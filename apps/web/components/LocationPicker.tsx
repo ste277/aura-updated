@@ -1,11 +1,18 @@
 'use client';
 
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { CITY_OPTIONS } from '../lib/cities';
+
+interface CityOption {
+  cityName: string;
+  latitude: number;
+  longitude: number;
+  timezone: string;
+}
 
 interface LocationPickerProps {
   currentCity: string;
-  onChanged: (city: { cityName: string; latitude: number; longitude: number; timezone: string }) => void;
+  onChanged: (city: CityOption) => void;
 }
 
 const OTHER_VALUE = '__other__';
@@ -14,7 +21,22 @@ export function LocationPicker({ currentCity, onChanged }: LocationPickerProps) 
   const [saving, setSaving] = useState(false);
   const [showCustomForm, setShowCustomForm] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [customCities, setCustomCities] = useState<CityOption[]>([]);
   const [custom, setCustom] = useState({ cityName: '', latitude: '', longitude: '', timezone: '' });
+
+  // Load custom cities saved in the DB
+  useEffect(() => {
+    fetch('/api/cities/custom')
+      .then((res) => (res.ok ? res.json() : []))
+      .then((data: CityOption[]) => setCustomCities(data))
+      .catch(() => {});
+  }, []);
+
+  // Combine static options with saved custom cities (deduped by city name)
+  const combinedCities: CityOption[] = [
+    ...CITY_OPTIONS,
+    ...customCities.filter((cc) => !CITY_OPTIONS.some((co) => co.cityName === cc.cityName)),
+  ];
 
   async function handleSelectChange(e: React.ChangeEvent<HTMLSelectElement>) {
     const value = e.target.value;
@@ -23,18 +45,26 @@ export function LocationPicker({ currentCity, onChanged }: LocationPickerProps) 
       return;
     }
 
+    const selectedCity = combinedCities.find((c) => c.cityName === value);
+    if (!selectedCity) return;
+
     setSaving(true);
     setError(null);
+
+    const isStatic = CITY_OPTIONS.some((c) => c.cityName === value);
+
     const res = await fetch('/api/users/location', {
       method: 'PATCH',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ cityName: value }),
+      body: isStatic
+        ? JSON.stringify({ cityName: value })
+        : JSON.stringify({ custom: selectedCity }),
     });
+
     setSaving(false);
 
     if (res.ok) {
-      const city = CITY_OPTIONS.find((c) => c.cityName === value);
-      if (city) onChanged(city);
+      onChanged(selectedCity);
     } else {
       setError('Could not update location.');
     }
@@ -45,24 +75,35 @@ export function LocationPicker({ currentCity, onChanged }: LocationPickerProps) 
     setSaving(true);
     setError(null);
 
+    const payload = {
+      cityName: custom.cityName,
+      latitude: parseFloat(custom.latitude),
+      longitude: parseFloat(custom.longitude),
+      timezone: custom.timezone,
+    };
+
     const res = await fetch('/api/users/location', {
       method: 'PATCH',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        custom: {
-          cityName: custom.cityName,
-          latitude: parseFloat(custom.latitude),
-          longitude: parseFloat(custom.longitude),
-          timezone: custom.timezone,
-        },
-      }),
+      body: JSON.stringify({ custom: payload }),
     });
+
     setSaving(false);
 
     if (res.ok) {
       const data = await res.json();
-      onChanged({ cityName: data.cityName, latitude: data.latitude, longitude: data.longitude, timezone: data.timezone });
+      const newCity = {
+        cityName: data.cityName,
+        latitude: data.latitude,
+        longitude: data.longitude,
+        timezone: data.timezone,
+      };
+
+      // Add to local custom cities list so it shows immediately in the dropdown
+      setCustomCities((prev) => [newCity, ...prev.filter((c) => c.cityName !== newCity.cityName)]);
+      onChanged(newCity);
       setShowCustomForm(false);
+      setCustom({ cityName: '', latitude: '', longitude: '', timezone: '' });
     } else {
       const data = await res.json().catch(() => ({}));
       setError(data.error ?? 'Could not save that location.');
@@ -73,7 +114,15 @@ export function LocationPicker({ currentCity, onChanged }: LocationPickerProps) 
     return (
       <form
         onSubmit={handleCustomSubmit}
-        style={{ display: 'flex', flexDirection: 'column', gap: 6, background: 'var(--as-surface-raised)', padding: 10, borderRadius: 8, border: '1px solid var(--as-border)' }}
+        style={{
+          display: 'flex',
+          flexDirection: 'column',
+          gap: 6,
+          background: 'var(--as-surface-raised)',
+          padding: 10,
+          borderRadius: 8,
+          border: '1px solid var(--as-border)',
+        }}
       >
         <div style={{ fontSize: 11, color: 'var(--as-text-muted)', marginBottom: 2 }}>
           Custom location — timezone must be an IANA name, e.g. "America/Chicago"
@@ -109,7 +158,16 @@ export function LocationPicker({ currentCity, onChanged }: LocationPickerProps) 
           style={inputStyle}
         />
         <div style={{ display: 'flex', gap: 6 }}>
-          <button type="submit" disabled={saving} style={{ ...inputStyle, cursor: 'pointer', background: 'var(--as-abhijit-dim, #1f4d34)', color: 'var(--as-abhijit, #4ade80)' }}>
+          <button
+            type="submit"
+            disabled={saving}
+            style={{
+              ...inputStyle,
+              cursor: 'pointer',
+              background: 'var(--as-abhijit-dim, #1f4d34)',
+              color: 'var(--as-abhijit, #4ade80)',
+            }}
+          >
             {saving ? 'Saving...' : 'Save'}
           </button>
           <button type="button" onClick={() => setShowCustomForm(false)} style={{ ...inputStyle, cursor: 'pointer' }}>
@@ -124,7 +182,7 @@ export function LocationPicker({ currentCity, onChanged }: LocationPickerProps) 
   return (
     <div>
       <select
-        value={CITY_OPTIONS.some((c) => c.cityName === currentCity) ? currentCity : OTHER_VALUE}
+        value={combinedCities.some((c) => c.cityName === currentCity) ? currentCity : OTHER_VALUE}
         onChange={handleSelectChange}
         disabled={saving}
         style={{
@@ -138,7 +196,7 @@ export function LocationPicker({ currentCity, onChanged }: LocationPickerProps) 
           cursor: 'pointer',
         }}
       >
-        {CITY_OPTIONS.map((c) => (
+        {combinedCities.map((c) => (
           <option key={c.cityName} value={c.cityName}>
             {c.cityName}
           </option>

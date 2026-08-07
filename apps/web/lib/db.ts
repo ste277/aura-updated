@@ -24,6 +24,43 @@ export interface User {
   birthTimezone: string | null;
 }
 
+export interface CustomCity {
+  id: string;
+  userId: string;
+  cityName: string;
+  latitude: number;
+  longitude: number;
+  timezone: string;
+  createdAt: Date;
+}
+
+export async function getCustomCitiesForUser(userId: string): Promise<CustomCity[]> {
+  const result = await pool.query(
+    `SELECT id, "userId", "cityName", latitude, longitude, timezone, "createdAt"
+     FROM "CustomCity"
+     WHERE "userId" = $1
+     ORDER BY "createdAt" DESC`,
+    [userId]
+  );
+  return result.rows;
+}
+
+export async function saveCustomCityForUser(
+  userId: string,
+  city: { cityName: string; latitude: number; longitude: number; timezone: string }
+): Promise<CustomCity> {
+  const id = randomUUID();
+  const result = await pool.query(
+    `INSERT INTO "CustomCity" (id, "userId", "cityName", latitude, longitude, timezone)
+     VALUES ($1, $2, $3, $4, $5, $6)
+     ON CONFLICT ("userId", "cityName")
+     DO UPDATE SET latitude = EXCLUDED.latitude, longitude = EXCLUDED.longitude, timezone = EXCLUDED.timezone
+     RETURNING id, "userId", "cityName", latitude, longitude, timezone, "createdAt"`,
+    [id, userId, city.cityName, city.latitude, city.longitude, city.timezone]
+  );
+  return result.rows[0];
+}
+
 export async function updateBirthProfile(
   userId: string,
   input: {
@@ -43,7 +80,6 @@ export async function updateBirthProfile(
   );
   return result.rows[0];
 }
-
 
 export interface HabitLogRow {
   id: string;

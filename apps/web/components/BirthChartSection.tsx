@@ -3,6 +3,13 @@
 import { useEffect, useState } from 'react';
 import { CITY_OPTIONS } from '../lib/cities';
 
+interface CityOption {
+  cityName: string;
+  latitude: number;
+  longitude: number;
+  timezone: string;
+}
+
 interface GrahaPlacement {
   graha: string;
   rashiName: string;
@@ -23,9 +30,24 @@ export function BirthChartSection() {
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
+  const [customCities, setCustomCities] = useState<CityOption[]>([]);
   const [birthDate, setBirthDate] = useState('');
   const [birthTime, setBirthTime] = useState('');
   const [birthCity, setBirthCity] = useState(CITY_OPTIONS[0].cityName);
+
+  // Fetch saved custom cities from DB
+  useEffect(() => {
+    fetch('/api/cities/custom')
+      .then((res) => (res.ok ? res.json() : []))
+      .then((data: CityOption[]) => setCustomCities(data))
+      .catch(() => {});
+  }, []);
+
+  // Combine static options with custom saved cities (deduped by city name)
+  const combinedCities: CityOption[] = [
+    ...CITY_OPTIONS,
+    ...customCities.filter((cc) => !CITY_OPTIONS.some((co) => co.cityName === cc.cityName)),
+  ];
 
   async function loadChart() {
     const res = await fetch('/api/panchang/natal-chart');
@@ -46,7 +68,8 @@ export function BirthChartSection() {
     setSaving(true);
     setError(null);
 
-    const city = CITY_OPTIONS.find((c) => c.cityName === birthCity)!;
+    const city = combinedCities.find((c) => c.cityName === birthCity) || combinedCities[0];
+
     const res = await fetch('/api/users/birth-profile', {
       method: 'PATCH',
       headers: { 'Content-Type': 'application/json' },
@@ -112,18 +135,31 @@ export function BirthChartSection() {
       {showForm && (
         <form
           onSubmit={handleSubmit}
-          style={{ display: 'flex', flexDirection: 'column', gap: 6, background: 'var(--as-surface-raised)', padding: 10, borderRadius: 8, border: '1px solid var(--as-border)', marginBottom: 12 }}
+          style={{
+            display: 'flex',
+            flexDirection: 'column',
+            gap: 6,
+            background: 'var(--as-surface-raised)',
+            padding: 10,
+            borderRadius: 8,
+            border: '1px solid var(--as-border)',
+            marginBottom: 12,
+          }}
         >
           <input required type="date" value={birthDate} onChange={(e) => setBirthDate(e.target.value)} style={formInputStyle} />
           <input required type="time" value={birthTime} onChange={(e) => setBirthTime(e.target.value)} style={formInputStyle} />
           <select value={birthCity} onChange={(e) => setBirthCity(e.target.value)} style={formInputStyle}>
-            {CITY_OPTIONS.map((c) => (
+            {combinedCities.map((c) => (
               <option key={c.cityName} value={c.cityName}>
                 {c.cityName}
               </option>
             ))}
           </select>
-          <button type="submit" disabled={saving} style={{ ...formInputStyle, cursor: 'pointer', background: 'var(--as-abhijit-dim, #1f4d34)', color: 'var(--as-abhijit, #4ade80)' }}>
+          <button
+            type="submit"
+            disabled={saving}
+            style={{ ...formInputStyle, cursor: 'pointer', background: 'var(--as-abhijit-dim, #1f4d34)', color: 'var(--as-abhijit, #4ade80)' }}
+          >
             {saving ? 'Saving...' : 'Save birth profile'}
           </button>
           {error && <div style={{ color: 'var(--as-rahu)', fontSize: 11 }}>{error}</div>}

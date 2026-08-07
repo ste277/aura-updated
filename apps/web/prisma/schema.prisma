@@ -28,6 +28,21 @@ model User {
   habitLogs       HabitLog[]
   visitLogs       VisitLog[]
   habits          Habit[]
+  customCities    CustomCity[]
+}
+
+model CustomCity {
+  id        String   @id @default(uuid())
+  userId    String
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  cityName  String
+  latitude  Float
+  longitude Float
+  timezone  String
+  createdAt DateTime @default(now()) @db.Timestamptz(3)
+
+  @@unique([userId, cityName])
+  @@index([userId])
 }
 
 model HabitLog {
@@ -61,15 +76,15 @@ model VisitLog {
 // the fixed 3 action cards, which are always derived from the current window
 // rather than something the user set up themselves.
 model Habit {
-  id               String   @id @default(uuid())
+  id               String    @id @default(uuid())
   userId           String
-  user             User     @relation(fields: [userId], references: [id])
+  user             User      @relation(fields: [userId], references: [id])
   title            String
-  category         String   // "WORKOUT" | "MEAL" | "MICRO_BREAK" | "FOCUS" | "REST"
-  targetWindowType String   // "BRAHMA" | "ABHIJIT" | "RAHU_KALAM" | "GULIKA" | "YAMA" | "NEUTRAL"
-  currentStreak    Int      @default(0)
-  longestStreak    Int      @default(0)
-  createdAt        DateTime @default(now()) @db.Timestamptz(3)
+  category         String    // "WORKOUT" | "MEAL" | "MICRO_BREAK" | "FOCUS" | "REST"
+  targetWindowType String    // "BRAHMA" | "ABHIJIT" | "RAHU_KALAM" | "GULIKA" | "YAMA" | "NEUTRAL"
+  currentStreak    Int       @default(0)
+  longestStreak    Int       @default(0)
+  createdAt        DateTime  @default(now()) @db.Timestamptz(3)
   archivedAt       DateTime? @db.Timestamptz(3)
 
   logs             HabitLog[]

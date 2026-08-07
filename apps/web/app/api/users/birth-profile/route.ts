@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getSessionFromRequest } from '../../../../lib/session';
-import { updateBirthProfile } from '../../../../lib/db';
+import { updateBirthProfile, saveCustomCityForUser } from '../../../../lib/db';
 import { isValidCustomLocation } from '../../../../lib/cities';
 
 export async function PATCH(req: NextRequest) {
@@ -18,16 +18,28 @@ export async function PATCH(req: NextRequest) {
   if (!birthCityName) {
     return NextResponse.json({ error: 'birthCityName is required.' }, { status: 400 });
   }
-  if (!isValidCustomLocation({ latitude: Number(birthLatitude), longitude: Number(birthLongitude), timezone: birthTimezone })) {
+
+  const latNum = Number(birthLatitude);
+  const lngNum = Number(birthLongitude);
+
+  if (!isValidCustomLocation({ latitude: latNum, longitude: lngNum, timezone: birthTimezone })) {
     return NextResponse.json({ error: 'Invalid birth location or timezone.' }, { status: 400 });
   }
+
+  // Persist the custom birth location into CustomCity table so it stays in user's saved cities
+  await saveCustomCityForUser(session.userId, {
+    cityName: birthCityName,
+    latitude: latNum,
+    longitude: lngNum,
+    timezone: birthTimezone,
+  });
 
   const user = await updateBirthProfile(session.userId, {
     birthDate,
     birthTime,
     birthCityName,
-    birthLatitude: Number(birthLatitude),
-    birthLongitude: Number(birthLongitude),
+    birthLatitude: latNum,
+    birthLongitude: lngNum,
     birthTimezone,
   });
 

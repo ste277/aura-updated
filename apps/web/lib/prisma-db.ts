@@ -13,6 +13,39 @@ const DEFAULT_SIGNUP_LOCATION = {
   timezone: 'Asia/Kolkata',
 };
 
+export async function getCustomCitiesForUser(userId: string) {
+  return prisma.customCity.findMany({
+    where: { userId },
+    orderBy: { createdAt: 'desc' },
+  });
+}
+
+export async function saveCustomCityForUser(
+  userId: string,
+  city: { cityName: string; latitude: number; longitude: number; timezone: string }
+) {
+  return prisma.customCity.upsert({
+    where: {
+      userId_cityName: {
+        userId,
+        cityName: city.cityName,
+      },
+    },
+    update: {
+      latitude: city.latitude,
+      longitude: city.longitude,
+      timezone: city.timezone,
+    },
+    create: {
+      userId,
+      cityName: city.cityName,
+      latitude: city.latitude,
+      longitude: city.longitude,
+      timezone: city.timezone,
+    },
+  });
+}
+
 export async function getOrCreateUserForAuth(email: string) {
   return prisma.user.upsert({
     where: { email },
