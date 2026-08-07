@@ -1,0 +1,44 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  math-core-tests:
+    name: Ephemeris / panchang tests
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+      - name: Install root deps
+        run: npm install
+      - name: Run ephemeris test
+        run: npx ts-node test/ephemeris.test.ts
+      - name: Run integration test
+        run: npx ts-node test/integration.test.ts
+
+  web-build:
+    name: Next.js production build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+      - name: Install web deps
+        working-directory: apps/web
+        run: npm install
+      - name: Build
+        working-directory: apps/web
+        env:
+          # Dummy values so the build step doesn't fail on missing env vars.
+          # Nothing in this project queries the DB at build time (all data
+          # fetching is client-side), so these never actually get used here.
+          DATABASE_URL: postgresql://user:pass@localhost:5432/placeholder
+          AUTH_SECRET: ci-placeholder-secret-not-for-production
+        run: npm run build

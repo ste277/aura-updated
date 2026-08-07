@@ -1,0 +1,76 @@
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+model User {
+  id              String   @id @default(uuid())
+  email           String   @unique
+  cityName        String
+  latitude        Float
+  longitude       Float
+  timezone        String   @default("Asia/Kolkata") // IANA name, e.g. 'Asia/Kolkata', 'America/New_York'
+  createdAt       DateTime @default(now()) @db.Timestamptz(3)
+
+  // Birth profile — nullable, since not every user will fill this in (Phase 2
+  // birth-chart feature is optional on top of the core daily dial).
+  birthDate       DateTime? @db.Timestamptz(3)
+  birthTime       String?   // "HH:MM", 24h, local to birthTimezone
+  birthCityName   String?
+  birthLatitude   Float?
+  birthLongitude  Float?
+  birthTimezone   String?   // IANA name
+
+  habitLogs       HabitLog[]
+  visitLogs       VisitLog[]
+  habits          Habit[]
+}
+
+model HabitLog {
+  id             String   @id @default(uuid())
+  userId         String
+  user           User     @relation(fields: [userId], references: [id])
+  habitId        String?
+  habit          Habit?   @relation(fields: [habitId], references: [id])
+  activityTitle  String
+  activeWindow   String   // "ABHIJIT" | "RAHU_KALAM" | "GULIKA" | "YAMA" | "BRAHMA" | "NEUTRAL"
+  logTimestamp   DateTime @default(now()) @db.Timestamptz(3)
+  logMinuteOfDay Int
+
+  @@index([userId, logTimestamp])
+}
+
+// Tracks app opens (not habit logs) — needed to measure the MVP spec's actual
+// kill criteria: day-2/day-7 return rate. A user can log a habit without this ever
+// firing, and can open the app without logging anything; these are deliberately
+// separate signals.
+model VisitLog {
+  id        String   @id @default(uuid())
+  userId    String
+  user      User     @relation(fields: [userId], references: [id])
+  visitedAt DateTime @default(now()) @db.Timestamptz(3)
+
+  @@index([userId, visitedAt])
+}
+
+// A user-defined recurring habit (Phase 1.2's "recurring habits") — distinct from
+// the fixed 3 action cards, which are always derived from the current window
+// rather than something the user set up themselves.
+model Habit {
+  id               String   @id @default(uuid())
+  userId           String
+  user             User     @relation(fields: [userId], references: [id])
+  title            String
+  category         String   // "WORKOUT" | "MEAL" | "MICRO_BREAK" | "FOCUS" | "REST"
+  targetWindowType String   // "BRAHMA" | "ABHIJIT" | "RAHU_KALAM" | "GULIKA" | "YAMA" | "NEUTRAL"
+  currentStreak    Int      @default(0)
+  longestStreak    Int      @default(0)
+  createdAt        DateTime @default(now()) @db.Timestamptz(3)
+  archivedAt       DateTime? @db.Timestamptz(3)
+
+  logs             HabitLog[]
+}
