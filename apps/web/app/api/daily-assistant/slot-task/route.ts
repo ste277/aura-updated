@@ -14,6 +14,7 @@ export async function POST(req: NextRequest) {
   const body = await req.json();
   const taskTitle = String(body?.taskTitle || '').trim();
   const durationMinutes = Number(body?.durationMinutes ?? 30);
+  const requestedStartMinute = body?.requestedStartMinute === undefined ? undefined : Number(body.requestedStartMinute);
 
   if (!taskTitle) {
     return NextResponse.json({ error: 'Task title is required.' }, { status: 400 });
@@ -26,7 +27,7 @@ export async function POST(req: NextRequest) {
     longitude: user.longitude,
     timezone: user.timezone,
     tzOffsetMinutes: resolveTzOffsetMinutes(user.timezone, now),
-  }, durationMinutes);
+  }, durationMinutes, requestedStartMinute);
 
   return NextResponse.json(recommendation);
 }

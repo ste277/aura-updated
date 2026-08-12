@@ -460,12 +460,17 @@ export function HomeDashboard({
         </div>
         {taskRecommendation && (
           <div style={{ display: 'flex', flexDirection: 'column', gap: 8, marginTop: 12 }}>
-            <div style={{ border: '1px solid rgba(74, 222, 128, 0.3)', background: 'rgba(74, 222, 128, 0.08)', borderRadius: 12, padding: 12 }}>
-              <div style={{ fontSize: 11, color: '#4ade80', fontWeight: 800 }}>Best Window</div>
+            <div style={{ border: `1px solid ${taskRecommendation.recommendationState === 'AVOID' ? 'rgba(251, 107, 107, 0.35)' : 'rgba(74, 222, 128, 0.3)'}`, background: taskRecommendation.recommendationState === 'AVOID' ? 'rgba(251, 107, 107, 0.08)' : 'rgba(74, 222, 128, 0.08)', borderRadius: 12, padding: 12 }}>
+              <div style={{ fontSize: 11, color: taskRecommendation.recommendationState === 'AVOID' ? '#fb6b6b' : '#4ade80', fontWeight: 800 }}>
+                {taskRecommendation.activityIcon} {taskRecommendation.recommendationLabel}
+              </div>
+              <div style={{ fontSize: 12, color: '#dbe7f4', fontWeight: 700, marginTop: 7 }}>
+                For {taskRecommendation.activityType.toLowerCase()}
+              </div>
               <div style={{ fontSize: 13, color: '#f8fafc', fontWeight: 700, marginTop: 3 }}>
                 {taskRecommendation.bestWindow.startTime} - {taskRecommendation.bestWindow.endTime} · {taskRecommendation.bestWindow.label}
               </div>
-              <div style={{ fontSize: 11, color: '#cbd5e1', marginTop: 4, lineHeight: 1.35 }}>
+              <div style={{ fontSize: 11, color: '#dbe7f4', marginTop: 4, lineHeight: 1.35 }}>
                 {taskRecommendation.bestWindow.reason}
               </div>
               <a
@@ -477,7 +482,7 @@ export function HomeDashboard({
                 Add to Google Calendar
               </a>
             </div>
-            {taskRecommendation.avoidWindow && (
+            {taskRecommendation.avoidWindow && taskRecommendation.recommendationState !== 'AVOID' && (
               <div style={{ border: '1px solid rgba(251, 107, 107, 0.25)', background: 'rgba(251, 107, 107, 0.07)', borderRadius: 12, padding: 12 }}>
                 <div style={{ fontSize: 11, color: '#fb6b6b', fontWeight: 800 }}>Avoid Window</div>
                 <div style={{ fontSize: 12, color: '#e2e8f0', fontWeight: 700, marginTop: 3 }}>
