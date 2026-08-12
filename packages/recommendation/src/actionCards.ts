@@ -2,7 +2,7 @@
  * MVP action-card lookup.
  * Deterministic table: SolarWindowType -> 3 action cards.
  * No LLM call, no persona branching (STANDARD only) — per the MVP scope cut.
- * This is intentionally boring and easy to extend later.
+ * Includes flexible fallback parsing for string key variations.
  */
 
 import type { SolarWindowType } from '../../panchang/src/windows';
@@ -11,7 +11,9 @@ export interface ActionCard {
   id: string;
   category: 'WORKOUT' | 'MEAL' | 'MICRO_BREAK' | 'FOCUS' | 'REST';
   title: string;
-  reasoning: string;
+  description: string; // Updated from reasoning for direct UI mapping
+  reasoning: string;   // Retained for backward compatibility
+  icon?: string;
 }
 
 const ACTION_CARDS: Record<SolarWindowType, ActionCard[]> = {
@@ -20,19 +22,25 @@ const ACTION_CARDS: Record<SolarWindowType, ActionCard[]> = {
       id: 'brahma-mobility',
       category: 'WORKOUT',
       title: 'Light mobility or breathwork',
+      description: 'Pre-dawn window favors low-strain movement and mental clarity over intensity.',
       reasoning: 'Pre-dawn window favors low-strain movement and mental clarity over intensity.',
+      icon: '🧘',
     },
     {
       id: 'brahma-focus',
       category: 'FOCUS',
       title: 'Distraction-free planning block',
+      description: 'Quiet hours before sunrise are well suited to deep, uninterrupted thinking.',
       reasoning: 'Quiet hours before sunrise are well suited to deep, uninterrupted thinking.',
+      icon: '✍️',
     },
     {
       id: 'brahma-hydrate',
       category: 'MICRO_BREAK',
       title: 'Hydrate before the day starts',
+      description: 'A simple, low-effort way to start the daily streak.',
       reasoning: 'A simple, low-effort way to start the daily streak.',
+      icon: '💧',
     },
   ],
   ABHIJIT: [
@@ -40,19 +48,25 @@ const ACTION_CARDS: Record<SolarWindowType, ActionCard[]> = {
       id: 'abhijit-workout',
       category: 'WORKOUT',
       title: 'Heavy lifting or a hard training session',
+      description: 'Peak solar window — best alignment for maximum physical output.',
       reasoning: 'Peak solar window — best alignment for maximum physical output.',
+      icon: '🏋️',
     },
     {
       id: 'abhijit-meal',
       category: 'MEAL',
       title: 'Main meal of the day',
+      description: 'Solar noon aligns with peak digestive capacity.',
       reasoning: 'Solar noon aligns with peak digestive capacity.',
+      icon: '🍲',
     },
     {
       id: 'abhijit-focus',
       category: 'FOCUS',
       title: 'Tackle your hardest task',
+      description: 'Highest-leverage window for demanding cognitive work.',
       reasoning: 'Highest-leverage window for demanding cognitive work.',
+      icon: '⚡',
     },
   ],
   RAHU_KALAM: [
@@ -60,19 +74,25 @@ const ACTION_CARDS: Record<SolarWindowType, ActionCard[]> = {
       id: 'rahu-rest',
       category: 'REST',
       title: 'Active rest, no high-stakes decisions',
+      description: 'Traditionally a high-friction window — good for low-risk, routine tasks only.',
       reasoning: 'Traditionally a high-friction window — good for low-risk, routine tasks only.',
+      icon: '🛡️',
     },
     {
       id: 'rahu-break',
       category: 'MICRO_BREAK',
       title: 'Step away and reset',
+      description: 'Short break rather than pushing through friction.',
       reasoning: 'Short break rather than pushing through friction.',
+      icon: '☕',
     },
     {
       id: 'rahu-hydrate',
       category: 'MICRO_BREAK',
       title: 'Water / tea refill',
+      description: 'Keep momentum with something low-stakes.',
       reasoning: 'Keep momentum with something low-stakes.',
+      icon: '🫖',
     },
   ],
   GULIKA: [
@@ -80,19 +100,25 @@ const ACTION_CARDS: Record<SolarWindowType, ActionCard[]> = {
       id: 'gulika-cardio',
       category: 'WORKOUT',
       title: 'Steady cardio or a walk',
+      description: 'Good window for compounding, lower-intensity conditioning.',
       reasoning: 'Good window for compounding, lower-intensity conditioning.',
+      icon: '🚶',
     },
     {
       id: 'gulika-skill',
       category: 'FOCUS',
       title: 'Skill-building or learning session',
+      description: 'Traditionally associated with steady, compounding growth.',
       reasoning: 'Traditionally associated with steady, compounding growth.',
+      icon: '📚',
     },
     {
       id: 'gulika-social',
       category: 'MICRO_BREAK',
       title: 'Social check-in or coffee break',
+      description: 'Good window to step out and reconnect before the day winds down.',
       reasoning: 'Good window to step out and reconnect before the day winds down.',
+      icon: '💬',
     },
   ],
   YAMA: [
@@ -100,19 +126,25 @@ const ACTION_CARDS: Record<SolarWindowType, ActionCard[]> = {
       id: 'yama-rest',
       category: 'REST',
       title: 'Restraint — avoid starting new commitments',
+      description: 'Traditionally a caution window; better for wrapping up than starting.',
       reasoning: 'Traditionally a caution window; better for wrapping up than starting.',
+      icon: '🐢',
     },
     {
       id: 'yama-lightmeal',
       category: 'MEAL',
       title: 'Light snack if needed',
+      description: 'Keep it light rather than a full meal in this window.',
       reasoning: 'Keep it light rather than a full meal in this window.',
+      icon: '🍏',
     },
     {
       id: 'yama-break',
       category: 'MICRO_BREAK',
       title: 'Stretch and reset',
+      description: 'Low-effort reset to bridge into the next window.',
       reasoning: 'Low-effort reset to bridge into the next window.',
+      icon: '🧘',
     },
   ],
   NEUTRAL: [
@@ -120,24 +152,40 @@ const ACTION_CARDS: Record<SolarWindowType, ActionCard[]> = {
       id: 'neutral-focus',
       category: 'FOCUS',
       title: 'Regular work block',
+      description: 'No special solar window active right now — business as usual.',
       reasoning: 'No special solar window active right now — business as usual.',
+      icon: '🎯',
     },
     {
       id: 'neutral-break',
       category: 'MICRO_BREAK',
       title: 'Short walk or stretch',
+      description: 'Good default to keep the ultradian rhythm on track.',
       reasoning: 'Good default to keep the ultradian rhythm on track.',
+      icon: '🚶',
     },
     {
       id: 'neutral-hydrate',
       category: 'MICRO_BREAK',
       title: 'Hydration check',
+      description: 'Simple, always-available action to log.',
       reasoning: 'Simple, always-available action to log.',
+      icon: '💧',
     },
   ],
 };
 
-/** The core "tap arc -> get 3 cards" lookup. O(1), no I/O. */
-export function getActionCards(window: SolarWindowType): ActionCard[] {
-  return ACTION_CARDS[window];
+/** The core "tap arc -> get 3 cards" lookup. Safe against unexpected string formats. */
+export function getActionCards(window: string): ActionCard[] {
+  if (!window) return ACTION_CARDS.NEUTRAL;
+
+  const clean = String(window).replace('_', ' ').toUpperCase();
+
+  if (clean.includes('RAHU')) return ACTION_CARDS.RAHU_KALAM;
+  if (clean.includes('BRAHMA')) return ACTION_CARDS.BRAHMA;
+  if (clean.includes('ABHIJIT') || clean.includes('VIJAYA')) return ACTION_CARDS.ABHIJIT;
+  if (clean.includes('GULIKA')) return ACTION_CARDS.GULIKA;
+  if (clean.includes('YAMA')) return ACTION_CARDS.YAMA;
+
+  return ACTION_CARDS[clean as SolarWindowType] || ACTION_CARDS.NEUTRAL;
 }

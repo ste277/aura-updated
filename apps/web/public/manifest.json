@@ -1,0 +1,16 @@
+{
+  "name": "Aura Panchang",
+  "short_name": "Aura",
+  "description": "Personalized Cosmic Alignment & Solar Window Operating System",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#020617",
+  "theme_color": "#0f172a",
+  "icons": [
+    {
+      "src": "/favicon.ico",
+      "sizes": "64x64 32x32 24x24 16x16",
+      "type": "image/x-icon"
+    }
+  ]
+}

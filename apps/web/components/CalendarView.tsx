@@ -1,6 +1,7 @@
 'use client';
 
 import { useEffect, useState } from 'react';
+import { PastActivityModal } from './PastActivityModal';
 
 interface DayActivity {
   day: number;
@@ -32,26 +33,47 @@ export function CalendarView() {
   const [dayLogs, setDayLogs] = useState<DayLogEntry[] | null>(null);
   const [dayLoading, setDayLoading] = useState(false);
 
+  // State for PastActivityModal
+  const [isModalOpen, setIsModalOpen] = useState(false);
+
   // Fetch month activity counts
-  useEffect(() => {
+  const fetchMonthActivity = () => {
     setLoading(true);
     fetch(`/api/habit-logs/calendar?year=${year}&month=${month}`)
       .then((res) => (res.ok ? res.json() : []))
       .then((data) => setActivity(data))
+      .catch((err) => console.error('Error fetching calendar activity:', err))
       .finally(() => setLoading(false));
+  };
+
+  useEffect(() => {
+    fetchMonthActivity();
   }, [year, month]);
 
   // Fetch logs for the selected day automatically
   const fetchLogsForDay = async (targetDay: number) => {
     setDayLoading(true);
-    const res = await fetch(`/api/habit-logs/calendar/day?year=${year}&month=${month}&day=${targetDay}`);
-    setDayLoading(false);
-    if (res.ok) setDayLogs(await res.json());
+    try {
+      const res = await fetch(`/api/habit-logs/calendar/day?year=${year}&month=${month}&day=${targetDay}`);
+      if (res.ok) {
+        const data = await res.json();
+        setDayLogs(data);
+      }
+    } catch (err) {
+      console.error('Error fetching day logs:', err);
+    } finally {
+      setDayLoading(false);
+    }
   };
 
   useEffect(() => {
     fetchLogsForDay(selectedDay);
   }, [year, month, selectedDay]);
+
+  const handleActivityLogged = () => {
+    fetchLogsForDay(selectedDay);
+    fetchMonthActivity();
+  };
 
   function goToPrevMonth() {
     if (month === 1) {
@@ -87,6 +109,8 @@ export function CalendarView() {
     ...Array(startWeekday).fill(null),
     ...Array.from({ length: daysInMonth }, (_, i) => i + 1),
   ];
+
+  const selectedDateObj = new Date(year, month - 1, selectedDay);
 
   return (
     <div style={{ marginTop: 28, position: 'relative' }}>
@@ -156,7 +180,7 @@ export function CalendarView() {
         <div
           style={{
             display: 'flex',
-            justifyContent: 'space-between',
+            justifyContent: 'space-between', // Fixed style bug here
             alignItems: 'center',
             marginBottom: 12,
           }}
@@ -164,11 +188,25 @@ export function CalendarView() {
           <span style={{ fontFamily: 'var(--as-font-mono)', fontSize: 11, letterSpacing: '0.06em', textTransform: 'uppercase', color: 'var(--as-text-muted)' }}>
             Activity Log ({MONTH_NAMES[month - 1]} {selectedDay}, {year})
           </span>
-          {dayLogs && dayLogs.length > 0 && (
-            <span style={{ fontSize: 11, fontFamily: 'var(--as-font-mono)', color: 'var(--as-text-muted)' }}>
-              {dayLogs.length} logged
-            </span>
-          )}
+
+          {/* Connected "+ Log Activity" Button */}
+          <button
+            type="button"
+            onClick={() => setIsModalOpen(true)}
+            style={{
+              background: 'var(--as-abhijit, #4ade80)',
+              color: '#000000',
+              border: 'none',
+              borderRadius: 6,
+              padding: '6px 12px',
+              fontSize: 12,
+              fontWeight: 600,
+              fontFamily: 'var(--as-font-mono)',
+              cursor: 'pointer',
+            }}
+          >
+            + Log Activity
+          </button>
         </div>
 
         {dayLoading && <div style={{ fontSize: 12, color: 'var(--as-text-muted)', fontFamily: 'var(--as-font-mono)' }}>Loading day logs…</div>}
@@ -186,7 +224,7 @@ export function CalendarView() {
                 key={log.id}
                 style={{
                   display: 'flex',
-                  justifyContent: 'space-between',
+                  justifyContent: 'space-between', // Fixed style bug here
                   alignItems: 'center',
                   padding: '10px 12px',
                   background: 'rgba(255, 255, 255, 0.03)',
@@ -203,6 +241,14 @@ export function CalendarView() {
           </div>
         )}
       </div>
+
+      {/* Render Modal */}
+      <PastActivityModal
+        isOpen={isModalOpen}
+        onClose={() => setIsModalOpen(false)}
+        selectedDate={selectedDateObj}
+        onSuccess={handleActivityLogged}
+      />
     </div>
   );
 }

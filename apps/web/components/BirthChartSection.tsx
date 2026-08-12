@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useEffect, useState, useMemo } from 'react';
 import { CITY_OPTIONS } from '../lib/cities';
 import { SouthIndianChart } from './SouthIndianChart';
 
@@ -28,6 +28,9 @@ interface TransitInsight {
 interface NatalChartData {
   janmaRashi: string;
   janmaNakshatra: string;
+  birthDate?: string;
+  birthTime?: string;
+  birthCityName?: string;
   chart: GrahaPlacement[];
   taraBala: { taraNumber: number; name: string; favorable: boolean; todayNakshatraName: string };
 }
@@ -60,7 +63,7 @@ export function BirthChartSection() {
   const [customCities, setCustomCities] = useState<CityOption[]>([]);
   const [birthDate, setBirthDate] = useState('');
   const [birthTime, setBirthTime] = useState('');
-  const [birthCity, setBirthCity] = useState(CITY_OPTIONS[0].cityName);
+  const [birthCity, setBirthCity] = useState(CITY_OPTIONS[0]?.cityName || 'Chennai');
 
   useEffect(() => {
     fetch('/api/cities/custom')
@@ -70,15 +73,25 @@ export function BirthChartSection() {
   }, []);
 
   const combinedCities: CityOption[] = [
-    ...CITY_OPTIONS,
-    ...customCities.filter((cc) => !CITY_OPTIONS.some((co) => co.cityName === cc.cityName)),
+    ...CITY_OPTIONS.map((c: any) => ({
+      cityName: c.cityName || c.name || 'Chennai',
+      latitude: c.latitude,
+      longitude: c.longitude,
+      timezone: c.timezone,
+    })),
+    ...customCities.filter((cc) => !CITY_OPTIONS.some((co: any) => (co.cityName || co.name) === cc.cityName)),
   ];
 
   async function loadChartAndTransits() {
     const resChart = await fetch('/api/panchang/natal-chart');
     if (resChart.ok) {
-      setChartData(await resChart.json());
+      const data: NatalChartData = await resChart.json();
+      setChartData(data);
       setHasProfile(true);
+
+      if (data.birthDate) setBirthDate(data.birthDate);
+      if (data.birthTime) setBirthTime(data.birthTime);
+      if (data.birthCityName) setBirthCity(data.birthCityName);
 
       const resTransits = await fetch('/api/panchang/transits');
       if (resTransits.ok) {
@@ -92,6 +105,15 @@ export function BirthChartSection() {
   useEffect(() => {
     loadChartAndTransits();
   }, []);
+
+  const handleToggleForm = () => {
+    if (!showForm && chartData) {
+      if (chartData.birthDate) setBirthDate(chartData.birthDate);
+      if (chartData.birthTime) setBirthTime(chartData.birthTime);
+      if (chartData.birthCityName) setBirthCity(chartData.birthCityName);
+    }
+    setShowForm((v) => !v);
+  };
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
@@ -123,7 +145,6 @@ export function BirthChartSection() {
     }
   }
 
-  // Calculate filtered house index when a grid cell is selected
   const moonRashiIdx = chartData ? RASHI_NAME_TO_INDEX[chartData.janmaRashi] ?? 1 : 1;
   const selectedHouseFromMoon =
     selectedRashiIndex !== null ? ((selectedRashiIndex - moonRashiIdx + 12) % 12) + 1 : null;
@@ -132,6 +153,49 @@ export function BirthChartSection() {
     selectedHouseFromMoon !== null
       ? transits.filter((t) => t.houseFromMoon === selectedHouseFromMoon)
       : transits;
+
+  // Dynamic Transit Energy Summarizer with Distinct Planetary Mappings
+  const transitSummary = useMemo(() => {
+    if (!transits || transits.length === 0) return null;
+
+    const capitalizeOn: string[] = [];
+    const guardrails: string[] = [];
+
+    transits.forEach((t) => {
+      if (t.isBenefic) {
+        if (t.graha === 'Sun') {
+          capitalizeOn.push(`Sun (House ${t.houseFromMoon}): Executive drive & administrative focus.`);
+        } else if (t.graha === 'Moon') {
+          capitalizeOn.push(`Moon (House ${t.houseFromMoon}): High vitality & smooth mental momentum.`);
+        } else if (t.graha === 'Mercury') {
+          capitalizeOn.push(`Mercury (House ${t.houseFromMoon}): Sharp analytical speed & communication.`);
+        } else if (t.graha === 'Venus') {
+          capitalizeOn.push(`Venus (House ${t.houseFromMoon}): Enhanced creative harmony & workflow.`);
+        } else if (t.graha === 'Saturn') {
+          capitalizeOn.push(`Saturn (House ${t.houseFromMoon}): Long-term stability & disciplined growth.`);
+        } else {
+          capitalizeOn.push(`${t.graha} (House ${t.houseFromMoon}): Auspicious support.`);
+        }
+      } else {
+        if (t.graha === 'Mars') {
+          guardrails.push(`Mars (House ${t.houseFromMoon}): Guard against hasty or impulsive friction.`);
+        } else if (t.graha === 'Jupiter') {
+          guardrails.push(`Jupiter (House ${t.houseFromMoon}): Exercise prudent financial planning.`);
+        } else if (t.graha === 'Rahu') {
+          guardrails.push(`Rahu (House ${t.houseFromMoon}): Avoid overcommitment or speculative risks.`);
+        } else if (t.graha === 'Ketu') {
+          guardrails.push(`Ketu (House ${t.houseFromMoon}): Watch out for emotional detachment.`);
+        } else {
+          guardrails.push(`${t.graha} (House ${t.houseFromMoon}): Potential friction point; exercise care.`);
+        }
+      }
+    });
+
+    return {
+      capitalizeOn: capitalizeOn.slice(0, 3),
+      guardrails: guardrails.slice(0, 3),
+    };
+  }, [transits]);
 
   if (hasProfile === null) return null;
 
@@ -151,7 +215,7 @@ export function BirthChartSection() {
               📅 Export iCal
             </a>
             <button
-              onClick={() => setShowForm((v) => !v)}
+              onClick={handleToggleForm}
               style={{ fontSize: 11, color: 'var(--as-gulika)', background: 'none', border: 'none', cursor: 'pointer', padding: 0 }}
             >
               {showForm ? 'Cancel' : 'Edit'}
@@ -179,14 +243,17 @@ export function BirthChartSection() {
           style={{
             display: 'flex',
             flexDirection: 'column',
-            gap: 6,
+            gap: 8,
             background: 'var(--as-surface-raised)',
-            padding: 10,
+            padding: 12,
             borderRadius: 8,
             border: '1px solid var(--as-border)',
             marginBottom: 12,
           }}
         >
+          <div style={{ fontSize: 10, fontFamily: 'monospace', color: '#94a3b8', textTransform: 'uppercase' }}>
+            Enter Birth Details
+          </div>
           <input required type="date" value={birthDate} onChange={(e) => setBirthDate(e.target.value)} style={formInputStyle} />
           <input required type="time" value={birthTime} onChange={(e) => setBirthTime(e.target.value)} style={formInputStyle} />
           <select value={birthCity} onChange={(e) => setBirthCity(e.target.value)} style={formInputStyle}>
@@ -199,9 +266,9 @@ export function BirthChartSection() {
           <button
             type="submit"
             disabled={saving}
-            style={{ ...formInputStyle, cursor: 'pointer', background: 'var(--as-abhijit-dim, #1f4d34)', color: 'var(--as-abhijit, #4ade80)' }}
+            style={{ ...formInputStyle, cursor: 'pointer', background: 'var(--as-abhijit-dim, #1f4d34)', color: 'var(--as-abhijit, #4ade80)', fontWeight: 600 }}
           >
-            {saving ? 'Saving...' : 'Save birth profile'}
+            {saving ? 'Saving...' : 'Save Birth Profile'}
           </button>
           {error && <div style={{ color: 'var(--as-rahu)', fontSize: 11 }}>{error}</div>}
         </form>
@@ -209,13 +276,38 @@ export function BirthChartSection() {
 
       {chartData && !showForm && (
         <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
+          {/* VISIBLE ENTERED DETAILS SUMMARY BANNER */}
+          {(chartData.birthDate || birthDate) && (
+            <div
+              style={{
+                background: 'rgba(30, 41, 59, 0.4)',
+                border: '1px solid var(--as-border)',
+                borderRadius: 8,
+                padding: '8px 12px',
+                display: 'flex',
+                justifyContent: 'space-between',
+                alignItems: 'center',
+                fontSize: 11,
+                fontFamily: 'monospace',
+                color: 'var(--as-text-muted)',
+              }}
+            >
+              <span>
+                📅 {chartData.birthDate || birthDate} · ⏰ {chartData.birthTime || birthTime}
+              </span>
+              <span style={{ color: 'var(--as-abhijit, #4ade80)', fontWeight: 600 }}>
+                📍 {chartData.birthCityName || birthCity}
+              </span>
+            </div>
+          )}
+
           {/* Birth Info & Interactive South Indian Chart Card */}
           <div style={{ background: 'var(--as-surface-raised)', border: '1px solid var(--as-border)', borderRadius: 12, padding: '14px 16px' }}>
             <div style={{ fontSize: 13, color: 'var(--as-text)', marginBottom: 12, textAlign: 'center' }}>
               Janma Rashi: <strong>{chartData.janmaRashi}</strong> · Janma Nakshatra: <strong>{chartData.janmaNakshatra}</strong>
             </div>
 
-            {/* Visual South Indian D1 Chart Grid with Active Click State */}
+            {/* Visual South Indian D1 Chart Grid */}
             <SouthIndianChart
               chart={chartData.chart}
               janmaRashi={chartData.janmaRashi}
@@ -270,6 +362,52 @@ export function BirthChartSection() {
                   </button>
                 )}
               </div>
+
+              {/* DYNAMIC GOCHARA ENERGY SUMMARY CARD */}
+              {transitSummary && selectedRashiIndex === null && (
+                <div
+                  style={{
+                    background: 'rgba(30, 41, 59, 0.5)',
+                    border: '1px solid var(--as-border)',
+                    borderRadius: 10,
+                    padding: 12,
+                    marginBottom: 14,
+                    display: 'flex',
+                    flexDirection: 'column',
+                    gap: 10,
+                  }}
+                >
+                  <div style={{ fontSize: 10, fontFamily: 'monospace', textTransform: 'uppercase', color: '#94a3b8', letterSpacing: '0.05em', fontWeight: 600 }}>
+                    Dynamic Gochara Summary
+                  </div>
+
+                  <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10 }}>
+                    {/* Green Light Box */}
+                    <div style={{ background: 'rgba(74, 222, 128, 0.08)', border: '1px solid rgba(74, 222, 128, 0.2)', borderRadius: 8, padding: 10 }}>
+                      <div style={{ fontSize: 11, fontWeight: 700, color: 'var(--as-abhijit, #4ade80)', marginBottom: 6 }}>
+                        🟢 Capitalize On
+                      </div>
+                      <ul style={{ margin: 0, paddingLeft: 14, fontSize: 11, color: '#e2e8f0', lineHeight: 1.4 }}>
+                        {transitSummary.capitalizeOn.map((item, idx) => (
+                          <li key={idx} style={{ marginBottom: 4 }}>{item}</li>
+                        ))}
+                      </ul>
+                    </div>
+
+                    {/* Guardrails Box */}
+                    <div style={{ background: 'rgba(251, 107, 107, 0.08)', border: '1px solid rgba(251, 107, 107, 0.2)', borderRadius: 8, padding: 10 }}>
+                      <div style={{ fontSize: 11, fontWeight: 700, color: 'var(--as-rahu, #fb6b6b)', marginBottom: 6 }}>
+                        ⚠️ Guardrails
+                      </div>
+                      <ul style={{ margin: 0, paddingLeft: 14, fontSize: 11, color: '#e2e8f0', lineHeight: 1.4 }}>
+                        {transitSummary.guardrails.map((item, idx) => (
+                          <li key={idx} style={{ marginBottom: 4 }}>{item}</li>
+                        ))}
+                      </ul>
+                    </div>
+                  </div>
+                </div>
+              )}
 
               {displayedTransits.length === 0 ? (
                 <div style={{ fontSize: 12, color: 'var(--as-text-muted)', textAlign: 'center', padding: '12px 0' }}>

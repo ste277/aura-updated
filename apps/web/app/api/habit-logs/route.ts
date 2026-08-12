@@ -9,13 +9,23 @@ export async function POST(req: NextRequest) {
   }
 
   const body = await req.json();
-  const { activityTitle, activeWindow, logMinuteOfDay } = body;
+  const { activityTitle, activeWindow, logMinuteOfDay, logTimestamp, notes } = body;
 
   if (!activityTitle || !activeWindow || logMinuteOfDay == null) {
     return NextResponse.json({ error: 'Missing required fields.' }, { status: 400 });
   }
 
-  const entry = await createHabitLog({ userId: session.userId, activityTitle, activeWindow, logMinuteOfDay });
+  // Parse custom timestamp if provided, fallback to current time
+  const customDate = logTimestamp ? new Date(logTimestamp) : new Date();
+
+  const entry = await createHabitLog({
+    userId: session.userId,
+    activityTitle,
+    activeWindow,
+    logMinuteOfDay,
+    logTimestamp: customDate, // Pass custom date to DB helper
+    notes: notes ? String(notes).trim() : undefined, // Forward notes to DB helper
+  });
 
   return NextResponse.json(entry);
 }

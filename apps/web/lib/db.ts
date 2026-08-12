@@ -88,6 +88,7 @@ export interface HabitLogRow {
   activeWindow: string;
   logTimestamp: Date;
   logMinuteOfDay: number;
+  notes?: string | null; // Added notes field
 }
 
 export interface Habit {
@@ -274,9 +275,9 @@ export async function getLogsForDay(
   year: number,
   month: number,
   day: number
-): Promise<{ id: string; activityTitle: string; activeWindow: string; logTimestamp: Date }[]> {
+): Promise<HabitLogRow[]> {
   const result = await pool.query(
-    `SELECT id, "activityTitle", "activeWindow", "logTimestamp"
+    `SELECT id, "userId", "activityTitle", "activeWindow", "logTimestamp", "logMinuteOfDay", notes
      FROM "HabitLog"
      WHERE "userId" = $1
        AND EXTRACT(YEAR FROM "logTimestamp") = $2
@@ -301,12 +302,16 @@ export async function createHabitLog(input: {
   activityTitle: string;
   activeWindow: string;
   logMinuteOfDay: number;
+  logTimestamp?: Date;
+  notes?: string; // Added optional notes parameter
 }): Promise<HabitLogRow> {
   const id = randomUUID();
+  const timestamp = input.logTimestamp ?? new Date();
+
   const result = await pool.query(
-    `INSERT INTO "HabitLog" (id, "userId", "activityTitle", "activeWindow", "logMinuteOfDay")
-     VALUES ($1, $2, $3, $4, $5) RETURNING *`,
-    [id, input.userId, input.activityTitle, input.activeWindow, input.logMinuteOfDay]
+    `INSERT INTO "HabitLog" (id, "userId", "activityTitle", "activeWindow", "logMinuteOfDay", "logTimestamp", notes)
+     VALUES ($1, $2, $3, $4, $5, $6, $7) RETURNING *`,
+    [id, input.userId, input.activityTitle, input.activeWindow, input.logMinuteOfDay, timestamp, input.notes ?? null]
   );
   return result.rows[0];
 }

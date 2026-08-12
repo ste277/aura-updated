@@ -26,6 +26,10 @@ export async function PATCH(req: NextRequest) {
     return NextResponse.json({ error: 'Invalid birth location or timezone.' }, { status: 400 });
   }
 
+  // Parse YYYY-MM-DD into explicit UTC Date at noon to prevent midnight timezone boundary shifts
+  const [year, month, day] = birthDate.split('-').map(Number);
+  const parsedBirthDate = new Date(Date.UTC(year, month - 1, day, 12, 0, 0));
+
   // Persist the custom birth location into CustomCity table so it stays in user's saved cities
   await saveCustomCityForUser(session.userId, {
     cityName: birthCityName,
@@ -35,7 +39,7 @@ export async function PATCH(req: NextRequest) {
   });
 
   const user = await updateBirthProfile(session.userId, {
-    birthDate,
+    birthDate: parsedBirthDate,
     birthTime,
     birthCityName,
     birthLatitude: latNum,
@@ -43,5 +47,8 @@ export async function PATCH(req: NextRequest) {
     birthTimezone,
   });
 
-  return NextResponse.json(user);
+  return NextResponse.json({
+    ...user,
+    birthDate: birthDate, // Return exact YYYY-MM-DD string back in API response
+  });
 }

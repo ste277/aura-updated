@@ -17,43 +17,45 @@ export interface WindowSpan {
   type: SolarWindowType;
   label: string;
   startMinutes: number; // local clock, 0-1439
-  endMinutes: number; // local clock, 0-1439
+  endMinutes: number;   // local clock, 0-1439
+  // Aliases added for backwards-compatibility with page.tsx UI mappers
+  startMinute?: number;
+  endMinute?: number;
 }
 
 /** 0 = Sunday ... 6 = Saturday, matching JS Date#getDay(). */
 export type WeekdayIndex = 0 | 1 | 2 | 3 | 4 | 5 | 6;
 
-// Each weekday has a fixed 1/8th-daytime-segment index (0-7) for Rahu Kalam,
-// Gulika Kalam, and Yama Gandam. These are the traditional segment assignments.
-// Segment 0 = first 1/8th of daylight after sunrise, segment 7 = last 1/8th before sunset.
+// 0-indexed segment offsets (0 = 1st segment, 7 = 8th segment):
+// Sun: 8th (7), Mon: 2nd (1), Tue: 7th (6), Wed: 5th (4), Thu: 6th (5), Fri: 4th (3), Sat: 3rd (2)
 const RAHU_KALAM_SEGMENT: Record<WeekdayIndex, number> = {
-  0: 7, // Sunday
-  1: 1, // Monday
-  2: 6, // Tuesday
-  3: 4, // Wednesday
-  4: 5, // Thursday
-  5: 3, // Friday
-  6: 2, // Saturday
+  0: 7, // Sunday (8th segment)
+  1: 1, // Monday (2nd segment)
+  2: 6, // Tuesday (7th segment)
+  3: 4, // Wednesday (5th segment)
+  4: 5, // Thursday (6th segment)
+  5: 3, // Friday (4th segment)
+  6: 2, // Saturday (3rd segment)
 };
 
 const GULIKA_KALAM_SEGMENT: Record<WeekdayIndex, number> = {
-  0: 6,
-  1: 5,
-  2: 4,
-  3: 3,
-  4: 2,
-  5: 1,
-  6: 0,
+  0: 6, // Sunday (7th segment)
+  1: 5, // Monday (6th segment)
+  2: 4, // Tuesday (5th segment)
+  3: 3, // Wednesday (4th segment)
+  4: 2, // Thursday (3rd segment)
+  5: 1, // Friday (2nd segment)
+  6: 0, // Saturday (1st segment)
 };
 
 const YAMA_GANDAM_SEGMENT: Record<WeekdayIndex, number> = {
-  0: 4,
-  1: 3,
-  2: 2,
-  3: 1,
-  4: 0,
-  5: 6,
-  6: 5,
+  0: 4, // Sunday (5th segment)
+  1: 3, // Monday (4th segment)
+  2: 2, // Tuesday (3rd segment)
+  3: 1, // Wednesday (2nd segment)
+  4: 0, // Thursday (1st segment)
+  5: 5, // Friday (6th segment)
+  6: 6, // Saturday (7th segment)
 };
 
 function segmentSpan(
@@ -69,20 +71,22 @@ function segmentSpan(
 
 /**
  * Computes all five panchang windows for a given day's solar ephemeris.
- * `weekday` must be the local weekday (0=Sun..6=Sat) of the date the
- * ephemeris was computed for.
  */
 export function computePanchangWindows(
   solar: SolarResult,
   weekday: WeekdayIndex
 ): WindowSpan[] {
-  const { sunriseMinutes, sunsetMinutes, solarNoonMinutes, daylightMinutes } = solar;
+  const { sunriseMinutes, solarNoonMinutes, daylightMinutes } = solar;
+
+  // Drik Panchang calculates Abhijit as the 8th Muhurta out of 15 equal day divisions
+  const muhurtaLength = daylightMinutes / 15;
+  const abhijitHalf = muhurtaLength / 2;
 
   const abhijit: WindowSpan = {
     type: 'ABHIJIT',
     label: 'Abhijit Muhurtham',
-    startMinutes: solarNoonMinutes - 24,
-    endMinutes: solarNoonMinutes + 24,
+    startMinutes: solarNoonMinutes - abhijitHalf,
+    endMinutes: solarNoonMinutes + abhijitHalf,
   };
 
   const brahma: WindowSpan = {
@@ -116,17 +120,21 @@ export function computePanchangWindows(
     endMinutes: yamaSeg.end,
   };
 
-  return [brahma, abhijit, rahuKalam, gulikaKalam, yamaGandam].map((w) => ({
-    ...w,
-    startMinutes: Math.round(((w.startMinutes % 1440) + 1440) % 1440),
-    endMinutes: Math.round(((w.endMinutes % 1440) + 1440) % 1440),
-  }));
+  return [brahma, abhijit, rahuKalam, gulikaKalam, yamaGandam].map((w) => {
+    const sMin = Math.round(((w.startMinutes % 1440) + 1440) % 1440);
+    const eMin = Math.round(((w.endMinutes % 1440) + 1440) % 1440);
+    return {
+      ...w,
+      startMinutes: sMin,
+      endMinutes: eMin,
+      startMinute: sMin,
+      endMinute: eMin,
+    };
+  });
 }
 
 /**
- * Given the current minute-of-day, returns which window is active right now,
- * or 'NEUTRAL' if none of the five windows apply. This is the lookup the
- * dial's tap-to-cards interaction uses.
+ * Given current minute-of-day, returns active window or 'NEUTRAL'.
  */
 export function getActiveWindow(
   windows: WindowSpan[],
@@ -138,7 +146,6 @@ export function getActiveWindow(
         return w.type;
       }
     } else {
-      // window wraps past midnight (e.g. Brahma Muhurtham before an early sunrise)
       if (currentMinuteOfDay >= w.startMinutes || currentMinuteOfDay <= w.endMinutes) {
         return w.type;
       }

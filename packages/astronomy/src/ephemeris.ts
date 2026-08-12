@@ -133,11 +133,14 @@ export function computeSolarEphemeris(input: SolarInput): SolarResult {
   const sunsetMinutes = toLocalMinutes(sunsetUTCMinutes);
   const solarNoonMinutes = toLocalMinutes(solarNoonUTCMinutesFinal);
 
+  // Compute daylight minutes directly from haDeg (haDeg * 4 = half day in minutes)
+  const daylightMinutes = haDeg * 8;
+
   return {
     sunriseMinutes: Math.round(sunriseMinutes),
     sunsetMinutes: Math.round(sunsetMinutes),
     solarNoonMinutes: Math.round(solarNoonMinutes),
-    daylightMinutes: Math.round(sunsetMinutes - sunriseMinutes),
+    daylightMinutes: Math.round(daylightMinutes),
   };
 }
 

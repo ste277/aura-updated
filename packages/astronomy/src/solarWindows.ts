@@ -39,7 +39,6 @@ export function getDailySolarWindows(
     const wrapped = ((Math.round(totalMinutes) % 1440) + 1440) % 1440;
     const hours = Math.floor(wrapped / 60);
     const mins = wrapped % 60;
-    // Construct local Date using local time components directly
     return new Date(year, month - 1, day, hours, mins, 0);
   };
 
@@ -48,11 +47,12 @@ export function getDailySolarWindows(
   const daylightMinutes = ephemeris.daylightMinutes;
 
   const eighthSegment = daylightMinutes / 8;
-  const dayOfWeek = date.getDay();
+  const dayOfWeek = date.getDay(); // 0 = Sunday ... 6 = Saturday
 
-  const rahuOffsets = [7, 1, 6, 4, 5, 2, 3];
-  const gulikaOffsets = [6, 5, 4, 3, 2, 1, 0];
-  const yamaOffsets = [4, 3, 2, 1, 0, 6, 5];
+  // Fixed 0-based segment offsets (0 = 1st segment, 7 = 8th segment)
+  const rahuOffsets = [7, 1, 6, 4, 5, 3, 2];   // Sun(7), Mon(1), Tue(6), Wed(4), Thu(5), Fri(3), Sat(2)
+  const gulikaOffsets = [6, 5, 4, 3, 2, 1, 0]; // Sun(6), Mon(5), Tue(4), Wed(3), Thu(2), Fri(1), Sat(0)
+  const yamaOffsets = [4, 3, 2, 1, 0, 5, 6];   // Sun(4), Mon(3), Tue(2), Wed(1), Thu(0), Fri(5), Sat(6)
 
   const getEighthWindow = (offsetIndex: number) => {
     const startMins = ephemeris.sunriseMinutes + offsetIndex * eighthSegment;
@@ -63,11 +63,14 @@ export function getDailySolarWindows(
     };
   };
 
+  // Brahma Muhurtham: 96 mins to 48 mins before sunrise
   const brahmaStart = localMinutesToDate(ephemeris.sunriseMinutes - 96);
   const brahmaEnd = localMinutesToDate(ephemeris.sunriseMinutes - 48);
 
-  const abhijitStart = localMinutesToDate(ephemeris.solarNoonMinutes - 24);
-  const abhijitEnd = localMinutesToDate(ephemeris.solarNoonMinutes + 24);
+  // Abhijit Muhurtham: 8th Muhurta out of 15 equal daytime divisions centered around Solar Noon
+  const abhijitHalfWindow = daylightMinutes / 30; // 15 Muhurtas total -> 1 Muhurta = daylight / 15 -> half = daylight / 30
+  const abhijitStart = localMinutesToDate(ephemeris.solarNoonMinutes - abhijitHalfWindow);
+  const abhijitEnd = localMinutesToDate(ephemeris.solarNoonMinutes + abhijitHalfWindow);
 
   return {
     sunrise,
