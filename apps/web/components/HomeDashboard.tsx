@@ -470,6 +470,11 @@ export function HomeDashboard({
               <div style={{ fontSize: 13, color: '#f8fafc', fontWeight: 700, marginTop: 3 }}>
                 {taskRecommendation.bestWindow.startTime} - {taskRecommendation.bestWindow.endTime} · {taskRecommendation.bestWindow.label}
               </div>
+              {!taskRecommendation.durationFits && (
+                <div style={{ fontSize: 11, color: '#fbbf24', marginTop: 5, lineHeight: 1.35 }}>
+                  Only {taskRecommendation.availableMinutes} minutes fit inside this period; try a shorter block or choose another window.
+                </div>
+              )}
               <div style={{ fontSize: 11, color: '#dbe7f4', marginTop: 4, lineHeight: 1.35 }}>
                 {taskRecommendation.bestWindow.reason}
               </div>
@@ -482,6 +487,27 @@ export function HomeDashboard({
                 Add to Google Calendar
               </a>
             </div>
+            {taskRecommendation.recommendationState === 'BEST_NOW' && taskRecommendation.bestWindowToday && (
+              <div style={{ border: '1px solid rgba(56, 189, 248, 0.28)', background: 'rgba(56, 189, 248, 0.08)', borderRadius: 12, padding: 12 }}>
+                <div style={{ fontSize: 11, color: '#7dd3fc', fontWeight: 800 }}>
+                  ⭐ Best Window Today{taskRecommendation.bestWindowToday.startsInMinutes > 0 ? ` · Starts in ${taskRecommendation.bestWindowToday.startsInMinutes} min` : ''}
+                </div>
+                <div style={{ fontSize: 13, color: '#f8fafc', fontWeight: 700, marginTop: 5 }}>
+                  {taskRecommendation.bestWindowToday.startTime} - {taskRecommendation.bestWindowToday.endTime} · {taskRecommendation.bestWindowToday.label}
+                </div>
+                <div style={{ fontSize: 11, color: '#dbe7f4', marginTop: 4, lineHeight: 1.35 }}>
+                  {taskRecommendation.bestWindowToday.reason}
+                </div>
+                <a
+                  href={taskRecommendation.bestWindowToday.googleCalendarUrl}
+                  target="_blank"
+                  rel="noreferrer"
+                  style={{ display: 'inline-block', marginTop: 8, fontSize: 11, color: '#38bdf8', fontWeight: 700, textDecoration: 'none' }}
+                >
+                  Schedule Best Window
+                </a>
+              </div>
+            )}
             {taskRecommendation.avoidWindow && taskRecommendation.recommendationState !== 'AVOID' && (
               <div style={{ border: '1px solid rgba(251, 107, 107, 0.25)', background: 'rgba(251, 107, 107, 0.07)', borderRadius: 12, padding: 12 }}>
                 <div style={{ fontSize: 11, color: '#fb6b6b', fontWeight: 800 }}>Avoid Window</div>

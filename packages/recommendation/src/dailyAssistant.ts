@@ -55,8 +55,24 @@ export interface TaskSlotRecommendation {
   taskTitle: string;
   activityType: string;
   activityIcon: string;
+  activityFit: 'IDEAL' | 'SUITABLE' | 'NEUTRAL' | 'UNSUITABLE';
+  timeStatus: 'NOW' | 'UPCOMING' | 'SCHEDULED';
+  windowQuality: 'BEST' | 'GOOD' | 'NEUTRAL' | 'AVOID';
+  durationMinutes: number;
+  durationFits: boolean;
+  availableMinutes: number;
   recommendationState: 'BEST_NOW' | 'NEXT_BEST' | 'SCHEDULED' | 'AVOID';
   recommendationLabel: string;
+  bestWindowToday: {
+    startMinute: number;
+    endMinute: number;
+    startTime: string;
+    endTime: string;
+    startsInMinutes: number;
+    label: string;
+    reason: string;
+    googleCalendarUrl: string;
+  } | null;
   bestWindow: {
     startMinute: number;
     endMinute: number;
@@ -211,13 +227,13 @@ export function recommendTaskSlot(
 
   const currentCandidate = candidates.find((candidate) => containsMinute(candidate, currentMinute));
   const currentIsUsable = currentCandidate && (
-    profile.significance === 'LOW' ||
-    (!isFriction(currentCandidate.type) && (!profile.preferredOnlyForHigh || scoreCandidate(currentCandidate, profile) >= 75))
+    currentCandidate.endMinute - currentMinute >= safeDuration &&
+    (profile.significance === 'LOW' || !isFriction(currentCandidate.type))
   );
   const bestFuture = candidates
     .filter((candidate) => candidate.startMinute > currentMinute && candidate.endMinute - candidate.startMinute >= safeDuration && scoreCandidate(candidate, profile) >= 0)
     .sort((a, b) => scoreCandidate(b, profile) - scoreCandidate(a, profile))[0];
-  if (requestedStartMinute === undefined && currentCandidate && currentIsUsable && (profile.significance === 'LOW' || !bestFuture || scoreCandidate(currentCandidate, profile) >= scoreCandidate(bestFuture, profile))) {
+  if (requestedStartMinute === undefined && currentCandidate && currentIsUsable) {
     return buildTaskRecommendation(cleanTitle, profile, 'BEST_NOW', currentCandidate, currentMinute, safeDuration, context, windows);
   }
 
@@ -238,6 +254,10 @@ type TaskProfile = {
   preferredOnlyForHigh?: boolean;
   scores: Partial<Record<SolarWindowType, number>>;
   reason: string;
+  neutralReason?: string;
+  preferredWindows?: SolarWindowType[];
+  acceptableWindows?: SolarWindowType[];
+  avoidWindows?: SolarWindowType[];
 };
 
 type SlotCandidate = {
@@ -262,23 +282,45 @@ function buildTaskRecommendation(
     ? startMinute
     : safeCandidate.startMinute;
   const end = Math.min(safeCandidate.endMinute, start + durationMinutes);
+  const availableMinutes = Math.max(0, end - start);
   const startsAtLocal = localDateTimeForMinute(context.now, start);
   const endsAtLocal = localDateTimeForMinute(context.now, end);
-  const recommendationLabel = state === 'BEST_NOW'
-    ? ((profile.scores[safeCandidate.type] ?? 55) >= 75 ? 'Best Window' : 'Good time now')
-    : state === 'AVOID' ? 'Not ideal' : state === 'SCHEDULED' ? 'Scheduled time' : 'Next Best Window';
   const nextAvoid = rankAvoidWindows(windows).find((window) => window.startMinutes >= start) ?? rankAvoidWindows(windows)[0] ?? null;
+  const bestTodayCandidate = findBestWindowToday(windows, profile, start, durationMinutes);
+  const score = scoreCandidate(safeCandidate, profile);
+  const activityFit: TaskSlotRecommendation['activityFit'] = state === 'AVOID'
+    ? 'UNSUITABLE'
+    : safeCandidate.type === 'NEUTRAL'
+      ? profile.significance === 'LOW' ? 'SUITABLE' : 'NEUTRAL'
+      : score >= 90 ? 'IDEAL' : score >= 70 ? 'SUITABLE' : 'NEUTRAL';
+  const windowQuality: TaskSlotRecommendation['windowQuality'] = state === 'AVOID'
+    ? 'AVOID'
+    : safeCandidate.type === 'NEUTRAL'
+      ? 'NEUTRAL'
+      : score >= 90 ? 'BEST' : score >= 70 ? 'GOOD' : 'NEUTRAL';
+  const recommendationLabel = state === 'BEST_NOW'
+    ? (windowQuality === 'BEST' ? 'Best Time Now' : 'Good Time Now')
+    : state === 'AVOID' ? 'Not Ideal' : state === 'SCHEDULED' ? 'Scheduled Time' : 'Next Best Window';
 
   return {
     taskTitle,
     activityType: profile.type,
     activityIcon: profile.icon,
+    activityFit,
+    timeStatus: state === 'BEST_NOW' ? 'NOW' : state === 'SCHEDULED' || state === 'AVOID' ? 'SCHEDULED' : 'UPCOMING',
+    windowQuality,
+    durationMinutes,
+    durationFits: availableMinutes >= durationMinutes,
+    availableMinutes,
     recommendationState: state,
     recommendationLabel,
+    bestWindowToday: bestTodayCandidate
+      ? buildWindowTodayOption(bestTodayCandidate, profile, start, durationMinutes, context)
+      : null,
     bestWindow: {
       startMinute: start,
       endMinute: end,
-      startTime: state === 'BEST_NOW' ? 'Now' : formatMinute(start),
+      startTime: formatMinute(start),
       endTime: formatMinute(end),
       label: formatWindowLabel(safeCandidate.type),
       reason: state === 'AVOID'
@@ -287,10 +329,46 @@ function buildTaskRecommendation(
           ? `Your earlier ideal window has passed. ${reasonForProfile(safeCandidate.type, profile)}`
           : reasonForProfile(safeCandidate.type, profile),
     },
-    avoidWindow: profile.significance === 'HIGH' && nextAvoid
+    avoidWindow: profile.significance === 'HIGH' && nextAvoid && nextAvoid.startMinutes > start
       ? { startMinute: nextAvoid.startMinutes, endMinute: nextAvoid.endMinutes, startTime: formatMinute(nextAvoid.startMinutes), endTime: formatMinute(nextAvoid.endMinutes), label: formatWindowLabel(nextAvoid.type), reason: 'High-friction window. Better for routine cleanup than fresh commitments.' }
       : null,
     calendar: { title: taskTitle, startsAtLocal, endsAtLocal, googleCalendarUrl: buildGoogleCalendarUrl(taskTitle, startsAtLocal, endsAtLocal) },
+  };
+}
+
+function findBestWindowToday(
+  windows: WindowSpan[],
+  profile: TaskProfile,
+  currentMinute: number,
+  durationMinutes: number
+): SlotCandidate | undefined {
+  return buildSlotCandidates(windows)
+    .filter((candidate) => candidate.startMinute > currentMinute)
+    .filter((candidate) => candidate.type !== 'NEUTRAL' && !isFriction(candidate.type))
+    .filter((candidate) => candidate.endMinute - candidate.startMinute >= durationMinutes)
+    .filter((candidate) => scoreCandidate(candidate, profile) >= 85)
+    .sort((a, b) => scoreCandidate(b, profile) - scoreCandidate(a, profile) || a.startMinute - b.startMinute)[0];
+}
+
+function buildWindowTodayOption(
+  candidate: SlotCandidate,
+  profile: TaskProfile,
+  currentMinute: number,
+  durationMinutes: number,
+  context: DailyAssistantContext
+) {
+  const endMinute = Math.min(candidate.endMinute, candidate.startMinute + durationMinutes);
+  const startsAtLocal = localDateTimeForMinute(context.now, candidate.startMinute);
+  const endsAtLocal = localDateTimeForMinute(context.now, endMinute);
+  return {
+    startMinute: candidate.startMinute,
+    endMinute,
+    startTime: formatMinute(candidate.startMinute),
+    endTime: formatMinute(endMinute),
+    startsInMinutes: Math.max(0, candidate.startMinute - currentMinute),
+    label: formatWindowLabel(candidate.type),
+    reason: reasonForProfile(candidate.type, profile),
+    googleCalendarUrl: buildGoogleCalendarUrl(profile.type, startsAtLocal, endsAtLocal),
   };
 }
 
@@ -340,21 +418,23 @@ function rankAvoidWindows(windows: WindowSpan[]): WindowSpan[] {
 
 function classifyTask(taskTitle: string): TaskProfile {
   const title = taskTitle.toLowerCase();
-  if (/(tea|coffee|break|snack)/.test(title)) return { type: 'Tea break', icon: '☕', significance: 'LOW', scores: { NEUTRAL: 90, GULIKA: 65 }, reason: 'A short break fits well in neutral flow without needing a peak window.' };
-  if (/(rest|nap|recover|sleep|wind down)/.test(title)) return { type: 'Rest', icon: '😴', significance: 'LOW', scores: { NEUTRAL: 90, BRAHMA: 70 }, reason: 'Recovery and low-stimulation time fit well in neutral flow.' };
-  if (/(meditat|breath|mindful|prayer)/.test(title)) return { type: 'Meditation', icon: '🧘', significance: 'LOW', scores: { BRAHMA: 100, NEUTRAL: 85 }, reason: 'Calm windows support stillness and inward attention.' };
-  if (/(workout|training|lift|lifting|run|gym|exercise|heavy)/.test(title)) return { type: 'Heavy workout', icon: '🏋️', significance: 'HIGH', preferredOnlyForHigh: true, scores: { ABHIJIT: 100, NEUTRAL: 62, GULIKA: 58 }, reason: 'Peak solar energy supports high physical output.' };
-  if (/(deep work|focus|coding|code|research|study|write|writing)/.test(title)) return { type: 'Deep work', icon: '🧠', significance: 'HIGH', preferredOnlyForHigh: true, scores: { ABHIJIT: 100, BRAHMA: 94, NEUTRAL: 66, GULIKA: 60 }, reason: 'Peak solar clarity supports sustained concentration.' };
-  if (/(meeting|1-on-1|one-on-one|call|interview|pitch|presentation|decision)/.test(title)) return { type: 'Important meeting', icon: '💼', significance: 'HIGH', preferredOnlyForHigh: true, scores: { ABHIJIT: 96, GULIKA: 76, NEUTRAL: 70 }, reason: 'A favorable window supports clear communication and decisive outcomes.' };
-  if (/(creative|brainstorm|design|idea)/.test(title)) return { type: 'Creative work', icon: '✍️', significance: 'HIGH', scores: { ABHIJIT: 88, BRAHMA: 84, NEUTRAL: 78, GULIKA: 70 }, reason: 'Favorable or neutral flow gives creative work room to develop.' };
-  if (/(admin|email|invoice|cleanup|organize|errand|expense|filing|paperwork)/.test(title)) return { type: 'Admin', icon: '📋', significance: 'LOW', scores: { NEUTRAL: 90, GULIKA: 82 }, reason: 'Neutral flow is a good fit for routine, repeatable work.' };
-  return { type: 'Focused work', icon: '🎯', significance: 'HIGH', preferredOnlyForHigh: true, scores: { ABHIJIT: 95, BRAHMA: 84, NEUTRAL: 68, GULIKA: 62 }, reason: 'A favorable window supports focused execution.' };
+  if (/(tea|coffee|break|snack)/.test(title)) return { type: 'Tea break', icon: '☕', significance: 'LOW', scores: { NEUTRAL: 90, GULIKA: 65 }, reason: 'A short reset fits well here.', neutralReason: 'A short break does not require an auspicious starting window.', preferredWindows: ['NEUTRAL', 'GULIKA'], acceptableWindows: ['BRAHMA', 'ABHIJIT', 'RAHU_KALAM', 'YAMA'] };
+  if (/(rest|nap|recover|sleep|wind down)/.test(title)) return { type: 'Rest', icon: '😴', significance: 'LOW', scores: { NEUTRAL: 90, BRAHMA: 70 }, reason: 'A recovery period supports rest and reset.', neutralReason: 'Recovery and low-stimulation time fit well here.', preferredWindows: ['NEUTRAL', 'BRAHMA'], acceptableWindows: ['GULIKA', 'ABHIJIT'] };
+  if (/(meditat|breath|mindful|prayer)/.test(title)) return { type: 'Meditation', icon: '🧘', significance: 'LOW', scores: { BRAHMA: 100, NEUTRAL: 85 }, reason: 'A calmer period supports reflection and reset.', neutralReason: 'A quiet neutral period is suitable for stillness.', preferredWindows: ['BRAHMA', 'NEUTRAL'], acceptableWindows: ['GULIKA', 'ABHIJIT'] };
+  if (/(workout|training|lift|lifting|run|gym|exercise|heavy)/.test(title)) return { type: 'Heavy workout', icon: '🏋️', significance: 'HIGH', preferredOnlyForHigh: true, scores: { ABHIJIT: 100, NEUTRAL: 62, GULIKA: 58 }, reason: 'Peak solar energy supports high physical output.', neutralReason: 'A neutral period is suitable for a workout, although it is not a peak-performance window.', preferredWindows: ['ABHIJIT', 'NEUTRAL'], acceptableWindows: ['GULIKA', 'BRAHMA'], avoidWindows: ['RAHU_KALAM', 'YAMA'] };
+  if (/(deep work|focus|coding|code|research|study|write|writing)/.test(title)) return { type: 'Deep work', icon: '🧠', significance: 'HIGH', preferredOnlyForHigh: true, scores: { ABHIJIT: 100, BRAHMA: 94, NEUTRAL: 66, GULIKA: 60 }, reason: 'Good conditions support sustained concentration.', neutralReason: 'A neutral period can support focused work without a special Panchang advantage.', preferredWindows: ['ABHIJIT', 'BRAHMA'], acceptableWindows: ['NEUTRAL', 'GULIKA'], avoidWindows: ['RAHU_KALAM', 'YAMA'] };
+  if (/(meeting|1-on-1|one-on-one|call|interview|pitch|presentation|decision)/.test(title)) return { type: 'Important meeting', icon: '💼', significance: 'HIGH', preferredOnlyForHigh: true, scores: { ABHIJIT: 96, GULIKA: 76, NEUTRAL: 70 }, reason: 'A favorable window supports clear communication and decisive outcomes.', neutralReason: 'A neutral period is workable for a meeting, without a special advantage.', preferredWindows: ['ABHIJIT'], acceptableWindows: ['GULIKA', 'NEUTRAL'], avoidWindows: ['RAHU_KALAM', 'YAMA'] };
+  if (/(creative|brainstorm|design|idea)/.test(title)) return { type: 'Creative work', icon: '✍️', significance: 'HIGH', scores: { ABHIJIT: 88, BRAHMA: 84, NEUTRAL: 78, GULIKA: 70 }, reason: 'Favorable flow gives creative work room to develop.', neutralReason: 'A neutral period is still suitable for creative work.', preferredWindows: ['ABHIJIT', 'BRAHMA', 'NEUTRAL'], acceptableWindows: ['GULIKA'], avoidWindows: ['RAHU_KALAM', 'YAMA'] };
+  if (/(admin|email|invoice|cleanup|organize|errand|expense|filing|paperwork)/.test(title)) return { type: 'Admin', icon: '📋', significance: 'LOW', scores: { NEUTRAL: 90, GULIKA: 82 }, reason: 'Routine work fits well here.', neutralReason: 'Suitable for routine, lower-intensity work.', preferredWindows: ['NEUTRAL', 'GULIKA'], acceptableWindows: ['RAHU_KALAM', 'YAMA', 'BRAHMA', 'ABHIJIT'] };
+  return { type: 'Focused work', icon: '🎯', significance: 'HIGH', preferredOnlyForHigh: true, scores: { ABHIJIT: 95, BRAHMA: 84, NEUTRAL: 68, GULIKA: 62 }, reason: 'A favorable window supports focused execution.', neutralReason: 'A neutral period is usable for focused work, without a meaningful Panchang advantage.', preferredWindows: ['ABHIJIT', 'BRAHMA'], acceptableWindows: ['NEUTRAL', 'GULIKA'], avoidWindows: ['RAHU_KALAM', 'YAMA'] };
 }
 
 function reasonForProfile(windowType: SolarWindowType, profile: TaskProfile): string {
   if (windowType === 'ABHIJIT') return profile.reason;
   if (windowType === 'BRAHMA') return profile.type === 'Meditation' ? profile.reason : 'Quiet pre-dawn energy supports calm, deliberate work.';
   if (windowType === 'GULIKA') return 'Steady compounding energy suits practice, follow-through, and repeatable work.';
+  if (isFriction(windowType)) return profile.significance === 'LOW' ? (profile.neutralReason ?? profile.reason) : 'Better later for this significant activity; routine work is fine during this period.';
+  if (windowType === 'NEUTRAL') return profile.neutralReason ?? profile.reason;
   return profile.reason;
 }
 
