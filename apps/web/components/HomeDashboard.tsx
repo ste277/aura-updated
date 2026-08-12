@@ -5,6 +5,38 @@ import { getPersonalizedTasks, UserChartContext } from '../../../packages/recomm
 import type { DailyBriefing, TaskSlotRecommendation } from '../../../packages/recommendation/src/dailyAssistant';
 import { triggerHaptic } from '../lib/haptics';
 
+interface TaskSuggestion {
+  title: string;
+  icon: string;
+  keywords: string[];
+  description?: string;
+}
+
+const POPULAR_TASKS: TaskSuggestion[] = [
+  { title: 'Deep Work', icon: '🧠', keywords: ['deep work', 'focus', 'coding', 'code', 'research', 'study', 'write'] },
+  { title: 'Exercise & Fitness', icon: '🏋️', keywords: ['exercise', 'workout', 'gym', 'training', 'fitness'] },
+  { title: 'Email & Communication', icon: '📧', keywords: ['email', 'communication', 'inbox', 'message', 'call'] },
+  { title: 'Break & Relaxation', icon: '🧘', keywords: ['break', 'rest', 'relax', 'tea', 'coffee', 'recovery'] },
+  { title: 'Planning', icon: '📋', keywords: ['planning', 'plan', 'organize', 'strategy'] },
+  { title: 'Learning', icon: '📚', keywords: ['learning', 'learn', 'reading', 'study', 'course'] },
+];
+
+const TASK_ALIASES: TaskSuggestion[] = [
+  { title: 'Exercise & Fitness', icon: '🏋️', keywords: ['exercise', 'workout', 'gym', 'training', 'fitness'] },
+  { title: 'Running', icon: '🏃', keywords: ['running', 'run', 'jog', 'cardio'] },
+  { title: 'Strength Training', icon: '🏋️', keywords: ['strength', 'weights', 'lifting', 'lift', 'gym'] },
+  { title: 'Stretching & Mobility', icon: '🧘', keywords: ['stretch', 'mobility', 'flexibility', 'recovery'] },
+  { title: 'Deep Technical Work', icon: '💻', keywords: ['technical', 'coding', 'code', 'programming', 'architecture'] },
+  { title: 'Documentation', icon: '📝', keywords: ['documentation', 'docs', 'document'] },
+  { title: 'Team Meeting', icon: '👥', keywords: ['meeting', 'team', 'standup'] },
+  { title: 'Client Communication', icon: '💬', keywords: ['client', 'communication', 'call', 'email'] },
+  { title: 'Meditation', icon: '🧘', keywords: ['meditation', 'meditate', 'mindful', 'breath'] },
+];
+
+function recentTaskTitles(titles: string[]): string[] {
+  return titles.filter(Boolean).slice().reverse().filter((title, index, list) => list.indexOf(title) === index).slice(0, 3);
+}
+
 interface HomeDashboardProps {
   userName: string;
   energyScore: number;
@@ -77,12 +109,31 @@ export function HomeDashboard({
   const [taskDuration, setTaskDuration] = useState(30);
   const [taskRecommendation, setTaskRecommendation] = useState<TaskSlotRecommendation | null>(null);
   const [isSlottingTask, setIsSlottingTask] = useState(false);
+  const [taskInputFocused, setTaskInputFocused] = useState(false);
   const [reflectionSaved, setReflectionSaved] = useState(false);
 
   // Compute personalized tasks tailored to active window, birth chart, and current log history
   const personalizedTasks = useMemo(() => {
     return getPersonalizedTasks(activeWindowName, userChart, loggedActivitiesToday);
   }, [activeWindowName, userChart, loggedActivitiesToday]);
+
+  const taskSuggestions = useMemo(() => {
+    const recent = recentTaskTitles(loggedActivitiesToday)
+      .map((title) => ({ title, icon: '↗', keywords: [title.toLowerCase()] }));
+    const query = taskTitle.trim().toLowerCase();
+    const source = query ? TASK_ALIASES : [...recent, ...POPULAR_TASKS];
+    const matches = source.filter((suggestion, index, all) => {
+      const matchesQuery = !query || suggestion.title.toLowerCase().includes(query) || suggestion.keywords.some((keyword) => keyword.includes(query));
+      return matchesQuery && all.findIndex((item) => item.title.toLowerCase() === suggestion.title.toLowerCase()) === index;
+    });
+    return matches.slice(0, 6);
+  }, [loggedActivitiesToday, taskTitle]);
+
+  const selectTaskSuggestion = (title: string) => {
+    setTaskTitle(title);
+    setTaskRecommendation(null);
+    setTaskInputFocused(false);
+  };
 
   const starCount = Math.round((energyScore / 10) * 5 * 2) / 2;
 
@@ -93,7 +144,7 @@ export function HomeDashboard({
       dailyBriefing.briefingState === 'COMPLETED' &&
       dailyBriefing.otherFavorableWindows.every((window) => window.state === 'COMPLETED')
   );
-  const briefTitle = allWindowsComplete ? 'Evening Status' : 'Morning Brief';
+  const briefTitle = allWindowsComplete ? 'Evening Mode' : 'Morning Brief';
   const briefStateLabel = allWindowsComplete
     ? 'Recovery phase'
     : dailyBriefing?.briefingState === 'ACTIVE'
@@ -201,6 +252,7 @@ export function HomeDashboard({
             border: allWindowsComplete ? '1px solid rgba(148, 163, 184, 0.24)' : '1px solid rgba(74, 222, 128, 0.28)',
             borderRadius: 16,
             padding: '18px 17px 19px',
+            order: 1,
           }}
         >
           <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
@@ -214,10 +266,10 @@ export function HomeDashboard({
           {allWindowsComplete ? (
             <>
               <div style={{ fontSize: 17, fontWeight: 800, color: '#f8fafc', marginTop: 15 }}>
-                All favorable windows complete
+                Shift from output to recovery
               </div>
               <div style={{ fontSize: 12, color: '#dbe7f4', marginTop: 6, lineHeight: 1.45 }}>
-                Focus on light activity, reflection, and sleep preparation.
+                Your key productivity windows are complete. Now: wrap up, recover, and prepare for tomorrow.
               </div>
               <div style={{ marginTop: 17, paddingTop: 14, borderTop: '1px solid rgba(255, 255, 255, 0.1)' }}>
                 <div style={{ fontSize: 10, color: '#b6c2d1', textTransform: 'uppercase', letterSpacing: '0.05em', fontWeight: 800 }}>
@@ -265,16 +317,17 @@ export function HomeDashboard({
           borderRadius: 16,
           padding: 20,
           position: 'relative',
+          order: 2,
         }}
       >
         <div style={{ fontSize: 10, fontFamily: 'monospace', textTransform: 'uppercase', letterSpacing: '0.05em', color: '#94a3b8' }}>
-          Current Alignment
+          Today&apos;s Energy
         </div>
 
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginTop: 4 }}>
           <div>
             <h2 style={{ fontSize: 24, fontWeight: 700, color: status.color, margin: 0 }}>
-              {status.label}
+              {status.label.replace(' Alignment', '')}
             </h2>
             <div style={{ display: 'flex', gap: 2, color: '#facc15', fontSize: 14, margin: '6px 0 0 0' }}>
               {Array.from({ length: 5 }).map((_, i) => (
@@ -282,7 +335,7 @@ export function HomeDashboard({
               ))}
             </div>
             <div style={{ fontSize: 11, color: '#94a3b8', marginTop: 6, fontWeight: 500 }}>
-              Active Window: <span style={{ color: status.color, fontWeight: 600 }}>{activeWindowName.replace('_', ' ')}</span>
+              Based on today&apos;s solar and Panchang windows · <span style={{ color: status.color, fontWeight: 600 }}>{activeWindowName.replace('_', ' ')}</span>
             </div>
           </div>
 
@@ -319,11 +372,12 @@ export function HomeDashboard({
           border: '1px solid var(--as-border, #1e293b)',
           borderRadius: 16,
           padding: 16,
+          order: 4,
         }}
       >
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
           <span style={{ fontSize: 10, fontFamily: 'monospace', textTransform: 'uppercase', color: '#4ade80', letterSpacing: '0.05em', fontWeight: 700 }}>
-            ⚡ Personalized Actions
+            ⚡ Today&apos;s Actions
           </span>
           <span style={{ fontSize: 10, color: '#94a3b8', fontFamily: 'monospace' }}>
             {activeWindowName.replace(/_/g, ' ')}
@@ -398,11 +452,12 @@ export function HomeDashboard({
           border: '1px solid var(--as-border, #1e293b)',
           borderRadius: 16,
           padding: 16,
+          order: 3,
         }}
       >
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 12 }}>
           <span style={{ fontSize: 10, fontFamily: 'monospace', textTransform: 'uppercase', color: '#38bdf8', letterSpacing: '0.05em', fontWeight: 700 }}>
-            Slot My Task
+            What do you want to do?
           </span>
           <select
             value={taskDuration}
@@ -425,8 +480,13 @@ export function HomeDashboard({
         <div style={{ display: 'flex', gap: 8, marginTop: 12 }}>
           <input
             value={taskTitle}
-            onChange={(e) => setTaskTitle(e.target.value)}
-            placeholder="Pitch deck, 1-on-1, code review..."
+            onFocus={() => setTaskInputFocused(true)}
+            onChange={(e) => {
+              setTaskTitle(e.target.value);
+              setTaskRecommendation(null);
+              setTaskInputFocused(true);
+            }}
+            placeholder="Type an activity..."
             style={{
               flex: 1,
               minWidth: 0,
@@ -458,6 +518,37 @@ export function HomeDashboard({
             {isSlottingTask ? '...' : 'Slot'}
           </button>
         </div>
+        {taskInputFocused && !taskRecommendation && (
+          <div style={{ marginTop: 10, padding: '10px 0 0', borderTop: '1px solid rgba(148, 163, 184, 0.14)' }}>
+            <div style={{ fontSize: 10, color: '#94a3b8', textTransform: 'uppercase', letterSpacing: '0.05em', fontWeight: 800 }}>
+              {taskTitle.trim() ? 'Suggestions' : recentTaskTitles(loggedActivitiesToday).length ? 'Recent & Popular' : 'Popular'}
+            </div>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 4, marginTop: 6 }}>
+              {taskSuggestions.map((suggestion) => (
+                <button
+                  key={suggestion.title}
+                  type="button"
+                  onMouseDown={(event) => event.preventDefault()}
+                  onClick={() => selectTaskSuggestion(suggestion.title)}
+                  style={{ display: 'flex', alignItems: 'center', gap: 9, width: '100%', border: 'none', borderRadius: 8, background: 'transparent', color: '#e2e8f0', padding: '7px 8px', textAlign: 'left', cursor: 'pointer' }}
+                >
+                  <span style={{ width: 22, textAlign: 'center', fontSize: 15 }}>{suggestion.icon}</span>
+                  <span style={{ fontSize: 12, fontWeight: 700 }}>{suggestion.title}</span>
+                </button>
+              ))}
+              {taskTitle.trim() && !taskSuggestions.some((suggestion) => suggestion.title.toLowerCase() === taskTitle.trim().toLowerCase()) && (
+                <button
+                  type="button"
+                  onMouseDown={(event) => event.preventDefault()}
+                  onClick={() => setTaskInputFocused(false)}
+                  style={{ border: 'none', borderTop: '1px solid rgba(148, 163, 184, 0.14)', background: 'transparent', color: '#38bdf8', padding: '9px 8px 3px', textAlign: 'left', fontSize: 11, cursor: 'pointer' }}
+                >
+                  + Create &ldquo;{taskTitle.trim()}&rdquo; as a custom task
+                </button>
+              )}
+            </div>
+          </div>
+        )}
         {taskRecommendation && (
           <div style={{ display: 'flex', flexDirection: 'column', gap: 8, marginTop: 12 }}>
             <div style={{ border: `1px solid ${taskRecommendation.recommendationState === 'AVOID' ? 'rgba(251, 107, 107, 0.35)' : taskRecommendation.recommendationState === 'NO_FIT' ? 'rgba(251, 191, 36, 0.35)' : 'rgba(74, 222, 128, 0.3)'}`, background: taskRecommendation.recommendationState === 'AVOID' ? 'rgba(251, 107, 107, 0.08)' : taskRecommendation.recommendationState === 'NO_FIT' ? 'rgba(251, 191, 36, 0.08)' : 'rgba(74, 222, 128, 0.08)', borderRadius: 12, padding: 12 }}>
@@ -528,13 +619,14 @@ export function HomeDashboard({
             border: '1px solid var(--as-border, #1e293b)',
             borderRadius: 16,
             padding: 16,
+            order: 5,
           }}
         >
           <span style={{ fontSize: 10, fontFamily: 'monospace', textTransform: 'uppercase', color: '#facc15', letterSpacing: '0.05em', fontWeight: 700 }}>
             Daily Check-in
           </span>
           <div style={{ fontSize: 13, color: '#f8fafc', fontWeight: 700, marginTop: 8 }}>
-            How was your output today?
+            How did today feel?
           </div>
           {reflectionSaved ? (
             <div style={{ fontSize: 12, color: '#4ade80', marginTop: 8 }}>
@@ -544,8 +636,8 @@ export function HomeDashboard({
             <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 8, marginTop: 10 }}>
               {[
                 ['LOW', 'Low'],
-                ['MODERATE', 'Moderate'],
-                ['PEAK_FLOW', 'Peak Flow'],
+                ['MODERATE', 'Balanced'],
+                ['PEAK_FLOW', 'Strong'],
               ].map(([value, label]) => (
                 <button
                   key={value}
@@ -668,6 +760,7 @@ export function HomeDashboard({
           border: '1px solid var(--as-border, #1e293b)',
           borderRadius: 16,
           padding: 16,
+          order: 6,
         }}
       >
         <span style={{ fontSize: 10, fontFamily: 'monospace', textTransform: 'uppercase', color: '#94a3b8', letterSpacing: '0.05em' }}>
@@ -686,6 +779,7 @@ export function HomeDashboard({
           border: '1px solid var(--as-border, #1e293b)',
           borderRadius: 16,
           padding: 16,
+          order: 6,
         }}
       >
         <span style={{ fontSize: 10, fontFamily: 'monospace', textTransform: 'uppercase', color: '#4ade80', letterSpacing: '0.05em' }}>
@@ -723,6 +817,7 @@ export function HomeDashboard({
             border: '1px solid var(--as-border, #1e293b)',
             borderRadius: 16,
             padding: 16,
+            order: 6,
           }}
         >
           <span style={{ fontSize: 10, fontFamily: 'monospace', textTransform: 'uppercase', color: '#fb6b6b', letterSpacing: '0.05em' }}>
@@ -760,6 +855,7 @@ export function HomeDashboard({
           border: '1px solid var(--as-border, #1e293b)',
           borderRadius: 16,
           padding: '14px 16px',
+          order: 6,
           display: 'flex',
           justifyContent: 'space-between',
           alignItems: 'center',
