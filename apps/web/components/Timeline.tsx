@@ -86,6 +86,16 @@ function getWindowMeta(typeStr: string) {
   };
 }
 
+function actionQueryForWindow(windowName: string): string {
+  const clean = windowName.replace(/_/g, ' ').toUpperCase();
+  if (clean.includes('RAHU')) return 'RAHU';
+  if (clean.includes('BRAHMA')) return 'BRAHMA';
+  if (clean.includes('ABHIJIT')) return 'ABHIJIT';
+  if (clean.includes('GULIKA')) return 'GULIKA';
+  if (clean.includes('YAMA')) return 'YAMA';
+  return 'NEUTRAL';
+}
+
 function polarToCartesian(centerX: number, centerY: number, radius: number, angleInDegrees: number) {
   const angleInRadians = ((angleInDegrees - 90) * Math.PI) / 180.0;
   return {
@@ -125,11 +135,22 @@ export function TimelineView({
   const selectedWindowName = selectedWindowItem?.name || null;
   const activeWindowName = selectedWindowName || currentWindow?.name || 'NEUTRAL';
   const activeMeta = getWindowMeta(activeWindowName);
+  const currentRecommendedCards: ActionCard[] = React.useMemo(() => {
+    const cards = getActionCards(actionQueryForWindow(currentWindow?.name || 'NEUTRAL'));
+    return Array.isArray(cards) ? cards.slice(0, 3) : [];
+  }, [currentWindow?.name]);
 
   // Chronologically sorted schedule windows
   const sortedWindows = React.useMemo(() => {
     return [...windows].sort((a, b) => (a.startMinute ?? 0) - (b.startMinute ?? 0));
   }, [windows]);
+
+  const nextOpportunity = React.useMemo(() => {
+    return sortedWindows
+      .filter((window) => (window.startMinute ?? 0) > activeMinute)
+      .filter((window) => /ABHIJIT|BRAHMA|VIJAYA/i.test(window.name))
+      .sort((a, b) => (b.type?.includes('ABHIJIT') ? 1 : 0) - (a.type?.includes('ABHIJIT') ? 1 : 0) || (a.startMinute ?? 0) - (b.startMinute ?? 0))[0] ?? null;
+  }, [sortedWindows, activeMinute]);
 
   // Derive recommended action cards safely
   const recommendedCards: ActionCard[] = React.useMemo(() => {
@@ -641,8 +662,8 @@ export function TimelineView({
               width: 140,
             }}
           >
-            <span style={{ fontSize: 9, fontFamily: 'monospace', textTransform: 'uppercase', color: '#94a3b8', letterSpacing: '0.08em' }}>
-              CURRENT WINDOW
+            <span style={{ fontSize: 9, fontFamily: 'monospace', textTransform: 'uppercase', color: '#4ade80', letterSpacing: '0.08em', fontWeight: 800 }}>
+              NOW
             </span>
 
             <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginTop: 6 }}>
@@ -653,15 +674,26 @@ export function TimelineView({
             </div>
 
             <span style={{ fontSize: 11, color: '#cbd5e1', marginTop: 8, fontFamily: 'sans-serif' }}>
-              Until {currentWindow?.endTime || '--:--'}
+              {currentWindow?.timeRemaining || '--'} remaining
             </span>
 
-            <span style={{ fontSize: 11, color: '#94a3b8', marginTop: 2, fontFamily: 'monospace' }}>
-              {`${currentWindow?.timeRemaining || '--'} left`}
+            <span style={{ fontSize: 9, color: '#94a3b8', marginTop: 5, lineHeight: 1.25, fontFamily: 'sans-serif' }}>
+              {currentRecommendedCards.length > 0 ? `Good for ${currentRecommendedCards[0].title.toLowerCase()}` : 'Choose a task that fits your current energy.'}
             </span>
           </div>
         </div>
       </div>
+
+      {nextOpportunity && (
+        <div style={{ background: 'rgba(56, 189, 248, 0.08)', border: '1px solid rgba(56, 189, 248, 0.28)', borderRadius: 14, padding: 13 }}>
+          <div style={{ fontSize: 10, color: '#7dd3fc', fontWeight: 800, letterSpacing: '0.05em', textTransform: 'uppercase' }}>⭐ Next Best Opportunity</div>
+          <div style={{ display: 'flex', justifyContent: 'space-between', gap: 12, marginTop: 6, alignItems: 'baseline' }}>
+            <span style={{ color: '#f8fafc', fontWeight: 750, fontSize: 13 }}>{getWindowMeta(nextOpportunity.name).title.split(' (')[0]}</span>
+            <span style={{ color: '#b6c2d1', fontSize: 11, fontFamily: 'monospace', whiteSpace: 'nowrap' }}>{nextOpportunity.startTime} - {nextOpportunity.endTime}</span>
+          </div>
+          <div style={{ color: '#dbe7f4', fontSize: 11, marginTop: 5 }}>Best suited for high-focus or high-impact work.</div>
+        </div>
+      )}
 
       {/* Schedule Items List */}
       <div style={{ display: 'flex', flexDirection: 'column', gap: 10, marginTop: 4 }}>
@@ -674,6 +706,8 @@ export function TimelineView({
           const isActive = sMin <= eMin
             ? activeMinute >= sMin && activeMinute < eMin
             : activeMinute >= sMin || activeMinute < eMin;
+          const isCompleted = !isActive && eMin <= activeMinute;
+          const isUpcoming = !isActive && sMin > activeMinute;
 
           const formatMinStr = (m?: number) => {
             if (m === undefined || isNaN(m)) return '--:--';
@@ -687,6 +721,15 @@ export function TimelineView({
             : `${formatMinStr(win.startMinute)} – ${formatMinStr(win.endMinute)}`;
 
           const windowLogs = getWindowLogs(win.name, win.startMinute, win.endMinute);
+          const overlappingWindow = sortedWindows.find((other) => {
+            if (other === win || !(/ABHIJIT|GULIKA/i.test(win.name) && /ABHIJIT|GULIKA/i.test(other.name))) return false;
+            const overlapStart = Math.max(sMin, other.startMinute ?? 0);
+            const overlapEnd = Math.min(eMin, other.endMinute ?? 0);
+            return overlapEnd > overlapStart;
+          });
+          const overlapMinutes = overlappingWindow
+            ? Math.max(0, Math.min(eMin, overlappingWindow.endMinute ?? 0) - Math.max(sMin, overlappingWindow.startMinute ?? 0))
+            : 0;
 
           return (
             <div
@@ -700,12 +743,13 @@ export function TimelineView({
                 borderRadius: 14,
                 cursor: 'pointer',
                 background: isActive ? 'rgba(139, 92, 246, 0.22)' : 'rgba(15, 23, 42, 0.6)',
-                border: isActive ? '1px solid rgba(139, 92, 246, 0.5)' : '1px solid rgba(255, 255, 255, 0.04)',
+                border: isActive ? '1px solid rgba(139, 92, 246, 0.5)' : isUpcoming ? '1px solid rgba(255, 255, 255, 0.08)' : '1px solid rgba(255, 255, 255, 0.04)',
                 boxShadow: isActive ? '0 0 16px rgba(139, 92, 246, 0.25)' : 'none',
+                opacity: isCompleted ? 0.58 : 1,
                 transition: 'all 0.2s ease',
               }}
             >
-              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8 }}>
                 <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
                   <div
                     style={{
@@ -721,32 +765,33 @@ export function TimelineView({
                   </span>
                 </div>
 
-                <span style={{ fontSize: 12, fontFamily: 'monospace', color: isActive ? '#c084fc' : '#94a3b8' }}>
+                  <span style={{ fontSize: 12, fontFamily: 'monospace', color: isActive ? '#c084fc' : '#94a3b8', whiteSpace: 'nowrap' }}>
                   {timeRange}
+                  </span>
+                </div>
+
+              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', paddingLeft: 22, minHeight: 16 }}>
+                <span style={{ fontSize: 10, color: isActive ? '#86efac' : isCompleted ? '#64748b' : '#94a3b8', fontWeight: 700 }}>
+                  {isActive ? '● NOW' : isCompleted ? '✓ Complete' : '○ Upcoming'}
                 </span>
+                {windowLogs.length > 0 && <span style={{ fontSize: 10, color: isCompleted ? '#64748b' : '#86efac' }}>{windowLogs.length} logged</span>}
               </div>
 
-              {/* Logged Activities Badges inside Schedule Item Block */}
-              {windowLogs.length > 0 && (
-                <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', paddingLeft: 22 }}>
-                  {windowLogs.map((log) => (
-                    <div
-                      key={log.id}
-                      style={{
-                        background: 'rgba(74, 222, 128, 0.12)',
-                        border: '1px solid rgba(74, 222, 128, 0.3)',
-                        color: '#4ade80',
-                        fontSize: 10,
-                        padding: '2px 8px',
-                        borderRadius: 8,
-                        display: 'flex',
-                        alignItems: 'center',
-                        gap: 4,
-                        fontWeight: 600,
-                      }}
-                    >
-                      <span>✓</span>
-                      <span>{log.activityTitle}</span>
+              {overlapMinutes > 0 && (
+                <div style={{ paddingLeft: 22, color: '#c4b5fd', fontSize: 10, fontWeight: 700 }}>
+                  {overlapMinutes} min overlap with {getWindowMeta(overlappingWindow?.name || '').title.split(' (')[0]}
+                </div>
+              )}
+
+              {isActive && currentRecommendedCards.length > 0 && (
+                <div style={{ paddingLeft: 22, display: 'flex', flexDirection: 'column', gap: 5 }}>
+                  <span style={{ fontSize: 10, color: '#b6c2d1', fontWeight: 700 }}>Good for now</span>
+                  {currentRecommendedCards.map((card) => (
+                    <div key={card.id} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 8 }}>
+                      <span style={{ color: '#dbe7f4', fontSize: 10 }}>{card.icon} {card.title}</span>
+                      <button onClick={(e) => { e.stopPropagation(); handleQuickLog(card.title); }} disabled={allLoggedNormalized.has(card.title.toLowerCase()) || !!loggingTitle} style={{ background: 'rgba(74, 222, 128, 0.12)', border: '1px solid rgba(74, 222, 128, 0.28)', color: '#86efac', borderRadius: 7, fontSize: 9, padding: '3px 6px' }}>
+                        {allLoggedNormalized.has(card.title.toLowerCase()) ? 'Logged' : 'Log'}
+                      </button>
                     </div>
                   ))}
                 </div>
