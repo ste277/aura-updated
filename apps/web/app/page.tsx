@@ -37,6 +37,14 @@ interface SessionUser {
 
 const FALLBACK_TZ = 'Asia/Kolkata';
 
+function formatDisplayName(email: string): string {
+  const localPart = email.split('@')[0] || 'there';
+  const withoutDigits = localPart.replace(/[0-9]+/g, '');
+  const words = withoutDigits.split(/[._-]+/).filter(Boolean);
+  const name = words.join(' ').trim() || localPart;
+  return name.replace(/\b\w/g, (letter) => letter.toUpperCase());
+}
+
 export default function DashboardPage() {
   const [user, setUser] = useState<SessionUser | null | undefined>(undefined);
   const [logEntries, setLogEntries] = useState<LoggedEntryItem[]>([]);
@@ -469,7 +477,7 @@ export default function DashboardPage() {
     return <LoginScreen onLoggedInCheck={loadUserDataAndLogs} />;
   }
 
-  const userNameDisplay = user.email.split('@')[0];
+  const userNameDisplay = formatDisplayName(user.email);
 
   return (
     <main

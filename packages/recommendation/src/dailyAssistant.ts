@@ -21,11 +21,26 @@ export interface DailyAssistantContext extends DailyAssistantLocation {
 
 export interface DailyBriefing {
   dateLabel: string;
+  briefingState: 'UPCOMING' | 'ACTIVE' | 'COMPLETED';
   peakWindow: {
     name: string;
     startTime: string;
     endTime: string;
   };
+  nextWindow: {
+    name: string;
+    startTime: string;
+    endTime: string;
+    windowType: SolarWindowType;
+  } | null;
+  otherFavorableWindows: Array<{
+    name: string;
+    startTime: string;
+    endTime: string;
+    windowType: SolarWindowType;
+    state: 'UPCOMING' | 'ACTIVE' | 'COMPLETED';
+  }>;
+  nextAction: string;
   greenLight: {
     title: string;
     description: string;
@@ -63,35 +78,65 @@ export interface TaskSlotRecommendation {
 }
 
 export function computeAssistantWindows(context: DailyAssistantContext): WindowSpan[] {
-  const localDate = context.now;
+  const localDate = localDateForContext(context);
   const solar = computeSolarEphemeris({
-    year: localDate.getFullYear(),
-    month: localDate.getMonth() + 1,
-    day: localDate.getDate(),
+    year: localDate.getUTCFullYear(),
+    month: localDate.getUTCMonth() + 1,
+    day: localDate.getUTCDate(),
     latitude: context.latitude,
     longitude: context.longitude,
     tzOffsetMinutes: context.tzOffsetMinutes,
   });
 
-  return computePanchangWindows(solar, localDate.getDay() as WeekdayIndex);
+  return computePanchangWindows(solar, localDate.getUTCDay() as WeekdayIndex);
 }
 
 export function buildDailyBriefing(context: DailyAssistantContext): DailyBriefing {
   const windows = computeAssistantWindows(context);
-  const minuteOfDay = context.now.getHours() * 60 + context.now.getMinutes();
+  const localDate = localDateForContext(context);
+  const minuteOfDay = localDate.getUTCHours() * 60 + localDate.getUTCMinutes();
   const activeWindow = getActiveWindow(windows, minuteOfDay);
   const peak = findWindow(windows, 'ABHIJIT') ?? windows[0];
   const action = getActionCards(peak?.type ?? activeWindow)[0] ?? getActionCards(activeWindow)[0];
   const peakName = peak?.label ?? 'Peak Solar Window';
   const peakStart = formatMinute(peak?.startMinutes ?? 720);
   const peakEnd = formatMinute(peak?.endMinutes ?? 780);
+  const briefingState = activeWindow === peak?.type
+    ? 'ACTIVE'
+    : minuteOfDay < (peak?.startMinutes ?? 720)
+      ? 'UPCOMING'
+      : 'COMPLETED';
+  const next = findNextFavorableWindow(windows, minuteOfDay, peak?.type);
+  const nextWindow = next
+    ? {
+        name: next.label,
+        startTime: formatMinute(next.startMinutes),
+        endTime: formatMinute(next.endMinutes),
+        windowType: next.type,
+      }
+    : null;
+  const otherFavorableWindows = windows
+    .filter((window) => window.type !== peak?.type && window.type !== 'RAHU_KALAM' && window.type !== 'YAMA')
+    .sort((a, b) => a.startMinutes - b.startMinutes)
+    .map((window) => ({
+      name: window.label,
+      startTime: formatMinute(window.startMinutes),
+      endTime: formatMinute(window.endMinutes),
+      windowType: window.type,
+      state: minuteOfDay >= window.startMinutes && minuteOfDay <= window.endMinutes
+        ? 'ACTIVE' as const
+        : minuteOfDay < window.startMinutes
+          ? 'UPCOMING' as const
+          : 'COMPLETED' as const,
+    }));
 
   return {
-    dateLabel: context.now.toLocaleDateString('en-US', {
+    dateLabel: localDate.toLocaleDateString('en-US', {
       weekday: 'long',
       month: 'short',
       day: 'numeric',
     }),
+    briefingState,
     peakWindow: {
       name: peakName,
       startTime: peakStart,
@@ -102,10 +147,39 @@ export function buildDailyBriefing(context: DailyAssistantContext): DailyBriefin
       description: action.description,
       windowType: peak?.type ?? activeWindow,
     },
+    nextWindow,
+    otherFavorableWindows,
+    nextAction: buildNextAction(briefingState, action.title, nextWindow),
     notificationText: `Good morning. Today's peak focus window begins at ${peakStart}. ${action.title} is your top green light.`,
     widgetText: `${peakName}: ${peakStart} - ${peakEnd}`,
     activeWindow,
   };
+}
+
+function localDateForContext(context: DailyAssistantContext): Date {
+  return new Date(context.now.getTime() + context.tzOffsetMinutes * 60 * 1000);
+}
+
+function findNextFavorableWindow(
+  windows: WindowSpan[],
+  minuteOfDay: number,
+  peakType?: SolarWindowType
+): WindowSpan | undefined {
+  return [...windows]
+    .filter((window) => window.type !== 'RAHU_KALAM' && window.type !== 'YAMA' && window.type !== peakType)
+    .filter((window) => window.startMinutes > minuteOfDay)
+    .sort((a, b) => a.startMinutes - b.startMinutes)[0];
+}
+
+function buildNextAction(
+  state: DailyBriefing['briefingState'],
+  actionTitle: string,
+  nextWindow: DailyBriefing['nextWindow']
+): string {
+  if (state === 'UPCOMING') return `Prepare ${actionTitle.toLowerCase()} for the peak window.`;
+  if (state === 'ACTIVE') return `Do your highest-value ${actionTitle.toLowerCase()} now.`;
+  if (nextWindow) return `Shift to ${nextWindow.name.toLowerCase()} work at ${nextWindow.startTime}.`;
+  return "Today's key windows are complete. Shift to lower-intensity tasks and recovery.";
 }
 
 export function recommendTaskSlot(

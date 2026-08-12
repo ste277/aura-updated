@@ -88,6 +88,37 @@ export function HomeDashboard({
 
   // Dynamic Status Label & Accent Color based on active score and window
   const status = getEnergyStatus(energyScore, activeWindowName);
+  const allWindowsComplete = Boolean(
+    dailyBriefing &&
+      dailyBriefing.briefingState === 'COMPLETED' &&
+      dailyBriefing.otherFavorableWindows.every((window) => window.state === 'COMPLETED')
+  );
+  const briefTitle = allWindowsComplete ? 'Evening Status' : 'Morning Brief';
+  const briefStateLabel = allWindowsComplete
+    ? 'Recovery phase'
+    : dailyBriefing?.briefingState === 'ACTIVE'
+      ? 'Active now'
+      : dailyBriefing?.briefingState === 'COMPLETED'
+        ? 'Peak complete'
+        : 'Upcoming';
+  const currentHour = new Date().getHours();
+  const greeting = allWindowsComplete || currentHour >= 17
+    ? 'Good Evening'
+    : currentHour >= 12
+      ? 'Good Afternoon'
+      : 'Good Morning';
+  const summaryWindows = dailyBriefing
+    ? [
+        {
+          name: dailyBriefing.peakWindow.name,
+          startTime: dailyBriefing.peakWindow.startTime,
+          endTime: dailyBriefing.peakWindow.endTime,
+          windowType: 'ABHIJIT',
+          state: dailyBriefing.briefingState,
+        },
+        ...dailyBriefing.otherFavorableWindows,
+      ]
+    : [];
 
   const radius = 30;
   const circumference = 2 * Math.PI * radius;
@@ -155,35 +186,74 @@ export function HomeDashboard({
       {/* 1. Greeting Header */}
       <div>
         <h1 style={{ fontSize: 20, fontWeight: 700, color: '#f8fafc', margin: 0 }}>
-          Good Evening, {userName}! 👋
+          {greeting}, {userName}! 👋
         </h1>
-        <p style={{ fontSize: 11, color: '#94a3b8', marginTop: 2, fontFamily: 'monospace' }}>
+        <p style={{ fontSize: 11, color: '#b6c2d1', marginTop: 2 }}>
           {new Date().toLocaleDateString('en-US', { weekday: 'long', month: 'short', day: 'numeric', year: 'numeric' })}
         </p>
       </div>
 
-      {/* 2a. Morning Briefing */}
+      {/* 2a. Morning Briefing / Evening Recovery Status */}
       {dailyBriefing && (
         <div
           style={{
             background: 'var(--as-surface-raised, #0f172a)',
-            border: '1px solid rgba(74, 222, 128, 0.28)',
+            border: allWindowsComplete ? '1px solid rgba(148, 163, 184, 0.24)' : '1px solid rgba(74, 222, 128, 0.28)',
             borderRadius: 16,
-            padding: 16,
+            padding: '18px 17px 19px',
           }}
         >
-          <div style={{ fontSize: 10, fontFamily: 'monospace', textTransform: 'uppercase', letterSpacing: '0.05em', color: '#4ade80', fontWeight: 700 }}>
-            Morning Brief
+          <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
+            <span style={{ fontSize: 10, textTransform: 'uppercase', letterSpacing: '0.05em', color: allWindowsComplete ? '#cbd5e1' : '#4ade80', fontWeight: 800 }}>
+              {briefTitle}
+            </span>
+            <span style={{ background: allWindowsComplete ? 'rgba(148, 163, 184, 0.16)' : 'rgba(74, 222, 128, 0.14)', border: `1px solid ${allWindowsComplete ? 'rgba(148, 163, 184, 0.24)' : 'rgba(74, 222, 128, 0.28)'}`, borderRadius: 999, color: allWindowsComplete ? '#cbd5e1' : '#86efac', fontSize: 10, fontWeight: 800, padding: '4px 8px' }}>
+              {briefStateLabel}
+            </span>
           </div>
-          <div style={{ fontSize: 14, fontWeight: 700, color: '#f8fafc', marginTop: 8 }}>
-            {dailyBriefing.peakWindow.name}: {dailyBriefing.peakWindow.startTime} - {dailyBriefing.peakWindow.endTime}
-          </div>
-          <div style={{ fontSize: 12, color: '#cbd5e1', marginTop: 6, lineHeight: 1.4 }}>
-            {dailyBriefing.greenLight.title}: {dailyBriefing.greenLight.description}
-          </div>
-          <div style={{ fontSize: 11, color: '#94a3b8', marginTop: 8, lineHeight: 1.35 }}>
-            {dailyBriefing.notificationText}
-          </div>
+          {allWindowsComplete ? (
+            <>
+              <div style={{ fontSize: 17, fontWeight: 800, color: '#f8fafc', marginTop: 15 }}>
+                All favorable windows complete
+              </div>
+              <div style={{ fontSize: 12, color: '#dbe7f4', marginTop: 6, lineHeight: 1.45 }}>
+                Focus on light activity, reflection, and sleep preparation.
+              </div>
+              <div style={{ marginTop: 17, paddingTop: 14, borderTop: '1px solid rgba(255, 255, 255, 0.1)' }}>
+                <div style={{ fontSize: 10, color: '#b6c2d1', textTransform: 'uppercase', letterSpacing: '0.05em', fontWeight: 800 }}>
+                  Today&apos;s summary
+                </div>
+                {summaryWindows.map((window) => {
+                  const isComplete = window.state === 'COMPLETED';
+                  const stateLabel = window.state === 'ACTIVE' ? 'Active now' : isComplete ? 'Complete' : 'Upcoming';
+                  return (
+                    <div key={`${window.windowType}-${window.startTime}`} style={{ display: 'grid', gridTemplateColumns: 'minmax(0, 1fr) auto auto', gap: '9px 10px', alignItems: 'center', marginTop: 9, opacity: isComplete ? 0.58 : 1 }}>
+                      <span style={{ color: isComplete ? '#7f8da1' : '#dbe7f4', fontSize: 11 }}>{window.name}</span>
+                      <span style={{ color: isComplete ? '#7f8da1' : '#b6c2d1', fontSize: 10, whiteSpace: 'nowrap' }}>{window.startTime} - {window.endTime}</span>
+                      <span style={{ background: isComplete ? 'rgba(148, 163, 184, 0.12)' : window.state === 'ACTIVE' ? 'rgba(74, 222, 128, 0.14)' : 'rgba(56, 189, 248, 0.14)', borderRadius: 999, color: isComplete ? '#7f8da1' : window.state === 'ACTIVE' ? '#86efac' : '#7dd3fc', fontSize: 9, fontWeight: 800, padding: '4px 7px' }}>{stateLabel}</span>
+                    </div>
+                  );
+                })}
+              </div>
+            </>
+          ) : (
+            <>
+              <div style={{ fontSize: 14, fontWeight: 700, color: '#f8fafc', marginTop: 10 }}>
+                {dailyBriefing.peakWindow.name}: {dailyBriefing.peakWindow.startTime} - {dailyBriefing.peakWindow.endTime}
+              </div>
+              <div style={{ fontSize: 12, color: '#dbe7f4', marginTop: 6, lineHeight: 1.45 }}>
+                {dailyBriefing.greenLight.title}: {dailyBriefing.greenLight.description}
+              </div>
+              <div style={{ fontSize: 11, color: '#b6c2d1', marginTop: 9, lineHeight: 1.4 }}>
+                {dailyBriefing.nextAction}
+              </div>
+            </>
+          )}
+          {!allWindowsComplete && dailyBriefing.briefingState === 'COMPLETED' && dailyBriefing.nextWindow && (
+            <div style={{ fontSize: 11, color: '#38bdf8', marginTop: 8, lineHeight: 1.35, fontWeight: 700 }}>
+              Next favorable window: {dailyBriefing.nextWindow.startTime} - {dailyBriefing.nextWindow.endTime} · {dailyBriefing.nextWindow.name}
+            </div>
+          )}
         </div>
       )}
 
