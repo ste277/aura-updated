@@ -61,7 +61,7 @@ export interface TaskSlotRecommendation {
   durationMinutes: number;
   durationFits: boolean;
   availableMinutes: number;
-  recommendationState: 'BEST_NOW' | 'NEXT_BEST' | 'SCHEDULED' | 'AVOID';
+  recommendationState: 'BEST_NOW' | 'BETTER_LATER' | 'NEXT_BEST' | 'SCHEDULED' | 'AVOID' | 'NO_FIT';
   recommendationLabel: string;
   bestWindowToday: {
     startMinute: number;
@@ -219,9 +219,15 @@ export function recommendTaskSlot(
   const targetCandidate = candidates.find((candidate) => containsMinute(candidate, targetMinute));
 
   if (requestedStartMinute !== undefined && targetCandidate && isFriction(targetCandidate.type) && profile.significance === 'HIGH') {
+    if (targetCandidate.endMinute - targetMinute < safeDuration) {
+      return buildTaskRecommendation(cleanTitle, profile, 'NO_FIT', targetCandidate, targetMinute, safeDuration, context, windows);
+    }
     return buildTaskRecommendation(cleanTitle, profile, 'AVOID', targetCandidate, targetMinute, safeDuration, context, windows);
   }
   if (requestedStartMinute !== undefined && targetCandidate) {
+    if (targetCandidate.endMinute - targetMinute < safeDuration) {
+      return buildTaskRecommendation(cleanTitle, profile, 'NO_FIT', targetCandidate, targetMinute, safeDuration, context, windows);
+    }
     return buildTaskRecommendation(cleanTitle, profile, 'SCHEDULED', targetCandidate, targetMinute, safeDuration, context, windows);
   }
 
@@ -237,14 +243,18 @@ export function recommendTaskSlot(
     return buildTaskRecommendation(cleanTitle, profile, 'BEST_NOW', currentCandidate, currentMinute, safeDuration, context, windows);
   }
 
-  if (!bestFuture && currentCandidate && !isFriction(currentCandidate.type)) {
-    return buildTaskRecommendation(cleanTitle, profile, 'BEST_NOW', currentCandidate, currentMinute, safeDuration, context, windows);
-  }
-
   const best = bestFuture ?? candidates
     .filter((candidate) => candidate.startMinute >= currentMinute && candidate.endMinute - candidate.startMinute >= safeDuration && scoreCandidate(candidate, profile) >= 0)
-    .sort((a, b) => scoreCandidate(b, profile) - scoreCandidate(a, profile))[0] ?? candidates[0];
-  return buildTaskRecommendation(cleanTitle, profile, 'NEXT_BEST', best, best?.startMinute ?? currentMinute, safeDuration, context, windows);
+    .sort((a, b) => scoreCandidate(b, profile) - scoreCandidate(a, profile))[0];
+  if (bestFuture) {
+    return buildTaskRecommendation(cleanTitle, profile, 'BETTER_LATER', bestFuture, bestFuture.startMinute, safeDuration, context, windows);
+  }
+
+  if (!best) {
+    return buildTaskRecommendation(cleanTitle, profile, 'NO_FIT', currentCandidate ?? candidates[0], currentMinute, safeDuration, context, windows);
+  }
+
+  return buildTaskRecommendation(cleanTitle, profile, 'NEXT_BEST', best, best.startMinute, safeDuration, context, windows);
 }
 
 type TaskProfile = {
@@ -278,7 +288,7 @@ function buildTaskRecommendation(
   windows: WindowSpan[]
 ): TaskSlotRecommendation {
   const safeCandidate = candidate ?? { startMinute, endMinute: startMinute + durationMinutes, type: 'NEUTRAL' as SolarWindowType, label: 'Neutral Flow' };
-  const start = state === 'BEST_NOW' || state === 'AVOID' || state === 'SCHEDULED' || (state === 'NEXT_BEST' && startMinute > safeCandidate.startMinute)
+  const start = state === 'BEST_NOW' || state === 'AVOID' || state === 'SCHEDULED' || state === 'NO_FIT' || (state !== 'BETTER_LATER' && state === 'NEXT_BEST' && startMinute > safeCandidate.startMinute)
     ? startMinute
     : safeCandidate.startMinute;
   const end = Math.min(safeCandidate.endMinute, start + durationMinutes);
@@ -300,21 +310,21 @@ function buildTaskRecommendation(
       : score >= 90 ? 'BEST' : score >= 70 ? 'GOOD' : 'NEUTRAL';
   const recommendationLabel = state === 'BEST_NOW'
     ? (windowQuality === 'BEST' ? 'Best Time Now' : 'Good Time Now')
-    : state === 'AVOID' ? 'Not Ideal' : state === 'SCHEDULED' ? 'Scheduled Time' : 'Next Best Window';
+    : state === 'AVOID' ? 'Not Ideal' : state === 'SCHEDULED' ? 'Scheduled Time' : state === 'NO_FIT' ? 'No Usable Window' : 'Better Later';
 
   return {
     taskTitle,
     activityType: profile.type,
     activityIcon: profile.icon,
     activityFit,
-    timeStatus: state === 'BEST_NOW' ? 'NOW' : state === 'SCHEDULED' || state === 'AVOID' ? 'SCHEDULED' : 'UPCOMING',
+    timeStatus: state === 'BEST_NOW' ? 'NOW' : state === 'SCHEDULED' || state === 'AVOID' || state === 'NO_FIT' ? 'SCHEDULED' : 'UPCOMING',
     windowQuality,
     durationMinutes,
     durationFits: availableMinutes >= durationMinutes,
     availableMinutes,
     recommendationState: state,
     recommendationLabel,
-    bestWindowToday: bestTodayCandidate
+    bestWindowToday: state === 'BEST_NOW' && bestTodayCandidate
       ? buildWindowTodayOption(bestTodayCandidate, profile, start, durationMinutes, context)
       : null,
     bestWindow: {
@@ -323,9 +333,11 @@ function buildTaskRecommendation(
       startTime: formatMinute(start),
       endTime: formatMinute(end),
       label: formatWindowLabel(safeCandidate.type),
-      reason: state === 'AVOID'
+      reason: state === 'NO_FIT'
+        ? `This ${durationMinutes}-minute task does not fit inside the available ${availableMinutes}-minute period.`
+        : state === 'AVOID'
         ? `This falls within ${formatWindowLabel(safeCandidate.type)}. ${profile.type} is better placed in a lower-friction window.`
-        : state === 'NEXT_BEST'
+        : state === 'BETTER_LATER' || state === 'NEXT_BEST'
           ? `Your earlier ideal window has passed. ${reasonForProfile(safeCandidate.type, profile)}`
           : reasonForProfile(safeCandidate.type, profile),
     },

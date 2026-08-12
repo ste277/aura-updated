@@ -460,8 +460,8 @@ export function HomeDashboard({
         </div>
         {taskRecommendation && (
           <div style={{ display: 'flex', flexDirection: 'column', gap: 8, marginTop: 12 }}>
-            <div style={{ border: `1px solid ${taskRecommendation.recommendationState === 'AVOID' ? 'rgba(251, 107, 107, 0.35)' : 'rgba(74, 222, 128, 0.3)'}`, background: taskRecommendation.recommendationState === 'AVOID' ? 'rgba(251, 107, 107, 0.08)' : 'rgba(74, 222, 128, 0.08)', borderRadius: 12, padding: 12 }}>
-              <div style={{ fontSize: 11, color: taskRecommendation.recommendationState === 'AVOID' ? '#fb6b6b' : '#4ade80', fontWeight: 800 }}>
+            <div style={{ border: `1px solid ${taskRecommendation.recommendationState === 'AVOID' ? 'rgba(251, 107, 107, 0.35)' : taskRecommendation.recommendationState === 'NO_FIT' ? 'rgba(251, 191, 36, 0.35)' : 'rgba(74, 222, 128, 0.3)'}`, background: taskRecommendation.recommendationState === 'AVOID' ? 'rgba(251, 107, 107, 0.08)' : taskRecommendation.recommendationState === 'NO_FIT' ? 'rgba(251, 191, 36, 0.08)' : 'rgba(74, 222, 128, 0.08)', borderRadius: 12, padding: 12 }}>
+              <div style={{ fontSize: 11, color: taskRecommendation.recommendationState === 'AVOID' ? '#fb6b6b' : taskRecommendation.recommendationState === 'NO_FIT' ? '#fbbf24' : '#4ade80', fontWeight: 800 }}>
                 {taskRecommendation.activityIcon} {taskRecommendation.recommendationLabel}
               </div>
               <div style={{ fontSize: 12, color: '#dbe7f4', fontWeight: 700, marginTop: 7 }}>
@@ -478,14 +478,14 @@ export function HomeDashboard({
               <div style={{ fontSize: 11, color: '#dbe7f4', marginTop: 4, lineHeight: 1.35 }}>
                 {taskRecommendation.bestWindow.reason}
               </div>
-              <a
+              {taskRecommendation.recommendationState !== 'NO_FIT' && <a
                 href={taskRecommendation.calendar.googleCalendarUrl}
                 target="_blank"
                 rel="noreferrer"
                 style={{ display: 'inline-block', marginTop: 8, fontSize: 11, color: '#38bdf8', fontWeight: 700, textDecoration: 'none' }}
               >
                 Add to Google Calendar
-              </a>
+              </a>}
             </div>
             {taskRecommendation.recommendationState === 'BEST_NOW' && taskRecommendation.bestWindowToday && (
               <div style={{ border: '1px solid rgba(56, 189, 248, 0.28)', background: 'rgba(56, 189, 248, 0.08)', borderRadius: 12, padding: 12 }}>

@@ -56,6 +56,7 @@ model HabitLog {
   activeWindow   String   // "ABHIJIT" | "RAHU_KALAM" | "GULIKA" | "YAMA" | "BRAHMA" | "NEUTRAL"
   logTimestamp   DateTime @default(now()) @db.Timestamptz(3)
   logMinuteOfDay Int
+  durationMinutes Int @default(30)
   notes          String?  @db.Text
 
   @@index([userId, logTimestamp])

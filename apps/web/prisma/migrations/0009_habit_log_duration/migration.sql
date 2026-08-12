@@ -1,0 +1,2 @@
+ALTER TABLE "HabitLog"
+  ADD COLUMN "durationMinutes" INTEGER NOT NULL DEFAULT 30;

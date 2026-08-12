@@ -9,13 +9,28 @@ export interface LoggedEntryItem {
   activeWindow: string;
   loggedAt: Date;
   logMinuteOfDay?: number;
+  durationMinutes?: number;
   notes?: string | null;
+}
+
+function activityCategory(title: string): 'WORK' | 'HEALTH' | 'PERSONAL' {
+  const value = title.toLowerCase();
+  if (/(work|code|writing|meeting|call|project|decision|docs|research|email|admin|study|planning|review|sprint|backlog|execution|architecture|optimization|pitch|proposal|client|task)/.test(value)) return 'WORK';
+  if (/(workout|exercise|stretch|walk|run|health|hydration|rest|meditat|sleep|yoga|fitness)/.test(value)) return 'HEALTH';
+  return 'PERSONAL';
+}
+
+function formatActiveDuration(minutes: number): string {
+  if (minutes < 60) return `${minutes}m`;
+  const hours = Math.floor(minutes / 60);
+  const rest = minutes % 60;
+  return rest ? `${hours}h ${rest}m` : `${hours}h`;
 }
 
 interface CalendarViewSectionProps {
   logEntries?: LoggedEntryItem[];
   userLocation?: { latitude: number; longitude: number; timezone: string };
-  onLogActivity?: (activityTitle: string, notes?: string, customTimestamp?: Date) => Promise<void>;
+  onLogActivity?: (activityTitle: string, notes?: string, customTimestamp?: Date, overrideWindowType?: string, durationMinutes?: number) => Promise<void>;
 }
 
 export function CalendarViewSection({
@@ -62,9 +77,10 @@ export function CalendarViewSection({
   };
 
   // Group logged entries for the active month view
-  const { activeDays, dailyLogs, monthTotalLogs } = useMemo(() => {
+  const { activeDays, dailyLogs, activityCounts, monthTotalLogs } = useMemo(() => {
     const daysSet = new Set<number>();
     const logsMap: Record<number, LoggedEntryItem[]> = {};
+    const countsMap: Record<number, number> = {};
     let total = 0;
 
     logEntries.forEach((entry) => {
@@ -74,6 +90,7 @@ export function CalendarViewSection({
       if (d.getFullYear() === displayYear && d.getMonth() === displayMonth) {
         const dayNum = d.getDate();
         daysSet.add(dayNum);
+        countsMap[dayNum] = (countsMap[dayNum] ?? 0) + 1;
 
         if (!logsMap[dayNum]) logsMap[dayNum] = [];
         logsMap[dayNum].push(entry);
@@ -81,7 +98,7 @@ export function CalendarViewSection({
       }
     });
 
-    return { activeDays: daysSet, dailyLogs: logsMap, monthTotalLogs: total };
+    return { activeDays: daysSet, dailyLogs: logsMap, activityCounts: countsMap, monthTotalLogs: total };
   }, [logEntries, displayYear, displayMonth]);
 
   // Check if selected day is in the future relative to today
@@ -90,6 +107,15 @@ export function CalendarViewSection({
     const startOfToday = new Date(today.getFullYear(), today.getMonth(), today.getDate());
     return targetDate > startOfToday;
   }, [displayYear, displayMonth, selectedDay, today]);
+
+  const selectedLogs = dailyLogs[selectedDay] ?? [];
+  const groupedSelectedLogs = useMemo(() => {
+    const groups: Record<'WORK' | 'HEALTH' | 'PERSONAL', LoggedEntryItem[]> = { WORK: [], HEALTH: [], PERSONAL: [] };
+    selectedLogs.forEach((log) => groups[activityCategory(log.activityTitle)].push(log));
+    return groups;
+  }, [selectedLogs]);
+  const selectedActiveMinutes = selectedLogs.reduce((total, log) => total + (log.durationMinutes ?? 30), 0);
+  const recentActivities = useMemo(() => [...new Set(logEntries.map((log) => log.activityTitle).filter(Boolean))].slice(0, 4), [logEntries]);
 
   // Date object for PastActivityModal
   const selectedDateObj = new Date(displayYear, displayMonth, selectedDay, 12, 0, 0);
@@ -102,7 +128,7 @@ export function CalendarViewSection({
           Activity Calendar
         </h1>
         <p style={{ fontSize: 12, color: 'var(--as-text-muted, #94a3b8)', marginTop: 4, fontFamily: 'sans-serif' }}>
-          Track your daily window utilization and logged habits
+          Track what you actually did and how it aligned with your recommended windows
         </p>
       </div>
 
@@ -160,7 +186,7 @@ export function CalendarViewSection({
           </div>
 
           <span style={{ fontSize: 11, color: 'var(--as-text-muted, #94a3b8)', fontFamily: 'monospace' }}>
-            📊 {monthTotalLogs} Total Logs
+            📊 {monthTotalLogs} activities
           </span>
         </div>
 
@@ -177,6 +203,7 @@ export function CalendarViewSection({
 
           {daysInMonth.map((day) => {
             const hasActivity = activeDays.has(day);
+            const activityCount = activityCounts[day] ?? 0;
             const isSelected = selectedDay === day;
             const isFutureDay = isCurrentMonthView ? day > todayDateNum : displayYear > today.getFullYear() || (displayYear === today.getFullYear() && displayMonth > today.getMonth());
 
@@ -190,7 +217,7 @@ export function CalendarViewSection({
                   background: isSelected
                     ? 'var(--as-abhijit, #4ade80)'
                     : hasActivity
-                    ? 'rgba(74, 222, 128, 0.18)'
+                    ? `rgba(74, 222, 128, ${Math.min(0.48, 0.12 + activityCount * 0.04)})`
                     : 'transparent',
                   color: isSelected
                     ? '#020617'
@@ -234,12 +261,12 @@ export function CalendarViewSection({
       >
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 }}>
           <div>
-            <span style={{ fontSize: 14, fontWeight: 700, color: 'var(--as-text, #fff)', fontFamily: 'sans-serif' }}>
-              {monthName} {selectedDay}, {displayYear}
-            </span>
-            <span style={{ fontSize: 12, fontFamily: 'monospace', color: 'var(--as-abhijit, #4ade80)', marginLeft: 8 }}>
-              ({dailyLogs[selectedDay]?.length || 0} logged)
-            </span>
+            <div style={{ fontSize: 16, fontWeight: 800, color: 'var(--as-text, #fff)' }}>
+              {monthName} {selectedDay}
+            </div>
+            <div style={{ fontSize: 11, color: '#b6c2d1', marginTop: 4 }}>
+              {selectedLogs.length} {selectedLogs.length === 1 ? 'activity' : 'activities'} · {formatActiveDuration(selectedActiveMinutes)} active
+            </div>
           </div>
 
           <button
@@ -264,48 +291,28 @@ export function CalendarViewSection({
           </button>
         </div>
 
-        <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-          {dailyLogs[selectedDay] && dailyLogs[selectedDay].length > 0 ? (
-            dailyLogs[selectedDay].map((log) => (
-              <div
-                key={log.id}
-                style={{
-                  display: 'flex',
-                  flexDirection: 'column',
-                  gap: 4,
-                  fontSize: 12,
-                  padding: '12px 14px',
-                  borderRadius: 12,
-                  background: 'rgba(30, 41, 59, 0.5)',
-                  border: '1px solid rgba(255, 255, 255, 0.05)',
-                }}
-              >
-                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                  <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-                    <span style={{ color: 'var(--as-abhijit, #4ade80)', fontWeight: 700, fontSize: 13 }}>✓</span>
-                    <span style={{ color: 'var(--as-text, #f8fafc)', fontWeight: 600, fontFamily: 'sans-serif', fontSize: 13 }}>
-                      {log.activityTitle}
-                    </span>
-                  </div>
-                  <span style={{ color: 'var(--as-text-muted, #94a3b8)', fontFamily: 'monospace', fontSize: 10, textTransform: 'uppercase', letterSpacing: '0.05em' }}>
-                    {log.activeWindow ? log.activeWindow.replace('_', ' ') : 'NEUTRAL'}
-                  </span>
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
+          {selectedLogs.length > 0 ? (
+            (['WORK', 'HEALTH', 'PERSONAL'] as const).map((category) => groupedSelectedLogs[category].length > 0 && (
+              <div key={category}>
+                <div style={{ fontSize: 10, color: '#94a3b8', fontWeight: 800, letterSpacing: '0.08em', marginBottom: 8 }}>
+                  {category} · {groupedSelectedLogs[category].length}
                 </div>
-
-                {log.notes && (
-                  <p
-                    style={{
-                      margin: '2px 0 0 23px',
-                      fontSize: 11,
-                      color: 'var(--as-text-muted, #94a3b8)',
-                      fontStyle: 'italic',
-                      lineHeight: 1.4,
-                      fontFamily: 'sans-serif',
-                    }}
-                  >
-                    "{log.notes}"
-                  </p>
-                )}
+                <div style={{ display: 'flex', flexDirection: 'column', gap: 7 }}>
+                  {groupedSelectedLogs[category].map((log) => (
+                    <div key={log.id} style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 10, padding: '9px 10px', borderRadius: 10, background: 'rgba(30, 41, 59, 0.5)', border: '1px solid rgba(255, 255, 255, 0.05)' }}>
+                      <div style={{ minWidth: 0 }}>
+                        <div style={{ display: 'flex', alignItems: 'center', gap: 7 }}>
+                          <span style={{ color: '#4ade80', fontWeight: 800 }}>✓</span>
+                          <span style={{ color: '#f8fafc', fontWeight: 650, fontSize: 12, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{log.activityTitle}</span>
+                        </div>
+                        <div style={{ color: '#b6c2d1', fontSize: 10, marginTop: 4, marginLeft: 19 }}>
+                          {new Date(log.loggedAt).toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' })} · {log.durationMinutes ?? 30}m · {log.activeWindow ? log.activeWindow.replace(/_/g, ' ') : 'NEUTRAL'}
+                        </div>
+                      </div>
+                    </div>
+                  ))}
+                </div>
               </div>
             ))
           ) : (
@@ -322,6 +329,7 @@ export function CalendarViewSection({
           isOpen={isLogModalOpen}
           initialDate={selectedDateObj}
           selectedDate={selectedDateObj}
+          recentActivities={recentActivities}
           userLocation={userLocation}
           onClose={() => setIsLogModalOpen(false)}
           onConfirmLog={onLogActivity}

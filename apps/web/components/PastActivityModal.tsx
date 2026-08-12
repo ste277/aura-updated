@@ -7,26 +7,18 @@ interface PastActivityModalProps {
   isOpen?: boolean;
   initialDate?: Date;
   selectedDate?: Date;
+  recentActivities?: string[];
   userLocation?: { latitude: number; longitude: number; timezone: string };
   onClose: () => void;
-  onConfirmLog?: (activityTitle: string, notes?: string, customTimestamp?: Date) => Promise<void>;
+  onConfirmLog?: (activityTitle: string, notes?: string, customTimestamp?: Date, overrideWindowType?: string, durationMinutes?: number) => Promise<void>;
   onSuccess?: () => void;
 }
-
-const WINDOW_SUGGESTIONS: Record<string, string[]> = {
-  BRAHMA_MUHURTA: ['Meditation & Breathwork', 'Strategic Planning', 'Deep Study / Reading'],
-  ABHIJIT: ['Important Client Calls', 'Key Decision / Sign-off', 'High-Focus Deep Work'],
-  VIJAYA: ['Pitching / Sales', 'Difficult Conversations', 'Task Execution'],
-  RAHU_KALAM: ['Routine Maintenance', 'Decluttering', 'Rest & Hydration'],
-  YAMAGANDAM: ['Review & Audit', 'Internal Admin', 'Low-Risk Tasks'],
-  GULIKA_KALAM: ['Long-term Setup', 'Asset Management', 'Document Filing'],
-  NEUTRAL: ['Deep Work', 'Exercise & Fitness', 'Email & Comm Sync', 'Break & Relaxation'],
-};
 
 export function PastActivityModal({
   isOpen = true,
   initialDate,
   selectedDate,
+  recentActivities = [],
   onClose,
   onConfirmLog,
   onSuccess,
@@ -34,6 +26,7 @@ export function PastActivityModal({
   const [mounted, setMounted] = useState(false);
   const [selectedChip, setSelectedChip] = useState<string>('');
   const [customTitle, setCustomTitle] = useState<string>('');
+  const [durationMinutes, setDurationMinutes] = useState(30);
 
   const [logTime, setLogTime] = useState(() => {
     const now = new Date();
@@ -58,12 +51,9 @@ export function PastActivityModal({
   }, [onClose]);
 
   const activeSuggestions = useMemo(() => {
-    const [hours] = logTime.split(':').map(Number);
-    if (hours >= 4 && hours < 6) return WINDOW_SUGGESTIONS.BRAHMA_MUHURTA;
-    if (hours >= 11 && hours <= 12) return WINDOW_SUGGESTIONS.ABHIJIT;
-    if (hours >= 15 && hours <= 16) return WINDOW_SUGGESTIONS.RAHU_KALAM;
-    return WINDOW_SUGGESTIONS.NEUTRAL;
-  }, [logTime]);
+    const common = ['Deep Work', 'Exercise', 'Meeting', 'Break', 'Reading', 'Family Time'];
+    return [...new Set([...recentActivities, ...common])].slice(0, 6);
+  }, [recentActivities]);
 
   const isFutureTimestamp = useMemo(() => {
     const [hours, minutes] = logTime.split(':').map(Number);
@@ -107,7 +97,7 @@ export function PastActivityModal({
       targetTimestamp.setHours(hours || 12, minutes || 0, 0, 0);
 
       if (onConfirmLog) {
-        await onConfirmLog(activeTitle, '', targetTimestamp);
+        await onConfirmLog(activeTitle, '', targetTimestamp, undefined, durationMinutes);
       } else {
         const res = await fetch('/api/habit-logs', {
           method: 'POST',
@@ -117,6 +107,7 @@ export function PastActivityModal({
             activeWindow: 'NEUTRAL',
             logMinuteOfDay: (hours || 12) * 60 + (minutes || 0),
             logTimestamp: targetTimestamp.toISOString(),
+            durationMinutes,
           }),
         });
 
@@ -185,7 +176,7 @@ export function PastActivityModal({
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: '20px' }}>
           <div>
             <h3 style={{ margin: 0, fontSize: '18px', fontWeight: 700, fontFamily: 'sans-serif', color: '#f8fafc' }}>
-              Log Activity
+              Quick Log
             </h3>
             <span style={{ fontSize: '12px', color: '#94a3b8', display: 'block', marginTop: '2px', fontFamily: 'monospace' }}>
               {dateFormatted}
@@ -222,13 +213,13 @@ export function PastActivityModal({
                 fontFamily: 'monospace',
               }}
             >
-              SELECT TIME
+              WHEN?
             </label>
             <div style={{ display: 'flex', gap: '6px' }}>
               {[
                 { label: 'Now', offset: 0 },
-                { label: '-15m', offset: 15 },
-                { label: '-30m', offset: 30 },
+                { label: '15m ago', offset: 15 },
+                { label: '30m ago', offset: 30 },
               ].map(({ label, offset }) => (
                 <button
                   key={label}
@@ -287,7 +278,20 @@ export function PastActivityModal({
           )}
         </div>
 
-        {/* 1-Click Suggestions */}
+        <div style={{ marginBottom: 20 }}>
+          <label style={{ display: 'block', fontSize: 10, color: '#94a3b8', marginBottom: 8, textTransform: 'uppercase', letterSpacing: '0.05em', fontWeight: 600, fontFamily: 'monospace' }}>
+            DURATION
+          </label>
+          <select value={durationMinutes} onChange={(e) => setDurationMinutes(Number(e.target.value))} style={{ width: '100%', background: '#020617', border: '1px solid #334155', borderRadius: 10, color: '#f8fafc', padding: '10px 12px', fontSize: 12 }}>
+            <option value={15}>15 minutes</option>
+            <option value={30}>30 minutes</option>
+            <option value={45}>45 minutes</option>
+            <option value={60}>60 minutes</option>
+            <option value={90}>90 minutes</option>
+          </select>
+        </div>
+
+        {/* Quick Log Suggestions */}
         <div style={{ marginBottom: '20px' }}>
           <label
             style={{
@@ -301,7 +305,7 @@ export function PastActivityModal({
               fontFamily: 'monospace',
             }}
           >
-            ⚡ 1-CLICK WINDOW SUGGESTIONS
+            RECENT & COMMON
           </label>
           <div style={{ display: 'flex', flexWrap: 'wrap', gap: '8px' }}>
             {activeSuggestions.map((suggestion) => {
@@ -348,7 +352,7 @@ export function PastActivityModal({
                 fontFamily: 'monospace',
               }}
             >
-              OR CUSTOM ACTIVITY
+              WHAT DID YOU DO?
             </label>
             <input
               type="text"

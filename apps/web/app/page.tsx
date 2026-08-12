@@ -100,6 +100,7 @@ export default function DashboardPage() {
             activeWindow: l.activeWindow,
             loggedAt: new Date(l.logTimestamp || l.createdAt || Date.now()),
             logMinuteOfDay: l.logMinuteOfDay,
+            durationMinutes: l.durationMinutes ?? 30,
             notes: l.notes || null,
           }))
         );
@@ -367,7 +368,8 @@ export default function DashboardPage() {
       activityTitle: string,
       notes?: string,
       customTimestamp?: Date,
-      overrideWindowType?: string
+      overrideWindowType?: string,
+      durationMinutes = 30
     ) => {
       const targetDate = customTimestamp ? new Date(customTimestamp) : new Date();
       const calculatedMinute = targetDate.getHours() * 60 + targetDate.getMinutes();
@@ -379,6 +381,7 @@ export default function DashboardPage() {
         activeWindow: overrideWindowType || activeType || 'NEUTRAL',
         loggedAt: targetDate,
         logMinuteOfDay: calculatedMinute,
+        durationMinutes,
         notes: notes ? String(notes).trim() : null,
       };
 
@@ -391,6 +394,7 @@ export default function DashboardPage() {
         logMinuteOfDay: calculatedMinute,
         logTimestamp: targetDate.toISOString(),
         notes: optimisticEntry.notes || undefined,
+        durationMinutes,
       };
 
       try {
