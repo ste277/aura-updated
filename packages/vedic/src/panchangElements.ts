@@ -113,7 +113,7 @@ export function findNextTransition(date: Date, targetType: 'TITHI' | 'NAKSHATRA'
   const astroTime = new AstroTime(date);
 
   if (targetType === 'TITHI') {
-    const res = SearchRelativeLongitude(Body.Moon, Body.Sun, 12, astroTime);
+    const res = SearchRelativeLongitude(Body.Moon, 12, astroTime);
     return res.date;
   }
 

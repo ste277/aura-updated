@@ -8,6 +8,7 @@ export interface LoggedEntryItem {
   activityTitle: string;
   activeWindow: string;
   loggedAt: Date;
+  logMinuteOfDay?: number;
   notes?: string | null;
 }
 

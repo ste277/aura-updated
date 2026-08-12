@@ -2,6 +2,7 @@
 
 import React, { useState, useMemo } from 'react';
 import { getPersonalizedTasks, UserChartContext } from '../../../packages/recommendation/src/personalizedTasks';
+import type { DailyBriefing, TaskSlotRecommendation } from '../../../packages/recommendation/src/dailyAssistant';
 import { triggerHaptic } from '../lib/haptics';
 
 interface HomeDashboardProps {
@@ -17,8 +18,11 @@ interface HomeDashboardProps {
   };
   activeWindowName?: string;
   loggedActivitiesToday?: string[];
+  dailyBriefing?: DailyBriefing | null;
   userChart?: UserChartContext;
   onLogActivity?: (activityTitle: string, notes?: string) => Promise<void>;
+  onSlotTask?: (taskTitle: string, durationMinutes: number) => Promise<TaskSlotRecommendation>;
+  onSubmitReflection?: (outputLevel: 'LOW' | 'MODERATE' | 'PEAK_FLOW', followedGuidance: boolean) => Promise<void>;
   onNextShiftClick?: () => void;
 }
 
@@ -59,13 +63,21 @@ export function HomeDashboard({
   nextShift,
   activeWindowName = 'NEUTRAL',
   loggedActivitiesToday = [],
+  dailyBriefing,
   userChart,
   onLogActivity,
+  onSlotTask,
+  onSubmitReflection,
   onNextShiftClick,
 }: HomeDashboardProps) {
   const [selectedHabit, setSelectedHabit] = useState<string | null>(null);
   const [activityNote, setActivityNote] = useState('');
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const [taskTitle, setTaskTitle] = useState('');
+  const [taskDuration, setTaskDuration] = useState(30);
+  const [taskRecommendation, setTaskRecommendation] = useState<TaskSlotRecommendation | null>(null);
+  const [isSlottingTask, setIsSlottingTask] = useState(false);
+  const [reflectionSaved, setReflectionSaved] = useState(false);
 
   // Compute personalized tasks tailored to active window, birth chart, and current log history
   const personalizedTasks = useMemo(() => {
@@ -100,6 +112,31 @@ export function HomeDashboard({
     }
   };
 
+  const handleSlotTask = async () => {
+    if (!onSlotTask || !taskTitle.trim()) return;
+    setIsSlottingTask(true);
+    try {
+      const recommendation = await onSlotTask(taskTitle, taskDuration);
+      setTaskRecommendation(recommendation);
+      triggerHaptic('success');
+    } catch (err) {
+      console.error('Failed to slot task:', err);
+    } finally {
+      setIsSlottingTask(false);
+    }
+  };
+
+  const handleReflection = async (outputLevel: 'LOW' | 'MODERATE' | 'PEAK_FLOW') => {
+    if (!onSubmitReflection) return;
+    try {
+      await onSubmitReflection(outputLevel, loggedActivitiesToday.length > 0);
+      setReflectionSaved(true);
+      triggerHaptic('success');
+    } catch (err) {
+      console.error('Failed to save reflection:', err);
+    }
+  };
+
   const getIconForBadge = (item: string) => {
     if (item.toLowerCase().includes('learn')) return '📖';
     if (item.toLowerCase().includes('exercise')) return '🏋️';
@@ -124,6 +161,31 @@ export function HomeDashboard({
           {new Date().toLocaleDateString('en-US', { weekday: 'long', month: 'short', day: 'numeric', year: 'numeric' })}
         </p>
       </div>
+
+      {/* 2a. Morning Briefing */}
+      {dailyBriefing && (
+        <div
+          style={{
+            background: 'var(--as-surface-raised, #0f172a)',
+            border: '1px solid rgba(74, 222, 128, 0.28)',
+            borderRadius: 16,
+            padding: 16,
+          }}
+        >
+          <div style={{ fontSize: 10, fontFamily: 'monospace', textTransform: 'uppercase', letterSpacing: '0.05em', color: '#4ade80', fontWeight: 700 }}>
+            Morning Brief
+          </div>
+          <div style={{ fontSize: 14, fontWeight: 700, color: '#f8fafc', marginTop: 8 }}>
+            {dailyBriefing.peakWindow.name}: {dailyBriefing.peakWindow.startTime} - {dailyBriefing.peakWindow.endTime}
+          </div>
+          <div style={{ fontSize: 12, color: '#cbd5e1', marginTop: 6, lineHeight: 1.4 }}>
+            {dailyBriefing.greenLight.title}: {dailyBriefing.greenLight.description}
+          </div>
+          <div style={{ fontSize: 11, color: '#94a3b8', marginTop: 8, lineHeight: 1.35 }}>
+            {dailyBriefing.notificationText}
+          </div>
+        </div>
+      )}
 
       {/* 2. Current Alignment Score Card */}
       <div
@@ -258,6 +320,153 @@ export function HomeDashboard({
           })}
         </div>
       </div>
+
+      {/* Smart Task Planner */}
+      <div
+        style={{
+          background: 'var(--as-surface-raised, #0f172a)',
+          border: '1px solid var(--as-border, #1e293b)',
+          borderRadius: 16,
+          padding: 16,
+        }}
+      >
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 12 }}>
+          <span style={{ fontSize: 10, fontFamily: 'monospace', textTransform: 'uppercase', color: '#38bdf8', letterSpacing: '0.05em', fontWeight: 700 }}>
+            Slot My Task
+          </span>
+          <select
+            value={taskDuration}
+            onChange={(e) => setTaskDuration(Number(e.target.value))}
+            style={{
+              background: '#020617',
+              border: '1px solid #334155',
+              borderRadius: 8,
+              color: '#cbd5e1',
+              fontSize: 11,
+              padding: '5px 8px',
+            }}
+          >
+            <option value={15}>15 min</option>
+            <option value={30}>30 min</option>
+            <option value={60}>60 min</option>
+            <option value={90}>90 min</option>
+          </select>
+        </div>
+        <div style={{ display: 'flex', gap: 8, marginTop: 12 }}>
+          <input
+            value={taskTitle}
+            onChange={(e) => setTaskTitle(e.target.value)}
+            placeholder="Pitch deck, 1-on-1, code review..."
+            style={{
+              flex: 1,
+              minWidth: 0,
+              background: '#020617',
+              border: '1px solid #334155',
+              borderRadius: 10,
+              color: '#f8fafc',
+              fontSize: 12,
+              padding: '10px 12px',
+              outline: 'none',
+            }}
+          />
+          <button
+            onClick={handleSlotTask}
+            disabled={!taskTitle.trim() || isSlottingTask}
+            style={{
+              background: '#38bdf8',
+              border: 'none',
+              borderRadius: 10,
+              color: '#020617',
+              cursor: taskTitle.trim() ? 'pointer' : 'default',
+              fontSize: 12,
+              fontWeight: 800,
+              padding: '0 12px',
+              opacity: taskTitle.trim() ? 1 : 0.55,
+              whiteSpace: 'nowrap',
+            }}
+          >
+            {isSlottingTask ? '...' : 'Slot'}
+          </button>
+        </div>
+        {taskRecommendation && (
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 8, marginTop: 12 }}>
+            <div style={{ border: '1px solid rgba(74, 222, 128, 0.3)', background: 'rgba(74, 222, 128, 0.08)', borderRadius: 12, padding: 12 }}>
+              <div style={{ fontSize: 11, color: '#4ade80', fontWeight: 800 }}>Best Window</div>
+              <div style={{ fontSize: 13, color: '#f8fafc', fontWeight: 700, marginTop: 3 }}>
+                {taskRecommendation.bestWindow.startTime} - {taskRecommendation.bestWindow.endTime} · {taskRecommendation.bestWindow.label}
+              </div>
+              <div style={{ fontSize: 11, color: '#cbd5e1', marginTop: 4, lineHeight: 1.35 }}>
+                {taskRecommendation.bestWindow.reason}
+              </div>
+              <a
+                href={taskRecommendation.calendar.googleCalendarUrl}
+                target="_blank"
+                rel="noreferrer"
+                style={{ display: 'inline-block', marginTop: 8, fontSize: 11, color: '#38bdf8', fontWeight: 700, textDecoration: 'none' }}
+              >
+                Add to Google Calendar
+              </a>
+            </div>
+            {taskRecommendation.avoidWindow && (
+              <div style={{ border: '1px solid rgba(251, 107, 107, 0.25)', background: 'rgba(251, 107, 107, 0.07)', borderRadius: 12, padding: 12 }}>
+                <div style={{ fontSize: 11, color: '#fb6b6b', fontWeight: 800 }}>Avoid Window</div>
+                <div style={{ fontSize: 12, color: '#e2e8f0', fontWeight: 700, marginTop: 3 }}>
+                  {taskRecommendation.avoidWindow.startTime} - {taskRecommendation.avoidWindow.endTime} · {taskRecommendation.avoidWindow.label}
+                </div>
+              </div>
+            )}
+          </div>
+        )}
+      </div>
+
+      {/* End-of-Day Reflection */}
+      {onSubmitReflection && (
+        <div
+          style={{
+            background: 'var(--as-surface-raised, #0f172a)',
+            border: '1px solid var(--as-border, #1e293b)',
+            borderRadius: 16,
+            padding: 16,
+          }}
+        >
+          <span style={{ fontSize: 10, fontFamily: 'monospace', textTransform: 'uppercase', color: '#facc15', letterSpacing: '0.05em', fontWeight: 700 }}>
+            Daily Check-in
+          </span>
+          <div style={{ fontSize: 13, color: '#f8fafc', fontWeight: 700, marginTop: 8 }}>
+            How was your output today?
+          </div>
+          {reflectionSaved ? (
+            <div style={{ fontSize: 12, color: '#4ade80', marginTop: 8 }}>
+              Saved. Your alignment proof gets stronger with every check-in.
+            </div>
+          ) : (
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 8, marginTop: 10 }}>
+              {[
+                ['LOW', 'Low'],
+                ['MODERATE', 'Moderate'],
+                ['PEAK_FLOW', 'Peak Flow'],
+              ].map(([value, label]) => (
+                <button
+                  key={value}
+                  onClick={() => handleReflection(value as 'LOW' | 'MODERATE' | 'PEAK_FLOW')}
+                  style={{
+                    background: 'rgba(30, 41, 59, 0.7)',
+                    border: '1px solid rgba(255, 255, 255, 0.08)',
+                    borderRadius: 10,
+                    color: '#e2e8f0',
+                    cursor: 'pointer',
+                    fontSize: 11,
+                    fontWeight: 700,
+                    minHeight: 38,
+                  }}
+                >
+                  {label}
+                </button>
+              ))}
+            </div>
+          )}
+        </div>
+      )}
 
       {/* Confirmation Modal Prompt */}
       {selectedHabit && (

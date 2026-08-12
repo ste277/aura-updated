@@ -17,15 +17,46 @@ export async function GET(req: NextRequest) {
   const yoga = getYoga(now);
   const karana = getKarana(now);
 
-  const tithiEndsAt = findNextTransition(now, (d) => getTithi(d).name);
-  const nakshatraEndsAt = findNextTransition(now, (d) => getNakshatra(d).name);
-  const yogaEndsAt = findNextTransition(now, (d) => getYoga(d).name);
-  const karanaEndsAt = findNextTransition(now, (d) => getKarana(d).name, 15); // karanas are ~6h, shorter search window
+  const tithiEndsAt = findNextTransition(now, 'TITHI');
+  const nakshatraEndsAt = findNextTransition(now, 'NAKSHATRA');
+  const yogaEndsAt = findNextNamedTransition(now, (d) => getYoga(d).name, 36);
+  const karanaEndsAt = findNextNamedTransition(now, (d) => getKarana(d).name, 15);
+  const paksha = tithi.index <= 15 ? 'Shukla' : 'Krishna';
 
   return NextResponse.json({
-    tithi: { paksha: tithi.paksha, name: tithi.name, endsAt: tithiEndsAt },
+    tithi: { paksha, name: tithi.name, endsAt: tithiEndsAt },
     nakshatra: { name: nakshatra.name, endsAt: nakshatraEndsAt },
     yoga: { name: yoga.name, endsAt: yogaEndsAt },
     karana: { name: karana.name, endsAt: karanaEndsAt },
   });
+}
+
+function findNextNamedTransition(
+  start: Date,
+  getName: (date: Date) => string,
+  searchHours: number
+): Date | null {
+  const initialName = getName(start);
+  const stepMs = 15 * 60 * 1000;
+  const endMs = start.getTime() + searchHours * 60 * 60 * 1000;
+
+  let low = start.getTime();
+  for (let high = low + stepMs; high <= endMs; high += stepMs) {
+    if (getName(new Date(high)) === initialName) {
+      low = high;
+      continue;
+    }
+
+    for (let i = 0; i < 20; i++) {
+      const mid = Math.floor((low + high) / 2);
+      if (getName(new Date(mid)) === initialName) {
+        low = mid;
+      } else {
+        high = mid;
+      }
+    }
+    return new Date(high);
+  }
+
+  return null;
 }

@@ -12,9 +12,16 @@ export interface LoggedEntryItem {
 
 interface InsightsViewProps {
   logEntries?: LoggedEntryItem[];
+  assistantInsight?: {
+    reflectionCount: number;
+    alignedDays: number;
+    unalignedDays: number;
+    peakFlowLiftPercent: number;
+    insightText: string;
+  } | null;
 }
 
-export function InsightsView({ logEntries = [] }: InsightsViewProps) {
+export function InsightsView({ logEntries = [], assistantInsight }: InsightsViewProps) {
   const [activeSubTab, setActiveSubTab] = useState<'overview' | 'patterns' | 'trends' | 'streaks'>('overview');
 
   // ---------------------------------------------------------------------------
@@ -241,6 +248,30 @@ export function InsightsView({ logEntries = [] }: InsightsViewProps) {
       {/* ==================== TAB 1: OVERVIEW ==================== */}
       {activeSubTab === 'overview' && (
         <>
+          {assistantInsight && (
+            <div
+              style={{
+                background: 'var(--as-surface-raised, #0f172a)',
+                border: '1px solid rgba(74, 222, 128, 0.28)',
+                borderRadius: 16,
+                padding: 16,
+              }}
+            >
+              <div style={{ fontSize: 10, fontFamily: 'monospace', textTransform: 'uppercase', color: '#4ade80', letterSpacing: '0.05em', fontWeight: 700 }}>
+                Alignment Proof
+              </div>
+              <div style={{ fontSize: 22, color: '#f8fafc', fontWeight: 800, marginTop: 8 }}>
+                {Math.max(0, assistantInsight.peakFlowLiftPercent)}%
+              </div>
+              <div style={{ fontSize: 12, color: '#cbd5e1', lineHeight: 1.4, marginTop: 4 }}>
+                {assistantInsight.insightText}
+              </div>
+              <div style={{ fontSize: 11, color: '#94a3b8', marginTop: 8 }}>
+                {assistantInsight.reflectionCount} check-ins · {assistantInsight.alignedDays} aligned days
+              </div>
+            </div>
+          )}
+
           {/* Stat Grid */}
           <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
             <span

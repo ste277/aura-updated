@@ -103,6 +103,17 @@ export interface Habit {
   archivedAt: Date | null;
 }
 
+export interface DailyReflection {
+  id: string;
+  userId: string;
+  reflectionDate: Date;
+  outputLevel: 'LOW' | 'MODERATE' | 'PEAK_FLOW';
+  followedGuidance: boolean;
+  notes?: string | null;
+  createdAt: Date;
+  updatedAt: Date;
+}
+
 export async function createHabit(input: {
   userId: string;
   title: string;
@@ -320,6 +331,52 @@ export async function listHabitLogs(userId: string): Promise<HabitLogRow[]> {
   const result = await pool.query(
     `SELECT * FROM "HabitLog" WHERE "userId" = $1 ORDER BY "logTimestamp" DESC LIMIT 50`,
     [userId]
+  );
+  return result.rows;
+}
+
+export async function upsertDailyReflection(input: {
+  userId: string;
+  reflectionDate: Date;
+  outputLevel: 'LOW' | 'MODERATE' | 'PEAK_FLOW';
+  followedGuidance: boolean;
+  notes?: string;
+}): Promise<DailyReflection> {
+  const id = randomUUID();
+  const result = await pool.query(
+    `INSERT INTO "DailyReflection"
+       (id, "userId", "reflectionDate", "outputLevel", "followedGuidance", notes)
+     VALUES ($1, $2, $3, $4, $5, $6)
+     ON CONFLICT ("userId", "reflectionDate")
+     DO UPDATE SET "outputLevel" = EXCLUDED."outputLevel",
+                   "followedGuidance" = EXCLUDED."followedGuidance",
+                   notes = EXCLUDED.notes,
+                   "updatedAt" = now()
+     RETURNING *`,
+    [
+      id,
+      input.userId,
+      input.reflectionDate,
+      input.outputLevel,
+      input.followedGuidance,
+      input.notes ?? null,
+    ]
+  );
+  return result.rows[0];
+}
+
+export async function getDailyReflection(userId: string, reflectionDate: Date): Promise<DailyReflection | null> {
+  const result = await pool.query(
+    `SELECT * FROM "DailyReflection" WHERE "userId" = $1 AND "reflectionDate" = $2 LIMIT 1`,
+    [userId, reflectionDate]
+  );
+  return result.rows[0] ?? null;
+}
+
+export async function listDailyReflections(userId: string, limit = 60): Promise<DailyReflection[]> {
+  const result = await pool.query(
+    `SELECT * FROM "DailyReflection" WHERE "userId" = $1 ORDER BY "reflectionDate" DESC LIMIT $2`,
+    [userId, limit]
   );
   return result.rows;
 }

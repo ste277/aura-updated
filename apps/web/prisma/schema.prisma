@@ -29,6 +29,7 @@ model User {
   visitLogs       VisitLog[]
   habits          Habit[]
   customCities    CustomCity[]
+  dailyReflections DailyReflection[]
 }
 
 model CustomCity {
@@ -89,4 +90,19 @@ model Habit {
   archivedAt       DateTime? @db.Timestamptz(3)
 
   logs             HabitLog[]
+}
+
+model DailyReflection {
+  id              String   @id @default(uuid())
+  userId          String
+  user            User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  reflectionDate  DateTime @db.Date
+  outputLevel     String   // "LOW" | "MODERATE" | "PEAK_FLOW"
+  followedGuidance Boolean @default(false)
+  notes           String?  @db.Text
+  createdAt       DateTime @default(now()) @db.Timestamptz(3)
+  updatedAt       DateTime @updatedAt @db.Timestamptz(3)
+
+  @@unique([userId, reflectionDate])
+  @@index([userId, reflectionDate])
 }

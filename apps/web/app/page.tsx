@@ -10,6 +10,7 @@ import {
 } from '../../../packages/panchang/src/windows';
 import { computeDailyEnergyInsight } from '../lib/scoreEngine';
 import { getActionCards, ActionCard } from '../../../packages/recommendation/src/actionCards';
+import type { DailyBriefing, TaskSlotRecommendation } from '../../../packages/recommendation/src/dailyAssistant';
 
 // UI Modules
 import { HomeDashboard } from '../components/HomeDashboard';
@@ -40,6 +41,8 @@ export default function DashboardPage() {
   const [user, setUser] = useState<SessionUser | null | undefined>(undefined);
   const [logEntries, setLogEntries] = useState<LoggedEntryItem[]>([]);
   const [, setHabits] = useState<any[]>([]);
+  const [dailyBriefing, setDailyBriefing] = useState<DailyBriefing | null>(null);
+  const [assistantInsight, setAssistantInsight] = useState<any>(null);
   const [mounted, setMounted] = useState(false);
 
   const [activeTab, setActiveTab] = useState<'home' | 'timeline' | 'ask' | 'calendar' | 'profile' | 'chart'>('home');
@@ -106,6 +109,24 @@ export default function DashboardPage() {
   useEffect(() => {
     loadUserDataAndLogs();
   }, [loadUserDataAndLogs]);
+
+  useEffect(() => {
+    if (!user) return;
+
+    const loadAssistantSignals = async () => {
+      const [briefingRes, insightRes] = await Promise.all([
+        fetch('/api/daily-assistant/briefing'),
+        fetch('/api/daily-assistant/insights'),
+      ]);
+
+      if (briefingRes.ok) setDailyBriefing(await briefingRes.json());
+      if (insightRes.ok) setAssistantInsight(await insightRes.json());
+    };
+
+    loadAssistantSignals().catch((err) => {
+      console.error('Failed to load daily assistant signals:', err);
+    });
+  }, [user?.id]);
 
   // Offline Log Sync Listener
   useEffect(() => {
@@ -229,7 +250,7 @@ export default function DashboardPage() {
       return null;
     };
 
-    let endMin = currentWin ? parseMinute(currentWin.endMinutes ?? currentWin.endMinute ?? currentWin.end) : null;
+    let endMin = currentWin ? parseMinute(currentWin.endMinutes ?? currentWin.endMinute) : null;
 
     if (endMin === null) {
       endMin = 1440; // Default midnight fallback
@@ -411,6 +432,31 @@ export default function DashboardPage() {
     setUser((prev) => (prev ? { ...prev, ...city } : prev));
   }, []);
 
+  const handleSlotTask = useCallback(async (taskTitle: string, durationMinutes: number): Promise<TaskSlotRecommendation> => {
+    const res = await fetch('/api/daily-assistant/slot-task', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ taskTitle, durationMinutes }),
+    });
+    if (!res.ok) throw new Error('Unable to slot task.');
+    return res.json();
+  }, []);
+
+  const handleSubmitReflection = useCallback(async (
+    outputLevel: 'LOW' | 'MODERATE' | 'PEAK_FLOW',
+    followedGuidance: boolean
+  ) => {
+    const res = await fetch('/api/daily-assistant/reflection', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ outputLevel, followedGuidance }),
+    });
+    if (!res.ok) throw new Error('Unable to save reflection.');
+
+    const insightRes = await fetch('/api/daily-assistant/insights');
+    if (insightRes.ok) setAssistantInsight(await insightRes.json());
+  }, []);
+
   if (user === undefined) {
     return (
       <main style={{ minHeight: '100vh', background: 'var(--as-bg, #020617)', color: 'var(--as-text-muted)', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
@@ -504,7 +550,10 @@ export default function DashboardPage() {
             nextShift={safeNextShift}
             activeWindowName={activeType}
             loggedActivitiesToday={loggedActivitiesToday}
+            dailyBriefing={dailyBriefing}
             onLogActivity={handleLogActivity}
+            onSlotTask={handleSlotTask}
+            onSubmitReflection={handleSubmitReflection}
             onNextShiftClick={() => setActiveTab('timeline')}
           />
         )}
@@ -537,7 +586,7 @@ export default function DashboardPage() {
           />
         )}
 
-        {activeTab === 'profile' && <InsightsView logEntries={logEntries} />}
+        {activeTab === 'profile' && <InsightsView logEntries={logEntries} assistantInsight={assistantInsight} />}
 
         {activeTab === 'chart' && <BirthChartSection />}
       </div>

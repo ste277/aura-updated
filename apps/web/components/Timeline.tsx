@@ -252,10 +252,11 @@ export function TimelineView({
       if (entryWin && entryWin === cleanWinName) return true;
 
       if (startMinute !== undefined && endMinute !== undefined) {
+        const entryMinute = entry.logMinuteOfDay ?? (new Date(entry.loggedAt).getHours() * 60 + new Date(entry.loggedAt).getMinutes());
         if (startMinute <= endMinute) {
-          return entry.logMinuteOfDay >= startMinute && entry.logMinuteOfDay <= endMinute;
+          return entryMinute >= startMinute && entryMinute <= endMinute;
         }
-        return entry.logMinuteOfDay >= startMinute || entry.logMinuteOfDay <= endMinute;
+        return entryMinute >= startMinute || entryMinute <= endMinute;
       }
       return false;
     });
