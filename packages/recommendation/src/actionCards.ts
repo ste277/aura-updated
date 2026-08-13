@@ -6,14 +6,20 @@
  */
 
 import type { SolarWindowType } from '../../panchang/src/windows';
+import { FULL_ACTIVITY_CATALOG, normalizeWindowType } from './personalizedTasks';
+import type { ActivityCategory } from './personalizedTasks';
 
 export interface ActionCard {
   id: string;
-  category: 'WORKOUT' | 'MEAL' | 'MICRO_BREAK' | 'FOCUS' | 'REST';
+  category: ActivityCategory;
   title: string;
   description: string; // Updated from reasoning for direct UI mapping
   reasoning: string;   // Retained for backward compatibility
   icon?: string;
+  activityId?: string;
+  significance?: 'LOW' | 'MEDIUM' | 'HIGH';
+  requiresFreshStart?: boolean;
+  aliases?: string[];
 }
 
 const ACTION_CARDS: Record<SolarWindowType, ActionCard[]> = {
@@ -179,13 +185,45 @@ const ACTION_CARDS: Record<SolarWindowType, ActionCard[]> = {
 export function getActionCards(window: string): ActionCard[] {
   if (!window) return ACTION_CARDS.NEUTRAL;
 
-  const clean = String(window).replace('_', ' ').toUpperCase();
+  const clean = normalizeWindowType(window);
 
-  if (clean.includes('RAHU')) return ACTION_CARDS.RAHU_KALAM;
-  if (clean.includes('BRAHMA')) return ACTION_CARDS.BRAHMA;
-  if (clean.includes('ABHIJIT') || clean.includes('VIJAYA')) return ACTION_CARDS.ABHIJIT;
-  if (clean.includes('GULIKA')) return ACTION_CARDS.GULIKA;
-  if (clean.includes('YAMA')) return ACTION_CARDS.YAMA;
+  if (clean === 'RAHU_KALAM') return ACTION_CARDS.RAHU_KALAM;
+  if (clean === 'BRAHMA') return ACTION_CARDS.BRAHMA;
+  if (clean === 'ABHIJIT') return ACTION_CARDS.ABHIJIT;
+  if (clean === 'GULIKA') return ACTION_CARDS.GULIKA;
+  if (clean === 'YAMA') return ACTION_CARDS.YAMA;
 
   return ACTION_CARDS[clean as SolarWindowType] || ACTION_CARDS.NEUTRAL;
+}
+
+/**
+ * Profile-backed discovery for the Planner and future activity picker.
+ * This answers "what could I do in this window?" without making the window
+ * the source of truth for task timing.
+ */
+export function getActivityDiscoveryCards(window: string, limit = 6): ActionCard[] {
+  const windowType = normalizeWindowType(window);
+  return FULL_ACTIVITY_CATALOG
+    .map((activity) => {
+      const preferred = activity.recommendedWindowTypes.includes(windowType);
+      const acceptable = activity.acceptableWindowTypes.includes(windowType);
+      const avoided = activity.avoidWindowTypes.includes(windowType);
+      const score = preferred ? 100 : acceptable ? 65 : avoided && !activity.allowDuringAvoidWindow ? -100 : 35;
+      return { activity, score };
+    })
+    .filter(({ score }) => score >= 0)
+    .sort((a, b) => b.score - a.score || a.activity.title.localeCompare(b.activity.title))
+    .slice(0, limit)
+    .map(({ activity }) => ({
+      id: `activity-${activity.id}`,
+      activityId: activity.id,
+      category: activity.category,
+      title: activity.title,
+      description: activity.description,
+      reasoning: activity.description,
+      icon: activity.icon,
+      significance: activity.significance,
+      requiresFreshStart: activity.requiresFreshStart,
+      aliases: activity.aliases,
+    }));
 }

@@ -2,7 +2,7 @@
 
 import React, { useState, useMemo } from 'react';
 import { getPersonalizedTasks, UserChartContext } from '../../../packages/recommendation/src/personalizedTasks';
-import type { DailyBriefing, TaskSlotRecommendation } from '../../../packages/recommendation/src/dailyAssistant';
+import type { DailyBriefing, PlanningHorizon, TaskSlotRecommendation } from '../../../packages/recommendation/src/dailyAssistant';
 import { triggerHaptic } from '../lib/haptics';
 
 interface TaskSuggestion {
@@ -15,6 +15,9 @@ interface TaskSuggestion {
 const POPULAR_TASKS: TaskSuggestion[] = [
   { title: 'Deep Work', icon: '🧠', keywords: ['deep work', 'focus', 'coding', 'code', 'research', 'study', 'write'] },
   { title: 'Exercise & Fitness', icon: '🏋️', keywords: ['exercise', 'workout', 'gym', 'training', 'fitness'] },
+  { title: 'Start a Journey', icon: '🚗', keywords: ['journey', 'travel', 'trip', 'flight', 'road trip', 'vacation'] },
+  { title: 'Date & Relationships', icon: '❤️', keywords: ['date', 'dating', 'romantic', 'partner', 'relationship'] },
+  { title: 'Party & Social Time', icon: '🎉', keywords: ['party', 'social', 'concert', 'movie', 'celebration'] },
   { title: 'Email & Communication', icon: '📧', keywords: ['email', 'communication', 'inbox', 'message', 'call'] },
   { title: 'Break & Relaxation', icon: '🧘', keywords: ['break', 'rest', 'relax', 'tea', 'coffee', 'recovery'] },
   { title: 'Planning', icon: '📋', keywords: ['planning', 'plan', 'organize', 'strategy'] },
@@ -31,6 +34,12 @@ const TASK_ALIASES: TaskSuggestion[] = [
   { title: 'Team Meeting', icon: '👥', keywords: ['meeting', 'team', 'standup'] },
   { title: 'Client Communication', icon: '💬', keywords: ['client', 'communication', 'call', 'email'] },
   { title: 'Meditation', icon: '🧘', keywords: ['meditation', 'meditate', 'mindful', 'breath'] },
+  { title: 'Start a Journey', icon: '🚗', keywords: ['journey', 'travel', 'trip', 'flight', 'train', 'vacation', 'relocation'] },
+  { title: 'Date & Relationships', icon: '❤️', keywords: ['date', 'dating', 'romantic', 'partner', 'relationship', 'proposal'] },
+  { title: 'Party & Social Time', icon: '🎉', keywords: ['party', 'social', 'concert', 'movie', 'celebration', 'night out'] },
+  { title: 'Financial Decision', icon: '💰', keywords: ['finance', 'investment', 'property', 'purchase', 'loan', 'contract'] },
+  { title: 'New Beginning', icon: '🚀', keywords: ['start', 'begin', 'launch', 'new project', 'new business', 'new job'] },
+  { title: 'Learning', icon: '📚', keywords: ['learn', 'course', 'reading', 'exam', 'practice', 'language'] },
 ];
 
 function recentTaskTitles(titles: string[]): string[] {
@@ -53,7 +62,7 @@ interface HomeDashboardProps {
   dailyBriefing?: DailyBriefing | null;
   userChart?: UserChartContext;
   onLogActivity?: (activityTitle: string, notes?: string) => Promise<void>;
-  onSlotTask?: (taskTitle: string, durationMinutes: number) => Promise<TaskSlotRecommendation>;
+  onSlotTask?: (taskTitle: string, durationMinutes: number, horizon?: PlanningHorizon, customStartDate?: string, customEndDate?: string) => Promise<TaskSlotRecommendation>;
   onSubmitReflection?: (outputLevel: 'LOW' | 'MODERATE' | 'PEAK_FLOW', followedGuidance: boolean) => Promise<void>;
   onNextShiftClick?: () => void;
 }
@@ -107,6 +116,9 @@ export function HomeDashboard({
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [taskTitle, setTaskTitle] = useState('');
   const [taskDuration, setTaskDuration] = useState(30);
+  const [taskHorizon, setTaskHorizon] = useState<PlanningHorizon>('TODAY');
+  const [customStartDate, setCustomStartDate] = useState('');
+  const [customEndDate, setCustomEndDate] = useState('');
   const [taskRecommendation, setTaskRecommendation] = useState<TaskSlotRecommendation | null>(null);
   const [isSlottingTask, setIsSlottingTask] = useState(false);
   const [taskInputFocused, setTaskInputFocused] = useState(false);
@@ -195,10 +207,10 @@ export function HomeDashboard({
   };
 
   const handleSlotTask = async () => {
-    if (!onSlotTask || !taskTitle.trim()) return;
+    if (!onSlotTask || !taskTitle.trim() || (taskHorizon === 'CUSTOM' && (!customStartDate || !customEndDate || customEndDate < customStartDate))) return;
     setIsSlottingTask(true);
     try {
-      const recommendation = await onSlotTask(taskTitle, taskDuration);
+      const recommendation = await onSlotTask(taskTitle, taskDuration, taskHorizon, customStartDate, customEndDate);
       setTaskRecommendation(recommendation);
       triggerHaptic('success');
     } catch (err) {
@@ -317,7 +329,7 @@ export function HomeDashboard({
           borderRadius: 16,
           padding: 20,
           position: 'relative',
-          order: 2,
+          order: 3,
         }}
       >
         <div style={{ fontSize: 10, fontFamily: 'monospace', textTransform: 'uppercase', letterSpacing: '0.05em', color: '#94a3b8' }}>
@@ -377,7 +389,7 @@ export function HomeDashboard({
       >
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
           <span style={{ fontSize: 10, fontFamily: 'monospace', textTransform: 'uppercase', color: '#4ade80', letterSpacing: '0.05em', fontWeight: 700 }}>
-            ⚡ Today&apos;s Actions
+            ✨ Aura Suggests
           </span>
           <span style={{ fontSize: 10, color: '#94a3b8', fontFamily: 'monospace' }}>
             {activeWindowName.replace(/_/g, ' ')}
@@ -452,30 +464,13 @@ export function HomeDashboard({
           border: '1px solid var(--as-border, #1e293b)',
           borderRadius: 16,
           padding: 16,
-          order: 3,
+          order: 2,
         }}
       >
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 12 }}>
           <span style={{ fontSize: 10, fontFamily: 'monospace', textTransform: 'uppercase', color: '#38bdf8', letterSpacing: '0.05em', fontWeight: 700 }}>
-            What do you want to do?
+            Plan a task
           </span>
-          <select
-            value={taskDuration}
-            onChange={(e) => setTaskDuration(Number(e.target.value))}
-            style={{
-              background: '#020617',
-              border: '1px solid #334155',
-              borderRadius: 8,
-              color: '#cbd5e1',
-              fontSize: 11,
-              padding: '5px 8px',
-            }}
-          >
-            <option value={15}>15 min</option>
-            <option value={30}>30 min</option>
-            <option value={60}>60 min</option>
-            <option value={90}>90 min</option>
-          </select>
         </div>
         <div style={{ display: 'flex', gap: 8, marginTop: 12 }}>
           <input
@@ -501,7 +496,7 @@ export function HomeDashboard({
           />
           <button
             onClick={handleSlotTask}
-            disabled={!taskTitle.trim() || isSlottingTask}
+            disabled={!taskTitle.trim() || isSlottingTask || (taskHorizon === 'CUSTOM' && (!customStartDate || !customEndDate || customEndDate < customStartDate))}
             style={{
               background: '#38bdf8',
               border: 'none',
@@ -511,13 +506,49 @@ export function HomeDashboard({
               fontSize: 12,
               fontWeight: 800,
               padding: '0 12px',
-              opacity: taskTitle.trim() ? 1 : 0.55,
+              opacity: taskTitle.trim() && !(taskHorizon === 'CUSTOM' && (!customStartDate || !customEndDate || customEndDate < customStartDate)) ? 1 : 0.55,
               whiteSpace: 'nowrap',
             }}
           >
-            {isSlottingTask ? '...' : 'Slot'}
+            {isSlottingTask ? '...' : 'Find Best Time'}
           </button>
         </div>
+        {taskTitle.trim() && <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8, marginTop: 9 }}>
+          <label style={{ fontSize: 10, color: '#94a3b8' }}>
+            WHEN?
+            <select value={taskHorizon} onChange={(e) => setTaskHorizon(e.target.value as PlanningHorizon)} style={{ display: 'block', width: '100%', marginTop: 4, background: '#020617', border: '1px solid #334155', borderRadius: 8, color: '#cbd5e1', fontSize: 11, padding: '7px 8px' }}>
+              <option value="NOW">Now</option>
+              <option value="TODAY">Today</option>
+              <option value="TOMORROW">Tomorrow</option>
+              <option value="WEEKEND">Weekend</option>
+              <option value="SEVEN_DAYS">Next 7 days</option>
+              <option value="CUSTOM">Custom dates</option>
+            </select>
+          </label>
+          <label style={{ fontSize: 10, color: '#94a3b8' }}>
+            HOW LONG?
+            <select value={taskDuration} onChange={(e) => setTaskDuration(Number(e.target.value))} style={{ display: 'block', width: '100%', marginTop: 4, background: '#020617', border: '1px solid #334155', borderRadius: 8, color: '#cbd5e1', fontSize: 11, padding: '7px 8px' }}>
+              <option value={15}>15 min</option>
+              <option value={30}>30 min</option>
+              <option value={60}>60 min</option>
+              <option value={90}>90 min</option>
+              <option value={120}>2 hours</option>
+              <option value={180}>3 hours</option>
+            </select>
+          </label>
+        </div>}
+        {taskTitle.trim() && taskHorizon === 'CUSTOM' && (
+          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8, marginTop: 9 }}>
+            <label style={{ fontSize: 10, color: '#94a3b8' }}>
+              START DATE
+              <input type="date" value={customStartDate} onChange={(e) => setCustomStartDate(e.target.value)} style={{ display: 'block', width: '100%', marginTop: 4, boxSizing: 'border-box', background: '#020617', border: '1px solid #334155', borderRadius: 8, color: '#cbd5e1', fontSize: 11, padding: '7px 8px' }} />
+            </label>
+            <label style={{ fontSize: 10, color: '#94a3b8' }}>
+              END DATE
+              <input type="date" value={customEndDate} min={customStartDate || undefined} onChange={(e) => setCustomEndDate(e.target.value)} style={{ display: 'block', width: '100%', marginTop: 4, boxSizing: 'border-box', background: '#020617', border: '1px solid #334155', borderRadius: 8, color: '#cbd5e1', fontSize: 11, padding: '7px 8px' }} />
+            </label>
+          </div>
+        )}
         {taskInputFocused && !taskRecommendation && (
           <div style={{ marginTop: 10, padding: '10px 0 0', borderTop: '1px solid rgba(148, 163, 184, 0.14)' }}>
             <div style={{ fontSize: 10, color: '#94a3b8', textTransform: 'uppercase', letterSpacing: '0.05em', fontWeight: 800 }}>
@@ -551,7 +582,23 @@ export function HomeDashboard({
         )}
         {taskRecommendation && (
           <div style={{ display: 'flex', flexDirection: 'column', gap: 8, marginTop: 12 }}>
-            <div style={{ border: `1px solid ${taskRecommendation.recommendationState === 'AVOID' ? 'rgba(251, 107, 107, 0.35)' : taskRecommendation.recommendationState === 'NO_FIT' ? 'rgba(251, 191, 36, 0.35)' : 'rgba(74, 222, 128, 0.3)'}`, background: taskRecommendation.recommendationState === 'AVOID' ? 'rgba(251, 107, 107, 0.08)' : taskRecommendation.recommendationState === 'NO_FIT' ? 'rgba(251, 191, 36, 0.08)' : 'rgba(74, 222, 128, 0.08)', borderRadius: 12, padding: 12 }}>
+            {taskRecommendation.planningOptions && taskRecommendation.planningOptions.length > 0 && (
+              <div style={{ border: '1px solid rgba(56, 189, 248, 0.28)', background: 'rgba(56, 189, 248, 0.07)', borderRadius: 12, padding: 12 }}>
+                <div style={{ fontSize: 11, color: '#7dd3fc', fontWeight: 800 }}>⭐ {taskHorizon === 'SEVEN_DAYS' || taskHorizon === 'WEEKEND' ? 'Best opportunities' : 'Best time'} · {taskDuration >= 120 ? `${taskDuration / 60} hours` : `${taskDuration} min`}</div>
+                <div style={{ display: 'flex', flexDirection: 'column', gap: 8, marginTop: 8 }}>
+                  {taskRecommendation.planningOptions.map((option, index) => (
+                    <div key={`${option.dateLabel}-${option.startTime}`} style={{ display: 'grid', gridTemplateColumns: '1fr auto', gap: 8, alignItems: 'center' }}>
+                      <div>
+                        <div style={{ fontSize: 12, color: '#f8fafc', fontWeight: 700 }}>{index + 1}. {option.dateLabel} · {option.startTime} - {option.endTime}</div>
+                        <div style={{ fontSize: 10, color: '#b6c2d1', marginTop: 2 }}>{option.score}/100 · {option.quality.toLowerCase()} · {option.summary}</div>
+                      </div>
+                      <a href={option.googleCalendarUrl} target="_blank" rel="noreferrer" style={{ color: '#38bdf8', fontSize: 10, fontWeight: 800, textDecoration: 'none' }}>Schedule</a>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+            {(!taskRecommendation.planningOptions || taskRecommendation.planningOptions.length === 0) && <div style={{ border: `1px solid ${taskRecommendation.recommendationState === 'AVOID' ? 'rgba(251, 107, 107, 0.35)' : taskRecommendation.recommendationState === 'NO_FIT' ? 'rgba(251, 191, 36, 0.35)' : 'rgba(74, 222, 128, 0.3)'}`, background: taskRecommendation.recommendationState === 'AVOID' ? 'rgba(251, 107, 107, 0.08)' : taskRecommendation.recommendationState === 'NO_FIT' ? 'rgba(251, 191, 36, 0.08)' : 'rgba(74, 222, 128, 0.08)', borderRadius: 12, padding: 12 }}>
               <div style={{ fontSize: 11, color: taskRecommendation.recommendationState === 'AVOID' ? '#fb6b6b' : taskRecommendation.recommendationState === 'NO_FIT' ? '#fbbf24' : '#4ade80', fontWeight: 800 }}>
                 {taskRecommendation.activityIcon} {taskRecommendation.recommendationLabel}
               </div>
@@ -577,7 +624,7 @@ export function HomeDashboard({
               >
                 Add to Google Calendar
               </a>}
-            </div>
+            </div>}
             {taskRecommendation.recommendationState === 'BEST_NOW' && taskRecommendation.bestWindowToday && (
               <div style={{ border: '1px solid rgba(56, 189, 248, 0.28)', background: 'rgba(56, 189, 248, 0.08)', borderRadius: 12, padding: 12 }}>
                 <div style={{ fontSize: 11, color: '#7dd3fc', fontWeight: 800 }}>

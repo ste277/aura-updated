@@ -95,7 +95,18 @@ export interface TaskSlotRecommendation {
     endsAtLocal: string;
     googleCalendarUrl: string;
   };
+  planningOptions?: Array<{
+    dateLabel: string;
+    startTime: string;
+    endTime: string;
+    score: number;
+    quality: 'STRONG' | 'GOOD' | 'USABLE';
+    summary: string;
+    googleCalendarUrl: string;
+  }>;
 }
+
+export type PlanningHorizon = 'NOW' | 'TODAY' | 'TOMORROW' | 'WEEKEND' | 'SEVEN_DAYS' | 'CUSTOM';
 
 export function computeAssistantWindows(context: DailyAssistantContext): WindowSpan[] {
   const localDate = localDateForContext(context);
@@ -218,7 +229,7 @@ export function recommendTaskSlot(
   const targetMinute = requestedStartMinute === undefined ? currentMinute : clampMinute(requestedStartMinute);
   const targetCandidate = candidates.find((candidate) => containsMinute(candidate, targetMinute));
 
-  if (requestedStartMinute !== undefined && targetCandidate && isFriction(targetCandidate.type) && profile.significance === 'HIGH') {
+  if (requestedStartMinute !== undefined && targetCandidate && isFriction(targetCandidate.type) && profile.significance !== 'LOW') {
     if (targetCandidate.endMinute - targetMinute < safeDuration) {
       return buildTaskRecommendation(cleanTitle, profile, 'NO_FIT', targetCandidate, targetMinute, safeDuration, context, windows);
     }
@@ -257,10 +268,123 @@ export function recommendTaskSlot(
   return buildTaskRecommendation(cleanTitle, profile, 'NEXT_BEST', best, best.startMinute, safeDuration, context, windows);
 }
 
+export function findOptimalTaskTimes(
+  taskTitle: string,
+  context: DailyAssistantContext,
+  durationMinutes = 30,
+  horizon: PlanningHorizon = 'TODAY',
+  customStartDate?: string,
+  customEndDate?: string
+): TaskSlotRecommendation {
+  const safeDuration = Math.min(360, Math.max(15, Math.round(durationMinutes)));
+  const cleanTitle = normalizeTaskTitle(taskTitle);
+  const profile = classifyTask(cleanTitle);
+  const days = horizon === 'NOW' || horizon === 'TODAY' ? 1 : horizon === 'TOMORROW' ? 1 : horizon === 'WEEKEND' ? 2 : 7;
+  const dayOffset = horizon === 'TOMORROW' ? 1 : 0;
+  const current = localDateForContext(context);
+  const currentDayOfWeek = current.getUTCDay();
+  const customOffsets = horizon === 'CUSTOM' && customStartDate && customEndDate
+    ? buildDateOffsets(current, customStartDate, customEndDate)
+    : [];
+  const weekendOffsets = horizon === 'WEEKEND'
+    ? [
+        (6 - currentDayOfWeek + 7) % 7,
+        (7 - currentDayOfWeek + 7) % 7,
+      ].map((offset, index) => offset === 0 && index === 0 && currentDayOfWeek === 0 ? 7 : offset)
+    : [];
+  const searchOffsets = horizon === 'CUSTOM'
+    ? customOffsets
+    : horizon === 'WEEKEND'
+    ? weekendOffsets
+    : Array.from({ length: days }, (_, index) => dayOffset + index);
+  const options: TaskSlotRecommendation['planningOptions'] = [];
+  for (const day of searchOffsets) {
+    const dayContext = { ...context, now: new Date(context.now.getTime() + day * 86400000) };
+    const localDay = localDateForContext(dayContext);
+    const windows = computeAssistantWindows(dayContext);
+    const candidates = buildSlotCandidates(windows);
+    const dayStart = horizon === 'NOW' ? localDay.getUTCHours() * 60 + localDay.getUTCMinutes() : 0;
+    const maxStart = 1440 - safeDuration;
+    for (let start = dayStart; start <= maxStart; start += 15) {
+      const score = scoreContinuousBlock(candidates, profile, start, start + safeDuration);
+      if (score < 0) continue;
+      const startsAtLocal = localDateTimeForMinute(dayContext.now, start);
+      const endsAtLocal = localDateTimeForMinute(dayContext.now, start + safeDuration);
+      options.push({
+        dateLabel: localDay.toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric' }),
+        startTime: formatMinute(start),
+        endTime: formatMinute(start + safeDuration),
+        score: Math.round(score * 10) / 10,
+        quality: score >= 85 ? 'STRONG' : score >= 65 ? 'GOOD' : 'USABLE',
+        summary: buildPlanSummary(candidates, profile, start, start + safeDuration),
+        googleCalendarUrl: buildGoogleCalendarUrl(cleanTitle, startsAtLocal, endsAtLocal),
+      });
+    }
+  }
+  const ranked = options.sort((a, b) => b.score - a.score).filter((option, index, list) => list.findIndex((item) => item.dateLabel === option.dateLabel && item.startTime === option.startTime) === index).slice(0, horizon === 'SEVEN_DAYS' || horizon === 'WEEKEND' ? 3 : 1);
+  const best = ranked[0];
+  if (!best) return { ...recommendTaskSlot(cleanTitle, context, safeDuration), planningOptions: [] };
+  const base = recommendTaskSlot(cleanTitle, { ...context, now: new Date(context.now.getTime() + (dayOffset * 86400000)) }, safeDuration, parseTime(best.startTime));
+  return { ...base, planningOptions: ranked };
+}
+
+function buildDateOffsets(current: Date, startDate: string, endDate: string): number[] {
+  const start = parseDateOnly(startDate);
+  const end = parseDateOnly(endDate);
+  if (!start || !end || end < start) return [];
+  const currentDay = Date.UTC(current.getUTCFullYear(), current.getUTCMonth(), current.getUTCDate());
+  const offsets: number[] = [];
+  for (let day = start; day <= end; day += 86400000) {
+    offsets.push(Math.round((day - currentDay) / 86400000));
+  }
+  return offsets;
+}
+
+function parseDateOnly(value: string): number | null {
+  const match = /^(\d{4})-(\d{2})-(\d{2})$/.exec(value);
+  if (!match) return null;
+  const timestamp = Date.UTC(Number(match[1]), Number(match[2]) - 1, Number(match[3]));
+  const date = new Date(timestamp);
+  return date.getUTCFullYear() === Number(match[1]) && date.getUTCMonth() === Number(match[2]) - 1 && date.getUTCDate() === Number(match[3]) ? timestamp : null;
+}
+
+function scoreContinuousBlock(candidates: SlotCandidate[], profile: TaskProfile, start: number, end: number): number {
+  const boundaries = [...new Set([start, end, ...candidates.flatMap((candidate) => [candidate.startMinute, candidate.endMinute]).filter((minute) => minute > start && minute < end)])].sort((a, b) => a - b);
+  let weighted = 0;
+  for (let index = 0; index < boundaries.length - 1; index += 1) {
+    const segmentStart = boundaries[index];
+    const segmentEnd = boundaries[index + 1];
+    const candidate = candidates.find((item) => containsMinute(item, segmentStart));
+    const segmentScore = candidate ? scoreCandidate(candidate, profile) : 55;
+    if (isFriction(candidate?.type ?? 'NEUTRAL') && profile.significance === 'HIGH') return -1;
+    weighted += segmentScore * (segmentEnd - segmentStart);
+  }
+  return weighted / (end - start);
+}
+
+function buildPlanSummary(candidates: SlotCandidate[], profile: TaskProfile, start: number, end: number): string {
+  const overlapping = candidates.filter((candidate) => candidate.startMinute < end && candidate.endMinute > start);
+  const types = [...new Set(overlapping.map((candidate) => formatWindowLabel(candidate.type)))];
+  const frictionMinutes = overlapping.filter((candidate) => isFriction(candidate.type)).reduce((total, candidate) => total + Math.max(0, Math.min(end, candidate.endMinute) - Math.max(start, candidate.startMinute)), 0);
+  if (frictionMinutes > 0) return `Mixed quality. This block includes ${frictionMinutes} minutes of higher-friction timing.`;
+  if (types.length === 1 && types[0] === 'Neutral Flow') return 'Usable stretch. The full period is Neutral Flow.';
+  if (types.length === 1) return `Clean ${end - start >= 60 ? `${(end - start) / 60}-hour` : `${end - start}-minute`} stretch in ${types[0]}.`;
+  return `Strong start, steady finish across ${types.join(' + ')}. No high-friction overlap.`;
+}
+
+function parseTime(value: string): number {
+  const match = value.match(/(\d+):(\d+)\s*(AM|PM)/i);
+  if (!match) return 0;
+  let hour = Number(match[1]) % 12;
+  if (match[3].toUpperCase() === 'PM') hour += 12;
+  return hour * 60 + Number(match[2]);
+}
+
 type TaskProfile = {
   type: string;
   icon: string;
-  significance: 'LOW' | 'HIGH';
+  family?: string;
+  significance: 'LOW' | 'MEDIUM' | 'HIGH';
   preferredOnlyForHigh?: boolean;
   scores: Partial<Record<SolarWindowType, number>>;
   reason: string;
@@ -399,7 +523,7 @@ function buildSlotCandidates(windows: WindowSpan[]): SlotCandidate[] {
 }
 
 function scoreCandidate(candidate: SlotCandidate, profile: TaskProfile): number {
-  if (isFriction(candidate.type)) return profile.significance === 'LOW' ? 20 : -100;
+  if (isFriction(candidate.type)) return profile.significance === 'LOW' ? 65 : profile.significance === 'MEDIUM' ? 25 : -100;
   return profile.scores[candidate.type] ?? 55;
 }
 
@@ -430,6 +554,13 @@ function rankAvoidWindows(windows: WindowSpan[]): WindowSpan[] {
 
 function classifyTask(taskTitle: string): TaskProfile {
   const title = taskTitle.toLowerCase();
+  if (/(start|begin|take|go on).*(journey|trip|road trip|flight|train|vacation|pilgrimage)|journey start|travel start|relocat|move to a new home/.test(title)) return { type: 'Start a journey', icon: '🚗', family: 'JOURNEY_START', significance: 'HIGH', preferredOnlyForHigh: true, scores: { ABHIJIT: 98, GULIKA: 76, NEUTRAL: 62 }, reason: 'A favorable start supports a smooth, intentional journey.', neutralReason: 'A neutral period is workable for travel, but not a preferred start.', preferredWindows: ['ABHIJIT'], acceptableWindows: ['GULIKA', 'NEUTRAL'], avoidWindows: ['RAHU_KALAM', 'YAMA'] };
+  if (/(date|dating|romantic|ask someone out|meet someone new|relationship|partner|proposal|engagement|anniversary)/.test(title)) return { type: 'Dating & relationships', icon: '❤️', family: 'RELATIONSHIP', significance: 'MEDIUM', scores: { ABHIJIT: 88, GULIKA: 84, NEUTRAL: 78, BRAHMA: 72 }, reason: 'Favorable, open energy supports meaningful connection.', neutralReason: 'A neutral period is comfortable for a date or social connection.', preferredWindows: ['ABHIJIT', 'GULIKA', 'NEUTRAL'], acceptableWindows: ['BRAHMA'], avoidWindows: ['RAHU_KALAM', 'YAMA'] };
+  if (/(party|partying|celebration|concert|movie|theatre|night out|clubbing|social gathering|dinner with friends|game night)/.test(title)) return { type: 'Party & social time', icon: '🎉', family: 'SOCIAL', significance: 'LOW', scores: { NEUTRAL: 88, GULIKA: 82, ABHIJIT: 74, YAMA: 68, RAHU_KALAM: 65 }, reason: 'Social energy is best used for connection and enjoyment.', neutralReason: 'This is a flexible activity; choose a comfortable time and enjoy it.', preferredWindows: ['NEUTRAL', 'GULIKA'], acceptableWindows: ['ABHIJIT', 'YAMA', 'RAHU_KALAM'] };
+  if (/(financial|finance|investment|invest|loan|property|purchase|buy|sell|contract|pay debt|transfer money|open account)/.test(title)) return { type: 'Financial decision', icon: '💰', family: 'FINANCE', significance: 'HIGH', preferredOnlyForHigh: true, scores: { ABHIJIT: 100, GULIKA: 72, NEUTRAL: 58 }, reason: 'A strong, clear window is preferable for financial commitments.', neutralReason: 'Use neutral time for research and preparation, not the final commitment.', preferredWindows: ['ABHIJIT'], acceptableWindows: ['GULIKA', 'NEUTRAL'], avoidWindows: ['RAHU_KALAM', 'YAMA'] };
+  if (/(start|begin|launch|open|new project|new business|new job|new course|renovation|new habit|marriage|wedding)/.test(title)) return { type: 'New beginning', icon: '🚀', family: 'NEW_BEGINNING', significance: 'HIGH', preferredOnlyForHigh: true, scores: { ABHIJIT: 100, BRAHMA: 90, GULIKA: 74, NEUTRAL: 58 }, reason: 'New beginnings benefit from a clear, favorable start.', neutralReason: 'Use this time to prepare; make the formal start in a stronger window.', preferredWindows: ['ABHIJIT', 'BRAHMA'], acceptableWindows: ['GULIKA', 'NEUTRAL'], avoidWindows: ['RAHU_KALAM', 'YAMA'] };
+  if (/(walk|cycling|swim|yoga|stretch|massage|spa|digital detox|journal|sleep preparation|early bedtime)/.test(title)) return { type: 'Wellbeing', icon: '🌿', family: 'WELLBEING', significance: 'LOW', scores: { NEUTRAL: 88, BRAHMA: 86, GULIKA: 78, ABHIJIT: 76 }, reason: 'A restorative activity supports balance and recovery.', neutralReason: 'This is a flexible, restorative activity that fits now.', preferredWindows: ['NEUTRAL', 'BRAHMA'], acceptableWindows: ['GULIKA', 'ABHIJIT', 'RAHU_KALAM', 'YAMA'] };
+  if (/(learn|course|read|book|exam|language|practice|certification|music|art)/.test(title)) return { type: 'Learning', icon: '📚', family: 'LEARNING', significance: 'MEDIUM', scores: { BRAHMA: 92, ABHIJIT: 88, NEUTRAL: 76, GULIKA: 72 }, reason: 'Steady concentration supports learning and skill development.', neutralReason: 'A neutral period is suitable for consistent practice.', preferredWindows: ['BRAHMA', 'ABHIJIT', 'NEUTRAL'], acceptableWindows: ['GULIKA'], avoidWindows: ['RAHU_KALAM', 'YAMA'] };
   if (/(tea|coffee|break|snack)/.test(title)) return { type: 'Tea break', icon: '☕', significance: 'LOW', scores: { NEUTRAL: 90, GULIKA: 65 }, reason: 'A short reset fits well here.', neutralReason: 'A short break does not require an auspicious starting window.', preferredWindows: ['NEUTRAL', 'GULIKA'], acceptableWindows: ['BRAHMA', 'ABHIJIT', 'RAHU_KALAM', 'YAMA'] };
   if (/(rest|nap|recover|sleep|wind down)/.test(title)) return { type: 'Rest', icon: '😴', significance: 'LOW', scores: { NEUTRAL: 90, BRAHMA: 70 }, reason: 'A recovery period supports rest and reset.', neutralReason: 'Recovery and low-stimulation time fit well here.', preferredWindows: ['NEUTRAL', 'BRAHMA'], acceptableWindows: ['GULIKA', 'ABHIJIT'] };
   if (/(meditat|breath|mindful|prayer)/.test(title)) return { type: 'Meditation', icon: '🧘', significance: 'LOW', scores: { BRAHMA: 100, NEUTRAL: 85 }, reason: 'A calmer period supports reflection and reset.', neutralReason: 'A quiet neutral period is suitable for stillness.', preferredWindows: ['BRAHMA', 'NEUTRAL'], acceptableWindows: ['GULIKA', 'ABHIJIT'] };

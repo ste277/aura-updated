@@ -9,7 +9,7 @@ interface ActionCardsProps {
   loggedIds: Set<string>;
 }
 
-const CATEGORY_LABEL: Record<ActionCard['category'], string> = {
+const CATEGORY_LABEL: Partial<Record<ActionCard['category'], string>> = {
   WORKOUT: 'Workout',
   MEAL: 'Meal',
   MICRO_BREAK: 'Micro-break',
@@ -86,7 +86,7 @@ export function ActionCards({ cards, onLog, loggedIds }: ActionCardsProps) {
                   marginBottom: 6,
                 }}
               >
-                {CATEGORY_LABEL[card.category]}
+                {CATEGORY_LABEL[card.category] || card.category.replace(/_/g, ' ')}
               </div>
               <div
                 style={{

@@ -10,7 +10,7 @@ import {
 } from '../../../packages/panchang/src/windows';
 import { computeDailyEnergyInsight } from '../lib/scoreEngine';
 import { getActionCards, ActionCard } from '../../../packages/recommendation/src/actionCards';
-import type { DailyBriefing, TaskSlotRecommendation } from '../../../packages/recommendation/src/dailyAssistant';
+import type { DailyBriefing, PlanningHorizon, TaskSlotRecommendation } from '../../../packages/recommendation/src/dailyAssistant';
 
 // UI Modules
 import { HomeDashboard } from '../components/HomeDashboard';
@@ -444,11 +444,11 @@ export default function DashboardPage() {
     setUser((prev) => (prev ? { ...prev, ...city } : prev));
   }, []);
 
-  const handleSlotTask = useCallback(async (taskTitle: string, durationMinutes: number): Promise<TaskSlotRecommendation> => {
+  const handleSlotTask = useCallback(async (taskTitle: string, durationMinutes: number, horizon: PlanningHorizon = 'TODAY', customStartDate?: string, customEndDate?: string): Promise<TaskSlotRecommendation> => {
     const res = await fetch('/api/daily-assistant/slot-task', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ taskTitle, durationMinutes }),
+      body: JSON.stringify({ taskTitle, durationMinutes, horizon, customStartDate, customEndDate }),
     });
     if (!res.ok) throw new Error('Unable to slot task.');
     return res.json();
