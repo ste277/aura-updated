@@ -2,7 +2,7 @@
 
 import React, { useState, useMemo } from 'react';
 import { getPersonalizedTasks, UserChartContext } from '../../../packages/recommendation/src/personalizedTasks';
-import type { DailyBriefing, PlanningHorizon, TaskSlotRecommendation } from '../../../packages/recommendation/src/dailyAssistant';
+import type { DailyBriefing, PlanningHorizon, TaskSlotRecommendation, TimePreference } from '../../../packages/recommendation/src/dailyAssistant';
 import { triggerHaptic } from '../lib/haptics';
 
 interface TaskSuggestion {
@@ -62,7 +62,7 @@ interface HomeDashboardProps {
   dailyBriefing?: DailyBriefing | null;
   userChart?: UserChartContext;
   onLogActivity?: (activityTitle: string, notes?: string) => Promise<void>;
-  onSlotTask?: (taskTitle: string, durationMinutes: number, horizon?: PlanningHorizon, customStartDate?: string, customEndDate?: string) => Promise<TaskSlotRecommendation>;
+  onSlotTask?: (taskTitle: string, durationMinutes: number, horizon?: PlanningHorizon, customStartDate?: string, customEndDate?: string, timePreference?: TimePreference) => Promise<TaskSlotRecommendation>;
   onSubmitReflection?: (outputLevel: 'LOW' | 'MODERATE' | 'PEAK_FLOW', followedGuidance: boolean) => Promise<void>;
   onNextShiftClick?: () => void;
 }
@@ -119,6 +119,7 @@ export function HomeDashboard({
   const [taskHorizon, setTaskHorizon] = useState<PlanningHorizon>('TODAY');
   const [customStartDate, setCustomStartDate] = useState('');
   const [customEndDate, setCustomEndDate] = useState('');
+  const [timePreference, setTimePreference] = useState<TimePreference>('ANYTIME');
   const [taskRecommendation, setTaskRecommendation] = useState<TaskSlotRecommendation | null>(null);
   const [isSlottingTask, setIsSlottingTask] = useState(false);
   const [taskInputFocused, setTaskInputFocused] = useState(false);
@@ -146,6 +147,15 @@ export function HomeDashboard({
     setTaskRecommendation(null);
     setTaskInputFocused(false);
   };
+
+  const suggestedTimePreference = useMemo<TimePreference>(() => {
+    const title = taskTitle.toLowerCase();
+    if (/(date|dating|party|social|family|romantic)/.test(title)) return 'EVENING';
+    if (/(sleep|wind down|night)/.test(title)) return 'NIGHT';
+    if (/(workout|exercise|journey|travel|deep work|study|learn|meditat|meeting)/.test(title)) return 'MORNING';
+    if (/(shopping|errand)/.test(title)) return 'AFTERNOON';
+    return 'ANYTIME';
+  }, [taskTitle]);
 
   const starCount = Math.round((energyScore / 10) * 5 * 2) / 2;
 
@@ -210,7 +220,7 @@ export function HomeDashboard({
     if (!onSlotTask || !taskTitle.trim() || (taskHorizon === 'CUSTOM' && (!customStartDate || !customEndDate || customEndDate < customStartDate))) return;
     setIsSlottingTask(true);
     try {
-      const recommendation = await onSlotTask(taskTitle, taskDuration, taskHorizon, customStartDate, customEndDate);
+      const recommendation = await onSlotTask(taskTitle, taskDuration, taskHorizon, customStartDate, customEndDate, timePreference);
       setTaskRecommendation(recommendation);
       triggerHaptic('success');
     } catch (err) {
@@ -537,6 +547,21 @@ export function HomeDashboard({
             </select>
           </label>
         </div>}
+        {taskTitle.trim() && (
+          <div style={{ marginTop: 10 }}>
+            <div style={{ fontSize: 10, color: '#94a3b8', marginBottom: 5 }}>PREFERRED TIME</div>
+            <div style={{ display: 'flex', gap: 5, flexWrap: 'wrap' }}>
+              {([
+                ['ANYTIME', 'Anytime'], ['MORNING', 'Morning'], ['AFTERNOON', 'Afternoon'], ['EVENING', 'Evening'], ['NIGHT', 'Night'],
+              ] as Array<[TimePreference, string]>).map(([value, label]) => (
+                <button key={value} type="button" onClick={() => setTimePreference(value)} style={{ border: `1px solid ${timePreference === value ? 'rgba(56, 189, 248, 0.7)' : 'rgba(148, 163, 184, 0.25)'}`, background: timePreference === value ? 'rgba(56, 189, 248, 0.16)' : 'rgba(2, 6, 23, 0.55)', color: timePreference === value ? '#7dd3fc' : '#b6c2d1', borderRadius: 999, padding: '5px 9px', fontSize: 10, fontWeight: 700, cursor: 'pointer' }}>
+                  {label}
+                </button>
+              ))}
+            </div>
+            {timePreference === 'ANYTIME' && suggestedTimePreference !== 'ANYTIME' && <div style={{ fontSize: 10, color: '#64748b', marginTop: 5 }}>Suggested: {suggestedTimePreference.toLowerCase()}</div>}
+          </div>
+        )}
         {taskTitle.trim() && taskHorizon === 'CUSTOM' && (
           <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8, marginTop: 9 }}>
             <label style={{ fontSize: 10, color: '#94a3b8' }}>

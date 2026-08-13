@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { getSessionFromRequest } from '../../../../lib/session';
 import { getUserById } from '../../../../lib/db';
 import { resolveTzOffsetMinutes } from '../../../../lib/timezone';
-import { findOptimalTaskTimes, recommendTaskSlot, PlanningHorizon } from '../../../../../../packages/recommendation/src/dailyAssistant';
+import { findOptimalTaskTimes, recommendTaskSlot, PlanningHorizon, TimePreference } from '../../../../../../packages/recommendation/src/dailyAssistant';
 
 export async function POST(req: NextRequest) {
   const session = getSessionFromRequest(req);
@@ -17,6 +17,7 @@ export async function POST(req: NextRequest) {
   const horizon = String(body?.horizon || 'TODAY') as PlanningHorizon;
   const customStartDate = body?.customStartDate ? String(body.customStartDate) : undefined;
   const customEndDate = body?.customEndDate ? String(body.customEndDate) : undefined;
+  const timePreference = String(body?.timePreference || 'ANYTIME') as TimePreference;
   const requestedStartMinute = body?.requestedStartMinute === undefined ? undefined : Number(body.requestedStartMinute);
 
   if (!taskTitle) {
@@ -36,7 +37,7 @@ export async function POST(req: NextRequest) {
   };
   const recommendation = horizon === 'NOW' || horizon === 'TODAY'
     ? recommendTaskSlot(taskTitle, assistantContext, durationMinutes, requestedStartMinute)
-    : findOptimalTaskTimes(taskTitle, assistantContext, durationMinutes, horizon, customStartDate, customEndDate);
+    : findOptimalTaskTimes(taskTitle, assistantContext, durationMinutes, horizon, customStartDate, customEndDate, timePreference);
 
   return NextResponse.json(recommendation);
 }

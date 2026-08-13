@@ -107,6 +107,7 @@ export interface TaskSlotRecommendation {
 }
 
 export type PlanningHorizon = 'NOW' | 'TODAY' | 'TOMORROW' | 'WEEKEND' | 'SEVEN_DAYS' | 'CUSTOM';
+export type TimePreference = 'ANYTIME' | 'MORNING' | 'AFTERNOON' | 'EVENING' | 'NIGHT' | 'WORK_HOURS';
 
 export function computeAssistantWindows(context: DailyAssistantContext): WindowSpan[] {
   const localDate = localDateForContext(context);
@@ -274,7 +275,8 @@ export function findOptimalTaskTimes(
   durationMinutes = 30,
   horizon: PlanningHorizon = 'TODAY',
   customStartDate?: string,
-  customEndDate?: string
+  customEndDate?: string,
+  timePreference: TimePreference = 'ANYTIME'
 ): TaskSlotRecommendation {
   const safeDuration = Math.min(360, Math.max(15, Math.round(durationMinutes)));
   const cleanTitle = normalizeTaskTitle(taskTitle);
@@ -306,6 +308,7 @@ export function findOptimalTaskTimes(
     const dayStart = horizon === 'NOW' ? localDay.getUTCHours() * 60 + localDay.getUTCMinutes() : 0;
     const maxStart = 1440 - safeDuration;
     for (let start = dayStart; start <= maxStart; start += 15) {
+      if (!matchesTimePreference(start, timePreference)) continue;
       const score = scoreContinuousBlock(candidates, profile, start, start + safeDuration);
       if (score < 0) continue;
       const startsAtLocal = localDateTimeForMinute(dayContext.now, start);
@@ -326,6 +329,16 @@ export function findOptimalTaskTimes(
   if (!best) return { ...recommendTaskSlot(cleanTitle, context, safeDuration), planningOptions: [] };
   const base = recommendTaskSlot(cleanTitle, { ...context, now: new Date(context.now.getTime() + (dayOffset * 86400000)) }, safeDuration, parseTime(best.startTime));
   return { ...base, planningOptions: ranked };
+}
+
+function matchesTimePreference(startMinute: number, preference: TimePreference): boolean {
+  const hour = Math.floor(startMinute / 60);
+  if (preference === 'MORNING') return hour >= 5 && hour < 12;
+  if (preference === 'AFTERNOON') return hour >= 12 && hour < 17;
+  if (preference === 'EVENING') return hour >= 17 && hour < 21;
+  if (preference === 'NIGHT') return hour >= 21 || hour < 5;
+  if (preference === 'WORK_HOURS') return hour >= 9 && hour < 18;
+  return true;
 }
 
 function buildDateOffsets(current: Date, startDate: string, endDate: string): number[] {
