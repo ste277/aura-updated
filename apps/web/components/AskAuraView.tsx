@@ -1,10 +1,12 @@
 'use client';
 
-import React, { useState } from 'react';
+import React, { useMemo, useState } from 'react';
 
 interface Message {
   sender: 'user' | 'aura';
   text: string;
+  responseType?: string;
+  actions?: string[];
 }
 
 export interface UserChartContext {
@@ -38,13 +40,27 @@ export function AskAuraView({
     },
   ]);
 
-  const promptChips = [
-    'Is this a good time to work out?',
-    'Can I start an important task now?',
-    'Is this a good time for a meeting?',
-    'Should I avoid anything right now?',
-    'When is the best time to meditate?',
-  ];
+  const promptChips = useMemo(() => {
+    const windowName = activeWindow.replace(/_/g, ' ').toLowerCase();
+    if (windowName.includes('rahu') || windowName.includes('yama')) {
+      return [
+        'What should I do with the rest of my time?',
+        'Should I avoid anything right now?',
+        'When is my next good window?',
+        'What can I do to prepare?',
+      ];
+    }
+    return [
+      'What should I do right now?',
+      'Is this a good time to work out?',
+      'Can I start an important task now?',
+      'When is the best time for deep work?',
+      'Should I avoid anything right now?',
+      "What's my best window today?",
+    ];
+  }, [activeWindow]);
+
+  const recentQuestions = messages.filter((message) => message.sender === 'user').slice(-3).reverse();
 
   const handleSend = async (textToSend?: string) => {
     const query = textToSend || input;
@@ -63,9 +79,10 @@ export function AskAuraView({
       const res = await fetch('/api/ask-aura', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          prompt: query,
-          activeWindow,
+          body: JSON.stringify({
+            prompt: query,
+            conversation: messages.slice(-8),
+            activeWindow,
           cityName,
           userName,
           lagnaSign: userChart?.lagnaSign,
@@ -75,7 +92,18 @@ export function AskAuraView({
 
       if (!res.body) throw new Error('No streaming response body available');
 
-      // Read response chunks token-by-token
+      const contentType = res.headers.get('content-type') || '';
+      if (contentType.includes('application/json')) {
+        const decision = await res.json();
+        setMessages((prev) => {
+          const next = [...prev];
+          next[next.length - 1] = { sender: 'aura', text: decision.text || 'I could not form a recommendation.', responseType: decision.responseType, actions: decision.actions };
+          return next;
+        });
+        return;
+      }
+
+      // Read response chunks token-by-token for the optional language layer.
       const reader = res.body.getReader();
       const decoder = new TextDecoder();
       let accumulatedText = '';
@@ -140,7 +168,7 @@ export function AskAuraView({
             fontFamily: 'sans-serif',
           }}
         >
-          AI Panchang & scheduling companion •{' '}
+          Your personal Panchang & timing guide •{' '}
           <span
             style={{
               color: 'var(--as-abhijit, #4ade80)',
@@ -151,6 +179,31 @@ export function AskAuraView({
             {activeWindow.replace(/_/g, ' ').toUpperCase()}
           </span>
         </p>
+      </div>
+
+      {/* Structured current context */}
+      <div style={{ background: 'var(--as-surface-raised, #0f172a)', border: '1px solid rgba(74, 222, 128, 0.25)', borderRadius: 14, padding: 14 }}>
+        <div style={{ fontSize: 10, color: '#4ade80', textTransform: 'uppercase', letterSpacing: '0.05em', fontWeight: 800 }}>Now</div>
+        <div style={{ display: 'flex', alignItems: 'baseline', gap: 8, marginTop: 6 }}>
+          <strong style={{ fontSize: 15, color: '#f8fafc' }}>{activeWindow.replace(/_/g, ' ')}</strong>
+          <span style={{ fontSize: 11, color: '#b6c2d1' }}>Current Panchang window</span>
+        </div>
+        <div style={{ fontSize: 11, color: '#dbe7f4', marginTop: 5, lineHeight: 1.4 }}>
+          Ask about an activity, the best time today, or what to focus on next.
+        </div>
+      </div>
+
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+        <span style={{ fontSize: 10, color: '#38bdf8', textTransform: 'uppercase', letterSpacing: '0.05em', fontWeight: 800 }}>Aura suggests</span>
+        <button
+          type="button"
+          disabled={loading}
+          onClick={() => handleSend(promptChips[0])}
+          style={{ background: 'rgba(56, 189, 248, 0.08)', border: '1px solid rgba(56, 189, 248, 0.22)', borderRadius: 10, padding: '11px 12px', textAlign: 'left', color: '#e2e8f0', fontSize: 12, fontWeight: 700, cursor: loading ? 'default' : 'pointer', opacity: loading ? 0.6 : 1 }}
+        >
+          {promptChips[0]}
+          <span style={{ display: 'block', color: '#94a3b8', fontSize: 10, fontWeight: 400, marginTop: 4 }}>Get a recommendation based on your current window.</span>
+        </button>
       </div>
 
       {/* Chat History Container */}
@@ -191,7 +244,21 @@ export function AskAuraView({
                   : 'none',
             }}
           >
-            {msg.text || (loading && index === messages.length - 1 ? '...' : '')}
+            {msg.responseType && (
+              <div style={{ fontSize: 9, color: '#7dd3fc', textTransform: 'uppercase', letterSpacing: '0.05em', fontWeight: 800, marginBottom: 6 }}>
+                {msg.responseType.replace(/_/g, ' ')}
+              </div>
+            )}
+            <div style={{ whiteSpace: 'pre-line' }}>{msg.text || (loading && index === messages.length - 1 ? '...' : '')}</div>
+            {msg.actions && msg.actions.length > 0 && (
+              <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', marginTop: 9 }}>
+                {msg.actions.map((action) => (
+                  <span key={action} style={{ border: '1px solid rgba(56, 189, 248, 0.3)', borderRadius: 999, color: '#7dd3fc', fontSize: 9, fontWeight: 800, padding: '4px 7px' }}>
+                    {action.replace(/_/g, ' ')}
+                  </span>
+                ))}
+              </div>
+            )}
           </div>
         ))}
         {loading && messages[messages.length - 1]?.text === '' && (
@@ -256,6 +323,17 @@ export function AskAuraView({
           ))}
         </div>
       </div>
+
+      {recentQuestions.length > 0 && (
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+          <span style={{ fontSize: 10, fontFamily: 'monospace', textTransform: 'uppercase', color: '#94a3b8', letterSpacing: '0.05em', fontWeight: 600 }}>Recent</span>
+          {recentQuestions.map((question, index) => (
+            <button key={`${question.text}-${index}`} type="button" disabled={loading} onClick={() => handleSend(question.text)} style={{ background: 'transparent', border: 'none', color: '#b6c2d1', fontSize: 11, textAlign: 'left', padding: '2px 0', cursor: loading ? 'default' : 'pointer' }}>
+              {question.text}
+            </button>
+          ))}
+        </div>
+      )}
 
       {/* Input Bar */}
       <div

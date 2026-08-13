@@ -1,15 +1,34 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { listHabitLogs } from '@/lib/db';
+import { getUserById } from '@/lib/db';
 import { getSessionFromRequest } from '@/lib/session';
+import { resolveTzOffsetMinutes } from '@/lib/timezone';
+import { buildDailyBriefing, recommendTaskSlot } from '../../../../../packages/recommendation/src/dailyAssistant';
 
 export const runtime = 'nodejs';
+
+interface AuraDecisionResponse {
+  intent: string;
+  responseType: 'ACTIVITY_RECOMMENDATIONS' | 'ACTIVITY_CHECK' | 'BEST_WINDOW' | 'DAY_OVERVIEW' | 'CAUTION';
+  text: string;
+  activity?: string;
+  currentWindow: { type: string };
+  recommendation?: {
+    type: string;
+    start: string;
+    end: string;
+    label: string;
+    reason: string;
+  };
+  actions: string[];
+}
 
 export async function POST(req: NextRequest) {
   try {
     const session = getSessionFromRequest(req);
     const userId = session?.userId || 'steve277';
 
-    const { prompt, activeWindow, cityName, userName } = await req.json();
+    const { prompt, activeWindow, cityName, userName, conversation = [] } = await req.json();
 
     if (!prompt) {
       return NextResponse.json({ error: 'Prompt is required' }, { status: 400 });
@@ -17,6 +36,8 @@ export async function POST(req: NextRequest) {
 
     const windowClean = activeWindow ? activeWindow.replace('_', ' ').toUpperCase() : 'NEUTRAL';
     const lower = prompt.toLowerCase();
+    const intent = detectIntent(lower);
+    const user = await getUserById(userId).catch(() => null);
 
     // 1. Fetch recent user habit logs from PostgreSQL
     let recentLogsText = 'None logged yet today';
@@ -36,6 +57,15 @@ export async function POST(req: NextRequest) {
     } catch (dbErr) {
       console.warn('Could not load habit logs for Aura context:', dbErr);
     }
+
+    const deterministicAnswer = buildDeterministicAnswer({
+      intent,
+      prompt,
+      activeWindow: windowClean,
+      cityName: cityName || user?.cityName || 'your location',
+      user,
+    });
+    if (deterministicAnswer) return NextResponse.json(deterministicAnswer);
 
     const apiKey = process.env.GEMINI_API_KEY;
 
@@ -95,10 +125,15 @@ User Name: ${userName || 'User'}
 Current Location: ${cityName || 'Chennai'}
 Active Solar Window: ${windowClean}
 Recent Logged Activities Today: ${recentLogsText}
+Detected Intent: ${intent}
+Recent Conversation: ${JSON.stringify(Array.isArray(conversation) ? conversation.slice(-8) : [])}
 
 Guidelines:
 - Provide clear, grounding, and actionable advice tailored to the active Panchang energy window.
 - Reference their recent activities if relevant to their query.
+- Treat this as a deterministic timing guide, not a general-purpose chatbot. Answer the detected intent directly.
+- Preserve context from the recent conversation when the user asks a follow-up without repeating the activity or duration.
+- Vary the response shape: use a clear yes/no assessment for activity checks, a best-window response for timing questions, and a short list for what-to-do questions.
 - Keep responses concise and focused (3 sentences or less).
 `;
 
@@ -162,4 +197,98 @@ Guidelines:
     console.error('Error in Ask Aura route:', err);
     return NextResponse.json({ error: 'Failed to process request' }, { status: 500 });
   }
+}
+
+function detectIntent(prompt: string): string {
+  if (/(what should i do|what can i do|what do i focus|best use of my time)/.test(prompt)) return 'WHAT_TO_DO_NOW';
+  if (/(avoid|not ideal|friction)/.test(prompt)) return 'CHECK_AVOID';
+  if (/(when|best time|best window|schedule)/.test(prompt)) return 'FIND_BEST_TIME';
+  if (/(good time|can i|should i|okay to|is now)/.test(prompt)) return 'CHECK_ACTIVITY';
+  if (/(why|reason)/.test(prompt)) return 'WHY_RECOMMENDATION';
+  if (/(today|day|rest of my)/.test(prompt)) return 'DAY_SUMMARY';
+  return 'UNKNOWN';
+}
+
+function buildDeterministicAnswer({
+  intent,
+  prompt,
+  activeWindow,
+  cityName,
+  user,
+}: {
+  intent: string;
+  prompt: string;
+  activeWindow: string;
+  cityName: string;
+  user: { latitude: number; longitude: number; timezone: string } | null;
+}): AuraDecisionResponse | null {
+  const lower = prompt.toLowerCase();
+  if (!user) return null;
+  const now = new Date();
+  const context = {
+    now,
+    latitude: user.latitude,
+    longitude: user.longitude,
+    timezone: user.timezone,
+    tzOffsetMinutes: resolveTzOffsetMinutes(user.timezone, now),
+  };
+  const scoreText = activeWindow.includes('RAHU') || activeWindow.includes('YAMA') ? 'a cautious period' : 'a usable period';
+
+  if (intent === 'WHAT_TO_DO_NOW') {
+    return {
+      intent,
+      responseType: 'ACTIVITY_RECOMMENDATIONS',
+      text: `🟢 Good time for steady progress.\n\nYou're currently in ${activeWindow} — ${scoreText}.\n\nI'd suggest:\n🧠 Deep work or focused execution\n📋 Documentation and process work\n🚶 A short walk or stretch\n\nBest fit: existing tasks that need steady progress.`,
+      currentWindow: { type: activeWindow },
+      actions: ['SLOT_TASK', 'VIEW_TIMELINE'],
+    };
+  }
+
+  if (intent === 'FIND_BEST_WINDOW_TODAY' || (intent === 'FIND_BEST_TIME' && /(best window today|strongest window|best window)/.test(lower))) {
+    const briefing = buildDailyBriefing(context);
+    return {
+      intent,
+      responseType: 'DAY_OVERVIEW',
+      text: `⭐ Today's strongest window\n\n${briefing.peakWindow.name} · ${briefing.peakWindow.startTime} - ${briefing.peakWindow.endTime}\n\nYour strongest timing opportunity today for important decisions, deep focus, and high-impact work.\n\nOther favorable windows:\n${briefing.otherFavorableWindows.slice(0, 3).map((window) => `• ${window.name} · ${window.startTime} - ${window.endTime}`).join('\n')}`,
+      currentWindow: { type: activeWindow },
+      recommendation: { type: 'ABHIJIT', start: briefing.peakWindow.startTime, end: briefing.peakWindow.endTime, label: briefing.peakWindow.name, reason: 'Strongest timing opportunity today.' },
+      actions: ['VIEW_TIMELINE', 'SCHEDULE'],
+    };
+  }
+
+  if (intent === 'CHECK_ACTIVITY' || intent === 'FIND_BEST_TIME') {
+    const recommendation = recommendTaskSlot(prompt, context, extractDuration(prompt));
+    const stateLead = recommendation.recommendationState === 'BEST_NOW'
+      ? '🟢 Good time now.'
+      : recommendation.recommendationState === 'AVOID'
+        ? '🔴 Better later.'
+        : '⭐ Best window for this activity.';
+    return {
+      intent,
+      responseType: intent === 'CHECK_ACTIVITY' ? 'ACTIVITY_CHECK' : 'BEST_WINDOW',
+      text: `${stateLead}\n\n${recommendation.activityIcon} ${recommendation.activityType}\n${recommendation.bestWindow.startTime} - ${recommendation.bestWindow.endTime} · ${recommendation.bestWindow.label}\n\n${recommendation.bestWindow.reason}\n\n${recommendation.recommendationState === 'BEST_NOW' ? 'Go ahead now.' : 'Schedule this window from Slot My Task.'}`,
+      activity: recommendation.activityType,
+      currentWindow: { type: activeWindow },
+      recommendation: { type: recommendation.bestWindow.label, start: recommendation.bestWindow.startTime, end: recommendation.bestWindow.endTime, label: recommendation.bestWindow.label, reason: recommendation.bestWindow.reason },
+      actions: recommendation.recommendationState === 'BEST_NOW' ? ['SLOT_TASK', 'VIEW_TIMELINE'] : ['SCHEDULE', 'VIEW_TIMELINE'],
+    };
+  }
+
+  if (intent === 'CHECK_AVOID') {
+    const isCaution = activeWindow.includes('RAHU') || activeWindow.includes('YAMA');
+    return {
+      intent,
+      responseType: 'CAUTION',
+      text: isCaution ? `🔴 I'd avoid starting high-stakes work right now.\n\n${activeWindow} is better for review, admin, preparation, and recovery. Save major launches or irreversible decisions for the next favorable window.` : `🟢 Nothing significant needs avoiding right now.\n\n${activeWindow} supports steady progress. Keep the task focused and avoid overcommitting your attention.`,
+      currentWindow: { type: activeWindow },
+      actions: ['VIEW_TIMELINE'],
+    };
+  }
+
+  return null;
+}
+
+function extractDuration(prompt: string): number {
+  const match = prompt.match(/(\d+)\s*(?:min|minute|minutes)/i);
+  return match ? Number(match[1]) : 30;
 }
