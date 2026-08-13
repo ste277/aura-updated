@@ -1,7 +1,7 @@
 'use client';
 
 import React, { useState, useRef } from 'react';
-import { getActionCards, ActionCard } from '../../../packages/recommendation/src/actionCards';
+import { getActionCards, getActivityDiscoveryCards, ActionCard } from '../../../packages/recommendation/src/actionCards';
 import { LoggedEntryItem } from './CalendarViewSection';
 import { triggerHaptic } from '../lib/haptics';
 
@@ -155,16 +155,7 @@ export function TimelineView({
   // Derive recommended action cards safely
   const recommendedCards: ActionCard[] = React.useMemo(() => {
     if (!selectedWindowName) return [];
-
-    const clean = selectedWindowName.replace('_', ' ').toUpperCase();
-    let queryKey = selectedWindowName;
-    if (clean.includes('RAHU')) queryKey = 'RAHU';
-    else if (clean.includes('BRAHMA')) queryKey = 'BRAHMA';
-    else if (clean.includes('ABHIJIT')) queryKey = 'ABHIJIT';
-    else if (clean.includes('GULIKA')) queryKey = 'GULIKA';
-    else if (clean.includes('YAMA')) queryKey = 'YAMA';
-
-    const res = getActionCards(queryKey);
+    const res = getActivityDiscoveryCards(selectedWindowName, 6);
     return Array.isArray(res) ? res : [];
   }, [selectedWindowName]);
 
@@ -368,7 +359,9 @@ export function TimelineView({
               {meta.title}
             </div>
             <div style={{ fontSize: 11, color: '#94a3b8', marginTop: 2, fontFamily: 'sans-serif' }}>
-              Recommended actions tuned to current energy vibrations
+              {meta.title.startsWith('Neutral')
+                ? 'Flexible window · good for everyday activities, habits, and steady progress.'
+                : 'Activities that fit the qualities of this Panchang window.'}
             </div>
 
             {/* Render Logged Badges inside Banner if Any exist */}
@@ -403,7 +396,7 @@ export function TimelineView({
         <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
             <span style={{ fontSize: 10, fontFamily: 'monospace', textTransform: 'uppercase', color: '#94a3b8', letterSpacing: '0.05em' }}>
-              Recommended for you
+              Good choices for this window
             </span>
           </div>
 
@@ -443,7 +436,7 @@ export function TimelineView({
                           marginBottom: 4,
                         }}
                       >
-                        BEST MATCH
+                        BEST FIT
                       </span>
                     )}
                     <h3 style={{ fontSize: 13, fontWeight: 700, color: '#fff', margin: 0, fontFamily: 'sans-serif' }}>
@@ -455,7 +448,15 @@ export function TimelineView({
                   </div>
                 </div>
 
-                <div style={{ display: 'flex', justifyContent: 'flex-end' }}>
+                <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 7 }}>
+                  {onAskAuraClick && !isAlreadyLogged && (
+                    <button
+                      onClick={() => onAskAuraClick()}
+                      style={{ background: 'rgba(56, 189, 248, 0.1)', color: '#7dd3fc', border: '1px solid rgba(56, 189, 248, 0.3)', borderRadius: 8, padding: '6px 12px', fontSize: 11, fontWeight: 700, cursor: 'pointer', fontFamily: 'sans-serif' }}
+                    >
+                      Plan
+                    </button>
+                  )}
                   <button
                     onClick={() => handleQuickLog(card.title)}
                     disabled={isAlreadyLogged || !!loggingTitle}
@@ -478,7 +479,7 @@ export function TimelineView({
                       fontFamily: 'sans-serif',
                     }}
                   >
-                    {isAlreadyLogged ? '✓ Logged' : isLoggingThis ? 'Logging...' : 'Log this'}
+                    {isAlreadyLogged ? '✓ Logged' : isLoggingThis ? 'Logging...' : 'Log'}
                   </button>
                 </div>
               </div>
@@ -772,7 +773,7 @@ export function TimelineView({
 
               <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', paddingLeft: 22, minHeight: 16 }}>
                 <span style={{ fontSize: 10, color: isActive ? '#86efac' : isCompleted ? '#64748b' : '#94a3b8', fontWeight: 700 }}>
-                  {isActive ? '● NOW' : isCompleted ? '✓ Complete' : '○ Upcoming'}
+                  {isActive ? '● NOW' : isCompleted ? 'Passed' : 'Upcoming'}
                 </span>
                 {windowLogs.length > 0 && <span style={{ fontSize: 10, color: isCompleted ? '#64748b' : '#86efac' }}>{windowLogs.length} logged</span>}
               </div>
