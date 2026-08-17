@@ -16,7 +16,7 @@ browser → Cloudflare (proxied, orange cloud) → nginx :443 on vf-1
 | App env (secrets) | `/srv/aura/app.env` — never committed |
 | DB password | `/srv/aura/db_password` |
 | Postgres data | `/srv/aura/pgdata` (bind mount — survives container rebuilds) |
-| TLS (Cloudflare Origin cert) | `/srv/aura/tls/origin.crt`, `origin.key` |
+| TLS | reuses `/etc/nginx/certs/voyforge-origin.{pem,key}` (existing wildcard Cloudflare Origin cert) |
 | nginx site | `/etc/nginx/conf.d/aura.conf` (from `deploy/nginx-aura.conf`) |
 | Backups | `/srv/aura/backups/` via `backup.sh` cron 03:30 |
 
@@ -33,8 +33,9 @@ browser → Cloudflare (proxied, orange cloud) → nginx :443 on vf-1
    # GEMINI_API_KEY=   (optional)
    ```
    Note the DB host is `db` — the compose service name — not localhost.
-4. Cloudflare Origin Certificate → `/srv/aura/tls/origin.crt` + `origin.key` (chmod 600).
-   Zone SSL mode must be **Full (strict)**.
+4. TLS: nothing to create — the site config references the wildcard Cloudflare Origin
+   cert already on the box (`/etc/nginx/certs/voyforge-origin.{pem,key}`, covers
+   `*.voyforge.com`; zone SSL mode already Full (strict)).
 5. `sudo cp deploy/nginx-aura.conf /etc/nginx/conf.d/aura.conf && sudo nginx -t && sudo systemctl reload nginx`
    (reload is zero-downtime for the other sites).
 6. `bash deploy/deploy.sh` — builds the image, starts db, applies migrations, starts app, waits for health.
