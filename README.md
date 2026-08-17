@@ -71,13 +71,17 @@ Run the PostgreSQL migrations in sequential order.
 # Create database if it doesn't already exist
 createdb auraschedule_dev
 
-# Apply all 6 migrations in order
+# Apply all 10 migrations in order
 psql -d auraschedule_dev -f prisma/migrations/0001_init/migration.sql
 psql -d auraschedule_dev -f prisma/migrations/0002_visit_log/migration.sql
 psql -d auraschedule_dev -f prisma/migrations/0003_timezone_column/migration.sql
 psql -d auraschedule_dev -f prisma/migrations/0004_habits/migration.sql
 psql -d auraschedule_dev -f prisma/migrations/0005_birth_profile/migration.sql
 psql -d auraschedule_dev -f prisma/migrations/0006_timestamptz_fix/migration.sql
+psql -d auraschedule_dev -f prisma/migrations/0007_custom_cities/migration.sql
+psql -d auraschedule_dev -f prisma/migrations/0008_daily_reflections/migration.sql
+psql -d auraschedule_dev -f prisma/migrations/0009_habit_log_duration/migration.sql
+psql -d auraschedule_dev -f prisma/migrations/0010_habit_log_notes/migration.sql
 
 
 
