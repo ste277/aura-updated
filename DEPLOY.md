@@ -48,6 +48,9 @@ Railway's project settings.
      direct-link responses, which you do NOT want in production — real users
      can't see a JSON response, they need an actual email. Set these before
      inviting anyone.
+   - `GEMINI_API_KEY` (optional) — enables real LLM answers in Ask Aura.
+     Without it, deterministic panchang answers still work and the rest falls
+     back to canned guidance.
 6. Apply the schema to the new production database once, before first deploy:
    ```bash
    psql "$DATABASE_URL" -f prisma/migrations/0001_init/migration.sql
