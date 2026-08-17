@@ -7,7 +7,7 @@
 // Setup: sign up at resend.com, verify a sending domain (or use their shared
 // onboarding domain for testing), set RESEND_API_KEY and RESEND_FROM_ADDRESS.
 
-export async function sendMagicLinkEmail(toEmail: string, verifyUrl: string): Promise<void> {
+export async function sendMagicLinkEmail(toEmail: string, verifyUrl: string, code?: string): Promise<void> {
   const apiKey = process.env.RESEND_API_KEY;
   const fromAddress = process.env.RESEND_FROM_ADDRESS ?? 'AuraSchedule <onboarding@resend.dev>';
 
@@ -24,9 +24,12 @@ export async function sendMagicLinkEmail(toEmail: string, verifyUrl: string): Pr
     body: JSON.stringify({
       from: fromAddress,
       to: [toEmail],
-      subject: 'Your AuraSchedule sign-in link',
-      html: buildEmailHtml(verifyUrl),
-      text: `Sign in to AuraSchedule: ${verifyUrl}\n\nThis link expires in 15 minutes.`,
+      subject: code ? `${code} is your AuraSchedule sign-in code` : 'Your AuraSchedule sign-in link',
+      html: buildEmailHtml(verifyUrl, code),
+      text:
+        `Sign in to AuraSchedule: ${verifyUrl}` +
+        (code ? `\n\nOr enter this code in the app: ${code}` : '') +
+        `\n\nThis link and code expire in 15 minutes.`,
     }),
   });
 
@@ -36,16 +39,25 @@ export async function sendMagicLinkEmail(toEmail: string, verifyUrl: string): Pr
   }
 }
 
-function buildEmailHtml(verifyUrl: string): string {
+function buildEmailHtml(verifyUrl: string, code?: string): string {
+  const codeBlock = code
+    ? `
+      <p style="color: #555; margin: 24px 0 8px;">On the mobile app? Enter this code instead:</p>
+      <div style="font-family: monospace; font-size: 28px; font-weight: 700; letter-spacing: 6px;
+                  background: #f4f4f5; border-radius: 8px; padding: 12px 20px; display: inline-block;">
+        ${code}
+      </div>`
+    : '';
   return `
     <div style="font-family: sans-serif; max-width: 480px; margin: 0 auto; padding: 24px;">
       <h2 style="margin-bottom: 8px;">Sign in to AuraSchedule</h2>
-      <p style="color: #555; margin-bottom: 24px;">Click the button below. This link expires in 15 minutes.</p>
+      <p style="color: #555; margin-bottom: 24px;">Click the button below. This link and code expire in 15 minutes.</p>
       <a href="${verifyUrl}"
          style="display: inline-block; padding: 12px 20px; background: #1f4d34; color: #4ade80;
                 text-decoration: none; border-radius: 8px; font-weight: 600;">
         Sign in
       </a>
+      ${codeBlock}
       <p style="color: #999; font-size: 12px; margin-top: 24px;">
         If you didn't request this, you can safely ignore this email.
       </p>
