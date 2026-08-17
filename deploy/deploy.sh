@@ -11,75 +11,85 @@
 # /srv/aura/* — never the Parley containers, /srv/parley, or other nginx sites.
 set -euo pipefail
 
-REPO_DIR="$(cd "$(dirname "$0")/.." && pwd)"
-STACK_DIR=/srv/aura
-COMPOSE=(docker compose -p aura -f "$STACK_DIR/compose.yml")
-REQUESTED="${1:-}"
+# The body runs inside a function so bash parses the WHOLE script before
+# executing any of it: deploy.sh checks out a different release mid-run,
+# which replaces this file on disk. Without the wrapper bash would continue
+# reading the new file from its old byte offset — arbitrary misbehaviour.
+main() {
 
-cd "$REPO_DIR"
-if [ "$REQUESTED" != "--current" ]; then
-  echo "==> fetching release tags"
-  git fetch --tags --quiet origin
-  if [ -z "$REQUESTED" ]; then
-    # newest by version order (v1.10.0 > v1.9.0), not by tag creation date
-    REQUESTED="$(git tag -l 'v*' --sort=-v:refname | head -1)"
-    [ -n "$REQUESTED" ] || { echo "!!  no release tags found; cut one first (see deploy/README.md)"; exit 1; }
+  REPO_DIR="$(cd "$(dirname "$0")/.." && pwd)"
+  STACK_DIR=/srv/aura
+  COMPOSE=(docker compose -p aura -f "$STACK_DIR/compose.yml")
+  REQUESTED="${1:-}"
+
+  cd "$REPO_DIR"
+  if [ "$REQUESTED" != "--current" ]; then
+    echo "==> fetching release tags"
+    git fetch --tags --quiet origin
+    if [ -z "$REQUESTED" ]; then
+      # newest by version order (v1.10.0 > v1.9.0), not by tag creation date
+      REQUESTED="$(git tag -l 'v*' --sort=-v:refname | head -1)"
+      [ -n "$REQUESTED" ] || { echo "!!  no release tags found; cut one first (see deploy/README.md)"; exit 1; }
+    fi
+    git rev-parse -q --verify "refs/tags/$REQUESTED" >/dev/null \
+      || { echo "!!  tag '$REQUESTED' does not exist"; exit 1; }
+    echo "==> checking out release $REQUESTED"
+    git checkout --quiet --detach "refs/tags/$REQUESTED"
   fi
-  git rev-parse -q --verify "refs/tags/$REQUESTED" >/dev/null \
-    || { echo "!!  tag '$REQUESTED' does not exist"; exit 1; }
-  echo "==> checking out release $REQUESTED"
-  git checkout --quiet --detach "refs/tags/$REQUESTED"
-fi
-VERSION="$(git describe --tags --always)"
-echo "==> deploying $VERSION ($(git rev-parse --short HEAD))"
+  VERSION="$(git describe --tags --always)"
+  echo "==> deploying $VERSION ($(git rev-parse --short HEAD))"
 
-echo "==> pre-flight: secret hygiene"
-for f in "$STACK_DIR/app.env" "$STACK_DIR/db_password"; do
-  [ -f "$f" ] || { echo "!!  missing $f (see deploy/README.md)"; exit 1; }
-  perms="$(stat -c %a "$f")"
-  [ "$perms" = "600" ] || { echo "!!  $f is mode $perms; expected 600"; exit 1; }
-done
-# A short or missing AUTH_SECRET makes the app fail closed at boot (lib/auth.ts);
-# catch it here instead of after the container is swapped.
-secret_len="$(awk -F= '/^AUTH_SECRET=/{print length($2)}' "$STACK_DIR/app.env")"
-[ "${secret_len:-0}" -ge 32 ] || { echo "!!  AUTH_SECRET in app.env is missing or under 32 chars"; exit 1; }
-echo "    ok"
+  echo "==> pre-flight: secret hygiene"
+  for f in "$STACK_DIR/app.env" "$STACK_DIR/db_password"; do
+    [ -f "$f" ] || { echo "!!  missing $f (see deploy/README.md)"; exit 1; }
+    perms="$(stat -c %a "$f")"
+    [ "$perms" = "600" ] || { echo "!!  $f is mode $perms; expected 600"; exit 1; }
+  done
+  # A short or missing AUTH_SECRET makes the app fail closed at boot (lib/auth.ts);
+  # catch it here instead of after the container is swapped.
+  secret_len="$(awk -F= '/^AUTH_SECRET=/{print length($2)}' "$STACK_DIR/app.env")"
+  [ "${secret_len:-0}" -ge 32 ] || { echo "!!  AUTH_SECRET in app.env is missing or under 32 chars"; exit 1; }
+  echo "    ok"
 
-echo "==> building image"
-docker build -f "$REPO_DIR/deploy/Dockerfile" -t "aura-app:$VERSION" -t aura-app:latest "$REPO_DIR"
+  echo "==> building image"
+  docker build -f "$REPO_DIR/deploy/Dockerfile" -t "aura-app:$VERSION" -t aura-app:latest "$REPO_DIR"
 
-echo "==> syncing compose file"
-cp "$REPO_DIR/deploy/compose.yml" "$STACK_DIR/compose.yml"
+  echo "==> syncing compose file"
+  cp "$REPO_DIR/deploy/compose.yml" "$STACK_DIR/compose.yml"
 
-echo "==> starting database"
-"${COMPOSE[@]}" up -d db
-until docker exec aura-db pg_isready -U aura -d aura >/dev/null 2>&1; do sleep 1; done
+  echo "==> starting database"
+  "${COMPOSE[@]}" up -d db
+  until docker exec aura-db pg_isready -U aura -d aura >/dev/null 2>&1; do sleep 1; done
 
-echo "==> applying migrations (idempotent: each file is skipped if already recorded)"
-docker exec aura-db psql -U aura -d aura -v ON_ERROR_STOP=1 -q \
-  -c 'CREATE TABLE IF NOT EXISTS "_migrations" (name TEXT PRIMARY KEY, applied_at TIMESTAMPTZ NOT NULL DEFAULT now());'
-for dir in "$REPO_DIR"/apps/web/prisma/migrations/*/; do
-  name="$(basename "$dir")"
-  applied="$(docker exec aura-db psql -U aura -d aura -tAc "SELECT 1 FROM \"_migrations\" WHERE name='$name'")"
-  if [ "$applied" = "1" ]; then continue; fi
-  echo "    applying $name"
-  docker exec -i aura-db psql -U aura -d aura -v ON_ERROR_STOP=1 -q < "$dir/migration.sql"
-  docker exec aura-db psql -U aura -d aura -q -c "INSERT INTO \"_migrations\"(name) VALUES ('$name')"
-done
+  echo "==> applying migrations (idempotent: each file is skipped if already recorded)"
+  docker exec aura-db psql -U aura -d aura -v ON_ERROR_STOP=1 -q \
+    -c 'CREATE TABLE IF NOT EXISTS "_migrations" (name TEXT PRIMARY KEY, applied_at TIMESTAMPTZ NOT NULL DEFAULT now());'
+  for dir in "$REPO_DIR"/apps/web/prisma/migrations/*/; do
+    name="$(basename "$dir")"
+    applied="$(docker exec aura-db psql -U aura -d aura -tAc "SELECT 1 FROM \"_migrations\" WHERE name='$name'")"
+    if [ "$applied" = "1" ]; then continue; fi
+    echo "    applying $name"
+    docker exec -i aura-db psql -U aura -d aura -v ON_ERROR_STOP=1 -q < "$dir/migration.sql"
+    docker exec aura-db psql -U aura -d aura -q -c "INSERT INTO \"_migrations\"(name) VALUES ('$name')"
+  done
 
-echo "==> starting app"
-"${COMPOSE[@]}" up -d app
+  echo "==> starting app"
+  "${COMPOSE[@]}" up -d app
 
-echo "==> waiting for health"
-for i in $(seq 1 30); do
-  if curl -fsS http://127.0.0.1:3001/api/health >/dev/null 2>&1; then
-    echo "    healthy: $(curl -fsS http://127.0.0.1:3001/api/health)"
-    echo "$VERSION $(date -Is)" >> "$STACK_DIR/deploys.log"
-    echo "==> deployed $VERSION"
-    exit 0
-  fi
-  sleep 2
-done
-echo "!!  app did not become healthy; recent logs:"
-docker logs --tail 50 aura-app
-exit 1
+  echo "==> waiting for health"
+  for i in $(seq 1 30); do
+    if curl -fsS http://127.0.0.1:3001/api/health >/dev/null 2>&1; then
+      echo "    healthy: $(curl -fsS http://127.0.0.1:3001/api/health)"
+      echo "$VERSION $(date -Is)" >> "$STACK_DIR/deploys.log"
+      echo "==> deployed $VERSION"
+      exit 0
+    fi
+    sleep 2
+  done
+  echo "!!  app did not become healthy; recent logs:"
+  docker logs --tail 50 aura-app
+  exit 1
+
+}
+
+main "$@"
