@@ -309,6 +309,65 @@ export async function getOrCreateUserForAuth(email: string): Promise<User> {
   return upsertUserByEmail({ email, ...DEFAULT_SIGNUP_LOCATION });
 }
 
+// --- One-time sign-in codes (AuthCode table, migration 0011) ----------------
+
+export interface AuthCodeRow {
+  id: string;
+  email: string;
+  codeHash: string;
+  attempts: number;
+  expiresAt: Date;
+  consumedAt: Date | null;
+}
+
+export async function createAuthCode(input: {
+  email: string;
+  codeHash: string;
+  expiresAt: Date;
+  requestIp?: string | null;
+}): Promise<void> {
+  await pool.query(
+    `INSERT INTO "AuthCode" (id, email, "codeHash", "expiresAt", "requestIp")
+     VALUES ($1, $2, $3, $4, $5)`,
+    [randomUUID(), input.email.toLowerCase(), input.codeHash, input.expiresAt, input.requestIp ?? null]
+  );
+}
+
+/** Requests in the last `windowMinutes` from this email or IP — rate limiting. */
+export async function countRecentAuthRequests(
+  email: string,
+  requestIp: string | null,
+  windowMinutes: number
+): Promise<number> {
+  const result = await pool.query(
+    `SELECT COUNT(*)::int AS count FROM "AuthCode"
+     WHERE "createdAt" > now() - ($1 || ' minutes')::interval
+       AND (email = $2 OR ("requestIp" IS NOT NULL AND "requestIp" = $3))`,
+    [windowMinutes, email.toLowerCase(), requestIp]
+  );
+  return result.rows[0].count;
+}
+
+/** Latest unconsumed, unexpired code row for this email. */
+export async function findActiveAuthCode(email: string): Promise<AuthCodeRow | null> {
+  const result = await pool.query(
+    `SELECT id, email, "codeHash", attempts, "expiresAt", "consumedAt"
+     FROM "AuthCode"
+     WHERE email = $1 AND "consumedAt" IS NULL AND "expiresAt" > now()
+     ORDER BY "createdAt" DESC LIMIT 1`,
+    [email.toLowerCase()]
+  );
+  return result.rows[0] ?? null;
+}
+
+export async function incrementAuthCodeAttempts(id: string): Promise<void> {
+  await pool.query(`UPDATE "AuthCode" SET attempts = attempts + 1 WHERE id = $1`, [id]);
+}
+
+export async function consumeAuthCode(id: string): Promise<void> {
+  await pool.query(`UPDATE "AuthCode" SET "consumedAt" = now() WHERE id = $1`, [id]);
+}
+
 export async function createHabitLog(input: {
   userId: string;
   activityTitle: string;
