@@ -25,6 +25,15 @@ import { LoginScreen } from '../components/LoginScreen';
 import { LocationPicker } from '../components/LocationPicker';
 import { useCurrentMinuteOfDay } from '../lib/useCurrentMinuteOfDay';
 import { resolveTzOffsetMinutes, getDatePartsInTimezone } from '../lib/timezone';
+import { Capacitor } from '@capacitor/core';
+import { NotificationSettings } from '../components/NotificationSettings';
+import {
+  loadNotificationPrefs,
+  saveNotificationPrefs,
+  syncWindowNotifications,
+  DEFAULT_NOTIFICATION_PREFS,
+  NotificationPrefs,
+} from '../lib/windowNotifications';
 
 interface SessionUser {
   id: string;
@@ -55,11 +64,21 @@ export default function DashboardPage() {
 
   const [activeTab, setActiveTab] = useState<'home' | 'timeline' | 'ask' | 'calendar' | 'profile' | 'chart'>('home');
 
+  const [notificationPrefs, setNotificationPrefs] = useState<NotificationPrefs>(DEFAULT_NOTIFICATION_PREFS);
+
   useEffect(() => {
     setMounted(true);
+    setNotificationPrefs(loadNotificationPrefs());
 
-    // Request notification permissions for Solar Shift Push Alerts
-    if (typeof window !== 'undefined' && 'Notification' in window && Notification.permission === 'default') {
+    // Web-only permission request (in-app toast alerts). In the native shells
+    // the LocalNotifications plugin runs its own permission flow when window
+    // alerts are scheduled — see syncWindowNotifications.
+    if (
+      typeof window !== 'undefined' &&
+      !Capacitor.isNativePlatform() &&
+      'Notification' in window &&
+      Notification.permission === 'default'
+    ) {
       Notification.requestPermission();
     }
 
@@ -205,6 +224,18 @@ export default function DashboardPage() {
   const windows = useMemo(() => {
     return solar ? computePanchangWindows(solar, weekday) : [];
   }, [solar, weekday]);
+
+  // Keep the device's scheduled window alerts in sync with today's windows
+  // and the user's per-window preferences. Reads the current minute through a
+  // ref so the per-minute clock tick doesn't cancel/reschedule every minute.
+  const minuteRef = React.useRef(currentMinuteOfDay);
+  minuteRef.current = currentMinuteOfDay;
+  useEffect(() => {
+    if (!user || windows.length === 0) return;
+    syncWindowNotifications(windows, minuteRef.current, notificationPrefs).catch((err) => {
+      console.warn('Could not sync window notifications:', err);
+    });
+  }, [user?.id, windows, notificationPrefs]);
 
   // Active window type lookup
   const activeType = useMemo(() => {
@@ -595,7 +626,20 @@ export default function DashboardPage() {
           />
         )}
 
-        {activeTab === 'profile' && <InsightsView logEntries={logEntries} assistantInsight={assistantInsight} />}
+        {activeTab === 'profile' && (
+          <>
+            <div style={{ marginBottom: 16 }}>
+              <NotificationSettings
+                prefs={notificationPrefs}
+                onChange={(next) => {
+                  setNotificationPrefs(next);
+                  saveNotificationPrefs(next);
+                }}
+              />
+            </div>
+            <InsightsView logEntries={logEntries} assistantInsight={assistantInsight} />
+          </>
+        )}
 
         {activeTab === 'chart' && <BirthChartSection />}
       </div>

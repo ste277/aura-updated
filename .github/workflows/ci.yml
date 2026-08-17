@@ -23,6 +23,8 @@ jobs:
         run: npx ts-node test/integration.test.ts
       - name: Run timezone test
         run: npx ts-node test/timezone.test.ts
+      - name: Run window notifications test
+        run: npx ts-node test/windowNotifications.test.ts
 
   web-build:
     name: Next.js production build
