@@ -11,28 +11,38 @@ export function LoginScreen({ onLoggedInCheck }: { onLoggedInCheck: () => void }
   const [verifying, setVerifying] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
+  // Both handlers must survive a rejected fetch: in the native shells the
+  // device is routinely offline, and an unhandled rejection would leave the
+  // button disabled on "Sending..." forever with no way to retry.
+  const OFFLINE_MESSAGE = "Couldn't reach the server. Check your connection and try again.";
+
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
     setStatus('sending');
     setError(null);
 
-    const res = await fetch('/api/auth/request-link', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ email }),
-    });
+    try {
+      const res = await fetch('/api/auth/request-link', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ email }),
+      });
 
-    if (!res.ok) {
       const data = await res.json().catch(() => null);
-      setError(data?.error ?? 'Something went wrong. Try again.');
-      setStatus('idle');
-      return;
-    }
+      if (!res.ok) {
+        setError(data?.error ?? `Sign-in request failed (${res.status}). Try again.`);
+        setStatus('idle');
+        return;
+      }
 
-    const data = await res.json();
-    setStatus('sent');
-    if (data.devLoginUrl) setDevLoginUrl(data.devLoginUrl);
-    if (data.devLoginCode) setDevLoginCode(data.devLoginCode);
+      setStatus('sent');
+      if (data?.devLoginUrl) setDevLoginUrl(data.devLoginUrl);
+      if (data?.devLoginCode) setDevLoginCode(data.devLoginCode);
+    } catch (err) {
+      console.error('request-link failed:', err);
+      setError(OFFLINE_MESSAGE);
+      setStatus('idle');
+    }
   }
 
   // The emailed link opens in the system browser, which is the wrong context
@@ -42,20 +52,26 @@ export function LoginScreen({ onLoggedInCheck }: { onLoggedInCheck: () => void }
     setVerifying(true);
     setError(null);
 
-    const res = await fetch('/api/auth/verify-code', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ email, code }),
-    });
+    try {
+      const res = await fetch('/api/auth/verify-code', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ email, code }),
+      });
 
-    setVerifying(false);
-    if (!res.ok) {
-      const data = await res.json().catch(() => null);
-      setError(data?.error ?? 'That code did not work. Try again.');
-      return;
+      if (!res.ok) {
+        const data = await res.json().catch(() => null);
+        setError(data?.error ?? `That code did not work (${res.status}). Try again.`);
+        return;
+      }
+
+      onLoggedInCheck();
+    } catch (err) {
+      console.error('verify-code failed:', err);
+      setError(OFFLINE_MESSAGE);
+    } finally {
+      setVerifying(false);
     }
-
-    onLoggedInCheck();
   }
 
   const inputStyle: React.CSSProperties = {
