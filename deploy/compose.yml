@@ -1,0 +1,55 @@
+# Production stack for vf-1. Run from /srv/aura on the server:
+#   docker compose -p aura -f compose.yml up -d
+#
+# Isolation from the other tenant (Parley) on this box is deliberate:
+# own compose project, own bridge network, own Postgres, own data dir,
+# own host port. Nothing here references /srv/parley or its containers.
+name: aura
+
+services:
+  db:
+    image: postgres:16-alpine
+    container_name: aura-db
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: aura
+      POSTGRES_USER: aura
+      POSTGRES_PASSWORD_FILE: /run/secrets/db_password
+    volumes:
+      # Data lives on the host, not in the container — survives rebuilds,
+      # image upgrades, and `compose down`. Same pattern as /srv/parley/pgdata.
+      - /srv/aura/pgdata:/var/lib/postgresql/data
+    secrets:
+      - db_password
+    networks: [aura]
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U aura -d aura"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    mem_limit: 512m
+    cpus: 1.0
+
+  app:
+    image: aura-app:latest
+    container_name: aura-app
+    restart: unless-stopped
+    env_file: /srv/aura/app.env
+    depends_on:
+      db:
+        condition: service_healthy
+    ports:
+      # localhost only — nginx on the host is the sole public entry point
+      - "127.0.0.1:3001:3000"
+    networks: [aura]
+    mem_limit: 768m
+    cpus: 1.5
+
+networks:
+  aura:
+    name: aura
+    driver: bridge
+
+secrets:
+  db_password:
+    file: /srv/aura/db_password
