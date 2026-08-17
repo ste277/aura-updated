@@ -40,14 +40,26 @@ browser → Cloudflare (proxied, orange cloud) → nginx :443 on vf-1
 6. `bash deploy/deploy.sh` — builds the image, starts db, applies migrations, starts app, waits for health.
 7. Cron: `30 3 * * * /srv/aura/backup.sh >> /srv/aura/backup.log 2>&1`
 
-## Every subsequent deploy
+## Releasing (production tracks tags, never `main`)
+
+Production only ever runs a **tagged release** — a specific, reviewed,
+CI-passed commit. `main` can move freely; nothing reaches vf-1 until it's
+tagged.
 
 ```bash
-ssh vf-1
-cd /srv/aura/src && git pull && bash deploy/deploy.sh
+# 1. Cut a release from origin/main (locally)
+bash deploy/release.sh v1.2.0 "Window notifications + code sign-in"
+
+# 2. Deploy that exact tag on the server
+ssh vf-1 'cd /srv/aura/src && bash deploy/deploy.sh v1.2.0'
 ```
 
-New migrations are applied automatically (tracked in the `_migrations` table).
+`deploy.sh` with no argument deploys the newest `v*` tag. New migrations are
+applied automatically (tracked in the `_migrations` table). Every deploy is
+appended to `/srv/aura/deploys.log`; images are tagged `aura-app:<version>`
+so rolling back is `bash deploy/deploy.sh v1.1.0`.
+
+Note that first-time setup step 6 above becomes `bash deploy/deploy.sh <tag>`.
 
 ## Isolation rules (Parley shares this machine)
 
