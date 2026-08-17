@@ -24,7 +24,7 @@ import { BirthChartSection } from '../components/BirthChartSection';
 import { LoginScreen } from '../components/LoginScreen';
 import { LocationPicker } from '../components/LocationPicker';
 import { useCurrentMinuteOfDay } from '../lib/useCurrentMinuteOfDay';
-import { resolveTzOffsetMinutes } from '../lib/timezone';
+import { resolveTzOffsetMinutes, getDatePartsInTimezone } from '../lib/timezone';
 
 interface SessionUser {
   id: string;
@@ -166,43 +166,40 @@ export default function DashboardPage() {
     return () => window.removeEventListener('online', syncOfflineLogs);
   }, [loadUserDataAndLogs]);
 
-  // Precise Date-Filtered Titles for Activities Logged TODAY
-  const loggedActivitiesToday = useMemo(() => {
-    const now = new Date();
-    const year = now.getFullYear();
-    const month = now.getMonth();
-    const day = now.getDate();
+  // The panchang day is defined by the USER'S timezone (their selected city),
+  // never the browser clock or UTC: the weekday selects the Rahu/Gulika/Yama
+  // segments and the date drives the ephemeris, so a NY browser with a Chennai
+  // profile must still compute Chennai's "today".
+  const userTz = user?.timezone ?? FALLBACK_TZ;
+  const todayParts = mounted ? getDatePartsInTimezone(userTz, new Date()) : null;
+  const todayDateStr = todayParts?.dateStr ?? '';
 
+  // Precise Date-Filtered Titles for Activities Logged TODAY (user-tz day)
+  const loggedActivitiesToday = useMemo(() => {
+    if (!todayDateStr) return [];
     return logEntries
-      .filter((entry) => {
-        const d = new Date(entry.loggedAt);
-        return (
-          d.getFullYear() === year &&
-          d.getMonth() === month &&
-          d.getDate() === day
-        );
-      })
+      .filter(
+        (entry) =>
+          getDatePartsInTimezone(userTz, new Date(entry.loggedAt)).dateStr === todayDateStr
+      )
       .map((entry) => entry.activityTitle.trim().toLowerCase());
-  }, [logEntries]);
+  }, [logEntries, userTz, todayDateStr]);
 
   // Date-memoized Solar Ephemeris Calculation
-  const todayDateStr = mounted ? new Date().toISOString().slice(0, 10) : '';
-
   const solar = useMemo(() => {
-    if (!user || !mounted) return null;
-    const now = new Date();
-    const tzOffsetMinutes = resolveTzOffsetMinutes(user.timezone, now);
+    if (!user || !mounted || !todayParts) return null;
+    const tzOffsetMinutes = resolveTzOffsetMinutes(user.timezone, new Date());
     return computeSolarEphemeris({
-      year: now.getFullYear(),
-      month: now.getMonth() + 1,
-      day: now.getDate(),
+      year: todayParts.year,
+      month: todayParts.month,
+      day: todayParts.day,
       latitude: user.latitude,
       longitude: user.longitude,
       tzOffsetMinutes,
     });
   }, [user?.latitude, user?.longitude, user?.timezone, todayDateStr, mounted]);
 
-  const weekday = (mounted ? new Date().getDay() : 0) as WeekdayIndex;
+  const weekday = (todayParts?.weekday ?? 0) as WeekdayIndex;
 
   // Memoize static daily Panchang windows
   const windows = useMemo(() => {
