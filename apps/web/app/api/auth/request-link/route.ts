@@ -14,16 +14,24 @@ function requestIp(req: NextRequest): string | null {
 }
 
 export async function POST(req: NextRequest) {
-  const { email } = await req.json();
-  if (!email || typeof email !== 'string') {
+  let body: { email?: unknown };
+  try {
+    body = await req.json();
+  } catch {
+    return NextResponse.json({ error: 'Malformed request body.' }, { status: 400 });
+  }
+  const rawEmail = body.email;
+  if (!rawEmail || typeof rawEmail !== 'string' || rawEmail.length > 254 || !rawEmail.includes('@')) {
     return NextResponse.json({ error: 'A valid email is required.' }, { status: 400 });
   }
+  const email = rawEmail.trim().toLowerCase();
 
   const ip = requestIp(req);
   const recent = await countRecentAuthRequests(email, ip, RATE_LIMIT_WINDOW_MINUTES);
   if (recent >= RATE_LIMIT_MAX_REQUESTS) {
+    console.warn('[auth] request-link rate-limited', { email, ip, recent });
     return NextResponse.json(
-      { error: 'Too many sign-in requests. Wait a few minutes and try again.' },
+      { error: `Too many sign-in requests. Try again in about ${RATE_LIMIT_WINDOW_MINUTES} minutes.` },
       { status: 429 }
     );
   }
@@ -41,25 +49,43 @@ export async function POST(req: NextRequest) {
   // surfaces where following the link would land the session in the wrong
   // browser context (the native app shells) — the code can be typed anywhere.
   const code = generateAuthCode();
-  await createAuthCode({
+  const codeRow = {
     email,
     codeHash: hashAuthCode(email, code),
     expiresAt: new Date(Date.now() + AUTH_CODE_TTL_MS),
     requestIp: ip,
-  });
+  };
 
-  // If RESEND_API_KEY is set, send a real email. Otherwise fall back to returning
-  // the link and code directly — dev-only convenience for local testing without
-  // an email provider configured.
   if (process.env.RESEND_API_KEY) {
+    // Send first, persist second: the AuthCode row is also what the rate
+    // limiter counts, so a failed send must not consume one of the user's
+    // three slots — otherwise "try again" during a provider outage locks
+    // them out.
     try {
       await sendMagicLinkEmail(email, verifyUrl, code);
-      return NextResponse.json({ sent: true });
     } catch (err) {
-      console.error('Failed to send magic link email:', err);
-      return NextResponse.json({ error: 'Could not send the email. Try again.' }, { status: 502 });
+      console.error('[auth] sign-in email send failed', { email, err });
+      return NextResponse.json(
+        { error: "Our email provider isn't responding right now. Please try again in a few minutes." },
+        { status: 502 }
+      );
     }
+    await createAuthCode(codeRow);
+    return NextResponse.json({ sent: true });
   }
 
+  // No email provider configured. In development, return the link and code
+  // directly for local testing. In production this is a misconfiguration and
+  // must fail closed — returning credentials here would let anyone sign in
+  // as any email address.
+  if (process.env.NODE_ENV === 'production') {
+    console.error('[auth] RESEND_API_KEY is not configured; refusing to expose sign-in credentials');
+    return NextResponse.json(
+      { error: 'Sign-in email is not configured on this server.' },
+      { status: 500 }
+    );
+  }
+
+  await createAuthCode(codeRow);
   return NextResponse.json({ devLoginUrl: verifyUrl, devLoginCode: code });
 }

@@ -210,14 +210,20 @@ export async function upsertUserByEmail(input: {
   longitude: number;
   timezone: string;
 }): Promise<User> {
-  const existing = await pool.query('SELECT * FROM "User" WHERE email = $1', [input.email]);
+  // Emails are case-insensitive identities. Both auth flows lowercase before
+  // hashing/looking up codes, so the user lookup must too — otherwise
+  // Foo@x.com and foo@x.com become two accounts and the second login lands
+  // in an empty one. Migration 0012 enforces this with a unique index on
+  // lower(email).
+  const email = input.email.trim().toLowerCase();
+  const existing = await pool.query('SELECT * FROM "User" WHERE lower(email) = $1', [email]);
   if (existing.rows.length > 0) return existing.rows[0];
 
   const id = randomUUID();
   const result = await pool.query(
     `INSERT INTO "User" (id, email, "cityName", latitude, longitude, timezone)
      VALUES ($1, $2, $3, $4, $5, $6) RETURNING *`,
-    [id, input.email, input.cityName, input.latitude, input.longitude, input.timezone]
+    [id, email, input.cityName, input.latitude, input.longitude, input.timezone]
   );
   return result.rows[0];
 }
