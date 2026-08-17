@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { createMagicLinkToken, generateAuthCode, hashAuthCode, AUTH_CODE_TTL_MS } from '../../../../lib/auth';
 import { createAuthCode, countRecentAuthRequests } from '../../../../lib/db';
-import { sendMagicLinkEmail } from '../../../../lib/email';
+import { sendMagicLinkEmail, isEmailConfigured } from '../../../../lib/email';
 
 // Sign-in requests allowed per email/IP per window — enough for a user who
 // mistypes twice, low enough to make email-bombing and code-guessing via
@@ -56,7 +56,7 @@ export async function POST(req: NextRequest) {
     requestIp: ip,
   };
 
-  if (process.env.RESEND_API_KEY) {
+  if (isEmailConfigured()) {
     // Send first, persist second: the AuthCode row is also what the rate
     // limiter counts, so a failed send must not consume one of the user's
     // three slots — otherwise "try again" during a provider outage locks
@@ -79,7 +79,7 @@ export async function POST(req: NextRequest) {
   // must fail closed — returning credentials here would let anyone sign in
   // as any email address.
   if (process.env.NODE_ENV === 'production') {
-    console.error('[auth] RESEND_API_KEY is not configured; refusing to expose sign-in credentials');
+    console.error('[auth] no email provider configured (MOM_API_KEY+MOM_FROM_EMAIL or RESEND_API_KEY); refusing to expose sign-in credentials');
     return NextResponse.json(
       { error: 'Sign-in email is not configured on this server.' },
       { status: 500 }
