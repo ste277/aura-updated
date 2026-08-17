@@ -6,7 +6,7 @@ apps/web/android
 apps/web/ios
 apps/web/cap-shell
 apps/web/assets
-apps/web/public/aura-dev.apk
+apps/web/public/*.apk
 apps/web/dev-server.log
 apps/web/tsconfig.tsbuildinfo
 .git

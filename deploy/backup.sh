@@ -6,13 +6,19 @@
 # protects against bad migrations and operator error, not disk loss.
 set -euo pipefail
 
+# Dumps contain every user's email, birth data and activity history, and this
+# box is shared with another tenant — keep them owner-only.
+umask 077
+
 OUT_DIR=/srv/aura/backups
 KEEP_DAYS=14
 mkdir -p "$OUT_DIR"
+chmod 700 "$OUT_DIR"
 
 stamp="$(date +%Y%m%d-%H%M%S)"
 file="$OUT_DIR/aura-$stamp.sql.gz"
 docker exec aura-db pg_dump -U aura -d aura --no-owner | gzip > "$file"
+chmod 600 "$file"
 echo "$(date -Is) wrote $file ($(du -h "$file" | cut -f1))"
 
 find "$OUT_DIR" -name 'aura-*.sql.gz' -mtime +"$KEEP_DAYS" -delete

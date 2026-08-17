@@ -33,6 +33,18 @@ fi
 VERSION="$(git describe --tags --always)"
 echo "==> deploying $VERSION ($(git rev-parse --short HEAD))"
 
+echo "==> pre-flight: secret hygiene"
+for f in "$STACK_DIR/app.env" "$STACK_DIR/db_password"; do
+  [ -f "$f" ] || { echo "!!  missing $f (see deploy/README.md)"; exit 1; }
+  perms="$(stat -c %a "$f")"
+  [ "$perms" = "600" ] || { echo "!!  $f is mode $perms; expected 600"; exit 1; }
+done
+# A short or missing AUTH_SECRET makes the app fail closed at boot (lib/auth.ts);
+# catch it here instead of after the container is swapped.
+secret_len="$(awk -F= '/^AUTH_SECRET=/{print length($2)}' "$STACK_DIR/app.env")"
+[ "${secret_len:-0}" -ge 32 ] || { echo "!!  AUTH_SECRET in app.env is missing or under 32 chars"; exit 1; }
+echo "    ok"
+
 echo "==> building image"
 docker build -f "$REPO_DIR/deploy/Dockerfile" -t "aura-app:$VERSION" -t aura-app:latest "$REPO_DIR"
 

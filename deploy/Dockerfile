@@ -23,7 +23,7 @@ COPY apps/web ./apps/web
 RUN cd apps/web && npx prisma generate \
  && NEXT_TELEMETRY_DISABLED=1 \
     DATABASE_URL=postgresql://build:build@localhost:5432/build \
-    AUTH_SECRET=build-placeholder \
+    AUTH_SECRET=build-time-placeholder-never-used-at-runtime \
     npm run build
 
 # ---- runtime: only the standalone server output -----------------------------
