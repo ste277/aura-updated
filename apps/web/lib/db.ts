@@ -360,12 +360,37 @@ export async function findActiveAuthCode(email: string): Promise<AuthCodeRow | n
   return result.rows[0] ?? null;
 }
 
-export async function incrementAuthCodeAttempts(id: string): Promise<void> {
-  await pool.query(`UPDATE "AuthCode" SET attempts = attempts + 1 WHERE id = $1`, [id]);
+/**
+ * Atomically spends one verification attempt and returns the code hash to
+ * compare against, or null once the attempt cap is reached. The gate and the
+ * increment are a single UPDATE so N concurrent guesses cost N attempts —
+ * a read-check-increment sequence would let parallel requests all see
+ * attempts=0 and bypass the cap entirely.
+ */
+export async function spendAuthCodeAttempt(
+  id: string,
+  maxAttempts: number
+): Promise<{ codeHash: string } | null> {
+  const result = await pool.query(
+    `UPDATE "AuthCode" SET attempts = attempts + 1
+     WHERE id = $1 AND attempts < $2 AND "consumedAt" IS NULL
+     RETURNING "codeHash"`,
+    [id, maxAttempts]
+  );
+  return result.rows[0] ?? null;
 }
 
-export async function consumeAuthCode(id: string): Promise<void> {
-  await pool.query(`UPDATE "AuthCode" SET "consumedAt" = now() WHERE id = $1`, [id]);
+/**
+ * Marks the code used. Returns false if it was already consumed — the caller
+ * must NOT issue a session in that case, or two concurrent redemptions of the
+ * same code would both mint sessions.
+ */
+export async function consumeAuthCode(id: string): Promise<boolean> {
+  const result = await pool.query(
+    `UPDATE "AuthCode" SET "consumedAt" = now() WHERE id = $1 AND "consumedAt" IS NULL RETURNING id`,
+    [id]
+  );
+  return result.rowCount === 1;
 }
 
 export async function createHabitLog(input: {
