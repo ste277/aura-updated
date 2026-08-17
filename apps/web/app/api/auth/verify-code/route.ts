@@ -8,7 +8,7 @@ import {
 } from '../../../../lib/auth';
 import {
   findActiveAuthCode,
-  incrementAuthCodeAttempts,
+  spendAuthCodeAttempt,
   consumeAuthCode,
   getOrCreateUserForAuth,
 } from '../../../../lib/db';
@@ -30,19 +30,27 @@ export async function POST(req: NextRequest) {
     );
   }
 
-  if (row.attempts >= AUTH_CODE_MAX_ATTEMPTS) {
+  // Every verification request — right or wrong, sequential or parallel —
+  // costs exactly one attempt; null means the cap is spent.
+  const attempt = await spendAuthCodeAttempt(row.id, AUTH_CODE_MAX_ATTEMPTS);
+  if (!attempt) {
     return NextResponse.json(
       { error: 'Too many incorrect attempts. Request a new code.' },
       { status: 429 }
     );
   }
 
-  if (!authCodeHashesEqual(hashAuthCode(email, code.trim()), row.codeHash)) {
-    await incrementAuthCodeAttempts(row.id);
+  if (!authCodeHashesEqual(hashAuthCode(email, code.trim()), attempt.codeHash)) {
     return NextResponse.json({ error: 'Incorrect code. Check the email and try again.' }, { status: 401 });
   }
 
-  await consumeAuthCode(row.id);
+  // Single-use: only the request that flips consumedAt gets a session. A
+  // concurrent duplicate submission loses the race and is rejected here.
+  const consumed = await consumeAuthCode(row.id);
+  if (!consumed) {
+    return NextResponse.json({ error: 'This code was already used. Request a new one.' }, { status: 401 });
+  }
+
   const user = await getOrCreateUserForAuth(email);
   const sessionToken = createSessionToken(user.id, user.email);
 
