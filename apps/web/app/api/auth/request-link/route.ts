@@ -29,8 +29,13 @@ export async function POST(req: NextRequest) {
   }
 
   const token = createMagicLinkToken(email);
-  const origin = req.nextUrl.origin;
-  const verifyUrl = `${origin}/api/auth/verify?token=${encodeURIComponent(token)}`;
+  // Build the link from the PUBLIC origin, not req.nextUrl.origin — behind a
+  // tunnel or reverse proxy nextUrl reports the internal address
+  // (localhost:3001), which would put a dead link in the email.
+  const host = req.headers.get('x-forwarded-host') ?? req.headers.get('host') ?? req.nextUrl.host;
+  const proto =
+    req.headers.get('x-forwarded-proto') ?? (host.startsWith('localhost') ? 'http' : 'https');
+  const verifyUrl = `${proto}://${host}/api/auth/verify?token=${encodeURIComponent(token)}`;
 
   // The 6-digit code travels in the same email as the link. It exists for
   // surfaces where following the link would land the session in the wrong
