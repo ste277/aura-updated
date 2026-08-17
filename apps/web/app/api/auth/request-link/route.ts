@@ -10,7 +10,13 @@ const RATE_LIMIT_WINDOW_MINUTES = 10;
 const RATE_LIMIT_MAX_REQUESTS = 3;
 
 function requestIp(req: NextRequest): string | null {
-  return req.headers.get('x-forwarded-for')?.split(',')[0]?.trim() ?? null;
+  // Only headers our own proxy sets can be trusted. nginx appends to
+  // X-Forwarded-For (`$proxy_add_x_forwarded_for`), so its LEFTMOST entry is
+  // whatever the client sent — using it would let anyone rotate the value to
+  // bypass the per-IP limit, or spoof a victim's IP to lock them out.
+  // X-Real-IP is set by nginx from $remote_addr, which the real_ip module has
+  // already resolved to the true visitor via CF-Connecting-IP.
+  return req.headers.get('x-real-ip')?.trim() || null;
 }
 
 export async function POST(req: NextRequest) {

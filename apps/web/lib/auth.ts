@@ -4,7 +4,23 @@ import { createHmac, timingSafeEqual, randomInt } from 'crypto';
 // a JWT library, since all we need is "tamper-evident payload with an expiry."
 // Swap for `jose` or NextAuth if the auth surface grows beyond magic links.
 
-const SECRET = process.env.AUTH_SECRET ?? 'dev-only-insecure-secret-change-me';
+// Anyone holding this key can mint a session for any email address, so a
+// missing or weak value must never silently fall back in production — that
+// would sign tokens with a key published in this repo.
+const MIN_SECRET_LENGTH = 32;
+
+function resolveSecret(): string {
+  const configured = process.env.AUTH_SECRET;
+  if (configured && configured.length >= MIN_SECRET_LENGTH) return configured;
+  if (process.env.NODE_ENV === 'production') {
+    throw new Error(
+      `AUTH_SECRET must be set to at least ${MIN_SECRET_LENGTH} characters in production.`
+    );
+  }
+  return 'dev-only-insecure-secret-change-me';
+}
+
+const SECRET = resolveSecret();
 
 function base64url(input: Buffer | string): string {
   return Buffer.from(input).toString('base64url');
