@@ -5,3 +5,5 @@ dist/
 .env.local
 .vercel
 .env*
+.next-dev/
+.DS_Store

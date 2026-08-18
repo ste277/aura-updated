@@ -68,6 +68,51 @@ export function getSecondOfDayInTimezone(ianaTimezone: string, date: Date): numb
   return hour * 3600 + minute * 60 + second;
 }
 
+export interface ZonedDateParts {
+  year: number;
+  /** 1-12, matching SolarInput's convention (not Date#getMonth's 0-11) */
+  month: number;
+  day: number;
+  /** 0=Sunday..6=Saturday, matching Date#getDay and WeekdayIndex */
+  weekday: number;
+  /** "YYYY-MM-DD" in the given timezone */
+  dateStr: string;
+}
+
+const WEEKDAY_INDEX: Record<string, number> = {
+  Sun: 0, Mon: 1, Tue: 2, Wed: 3, Thu: 4, Fri: 5, Sat: 6,
+};
+
+/**
+ * The calendar date and weekday *in the given IANA timezone* for an instant.
+ * The panchang windows for "today" hinge on these: the weekday selects the
+ * Rahu Kalam / Gulika / Yama segments, and the date drives the ephemeris.
+ * Deriving them from the browser clock (or worse, `toISOString()`, which is
+ * UTC) computes the wrong day's windows whenever the user's browser timezone
+ * and their selected city differ — or, for the UTC variant, for every user
+ * east of Greenwich during their late evening.
+ */
+export function getDatePartsInTimezone(ianaTimezone: string, date: Date): ZonedDateParts {
+  const dtf = new Intl.DateTimeFormat('en-US', {
+    timeZone: ianaTimezone,
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+    weekday: 'short',
+  });
+  const parts = dtf.formatToParts(date);
+  const get = (type: Intl.DateTimeFormatPartTypes) =>
+    parts.find((p) => p.type === type)?.value ?? '';
+
+  const year = parseInt(get('year'), 10);
+  const month = parseInt(get('month'), 10);
+  const day = parseInt(get('day'), 10);
+  const weekday = WEEKDAY_INDEX[get('weekday')] ?? 0;
+  const dateStr = `${String(year).padStart(4, '0')}-${String(month).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
+
+  return { year, month, day, weekday, dateStr };
+}
+
 /**
  * Converts a local date+time (as typed into a birth-data form, e.g. "1990-03-15"
  * + "14:30" in "Asia/Kolkata") to the actual UTC instant it represents. One

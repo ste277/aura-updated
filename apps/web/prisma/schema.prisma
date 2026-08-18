@@ -93,6 +93,23 @@ model Habit {
   logs             HabitLog[]
 }
 
+// One-time 6-digit sign-in codes (see migration 0011). Kept server-side for
+// attempt counting and single-use semantics; the code itself is never stored,
+// only an HMAC of it.
+model AuthCode {
+  id         String    @id @default(uuid())
+  email      String
+  codeHash   String
+  requestIp  String?
+  attempts   Int       @default(0)
+  expiresAt  DateTime  @db.Timestamptz(3)
+  consumedAt DateTime? @db.Timestamptz(3)
+  createdAt  DateTime  @default(now()) @db.Timestamptz(3)
+
+  @@index([email, createdAt])
+  @@index([requestIp, createdAt])
+}
+
 model DailyReflection {
   id              String   @id @default(uuid())
   userId          String

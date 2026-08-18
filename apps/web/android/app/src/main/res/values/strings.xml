@@ -1,0 +1,7 @@
+<?xml version='1.0' encoding='utf-8'?>
+<resources>
+    <string name="app_name">AuraSchedule</string>
+    <string name="title_activity_main">AuraSchedule</string>
+    <string name="package_name">com.greenarrow.auraschedule</string>
+    <string name="custom_url_scheme">com.greenarrow.auraschedule</string>
+</resources>

@@ -26,7 +26,10 @@ interface AuraDecisionResponse {
 export async function POST(req: NextRequest) {
   try {
     const session = getSessionFromRequest(req);
-    const userId = session?.userId || 'steve277';
+    if (!session) {
+      return NextResponse.json({ error: 'Not authenticated.' }, { status: 401 });
+    }
+    const userId = session.userId;
 
     const { prompt, activeWindow, cityName, userName, conversation = [] } = await req.json();
 
@@ -137,11 +140,13 @@ Guidelines:
 - Keep responses concise and focused (3 sentences or less).
 `;
 
+    // Key goes in a header, never the URL — query strings end up in proxy and
+    // server logs.
     const response = await fetch(
-      `https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:streamGenerateContent?alt=sse&key=${apiKey}`,
+      `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:streamGenerateContent?alt=sse`,
       {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: { 'Content-Type': 'application/json', 'x-goog-api-key': apiKey },
         body: JSON.stringify({
           contents: [
             {

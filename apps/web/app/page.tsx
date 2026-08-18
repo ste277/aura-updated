@@ -24,7 +24,16 @@ import { BirthChartSection } from '../components/BirthChartSection';
 import { LoginScreen } from '../components/LoginScreen';
 import { LocationPicker } from '../components/LocationPicker';
 import { useCurrentMinuteOfDay } from '../lib/useCurrentMinuteOfDay';
-import { resolveTzOffsetMinutes } from '../lib/timezone';
+import { resolveTzOffsetMinutes, getDatePartsInTimezone } from '../lib/timezone';
+import { Capacitor } from '@capacitor/core';
+import { NotificationSettings } from '../components/NotificationSettings';
+import {
+  loadNotificationPrefs,
+  saveNotificationPrefs,
+  syncWindowNotifications,
+  DEFAULT_NOTIFICATION_PREFS,
+  NotificationPrefs,
+} from '../lib/windowNotifications';
 
 interface SessionUser {
   id: string;
@@ -55,11 +64,21 @@ export default function DashboardPage() {
 
   const [activeTab, setActiveTab] = useState<'home' | 'timeline' | 'ask' | 'calendar' | 'profile' | 'chart'>('home');
 
+  const [notificationPrefs, setNotificationPrefs] = useState<NotificationPrefs>(DEFAULT_NOTIFICATION_PREFS);
+
   useEffect(() => {
     setMounted(true);
+    setNotificationPrefs(loadNotificationPrefs());
 
-    // Request notification permissions for Solar Shift Push Alerts
-    if (typeof window !== 'undefined' && 'Notification' in window && Notification.permission === 'default') {
+    // Web-only permission request (in-app toast alerts). In the native shells
+    // the LocalNotifications plugin runs its own permission flow when window
+    // alerts are scheduled — see syncWindowNotifications.
+    if (
+      typeof window !== 'undefined' &&
+      !Capacitor.isNativePlatform() &&
+      'Notification' in window &&
+      Notification.permission === 'default'
+    ) {
       Notification.requestPermission();
     }
 
@@ -166,48 +185,57 @@ export default function DashboardPage() {
     return () => window.removeEventListener('online', syncOfflineLogs);
   }, [loadUserDataAndLogs]);
 
-  // Precise Date-Filtered Titles for Activities Logged TODAY
-  const loggedActivitiesToday = useMemo(() => {
-    const now = new Date();
-    const year = now.getFullYear();
-    const month = now.getMonth();
-    const day = now.getDate();
+  // The panchang day is defined by the USER'S timezone (their selected city),
+  // never the browser clock or UTC: the weekday selects the Rahu/Gulika/Yama
+  // segments and the date drives the ephemeris, so a NY browser with a Chennai
+  // profile must still compute Chennai's "today".
+  const userTz = user?.timezone ?? FALLBACK_TZ;
+  const todayParts = mounted ? getDatePartsInTimezone(userTz, new Date()) : null;
+  const todayDateStr = todayParts?.dateStr ?? '';
 
+  // Precise Date-Filtered Titles for Activities Logged TODAY (user-tz day)
+  const loggedActivitiesToday = useMemo(() => {
+    if (!todayDateStr) return [];
     return logEntries
-      .filter((entry) => {
-        const d = new Date(entry.loggedAt);
-        return (
-          d.getFullYear() === year &&
-          d.getMonth() === month &&
-          d.getDate() === day
-        );
-      })
+      .filter(
+        (entry) =>
+          getDatePartsInTimezone(userTz, new Date(entry.loggedAt)).dateStr === todayDateStr
+      )
       .map((entry) => entry.activityTitle.trim().toLowerCase());
-  }, [logEntries]);
+  }, [logEntries, userTz, todayDateStr]);
 
   // Date-memoized Solar Ephemeris Calculation
-  const todayDateStr = mounted ? new Date().toISOString().slice(0, 10) : '';
-
   const solar = useMemo(() => {
-    if (!user || !mounted) return null;
-    const now = new Date();
-    const tzOffsetMinutes = resolveTzOffsetMinutes(user.timezone, now);
+    if (!user || !mounted || !todayParts) return null;
+    const tzOffsetMinutes = resolveTzOffsetMinutes(user.timezone, new Date());
     return computeSolarEphemeris({
-      year: now.getFullYear(),
-      month: now.getMonth() + 1,
-      day: now.getDate(),
+      year: todayParts.year,
+      month: todayParts.month,
+      day: todayParts.day,
       latitude: user.latitude,
       longitude: user.longitude,
       tzOffsetMinutes,
     });
   }, [user?.latitude, user?.longitude, user?.timezone, todayDateStr, mounted]);
 
-  const weekday = (mounted ? new Date().getDay() : 0) as WeekdayIndex;
+  const weekday = (todayParts?.weekday ?? 0) as WeekdayIndex;
 
   // Memoize static daily Panchang windows
   const windows = useMemo(() => {
     return solar ? computePanchangWindows(solar, weekday) : [];
   }, [solar, weekday]);
+
+  // Keep the device's scheduled window alerts in sync with today's windows
+  // and the user's per-window preferences. Reads the current minute through a
+  // ref so the per-minute clock tick doesn't cancel/reschedule every minute.
+  const minuteRef = React.useRef(currentMinuteOfDay);
+  minuteRef.current = currentMinuteOfDay;
+  useEffect(() => {
+    if (!user || windows.length === 0) return;
+    syncWindowNotifications(windows, minuteRef.current, notificationPrefs).catch((err) => {
+      console.warn('Could not sync window notifications:', err);
+    });
+  }, [user?.id, windows, notificationPrefs]);
 
   // Active window type lookup
   const activeType = useMemo(() => {
@@ -598,7 +626,20 @@ export default function DashboardPage() {
           />
         )}
 
-        {activeTab === 'profile' && <InsightsView logEntries={logEntries} assistantInsight={assistantInsight} />}
+        {activeTab === 'profile' && (
+          <>
+            <div style={{ marginBottom: 16 }}>
+              <NotificationSettings
+                prefs={notificationPrefs}
+                onChange={(next) => {
+                  setNotificationPrefs(next);
+                  saveNotificationPrefs(next);
+                }}
+              />
+            </div>
+            <InsightsView logEntries={logEntries} assistantInsight={assistantInsight} />
+          </>
+        )}
 
         {activeTab === 'chart' && <BirthChartSection />}
       </div>

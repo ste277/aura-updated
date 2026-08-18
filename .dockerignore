@@ -1,0 +1,17 @@
+node_modules
+apps/web/node_modules
+apps/web/.next
+apps/web/.next-dev
+apps/web/android
+apps/web/ios
+apps/web/cap-shell
+apps/web/assets
+apps/web/public/*.apk
+apps/web/dev-server.log
+apps/web/tsconfig.tsbuildinfo
+.git
+tasks
+test
+**/.DS_Store
+**/.env*
+!**/.env.example

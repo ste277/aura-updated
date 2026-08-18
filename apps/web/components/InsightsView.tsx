@@ -7,6 +7,7 @@ export interface LoggedEntryItem {
   activityTitle: string;
   activeWindow: string;
   loggedAt: Date;
+  durationMinutes?: number;
   notes?: string | null;
 }
 
@@ -151,13 +152,16 @@ export function InsightsView({ logEntries = [], assistantInsight }: InsightsView
       }
     });
 
+    // All stats are real or zero — no placeholder values. Showing a fake
+    // "50 activities / 3-day streak" to a brand-new user would poison the
+    // product's core claim that insights come from the user's own data.
     const alignmentScore =
       totalActivities > 0
         ? Math.min(100, Math.max(0, Math.round(((auspiciousCount * 1.0 + neutralCount * 0.7) / totalActivities) * 100)))
-        : 62;
+        : 0;
 
-    const totalHours = (totalActivities * 25) / 60;
-    const formattedHours = totalHours > 0 ? `${totalHours.toFixed(1)} hrs` : '20.8 hrs';
+    const totalMinutes = logEntries.reduce((sum, e) => sum + (e.durationMinutes ?? 30), 0);
+    const formattedHours = `${(totalMinutes / 60).toFixed(1)} hrs`;
 
     const distribution = Object.entries(windowCounts).map(([winName, count]) => ({
       name: winName,
@@ -165,9 +169,43 @@ export function InsightsView({ logEntries = [], assistantInsight }: InsightsView
       percentage: totalActivities > 0 ? Math.round((count / totalActivities) * 100) : 0,
     }));
 
+    // Behavioral patterns computed from the user's actual logs. Hidden until
+    // there's enough data to say anything meaningful.
+    const patterns: { icon: string; color: string; title: string; text: string }[] = [];
+    if (totalActivities >= 3) {
+      const topWindow = Object.entries(windowCounts).sort((a, b) => b[1] - a[1])[0];
+      if (topWindow) {
+        patterns.push({
+          icon: '🎯',
+          color: '#4ade80',
+          title: 'Most-used window',
+          text: `${topWindow[1]} of your ${totalActivities} activities (${Math.round((topWindow[1] / totalActivities) * 100)}%) happen during ${topWindow[0]} windows.`,
+        });
+      }
+
+      const avgMinutes = Math.round(totalMinutes / totalActivities);
+      patterns.push({
+        icon: '⏱️',
+        color: '#38bdf8',
+        title: 'Session length',
+        text: `Your sessions average ${avgMinutes} minutes.`,
+      });
+
+      const todEntries = Object.entries(todCounts).sort((a, b) => b[1] - a[1]);
+      const topTod = todEntries[0];
+      if (topTod && topTod[1] > 0) {
+        patterns.push({
+          icon: '☀️',
+          color: '#facc15',
+          title: 'Time of day',
+          text: `${topTod[0].charAt(0).toUpperCase() + topTod[0].slice(1)} is your most consistent time — ${topTod[1]} of ${totalActivities} activities.`,
+        });
+      }
+    }
+
     return {
-      totalActivities: totalActivities || 50,
-      streak: streak || 3,
+      totalActivities,
+      streak,
       formattedHours,
       alignmentScore,
       distribution,
@@ -175,30 +213,11 @@ export function InsightsView({ logEntries = [], assistantInsight }: InsightsView
       heatmapDays,
       past7Days,
       todCounts,
+      patterns,
     };
   }, [logEntries]);
 
-  // Behavioral Patterns
-  const patterns = [
-    {
-      icon: '🏋️',
-      color: '#4ade80',
-      title: 'Workout Optimization',
-      text: 'You complete 78% more workouts during Steady Progress (Gulika) windows.',
-    },
-    {
-      icon: '📖',
-      color: '#38bdf8',
-      title: 'Deep Learning',
-      text: 'Learning sessions during Peak Productivity (Abhijit) average 45 minutes.',
-    },
-    {
-      icon: '☕',
-      color: '#facc15',
-      title: 'Evening Routine',
-      text: 'Evening is your most consistent time for reflection & planning. Great job!',
-    },
-  ];
+  const patterns = analytics.patterns;
 
   return (
     <div
@@ -321,6 +340,11 @@ export function InsightsView({ logEntries = [], assistantInsight }: InsightsView
             </span>
 
             <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+              {patterns.length === 0 && (
+                <span style={{ fontSize: 12, color: '#94a3b8', lineHeight: 1.4 }}>
+                  Log a few activities and your patterns will appear here — computed from your own data.
+                </span>
+              )}
               {patterns.map((item, idx) => (
                 <div
                   key={idx}
@@ -481,6 +505,11 @@ export function InsightsView({ logEntries = [], assistantInsight }: InsightsView
             </p>
 
             <div style={{ display: 'flex', flexDirection: 'column', gap: 12, marginTop: 14 }}>
+              {patterns.length === 0 && (
+                <span style={{ fontSize: 12, color: '#94a3b8', lineHeight: 1.4 }}>
+                  Not enough activity yet. Log at least 3 sessions and this analysis will build itself from your own history.
+                </span>
+              )}
               {patterns.map((item, idx) => (
                 <div
                   key={idx}

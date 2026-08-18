@@ -43,11 +43,14 @@ Railway's project settings.
    - `DATABASE_URL` — from the Postgres addon (step 4)
    - `AUTH_SECRET` — generate a real random value, e.g. `openssl rand -hex 32`.
      **Do not deploy with the insecure default in `lib/auth.ts`.**
-   - `RESEND_API_KEY` and `RESEND_FROM_ADDRESS` — once you've set up Resend
-     (see README's Auth section). Omit these and it'll fall back to dev-mode
-     direct-link responses, which you do NOT want in production — real users
-     can't see a JSON response, they need an actual email. Set these before
-     inviting anyone.
+   - Email provider — **one of**: `MOM_API_KEY` + `MOM_FROM_EMAIL` (mail-o-mail,
+     preferred; shared with Parley, sends from a verified @voyforge.com
+     address) or `RESEND_API_KEY` + `RESEND_FROM_ADDRESS`. In production the
+     sign-in endpoint refuses to work with neither configured (it fails
+     closed rather than exposing credentials), so this is mandatory.
+   - `GEMINI_API_KEY` (optional) — enables real LLM answers in Ask Aura.
+     Without it, deterministic panchang answers still work and the rest falls
+     back to canned guidance.
 6. Apply the schema to the new production database once, before first deploy:
    ```bash
    psql "$DATABASE_URL" -f prisma/migrations/0001_init/migration.sql

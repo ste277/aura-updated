@@ -1,10 +1,26 @@
-import { createHmac, timingSafeEqual } from 'crypto';
+import { createHmac, timingSafeEqual, randomInt } from 'crypto';
 
 // Deliberately minimal — a hand-rolled signed-token helper rather than pulling in
 // a JWT library, since all we need is "tamper-evident payload with an expiry."
 // Swap for `jose` or NextAuth if the auth surface grows beyond magic links.
 
-const SECRET = process.env.AUTH_SECRET ?? 'dev-only-insecure-secret-change-me';
+// Anyone holding this key can mint a session for any email address, so a
+// missing or weak value must never silently fall back in production — that
+// would sign tokens with a key published in this repo.
+const MIN_SECRET_LENGTH = 32;
+
+function resolveSecret(): string {
+  const configured = process.env.AUTH_SECRET;
+  if (configured && configured.length >= MIN_SECRET_LENGTH) return configured;
+  if (process.env.NODE_ENV === 'production') {
+    throw new Error(
+      `AUTH_SECRET must be set to at least ${MIN_SECRET_LENGTH} characters in production.`
+    );
+  }
+  return 'dev-only-insecure-secret-change-me';
+}
+
+const SECRET = resolveSecret();
 
 function base64url(input: Buffer | string): string {
   return Buffer.from(input).toString('base64url');
@@ -66,3 +82,28 @@ export function verifySessionToken(token: string): SessionPayload | null {
 }
 
 export const SESSION_COOKIE_NAME = 'as_session';
+
+// --- One-time sign-in codes -------------------------------------------------
+// The 6-digit code exists because magic-link emails open in the system
+// browser, not a native shell's webview — the code can be typed anywhere.
+// Codes are stored server-side (AuthCode table) as an HMAC, never plaintext.
+
+export const AUTH_CODE_TTL_MS = 15 * 60 * 1000;
+export const AUTH_CODE_MAX_ATTEMPTS = 5;
+
+export function generateAuthCode(): string {
+  // crypto.randomInt avoids modulo bias; always 6 digits, leading zeros kept.
+  return String(randomInt(0, 1_000_000)).padStart(6, '0');
+}
+
+export function hashAuthCode(email: string, code: string): string {
+  // Bind the hash to the email so a code row can't be replayed for another
+  // address even if rows were somehow mixed up.
+  return createHmac('sha256', SECRET).update(`${email.toLowerCase()}:${code}`).digest('base64url');
+}
+
+export function authCodeHashesEqual(a: string, b: string): boolean {
+  const aBuf = Buffer.from(a);
+  const bBuf = Buffer.from(b);
+  return aBuf.length === bBuf.length && timingSafeEqual(aBuf, bBuf);
+}

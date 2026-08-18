@@ -210,14 +210,20 @@ export async function upsertUserByEmail(input: {
   longitude: number;
   timezone: string;
 }): Promise<User> {
-  const existing = await pool.query('SELECT * FROM "User" WHERE email = $1', [input.email]);
+  // Emails are case-insensitive identities. Both auth flows lowercase before
+  // hashing/looking up codes, so the user lookup must too — otherwise
+  // Foo@x.com and foo@x.com become two accounts and the second login lands
+  // in an empty one. Migration 0012 enforces this with a unique index on
+  // lower(email).
+  const email = input.email.trim().toLowerCase();
+  const existing = await pool.query('SELECT * FROM "User" WHERE lower(email) = $1', [email]);
   if (existing.rows.length > 0) return existing.rows[0];
 
   const id = randomUUID();
   const result = await pool.query(
     `INSERT INTO "User" (id, email, "cityName", latitude, longitude, timezone)
      VALUES ($1, $2, $3, $4, $5, $6) RETURNING *`,
-    [id, input.email, input.cityName, input.latitude, input.longitude, input.timezone]
+    [id, email, input.cityName, input.latitude, input.longitude, input.timezone]
   );
   return result.rows[0];
 }
@@ -307,6 +313,90 @@ export async function checkDbConnection(): Promise<void> {
 
 export async function getOrCreateUserForAuth(email: string): Promise<User> {
   return upsertUserByEmail({ email, ...DEFAULT_SIGNUP_LOCATION });
+}
+
+// --- One-time sign-in codes (AuthCode table, migration 0011) ----------------
+
+export interface AuthCodeRow {
+  id: string;
+  email: string;
+  codeHash: string;
+  attempts: number;
+  expiresAt: Date;
+  consumedAt: Date | null;
+}
+
+export async function createAuthCode(input: {
+  email: string;
+  codeHash: string;
+  expiresAt: Date;
+  requestIp?: string | null;
+}): Promise<void> {
+  await pool.query(
+    `INSERT INTO "AuthCode" (id, email, "codeHash", "expiresAt", "requestIp")
+     VALUES ($1, $2, $3, $4, $5)`,
+    [randomUUID(), input.email.toLowerCase(), input.codeHash, input.expiresAt, input.requestIp ?? null]
+  );
+}
+
+/** Requests in the last `windowMinutes` from this email or IP — rate limiting. */
+export async function countRecentAuthRequests(
+  email: string,
+  requestIp: string | null,
+  windowMinutes: number
+): Promise<number> {
+  const result = await pool.query(
+    `SELECT COUNT(*)::int AS count FROM "AuthCode"
+     WHERE "createdAt" > now() - ($1 || ' minutes')::interval
+       AND (email = $2 OR ("requestIp" IS NOT NULL AND "requestIp" = $3))`,
+    [windowMinutes, email.toLowerCase(), requestIp]
+  );
+  return result.rows[0].count;
+}
+
+/** Latest unconsumed, unexpired code row for this email. */
+export async function findActiveAuthCode(email: string): Promise<AuthCodeRow | null> {
+  const result = await pool.query(
+    `SELECT id, email, "codeHash", attempts, "expiresAt", "consumedAt"
+     FROM "AuthCode"
+     WHERE email = $1 AND "consumedAt" IS NULL AND "expiresAt" > now()
+     ORDER BY "createdAt" DESC LIMIT 1`,
+    [email.toLowerCase()]
+  );
+  return result.rows[0] ?? null;
+}
+
+/**
+ * Atomically spends one verification attempt and returns the code hash to
+ * compare against, or null once the attempt cap is reached. The gate and the
+ * increment are a single UPDATE so N concurrent guesses cost N attempts —
+ * a read-check-increment sequence would let parallel requests all see
+ * attempts=0 and bypass the cap entirely.
+ */
+export async function spendAuthCodeAttempt(
+  id: string,
+  maxAttempts: number
+): Promise<{ codeHash: string } | null> {
+  const result = await pool.query(
+    `UPDATE "AuthCode" SET attempts = attempts + 1
+     WHERE id = $1 AND attempts < $2 AND "consumedAt" IS NULL
+     RETURNING "codeHash"`,
+    [id, maxAttempts]
+  );
+  return result.rows[0] ?? null;
+}
+
+/**
+ * Marks the code used. Returns false if it was already consumed — the caller
+ * must NOT issue a session in that case, or two concurrent redemptions of the
+ * same code would both mint sessions.
+ */
+export async function consumeAuthCode(id: string): Promise<boolean> {
+  const result = await pool.query(
+    `UPDATE "AuthCode" SET "consumedAt" = now() WHERE id = $1 AND "consumedAt" IS NULL RETURNING id`,
+    [id]
+  );
+  return result.rowCount === 1;
 }
 
 export async function createHabitLog(input: {
