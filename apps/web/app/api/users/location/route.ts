@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { getSessionFromRequest } from '../../../../lib/session';
 import { updateUserLocation, saveCustomCityForUser } from '../../../../lib/db';
 import { findCity, isValidCustomLocation } from '../../../../lib/cities';
+import { parseJsonObject } from '../../../../lib/request';
 
 export async function PATCH(req: NextRequest) {
   const session = getSessionFromRequest(req);
@@ -9,11 +10,12 @@ export async function PATCH(req: NextRequest) {
     return NextResponse.json({ error: 'Not authenticated.' }, { status: 401 });
   }
 
-  const body = await req.json();
+  const body = await parseJsonObject(req);
+  if (!body) return NextResponse.json({ error: 'A valid JSON request body is required.' }, { status: 400 });
 
   // Path 1: a curated city was picked.
-  if (body.cityName && !body.custom) {
-    const city = findCity(body.cityName);
+  if (typeof body.cityName === 'string' && !body.custom) {
+    const city = findCity(body.cityName.trim());
     if (!city) {
       return NextResponse.json({ error: 'Unknown city.' }, { status: 400 });
     }
@@ -22,7 +24,13 @@ export async function PATCH(req: NextRequest) {
   }
 
   // Path 2: a fully custom location (anywhere not on the curated list).
-  const { cityName, latitude, longitude, timezone } = body.custom ?? body;
+  const source = body.custom && typeof body.custom === 'object' && !Array.isArray(body.custom)
+    ? body.custom as Record<string, unknown>
+    : body;
+  const cityName = typeof source.cityName === 'string' ? source.cityName.trim() : '';
+  const latitude = source.latitude;
+  const longitude = source.longitude;
+  const timezone = typeof source.timezone === 'string' ? source.timezone.trim() : '';
   if (!cityName || latitude == null || longitude == null || !timezone) {
     return NextResponse.json(
       { error: 'cityName, latitude, longitude, and timezone are required.' },

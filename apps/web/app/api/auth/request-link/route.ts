@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { createMagicLinkToken, generateAuthCode, hashAuthCode, AUTH_CODE_TTL_MS } from '../../../../lib/auth';
 import { createAuthCode, countRecentAuthRequests } from '../../../../lib/db';
 import { sendMagicLinkEmail, isEmailConfigured } from '../../../../lib/email';
+import { readJsonObject } from '../../../../lib/request';
 
 // Sign-in requests allowed per email/IP per window — enough for a user who
 // mistypes twice, low enough to make email-bombing and code-guessing via
@@ -20,12 +21,13 @@ function requestIp(req: NextRequest): string | null {
 }
 
 export async function POST(req: NextRequest) {
-  let body: { email?: unknown };
-  try {
-    body = await req.json();
-  } catch {
+  const parsed = await readJsonObject(req);
+  if (!parsed.ok) {
     return NextResponse.json({ error: 'Malformed request body.' }, { status: 400 });
   }
+  const body = parsed.body;
+  if (!body) return NextResponse.json({ error: 'A valid JSON request body is required.' }, { status: 400 });
+
   const rawEmail = body.email;
   if (!rawEmail || typeof rawEmail !== 'string' || rawEmail.length > 254 || !rawEmail.includes('@')) {
     return NextResponse.json({ error: 'A valid email is required.' }, { status: 400 });

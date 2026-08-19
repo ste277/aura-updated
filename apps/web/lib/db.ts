@@ -89,7 +89,7 @@ export interface HabitLogRow {
   logTimestamp: Date;
   logMinuteOfDay: number;
   durationMinutes: number;
-  notes?: string | null; // Added notes field
+  notes?: string | null;
   logSource?: 'AURA_PLANNED' | 'AURA_DO_NOW' | 'MANUAL' | 'OVERRIDE_CAUTION';
   activitySignificance?: 'LOW' | 'MEDIUM' | 'HIGH';
 }
@@ -257,7 +257,32 @@ export async function listPlannedActivities(userId: string): Promise<PlannedActi
   return result.rows;
 }
 
+export async function listAllPlannedActivitiesForExport(userId: string): Promise<PlannedActivity[]> {
+  const result = await pool.query(
+    `SELECT *
+     FROM "PlannedActivity"
+     WHERE "userId" = $1
+     ORDER BY "plannedStartAt" DESC, "createdAt" DESC`,
+    [userId]
+  );
+  return result.rows;
+}
+
 export async function createPlannedActivity(input: CreatePlannedActivityInput): Promise<PlannedActivity> {
+  const existing = await pool.query(
+    `SELECT *
+     FROM "PlannedActivity"
+     WHERE "userId" = $1
+       AND status = 'UPCOMING'
+       AND lower(title) = lower($2)
+       AND "plannedStartAt" = $3
+       AND "plannedEndAt" = $4
+     ORDER BY "createdAt" DESC
+     LIMIT 1`,
+    [input.userId, input.title, input.plannedStartAt, input.plannedEndAt]
+  );
+  if (existing.rows.length > 0) return existing.rows[0];
+
   const id = randomUUID();
   const result = await pool.query(
     `INSERT INTO "PlannedActivity"
@@ -286,6 +311,19 @@ export async function createPlannedActivity(input: CreatePlannedActivityInput): 
   return result.rows[0];
 }
 
+export async function cancelPlannedActivity(userId: string, planId: string): Promise<PlannedActivity> {
+  const result = await pool.query(
+    `UPDATE "PlannedActivity"
+     SET status = 'CANCELLED',
+         "updatedAt" = now()
+     WHERE id = $1 AND "userId" = $2 AND status = 'UPCOMING'
+     RETURNING *`,
+    [planId, userId]
+  );
+  if (result.rows.length === 0) throw new Error('Plan not found or cannot be cancelled.');
+  return result.rows[0];
+}
+
 export async function logPlannedActivity(userId: string, planId: string): Promise<{ plan: PlannedActivity; habitLog: HabitLogRow }> {
   const client = await pool.connect();
   try {
@@ -305,8 +343,15 @@ export async function logPlannedActivity(userId: string, planId: string): Promis
          WHERE id = $1 AND "userId" = $2`,
         [plan.habitLogId, userId]
       );
+      if (existingLog.rows.length === 0) {
+        throw new Error('Logged plan is missing its activity log.');
+      }
       await client.query('COMMIT');
       return { plan, habitLog: existingLog.rows[0] };
+    }
+
+    if (plan.status !== 'UPCOMING') {
+      throw new Error('Plan is not available to log.');
     }
 
     const habitLogId = randomUUID();
@@ -556,7 +601,7 @@ export async function createHabitLog(input: {
   logMinuteOfDay: number;
   logTimestamp?: Date;
   durationMinutes?: number;
-  notes?: string; // Added optional notes parameter
+  notes?: string;
   logSource?: 'AURA_PLANNED' | 'AURA_DO_NOW' | 'MANUAL' | 'OVERRIDE_CAUTION';
   activitySignificance?: 'LOW' | 'MEDIUM' | 'HIGH';
 }): Promise<HabitLogRow> {
@@ -585,6 +630,14 @@ export async function createHabitLog(input: {
 export async function listHabitLogs(userId: string): Promise<HabitLogRow[]> {
   const result = await pool.query(
     `SELECT * FROM "HabitLog" WHERE "userId" = $1 ORDER BY "logTimestamp" DESC LIMIT 50`,
+    [userId]
+  );
+  return result.rows;
+}
+
+export async function listAllHabitLogsForExport(userId: string): Promise<HabitLogRow[]> {
+  const result = await pool.query(
+    `SELECT * FROM "HabitLog" WHERE "userId" = $1 ORDER BY "logTimestamp" DESC`,
     [userId]
   );
   return result.rows;
@@ -632,6 +685,14 @@ export async function listDailyReflections(userId: string, limit = 60): Promise<
   const result = await pool.query(
     `SELECT * FROM "DailyReflection" WHERE "userId" = $1 ORDER BY "reflectionDate" DESC LIMIT $2`,
     [userId, limit]
+  );
+  return result.rows;
+}
+
+export async function listAllDailyReflectionsForExport(userId: string): Promise<DailyReflection[]> {
+  const result = await pool.query(
+    `SELECT * FROM "DailyReflection" WHERE "userId" = $1 ORDER BY "reflectionDate" DESC`,
+    [userId]
   );
   return result.rows;
 }

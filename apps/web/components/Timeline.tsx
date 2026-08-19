@@ -33,6 +33,7 @@ export interface TimelineViewProps {
     customTimestamp?: Date,
     overrideWindowType?: string
   ) => Promise<void>;
+  onPlanActivity?: (activityTitle: string) => void;
   onAskAuraClick?: () => void;
 }
 
@@ -118,6 +119,7 @@ export function TimelineView({
   logEntries = [],
   loggedActivitiesToday = [],
   onLogActivity,
+  onPlanActivity,
   onAskAuraClick,
 }: TimelineViewProps) {
   const containerRef = useRef<HTMLDivElement>(null);
@@ -130,6 +132,7 @@ export function TimelineView({
   // Interactive selection and logging state
   const [selectedWindowItem, setSelectedWindowItem] = useState<TimelineWindowItem | null>(null);
   const [loggingTitle, setLoggingTitle] = useState<string | null>(null);
+  const [logError, setLogError] = useState('');
   const [optimisticLogged, setOptimisticLogged] = useState<string[]>([]);
 
   const selectedWindowName = selectedWindowItem?.name || null;
@@ -161,6 +164,8 @@ export function TimelineView({
 
   const handleQuickLog = async (title: string) => {
     const normTitle = title.trim().toLowerCase();
+    if (!normTitle || loggingTitle || allLoggedNormalized.has(normTitle)) return;
+    setLogError('');
     setLoggingTitle(title);
     setOptimisticLogged((prev) => [...prev, normTitle]);
 
@@ -174,6 +179,7 @@ export function TimelineView({
     } catch (err) {
       console.error('Error logging activity:', err);
       setOptimisticLogged((prev) => prev.filter((item) => item !== normTitle));
+      setLogError(`Could not log ${title}. Try again.`);
     } finally {
       setLoggingTitle(null);
     }
@@ -246,11 +252,13 @@ export function TimelineView({
       const match = windowObj || sortedWindows.find((w) => w.name === winName) || { name: winName };
       setSelectedWindowItem(match);
     }
+    setLogError('');
   };
 
   const handleResetSelect = (e?: React.MouseEvent) => {
     if (e) e.stopPropagation();
     setSelectedWindowItem(null);
+    setLogError('');
   };
 
   // Helper to filter log entries for a given window
@@ -297,6 +305,7 @@ export function TimelineView({
         {/* Back Navigation Bar */}
         <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
           <button
+            type="button"
             onClick={() => handleResetSelect()}
             style={{
               background: 'rgba(255, 255, 255, 0.08)',
@@ -399,6 +408,11 @@ export function TimelineView({
               Good choices for this window
             </span>
           </div>
+          {logError && (
+            <div style={{ color: '#fb7185', fontSize: 12, lineHeight: 1.35, background: 'rgba(251, 113, 133, 0.08)', border: '1px solid rgba(251, 113, 133, 0.22)', borderRadius: 10, padding: '9px 10px' }}>
+              {logError}
+            </div>
+          )}
 
           {recommendedCards.map((card, idx) => {
             const cardTitleNorm = card.title.trim().toLowerCase();
@@ -440,15 +454,17 @@ export function TimelineView({
                 </div>
 
                 <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 7 }}>
-                  {onAskAuraClick && !isAlreadyLogged && (
+                  {onPlanActivity && !isAlreadyLogged && (
                     <button
-                      onClick={() => onAskAuraClick()}
+                      type="button"
+                      onClick={() => onPlanActivity(card.title)}
                       style={{ background: 'rgba(56, 189, 248, 0.1)', color: '#7dd3fc', border: '1px solid rgba(56, 189, 248, 0.42)', borderRadius: 10, padding: '8px 14px', fontSize: 12, fontWeight: 850, cursor: 'pointer', fontFamily: 'sans-serif' }}
                     >
                       Plan
                     </button>
                   )}
                   <button
+                    type="button"
                     onClick={() => handleQuickLog(card.title)}
                     disabled={isAlreadyLogged || !!loggingTitle}
                     style={{
@@ -497,6 +513,7 @@ export function TimelineView({
               <div style={{ fontSize: 10, color: '#94a3b8', fontFamily: 'sans-serif' }}>Get a personalized suggestion</div>
             </div>
             <button
+              type="button"
               onClick={onAskAuraClick}
               style={{
                 background: '#4ade80',
@@ -781,9 +798,16 @@ export function TimelineView({
                   {currentRecommendedCards.map((card) => (
                     <div key={card.id} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 8 }}>
                       <span style={{ color: '#dbe7f4', fontSize: 10 }}>{card.icon} {card.title}</span>
-                      <button onClick={(e) => { e.stopPropagation(); handleQuickLog(card.title); }} disabled={allLoggedNormalized.has(card.title.toLowerCase()) || !!loggingTitle} style={{ background: 'rgba(74, 222, 128, 0.12)', border: '1px solid rgba(74, 222, 128, 0.28)', color: '#86efac', borderRadius: 7, fontSize: 9, padding: '3px 6px' }}>
-                        {allLoggedNormalized.has(card.title.toLowerCase()) ? 'Logged' : 'Log'}
-                      </button>
+                      <span style={{ display: 'flex', gap: 5, flexShrink: 0 }}>
+                        {onPlanActivity && (
+                          <button type="button" onClick={(e) => { e.stopPropagation(); onPlanActivity(card.title); }} style={{ background: 'rgba(56, 189, 248, 0.1)', border: '1px solid rgba(56, 189, 248, 0.28)', color: '#7dd3fc', borderRadius: 7, fontSize: 9, padding: '3px 6px' }}>
+                            Plan
+                          </button>
+                        )}
+                        <button type="button" onClick={(e) => { e.stopPropagation(); handleQuickLog(card.title); }} disabled={allLoggedNormalized.has(card.title.toLowerCase()) || !!loggingTitle} style={{ background: 'rgba(74, 222, 128, 0.12)', border: '1px solid rgba(74, 222, 128, 0.28)', color: '#86efac', borderRadius: 7, fontSize: 9, padding: '3px 6px' }}>
+                          {allLoggedNormalized.has(card.title.toLowerCase()) ? 'Logged' : 'Log'}
+                        </button>
+                      </span>
                     </div>
                   ))}
                 </div>

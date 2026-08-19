@@ -29,16 +29,52 @@ function formatActiveDuration(minutes: number): string {
   return rest ? `${hours}h ${rest}m` : `${hours}h`;
 }
 
+function getLogSourceLabel(source?: LoggedEntryItem['logSource']): { label: string; color: string; background: string; border: string } {
+  switch (source) {
+    case 'AURA_PLANNED':
+      return { label: 'Aura plan', color: '#4ade80', background: 'rgba(74, 222, 128, 0.1)', border: 'rgba(74, 222, 128, 0.28)' };
+    case 'AURA_DO_NOW':
+      return { label: 'Do now', color: '#38bdf8', background: 'rgba(56, 189, 248, 0.1)', border: 'rgba(56, 189, 248, 0.28)' };
+    case 'OVERRIDE_CAUTION':
+      return { label: 'Override', color: '#fb7185', background: 'rgba(251, 113, 133, 0.1)', border: 'rgba(251, 113, 133, 0.3)' };
+    case 'MANUAL':
+    default:
+      return { label: 'Manual', color: '#cbd5e1', background: 'rgba(148, 163, 184, 0.1)', border: 'rgba(148, 163, 184, 0.22)' };
+  }
+}
+
+function getSignificanceLabel(significance?: LoggedEntryItem['activitySignificance']): { label: string; color: string; background: string; border: string } {
+  switch (significance) {
+    case 'HIGH':
+      return { label: 'High impact', color: '#facc15', background: 'rgba(250, 204, 21, 0.1)', border: 'rgba(250, 204, 21, 0.3)' };
+    case 'LOW':
+      return { label: 'Light', color: '#a78bfa', background: 'rgba(167, 139, 250, 0.1)', border: 'rgba(167, 139, 250, 0.28)' };
+    case 'MEDIUM':
+    default:
+      return { label: 'Medium', color: '#93c5fd', background: 'rgba(147, 197, 253, 0.1)', border: 'rgba(147, 197, 253, 0.25)' };
+  }
+}
+
 interface CalendarViewSectionProps {
   logEntries?: LoggedEntryItem[];
   userLocation?: { latitude: number; longitude: number; timezone: string };
-  onLogActivity?: (activityTitle: string, notes?: string, customTimestamp?: Date, overrideWindowType?: string, durationMinutes?: number) => Promise<void>;
+  onLogActivity?: (
+    activityTitle: string,
+    notes?: string,
+    customTimestamp?: Date,
+    overrideWindowType?: string,
+    durationMinutes?: number,
+    logSource?: 'AURA_PLANNED' | 'AURA_DO_NOW' | 'MANUAL' | 'OVERRIDE_CAUTION',
+    activitySignificance?: 'LOW' | 'MEDIUM' | 'HIGH'
+  ) => Promise<void>;
+  onBack?: () => void;
 }
 
 export function CalendarViewSection({
   logEntries = [],
   userLocation,
   onLogActivity,
+  onBack,
 }: CalendarViewSectionProps) {
   const today = useMemo(() => new Date(), []);
   
@@ -55,6 +91,10 @@ export function CalendarViewSection({
 
   const isCurrentMonthView =
     displayYear === today.getFullYear() && displayMonth === today.getMonth();
+  const isTodaySelected = isCurrentMonthView && selectedDay === today.getDate();
+  const canGoNextMonth =
+    displayYear < today.getFullYear() ||
+    (displayYear === today.getFullYear() && displayMonth < today.getMonth());
 
   const todayDateNum = today.getDate();
 
@@ -74,16 +114,26 @@ export function CalendarViewSection({
   };
 
   const handleNextMonth = () => {
+    if (!canGoNextMonth) return;
     setCurrentDate((prev) => new Date(prev.getFullYear(), prev.getMonth() + 1, 1));
     setSelectedDay(1);
   };
 
+  const handleGoToToday = () => {
+    setCurrentDate(new Date(today.getFullYear(), today.getMonth(), 1));
+    setSelectedDay(today.getDate());
+  };
+
   // Group logged entries for the active month view
-  const { activeDays, dailyLogs, activityCounts, monthTotalLogs } = useMemo(() => {
+  const { activeDays, auraGuidedDays, highImpactDays, dailyLogs, activityCounts, monthTotalLogs, monthAuraGuidedLogs, monthHighImpactLogs } = useMemo(() => {
     const daysSet = new Set<number>();
+    const auraGuidedDaysSet = new Set<number>();
+    const highImpactDaysSet = new Set<number>();
     const logsMap: Record<number, LoggedEntryItem[]> = {};
     const countsMap: Record<number, number> = {};
     let total = 0;
+    let auraGuided = 0;
+    let highImpact = 0;
 
     logEntries.forEach((entry) => {
       const d = new Date(entry.loggedAt);
@@ -97,10 +147,22 @@ export function CalendarViewSection({
         if (!logsMap[dayNum]) logsMap[dayNum] = [];
         logsMap[dayNum].push(entry);
         total++;
+        if (entry.logSource === 'AURA_PLANNED' || entry.logSource === 'AURA_DO_NOW') {
+          auraGuided++;
+          auraGuidedDaysSet.add(dayNum);
+        }
+        if (entry.activitySignificance === 'HIGH') {
+          highImpact++;
+          highImpactDaysSet.add(dayNum);
+        }
       }
     });
 
-    return { activeDays: daysSet, dailyLogs: logsMap, activityCounts: countsMap, monthTotalLogs: total };
+    Object.values(logsMap).forEach((logs) => {
+      logs.sort((a, b) => new Date(a.loggedAt).getTime() - new Date(b.loggedAt).getTime());
+    });
+
+    return { activeDays: daysSet, auraGuidedDays: auraGuidedDaysSet, highImpactDays: highImpactDaysSet, dailyLogs: logsMap, activityCounts: countsMap, monthTotalLogs: total, monthAuraGuidedLogs: auraGuided, monthHighImpactLogs: highImpact };
   }, [logEntries, displayYear, displayMonth]);
 
   // Check if selected day is in the future relative to today
@@ -117,21 +179,45 @@ export function CalendarViewSection({
     return groups;
   }, [selectedLogs]);
   const selectedActiveMinutes = selectedLogs.reduce((total, log) => total + (log.durationMinutes ?? 30), 0);
+  const selectedAuraGuidedLogs = selectedLogs.filter((log) => log.logSource === 'AURA_PLANNED' || log.logSource === 'AURA_DO_NOW').length;
+  const selectedAuraGuidedPercent =
+    selectedLogs.length > 0 ? Math.round((selectedAuraGuidedLogs / selectedLogs.length) * 100) : null;
+  const selectedHighImpactLogs = selectedLogs.filter((log) => log.activitySignificance === 'HIGH').length;
   const recentActivities = useMemo(() => [...new Set(logEntries.map((log) => log.activityTitle).filter(Boolean))].slice(0, 4), [logEntries]);
+  const monthAuraGuidedPercent =
+    monthTotalLogs > 0 ? Math.round((monthAuraGuidedLogs / monthTotalLogs) * 100) : null;
 
   // Date object for PastActivityModal
   const selectedDateObj = new Date(displayYear, displayMonth, selectedDay, 12, 0, 0);
+  const selectedDateLabel = selectedDateObj.toLocaleDateString('en-US', {
+    month: 'long',
+    day: 'numeric',
+    year: 'numeric',
+  });
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 16, paddingBottom: 24, fontFamily: 'sans-serif', color: '#f8fafc' }}>
       {/* Header */}
-      <div>
-        <h1 style={{ fontSize: 20, fontWeight: 700, color: 'var(--as-text, #f8fafc)', margin: 0, fontFamily: 'sans-serif', lineHeight: 1.2 }}>
-          Activity Calendar
-        </h1>
-        <p style={{ fontSize: 12, color: 'var(--as-text-muted, #94a3b8)', marginTop: 4, fontFamily: 'sans-serif' }}>
-          Track what you actually did and how it aligned with your recommended windows
-        </p>
+      <div style={{ display: 'flex', alignItems: 'flex-start', gap: 12 }}>
+        {onBack && (
+          <button
+            type="button"
+            onClick={onBack}
+            aria-label="Back to You"
+            style={{ minHeight: 34, borderRadius: 17, border: '1px solid rgba(148, 163, 184, 0.22)', background: 'rgba(15, 23, 42, 0.75)', color: '#f8fafc', fontSize: 12, cursor: 'pointer', flexShrink: 0, display: 'inline-flex', alignItems: 'center', gap: 6, padding: '0 10px', fontWeight: 800 }}
+          >
+            <span style={{ fontSize: 16, lineHeight: 1 }}>←</span>
+            You
+          </button>
+        )}
+        <div>
+          <h1 style={{ fontSize: 20, fontWeight: 700, color: 'var(--as-text, #f8fafc)', margin: 0, fontFamily: 'sans-serif', lineHeight: 1.2 }}>
+            Activity Log
+          </h1>
+          <p style={{ fontSize: 12, color: 'var(--as-text-muted, #94a3b8)', marginTop: 4, fontFamily: 'sans-serif' }}>
+            Review logged activities and how they aligned with your recommended windows.
+          </p>
+        </div>
       </div>
 
       {/* Month Matrix Card */}
@@ -147,6 +233,7 @@ export function CalendarViewSection({
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 14 }}>
           <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
             <button
+              type="button"
               onClick={handlePrevMonth}
               style={{
                 background: 'rgba(255, 255, 255, 0.06)',
@@ -168,29 +255,62 @@ export function CalendarViewSection({
               {monthName} {displayYear}
             </span>
             <button
+              type="button"
               onClick={handleNextMonth}
+              disabled={!canGoNextMonth}
+              aria-label={canGoNextMonth ? 'Next month' : 'Current month'}
               style={{
-                background: 'rgba(255, 255, 255, 0.06)',
+                background: canGoNextMonth ? 'rgba(255, 255, 255, 0.06)' : 'rgba(255, 255, 255, 0.025)',
                 border: '1px solid rgba(255, 255, 255, 0.1)',
-                color: '#fff',
+                color: canGoNextMonth ? '#fff' : 'rgba(148, 163, 184, 0.45)',
                 borderRadius: 8,
                 width: 28,
                 height: 28,
-                cursor: 'pointer',
+                cursor: canGoNextMonth ? 'pointer' : 'not-allowed',
                 display: 'flex',
                 alignItems: 'center',
                 justifyContent: 'center',
                 fontSize: 12,
+                opacity: canGoNextMonth ? 1 : 0.55,
               }}
             >
               →
             </button>
           </div>
 
-          <span style={{ fontSize: 11, color: 'var(--as-text-muted, #94a3b8)', fontFamily: 'monospace' }}>
-            📊 {monthTotalLogs} activities
-          </span>
+          <div style={{ textAlign: 'right', fontSize: 11, color: 'var(--as-text-muted, #94a3b8)', fontFamily: 'monospace', lineHeight: 1.35 }}>
+            <div>📊 {monthTotalLogs} activities</div>
+            <div style={{ color: monthAuraGuidedLogs > 0 ? '#4ade80' : '#64748b' }}>
+              ✨ {monthAuraGuidedLogs} Aura-guided{monthAuraGuidedPercent !== null ? ` · ${monthAuraGuidedPercent}%` : ''}
+            </div>
+            {monthHighImpactLogs > 0 && (
+              <div style={{ color: '#facc15' }}>
+                ★ {monthHighImpactLogs} high impact
+              </div>
+            )}
+          </div>
         </div>
+
+        {!isTodaySelected && (
+          <button
+            type="button"
+            onClick={handleGoToToday}
+            style={{
+              minHeight: 30,
+              width: '100%',
+              border: '1px solid rgba(74, 222, 128, 0.22)',
+              borderRadius: 10,
+              background: 'rgba(74, 222, 128, 0.08)',
+              color: '#4ade80',
+              fontSize: 12,
+              fontWeight: 800,
+              cursor: 'pointer',
+              marginBottom: 12,
+            }}
+          >
+            Jump to today
+          </button>
+        )}
 
         {/* Days Header */}
         <div style={{ display: 'grid', gridTemplateColumns: 'repeat(7, 1fr)', textAlign: 'center', fontSize: 11, fontFamily: 'monospace', color: 'var(--as-text-muted, #64748b)', fontWeight: 600, marginBottom: 8 }}>
@@ -205,14 +325,26 @@ export function CalendarViewSection({
 
           {daysInMonth.map((day) => {
             const hasActivity = activeDays.has(day);
+            const hasAuraGuided = auraGuidedDays.has(day);
+            const hasHighImpact = highImpactDays.has(day);
             const activityCount = activityCounts[day] ?? 0;
             const isSelected = selectedDay === day;
             const isFutureDay = isCurrentMonthView ? day > todayDateNum : displayYear > today.getFullYear() || (displayYear === today.getFullYear() && displayMonth > today.getMonth());
+            const dayLabelParts = [
+              new Date(displayYear, displayMonth, day).toLocaleDateString('en-US', { month: 'long', day: 'numeric', year: 'numeric' }),
+              activityCount === 1 ? '1 activity' : `${activityCount} activities`,
+              hasAuraGuided ? 'Aura-guided activity' : null,
+              hasHighImpact ? 'High-impact activity' : null,
+              isFutureDay ? 'future date' : null,
+            ].filter(Boolean);
 
             return (
               <button
+                type="button"
                 key={day}
                 disabled={isFutureDay}
+                aria-label={dayLabelParts.join(', ')}
+                aria-pressed={isSelected}
                 onClick={() => setSelectedDay(day)}
                 style={{
                   aspectRatio: '1',
@@ -241,15 +373,41 @@ export function CalendarViewSection({
                   display: 'flex',
                   alignItems: 'center',
                   justifyContent: 'center',
+                  position: 'relative',
                   opacity: isFutureDay ? 0.35 : 1,
                   transition: 'all 0.15s ease',
                 }}
               >
                 {day}
+                {hasHighImpact && !isFutureDay && (
+                  <span aria-hidden="true" style={{ position: 'absolute', right: 4, top: 3, color: isSelected ? '#854d0e' : '#facc15', fontSize: 8, lineHeight: 1 }}>
+                    ★
+                  </span>
+                )}
+                {hasAuraGuided && !isFutureDay && (
+                  <span aria-hidden="true" style={{ position: 'absolute', bottom: 4, width: 4, height: 4, borderRadius: 999, background: isSelected ? '#064e3b' : '#4ade80' }} />
+                )}
               </button>
             );
           })}
         </div>
+
+        {(monthAuraGuidedLogs > 0 || monthHighImpactLogs > 0) && (
+          <div style={{ display: 'flex', flexWrap: 'wrap', gap: 10, marginTop: 10, color: '#94a3b8', fontSize: 10 }}>
+            {monthAuraGuidedLogs > 0 && (
+              <span style={{ display: 'inline-flex', alignItems: 'center', gap: 5 }}>
+                <span aria-hidden="true" style={{ width: 5, height: 5, borderRadius: 999, background: '#4ade80' }} />
+                Aura-guided
+              </span>
+            )}
+            {monthHighImpactLogs > 0 && (
+              <span style={{ display: 'inline-flex', alignItems: 'center', gap: 5 }}>
+                <span aria-hidden="true" style={{ color: '#facc15', fontSize: 9, lineHeight: 1 }}>★</span>
+                High impact
+              </span>
+            )}
+          </div>
+        )}
       </div>
 
       {/* Selected Day Activity Log & Add Action */}
@@ -263,11 +421,20 @@ export function CalendarViewSection({
       >
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 }}>
           <div>
-            <div style={{ fontSize: 16, fontWeight: 800, color: 'var(--as-text, #fff)' }}>
-              {monthName} {selectedDay}
+            <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
+              <span style={{ fontSize: 16, fontWeight: 800, color: 'var(--as-text, #fff)' }}>
+                {selectedDateLabel}
+              </span>
+              {isTodaySelected && (
+                <span style={{ border: '1px solid rgba(74, 222, 128, 0.35)', borderRadius: 999, color: '#4ade80', background: 'rgba(74, 222, 128, 0.1)', padding: '2px 7px', fontSize: 10, fontWeight: 850 }}>
+                  Today
+                </span>
+              )}
             </div>
             <div style={{ fontSize: 11, color: '#b6c2d1', marginTop: 4 }}>
               {selectedLogs.length} {selectedLogs.length === 1 ? 'activity' : 'activities'} · {formatActiveDuration(selectedActiveMinutes)} active
+              {selectedLogs.length > 0 ? ` · ${selectedAuraGuidedLogs} Aura-guided${selectedAuraGuidedPercent !== null ? ` (${selectedAuraGuidedPercent}%)` : ''}` : ''}
+              {selectedHighImpactLogs > 0 ? ` · ${selectedHighImpactLogs} high impact` : ''}
             </div>
           </div>
 
@@ -301,19 +468,34 @@ export function CalendarViewSection({
                   {category} · {groupedSelectedLogs[category].length}
                 </div>
                 <div style={{ display: 'flex', flexDirection: 'column', gap: 7 }}>
-                  {groupedSelectedLogs[category].map((log) => (
+                  {groupedSelectedLogs[category].map((log) => {
+                    const sourceLabel = getLogSourceLabel(log.logSource);
+                    const significanceLabel = getSignificanceLabel(log.activitySignificance);
+                    return (
                     <div key={log.id} style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 10, padding: '9px 10px', borderRadius: 10, background: 'rgba(30, 41, 59, 0.5)', border: '1px solid rgba(255, 255, 255, 0.05)' }}>
-                      <div style={{ minWidth: 0 }}>
-                        <div style={{ display: 'flex', alignItems: 'center', gap: 7 }}>
+                      <div style={{ minWidth: 0, flex: 1 }}>
+                        <div style={{ display: 'flex', alignItems: 'center', gap: 7, flexWrap: 'wrap' }}>
                           <span style={{ color: '#4ade80', fontWeight: 800 }}>✓</span>
                           <span style={{ color: '#f8fafc', fontWeight: 650, fontSize: 12, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{log.activityTitle}</span>
+                          <span style={{ border: `1px solid ${sourceLabel.border}`, borderRadius: 999, background: sourceLabel.background, color: sourceLabel.color, padding: '1px 6px', fontSize: 9, fontWeight: 850, flexShrink: 0 }}>
+                            {sourceLabel.label}
+                          </span>
+                          <span style={{ border: `1px solid ${significanceLabel.border}`, borderRadius: 999, background: significanceLabel.background, color: significanceLabel.color, padding: '1px 6px', fontSize: 9, fontWeight: 850, flexShrink: 0 }}>
+                            {significanceLabel.label}
+                          </span>
                         </div>
                         <div style={{ color: '#b6c2d1', fontSize: 10, marginTop: 4, marginLeft: 19 }}>
                           {new Date(log.loggedAt).toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' })} · {log.durationMinutes ?? 30}m · {log.activeWindow ? log.activeWindow.replace(/_/g, ' ') : 'NEUTRAL'}
                         </div>
+                        {log.notes?.trim() && (
+                          <div style={{ color: '#94a3b8', fontSize: 10, lineHeight: 1.4, marginTop: 5, marginLeft: 19 }}>
+                            {log.notes.trim()}
+                          </div>
+                        )}
                       </div>
                     </div>
-                  ))}
+                    );
+                  })}
                 </div>
               </div>
             ))

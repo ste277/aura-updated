@@ -2,6 +2,7 @@
 
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import type { PlanningHorizon, TaskSlotRecommendation, TimePreference } from '../../../packages/recommendation/src/dailyAssistant';
+import { FULL_ACTIVITY_CATALOG } from '../../../packages/recommendation/src/personalizedTasks';
 import { triggerHaptic } from '../lib/haptics';
 
 interface TaskSuggestion {
@@ -9,6 +10,7 @@ interface TaskSuggestion {
   icon: string;
   keywords: string[];
   accent: string;
+  defaultDurationMinutes?: number;
 }
 
 interface PlanWithAuraViewProps {
@@ -23,6 +25,8 @@ interface PlanWithAuraViewProps {
   onViewDay?: () => void;
   onPlanLogged?: () => void;
   timezone?: string;
+  initialActivity?: string | null;
+  initialActivityKey?: number;
 }
 
 const TASKS: TaskSuggestion[] = [
@@ -35,6 +39,27 @@ const TASKS: TaskSuggestion[] = [
   { title: 'Meditation', icon: '🧘', keywords: ['meditation', 'mindful', 'breath', 'prayer'], accent: '#4ade80' },
   { title: 'Meal', icon: '🍽️', keywords: ['meal', 'dinner', 'lunch', 'breakfast', 'food'], accent: '#fb923c' },
 ];
+
+function accentForActivity(category: string, title: string): string {
+  const lower = title.toLowerCase();
+  if (/date|relationship|romantic|workout|exercise|gym/.test(lower)) return '#ff5f95';
+  if (/study|learn|meditat|breath|spiritual/.test(lower)) return '#4ade80';
+  if (/journey|travel|trip|financial|decision|new beginning|launch/.test(lower)) return '#facc15';
+  if (category === 'SOCIAL') return '#a78bfa';
+  if (category === 'REST' || category === 'MICRO_BREAK') return '#7dd3fc';
+  return '#38bdf8';
+}
+
+const ALL_TASKS: TaskSuggestion[] = [
+  ...TASKS,
+  ...FULL_ACTIVITY_CATALOG.map((activity) => ({
+    title: activity.title,
+    icon: activity.icon,
+    keywords: activity.aliases,
+    accent: accentForActivity(activity.category, activity.title),
+    defaultDurationMinutes: activity.defaultDurationMinutes,
+  })),
+].filter((task, index, list) => list.findIndex((item) => item.title.toLowerCase() === task.title.toLowerCase()) === index);
 
 const HORIZONS: Array<{ value: PlanningHorizon; label: string }> = [
   { value: 'TODAY', label: 'Today' },
@@ -61,38 +86,56 @@ const TIME_PREFERENCES: Array<{ value: TimePreference; label: string; icon: stri
 ];
 
 type PlanIcon = 'workout' | 'focus' | 'heart' | 'study' | 'meditate' | 'meeting' | 'journey';
-type UpcomingPlanTemplate = {
+type SpeechRecognitionConstructor = new () => {
+  continuous: boolean;
+  interimResults: boolean;
+  lang: string;
+  onresult: ((event: { results: ArrayLike<ArrayLike<{ transcript: string }>> }) => void) | null;
+  onerror: (() => void) | null;
+  onend: (() => void) | null;
+  start: () => void;
+  stop: () => void;
+};
+type UpcomingPlan = {
   id: string;
   title: string;
   icon: PlanIcon;
-  dayOffset: number;
   duration: string;
   time: string;
   window: string;
   match: 'Best Match' | 'Good Match';
   note: string;
   accent: string;
-};
-type UpcomingPlan = Omit<UpcomingPlanTemplate, 'dayOffset'> & {
   when: string;
   plannedStartAt: string;
   plannedEndAt: string;
   details: string;
+  score?: number;
   googleCalendarUrl?: string;
-  source?: 'Aura' | 'Sample';
+  source?: 'Aura';
   status?: 'UPCOMING' | 'LOGGED';
   loggedAt?: string;
 };
 
-const UPCOMING_PLAN_TEMPLATES: UpcomingPlanTemplate[] = [
-  { id: 'seed-workout', title: 'Workout', icon: 'workout', dayOffset: 1, duration: '45 min', time: '7:15 AM - 8:00 AM', window: 'Steady Progress (Gulika)', match: 'Best Match', note: 'Strong match', accent: '#ff5f95' },
-  { id: 'seed-deep-work', title: 'Deep Work', icon: 'focus', dayOffset: 1, duration: '90 min', time: '10:05 AM - 11:35 AM', window: 'Peak Productivity (Abhijit)', match: 'Best Match', note: 'Excellent match', accent: '#38bdf8' },
-  { id: 'seed-date-night', title: 'Date Night', icon: 'heart', dayOffset: 3, duration: '2h', time: '7:00 PM - 9:00 PM', window: 'Neutral Flow', match: 'Good Match', note: 'Good for relationships', accent: '#ff5f95' },
-  { id: 'seed-study', title: 'Study Session', icon: 'study', dayOffset: 4, duration: '60 min', time: '9:00 AM - 10:00 AM', window: 'Steady Progress (Gulika)', match: 'Good Match', note: 'Good focus window', accent: '#4ade80' },
-  { id: 'seed-meditation', title: 'Meditation', icon: 'meditate', dayOffset: 5, duration: '30 min', time: '5:15 AM - 5:45 AM', window: 'Brahma Muhurta', match: 'Good Match', note: 'Quiet reset', accent: '#a78bfa' },
-  { id: 'seed-team-review', title: 'Team Review', icon: 'meeting', dayOffset: 6, duration: '45 min', time: '12:10 PM - 12:55 PM', window: 'Abhijit Muhurtham', match: 'Best Match', note: 'Clear decision window', accent: '#38bdf8' },
-  { id: 'seed-travel-prep', title: 'Travel Prep', icon: 'journey', dayOffset: 7, duration: '60 min', time: '8:30 AM - 9:30 AM', window: 'Neutral Flow', match: 'Good Match', note: 'Low-friction planning', accent: '#facc15' },
-];
+type PlanActionState = 'LOGGING' | 'CANCELLING';
+
+type PlanApiRow = {
+  id: string;
+  title?: string | null;
+  activityType?: string | null;
+  icon?: string | null;
+  status?: 'UPCOMING' | 'LOGGED' | 'CANCELLED' | string | null;
+  plannedStartAt: string | Date;
+  plannedEndAt: string | Date;
+  durationMinutes?: number | null;
+  windowType?: string | null;
+  windowLabel?: string | null;
+  matchLabel?: string | null;
+  score?: number | null;
+  recommendation?: string | null;
+  calendarUrl?: string | null;
+  loggedAt?: string | Date | null;
+};
 
 function recommendedPreference(taskTitle: string): TimePreference {
   const title = taskTitle.toLowerCase();
@@ -146,23 +189,6 @@ function getTodayForTimezone(timezone?: string): Date {
   return new Date(Date.UTC(year, month - 1, day, 12, 0, 0));
 }
 
-function buildUpcomingPlans(timezone?: string): UpcomingPlan[] {
-  const today = getTodayForTimezone(timezone);
-  return UPCOMING_PLAN_TEMPLATES.map(({ dayOffset, ...plan }) => {
-    const day = addDays(today, dayOffset);
-    const [startTime, endTime] = plan.time.split(' - ');
-    return {
-      ...plan,
-      when: dayOffset === 0 ? 'Today' : dayOffset === 1 ? 'Tomorrow' : formatShortDate(day),
-      plannedStartAt: localPlanDateTime(day, startTime).toISOString(),
-      plannedEndAt: localPlanDateTime(day, endTime).toISOString(),
-      details: `${plan.note}. Aura placed this in ${plan.window} based on your activity, duration, and timing preference.`,
-      source: 'Sample',
-      status: 'UPCOMING' as const,
-    };
-  });
-}
-
 function planIconForTitle(title: string): PlanIcon {
   const lower = title.toLowerCase();
   if (/workout|exercise|gym|training/.test(lower)) return 'workout';
@@ -190,14 +216,6 @@ function minutesFromDuration(duration: string): number {
   return 60;
 }
 
-function localPlanDateTime(day: Date, timeLabel: string): Date {
-  const match = timeLabel.match(/(\d+):(\d+)\s*(AM|PM)/i);
-  if (!match) return day;
-  let hour = Number(match[1]) % 12;
-  if (match[3].toUpperCase() === 'PM') hour += 12;
-  return new Date(Date.UTC(day.getUTCFullYear(), day.getUTCMonth(), day.getUTCDate(), hour, Number(match[2]), 0, 0));
-}
-
 function formatPlanDay(date: Date): string {
   const today = getTodayForTimezone();
   const dateKey = date.toISOString().slice(0, 10);
@@ -223,7 +241,7 @@ function windowTypeFromLabel(label?: string): string {
   return 'NEUTRAL';
 }
 
-function mapPlanRow(row: any): UpcomingPlan {
+function mapPlanRow(row: PlanApiRow): UpcomingPlan {
   const start = new Date(row.plannedStartAt);
   const end = new Date(row.plannedEndAt);
   const title = row.title || row.activityType || 'Planned activity';
@@ -242,6 +260,7 @@ function mapPlanRow(row: any): UpcomingPlan {
     note: status === 'LOGGED' ? 'Logged' : row.matchLabel || 'Good match',
     accent: planAccentForTitle(title),
     details: row.recommendation || 'Aura saved this as one of your planned moments.',
+    score: typeof row.score === 'number' ? row.score : undefined,
     googleCalendarUrl: row.calendarUrl || undefined,
     source: 'Aura',
     status,
@@ -249,9 +268,9 @@ function mapPlanRow(row: any): UpcomingPlan {
   };
 }
 
-export function PlanWithAuraView({ onSlotTask, onViewDay, onPlanLogged, timezone }: PlanWithAuraViewProps) {
+export function PlanWithAuraView({ onSlotTask, onViewDay, onPlanLogged, timezone, initialActivity, initialActivityKey }: PlanWithAuraViewProps) {
   const [taskTitle, setTaskTitle] = useState('');
-  const [isCustomTask, setIsCustomTask] = useState(false);
+  const [, setIsCustomTask] = useState(false);
   const [horizon, setHorizon] = useState<PlanningHorizon>('TODAY');
   const [durationMinutes, setDurationMinutes] = useState(30);
   const [timePreference, setTimePreference] = useState<TimePreference>('AFTERNOON');
@@ -260,10 +279,36 @@ export function PlanWithAuraView({ onSlotTask, onViewDay, onPlanLogged, timezone
   const [recommendation, setRecommendation] = useState<TaskSlotRecommendation | null>(null);
   const [error, setError] = useState('');
   const [isLoading, setIsLoading] = useState(false);
+  const [isListening, setIsListening] = useState(false);
   const [showAllPlans, setShowAllPlans] = useState(false);
+  const [showMoreActivities, setShowMoreActivities] = useState(false);
   const [savedPlans, setSavedPlans] = useState<UpcomingPlan[]>([]);
   const [expandedPlanId, setExpandedPlanId] = useState<string | null>(null);
+  const [reschedulingPlanId, setReschedulingPlanId] = useState<string | null>(null);
+  const [savingOpportunityKey, setSavingOpportunityKey] = useState<string | null>(null);
+  const [planActionStates, setPlanActionStates] = useState<Record<string, PlanActionState>>({});
+  const [plannedOpportunityKeys, setPlannedOpportunityKeys] = useState<Set<string>>(() => new Set());
   const plansSectionRef = useRef<HTMLElement | null>(null);
+
+  useEffect(() => {
+    const nextActivity = initialActivity?.trim();
+    if (!nextActivity) return;
+
+    const knownTask = TASKS.some((task) => task.title.toLowerCase() === nextActivity.toLowerCase());
+    setTaskTitle(nextActivity);
+    setIsCustomTask(!knownTask);
+    setTimePreference(recommendedPreference(nextActivity));
+    setRecommendation(null);
+    setError('');
+    setShowAllPlans(false);
+    setShowMoreActivities(false);
+    setExpandedPlanId(null);
+    setReschedulingPlanId(null);
+    setSavingOpportunityKey(null);
+    setPlanActionStates({});
+    setPlannedOpportunityKeys(new Set());
+    if (typeof window !== 'undefined') window.scrollTo({ top: 0, behavior: 'smooth' });
+  }, [initialActivity, initialActivityKey]);
 
   useEffect(() => {
     let cancelled = false;
@@ -273,9 +318,9 @@ export function PlanWithAuraView({ onSlotTask, onViewDay, onPlanLogged, timezone
         if (!res.ok) throw new Error('Unable to load plans.');
         const rows = await res.json();
         if (cancelled) return;
-        setSavedPlans(Array.isArray(rows) && rows.length > 0 ? rows.map(mapPlanRow) : buildUpcomingPlans(timezone));
+        setSavedPlans(Array.isArray(rows) ? rows.map(mapPlanRow) : []);
       } catch {
-        if (!cancelled) setSavedPlans(buildUpcomingPlans(timezone));
+        if (!cancelled) setSavedPlans([]);
       }
     };
 
@@ -288,9 +333,11 @@ export function PlanWithAuraView({ onSlotTask, onViewDay, onPlanLogged, timezone
 
   const filteredTasks = useMemo(() => {
     const query = taskTitle.trim().toLowerCase();
-    if (isCustomTask || !query) return TASKS.slice(0, 4);
-    return TASKS.filter((task) => task.title.toLowerCase().includes(query) || task.keywords.some((keyword) => keyword.includes(query))).slice(0, 5);
-  }, [taskTitle, isCustomTask]);
+    if (!query) return showMoreActivities ? ALL_TASKS : TASKS.slice(0, 4);
+    return ALL_TASKS
+      .filter((task) => task.title.toLowerCase().includes(query) || task.keywords.some((keyword) => keyword.includes(query)))
+      .slice(0, showMoreActivities ? 14 : 5);
+  }, [taskTitle, showMoreActivities]);
 
   const selectedHorizon = HORIZONS.find((item) => item.value === horizon) ?? HORIZONS[0];
   const selectedDuration = DURATIONS.find((item) => item.value === durationMinutes) ?? DURATIONS[2];
@@ -316,6 +363,7 @@ export function PlanWithAuraView({ onSlotTask, onViewDay, onPlanLogged, timezone
           windowType: windowTypeFromLabel(plan.window),
           windowLabel: plan.window,
           matchLabel: plan.match,
+          score: plan.score,
           recommendation: plan.details,
           calendarUrl: plan.googleCalendarUrl,
         }),
@@ -323,14 +371,30 @@ export function PlanWithAuraView({ onSlotTask, onViewDay, onPlanLogged, timezone
       if (!res.ok) throw new Error('Unable to save plan.');
       const row = await res.json();
       const saved = mapPlanRow(row);
-      setSavedPlans((plans) => [saved, ...plans.filter((item) => item.id !== saved.id && item.source !== 'Sample')]);
+      const replacedPlanId = reschedulingPlanId;
+      if (replacedPlanId && replacedPlanId !== saved.id) {
+        fetch(`/api/plans/${replacedPlanId}`, { method: 'DELETE' }).catch((err) => {
+          console.warn('Could not cancel previous rescheduled plan:', err);
+        });
+      }
+      setSavedPlans((plans) => [
+        saved,
+        ...plans.filter((item) => item.id !== saved.id && item.id !== replacedPlanId),
+      ]);
       setExpandedPlanId(saved.id);
+      setReschedulingPlanId(null);
       setShowAllPlans(true);
+      onPlanLogged?.();
       triggerHaptic('success');
       return saved;
     } catch {
-      setSavedPlans((plans) => [{ ...plan, status: 'UPCOMING' }, ...plans.filter((item) => item.id !== plan.id)]);
+      const replacedPlanId = reschedulingPlanId;
+      setSavedPlans((plans) => [
+        { ...plan, status: 'UPCOMING' },
+        ...plans.filter((item) => item.id !== plan.id && item.id !== replacedPlanId),
+      ]);
       setExpandedPlanId(plan.id);
+      setReschedulingPlanId(null);
       setShowAllPlans(true);
       triggerHaptic('success');
       return plan;
@@ -348,20 +412,16 @@ export function PlanWithAuraView({ onSlotTask, onViewDay, onPlanLogged, timezone
     setRecommendation(null);
     setShowAllPlans(false);
     setExpandedPlanId(null);
+    setReschedulingPlanId(plan.status === 'UPCOMING' ? plan.id : null);
+    setSavingOpportunityKey(null);
+    setPlannedOpportunityKeys(new Set());
     triggerHaptic('light');
     if (typeof window !== 'undefined') window.scrollTo({ top: 0, behavior: 'smooth' });
   };
 
   const handleLogPlan = async (plan: UpcomingPlan) => {
-    if (plan.source === 'Sample') {
-      const savedPlan = { ...plan, id: `aura-${plan.id}-${Date.now()}`, source: 'Aura' as const };
-      const persisted = await handleSavePlan(savedPlan);
-      if (persisted.id !== savedPlan.id) {
-        await handleLogPlan(persisted);
-      }
-      return;
-    }
-
+    if (planActionStates[plan.id] || plan.status === 'LOGGED') return;
+    setPlanActionStates((states) => ({ ...states, [plan.id]: 'LOGGING' }));
     try {
       const res = await fetch(`/api/plans/${plan.id}/log`, { method: 'POST' });
       if (!res.ok) throw new Error('Unable to log plan.');
@@ -385,6 +445,34 @@ export function PlanWithAuraView({ onSlotTask, onViewDay, onPlanLogged, timezone
       ));
       setExpandedPlanId(plan.id);
       triggerHaptic('success');
+    } finally {
+      setPlanActionStates((states) => {
+        const next = { ...states };
+        delete next[plan.id];
+        return next;
+      });
+    }
+  };
+
+  const handleCancelPlan = async (plan: UpcomingPlan) => {
+    if (planActionStates[plan.id] || plan.status === 'LOGGED') return;
+
+    setPlanActionStates((states) => ({ ...states, [plan.id]: 'CANCELLING' }));
+    try {
+      const res = await fetch(`/api/plans/${plan.id}`, { method: 'DELETE' });
+      if (!res.ok) throw new Error('Unable to cancel plan.');
+      setSavedPlans((plans) => plans.filter((item) => item.id !== plan.id));
+      setExpandedPlanId(null);
+      onPlanLogged?.();
+      triggerHaptic('success');
+    } catch (err) {
+      console.error('Failed to cancel plan:', err);
+    } finally {
+      setPlanActionStates((states) => {
+        const next = { ...states };
+        delete next[plan.id];
+        return next;
+      });
     }
   };
 
@@ -395,12 +483,56 @@ export function PlanWithAuraView({ onSlotTask, onViewDay, onPlanLogged, timezone
     try {
       const next = await onSlotTask(taskTitle, durationMinutes, horizon, customStartDate, customEndDate, timePreference);
       setRecommendation(next);
+      setSavingOpportunityKey(null);
+      setPlannedOpportunityKeys(new Set());
       triggerHaptic('success');
     } catch {
       setError('Aura could not find a time for this request. Try a shorter duration or a wider date range.');
     } finally {
       setIsLoading(false);
     }
+  };
+
+  const handleVoiceInput = () => {
+    if (typeof window === 'undefined' || isListening) return;
+    const SpeechRecognition = (
+      (window as typeof window & {
+        SpeechRecognition?: SpeechRecognitionConstructor;
+        webkitSpeechRecognition?: SpeechRecognitionConstructor;
+      }).SpeechRecognition ||
+      (window as typeof window & {
+        SpeechRecognition?: SpeechRecognitionConstructor;
+        webkitSpeechRecognition?: SpeechRecognitionConstructor;
+      }).webkitSpeechRecognition
+    );
+
+    if (!SpeechRecognition) {
+      setError('Voice input is not available in this browser. Type the activity instead.');
+      return;
+    }
+
+    const recognition = new SpeechRecognition();
+    recognition.continuous = false;
+    recognition.interimResults = false;
+    recognition.lang = 'en-US';
+    setError('');
+    setIsListening(true);
+
+    recognition.onresult = (event) => {
+      const transcript = event.results[0]?.[0]?.transcript?.trim();
+      if (!transcript) return;
+      setTaskTitle(transcript);
+      setIsCustomTask(true);
+      setTimePreference(recommendedPreference(transcript));
+      setRecommendation(null);
+    };
+    recognition.onerror = () => {
+      setError('Aura could not hear that clearly. Try typing the activity.');
+    };
+    recognition.onend = () => {
+      setIsListening(false);
+    };
+    recognition.start();
   };
 
   const handleMyPlansClick = () => {
@@ -412,6 +544,16 @@ export function PlanWithAuraView({ onSlotTask, onViewDay, onPlanLogged, timezone
 
   const options = recommendation?.planningOptions ?? [];
   const hasMultiOptions = options.length > 0;
+  const saveOpportunity = async (key: string, plan: UpcomingPlan) => {
+    if (savingOpportunityKey || plannedOpportunityKeys.has(key)) return;
+    setSavingOpportunityKey(key);
+    try {
+      await handleSavePlan(plan);
+      setPlannedOpportunityKeys((prev) => new Set(prev).add(key));
+    } finally {
+      setSavingOpportunityKey(null);
+    }
+  };
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 17, paddingBottom: 24, fontFamily: 'sans-serif', color: '#f8fafc' }}>
@@ -432,6 +574,11 @@ export function PlanWithAuraView({ onSlotTask, onViewDay, onPlanLogged, timezone
 
       <section style={panelStyle}>
         <SectionTitle number={1} label="What do you want to do?" />
+        {reschedulingPlanId && (
+          <div style={rescheduleNoticeStyle}>
+            Rescheduling this plan. Saving a new best moment will replace the current upcoming plan.
+          </div>
+        )}
         <div style={inputShellStyle}>
           <span style={{ fontSize: 21, color: '#7dd3fc' }}>✦</span>
           <input
@@ -444,7 +591,18 @@ export function PlanWithAuraView({ onSlotTask, onViewDay, onPlanLogged, timezone
             placeholder="e.g. Workout, Deep work, Study, Date night..."
             style={inputStyle}
           />
-          <button type="button" aria-label="Voice input" style={voiceButtonStyle}>🎙</button>
+          <button
+            type="button"
+            onClick={handleVoiceInput}
+            aria-label={isListening ? 'Listening for activity' : 'Voice input'}
+            style={{
+              ...voiceButtonStyle,
+              borderColor: isListening ? 'rgba(74, 222, 128, 0.55)' : voiceButtonStyle.borderColor,
+              color: isListening ? '#4ade80' : voiceButtonStyle.color,
+            }}
+          >
+            {isListening ? '●' : '🎙'}
+          </button>
         </div>
         <div style={{ marginTop: 17, color: '#aab7d2', fontSize: 13 }}>Popular</div>
         <div style={{ display: 'flex', flexWrap: 'wrap', gap: 9, marginTop: 12 }}>
@@ -456,12 +614,23 @@ export function PlanWithAuraView({ onSlotTask, onViewDay, onPlanLogged, timezone
               onClick={() => {
                 setTaskTitle(task.title);
                 setIsCustomTask(false);
+                if (task.defaultDurationMinutes) setDurationMinutes(task.defaultDurationMinutes);
                 setTimePreference(recommendedPreference(task.title));
                 setRecommendation(null);
               }}
             />
           ))}
-          <button type="button" style={moreChipStyle}>••• More</button>
+          <button
+            type="button"
+            onClick={() => setShowMoreActivities((value) => !value)}
+            style={{
+              ...moreChipStyle,
+              borderColor: showMoreActivities ? 'rgba(74, 222, 128, 0.45)' : 'rgba(148, 163, 184, 0.28)',
+              color: showMoreActivities ? '#4ade80' : moreChipStyle.color,
+            }}
+          >
+            {showMoreActivities ? 'Show less' : '••• More'}
+          </button>
         </div>
       </section>
 
@@ -521,20 +690,9 @@ export function PlanWithAuraView({ onSlotTask, onViewDay, onPlanLogged, timezone
       {recommendation && (
         <section style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
           <SectionHeader label="Aura's Best Moments" actionLabel={onViewDay ? 'View my day' : undefined} onAction={onViewDay} />
-          {hasMultiOptions ? options.map((option, index) => (
-            <OpportunityCard
-              key={`${option.dateLabel}-${option.startTime}`}
-              rank={index}
-              title={recommendation.activityType}
-              durationText={durationLabel(durationMinutes)}
-              dateLabel={option.dateLabel}
-              startTime={option.startTime}
-              endTime={option.endTime}
-              score={option.score}
-              quality={option.quality}
-              summary={option.summary}
-              googleCalendarUrl={option.googleCalendarUrl}
-              onPlan={() => handleSavePlan({
+          {hasMultiOptions ? options.map((option, index) => {
+            const opportunityKey = `${recommendation.activityType}-${option.startsAtLocal}-${option.endsAtLocal}`;
+            const planPayload: UpcomingPlan = {
                 id: `aura-${option.dateLabel}-${option.startTime}-${recommendation.activityType}`.toLowerCase().replace(/[^a-z0-9]+/g, '-'),
                 title: recommendation.activityType,
                 icon: planIconForTitle(recommendation.activityType),
@@ -548,23 +706,32 @@ export function PlanWithAuraView({ onSlotTask, onViewDay, onPlanLogged, timezone
                 note: option.quality === 'STRONG' ? 'Excellent match' : option.quality === 'GOOD' ? 'Good match' : 'Usable match',
                 accent: planAccentForTitle(recommendation.activityType),
                 details: option.summary,
+                score: option.score,
                 googleCalendarUrl: option.googleCalendarUrl,
                 source: 'Aura',
-              })}
-            />
-          )) : (
-            <OpportunityCard
-              rank={0}
-              title={recommendation.activityType}
-              durationText={durationLabel(durationMinutes)}
-              dateLabel={recommendation.timeStatus === 'NOW' ? 'Today' : 'Recommended'}
-              startTime={recommendation.bestWindow.startTime}
-              endTime={recommendation.bestWindow.endTime}
-              score={recommendation.windowQuality === 'BEST' ? 92 : recommendation.windowQuality === 'GOOD' ? 84 : recommendation.windowQuality === 'AVOID' ? 35 : 72}
-              quality={recommendation.windowQuality === 'BEST' ? 'STRONG' : recommendation.windowQuality === 'GOOD' ? 'GOOD' : 'USABLE'}
-              summary={recommendation.bestWindow.reason}
-              googleCalendarUrl={recommendation.calendar.googleCalendarUrl}
-              onPlan={() => handleSavePlan({
+              };
+            return (
+              <OpportunityCard
+                key={opportunityKey}
+                rank={index}
+                title={recommendation.activityType}
+                durationText={durationLabel(durationMinutes)}
+                dateLabel={option.dateLabel}
+                startTime={option.startTime}
+                endTime={option.endTime}
+                score={option.score}
+                quality={option.quality}
+                summary={option.summary}
+                googleCalendarUrl={option.googleCalendarUrl}
+                isSaving={savingOpportunityKey === opportunityKey}
+                isPlanned={plannedOpportunityKeys.has(opportunityKey)}
+                onPlan={() => saveOpportunity(opportunityKey, planPayload)}
+              />
+            );
+          }) : (() => {
+            const opportunityKey = `${recommendation.activityType}-${recommendation.calendar.startsAtLocal}-${recommendation.calendar.endsAtLocal}`;
+            const recommendationScore = recommendation.windowQuality === 'BEST' ? 92 : recommendation.windowQuality === 'GOOD' ? 84 : recommendation.windowQuality === 'AVOID' ? 35 : 72;
+            const planPayload: UpcomingPlan = {
                 id: `aura-${recommendation.bestWindow.startTime}-${recommendation.activityType}`.toLowerCase().replace(/[^a-z0-9]+/g, '-'),
                 title: recommendation.activityType,
                 icon: planIconForTitle(recommendation.activityType),
@@ -578,11 +745,28 @@ export function PlanWithAuraView({ onSlotTask, onViewDay, onPlanLogged, timezone
                 note: recommendation.windowQuality === 'BEST' ? 'Excellent match' : 'Good match',
                 accent: planAccentForTitle(recommendation.activityType),
                 details: recommendation.bestWindow.reason,
+                score: recommendationScore,
                 googleCalendarUrl: recommendation.calendar.googleCalendarUrl,
                 source: 'Aura',
-              })}
-            />
-          )}
+              };
+            return (
+              <OpportunityCard
+                rank={0}
+                title={recommendation.activityType}
+                durationText={durationLabel(durationMinutes)}
+                dateLabel={recommendation.timeStatus === 'NOW' ? 'Today' : 'Recommended'}
+                startTime={recommendation.bestWindow.startTime}
+                endTime={recommendation.bestWindow.endTime}
+                score={recommendationScore}
+                quality={recommendation.windowQuality === 'BEST' ? 'STRONG' : recommendation.windowQuality === 'GOOD' ? 'GOOD' : 'USABLE'}
+                summary={recommendation.bestWindow.reason}
+                googleCalendarUrl={recommendation.calendar.googleCalendarUrl}
+                isSaving={savingOpportunityKey === opportunityKey}
+                isPlanned={plannedOpportunityKeys.has(opportunityKey)}
+                onPlan={() => saveOpportunity(opportunityKey, planPayload)}
+              />
+            );
+          })()}
         </section>
       )}
 
@@ -597,12 +781,16 @@ export function PlanWithAuraView({ onSlotTask, onViewDay, onPlanLogged, timezone
             key={plan.id}
             plan={plan}
             expanded={expandedPlanId === plan.id}
+            actionState={planActionStates[plan.id]}
             onToggle={() => setExpandedPlanId((id) => id === plan.id ? null : plan.id)}
             onReschedule={() => handleReschedulePlan(plan)}
             onLog={() => handleLogPlan(plan)}
+            onCancel={() => handleCancelPlan(plan)}
           />
         )) : (
-          <div style={emptyPlansStyle}>No upcoming plans yet.</div>
+          <div style={emptyPlansStyle}>
+            No upcoming plans yet. Choose an activity above and tap Find My Best Time to create one.
+          </div>
         )}
       </section>
 
@@ -614,9 +802,11 @@ export function PlanWithAuraView({ onSlotTask, onViewDay, onPlanLogged, timezone
               key={plan.id}
               plan={plan}
               expanded={expandedPlanId === plan.id}
+              actionState={planActionStates[plan.id]}
               onToggle={() => setExpandedPlanId((id) => id === plan.id ? null : plan.id)}
               onReschedule={() => handleReschedulePlan(plan)}
               onLog={() => handleLogPlan(plan)}
+              onCancel={() => handleCancelPlan(plan)}
             />
           ))}
         </section>
@@ -751,17 +941,23 @@ function TimeTile({ item, active, onClick }: { item: typeof TIME_PREFERENCES[num
 function UpcomingPlan({
   plan,
   expanded,
+  actionState,
   onToggle,
   onReschedule,
   onLog,
+  onCancel,
 }: {
   plan: UpcomingPlan;
   expanded: boolean;
+  actionState?: PlanActionState;
   onToggle: () => void;
   onReschedule: () => void;
   onLog: () => void;
+  onCancel: () => void;
 }) {
   const isLogged = plan.status === 'LOGGED';
+  const isBusy = Boolean(actionState);
+  const logButtonLabel = isLogged ? 'Logged' : actionState === 'LOGGING' ? 'Logging...' : 'Log activity';
   return (
     <article style={{ ...panelStyle, padding: 0, overflow: 'hidden', borderColor: isLogged ? 'rgba(74, 222, 128, 0.38)' : expanded ? 'rgba(56, 189, 248, 0.38)' : undefined }}>
       <button
@@ -806,7 +1002,12 @@ function UpcomingPlan({
           <div style={{ minWidth: 0 }}>
             <div style={{ color: isLogged ? '#a7f3d0' : '#4ade80', fontSize: 15, fontWeight: 900, whiteSpace: 'nowrap' }}>{plan.time}</div>
             <div style={{ color: '#dbe7f4', fontSize: 13, marginTop: 5 }}>{plan.window}</div>
-            <div style={{ color: '#aab7d2', fontSize: 13, marginTop: 6 }}>{plan.note}</div>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 7, flexWrap: 'wrap', marginTop: 6 }}>
+              <span style={{ color: '#aab7d2', fontSize: 13 }}>{plan.note}</span>
+              {typeof plan.score === 'number' && (
+                <span style={planScorePillStyle}>{Math.round(plan.score)}/100</span>
+              )}
+            </div>
           </div>
           <span style={{ color: '#aab7d2', fontSize: 27, lineHeight: 1, transform: expanded ? 'rotate(90deg)' : 'none', transition: 'transform 140ms ease' }}>›</span>
         </div>
@@ -820,10 +1021,15 @@ function UpcomingPlan({
                 Add calendar
               </a>
             )}
-            <button type="button" onClick={onReschedule} style={planSecondaryActionStyle}>Reschedule</button>
-            <button type="button" onClick={onLog} disabled={isLogged} style={{ ...planSecondaryActionStyle, opacity: isLogged ? 0.55 : 1, cursor: isLogged ? 'default' : 'pointer' }}>
-              {isLogged ? 'Logged' : 'Log activity'}
+            <button type="button" onClick={onReschedule} disabled={isBusy} style={{ ...planSecondaryActionStyle, opacity: isBusy ? 0.55 : 1, cursor: isBusy ? 'default' : 'pointer' }}>Reschedule</button>
+            <button type="button" onClick={onLog} disabled={isLogged || isBusy} style={{ ...planSecondaryActionStyle, opacity: isLogged || isBusy ? 0.55 : 1, cursor: isLogged || isBusy ? 'default' : 'pointer' }}>
+              {logButtonLabel}
             </button>
+            {!isLogged && (
+              <button type="button" onClick={onCancel} disabled={isBusy} style={{ ...planDangerActionStyle, opacity: isBusy ? 0.55 : 1, cursor: isBusy ? 'default' : 'pointer' }}>
+                {actionState === 'CANCELLING' ? 'Cancelling...' : 'Cancel'}
+              </button>
+            )}
           </div>
         </div>
       )}
@@ -895,6 +1101,8 @@ function OpportunityCard({
   quality,
   summary,
   googleCalendarUrl,
+  isSaving,
+  isPlanned,
   onPlan,
 }: {
   rank: number;
@@ -907,6 +1115,8 @@ function OpportunityCard({
   quality: 'STRONG' | 'GOOD' | 'USABLE';
   summary: string;
   googleCalendarUrl: string;
+  isSaving?: boolean;
+  isPlanned?: boolean;
   onPlan: () => void;
 }) {
   const label = rank === 0 ? 'Best Match' : rank === 1 ? 'Good Alternative' : 'Backup Option';
@@ -926,8 +1136,13 @@ function OpportunityCard({
       </div>
       <div style={{ color: '#dbe7f4', fontSize: 12, lineHeight: 1.45, marginTop: 9 }}>{summary}</div>
       <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginTop: 10 }}>
-        <button type="button" onClick={onPlan} style={{ border: 'none', background: 'transparent', color: '#38bdf8', fontWeight: 850, fontSize: 12, padding: 0, cursor: 'pointer' }}>
-          Plan this
+        <button
+          type="button"
+          onClick={onPlan}
+          disabled={isSaving || isPlanned}
+          style={{ border: 'none', background: 'transparent', color: isPlanned ? '#4ade80' : '#38bdf8', fontWeight: 850, fontSize: 12, padding: 0, cursor: isSaving || isPlanned ? 'default' : 'pointer', opacity: isSaving ? 0.65 : 1 }}
+        >
+          {isSaving ? 'Saving...' : isPlanned ? 'Planned' : 'Plan this'}
         </button>
         <a href={googleCalendarUrl} target="_blank" rel="noreferrer" style={{ color: '#aab7d2', textDecoration: 'none', fontWeight: 750, fontSize: 12 }}>
           Add calendar
@@ -972,6 +1187,17 @@ const inputShellStyle: React.CSSProperties = {
   alignItems: 'center',
   gap: 7,
   padding: '0 10px 0 13px',
+};
+
+const rescheduleNoticeStyle: React.CSSProperties = {
+  marginTop: 12,
+  border: '1px solid rgba(56, 189, 248, 0.28)',
+  borderRadius: 10,
+  background: 'rgba(56, 189, 248, 0.1)',
+  color: '#dbe7f4',
+  fontSize: 12,
+  lineHeight: 1.4,
+  padding: '9px 11px',
 };
 
 const inputStyle: React.CSSProperties = {
@@ -1062,10 +1288,29 @@ const planActionStyle: React.CSSProperties = {
   fontWeight: 850,
 };
 
+const planScorePillStyle: React.CSSProperties = {
+  border: '1px solid rgba(74, 222, 128, 0.26)',
+  borderRadius: 999,
+  background: 'rgba(74, 222, 128, 0.09)',
+  color: '#a7f3d0',
+  padding: '2px 7px',
+  fontSize: 11,
+  fontWeight: 900,
+  whiteSpace: 'nowrap',
+};
+
 const planSecondaryActionStyle: React.CSSProperties = {
   ...planActionStyle,
   border: '1px solid rgba(148, 163, 184, 0.24)',
   background: 'rgba(148, 163, 184, 0.12)',
   color: '#dbe7f4',
+  cursor: 'pointer',
+};
+
+const planDangerActionStyle: React.CSSProperties = {
+  ...planActionStyle,
+  border: '1px solid rgba(251, 113, 133, 0.35)',
+  background: 'rgba(251, 113, 133, 0.1)',
+  color: '#fb7185',
   cursor: 'pointer',
 };

@@ -12,6 +12,7 @@ import {
   consumeAuthCode,
   getOrCreateUserForAuth,
 } from '../../../../lib/db';
+import { readJsonObject } from '../../../../lib/request';
 
 // One message for every "your input didn't verify" outcome, so an
 // unauthenticated caller can't distinguish "no code pending for this email"
@@ -22,12 +23,13 @@ const REJECTED = { error: 'That code is not valid. Check the email or request a 
 // cookie), but works inside native webview shells where the emailed link
 // would open in the system browser instead.
 export async function POST(req: NextRequest) {
-  let body: { email?: unknown; code?: unknown };
-  try {
-    body = await req.json();
-  } catch {
+  const parsed = await readJsonObject(req);
+  if (!parsed.ok) {
     return NextResponse.json({ error: 'Malformed request body.' }, { status: 400 });
   }
+  const body = parsed.body;
+  if (!body) return NextResponse.json({ error: 'A valid JSON request body is required.' }, { status: 400 });
+
   const { email: rawEmail, code: rawCode } = body;
   if (!rawEmail || typeof rawEmail !== 'string' || !rawCode || typeof rawCode !== 'string') {
     return NextResponse.json({ error: 'Email and code are required.' }, { status: 400 });

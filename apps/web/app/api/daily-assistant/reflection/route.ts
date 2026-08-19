@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getDailyReflection, upsertDailyReflection } from '../../../../lib/db';
 import { getSessionFromRequest } from '../../../../lib/session';
+import { parseJsonObject } from '../../../../lib/request';
 
 const OUTPUT_LEVELS = new Set(['LOW', 'MODERATE', 'PEAK_FLOW']);
 
@@ -17,7 +18,9 @@ export async function POST(req: NextRequest) {
   const session = getSessionFromRequest(req);
   if (!session) return NextResponse.json({ error: 'Not authenticated.' }, { status: 401 });
 
-  const body = await req.json();
+  const body = await parseJsonObject(req);
+  if (!body) return NextResponse.json({ error: 'A valid JSON request body is required.' }, { status: 400 });
+
   const outputLevel = String(body?.outputLevel || '').toUpperCase();
   if (!OUTPUT_LEVELS.has(outputLevel)) {
     return NextResponse.json({ error: 'Invalid output level.' }, { status: 400 });
@@ -25,7 +28,7 @@ export async function POST(req: NextRequest) {
 
   const reflection = await upsertDailyReflection({
     userId: session.userId,
-    reflectionDate: getReflectionDate(body?.date),
+    reflectionDate: getReflectionDate(typeof body?.date === 'string' ? body.date : null),
     outputLevel: outputLevel as 'LOW' | 'MODERATE' | 'PEAK_FLOW',
     followedGuidance: Boolean(body?.followedGuidance),
     notes: body?.notes ? String(body.notes).trim() : undefined,

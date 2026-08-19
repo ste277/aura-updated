@@ -17,7 +17,7 @@ import type { DailyBriefing, PlanningHorizon, TaskSlotRecommendation, TimePrefer
 import { HomeDashboard } from '../components/HomeDashboard';
 import { TimelineView } from '../components/Timeline';
 import { AskAuraView } from '../components/AskAuraView';
-import { LoggedEntryItem } from '../components/CalendarViewSection';
+import { CalendarViewSection, LoggedEntryItem } from '../components/CalendarViewSection';
 import { InsightsView } from '../components/InsightsView';
 import { WindowShiftToast } from '../components/WindowShiftToast';
 import { PlanWithAuraView } from '../components/PlanWithAuraView';
@@ -25,7 +25,6 @@ import { YouView } from '../components/YouView';
 
 import { BirthChartSection } from '../components/BirthChartSection';
 import { LoginScreen } from '../components/LoginScreen';
-import { LocationPicker } from '../components/LocationPicker';
 import { useCurrentMinuteOfDay } from '../lib/useCurrentMinuteOfDay';
 import { resolveTzOffsetMinutes, getDatePartsInTimezone } from '../lib/timezone';
 import { Capacitor } from '@capacitor/core';
@@ -49,6 +48,20 @@ interface SessionUser {
 interface DailyReflectionState {
   outputLevel: 'LOW' | 'MODERATE' | 'PEAK_FLOW';
   followedGuidance: boolean;
+}
+
+interface PlannedActivityState {
+  id: string;
+  title: string;
+  icon?: string | null;
+  status: 'UPCOMING' | 'LOGGED' | 'CANCELLED';
+  plannedStartAt: string;
+  plannedEndAt: string;
+  durationMinutes: number;
+  windowType?: string | null;
+  windowLabel?: string | null;
+  matchLabel?: string | null;
+  recommendation?: string | null;
 }
 
 const FALLBACK_TZ = 'Asia/Kolkata';
@@ -80,9 +93,12 @@ export default function DashboardPage() {
   const [dailyBriefing, setDailyBriefing] = useState<DailyBriefing | null>(null);
   const [assistantInsight, setAssistantInsight] = useState<any>(null);
   const [todayReflection, setTodayReflection] = useState<DailyReflectionState | null>(null);
+  const [plannedActivities, setPlannedActivities] = useState<PlannedActivityState[]>([]);
+  const [planPrefill, setPlanPrefill] = useState<{ activity: string; key: number } | null>(null);
+  const [youNotificationsFocusKey, setYouNotificationsFocusKey] = useState(0);
   const [mounted, setMounted] = useState(false);
 
-  const [activeTab, setActiveTab] = useState<'home' | 'timeline' | 'ask' | 'plan' | 'insights' | 'you' | 'chart'>('home');
+  const [activeTab, setActiveTab] = useState<'home' | 'timeline' | 'ask' | 'plan' | 'insights' | 'you' | 'chart' | 'activity'>('home');
 
   const [notificationPrefs, setNotificationPrefs] = useState<NotificationPrefs>(DEFAULT_NOTIFICATION_PREFS);
 
@@ -135,14 +151,16 @@ export default function DashboardPage() {
 
       if (!sessionData?.user) {
         setUser(null);
+        setPlannedActivities([]);
         return;
       }
 
       setUser(sessionData.user);
 
-      const [logsRes, habitsRes] = await Promise.all([
+      const [logsRes, habitsRes, plansRes] = await Promise.all([
         fetch('/api/habit-logs'),
         fetch('/api/habits'),
+        fetch('/api/plans'),
       ]);
 
       if (logsRes.ok) {
@@ -166,8 +184,13 @@ export default function DashboardPage() {
         const habitsData = await habitsRes.json();
         setHabits(habitsData);
       }
+
+      if (plansRes.ok) {
+        setPlannedActivities(await plansRes.json());
+      }
     } catch {
       setUser(null);
+      setPlannedActivities([]);
     }
   }, []);
 
@@ -538,10 +561,29 @@ export default function DashboardPage() {
     const res = await fetch('/api/daily-assistant/slot-task', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ taskTitle, durationMinutes, horizon, customStartDate, customEndDate, timePreference }),
+      body: JSON.stringify({ taskTitle, durationMinutes, horizon, customStartDate, customEndDate, timePreference, clientNow: new Date().toISOString() }),
     });
     if (!res.ok) throw new Error('Unable to slot task.');
     return res.json();
+  }, []);
+
+  const handleLogPlanFromHome = useCallback(async (planId: string) => {
+    const res = await fetch(`/api/plans/${planId}/log`, { method: 'POST' });
+    if (!res.ok) throw new Error('Unable to log planned activity.');
+    await loadUserDataAndLogs();
+  }, [loadUserDataAndLogs]);
+
+  const handleOpenPlan = useCallback((activity?: string) => {
+    const cleanActivity = activity?.trim();
+    if (cleanActivity) {
+      setPlanPrefill({ activity: cleanActivity, key: Date.now() });
+    }
+    setActiveTab('plan');
+  }, []);
+
+  const handleOpenNotificationSettings = useCallback(() => {
+    setYouNotificationsFocusKey(Date.now());
+    setActiveTab('you');
   }, []);
 
   const handleSubmitReflection = useCallback(async (
@@ -602,39 +644,30 @@ export default function DashboardPage() {
             padding: '0 4px',
           }}
         >
-          <LocationPicker currentCity={user.cityName} onChanged={handleLocationChanged} />
-          <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-            <button
-              onClick={() => setActiveTab('home')}
-              style={{
-                fontSize: 11,
-                color: '#4ade80',
-                background: 'rgba(255,255,255,0.06)',
-                border: '1px solid #4ade80',
-                borderRadius: 14,
-                padding: '6px 10px',
-                cursor: 'pointer',
-                minHeight: 32,
-              }}
-            >
-              Home
-            </button>
-            <button
-              onClick={handleLogout}
-              style={{
-                fontSize: 11,
-                color: 'var(--as-text-muted)',
-                background: 'rgba(255,255,255,0.06)',
-                border: '1px solid rgba(255,255,255,0.1)',
-                borderRadius: 14,
-                padding: '6px 12px',
-                cursor: 'pointer',
-                minHeight: 32,
-              }}
-            >
-              sign out
-            </button>
+          <div>
+            <h1 style={{ fontSize: 20, margin: 0, lineHeight: 1.15 }}>Birth Chart</h1>
+            <p style={{ fontSize: 12, color: '#b6c2d1', margin: '4px 0 0' }}>
+              Personal timing map and daily transit context.
+            </p>
           </div>
+          <button
+            type="button"
+            onClick={() => setActiveTab('you')}
+            aria-label="Back to You"
+            style={{
+              fontSize: 11,
+              color: '#4ade80',
+              background: 'rgba(255,255,255,0.06)',
+              border: '1px solid #4ade80',
+              borderRadius: 14,
+              padding: '6px 10px',
+              cursor: 'pointer',
+              minHeight: 32,
+              flexShrink: 0,
+            }}
+          >
+            Back to You
+          </button>
         </header>
       )}
 
@@ -652,11 +685,14 @@ export default function DashboardPage() {
             loggedActivitiesToday={loggedActivitiesToday}
             dailyBriefing={dailyBriefing}
             todayReflection={todayReflection}
+            upcomingPlans={plannedActivities.filter((plan) => plan.status === 'UPCOMING')}
             onLogActivity={handleLogActivity}
             onSubmitReflection={handleSubmitReflection}
+            onLogPlan={handleLogPlanFromHome}
             onNextShiftClick={() => setActiveTab('timeline')}
-            onPlanClick={() => setActiveTab('plan')}
+            onPlanClick={handleOpenPlan}
             onInsightsClick={() => setActiveTab('insights')}
+            onNotificationsClick={handleOpenNotificationSettings}
           />
         )}
 
@@ -668,6 +704,7 @@ export default function DashboardPage() {
             logEntries={logEntries}
             loggedActivitiesToday={loggedActivitiesToday}
             onLogActivity={handleLogActivity}
+            onPlanActivity={handleOpenPlan}
             onAskAuraClick={() => setActiveTab('ask')}
           />
         )}
@@ -677,6 +714,8 @@ export default function DashboardPage() {
             userName={userNameDisplay}
             activeWindow={activeType}
             cityName={user.cityName}
+            onPlanLogged={loadUserDataAndLogs}
+            onViewTimeline={() => setActiveTab('timeline')}
           />
         )}
 
@@ -686,6 +725,8 @@ export default function DashboardPage() {
             onViewDay={() => setActiveTab('timeline')}
             onPlanLogged={loadUserDataAndLogs}
             timezone={user.timezone}
+            initialActivity={planPrefill?.activity}
+            initialActivityKey={planPrefill?.key}
           />
         )}
 
@@ -704,12 +745,25 @@ export default function DashboardPage() {
               setNotificationPrefs(next);
               saveNotificationPrefs(next);
             }}
+            onLocationChanged={handleLocationChanged}
+            onOpenHome={() => setActiveTab('home')}
             onOpenChart={() => setActiveTab('chart')}
+            onOpenActivityLog={() => setActiveTab('activity')}
             onSignOut={handleLogout}
+            focusNotificationsKey={youNotificationsFocusKey}
           />
         )}
 
         {activeTab === 'chart' && <BirthChartSection />}
+
+        {activeTab === 'activity' && (
+          <CalendarViewSection
+            logEntries={logEntries}
+            userLocation={{ latitude: user.latitude, longitude: user.longitude, timezone: user.timezone }}
+            onLogActivity={handleLogActivity}
+            onBack={() => setActiveTab('you')}
+          />
+        )}
       </div>
 
       {/* Navigation Dock */}
@@ -733,7 +787,7 @@ export default function DashboardPage() {
         <NavButton label="Plan" icon="✨" active={activeTab === 'plan'} onClick={() => setActiveTab('plan')} />
         <NavButton label="Ask Aura" icon="🤖" active={activeTab === 'ask'} onClick={() => setActiveTab('ask')} />
         <NavButton label="Insights" icon="📊" active={activeTab === 'insights'} onClick={() => setActiveTab('insights')} />
-        <NavButton label="You" icon="👤" active={activeTab === 'you'} onClick={() => setActiveTab('you')} />
+        <NavButton label="You" icon="👤" active={activeTab === 'you' || activeTab === 'chart' || activeTab === 'activity'} onClick={() => setActiveTab('you')} />
       </nav>
     </main>
   );
@@ -742,6 +796,7 @@ export default function DashboardPage() {
 const NavButton = React.memo(function NavButton({ label, icon, active, onClick }: any) {
   return (
     <button
+      type="button"
       onClick={onClick}
       style={{
         background: 'none',

@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { listHabitLogs } from '@/lib/db';
 import { getUserById } from '@/lib/db';
 import { getSessionFromRequest } from '@/lib/session';
+import { parseJsonObject } from '@/lib/request';
 import { resolveTzOffsetMinutes } from '@/lib/timezone';
 import { buildDailyBriefing, recommendTaskSlot } from '../../../../../packages/recommendation/src/dailyAssistant';
 
@@ -19,6 +20,11 @@ interface AuraDecisionResponse {
     end: string;
     label: string;
     reason: string;
+    startsAtLocal?: string;
+    endsAtLocal?: string;
+    googleCalendarUrl?: string;
+    durationMinutes?: number;
+    matchLabel?: string;
   };
   actions: string[];
 }
@@ -31,7 +37,14 @@ export async function POST(req: NextRequest) {
     }
     const userId = session.userId;
 
-    const { prompt, activeWindow, cityName, userName, conversation = [] } = await req.json();
+    const body = await parseJsonObject(req);
+    if (!body) return NextResponse.json({ error: 'A valid JSON request body is required.' }, { status: 400 });
+
+    const prompt = typeof body.prompt === 'string' ? body.prompt.trim() : '';
+    const activeWindow = typeof body.activeWindow === 'string' ? body.activeWindow : undefined;
+    const cityName = typeof body.cityName === 'string' ? body.cityName.trim() : undefined;
+    const userName = typeof body.userName === 'string' ? body.userName.trim() : undefined;
+    const conversation = Array.isArray(body.conversation) ? body.conversation : [];
 
     if (!prompt) {
       return NextResponse.json({ error: 'Prompt is required' }, { status: 400 });
@@ -274,7 +287,18 @@ function buildDeterministicAnswer({
       text: `${stateLead}\n\n${recommendation.activityIcon} ${recommendation.activityType}\n${recommendation.bestWindow.startTime} - ${recommendation.bestWindow.endTime} · ${recommendation.bestWindow.label}\n\n${recommendation.bestWindow.reason}\n\n${recommendation.recommendationState === 'BEST_NOW' ? 'Go ahead now.' : 'Schedule this window from Slot My Task.'}`,
       activity: recommendation.activityType,
       currentWindow: { type: activeWindow },
-      recommendation: { type: recommendation.bestWindow.label, start: recommendation.bestWindow.startTime, end: recommendation.bestWindow.endTime, label: recommendation.bestWindow.label, reason: recommendation.bestWindow.reason },
+      recommendation: {
+        type: recommendation.bestWindow.label,
+        start: recommendation.bestWindow.startTime,
+        end: recommendation.bestWindow.endTime,
+        label: recommendation.bestWindow.label,
+        reason: recommendation.bestWindow.reason,
+        startsAtLocal: recommendation.calendar.startsAtLocal,
+        endsAtLocal: recommendation.calendar.endsAtLocal,
+        googleCalendarUrl: recommendation.calendar.googleCalendarUrl,
+        durationMinutes: recommendation.durationMinutes,
+        matchLabel: recommendation.windowQuality === 'BEST' ? 'Best Match' : 'Good Match',
+      },
       actions: recommendation.recommendationState === 'BEST_NOW' ? ['SLOT_TASK', 'VIEW_TIMELINE'] : ['SCHEDULE', 'VIEW_TIMELINE'],
     };
   }

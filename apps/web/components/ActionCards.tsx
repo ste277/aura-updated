@@ -35,6 +35,7 @@ export function ActionCards({ cards, onLog, loggedIds }: ActionCardsProps) {
           Recommended for you
         </span>
         <button
+          type="button"
           onClick={() => setShowWhy((v) => !v)}
           style={{ fontSize: 11, color: 'var(--as-gulika)', background: 'none', border: 'none', cursor: 'pointer', padding: 0 }}
         >
@@ -102,6 +103,7 @@ export function ActionCards({ cards, onLog, loggedIds }: ActionCardsProps) {
                 {card.reasoning ?? card.description}
               </div>
               <button
+                type="button"
                 onClick={() => onLog(card)}
                 disabled={logged}
                 style={{

@@ -108,6 +108,7 @@ export function RecommendationsView({
                   {rec.duration || '20 - 30 min'}
                 </span>
                 <button
+                  type="button"
                   onClick={() => onLog(rec)}
                   disabled={isLogged}
                   style={{

@@ -152,6 +152,12 @@ export function InsightsView({ logEntries = [], assistantInsight }: InsightsView
     // Window Breakdown
     let weightedAlignment = 0;
     let frictionCount = 0;
+    let auraPlannedCount = 0;
+    let auraDoNowCount = 0;
+    let manualCount = 0;
+    let overrideCautionCount = 0;
+    let auraPlannedAlignment = 0;
+    let manualAlignment = 0;
 
     const windowCounts: Record<string, number> = {};
     const frictionLogs: LoggedEntryItem[] = [];
@@ -160,7 +166,21 @@ export function InsightsView({ logEntries = [], assistantInsight }: InsightsView
       const win = (entry.activeWindow || 'NEUTRAL').toUpperCase().replace(/_/g, ' ');
       windowCounts[win] = (windowCounts[win] || 0) + 1;
 
-      weightedAlignment += scoreLoggedWindow(entry);
+      const entryScore = scoreLoggedWindow(entry);
+      const source = entry.logSource ?? 'MANUAL';
+      weightedAlignment += entryScore;
+
+      if (source === 'AURA_PLANNED') {
+        auraPlannedCount++;
+        auraPlannedAlignment += entryScore;
+      } else if (source === 'AURA_DO_NOW') {
+        auraDoNowCount++;
+      } else if (source === 'OVERRIDE_CAUTION') {
+        overrideCautionCount++;
+      } else {
+        manualCount++;
+        manualAlignment += entryScore;
+      }
 
       if (win.includes('RAHU') || win.includes('YAMA')) {
         frictionCount++;
@@ -178,6 +198,11 @@ export function InsightsView({ logEntries = [], assistantInsight }: InsightsView
 
     const totalMinutes = logEntries.reduce((sum, e) => sum + (e.durationMinutes ?? 30), 0);
     const formattedHours = `${(totalMinutes / 60).toFixed(1)} hrs`;
+    const auraGuidedCount = auraPlannedCount + auraDoNowCount;
+    const auraGuidedRate = totalActivities > 0 ? Math.round((auraGuidedCount / totalActivities) * 100) : 0;
+    const plannedAlignmentScore = auraPlannedCount > 0 ? Math.round((auraPlannedAlignment / auraPlannedCount) * 100) : 0;
+    const manualAlignmentScore = manualCount > 0 ? Math.round((manualAlignment / manualCount) * 100) : 0;
+    const planningLift = auraPlannedCount > 0 && manualCount > 0 ? plannedAlignmentScore - manualAlignmentScore : null;
 
     const distribution = Object.entries(windowCounts).map(([winName, count]) => ({
       name: winName,
@@ -224,6 +249,15 @@ export function InsightsView({ logEntries = [], assistantInsight }: InsightsView
       streak,
       formattedHours,
       alignmentScore,
+      auraPlannedCount,
+      auraDoNowCount,
+      auraGuidedCount,
+      auraGuidedRate,
+      manualCount,
+      overrideCautionCount,
+      plannedAlignmentScore,
+      manualAlignmentScore,
+      planningLift,
       distribution,
       frictionLogs,
       heatmapDays,
@@ -325,7 +359,7 @@ export function InsightsView({ logEntries = [], assistantInsight }: InsightsView
             <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: 8 }}>
               <StatCard value={analytics.totalActivities} label="Activities Completed" color="#4ade80" />
               <StatCard value={analytics.streak} label="Day Streak" color="#facc15" />
-              <StatCard value={analytics.formattedHours} label="Total Time" color="#38bdf8" />
+              <StatCard value={`${analytics.auraGuidedRate}%`} label="Aura Guided" color="#38bdf8" />
               <StatCard value={`${analytics.alignmentScore}%`} label="Windows Utilized" color="#c084fc" />
             </div>
           </div>
@@ -481,6 +515,34 @@ export function InsightsView({ logEntries = [], assistantInsight }: InsightsView
       {/* ==================== TAB 2: PATTERNS ==================== */}
       {activeSubTab === 'patterns' && (
         <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
+          <div
+            style={{
+              background: 'var(--as-surface-raised, #0f172a)',
+              border: '1px solid rgba(74, 222, 128, 0.22)',
+              borderRadius: 16,
+              padding: 16,
+            }}
+          >
+            <span style={{ fontSize: 10, fontFamily: 'monospace', textTransform: 'uppercase', color: '#4ade80', letterSpacing: '0.05em', fontWeight: 700 }}>
+              Planning Loop
+            </span>
+            <p style={{ fontSize: 12, color: '#cbd5e1', margin: '8px 0 0', lineHeight: 1.45 }}>
+              {analytics.auraGuidedCount > 0
+                ? `${analytics.auraGuidedCount} of your ${analytics.totalActivities} activities came through Aura suggestions or planned moments.`
+                : 'Plan or accept a few Aura suggestions to see whether guided timing improves your alignment.'}
+            </p>
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 8, marginTop: 14 }}>
+              <MiniStat value={analytics.auraPlannedCount} label="Planned" color="#4ade80" />
+              <MiniStat value={analytics.auraDoNowCount} label="Do Now" color="#38bdf8" />
+              <MiniStat value={analytics.overrideCautionCount} label="Overrides" color="#fb7185" />
+            </div>
+            {analytics.planningLift !== null && (
+              <div style={{ marginTop: 12, color: analytics.planningLift >= 0 ? '#4ade80' : '#fb7185', fontSize: 12, fontWeight: 750 }}>
+                Aura-planned logs are {Math.abs(analytics.planningLift)} points {analytics.planningLift >= 0 ? 'more aligned' : 'less aligned'} than manual logs so far.
+              </div>
+            )}
+          </div>
+
           {/* Time of Day Segment Cards */}
           <div
             style={{
@@ -730,10 +792,13 @@ export function InsightsView({ logEntries = [], assistantInsight }: InsightsView
                     fontSize: 12,
                   }}
                 >
-                  <span style={{ color: '#f8fafc', fontWeight: 600 }}>{entry.activityTitle}</span>
-                  <span style={{ color: '#4ade80', fontFamily: 'monospace', fontSize: 11 }}>
-                    {entry.activeWindow}
-                  </span>
+                  <div style={{ minWidth: 0 }}>
+                    <span style={{ color: '#f8fafc', fontWeight: 600 }}>{entry.activityTitle}</span>
+                    <div style={{ marginTop: 3 }}>
+                      <SourceBadge source={entry.logSource ?? 'MANUAL'} />
+                    </div>
+                  </div>
+                  <span style={{ color: '#4ade80', fontFamily: 'monospace', fontSize: 11, whiteSpace: 'nowrap' }}>{entry.activeWindow}</span>
                 </div>
               ))}
             </div>
@@ -780,6 +845,31 @@ function StatCard({
         {label}
       </div>
     </div>
+  );
+}
+
+function MiniStat({ value, label, color }: { value: string | number; label: string; color: string }) {
+  return (
+    <div style={{ background: 'rgba(30, 41, 59, 0.5)', border: '1px solid rgba(255, 255, 255, 0.06)', borderRadius: 12, padding: 10, textAlign: 'center' }}>
+      <div style={{ color, fontSize: 18, fontWeight: 900 }}>{value}</div>
+      <div style={{ color: '#94a3b8', fontSize: 10, marginTop: 3 }}>{label}</div>
+    </div>
+  );
+}
+
+function SourceBadge({ source }: { source: NonNullable<LoggedEntryItem['logSource']> }) {
+  const meta = source === 'AURA_PLANNED'
+    ? { label: 'Aura planned', color: '#4ade80' }
+    : source === 'AURA_DO_NOW'
+      ? { label: 'Aura do now', color: '#38bdf8' }
+      : source === 'OVERRIDE_CAUTION'
+        ? { label: 'Caution override', color: '#fb7185' }
+        : { label: 'Manual', color: '#94a3b8' };
+
+  return (
+    <span style={{ display: 'inline-flex', border: `1px solid ${meta.color}44`, background: `${meta.color}16`, color: meta.color, borderRadius: 999, padding: '2px 7px', fontSize: 9, fontWeight: 850, textTransform: 'uppercase', letterSpacing: '0.03em' }}>
+      {meta.label}
+    </span>
   );
 }
 

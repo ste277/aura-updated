@@ -1,6 +1,17 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { createHabitLog, listHabitLogs } from '../../../lib/db';
 import { getSessionFromRequest } from '../../../lib/session';
+import { parseJsonObject } from '../../../lib/request';
+
+function parseLogSource(value: unknown): 'AURA_PLANNED' | 'AURA_DO_NOW' | 'MANUAL' | 'OVERRIDE_CAUTION' {
+  if (value === 'AURA_PLANNED' || value === 'AURA_DO_NOW' || value === 'MANUAL' || value === 'OVERRIDE_CAUTION') return value;
+  return 'MANUAL';
+}
+
+function parseActivitySignificance(value: unknown): 'LOW' | 'MEDIUM' | 'HIGH' {
+  if (value === 'LOW' || value === 'MEDIUM' || value === 'HIGH') return value;
+  return 'MEDIUM';
+}
 
 export async function POST(req: NextRequest) {
   const session = getSessionFromRequest(req);
@@ -8,26 +19,34 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: 'Not authenticated.' }, { status: 401 });
   }
 
-  const body = await req.json();
-  const { activityTitle, activeWindow, logMinuteOfDay, logTimestamp, notes, durationMinutes, logSource, activitySignificance } = body;
+  const body = await parseJsonObject(req);
+  if (!body) return NextResponse.json({ error: 'A valid JSON request body is required.' }, { status: 400 });
 
-  if (!activityTitle || !activeWindow || logMinuteOfDay == null) {
+  const { activityTitle, activeWindow, logMinuteOfDay, logTimestamp, notes, durationMinutes, logSource, activitySignificance } = body;
+  const cleanTitle = typeof activityTitle === 'string' ? activityTitle.trim() : '';
+  const cleanWindow = typeof activeWindow === 'string' ? activeWindow.trim() : '';
+  const minuteOfDay = Number(logMinuteOfDay);
+
+  if (!cleanTitle || !cleanWindow || !Number.isFinite(minuteOfDay) || minuteOfDay < 0 || minuteOfDay > 1439) {
     return NextResponse.json({ error: 'Missing required fields.' }, { status: 400 });
   }
 
   // Parse custom timestamp if provided, fallback to current time
-  const customDate = logTimestamp ? new Date(logTimestamp) : new Date();
+  const customDate = typeof logTimestamp === 'string' ? new Date(logTimestamp) : new Date();
+  if (Number.isNaN(customDate.getTime())) {
+    return NextResponse.json({ error: 'logTimestamp must be a valid date.' }, { status: 400 });
+  }
 
   const entry = await createHabitLog({
     userId: session.userId,
-    activityTitle,
-    activeWindow,
-    logMinuteOfDay,
-    logTimestamp: customDate, // Pass custom date to DB helper
+    activityTitle: cleanTitle,
+    activeWindow: cleanWindow,
+    logMinuteOfDay: Math.round(minuteOfDay),
+    logTimestamp: customDate,
     durationMinutes: Math.min(180, Math.max(5, Number(durationMinutes ?? 30))),
-    notes: notes ? String(notes).trim() : undefined, // Forward notes to DB helper
-    logSource: ['AURA_PLANNED', 'AURA_DO_NOW', 'MANUAL', 'OVERRIDE_CAUTION'].includes(logSource) ? logSource : 'MANUAL',
-    activitySignificance: ['LOW', 'MEDIUM', 'HIGH'].includes(activitySignificance) ? activitySignificance : 'MEDIUM',
+    notes: notes ? String(notes).trim() : undefined,
+    logSource: parseLogSource(logSource),
+    activitySignificance: parseActivitySignificance(activitySignificance),
   });
 
   return NextResponse.json(entry);

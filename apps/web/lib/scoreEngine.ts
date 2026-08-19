@@ -13,16 +13,22 @@ export interface DailyEnergyInsight {
   };
 }
 
-// Helper to safely extract total minutes of the day from numbers, strings, or time objects
-function parseMinuteVal(val: any, fallback = 0): number {
-  if (typeof val === 'number' && !isNaN(val)) return val;
+type LegacyWindowStart = WindowSpan & {
+  start?: number | string;
+  startMin?: number | string;
+  startTime?: number | string;
+};
+
+// Helper to safely extract total minutes of the day from numbers or strings.
+function parseMinuteVal(val: unknown, fallback = 0): number {
+  if (typeof val === 'number' && !Number.isNaN(val)) return val;
   if (typeof val === 'string') {
     if (val.includes(':')) {
       const [h, m] = val.split(':').map(Number);
-      if (!isNaN(h) && !isNaN(m)) return h * 60 + m;
+      if (!Number.isNaN(h) && !Number.isNaN(m)) return h * 60 + m;
     }
     const parsed = parseFloat(val);
-    if (!isNaN(parsed)) return parsed;
+    if (!Number.isNaN(parsed)) return parsed;
   }
   return fallback;
 }
@@ -72,7 +78,7 @@ export function computeDailyEnergyInsight(
   }
 
   // Normalize and sort windows safely checking startMinutes (plural) first
-  const normalizedWindows = (windows || []).map((w: any) => ({
+  const normalizedWindows = (windows || []).map((w: LegacyWindowStart) => ({
     ...w,
     startMinuteParsed: parseMinuteVal(
       w.startMinutes ?? w.startMinute ?? w.start ?? w.startMin ?? w.startTime,

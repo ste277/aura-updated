@@ -116,19 +116,21 @@ export type PlanningHorizon = 'NOW' | 'TODAY' | 'TOMORROW' | 'WEEKEND' | 'SEVEN_
 export type TimePreference = 'ANYTIME' | 'MORNING' | 'AFTERNOON' | 'EVENING' | 'NIGHT' | 'WORK_HOURS';
 type PlanningOption = NonNullable<TaskSlotRecommendation['planningOptions']>[number];
 type ScoredPlanningOption = PlanningOption & {
+  dayOffset: number;
   startMinute: number;
   rawScore: number;
 };
 
 export function computeAssistantWindows(context: DailyAssistantContext): WindowSpan[] {
+  const resolvedContext = resolveContextOffset(context);
   const localDate = localDateForContext(context);
   const solar = computeSolarEphemeris({
     year: localDate.getUTCFullYear(),
     month: localDate.getUTCMonth() + 1,
     day: localDate.getUTCDate(),
-    latitude: context.latitude,
-    longitude: context.longitude,
-    tzOffsetMinutes: context.tzOffsetMinutes,
+    latitude: resolvedContext.latitude,
+    longitude: resolvedContext.longitude,
+    tzOffsetMinutes: resolvedContext.tzOffsetMinutes,
   });
 
   return computePanchangWindows(solar, localDate.getUTCDay() as WeekdayIndex);
@@ -178,6 +180,7 @@ export function buildDailyBriefing(context: DailyAssistantContext): DailyBriefin
       weekday: 'long',
       month: 'short',
       day: 'numeric',
+      timeZone: 'UTC',
     }),
     briefingState,
     peakWindow: {
@@ -199,8 +202,60 @@ export function buildDailyBriefing(context: DailyAssistantContext): DailyBriefin
   };
 }
 
+function resolveTzOffsetMinutes(timezone: string, date: Date): number | null {
+  try {
+    const dtf = new Intl.DateTimeFormat('en-US', {
+      timeZone: timezone,
+      timeZoneName: 'shortOffset',
+    });
+    const offsetPart = dtf.formatToParts(date).find((part) => part.type === 'timeZoneName')?.value ?? 'GMT+0';
+    const match = offsetPart.match(/GMT([+-])(\d+)(?::(\d+))?/);
+    if (!match) return 0;
+
+    const sign = match[1] === '-' ? -1 : 1;
+    const hours = Number(match[2]);
+    const minutes = match[3] ? Number(match[3]) : 0;
+    return sign * (hours * 60 + minutes);
+  } catch {
+    return null;
+  }
+}
+
+function resolveContextOffset(context: DailyAssistantContext): DailyAssistantContext {
+  const offset = resolveTzOffsetMinutes(context.timezone, context.now);
+  return offset === null || offset === context.tzOffsetMinutes
+    ? context
+    : { ...context, tzOffsetMinutes: offset };
+}
+
+function contextForDayOffset(context: DailyAssistantContext, dayOffset: number): DailyAssistantContext {
+  if (dayOffset === 0) return resolveContextOffset(context);
+
+  const localDate = localDateForContext(context);
+  const targetLocalTimestamp = Date.UTC(
+    localDate.getUTCFullYear(),
+    localDate.getUTCMonth(),
+    localDate.getUTCDate() + dayOffset,
+    localDate.getUTCHours(),
+    localDate.getUTCMinutes(),
+    localDate.getUTCSeconds(),
+    localDate.getUTCMilliseconds()
+  );
+  const targetNow = localTimestampToUtcInstant(context.timezone, targetLocalTimestamp, context.tzOffsetMinutes);
+  return resolveContextOffset({ ...context, now: targetNow });
+}
+
 function localDateForContext(context: DailyAssistantContext): Date {
-  return new Date(context.now.getTime() + context.tzOffsetMinutes * 60 * 1000);
+  const resolved = resolveContextOffset(context);
+  return new Date(resolved.now.getTime() + resolved.tzOffsetMinutes * 60 * 1000);
+}
+
+function localTimestampToUtcInstant(timezone: string, localTimestamp: number, fallbackOffsetMinutes: number): Date {
+  const firstGuess = new Date(localTimestamp - fallbackOffsetMinutes * 60 * 1000);
+  const firstOffset = resolveTzOffsetMinutes(timezone, firstGuess) ?? fallbackOffsetMinutes;
+  const secondGuess = new Date(localTimestamp - firstOffset * 60 * 1000);
+  const secondOffset = resolveTzOffsetMinutes(timezone, secondGuess) ?? firstOffset;
+  return new Date(localTimestamp - secondOffset * 60 * 1000);
 }
 
 function findNextFavorableWindow(
@@ -231,7 +286,7 @@ export function recommendTaskSlot(
   durationMinutes = 30,
   requestedStartMinute?: number
 ): TaskSlotRecommendation {
-  const safeDuration = Math.min(180, Math.max(15, Math.round(durationMinutes)));
+  const safeDuration = Math.min(360, Math.max(15, Math.round(durationMinutes)));
   const cleanTitle = normalizeTaskTitle(taskTitle);
   const windows = computeAssistantWindows(context);
   const localDate = localDateForContext(context);
@@ -312,10 +367,11 @@ export function findOptimalTaskTimes(
     : horizon === 'WEEKEND'
     ? weekendOffsets
     : Array.from({ length: days }, (_, index) => dayOffset + index);
+  const fallbackDayOffset = searchOffsets[0] ?? dayOffset;
   const options: ScoredPlanningOption[] = [];
   const currentMinute = current.getUTCHours() * 60 + current.getUTCMinutes();
   for (const day of searchOffsets) {
-    const dayContext = { ...context, now: new Date(context.now.getTime() + day * 86400000) };
+    const dayContext = contextForDayOffset(context, day);
     const localDay = localDateForContext(dayContext);
     const windows = computeAssistantWindows(dayContext);
     const candidates = buildSlotCandidates(windows);
@@ -325,15 +381,16 @@ export function findOptimalTaskTimes(
       if (!matchesTimePreference(start, timePreference)) continue;
       const score = scoreContinuousBlock(candidates, profile, start, start + safeDuration, (minute) => localInstantForMinute(dayContext, minute));
       if (score < 0) continue;
-      const startsAtLocal = localDateTimeForMinute(dayContext.now, start);
-      const endsAtLocal = localDateTimeForMinute(dayContext.now, start + safeDuration);
+      const startsAtLocal = localDateTimeForMinute(dayContext, start);
+      const endsAtLocal = localDateTimeForMinute(dayContext, start + safeDuration);
       options.push({
-        dateLabel: localDay.toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric' }),
+        dateLabel: localDay.toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric', timeZone: 'UTC' }),
         startTime: formatMinute(start),
         endTime: formatMinute(start + safeDuration),
         startsAtLocal,
         endsAtLocal,
         score: Math.round(score * 10) / 10,
+        dayOffset: day,
         rawScore: score,
         startMinute: start,
         quality: score >= 85 ? 'STRONG' : score >= 65 ? 'GOOD' : 'USABLE',
@@ -342,14 +399,14 @@ export function findOptimalTaskTimes(
       });
     }
   }
-  const ranked = (horizon === 'SEVEN_DAYS'
+  const selectedScored = horizon === 'SEVEN_DAYS'
     ? selectDailyBestPlanningOptions(options, searchOffsets.length)
-    : selectDiversePlanningOptions(options)
-  )
-    .map(({ rawScore: _rawScore, startMinute: _startMinute, ...option }) => option);
-  const best = [...ranked].sort((a, b) => b.score - a.score)[0];
-  if (!best) return { ...recommendTaskSlot(cleanTitle, context, safeDuration), planningOptions: [] };
-  const base = recommendTaskSlot(cleanTitle, { ...context, now: new Date(context.now.getTime() + (dayOffset * 86400000)) }, safeDuration, parseTime(best.startTime));
+    : selectDiversePlanningOptions(options);
+  const ranked = selectedScored
+    .map(({ dayOffset: _dayOffset, rawScore: _rawScore, startMinute: _startMinute, ...option }) => option);
+  const bestScored = [...selectedScored].sort((a, b) => b.rawScore - a.rawScore)[0];
+  if (!bestScored) return { ...recommendTaskSlot(cleanTitle, contextForDayOffset(context, fallbackDayOffset), safeDuration), planningOptions: [] };
+  const base = recommendTaskSlot(cleanTitle, contextForDayOffset(context, bestScored.dayOffset), safeDuration, bestScored.startMinute);
   return { ...base, planningOptions: ranked };
 }
 
@@ -517,8 +574,8 @@ function buildTaskRecommendation(
     : safeCandidate.startMinute;
   const end = Math.min(safeCandidate.endMinute, start + durationMinutes);
   const availableMinutes = Math.max(0, end - start);
-  const startsAtLocal = localDateTimeForMinute(context.now, start);
-  const endsAtLocal = localDateTimeForMinute(context.now, end);
+  const startsAtLocal = localDateTimeForMinute(context, start);
+  const endsAtLocal = localDateTimeForMinute(context, end);
   const nextAvoid = rankAvoidWindows(windows).find((window) => window.startMinutes >= start) ?? rankAvoidWindows(windows)[0] ?? null;
   const startDate = localInstantForMinute(context, start);
   const bestTodayCandidate = findBestWindowToday(windows, profile, start, durationMinutes, context);
@@ -601,8 +658,8 @@ function buildWindowTodayOption(
 ) {
   const endMinute = Math.min(candidate.endMinute, candidate.startMinute + durationMinutes);
   const startsAtDate = localInstantForMinute(context, candidate.startMinute);
-  const startsAtLocal = localDateTimeForMinute(context.now, candidate.startMinute);
-  const endsAtLocal = localDateTimeForMinute(context.now, endMinute);
+  const startsAtLocal = localDateTimeForMinute(context, candidate.startMinute);
+  const endsAtLocal = localDateTimeForMinute(context, endMinute);
   return {
     startMinute: candidate.startMinute,
     endMinute,
@@ -766,25 +823,22 @@ export function formatMinute(totalMinutes: number): string {
   return `${hour12}:${String(minute).padStart(2, '0')} ${period}`;
 }
 
-function localDateTimeForMinute(date: Date, minuteOfDay: number): string {
-  const local = new Date(date);
-  local.setHours(Math.floor(minuteOfDay / 60), minuteOfDay % 60, 0, 0);
-  return local.toISOString();
+function localDateTimeForMinute(context: DailyAssistantContext, minuteOfDay: number): string {
+  return localInstantForMinute(context, minuteOfDay).toISOString();
 }
 
 function localInstantForMinute(context: DailyAssistantContext, minuteOfDay: number): Date {
   const localDate = localDateForContext(context);
-  return new Date(
-    Date.UTC(
-      localDate.getUTCFullYear(),
-      localDate.getUTCMonth(),
-      localDate.getUTCDate(),
-      Math.floor(minuteOfDay / 60),
-      minuteOfDay % 60,
-      0,
-      0
-    ) - context.tzOffsetMinutes * 60 * 1000
+  const localTimestamp = Date.UTC(
+    localDate.getUTCFullYear(),
+    localDate.getUTCMonth(),
+    localDate.getUTCDate(),
+    Math.floor(minuteOfDay / 60),
+    minuteOfDay % 60,
+    0,
+    0
   );
+  return localTimestampToUtcInstant(context.timezone, localTimestamp, context.tzOffsetMinutes);
 }
 
 function buildGoogleCalendarUrl(title: string, startsAtIso: string, endsAtIso: string): string {

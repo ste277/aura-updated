@@ -241,6 +241,7 @@ export function SouthIndianChart({
               </span>
             </div>
             <button
+              type="button"
               onClick={() => onSelectRashi(null)}
               style={{
                 background: 'none',

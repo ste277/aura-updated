@@ -1,12 +1,27 @@
 'use client';
 
-import React, { useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 
 interface Message {
   sender: 'user' | 'aura';
   text: string;
   responseType?: string;
   actions?: string[];
+  activity?: string;
+  recommendation?: AuraRecommendation;
+}
+
+interface AuraRecommendation {
+  type: string;
+  start: string;
+  end: string;
+  label: string;
+  reason: string;
+  startsAtLocal?: string;
+  endsAtLocal?: string;
+  googleCalendarUrl?: string;
+  durationMinutes?: number;
+  matchLabel?: string;
 }
 
 export interface UserChartContext {
@@ -20,6 +35,18 @@ interface AskAuraProps {
   cityName?: string;
   userChart?: UserChartContext;
   onQuickPromptClick?: (promptText: string) => void;
+  onPlanLogged?: () => void;
+  onViewTimeline?: () => void;
+}
+
+function formatActionLabel(action: string, isSaving: boolean, isSaved: boolean) {
+  if (['SCHEDULE', 'SLOT_TASK', 'PLAN_THIS'].includes(action)) {
+    if (isSaving) return 'Saving...';
+    if (isSaved) return 'Planned';
+    return 'Plan this';
+  }
+  if (action === 'VIEW_TIMELINE') return 'View timeline';
+  return action.replace(/_/g, ' ');
 }
 
 export function AskAuraView({
@@ -28,9 +55,15 @@ export function AskAuraView({
   cityName = 'Chennai',
   userChart,
   onQuickPromptClick,
+  onPlanLogged,
+  onViewTimeline,
 }: AskAuraProps) {
   const [input, setInput] = useState('');
   const [loading, setLoading] = useState(false);
+  const [savingActionIndex, setSavingActionIndex] = useState<number | null>(null);
+  const [savedActionIndexes, setSavedActionIndexes] = useState<Set<number>>(() => new Set());
+  const [actionErrors, setActionErrors] = useState<Record<number, string>>({});
+  const chatEndRef = useRef<HTMLDivElement | null>(null);
   const [messages, setMessages] = useState<Message[]>([
     {
       sender: 'aura',
@@ -61,6 +94,11 @@ export function AskAuraView({
   }, [activeWindow]);
 
   const recentQuestions = messages.filter((message) => message.sender === 'user').slice(-3).reverse();
+  const canSendInput = Boolean(input.trim()) && !loading;
+
+  useEffect(() => {
+    chatEndRef.current?.scrollIntoView({ behavior: 'smooth', block: 'end' });
+  }, [messages, loading]);
 
   const handleSend = async (textToSend?: string) => {
     const query = textToSend || input;
@@ -97,7 +135,14 @@ export function AskAuraView({
         const decision = await res.json();
         setMessages((prev) => {
           const next = [...prev];
-          next[next.length - 1] = { sender: 'aura', text: decision.text || 'I could not form a recommendation.', responseType: decision.responseType, actions: decision.actions };
+          next[next.length - 1] = {
+            sender: 'aura',
+            text: decision.text || 'I could not form a recommendation.',
+            responseType: decision.responseType,
+            actions: decision.actions,
+            activity: decision.activity,
+            recommendation: decision.recommendation,
+          };
           return next;
         });
         return;
@@ -132,6 +177,54 @@ export function AskAuraView({
       });
     } finally {
       setLoading(false);
+    }
+  };
+
+  const handleMessageAction = async (message: Message, action: string, index: number) => {
+    if (action === 'VIEW_TIMELINE') {
+      onViewTimeline?.();
+      return;
+    }
+
+    if (!['SCHEDULE', 'SLOT_TASK', 'PLAN_THIS'].includes(action) || !message.recommendation?.startsAtLocal || !message.recommendation?.endsAtLocal) {
+      return;
+    }
+
+    setSavingActionIndex(index);
+    setActionErrors((prev) => {
+      const next = { ...prev };
+      delete next[index];
+      return next;
+    });
+    try {
+      const recommendation = message.recommendation;
+      const res = await fetch('/api/plans', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          title: message.activity || 'Aura recommendation',
+          activityType: message.activity || 'Aura recommendation',
+          plannedStartAt: recommendation.startsAtLocal,
+          plannedEndAt: recommendation.endsAtLocal,
+          durationMinutes: recommendation.durationMinutes ?? 30,
+          windowType: recommendation.type || recommendation.label || 'NEUTRAL',
+          windowLabel: recommendation.label,
+          matchLabel: recommendation.matchLabel || 'Good Match',
+          recommendation: recommendation.reason,
+          calendarUrl: recommendation.googleCalendarUrl,
+        }),
+      });
+      if (!res.ok) throw new Error('Unable to save plan.');
+      setSavedActionIndexes((prev) => new Set(prev).add(index));
+      onPlanLogged?.();
+    } catch (err) {
+      console.error('Failed to save Ask Aura plan:', err);
+      setActionErrors((prev) => ({
+        ...prev,
+        [index]: 'Could not save that plan. Try again.',
+      }));
+    } finally {
+      setSavingActionIndex(null);
     }
   };
 
@@ -253,10 +346,31 @@ export function AskAuraView({
             {msg.actions && msg.actions.length > 0 && (
               <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', marginTop: 9 }}>
                 {msg.actions.map((action) => (
-                  <span key={action} style={{ border: '1px solid rgba(56, 189, 248, 0.3)', borderRadius: 999, color: '#7dd3fc', fontSize: 9, fontWeight: 800, padding: '4px 7px' }}>
-                    {action.replace(/_/g, ' ')}
-                  </span>
+                  <button
+                    key={action}
+                    type="button"
+                    disabled={savingActionIndex === index || (['SCHEDULE', 'SLOT_TASK', 'PLAN_THIS'].includes(action) && savedActionIndexes.has(index))}
+                    onClick={() => handleMessageAction(msg, action, index)}
+                    style={{
+                      border: '1px solid rgba(56, 189, 248, 0.3)',
+                      borderRadius: 999,
+                      background: savedActionIndexes.has(index) && ['SCHEDULE', 'SLOT_TASK', 'PLAN_THIS'].includes(action) ? 'rgba(74, 222, 128, 0.14)' : 'transparent',
+                      color: savedActionIndexes.has(index) && ['SCHEDULE', 'SLOT_TASK', 'PLAN_THIS'].includes(action) ? '#4ade80' : '#7dd3fc',
+                      fontSize: 9,
+                      fontWeight: 800,
+                      padding: '4px 7px',
+                      cursor: savingActionIndex === index ? 'default' : 'pointer',
+                      opacity: savingActionIndex === index ? 0.65 : 1,
+                    }}
+                  >
+                    {formatActionLabel(action, savingActionIndex === index, savedActionIndexes.has(index))}
+                  </button>
                 ))}
+              </div>
+            )}
+            {actionErrors[index] && (
+              <div style={{ color: '#fb7185', fontSize: 10, lineHeight: 1.35, marginTop: 7 }}>
+                {actionErrors[index]}
               </div>
             )}
           </div>
@@ -273,6 +387,7 @@ export function AskAuraView({
             Aura is analyzing transits...
           </div>
         )}
+        <div ref={chatEndRef} />
       </div>
 
       {/* Quick Prompt Chips */}
@@ -292,6 +407,7 @@ export function AskAuraView({
         <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
           {promptChips.map((chip) => (
             <button
+              type="button"
               key={chip}
               disabled={loading}
               onClick={() => {
@@ -365,8 +481,10 @@ export function AskAuraView({
           }}
         />
         <button
+          type="button"
           onClick={() => handleSend()}
-          disabled={loading}
+          disabled={!canSendInput}
+          aria-label="Send message"
           style={{
             background: 'var(--as-abhijit, #4ade80)',
             border: 'none',
@@ -376,10 +494,10 @@ export function AskAuraView({
             display: 'flex',
             alignItems: 'center',
             justifyContent: 'center',
-            cursor: loading ? 'default' : 'pointer',
+            cursor: canSendInput ? 'pointer' : 'default',
             color: '#020617',
             fontWeight: 700,
-            opacity: loading ? 0.5 : 1,
+            opacity: canSendInput ? 1 : 0.5,
           }}
         >
           ↑

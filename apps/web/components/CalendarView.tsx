@@ -116,14 +116,14 @@ export function CalendarView() {
     <div style={{ marginTop: 28, position: 'relative' }}>
       {/* Calendar Header */}
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 10 }}>
-        <button onClick={goToPrevMonth} style={navButtonStyle}>
+        <button type="button" onClick={goToPrevMonth} style={navButtonStyle}>
           ‹
         </button>
         <span style={{ fontFamily: 'var(--as-font-mono)', fontSize: 12, color: 'var(--as-text-muted)' }}>
           {MONTH_NAMES[month - 1]} {year}
           {loading ? ' …' : ''}
         </span>
-        <button onClick={goToNextMonth} style={navButtonStyle}>
+        <button type="button" onClick={goToNextMonth} style={navButtonStyle}>
           ›
         </button>
       </div>
@@ -147,6 +147,7 @@ export function CalendarView() {
 
           return (
             <button
+              type="button"
               key={i}
               onClick={() => handleDayClick(day)}
               title={count > 0 ? `${count} logged` : 'No activity'}

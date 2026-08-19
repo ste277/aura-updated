@@ -49,6 +49,7 @@ export function NotificationSettings({
           const enabled = prefs[opt.type];
           return (
             <button
+              type="button"
               key={opt.type}
               onClick={() => onChange({ ...prefs, [opt.type]: !enabled })}
               style={{

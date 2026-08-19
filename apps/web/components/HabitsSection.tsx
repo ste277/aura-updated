@@ -55,6 +55,7 @@ export function HabitsSection({ habits, onCreate, onLog, onArchive, todayLoggedH
           Your habits
         </span>
         <button
+          type="button"
           onClick={() => setShowForm((v) => !v)}
           style={{ fontSize: 11, color: 'var(--as-gulika)', background: 'none', border: 'none', cursor: 'pointer', padding: 0 }}
         >
@@ -144,6 +145,7 @@ export function HabitsSection({ habits, onCreate, onLog, onArchive, todayLoggedH
               </div>
               <div style={{ display: 'flex', gap: 6 }}>
                 <button
+                  type="button"
                   onClick={() => onLog(h.id)}
                   disabled={loggedToday}
                   style={{
@@ -159,6 +161,7 @@ export function HabitsSection({ habits, onCreate, onLog, onArchive, todayLoggedH
                   {loggedToday ? 'Done today' : 'Log'}
                 </button>
                 <button
+                  type="button"
                   onClick={() => onArchive(h.id)}
                   style={{ fontSize: 12, padding: '5px 8px', borderRadius: 6, border: 'none', background: 'none', color: 'var(--as-text-muted)', cursor: 'pointer' }}
                   title="Archive this habit"

@@ -2,14 +2,8 @@
 
 import { useEffect, useState, useMemo } from 'react';
 import { CITY_OPTIONS } from '../lib/cities';
+import type { CityOption } from '../lib/cities';
 import { SouthIndianChart } from './SouthIndianChart';
-
-interface CityOption {
-  cityName: string;
-  latitude: number;
-  longitude: number;
-  timezone: string;
-}
 
 interface GrahaPlacement {
   graha: string;
@@ -73,13 +67,8 @@ export function BirthChartSection() {
   }, []);
 
   const combinedCities: CityOption[] = [
-    ...CITY_OPTIONS.map((c: any) => ({
-      cityName: c.cityName || c.name || 'Chennai',
-      latitude: c.latitude,
-      longitude: c.longitude,
-      timezone: c.timezone,
-    })),
-    ...customCities.filter((cc) => !CITY_OPTIONS.some((co: any) => (co.cityName || co.name) === cc.cityName)),
+    ...CITY_OPTIONS,
+    ...customCities.filter((cc) => !CITY_OPTIONS.some((co) => co.cityName === cc.cityName)),
   ];
 
   async function loadChartAndTransits() {
@@ -215,6 +204,7 @@ export function BirthChartSection() {
               📅 Export iCal
             </a>
             <button
+              type="button"
               onClick={handleToggleForm}
               style={{ fontSize: 11, color: 'var(--as-gulika)', background: 'none', border: 'none', cursor: 'pointer', padding: 0 }}
             >
@@ -228,6 +218,7 @@ export function BirthChartSection() {
         <div style={{ fontSize: 13, color: 'var(--as-text-muted)' }}>
           No birth profile yet.{' '}
           <button
+            type="button"
             onClick={() => setShowForm(true)}
             style={{ color: 'var(--as-gulika)', background: 'none', border: 'none', cursor: 'pointer', padding: 0, fontSize: 13 }}
           >
@@ -355,6 +346,7 @@ export function BirthChartSection() {
                 </div>
                 {selectedRashiIndex !== null && (
                   <button
+                    type="button"
                     onClick={() => setSelectedRashiIndex(null)}
                     style={{ fontSize: 11, color: 'var(--as-gulika)', background: 'none', border: 'none', cursor: 'pointer', padding: 0 }}
                   >

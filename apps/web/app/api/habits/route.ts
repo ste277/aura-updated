@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getSessionFromRequest } from '../../../lib/session';
 import { createHabit, listHabits } from '../../../lib/db';
+import { parseJsonObject } from '../../../lib/request';
 
 const VALID_CATEGORIES = ['WORKOUT', 'MEAL', 'MICRO_BREAK', 'FOCUS', 'REST'];
 const VALID_WINDOWS = ['BRAHMA', 'ABHIJIT', 'RAHU_KALAM', 'GULIKA', 'YAMA', 'NEUTRAL'];
@@ -17,9 +18,14 @@ export async function POST(req: NextRequest) {
   const session = getSessionFromRequest(req);
   if (!session) return NextResponse.json({ error: 'Not authenticated.' }, { status: 401 });
 
-  const { title, category, targetWindowType } = await req.json();
+  const body = await parseJsonObject(req);
+  if (!body) return NextResponse.json({ error: 'A valid JSON request body is required.' }, { status: 400 });
 
-  if (!title || typeof title !== 'string' || title.trim().length === 0) {
+  const title = typeof body.title === 'string' ? body.title.trim() : '';
+  const category = typeof body.category === 'string' ? body.category : '';
+  const targetWindowType = typeof body.targetWindowType === 'string' ? body.targetWindowType : '';
+
+  if (!title || title.length > 120) {
     return NextResponse.json({ error: 'A habit title is required.' }, { status: 400 });
   }
   if (!VALID_CATEGORIES.includes(category)) {
@@ -29,6 +35,6 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: `targetWindowType must be one of ${VALID_WINDOWS.join(', ')}` }, { status: 400 });
   }
 
-  const habit = await createHabit({ userId: session.userId, title: title.trim(), category, targetWindowType });
+  const habit = await createHabit({ userId: session.userId, title, category, targetWindowType });
   return NextResponse.json(habit);
 }

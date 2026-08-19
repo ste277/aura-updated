@@ -57,6 +57,19 @@ const todayPastOptions = sevenDayOptions.filter((option) => option.dateLabel ===
 check('Seven-day planning excludes already-passed moments from today', todayPastOptions.length === 0);
 check('Seven-day planning returns a daily option for each day', sevenDayOptions.length === 7);
 check('Seven-day planning returns varied start times when alternatives exist', new Set(sevenDayOptions.map((option) => option.startTime)).size > 1);
+const sevenDayBestOption = [...sevenDayOptions].sort((a, b) => b.score - a.score)[0];
+check('Seven-day base calendar matches the best returned option', sevenDayPlan.calendar.startsAtLocal === sevenDayBestOption?.startsAtLocal);
+
+const weekendPlan = findOptimalTaskTimes('Deep Work', afternoonContext, 30, 'WEEKEND', undefined, undefined, 'ANYTIME');
+const weekendBestOption = [...(weekendPlan.planningOptions ?? [])].sort((a, b) => b.score - a.score)[0];
+check('Weekend base calendar matches the best returned option', weekendPlan.calendar.startsAtLocal === weekendBestOption?.startsAtLocal);
+
+const customPlan = findOptimalTaskTimes('Deep Work', afternoonContext, 30, 'CUSTOM', '2026-08-21', '2026-08-23', 'ANYTIME');
+const customBestOption = [...(customPlan.planningOptions ?? [])].sort((a, b) => b.score - a.score)[0];
+check('Custom-range base calendar matches the best returned option', customPlan.calendar.startsAtLocal === customBestOption?.startsAtLocal);
+
+const longPlan = findOptimalTaskTimes('Tea break', afternoonContext, 240, 'TOMORROW', undefined, undefined, 'ANYTIME');
+check('Planner preserves long requested durations in base recommendation', longPlan.durationMinutes === 240);
 
 const roadTripIntent = findActivityIntent('I need to start my road trip');
 check('Activity catalog resolves start-journey intent', roadTripIntent?.id === 'start-journey');
@@ -78,6 +91,29 @@ const journeyPlan = findBestTimeForActivity({
   timePreference: 'ANYTIME',
 });
 check('Planner uses catalog profile for journey starts', journeyPlan.activityType === 'Start a Journey');
+check('Tomorrow planning from Aug 19 IST labels Aug 20', (journeyPlan.planningOptions ?? []).every((option) => option.dateLabel === 'Thu, Aug 20'));
+
+const noonIstPlan = findOptimalTaskTimes('Deep Work', afternoonContext, 30, 'TOMORROW', undefined, undefined, 'ANYTIME');
+const noonIstOption = (noonIstPlan.planningOptions ?? []).find((option) => option.startTime === '12:00 PM');
+check('Planner calendar timestamps use user timezone offset', noonIstOption?.startsAtLocal === '2026-08-20T06:30:00.000Z');
+
+const newYorkBeforeDst = {
+  now: new Date(Date.UTC(2026, 2, 7, 15, 0, 0)), // 10:00 AM EST on Mar 7, 2026
+  latitude: 40.7128,
+  longitude: -74.006,
+  timezone: 'America/New_York',
+  tzOffsetMinutes: -300,
+};
+const newYorkDstPlan = findOptimalTaskTimes('Deep Work', newYorkBeforeDst, 30, 'TOMORROW', undefined, undefined, 'ANYTIME');
+const newYorkAfternoon = (newYorkDstPlan.planningOptions ?? []).find((option) => option.startTime === '12:45 PM');
+check('Planner recomputes timezone offset for future DST dates', newYorkAfternoon?.startsAtLocal === '2026-03-08T16:45:00.000Z');
+
+const newYorkLateBeforeDst = {
+  ...newYorkBeforeDst,
+  now: new Date(Date.UTC(2026, 2, 8, 4, 30, 0)), // 11:30 PM EST on Mar 7, 2026
+};
+const newYorkLateDstPlan = findOptimalTaskTimes('Deep Work', newYorkLateBeforeDst, 30, 'TOMORROW', undefined, undefined, 'ANYTIME');
+check('Tomorrow planning adds local calendar days across DST', (newYorkLateDstPlan.planningOptions ?? []).every((option) => option.dateLabel === 'Sun, Mar 8'));
 
 const teaPlan = findOptimalTaskTimes('tea break', afternoonContext, 15, 'TODAY', undefined, undefined, 'ANYTIME');
 check('Low-stakes catalog activities can remain usable today', (teaPlan.planningOptions ?? []).length >= 1);

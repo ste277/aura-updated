@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { getPersonalizedTasks, UserChartContext } from '../../../packages/recommendation/src/personalizedTasks';
 import type { DailyBriefing } from '../../../packages/recommendation/src/dailyAssistant';
 import { triggerHaptic } from '../lib/haptics';
@@ -29,6 +29,7 @@ interface HomeDashboardProps {
     outputLevel: 'LOW' | 'MODERATE' | 'PEAK_FLOW';
     followedGuidance: boolean;
   } | null;
+  upcomingPlans?: HomeUpcomingPlan[];
   userChart?: UserChartContext;
   onLogActivity?: (
     activityTitle: string,
@@ -40,9 +41,34 @@ interface HomeDashboardProps {
     activitySignificance?: 'LOW' | 'MEDIUM' | 'HIGH'
   ) => Promise<void>;
   onSubmitReflection?: (outputLevel: 'LOW' | 'MODERATE' | 'PEAK_FLOW', followedGuidance: boolean) => Promise<void>;
+  onLogPlan?: (planId: string) => Promise<void>;
   onNextShiftClick?: () => void;
   onPlanClick?: (activity?: string) => void;
   onInsightsClick?: () => void;
+  onNotificationsClick?: () => void;
+}
+
+interface HomeUpcomingPlan {
+  id: string;
+  title: string;
+  icon?: string | null;
+  status: 'UPCOMING' | 'LOGGED' | 'CANCELLED';
+  plannedStartAt: string;
+  plannedEndAt: string;
+  durationMinutes: number;
+  windowType?: string | null;
+  windowLabel?: string | null;
+  matchLabel?: string | null;
+  recommendation?: string | null;
+}
+
+interface AssistantSuggestion {
+  title: string;
+  description: string;
+  icon: string;
+  actionLabel: string;
+  secondaryLabel: string;
+  planId?: string;
 }
 
 const PROMPT_CHIPS = ['Workout', 'Deep work', 'Study', 'Date night'];
@@ -77,6 +103,31 @@ function scoreLabel(score: number) {
   return Math.max(1, Math.min(10, Math.round(score * 10) / 10));
 }
 
+function isCautionWindow(windowName: string) {
+  const cleanWindow = windowName.toUpperCase();
+  return cleanWindow.includes('RAHU') || cleanWindow.includes('YAMA');
+}
+
+function formatPlanClock(value: string) {
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return 'soon';
+  return date.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' });
+}
+
+function findActionablePlan(plans: HomeUpcomingPlan[]) {
+  const now = Date.now();
+  const horizonEnd = now + 90 * 60 * 1000;
+  return plans
+    .filter((plan) => plan.status === 'UPCOMING')
+    .map((plan) => ({
+      plan,
+      startMs: new Date(plan.plannedStartAt).getTime(),
+      endMs: new Date(plan.plannedEndAt).getTime(),
+    }))
+    .filter(({ startMs, endMs }) => Number.isFinite(startMs) && Number.isFinite(endMs) && startMs <= horizonEnd && endMs >= now - 15 * 60 * 1000)
+    .sort((a, b) => a.startMs - b.startMs)[0]?.plan ?? null;
+}
+
 export function HomeDashboard({
   userName,
   energyScore,
@@ -89,16 +140,21 @@ export function HomeDashboard({
   loggedActivitiesToday = [],
   dailyBriefing,
   todayReflection,
+  upcomingPlans = [],
   userChart,
   onLogActivity,
   onSubmitReflection,
+  onLogPlan,
   onNextShiftClick,
   onPlanClick,
   onInsightsClick,
+  onNotificationsClick,
 }: HomeDashboardProps) {
   const [selectedHabit, setSelectedHabit] = useState<string | null>(null);
+  const [selectedPlanId, setSelectedPlanId] = useState<string | null>(null);
   const [activityNote, setActivityNote] = useState('');
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const [logError, setLogError] = useState('');
   const [reflectionSaved, setReflectionSaved] = useState(Boolean(todayReflection));
   const [isEditingReflection, setIsEditingReflection] = useState(false);
   const [isSavingReflection, setIsSavingReflection] = useState(false);
@@ -123,6 +179,40 @@ export function HomeDashboard({
     description: themeText,
     icon: '✨',
   };
+  const assistantSuggestion: AssistantSuggestion = useMemo(() => {
+    const actionablePlan = findActionablePlan(upcomingPlans);
+    if (actionablePlan) {
+      const start = formatPlanClock(actionablePlan.plannedStartAt);
+      const label = actionablePlan.windowLabel || formatWindowName(actionablePlan.windowType || activeWindowName);
+      return {
+        title: actionablePlan.title,
+        description: `You planned this for ${start}. ${label} is the context Aura picked for it.`,
+        icon: actionablePlan.icon || primaryTask.icon || '✨',
+        actionLabel: 'Log now',
+        secondaryLabel: 'Open Plan',
+        planId: actionablePlan.id,
+      };
+    }
+
+    if (isCautionWindow(activeWindowName)) {
+      const lightTask = personalizedTasks.find((task) => task.significance === 'LOW') ?? personalizedTasks[0] ?? primaryTask;
+      return {
+        title: lightTask.title,
+        description: `This is a caution window, so Aura is keeping the suggestion low-stakes. ${lightTask.description}`,
+        icon: lightTask.icon || '✨',
+        actionLabel: 'Do lightly',
+        secondaryLabel: 'Find better time',
+      };
+    }
+
+    return {
+      title: primaryTask.title,
+      description: primaryTask.description,
+      icon: primaryTask.icon || '✨',
+      actionLabel: 'Do it now',
+      secondaryLabel: 'More options',
+    };
+  }, [activeWindowName, personalizedTasks, primaryTask, upcomingPlans]);
   const tone = getWindowTone(energyScore, activeWindowName);
   const currentWindowLabel = dailyBriefing?.briefingState === 'ACTIVE'
     ? dailyBriefing.peakWindow.name
@@ -161,16 +251,23 @@ export function HomeDashboard({
   }, [currentWindowLabel, dailyBriefing, nextShift.startTime, nextShift.windowName, tone.color]);
 
   const handleConfirmLog = async () => {
-    if (!selectedHabit || !onLogActivity) return;
+    if (!selectedHabit) return;
     setIsSubmitting(true);
+    setLogError('');
     try {
-      const selectedTask = personalizedTasks.find((task) => task.title === selectedHabit);
-      await onLogActivity(selectedHabit, activityNote, undefined, undefined, 30, 'AURA_DO_NOW', selectedTask?.significance);
+      if (selectedPlanId && onLogPlan) {
+        await onLogPlan(selectedPlanId);
+      } else if (onLogActivity) {
+        const selectedTask = personalizedTasks.find((task) => task.title === selectedHabit);
+        await onLogActivity(selectedHabit, activityNote, undefined, undefined, 30, 'AURA_DO_NOW', selectedTask?.significance);
+      }
       triggerHaptic('success');
       setSelectedHabit(null);
+      setSelectedPlanId(null);
       setActivityNote('');
     } catch (err) {
       console.error('Failed to log activity:', err);
+      setLogError('Could not log this activity. Try again.');
     } finally {
       setIsSubmitting(false);
     }
@@ -203,7 +300,7 @@ export function HomeDashboard({
           </h1>
           <p style={{ fontSize: 15, color: '#aab7d2', margin: '7px 0 0' }}>{todayLabel()}</p>
         </div>
-        <button type="button" aria-label="Notifications" style={topActionStyle}>
+        <button type="button" onClick={onNotificationsClick} aria-label="Notification settings" style={topActionStyle}>
           <span style={{ position: 'absolute', right: 7, top: 6, width: 8, height: 8, borderRadius: 8, background: '#4ade80' }} />
           <BellIcon />
         </button>
@@ -252,14 +349,24 @@ export function HomeDashboard({
       <section style={{ ...panelStyle, padding: 18 }}>
         <div style={sectionKickerStyle}>✨ Aura Suggests</div>
         <div style={{ display: 'grid', gridTemplateColumns: '74px minmax(0, 1fr)', alignItems: 'center', gap: 15, marginTop: 15 }}>
-          <div style={suggestIconStyle}>{primaryTask.icon}</div>
+          <div style={suggestIconStyle}>{assistantSuggestion.icon}</div>
           <div style={{ minWidth: 0 }}>
-            <h2 style={{ margin: 0, color: '#f8fafc', fontSize: 18, lineHeight: 1.2 }}>{primaryTask.title}</h2>
-            <p style={{ margin: '8px 0 0', color: '#aab7d2', lineHeight: 1.38, fontSize: 14 }}>{primaryTask.description}</p>
+            <h2 style={{ margin: 0, color: '#f8fafc', fontSize: 18, lineHeight: 1.2 }}>{assistantSuggestion.title}</h2>
+            <p style={{ margin: '8px 0 0', color: '#aab7d2', lineHeight: 1.38, fontSize: 14 }}>{assistantSuggestion.description}</p>
           </div>
           <div style={{ gridColumn: '1 / -1', display: 'flex', gap: 12, alignItems: 'center', justifyContent: 'space-between', marginTop: 3 }}>
-            <button type="button" onClick={() => setSelectedHabit(primaryTask.title)} style={primaryButtonStyle}>Do it now</button>
-            <button type="button" onClick={() => onPlanClick?.(primaryTask.title)} style={linkButtonStyle}>More options →</button>
+            <button
+              type="button"
+              onClick={() => {
+                setSelectedHabit(assistantSuggestion.title);
+                setSelectedPlanId(assistantSuggestion.planId ?? null);
+                setLogError('');
+              }}
+              style={primaryButtonStyle}
+            >
+              {assistantSuggestion.actionLabel}
+            </button>
+            <button type="button" onClick={() => onPlanClick?.(assistantSuggestion.title)} style={linkButtonStyle}>{assistantSuggestion.secondaryLabel} →</button>
           </div>
         </div>
       </section>
@@ -363,8 +470,14 @@ export function HomeDashboard({
           activeWindowName={activeWindowName}
           note={activityNote}
           isSubmitting={isSubmitting}
+          error={logError}
           onNoteChange={setActivityNote}
-          onCancel={() => setSelectedHabit(null)}
+          onCancel={() => {
+            if (isSubmitting) return;
+            setSelectedHabit(null);
+            setSelectedPlanId(null);
+            setLogError('');
+          }}
           onConfirm={handleConfirmLog}
         />
       )}
@@ -444,6 +557,7 @@ function LogActivityModal({
   activeWindowName,
   note,
   isSubmitting,
+  error,
   onNoteChange,
   onCancel,
   onConfirm,
@@ -452,19 +566,63 @@ function LogActivityModal({
   activeWindowName: string;
   note: string;
   isSubmitting: boolean;
+  error: string;
   onNoteChange: (value: string) => void;
   onCancel: () => void;
   onConfirm: () => void;
 }) {
+  const dialogRef = useRef<HTMLDivElement | null>(null);
+  const noteRef = useRef<HTMLTextAreaElement | null>(null);
+  const previousFocusRef = useRef<HTMLElement | null>(null);
+
+  useEffect(() => {
+    previousFocusRef.current = document.activeElement instanceof HTMLElement ? document.activeElement : null;
+    const previousOverflow = document.body.style.overflow;
+    document.body.style.overflow = 'hidden';
+    const timer = window.setTimeout(() => noteRef.current?.focus(), 0);
+    return () => {
+      window.clearTimeout(timer);
+      document.body.style.overflow = previousOverflow;
+      previousFocusRef.current?.focus?.();
+    };
+  }, []);
+
+  useEffect(() => {
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.key === 'Escape' && !isSubmitting) onCancel();
+      if (event.key !== 'Tab') return;
+
+      const focusable = Array.from(
+        dialogRef.current?.querySelectorAll<HTMLElement>(
+          'button:not([disabled]), textarea:not([disabled]), input:not([disabled]), select:not([disabled]), a[href], [tabindex]:not([tabindex="-1"])'
+        ) ?? []
+      );
+      if (focusable.length === 0) return;
+
+      const first = focusable[0];
+      const last = focusable[focusable.length - 1];
+      if (event.shiftKey && document.activeElement === first) {
+        event.preventDefault();
+        last.focus();
+      } else if (!event.shiftKey && document.activeElement === last) {
+        event.preventDefault();
+        first.focus();
+      }
+    };
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [isSubmitting, onCancel]);
+
   return (
     <div style={{ position: 'fixed', inset: 0, background: 'rgba(2, 6, 23, 0.82)', backdropFilter: 'blur(8px)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 10000, padding: 20 }}>
-      <div style={{ background: '#0f172a', border: '1px solid #1e293b', borderRadius: 18, padding: 20, width: '100%', maxWidth: 360, boxShadow: '0 25px 50px -12px rgba(0, 0, 0, 0.6)', color: '#f8fafc' }}>
-        <h3 style={{ margin: 0, fontSize: 17 }}>Log {title}?</h3>
-        <p style={{ fontSize: 12, color: '#94a3b8', marginTop: 5 }}>Tagging this under {formatWindowName(activeWindowName)}.</p>
-        <textarea placeholder="Optional notes or reflection..." value={note} onChange={(event) => onNoteChange(event.target.value)} style={{ width: '100%', height: 72, marginTop: 12, borderRadius: 10, background: '#020617', border: '1px solid #334155', color: '#f8fafc', padding: 10, fontSize: 12, resize: 'none', boxSizing: 'border-box', outline: 'none' }} />
+      <div ref={dialogRef} role="dialog" aria-modal="true" aria-labelledby="home-log-title" aria-describedby="home-log-window" style={{ background: '#0f172a', border: '1px solid #1e293b', borderRadius: 18, padding: 20, width: '100%', maxWidth: 360, boxShadow: '0 25px 50px -12px rgba(0, 0, 0, 0.6)', color: '#f8fafc' }}>
+        <h3 id="home-log-title" style={{ margin: 0, fontSize: 17 }}>Log {title}?</h3>
+        <p id="home-log-window" style={{ fontSize: 12, color: '#94a3b8', marginTop: 5 }}>Tagging this under {formatWindowName(activeWindowName)}.</p>
+        <textarea ref={noteRef} placeholder="Optional notes or reflection..." value={note} onChange={(event) => onNoteChange(event.target.value)} style={{ width: '100%', height: 72, marginTop: 12, borderRadius: 10, background: '#020617', border: '1px solid #334155', color: '#f8fafc', padding: 10, fontSize: 12, resize: 'none', boxSizing: 'border-box', outline: 'none' }} />
+        {error && <div style={{ color: '#fb7185', fontSize: 12, lineHeight: 1.35, marginTop: 10 }}>{error}</div>}
         <div style={{ display: 'flex', gap: 10, marginTop: 16 }}>
-          <button type="button" onClick={onCancel} style={{ flex: 1, padding: '10px 0', borderRadius: 10, background: 'transparent', border: '1px solid #334155', color: '#94a3b8', fontSize: 13, cursor: 'pointer' }}>Cancel</button>
-          <button type="button" onClick={onConfirm} disabled={isSubmitting} style={{ flex: 1, padding: '10px 0', borderRadius: 10, background: '#4ade80', border: 'none', color: '#020617', fontWeight: 800, fontSize: 13, cursor: 'pointer' }}>{isSubmitting ? 'Saving...' : 'Confirm Log'}</button>
+          <button type="button" onClick={onCancel} disabled={isSubmitting} style={{ flex: 1, padding: '10px 0', borderRadius: 10, background: 'transparent', border: '1px solid #334155', color: '#94a3b8', fontSize: 13, cursor: isSubmitting ? 'default' : 'pointer', opacity: isSubmitting ? 0.6 : 1 }}>Cancel</button>
+          <button type="button" onClick={onConfirm} disabled={isSubmitting} style={{ flex: 1, padding: '10px 0', borderRadius: 10, background: '#4ade80', border: 'none', color: '#020617', fontWeight: 800, fontSize: 13, cursor: isSubmitting ? 'default' : 'pointer', opacity: isSubmitting ? 0.7 : 1 }}>{isSubmitting ? 'Saving...' : 'Confirm Log'}</button>
         </div>
       </div>
     </div>

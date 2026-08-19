@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useEffect, useState, useMemo } from 'react';
+import React, { useEffect, useRef, useState, useMemo } from 'react';
 import { createPortal } from 'react-dom';
 
 interface PastActivityModalProps {
@@ -10,7 +10,15 @@ interface PastActivityModalProps {
   recentActivities?: string[];
   userLocation?: { latitude: number; longitude: number; timezone: string };
   onClose: () => void;
-  onConfirmLog?: (activityTitle: string, notes?: string, customTimestamp?: Date, overrideWindowType?: string, durationMinutes?: number) => Promise<void>;
+  onConfirmLog?: (
+    activityTitle: string,
+    notes?: string,
+    customTimestamp?: Date,
+    overrideWindowType?: string,
+    durationMinutes?: number,
+    logSource?: 'AURA_PLANNED' | 'AURA_DO_NOW' | 'MANUAL' | 'OVERRIDE_CAUTION',
+    activitySignificance?: 'LOW' | 'MEDIUM' | 'HIGH'
+  ) => Promise<void>;
   onSuccess?: () => void;
 }
 
@@ -26,7 +34,12 @@ export function PastActivityModal({
   const [mounted, setMounted] = useState(false);
   const [selectedChip, setSelectedChip] = useState<string>('');
   const [customTitle, setCustomTitle] = useState<string>('');
+  const [notes, setNotes] = useState<string>('');
   const [durationMinutes, setDurationMinutes] = useState(30);
+  const [activitySignificance, setActivitySignificance] = useState<'AUTO' | 'LOW' | 'MEDIUM' | 'HIGH'>('AUTO');
+  const dialogRef = useRef<HTMLDivElement | null>(null);
+  const activityInputRef = useRef<HTMLInputElement | null>(null);
+  const previousFocusRef = useRef<HTMLElement | null>(null);
 
   const [logTime, setLogTime] = useState(() => {
     const now = new Date();
@@ -43,12 +56,59 @@ export function PastActivityModal({
   }, []);
 
   useEffect(() => {
+    if (!isOpen || !mounted) return;
+    previousFocusRef.current = document.activeElement instanceof HTMLElement ? document.activeElement : null;
+    const timer = window.setTimeout(() => activityInputRef.current?.focus(), 0);
+    return () => {
+      window.clearTimeout(timer);
+      previousFocusRef.current?.focus?.();
+      previousFocusRef.current = null;
+    };
+  }, [isOpen, mounted]);
+
+  useEffect(() => {
+    if (!isOpen || !mounted) return;
+    const previousOverflow = document.body.style.overflow;
+    document.body.style.overflow = 'hidden';
+    return () => {
+      document.body.style.overflow = previousOverflow;
+    };
+  }, [isOpen, mounted]);
+
+  useEffect(() => {
+    if (!isOpen || !mounted) return;
+
     const handleKeyDown = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') onClose();
+      if (e.key === 'Escape') {
+        onClose();
+        return;
+      }
+
+      if (e.key !== 'Tab' || !dialogRef.current) return;
+
+      const focusable = Array.from(
+        dialogRef.current.querySelectorAll<HTMLElement>(
+          'button:not([disabled]), input:not([disabled]), select:not([disabled]), textarea:not([disabled]), a[href], [tabindex]:not([tabindex="-1"])'
+        )
+      ).filter((element) => element.offsetParent !== null);
+
+      if (focusable.length === 0) return;
+
+      const first = focusable[0];
+      const last = focusable[focusable.length - 1];
+      const active = document.activeElement;
+
+      if (e.shiftKey && active === first) {
+        e.preventDefault();
+        last.focus();
+      } else if (!e.shiftKey && active === last) {
+        e.preventDefault();
+        first.focus();
+      }
     };
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [onClose]);
+  }, [isOpen, mounted, onClose]);
 
   const activeSuggestions = useMemo(() => {
     const common = ['Deep Work', 'Exercise', 'Meeting', 'Break', 'Reading', 'Family Time'];
@@ -95,9 +155,11 @@ export function PastActivityModal({
       const [hours, minutes] = logTime.split(':').map(Number);
       const targetTimestamp = new Date(baseDate);
       targetTimestamp.setHours(hours || 12, minutes || 0, 0, 0);
+      const cleanNotes = notes.trim();
+      const explicitSignificance = activitySignificance === 'AUTO' ? undefined : activitySignificance;
 
       if (onConfirmLog) {
-        await onConfirmLog(activeTitle, '', targetTimestamp, undefined, durationMinutes);
+        await onConfirmLog(activeTitle, cleanNotes, targetTimestamp, undefined, durationMinutes, 'MANUAL', explicitSignificance);
       } else {
         const res = await fetch('/api/habit-logs', {
           method: 'POST',
@@ -108,6 +170,8 @@ export function PastActivityModal({
             logMinuteOfDay: (hours || 12) * 60 + (minutes || 0),
             logTimestamp: targetTimestamp.toISOString(),
             durationMinutes,
+            notes: cleanNotes,
+            activitySignificance: explicitSignificance,
           }),
         });
 
@@ -116,6 +180,8 @@ export function PastActivityModal({
 
       setCustomTitle('');
       setSelectedChip('');
+      setNotes('');
+      setActivitySignificance('AUTO');
       if (onSuccess) onSuccess();
       onClose();
     } catch (err) {
@@ -139,10 +205,11 @@ export function PastActivityModal({
         zIndex: 99999,
         backgroundColor: 'rgba(2, 6, 23, 0.82)',
         display: 'flex',
-        alignItems: 'center',
+        alignItems: 'flex-start',
         justifyContent: 'center',
         backdropFilter: 'blur(8px)',
         padding: '16px',
+        overflowY: 'auto',
       }}
       onClick={onClose}
     >
@@ -158,6 +225,11 @@ export function PastActivityModal({
         }
       `}</style>
       <div
+        ref={dialogRef}
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="quick-log-title"
+        aria-describedby="quick-log-date"
         style={{
           width: '100%',
           maxWidth: '400px',
@@ -165,6 +237,9 @@ export function PastActivityModal({
           border: '1px solid #1e293b',
           borderRadius: '20px',
           padding: '24px',
+          margin: 'min(6vh, 32px) 0',
+          maxHeight: 'calc(100vh - 32px)',
+          overflowY: 'auto',
           boxShadow: '0 25px 50px -12px rgba(0, 0, 0, 0.6)',
           color: '#f8fafc',
           fontFamily: 'sans-serif',
@@ -175,10 +250,10 @@ export function PastActivityModal({
         {/* Header */}
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: '20px' }}>
           <div>
-            <h3 style={{ margin: 0, fontSize: '18px', fontWeight: 700, fontFamily: 'sans-serif', color: '#f8fafc' }}>
+            <h3 id="quick-log-title" style={{ margin: 0, fontSize: '18px', fontWeight: 700, fontFamily: 'sans-serif', color: '#f8fafc' }}>
               Quick Log
             </h3>
-            <span style={{ fontSize: '12px', color: '#94a3b8', display: 'block', marginTop: '2px', fontFamily: 'monospace' }}>
+            <span id="quick-log-date" style={{ fontSize: '12px', color: '#94a3b8', display: 'block', marginTop: '2px', fontFamily: 'monospace' }}>
               {dateFormatted}
             </span>
           </div>
@@ -186,6 +261,7 @@ export function PastActivityModal({
           <button
             type="button"
             onClick={onClose}
+            aria-label="Close quick log"
             style={{
               background: 'none',
               border: 'none',
@@ -291,6 +367,46 @@ export function PastActivityModal({
           </select>
         </div>
 
+        <div style={{ marginBottom: 20 }}>
+          <label style={{ display: 'block', fontSize: 10, color: '#94a3b8', marginBottom: 8, textTransform: 'uppercase', letterSpacing: '0.05em', fontWeight: 600, fontFamily: 'monospace' }}>
+            SIGNIFICANCE
+          </label>
+          <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8 }}>
+            {[
+              { value: 'AUTO' as const, label: 'Auto' },
+              { value: 'LOW' as const, label: 'Light' },
+              { value: 'MEDIUM' as const, label: 'Medium' },
+              { value: 'HIGH' as const, label: 'High impact' },
+            ].map((option) => {
+              const selected = activitySignificance === option.value;
+              return (
+                <button
+                  key={option.value}
+                  type="button"
+                  onClick={() => setActivitySignificance(option.value)}
+                  disabled={submitting}
+                  style={{
+                    minHeight: 36,
+                    flex: '1 1 72px',
+                    borderRadius: 10,
+                    border: selected ? '1px solid #4ade80' : '1px solid #334155',
+                    background: selected ? 'rgba(74, 222, 128, 0.13)' : '#020617',
+                    color: selected ? '#4ade80' : '#cbd5e1',
+                    fontSize: 11,
+                    fontWeight: 800,
+                    cursor: submitting ? 'not-allowed' : 'pointer',
+                  }}
+                >
+                  {option.label}
+                </button>
+              );
+            })}
+          </div>
+          <div style={{ color: '#94a3b8', fontSize: 10, lineHeight: 1.4, marginTop: 7 }}>
+            Auto lets Aura infer impact from the activity title.
+          </div>
+        </div>
+
         {/* Quick Log Suggestions */}
         <div style={{ marginBottom: '20px' }}>
           <label
@@ -355,6 +471,7 @@ export function PastActivityModal({
               WHAT DID YOU DO?
             </label>
             <input
+              ref={activityInputRef}
               type="text"
               value={customTitle}
               onChange={(e) => {
@@ -373,6 +490,43 @@ export function PastActivityModal({
                 fontFamily: 'sans-serif',
                 outline: 'none',
                 boxSizing: 'border-box',
+              }}
+            />
+          </div>
+
+          <div style={{ marginBottom: '24px' }}>
+            <label
+              style={{
+                display: 'block',
+                fontSize: '10px',
+                color: '#94a3b8',
+                marginBottom: '6px',
+                textTransform: 'uppercase',
+                letterSpacing: '0.05em',
+                fontWeight: 600,
+                fontFamily: 'monospace',
+              }}
+            >
+              NOTES
+            </label>
+            <textarea
+              value={notes}
+              onChange={(e) => setNotes(e.target.value)}
+              placeholder="Optional context, outcome, or reflection"
+              rows={3}
+              style={{
+                width: '100%',
+                padding: '10px 14px',
+                backgroundColor: '#020617',
+                border: notes.trim() ? '1px solid #38bdf8' : '1px solid #334155',
+                borderRadius: '12px',
+                color: '#f8fafc',
+                fontSize: '12px',
+                fontFamily: 'sans-serif',
+                outline: 'none',
+                boxSizing: 'border-box',
+                resize: 'vertical',
+                minHeight: 74,
               }}
             />
           </div>
