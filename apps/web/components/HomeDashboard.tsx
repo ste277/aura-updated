@@ -1,50 +1,9 @@
 'use client';
 
-import React, { useState, useMemo } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import { getPersonalizedTasks, UserChartContext } from '../../../packages/recommendation/src/personalizedTasks';
-import type { DailyBriefing, PlanningHorizon, TaskSlotRecommendation, TimePreference } from '../../../packages/recommendation/src/dailyAssistant';
+import type { DailyBriefing } from '../../../packages/recommendation/src/dailyAssistant';
 import { triggerHaptic } from '../lib/haptics';
-
-interface TaskSuggestion {
-  title: string;
-  icon: string;
-  keywords: string[];
-  description?: string;
-}
-
-const POPULAR_TASKS: TaskSuggestion[] = [
-  { title: 'Deep Work', icon: '🧠', keywords: ['deep work', 'focus', 'coding', 'code', 'research', 'study', 'write'] },
-  { title: 'Exercise & Fitness', icon: '🏋️', keywords: ['exercise', 'workout', 'gym', 'training', 'fitness'] },
-  { title: 'Start a Journey', icon: '🚗', keywords: ['journey', 'travel', 'trip', 'flight', 'road trip', 'vacation'] },
-  { title: 'Date & Relationships', icon: '❤️', keywords: ['date', 'dating', 'romantic', 'partner', 'relationship'] },
-  { title: 'Party & Social Time', icon: '🎉', keywords: ['party', 'social', 'concert', 'movie', 'celebration'] },
-  { title: 'Email & Communication', icon: '📧', keywords: ['email', 'communication', 'inbox', 'message', 'call'] },
-  { title: 'Break & Relaxation', icon: '🧘', keywords: ['break', 'rest', 'relax', 'tea', 'coffee', 'recovery'] },
-  { title: 'Planning', icon: '📋', keywords: ['planning', 'plan', 'organize', 'strategy'] },
-  { title: 'Learning', icon: '📚', keywords: ['learning', 'learn', 'reading', 'study', 'course'] },
-];
-
-const TASK_ALIASES: TaskSuggestion[] = [
-  { title: 'Exercise & Fitness', icon: '🏋️', keywords: ['exercise', 'workout', 'gym', 'training', 'fitness'] },
-  { title: 'Running', icon: '🏃', keywords: ['running', 'run', 'jog', 'cardio'] },
-  { title: 'Strength Training', icon: '🏋️', keywords: ['strength', 'weights', 'lifting', 'lift', 'gym'] },
-  { title: 'Stretching & Mobility', icon: '🧘', keywords: ['stretch', 'mobility', 'flexibility', 'recovery'] },
-  { title: 'Deep Technical Work', icon: '💻', keywords: ['technical', 'coding', 'code', 'programming', 'architecture'] },
-  { title: 'Documentation', icon: '📝', keywords: ['documentation', 'docs', 'document'] },
-  { title: 'Team Meeting', icon: '👥', keywords: ['meeting', 'team', 'standup'] },
-  { title: 'Client Communication', icon: '💬', keywords: ['client', 'communication', 'call', 'email'] },
-  { title: 'Meditation', icon: '🧘', keywords: ['meditation', 'meditate', 'mindful', 'breath'] },
-  { title: 'Start a Journey', icon: '🚗', keywords: ['journey', 'travel', 'trip', 'flight', 'train', 'vacation', 'relocation'] },
-  { title: 'Date & Relationships', icon: '❤️', keywords: ['date', 'dating', 'romantic', 'partner', 'relationship', 'proposal'] },
-  { title: 'Party & Social Time', icon: '🎉', keywords: ['party', 'social', 'concert', 'movie', 'celebration', 'night out'] },
-  { title: 'Financial Decision', icon: '💰', keywords: ['finance', 'investment', 'property', 'purchase', 'loan', 'contract'] },
-  { title: 'New Beginning', icon: '🚀', keywords: ['start', 'begin', 'launch', 'new project', 'new business', 'new job'] },
-  { title: 'Learning', icon: '📚', keywords: ['learn', 'course', 'reading', 'exam', 'practice', 'language'] },
-];
-
-function recentTaskTitles(titles: string[]): string[] {
-  return titles.filter(Boolean).slice().reverse().filter((title, index, list) => list.indexOf(title) === index).slice(0, 3);
-}
 
 interface HomeDashboardProps {
   userName: string;
@@ -57,42 +16,65 @@ interface HomeDashboardProps {
     startsIn: string;
     startTime: string;
   };
+  currentWindow?: {
+    name: string;
+    startTime: string;
+    endTime: string;
+    timeRemaining: string;
+  };
   activeWindowName?: string;
   loggedActivitiesToday?: string[];
   dailyBriefing?: DailyBriefing | null;
+  todayReflection?: {
+    outputLevel: 'LOW' | 'MODERATE' | 'PEAK_FLOW';
+    followedGuidance: boolean;
+  } | null;
   userChart?: UserChartContext;
-  onLogActivity?: (activityTitle: string, notes?: string) => Promise<void>;
-  onSlotTask?: (taskTitle: string, durationMinutes: number, horizon?: PlanningHorizon, customStartDate?: string, customEndDate?: string, timePreference?: TimePreference) => Promise<TaskSlotRecommendation>;
+  onLogActivity?: (
+    activityTitle: string,
+    notes?: string,
+    customTimestamp?: Date,
+    overrideWindowType?: string,
+    durationMinutes?: number,
+    logSource?: 'AURA_PLANNED' | 'AURA_DO_NOW' | 'MANUAL' | 'OVERRIDE_CAUTION',
+    activitySignificance?: 'LOW' | 'MEDIUM' | 'HIGH'
+  ) => Promise<void>;
   onSubmitReflection?: (outputLevel: 'LOW' | 'MODERATE' | 'PEAK_FLOW', followedGuidance: boolean) => Promise<void>;
   onNextShiftClick?: () => void;
+  onPlanClick?: (activity?: string) => void;
+  onInsightsClick?: () => void;
 }
 
-// Helper to determine status text and color dynamically from the energy score and window
-function getEnergyStatus(score: number, windowName: string) {
-  const cleanWindow = (windowName || '').toUpperCase();
-  
+const PROMPT_CHIPS = ['Workout', 'Deep work', 'Study', 'Date night'];
+
+function getWindowTone(score: number, windowName: string) {
+  const cleanWindow = windowName.toUpperCase();
   if (cleanWindow.includes('RAHU') || cleanWindow.includes('YAMA') || score < 4) {
-    return {
-      label: 'Caution Period',
-      color: '#fb6b6b', // Red / High friction
-    };
+    return { label: 'Use Caution', pill: 'Caution', color: '#fb6b6b', description: 'Better for routine, low-stakes tasks and cleanup.' };
   }
-  if (score >= 7.5) {
-    return {
-      label: 'High Alignment',
-      color: '#4ade80', // Green / Auspicious
-    };
-  }
-  if (score >= 5.0) {
-    return {
-      label: 'Steady Flow',
-      color: '#facc15', // Yellow / Neutral
-    };
-  }
-  return {
-    label: 'Moderate Energy',
-    color: '#fb923c', // Orange
-  };
+  if (score >= 7.5) return { label: 'Strong Window', pill: 'Best Time', color: '#4ade80', description: 'Good for focused, important, or momentum-building work.' };
+  if (score >= 5) return { label: 'Neutral Flow', pill: 'Good Time', color: '#4ade80', description: 'Good for steady progress, planning, and everyday tasks.' };
+  return { label: 'Light Flow', pill: 'Steady Time', color: '#facc15', description: 'Good for maintenance, reflection, and gentle progress.' };
+}
+
+function formatWindowName(name: string) {
+  const formatted = name.replace(/_/g, ' ').replace(/\b\w/g, (letter) => letter.toUpperCase());
+  return formatted.toUpperCase() === 'NEUTRAL' ? 'Neutral Flow' : formatted;
+}
+
+function todayLabel() {
+  return new Date().toLocaleDateString('en-US', { weekday: 'long', month: 'short', day: 'numeric', year: 'numeric' });
+}
+
+function greeting() {
+  const hour = new Date().getHours();
+  if (hour >= 17) return 'Good Evening';
+  if (hour >= 12) return 'Good Afternoon';
+  return 'Good Morning';
+}
+
+function scoreLabel(score: number) {
+  return Math.max(1, Math.min(10, Math.round(score * 10) / 10));
 }
 
 export function HomeDashboard({
@@ -102,111 +84,89 @@ export function HomeDashboard({
   bestForToday,
   cautionItems,
   nextShift,
+  currentWindow,
   activeWindowName = 'NEUTRAL',
   loggedActivitiesToday = [],
   dailyBriefing,
+  todayReflection,
   userChart,
   onLogActivity,
-  onSlotTask,
   onSubmitReflection,
   onNextShiftClick,
+  onPlanClick,
+  onInsightsClick,
 }: HomeDashboardProps) {
   const [selectedHabit, setSelectedHabit] = useState<string | null>(null);
   const [activityNote, setActivityNote] = useState('');
   const [isSubmitting, setIsSubmitting] = useState(false);
-  const [taskTitle, setTaskTitle] = useState('');
-  const [taskDuration, setTaskDuration] = useState(30);
-  const [taskHorizon, setTaskHorizon] = useState<PlanningHorizon>('TODAY');
-  const [customStartDate, setCustomStartDate] = useState('');
-  const [customEndDate, setCustomEndDate] = useState('');
-  const [timePreference, setTimePreference] = useState<TimePreference>('ANYTIME');
-  const [taskRecommendation, setTaskRecommendation] = useState<TaskSlotRecommendation | null>(null);
-  const [isSlottingTask, setIsSlottingTask] = useState(false);
-  const [taskInputFocused, setTaskInputFocused] = useState(false);
-  const [reflectionSaved, setReflectionSaved] = useState(false);
+  const [reflectionSaved, setReflectionSaved] = useState(Boolean(todayReflection));
+  const [isEditingReflection, setIsEditingReflection] = useState(false);
+  const [isSavingReflection, setIsSavingReflection] = useState(false);
+  const [reflectionError, setReflectionError] = useState('');
+  const [selectedReflection, setSelectedReflection] = useState<'LOW' | 'MODERATE' | 'PEAK_FLOW' | null>(todayReflection?.outputLevel ?? null);
+  const [showReflectionWhy, setShowReflectionWhy] = useState(false);
 
-  // Compute personalized tasks tailored to active window, birth chart, and current log history
-  const personalizedTasks = useMemo(() => {
-    return getPersonalizedTasks(activeWindowName, userChart, loggedActivitiesToday);
-  }, [activeWindowName, userChart, loggedActivitiesToday]);
+  useEffect(() => {
+    setReflectionSaved(Boolean(todayReflection));
+    setSelectedReflection(todayReflection?.outputLevel ?? null);
+    setIsEditingReflection(false);
+    setReflectionError('');
+  }, [todayReflection?.outputLevel]);
 
-  const taskSuggestions = useMemo(() => {
-    const recent = recentTaskTitles(loggedActivitiesToday)
-      .map((title) => ({ title, icon: '↗', keywords: [title.toLowerCase()] }));
-    const query = taskTitle.trim().toLowerCase();
-    const source = query ? TASK_ALIASES : [...recent, ...POPULAR_TASKS];
-    const matches = source.filter((suggestion, index, all) => {
-      const matchesQuery = !query || suggestion.title.toLowerCase().includes(query) || suggestion.keywords.some((keyword) => keyword.includes(query));
-      return matchesQuery && all.findIndex((item) => item.title.toLowerCase() === suggestion.title.toLowerCase()) === index;
-    });
-    return matches.slice(0, 6);
-  }, [loggedActivitiesToday, taskTitle]);
-
-  const selectTaskSuggestion = (title: string) => {
-    setTaskTitle(title);
-    setTaskRecommendation(null);
-    setTaskInputFocused(false);
-  };
-
-  const suggestedTimePreference = useMemo<TimePreference>(() => {
-    const title = taskTitle.toLowerCase();
-    if (/(date|dating|party|social|family|romantic)/.test(title)) return 'EVENING';
-    if (/(sleep|wind down|night)/.test(title)) return 'NIGHT';
-    if (/(workout|exercise|journey|travel|deep work|study|learn|meditat|meeting)/.test(title)) return 'MORNING';
-    if (/(shopping|errand)/.test(title)) return 'AFTERNOON';
-    return 'ANYTIME';
-  }, [taskTitle]);
-
-  const starCount = Math.round((energyScore / 10) * 5 * 2) / 2;
-
-  // Dynamic Status Label & Accent Color based on active score and window
-  const status = getEnergyStatus(energyScore, activeWindowName);
-  const allWindowsComplete = Boolean(
-    dailyBriefing &&
-      dailyBriefing.briefingState === 'COMPLETED' &&
-      dailyBriefing.otherFavorableWindows.every((window) => window.state === 'COMPLETED')
+  const personalizedTasks = useMemo(
+    () => getPersonalizedTasks(activeWindowName, userChart, loggedActivitiesToday),
+    [activeWindowName, userChart, loggedActivitiesToday]
   );
-  const briefTitle = allWindowsComplete ? 'Evening Mode' : 'Morning Brief';
-  const briefStateLabel = allWindowsComplete
-    ? 'Recovery phase'
-    : dailyBriefing?.briefingState === 'ACTIVE'
-      ? 'Active now'
-      : dailyBriefing?.briefingState === 'COMPLETED'
-        ? 'Peak complete'
-        : 'Upcoming';
-  const currentHour = new Date().getHours();
-  const greeting = allWindowsComplete || currentHour >= 17
-    ? 'Good Evening'
-    : currentHour >= 12
-      ? 'Good Afternoon'
-      : 'Good Morning';
-  const summaryWindows = dailyBriefing
-    ? [
-        {
-          name: dailyBriefing.peakWindow.name,
-          startTime: dailyBriefing.peakWindow.startTime,
-          endTime: dailyBriefing.peakWindow.endTime,
-          windowType: 'ABHIJIT',
-          state: dailyBriefing.briefingState,
-        },
-        ...dailyBriefing.otherFavorableWindows,
-      ]
-    : [];
-
-  const radius = 30;
-  const circumference = 2 * Math.PI * radius;
-  const normalizedScore = energyScore <= 10 ? energyScore * 10 : energyScore;
-  const strokeDashoffset = circumference - (normalizedScore / 100) * circumference;
+  const primaryTask = personalizedTasks[0] ?? {
+    id: 'steady-progress',
+    title: bestForToday[0] ?? 'Steady Progress',
+    description: themeText,
+    icon: '✨',
+  };
+  const tone = getWindowTone(energyScore, activeWindowName);
+  const currentWindowLabel = dailyBriefing?.briefingState === 'ACTIVE'
+    ? dailyBriefing.peakWindow.name
+    : formatWindowName(currentWindow?.name ?? activeWindowName);
+  const currentTimeRange = dailyBriefing?.briefingState === 'ACTIVE'
+    ? `${dailyBriefing.peakWindow.startTime} - ${dailyBriefing.peakWindow.endTime}`
+    : currentWindow
+      ? `${currentWindow.startTime} - ${currentWindow.endTime}`
+      : `Next shift ${nextShift.startTime}`;
+  const remainingText = dailyBriefing?.briefingState === 'ACTIVE'
+    ? nextShift.startsIn
+    : currentWindow
+      ? `${currentWindow.timeRemaining} left`
+      : nextShift.startsIn;
+  const flowItems = useMemo(() => {
+    if (!dailyBriefing) {
+      return [
+        { label: 'Now', name: currentWindowLabel, time: 'Current', accent: tone.color },
+        { label: 'Next', name: nextShift.windowName, time: nextShift.startTime, accent: '#38bdf8' },
+      ];
+    }
+    return [
+      {
+        label: dailyBriefing.briefingState === 'ACTIVE' ? 'Now' : 'Peak',
+        name: dailyBriefing.peakWindow.name,
+        time: `${dailyBriefing.peakWindow.startTime} - ${dailyBriefing.peakWindow.endTime}`,
+        accent: '#4ade80',
+      },
+      ...dailyBriefing.otherFavorableWindows.slice(0, 4).map((window) => ({
+        label: window.state === 'ACTIVE' ? 'Now' : window.state === 'COMPLETED' ? 'Passed' : 'Next',
+        name: window.name,
+        time: `${window.startTime} - ${window.endTime}`,
+        accent: window.state === 'COMPLETED' ? '#64748b' : '#38bdf8',
+      })),
+    ];
+  }, [currentWindowLabel, dailyBriefing, nextShift.startTime, nextShift.windowName, tone.color]);
 
   const handleConfirmLog = async () => {
     if (!selectedHabit || !onLogActivity) return;
     setIsSubmitting(true);
     try {
-      await onLogActivity(selectedHabit, activityNote);
-      
-      // Trigger success haptic vibration upon successful log confirmation
+      const selectedTask = personalizedTasks.find((task) => task.title === selectedHabit);
+      await onLogActivity(selectedHabit, activityNote, undefined, undefined, 30, 'AURA_DO_NOW', selectedTask?.significance);
       triggerHaptic('success');
-
       setSelectedHabit(null);
       setActivityNote('');
     } catch (err) {
@@ -216,755 +176,485 @@ export function HomeDashboard({
     }
   };
 
-  const handleSlotTask = async () => {
-    if (!onSlotTask || !taskTitle.trim() || (taskHorizon === 'CUSTOM' && (!customStartDate || !customEndDate || customEndDate < customStartDate))) return;
-    setIsSlottingTask(true);
-    try {
-      const recommendation = await onSlotTask(taskTitle, taskDuration, taskHorizon, customStartDate, customEndDate, timePreference);
-      setTaskRecommendation(recommendation);
-      triggerHaptic('success');
-    } catch (err) {
-      console.error('Failed to slot task:', err);
-    } finally {
-      setIsSlottingTask(false);
-    }
-  };
-
   const handleReflection = async (outputLevel: 'LOW' | 'MODERATE' | 'PEAK_FLOW') => {
-    if (!onSubmitReflection) return;
+    if (!onSubmitReflection || isSavingReflection) return;
+    setIsSavingReflection(true);
+    setReflectionError('');
     try {
       await onSubmitReflection(outputLevel, loggedActivitiesToday.length > 0);
+      setSelectedReflection(outputLevel);
       setReflectionSaved(true);
+      setIsEditingReflection(false);
       triggerHaptic('success');
     } catch (err) {
       console.error('Failed to save reflection:', err);
+      setReflectionError('Could not save check-in. Try again.');
+    } finally {
+      setIsSavingReflection(false);
     }
   };
 
-  const getIconForBadge = (item: string) => {
-    if (item.toLowerCase().includes('learn')) return '📖';
-    if (item.toLowerCase().includes('exercise')) return '🏋️';
-    if (item.toLowerCase().includes('plan')) return '📅';
-    return '✨';
-  };
-
-  const getIconForCaution = (item: string) => {
-    if (item.toLowerCase().includes('emotion')) return '❤️';
-    if (item.toLowerCase().includes('financial')) return '🪙';
-    return '⚠️';
-  };
-
   return (
-    <div style={{ display: 'flex', flexDirection: 'column', gap: 14, paddingBottom: 24, position: 'relative', fontFamily: 'sans-serif' }}>
-      {/* 1. Greeting Header */}
-      <div>
-        <h1 style={{ fontSize: 20, fontWeight: 700, color: '#f8fafc', margin: 0 }}>
-          {greeting}, {userName}! 👋
-        </h1>
-        <p style={{ fontSize: 11, color: '#b6c2d1', marginTop: 2 }}>
-          {new Date().toLocaleDateString('en-US', { weekday: 'long', month: 'short', day: 'numeric', year: 'numeric' })}
-        </p>
-      </div>
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 17, paddingBottom: 24, fontFamily: 'sans-serif', color: '#f8fafc' }}>
+      <header style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: 16 }}>
+        <div>
+          <h1 style={{ fontSize: 26, lineHeight: 1.08, fontWeight: 900, color: '#f8fafc', margin: 0, letterSpacing: 0 }}>
+            {greeting()}, {userName}! 👋
+          </h1>
+          <p style={{ fontSize: 15, color: '#aab7d2', margin: '7px 0 0' }}>{todayLabel()}</p>
+        </div>
+        <button type="button" aria-label="Notifications" style={topActionStyle}>
+          <span style={{ position: 'absolute', right: 7, top: 6, width: 8, height: 8, borderRadius: 8, background: '#4ade80' }} />
+          <BellIcon />
+        </button>
+      </header>
 
-      {/* 2a. Morning Briefing / Evening Recovery Status */}
-      {dailyBriefing && (
-        <div
-          style={{
-            background: 'var(--as-surface-raised, #0f172a)',
-            border: allWindowsComplete ? '1px solid rgba(148, 163, 184, 0.24)' : '1px solid rgba(74, 222, 128, 0.28)',
-            borderRadius: 16,
-            padding: '18px 17px 19px',
-            order: 1,
-          }}
-        >
-          <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
-            <span style={{ fontSize: 10, textTransform: 'uppercase', letterSpacing: '0.05em', color: allWindowsComplete ? '#cbd5e1' : '#4ade80', fontWeight: 800 }}>
-              {briefTitle}
-            </span>
-            <span style={{ background: allWindowsComplete ? 'rgba(148, 163, 184, 0.16)' : 'rgba(74, 222, 128, 0.14)', border: `1px solid ${allWindowsComplete ? 'rgba(148, 163, 184, 0.24)' : 'rgba(74, 222, 128, 0.28)'}`, borderRadius: 999, color: allWindowsComplete ? '#cbd5e1' : '#86efac', fontSize: 10, fontWeight: 800, padding: '4px 8px' }}>
-              {briefStateLabel}
+      <section style={{ ...panelStyle, display: 'grid', gridTemplateColumns: '104px minmax(0, 1fr)', gap: 18, alignItems: 'center', padding: 18 }}>
+        <FlowRing score={energyScore} color={tone.color} />
+        <div style={{ minWidth: 0 }}>
+          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8, flexWrap: 'wrap' }}>
+            <div style={sectionKickerStyle}>
+              ● Right Now
+            </div>
+            <span style={{ border: `1px solid ${tone.color}80`, color: tone.color, borderRadius: 999, padding: '7px 13px', fontSize: 13, fontWeight: 850, whiteSpace: 'nowrap' }}>
+              {tone.pill}
             </span>
           </div>
-          {allWindowsComplete ? (
-            <>
-              <div style={{ fontSize: 17, fontWeight: 800, color: '#f8fafc', marginTop: 15 }}>
-                Shift from output to recovery
-              </div>
-              <div style={{ fontSize: 12, color: '#dbe7f4', marginTop: 6, lineHeight: 1.45 }}>
-                Your key productivity windows are complete. Now: wrap up, recover, and prepare for tomorrow.
-              </div>
-              <div style={{ marginTop: 17, paddingTop: 14, borderTop: '1px solid rgba(255, 255, 255, 0.1)' }}>
-                <div style={{ fontSize: 10, color: '#b6c2d1', textTransform: 'uppercase', letterSpacing: '0.05em', fontWeight: 800 }}>
-                  Today&apos;s summary
-                </div>
-                {summaryWindows.map((window) => {
-                  const isComplete = window.state === 'COMPLETED';
-                  const stateLabel = window.state === 'ACTIVE' ? 'Active now' : isComplete ? 'Complete' : 'Upcoming';
-                  return (
-                    <div key={`${window.windowType}-${window.startTime}`} style={{ display: 'grid', gridTemplateColumns: 'minmax(0, 1fr) auto auto', gap: '9px 10px', alignItems: 'center', marginTop: 9, opacity: isComplete ? 0.58 : 1 }}>
-                      <span style={{ color: isComplete ? '#7f8da1' : '#dbe7f4', fontSize: 11 }}>{window.name}</span>
-                      <span style={{ color: isComplete ? '#7f8da1' : '#b6c2d1', fontSize: 10, whiteSpace: 'nowrap' }}>{window.startTime} - {window.endTime}</span>
-                      <span style={{ background: isComplete ? 'rgba(148, 163, 184, 0.12)' : window.state === 'ACTIVE' ? 'rgba(74, 222, 128, 0.14)' : 'rgba(56, 189, 248, 0.14)', borderRadius: 999, color: isComplete ? '#7f8da1' : window.state === 'ACTIVE' ? '#86efac' : '#7dd3fc', fontSize: 9, fontWeight: 800, padding: '4px 7px' }}>{stateLabel}</span>
-                    </div>
-                  );
-                })}
-              </div>
-            </>
-          ) : (
-            <>
-              <div style={{ fontSize: 14, fontWeight: 700, color: '#f8fafc', marginTop: 10 }}>
-                {dailyBriefing.peakWindow.name}: {dailyBriefing.peakWindow.startTime} - {dailyBriefing.peakWindow.endTime}
-              </div>
-              <div style={{ fontSize: 12, color: '#dbe7f4', marginTop: 6, lineHeight: 1.45 }}>
-                {dailyBriefing.greenLight.title}: {dailyBriefing.greenLight.description}
-              </div>
-              <div style={{ fontSize: 11, color: '#b6c2d1', marginTop: 9, lineHeight: 1.4 }}>
-                {dailyBriefing.nextAction}
-              </div>
-            </>
-          )}
-          {!allWindowsComplete && dailyBriefing.briefingState === 'COMPLETED' && dailyBriefing.nextWindow && (
-            <div style={{ fontSize: 11, color: '#38bdf8', marginTop: 8, lineHeight: 1.35, fontWeight: 700 }}>
-              Next favorable window: {dailyBriefing.nextWindow.startTime} - {dailyBriefing.nextWindow.endTime} · {dailyBriefing.nextWindow.name}
-            </div>
-          )}
-        </div>
-      )}
-
-      {/* 2. Current Alignment Score Card */}
-      <div
-        style={{
-          background: 'var(--as-surface-raised, #0f172a)',
-          border: '1px solid var(--as-border, #1e293b)',
-          borderRadius: 16,
-          padding: 20,
-          position: 'relative',
-          order: 3,
-        }}
-      >
-        <div style={{ fontSize: 10, fontFamily: 'monospace', textTransform: 'uppercase', letterSpacing: '0.05em', color: '#94a3b8' }}>
-          Today&apos;s Energy
-        </div>
-
-        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginTop: 4 }}>
-          <div>
-            <h2 style={{ fontSize: 24, fontWeight: 700, color: status.color, margin: 0 }}>
-              {status.label.replace(' Alignment', '')}
-            </h2>
-            <div style={{ display: 'flex', gap: 2, color: '#facc15', fontSize: 14, margin: '6px 0 0 0' }}>
-              {Array.from({ length: 5 }).map((_, i) => (
-                <span key={i}>{i < Math.floor(starCount) ? '★' : '☆'}</span>
-              ))}
-            </div>
-            <div style={{ fontSize: 11, color: '#94a3b8', marginTop: 6, fontWeight: 500 }}>
-              Based on today&apos;s solar and Panchang windows · <span style={{ color: status.color, fontWeight: 600 }}>{activeWindowName.replace('_', ' ')}</span>
-            </div>
+          <h2 style={{ margin: '13px 0 0', fontSize: 27, color: '#f8fafc', lineHeight: 1.05 }}>{currentWindowLabel}</h2>
+          <div style={{ color: '#f8fafc', fontSize: 15, fontWeight: 850, marginTop: 10, lineHeight: 1.35 }}>
+            {currentTimeRange}
+            <span style={{ color: tone.color, display: 'inline-block', marginLeft: 6 }}>{remainingText}</span>
           </div>
-
-          <div style={{ position: 'relative', width: 76, height: 76, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-            <svg width="76" height="76" viewBox="0 0 76 76" style={{ transform: 'rotate(-90deg)' }}>
-              <circle cx="38" cy="38" r={radius} stroke="rgba(255, 255, 255, 0.08)" strokeWidth="6" fill="none" />
-              <circle
-                cx="38"
-                cy="38"
-                r={radius}
-                stroke={status.color}
-                strokeWidth="6"
-                fill="none"
-                strokeDasharray={circumference}
-                strokeDashoffset={strokeDashoffset}
-                strokeLinecap="round"
-                style={{ transition: 'stroke-dashoffset 0.6s ease' }}
-              />
-            </svg>
-            <div style={{ position: 'absolute', textAlign: 'center' }}>
-              <span style={{ fontSize: 18, fontWeight: 700, color: 'var(--as-text, #fff)', display: 'block' }}>
-                {energyScore}
-              </span>
-              <span style={{ fontSize: 9, color: 'var(--as-text-muted, #94a3b8)' }}>/ 10</span>
-            </div>
-          </div>
+          <p style={{ margin: '11px 0 0', color: '#aab7d2', fontSize: 15, lineHeight: 1.42 }}>{tone.description}</p>
         </div>
-      </div>
+      </section>
 
-      {/* 3. Personalized Actions Playbook Section */}
-      <div
-        style={{
-          background: 'var(--as-surface-raised, #0f172a)',
-          border: '1px solid var(--as-border, #1e293b)',
-          borderRadius: 16,
-          padding: 16,
-          order: 4,
-        }}
-      >
-        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-          <span style={{ fontSize: 10, fontFamily: 'monospace', textTransform: 'uppercase', color: '#4ade80', letterSpacing: '0.05em', fontWeight: 700 }}>
-            ✨ Aura Suggests
-          </span>
-          <span style={{ fontSize: 10, color: '#94a3b8', fontFamily: 'monospace' }}>
-            {activeWindowName.replace(/_/g, ' ')}
-          </span>
-        </div>
-
-        <div style={{ display: 'flex', flexDirection: 'column', gap: 10, marginTop: 12 }}>
-          {personalizedTasks.map((task) => {
-            const isAlreadyLogged = loggedActivitiesToday.some(
-              (title) => title.toLowerCase() === task.title.toLowerCase()
-            );
-
-            return (
-              <div
-                key={task.id}
-                style={{
-                  display: 'flex',
-                  alignItems: 'center',
-                  justifyContent: 'space-between',
-                  gap: 12,
-                  padding: '12px 14px',
-                  borderRadius: 12,
-                  background: isAlreadyLogged
-                    ? 'rgba(74, 222, 128, 0.08)'
-                    : 'rgba(30, 41, 59, 0.6)',
-                  border: isAlreadyLogged
-                    ? '1px solid rgba(74, 222, 128, 0.3)'
-                    : '1px solid rgba(255, 255, 255, 0.08)',
-                  transition: 'all 0.2s ease',
-                }}
-              >
-                <div style={{ display: 'flex', alignItems: 'center', gap: 10, flex: 1 }}>
-                  <span style={{ fontSize: 20 }}>{task.icon}</span>
-                  <div>
-                    <div style={{ fontSize: 13, fontWeight: 700, color: isAlreadyLogged ? '#e2e8f0' : '#f8fafc' }}>
-                      {task.title}
-                    </div>
-                    <div style={{ fontSize: 11, color: '#94a3b8', marginTop: 2, lineHeight: 1.3 }}>
-                      {task.description}
-                    </div>
-                  </div>
-                </div>
-
-                <button
-                  onClick={() => !isAlreadyLogged && setSelectedHabit(task.title)}
-                  disabled={isAlreadyLogged}
-                  style={{
-                    background: isAlreadyLogged ? 'rgba(74, 222, 128, 0.15)' : '#4ade80',
-                    color: isAlreadyLogged ? '#4ade80' : '#020617',
-                    border: isAlreadyLogged ? '1px solid rgba(74, 222, 128, 0.3)' : 'none',
-                    borderRadius: 8,
-                    padding: '6px 12px',
-                    fontSize: 11,
-                    fontWeight: 700,
-                    cursor: isAlreadyLogged ? 'default' : 'pointer',
-                    whiteSpace: 'nowrap',
-                    flexShrink: 0,
-                  }}
-                >
-                  {isAlreadyLogged ? '✓ Logged' : '+ Log This'}
-                </button>
-              </div>
-            );
-          })}
-        </div>
-      </div>
-
-      {/* Smart Task Planner */}
-      <div
-        style={{
-          background: 'var(--as-surface-raised, #0f172a)',
-          border: '1px solid var(--as-border, #1e293b)',
-          borderRadius: 16,
-          padding: 16,
-          order: 2,
-        }}
-      >
-        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 12 }}>
-          <span style={{ fontSize: 10, fontFamily: 'monospace', textTransform: 'uppercase', color: '#38bdf8', letterSpacing: '0.05em', fontWeight: 700 }}>
-            Plan a task
-          </span>
-        </div>
-        <div style={{ display: 'flex', gap: 8, marginTop: 12 }}>
-          <input
-            value={taskTitle}
-            onFocus={() => setTaskInputFocused(true)}
-            onChange={(e) => {
-              setTaskTitle(e.target.value);
-              setTaskRecommendation(null);
-              setTaskInputFocused(true);
-            }}
-            placeholder="Type an activity..."
-            style={{
-              flex: 1,
-              minWidth: 0,
-              background: '#020617',
-              border: '1px solid #334155',
-              borderRadius: 10,
-              color: '#f8fafc',
-              fontSize: 12,
-              padding: '10px 12px',
-              outline: 'none',
-            }}
-          />
-          <button
-            onClick={handleSlotTask}
-            disabled={!taskTitle.trim() || isSlottingTask || (taskHorizon === 'CUSTOM' && (!customStartDate || !customEndDate || customEndDate < customStartDate))}
-            style={{
-              background: '#38bdf8',
-              border: 'none',
-              borderRadius: 10,
-              color: '#020617',
-              cursor: taskTitle.trim() ? 'pointer' : 'default',
-              fontSize: 12,
-              fontWeight: 800,
-              padding: '0 12px',
-              opacity: taskTitle.trim() && !(taskHorizon === 'CUSTOM' && (!customStartDate || !customEndDate || customEndDate < customStartDate)) ? 1 : 0.55,
-              whiteSpace: 'nowrap',
-            }}
-          >
-            {isSlottingTask ? '...' : 'Find Best Time'}
+      <section style={panelStyle}>
+        <div style={inputShellStyle}>
+          <span style={{ color: '#93c5fd', fontSize: 23 }}>✦</span>
+          <button type="button" onClick={() => onPlanClick?.()} style={promptButtonStyle}>
+            What are you thinking about?
+          </button>
+          <button type="button" onClick={() => onPlanClick?.()} style={voiceButtonStyle} aria-label="Find a time">
+            →
           </button>
         </div>
-        {taskTitle.trim() && <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8, marginTop: 9 }}>
-          <label style={{ fontSize: 10, color: '#94a3b8' }}>
-            WHEN?
-            <select value={taskHorizon} onChange={(e) => setTaskHorizon(e.target.value as PlanningHorizon)} style={{ display: 'block', width: '100%', marginTop: 4, background: '#020617', border: '1px solid #334155', borderRadius: 8, color: '#cbd5e1', fontSize: 11, padding: '7px 8px' }}>
-              <option value="NOW">Now</option>
-              <option value="TODAY">Today</option>
-              <option value="TOMORROW">Tomorrow</option>
-              <option value="WEEKEND">Weekend</option>
-              <option value="SEVEN_DAYS">Next 7 days</option>
-              <option value="CUSTOM">Custom dates</option>
-            </select>
-          </label>
-          <label style={{ fontSize: 10, color: '#94a3b8' }}>
-            HOW LONG?
-            <select value={taskDuration} onChange={(e) => setTaskDuration(Number(e.target.value))} style={{ display: 'block', width: '100%', marginTop: 4, background: '#020617', border: '1px solid #334155', borderRadius: 8, color: '#cbd5e1', fontSize: 11, padding: '7px 8px' }}>
-              <option value={15}>15 min</option>
-              <option value={30}>30 min</option>
-              <option value={60}>60 min</option>
-              <option value={90}>90 min</option>
-              <option value={120}>2 hours</option>
-              <option value={180}>3 hours</option>
-            </select>
-          </label>
-        </div>}
-        {taskTitle.trim() && (
-          <div style={{ marginTop: 10 }}>
-            <div style={{ fontSize: 10, color: '#94a3b8', marginBottom: 5 }}>PREFERRED TIME</div>
-            <div style={{ display: 'flex', gap: 5, flexWrap: 'wrap' }}>
-              {([
-                ['ANYTIME', 'Anytime'], ['MORNING', 'Morning'], ['AFTERNOON', 'Afternoon'], ['EVENING', 'Evening'], ['NIGHT', 'Night'],
-              ] as Array<[TimePreference, string]>).map(([value, label]) => (
-                <button key={value} type="button" onClick={() => setTimePreference(value)} style={{ border: `1px solid ${timePreference === value ? 'rgba(56, 189, 248, 0.7)' : 'rgba(148, 163, 184, 0.25)'}`, background: timePreference === value ? 'rgba(56, 189, 248, 0.16)' : 'rgba(2, 6, 23, 0.55)', color: timePreference === value ? '#7dd3fc' : '#b6c2d1', borderRadius: 999, padding: '5px 9px', fontSize: 10, fontWeight: 700, cursor: 'pointer' }}>
-                  {label}
-                </button>
-              ))}
-            </div>
-            {timePreference === 'ANYTIME' && suggestedTimePreference !== 'ANYTIME' && <div style={{ fontSize: 10, color: '#64748b', marginTop: 5 }}>Suggested: {suggestedTimePreference.toLowerCase()}</div>}
-          </div>
-        )}
-        {taskTitle.trim() && taskHorizon === 'CUSTOM' && (
-          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8, marginTop: 9 }}>
-            <label style={{ fontSize: 10, color: '#94a3b8' }}>
-              START DATE
-              <input type="date" value={customStartDate} onChange={(e) => setCustomStartDate(e.target.value)} style={{ display: 'block', width: '100%', marginTop: 4, boxSizing: 'border-box', background: '#020617', border: '1px solid #334155', borderRadius: 8, color: '#cbd5e1', fontSize: 11, padding: '7px 8px' }} />
-            </label>
-            <label style={{ fontSize: 10, color: '#94a3b8' }}>
-              END DATE
-              <input type="date" value={customEndDate} min={customStartDate || undefined} onChange={(e) => setCustomEndDate(e.target.value)} style={{ display: 'block', width: '100%', marginTop: 4, boxSizing: 'border-box', background: '#020617', border: '1px solid #334155', borderRadius: 8, color: '#cbd5e1', fontSize: 11, padding: '7px 8px' }} />
-            </label>
-          </div>
-        )}
-        {taskInputFocused && !taskRecommendation && (
-          <div style={{ marginTop: 10, padding: '10px 0 0', borderTop: '1px solid rgba(148, 163, 184, 0.14)' }}>
-            <div style={{ fontSize: 10, color: '#94a3b8', textTransform: 'uppercase', letterSpacing: '0.05em', fontWeight: 800 }}>
-              {taskTitle.trim() ? 'Suggestions' : recentTaskTitles(loggedActivitiesToday).length ? 'Recent & Popular' : 'Popular'}
-            </div>
-            <div style={{ display: 'flex', flexDirection: 'column', gap: 4, marginTop: 6 }}>
-              {taskSuggestions.map((suggestion) => (
-                <button
-                  key={suggestion.title}
-                  type="button"
-                  onMouseDown={(event) => event.preventDefault()}
-                  onClick={() => selectTaskSuggestion(suggestion.title)}
-                  style={{ display: 'flex', alignItems: 'center', gap: 9, width: '100%', border: 'none', borderRadius: 8, background: 'transparent', color: '#e2e8f0', padding: '7px 8px', textAlign: 'left', cursor: 'pointer' }}
-                >
-                  <span style={{ width: 22, textAlign: 'center', fontSize: 15 }}>{suggestion.icon}</span>
-                  <span style={{ fontSize: 12, fontWeight: 700 }}>{suggestion.title}</span>
-                </button>
-              ))}
-              {taskTitle.trim() && !taskSuggestions.some((suggestion) => suggestion.title.toLowerCase() === taskTitle.trim().toLowerCase()) && (
-                <button
-                  type="button"
-                  onMouseDown={(event) => event.preventDefault()}
-                  onClick={() => setTaskInputFocused(false)}
-                  style={{ border: 'none', borderTop: '1px solid rgba(148, 163, 184, 0.14)', background: 'transparent', color: '#38bdf8', padding: '9px 8px 3px', textAlign: 'left', fontSize: 11, cursor: 'pointer' }}
-                >
-                  + Create &ldquo;{taskTitle.trim()}&rdquo; as a custom task
-                </button>
-              )}
-            </div>
-          </div>
-        )}
-        {taskRecommendation && (
-          <div style={{ display: 'flex', flexDirection: 'column', gap: 8, marginTop: 12 }}>
-            {taskRecommendation.planningOptions && taskRecommendation.planningOptions.length > 0 && (
-              <div style={{ border: '1px solid rgba(56, 189, 248, 0.28)', background: 'rgba(56, 189, 248, 0.07)', borderRadius: 12, padding: 12 }}>
-                <div style={{ fontSize: 11, color: '#7dd3fc', fontWeight: 800 }}>⭐ {taskHorizon === 'SEVEN_DAYS' || taskHorizon === 'WEEKEND' ? 'Best opportunities' : 'Best time'} · {taskDuration >= 120 ? `${taskDuration / 60} hours` : `${taskDuration} min`}</div>
-                <div style={{ display: 'flex', flexDirection: 'column', gap: 8, marginTop: 8 }}>
-                  {taskRecommendation.planningOptions.map((option, index) => (
-                    <div key={`${option.dateLabel}-${option.startTime}`} style={{ display: 'grid', gridTemplateColumns: '1fr auto', gap: 8, alignItems: 'center' }}>
-                      <div>
-                        <div style={{ fontSize: 12, color: '#f8fafc', fontWeight: 700 }}>{index + 1}. {option.dateLabel} · {option.startTime} - {option.endTime}</div>
-                        <div style={{ fontSize: 10, color: '#b6c2d1', marginTop: 2 }}>{option.score}/100 · {option.quality.toLowerCase()} · {option.summary}</div>
-                      </div>
-                      <a href={option.googleCalendarUrl} target="_blank" rel="noreferrer" style={{ color: '#38bdf8', fontSize: 10, fontWeight: 800, textDecoration: 'none' }}>Schedule</a>
-                    </div>
-                  ))}
-                </div>
-              </div>
-            )}
-            {(!taskRecommendation.planningOptions || taskRecommendation.planningOptions.length === 0) && <div style={{ border: `1px solid ${taskRecommendation.recommendationState === 'AVOID' ? 'rgba(251, 107, 107, 0.35)' : taskRecommendation.recommendationState === 'NO_FIT' ? 'rgba(251, 191, 36, 0.35)' : 'rgba(74, 222, 128, 0.3)'}`, background: taskRecommendation.recommendationState === 'AVOID' ? 'rgba(251, 107, 107, 0.08)' : taskRecommendation.recommendationState === 'NO_FIT' ? 'rgba(251, 191, 36, 0.08)' : 'rgba(74, 222, 128, 0.08)', borderRadius: 12, padding: 12 }}>
-              <div style={{ fontSize: 11, color: taskRecommendation.recommendationState === 'AVOID' ? '#fb6b6b' : taskRecommendation.recommendationState === 'NO_FIT' ? '#fbbf24' : '#4ade80', fontWeight: 800 }}>
-                {taskRecommendation.activityIcon} {taskRecommendation.recommendationLabel}
-              </div>
-              <div style={{ fontSize: 12, color: '#dbe7f4', fontWeight: 700, marginTop: 7 }}>
-                For {taskRecommendation.activityType.toLowerCase()}
-              </div>
-              <div style={{ fontSize: 13, color: '#f8fafc', fontWeight: 700, marginTop: 3 }}>
-                {taskRecommendation.bestWindow.startTime} - {taskRecommendation.bestWindow.endTime} · {taskRecommendation.bestWindow.label}
-              </div>
-              {!taskRecommendation.durationFits && (
-                <div style={{ fontSize: 11, color: '#fbbf24', marginTop: 5, lineHeight: 1.35 }}>
-                  Only {taskRecommendation.availableMinutes} minutes fit inside this period; try a shorter block or choose another window.
-                </div>
-              )}
-              <div style={{ fontSize: 11, color: '#dbe7f4', marginTop: 4, lineHeight: 1.35 }}>
-                {taskRecommendation.bestWindow.reason}
-              </div>
-              {taskRecommendation.recommendationState !== 'NO_FIT' && <a
-                href={taskRecommendation.calendar.googleCalendarUrl}
-                target="_blank"
-                rel="noreferrer"
-                style={{ display: 'inline-block', marginTop: 8, fontSize: 11, color: '#38bdf8', fontWeight: 700, textDecoration: 'none' }}
-              >
-                Add to Google Calendar
-              </a>}
-            </div>}
-            {taskRecommendation.recommendationState === 'BEST_NOW' && taskRecommendation.bestWindowToday && (
-              <div style={{ border: '1px solid rgba(56, 189, 248, 0.28)', background: 'rgba(56, 189, 248, 0.08)', borderRadius: 12, padding: 12 }}>
-                <div style={{ fontSize: 11, color: '#7dd3fc', fontWeight: 800 }}>
-                  ⭐ Best Window Today{taskRecommendation.bestWindowToday.startsInMinutes > 0 ? ` · Starts in ${taskRecommendation.bestWindowToday.startsInMinutes} min` : ''}
-                </div>
-                <div style={{ fontSize: 13, color: '#f8fafc', fontWeight: 700, marginTop: 5 }}>
-                  {taskRecommendation.bestWindowToday.startTime} - {taskRecommendation.bestWindowToday.endTime} · {taskRecommendation.bestWindowToday.label}
-                </div>
-                <div style={{ fontSize: 11, color: '#dbe7f4', marginTop: 4, lineHeight: 1.35 }}>
-                  {taskRecommendation.bestWindowToday.reason}
-                </div>
-                <a
-                  href={taskRecommendation.bestWindowToday.googleCalendarUrl}
-                  target="_blank"
-                  rel="noreferrer"
-                  style={{ display: 'inline-block', marginTop: 8, fontSize: 11, color: '#38bdf8', fontWeight: 700, textDecoration: 'none' }}
-                >
-                  Schedule Best Window
-                </a>
-              </div>
-            )}
-            {taskRecommendation.avoidWindow && taskRecommendation.recommendationState !== 'AVOID' && (
-              <div style={{ border: '1px solid rgba(251, 107, 107, 0.25)', background: 'rgba(251, 107, 107, 0.07)', borderRadius: 12, padding: 12 }}>
-                <div style={{ fontSize: 11, color: '#fb6b6b', fontWeight: 800 }}>Avoid Window</div>
-                <div style={{ fontSize: 12, color: '#e2e8f0', fontWeight: 700, marginTop: 3 }}>
-                  {taskRecommendation.avoidWindow.startTime} - {taskRecommendation.avoidWindow.endTime} · {taskRecommendation.avoidWindow.label}
-                </div>
-              </div>
-            )}
-          </div>
-        )}
-      </div>
-
-      {/* End-of-Day Reflection */}
-      {onSubmitReflection && (
-        <div
-          style={{
-            background: 'var(--as-surface-raised, #0f172a)',
-            border: '1px solid var(--as-border, #1e293b)',
-            borderRadius: 16,
-            padding: 16,
-            order: 5,
-          }}
-        >
-          <span style={{ fontSize: 10, fontFamily: 'monospace', textTransform: 'uppercase', color: '#facc15', letterSpacing: '0.05em', fontWeight: 700 }}>
-            Daily Check-in
-          </span>
-          <div style={{ fontSize: 13, color: '#f8fafc', fontWeight: 700, marginTop: 8 }}>
-            How did today feel?
-          </div>
-          {reflectionSaved ? (
-            <div style={{ fontSize: 12, color: '#4ade80', marginTop: 8 }}>
-              Saved. Your alignment proof gets stronger with every check-in.
-            </div>
-          ) : (
-            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 8, marginTop: 10 }}>
-              {[
-                ['LOW', 'Low'],
-                ['MODERATE', 'Balanced'],
-                ['PEAK_FLOW', 'Strong'],
-              ].map(([value, label]) => (
-                <button
-                  key={value}
-                  onClick={() => handleReflection(value as 'LOW' | 'MODERATE' | 'PEAK_FLOW')}
-                  style={{
-                    background: 'rgba(30, 41, 59, 0.7)',
-                    border: '1px solid rgba(255, 255, 255, 0.08)',
-                    borderRadius: 10,
-                    color: '#e2e8f0',
-                    cursor: 'pointer',
-                    fontSize: 11,
-                    fontWeight: 700,
-                    minHeight: 38,
-                  }}
-                >
-                  {label}
-                </button>
-              ))}
-            </div>
-          )}
+        <div style={{ marginTop: 17, color: '#aab7d2', fontSize: 13 }}>Popular</div>
+        <div style={{ display: 'flex', flexWrap: 'wrap', gap: 9, marginTop: 12 }}>
+          {PROMPT_CHIPS.map((chip) => (
+            <button key={chip} type="button" onClick={() => onPlanClick?.(chip)} style={chipStyle}>
+              {chip}
+            </button>
+          ))}
         </div>
-      )}
+      </section>
 
-      {/* Confirmation Modal Prompt */}
-      {selectedHabit && (
-        <div
-          style={{
-            position: 'fixed',
-            inset: 0,
-            background: 'rgba(2, 6, 23, 0.82)',
-            backdropFilter: 'blur(8px)',
-            display: 'flex',
-            alignItems: 'center',
-            justifyContent: 'center',
-            zIndex: 10000,
-            padding: 20,
-          }}
-        >
-          <div
-            style={{
-              background: '#0f172a',
-              border: '1px solid #1e293b',
-              borderRadius: 20,
-              padding: 20,
-              width: '100%',
-              maxWidth: 360,
-              boxShadow: '0 25px 50px -12px rgba(0, 0, 0, 0.6)',
-              color: '#f8fafc',
-            }}
-          >
-            <h3 style={{ margin: 0, fontSize: 16, fontWeight: 700, color: '#f8fafc' }}>
-              Log {selectedHabit}?
-            </h3>
-            <p style={{ fontSize: 12, color: '#94a3b8', marginTop: 4 }}>
-              Tagging this under current active window ({activeWindowName.replace(/_/g, ' ')}).
-            </p>
-
-            <textarea
-              placeholder="Optional notes or reflection..."
-              value={activityNote}
-              onChange={(e) => setActivityNote(e.target.value)}
-              style={{
-                width: '100%',
-                height: 70,
-                marginTop: 12,
-                borderRadius: 10,
-                background: '#020617',
-                border: '1px solid #334155',
-                color: '#f8fafc',
-                padding: 10,
-                fontSize: 12,
-                resize: 'none',
-                boxSizing: 'border-box',
-                outline: 'none',
-              }}
-            />
-
-            <div style={{ display: 'flex', gap: 10, marginTop: 16 }}>
-              <button
-                onClick={() => setSelectedHabit(null)}
-                style={{
-                  flex: 1,
-                  padding: '10px 0',
-                  borderRadius: 10,
-                  background: 'transparent',
-                  border: '1px solid #334155',
-                  color: '#94a3b8',
-                  fontSize: 13,
-                  cursor: 'pointer',
-                }}
-              >
-                Cancel
-              </button>
-              <button
-                onClick={handleConfirmLog}
-                disabled={isSubmitting}
-                style={{
-                  flex: 1,
-                  padding: '10px 0',
-                  borderRadius: 10,
-                  background: '#4ade80',
-                  border: 'none',
-                  color: '#020617',
-                  fontWeight: 700,
-                  fontSize: 13,
-                  cursor: 'pointer',
-                }}
-              >
-                {isSubmitting ? 'Saving...' : 'Confirm Log'}
-              </button>
-            </div>
+      <section style={{ ...panelStyle, padding: 18 }}>
+        <div style={sectionKickerStyle}>✨ Aura Suggests</div>
+        <div style={{ display: 'grid', gridTemplateColumns: '74px minmax(0, 1fr)', alignItems: 'center', gap: 15, marginTop: 15 }}>
+          <div style={suggestIconStyle}>{primaryTask.icon}</div>
+          <div style={{ minWidth: 0 }}>
+            <h2 style={{ margin: 0, color: '#f8fafc', fontSize: 18, lineHeight: 1.2 }}>{primaryTask.title}</h2>
+            <p style={{ margin: '8px 0 0', color: '#aab7d2', lineHeight: 1.38, fontSize: 14 }}>{primaryTask.description}</p>
+          </div>
+          <div style={{ gridColumn: '1 / -1', display: 'flex', gap: 12, alignItems: 'center', justifyContent: 'space-between', marginTop: 3 }}>
+            <button type="button" onClick={() => setSelectedHabit(primaryTask.title)} style={primaryButtonStyle}>Do it now</button>
+            <button type="button" onClick={() => onPlanClick?.(primaryTask.title)} style={linkButtonStyle}>More options →</button>
           </div>
         </div>
-      )}
+      </section>
 
-      {/* 4. Active Guidance Card */}
-      <div
-        style={{
-          background: 'var(--as-surface-raised, #0f172a)',
-          border: '1px solid var(--as-border, #1e293b)',
-          borderRadius: 16,
-          padding: 16,
-          order: 6,
-        }}
-      >
-        <span style={{ fontSize: 10, fontFamily: 'monospace', textTransform: 'uppercase', color: '#94a3b8', letterSpacing: '0.05em' }}>
-          Active Guidance
-        </span>
-        <div style={{ display: 'flex', alignItems: 'flex-start', gap: 10, fontSize: 13, color: '#e2e8f0', lineHeight: 1.4, marginTop: 6 }}>
-          <span style={{ fontSize: 16 }}>🌿</span>
-          <span>&ldquo;{themeText}&rdquo;</span>
+      <section style={{ ...panelStyle, padding: 18, display: 'grid', gridTemplateColumns: '1fr 74px', gap: 14, alignItems: 'center' }}>
+        <div>
+          <div style={{ ...sectionKickerStyle, color: '#facc15' }}>⭐ Next Best Moment</div>
+          <h2 style={{ margin: '14px 0 0', color: '#f8fafc', fontSize: 22 }}>{nextShift.windowName}</h2>
+          <div style={{ marginTop: 7, color: '#38bdf8', fontSize: 15, fontWeight: 850 }}>{nextShift.startTime}</div>
+          <p style={{ color: '#aab7d2', fontSize: 14, margin: '10px 0 0' }}>{themeText}</p>
         </div>
-      </div>
+        <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 10 }}>
+          <ScoreGauge score={scoreLabel(energyScore)} color={tone.color} />
+          <button type="button" onClick={() => onPlanClick?.()} style={outlineButtonStyle}>Plan this</button>
+        </div>
+      </section>
 
-      {/* 5. Optimal Activities Card */}
-      <div
-        style={{
-          background: 'var(--as-surface-raised, #0f172a)',
-          border: '1px solid var(--as-border, #1e293b)',
-          borderRadius: 16,
-          padding: 16,
-          order: 6,
-        }}
-      >
-        <span style={{ fontSize: 10, fontFamily: 'monospace', textTransform: 'uppercase', color: '#4ade80', letterSpacing: '0.05em' }}>
-          Optimal Activities
-        </span>
-        <div style={{ display: 'flex', gap: 8, marginTop: 10, flexWrap: 'wrap' }}>
-          {bestForToday.map((item) => (
-            <div
-              key={item}
-              style={{
-                display: 'flex',
-                alignItems: 'center',
-                gap: 6,
-                fontSize: 12,
-                padding: '8px 14px',
-                borderRadius: 20,
-                background: 'rgba(30, 41, 59, 0.7)',
-                color: '#f8fafc',
-                border: '1px solid rgba(255, 255, 255, 0.08)',
-                fontWeight: 500,
-              }}
-            >
-              <span>{getIconForBadge(item)}</span>
-              <span>{item}</span>
+      <section>
+        <SectionHeader label="Today's Flow" />
+        <div style={{ display: 'flex', gap: 10, overflowX: 'auto', paddingBottom: 5 }}>
+          {flowItems.map((item, index) => (
+            <div key={`${item.name}-${item.time}-${index}`} style={{ ...flowPillStyle, borderColor: index === 0 ? 'rgba(74, 222, 128, 0.32)' : 'rgba(96, 165, 250, 0.16)' }}>
+              <div style={{ color: item.accent, fontFamily: 'var(--as-font-mono)', fontSize: 11, fontWeight: 900, textTransform: 'uppercase' }}>{item.label}</div>
+              <div style={{ color: '#f8fafc', marginTop: 9, fontSize: 13, fontWeight: 750, whiteSpace: 'nowrap' }}>{item.name}</div>
+              <div style={{ color: '#aab7d2', marginTop: 7, fontSize: 12, whiteSpace: 'nowrap' }}>{item.time}</div>
             </div>
           ))}
         </div>
-      </div>
+        <button type="button" onClick={onNextShiftClick} style={viewDayButtonStyle}>View today&apos;s flow →</button>
+      </section>
 
-      {/* 6. Friction Guardrails Card */}
-      {cautionItems.length > 0 && (
-        <div
-          style={{
-            background: 'var(--as-surface-raised, #0f172a)',
-            border: '1px solid var(--as-border, #1e293b)',
-            borderRadius: 16,
-            padding: 16,
-            order: 6,
-          }}
-        >
-          <span style={{ fontSize: 10, fontFamily: 'monospace', textTransform: 'uppercase', color: '#fb6b6b', letterSpacing: '0.05em' }}>
-            Friction Guardrails
-          </span>
-          <div style={{ display: 'flex', flexDirection: 'column', gap: 10, marginTop: 10 }}>
-            {cautionItems.map((caution) => (
-              <div
-                key={caution}
-                style={{
-                  display: 'flex',
-                  alignItems: 'center',
-                  gap: 10,
-                  fontSize: 12,
-                  padding: '8px 12px',
-                  borderRadius: 12,
-                  background: 'rgba(30, 41, 59, 0.4)',
-                  border: '1px solid rgba(255, 255, 255, 0.04)',
-                  color: '#94a3b8',
-                }}
+      {onSubmitReflection && (
+        <section style={panelStyle}>
+          <div style={{ display: 'flex', justifyContent: 'space-between', gap: 10, alignItems: 'center' }}>
+            <div style={{ ...sectionKickerStyle, color: '#facc15' }}>Daily Check-in</div>
+            <div
+              style={whyAskWrapStyle}
+              onMouseEnter={() => setShowReflectionWhy(true)}
+              onMouseLeave={() => setShowReflectionWhy(false)}
+              onFocus={() => setShowReflectionWhy(true)}
+              onBlur={(event) => {
+                if (!event.currentTarget.contains(event.relatedTarget)) setShowReflectionWhy(false);
+              }}
+            >
+              <button
+                type="button"
+                aria-expanded={showReflectionWhy}
+                onClick={() => setShowReflectionWhy((value) => !value)}
+                style={whyAskButtonStyle}
               >
-                <span>{getIconForCaution(caution)}</span>
-                <span>{caution}</span>
-              </div>
-            ))}
+                Why we ask ⓘ
+              </button>
+              {showReflectionWhy && (
+                <div style={whyAskPanelStyle}>
+                  Aura compares how your day felt with when you logged activities. Balanced counts as partial signal, Strong as high signal, and Low as low signal, so Insights can learn which windows actually help you.
+                </div>
+              )}
+            </div>
           </div>
-        </div>
+          <h2 style={{ margin: '13px 0 0', color: '#f8fafc', fontSize: 18 }}>How did today feel so far?</h2>
+          {reflectionSaved && !isEditingReflection ? (
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12, marginTop: 14 }}>
+              <div style={{ color: '#4ade80', fontSize: 13, lineHeight: 1.4 }}>
+                Saved{selectedReflection ? `: ${formatReflectionLabel(selectedReflection)}` : ''}. Your insights get stronger with every check-in.
+              </div>
+              <button type="button" onClick={() => setIsEditingReflection(true)} style={changeReflectionButtonStyle}>
+                Change
+              </button>
+            </div>
+          ) : (
+            <>
+              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, minmax(0, 1fr))', gap: 10, marginTop: 16 }}>
+                <ReflectionButton label="Low" icon="☹" disabled={isSavingReflection} onClick={() => handleReflection('LOW')} />
+                <ReflectionButton label="Balanced" icon="-" disabled={isSavingReflection} onClick={() => handleReflection('MODERATE')} />
+                <ReflectionButton label="Strong" icon="☺" disabled={isSavingReflection} onClick={() => handleReflection('PEAK_FLOW')} />
+              </div>
+              {isSavingReflection && <div style={{ color: '#aab7d2', fontSize: 12, marginTop: 10 }}>Saving check-in...</div>}
+              {reflectionError && <div style={{ color: '#fb6b6b', fontSize: 12, marginTop: 10 }}>{reflectionError}</div>}
+            </>
+          )}
+        </section>
       )}
 
-      {/* 7. Next Energy Shift */}
-      <div
-        onClick={onNextShiftClick}
-        style={{
-          background: 'var(--as-surface-raised, #0f172a)',
-          border: '1px solid var(--as-border, #1e293b)',
-          borderRadius: 16,
-          padding: '14px 16px',
-          order: 6,
-          display: 'flex',
-          justifyContent: 'space-between',
-          alignItems: 'center',
-          cursor: onNextShiftClick ? 'pointer' : 'default',
-          transition: 'all 0.15s ease',
-        }}
-      >
-        <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
-          <div
-            style={{
-              width: 36,
-              height: 36,
-              borderRadius: 10,
-              background: 'rgba(250, 204, 21, 0.15)',
-              display: 'flex',
-              alignItems: 'center',
-              justifyContent: 'center',
-              fontSize: 18,
-            }}
-          >
-            ☀️
-          </div>
-          <div>
-            <div style={{ fontSize: 10, fontFamily: 'monospace', color: '#94a3b8' }}>Next Energy Shift</div>
-            <div style={{ fontSize: 13, fontWeight: 600, color: '#fff' }}>{nextShift.windowName}</div>
-          </div>
+      <section style={{ ...panelStyle, display: 'grid', gridTemplateColumns: '42px 1fr auto', alignItems: 'center', gap: 12 }}>
+        <div style={{ color: '#4ade80', width: 32, height: 32, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+          <AuraInsightIcon />
         </div>
-        <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-          <div style={{ textAlign: 'right' }}>
-            <div style={{ fontSize: 11, color: '#4ade80', fontWeight: 600 }}>{nextShift.startsIn}</div>
-            <div style={{ fontSize: 10, color: '#94a3b8' }}>{nextShift.startTime}</div>
+        <div>
+          <div style={{ ...sectionKickerStyle, marginBottom: 7 }}>Aura Insight</div>
+          <div style={{ color: '#f8fafc', fontSize: 16, lineHeight: 1.35 }}>
+            {bestForToday[0] ? `You tend to do well with ${bestForToday[0].toLowerCase()} during ${currentWindowLabel} windows.` : 'Your best patterns will appear as you log more moments.'}
           </div>
-          {onNextShiftClick && (
-            <span style={{ fontSize: 16, color: '#94a3b8' }}>›</span>
-          )}
+          {cautionItems[0] && <div style={{ color: '#aab7d2', fontSize: 12, marginTop: 6 }}>Avoid: {cautionItems[0]}</div>}
+        </div>
+        <button type="button" onClick={onInsightsClick} style={linkButtonStyle}>View insights →</button>
+      </section>
+
+      {selectedHabit && (
+        <LogActivityModal
+          title={selectedHabit}
+          activeWindowName={activeWindowName}
+          note={activityNote}
+          isSubmitting={isSubmitting}
+          onNoteChange={setActivityNote}
+          onCancel={() => setSelectedHabit(null)}
+          onConfirm={handleConfirmLog}
+        />
+      )}
+    </div>
+  );
+}
+
+function FlowRing({ score, color }: { score: number; color: string }) {
+  const radius = 34;
+  const circumference = 2 * Math.PI * radius;
+  const normalized = score <= 10 ? score * 10 : score;
+  return (
+    <div style={{ position: 'relative', width: 96, height: 96, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+      <svg width="96" height="96" viewBox="0 0 96 96" style={{ transform: 'rotate(-90deg)' }}>
+        <circle cx="48" cy="48" r={radius} stroke="rgba(148, 163, 184, 0.22)" strokeWidth="11" fill="none" />
+        <circle cx="48" cy="48" r={radius} stroke={color} strokeWidth="11" fill="none" strokeLinecap="round" strokeDasharray={circumference} strokeDashoffset={circumference - (Math.min(100, normalized) / 100) * circumference} />
+      </svg>
+      <div style={{ position: 'absolute', color: '#facc15', fontSize: 28 }}>✦</div>
+    </div>
+  );
+}
+
+function ScoreGauge({ score, color }: { score: number; color: string }) {
+  return (
+    <div style={{ width: 58, height: 58, borderRadius: 58, border: `4px solid ${color}`, borderLeftColor: 'rgba(148, 163, 184, 0.28)', display: 'flex', flexDirection: 'column', justifyContent: 'center', alignItems: 'center', background: 'rgba(15, 23, 42, 0.75)' }}>
+      <span style={{ color: '#f8fafc', fontSize: 19, fontWeight: 950 }}>{score}</span>
+      <span style={{ color: '#aab7d2', fontSize: 10 }}>/10</span>
+    </div>
+  );
+}
+
+function BellIcon() {
+  return (
+    <svg width="27" height="27" viewBox="0 0 32 32" aria-hidden="true">
+      <path d="M12 26a4 4 0 0 0 8 0" fill="none" stroke="currentColor" strokeWidth="2.4" strokeLinecap="round" />
+      <path d="M8.5 23h15c-1.7-2.2-2.3-4.8-2.3-8.2A5.2 5.2 0 0 0 16 9.5a5.2 5.2 0 0 0-5.2 5.3c0 3.4-.6 6-2.3 8.2Z" fill="none" stroke="currentColor" strokeWidth="2.4" strokeLinejoin="round" />
+    </svg>
+  );
+}
+
+function AuraInsightIcon() {
+  return (
+    <svg width="30" height="30" viewBox="0 0 32 32" aria-hidden="true">
+      <path d="M16 25V9" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" />
+      <path d="M16 14c-5 0-8-2.5-8-7 5 0 8 2.5 8 7Z" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinejoin="round" />
+      <path d="M16 20c5 0 8-2.5 8-7-5 0-8 2.5-8 7Z" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinejoin="round" />
+      <path d="M10 25h12" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" />
+    </svg>
+  );
+}
+
+function SectionHeader({ label }: { label: string }) {
+  return (
+    <h2 style={{ margin: '0 0 12px', color: '#aab7d2', fontFamily: 'var(--as-font-mono)', fontSize: 14, textTransform: 'uppercase', letterSpacing: '0.04em' }}>
+      {label}
+    </h2>
+  );
+}
+
+function ReflectionButton({ label, icon, disabled, onClick }: { label: string; icon: string; disabled?: boolean; onClick: () => void }) {
+  return (
+    <button type="button" disabled={disabled} onClick={onClick} style={{ minHeight: 54, borderRadius: 10, border: '1px solid rgba(148, 163, 184, 0.22)', background: 'rgba(2, 6, 23, 0.36)', color: '#f8fafc', fontSize: 13, fontWeight: 850, cursor: disabled ? 'default' : 'pointer', opacity: disabled ? 0.55 : 1 }}>
+      <span style={{ fontSize: 21, marginRight: 8, color: label === 'Strong' ? '#4ade80' : label === 'Balanced' ? '#facc15' : '#60a5fa' }}>{icon}</span>
+      {label}
+    </button>
+  );
+}
+
+function formatReflectionLabel(outputLevel: 'LOW' | 'MODERATE' | 'PEAK_FLOW') {
+  if (outputLevel === 'LOW') return 'Low';
+  if (outputLevel === 'PEAK_FLOW') return 'Strong';
+  return 'Balanced';
+}
+
+function LogActivityModal({
+  title,
+  activeWindowName,
+  note,
+  isSubmitting,
+  onNoteChange,
+  onCancel,
+  onConfirm,
+}: {
+  title: string;
+  activeWindowName: string;
+  note: string;
+  isSubmitting: boolean;
+  onNoteChange: (value: string) => void;
+  onCancel: () => void;
+  onConfirm: () => void;
+}) {
+  return (
+    <div style={{ position: 'fixed', inset: 0, background: 'rgba(2, 6, 23, 0.82)', backdropFilter: 'blur(8px)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 10000, padding: 20 }}>
+      <div style={{ background: '#0f172a', border: '1px solid #1e293b', borderRadius: 18, padding: 20, width: '100%', maxWidth: 360, boxShadow: '0 25px 50px -12px rgba(0, 0, 0, 0.6)', color: '#f8fafc' }}>
+        <h3 style={{ margin: 0, fontSize: 17 }}>Log {title}?</h3>
+        <p style={{ fontSize: 12, color: '#94a3b8', marginTop: 5 }}>Tagging this under {formatWindowName(activeWindowName)}.</p>
+        <textarea placeholder="Optional notes or reflection..." value={note} onChange={(event) => onNoteChange(event.target.value)} style={{ width: '100%', height: 72, marginTop: 12, borderRadius: 10, background: '#020617', border: '1px solid #334155', color: '#f8fafc', padding: 10, fontSize: 12, resize: 'none', boxSizing: 'border-box', outline: 'none' }} />
+        <div style={{ display: 'flex', gap: 10, marginTop: 16 }}>
+          <button type="button" onClick={onCancel} style={{ flex: 1, padding: '10px 0', borderRadius: 10, background: 'transparent', border: '1px solid #334155', color: '#94a3b8', fontSize: 13, cursor: 'pointer' }}>Cancel</button>
+          <button type="button" onClick={onConfirm} disabled={isSubmitting} style={{ flex: 1, padding: '10px 0', borderRadius: 10, background: '#4ade80', border: 'none', color: '#020617', fontWeight: 800, fontSize: 13, cursor: 'pointer' }}>{isSubmitting ? 'Saving...' : 'Confirm Log'}</button>
         </div>
       </div>
     </div>
   );
 }
+
+const panelStyle: React.CSSProperties = {
+  background: 'linear-gradient(145deg, rgba(15, 23, 42, 0.96), rgba(13, 28, 62, 0.82))',
+  border: '1px solid rgba(96, 165, 250, 0.18)',
+  borderRadius: 16,
+  boxShadow: 'inset 0 1px 0 rgba(255, 255, 255, 0.03)',
+  padding: 16,
+};
+
+const sectionKickerStyle: React.CSSProperties = {
+  color: '#4ade80',
+  fontSize: 12,
+  fontFamily: 'var(--as-font-mono)',
+  fontWeight: 900,
+  textTransform: 'uppercase',
+  letterSpacing: '0.04em',
+};
+
+const topActionStyle: React.CSSProperties = {
+  position: 'relative',
+  width: 44,
+  height: 44,
+  border: '1px solid rgba(96, 165, 250, 0.23)',
+  borderRadius: 14,
+  background: 'rgba(15, 23, 42, 0.75)',
+  color: '#f8fafc',
+  display: 'flex',
+  alignItems: 'center',
+  justifyContent: 'center',
+  cursor: 'pointer',
+};
+
+const inputShellStyle: React.CSSProperties = {
+  minHeight: 62,
+  border: '1px solid #2f95ff',
+  borderRadius: 12,
+  background: 'rgba(2, 6, 23, 0.52)',
+  display: 'grid',
+  gridTemplateColumns: '34px 1fr 44px',
+  alignItems: 'center',
+  gap: 7,
+  padding: '0 10px 0 13px',
+};
+
+const promptButtonStyle: React.CSSProperties = {
+  border: 'none',
+  background: 'transparent',
+  color: '#94a3b8',
+  fontSize: 16,
+  textAlign: 'left',
+  cursor: 'pointer',
+  padding: 0,
+};
+
+const voiceButtonStyle: React.CSSProperties = {
+  width: 42,
+  height: 42,
+  borderRadius: 21,
+  border: '1px solid rgba(148, 163, 184, 0.2)',
+  background: 'rgba(148, 163, 184, 0.16)',
+  color: '#f8fafc',
+  fontSize: 22,
+  fontWeight: 800,
+  cursor: 'pointer',
+};
+
+const chipStyle: React.CSSProperties = {
+  flex: '0 0 auto',
+  border: '1px solid rgba(148, 163, 184, 0.24)',
+  background: 'rgba(2, 6, 23, 0.35)',
+  color: '#cbd5e1',
+  borderRadius: 999,
+  padding: '8px 14px',
+  fontSize: 13,
+  cursor: 'pointer',
+};
+
+const suggestIconStyle: React.CSSProperties = {
+  width: 66,
+  height: 66,
+  borderRadius: 13,
+  border: '1px solid rgba(96, 165, 250, 0.22)',
+  background: 'rgba(2, 6, 23, 0.32)',
+  display: 'flex',
+  alignItems: 'center',
+  justifyContent: 'center',
+  fontSize: 35,
+};
+
+const primaryButtonStyle: React.CSSProperties = {
+  minWidth: 116,
+  minHeight: 45,
+  border: 'none',
+  borderRadius: 10,
+  background: '#4ade80',
+  color: '#020617',
+  fontSize: 15,
+  fontWeight: 950,
+  cursor: 'pointer',
+};
+
+const linkButtonStyle: React.CSSProperties = {
+  border: 'none',
+  background: 'transparent',
+  color: '#4ade80',
+  fontSize: 13,
+  fontWeight: 850,
+  cursor: 'pointer',
+  whiteSpace: 'nowrap',
+};
+
+const changeReflectionButtonStyle: React.CSSProperties = {
+  minHeight: 32,
+  borderRadius: 9,
+  border: '1px solid rgba(74, 222, 128, 0.32)',
+  background: 'rgba(74, 222, 128, 0.1)',
+  color: '#4ade80',
+  fontSize: 12,
+  fontWeight: 850,
+  padding: '0 12px',
+  cursor: 'pointer',
+  whiteSpace: 'nowrap',
+};
+
+const whyAskWrapStyle: React.CSSProperties = {
+  position: 'relative',
+  display: 'inline-flex',
+  justifyContent: 'flex-end',
+  zIndex: 2,
+};
+
+const whyAskButtonStyle: React.CSSProperties = {
+  border: 'none',
+  background: 'transparent',
+  color: '#aab7d2',
+  fontSize: 13,
+  fontWeight: 750,
+  padding: 0,
+  cursor: 'pointer',
+};
+
+const whyAskPanelStyle: React.CSSProperties = {
+  position: 'absolute',
+  right: 0,
+  top: 'calc(100% + 8px)',
+  width: 'min(300px, calc(100vw - 48px))',
+  border: '1px solid rgba(96, 165, 250, 0.18)',
+  borderRadius: 10,
+  background: 'rgba(15, 23, 42, 0.98)',
+  boxShadow: '0 18px 34px rgba(0, 0, 0, 0.36)',
+  color: '#cbd5e1',
+  fontSize: 12,
+  lineHeight: 1.45,
+  padding: 11,
+  textAlign: 'left',
+};
+
+const outlineButtonStyle: React.CSSProperties = {
+  minWidth: 86,
+  minHeight: 38,
+  borderRadius: 10,
+  border: '1px solid rgba(56, 189, 248, 0.42)',
+  background: 'rgba(2, 6, 23, 0.22)',
+  color: '#7dd3fc',
+  fontSize: 13,
+  fontWeight: 850,
+  cursor: 'pointer',
+};
+
+const flowPillStyle: React.CSSProperties = {
+  flex: '0 0 138px',
+  minHeight: 82,
+  borderRadius: 13,
+  background: 'linear-gradient(145deg, rgba(15, 23, 42, 0.96), rgba(13, 28, 62, 0.82))',
+  border: '1px solid rgba(96, 165, 250, 0.16)',
+  padding: 12,
+};
+
+const viewDayButtonStyle: React.CSSProperties = {
+  display: 'block',
+  margin: '12px auto 0',
+  border: 'none',
+  background: 'transparent',
+  color: '#38bdf8',
+  fontSize: 16,
+  fontWeight: 850,
+  cursor: 'pointer',
+};

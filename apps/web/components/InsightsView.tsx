@@ -9,6 +9,8 @@ export interface LoggedEntryItem {
   loggedAt: Date;
   durationMinutes?: number;
   notes?: string | null;
+  logSource?: 'AURA_PLANNED' | 'AURA_DO_NOW' | 'MANUAL' | 'OVERRIDE_CAUTION';
+  activitySignificance?: 'LOW' | 'MEDIUM' | 'HIGH';
 }
 
 interface InsightsViewProps {
@@ -20,6 +22,23 @@ interface InsightsViewProps {
     peakFlowLiftPercent: number;
     insightText: string;
   } | null;
+}
+
+function scoreLoggedWindow(entry: LoggedEntryItem): number {
+  const windowName = (entry.activeWindow || '').toUpperCase();
+  const significance = entry.activitySignificance ?? 'MEDIUM';
+  const source = entry.logSource ?? 'MANUAL';
+  let score = 0.7;
+
+  if (windowName.includes('BRAHMA') || windowName.includes('ABHIJIT') || windowName.includes('GULIKA')) {
+    score = 1;
+  } else if (windowName.includes('RAHU') || windowName.includes('YAMA')) {
+    score = significance === 'LOW' ? 0.4 : significance === 'MEDIUM' ? 0.15 : 0;
+  }
+
+  if (source === 'AURA_PLANNED') score += 0.1;
+  if (source === 'OVERRIDE_CAUTION') score -= 0.15;
+  return Math.min(1, Math.max(0, score));
 }
 
 export function InsightsView({ logEntries = [], assistantInsight }: InsightsViewProps) {
@@ -131,9 +150,8 @@ export function InsightsView({ logEntries = [], assistantInsight }: InsightsView
     }
 
     // Window Breakdown
-    let auspiciousCount = 0;
+    let weightedAlignment = 0;
     let frictionCount = 0;
-    let neutralCount = 0;
 
     const windowCounts: Record<string, number> = {};
     const frictionLogs: LoggedEntryItem[] = [];
@@ -142,13 +160,11 @@ export function InsightsView({ logEntries = [], assistantInsight }: InsightsView
       const win = (entry.activeWindow || 'NEUTRAL').toUpperCase().replace(/_/g, ' ');
       windowCounts[win] = (windowCounts[win] || 0) + 1;
 
-      if (win.includes('BRAHMA') || win.includes('ABHIJIT') || win.includes('GULIKA')) {
-        auspiciousCount++;
-      } else if (win.includes('RAHU') || win.includes('YAMA')) {
+      weightedAlignment += scoreLoggedWindow(entry);
+
+      if (win.includes('RAHU') || win.includes('YAMA')) {
         frictionCount++;
         frictionLogs.push(entry);
-      } else {
-        neutralCount++;
       }
     });
 
@@ -157,7 +173,7 @@ export function InsightsView({ logEntries = [], assistantInsight }: InsightsView
     // product's core claim that insights come from the user's own data.
     const alignmentScore =
       totalActivities > 0
-        ? Math.min(100, Math.max(0, Math.round(((auspiciousCount * 1.0 + neutralCount * 0.7) / totalActivities) * 100)))
+        ? Math.min(100, Math.max(0, Math.round((weightedAlignment / totalActivities) * 100)))
         : 0;
 
     const totalMinutes = logEntries.reduce((sum, e) => sum + (e.durationMinutes ?? 30), 0);
@@ -233,10 +249,10 @@ export function InsightsView({ logEntries = [], assistantInsight }: InsightsView
       {/* Header */}
       <div>
         <h1 style={{ fontSize: 20, fontWeight: 700, color: 'var(--as-text, #f8fafc)', margin: 0, lineHeight: 1.2 }}>
-          Insights & Analytics
+          Insights
         </h1>
         <p style={{ fontSize: 12, color: 'var(--as-text-muted, #94a3b8)', marginTop: 4 }}>
-          Live metrics and behavioral patterns derived from database logs
+          Patterns from your journey
         </p>
       </div>
 
@@ -434,7 +450,7 @@ export function InsightsView({ logEntries = [], assistantInsight }: InsightsView
               </div>
             ) : (
               <div style={{ fontSize: 11, color: '#94a3b8', textAlign: 'center', padding: '12px 0' }}>
-                No activity logs recorded yet. Start logging from Home or Timeline!
+                No activity logs recorded yet. Start logging from Home.
               </div>
             )}
           </div>

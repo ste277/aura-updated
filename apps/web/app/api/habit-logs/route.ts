@@ -9,7 +9,7 @@ export async function POST(req: NextRequest) {
   }
 
   const body = await req.json();
-  const { activityTitle, activeWindow, logMinuteOfDay, logTimestamp, notes, durationMinutes } = body;
+  const { activityTitle, activeWindow, logMinuteOfDay, logTimestamp, notes, durationMinutes, logSource, activitySignificance } = body;
 
   if (!activityTitle || !activeWindow || logMinuteOfDay == null) {
     return NextResponse.json({ error: 'Missing required fields.' }, { status: 400 });
@@ -26,6 +26,8 @@ export async function POST(req: NextRequest) {
     logTimestamp: customDate, // Pass custom date to DB helper
     durationMinutes: Math.min(180, Math.max(5, Number(durationMinutes ?? 30))),
     notes: notes ? String(notes).trim() : undefined, // Forward notes to DB helper
+    logSource: ['AURA_PLANNED', 'AURA_DO_NOW', 'MANUAL', 'OVERRIDE_CAUTION'].includes(logSource) ? logSource : 'MANUAL',
+    activitySignificance: ['LOW', 'MEDIUM', 'HIGH'].includes(activitySignificance) ? activitySignificance : 'MEDIUM',
   });
 
   return NextResponse.json(entry);

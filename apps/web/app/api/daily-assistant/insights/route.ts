@@ -26,9 +26,9 @@ export async function GET(req: NextRequest) {
     logsByDay.set(dateKey, existing);
   });
 
-  let alignedPeak = 0;
+  let alignedScoreTotal = 0;
   let alignedTotal = 0;
-  let unalignedPeak = 0;
+  let unalignedScoreTotal = 0;
   let unalignedTotal = 0;
 
   reflections.forEach((reflection) => {
@@ -36,19 +36,23 @@ export async function GET(req: NextRequest) {
     const dayLogs = logsByDay.get(dateKey);
     const followedByLogs = Boolean(dayLogs && dayLogs.aligned > dayLogs.friction);
     const followed = reflection.followedGuidance || followedByLogs;
-    const isPeak = reflection.outputLevel === 'PEAK_FLOW';
+    const reflectionScore = reflection.outputLevel === 'PEAK_FLOW'
+      ? 1
+      : reflection.outputLevel === 'MODERATE'
+      ? 0.5
+      : 0;
 
     if (followed) {
       alignedTotal += 1;
-      if (isPeak) alignedPeak += 1;
+      alignedScoreTotal += reflectionScore;
     } else {
       unalignedTotal += 1;
-      if (isPeak) unalignedPeak += 1;
+      unalignedScoreTotal += reflectionScore;
     }
   });
 
-  const alignedRate = alignedTotal > 0 ? alignedPeak / alignedTotal : 0;
-  const unalignedRate = unalignedTotal > 0 ? unalignedPeak / unalignedTotal : 0;
+  const alignedRate = alignedTotal > 0 ? alignedScoreTotal / alignedTotal : 0;
+  const unalignedRate = unalignedTotal > 0 ? unalignedScoreTotal / unalignedTotal : 0;
   const liftPercent = unalignedRate > 0
     ? Math.round(((alignedRate - unalignedRate) / unalignedRate) * 100)
     : alignedTotal > 0
@@ -61,7 +65,7 @@ export async function GET(req: NextRequest) {
     unalignedDays: unalignedTotal,
     peakFlowLiftPercent: liftPercent,
     insightText: reflections.length >= 3
-      ? `You reported ${Math.max(0, liftPercent)}% higher peak-flow days when you followed favorable windows.`
+      ? `Your check-ins score ${Math.max(0, liftPercent)}% higher on days when you followed favorable windows.`
       : 'Log a few evening check-ins to unlock your personal before-and-after trend.',
   });
 }

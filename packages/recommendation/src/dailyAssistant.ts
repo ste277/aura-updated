@@ -6,7 +6,10 @@ import {
   WeekdayIndex,
   WindowSpan,
 } from '../../panchang/src/windows';
+import { evaluateMuhurta, MuhurtaActivityFamily } from '../../muhurta/src/muhurtaEngine';
 import { getActionCards } from './actionCards';
+import { ActivityProfile, findActivityIntent } from './personalizedTasks';
+import { evaluateActivityFit, familyForActivityProfile, PersonalMuhurtaContext } from './auraFitEngine';
 
 export interface DailyAssistantLocation {
   latitude: number;
@@ -17,6 +20,7 @@ export interface DailyAssistantLocation {
 export interface DailyAssistantContext extends DailyAssistantLocation {
   now: Date;
   tzOffsetMinutes: number;
+  personalContext?: PersonalMuhurtaContext;
 }
 
 export interface DailyBriefing {
@@ -99,6 +103,8 @@ export interface TaskSlotRecommendation {
     dateLabel: string;
     startTime: string;
     endTime: string;
+    startsAtLocal: string;
+    endsAtLocal: string;
     score: number;
     quality: 'STRONG' | 'GOOD' | 'USABLE';
     summary: string;
@@ -108,6 +114,11 @@ export interface TaskSlotRecommendation {
 
 export type PlanningHorizon = 'NOW' | 'TODAY' | 'TOMORROW' | 'WEEKEND' | 'SEVEN_DAYS' | 'CUSTOM';
 export type TimePreference = 'ANYTIME' | 'MORNING' | 'AFTERNOON' | 'EVENING' | 'NIGHT' | 'WORK_HOURS';
+type PlanningOption = NonNullable<TaskSlotRecommendation['planningOptions']>[number];
+type ScoredPlanningOption = PlanningOption & {
+  startMinute: number;
+  rawScore: number;
+};
 
 export function computeAssistantWindows(context: DailyAssistantContext): WindowSpan[] {
   const localDate = localDateForContext(context);
@@ -226,6 +237,7 @@ export function recommendTaskSlot(
   const localDate = localDateForContext(context);
   const currentMinute = localDate.getUTCHours() * 60 + localDate.getUTCMinutes();
   const profile = classifyTask(cleanTitle);
+  profile.personalContext = context.personalContext;
   const candidates = buildSlotCandidates(windows);
   const targetMinute = requestedStartMinute === undefined ? currentMinute : clampMinute(requestedStartMinute);
   const targetCandidate = candidates.find((candidate) => containsMinute(candidate, targetMinute));
@@ -249,15 +261,15 @@ export function recommendTaskSlot(
     (profile.significance === 'LOW' || !isFriction(currentCandidate.type))
   );
   const bestFuture = candidates
-    .filter((candidate) => candidate.startMinute > currentMinute && candidate.endMinute - candidate.startMinute >= safeDuration && scoreCandidate(candidate, profile) >= 0)
-    .sort((a, b) => scoreCandidate(b, profile) - scoreCandidate(a, profile))[0];
+    .filter((candidate) => candidate.startMinute > currentMinute && candidate.endMinute - candidate.startMinute >= safeDuration && scoreCandidate(candidate, profile, localInstantForMinute(context, candidate.startMinute)) >= 0)
+    .sort((a, b) => scoreCandidate(b, profile, localInstantForMinute(context, b.startMinute)) - scoreCandidate(a, profile, localInstantForMinute(context, a.startMinute)))[0];
   if (requestedStartMinute === undefined && currentCandidate && currentIsUsable) {
     return buildTaskRecommendation(cleanTitle, profile, 'BEST_NOW', currentCandidate, currentMinute, safeDuration, context, windows);
   }
 
   const best = bestFuture ?? candidates
-    .filter((candidate) => candidate.startMinute >= currentMinute && candidate.endMinute - candidate.startMinute >= safeDuration && scoreCandidate(candidate, profile) >= 0)
-    .sort((a, b) => scoreCandidate(b, profile) - scoreCandidate(a, profile))[0];
+    .filter((candidate) => candidate.startMinute >= currentMinute && candidate.endMinute - candidate.startMinute >= safeDuration && scoreCandidate(candidate, profile, localInstantForMinute(context, candidate.startMinute)) >= 0)
+    .sort((a, b) => scoreCandidate(b, profile, localInstantForMinute(context, b.startMinute)) - scoreCandidate(a, profile, localInstantForMinute(context, a.startMinute)))[0];
   if (bestFuture) {
     return buildTaskRecommendation(cleanTitle, profile, 'BETTER_LATER', bestFuture, bestFuture.startMinute, safeDuration, context, windows);
   }
@@ -281,6 +293,7 @@ export function findOptimalTaskTimes(
   const safeDuration = Math.min(360, Math.max(15, Math.round(durationMinutes)));
   const cleanTitle = normalizeTaskTitle(taskTitle);
   const profile = classifyTask(cleanTitle);
+  profile.personalContext = context.personalContext;
   const days = horizon === 'NOW' || horizon === 'TODAY' ? 1 : horizon === 'TOMORROW' ? 1 : horizon === 'WEEKEND' ? 2 : 7;
   const dayOffset = horizon === 'TOMORROW' ? 1 : 0;
   const current = localDateForContext(context);
@@ -299,17 +312,18 @@ export function findOptimalTaskTimes(
     : horizon === 'WEEKEND'
     ? weekendOffsets
     : Array.from({ length: days }, (_, index) => dayOffset + index);
-  const options: TaskSlotRecommendation['planningOptions'] = [];
+  const options: ScoredPlanningOption[] = [];
+  const currentMinute = current.getUTCHours() * 60 + current.getUTCMinutes();
   for (const day of searchOffsets) {
     const dayContext = { ...context, now: new Date(context.now.getTime() + day * 86400000) };
     const localDay = localDateForContext(dayContext);
     const windows = computeAssistantWindows(dayContext);
     const candidates = buildSlotCandidates(windows);
-    const dayStart = horizon === 'NOW' ? localDay.getUTCHours() * 60 + localDay.getUTCMinutes() : 0;
+    const dayStart = day === 0 ? currentMinute : 0;
     const maxStart = 1440 - safeDuration;
     for (let start = dayStart; start <= maxStart; start += 15) {
       if (!matchesTimePreference(start, timePreference)) continue;
-      const score = scoreContinuousBlock(candidates, profile, start, start + safeDuration);
+      const score = scoreContinuousBlock(candidates, profile, start, start + safeDuration, (minute) => localInstantForMinute(dayContext, minute));
       if (score < 0) continue;
       const startsAtLocal = localDateTimeForMinute(dayContext.now, start);
       const endsAtLocal = localDateTimeForMinute(dayContext.now, start + safeDuration);
@@ -317,18 +331,80 @@ export function findOptimalTaskTimes(
         dateLabel: localDay.toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric' }),
         startTime: formatMinute(start),
         endTime: formatMinute(start + safeDuration),
+        startsAtLocal,
+        endsAtLocal,
         score: Math.round(score * 10) / 10,
+        rawScore: score,
+        startMinute: start,
         quality: score >= 85 ? 'STRONG' : score >= 65 ? 'GOOD' : 'USABLE',
-        summary: buildPlanSummary(candidates, profile, start, start + safeDuration),
+        summary: buildPlanSummary(candidates, profile, start, start + safeDuration, localInstantForMinute(dayContext, start)),
         googleCalendarUrl: buildGoogleCalendarUrl(cleanTitle, startsAtLocal, endsAtLocal),
       });
     }
   }
-  const ranked = options.sort((a, b) => b.score - a.score).filter((option, index, list) => list.findIndex((item) => item.dateLabel === option.dateLabel && item.startTime === option.startTime) === index).slice(0, horizon === 'SEVEN_DAYS' || horizon === 'WEEKEND' ? 3 : 1);
-  const best = ranked[0];
+  const ranked = (horizon === 'SEVEN_DAYS'
+    ? selectDailyBestPlanningOptions(options, searchOffsets.length)
+    : selectDiversePlanningOptions(options)
+  )
+    .map(({ rawScore: _rawScore, startMinute: _startMinute, ...option }) => option);
+  const best = [...ranked].sort((a, b) => b.score - a.score)[0];
   if (!best) return { ...recommendTaskSlot(cleanTitle, context, safeDuration), planningOptions: [] };
   const base = recommendTaskSlot(cleanTitle, { ...context, now: new Date(context.now.getTime() + (dayOffset * 86400000)) }, safeDuration, parseTime(best.startTime));
   return { ...base, planningOptions: ranked };
+}
+
+export function findBestTimeForActivity(params: {
+  activity: string;
+  context: DailyAssistantContext;
+  durationMinutes?: number;
+  horizon?: PlanningHorizon;
+  customStartDate?: string;
+  customEndDate?: string;
+  timePreference?: TimePreference;
+}): TaskSlotRecommendation {
+  return findOptimalTaskTimes(
+    params.activity,
+    params.context,
+    params.durationMinutes,
+    params.horizon,
+    params.customStartDate,
+    params.customEndDate,
+    params.timePreference
+  );
+}
+
+function selectDailyBestPlanningOptions(options: ScoredPlanningOption[], limit: number): ScoredPlanningOption[] {
+  const byDate = new Map<string, ScoredPlanningOption>();
+  for (const option of options) {
+    const existing = byDate.get(option.dateLabel);
+    if (!existing || option.rawScore > existing.rawScore || (option.rawScore === existing.rawScore && option.startMinute < existing.startMinute)) {
+      byDate.set(option.dateLabel, option);
+    }
+  }
+  return Array.from(byDate.values()).slice(0, limit);
+}
+
+function selectDiversePlanningOptions(options: ScoredPlanningOption[], limit = 3): ScoredPlanningOption[] {
+  const ranked = options
+    .sort((a, b) => b.rawScore - a.rawScore || a.startMinute - b.startMinute)
+    .filter((option, index, list) => list.findIndex((item) => item.dateLabel === option.dateLabel && item.startTime === option.startTime) === index);
+  const selected: ScoredPlanningOption[] = [];
+  for (const option of ranked) {
+    const repeatsClockTime = selected.some((item) => Math.abs(item.startMinute - option.startMinute) < 90);
+    const repeatsDate = selected.some((item) => item.dateLabel === option.dateLabel);
+    if (!repeatsClockTime && !repeatsDate) selected.push(option);
+    if (selected.length === limit) return selected;
+  }
+  for (const option of ranked) {
+    const repeatsClockTime = selected.some((item) => Math.abs(item.startMinute - option.startMinute) < 90);
+    if (!repeatsClockTime && !selected.includes(option)) selected.push(option);
+    if (selected.length === limit) return selected;
+  }
+  for (const option of ranked) {
+    if (!selected.includes(option)) selected.push(option);
+    if (selected.length === limit) return selected;
+  }
+  return selected;
 }
 
 function matchesTimePreference(startMinute: number, preference: TimePreference): boolean {
@@ -361,28 +437,35 @@ function parseDateOnly(value: string): number | null {
   return date.getUTCFullYear() === Number(match[1]) && date.getUTCMonth() === Number(match[2]) - 1 && date.getUTCDate() === Number(match[3]) ? timestamp : null;
 }
 
-function scoreContinuousBlock(candidates: SlotCandidate[], profile: TaskProfile, start: number, end: number): number {
+function scoreContinuousBlock(
+  candidates: SlotCandidate[],
+  profile: TaskProfile,
+  start: number,
+  end: number,
+  dateForMinute?: (minute: number) => Date
+): number {
   const boundaries = [...new Set([start, end, ...candidates.flatMap((candidate) => [candidate.startMinute, candidate.endMinute]).filter((minute) => minute > start && minute < end)])].sort((a, b) => a - b);
   let weighted = 0;
   for (let index = 0; index < boundaries.length - 1; index += 1) {
     const segmentStart = boundaries[index];
     const segmentEnd = boundaries[index + 1];
     const candidate = candidates.find((item) => containsMinute(item, segmentStart));
-    const segmentScore = candidate ? scoreCandidate(candidate, profile) : 55;
-    if (isFriction(candidate?.type ?? 'NEUTRAL') && profile.significance === 'HIGH') return -1;
+    const segmentScore = candidate ? scoreCandidate(candidate, profile, dateForMinute?.(segmentStart)) : 55;
+    if (isFriction(candidate?.type ?? 'NEUTRAL') && (profile.significance === 'HIGH' || profile.requiresFreshStart)) return -1;
     weighted += segmentScore * (segmentEnd - segmentStart);
   }
   return weighted / (end - start);
 }
 
-function buildPlanSummary(candidates: SlotCandidate[], profile: TaskProfile, start: number, end: number): string {
+function buildPlanSummary(candidates: SlotCandidate[], profile: TaskProfile, start: number, end: number, startDate?: Date): string {
   const overlapping = candidates.filter((candidate) => candidate.startMinute < end && candidate.endMinute > start);
   const types = [...new Set(overlapping.map((candidate) => formatWindowLabel(candidate.type)))];
   const frictionMinutes = overlapping.filter((candidate) => isFriction(candidate.type)).reduce((total, candidate) => total + Math.max(0, Math.min(end, candidate.endMinute) - Math.max(start, candidate.startMinute)), 0);
-  if (frictionMinutes > 0) return `Mixed quality. This block includes ${frictionMinutes} minutes of higher-friction timing.`;
-  if (types.length === 1 && types[0] === 'Neutral Flow') return 'Usable stretch. The full period is Neutral Flow.';
-  if (types.length === 1) return `Clean ${end - start >= 60 ? `${(end - start) / 60}-hour` : `${end - start}-minute`} stretch in ${types[0]}.`;
-  return `Strong start, steady finish across ${types.join(' + ')}. No high-friction overlap.`;
+  const muhurta = startDate && overlapping[0] ? evaluateCandidateMuhurta(overlapping[0], profile, startDate).summary : '';
+  if (frictionMinutes > 0) return appendMuhurtaSummary(`Mixed quality. This block includes ${frictionMinutes} minutes of higher-friction timing.`, muhurta);
+  if (types.length === 1 && types[0] === 'Neutral Flow') return appendMuhurtaSummary('Usable stretch. The full period is Neutral Flow.', muhurta);
+  if (types.length === 1) return appendMuhurtaSummary(`Clean ${end - start >= 60 ? `${(end - start) / 60}-hour` : `${end - start}-minute`} stretch in ${types[0]}.`, muhurta);
+  return appendMuhurtaSummary(`Strong start, steady finish across ${types.join(' + ')}. No high-friction overlap.`, muhurta);
 }
 
 function parseTime(value: string): number {
@@ -394,10 +477,12 @@ function parseTime(value: string): number {
 }
 
 type TaskProfile = {
+  activityId?: string;
   type: string;
   icon: string;
-  family?: string;
+  family?: MuhurtaActivityFamily;
   significance: 'LOW' | 'MEDIUM' | 'HIGH';
+  requiresFreshStart?: boolean;
   preferredOnlyForHigh?: boolean;
   scores: Partial<Record<SolarWindowType, number>>;
   reason: string;
@@ -405,6 +490,8 @@ type TaskProfile = {
   preferredWindows?: SolarWindowType[];
   acceptableWindows?: SolarWindowType[];
   avoidWindows?: SolarWindowType[];
+  activity?: ActivityProfile;
+  personalContext?: PersonalMuhurtaContext;
 };
 
 type SlotCandidate = {
@@ -433,8 +520,10 @@ function buildTaskRecommendation(
   const startsAtLocal = localDateTimeForMinute(context.now, start);
   const endsAtLocal = localDateTimeForMinute(context.now, end);
   const nextAvoid = rankAvoidWindows(windows).find((window) => window.startMinutes >= start) ?? rankAvoidWindows(windows)[0] ?? null;
-  const bestTodayCandidate = findBestWindowToday(windows, profile, start, durationMinutes);
-  const score = scoreCandidate(safeCandidate, profile);
+  const startDate = localInstantForMinute(context, start);
+  const bestTodayCandidate = findBestWindowToday(windows, profile, start, durationMinutes, context);
+  const score = scoreCandidate(safeCandidate, profile, startDate);
+  const muhurta = evaluateCandidateMuhurta(safeCandidate, profile, startDate);
   const activityFit: TaskSlotRecommendation['activityFit'] = state === 'AVOID'
     ? 'UNSUITABLE'
     : safeCandidate.type === 'NEUTRAL'
@@ -474,9 +563,12 @@ function buildTaskRecommendation(
         ? `This ${durationMinutes}-minute task does not fit inside the available ${availableMinutes}-minute period.`
         : state === 'AVOID'
         ? `This falls within ${formatWindowLabel(safeCandidate.type)}. ${profile.type} is better placed in a lower-friction window.`
-        : state === 'BETTER_LATER' || state === 'NEXT_BEST'
-          ? `Your earlier ideal window has passed. ${reasonForProfile(safeCandidate.type, profile)}`
-          : reasonForProfile(safeCandidate.type, profile),
+        : appendMuhurtaSummary(
+            state === 'BETTER_LATER' || state === 'NEXT_BEST'
+              ? `Your earlier ideal window has passed. ${reasonForProfile(safeCandidate.type, profile)}`
+              : reasonForProfile(safeCandidate.type, profile),
+            muhurta.summary
+          ),
     },
     avoidWindow: profile.significance === 'HIGH' && nextAvoid && nextAvoid.startMinutes > start
       ? { startMinute: nextAvoid.startMinutes, endMinute: nextAvoid.endMinutes, startTime: formatMinute(nextAvoid.startMinutes), endTime: formatMinute(nextAvoid.endMinutes), label: formatWindowLabel(nextAvoid.type), reason: 'High-friction window. Better for routine cleanup than fresh commitments.' }
@@ -489,14 +581,15 @@ function findBestWindowToday(
   windows: WindowSpan[],
   profile: TaskProfile,
   currentMinute: number,
-  durationMinutes: number
+  durationMinutes: number,
+  context: DailyAssistantContext
 ): SlotCandidate | undefined {
   return buildSlotCandidates(windows)
     .filter((candidate) => candidate.startMinute > currentMinute)
     .filter((candidate) => candidate.type !== 'NEUTRAL' && !isFriction(candidate.type))
     .filter((candidate) => candidate.endMinute - candidate.startMinute >= durationMinutes)
-    .filter((candidate) => scoreCandidate(candidate, profile) >= 85)
-    .sort((a, b) => scoreCandidate(b, profile) - scoreCandidate(a, profile) || a.startMinute - b.startMinute)[0];
+    .filter((candidate) => scoreCandidate(candidate, profile, localInstantForMinute(context, candidate.startMinute)) >= 85)
+    .sort((a, b) => scoreCandidate(b, profile, localInstantForMinute(context, b.startMinute)) - scoreCandidate(a, profile, localInstantForMinute(context, a.startMinute)) || a.startMinute - b.startMinute)[0];
 }
 
 function buildWindowTodayOption(
@@ -507,6 +600,7 @@ function buildWindowTodayOption(
   context: DailyAssistantContext
 ) {
   const endMinute = Math.min(candidate.endMinute, candidate.startMinute + durationMinutes);
+  const startsAtDate = localInstantForMinute(context, candidate.startMinute);
   const startsAtLocal = localDateTimeForMinute(context.now, candidate.startMinute);
   const endsAtLocal = localDateTimeForMinute(context.now, endMinute);
   return {
@@ -516,7 +610,7 @@ function buildWindowTodayOption(
     endTime: formatMinute(endMinute),
     startsInMinutes: Math.max(0, candidate.startMinute - currentMinute),
     label: formatWindowLabel(candidate.type),
-    reason: reasonForProfile(candidate.type, profile),
+    reason: appendMuhurtaSummary(reasonForProfile(candidate.type, profile), evaluateCandidateMuhurta(candidate, profile, startsAtDate).summary),
     googleCalendarUrl: buildGoogleCalendarUrl(profile.type, startsAtLocal, endsAtLocal),
   };
 }
@@ -535,9 +629,27 @@ function buildSlotCandidates(windows: WindowSpan[]): SlotCandidate[] {
   return candidates;
 }
 
-function scoreCandidate(candidate: SlotCandidate, profile: TaskProfile): number {
-  if (isFriction(candidate.type)) return profile.significance === 'LOW' ? 65 : profile.significance === 'MEDIUM' ? 25 : -100;
-  return profile.scores[candidate.type] ?? 55;
+function scoreCandidate(candidate: SlotCandidate, profile: TaskProfile, date?: Date): number {
+  if (profile.activity && date) {
+    const fit = evaluateActivityFit({
+      activity: profile.activity,
+      date,
+      windowType: candidate.type,
+      personalContext: profile.personalContext,
+    });
+    if (profile.activity.avoidWindowTypes.includes(candidate.type) && !profile.activity.allowDuringAvoidWindow && fit.score < 55) return -100;
+    return fit.score;
+  }
+  const base = profile.avoidWindows?.includes(candidate.type)
+    ? profile.significance === 'LOW' && !profile.requiresFreshStart ? 30 : -100
+    : profile.scores[candidate.type] !== undefined
+    ? profile.scores[candidate.type]!
+    : isFriction(candidate.type)
+    ? profile.significance === 'LOW' ? 65 : profile.significance === 'MEDIUM' ? 25 : -100
+    : 55;
+  if (!date || base < 0) return base;
+  const muhurta = evaluateCandidateMuhurta(candidate, profile, date);
+  return Math.max(0, Math.min(100, base + muhurta.modifier));
 }
 
 function containsMinute(window: { startMinutes?: number; endMinutes?: number; startMinute?: number; endMinute?: number }, minute: number): boolean {
@@ -565,7 +677,44 @@ function rankAvoidWindows(windows: WindowSpan[]): WindowSpan[] {
     .sort((a, b) => (a.type === 'RAHU_KALAM' ? -1 : 1) - (b.type === 'RAHU_KALAM' ? -1 : 1));
 }
 
+function evaluateCandidateMuhurta(candidate: SlotCandidate, profile: TaskProfile, date: Date) {
+  return evaluateMuhurta({
+    taskTitle: profile.type,
+    date,
+    windowType: candidate.type,
+    family: profile.family,
+  });
+}
+
+function appendMuhurtaSummary(base: string, muhurtaSummary: string): string {
+  if (!muhurtaSummary || muhurtaSummary === 'Panchanga factors are neutral for this activity.') return base;
+  return `${base} ${muhurtaSummary}`;
+}
+
+function profileFromActivity(activity: ActivityProfile): TaskProfile {
+  return {
+    activityId: activity.id,
+    type: activity.title,
+    icon: activity.icon,
+    family: familyForActivityProfile(activity),
+    significance: activity.significance,
+    requiresFreshStart: activity.requiresFreshStart,
+    scores: {},
+    reason: activity.description,
+    neutralReason: activity.significance === 'HIGH'
+      ? `${activity.title} is workable in a neutral window, but Aura will still prefer a stronger opening when one is available.`
+      : activity.description,
+    preferredWindows: activity.recommendedWindowTypes,
+    acceptableWindows: activity.acceptableWindowTypes,
+    avoidWindows: activity.avoidWindowTypes,
+    activity,
+  };
+}
+
 function classifyTask(taskTitle: string): TaskProfile {
+  const activity = findActivityIntent(taskTitle);
+  if (activity) return profileFromActivity(activity);
+
   const title = taskTitle.toLowerCase();
   if (/(start|begin|take|go on).*(journey|trip|road trip|flight|train|vacation|pilgrimage)|journey start|travel start|relocat|move to a new home/.test(title)) return { type: 'Start a journey', icon: '🚗', family: 'JOURNEY_START', significance: 'HIGH', preferredOnlyForHigh: true, scores: { ABHIJIT: 98, GULIKA: 76, NEUTRAL: 62 }, reason: 'A favorable start supports a smooth, intentional journey.', neutralReason: 'A neutral period is workable for travel, but not a preferred start.', preferredWindows: ['ABHIJIT'], acceptableWindows: ['GULIKA', 'NEUTRAL'], avoidWindows: ['RAHU_KALAM', 'YAMA'] };
   if (/(date|dating|romantic|ask someone out|meet someone new|relationship|partner|proposal|engagement|anniversary)/.test(title)) return { type: 'Dating & relationships', icon: '❤️', family: 'RELATIONSHIP', significance: 'MEDIUM', scores: { ABHIJIT: 88, GULIKA: 84, NEUTRAL: 78, BRAHMA: 72 }, reason: 'Favorable, open energy supports meaningful connection.', neutralReason: 'A neutral period is comfortable for a date or social connection.', preferredWindows: ['ABHIJIT', 'GULIKA', 'NEUTRAL'], acceptableWindows: ['BRAHMA'], avoidWindows: ['RAHU_KALAM', 'YAMA'] };
@@ -621,6 +770,21 @@ function localDateTimeForMinute(date: Date, minuteOfDay: number): string {
   const local = new Date(date);
   local.setHours(Math.floor(minuteOfDay / 60), minuteOfDay % 60, 0, 0);
   return local.toISOString();
+}
+
+function localInstantForMinute(context: DailyAssistantContext, minuteOfDay: number): Date {
+  const localDate = localDateForContext(context);
+  return new Date(
+    Date.UTC(
+      localDate.getUTCFullYear(),
+      localDate.getUTCMonth(),
+      localDate.getUTCDate(),
+      Math.floor(minuteOfDay / 60),
+      minuteOfDay % 60,
+      0,
+      0
+    ) - context.tzOffsetMinutes * 60 * 1000
+  );
 }
 
 function buildGoogleCalendarUrl(title: string, startsAtIso: string, endsAtIso: string): string {

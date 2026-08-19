@@ -10,15 +10,18 @@ import {
 } from '../../../packages/panchang/src/windows';
 import { computeDailyEnergyInsight } from '../lib/scoreEngine';
 import { getActionCards, ActionCard } from '../../../packages/recommendation/src/actionCards';
+import { findActivityIntent } from '../../../packages/recommendation/src/personalizedTasks';
 import type { DailyBriefing, PlanningHorizon, TaskSlotRecommendation, TimePreference } from '../../../packages/recommendation/src/dailyAssistant';
 
 // UI Modules
 import { HomeDashboard } from '../components/HomeDashboard';
 import { TimelineView } from '../components/Timeline';
 import { AskAuraView } from '../components/AskAuraView';
-import { CalendarViewSection, LoggedEntryItem } from '../components/CalendarViewSection';
+import { LoggedEntryItem } from '../components/CalendarViewSection';
 import { InsightsView } from '../components/InsightsView';
 import { WindowShiftToast } from '../components/WindowShiftToast';
+import { PlanWithAuraView } from '../components/PlanWithAuraView';
+import { YouView } from '../components/YouView';
 
 import { BirthChartSection } from '../components/BirthChartSection';
 import { LoginScreen } from '../components/LoginScreen';
@@ -26,7 +29,6 @@ import { LocationPicker } from '../components/LocationPicker';
 import { useCurrentMinuteOfDay } from '../lib/useCurrentMinuteOfDay';
 import { resolveTzOffsetMinutes, getDatePartsInTimezone } from '../lib/timezone';
 import { Capacitor } from '@capacitor/core';
-import { NotificationSettings } from '../components/NotificationSettings';
 import {
   loadNotificationPrefs,
   saveNotificationPrefs,
@@ -44,6 +46,11 @@ interface SessionUser {
   timezone: string;
 }
 
+interface DailyReflectionState {
+  outputLevel: 'LOW' | 'MODERATE' | 'PEAK_FLOW';
+  followedGuidance: boolean;
+}
+
 const FALLBACK_TZ = 'Asia/Kolkata';
 
 function formatDisplayName(email: string): string {
@@ -54,15 +61,28 @@ function formatDisplayName(email: string): string {
   return name.replace(/\b\w/g, (letter) => letter.toUpperCase());
 }
 
+type LogSource = 'AURA_PLANNED' | 'AURA_DO_NOW' | 'MANUAL' | 'OVERRIDE_CAUTION';
+type ActivitySignificance = 'LOW' | 'MEDIUM' | 'HIGH';
+
+function inferActivitySignificance(activityTitle: string): ActivitySignificance {
+  return findActivityIntent(activityTitle)?.significance ?? 'MEDIUM';
+}
+
+function isFrictionWindow(windowName: string): boolean {
+  const normalized = windowName.toUpperCase();
+  return normalized.includes('RAHU') || normalized.includes('YAMA');
+}
+
 export default function DashboardPage() {
   const [user, setUser] = useState<SessionUser | null | undefined>(undefined);
   const [logEntries, setLogEntries] = useState<LoggedEntryItem[]>([]);
   const [, setHabits] = useState<any[]>([]);
   const [dailyBriefing, setDailyBriefing] = useState<DailyBriefing | null>(null);
   const [assistantInsight, setAssistantInsight] = useState<any>(null);
+  const [todayReflection, setTodayReflection] = useState<DailyReflectionState | null>(null);
   const [mounted, setMounted] = useState(false);
 
-  const [activeTab, setActiveTab] = useState<'home' | 'timeline' | 'ask' | 'calendar' | 'profile' | 'chart'>('home');
+  const [activeTab, setActiveTab] = useState<'home' | 'timeline' | 'ask' | 'plan' | 'insights' | 'you' | 'chart'>('home');
 
   const [notificationPrefs, setNotificationPrefs] = useState<NotificationPrefs>(DEFAULT_NOTIFICATION_PREFS);
 
@@ -87,6 +107,21 @@ export default function DashboardPage() {
       navigator.serviceWorker.register('/sw.js').catch((err) => {
         console.error('ServiceWorker registration failed:', err);
       });
+    }
+
+    if (typeof window !== 'undefined' && 'serviceWorker' in navigator && process.env.NODE_ENV !== 'production') {
+      navigator.serviceWorker.getRegistrations().then((registrations) => {
+        registrations.forEach((registration) => registration.unregister());
+      }).catch((err) => {
+        console.warn('Could not clear development service worker:', err);
+      });
+      if ('caches' in window) {
+        caches.keys().then((keys) => {
+          keys.filter((key) => key.startsWith('aura-')).forEach((key) => caches.delete(key));
+        }).catch((err) => {
+          console.warn('Could not clear development app cache:', err);
+        });
+      }
     }
   }, []);
 
@@ -121,6 +156,8 @@ export default function DashboardPage() {
             logMinuteOfDay: l.logMinuteOfDay,
             durationMinutes: l.durationMinutes ?? 30,
             notes: l.notes || null,
+            logSource: l.logSource || 'MANUAL',
+            activitySignificance: l.activitySignificance || 'MEDIUM',
           }))
         );
       }
@@ -142,13 +179,21 @@ export default function DashboardPage() {
     if (!user) return;
 
     const loadAssistantSignals = async () => {
-      const [briefingRes, insightRes] = await Promise.all([
+      const [briefingRes, insightRes, reflectionRes] = await Promise.all([
         fetch('/api/daily-assistant/briefing'),
         fetch('/api/daily-assistant/insights'),
+        fetch('/api/daily-assistant/reflection'),
       ]);
 
       if (briefingRes.ok) setDailyBriefing(await briefingRes.json());
       if (insightRes.ok) setAssistantInsight(await insightRes.json());
+      if (reflectionRes.ok) {
+        const reflection = await reflectionRes.json();
+        setTodayReflection(reflection ? {
+          outputLevel: reflection.outputLevel,
+          followedGuidance: Boolean(reflection.followedGuidance),
+        } : null);
+      }
     };
 
     loadAssistantSignals().catch((err) => {
@@ -287,18 +332,23 @@ export default function DashboardPage() {
       return null;
     };
 
+    const startMin = currentWin ? parseMinute(currentWin.startMinutes ?? currentWin.startMinute) : null;
     let endMin = currentWin ? parseMinute(currentWin.endMinutes ?? currentWin.endMinute) : null;
 
     if (endMin === null) {
       endMin = 1440; // Default midnight fallback
     }
 
-    const totalMins = Math.floor(endMin) % 1440;
-    const hrs = Math.floor(totalMins / 60);
-    const mins = totalMins % 60;
-    const period = hrs >= 12 ? 'PM' : 'AM';
-    const formattedHr = hrs % 12 === 0 ? 12 : hrs % 12;
-    const endTimeStr = `${formattedHr}:${String(mins).padStart(2, '0')} ${period}`;
+    const formatMinute = (minute: number) => {
+      const totalMins = Math.floor(minute) % 1440;
+      const hrs = Math.floor(totalMins / 60);
+      const mins = totalMins % 60;
+      const period = hrs >= 12 ? 'PM' : 'AM';
+      const formattedHr = hrs % 12 === 0 ? 12 : hrs % 12;
+      return `${formattedHr}:${String(mins).padStart(2, '0')} ${period}`;
+    };
+
+    const endTimeStr = formatMinute(endMin);
 
     let diff = endMin - currentMinuteOfDay;
     if (diff < 0) diff += 1440;
@@ -308,6 +358,7 @@ export default function DashboardPage() {
 
     return {
       name: activeType.replace('_', ' '),
+      startTime: startMin === null ? 'Current' : formatMinute(startMin),
       endTime: endTimeStr,
       timeRemaining: timeRemainingStr,
     };
@@ -397,20 +448,29 @@ export default function DashboardPage() {
       notes?: string,
       customTimestamp?: Date,
       overrideWindowType?: string,
-      durationMinutes = 30
+      durationMinutes = 30,
+      logSource: LogSource = 'MANUAL',
+      activitySignificance?: ActivitySignificance
     ) => {
       const targetDate = customTimestamp ? new Date(customTimestamp) : new Date();
       const calculatedMinute = targetDate.getHours() * 60 + targetDate.getMinutes();
       const tempId = `temp-${Date.now()}`;
+      const activeWindowForLog = overrideWindowType || activeType || 'NEUTRAL';
+      const inferredSignificance = activitySignificance ?? inferActivitySignificance(activityTitle);
+      const finalLogSource = logSource === 'MANUAL' && isFrictionWindow(activeWindowForLog) && inferredSignificance !== 'LOW'
+        ? 'OVERRIDE_CAUTION'
+        : logSource;
 
       const optimisticEntry: LoggedEntryItem = {
         id: tempId,
         activityTitle,
-        activeWindow: overrideWindowType || activeType || 'NEUTRAL',
+        activeWindow: activeWindowForLog,
         loggedAt: targetDate,
         logMinuteOfDay: calculatedMinute,
         durationMinutes,
         notes: notes ? String(notes).trim() : null,
+        logSource: finalLogSource,
+        activitySignificance: inferredSignificance,
       };
 
       // 1. Optimistic UI Update
@@ -423,6 +483,8 @@ export default function DashboardPage() {
         logTimestamp: targetDate.toISOString(),
         notes: optimisticEntry.notes || undefined,
         durationMinutes,
+        logSource: finalLogSource,
+        activitySignificance: inferredSignificance,
       };
 
       try {
@@ -495,6 +557,7 @@ export default function DashboardPage() {
 
     const insightRes = await fetch('/api/daily-assistant/insights');
     if (insightRes.ok) setAssistantInsight(await insightRes.json());
+    setTodayReflection({ outputLevel, followedGuidance });
   }, []);
 
   if (user === undefined) {
@@ -527,57 +590,53 @@ export default function DashboardPage() {
       {/* Real-Time Solar Phase Shift Toast Banner */}
       <WindowShiftToast activeWindowName={activeType} />
 
-      <header
-        style={{
-          width: '100%',
-          maxWidth: 420,
-          display: 'flex',
-          alignItems: 'center',
-          justifyContent: 'space-between',
-          marginBottom: 16,
-          padding: '0 4px',
-        }}
-      >
-        <LocationPicker currentCity={user.cityName} onChanged={handleLocationChanged} />
-        <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-          <button
-            onClick={() => setActiveTab(activeTab === 'chart' ? 'home' : 'chart')}
-            style={{
-              fontSize: 11,
-              color: activeTab === 'chart' ? '#4ade80' : 'var(--as-text-muted)',
-              background: 'rgba(255,255,255,0.06)',
-              border: activeTab === 'chart' ? '1px solid #4ade80' : '1px solid rgba(255,255,255,0.1)',
-              borderRadius: 14,
-              padding: '6px 10px',
-              cursor: 'pointer',
-              minHeight: 32,
-              display: 'flex',
-              alignItems: 'center',
-              gap: 4,
-            }}
-          >
-            <span>✨ Chart</span>
-          </button>
-          <span style={{ fontFamily: 'var(--as-font-mono)', fontSize: 11, color: 'var(--as-text-muted)', opacity: 0.8 }}>
-            {userNameDisplay}
-          </span>
-          <button
-            onClick={handleLogout}
-            style={{
-              fontSize: 11,
-              color: 'var(--as-text-muted)',
-              background: 'rgba(255,255,255,0.06)',
-              border: '1px solid rgba(255,255,255,0.1)',
-              borderRadius: 14,
-              padding: '6px 12px',
-              cursor: 'pointer',
-              minHeight: 32,
-            }}
-          >
-            sign out
-          </button>
-        </div>
-      </header>
+      {activeTab === 'chart' && (
+        <header
+          style={{
+            width: '100%',
+            maxWidth: 420,
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'space-between',
+            marginBottom: 16,
+            padding: '0 4px',
+          }}
+        >
+          <LocationPicker currentCity={user.cityName} onChanged={handleLocationChanged} />
+          <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+            <button
+              onClick={() => setActiveTab('home')}
+              style={{
+                fontSize: 11,
+                color: '#4ade80',
+                background: 'rgba(255,255,255,0.06)',
+                border: '1px solid #4ade80',
+                borderRadius: 14,
+                padding: '6px 10px',
+                cursor: 'pointer',
+                minHeight: 32,
+              }}
+            >
+              Home
+            </button>
+            <button
+              onClick={handleLogout}
+              style={{
+                fontSize: 11,
+                color: 'var(--as-text-muted)',
+                background: 'rgba(255,255,255,0.06)',
+                border: '1px solid rgba(255,255,255,0.1)',
+                borderRadius: 14,
+                padding: '6px 12px',
+                cursor: 'pointer',
+                minHeight: 32,
+              }}
+            >
+              sign out
+            </button>
+          </div>
+        </header>
+      )}
 
       <div style={{ width: '100%', maxWidth: 420 }}>
         {activeTab === 'home' && (
@@ -588,13 +647,16 @@ export default function DashboardPage() {
             bestForToday={energyInsight.bestForToday}
             cautionItems={energyInsight.cautionItems}
             nextShift={safeNextShift}
+            currentWindow={currentWindowInfo}
             activeWindowName={activeType}
             loggedActivitiesToday={loggedActivitiesToday}
             dailyBriefing={dailyBriefing}
+            todayReflection={todayReflection}
             onLogActivity={handleLogActivity}
-            onSlotTask={handleSlotTask}
             onSubmitReflection={handleSubmitReflection}
             onNextShiftClick={() => setActiveTab('timeline')}
+            onPlanClick={() => setActiveTab('plan')}
+            onInsightsClick={() => setActiveTab('insights')}
           />
         )}
 
@@ -618,27 +680,33 @@ export default function DashboardPage() {
           />
         )}
 
-        {activeTab === 'calendar' && (
-          <CalendarViewSection
-            logEntries={logEntries}
-            userLocation={user ? { latitude: user.latitude, longitude: user.longitude, timezone: user.timezone } : undefined}
-            onLogActivity={handleLogActivity}
+        {activeTab === 'plan' && (
+          <PlanWithAuraView
+            onSlotTask={handleSlotTask}
+            onViewDay={() => setActiveTab('timeline')}
+            onPlanLogged={loadUserDataAndLogs}
+            timezone={user.timezone}
           />
         )}
 
-        {activeTab === 'profile' && (
-          <>
-            <div style={{ marginBottom: 16 }}>
-              <NotificationSettings
-                prefs={notificationPrefs}
-                onChange={(next) => {
-                  setNotificationPrefs(next);
-                  saveNotificationPrefs(next);
-                }}
-              />
-            </div>
-            <InsightsView logEntries={logEntries} assistantInsight={assistantInsight} />
-          </>
+        {activeTab === 'insights' && (
+          <InsightsView logEntries={logEntries} assistantInsight={assistantInsight} />
+        )}
+
+        {activeTab === 'you' && (
+          <YouView
+            userName={userNameDisplay}
+            email={user.email}
+            cityName={user.cityName}
+            timezone={user.timezone}
+            notificationPrefs={notificationPrefs}
+            onNotificationPrefsChange={(next) => {
+              setNotificationPrefs(next);
+              saveNotificationPrefs(next);
+            }}
+            onOpenChart={() => setActiveTab('chart')}
+            onSignOut={handleLogout}
+          />
         )}
 
         {activeTab === 'chart' && <BirthChartSection />}
@@ -662,10 +730,10 @@ export default function DashboardPage() {
         }}
       >
         <NavButton label="Home" icon="🏠" active={activeTab === 'home'} onClick={() => setActiveTab('home')} />
-        <NavButton label="Timeline" icon="⏱️" active={activeTab === 'timeline'} onClick={() => setActiveTab('timeline')} />
-        <NavButton label="Ask" icon="🤖" active={activeTab === 'ask'} onClick={() => setActiveTab('ask')} />
-        <NavButton label="Calendar" icon="📅" active={activeTab === 'calendar'} onClick={() => setActiveTab('calendar')} />
-        <NavButton label="Profile" icon="👤" active={activeTab === 'profile'} onClick={() => setActiveTab('profile')} />
+        <NavButton label="Plan" icon="✨" active={activeTab === 'plan'} onClick={() => setActiveTab('plan')} />
+        <NavButton label="Ask Aura" icon="🤖" active={activeTab === 'ask'} onClick={() => setActiveTab('ask')} />
+        <NavButton label="Insights" icon="📊" active={activeTab === 'insights'} onClick={() => setActiveTab('insights')} />
+        <NavButton label="You" icon="👤" active={activeTab === 'you'} onClick={() => setActiveTab('you')} />
       </nav>
     </main>
   );

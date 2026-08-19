@@ -22,6 +22,8 @@ export interface ActivityProfile {
   title: string;
   description: string;
   category: ActivityCategory;
+  nature?: 'PERFORM' | 'INITIATE' | 'CONNECT' | 'RESTORE' | 'ROUTINE' | 'LEARN' | 'NOURISH';
+  defaultDurationMinutes?: number;
   recommendedWindowTypes: SolarWindowType[];
   acceptableWindowTypes: SolarWindowType[];
   avoidWindowTypes: SolarWindowType[];
@@ -139,6 +141,10 @@ export const ACTIVITY_CATALOG: ActivityProfile[] = [
 ];
 
 const EXTENDED_ACTIVITY_CATALOG: ActivityProfile[] = [
+  { id: 'start-journey', title: 'Start a Journey', description: 'Choose a supportive window for beginning a journey or important trip.', category: 'TRAVEL', recommendedWindowTypes: ['ABHIJIT'], acceptableWindowTypes: ['NEUTRAL', 'GULIKA'], avoidWindowTypes: ['RAHU_KALAM', 'YAMA'], significance: 'HIGH', requiresFreshStart: true, aliases: ['start journey', 'start a journey', 'start trip', 'begin trip', 'start travel', 'road trip', 'leave for trip', 'start my road trip'], icon: '🚗' },
+  { id: 'deep-work', title: 'Deep Work', description: 'Protect a focused block for coding, research, writing, or complex thinking.', category: 'FOCUS', recommendedWindowTypes: ['ABHIJIT', 'BRAHMA'], acceptableWindowTypes: ['NEUTRAL', 'GULIKA'], avoidWindowTypes: ['RAHU_KALAM', 'YAMA'], significance: 'HIGH', requiresFreshStart: false, aliases: ['deep work', 'focus work', 'coding', 'research', 'writing', 'write', 'focus session'], elementAffinity: 'WATER', icon: '🧠' },
+  { id: 'workout', title: 'Workout', description: 'Use a supportive energy window for training, exercise, or a gym session.', category: 'WORKOUT', recommendedWindowTypes: ['ABHIJIT', 'NEUTRAL'], acceptableWindowTypes: ['GULIKA', 'BRAHMA'], avoidWindowTypes: ['RAHU_KALAM', 'YAMA'], significance: 'HIGH', requiresFreshStart: false, aliases: ['workout', 'exercise', 'gym', 'training', 'run', 'lifting', 'heavy workout'], elementAffinity: 'FIRE', icon: '🏋️' },
+  { id: 'tea-break', title: 'Tea Break', description: 'Take a short reset without needing a special auspicious start.', category: 'MICRO_BREAK', recommendedWindowTypes: ['NEUTRAL', 'GULIKA'], acceptableWindowTypes: ['ABHIJIT', 'BRAHMA', 'RAHU_KALAM', 'YAMA'], avoidWindowTypes: [], significance: 'LOW', requiresFreshStart: false, aliases: ['tea break', 'coffee break', 'break', 'snack'], icon: '☕' },
   { id: 'dating', title: 'Dating', description: 'Plan a date or meaningful social connection during a supportive period.', category: 'RELATIONSHIP', recommendedWindowTypes: ['GULIKA', 'NEUTRAL'], acceptableWindowTypes: ['ABHIJIT'], avoidWindowTypes: [], significance: 'MEDIUM', requiresFreshStart: false, aliases: ['date', 'dating', 'go on a date', 'romantic dinner', 'meet someone'], icon: '❤️' },
   { id: 'party', title: 'Party', description: 'Enjoy a social gathering during an easy, relaxed period.', category: 'SOCIAL', recommendedWindowTypes: ['NEUTRAL', 'GULIKA'], acceptableWindowTypes: ['ABHIJIT', 'YAMA', 'RAHU_KALAM'], avoidWindowTypes: [], significance: 'LOW', requiresFreshStart: false, aliases: ['party', 'partying', 'social gathering', 'night out', 'celebration'], icon: '🎉' },
   { id: 'financial-decision', title: 'Financial Decision', description: 'Handle a meaningful financial commitment in a clear, supportive window.', category: 'FINANCE', recommendedWindowTypes: ['ABHIJIT'], acceptableWindowTypes: ['GULIKA', 'NEUTRAL'], avoidWindowTypes: ['RAHU_KALAM', 'YAMA'], significance: 'HIGH', requiresFreshStart: true, aliases: ['investment', 'property purchase', 'sign contract', 'financial decision', 'loan', 'major purchase'], icon: '💰' },

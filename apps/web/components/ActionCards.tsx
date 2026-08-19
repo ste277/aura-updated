@@ -99,7 +99,7 @@ export function ActionCards({ cards, onLog, loggedIds }: ActionCardsProps) {
                 {card.title}
               </div>
               <div style={{ fontFamily: 'var(--as-font-body)', fontSize: 13, color: 'var(--as-text-muted)' }}>
-                {card.reasoning}
+                {card.reasoning ?? card.description}
               </div>
               <button
                 onClick={() => onLog(card)}

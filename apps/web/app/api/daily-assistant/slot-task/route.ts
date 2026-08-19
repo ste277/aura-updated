@@ -1,14 +1,57 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getSessionFromRequest } from '../../../../lib/session';
-import { getUserById } from '../../../../lib/db';
-import { resolveTzOffsetMinutes } from '../../../../lib/timezone';
+import { getUserById, User } from '../../../../lib/db';
+import { localDateTimeToUTC, resolveTzOffsetMinutes } from '../../../../lib/timezone';
 import { findOptimalTaskTimes, recommendTaskSlot, PlanningHorizon, TimePreference } from '../../../../../../packages/recommendation/src/dailyAssistant';
+import { PersonalMuhurtaContext } from '../../../../../../packages/recommendation/src/auraFitEngine';
+import { getNatalChart } from '../../../../../../packages/vedic/src/natalChart';
+import { getNakshatra } from '../../../../../../packages/vedic/src/panchangElements';
 
 /** Longest CUSTOM planning window. Comfortably beyond any real use (the UI
  *  offers today/week/month) while keeping the synchronous per-day search
  *  bounded — see the span check below. */
 const MAX_CUSTOM_RANGE_DAYS = 90;
 const MAX_TASK_TITLE_LENGTH = 200;
+
+const RASHI_ELEMENT: Record<string, PersonalMuhurtaContext['moonElement']> = {
+  Mesha: 'FIRE',
+  Vrishabha: 'EARTH',
+  Mithuna: 'AIR',
+  Karka: 'WATER',
+  Simha: 'FIRE',
+  Kanya: 'EARTH',
+  Tula: 'AIR',
+  Vrishchika: 'WATER',
+  Dhanu: 'FIRE',
+  Makara: 'EARTH',
+  Kumbha: 'AIR',
+  Meena: 'WATER',
+};
+
+function formatUTCDateString(dateInput: Date | string): string {
+  if (typeof dateInput === 'string') return dateInput.split('T')[0];
+  const year = dateInput.getUTCFullYear();
+  const month = String(dateInput.getUTCMonth() + 1).padStart(2, '0');
+  const day = String(dateInput.getUTCDate()).padStart(2, '0');
+  return `${year}-${month}-${day}`;
+}
+
+function buildPersonalMuhurtaContext(user: User): PersonalMuhurtaContext | undefined {
+  if (!user.birthDate || !user.birthTime || !user.birthTimezone) return undefined;
+
+  const birthDateStr = formatUTCDateString(user.birthDate);
+  const birthMomentUTC = localDateTimeToUTC(birthDateStr, user.birthTime, user.birthTimezone);
+  const natalNakshatra = getNakshatra(birthMomentUTC);
+  const chart = getNatalChart(birthMomentUTC);
+  const moonPlacement = chart.find((graha) => graha.graha === 'Moon');
+
+  return {
+    natalNakshatraIndex: natalNakshatra.index,
+    janmaNakshatra: natalNakshatra.name,
+    janmaRashi: moonPlacement?.rashiName,
+    moonElement: moonPlacement?.rashiName ? RASHI_ELEMENT[moonPlacement.rashiName] : undefined,
+  };
+}
 
 export async function POST(req: NextRequest) {
   const session = getSessionFromRequest(req);
@@ -53,8 +96,9 @@ export async function POST(req: NextRequest) {
     longitude: user.longitude,
     timezone: user.timezone,
     tzOffsetMinutes: resolveTzOffsetMinutes(user.timezone, now),
+    personalContext: buildPersonalMuhurtaContext(user),
   };
-  const recommendation = horizon === 'NOW' || horizon === 'TODAY'
+  const recommendation = horizon === 'NOW'
     ? recommendTaskSlot(taskTitle, assistantContext, durationMinutes, requestedStartMinute)
     : findOptimalTaskTimes(taskTitle, assistantContext, durationMinutes, horizon, customStartDate, customEndDate, timePreference);
 

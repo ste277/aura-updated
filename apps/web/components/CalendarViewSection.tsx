@@ -11,6 +11,8 @@ export interface LoggedEntryItem {
   logMinuteOfDay?: number;
   durationMinutes?: number;
   notes?: string | null;
+  logSource?: 'AURA_PLANNED' | 'AURA_DO_NOW' | 'MANUAL' | 'OVERRIDE_CAUTION';
+  activitySignificance?: 'LOW' | 'MEDIUM' | 'HIGH';
 }
 
 function activityCategory(title: string): 'WORK' | 'HEALTH' | 'PERSONAL' {

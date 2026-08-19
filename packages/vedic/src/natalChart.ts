@@ -120,7 +120,7 @@ export function getTaraBala(natalNakshatraIndex: number, today: Date): TaraBala 
     taraNumber,
     name: TARA_NAMES[taraNumber - 1],
     favorable: !UNFAVORABLE_TARA_NUMBERS.has(taraNumber),
-    natalNakshatraName: NAKSHATRA_NAMES_LOCAL[natalNakshatraIndex],
+    natalNakshatraName: NAKSHATRA_NAMES_LOCAL[natalNakshatraIndex - 1],
     todayNakshatraName: todayNakshatra.name,
   };
 }

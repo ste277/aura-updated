@@ -30,6 +30,7 @@ model User {
   habits          Habit[]
   customCities    CustomCity[]
   dailyReflections DailyReflection[]
+  plannedActivities PlannedActivity[]
 }
 
 model CustomCity {
@@ -58,8 +59,41 @@ model HabitLog {
   logMinuteOfDay Int
   durationMinutes Int @default(30)
   notes          String?  @db.Text
+  logSource      String   @default("MANUAL") // "AURA_PLANNED" | "AURA_DO_NOW" | "MANUAL" | "OVERRIDE_CAUTION"
+  activitySignificance String @default("MEDIUM") // "LOW" | "MEDIUM" | "HIGH"
 
   @@index([userId, logTimestamp])
+}
+
+model PlannedActivity {
+  id              String   @id @default(uuid())
+  userId          String
+  user            User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  title           String
+  activityType    String?
+  icon            String?
+  status          String   @default("UPCOMING") // "UPCOMING" | "LOGGED" | "CANCELLED"
+
+  plannedStartAt  DateTime @db.Timestamptz(3)
+  plannedEndAt    DateTime @db.Timestamptz(3)
+  durationMinutes Int
+
+  windowType      String
+  windowLabel     String?
+  matchLabel      String?
+  score           Int?
+  recommendation  String?  @db.Text
+  calendarUrl     String?  @db.Text
+
+  loggedAt        DateTime? @db.Timestamptz(3)
+  habitLogId      String?
+
+  createdAt       DateTime @default(now()) @db.Timestamptz(3)
+  updatedAt       DateTime @updatedAt @db.Timestamptz(3)
+
+  @@index([userId, plannedStartAt])
+  @@index([userId, status])
 }
 
 // Tracks app opens (not habit logs) — needed to measure the MVP spec's actual

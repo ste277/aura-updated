@@ -71,7 +71,7 @@ Run the PostgreSQL migrations in sequential order.
 # Create database if it doesn't already exist
 createdb auraschedule_dev
 
-# Apply all 12 migrations in order
+# Apply all 14 migrations in order
 psql -d auraschedule_dev -f prisma/migrations/0001_init/migration.sql
 psql -d auraschedule_dev -f prisma/migrations/0002_visit_log/migration.sql
 psql -d auraschedule_dev -f prisma/migrations/0003_timezone_column/migration.sql
@@ -84,6 +84,8 @@ psql -d auraschedule_dev -f prisma/migrations/0009_habit_log_duration/migration.
 psql -d auraschedule_dev -f prisma/migrations/0010_habit_log_notes/migration.sql
 psql -d auraschedule_dev -f prisma/migrations/0011_auth_codes/migration.sql
 psql -d auraschedule_dev -f prisma/migrations/0012_user_email_case_insensitive/migration.sql
+psql -d auraschedule_dev -f prisma/migrations/0013_planned_activities/migration.sql
+psql -d auraschedule_dev -f prisma/migrations/0014_habit_log_context/migration.sql
 
 
 
@@ -97,7 +99,5 @@ DATABASE_URL="postgresql://YOUR_USER:YOUR_PASSWORD@localhost:5432/auraschedule_d
 AUTH_SECRET="anything-random-for-local-dev"
 (Leave RESEND_API_KEY blank for local development. The magic link will render directly in the API response payload).
 npm run dev
-
-
 
 

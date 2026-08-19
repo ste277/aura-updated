@@ -155,7 +155,7 @@ export function TimelineView({
   // Derive recommended action cards safely
   const recommendedCards: ActionCard[] = React.useMemo(() => {
     if (!selectedWindowName) return [];
-    const res = getActivityDiscoveryCards(selectedWindowName, 6);
+    const res = getActivityDiscoveryCards(selectedWindowName, 8);
     return Array.isArray(res) ? res : [];
   }, [selectedWindowName]);
 
@@ -392,10 +392,10 @@ export function TimelineView({
           </div>
         </div>
 
-        {/* Recommended Action Cards List */}
+        {/* Activity Discovery Cards List */}
         <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-            <span style={{ fontSize: 10, fontFamily: 'monospace', textTransform: 'uppercase', color: '#94a3b8', letterSpacing: '0.05em' }}>
+            <span style={{ fontSize: 12, fontFamily: 'var(--as-font-mono)', textTransform: 'uppercase', color: '#aab7d2', letterSpacing: '0.04em', fontWeight: 900 }}>
               Good choices for this window
             </span>
           </div>
@@ -404,45 +404,36 @@ export function TimelineView({
             const cardTitleNorm = card.title.trim().toLowerCase();
             const isAlreadyLogged = allLoggedNormalized.has(cardTitleNorm);
             const isLoggingThis = loggingTitle === card.title;
+            const fitLabel = card.fit === 'BEST' ? 'Best fit' : card.fit === 'GOOD' ? 'Good fit' : card.fit === 'CAUTION' ? 'Use lightly' : 'Usable';
+            const fitColor = card.fit === 'CAUTION' ? '#facc15' : card.fit === 'USABLE' ? '#7dd3fc' : '#4ade80';
 
             return (
               <div
                 key={card.id || idx}
                 style={{
-                  background: 'rgba(15, 23, 42, 0.8)',
+                  background: 'linear-gradient(145deg, rgba(15, 23, 42, 0.96), rgba(13, 28, 62, 0.82))',
                   border: isAlreadyLogged
                     ? '1px solid rgba(74, 222, 128, 0.25)'
-                    : '1px solid rgba(255, 255, 255, 0.08)',
-                  borderRadius: 14,
-                  padding: 14,
+                    : '1px solid rgba(96, 165, 250, 0.18)',
+                  borderRadius: 16,
+                  padding: 16,
                   display: 'flex',
                   flexDirection: 'column',
                   gap: 10,
+                  boxShadow: 'inset 0 1px 0 rgba(255, 255, 255, 0.03)',
                   transition: 'all 0.2s ease',
                 }}
               >
                 <div style={{ display: 'flex', alignItems: 'flex-start', gap: 12 }}>
                   <span style={{ fontSize: 22 }}>{card.icon || '🎯'}</span>
                   <div style={{ flex: 1 }}>
-                    {idx === 0 && !isAlreadyLogged && (
-                      <span
-                        style={{
-                          fontSize: 9,
-                          fontWeight: 700,
-                          color: '#4ade80',
-                          fontFamily: 'monospace',
-                          letterSpacing: '0.05em',
-                          display: 'inline-block',
-                          marginBottom: 4,
-                        }}
-                      >
-                        BEST FIT
-                      </span>
-                    )}
-                    <h3 style={{ fontSize: 13, fontWeight: 700, color: '#fff', margin: 0, fontFamily: 'sans-serif' }}>
+                    <span style={{ fontSize: 10, fontWeight: 900, color: fitColor, fontFamily: 'var(--as-font-mono)', letterSpacing: '0.05em', display: 'inline-block', marginBottom: 5, textTransform: 'uppercase' }}>
+                      {fitLabel}
+                    </span>
+                    <h3 style={{ fontSize: 16, fontWeight: 900, color: '#fff', margin: 0, fontFamily: 'sans-serif', lineHeight: 1.18 }}>
                       {card.title}
                     </h3>
-                    <p style={{ fontSize: 11, color: '#94a3b8', margin: '4px 0 0', lineHeight: 1.4, fontFamily: 'sans-serif' }}>
+                    <p style={{ fontSize: 13, color: '#aab7d2', margin: '6px 0 0', lineHeight: 1.4, fontFamily: 'sans-serif' }}>
                       {card.description}
                     </p>
                   </div>
@@ -452,7 +443,7 @@ export function TimelineView({
                   {onAskAuraClick && !isAlreadyLogged && (
                     <button
                       onClick={() => onAskAuraClick()}
-                      style={{ background: 'rgba(56, 189, 248, 0.1)', color: '#7dd3fc', border: '1px solid rgba(56, 189, 248, 0.3)', borderRadius: 8, padding: '6px 12px', fontSize: 11, fontWeight: 700, cursor: 'pointer', fontFamily: 'sans-serif' }}
+                      style={{ background: 'rgba(56, 189, 248, 0.1)', color: '#7dd3fc', border: '1px solid rgba(56, 189, 248, 0.42)', borderRadius: 10, padding: '8px 14px', fontSize: 12, fontWeight: 850, cursor: 'pointer', fontFamily: 'sans-serif' }}
                     >
                       Plan
                     </button>
@@ -470,10 +461,10 @@ export function TimelineView({
                       border: isAlreadyLogged
                         ? '1px solid rgba(74, 222, 128, 0.3)'
                         : '1px solid rgba(255, 255, 255, 0.12)',
-                      borderRadius: 8,
-                      padding: '6px 14px',
-                      fontSize: 11,
-                      fontWeight: 700,
+                      borderRadius: 10,
+                      padding: '8px 14px',
+                      fontSize: 12,
+                      fontWeight: 850,
                       cursor: isAlreadyLogged ? 'default' : 'pointer',
                       transition: 'all 0.15s ease',
                       fontFamily: 'sans-serif',

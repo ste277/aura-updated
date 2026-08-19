@@ -8,18 +8,21 @@
 import type { SolarWindowType } from '../../panchang/src/windows';
 import { FULL_ACTIVITY_CATALOG, normalizeWindowType } from './personalizedTasks';
 import type { ActivityCategory } from './personalizedTasks';
+import { evaluateActivityFit } from './auraFitEngine';
 
 export interface ActionCard {
   id: string;
   category: ActivityCategory;
   title: string;
   description: string; // Updated from reasoning for direct UI mapping
-  reasoning: string;   // Retained for backward compatibility
+  reasoning?: string;   // Retained for backward compatibility
   icon?: string;
   activityId?: string;
   significance?: 'LOW' | 'MEDIUM' | 'HIGH';
   requiresFreshStart?: boolean;
   aliases?: string[];
+  fit?: 'BEST' | 'GOOD' | 'USABLE' | 'CAUTION';
+  fitScore?: number;
 }
 
 const ACTION_CARDS: Record<SolarWindowType, ActionCard[]> = {
@@ -203,27 +206,27 @@ export function getActionCards(window: string): ActionCard[] {
  */
 export function getActivityDiscoveryCards(window: string, limit = 6): ActionCard[] {
   const windowType = normalizeWindowType(window);
+  const date = new Date();
   return FULL_ACTIVITY_CATALOG
     .map((activity) => {
-      const preferred = activity.recommendedWindowTypes.includes(windowType);
-      const acceptable = activity.acceptableWindowTypes.includes(windowType);
-      const avoided = activity.avoidWindowTypes.includes(windowType);
-      const score = preferred ? 100 : acceptable ? 65 : avoided && !activity.allowDuringAvoidWindow ? -100 : 35;
-      return { activity, score };
+      const fit = evaluateActivityFit({ activity, date, windowType });
+      const blocked = activity.avoidWindowTypes.includes(windowType) && !activity.allowDuringAvoidWindow && fit.score < 55;
+      return { activity, fit, blocked };
     })
-    .filter(({ score }) => score >= 0)
-    .sort((a, b) => b.score - a.score || a.activity.title.localeCompare(b.activity.title))
+    .filter(({ blocked, fit }) => !blocked && fit.label !== 'AVOID')
+    .sort((a, b) => b.fit.score - a.fit.score || a.activity.title.localeCompare(b.activity.title))
     .slice(0, limit)
-    .map(({ activity }) => ({
+    .map(({ activity, fit }) => ({
       id: `activity-${activity.id}`,
       activityId: activity.id,
       category: activity.category,
       title: activity.title,
-      description: activity.description,
-      reasoning: activity.description,
+      description: fit.summary,
       icon: activity.icon,
       significance: activity.significance,
       requiresFreshStart: activity.requiresFreshStart,
       aliases: activity.aliases,
+      fit: fit.score >= 85 ? 'BEST' : fit.score >= 70 ? 'GOOD' : fit.score >= 55 ? 'USABLE' : 'CAUTION',
+      fitScore: fit.score,
     }));
 }

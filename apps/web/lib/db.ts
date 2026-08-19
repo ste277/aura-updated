@@ -90,6 +90,8 @@ export interface HabitLogRow {
   logMinuteOfDay: number;
   durationMinutes: number;
   notes?: string | null; // Added notes field
+  logSource?: 'AURA_PLANNED' | 'AURA_DO_NOW' | 'MANUAL' | 'OVERRIDE_CAUTION';
+  activitySignificance?: 'LOW' | 'MEDIUM' | 'HIGH';
 }
 
 export interface Habit {
@@ -113,6 +115,44 @@ export interface DailyReflection {
   notes?: string | null;
   createdAt: Date;
   updatedAt: Date;
+}
+
+export interface PlannedActivity {
+  id: string;
+  userId: string;
+  title: string;
+  activityType: string | null;
+  icon: string | null;
+  status: 'UPCOMING' | 'LOGGED' | 'CANCELLED';
+  plannedStartAt: Date;
+  plannedEndAt: Date;
+  durationMinutes: number;
+  windowType: string;
+  windowLabel: string | null;
+  matchLabel: string | null;
+  score: number | null;
+  recommendation: string | null;
+  calendarUrl: string | null;
+  loggedAt: Date | null;
+  habitLogId: string | null;
+  createdAt: Date;
+  updatedAt: Date;
+}
+
+export interface CreatePlannedActivityInput {
+  userId: string;
+  title: string;
+  activityType?: string | null;
+  icon?: string | null;
+  plannedStartAt: Date;
+  plannedEndAt: Date;
+  durationMinutes: number;
+  windowType: string;
+  windowLabel?: string | null;
+  matchLabel?: string | null;
+  score?: number | null;
+  recommendation?: string | null;
+  calendarUrl?: string | null;
 }
 
 export async function createHabit(input: {
@@ -183,8 +223,8 @@ export async function logHabitCompletion(
     const newLongest = Math.max(habit.longestStreak, newStreak);
 
     await client.query(
-      `INSERT INTO "HabitLog" (id, "userId", "habitId", "activityTitle", "activeWindow", "logMinuteOfDay")
-       VALUES ($1, $2, $3, $4, $5, $6)`,
+      `INSERT INTO "HabitLog" (id, "userId", "habitId", "activityTitle", "activeWindow", "logMinuteOfDay", "logSource", "activitySignificance")
+       VALUES ($1, $2, $3, $4, $5, $6, 'MANUAL', 'MEDIUM')`,
       [randomUUID(), userId, habitId, habit.title, activeWindow, logMinuteOfDay]
     );
 
@@ -195,6 +235,116 @@ export async function logHabitCompletion(
 
     await client.query('COMMIT');
     return updated.rows[0];
+  } catch (err) {
+    await client.query('ROLLBACK');
+    throw err;
+  } finally {
+    client.release();
+  }
+}
+
+export async function listPlannedActivities(userId: string): Promise<PlannedActivity[]> {
+  const result = await pool.query(
+    `SELECT *
+     FROM "PlannedActivity"
+     WHERE "userId" = $1 AND status <> 'CANCELLED'
+     ORDER BY
+       CASE WHEN status = 'UPCOMING' THEN 0 ELSE 1 END,
+       "plannedStartAt" ASC,
+       "createdAt" DESC`,
+    [userId]
+  );
+  return result.rows;
+}
+
+export async function createPlannedActivity(input: CreatePlannedActivityInput): Promise<PlannedActivity> {
+  const id = randomUUID();
+  const result = await pool.query(
+    `INSERT INTO "PlannedActivity"
+       (id, "userId", title, "activityType", icon, "plannedStartAt", "plannedEndAt",
+        "durationMinutes", "windowType", "windowLabel", "matchLabel", score,
+        recommendation, "calendarUrl")
+     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14)
+     RETURNING *`,
+    [
+      id,
+      input.userId,
+      input.title,
+      input.activityType ?? null,
+      input.icon ?? null,
+      input.plannedStartAt,
+      input.plannedEndAt,
+      input.durationMinutes,
+      input.windowType,
+      input.windowLabel ?? null,
+      input.matchLabel ?? null,
+      input.score ?? null,
+      input.recommendation ?? null,
+      input.calendarUrl ?? null,
+    ]
+  );
+  return result.rows[0];
+}
+
+export async function logPlannedActivity(userId: string, planId: string): Promise<{ plan: PlannedActivity; habitLog: HabitLogRow }> {
+  const client = await pool.connect();
+  try {
+    await client.query('BEGIN');
+
+    const planRes = await client.query(
+      `SELECT * FROM "PlannedActivity" WHERE id = $1 AND "userId" = $2 FOR UPDATE`,
+      [planId, userId]
+    );
+    if (planRes.rows.length === 0) throw new Error('Plan not found.');
+    const plan: PlannedActivity = planRes.rows[0];
+
+    if (plan.status === 'LOGGED' && plan.habitLogId) {
+      const existingLog = await client.query(
+        `SELECT id, "userId", "activityTitle", "activeWindow", "logTimestamp", "logMinuteOfDay", "durationMinutes", notes, "logSource", "activitySignificance"
+         FROM "HabitLog"
+         WHERE id = $1 AND "userId" = $2`,
+        [plan.habitLogId, userId]
+      );
+      await client.query('COMMIT');
+      return { plan, habitLog: existingLog.rows[0] };
+    }
+
+    const habitLogId = randomUUID();
+    const logTimestamp = new Date();
+    const logMinuteOfDay = logTimestamp.getHours() * 60 + logTimestamp.getMinutes();
+    const notes = `Logged from planned Aura activity${plan.recommendation ? `: ${plan.recommendation}` : '.'}`;
+
+    const habitLogRes = await client.query(
+      `INSERT INTO "HabitLog"
+         (id, "userId", "activityTitle", "activeWindow", "logMinuteOfDay",
+          "logTimestamp", "durationMinutes", notes, "logSource", "activitySignificance")
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, 'AURA_PLANNED', 'MEDIUM')
+       RETURNING id, "userId", "activityTitle", "activeWindow", "logTimestamp", "logMinuteOfDay", "durationMinutes", notes, "logSource", "activitySignificance"`,
+      [
+        habitLogId,
+        userId,
+        plan.title,
+        plan.windowType,
+        logMinuteOfDay,
+        logTimestamp,
+        plan.durationMinutes,
+        notes,
+      ]
+    );
+
+    const updatedPlanRes = await client.query(
+      `UPDATE "PlannedActivity"
+       SET status = 'LOGGED',
+           "loggedAt" = $3,
+           "habitLogId" = $4,
+           "updatedAt" = now()
+       WHERE id = $1 AND "userId" = $2
+       RETURNING *`,
+      [planId, userId, logTimestamp, habitLogId]
+    );
+
+    await client.query('COMMIT');
+    return { plan: updatedPlanRes.rows[0], habitLog: habitLogRes.rows[0] };
   } catch (err) {
     await client.query('ROLLBACK');
     throw err;
@@ -295,7 +445,7 @@ export async function getLogsForDay(
   day: number
 ): Promise<HabitLogRow[]> {
   const result = await pool.query(
-    `SELECT id, "userId", "activityTitle", "activeWindow", "logTimestamp", "logMinuteOfDay", "durationMinutes", notes
+    `SELECT id, "userId", "activityTitle", "activeWindow", "logTimestamp", "logMinuteOfDay", "durationMinutes", notes, "logSource", "activitySignificance"
      FROM "HabitLog"
      WHERE "userId" = $1
        AND EXTRACT(YEAR FROM "logTimestamp") = $2
@@ -407,14 +557,27 @@ export async function createHabitLog(input: {
   logTimestamp?: Date;
   durationMinutes?: number;
   notes?: string; // Added optional notes parameter
+  logSource?: 'AURA_PLANNED' | 'AURA_DO_NOW' | 'MANUAL' | 'OVERRIDE_CAUTION';
+  activitySignificance?: 'LOW' | 'MEDIUM' | 'HIGH';
 }): Promise<HabitLogRow> {
   const id = randomUUID();
   const timestamp = input.logTimestamp ?? new Date();
 
   const result = await pool.query(
-    `INSERT INTO "HabitLog" (id, "userId", "activityTitle", "activeWindow", "logMinuteOfDay", "logTimestamp", "durationMinutes", notes)
-     VALUES ($1, $2, $3, $4, $5, $6, $7, $8) RETURNING *`,
-    [id, input.userId, input.activityTitle, input.activeWindow, input.logMinuteOfDay, timestamp, input.durationMinutes ?? 30, input.notes ?? null]
+    `INSERT INTO "HabitLog" (id, "userId", "activityTitle", "activeWindow", "logMinuteOfDay", "logTimestamp", "durationMinutes", notes, "logSource", "activitySignificance")
+     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10) RETURNING *`,
+    [
+      id,
+      input.userId,
+      input.activityTitle,
+      input.activeWindow,
+      input.logMinuteOfDay,
+      timestamp,
+      input.durationMinutes ?? 30,
+      input.notes ?? null,
+      input.logSource ?? 'MANUAL',
+      input.activitySignificance ?? 'MEDIUM',
+    ]
   );
   return result.rows[0];
 }
