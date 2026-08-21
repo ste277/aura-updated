@@ -52,21 +52,49 @@
  * elsewhere) and touches no shared file, so Timing Search's and Plan's
  * scoring are unaffected.
  *
- * ## Known limitation: start-sensitive activities
+ * ## Start sensitivity (first real use of ActivityDefinition.muhurta.timingSensitivity)
  *
  * ActivityDefinition.muhurta.timingSensitivity (packages/recommendation/src/
  * activityDefinitions.ts) records, per activity, whether the START moment
- * matters more than filling the full requested duration (JOURNEY_START,
- * PROJECT_START, PROPERTY_PURCHASE-style activities are HIGH on `start`).
- * Beyond the interval-overlap safety check above, this file does not
- * otherwise branch on that field: within a clean (non-friction-overlapping)
- * window, the whole [start, start+duration) span is scored uniformly,
- * regardless of which sub-part of the window the activity's
- * `timingSensitivity` says actually matters most. Building a second
- * evaluation path that gives the start instant extra weight WITHIN an
- * already-clean window would be new Muhurta methodology, out of scope for
- * this PR (see brief section 8's own escape hatch: document rather than
- * invent). Left as a documented limitation and a natural follow-up PR.
+ * matters more than filling the full requested duration. Every Muhurtham
+ * Finder-eligible activity today (start-journey, financial-decision,
+ * new-beginning, business-start, property-purchase, engagement,
+ * griha-pravesh) has `timingSensitivity.start: 'HIGH'` -- these are all,
+ * definitionally, occasions defined by their commencement instant.
+ *
+ * For a START_HIGH activity, findBestWindowsForDate() blends the
+ * full-duration score (from evaluateTimingCandidate(), unchanged) with a
+ * SECOND evaluateTimingCandidate() call at the exact same start instant but
+ * a short probe duration (START_SENSITIVITY_PROBE_MINUTES) -- i.e. "how good
+ * is the moment of commencement on its own", reusing the identical scoring
+ * primitive rather than inventing new Panchanga math. blendStartSensitiveScore()
+ * combines the two with a single small, explicit, documented weight
+ * (START_SENSITIVITY_WEIGHT) -- the "smallest explicit weighting model
+ * necessary" the brief asks for, not a new scoring formula.
+ *
+ * Hard caution/block intervals are still fully respected: the commencement
+ * probe goes through the exact same FRICTION_WINDOW_BLOCKED and
+ * spanOverlapsFrictionWindow() checks as the full-duration candidate before
+ * blending, so a start instant that itself crosses into Rahu Kalam/Yama
+ * disqualifies the candidate regardless of how well the rest of the window
+ * scores -- blending only ever adjusts the RANKING of already-valid
+ * candidates, never bypasses rejection.
+ *
+ * A DURATION_HIGH or START-insensitive activity (start !== 'HIGH') is
+ * completely unaffected -- the blend is only computed and applied when the
+ * gate matches, so its score is identical to before this change (see
+ * test/muhurthamFinder.test.ts's synthetic-classification unit test for
+ * blendStartSensitiveScore() proving the gate, since every activity
+ * currently exposed in Finder happens to be START_HIGH).
+ *
+ * This intentionally CAN and DOES change start-journey's/financial-decision's/
+ * new-beginning's own Muhurtham Finder scores and best-window selection
+ * relative to the previous PR -- that is the documented, intentional
+ * improvement this section exists to make (brief section 12's regression
+ * note explicitly carves this out). Timing Search's own FIND/CHECK/COMPARE
+ * modes are untouched (this file never modifies evaluateTimingCandidate()
+ * or scoreContinuousBlock()), so Timing Search's scores for the same
+ * activities are byte-identical to before.
  *
  * ## Known limitation: search range is unbounded here by design
  *
@@ -80,25 +108,46 @@
  */
 
 import { DailyAssistantContext, TaskProfile, buildSlotCandidates, computeAssistantWindows, isFriction, matchesTimePreference, profileFromActivity } from './dailyAssistant';
-import { evaluateTimingCandidate, TimingCandidate, TimingTimePreference } from './timingSearch';
+import { evaluateTimingCandidate, TimingCandidate, TimingCandidateLabel, TimingTimePreference } from './timingSearch';
 import { formatMinutes } from '../../astronomy/src/ephemeris';
 import { getPanchangForDate, PanchangWindowSpan } from '../../panchang/src/panchangDay';
 import { isValidCalendarDateString, localDateTimeToUTC } from '../../panchang/src/localDate';
 import { FULL_ACTIVITY_CATALOG } from './personalizedTasks';
-import type { MuhurtaReason } from '../../muhurta/src/activityOntology';
+import { ACTIVITY_DEFINITIONS, ActivityDefinition } from './activityDefinitions';
+import { computeMuhurtaSupportLevel, resolveMuhurtaRulePack } from '../../muhurta/src/muhurtaRulePacks';
+import type { MuhurtaClassification, MuhurtaReason } from '../../muhurta/src/activityOntology';
 
 /**
- * The activity catalog IDs Muhurtham Finder actually exposes. See the
- * module doc comment and the completion report for the full
- * SUPPORTED/PARTIALLY_SUPPORTED/NOT_YET_SUPPORTED inspection this list is
- * derived from -- not manufactured, not "every DEEP activity", not "every
- * activity that conceptually sounds like an occasion".
+ * Finder eligibility (brief section 10): derived from ActivityDefinition +
+ * MuhurtaRulePack + MuhurtaSupportLevel metadata, NOT a hand-maintained id
+ * list. An activity is eligible when:
+ *   - its ontology status isn't AMBIGUOUS (an activity that genuinely spans
+ *     two different intents per its own notes -- e.g. "High-Stakes Decision
+ *     or Pitch" -- shouldn't be offered as a single occasion search target);
+ *   - its evaluationDepth is DEEP or CEREMONIAL (LIGHT/STANDARD activities
+ *     like Tea Break or routine admin were never occasion-search material);
+ *   - its resolved MuhurtaRulePack reaches SUPPORTED (not PARTIAL/
+ *     NOT_YET_SUPPORTED) -- see muhurtaRulePacks.ts's computeMuhurtaSupportLevel
+ *     for exactly what that requires (stricter for CEREMONIAL activities).
+ * A PARTIAL activity (today: Engagement, Griha Pravesh -- both CEREMONIAL
+ * with incomplete Tithi/Nakshatra coverage) is automatically excluded here,
+ * per brief section 10's "PARTIAL activities may be hidden from normal
+ * Finder results for now" -- computed from the SAME rule-pack data the
+ * completion report's coverage matrix is built from, so this list can never
+ * silently drift from that audit.
  */
-export const SUPPORTED_MUHURTHAM_ACTIVITY_IDS = ['start-journey', 'financial-decision', 'new-beginning'] as const;
-export type SupportedMuhurthamActivityId = (typeof SUPPORTED_MUHURTHAM_ACTIVITY_IDS)[number];
+function isMuhurthamEligible(definition: ActivityDefinition): boolean {
+  if (definition.status === 'AMBIGUOUS') return false;
+  if (definition.muhurta.evaluationDepth !== 'DEEP' && definition.muhurta.evaluationDepth !== 'CEREMONIAL') return false;
+  const rulePack = resolveMuhurtaRulePack(definition.muhurta);
+  return computeMuhurtaSupportLevel(definition.muhurta, rulePack) === 'SUPPORTED';
+}
 
-export function isSupportedMuhurthamActivity(activityId: string): activityId is SupportedMuhurthamActivityId {
-  return (SUPPORTED_MUHURTHAM_ACTIVITY_IDS as readonly string[]).includes(activityId);
+export const SUPPORTED_MUHURTHAM_ACTIVITY_IDS: string[] = ACTIVITY_DEFINITIONS.filter(isMuhurthamEligible).map((definition) => definition.id);
+export type SupportedMuhurthamActivityId = string;
+
+export function isSupportedMuhurthamActivity(activityId: string): boolean {
+  return SUPPORTED_MUHURTHAM_ACTIVITY_IDS.includes(activityId);
 }
 
 export type MuhurthamRating = 'EXCELLENT' | 'STRONG' | 'FAVORABLE' | 'ACCEPTABLE';
@@ -170,6 +219,38 @@ const MIN_INCLUSION_SCORE = 5.5;
  * moment again". */
 const ALTERNATE_WINDOW_SEPARATION_MINUTES = 90;
 const MAX_ALTERNATE_WINDOWS = 2;
+
+/**
+ * Section 7 start-sensitivity model -- see this file's module doc comment
+ * ("Start sensitivity") for the full reasoning. Both constants are small,
+ * explicit, and the minimum needed to give commencement quality real but
+ * bounded influence: the probe covers only the first
+ * START_SENSITIVITY_PROBE_MINUTES of the window (or the whole window if
+ * shorter), and the blend gives it START_SENSITIVITY_WEIGHT of the final
+ * score -- the full-duration evaluation still dominates (65%).
+ */
+export const START_SENSITIVITY_PROBE_MINUTES = 15;
+export const START_SENSITIVITY_WEIGHT = 0.35;
+
+/** Pure blend of a full-duration score with a commencement-instant probe
+ * score -- exported for direct unit testing of the weighting model in
+ * isolation from the rest of the search pipeline. */
+export function blendStartSensitiveScore(fullDurationScore: number, commencementScore: number): number {
+  return Math.round((fullDurationScore * (1 - START_SENSITIVITY_WEIGHT) + commencementScore * START_SENSITIVITY_WEIGHT) * 10) / 10;
+}
+
+/** Mirrors timingSearch.ts's internal labelForRawScore(), on the 0-10
+ * presentation scale instead of the 0-100 raw scale, so a blended score
+ * gets a label consistent with what that score would have produced if
+ * evaluateTimingCandidate() had computed it directly. */
+function labelForBlendedScore(score: number): TimingCandidateLabel {
+  if (score < 0) return 'CAUTION';
+  if (score >= 9.0) return 'EXCELLENT';
+  if (score >= 8.0) return 'VERY_GOOD';
+  if (score >= 7.0) return 'GOOD';
+  if (score >= 5.5) return 'USABLE';
+  return 'CAUTION';
+}
 
 /**
  * Section 6 rating thresholds, on evaluateTimingCandidate's existing 0-10
@@ -264,11 +345,13 @@ function findBestWindowsForDate(
   context: DailyAssistantContext,
   durationMinutes: number,
   preference: TimingTimePreference,
-  panchangWindows: PanchangWindowSpan[]
+  panchangWindows: PanchangWindowSpan[],
+  classification: MuhurtaClassification | undefined
 ): { best: SampledCandidate; alternates: SampledCandidate[] } | null {
   const dayContext: DailyAssistantContext = { ...context, now: localDateTimeToUTC(dateStr, '12:00', context.timezone) };
   const slotCandidates = buildSlotCandidates(computeAssistantWindows(dayContext));
   const isFrictionSensitive = profile.significance === 'HIGH' || profile.requiresFreshStart;
+  const isStartSensitive = classification?.timingSensitivity.start === 'HIGH';
 
   const candidates: SampledCandidate[] = [];
   for (const slot of slotCandidates) {
@@ -278,8 +361,19 @@ function findBestWindowsForDate(
     const candidate = evaluateTimingCandidate({ profile, start, durationMinutes, context });
     if (candidate.conflicts?.some((c) => c.type === 'FRICTION_WINDOW_BLOCKED')) continue;
     if (isFrictionSensitive && spanOverlapsFrictionWindow(candidate.start, candidate.end, panchangWindows)) continue;
-    if (candidate.score < MIN_INCLUSION_SCORE) continue;
-    candidates.push({ ...candidate, startMinute: slot.startMinute });
+
+    let effectiveCandidate: TimingCandidate = candidate;
+    if (isStartSensitive) {
+      const probeDurationMinutes = Math.min(durationMinutes, START_SENSITIVITY_PROBE_MINUTES);
+      const commencementProbe = evaluateTimingCandidate({ profile, start, durationMinutes: probeDurationMinutes, context });
+      if (commencementProbe.conflicts?.some((c) => c.type === 'FRICTION_WINDOW_BLOCKED')) continue;
+      if (isFrictionSensitive && spanOverlapsFrictionWindow(commencementProbe.start, commencementProbe.end, panchangWindows)) continue;
+      const blendedScore = blendStartSensitiveScore(candidate.score, commencementProbe.score);
+      effectiveCandidate = { ...candidate, score: blendedScore, label: labelForBlendedScore(blendedScore) };
+    }
+
+    if (effectiveCandidate.score < MIN_INCLUSION_SCORE) continue;
+    candidates.push({ ...effectiveCandidate, startMinute: slot.startMinute });
   }
 
   if (candidates.length === 0) return null;
@@ -336,7 +430,7 @@ export function findMuhurthams(request: MuhurthamSearchRequest): MuhurthamSearch
       timezone: request.context.timezone,
     });
 
-    const evaluated = findBestWindowsForDate(profile, dateStr, request.context, durationMinutes, preference, panchangDay.windows);
+    const evaluated = findBestWindowsForDate(profile, dateStr, request.context, durationMinutes, preference, panchangDay.windows, profile.muhurtaClassification);
     if (!evaluated) continue;
 
     const supportReasons = evaluated.best.reasons.filter((r) => r.polarity === 'SUPPORT');

@@ -42,13 +42,15 @@ const FAVORABLE_YOGAS = new Set(['Priti', 'Ayushman', 'Saubhagya', 'Shobhana', '
 const DIFFICULT_YOGAS = new Set(['Atiganda', 'Shula', 'Ganda', 'Vyaghapata', 'Vyatipata', 'Vajra', 'Parigha', 'Vaidhriti']);
 const FAVORABLE_KARANAS = new Set(['Bava', 'Balava', 'Kaulava', 'Taitila', 'Garaja', 'Vanija']);
 
-const RULES: Record<MuhurtaActivityFamily, {
+export interface MuhurtaFamilyRuleData {
   preferredNakshatras: string[];
   avoidNakshatras: string[];
   preferredTithiPatterns: RegExp[];
   avoidTithiPatterns: RegExp[];
   note: string;
-}> = {
+}
+
+const RULES: Record<MuhurtaActivityFamily, MuhurtaFamilyRuleData> = {
   DEEP_WORK: {
     preferredNakshatras: ['Rohini', 'Mrigashira', 'Hasta', 'Chitra', 'Anuradha', 'Shravana', 'Revati'],
     avoidNakshatras: ['Ardra', 'Ashlesha', 'Jyeshtha', 'Mula'],
@@ -168,15 +170,17 @@ export function getPanchangaSnapshot(date: Date): PanchangaSnapshot {
   };
 }
 
-export function evaluateMuhurta(params: {
-  taskTitle: string;
-  date: Date;
-  windowType: SolarWindowType;
-  family?: MuhurtaActivityFamily;
-}): MuhurtaEvaluation {
-  const family = params.family ?? classifyMuhurtaActivity(params.taskTitle);
-  const rules = RULES[family];
-  const panchanga = getPanchangaSnapshot(params.date);
+/**
+ * The generic nakshatra/tithi evaluator: given a Panchanga snapshot and ANY
+ * rule data shaped like MuhurtaFamilyRuleData (the legacy per-family RULES
+ * table below, OR a MuhurtaRulePack's tithi/nakshatra fields -- see
+ * muhurtaRulePacks.ts), produces the same SUPPORT/CAUTION reasons. Extracted
+ * so the rule-pack evaluator (packages/muhurta/src/muhurtaRulePacks.ts) can
+ * reuse this exact logic instead of a second copy -- see that module's own
+ * doc comment and brief section 4 ("evaluate rules generically", not
+ * `if (intent === ...)` branches sprinkled through this file).
+ */
+export function evaluatePanchangaNakshatraTithiReasons(panchanga: PanchangaSnapshot, rules: MuhurtaFamilyRuleData): MuhurtaReason[] {
   const reasons: MuhurtaReason[] = [];
 
   if (rules.preferredNakshatras.includes(panchanga.nakshatra)) {
@@ -191,6 +195,18 @@ export function evaluateMuhurta(params: {
     reasons.push({ code: 'TITHI_UNFAVORABLE', factor: 'TITHI', polarity: 'CAUTION', impact: -8, value: panchanga.tithi });
   }
 
+  return reasons;
+}
+
+/**
+ * Yoga/Karana favorability is GLOBAL -- family/intent-independent -- in
+ * today's engine (FAVORABLE_YOGAS/DIFFICULT_YOGAS/FAVORABLE_KARANAS above
+ * apply identically to every activity). Extracted verbatim so the rule-pack
+ * evaluator reuses it rather than re-declaring the same favorability sets.
+ */
+export function evaluatePanchangaYogaKaranaReasons(panchanga: PanchangaSnapshot): MuhurtaReason[] {
+  const reasons: MuhurtaReason[] = [];
+
   if (FAVORABLE_YOGAS.has(panchanga.yoga)) {
     reasons.push({ code: 'YOGA_SUPPORTIVE', factor: 'YOGA', polarity: 'SUPPORT', impact: 4, value: panchanga.yoga });
   } else if (DIFFICULT_YOGAS.has(panchanga.yoga)) {
@@ -203,16 +219,59 @@ export function evaluateMuhurta(params: {
     reasons.push({ code: 'KARANA_SUPPORTIVE', factor: 'KARANA', polarity: 'SUPPORT', impact: 3, value: panchanga.karana });
   }
 
-  if (params.windowType === 'RAHU_KALAM' || params.windowType === 'YAMA') {
+  return reasons;
+}
+
+/**
+ * Solar-window reason, parameterized on a (possibly undefined) legacy
+ * family for the BRAHMA/GULIKA bonus conditions. RAHU_KALAM/YAMA caution and
+ * ABHIJIT support are family-independent baselines that always apply.
+ * `family` undefined (no legacy-family equivalent exists -- see
+ * muhurtaRulePacks.ts's FAMILY_BASE_SOURCE) simply means neither bonus
+ * condition can match, which is the correct, honest behavior: no invented
+ * bonus for a family with no supporting data.
+ */
+export function evaluateSolarWindowReason(windowType: SolarWindowType, family: MuhurtaActivityFamily | undefined): MuhurtaReason | undefined {
+  if (windowType === 'RAHU_KALAM' || windowType === 'YAMA') {
     const impact = -(family === 'ADMIN' || family === 'SOCIAL' ? 4 : 12);
-    reasons.push({ code: params.windowType === 'RAHU_KALAM' ? 'RAHU_CAUTION' : 'YAMA_CAUTION', factor: 'SOLAR_WINDOW', polarity: 'CAUTION', impact, value: params.windowType });
-  } else if (params.windowType === 'ABHIJIT') {
-    reasons.push({ code: 'ABHIJIT_SUPPORT', factor: 'SOLAR_WINDOW', polarity: 'SUPPORT', impact: 8, value: params.windowType });
-  } else if (params.windowType === 'BRAHMA' && (family === 'MEDITATION' || family === 'LEARNING' || family === 'DEEP_WORK')) {
-    reasons.push({ code: 'BRAHMA_SUPPORT', factor: 'SOLAR_WINDOW', polarity: 'SUPPORT', impact: 7, value: params.windowType });
-  } else if (params.windowType === 'GULIKA' && (family === 'ADMIN' || family === 'LEARNING' || family === 'SOCIAL')) {
-    reasons.push({ code: 'GULIKA_SUPPORT', factor: 'SOLAR_WINDOW', polarity: 'SUPPORT', impact: 4, value: params.windowType });
+    return { code: windowType === 'RAHU_KALAM' ? 'RAHU_CAUTION' : 'YAMA_CAUTION', factor: 'SOLAR_WINDOW', polarity: 'CAUTION', impact, value: windowType };
   }
+  if (windowType === 'ABHIJIT') {
+    return { code: 'ABHIJIT_SUPPORT', factor: 'SOLAR_WINDOW', polarity: 'SUPPORT', impact: 8, value: windowType };
+  }
+  if (windowType === 'BRAHMA' && (family === 'MEDITATION' || family === 'LEARNING' || family === 'DEEP_WORK')) {
+    return { code: 'BRAHMA_SUPPORT', factor: 'SOLAR_WINDOW', polarity: 'SUPPORT', impact: 7, value: windowType };
+  }
+  if (windowType === 'GULIKA' && (family === 'ADMIN' || family === 'LEARNING' || family === 'SOCIAL')) {
+    return { code: 'GULIKA_SUPPORT', factor: 'SOLAR_WINDOW', polarity: 'SUPPORT', impact: 4, value: windowType };
+  }
+  return undefined;
+}
+
+/** Read-only accessor for a legacy family's rule data -- lets
+ * muhurtaRulePacks.ts build family-base rule packs from the EXACT same data
+ * this file's own evaluateMuhurta() uses, without exposing the whole
+ * internal RULES table as a mutable export. */
+export function getFamilyRuleData(family: MuhurtaActivityFamily): MuhurtaFamilyRuleData {
+  return RULES[family];
+}
+
+export function evaluateMuhurta(params: {
+  taskTitle: string;
+  date: Date;
+  windowType: SolarWindowType;
+  family?: MuhurtaActivityFamily;
+}): MuhurtaEvaluation {
+  const family = params.family ?? classifyMuhurtaActivity(params.taskTitle);
+  const rules = RULES[family];
+  const panchanga = getPanchangaSnapshot(params.date);
+  const reasons: MuhurtaReason[] = [
+    ...evaluatePanchangaNakshatraTithiReasons(panchanga, rules),
+    ...evaluatePanchangaYogaKaranaReasons(panchanga),
+  ];
+
+  const windowReason = evaluateSolarWindowReason(params.windowType, family);
+  if (windowReason) reasons.push(windowReason);
 
   const modifier = reasons.reduce((total, reason) => total + (reason.impact ?? 0), 0);
   const legacy = deriveLegacyMuhurtaText(reasons);

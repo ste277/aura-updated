@@ -45,6 +45,8 @@ jobs:
         run: npx ts-node test/muhurthamFinder.test.ts
       - name: Run Muhurtham search API validation test
         run: npx ts-node test/muhurthamSearchApi.test.ts
+      - name: Run Muhurta rule packs test
+        run: npx ts-node test/muhurtaRulePacks.test.ts
       - name: Install web deps
         working-directory: apps/web
         run: npm install

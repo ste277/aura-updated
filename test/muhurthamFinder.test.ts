@@ -1,4 +1,4 @@
-import { findMuhurthams, isSupportedMuhurthamActivity, SUPPORTED_MUHURTHAM_ACTIVITY_IDS } from '../packages/recommendation/src/muhurthamFinder';
+import { blendStartSensitiveScore, findMuhurthams, isSupportedMuhurthamActivity, START_SENSITIVITY_PROBE_MINUTES, START_SENSITIVITY_WEIGHT, SUPPORTED_MUHURTHAM_ACTIVITY_IDS } from '../packages/recommendation/src/muhurthamFinder';
 import { evaluateTimingCandidate } from '../packages/recommendation/src/timingSearch';
 import { profileFromActivity } from '../packages/recommendation/src/dailyAssistant';
 import { findActivityIntent } from '../packages/recommendation/src/personalizedTasks';
@@ -116,21 +116,30 @@ check('findMuhurthams throws for an unknown activityId', threwForUnknown);
 // REJECTS/PENALIZES BLOCKERS, PRESERVES CAUTIONS (no new scoring formula)
 // ============================================================
 
-// Cross-check: findMuhurthams' bestWindow score for a given date must match
-// calling evaluateTimingCandidate() directly at the same instant with the
-// same profile -- proves no second scoring formula exists in this file.
+// Cross-check: findMuhurthams' bestWindow score for a given date must equal
+// blendStartSensitiveScore() applied to two DIRECT evaluateTimingCandidate()
+// calls (full duration + the start-sensitivity commencement probe) -- proves
+// no second/hidden scoring formula exists, only the documented blend of the
+// same reused primitive (start-journey is start-sensitive, see section 7).
 const activity = findActivityIntent('start a journey')!;
 const profile = profileFromActivity(activity);
-const directCandidate = evaluateTimingCandidate({
+const directFullCandidate = evaluateTimingCandidate({
   profile,
   start: new Date(journeyResult.dates[0].bestWindow.start),
   durationMinutes: 60,
   context: chennaiContext,
 });
-check('bestWindow score for a date matches evaluateTimingCandidate() called directly at the same instant (no second scoring formula)', directCandidate.score === journeyResult.dates[0].bestWindow.score);
+const directProbeCandidate = evaluateTimingCandidate({
+  profile,
+  start: new Date(journeyResult.dates[0].bestWindow.start),
+  durationMinutes: Math.min(60, START_SENSITIVITY_PROBE_MINUTES),
+  context: chennaiContext,
+});
+const expectedBlendedScore = blendStartSensitiveScore(directFullCandidate.score, directProbeCandidate.score);
+check('bestWindow score for a date equals blendStartSensitiveScore() of two direct evaluateTimingCandidate() calls (no hidden scoring formula)', expectedBlendedScore === journeyResult.dates[0].bestWindow.score);
 const combinedReasons = [...journeyResult.dates[0].reasons, ...journeyResult.dates[0].cautions];
 const sortByCode = (a: { code: string }, b: { code: string }) => a.code.localeCompare(b.code);
-check('bestWindow reasons for a date match evaluateTimingCandidate() called directly (same reasons, not re-derived)', JSON.stringify([...directCandidate.reasons].sort(sortByCode)) === JSON.stringify([...combinedReasons].sort(sortByCode)));
+check('bestWindow reasons for a date match evaluateTimingCandidate() called directly (same reasons, not re-derived -- blending only ever touches score/label)', JSON.stringify([...directFullCandidate.reasons].sort(sortByCode)) === JSON.stringify([...combinedReasons].sort(sortByCode)));
 
 // ============================================================
 // INTERVAL OVERLAP AFFECTS SUITABILITY (brief section 7)
@@ -250,7 +259,69 @@ check('Every returned date across the DST boundary is within the requested range
 // KNOWN ACTIVITY USES ONTOLOGY (no invented rules)
 // ============================================================
 
-check('Only DEEP-depth, non-AMBIGUOUS activities are exposed', SUPPORTED_MUHURTHAM_ACTIVITY_IDS.length === 3 && JSON.stringify([...SUPPORTED_MUHURTHAM_ACTIVITY_IDS].sort()) === JSON.stringify(['financial-decision', 'new-beginning', 'start-journey']));
+check(
+  'Finder eligibility is metadata-derived: DEEP/CEREMONIAL, non-AMBIGUOUS, SUPPORTED-level activities only',
+  SUPPORTED_MUHURTHAM_ACTIVITY_IDS.length === 5 &&
+    JSON.stringify([...SUPPORTED_MUHURTHAM_ACTIVITY_IDS].sort()) ===
+      JSON.stringify(['business-start', 'financial-decision', 'new-beginning', 'property-purchase', 'start-journey'])
+);
+check('The two new CEREMONIAL occasions (Engagement, Griha Pravesh) are PARTIAL and hidden from Finder', !isSupportedMuhurthamActivity('engagement') && !isSupportedMuhurthamActivity('griha-pravesh'));
+
+const propertyResult = findMuhurthams({
+  activityId: 'property-purchase',
+  dateRange: { start: '2026-09-01', end: '2026-09-15' },
+  timePreference: 'ANY',
+  durationMinutes: 60,
+  limit: 5,
+  context: chennaiContext,
+});
+check('The newly-exposed property-purchase activity searches successfully and returns dates', propertyResult.dates.length > 0);
+check('property-purchase activity metadata matches its catalog entry', propertyResult.activity.id === 'property-purchase' && propertyResult.activity.title === 'Property Purchase');
+
+const businessResult = findMuhurthams({
+  activityId: 'business-start',
+  dateRange: { start: '2026-09-01', end: '2026-09-15' },
+  timePreference: 'ANY',
+  durationMinutes: 60,
+  limit: 5,
+  context: chennaiContext,
+});
+check('The newly-exposed business-start activity searches successfully and returns dates', businessResult.dates.length > 0);
+
+let threwForPartialEngagement = false;
+try {
+  findMuhurthams({ activityId: 'engagement', dateRange: { start: '2026-09-01', end: '2026-09-05' }, context: chennaiContext });
+} catch {
+  threwForPartialEngagement = true;
+}
+check('findMuhurthams throws for engagement (PARTIAL support, not exposed) rather than silently searching it', threwForPartialEngagement);
+
+let threwForPartialGrihaPravesh = false;
+try {
+  findMuhurthams({ activityId: 'griha-pravesh', dateRange: { start: '2026-09-01', end: '2026-09-05' }, context: chennaiContext });
+} catch {
+  threwForPartialGrihaPravesh = true;
+}
+check('findMuhurthams throws for griha-pravesh (PARTIAL support, not exposed) rather than silently searching it', threwForPartialGrihaPravesh);
+
+// ============================================================
+// START SENSITIVITY (brief section 7 -- first real use of timingSensitivity)
+// ============================================================
+
+check('blendStartSensitiveScore is a documented, bounded weighted average (not a new formula)', blendStartSensitiveScore(10, 0) === Math.round(10 * (1 - START_SENSITIVITY_WEIGHT) * 10) / 10);
+check('blendStartSensitiveScore returns the full-duration score unchanged when both inputs are equal', blendStartSensitiveScore(7.5, 7.5) === 7.5);
+check('blendStartSensitiveScore weights the commencement probe by START_SENSITIVITY_WEIGHT (a stronger probe raises the blend)', blendStartSensitiveScore(5.0, 10.0) > 5.0 && blendStartSensitiveScore(5.0, 10.0) < 10.0);
+check('START_SENSITIVITY_WEIGHT keeps the full-duration score dominant (< 50%)', START_SENSITIVITY_WEIGHT < 0.5);
+
+// Every activity currently exposed in Muhurtham Finder has
+// timingSensitivity.start === 'HIGH' (all 5 are commencement-defined
+// occasions), so the START_HIGH blending path is exercised by every FIND
+// above. The cross-check earlier in this file (bestWindow score equals
+// blendStartSensitiveScore() of two direct evaluateTimingCandidate() calls,
+// not a raw single call) is the deterministic proof that the gate is wired:
+// if it were removed or mis-wired, that check would fail because the
+// reported score would equal the raw single-call score instead of the
+// blended one whenever the full-duration and probe scores actually differ.
 
 console.log(allPassed ? '\nALL MUHURTHAM FINDER CHECKS PASSED' : '\nSOME MUHURTHAM FINDER CHECKS FAILED');
 process.exit(allPassed ? 0 : 1);

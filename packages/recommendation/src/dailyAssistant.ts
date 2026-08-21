@@ -7,9 +7,11 @@ import {
   WindowSpan,
 } from '../../panchang/src/windows';
 import { evaluateMuhurta, MuhurtaActivityFamily } from '../../muhurta/src/muhurtaEngine';
+import type { MuhurtaClassification } from '../../muhurta/src/activityOntology';
 import { getActionCards } from './actionCards';
 import { ActivityProfile, findActivityIntent } from './personalizedTasks';
 import { evaluateActivityFit, familyForActivityProfile, PersonalMuhurtaContext } from './auraFitEngine';
+import { getActivityDefinition } from './activityDefinitions';
 
 export interface DailyAssistantLocation {
   latitude: number;
@@ -576,6 +578,13 @@ export type TaskProfile = {
   avoidWindows?: SolarWindowType[];
   activity?: ActivityProfile;
   personalContext?: PersonalMuhurtaContext;
+  /** Resolved from activityDefinitions.ts's ActivityDefinition when
+   * `activity` is a known catalog activity (see profileFromActivity below).
+   * Threaded into evaluateActivityFit() by scoreCandidate() so the
+   * rule-pack-aware evaluation path (muhurtaRulePacks.ts) can run when the
+   * legacy family has no legitimate data -- see auraFitEngine.ts's own doc
+   * comment on evaluateActivityFit's `classification` param. */
+  muhurtaClassification?: MuhurtaClassification;
 };
 
 export type SlotCandidate = {
@@ -720,6 +729,7 @@ export function scoreCandidate(candidate: SlotCandidate, profile: TaskProfile, d
       date,
       windowType: candidate.type,
       personalContext: profile.personalContext,
+      classification: profile.muhurtaClassification,
     });
     if (profile.activity.avoidWindowTypes.includes(candidate.type) && !profile.activity.allowDuringAvoidWindow && fit.score < 55) return -100;
     return fit.score;
@@ -783,6 +793,7 @@ export function profileFromActivity(activity: ActivityProfile): TaskProfile {
     family: familyForActivityProfile(activity),
     significance: activity.significance,
     requiresFreshStart: activity.requiresFreshStart,
+    muhurtaClassification: getActivityDefinition(activity)?.muhurta,
     scores: {},
     reason: activity.description,
     neutralReason: activity.significance === 'HIGH'

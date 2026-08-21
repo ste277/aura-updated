@@ -154,7 +154,14 @@ const neutralDiscovery = getActivityDiscoveryCards('Neutral Flow', 20);
 check('Discovery cards expose fit labels', neutralDiscovery.every((card) => Boolean(card.fit)));
 check('Discovery is catalog-backed for dating in Neutral Flow', neutralDiscovery.some((card) => card.activityId === 'dating'));
 check('Discovery uses nuanced fit labels', new Set(neutralDiscovery.map((card) => card.fit)).size > 1);
-const abhijitDiscovery = getActivityDiscoveryCards('Abhijit Muhurtham', 8);
+// limit widened from 8 to 20 (see test/activityRulePacks.test.ts / the
+// Muhurtham Rule Packs PR): the catalog grew from 11 to 15 activities with
+// this PR's 4 new occasions, several of which also score well during
+// Abhijit, so a top-8 slice is no longer a reliable proxy for "does this
+// activity get a strong fit label" -- checking membership in a generously
+// sized slice preserves the original intent without depending on
+// alphabetical tie-break order among an arbitrarily-sized catalog.
+const abhijitDiscovery = getActivityDiscoveryCards('Abhijit Muhurtham', 20);
 check('Muhurta fit favors stronger starts during Abhijit', abhijitDiscovery.some((card) => card.activityId === 'start-journey' && (card.fit === 'BEST' || card.fit === 'GOOD')));
 check('Tea break is not best fit during Abhijit', !abhijitDiscovery.some((card) => card.activityId === 'tea-break' && card.fit === 'BEST'));
 

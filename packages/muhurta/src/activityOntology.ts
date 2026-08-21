@@ -60,12 +60,18 @@ export type MuhurtaIntent =
   | 'PITCH' // reserved: not yet assigned, see comment above
   | 'PROJECT_START'
   | 'STRATEGIC_PLANNING' // reserved: not yet assigned, see comment above
+  // BUSINESS
+  | 'BUSINESS_START'
   // FINANCE
   | 'IMPORTANT_FINANCIAL_DECISION'
+  | 'PROPERTY_PURCHASE'
   // TRAVEL
   | 'JOURNEY_START'
   // RELATIONSHIP
   | 'DATE'
+  | 'ENGAGEMENT'
+  // HOME
+  | 'GRIHA_PRAVESH'
   // EDUCATION
   | 'STUDY'
   // HEALTH
@@ -89,9 +95,13 @@ export const INTENT_FAMILY: Record<MuhurtaIntent, MuhurtaFamily> = {
   PITCH: 'WORK',
   PROJECT_START: 'WORK',
   STRATEGIC_PLANNING: 'WORK',
+  BUSINESS_START: 'BUSINESS',
   IMPORTANT_FINANCIAL_DECISION: 'FINANCE',
+  PROPERTY_PURCHASE: 'FINANCE',
   JOURNEY_START: 'TRAVEL',
   DATE: 'RELATIONSHIP',
+  ENGAGEMENT: 'RELATIONSHIP',
+  GRIHA_PRAVESH: 'HOME',
   STUDY: 'EDUCATION',
   WORKOUT: 'HEALTH',
   MEDITATION: 'HEALTH',
