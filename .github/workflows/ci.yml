@@ -41,6 +41,10 @@ jobs:
         run: npx ts-node test/windowOverlap.test.ts
       - name: Run day activity suggestions test
         run: npx ts-node test/dayActivitySuggestions.test.ts
+      - name: Run Muhurtham Finder test
+        run: npx ts-node test/muhurthamFinder.test.ts
+      - name: Run Muhurtham search API validation test
+        run: npx ts-node test/muhurthamSearchApi.test.ts
       - name: Install web deps
         working-directory: apps/web
         run: npm install
@@ -52,6 +56,10 @@ jobs:
         env:
           TS_NODE_COMPILER_OPTIONS: '{"jsx":"react"}'
         run: npx ts-node test/panchangCalendarLogic.test.ts
+      - name: Run Muhurtham Finder view logic test
+        env:
+          TS_NODE_COMPILER_OPTIONS: '{"jsx":"react"}'
+        run: npx ts-node test/muhurthamFinderViewLogic.test.ts
   web-build:
     name: Next.js production build
     runs-on: ubuntu-latest
