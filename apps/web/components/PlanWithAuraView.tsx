@@ -2,7 +2,12 @@
 
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import type { PlanningHorizon, TaskSlotRecommendation, TimePreference } from '../../../packages/recommendation/src/dailyAssistant';
+import { buildGoogleCalendarUrl } from '../../../packages/recommendation/src/dailyAssistant';
 import { FULL_ACTIVITY_CATALOG } from '../../../packages/recommendation/src/personalizedTasks';
+import type { TimingCandidate, TimingCandidateLabel, TimingSearchDateRange, TimingSearchMode, TimingSearchResponse, TimingTimePreference } from '../../../packages/recommendation/src/timingSearch';
+import type { MuhurtaReason } from '../../../packages/muhurta/src/activityOntology';
+import { formatMuhurtaReason } from '../../../packages/muhurta/src/muhurtaReasonFormat';
+import { localDateTimeToUTC } from '../lib/timezone';
 import { triggerHaptic } from '../lib/haptics';
 
 interface TaskSuggestion {
@@ -22,6 +27,25 @@ interface PlanWithAuraViewProps {
     customEndDate?: string,
     timePreference?: TimePreference
   ) => Promise<TaskSlotRecommendation>;
+  /** Client-facing subset of TimingSearchRequest -- `context` (location/timezone/
+   * personal Muhurta context) is resolved server-side from the session user,
+   * exactly like onSlotTask/the slot-task route already does, so it's never
+   * built or sent from here. */
+  onTimingSearch: (request: {
+    mode: TimingSearchMode;
+    activityId?: string;
+    taskTitle?: string;
+    durationMinutes: number;
+    dateRange?: TimingSearchDateRange;
+    horizon?: PlanningHorizon;
+    customStartDate?: string;
+    customEndDate?: string;
+    timePreference?: TimingTimePreference;
+    limit?: number;
+    candidateStart?: string;
+    checkNearbyWindowMinutes?: number;
+    candidateStarts?: string[];
+  }) => Promise<TimingSearchResponse>;
   onViewDay?: () => void;
   onPlanLogged?: () => void;
   timezone?: string;
@@ -82,8 +106,67 @@ const TIME_PREFERENCES: Array<{ value: TimePreference; label: string; icon: stri
   { value: 'MORNING', label: 'Morning', icon: '☀️', accent: '#facc15' },
   { value: 'AFTERNOON', label: 'Afternoon', icon: '☀', accent: '#fb923c' },
   { value: 'EVENING', label: 'Evening', icon: '🌅', accent: '#ff5f95' },
+  // Existing product semantics: Night runs 21:00-05:00 (wraps past midnight),
+  // not 21:00-24:00 -- deliberately not stating an exact range here so the
+  // wording can't imply the shorter window (see timingSearch.ts's
+  // mapTimingTimePreference doc comment for where this is preserved).
   { value: 'NIGHT', label: 'Night', icon: '🌙', accent: '#38bdf8' },
 ];
+
+/** Timing Search's mode-switcher tabs (section 3 of the brief) -- human labels only. */
+const PLAN_MODES: Array<{ value: TimingSearchMode; label: string; helper: string }> = [
+  { value: 'FIND', label: 'Find a Time', helper: 'When should I do this?' },
+  { value: 'CHECK', label: 'Check a Time', helper: 'Is this specific time good?' },
+  { value: 'COMPARE', label: 'Compare', helper: 'Which option is better?' },
+];
+
+/** TimingCandidateLabel -> friendly copy (section 11). Do not invent a second
+ * fit classification -- this is purely a display mapping of the engine's own
+ * label values. */
+export const RESULT_LABEL_TEXT: Record<TimingCandidateLabel, string> = {
+  EXCELLENT: 'Excellent fit',
+  VERY_GOOD: 'Very good',
+  GOOD: 'Good',
+  USABLE: 'Usable',
+  CAUTION: 'Caution',
+};
+
+const RESULT_LABEL_COLOR: Record<TimingCandidateLabel, string> = {
+  EXCELLENT: '#4ade80',
+  VERY_GOOD: '#4ade80',
+  GOOD: '#38bdf8',
+  USABLE: '#facc15',
+  CAUTION: '#fb7185',
+};
+
+const REASON_FACTOR_LABEL: Record<MuhurtaReason['factor'], string> = {
+  NAKSHATRA: 'Nakshatra',
+  TITHI: 'Tithi',
+  YOGA: 'Yoga',
+  KARANA: 'Karana',
+  SOLAR_WINDOW: 'Solar window',
+  PERSONAL: 'Personal Tara',
+  ACTIVITY: 'Activity rule',
+};
+
+export function toTimingPreference(preference: TimePreference): TimingTimePreference {
+  // WORK_HOURS is part of the legacy TimePreference union but was never
+  // offered by this component's own TIME_PREFERENCES picker (unreachable via
+  // the UI) -- mapped to ANY defensively rather than narrowing the shared type.
+  if (preference === 'MORNING' || preference === 'AFTERNOON' || preference === 'EVENING' || preference === 'NIGHT') return preference;
+  return 'ANY';
+}
+
+/** Section 8: known activity selection must send activityId, not a title
+ * string converted back to free text. A title that exactly matches a
+ * catalog entry (whether picked from a chip or typed verbatim) is treated
+ * as that known activity; anything else falls through to taskTitle, which
+ * the API resolves via the same classifyTask() fallback as ever. */
+export function resolveActivitySelection(rawTitle: string): { activityId?: string; taskTitle?: string } {
+  const trimmed = rawTitle.trim();
+  const known = FULL_ACTIVITY_CATALOG.find((activity) => activity.title.toLowerCase() === trimmed.toLowerCase());
+  return known ? { activityId: known.id } : { taskTitle: trimmed };
+}
 
 type PlanIcon = 'workout' | 'focus' | 'heart' | 'study' | 'meditate' | 'meeting' | 'journey';
 type SpeechRecognitionConstructor = new () => {
@@ -268,7 +351,42 @@ function mapPlanRow(row: PlanApiRow): UpcomingPlan {
   };
 }
 
-export function PlanWithAuraView({ onSlotTask, onViewDay, onPlanLogged, timezone, initialActivity, initialActivityKey }: PlanWithAuraViewProps) {
+export function findCandidateKey(candidate: TimingCandidate): string {
+  return `${candidate.metadata.activityType}-${candidate.start}-${candidate.end}`.toLowerCase();
+}
+
+/** Adapts a TimingCandidate into the existing UpcomingPlan/handleSavePlan
+ * pipeline (POST /api/plans) so Find/Check/Compare's "Use this time" reuses
+ * the same persistence path the original Plan flow already had, rather than
+ * a second save mechanism. candidate.metadata.windowLabel is produced by the
+ * same formatWindowLabel() the old slot-task-backed flow used, so
+ * windowTypeFromLabel() below still resolves it correctly. */
+export function planPayloadFromCandidate(candidate: TimingCandidate, durationMinutes: number): UpcomingPlan {
+  const start = new Date(candidate.start);
+  const end = new Date(candidate.end);
+  const title = candidate.metadata.activityType;
+  return {
+    id: `aura-${findCandidateKey(candidate)}`.replace(/[^a-z0-9]+/g, '-'),
+    title,
+    icon: planIconForTitle(title),
+    when: candidate.metadata.dateLabel,
+    plannedStartAt: candidate.start,
+    plannedEndAt: candidate.end,
+    duration: durationLabel(durationMinutes),
+    time: formatPlanTimeRange(start, end),
+    window: candidate.metadata.windowLabel,
+    match: candidate.label === 'EXCELLENT' || candidate.label === 'VERY_GOOD' ? 'Best Match' : 'Good Match',
+    note: RESULT_LABEL_TEXT[candidate.label],
+    accent: planAccentForTitle(title),
+    details: candidate.reasons.length > 0 ? candidate.reasons.map((reason) => formatMuhurtaReason(reason)).join(' ') : 'Aura found this as a good moment for this activity.',
+    score: candidate.score * 10,
+    googleCalendarUrl: buildGoogleCalendarUrl(title, candidate.start, candidate.end),
+    source: 'Aura',
+  };
+}
+
+export function PlanWithAuraView({ onSlotTask: _onSlotTask, onTimingSearch, onViewDay, onPlanLogged, timezone, initialActivity, initialActivityKey }: PlanWithAuraViewProps) {
+  const [planMode, setPlanMode] = useState<TimingSearchMode>('FIND');
   const [taskTitle, setTaskTitle] = useState('');
   const [, setIsCustomTask] = useState(false);
   const [horizon, setHorizon] = useState<PlanningHorizon>('TODAY');
@@ -276,10 +394,30 @@ export function PlanWithAuraView({ onSlotTask, onViewDay, onPlanLogged, timezone
   const [timePreference, setTimePreference] = useState<TimePreference>('AFTERNOON');
   const [customStartDate, setCustomStartDate] = useState('');
   const [customEndDate, setCustomEndDate] = useState('');
-  const [recommendation, setRecommendation] = useState<TaskSlotRecommendation | null>(null);
+  const [findResult, setFindResult] = useState<TimingSearchResponse | null>(null);
   const [error, setError] = useState('');
   const [isLoading, setIsLoading] = useState(false);
   const [isListening, setIsListening] = useState(false);
+
+  // CHECK mode
+  const [checkTaskTitle, setCheckTaskTitle] = useState('');
+  const [checkDate, setCheckDate] = useState('');
+  const [checkStartTime, setCheckStartTime] = useState('');
+  const [checkDurationMinutes, setCheckDurationMinutes] = useState(60);
+  const [checkResult, setCheckResult] = useState<TimingSearchResponse | null>(null);
+  const [checkError, setCheckError] = useState('');
+  const [isChecking, setIsChecking] = useState(false);
+
+  // COMPARE mode
+  const [compareTaskTitle, setCompareTaskTitle] = useState('');
+  const [compareDurationMinutes, setCompareDurationMinutes] = useState(60);
+  const [compareADate, setCompareADate] = useState('');
+  const [compareAStartTime, setCompareAStartTime] = useState('');
+  const [compareBDate, setCompareBDate] = useState('');
+  const [compareBStartTime, setCompareBStartTime] = useState('');
+  const [compareResult, setCompareResult] = useState<TimingSearchResponse | null>(null);
+  const [compareError, setCompareError] = useState('');
+  const [isComparing, setIsComparing] = useState(false);
   const [showAllPlans, setShowAllPlans] = useState(false);
   const [showMoreActivities, setShowMoreActivities] = useState(false);
   const [savedPlans, setSavedPlans] = useState<UpcomingPlan[]>([]);
@@ -298,7 +436,7 @@ export function PlanWithAuraView({ onSlotTask, onViewDay, onPlanLogged, timezone
     setTaskTitle(nextActivity);
     setIsCustomTask(!knownTask);
     setTimePreference(recommendedPreference(nextActivity));
-    setRecommendation(null);
+    setFindResult(null);
     setError('');
     setShowAllPlans(false);
     setShowMoreActivities(false);
@@ -409,7 +547,7 @@ export function PlanWithAuraView({ onSlotTask, onViewDay, onPlanLogged, timezone
     setHorizon('SEVEN_DAYS');
     setCustomStartDate('');
     setCustomEndDate('');
-    setRecommendation(null);
+    setFindResult(null);
     setShowAllPlans(false);
     setExpandedPlanId(null);
     setReschedulingPlanId(plan.status === 'UPCOMING' ? plan.id : null);
@@ -481,8 +619,18 @@ export function PlanWithAuraView({ onSlotTask, onViewDay, onPlanLogged, timezone
     setIsLoading(true);
     setError('');
     try {
-      const next = await onSlotTask(taskTitle, durationMinutes, horizon, customStartDate, customEndDate, timePreference);
-      setRecommendation(next);
+      const selection = resolveActivitySelection(taskTitle);
+      const next = await onTimingSearch({
+        mode: 'FIND',
+        ...selection,
+        durationMinutes,
+        horizon,
+        customStartDate: horizon === 'CUSTOM' ? customStartDate : undefined,
+        customEndDate: horizon === 'CUSTOM' ? customEndDate : undefined,
+        timePreference: toTimingPreference(timePreference),
+        limit: 3,
+      });
+      setFindResult(next);
       setSavingOpportunityKey(null);
       setPlannedOpportunityKeys(new Set());
       triggerHaptic('success');
@@ -490,6 +638,57 @@ export function PlanWithAuraView({ onSlotTask, onViewDay, onPlanLogged, timezone
       setError('Aura could not find a time for this request. Try a shorter duration or a wider date range.');
     } finally {
       setIsLoading(false);
+    }
+  };
+
+  const handleCheckTime = async () => {
+    if (!checkTaskTitle.trim() || !checkDate || !checkStartTime) return;
+    setIsChecking(true);
+    setCheckError('');
+    try {
+      const selection = resolveActivitySelection(checkTaskTitle);
+      const candidateStart = localDateTimeToUTC(checkDate, checkStartTime, timezone || 'UTC').toISOString();
+      const next = await onTimingSearch({
+        mode: 'CHECK',
+        ...selection,
+        durationMinutes: checkDurationMinutes,
+        candidateStart,
+      });
+      setCheckResult(next);
+      setSavingOpportunityKey(null);
+      setPlannedOpportunityKeys(new Set());
+      triggerHaptic('success');
+    } catch {
+      setCheckError('Aura could not check that time. Double check the date and time and try again.');
+    } finally {
+      setIsChecking(false);
+    }
+  };
+
+  const handleCompareTimes = async () => {
+    if (!compareTaskTitle.trim() || !compareADate || !compareAStartTime || !compareBDate || !compareBStartTime) return;
+    setIsComparing(true);
+    setCompareError('');
+    try {
+      const selection = resolveActivitySelection(compareTaskTitle);
+      const candidateStarts = [
+        localDateTimeToUTC(compareADate, compareAStartTime, timezone || 'UTC').toISOString(),
+        localDateTimeToUTC(compareBDate, compareBStartTime, timezone || 'UTC').toISOString(),
+      ];
+      const next = await onTimingSearch({
+        mode: 'COMPARE',
+        ...selection,
+        durationMinutes: compareDurationMinutes,
+        candidateStarts,
+      });
+      setCompareResult(next);
+      setSavingOpportunityKey(null);
+      setPlannedOpportunityKeys(new Set());
+      triggerHaptic('success');
+    } catch {
+      setCompareError('Aura could not compare those times. Double check both dates and times and try again.');
+    } finally {
+      setIsComparing(false);
     }
   };
 
@@ -524,7 +723,7 @@ export function PlanWithAuraView({ onSlotTask, onViewDay, onPlanLogged, timezone
       setTaskTitle(transcript);
       setIsCustomTask(true);
       setTimePreference(recommendedPreference(transcript));
-      setRecommendation(null);
+      setFindResult(null);
     };
     recognition.onerror = () => {
       setError('Aura could not hear that clearly. Try typing the activity.');
@@ -542,8 +741,6 @@ export function PlanWithAuraView({ onSlotTask, onViewDay, onPlanLogged, timezone
     });
   };
 
-  const options = recommendation?.planningOptions ?? [];
-  const hasMultiOptions = options.length > 0;
   const saveOpportunity = async (key: string, plan: UpcomingPlan) => {
     if (savingOpportunityKey || plannedOpportunityKeys.has(key)) return;
     setSavingOpportunityKey(key);
@@ -572,6 +769,24 @@ export function PlanWithAuraView({ onSlotTask, onViewDay, onPlanLogged, timezone
         </button>
       </header>
 
+      <div style={modeSwitcherStyle}>
+        {PLAN_MODES.map((mode) => (
+          <button
+            key={mode.value}
+            type="button"
+            onClick={() => setPlanMode(mode.value)}
+            style={{ ...modePillStyle, ...(planMode === mode.value ? modePillActiveStyle : {}) }}
+          >
+            {mode.label}
+          </button>
+        ))}
+      </div>
+      <div style={{ color: '#aab7d2', fontSize: 13, marginTop: -8 }}>
+        {PLAN_MODES.find((mode) => mode.value === planMode)?.helper}
+      </div>
+
+      {planMode === 'FIND' && (
+      <>
       <section style={panelStyle}>
         <SectionTitle number={1} label="What do you want to do?" />
         {reschedulingPlanId && (
@@ -586,7 +801,7 @@ export function PlanWithAuraView({ onSlotTask, onViewDay, onPlanLogged, timezone
             onChange={(event) => {
               setTaskTitle(event.target.value);
               setIsCustomTask(true);
-              setRecommendation(null);
+              setFindResult(null);
             }}
             placeholder="e.g. Workout, Deep work, Study, Date night..."
             style={inputStyle}
@@ -616,7 +831,7 @@ export function PlanWithAuraView({ onSlotTask, onViewDay, onPlanLogged, timezone
                 setIsCustomTask(false);
                 if (task.defaultDurationMinutes) setDurationMinutes(task.defaultDurationMinutes);
                 setTimePreference(recommendedPreference(task.title));
-                setRecommendation(null);
+                setFindResult(null);
               }}
             />
           ))}
@@ -687,87 +902,220 @@ export function PlanWithAuraView({ onSlotTask, onViewDay, onPlanLogged, timezone
         {error && <div style={{ color: '#fb6b6b', fontSize: 12, marginTop: 10, lineHeight: 1.35 }}>{error}</div>}
       </section>
 
-      {recommendation && (
+      {findResult && (
         <section style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
           <SectionHeader label="Aura's Best Moments" actionLabel={onViewDay ? 'View my day' : undefined} onAction={onViewDay} />
-          {hasMultiOptions ? options.map((option, index) => {
-            const opportunityKey = `${recommendation.activityType}-${option.startsAtLocal}-${option.endsAtLocal}`;
-            const planPayload: UpcomingPlan = {
-                id: `aura-${option.dateLabel}-${option.startTime}-${recommendation.activityType}`.toLowerCase().replace(/[^a-z0-9]+/g, '-'),
-                title: recommendation.activityType,
-                icon: planIconForTitle(recommendation.activityType),
-                when: option.dateLabel,
-                plannedStartAt: option.startsAtLocal,
-                plannedEndAt: option.endsAtLocal,
-                duration: durationLabel(durationMinutes),
-                time: `${option.startTime} - ${option.endTime}`,
-                window: option.summary.includes('Abhijit') ? 'Abhijit Muhurtham' : option.summary.includes('Gulika') ? 'Steady Progress (Gulika)' : option.summary.includes('Brahma') ? 'Brahma Muhurta' : 'Neutral Flow',
-                match: option.quality === 'STRONG' ? 'Best Match' : 'Good Match',
-                note: option.quality === 'STRONG' ? 'Excellent match' : option.quality === 'GOOD' ? 'Good match' : 'Usable match',
-                accent: planAccentForTitle(recommendation.activityType),
-                details: option.summary,
-                score: option.score,
-                googleCalendarUrl: option.googleCalendarUrl,
-                source: 'Aura',
-              };
-            return (
-              <OpportunityCard
-                key={opportunityKey}
-                rank={index}
-                title={recommendation.activityType}
-                durationText={durationLabel(durationMinutes)}
-                dateLabel={option.dateLabel}
-                startTime={option.startTime}
-                endTime={option.endTime}
-                score={option.score}
-                quality={option.quality}
-                summary={option.summary}
-                googleCalendarUrl={option.googleCalendarUrl}
-                isSaving={savingOpportunityKey === opportunityKey}
-                isPlanned={plannedOpportunityKeys.has(opportunityKey)}
-                onPlan={() => saveOpportunity(opportunityKey, planPayload)}
-              />
-            );
-          }) : (() => {
-            const opportunityKey = `${recommendation.activityType}-${recommendation.calendar.startsAtLocal}-${recommendation.calendar.endsAtLocal}`;
-            const recommendationScore = recommendation.windowQuality === 'BEST' ? 92 : recommendation.windowQuality === 'GOOD' ? 84 : recommendation.windowQuality === 'AVOID' ? 35 : 72;
-            const planPayload: UpcomingPlan = {
-                id: `aura-${recommendation.bestWindow.startTime}-${recommendation.activityType}`.toLowerCase().replace(/[^a-z0-9]+/g, '-'),
-                title: recommendation.activityType,
-                icon: planIconForTitle(recommendation.activityType),
-                when: recommendation.timeStatus === 'NOW' ? 'Today' : 'Recommended',
-                plannedStartAt: recommendation.calendar.startsAtLocal,
-                plannedEndAt: recommendation.calendar.endsAtLocal,
-                duration: durationLabel(durationMinutes),
-                time: `${recommendation.bestWindow.startTime} - ${recommendation.bestWindow.endTime}`,
-                window: recommendation.bestWindow.label,
-                match: recommendation.windowQuality === 'BEST' ? 'Best Match' : 'Good Match',
-                note: recommendation.windowQuality === 'BEST' ? 'Excellent match' : 'Good match',
-                accent: planAccentForTitle(recommendation.activityType),
-                details: recommendation.bestWindow.reason,
-                score: recommendationScore,
-                googleCalendarUrl: recommendation.calendar.googleCalendarUrl,
-                source: 'Aura',
-              };
-            return (
-              <OpportunityCard
-                rank={0}
-                title={recommendation.activityType}
-                durationText={durationLabel(durationMinutes)}
-                dateLabel={recommendation.timeStatus === 'NOW' ? 'Today' : 'Recommended'}
-                startTime={recommendation.bestWindow.startTime}
-                endTime={recommendation.bestWindow.endTime}
-                score={recommendationScore}
-                quality={recommendation.windowQuality === 'BEST' ? 'STRONG' : recommendation.windowQuality === 'GOOD' ? 'GOOD' : 'USABLE'}
-                summary={recommendation.bestWindow.reason}
-                googleCalendarUrl={recommendation.calendar.googleCalendarUrl}
-                isSaving={savingOpportunityKey === opportunityKey}
-                isPlanned={plannedOpportunityKeys.has(opportunityKey)}
-                onPlan={() => saveOpportunity(opportunityKey, planPayload)}
-              />
-            );
-          })()}
+          {findResult.candidates.length === 0 && (
+            <div style={emptyPlansStyle}>Aura could not find a usable time for this request. Try a shorter duration, a wider date range, or a different preferred time.</div>
+          )}
+          {findResult.candidates[0] && (
+            <TimingResultCard
+              kicker="BEST MATCH"
+              candidate={findResult.candidates[0]}
+              activityTitle={findResult.candidates[0].metadata.activityType}
+              durationMinutes={durationMinutes}
+              isSaving={savingOpportunityKey === findCandidateKey(findResult.candidates[0])}
+              isPlanned={plannedOpportunityKeys.has(findCandidateKey(findResult.candidates[0]))}
+              onPlan={() => saveOpportunity(findCandidateKey(findResult.candidates[0]), planPayloadFromCandidate(findResult.candidates[0], durationMinutes))}
+            />
+          )}
+          {findResult.candidates.length > 1 && (
+            <>
+              <SectionHeader label="Other Good Options" />
+              {findResult.candidates.slice(1).map((candidate) => (
+                <TimingResultCard
+                  key={findCandidateKey(candidate)}
+                  kicker="OTHER OPTION"
+                  candidate={candidate}
+                  activityTitle={candidate.metadata.activityType}
+                  durationMinutes={durationMinutes}
+                  isSaving={savingOpportunityKey === findCandidateKey(candidate)}
+                  isPlanned={plannedOpportunityKeys.has(findCandidateKey(candidate))}
+                  onPlan={() => saveOpportunity(findCandidateKey(candidate), planPayloadFromCandidate(candidate, durationMinutes))}
+                />
+              ))}
+            </>
+          )}
         </section>
+      )}
+      </>
+      )}
+
+      {planMode === 'CHECK' && (
+        <>
+          <section style={panelStyle}>
+            <SectionTitle number={1} label="Activity" />
+            <div style={inputShellStyle}>
+              <span style={{ fontSize: 21, color: '#7dd3fc' }}>✦</span>
+              <input
+                value={checkTaskTitle}
+                onChange={(event) => { setCheckTaskTitle(event.target.value); setCheckResult(null); }}
+                placeholder="e.g. Important meeting"
+                style={inputStyle}
+              />
+            </div>
+          </section>
+
+          <div style={{ ...panelStyle, display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10 }}>
+            <label style={dateLabelStyle}>
+              Date
+              <input type="date" value={checkDate} onChange={(event) => { setCheckDate(event.target.value); setCheckResult(null); }} style={dateInputStyle} />
+            </label>
+            <label style={dateLabelStyle}>
+              Start time
+              <input type="time" value={checkStartTime} onChange={(event) => { setCheckStartTime(event.target.value); setCheckResult(null); }} style={dateInputStyle} />
+            </label>
+          </div>
+
+          <SelectPanel
+            number={2}
+            icon="🕒"
+            label="How long?"
+            value={DURATIONS.find((item) => item.value === checkDurationMinutes)?.label ?? `${checkDurationMinutes} min`}
+            helper="Duration to check"
+            options={DURATIONS}
+            selectedValue={checkDurationMinutes}
+            onChange={(value) => { setCheckDurationMinutes(Number(value)); setCheckResult(null); }}
+          />
+
+          <section style={panelStyle}>
+            <button
+              type="button"
+              disabled={!checkTaskTitle.trim() || !checkDate || !checkStartTime || isChecking}
+              onClick={handleCheckTime}
+              style={{ ...ctaStyle, marginTop: 0, opacity: checkTaskTitle.trim() && checkDate && checkStartTime ? 1 : 0.55 }}
+            >
+              {isChecking ? 'Checking...' : '✦ Check This Time'}
+            </button>
+            {checkError && <div style={{ color: '#fb6b6b', fontSize: 12, marginTop: 10, lineHeight: 1.35 }}>{checkError}</div>}
+          </section>
+
+          {checkResult?.requestedCandidate && (
+            <section style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+              <SectionHeader label="Your Requested Time" />
+              <TimingResultCard
+                kicker="REQUESTED TIME"
+                candidate={checkResult.requestedCandidate}
+                activityTitle={checkResult.requestedCandidate.metadata.activityType}
+                durationMinutes={checkDurationMinutes}
+                isSaving={savingOpportunityKey === findCandidateKey(checkResult.requestedCandidate)}
+                isPlanned={plannedOpportunityKeys.has(findCandidateKey(checkResult.requestedCandidate))}
+                onPlan={() => saveOpportunity(findCandidateKey(checkResult.requestedCandidate!), planPayloadFromCandidate(checkResult.requestedCandidate!, checkDurationMinutes))}
+              />
+              {checkResult.betterNearby && (
+                <>
+                  <SectionHeader label="Better Nearby" />
+                  <TimingResultCard
+                    kicker="BETTER NEARBY"
+                    candidate={checkResult.betterNearby}
+                    activityTitle={checkResult.betterNearby.metadata.activityType}
+                    durationMinutes={checkDurationMinutes}
+                    planCtaLabel="Use better time"
+                    isSaving={savingOpportunityKey === findCandidateKey(checkResult.betterNearby)}
+                    isPlanned={plannedOpportunityKeys.has(findCandidateKey(checkResult.betterNearby))}
+                    onPlan={() => saveOpportunity(findCandidateKey(checkResult.betterNearby!), planPayloadFromCandidate(checkResult.betterNearby!, checkDurationMinutes))}
+                  />
+                </>
+              )}
+            </section>
+          )}
+        </>
+      )}
+
+      {planMode === 'COMPARE' && (
+        <>
+          <section style={panelStyle}>
+            <SectionTitle number={1} label="Activity" />
+            <div style={inputShellStyle}>
+              <span style={{ fontSize: 21, color: '#7dd3fc' }}>✦</span>
+              <input
+                value={compareTaskTitle}
+                onChange={(event) => { setCompareTaskTitle(event.target.value); setCompareResult(null); }}
+                placeholder="e.g. Dinner date"
+                style={inputStyle}
+              />
+            </div>
+          </section>
+
+          <SelectPanel
+            number={2}
+            icon="🕒"
+            label="How long?"
+            value={DURATIONS.find((item) => item.value === compareDurationMinutes)?.label ?? `${compareDurationMinutes} min`}
+            helper="Duration for both options"
+            options={DURATIONS}
+            selectedValue={compareDurationMinutes}
+            onChange={(value) => { setCompareDurationMinutes(Number(value)); setCompareResult(null); }}
+          />
+
+          <section style={panelStyle}>
+            <SectionTitle number={3} label="Option A" />
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10, marginTop: 12 }}>
+              <label style={dateLabelStyle}>
+                Date
+                <input type="date" value={compareADate} onChange={(event) => { setCompareADate(event.target.value); setCompareResult(null); }} style={dateInputStyle} />
+              </label>
+              <label style={dateLabelStyle}>
+                Start time
+                <input type="time" value={compareAStartTime} onChange={(event) => { setCompareAStartTime(event.target.value); setCompareResult(null); }} style={dateInputStyle} />
+              </label>
+            </div>
+          </section>
+
+          <section style={panelStyle}>
+            <SectionTitle number={4} label="Option B" />
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10, marginTop: 12 }}>
+              <label style={dateLabelStyle}>
+                Date
+                <input type="date" value={compareBDate} onChange={(event) => { setCompareBDate(event.target.value); setCompareResult(null); }} style={dateInputStyle} />
+              </label>
+              <label style={dateLabelStyle}>
+                Start time
+                <input type="time" value={compareBStartTime} onChange={(event) => { setCompareBStartTime(event.target.value); setCompareResult(null); }} style={dateInputStyle} />
+              </label>
+            </div>
+          </section>
+
+          <section style={panelStyle}>
+            <button
+              type="button"
+              disabled={!compareTaskTitle.trim() || !compareADate || !compareAStartTime || !compareBDate || !compareBStartTime || isComparing}
+              onClick={handleCompareTimes}
+              style={{ ...ctaStyle, marginTop: 0, opacity: compareTaskTitle.trim() && compareADate && compareAStartTime && compareBDate && compareBStartTime ? 1 : 0.55 }}
+            >
+              {isComparing ? 'Comparing...' : '✦ Compare Times'}
+            </button>
+            {compareError && <div style={{ color: '#fb6b6b', fontSize: 12, marginTop: 10, lineHeight: 1.35 }}>{compareError}</div>}
+          </section>
+
+          {compareResult && compareResult.candidates.length >= 2 && (
+            <section style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+              <SectionHeader label="Recommended" />
+              <TimingResultCard
+                kicker="RECOMMENDED"
+                candidate={compareResult.candidates[0]}
+                activityTitle={compareResult.candidates[0].metadata.activityType}
+                durationMinutes={compareDurationMinutes}
+                isSaving={savingOpportunityKey === findCandidateKey(compareResult.candidates[0])}
+                isPlanned={plannedOpportunityKeys.has(findCandidateKey(compareResult.candidates[0]))}
+                onPlan={() => saveOpportunity(findCandidateKey(compareResult.candidates[0]), planPayloadFromCandidate(compareResult.candidates[0], compareDurationMinutes))}
+              />
+              <SectionHeader label="Compared With" />
+              {compareResult.candidates.slice(1).map((candidate) => (
+                <TimingResultCard
+                  key={findCandidateKey(candidate)}
+                  kicker="COMPARED WITH"
+                  candidate={candidate}
+                  activityTitle={candidate.metadata.activityType}
+                  durationMinutes={compareDurationMinutes}
+                  isSaving={savingOpportunityKey === findCandidateKey(candidate)}
+                  isPlanned={plannedOpportunityKeys.has(findCandidateKey(candidate))}
+                  onPlan={() => saveOpportunity(findCandidateKey(candidate), planPayloadFromCandidate(candidate, compareDurationMinutes))}
+                />
+              ))}
+            </section>
+          )}
+        </>
       )}
 
       <section ref={plansSectionRef} style={{ display: 'flex', flexDirection: 'column', gap: 10, scrollMarginTop: 18 }}>
@@ -1152,12 +1500,138 @@ function OpportunityCard({
   );
 }
 
+/**
+ * Shared result card for FIND/CHECK/COMPARE (Timing Search). Renders the
+ * engine's own TimingCandidateLabel via RESULT_LABEL_TEXT (never a second
+ * fit classification) and its structured MuhurtaReason[] via the existing
+ * English formatter (formatMuhurtaReason) -- no new free-form copy is
+ * generated here, per the brief. "Why this works" shows the 2-3 leading
+ * reasons inline; "Why this time?" progressively discloses the full
+ * structured breakdown grouped by factor.
+ */
+function TimingResultCard({
+  kicker,
+  candidate,
+  activityTitle,
+  durationMinutes,
+  planCtaLabel = 'Use this time',
+  isSaving,
+  isPlanned,
+  onPlan,
+}: {
+  kicker: string;
+  candidate: TimingCandidate;
+  activityTitle: string;
+  durationMinutes: number;
+  planCtaLabel?: string;
+  isSaving?: boolean;
+  isPlanned?: boolean;
+  onPlan: () => void;
+}) {
+  const [showAllReasons, setShowAllReasons] = useState(false);
+  const start = new Date(candidate.start);
+  const end = new Date(candidate.end);
+  const timeOpts: Intl.DateTimeFormatOptions = { hour: 'numeric', minute: '2-digit' };
+  const timeRange = `${start.toLocaleTimeString('en-US', timeOpts)} - ${end.toLocaleTimeString('en-US', timeOpts)}`;
+  const topReasons = candidate.reasons.slice(0, 3);
+  const hasMoreReasons = candidate.reasons.length > topReasons.length;
+  const labelColor = RESULT_LABEL_COLOR[candidate.label];
+
+  return (
+    <article style={{ ...panelStyle, padding: 15 }}>
+      <div style={{ display: 'grid', gridTemplateColumns: '1fr auto', gap: 12, alignItems: 'start' }}>
+        <div>
+          <div style={{ color: '#4ade80', fontFamily: 'var(--as-font-mono)', fontSize: 11, fontWeight: 900, textTransform: 'uppercase' }}>{kicker}</div>
+          <h2 style={{ margin: '7px 0 0', color: '#f8fafc', fontSize: 18 }}>{activityTitle}</h2>
+          <div style={{ color: '#dbe7f4', fontSize: 14, marginTop: 5 }}>{candidate.metadata.dateLabel} · {timeRange}</div>
+          <div style={{ color: labelColor, fontSize: 12, marginTop: 7, fontWeight: 800 }}>{RESULT_LABEL_TEXT[candidate.label]} · {durationLabel(durationMinutes)}</div>
+        </div>
+        <div style={{ width: 58, height: 58, borderRadius: 29, border: `1px solid ${labelColor}99`, background: `${labelColor}14`, display: 'flex', alignItems: 'center', justifyContent: 'center', flexDirection: 'column' }}>
+          <span style={{ color: '#f8fafc', fontSize: 19, fontWeight: 900 }}>{candidate.score.toFixed(1)}</span>
+          <span style={{ color: '#94a3b8', fontSize: 9 }}>Aura Fit</span>
+        </div>
+      </div>
+
+      {topReasons.length > 0 && (
+        <div style={{ marginTop: 10 }}>
+          <div style={{ color: '#aab7d2', fontSize: 11, fontWeight: 850, textTransform: 'uppercase', letterSpacing: '0.03em' }}>Why this works</div>
+          <ul style={{ margin: '6px 0 0', paddingLeft: 18, color: '#dbe7f4', fontSize: 12, lineHeight: 1.5 }}>
+            {topReasons.map((reason, index) => (
+              <li key={index}>{formatMuhurtaReason(reason)}</li>
+            ))}
+          </ul>
+        </div>
+      )}
+
+      {candidate.conflicts && candidate.conflicts.length > 0 && (
+        <div style={{ marginTop: 10, color: '#fb7185', fontSize: 12, lineHeight: 1.4 }}>
+          {candidate.conflicts.map((conflict, index) => <div key={index}>⚠ {conflict.message}</div>)}
+        </div>
+      )}
+
+      {hasMoreReasons && (
+        <button
+          type="button"
+          onClick={() => setShowAllReasons((value) => !value)}
+          style={{ border: 'none', background: 'transparent', color: '#7dd3fc', fontSize: 12, fontWeight: 800, padding: 0, marginTop: 9, cursor: 'pointer' }}
+        >
+          {showAllReasons ? 'Hide details ⌃' : 'Why this time? ⌄'}
+        </button>
+      )}
+      {showAllReasons && (
+        <ul style={{ margin: '8px 0 0', paddingLeft: 18, color: '#aab7d2', fontSize: 12, lineHeight: 1.55 }}>
+          {candidate.reasons.map((reason, index) => (
+            <li key={index}><strong style={{ color: '#dbe7f4' }}>{REASON_FACTOR_LABEL[reason.factor]}:</strong> {formatMuhurtaReason(reason)}</li>
+          ))}
+        </ul>
+      )}
+
+      <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginTop: 12 }}>
+        <button
+          type="button"
+          onClick={onPlan}
+          disabled={isSaving || isPlanned}
+          style={{ border: 'none', background: 'transparent', color: isPlanned ? '#4ade80' : '#38bdf8', fontWeight: 850, fontSize: 12, padding: 0, cursor: isSaving || isPlanned ? 'default' : 'pointer', opacity: isSaving ? 0.65 : 1 }}
+        >
+          {isSaving ? 'Saving...' : isPlanned ? 'Planned' : planCtaLabel}
+        </button>
+      </div>
+    </article>
+  );
+}
+
 const panelStyle: React.CSSProperties = {
   background: 'linear-gradient(145deg, rgba(15, 23, 42, 0.96), rgba(13, 28, 62, 0.82))',
   border: '1px solid rgba(96, 165, 250, 0.18)',
   borderRadius: 16,
   boxShadow: 'inset 0 1px 0 rgba(255, 255, 255, 0.03)',
   padding: 16,
+};
+
+const modeSwitcherStyle: React.CSSProperties = {
+  display: 'grid',
+  gridTemplateColumns: 'repeat(3, minmax(0, 1fr))',
+  gap: 8,
+  border: '1px solid rgba(96, 165, 250, 0.18)',
+  borderRadius: 14,
+  background: 'rgba(2, 6, 23, 0.5)',
+  padding: 5,
+};
+
+const modePillStyle: React.CSSProperties = {
+  border: 'none',
+  borderRadius: 10,
+  background: 'transparent',
+  color: '#aab7d2',
+  fontSize: 13,
+  fontWeight: 850,
+  padding: '10px 6px',
+  cursor: 'pointer',
+};
+
+const modePillActiveStyle: React.CSSProperties = {
+  background: 'linear-gradient(90deg, #4ade80 0%, #22d3ee 52%, #2f95ff 100%)',
+  color: '#020617',
 };
 
 const myPlansStyle: React.CSSProperties = {

@@ -31,6 +31,15 @@ jobs:
         run: npx ts-node test/muhurtaReasons.test.ts
       - name: Run timing search test
         run: npx ts-node test/timingSearch.test.ts
+      - name: Run timing search API validation test
+        run: npx ts-node test/timingSearchApi.test.ts
+      - name: Install web deps
+        working-directory: apps/web
+        run: npm install
+      - name: Run Plan-with-Aura view logic test
+        env:
+          TS_NODE_COMPILER_OPTIONS: '{"jsx":"react"}'
+        run: npx ts-node test/planWithAuraViewLogic.test.ts
   web-build:
     name: Next.js production build
     runs-on: ubuntu-latest

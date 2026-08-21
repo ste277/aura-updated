@@ -9,5 +9,7 @@
     "resolveJsonModule": true,
     "outDir": "dist"
   },
-  "include": ["packages/**/*.ts", "test/**/*.ts"]
+  "include": ["packages/**/*.ts", "test/**/*.ts"],
+  "exclude": ["test/planWithAuraViewLogic.test.ts"]
 }
+
