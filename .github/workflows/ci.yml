@@ -35,6 +35,12 @@ jobs:
         run: npx ts-node test/timingSearchApi.test.ts
       - name: Run panchang day service test
         run: npx ts-node test/panchangDay.test.ts
+      - name: Run panchang month service test
+        run: npx ts-node test/panchangMonth.test.ts
+      - name: Run window overlap test
+        run: npx ts-node test/windowOverlap.test.ts
+      - name: Run day activity suggestions test
+        run: npx ts-node test/dayActivitySuggestions.test.ts
       - name: Install web deps
         working-directory: apps/web
         run: npm install
@@ -42,6 +48,10 @@ jobs:
         env:
           TS_NODE_COMPILER_OPTIONS: '{"jsx":"react"}'
         run: npx ts-node test/planWithAuraViewLogic.test.ts
+      - name: Run Panchang calendar logic test
+        env:
+          TS_NODE_COMPILER_OPTIONS: '{"jsx":"react"}'
+        run: npx ts-node test/panchangCalendarLogic.test.ts
   web-build:
     name: Next.js production build
     runs-on: ubuntu-latest

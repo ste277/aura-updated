@@ -46,6 +46,7 @@ interface HomeDashboardProps {
   onPlanClick?: (activity?: string) => void;
   onInsightsClick?: () => void;
   onNotificationsClick?: () => void;
+  onPanchangClick?: () => void;
 }
 
 interface HomeUpcomingPlan {
@@ -174,6 +175,7 @@ export function HomeDashboard({
   onPlanClick,
   onInsightsClick,
   onNotificationsClick,
+  onPanchangClick,
 }: HomeDashboardProps) {
   const [selectedHabit, setSelectedHabit] = useState<string | null>(null);
   const [selectedPlanId, setSelectedPlanId] = useState<string | null>(null);
@@ -466,7 +468,12 @@ export function HomeDashboard({
             </div>
           ))}
         </div>
-        <button type="button" onClick={onNextShiftClick} style={viewDayButtonStyle}>View today&apos;s flow →</button>
+        <div style={{ display: 'flex', justifyContent: 'center', gap: 18, marginTop: 12 }}>
+          <button type="button" onClick={onNextShiftClick} style={{ ...viewDayButtonStyle, margin: 0 }}>View today&apos;s flow →</button>
+          {onPanchangClick && (
+            <button type="button" onClick={onPanchangClick} style={{ ...viewDayButtonStyle, margin: 0, color: '#a78bfa' }}>Today&apos;s Panchang →</button>
+          )}
+        </div>
       </section>
 
       {onSubmitReflection && (
