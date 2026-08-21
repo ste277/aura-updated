@@ -337,14 +337,19 @@ export default function DashboardPage() {
     };
   }, [energyInsight]);
 
-  // Current window timing calculations for TimelineView Banner
+  // Current window timing calculations for TimelineView Banner.
+  //
+  // This answers "how long until the next meaningful timing change" — NOT
+  // "how long until this window's underlying block ends." Those are different
+  // questions: when we're in a Neutral gap, the gap itself may run until
+  // midnight, but if a real window (Gulika, Rahu Kalam, etc.) starts sooner,
+  // that's the moment the user's experience actually changes, so that's what
+  // should drive the countdown. Previously this always used the matched
+  // window's own end time and fell back to literal midnight for Neutral,
+  // which produced misleading "8h 9m left" countdowns straight through a
+  // window that started in the next hour.
   const currentWindowInfo = useMemo(() => {
     const activeTypeClean = activeType ? String(activeType).replace('_', ' ').toUpperCase() : 'NEUTRAL';
-
-    const currentWin = windows.find((w: any) => {
-      const rawType = String(w.type || w.windowType || w.name || '').replace('_', ' ').toUpperCase();
-      return rawType === activeTypeClean;
-    });
 
     const parseMinute = (val: any) => {
       if (typeof val === 'number' && !isNaN(val)) return val;
@@ -355,15 +360,8 @@ export default function DashboardPage() {
       return null;
     };
 
-    const startMin = currentWin ? parseMinute(currentWin.startMinutes ?? currentWin.startMinute) : null;
-    let endMin = currentWin ? parseMinute(currentWin.endMinutes ?? currentWin.endMinute) : null;
-
-    if (endMin === null) {
-      endMin = 1440; // Default midnight fallback
-    }
-
     const formatMinute = (minute: number) => {
-      const totalMins = Math.floor(minute) % 1440;
+      const totalMins = ((Math.floor(minute) % 1440) + 1440) % 1440;
       const hrs = Math.floor(totalMins / 60);
       const mins = totalMins % 60;
       const period = hrs >= 12 ? 'PM' : 'AM';
@@ -371,9 +369,39 @@ export default function DashboardPage() {
       return `${formattedHr}:${String(mins).padStart(2, '0')} ${period}`;
     };
 
-    const endTimeStr = formatMinute(endMin);
+    const activeWin = windows.find((w: any) => {
+      const rawType = String(w.type || w.windowType || w.name || '').replace('_', ' ').toUpperCase();
+      return rawType === activeTypeClean;
+    });
 
-    let diff = endMin - currentMinuteOfDay;
+    // Windows sorted chronologically by start minute, so we can find the
+    // soonest upcoming boundary regardless of which order they were computed in.
+    const sortedByStart = [...windows]
+      .map((w: any) => ({ w, start: parseMinute(w.startMinutes ?? w.startMinute) ?? 0 }))
+      .sort((a, b) => a.start - b.start);
+
+    let startMin: number | null;
+    let nextBoundaryMin: number;
+
+    if (activeWin) {
+      // Currently inside a real (named) window: the boundary is simply its own end.
+      startMin = parseMinute(activeWin.startMinutes ?? activeWin.startMinute);
+      nextBoundaryMin = parseMinute(activeWin.endMinutes ?? activeWin.endMinute) ?? currentMinuteOfDay;
+    } else {
+      // Currently in a Neutral gap: the boundary is the start of whichever
+      // named window begins soonest — today if one remains, otherwise the
+      // earliest one tomorrow (wrapping past midnight).
+      startMin = null;
+      const upcomingToday = sortedByStart.find(({ start }) => start > currentMinuteOfDay);
+      const soonest = upcomingToday ?? sortedByStart[0];
+      let boundary = soonest ? soonest.start : currentMinuteOfDay;
+      if (boundary <= currentMinuteOfDay) boundary += 1440; // wraps to tomorrow
+      nextBoundaryMin = boundary;
+    }
+
+    const endTimeStr = formatMinute(nextBoundaryMin);
+
+    let diff = nextBoundaryMin - currentMinuteOfDay;
     if (diff < 0) diff += 1440;
     const remHrs = Math.floor(diff / 60);
     const remMins = diff % 60;

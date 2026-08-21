@@ -142,6 +142,7 @@ function formatWindowName(type: SolarWindowType | string): string {
   const cleanType = String(type).replace('_', ' ').toUpperCase();
   if (cleanType.includes('ABHIJIT')) return 'Peak Clarity (Abhijit)';
   if (cleanType.includes('VIJAYA')) return 'Victorious Window (Vijaya)';
+  if (cleanType.includes('BRAHMA')) return 'Deep Focus (Brahma)';
   if (cleanType.includes('RAHU')) return 'Friction Period (Rahu Kalam)';
   if (cleanType.includes('YAMA')) return 'Caution Window (Yamaganda)';
   if (cleanType.includes('GULIKA')) return 'Steady Foundation (Gulika)';

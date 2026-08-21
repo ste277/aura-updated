@@ -73,14 +73,39 @@ interface AssistantSuggestion {
 
 const PROMPT_CHIPS = ['Workout', 'Deep work', 'Study', 'Date night'];
 
+// "Best Time" is a claim of credibility: it should only appear once the engine
+// has actually evaluated a window as genuinely strong (e.g. Abhijit, a real
+// Muhurta peak). Neutral Flow is the *absence* of a special window, not a
+// verdict that now is the best moment for anything — so it always gets its
+// own honest "Flexible" framing here, regardless of its numeric score.
 function getWindowTone(score: number, windowName: string) {
   const cleanWindow = windowName.toUpperCase();
   if (cleanWindow.includes('RAHU') || cleanWindow.includes('YAMA') || score < 4) {
     return { label: 'Use Caution', pill: 'Caution', color: '#fb6b6b', description: 'Better for routine, low-stakes tasks and cleanup.' };
   }
+  if (cleanWindow.includes('NEUTRAL')) {
+    return {
+      label: 'Neutral Flow',
+      pill: 'Flexible',
+      color: '#38bdf8',
+      description: 'Flexible period for steady progress. Good for existing work, everyday tasks, and activities that don\u2019t need a special window.',
+    };
+  }
   if (score >= 7.5) return { label: 'Strong Window', pill: 'Best Time', color: '#4ade80', description: 'Good for focused, important, or momentum-building work.' };
-  if (score >= 5) return { label: 'Neutral Flow', pill: 'Good Time', color: '#4ade80', description: 'Good for steady progress, planning, and everyday tasks.' };
+  if (score >= 5) return { label: 'Good Window', pill: 'Good Time', color: '#4ade80', description: 'Good for steady progress, planning, and everyday tasks.' };
   return { label: 'Light Flow', pill: 'Steady Time', color: '#facc15', description: 'Good for maintenance, reflection, and gentle progress.' };
+}
+
+// dailyBriefing only gives formatted clock strings ("4:38 AM"), not raw minute
+// values, so this recovers a sortable minute-of-day from them — needed to
+// merge the peak window and the other favorable windows into one true
+// chronological order (see flowItems below).
+function parseClockToMinutes(clock: string): number {
+  const match = clock.match(/(\d{1,2}):(\d{2})\s*(AM|PM)/i);
+  if (!match) return 0;
+  let hours = Number(match[1]) % 12;
+  if (match[3].toUpperCase() === 'PM') hours += 12;
+  return hours * 60 + Number(match[2]);
 }
 
 function formatWindowName(name: string) {
@@ -179,6 +204,21 @@ export function HomeDashboard({
     description: themeText,
     icon: '✨',
   };
+  const tone = getWindowTone(energyScore, activeWindowName);
+  const currentWindowLabel = dailyBriefing?.briefingState === 'ACTIVE'
+    ? dailyBriefing.peakWindow.name
+    : formatWindowName(currentWindow?.name ?? activeWindowName);
+  const currentTimeRange = dailyBriefing?.briefingState === 'ACTIVE'
+    ? `${dailyBriefing.peakWindow.startTime} - ${dailyBriefing.peakWindow.endTime}`
+    : currentWindow
+      ? `${currentWindow.startTime} - ${currentWindow.endTime}`
+      : `Next shift ${nextShift.startTime}`;
+  const remainingText = dailyBriefing?.briefingState === 'ACTIVE'
+    ? nextShift.startsIn
+    : currentWindow
+      ? `${currentWindow.timeRemaining} left`
+      : nextShift.startsIn;
+
   const assistantSuggestion: AssistantSuggestion = useMemo(() => {
     const actionablePlan = findActionablePlan(upcomingPlans);
     if (actionablePlan) {
@@ -205,28 +245,31 @@ export function HomeDashboard({
       };
     }
 
+    // Situate the suggestion in the actual moment (how much usable time is
+    // left before the next shift) rather than just restating a static
+    // catalog description — a recommendation should sound like it looked at
+    // the clock, not like a lookup table entry.
+    const timeLeft = remainingText.replace(/\s*left$/i, '').trim();
+    const situatedDescription = timeLeft
+      ? `You have about ${timeLeft} before the next shift, making this a good time to ${primaryTask.title.toLowerCase()}.`
+      : primaryTask.description;
+
     return {
       title: primaryTask.title,
-      description: primaryTask.description,
+      description: situatedDescription,
       icon: primaryTask.icon || '✨',
       actionLabel: 'Do it now',
       secondaryLabel: 'More options',
     };
-  }, [activeWindowName, personalizedTasks, primaryTask, upcomingPlans]);
-  const tone = getWindowTone(energyScore, activeWindowName);
-  const currentWindowLabel = dailyBriefing?.briefingState === 'ACTIVE'
-    ? dailyBriefing.peakWindow.name
-    : formatWindowName(currentWindow?.name ?? activeWindowName);
-  const currentTimeRange = dailyBriefing?.briefingState === 'ACTIVE'
-    ? `${dailyBriefing.peakWindow.startTime} - ${dailyBriefing.peakWindow.endTime}`
-    : currentWindow
-      ? `${currentWindow.startTime} - ${currentWindow.endTime}`
-      : `Next shift ${nextShift.startTime}`;
-  const remainingText = dailyBriefing?.briefingState === 'ACTIVE'
-    ? nextShift.startsIn
-    : currentWindow
-      ? `${currentWindow.timeRemaining} left`
-      : nextShift.startsIn;
+  }, [activeWindowName, personalizedTasks, primaryTask, remainingText, upcomingPlans]);
+
+  // Today's Flow should read Now -> Next -> Later, prioritizing what's still
+  // ahead rather than history. Previously the peak window was always listed
+  // first regardless of whether it had already passed (labeled "Peak" even
+  // hours after it ended), and completed windows crowded out what's actually
+  // coming up. dailyBriefing only exposes formatted clock strings, so the
+  // peak window and otherFavorableWindows are merged into one real
+  // chronological order via parseClockToMinutes before labeling.
   const flowItems = useMemo(() => {
     if (!dailyBriefing) {
       return [
@@ -234,20 +277,48 @@ export function HomeDashboard({
         { label: 'Next', name: nextShift.windowName, time: nextShift.startTime, accent: '#38bdf8' },
       ];
     }
-    return [
+
+    const candidates = [
       {
-        label: dailyBriefing.briefingState === 'ACTIVE' ? 'Now' : 'Peak',
         name: dailyBriefing.peakWindow.name,
-        time: `${dailyBriefing.peakWindow.startTime} - ${dailyBriefing.peakWindow.endTime}`,
-        accent: '#4ade80',
+        startTime: dailyBriefing.peakWindow.startTime,
+        endTime: dailyBriefing.peakWindow.endTime,
+        state: dailyBriefing.briefingState,
+        sortMinute: parseClockToMinutes(dailyBriefing.peakWindow.startTime),
       },
-      ...dailyBriefing.otherFavorableWindows.slice(0, 4).map((window) => ({
-        label: window.state === 'ACTIVE' ? 'Now' : window.state === 'COMPLETED' ? 'Passed' : 'Next',
+      ...dailyBriefing.otherFavorableWindows.map((window) => ({
         name: window.name,
-        time: `${window.startTime} - ${window.endTime}`,
-        accent: window.state === 'COMPLETED' ? '#64748b' : '#38bdf8',
+        startTime: window.startTime,
+        endTime: window.endTime,
+        state: window.state,
+        sortMinute: parseClockToMinutes(window.startTime),
       })),
+    ].sort((a, b) => a.sortMinute - b.sortMinute);
+
+    const active = candidates.find((c) => c.state === 'ACTIVE');
+    const upcoming = candidates.filter((c) => c.state === 'UPCOMING');
+
+    const items = [
+      active
+        ? { label: 'Now', name: active.name, time: `${active.startTime} - ${active.endTime}`, accent: '#4ade80' }
+        : { label: 'Now', name: currentWindowLabel, time: 'Current', accent: tone.color },
     ];
+
+    upcoming.slice(0, 3).forEach((candidate, index) => {
+      items.push({
+        label: index === 0 ? 'Next' : 'Later',
+        name: candidate.name,
+        time: `${candidate.startTime} - ${candidate.endTime}`,
+        accent: index === 0 ? '#38bdf8' : '#facc15',
+      });
+    });
+
+    if (items.length === 1) {
+      // Nothing favorable remains today — fall back to whatever's next overall.
+      items.push({ label: 'Next', name: nextShift.windowName, time: nextShift.startTime, accent: '#38bdf8' });
+    }
+
+    return items;
   }, [currentWindowLabel, dailyBriefing, nextShift.startTime, nextShift.windowName, tone.color]);
 
   const handleConfirmLog = async () => {

@@ -1,5 +1,6 @@
 import { Pool } from 'pg';
 import { randomUUID } from 'crypto';
+import { getMinuteOfDayInTimezone } from './timezone';
 
 // Sandbox-only substitute for @prisma/client (its engine binary can't be downloaded
 // here — see README). Same schema, same Postgres instance, plain SQL. Swap API
@@ -354,9 +355,15 @@ export async function logPlannedActivity(userId: string, planId: string): Promis
       throw new Error('Plan is not available to log.');
     }
 
+    const userRes = await client.query(
+      `SELECT timezone FROM "User" WHERE id = $1`,
+      [userId]
+    );
+    const userTimezone = userRes.rows[0]?.timezone || 'UTC';
     const habitLogId = randomUUID();
-    const logTimestamp = new Date();
-    const logMinuteOfDay = logTimestamp.getHours() * 60 + logTimestamp.getMinutes();
+    const loggedAt = new Date();
+    const logTimestamp = new Date(plan.plannedStartAt);
+    const logMinuteOfDay = getMinuteOfDayInTimezone(userTimezone, logTimestamp);
     const notes = `Logged from planned Aura activity${plan.recommendation ? `: ${plan.recommendation}` : '.'}`;
 
     const habitLogRes = await client.query(
@@ -385,7 +392,7 @@ export async function logPlannedActivity(userId: string, planId: string): Promis
            "updatedAt" = now()
        WHERE id = $1 AND "userId" = $2
        RETURNING *`,
-      [planId, userId, logTimestamp, habitLogId]
+      [planId, userId, loggedAt, habitLogId]
     );
 
     await client.query('COMMIT');
