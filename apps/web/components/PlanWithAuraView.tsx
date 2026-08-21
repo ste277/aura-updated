@@ -1,7 +1,7 @@
 'use client';
 
 import React, { useEffect, useMemo, useRef, useState } from 'react';
-import type { PlanningHorizon, TaskSlotRecommendation, TimePreference } from '../../../packages/recommendation/src/dailyAssistant';
+import type { PlanningHorizon, TimePreference } from '../../../packages/recommendation/src/dailyAssistant';
 import { buildGoogleCalendarUrl } from '../../../packages/recommendation/src/dailyAssistant';
 import { FULL_ACTIVITY_CATALOG } from '../../../packages/recommendation/src/personalizedTasks';
 import type { TimingCandidate, TimingCandidateLabel, TimingSearchDateRange, TimingSearchMode, TimingSearchResponse, TimingTimePreference } from '../../../packages/recommendation/src/timingSearch';
@@ -19,18 +19,10 @@ interface TaskSuggestion {
 }
 
 interface PlanWithAuraViewProps {
-  onSlotTask: (
-    taskTitle: string,
-    durationMinutes: number,
-    horizon?: PlanningHorizon,
-    customStartDate?: string,
-    customEndDate?: string,
-    timePreference?: TimePreference
-  ) => Promise<TaskSlotRecommendation>;
   /** Client-facing subset of TimingSearchRequest -- `context` (location/timezone/
    * personal Muhurta context) is resolved server-side from the session user,
-   * exactly like onSlotTask/the slot-task route already does, so it's never
-   * built or sent from here. */
+   * exactly like the legacy slot-task route did, so it's never built or sent
+   * from here. */
   onTimingSearch: (request: {
     mode: TimingSearchMode;
     activityId?: string;
@@ -385,7 +377,7 @@ export function planPayloadFromCandidate(candidate: TimingCandidate, durationMin
   };
 }
 
-export function PlanWithAuraView({ onSlotTask: _onSlotTask, onTimingSearch, onViewDay, onPlanLogged, timezone, initialActivity, initialActivityKey }: PlanWithAuraViewProps) {
+export function PlanWithAuraView({ onTimingSearch, onViewDay, onPlanLogged, timezone, initialActivity, initialActivityKey }: PlanWithAuraViewProps) {
   const [planMode, setPlanMode] = useState<TimingSearchMode>('FIND');
   const [taskTitle, setTaskTitle] = useState('');
   const [, setIsCustomTask] = useState(false);
@@ -1435,68 +1427,6 @@ function PlanGlyph({ type, color }: { type: PlanIcon; color: string }) {
         </>
       )}
     </svg>
-  );
-}
-
-function OpportunityCard({
-  rank,
-  title,
-  durationText,
-  dateLabel,
-  startTime,
-  endTime,
-  score,
-  quality,
-  summary,
-  googleCalendarUrl,
-  isSaving,
-  isPlanned,
-  onPlan,
-}: {
-  rank: number;
-  title: string;
-  durationText: string;
-  dateLabel: string;
-  startTime: string;
-  endTime: string;
-  score: number;
-  quality: 'STRONG' | 'GOOD' | 'USABLE';
-  summary: string;
-  googleCalendarUrl: string;
-  isSaving?: boolean;
-  isPlanned?: boolean;
-  onPlan: () => void;
-}) {
-  const label = rank === 0 ? 'Best Match' : rank === 1 ? 'Good Alternative' : 'Backup Option';
-  return (
-    <article style={{ ...panelStyle, padding: 15 }}>
-      <div style={{ display: 'grid', gridTemplateColumns: '1fr auto', gap: 12, alignItems: 'start' }}>
-        <div>
-          <div style={{ color: '#4ade80', fontFamily: 'var(--as-font-mono)', fontSize: 11, fontWeight: 900, textTransform: 'uppercase' }}>{label}</div>
-          <h2 style={{ margin: '7px 0 0', color: '#f8fafc', fontSize: 18 }}>{title}</h2>
-          <div style={{ color: '#dbe7f4', fontSize: 14, marginTop: 5 }}>{dateLabel} · {startTime} - {endTime}</div>
-          <div style={{ color: '#aab7d2', fontSize: 12, marginTop: 7 }}>{quality === 'STRONG' ? 'Excellent match' : quality === 'GOOD' ? 'Good match' : 'Usable match'} · {durationText}</div>
-        </div>
-        <div style={{ width: 58, height: 58, borderRadius: 29, border: '1px solid rgba(74, 222, 128, 0.6)', background: 'rgba(74, 222, 128, 0.08)', display: 'flex', alignItems: 'center', justifyContent: 'center', flexDirection: 'column' }}>
-          <span style={{ color: '#f8fafc', fontSize: 19, fontWeight: 900 }}>{Math.round(score)}</span>
-          <span style={{ color: '#94a3b8', fontSize: 9 }}>/100</span>
-        </div>
-      </div>
-      <div style={{ color: '#dbe7f4', fontSize: 12, lineHeight: 1.45, marginTop: 9 }}>{summary}</div>
-      <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginTop: 10 }}>
-        <button
-          type="button"
-          onClick={onPlan}
-          disabled={isSaving || isPlanned}
-          style={{ border: 'none', background: 'transparent', color: isPlanned ? '#4ade80' : '#38bdf8', fontWeight: 850, fontSize: 12, padding: 0, cursor: isSaving || isPlanned ? 'default' : 'pointer', opacity: isSaving ? 0.65 : 1 }}
-        >
-          {isSaving ? 'Saving...' : isPlanned ? 'Planned' : 'Plan this'}
-        </button>
-        <a href={googleCalendarUrl} target="_blank" rel="noreferrer" style={{ color: '#aab7d2', textDecoration: 'none', fontWeight: 750, fontSize: 12 }}>
-          Add calendar
-        </a>
-      </div>
-    </article>
   );
 }
 
