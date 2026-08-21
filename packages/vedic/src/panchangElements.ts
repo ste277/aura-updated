@@ -1,9 +1,10 @@
 import {
-  SearchRelativeLongitude,
   Body,
   AstroTime,
   Ecliptic,
   GeoVector,
+  MoonPhase,
+  SearchMoonPhase,
 } from 'astronomy-engine';
 
 export const NAKSHATRA_NAMES = [
@@ -35,6 +36,16 @@ export const KARANA_NAMES = [
   'Shakuni', 'Chatushpada', 'Naga', 'Kintughna',
 ];
 
+/** 0=Sunday..6=Saturday, matching WeekdayIndex (packages/panchang/src/windows.ts)
+ * and ZonedDateParts.weekday (apps/web/lib/timezone.ts's getDatePartsInTimezone). */
+export const VARA_NAMES = [
+  'Ravivara', 'Somavara', 'Mangalavara', 'Budhavara', 'Guruvara', 'Shukravara', 'Shanivara',
+];
+
+export function getVara(weekday: number): string {
+  return VARA_NAMES[((weekday % 7) + 7) % 7];
+}
+
 /** Lahiri Ayanamsa approximation in degrees */
 export function lahiriAyanamsa(date: Date): number {
   const astroTime = new AstroTime(date);
@@ -42,13 +53,40 @@ export function lahiriAyanamsa(date: Date): number {
   return 23.85 + 1.4 * t;
 }
 
+/**
+ * Small bounded memo for getSiderealLongitude(): computing Tithi, Nakshatra,
+ * Yoga, and Karana all at the same instant (as getPanchangForDate() does)
+ * calls this 7 times for only 2 distinct (body, instant) pairs -- Moon and
+ * Sun's position don't change between those calls. GeoVector/Ecliptic is the
+ * genuinely expensive part of each Panchanga lookup, so caching it here
+ * benefits every caller (getTithi/getNakshatra/getYoga/getKarana, and
+ * therefore muhurtaEngine.ts, dailyAssistant.ts, timingSearch.ts, and the
+ * panchang API routes) without any of them needing to change. Pure cache:
+ * same formula, same output, just avoids redundant recomputation. Bounded
+ * so long-running processes (findNextTransition's binary search visits many
+ * distinct instants) don't grow this unboundedly.
+ */
+const SIDEREAL_LONGITUDE_CACHE_LIMIT = 64;
+const siderealLongitudeCache = new Map<string, number>();
+
 /** Get Sidereal Longitude of Moon/Sun */
 export function getSiderealLongitude(body: Body, date: Date): number {
+  const cacheKey = `${body}:${date.getTime()}`;
+  const cached = siderealLongitudeCache.get(cacheKey);
+  if (cached !== undefined) return cached;
+
   const astroTime = new AstroTime(date);
   const vec = GeoVector(body, astroTime, true);
   const ecl = Ecliptic(vec);
   const ayanamsa = lahiriAyanamsa(date);
-  return (ecl.elon - ayanamsa + 360) % 360;
+  const longitude = (ecl.elon - ayanamsa + 360) % 360;
+
+  if (siderealLongitudeCache.size >= SIDEREAL_LONGITUDE_CACHE_LIMIT) {
+    const oldestKey = siderealLongitudeCache.keys().next().value;
+    if (oldestKey !== undefined) siderealLongitudeCache.delete(oldestKey);
+  }
+  siderealLongitudeCache.set(cacheKey, longitude);
+  return longitude;
 }
 
 export function getTithi(date: Date): { index: number; name: string } {
@@ -106,14 +144,35 @@ export function getKarana(date: Date): { index: number; name: string } {
 
 /**
  * Finds exact next transition date.
- * TITHI uses SearchRelativeLongitude.
+ * TITHI uses SearchMoonPhase on the Moon-Sun elongation angle (the same
+ * quantity getTithi() derives its index from -- ayanamsha subtracts equally
+ * from both bodies' sidereal longitudes, so the *difference* between them,
+ * and therefore every tithi boundary, is ayanamsha-invariant; SearchMoonPhase
+ * finds the same physical instant using tropical longitudes directly, which
+ * is both simpler and avoids relying on a sidereal degree target).
  * NAKSHATRA uses targeted binary search over Moon sidereal longitude.
+ *
+ * (SearchMoonPhase replaced a prior SearchRelativeLongitude(Body.Moon, ...)
+ * call here that threw unconditionally -- astronomy-engine's
+ * SearchRelativeLongitude only supports planets relative to the Sun, not the
+ * Moon. This was a latent bug: findNextTransition(date, 'TITHI') has never
+ * successfully returned a value. It went unnoticed because its only caller,
+ * /api/panchang/today, feeds a component (TodayOverview) that isn't mounted
+ * anywhere in the app today. Fixed here since getPanchangForDate() needs a
+ * working Tithi transition search, and per the brief's "fix if an existing
+ * bug is found" allowance -- see the completion report for detail. No
+ * ayanamsha/methodology change: getTithi()'s own value calculation is
+ * untouched, only the previously-broken transition *search* is fixed.)
  */
 export function findNextTransition(date: Date, targetType: 'TITHI' | 'NAKSHATRA'): Date {
   const astroTime = new AstroTime(date);
 
   if (targetType === 'TITHI') {
-    const res = SearchRelativeLongitude(Body.Moon, 12, astroTime);
+    const currentPhase = MoonPhase(date);
+    const targetPhase = (Math.floor(currentPhase / 12) + 1) * 12 % 360;
+    // A tithi is 19-26 hours long; 2 days is a safe search bound with margin.
+    const res = SearchMoonPhase(targetPhase, astroTime, 2);
+    if (!res) throw new Error(`findNextTransition: no TITHI transition found within 2 days of ${date.toISOString()}.`);
     return res.date;
   }
 
@@ -146,4 +205,43 @@ export function findNextTransition(date: Date, targetType: 'TITHI' | 'NAKSHATRA'
   }
 
   return new Date(Math.floor((low + high) / 2));
+}
+
+/**
+ * Generic named-value transition finder: advances in 15-minute steps from
+ * `start` until `getName()` returns something other than its value at
+ * `start`, then binary-searches the boundary. Used for Yoga and Karana,
+ * which (unlike Tithi/Nakshatra) don't have a direct degree-based transition
+ * formula here -- moved from apps/web/app/api/panchang/today/route.ts
+ * verbatim (same search step/iteration counts) so getPanchangForDate() and
+ * the legacy /today route share one implementation instead of two.
+ */
+export function findNextNamedTransition(
+  start: Date,
+  getName: (date: Date) => string,
+  searchHours: number
+): Date | null {
+  const initialName = getName(start);
+  const stepMs = 15 * 60 * 1000;
+  const endMs = start.getTime() + searchHours * 60 * 60 * 1000;
+
+  let low = start.getTime();
+  for (let high = low + stepMs; high <= endMs; high += stepMs) {
+    if (getName(new Date(high)) === initialName) {
+      low = high;
+      continue;
+    }
+
+    for (let i = 0; i < 20; i++) {
+      const mid = Math.floor((low + high) / 2);
+      if (getName(new Date(mid)) === initialName) {
+        low = mid;
+      } else {
+        high = mid;
+      }
+    }
+    return new Date(high);
+  }
+
+  return null;
 }

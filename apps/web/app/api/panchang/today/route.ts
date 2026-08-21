@@ -1,8 +1,26 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getSessionFromRequest } from '../../../../lib/session';
 import { getUserById } from '../../../../lib/db';
-import { getTithi, getNakshatra, getYoga, getKarana, findNextTransition } from '../../../../../../packages/vedic/src/panchangElements';
+import { getPanchangForDate } from '../../../../../../packages/panchang/src/panchangDay';
+import { getDatePartsInTimezone } from '../../../../../../packages/panchang/src/localDate';
 
+/**
+ * Resolves the user's current LOCAL date and delegates to
+ * getPanchangForDate() (see /api/panchang/route.ts and
+ * packages/panchang/src/panchangDay.ts) -- this route no longer computes
+ * Panchanga elements itself, so there is exactly one implementation shared
+ * with the arbitrary-date endpoint.
+ *
+ * `referenceInstant: now` reproduces this route's pre-existing behavior
+ * exactly: Tithi/Nakshatra/Yoga/Karana (and their `endsAt` transitions) are
+ * evaluated as of the moment of the request, not at local noon (the default
+ * getPanchangForDate() uses for arbitrary dates that have no "now").
+ *
+ * The response is adapted back to the exact legacy shape
+ * ({tithi,nakshatra,yoga,karana} with paksha/name/endsAt only, no
+ * date/location/solar/windows) rather than exposing the full PanchangDay at
+ * this URL, since that's the contract this route has always had.
+ */
 export async function GET(req: NextRequest) {
   const session = getSessionFromRequest(req);
   if (!session) return NextResponse.json({ error: 'Not authenticated.' }, { status: 401 });
@@ -11,52 +29,24 @@ export async function GET(req: NextRequest) {
   if (!user) return NextResponse.json({ error: 'User not found.' }, { status: 404 });
 
   const now = new Date();
+  const timezone = user.timezone || 'Asia/Kolkata';
+  const latitude = user.latitude ?? 13.0827;
+  const longitude = user.longitude ?? 80.2707;
+  const today = getDatePartsInTimezone(timezone, now);
 
-  const tithi = getTithi(now);
-  const nakshatra = getNakshatra(now);
-  const yoga = getYoga(now);
-  const karana = getKarana(now);
-
-  const tithiEndsAt = findNextTransition(now, 'TITHI');
-  const nakshatraEndsAt = findNextTransition(now, 'NAKSHATRA');
-  const yogaEndsAt = findNextNamedTransition(now, (d) => getYoga(d).name, 36);
-  const karanaEndsAt = findNextNamedTransition(now, (d) => getKarana(d).name, 15);
-  const paksha = tithi.index <= 15 ? 'Shukla' : 'Krishna';
-
-  return NextResponse.json({
-    tithi: { paksha, name: tithi.name, endsAt: tithiEndsAt },
-    nakshatra: { name: nakshatra.name, endsAt: nakshatraEndsAt },
-    yoga: { name: yoga.name, endsAt: yogaEndsAt },
-    karana: { name: karana.name, endsAt: karanaEndsAt },
+  const panchangDay = getPanchangForDate({
+    localDate: today.dateStr,
+    latitude,
+    longitude,
+    timezone,
+    referenceInstant: now,
   });
-}
 
-function findNextNamedTransition(
-  start: Date,
-  getName: (date: Date) => string,
-  searchHours: number
-): Date | null {
-  const initialName = getName(start);
-  const stepMs = 15 * 60 * 1000;
-  const endMs = start.getTime() + searchHours * 60 * 60 * 1000;
-
-  let low = start.getTime();
-  for (let high = low + stepMs; high <= endMs; high += stepMs) {
-    if (getName(new Date(high)) === initialName) {
-      low = high;
-      continue;
-    }
-
-    for (let i = 0; i < 20; i++) {
-      const mid = Math.floor((low + high) / 2);
-      if (getName(new Date(mid)) === initialName) {
-        low = mid;
-      } else {
-        high = mid;
-      }
-    }
-    return new Date(high);
-  }
-
-  return null;
+  const { tithi, nakshatra, yoga, karana } = panchangDay.panchanga;
+  return NextResponse.json({
+    tithi: { paksha: tithi.paksha, name: tithi.name, endsAt: tithi.endsAt },
+    nakshatra: { name: nakshatra.name, endsAt: nakshatra.endsAt },
+    yoga: { name: yoga.name, endsAt: yoga.endsAt },
+    karana: { name: karana.name, endsAt: karana.endsAt },
+  });
 }
