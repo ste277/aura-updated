@@ -36,6 +36,16 @@ export interface MuhurtaEvaluation {
   blockers: string[];
   supports: string[];
   summary: string;
+  /** Which Aura Muhurta methodology (and, when applicable, which specific
+   * rule pack) produced this evaluation — for a future "how Aura calculated
+   * this" audit view, never consumed by scoring itself. Only set by
+   * muhurtaRulePacks.ts's evaluateMuhurtaWithRulePack(); this file's own
+   * legacy evaluateMuhurta() below leaves it undefined (unchanged
+   * behavior — see muhurtaRulePacks.ts's module doc comment). */
+  provenance?: {
+    methodology: string;
+    rulePackId?: string;
+  };
 }
 
 const FAVORABLE_YOGAS = new Set(['Priti', 'Ayushman', 'Saubhagya', 'Shobhana', 'Sukarma', 'Dhriti', 'Harshana', 'Siddhi', 'Shiva', 'Siddha', 'Sadhya', 'Shubha', 'Shukla', 'Brahma', 'Indra']);

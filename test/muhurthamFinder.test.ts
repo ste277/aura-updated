@@ -106,11 +106,11 @@ check('findMuhurthams throws for a not-yet-supported activity rather than return
 
 let threwForUnknown = false;
 try {
-  findMuhurthams({ activityId: 'griha-pravesh', dateRange: { start: '2026-09-01', end: '2026-09-05' }, context: chennaiContext });
+  findMuhurthams({ activityId: 'marriage', dateRange: { start: '2026-09-01', end: '2026-09-05' }, context: chennaiContext });
 } catch {
   threwForUnknown = true;
 }
-check('findMuhurthams throws for an unknown activityId', threwForUnknown);
+check('findMuhurthams throws for an unknown activityId (marriage does not exist as a catalog activity yet)', threwForUnknown);
 
 // ============================================================
 // REJECTS/PENALIZES BLOCKERS, PRESERVES CAUTIONS (no new scoring formula)
@@ -259,13 +259,17 @@ check('Every returned date across the DST boundary is within the requested range
 // KNOWN ACTIVITY USES ONTOLOGY (no invented rules)
 // ============================================================
 
+// Griha Pravesh reached SUPPORTED in the Muhurta Knowledge Pack V1 PR (see
+// test/muhurtaRulePacks.test.ts for the full rule-pack/coverage detail) and
+// now appears in Finder automatically -- Engagement remains PARTIAL.
 check(
   'Finder eligibility is metadata-derived: DEEP/CEREMONIAL, non-AMBIGUOUS, SUPPORTED-level activities only',
-  SUPPORTED_MUHURTHAM_ACTIVITY_IDS.length === 5 &&
+  SUPPORTED_MUHURTHAM_ACTIVITY_IDS.length === 6 &&
     JSON.stringify([...SUPPORTED_MUHURTHAM_ACTIVITY_IDS].sort()) ===
-      JSON.stringify(['business-start', 'financial-decision', 'new-beginning', 'property-purchase', 'start-journey'])
+      JSON.stringify(['business-start', 'financial-decision', 'griha-pravesh', 'new-beginning', 'property-purchase', 'start-journey'])
 );
-check('The two new CEREMONIAL occasions (Engagement, Griha Pravesh) are PARTIAL and hidden from Finder', !isSupportedMuhurthamActivity('engagement') && !isSupportedMuhurthamActivity('griha-pravesh'));
+check('Engagement remains PARTIAL and hidden from Finder (no intent-specific rule pack yet)', !isSupportedMuhurthamActivity('engagement'));
+check('Griha Pravesh is now exposed in Finder (SUPPORTED as of the Muhurta Knowledge Pack V1 PR)', isSupportedMuhurthamActivity('griha-pravesh'));
 
 const propertyResult = findMuhurthams({
   activityId: 'property-purchase',
@@ -288,6 +292,17 @@ const businessResult = findMuhurthams({
 });
 check('The newly-exposed business-start activity searches successfully and returns dates', businessResult.dates.length > 0);
 
+const grihaResult = findMuhurthams({
+  activityId: 'griha-pravesh',
+  dateRange: { start: '2026-09-01', end: '2026-09-30' },
+  timePreference: 'ANY',
+  durationMinutes: 90,
+  limit: 5,
+  context: chennaiContext,
+});
+check('The newly-SUPPORTED griha-pravesh activity searches successfully and returns dates', grihaResult.dates.length > 0);
+check('griha-pravesh activity metadata matches its catalog entry', grihaResult.activity.id === 'griha-pravesh' && grihaResult.activity.title === 'Griha Pravesh');
+
 let threwForPartialEngagement = false;
 try {
   findMuhurthams({ activityId: 'engagement', dateRange: { start: '2026-09-01', end: '2026-09-05' }, context: chennaiContext });
@@ -295,14 +310,6 @@ try {
   threwForPartialEngagement = true;
 }
 check('findMuhurthams throws for engagement (PARTIAL support, not exposed) rather than silently searching it', threwForPartialEngagement);
-
-let threwForPartialGrihaPravesh = false;
-try {
-  findMuhurthams({ activityId: 'griha-pravesh', dateRange: { start: '2026-09-01', end: '2026-09-05' }, context: chennaiContext });
-} catch {
-  threwForPartialGrihaPravesh = true;
-}
-check('findMuhurthams throws for griha-pravesh (PARTIAL support, not exposed) rather than silently searching it', threwForPartialGrihaPravesh);
 
 // ============================================================
 // START SENSITIVITY (brief section 7 -- first real use of timingSensitivity)
