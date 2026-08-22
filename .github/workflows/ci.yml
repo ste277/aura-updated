@@ -57,14 +57,25 @@ jobs:
         run: npx ts-node test/sharedMuhurtham.test.ts
       - name: Run score engine test
         run: npx ts-node test/scoreEngine.test.ts
-      # test/savedPersonDb.test.ts is intentionally NOT run here -- it makes
-      # real INSERT/SELECT/UPDATE/DELETE calls against Postgres via a live
-      # DATABASE_URL, and this job has no Postgres service provisioned. Run
-      # it locally against a real database instead (see the file's own doc
-      # comment for the exact command).
+      - name: Run Aura Moment request validation test
+        run: npx ts-node test/auraMomentRequest.test.ts
+      # test/savedPersonDb.test.ts and test/auraMomentsDb.test.ts are
+      # intentionally NOT run here -- they make real INSERT/SELECT/UPDATE/
+      # DELETE calls against Postgres via a live DATABASE_URL, and this job
+      # has no Postgres service provisioned. Run them locally against a real
+      # database instead (see each file's own doc comment for the exact
+      # command).
       - name: Install web deps
         working-directory: apps/web
         run: npm install
+      # test/auraMoments.test.ts imports apps/web/lib/auraMoments.ts, which
+      # imports a `next/server` TYPE (NextRequest) -- ts-node's module
+      # resolution walks up from that file's own directory, so it needs
+      # apps/web/node_modules (installed above) to exist, unlike every
+      # other DB-free test in this job, which never import anything from
+      # the `next` package.
+      - name: Run Aura Moment test
+        run: npx ts-node test/auraMoments.test.ts
       - name: Run Plan-with-Aura view logic test
         env:
           TS_NODE_COMPILER_OPTIONS: '{"jsx":"react"}'

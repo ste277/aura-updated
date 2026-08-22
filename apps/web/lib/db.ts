@@ -187,6 +187,141 @@ export async function deleteSavedPerson(ownerUserId: string, personId: string): 
   if (result.rowCount === 0) throw new Error('Person not found.');
 }
 
+export type AuraMomentScope = 'GENERAL' | 'PERSONAL' | 'SHARED';
+export type AuraMomentStatus = 'ACTIVE' | 'REVOKED';
+export type AuraMomentResponseState = 'ACCEPTED' | 'ANOTHER_TIME';
+
+export interface AuraMoment {
+  id: string;
+  ownerUserId: string;
+  publicToken: string;
+  scope: AuraMomentScope;
+  activityId: string;
+  activityTitle: string;
+  activityIcon: string | null;
+  startAt: Date;
+  endAt: Date;
+  timezone: string;
+  savedPersonId: string | null;
+  sharedPersonDisplayName: string | null;
+  senderDisplayName: string | null;
+  ratingLabel: string | null;
+  explanationSnapshot: string | null;
+  status: AuraMomentStatus;
+  responseState: AuraMomentResponseState | null;
+  respondedAt: Date | null;
+  createdAt: Date;
+  expiresAt: Date | null;
+}
+
+export interface CreateAuraMomentInput {
+  ownerUserId: string;
+  publicToken: string;
+  scope: AuraMomentScope;
+  activityId: string;
+  activityTitle: string;
+  activityIcon: string | null;
+  startAt: Date;
+  endAt: Date;
+  timezone: string;
+  savedPersonId: string | null;
+  sharedPersonDisplayName: string | null;
+  senderDisplayName: string | null;
+  ratingLabel: string | null;
+  explanationSnapshot: string | null;
+  expiresAt: Date | null;
+}
+
+/** Every write/read below that's scoped to an owner filters by ownerUserId,
+ * never by id/token alone -- same ownership discipline as SavedPerson above.
+ * getAuraMomentByToken() is the one deliberate exception: it's the PUBLIC
+ * bearer-access lookup (anyone holding the token can read the row), used by
+ * the public page and the public response endpoint, never by owner-scoped
+ * routes. */
+export async function createAuraMoment(input: CreateAuraMomentInput): Promise<AuraMoment> {
+  const id = randomUUID();
+  const result = await pool.query(
+    `INSERT INTO "AuraMoment"
+       (id, "ownerUserId", "publicToken", scope, "activityId", "activityTitle", "activityIcon",
+        "startAt", "endAt", timezone, "savedPersonId", "sharedPersonDisplayName", "senderDisplayName",
+        "ratingLabel", "explanationSnapshot", "expiresAt")
+     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16)
+     RETURNING *`,
+    [
+      id,
+      input.ownerUserId,
+      input.publicToken,
+      input.scope,
+      input.activityId,
+      input.activityTitle,
+      input.activityIcon,
+      input.startAt,
+      input.endAt,
+      input.timezone,
+      input.savedPersonId,
+      input.sharedPersonDisplayName,
+      input.senderDisplayName,
+      input.ratingLabel,
+      input.explanationSnapshot,
+      input.expiresAt,
+    ]
+  );
+  return result.rows[0];
+}
+
+export async function listAuraMomentsForOwner(ownerUserId: string): Promise<AuraMoment[]> {
+  const result = await pool.query(
+    `SELECT * FROM "AuraMoment" WHERE "ownerUserId" = $1 ORDER BY "createdAt" DESC`,
+    [ownerUserId]
+  );
+  return result.rows;
+}
+
+/** PUBLIC lookup -- by publicToken only, no ownership filter. This is the
+ * bearer-access read every recipient (and the public response endpoint)
+ * uses; it deliberately does not care who owns the row. */
+export async function getAuraMomentByToken(publicToken: string): Promise<AuraMoment | null> {
+  const result = await pool.query(
+    `SELECT * FROM "AuraMoment" WHERE "publicToken" = $1`,
+    [publicToken]
+  );
+  return result.rows[0] ?? null;
+}
+
+export async function getAuraMomentForOwner(ownerUserId: string, publicToken: string): Promise<AuraMoment | null> {
+  const result = await pool.query(
+    `SELECT * FROM "AuraMoment" WHERE "publicToken" = $1 AND "ownerUserId" = $2`,
+    [publicToken, ownerUserId]
+  );
+  return result.rows[0] ?? null;
+}
+
+export async function revokeAuraMoment(ownerUserId: string, publicToken: string): Promise<AuraMoment> {
+  const result = await pool.query(
+    `UPDATE "AuraMoment" SET status = 'REVOKED' WHERE "publicToken" = $1 AND "ownerUserId" = $2 RETURNING *`,
+    [publicToken, ownerUserId]
+  );
+  if (result.rows.length === 0) throw new Error('Moment not found.');
+  return result.rows[0];
+}
+
+/** PUBLIC write -- by publicToken only. Guarded entirely in SQL (status must
+ * still be ACTIVE and, if set, expiresAt must not have passed) so the
+ * check-then-act window can't race a concurrent revoke/expiry -- the caller
+ * (resolvePublicAuraMoment in lib/auraMoments.ts) separately determines the
+ * exact reason for a rejection (not found / revoked / expired) for the HTTP
+ * response, but this function's own guard is the actual source of truth. */
+export async function respondToAuraMoment(publicToken: string, response: AuraMomentResponseState): Promise<AuraMoment | null> {
+  const result = await pool.query(
+    `UPDATE "AuraMoment"
+     SET "responseState" = $2, "respondedAt" = now()
+     WHERE "publicToken" = $1 AND status = 'ACTIVE' AND ("expiresAt" IS NULL OR "expiresAt" > now())
+     RETURNING *`,
+    [publicToken, response]
+  );
+  return result.rows[0] ?? null;
+}
+
 export interface HabitLogRow {
   id: string;
   userId: string;
