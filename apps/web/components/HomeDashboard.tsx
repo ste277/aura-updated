@@ -517,8 +517,10 @@ export function HomeDashboard({
       {/* Product Structure V2 (brief section 27): ONE highly actionable
        * card, not up to 3 -- the bell (now the Updates inbox) already shows
        * the full list, so Home would otherwise duplicate it entirely.
-       * topMomentUpdate is already the most-actionable/most-recent entry
-       * (summarizeAuraUpdates's own sort), so no extra selection logic. */}
+       * topMomentUpdate is filtered by the caller (app/page.tsx) to only an
+       * entry that's still actionable/unread -- an already-resolved or
+       * already-seen update is deliberately absent here rather than shown
+       * with a stale prompt, so this section can be entirely absent too. */}
       {topMomentUpdate && (
         <section>
           <SectionHeader label="Your Moments" />

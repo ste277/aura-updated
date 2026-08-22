@@ -813,7 +813,11 @@ export default function DashboardPage() {
             onNotificationsClick={handleOpenUpdates}
             unreadUpdatesCount={auraUpdates?.unreadCount}
             onPanchangClick={() => setActiveTab('explore')}
-            topMomentUpdate={auraUpdates?.updates?.[0]}
+            // Only surface something that still needs the owner's attention --
+            // updates[0] alone could be an already-resolved/seen entry that's
+            // merely the most recent, which read as a stale "Find another
+            // time" prompt after the owner had already handled it.
+            topMomentUpdate={auraUpdates?.updates?.find((update) => update.requiresAction || (update.type === 'MOMENT_ACCEPTED' && update.unread))}
             onViewMomentUpdate={handleViewMomentUpdate}
             onFindAnotherTimeForMoment={handleFindAnotherTimeForMoment}
           />
