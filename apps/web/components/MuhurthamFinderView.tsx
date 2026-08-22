@@ -176,6 +176,8 @@ export function MuhurthamFinderView({ timezone, onBack, onOpenPanchangCalendar, 
   const [expandedDate, setExpandedDate] = useState<string | null>(null);
   const [savingWindowKey, setSavingWindowKey] = useState<string | null>(null);
   const [savedWindowKeys, setSavedWindowKeys] = useState<Set<string>>(new Set());
+  const [sharingWindowKey, setSharingWindowKey] = useState<string | null>(null);
+  const [shareFeedback, setShareFeedback] = useState<{ key: string; text: string } | null>(null);
 
   // SHARED's person selector -- lazily fetched (brief section 12: GENERAL/
   // PERSONAL never touch this) the first time the "Us" scope is opened, not
@@ -315,6 +317,62 @@ export function MuhurthamFinderView({ timezone, onBack, onOpenPanchangCalendar, 
       // Best-effort -- the user can retry; no destructive state to roll back.
     } finally {
       setSavingWindowKey(null);
+    }
+  };
+
+  /** Aura Moment Sharing V1 -- creates a snapshot of the SELECTED candidate
+   * (never re-runs search) via POST /api/aura-moments, then opens the
+   * native share sheet when available (brief section 7: "open native share
+   * UI when available... Use navigator.share() where supported"), falling
+   * back to copying the link. Works for all three scopes (brief section 7:
+   * "If implementation is clean, GENERAL/PERSONAL may also be shareable") --
+   * the request shape is identical across scopes; only ratingLabel/
+   * savedPersonId vary per caller. */
+  const handleShareMoment = async (dateKey: string, window: TimingCandidate, scope: MuhurthamSearchScope, ratingLabel: string, savedPersonId?: string) => {
+    const key = windowKey(dateKey, window);
+    setSharingWindowKey(key);
+    setShareFeedback(null);
+    try {
+      const res = await fetch('/api/aura-moments', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ scope, activityId, startAt: window.start, endAt: window.end, ratingLabel, savedPersonId }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data?.error || 'Unable to share this moment.');
+      const shareUrl: string = data.shareUrl;
+      const shareTitle = `A moment from Aura — ${activity?.title ?? 'Timing'}`;
+      const shareText = 'Aura found a good time — take a look.';
+
+      // The moment already exists at this point (the POST above succeeded),
+      // so any failure from here on is only about HOW to hand the link to
+      // the user, not whether sharing worked -- fall back to just showing
+      // the link itself rather than surfacing a raw browser exception (e.g.
+      // clipboard writes can throw "Document is not focused" in some
+      // embedding contexts).
+      try {
+        if (typeof navigator !== 'undefined' && navigator.share) {
+          await navigator.share({ title: shareTitle, text: shareText, url: shareUrl });
+          setShareFeedback({ key, text: 'Shared!' });
+        } else if (typeof navigator !== 'undefined' && navigator.clipboard) {
+          await navigator.clipboard.writeText(shareUrl);
+          setShareFeedback({ key, text: 'Link copied!' });
+        } else {
+          setShareFeedback({ key, text: shareUrl });
+        }
+      } catch (shareErr) {
+        // navigator.share() throws AbortError when the user simply dismisses
+        // the native sheet -- not a failure, nothing to show for that.
+        if (shareErr instanceof Error && shareErr.name === 'AbortError') {
+          setSharingWindowKey(null);
+          return;
+        }
+        setShareFeedback({ key, text: shareUrl });
+      }
+    } catch (err) {
+      setShareFeedback({ key, text: err instanceof Error ? err.message : 'Unable to share this moment.' });
+    } finally {
+      setSharingWindowKey(null);
     }
   };
 
@@ -461,6 +519,9 @@ export function MuhurthamFinderView({ timezone, onBack, onOpenPanchangCalendar, 
                   savingWindowKey={savingWindowKey}
                   savedWindowKeys={savedWindowKeys}
                   windowKey={windowKey}
+                  onShareMoment={(window) => handleShareMoment(date.date, window, 'GENERAL', date.rating)}
+                  sharingWindowKey={sharingWindowKey}
+                  shareFeedback={shareFeedback}
                 />
               ))}
               {!showAllDates && visibleDates.length > DEFAULT_DISPLAY_COUNT && (
@@ -531,6 +592,9 @@ export function MuhurthamFinderView({ timezone, onBack, onOpenPanchangCalendar, 
                   savingWindowKey={savingWindowKey}
                   savedWindowKeys={savedWindowKeys}
                   windowKey={windowKey}
+                  onShareMoment={(window) => handleShareMoment(date.date, window, 'PERSONAL', date.rating)}
+                  sharingWindowKey={sharingWindowKey}
+                  shareFeedback={shareFeedback}
                 />
               ))}
               {!showAllDates && personalVisible.length > DEFAULT_DISPLAY_COUNT && (
@@ -613,6 +677,9 @@ export function MuhurthamFinderView({ timezone, onBack, onOpenPanchangCalendar, 
                   savingWindowKey={savingWindowKey}
                   savedWindowKeys={savedWindowKeys}
                   windowKey={windowKey}
+                  onShareMoment={(window) => handleShareMoment(date.date, window, 'SHARED', date.rating, date.person.savedPersonId)}
+                  sharingWindowKey={sharingWindowKey}
+                  shareFeedback={shareFeedback}
                 />
               ))}
               {!showAllDates && sharedVisible.length > DEFAULT_DISPLAY_COUNT && (
@@ -663,6 +730,9 @@ function MuhurthamDateCard({
   savingWindowKey,
   savedWindowKeys,
   windowKey,
+  onShareMoment,
+  sharingWindowKey,
+  shareFeedback,
 }: {
   date: MuhurthamDateCandidate;
   timezone: string;
@@ -673,6 +743,9 @@ function MuhurthamDateCard({
   savingWindowKey: string | null;
   savedWindowKeys: Set<string>;
   windowKey: (dateKey: string, window: TimingCandidate) => string;
+  onShareMoment: (window: TimingCandidate) => void;
+  sharingWindowKey: string | null;
+  shareFeedback: { key: string; text: string } | null;
 }) {
   const topReasons = date.reasons.slice(0, 3);
   const bestKey = windowKey(date.date, date.bestWindow);
@@ -706,6 +779,7 @@ function MuhurthamDateCard({
         <button type="button" onClick={() => onUseThisTime(date.bestWindow)} disabled={bestSaving || bestSaved} style={{ ...linkButtonStyle, color: bestSaved ? '#4ade80' : '#38bdf8' }}>
           {bestSaved ? 'Added to Plan ✓' : bestSaving ? 'Saving…' : 'Use this time →'}
         </button>
+        <ShareMomentButton window={date.bestWindow} onShareMoment={onShareMoment} sharingWindowKey={sharingWindowKey} shareFeedback={shareFeedback} windowKeyValue={bestKey} />
       </div>
 
       {expanded && (
@@ -795,6 +869,9 @@ function MuhurthamPersonalDateCard({
   savingWindowKey,
   savedWindowKeys,
   windowKey,
+  onShareMoment,
+  sharingWindowKey,
+  shareFeedback,
 }: {
   date: MuhurthamPersonalDateCandidate;
   timezone: string;
@@ -806,6 +883,9 @@ function MuhurthamPersonalDateCard({
   savingWindowKey: string | null;
   savedWindowKeys: Set<string>;
   windowKey: (dateKey: string, window: TimingCandidate) => string;
+  onShareMoment: (window: TimingCandidate) => void;
+  sharingWindowKey: string | null;
+  shareFeedback: { key: string; text: string } | null;
 }) {
   const topReasons = date.reasons.slice(0, 3);
   const bestKey = windowKey(date.date, date.bestWindow);
@@ -853,6 +933,7 @@ function MuhurthamPersonalDateCard({
         <button type="button" onClick={() => onUseThisTime(date.bestWindow)} disabled={bestSaving || bestSaved} style={{ ...linkButtonStyle, color: bestSaved ? '#4ade80' : '#38bdf8' }}>
           {bestSaved ? 'Added to Plan ✓' : bestSaving ? 'Saving…' : 'Use this time →'}
         </button>
+        <ShareMomentButton window={date.bestWindow} onShareMoment={onShareMoment} sharingWindowKey={sharingWindowKey} shareFeedback={shareFeedback} windowKeyValue={bestKey} />
       </div>
 
       {expanded && (
@@ -951,6 +1032,9 @@ function MuhurthamSharedDateCard({
   savingWindowKey,
   savedWindowKeys,
   windowKey,
+  onShareMoment,
+  sharingWindowKey,
+  shareFeedback,
 }: {
   date: MuhurthamSharedDateCandidate;
   timezone: string;
@@ -962,6 +1046,9 @@ function MuhurthamSharedDateCard({
   savingWindowKey: string | null;
   savedWindowKeys: Set<string>;
   windowKey: (dateKey: string, window: TimingCandidate) => string;
+  onShareMoment: (window: TimingCandidate) => void;
+  sharingWindowKey: string | null;
+  shareFeedback: { key: string; text: string } | null;
 }) {
   const bestKey = windowKey(date.date, date.bestWindow);
   const bestSaved = savedWindowKeys.has(bestKey);
@@ -1016,6 +1103,7 @@ function MuhurthamSharedDateCard({
         <button type="button" onClick={() => onUseThisTime(date.bestWindow)} disabled={bestSaving || bestSaved} style={{ ...linkButtonStyle, color: bestSaved ? '#4ade80' : '#38bdf8' }}>
           {bestSaved ? 'Added to Plan ✓' : bestSaving ? 'Saving…' : 'Use this time →'}
         </button>
+        <ShareMomentButton window={date.bestWindow} onShareMoment={onShareMoment} sharingWindowKey={sharingWindowKey} shareFeedback={shareFeedback} windowKeyValue={bestKey} />
       </div>
 
       {expanded && (
@@ -1102,6 +1190,33 @@ function MuhurthamSharedDateCard({
         </div>
       )}
     </section>
+  );
+}
+
+/** Shared by all three result card types (GENERAL/PERSONAL/SHARED) --
+ * creates an Aura Moment snapshot of THIS window and opens the native share
+ * sheet where supported, falling back to a copy-link confirmation. Never
+ * disabled based on scope -- brief section 7: "If implementation is clean,
+ * GENERAL/PERSONAL may also be shareable." */
+function ShareMomentButton({
+  window: shareWindow,
+  onShareMoment,
+  sharingWindowKey,
+  shareFeedback,
+  windowKeyValue,
+}: {
+  window: TimingCandidate;
+  onShareMoment: (window: TimingCandidate) => void;
+  sharingWindowKey: string | null;
+  shareFeedback: { key: string; text: string } | null;
+  windowKeyValue: string;
+}) {
+  const sharing = sharingWindowKey === windowKeyValue;
+  const feedback = shareFeedback?.key === windowKeyValue ? shareFeedback.text : null;
+  return (
+    <button type="button" onClick={() => onShareMoment(shareWindow)} disabled={sharing} style={{ ...linkButtonStyle, color: feedback ? '#4ade80' : '#38bdf8' }}>
+      {feedback ?? (sharing ? 'Sharing…' : 'Share this moment')}
+    </button>
   );
 }
 

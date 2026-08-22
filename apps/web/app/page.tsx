@@ -26,11 +26,13 @@ import { YouView } from '../components/YouView';
 import { PanchangCalendarView } from '../components/PanchangCalendarView';
 import { MuhurthamFinderView } from '../components/MuhurthamFinderView';
 import { PeopleView } from '../components/PeopleView';
+import { SharedMomentsView } from '../components/SharedMomentsView';
 
 import { BirthChartSection } from '../components/BirthChartSection';
 import { LoginScreen } from '../components/LoginScreen';
 import { useCurrentMinuteOfDay } from '../lib/useCurrentMinuteOfDay';
 import { resolveTzOffsetMinutes, getDatePartsInTimezone } from '../lib/timezone';
+import { formatDisplayName } from '../lib/displayName';
 import { Capacitor } from '@capacitor/core';
 import {
   loadNotificationPrefs,
@@ -70,14 +72,6 @@ interface PlannedActivityState {
 
 const FALLBACK_TZ = 'Asia/Kolkata';
 
-function formatDisplayName(email: string): string {
-  const localPart = email.split('@')[0] || 'there';
-  const withoutDigits = localPart.replace(/[0-9]+/g, '');
-  const words = withoutDigits.split(/[._-]+/).filter(Boolean);
-  const name = words.join(' ').trim() || localPart;
-  return name.replace(/\b\w/g, (letter) => letter.toUpperCase());
-}
-
 type LogSource = 'AURA_PLANNED' | 'AURA_DO_NOW' | 'MANUAL' | 'OVERRIDE_CAUTION';
 type ActivitySignificance = 'LOW' | 'MEDIUM' | 'HIGH';
 
@@ -102,7 +96,7 @@ export default function DashboardPage() {
   const [youNotificationsFocusKey, setYouNotificationsFocusKey] = useState(0);
   const [mounted, setMounted] = useState(false);
 
-  const [activeTab, setActiveTab] = useState<'home' | 'timeline' | 'ask' | 'plan' | 'insights' | 'you' | 'chart' | 'activity' | 'panchang' | 'muhurtham' | 'people'>('home');
+  const [activeTab, setActiveTab] = useState<'home' | 'timeline' | 'ask' | 'plan' | 'insights' | 'you' | 'chart' | 'activity' | 'panchang' | 'muhurtham' | 'people' | 'sharedMoments'>('home');
   const [panchangDateJump, setPanchangDateJump] = useState<{ date: string; key: number } | null>(null);
 
   const [notificationPrefs, setNotificationPrefs] = useState<NotificationPrefs>(DEFAULT_NOTIFICATION_PREFS);
@@ -808,6 +802,7 @@ export default function DashboardPage() {
             onOpenActivityLog={() => setActiveTab('activity')}
             onOpenPanchang={() => setActiveTab('panchang')}
             onOpenPeople={() => setActiveTab('people')}
+            onOpenSharedMoments={() => setActiveTab('sharedMoments')}
             onSignOut={handleLogout}
             focusNotificationsKey={youNotificationsFocusKey}
           />
@@ -816,6 +811,8 @@ export default function DashboardPage() {
         {activeTab === 'chart' && <BirthChartSection />}
 
         {activeTab === 'people' && <PeopleView onBack={() => setActiveTab('you')} />}
+
+        {activeTab === 'sharedMoments' && <SharedMomentsView onBack={() => setActiveTab('you')} />}
 
         {activeTab === 'activity' && (
           <CalendarViewSection
@@ -872,7 +869,7 @@ export default function DashboardPage() {
         <NavButton label="Plan" icon="✨" active={activeTab === 'plan'} onClick={() => setActiveTab('plan')} />
         <NavButton label="Ask Aura" icon="🤖" active={activeTab === 'ask'} onClick={() => setActiveTab('ask')} />
         <NavButton label="Insights" icon="📊" active={activeTab === 'insights'} onClick={() => setActiveTab('insights')} />
-        <NavButton label="You" icon="👤" active={activeTab === 'you' || activeTab === 'chart' || activeTab === 'activity' || activeTab === 'panchang' || activeTab === 'muhurtham' || activeTab === 'people'} onClick={() => setActiveTab('you')} />
+        <NavButton label="You" icon="👤" active={activeTab === 'you' || activeTab === 'chart' || activeTab === 'activity' || activeTab === 'panchang' || activeTab === 'muhurtham' || activeTab === 'people' || activeTab === 'sharedMoments'} onClick={() => setActiveTab('you')} />
       </nav>
     </main>
   );

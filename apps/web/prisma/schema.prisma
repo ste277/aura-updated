@@ -32,6 +32,7 @@ model User {
   dailyReflections DailyReflection[]
   plannedActivities PlannedActivity[]
   savedPeople     SavedPerson[]
+  auraMoments     AuraMoment[]
 }
 
 // A lightweight profile for someone the user plans with -- the minimum
@@ -71,6 +72,50 @@ model SavedPerson {
 
   createdAt       DateTime @default(now()) @db.Timestamptz(3)
   updatedAt       DateTime @updatedAt @db.Timestamptz(3)
+
+  auraMoments     AuraMoment[]
+
+  @@index([ownerUserId])
+}
+
+// A snapshot of a selected Muhurtham recommendation, shared via an opaque
+// public token -- "what Aura recommended when this was shared", never
+// re-derived on read (no Panchang/Muhurta/natal recomputation). The public
+// page and the public response endpoint resolve ONLY by publicToken --
+// bearer-access, like a normal share link -- never by this row's own `id`.
+// Deliberately stores no natal/birth data at all (see apps/web/lib/auraMoments.ts's
+// PublicAuraMoment DTO, which allow-lists fields rather than ever spreading
+// this row), so there is nothing here for a public reader to leak beyond
+// what the owner explicitly chose to share.
+model AuraMoment {
+  id                      String    @id @default(uuid())
+  ownerUserId             String
+  owner                   User      @relation(fields: [ownerUserId], references: [id], onDelete: Cascade)
+  publicToken             String    @unique
+
+  scope                   String    // "GENERAL" | "PERSONAL" | "SHARED"
+  activityId              String
+  activityTitle           String
+  activityIcon            String?
+
+  startAt                 DateTime  @db.Timestamptz(3)
+  endAt                   DateTime  @db.Timestamptz(3)
+  timezone                String
+
+  savedPersonId           String?
+  savedPerson              SavedPerson? @relation(fields: [savedPersonId], references: [id], onDelete: SetNull)
+  sharedPersonDisplayName String?
+  senderDisplayName       String?
+
+  ratingLabel             String?
+  explanationSnapshot     String?
+
+  status                  String    @default("ACTIVE") // "ACTIVE" | "REVOKED"
+  responseState           String?   // null | "ACCEPTED" | "ANOTHER_TIME"
+  respondedAt             DateTime? @db.Timestamptz(3)
+
+  createdAt               DateTime  @default(now()) @db.Timestamptz(3)
+  expiresAt                DateTime? @db.Timestamptz(3)
 
   @@index([ownerUserId])
 }
