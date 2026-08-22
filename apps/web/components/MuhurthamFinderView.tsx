@@ -2,7 +2,7 @@
 
 import React, { useMemo, useState } from 'react';
 import { SUPPORTED_MUHURTHAM_ACTIVITY_IDS, SupportedMuhurthamActivityId } from '../../../packages/recommendation/src/muhurthamFinder';
-import type { MuhurthamDateCandidate, MuhurthamSearchResult } from '../../../packages/recommendation/src/muhurthamFinder';
+import type { MuhurthamDateCandidate, MuhurthamPersonalDateCandidate, MuhurthamPersonalSearchOutcome, MuhurthamSearchResult, MuhurthamSearchScope } from '../../../packages/recommendation/src/muhurthamFinder';
 import type { TimingCandidate, TimingTimePreference } from '../../../packages/recommendation/src/timingSearch';
 import { FULL_ACTIVITY_CATALOG } from '../../../packages/recommendation/src/personalizedTasks';
 import { formatMuhurtaReason } from '../../../packages/muhurta/src/muhurtaReasonFormat';
@@ -19,6 +19,11 @@ interface MuhurthamFinderViewProps {
    * implementation, never a second one. */
   onViewFullPanchang: (dateStr: string) => void;
   onPlanLogged?: () => void;
+  /** Reuses the existing birth-profile setup screen (You -> Birth Chart) for
+   * the "Complete profile" affordance in the incomplete-profile state --
+   * brief section 11: "Reuse existing birth-profile setup/navigation. Do
+   * not build another profile form." */
+  onOpenBirthProfile: () => void;
 }
 
 type RangePreset = 'THIS_MONTH' | 'NEXT_MONTH' | 'NEXT_3_MONTHS' | 'CUSTOM';
@@ -98,7 +103,7 @@ export function computePresetRange(preset: RangePreset, todayDateStr: string, cu
  * withheld from the default results list (never manufactured as if they
  * were strong) and only revealed via the explicit "Show acceptable
  * options" action. Exported for unit testing. */
-export function partitionDatesByStrength(dates: MuhurthamDateCandidate[]): { strong: MuhurthamDateCandidate[]; acceptable: MuhurthamDateCandidate[] } {
+export function partitionDatesByStrength<T extends { rating: MuhurthamDateCandidate['rating'] }>(dates: T[]): { strong: T[]; acceptable: T[] } {
   return {
     strong: dates.filter((d) => d.rating !== 'ACCEPTABLE'),
     acceptable: dates.filter((d) => d.rating === 'ACCEPTABLE'),
@@ -115,7 +120,7 @@ function formatClockTime(iso: string, timezone: string): string {
   return new Date(iso).toLocaleTimeString('en-US', { timeZone: timezone, hour: 'numeric', minute: '2-digit' });
 }
 
-export function MuhurthamFinderView({ timezone, onBack, onOpenPanchangCalendar, onViewFullPanchang, onPlanLogged }: MuhurthamFinderViewProps) {
+export function MuhurthamFinderView({ timezone, onBack, onOpenPanchangCalendar, onViewFullPanchang, onPlanLogged, onOpenBirthProfile }: MuhurthamFinderViewProps) {
   const todayDateStr = useMemo(() => getDatePartsInTimezone(timezone, new Date()).dateStr, [timezone]);
 
   const [activityId, setActivityId] = useState<SupportedMuhurthamActivityId>('start-journey');
@@ -124,10 +129,12 @@ export function MuhurthamFinderView({ timezone, onBack, onOpenPanchangCalendar, 
   const [customEnd, setCustomEnd] = useState('');
   const [timePreference, setTimePreference] = useState<TimingTimePreference>('ANY');
   const [durationMinutes, setDurationMinutes] = useState(60);
+  const [scope, setScope] = useState<MuhurthamSearchScope>('GENERAL');
 
   const [searching, setSearching] = useState(false);
   const [error, setError] = useState('');
   const [result, setResult] = useState<MuhurthamSearchResult | null>(null);
+  const [personalOutcome, setPersonalOutcome] = useState<MuhurthamPersonalSearchOutcome | null>(null);
   const [activeRange, setActiveRange] = useState<{ start: string; end: string } | null>(null);
 
   const [showAllDates, setShowAllDates] = useState(false);
@@ -139,7 +146,7 @@ export function MuhurthamFinderView({ timezone, onBack, onOpenPanchangCalendar, 
   const requestedRange = computePresetRange(rangePreset, todayDateStr, customStart, customEnd);
   const activity = FULL_ACTIVITY_CATALOG.find((a) => a.id === activityId);
 
-  const runSearch = async (range: { start: string; end: string }, preference: TimingTimePreference) => {
+  const runSearch = async (range: { start: string; end: string }, preference: TimingTimePreference, searchScope: MuhurthamSearchScope) => {
     setSearching(true);
     setError('');
     setShowAllDates(false);
@@ -155,14 +162,22 @@ export function MuhurthamFinderView({ timezone, onBack, onOpenPanchangCalendar, 
           timePreference: preference,
           durationMinutes,
           limit: SEARCH_LIMIT,
+          scope: searchScope,
         }),
       });
       const data = await res.json();
       if (!res.ok) throw new Error(data?.error || 'Unable to search for favorable dates.');
-      setResult(data);
+      if (searchScope === 'PERSONAL') {
+        setPersonalOutcome(data as MuhurthamPersonalSearchOutcome);
+        setResult(null);
+      } else {
+        setResult(data as MuhurthamSearchResult);
+        setPersonalOutcome(null);
+      }
       setActiveRange(range);
     } catch (err) {
       setResult(null);
+      setPersonalOutcome(null);
       setActiveRange(null);
       setError(err instanceof Error ? err.message : 'Unable to search for favorable dates.');
     } finally {
@@ -175,7 +190,7 @@ export function MuhurthamFinderView({ timezone, onBack, onOpenPanchangCalendar, 
       setError('Choose a start and end date.');
       return;
     }
-    runSearch(requestedRange, timePreference);
+    runSearch(requestedRange, timePreference, scope);
   };
 
   const handleExpandRange = () => {
@@ -186,24 +201,38 @@ export function MuhurthamFinderView({ timezone, onBack, onOpenPanchangCalendar, 
     setRangePreset('CUSTOM');
     setCustomStart(activeRange.start);
     setCustomEnd(nextEnd);
-    runSearch({ start: activeRange.start, end: nextEnd }, timePreference);
+    runSearch({ start: activeRange.start, end: nextEnd }, timePreference, scope);
   };
 
   const handleRelaxTimePreference = () => {
     if (!activeRange) return;
     setTimePreference('ANY');
-    runSearch(activeRange, 'ANY');
+    runSearch(activeRange, 'ANY', scope);
+  };
+
+  const handleScopeChange = (nextScope: MuhurthamSearchScope) => {
+    setScope(nextScope);
+    setResult(null);
+    setPersonalOutcome(null);
+    setActiveRange(null);
+    setError('');
   };
 
   const { strong: strongDates, acceptable: acceptableDates } = useMemo(() => partitionDatesByStrength(result?.dates ?? []), [result]);
   const visibleDates = showAcceptable ? result?.dates ?? [] : strongDates;
   const displayedDates = showAllDates ? visibleDates : visibleDates.slice(0, DEFAULT_DISPLAY_COUNT);
+
+  const personalOk = personalOutcome?.status === 'OK' ? personalOutcome : null;
+  const { strong: personalStrong, acceptable: personalAcceptable } = useMemo(() => partitionDatesByStrength(personalOk?.dates ?? []), [personalOk]);
+  const personalVisible = showAcceptable ? personalOk?.dates ?? [] : personalStrong;
+  const personalDisplayed = showAllDates ? personalVisible : personalVisible.slice(0, DEFAULT_DISPLAY_COUNT);
+
   const canExpandRange = activeRange ? daySpan(activeRange.start, activeRange.end) < MAX_RANGE_DAYS : false;
 
-  const windowKey = (date: MuhurthamDateCandidate, window: TimingCandidate) => `${date.date}-${window.start}-${window.end}`;
+  const windowKey = (dateKey: string, window: TimingCandidate) => `${dateKey}-${window.start}-${window.end}`;
 
-  const handleUseThisTime = async (date: MuhurthamDateCandidate, window: TimingCandidate) => {
-    const key = windowKey(date, window);
+  const handleUseThisTime = async (dateKey: string, window: TimingCandidate) => {
+    const key = windowKey(dateKey, window);
     setSavingWindowKey(key);
     try {
       await saveUpcomingPlanFromCandidate(window, durationMinutes);
@@ -230,6 +259,14 @@ export function MuhurthamFinderView({ timezone, onBack, onOpenPanchangCalendar, 
       </div>
 
       <ExploreModeToggle active="muhurtham" onSelectCalendar={onOpenPanchangCalendar} />
+
+      <div>
+        <div style={{ ...sectionKickerStyle, marginBottom: 8 }}>For</div>
+        <div style={toggleRowStyle} role="tablist" aria-label="General or personalized results">
+          <ScopeToggleButton label="General" icon="🌐" active={scope === 'GENERAL'} onClick={() => handleScopeChange('GENERAL')} />
+          <ScopeToggleButton label="Me" icon="✨" active={scope === 'PERSONAL'} onClick={() => handleScopeChange('PERSONAL')} />
+        </div>
+      </div>
 
       <section style={cardStyle}>
         <div style={sectionKickerStyle}>What are you planning?</div>
@@ -278,7 +315,7 @@ export function MuhurthamFinderView({ timezone, onBack, onOpenPanchangCalendar, 
         {error && <div style={{ ...errorBoxStyle, marginTop: 10 }}>{error}</div>}
       </section>
 
-      {result && (
+      {scope === 'GENERAL' && result && (
         <>
           {visibleDates.length === 0 ? (
             <section style={cardStyle}>
@@ -314,7 +351,7 @@ export function MuhurthamFinderView({ timezone, onBack, onOpenPanchangCalendar, 
                   expanded={expandedDate === date.date}
                   onToggleExpand={() => setExpandedDate((current) => (current === date.date ? null : date.date))}
                   onViewFullPanchang={() => onViewFullPanchang(date.date)}
-                  onUseThisTime={(window) => handleUseThisTime(date, window)}
+                  onUseThisTime={(window) => handleUseThisTime(date.date, window)}
                   savingWindowKey={savingWindowKey}
                   savedWindowKeys={savedWindowKeys}
                   windowKey={windowKey}
@@ -334,7 +371,97 @@ export function MuhurthamFinderView({ timezone, onBack, onOpenPanchangCalendar, 
           )}
         </>
       )}
+
+      {scope === 'PERSONAL' && personalOutcome?.status === 'PERSONAL_PROFILE_INCOMPLETE' && (
+        <section style={cardStyle}>
+          <div style={{ fontSize: 14, fontWeight: 800 }}>Personalize your Muhurtham</div>
+          <p style={{ fontSize: 12, color: '#94a3b8', marginTop: 6, lineHeight: 1.5 }}>
+            Add your birth details to see timings matched to you.
+          </p>
+          <button type="button" onClick={onOpenBirthProfile} style={{ ...secondaryButtonStyle, marginTop: 12, textAlign: 'center' }}>
+            Complete profile →
+          </button>
+        </section>
+      )}
+
+      {scope === 'PERSONAL' && personalOk && (
+        <>
+          {personalVisible.length === 0 ? (
+            <section style={cardStyle}>
+              <div style={{ fontSize: 14, fontWeight: 800 }}>No strongly favorable dates were found in this range.</div>
+              <p style={{ fontSize: 12, color: '#94a3b8', marginTop: 6, lineHeight: 1.5 }}>
+                {activity?.title ?? 'This activity'} didn&apos;t have a clearly favorable window for you between {formatDateLabel(personalOk.dateRange.start, timezone)} and {formatDateLabel(personalOk.dateRange.end, timezone)}.
+              </p>
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 8, marginTop: 14 }}>
+                {canExpandRange && (
+                  <button type="button" onClick={handleExpandRange} disabled={searching} style={secondaryButtonStyle}>
+                    Expand search range (+{EXPAND_STEP_DAYS} days) →
+                  </button>
+                )}
+                {timePreference !== 'ANY' && (
+                  <button type="button" onClick={handleRelaxTimePreference} disabled={searching} style={secondaryButtonStyle}>
+                    Relax preferred time →
+                  </button>
+                )}
+                {personalAcceptable.length > 0 && (
+                  <button type="button" onClick={() => setShowAcceptable(true)} style={secondaryButtonStyle}>
+                    Show acceptable options ({personalAcceptable.length}) →
+                  </button>
+                )}
+              </div>
+            </section>
+          ) : (
+            <>
+              {personalDisplayed.map((date, index) => (
+                <MuhurthamPersonalDateCard
+                  key={date.date}
+                  date={date}
+                  timezone={timezone}
+                  isBestForYou={index === 0}
+                  expanded={expandedDate === date.date}
+                  onToggleExpand={() => setExpandedDate((current) => (current === date.date ? null : date.date))}
+                  onViewFullPanchang={() => onViewFullPanchang(date.date)}
+                  onUseThisTime={(window) => handleUseThisTime(date.date, window)}
+                  savingWindowKey={savingWindowKey}
+                  savedWindowKeys={savedWindowKeys}
+                  windowKey={windowKey}
+                />
+              ))}
+              {!showAllDates && personalVisible.length > DEFAULT_DISPLAY_COUNT && (
+                <button type="button" onClick={() => setShowAllDates(true)} style={{ ...linkButtonStyle, alignSelf: 'center' }}>
+                  View more results ({personalVisible.length - DEFAULT_DISPLAY_COUNT} more) →
+                </button>
+              )}
+              {!showAcceptable && personalAcceptable.length > 0 && (
+                <button type="button" onClick={() => setShowAcceptable(true)} style={{ ...linkButtonStyle, alignSelf: 'center' }}>
+                  Show {personalAcceptable.length} more acceptable option{personalAcceptable.length === 1 ? '' : 's'} →
+                </button>
+              )}
+            </>
+          )}
+        </>
+      )}
     </div>
+  );
+}
+
+function ScopeToggleButton({ label, icon, active, onClick }: { label: string; icon: string; active: boolean; onClick: () => void }) {
+  return (
+    <button
+      type="button"
+      role="tab"
+      aria-selected={active}
+      onClick={active ? undefined : onClick}
+      disabled={active}
+      style={{
+        ...toggleButtonStyle,
+        background: active ? '#4ade80' : 'transparent',
+        color: active ? '#020617' : '#f8fafc',
+        cursor: active ? 'default' : 'pointer',
+      }}
+    >
+      <span aria-hidden="true">{icon}</span> {label}
+    </button>
   );
 }
 
@@ -357,10 +484,10 @@ function MuhurthamDateCard({
   onUseThisTime: (window: TimingCandidate) => void;
   savingWindowKey: string | null;
   savedWindowKeys: Set<string>;
-  windowKey: (date: MuhurthamDateCandidate, window: TimingCandidate) => string;
+  windowKey: (dateKey: string, window: TimingCandidate) => string;
 }) {
   const topReasons = date.reasons.slice(0, 3);
-  const bestKey = windowKey(date, date.bestWindow);
+  const bestKey = windowKey(date.date, date.bestWindow);
   const bestSaved = savedWindowKeys.has(bestKey);
   const bestSaving = savingWindowKey === bestKey;
 
@@ -433,7 +560,163 @@ function MuhurthamDateCard({
               <div style={sectionKickerStyle}>Other good windows this date</div>
               <div style={{ display: 'flex', flexDirection: 'column', gap: 8, marginTop: 8 }}>
                 {date.alternateWindows.map((window) => {
-                  const key = windowKey(date, window);
+                  const key = windowKey(date.date, window);
+                  const saved = savedWindowKeys.has(key);
+                  const saving = savingWindowKey === key;
+                  return (
+                    <div key={key} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 8 }}>
+                      <span style={{ fontSize: 12, color: '#dbe7f4' }}>{formatClockTime(window.start, timezone)} – {formatClockTime(window.end, timezone)}</span>
+                      <button type="button" onClick={() => onUseThisTime(window)} disabled={saving || saved} style={{ ...linkButtonStyle, fontSize: 12, color: saved ? '#4ade80' : '#38bdf8' }}>
+                        {saved ? 'Added ✓' : saving ? 'Saving…' : 'Use this time →'}
+                      </button>
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+          )}
+
+          <button type="button" onClick={onViewFullPanchang} style={{ ...linkButtonStyle, alignSelf: 'flex-start' }}>
+            View full Panchang →
+          </button>
+        </div>
+      )}
+    </section>
+  );
+}
+
+/** Display-only rating label for a standalone score (e.g. generalScore shown
+ * inside a PERSONAL card) -- mirrors the domain's rateMuhurtham() thresholds
+ * exactly (9.0/8.0/7.0), but without the caution-aware EXCELLENT cap since
+ * this is a secondary informational label, not the card's own rating. */
+function scoreRatingLabel(score: number): MuhurthamDateCandidate['rating'] {
+  if (score >= 9.0) return 'EXCELLENT';
+  if (score >= 8.0) return 'STRONG';
+  if (score >= 7.0) return 'FAVORABLE';
+  return 'ACCEPTABLE';
+}
+
+function MuhurthamPersonalDateCard({
+  date,
+  timezone,
+  isBestForYou,
+  expanded,
+  onToggleExpand,
+  onViewFullPanchang,
+  onUseThisTime,
+  savingWindowKey,
+  savedWindowKeys,
+  windowKey,
+}: {
+  date: MuhurthamPersonalDateCandidate;
+  timezone: string;
+  isBestForYou: boolean;
+  expanded: boolean;
+  onToggleExpand: () => void;
+  onViewFullPanchang: () => void;
+  onUseThisTime: (window: TimingCandidate) => void;
+  savingWindowKey: string | null;
+  savedWindowKeys: Set<string>;
+  windowKey: (dateKey: string, window: TimingCandidate) => string;
+}) {
+  const topReasons = date.reasons.slice(0, 3);
+  const bestKey = windowKey(date.date, date.bestWindow);
+  const bestSaved = savedWindowKeys.has(bestKey);
+  const bestSaving = savingWindowKey === bestKey;
+  const generalRating = scoreRatingLabel(date.generalScore);
+  const taraBala = date.personalFactors.taraBala;
+
+  return (
+    <section style={cardStyle}>
+      {isBestForYou && <div style={{ ...sectionKickerStyle, color: '#a78bfa', marginBottom: 8 }}>✨ Best for you</div>}
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: 10, flexWrap: 'wrap' }}>
+        <div>
+          <div style={{ fontSize: 16, fontWeight: 800 }}>{formatDateLabel(date.date, timezone)}</div>
+          <div style={{ fontSize: 12, color: '#dbe7f4', marginTop: 3 }}>
+            {formatClockTime(date.bestWindow.start, timezone)} – {formatClockTime(date.bestWindow.end, timezone)}
+          </div>
+        </div>
+        <span style={{ ...ratingBadgeStyle, color: RATING_COLOR[date.rating], borderColor: RATING_COLOR[date.rating] }}>{RATING_TEXT[date.rating]} personal fit</span>
+      </div>
+
+      <div style={{ display: 'flex', gap: 16, marginTop: 12, fontSize: 12 }}>
+        <div style={{ display: 'flex', gap: 6, alignItems: 'baseline' }}>
+          <span style={{ color: '#94a3b8' }}>General Muhurta</span>
+          <span style={{ fontWeight: 800, color: RATING_COLOR[generalRating] }}>{RATING_TEXT[generalRating]}</span>
+        </div>
+        <div style={{ display: 'flex', gap: 6, alignItems: 'baseline' }}>
+          <span style={{ color: '#94a3b8' }}>For you</span>
+          <span style={{ fontWeight: 800, color: RATING_COLOR[date.rating] }}>{RATING_TEXT[date.rating]}</span>
+        </div>
+      </div>
+
+      {topReasons.length > 0 && (
+        <ul style={{ margin: '10px 0 0', paddingLeft: 18, fontSize: 12, color: '#94a3b8', lineHeight: 1.6 }}>
+          {topReasons.map((reason, i) => (
+            <li key={i}>{reason.factor === 'PERSONAL' ? '✨ ' : ''}{formatMuhurtaReason(reason)}</li>
+          ))}
+        </ul>
+      )}
+
+      <div style={{ display: 'flex', gap: 14, marginTop: 12, flexWrap: 'wrap' }}>
+        <button type="button" onClick={onToggleExpand} style={linkButtonStyle}>
+          {expanded ? 'Hide details' : 'Why this time?'} {expanded ? '▲' : '▼'}
+        </button>
+        <button type="button" onClick={() => onUseThisTime(date.bestWindow)} disabled={bestSaving || bestSaved} style={{ ...linkButtonStyle, color: bestSaved ? '#4ade80' : '#38bdf8' }}>
+          {bestSaved ? 'Added to Plan ✓' : bestSaving ? 'Saving…' : 'Use this time →'}
+        </button>
+      </div>
+
+      {expanded && (
+        <div style={{ marginTop: 14, paddingTop: 14, borderTop: '1px solid rgba(255,255,255,0.08)', display: 'flex', flexDirection: 'column', gap: 14 }}>
+          <div>
+            <div style={sectionKickerStyle}>Panchang</div>
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8, marginTop: 8 }}>
+              <PanchangaMiniCell label="Tithi" value={date.panchangSummary.tithi} />
+              <PanchangaMiniCell label="Nakshatra" value={date.panchangSummary.nakshatra} />
+              <PanchangaMiniCell label="Yoga" value={date.panchangSummary.yoga} />
+              <PanchangaMiniCell label="Karana" value={date.panchangSummary.karana} />
+              <PanchangaMiniCell label="Vara" value={date.panchangSummary.vara} />
+            </div>
+          </div>
+
+          {taraBala && (
+            <div>
+              <div style={{ ...sectionKickerStyle, color: '#a78bfa' }}>Personalized for your birth Nakshatra</div>
+              <p style={{ margin: '8px 0 0', fontSize: 12, color: '#dbe7f4', lineHeight: 1.6 }}>
+                ✨ {taraBala.tara} Tara — {taraBala.status === 'SUPPORT' ? 'personally supportive' : taraBala.status === 'CAUTION' ? 'a personal caution' : 'personally neutral'}
+              </p>
+            </div>
+          )}
+
+          {date.reasons.length > 0 && (
+            <div>
+              <div style={{ ...sectionKickerStyle, color: '#4ade80' }}>Why this suits you</div>
+              <ul style={{ margin: '8px 0 0', paddingLeft: 18, fontSize: 12, color: '#dbe7f4', lineHeight: 1.6 }}>
+                {date.reasons.map((reason, i) => (
+                  <li key={i}>{reason.factor === 'PERSONAL' ? '✨ ' : '✓ '}{formatMuhurtaReason(reason)}</li>
+                ))}
+              </ul>
+            </div>
+          )}
+
+          {date.cautions.length > 0 && (
+            <div>
+              <div style={{ ...sectionKickerStyle, color: '#facc15' }}>Considerations</div>
+              <ul style={{ margin: '8px 0 0', paddingLeft: 18, fontSize: 12, color: '#dbe7f4', lineHeight: 1.6 }}>
+                {date.cautions.map((reason, i) => (
+                  <li key={i}>{reason.factor === 'PERSONAL' ? '✨ ' : ''}{formatMuhurtaReason(reason)}</li>
+                ))}
+              </ul>
+            </div>
+          )}
+
+          {date.alternateWindows.length > 0 && (
+            <div>
+              <div style={sectionKickerStyle}>Other good windows this date</div>
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 8, marginTop: 8 }}>
+                {date.alternateWindows.map((window) => {
+                  const key = windowKey(date.date, window);
                   const saved = savedWindowKeys.has(key);
                   const saving = savingWindowKey === key;
                   return (
@@ -603,4 +886,23 @@ const panchangaCellStyle: React.CSSProperties = {
   border: '1px solid rgba(148, 163, 184, 0.14)',
   borderRadius: 8,
   padding: '7px 9px',
+};
+
+const toggleRowStyle: React.CSSProperties = {
+  display: 'flex',
+  gap: 6,
+  background: 'rgba(15, 23, 42, 0.6)',
+  border: '1px solid rgba(255, 255, 255, 0.08)',
+  borderRadius: 14,
+  padding: 4,
+};
+
+const toggleButtonStyle: React.CSSProperties = {
+  flex: 1,
+  minHeight: 34,
+  border: 'none',
+  borderRadius: 10,
+  fontSize: 12,
+  fontWeight: 800,
+  fontFamily: 'sans-serif',
 };

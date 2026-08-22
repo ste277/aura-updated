@@ -1,4 +1,4 @@
-import { findMuhurthams, isSupportedMuhurthamActivity, MuhurthamSearchRequest, MuhurthamSearchResult, SUPPORTED_MUHURTHAM_ACTIVITY_IDS } from '../../../packages/recommendation/src/muhurthamFinder';
+import { findMuhurthams, findPersonalMuhurthams, isSupportedMuhurthamActivity, MuhurthamPersonalSearchOutcome, MuhurthamSearchRequest, MuhurthamSearchResult, MuhurthamSearchScope, SUPPORTED_MUHURTHAM_ACTIVITY_IDS } from '../../../packages/recommendation/src/muhurthamFinder';
 import { DailyAssistantContext } from '../../../packages/recommendation/src/dailyAssistant';
 import { TimingTimePreference } from '../../../packages/recommendation/src/timingSearch';
 import { isDateOnlyString } from './timingSearchRequest';
@@ -21,23 +21,34 @@ const MIN_LIMIT = 1;
 const MAX_LIMIT = 20;
 
 const VALID_TIME_PREFERENCES = new Set<TimingTimePreference>(['ANY', 'MORNING', 'AFTERNOON', 'EVENING', 'NIGHT']);
+const VALID_SCOPES = new Set<MuhurthamSearchScope>(['GENERAL', 'PERSONAL']);
 
 function daySpan(startDate: string, endDate: string): number {
   return (Date.parse(`${endDate}T00:00:00Z`) - Date.parse(`${startDate}T00:00:00Z`)) / 86_400_000;
 }
 
 export type MuhurthamSearchValidationResult =
-  | { ok: true; request: MuhurthamSearchRequest }
+  | { ok: true; request: MuhurthamSearchRequest; scope: MuhurthamSearchScope }
   | { ok: false; error: string; status: number };
 
 /**
- * Validates a parsed JSON body into a MuhurthamSearchRequest. Takes the
- * already-resolved DailyAssistantContext (built from the session user by the
- * route) rather than resolving it itself, keeping this function free of I/O
- * so it can be unit-tested with a fake context -- same pattern as
- * buildTimingSearchRequest().
+ * Validates a parsed JSON body into a MuhurthamSearchRequest + scope. Takes
+ * the already-resolved DailyAssistantContext (built from the session user by
+ * the route) rather than resolving it itself, keeping this function free of
+ * I/O so it can be unit-tested with a fake context -- same pattern as
+ * buildTimingSearchRequest(). `context.personalContext` is only meaningful
+ * (and only expected to be populated by the caller) when scope is
+ * 'PERSONAL' -- see route.ts, which skips resolving it entirely for
+ * 'GENERAL' requests (brief section 10: "GENERAL should not unnecessarily
+ * fetch natal data").
  */
 export function buildMuhurthamSearchRequest(body: Record<string, unknown>, context: DailyAssistantContext): MuhurthamSearchValidationResult {
+  const rawScope = body.scope === undefined ? 'GENERAL' : String(body.scope);
+  if (!VALID_SCOPES.has(rawScope as MuhurthamSearchScope)) {
+    return { ok: false, error: 'scope must be GENERAL or PERSONAL.', status: 400 };
+  }
+  const scope = rawScope as MuhurthamSearchScope;
+
   const activityId = typeof body.activityId === 'string' ? body.activityId.trim() : '';
   if (!activityId) {
     return { ok: false, error: 'activityId is required.', status: 400 };
@@ -82,12 +93,17 @@ export function buildMuhurthamSearchRequest(body: Record<string, unknown>, conte
     context,
   };
 
-  return { ok: true, request };
+  return { ok: true, request, scope };
 }
 
-/** Convenience wrapper: validate then run, for the route handler. */
-export function handleMuhurthamSearchBody(body: Record<string, unknown>, context: DailyAssistantContext): { ok: true; result: MuhurthamSearchResult } | { ok: false; error: string; status: number } {
+/** Convenience wrapper: validate then run, for the route handler. Dispatches
+ * to findMuhurthams() (GENERAL, unchanged response shape) or
+ * findPersonalMuhurthams() (PERSONAL, its own discriminated-union outcome
+ * shape -- OK or PERSONAL_PROFILE_INCOMPLETE, both HTTP 200 since an
+ * incomplete profile is an expected, valid outcome, not a request error). */
+export function handleMuhurthamSearchBody(body: Record<string, unknown>, context: DailyAssistantContext): { ok: true; result: MuhurthamSearchResult | MuhurthamPersonalSearchOutcome } | { ok: false; error: string; status: number } {
   const validated = buildMuhurthamSearchRequest(body, context);
   if (!validated.ok) return { ok: false, error: validated.error, status: validated.status };
+  if (validated.scope === 'PERSONAL') return { ok: true, result: findPersonalMuhurthams(validated.request) };
   return { ok: true, result: findMuhurthams(validated.request) };
 }

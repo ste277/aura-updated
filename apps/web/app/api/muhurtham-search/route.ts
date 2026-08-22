@@ -74,13 +74,19 @@ export async function POST(req: NextRequest) {
   if (!body) return NextResponse.json({ error: 'A valid JSON request body is required.' }, { status: 400 });
 
   const now = new Date();
+  // GENERAL requests never need natal data (brief section 10) -- only
+  // resolve/compute it (a real natal-chart calculation, not free) when
+  // PERSONAL scope was actually requested. buildMuhurthamSearchRequest()
+  // re-validates `scope` itself; this is just an early, cheap peek so the
+  // natal chart is never computed for a GENERAL request.
+  const requestsPersonalScope = body.scope === 'PERSONAL';
   const context: DailyAssistantContext = {
     now,
     latitude: user.latitude,
     longitude: user.longitude,
     timezone: user.timezone,
     tzOffsetMinutes: resolveTzOffsetMinutes(user.timezone, now),
-    personalContext: buildPersonalMuhurtaContext(user),
+    personalContext: requestsPersonalScope ? buildPersonalMuhurtaContext(user) : undefined,
   };
 
   const outcome = handleMuhurthamSearchBody(body, context);
