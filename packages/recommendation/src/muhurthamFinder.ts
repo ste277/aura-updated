@@ -169,6 +169,16 @@ export interface MuhurthamSearchRequest {
   /** Location/timezone/personal-Muhurta-context, resolved server-side from
    * the session user -- same pattern as TimingSearchRequest.context. */
   context: DailyAssistantContext;
+  /** SHARED scope only -- the SavedPerson's resolved natal context, plus the
+   * minimal display fields the response is allowed to carry back (brief
+   * section 17: never the SavedPerson's raw birth data). Ownership
+   * enforcement (does this savedPersonId actually belong to the requesting
+   * user?) happens entirely server-side, before this request is built --
+   * see apps/web/app/api/muhurtham-search/route.ts. findSharedMuhurthams()
+   * never touches a database or an id/ownership check; it only ever sees an
+   * already-resolved, already-owned natal context. Left undefined for
+   * GENERAL/PERSONAL. */
+  partner?: { savedPersonId: string; name: string; context: PersonalMuhurtaContext };
 }
 
 /** A window candidate IS a TimingCandidate, unmodified -- not a parallel
@@ -607,7 +617,7 @@ export function findMuhurthams(request: MuhurthamSearchRequest): MuhurthamSearch
  * separately (muhurtaMethodology + personalMethodology), never merged.
  */
 
-export type MuhurthamSearchScope = 'GENERAL' | 'PERSONAL';
+export type MuhurthamSearchScope = 'GENERAL' | 'PERSONAL' | 'SHARED';
 
 /** The Tara Bala factor as surfaced in a personal evaluation -- 'NEUTRAL' is
  * declared for interface completeness (brief section 6: "keep extensible
@@ -754,5 +764,333 @@ export function findPersonalMuhurthams(request: MuhurthamSearchRequest): Muhurth
     dates: ranked,
     evaluatedDateCount: dateStrs.length,
     provenance: { muhurtaMethodology: AURA_MUHURTA_METHODOLOGY_ID, personalMethodology: AURA_PERSONAL_FIT_METHODOLOGY_ID },
+  };
+}
+
+/**
+ * ## Shared Muhurtham ("General | Me | Us")
+ *
+ * findSharedMuhurthams() answers "when is this favorable for BOTH the
+ * authenticated user and one SavedPerson" -- shared TIMING, not
+ * compatibility. It is not a third scoring formula: every candidate window
+ * is still selected by the exact same findBestWindowsForDate() GENERAL scan
+ * findMuhurthams() uses (generalContext, personalContext stripped) -- SHARED
+ * never re-picks a date's best window using either person's personal
+ * context, so candidate generation is never duplicated (brief section 1).
+ * Once a date's general-valid best window is chosen, each person's fit on
+ * that EXACT window is evaluated independently, by calling
+ * evaluateMuhurthamCandidate() again per person (the identical
+ * friction/overlap/start-sensitivity pipeline PERSONAL already uses, just
+ * with that one person's personalContext threaded onto a fresh profile
+ * copy) -- i.e. "what would this person's own PERSONAL combinedScore be for
+ * this candidate". There is no synastry: person A's Tara Bala is computed
+ * against the candidate's Nakshatra, person B's Tara Bala is computed
+ * against the same candidate's Nakshatra, completely independently of one
+ * another (brief section 3) -- neither evaluation ever reads the other
+ * person's natal data.
+ *
+ * ## Why not a simple average (brief section 4)
+ *
+ * `shared = (userScore + partnerScore) / 2` would let a strong participant
+ * mask a weak one (9.5 and 4.0 averaging to a misleadingly acceptable 6.75).
+ * Shared ranking must instead reward BALANCED suitability and let the
+ * weaker participant's fit matter strongly (brief section 6:
+ * "min(userFit, personFit) should matter strongly"). This file computes
+ * each participant's own bounded personal DELTA on top of the shared
+ * generalScore -- combinedScore minus generalScore, i.e. exactly the same
+ * ≤10%-weighted personal modifier PERSONAL scope already produces for a
+ * single person (evaluateActivityFit's existing `personalPatternScore *
+ * 0.10` term; no new weight invented) -- then blends the two deltas as
+ * SHARED_FLOOR_WEIGHT (70%) of the WEAKER delta plus (1 - SHARED_FLOOR_WEIGHT)
+ * (30%) of their average. When both deltas are equal (perfectly balanced
+ * fit) this blend reduces exactly to their average -- a balanced pair is
+ * never penalized relative to a plain-average model. When they diverge, the
+ * blend leans toward the weaker participant's delta, so a candidate with one
+ * strong and one poor personal fit scores lower than a comparable candidate
+ * where both are supportive, even at an equal or slightly better general
+ * score -- without ever hard-rejecting a CAUTION Tara on its own (brief
+ * section 6: "do not necessarily make every Tara CAUTION a hard rejection").
+ * See blendSharedDelta() below for the exact, minimal formula.
+ *
+ * ## General Muhurta remains the foundation (brief section 7)
+ *
+ * Personal/shared fit can never rescue a general BLOCK, an invalid
+ * duration, a friction-window overlap, or an unsupported activity --
+ * findBestWindowsForDate() is called with generalContext exactly like
+ * findMuhurthams(), so every hard-exclusion rule (evaluateMuhurthamCandidate's
+ * FRICTION_WINDOW_BLOCKED conflict and spanOverlapsFrictionWindow() check)
+ * runs before either person's personal fit is even computed. A date that
+ * findMuhurthams() would exclude entirely is excluded here too, for the
+ * identical reason.
+ *
+ * ## Profile requirements (brief section 11)
+ *
+ * SHARED requires BOTH a complete user profile (request.context.personalContext,
+ * the same PERSONAL_PROFILE_INCOMPLETE gate reused as USER_PROFILE_INCOMPLETE)
+ * AND a complete SavedPerson profile (request.partner, resolved server-side).
+ * Never a silent fallback to GENERAL -- an incomplete state is always a typed,
+ * explicit outcome. SavedPerson's birthTime/birthTimezone are DB-required
+ * (NOT NULL, see apps/web/prisma/schema.prisma), so SAVED_PERSON_PROFILE_INCOMPLETE
+ * is not reachable through the current SavedPerson creation flow -- kept as a
+ * real, checked typed state anyway (not dead code deleted, just currently
+ * unreachable via this app's own UI) for the same reason PersonalTaraBalaFactor
+ * declares an unreachable 'NEUTRAL' status: interface correctness and
+ * forward-compatibility, not speculative engineering.
+ *
+ * ## Methodology (brief section 9)
+ *
+ * AURA_SHARED_FIT_V1 is explicitly NOT a compatibility methodology -- it
+ * does not compare the two people's charts against each other (no synastry,
+ * no Guna Milan/Ashtakoota, no relationship score). It evaluates shared
+ * TIMING only: does the same general-favorable moment work reasonably well
+ * for each person independently, and does it do so for BOTH of them rather
+ * than just the stronger one. provenance carries all three methodology
+ * identifiers separately (muhurtaMethodology, personalMethodology,
+ * sharedMethodology), never merged.
+ */
+
+export const AURA_SHARED_FIT_METHODOLOGY_ID = 'AURA_SHARED_FIT_V1' as const;
+
+/**
+ * Section 6's "min(userFit, personFit) should matter strongly": the WEAKER
+ * participant's personal delta gets this fraction of the blend; the
+ * remaining (1 - SHARED_FLOOR_WEIGHT) comes from the two deltas' plain
+ * average. When the two deltas are equal, min === average, so the blend is
+ * identical to a plain average in the perfectly-balanced case -- this
+ * weight only ever matters, and only ever pulls the score DOWN relative to
+ * a plain average, when the two participants' fit actually diverges. 0.7 is
+ * the smallest weight that reliably lets a single poor Tara Bala (the
+ * ~0.25-wide swing evaluatePersonalMuhurtaFit's HIGH-significance CAUTION
+ * penalty produces on the 0-10 scale, see the completion report's
+ * score-distribution audit) outweigh a plain-average blend for these
+ * already-small personal deltas, without being 1.0 (which would ignore the
+ * stronger participant's fit entirely -- not what brief section 6 asks for:
+ * "do not necessarily make every Tara CAUTION a hard rejection").
+ */
+export const SHARED_FLOOR_WEIGHT = 0.7;
+
+/** Pure blend of two participants' personal deltas (each: combinedScore -
+ * generalScore, on the 0-10 scale) into one shared delta -- exported for
+ * direct unit testing of the balance/floor weighting model in isolation
+ * from the rest of the search pipeline. See this file's "Shared Muhurtham"
+ * doc comment above for the full reasoning; this is deliberately NOT
+ * `(userDelta + personDelta) / 2` (brief section 4). */
+export function blendSharedDelta(userDelta: number, personDelta: number): number {
+  const weaker = Math.min(userDelta, personDelta);
+  const average = (userDelta + personDelta) / 2;
+  return Math.round((weaker * SHARED_FLOOR_WEIGHT + average * (1 - SHARED_FLOOR_WEIGHT)) * 1000) / 1000;
+}
+
+export type SharedMuhurthamRating = 'EXCELLENT_SHARED_FIT' | 'STRONG_SHARED_FIT' | 'GOOD_SHARED_FIT' | 'MIXED_SHARED_FIT';
+
+/**
+ * Brief section 16: "Do not reuse romantic compatibility labels... the
+ * lowest participant fit should influence the label." Any CAUTION Tara on
+ * EITHER side caps the label at MIXED_SHARED_FIT, regardless of sharedScore
+ * -- that is literally what "mixed" means here (one or both participants'
+ * own Tara Bala is unsupportive for this candidate), and it's the most
+ * direct, smallest-possible way to let the weaker fit influence the label
+ * without inventing a second threshold system. When both are SUPPORT, the
+ * same 9.0/8.0/7.0 boundaries rateMuhurtham() already uses classify the
+ * blended sharedScore (with the same caution/conflict cap on the top label
+ * rateMuhurtham() applies) -- no new score thresholds invented.
+ */
+function rateSharedMuhurtham(sharedScore: number, userTaraStatus: PersonalTaraBalaFactor['status'], personTaraStatus: PersonalTaraBalaFactor['status'], hasCautionOrConflict: boolean): SharedMuhurthamRating {
+  if (userTaraStatus === 'CAUTION' || personTaraStatus === 'CAUTION') return 'MIXED_SHARED_FIT';
+  if (sharedScore >= 9.0 && !hasCautionOrConflict) return 'EXCELLENT_SHARED_FIT';
+  if (sharedScore >= 8.0) return 'STRONG_SHARED_FIT';
+  return 'GOOD_SHARED_FIT';
+}
+
+/** One participant's own PERSONAL-equivalent combinedScore (general Muhurta
+ * + their own personal layer, identical formula/weight to PERSONAL scope)
+ * for an ALREADY-chosen general-valid candidate window -- reuses
+ * evaluateMuhurthamCandidate() again (never a second scoring formula), on a
+ * cheap spread copy of the shared general profile with only personalContext
+ * swapped in, exactly like findPersonalMuhurthams()'s own
+ * generalOnlyProfile/generalContext split. The `?? generalFallbackScore`
+ * mirrors findPersonalMuhurthams()'s identical defensive fallback -- not a
+ * reachable path today, since none of the friction/overlap checks this
+ * candidate already passed as GENERAL depend on personalContext, but kept
+ * for the same robustness reason. */
+function participantCombinedScore(
+  generalProfile: TaskProfile,
+  bestStart: Date,
+  durationMinutes: number,
+  context: DailyAssistantContext,
+  personalContext: PersonalMuhurtaContext,
+  panchangWindows: PanchangWindowSpan[],
+  generalFallbackScore: number
+): number {
+  const participantProfile: TaskProfile = { ...generalProfile, personalContext };
+  const evaluated = evaluateMuhurthamCandidate(participantProfile, bestStart, durationMinutes, context, panchangWindows, generalProfile.muhurtaClassification);
+  return evaluated?.score ?? generalFallbackScore;
+}
+
+/** One participant's fit on a SHARED candidate -- structurally the same
+ * `{score, factors, reasons}` sketch brief section 8 asks for. */
+export interface SharedParticipantFit {
+  /** This participant's own combinedScore (0-10) for this exact candidate
+   * window -- general Muhurta blended with their personal factors, the
+   * identical scale/semantics as PERSONAL's own combinedScore. */
+  score: number;
+  factors: PersonalMuhurtaFactors;
+  reasons: MuhurtaReason[];
+}
+
+export interface MuhurthamSharedDateCandidate {
+  date: string;
+  rating: SharedMuhurthamRating;
+  /** What GENERAL scores this exact candidate -- 0-10, identical semantics
+   * to MuhurthamPersonalDateCandidate.generalScore. */
+  generalScore: number;
+  user: SharedParticipantFit;
+  person: SharedParticipantFit & { savedPersonId: string; name: string };
+  /** The actual ranking score: generalScore + blendSharedDelta(userDelta,
+   * personDelta). Same 0-10 scale as generalScore/user.score/person.score. */
+  sharedScore: number;
+  /** Informational only (never used in ranking beyond already being part of
+   * sharedScore's own inputs) -- 10 when the two participants' personal
+   * deltas for this candidate are identical (perfectly even fit), lower as
+   * they diverge. Brief section 8's optional `balance?` field. */
+  balance: number;
+  bestWindow: MuhurthamWindowCandidate;
+  alternateWindows: MuhurthamWindowCandidate[];
+  /** SUPPORT-polarity GENERAL reasons (Panchanga/solar-window), same as
+   * MuhurthamDateCandidate.reasons -- personal reasons live under
+   * user.reasons/person.reasons instead, kept separate so the UI can render
+   * "General Muhurta" / "For you" / "For {name}" as distinct sections
+   * (brief section 15). */
+  reasons: MuhurtaReason[];
+  cautions: MuhurtaReason[];
+  panchangSummary: MuhurthamPanchangSummary;
+}
+
+export interface MuhurthamSharedSearchResult {
+  scope: 'SHARED';
+  status: 'OK';
+  activity: { id: string; title: string; icon: string };
+  dateRange: MuhurthamDateRange;
+  /** Brief section 17: id + display name only -- never the SavedPerson's
+   * birth date/time/timezone/coordinates. The UI already knows which person
+   * it selected; natal details stay server-side. */
+  savedPerson: { id: string; name: string };
+  dates: MuhurthamSharedDateCandidate[];
+  evaluatedDateCount: number;
+  provenance: { muhurtaMethodology: string; personalMethodology: string; sharedMethodology: string };
+}
+
+export interface MuhurthamUserProfileIncomplete {
+  scope: 'SHARED';
+  status: 'USER_PROFILE_INCOMPLETE';
+  requiredFields: Array<'birthDate' | 'birthTime' | 'birthTimezone'>;
+}
+
+/** See this file's "Shared Muhurtham" doc comment ("Profile requirements")
+ * for why this state is currently unreachable via the app's own SavedPerson
+ * creation flow, but kept as a real typed outcome. */
+export interface MuhurthamSavedPersonProfileIncomplete {
+  scope: 'SHARED';
+  status: 'SAVED_PERSON_PROFILE_INCOMPLETE';
+  requiredFields: Array<'birthDate' | 'birthTime' | 'birthTimezone'>;
+}
+
+export type MuhurthamSharedSearchOutcome = MuhurthamSharedSearchResult | MuhurthamUserProfileIncomplete | MuhurthamSavedPersonProfileIncomplete;
+
+/**
+ * SHARED scope entry point -- see this file's "Shared Muhurtham" doc comment
+ * above for the full architecture. Same request shape as findMuhurthams()/
+ * findPersonalMuhurthams() plus `request.partner` (resolved server-side,
+ * ownership already enforced by the caller before this function is ever
+ * invoked).
+ */
+export function findSharedMuhurthams(request: MuhurthamSearchRequest): MuhurthamSharedSearchOutcome {
+  const { activity, durationMinutes, limit, preference, dateStrs } = resolveMuhurthamSearchParams(request, 'findSharedMuhurthams');
+
+  const userContext = request.context.personalContext;
+  if (!userContext || userContext.natalNakshatraIndex === undefined) {
+    return { scope: 'SHARED', status: 'USER_PROFILE_INCOMPLETE', requiredFields: REQUIRED_PERSONAL_PROFILE_FIELDS };
+  }
+
+  const partner = request.partner;
+  if (!partner || partner.context.natalNakshatraIndex === undefined) {
+    return { scope: 'SHARED', status: 'SAVED_PERSON_PROFILE_INCOMPLETE', requiredFields: REQUIRED_PERSONAL_PROFILE_FIELDS };
+  }
+
+  const generalContext: DailyAssistantContext = { ...request.context, personalContext: undefined };
+  const generalProfile = profileFromActivity(activity);
+
+  const dateCandidates: MuhurthamSharedDateCandidate[] = [];
+  for (const dateStr of dateStrs) {
+    const panchangDay = getPanchangForDate({
+      localDate: dateStr,
+      latitude: request.context.latitude,
+      longitude: request.context.longitude,
+      timezone: request.context.timezone,
+    });
+
+    // Same GENERAL candidate generation findMuhurthams() uses -- SHARED
+    // never re-derives or re-picks window candidates using either person's
+    // personal context (brief section 1 / section 7).
+    const evaluated = findBestWindowsForDate(generalProfile, dateStr, generalContext, durationMinutes, preference, panchangDay.windows, generalProfile.muhurtaClassification);
+    if (!evaluated) continue;
+
+    const bestStart = new Date(evaluated.best.start);
+    const generalScore = evaluated.best.score;
+
+    const userCombined = participantCombinedScore(generalProfile, bestStart, durationMinutes, generalContext, userContext, panchangDay.windows, generalScore);
+    const personCombined = participantCombinedScore(generalProfile, bestStart, durationMinutes, generalContext, partner.context, panchangDay.windows, generalScore);
+
+    const userTara = taraBalaFactor(userContext, bestStart);
+    const personTara = taraBalaFactor(partner.context, bestStart);
+    const userFit = evaluatePersonalMuhurtaFit(activity, bestStart, userContext);
+    const personFit = evaluatePersonalMuhurtaFit(activity, bestStart, partner.context);
+
+    const userDelta = userCombined - generalScore;
+    const personDelta = personCombined - generalScore;
+    const sharedDelta = blendSharedDelta(userDelta, personDelta);
+    const sharedScore = Math.max(0, Math.min(10, Math.round((generalScore + sharedDelta) * 10) / 10));
+    const balance = Math.round(Math.max(0, 10 - Math.abs(userDelta - personDelta) * 10) * 10) / 10;
+
+    const supportReasons = evaluated.best.reasons.filter((r) => r.polarity === 'SUPPORT');
+    const cautionReasons = evaluated.best.reasons.filter((r) => r.polarity === 'CAUTION' || r.polarity === 'BLOCK');
+    const hasCautionOrConflict = cautionReasons.length > 0 || Boolean(evaluated.best.conflicts?.length);
+
+    dateCandidates.push({
+      date: dateStr,
+      rating: rateSharedMuhurtham(sharedScore, userTara.status, personTara.status, hasCautionOrConflict),
+      generalScore,
+      user: { score: Math.round(userCombined * 10) / 10, factors: { taraBala: userTara }, reasons: userFit.reasons ?? [] },
+      person: { savedPersonId: partner.savedPersonId, name: partner.name, score: Math.round(personCombined * 10) / 10, factors: { taraBala: personTara }, reasons: personFit.reasons ?? [] },
+      sharedScore,
+      balance,
+      bestWindow: toWindowCandidate(evaluated.best),
+      alternateWindows: evaluated.alternates.map(toWindowCandidate),
+      reasons: supportReasons,
+      cautions: cautionReasons,
+      panchangSummary: {
+        vara: panchangDay.panchanga.vara,
+        tithi: panchangDay.panchanga.tithi.name,
+        nakshatra: panchangDay.panchanga.nakshatra.name,
+        yoga: panchangDay.panchanga.yoga.name,
+        karana: panchangDay.panchanga.karana.name,
+      },
+    });
+  }
+
+  const ranked = dateCandidates
+    .sort((a, b) => b.sharedScore - a.sharedScore)
+    .slice(0, limit)
+    .sort((a, b) => a.date.localeCompare(b.date));
+
+  return {
+    scope: 'SHARED',
+    status: 'OK',
+    activity: { id: activity.id, title: activity.title, icon: activity.icon },
+    dateRange: request.dateRange,
+    savedPerson: { id: partner.savedPersonId, name: partner.name },
+    dates: ranked,
+    evaluatedDateCount: dateStrs.length,
+    provenance: { muhurtaMethodology: AURA_MUHURTA_METHODOLOGY_ID, personalMethodology: AURA_PERSONAL_FIT_METHODOLOGY_ID, sharedMethodology: AURA_SHARED_FIT_METHODOLOGY_ID },
   };
 }

@@ -4,9 +4,9 @@ import React, { useEffect, useMemo, useState } from 'react';
 import { CITY_OPTIONS } from '../lib/cities';
 import type { CityOption } from '../lib/cities';
 
-type RelationshipType = 'PARTNER' | 'SPOUSE' | 'FAMILY' | 'FRIEND' | 'OTHER';
+export type RelationshipType = 'PARTNER' | 'SPOUSE' | 'FAMILY' | 'FRIEND' | 'OTHER';
 
-interface SavedPersonRow {
+export interface SavedPersonRow {
   id: string;
   name: string;
   relationshipType: RelationshipType;
@@ -34,8 +34,12 @@ const RELATIONSHIP_OPTIONS: Array<{ value: RelationshipType; label: string; icon
   { value: 'OTHER', label: 'Other', icon: '👤' },
 ];
 
-const RELATIONSHIP_LABEL: Record<RelationshipType, string> = Object.fromEntries(RELATIONSHIP_OPTIONS.map((o) => [o.value, o.label])) as Record<RelationshipType, string>;
-const RELATIONSHIP_ICON: Record<RelationshipType, string> = Object.fromEntries(RELATIONSHIP_OPTIONS.map((o) => [o.value, o.icon])) as Record<RelationshipType, string>;
+/** Exported so other screens that reference a SavedPerson (e.g. Muhurtham
+ * Finder's "Us" person selector) render the same relationship icon/label
+ * vocabulary instead of re-declaring it -- there is exactly one
+ * relationship-type -> icon/label mapping in this app. */
+export const RELATIONSHIP_LABEL: Record<RelationshipType, string> = Object.fromEntries(RELATIONSHIP_OPTIONS.map((o) => [o.value, o.label])) as Record<RelationshipType, string>;
+export const RELATIONSHIP_ICON: Record<RelationshipType, string> = Object.fromEntries(RELATIONSHIP_OPTIONS.map((o) => [o.value, o.icon])) as Record<RelationshipType, string>;
 
 type ViewMode = { kind: 'LIST' } | { kind: 'ADD' } | { kind: 'DETAIL'; personId: string } | { kind: 'EDIT'; personId: string };
 

@@ -352,11 +352,20 @@ export function findCandidateKey(candidate: TimingCandidate): string {
  * the same persistence path the original Plan flow already had, rather than
  * a second save mechanism. candidate.metadata.windowLabel is produced by the
  * same formatWindowLabel() the old slot-task-backed flow used, so
- * windowTypeFromLabel() below still resolves it correctly. */
-export function planPayloadFromCandidate(candidate: TimingCandidate, durationMinutes: number): UpcomingPlan {
+ * windowTypeFromLabel() below still resolves it correctly.
+ *
+ * `sharedWithName` (Shared Muhurtham brief section 18): PlannedActivity has
+ * no JSON metadata column and this PR does not add one ("do not create a new
+ * plan model solely for this") -- so when a SHARED "Use this time" saves a
+ * plan, the only schema-migration-free way to preserve that context is a
+ * short human-readable prefix on the existing `details`/`recommendation`
+ * text field. Omitted (undefined), `details` is byte-identical to before --
+ * GENERAL/PERSONAL "Use this time" callers are completely unaffected. */
+export function planPayloadFromCandidate(candidate: TimingCandidate, durationMinutes: number, sharedWithName?: string): UpcomingPlan {
   const start = new Date(candidate.start);
   const end = new Date(candidate.end);
   const title = candidate.metadata.activityType;
+  const reasonDetails = candidate.reasons.length > 0 ? candidate.reasons.map((reason) => formatMuhurtaReason(reason)).join(' ') : 'Aura found this as a good moment for this activity.';
   return {
     id: `aura-${findCandidateKey(candidate)}`.replace(/[^a-z0-9]+/g, '-'),
     title,
@@ -370,7 +379,7 @@ export function planPayloadFromCandidate(candidate: TimingCandidate, durationMin
     match: candidate.label === 'EXCELLENT' || candidate.label === 'VERY_GOOD' ? 'Best Match' : 'Good Match',
     note: RESULT_LABEL_TEXT[candidate.label],
     accent: planAccentForTitle(title),
-    details: candidate.reasons.length > 0 ? candidate.reasons.map((reason) => formatMuhurtaReason(reason)).join(' ') : 'Aura found this as a good moment for this activity.',
+    details: sharedWithName ? `❤️ Planned with ${sharedWithName}. ${reasonDetails}` : reasonDetails,
     score: candidate.score * 10,
     googleCalendarUrl: buildGoogleCalendarUrl(title, candidate.start, candidate.end),
     source: 'Aura',
@@ -387,8 +396,8 @@ export function planPayloadFromCandidate(candidate: TimingCandidate, durationMin
  * want the saved plan reflected immediately in their own UI should refetch
  * (e.g. via the onPlanLogged callback already threaded through page.tsx).
  */
-export async function saveUpcomingPlanFromCandidate(candidate: TimingCandidate, durationMinutes: number): Promise<UpcomingPlan> {
-  const plan = planPayloadFromCandidate(candidate, durationMinutes);
+export async function saveUpcomingPlanFromCandidate(candidate: TimingCandidate, durationMinutes: number, sharedWithName?: string): Promise<UpcomingPlan> {
+  const plan = planPayloadFromCandidate(candidate, durationMinutes, sharedWithName);
   const res = await fetch('/api/plans', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },

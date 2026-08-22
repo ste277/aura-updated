@@ -1,4 +1,4 @@
-import { buildMuhurthamSearchRequest } from '../apps/web/lib/muhurthamSearchRequest';
+import { buildMuhurthamSearchRequest, handleSharedMuhurthamSearchBody } from '../apps/web/lib/muhurthamSearchRequest';
 import type { DailyAssistantContext } from '../packages/recommendation/src/dailyAssistant';
 
 let allPassed = true;
@@ -116,6 +116,45 @@ check('An invalid scope value is rejected with 400', (() => {
   const r = buildMuhurthamSearchRequest({ activityId: 'start-journey', dateRange: { start: '2026-09-01', end: '2026-09-05' }, scope: 'FOR_US' }, chennaiContext);
   return r.ok === false && r.status === 400;
 })());
+
+// ============================================================
+// SCOPE (Shared Muhurtham -- General | Me | Us)
+// ============================================================
+
+const explicitShared = buildMuhurthamSearchRequest({ activityId: 'start-journey', dateRange: { start: '2026-09-01', end: '2026-09-05' }, scope: 'SHARED', savedPersonId: 'person-123' }, chennaiContext);
+check('Explicit scope: SHARED is accepted when savedPersonId is present', explicitShared.ok === true && explicitShared.ok && explicitShared.scope === 'SHARED' && explicitShared.savedPersonId === 'person-123');
+
+const sharedMissingPersonId = buildMuhurthamSearchRequest({ activityId: 'start-journey', dateRange: { start: '2026-09-01', end: '2026-09-05' }, scope: 'SHARED' }, chennaiContext);
+check('SHARED without savedPersonId is rejected with 400', sharedMissingPersonId.ok === false && sharedMissingPersonId.status === 400);
+
+const sharedEmptyPersonId = buildMuhurthamSearchRequest({ activityId: 'start-journey', dateRange: { start: '2026-09-01', end: '2026-09-05' }, scope: 'SHARED', savedPersonId: '   ' }, chennaiContext);
+check('SHARED with a blank/whitespace-only savedPersonId is rejected with 400', sharedEmptyPersonId.ok === false && sharedEmptyPersonId.status === 400);
+
+check('GENERAL/PERSONAL requests never require savedPersonId', buildMuhurthamSearchRequest({ activityId: 'start-journey', dateRange: { start: '2026-09-01', end: '2026-09-05' }, scope: 'PERSONAL' }, chennaiContext).ok === true);
+
+// handleSharedMuhurthamSearchBody -- the SHARED-specific dispatcher route.ts
+// calls once it has already resolved+ownership-checked the SavedPerson.
+const sharedPartner = { savedPersonId: 'person-123', name: 'Anu', context: { natalNakshatraIndex: 4 } };
+const sharedHandled = handleSharedMuhurthamSearchBody(
+  { activityId: 'start-journey', dateRange: { start: '2026-09-01', end: '2026-09-30' }, scope: 'SHARED', savedPersonId: 'person-123' },
+  { ...chennaiContext, personalContext: { natalNakshatraIndex: 1 } },
+  sharedPartner
+);
+check('handleSharedMuhurthamSearchBody returns ok:true with a SHARED result when the request validates and a partner is supplied', sharedHandled.ok === true && sharedHandled.ok && sharedHandled.result.scope === 'SHARED' && sharedHandled.result.status === 'OK');
+
+const sharedHandledInvalidActivity = handleSharedMuhurthamSearchBody(
+  { activityId: 'not-a-real-activity', dateRange: { start: '2026-09-01', end: '2026-09-30' }, scope: 'SHARED', savedPersonId: 'person-123' },
+  { ...chennaiContext, personalContext: { natalNakshatraIndex: 1 } },
+  sharedPartner
+);
+check('handleSharedMuhurthamSearchBody still runs request validation (rejects an unsupported activity with 400)', sharedHandledInvalidActivity.ok === false && sharedHandledInvalidActivity.status === 400);
+
+const sharedHandledWrongScope = handleSharedMuhurthamSearchBody(
+  { activityId: 'start-journey', dateRange: { start: '2026-09-01', end: '2026-09-30' }, scope: 'GENERAL' },
+  chennaiContext,
+  sharedPartner
+);
+check('handleSharedMuhurthamSearchBody rejects a body whose own scope is not SHARED', sharedHandledWrongScope.ok === false && sharedHandledWrongScope.status === 400);
 
 console.log(allPassed ? '\nALL MUHURTHAM SEARCH API CHECKS PASSED' : '\nSOME MUHURTHAM SEARCH API CHECKS FAILED');
 process.exit(allPassed ? 0 : 1);

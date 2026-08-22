@@ -15,6 +15,12 @@ interface HomeDashboardProps {
     windowName: string;
     startsIn: string;
     startTime: string;
+    /** The upcoming window's OWN score/theme (see DailyEnergyInsight.nextShift
+     * in lib/scoreEngine.ts) -- the "Next Best Moment" card must use these,
+     * not the top-level energyScore/themeText props, which describe the
+     * CURRENT window instead. */
+    score: number;
+    themeText: string;
   };
   currentWindow?: {
     name: string;
@@ -207,6 +213,10 @@ export function HomeDashboard({
     icon: '✨',
   };
   const tone = getWindowTone(energyScore, activeWindowName);
+  // The "Next Best Moment" card's OWN tone -- must not reuse `tone` above,
+  // which describes the CURRENT window (e.g. a Rahu Kalam caution color
+  // would otherwise bleed into a favorable upcoming Abhijit window's gauge).
+  const nextTone = getWindowTone(nextShift.score, nextShift.windowName);
   const currentWindowLabel = dailyBriefing?.briefingState === 'ACTIVE'
     ? dailyBriefing.peakWindow.name
     : formatWindowName(currentWindow?.name ?? activeWindowName);
@@ -449,10 +459,10 @@ export function HomeDashboard({
           <div style={{ ...sectionKickerStyle, color: '#facc15' }}>⭐ Next Best Moment</div>
           <h2 style={{ margin: '14px 0 0', color: '#f8fafc', fontSize: 22 }}>{nextShift.windowName}</h2>
           <div style={{ marginTop: 7, color: '#38bdf8', fontSize: 15, fontWeight: 850 }}>{nextShift.startTime}</div>
-          <p style={{ color: '#aab7d2', fontSize: 14, margin: '10px 0 0' }}>{themeText}</p>
+          <p style={{ color: '#aab7d2', fontSize: 14, margin: '10px 0 0' }}>{nextShift.themeText}</p>
         </div>
         <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 10 }}>
-          <ScoreGauge score={scoreLabel(energyScore)} color={tone.color} />
+          <ScoreGauge score={scoreLabel(nextShift.score)} color={nextTone.color} />
           <button type="button" onClick={() => onPlanClick?.()} style={outlineButtonStyle}>Plan this</button>
         </div>
       </section>

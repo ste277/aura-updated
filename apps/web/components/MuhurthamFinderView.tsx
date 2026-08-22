@@ -1,14 +1,15 @@
 'use client';
 
-import React, { useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import { SUPPORTED_MUHURTHAM_ACTIVITY_IDS, SupportedMuhurthamActivityId } from '../../../packages/recommendation/src/muhurthamFinder';
-import type { MuhurthamDateCandidate, MuhurthamPersonalDateCandidate, MuhurthamPersonalSearchOutcome, MuhurthamSearchResult, MuhurthamSearchScope } from '../../../packages/recommendation/src/muhurthamFinder';
+import type { MuhurthamDateCandidate, MuhurthamPersonalDateCandidate, MuhurthamPersonalSearchOutcome, MuhurthamSearchResult, MuhurthamSearchScope, MuhurthamSharedDateCandidate, MuhurthamSharedSearchOutcome, SharedMuhurthamRating } from '../../../packages/recommendation/src/muhurthamFinder';
 import type { TimingCandidate, TimingTimePreference } from '../../../packages/recommendation/src/timingSearch';
 import { FULL_ACTIVITY_CATALOG } from '../../../packages/recommendation/src/personalizedTasks';
 import { formatMuhurtaReason } from '../../../packages/muhurta/src/muhurtaReasonFormat';
 import { saveUpcomingPlanFromCandidate } from './PlanWithAuraView';
 import { ExploreModeToggle } from './ExploreModeToggle';
 import { getDatePartsInTimezone } from '../lib/timezone';
+import { RELATIONSHIP_ICON, RELATIONSHIP_LABEL, SavedPersonRow } from './PeopleView';
 
 interface MuhurthamFinderViewProps {
   timezone: string;
@@ -24,6 +25,12 @@ interface MuhurthamFinderViewProps {
    * brief section 11: "Reuse existing birth-profile setup/navigation. Do
    * not build another profile form." */
   onOpenBirthProfile: () => void;
+  /** Reuses the existing People screen (You -> People) for both the "Us"
+   * scope's empty state ("Add someone to find timings that work well for
+   * both of you") and a SavedPerson with an incomplete profile -- Shared
+   * Muhurtham brief section 13: "Reuse People screen. Do not create another
+   * Add Person form inside Finder." */
+  onOpenPeople: () => void;
 }
 
 type RangePreset = 'THIS_MONTH' | 'NEXT_MONTH' | 'NEXT_3_MONTHS' | 'CUSTOM';
@@ -57,6 +64,20 @@ const RATING_COLOR: Record<MuhurthamDateCandidate['rating'], string> = {
   STRONG: '#4ade80',
   FAVORABLE: '#38bdf8',
   ACCEPTABLE: '#94a3b8',
+};
+
+const SHARED_RATING_TEXT: Record<SharedMuhurthamRating, string> = {
+  EXCELLENT_SHARED_FIT: 'Excellent shared fit',
+  STRONG_SHARED_FIT: 'Strong shared fit',
+  GOOD_SHARED_FIT: 'Good shared fit',
+  MIXED_SHARED_FIT: 'Mixed fit',
+};
+
+const SHARED_RATING_COLOR: Record<SharedMuhurthamRating, string> = {
+  EXCELLENT_SHARED_FIT: '#4ade80',
+  STRONG_SHARED_FIT: '#4ade80',
+  GOOD_SHARED_FIT: '#38bdf8',
+  MIXED_SHARED_FIT: '#facc15',
 };
 
 const DEFAULT_DISPLAY_COUNT = 5;
@@ -110,6 +131,18 @@ export function partitionDatesByStrength<T extends { rating: MuhurthamDateCandid
   };
 }
 
+/** SHARED's counterpart to partitionDatesByStrength() above -- MIXED_SHARED_FIT
+ * (at least one participant's own Tara Bala is a CAUTION for this candidate,
+ * brief section 16) plays the same "withheld by default" role ACCEPTABLE
+ * plays for GENERAL/PERSONAL, revealed via the same "Show ... options"
+ * action. Exported for unit testing. */
+export function partitionSharedDatesByStrength(dates: MuhurthamSharedDateCandidate[]): { strong: MuhurthamSharedDateCandidate[]; mixed: MuhurthamSharedDateCandidate[] } {
+  return {
+    strong: dates.filter((d) => d.rating !== 'MIXED_SHARED_FIT'),
+    mixed: dates.filter((d) => d.rating === 'MIXED_SHARED_FIT'),
+  };
+}
+
 export function formatDateLabel(dateStr: string, timezone: string): string {
   const [y, m, d] = dateStr.split('-').map(Number);
   const approxNoonUTC = new Date(Date.UTC(y, m - 1, d, 12, 0, 0));
@@ -120,7 +153,7 @@ function formatClockTime(iso: string, timezone: string): string {
   return new Date(iso).toLocaleTimeString('en-US', { timeZone: timezone, hour: 'numeric', minute: '2-digit' });
 }
 
-export function MuhurthamFinderView({ timezone, onBack, onOpenPanchangCalendar, onViewFullPanchang, onPlanLogged, onOpenBirthProfile }: MuhurthamFinderViewProps) {
+export function MuhurthamFinderView({ timezone, onBack, onOpenPanchangCalendar, onViewFullPanchang, onPlanLogged, onOpenBirthProfile, onOpenPeople }: MuhurthamFinderViewProps) {
   const todayDateStr = useMemo(() => getDatePartsInTimezone(timezone, new Date()).dateStr, [timezone]);
 
   const [activityId, setActivityId] = useState<SupportedMuhurthamActivityId>('start-journey');
@@ -135,6 +168,7 @@ export function MuhurthamFinderView({ timezone, onBack, onOpenPanchangCalendar, 
   const [error, setError] = useState('');
   const [result, setResult] = useState<MuhurthamSearchResult | null>(null);
   const [personalOutcome, setPersonalOutcome] = useState<MuhurthamPersonalSearchOutcome | null>(null);
+  const [sharedOutcome, setSharedOutcome] = useState<MuhurthamSharedSearchOutcome | null>(null);
   const [activeRange, setActiveRange] = useState<{ start: string; end: string } | null>(null);
 
   const [showAllDates, setShowAllDates] = useState(false);
@@ -143,8 +177,29 @@ export function MuhurthamFinderView({ timezone, onBack, onOpenPanchangCalendar, 
   const [savingWindowKey, setSavingWindowKey] = useState<string | null>(null);
   const [savedWindowKeys, setSavedWindowKeys] = useState<Set<string>>(new Set());
 
+  // SHARED's person selector -- lazily fetched (brief section 12: GENERAL/
+  // PERSONAL never touch this) the first time the "Us" scope is opened, not
+  // on mount, since GENERAL is the default and most searches never need it.
+  const [savedPeople, setSavedPeople] = useState<SavedPersonRow[] | null>(null);
+  const [loadingPeople, setLoadingPeople] = useState(false);
+  const [selectedPersonId, setSelectedPersonId] = useState<string>('');
+
+  useEffect(() => {
+    if (scope !== 'SHARED' || savedPeople !== null || loadingPeople) return;
+    setLoadingPeople(true);
+    fetch('/api/people')
+      .then((res) => (res.ok ? res.json() : Promise.reject(new Error('Unable to load people.'))))
+      .then((data: SavedPersonRow[]) => {
+        setSavedPeople(data);
+        if (data.length > 0) setSelectedPersonId((current) => current || data[0].id);
+      })
+      .catch(() => setSavedPeople([]))
+      .finally(() => setLoadingPeople(false));
+  }, [scope, savedPeople, loadingPeople]);
+
   const requestedRange = computePresetRange(rangePreset, todayDateStr, customStart, customEnd);
   const activity = FULL_ACTIVITY_CATALOG.find((a) => a.id === activityId);
+  const selectedPerson = savedPeople?.find((p) => p.id === selectedPersonId) ?? null;
 
   const runSearch = async (range: { start: string; end: string }, preference: TimingTimePreference, searchScope: MuhurthamSearchScope) => {
     setSearching(true);
@@ -163,21 +218,29 @@ export function MuhurthamFinderView({ timezone, onBack, onOpenPanchangCalendar, 
           durationMinutes,
           limit: SEARCH_LIMIT,
           scope: searchScope,
+          savedPersonId: searchScope === 'SHARED' ? selectedPersonId : undefined,
         }),
       });
       const data = await res.json();
       if (!res.ok) throw new Error(data?.error || 'Unable to search for favorable dates.');
-      if (searchScope === 'PERSONAL') {
+      if (searchScope === 'SHARED') {
+        setSharedOutcome(data as MuhurthamSharedSearchOutcome);
+        setResult(null);
+        setPersonalOutcome(null);
+      } else if (searchScope === 'PERSONAL') {
         setPersonalOutcome(data as MuhurthamPersonalSearchOutcome);
         setResult(null);
+        setSharedOutcome(null);
       } else {
         setResult(data as MuhurthamSearchResult);
         setPersonalOutcome(null);
+        setSharedOutcome(null);
       }
       setActiveRange(range);
     } catch (err) {
       setResult(null);
       setPersonalOutcome(null);
+      setSharedOutcome(null);
       setActiveRange(null);
       setError(err instanceof Error ? err.message : 'Unable to search for favorable dates.');
     } finally {
@@ -188,6 +251,10 @@ export function MuhurthamFinderView({ timezone, onBack, onOpenPanchangCalendar, 
   const handleFindDates = () => {
     if (!requestedRange) {
       setError('Choose a start and end date.');
+      return;
+    }
+    if (scope === 'SHARED' && !selectedPersonId) {
+      setError('Choose a person to plan with.');
       return;
     }
     runSearch(requestedRange, timePreference, scope);
@@ -214,6 +281,7 @@ export function MuhurthamFinderView({ timezone, onBack, onOpenPanchangCalendar, 
     setScope(nextScope);
     setResult(null);
     setPersonalOutcome(null);
+    setSharedOutcome(null);
     setActiveRange(null);
     setError('');
   };
@@ -227,15 +295,20 @@ export function MuhurthamFinderView({ timezone, onBack, onOpenPanchangCalendar, 
   const personalVisible = showAcceptable ? personalOk?.dates ?? [] : personalStrong;
   const personalDisplayed = showAllDates ? personalVisible : personalVisible.slice(0, DEFAULT_DISPLAY_COUNT);
 
+  const sharedOk = sharedOutcome?.status === 'OK' ? sharedOutcome : null;
+  const { strong: sharedStrong, mixed: sharedMixed } = useMemo(() => partitionSharedDatesByStrength(sharedOk?.dates ?? []), [sharedOk]);
+  const sharedVisible = showAcceptable ? sharedOk?.dates ?? [] : sharedStrong;
+  const sharedDisplayed = showAllDates ? sharedVisible : sharedVisible.slice(0, DEFAULT_DISPLAY_COUNT);
+
   const canExpandRange = activeRange ? daySpan(activeRange.start, activeRange.end) < MAX_RANGE_DAYS : false;
 
   const windowKey = (dateKey: string, window: TimingCandidate) => `${dateKey}-${window.start}-${window.end}`;
 
-  const handleUseThisTime = async (dateKey: string, window: TimingCandidate) => {
+  const handleUseThisTime = async (dateKey: string, window: TimingCandidate, sharedWithName?: string) => {
     const key = windowKey(dateKey, window);
     setSavingWindowKey(key);
     try {
-      await saveUpcomingPlanFromCandidate(window, durationMinutes);
+      await saveUpcomingPlanFromCandidate(window, durationMinutes, sharedWithName);
       setSavedWindowKeys((prev) => new Set(prev).add(key));
       onPlanLogged?.();
     } catch {
@@ -262,11 +335,39 @@ export function MuhurthamFinderView({ timezone, onBack, onOpenPanchangCalendar, 
 
       <div>
         <div style={{ ...sectionKickerStyle, marginBottom: 8 }}>For</div>
-        <div style={toggleRowStyle} role="tablist" aria-label="General or personalized results">
+        <div style={toggleRowStyle} role="tablist" aria-label="General, personalized, or shared results">
           <ScopeToggleButton label="General" icon="🌐" active={scope === 'GENERAL'} onClick={() => handleScopeChange('GENERAL')} />
           <ScopeToggleButton label="Me" icon="✨" active={scope === 'PERSONAL'} onClick={() => handleScopeChange('PERSONAL')} />
+          <ScopeToggleButton label="Us" icon="❤️" active={scope === 'SHARED'} onClick={() => handleScopeChange('SHARED')} />
         </div>
       </div>
+
+      {scope === 'SHARED' && (
+        <section style={cardStyle}>
+          <div style={sectionKickerStyle}>For us</div>
+          {loadingPeople && savedPeople === null ? (
+            <p style={{ fontSize: 12, color: '#94a3b8', marginTop: 10 }}>Loading your people…</p>
+          ) : savedPeople && savedPeople.length === 0 ? (
+            <>
+              <div style={{ fontSize: 14, fontWeight: 800, marginTop: 10 }}>Plan together</div>
+              <p style={{ fontSize: 12, color: '#94a3b8', marginTop: 6, lineHeight: 1.5 }}>
+                Add someone to find timings that work well for both of you.
+              </p>
+              <button type="button" onClick={onOpenPeople} style={{ ...secondaryButtonStyle, marginTop: 12, textAlign: 'center' }}>
+                Add person →
+              </button>
+            </>
+          ) : savedPeople && savedPeople.length > 0 ? (
+            <select value={selectedPersonId} onChange={(e) => setSelectedPersonId(e.target.value)} style={{ ...selectStyle, marginTop: 10 }}>
+              {savedPeople.map((person) => (
+                <option key={person.id} value={person.id}>
+                  {RELATIONSHIP_ICON[person.relationshipType]} {person.name} · {RELATIONSHIP_LABEL[person.relationshipType]}
+                </option>
+              ))}
+            </select>
+          ) : null}
+        </section>
+      )}
 
       <section style={cardStyle}>
         <div style={sectionKickerStyle}>What are you planning?</div>
@@ -309,7 +410,12 @@ export function MuhurthamFinderView({ timezone, onBack, onOpenPanchangCalendar, 
           ))}
         </div>
 
-        <button type="button" onClick={handleFindDates} disabled={searching} style={{ ...primaryButtonStyle, marginTop: 18, opacity: searching ? 0.7 : 1 }}>
+        <button
+          type="button"
+          onClick={handleFindDates}
+          disabled={searching || (scope === 'SHARED' && savedPeople?.length === 0)}
+          style={{ ...primaryButtonStyle, marginTop: 18, opacity: searching || (scope === 'SHARED' && savedPeople?.length === 0) ? 0.7 : 1 }}
+        >
           {searching ? 'Searching…' : 'Find Favorable Dates'}
         </button>
         {error && <div style={{ ...errorBoxStyle, marginTop: 10 }}>{error}</div>}
@@ -435,6 +541,88 @@ export function MuhurthamFinderView({ timezone, onBack, onOpenPanchangCalendar, 
               {!showAcceptable && personalAcceptable.length > 0 && (
                 <button type="button" onClick={() => setShowAcceptable(true)} style={{ ...linkButtonStyle, alignSelf: 'center' }}>
                   Show {personalAcceptable.length} more acceptable option{personalAcceptable.length === 1 ? '' : 's'} →
+                </button>
+              )}
+            </>
+          )}
+        </>
+      )}
+
+      {scope === 'SHARED' && sharedOutcome?.status === 'USER_PROFILE_INCOMPLETE' && (
+        <section style={cardStyle}>
+          <div style={{ fontSize: 14, fontWeight: 800 }}>Complete your own profile first</div>
+          <p style={{ fontSize: 12, color: '#94a3b8', marginTop: 6, lineHeight: 1.5 }}>
+            Add your birth details so Aura can find timings that work well for both of you.
+          </p>
+          <button type="button" onClick={onOpenBirthProfile} style={{ ...secondaryButtonStyle, marginTop: 12, textAlign: 'center' }}>
+            Complete profile →
+          </button>
+        </section>
+      )}
+
+      {scope === 'SHARED' && sharedOutcome?.status === 'SAVED_PERSON_PROFILE_INCOMPLETE' && (
+        <section style={cardStyle}>
+          <div style={{ fontSize: 14, fontWeight: 800 }}>{selectedPerson ? `${selectedPerson.name}'s profile is incomplete` : "This person's profile is incomplete"}</div>
+          <p style={{ fontSize: 12, color: '#94a3b8', marginTop: 6, lineHeight: 1.5 }}>
+            Add their birth details to find timings that work well for both of you.
+          </p>
+          <button type="button" onClick={onOpenPeople} style={{ ...secondaryButtonStyle, marginTop: 12, textAlign: 'center' }}>
+            Edit person →
+          </button>
+        </section>
+      )}
+
+      {scope === 'SHARED' && sharedOk && (
+        <>
+          {sharedVisible.length === 0 ? (
+            <section style={cardStyle}>
+              <div style={{ fontSize: 14, fontWeight: 800 }}>No strongly favorable dates were found in this range.</div>
+              <p style={{ fontSize: 12, color: '#94a3b8', marginTop: 6, lineHeight: 1.5 }}>
+                {activity?.title ?? 'This activity'} didn&apos;t have a clearly favorable window for both of you between {formatDateLabel(sharedOk.dateRange.start, timezone)} and {formatDateLabel(sharedOk.dateRange.end, timezone)}.
+              </p>
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 8, marginTop: 14 }}>
+                {canExpandRange && (
+                  <button type="button" onClick={handleExpandRange} disabled={searching} style={secondaryButtonStyle}>
+                    Expand search range (+{EXPAND_STEP_DAYS} days) →
+                  </button>
+                )}
+                {timePreference !== 'ANY' && (
+                  <button type="button" onClick={handleRelaxTimePreference} disabled={searching} style={secondaryButtonStyle}>
+                    Relax preferred time →
+                  </button>
+                )}
+                {sharedMixed.length > 0 && (
+                  <button type="button" onClick={() => setShowAcceptable(true)} style={secondaryButtonStyle}>
+                    Show mixed-fit options ({sharedMixed.length}) →
+                  </button>
+                )}
+              </div>
+            </section>
+          ) : (
+            <>
+              {sharedDisplayed.map((date, index) => (
+                <MuhurthamSharedDateCard
+                  key={date.date}
+                  date={date}
+                  timezone={timezone}
+                  isBestForBoth={index === 0}
+                  expanded={expandedDate === date.date}
+                  onToggleExpand={() => setExpandedDate((current) => (current === date.date ? null : date.date))}
+                  onViewFullPanchang={() => onViewFullPanchang(date.date)}
+                  onUseThisTime={(window) => handleUseThisTime(date.date, window, date.person.name)}
+                  savingWindowKey={savingWindowKey}
+                  savedWindowKeys={savedWindowKeys}
+                  windowKey={windowKey}
+                />
+              ))}
+              {!showAllDates && sharedVisible.length > DEFAULT_DISPLAY_COUNT && (
+                <button type="button" onClick={() => setShowAllDates(true)} style={{ ...linkButtonStyle, alignSelf: 'center' }}>
+                  View more results ({sharedVisible.length - DEFAULT_DISPLAY_COUNT} more) →
+                </button>
+              )}
+              {!showAcceptable && sharedMixed.length > 0 && (
+                <button type="button" onClick={() => setShowAcceptable(true)} style={{ ...linkButtonStyle, alignSelf: 'center' }}>
+                  Show {sharedMixed.length} more mixed-fit option{sharedMixed.length === 1 ? '' : 's'} →
                 </button>
               )}
             </>
@@ -706,6 +894,182 @@ function MuhurthamPersonalDateCard({
               <ul style={{ margin: '8px 0 0', paddingLeft: 18, fontSize: 12, color: '#dbe7f4', lineHeight: 1.6 }}>
                 {date.cautions.map((reason, i) => (
                   <li key={i}>{reason.factor === 'PERSONAL' ? '✨ ' : ''}{formatMuhurtaReason(reason)}</li>
+                ))}
+              </ul>
+            </div>
+          )}
+
+          {date.alternateWindows.length > 0 && (
+            <div>
+              <div style={sectionKickerStyle}>Other good windows this date</div>
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 8, marginTop: 8 }}>
+                {date.alternateWindows.map((window) => {
+                  const key = windowKey(date.date, window);
+                  const saved = savedWindowKeys.has(key);
+                  const saving = savingWindowKey === key;
+                  return (
+                    <div key={key} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 8 }}>
+                      <span style={{ fontSize: 12, color: '#dbe7f4' }}>{formatClockTime(window.start, timezone)} – {formatClockTime(window.end, timezone)}</span>
+                      <button type="button" onClick={() => onUseThisTime(window)} disabled={saving || saved} style={{ ...linkButtonStyle, fontSize: 12, color: saved ? '#4ade80' : '#38bdf8' }}>
+                        {saved ? 'Added ✓' : saving ? 'Saving…' : 'Use this time →'}
+                      </button>
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+          )}
+
+          <button type="button" onClick={onViewFullPanchang} style={{ ...linkButtonStyle, alignSelf: 'flex-start' }}>
+            View full Panchang →
+          </button>
+        </div>
+      )}
+    </section>
+  );
+}
+
+/** Section 14's condensed 3-line summary, shown even when the card isn't
+ * expanded: one line for the general Muhurta's own strength, one for
+ * whether it's supportive/a caution for the user, one for the SavedPerson.
+ * Deliberately short and non-numeric -- the full per-person reason lists
+ * live in the expanded view below. */
+function participantStatusLine(status: 'SUPPORT' | 'NEUTRAL' | 'CAUTION', label: string): string {
+  if (status === 'SUPPORT') return `Supportive for ${label}`;
+  if (status === 'CAUTION') return `A personal caution for ${label}`;
+  return `Neutral for ${label}`;
+}
+
+function MuhurthamSharedDateCard({
+  date,
+  timezone,
+  isBestForBoth,
+  expanded,
+  onToggleExpand,
+  onViewFullPanchang,
+  onUseThisTime,
+  savingWindowKey,
+  savedWindowKeys,
+  windowKey,
+}: {
+  date: MuhurthamSharedDateCandidate;
+  timezone: string;
+  isBestForBoth: boolean;
+  expanded: boolean;
+  onToggleExpand: () => void;
+  onViewFullPanchang: () => void;
+  onUseThisTime: (window: TimingCandidate) => void;
+  savingWindowKey: string | null;
+  savedWindowKeys: Set<string>;
+  windowKey: (dateKey: string, window: TimingCandidate) => string;
+}) {
+  const bestKey = windowKey(date.date, date.bestWindow);
+  const bestSaved = savedWindowKeys.has(bestKey);
+  const bestSaving = savingWindowKey === bestKey;
+  const generalRating = scoreRatingLabel(date.generalScore);
+  const userRating = scoreRatingLabel(date.user.score);
+  const personRating = scoreRatingLabel(date.person.score);
+  const userTaraStatus = date.user.factors.taraBala?.status ?? 'NEUTRAL';
+  const personTaraStatus = date.person.factors.taraBala?.status ?? 'NEUTRAL';
+
+  return (
+    <section style={cardStyle}>
+      {isBestForBoth && <div style={{ ...sectionKickerStyle, color: '#fb7185', marginBottom: 8 }}>❤️ Best for both</div>}
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: 10, flexWrap: 'wrap' }}>
+        <div>
+          <div style={{ fontSize: 16, fontWeight: 800 }}>{formatDateLabel(date.date, timezone)}</div>
+          <div style={{ fontSize: 12, color: '#dbe7f4', marginTop: 3 }}>
+            {formatClockTime(date.bestWindow.start, timezone)} – {formatClockTime(date.bestWindow.end, timezone)}
+          </div>
+        </div>
+        <span style={{ ...ratingBadgeStyle, color: SHARED_RATING_COLOR[date.rating], borderColor: SHARED_RATING_COLOR[date.rating] }}>{SHARED_RATING_TEXT[date.rating]}</span>
+      </div>
+
+      <div style={{ display: 'flex', gap: 14, marginTop: 12, fontSize: 12, flexWrap: 'wrap' }}>
+        <div style={{ display: 'flex', gap: 6, alignItems: 'baseline' }}>
+          <span style={{ color: '#94a3b8' }}>General Muhurta</span>
+          <span style={{ fontWeight: 800, color: RATING_COLOR[generalRating] }}>{RATING_TEXT[generalRating]}</span>
+        </div>
+        <div style={{ display: 'flex', gap: 6, alignItems: 'baseline' }}>
+          <span style={{ color: '#94a3b8' }}>You</span>
+          <span style={{ fontWeight: 800, color: RATING_COLOR[userRating] }}>{RATING_TEXT[userRating]}</span>
+        </div>
+        <div style={{ display: 'flex', gap: 6, alignItems: 'baseline' }}>
+          <span style={{ color: '#94a3b8' }}>{date.person.name}</span>
+          <span style={{ fontWeight: 800, color: RATING_COLOR[personRating] }}>{RATING_TEXT[personRating]}</span>
+        </div>
+      </div>
+
+      <div style={{ marginTop: 10 }}>
+        <div style={{ ...sectionKickerStyle, fontSize: 10 }}>Why this works for both</div>
+        <ul style={{ margin: '6px 0 0', paddingLeft: 18, fontSize: 12, color: '#94a3b8', lineHeight: 1.6 }}>
+          <li>{RATING_TEXT[generalRating]} general Muhurta</li>
+          <li>✨ {participantStatusLine(userTaraStatus, 'you')}</li>
+          <li>❤️ {participantStatusLine(personTaraStatus, date.person.name)}</li>
+        </ul>
+      </div>
+
+      <div style={{ display: 'flex', gap: 14, marginTop: 12, flexWrap: 'wrap' }}>
+        <button type="button" onClick={onToggleExpand} style={linkButtonStyle}>
+          {expanded ? 'Hide details' : 'Why this time?'} {expanded ? '▲' : '▼'}
+        </button>
+        <button type="button" onClick={() => onUseThisTime(date.bestWindow)} disabled={bestSaving || bestSaved} style={{ ...linkButtonStyle, color: bestSaved ? '#4ade80' : '#38bdf8' }}>
+          {bestSaved ? 'Added to Plan ✓' : bestSaving ? 'Saving…' : 'Use this time →'}
+        </button>
+      </div>
+
+      {expanded && (
+        <div style={{ marginTop: 14, paddingTop: 14, borderTop: '1px solid rgba(255,255,255,0.08)', display: 'flex', flexDirection: 'column', gap: 14 }}>
+          <div>
+            <div style={sectionKickerStyle}>Panchang</div>
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8, marginTop: 8 }}>
+              <PanchangaMiniCell label="Tithi" value={date.panchangSummary.tithi} />
+              <PanchangaMiniCell label="Nakshatra" value={date.panchangSummary.nakshatra} />
+              <PanchangaMiniCell label="Yoga" value={date.panchangSummary.yoga} />
+              <PanchangaMiniCell label="Karana" value={date.panchangSummary.karana} />
+              <PanchangaMiniCell label="Vara" value={date.panchangSummary.vara} />
+            </div>
+          </div>
+
+          {date.reasons.length > 0 && (
+            <div>
+              <div style={{ ...sectionKickerStyle, color: '#4ade80' }}>General Muhurta</div>
+              <ul style={{ margin: '8px 0 0', paddingLeft: 18, fontSize: 12, color: '#dbe7f4', lineHeight: 1.6 }}>
+                {date.reasons.map((reason, i) => (
+                  <li key={i}>{formatMuhurtaReason(reason)}</li>
+                ))}
+              </ul>
+            </div>
+          )}
+
+          {date.user.reasons.length > 0 && (
+            <div>
+              <div style={{ ...sectionKickerStyle, color: '#a78bfa' }}>For you</div>
+              <ul style={{ margin: '8px 0 0', paddingLeft: 18, fontSize: 12, color: '#dbe7f4', lineHeight: 1.6 }}>
+                {date.user.reasons.map((reason, i) => (
+                  <li key={i}>{reason.polarity === 'SUPPORT' ? '✓ ' : '⚠ '}{formatMuhurtaReason(reason)}</li>
+                ))}
+              </ul>
+            </div>
+          )}
+
+          {date.person.reasons.length > 0 && (
+            <div>
+              <div style={{ ...sectionKickerStyle, color: '#fb7185' }}>For {date.person.name}</div>
+              <ul style={{ margin: '8px 0 0', paddingLeft: 18, fontSize: 12, color: '#dbe7f4', lineHeight: 1.6 }}>
+                {date.person.reasons.map((reason, i) => (
+                  <li key={i}>{reason.polarity === 'SUPPORT' ? '✓ ' : '⚠ '}{formatMuhurtaReason(reason)}</li>
+                ))}
+              </ul>
+            </div>
+          )}
+
+          {date.cautions.length > 0 && (
+            <div>
+              <div style={{ ...sectionKickerStyle, color: '#facc15' }}>Considerations</div>
+              <ul style={{ margin: '8px 0 0', paddingLeft: 18, fontSize: 12, color: '#dbe7f4', lineHeight: 1.6 }}>
+                {date.cautions.map((reason, i) => (
+                  <li key={i}>{formatMuhurtaReason(reason)}</li>
                 ))}
               </ul>
             </div>
