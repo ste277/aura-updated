@@ -118,6 +118,38 @@ check('Tomorrow planning adds local calendar days across DST', (newYorkLateDstPl
 const teaPlan = findOptimalTaskTimes('tea break', afternoonContext, 15, 'TODAY', undefined, undefined, 'ANYTIME');
 check('Low-stakes catalog activities can remain usable today', (teaPlan.planningOptions ?? []).length >= 1);
 
+// Regression coverage for the catalog-match scoring-quality question raised in
+// the activity-ontology work: profileFromActivity() (dailyAssistant.ts) sets
+// TaskProfile.scores to {} for every catalog match, but scoreCandidate()
+// (dailyAssistant.ts:690-699) routes any profile carrying `activity` through
+// evaluateActivityFit() whenever a date is available -- which is true for
+// every current caller (recommendTaskSlot, findOptimalTaskTimes,
+// findBestWindowToday, scoreContinuousBlock) -- bypassing the empty map
+// entirely. These checks pin down that a catalog match gets real,
+// window-differentiated scores today, not the generic flat-55 fallback.
+const SOLAR_WINDOW_TYPES = ['ABHIJIT', 'BRAHMA', 'GULIKA', 'NEUTRAL', 'RAHU_KALAM', 'YAMA'] as const;
+if (roadTripIntent) {
+  const windowScores = SOLAR_WINDOW_TYPES.map((windowType) => ({
+    windowType,
+    score: evaluateActivityFit({ activity: roadTripIntent, date, windowType }).score,
+  }));
+  check('Catalog-matched activity scores differ across window types (not flat 55)', new Set(windowScores.map((entry) => entry.score)).size > 1);
+  check('Catalog-matched activity scores are never the generic flat-55 fallback value', windowScores.every((entry) => entry.score !== 55));
+  const abhijitScore = windowScores.find((entry) => entry.windowType === 'ABHIJIT')!.score;
+  const rahuScore = windowScores.find((entry) => entry.windowType === 'RAHU_KALAM')!.score;
+  check('Catalog-matched activity scores its recommended window meaningfully higher than its avoid window', abhijitScore - rahuScore >= 20);
+}
+
+const deepWorkIntent = findActivityIntent('Deep Work');
+check('Deep Work resolves to the deep-work catalog entry', deepWorkIntent?.id === 'deep-work');
+if (deepWorkIntent) {
+  const deepWorkScores = SOLAR_WINDOW_TYPES.map((windowType) => evaluateActivityFit({ activity: deepWorkIntent, date, windowType }).score);
+  check('Deep Work (catalog match) window scores are differentiated, not flat', new Set(deepWorkScores).size > 1);
+  const abhijitScore = evaluateActivityFit({ activity: deepWorkIntent, date, windowType: 'ABHIJIT' }).score;
+  const rahuScore = evaluateActivityFit({ activity: deepWorkIntent, date, windowType: 'RAHU_KALAM' }).score;
+  check('Deep Work scores its recommended window meaningfully higher than its avoid window', abhijitScore - rahuScore >= 20);
+}
+
 const neutralDiscovery = getActivityDiscoveryCards('Neutral Flow', 20);
 check('Discovery cards expose fit labels', neutralDiscovery.every((card) => Boolean(card.fit)));
 check('Discovery is catalog-backed for dating in Neutral Flow', neutralDiscovery.some((card) => card.activityId === 'dating'));

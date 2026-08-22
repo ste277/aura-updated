@@ -25,7 +25,8 @@ jobs:
         run: npx ts-node test/timezone.test.ts
       - name: Run window notifications test
         run: npx ts-node test/windowNotifications.test.ts
-
+      - name: Run activity ontology test
+        run: npx ts-node test/activityOntology.test.ts
   web-build:
     name: Next.js production build
     runs-on: ubuntu-latest
