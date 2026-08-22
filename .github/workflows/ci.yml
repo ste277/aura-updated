@@ -47,6 +47,8 @@ jobs:
         run: npx ts-node test/muhurthamSearchApi.test.ts
       - name: Run Muhurta rule packs test
         run: npx ts-node test/muhurtaRulePacks.test.ts
+      - name: Run Personal Muhurtham test
+        run: npx ts-node test/personalMuhurtham.test.ts
       - name: Install web deps
         working-directory: apps/web
         run: npm install

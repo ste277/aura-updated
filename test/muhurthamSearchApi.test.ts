@@ -99,5 +99,23 @@ check('Non-numeric duration is rejected', buildMuhurthamSearchRequest({ activity
 check('limit below the minimum is rejected', buildMuhurthamSearchRequest({ activityId: 'start-journey', dateRange: { start: '2026-09-01', end: '2026-09-05' }, limit: 0 }, chennaiContext).ok === false);
 check('limit above the maximum is rejected', buildMuhurthamSearchRequest({ activityId: 'start-journey', dateRange: { start: '2026-09-01', end: '2026-09-05' }, limit: 50 }, chennaiContext).ok === false);
 
+// ============================================================
+// SCOPE (Personal Muhurtham -- General | For Me)
+// ============================================================
+
+const noScopeResult = buildMuhurthamSearchRequest({ activityId: 'start-journey', dateRange: { start: '2026-09-01', end: '2026-09-05' } }, chennaiContext);
+check('Omitting scope defaults to GENERAL', noScopeResult.ok === true && noScopeResult.ok && noScopeResult.scope === 'GENERAL');
+
+const explicitGeneral = buildMuhurthamSearchRequest({ activityId: 'start-journey', dateRange: { start: '2026-09-01', end: '2026-09-05' }, scope: 'GENERAL' }, chennaiContext);
+check('Explicit scope: GENERAL is accepted', explicitGeneral.ok === true && explicitGeneral.ok && explicitGeneral.scope === 'GENERAL');
+
+const explicitPersonal = buildMuhurthamSearchRequest({ activityId: 'start-journey', dateRange: { start: '2026-09-01', end: '2026-09-05' }, scope: 'PERSONAL' }, chennaiContext);
+check('Explicit scope: PERSONAL is accepted', explicitPersonal.ok === true && explicitPersonal.ok && explicitPersonal.scope === 'PERSONAL');
+
+check('An invalid scope value is rejected with 400', (() => {
+  const r = buildMuhurthamSearchRequest({ activityId: 'start-journey', dateRange: { start: '2026-09-01', end: '2026-09-05' }, scope: 'FOR_US' }, chennaiContext);
+  return r.ok === false && r.status === 400;
+})());
+
 console.log(allPassed ? '\nALL MUHURTHAM SEARCH API CHECKS PASSED' : '\nSOME MUHURTHAM SEARCH API CHECKS FAILED');
 process.exit(allPassed ? 0 : 1);

@@ -18,6 +18,15 @@ import type { ActivityProfile } from './personalizedTasks';
  * cannot change any existing activity's score. */
 const CEREMONIAL_INCOMPLETE_SCORE_CAP = 89;
 
+/** Methodology identifier for the personal-fit layer (Tara Bala + element
+ * affinity), kept conceptually separate from AURA_MUHURTA_V1
+ * (packages/muhurta/src/muhurtaRulePacks.ts) -- personal factors are not
+ * traditional Muhurta rules and must not be silently folded into that
+ * methodology's provenance. See evaluatePersonalMuhurtaFit() below for what
+ * this covers today (Tara Bala + a moon-element-affinity heuristic) and the
+ * Personal Muhurtham completion report for the full factor audit. */
+export const AURA_PERSONAL_FIT_METHODOLOGY_ID = 'AURA_PERSONAL_FIT_V1' as const;
+
 export type AuraFitLabel = 'EXCEPTIONAL' | 'BEST' | 'GOOD' | 'SUITABLE' | 'USE_LIGHTLY' | 'AVOID';
 
 export interface MuhurtaCapabilities {

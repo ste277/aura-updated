@@ -114,7 +114,9 @@ import { getPanchangForDate, PanchangWindowSpan } from '../../panchang/src/panch
 import { isValidCalendarDateString, localDateTimeToUTC } from '../../panchang/src/localDate';
 import { FULL_ACTIVITY_CATALOG } from './personalizedTasks';
 import { ACTIVITY_DEFINITIONS, ActivityDefinition } from './activityDefinitions';
-import { computeMuhurtaSupportLevel, resolveMuhurtaRulePack } from '../../muhurta/src/muhurtaRulePacks';
+import { computeMuhurtaSupportLevel, resolveMuhurtaRulePack, AURA_MUHURTA_METHODOLOGY_ID } from '../../muhurta/src/muhurtaRulePacks';
+import { evaluatePersonalMuhurtaFit, AURA_PERSONAL_FIT_METHODOLOGY_ID, PersonalMuhurtaContext } from './auraFitEngine';
+import { getTaraBala } from '../../vedic/src/natalChart';
 import type { MuhurtaClassification, MuhurtaReason } from '../../muhurta/src/activityOntology';
 
 /**
@@ -339,6 +341,43 @@ function spanOverlapsFrictionWindow(startISO: string, endISO: string, panchangWi
  * safety check -- see spanOverlapsFrictionWindow above). Returns null if no
  * candidate for this date reaches MIN_INCLUSION_SCORE.
  */
+/**
+ * Evaluates ONE candidate start instant end-to-end: the full-duration score,
+ * the section-7 friction/overlap safety check, and (when start-sensitive)
+ * the commencement-probe blend -- the exact per-candidate logic
+ * findBestWindowsForDate()'s scan loop needs, extracted so
+ * findPersonalMuhurthams() can also call it directly for a single instant
+ * (its general-only comparison score) without duplicating this logic.
+ * Returns null when the candidate is hard-excluded (friction-blocked, on
+ * either the full window or, for start-sensitive activities, the
+ * commencement probe).
+ */
+function evaluateMuhurthamCandidate(
+  profile: TaskProfile,
+  start: Date,
+  durationMinutes: number,
+  context: DailyAssistantContext,
+  panchangWindows: PanchangWindowSpan[],
+  classification: MuhurtaClassification | undefined
+): TimingCandidate | null {
+  const isFrictionSensitive = profile.significance === 'HIGH' || profile.requiresFreshStart;
+  const isStartSensitive = classification?.timingSensitivity.start === 'HIGH';
+
+  const candidate = evaluateTimingCandidate({ profile, start, durationMinutes, context });
+  if (candidate.conflicts?.some((c) => c.type === 'FRICTION_WINDOW_BLOCKED')) return null;
+  if (isFrictionSensitive && spanOverlapsFrictionWindow(candidate.start, candidate.end, panchangWindows)) return null;
+
+  if (!isStartSensitive) return candidate;
+
+  const probeDurationMinutes = Math.min(durationMinutes, START_SENSITIVITY_PROBE_MINUTES);
+  const commencementProbe = evaluateTimingCandidate({ profile, start, durationMinutes: probeDurationMinutes, context });
+  if (commencementProbe.conflicts?.some((c) => c.type === 'FRICTION_WINDOW_BLOCKED')) return null;
+  if (isFrictionSensitive && spanOverlapsFrictionWindow(commencementProbe.start, commencementProbe.end, panchangWindows)) return null;
+
+  const blendedScore = blendStartSensitiveScore(candidate.score, commencementProbe.score);
+  return { ...candidate, score: blendedScore, label: labelForBlendedScore(blendedScore) };
+}
+
 function findBestWindowsForDate(
   profile: TaskProfile,
   dateStr: string,
@@ -350,28 +389,14 @@ function findBestWindowsForDate(
 ): { best: SampledCandidate; alternates: SampledCandidate[] } | null {
   const dayContext: DailyAssistantContext = { ...context, now: localDateTimeToUTC(dateStr, '12:00', context.timezone) };
   const slotCandidates = buildSlotCandidates(computeAssistantWindows(dayContext));
-  const isFrictionSensitive = profile.significance === 'HIGH' || profile.requiresFreshStart;
-  const isStartSensitive = classification?.timingSensitivity.start === 'HIGH';
 
   const candidates: SampledCandidate[] = [];
   for (const slot of slotCandidates) {
     if (slot.endMinute - slot.startMinute < durationMinutes) continue;
     if (!matchesTimePreference(slot.startMinute, preference === 'ANY' ? 'ANYTIME' : preference)) continue;
     const start = localDateTimeToUTC(dateStr, formatMinutes(slot.startMinute), context.timezone);
-    const candidate = evaluateTimingCandidate({ profile, start, durationMinutes, context });
-    if (candidate.conflicts?.some((c) => c.type === 'FRICTION_WINDOW_BLOCKED')) continue;
-    if (isFrictionSensitive && spanOverlapsFrictionWindow(candidate.start, candidate.end, panchangWindows)) continue;
-
-    let effectiveCandidate: TimingCandidate = candidate;
-    if (isStartSensitive) {
-      const probeDurationMinutes = Math.min(durationMinutes, START_SENSITIVITY_PROBE_MINUTES);
-      const commencementProbe = evaluateTimingCandidate({ profile, start, durationMinutes: probeDurationMinutes, context });
-      if (commencementProbe.conflicts?.some((c) => c.type === 'FRICTION_WINDOW_BLOCKED')) continue;
-      if (isFrictionSensitive && spanOverlapsFrictionWindow(commencementProbe.start, commencementProbe.end, panchangWindows)) continue;
-      const blendedScore = blendStartSensitiveScore(candidate.score, commencementProbe.score);
-      effectiveCandidate = { ...candidate, score: blendedScore, label: labelForBlendedScore(blendedScore) };
-    }
-
+    const effectiveCandidate = evaluateMuhurthamCandidate(profile, start, durationMinutes, context, panchangWindows, classification);
+    if (!effectiveCandidate) continue;
     if (effectiveCandidate.score < MIN_INCLUSION_SCORE) continue;
     candidates.push({ ...effectiveCandidate, startMinute: slot.startMinute });
   }
@@ -391,35 +416,57 @@ function findBestWindowsForDate(
 }
 
 /**
- * The canonical Muhurtham Finder entry point. For every local date in the
- * requested range: fetches that date's Panchang (getPanchangForDate() --
- * both for the display summary AND for its overlap-preserving `windows`,
- * which findBestWindowsForDate's section-7 safety check needs), then
- * samples and evaluates candidate windows (via evaluateTimingCandidate(),
- * never a second formula), keeping the best (plus up to 2 diverse
- * alternates). Dates are ranked globally by their best window's score, then
- * the top `limit` are re-sorted chronologically for display (matching the
- * brief's own example: top-ranked dates shown in date order, not strictly
- * descending score order).
+ * Shared activity/date-range validation + parameter normalization used by
+ * BOTH findMuhurthams() (GENERAL) and findPersonalMuhurthams() (PERSONAL) --
+ * kept in one place so the two entry points can never silently drift on
+ * what counts as a valid request.
  */
-export function findMuhurthams(request: MuhurthamSearchRequest): MuhurthamSearchResult {
+function resolveMuhurthamSearchParams(request: MuhurthamSearchRequest, callerName: string) {
   const activity = FULL_ACTIVITY_CATALOG.find((a) => a.id === request.activityId);
   if (!activity) {
-    throw new Error(`findMuhurthams: unknown activityId "${request.activityId}".`);
+    throw new Error(`${callerName}: unknown activityId "${request.activityId}".`);
   }
   if (!isSupportedMuhurthamActivity(request.activityId)) {
-    throw new Error(`findMuhurthams: "${request.activityId}" is not yet supported by Muhurtham Finder.`);
+    throw new Error(`${callerName}: "${request.activityId}" is not yet supported by Muhurtham Finder.`);
   }
   if (!isValidCalendarDateString(request.dateRange.start) || !isValidCalendarDateString(request.dateRange.end) || request.dateRange.end < request.dateRange.start) {
-    throw new Error('findMuhurthams: dateRange must be a valid { start, end } with end on or after start.');
+    throw new Error(`${callerName}: dateRange must be a valid { start, end } with end on or after start.`);
   }
 
+  return {
+    activity,
+    durationMinutes: Math.min(360, Math.max(15, Math.round(request.durationMinutes ?? DEFAULT_DURATION_MINUTES))),
+    limit: Math.max(1, Math.min(MAX_LIMIT, Math.round(request.limit ?? DEFAULT_LIMIT))),
+    preference: request.timePreference ?? 'ANY',
+    dateStrs: enumerateLocalDates(request.dateRange.start, request.dateRange.end),
+  };
+}
+
+/**
+ * The canonical Muhurtham Finder entry point -- GENERAL scope. For every
+ * local date in the requested range: fetches that date's Panchang
+ * (getPanchangForDate() -- both for the display summary AND for its
+ * overlap-preserving `windows`, which findBestWindowsForDate's section-7
+ * safety check needs), then samples and evaluates candidate windows (via
+ * evaluateTimingCandidate(), never a second formula), keeping the best
+ * (plus up to 2 diverse alternates). Dates are ranked globally by their
+ * best window's score, then the top `limit` are re-sorted chronologically
+ * for display (matching the brief's own example: top-ranked dates shown in
+ * date order, not strictly descending score order).
+ *
+ * Deliberately NEVER reads request.context.personalContext, even when the
+ * caller's resolved context happens to carry one (e.g. the API route
+ * resolves it unconditionally for the PERSONAL path) -- GENERAL must answer
+ * "when is this generally favorable", with zero natal-data influence on
+ * ranking or score. See findPersonalMuhurthams() for the PERSONAL scope
+ * that intentionally does use it. (Before this PR, this function DID
+ * accidentally thread personalContext through when present -- a genuine,
+ * intentionally-fixed bug; see the Personal Muhurtham completion report.)
+ */
+export function findMuhurthams(request: MuhurthamSearchRequest): MuhurthamSearchResult {
+  const { activity, durationMinutes, limit, preference, dateStrs } = resolveMuhurthamSearchParams(request, 'findMuhurthams');
+  const generalContext: DailyAssistantContext = { ...request.context, personalContext: undefined };
   const profile = profileFromActivity(activity);
-  profile.personalContext = request.context.personalContext;
-  const durationMinutes = Math.min(360, Math.max(15, Math.round(request.durationMinutes ?? DEFAULT_DURATION_MINUTES)));
-  const limit = Math.max(1, Math.min(MAX_LIMIT, Math.round(request.limit ?? DEFAULT_LIMIT)));
-  const preference = request.timePreference ?? 'ANY';
-  const dateStrs = enumerateLocalDates(request.dateRange.start, request.dateRange.end);
 
   const dateCandidates: MuhurthamDateCandidate[] = [];
   for (const dateStr of dateStrs) {
@@ -430,7 +477,7 @@ export function findMuhurthams(request: MuhurthamSearchRequest): MuhurthamSearch
       timezone: request.context.timezone,
     });
 
-    const evaluated = findBestWindowsForDate(profile, dateStr, request.context, durationMinutes, preference, panchangDay.windows, profile.muhurtaClassification);
+    const evaluated = findBestWindowsForDate(profile, dateStr, generalContext, durationMinutes, preference, panchangDay.windows, profile.muhurtaClassification);
     if (!evaluated) continue;
 
     const supportReasons = evaluated.best.reasons.filter((r) => r.polarity === 'SUPPORT');
@@ -465,5 +512,247 @@ export function findMuhurthams(request: MuhurthamSearchRequest): MuhurthamSearch
     dateRange: request.dateRange,
     dates: ranked,
     evaluatedDateCount: dateStrs.length,
+  };
+}
+
+/**
+ * ## Personal Muhurtham ("General | For Me")
+ *
+ * findPersonalMuhurthams() answers "when is this favorable FOR THIS USER",
+ * layering personal factors on top of (never instead of) the exact same
+ * general Muhurta evaluation findMuhurthams() uses. It does not duplicate
+ * any scoring logic: every candidate still goes through
+ * evaluateMuhurthamCandidate() (the identical friction/overlap/
+ * start-sensitivity pipeline), just with the profile's personalContext
+ * populated -- the ONLY difference from GENERAL is whether
+ * evaluateActivityFit()'s existing `personalContext` parameter is passed.
+ *
+ * ## Personal factor audit (brief section 1) -- what's actually implemented
+ *
+ * IMPLEMENTED_AND_VALIDATED: Tara Bala (getTaraBala(), packages/vedic/src/
+ * natalChart.ts) -- a standard, unambiguous distance-counting technique
+ * (today's Nakshatra's position relative to the natal Nakshatra, mod 9),
+ * already in production (natal chart display) and already wired into Aura
+ * Fit's `personalPatternScore` at a fixed 10% weight. This PR reuses it
+ * exactly as-is -- no second Tara calculation.
+ *
+ * IMPLEMENTED_BUT_HEURISTIC: the moon-element-affinity bonus inside
+ * evaluatePersonalMuhurtaFit() (auraFitEngine.ts) -- matching the natal
+ * Moon's Rashi element against an activity's `elementAffinity` is a
+ * designed scoring heuristic layered on top of real astrology (the Rashi
+ * placement itself), not itself a named classical Muhurta technique. Also
+ * heuristic: the "-8 penalty when Tara is unfavorable AND the activity is
+ * HIGH significance/requiresFreshStart" amplifier.
+ *
+ * AVAILABLE_BUT_UNUSED: janmaRashi (the natal Moon's Rashi name) is
+ * computed (buildPersonalMuhurtaContext, apps/web/app/api/muhurtham-search/
+ * route.ts) but only consumed indirectly via the element-affinity mapping
+ * above -- there is no direct Rashi-based rule (e.g. Chandra Bala) reading
+ * it on its own. `UserChartContext.lagnaSign` (personalizedTasks.ts) is
+ * declared but never populated with a real value or read by any scoring
+ * path.
+ *
+ * NOT_IMPLEMENTED: Chandra Bala, Lagna-based Muhurta, Navamsha, Dasha/
+ * Antardasha, Ashtakavarga -- none of these exist anywhere in this
+ * codebase. This PR does not add any of them (brief section 17); Tara Bala
+ * is the only personal factor this PR uses, per brief section 5's explicit
+ * instruction not to add new astrology merely to make personalization look
+ * richer.
+ *
+ * ## Minimum profile requirement
+ *
+ * Only birthDate + birthTime + birthTimezone (brief section 9) --
+ * NOT birth location/lat-lng, Lagna, or Navamsha. This is the exact gate
+ * buildPersonalMuhurtaContext() (the route-level context builder) already
+ * uses to decide whether `personalContext` exists at all; this file cannot
+ * (and does not) know which of the three raw fields is missing (it only
+ * sees the resolved PersonalMuhurtaContext, or its absence), so
+ * PERSONAL_PROFILE_INCOMPLETE always names all three as the required set.
+ *
+ * ## generalScore / personalScore / combinedScore (brief section 7)
+ *
+ * No new weight is invented. `combinedScore` is exactly what
+ * evaluateTimingCandidate() already produces when `profile.personalContext`
+ * is set -- i.e. the EXISTING evaluateActivityFit() formula's
+ * `personalPatternScore * 0.10` term (general Muhurta dominates at 90% of
+ * the weight; personal factors are a bounded ≤10%-of-total modifier).
+ * `generalScore` is the exact same instant/duration scored a second time
+ * WITHOUT personalContext (evaluateMuhurthamCandidate() again, on a profile
+ * copy with personalContext stripped) -- "what GENERAL would have said
+ * about this same moment". `personalScore` is evaluatePersonalMuhurtaFit()'s
+ * own raw 0-100 score (Tara Bala + element affinity, unchanged), rescaled to
+ * the 0-10 presentation scale for display consistency with the other two.
+ * Ranking uses combinedScore -- see PERSONALIZATION MUST RE-RANK below.
+ *
+ * ## Re-ranking (brief section 8) and hard blocks (brief section 4)
+ *
+ * Every date's best window is selected by scanning candidates with
+ * combinedScore (personalContext applied throughout the scan, exactly like
+ * findBestWindowsForDate()'s GENERAL scan but with a personalized profile),
+ * so a date whose Tara Bala is favorable can out-rank a date with a
+ * marginally higher general score, and vice versa -- genuine re-ranking,
+ * not a cosmetic label change. Hard blocks are untouched: friction/overlap
+ * exclusion (evaluateMuhurthamCandidate()'s FRICTION_WINDOW_BLOCKED and
+ * spanOverlapsFrictionWindow() checks) never reads personalContext at all,
+ * so a generally-blocked candidate cannot be rescued by a favorable Tara
+ * Bala, and a favorable general candidate is never excluded by an
+ * unfavorable one either (personal factors only ever adjust the ~10%-bounded
+ * score of an ALREADY-valid candidate).
+ *
+ * ## Methodology separation (brief section 16)
+ *
+ * Tara Bala/element-affinity are NOT part of AURA_MUHURTA_V1 (the
+ * traditional-rule methodology, packages/muhurta/src/muhurtaRulePacks.ts) --
+ * MuhurthamPersonalSearchResult.provenance carries both identifiers
+ * separately (muhurtaMethodology + personalMethodology), never merged.
+ */
+
+export type MuhurthamSearchScope = 'GENERAL' | 'PERSONAL';
+
+/** The Tara Bala factor as surfaced in a personal evaluation -- 'NEUTRAL' is
+ * declared for interface completeness (brief section 6: "keep extensible
+ * for future personal factors") but unreachable today, since
+ * getTaraBala().favorable is a strict boolean (no neutral tara in the
+ * existing calculation). */
+export interface PersonalTaraBalaFactor {
+  tara: string;
+  status: 'SUPPORT' | 'NEUTRAL' | 'CAUTION';
+  score?: number;
+}
+
+export interface PersonalMuhurtaFactors {
+  taraBala?: PersonalTaraBalaFactor;
+}
+
+export interface MuhurthamPersonalDateCandidate {
+  date: string;
+  /** Derived from combinedScore, same thresholds as GENERAL's rateMuhurtham. */
+  rating: MuhurthamRating;
+  /** What GENERAL would score this exact instant/duration -- 0-10. */
+  generalScore: number;
+  /** evaluatePersonalMuhurtaFit()'s own score (Tara Bala + element affinity),
+   * rescaled from its native 0-100 to 0-10. */
+  personalScore: number;
+  /** The actual ranking score -- general Muhurta blended with personal
+   * factors via the EXISTING evaluateActivityFit() weighting (10% personal,
+   * unchanged formula). Same value as bestWindow.score. */
+  combinedScore: number;
+  /** The combined-scored window -- reasons include both general Panchanga
+   * reasons and personal (Tara Bala/element) reasons, already merged by
+   * evaluateActivityFit(). */
+  bestWindow: MuhurthamWindowCandidate;
+  alternateWindows: MuhurthamWindowCandidate[];
+  reasons: MuhurtaReason[];
+  cautions: MuhurtaReason[];
+  personalFactors: PersonalMuhurtaFactors;
+  panchangSummary: MuhurthamPanchangSummary;
+}
+
+export interface MuhurthamPersonalSearchResult {
+  scope: 'PERSONAL';
+  status: 'OK';
+  activity: { id: string; title: string; icon: string };
+  dateRange: MuhurthamDateRange;
+  dates: MuhurthamPersonalDateCandidate[];
+  evaluatedDateCount: number;
+  provenance: { muhurtaMethodology: string; personalMethodology: string };
+}
+
+/** Returned instead of a result when PERSONAL scope was requested but the
+ * user's profile doesn't have what Tara Bala needs -- never a silent
+ * fallback to GENERAL (brief section 9). */
+export interface MuhurthamProfileIncomplete {
+  scope: 'PERSONAL';
+  status: 'PERSONAL_PROFILE_INCOMPLETE';
+  requiredFields: Array<'birthDate' | 'birthTime' | 'birthTimezone'>;
+}
+
+export type MuhurthamPersonalSearchOutcome = MuhurthamPersonalSearchResult | MuhurthamProfileIncomplete;
+
+const REQUIRED_PERSONAL_PROFILE_FIELDS: MuhurthamProfileIncomplete['requiredFields'] = ['birthDate', 'birthTime', 'birthTimezone'];
+
+function taraBalaFactor(personalContext: PersonalMuhurtaContext, at: Date): PersonalTaraBalaFactor {
+  const taraBala = getTaraBala(personalContext.natalNakshatraIndex!, at);
+  return { tara: taraBala.name, status: taraBala.favorable ? 'SUPPORT' : 'CAUTION' };
+}
+
+/**
+ * PERSONAL scope entry point -- see this file's "Personal Muhurtham" doc
+ * comment above for the full architecture. Same request shape as
+ * findMuhurthams() (activityId/dateRange/timePreference/durationMinutes/
+ * limit/context); PERSONAL-ness comes entirely from actually USING
+ * request.context.personalContext, which findMuhurthams() deliberately
+ * ignores.
+ */
+export function findPersonalMuhurthams(request: MuhurthamSearchRequest): MuhurthamPersonalSearchOutcome {
+  const { activity, durationMinutes, limit, preference, dateStrs } = resolveMuhurthamSearchParams(request, 'findPersonalMuhurthams');
+
+  const personalContext = request.context.personalContext;
+  if (!personalContext || personalContext.natalNakshatraIndex === undefined) {
+    return { scope: 'PERSONAL', status: 'PERSONAL_PROFILE_INCOMPLETE', requiredFields: REQUIRED_PERSONAL_PROFILE_FIELDS };
+  }
+
+  const personalProfile = profileFromActivity(activity);
+  personalProfile.personalContext = personalContext;
+  const generalOnlyProfile: TaskProfile = { ...personalProfile, personalContext: undefined };
+  const generalContext: DailyAssistantContext = { ...request.context, personalContext: undefined };
+
+  const dateCandidates: MuhurthamPersonalDateCandidate[] = [];
+  for (const dateStr of dateStrs) {
+    const panchangDay = getPanchangForDate({
+      localDate: dateStr,
+      latitude: request.context.latitude,
+      longitude: request.context.longitude,
+      timezone: request.context.timezone,
+    });
+
+    // Scan and rank by combinedScore -- the personalized profile is used
+    // throughout, so a date's best window is chosen WITH personal factors
+    // in mind, not merely re-scored after the fact.
+    const evaluated = findBestWindowsForDate(personalProfile, dateStr, request.context, durationMinutes, preference, panchangDay.windows, personalProfile.muhurtaClassification);
+    if (!evaluated) continue;
+
+    const bestStart = new Date(evaluated.best.start);
+    const generalCandidate = evaluateMuhurthamCandidate(generalOnlyProfile, bestStart, durationMinutes, generalContext, panchangDay.windows, personalProfile.muhurtaClassification) ?? evaluated.best;
+    const personalFit = evaluatePersonalMuhurtaFit(activity, bestStart, personalContext);
+
+    const supportReasons = evaluated.best.reasons.filter((r) => r.polarity === 'SUPPORT');
+    const cautionReasons = evaluated.best.reasons.filter((r) => r.polarity === 'CAUTION' || r.polarity === 'BLOCK');
+    const hasCautionOrConflict = cautionReasons.length > 0 || Boolean(evaluated.best.conflicts?.length);
+
+    dateCandidates.push({
+      date: dateStr,
+      rating: rateMuhurtham(evaluated.best.score, hasCautionOrConflict),
+      generalScore: generalCandidate.score,
+      personalScore: Math.round(personalFit.score) / 10,
+      combinedScore: evaluated.best.score,
+      bestWindow: toWindowCandidate(evaluated.best),
+      alternateWindows: evaluated.alternates.map(toWindowCandidate),
+      reasons: supportReasons,
+      cautions: cautionReasons,
+      personalFactors: { taraBala: taraBalaFactor(personalContext, bestStart) },
+      panchangSummary: {
+        vara: panchangDay.panchanga.vara,
+        tithi: panchangDay.panchanga.tithi.name,
+        nakshatra: panchangDay.panchanga.nakshatra.name,
+        yoga: panchangDay.panchanga.yoga.name,
+        karana: panchangDay.panchanga.karana.name,
+      },
+    });
+  }
+
+  const ranked = dateCandidates
+    .sort((a, b) => b.combinedScore - a.combinedScore)
+    .slice(0, limit)
+    .sort((a, b) => a.date.localeCompare(b.date));
+
+  return {
+    scope: 'PERSONAL',
+    status: 'OK',
+    activity: { id: activity.id, title: activity.title, icon: activity.icon },
+    dateRange: request.dateRange,
+    dates: ranked,
+    evaluatedDateCount: dateStrs.length,
+    provenance: { muhurtaMethodology: AURA_MUHURTA_METHODOLOGY_ID, personalMethodology: AURA_PERSONAL_FIT_METHODOLOGY_ID },
   };
 }
