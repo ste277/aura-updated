@@ -1,6 +1,7 @@
 'use client';
 
 import React, { useEffect, useState } from 'react';
+import * as theme from './theme';
 
 /**
  * Owner-facing moment management (Aura Moment Sharing brief section 14,
@@ -18,6 +19,11 @@ interface SharedMomentRow {
   publicToken: string;
   shareUrl: string;
   scope: 'GENERAL' | 'PERSONAL' | 'SHARED';
+  source: 'PLAN' | 'MUHURTHAM';
+  /** Derived server-side (never stored) -- picks everyday vs. ceremonial
+   * copy for this moment's alternatives, the same field the public DTO
+   * already carries. */
+  planningMode: 'EVERYDAY' | 'IMPORTANT' | 'CEREMONIAL';
   activityTitle: string;
   activityIcon: string | null;
   startAt: string;
@@ -26,6 +32,10 @@ interface SharedMomentRow {
   status: 'ACTIVE' | 'REVOKED';
   responseState: 'ACCEPTED' | 'ANOTHER_TIME' | null;
   responsePreference: AlternativePreference | null;
+  /** Whether a successor moment already exists via previousMomentId lineage
+   * -- an ANOTHER_TIME response with hasSuccessor is already resolved, so
+   * the "Find another time" CTA shouldn't offer to redo it. */
+  hasSuccessor: boolean;
 }
 
 interface AlternativeCandidate {
@@ -42,7 +52,8 @@ type AlternativesOutcome =
   | { status: 'SAVED_PERSON_PROFILE_INCOMPLETE' };
 
 interface SharedMomentsViewProps {
-  onBack: () => void;
+  /** Omit when embedded === true (no back button is rendered). */
+  onBack?: () => void;
   /** Aura Updates V1 -- called after "View" or "Find another time" marks a
    * moment's response seen, so the caller (page.tsx) can refetch the unread
    * badge without this view needing to know anything about that state
@@ -53,6 +64,12 @@ interface SharedMomentsViewProps {
    * flow, not a second one) rather than leaving the owner to find the right
    * card themselves. */
   focusMomentToken?: string;
+  /** Product Structure V2 (brief section 19) -- true when rendered inline
+   * at the bottom of Plan rather than as its own full-screen destination:
+   * hides the back button and full-page header, keeping just the list and
+   * a lighter heading. The data/actions are otherwise identical -- this is
+   * a presentation-only flag, not a second implementation. */
+  embedded?: boolean;
 }
 
 const PREFERENCE_TEXT: Record<AlternativePreference, string> = {
@@ -62,11 +79,26 @@ const PREFERENCE_TEXT: Record<AlternativePreference, string> = {
   NO_PREFERENCE: 'Anything else',
 };
 
-const RATING_TEXT_SHARED: Record<string, string> = {
+/** Every rating vocabulary an alternative candidate can carry, regardless
+ * of which source/scope strategy produced it (Muhurtham SHARED, everyday
+ * shared timing, or plain Timing Search for GENERAL/PERSONAL). One shared
+ * lookup so the alternatives list never has to know which engine ran. */
+const RATING_TEXT: Record<string, string> = {
+  // Muhurtham SHARED (findSharedMuhurthams)
   EXCELLENT_SHARED_FIT: 'Excellent shared fit',
   STRONG_SHARED_FIT: 'Strong shared fit',
   GOOD_SHARED_FIT: 'Good shared fit',
   MIXED_SHARED_FIT: 'Mixed fit',
+  // Everyday shared timing (findEverydaySharedTiming)
+  STRONG_TOGETHER_FIT: 'Strong shared fit',
+  GOOD_TOGETHER_FIT: 'Good shared fit',
+  EASY_TOGETHER_FIT: 'Easy fit together',
+  // Plain Timing Search (GENERAL/PERSONAL PLAN alternatives)
+  EXCELLENT: 'Excellent fit',
+  VERY_GOOD: 'Very good fit',
+  GOOD: 'Good fit',
+  USABLE: 'Usable',
+  CAUTION: 'Use caution',
 };
 
 function formatMomentDateLabel(iso: string, timezone: string): string {
@@ -81,16 +113,26 @@ function formatMomentTimeRange(startIso: string, endIso: string, timezone: strin
 function responseText(moment: SharedMomentRow): { text: string; color: string } {
   if (moment.status === 'REVOKED') return { text: 'Revoked', color: '#64748b' };
   if (moment.responseState === 'ACCEPTED') return { text: "❤️ They're in", color: '#4ade80' };
-  if (moment.responseState === 'ANOTHER_TIME') return { text: '↻ Another time requested', color: '#facc15' };
+  if (moment.responseState === 'ANOTHER_TIME') {
+    return moment.hasSuccessor
+      ? { text: '✓ Alternative suggested', color: '#4ade80' }
+      : { text: '↻ Another time requested', color: '#facc15' };
+  }
   return { text: 'Waiting for response', color: '#94a3b8' };
 }
 
-export function SharedMomentsView({ onBack, onSeen, focusMomentToken }: SharedMomentsViewProps) {
+export function SharedMomentsView({ onBack, onSeen, focusMomentToken, embedded }: SharedMomentsViewProps) {
   const [moments, setMoments] = useState<SharedMomentRow[] | null>(null);
   const [error, setError] = useState('');
   const [copiedId, setCopiedId] = useState<string | null>(null);
   const [confirmingRevokeId, setConfirmingRevokeId] = useState<string | null>(null);
   const [revokingId, setRevokingId] = useState<string | null>(null);
+  const [confirmingDeleteId, setConfirmingDeleteId] = useState<string | null>(null);
+  const [deletingId, setDeletingId] = useState<string | null>(null);
+  // Revoked moments are dead history -- collapsed by default so the list
+  // doesn't just keep growing as more get revoked over time. Active moments
+  // always show in full (there's rarely more than a handful at once).
+  const [showRevoked, setShowRevoked] = useState(false);
 
   const loadMoments = async () => {
     setError('');
@@ -111,7 +153,10 @@ export function SharedMomentsView({ onBack, onSeen, focusMomentToken }: SharedMo
   /** Section 6/10: marks ONE moment's response seen via the owner-authenticated
    * endpoint (never the public bearer-link response route). Best-effort --
    * a failure here shouldn't block the action (View/Find another time) the
-   * owner actually asked for. */
+   * owner actually asked for. Also called again after a successor is
+   * suggested (redundant POST, harmless) purely for its onSeen?.() side
+   * effect -- that's what tells Home to refetch, since only then does
+   * hasSuccessor flip and the update stop requiring action. */
   const markSeen = (publicToken: string) => {
     fetch(`/api/aura-moments/${publicToken}/seen`, { method: 'POST' }).catch(() => {});
     onSeen?.();
@@ -146,16 +191,37 @@ export function SharedMomentsView({ onBack, onSeen, focusMomentToken }: SharedMo
     }
   };
 
+  /** Permanently removes an already-revoked moment (brief: "how do we
+   * remove completed Moments"). Scoped server-side to REVOKED only. */
+  const handleDelete = async (moment: SharedMomentRow) => {
+    setDeletingId(moment.id);
+    try {
+      const res = await fetch(`/api/aura-moments/${moment.publicToken}`, { method: 'DELETE' });
+      if (!res.ok) throw new Error('Unable to remove this moment.');
+      setMoments((current) => current?.filter((m) => m.id !== moment.id) ?? current);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Unable to remove this moment.');
+    } finally {
+      setDeletingId(null);
+      setConfirmingDeleteId(null);
+    }
+  };
+
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 16, paddingBottom: 24, fontFamily: 'sans-serif', color: '#f8fafc' }}>
       <div style={{ display: 'flex', alignItems: 'flex-start', gap: 12 }}>
-        <button type="button" onClick={onBack} aria-label="Back to You" style={backButtonStyle}>
-          <span style={{ fontSize: 16, lineHeight: 1 }}>←</span>
-          You
-        </button>
+        {!embedded && onBack && (
+          <button type="button" onClick={onBack} aria-label="Back" style={backButtonStyle}>
+            <span style={{ fontSize: 16, lineHeight: 1 }}>←</span>
+            Back
+          </button>
+        )}
         <div>
-          <h1 style={{ fontSize: 20, fontWeight: 700, margin: 0, lineHeight: 1.2 }}>Shared Moments</h1>
-          <p style={{ fontSize: 12, color: '#94a3b8', marginTop: 4 }}>Moments you&apos;ve shared and their responses.</p>
+          {/* Section 20: "Shared Moments" -> "Your Moments" -- the concept is
+           * now universal (Plan and Muhurtham both create AuraMoments), not
+           * specific to sharing with a partner. */}
+          <h1 style={{ fontSize: embedded ? 16 : 20, fontWeight: 700, margin: 0, lineHeight: 1.2 }}>Your Moments</h1>
+          {!embedded && <p style={{ fontSize: 12, color: '#94a3b8', marginTop: 4 }}>Moments you&apos;ve created and their responses.</p>}
         </div>
       </div>
 
@@ -165,29 +231,73 @@ export function SharedMomentsView({ onBack, onSeen, focusMomentToken }: SharedMo
         <p style={{ fontSize: 13, color: '#94a3b8' }}>Loading…</p>
       ) : moments.length === 0 ? (
         <section style={cardStyle}>
-          <div style={{ fontSize: 14, fontWeight: 800 }}>No shared moments yet</div>
+          <div style={{ fontSize: 14, fontWeight: 800 }}>No Moments yet</div>
           <p style={{ fontSize: 12, color: '#94a3b8', marginTop: 6, lineHeight: 1.5 }}>
-            Tap &quot;Share this moment&quot; on a favorable date in Muhurtham Finder to share it.
+            Tap &quot;Make this a Moment&quot; on a result in Plan, or &quot;Share this moment&quot; in Explore &rarr; Muhurtham, to create one.
           </p>
         </section>
       ) : (
-        moments.map((moment) => (
-          <MomentCard
-            key={moment.id}
-            moment={moment}
-            copied={copiedId === moment.id}
-            onCopy={() => handleCopy(moment)}
-            onView={() => handleView(moment)}
-            confirmingRevoke={confirmingRevokeId === moment.id}
-            revoking={revokingId === moment.id}
-            onRequestRevoke={() => setConfirmingRevokeId(moment.id)}
-            onCancelRevoke={() => setConfirmingRevokeId(null)}
-            onConfirmRevoke={() => handleRevoke(moment)}
-            onSuggested={loadMoments}
-            onFindAlternatives={() => markSeen(moment.publicToken)}
-            autoFindAlternatives={focusMomentToken !== undefined && focusMomentToken === moment.publicToken}
-          />
-        ))
+        (() => {
+          const activeMoments = moments.filter((m) => m.status === 'ACTIVE');
+          const revokedMoments = moments.filter((m) => m.status === 'REVOKED');
+          return (
+            <>
+              {activeMoments.length === 0 && revokedMoments.length > 0 && (
+                <p style={{ fontSize: 13, color: '#94a3b8' }}>No active Moments -- see revoked below.</p>
+              )}
+              {activeMoments.map((moment) => (
+                <MomentCard
+                  key={moment.id}
+                  moment={moment}
+                  copied={copiedId === moment.id}
+                  onCopy={() => handleCopy(moment)}
+                  onView={() => handleView(moment)}
+                  confirmingRevoke={confirmingRevokeId === moment.id}
+                  revoking={revokingId === moment.id}
+                  onRequestRevoke={() => setConfirmingRevokeId(moment.id)}
+                  onCancelRevoke={() => setConfirmingRevokeId(null)}
+                  onConfirmRevoke={() => handleRevoke(moment)}
+                  onSuggested={() => { loadMoments(); markSeen(moment.publicToken); }}
+                  onFindAlternatives={() => markSeen(moment.publicToken)}
+                  autoFindAlternatives={focusMomentToken !== undefined && focusMomentToken === moment.publicToken}
+                />
+              ))}
+              {revokedMoments.length > 0 && (
+                <>
+                  <button
+                    type="button"
+                    onClick={() => setShowRevoked((value) => !value)}
+                    style={{ ...linkButtonStyle, textAlign: 'left' }}
+                  >
+                    {showRevoked ? 'Hide' : 'Show'} revoked ({revokedMoments.length}) {showRevoked ? '⌃' : '⌄'}
+                  </button>
+                  {showRevoked && revokedMoments.map((moment) => (
+                    <MomentCard
+                      key={moment.id}
+                      moment={moment}
+                      copied={copiedId === moment.id}
+                      onCopy={() => handleCopy(moment)}
+                      onView={() => handleView(moment)}
+                      confirmingRevoke={false}
+                      revoking={false}
+                      onRequestRevoke={() => {}}
+                      onCancelRevoke={() => {}}
+                      onConfirmRevoke={() => {}}
+                      onSuggested={loadMoments}
+                      onFindAlternatives={() => markSeen(moment.publicToken)}
+                      autoFindAlternatives={false}
+                      confirmingDelete={confirmingDeleteId === moment.id}
+                      deleting={deletingId === moment.id}
+                      onRequestDelete={() => setConfirmingDeleteId(moment.id)}
+                      onCancelDelete={() => setConfirmingDeleteId(null)}
+                      onConfirmDelete={() => handleDelete(moment)}
+                    />
+                  ))}
+                </>
+              )}
+            </>
+          );
+        })()
       )}
     </div>
   );
@@ -206,6 +316,11 @@ function MomentCard({
   onSuggested,
   onFindAlternatives,
   autoFindAlternatives,
+  confirmingDelete,
+  deleting,
+  onRequestDelete,
+  onCancelDelete,
+  onConfirmDelete,
 }: {
   moment: SharedMomentRow;
   copied: boolean;
@@ -228,6 +343,14 @@ function MomentCard({
    * straight into the search instead of leaving the owner to find the
    * button themselves. */
   autoFindAlternatives?: boolean;
+  /** Permanent removal -- only ever offered for an already-REVOKED moment
+   * (see the parent's revoked-section rendering); undefined for an ACTIVE
+   * moment's card. */
+  confirmingDelete?: boolean;
+  deleting?: boolean;
+  onRequestDelete?: () => void;
+  onCancelDelete?: () => void;
+  onConfirmDelete?: () => void;
 }) {
   const response = responseText(moment);
   const [alternatives, setAlternatives] = useState<AlternativesOutcome | null>(null);
@@ -237,7 +360,14 @@ function MomentCard({
   const [suggested, setSuggested] = useState<{ shareUrl: string } | null>(null);
 
   // Brief section 16: ACCEPTED is terminal for V1 -- no reschedule CTA.
-  const canFindAnotherTime = moment.scope === 'SHARED' && moment.status === 'ACTIVE' && moment.responseState === 'ANOTHER_TIME';
+  // Everyday Moment Rescheduling V1: a PLAN moment can look for another time
+  // regardless of scope (GENERAL/PERSONAL/SHARED all route to a real
+  // strategy in findAuraMomentAlternatives); a MUHURTHAM moment keeps the
+  // exact original restriction -- SHARED only. hasSuccessor excluded here:
+  // once an alternative has already been suggested for this response, redoing
+  // "Find another time" would just offer to suggest a second successor for
+  // the same original -- the owner already acted on it.
+  const canFindAnotherTime = moment.status === 'ACTIVE' && moment.responseState === 'ANOTHER_TIME' && !moment.hasSuccessor && (moment.source === 'PLAN' || moment.scope === 'SHARED');
 
   const handleFindAlternatives = async () => {
     onFindAlternatives?.();
@@ -328,6 +458,22 @@ function MomentCard({
             </button>
           )
         )}
+        {moment.status === 'REVOKED' && onRequestDelete && (
+          confirmingDelete ? (
+            <>
+              <button type="button" onClick={onConfirmDelete} disabled={deleting} style={{ ...linkButtonStyle, color: '#fb6b6b' }}>
+                {deleting ? 'Removing…' : 'Confirm remove'}
+              </button>
+              <button type="button" onClick={onCancelDelete} style={linkButtonStyle}>
+                Cancel
+              </button>
+            </>
+          ) : (
+            <button type="button" onClick={onRequestDelete} style={{ ...linkButtonStyle, color: '#fb6b6b' }}>
+              Remove
+            </button>
+          )
+        )}
       </div>
 
       {canFindAnotherTime && !alternatives && !suggested && (
@@ -338,6 +484,9 @@ function MomentCard({
 
       {alternativesError && <div style={{ ...errorBoxStyle, marginTop: 10 }}>{alternativesError}</div>}
 
+      {alternatives && alternatives.status === 'NOT_APPLICABLE' && (
+        <p style={{ marginTop: 10, fontSize: 12, color: '#94a3b8' }}>Finding another time isn&apos;t available for this kind of moment yet -- try suggesting a new time directly.</p>
+      )}
       {alternatives && alternatives.status === 'USER_PROFILE_INCOMPLETE' && (
         <p style={{ marginTop: 10, fontSize: 12, color: '#94a3b8' }}>Complete your own birth profile to find alternatives.</p>
       )}
@@ -349,15 +498,21 @@ function MomentCard({
       )}
       {alternatives && alternatives.status === 'OK' && alternatives.candidates.length > 0 && (
         <div style={{ marginTop: 12 }}>
-          <div style={sectionKickerStyle}>Aura found a few alternatives</div>
+          {/* Section 11: never ceremonial "Muhurtham" language for an
+           * everyday activity -- planningMode picks the framing. */}
+          <div style={sectionKickerStyle}>{moment.planningMode === 'EVERYDAY' ? 'Better times' : 'Alternative Muhurtham'}</div>
           <div style={{ display: 'flex', flexDirection: 'column', gap: 10, marginTop: 8 }}>
             {alternatives.candidates.map((candidate, index) => (
               <div key={`${candidate.startAt}-${index}`} style={{ ...panchangaCellStyle, display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 10 }}>
                 <div>
-                  {index === 0 && <div style={{ fontSize: 10, fontWeight: 800, color: '#fb7185', marginBottom: 2 }}>❤️ BEST ALTERNATIVE</div>}
+                  {index === 0 && (
+                    <div style={{ fontSize: 10, fontWeight: 800, color: '#fb7185', marginBottom: 2 }}>
+                      {moment.planningMode === 'EVERYDAY' ? '❤️ BETTER ALTERNATIVE' : '❤️ BEST ALTERNATIVE'}
+                    </div>
+                  )}
                   <div style={{ fontSize: 13, fontWeight: 800 }}>{formatMomentDateLabel(candidate.startAt, moment.timezone)}</div>
                   <div style={{ fontSize: 12, color: '#38bdf8', marginTop: 2 }}>{formatMomentTimeRange(candidate.startAt, candidate.endAt, moment.timezone)}</div>
-                  <div style={{ fontSize: 11, color: '#4ade80', marginTop: 2, fontWeight: 800 }}>{RATING_TEXT_SHARED[candidate.ratingLabel] ?? candidate.ratingLabel}</div>
+                  <div style={{ fontSize: 11, color: '#4ade80', marginTop: 2, fontWeight: 800 }}>{RATING_TEXT[candidate.ratingLabel] ?? candidate.ratingLabel}</div>
                 </div>
                 <button type="button" onClick={() => handleSuggest(index)} disabled={suggestingIndex !== null} style={linkButtonStyle}>
                   {suggestingIndex === index ? 'Suggesting…' : 'Suggest this'}
@@ -377,70 +532,10 @@ function MomentCard({
   );
 }
 
-const cardStyle: React.CSSProperties = {
-  background: 'var(--as-surface-raised, #0f172a)',
-  border: '1px solid var(--as-border, #1e293b)',
-  borderRadius: 16,
-  padding: 16,
-};
-
-const backButtonStyle: React.CSSProperties = {
-  minHeight: 34,
-  borderRadius: 17,
-  border: '1px solid rgba(148, 163, 184, 0.22)',
-  background: 'rgba(15, 23, 42, 0.75)',
-  color: '#f8fafc',
-  fontSize: 12,
-  cursor: 'pointer',
-  flexShrink: 0,
-  display: 'inline-flex',
-  alignItems: 'center',
-  gap: 6,
-  padding: '0 10px',
-  fontWeight: 800,
-};
-
-const errorBoxStyle: React.CSSProperties = {
-  color: '#fb6b6b',
-  fontSize: 12,
-  lineHeight: 1.45,
-};
-
-const linkButtonStyle: React.CSSProperties = {
-  border: 'none',
-  background: 'transparent',
-  color: '#38bdf8',
-  fontSize: 13,
-  fontWeight: 850,
-  cursor: 'pointer',
-  padding: 0,
-  textDecoration: 'none',
-};
-
-const outlineButtonStyle: React.CSSProperties = {
-  width: '100%',
-  minHeight: 40,
-  borderRadius: 12,
-  border: '1px solid rgba(74, 222, 128, 0.35)',
-  background: 'rgba(74, 222, 128, 0.08)',
-  color: '#4ade80',
-  fontSize: 12,
-  fontWeight: 800,
-  cursor: 'pointer',
-};
-
-const sectionKickerStyle: React.CSSProperties = {
-  color: '#4ade80',
-  fontSize: 10,
-  fontFamily: 'var(--as-font-mono)',
-  fontWeight: 900,
-  textTransform: 'uppercase',
-  letterSpacing: '0.04em',
-};
-
-const panchangaCellStyle: React.CSSProperties = {
-  background: 'rgba(2, 6, 23, 0.4)',
-  border: '1px solid rgba(148, 163, 184, 0.14)',
-  borderRadius: 8,
-  padding: '9px 11px',
-};
+const cardStyle: React.CSSProperties = theme.panelStyle;
+const backButtonStyle: React.CSSProperties = theme.backButtonStyle;
+const errorBoxStyle: React.CSSProperties = theme.errorBoxStyle;
+const linkButtonStyle: React.CSSProperties = theme.linkButtonStyle;
+const outlineButtonStyle: React.CSSProperties = { ...theme.outlineButtonStyle, width: '100%' };
+const sectionKickerStyle: React.CSSProperties = theme.sectionKickerStyle;
+const panchangaCellStyle: React.CSSProperties = theme.cellStyle;

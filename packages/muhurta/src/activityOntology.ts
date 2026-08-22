@@ -80,6 +80,19 @@ export type MuhurtaIntent =
   | 'RECOVERY'
   // SOCIAL
   | 'PARTY'
+  // Product Structure V2's everyday-moment catalog (see
+  // packages/recommendation/src/personalizedTasks.ts) -- four genuinely new
+  // intents, added only because nothing existing captures them: a family
+  // get-together is not a PARTY (no celebratory occasion), a casual
+  // friend/coffee/movie hangout is not a DATE (no romantic framing) and not
+  // a PARTY (no group-celebration framing), a birthday/anniversary is more
+  // specific than a generic PARTY (marking an occasion, not just socializing),
+  // and a day trip/picnic/shopping outing is not a JOURNEY_START (no
+  // significant "departure" moment, LIGHT/STANDARD not DEEP).
+  | 'FAMILY_GATHERING'
+  | 'CASUAL_HANGOUT'
+  | 'CELEBRATION'
+  | 'OUTING'
   // ROUTINE
   | 'ADMIN'
   // Used only by the free-text fallback path (see legacyFamilyToIntent below)
@@ -107,6 +120,10 @@ export const INTENT_FAMILY: Record<MuhurtaIntent, MuhurtaFamily> = {
   MEDITATION: 'HEALTH',
   RECOVERY: 'HEALTH',
   PARTY: 'SOCIAL',
+  FAMILY_GATHERING: 'SOCIAL',
+  CASUAL_HANGOUT: 'SOCIAL',
+  CELEBRATION: 'SOCIAL',
+  OUTING: 'TRAVEL',
   ADMIN: 'ROUTINE',
   GENERAL: 'ROUTINE',
 };

@@ -71,7 +71,7 @@ check('Custom-range base calendar matches the best returned option', customPlan.
 const longPlan = findOptimalTaskTimes('Tea break', afternoonContext, 240, 'TOMORROW', undefined, undefined, 'ANYTIME');
 check('Planner preserves long requested durations in base recommendation', longPlan.durationMinutes === 240);
 
-const roadTripIntent = findActivityIntent('I need to start my road trip');
+const roadTripIntent = findActivityIntent('I need to start a journey');
 check('Activity catalog resolves start-journey intent', roadTripIntent?.id === 'start-journey');
 if (roadTripIntent) {
   const universalFit = evaluateActivityFit({ activity: roadTripIntent, date, windowType: 'ABHIJIT' });
@@ -84,7 +84,7 @@ if (roadTripIntent) {
   check('Birth context adds a secondary personal Muhurtham signal', Boolean(personalFit.personalSummary) && personalFit.score !== universalFit.score);
 }
 const journeyPlan = findBestTimeForActivity({
-  activity: 'I need to start my road trip',
+  activity: 'I need to start a journey',
   context: afternoonContext,
   durationMinutes: 90,
   horizon: 'TOMORROW',
@@ -150,18 +150,18 @@ if (deepWorkIntent) {
   check('Deep Work scores its recommended window meaningfully higher than its avoid window', abhijitScore - rahuScore >= 20);
 }
 
-const neutralDiscovery = getActivityDiscoveryCards('Neutral Flow', 20);
+// limit widened from 20 to 50 (Product Structure V2): the catalog grew
+// from ~20 to ~39 activities with that PR's 19 new everyday occasions, so
+// a top-20 slice is no longer a reliable proxy for "does this activity get
+// a strong fit label" -- see the identical reasoning this comment already
+// carried when the limit was widened from 8 to 20. Checking membership in
+// a generously sized slice preserves the original intent without depending
+// on alphabetical tie-break order among an arbitrarily-sized catalog.
+const neutralDiscovery = getActivityDiscoveryCards('Neutral Flow', 50);
 check('Discovery cards expose fit labels', neutralDiscovery.every((card) => Boolean(card.fit)));
 check('Discovery is catalog-backed for dating in Neutral Flow', neutralDiscovery.some((card) => card.activityId === 'dating'));
 check('Discovery uses nuanced fit labels', new Set(neutralDiscovery.map((card) => card.fit)).size > 1);
-// limit widened from 8 to 20 (see test/activityRulePacks.test.ts / the
-// Muhurtham Rule Packs PR): the catalog grew from 11 to 15 activities with
-// this PR's 4 new occasions, several of which also score well during
-// Abhijit, so a top-8 slice is no longer a reliable proxy for "does this
-// activity get a strong fit label" -- checking membership in a generously
-// sized slice preserves the original intent without depending on
-// alphabetical tie-break order among an arbitrarily-sized catalog.
-const abhijitDiscovery = getActivityDiscoveryCards('Abhijit Muhurtham', 20);
+const abhijitDiscovery = getActivityDiscoveryCards('Abhijit Muhurtham', 50);
 check('Muhurta fit favors stronger starts during Abhijit', abhijitDiscovery.some((card) => card.activityId === 'start-journey' && (card.fit === 'BEST' || card.fit === 'GOOD')));
 check('Tea break is not best fit during Abhijit', !abhijitDiscovery.some((card) => card.activityId === 'tea-break' && card.fit === 'BEST'));
 

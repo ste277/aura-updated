@@ -95,6 +95,12 @@ model AuraMoment {
   publicToken             String    @unique
 
   scope                   String    // "GENERAL" | "PERSONAL" | "SHARED"
+  // Product Structure V2: where the selected timing came from -- "PLAN"
+  // (Find/Check/Compare, including everyday shared timing) or "MUHURTHAM"
+  // (Muhurtham Finder's occasion search). Every pre-V2 row backfilled to
+  // "MUHURTHAM" (see migration 0020) since that was, until this PR, the
+  // only path that ever created an AuraMoment.
+  source                  String    // "PLAN" | "MUHURTHAM"
   activityId              String
   activityTitle           String
   activityIcon            String?

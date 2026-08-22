@@ -27,7 +27,8 @@ import { YouView } from '../components/YouView';
 import { PanchangCalendarView } from '../components/PanchangCalendarView';
 import { MuhurthamFinderView } from '../components/MuhurthamFinderView';
 import { PeopleView } from '../components/PeopleView';
-import { SharedMomentsView } from '../components/SharedMomentsView';
+import { ExploreView } from '../components/ExploreView';
+import { UpdatesView } from '../components/UpdatesView';
 
 import { BirthChartSection } from '../components/BirthChartSection';
 import { LoginScreen } from '../components/LoginScreen';
@@ -95,12 +96,20 @@ export default function DashboardPage() {
   const [todayReflection, setTodayReflection] = useState<DailyReflectionState | null>(null);
   const [plannedActivities, setPlannedActivities] = useState<PlannedActivityState[]>([]);
   const [planPrefill, setPlanPrefill] = useState<{ activity: string; key: number } | null>(null);
-  const [youNotificationsFocusKey, setYouNotificationsFocusKey] = useState(0);
   const [mounted, setMounted] = useState(false);
   const [auraUpdates, setAuraUpdates] = useState<AuraUpdatesSummary | null>(null);
-  const [sharedMomentsFocusToken, setSharedMomentsFocusToken] = useState<string | undefined>(undefined);
+  // Product Structure V2 -- "Your Moments" now lives inside Plan (brief
+  // section 19), so any entry point that used to jump to the standalone
+  // Shared Moments tab (Home's actionable card, You's row) now jumps into
+  // Plan and focuses this token instead.
+  const [momentsFocusToken, setMomentsFocusToken] = useState<string | undefined>(undefined);
+  const [momentsFocusKey, setMomentsFocusKey] = useState(0);
+  // Product Structure V2 (brief section 28): Plan -> People -> Plan return
+  // flow. One small piece of local state, not a global navigation
+  // framework -- People's own onBack just reads it.
+  const [peopleReturnTo, setPeopleReturnTo] = useState<'you' | 'plan'>('you');
 
-  const [activeTab, setActiveTab] = useState<'home' | 'timeline' | 'ask' | 'plan' | 'insights' | 'you' | 'chart' | 'activity' | 'panchang' | 'muhurtham' | 'people' | 'sharedMoments'>('home');
+  const [activeTab, setActiveTab] = useState<'home' | 'timeline' | 'ask' | 'plan' | 'insights' | 'you' | 'chart' | 'activity' | 'explore' | 'panchang' | 'muhurtham' | 'people' | 'updates'>('home');
   const [panchangDateJump, setPanchangDateJump] = useState<{ date: string; key: number } | null>(null);
 
   const [notificationPrefs, setNotificationPrefs] = useState<NotificationPrefs>(DEFAULT_NOTIFICATION_PREFS);
@@ -266,17 +275,26 @@ export default function DashboardPage() {
   }, [loadAuraUpdates]);
 
   const handleFindAnotherTimeForMoment = useCallback((momentToken: string) => {
-    setSharedMomentsFocusToken(momentToken);
-    setActiveTab('sharedMoments');
+    setMomentsFocusToken(momentToken);
+    setMomentsFocusKey(Date.now());
+    setActiveTab('plan');
   }, []);
 
-  // The focus token is only meant for ONE visit to Shared Moments -- clear
-  // it as soon as the tab changes away (however that happens, not just via
-  // the screen's own Back button), so a later, unrelated visit never
-  // auto-re-triggers an old moment's alternatives search.
+  // The focus token is only meant for ONE visit to Your Moments -- clear it
+  // as soon as the tab changes away, so a later, unrelated visit to Plan
+  // never auto-re-triggers an old moment's alternatives search.
   useEffect(() => {
-    if (activeTab !== 'sharedMoments') setSharedMomentsFocusToken(undefined);
+    if (activeTab !== 'plan') setMomentsFocusToken(undefined);
   }, [activeTab]);
+
+  const handleOpenUpdates = useCallback(() => {
+    setActiveTab('updates');
+  }, []);
+
+  const handleOpenMomentsFromYou = useCallback(() => {
+    setMomentsFocusKey(Date.now());
+    setActiveTab('plan');
+  }, []);
 
   // Offline Log Sync Listener
   useEffect(() => {
@@ -686,11 +704,6 @@ export default function DashboardPage() {
     setActiveTab('panchang');
   }, []);
 
-  const handleOpenNotificationSettings = useCallback(() => {
-    setYouNotificationsFocusKey(Date.now());
-    setActiveTab('you');
-  }, []);
-
   const handleSubmitReflection = useCallback(async (
     outputLevel: 'LOW' | 'MODERATE' | 'PEAK_FLOW',
     followedGuidance: boolean
@@ -797,9 +810,14 @@ export default function DashboardPage() {
             onNextShiftClick={() => setActiveTab('timeline')}
             onPlanClick={handleOpenPlan}
             onInsightsClick={() => setActiveTab('insights')}
-            onNotificationsClick={handleOpenNotificationSettings}
-            onPanchangClick={() => setActiveTab('panchang')}
-            momentUpdates={auraUpdates?.updates}
+            onNotificationsClick={handleOpenUpdates}
+            unreadUpdatesCount={auraUpdates?.unreadCount}
+            onPanchangClick={() => setActiveTab('explore')}
+            // Only surface something that still needs the owner's attention --
+            // updates[0] alone could be an already-resolved/seen entry that's
+            // merely the most recent, which read as a stale "Find another
+            // time" prompt after the owner had already handled it.
+            topMomentUpdate={auraUpdates?.updates?.find((update) => update.requiresAction || (update.type === 'MOMENT_ACCEPTED' && update.unread))}
             onViewMomentUpdate={handleViewMomentUpdate}
             onFindAnotherTimeForMoment={handleFindAnotherTimeForMoment}
           />
@@ -836,6 +854,10 @@ export default function DashboardPage() {
             timezone={user.timezone}
             initialActivity={planPrefill?.activity}
             initialActivityKey={planPrefill?.key}
+            onOpenPeople={() => { setPeopleReturnTo('plan'); setActiveTab('people'); }}
+            focusMomentsKey={momentsFocusKey}
+            focusMomentToken={momentsFocusToken}
+            onMomentSeen={loadAuraUpdates}
           />
         )}
 
@@ -858,29 +880,16 @@ export default function DashboardPage() {
             onOpenHome={() => setActiveTab('home')}
             onOpenChart={() => setActiveTab('chart')}
             onOpenActivityLog={() => setActiveTab('activity')}
-            onOpenPanchang={() => setActiveTab('panchang')}
-            onOpenPeople={() => setActiveTab('people')}
-            onOpenSharedMoments={() => setActiveTab('sharedMoments')}
+            onOpenPeople={() => { setPeopleReturnTo('you'); setActiveTab('people'); }}
+            onOpenSharedMoments={handleOpenMomentsFromYou}
             onSignOut={handleLogout}
-            focusNotificationsKey={youNotificationsFocusKey}
             sharedMomentsUnreadCount={auraUpdates?.unreadCount}
           />
         )}
 
         {activeTab === 'chart' && <BirthChartSection />}
 
-        {activeTab === 'people' && <PeopleView onBack={() => setActiveTab('you')} />}
-
-        {activeTab === 'sharedMoments' && (
-          <SharedMomentsView
-            onBack={() => {
-              setSharedMomentsFocusToken(undefined);
-              setActiveTab('you');
-            }}
-            onSeen={loadAuraUpdates}
-            focusMomentToken={sharedMomentsFocusToken}
-          />
-        )}
+        {activeTab === 'people' && <PeopleView onBack={() => setActiveTab(peopleReturnTo)} />}
 
         {activeTab === 'activity' && (
           <CalendarViewSection
@@ -891,10 +900,17 @@ export default function DashboardPage() {
           />
         )}
 
+        {activeTab === 'explore' && (
+          <ExploreView
+            onOpenPanchang={() => setActiveTab('panchang')}
+            onOpenMuhurtham={() => setActiveTab('muhurtham')}
+          />
+        )}
+
         {activeTab === 'panchang' && (
           <PanchangCalendarView
             timezone={user.timezone}
-            onBack={() => setActiveTab('you')}
+            onBack={() => setActiveTab('explore')}
             onViewTodayRhythm={() => setActiveTab('timeline')}
             onExploreActivities={() => setActiveTab('plan')}
             onOpenMuhurtham={() => setActiveTab('muhurtham')}
@@ -906,12 +922,21 @@ export default function DashboardPage() {
         {activeTab === 'muhurtham' && (
           <MuhurthamFinderView
             timezone={user.timezone}
-            onBack={() => setActiveTab('you')}
+            onBack={() => setActiveTab('explore')}
             onOpenPanchangCalendar={() => setActiveTab('panchang')}
             onViewFullPanchang={handleViewFullPanchang}
             onPlanLogged={loadUserDataAndLogs}
             onOpenBirthProfile={() => setActiveTab('chart')}
-            onOpenPeople={() => setActiveTab('people')}
+            onOpenPeople={() => { setPeopleReturnTo('you'); setActiveTab('people'); }}
+          />
+        )}
+
+        {activeTab === 'updates' && (
+          <UpdatesView
+            updates={auraUpdates?.updates ?? []}
+            onBack={() => setActiveTab('home')}
+            onViewMomentUpdate={handleViewMomentUpdate}
+            onFindAnotherTimeForMoment={handleFindAnotherTimeForMoment}
           />
         )}
       </div>
@@ -928,16 +953,17 @@ export default function DashboardPage() {
           backdropFilter: 'blur(16px)',
           borderTop: '1px solid rgba(255, 255, 255, 0.12)',
           display: 'grid',
-          gridTemplateColumns: 'repeat(5, 1fr)',
+          gridTemplateColumns: 'repeat(6, 1fr)',
           padding: '4px 8px calc(env(safe-area-inset-bottom, 0px) + 4px)',
           zIndex: 9999,
         }}
       >
         <NavButton label="Home" icon="🏠" active={activeTab === 'home'} onClick={() => setActiveTab('home')} />
-        <NavButton label="Plan" icon="✨" active={activeTab === 'plan'} onClick={() => setActiveTab('plan')} />
+        <NavButton label="Plan" icon="✨" active={activeTab === 'plan' || (activeTab === 'people' && peopleReturnTo === 'plan')} onClick={() => setActiveTab('plan')} />
+        <NavButton label="Explore" icon="🧭" active={activeTab === 'explore' || activeTab === 'panchang' || activeTab === 'muhurtham'} onClick={() => setActiveTab('explore')} />
         <NavButton label="Ask Aura" icon="🤖" active={activeTab === 'ask'} onClick={() => setActiveTab('ask')} />
         <NavButton label="Insights" icon="📊" active={activeTab === 'insights'} onClick={() => setActiveTab('insights')} />
-        <NavButton label="You" icon="👤" active={activeTab === 'you' || activeTab === 'chart' || activeTab === 'activity' || activeTab === 'panchang' || activeTab === 'muhurtham' || activeTab === 'people' || activeTab === 'sharedMoments'} onClick={() => setActiveTab('you')} />
+        <NavButton label="You" icon="👤" active={activeTab === 'you' || activeTab === 'chart' || activeTab === 'activity' || (activeTab === 'people' && peopleReturnTo === 'you')} onClick={() => setActiveTab('you')} />
       </nav>
     </main>
   );

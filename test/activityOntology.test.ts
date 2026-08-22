@@ -98,10 +98,17 @@ check(
 
 // --- Known catalog activity -> explicit ActivityDefinition (not title regex) ---
 
+// Product Structure V2: "road trip" now resolves to the dedicated EVERYDAY
+// road-trip activity (OUTING intent), not the IMPORTANT/DEEP start-journey
+// -- a casual weekend road trip is a different occasion from an important
+// journey or relocation (see activityDefinitions.ts's road-trip notes and
+// personalizedTasks.ts's start-journey comment). This is an intentional
+// product change, not a regression -- start-journey's own aliases no
+// longer include "road trip" at all.
 const roadTrip = resolveActivityDefinition('I need to start my road trip');
 check('Known free-text phrase resolves via the catalog, not the classifier', roadTrip.source === 'CATALOG');
-check('Known free-text phrase resolves to the correct activity', roadTrip.activity?.id === 'start-journey');
-check('Known free-text phrase carries the journey intent', roadTrip.definition.muhurta.intent === 'JOURNEY_START');
+check('Known free-text phrase resolves to the dedicated everyday road-trip activity', roadTrip.activity?.id === 'road-trip');
+check('Known free-text phrase carries the OUTING intent', roadTrip.definition.muhurta.intent === 'OUTING');
 check(
   'Catalog resolution keeps the exact legacy family the engine already uses today',
   toLegacyMuhurtaFamily(roadTrip.definition) === familyForActivityProfile(findActivityIntent('I need to start my road trip')!)

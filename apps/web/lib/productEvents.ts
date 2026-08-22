@@ -12,7 +12,7 @@
 //      whether a per-event schema would otherwise accept it. This is
 //      defense-in-depth: even a future mistake in an event's own schema
 //      cannot leak one of these fields.
-import { isSupportedMuhurthamActivity } from '../../../packages/recommendation/src/muhurthamFinder';
+import { FULL_ACTIVITY_CATALOG } from '../../../packages/recommendation/src/personalizedTasks';
 import { createProductEvent } from './db';
 
 export type ProductEventName =
@@ -112,6 +112,12 @@ const TIMING_MODE_VALUES = new Set(['FIND', 'CHECK', 'COMPARE']);
 const PREFERENCE_VALUES = new Set(['EARLIER', 'LATER', 'DIFFERENT_DAY', 'NO_PREFERENCE']);
 const SHARE_METHOD_VALUES = new Set(['native_share', 'copy_link']);
 const RELATIONSHIP_VALUES = new Set(['PARTNER', 'SPOUSE', 'FAMILY', 'FRIEND', 'OTHER']);
+// Product Structure V2 (brief section 31): "at minimum ensure we can
+// distinguish... source = PLAN | MUHURTHAM, planningMode = EVERYDAY |
+// IMPORTANT | CEREMONIAL" -- reusing the exact same closed vocabularies
+// AuraMomentSource/PlanningMode already define, not a third copy.
+const SOURCE_VALUES = new Set(['PLAN', 'MUHURTHAM']);
+const PLANNING_MODE_VALUES = new Set(['EVERYDAY', 'IMPORTANT', 'CEREMONIAL']);
 
 type FieldSchema =
   | { type: 'enum'; values: Set<string> }
@@ -122,6 +128,8 @@ type FieldSchema =
 const scopeField: FieldSchema = { type: 'enum', values: SCOPE_VALUES };
 const activityIdField: FieldSchema = { type: 'activityId' };
 const durationField: FieldSchema = { type: 'number', min: 0, max: 120_000 };
+const sourceField: FieldSchema = { type: 'enum', values: SOURCE_VALUES };
+const planningModeField: FieldSchema = { type: 'enum', values: PLANNING_MODE_VALUES };
 
 const EVENT_METADATA_SCHEMAS: Record<ProductEventName, Record<string, FieldSchema>> = {
   AURA_HOME_VIEWED: {},
@@ -157,10 +165,13 @@ const EVENT_METADATA_SCHEMAS: Record<ProductEventName, Record<string, FieldSchem
   AURA_MOMENT_CREATED: {
     scope: scopeField,
     activityId: activityIdField,
+    source: sourceField,
+    planningMode: planningModeField,
   },
   AURA_MOMENT_SHARE_INITIATED: {
     scope: scopeField,
     method: { type: 'enum', values: SHARE_METHOD_VALUES },
+    planningMode: planningModeField,
   },
   AURA_MOMENT_OPENED: {
     scope: scopeField,
@@ -175,6 +186,8 @@ const EVENT_METADATA_SCHEMAS: Record<ProductEventName, Record<string, FieldSchem
   AURA_MOMENT_ALTERNATIVE_CREATED: {
     scope: scopeField,
     activityId: activityIdField,
+    source: sourceField,
+    planningMode: planningModeField,
   },
   AURA_MOMENT_FIND_YOUR_OWN_CLICKED: {},
 };
@@ -217,8 +230,19 @@ export function validateProductEvent(eventName: string, rawMetadata: unknown): P
       }
       metadata[key] = value;
     } else if (fieldSchema.type === 'activityId') {
-      if (typeof value !== 'string' || !isSupportedMuhurthamActivity(value)) {
-        return { ok: false, error: `metadata.${key} must be a supported activity id` };
+      // Everyday Moment Rescheduling V1 fix: this used to check
+      // isSupportedMuhurthamActivity(), which silently rejected (and
+      // dropped) every event carrying an everyday, non-Muhurtham-eligible
+      // activityId -- AURA_MOMENT_CREATED/AURA_MOMENT_ALTERNATIVE_CREATED
+      // for any Plan-sourced moment (Date Night, Coffee, ...) never
+      // actually persisted since Product Structure V2 shipped. Any real
+      // catalog activity id is valid metadata here; the events that are
+      // genuinely Muhurtham-Finder-only (MUHURTHAM_SEARCH_STARTED/
+      // MUHURTHAM_SEARCH_COMPLETED) only ever receive a Muhurtham-eligible
+      // id from their own call sites anyway, so this loosening does not
+      // weaken validation for those.
+      if (typeof value !== 'string' || !FULL_ACTIVITY_CATALOG.some((activity) => activity.id === value)) {
+        return { ok: false, error: `metadata.${key} must be a known catalog activity id` };
       }
       metadata[key] = value;
     } else if (fieldSchema.type === 'number') {

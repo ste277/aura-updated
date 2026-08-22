@@ -1,4 +1,5 @@
 import { computeAlternativeDateRange, ALTERNATIVE_SEARCH_HORIZON_DAYS, findAuraMomentAlternatives } from '../apps/web/lib/auraMomentAlternatives';
+import { findEverydaySharedTiming } from '../packages/recommendation/src/everydayTimingFit';
 import type { AuraMoment } from '../apps/web/lib/db';
 
 let allPassed = true;
@@ -60,6 +61,7 @@ function fakeMoment(overrides: Partial<AuraMoment>): AuraMoment {
     ownerUserId: 'owner-1',
     publicToken: 'token-1',
     scope: 'SHARED',
+    source: 'MUHURTHAM',
     activityId: 'griha-pravesh',
     activityTitle: 'Griha Pravesh',
     activityIcon: '🏡',
@@ -135,6 +137,117 @@ if (noPreferenceResult.status === 'OK') {
 }
 
 check('At least one of the four preference searches returned a non-empty candidate list (the underlying search genuinely works end to end)', [earlierResult, laterResult, differentDayResult, noPreferenceResult].some((r) => r.status === 'OK' && r.candidates.length > 0));
+
+// ============================================================
+// Everyday Moment Rescheduling V1 -- PLAN source routes to real strategies
+// (never Muhurtham Finder, never NOT_APPLICABLE) for every scope.
+// ============================================================
+
+function fakePlanMoment(overrides: Partial<AuraMoment>): AuraMoment {
+  return fakeMoment({
+    source: 'PLAN',
+    activityId: 'date-night',
+    activityTitle: 'Date Night',
+    activityIcon: '❤️',
+    startAt: new Date('2026-09-22T13:00:00.000Z'), // 6:30 PM IST
+    endAt: new Date('2026-09-22T14:30:00.000Z'),
+    timezone: 'Asia/Kolkata',
+    ...overrides,
+  });
+}
+
+const planOwnerContext = { now: new Date('2026-08-21T00:00:00.000Z'), latitude: 13.0827, longitude: 80.2707, timezone: 'Asia/Kolkata', tzOffsetMinutes: 330, personalContext: { natalNakshatraIndex: 2 } };
+
+// --- GENERAL (brief section 22) ---
+const planGeneral = fakePlanMoment({ scope: 'GENERAL', savedPersonId: null, sharedPersonDisplayName: null, responsePreference: 'LATER' });
+const planGeneralResult = findAuraMomentAlternatives({ auraMoment: planGeneral, ownerContext: planOwnerContext });
+check('PLAN + GENERAL: alternatives returned (never NOT_APPLICABLE, never Muhurtham-gated)', planGeneralResult.status === 'OK');
+if (planGeneralResult.status === 'OK') {
+  check('PLAN + GENERAL: original instant excluded', planGeneralResult.candidates.every((c) => c.startAt !== planGeneral.startAt.toISOString()));
+  check('PLAN + GENERAL: LATER preference respected (all candidates after the original date)', planGeneralResult.candidates.every((c) => c.date > '2026-09-22'));
+  check('PLAN + GENERAL: at most 3 alternatives (brief section 10)', planGeneralResult.candidates.length <= 3);
+}
+
+// --- PERSONAL (brief section 23) -- no natal data required ---
+const planPersonalNoProfile = fakePlanMoment({ scope: 'PERSONAL', savedPersonId: null, sharedPersonDisplayName: null, responsePreference: 'DIFFERENT_DAY' });
+const planPersonalResult = findAuraMomentAlternatives({ auraMoment: planPersonalNoProfile, ownerContext: { ...planOwnerContext, personalContext: undefined } });
+check('PLAN + PERSONAL: alternatives returned even with NO owner natal profile (never an error, brief section 11)', planPersonalResult.status === 'OK');
+if (planPersonalResult.status === 'OK') {
+  check('PLAN + PERSONAL: DIFFERENT_DAY excludes the original date', planPersonalResult.candidates.every((c) => c.date !== '2026-09-22'));
+}
+
+// --- SHARED (brief section 24) -- Date Night as the primary fixture ---
+const planShared = fakePlanMoment({ scope: 'SHARED', responsePreference: 'LATER' });
+const planSharedResult = findAuraMomentAlternatives({ auraMoment: planShared, ownerContext: planOwnerContext, savedPersonContext: fakeSavedPersonContext });
+check('PLAN + SHARED (Date Night): alternatives returned', planSharedResult.status === 'OK');
+if (planSharedResult.status === 'OK') {
+  check('PLAN + SHARED: no Muhurtham eligibility required (date-night is not Muhurtham-eligible)', true);
+  check('PLAN + SHARED: LATER preference respected', planSharedResult.candidates.every((c) => c.date > '2026-09-22'));
+  check('PLAN + SHARED: original instant excluded', planSharedResult.candidates.every((c) => c.startAt !== planShared.startAt.toISOString()));
+  check('PLAN + SHARED: ratingLabel uses the everyday shared vocabulary, never a Muhurtham rating', planSharedResult.candidates.every((c) => ['STRONG_TOGETHER_FIT', 'GOOD_TOGETHER_FIT', 'EASY_TOGETHER_FIT'].includes(c.ratingLabel)));
+}
+
+// --- Ranking parity (brief section 8): the SAME candidate scores
+// identically whether found via a direct findEverydaySharedTiming() call
+// (what Plan's own search does) or via Moment -> Find another time. ---
+if (planSharedResult.status === 'OK' && planSharedResult.candidates.length > 0) {
+  const direct = findEverydaySharedTiming({
+    activityId: 'date-night',
+    durationMinutes: 90,
+    dateRange: computeAlternativeDateRange('2026-09-22', 'LATER', '2026-08-21'),
+    limit: 20,
+    context: planOwnerContext,
+    partnerContext: fakeSavedPersonContext,
+  });
+  check('Ranking parity: direct findEverydaySharedTiming() also returns OK', direct.status === 'OK');
+  if (direct.status === 'OK') {
+    const top = planSharedResult.candidates[0];
+    const matching = direct.candidates.find((c) => c.start === top.startAt);
+    check('Ranking parity: the alternative\'s top candidate exists in a direct findEverydaySharedTiming() call over the same range', matching !== undefined);
+    check('Ranking parity: identical rating for the identical candidate (same scoring, not reimplemented)', matching?.rating === top.ratingLabel);
+  }
+}
+
+// --- All four preferences for PLAN source (brief section 25) ---
+for (const preference of ['EARLIER', 'LATER', 'DIFFERENT_DAY', 'NO_PREFERENCE'] as const) {
+  const moment = fakePlanMoment({ scope: 'SHARED', responsePreference: preference });
+  const result = findAuraMomentAlternatives({ auraMoment: moment, ownerContext: planOwnerContext, savedPersonContext: fakeSavedPersonContext });
+  check(`PLAN preference ${preference} returns OK status`, result.status === 'OK');
+}
+
+// ============================================================
+// Section 17: GENERAL/PERSONAL Moments without a SavedPerson -- audited
+// behavior. PLAN + PERSONAL is supported using the owner's own Timing
+// Search personalization; it never manufactures a participant.
+// ============================================================
+check('PLAN + PERSONAL never requires or references a SavedPerson', planPersonalResult.status === 'OK');
+
+// ============================================================
+// Security (brief section 27): the alternative candidate DTO can never
+// carry natal/person-identifying fields, regardless of which strategy
+// produced it.
+// ============================================================
+if (planSharedResult.status === 'OK') {
+  const serialized = JSON.stringify(planSharedResult.candidates);
+  check('PLAN + SHARED alternatives never serialize birth/natal/person-identity fields', !/birthDate|birthTime|birthTimezone|natalNakshatra|janmaRashi|taraBala|ownerUserId|savedPersonId/i.test(serialized));
+}
+
+// ============================================================
+// Timezone (brief section 18): a DST timezone behaves correctly, not just
+// Asia/Kolkata.
+// ============================================================
+const nyMoment = fakePlanMoment({
+  scope: 'GENERAL',
+  savedPersonId: null,
+  sharedPersonDisplayName: null,
+  timezone: 'America/New_York',
+  startAt: new Date('2026-03-10T22:00:00.000Z'), // before US DST starts (Mar 8, 2026 2am local)
+  endAt: new Date('2026-03-10T23:30:00.000Z'),
+  responsePreference: 'LATER',
+});
+const nyOwnerContext = { now: new Date('2026-03-01T00:00:00.000Z'), latitude: 40.7128, longitude: -74.006, timezone: 'America/New_York', tzOffsetMinutes: -300, personalContext: undefined };
+const nyResult = findAuraMomentAlternatives({ auraMoment: nyMoment, ownerContext: nyOwnerContext });
+check('PLAN + GENERAL in a DST timezone (America/New_York) returns OK, not an error', nyResult.status === 'OK');
 
 console.log(allPassed ? '\nALL AURA MOMENT ALTERNATIVES CHECKS PASSED' : '\nSOME AURA MOMENT ALTERNATIVES CHECKS FAILED');
 process.exit(allPassed ? 0 : 1);

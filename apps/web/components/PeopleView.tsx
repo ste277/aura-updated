@@ -3,6 +3,7 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import { CITY_OPTIONS } from '../lib/cities';
 import type { CityOption } from '../lib/cities';
+import * as theme from './theme';
 
 export type RelationshipType = 'PARTNER' | 'SPOUSE' | 'FAMILY' | 'FRIEND' | 'OTHER';
 
@@ -384,37 +385,9 @@ function PanchangaMiniCell({ label, value }: { label: string; value: string }) {
   );
 }
 
-const cardStyle: React.CSSProperties = {
-  background: 'var(--as-surface-raised, #0f172a)',
-  border: '1px solid var(--as-border, #1e293b)',
-  borderRadius: 16,
-  padding: 16,
-};
-
-const backButtonStyle: React.CSSProperties = {
-  minHeight: 34,
-  borderRadius: 17,
-  border: '1px solid rgba(148, 163, 184, 0.22)',
-  background: 'rgba(15, 23, 42, 0.75)',
-  color: '#f8fafc',
-  fontSize: 12,
-  cursor: 'pointer',
-  flexShrink: 0,
-  display: 'inline-flex',
-  alignItems: 'center',
-  gap: 6,
-  padding: '0 10px',
-  fontWeight: 800,
-};
-
-const sectionKickerStyle: React.CSSProperties = {
-  color: '#4ade80',
-  fontSize: 11,
-  fontFamily: 'var(--as-font-mono)',
-  fontWeight: 900,
-  textTransform: 'uppercase',
-  letterSpacing: '0.04em',
-};
+const cardStyle: React.CSSProperties = theme.panelStyle;
+const backButtonStyle: React.CSSProperties = theme.backButtonStyle;
+const sectionKickerStyle: React.CSSProperties = theme.sectionKickerStyle;
 
 const fieldLabelStyle: React.CSSProperties = {
   display: 'flex',
@@ -449,22 +422,12 @@ const primaryButtonStyle: React.CSSProperties = {
   cursor: 'pointer',
 };
 
-const secondaryButtonStyle: React.CSSProperties = {
-  minHeight: 38,
-  borderRadius: 12,
-  border: '1px solid rgba(74, 222, 128, 0.35)',
-  background: 'rgba(74, 222, 128, 0.08)',
-  color: '#4ade80',
-  fontSize: 12,
-  fontWeight: 800,
-  cursor: 'pointer',
-  padding: '0 14px',
-};
+const secondaryButtonStyle: React.CSSProperties = { ...theme.outlineButtonStyle, minHeight: 38, padding: '0 14px' };
 
 const dangerLinkStyle: React.CSSProperties = {
   border: 'none',
   background: 'transparent',
-  color: '#fb6b6b',
+  color: theme.colors.danger,
   fontSize: 13,
   fontWeight: 850,
   cursor: 'pointer',
@@ -476,22 +439,13 @@ const dangerButtonStyle: React.CSSProperties = {
   borderRadius: 12,
   border: '1px solid rgba(251, 107, 107, 0.35)',
   background: 'rgba(251, 107, 107, 0.1)',
-  color: '#fb6b6b',
+  color: theme.colors.danger,
   fontSize: 12,
   fontWeight: 800,
   cursor: 'pointer',
   padding: '0 14px',
 };
 
-const errorBoxStyle: React.CSSProperties = {
-  color: '#fb6b6b',
-  fontSize: 12,
-  lineHeight: 1.45,
-};
+const errorBoxStyle: React.CSSProperties = theme.errorBoxStyle;
 
-const panchangaCellStyle: React.CSSProperties = {
-  background: 'rgba(2, 6, 23, 0.4)',
-  border: '1px solid rgba(148, 163, 184, 0.14)',
-  borderRadius: 8,
-  padding: '7px 9px',
-};
+const panchangaCellStyle: React.CSSProperties = theme.cellStyle;

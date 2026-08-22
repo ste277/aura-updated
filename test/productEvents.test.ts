@@ -62,8 +62,14 @@ check('An unlisted metadata key is rejected even when it looks harmless', valida
 check('scope must be one of GENERAL/PERSONAL/SHARED', validateProductEvent('MUHURTHAM_SCOPE_SELECTED', { scope: 'EVERYONE' }).ok === false);
 check('scope accepts a valid value', validateProductEvent('MUHURTHAM_SCOPE_SELECTED', { scope: 'PERSONAL' }).ok === true);
 check('mode must be a string enum, not a number', validateProductEvent('PLAN_STARTED', { mode: 1 }).ok === false);
-check('activityId must be a real, supported Muhurtham activity id', validateProductEvent('AURA_MOMENT_CREATED', { scope: 'GENERAL', activityId: 'not-a-real-activity' }).ok === false);
-check('activityId accepts a real supported activity id', validateProductEvent('AURA_MOMENT_CREATED', { scope: 'GENERAL', activityId: 'start-journey' }).ok === true);
+check('activityId must be a real, known catalog activity id', validateProductEvent('AURA_MOMENT_CREATED', { scope: 'GENERAL', activityId: 'not-a-real-activity' }).ok === false);
+check('activityId accepts a Muhurtham-eligible activity id', validateProductEvent('AURA_MOMENT_CREATED', { scope: 'GENERAL', activityId: 'start-journey' }).ok === true);
+// Everyday Moment Rescheduling V1 regression: activityId must accept ANY
+// real catalog activity, not just Muhurtham-eligible ones -- a Plan-sourced
+// AURA_MOMENT_CREATED/AURA_MOMENT_ALTERNATIVE_CREATED for an everyday
+// activity (never Muhurtham-eligible) was silently rejected before this fix.
+check('activityId accepts a non-Muhurtham-eligible everyday activity id (date-night)', validateProductEvent('AURA_MOMENT_CREATED', { scope: 'SHARED', activityId: 'date-night', source: 'PLAN', planningMode: 'EVERYDAY' }).ok === true);
+check('AURA_MOMENT_ALTERNATIVE_CREATED accepts an everyday activityId plus source/planningMode', validateProductEvent('AURA_MOMENT_ALTERNATIVE_CREATED', { scope: 'SHARED', activityId: 'date-night', source: 'PLAN', planningMode: 'EVERYDAY' }).ok === true);
 check('resultCount rejects a negative number', validateProductEvent('MUHURTHAM_SEARCH_COMPLETED', { scope: 'GENERAL', activityId: 'start-journey', resultCount: -1 }).ok === false);
 check('resultCount rejects a non-finite number', validateProductEvent('MUHURTHAM_SEARCH_COMPLETED', { scope: 'GENERAL', activityId: 'start-journey', resultCount: Infinity }).ok === false);
 check('durationMs rejects an absurdly large value (bounds enforced)', validateProductEvent('PLAN_SEARCH_COMPLETED', { mode: 'FIND', resultCount: 1, durationMs: 999_999_999 }).ok === false);

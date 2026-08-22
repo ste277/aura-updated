@@ -188,6 +188,10 @@ export async function deleteSavedPerson(ownerUserId: string, personId: string): 
 }
 
 export type AuraMomentScope = 'GENERAL' | 'PERSONAL' | 'SHARED';
+/** Product Structure V2 -- where the selected timing came from. Every
+ * pre-V2 row is backfilled to 'MUHURTHAM' (see migration 0020's doc
+ * comment) since that was the only creation path until this PR. */
+export type AuraMomentSource = 'PLAN' | 'MUHURTHAM';
 export type AuraMomentStatus = 'ACTIVE' | 'REVOKED';
 export type AuraMomentResponseState = 'ACCEPTED' | 'ANOTHER_TIME';
 /** Structured recipient preference (Aura Moment Rescheduling), only ever
@@ -200,6 +204,7 @@ export interface AuraMoment {
   ownerUserId: string;
   publicToken: string;
   scope: AuraMomentScope;
+  source: AuraMomentSource;
   activityId: string;
   activityTitle: string;
   activityIcon: string | null;
@@ -237,6 +242,7 @@ export interface CreateAuraMomentInput {
   ownerUserId: string;
   publicToken: string;
   scope: AuraMomentScope;
+  source: AuraMomentSource;
   activityId: string;
   activityTitle: string;
   activityIcon: string | null;
@@ -262,16 +268,17 @@ export async function createAuraMoment(input: CreateAuraMomentInput): Promise<Au
   const id = randomUUID();
   const result = await pool.query(
     `INSERT INTO "AuraMoment"
-       (id, "ownerUserId", "publicToken", scope, "activityId", "activityTitle", "activityIcon",
+       (id, "ownerUserId", "publicToken", scope, source, "activityId", "activityTitle", "activityIcon",
         "startAt", "endAt", timezone, "savedPersonId", "sharedPersonDisplayName", "senderDisplayName",
         "ratingLabel", "explanationSnapshot", "expiresAt", "previousMomentId")
-     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17)
+     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18)
      RETURNING *`,
     [
       id,
       input.ownerUserId,
       input.publicToken,
       input.scope,
+      input.source,
       input.activityId,
       input.activityTitle,
       input.activityIcon,
@@ -324,6 +331,19 @@ export async function revokeAuraMoment(ownerUserId: string, publicToken: string)
   );
   if (result.rows.length === 0) throw new Error('Moment not found.');
   return result.rows[0];
+}
+
+/** Permanently removes a moment from the list -- scoped to REVOKED only, so
+ * a moment is always revoked first (the deliberate, visible "this link no
+ * longer works" step) before it can be cleared away. Safe to hard-delete:
+ * previousMomentId/ProductEvent.auraMomentId both reference AuraMoment with
+ * ON DELETE SET NULL, so this never breaks lineage or analytics rows. */
+export async function deleteAuraMoment(ownerUserId: string, publicToken: string): Promise<void> {
+  const result = await pool.query(
+    `DELETE FROM "AuraMoment" WHERE "publicToken" = $1 AND "ownerUserId" = $2 AND status = 'REVOKED'`,
+    [publicToken, ownerUserId]
+  );
+  if (result.rowCount === 0) throw new Error('Moment not found or cannot be removed.');
 }
 
 /** PUBLIC write -- by publicToken only. Guarded entirely in SQL (status must
@@ -650,6 +670,18 @@ export async function cancelPlannedActivity(userId: string, planId: string): Pro
   );
   if (result.rows.length === 0) throw new Error('Plan not found or cannot be cancelled.');
   return result.rows[0];
+}
+
+/** Permanently removes a plan from the list -- scoped to LOGGED/CANCELLED
+ * only, never UPCOMING (that's what cancelPlannedActivity is for). Lets the
+ * user actually clear old completed plans instead of them only ever
+ * accumulating in "Recently Completed". */
+export async function deletePlannedActivity(userId: string, planId: string): Promise<void> {
+  const result = await pool.query(
+    `DELETE FROM "PlannedActivity" WHERE id = $1 AND "userId" = $2 AND status IN ('LOGGED', 'CANCELLED')`,
+    [planId, userId]
+  );
+  if (result.rowCount === 0) throw new Error('Plan not found or cannot be removed.');
 }
 
 export async function logPlannedActivity(userId: string, planId: string): Promise<{ plan: PlannedActivity; habitLog: HabitLogRow }> {

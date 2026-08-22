@@ -1,7 +1,7 @@
 import {
   defaultExpiresAt,
   DEFAULT_EXPIRY_AFTER_EVENT_DAYS,
-  explanationSnapshotForScope,
+  explanationSnapshotFor,
   generatePublicMomentToken,
   isMomentExpired,
   resolvePublicOrigin,
@@ -75,8 +75,10 @@ check('isMomentExpired is false when expiresAt is null (no expiry set)', isMomen
 // EXPLANATION SNAPSHOT (brief section 3/17 -- server-templated, relationship-neutral)
 // ============================================================
 
-check('explanationSnapshotForScope(SHARED) mentions "both", not a specific relationship word', explanationSnapshotForScope('SHARED').toLowerCase().includes('both') && !/partner|spouse|boyfriend|girlfriend/i.test(explanationSnapshotForScope('SHARED')));
-check('explanationSnapshotForScope(GENERAL) and (PERSONAL) are each distinct, non-empty strings', explanationSnapshotForScope('GENERAL').length > 0 && explanationSnapshotForScope('PERSONAL').length > 0 && explanationSnapshotForScope('GENERAL') !== explanationSnapshotForScope('PERSONAL'));
+check('explanationSnapshotFor(griha-pravesh, SHARED) mentions "both", not a specific relationship word', explanationSnapshotFor('griha-pravesh', 'SHARED').toLowerCase().includes('both') && !/partner|spouse|boyfriend|girlfriend/i.test(explanationSnapshotFor('griha-pravesh', 'SHARED')));
+check('explanationSnapshotFor(griha-pravesh, GENERAL) and (PERSONAL) are each distinct, non-empty strings', explanationSnapshotFor('griha-pravesh', 'GENERAL').length > 0 && explanationSnapshotFor('griha-pravesh', 'PERSONAL').length > 0 && explanationSnapshotFor('griha-pravesh', 'GENERAL') !== explanationSnapshotFor('griha-pravesh', 'PERSONAL'));
+check('explanationSnapshotFor never says "Muhurtham" for an EVERYDAY activity (brief section 14/18)', !/muhurtham/i.test(explanationSnapshotFor('date-night', 'SHARED')));
+check('explanationSnapshotFor for an EVERYDAY activity is distinct wording from a CEREMONIAL one', explanationSnapshotFor('date-night', 'SHARED') !== explanationSnapshotFor('griha-pravesh', 'SHARED'));
 
 // ============================================================
 // SECURITY: PublicAuraMoment DTO never leaks private/natal fields
@@ -87,6 +89,7 @@ const fullMoment: AuraMoment = {
   ownerUserId: 'owner-user-id-should-never-appear-publicly',
   publicToken: 'the-token-itself-should-not-be-echoed-back',
   scope: 'SHARED',
+  source: 'MUHURTHAM',
   activityId: 'griha-pravesh',
   activityTitle: 'Griha Pravesh',
   activityIcon: '🏡',
@@ -112,7 +115,8 @@ const fullMoment: AuraMoment = {
 const publicDto = toPublicAuraMoment(fullMoment, true);
 const serialized = JSON.stringify(publicDto);
 
-check('PublicAuraMoment DTO has EXACTLY the allow-listed keys (no accidental extra fields)', Object.keys(publicDto).sort().join(',') === ['activityTitle', 'activityIcon', 'startAt', 'endAt', 'timezone', 'senderDisplayName', 'sharedPersonDisplayName', 'scope', 'ratingLabel', 'explanationSnapshot', 'responseState', 'responsePreference', 'hasSuccessor'].sort().join(','));
+check('PublicAuraMoment DTO has EXACTLY the allow-listed keys (no accidental extra fields)', Object.keys(publicDto).sort().join(',') === ['activityTitle', 'activityIcon', 'startAt', 'endAt', 'timezone', 'senderDisplayName', 'sharedPersonDisplayName', 'scope', 'planningMode', 'ratingLabel', 'explanationSnapshot', 'responseState', 'responsePreference', 'hasSuccessor'].sort().join(','));
+check('PublicAuraMoment DTO planningMode is derived from the activity catalog (griha-pravesh is CEREMONIAL), never the internal AuraMomentSource', publicDto.planningMode === 'CEREMONIAL');
 check('PublicAuraMoment DTO never contains the internal id', !serialized.includes('internal-id-should-never-appear-publicly'));
 check('PublicAuraMoment DTO never contains ownerUserId', !serialized.includes('owner-user-id-should-never-appear-publicly') && !('ownerUserId' in publicDto));
 check('PublicAuraMoment DTO never echoes back the publicToken itself', !serialized.includes('the-token-itself-should-not-be-echoed-back') && !('publicToken' in publicDto));

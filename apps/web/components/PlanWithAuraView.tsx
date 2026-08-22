@@ -4,6 +4,11 @@ import React, { useEffect, useMemo, useRef, useState } from 'react';
 import type { PlanningHorizon, TimePreference } from '../../../packages/recommendation/src/dailyAssistant';
 import { buildGoogleCalendarUrl } from '../../../packages/recommendation/src/dailyAssistant';
 import { FULL_ACTIVITY_CATALOG } from '../../../packages/recommendation/src/personalizedTasks';
+import { getActivityDefinition } from '../../../packages/recommendation/src/activityDefinitions';
+import type { EverydaySharedCandidate } from '../../../packages/recommendation/src/everydayTimingFit';
+import { RELATIONSHIP_ICON, SavedPersonRow } from './PeopleView';
+import { SharedMomentsView } from './SharedMomentsView';
+import * as theme from './theme';
 import type { TimingCandidate, TimingCandidateLabel, TimingSearchDateRange, TimingSearchMode, TimingSearchResponse, TimingTimePreference } from '../../../packages/recommendation/src/timingSearch';
 import type { MuhurtaReason } from '../../../packages/muhurta/src/activityOntology';
 import { formatMuhurtaReason } from '../../../packages/muhurta/src/muhurtaReasonFormat';
@@ -44,17 +49,40 @@ interface PlanWithAuraViewProps {
   timezone?: string;
   initialActivity?: string | null;
   initialActivityKey?: number;
+  /** Product Structure V2 (brief section 10/22) -- "Add someone" from the
+   * Who's-this-with picker navigates to the existing People screen; Plan
+   * itself never builds a second Add Person UI. */
+  onOpenPeople?: () => void;
+  /** Product Structure V2 (brief section 19) -- jump straight to the
+   * bottom-of-Plan "Your Moments" section. */
+  focusMomentsKey?: number;
+  /** Forwarded to the embedded SharedMomentsView's own onSeen (brief
+   * section 6 of Aura Updates V1) -- keeps the bell's unread badge accurate
+   * even when a moment is viewed from Plan's "Your Moments", not just You. */
+  onMomentSeen?: () => void;
+  /** Forwarded to the embedded SharedMomentsView -- jumps straight into one
+   * moment's alternatives when arriving via a "Find another time" deep
+   * link (Home's card, or the old Shared Moments entry under You). */
+  focusMomentToken?: string;
 }
 
+// Product Structure V2 (brief section 8): "Suggested" leads with everyday
+// TOGETHER activities (❤️ Date Night, 🍽 Dinner, ☕ Coffee, 🎬 Movie) --
+// filteredTasks shows only the first 4 when the search box is empty, so
+// ordering here is what actually decides the default suggestion set.
+// Titles are exact FULL_ACTIVITY_CATALOG matches so resolveActivitySelection
+// sends a real activityId, not a free-text fallback.
 const TASKS: TaskSuggestion[] = [
+  { title: 'Date Night', icon: '❤️', keywords: ['date', 'romantic', 'relationship', 'partner'], accent: '#ff5f95' },
+  { title: 'Dinner Date', icon: '🍽️', keywords: ['dinner', 'romantic dinner'], accent: '#ff5f95' },
+  { title: 'Coffee / Tea', icon: '☕', keywords: ['coffee', 'tea'], accent: '#fb923c' },
+  { title: 'Movie Night', icon: '🎬', keywords: ['movie', 'film'], accent: '#a78bfa' },
   { title: 'Workout', icon: '🏋️', keywords: ['workout', 'exercise', 'gym', 'training', 'fitness'], accent: '#ff5f95' },
   { title: 'Deep work', icon: '🧠', keywords: ['deep work', 'focus', 'coding', 'research', 'writing'], accent: '#38bdf8' },
   { title: 'Study', icon: '📖', keywords: ['study', 'learn', 'course', 'exam', 'reading'], accent: '#4ade80' },
-  { title: 'Date night', icon: '💞', keywords: ['date', 'romantic', 'relationship', 'partner'], accent: '#ff5f95' },
   { title: 'Journey', icon: '🚗', keywords: ['journey', 'travel', 'trip', 'flight', 'train'], accent: '#facc15' },
   { title: 'Party', icon: '🎉', keywords: ['party', 'social', 'celebration', 'night out'], accent: '#a78bfa' },
   { title: 'Meditation', icon: '🧘', keywords: ['meditation', 'mindful', 'breath', 'prayer'], accent: '#4ade80' },
-  { title: 'Meal', icon: '🍽️', keywords: ['meal', 'dinner', 'lunch', 'breakfast', 'food'], accent: '#fb923c' },
 ];
 
 function accentForActivity(category: string, title: string): string {
@@ -421,7 +449,7 @@ export async function saveUpcomingPlanFromCandidate(candidate: TimingCandidate, 
   return mapPlanRow(await res.json());
 }
 
-export function PlanWithAuraView({ onTimingSearch, onViewDay, onPlanLogged, timezone, initialActivity, initialActivityKey }: PlanWithAuraViewProps) {
+export function PlanWithAuraView({ onTimingSearch, onViewDay, onPlanLogged, timezone, initialActivity, initialActivityKey, onOpenPeople, focusMomentsKey, onMomentSeen, focusMomentToken }: PlanWithAuraViewProps) {
   const [planMode, setPlanMode] = useState<TimingSearchMode>('FIND');
   const [taskTitle, setTaskTitle] = useState('');
   const [, setIsCustomTask] = useState(false);
@@ -434,6 +462,24 @@ export function PlanWithAuraView({ onTimingSearch, onViewDay, onPlanLogged, time
   const [error, setError] = useState('');
   const [isLoading, setIsLoading] = useState(false);
   const [isListening, setIsListening] = useState(false);
+
+  // Product Structure V2 -- "Who's this with?" (brief section 10/11).
+  // Lazily fetched the first time an activity whose socialMode permits a
+  // person is selected, never on mount (most FIND searches are solo).
+  const [savedPeople, setSavedPeople] = useState<SavedPersonRow[] | null>(null);
+  const [loadingPeople, setLoadingPeople] = useState(false);
+  const [selectedPersonId, setSelectedPersonId] = useState<string>('');
+  const [sharedFindResult, setSharedFindResult] = useState<EverydaySharedCandidate[] | null>(null);
+  const [momentSavingKey, setMomentSavingKey] = useState<string | null>(null);
+  const [momentSavedKeys, setMomentSavedKeys] = useState<Set<string>>(() => new Set());
+  // Share option under Plan (parity with Muhurtham Finder's "Share this
+  // moment"): once a moment is saved, its shareUrl/id are kept here so a
+  // second click can open the native share sheet / copy the link without
+  // re-creating the moment.
+  const [momentShareInfo, setMomentShareInfo] = useState<Record<string, { id: string; shareUrl: string }>>({});
+  const [sharingMomentKey, setSharingMomentKey] = useState<string | null>(null);
+  const [momentShareFeedback, setMomentShareFeedback] = useState<{ key: string; text: string } | null>(null);
+  const momentsSectionRef = useRef<HTMLDivElement | null>(null);
 
   // CHECK mode
   const [checkTaskTitle, setCheckTaskTitle] = useState('');
@@ -459,6 +505,7 @@ export function PlanWithAuraView({ onTimingSearch, onViewDay, onPlanLogged, time
   const [savedPlans, setSavedPlans] = useState<UpcomingPlan[]>([]);
   const [expandedPlanId, setExpandedPlanId] = useState<string | null>(null);
   const [reschedulingPlanId, setReschedulingPlanId] = useState<string | null>(null);
+  const [confirmingRemovePlanId, setConfirmingRemovePlanId] = useState<string | null>(null);
   const [savingOpportunityKey, setSavingOpportunityKey] = useState<string | null>(null);
   const [planActionStates, setPlanActionStates] = useState<Record<string, PlanActionState>>({});
   const [plannedOpportunityKeys, setPlannedOpportunityKeys] = useState<Set<string>>(() => new Set());
@@ -512,6 +559,33 @@ export function PlanWithAuraView({ onTimingSearch, onViewDay, onPlanLogged, time
       .filter((task) => task.title.toLowerCase().includes(query) || task.keywords.some((keyword) => keyword.includes(query)))
       .slice(0, showMoreActivities ? 14 : 5);
   }, [taskTitle, showMoreActivities]);
+
+  // The exact same resolution handleFindTime's own selection will use
+  // (resolveActivitySelection, not the looser alias matcher) -- the person
+  // picker must only appear when the search is actually about to resolve
+  // to this specific catalog activity.
+  const resolvedActivityDefinition = useMemo(() => {
+    const selection = resolveActivitySelection(taskTitle);
+    return selection.activityId ? getActivityDefinition(selection.activityId) : undefined;
+  }, [taskTitle]);
+  const showPersonPicker = planMode === 'FIND' && resolvedActivityDefinition?.socialMode !== undefined && resolvedActivityDefinition.socialMode !== 'SOLO';
+
+  useEffect(() => {
+    if (!showPersonPicker || savedPeople !== null || loadingPeople) return;
+    setLoadingPeople(true);
+    fetch('/api/people')
+      .then((res) => (res.ok ? res.json() : Promise.reject(new Error('Unable to load people.'))))
+      .then((data: SavedPersonRow[]) => setSavedPeople(data))
+      .catch(() => setSavedPeople([]))
+      .finally(() => setLoadingPeople(false));
+  }, [showPersonPicker, savedPeople, loadingPeople]);
+
+  useEffect(() => {
+    if (!focusMomentsKey) return;
+    requestAnimationFrame(() => {
+      momentsSectionRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    });
+  }, [focusMomentsKey]);
 
   const selectedHorizon = HORIZONS.find((item) => item.value === horizon) ?? HORIZONS[0];
   const selectedDuration = DURATIONS.find((item) => item.value === durationMinutes) ?? DURATIONS[2];
@@ -630,18 +704,22 @@ export function PlanWithAuraView({ onTimingSearch, onViewDay, onPlanLogged, time
   };
 
   const handleCancelPlan = async (plan: UpcomingPlan) => {
-    if (planActionStates[plan.id] || plan.status === 'LOGGED') return;
+    if (planActionStates[plan.id]) return;
 
     setPlanActionStates((states) => ({ ...states, [plan.id]: 'CANCELLING' }));
     try {
+      // Server decides cancel vs. permanent removal from the plan's own
+      // status -- UPCOMING gets cancelled, LOGGED/CANCELLED gets removed
+      // for good (see app/api/plans/[planId]/route.ts).
       const res = await fetch(`/api/plans/${plan.id}`, { method: 'DELETE' });
-      if (!res.ok) throw new Error('Unable to cancel plan.');
+      if (!res.ok) throw new Error('Unable to remove plan.');
       setSavedPlans((plans) => plans.filter((item) => item.id !== plan.id));
       setExpandedPlanId(null);
+      setConfirmingRemovePlanId(null);
       onPlanLogged?.();
       triggerHaptic('success');
     } catch (err) {
-      console.error('Failed to cancel plan:', err);
+      console.error('Failed to remove plan:', err);
     } finally {
       setPlanActionStates((states) => {
         const next = { ...states };
@@ -657,24 +735,123 @@ export function PlanWithAuraView({ onTimingSearch, onViewDay, onPlanLogged, time
     setError('');
     try {
       const selection = resolveActivitySelection(taskTitle);
-      const next = await onTimingSearch({
-        mode: 'FIND',
-        ...selection,
-        durationMinutes,
-        horizon,
-        customStartDate: horizon === 'CUSTOM' ? customStartDate : undefined,
-        customEndDate: horizon === 'CUSTOM' ? customEndDate : undefined,
-        timePreference: toTimingPreference(timePreference),
-        limit: 3,
-      });
-      setFindResult(next);
+      // Product Structure V2 (brief section 12): a person is selected AND
+      // resolves to a known catalog activity -> everyday SHARED timing,
+      // never findSharedMuhurthams (see everydayTimingFit.ts's own doc
+      // comment for why). Otherwise, existing GENERAL/personalized FIND is
+      // completely unchanged.
+      if (selectedPersonId && selection.activityId) {
+        const res = await fetch('/api/timing-search/shared', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            activityId: selection.activityId,
+            durationMinutes,
+            horizon,
+            customStartDate: horizon === 'CUSTOM' ? customStartDate : undefined,
+            customEndDate: horizon === 'CUSTOM' ? customEndDate : undefined,
+            timePreference: toTimingPreference(timePreference),
+            limit: 3,
+            savedPersonId: selectedPersonId,
+          }),
+        });
+        const data = await res.json();
+        if (!res.ok) throw new Error(data?.error || 'Unable to find a shared time.');
+        setSharedFindResult(data.candidates as EverydaySharedCandidate[]);
+        setFindResult(null);
+      } else {
+        const next = await onTimingSearch({
+          mode: 'FIND',
+          ...selection,
+          durationMinutes,
+          horizon,
+          customStartDate: horizon === 'CUSTOM' ? customStartDate : undefined,
+          customEndDate: horizon === 'CUSTOM' ? customEndDate : undefined,
+          timePreference: toTimingPreference(timePreference),
+          limit: 3,
+        });
+        setFindResult(next);
+        setSharedFindResult(null);
+      }
       setSavingOpportunityKey(null);
       setPlannedOpportunityKeys(new Set());
+      setMomentSavedKeys(new Set());
       triggerHaptic('success');
     } catch {
       setError('Aura could not find a time for this request. Try a shorter duration or a wider date range.');
     } finally {
       setIsLoading(false);
+    }
+  };
+
+  /** Product Structure V2 -- "Make this a Moment" (brief section 9/17):
+   * generalizes AuraMoment creation beyond Muhurtham Finder. Reuses the
+   * exact same POST /api/aura-moments endpoint, just with source: 'PLAN'.
+   * Solo results use scope PERSONAL (Timing Search already personalizes
+   * when profile data exists); a selected person uses SHARED. */
+  const handleMakeMoment = async (key: string, params: { activityId: string; start: string; end: string; ratingLabel: string; savedPersonId?: string }) => {
+    setMomentSavingKey(key);
+    try {
+      const res = await fetch('/api/aura-moments', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          scope: params.savedPersonId ? 'SHARED' : 'PERSONAL',
+          source: 'PLAN',
+          activityId: params.activityId,
+          startAt: params.start,
+          endAt: params.end,
+          ratingLabel: params.ratingLabel,
+          savedPersonId: params.savedPersonId,
+        }),
+      });
+      if (!res.ok) throw new Error('Unable to create this moment.');
+      const data = await res.json();
+      setMomentSavedKeys((prev) => new Set(prev).add(key));
+      setMomentShareInfo((prev) => ({ ...prev, [key]: { id: data.id, shareUrl: data.shareUrl } }));
+      triggerHaptic('success');
+    } catch {
+      // Best-effort, same convention as saveOpportunity's own catch below --
+      // no destructive state to roll back, the user can just retry.
+    } finally {
+      setMomentSavingKey(null);
+    }
+  };
+
+  /** Share option under Plan -- parity with Muhurtham Finder's "Share this
+   * moment" (handleShareMoment there): the moment already exists (created by
+   * handleMakeMoment above), so this only ever hands its shareUrl to the
+   * user -- native share sheet where supported, else copy-to-clipboard,
+   * else show the raw link. Never re-POSTs /api/aura-moments. */
+  const handleShareSavedMoment = async (key: string, scope: 'PERSONAL' | 'SHARED', activityId: string) => {
+    const info = momentShareInfo[key];
+    if (!info) return;
+    setSharingMomentKey(key);
+    setMomentShareFeedback(null);
+    const shareTitle = `A moment from Aura — ${FULL_ACTIVITY_CATALOG.find((a) => a.id === activityId)?.title ?? 'Timing'}`;
+    const shareText = 'Aura found a good time — take a look.';
+    try {
+      if (typeof navigator !== 'undefined' && navigator.share) {
+        await navigator.share({ title: shareTitle, text: shareText, url: info.shareUrl });
+        setMomentShareFeedback({ key, text: 'Shared!' });
+        trackEvent('AURA_MOMENT_SHARE_INITIATED', { auraMomentId: info.id, metadata: { scope, method: 'native_share', planningMode: getActivityDefinition(activityId)?.experience.planningMode ?? 'EVERYDAY' } });
+      } else if (typeof navigator !== 'undefined' && navigator.clipboard) {
+        await navigator.clipboard.writeText(info.shareUrl);
+        setMomentShareFeedback({ key, text: 'Link copied!' });
+        trackEvent('AURA_MOMENT_SHARE_INITIATED', { auraMomentId: info.id, metadata: { scope, method: 'copy_link', planningMode: getActivityDefinition(activityId)?.experience.planningMode ?? 'EVERYDAY' } });
+      } else {
+        setMomentShareFeedback({ key, text: info.shareUrl });
+      }
+    } catch (shareErr) {
+      // navigator.share() throws AbortError when the user simply dismisses
+      // the native sheet -- not a failure, nothing to show for that.
+      if (shareErr instanceof Error && shareErr.name === 'AbortError') {
+        setSharingMomentKey(null);
+        return;
+      }
+      setMomentShareFeedback({ key, text: info.shareUrl });
+    } finally {
+      setSharingMomentKey(null);
     }
   };
 
@@ -886,6 +1063,32 @@ export function PlanWithAuraView({ onTimingSearch, onViewDay, onPlanLogged, time
         </div>
       </section>
 
+      {showPersonPicker && (
+        <section style={panelStyle}>
+          <div style={{ color: '#aab7d2', fontSize: 13 }}>Who&apos;s this with?</div>
+          <div style={{ display: 'flex', flexWrap: 'wrap', gap: 9, marginTop: 12 }}>
+            <PersonPickerChip label="Just me" active={!selectedPersonId} onClick={() => { setSelectedPersonId(''); setFindResult(null); setSharedFindResult(null); }} />
+            {loadingPeople && savedPeople === null && <span style={{ fontSize: 12, color: '#94a3b8', alignSelf: 'center' }}>Loading…</span>}
+            {savedPeople?.map((person) => (
+              <PersonPickerChip
+                key={person.id}
+                label={`${RELATIONSHIP_ICON[person.relationshipType]} ${person.name}`}
+                active={selectedPersonId === person.id}
+                onClick={() => { setSelectedPersonId(person.id); setFindResult(null); setSharedFindResult(null); }}
+              />
+            ))}
+            <button type="button" onClick={onOpenPeople} style={moreChipStyle}>
+              + Choose someone
+            </button>
+          </div>
+          {savedPeople && savedPeople.length === 0 && (
+            <p style={{ fontSize: 12, color: '#94a3b8', marginTop: 10, lineHeight: 1.5 }}>
+              Add someone to find timings that work well for both of you.
+            </p>
+          )}
+        </section>
+      )}
+
       <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10 }}>
         <SelectPanel
           number={2}
@@ -954,6 +1157,12 @@ export function PlanWithAuraView({ onTimingSearch, onViewDay, onPlanLogged, time
               isSaving={savingOpportunityKey === findCandidateKey(findResult.candidates[0])}
               isPlanned={plannedOpportunityKeys.has(findCandidateKey(findResult.candidates[0]))}
               onPlan={() => saveOpportunity(findCandidateKey(findResult.candidates[0]), planPayloadFromCandidate(findResult.candidates[0], durationMinutes))}
+              onMakeMoment={resolvedActivityDefinition?.experience.momentEligible ? () => handleMakeMoment(findCandidateKey(findResult.candidates[0]), { activityId: resolvedActivityDefinition.id, start: findResult.candidates[0].start, end: findResult.candidates[0].end, ratingLabel: findResult.candidates[0].label }) : undefined}
+              isMomentSaving={momentSavingKey === findCandidateKey(findResult.candidates[0])}
+              isMomentSaved={momentSavedKeys.has(findCandidateKey(findResult.candidates[0]))}
+              onShareMoment={resolvedActivityDefinition ? () => handleShareSavedMoment(findCandidateKey(findResult.candidates[0]), 'PERSONAL', resolvedActivityDefinition.id) : undefined}
+              isSharingMoment={sharingMomentKey === findCandidateKey(findResult.candidates[0])}
+              shareFeedback={momentShareFeedback?.key === findCandidateKey(findResult.candidates[0]) ? momentShareFeedback.text : null}
             />
           )}
           {findResult.candidates.length > 1 && (
@@ -969,10 +1178,43 @@ export function PlanWithAuraView({ onTimingSearch, onViewDay, onPlanLogged, time
                   isSaving={savingOpportunityKey === findCandidateKey(candidate)}
                   isPlanned={plannedOpportunityKeys.has(findCandidateKey(candidate))}
                   onPlan={() => saveOpportunity(findCandidateKey(candidate), planPayloadFromCandidate(candidate, durationMinutes))}
+                  onMakeMoment={resolvedActivityDefinition?.experience.momentEligible ? () => handleMakeMoment(findCandidateKey(candidate), { activityId: resolvedActivityDefinition.id, start: candidate.start, end: candidate.end, ratingLabel: candidate.label }) : undefined}
+                  isMomentSaving={momentSavingKey === findCandidateKey(candidate)}
+                  isMomentSaved={momentSavedKeys.has(findCandidateKey(candidate))}
+                  onShareMoment={resolvedActivityDefinition ? () => handleShareSavedMoment(findCandidateKey(candidate), 'PERSONAL', resolvedActivityDefinition.id) : undefined}
+                  isSharingMoment={sharingMomentKey === findCandidateKey(candidate)}
+                  shareFeedback={momentShareFeedback?.key === findCandidateKey(candidate) ? momentShareFeedback.text : null}
                 />
               ))}
             </>
           )}
+        </section>
+      )}
+
+      {sharedFindResult && (
+        <section style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+          <SectionHeader label="Best For You Two" />
+          {sharedFindResult.length === 0 && (
+            <div style={emptyPlansStyle}>Aura could not find a shared time for this request. Try a shorter duration or a wider date range.</div>
+          )}
+          {sharedFindResult.map((candidate, index) => {
+            const key = `${candidate.start}-${candidate.end}`;
+            return (
+              <EverydaySharedResultCard
+                key={key}
+                kicker={index === 0 ? 'BEST FOR YOU TWO' : 'OTHER OPTION'}
+                activityTitle={resolvedActivityDefinition ? FULL_ACTIVITY_CATALOG.find((a) => a.id === resolvedActivityDefinition.id)?.title ?? taskTitle : taskTitle}
+                candidate={candidate}
+                durationMinutes={durationMinutes}
+                isMomentSaving={momentSavingKey === key}
+                isMomentSaved={momentSavedKeys.has(key)}
+                onMakeMoment={() => resolvedActivityDefinition && handleMakeMoment(key, { activityId: resolvedActivityDefinition.id, start: candidate.start, end: candidate.end, ratingLabel: candidate.rating, savedPersonId: selectedPersonId })}
+                onShareMoment={resolvedActivityDefinition ? () => handleShareSavedMoment(key, 'SHARED', resolvedActivityDefinition.id) : undefined}
+                isSharingMoment={sharingMomentKey === key}
+                shareFeedback={momentShareFeedback?.key === key ? momentShareFeedback.text : null}
+              />
+            );
+          })}
         </section>
       )}
       </>
@@ -1170,7 +1412,10 @@ export function PlanWithAuraView({ onTimingSearch, onViewDay, onPlanLogged, time
             onToggle={() => setExpandedPlanId((id) => id === plan.id ? null : plan.id)}
             onReschedule={() => handleReschedulePlan(plan)}
             onLog={() => handleLogPlan(plan)}
-            onCancel={() => handleCancelPlan(plan)}
+            confirmingRemove={confirmingRemovePlanId === plan.id}
+            onRequestRemove={() => setConfirmingRemovePlanId(plan.id)}
+            onCancelRemove={() => setConfirmingRemovePlanId(null)}
+            onConfirmRemove={() => handleCancelPlan(plan)}
           />
         )) : (
           <div style={emptyPlansStyle}>
@@ -1191,11 +1436,21 @@ export function PlanWithAuraView({ onTimingSearch, onViewDay, onPlanLogged, time
               onToggle={() => setExpandedPlanId((id) => id === plan.id ? null : plan.id)}
               onReschedule={() => handleReschedulePlan(plan)}
               onLog={() => handleLogPlan(plan)}
-              onCancel={() => handleCancelPlan(plan)}
+              confirmingRemove={confirmingRemovePlanId === plan.id}
+              onRequestRemove={() => setConfirmingRemovePlanId(plan.id)}
+              onCancelRemove={() => setConfirmingRemovePlanId(null)}
+              onConfirmRemove={() => handleCancelPlan(plan)}
             />
           ))}
         </section>
       )}
+
+      {/* Product Structure V2 (brief section 19): "Your Moments" becomes a
+       * primary Plan surface. Reuses SharedMomentsView as-is (embedded
+       * mode), never a second implementation. */}
+      <div ref={momentsSectionRef} style={{ scrollMarginTop: 18 }}>
+        <SharedMomentsView embedded onSeen={onMomentSeen} focusMomentToken={focusMomentToken} />
+      </div>
     </div>
   );
 }
@@ -1220,6 +1475,28 @@ function SectionHeader({ label, actionLabel, onAction }: { label: string; action
         </button>
       )}
     </div>
+  );
+}
+
+function PersonPickerChip({ label, active, onClick }: { label: string; active: boolean; onClick: () => void }) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      style={{
+        border: `1px solid ${active ? '#4ade80' : 'rgba(148, 163, 184, 0.28)'}`,
+        background: active ? 'rgba(74, 222, 128, 0.16)' : 'rgba(2, 6, 23, 0.35)',
+        color: active ? '#4ade80' : '#dbe7f4',
+        borderRadius: 999,
+        padding: '9px 14px',
+        fontSize: 12,
+        fontWeight: 850,
+        cursor: 'pointer',
+        whiteSpace: 'nowrap',
+      }}
+    >
+      {label}
+    </button>
   );
 }
 
@@ -1330,7 +1607,10 @@ function UpcomingPlan({
   onToggle,
   onReschedule,
   onLog,
-  onCancel,
+  confirmingRemove,
+  onRequestRemove,
+  onCancelRemove,
+  onConfirmRemove,
 }: {
   plan: UpcomingPlan;
   expanded: boolean;
@@ -1338,7 +1618,10 @@ function UpcomingPlan({
   onToggle: () => void;
   onReschedule: () => void;
   onLog: () => void;
-  onCancel: () => void;
+  confirmingRemove: boolean;
+  onRequestRemove: () => void;
+  onCancelRemove: () => void;
+  onConfirmRemove: () => void;
 }) {
   const isLogged = plan.status === 'LOGGED';
   const isBusy = Boolean(actionState);
@@ -1410,9 +1693,18 @@ function UpcomingPlan({
             <button type="button" onClick={onLog} disabled={isLogged || isBusy} style={{ ...planSecondaryActionStyle, opacity: isLogged || isBusy ? 0.55 : 1, cursor: isLogged || isBusy ? 'default' : 'pointer' }}>
               {logButtonLabel}
             </button>
-            {!isLogged && (
-              <button type="button" onClick={onCancel} disabled={isBusy} style={{ ...planDangerActionStyle, opacity: isBusy ? 0.55 : 1, cursor: isBusy ? 'default' : 'pointer' }}>
-                {actionState === 'CANCELLING' ? 'Cancelling...' : 'Cancel'}
+            {confirmingRemove ? (
+              <>
+                <button type="button" onClick={onConfirmRemove} disabled={isBusy} style={{ ...planDangerActionStyle, opacity: isBusy ? 0.55 : 1, cursor: isBusy ? 'default' : 'pointer' }}>
+                  {isBusy ? 'Removing...' : isLogged ? 'Confirm remove' : 'Confirm cancel'}
+                </button>
+                <button type="button" onClick={onCancelRemove} disabled={isBusy} style={{ ...planSecondaryActionStyle, opacity: isBusy ? 0.55 : 1, cursor: isBusy ? 'default' : 'pointer' }}>
+                  Keep it
+                </button>
+              </>
+            ) : (
+              <button type="button" onClick={onRequestRemove} disabled={isBusy} style={{ ...planDangerActionStyle, opacity: isBusy ? 0.55 : 1, cursor: isBusy ? 'default' : 'pointer' }}>
+                {isLogged ? 'Remove' : 'Cancel'}
               </button>
             )}
           </div>
@@ -1493,6 +1785,12 @@ function TimingResultCard({
   isSaving,
   isPlanned,
   onPlan,
+  onMakeMoment,
+  isMomentSaving,
+  isMomentSaved,
+  onShareMoment,
+  isSharingMoment,
+  shareFeedback,
 }: {
   kicker: string;
   candidate: TimingCandidate;
@@ -1502,6 +1800,15 @@ function TimingResultCard({
   isSaving?: boolean;
   isPlanned?: boolean;
   onPlan: () => void;
+  /** Product Structure V2 -- present only when the resolved activity is
+   * momentEligible (brief section 3). */
+  onMakeMoment?: () => void;
+  isMomentSaving?: boolean;
+  isMomentSaved?: boolean;
+  /** Share option under Plan -- present once the moment has been saved. */
+  onShareMoment?: () => void;
+  isSharingMoment?: boolean;
+  shareFeedback?: string | null;
 }) {
   const [showAllReasons, setShowAllReasons] = useState(false);
   const start = new Date(candidate.start);
@@ -1570,18 +1877,108 @@ function TimingResultCard({
         >
           {isSaving ? 'Saving...' : isPlanned ? 'Planned' : planCtaLabel}
         </button>
+        {onMakeMoment && (
+          <button
+            type="button"
+            onClick={onMakeMoment}
+            disabled={isMomentSaving || isMomentSaved}
+            style={{ border: 'none', background: 'transparent', color: isMomentSaved ? '#4ade80' : '#fb7185', fontWeight: 850, fontSize: 12, padding: 0, cursor: isMomentSaving || isMomentSaved ? 'default' : 'pointer', opacity: isMomentSaving ? 0.65 : 1 }}
+          >
+            {isMomentSaving ? 'Saving…' : isMomentSaved ? '✓ Moment saved' : 'Make this a Moment'}
+          </button>
+        )}
+        {isMomentSaved && onShareMoment && (
+          <button
+            type="button"
+            onClick={onShareMoment}
+            disabled={isSharingMoment}
+            style={{ border: 'none', background: 'transparent', color: shareFeedback ? '#4ade80' : '#38bdf8', fontWeight: 850, fontSize: 12, padding: 0, cursor: isSharingMoment ? 'default' : 'pointer', opacity: isSharingMoment ? 0.65 : 1 }}
+          >
+            {shareFeedback ?? (isSharingMoment ? 'Sharing…' : 'Share this moment')}
+          </button>
+        )}
       </div>
     </article>
   );
 }
 
-const panelStyle: React.CSSProperties = {
-  background: 'linear-gradient(145deg, rgba(15, 23, 42, 0.96), rgba(13, 28, 62, 0.82))',
-  border: '1px solid rgba(96, 165, 250, 0.18)',
-  borderRadius: 16,
-  boxShadow: 'inset 0 1px 0 rgba(255, 255, 255, 0.03)',
-  padding: 16,
+/** Section 14's everyday shared result experience: "Strong shared fit / Good
+ * social window / Supportive for you / Supportive for Anna" -- never
+ * "Muhurtham"/"auspicious" language (that's Explore's ceremonial framing).
+ * Deliberately a lighter, separate card from TimingResultCard/its Aura Fit
+ * gauge and reasons list -- EverydaySharedCandidate carries the general
+ * candidate's own reasons but this card focuses on the "for both of you"
+ * framing the brief's mockup shows. */
+const EVERYDAY_SHARED_RATING_TEXT: Record<string, string> = {
+  STRONG_TOGETHER_FIT: 'Strong shared fit',
+  GOOD_TOGETHER_FIT: 'Good shared fit',
+  EASY_TOGETHER_FIT: 'Easy fit together',
 };
+
+function EverydaySharedResultCard({
+  kicker,
+  activityTitle,
+  candidate,
+  durationMinutes,
+  onMakeMoment,
+  isMomentSaving,
+  isMomentSaved,
+  onShareMoment,
+  isSharingMoment,
+  shareFeedback,
+}: {
+  kicker: string;
+  activityTitle: string;
+  candidate: EverydaySharedCandidate;
+  durationMinutes: number;
+  onMakeMoment: () => void;
+  isMomentSaving?: boolean;
+  isMomentSaved?: boolean;
+  /** Share option under Plan -- present once the moment has been saved. */
+  onShareMoment?: () => void;
+  isSharingMoment?: boolean;
+  shareFeedback?: string | null;
+}) {
+  const start = new Date(candidate.start);
+  const end = new Date(candidate.end);
+  const timeOpts: Intl.DateTimeFormatOptions = { hour: 'numeric', minute: '2-digit' };
+  const timeRange = `${start.toLocaleTimeString('en-US', timeOpts)} - ${end.toLocaleTimeString('en-US', timeOpts)}`;
+  const dateLabel = start.toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric' });
+
+  return (
+    <article style={{ ...panelStyle, padding: 15 }}>
+      <div style={{ color: '#4ade80', fontFamily: 'var(--as-font-mono)', fontSize: 11, fontWeight: 900, textTransform: 'uppercase' }}>{kicker}</div>
+      <h2 style={{ margin: '7px 0 0', color: '#f8fafc', fontSize: 18 }}>{activityTitle}</h2>
+      <div style={{ color: '#dbe7f4', fontSize: 14, marginTop: 5 }}>{dateLabel} · {timeRange}</div>
+      <div style={{ color: '#fb7185', fontSize: 12, marginTop: 7, fontWeight: 800 }}>{EVERYDAY_SHARED_RATING_TEXT[candidate.rating]} · {durationLabel(durationMinutes)}</div>
+      <div style={{ marginTop: 10, fontSize: 12, color: '#94a3b8', lineHeight: 1.5 }}>
+        Supportive for you{candidate.partnerScore >= candidate.generalCandidate.score ? ' and them' : ''}.
+      </div>
+      <div style={{ marginTop: 12, display: 'flex', alignItems: 'center', gap: 10 }}>
+        <button
+          type="button"
+          onClick={onMakeMoment}
+          disabled={isMomentSaving || isMomentSaved}
+          style={{ border: 'none', background: 'transparent', color: isMomentSaved ? '#4ade80' : '#fb7185', fontWeight: 850, fontSize: 12, padding: 0, cursor: isMomentSaving || isMomentSaved ? 'default' : 'pointer', opacity: isMomentSaving ? 0.65 : 1 }}
+        >
+          {isMomentSaving ? 'Saving…' : isMomentSaved ? '✓ Moment saved' : 'Make this a Moment'}
+        </button>
+        {isMomentSaved && onShareMoment && (
+          <button
+            type="button"
+            onClick={onShareMoment}
+            disabled={isSharingMoment}
+            style={{ border: 'none', background: 'transparent', color: shareFeedback ? '#4ade80' : '#38bdf8', fontWeight: 850, fontSize: 12, padding: 0, cursor: isSharingMoment ? 'default' : 'pointer', opacity: isSharingMoment ? 0.65 : 1 }}
+          >
+            {shareFeedback ?? (isSharingMoment ? 'Sharing…' : 'Share this moment')}
+          </button>
+        )}
+      </div>
+    </article>
+  );
+}
+
+const panelStyle: React.CSSProperties = theme.panelStyle;
 
 const modeSwitcherStyle: React.CSSProperties = {
   display: 'grid',

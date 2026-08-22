@@ -71,7 +71,11 @@ const AURA_FIT_BASELINE: Record<string, Partial<Record<'ABHIJIT' | 'BRAHMA' | 'G
   'deep-work': { ABHIJIT: 75, BRAHMA: 74, GULIKA: 62, NEUTRAL: 61, RAHU_KALAM: 30, YAMA: 30 },
   'tea-break': { ABHIJIT: 76, BRAHMA: 70, GULIKA: 72, NEUTRAL: 62, RAHU_KALAM: 51, YAMA: 51 },
 };
-for (const title of ['I need to start my road trip', 'Deep Work', 'Tea break']) {
+// 'I need to start my road trip' now resolves to Product Structure V2's
+// dedicated everyday road-trip activity (start-journey's own aliases no
+// longer include "road trip" -- see personalizedTasks.ts), so this pin
+// uses a phrase that still matches start-journey's remaining aliases.
+for (const title of ['I need to start a journey', 'Deep Work', 'Tea break']) {
   const activity = findActivityIntent(title);
   if (!activity) { check(`${title} resolves to a catalog activity`, false); continue; }
   const expected = AURA_FIT_BASELINE[activity.id];
@@ -82,7 +86,7 @@ for (const title of ['I need to start my road trip', 'Deep Work', 'Tea break']) 
 }
 
 // evaluateActivityFit's new `reasons` field is additive and does not disturb the score.
-const journeyActivity = findActivityIntent('I need to start my road trip')!;
+const journeyActivity = findActivityIntent('I need to start a journey')!;
 const journeyFit = evaluateActivityFit({ activity: journeyActivity, date: auraFitDate, windowType: 'ABHIJIT' });
 check('evaluateActivityFit exposes structured reasons alongside the unchanged score', journeyFit.reasons.length > 0 && journeyFit.score === 76);
 check('evaluateActivityFit reasons include the activity-rule reason for a recommended window', journeyFit.reasons.some((reason) => reason.code === 'ACTIVITY_RULE_SUPPORT' && reason.value === 'ABHIJIT'));

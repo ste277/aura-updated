@@ -90,6 +90,7 @@ async function main() {
       ownerUserId: owner.id,
       publicToken: momentToken,
       scope: 'GENERAL',
+      source: 'PLAN',
       activityId: 'start-journey',
       activityTitle: 'Start a Journey',
       activityIcon: '🧳',
