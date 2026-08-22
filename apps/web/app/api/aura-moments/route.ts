@@ -91,8 +91,15 @@ export async function GET(req: NextRequest) {
   // The owner's own private view -- fine to include publicToken/shareUrl
   // (they already have it, it's literally what they shared) and id. Never
   // includes natal/birth data since AuraMoment never stores any in the
-  // first place -- there is nothing here to accidentally leak.
+  // first place -- there is nothing here to accidentally leak. planningMode
+  // is derived (never stored) the same way PublicAuraMoment's own field is,
+  // so the owner's own list can pick everyday vs. ceremonial copy too
+  // (Everyday Moment Rescheduling V1).
   return NextResponse.json(
-    moments.map((m) => ({ ...m, shareUrl: buildMomentShareUrl(req, m.publicToken) }))
+    moments.map((m) => ({
+      ...m,
+      shareUrl: buildMomentShareUrl(req, m.publicToken),
+      planningMode: getActivityDefinition(m.activityId)?.experience.planningMode ?? 'EVERYDAY',
+    }))
   );
 }

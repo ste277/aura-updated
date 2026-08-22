@@ -8,18 +8,23 @@ import { resolveTzOffsetMinutes } from '../../../../../lib/timezone';
 import { DailyAssistantContext } from '../../../../../../../packages/recommendation/src/dailyAssistant';
 
 /**
- * Owner-authenticated (brief section 20) -- runs a fresh, PRIVATE Shared
- * Muhurtham search for alternatives to a moment the recipient asked to
- * reschedule. Never invoked automatically (brief section 5: "Do not
- * automatically run a potentially expensive Shared search when the owner
- * opens the page") -- only when this endpoint is explicitly called (the
- * owner's "Find another time" button).
+ * Owner-authenticated -- runs a fresh, PRIVATE search for alternatives to a
+ * moment the recipient asked to reschedule (Muhurtham occasion search for a
+ * MUHURTHAM-sourced moment, Timing Search / everyday shared timing for a
+ * PLAN-sourced one -- see findAuraMomentAlternatives() for the routing).
+ * Never invoked automatically ("Do not automatically run a potentially
+ * expensive search when the owner opens the page") -- only when this
+ * endpoint is explicitly called (the owner's "Find another time" button).
  *
- * Recomputes both natal contexts server-side on every call (brief section
- * 11) -- AuraMoment never snapshots natal data, so there is nothing to
- * reuse from the original share; getAuraMomentForOwner() resolves the
- * SavedPerson id from the AURAMOMENT itself, never trusting one from the
- * request body (brief section 20).
+ * Recomputes both natal contexts server-side on every call -- AuraMoment
+ * never snapshots natal data, so there is nothing to reuse from the
+ * original share; getAuraMomentForOwner() resolves the SavedPerson id from
+ * the AURAMOMENT itself, never trusting one from the request body. Unlike
+ * the old MUHURTHAM-only version of this route, an incomplete profile is
+ * NOT fetched-then-rejected up front for a PLAN moment -- findAuraMomentAlternatives()
+ * itself decides what each source/scope actually requires (MUHURTHAM+SHARED
+ * still hard-requires both profiles, exactly as before; PLAN degrades
+ * gracefully instead).
  */
 export async function POST(req: NextRequest, { params }: { params: { token: string } }) {
   const session = getSessionFromRequest(req);
@@ -31,20 +36,8 @@ export async function POST(req: NextRequest, { params }: { params: { token: stri
   const moment = await getAuraMomentForOwner(session.userId, params.token);
   if (!moment) return NextResponse.json({ error: 'Moment not found.' }, { status: 404 });
 
-  if (moment.scope !== 'SHARED' || !moment.savedPersonId) {
-    return NextResponse.json({ error: 'Alternatives are only available for Shared Muhurtham moments.' }, { status: 400 });
-  }
   if (moment.responseState !== 'ANOTHER_TIME' || !moment.responsePreference) {
     return NextResponse.json({ error: 'This moment has no reschedule preference to act on yet.' }, { status: 400 });
-  }
-
-  const ownerPersonalContext = buildPersonalMuhurtaContextForUser(user);
-  if (!ownerPersonalContext) {
-    return NextResponse.json({ status: 'USER_PROFILE_INCOMPLETE' }, { status: 200 });
-  }
-  const savedPersonContext = await getSavedPersonNatalContext(moment.savedPersonId, session.userId);
-  if (!savedPersonContext) {
-    return NextResponse.json({ status: 'SAVED_PERSON_PROFILE_INCOMPLETE' }, { status: 200 });
   }
 
   const now = new Date();
@@ -54,8 +47,9 @@ export async function POST(req: NextRequest, { params }: { params: { token: stri
     longitude: user.longitude,
     timezone: user.timezone,
     tzOffsetMinutes: resolveTzOffsetMinutes(user.timezone, now),
-    personalContext: ownerPersonalContext,
+    personalContext: buildPersonalMuhurtaContextForUser(user),
   };
+  const savedPersonContext = moment.savedPersonId ? (await getSavedPersonNatalContext(moment.savedPersonId, session.userId)) ?? undefined : undefined;
 
   const outcome = findAuraMomentAlternatives({ auraMoment: moment, ownerContext, savedPersonContext });
   return NextResponse.json(outcome);

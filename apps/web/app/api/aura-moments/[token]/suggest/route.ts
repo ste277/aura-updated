@@ -9,6 +9,7 @@ import { buildMomentShareUrl, defaultExpiresAt, explanationSnapshotFor, generate
 import { parseJsonObject } from '../../../../../lib/request';
 import { resolveTzOffsetMinutes } from '../../../../../lib/timezone';
 import { DailyAssistantContext } from '../../../../../../../packages/recommendation/src/dailyAssistant';
+import { getActivityDefinition } from '../../../../../../../packages/recommendation/src/activityDefinitions';
 import { recordProductEvent } from '../../../../../lib/productEvents';
 
 /**
@@ -40,17 +41,9 @@ export async function POST(req: NextRequest, { params }: { params: { token: stri
   const original = await getAuraMomentForOwner(session.userId, params.token);
   if (!original) return NextResponse.json({ error: 'Moment not found.' }, { status: 404 });
 
-  if (original.scope !== 'SHARED' || !original.savedPersonId) {
-    return NextResponse.json({ error: 'Alternatives are only available for Shared Muhurtham moments.' }, { status: 400 });
-  }
   if (original.responseState !== 'ANOTHER_TIME' || !original.responsePreference) {
     return NextResponse.json({ error: 'This moment has no reschedule preference to act on yet.' }, { status: 400 });
   }
-
-  const ownerPersonalContext = buildPersonalMuhurtaContextForUser(user);
-  if (!ownerPersonalContext) return NextResponse.json({ error: 'Complete your birth profile first.' }, { status: 400 });
-  const savedPersonContext = await getSavedPersonNatalContext(original.savedPersonId, session.userId);
-  if (!savedPersonContext) return NextResponse.json({ error: "This person's profile is incomplete." }, { status: 400 });
 
   const now = new Date();
   const ownerContext: DailyAssistantContext = {
@@ -59,8 +52,9 @@ export async function POST(req: NextRequest, { params }: { params: { token: stri
     longitude: user.longitude,
     timezone: user.timezone,
     tzOffsetMinutes: resolveTzOffsetMinutes(user.timezone, now),
-    personalContext: ownerPersonalContext,
+    personalContext: buildPersonalMuhurtaContextForUser(user),
   };
+  const savedPersonContext = original.savedPersonId ? (await getSavedPersonNatalContext(original.savedPersonId, session.userId)) ?? undefined : undefined;
 
   const outcome = findAuraMomentAlternatives({ auraMoment: original, ownerContext, savedPersonContext });
   if (outcome.status !== 'OK' || body.index >= outcome.candidates.length) {
@@ -71,15 +65,18 @@ export async function POST(req: NextRequest, { params }: { params: { token: stri
   const newMoment = await createAuraMoment({
     ownerUserId: session.userId,
     publicToken: generatePublicMomentToken(),
-    scope: 'SHARED',
-    // A suggested alternative always came through this reschedule flow --
-    // itself only ever reachable via findAuraMomentAlternatives(), which
-    // (Product Structure V2) only resolves for Muhurtham-eligible
-    // activities. Preserving original.source anyway (rather than hardcoding
-    // MUHURTHAM) keeps this correct if that constraint ever loosens.
+    // Everyday Moment Rescheduling V1 (brief section 13): the successor must
+    // preserve the ORIGINAL scope, not force SHARED -- a GENERAL/PERSONAL
+    // PLAN moment's successor stays GENERAL/PERSONAL. Previously hardcoded
+    // to 'SHARED', which was harmless only because the route itself used to
+    // gate out every non-SHARED moment before reaching here.
+    scope: original.scope,
+    // Section 13: the successor's source must match the original's --
+    // a PLAN moment's successor stays PLAN, a MUHURTHAM moment's successor
+    // stays MUHURTHAM. Never hardcode either.
     source: original.source,
-    // Preserve the exact occasion (brief section 10) -- never broadened to
-    // a generic family, always the original's own canonical activity.
+    // Preserve the exact occasion -- never broadened to a generic family,
+    // always the original's own canonical activity.
     activityId: original.activityId,
     activityTitle: original.activityTitle,
     activityIcon: original.activityIcon,
@@ -90,7 +87,9 @@ export async function POST(req: NextRequest, { params }: { params: { token: stri
     sharedPersonDisplayName: original.sharedPersonDisplayName,
     senderDisplayName: original.senderDisplayName,
     ratingLabel: candidate.ratingLabel,
-    explanationSnapshot: explanationSnapshotFor(original.activityId, 'SHARED'),
+    // Section 14: generated fresh from the successor's own scope/activity,
+    // never copied from the original (which may describe different timing).
+    explanationSnapshot: explanationSnapshotFor(original.activityId, original.scope),
     expiresAt: defaultExpiresAt(new Date(candidate.endAt)),
     previousMomentId: original.id,
   });
@@ -99,7 +98,12 @@ export async function POST(req: NextRequest, { params }: { params: { token: stri
     eventName: 'AURA_MOMENT_ALTERNATIVE_CREATED',
     userId: session.userId,
     auraMomentId: newMoment.id,
-    metadata: { scope: 'SHARED', activityId: newMoment.activityId },
+    metadata: {
+      scope: newMoment.scope,
+      activityId: newMoment.activityId,
+      source: newMoment.source,
+      planningMode: getActivityDefinition(newMoment.activityId)?.experience.planningMode ?? 'EVERYDAY',
+    },
   });
 
   return NextResponse.json({ id: newMoment.id, shareUrl: buildMomentShareUrl(req, newMoment.publicToken) }, { status: 201 });

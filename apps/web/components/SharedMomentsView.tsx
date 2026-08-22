@@ -19,6 +19,11 @@ interface SharedMomentRow {
   publicToken: string;
   shareUrl: string;
   scope: 'GENERAL' | 'PERSONAL' | 'SHARED';
+  source: 'PLAN' | 'MUHURTHAM';
+  /** Derived server-side (never stored) -- picks everyday vs. ceremonial
+   * copy for this moment's alternatives, the same field the public DTO
+   * already carries. */
+  planningMode: 'EVERYDAY' | 'IMPORTANT' | 'CEREMONIAL';
   activityTitle: string;
   activityIcon: string | null;
   startAt: string;
@@ -70,11 +75,26 @@ const PREFERENCE_TEXT: Record<AlternativePreference, string> = {
   NO_PREFERENCE: 'Anything else',
 };
 
-const RATING_TEXT_SHARED: Record<string, string> = {
+/** Every rating vocabulary an alternative candidate can carry, regardless
+ * of which source/scope strategy produced it (Muhurtham SHARED, everyday
+ * shared timing, or plain Timing Search for GENERAL/PERSONAL). One shared
+ * lookup so the alternatives list never has to know which engine ran. */
+const RATING_TEXT: Record<string, string> = {
+  // Muhurtham SHARED (findSharedMuhurthams)
   EXCELLENT_SHARED_FIT: 'Excellent shared fit',
   STRONG_SHARED_FIT: 'Strong shared fit',
   GOOD_SHARED_FIT: 'Good shared fit',
   MIXED_SHARED_FIT: 'Mixed fit',
+  // Everyday shared timing (findEverydaySharedTiming)
+  STRONG_TOGETHER_FIT: 'Strong shared fit',
+  GOOD_TOGETHER_FIT: 'Good shared fit',
+  EASY_TOGETHER_FIT: 'Easy fit together',
+  // Plain Timing Search (GENERAL/PERSONAL PLAN alternatives)
+  EXCELLENT: 'Excellent fit',
+  VERY_GOOD: 'Very good fit',
+  GOOD: 'Good fit',
+  USABLE: 'Usable',
+  CAUTION: 'Use caution',
 };
 
 function formatMomentDateLabel(iso: string, timezone: string): string {
@@ -329,7 +349,11 @@ function MomentCard({
   const [suggested, setSuggested] = useState<{ shareUrl: string } | null>(null);
 
   // Brief section 16: ACCEPTED is terminal for V1 -- no reschedule CTA.
-  const canFindAnotherTime = moment.scope === 'SHARED' && moment.status === 'ACTIVE' && moment.responseState === 'ANOTHER_TIME';
+  // Everyday Moment Rescheduling V1: a PLAN moment can look for another time
+  // regardless of scope (GENERAL/PERSONAL/SHARED all route to a real
+  // strategy in findAuraMomentAlternatives); a MUHURTHAM moment keeps the
+  // exact original restriction -- SHARED only.
+  const canFindAnotherTime = moment.status === 'ACTIVE' && moment.responseState === 'ANOTHER_TIME' && (moment.source === 'PLAN' || moment.scope === 'SHARED');
 
   const handleFindAlternatives = async () => {
     onFindAlternatives?.();
@@ -460,15 +484,21 @@ function MomentCard({
       )}
       {alternatives && alternatives.status === 'OK' && alternatives.candidates.length > 0 && (
         <div style={{ marginTop: 12 }}>
-          <div style={sectionKickerStyle}>Aura found a few alternatives</div>
+          {/* Section 11: never ceremonial "Muhurtham" language for an
+           * everyday activity -- planningMode picks the framing. */}
+          <div style={sectionKickerStyle}>{moment.planningMode === 'EVERYDAY' ? 'Better times' : 'Alternative Muhurtham'}</div>
           <div style={{ display: 'flex', flexDirection: 'column', gap: 10, marginTop: 8 }}>
             {alternatives.candidates.map((candidate, index) => (
               <div key={`${candidate.startAt}-${index}`} style={{ ...panchangaCellStyle, display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 10 }}>
                 <div>
-                  {index === 0 && <div style={{ fontSize: 10, fontWeight: 800, color: '#fb7185', marginBottom: 2 }}>❤️ BEST ALTERNATIVE</div>}
+                  {index === 0 && (
+                    <div style={{ fontSize: 10, fontWeight: 800, color: '#fb7185', marginBottom: 2 }}>
+                      {moment.planningMode === 'EVERYDAY' ? '❤️ BETTER ALTERNATIVE' : '❤️ BEST ALTERNATIVE'}
+                    </div>
+                  )}
                   <div style={{ fontSize: 13, fontWeight: 800 }}>{formatMomentDateLabel(candidate.startAt, moment.timezone)}</div>
                   <div style={{ fontSize: 12, color: '#38bdf8', marginTop: 2 }}>{formatMomentTimeRange(candidate.startAt, candidate.endAt, moment.timezone)}</div>
-                  <div style={{ fontSize: 11, color: '#4ade80', marginTop: 2, fontWeight: 800 }}>{RATING_TEXT_SHARED[candidate.ratingLabel] ?? candidate.ratingLabel}</div>
+                  <div style={{ fontSize: 11, color: '#4ade80', marginTop: 2, fontWeight: 800 }}>{RATING_TEXT[candidate.ratingLabel] ?? candidate.ratingLabel}</div>
                 </div>
                 <button type="button" onClick={() => handleSuggest(index)} disabled={suggestingIndex !== null} style={linkButtonStyle}>
                   {suggestingIndex === index ? 'Suggesting…' : 'Suggest this'}
