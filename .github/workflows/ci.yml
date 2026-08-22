@@ -61,12 +61,14 @@ jobs:
         run: npx ts-node test/auraMomentAlternatives.test.ts
       - name: Run Aura Moment request validation test
         run: npx ts-node test/auraMomentRequest.test.ts
-      # test/savedPersonDb.test.ts and test/auraMomentsDb.test.ts are
-      # intentionally NOT run here -- they make real INSERT/SELECT/UPDATE/
-      # DELETE calls against Postgres via a live DATABASE_URL, and this job
-      # has no Postgres service provisioned. Run them locally against a real
-      # database instead (see each file's own doc comment for the exact
-      # command).
+      - name: Run Aura Updates test
+        run: npx ts-node test/auraUpdates.test.ts
+      # test/savedPersonDb.test.ts, test/auraMomentsDb.test.ts, and
+      # test/auraUpdatesDb.test.ts are intentionally NOT run here -- they
+      # make real INSERT/SELECT/UPDATE/DELETE calls against Postgres via a
+      # live DATABASE_URL, and this job has no Postgres service provisioned.
+      # Run them locally against a real database instead (see each file's
+      # own doc comment for the exact command).
       - name: Install web deps
         working-directory: apps/web
         run: npm install
@@ -90,6 +92,10 @@ jobs:
         env:
           TS_NODE_COMPILER_OPTIONS: '{"jsx":"react"}'
         run: npx ts-node test/muhurthamFinderViewLogic.test.ts
+      - name: Run Home dashboard logic test
+        env:
+          TS_NODE_COMPILER_OPTIONS: '{"jsx":"react"}'
+        run: npx ts-node test/homeDashboardLogic.test.ts
   web-build:
     name: Next.js production build
     runs-on: ubuntu-latest

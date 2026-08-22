@@ -21,6 +21,10 @@ interface YouViewProps {
   onOpenSharedMoments: () => void;
   onSignOut: () => void;
   focusNotificationsKey?: number;
+  /** Aura Updates V1 -- unread moment-response count (brief section 9: "a
+   * subtle unread indicator... a small dot" on the existing Shared Moments
+   * entry, NOT a new nav item). Omitted or 0 renders no badge at all. */
+  sharedMomentsUnreadCount?: number;
 }
 
 export function YouView({
@@ -39,6 +43,7 @@ export function YouView({
   onOpenSharedMoments,
   onSignOut,
   focusNotificationsKey,
+  sharedMomentsUnreadCount,
 }: YouViewProps) {
   const notificationsRef = useRef<HTMLDivElement | null>(null);
   const [openSettingsPanel, setOpenSettingsPanel] = useState<
@@ -141,7 +146,7 @@ export function YouView({
         <SettingsRow icon="📋" title="Activity Log" detail="View logged activities" onClick={onOpenActivityLog} />
         <SettingsRow icon="🗓️" title="Panchang Calendar" detail="Tithi, Nakshatra, and windows by day" onClick={onOpenPanchang} />
         <SettingsRow icon="👥" title="People" detail="Manage the people you plan with" onClick={onOpenPeople} />
-        <SettingsRow icon="🔗" title="Shared Moments" detail="Moments you've shared and their responses" onClick={onOpenSharedMoments} />
+        <SettingsRow icon="🔗" title="Shared Moments" detail="Moments you've shared and their responses" onClick={onOpenSharedMoments} badgeCount={sharedMomentsUnreadCount} />
         <SettingsLinkRow icon="⬇️" title="Export Data" detail="Download your timing data" href="/api/users/export" />
         <SettingsRow icon="❔" title="Help & FAQ" detail="Learn more about myAuraMoment" expanded={openSettingsPanel === 'help'} onClick={() => toggleSettingsPanel('help')} />
         {openSettingsPanel === 'help' && (
@@ -230,12 +235,17 @@ function SettingsRow({
   detail,
   expanded,
   onClick,
+  badgeCount,
 }: {
   icon: string;
   title: string;
   detail: string;
   expanded?: boolean;
   onClick?: () => void;
+  /** Aura Updates V1 -- a small unread-count pill next to the chevron.
+   * Omitted or 0 renders nothing (brief section 9: subtle indicator only,
+   * never a persistent zero). */
+  badgeCount?: number;
 }) {
   return (
     <button
@@ -250,11 +260,18 @@ function SettingsRow({
         <span style={{ display: 'block', fontSize: 13, fontWeight: 800 }}>{title}</span>
         <span style={{ display: 'block', fontSize: 11, color: '#94a3b8', marginTop: 2, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{detail}</span>
       </span>
-      {onClick && (
-        <span style={{ color: expanded ? '#4ade80' : '#94a3b8', fontSize: 16, transform: expanded ? 'rotate(90deg)' : 'rotate(0deg)', transition: 'transform 160ms ease, color 160ms ease' }}>
-          ›
-        </span>
-      )}
+      <span style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+        {Boolean(badgeCount) && (
+          <span style={{ minWidth: 18, height: 18, borderRadius: 9, background: '#fb7185', color: '#020617', fontSize: 10, fontWeight: 900, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '0 5px' }}>
+            {badgeCount! > 9 ? '9+' : badgeCount}
+          </span>
+        )}
+        {onClick && (
+          <span style={{ color: expanded ? '#4ade80' : '#94a3b8', fontSize: 16, transform: expanded ? 'rotate(90deg)' : 'rotate(0deg)', transition: 'transform 160ms ease, color 160ms ease' }}>
+            ›
+          </span>
+        )}
+      </span>
     </button>
   );
 }

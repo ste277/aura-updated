@@ -3,6 +3,7 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { getPersonalizedTasks, UserChartContext } from '../../../packages/recommendation/src/personalizedTasks';
 import type { DailyBriefing } from '../../../packages/recommendation/src/dailyAssistant';
+import type { AuraUpdate } from '../lib/auraUpdates';
 import { triggerHaptic } from '../lib/haptics';
 
 interface HomeDashboardProps {
@@ -53,6 +54,17 @@ interface HomeDashboardProps {
   onInsightsClick?: () => void;
   onNotificationsClick?: () => void;
   onPanchangClick?: () => void;
+  /** Aura Updates V1 (brief section 7) -- already prioritized/sorted by
+   * summarizeAuraUpdates(); this component only ever shows the first 2-3.
+   * Omitted or empty renders no section at all -- never an empty state. */
+  momentUpdates?: AuraUpdate[];
+  /** Opens the moment's own public link (View / View moment) AND marks its
+   * response seen -- both happen together, see page.tsx. */
+  onViewMomentUpdate?: (momentToken: string) => void;
+  /** Routes into the EXISTING Shared Moments reschedule flow (brief section
+   * 12: "Do not create a second alternatives flow") -- never runs a search
+   * on Home itself. */
+  onFindAnotherTimeForMoment?: (momentToken: string) => void;
 }
 
 interface HomeUpcomingPlan {
@@ -131,6 +143,33 @@ function greeting() {
   return 'Good Morning';
 }
 
+/** Brief section 7: "Maximum: 2-3 recent/actionable cards" -- Home is a
+ * teaser into Shared Moments, never the full list. */
+export const MAX_HOME_MOMENT_CARDS = 3;
+
+/** Pure slice, exported for unit testing without rendering the component.
+ * summarizeAuraUpdates() (lib/auraUpdates.ts) already did the actual
+ * priority sort (actionable first, then most recent) -- this only ever caps
+ * how many of that already-ordered list Home is allowed to show. */
+export function selectHomeMomentCards(updates: AuraUpdate[]): AuraUpdate[] {
+  return updates.slice(0, MAX_HOME_MOMENT_CARDS);
+}
+
+function formatUpdateDateTime(iso: string) {
+  const date = new Date(iso);
+  return {
+    day: date.toLocaleDateString('en-US', { weekday: 'long', month: 'short', day: 'numeric' }),
+    time: date.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' }),
+  };
+}
+
+const PREFERENCE_TEXT: Record<string, string> = {
+  EARLIER: 'Earlier',
+  LATER: 'Later',
+  DIFFERENT_DAY: 'A different day',
+  NO_PREFERENCE: 'Anything else',
+};
+
 function scoreLabel(score: number) {
   return Math.max(1, Math.min(10, Math.round(score * 10) / 10));
 }
@@ -182,6 +221,9 @@ export function HomeDashboard({
   onInsightsClick,
   onNotificationsClick,
   onPanchangClick,
+  momentUpdates = [],
+  onViewMomentUpdate,
+  onFindAnotherTimeForMoment,
 }: HomeDashboardProps) {
   const [selectedHabit, setSelectedHabit] = useState<string | null>(null);
   const [selectedPlanId, setSelectedPlanId] = useState<string | null>(null);
@@ -466,6 +508,36 @@ export function HomeDashboard({
           <button type="button" onClick={() => onPlanClick?.()} style={outlineButtonStyle}>Plan this</button>
         </div>
       </section>
+
+      {momentUpdates.length > 0 && (
+        <section>
+          <SectionHeader label="Your Moments" />
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+            {selectHomeMomentCards(momentUpdates).map((update) => {
+              const { day, time } = formatUpdateDateTime(update.eventStartAt);
+              const isAccepted = update.type === 'MOMENT_ACCEPTED';
+              return (
+                <div key={update.id} style={{ ...panelStyle, padding: 16 }}>
+                  <div style={{ fontSize: 13, fontWeight: 800, color: isAccepted ? '#4ade80' : '#facc15' }}>
+                    {isAccepted ? `❤️ ${update.recipientDisplayName ?? 'They'} is in` : `↻ ${update.recipientDisplayName ?? 'They'} want${update.recipientDisplayName ? 's' : ''} another time`}
+                  </div>
+                  <div style={{ marginTop: 8, fontSize: 14, fontWeight: 750, color: '#f8fafc' }}>{update.activityTitle}</div>
+                  <div style={{ marginTop: 3, fontSize: 12, color: '#aab7d2' }}>
+                    {isAccepted ? `${day} · ${time}` : `Prefers: ${PREFERENCE_TEXT[update.preference ?? 'NO_PREFERENCE']}`}
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => (isAccepted ? onViewMomentUpdate?.(update.momentToken) : onFindAnotherTimeForMoment?.(update.momentToken))}
+                    style={{ ...outlineButtonStyle, width: 'auto', marginTop: 10, padding: '8px 16px' }}
+                  >
+                    {isAccepted ? 'View' : 'Find another time'}
+                  </button>
+                </div>
+              );
+            })}
+          </div>
+        </section>
+      )}
 
       <section>
         <SectionHeader label="Today's Flow" />

@@ -43,6 +43,16 @@ type AlternativesOutcome =
 
 interface SharedMomentsViewProps {
   onBack: () => void;
+  /** Aura Updates V1 -- called after "View" or "Find another time" marks a
+   * moment's response seen, so the caller (page.tsx) can refetch the unread
+   * badge without this view needing to know anything about that state
+   * itself. */
+  onSeen?: () => void;
+  /** When arriving here via a Home "Find another time" card, jump straight
+   * into that moment's alternatives (brief section 12: enter the EXISTING
+   * flow, not a second one) rather than leaving the owner to find the right
+   * card themselves. */
+  focusMomentToken?: string;
 }
 
 const PREFERENCE_TEXT: Record<AlternativePreference, string> = {
@@ -75,7 +85,7 @@ function responseText(moment: SharedMomentRow): { text: string; color: string } 
   return { text: 'Waiting for response', color: '#94a3b8' };
 }
 
-export function SharedMomentsView({ onBack }: SharedMomentsViewProps) {
+export function SharedMomentsView({ onBack, onSeen, focusMomentToken }: SharedMomentsViewProps) {
   const [moments, setMoments] = useState<SharedMomentRow[] | null>(null);
   const [error, setError] = useState('');
   const [copiedId, setCopiedId] = useState<string | null>(null);
@@ -97,6 +107,20 @@ export function SharedMomentsView({ onBack }: SharedMomentsViewProps) {
   useEffect(() => {
     loadMoments();
   }, []);
+
+  /** Section 6/10: marks ONE moment's response seen via the owner-authenticated
+   * endpoint (never the public bearer-link response route). Best-effort --
+   * a failure here shouldn't block the action (View/Find another time) the
+   * owner actually asked for. */
+  const markSeen = (publicToken: string) => {
+    fetch(`/api/aura-moments/${publicToken}/seen`, { method: 'POST' }).catch(() => {});
+    onSeen?.();
+  };
+
+  const handleView = (moment: SharedMomentRow) => {
+    window.open(moment.shareUrl, '_blank', 'noopener,noreferrer');
+    markSeen(moment.publicToken);
+  };
 
   const handleCopy = async (moment: SharedMomentRow) => {
     try {
@@ -153,12 +177,15 @@ export function SharedMomentsView({ onBack }: SharedMomentsViewProps) {
             moment={moment}
             copied={copiedId === moment.id}
             onCopy={() => handleCopy(moment)}
+            onView={() => handleView(moment)}
             confirmingRevoke={confirmingRevokeId === moment.id}
             revoking={revokingId === moment.id}
             onRequestRevoke={() => setConfirmingRevokeId(moment.id)}
             onCancelRevoke={() => setConfirmingRevokeId(null)}
             onConfirmRevoke={() => handleRevoke(moment)}
             onSuggested={loadMoments}
+            onFindAlternatives={() => markSeen(moment.publicToken)}
+            autoFindAlternatives={focusMomentToken !== undefined && focusMomentToken === moment.publicToken}
           />
         ))
       )}
@@ -170,16 +197,20 @@ function MomentCard({
   moment,
   copied,
   onCopy,
+  onView,
   confirmingRevoke,
   revoking,
   onRequestRevoke,
   onCancelRevoke,
   onConfirmRevoke,
   onSuggested,
+  onFindAlternatives,
+  autoFindAlternatives,
 }: {
   moment: SharedMomentRow;
   copied: boolean;
   onCopy: () => void;
+  onView: () => void;
   confirmingRevoke: boolean;
   revoking: boolean;
   onRequestRevoke: () => void;
@@ -188,6 +219,15 @@ function MomentCard({
   /** Called after a successful "Suggest this" so the parent can refetch the
    * list (the new moment shows up as its own row -- no separate thread UI). */
   onSuggested: () => void;
+  /** Aura Updates V1: fired once, the first time this card's alternatives
+   * are fetched -- marks the response seen (brief section 10: "'Find
+   * another time' is used directly... marking the response seen is also
+   * reasonable"). */
+  onFindAlternatives?: () => void;
+  /** Set when arriving here from a Home "Find another time" card -- jumps
+   * straight into the search instead of leaving the owner to find the
+   * button themselves. */
+  autoFindAlternatives?: boolean;
 }) {
   const response = responseText(moment);
   const [alternatives, setAlternatives] = useState<AlternativesOutcome | null>(null);
@@ -200,6 +240,7 @@ function MomentCard({
   const canFindAnotherTime = moment.scope === 'SHARED' && moment.status === 'ACTIVE' && moment.responseState === 'ANOTHER_TIME';
 
   const handleFindAlternatives = async () => {
+    onFindAlternatives?.();
     setLoadingAlternatives(true);
     setAlternativesError('');
     try {
@@ -213,6 +254,13 @@ function MomentCard({
       setLoadingAlternatives(false);
     }
   };
+
+  useEffect(() => {
+    if (autoFindAlternatives && canFindAnotherTime && !alternatives && !loadingAlternatives) {
+      handleFindAlternatives();
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [autoFindAlternatives]);
 
   const handleSuggest = async (index: number) => {
     setSuggestingIndex(index);
@@ -258,9 +306,9 @@ function MomentCard({
       )}
 
       <div style={{ display: 'flex', gap: 14, marginTop: 12, flexWrap: 'wrap' }}>
-        <a href={moment.shareUrl} target="_blank" rel="noreferrer" style={linkButtonStyle}>
+        <button type="button" onClick={onView} style={linkButtonStyle}>
           View →
-        </a>
+        </button>
         <button type="button" onClick={onCopy} style={linkButtonStyle}>
           {copied ? 'Copied ✓' : 'Copy link'}
         </button>
