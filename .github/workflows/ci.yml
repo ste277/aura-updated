@@ -33,6 +33,8 @@ jobs:
         run: npx ts-node test/timingSearch.test.ts
       - name: Run timing search API validation test
         run: npx ts-node test/timingSearchApi.test.ts
+      - name: Run panchang day service test
+        run: npx ts-node test/panchangDay.test.ts
       - name: Install web deps
         working-directory: apps/web
         run: npm install
