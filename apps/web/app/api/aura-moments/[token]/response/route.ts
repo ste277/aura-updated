@@ -3,6 +3,7 @@ import { AuraMomentAlternativePreference, respondToAuraMoment } from '../../../.
 import { parseJsonObject } from '../../../../../lib/request';
 import { isValidAlternativePreference, isValidMomentResponse } from '../../../../../lib/auraMomentRequest';
 import { resolvePublicAuraMoment } from '../../../../../lib/auraMoments';
+import { recordProductEvent } from '../../../../../lib/productEvents';
 
 /**
  * PUBLIC endpoint (brief section 10) -- no authentication, resolved
@@ -45,7 +46,7 @@ export async function POST(req: NextRequest, { params }: { params: { token: stri
     return NextResponse.json({ error: 'This Aura Moment is no longer available.' }, { status: 410 });
   }
 
-  await respondToAuraMoment(params.token, body.response, preference);
+  const updated = await respondToAuraMoment(params.token, body.response, preference);
 
   const after = await resolvePublicAuraMoment(params.token);
   if (after.status !== 'OK') {
@@ -53,5 +54,19 @@ export async function POST(req: NextRequest, { params }: { params: { token: stri
     // resolves above) -- same "no longer available" response either way.
     return NextResponse.json({ error: 'This Aura Moment is no longer available.' }, { status: 410 });
   }
+
+  // Recorded server-side, off the raw AuraMoment row (which has scope/id) --
+  // never off the public DTO in `after`, which deliberately strips id.
+  if (updated) {
+    void recordProductEvent({
+      eventName: body.response === 'ACCEPTED' ? 'AURA_MOMENT_ACCEPTED' : 'AURA_MOMENT_ANOTHER_TIME',
+      auraMomentId: updated.id,
+      metadata:
+        body.response === 'ACCEPTED'
+          ? { scope: updated.scope }
+          : { scope: updated.scope, preference: preference! },
+    });
+  }
+
   return NextResponse.json(after.moment);
 }

@@ -9,6 +9,7 @@ import type { MuhurtaReason } from '../../../packages/muhurta/src/activityOntolo
 import { formatMuhurtaReason } from '../../../packages/muhurta/src/muhurtaReasonFormat';
 import { localDateTimeToUTC } from '../lib/timezone';
 import { triggerHaptic } from '../lib/haptics';
+import { trackEvent } from '../lib/trackEvent';
 
 interface TaskSuggestion {
   title: string;
@@ -559,6 +560,7 @@ export function PlanWithAuraView({ onTimingSearch, onViewDay, onPlanLogged, time
       setShowAllPlans(true);
       onPlanLogged?.();
       triggerHaptic('success');
+      trackEvent('PLAN_RESULT_SELECTED', { metadata: { mode: planMode } });
       return saved;
     } catch {
       const replacedPlanId = reschedulingPlanId;

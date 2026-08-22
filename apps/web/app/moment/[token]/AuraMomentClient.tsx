@@ -3,6 +3,7 @@
 import React, { useState } from 'react';
 import type { PublicAuraMoment, PublicAuraMomentOutcome } from '../../../lib/auraMoments';
 import { buildGoogleCalendarUrl } from '../../../../../packages/recommendation/src/dailyAssistant';
+import { trackEvent } from '../../../lib/trackEvent';
 
 interface AuraMomentClientProps {
   token: string;
@@ -102,7 +103,7 @@ export function AuraMomentClient({ token, initialOutcome }: AuraMomentClientProp
             The person who shared it may have found a different time, or the link has expired.
           </p>
         </div>
-        <FindYourOwnMomentCta />
+        <FindYourOwnMomentCta momentToken={token} />
       </Shell>
     );
   }
@@ -182,7 +183,7 @@ export function AuraMomentClient({ token, initialOutcome }: AuraMomentClientProp
         )}
       </div>
 
-      <FindYourOwnMomentCta />
+      <FindYourOwnMomentCta momentToken={token} />
     </Shell>
   );
 }
@@ -210,11 +211,15 @@ function FindAnotherTimeLink() {
  * Works for both logged-out (root page shows sign-in) and logged-in
  * visitors (root page shows the app) without this page needing to know
  * which. */
-function FindYourOwnMomentCta() {
+function FindYourOwnMomentCta({ momentToken }: { momentToken: string }) {
   return (
     <div style={{ textAlign: 'center', marginTop: 30, paddingTop: 20, borderTop: '1px solid rgba(255,255,255,0.08)' }}>
       <div style={{ fontSize: 11, color: '#64748b', marginBottom: 10 }}>Timing guidance by Aura</div>
-      <a href="/" style={{ color: '#38bdf8', fontSize: 13, fontWeight: 800, textDecoration: 'none' }}>
+      <a
+        href="/"
+        onClick={() => trackEvent('AURA_MOMENT_FIND_YOUR_OWN_CLICKED', { momentToken })}
+        style={{ color: '#38bdf8', fontSize: 13, fontWeight: 800, textDecoration: 'none' }}
+      >
         Find your own moment →
       </a>
     </div>

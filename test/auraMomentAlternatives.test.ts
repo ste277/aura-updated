@@ -77,6 +77,7 @@ function fakeMoment(overrides: Partial<AuraMoment>): AuraMoment {
     respondedAt: new Date(),
     previousMomentId: null,
     ownerSeenResponseAt: null,
+    firstOpenedAt: null,
     createdAt: new Date(),
     expiresAt: null,
     ...overrides,

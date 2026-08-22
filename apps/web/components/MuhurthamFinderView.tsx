@@ -10,6 +10,7 @@ import { saveUpcomingPlanFromCandidate } from './PlanWithAuraView';
 import { ExploreModeToggle } from './ExploreModeToggle';
 import { getDatePartsInTimezone } from '../lib/timezone';
 import { RELATIONSHIP_ICON, RELATIONSHIP_LABEL, SavedPersonRow } from './PeopleView';
+import { trackEvent } from '../lib/trackEvent';
 
 interface MuhurthamFinderViewProps {
   timezone: string;
@@ -209,6 +210,7 @@ export function MuhurthamFinderView({ timezone, onBack, onOpenPanchangCalendar, 
     setShowAllDates(false);
     setShowAcceptable(false);
     setExpandedDate(null);
+    trackEvent('MUHURTHAM_SEARCH_STARTED', { metadata: { scope: searchScope, activityId } });
     try {
       const res = await fetch('/api/muhurtham-search', {
         method: 'POST',
@@ -286,6 +288,7 @@ export function MuhurthamFinderView({ timezone, onBack, onOpenPanchangCalendar, 
     setSharedOutcome(null);
     setActiveRange(null);
     setError('');
+    trackEvent('MUHURTHAM_SCOPE_SELECTED', { metadata: { scope: nextScope } });
   };
 
   const { strong: strongDates, acceptable: acceptableDates } = useMemo(() => partitionDatesByStrength(result?.dates ?? []), [result]);
@@ -354,9 +357,11 @@ export function MuhurthamFinderView({ timezone, onBack, onOpenPanchangCalendar, 
         if (typeof navigator !== 'undefined' && navigator.share) {
           await navigator.share({ title: shareTitle, text: shareText, url: shareUrl });
           setShareFeedback({ key, text: 'Shared!' });
+          trackEvent('AURA_MOMENT_SHARE_INITIATED', { auraMomentId: data.id, metadata: { scope, method: 'native_share' } });
         } else if (typeof navigator !== 'undefined' && navigator.clipboard) {
           await navigator.clipboard.writeText(shareUrl);
           setShareFeedback({ key, text: 'Link copied!' });
+          trackEvent('AURA_MOMENT_SHARE_INITIATED', { auraMomentId: data.id, metadata: { scope, method: 'copy_link' } });
         } else {
           setShareFeedback({ key, text: shareUrl });
         }

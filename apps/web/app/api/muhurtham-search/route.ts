@@ -6,6 +6,14 @@ import { resolveTzOffsetMinutes } from '../../../lib/timezone';
 import { buildPersonalMuhurtaContextForUser, natalContextFromBirthDetails } from '../../../lib/natalContext';
 import { handleMuhurthamSearchBody, handleSharedMuhurthamSearchBody } from '../../../lib/muhurthamSearchRequest';
 import { DailyAssistantContext } from '../../../../../packages/recommendation/src/dailyAssistant';
+import { recordProductEvent } from '../../../lib/productEvents';
+
+/** Uniform result-count computation across GENERAL (always has `.dates`)
+ * and PERSONAL/SHARED (a discriminated union where `.dates` only exists
+ * when status === 'OK') outcome shapes, without per-scope branching. */
+function muhurthamResultCount(result: { dates: unknown[] } | { status: string; dates?: unknown[] }): number {
+  return 'dates' in result && Array.isArray(result.dates) ? result.dates.length : 0;
+}
 
 /**
  * The Muhurtham Finder API: a thin HTTP wrapper around findMuhurthams()/
@@ -79,13 +87,37 @@ export async function POST(req: NextRequest) {
       context: natalContextFromBirthDetails(formatUTCDateString(person.birthDate), person.birthTime, person.birthTimezone),
     };
 
+    const sharedStartedAt = Date.now();
     const sharedOutcome = handleSharedMuhurthamSearchBody(body, context, partner);
     if (!sharedOutcome.ok) return NextResponse.json({ error: sharedOutcome.error }, { status: sharedOutcome.status });
+
+    void recordProductEvent({
+      eventName: 'MUHURTHAM_SEARCH_COMPLETED',
+      userId: session.userId,
+      metadata: {
+        scope: 'SHARED',
+        activityId: typeof body.activityId === 'string' ? body.activityId.trim() : '',
+        resultCount: muhurthamResultCount(sharedOutcome.result),
+        durationMs: Date.now() - sharedStartedAt,
+      },
+    });
     return NextResponse.json(sharedOutcome.result);
   }
 
+  const startedAt = Date.now();
   const outcome = handleMuhurthamSearchBody(body, context);
   if (!outcome.ok) return NextResponse.json({ error: outcome.error }, { status: outcome.status });
+
+  void recordProductEvent({
+    eventName: 'MUHURTHAM_SEARCH_COMPLETED',
+    userId: session.userId,
+    metadata: {
+      scope: body.scope === 'PERSONAL' ? 'PERSONAL' : 'GENERAL',
+      activityId: typeof body.activityId === 'string' ? body.activityId.trim() : '',
+      resultCount: muhurthamResultCount(outcome.result),
+      durationMs: Date.now() - startedAt,
+    },
+  });
 
   return NextResponse.json(outcome.result);
 }

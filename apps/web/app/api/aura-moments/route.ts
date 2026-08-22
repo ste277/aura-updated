@@ -6,6 +6,7 @@ import { buildAuraMomentCreateRequest } from '../../../lib/auraMomentRequest';
 import { buildMomentShareUrl, defaultExpiresAt, explanationSnapshotForScope, generatePublicMomentToken } from '../../../lib/auraMoments';
 import { formatDisplayName } from '../../../lib/displayName';
 import { FULL_ACTIVITY_CATALOG } from '../../../../../packages/recommendation/src/personalizedTasks';
+import { recordProductEvent } from '../../../lib/productEvents';
 
 /**
  * Aura Moment Sharing V1 -- CREATE + LIST, both authenticated.
@@ -63,6 +64,13 @@ export async function POST(req: NextRequest) {
     ratingLabel: input.ratingLabel,
     explanationSnapshot: explanationSnapshotForScope(input.scope),
     expiresAt: defaultExpiresAt(input.endAt),
+  });
+
+  void recordProductEvent({
+    eventName: 'AURA_MOMENT_CREATED',
+    userId: session.userId,
+    auraMomentId: moment.id,
+    metadata: { scope: moment.scope, activityId: moment.activityId },
   });
 
   return NextResponse.json({ id: moment.id, shareUrl: buildMomentShareUrl(req, moment.publicToken) }, { status: 201 });

@@ -3,6 +3,7 @@ import { getSessionFromRequest } from '../../../lib/session';
 import { createSavedPerson, listSavedPeople } from '../../../lib/db';
 import { parseJsonObject } from '../../../lib/request';
 import { buildSavedPersonInput } from '../../../lib/savedPersonRequest';
+import { recordProductEvent } from '../../../lib/productEvents';
 
 /**
  * SavedPerson CRUD -- LIST + CREATE. Every call is scoped to the
@@ -30,5 +31,12 @@ export async function POST(req: NextRequest) {
   if (!validated.ok) return NextResponse.json({ error: validated.error }, { status: validated.status });
 
   const person = await createSavedPerson(session.userId, validated.input);
+
+  void recordProductEvent({
+    eventName: 'SAVED_PERSON_CREATED',
+    userId: session.userId,
+    metadata: { relationshipType: person.relationshipType },
+  });
+
   return NextResponse.json(person, { status: 201 });
 }

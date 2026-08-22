@@ -9,6 +9,7 @@ import { buildMomentShareUrl, defaultExpiresAt, explanationSnapshotForScope, gen
 import { parseJsonObject } from '../../../../../lib/request';
 import { resolveTzOffsetMinutes } from '../../../../../lib/timezone';
 import { DailyAssistantContext } from '../../../../../../../packages/recommendation/src/dailyAssistant';
+import { recordProductEvent } from '../../../../../lib/productEvents';
 
 /**
  * "Suggest this" (brief section 13) -- owner-authenticated. Creates a BRAND
@@ -86,6 +87,13 @@ export async function POST(req: NextRequest, { params }: { params: { token: stri
     explanationSnapshot: explanationSnapshotForScope('SHARED'),
     expiresAt: defaultExpiresAt(new Date(candidate.endAt)),
     previousMomentId: original.id,
+  });
+
+  void recordProductEvent({
+    eventName: 'AURA_MOMENT_ALTERNATIVE_CREATED',
+    userId: session.userId,
+    auraMomentId: newMoment.id,
+    metadata: { scope: 'SHARED', activityId: newMoment.activityId },
   });
 
   return NextResponse.json({ id: newMoment.id, shareUrl: buildMomentShareUrl(req, newMoment.publicToken) }, { status: 201 });

@@ -33,6 +33,7 @@ model User {
   plannedActivities PlannedActivity[]
   savedPeople     SavedPerson[]
   auraMoments     AuraMoment[]
+  productEvents   ProductEvent[]
 }
 
 // A lightweight profile for someone the user plans with -- the minimum
@@ -132,6 +133,12 @@ model AuraMoment {
 
   createdAt               DateTime  @default(now()) @db.Timestamptz(3)
   expiresAt                DateTime? @db.Timestamptz(3)
+  // Product Instrumentation V1 -- set once, the first time the public page
+  // successfully resolves this moment. Powers "shared -> opened" without
+  // refresh inflation; see lib/productEvents.ts / the public page.
+  firstOpenedAt            DateTime? @db.Timestamptz(3)
+
+  productEvents           ProductEvent[]
 
   // Migration 0018 also adds a partial index on (ownerUserId, status,
   // respondedAt DESC) WHERE responseState IS NOT NULL, for the Aura
@@ -140,6 +147,33 @@ model AuraMoment {
   // represented here to avoid this line implying a different index shape
   // than what's actually created.
   @@index([ownerUserId])
+}
+
+// Product Instrumentation V1 -- a small, generic first-party event log.
+// Deliberately ONE table (eventName + a tightly allow-listed metadata JSON)
+// rather than one table per event type: this is a low-volume funnel log,
+// not a transactional record. What `metadata` may contain per eventName is
+// enforced entirely in application code (lib/productEvents.ts), never
+// trusted from a raw JSON column -- see that file's doc comment for the
+// full privacy/validation model. Never stores birth data, natal fields,
+// SavedPerson/recipient names, email, or a moment's publicToken.
+model ProductEvent {
+  id           String    @id @default(uuid())
+  eventName    String
+
+  userId       String?
+  user         User?       @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  auraMomentId String?
+  auraMoment   AuraMoment? @relation(fields: [auraMomentId], references: [id], onDelete: SetNull)
+
+  metadata     Json      @default("{}")
+  createdAt    DateTime  @default(now()) @db.Timestamptz(3)
+
+  // Migration 0019 also adds a composite (eventName, createdAt DESC) index
+  // and two partial indexes on userId/auraMomentId -- not representable
+  // here without Prisma's partial-index preview feature; raw-SQL-only, same
+  // convention as AuraMoment's own partial index above.
 }
 
 model CustomCity {

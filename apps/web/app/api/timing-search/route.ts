@@ -6,6 +6,7 @@ import { resolveTzOffsetMinutes } from '../../../lib/timezone';
 import { buildPersonalMuhurtaContextForUser } from '../../../lib/natalContext';
 import { handleTimingSearchBody } from '../../../lib/timingSearchRequest';
 import { DailyAssistantContext } from '../../../../../packages/recommendation/src/dailyAssistant';
+import { recordProductEvent } from '../../../lib/productEvents';
 
 /**
  * The Timing Search API: a thin HTTP wrapper around runTimingSearch() (the
@@ -57,8 +58,19 @@ export async function POST(req: NextRequest) {
     personalContext: buildPersonalMuhurtaContextForUser(user),
   };
 
+  const startedAt = Date.now();
   const outcome = handleTimingSearchBody(body, context);
   if (!outcome.ok) return NextResponse.json({ error: outcome.error }, { status: outcome.status });
+
+  void recordProductEvent({
+    eventName: 'PLAN_SEARCH_COMPLETED',
+    userId: session.userId,
+    metadata: {
+      mode: outcome.result.mode,
+      resultCount: outcome.result.candidates.length,
+      durationMs: Date.now() - startedAt,
+    },
+  });
 
   return NextResponse.json(outcome.result);
 }

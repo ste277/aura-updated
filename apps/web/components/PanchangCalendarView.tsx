@@ -6,6 +6,7 @@ import { findWindowOverlaps } from '../../../packages/panchang/src/windowOverlap
 import { getGoodForDayCategories } from '../../../packages/recommendation/src/dayActivitySuggestions';
 import { getDatePartsInTimezone } from '../lib/timezone';
 import { ExploreModeToggle } from './ExploreModeToggle';
+import { trackEvent } from '../lib/trackEvent';
 
 interface PanchangCalendarViewProps {
   timezone: string;
@@ -117,6 +118,7 @@ export function PanchangCalendarView({ timezone, onBack, onViewTodayRhythm, onEx
     let cancelled = false;
     setDayLoading(true);
     setDayError('');
+    trackEvent('PANCHANG_DATE_VIEWED');
     fetch(`/api/panchang?date=${selectedDate}`)
       .then(async (res) => {
         if (!res.ok) throw new Error((await res.json().catch(() => null))?.error || 'Unable to load this date.');
