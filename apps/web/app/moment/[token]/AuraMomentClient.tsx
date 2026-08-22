@@ -9,6 +9,8 @@ interface AuraMomentClientProps {
   initialOutcome: PublicAuraMomentOutcome;
 }
 
+type AlternativePreference = 'EARLIER' | 'LATER' | 'DIFFERENT_DAY' | 'NO_PREFERENCE';
+
 const RATING_TEXT_GENERAL: Record<string, string> = {
   EXCELLENT: 'Excellent fit',
   STRONG: 'Strong fit',
@@ -21,6 +23,25 @@ const RATING_TEXT_SHARED: Record<string, string> = {
   STRONG_SHARED_FIT: 'Strong shared fit',
   GOOD_SHARED_FIT: 'Good shared fit',
   MIXED_SHARED_FIT: 'Mixed fit',
+};
+
+/** Section 3's four choices -- "Anything else" is the recipient-facing label
+ * for NO_PREFERENCE, i.e. no specific preference at all. */
+const PREFERENCE_OPTIONS: Array<{ value: AlternativePreference; label: string }> = [
+  { value: 'EARLIER', label: 'Earlier' },
+  { value: 'LATER', label: 'Later' },
+  { value: 'DIFFERENT_DAY', label: 'Different day' },
+  { value: 'NO_PREFERENCE', label: 'Anything else' },
+];
+
+/** The confirmation clause per preference (brief section 4: "We'll let
+ * Stephen know you'd prefer something later."). NO_PREFERENCE gets a
+ * clause-free sentence rather than an awkward "something anything else". */
+const PREFERENCE_CONFIRMATION_CLAUSE: Record<AlternativePreference, string> = {
+  EARLIER: "you'd prefer something earlier",
+  LATER: "you'd prefer something later",
+  DIFFERENT_DAY: "you'd prefer a different day",
+  NO_PREFERENCE: "you'd like another time",
 };
 
 function ratingDisplayText(ratingLabel: string | null, scope: string): string | null {
@@ -45,17 +66,21 @@ function introText(moment: PublicAuraMoment): string {
 
 export function AuraMomentClient({ token, initialOutcome }: AuraMomentClientProps) {
   const [outcome, setOutcome] = useState<PublicAuraMomentOutcome>(initialOutcome);
-  const [responding, setResponding] = useState<'ACCEPTED' | 'ANOTHER_TIME' | null>(null);
+  const [responding, setResponding] = useState<'ACCEPTED' | AlternativePreference | null>(null);
   const [error, setError] = useState('');
+  // Clicking "Another time" only reveals the preference choices -- it does
+  // NOT submit anything by itself (brief section 3). The actual POST fires
+  // once a specific preference (including "Anything else") is picked.
+  const [showPreferenceChoices, setShowPreferenceChoices] = useState(false);
 
-  const respond = async (response: 'ACCEPTED' | 'ANOTHER_TIME') => {
-    setResponding(response);
+  const respond = async (response: 'ACCEPTED' | 'ANOTHER_TIME', preference?: AlternativePreference) => {
+    setResponding(response === 'ACCEPTED' ? 'ACCEPTED' : preference ?? null);
     setError('');
     try {
       const res = await fetch(`/api/aura-moments/${token}/response`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ response }),
+        body: JSON.stringify(preference ? { response, preference } : { response }),
       });
       const data = await res.json();
       if (!res.ok) throw new Error(data?.error || 'Unable to send your response.');
@@ -85,6 +110,7 @@ export function AuraMomentClient({ token, initialOutcome }: AuraMomentClientProp
   const { moment } = outcome;
   const ratingText = ratingDisplayText(moment.ratingLabel, moment.scope);
   const calendarUrl = buildGoogleCalendarUrl(moment.activityTitle, moment.startAt, moment.endAt);
+  const sender = moment.senderDisplayName ?? 'They';
 
   return (
     <Shell>
@@ -118,7 +144,30 @@ export function AuraMomentClient({ token, initialOutcome }: AuraMomentClientProp
             }
           />
         ) : moment.responseState === 'ANOTHER_TIME' ? (
-          <ResponseResult heading="No problem." body="Aura can help find another moment." action={<FindAnotherTimeLink />} />
+          <ResponseResult
+            heading="↻ Another time requested"
+            body={`We'll let ${sender} know ${PREFERENCE_CONFIRMATION_CLAUSE[moment.responsePreference ?? 'NO_PREFERENCE']}. Your preference has been saved.`}
+            note={moment.hasSuccessor ? `✨ ${sender} has suggested a new time -- look out for a new link.` : undefined}
+            action={<FindAnotherTimeLink />}
+          />
+        ) : showPreferenceChoices ? (
+          <>
+            <div style={{ textAlign: 'center', fontSize: 13, color: '#94a3b8', marginBottom: 14 }}>What would work better?</div>
+            {error && <div style={{ color: '#fb6b6b', fontSize: 12, textAlign: 'center', marginBottom: 10 }}>{error}</div>}
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10 }}>
+              {PREFERENCE_OPTIONS.map((option) => (
+                <button
+                  key={option.value}
+                  type="button"
+                  onClick={() => respond('ANOTHER_TIME', option.value)}
+                  disabled={responding !== null}
+                  style={outlineButtonStyle}
+                >
+                  {responding === option.value ? 'Sending…' : option.label}
+                </button>
+              ))}
+            </div>
+          </>
         ) : (
           <>
             <div style={{ textAlign: 'center', fontSize: 13, color: '#94a3b8', marginBottom: 14 }}>Does this work for you?</div>
@@ -126,8 +175,8 @@ export function AuraMomentClient({ token, initialOutcome }: AuraMomentClientProp
             <button type="button" onClick={() => respond('ACCEPTED')} disabled={responding !== null} style={primaryButtonStyle}>
               {responding === 'ACCEPTED' ? 'Sending…' : "I'm in ❤️"}
             </button>
-            <button type="button" onClick={() => respond('ANOTHER_TIME')} disabled={responding !== null} style={{ ...outlineButtonStyle, width: '100%', marginTop: 10, textAlign: 'center' }}>
-              {responding === 'ANOTHER_TIME' ? 'Sending…' : 'Another time'}
+            <button type="button" onClick={() => setShowPreferenceChoices(true)} disabled={responding !== null} style={{ ...outlineButtonStyle, width: '100%', marginTop: 10, textAlign: 'center' }}>
+              Another time
             </button>
           </>
         )}
@@ -138,11 +187,12 @@ export function AuraMomentClient({ token, initialOutcome }: AuraMomentClientProp
   );
 }
 
-function ResponseResult({ heading, body, action }: { heading: string; body: string; action: React.ReactNode }) {
+function ResponseResult({ heading, body, note, action }: { heading: string; body: string; note?: string; action: React.ReactNode }) {
   return (
     <div style={{ textAlign: 'center' }}>
       <div style={{ fontSize: 18, fontWeight: 900 }}>{heading}</div>
       <p style={{ color: '#94a3b8', fontSize: 14, marginTop: 8 }}>{body}</p>
+      {note && <p style={{ color: '#a78bfa', fontSize: 13, marginTop: 10, fontWeight: 700 }}>{note}</p>}
       <div style={{ marginTop: 16 }}>{action}</div>
     </div>
   );

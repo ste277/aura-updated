@@ -57,6 +57,8 @@ jobs:
         run: npx ts-node test/sharedMuhurtham.test.ts
       - name: Run score engine test
         run: npx ts-node test/scoreEngine.test.ts
+      - name: Run Aura Moment alternatives (rescheduling) test
+        run: npx ts-node test/auraMomentAlternatives.test.ts
       - name: Run Aura Moment request validation test
         run: npx ts-node test/auraMomentRequest.test.ts
       # test/savedPersonDb.test.ts and test/auraMomentsDb.test.ts are

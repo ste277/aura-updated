@@ -11,7 +11,7 @@
  * up every AuraMoment row it creates, but leaves the User row in place
  * (matches test/savedPersonDb.test.ts's own convention).
  */
-import { createAuraMoment, getAuraMomentByToken, getAuraMomentForOwner, listAuraMomentsForOwner, respondToAuraMoment, revokeAuraMoment, upsertUserByEmail } from '../apps/web/lib/db';
+import { createAuraMoment, getAuraMomentByToken, getAuraMomentForOwner, hasSuccessorMoment, listAuraMomentsForOwner, respondToAuraMoment, revokeAuraMoment, upsertUserByEmail } from '../apps/web/lib/db';
 import { generatePublicMomentToken, resolvePublicAuraMoment } from '../apps/web/lib/auraMoments';
 
 let allPassed = true;
@@ -115,6 +115,65 @@ async function main() {
 
     const afterResponseOutcome = await resolvePublicAuraMoment(tokenA);
     check('The public DTO reflects the new responseState after responding', afterResponseOutcome.status === 'OK' && afterResponseOutcome.moment.responseState === 'ACCEPTED');
+
+    // ============================================================
+    // RESCHEDULE PREFERENCE (public, by token)
+    // ============================================================
+    const tokenC = generatePublicMomentToken();
+    createdTokens.push(tokenC);
+    const momentC = await createAuraMoment({ ...baseInput, ownerUserId: ownerA.id, publicToken: tokenC, scope: 'SHARED', savedPersonId: null, sharedPersonDisplayName: 'Anu', senderDisplayName: 'Stephen', ratingLabel: 'STRONG_SHARED_FIT', explanationSnapshot: 'Aura found this timing to work well for both of you.', expiresAt: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000) });
+
+    const respondedWithPreference = await respondToAuraMoment(tokenC, 'ANOTHER_TIME', 'LATER');
+    check('respondToAuraMoment stores the structured preference alongside ANOTHER_TIME', respondedWithPreference?.responseState === 'ANOTHER_TIME' && respondedWithPreference?.responsePreference === 'LATER');
+
+    const preferenceOutcome = await resolvePublicAuraMoment(tokenC);
+    check('The public DTO reflects the stored preference (safe -- the recipient\'s own input)', preferenceOutcome.status === 'OK' && preferenceOutcome.moment.responsePreference === 'LATER');
+
+    const reRespondedAccepted = await respondToAuraMoment(tokenC, 'ACCEPTED', null);
+    check('Responding again with ACCEPTED clears the stale preference (most recent response wins, no stale LATER left over)', reRespondedAccepted?.responseState === 'ACCEPTED' && reRespondedAccepted?.responsePreference === null);
+
+    // ============================================================
+    // LINEAGE ("Suggest this" creates a new moment, original stays immutable)
+    // ============================================================
+    const tokenD = generatePublicMomentToken();
+    createdTokens.push(tokenD);
+    const momentD = await createAuraMoment({ ...baseInput, ownerUserId: ownerA.id, publicToken: tokenD, scope: 'SHARED', savedPersonId: null, sharedPersonDisplayName: 'Anu', senderDisplayName: 'Stephen', ratingLabel: 'STRONG_SHARED_FIT', explanationSnapshot: 'Aura found this timing to work well for both of you.', expiresAt: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000) });
+    check('hasSuccessorMoment is false before any successor exists', (await hasSuccessorMoment(momentD.id)) === false);
+
+    const tokenE = generatePublicMomentToken();
+    createdTokens.push(tokenE);
+    const newStartAt = new Date('2026-10-20T03:40:00.000Z');
+    const newEndAt = new Date('2026-10-20T04:55:00.000Z');
+    const momentE = await createAuraMoment({
+      ownerUserId: ownerA.id,
+      publicToken: tokenE,
+      scope: 'SHARED',
+      activityId: momentD.activityId,
+      activityTitle: momentD.activityTitle,
+      activityIcon: momentD.activityIcon,
+      startAt: newStartAt,
+      endAt: newEndAt,
+      timezone: momentD.timezone,
+      savedPersonId: momentD.savedPersonId,
+      sharedPersonDisplayName: momentD.sharedPersonDisplayName,
+      senderDisplayName: momentD.senderDisplayName,
+      ratingLabel: 'GOOD_SHARED_FIT',
+      explanationSnapshot: 'Aura found this timing to work well for both of you.',
+      expiresAt: new Date(newEndAt.getTime() + 7 * 24 * 60 * 60 * 1000),
+      previousMomentId: momentD.id,
+    });
+    check('The new moment via "Suggest this" gets its own distinct token', momentE.publicToken !== momentD.publicToken);
+    check('The new moment carries previousMomentId pointing at the original', momentE.previousMomentId === momentD.id);
+    check('The new moment preserves the exact activity from the original (never broadened)', momentE.activityId === momentD.activityId && momentE.activityTitle === momentD.activityTitle);
+    check('The new moment carries the SAME savedPersonId (SavedPerson context preserved privately)', momentE.savedPersonId === momentD.savedPersonId);
+    check('The new moment gets a FRESH expiresAt derived from its OWN endAt, not inherited from the original', momentE.expiresAt !== null && momentE.expiresAt.getTime() === newEndAt.getTime() + 7 * 24 * 60 * 60 * 1000);
+
+    const originalAfterSuggest = await getAuraMomentByToken(tokenD);
+    check('The ORIGINAL moment is completely unchanged after a successor is created (immutable historical snapshot)', originalAfterSuggest?.startAt.getTime() === momentD.startAt.getTime() && originalAfterSuggest?.previousMomentId === null);
+    check('hasSuccessorMoment is now true for the original', (await hasSuccessorMoment(momentD.id)) === true);
+
+    const originalPublicOutcome = await resolvePublicAuraMoment(tokenD);
+    check('The ORIGINAL public page can now see hasSuccessor=true, but the public DTO never leaks the new token anywhere', originalPublicOutcome.status === 'OK' && originalPublicOutcome.moment.hasSuccessor === true && !JSON.stringify(originalPublicOutcome.moment).includes(tokenE));
 
     // ============================================================
     // REVOKE (owner-scoped) -- after revoke, public resolution reports REVOKED

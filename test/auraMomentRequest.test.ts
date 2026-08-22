@@ -1,4 +1,5 @@
-import { buildAuraMomentCreateRequest, isValidMomentResponse } from '../apps/web/lib/auraMomentRequest';
+import { buildAuraMomentCreateRequest, isValidAlternativeIndex, isValidAlternativePreference, isValidMomentResponse } from '../apps/web/lib/auraMomentRequest';
+import { MAX_ALTERNATIVES } from '../apps/web/lib/auraMomentAlternatives';
 
 let allPassed = true;
 function check(label: string, condition: boolean) {
@@ -87,6 +88,34 @@ check('isValidMomentResponse rejects an arbitrary string', isValidMomentResponse
 check('isValidMomentResponse rejects a non-string value', isValidMomentResponse(42) === false);
 check('isValidMomentResponse rejects undefined', isValidMomentResponse(undefined) === false);
 check('isValidMomentResponse rejects null', isValidMomentResponse(null) === false);
+
+// ============================================================
+// ALTERNATIVE PREFERENCE VALIDATION (Rescheduling brief section 2/19 --
+// "the public API must remain intentionally powerless")
+// ============================================================
+
+check('isValidAlternativePreference accepts EARLIER', isValidAlternativePreference('EARLIER') === true);
+check('isValidAlternativePreference accepts LATER', isValidAlternativePreference('LATER') === true);
+check('isValidAlternativePreference accepts DIFFERENT_DAY', isValidAlternativePreference('DIFFERENT_DAY') === true);
+check('isValidAlternativePreference accepts NO_PREFERENCE', isValidAlternativePreference('NO_PREFERENCE') === true);
+check('isValidAlternativePreference rejects an arbitrary string', isValidAlternativePreference('SOMETIME_NEXT_WEEK') === false);
+check('isValidAlternativePreference rejects free text (no comments in V1)', isValidAlternativePreference('please find something on a weekend') === false);
+check('isValidAlternativePreference rejects a non-string value', isValidAlternativePreference(42) === false);
+check('isValidAlternativePreference rejects null/undefined', isValidAlternativePreference(null) === false && isValidAlternativePreference(undefined) === false);
+check('isValidAlternativePreference rejects an object (no structured date-range payloads)', isValidAlternativePreference({ start: '2026-10-01', end: '2026-10-31' }) === false);
+
+// ============================================================
+// ALTERNATIVE INDEX VALIDATION (Suggest this -- section 20: never trust a
+// client-supplied date/activity/SavedPerson id, only a small index)
+// ============================================================
+
+check('isValidAlternativeIndex accepts 0', isValidAlternativeIndex(0) === true);
+check(`isValidAlternativeIndex accepts up to MAX_ALTERNATIVES - 1 (${MAX_ALTERNATIVES - 1})`, isValidAlternativeIndex(MAX_ALTERNATIVES - 1) === true);
+check(`isValidAlternativeIndex rejects MAX_ALTERNATIVES itself (${MAX_ALTERNATIVES})`, isValidAlternativeIndex(MAX_ALTERNATIVES) === false);
+check('isValidAlternativeIndex rejects a negative index', isValidAlternativeIndex(-1) === false);
+check('isValidAlternativeIndex rejects a non-integer', isValidAlternativeIndex(1.5) === false);
+check('isValidAlternativeIndex rejects a string index', isValidAlternativeIndex('0') === false);
+check('isValidAlternativeIndex rejects null/undefined', isValidAlternativeIndex(null) === false && isValidAlternativeIndex(undefined) === false);
 
 console.log(allPassed ? '\nALL AURA MOMENT REQUEST CHECKS PASSED' : '\nSOME AURA MOMENT REQUEST CHECKS FAILED');
 process.exit(allPassed ? 0 : 1);

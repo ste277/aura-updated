@@ -1,12 +1,11 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getSessionFromRequest } from '../../../lib/session';
-import { getSavedPersonForOwner, getUserById, User } from '../../../lib/db';
+import { getSavedPersonForOwner, getUserById } from '../../../lib/db';
 import { parseJsonObject } from '../../../lib/request';
 import { resolveTzOffsetMinutes } from '../../../lib/timezone';
-import { natalContextFromBirthDetails } from '../../../lib/natalContext';
+import { buildPersonalMuhurtaContextForUser, natalContextFromBirthDetails } from '../../../lib/natalContext';
 import { handleMuhurthamSearchBody, handleSharedMuhurthamSearchBody } from '../../../lib/muhurthamSearchRequest';
 import { DailyAssistantContext } from '../../../../../packages/recommendation/src/dailyAssistant';
-import { PersonalMuhurtaContext } from '../../../../../packages/recommendation/src/auraFitEngine';
 
 /**
  * The Muhurtham Finder API: a thin HTTP wrapper around findMuhurthams()/
@@ -41,11 +40,6 @@ function formatUTCDateString(dateInput: Date | string): string {
   return `${year}-${month}-${day}`;
 }
 
-function buildPersonalMuhurtaContext(user: User): PersonalMuhurtaContext | undefined {
-  if (!user.birthDate || !user.birthTime || !user.birthTimezone) return undefined;
-  return natalContextFromBirthDetails(formatUTCDateString(user.birthDate), user.birthTime, user.birthTimezone);
-}
-
 export async function POST(req: NextRequest) {
   const session = getSessionFromRequest(req);
   if (!session) return NextResponse.json({ error: 'Not authenticated.' }, { status: 401 });
@@ -69,7 +63,7 @@ export async function POST(req: NextRequest) {
     longitude: user.longitude,
     timezone: user.timezone,
     tzOffsetMinutes: resolveTzOffsetMinutes(user.timezone, now),
-    personalContext: requestsNatalData ? buildPersonalMuhurtaContext(user) : undefined,
+    personalContext: requestsNatalData ? buildPersonalMuhurtaContextForUser(user) : undefined,
   };
 
   if (body.scope === 'SHARED') {

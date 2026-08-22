@@ -112,7 +112,18 @@ model AuraMoment {
 
   status                  String    @default("ACTIVE") // "ACTIVE" | "REVOKED"
   responseState           String?   // null | "ACCEPTED" | "ANOTHER_TIME"
+  // Structured recipient preference (Aura Moment Rescheduling), only ever
+  // meaningful alongside responseState = "ANOTHER_TIME" -- kept as its own
+  // column, never folded into responseState.
+  responsePreference      String?   // null | "EARLIER" | "LATER" | "DIFFERENT_DAY" | "NO_PREFERENCE"
   respondedAt             DateTime? @db.Timestamptz(3)
+
+  // Lineage: set on a NEW moment created via "Suggest this" -- points at the
+  // moment it replaces. The original is never mutated (brief section 13:
+  // "Historical shares should remain immutable snapshots").
+  previousMomentId        String?
+  previousMoment          AuraMoment?  @relation("MomentLineage", fields: [previousMomentId], references: [id], onDelete: SetNull)
+  supersededBy            AuraMoment[] @relation("MomentLineage")
 
   createdAt               DateTime  @default(now()) @db.Timestamptz(3)
   expiresAt                DateTime? @db.Timestamptz(3)
