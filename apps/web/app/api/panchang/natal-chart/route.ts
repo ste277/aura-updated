@@ -2,8 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { getSessionFromRequest } from '../../../../lib/session';
 import { getUserById } from '../../../../lib/db';
 import { localDateTimeToUTC } from '../../../../lib/timezone';
-import { getNatalChart, getTaraBala } from '../../../../../../packages/vedic/src/natalChart';
-import { getNakshatra } from '../../../../../../packages/vedic/src/panchangElements';
+import { getNatalChart, getTaraBala, buildNatalContext } from '../../../../../../packages/vedic/src/natalChart';
 
 function formatUTCDateString(dateInput: Date | string): string {
   if (typeof dateInput === 'string') {
@@ -34,11 +33,14 @@ export async function GET(req: NextRequest) {
 
   const birthMomentUTC = localDateTimeToUTC(birthDateStr, user.birthTime, user.birthTimezone);
 
+  // Full 9-graha placement grid is display-only data specific to this route
+  // (not part of the shared NatalContext adapter shape); janmaRashi/
+  // janmaNakshatra below are still derived via the SAME shared
+  // buildNatalContext() every other personalization consumer uses, rather
+  // than a second Moon-placement lookup.
   const chart = getNatalChart(birthMomentUTC);
-  const natalNakshatra = getNakshatra(birthMomentUTC);
-  const taraBala = getTaraBala(natalNakshatra.index, new Date());
-
-  const moonPlacement = chart.find((g) => g.graha === 'Moon')!;
+  const natalContext = buildNatalContext(birthMomentUTC);
+  const taraBala = getTaraBala(natalContext.natalNakshatraIndex, new Date());
 
   return NextResponse.json({
     // Raw user inputs passed back for display
@@ -47,8 +49,8 @@ export async function GET(req: NextRequest) {
     birthCityName: user.birthCityName || user.cityName || 'Chennai',
 
     // Calculated natal parameters
-    janmaRashi: moonPlacement.rashiName,
-    janmaNakshatra: natalNakshatra.name,
+    janmaRashi: natalContext.janmaRashi,
+    janmaNakshatra: natalContext.janmaNakshatra,
     chart: chart.map((g) => ({
       graha: g.graha,
       rashiName: g.rashiName,

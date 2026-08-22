@@ -82,6 +82,111 @@ export async function updateBirthProfile(
   return result.rows[0];
 }
 
+export type SavedPersonRelationshipType = 'PARTNER' | 'SPOUSE' | 'FAMILY' | 'FRIEND' | 'OTHER';
+
+export interface SavedPerson {
+  id: string;
+  ownerUserId: string;
+  name: string;
+  relationshipType: SavedPersonRelationshipType;
+  birthDate: Date;
+  birthTime: string;
+  birthTimezone: string;
+  birthCityName: string | null;
+  birthLatitude: number | null;
+  birthLongitude: number | null;
+  createdAt: Date;
+  updatedAt: Date;
+}
+
+export interface SavedPersonInput {
+  name: string;
+  relationshipType: SavedPersonRelationshipType;
+  birthDate: string; // 'YYYY-MM-DD'
+  birthTime: string; // 'HH:MM'
+  birthTimezone: string;
+  birthCityName?: string;
+  birthLatitude?: number;
+  birthLongitude?: number;
+}
+
+/** All CRUD below is scoped by ownerUserId on every query -- never by id
+ * alone -- so a user can never read, update, or delete another user's
+ * SavedPerson (brief section 3: ownership is enforced here, at the data
+ * layer, not just in the route). Mirrors cancelPlannedActivity()'s
+ * `WHERE id = $1 AND "userId" = $2` pattern below. */
+export async function listSavedPeople(ownerUserId: string): Promise<SavedPerson[]> {
+  const result = await pool.query(
+    `SELECT * FROM "SavedPerson" WHERE "ownerUserId" = $1 ORDER BY name ASC`,
+    [ownerUserId]
+  );
+  return result.rows;
+}
+
+export async function getSavedPersonForOwner(ownerUserId: string, personId: string): Promise<SavedPerson | null> {
+  const result = await pool.query(
+    `SELECT * FROM "SavedPerson" WHERE id = $1 AND "ownerUserId" = $2`,
+    [personId, ownerUserId]
+  );
+  return result.rows[0] ?? null;
+}
+
+export async function createSavedPerson(ownerUserId: string, input: SavedPersonInput): Promise<SavedPerson> {
+  const id = randomUUID();
+  const result = await pool.query(
+    `INSERT INTO "SavedPerson"
+       (id, "ownerUserId", name, "relationshipType", "birthDate", "birthTime", "birthTimezone", "birthCityName", "birthLatitude", "birthLongitude")
+     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
+     RETURNING *`,
+    [
+      id,
+      ownerUserId,
+      input.name,
+      input.relationshipType,
+      input.birthDate,
+      input.birthTime,
+      input.birthTimezone,
+      input.birthCityName ?? null,
+      input.birthLatitude ?? null,
+      input.birthLongitude ?? null,
+    ]
+  );
+  return result.rows[0];
+}
+
+export async function updateSavedPerson(ownerUserId: string, personId: string, input: SavedPersonInput): Promise<SavedPerson> {
+  const result = await pool.query(
+    `UPDATE "SavedPerson"
+     SET name = $3, "relationshipType" = $4, "birthDate" = $5, "birthTime" = $6,
+         "birthTimezone" = $7, "birthCityName" = $8, "birthLatitude" = $9, "birthLongitude" = $10,
+         "updatedAt" = now()
+     WHERE id = $1 AND "ownerUserId" = $2
+     RETURNING *`,
+    [
+      personId,
+      ownerUserId,
+      input.name,
+      input.relationshipType,
+      input.birthDate,
+      input.birthTime,
+      input.birthTimezone,
+      input.birthCityName ?? null,
+      input.birthLatitude ?? null,
+      input.birthLongitude ?? null,
+    ]
+  );
+  if (result.rows.length === 0) throw new Error('Person not found.');
+  return result.rows[0];
+}
+
+export async function deleteSavedPerson(ownerUserId: string, personId: string): Promise<void> {
+  const result = await pool.query(
+    `DELETE FROM "SavedPerson" WHERE id = $1 AND "ownerUserId" = $2`,
+    [personId, ownerUserId]
+  );
+  if (result.rowCount === 0) throw new Error('Person not found.');
+}
+
 export interface HabitLogRow {
   id: string;
   userId: string;
