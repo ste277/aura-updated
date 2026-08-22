@@ -53,6 +53,14 @@ export interface ActivityDefinition {
   /** Present when status is not CANONICAL — explains the ambiguity or why
    * this is a legacy alias, for anyone building on top of this model. */
   notes?: string;
+  /** True for a broad, historically-generic activity (financial-decision,
+   * new-beginning) that now has one or more narrower, more specific sibling
+   * activities (property-purchase, business-start, ...). Not the same as
+   * LEGACY_ALIAS status: these activities remain CANONICAL and fully
+   * supported for the cases their narrower siblings don't cover — this flag
+   * only signals "prefer a narrower activity when one resolves" (brief
+   * section 11), it does not deprecate the broad activity itself. */
+  legacyBroadIntent?: boolean;
 }
 
 /**
@@ -82,6 +90,7 @@ type ActivityMetadataInput = {
   significance?: 'LOW' | 'MEDIUM' | 'HIGH';
   status?: ActivityStatus;
   notes?: string;
+  legacyBroadIntent?: boolean;
 };
 
 const ACTIVITY_METADATA: Record<string, ActivityMetadataInput> = {
@@ -207,29 +216,33 @@ const ACTIVITY_METADATA: Record<string, ActivityMetadataInput> = {
     socialMode: 'GROUP',
   },
   'financial-decision': {
-    // Aliases span investment, property purchase, contract signing, and
-    // loans. INVESTMENT was too specific — IMPORTANT_FINANCIAL_DECISION is
+    // Aliases span investment, contract signing, and loans (property
+    // purchase now has its own dedicated activity — see property-purchase
+    // below). INVESTMENT was too specific — IMPORTANT_FINANCIAL_DECISION is
     // the broader intent that actually covers what this catalog entry means.
     family: 'FINANCE',
     intent: 'IMPORTANT_FINANCIAL_DECISION',
     evaluationDepth: 'DEEP',
     timingSensitivity: { start: 'HIGH', duration: 'LOW', end: 'LOW' },
     socialMode: 'ANY',
+    legacyBroadIntent: true,
+    notes: 'Remains CANONICAL and fully supported for financial decisions generally (investment, contract signing, loans). Prefer property-purchase when the more specific PROPERTY_PURCHASE intent resolves (brief section 11).',
   },
   'new-beginning': {
     // Deliberately generic in the existing catalog (new project, habit,
     // role, or chapter). WORK/PROJECT_START is a reasonable
     // backward-compatible mapping, but this is too broad to be a canonical
     // activity — marked LEGACY_ALIAS so it's not offered as a primary
-    // generic activity once more specific options (BUSINESS_START,
-    // HOME/CONSTRUCTION_START, RELATIONSHIP/ENGAGEMENT, etc.) exist.
+    // generic activity once more specific options (business-start,
+    // griha-pravesh, engagement, etc.) exist.
     family: 'WORK',
     intent: 'PROJECT_START',
     evaluationDepth: 'DEEP',
     timingSensitivity: { start: 'HIGH', duration: 'LOW', end: 'LOW' },
     socialMode: 'ANY',
     status: 'LEGACY_ALIAS',
-    notes: 'Too broad for a canonical activity (could mean a business, home, relationship, or generic project start). Kept as a backward-compatible alias to WORK/PROJECT_START; deprecate as a primary/user-facing generic activity once narrower options exist.',
+    legacyBroadIntent: true,
+    notes: 'Too broad for a canonical activity (could mean a business, home, relationship, or generic project start). Kept as a backward-compatible alias to WORK/PROJECT_START; prefer business-start/griha-pravesh/engagement when one of those more specific intents resolves (brief section 11).',
   },
   learning: {
     family: 'EDUCATION',
@@ -237,6 +250,42 @@ const ACTIVITY_METADATA: Record<string, ActivityMetadataInput> = {
     evaluationDepth: 'STANDARD',
     timingSensitivity: { start: 'LOW', duration: 'MEDIUM', end: 'LOW' },
     socialMode: 'SOLO',
+  },
+
+  // -- New explicit occasion activities (see personalizedTasks.ts and the
+  // completion report's rule coverage matrix for the audit these are based
+  // on) --
+  'business-start': {
+    family: 'BUSINESS',
+    intent: 'BUSINESS_START',
+    evaluationDepth: 'DEEP',
+    timingSensitivity: { start: 'HIGH', duration: 'MEDIUM', end: 'LOW' },
+    socialMode: 'ANY',
+    notes: 'Tithi/Nakshatra reuse NEW_BEGINNING\'s existing family-level rule data as a base (see muhurtaRulePacks.ts FAMILY_BASE_SOURCE) -- new-beginning\'s own notes already name BUSINESS_START as one of the narrower intents that data was standing in for. REUSABLE_BASE_RULE, not invented.',
+  },
+  'property-purchase': {
+    family: 'FINANCE',
+    intent: 'PROPERTY_PURCHASE',
+    evaluationDepth: 'DEEP',
+    timingSensitivity: { start: 'HIGH', duration: 'LOW', end: 'LOW' },
+    socialMode: 'ANY',
+    notes: 'Tithi/Nakshatra reuse FINANCE\'s existing family-level rule data as a base -- financial-decision\'s own aliases already included "property purchase" before this PR split it out. REUSABLE_BASE_RULE, a strong-fit reuse.',
+  },
+  engagement: {
+    family: 'RELATIONSHIP',
+    intent: 'ENGAGEMENT',
+    evaluationDepth: 'CEREMONIAL',
+    timingSensitivity: { start: 'HIGH', duration: 'MEDIUM', end: 'LOW' },
+    socialMode: 'PAIR',
+    notes: 'CEREMONIAL depth requires dedicated (IMPLEMENTED) Tithi/Nakshatra coverage to reach SUPPORTED (brief section 8). Currently only has RELATIONSHIP\'s family-level base (authored for casual dating, not a ceremonial engagement) -- REUSABLE_BASE_RULE, not sufficient evidence on its own, so this resolves to PARTIAL support and is hidden from Muhurtham Finder until dedicated data is added.',
+  },
+  'griha-pravesh': {
+    family: 'HOME',
+    intent: 'GRIHA_PRAVESH',
+    evaluationDepth: 'CEREMONIAL',
+    timingSensitivity: { start: 'HIGH', duration: 'MEDIUM', end: 'LOW' },
+    socialMode: 'FAMILY',
+    notes: 'No existing family-level rule data legitimately targets a home-entry ceremony (HOME has no MuhurtaRulePack base -- see muhurtaRulePacks.ts). Tithi/Nakshatra coverage is honestly MISSING rather than borrowed from an unrelated family (e.g. ADMIN); resolves to PARTIAL support and is hidden from Muhurtham Finder until dedicated data is added.',
   },
 };
 
@@ -281,6 +330,7 @@ function buildActivityDefinition(activity: ActivityProfile): ActivityDefinition 
     socialMode: metadata.socialMode,
     status: metadata.status ?? 'CANONICAL',
     notes: metadata.notes,
+    legacyBroadIntent: metadata.legacyBroadIntent,
     muhurta: {
       family: metadata.family,
       intent: metadata.intent,

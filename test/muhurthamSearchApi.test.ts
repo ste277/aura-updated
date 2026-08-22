@@ -59,9 +59,13 @@ if (defaultsResult.ok) {
 
 check('Missing activityId is rejected', buildMuhurthamSearchRequest({ dateRange: { start: '2026-09-01', end: '2026-09-05' } }, chennaiContext).ok === false);
 check('Empty activityId is rejected', buildMuhurthamSearchRequest({ activityId: '', dateRange: { start: '2026-09-01', end: '2026-09-05' } }, chennaiContext).ok === false);
-check('Unknown activityId is rejected', buildMuhurthamSearchRequest({ activityId: 'griha-pravesh', dateRange: { start: '2026-09-01', end: '2026-09-05' } }, chennaiContext).ok === false);
+check('An unknown (not-in-catalog) activityId is rejected', buildMuhurthamSearchRequest({ activityId: 'marriage', dateRange: { start: '2026-09-01', end: '2026-09-05' } }, chennaiContext).ok === false);
 check('A NOT_YET_SUPPORTED (but real catalog) activityId is rejected', buildMuhurthamSearchRequest({ activityId: 'tea-break', dateRange: { start: '2026-09-01', end: '2026-09-05' } }, chennaiContext).ok === false);
 check('A PARTIALLY_SUPPORTED (AMBIGUOUS-status) activityId is rejected', buildMuhurthamSearchRequest({ activityId: 'task-1', dateRange: { start: '2026-09-01', end: '2026-09-05' } }, chennaiContext).ok === false);
+check('A real catalog activity with PARTIAL rule-pack support (engagement) is rejected, not silently exposed', buildMuhurthamSearchRequest({ activityId: 'engagement', dateRange: { start: '2026-09-01', end: '2026-09-05' } }, chennaiContext).ok === false);
+check('A real catalog activity with PARTIAL rule-pack support (griha-pravesh, missing Tithi/Nakshatra data) is rejected', buildMuhurthamSearchRequest({ activityId: 'griha-pravesh', dateRange: { start: '2026-09-01', end: '2026-09-05' } }, chennaiContext).ok === false);
+check('The new business-start activity (SUPPORTED via reused rule-pack base) is accepted', buildMuhurthamSearchRequest({ activityId: 'business-start', dateRange: { start: '2026-09-01', end: '2026-09-05' } }, chennaiContext).ok === true);
+check('The new property-purchase activity (SUPPORTED via reused rule-pack base) is accepted', buildMuhurthamSearchRequest({ activityId: 'property-purchase', dateRange: { start: '2026-09-01', end: '2026-09-05' } }, chennaiContext).ok === true);
 
 const unsupportedResult = buildMuhurthamSearchRequest({ activityId: 'tea-break', dateRange: { start: '2026-09-01', end: '2026-09-05' } }, chennaiContext);
 check('Unsupported-activity rejection uses 400', unsupportedResult.ok === false && unsupportedResult.status === 400);

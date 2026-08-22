@@ -1,9 +1,22 @@
 import type { SolarWindowType } from '../../panchang/src/windows';
 import { evaluateMuhurta, MuhurtaActivityFamily } from '../../muhurta/src/muhurtaEngine';
-import type { MuhurtaReason } from '../../muhurta/src/activityOntology';
+import type { MuhurtaReason, MuhurtaClassification } from '../../muhurta/src/activityOntology';
 import { formatPersonalReasons } from '../../muhurta/src/muhurtaReasonFormat';
+import { computeMuhurtaSupportLevel, evaluateMuhurtaWithRulePack, resolveMuhurtaRulePack } from '../../muhurta/src/muhurtaRulePacks';
 import { getTaraBala } from '../../vedic/src/natalChart';
 import type { ActivityProfile } from './personalizedTasks';
+
+/** Score cap applied when a CEREMONIAL activity's rule pack hasn't reached
+ * SUPPORTED (dedicated Tithi+Nakshatra evidence) -- brief section 8: "Do not
+ * let a generic good solar window alone produce EXCELLENT... A CEREMONIAL
+ * result should require sufficient Panchanga evidence." 89 sits just below
+ * the EXCEPTIONAL label threshold (90), so an incomplete ceremonial rule
+ * pack can still reach BEST/GOOD but never the top label. Only ever applies
+ * when `classification` is supplied AND evaluationDepth is CEREMONIAL AND
+ * support level is not SUPPORTED -- today that's Engagement and Griha
+ * Pravesh; no existing (pre-this-PR) activity uses CEREMONIAL depth, so this
+ * cannot change any existing activity's score. */
+const CEREMONIAL_INCOMPLETE_SCORE_CAP = 89;
 
 export type AuraFitLabel = 'EXCEPTIONAL' | 'BEST' | 'GOOD' | 'SUITABLE' | 'USE_LIGHTLY' | 'AVOID';
 
@@ -70,14 +83,30 @@ export function evaluateActivityFit(params: {
   personalPatternScore?: number;
   userPreferenceScore?: number;
   personalContext?: PersonalMuhurtaContext;
+  /** Optional newer-ontology classification (activityDefinitions.ts's
+   * ActivityDefinition.muhurta) for the activity being scored. When
+   * supplied AND its resolved rule pack has no legitimate legacy-family
+   * data to fall back on (both Tithi and Nakshatra coverage MISSING --
+   * today only Griha Pravesh), the generic rule-pack evaluator
+   * (muhurtaRulePacks.ts) is used INSTEAD of the legacy family-keyed
+   * evaluateMuhurta() call below. Every other activity (including the other
+   * 3 new occasions, whose classifications resolve to REUSABLE_BASE_RULE,
+   * not MISSING) is completely unaffected by this parameter -- see
+   * muhurtaRulePacks.ts's module doc comment for the full reasoning. */
+  classification?: MuhurtaClassification;
 }): AuraFitEvaluation {
   const family = familyForActivityProfile(params.activity);
-  const muhurta = evaluateMuhurta({
-    taskTitle: params.activity.title,
-    date: params.date,
-    windowType: params.windowType,
-    family,
-  });
+  const rulePack = params.classification ? resolveMuhurtaRulePack(params.classification) : undefined;
+  const supportLevel = params.classification && rulePack ? computeMuhurtaSupportLevel(params.classification, rulePack) : undefined;
+  const usesGenericRulePack = rulePack !== undefined && rulePack.coverage.tithi === 'MISSING' && rulePack.coverage.nakshatra === 'MISSING';
+  const muhurta = usesGenericRulePack
+    ? evaluateMuhurtaWithRulePack({ classification: params.classification!, date: params.date, windowType: params.windowType })
+    : evaluateMuhurta({
+        taskTitle: params.activity.title,
+        date: params.date,
+        windowType: params.windowType,
+        family,
+      });
   const capabilities = capabilitiesForWindow(params.windowType, muhurta.modifier);
   const activityScore = scoreActivityAgainstCapabilities(params.activity, capabilities);
   const muhurtaScore = clamp(68 + muhurta.modifier * 1.8 - capabilities.friction * 0.24);
@@ -97,7 +126,7 @@ export function evaluateActivityFit(params: {
       ? -10
       : 0
     : 0;
-  const score = clamp(
+  const uncappedScore = clamp(
     muhurtaScore * 0.45 +
     solarScore * 0.20 +
     timePreferenceScore * 0.10 +
@@ -107,6 +136,8 @@ export function evaluateActivityFit(params: {
     startSensitivityPenalty +
     neutralContextAdjustment
   );
+  const ceremonialIncomplete = params.classification?.evaluationDepth === 'CEREMONIAL' && supportLevel !== 'SUPPORTED';
+  const score = ceremonialIncomplete ? Math.min(uncappedScore, CEREMONIAL_INCOMPLETE_SCORE_CAP) : uncappedScore;
   const label = labelForScore(score);
   const ruleReason = activityRuleReason(params.activity, params.windowType);
   return {
