@@ -12,6 +12,7 @@ import { computeDailyEnergyInsight } from '../lib/scoreEngine';
 import { getActionCards, ActionCard } from '../../../packages/recommendation/src/actionCards';
 import { findActivityIntent } from '../../../packages/recommendation/src/personalizedTasks';
 import type { DailyBriefing, PlanningHorizon, TaskSlotRecommendation, TimePreference } from '../../../packages/recommendation/src/dailyAssistant';
+import type { TimingSearchDateRange, TimingSearchMode, TimingSearchResponse, TimingTimePreference } from '../../../packages/recommendation/src/timingSearch';
 
 // UI Modules
 import { HomeDashboard } from '../components/HomeDashboard';
@@ -595,6 +596,30 @@ export default function DashboardPage() {
     return res.json();
   }, []);
 
+  const handleTimingSearch = useCallback(async (request: {
+    mode: TimingSearchMode;
+    activityId?: string;
+    taskTitle?: string;
+    durationMinutes: number;
+    dateRange?: TimingSearchDateRange;
+    horizon?: PlanningHorizon;
+    customStartDate?: string;
+    customEndDate?: string;
+    timePreference?: TimingTimePreference;
+    limit?: number;
+    candidateStart?: string;
+    checkNearbyWindowMinutes?: number;
+    candidateStarts?: string[];
+  }): Promise<TimingSearchResponse> => {
+    const res = await fetch('/api/timing-search', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ ...request, clientNow: new Date().toISOString() }),
+    });
+    if (!res.ok) throw new Error('Unable to run timing search.');
+    return res.json();
+  }, []);
+
   const handleLogPlanFromHome = useCallback(async (planId: string) => {
     const res = await fetch(`/api/plans/${planId}/log`, { method: 'POST' });
     if (!res.ok) throw new Error('Unable to log planned activity.');
@@ -750,6 +775,7 @@ export default function DashboardPage() {
         {activeTab === 'plan' && (
           <PlanWithAuraView
             onSlotTask={handleSlotTask}
+            onTimingSearch={handleTimingSearch}
             onViewDay={() => setActiveTab('timeline')}
             onPlanLogged={loadUserDataAndLogs}
             timezone={user.timezone}
