@@ -10,6 +10,6 @@
     "outDir": "dist"
   },
   "include": ["packages/**/*.ts", "test/**/*.ts"],
-  "exclude": ["test/planWithAuraViewLogic.test.ts"]
+  "exclude": ["test/planWithAuraViewLogic.test.ts", "test/panchangCalendarLogic.test.ts"]
 }
 

@@ -23,6 +23,7 @@ import { InsightsView } from '../components/InsightsView';
 import { WindowShiftToast } from '../components/WindowShiftToast';
 import { PlanWithAuraView } from '../components/PlanWithAuraView';
 import { YouView } from '../components/YouView';
+import { PanchangCalendarView } from '../components/PanchangCalendarView';
 
 import { BirthChartSection } from '../components/BirthChartSection';
 import { LoginScreen } from '../components/LoginScreen';
@@ -99,7 +100,7 @@ export default function DashboardPage() {
   const [youNotificationsFocusKey, setYouNotificationsFocusKey] = useState(0);
   const [mounted, setMounted] = useState(false);
 
-  const [activeTab, setActiveTab] = useState<'home' | 'timeline' | 'ask' | 'plan' | 'insights' | 'you' | 'chart' | 'activity'>('home');
+  const [activeTab, setActiveTab] = useState<'home' | 'timeline' | 'ask' | 'plan' | 'insights' | 'you' | 'chart' | 'activity' | 'panchang'>('home');
 
   const [notificationPrefs, setNotificationPrefs] = useState<NotificationPrefs>(DEFAULT_NOTIFICATION_PREFS);
 
@@ -736,6 +737,7 @@ export default function DashboardPage() {
             onPlanClick={handleOpenPlan}
             onInsightsClick={() => setActiveTab('insights')}
             onNotificationsClick={handleOpenNotificationSettings}
+            onPanchangClick={() => setActiveTab('panchang')}
           />
         )}
 
@@ -792,6 +794,7 @@ export default function DashboardPage() {
             onOpenHome={() => setActiveTab('home')}
             onOpenChart={() => setActiveTab('chart')}
             onOpenActivityLog={() => setActiveTab('activity')}
+            onOpenPanchang={() => setActiveTab('panchang')}
             onSignOut={handleLogout}
             focusNotificationsKey={youNotificationsFocusKey}
           />
@@ -805,6 +808,15 @@ export default function DashboardPage() {
             userLocation={{ latitude: user.latitude, longitude: user.longitude, timezone: user.timezone }}
             onLogActivity={handleLogActivity}
             onBack={() => setActiveTab('you')}
+          />
+        )}
+
+        {activeTab === 'panchang' && (
+          <PanchangCalendarView
+            timezone={user.timezone}
+            onBack={() => setActiveTab('you')}
+            onViewTodayRhythm={() => setActiveTab('timeline')}
+            onExploreActivities={() => setActiveTab('plan')}
           />
         )}
       </div>
@@ -830,7 +842,7 @@ export default function DashboardPage() {
         <NavButton label="Plan" icon="✨" active={activeTab === 'plan'} onClick={() => setActiveTab('plan')} />
         <NavButton label="Ask Aura" icon="🤖" active={activeTab === 'ask'} onClick={() => setActiveTab('ask')} />
         <NavButton label="Insights" icon="📊" active={activeTab === 'insights'} onClick={() => setActiveTab('insights')} />
-        <NavButton label="You" icon="👤" active={activeTab === 'you' || activeTab === 'chart' || activeTab === 'activity'} onClick={() => setActiveTab('you')} />
+        <NavButton label="You" icon="👤" active={activeTab === 'you' || activeTab === 'chart' || activeTab === 'activity' || activeTab === 'panchang'} onClick={() => setActiveTab('you')} />
       </nav>
     </main>
   );

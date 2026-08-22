@@ -74,6 +74,59 @@ export interface PanchangWindowSpan {
   end: string;
 }
 
+export interface PanchangDaySummary {
+  date: string;
+  vara: string;
+  tithi: { name: string };
+  nakshatra: { name: string };
+  /**
+   * hasAbhijit/hasBrahma/cautionCount are always {true, true, 3} with
+   * today's engine -- computePanchangWindows() unconditionally returns all
+   * 5 windows every day (there is no "no Abhijit today" case for ordinary
+   * latitudes), so these are NOT meaningful per-day differentiators right
+   * now. Kept as literal, honest presence/count data (future-ready, per the
+   * brief) rather than omitted -- but the calendar UI deliberately does NOT
+   * render a per-day star/caution badge from them, since a marker that's
+   * identical on every cell would misleadingly imply daily variation that
+   * doesn't exist. See the completion report.
+   */
+  notableWindows: {
+    hasAbhijit: boolean;
+    hasBrahma: boolean;
+    cautionCount: number;
+  };
+  /**
+   * The one genuinely sparse, already-reliable per-day signal the current
+   * engine provides: Purnima (full moon) and Amavasya (new moon) are each
+   * one specific named Tithi (see TITHI_NAMES), occurring once per lunar
+   * cycle (~29.5 days) -- a real reason to mark a specific day, unlike the
+   * always-true window-presence fields above.
+   */
+  moonPhaseMarker?: 'NEW_MOON' | 'FULL_MOON';
+}
+
+/** Derives the lightweight month-calendar summary from a full PanchangDay --
+ * pure, no recalculation; every field is read directly off `day`. */
+export function summarizePanchangDay(day: PanchangDay): PanchangDaySummary {
+  const hasWindowType = (type: SolarWindowType) => day.windows.some((w) => w.type === type);
+  const cautionCount = (['RAHU_KALAM', 'YAMA', 'GULIKA'] as SolarWindowType[]).filter(hasWindowType).length;
+  const moonPhaseMarker: PanchangDaySummary['moonPhaseMarker'] =
+    day.panchanga.tithi.name === 'Purnima' ? 'FULL_MOON' : day.panchanga.tithi.name === 'Amavasya' ? 'NEW_MOON' : undefined;
+
+  return {
+    date: day.date,
+    vara: day.panchanga.vara,
+    tithi: { name: day.panchanga.tithi.name },
+    nakshatra: { name: day.panchanga.nakshatra.name },
+    notableWindows: {
+      hasAbhijit: hasWindowType('ABHIJIT'),
+      hasBrahma: hasWindowType('BRAHMA'),
+      cautionCount,
+    },
+    moonPhaseMarker,
+  };
+}
+
 export interface GetPanchangForDateParams {
   /** The user's local calendar date, e.g. "2026-08-21". Treated as a local
    * date, never as UTC midnight -- see the module doc comment. */
@@ -185,4 +238,45 @@ export function getPanchangForDate(params: GetPanchangForDateParams): PanchangDa
       end: toInstant(w.endMinutes),
     })),
   };
+}
+
+export interface GetMonthOfPanchangSummariesParams {
+  /** Calendar year, e.g. 2026. */
+  year: number;
+  /** 1-12 (not 0-indexed). */
+  month: number;
+  latitude: number;
+  longitude: number;
+  timezone: string;
+}
+
+/** Days in `month` (1-12) of `year`, leap-year-correct (calendar-date
+ * arithmetic, not tied to any timezone or instant). */
+function daysInCalendarMonth(year: number, month: number): number {
+  return new Date(Date.UTC(year, month, 0)).getUTCDate();
+}
+
+/**
+ * The one canonical entry point for a month of Panchang summaries -- used
+ * by GET /api/panchang/month, and unit-testable independent of the HTTP
+ * layer. Calls getPanchangForDate() once per local calendar date in the
+ * month (28-31 calls) and reduces each to a PanchangDaySummary; never
+ * assembles or returns a full PanchangDay per date. Produces exactly one
+ * summary per calendar date in the month, in ascending date order -- no
+ * duplicates, no gaps, regardless of the caller's timezone (the loop is
+ * driven by calendar-date arithmetic, not by iterating instants).
+ */
+export function getMonthOfPanchangSummaries(params: GetMonthOfPanchangSummariesParams): PanchangDaySummary[] {
+  const { year, month, latitude, longitude, timezone } = params;
+  if (!Number.isInteger(month) || month < 1 || month > 12) {
+    throw new Error(`getMonthOfPanchangSummaries: month must be an integer 1-12, got ${month}.`);
+  }
+
+  const totalDays = daysInCalendarMonth(year, month);
+  const pad2 = (n: number) => String(n).padStart(2, '0');
+
+  return Array.from({ length: totalDays }, (_, index) => {
+    const localDate = `${String(year).padStart(4, '0')}-${pad2(month)}-${pad2(index + 1)}`;
+    return summarizePanchangDay(getPanchangForDate({ localDate, latitude, longitude, timezone }));
+  });
 }
