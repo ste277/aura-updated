@@ -2,12 +2,11 @@ import { NextRequest, NextResponse } from 'next/server';
 import { getSessionFromRequest } from '../../../lib/session';
 import { getUserById, User } from '../../../lib/db';
 import { parseJsonObject } from '../../../lib/request';
-import { localDateTimeToUTC, resolveTzOffsetMinutes } from '../../../lib/timezone';
+import { resolveTzOffsetMinutes } from '../../../lib/timezone';
+import { natalContextFromBirthDetails } from '../../../lib/natalContext';
 import { handleTimingSearchBody } from '../../../lib/timingSearchRequest';
 import { DailyAssistantContext } from '../../../../../packages/recommendation/src/dailyAssistant';
 import { PersonalMuhurtaContext } from '../../../../../packages/recommendation/src/auraFitEngine';
-import { getNatalChart } from '../../../../../packages/vedic/src/natalChart';
-import { getNakshatra } from '../../../../../packages/vedic/src/panchangElements';
 
 /**
  * The Timing Search API: a thin HTTP wrapper around runTimingSearch() (the
@@ -16,30 +15,17 @@ import { getNakshatra } from '../../../../../packages/vedic/src/panchangElements
  * (Next's route modules may only export HTTP handlers + a few config
  * options, so a testable pure validation function can't live in this file).
  *
- * buildPersonalMuhurtaContext()/RASHI_ELEMENT/resolveRequestNow() below are
- * intentionally duplicated from ../daily-assistant/slot-task/route.ts rather
- * than extracted into a shared module, because that route must not be
- * touched in this PR (see brief). Both copies are small and behavior-
- * identical; a future PR that actually re-routes slot-task through Timing
- * Search should collapse them.
+ * buildPersonalMuhurtaContext() below shares its actual astronomy work with
+ * ../muhurtham-search/route.ts and ../panchang/natal-chart/route.ts via
+ * ../../../lib/natalContext.ts's natalContextFromBirthDetails() -- the
+ * "collapse all three copies" consolidation flagged as future work in an
+ * earlier PR, done as part of the Partner Profile Foundation PR (which needs
+ * this same shared conversion for SavedPerson). resolveRequestNow() is still
+ * duplicated from ../daily-assistant/slot-task/route.ts, since that route
+ * must not be touched here.
  */
 
 const MAX_CLIENT_CLOCK_SKEW_MS = 12 * 60 * 60 * 1000;
-
-const RASHI_ELEMENT: Record<string, PersonalMuhurtaContext['moonElement']> = {
-  Mesha: 'FIRE',
-  Vrishabha: 'EARTH',
-  Mithuna: 'AIR',
-  Karka: 'WATER',
-  Simha: 'FIRE',
-  Kanya: 'EARTH',
-  Tula: 'AIR',
-  Vrishchika: 'WATER',
-  Dhanu: 'FIRE',
-  Makara: 'EARTH',
-  Kumbha: 'AIR',
-  Meena: 'WATER',
-};
 
 function formatUTCDateString(dateInput: Date | string): string {
   if (typeof dateInput === 'string') return dateInput.split('T')[0];
@@ -51,19 +37,7 @@ function formatUTCDateString(dateInput: Date | string): string {
 
 function buildPersonalMuhurtaContext(user: User): PersonalMuhurtaContext | undefined {
   if (!user.birthDate || !user.birthTime || !user.birthTimezone) return undefined;
-
-  const birthDateStr = formatUTCDateString(user.birthDate);
-  const birthMomentUTC = localDateTimeToUTC(birthDateStr, user.birthTime, user.birthTimezone);
-  const natalNakshatra = getNakshatra(birthMomentUTC);
-  const chart = getNatalChart(birthMomentUTC);
-  const moonPlacement = chart.find((graha) => graha.graha === 'Moon');
-
-  return {
-    natalNakshatraIndex: natalNakshatra.index,
-    janmaNakshatra: natalNakshatra.name,
-    janmaRashi: moonPlacement?.rashiName,
-    moonElement: moonPlacement?.rashiName ? RASHI_ELEMENT[moonPlacement.rashiName] : undefined,
-  };
+  return natalContextFromBirthDetails(formatUTCDateString(user.birthDate), user.birthTime, user.birthTimezone);
 }
 
 function resolveRequestNow(clientNow: unknown): Date {

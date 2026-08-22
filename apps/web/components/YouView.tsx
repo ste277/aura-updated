@@ -17,6 +17,7 @@ interface YouViewProps {
   onOpenChart: () => void;
   onOpenActivityLog: () => void;
   onOpenPanchang: () => void;
+  onOpenPeople: () => void;
   onSignOut: () => void;
   focusNotificationsKey?: number;
 }
@@ -33,6 +34,7 @@ export function YouView({
   onOpenChart,
   onOpenActivityLog,
   onOpenPanchang,
+  onOpenPeople,
   onSignOut,
   focusNotificationsKey,
 }: YouViewProps) {
@@ -136,6 +138,7 @@ export function YouView({
       <section style={{ background: 'var(--as-surface-raised, #0f172a)', border: '1px solid var(--as-border, #1e293b)', borderRadius: 16, overflow: 'hidden' }}>
         <SettingsRow icon="📋" title="Activity Log" detail="View logged activities" onClick={onOpenActivityLog} />
         <SettingsRow icon="🗓️" title="Panchang Calendar" detail="Tithi, Nakshatra, and windows by day" onClick={onOpenPanchang} />
+        <SettingsRow icon="👥" title="People" detail="Manage the people you plan with" onClick={onOpenPeople} />
         <SettingsLinkRow icon="⬇️" title="Export Data" detail="Download your timing data" href="/api/users/export" />
         <SettingsRow icon="❔" title="Help & FAQ" detail="Learn more about myAuraMoment" expanded={openSettingsPanel === 'help'} onClick={() => toggleSettingsPanel('help')} />
         {openSettingsPanel === 'help' && (

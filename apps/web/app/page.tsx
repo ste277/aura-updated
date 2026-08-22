@@ -25,6 +25,7 @@ import { PlanWithAuraView } from '../components/PlanWithAuraView';
 import { YouView } from '../components/YouView';
 import { PanchangCalendarView } from '../components/PanchangCalendarView';
 import { MuhurthamFinderView } from '../components/MuhurthamFinderView';
+import { PeopleView } from '../components/PeopleView';
 
 import { BirthChartSection } from '../components/BirthChartSection';
 import { LoginScreen } from '../components/LoginScreen';
@@ -101,7 +102,7 @@ export default function DashboardPage() {
   const [youNotificationsFocusKey, setYouNotificationsFocusKey] = useState(0);
   const [mounted, setMounted] = useState(false);
 
-  const [activeTab, setActiveTab] = useState<'home' | 'timeline' | 'ask' | 'plan' | 'insights' | 'you' | 'chart' | 'activity' | 'panchang' | 'muhurtham'>('home');
+  const [activeTab, setActiveTab] = useState<'home' | 'timeline' | 'ask' | 'plan' | 'insights' | 'you' | 'chart' | 'activity' | 'panchang' | 'muhurtham' | 'people'>('home');
   const [panchangDateJump, setPanchangDateJump] = useState<{ date: string; key: number } | null>(null);
 
   const [notificationPrefs, setNotificationPrefs] = useState<NotificationPrefs>(DEFAULT_NOTIFICATION_PREFS);
@@ -802,12 +803,15 @@ export default function DashboardPage() {
             onOpenChart={() => setActiveTab('chart')}
             onOpenActivityLog={() => setActiveTab('activity')}
             onOpenPanchang={() => setActiveTab('panchang')}
+            onOpenPeople={() => setActiveTab('people')}
             onSignOut={handleLogout}
             focusNotificationsKey={youNotificationsFocusKey}
           />
         )}
 
         {activeTab === 'chart' && <BirthChartSection />}
+
+        {activeTab === 'people' && <PeopleView onBack={() => setActiveTab('you')} />}
 
         {activeTab === 'activity' && (
           <CalendarViewSection
@@ -863,7 +867,7 @@ export default function DashboardPage() {
         <NavButton label="Plan" icon="✨" active={activeTab === 'plan'} onClick={() => setActiveTab('plan')} />
         <NavButton label="Ask Aura" icon="🤖" active={activeTab === 'ask'} onClick={() => setActiveTab('ask')} />
         <NavButton label="Insights" icon="📊" active={activeTab === 'insights'} onClick={() => setActiveTab('insights')} />
-        <NavButton label="You" icon="👤" active={activeTab === 'you' || activeTab === 'chart' || activeTab === 'activity' || activeTab === 'panchang' || activeTab === 'muhurtham'} onClick={() => setActiveTab('you')} />
+        <NavButton label="You" icon="👤" active={activeTab === 'you' || activeTab === 'chart' || activeTab === 'activity' || activeTab === 'panchang' || activeTab === 'muhurtham' || activeTab === 'people'} onClick={() => setActiveTab('you')} />
       </nav>
     </main>
   );

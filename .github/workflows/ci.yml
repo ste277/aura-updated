@@ -49,6 +49,15 @@ jobs:
         run: npx ts-node test/muhurtaRulePacks.test.ts
       - name: Run Personal Muhurtham test
         run: npx ts-node test/personalMuhurtham.test.ts
+      - name: Run SavedPerson request validation test
+        run: npx ts-node test/savedPersonRequest.test.ts
+      - name: Run SavedPerson natal context test
+        run: npx ts-node test/savedPersonNatalContext.test.ts
+      # test/savedPersonDb.test.ts is intentionally NOT run here -- it makes
+      # real INSERT/SELECT/UPDATE/DELETE calls against Postgres via a live
+      # DATABASE_URL, and this job has no Postgres service provisioned. Run
+      # it locally against a real database instead (see the file's own doc
+      # comment for the exact command).
       - name: Install web deps
         working-directory: apps/web
         run: npm install

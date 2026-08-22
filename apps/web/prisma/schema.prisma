@@ -31,6 +31,48 @@ model User {
   customCities    CustomCity[]
   dailyReflections DailyReflection[]
   plannedActivities PlannedActivity[]
+  savedPeople     SavedPerson[]
+}
+
+// A lightweight profile for someone the user plans with -- the minimum
+// natal information Personal Muhurtham-style personalization needs, not a
+// second full user account. Deliberately named SavedPerson (not
+// PartnerProfile): relationshipType covers PARTNER today but is expected to
+// grow (SPOUSE, FAMILY, FRIEND, OTHER) without a schema change. Every row is
+// owned by exactly one User (ownerUserId) and is never readable, listable,
+// or mutable by anyone else -- see apps/web/lib/db.ts's SavedPerson CRUD,
+// which always scopes by ownerUserId, never by id alone.
+//
+// birthLatitude/birthLongitude are OPTIONAL: buildNatalContext() (packages/
+// vedic/src/natalChart.ts) uses geocentric sidereal longitude, which does
+// not depend on observer location -- only birthDate + birthTime +
+// birthTimezone are actually required to derive Janma Nakshatra/Rashi. They
+// still naturally travel together with birthTimezone when a birth city is
+// picked (the existing city-picker UX), so they're stored when available
+// but never required.
+//
+// No calculated planetary positions are stored here -- natal context is
+// always derived on read via getSavedPersonNatalContext(), the same
+// buildNatalContext() every other personalization consumer uses.
+model SavedPerson {
+  id              String   @id @default(uuid())
+  ownerUserId     String
+  owner           User     @relation(fields: [ownerUserId], references: [id], onDelete: Cascade)
+
+  name            String
+  relationshipType String  @default("OTHER") // "PARTNER" | "SPOUSE" | "FAMILY" | "FRIEND" | "OTHER"
+
+  birthDate       DateTime @db.Timestamptz(3)
+  birthTime       String   // "HH:MM", 24h, local to birthTimezone -- required, see module note above
+  birthTimezone   String   // IANA name -- required
+  birthCityName   String?
+  birthLatitude   Float?
+  birthLongitude  Float?
+
+  createdAt       DateTime @default(now()) @db.Timestamptz(3)
+  updatedAt       DateTime @updatedAt @db.Timestamptz(3)
+
+  @@index([ownerUserId])
 }
 
 model CustomCity {

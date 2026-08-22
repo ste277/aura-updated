@@ -85,6 +85,66 @@ function getMeanLunarNodeLongitude(date: Date): number {
   return normalizeDegrees(meanNodeTropical - lahiriAyanamsa(date));
 }
 
+/**
+ * Derived natal context for ANY birth instant -- the authenticated user's
+ * own birth details or a SavedPerson's, indifferently. getNatalChart()/
+ * getTaraBala() above already operate on an arbitrary Date with zero
+ * coupling to the User model; this is the single shared adapter that turns
+ * "a birth instant" into the compact shape personalization consumers need
+ * (packages/recommendation/src/auraFitEngine.ts's PersonalMuhurtaContext is
+ * structurally identical but not imported here, to avoid packages/vedic
+ * depending on packages/recommendation -- the dependency runs the other
+ * way). Both apps/web's own-user context builder and the SavedPerson natal
+ * context function (apps/web/lib/savedPersonNatalContext.ts) call this SAME
+ * function -- there is exactly one astronomy implementation, not a second
+ * "calculatePartnerChart()".
+ */
+export interface NatalContext {
+  natalNakshatraIndex: number;
+  janmaNakshatra: string;
+  janmaRashi: string;
+  moonElement: 'FIRE' | 'WATER' | 'AIR' | 'EARTH';
+}
+
+const RASHI_ELEMENT: Record<string, NatalContext['moonElement']> = {
+  Mesha: 'FIRE',
+  Vrishabha: 'EARTH',
+  Mithuna: 'AIR',
+  Karka: 'WATER',
+  Simha: 'FIRE',
+  Kanya: 'EARTH',
+  Tula: 'AIR',
+  Vrishchika: 'WATER',
+  Dhanu: 'FIRE',
+  Makara: 'EARTH',
+  Kumbha: 'AIR',
+  Meena: 'WATER',
+};
+
+/**
+ * Builds the compact natal context (Janma Nakshatra + Rashi + Moon element)
+ * for a given birth instant. Geocentric sidereal longitude (GeoVector/
+ * GeoMoon + Ecliptic, see getSiderealLongitude above) does NOT depend on
+ * observer location -- birth latitude/longitude are genuinely not needed
+ * for this calculation (only birth date+time+timezone, to resolve the
+ * correct UTC instant). Callers building `birthMomentUTC` are responsible
+ * for that local-time-to-UTC conversion (localDateTimeToUTC, packages/
+ * panchang/src/localDate.ts or apps/web/lib/timezone.ts) -- this function
+ * takes the resolved instant only, matching getNatalChart()/getTaraBala()'s
+ * existing signature style.
+ */
+export function buildNatalContext(birthMomentUTC: Date): NatalContext {
+  const natalNakshatra = getNakshatra(birthMomentUTC);
+  const chart = getNatalChart(birthMomentUTC);
+  const moonPlacement = chart.find((g) => g.graha === 'Moon')!;
+  return {
+    natalNakshatraIndex: natalNakshatra.index,
+    janmaNakshatra: natalNakshatra.name,
+    janmaRashi: moonPlacement.rashiName,
+    moonElement: RASHI_ELEMENT[moonPlacement.rashiName],
+  };
+}
+
 export interface TaraBala {
   taraNumber: number; // 1-9
   name: string;
