@@ -1,6 +1,7 @@
 'use client';
 
 import React from 'react';
+import * as theme from './theme';
 
 /**
  * Product Structure V2 -- Explore owns Panchang + Muhurtham (brief section
@@ -47,15 +48,13 @@ export function ExploreView({ onOpenPanchang, onOpenMuhurtham }: ExploreViewProp
 }
 
 const cardButtonStyle: React.CSSProperties = {
+  ...theme.panelStyle,
   display: 'flex',
   alignItems: 'center',
   gap: 14,
   width: '100%',
   minHeight: 76,
-  border: '1px solid rgba(148, 163, 184, 0.22)',
-  borderRadius: 16,
-  background: 'var(--as-surface-raised, #0f172a)',
-  color: '#f8fafc',
+  color: theme.colors.textPrimary,
   padding: '14px 16px',
   textAlign: 'left',
   cursor: 'pointer',

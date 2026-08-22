@@ -8,6 +8,7 @@ import { getActivityDefinition } from '../../../packages/recommendation/src/acti
 import type { EverydaySharedCandidate } from '../../../packages/recommendation/src/everydayTimingFit';
 import { RELATIONSHIP_ICON, SavedPersonRow } from './PeopleView';
 import { SharedMomentsView } from './SharedMomentsView';
+import * as theme from './theme';
 import type { TimingCandidate, TimingCandidateLabel, TimingSearchDateRange, TimingSearchMode, TimingSearchResponse, TimingTimePreference } from '../../../packages/recommendation/src/timingSearch';
 import type { MuhurtaReason } from '../../../packages/muhurta/src/activityOntology';
 import { formatMuhurtaReason } from '../../../packages/muhurta/src/muhurtaReasonFormat';
@@ -497,6 +498,7 @@ export function PlanWithAuraView({ onTimingSearch, onViewDay, onPlanLogged, time
   const [savedPlans, setSavedPlans] = useState<UpcomingPlan[]>([]);
   const [expandedPlanId, setExpandedPlanId] = useState<string | null>(null);
   const [reschedulingPlanId, setReschedulingPlanId] = useState<string | null>(null);
+  const [confirmingRemovePlanId, setConfirmingRemovePlanId] = useState<string | null>(null);
   const [savingOpportunityKey, setSavingOpportunityKey] = useState<string | null>(null);
   const [planActionStates, setPlanActionStates] = useState<Record<string, PlanActionState>>({});
   const [plannedOpportunityKeys, setPlannedOpportunityKeys] = useState<Set<string>>(() => new Set());
@@ -695,18 +697,22 @@ export function PlanWithAuraView({ onTimingSearch, onViewDay, onPlanLogged, time
   };
 
   const handleCancelPlan = async (plan: UpcomingPlan) => {
-    if (planActionStates[plan.id] || plan.status === 'LOGGED') return;
+    if (planActionStates[plan.id]) return;
 
     setPlanActionStates((states) => ({ ...states, [plan.id]: 'CANCELLING' }));
     try {
+      // Server decides cancel vs. permanent removal from the plan's own
+      // status -- UPCOMING gets cancelled, LOGGED/CANCELLED gets removed
+      // for good (see app/api/plans/[planId]/route.ts).
       const res = await fetch(`/api/plans/${plan.id}`, { method: 'DELETE' });
-      if (!res.ok) throw new Error('Unable to cancel plan.');
+      if (!res.ok) throw new Error('Unable to remove plan.');
       setSavedPlans((plans) => plans.filter((item) => item.id !== plan.id));
       setExpandedPlanId(null);
+      setConfirmingRemovePlanId(null);
       onPlanLogged?.();
       triggerHaptic('success');
     } catch (err) {
-      console.error('Failed to cancel plan:', err);
+      console.error('Failed to remove plan:', err);
     } finally {
       setPlanActionStates((states) => {
         const next = { ...states };
@@ -1351,7 +1357,10 @@ export function PlanWithAuraView({ onTimingSearch, onViewDay, onPlanLogged, time
             onToggle={() => setExpandedPlanId((id) => id === plan.id ? null : plan.id)}
             onReschedule={() => handleReschedulePlan(plan)}
             onLog={() => handleLogPlan(plan)}
-            onCancel={() => handleCancelPlan(plan)}
+            confirmingRemove={confirmingRemovePlanId === plan.id}
+            onRequestRemove={() => setConfirmingRemovePlanId(plan.id)}
+            onCancelRemove={() => setConfirmingRemovePlanId(null)}
+            onConfirmRemove={() => handleCancelPlan(plan)}
           />
         )) : (
           <div style={emptyPlansStyle}>
@@ -1372,7 +1381,10 @@ export function PlanWithAuraView({ onTimingSearch, onViewDay, onPlanLogged, time
               onToggle={() => setExpandedPlanId((id) => id === plan.id ? null : plan.id)}
               onReschedule={() => handleReschedulePlan(plan)}
               onLog={() => handleLogPlan(plan)}
-              onCancel={() => handleCancelPlan(plan)}
+              confirmingRemove={confirmingRemovePlanId === plan.id}
+              onRequestRemove={() => setConfirmingRemovePlanId(plan.id)}
+              onCancelRemove={() => setConfirmingRemovePlanId(null)}
+              onConfirmRemove={() => handleCancelPlan(plan)}
             />
           ))}
         </section>
@@ -1540,7 +1552,10 @@ function UpcomingPlan({
   onToggle,
   onReschedule,
   onLog,
-  onCancel,
+  confirmingRemove,
+  onRequestRemove,
+  onCancelRemove,
+  onConfirmRemove,
 }: {
   plan: UpcomingPlan;
   expanded: boolean;
@@ -1548,7 +1563,10 @@ function UpcomingPlan({
   onToggle: () => void;
   onReschedule: () => void;
   onLog: () => void;
-  onCancel: () => void;
+  confirmingRemove: boolean;
+  onRequestRemove: () => void;
+  onCancelRemove: () => void;
+  onConfirmRemove: () => void;
 }) {
   const isLogged = plan.status === 'LOGGED';
   const isBusy = Boolean(actionState);
@@ -1620,9 +1638,18 @@ function UpcomingPlan({
             <button type="button" onClick={onLog} disabled={isLogged || isBusy} style={{ ...planSecondaryActionStyle, opacity: isLogged || isBusy ? 0.55 : 1, cursor: isLogged || isBusy ? 'default' : 'pointer' }}>
               {logButtonLabel}
             </button>
-            {!isLogged && (
-              <button type="button" onClick={onCancel} disabled={isBusy} style={{ ...planDangerActionStyle, opacity: isBusy ? 0.55 : 1, cursor: isBusy ? 'default' : 'pointer' }}>
-                {actionState === 'CANCELLING' ? 'Cancelling...' : 'Cancel'}
+            {confirmingRemove ? (
+              <>
+                <button type="button" onClick={onConfirmRemove} disabled={isBusy} style={{ ...planDangerActionStyle, opacity: isBusy ? 0.55 : 1, cursor: isBusy ? 'default' : 'pointer' }}>
+                  {isBusy ? 'Removing...' : isLogged ? 'Confirm remove' : 'Confirm cancel'}
+                </button>
+                <button type="button" onClick={onCancelRemove} disabled={isBusy} style={{ ...planSecondaryActionStyle, opacity: isBusy ? 0.55 : 1, cursor: isBusy ? 'default' : 'pointer' }}>
+                  Keep it
+                </button>
+              </>
+            ) : (
+              <button type="button" onClick={onRequestRemove} disabled={isBusy} style={{ ...planDangerActionStyle, opacity: isBusy ? 0.55 : 1, cursor: isBusy ? 'default' : 'pointer' }}>
+                {isLogged ? 'Remove' : 'Cancel'}
               </button>
             )}
           </div>
@@ -1862,13 +1889,7 @@ function EverydaySharedResultCard({
   );
 }
 
-const panelStyle: React.CSSProperties = {
-  background: 'linear-gradient(145deg, rgba(15, 23, 42, 0.96), rgba(13, 28, 62, 0.82))',
-  border: '1px solid rgba(96, 165, 250, 0.18)',
-  borderRadius: 16,
-  boxShadow: 'inset 0 1px 0 rgba(255, 255, 255, 0.03)',
-  padding: 16,
-};
+const panelStyle: React.CSSProperties = theme.panelStyle;
 
 const modeSwitcherStyle: React.CSSProperties = {
   display: 'grid',

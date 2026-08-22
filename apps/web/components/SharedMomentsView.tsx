@@ -1,6 +1,7 @@
 'use client';
 
 import React, { useEffect, useState } from 'react';
+import * as theme from './theme';
 
 /**
  * Owner-facing moment management (Aura Moment Sharing brief section 14,
@@ -98,6 +99,12 @@ export function SharedMomentsView({ onBack, onSeen, focusMomentToken, embedded }
   const [copiedId, setCopiedId] = useState<string | null>(null);
   const [confirmingRevokeId, setConfirmingRevokeId] = useState<string | null>(null);
   const [revokingId, setRevokingId] = useState<string | null>(null);
+  const [confirmingDeleteId, setConfirmingDeleteId] = useState<string | null>(null);
+  const [deletingId, setDeletingId] = useState<string | null>(null);
+  // Revoked moments are dead history -- collapsed by default so the list
+  // doesn't just keep growing as more get revoked over time. Active moments
+  // always show in full (there's rarely more than a handful at once).
+  const [showRevoked, setShowRevoked] = useState(false);
 
   const loadMoments = async () => {
     setError('');
@@ -153,6 +160,22 @@ export function SharedMomentsView({ onBack, onSeen, focusMomentToken, embedded }
     }
   };
 
+  /** Permanently removes an already-revoked moment (brief: "how do we
+   * remove completed Moments"). Scoped server-side to REVOKED only. */
+  const handleDelete = async (moment: SharedMomentRow) => {
+    setDeletingId(moment.id);
+    try {
+      const res = await fetch(`/api/aura-moments/${moment.publicToken}`, { method: 'DELETE' });
+      if (!res.ok) throw new Error('Unable to remove this moment.');
+      setMoments((current) => current?.filter((m) => m.id !== moment.id) ?? current);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Unable to remove this moment.');
+    } finally {
+      setDeletingId(null);
+      setConfirmingDeleteId(null);
+    }
+  };
+
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 16, paddingBottom: 24, fontFamily: 'sans-serif', color: '#f8fafc' }}>
       <div style={{ display: 'flex', alignItems: 'flex-start', gap: 12 }}>
@@ -183,23 +206,67 @@ export function SharedMomentsView({ onBack, onSeen, focusMomentToken, embedded }
           </p>
         </section>
       ) : (
-        moments.map((moment) => (
-          <MomentCard
-            key={moment.id}
-            moment={moment}
-            copied={copiedId === moment.id}
-            onCopy={() => handleCopy(moment)}
-            onView={() => handleView(moment)}
-            confirmingRevoke={confirmingRevokeId === moment.id}
-            revoking={revokingId === moment.id}
-            onRequestRevoke={() => setConfirmingRevokeId(moment.id)}
-            onCancelRevoke={() => setConfirmingRevokeId(null)}
-            onConfirmRevoke={() => handleRevoke(moment)}
-            onSuggested={loadMoments}
-            onFindAlternatives={() => markSeen(moment.publicToken)}
-            autoFindAlternatives={focusMomentToken !== undefined && focusMomentToken === moment.publicToken}
-          />
-        ))
+        (() => {
+          const activeMoments = moments.filter((m) => m.status === 'ACTIVE');
+          const revokedMoments = moments.filter((m) => m.status === 'REVOKED');
+          return (
+            <>
+              {activeMoments.length === 0 && revokedMoments.length > 0 && (
+                <p style={{ fontSize: 13, color: '#94a3b8' }}>No active Moments -- see revoked below.</p>
+              )}
+              {activeMoments.map((moment) => (
+                <MomentCard
+                  key={moment.id}
+                  moment={moment}
+                  copied={copiedId === moment.id}
+                  onCopy={() => handleCopy(moment)}
+                  onView={() => handleView(moment)}
+                  confirmingRevoke={confirmingRevokeId === moment.id}
+                  revoking={revokingId === moment.id}
+                  onRequestRevoke={() => setConfirmingRevokeId(moment.id)}
+                  onCancelRevoke={() => setConfirmingRevokeId(null)}
+                  onConfirmRevoke={() => handleRevoke(moment)}
+                  onSuggested={loadMoments}
+                  onFindAlternatives={() => markSeen(moment.publicToken)}
+                  autoFindAlternatives={focusMomentToken !== undefined && focusMomentToken === moment.publicToken}
+                />
+              ))}
+              {revokedMoments.length > 0 && (
+                <>
+                  <button
+                    type="button"
+                    onClick={() => setShowRevoked((value) => !value)}
+                    style={{ ...linkButtonStyle, textAlign: 'left' }}
+                  >
+                    {showRevoked ? 'Hide' : 'Show'} revoked ({revokedMoments.length}) {showRevoked ? '⌃' : '⌄'}
+                  </button>
+                  {showRevoked && revokedMoments.map((moment) => (
+                    <MomentCard
+                      key={moment.id}
+                      moment={moment}
+                      copied={copiedId === moment.id}
+                      onCopy={() => handleCopy(moment)}
+                      onView={() => handleView(moment)}
+                      confirmingRevoke={false}
+                      revoking={false}
+                      onRequestRevoke={() => {}}
+                      onCancelRevoke={() => {}}
+                      onConfirmRevoke={() => {}}
+                      onSuggested={loadMoments}
+                      onFindAlternatives={() => markSeen(moment.publicToken)}
+                      autoFindAlternatives={false}
+                      confirmingDelete={confirmingDeleteId === moment.id}
+                      deleting={deletingId === moment.id}
+                      onRequestDelete={() => setConfirmingDeleteId(moment.id)}
+                      onCancelDelete={() => setConfirmingDeleteId(null)}
+                      onConfirmDelete={() => handleDelete(moment)}
+                    />
+                  ))}
+                </>
+              )}
+            </>
+          );
+        })()
       )}
     </div>
   );
@@ -218,6 +285,11 @@ function MomentCard({
   onSuggested,
   onFindAlternatives,
   autoFindAlternatives,
+  confirmingDelete,
+  deleting,
+  onRequestDelete,
+  onCancelDelete,
+  onConfirmDelete,
 }: {
   moment: SharedMomentRow;
   copied: boolean;
@@ -240,6 +312,14 @@ function MomentCard({
    * straight into the search instead of leaving the owner to find the
    * button themselves. */
   autoFindAlternatives?: boolean;
+  /** Permanent removal -- only ever offered for an already-REVOKED moment
+   * (see the parent's revoked-section rendering); undefined for an ACTIVE
+   * moment's card. */
+  confirmingDelete?: boolean;
+  deleting?: boolean;
+  onRequestDelete?: () => void;
+  onCancelDelete?: () => void;
+  onConfirmDelete?: () => void;
 }) {
   const response = responseText(moment);
   const [alternatives, setAlternatives] = useState<AlternativesOutcome | null>(null);
@@ -340,6 +420,22 @@ function MomentCard({
             </button>
           )
         )}
+        {moment.status === 'REVOKED' && onRequestDelete && (
+          confirmingDelete ? (
+            <>
+              <button type="button" onClick={onConfirmDelete} disabled={deleting} style={{ ...linkButtonStyle, color: '#fb6b6b' }}>
+                {deleting ? 'Removing…' : 'Confirm remove'}
+              </button>
+              <button type="button" onClick={onCancelDelete} style={linkButtonStyle}>
+                Cancel
+              </button>
+            </>
+          ) : (
+            <button type="button" onClick={onRequestDelete} style={{ ...linkButtonStyle, color: '#fb6b6b' }}>
+              Remove
+            </button>
+          )
+        )}
       </div>
 
       {canFindAnotherTime && !alternatives && !suggested && (
@@ -392,70 +488,10 @@ function MomentCard({
   );
 }
 
-const cardStyle: React.CSSProperties = {
-  background: 'var(--as-surface-raised, #0f172a)',
-  border: '1px solid var(--as-border, #1e293b)',
-  borderRadius: 16,
-  padding: 16,
-};
-
-const backButtonStyle: React.CSSProperties = {
-  minHeight: 34,
-  borderRadius: 17,
-  border: '1px solid rgba(148, 163, 184, 0.22)',
-  background: 'rgba(15, 23, 42, 0.75)',
-  color: '#f8fafc',
-  fontSize: 12,
-  cursor: 'pointer',
-  flexShrink: 0,
-  display: 'inline-flex',
-  alignItems: 'center',
-  gap: 6,
-  padding: '0 10px',
-  fontWeight: 800,
-};
-
-const errorBoxStyle: React.CSSProperties = {
-  color: '#fb6b6b',
-  fontSize: 12,
-  lineHeight: 1.45,
-};
-
-const linkButtonStyle: React.CSSProperties = {
-  border: 'none',
-  background: 'transparent',
-  color: '#38bdf8',
-  fontSize: 13,
-  fontWeight: 850,
-  cursor: 'pointer',
-  padding: 0,
-  textDecoration: 'none',
-};
-
-const outlineButtonStyle: React.CSSProperties = {
-  width: '100%',
-  minHeight: 40,
-  borderRadius: 12,
-  border: '1px solid rgba(74, 222, 128, 0.35)',
-  background: 'rgba(74, 222, 128, 0.08)',
-  color: '#4ade80',
-  fontSize: 12,
-  fontWeight: 800,
-  cursor: 'pointer',
-};
-
-const sectionKickerStyle: React.CSSProperties = {
-  color: '#4ade80',
-  fontSize: 10,
-  fontFamily: 'var(--as-font-mono)',
-  fontWeight: 900,
-  textTransform: 'uppercase',
-  letterSpacing: '0.04em',
-};
-
-const panchangaCellStyle: React.CSSProperties = {
-  background: 'rgba(2, 6, 23, 0.4)',
-  border: '1px solid rgba(148, 163, 184, 0.14)',
-  borderRadius: 8,
-  padding: '9px 11px',
-};
+const cardStyle: React.CSSProperties = theme.panelStyle;
+const backButtonStyle: React.CSSProperties = theme.backButtonStyle;
+const errorBoxStyle: React.CSSProperties = theme.errorBoxStyle;
+const linkButtonStyle: React.CSSProperties = theme.linkButtonStyle;
+const outlineButtonStyle: React.CSSProperties = { ...theme.outlineButtonStyle, width: '100%' };
+const sectionKickerStyle: React.CSSProperties = theme.sectionKickerStyle;
+const panchangaCellStyle: React.CSSProperties = theme.cellStyle;

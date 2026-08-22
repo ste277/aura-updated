@@ -6,6 +6,7 @@ import type { DailyBriefing } from '../../../packages/recommendation/src/dailyAs
 import type { AuraUpdate } from '../lib/auraUpdates';
 import { triggerHaptic } from '../lib/haptics';
 import { stripCountdownWrapper } from '../lib/formatTimeLeft';
+import * as theme from './theme';
 
 interface HomeDashboardProps {
   userName: string;
@@ -797,13 +798,7 @@ function LogActivityModal({
   );
 }
 
-const panelStyle: React.CSSProperties = {
-  background: 'linear-gradient(145deg, rgba(15, 23, 42, 0.96), rgba(13, 28, 62, 0.82))',
-  border: '1px solid rgba(96, 165, 250, 0.18)',
-  borderRadius: 16,
-  boxShadow: 'inset 0 1px 0 rgba(255, 255, 255, 0.03)',
-  padding: 16,
-};
+const panelStyle: React.CSSProperties = theme.panelStyle;
 
 const sectionKickerStyle: React.CSSProperties = {
   color: '#4ade80',

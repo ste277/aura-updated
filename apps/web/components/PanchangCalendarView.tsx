@@ -7,6 +7,7 @@ import { getGoodForDayCategories } from '../../../packages/recommendation/src/da
 import { getDatePartsInTimezone } from '../lib/timezone';
 import { ExploreModeToggle } from './ExploreModeToggle';
 import { trackEvent } from '../lib/trackEvent';
+import * as theme from './theme';
 
 interface PanchangCalendarViewProps {
   timezone: string;
@@ -412,28 +413,8 @@ function DetailSkeleton() {
   );
 }
 
-const cardStyle: React.CSSProperties = {
-  background: 'var(--as-surface-raised, #0f172a)',
-  border: '1px solid var(--as-border, #1e293b)',
-  borderRadius: 16,
-  padding: 16,
-};
-
-const backButtonStyle: React.CSSProperties = {
-  minHeight: 34,
-  borderRadius: 17,
-  border: '1px solid rgba(148, 163, 184, 0.22)',
-  background: 'rgba(15, 23, 42, 0.75)',
-  color: '#f8fafc',
-  fontSize: 12,
-  cursor: 'pointer',
-  flexShrink: 0,
-  display: 'inline-flex',
-  alignItems: 'center',
-  gap: 6,
-  padding: '0 10px',
-  fontWeight: 800,
-};
+const cardStyle: React.CSSProperties = theme.panelStyle;
+const backButtonStyle: React.CSSProperties = theme.backButtonStyle;
 
 const monthNavButtonStyle: React.CSSProperties = {
   background: 'rgba(255, 255, 255, 0.06)',
@@ -475,30 +456,11 @@ const dayCellStyle: React.CSSProperties = {
   minWidth: 0,
 };
 
-const sectionKickerStyle: React.CSSProperties = {
-  color: '#4ade80',
-  fontSize: 11,
-  fontFamily: 'var(--as-font-mono)',
-  fontWeight: 900,
-  textTransform: 'uppercase',
-  letterSpacing: '0.04em',
-  marginTop: 4,
-};
+const sectionKickerStyle: React.CSSProperties = { ...theme.sectionKickerStyle, marginTop: 4 };
 
-const panchangaCellStyle: React.CSSProperties = {
-  background: 'rgba(2, 6, 23, 0.4)',
-  border: '1px solid rgba(148, 163, 184, 0.14)',
-  borderRadius: 10,
-  padding: '9px 11px',
-};
+const panchangaCellStyle: React.CSSProperties = theme.cellStyle;
 
-const errorBoxStyle: React.CSSProperties = {
-  color: '#fb6b6b',
-  fontSize: 12,
-  lineHeight: 1.45,
-  padding: '12px 4px',
-  textAlign: 'center',
-};
+const errorBoxStyle: React.CSSProperties = { ...theme.errorBoxStyle, padding: '12px 4px', textAlign: 'center' };
 
 const todayBadgeStyle: React.CSSProperties = {
   border: '1px solid rgba(74, 222, 128, 0.35)',
@@ -520,12 +482,4 @@ const goodForDayChipStyle: React.CSSProperties = {
   fontWeight: 750,
 };
 
-const linkButtonStyle: React.CSSProperties = {
-  border: 'none',
-  background: 'transparent',
-  color: '#38bdf8',
-  fontSize: 14,
-  fontWeight: 850,
-  cursor: 'pointer',
-  padding: 0,
-};
+const linkButtonStyle: React.CSSProperties = { ...theme.linkButtonStyle, fontSize: 14 };

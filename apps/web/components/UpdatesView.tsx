@@ -2,6 +2,7 @@
 
 import React from 'react';
 import type { AuraUpdate } from '../lib/auraUpdates';
+import * as theme from './theme';
 
 /**
  * Product Structure V2 -- the bell's destination (brief section 25/26).
@@ -111,37 +112,6 @@ function UpdateCard({ update, onView, onFindAnotherTime }: { update: AuraUpdate;
   );
 }
 
-const cardStyle: React.CSSProperties = {
-  background: 'var(--as-surface-raised, #0f172a)',
-  border: '1px solid var(--as-border, #1e293b)',
-  borderRadius: 16,
-  padding: 16,
-};
-
-const backButtonStyle: React.CSSProperties = {
-  minHeight: 34,
-  borderRadius: 17,
-  border: '1px solid rgba(148, 163, 184, 0.22)',
-  background: 'rgba(15, 23, 42, 0.75)',
-  color: '#f8fafc',
-  fontSize: 12,
-  cursor: 'pointer',
-  flexShrink: 0,
-  display: 'inline-flex',
-  alignItems: 'center',
-  gap: 6,
-  padding: '0 10px',
-  fontWeight: 800,
-};
-
-const actionButtonStyle: React.CSSProperties = {
-  border: '1px solid rgba(74, 222, 128, 0.35)',
-  background: 'rgba(74, 222, 128, 0.08)',
-  color: '#4ade80',
-  borderRadius: 10,
-  fontSize: 12,
-  fontWeight: 800,
-  cursor: 'pointer',
-  padding: '8px 16px',
-  marginTop: 10,
-};
+const cardStyle: React.CSSProperties = theme.panelStyle;
+const backButtonStyle: React.CSSProperties = theme.backButtonStyle;
+const actionButtonStyle: React.CSSProperties = { ...theme.outlineButtonStyle, borderRadius: 10, padding: '8px 16px', marginTop: 10 };

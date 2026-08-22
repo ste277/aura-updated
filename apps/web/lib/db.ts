@@ -333,6 +333,19 @@ export async function revokeAuraMoment(ownerUserId: string, publicToken: string)
   return result.rows[0];
 }
 
+/** Permanently removes a moment from the list -- scoped to REVOKED only, so
+ * a moment is always revoked first (the deliberate, visible "this link no
+ * longer works" step) before it can be cleared away. Safe to hard-delete:
+ * previousMomentId/ProductEvent.auraMomentId both reference AuraMoment with
+ * ON DELETE SET NULL, so this never breaks lineage or analytics rows. */
+export async function deleteAuraMoment(ownerUserId: string, publicToken: string): Promise<void> {
+  const result = await pool.query(
+    `DELETE FROM "AuraMoment" WHERE "publicToken" = $1 AND "ownerUserId" = $2 AND status = 'REVOKED'`,
+    [publicToken, ownerUserId]
+  );
+  if (result.rowCount === 0) throw new Error('Moment not found or cannot be removed.');
+}
+
 /** PUBLIC write -- by publicToken only. Guarded entirely in SQL (status must
  * still be ACTIVE and, if set, expiresAt must not have passed) so the
  * check-then-act window can't race a concurrent revoke/expiry -- the caller
@@ -657,6 +670,18 @@ export async function cancelPlannedActivity(userId: string, planId: string): Pro
   );
   if (result.rows.length === 0) throw new Error('Plan not found or cannot be cancelled.');
   return result.rows[0];
+}
+
+/** Permanently removes a plan from the list -- scoped to LOGGED/CANCELLED
+ * only, never UPCOMING (that's what cancelPlannedActivity is for). Lets the
+ * user actually clear old completed plans instead of them only ever
+ * accumulating in "Recently Completed". */
+export async function deletePlannedActivity(userId: string, planId: string): Promise<void> {
+  const result = await pool.query(
+    `DELETE FROM "PlannedActivity" WHERE id = $1 AND "userId" = $2 AND status IN ('LOGGED', 'CANCELLED')`,
+    [planId, userId]
+  );
+  if (result.rowCount === 0) throw new Error('Plan not found or cannot be removed.');
 }
 
 export async function logPlannedActivity(userId: string, planId: string): Promise<{ plan: PlannedActivity; habitLog: HabitLogRow }> {
