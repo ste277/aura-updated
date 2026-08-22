@@ -472,6 +472,13 @@ export function PlanWithAuraView({ onTimingSearch, onViewDay, onPlanLogged, time
   const [sharedFindResult, setSharedFindResult] = useState<EverydaySharedCandidate[] | null>(null);
   const [momentSavingKey, setMomentSavingKey] = useState<string | null>(null);
   const [momentSavedKeys, setMomentSavedKeys] = useState<Set<string>>(() => new Set());
+  // Share option under Plan (parity with Muhurtham Finder's "Share this
+  // moment"): once a moment is saved, its shareUrl/id are kept here so a
+  // second click can open the native share sheet / copy the link without
+  // re-creating the moment.
+  const [momentShareInfo, setMomentShareInfo] = useState<Record<string, { id: string; shareUrl: string }>>({});
+  const [sharingMomentKey, setSharingMomentKey] = useState<string | null>(null);
+  const [momentShareFeedback, setMomentShareFeedback] = useState<{ key: string; text: string } | null>(null);
   const momentsSectionRef = useRef<HTMLDivElement | null>(null);
 
   // CHECK mode
@@ -799,13 +806,52 @@ export function PlanWithAuraView({ onTimingSearch, onViewDay, onPlanLogged, time
         }),
       });
       if (!res.ok) throw new Error('Unable to create this moment.');
+      const data = await res.json();
       setMomentSavedKeys((prev) => new Set(prev).add(key));
+      setMomentShareInfo((prev) => ({ ...prev, [key]: { id: data.id, shareUrl: data.shareUrl } }));
       triggerHaptic('success');
     } catch {
       // Best-effort, same convention as saveOpportunity's own catch below --
       // no destructive state to roll back, the user can just retry.
     } finally {
       setMomentSavingKey(null);
+    }
+  };
+
+  /** Share option under Plan -- parity with Muhurtham Finder's "Share this
+   * moment" (handleShareMoment there): the moment already exists (created by
+   * handleMakeMoment above), so this only ever hands its shareUrl to the
+   * user -- native share sheet where supported, else copy-to-clipboard,
+   * else show the raw link. Never re-POSTs /api/aura-moments. */
+  const handleShareSavedMoment = async (key: string, scope: 'PERSONAL' | 'SHARED', activityId: string) => {
+    const info = momentShareInfo[key];
+    if (!info) return;
+    setSharingMomentKey(key);
+    setMomentShareFeedback(null);
+    const shareTitle = `A moment from Aura — ${FULL_ACTIVITY_CATALOG.find((a) => a.id === activityId)?.title ?? 'Timing'}`;
+    const shareText = 'Aura found a good time — take a look.';
+    try {
+      if (typeof navigator !== 'undefined' && navigator.share) {
+        await navigator.share({ title: shareTitle, text: shareText, url: info.shareUrl });
+        setMomentShareFeedback({ key, text: 'Shared!' });
+        trackEvent('AURA_MOMENT_SHARE_INITIATED', { auraMomentId: info.id, metadata: { scope, method: 'native_share', planningMode: getActivityDefinition(activityId)?.experience.planningMode ?? 'EVERYDAY' } });
+      } else if (typeof navigator !== 'undefined' && navigator.clipboard) {
+        await navigator.clipboard.writeText(info.shareUrl);
+        setMomentShareFeedback({ key, text: 'Link copied!' });
+        trackEvent('AURA_MOMENT_SHARE_INITIATED', { auraMomentId: info.id, metadata: { scope, method: 'copy_link', planningMode: getActivityDefinition(activityId)?.experience.planningMode ?? 'EVERYDAY' } });
+      } else {
+        setMomentShareFeedback({ key, text: info.shareUrl });
+      }
+    } catch (shareErr) {
+      // navigator.share() throws AbortError when the user simply dismisses
+      // the native sheet -- not a failure, nothing to show for that.
+      if (shareErr instanceof Error && shareErr.name === 'AbortError') {
+        setSharingMomentKey(null);
+        return;
+      }
+      setMomentShareFeedback({ key, text: info.shareUrl });
+    } finally {
+      setSharingMomentKey(null);
     }
   };
 
@@ -1114,6 +1160,9 @@ export function PlanWithAuraView({ onTimingSearch, onViewDay, onPlanLogged, time
               onMakeMoment={resolvedActivityDefinition?.experience.momentEligible ? () => handleMakeMoment(findCandidateKey(findResult.candidates[0]), { activityId: resolvedActivityDefinition.id, start: findResult.candidates[0].start, end: findResult.candidates[0].end, ratingLabel: findResult.candidates[0].label }) : undefined}
               isMomentSaving={momentSavingKey === findCandidateKey(findResult.candidates[0])}
               isMomentSaved={momentSavedKeys.has(findCandidateKey(findResult.candidates[0]))}
+              onShareMoment={resolvedActivityDefinition ? () => handleShareSavedMoment(findCandidateKey(findResult.candidates[0]), 'PERSONAL', resolvedActivityDefinition.id) : undefined}
+              isSharingMoment={sharingMomentKey === findCandidateKey(findResult.candidates[0])}
+              shareFeedback={momentShareFeedback?.key === findCandidateKey(findResult.candidates[0]) ? momentShareFeedback.text : null}
             />
           )}
           {findResult.candidates.length > 1 && (
@@ -1132,6 +1181,9 @@ export function PlanWithAuraView({ onTimingSearch, onViewDay, onPlanLogged, time
                   onMakeMoment={resolvedActivityDefinition?.experience.momentEligible ? () => handleMakeMoment(findCandidateKey(candidate), { activityId: resolvedActivityDefinition.id, start: candidate.start, end: candidate.end, ratingLabel: candidate.label }) : undefined}
                   isMomentSaving={momentSavingKey === findCandidateKey(candidate)}
                   isMomentSaved={momentSavedKeys.has(findCandidateKey(candidate))}
+                  onShareMoment={resolvedActivityDefinition ? () => handleShareSavedMoment(findCandidateKey(candidate), 'PERSONAL', resolvedActivityDefinition.id) : undefined}
+                  isSharingMoment={sharingMomentKey === findCandidateKey(candidate)}
+                  shareFeedback={momentShareFeedback?.key === findCandidateKey(candidate) ? momentShareFeedback.text : null}
                 />
               ))}
             </>
@@ -1157,6 +1209,9 @@ export function PlanWithAuraView({ onTimingSearch, onViewDay, onPlanLogged, time
                 isMomentSaving={momentSavingKey === key}
                 isMomentSaved={momentSavedKeys.has(key)}
                 onMakeMoment={() => resolvedActivityDefinition && handleMakeMoment(key, { activityId: resolvedActivityDefinition.id, start: candidate.start, end: candidate.end, ratingLabel: candidate.rating, savedPersonId: selectedPersonId })}
+                onShareMoment={resolvedActivityDefinition ? () => handleShareSavedMoment(key, 'SHARED', resolvedActivityDefinition.id) : undefined}
+                isSharingMoment={sharingMomentKey === key}
+                shareFeedback={momentShareFeedback?.key === key ? momentShareFeedback.text : null}
               />
             );
           })}
@@ -1733,6 +1788,9 @@ function TimingResultCard({
   onMakeMoment,
   isMomentSaving,
   isMomentSaved,
+  onShareMoment,
+  isSharingMoment,
+  shareFeedback,
 }: {
   kicker: string;
   candidate: TimingCandidate;
@@ -1747,6 +1805,10 @@ function TimingResultCard({
   onMakeMoment?: () => void;
   isMomentSaving?: boolean;
   isMomentSaved?: boolean;
+  /** Share option under Plan -- present once the moment has been saved. */
+  onShareMoment?: () => void;
+  isSharingMoment?: boolean;
+  shareFeedback?: string | null;
 }) {
   const [showAllReasons, setShowAllReasons] = useState(false);
   const start = new Date(candidate.start);
@@ -1825,6 +1887,16 @@ function TimingResultCard({
             {isMomentSaving ? 'Saving…' : isMomentSaved ? '✓ Moment saved' : 'Make this a Moment'}
           </button>
         )}
+        {isMomentSaved && onShareMoment && (
+          <button
+            type="button"
+            onClick={onShareMoment}
+            disabled={isSharingMoment}
+            style={{ border: 'none', background: 'transparent', color: shareFeedback ? '#4ade80' : '#38bdf8', fontWeight: 850, fontSize: 12, padding: 0, cursor: isSharingMoment ? 'default' : 'pointer', opacity: isSharingMoment ? 0.65 : 1 }}
+          >
+            {shareFeedback ?? (isSharingMoment ? 'Sharing…' : 'Share this moment')}
+          </button>
+        )}
       </div>
     </article>
   );
@@ -1851,6 +1923,9 @@ function EverydaySharedResultCard({
   onMakeMoment,
   isMomentSaving,
   isMomentSaved,
+  onShareMoment,
+  isSharingMoment,
+  shareFeedback,
 }: {
   kicker: string;
   activityTitle: string;
@@ -1859,6 +1934,10 @@ function EverydaySharedResultCard({
   onMakeMoment: () => void;
   isMomentSaving?: boolean;
   isMomentSaved?: boolean;
+  /** Share option under Plan -- present once the moment has been saved. */
+  onShareMoment?: () => void;
+  isSharingMoment?: boolean;
+  shareFeedback?: string | null;
 }) {
   const start = new Date(candidate.start);
   const end = new Date(candidate.end);
@@ -1875,7 +1954,7 @@ function EverydaySharedResultCard({
       <div style={{ marginTop: 10, fontSize: 12, color: '#94a3b8', lineHeight: 1.5 }}>
         Supportive for you{candidate.partnerScore >= candidate.generalCandidate.score ? ' and them' : ''}.
       </div>
-      <div style={{ marginTop: 12 }}>
+      <div style={{ marginTop: 12, display: 'flex', alignItems: 'center', gap: 10 }}>
         <button
           type="button"
           onClick={onMakeMoment}
@@ -1884,6 +1963,16 @@ function EverydaySharedResultCard({
         >
           {isMomentSaving ? 'Saving…' : isMomentSaved ? '✓ Moment saved' : 'Make this a Moment'}
         </button>
+        {isMomentSaved && onShareMoment && (
+          <button
+            type="button"
+            onClick={onShareMoment}
+            disabled={isSharingMoment}
+            style={{ border: 'none', background: 'transparent', color: shareFeedback ? '#4ade80' : '#38bdf8', fontWeight: 850, fontSize: 12, padding: 0, cursor: isSharingMoment ? 'default' : 'pointer', opacity: isSharingMoment ? 0.65 : 1 }}
+          >
+            {shareFeedback ?? (isSharingMoment ? 'Sharing…' : 'Share this moment')}
+          </button>
+        )}
       </div>
     </article>
   );
