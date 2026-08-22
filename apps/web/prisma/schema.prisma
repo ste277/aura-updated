@@ -117,6 +117,11 @@ model AuraMoment {
   // column, never folded into responseState.
   responsePreference      String?   // null | "EARLIER" | "LATER" | "DIFFERENT_DAY" | "NO_PREFERENCE"
   respondedAt             DateTime? @db.Timestamptz(3)
+  // Aura Updates V1: when the OWNER last saw this moment's response. Unread
+  // is derived by comparing this to respondedAt (never a separate boolean),
+  // so a new response after a prior "seen" mark is correctly unread again
+  // with no extra write on the public response path itself.
+  ownerSeenResponseAt     DateTime? @db.Timestamptz(3)
 
   // Lineage: set on a NEW moment created via "Suggest this" -- points at the
   // moment it replaces. The original is never mutated (brief section 13:
@@ -128,6 +133,12 @@ model AuraMoment {
   createdAt               DateTime  @default(now()) @db.Timestamptz(3)
   expiresAt                DateTime? @db.Timestamptz(3)
 
+  // Migration 0018 also adds a partial index on (ownerUserId, status,
+  // respondedAt DESC) WHERE responseState IS NOT NULL, for the Aura
+  // Updates query -- Prisma's @@index syntax has no partial-index support
+  // in this schema's provider config, so it's raw-SQL-only; not
+  // represented here to avoid this line implying a different index shape
+  // than what's actually created.
   @@index([ownerUserId])
 }
 

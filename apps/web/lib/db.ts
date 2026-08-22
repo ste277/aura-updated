@@ -219,6 +219,10 @@ export interface AuraMoment {
    * earlier moment -- see revokeAuraMoment/createAuraMoment's doc comments.
    * The referenced moment is never mutated; this is a one-way pointer. */
   previousMomentId: string | null;
+  /** Aura Updates V1 -- when the OWNER last saw this moment's response.
+   * "Unread" is ALWAYS derived by comparing this to respondedAt (see
+   * lib/auraUpdates.ts), never read as a bare boolean. */
+  ownerSeenResponseAt: Date | null;
   createdAt: Date;
   expiresAt: Date | null;
 }
@@ -344,6 +348,46 @@ export async function hasSuccessorMoment(momentId: string): Promise<boolean> {
     [momentId]
   );
   return result.rows.length > 0;
+}
+
+/** Bulk counterpart to hasSuccessorMoment() -- one query for "which of this
+ * owner's moments already have a successor", used by the Aura Updates
+ * summary so it never does one query per moment. */
+export async function listMomentIdsWithSuccessorForOwner(ownerUserId: string): Promise<Set<string>> {
+  const result = await pool.query(
+    `SELECT DISTINCT "previousMomentId" FROM "AuraMoment" WHERE "ownerUserId" = $1 AND "previousMomentId" IS NOT NULL`,
+    [ownerUserId]
+  );
+  return new Set(result.rows.map((row) => row.previousMomentId as string));
+}
+
+/** The ONLY moments Aura Updates cares about: this owner's, still ACTIVE
+ * (a revoked moment is a closed matter, not an update -- see
+ * lib/auraUpdates.ts), with an actual response, most-recently-responded
+ * first, capped at `limit`. Scoped in SQL rather than filtering
+ * listAuraMomentsForOwner()'s full history in application code -- cheap,
+ * ordinary retrieval (brief section 17), backed by migration 0018's partial
+ * index on exactly this shape. */
+export async function listRecentRespondedAuraMomentsForOwner(ownerUserId: string, limit: number): Promise<AuraMoment[]> {
+  const result = await pool.query(
+    `SELECT * FROM "AuraMoment"
+     WHERE "ownerUserId" = $1 AND status = 'ACTIVE' AND "responseState" IS NOT NULL
+     ORDER BY "respondedAt" DESC
+     LIMIT $2`,
+    [ownerUserId, limit]
+  );
+  return result.rows;
+}
+
+/** Owner-authenticated only (brief section 6: "Do not use the public
+ * bearer-link response endpoint"). Ownership-scoped like revokeAuraMoment --
+ * a token that doesn't belong to this owner silently updates nothing. */
+export async function markAuraMomentResponseSeen(ownerUserId: string, publicToken: string): Promise<AuraMoment | null> {
+  const result = await pool.query(
+    `UPDATE "AuraMoment" SET "ownerSeenResponseAt" = now() WHERE "publicToken" = $1 AND "ownerUserId" = $2 RETURNING *`,
+    [publicToken, ownerUserId]
+  );
+  return result.rows[0] ?? null;
 }
 
 export interface HabitLogRow {

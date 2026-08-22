@@ -13,6 +13,7 @@ import { getActionCards, ActionCard } from '../../../packages/recommendation/src
 import { findActivityIntent } from '../../../packages/recommendation/src/personalizedTasks';
 import type { DailyBriefing, PlanningHorizon } from '../../../packages/recommendation/src/dailyAssistant';
 import type { TimingSearchDateRange, TimingSearchMode, TimingSearchResponse, TimingTimePreference } from '../../../packages/recommendation/src/timingSearch';
+import type { AuraUpdatesSummary } from '../lib/auraUpdates';
 
 // UI Modules
 import { HomeDashboard } from '../components/HomeDashboard';
@@ -95,6 +96,8 @@ export default function DashboardPage() {
   const [planPrefill, setPlanPrefill] = useState<{ activity: string; key: number } | null>(null);
   const [youNotificationsFocusKey, setYouNotificationsFocusKey] = useState(0);
   const [mounted, setMounted] = useState(false);
+  const [auraUpdates, setAuraUpdates] = useState<AuraUpdatesSummary | null>(null);
+  const [sharedMomentsFocusToken, setSharedMomentsFocusToken] = useState<string | undefined>(undefined);
 
   const [activeTab, setActiveTab] = useState<'home' | 'timeline' | 'ask' | 'plan' | 'insights' | 'you' | 'chart' | 'activity' | 'panchang' | 'muhurtham' | 'people' | 'sharedMoments'>('home');
   const [panchangDateJump, setPanchangDateJump] = useState<{ date: string; key: number } | null>(null);
@@ -222,6 +225,45 @@ export default function DashboardPage() {
       console.error('Failed to load daily assistant signals:', err);
     });
   }, [user?.id]);
+
+  // Aura Updates V1 -- ordinary fetch on the same lifecycle as the other
+  // Home data above, no polling faster than the app's existing refresh
+  // pattern (brief: "not faster than existing normal app refresh
+  // patterns"). Refetched after actions that change seen/actionable state
+  // (see loadAuraUpdates callers below) so the badge/section stay current
+  // without a background timer.
+  const loadAuraUpdates = useCallback(async () => {
+    try {
+      const res = await fetch('/api/aura-updates');
+      if (res.ok) setAuraUpdates(await res.json());
+    } catch {
+      // Best-effort -- Home/You already render fine with no updates data.
+    }
+  }, []);
+
+  useEffect(() => {
+    if (!user) return;
+    loadAuraUpdates();
+  }, [user?.id, loadAuraUpdates]);
+
+  const handleViewMomentUpdate = useCallback((momentToken: string) => {
+    window.open(`${window.location.origin}/moment/${momentToken}`, '_blank', 'noopener,noreferrer');
+    fetch(`/api/aura-moments/${momentToken}/seen`, { method: 'POST' }).catch(() => {});
+    loadAuraUpdates();
+  }, [loadAuraUpdates]);
+
+  const handleFindAnotherTimeForMoment = useCallback((momentToken: string) => {
+    setSharedMomentsFocusToken(momentToken);
+    setActiveTab('sharedMoments');
+  }, []);
+
+  // The focus token is only meant for ONE visit to Shared Moments -- clear
+  // it as soon as the tab changes away (however that happens, not just via
+  // the screen's own Back button), so a later, unrelated visit never
+  // auto-re-triggers an old moment's alternatives search.
+  useEffect(() => {
+    if (activeTab !== 'sharedMoments') setSharedMomentsFocusToken(undefined);
+  }, [activeTab]);
 
   // Offline Log Sync Listener
   useEffect(() => {
@@ -744,6 +786,9 @@ export default function DashboardPage() {
             onInsightsClick={() => setActiveTab('insights')}
             onNotificationsClick={handleOpenNotificationSettings}
             onPanchangClick={() => setActiveTab('panchang')}
+            momentUpdates={auraUpdates?.updates}
+            onViewMomentUpdate={handleViewMomentUpdate}
+            onFindAnotherTimeForMoment={handleFindAnotherTimeForMoment}
           />
         )}
 
@@ -805,6 +850,7 @@ export default function DashboardPage() {
             onOpenSharedMoments={() => setActiveTab('sharedMoments')}
             onSignOut={handleLogout}
             focusNotificationsKey={youNotificationsFocusKey}
+            sharedMomentsUnreadCount={auraUpdates?.unreadCount}
           />
         )}
 
@@ -812,7 +858,16 @@ export default function DashboardPage() {
 
         {activeTab === 'people' && <PeopleView onBack={() => setActiveTab('you')} />}
 
-        {activeTab === 'sharedMoments' && <SharedMomentsView onBack={() => setActiveTab('you')} />}
+        {activeTab === 'sharedMoments' && (
+          <SharedMomentsView
+            onBack={() => {
+              setSharedMomentsFocusToken(undefined);
+              setActiveTab('you');
+            }}
+            onSeen={loadAuraUpdates}
+            focusMomentToken={sharedMomentsFocusToken}
+          />
+        )}
 
         {activeTab === 'activity' && (
           <CalendarViewSection
