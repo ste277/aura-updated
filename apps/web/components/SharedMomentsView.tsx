@@ -32,6 +32,10 @@ interface SharedMomentRow {
   status: 'ACTIVE' | 'REVOKED';
   responseState: 'ACCEPTED' | 'ANOTHER_TIME' | null;
   responsePreference: AlternativePreference | null;
+  /** Whether a successor moment already exists via previousMomentId lineage
+   * -- an ANOTHER_TIME response with hasSuccessor is already resolved, so
+   * the "Find another time" CTA shouldn't offer to redo it. */
+  hasSuccessor: boolean;
 }
 
 interface AlternativeCandidate {
@@ -109,7 +113,11 @@ function formatMomentTimeRange(startIso: string, endIso: string, timezone: strin
 function responseText(moment: SharedMomentRow): { text: string; color: string } {
   if (moment.status === 'REVOKED') return { text: 'Revoked', color: '#64748b' };
   if (moment.responseState === 'ACCEPTED') return { text: "❤️ They're in", color: '#4ade80' };
-  if (moment.responseState === 'ANOTHER_TIME') return { text: '↻ Another time requested', color: '#facc15' };
+  if (moment.responseState === 'ANOTHER_TIME') {
+    return moment.hasSuccessor
+      ? { text: '✓ Alternative suggested', color: '#4ade80' }
+      : { text: '↻ Another time requested', color: '#facc15' };
+  }
   return { text: 'Waiting for response', color: '#94a3b8' };
 }
 
@@ -145,7 +153,10 @@ export function SharedMomentsView({ onBack, onSeen, focusMomentToken, embedded }
   /** Section 6/10: marks ONE moment's response seen via the owner-authenticated
    * endpoint (never the public bearer-link response route). Best-effort --
    * a failure here shouldn't block the action (View/Find another time) the
-   * owner actually asked for. */
+   * owner actually asked for. Also called again after a successor is
+   * suggested (redundant POST, harmless) purely for its onSeen?.() side
+   * effect -- that's what tells Home to refetch, since only then does
+   * hasSuccessor flip and the update stop requiring action. */
   const markSeen = (publicToken: string) => {
     fetch(`/api/aura-moments/${publicToken}/seen`, { method: 'POST' }).catch(() => {});
     onSeen?.();
@@ -246,7 +257,7 @@ export function SharedMomentsView({ onBack, onSeen, focusMomentToken, embedded }
                   onRequestRevoke={() => setConfirmingRevokeId(moment.id)}
                   onCancelRevoke={() => setConfirmingRevokeId(null)}
                   onConfirmRevoke={() => handleRevoke(moment)}
-                  onSuggested={loadMoments}
+                  onSuggested={() => { loadMoments(); markSeen(moment.publicToken); }}
                   onFindAlternatives={() => markSeen(moment.publicToken)}
                   autoFindAlternatives={focusMomentToken !== undefined && focusMomentToken === moment.publicToken}
                 />
@@ -352,8 +363,11 @@ function MomentCard({
   // Everyday Moment Rescheduling V1: a PLAN moment can look for another time
   // regardless of scope (GENERAL/PERSONAL/SHARED all route to a real
   // strategy in findAuraMomentAlternatives); a MUHURTHAM moment keeps the
-  // exact original restriction -- SHARED only.
-  const canFindAnotherTime = moment.status === 'ACTIVE' && moment.responseState === 'ANOTHER_TIME' && (moment.source === 'PLAN' || moment.scope === 'SHARED');
+  // exact original restriction -- SHARED only. hasSuccessor excluded here:
+  // once an alternative has already been suggested for this response, redoing
+  // "Find another time" would just offer to suggest a second successor for
+  // the same original -- the owner already acted on it.
+  const canFindAnotherTime = moment.status === 'ACTIVE' && moment.responseState === 'ANOTHER_TIME' && !moment.hasSuccessor && (moment.source === 'PLAN' || moment.scope === 'SHARED');
 
   const handleFindAlternatives = async () => {
     onFindAlternatives?.();

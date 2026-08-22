@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getSessionFromRequest } from '../../../lib/session';
-import { createAuraMoment, getSavedPersonForOwner, getUserById, listAuraMomentsForOwner } from '../../../lib/db';
+import { createAuraMoment, getSavedPersonForOwner, getUserById, listAuraMomentsForOwner, listMomentIdsWithSuccessorForOwner } from '../../../lib/db';
 import { parseJsonObject } from '../../../lib/request';
 import { buildAuraMomentCreateRequest } from '../../../lib/auraMomentRequest';
 import { buildMomentShareUrl, defaultExpiresAt, explanationSnapshotFor, generatePublicMomentToken } from '../../../lib/auraMoments';
@@ -87,19 +87,26 @@ export async function GET(req: NextRequest) {
   const session = getSessionFromRequest(req);
   if (!session) return NextResponse.json({ error: 'Not authenticated.' }, { status: 401 });
 
-  const moments = await listAuraMomentsForOwner(session.userId);
+  const [moments, momentIdsWithSuccessor] = await Promise.all([
+    listAuraMomentsForOwner(session.userId),
+    listMomentIdsWithSuccessorForOwner(session.userId),
+  ]);
   // The owner's own private view -- fine to include publicToken/shareUrl
   // (they already have it, it's literally what they shared) and id. Never
   // includes natal/birth data since AuraMoment never stores any in the
   // first place -- there is nothing here to accidentally leak. planningMode
   // is derived (never stored) the same way PublicAuraMoment's own field is,
   // so the owner's own list can pick everyday vs. ceremonial copy too
-  // (Everyday Moment Rescheduling V1).
+  // (Everyday Moment Rescheduling V1). hasSuccessor mirrors the same signal
+  // GET /api/aura-updates already derives (lib/auraUpdates.ts) -- without it
+  // an already-rescheduled "another time" moment kept offering "Find
+  // another time" again with no way for the UI to know it was resolved.
   return NextResponse.json(
     moments.map((m) => ({
       ...m,
       shareUrl: buildMomentShareUrl(req, m.publicToken),
       planningMode: getActivityDefinition(m.activityId)?.experience.planningMode ?? 'EVERYDAY',
+      hasSuccessor: momentIdsWithSuccessor.has(m.id),
     }))
   );
 }
