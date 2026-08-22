@@ -11,7 +11,7 @@ import {
 import { computeDailyEnergyInsight } from '../lib/scoreEngine';
 import { getActionCards, ActionCard } from '../../../packages/recommendation/src/actionCards';
 import { findActivityIntent } from '../../../packages/recommendation/src/personalizedTasks';
-import type { DailyBriefing, PlanningHorizon, TaskSlotRecommendation, TimePreference } from '../../../packages/recommendation/src/dailyAssistant';
+import type { DailyBriefing, PlanningHorizon } from '../../../packages/recommendation/src/dailyAssistant';
 import type { TimingSearchDateRange, TimingSearchMode, TimingSearchResponse, TimingTimePreference } from '../../../packages/recommendation/src/timingSearch';
 
 // UI Modules
@@ -586,16 +586,6 @@ export default function DashboardPage() {
     setUser((prev) => (prev ? { ...prev, ...city } : prev));
   }, []);
 
-  const handleSlotTask = useCallback(async (taskTitle: string, durationMinutes: number, horizon: PlanningHorizon = 'TODAY', customStartDate?: string, customEndDate?: string, timePreference: TimePreference = 'ANYTIME'): Promise<TaskSlotRecommendation> => {
-    const res = await fetch('/api/daily-assistant/slot-task', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ taskTitle, durationMinutes, horizon, customStartDate, customEndDate, timePreference, clientNow: new Date().toISOString() }),
-    });
-    if (!res.ok) throw new Error('Unable to slot task.');
-    return res.json();
-  }, []);
-
   const handleTimingSearch = useCallback(async (request: {
     mode: TimingSearchMode;
     activityId?: string;
@@ -774,7 +764,6 @@ export default function DashboardPage() {
 
         {activeTab === 'plan' && (
           <PlanWithAuraView
-            onSlotTask={handleSlotTask}
             onTimingSearch={handleTimingSearch}
             onViewDay={() => setActiveTab('timeline')}
             onPlanLogged={loadUserDataAndLogs}
