@@ -228,7 +228,7 @@ function resolveContextOffset(context: DailyAssistantContext): DailyAssistantCon
     : { ...context, tzOffsetMinutes: offset };
 }
 
-function contextForDayOffset(context: DailyAssistantContext, dayOffset: number): DailyAssistantContext {
+export function contextForDayOffset(context: DailyAssistantContext, dayOffset: number): DailyAssistantContext {
   if (dayOffset === 0) return resolveContextOffset(context);
 
   const localDate = localDateForContext(context);
@@ -245,7 +245,7 @@ function contextForDayOffset(context: DailyAssistantContext, dayOffset: number):
   return resolveContextOffset({ ...context, now: targetNow });
 }
 
-function localDateForContext(context: DailyAssistantContext): Date {
+export function localDateForContext(context: DailyAssistantContext): Date {
   const resolved = resolveContextOffset(context);
   return new Date(resolved.now.getTime() + resolved.tzOffsetMinutes * 60 * 1000);
 }
@@ -349,25 +349,9 @@ export function findOptimalTaskTimes(
   const cleanTitle = normalizeTaskTitle(taskTitle);
   const profile = classifyTask(cleanTitle);
   profile.personalContext = context.personalContext;
-  const days = horizon === 'NOW' || horizon === 'TODAY' ? 1 : horizon === 'TOMORROW' ? 1 : horizon === 'WEEKEND' ? 2 : 7;
-  const dayOffset = horizon === 'TOMORROW' ? 1 : 0;
   const current = localDateForContext(context);
-  const currentDayOfWeek = current.getUTCDay();
-  const customOffsets = horizon === 'CUSTOM' && customStartDate && customEndDate
-    ? buildDateOffsets(current, customStartDate, customEndDate)
-    : [];
-  const weekendOffsets = horizon === 'WEEKEND'
-    ? [
-        (6 - currentDayOfWeek + 7) % 7,
-        (7 - currentDayOfWeek + 7) % 7,
-      ].map((offset, index) => offset === 0 && index === 0 && currentDayOfWeek === 0 ? 7 : offset)
-    : [];
-  const searchOffsets = horizon === 'CUSTOM'
-    ? customOffsets
-    : horizon === 'WEEKEND'
-    ? weekendOffsets
-    : Array.from({ length: days }, (_, index) => dayOffset + index);
-  const fallbackDayOffset = searchOffsets[0] ?? dayOffset;
+  const searchOffsets = resolveHorizonDayOffsets(horizon, context, customStartDate, customEndDate);
+  const fallbackDayOffset = searchOffsets[0] ?? (horizon === 'TOMORROW' ? 1 : 0);
   const options: ScoredPlanningOption[] = [];
   const currentMinute = current.getUTCHours() * 60 + current.getUTCMinutes();
   for (const day of searchOffsets) {
@@ -410,6 +394,38 @@ export function findOptimalTaskTimes(
   return { ...base, planningOptions: ranked };
 }
 
+/**
+ * Named-horizon -> day-offsets adapter, extracted verbatim from
+ * findOptimalTaskTimes's original inline computation (zero behavior change,
+ * still the only caller-facing horizon logic) so packages/recommendation/src/
+ * timingSearch.ts can resolve the same horizons without re-deriving this math.
+ */
+export function resolveHorizonDayOffsets(
+  horizon: PlanningHorizon,
+  context: DailyAssistantContext,
+  customStartDate?: string,
+  customEndDate?: string
+): number[] {
+  const days = horizon === 'NOW' || horizon === 'TODAY' ? 1 : horizon === 'TOMORROW' ? 1 : horizon === 'WEEKEND' ? 2 : 7;
+  const dayOffset = horizon === 'TOMORROW' ? 1 : 0;
+  const current = localDateForContext(context);
+  const currentDayOfWeek = current.getUTCDay();
+  const customOffsets = horizon === 'CUSTOM' && customStartDate && customEndDate
+    ? buildDateOffsets(current, customStartDate, customEndDate)
+    : [];
+  const weekendOffsets = horizon === 'WEEKEND'
+    ? [
+        (6 - currentDayOfWeek + 7) % 7,
+        (7 - currentDayOfWeek + 7) % 7,
+      ].map((offset, index) => offset === 0 && index === 0 && currentDayOfWeek === 0 ? 7 : offset)
+    : [];
+  return horizon === 'CUSTOM'
+    ? customOffsets
+    : horizon === 'WEEKEND'
+    ? weekendOffsets
+    : Array.from({ length: days }, (_, index) => dayOffset + index);
+}
+
 export function findBestTimeForActivity(params: {
   activity: string;
   context: DailyAssistantContext;
@@ -430,8 +446,14 @@ export function findBestTimeForActivity(params: {
   );
 }
 
-function selectDailyBestPlanningOptions(options: ScoredPlanningOption[], limit: number): ScoredPlanningOption[] {
-  const byDate = new Map<string, ScoredPlanningOption>();
+/** Generic over any shape carrying these three fields so
+ * packages/recommendation/src/timingSearch.ts can rank its own
+ * TimingCandidate[] with the exact same day-diversity rule as
+ * findOptimalTaskTimes's SEVEN_DAYS path, instead of a second
+ * implementation. Runtime behavior for the existing ScoredPlanningOption
+ * caller below is unchanged -- this is a type-only generalization. */
+export function selectDailyBestPlanningOptions<T extends { dateLabel: string; startMinute: number; rawScore: number }>(options: T[], limit: number): T[] {
+  const byDate = new Map<string, T>();
   for (const option of options) {
     const existing = byDate.get(option.dateLabel);
     if (!existing || option.rawScore > existing.rawScore || (option.rawScore === existing.rawScore && option.startMinute < existing.startMinute)) {
@@ -441,11 +463,16 @@ function selectDailyBestPlanningOptions(options: ScoredPlanningOption[], limit: 
   return Array.from(byDate.values()).slice(0, limit);
 }
 
-function selectDiversePlanningOptions(options: ScoredPlanningOption[], limit = 3): ScoredPlanningOption[] {
+/** Generic for the same reason as selectDailyBestPlanningOptions above --
+ * this is the diversity/dedup strategy: sort by score, drop exact
+ * date+time duplicates, then greedily pick options that don't repeat a
+ * clock time within 90 minutes or repeat a date already picked, relaxing
+ * those two constraints in two more passes if too few survive. */
+export function selectDiversePlanningOptions<T extends { dateLabel: string; startMinute: number; rawScore: number; startTime: string }>(options: T[], limit = 3): T[] {
   const ranked = options
     .sort((a, b) => b.rawScore - a.rawScore || a.startMinute - b.startMinute)
     .filter((option, index, list) => list.findIndex((item) => item.dateLabel === option.dateLabel && item.startTime === option.startTime) === index);
-  const selected: ScoredPlanningOption[] = [];
+  const selected: T[] = [];
   for (const option of ranked) {
     const repeatsClockTime = selected.some((item) => Math.abs(item.startMinute - option.startMinute) < 90);
     const repeatsDate = selected.some((item) => item.dateLabel === option.dateLabel);
@@ -464,7 +491,7 @@ function selectDiversePlanningOptions(options: ScoredPlanningOption[], limit = 3
   return selected;
 }
 
-function matchesTimePreference(startMinute: number, preference: TimePreference): boolean {
+export function matchesTimePreference(startMinute: number, preference: TimePreference): boolean {
   const hour = Math.floor(startMinute / 60);
   if (preference === 'MORNING') return hour >= 5 && hour < 12;
   if (preference === 'AFTERNOON') return hour >= 12 && hour < 17;
@@ -474,7 +501,7 @@ function matchesTimePreference(startMinute: number, preference: TimePreference):
   return true;
 }
 
-function buildDateOffsets(current: Date, startDate: string, endDate: string): number[] {
+export function buildDateOffsets(current: Date, startDate: string, endDate: string): number[] {
   const start = parseDateOnly(startDate);
   const end = parseDateOnly(endDate);
   if (!start || !end || end < start) return [];
@@ -494,7 +521,7 @@ function parseDateOnly(value: string): number | null {
   return date.getUTCFullYear() === Number(match[1]) && date.getUTCMonth() === Number(match[2]) - 1 && date.getUTCDate() === Number(match[3]) ? timestamp : null;
 }
 
-function scoreContinuousBlock(
+export function scoreContinuousBlock(
   candidates: SlotCandidate[],
   profile: TaskProfile,
   start: number,
@@ -533,7 +560,7 @@ function parseTime(value: string): number {
   return hour * 60 + Number(match[2]);
 }
 
-type TaskProfile = {
+export type TaskProfile = {
   activityId?: string;
   type: string;
   icon: string;
@@ -551,7 +578,7 @@ type TaskProfile = {
   personalContext?: PersonalMuhurtaContext;
 };
 
-type SlotCandidate = {
+export type SlotCandidate = {
   startMinute: number;
   endMinute: number;
   type: SolarWindowType;
@@ -672,7 +699,7 @@ function buildWindowTodayOption(
   };
 }
 
-function buildSlotCandidates(windows: WindowSpan[]): SlotCandidate[] {
+export function buildSlotCandidates(windows: WindowSpan[]): SlotCandidate[] {
   const candidates: SlotCandidate[] = windows.map((window) => ({ startMinute: window.startMinutes, endMinute: window.endMinutes, type: window.type, label: window.label }));
   const boundaries = [0, ...windows.flatMap((window) => [window.startMinutes, window.endMinutes]), 1440].sort((a, b) => a - b);
   for (let index = 0; index < boundaries.length - 1; index += 1) {
@@ -686,7 +713,7 @@ function buildSlotCandidates(windows: WindowSpan[]): SlotCandidate[] {
   return candidates;
 }
 
-function scoreCandidate(candidate: SlotCandidate, profile: TaskProfile, date?: Date): number {
+export function scoreCandidate(candidate: SlotCandidate, profile: TaskProfile, date?: Date): number {
   if (profile.activity && date) {
     const fit = evaluateActivityFit({
       activity: profile.activity,
@@ -709,14 +736,14 @@ function scoreCandidate(candidate: SlotCandidate, profile: TaskProfile, date?: D
   return Math.max(0, Math.min(100, base + muhurta.modifier));
 }
 
-function containsMinute(window: { startMinutes?: number; endMinutes?: number; startMinute?: number; endMinute?: number }, minute: number): boolean {
+export function containsMinute(window: { startMinutes?: number; endMinutes?: number; startMinute?: number; endMinute?: number }, minute: number): boolean {
   const start = window.startMinute ?? window.startMinutes;
   const end = window.endMinute ?? window.endMinutes;
   if (start === undefined || end === undefined) return false;
   return start <= end ? minute >= start && minute < end : minute >= start || minute < end;
 }
 
-function isFriction(type: SolarWindowType): boolean {
+export function isFriction(type: SolarWindowType): boolean {
   return type === 'RAHU_KALAM' || type === 'YAMA';
 }
 
@@ -734,7 +761,7 @@ function rankAvoidWindows(windows: WindowSpan[]): WindowSpan[] {
     .sort((a, b) => (a.type === 'RAHU_KALAM' ? -1 : 1) - (b.type === 'RAHU_KALAM' ? -1 : 1));
 }
 
-function evaluateCandidateMuhurta(candidate: SlotCandidate, profile: TaskProfile, date: Date) {
+export function evaluateCandidateMuhurta(candidate: SlotCandidate, profile: TaskProfile, date: Date) {
   return evaluateMuhurta({
     taskTitle: profile.type,
     date,
@@ -748,7 +775,7 @@ function appendMuhurtaSummary(base: string, muhurtaSummary: string): string {
   return `${base} ${muhurtaSummary}`;
 }
 
-function profileFromActivity(activity: ActivityProfile): TaskProfile {
+export function profileFromActivity(activity: ActivityProfile): TaskProfile {
   return {
     activityId: activity.id,
     type: activity.title,
@@ -768,7 +795,7 @@ function profileFromActivity(activity: ActivityProfile): TaskProfile {
   };
 }
 
-function classifyTask(taskTitle: string): TaskProfile {
+export function classifyTask(taskTitle: string): TaskProfile {
   const activity = findActivityIntent(taskTitle);
   if (activity) return profileFromActivity(activity);
 
@@ -800,12 +827,12 @@ function reasonForProfile(windowType: SolarWindowType, profile: TaskProfile): st
   return profile.reason;
 }
 
-function normalizeTaskTitle(taskTitle: string): string {
+export function normalizeTaskTitle(taskTitle: string): string {
   const trimmed = String(taskTitle || '').replace(/\s+/g, ' ').trim();
   return trimmed || 'Focused work block';
 }
 
-function formatWindowLabel(type: SolarWindowType): string {
+export function formatWindowLabel(type: SolarWindowType): string {
   if (type === 'ABHIJIT') return 'Abhijit Muhurta';
   if (type === 'BRAHMA') return 'Brahma Muhurta';
   if (type === 'GULIKA') return 'Gulika steady window';
@@ -827,7 +854,7 @@ function localDateTimeForMinute(context: DailyAssistantContext, minuteOfDay: num
   return localInstantForMinute(context, minuteOfDay).toISOString();
 }
 
-function localInstantForMinute(context: DailyAssistantContext, minuteOfDay: number): Date {
+export function localInstantForMinute(context: DailyAssistantContext, minuteOfDay: number): Date {
   const localDate = localDateForContext(context);
   const localTimestamp = Date.UTC(
     localDate.getUTCFullYear(),
@@ -841,7 +868,7 @@ function localInstantForMinute(context: DailyAssistantContext, minuteOfDay: numb
   return localTimestampToUtcInstant(context.timezone, localTimestamp, context.tzOffsetMinutes);
 }
 
-function buildGoogleCalendarUrl(title: string, startsAtIso: string, endsAtIso: string): string {
+export function buildGoogleCalendarUrl(title: string, startsAtIso: string, endsAtIso: string): string {
   const compact = (value: string) => value.replace(/[-:]/g, '').replace(/\.\d{3}Z$/, 'Z');
   const params = new URLSearchParams({
     action: 'TEMPLATE',

@@ -29,6 +29,8 @@ jobs:
         run: npx ts-node test/activityOntology.test.ts
       - name: Run muhurta reasons test
         run: npx ts-node test/muhurtaReasons.test.ts
+      - name: Run timing search test
+        run: npx ts-node test/timingSearch.test.ts
   web-build:
     name: Next.js production build
     runs-on: ubuntu-latest
