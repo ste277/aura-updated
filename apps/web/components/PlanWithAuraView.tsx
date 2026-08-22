@@ -377,6 +377,40 @@ export function planPayloadFromCandidate(candidate: TimingCandidate, durationMin
   };
 }
 
+/**
+ * Saves a TimingCandidate-shaped result straight to POST /api/plans, using
+ * planPayloadFromCandidate() above for the exact same field mapping
+ * PlanWithAuraView's own handleSavePlan() uses -- for callers (Muhurtham
+ * Finder's "Use this time ->") that need the same save pipeline but aren't
+ * PlanWithAuraView itself, so don't have its local savedPlans list state to
+ * update. Intentionally does none of that list bookkeeping; callers that
+ * want the saved plan reflected immediately in their own UI should refetch
+ * (e.g. via the onPlanLogged callback already threaded through page.tsx).
+ */
+export async function saveUpcomingPlanFromCandidate(candidate: TimingCandidate, durationMinutes: number): Promise<UpcomingPlan> {
+  const plan = planPayloadFromCandidate(candidate, durationMinutes);
+  const res = await fetch('/api/plans', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      title: plan.title,
+      activityType: plan.title,
+      icon: plan.icon,
+      plannedStartAt: plan.plannedStartAt,
+      plannedEndAt: plan.plannedEndAt,
+      durationMinutes: minutesFromDuration(plan.duration),
+      windowType: windowTypeFromLabel(plan.window),
+      windowLabel: plan.window,
+      matchLabel: plan.match,
+      score: plan.score,
+      recommendation: plan.details,
+      calendarUrl: plan.googleCalendarUrl,
+    }),
+  });
+  if (!res.ok) throw new Error('Unable to save plan.');
+  return mapPlanRow(await res.json());
+}
+
 export function PlanWithAuraView({ onTimingSearch, onViewDay, onPlanLogged, timezone, initialActivity, initialActivityKey }: PlanWithAuraViewProps) {
   const [planMode, setPlanMode] = useState<TimingSearchMode>('FIND');
   const [taskTitle, setTaskTitle] = useState('');

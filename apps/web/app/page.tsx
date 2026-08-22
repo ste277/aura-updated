@@ -24,6 +24,7 @@ import { WindowShiftToast } from '../components/WindowShiftToast';
 import { PlanWithAuraView } from '../components/PlanWithAuraView';
 import { YouView } from '../components/YouView';
 import { PanchangCalendarView } from '../components/PanchangCalendarView';
+import { MuhurthamFinderView } from '../components/MuhurthamFinderView';
 
 import { BirthChartSection } from '../components/BirthChartSection';
 import { LoginScreen } from '../components/LoginScreen';
@@ -100,7 +101,8 @@ export default function DashboardPage() {
   const [youNotificationsFocusKey, setYouNotificationsFocusKey] = useState(0);
   const [mounted, setMounted] = useState(false);
 
-  const [activeTab, setActiveTab] = useState<'home' | 'timeline' | 'ask' | 'plan' | 'insights' | 'you' | 'chart' | 'activity' | 'panchang'>('home');
+  const [activeTab, setActiveTab] = useState<'home' | 'timeline' | 'ask' | 'plan' | 'insights' | 'you' | 'chart' | 'activity' | 'panchang' | 'muhurtham'>('home');
+  const [panchangDateJump, setPanchangDateJump] = useState<{ date: string; key: number } | null>(null);
 
   const [notificationPrefs, setNotificationPrefs] = useState<NotificationPrefs>(DEFAULT_NOTIFICATION_PREFS);
 
@@ -625,6 +627,11 @@ export default function DashboardPage() {
     setActiveTab('plan');
   }, []);
 
+  const handleViewFullPanchang = useCallback((dateStr: string) => {
+    setPanchangDateJump({ date: dateStr, key: Date.now() });
+    setActiveTab('panchang');
+  }, []);
+
   const handleOpenNotificationSettings = useCallback(() => {
     setYouNotificationsFocusKey(Date.now());
     setActiveTab('you');
@@ -817,6 +824,19 @@ export default function DashboardPage() {
             onBack={() => setActiveTab('you')}
             onViewTodayRhythm={() => setActiveTab('timeline')}
             onExploreActivities={() => setActiveTab('plan')}
+            onOpenMuhurtham={() => setActiveTab('muhurtham')}
+            initialSelectedDate={panchangDateJump?.date}
+            initialSelectedDateKey={panchangDateJump?.key}
+          />
+        )}
+
+        {activeTab === 'muhurtham' && (
+          <MuhurthamFinderView
+            timezone={user.timezone}
+            onBack={() => setActiveTab('you')}
+            onOpenPanchangCalendar={() => setActiveTab('panchang')}
+            onViewFullPanchang={handleViewFullPanchang}
+            onPlanLogged={loadUserDataAndLogs}
           />
         )}
       </div>
@@ -842,7 +862,7 @@ export default function DashboardPage() {
         <NavButton label="Plan" icon="✨" active={activeTab === 'plan'} onClick={() => setActiveTab('plan')} />
         <NavButton label="Ask Aura" icon="🤖" active={activeTab === 'ask'} onClick={() => setActiveTab('ask')} />
         <NavButton label="Insights" icon="📊" active={activeTab === 'insights'} onClick={() => setActiveTab('insights')} />
-        <NavButton label="You" icon="👤" active={activeTab === 'you' || activeTab === 'chart' || activeTab === 'activity' || activeTab === 'panchang'} onClick={() => setActiveTab('you')} />
+        <NavButton label="You" icon="👤" active={activeTab === 'you' || activeTab === 'chart' || activeTab === 'activity' || activeTab === 'panchang' || activeTab === 'muhurtham'} onClick={() => setActiveTab('you')} />
       </nav>
     </main>
   );

@@ -5,6 +5,7 @@ import type { PanchangDay, PanchangDaySummary, PanchangWindowSpan } from '../../
 import { findWindowOverlaps } from '../../../packages/panchang/src/windowOverlap';
 import { getGoodForDayCategories } from '../../../packages/recommendation/src/dayActivitySuggestions';
 import { getDatePartsInTimezone } from '../lib/timezone';
+import { ExploreModeToggle } from './ExploreModeToggle';
 
 interface PanchangCalendarViewProps {
   timezone: string;
@@ -14,6 +15,15 @@ interface PanchangCalendarViewProps {
    * assumes `now`. */
   onViewTodayRhythm?: () => void;
   onExploreActivities?: () => void;
+  /** [Calendar][Muhurtham] toggle entry point (brief section 12). */
+  onOpenMuhurtham?: () => void;
+  /** External date-jump target, e.g. Muhurtham Finder's "View full Panchang
+   * -> " (brief section 14) -- must land on THIS SAME calendar/day-detail
+   * implementation, not a second one. Bump initialSelectedDateKey (e.g.
+   * Date.now()) alongside a new initialSelectedDate to force re-navigation
+   * even to a date that's already selected. */
+  initialSelectedDate?: string;
+  initialSelectedDateKey?: number;
 }
 
 const WEEKDAY_HEADER = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
@@ -53,11 +63,21 @@ function formatFullDateLabel(dateStr: string, timezone: string): string {
   return approxNoonUTC.toLocaleDateString('en-US', { timeZone: timezone, weekday: 'long', month: 'long', day: 'numeric' });
 }
 
-export function PanchangCalendarView({ timezone, onBack, onViewTodayRhythm, onExploreActivities }: PanchangCalendarViewProps) {
+export function PanchangCalendarView({ timezone, onBack, onViewTodayRhythm, onExploreActivities, onOpenMuhurtham, initialSelectedDate, initialSelectedDateKey }: PanchangCalendarViewProps) {
   const todayParts = useMemo(() => getDatePartsInTimezone(timezone, new Date()), [timezone]);
   const [displayYear, setDisplayYear] = useState(todayParts.year);
   const [displayMonth, setDisplayMonth] = useState(todayParts.month);
   const [selectedDate, setSelectedDate] = useState<string>(todayParts.dateStr);
+
+  useEffect(() => {
+    if (!initialSelectedDate) return;
+    const [y, m] = initialSelectedDate.split('-').map(Number);
+    if (!y || !m) return;
+    setDisplayYear(y);
+    setDisplayMonth(m);
+    setSelectedDate(initialSelectedDate);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [initialSelectedDateKey]);
 
   const [monthSummaries, setMonthSummaries] = useState<PanchangDaySummary[] | null>(null);
   const [monthLoading, setMonthLoading] = useState(true);
@@ -170,6 +190,8 @@ export function PanchangCalendarView({ timezone, onBack, onViewTodayRhythm, onEx
           <p style={{ fontSize: 12, color: '#94a3b8', marginTop: 4 }}>What the day holds -- Tithi, Nakshatra, and solar timing windows.</p>
         </div>
       </div>
+
+      {onOpenMuhurtham && <ExploreModeToggle active="calendar" onSelectMuhurtham={onOpenMuhurtham} />}
 
       <section style={cardStyle}>
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 14, flexWrap: 'wrap', gap: 8 }}>
