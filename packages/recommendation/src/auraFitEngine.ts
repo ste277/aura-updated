@@ -85,20 +85,26 @@ export function evaluateActivityFit(params: {
   personalContext?: PersonalMuhurtaContext;
   /** Optional newer-ontology classification (activityDefinitions.ts's
    * ActivityDefinition.muhurta) for the activity being scored. When
-   * supplied AND its resolved rule pack has no legitimate legacy-family
-   * data to fall back on (both Tithi and Nakshatra coverage MISSING --
-   * today only Griha Pravesh), the generic rule-pack evaluator
-   * (muhurtaRulePacks.ts) is used INSTEAD of the legacy family-keyed
-   * evaluateMuhurta() call below. Every other activity (including the other
-   * 3 new occasions, whose classifications resolve to REUSABLE_BASE_RULE,
-   * not MISSING) is completely unaffected by this parameter -- see
-   * muhurtaRulePacks.ts's module doc comment for the full reasoning. */
+   * supplied AND its resolved rule pack has data the legacy family-keyed
+   * path cannot see -- i.e. coverage is NOT simply "both Tithi and
+   * Nakshatra REUSABLE_BASE_RULE" (the case where the legacy path is
+   * equally correct and already trusted/tested) -- the generic rule-pack
+   * evaluator (muhurtaRulePacks.ts) is used INSTEAD of the legacy
+   * family-keyed evaluateMuhurta() call below. That covers both a MISSING
+   * family (no legitimate legacy proxy at all) and, as of the Muhurta
+   * Knowledge Pack V1 PR, an IMPLEMENTED (genuinely dedicated,
+   * intent-specific) pack, which is strictly better data than any legacy
+   * family could offer. Every activity whose classification resolves to
+   * REUSABLE_BASE_RULE for both factors (every pre-existing activity, plus
+   * business-start/property-purchase/engagement) is completely unaffected
+   * by this parameter -- see muhurtaRulePacks.ts's module doc comment for
+   * the full reasoning. */
   classification?: MuhurtaClassification;
 }): AuraFitEvaluation {
   const family = familyForActivityProfile(params.activity);
   const rulePack = params.classification ? resolveMuhurtaRulePack(params.classification) : undefined;
   const supportLevel = params.classification && rulePack ? computeMuhurtaSupportLevel(params.classification, rulePack) : undefined;
-  const usesGenericRulePack = rulePack !== undefined && rulePack.coverage.tithi === 'MISSING' && rulePack.coverage.nakshatra === 'MISSING';
+  const usesGenericRulePack = rulePack !== undefined && !(rulePack.coverage.tithi === 'REUSABLE_BASE_RULE' && rulePack.coverage.nakshatra === 'REUSABLE_BASE_RULE');
   const muhurta = usesGenericRulePack
     ? evaluateMuhurtaWithRulePack({ classification: params.classification!, date: params.date, windowType: params.windowType })
     : evaluateMuhurta({

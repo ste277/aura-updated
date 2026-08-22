@@ -246,7 +246,7 @@ export function evaluateTimingCandidate(params: {
   const primaryCandidate: SlotCandidate = candidates.find((candidate) => containsMinute(candidate, startMinute)) ?? candidates[0];
   const muhurta = evaluateCandidateMuhurta(primaryCandidate, profile, start);
   const auraFit = profile.activity
-    ? evaluateActivityFit({ activity: profile.activity, date: start, windowType: primaryCandidate.type, personalContext: profile.personalContext })
+    ? evaluateActivityFit({ activity: profile.activity, date: start, windowType: primaryCandidate.type, personalContext: profile.personalContext, classification: profile.muhurtaClassification })
     : undefined;
 
   const end = new Date(start.getTime() + durationMinutes * 60000);
