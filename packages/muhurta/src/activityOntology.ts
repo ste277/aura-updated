@@ -138,18 +138,51 @@ export interface MuhurtaClassification {
 }
 
 /**
- * Foundation for a future structured-reason model (see brief section 6).
- * Not wired into evaluateMuhurta(), auraFitEngine, or any UI copy yet — this
- * PR only introduces the type so a later PR can migrate explanation strings
- * onto it without another type-design pass.
+ * Structured-reason model: the canonical output of evaluateMuhurta() and the
+ * Muhurta-derived parts of evaluateActivityFit(). English strings (supports/
+ * blockers/summary arrays, muhurtaSummary, personalSummary) are now derived
+ * FROM these via packages/muhurta/src/muhurtaReasonFormat.ts, not the other
+ * way around — the engine's own modifier/score math only ever sums
+ * `impact`, never inspects formatted text.
+ *
+ * NEUTRAL_WINDOW, ACTIVITY_RULE_SUPPORT, and ACTIVITY_RULE_BLOCK are
+ * reserved codes: NEUTRAL_WINDOW is declared for a future PR that wants an
+ * explicit "no solar-window signal" reason (today a neutral window simply
+ * emits no SOLAR_WINDOW reason, matching pre-refactor behavior); the
+ * ACTIVITY_RULE_* codes are emitted by evaluateActivityFit()'s
+ * recommended/acceptable/avoid-window check (see auraFitEngine.ts).
  */
+export type MuhurtaReasonCode =
+  | 'TITHI_SUPPORTIVE'
+  | 'TITHI_UNFAVORABLE'
+  | 'NAKSHATRA_SUPPORTIVE'
+  | 'NAKSHATRA_UNFAVORABLE'
+  | 'YOGA_SUPPORTIVE'
+  | 'YOGA_UNFAVORABLE'
+  | 'KARANA_SUPPORTIVE'
+  | 'KARANA_UNFAVORABLE'
+  | 'ABHIJIT_SUPPORT'
+  | 'RAHU_CAUTION'
+  | 'YAMA_CAUTION'
+  | 'GULIKA_SUPPORT'
+  | 'BRAHMA_SUPPORT'
+  | 'NEUTRAL_WINDOW'
+  | 'ACTIVITY_RULE_SUPPORT'
+  | 'ACTIVITY_RULE_BLOCK'
+  | 'PERSONAL_TARA_SUPPORT'
+  | 'PERSONAL_TARA_CAUTION'
+  | 'OTHER';
+
 export interface MuhurtaReason {
-  code: string;
+  code: MuhurtaReasonCode;
   factor: 'TITHI' | 'NAKSHATRA' | 'YOGA' | 'KARANA' | 'SOLAR_WINDOW' | 'PERSONAL' | 'ACTIVITY';
   polarity: 'SUPPORT' | 'CAUTION' | 'BLOCK';
   impact?: number;
+  /** Canonical-ish value the reason is about (a nakshatra/tithi/yoga/karana
+   * name, a SolarWindowType, an element, etc.) — see muhurtaReasonFormat.ts
+   * for which raw Panchang strings are not yet true canonical IDs. */
   value?: string;
-  params?: Record<string, string | number>;
+  params?: Record<string, string | number | boolean>;
 }
 
 /**

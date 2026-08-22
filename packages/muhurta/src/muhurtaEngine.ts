@@ -1,5 +1,7 @@
 import { getKarana, getNakshatra, getTithi, getYoga } from '../../vedic/src/panchangElements';
 import type { SolarWindowType } from '../../panchang/src/windows';
+import type { MuhurtaReason } from './activityOntology';
+import { deriveLegacyMuhurtaText } from './muhurtaReasonFormat';
 
 export type MuhurtaActivityFamily =
   | 'DEEP_WORK'
@@ -27,6 +29,10 @@ export interface MuhurtaEvaluation {
   family: MuhurtaActivityFamily;
   panchanga: PanchangaSnapshot;
   modifier: number;
+  /** Canonical source of truth — see activityOntology.ts. blockers/supports/
+   * summary below are derived from this via muhurtaReasonFormat.ts purely
+   * for backward compatibility with existing consumers. */
+  reasons: MuhurtaReason[];
   blockers: string[];
   supports: string[];
   summary: string;
@@ -171,78 +177,53 @@ export function evaluateMuhurta(params: {
   const family = params.family ?? classifyMuhurtaActivity(params.taskTitle);
   const rules = RULES[family];
   const panchanga = getPanchangaSnapshot(params.date);
-  const supports: string[] = [];
-  const blockers: string[] = [];
-  let modifier = 0;
+  const reasons: MuhurtaReason[] = [];
 
   if (rules.preferredNakshatras.includes(panchanga.nakshatra)) {
-    modifier += 8;
-    supports.push(`${panchanga.nakshatra} ${rules.note}`);
+    reasons.push({ code: 'NAKSHATRA_SUPPORTIVE', factor: 'NAKSHATRA', polarity: 'SUPPORT', impact: 8, value: panchanga.nakshatra, params: { note: rules.note } });
   } else if (rules.avoidNakshatras.includes(panchanga.nakshatra)) {
-    modifier -= 10;
-    blockers.push(`${panchanga.nakshatra} is less supportive for this activity`);
+    reasons.push({ code: 'NAKSHATRA_UNFAVORABLE', factor: 'NAKSHATRA', polarity: 'CAUTION', impact: -10, value: panchanga.nakshatra });
   }
 
   if (rules.preferredTithiPatterns.some((pattern) => pattern.test(panchanga.tithi))) {
-    modifier += 5;
-    supports.push(`${panchanga.tithi} is a helpful tithi`);
+    reasons.push({ code: 'TITHI_SUPPORTIVE', factor: 'TITHI', polarity: 'SUPPORT', impact: 5, value: panchanga.tithi });
   } else if (rules.avoidTithiPatterns.some((pattern) => pattern.test(panchanga.tithi))) {
-    modifier -= 8;
-    blockers.push(`${panchanga.tithi} is better for lower-stakes work`);
+    reasons.push({ code: 'TITHI_UNFAVORABLE', factor: 'TITHI', polarity: 'CAUTION', impact: -8, value: panchanga.tithi });
   }
 
   if (FAVORABLE_YOGAS.has(panchanga.yoga)) {
-    modifier += 4;
-    supports.push(`${panchanga.yoga} yoga adds support`);
+    reasons.push({ code: 'YOGA_SUPPORTIVE', factor: 'YOGA', polarity: 'SUPPORT', impact: 4, value: panchanga.yoga });
   } else if (DIFFICULT_YOGAS.has(panchanga.yoga)) {
-    modifier -= 6;
-    blockers.push(`${panchanga.yoga} yoga adds friction`);
+    reasons.push({ code: 'YOGA_UNFAVORABLE', factor: 'YOGA', polarity: 'CAUTION', impact: -6, value: panchanga.yoga });
   }
 
   if (panchanga.karana === 'Vishti') {
-    modifier -= 8;
-    blockers.push('Vishti karana is avoided for important starts');
+    reasons.push({ code: 'KARANA_UNFAVORABLE', factor: 'KARANA', polarity: 'CAUTION', impact: -8, value: panchanga.karana });
   } else if (FAVORABLE_KARANAS.has(panchanga.karana)) {
-    modifier += 3;
-    supports.push(`${panchanga.karana} karana is workable`);
+    reasons.push({ code: 'KARANA_SUPPORTIVE', factor: 'KARANA', polarity: 'SUPPORT', impact: 3, value: panchanga.karana });
   }
 
   if (params.windowType === 'RAHU_KALAM' || params.windowType === 'YAMA') {
-    modifier -= family === 'ADMIN' || family === 'SOCIAL' ? 4 : 12;
-    blockers.push(`${formatWindow(params.windowType)} is a high-friction period`);
+    const impact = -(family === 'ADMIN' || family === 'SOCIAL' ? 4 : 12);
+    reasons.push({ code: params.windowType === 'RAHU_KALAM' ? 'RAHU_CAUTION' : 'YAMA_CAUTION', factor: 'SOLAR_WINDOW', polarity: 'CAUTION', impact, value: params.windowType });
   } else if (params.windowType === 'ABHIJIT') {
-    modifier += 8;
-    supports.push('Abhijit Muhurta is broadly favorable');
+    reasons.push({ code: 'ABHIJIT_SUPPORT', factor: 'SOLAR_WINDOW', polarity: 'SUPPORT', impact: 8, value: params.windowType });
   } else if (params.windowType === 'BRAHMA' && (family === 'MEDITATION' || family === 'LEARNING' || family === 'DEEP_WORK')) {
-    modifier += 7;
-    supports.push('Brahma Muhurta supports quiet mental work');
+    reasons.push({ code: 'BRAHMA_SUPPORT', factor: 'SOLAR_WINDOW', polarity: 'SUPPORT', impact: 7, value: params.windowType });
   } else if (params.windowType === 'GULIKA' && (family === 'ADMIN' || family === 'LEARNING' || family === 'SOCIAL')) {
-    modifier += 4;
-    supports.push('Gulika supports steady follow-through');
+    reasons.push({ code: 'GULIKA_SUPPORT', factor: 'SOLAR_WINDOW', polarity: 'SUPPORT', impact: 4, value: params.windowType });
   }
+
+  const modifier = reasons.reduce((total, reason) => total + (reason.impact ?? 0), 0);
+  const legacy = deriveLegacyMuhurtaText(reasons);
 
   return {
     family,
     panchanga,
     modifier,
-    blockers,
-    supports,
-    summary: buildSummary(supports, blockers),
+    reasons,
+    blockers: legacy.blockers,
+    supports: legacy.supports,
+    summary: legacy.summary,
   };
-}
-
-function buildSummary(supports: string[], blockers: string[]): string {
-  if (blockers.length > 0 && supports.length > 0) return `${supports[0]}; ${blockers[0]}.`;
-  if (supports.length > 0) return `${supports[0]}.`;
-  if (blockers.length > 0) return `${blockers[0]}.`;
-  return 'Panchanga factors are neutral for this activity.';
-}
-
-function formatWindow(type: SolarWindowType): string {
-  if (type === 'RAHU_KALAM') return 'Rahu Kalam';
-  if (type === 'YAMA') return 'Yama Gandam';
-  if (type === 'ABHIJIT') return 'Abhijit Muhurta';
-  if (type === 'BRAHMA') return 'Brahma Muhurta';
-  if (type === 'GULIKA') return 'Gulika Kalam';
-  return 'Neutral Flow';
 }

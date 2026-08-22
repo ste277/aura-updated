@@ -1,5 +1,7 @@
 import type { SolarWindowType } from '../../panchang/src/windows';
 import { evaluateMuhurta, MuhurtaActivityFamily } from '../../muhurta/src/muhurtaEngine';
+import type { MuhurtaReason } from '../../muhurta/src/activityOntology';
+import { formatPersonalReasons } from '../../muhurta/src/muhurtaReasonFormat';
 import { getTaraBala } from '../../vedic/src/natalChart';
 import type { ActivityProfile } from './personalizedTasks';
 
@@ -24,6 +26,11 @@ export interface AuraFitEvaluation {
   capabilities: MuhurtaCapabilities;
   muhurtaSummary: string;
   personalSummary?: string;
+  /** Structured reasons behind this evaluation — Muhurta panchanga/solar-window
+   * reasons, the activity's own recommended/avoid-window rule, and (when a
+   * personal context is supplied) Tara Bala reasons. Additive: does not
+   * change score/summary/label, which are computed exactly as before. */
+  reasons: MuhurtaReason[];
 }
 
 export interface PersonalMuhurtaContext {
@@ -101,6 +108,7 @@ export function evaluateActivityFit(params: {
     neutralContextAdjustment
   );
   const label = labelForScore(score);
+  const ruleReason = activityRuleReason(params.activity, params.windowType);
   return {
     score: Math.round(score),
     label,
@@ -109,23 +117,42 @@ export function evaluateActivityFit(params: {
     capabilities,
     muhurtaSummary: muhurta.summary,
     personalSummary: personalFit.summary,
+    reasons: [...muhurta.reasons, ...(ruleReason ? [ruleReason] : []), ...(personalFit.reasons ?? [])],
   };
 }
 
-export function evaluatePersonalMuhurtaFit(activity: ActivityProfile, date: Date, context?: PersonalMuhurtaContext): { score: number; summary?: string } {
+/**
+ * Structured counterpart to scoreSolarWindow() below — same
+ * recommended/acceptable/avoid classification, but as a MuhurtaReason
+ * instead of a number. Additive only: never consulted by scoreSolarWindow()
+ * or the score formula in evaluateActivityFit(), so it cannot change scores.
+ */
+function activityRuleReason(activity: ActivityProfile, windowType: SolarWindowType): MuhurtaReason | undefined {
+  if (activity.avoidWindowTypes.includes(windowType)) {
+    return { code: 'ACTIVITY_RULE_BLOCK', factor: 'ACTIVITY', polarity: activity.allowDuringAvoidWindow ? 'CAUTION' : 'BLOCK', value: windowType };
+  }
+  if (activity.recommendedWindowTypes.includes(windowType)) {
+    return { code: 'ACTIVITY_RULE_SUPPORT', factor: 'ACTIVITY', polarity: 'SUPPORT', value: windowType };
+  }
+  return undefined;
+}
+
+export function evaluatePersonalMuhurtaFit(activity: ActivityProfile, date: Date, context?: PersonalMuhurtaContext): { score: number; summary?: string; reasons?: MuhurtaReason[] } {
   if (!context || context.natalNakshatraIndex === undefined) return { score: 65 };
   const taraBala = getTaraBala(context.natalNakshatraIndex, date);
   let score = taraBala.favorable ? 76 : 48;
-  const notes: string[] = [`${taraBala.name} Tara is ${taraBala.favorable ? 'supportive' : 'less supportive'} from your Janma Nakshatra`];
+  const reasons: MuhurtaReason[] = [
+    { code: taraBala.favorable ? 'PERSONAL_TARA_SUPPORT' : 'PERSONAL_TARA_CAUTION', factor: 'PERSONAL', polarity: taraBala.favorable ? 'SUPPORT' : 'CAUTION', impact: taraBala.favorable ? 11 : -17, value: taraBala.name },
+  ];
   if (context.moonElement && activity.elementAffinity === context.moonElement) {
     score += 8;
-    notes.push(`${context.moonElement.toLowerCase()} Moon affinity supports this activity`);
+    reasons.push({ code: 'OTHER', factor: 'PERSONAL', polarity: 'SUPPORT', impact: 8, value: context.moonElement, params: { kind: 'ELEMENT_AFFINITY' } });
   }
   if (!taraBala.favorable && (activity.significance === 'HIGH' || activity.requiresFreshStart)) {
     score -= 8;
-    notes.push('high-importance starts get a personal caution modifier');
+    reasons.push({ code: 'OTHER', factor: 'PERSONAL', polarity: 'CAUTION', impact: -8, params: { kind: 'HIGH_IMPORTANCE_CAUTION' } });
   }
-  return { score: clamp(score), summary: notes.join('; ') };
+  return { score: clamp(score), summary: formatPersonalReasons(reasons), reasons };
 }
 
 function capabilitiesForWindow(windowType: SolarWindowType, muhurtaModifier: number): MuhurtaCapabilities {
