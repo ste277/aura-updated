@@ -55,6 +55,8 @@ jobs:
         run: npx ts-node test/savedPersonNatalContext.test.ts
       - name: Run Shared Muhurtham test
         run: npx ts-node test/sharedMuhurtham.test.ts
+      - name: Run score engine test
+        run: npx ts-node test/scoreEngine.test.ts
       # test/savedPersonDb.test.ts is intentionally NOT run here -- it makes
       # real INSERT/SELECT/UPDATE/DELETE calls against Postgres via a live
       # DATABASE_URL, and this job has no Postgres service provisioned. Run

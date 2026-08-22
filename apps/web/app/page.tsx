@@ -327,10 +327,12 @@ export default function DashboardPage() {
         windowName: 'Next Shift',
         startsIn: 'In 1h 20m',
         startTime: '04:30 AM',
+        score: 7.8,
+        themeText: 'Balanced and stable energy. Good for consistent, incremental execution.',
       };
     }
 
-    const { windowName, startsIn, startTime } = energyInsight.nextShift;
+    const { windowName, startsIn, startTime, score, themeText } = energyInsight.nextShift;
 
     const validStartsIn = startsIn && !startsIn.includes('NaN') ? startsIn : 'In 45m';
     const validStartTime = startTime && !startTime.includes('NaN') ? startTime : '11:40 AM';
@@ -339,6 +341,8 @@ export default function DashboardPage() {
       windowName: windowName ? String(windowName).replace('_', ' ') : 'Next Shift',
       startsIn: validStartsIn,
       startTime: validStartTime,
+      score,
+      themeText,
     };
   }, [energyInsight]);
 
