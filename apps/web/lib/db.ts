@@ -223,6 +223,12 @@ export interface AuraMoment {
    * "Unread" is ALWAYS derived by comparing this to respondedAt (see
    * lib/auraUpdates.ts), never read as a bare boolean. */
   ownerSeenResponseAt: Date | null;
+  /** Product Instrumentation V1 -- set once, on the first successful PUBLIC
+   * open of this moment (see markAuraMomentFirstOpened below). Never reset,
+   * never touched by refreshes after the first. Exists purely so
+   * AURA_MOMENT_OPENED can be recorded exactly once per moment without
+   * fingerprinting the anonymous recipient. */
+  firstOpenedAt: Date | null;
   createdAt: Date;
   expiresAt: Date | null;
 }
@@ -386,6 +392,19 @@ export async function markAuraMomentResponseSeen(ownerUserId: string, publicToke
   const result = await pool.query(
     `UPDATE "AuraMoment" SET "ownerSeenResponseAt" = now() WHERE "publicToken" = $1 AND "ownerUserId" = $2 RETURNING *`,
     [publicToken, ownerUserId]
+  );
+  return result.rows[0] ?? null;
+}
+
+/** PUBLIC write -- by publicToken only, same bearer-access shape as
+ * respondToAuraMoment. Idempotent: only ever sets firstOpenedAt when it was
+ * previously NULL, so `result.rows.length > 0` tells the caller whether this
+ * was genuinely the FIRST open (the caller uses that to decide whether to
+ * record an AURA_MOMENT_OPENED product event -- see app/moment/[token]/page.tsx). */
+export async function markAuraMomentFirstOpened(publicToken: string): Promise<AuraMoment | null> {
+  const result = await pool.query(
+    `UPDATE "AuraMoment" SET "firstOpenedAt" = now() WHERE "publicToken" = $1 AND "firstOpenedAt" IS NULL RETURNING *`,
+    [publicToken]
   );
   return result.rows[0] ?? null;
 }
@@ -1010,4 +1029,134 @@ export async function listAllDailyReflectionsForExport(userId: string): Promise<
     [userId]
   );
   return result.rows;
+}
+
+// ============================================================
+// Product Instrumentation V1
+//
+// This table is written to ONLY via lib/productEvents.ts's
+// validateProductEvent() -- see that module for the closed event-name
+// vocabulary and per-event metadata allow-list. createProductEvent() below
+// trusts its input completely (no validation here); that is intentional so
+// the validation logic stays independently unit-testable without a database.
+// ============================================================
+
+export interface ProductEvent {
+  id: string;
+  eventName: string;
+  userId: string | null;
+  auraMomentId: string | null;
+  metadata: Record<string, string | number | boolean>;
+  createdAt: Date;
+}
+
+export interface CreateProductEventInput {
+  eventName: string;
+  userId?: string | null;
+  auraMomentId?: string | null;
+  metadata: Record<string, string | number | boolean>;
+}
+
+export async function createProductEvent(input: CreateProductEventInput): Promise<ProductEvent> {
+  const id = randomUUID();
+  const result = await pool.query(
+    `INSERT INTO "ProductEvent" (id, "eventName", "userId", "auraMomentId", metadata)
+     VALUES ($1, $2, $3, $4, $5)
+     RETURNING *`,
+    [id, input.eventName, input.userId ?? null, input.auraMomentId ?? null, JSON.stringify(input.metadata)]
+  );
+  return result.rows[0];
+}
+
+/** One row per (eventName, metadata->>groupKey) pair within the window --
+ * the raw material for both the volume table and the scope/mode breakdowns
+ * on the internal metrics endpoint. `group` is null for events that don't
+ * carry the requested key (e.g. AURA_HOME_VIEWED has no "scope"). */
+export interface ProductEventCountRow {
+  eventName: string;
+  group: string | null;
+  count: number;
+}
+
+export async function listProductEventCountsSince(since: Date, groupMetadataKey: string): Promise<ProductEventCountRow[]> {
+  const result = await pool.query(
+    `SELECT "eventName", metadata->>$2 as group, COUNT(*)::int as count
+     FROM "ProductEvent"
+     WHERE "createdAt" >= $1
+     GROUP BY "eventName", metadata->>$2`,
+    [since, groupMetadataKey]
+  );
+  return result.rows.map((row) => ({ eventName: row.eventName, group: row.group ?? null, count: row.count }));
+}
+
+/** Distinct AURA MOMENTS (not raw event rows) that fired a given event within
+ * the window -- the correct denominator for the Moment lifecycle funnel,
+ * since a recipient can (for example) reopen a moment or an owner can click
+ * "share" more than once for the same moment. */
+export async function countDistinctMomentsForEventSince(eventName: string, since: Date): Promise<number> {
+  const result = await pool.query(
+    `SELECT COUNT(DISTINCT "auraMomentId")::int as count
+     FROM "ProductEvent"
+     WHERE "eventName" = $1 AND "createdAt" >= $2 AND "auraMomentId" IS NOT NULL`,
+    [eventName, since]
+  );
+  return result.rows[0]?.count ?? 0;
+}
+
+/** Distinct authenticated USERS that fired a given event within the window
+ * -- used for the "unique users" side of Plan activation / personalization
+ * rate, as distinct from total event volume. */
+export async function countDistinctUsersForEventSince(eventName: string, since: Date): Promise<number> {
+  const result = await pool.query(
+    `SELECT COUNT(DISTINCT "userId")::int as count
+     FROM "ProductEvent"
+     WHERE "eventName" = $1 AND "createdAt" >= $2 AND "userId" IS NOT NULL`,
+    [eventName, since]
+  );
+  return result.rows[0]?.count ?? 0;
+}
+
+/** Union counterpart to countDistinctMomentsForEventSince -- distinct
+ * moments that fired ANY of the given events within the window. Needed
+ * because a single moment CAN fire more than one response-type event over
+ * its lifetime (e.g. ANOTHER_TIME, revisited, then ACCEPTED), so naively
+ * summing per-event distinct counts would double count; this runs one
+ * query against the true union instead. */
+export async function countDistinctMomentsForAnyEventSince(eventNames: string[], since: Date): Promise<number> {
+  const result = await pool.query(
+    `SELECT COUNT(DISTINCT "auraMomentId")::int as count
+     FROM "ProductEvent"
+     WHERE "eventName" = ANY($1) AND "createdAt" >= $2 AND "auraMomentId" IS NOT NULL`,
+    [eventNames, since]
+  );
+  return result.rows[0]?.count ?? 0;
+}
+
+/** Raw durationMs values for an event within the window, optionally grouped
+ * by another metadata key (e.g. "scope") -- the input to p50/p95 percentile
+ * computation in lib/productMetrics.ts. Grouped entries with no such
+ * metadata key come back under the `null` group. */
+export interface ProductEventDurationGroup {
+  group: string | null;
+  durationsMs: number[];
+}
+
+export async function listProductEventDurationsSince(eventName: string, since: Date, groupMetadataKey: string | null = null): Promise<ProductEventDurationGroup[]> {
+  const result = await pool.query(
+    groupMetadataKey
+      ? `SELECT metadata->>$3 as group, (metadata->>'durationMs')::numeric as duration
+         FROM "ProductEvent"
+         WHERE "eventName" = $1 AND "createdAt" >= $2 AND metadata ? 'durationMs'`
+      : `SELECT NULL as group, (metadata->>'durationMs')::numeric as duration
+         FROM "ProductEvent"
+         WHERE "eventName" = $1 AND "createdAt" >= $2 AND metadata ? 'durationMs'`,
+    groupMetadataKey ? [eventName, since, groupMetadataKey] : [eventName, since]
+  );
+  const byGroup = new Map<string | null, number[]>();
+  for (const row of result.rows) {
+    const key = row.group ?? null;
+    if (!byGroup.has(key)) byGroup.set(key, []);
+    byGroup.get(key)!.push(Number(row.duration));
+  }
+  return Array.from(byGroup.entries()).map(([group, durationsMs]) => ({ group, durationsMs }));
 }

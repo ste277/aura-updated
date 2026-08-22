@@ -104,6 +104,7 @@ const fullMoment: AuraMoment = {
   respondedAt: null,
   previousMomentId: 'previous-moment-internal-id-should-never-appear-publicly',
   ownerSeenResponseAt: null,
+  firstOpenedAt: null,
   createdAt: new Date('2026-08-22T00:00:00.000Z'),
   expiresAt: new Date('2026-10-25T00:00:00.000Z'),
 };

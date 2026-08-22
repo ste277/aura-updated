@@ -5,6 +5,7 @@ import { getPersonalizedTasks, UserChartContext } from '../../../packages/recomm
 import type { DailyBriefing } from '../../../packages/recommendation/src/dailyAssistant';
 import type { AuraUpdate } from '../lib/auraUpdates';
 import { triggerHaptic } from '../lib/haptics';
+import { stripCountdownWrapper } from '../lib/formatTimeLeft';
 
 interface HomeDashboardProps {
   userName: string;
@@ -303,7 +304,7 @@ export function HomeDashboard({
     // left before the next shift) rather than just restating a static
     // catalog description — a recommendation should sound like it looked at
     // the clock, not like a lookup table entry.
-    const timeLeft = remainingText.replace(/\s*left$/i, '').trim();
+    const timeLeft = stripCountdownWrapper(remainingText);
     const situatedDescription = timeLeft
       ? `You have about ${timeLeft} before the next shift, making this a good time to ${primaryTask.title.toLowerCase()}.`
       : primaryTask.description;

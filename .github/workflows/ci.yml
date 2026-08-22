@@ -63,12 +63,17 @@ jobs:
         run: npx ts-node test/auraMomentRequest.test.ts
       - name: Run Aura Updates test
         run: npx ts-node test/auraUpdates.test.ts
-      # test/savedPersonDb.test.ts, test/auraMomentsDb.test.ts, and
-      # test/auraUpdatesDb.test.ts are intentionally NOT run here -- they
-      # make real INSERT/SELECT/UPDATE/DELETE calls against Postgres via a
-      # live DATABASE_URL, and this job has no Postgres service provisioned.
-      # Run them locally against a real database instead (see each file's
-      # own doc comment for the exact command).
+      - name: Run product metrics test
+        run: npx ts-node test/productMetrics.test.ts
+      - name: Run Home dashboard time-left formatting test
+        run: npx ts-node test/formatTimeLeft.test.ts
+      # test/savedPersonDb.test.ts, test/auraMomentsDb.test.ts,
+      # test/auraUpdatesDb.test.ts, and test/productEventsDb.test.ts are
+      # intentionally NOT run here -- they make real
+      # INSERT/SELECT/UPDATE/DELETE calls against Postgres via a live
+      # DATABASE_URL, and this job has no Postgres service provisioned. Run
+      # them locally against a real database instead (see each file's own
+      # doc comment for the exact command).
       - name: Install web deps
         working-directory: apps/web
         run: npm install
@@ -80,6 +85,12 @@ jobs:
       # the `next` package.
       - name: Run Aura Moment test
         run: npx ts-node test/auraMoments.test.ts
+      # test/productEvents.test.ts imports apps/web/lib/productEvents.ts,
+      # which imports apps/web/lib/db.ts (for its `pg` dependency) -- same
+      # apps/web/node_modules requirement as the Aura Moment test above, so
+      # it also has to run after "Install web deps".
+      - name: Run product events validation test
+        run: npx ts-node test/productEvents.test.ts
       - name: Run Plan-with-Aura view logic test
         env:
           TS_NODE_COMPILER_OPTIONS: '{"jsx":"react"}'

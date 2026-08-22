@@ -30,6 +30,7 @@ function fakeMoment(overrides: Partial<AuraMoment>): AuraMoment {
     respondedAt: null,
     previousMomentId: null,
     ownerSeenResponseAt: null,
+    firstOpenedAt: null,
     createdAt: new Date('2026-08-22T00:00:00.000Z'),
     expiresAt: null,
     ...overrides,

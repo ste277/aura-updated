@@ -34,6 +34,7 @@ import { LoginScreen } from '../components/LoginScreen';
 import { useCurrentMinuteOfDay } from '../lib/useCurrentMinuteOfDay';
 import { resolveTzOffsetMinutes, getDatePartsInTimezone } from '../lib/timezone';
 import { formatDisplayName } from '../lib/displayName';
+import { trackEvent } from '../lib/trackEvent';
 import { Capacitor } from '@capacitor/core';
 import {
   loadNotificationPrefs,
@@ -103,6 +104,18 @@ export default function DashboardPage() {
   const [panchangDateJump, setPanchangDateJump] = useState<{ date: string; key: number } | null>(null);
 
   const [notificationPrefs, setNotificationPrefs] = useState<NotificationPrefs>(DEFAULT_NOTIFICATION_PREFS);
+
+  // Product Instrumentation V1 -- client-side "viewed"/"started" UI intent
+  // signals with no reliable server equivalent. Fires once per tab switch,
+  // only once the user is actually signed in (never for the logged-out
+  // LoginScreen). Outcome events (searches completing, moments created,
+  // etc.) are tracked server-side instead -- see the relevant API routes.
+  useEffect(() => {
+    if (!user) return;
+    if (activeTab === 'home') trackEvent('AURA_HOME_VIEWED');
+    else if (activeTab === 'panchang') trackEvent('PANCHANG_CALENDAR_VIEWED');
+    else if (activeTab === 'plan') trackEvent('PLAN_STARTED');
+  }, [activeTab, user]);
 
   useEffect(() => {
     setMounted(true);
