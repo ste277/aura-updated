@@ -842,6 +842,7 @@ export default function DashboardPage() {
             onViewFullPanchang={handleViewFullPanchang}
             onPlanLogged={loadUserDataAndLogs}
             onOpenBirthProfile={() => setActiveTab('chart')}
+            onOpenPeople={() => setActiveTab('people')}
           />
         )}
       </div>

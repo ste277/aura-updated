@@ -1,6 +1,7 @@
-import { findMuhurthams, findPersonalMuhurthams, isSupportedMuhurthamActivity, MuhurthamPersonalSearchOutcome, MuhurthamSearchRequest, MuhurthamSearchResult, MuhurthamSearchScope, SUPPORTED_MUHURTHAM_ACTIVITY_IDS } from '../../../packages/recommendation/src/muhurthamFinder';
+import { findMuhurthams, findPersonalMuhurthams, findSharedMuhurthams, isSupportedMuhurthamActivity, MuhurthamPersonalSearchOutcome, MuhurthamSearchRequest, MuhurthamSearchResult, MuhurthamSearchScope, MuhurthamSharedSearchOutcome, SUPPORTED_MUHURTHAM_ACTIVITY_IDS } from '../../../packages/recommendation/src/muhurthamFinder';
 import { DailyAssistantContext } from '../../../packages/recommendation/src/dailyAssistant';
 import { TimingTimePreference } from '../../../packages/recommendation/src/timingSearch';
+import { PersonalMuhurtaContext } from '../../../packages/recommendation/src/auraFitEngine';
 import { isDateOnlyString } from './timingSearchRequest';
 
 /**
@@ -21,14 +22,14 @@ const MIN_LIMIT = 1;
 const MAX_LIMIT = 20;
 
 const VALID_TIME_PREFERENCES = new Set<TimingTimePreference>(['ANY', 'MORNING', 'AFTERNOON', 'EVENING', 'NIGHT']);
-const VALID_SCOPES = new Set<MuhurthamSearchScope>(['GENERAL', 'PERSONAL']);
+const VALID_SCOPES = new Set<MuhurthamSearchScope>(['GENERAL', 'PERSONAL', 'SHARED']);
 
 function daySpan(startDate: string, endDate: string): number {
   return (Date.parse(`${endDate}T00:00:00Z`) - Date.parse(`${startDate}T00:00:00Z`)) / 86_400_000;
 }
 
 export type MuhurthamSearchValidationResult =
-  | { ok: true; request: MuhurthamSearchRequest; scope: MuhurthamSearchScope }
+  | { ok: true; request: MuhurthamSearchRequest; scope: MuhurthamSearchScope; savedPersonId?: string }
   | { ok: false; error: string; status: number };
 
 /**
@@ -38,14 +39,22 @@ export type MuhurthamSearchValidationResult =
  * I/O so it can be unit-tested with a fake context -- same pattern as
  * buildTimingSearchRequest(). `context.personalContext` is only meaningful
  * (and only expected to be populated by the caller) when scope is
- * 'PERSONAL' -- see route.ts, which skips resolving it entirely for
- * 'GENERAL' requests (brief section 10: "GENERAL should not unnecessarily
+ * 'PERSONAL' or 'SHARED' -- see route.ts, which skips resolving it entirely
+ * for 'GENERAL' requests (brief section 10: "GENERAL should not unnecessarily
  * fetch natal data").
+ *
+ * For 'SHARED', this function ONLY validates that `savedPersonId` is present
+ * as a non-empty string and returns it alongside the request -- it cannot
+ * resolve ownership or build `request.partner` itself (that needs a database
+ * call, and this function is deliberately I/O-free for unit-testability).
+ * route.ts does that resolution and calls findSharedMuhurthams() directly
+ * rather than going through handleMuhurthamSearchBody() below, which only
+ * dispatches the two DB-free scopes.
  */
 export function buildMuhurthamSearchRequest(body: Record<string, unknown>, context: DailyAssistantContext): MuhurthamSearchValidationResult {
   const rawScope = body.scope === undefined ? 'GENERAL' : String(body.scope);
   if (!VALID_SCOPES.has(rawScope as MuhurthamSearchScope)) {
-    return { ok: false, error: 'scope must be GENERAL or PERSONAL.', status: 400 };
+    return { ok: false, error: 'scope must be GENERAL, PERSONAL, or SHARED.', status: 400 };
   }
   const scope = rawScope as MuhurthamSearchScope;
 
@@ -84,6 +93,14 @@ export function buildMuhurthamSearchRequest(body: Record<string, unknown>, conte
     return { ok: false, error: `limit must be between ${MIN_LIMIT} and ${MAX_LIMIT}.`, status: 400 };
   }
 
+  let savedPersonId: string | undefined;
+  if (scope === 'SHARED') {
+    savedPersonId = typeof body.savedPersonId === 'string' ? body.savedPersonId.trim() : '';
+    if (!savedPersonId) {
+      return { ok: false, error: 'savedPersonId is required for SHARED scope.', status: 400 };
+    }
+  }
+
   const request: MuhurthamSearchRequest = {
     activityId,
     dateRange: { start: dateRange.start, end: dateRange.end },
@@ -93,17 +110,47 @@ export function buildMuhurthamSearchRequest(body: Record<string, unknown>, conte
     context,
   };
 
-  return { ok: true, request, scope };
+  return { ok: true, request, scope, savedPersonId };
 }
 
 /** Convenience wrapper: validate then run, for the route handler. Dispatches
  * to findMuhurthams() (GENERAL, unchanged response shape) or
  * findPersonalMuhurthams() (PERSONAL, its own discriminated-union outcome
  * shape -- OK or PERSONAL_PROFILE_INCOMPLETE, both HTTP 200 since an
- * incomplete profile is an expected, valid outcome, not a request error). */
+ * incomplete profile is an expected, valid outcome, not a request error).
+ * Handles only the two DB-free scopes -- SHARED needs an already-resolved,
+ * already-ownership-checked SavedPerson (a database call), so it explicitly
+ * refuses to silently run as GENERAL here; see handleSharedMuhurthamSearchBody()
+ * below, which route.ts calls instead once it has resolved the SavedPerson. */
 export function handleMuhurthamSearchBody(body: Record<string, unknown>, context: DailyAssistantContext): { ok: true; result: MuhurthamSearchResult | MuhurthamPersonalSearchOutcome } | { ok: false; error: string; status: number } {
   const validated = buildMuhurthamSearchRequest(body, context);
   if (!validated.ok) return { ok: false, error: validated.error, status: validated.status };
+  if (validated.scope === 'SHARED') return { ok: false, error: 'SHARED scope must be handled via handleSharedMuhurthamSearchBody.', status: 500 };
   if (validated.scope === 'PERSONAL') return { ok: true, result: findPersonalMuhurthams(validated.request) };
   return { ok: true, result: findMuhurthams(validated.request) };
+}
+
+/**
+ * SHARED-scope counterpart to handleMuhurthamSearchBody() above. Takes an
+ * already-resolved, already-ownership-checked `partner` (route.ts builds it
+ * via getSavedPersonForOwner()/getSavedPersonNatalContext() BEFORE calling
+ * this function) rather than resolving it itself, keeping this file free of
+ * database access -- same reasoning as `context` being pre-resolved for the
+ * other scopes. A missing/undefined `partner` here means the route already
+ * determined the requested savedPersonId doesn't exist or isn't owned by
+ * this user; that's an ownership-safe 404 the route returns directly (brief
+ * section 11) without ever calling findSharedMuhurthams(), so `partner`
+ * being undefined at this point should not normally happen -- kept as
+ * `| undefined` only so this function's own signature can't silently accept
+ * an unresolved partner as if it were valid.
+ */
+export function handleSharedMuhurthamSearchBody(
+  body: Record<string, unknown>,
+  context: DailyAssistantContext,
+  partner: { savedPersonId: string; name: string; context: PersonalMuhurtaContext }
+): { ok: true; result: MuhurthamSharedSearchOutcome } | { ok: false; error: string; status: number } {
+  const validated = buildMuhurthamSearchRequest(body, context);
+  if (!validated.ok) return { ok: false, error: validated.error, status: validated.status };
+  if (validated.scope !== 'SHARED') return { ok: false, error: 'handleSharedMuhurthamSearchBody requires scope SHARED.', status: 400 };
+  return { ok: true, result: findSharedMuhurthams({ ...validated.request, partner }) };
 }
