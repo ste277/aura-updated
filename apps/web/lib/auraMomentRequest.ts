@@ -1,5 +1,6 @@
 import { isSupportedMuhurthamActivity, SUPPORTED_MUHURTHAM_ACTIVITY_IDS, MuhurthamRating, SharedMuhurthamRating } from '../../../packages/recommendation/src/muhurthamFinder';
-import { AuraMomentResponseState, AuraMomentScope } from './db';
+import { AuraMomentAlternativePreference, AuraMomentResponseState, AuraMomentScope } from './db';
+import { MAX_ALTERNATIVES } from './auraMomentAlternatives';
 
 /**
  * Pure request validation for POST /api/aura-moments, kept out of
@@ -100,4 +101,29 @@ const VALID_RESPONSE_VALUES = new Set<AuraMomentResponseState>(['ACCEPTED', 'ANO
  * isn't exactly one of the two known values (no free text, no extra states). */
 export function isValidMomentResponse(value: unknown): value is AuraMomentResponseState {
   return typeof value === 'string' && VALID_RESPONSE_VALUES.has(value as AuraMomentResponseState);
+}
+
+const VALID_ALTERNATIVE_PREFERENCES = new Set<AuraMomentAlternativePreference>(['EARLIER', 'LATER', 'DIFFERENT_DAY', 'NO_PREFERENCE']);
+
+/**
+ * Aura Moment Rescheduling brief section 19: "the public API must remain
+ * intentionally powerless" -- the ONLY additional thing a recipient may ever
+ * submit alongside ANOTHER_TIME is one of these four closed values. No
+ * dates, no activity ids, no SavedPerson ids, no free text.
+ */
+export function isValidAlternativePreference(value: unknown): value is AuraMomentAlternativePreference {
+  return typeof value === 'string' && VALID_ALTERNATIVE_PREFERENCES.has(value as AuraMomentAlternativePreference);
+}
+
+/**
+ * POST /api/aura-moments/[token]/suggest's entire request body: an index
+ * into the alternatives just computed (0, 1, or 2 -- see MAX_ALTERNATIVES in
+ * auraMomentAlternatives.ts), NEVER a client-supplied date/time/activity/
+ * SavedPerson id (brief section 20: "Do not trust IDs supplied by the
+ * browser where they can be resolved from AuraMoment"). The route re-runs
+ * the exact same deterministic search server-side and picks
+ * candidates[index] itself.
+ */
+export function isValidAlternativeIndex(value: unknown): value is number {
+  return typeof value === 'number' && Number.isInteger(value) && value >= 0 && value < MAX_ALTERNATIVES;
 }

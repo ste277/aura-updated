@@ -190,6 +190,10 @@ export async function deleteSavedPerson(ownerUserId: string, personId: string): 
 export type AuraMomentScope = 'GENERAL' | 'PERSONAL' | 'SHARED';
 export type AuraMomentStatus = 'ACTIVE' | 'REVOKED';
 export type AuraMomentResponseState = 'ACCEPTED' | 'ANOTHER_TIME';
+/** Structured recipient preference (Aura Moment Rescheduling), only ever
+ * meaningful alongside responseState = 'ANOTHER_TIME'. Deliberately small
+ * and closed -- no free text in V1 (brief section 2). */
+export type AuraMomentAlternativePreference = 'EARLIER' | 'LATER' | 'DIFFERENT_DAY' | 'NO_PREFERENCE';
 
 export interface AuraMoment {
   id: string;
@@ -209,7 +213,12 @@ export interface AuraMoment {
   explanationSnapshot: string | null;
   status: AuraMomentStatus;
   responseState: AuraMomentResponseState | null;
+  responsePreference: AuraMomentAlternativePreference | null;
   respondedAt: Date | null;
+  /** Lineage: set when this moment was created via "Suggest this" on an
+   * earlier moment -- see revokeAuraMoment/createAuraMoment's doc comments.
+   * The referenced moment is never mutated; this is a one-way pointer. */
+  previousMomentId: string | null;
   createdAt: Date;
   expiresAt: Date | null;
 }
@@ -230,6 +239,7 @@ export interface CreateAuraMomentInput {
   ratingLabel: string | null;
   explanationSnapshot: string | null;
   expiresAt: Date | null;
+  previousMomentId?: string | null;
 }
 
 /** Every write/read below that's scoped to an owner filters by ownerUserId,
@@ -244,8 +254,8 @@ export async function createAuraMoment(input: CreateAuraMomentInput): Promise<Au
     `INSERT INTO "AuraMoment"
        (id, "ownerUserId", "publicToken", scope, "activityId", "activityTitle", "activityIcon",
         "startAt", "endAt", timezone, "savedPersonId", "sharedPersonDisplayName", "senderDisplayName",
-        "ratingLabel", "explanationSnapshot", "expiresAt")
-     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16)
+        "ratingLabel", "explanationSnapshot", "expiresAt", "previousMomentId")
+     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17)
      RETURNING *`,
     [
       id,
@@ -264,6 +274,7 @@ export async function createAuraMoment(input: CreateAuraMomentInput): Promise<Au
       input.ratingLabel,
       input.explanationSnapshot,
       input.expiresAt,
+      input.previousMomentId ?? null,
     ]
   );
   return result.rows[0];
@@ -311,15 +322,28 @@ export async function revokeAuraMoment(ownerUserId: string, publicToken: string)
  * (resolvePublicAuraMoment in lib/auraMoments.ts) separately determines the
  * exact reason for a rejection (not found / revoked / expired) for the HTTP
  * response, but this function's own guard is the actual source of truth. */
-export async function respondToAuraMoment(publicToken: string, response: AuraMomentResponseState): Promise<AuraMoment | null> {
+export async function respondToAuraMoment(publicToken: string, response: AuraMomentResponseState, preference: AuraMomentAlternativePreference | null = null): Promise<AuraMoment | null> {
   const result = await pool.query(
     `UPDATE "AuraMoment"
-     SET "responseState" = $2, "respondedAt" = now()
+     SET "responseState" = $2, "responsePreference" = $3, "respondedAt" = now()
      WHERE "publicToken" = $1 AND status = 'ACTIVE' AND ("expiresAt" IS NULL OR "expiresAt" > now())
      RETURNING *`,
-    [publicToken, response]
+    [publicToken, response, preference]
   );
   return result.rows[0] ?? null;
+}
+
+/** PUBLIC-safe existence check -- "has ANY moment been created via 'Suggest
+ * this' with this one as its previousMomentId", never the successor's own
+ * token/id (brief section 15: "only if that can be done without leaking the
+ * new token publicly"). Used by resolvePublicAuraMoment() so the ORIGINAL
+ * link can say "a new time was suggested" without exposing where. */
+export async function hasSuccessorMoment(momentId: string): Promise<boolean> {
+  const result = await pool.query(
+    `SELECT 1 FROM "AuraMoment" WHERE "previousMomentId" = $1 LIMIT 1`,
+    [momentId]
+  );
+  return result.rows.length > 0;
 }
 
 export interface HabitLogRow {

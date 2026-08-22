@@ -1,12 +1,11 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getSessionFromRequest } from '../../../lib/session';
-import { getUserById, User } from '../../../lib/db';
+import { getUserById } from '../../../lib/db';
 import { parseJsonObject } from '../../../lib/request';
 import { resolveTzOffsetMinutes } from '../../../lib/timezone';
-import { natalContextFromBirthDetails } from '../../../lib/natalContext';
+import { buildPersonalMuhurtaContextForUser } from '../../../lib/natalContext';
 import { handleTimingSearchBody } from '../../../lib/timingSearchRequest';
 import { DailyAssistantContext } from '../../../../../packages/recommendation/src/dailyAssistant';
-import { PersonalMuhurtaContext } from '../../../../../packages/recommendation/src/auraFitEngine';
 
 /**
  * The Timing Search API: a thin HTTP wrapper around runTimingSearch() (the
@@ -26,19 +25,6 @@ import { PersonalMuhurtaContext } from '../../../../../packages/recommendation/s
  */
 
 const MAX_CLIENT_CLOCK_SKEW_MS = 12 * 60 * 60 * 1000;
-
-function formatUTCDateString(dateInput: Date | string): string {
-  if (typeof dateInput === 'string') return dateInput.split('T')[0];
-  const year = dateInput.getUTCFullYear();
-  const month = String(dateInput.getUTCMonth() + 1).padStart(2, '0');
-  const day = String(dateInput.getUTCDate()).padStart(2, '0');
-  return `${year}-${month}-${day}`;
-}
-
-function buildPersonalMuhurtaContext(user: User): PersonalMuhurtaContext | undefined {
-  if (!user.birthDate || !user.birthTime || !user.birthTimezone) return undefined;
-  return natalContextFromBirthDetails(formatUTCDateString(user.birthDate), user.birthTime, user.birthTimezone);
-}
 
 function resolveRequestNow(clientNow: unknown): Date {
   const serverNow = new Date();
@@ -68,7 +54,7 @@ export async function POST(req: NextRequest) {
     longitude: user.longitude,
     timezone: user.timezone,
     tzOffsetMinutes: resolveTzOffsetMinutes(user.timezone, now),
-    personalContext: buildPersonalMuhurtaContext(user),
+    personalContext: buildPersonalMuhurtaContextForUser(user),
   };
 
   const outcome = handleTimingSearchBody(body, context);

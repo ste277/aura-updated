@@ -1,6 +1,6 @@
 import { randomBytes } from 'crypto';
 import type { NextRequest } from 'next/server';
-import { AuraMoment, AuraMomentScope, AuraMomentResponseState, getAuraMomentByToken } from './db';
+import { AuraMoment, AuraMomentAlternativePreference, AuraMomentScope, AuraMomentResponseState, getAuraMomentByToken, hasSuccessorMoment } from './db';
 
 /**
  * Aura Moment Sharing V1 -- domain logic for turning a selected Muhurtham
@@ -108,9 +108,20 @@ export interface PublicAuraMoment {
   ratingLabel: string | null;
   explanationSnapshot: string | null;
   responseState: AuraMomentResponseState | null;
+  /** Safe to expose publicly -- it's literally what the recipient themselves
+   * just told Aura (Rescheduling brief section 3/4), not owner-private data.
+   * Only ever non-null alongside responseState = 'ANOTHER_TIME'. */
+  responsePreference: AuraMomentAlternativePreference | null;
+  /** True once the owner has used "Suggest this" to create a follow-up
+   * moment from this one -- never the successor's own token/link (brief
+   * section 15: "without leaking the new token publicly"), just whether one
+   * exists, so the original page can say "a new time was suggested"
+   * instead of leaving the recipient wondering if their preference reached
+   * anyone. */
+  hasSuccessor: boolean;
 }
 
-export function toPublicAuraMoment(moment: AuraMoment): PublicAuraMoment {
+export function toPublicAuraMoment(moment: AuraMoment, hasSuccessor: boolean): PublicAuraMoment {
   return {
     activityTitle: moment.activityTitle,
     activityIcon: moment.activityIcon,
@@ -123,6 +134,8 @@ export function toPublicAuraMoment(moment: AuraMoment): PublicAuraMoment {
     ratingLabel: moment.ratingLabel,
     explanationSnapshot: moment.explanationSnapshot,
     responseState: moment.responseState,
+    responsePreference: moment.responsePreference,
+    hasSuccessor,
   };
 }
 
@@ -139,12 +152,14 @@ export type PublicAuraMomentOutcome =
  * given token is currently viewable/respondable. This is the ENTIRE public
  * read path: token -> stored snapshot -> sanitized DTO -- no Panchang
  * calculation, no Muhurta search, no natal/Tara Bala computation (brief
- * section 23).
+ * section 23). The one extra lookup (hasSuccessorMoment) is a cheap,
+ * indexed existence check, not a search.
  */
 export async function resolvePublicAuraMoment(publicToken: string): Promise<PublicAuraMomentOutcome> {
   const moment = await getAuraMomentByToken(publicToken);
   if (!moment) return { status: 'NOT_FOUND' };
   if (moment.status === 'REVOKED') return { status: 'REVOKED' };
   if (isMomentExpired(moment)) return { status: 'EXPIRED' };
-  return { status: 'OK', moment: toPublicAuraMoment(moment) };
+  const hasSuccessor = await hasSuccessorMoment(moment.id);
+  return { status: 'OK', moment: toPublicAuraMoment(moment, hasSuccessor) };
 }

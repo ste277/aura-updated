@@ -99,22 +99,26 @@ const fullMoment: AuraMoment = {
   ratingLabel: 'STRONG_SHARED_FIT',
   explanationSnapshot: 'Aura found this timing to work well for both of you.',
   status: 'ACTIVE',
-  responseState: null,
+  responseState: 'ANOTHER_TIME',
+  responsePreference: 'LATER',
   respondedAt: null,
+  previousMomentId: 'previous-moment-internal-id-should-never-appear-publicly',
   createdAt: new Date('2026-08-22T00:00:00.000Z'),
   expiresAt: new Date('2026-10-25T00:00:00.000Z'),
 };
 
-const publicDto = toPublicAuraMoment(fullMoment);
+const publicDto = toPublicAuraMoment(fullMoment, true);
 const serialized = JSON.stringify(publicDto);
 
-check('PublicAuraMoment DTO has EXACTLY the allow-listed keys (no accidental extra fields)', Object.keys(publicDto).sort().join(',') === ['activityTitle', 'activityIcon', 'startAt', 'endAt', 'timezone', 'senderDisplayName', 'sharedPersonDisplayName', 'scope', 'ratingLabel', 'explanationSnapshot', 'responseState'].sort().join(','));
+check('PublicAuraMoment DTO has EXACTLY the allow-listed keys (no accidental extra fields)', Object.keys(publicDto).sort().join(',') === ['activityTitle', 'activityIcon', 'startAt', 'endAt', 'timezone', 'senderDisplayName', 'sharedPersonDisplayName', 'scope', 'ratingLabel', 'explanationSnapshot', 'responseState', 'responsePreference', 'hasSuccessor'].sort().join(','));
 check('PublicAuraMoment DTO never contains the internal id', !serialized.includes('internal-id-should-never-appear-publicly'));
 check('PublicAuraMoment DTO never contains ownerUserId', !serialized.includes('owner-user-id-should-never-appear-publicly') && !('ownerUserId' in publicDto));
 check('PublicAuraMoment DTO never echoes back the publicToken itself', !serialized.includes('the-token-itself-should-not-be-echoed-back') && !('publicToken' in publicDto));
 check('PublicAuraMoment DTO never contains savedPersonId (only the safe display name)', !serialized.includes('saved-person-id-should-never-appear-publicly') && !('savedPersonId' in publicDto));
+check('PublicAuraMoment DTO never contains the previous moment\'s internal id (only the safe boolean hasSuccessor)', !serialized.includes('previous-moment-internal-id-should-never-appear-publicly') && !('previousMomentId' in publicDto));
 check('PublicAuraMoment DTO never contains any birth/natal field name at all', !/birthDate|birthTime|birthTimezone|birthLatitude|birthLongitude|janmaNakshatra|janmaRashi|natalNakshatraIndex/i.test(serialized));
 check('PublicAuraMoment DTO does carry the safe display fields the brief explicitly allows', publicDto.senderDisplayName === 'Stephen' && publicDto.sharedPersonDisplayName === 'Anu' && publicDto.activityTitle === 'Griha Pravesh');
+check('PublicAuraMoment DTO carries the recipient\'s own preference (safe -- it is their own input) and the hasSuccessor flag passed in', publicDto.responsePreference === 'LATER' && publicDto.hasSuccessor === true);
 check('PublicAuraMoment DTO dates are ISO strings, not raw Date objects (JSON-safe)', typeof publicDto.startAt === 'string' && typeof publicDto.endAt === 'string');
 
 console.log(allPassed ? '\nALL AURA MOMENT CHECKS PASSED' : '\nSOME AURA MOMENT CHECKS FAILED');
