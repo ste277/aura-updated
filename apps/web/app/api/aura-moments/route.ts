@@ -3,9 +3,10 @@ import { getSessionFromRequest } from '../../../lib/session';
 import { createAuraMoment, getSavedPersonForOwner, getUserById, listAuraMomentsForOwner } from '../../../lib/db';
 import { parseJsonObject } from '../../../lib/request';
 import { buildAuraMomentCreateRequest } from '../../../lib/auraMomentRequest';
-import { buildMomentShareUrl, defaultExpiresAt, explanationSnapshotForScope, generatePublicMomentToken } from '../../../lib/auraMoments';
+import { buildMomentShareUrl, defaultExpiresAt, explanationSnapshotFor, generatePublicMomentToken } from '../../../lib/auraMoments';
 import { formatDisplayName } from '../../../lib/displayName';
 import { FULL_ACTIVITY_CATALOG } from '../../../../../packages/recommendation/src/personalizedTasks';
+import { getActivityDefinition } from '../../../../../packages/recommendation/src/activityDefinitions';
 import { recordProductEvent } from '../../../lib/productEvents';
 
 /**
@@ -52,6 +53,7 @@ export async function POST(req: NextRequest) {
     ownerUserId: session.userId,
     publicToken: generatePublicMomentToken(),
     scope: input.scope,
+    source: input.source,
     activityId: activity.id,
     activityTitle: activity.title,
     activityIcon: activity.icon,
@@ -62,7 +64,7 @@ export async function POST(req: NextRequest) {
     sharedPersonDisplayName,
     senderDisplayName: formatDisplayName(user.email),
     ratingLabel: input.ratingLabel,
-    explanationSnapshot: explanationSnapshotForScope(input.scope),
+    explanationSnapshot: explanationSnapshotFor(activity.id, input.scope),
     expiresAt: defaultExpiresAt(input.endAt),
   });
 
@@ -70,7 +72,12 @@ export async function POST(req: NextRequest) {
     eventName: 'AURA_MOMENT_CREATED',
     userId: session.userId,
     auraMomentId: moment.id,
-    metadata: { scope: moment.scope, activityId: moment.activityId },
+    metadata: {
+      scope: moment.scope,
+      activityId: moment.activityId,
+      source: moment.source,
+      planningMode: getActivityDefinition(activity)?.experience.planningMode ?? 'EVERYDAY',
+    },
   });
 
   return NextResponse.json({ id: moment.id, shareUrl: buildMomentShareUrl(req, moment.publicToken) }, { status: 201 });

@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useEffect, useMemo, useRef, useState } from 'react';
+import React, { useMemo, useState } from 'react';
 import { LocationPicker } from './LocationPicker';
 import { NotificationSettings } from './NotificationSettings';
 import type { NotificationPrefs } from '../lib/windowNotifications';
@@ -16,11 +16,12 @@ interface YouViewProps {
   onOpenHome: () => void;
   onOpenChart: () => void;
   onOpenActivityLog: () => void;
-  onOpenPanchang: () => void;
   onOpenPeople: () => void;
+  /** Product Structure V2 (brief section 21): "Your Moments" is no longer a
+   * primary You destination -- this now navigates into Plan's embedded
+   * Your Moments section, a redirect rather than a dead end. */
   onOpenSharedMoments: () => void;
   onSignOut: () => void;
-  focusNotificationsKey?: number;
   /** Aura Updates V1 -- unread moment-response count (brief section 9: "a
    * subtle unread indicator... a small dot" on the existing Shared Moments
    * entry, NOT a new nav item). Omitted or 0 renders no badge at all. */
@@ -38,14 +39,11 @@ export function YouView({
   onOpenHome,
   onOpenChart,
   onOpenActivityLog,
-  onOpenPanchang,
   onOpenPeople,
   onOpenSharedMoments,
   onSignOut,
-  focusNotificationsKey,
   sharedMomentsUnreadCount,
 }: YouViewProps) {
-  const notificationsRef = useRef<HTMLDivElement | null>(null);
   const [openSettingsPanel, setOpenSettingsPanel] = useState<
     'location' | 'calendar' | 'checkIn' | 'help' | 'about' | null
   >(null);
@@ -69,13 +67,6 @@ export function YouView({
   const toggleSettingsPanel = (panel: NonNullable<typeof openSettingsPanel>) => {
     setOpenSettingsPanel((current) => (current === panel ? null : panel));
   };
-
-  useEffect(() => {
-    if (!focusNotificationsKey) return;
-    requestAnimationFrame(() => {
-      notificationsRef.current?.scrollIntoView({ behavior: 'smooth', block: 'center' });
-    });
-  }, [focusNotificationsKey]);
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 16, paddingBottom: 24, fontFamily: 'sans-serif', color: '#f8fafc' }}>
@@ -138,15 +129,14 @@ export function YouView({
         )}
       </section>
 
-      <div ref={notificationsRef} style={{ scrollMarginTop: 18 }}>
+      <div style={{ scrollMarginTop: 18 }}>
         <NotificationSettings prefs={notificationPrefs} onChange={onNotificationPrefsChange} />
       </div>
 
       <section style={{ background: 'var(--as-surface-raised, #0f172a)', border: '1px solid var(--as-border, #1e293b)', borderRadius: 16, overflow: 'hidden' }}>
         <SettingsRow icon="📋" title="Activity Log" detail="View logged activities" onClick={onOpenActivityLog} />
-        <SettingsRow icon="🗓️" title="Panchang Calendar" detail="Tithi, Nakshatra, and windows by day" onClick={onOpenPanchang} />
         <SettingsRow icon="👥" title="People" detail="Manage the people you plan with" onClick={onOpenPeople} />
-        <SettingsRow icon="🔗" title="Shared Moments" detail="Moments you've shared and their responses" onClick={onOpenSharedMoments} badgeCount={sharedMomentsUnreadCount} />
+        <SettingsRow icon="🔗" title="Your Moments" detail="Moments you've created and their responses" onClick={onOpenSharedMoments} badgeCount={sharedMomentsUnreadCount} />
         <SettingsLinkRow icon="⬇️" title="Export Data" detail="Download your timing data" href="/api/users/export" />
         <SettingsRow icon="❔" title="Help & FAQ" detail="Learn more about myAuraMoment" expanded={openSettingsPanel === 'help'} onClick={() => toggleSettingsPanel('help')} />
         {openSettingsPanel === 'help' && (

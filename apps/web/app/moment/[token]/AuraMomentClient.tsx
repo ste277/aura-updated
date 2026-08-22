@@ -65,6 +65,33 @@ function introText(moment: PublicAuraMoment): string {
     : `${sender} found a good moment for you.`;
 }
 
+/**
+ * Product Structure V2 (brief section 18): moment copy must be
+ * source-neutral AND never use ceremonial "Muhurtham" framing for an
+ * EVERYDAY activity (Date Night, Coffee, Birthday Party, ...) -- only
+ * CEREMONIAL/IMPORTANT activities (Griha Pravesh, an important journey, a
+ * financial decision) keep the existing heart-emoji "shared moment"
+ * framing. Driven by moment.planningMode, which is derived from the
+ * (public) activity catalog server-side -- never from AuraMomentSource, so
+ * a Griha Pravesh Moment created via Plan still gets ceremonial framing.
+ */
+function momentKickerText(moment: PublicAuraMoment): string {
+  if (moment.planningMode === 'EVERYDAY') return moment.sharedPersonDisplayName ? 'A moment together' : 'A moment from Aura';
+  return moment.scope === 'SHARED' ? '❤️ A shared moment' : '✨ A moment from Aura';
+}
+
+function acceptCtaText(moment: PublicAuraMoment): string {
+  return moment.planningMode === 'EVERYDAY' ? "I'm in" : "I'm in ❤️";
+}
+
+function acceptedHeading(moment: PublicAuraMoment): string {
+  return moment.planningMode === 'EVERYDAY' ? "It's a plan" : "❤️ It's a plan";
+}
+
+function acceptedBody(moment: PublicAuraMoment): string {
+  return moment.sharedPersonDisplayName ? 'This moment works for you both.' : 'This moment is on the calendar.';
+}
+
 export function AuraMomentClient({ token, initialOutcome }: AuraMomentClientProps) {
   const [outcome, setOutcome] = useState<PublicAuraMomentOutcome>(initialOutcome);
   const [responding, setResponding] = useState<'ACCEPTED' | AlternativePreference | null>(null);
@@ -117,7 +144,7 @@ export function AuraMomentClient({ token, initialOutcome }: AuraMomentClientProp
     <Shell>
       <div style={{ textAlign: 'center' }}>
         <div style={{ fontSize: 12, letterSpacing: '0.12em', color: '#94a3b8', fontWeight: 800 }}>AURA</div>
-        <div style={{ marginTop: 10, fontSize: 14, fontWeight: 800, color: '#fb7185' }}>❤️ A shared moment</div>
+        <div style={{ marginTop: 10, fontSize: 14, fontWeight: 800, color: '#fb7185' }}>{momentKickerText(moment)}</div>
         <p style={{ marginTop: 14, color: '#dbe7f4', fontSize: 15, lineHeight: 1.5 }}>{introText(moment)}</p>
 
         <div style={{ fontSize: 44, margin: '22px 0 10px' }}>{moment.activityIcon ?? '✨'}</div>
@@ -136,8 +163,8 @@ export function AuraMomentClient({ token, initialOutcome }: AuraMomentClientProp
       <div style={{ borderTop: '1px solid rgba(255,255,255,0.08)', marginTop: 26, paddingTop: 22 }}>
         {moment.responseState === 'ACCEPTED' ? (
           <ResponseResult
-            heading="❤️ It's a plan"
-            body="This moment works for you both."
+            heading={acceptedHeading(moment)}
+            body={acceptedBody(moment)}
             action={
               <a href={calendarUrl} target="_blank" rel="noreferrer" style={outlineButtonStyle}>
                 Add to calendar
@@ -174,7 +201,7 @@ export function AuraMomentClient({ token, initialOutcome }: AuraMomentClientProp
             <div style={{ textAlign: 'center', fontSize: 13, color: '#94a3b8', marginBottom: 14 }}>Does this work for you?</div>
             {error && <div style={{ color: '#fb6b6b', fontSize: 12, textAlign: 'center', marginBottom: 10 }}>{error}</div>}
             <button type="button" onClick={() => respond('ACCEPTED')} disabled={responding !== null} style={primaryButtonStyle}>
-              {responding === 'ACCEPTED' ? 'Sending…' : "I'm in ❤️"}
+              {responding === 'ACCEPTED' ? 'Sending…' : acceptCtaText(moment)}
             </button>
             <button type="button" onClick={() => setShowPreferenceChoices(true)} disabled={responding !== null} style={{ ...outlineButtonStyle, width: '100%', marginTop: 10, textAlign: 'center' }}>
               Another time

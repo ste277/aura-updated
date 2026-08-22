@@ -5,6 +5,7 @@ import { SUPPORTED_MUHURTHAM_ACTIVITY_IDS, SupportedMuhurthamActivityId } from '
 import type { MuhurthamDateCandidate, MuhurthamPersonalDateCandidate, MuhurthamPersonalSearchOutcome, MuhurthamSearchResult, MuhurthamSearchScope, MuhurthamSharedDateCandidate, MuhurthamSharedSearchOutcome, SharedMuhurthamRating } from '../../../packages/recommendation/src/muhurthamFinder';
 import type { TimingCandidate, TimingTimePreference } from '../../../packages/recommendation/src/timingSearch';
 import { FULL_ACTIVITY_CATALOG } from '../../../packages/recommendation/src/personalizedTasks';
+import { getActivityDefinition } from '../../../packages/recommendation/src/activityDefinitions';
 import { formatMuhurtaReason } from '../../../packages/muhurta/src/muhurtaReasonFormat';
 import { saveUpcomingPlanFromCandidate } from './PlanWithAuraView';
 import { ExploreModeToggle } from './ExploreModeToggle';
@@ -339,7 +340,7 @@ export function MuhurthamFinderView({ timezone, onBack, onOpenPanchangCalendar, 
       const res = await fetch('/api/aura-moments', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ scope, activityId, startAt: window.start, endAt: window.end, ratingLabel, savedPersonId }),
+        body: JSON.stringify({ scope, source: 'MUHURTHAM', activityId, startAt: window.start, endAt: window.end, ratingLabel, savedPersonId }),
       });
       const data = await res.json();
       if (!res.ok) throw new Error(data?.error || 'Unable to share this moment.');
@@ -357,11 +358,11 @@ export function MuhurthamFinderView({ timezone, onBack, onOpenPanchangCalendar, 
         if (typeof navigator !== 'undefined' && navigator.share) {
           await navigator.share({ title: shareTitle, text: shareText, url: shareUrl });
           setShareFeedback({ key, text: 'Shared!' });
-          trackEvent('AURA_MOMENT_SHARE_INITIATED', { auraMomentId: data.id, metadata: { scope, method: 'native_share' } });
+          trackEvent('AURA_MOMENT_SHARE_INITIATED', { auraMomentId: data.id, metadata: { scope, method: 'native_share', planningMode: getActivityDefinition(activityId)?.experience.planningMode ?? 'EVERYDAY' } });
         } else if (typeof navigator !== 'undefined' && navigator.clipboard) {
           await navigator.clipboard.writeText(shareUrl);
           setShareFeedback({ key, text: 'Link copied!' });
-          trackEvent('AURA_MOMENT_SHARE_INITIATED', { auraMomentId: data.id, metadata: { scope, method: 'copy_link' } });
+          trackEvent('AURA_MOMENT_SHARE_INITIATED', { auraMomentId: data.id, metadata: { scope, method: 'copy_link', planningMode: getActivityDefinition(activityId)?.experience.planningMode ?? 'EVERYDAY' } });
         } else {
           setShareFeedback({ key, text: shareUrl });
         }
@@ -384,9 +385,9 @@ export function MuhurthamFinderView({ timezone, onBack, onOpenPanchangCalendar, 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 16, paddingBottom: 24, fontFamily: 'sans-serif', color: '#f8fafc' }}>
       <div style={{ display: 'flex', alignItems: 'flex-start', gap: 12 }}>
-        <button type="button" onClick={onBack} aria-label="Back to You" style={backButtonStyle}>
+        <button type="button" onClick={onBack} aria-label="Back to Explore" style={backButtonStyle}>
           <span style={{ fontSize: 16, lineHeight: 1 }}>←</span>
-          You
+          Explore
         </button>
         <div>
           <h1 style={{ fontSize: 20, fontWeight: 700, margin: 0, lineHeight: 1.2 }}>Muhurtham Finder</h1>

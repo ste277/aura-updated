@@ -42,7 +42,8 @@ type AlternativesOutcome =
   | { status: 'SAVED_PERSON_PROFILE_INCOMPLETE' };
 
 interface SharedMomentsViewProps {
-  onBack: () => void;
+  /** Omit when embedded === true (no back button is rendered). */
+  onBack?: () => void;
   /** Aura Updates V1 -- called after "View" or "Find another time" marks a
    * moment's response seen, so the caller (page.tsx) can refetch the unread
    * badge without this view needing to know anything about that state
@@ -53,6 +54,12 @@ interface SharedMomentsViewProps {
    * flow, not a second one) rather than leaving the owner to find the right
    * card themselves. */
   focusMomentToken?: string;
+  /** Product Structure V2 (brief section 19) -- true when rendered inline
+   * at the bottom of Plan rather than as its own full-screen destination:
+   * hides the back button and full-page header, keeping just the list and
+   * a lighter heading. The data/actions are otherwise identical -- this is
+   * a presentation-only flag, not a second implementation. */
+  embedded?: boolean;
 }
 
 const PREFERENCE_TEXT: Record<AlternativePreference, string> = {
@@ -85,7 +92,7 @@ function responseText(moment: SharedMomentRow): { text: string; color: string } 
   return { text: 'Waiting for response', color: '#94a3b8' };
 }
 
-export function SharedMomentsView({ onBack, onSeen, focusMomentToken }: SharedMomentsViewProps) {
+export function SharedMomentsView({ onBack, onSeen, focusMomentToken, embedded }: SharedMomentsViewProps) {
   const [moments, setMoments] = useState<SharedMomentRow[] | null>(null);
   const [error, setError] = useState('');
   const [copiedId, setCopiedId] = useState<string | null>(null);
@@ -149,13 +156,18 @@ export function SharedMomentsView({ onBack, onSeen, focusMomentToken }: SharedMo
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 16, paddingBottom: 24, fontFamily: 'sans-serif', color: '#f8fafc' }}>
       <div style={{ display: 'flex', alignItems: 'flex-start', gap: 12 }}>
-        <button type="button" onClick={onBack} aria-label="Back to You" style={backButtonStyle}>
-          <span style={{ fontSize: 16, lineHeight: 1 }}>←</span>
-          You
-        </button>
+        {!embedded && onBack && (
+          <button type="button" onClick={onBack} aria-label="Back" style={backButtonStyle}>
+            <span style={{ fontSize: 16, lineHeight: 1 }}>←</span>
+            Back
+          </button>
+        )}
         <div>
-          <h1 style={{ fontSize: 20, fontWeight: 700, margin: 0, lineHeight: 1.2 }}>Shared Moments</h1>
-          <p style={{ fontSize: 12, color: '#94a3b8', marginTop: 4 }}>Moments you&apos;ve shared and their responses.</p>
+          {/* Section 20: "Shared Moments" -> "Your Moments" -- the concept is
+           * now universal (Plan and Muhurtham both create AuraMoments), not
+           * specific to sharing with a partner. */}
+          <h1 style={{ fontSize: embedded ? 16 : 20, fontWeight: 700, margin: 0, lineHeight: 1.2 }}>Your Moments</h1>
+          {!embedded && <p style={{ fontSize: 12, color: '#94a3b8', marginTop: 4 }}>Moments you&apos;ve created and their responses.</p>}
         </div>
       </div>
 
@@ -165,9 +177,9 @@ export function SharedMomentsView({ onBack, onSeen, focusMomentToken }: SharedMo
         <p style={{ fontSize: 13, color: '#94a3b8' }}>Loading…</p>
       ) : moments.length === 0 ? (
         <section style={cardStyle}>
-          <div style={{ fontSize: 14, fontWeight: 800 }}>No shared moments yet</div>
+          <div style={{ fontSize: 14, fontWeight: 800 }}>No Moments yet</div>
           <p style={{ fontSize: 12, color: '#94a3b8', marginTop: 6, lineHeight: 1.5 }}>
-            Tap &quot;Share this moment&quot; on a favorable date in Muhurtham Finder to share it.
+            Tap &quot;Make this a Moment&quot; on a result in Plan, or &quot;Share this moment&quot; in Explore &rarr; Muhurtham, to create one.
           </p>
         </section>
       ) : (
@@ -338,6 +350,9 @@ function MomentCard({
 
       {alternativesError && <div style={{ ...errorBoxStyle, marginTop: 10 }}>{alternativesError}</div>}
 
+      {alternatives && alternatives.status === 'NOT_APPLICABLE' && (
+        <p style={{ marginTop: 10, fontSize: 12, color: '#94a3b8' }}>Finding another time isn&apos;t available for this kind of moment yet -- try suggesting a new time directly.</p>
+      )}
       {alternatives && alternatives.status === 'USER_PROFILE_INCOMPLETE' && (
         <p style={{ marginTop: 10, fontSize: 12, color: '#94a3b8' }}>Complete your own birth profile to find alternatives.</p>
       )}

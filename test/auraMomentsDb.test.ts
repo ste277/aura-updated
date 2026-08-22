@@ -27,6 +27,7 @@ async function main() {
   const createdTokens: string[] = [];
   const baseInput = {
     activityId: 'griha-pravesh',
+    source: 'MUHURTHAM' as const,
     activityTitle: 'Griha Pravesh',
     activityIcon: '🏡',
     startAt: new Date('2026-10-18T04:42:00.000Z'),
@@ -148,6 +149,7 @@ async function main() {
       ownerUserId: ownerA.id,
       publicToken: tokenE,
       scope: 'SHARED',
+      source: 'MUHURTHAM',
       activityId: momentD.activityId,
       activityTitle: momentD.activityTitle,
       activityIcon: momentD.activityIcon,

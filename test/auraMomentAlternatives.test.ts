@@ -60,6 +60,7 @@ function fakeMoment(overrides: Partial<AuraMoment>): AuraMoment {
     ownerUserId: 'owner-1',
     publicToken: 'token-1',
     scope: 'SHARED',
+    source: 'MUHURTHAM',
     activityId: 'griha-pravesh',
     activityTitle: 'Griha Pravesh',
     activityIcon: '🏡',

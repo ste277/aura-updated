@@ -1,4 +1,4 @@
-import { findSharedMuhurthams } from '../../../packages/recommendation/src/muhurthamFinder';
+import { findSharedMuhurthams, isSupportedMuhurthamActivity } from '../../../packages/recommendation/src/muhurthamFinder';
 import { getDatePartsInTimezone } from '../../../packages/panchang/src/localDate';
 import type { AuraMoment, AuraMomentAlternativePreference } from './db';
 import type { DailyAssistantContext } from '../../../packages/recommendation/src/dailyAssistant';
@@ -124,6 +124,15 @@ export function findAuraMomentAlternatives(params: {
   // PERSONAL rescheduling is explicitly out of scope, not forced in.
   if (auraMoment.scope !== 'SHARED' || !auraMoment.savedPersonId) return { status: 'NOT_APPLICABLE' };
   if (auraMoment.responseState !== 'ANOTHER_TIME' || !auraMoment.responsePreference) return { status: 'NOT_APPLICABLE' };
+  // Product Structure V2 (brief section 29): findSharedMuhurthams() throws
+  // for any activityId outside SUPPORTED_MUHURTHAM_ACTIVITY_IDS, so an
+  // everyday Plan-sourced SHARED moment (e.g. Date Night) cannot safely
+  // reach it. Rather than route everyday activities through Muhurtham
+  // Finder just to reuse rescheduling (explicitly forbidden), everyday
+  // rescheduling is deferred -- NOT_APPLICABLE here, same as any other
+  // structurally-unsupported case. See the completion report for this
+  // documented limitation.
+  if (!isSupportedMuhurthamActivity(auraMoment.activityId)) return { status: 'NOT_APPLICABLE' };
 
   const originalLocalDate = getDatePartsInTimezone(auraMoment.timezone, auraMoment.startAt).dateStr;
   const todayLocalDate = getDatePartsInTimezone(auraMoment.timezone, new Date()).dateStr;

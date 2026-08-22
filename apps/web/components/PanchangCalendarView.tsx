@@ -183,9 +183,9 @@ export function PanchangCalendarView({ timezone, onBack, onViewTodayRhythm, onEx
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 16, paddingBottom: 24, fontFamily: 'sans-serif', color: '#f8fafc' }}>
       <div style={{ display: 'flex', alignItems: 'flex-start', gap: 12 }}>
-        <button type="button" onClick={onBack} aria-label="Back to You" style={backButtonStyle}>
+        <button type="button" onClick={onBack} aria-label="Back to Explore" style={backButtonStyle}>
           <span style={{ fontSize: 16, lineHeight: 1 }}>←</span>
-          You
+          Explore
         </button>
         <div>
           <h1 style={{ fontSize: 20, fontWeight: 700, margin: 0, lineHeight: 1.2 }}>Panchang Calendar</h1>

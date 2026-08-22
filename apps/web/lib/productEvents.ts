@@ -112,6 +112,12 @@ const TIMING_MODE_VALUES = new Set(['FIND', 'CHECK', 'COMPARE']);
 const PREFERENCE_VALUES = new Set(['EARLIER', 'LATER', 'DIFFERENT_DAY', 'NO_PREFERENCE']);
 const SHARE_METHOD_VALUES = new Set(['native_share', 'copy_link']);
 const RELATIONSHIP_VALUES = new Set(['PARTNER', 'SPOUSE', 'FAMILY', 'FRIEND', 'OTHER']);
+// Product Structure V2 (brief section 31): "at minimum ensure we can
+// distinguish... source = PLAN | MUHURTHAM, planningMode = EVERYDAY |
+// IMPORTANT | CEREMONIAL" -- reusing the exact same closed vocabularies
+// AuraMomentSource/PlanningMode already define, not a third copy.
+const SOURCE_VALUES = new Set(['PLAN', 'MUHURTHAM']);
+const PLANNING_MODE_VALUES = new Set(['EVERYDAY', 'IMPORTANT', 'CEREMONIAL']);
 
 type FieldSchema =
   | { type: 'enum'; values: Set<string> }
@@ -122,6 +128,8 @@ type FieldSchema =
 const scopeField: FieldSchema = { type: 'enum', values: SCOPE_VALUES };
 const activityIdField: FieldSchema = { type: 'activityId' };
 const durationField: FieldSchema = { type: 'number', min: 0, max: 120_000 };
+const sourceField: FieldSchema = { type: 'enum', values: SOURCE_VALUES };
+const planningModeField: FieldSchema = { type: 'enum', values: PLANNING_MODE_VALUES };
 
 const EVENT_METADATA_SCHEMAS: Record<ProductEventName, Record<string, FieldSchema>> = {
   AURA_HOME_VIEWED: {},
@@ -157,10 +165,13 @@ const EVENT_METADATA_SCHEMAS: Record<ProductEventName, Record<string, FieldSchem
   AURA_MOMENT_CREATED: {
     scope: scopeField,
     activityId: activityIdField,
+    source: sourceField,
+    planningMode: planningModeField,
   },
   AURA_MOMENT_SHARE_INITIATED: {
     scope: scopeField,
     method: { type: 'enum', values: SHARE_METHOD_VALUES },
+    planningMode: planningModeField,
   },
   AURA_MOMENT_OPENED: {
     scope: scopeField,

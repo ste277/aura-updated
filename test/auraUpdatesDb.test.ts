@@ -36,6 +36,7 @@ async function main() {
   let tokenOwnerB = '';
   const baseInput = {
     activityId: 'griha-pravesh',
+    source: 'MUHURTHAM' as const,
     activityTitle: 'Griha Pravesh',
     activityIcon: '🏡',
     startAt: new Date('2026-10-18T04:42:00.000Z'),
@@ -113,6 +114,7 @@ async function main() {
       ownerUserId: ownerA.id,
       publicToken: tokenReplacement,
       scope: 'SHARED',
+      source: 'MUHURTHAM',
       activityId: originalMoment.activityId,
       activityTitle: originalMoment.activityTitle,
       activityIcon: originalMoment.activityIcon,

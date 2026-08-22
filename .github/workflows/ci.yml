@@ -41,6 +41,8 @@ jobs:
         run: npx ts-node test/windowOverlap.test.ts
       - name: Run day activity suggestions test
         run: npx ts-node test/dayActivitySuggestions.test.ts
+      - name: Run everyday activity catalog test
+        run: npx ts-node test/activityCatalogEveryday.test.ts
       - name: Run Muhurtham Finder test
         run: npx ts-node test/muhurthamFinder.test.ts
       - name: Run Muhurtham search API validation test
@@ -55,6 +57,8 @@ jobs:
         run: npx ts-node test/savedPersonNatalContext.test.ts
       - name: Run Shared Muhurtham test
         run: npx ts-node test/sharedMuhurtham.test.ts
+      - name: Run everyday shared timing fit test
+        run: npx ts-node test/everydayTimingFit.test.ts
       - name: Run score engine test
         run: npx ts-node test/scoreEngine.test.ts
       - name: Run Aura Moment alternatives (rescheduling) test

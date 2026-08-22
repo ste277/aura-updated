@@ -43,11 +43,41 @@ import {
  */
 export type ActivityStatus = 'CANONICAL' | 'AMBIGUOUS' | 'LEGACY_ALIAS';
 
+/**
+ * Product Structure V2 -- the small "what can the PRODUCT do with this
+ * activity" layer the brief asks for, kept deliberately separate from
+ * `muhurta` (MuhurtaClassification is a Muhurta-domain/engine concept;
+ * `experience` is a Plan/Moment/UI concept that happens to be derivable
+ * from it). Every field here is computed from existing metadata in
+ * buildActivityDefinition() below -- nothing here is a second source of
+ * truth for family/intent/socialMode/significance/evaluationDepth.
+ */
+export type PlanningMode = 'EVERYDAY' | 'IMPORTANT' | 'CEREMONIAL';
+
+export interface ActivityExperience {
+  /** Whether this activity is offered as a Plan/Muhurtham RESULT the user
+   * can turn into an AuraMoment (brief section 3: "An Aura Moment is a
+   * selected time the user intends to do/share"). False for the original
+   * task-1..7 daily-assistant playbook cards (Home's contextual "what to do
+   * with this window" suggestions, never searched for or shared as an
+   * occasion) -- true for everything in the actual activity catalog
+   * (EXTENDED_ACTIVITY_CATALOG), including every new everyday activity. */
+  momentEligible: boolean;
+  /** CEREMONIAL when evaluationDepth is CEREMONIAL; IMPORTANT when DEEP;
+   * EVERYDAY when LIGHT or STANDARD -- exactly the depth tiers Muhurtham
+   * Finder eligibility (muhurthamFinder.ts's isMuhurthamEligible) already
+   * keys off, so this can never drift from what Finder actually exposes. */
+  planningMode: PlanningMode;
+  defaultDurationMinutes?: number;
+  suggestedDurations?: number[];
+}
+
 export interface ActivityDefinition {
   id: string;
   category: ActivityCategory;
   muhurta: MuhurtaClassification;
   socialMode: SocialMode;
+  experience: ActivityExperience;
   aliases: string[];
   status: ActivityStatus;
   /** Present when status is not CANONICAL — explains the ambiguity or why
@@ -91,7 +121,29 @@ type ActivityMetadataInput = {
   status?: ActivityStatus;
   notes?: string;
   legacyBroadIntent?: boolean;
+  /** A curated set of durations this activity is commonly done in, offered
+   * as quick-pick chips in Plan instead of a bare duration input. Omit to
+   * fall back to a single defaultDurationMinutes (or the generic default). */
+  suggestedDurations?: number[];
 };
+
+/** planningMode is entirely a function of evaluationDepth -- see
+ * ActivityExperience's own doc comment for why these three tiers exactly
+ * mirror the depth tiers Muhurtham Finder eligibility already keys off. */
+function planningModeForDepth(evaluationDepth: MuhurtaClassification['evaluationDepth']): PlanningMode {
+  if (evaluationDepth === 'CEREMONIAL') return 'CEREMONIAL';
+  if (evaluationDepth === 'DEEP') return 'IMPORTANT';
+  return 'EVERYDAY';
+}
+
+/** task-1..7 are Home's daily-assistant playbook cards (see
+ * getPersonalizedTasks() in personalizedTasks.ts) -- contextual "what to do
+ * with this window" nudges, never searched for via Plan's activity picker
+ * or turned into a shareable occasion. Everything else in the catalog
+ * (EXTENDED_ACTIVITY_CATALOG) is momentEligible. */
+function isMomentEligible(activityId: string): boolean {
+  return !activityId.startsWith('task-');
+}
 
 const ACTIVITY_METADATA: Record<string, ActivityMetadataInput> = {
   // -- ACTIVITY_CATALOG (task-1..task-7) --
@@ -287,6 +339,36 @@ const ACTIVITY_METADATA: Record<string, ActivityMetadataInput> = {
     socialMode: 'FAMILY',
     notes: 'No existing family-level rule data legitimately targets a home-entry ceremony (HOME has no MuhurtaRulePack base -- see muhurtaRulePacks.ts). Tithi/Nakshatra coverage is honestly MISSING rather than borrowed from an unrelated family (e.g. ADMIN); resolves to PARTIAL support and is hidden from Muhurtham Finder until dedicated data is added.',
   },
+
+  // -- Product Structure V2: everyday moments -- every entry below is
+  // LIGHT or STANDARD depth, NEVER DEEP/CEREMONIAL, which is what actually
+  // keeps them out of Muhurtham Finder's SUPPORTED_MUHURTHAM_ACTIVITY_IDS
+  // (isMuhurthamEligible requires DEEP/CEREMONIAL -- see
+  // test/activityCatalogEveryday.test.ts). timingSensitivity.start is
+  // MEDIUM (not HIGH) for the STANDARD social/family/celebration entries --
+  // catching people at a good time matters somewhat, but not with a
+  // ceremonial occasion's commencement-instant precision -- and HIGH only
+  // for road-trip/day-trip, which (like start-journey) genuinely have a
+  // "departure moment."
+  'date-night': { family: 'RELATIONSHIP', intent: 'DATE', evaluationDepth: 'STANDARD', timingSensitivity: { start: 'MEDIUM', duration: 'LOW', end: 'LOW' }, socialMode: 'PAIR', suggestedDurations: [90, 120, 150] },
+  'dinner-date': { family: 'RELATIONSHIP', intent: 'DATE', evaluationDepth: 'STANDARD', timingSensitivity: { start: 'MEDIUM', duration: 'LOW', end: 'LOW' }, socialMode: 'PAIR', suggestedDurations: [60, 90, 120] },
+  'coffee-tea': { family: 'SOCIAL', intent: 'CASUAL_HANGOUT', evaluationDepth: 'LIGHT', timingSensitivity: { start: 'LOW', duration: 'LOW', end: 'LOW' }, socialMode: 'ANY', suggestedDurations: [30, 45, 60] },
+  'movie-night': { family: 'SOCIAL', intent: 'CASUAL_HANGOUT', evaluationDepth: 'LIGHT', timingSensitivity: { start: 'LOW', duration: 'LOW', end: 'LOW' }, socialMode: 'ANY', suggestedDurations: [120, 150, 180] },
+  'walk-together': { family: 'SOCIAL', intent: 'CASUAL_HANGOUT', evaluationDepth: 'LIGHT', timingSensitivity: { start: 'LOW', duration: 'LOW', end: 'LOW' }, socialMode: 'ANY', suggestedDurations: [30, 45, 60] },
+  'family-dinner': { family: 'SOCIAL', intent: 'FAMILY_GATHERING', evaluationDepth: 'STANDARD', timingSensitivity: { start: 'MEDIUM', duration: 'LOW', end: 'LOW' }, socialMode: 'FAMILY', suggestedDurations: [60, 90, 120] },
+  'family-outing': { family: 'SOCIAL', intent: 'FAMILY_GATHERING', evaluationDepth: 'STANDARD', timingSensitivity: { start: 'MEDIUM', duration: 'LOW', end: 'LOW' }, socialMode: 'FAMILY', suggestedDurations: [120, 180, 240] },
+  'visit-family': { family: 'SOCIAL', intent: 'FAMILY_GATHERING', evaluationDepth: 'STANDARD', timingSensitivity: { start: 'MEDIUM', duration: 'LOW', end: 'LOW' }, socialMode: 'FAMILY', suggestedDurations: [60, 90, 120] },
+  'family-movie-night': { family: 'SOCIAL', intent: 'FAMILY_GATHERING', evaluationDepth: 'LIGHT', timingSensitivity: { start: 'LOW', duration: 'LOW', end: 'LOW' }, socialMode: 'FAMILY', suggestedDurations: [120, 150, 180] },
+  'dinner-with-friends': { family: 'SOCIAL', intent: 'CASUAL_HANGOUT', evaluationDepth: 'STANDARD', timingSensitivity: { start: 'MEDIUM', duration: 'LOW', end: 'LOW' }, socialMode: 'GROUP', suggestedDurations: [90, 120, 150] },
+  'catch-up': { family: 'SOCIAL', intent: 'CASUAL_HANGOUT', evaluationDepth: 'LIGHT', timingSensitivity: { start: 'LOW', duration: 'LOW', end: 'LOW' }, socialMode: 'PAIR', suggestedDurations: [45, 60, 90] },
+  'game-night': { family: 'SOCIAL', intent: 'CASUAL_HANGOUT', evaluationDepth: 'LIGHT', timingSensitivity: { start: 'LOW', duration: 'LOW', end: 'LOW' }, socialMode: 'GROUP', suggestedDurations: [120, 150, 180] },
+  'birthday-party': { family: 'SOCIAL', intent: 'CELEBRATION', evaluationDepth: 'STANDARD', timingSensitivity: { start: 'MEDIUM', duration: 'LOW', end: 'LOW' }, socialMode: 'GROUP', suggestedDurations: [120, 180, 240] },
+  'anniversary-dinner': { family: 'RELATIONSHIP', intent: 'DATE', evaluationDepth: 'STANDARD', timingSensitivity: { start: 'MEDIUM', duration: 'LOW', end: 'LOW' }, socialMode: 'PAIR', suggestedDurations: [90, 120, 150] },
+  'celebration-dinner': { family: 'SOCIAL', intent: 'CELEBRATION', evaluationDepth: 'STANDARD', timingSensitivity: { start: 'MEDIUM', duration: 'LOW', end: 'LOW' }, socialMode: 'GROUP', suggestedDurations: [90, 120, 150] },
+  'road-trip': { family: 'TRAVEL', intent: 'OUTING', evaluationDepth: 'STANDARD', timingSensitivity: { start: 'HIGH', duration: 'MEDIUM', end: 'LOW' }, socialMode: 'ANY', suggestedDurations: [240, 360, 480], notes: 'Distinct from start-journey (IMPORTANT/DEEP): a casual weekend road trip, not an important journey or relocation.' },
+  'day-trip': { family: 'TRAVEL', intent: 'OUTING', evaluationDepth: 'STANDARD', timingSensitivity: { start: 'HIGH', duration: 'MEDIUM', end: 'LOW' }, socialMode: 'ANY', suggestedDurations: [240, 300, 360] },
+  picnic: { family: 'TRAVEL', intent: 'OUTING', evaluationDepth: 'LIGHT', timingSensitivity: { start: 'LOW', duration: 'LOW', end: 'LOW' }, socialMode: 'ANY', suggestedDurations: [90, 120, 150] },
+  'shopping-trip': { family: 'TRAVEL', intent: 'OUTING', evaluationDepth: 'LIGHT', timingSensitivity: { start: 'LOW', duration: 'LOW', end: 'LOW' }, socialMode: 'ANY', suggestedDurations: [60, 90, 120] },
 };
 
 /** Best-effort metadata for a catalog activity with no explicit entry above
@@ -337,6 +419,12 @@ function buildActivityDefinition(activity: ActivityProfile): ActivityDefinition 
       significance: metadata.significance ?? activity.significance,
       evaluationDepth: metadata.evaluationDepth,
       timingSensitivity: metadata.timingSensitivity,
+    },
+    experience: {
+      momentEligible: isMomentEligible(activity.id),
+      planningMode: planningModeForDepth(metadata.evaluationDepth),
+      defaultDurationMinutes: activity.defaultDurationMinutes,
+      suggestedDurations: metadata.suggestedDurations,
     },
   };
 }
@@ -429,6 +517,13 @@ export function resolveActivityDefinition(taskTitle: string): ActivityResolution
       aliases: [],
       socialMode: 'ANY',
       status: 'CANONICAL',
+      experience: {
+        // Free-text fallback activities were never resolved from the
+        // catalog, so there's no known occasion to turn into an AuraMoment
+        // -- momentEligible false, distinct from every real catalog id.
+        momentEligible: false,
+        planningMode: 'EVERYDAY',
+      },
       muhurta: {
         family,
         intent,

@@ -53,12 +53,21 @@ interface HomeDashboardProps {
   onNextShiftClick?: () => void;
   onPlanClick?: (activity?: string) => void;
   onInsightsClick?: () => void;
+  /** Product Structure V2 (brief section 25) -- the bell is now the primary
+   * Aura Updates entry point (was window-alert settings; that moved to You
+   * -> Preferences). */
   onNotificationsClick?: () => void;
+  /** Product Structure V2 (brief section 25) -- reuses Aura Updates V1's
+   * unreadCount exactly, no new notification state. Omitted or 0 renders no
+   * badge. */
+  unreadUpdatesCount?: number;
   onPanchangClick?: () => void;
-  /** Aura Updates V1 (brief section 7) -- already prioritized/sorted by
-   * summarizeAuraUpdates(); this component only ever shows the first 2-3.
-   * Omitted or empty renders no section at all -- never an empty state. */
-  momentUpdates?: AuraUpdate[];
+  /** Product Structure V2 (brief section 27): now the SAME already-sorted
+   * list Aura Updates V1 produces, capped to just its single most
+   * actionable/most-recent entry (updates[0]) -- one card, not up to 3, so
+   * Home doesn't duplicate the bell's own Updates screen. Omitted or
+   * undefined renders no section at all -- never an empty state. */
+  topMomentUpdate?: AuraUpdate;
   /** Opens the moment's own public link (View / View moment) AND marks its
    * response seen -- both happen together, see page.tsx. */
   onViewMomentUpdate?: (momentToken: string) => void;
@@ -144,17 +153,6 @@ function greeting() {
   return 'Good Morning';
 }
 
-/** Brief section 7: "Maximum: 2-3 recent/actionable cards" -- Home is a
- * teaser into Shared Moments, never the full list. */
-export const MAX_HOME_MOMENT_CARDS = 3;
-
-/** Pure slice, exported for unit testing without rendering the component.
- * summarizeAuraUpdates() (lib/auraUpdates.ts) already did the actual
- * priority sort (actionable first, then most recent) -- this only ever caps
- * how many of that already-ordered list Home is allowed to show. */
-export function selectHomeMomentCards(updates: AuraUpdate[]): AuraUpdate[] {
-  return updates.slice(0, MAX_HOME_MOMENT_CARDS);
-}
 
 function formatUpdateDateTime(iso: string) {
   const date = new Date(iso);
@@ -221,8 +219,9 @@ export function HomeDashboard({
   onPlanClick,
   onInsightsClick,
   onNotificationsClick,
+  unreadUpdatesCount = 0,
   onPanchangClick,
-  momentUpdates = [],
+  topMomentUpdate,
   onViewMomentUpdate,
   onFindAnotherTimeForMoment,
 }: HomeDashboardProps) {
@@ -426,8 +425,12 @@ export function HomeDashboard({
           </h1>
           <p style={{ fontSize: 15, color: '#aab7d2', margin: '7px 0 0' }}>{todayLabel()}</p>
         </div>
-        <button type="button" onClick={onNotificationsClick} aria-label="Notification settings" style={topActionStyle}>
-          <span style={{ position: 'absolute', right: 7, top: 6, width: 8, height: 8, borderRadius: 8, background: '#4ade80' }} />
+        <button type="button" onClick={onNotificationsClick} aria-label="Updates" style={topActionStyle}>
+          {unreadUpdatesCount > 0 && (
+            <span style={{ position: 'absolute', right: 3, top: 2, minWidth: 16, height: 16, borderRadius: 8, background: '#fb7185', color: '#020617', fontSize: 10, fontWeight: 900, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '0 4px' }}>
+              {unreadUpdatesCount > 9 ? '9+' : unreadUpdatesCount}
+            </span>
+          )}
           <BellIcon />
         </button>
       </header>
@@ -510,33 +513,37 @@ export function HomeDashboard({
         </div>
       </section>
 
-      {momentUpdates.length > 0 && (
+      {/* Product Structure V2 (brief section 27): ONE highly actionable
+       * card, not up to 3 -- the bell (now the Updates inbox) already shows
+       * the full list, so Home would otherwise duplicate it entirely.
+       * topMomentUpdate is already the most-actionable/most-recent entry
+       * (summarizeAuraUpdates's own sort), so no extra selection logic. */}
+      {topMomentUpdate && (
         <section>
           <SectionHeader label="Your Moments" />
-          <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
-            {selectHomeMomentCards(momentUpdates).map((update) => {
-              const { day, time } = formatUpdateDateTime(update.eventStartAt);
-              const isAccepted = update.type === 'MOMENT_ACCEPTED';
-              return (
-                <div key={update.id} style={{ ...panelStyle, padding: 16 }}>
-                  <div style={{ fontSize: 13, fontWeight: 800, color: isAccepted ? '#4ade80' : '#facc15' }}>
-                    {isAccepted ? `❤️ ${update.recipientDisplayName ?? 'They'} is in` : `↻ ${update.recipientDisplayName ?? 'They'} want${update.recipientDisplayName ? 's' : ''} another time`}
-                  </div>
-                  <div style={{ marginTop: 8, fontSize: 14, fontWeight: 750, color: '#f8fafc' }}>{update.activityTitle}</div>
-                  <div style={{ marginTop: 3, fontSize: 12, color: '#aab7d2' }}>
-                    {isAccepted ? `${day} · ${time}` : `Prefers: ${PREFERENCE_TEXT[update.preference ?? 'NO_PREFERENCE']}`}
-                  </div>
-                  <button
-                    type="button"
-                    onClick={() => (isAccepted ? onViewMomentUpdate?.(update.momentToken) : onFindAnotherTimeForMoment?.(update.momentToken))}
-                    style={{ ...outlineButtonStyle, width: 'auto', marginTop: 10, padding: '8px 16px' }}
-                  >
-                    {isAccepted ? 'View' : 'Find another time'}
-                  </button>
+          {(() => {
+            const update = topMomentUpdate;
+            const { day, time } = formatUpdateDateTime(update.eventStartAt);
+            const isAccepted = update.type === 'MOMENT_ACCEPTED';
+            return (
+              <div style={{ ...panelStyle, padding: 16 }}>
+                <div style={{ fontSize: 13, fontWeight: 800, color: isAccepted ? '#4ade80' : '#facc15' }}>
+                  {isAccepted ? `❤️ ${update.recipientDisplayName ?? 'They'} is in` : `↻ ${update.recipientDisplayName ?? 'They'} want${update.recipientDisplayName ? 's' : ''} another time`}
                 </div>
-              );
-            })}
-          </div>
+                <div style={{ marginTop: 8, fontSize: 14, fontWeight: 750, color: '#f8fafc' }}>{update.activityTitle}</div>
+                <div style={{ marginTop: 3, fontSize: 12, color: '#aab7d2' }}>
+                  {isAccepted ? `${day} · ${time}` : `Prefers: ${PREFERENCE_TEXT[update.preference ?? 'NO_PREFERENCE']}`}
+                </div>
+                <button
+                  type="button"
+                  onClick={() => (isAccepted ? onViewMomentUpdate?.(update.momentToken) : onFindAnotherTimeForMoment?.(update.momentToken))}
+                  style={{ ...outlineButtonStyle, width: 'auto', marginTop: 10, padding: '8px 16px' }}
+                >
+                  {isAccepted ? 'View' : 'Find another time'}
+                </button>
+              </div>
+            );
+          })()}
         </section>
       )}
 

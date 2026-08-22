@@ -188,6 +188,10 @@ export async function deleteSavedPerson(ownerUserId: string, personId: string): 
 }
 
 export type AuraMomentScope = 'GENERAL' | 'PERSONAL' | 'SHARED';
+/** Product Structure V2 -- where the selected timing came from. Every
+ * pre-V2 row is backfilled to 'MUHURTHAM' (see migration 0020's doc
+ * comment) since that was the only creation path until this PR. */
+export type AuraMomentSource = 'PLAN' | 'MUHURTHAM';
 export type AuraMomentStatus = 'ACTIVE' | 'REVOKED';
 export type AuraMomentResponseState = 'ACCEPTED' | 'ANOTHER_TIME';
 /** Structured recipient preference (Aura Moment Rescheduling), only ever
@@ -200,6 +204,7 @@ export interface AuraMoment {
   ownerUserId: string;
   publicToken: string;
   scope: AuraMomentScope;
+  source: AuraMomentSource;
   activityId: string;
   activityTitle: string;
   activityIcon: string | null;
@@ -237,6 +242,7 @@ export interface CreateAuraMomentInput {
   ownerUserId: string;
   publicToken: string;
   scope: AuraMomentScope;
+  source: AuraMomentSource;
   activityId: string;
   activityTitle: string;
   activityIcon: string | null;
@@ -262,16 +268,17 @@ export async function createAuraMoment(input: CreateAuraMomentInput): Promise<Au
   const id = randomUUID();
   const result = await pool.query(
     `INSERT INTO "AuraMoment"
-       (id, "ownerUserId", "publicToken", scope, "activityId", "activityTitle", "activityIcon",
+       (id, "ownerUserId", "publicToken", scope, source, "activityId", "activityTitle", "activityIcon",
         "startAt", "endAt", timezone, "savedPersonId", "sharedPersonDisplayName", "senderDisplayName",
         "ratingLabel", "explanationSnapshot", "expiresAt", "previousMomentId")
-     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17)
+     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18)
      RETURNING *`,
     [
       id,
       input.ownerUserId,
       input.publicToken,
       input.scope,
+      input.source,
       input.activityId,
       input.activityTitle,
       input.activityIcon,

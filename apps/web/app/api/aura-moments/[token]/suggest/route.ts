@@ -5,7 +5,7 @@ import { buildPersonalMuhurtaContextForUser } from '../../../../../lib/natalCont
 import { getSavedPersonNatalContext } from '../../../../../lib/savedPersonNatalContext';
 import { findAuraMomentAlternatives } from '../../../../../lib/auraMomentAlternatives';
 import { isValidAlternativeIndex } from '../../../../../lib/auraMomentRequest';
-import { buildMomentShareUrl, defaultExpiresAt, explanationSnapshotForScope, generatePublicMomentToken } from '../../../../../lib/auraMoments';
+import { buildMomentShareUrl, defaultExpiresAt, explanationSnapshotFor, generatePublicMomentToken } from '../../../../../lib/auraMoments';
 import { parseJsonObject } from '../../../../../lib/request';
 import { resolveTzOffsetMinutes } from '../../../../../lib/timezone';
 import { DailyAssistantContext } from '../../../../../../../packages/recommendation/src/dailyAssistant';
@@ -72,6 +72,12 @@ export async function POST(req: NextRequest, { params }: { params: { token: stri
     ownerUserId: session.userId,
     publicToken: generatePublicMomentToken(),
     scope: 'SHARED',
+    // A suggested alternative always came through this reschedule flow --
+    // itself only ever reachable via findAuraMomentAlternatives(), which
+    // (Product Structure V2) only resolves for Muhurtham-eligible
+    // activities. Preserving original.source anyway (rather than hardcoding
+    // MUHURTHAM) keeps this correct if that constraint ever loosens.
+    source: original.source,
     // Preserve the exact occasion (brief section 10) -- never broadened to
     // a generic family, always the original's own canonical activity.
     activityId: original.activityId,
@@ -84,7 +90,7 @@ export async function POST(req: NextRequest, { params }: { params: { token: stri
     sharedPersonDisplayName: original.sharedPersonDisplayName,
     senderDisplayName: original.senderDisplayName,
     ratingLabel: candidate.ratingLabel,
-    explanationSnapshot: explanationSnapshotForScope('SHARED'),
+    explanationSnapshot: explanationSnapshotFor(original.activityId, 'SHARED'),
     expiresAt: defaultExpiresAt(new Date(candidate.endAt)),
     previousMomentId: original.id,
   });

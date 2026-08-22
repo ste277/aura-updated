@@ -1,5 +1,9 @@
-import { isSupportedMuhurthamActivity, SUPPORTED_MUHURTHAM_ACTIVITY_IDS, MuhurthamRating, SharedMuhurthamRating } from '../../../packages/recommendation/src/muhurthamFinder';
-import { AuraMomentAlternativePreference, AuraMomentResponseState, AuraMomentScope } from './db';
+import { MuhurthamRating, SharedMuhurthamRating } from '../../../packages/recommendation/src/muhurthamFinder';
+import { EverydayTimingRating } from '../../../packages/recommendation/src/everydayTimingFit';
+import { TimingCandidateLabel } from '../../../packages/recommendation/src/timingSearch';
+import { FULL_ACTIVITY_CATALOG } from '../../../packages/recommendation/src/personalizedTasks';
+import { getActivityDefinition } from '../../../packages/recommendation/src/activityDefinitions';
+import { AuraMomentAlternativePreference, AuraMomentResponseState, AuraMomentScope, AuraMomentSource } from './db';
 import { MAX_ALTERNATIVES } from './auraMomentAlternatives';
 
 /**
@@ -21,20 +25,28 @@ import { MAX_ALTERNATIVES } from './auraMomentAlternatives';
  */
 
 const VALID_SCOPES = new Set<AuraMomentScope>(['GENERAL', 'PERSONAL', 'SHARED']);
+const VALID_SOURCES = new Set<AuraMomentSource>(['PLAN', 'MUHURTHAM']);
 const MIN_DURATION_MINUTES = 15;
 const MAX_DURATION_MINUTES = 360;
 
-/** The union of every rating vocabulary Muhurtham Finder's three scopes can
- * produce -- validated as a closed set (not just "any string") so a public
- * moment can never display an arbitrary client-supplied label, even though
- * the actual astrological content of ratingLabel is not itself sensitive. */
-const VALID_RATING_LABELS = new Set<MuhurthamRating | SharedMuhurthamRating>([
+/** The union of every rating vocabulary ANY moment source can produce --
+ * Muhurtham Finder's three scopes, Plan's own TimingCandidateLabel (a
+ * solo/unspecified-participants everyday result), and everyday shared
+ * timing's own vocabulary (findEverydaySharedTiming(), never the ceremonial
+ * "Muhurtham" language). Validated as a closed set (not just "any string")
+ * so a public moment can never display an arbitrary client-supplied label,
+ * even though the actual astrological content of ratingLabel is not itself
+ * sensitive. */
+const VALID_RATING_LABELS = new Set<MuhurthamRating | SharedMuhurthamRating | TimingCandidateLabel | EverydayTimingRating>([
   'EXCELLENT', 'STRONG', 'FAVORABLE', 'ACCEPTABLE',
   'EXCELLENT_SHARED_FIT', 'STRONG_SHARED_FIT', 'GOOD_SHARED_FIT', 'MIXED_SHARED_FIT',
+  'VERY_GOOD', 'GOOD', 'USABLE', 'CAUTION',
+  'STRONG_TOGETHER_FIT', 'GOOD_TOGETHER_FIT', 'EASY_TOGETHER_FIT',
 ]);
 
 export interface AuraMomentCreateInput {
   scope: AuraMomentScope;
+  source: AuraMomentSource;
   activityId: string;
   startAt: Date;
   endAt: Date;
@@ -59,9 +71,24 @@ export function buildAuraMomentCreateRequest(body: Record<string, unknown>): Aur
   }
   const scope = rawScope as AuraMomentScope;
 
+  const rawSource = typeof body.source === 'string' ? body.source : '';
+  if (!VALID_SOURCES.has(rawSource as AuraMomentSource)) {
+    return { ok: false, error: 'source must be PLAN or MUHURTHAM.', status: 400 };
+  }
+  const source = rawSource as AuraMomentSource;
+
+  // Product Structure V2: generalized beyond Muhurtham Finder's own
+  // eligibility list (isSupportedMuhurthamActivity) -- a Moment is "a
+  // selected time the user intends to do/share" for ANY momentEligible
+  // catalog activity, from either source. Muhurtham Finder's own strictness
+  // is untouched (it lives entirely in SUPPORTED_MUHURTHAM_ACTIVITY_IDS,
+  // which still gates the FINDER's own search results, not what can become
+  // a Moment afterward).
   const activityId = typeof body.activityId === 'string' ? body.activityId.trim() : '';
-  if (!activityId || !isSupportedMuhurthamActivity(activityId)) {
-    return { ok: false, error: `activityId must be one of: ${SUPPORTED_MUHURTHAM_ACTIVITY_IDS.join(', ')}.`, status: 400 };
+  const activity = FULL_ACTIVITY_CATALOG.find((a) => a.id === activityId);
+  const definition = activity ? getActivityDefinition(activity) : undefined;
+  if (!activity || !definition?.experience.momentEligible) {
+    return { ok: false, error: 'activityId must be a valid, moment-eligible catalog activity.', status: 400 };
   }
 
   if (!isIsoDateString(body.startAt) || !isIsoDateString(body.endAt)) {
@@ -90,7 +117,7 @@ export function buildAuraMomentCreateRequest(body: Record<string, unknown>): Aur
     }
   }
 
-  return { ok: true, input: { scope, activityId, startAt, endAt, ratingLabel, savedPersonId } };
+  return { ok: true, input: { scope, source, activityId, startAt, endAt, ratingLabel, savedPersonId } };
 }
 
 const VALID_RESPONSE_VALUES = new Set<AuraMomentResponseState>(['ACCEPTED', 'ANOTHER_TIME']);

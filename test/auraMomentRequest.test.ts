@@ -9,6 +9,7 @@ function check(label: string, condition: boolean) {
 
 const validGeneralBody = {
   scope: 'GENERAL',
+  source: 'MUHURTHAM',
   activityId: 'start-journey',
   startAt: '2026-10-18T04:42:00.000Z',
   endAt: '2026-10-18T05:42:00.000Z',
@@ -30,7 +31,7 @@ if (validResult.ok) {
 const validShared = buildAuraMomentCreateRequest({ ...validGeneralBody, scope: 'SHARED', ratingLabel: 'STRONG_SHARED_FIT', savedPersonId: 'person-123' });
 check('A valid SHARED request with savedPersonId is accepted', validShared.ok === true && validShared.ok && validShared.input.savedPersonId === 'person-123');
 
-const noRatingLabel = buildAuraMomentCreateRequest({ scope: 'GENERAL', activityId: 'start-journey', startAt: validGeneralBody.startAt, endAt: validGeneralBody.endAt });
+const noRatingLabel = buildAuraMomentCreateRequest({ scope: 'GENERAL', source: 'MUHURTHAM', activityId: 'start-journey', startAt: validGeneralBody.startAt, endAt: validGeneralBody.endAt });
 check('ratingLabel is optional -- omitting it is accepted, resolves to null', noRatingLabel.ok === true && noRatingLabel.ok && noRatingLabel.input.ratingLabel === null);
 
 // ============================================================
@@ -44,12 +45,25 @@ check('An invalid scope is rejected with 400', (() => {
 check('Missing scope is rejected', buildAuraMomentCreateRequest({ activityId: 'start-journey', startAt: validGeneralBody.startAt, endAt: validGeneralBody.endAt }).ok === false);
 
 // ============================================================
-// ACTIVITY (must reuse Muhurtham Finder's own eligibility, not a new list)
+// ACTIVITY (Product Structure V2: generalized to any momentEligible
+// catalog activity, not just Muhurtham Finder's own eligibility list --
+// see auraMomentRequest.ts's own doc comment)
 // ============================================================
 
-check('An unsupported activityId is rejected', buildAuraMomentCreateRequest({ ...validGeneralBody, activityId: 'tea-break' }).ok === false);
+check('A momentEligible everyday activity (tea-break, not Muhurtham-eligible) is now accepted', buildAuraMomentCreateRequest({ ...validGeneralBody, activityId: 'tea-break' }).ok === true);
+check('A momentEligible everyday activity added in this PR (date-night) is accepted', buildAuraMomentCreateRequest({ ...validGeneralBody, activityId: 'date-night' }).ok === true);
+check('A non-momentEligible activity (task-1, a Home daily-assistant playbook card) is rejected', buildAuraMomentCreateRequest({ ...validGeneralBody, activityId: 'task-1' }).ok === false);
 check('A missing activityId is rejected', buildAuraMomentCreateRequest({ ...validGeneralBody, activityId: undefined }).ok === false);
 check('An unknown activityId is rejected', buildAuraMomentCreateRequest({ ...validGeneralBody, activityId: 'not-a-real-activity' }).ok === false);
+
+// ============================================================
+// SOURCE (Product Structure V2 -- PLAN | MUHURTHAM)
+// ============================================================
+
+check('source PLAN is accepted', buildAuraMomentCreateRequest({ ...validGeneralBody, source: 'PLAN' }).ok === true);
+check('source MUHURTHAM is accepted', buildAuraMomentCreateRequest({ ...validGeneralBody, source: 'MUHURTHAM' }).ok === true);
+check('An invalid source is rejected', buildAuraMomentCreateRequest({ ...validGeneralBody, source: 'ASK_AURA' }).ok === false);
+check('A missing source is rejected', buildAuraMomentCreateRequest({ ...validGeneralBody, source: undefined }).ok === false);
 
 // ============================================================
 // START/END

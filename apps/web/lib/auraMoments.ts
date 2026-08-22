@@ -1,6 +1,7 @@
 import { randomBytes } from 'crypto';
 import type { NextRequest } from 'next/server';
 import { AuraMoment, AuraMomentAlternativePreference, AuraMomentScope, AuraMomentResponseState, getAuraMomentByToken, hasSuccessorMoment } from './db';
+import { getActivityDefinition, PlanningMode } from '../../../packages/recommendation/src/activityDefinitions';
 
 /**
  * Aura Moment Sharing V1 -- domain logic for turning a selected Muhurtham
@@ -48,20 +49,35 @@ export function buildMomentShareUrl(req: NextRequest, publicToken: string): stri
 
 /**
  * Section 3's "short pre-generated explanation snapshot" -- always
- * server-templated from `scope`, NEVER accepted as free text from the
- * client (no LLM, no arbitrary public-facing copy injection). Section 17:
- * "keep public copy relationship-neutral" -- none of these mention
- * "partner" specifically, since SavedPerson already spans
- * PARTNER/SPOUSE/FAMILY/FRIEND/OTHER.
+ * server-templated from `scope` (+ Product Structure V2: planningMode),
+ * NEVER accepted as free text from the client (no LLM, no arbitrary
+ * public-facing copy injection). Section 17/18: "keep public copy
+ * relationship-neutral" and "source-neutral" -- none of these mention
+ * "partner" specifically (SavedPerson already spans PARTNER/SPOUSE/FAMILY/
+ * FRIEND/OTHER), and none say "Muhurtham" for an EVERYDAY activity (brief
+ * section 14: "Do not call this a Muhurtham").
  */
-const EXPLANATION_BY_SCOPE: Record<AuraMomentScope, string> = {
+const EXPLANATION_BY_SCOPE_EVERYDAY: Record<AuraMomentScope, string> = {
+  GENERAL: 'Aura found a good moment for this.',
+  PERSONAL: 'Aura found a good moment for you.',
+  SHARED: 'Aura found a good moment for you both.',
+};
+
+const EXPLANATION_BY_SCOPE_CEREMONIAL: Record<AuraMomentScope, string> = {
   GENERAL: 'Aura found this to be a favorable time.',
   PERSONAL: 'Aura found this timing to work well for you.',
   SHARED: 'Aura found this timing to work well for both of you.',
 };
 
-export function explanationSnapshotForScope(scope: AuraMomentScope): string {
-  return EXPLANATION_BY_SCOPE[scope];
+/** planningMode is looked up from the activity catalog (never trusted from
+ * the client) -- CEREMONIAL/IMPORTANT keep the existing Muhurtham-style
+ * language, EVERYDAY gets warmer, non-astrological phrasing. An unknown
+ * activityId falls back to the everyday tier (the safer default -- no
+ * activity should ever be UPGRADED to ceremonial language it didn't earn). */
+export function explanationSnapshotFor(activityId: string, scope: AuraMomentScope): string {
+  const planningMode = getActivityDefinition(activityId)?.experience.planningMode ?? 'EVERYDAY';
+  const table = planningMode === 'EVERYDAY' ? EXPLANATION_BY_SCOPE_EVERYDAY : EXPLANATION_BY_SCOPE_CEREMONIAL;
+  return table[scope];
 }
 
 // ── Expiry policy (brief section 16) ────────────────────────────────────
@@ -105,6 +121,13 @@ export interface PublicAuraMoment {
   senderDisplayName: string | null;
   sharedPersonDisplayName: string | null;
   scope: AuraMomentScope;
+  /** Product Structure V2 -- looked up from the (public) activity catalog by
+   * activityId, never the internal AuraMomentSource. Lets the public page
+   * choose ceremonial vs. everyday framing (brief section 18: "Do not call
+   * this a Muhurtham" for an everyday activity) without exposing anything
+   * about WHERE the moment was created. Non-sensitive -- the same tier of
+   * detail as activityTitle itself. */
+  planningMode: PlanningMode;
   ratingLabel: string | null;
   explanationSnapshot: string | null;
   responseState: AuraMomentResponseState | null;
@@ -131,6 +154,7 @@ export function toPublicAuraMoment(moment: AuraMoment, hasSuccessor: boolean): P
     senderDisplayName: moment.senderDisplayName,
     sharedPersonDisplayName: moment.sharedPersonDisplayName,
     scope: moment.scope,
+    planningMode: getActivityDefinition(moment.activityId)?.experience.planningMode ?? 'EVERYDAY',
     ratingLabel: moment.ratingLabel,
     explanationSnapshot: moment.explanationSnapshot,
     responseState: moment.responseState,
