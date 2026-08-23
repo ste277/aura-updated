@@ -3,6 +3,7 @@ import { createMagicLinkToken, generateAuthCode, hashAuthCode, AUTH_CODE_TTL_MS 
 import { createAuthCode, countRecentAuthRequests } from '../../../../lib/db';
 import { sendMagicLinkEmail, isEmailConfigured } from '../../../../lib/email';
 import { readJsonObject } from '../../../../lib/request';
+import { verifyGuestStateToken } from '../../../../lib/guestState';
 
 // Sign-in requests allowed per email/IP per window — enough for a user who
 // mistypes twice, low enough to make email-bombing and code-guessing via
@@ -51,7 +52,20 @@ export async function POST(req: NextRequest) {
   const host = req.headers.get('x-forwarded-host') ?? req.headers.get('host') ?? req.nextUrl.host;
   const proto =
     req.headers.get('x-forwarded-proto') ?? (host.startsWith('localhost') ? 'http' : 'https');
-  const verifyUrl = `${proto}://${host}/api/auth/verify?token=${encodeURIComponent(token)}`;
+  let verifyUrl = `${proto}://${host}/api/auth/verify?token=${encodeURIComponent(token)}`;
+
+  // Recipient Conversion V1 (brief section 10/24) -- if this sign-in was
+  // triggered from the guest conversion flow at /find, thread the guest's
+  // already-minted, short-lived state token through the magic link so the
+  // GET /api/auth/verify click (which may land in a different browser
+  // context than where the guest searched, e.g. a mail app's in-app
+  // browser) can restore their result instead of dropping them on generic
+  // Home. Re-verified here (not just shape-checked) so a malformed or
+  // already-expired token is never embedded pointlessly.
+  const rawGuestStateToken = typeof body.guestStateToken === 'string' ? body.guestStateToken : '';
+  if (rawGuestStateToken && rawGuestStateToken.length <= 2000 && verifyGuestStateToken(rawGuestStateToken)) {
+    verifyUrl += `&guest=${encodeURIComponent(rawGuestStateToken)}`;
+  }
 
   // The 6-digit code travels in the same email as the link. It exists for
   // surfaces where following the link would land the session in the wrong

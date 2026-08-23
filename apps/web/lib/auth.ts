@@ -26,13 +26,17 @@ function base64url(input: Buffer | string): string {
   return Buffer.from(input).toString('base64url');
 }
 
-function sign(payload: object): string {
+// Exported so other token kinds (e.g. lib/guestState.ts's short-lived guest
+// search state) can reuse the same tamper-evident sign/verify primitive
+// instead of a second hand-rolled implementation. Still just "HMAC over a
+// base64url JSON body, with an `exp` the verifier checks" -- no new crypto.
+export function sign(payload: object): string {
   const body = base64url(JSON.stringify(payload));
   const sig = createHmac('sha256', SECRET).update(body).digest('base64url');
   return `${body}.${sig}`;
 }
 
-function verify<T>(token: string): T | null {
+export function verify<T>(token: string): T | null {
   const [body, sig] = token.split('.');
   if (!body || !sig) return null;
 

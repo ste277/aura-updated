@@ -16,7 +16,15 @@ export async function GET(req: NextRequest) {
   const user = await getOrCreateUserForAuth(payload.email);
   const sessionToken = createSessionToken(user.id, user.email);
 
-  const response = NextResponse.redirect(new URL('/', req.url));
+  // Recipient Conversion V1 (brief section 10/24) -- a guest search state
+  // token riding along on this link (see api/auth/request-link/route.ts)
+  // redirects to the restore step instead of generic Home. Not re-verified
+  // here -- /find itself verifies it before restoring anything; this route
+  // only decides WHERE to redirect.
+  const guestStateToken = req.nextUrl.searchParams.get('guest');
+  const redirectUrl = guestStateToken ? new URL(`/find?restore=${encodeURIComponent(guestStateToken)}`, req.url) : new URL('/', req.url);
+
+  const response = NextResponse.redirect(redirectUrl);
   response.cookies.set(SESSION_COOKIE_NAME, sessionToken, {
     httpOnly: true,
     secure: process.env.NODE_ENV === 'production',

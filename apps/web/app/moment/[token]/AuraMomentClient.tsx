@@ -211,12 +211,15 @@ export function AuraMomentClient({ token, initialOutcome }: AuraMomentClientProp
                   Add to calendar
                 </AnchorButton>
               }
+              conversionPrompt="Want to find a good moment for something of your own?"
+              momentToken={token}
             />
           ) : moment.responseState === 'ANOTHER_TIME' ? (
             <ResponseResult
               text={`✓ We'll let ${sender} know ${PREFERENCE_CONFIRMATION_CLAUSE[moment.responsePreference ?? 'NO_PREFERENCE']}.`}
               note={moment.hasSuccessor ? `✨ ${sender} has suggested a new time -- look out for a new link.` : undefined}
-              action={<FindAnotherTimeLink />}
+              conversionPrompt="Aura can also help you find good times for your own plans."
+              momentToken={token}
             />
           ) : showPreferenceChoices ? (
             <>
@@ -255,12 +258,34 @@ export function AuraMomentClient({ token, initialOutcome }: AuraMomentClientProp
   );
 }
 
-function ResponseResult({ text, note, action }: { text: string; note?: string; action: React.ReactNode }) {
+function ResponseResult({
+  text,
+  note,
+  action,
+  conversionPrompt,
+  momentToken,
+}: {
+  text: string;
+  note?: string;
+  action?: React.ReactNode;
+  /** Recipient Conversion V1 (brief section 12/13): the acquisition CTA
+   * only gets to be this prominent AFTER the recipient has responded --
+   * never competing with I'm in / Another time above. Copy differs by
+   * response (see the two call sites), the CTA itself is the same link. */
+  conversionPrompt?: string;
+  momentToken: string;
+}) {
   return (
     <div style={{ textAlign: 'center' }}>
       <div style={{ ...typography.bodyStrong, fontSize: 15 }}>{text}</div>
       {note && <p style={{ color: colors.traditional, fontSize: 13, marginTop: spacing.sm, fontWeight: 700 }}>{note}</p>}
-      <div style={{ marginTop: spacing.lg }}>{action}</div>
+      {action && <div style={{ marginTop: spacing.lg }}>{action}</div>}
+      {conversionPrompt && (
+        <div style={{ marginTop: spacing.xxl, paddingTop: spacing.xl, borderTop: `1px solid ${colors.borderSubtle}` }}>
+          <p style={{ ...typography.body, marginBottom: spacing.md }}>{conversionPrompt}</p>
+          <FindYourOwnMomentLink momentToken={momentToken} />
+        </div>
+      )}
     </div>
   );
 }
@@ -289,23 +314,17 @@ function PreferenceChip({ label, onClick, disabled }: { label: string; onClick: 
   );
 }
 
-function FindAnotherTimeLink() {
-  return (
-    <div style={{ textAlign: 'center' }}>
-      <a href="/" style={{ color: colors.info, fontSize: 13, fontWeight: 850, textDecoration: 'none' }}>
-        Find another time
-      </a>
-    </div>
-  );
-}
-
-/** The acquisition loop (brief section 18) -- value first, signup second.
- * Works for both logged-out (root page shows sign-in) and logged-in
- * visitors (root page shows the app) without this page needing to know
- * which. */
+/** The acquisition loop (brief section 18, extended by Recipient
+ * Conversion V1) -- routes to the guest conversion flow at /find, never the
+ * raw Moment token itself (privacy -- brief section 11/19: attribution
+ * stays product-level via ?src=moment, never a sender/Moment identity).
+ * trackEvent's own `momentToken` option is a SEPARATE, already-safe
+ * mechanism (resolved server-side to an internal id for analytics
+ * correlation, never stored as the token itself -- see
+ * api/product-events/route.ts), unrelated to what rides in the URL here. */
 function FindYourOwnMomentLink({ momentToken }: { momentToken: string }) {
   return (
-    <AnchorButton href="/" onClick={() => trackEvent('AURA_MOMENT_FIND_YOUR_OWN_CLICKED', { momentToken })}>
+    <AnchorButton href="/find?src=moment" onClick={() => trackEvent('AURA_MOMENT_FIND_YOUR_OWN_CLICKED', { momentToken })}>
       Find your own moment →
     </AnchorButton>
   );
@@ -360,7 +379,7 @@ function FindYourOwnMomentFooter({ momentToken, senderDisplayName }: { momentTok
     <div style={{ textAlign: 'center', marginTop: spacing.xxl, paddingTop: spacing.xl, borderTop: `1px solid ${colors.borderSubtle}` }}>
       {senderDisplayName && <div style={{ ...typography.caption, marginBottom: spacing.sm }}>Sent by {senderDisplayName}</div>}
       <a
-        href="/"
+        href="/find?src=moment"
         onClick={() => trackEvent('AURA_MOMENT_FIND_YOUR_OWN_CLICKED', { momentToken })}
         style={{ color: colors.info, fontSize: 13, fontWeight: 800, textDecoration: 'none' }}
       >

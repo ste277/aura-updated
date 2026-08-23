@@ -112,7 +112,18 @@ export default function DashboardPage() {
   // framework -- People's own onBack just reads it.
   const [peopleReturnTo, setPeopleReturnTo] = useState<'you' | 'plan'>('you');
 
-  const [activeTab, setActiveTab] = useState<'home' | 'timeline' | 'ask' | 'plan' | 'insights' | 'you' | 'chart' | 'activity' | 'explore' | 'panchang' | 'muhurtham' | 'people' | 'updates'>('home');
+  type AppTab = 'home' | 'timeline' | 'ask' | 'plan' | 'insights' | 'you' | 'chart' | 'activity' | 'explore' | 'panchang' | 'muhurtham' | 'people' | 'updates';
+  const VALID_TABS: AppTab[] = ['home', 'timeline', 'ask', 'plan', 'insights', 'you', 'chart', 'activity', 'explore', 'panchang', 'muhurtham', 'people', 'updates'];
+  // Recipient Conversion V1 (brief section 16/33) -- an already-signed-in
+  // visitor who lands on /find (e.g. via "Find your own moment" on a Moment
+  // they received) is redirected to `/?tab=plan` rather than the guest
+  // wizard. This is the one place that redirect needs to land on a specific
+  // tab; every other entry to '/' keeps defaulting to Home, unaffected.
+  const [activeTab, setActiveTab] = useState<AppTab>(() => {
+    if (typeof window === 'undefined') return 'home';
+    const requested = new URLSearchParams(window.location.search).get('tab');
+    return (VALID_TABS as string[]).includes(requested ?? '') ? (requested as AppTab) : 'home';
+  });
   const [panchangDateJump, setPanchangDateJump] = useState<{ date: string; key: number } | null>(null);
   const [muhurthamActivityJump, setMuhurthamActivityJump] = useState<{ activityId: string; key: number } | null>(null);
 

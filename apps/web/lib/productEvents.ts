@@ -40,7 +40,12 @@ export type ProductEventName =
   | 'REMINDER_PUSH_SENT'
   | 'ASK_AURA_SUBMITTED'
   | 'ASK_AURA_INTENT_RESOLVED'
-  | 'ASK_AURA_RESULT_ACTION';
+  | 'ASK_AURA_RESULT_ACTION'
+  | 'GUEST_TIMING_SEARCH_STARTED'
+  | 'GUEST_TIMING_RESULT_VIEWED'
+  | 'GUEST_SIGNUP_STARTED'
+  | 'GUEST_SIGNUP_COMPLETED'
+  | 'GUEST_RESULT_SAVED';
 
 export const PRODUCT_EVENT_NAMES: ProductEventName[] = [
   'AURA_HOME_VIEWED',
@@ -68,6 +73,11 @@ export const PRODUCT_EVENT_NAMES: ProductEventName[] = [
   'ASK_AURA_SUBMITTED',
   'ASK_AURA_INTENT_RESOLVED',
   'ASK_AURA_RESULT_ACTION',
+  'GUEST_TIMING_SEARCH_STARTED',
+  'GUEST_TIMING_RESULT_VIEWED',
+  'GUEST_SIGNUP_STARTED',
+  'GUEST_SIGNUP_COMPLETED',
+  'GUEST_RESULT_SAVED',
 ];
 
 export function isProductEventName(value: string): value is ProductEventName {
@@ -117,6 +127,18 @@ export const CLIENT_TRACKED_EVENTS: ReadonlySet<ProductEventName> = new Set<Prod
   // (mirrors PLAN_SEARCH_COMPLETED), never duplicated client-side.
   'ASK_AURA_SUBMITTED',
   'ASK_AURA_RESULT_ACTION',
+  // Recipient Conversion V1 (brief section 22) -- every guest-funnel step is
+  // a UI intent signal fired from the public, unauthenticated /find page
+  // (there is no session to attach a server-side "at DB success" moment to
+  // for most of these, and GUEST_SIGNUP_COMPLETED specifically must NOT
+  // fire from the shared verify/verify-code routes, which also serve every
+  // ordinary returning-user sign-in -- only /find itself knows this
+  // particular session completion belongs to the guest conversion funnel).
+  'GUEST_TIMING_SEARCH_STARTED',
+  'GUEST_TIMING_RESULT_VIEWED',
+  'GUEST_SIGNUP_STARTED',
+  'GUEST_SIGNUP_COMPLETED',
+  'GUEST_RESULT_SAVED',
 ]);
 
 // Fields that must NEVER appear in ProductEvent.metadata, under any event,
@@ -195,6 +217,16 @@ const ASK_HORIZON_VALUES = new Set([
 ]);
 const ASK_TIME_PREFERENCE_VALUES = new Set(['ANY', 'MORNING', 'AFTERNOON', 'EVENING', 'NIGHT']);
 const ASK_RESULT_ACTION_VALUES = new Set(['PLAN_THIS', 'CREATE_MOMENT', 'OPEN_PLAN', 'OPEN_TIMELINE', 'OPEN_PANCHANG', 'OPEN_MUHURTHAM']);
+// Recipient Conversion V1 (brief section 22/23) -- GUEST_HORIZON_VALUES is
+// the exact guest-facing horizon subset lib/guestTimingSearchRequest.ts
+// validates against (not the full PlanningHorizon set, which also has
+// NOW/CUSTOM that guest search never uses). timePreference reuses
+// ASK_TIME_PREFERENCE_VALUES above verbatim -- same closed vocabulary as
+// TimingTimePreference, not a third copy. GUEST_SOURCE_VALUES is a new,
+// deliberately coarse product-level attribution vocabulary (brief section
+// 11): AURA_MOMENT | DIRECT, never a sender/Moment identity.
+const GUEST_HORIZON_VALUES = new Set(['TODAY', 'TOMORROW', 'WEEKEND', 'SEVEN_DAYS']);
+const GUEST_SOURCE_VALUES = new Set(['AURA_MOMENT', 'DIRECT']);
 
 type FieldSchema =
   | { type: 'enum'; values: Set<string> }
@@ -207,6 +239,9 @@ const activityIdField: FieldSchema = { type: 'activityId' };
 const durationField: FieldSchema = { type: 'number', min: 0, max: 120_000 };
 const sourceField: FieldSchema = { type: 'enum', values: SOURCE_VALUES };
 const planningModeField: FieldSchema = { type: 'enum', values: PLANNING_MODE_VALUES };
+const guestHorizonField: FieldSchema = { type: 'enum', values: GUEST_HORIZON_VALUES };
+const guestTimePreferenceField: FieldSchema = { type: 'enum', values: ASK_TIME_PREFERENCE_VALUES };
+const guestSourceField: FieldSchema = { type: 'enum', values: GUEST_SOURCE_VALUES };
 
 const EVENT_METADATA_SCHEMAS: Record<ProductEventName, Record<string, FieldSchema>> = {
   AURA_HOME_VIEWED: {},
@@ -306,6 +341,32 @@ const EVENT_METADATA_SCHEMAS: Record<ProductEventName, Record<string, FieldSchem
   ASK_AURA_RESULT_ACTION: {
     intent: { type: 'enum', values: ASK_INTENT_VALUES },
     action: { type: 'enum', values: ASK_RESULT_ACTION_VALUES },
+  },
+  // Recipient Conversion V1 (brief section 22/23) -- activityId/horizon/
+  // timePreference/durationMinutes bucket/source only. Never free text,
+  // email, person name, public token, location coordinates, or birth
+  // information (brief section 23) -- FORBIDDEN_METADATA_KEYS already
+  // structurally blocks the sensitive ones even if a mistake were made here.
+  GUEST_TIMING_SEARCH_STARTED: {
+    activityId: activityIdField,
+    horizon: guestHorizonField,
+    timePreference: guestTimePreferenceField,
+    source: guestSourceField,
+  },
+  GUEST_TIMING_RESULT_VIEWED: {
+    activityId: activityIdField,
+    resultCount: { type: 'number', min: 0, max: 3 },
+    source: guestSourceField,
+  },
+  GUEST_SIGNUP_STARTED: {
+    source: guestSourceField,
+  },
+  GUEST_SIGNUP_COMPLETED: {
+    source: guestSourceField,
+  },
+  GUEST_RESULT_SAVED: {
+    activityId: activityIdField,
+    source: guestSourceField,
   },
 };
 
