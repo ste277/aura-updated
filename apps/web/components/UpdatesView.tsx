@@ -6,6 +6,8 @@ import type { AuraReminder } from '../lib/auraReminders';
 import { formatReminderTiming } from '../lib/auraReminders';
 import type { ReminderWithAttention } from '../lib/reminderAttention';
 import * as theme from './theme';
+import { colors, spacing, typography } from './theme';
+import { SurfaceCard, SecondaryButton, EmptyState } from './ui';
 
 /**
  * Product Structure V2 -- the bell's destination (brief section 25/26).
@@ -64,9 +66,9 @@ export function UpdatesView({ updates, upcoming = [], onBack, onViewMomentUpdate
       </div>
 
       {updates.length === 0 && upcoming.length === 0 && (
-        <div style={cardStyle}>
-          <p style={{ fontSize: 13, color: '#94a3b8', margin: 0 }}>Nothing yet -- responses to your shared Moments will show up here.</p>
-        </div>
+        <SurfaceCard>
+          <EmptyState title="No Updates" description="You're all caught up." />
+        </SurfaceCard>
       )}
 
       {upcoming.length > 0 && (
@@ -117,22 +119,20 @@ function UpdateCard({ update, onView, onFindAnotherTime }: { update: AuraUpdate;
   const isAccepted = update.type === 'MOMENT_ACCEPTED';
   const { day, time } = formatUpdateDateTime(update.eventStartAt);
   return (
-    <div style={cardStyle}>
-      <div style={{ fontSize: 13, fontWeight: 800, color: isAccepted ? '#4ade80' : '#facc15' }}>
+    <SurfaceCard accentColor={isAccepted ? colors.positive : colors.caution}>
+      <div style={{ fontSize: 13, fontWeight: 800, color: isAccepted ? colors.positive : colors.caution }}>
         {isAccepted ? `❤️ ${update.recipientDisplayName ?? 'They'} is in` : `↻ ${update.recipientDisplayName ?? 'They'} want${update.recipientDisplayName ? 's' : ''} another time`}
       </div>
-      <div style={{ marginTop: 8, fontSize: 14, fontWeight: 750, color: '#f8fafc' }}>{update.activityTitle}</div>
-      <div style={{ marginTop: 3, fontSize: 12, color: '#aab7d2' }}>
+      <div style={{ marginTop: 8, fontSize: 14, fontWeight: 750, color: colors.textPrimary }}>{update.activityTitle}</div>
+      <div style={{ marginTop: 3, fontSize: 12, color: colors.textFaint }}>
         {isAccepted ? `${day} · ${time}` : `Prefers: ${PREFERENCE_TEXT[update.preference ?? 'NO_PREFERENCE']}`}
       </div>
-      <button
-        type="button"
-        onClick={() => (isAccepted ? onView(update.momentToken) : onFindAnotherTime(update.momentToken))}
-        style={actionButtonStyle}
-      >
-        {isAccepted ? 'View' : 'Find another time'}
-      </button>
-    </div>
+      <div style={{ marginTop: spacing.sm }}>
+        <SecondaryButton onClick={() => (isAccepted ? onView(update.momentToken) : onFindAnotherTime(update.momentToken))}>
+          {isAccepted ? 'View' : 'Find another time'}
+        </SecondaryButton>
+      </div>
+    </SurfaceCard>
   );
 }
 
@@ -146,22 +146,22 @@ function ReminderCard({ reminder, onOpen }: { reminder: ReminderWithAttention; o
       : `Waiting for ${reminder.participantDisplayName}`
     : null;
   return (
-    <div style={cardStyle}>
-      <div style={{ display: 'flex', alignItems: 'center', gap: 7, fontSize: 13, fontWeight: 800, color: '#facc15' }}>
+    <SurfaceCard accentColor={colors.caution}>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 7, fontSize: 13, fontWeight: 800, color: colors.caution }}>
         {reminder.unread && (
-          <span aria-label="Unseen" style={{ width: 7, height: 7, borderRadius: 4, background: '#4ade80', flexShrink: 0 }} />
+          <span aria-label="Unseen" style={{ width: 7, height: 7, borderRadius: 4, background: colors.positive, flexShrink: 0 }} />
         )}
         {reminder.activityIcon ? `${reminder.activityIcon} ` : ''}{formatReminderTiming(reminder.minutesUntilStart)}
       </div>
-      <div style={{ marginTop: 8, fontSize: 14, fontWeight: 750, color: '#f8fafc' }}>{reminder.activityTitle}</div>
-      <div style={{ marginTop: 3, fontSize: 12, color: '#aab7d2' }}>{timeRange}{participantLine ? ` · ${participantLine}` : ''}</div>
-      <button type="button" onClick={() => onOpen?.(reminder)} style={actionButtonStyle}>
-        {reminder.type === 'MOMENT_APPROACHING' ? 'View Moment' : 'Open Plan'}
-      </button>
-    </div>
+      <div style={{ marginTop: 8, fontSize: 14, fontWeight: 750, color: colors.textPrimary }}>{reminder.activityTitle}</div>
+      <div style={{ marginTop: 3, fontSize: 12, color: colors.textFaint }}>{timeRange}{participantLine ? ` · ${participantLine}` : ''}</div>
+      <div style={{ marginTop: spacing.sm }}>
+        <SecondaryButton onClick={() => onOpen?.(reminder)}>
+          {reminder.type === 'MOMENT_APPROACHING' ? 'View Moment' : 'Open Plan'}
+        </SecondaryButton>
+      </div>
+    </SurfaceCard>
   );
 }
 
-const cardStyle: React.CSSProperties = theme.panelStyle;
 const backButtonStyle: React.CSSProperties = theme.backButtonStyle;
-const actionButtonStyle: React.CSSProperties = { ...theme.outlineButtonStyle, borderRadius: 10, padding: '8px 16px', marginTop: 10 };

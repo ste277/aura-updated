@@ -2,6 +2,7 @@
 
 import React, { useEffect, useState } from 'react';
 import * as theme from './theme';
+import { SecondaryButton } from './ui';
 
 /**
  * Owner-facing moment management (Aura Moment Sharing brief section 14,
@@ -490,11 +491,17 @@ function MomentCard({
               </div>
             )}
 
-            <div className="aura-moment-actions" style={{ display: 'flex', alignItems: 'center', gap: 10, marginTop: 12, flexWrap: 'wrap' }}>
-              <button type="button" onClick={onView} className="aura-moment-action" style={{ ...momentActionStyle, color: '#38bdf8' }}>
+            <div style={{ marginTop: 12 }}>
+              {/* Progressive action hierarchy (brief section 64): View is
+               * the one primary action; Copy link/Revoke/Remove recede to
+               * plain text links below it instead of all four competing
+               * for the same visual weight. */}
+              <SecondaryButton onClick={onView} style={{ minHeight: 36, padding: '0 14px' }}>
                 <span aria-hidden="true">👁</span> View
-              </button>
-              <button type="button" onClick={onCopy} className="aura-moment-action" style={{ ...momentActionStyle, color: '#38bdf8' }}>
+              </SecondaryButton>
+            </div>
+            <div className="aura-moment-actions" style={{ display: 'flex', alignItems: 'center', gap: 10, marginTop: 10, flexWrap: 'wrap' }}>
+              <button type="button" onClick={onCopy} className="aura-moment-action" style={momentActionStyle}>
                 <span aria-hidden="true">🔗</span> {copied ? 'Copied ✓' : 'Copy link'}
               </button>
               {moment.status === 'ACTIVE' && (
