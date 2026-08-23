@@ -13,6 +13,7 @@ import { getDatePartsInTimezone } from '../lib/timezone';
 import { RELATIONSHIP_ICON, RELATIONSHIP_LABEL, SavedPersonRow } from './PeopleView';
 import { trackEvent } from '../lib/trackEvent';
 import * as theme from './theme';
+import { SegmentedControl } from './ui';
 
 interface MuhurthamFinderViewProps {
   timezone: string;
@@ -428,11 +429,15 @@ export function MuhurthamFinderView({ timezone, onBack, onOpenPanchangCalendar, 
 
       <div>
         <div style={{ ...sectionKickerStyle, marginBottom: 8 }}>For</div>
-        <div style={toggleRowStyle} role="tablist" aria-label="General, personalized, or shared results">
-          <ScopeToggleButton label="General" icon="🌐" active={scope === 'GENERAL'} onClick={() => handleScopeChange('GENERAL')} />
-          <ScopeToggleButton label="Me" icon="✨" active={scope === 'PERSONAL'} onClick={() => handleScopeChange('PERSONAL')} />
-          <ScopeToggleButton label="Us" icon="❤️" active={scope === 'SHARED'} onClick={() => handleScopeChange('SHARED')} />
-        </div>
+        <SegmentedControl
+          options={[
+            { value: 'GENERAL' as const, label: <>🌐 General</> },
+            { value: 'PERSONAL' as const, label: <>✨ Me</> },
+            { value: 'SHARED' as const, label: <>❤️ Us</> },
+          ]}
+          value={scope}
+          onChange={handleScopeChange}
+        />
       </div>
 
       {scope === 'SHARED' && (
@@ -732,26 +737,6 @@ export function MuhurthamFinderView({ timezone, onBack, onOpenPanchangCalendar, 
         </>
       )}
     </div>
-  );
-}
-
-function ScopeToggleButton({ label, icon, active, onClick }: { label: string; icon: string; active: boolean; onClick: () => void }) {
-  return (
-    <button
-      type="button"
-      role="tab"
-      aria-selected={active}
-      onClick={active ? undefined : onClick}
-      disabled={active}
-      style={{
-        ...toggleButtonStyle,
-        background: active ? '#4ade80' : 'transparent',
-        color: active ? '#020617' : '#f8fafc',
-        cursor: active ? 'default' : 'pointer',
-      }}
-    >
-      <span aria-hidden="true">{icon}</span> {label}
-    </button>
   );
 }
 
@@ -1345,22 +1330,3 @@ const ratingBadgeStyle: React.CSSProperties = {
 };
 
 const panchangaCellStyle: React.CSSProperties = theme.cellStyle;
-
-const toggleRowStyle: React.CSSProperties = {
-  display: 'flex',
-  gap: 6,
-  background: 'rgba(15, 23, 42, 0.6)',
-  border: '1px solid rgba(255, 255, 255, 0.08)',
-  borderRadius: 14,
-  padding: 4,
-};
-
-const toggleButtonStyle: React.CSSProperties = {
-  flex: 1,
-  minHeight: 34,
-  border: 'none',
-  borderRadius: 10,
-  fontSize: 12,
-  fontWeight: 800,
-  fontFamily: 'sans-serif',
-};

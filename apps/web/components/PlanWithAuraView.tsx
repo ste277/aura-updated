@@ -9,6 +9,8 @@ import type { EverydaySharedCandidate } from '../../../packages/recommendation/s
 import { RELATIONSHIP_ICON, SavedPersonRow } from './PeopleView';
 import { SharedMomentsView } from './SharedMomentsView';
 import * as theme from './theme';
+import { colors, spacing, typography } from './theme';
+import { PageHeader, SegmentedControl, SecondaryButton } from './ui';
 import type { TimingCandidate, TimingCandidateLabel, TimingSearchDateRange, TimingSearchMode, TimingSearchResponse, TimingTimePreference } from '../../../packages/recommendation/src/timingSearch';
 import type { MuhurtaReason } from '../../../packages/muhurta/src/activityOntology';
 import { formatMuhurtaReason } from '../../../packages/muhurta/src/muhurtaReasonFormat';
@@ -982,34 +984,22 @@ export function PlanWithAuraView({ onTimingSearch, onViewDay, onPlanLogged, time
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 17, paddingBottom: 24, fontFamily: 'sans-serif', color: '#f8fafc' }}>
-      <header style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: 16 }}>
-        <div>
-          <h1 style={{ fontSize: 26, lineHeight: 1.08, margin: 0, color: '#f8fafc', letterSpacing: 0 }}>
-            Plan with Aura ✨
-          </h1>
-          <p style={{ fontSize: 15, lineHeight: 1.35, color: '#b6c2d1', margin: '7px 0 0' }}>
-            Tell Aura what you want to do.<br />We&apos;ll find your best moments.
-          </p>
-        </div>
-        <button type="button" onClick={handleMyPlansClick} style={myPlansStyle}>
-          <span style={{ fontSize: 15 }}>☷</span>
-          My Plans
-        </button>
-      </header>
+      <PageHeader
+        title={<>Plan with Aura ✨</>}
+        subtitle={<>Tell Aura what you want to do.<br />We&apos;ll find your best moments.</>}
+        rightAction={
+          <SecondaryButton onClick={handleMyPlansClick} style={{ minHeight: 40 }}>
+            <span style={{ fontSize: 15 }}>☷</span> My Plans
+          </SecondaryButton>
+        }
+      />
 
-      <div style={modeSwitcherStyle}>
-        {PLAN_MODES.map((mode) => (
-          <button
-            key={mode.value}
-            type="button"
-            onClick={() => setPlanMode(mode.value)}
-            style={{ ...modePillStyle, ...(planMode === mode.value ? modePillActiveStyle : {}) }}
-          >
-            {mode.label}
-          </button>
-        ))}
-      </div>
-      <div style={{ color: '#aab7d2', fontSize: 13, marginTop: -8 }}>
+      <SegmentedControl
+        options={PLAN_MODES.map((mode) => ({ value: mode.value, label: mode.label }))}
+        value={planMode}
+        onChange={setPlanMode}
+      />
+      <div style={{ ...typography.meta, marginTop: -8 }}>
         {PLAN_MODES.find((mode) => mode.value === planMode)?.helper}
       </div>
 
@@ -2016,48 +2006,6 @@ function EverydaySharedResultCard({
 }
 
 const panelStyle: React.CSSProperties = theme.panelStyle;
-
-const modeSwitcherStyle: React.CSSProperties = {
-  display: 'grid',
-  gridTemplateColumns: 'repeat(3, minmax(0, 1fr))',
-  gap: 8,
-  border: '1px solid rgba(96, 165, 250, 0.18)',
-  borderRadius: 14,
-  background: 'rgba(2, 6, 23, 0.5)',
-  padding: 5,
-};
-
-const modePillStyle: React.CSSProperties = {
-  border: 'none',
-  borderRadius: 10,
-  background: 'transparent',
-  color: '#aab7d2',
-  fontSize: 13,
-  fontWeight: 850,
-  padding: '10px 6px',
-  cursor: 'pointer',
-};
-
-const modePillActiveStyle: React.CSSProperties = {
-  background: 'linear-gradient(90deg, #4ade80 0%, #22d3ee 52%, #2f95ff 100%)',
-  color: '#020617',
-};
-
-const myPlansStyle: React.CSSProperties = {
-  minHeight: 45,
-  border: '1px solid rgba(96, 165, 250, 0.23)',
-  borderRadius: 14,
-  background: 'rgba(15, 23, 42, 0.75)',
-  color: '#4ade80',
-  fontSize: 15,
-  fontWeight: 900,
-  display: 'flex',
-  alignItems: 'center',
-  gap: 8,
-  padding: '0 15px',
-  cursor: 'pointer',
-  whiteSpace: 'nowrap',
-};
 
 const inputShellStyle: React.CSSProperties = {
   minHeight: 62,
