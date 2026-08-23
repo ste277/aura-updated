@@ -118,24 +118,26 @@ only what's needed to actually turn it on in a deployed environment.
 
 ### Scheduling the dispatch worker
 
-`apps/web/vercel.json` already defines a Vercel Cron Job hitting
-`/api/internal/reminders/dispatch` every 5 minutes. Two things to set up for that to
-actually work:
+`apps/web/vercel.json` defines a Vercel Cron Job hitting
+`/api/internal/reminders/dispatch`. Two things to set up for that to actually work:
 
 1. In the Vercel dashboard, set `CRON_SECRET` to the **same value** as
    `INTERNAL_REMINDER_DISPATCH_SECRET`. Vercel Cron sends
    `Authorization: Bearer $CRON_SECRET` automatically on every invocation — no other
    wiring needed.
 2. **Plan-tier caveat (read this before assuming reminders are reliable):** Vercel's
-   Hobby (free) tier does not run Cron Jobs on their configured schedule — it
-   silently coalesces every cron job down to **once per day**, at a time Vercel
-   chooses, regardless of what `vercel.json` says. A `*/5 * * * *` schedule on Hobby
-   does NOT give you 5-minute reminders; it gives you roughly one dispatch run per
-   day, which means most 15-minutes-before pushes would simply never fire in time.
-   Do not deploy this feature on Hobby and assume it works — verify your plan tier,
-   or point an external scheduler (cron-job.org, a GitHub Actions scheduled
-   workflow, or any host that can `curl` on a real interval) at the same endpoint
-   with the same bearer secret. Pro and Enterprise tiers honor the real schedule.
+   Hobby (free) tier doesn't just under-serve a sub-daily cron schedule — it now
+   **rejects the deploy outright** if `vercel.json` declares a schedule that would run
+   more than once a day (confirmed live: a `*/5 * * * *` schedule failed deployment
+   with "Hobby accounts are limited to daily cron jobs"). That's why the checked-in
+   schedule here is `0 13 * * *` (once daily, 13:00 UTC) — a deploy-safe default that
+   does NOT give you real 15-minutes-before reminders; it gives you one dispatch run
+   per day, so most reminders will simply never fire in time. Before relying on this
+   feature in production, either upgrade to Pro (which allows a real interval — put a
+   tighter schedule like `*/5 * * * *` back once you have it) or point an external
+   scheduler (cron-job.org, a GitHub Actions scheduled workflow, or any host that can
+   `curl` on a real interval) at the same endpoint with the same bearer secret instead
+   of relying on `vercel.json`'s own cron at all.
 3. Worst-case delay even on a correctly-running 5-minute schedule: up to ~5 minutes
    after a reminder becomes due before the next dispatch tick picks it up, plus
    actual send latency (single-digit seconds per user in local testing — see the

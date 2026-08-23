@@ -2,7 +2,7 @@
   "crons": [
     {
       "path": "/api/internal/reminders/dispatch",
-      "schedule": "*/5 * * * *"
+      "schedule": "0 13 * * *"
     }
   ]
 }
