@@ -877,7 +877,7 @@ export default function DashboardPage() {
         <header
           style={{
             width: '100%',
-            maxWidth: 420,
+            maxWidth: 760,
             display: 'flex',
             alignItems: 'center',
             justifyContent: 'space-between',
@@ -912,7 +912,12 @@ export default function DashboardPage() {
         </header>
       )}
 
-      <div style={{ width: '100%', maxWidth: activeTab === 'home' || activeTab === 'plan' || activeTab === 'explore' ? 760 : 420 }}>
+      {/* Aura UI Experience V2 (brief section 7/89) -- one shared content
+       * max-width for every main screen. Was 760 for Home/Plan/Explore but
+       * 420 for every other tab, a real "inconsistent screen widths" bug on
+       * anything wider than a phone; harmless on mobile since the actual
+       * rendered width is always min(100%, maxWidth). */}
+      <div style={{ width: '100%', maxWidth: 760 }}>
         {activeTab === 'home' && (
           <HomeDashboard
             userName={userNameDisplay}
