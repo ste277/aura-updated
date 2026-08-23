@@ -1,8 +1,9 @@
 'use client';
 
-import React from 'react';
+import React, { useState } from 'react';
 import type { SolarWindowType } from '../../../packages/panchang/src/windows';
 import type { NotificationPrefs } from '../lib/windowNotifications';
+import { colors, spacing, typography, radius } from './theme';
 
 const WINDOW_OPTIONS: { type: SolarWindowType; label: string; hint: string }[] = [
   { type: 'ABHIJIT', label: 'Abhijit Muhurtham', hint: 'Peak productivity window' },
@@ -12,6 +13,13 @@ const WINDOW_OPTIONS: { type: SolarWindowType; label: string; hint: string }[] =
   { type: 'YAMA', label: 'Yama Gandam', hint: 'Caution window' },
 ];
 
+/**
+ * Aura UI Experience V2 (brief section 60) -- collapsed by default. Before
+ * this, all 5 toggles rendered permanently, making this the densest block
+ * on the whole You screen. Now a single summary row ("Window alerts / N
+ * enabled ›") expands into the exact same 5 toggles on tap -- no
+ * functionality removed, just not shown until asked for.
+ */
 export function NotificationSettings({
   prefs,
   onChange,
@@ -19,85 +27,110 @@ export function NotificationSettings({
   prefs: NotificationPrefs;
   onChange: (next: NotificationPrefs) => void;
 }) {
+  const [expanded, setExpanded] = useState(false);
+  const enabledCount = WINDOW_OPTIONS.filter((opt) => prefs[opt.type]).length;
+
   return (
     <div
       style={{
-        background: 'rgba(30, 41, 59, 0.5)',
-        border: '1px solid rgba(255, 255, 255, 0.08)',
-        borderRadius: 14,
-        padding: 16,
+        background: colors.surfaceSubtle,
+        border: `1px solid ${colors.borderSubtle}`,
+        borderRadius: radius.lg,
+        padding: spacing.lg,
       }}
     >
-      <span
+      <button
+        type="button"
+        onClick={() => setExpanded((value) => !value)}
+        aria-expanded={expanded}
         style={{
-          fontSize: 10,
-          fontFamily: 'monospace',
-          textTransform: 'uppercase',
-          color: '#94a3b8',
-          letterSpacing: '0.05em',
-          fontWeight: 600,
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'space-between',
+          width: '100%',
+          background: 'transparent',
+          border: 'none',
+          padding: 0,
+          cursor: 'pointer',
+          textAlign: 'left',
+          minHeight: 32,
         }}
       >
-        Window Alerts
-      </span>
-      <p style={{ fontSize: 12, color: '#94a3b8', margin: '6px 0 12px', lineHeight: 1.4 }}>
-        Get notified 10 minutes before a window starts. Alerts fire on this device.
-      </p>
+        <div>
+          <span style={typography.sectionEyebrow}>Window Alerts</span>
+          {!expanded && (
+            <p style={{ fontSize: 12, color: colors.textFaint, margin: '6px 0 0', lineHeight: 1.4 }}>
+              {enabledCount} enabled
+            </p>
+          )}
+        </div>
+        <span style={{ color: expanded ? colors.positive : colors.textMuted, fontSize: 16, transform: expanded ? 'rotate(90deg)' : 'rotate(0deg)', transition: 'transform 160ms ease, color 160ms ease' }}>
+          ›
+        </span>
+      </button>
 
-      <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
-        {WINDOW_OPTIONS.map((opt) => {
-          const enabled = prefs[opt.type];
-          return (
-            <button
-              type="button"
-              key={opt.type}
-              onClick={() => onChange({ ...prefs, [opt.type]: !enabled })}
-              style={{
-                display: 'flex',
-                alignItems: 'center',
-                justifyContent: 'space-between',
-                gap: 12,
-                background: 'transparent',
-                border: 'none',
-                padding: 0,
-                cursor: 'pointer',
-                textAlign: 'left',
-                minHeight: 32,
-              }}
-            >
-              <div>
-                <div style={{ fontSize: 13, color: '#e2e8f0' }}>{opt.label}</div>
-                <div style={{ fontSize: 11, color: '#64748b' }}>{opt.hint}</div>
-              </div>
-              <div
-                style={{
-                  width: 40,
-                  height: 22,
-                  borderRadius: 11,
-                  flexShrink: 0,
-                  background: enabled ? '#1f4d34' : 'rgba(255,255,255,0.08)',
-                  border: `1px solid ${enabled ? '#4ade80' : 'rgba(255,255,255,0.15)'}`,
-                  position: 'relative',
-                  transition: 'background 0.15s',
-                }}
-              >
-                <div
+      {expanded && (
+        <>
+          <p style={{ fontSize: 12, color: colors.textFaint, margin: `${spacing.sm}px 0 ${spacing.md}px`, lineHeight: 1.4 }}>
+            Get notified 10 minutes before a window starts. Alerts fire on this device.
+          </p>
+
+          <div style={{ display: 'flex', flexDirection: 'column', gap: spacing.sm }}>
+            {WINDOW_OPTIONS.map((opt) => {
+              const enabled = prefs[opt.type];
+              return (
+                <button
+                  type="button"
+                  key={opt.type}
+                  onClick={() => onChange({ ...prefs, [opt.type]: !enabled })}
                   style={{
-                    position: 'absolute',
-                    top: 2,
-                    left: enabled ? 20 : 2,
-                    width: 16,
-                    height: 16,
-                    borderRadius: '50%',
-                    background: enabled ? '#4ade80' : '#94a3b8',
-                    transition: 'left 0.15s',
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'space-between',
+                    gap: spacing.md,
+                    background: 'transparent',
+                    border: 'none',
+                    padding: 0,
+                    cursor: 'pointer',
+                    textAlign: 'left',
+                    minHeight: 44,
                   }}
-                />
-              </div>
-            </button>
-          );
-        })}
-      </div>
+                >
+                  <div>
+                    <div style={{ fontSize: 13, color: colors.textSecondary }}>{opt.label}</div>
+                    <div style={{ fontSize: 11, color: colors.textMuted }}>{opt.hint}</div>
+                  </div>
+                  <div
+                    style={{
+                      width: 40,
+                      height: 22,
+                      borderRadius: radius.pill,
+                      flexShrink: 0,
+                      background: enabled ? '#1f4d34' : 'rgba(255,255,255,0.08)',
+                      border: `1px solid ${enabled ? colors.positive : 'rgba(255,255,255,0.15)'}`,
+                      position: 'relative',
+                      transition: 'background 0.15s',
+                    }}
+                  >
+                    <div
+                      style={{
+                        position: 'absolute',
+                        top: 2,
+                        left: enabled ? 20 : 2,
+                        width: 16,
+                        height: 16,
+                        borderRadius: '50%',
+                        background: enabled ? colors.positive : colors.textMuted,
+                        transition: 'left 0.15s',
+                      }}
+                    />
+                  </div>
+                </button>
+              );
+            })}
+          </div>
+        </>
+      )}
     </div>
   );
 }

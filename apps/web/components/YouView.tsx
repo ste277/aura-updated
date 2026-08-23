@@ -6,6 +6,8 @@ import { NotificationSettings } from './NotificationSettings';
 import { ReminderSettings } from './ReminderSettings';
 import type { NotificationPrefs } from '../lib/windowNotifications';
 import * as theme from './theme';
+import { colors, spacing, typography, radius } from './theme';
+import { PageHeader, SectionHeader, SurfaceCard, DestructiveButton } from './ui';
 
 interface YouViewProps {
   userName: string;
@@ -77,120 +79,132 @@ export function YouView({
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 16, paddingBottom: 24, fontFamily: 'sans-serif', color: '#f8fafc' }}>
-      <div>
-        <h1 style={{ fontSize: 22, margin: 0, lineHeight: 1.15 }}>You</h1>
-        <p style={{ fontSize: 12, color: '#b6c2d1', margin: '5px 0 0' }}>
-          Your preferences, timing profile, and settings.
-        </p>
-      </div>
+      <PageHeader title="You" subtitle="Your profile and Aura preferences." />
 
-      <section style={theme.panelStyle}>
-        <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
-          <div style={{ width: 48, height: 48, borderRadius: 14, background: 'rgba(74, 222, 128, 0.16)', display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#4ade80', fontSize: 20, fontWeight: 900 }}>
+      {/* Profile (brief section 56) -- identity first: avatar, name,
+       * location (secondary), email (muted, tertiary). */}
+      <SurfaceCard>
+        <div style={{ display: 'flex', alignItems: 'center', gap: spacing.md }}>
+          <div style={{ width: 48, height: 48, borderRadius: radius.md, background: colors.positiveSoft, display: 'flex', alignItems: 'center', justifyContent: 'center', color: colors.positive, fontSize: 20, fontWeight: 900 }}>
             {userName.charAt(0).toUpperCase()}
           </div>
           <div style={{ minWidth: 0, flex: 1 }}>
-            <div style={{ fontSize: 15, fontWeight: 800, color: '#f8fafc' }}>{userName}</div>
-            <div style={{ fontSize: 11, color: '#94a3b8', marginTop: 2, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{email}</div>
+            <div style={{ fontSize: 16, fontWeight: 800, color: colors.textPrimary }}>{userName}</div>
+            <div style={{ fontSize: 12, color: colors.textFaint, marginTop: 2 }}>{cityName} · {timezone}</div>
+            <div style={{ fontSize: 11, color: colors.textMuted, marginTop: 2, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{email}</div>
           </div>
         </div>
-      </section>
+      </SurfaceCard>
 
-      <section style={{ ...theme.panelStyle, padding: 0, overflow: 'hidden' }}>
-        <SettingsRow icon="📍" title="Location & Time" detail={`${cityName} · ${timezone}`} expanded={openSettingsPanel === 'location'} onClick={() => toggleSettingsPanel('location')} />
-        {openSettingsPanel === 'location' && (
-          <div style={settingsPanelStyle}>
-            <div style={{ color: '#dbe7f4', fontSize: 12, lineHeight: 1.45, marginBottom: 10 }}>
-              Your selected location determines Panchang windows, calendar feed timing, and daily suggestions.
+      {/* Your Aura (brief section 57/58) -- the identity/personalization
+       * features get top billing, not buried in an undifferentiated list. */}
+      <div>
+        <SectionHeader label="Your Aura" />
+        <SurfaceCard padding={0} style={{ overflow: 'hidden' }}>
+          <SettingsRow icon="✨" title="Birth Chart" detail="View personal timing map" onClick={onOpenChart} />
+          <SettingsRow icon="👥" title="People" detail="Manage the people you plan with" onClick={onOpenPeople} />
+          <SettingsRow icon="🔗" title="Your Moments" detail="Moments you've created and their responses" onClick={onOpenSharedMoments} badgeCount={sharedMomentsUnreadCount} />
+        </SurfaceCard>
+      </div>
+
+      {/* Planning */}
+      <div>
+        <SectionHeader label="Planning" />
+        <SurfaceCard padding={0} style={{ overflow: 'hidden' }}>
+          <SettingsRow icon="📍" title="Location & Time" detail={`${cityName} · ${timezone}`} expanded={openSettingsPanel === 'location'} onClick={() => toggleSettingsPanel('location')} />
+          {openSettingsPanel === 'location' && (
+            <div style={settingsPanelStyle}>
+              <div style={{ color: colors.textSecondary, fontSize: 12, lineHeight: 1.45, marginBottom: 10 }}>
+                Your selected location determines Panchang windows, calendar feed timing, and daily suggestions.
+              </div>
+              <LocationPicker currentCity={cityName} onChanged={onLocationChanged} />
             </div>
-            <LocationPicker currentCity={cityName} onChanged={onLocationChanged} />
-          </div>
-        )}
-        <SettingsRow icon="✨" title="Birth Chart" detail="View personal timing map" onClick={onOpenChart} />
-        <SettingsRow icon="📅" title="Calendar & Sync" detail="Aura plans + Panchang windows" expanded={openSettingsPanel === 'calendar'} onClick={() => toggleSettingsPanel('calendar')} />
-        {openSettingsPanel === 'calendar' && (
-          <div style={settingsPanelStyle}>
-            <div style={{ color: '#dbe7f4', fontSize: 12, lineHeight: 1.45 }}>
-              Export your upcoming Aura plans and today&apos;s Panchang windows as an `.ics` calendar file.
+          )}
+          <SettingsRow icon="📅" title="Calendar & Sync" detail="Aura plans + Panchang windows" expanded={openSettingsPanel === 'calendar'} onClick={() => toggleSettingsPanel('calendar')} />
+          {openSettingsPanel === 'calendar' && (
+            <div style={settingsPanelStyle}>
+              <div style={{ color: colors.textSecondary, fontSize: 12, lineHeight: 1.45 }}>
+                Export your upcoming Aura plans and today&apos;s Panchang windows as an `.ics` calendar file.
+              </div>
+              <div style={{ display: 'flex', flexWrap: 'wrap', gap: spacing.sm, marginTop: spacing.md }}>
+                <a href="/api/calendar/feed" target="_blank" rel="noreferrer" style={calendarPrimaryActionStyle}>
+                  Open calendar
+                </a>
+                <button type="button" onClick={handleCopyCalendarFeed} style={calendarSecondaryActionStyle}>
+                  {calendarCopyState === 'copied' ? 'Copied' : calendarCopyState === 'failed' ? 'Copy failed' : 'Copy link'}
+                </button>
+              </div>
             </div>
-            <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8, marginTop: 12 }}>
-              <a href="/api/calendar/feed" target="_blank" rel="noreferrer" style={calendarPrimaryActionStyle}>
-                Open calendar
-              </a>
-              <button type="button" onClick={handleCopyCalendarFeed} style={calendarSecondaryActionStyle}>
-                {calendarCopyState === 'copied' ? 'Copied' : calendarCopyState === 'failed' ? 'Copy failed' : 'Copy link'}
+          )}
+          <SettingsRow icon="📋" title="Activity Log" detail="View logged activities" onClick={onOpenActivityLog} />
+          <SettingsRow icon="✅" title="Daily Check-In" detail="How check-ins affect Insights" expanded={openSettingsPanel === 'checkIn'} onClick={() => toggleSettingsPanel('checkIn')} />
+          {openSettingsPanel === 'checkIn' && (
+            <div style={settingsPanelStyle}>
+              <div style={{ color: colors.textSecondary, fontSize: 12, lineHeight: 1.45 }}>
+                Daily Check-In compares how the day felt with your logged activity timing. Low counts as 0%, Balanced as 50%, and Strong as 100% toward Alignment Proof.
+              </div>
+              <button type="button" onClick={onOpenHome} style={{ ...calendarPrimaryActionStyle, marginTop: spacing.md }}>
+                Update today&apos;s check-in
               </button>
             </div>
-          </div>
-        )}
-        <SettingsRow icon="✅" title="Daily Check-In" detail="How check-ins affect Insights" expanded={openSettingsPanel === 'checkIn'} onClick={() => toggleSettingsPanel('checkIn')} />
-        {openSettingsPanel === 'checkIn' && (
-          <div style={settingsPanelStyle}>
-            <div style={{ color: '#dbe7f4', fontSize: 12, lineHeight: 1.45 }}>
-              Daily Check-In compares how the day felt with your logged activity timing. Low counts as 0%, Balanced as 50%, and Strong as 100% toward Alignment Proof.
-            </div>
-            <button type="button" onClick={onOpenHome} style={{ ...calendarPrimaryActionStyle, marginTop: 12 }}>
-              Update today&apos;s check-in
-            </button>
-          </div>
-        )}
-      </section>
+          )}
+        </SurfaceCard>
+      </div>
 
       <div style={{ scrollMarginTop: 18 }}>
-        <div style={{ ...theme.sectionKickerStyle, marginBottom: 10 }}>Notifications &amp; Alerts</div>
+        <SectionHeader label="Notifications" />
         <ReminderSettings enabled={remindersEnabled} onChange={onRemindersEnabledChange} />
         <NotificationSettings prefs={notificationPrefs} onChange={onNotificationPrefsChange} />
       </div>
 
-      <section style={{ ...theme.panelStyle, padding: 0, overflow: 'hidden' }}>
-        <SettingsRow icon="📋" title="Activity Log" detail="View logged activities" onClick={onOpenActivityLog} />
-        <SettingsRow icon="👥" title="People" detail="Manage the people you plan with" onClick={onOpenPeople} />
-        <SettingsRow icon="🔗" title="Your Moments" detail="Moments you've created and their responses" onClick={onOpenSharedMoments} badgeCount={sharedMomentsUnreadCount} />
-        <SettingsLinkRow icon="⬇️" title="Export Data" detail="Download your timing data" href="/api/users/export" />
-        <SettingsRow icon="❔" title="Help & FAQ" detail="Learn more about myAuraMoment" expanded={openSettingsPanel === 'help'} onClick={() => toggleSettingsPanel('help')} />
-        {openSettingsPanel === 'help' && (
-          <div style={settingsPanelStyle}>
-            <HelpItem
-              question="How does Aura choose a moment?"
-              answer="Aura calculates Panchang windows for your location, scores the Muhurtham fit for the activity, then blends in time of day, duration, personal patterns, and logged outcomes."
-            />
-            <HelpItem
-              question="Do I need birth details?"
-              answer="No. Without birth details, Aura still uses location-based Panchang and Muhurtham timing. Birth details add a personal secondary signal when available."
-            />
-            <HelpItem
-              question="Why log activities?"
-              answer="Logs teach Insights which suggestions you actually follow and whether those windows line up with stronger days, streaks, and completion patterns."
-            />
-            <HelpItem
-              question="Can I get my data out?"
-              answer="Yes. Export Data downloads your profile settings, planned activities, logged activities, and daily check-ins as JSON."
-            />
-          </div>
-        )}
-        <SettingsRow icon="ℹ️" title="About myAuraMoment" detail="Version 1.0.0" expanded={openSettingsPanel === 'about'} onClick={() => toggleSettingsPanel('about')} />
-        {openSettingsPanel === 'about' && (
-          <div style={settingsPanelStyle}>
-            <div style={{ color: '#f8fafc', fontSize: 13, fontWeight: 850 }}>myAuraMoment</div>
-            <div style={{ color: '#94a3b8', fontSize: 12, lineHeight: 1.45, marginTop: 6 }}>
-              A personal timing assistant that turns Panchang and Muhurtham calculations into simple decisions: what to do now, when to plan something, and what your patterns are teaching you.
+      {/* Data & Support (brief section 61) -- deliberately lower visual
+       * prominence than Your Aura above: muted section label, no elevated
+       * card border. */}
+      <div>
+        <div style={{ ...typography.caption, marginBottom: spacing.sm }}>Data &amp; Support</div>
+        <div style={{ border: `1px solid ${colors.borderSubtle}`, borderRadius: radius.lg, overflow: 'hidden' }}>
+          <SettingsLinkRow icon="⬇️" title="Export Data" detail="Download your timing data" href="/api/users/export" />
+          <SettingsRow icon="❔" title="Help & FAQ" detail="Learn more about myAuraMoment" expanded={openSettingsPanel === 'help'} onClick={() => toggleSettingsPanel('help')} />
+          {openSettingsPanel === 'help' && (
+            <div style={settingsPanelStyle}>
+              <HelpItem
+                question="How does Aura choose a moment?"
+                answer="Aura calculates Panchang windows for your location, scores the Muhurtham fit for the activity, then blends in time of day, duration, personal patterns, and logged outcomes."
+              />
+              <HelpItem
+                question="Do I need birth details?"
+                answer="No. Without birth details, Aura still uses location-based Panchang and Muhurtham timing. Birth details add a personal secondary signal when available."
+              />
+              <HelpItem
+                question="Why log activities?"
+                answer="Logs teach Insights which suggestions you actually follow and whether those windows line up with stronger days, streaks, and completion patterns."
+              />
+              <HelpItem
+                question="Can I get my data out?"
+                answer="Yes. Export Data downloads your profile settings, planned activities, logged activities, and daily check-ins as JSON."
+              />
             </div>
-            <div style={{ display: 'grid', gap: 6, marginTop: 12, color: '#b6c2d1', fontSize: 11 }}>
-              <span>Version 1.0.0</span>
-              <span>Panchang Engine + Muhurta Fit Engine</span>
-              <span>Your activity history stays tied to your account and can be exported any time.</span>
+          )}
+          <SettingsRow icon="ℹ️" title="About Aura" detail="Version 1.0.0" expanded={openSettingsPanel === 'about'} onClick={() => toggleSettingsPanel('about')} />
+          {openSettingsPanel === 'about' && (
+            <div style={settingsPanelStyle}>
+              <div style={{ color: colors.textPrimary, fontSize: 13, fontWeight: 850 }}>myAuraMoment</div>
+              <div style={{ color: colors.textMuted, fontSize: 12, lineHeight: 1.45, marginTop: 6 }}>
+                A personal timing assistant that turns Panchang and Muhurtham calculations into simple decisions: what to do now, when to plan something, and what your patterns are teaching you.
+              </div>
+              <div style={{ display: 'grid', gap: 6, marginTop: spacing.md, color: colors.textFaint, fontSize: 11 }}>
+                <span>Version 1.0.0</span>
+                <span>Panchang Engine + Muhurta Fit Engine</span>
+                <span>Your activity history stays tied to your account and can be exported any time.</span>
+              </div>
             </div>
-          </div>
-        )}
-      </section>
+          )}
+        </div>
+      </div>
 
-      <button
-        type="button"
-        onClick={onSignOut}
-        style={{ minHeight: 44, border: '1px solid rgba(251, 107, 107, 0.3)', borderRadius: 12, background: 'rgba(251, 107, 107, 0.08)', color: '#fb6b6b', fontSize: 13, fontWeight: 800, cursor: 'pointer' }}
-      >
+      <DestructiveButton onClick={onSignOut} style={{ width: '100%' }}>
         Sign out
-      </button>
+      </DestructiveButton>
     </div>
   );
 }
