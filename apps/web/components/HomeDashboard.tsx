@@ -317,11 +317,19 @@ export function HomeDashboard({
     : currentWindow
       ? `${currentWindow.startTime} - ${currentWindow.endTime}`
       : `Next shift ${nextShift.startTime}`;
-  const remainingText = dailyBriefing?.briefingState === 'ACTIVE'
-    ? nextShift.startsIn
-    : currentWindow
-      ? `${currentWindow.timeRemaining} left`
-      : nextShift.startsIn;
+  // Bug fix: this used to show nextShift.startsIn even while ACTIVE --
+  // nextShift is the countdown to whatever window comes next
+  // chronologically (scoreEngine.ts), unrelated to when the peak window
+  // itself (shown just above in currentTimeRange) actually ends. That
+  // produced nonsense like "11:47 AM - 12:37 PM  In 2h 56m" for a 50-minute
+  // window. currentWindow.timeRemaining is already time-left-in-THIS-window
+  // (page.tsx's currentWindowInfo, matched via the same getActiveWindow call
+  // dailyBriefing itself uses to decide ACTIVE), so reuse it here too --
+  // mirroring the currentTimeRange ternary two lines above instead of
+  // diverging from it.
+  const remainingText = currentWindow
+    ? `${currentWindow.timeRemaining} left`
+    : nextShift.startsIn;
 
   const assistantSuggestion: AssistantSuggestion = useMemo(() => {
     const actionablePlan = findActionablePlan(upcomingPlans);
