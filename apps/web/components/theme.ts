@@ -52,6 +52,7 @@ export const colors = {
 
   borderSubtle: 'rgba(148, 163, 184, 0.14)',
   borderDefault: 'rgba(148, 163, 184, 0.22)',
+  borderFocus: '#60a5fa',
   surfaceSubtle: 'rgba(255, 255, 255, 0.03)',
   surfaceSelected: 'rgba(74, 222, 128, 0.14)',
   textInverse: '#02150c',

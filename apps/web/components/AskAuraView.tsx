@@ -1,6 +1,8 @@
 'use client';
 
 import React, { useEffect, useMemo, useRef, useState } from 'react';
+import { colors, spacing, typography, radius } from './theme';
+import { PageHeader, TextButton } from './ui';
 
 interface Message {
   sender: 'user' | 'aura';
@@ -67,11 +69,15 @@ export function AskAuraView({
   const [messages, setMessages] = useState<Message[]>([
     {
       sender: 'aura',
-      text: `Hi ${userName}! I'm Aura. I'm synchronized with your ${activeWindow.replace('_', ' ').toUpperCase()} window in ${cityName}${
-        userChart?.moonSign ? ` and aligned with your ${userChart.moonSign} Moon` : ''
-      }. Ask me anything about timing a task, making a decision, or planning your day!`,
+      text: `Hi ${userName} — I can help you decide what to do now, when to plan something, or what your day looks like.`,
     },
   ]);
+  const [showAllPrompts, setShowAllPrompts] = useState(false);
+  const [isInputFocused, setIsInputFocused] = useState(false);
+  // Brief section 45: the conversation becomes primary the moment the user
+  // has actually asked something -- the initial greeting alone (length 1)
+  // still counts as the calm empty state, not a "conversation in progress".
+  const hasConversationStarted = messages.length > 1;
 
   const promptChips = useMemo(() => {
     const windowName = activeWindow.replace(/_/g, ' ').toLowerCase();
@@ -239,82 +245,43 @@ export function AskAuraView({
         color: '#f8fafc',
       }}
     >
-      {/* Header */}
-      <div>
-        <h1
-          style={{
-            fontSize: 20,
-            fontWeight: 700,
-            color: 'var(--as-text, #f8fafc)',
-            margin: 0,
-            fontFamily: 'sans-serif',
-            lineHeight: 1.2,
-          }}
-        >
-          Ask Aura
-        </h1>
-        <p
-          style={{
-            fontSize: 12,
-            color: 'var(--as-text-muted, #94a3b8)',
-            marginTop: 4,
-            fontFamily: 'sans-serif',
-          }}
-        >
-          Your personal Panchang & timing guide •{' '}
-          <span
-            style={{
-              color: 'var(--as-abhijit, #4ade80)',
-              fontFamily: 'monospace',
-              fontWeight: 600,
-            }}
-          >
-            {activeWindow.replace(/_/g, ' ').toUpperCase()}
-          </span>
-        </p>
+      <PageHeader
+        title="Ask Aura ✨"
+        subtitle="Your personal timing guide"
+      />
+
+      {/* Current context -- a small supporting line, not a bordered card
+       * (brief section 44/45: "current-context card too large" was one of
+       * the diagnosed issues; once a conversation starts it recedes further
+       * by dropping to a single inline line). */}
+      <div style={{ display: 'flex', alignItems: 'baseline', gap: spacing.sm, flexWrap: 'wrap' }}>
+        <span style={typography.sectionEyebrow}>Now</span>
+        <strong style={{ fontSize: 13, color: colors.textSecondary }}>{activeWindow.replace(/_/g, ' ')}</strong>
+        {!hasConversationStarted && <span style={{ fontSize: 12, color: colors.textMuted }}>· Current Panchang window in {cityName}</span>}
       </div>
 
-      {/* Structured current context */}
-      <div style={{ background: 'var(--as-surface-raised, #0f172a)', border: '1px solid rgba(74, 222, 128, 0.25)', borderRadius: 14, padding: 14 }}>
-        <div style={{ fontSize: 10, color: '#4ade80', textTransform: 'uppercase', letterSpacing: '0.05em', fontWeight: 800 }}>Now</div>
-        <div style={{ display: 'flex', alignItems: 'baseline', gap: 8, marginTop: 6 }}>
-          <strong style={{ fontSize: 15, color: '#f8fafc' }}>{activeWindow.replace(/_/g, ' ')}</strong>
-          <span style={{ fontSize: 11, color: '#b6c2d1' }}>Current Panchang window</span>
-        </div>
-        <div style={{ fontSize: 11, color: '#dbe7f4', marginTop: 5, lineHeight: 1.4 }}>
-          Ask about an activity, the best time today, or what to focus on next.
-        </div>
-      </div>
-
-      <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-        <span style={{ fontSize: 10, color: '#38bdf8', textTransform: 'uppercase', letterSpacing: '0.05em', fontWeight: 800 }}>Aura suggests</span>
-        <button
-          type="button"
-          disabled={loading}
-          onClick={() => handleSend(promptChips[0])}
-          style={{ background: 'rgba(56, 189, 248, 0.08)', border: '1px solid rgba(56, 189, 248, 0.22)', borderRadius: 10, padding: '11px 12px', textAlign: 'left', color: '#e2e8f0', fontSize: 12, fontWeight: 700, cursor: loading ? 'default' : 'pointer', opacity: loading ? 0.6 : 1 }}
-        >
-          {promptChips[0]}
-          <span style={{ display: 'block', color: '#94a3b8', fontSize: 10, fontWeight: 400, marginTop: 4 }}>Get a recommendation based on your current window.</span>
-        </button>
-      </div>
-
-      {/* Chat History Container */}
+      {/* Chat -- always rendered (the greeting is message[0]), but only
+       * grows into a real scrolling transcript once a real exchange exists;
+       * before that it's just the single calm greeting line, never a big
+       * empty reserved panel (brief section 44). */}
       <div
-        style={{
-          background: 'var(--as-surface-raised, #0f172a)',
-          border: '1px solid var(--as-border, #1e293b)',
-          borderRadius: 16,
-          padding: 16,
-          minHeight: 240,
-          maxHeight: 340,
-          overflowY: 'auto',
-          display: 'flex',
-          flexDirection: 'column',
-          gap: 12,
-        }}
+        style={
+          hasConversationStarted
+            ? {
+                background: colors.surfaceSubtle,
+                border: `1px solid ${colors.borderSubtle}`,
+                borderRadius: radius.lg,
+                padding: spacing.lg,
+                maxHeight: 420,
+                overflowY: 'auto',
+                display: 'flex',
+                flexDirection: 'column',
+                gap: spacing.md,
+              }
+            : { display: 'flex', flexDirection: 'column', gap: spacing.md }
+        }
       >
-        {messages.map((msg, index) => (
+        {(hasConversationStarted ? messages : messages.slice(0, 1)).map((msg, index) => (
           <div
             key={index}
             style={{
@@ -390,94 +357,99 @@ export function AskAuraView({
         <div ref={chatEndRef} />
       </div>
 
-      {/* Quick Prompt Chips */}
-      <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-        <span
-          style={{
-            fontSize: 10,
-            fontFamily: 'monospace',
-            textTransform: 'uppercase',
-            color: 'var(--as-text-muted, #94a3b8)',
-            letterSpacing: '0.05em',
-            fontWeight: 600,
-          }}
-        >
-          Suggested Inquiries
-        </span>
-        <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
-          {promptChips.map((chip) => (
-            <button
-              type="button"
-              key={chip}
-              disabled={loading}
-              onClick={() => {
-                if (onQuickPromptClick) onQuickPromptClick(chip);
-                handleSend(chip);
-              }}
-              style={{
-                background: 'var(--as-surface-raised, #0f172a)',
-                border: '1px solid var(--as-border, #1e293b)',
-                borderRadius: 10,
-                padding: '10px 14px',
-                textAlign: 'left',
-                color: 'var(--as-text, #e2e8f0)',
-                fontSize: 12,
-                fontWeight: 600,
-                fontFamily: 'sans-serif',
-                cursor: loading ? 'default' : 'pointer',
-                display: 'flex',
-                justifyContent: 'space-between',
-                alignItems: 'center',
-                opacity: loading ? 0.6 : 1,
-              }}
-            >
-              <span>{chip}</span>
-              <span style={{ color: 'var(--as-text-muted)', fontSize: 14 }}>
-                ›
-              </span>
-            </button>
-          ))}
+      {/* Suggestions -- ONE consolidated section (brief section 43/44/45:
+       * "duplicate suggestion sections" was a diagnosed issue -- the old
+       * "Aura suggests" hero chip and "Suggested Inquiries" list were the
+       * same promptChips array shown twice). Capped to 4 with a "Show
+       * more" reveal; disappears entirely once a real conversation exists
+       * so it never competes with the transcript for attention. */}
+      {!hasConversationStarted && (
+        <div style={{ display: 'flex', flexDirection: 'column', gap: spacing.sm }}>
+          <span style={typography.sectionEyebrow}>What would you like help with?</span>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: spacing.xs }}>
+            {(showAllPrompts ? promptChips : promptChips.slice(0, 4)).map((chip) => (
+              <button
+                type="button"
+                key={chip}
+                disabled={loading}
+                onClick={() => {
+                  if (onQuickPromptClick) onQuickPromptClick(chip);
+                  handleSend(chip);
+                }}
+                style={{
+                  background: colors.surfaceSubtle,
+                  border: `1px solid ${colors.borderSubtle}`,
+                  borderRadius: radius.md,
+                  padding: '12px 14px',
+                  textAlign: 'left',
+                  color: colors.textSecondary,
+                  fontSize: 13,
+                  fontWeight: 650,
+                  fontFamily: 'sans-serif',
+                  cursor: loading ? 'default' : 'pointer',
+                  display: 'flex',
+                  justifyContent: 'space-between',
+                  alignItems: 'center',
+                  opacity: loading ? 0.6 : 1,
+                }}
+              >
+                <span>{chip}</span>
+                <span style={{ color: colors.textMuted, fontSize: 14 }}>›</span>
+              </button>
+            ))}
+          </div>
+          {!showAllPrompts && promptChips.length > 4 && (
+            <TextButton onClick={() => setShowAllPrompts(true)} color={colors.textMuted} style={{ alignSelf: 'flex-start' }}>
+              Show more →
+            </TextButton>
+          )}
         </div>
-      </div>
+      )}
 
-      {recentQuestions.length > 0 && (
-        <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
-          <span style={{ fontSize: 10, fontFamily: 'monospace', textTransform: 'uppercase', color: '#94a3b8', letterSpacing: '0.05em', fontWeight: 600 }}>Recent</span>
+      {!hasConversationStarted && recentQuestions.length > 0 && (
+        <div style={{ display: 'flex', flexDirection: 'column', gap: spacing.xs }}>
+          <span style={typography.sectionEyebrow}>Recent</span>
           {recentQuestions.map((question, index) => (
-            <button key={`${question.text}-${index}`} type="button" disabled={loading} onClick={() => handleSend(question.text)} style={{ background: 'transparent', border: 'none', color: '#b6c2d1', fontSize: 11, textAlign: 'left', padding: '2px 0', cursor: loading ? 'default' : 'pointer' }}>
+            <button key={`${question.text}-${index}`} type="button" disabled={loading} onClick={() => handleSend(question.text)} style={{ background: 'transparent', border: 'none', color: colors.textFaint, fontSize: 12, textAlign: 'left', padding: '2px 0', cursor: loading ? 'default' : 'pointer' }}>
               {question.text}
             </button>
           ))}
         </div>
       )}
 
-      {/* Input Bar */}
+      {/* Input Bar (brief section 47: prominent, calm, modern; 44px+
+       * target; visible focus). */}
       <div
         style={{
           display: 'flex',
           alignItems: 'center',
-          background: 'var(--as-surface-raised, #0f172a)',
-          border: '1px solid var(--as-border, #1e293b)',
-          borderRadius: 24,
-          padding: '6px 6px 6px 14px',
-          marginTop: 4,
+          minHeight: 52,
+          background: colors.surfaceSubtle,
+          border: `1px solid ${isInputFocused ? colors.borderFocus : colors.borderSubtle}`,
+          borderRadius: radius.pill,
+          padding: '6px 6px 6px 16px',
+          marginTop: spacing.xs,
+          boxSizing: 'border-box',
         }}
       >
         <input
           type="text"
-          placeholder="Ask anything..."
+          placeholder="Ask Aura anything..."
           value={input}
           disabled={loading}
+          onFocus={() => setIsInputFocused(true)}
+          onBlur={() => setIsInputFocused(false)}
           onChange={(e) => setInput(e.target.value)}
           onKeyDown={(e) => e.key === 'Enter' && handleSend()}
           style={{
             background: 'none',
             border: 'none',
-            color: 'var(--as-text, #fff)',
-            fontSize: 12,
+            color: colors.textPrimary,
+            fontSize: 14,
             fontFamily: 'sans-serif',
             outline: 'none',
             flex: 1,
+            minWidth: 0,
           }}
         />
         <button
@@ -486,17 +458,19 @@ export function AskAuraView({
           disabled={!canSendInput}
           aria-label="Send message"
           style={{
-            background: 'var(--as-abhijit, #4ade80)',
+            background: colors.positive,
             border: 'none',
-            borderRadius: '50%',
-            width: 32,
-            height: 32,
+            borderRadius: radius.pill,
+            width: 38,
+            height: 38,
+            flexShrink: 0,
             display: 'flex',
             alignItems: 'center',
             justifyContent: 'center',
             cursor: canSendInput ? 'pointer' : 'default',
-            color: '#020617',
+            color: colors.textInverse,
             fontWeight: 700,
+            fontSize: 16,
             opacity: canSendInput ? 1 : 0.5,
           }}
         >
