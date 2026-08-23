@@ -110,15 +110,35 @@ function formatMomentTimeRange(startIso: string, endIso: string, timezone: strin
   return `${fmt(startIso)} – ${fmt(endIso)}`;
 }
 
-function responseText(moment: SharedMomentRow): { text: string; color: string } {
-  if (moment.status === 'REVOKED') return { text: 'Revoked', color: '#64748b' };
-  if (moment.responseState === 'ACCEPTED') return { text: "❤️ They're in", color: '#4ade80' };
+interface StatusPill {
+  icon: string;
+  text: string;
+  color: string;
+  bg: string;
+  border: string;
+  /** Whether this state earns the card's subtle green left-edge accent --
+   * every "resolved positively" state (accepted, or an alternative already
+   * suggested), never waiting/requested/revoked. */
+  positive: boolean;
+}
+
+/** Same decision tree as before (Your Moments redesign only restyles this
+ * into a pill -- REVOKED/ACCEPTED/ANOTHER_TIME(+hasSuccessor)/waiting logic
+ * is unchanged), now returning enough to render a subtle pill instead of
+ * plain colored text. */
+function getStatusPill(moment: SharedMomentRow): StatusPill {
+  if (moment.status === 'REVOKED') {
+    return { icon: '⏸', text: 'Revoked', color: '#94a3b8', bg: 'rgba(148, 163, 184, 0.08)', border: 'rgba(148, 163, 184, 0.2)', positive: false };
+  }
+  if (moment.responseState === 'ACCEPTED') {
+    return { icon: '❤️', text: "They're in", color: '#4ade80', bg: 'rgba(74, 222, 128, 0.1)', border: 'rgba(74, 222, 128, 0.28)', positive: true };
+  }
   if (moment.responseState === 'ANOTHER_TIME') {
     return moment.hasSuccessor
-      ? { text: '✓ Alternative suggested', color: '#4ade80' }
-      : { text: '↻ Another time requested', color: '#facc15' };
+      ? { icon: '✓', text: 'Alternative suggested', color: '#4ade80', bg: 'rgba(74, 222, 128, 0.1)', border: 'rgba(74, 222, 128, 0.28)', positive: true }
+      : { icon: '↻', text: 'Another time requested', color: '#facc15', bg: 'rgba(250, 204, 21, 0.08)', border: 'rgba(250, 204, 21, 0.22)', positive: false };
   }
-  return { text: 'Waiting for response', color: '#94a3b8' };
+  return { icon: '🕐', text: 'Waiting for response', color: '#93a5c4', bg: 'rgba(148, 163, 184, 0.08)', border: 'rgba(148, 163, 184, 0.2)', positive: false };
 }
 
 export function SharedMomentsView({ onBack, onSeen, focusMomentToken, embedded }: SharedMomentsViewProps) {
@@ -209,6 +229,37 @@ export function SharedMomentsView({ onBack, onSeen, focusMomentToken, embedded }
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 16, paddingBottom: 24, fontFamily: 'sans-serif', color: '#f8fafc' }}>
+      {/* Plain <style> (not styled-jsx's `<style jsx>`) so this type-checks
+       * under the plain-Node ts-node harness the view-logic tests use, not
+       * just Next's own build -- rendered once here, not once per
+       * MomentCard, since the class names below are specific enough not to
+       * need per-instance scoping. */}
+      <style>{`
+        .aura-moment-card {
+          transition: border-color 180ms ease, filter 180ms ease;
+        }
+        .aura-moment-card:hover {
+          border-color: rgba(96, 165, 250, 0.34);
+          filter: brightness(1.06);
+        }
+        .aura-moment-action {
+          transition: filter 180ms ease;
+        }
+        .aura-moment-action:hover {
+          filter: brightness(1.3);
+          text-decoration: underline;
+        }
+        .aura-moment-actions .aura-moment-action:not(:last-child) {
+          padding-right: 11px;
+          border-right: 1px solid rgba(148, 163, 184, 0.18);
+        }
+        .aura-moment-chevron {
+          transition: color 180ms ease;
+        }
+        .aura-moment-chevron:hover {
+          color: #cbd5e1;
+        }
+      `}</style>
       <div style={{ display: 'flex', alignItems: 'flex-start', gap: 12 }}>
         {!embedded && onBack && (
           <button type="button" onClick={onBack} aria-label="Back" style={backButtonStyle}>
@@ -220,8 +271,8 @@ export function SharedMomentsView({ onBack, onSeen, focusMomentToken, embedded }
           {/* Section 20: "Shared Moments" -> "Your Moments" -- the concept is
            * now universal (Plan and Muhurtham both create AuraMoments), not
            * specific to sharing with a partner. */}
-          <h1 style={{ fontSize: embedded ? 16 : 20, fontWeight: 700, margin: 0, lineHeight: 1.2 }}>Your Moments</h1>
-          {!embedded && <p style={{ fontSize: 12, color: '#94a3b8', marginTop: 4 }}>Moments you&apos;ve created and their responses.</p>}
+          <h1 style={{ fontSize: embedded ? 22 : 26, fontWeight: 800, margin: 0, lineHeight: 1.2, color: '#f8fafc' }}>Your Moments</h1>
+          <p style={{ fontSize: 13, color: '#94a3b8', marginTop: 5 }}>Plans you&apos;ve shared or been invited to.</p>
         </div>
       </div>
 
@@ -299,6 +350,13 @@ export function SharedMomentsView({ onBack, onSeen, focusMomentToken, embedded }
           );
         })()
       )}
+
+      {moments && moments.length > 0 && (
+        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 6, marginTop: 4, color: '#64748b', fontSize: 11.5 }}>
+          <span aria-hidden="true">🛡</span>
+          <span>Shared links are private and only accessible to people you share them with.</span>
+        </div>
+      )}
     </div>
   );
 }
@@ -352,7 +410,7 @@ function MomentCard({
   onCancelDelete?: () => void;
   onConfirmDelete?: () => void;
 }) {
-  const response = responseText(moment);
+  const pill = getStatusPill(moment);
   const [alternatives, setAlternatives] = useState<AlternativesOutcome | null>(null);
   const [loadingAlternatives, setLoadingAlternatives] = useState(false);
   const [alternativesError, setAlternativesError] = useState('');
@@ -414,67 +472,79 @@ function MomentCard({
   };
 
   return (
-    <section style={{ ...cardStyle, padding: 18 }}>
-      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: 10 }}>
-        <div style={{ display: 'flex', alignItems: 'flex-start', gap: 12, minWidth: 0 }}>
+    <section className="aura-moment-card" style={{ ...cardStyle, padding: 20, borderLeftWidth: pill.positive ? 3 : 1, borderLeftColor: pill.positive ? '#4ade80' : undefined }}>
+      <div style={{ display: 'flex', alignItems: 'flex-start', gap: 14, flexWrap: 'wrap' }}>
+        <div style={{ display: 'flex', alignItems: 'flex-start', gap: 14, flex: '1 1 220px', minWidth: 0 }}>
           <div style={momentIconCircleStyle}>{moment.activityIcon ?? '✨'}</div>
-          <div style={{ minWidth: 0 }}>
-            <div style={{ fontSize: 15, fontWeight: 800 }}>{moment.activityTitle}</div>
-            <div style={{ fontSize: 12, color: '#94a3b8', marginTop: 3 }}>
+          <div style={{ minWidth: 0, flex: 1 }}>
+            <div style={{ fontSize: 16, fontWeight: 800, color: '#f8fafc' }}>{moment.activityTitle}</div>
+            <div style={{ fontSize: 12.5, color: '#94a3b8', marginTop: 4 }}>
               {formatMomentDateLabel(moment.startAt, moment.timezone)}
               {moment.sharedPersonDisplayName ? ` · with ${moment.sharedPersonDisplayName}` : ''}
             </div>
+
+            {moment.responseState === 'ANOTHER_TIME' && moment.responsePreference && (
+              <div style={{ marginTop: 8, fontSize: 12, color: '#dbe7f4' }}>
+                <span style={{ color: '#94a3b8' }}>Preference: </span>
+                <span style={{ fontWeight: 800 }}>{PREFERENCE_TEXT[moment.responsePreference]}</span>
+              </div>
+            )}
+
+            <div className="aura-moment-actions" style={{ display: 'flex', alignItems: 'center', gap: 10, marginTop: 12, flexWrap: 'wrap' }}>
+              <button type="button" onClick={onView} className="aura-moment-action" style={{ ...momentActionStyle, color: '#38bdf8' }}>
+                <span aria-hidden="true">👁</span> View
+              </button>
+              <button type="button" onClick={onCopy} className="aura-moment-action" style={{ ...momentActionStyle, color: '#38bdf8' }}>
+                <span aria-hidden="true">🔗</span> {copied ? 'Copied ✓' : 'Copy link'}
+              </button>
+              {moment.status === 'ACTIVE' && (
+                confirmingRevoke ? (
+                  <>
+                    <button type="button" onClick={onConfirmRevoke} disabled={revoking} className="aura-moment-action" style={{ ...momentActionStyle, color: '#fb6b6b' }}>
+                      {revoking ? 'Revoking…' : 'Confirm revoke'}
+                    </button>
+                    <button type="button" onClick={onCancelRevoke} className="aura-moment-action" style={momentActionStyle}>
+                      Cancel
+                    </button>
+                  </>
+                ) : (
+                  <button type="button" onClick={onRequestRevoke} className="aura-moment-action" style={{ ...momentActionStyle, color: '#fb6b6b' }}>
+                    <span aria-hidden="true">🗑</span> Revoke
+                  </button>
+                )
+              )}
+              {moment.status === 'REVOKED' && onRequestDelete && (
+                confirmingDelete ? (
+                  <>
+                    <button type="button" onClick={onConfirmDelete} disabled={deleting} className="aura-moment-action" style={{ ...momentActionStyle, color: '#fb6b6b' }}>
+                      {deleting ? 'Removing…' : 'Confirm remove'}
+                    </button>
+                    <button type="button" onClick={onCancelDelete} className="aura-moment-action" style={momentActionStyle}>
+                      Cancel
+                    </button>
+                  </>
+                ) : (
+                  <button type="button" onClick={onRequestDelete} className="aura-moment-action" style={{ ...momentActionStyle, color: '#fb6b6b' }}>
+                    <span aria-hidden="true">🗑</span> Remove
+                  </button>
+                )
+              )}
+            </div>
           </div>
         </div>
-        <span style={{ fontSize: 12, fontWeight: 800, color: response.color, whiteSpace: 'nowrap', flexShrink: 0 }}>{response.text}</span>
-      </div>
 
-      {moment.responseState === 'ANOTHER_TIME' && moment.responsePreference && (
-        <div style={{ marginTop: 10, fontSize: 12, color: '#dbe7f4' }}>
-          <span style={{ color: '#94a3b8' }}>Preference: </span>
-          <span style={{ fontWeight: 800 }}>{PREFERENCE_TEXT[moment.responsePreference]}</span>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexShrink: 0 }}>
+          <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6, fontSize: 12, fontWeight: 800, color: pill.color, background: pill.bg, border: `1px solid ${pill.border}`, borderRadius: 999, padding: '5px 11px', whiteSpace: 'nowrap' }}>
+            <span aria-hidden="true">{pill.icon}</span>
+            {pill.text}
+          </span>
+          {/* Reuses the exact same View handler -- a visual "this can be
+             opened" affordance, not a second interaction model. The card
+             itself stays non-clickable so it never fights View/Copy/Revoke. */}
+          <button type="button" onClick={onView} className="aura-moment-chevron" aria-label={`Open ${moment.activityTitle}`} style={{ border: 'none', background: 'transparent', color: '#94a3b8', fontSize: 22, lineHeight: 1, cursor: 'pointer', padding: 0 }}>
+            ›
+          </button>
         </div>
-      )}
-
-      <div style={{ display: 'flex', gap: 14, marginTop: 12, flexWrap: 'wrap' }}>
-        <button type="button" onClick={onView} style={linkButtonStyle}>
-          View →
-        </button>
-        <button type="button" onClick={onCopy} style={linkButtonStyle}>
-          {copied ? 'Copied ✓' : 'Copy link'}
-        </button>
-        {moment.status === 'ACTIVE' && (
-          confirmingRevoke ? (
-            <>
-              <button type="button" onClick={onConfirmRevoke} disabled={revoking} style={{ ...linkButtonStyle, color: '#fb6b6b' }}>
-                {revoking ? 'Revoking…' : 'Confirm revoke'}
-              </button>
-              <button type="button" onClick={onCancelRevoke} style={linkButtonStyle}>
-                Cancel
-              </button>
-            </>
-          ) : (
-            <button type="button" onClick={onRequestRevoke} style={{ ...linkButtonStyle, color: '#fb6b6b' }}>
-              Revoke
-            </button>
-          )
-        )}
-        {moment.status === 'REVOKED' && onRequestDelete && (
-          confirmingDelete ? (
-            <>
-              <button type="button" onClick={onConfirmDelete} disabled={deleting} style={{ ...linkButtonStyle, color: '#fb6b6b' }}>
-                {deleting ? 'Removing…' : 'Confirm remove'}
-              </button>
-              <button type="button" onClick={onCancelDelete} style={linkButtonStyle}>
-                Cancel
-              </button>
-            </>
-          ) : (
-            <button type="button" onClick={onRequestDelete} style={{ ...linkButtonStyle, color: '#fb6b6b' }}>
-              Remove
-            </button>
-          )
-        )}
       </div>
 
       {canFindAnotherTime && !alternatives && !suggested && (
@@ -539,17 +609,31 @@ const cardStyle: React.CSSProperties = theme.panelStyle;
 // icon-circle treatment Upcoming Plans already uses, at a slightly smaller
 // size since this list is intentionally simpler/denser.
 const momentIconCircleStyle: React.CSSProperties = {
-  width: 40,
-  height: 40,
+  width: 48,
+  height: 48,
   flexShrink: 0,
-  borderRadius: 20,
+  borderRadius: 24,
   background: 'rgba(96, 165, 250, 0.12)',
   border: '1px solid rgba(96, 165, 250, 0.22)',
   display: 'flex',
   alignItems: 'center',
   justifyContent: 'center',
-  fontSize: 18,
+  fontSize: 21,
 };
+
+const momentActionStyle: React.CSSProperties = {
+  border: 'none',
+  background: 'transparent',
+  color: '#dbe7f4',
+  fontSize: 12.5,
+  fontWeight: 750,
+  cursor: 'pointer',
+  padding: 0,
+  display: 'inline-flex',
+  alignItems: 'center',
+  gap: 5,
+};
+
 const backButtonStyle: React.CSSProperties = theme.backButtonStyle;
 const errorBoxStyle: React.CSSProperties = theme.errorBoxStyle;
 const linkButtonStyle: React.CSSProperties = theme.linkButtonStyle;
