@@ -17,7 +17,19 @@ export interface ActionCard {
   description: string; // Updated from reasoning for direct UI mapping
   reasoning?: string;   // Retained for backward compatibility
   icon?: string;
+  /** Good Right Now Actions V1 -- links this window-flavor card to a real
+   * canonical catalog activity (including task-1..7, which ARE full
+   * ActivityDefinition entries even though they're not momentEligible) so
+   * Home can resolve immediateAction/duration from ActivityDefinition
+   * instead of the card's own display copy. Omitted only for the two cards
+   * with no existing catalog counterpart (a generic "meal" concept doesn't
+   * exist) -- see immediateAction below for those. */
   activityId?: string;
+  /** Only meaningful when activityId is absent -- the catalog is the
+   * source of truth (brief section 3) whenever a real activityId exists;
+   * this is strictly a fallback for the handful of cards with no catalog
+   * counterpart to link to. */
+  immediateAction?: 'LOG_NOW' | 'START_NOW';
   significance?: 'LOW' | 'MEDIUM' | 'HIGH';
   requiresFreshStart?: boolean;
   aliases?: string[];
@@ -34,6 +46,7 @@ const ACTION_CARDS: Record<SolarWindowType, ActionCard[]> = {
       description: 'Pre-dawn window favors low-strain movement and mental clarity over intensity.',
       reasoning: 'Pre-dawn window favors low-strain movement and mental clarity over intensity.',
       icon: '🧘',
+      activityId: 'task-3', // "Breathwork & Strategic Visioning" -- START_NOW
     },
     {
       id: 'brahma-focus',
@@ -42,6 +55,7 @@ const ACTION_CARDS: Record<SolarWindowType, ActionCard[]> = {
       description: 'Quiet hours before sunrise are well suited to deep, uninterrupted thinking.',
       reasoning: 'Quiet hours before sunrise are well suited to deep, uninterrupted thinking.',
       icon: '✍️',
+      activityId: 'deep-work', // BOTH
     },
     {
       id: 'brahma-hydrate',
@@ -50,6 +64,7 @@ const ACTION_CARDS: Record<SolarWindowType, ActionCard[]> = {
       description: 'A simple, low-effort way to start the daily streak.',
       reasoning: 'A simple, low-effort way to start the daily streak.',
       icon: '💧',
+      activityId: 'task-6', // "Active Rest & Hydration Check" -- LOG_NOW
     },
   ],
   ABHIJIT: [
@@ -60,6 +75,7 @@ const ACTION_CARDS: Record<SolarWindowType, ActionCard[]> = {
       description: 'Peak solar window — best alignment for maximum physical output.',
       reasoning: 'Peak solar window — best alignment for maximum physical output.',
       icon: '🏋️',
+      activityId: 'workout', // BOTH
     },
     {
       id: 'abhijit-meal',
@@ -68,6 +84,10 @@ const ACTION_CARDS: Record<SolarWindowType, ActionCard[]> = {
       description: 'Solar noon aligns with peak digestive capacity.',
       reasoning: 'Solar noon aligns with peak digestive capacity.',
       icon: '🍲',
+      // No generic solo "meal" activity exists in the catalog and adding
+      // one solely for this card's action semantics isn't warranted --
+      // logging that you ate is inherently instantaneous either way.
+      immediateAction: 'LOG_NOW',
     },
     {
       id: 'abhijit-focus',
@@ -76,6 +96,7 @@ const ACTION_CARDS: Record<SolarWindowType, ActionCard[]> = {
       description: 'Highest-leverage window for demanding cognitive work.',
       reasoning: 'Highest-leverage window for demanding cognitive work.',
       icon: '⚡',
+      activityId: 'deep-work', // BOTH
     },
   ],
   RAHU_KALAM: [
@@ -86,6 +107,7 @@ const ACTION_CARDS: Record<SolarWindowType, ActionCard[]> = {
       description: 'Traditionally a high-friction window — good for low-risk, routine tasks only.',
       reasoning: 'Traditionally a high-friction window — good for low-risk, routine tasks only.',
       icon: '🛡️',
+      activityId: 'task-6', // "Active Rest & Hydration Check" -- LOG_NOW
     },
     {
       id: 'rahu-break',
@@ -94,6 +116,7 @@ const ACTION_CARDS: Record<SolarWindowType, ActionCard[]> = {
       description: 'Short break rather than pushing through friction.',
       reasoning: 'Short break rather than pushing through friction.',
       icon: '☕',
+      activityId: 'tea-break', // LOG_NOW
     },
     {
       id: 'rahu-hydrate',
@@ -102,6 +125,7 @@ const ACTION_CARDS: Record<SolarWindowType, ActionCard[]> = {
       description: 'Keep momentum with something low-stakes.',
       reasoning: 'Keep momentum with something low-stakes.',
       icon: '🫖',
+      activityId: 'tea-break', // LOG_NOW
     },
   ],
   GULIKA: [
@@ -112,6 +136,7 @@ const ACTION_CARDS: Record<SolarWindowType, ActionCard[]> = {
       description: 'Good window for compounding, lower-intensity conditioning.',
       reasoning: 'Good window for compounding, lower-intensity conditioning.',
       icon: '🚶',
+      activityId: 'workout', // BOTH
     },
     {
       id: 'gulika-skill',
@@ -120,6 +145,7 @@ const ACTION_CARDS: Record<SolarWindowType, ActionCard[]> = {
       description: 'Traditionally associated with steady, compounding growth.',
       reasoning: 'Traditionally associated with steady, compounding growth.',
       icon: '📚',
+      activityId: 'learning', // BOTH
     },
     {
       id: 'gulika-social',
@@ -128,6 +154,7 @@ const ACTION_CARDS: Record<SolarWindowType, ActionCard[]> = {
       description: 'Good window to step out and reconnect before the day winds down.',
       reasoning: 'Good window to step out and reconnect before the day winds down.',
       icon: '💬',
+      activityId: 'tea-break', // LOG_NOW
     },
   ],
   YAMA: [
@@ -138,6 +165,7 @@ const ACTION_CARDS: Record<SolarWindowType, ActionCard[]> = {
       description: 'Traditionally a caution window; better for wrapping up than starting.',
       reasoning: 'Traditionally a caution window; better for wrapping up than starting.',
       icon: '🐢',
+      activityId: 'task-6', // "Active Rest & Hydration Check" -- LOG_NOW
     },
     {
       id: 'yama-lightmeal',
@@ -146,6 +174,8 @@ const ACTION_CARDS: Record<SolarWindowType, ActionCard[]> = {
       description: 'Keep it light rather than a full meal in this window.',
       reasoning: 'Keep it light rather than a full meal in this window.',
       icon: '🍏',
+      // Same reasoning as abhijit-meal above -- no catalog counterpart.
+      immediateAction: 'LOG_NOW',
     },
     {
       id: 'yama-break',
@@ -154,6 +184,7 @@ const ACTION_CARDS: Record<SolarWindowType, ActionCard[]> = {
       description: 'Low-effort reset to bridge into the next window.',
       reasoning: 'Low-effort reset to bridge into the next window.',
       icon: '🧘',
+      activityId: 'task-7', // "Light Stretch & Mobility" -- START_NOW
     },
   ],
   NEUTRAL: [
@@ -164,6 +195,7 @@ const ACTION_CARDS: Record<SolarWindowType, ActionCard[]> = {
       description: 'No special solar window active right now — business as usual.',
       reasoning: 'No special solar window active right now — business as usual.',
       icon: '🎯',
+      activityId: 'deep-work', // BOTH
     },
     {
       id: 'neutral-break',
@@ -172,6 +204,7 @@ const ACTION_CARDS: Record<SolarWindowType, ActionCard[]> = {
       description: 'Good default to keep the ultradian rhythm on track.',
       reasoning: 'Good default to keep the ultradian rhythm on track.',
       icon: '🚶',
+      activityId: 'task-7', // "Light Stretch & Mobility" -- START_NOW
     },
     {
       id: 'neutral-hydrate',
@@ -180,6 +213,7 @@ const ACTION_CARDS: Record<SolarWindowType, ActionCard[]> = {
       description: 'Simple, always-available action to log.',
       reasoning: 'Simple, always-available action to log.',
       icon: '💧',
+      activityId: 'task-6', // "Active Rest & Hydration Check" -- LOG_NOW
     },
   ],
 };

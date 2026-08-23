@@ -33,7 +33,8 @@ export type ProductEventName =
   | 'AURA_MOMENT_ANOTHER_TIME'
   | 'AURA_MOMENT_ALTERNATIVE_CREATED'
   | 'AURA_MOMENT_FIND_YOUR_OWN_CLICKED'
-  | 'REMINDER_OPENED';
+  | 'REMINDER_OPENED'
+  | 'ACTIVITY_LOGGED_NOW';
 
 export const PRODUCT_EVENT_NAMES: ProductEventName[] = [
   'AURA_HOME_VIEWED',
@@ -54,6 +55,7 @@ export const PRODUCT_EVENT_NAMES: ProductEventName[] = [
   'AURA_MOMENT_ALTERNATIVE_CREATED',
   'AURA_MOMENT_FIND_YOUR_OWN_CLICKED',
   'REMINDER_OPENED',
+  'ACTIVITY_LOGGED_NOW',
 ];
 
 export function isProductEventName(value: string): value is ProductEventName {
@@ -82,6 +84,14 @@ export const CLIENT_TRACKED_EVENTS: ReadonlySet<ProductEventName> = new Set<Prod
   // reminders are recomputed on every GET /api/aura-updates, so a naive
   // "surfaced" event would fire on every poll).
   'REMINDER_OPENED',
+  // Good Right Now Actions V1 (brief section 19) -- handleLogActivity()
+  // (page.tsx) is deliberately optimistic/offline-resilient and never
+  // surfaces server DB success/failure to its caller (queues locally on
+  // any failure instead of throwing), so there is no reliable point to
+  // track this server-side at the moment of DB success the way
+  // AURA_MOMENT_CREATED is. Tracked as a UI intent signal instead, the same
+  // convention as every other CLIENT_TRACKED_EVENTS entry.
+  'ACTIVITY_LOGGED_NOW',
 ]);
 
 // Fields that must NEVER appear in ProductEvent.metadata, under any event,
@@ -130,6 +140,13 @@ const PLANNING_MODE_VALUES = new Set(['EVERYDAY', 'IMPORTANT', 'CEREMONIAL']);
 // Aura Reminders V1 (brief section 12): the only two reminder types -- lead
 // time is data (leadTimeMinutes below), not a distinct type per lead time.
 const SCHEDULED_ITEM_TYPE_VALUES = new Set(['PLANNED_ACTIVITY', 'AURA_MOMENT']);
+// Good Right Now Actions V1 (brief section 19) -- deliberately its own
+// vocabulary, not a reuse of SOURCE_VALUES above (PLAN | MUHURTHAM means
+// "which search flow produced this AuraMoment", an unrelated concept to
+// "which screen initiated this activity log").
+const LOG_ORIGIN_VALUES = new Set(['HOME']);
+const WINDOW_TYPE_VALUES = new Set(['BRAHMA', 'ABHIJIT', 'RAHU_KALAM', 'GULIKA', 'YAMA', 'NEUTRAL']);
+const IMMEDIATE_ACTION_TYPE_VALUES = new Set(['LOG_NOW', 'START_NOW']);
 
 type FieldSchema =
   | { type: 'enum'; values: Set<string> }
@@ -205,6 +222,15 @@ const EVENT_METADATA_SCHEMAS: Record<ProductEventName, Record<string, FieldSchem
   REMINDER_OPENED: {
     scheduledItemType: { type: 'enum', values: SCHEDULED_ITEM_TYPE_VALUES },
     leadTimeMinutes: { type: 'number', min: 0, max: 120 },
+  },
+  ACTIVITY_LOGGED_NOW: {
+    // Omitted for the two Good Right Now cards with no catalog counterpart
+    // (see actionCards.ts's abhijit-meal/yama-lightmeal) -- validation only
+    // runs on keys that are actually present.
+    activityId: activityIdField,
+    source: { type: 'enum', values: LOG_ORIGIN_VALUES },
+    windowType: { type: 'enum', values: WINDOW_TYPE_VALUES },
+    actionType: { type: 'enum', values: IMMEDIATE_ACTION_TYPE_VALUES },
   },
 };
 

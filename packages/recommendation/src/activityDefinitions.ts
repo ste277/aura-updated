@@ -54,6 +54,26 @@ export type ActivityStatus = 'CANONICAL' | 'AMBIGUOUS' | 'LEGACY_ALIAS';
  */
 export type PlanningMode = 'EVERYDAY' | 'IMPORTANT' | 'CEREMONIAL';
 
+/**
+ * Good Right Now Actions V1 -- the canonical "what does tapping this
+ * activity actually do right now" behavior (brief section 2/3), replacing
+ * Home's previous "every card routes to Plan" behavior with intentional
+ * per-activity semantics:
+ *   LOG_NOW   -- effectively instantaneous (hydration, tea/coffee, a quick
+ *                check-in). One tap, immediately logged, no duration choice.
+ *   START_NOW -- has real duration but can be done immediately (Deep Work,
+ *                Workout, a short walk). Logs a start-now entry using the
+ *                activity's own default/suggested duration -- see
+ *                HomeDashboard's GoodRightNowCard for why this app has no
+ *                running-session/timer model to log an *actual* duration.
+ *   PLAN      -- future-oriented or occasion-like (Date Night, Griha
+ *                Pravesh); routes into the existing Plan flow, unchanged.
+ *   BOTH      -- can be started immediately OR planned for later (Deep
+ *                Work, Workout, Learning) -- the UI offers START_NOW as the
+ *                primary action with a small "Plan for later" secondary.
+ */
+export type ImmediateAction = 'LOG_NOW' | 'START_NOW' | 'PLAN' | 'BOTH';
+
 export interface ActivityExperience {
   /** Whether this activity is offered as a Plan/Muhurtham RESULT the user
    * can turn into an AuraMoment (brief section 3: "An Aura Moment is a
@@ -70,6 +90,11 @@ export interface ActivityExperience {
   planningMode: PlanningMode;
   defaultDurationMinutes?: number;
   suggestedDurations?: number[];
+  /** See ImmediateAction's own doc comment above for the four values.
+   * Hand-authored per activity in ACTIVITY_METADATA below (or computed by
+   * defaultImmediateActionFor() for any future catalog entry with no
+   * explicit override) -- never inferred from title text at render time. */
+  immediateAction: ImmediateAction;
 }
 
 export interface ActivityDefinition {
@@ -107,6 +132,10 @@ export interface ActivityDefinition {
  * See the completion report for activities whose family/intent mapping is
  * genuinely ambiguous (New Beginning, Financial Decision, High-Stakes
  * Decision or Pitch).
+ *
+ * Good Right Now Actions V1 also added `immediateAction` here for every
+ * entry -- see the completion report for the handful genuinely ambiguous
+ * between BOTH and PLAN (Walk Together, Catch Up).
  */
 type ActivityMetadataInput = {
   family: MuhurtaFamily;
@@ -114,6 +143,7 @@ type ActivityMetadataInput = {
   evaluationDepth: MuhurtaClassification['evaluationDepth'];
   timingSensitivity: TimingSensitivity;
   socialMode: SocialMode;
+  immediateAction?: ImmediateAction;
   /** Overrides activity.significance when the catalog's existing value is a
    * poor proxy for genuine Muhurta significance (see 'workout' below for
    * why this exists). Omit to reuse activity.significance as-is. */
@@ -159,6 +189,7 @@ const ACTIVITY_METADATA: Record<string, ActivityMetadataInput> = {
     socialMode: 'GROUP',
     status: 'AMBIGUOUS',
     notes: 'Spans decision-making and pitching. Candidate to split into IMPORTANT_DECISION and PITCH activities; IMPORTANT_DECISION used as the interim broader intent.',
+    immediateAction: 'PLAN',
   },
   'task-2': {
     // "Sprint Backlog Execution"
@@ -167,6 +198,7 @@ const ACTIVITY_METADATA: Record<string, ActivityMetadataInput> = {
     evaluationDepth: 'STANDARD',
     timingSensitivity: { start: 'MEDIUM', duration: 'MEDIUM', end: 'LOW' },
     socialMode: 'SOLO',
+    immediateAction: 'BOTH',
   },
   'task-3': {
     // "Breathwork & Strategic Visioning" — MEDITATION captures the
@@ -181,6 +213,7 @@ const ACTIVITY_METADATA: Record<string, ActivityMetadataInput> = {
     socialMode: 'SOLO',
     status: 'AMBIGUOUS',
     notes: 'Spans breathwork (MEDITATION) and strategic visioning (reserved STRATEGIC_PLANNING intent). Candidate to split into two activities later.',
+    immediateAction: 'START_NOW',
   },
   'task-4': {
     // "Deep Architecture & Writing"
@@ -189,6 +222,7 @@ const ACTIVITY_METADATA: Record<string, ActivityMetadataInput> = {
     evaluationDepth: 'STANDARD',
     timingSensitivity: { start: 'MEDIUM', duration: 'MEDIUM', end: 'LOW' },
     socialMode: 'SOLO',
+    immediateAction: 'BOTH',
   },
   'task-5': {
     // "Process Optimization & Docs"
@@ -197,22 +231,29 @@ const ACTIVITY_METADATA: Record<string, ActivityMetadataInput> = {
     evaluationDepth: 'LIGHT',
     timingSensitivity: { start: 'LOW', duration: 'LOW', end: 'LOW' },
     socialMode: 'SOLO',
+    immediateAction: 'START_NOW',
   },
   'task-6': {
-    // "Active Rest & Hydration Check"
+    // "Active Rest & Hydration Check" -- Good Right Now Actions V1 reuses
+    // this EXISTING id for Home's "Hydration check" card (see
+    // actionCards.ts) rather than adding a new catalog entry for the same
+    // concept.
     family: 'HEALTH',
     intent: 'RECOVERY',
     evaluationDepth: 'LIGHT',
     timingSensitivity: { start: 'LOW', duration: 'LOW', end: 'LOW' },
     socialMode: 'SOLO',
+    immediateAction: 'LOG_NOW',
   },
   'task-7': {
-    // "Light Stretch & Mobility"
+    // "Light Stretch & Mobility" -- reused by Good Right Now Actions V1 for
+    // Home's "Short walk or stretch" card (see actionCards.ts).
     family: 'HEALTH',
     intent: 'RECOVERY',
     evaluationDepth: 'LIGHT',
     timingSensitivity: { start: 'LOW', duration: 'LOW', end: 'LOW' },
     socialMode: 'SOLO',
+    immediateAction: 'START_NOW',
   },
 
   // -- EXTENDED_ACTIVITY_CATALOG --
@@ -222,6 +263,7 @@ const ACTIVITY_METADATA: Record<string, ActivityMetadataInput> = {
     evaluationDepth: 'DEEP',
     timingSensitivity: { start: 'HIGH', duration: 'MEDIUM', end: 'LOW' },
     socialMode: 'ANY',
+    immediateAction: 'PLAN',
   },
   'deep-work': {
     family: 'WORK',
@@ -229,6 +271,7 @@ const ACTIVITY_METADATA: Record<string, ActivityMetadataInput> = {
     evaluationDepth: 'STANDARD',
     timingSensitivity: { start: 'MEDIUM', duration: 'MEDIUM', end: 'LOW' },
     socialMode: 'SOLO',
+    immediateAction: 'BOTH',
   },
   workout: {
     // The catalog's own `significance: 'HIGH'` reflects planner priority,
@@ -241,6 +284,7 @@ const ACTIVITY_METADATA: Record<string, ActivityMetadataInput> = {
     timingSensitivity: { start: 'LOW', duration: 'MEDIUM', end: 'LOW' },
     socialMode: 'SOLO',
     significance: 'MEDIUM',
+    immediateAction: 'BOTH',
   },
   'tea-break': {
     // Kept under HEALTH/RECOVERY for now; candidate to move to a future
@@ -252,6 +296,7 @@ const ACTIVITY_METADATA: Record<string, ActivityMetadataInput> = {
     timingSensitivity: { start: 'LOW', duration: 'LOW', end: 'LOW' },
     socialMode: 'ANY',
     notes: 'Candidate to move to a future REST_ROUTINE / BREAK concept distinct from HEALTH.',
+    immediateAction: 'LOG_NOW',
   },
   dating: {
     family: 'RELATIONSHIP',
@@ -259,6 +304,7 @@ const ACTIVITY_METADATA: Record<string, ActivityMetadataInput> = {
     evaluationDepth: 'STANDARD',
     timingSensitivity: { start: 'MEDIUM', duration: 'LOW', end: 'LOW' },
     socialMode: 'PAIR',
+    immediateAction: 'PLAN',
   },
   party: {
     family: 'SOCIAL',
@@ -266,6 +312,7 @@ const ACTIVITY_METADATA: Record<string, ActivityMetadataInput> = {
     evaluationDepth: 'LIGHT',
     timingSensitivity: { start: 'LOW', duration: 'LOW', end: 'LOW' },
     socialMode: 'GROUP',
+    immediateAction: 'PLAN',
   },
   'financial-decision': {
     // Aliases span investment, contract signing, and loans (property
@@ -279,6 +326,7 @@ const ACTIVITY_METADATA: Record<string, ActivityMetadataInput> = {
     socialMode: 'ANY',
     legacyBroadIntent: true,
     notes: 'Remains CANONICAL and fully supported for financial decisions generally (investment, contract signing, loans). Prefer property-purchase when the more specific PROPERTY_PURCHASE intent resolves (brief section 11).',
+    immediateAction: 'PLAN',
   },
   'new-beginning': {
     // Deliberately generic in the existing catalog (new project, habit,
@@ -295,6 +343,7 @@ const ACTIVITY_METADATA: Record<string, ActivityMetadataInput> = {
     status: 'LEGACY_ALIAS',
     legacyBroadIntent: true,
     notes: 'Too broad for a canonical activity (could mean a business, home, relationship, or generic project start). Kept as a backward-compatible alias to WORK/PROJECT_START; prefer business-start/griha-pravesh/engagement when one of those more specific intents resolves (brief section 11).',
+    immediateAction: 'PLAN',
   },
   learning: {
     family: 'EDUCATION',
@@ -302,6 +351,7 @@ const ACTIVITY_METADATA: Record<string, ActivityMetadataInput> = {
     evaluationDepth: 'STANDARD',
     timingSensitivity: { start: 'LOW', duration: 'MEDIUM', end: 'LOW' },
     socialMode: 'SOLO',
+    immediateAction: 'BOTH',
   },
 
   // -- New explicit occasion activities (see personalizedTasks.ts and the
@@ -314,6 +364,7 @@ const ACTIVITY_METADATA: Record<string, ActivityMetadataInput> = {
     timingSensitivity: { start: 'HIGH', duration: 'MEDIUM', end: 'LOW' },
     socialMode: 'ANY',
     notes: 'Tithi/Nakshatra reuse NEW_BEGINNING\'s existing family-level rule data as a base (see muhurtaRulePacks.ts FAMILY_BASE_SOURCE) -- new-beginning\'s own notes already name BUSINESS_START as one of the narrower intents that data was standing in for. REUSABLE_BASE_RULE, not invented.',
+    immediateAction: 'PLAN',
   },
   'property-purchase': {
     family: 'FINANCE',
@@ -322,6 +373,7 @@ const ACTIVITY_METADATA: Record<string, ActivityMetadataInput> = {
     timingSensitivity: { start: 'HIGH', duration: 'LOW', end: 'LOW' },
     socialMode: 'ANY',
     notes: 'Tithi/Nakshatra reuse FINANCE\'s existing family-level rule data as a base -- financial-decision\'s own aliases already included "property purchase" before this PR split it out. REUSABLE_BASE_RULE, a strong-fit reuse.',
+    immediateAction: 'PLAN',
   },
   engagement: {
     family: 'RELATIONSHIP',
@@ -330,6 +382,7 @@ const ACTIVITY_METADATA: Record<string, ActivityMetadataInput> = {
     timingSensitivity: { start: 'HIGH', duration: 'MEDIUM', end: 'LOW' },
     socialMode: 'PAIR',
     notes: 'CEREMONIAL depth requires dedicated (IMPLEMENTED) Tithi/Nakshatra coverage to reach SUPPORTED (brief section 8). Currently only has RELATIONSHIP\'s family-level base (authored for casual dating, not a ceremonial engagement) -- REUSABLE_BASE_RULE, not sufficient evidence on its own, so this resolves to PARTIAL support and is hidden from Muhurtham Finder until dedicated data is added.',
+    immediateAction: 'PLAN',
   },
   'griha-pravesh': {
     family: 'HOME',
@@ -338,6 +391,7 @@ const ACTIVITY_METADATA: Record<string, ActivityMetadataInput> = {
     timingSensitivity: { start: 'HIGH', duration: 'MEDIUM', end: 'LOW' },
     socialMode: 'FAMILY',
     notes: 'No existing family-level rule data legitimately targets a home-entry ceremony (HOME has no MuhurtaRulePack base -- see muhurtaRulePacks.ts). Tithi/Nakshatra coverage is honestly MISSING rather than borrowed from an unrelated family (e.g. ADMIN); resolves to PARTIAL support and is hidden from Muhurtham Finder until dedicated data is added.',
+    immediateAction: 'PLAN',
   },
 
   // -- Product Structure V2: everyday moments -- every entry below is
@@ -350,25 +404,36 @@ const ACTIVITY_METADATA: Record<string, ActivityMetadataInput> = {
   // ceremonial occasion's commencement-instant precision -- and HIGH only
   // for road-trip/day-trip, which (like start-journey) genuinely have a
   // "departure moment."
-  'date-night': { family: 'RELATIONSHIP', intent: 'DATE', evaluationDepth: 'STANDARD', timingSensitivity: { start: 'MEDIUM', duration: 'LOW', end: 'LOW' }, socialMode: 'PAIR', suggestedDurations: [90, 120, 150] },
-  'dinner-date': { family: 'RELATIONSHIP', intent: 'DATE', evaluationDepth: 'STANDARD', timingSensitivity: { start: 'MEDIUM', duration: 'LOW', end: 'LOW' }, socialMode: 'PAIR', suggestedDurations: [60, 90, 120] },
-  'coffee-tea': { family: 'SOCIAL', intent: 'CASUAL_HANGOUT', evaluationDepth: 'LIGHT', timingSensitivity: { start: 'LOW', duration: 'LOW', end: 'LOW' }, socialMode: 'ANY', suggestedDurations: [30, 45, 60] },
-  'movie-night': { family: 'SOCIAL', intent: 'CASUAL_HANGOUT', evaluationDepth: 'LIGHT', timingSensitivity: { start: 'LOW', duration: 'LOW', end: 'LOW' }, socialMode: 'ANY', suggestedDurations: [120, 150, 180] },
-  'walk-together': { family: 'SOCIAL', intent: 'CASUAL_HANGOUT', evaluationDepth: 'LIGHT', timingSensitivity: { start: 'LOW', duration: 'LOW', end: 'LOW' }, socialMode: 'ANY', suggestedDurations: [30, 45, 60] },
-  'family-dinner': { family: 'SOCIAL', intent: 'FAMILY_GATHERING', evaluationDepth: 'STANDARD', timingSensitivity: { start: 'MEDIUM', duration: 'LOW', end: 'LOW' }, socialMode: 'FAMILY', suggestedDurations: [60, 90, 120] },
-  'family-outing': { family: 'SOCIAL', intent: 'FAMILY_GATHERING', evaluationDepth: 'STANDARD', timingSensitivity: { start: 'MEDIUM', duration: 'LOW', end: 'LOW' }, socialMode: 'FAMILY', suggestedDurations: [120, 180, 240] },
-  'visit-family': { family: 'SOCIAL', intent: 'FAMILY_GATHERING', evaluationDepth: 'STANDARD', timingSensitivity: { start: 'MEDIUM', duration: 'LOW', end: 'LOW' }, socialMode: 'FAMILY', suggestedDurations: [60, 90, 120] },
-  'family-movie-night': { family: 'SOCIAL', intent: 'FAMILY_GATHERING', evaluationDepth: 'LIGHT', timingSensitivity: { start: 'LOW', duration: 'LOW', end: 'LOW' }, socialMode: 'FAMILY', suggestedDurations: [120, 150, 180] },
-  'dinner-with-friends': { family: 'SOCIAL', intent: 'CASUAL_HANGOUT', evaluationDepth: 'STANDARD', timingSensitivity: { start: 'MEDIUM', duration: 'LOW', end: 'LOW' }, socialMode: 'GROUP', suggestedDurations: [90, 120, 150] },
-  'catch-up': { family: 'SOCIAL', intent: 'CASUAL_HANGOUT', evaluationDepth: 'LIGHT', timingSensitivity: { start: 'LOW', duration: 'LOW', end: 'LOW' }, socialMode: 'PAIR', suggestedDurations: [45, 60, 90] },
-  'game-night': { family: 'SOCIAL', intent: 'CASUAL_HANGOUT', evaluationDepth: 'LIGHT', timingSensitivity: { start: 'LOW', duration: 'LOW', end: 'LOW' }, socialMode: 'GROUP', suggestedDurations: [120, 150, 180] },
-  'birthday-party': { family: 'SOCIAL', intent: 'CELEBRATION', evaluationDepth: 'STANDARD', timingSensitivity: { start: 'MEDIUM', duration: 'LOW', end: 'LOW' }, socialMode: 'GROUP', suggestedDurations: [120, 180, 240] },
-  'anniversary-dinner': { family: 'RELATIONSHIP', intent: 'DATE', evaluationDepth: 'STANDARD', timingSensitivity: { start: 'MEDIUM', duration: 'LOW', end: 'LOW' }, socialMode: 'PAIR', suggestedDurations: [90, 120, 150] },
-  'celebration-dinner': { family: 'SOCIAL', intent: 'CELEBRATION', evaluationDepth: 'STANDARD', timingSensitivity: { start: 'MEDIUM', duration: 'LOW', end: 'LOW' }, socialMode: 'GROUP', suggestedDurations: [90, 120, 150] },
-  'road-trip': { family: 'TRAVEL', intent: 'OUTING', evaluationDepth: 'STANDARD', timingSensitivity: { start: 'HIGH', duration: 'MEDIUM', end: 'LOW' }, socialMode: 'ANY', suggestedDurations: [240, 360, 480], notes: 'Distinct from start-journey (IMPORTANT/DEEP): a casual weekend road trip, not an important journey or relocation.' },
-  'day-trip': { family: 'TRAVEL', intent: 'OUTING', evaluationDepth: 'STANDARD', timingSensitivity: { start: 'HIGH', duration: 'MEDIUM', end: 'LOW' }, socialMode: 'ANY', suggestedDurations: [240, 300, 360] },
-  picnic: { family: 'TRAVEL', intent: 'OUTING', evaluationDepth: 'LIGHT', timingSensitivity: { start: 'LOW', duration: 'LOW', end: 'LOW' }, socialMode: 'ANY', suggestedDurations: [90, 120, 150] },
-  'shopping-trip': { family: 'TRAVEL', intent: 'OUTING', evaluationDepth: 'LIGHT', timingSensitivity: { start: 'LOW', duration: 'LOW', end: 'LOW' }, socialMode: 'ANY', suggestedDurations: [60, 90, 120] },
+  //
+  // Good Right Now Actions V1: every entry below is immediateAction PLAN --
+  // each one is inherently CONNECT-natured (needs another person's time
+  // coordinated, or is a dedicated outing) rather than an instantaneous
+  // solo action. walk-together and catch-up have their immediateAction
+  // choice flagged as genuinely debatable in the completion report (see
+  // their own inline comments below) -- NOT the same thing as this file's
+  // `status: 'AMBIGUOUS'` (that axis is reserved for family/intent
+  // classification ambiguity): both are LIGHT/short enough that
+  // START_NOW/BOTH reads plausibly if the other person is already present,
+  // but PLAN was kept as the safer default since neither can assume that.
+  'date-night': { family: 'RELATIONSHIP', intent: 'DATE', evaluationDepth: 'STANDARD', timingSensitivity: { start: 'MEDIUM', duration: 'LOW', end: 'LOW' }, socialMode: 'PAIR', suggestedDurations: [90, 120, 150], immediateAction: 'PLAN' },
+  'dinner-date': { family: 'RELATIONSHIP', intent: 'DATE', evaluationDepth: 'STANDARD', timingSensitivity: { start: 'MEDIUM', duration: 'LOW', end: 'LOW' }, socialMode: 'PAIR', suggestedDurations: [60, 90, 120], immediateAction: 'PLAN' },
+  'coffee-tea': { family: 'SOCIAL', intent: 'CASUAL_HANGOUT', evaluationDepth: 'LIGHT', timingSensitivity: { start: 'LOW', duration: 'LOW', end: 'LOW' }, socialMode: 'ANY', suggestedDurations: [30, 45, 60], immediateAction: 'PLAN' },
+  'movie-night': { family: 'SOCIAL', intent: 'CASUAL_HANGOUT', evaluationDepth: 'LIGHT', timingSensitivity: { start: 'LOW', duration: 'LOW', end: 'LOW' }, socialMode: 'ANY', suggestedDurations: [120, 150, 180], immediateAction: 'PLAN' },
+  'walk-together': { family: 'SOCIAL', intent: 'CASUAL_HANGOUT', evaluationDepth: 'LIGHT', timingSensitivity: { start: 'LOW', duration: 'LOW', end: 'LOW' }, socialMode: 'ANY', suggestedDurations: [30, 45, 60], immediateAction: 'PLAN' }, // immediateAction ambiguous (not a MuhurtaClassification/status-level ambiguity): PLAN was chosen as the safer default, but a walk together is short enough that START_NOW/BOTH is plausible when the other person is already present -- flagged in the Good Right Now Actions V1 completion report, not promoted to `status: AMBIGUOUS` (that axis is reserved for family/intent classification ambiguity, a different concern).
+  'family-dinner': { family: 'SOCIAL', intent: 'FAMILY_GATHERING', evaluationDepth: 'STANDARD', timingSensitivity: { start: 'MEDIUM', duration: 'LOW', end: 'LOW' }, socialMode: 'FAMILY', suggestedDurations: [60, 90, 120], immediateAction: 'PLAN' },
+  'family-outing': { family: 'SOCIAL', intent: 'FAMILY_GATHERING', evaluationDepth: 'STANDARD', timingSensitivity: { start: 'MEDIUM', duration: 'LOW', end: 'LOW' }, socialMode: 'FAMILY', suggestedDurations: [120, 180, 240], immediateAction: 'PLAN' },
+  'visit-family': { family: 'SOCIAL', intent: 'FAMILY_GATHERING', evaluationDepth: 'STANDARD', timingSensitivity: { start: 'MEDIUM', duration: 'LOW', end: 'LOW' }, socialMode: 'FAMILY', suggestedDurations: [60, 90, 120], immediateAction: 'PLAN' },
+  'family-movie-night': { family: 'SOCIAL', intent: 'FAMILY_GATHERING', evaluationDepth: 'LIGHT', timingSensitivity: { start: 'LOW', duration: 'LOW', end: 'LOW' }, socialMode: 'FAMILY', suggestedDurations: [120, 150, 180], immediateAction: 'PLAN' },
+  'dinner-with-friends': { family: 'SOCIAL', intent: 'CASUAL_HANGOUT', evaluationDepth: 'STANDARD', timingSensitivity: { start: 'MEDIUM', duration: 'LOW', end: 'LOW' }, socialMode: 'GROUP', suggestedDurations: [90, 120, 150], immediateAction: 'PLAN' },
+  'catch-up': { family: 'SOCIAL', intent: 'CASUAL_HANGOUT', evaluationDepth: 'LIGHT', timingSensitivity: { start: 'LOW', duration: 'LOW', end: 'LOW' }, socialMode: 'PAIR', suggestedDurations: [45, 60, 90], immediateAction: 'PLAN' }, // immediateAction ambiguous: PLAN was chosen as the safer default, but a spontaneous catch-up is short enough that START_NOW/BOTH is plausible -- flagged in the Good Right Now Actions V1 completion report, not promoted to `status: AMBIGUOUS`.
+  'game-night': { family: 'SOCIAL', intent: 'CASUAL_HANGOUT', evaluationDepth: 'LIGHT', timingSensitivity: { start: 'LOW', duration: 'LOW', end: 'LOW' }, socialMode: 'GROUP', suggestedDurations: [120, 150, 180], immediateAction: 'PLAN' },
+  'birthday-party': { family: 'SOCIAL', intent: 'CELEBRATION', evaluationDepth: 'STANDARD', timingSensitivity: { start: 'MEDIUM', duration: 'LOW', end: 'LOW' }, socialMode: 'GROUP', suggestedDurations: [120, 180, 240], immediateAction: 'PLAN' },
+  'anniversary-dinner': { family: 'RELATIONSHIP', intent: 'DATE', evaluationDepth: 'STANDARD', timingSensitivity: { start: 'MEDIUM', duration: 'LOW', end: 'LOW' }, socialMode: 'PAIR', suggestedDurations: [90, 120, 150], immediateAction: 'PLAN' },
+  'celebration-dinner': { family: 'SOCIAL', intent: 'CELEBRATION', evaluationDepth: 'STANDARD', timingSensitivity: { start: 'MEDIUM', duration: 'LOW', end: 'LOW' }, socialMode: 'GROUP', suggestedDurations: [90, 120, 150], immediateAction: 'PLAN' },
+  'road-trip': { family: 'TRAVEL', intent: 'OUTING', evaluationDepth: 'STANDARD', timingSensitivity: { start: 'HIGH', duration: 'MEDIUM', end: 'LOW' }, socialMode: 'ANY', suggestedDurations: [240, 360, 480], notes: 'Distinct from start-journey (IMPORTANT/DEEP): a casual weekend road trip, not an important journey or relocation.', immediateAction: 'PLAN' },
+  'day-trip': { family: 'TRAVEL', intent: 'OUTING', evaluationDepth: 'STANDARD', timingSensitivity: { start: 'HIGH', duration: 'MEDIUM', end: 'LOW' }, socialMode: 'ANY', suggestedDurations: [240, 300, 360], immediateAction: 'PLAN' },
+  picnic: { family: 'TRAVEL', intent: 'OUTING', evaluationDepth: 'LIGHT', timingSensitivity: { start: 'LOW', duration: 'LOW', end: 'LOW' }, socialMode: 'ANY', suggestedDurations: [90, 120, 150], immediateAction: 'PLAN' },
+  'shopping-trip': { family: 'TRAVEL', intent: 'OUTING', evaluationDepth: 'LIGHT', timingSensitivity: { start: 'LOW', duration: 'LOW', end: 'LOW' }, socialMode: 'ANY', suggestedDurations: [60, 90, 120], immediateAction: 'PLAN' },
 };
 
 /** Best-effort metadata for a catalog activity with no explicit entry above
@@ -387,6 +452,18 @@ function fallbackMetadataFor(activity: ActivityProfile): ActivityMetadataInput {
       : { start: 'LOW', duration: 'LOW', end: 'LOW' },
     socialMode: 'ANY',
   };
+}
+
+/** Good Right Now Actions V1: only reached for a future catalog activity
+ * with no explicit ACTIVITY_METADATA entry above (every activity in
+ * today's catalog has one) -- a conservative default, not a classifier.
+ * DEEP/CEREMONIAL depth (IMPORTANT/CEREMONIAL planningMode) is inherently
+ * future-oriented, so it defaults to PLAN; anything lighter defaults to
+ * BOTH (safe since Plan already remains available as the secondary
+ * action -- never LOG_NOW/START_NOW-only, which would hide Plan for an
+ * activity nobody has actually classified yet). */
+function defaultImmediateActionFor(evaluationDepth: MuhurtaClassification['evaluationDepth']): ImmediateAction {
+  return evaluationDepth === 'DEEP' || evaluationDepth === 'CEREMONIAL' ? 'PLAN' : 'BOTH';
 }
 
 /**
@@ -425,6 +502,7 @@ function buildActivityDefinition(activity: ActivityProfile): ActivityDefinition 
       planningMode: planningModeForDepth(metadata.evaluationDepth),
       defaultDurationMinutes: activity.defaultDurationMinutes,
       suggestedDurations: metadata.suggestedDurations,
+      immediateAction: metadata.immediateAction ?? defaultImmediateActionFor(metadata.evaluationDepth),
     },
   };
 }
@@ -523,6 +601,11 @@ export function resolveActivityDefinition(taskTitle: string): ActivityResolution
         // -- momentEligible false, distinct from every real catalog id.
         momentEligible: false,
         planningMode: 'EVERYDAY',
+        // Unknown free text has no real basis for LOG_NOW/START_NOW/PLAN --
+        // BOTH is the safe default (matches defaultImmediateActionFor for
+        // this same STANDARD evaluationDepth): never hides Plan, which
+        // remains correct for literally anything.
+        immediateAction: 'BOTH',
       },
       muhurta: {
         family,

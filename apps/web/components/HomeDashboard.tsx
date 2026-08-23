@@ -1,14 +1,16 @@
 'use client';
 
 import React, { useEffect, useMemo, useRef, useState } from 'react';
-import { getPersonalizedTasks, UserChartContext } from '../../../packages/recommendation/src/personalizedTasks';
-import { getActionCards } from '../../../packages/recommendation/src/actionCards';
+import { getPersonalizedTasks, UserChartContext, FULL_ACTIVITY_CATALOG, normalizeWindowType } from '../../../packages/recommendation/src/personalizedTasks';
+import { getActionCards, ActionCard } from '../../../packages/recommendation/src/actionCards';
+import { getActivityDefinition, ImmediateAction } from '../../../packages/recommendation/src/activityDefinitions';
 import type { DailyBriefing } from '../../../packages/recommendation/src/dailyAssistant';
 import type { AuraUpdate } from '../lib/auraUpdates';
 import type { AuraReminder } from '../lib/auraReminders';
 import { formatReminderTiming } from '../lib/auraReminders';
 import { triggerHaptic } from '../lib/haptics';
 import { stripCountdownWrapper } from '../lib/formatTimeLeft';
+import { trackEvent } from '../lib/trackEvent';
 import * as theme from './theme';
 
 interface HomeDashboardProps {
@@ -578,11 +580,13 @@ export function HomeDashboard({
           </div>
           <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, minmax(0, 1fr))', gap: 9, marginTop: 13 }}>
             {goodRightNow.map((card) => (
-              <button key={card.id} type="button" onClick={() => onPlanClick?.(card.title)} style={goodRightNowCardStyle}>
-                <span style={{ fontSize: 20 }}>{card.icon ?? '✨'}</span>
-                <span style={{ marginTop: 8, color: '#f8fafc', fontSize: 12, fontWeight: 800, lineHeight: 1.3 }}>{card.title}</span>
-                <span style={{ marginTop: 4, color: '#94a3b8', fontSize: 10.5, lineHeight: 1.35, display: '-webkit-box', WebkitLineClamp: 2, WebkitBoxOrient: 'vertical', overflow: 'hidden' }}>{card.description}</span>
-              </button>
+              <GoodRightNowCard
+                key={card.id}
+                card={card}
+                activeWindowName={activeWindowName}
+                onLogActivity={onLogActivity}
+                onPlanClick={onPlanClick}
+              />
             ))}
           </div>
         </div>
@@ -900,6 +904,134 @@ function StartingSoonCard({ reminder, onOpen }: { reminder: AuraReminder; onOpen
   );
 }
 
+// Good Right Now Actions V1 -- a deliberately small, fixed duration for
+// LOG_NOW activities (hydration, tea/coffee, a quick check-in): the
+// existing HabitLog model has no "durationless" concept, so this is the
+// smallest honest placeholder, distinct from the 30-minute default meant
+// for genuinely timed activities.
+const LOG_NOW_DURATION_MINUTES = 5;
+
+/**
+ * Good Right Now Actions V1 -- replaces the previous "every card routes to
+ * Plan" behavior with canonical per-activity action semantics (brief
+ * section 5/6). `card.activityId`, when present, resolves to a real
+ * ActivityDefinition via getActivityDefinition() -- never a title regex --
+ * whose `experience.immediateAction` decides LOG_NOW / START_NOW / PLAN /
+ * BOTH. The two cards with no catalog counterpart (a generic "meal") carry
+ * their own explicit `card.immediateAction` fallback instead (see
+ * actionCards.ts).
+ *
+ * LOG_NOW and START_NOW both reuse the EXACT SAME onLogActivity pipeline
+ * Timeline already logs through (brief section 7: "reuse existing activity
+ * logging pipeline... do not create another logging implementation") --
+ * this component only decides which duration/copy to use, never how a log
+ * is persisted. There is no real running-session/timer model anywhere in
+ * this app (audited: HabitLog stores a single fixed durationMinutes, no
+ * start/stop pair) -- see the completion report for why START_NOW
+ * therefore logs immediately using the activity's own default/suggested
+ * duration rather than opening a timer (brief section 9/10's documented V1
+ * fallback), and for the extension point a future real timer would hook
+ * into.
+ */
+function GoodRightNowCard({
+  card,
+  activeWindowName,
+  onLogActivity,
+  onPlanClick,
+}: {
+  card: ActionCard;
+  activeWindowName: string;
+  onLogActivity?: HomeDashboardProps['onLogActivity'];
+  onPlanClick?: (activity?: string) => void;
+}) {
+  const [status, setStatus] = useState<'idle' | 'loading' | 'logged' | 'error'>('idle');
+  const [loggedAtLabel, setLoggedAtLabel] = useState('');
+
+  const definition = card.activityId ? getActivityDefinition(card.activityId) : undefined;
+  const action: ImmediateAction = definition?.experience.immediateAction ?? card.immediateAction ?? 'LOG_NOW';
+  // The real catalog title (e.g. "Deep Work"), not this card's own
+  // window-flavor copy (e.g. "Regular work block") -- passing the window
+  // copy into Plan's existing free-text prefill would silently fail to
+  // match any catalog alias and fall through to the fallback classifier.
+  const catalogTitle = card.activityId ? FULL_ACTIVITY_CATALOG.find((activity) => activity.id === card.activityId)?.title : undefined;
+  const planTitle = catalogTitle ?? card.title;
+
+  const handleImmediateAction = async (type: 'LOG_NOW' | 'START_NOW') => {
+    if (status === 'loading' || !onLogActivity) return;
+    setStatus('loading');
+    try {
+      const durationMinutes = type === 'START_NOW'
+        ? definition?.experience.defaultDurationMinutes ?? definition?.experience.suggestedDurations?.[0] ?? 30
+        : LOG_NOW_DURATION_MINUTES;
+      // overrideWindowType reuses the CURRENT structured window (brief
+      // section 13) already known here as a prop, never re-inferred from a
+      // display string -- Insights/window distribution then sees this log
+      // exactly like a Timeline-created one (brief section 14).
+      await onLogActivity(planTitle, undefined, undefined, activeWindowName, durationMinutes, 'AURA_DO_NOW', definition?.muhurta.significance);
+      setStatus('logged');
+      setLoggedAtLabel(new Date().toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' }));
+      triggerHaptic('success');
+      trackEvent('ACTIVITY_LOGGED_NOW', {
+        metadata: {
+          ...(card.activityId ? { activityId: card.activityId } : {}),
+          source: 'HOME',
+          windowType: normalizeWindowType(activeWindowName),
+          actionType: type,
+        },
+      });
+    } catch {
+      // handleLogActivity (page.tsx) is itself optimistic/offline-resilient
+      // and rarely rejects -- this mainly guards the case onLogActivity is
+      // missing entirely. See the completion report for why a genuine
+      // server failure has no reliable signal to surface here today.
+      setStatus('error');
+    }
+  };
+
+  if (status === 'logged') {
+    return (
+      <div style={goodRightNowCardStyle}>
+        <span style={{ fontSize: 20 }}>{card.icon ?? '✨'}</span>
+        <span style={{ marginTop: 8, color: '#f8fafc', fontSize: 12, fontWeight: 800, lineHeight: 1.3 }}>{card.title}</span>
+        <span style={{ marginTop: 'auto', paddingTop: 8, color: '#4ade80', fontSize: 11, fontWeight: 850 }}>✓ Logged at {loggedAtLabel}</span>
+      </div>
+    );
+  }
+
+  return (
+    <div style={goodRightNowCardStyle}>
+      <span style={{ fontSize: 20 }}>{card.icon ?? '✨'}</span>
+      <span style={{ marginTop: 8, color: '#f8fafc', fontSize: 12, fontWeight: 800, lineHeight: 1.3 }}>{card.title}</span>
+      <span style={{ marginTop: 4, color: '#94a3b8', fontSize: 10.5, lineHeight: 1.35, display: '-webkit-box', WebkitLineClamp: 2, WebkitBoxOrient: 'vertical', overflow: 'hidden' }}>{card.description}</span>
+      <div style={{ marginTop: 'auto', paddingTop: 8, width: '100%' }}>
+        {action === 'PLAN' ? (
+          <button type="button" onClick={() => onPlanClick?.(planTitle)} style={goodRightNowActionButtonStyle} aria-label={`Plan ${planTitle}`}>
+            Plan
+          </button>
+        ) : (
+          <>
+            <button
+              type="button"
+              onClick={() => handleImmediateAction(action === 'BOTH' ? 'START_NOW' : action)}
+              disabled={status === 'loading'}
+              style={{ ...goodRightNowActionButtonStyle, opacity: status === 'loading' ? 0.6 : 1, cursor: status === 'loading' ? 'default' : 'pointer' }}
+              aria-label={`${action === 'LOG_NOW' ? 'Log' : 'Start'} ${planTitle} now`}
+            >
+              {status === 'loading' ? 'Logging…' : action === 'LOG_NOW' ? 'Log now' : 'Start now'}
+            </button>
+            {action === 'BOTH' && (
+              <button type="button" onClick={() => onPlanClick?.(planTitle)} style={goodRightNowSecondaryLinkStyle} aria-label={`Plan ${planTitle} for later`}>
+                Plan for later →
+              </button>
+            )}
+          </>
+        )}
+        {status === 'error' && <div style={{ color: '#fb7185', fontSize: 10, marginTop: 5 }}>Couldn&apos;t log. Try again.</div>}
+      </div>
+    </div>
+  );
+}
+
 function ReflectionButton({ label, icon, disabled, onClick }: { label: string; icon: string; disabled?: boolean; onClick: () => void }) {
   return (
     <button type="button" disabled={disabled} onClick={onClick} style={{ minHeight: 54, borderRadius: 10, border: '1px solid rgba(148, 163, 184, 0.22)', background: 'rgba(2, 6, 23, 0.36)', color: '#f8fafc', fontSize: 13, fontWeight: 850, cursor: disabled ? 'default' : 'pointer', opacity: disabled ? 0.55 : 1 }}>
@@ -1168,17 +1300,54 @@ const pairGridStyle: React.CSSProperties = {
   alignItems: 'stretch',
 };
 
+// Good Right Now Actions V1: was a single clickable <button> wrapping the
+// whole card (routed everything to Plan); now a plain container with its
+// own real action button(s) inside (brief section 21: "Do not make the
+// entire card clickable if the card contains more than one possible
+// action"). minHeight grew to fit the new action row -- same 3-column grid,
+// same card footprint otherwise, so this stays an action-semantics change,
+// not a layout redesign.
 const goodRightNowCardStyle: React.CSSProperties = {
   display: 'flex',
   flexDirection: 'column',
   alignItems: 'flex-start',
   textAlign: 'left',
-  minHeight: 92,
+  minHeight: 132,
   border: '1px solid rgba(148, 163, 184, 0.18)',
   borderRadius: 12,
   background: 'rgba(2, 6, 23, 0.4)',
   padding: '11px 10px',
+};
+
+// One primary action per card (brief section 6: never "Log now | Start now
+// | Plan" all at once) -- full-width within the card so it stays legible
+// down to 375px without needing two side-by-side buttons (brief section 22).
+const goodRightNowActionButtonStyle: React.CSSProperties = {
+  width: '100%',
+  minHeight: 30,
+  border: '1px solid rgba(74, 222, 128, 0.35)',
+  borderRadius: 8,
+  background: 'rgba(74, 222, 128, 0.12)',
+  color: '#4ade80',
+  fontSize: 11,
+  fontWeight: 850,
   cursor: 'pointer',
+};
+
+// BOTH activities only (brief section 22): a small text link under the
+// primary button, never a second equal-weight button.
+const goodRightNowSecondaryLinkStyle: React.CSSProperties = {
+  display: 'block',
+  width: '100%',
+  textAlign: 'center',
+  marginTop: 6,
+  border: 'none',
+  background: 'transparent',
+  color: '#94a3b8',
+  fontSize: 10,
+  fontWeight: 750,
+  cursor: 'pointer',
+  padding: 0,
 };
 
 const askAuraCtaStyle: React.CSSProperties = {
