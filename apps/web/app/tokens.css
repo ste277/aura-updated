@@ -1,10 +1,63 @@
 :root {
+  /* ============================================================
+   * Aura UI Experience V2 -- the semantic token layer every screen's
+   * shared primitives (components/ui/*) read from. Existing --as-bg/
+   * --as-surface/--as-surface-raised/--as-text/--as-text-muted/--as-border
+   * and the Panchang window-accent variables below are UNCHANGED (still
+   * read directly by several screens) -- this only ADDS the fuller
+   * semantic set the design system needed: a second background step, a
+   * subtle/focus border pair, a full text scale, and named action colors
+   * with "soft" (low-opacity background) variants for badges/chips.
+   * ============================================================ */
   --as-bg: #0b0f2e;
+  --as-bg-secondary: #0e1338;
   --as-surface: #141a3d;
   --as-surface-raised: #1b2350;
+  --as-surface-selected: #1f2a5c;
+  --as-surface-subtle: rgba(255, 255, 255, 0.03);
   --as-text: #f5f1e6;
+  --as-text-secondary: #dbe7f4;
   --as-text-muted: #7c82ac;
+  --as-text-inverse: #020617;
   --as-border: #262c57;
+  --as-border-subtle: rgba(148, 163, 184, 0.14);
+  --as-border-focus: #60a5fa;
+
+  /* Action semantics (brief section 6): green = current/positive/action
+   * complete, cyan = information/navigation, purple = Aura/planning, pink
+   * = relationship/shared, gold = traditional/auspicious, red = actual
+   * caution/destructive only -- never ordinary advisory copy. */
+  --as-accent: #4ade80;
+  --as-accent-secondary: #38bdf8;
+  --as-positive: #4ade80;
+  --as-positive-soft: rgba(74, 222, 128, 0.12);
+  --as-caution: #facc15;
+  --as-caution-soft: rgba(250, 204, 21, 0.12);
+  --as-danger: #fb6b6b;
+  --as-danger-soft: rgba(251, 107, 107, 0.12);
+  --as-info: #38bdf8;
+  --as-info-soft: rgba(56, 189, 248, 0.12);
+  --as-relationship: #f472b6;
+  --as-relationship-soft: rgba(244, 114, 182, 0.12);
+  --as-traditional: #a78bfa;
+  --as-traditional-soft: rgba(167, 139, 250, 0.12);
+
+  /* Spacing scale (brief section 3) -- page padding, section gaps, card
+   * padding, and row gaps all resolve to one of these. */
+  --as-space-1: 4px;
+  --as-space-2: 8px;
+  --as-space-3: 12px;
+  --as-space-4: 16px;
+  --as-space-5: 20px;
+  --as-space-6: 24px;
+  --as-space-7: 32px;
+  --as-space-8: 40px;
+
+  /* Radius scale (brief section 4). */
+  --as-radius-sm: 10px;
+  --as-radius-md: 12px;
+  --as-radius-lg: 16px;
+  --as-radius-pill: 999px;
 
   --as-abhijit: #4ade80;
   --as-abhijit-dim: #1f4d34;
