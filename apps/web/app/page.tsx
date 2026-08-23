@@ -111,6 +111,7 @@ export default function DashboardPage() {
 
   const [activeTab, setActiveTab] = useState<'home' | 'timeline' | 'ask' | 'plan' | 'insights' | 'you' | 'chart' | 'activity' | 'explore' | 'panchang' | 'muhurtham' | 'people' | 'updates'>('home');
   const [panchangDateJump, setPanchangDateJump] = useState<{ date: string; key: number } | null>(null);
+  const [muhurthamActivityJump, setMuhurthamActivityJump] = useState<{ activityId: string; key: number } | null>(null);
 
   const [notificationPrefs, setNotificationPrefs] = useState<NotificationPrefs>(DEFAULT_NOTIFICATION_PREFS);
 
@@ -704,6 +705,14 @@ export default function DashboardPage() {
     setActiveTab('panchang');
   }, []);
 
+  // Explore's Quick Explore shortcuts -- identical pattern to
+  // handleViewFullPanchang above, just for Muhurtham Finder's activity
+  // instead of Panchang's date.
+  const handleOpenMuhurthamWithActivity = useCallback((activityId: string) => {
+    setMuhurthamActivityJump({ activityId, key: Date.now() });
+    setActiveTab('muhurtham');
+  }, []);
+
   const handleSubmitReflection = useCallback(async (
     outputLevel: 'LOW' | 'MODERATE' | 'PEAK_FLOW',
     followedGuidance: boolean
@@ -789,7 +798,7 @@ export default function DashboardPage() {
         </header>
       )}
 
-      <div style={{ width: '100%', maxWidth: activeTab === 'home' || activeTab === 'plan' ? 760 : 420 }}>
+      <div style={{ width: '100%', maxWidth: activeTab === 'home' || activeTab === 'plan' || activeTab === 'explore' ? 760 : 420 }}>
         {activeTab === 'home' && (
           <HomeDashboard
             userName={userNameDisplay}
@@ -904,8 +913,10 @@ export default function DashboardPage() {
 
         {activeTab === 'explore' && (
           <ExploreView
+            timezone={user.timezone}
             onOpenPanchang={() => setActiveTab('panchang')}
             onOpenMuhurtham={() => setActiveTab('muhurtham')}
+            onOpenMuhurthamWithActivity={handleOpenMuhurthamWithActivity}
           />
         )}
 
@@ -930,6 +941,8 @@ export default function DashboardPage() {
             onPlanLogged={loadUserDataAndLogs}
             onOpenBirthProfile={() => setActiveTab('chart')}
             onOpenPeople={() => { setPeopleReturnTo('you'); setActiveTab('people'); }}
+            initialActivityId={muhurthamActivityJump?.activityId}
+            initialActivityIdKey={muhurthamActivityJump?.key}
           />
         )}
 

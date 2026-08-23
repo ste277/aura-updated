@@ -1,7 +1,7 @@
 'use client';
 
 import React, { useEffect, useMemo, useState } from 'react';
-import { SUPPORTED_MUHURTHAM_ACTIVITY_IDS, SupportedMuhurthamActivityId } from '../../../packages/recommendation/src/muhurthamFinder';
+import { SUPPORTED_MUHURTHAM_ACTIVITY_IDS, SupportedMuhurthamActivityId, isSupportedMuhurthamActivity } from '../../../packages/recommendation/src/muhurthamFinder';
 import type { MuhurthamDateCandidate, MuhurthamPersonalDateCandidate, MuhurthamPersonalSearchOutcome, MuhurthamSearchResult, MuhurthamSearchScope, MuhurthamSharedDateCandidate, MuhurthamSharedSearchOutcome, SharedMuhurthamRating } from '../../../packages/recommendation/src/muhurthamFinder';
 import type { TimingCandidate, TimingTimePreference } from '../../../packages/recommendation/src/timingSearch';
 import { FULL_ACTIVITY_CATALOG } from '../../../packages/recommendation/src/personalizedTasks';
@@ -34,6 +34,14 @@ interface MuhurthamFinderViewProps {
    * Muhurtham brief section 13: "Reuse People screen. Do not create another
    * Add Person form inside Finder." */
   onOpenPeople: () => void;
+  /** Explore's Quick Explore shortcuts (brief: "reuse existing occasion IDs
+   * and selection logic... do not implement a second Muhurtham search
+   * flow") -- mirrors PanchangCalendarView's own initialSelectedDate/
+   * initialSelectedDateKey pattern exactly. Bump the key (e.g. Date.now())
+   * alongside a new id to force re-selection even when it's the same id as
+   * last time. */
+  initialActivityId?: string;
+  initialActivityIdKey?: number;
 }
 
 type RangePreset = 'THIS_MONTH' | 'NEXT_MONTH' | 'NEXT_3_MONTHS' | 'CUSTOM';
@@ -156,7 +164,7 @@ function formatClockTime(iso: string, timezone: string): string {
   return new Date(iso).toLocaleTimeString('en-US', { timeZone: timezone, hour: 'numeric', minute: '2-digit' });
 }
 
-export function MuhurthamFinderView({ timezone, onBack, onOpenPanchangCalendar, onViewFullPanchang, onPlanLogged, onOpenBirthProfile, onOpenPeople }: MuhurthamFinderViewProps) {
+export function MuhurthamFinderView({ timezone, onBack, onOpenPanchangCalendar, onViewFullPanchang, onPlanLogged, onOpenBirthProfile, onOpenPeople, initialActivityId, initialActivityIdKey }: MuhurthamFinderViewProps) {
   const todayDateStr = useMemo(() => getDatePartsInTimezone(timezone, new Date()).dateStr, [timezone]);
 
   const [activityId, setActivityId] = useState<SupportedMuhurthamActivityId>('start-journey');
@@ -188,6 +196,26 @@ export function MuhurthamFinderView({ timezone, onBack, onOpenPanchangCalendar, 
   const [savedPeople, setSavedPeople] = useState<SavedPersonRow[] | null>(null);
   const [loadingPeople, setLoadingPeople] = useState(false);
   const [selectedPersonId, setSelectedPersonId] = useState<string>('');
+
+  // Explore's Quick Explore shortcuts -- same pattern as
+  // PanchangCalendarView's own initialSelectedDate/Key effect. Only ever
+  // accepts a genuinely supported id (defensive; Explore only ever sends
+  // one of these), and clears any stale search results from a previous
+  // occasion so the owner doesn't see an old result set for a new pick.
+  useEffect(() => {
+    if (!initialActivityId) return;
+    if (!isSupportedMuhurthamActivity(initialActivityId)) return;
+    setActivityId(initialActivityId);
+    setResult(null);
+    setPersonalOutcome(null);
+    setSharedOutcome(null);
+    setActiveRange(null);
+    setShowAllDates(false);
+    setShowAcceptable(false);
+    setExpandedDate(null);
+    setError('');
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [initialActivityIdKey]);
 
   useEffect(() => {
     if (scope !== 'SHARED' || savedPeople !== null || loadingPeople) return;
