@@ -302,16 +302,34 @@ export default function DashboardPage() {
   // reused rather than duplicated), PLAN_APPROACHING opens Plan (Plans have
   // no dedicated detail route -- Home's own Upcoming Plans section already
   // lives there). Never routes to Home itself.
+  //
+  // Notification Delivery Readiness V1 (brief section 6) -- this is the
+  // ONE place a reminder is marked seen: the owner intentionally opening
+  // this SPECIFIC reminder, from either Home's Starting Soon card or
+  // Updates' Upcoming section (both already call this same handler, so
+  // there is no separate Bell-vs-destination path to double-fire from --
+  // opening the Bell itself never marks anything seen). Best-effort POST,
+  // same convention as handleViewMomentUpdate's own /seen call just below:
+  // never blocks the navigation/open action on it.
   const handleOpenReminder = useCallback((reminder: AuraReminder) => {
     if (reminder.target.type === 'MOMENT') {
       window.open(`${window.location.origin}/moment/${reminder.target.momentToken}`, '_blank', 'noopener,noreferrer');
     } else {
       setActiveTab('plan');
     }
+    fetch('/api/reminders/seen', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        scheduledItemType: reminder.scheduledItemType,
+        scheduledItemId: reminder.scheduledItemId,
+        reminderAt: reminder.reminderAt,
+      }),
+    }).catch(() => {}).finally(() => loadAuraUpdates());
     trackEvent('REMINDER_OPENED', {
       metadata: { scheduledItemType: reminder.scheduledItemType, leadTimeMinutes: Math.max(0, Math.round((new Date(reminder.startAt).getTime() - new Date(reminder.reminderAt).getTime()) / 60000)) },
     });
-  }, []);
+  }, [loadAuraUpdates]);
 
   // The focus token is only meant for ONE visit to Your Moments -- clear it
   // as soon as the tab changes away, so a later, unrelated visit to Plan

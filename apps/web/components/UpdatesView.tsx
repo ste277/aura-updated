@@ -4,6 +4,7 @@ import React from 'react';
 import type { AuraUpdate } from '../lib/auraUpdates';
 import type { AuraReminder } from '../lib/auraReminders';
 import { formatReminderTiming } from '../lib/auraReminders';
+import type { ReminderWithAttention } from '../lib/reminderAttention';
 import * as theme from './theme';
 
 /**
@@ -17,10 +18,16 @@ import * as theme from './theme';
  * this is exclusively AuraMoment response updates plus (Aura Reminders V1,
  * brief section 17) an UPCOMING section for approaching reminders, reusing
  * `deriveAuraReminders`'s own already-sorted `upcoming` list the same way.
+ *
+ * Notification Delivery Readiness V1 (brief section 9): Upcoming shows
+ * every relevant reminder, seen or not, for as long as its window stays
+ * active -- opening one (onOpenReminder) never removes it from this list,
+ * only a small dot distinguishes an unseen occurrence. No second "NEW"
+ * section for reminders -- that would duplicate the one Upcoming already has.
  */
 interface UpdatesViewProps {
   updates: AuraUpdate[];
-  upcoming?: AuraReminder[];
+  upcoming?: ReminderWithAttention[];
   onBack: () => void;
   onViewMomentUpdate: (momentToken: string) => void;
   onFindAnotherTimeForMoment: (momentToken: string) => void;
@@ -129,7 +136,7 @@ function UpdateCard({ update, onView, onFindAnotherTime }: { update: AuraUpdate;
   );
 }
 
-function ReminderCard({ reminder, onOpen }: { reminder: AuraReminder; onOpen?: (reminder: AuraReminder) => void }) {
+function ReminderCard({ reminder, onOpen }: { reminder: ReminderWithAttention; onOpen?: (reminder: AuraReminder) => void }) {
   const start = new Date(reminder.startAt);
   const end = new Date(reminder.endAt);
   const timeRange = `${start.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' })} – ${end.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' })}`;
@@ -140,7 +147,10 @@ function ReminderCard({ reminder, onOpen }: { reminder: AuraReminder; onOpen?: (
     : null;
   return (
     <div style={cardStyle}>
-      <div style={{ fontSize: 13, fontWeight: 800, color: '#facc15' }}>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 7, fontSize: 13, fontWeight: 800, color: '#facc15' }}>
+        {reminder.unread && (
+          <span aria-label="Unseen" style={{ width: 7, height: 7, borderRadius: 4, background: '#4ade80', flexShrink: 0 }} />
+        )}
         {reminder.activityIcon ? `${reminder.activityIcon} ` : ''}{formatReminderTiming(reminder.minutesUntilStart)}
       </div>
       <div style={{ marginTop: 8, fontSize: 14, fontWeight: 750, color: '#f8fafc' }}>{reminder.activityTitle}</div>

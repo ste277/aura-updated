@@ -40,6 +40,8 @@ model User {
   savedPeople     SavedPerson[]
   auraMoments     AuraMoment[]
   productEvents   ProductEvent[]
+  reminderAttentions ReminderAttention[]
+  reminderDeliveries ReminderDelivery[]
 }
 
 // A lightweight profile for someone the user plans with -- the minimum
@@ -325,4 +327,53 @@ model DailyReflection {
 
   @@unique([userId, reflectionDate])
   @@index([userId, reflectionDate])
+}
+
+// Notification Delivery Readiness V1 -- "has the owner acknowledged THIS
+// reminder occurrence in Aura", identified by (userId, scheduledItemType,
+// scheduledItemId, reminderAt) rather than a bare boolean on the source
+// row. A rescheduled Plan/Moment produces a NEW reminderAt, so its next
+// occurrence has no matching row here and is unread again with no extra
+// write anywhere -- the same "derive unread by comparison, don't store a
+// boolean" pattern AuraMoment.ownerSeenResponseAt already established,
+// just keyed to a specific occurrence instead of "the current state".
+model ReminderAttention {
+  id                String   @id @default(uuid())
+  userId            String
+  user              User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  scheduledItemType String   // "PLANNED_ACTIVITY" | "AURA_MOMENT"
+  scheduledItemId   String
+  reminderAt        DateTime @db.Timestamptz(3)
+  seenAt            DateTime @default(now()) @db.Timestamptz(3)
+
+  @@unique([userId, scheduledItemType, scheduledItemId, reminderAt])
+  @@index([userId, scheduledItemType, scheduledItemId])
+}
+
+// Notification Delivery Readiness V1 -- idempotent delivery-attempt
+// tracking for a future Web Push worker. NOT reminder relevance (still
+// computed live by deriveAuraReminders()) and NOT seen state (that's
+// ReminderAttention above) -- these three stay strictly separate. The
+// unique constraint below is what makes claiming safe under concurrent
+// workers: INSERT ... ON CONFLICT DO NOTHING against this exact constraint
+// guarantees the same reminder occurrence never produces two WEB_PUSH
+// sends, without any in-memory locking. No worker exists yet in this PR --
+// only ensureDueReminderDeliveries() writes here, and nothing in a live
+// request path calls it yet.
+model ReminderDelivery {
+  id                String    @id @default(uuid())
+  userId            String
+  user              User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  scheduledItemType String
+  scheduledItemId   String
+  reminderAt        DateTime  @db.Timestamptz(3)
+  channel           String    // "WEB_PUSH"
+  status            String    @default("PENDING") // "PENDING" | "SENT" | "FAILED"
+  createdAt         DateTime  @default(now()) @db.Timestamptz(3)
+  sentAt            DateTime? @db.Timestamptz(3)
+  failedAt          DateTime? @db.Timestamptz(3)
+  failureReason     String?
+
+  @@unique([userId, scheduledItemType, scheduledItemId, reminderAt, channel])
+  @@index([status])
 }

@@ -6,9 +6,11 @@ import {
   listMomentIdsWithSuccessorForOwner,
   listPlannedActivitiesForReminders,
   listRecentRespondedAuraMomentsForOwner,
+  listReminderAttentionForOwner,
 } from '../../../lib/db';
 import { summarizeAuraUpdates } from '../../../lib/auraUpdates';
 import { deriveAuraReminders, MAX_REMINDER_LEAD_MINUTES, REMINDER_GRACE_PERIOD_MINUTES } from '../../../lib/auraReminders';
+import { attachReminderSeenState } from '../../../lib/reminderAttention';
 
 /**
  * Authenticated only -- returns the current user's own actionable/recent
@@ -38,16 +40,17 @@ export async function GET(req: NextRequest) {
   const from = new Date(now.getTime() - REMINDER_GRACE_PERIOD_MINUTES * 60_000);
   const to = new Date(now.getTime() + MAX_REMINDER_LEAD_MINUTES * 60_000);
 
-  const [moments, momentIdsWithSuccessor, plansForReminders, momentsForReminders] = await Promise.all([
+  const [moments, momentIdsWithSuccessor, plansForReminders, momentsForReminders, reminderAttention] = await Promise.all([
     listRecentRespondedAuraMomentsForOwner(session.userId, RECENT_MOMENT_QUERY_LIMIT),
     listMomentIdsWithSuccessorForOwner(session.userId),
     listPlannedActivitiesForReminders(session.userId, from, to),
     listAuraMomentsForReminders(session.userId, from, to),
+    listReminderAttentionForOwner(session.userId, from, to),
   ]);
 
   const summary = summarizeAuraUpdates(moments, momentIdsWithSuccessor);
 
-  const upcoming = user.remindersEnabled
+  const rawReminders = user.remindersEnabled
     ? deriveAuraReminders({
         now,
         leadMinutes: user.reminderLeadMinutes,
@@ -58,16 +61,16 @@ export async function GET(req: NextRequest) {
       })
     : [];
 
-  // Bell badge (brief section 18/19): an active reminder counts toward the
-  // badge for as long as its window stays active -- reminders are treated
-  // as CONTEXTUAL ("something is starting soon right now"), not a
-  // dismissible notification, so there is no separate persisted seen state
-  // to subtract here (brief section 19 explicitly allows this simpler
-  // reading: "consider treating active reminders as contextual rather than
-  // permanently unread"). Existing coordination-update unread counting is
-  // completely unchanged.
+  // Notification Delivery Readiness V1 -- relevance (rawReminders, above)
+  // and seen state are now separate concerns. `upcoming` shows every
+  // relevant reminder (seen or not, brief section 9) for as long as its
+  // window stays active; only genuinely UNSEEN ones count toward the Bell
+  // badge below (brief section 7).
+  const upcoming = attachReminderSeenState(rawReminders, reminderAttention);
+  const unseenReminderCount = upcoming.filter((reminder) => reminder.unread).length;
+
   return NextResponse.json({
-    unreadCount: summary.unreadCount + upcoming.length,
+    unreadCount: summary.unreadCount + unseenReminderCount,
     updates: summary.updates,
     upcoming,
   });

@@ -336,6 +336,21 @@ export async function getAuraMomentForOwner(ownerUserId: string, publicToken: st
   return result.rows[0] ?? null;
 }
 
+/** Notification Delivery Readiness V1 -- ownership-scoped lookup by
+ * INTERNAL id (not publicToken). Needed because AuraReminder.scheduledItemId
+ * for a MOMENT_APPROACHING reminder is the moment's internal id (see
+ * lib/auraReminders.ts), and POST /api/reminders/seen must verify that id
+ * belongs to the requesting owner before ever writing a ReminderAttention
+ * row -- never trust a client-supplied id where it can be resolved and
+ * checked (same discipline as getPlannedActivityForOwner). */
+export async function getAuraMomentByIdForOwner(ownerUserId: string, momentId: string): Promise<AuraMoment | null> {
+  const result = await pool.query(
+    `SELECT * FROM "AuraMoment" WHERE id = $1 AND "ownerUserId" = $2`,
+    [momentId, ownerUserId]
+  );
+  return result.rows[0] ?? null;
+}
+
 export async function revokeAuraMoment(ownerUserId: string, publicToken: string): Promise<AuraMoment> {
   const result = await pool.query(
     `UPDATE "AuraMoment" SET status = 'REVOKED' WHERE "publicToken" = $1 AND "ownerUserId" = $2 RETURNING *`,
@@ -680,6 +695,129 @@ export async function updateUserReminderPrefs(
     [userId, prefs.remindersEnabled, prefs.reminderLeadMinutes]
   );
   return result.rows[0];
+}
+
+// ============================================================
+// Notification Delivery Readiness V1 -- ReminderAttention (seen state) and
+// ReminderDelivery (future Web Push idempotency). See
+// lib/reminderAttention.ts / lib/reminderDelivery.ts for the domain logic
+// built on top of these; this section is pure persistence.
+// ============================================================
+
+export type ReminderScheduledItemType = 'PLANNED_ACTIVITY' | 'AURA_MOMENT';
+
+export interface ReminderAttention {
+  id: string;
+  userId: string;
+  scheduledItemType: ReminderScheduledItemType;
+  scheduledItemId: string;
+  reminderAt: Date;
+  seenAt: Date;
+}
+
+/** Idempotent upsert, keyed by the occurrence identity (userId,
+ * scheduledItemType, scheduledItemId, reminderAt) -- brief section 3/4:
+ * never a bare boolean, so a rescheduled item's NEW occurrence has no
+ * matching row and is unread again automatically. Re-marking the SAME
+ * occurrence seen just refreshes seenAt (harmless, idempotent). */
+export async function markReminderSeen(
+  userId: string,
+  scheduledItemType: ReminderScheduledItemType,
+  scheduledItemId: string,
+  reminderAt: Date
+): Promise<ReminderAttention> {
+  const id = randomUUID();
+  const result = await pool.query(
+    `INSERT INTO "ReminderAttention" (id, "userId", "scheduledItemType", "scheduledItemId", "reminderAt")
+     VALUES ($1, $2, $3, $4, $5)
+     ON CONFLICT ("userId", "scheduledItemType", "scheduledItemId", "reminderAt")
+     DO UPDATE SET "seenAt" = now()
+     RETURNING *`,
+    [id, userId, scheduledItemType, scheduledItemId, reminderAt]
+  );
+  return result.rows[0];
+}
+
+/** Bounded query mirroring listPlannedActivitiesForReminders/
+ * listAuraMomentsForReminders' own [from, to] window (brief section 25) --
+ * only attention rows that could plausibly matter for a currently-relevant
+ * reminder, never full history. */
+export async function listReminderAttentionForOwner(userId: string, from: Date, to: Date): Promise<ReminderAttention[]> {
+  const result = await pool.query(
+    `SELECT * FROM "ReminderAttention" WHERE "userId" = $1 AND "reminderAt" BETWEEN $2 AND $3`,
+    [userId, from, to]
+  );
+  return result.rows;
+}
+
+export type ReminderDeliveryChannel = 'WEB_PUSH';
+export type ReminderDeliveryStatus = 'PENDING' | 'SENT' | 'FAILED';
+
+export interface ReminderDelivery {
+  id: string;
+  userId: string;
+  scheduledItemType: ReminderScheduledItemType;
+  scheduledItemId: string;
+  reminderAt: Date;
+  channel: ReminderDeliveryChannel;
+  status: ReminderDeliveryStatus;
+  createdAt: Date;
+  sentAt: Date | null;
+  failedAt: Date | null;
+  failureReason: string | null;
+}
+
+/** Idempotent claim (brief section 11/15): INSERT ... ON CONFLICT DO
+ * NOTHING against the (userId, scheduledItemType, scheduledItemId,
+ * reminderAt, channel) unique constraint, so two concurrent workers
+ * calling this for the SAME occurrence can never both create a row -- the
+ * DB constraint is the source of truth, not an in-memory check. Always
+ * returns a real, persisted row: on conflict, re-reads and returns the
+ * EXISTING one, so callers get idempotent read-or-create semantics without
+ * needing to branch on which happened. */
+export async function ensureReminderDelivery(
+  userId: string,
+  scheduledItemType: ReminderScheduledItemType,
+  scheduledItemId: string,
+  reminderAt: Date,
+  channel: ReminderDeliveryChannel
+): Promise<ReminderDelivery> {
+  const id = randomUUID();
+  const inserted = await pool.query(
+    `INSERT INTO "ReminderDelivery" (id, "userId", "scheduledItemType", "scheduledItemId", "reminderAt", channel)
+     VALUES ($1, $2, $3, $4, $5, $6)
+     ON CONFLICT ("userId", "scheduledItemType", "scheduledItemId", "reminderAt", channel) DO NOTHING
+     RETURNING *`,
+    [id, userId, scheduledItemType, scheduledItemId, reminderAt, channel]
+  );
+  if (inserted.rows.length > 0) return inserted.rows[0];
+
+  const existing = await pool.query(
+    `SELECT * FROM "ReminderDelivery"
+     WHERE "userId" = $1 AND "scheduledItemType" = $2 AND "scheduledItemId" = $3 AND "reminderAt" = $4 AND channel = $5`,
+    [userId, scheduledItemType, scheduledItemId, reminderAt, channel]
+  );
+  return existing.rows[0];
+}
+
+/** Owner-scoped delivery status update -- the ONLY writer of status/sentAt/
+ * failedAt/failureReason (brief section 19: allow FAILED with a safe
+ * reason, never a huge provider payload -- callers must pass a short,
+ * app-generated string, not raw provider response bodies). Not called by
+ * anything in this PR (no worker exists yet); exists so the future Web
+ * Push worker has a real function to call instead of hand-writing SQL. */
+export async function markReminderDeliveryStatus(
+  deliveryId: string,
+  status: 'SENT' | 'FAILED',
+  failureReason?: string
+): Promise<ReminderDelivery | null> {
+  const result = await pool.query(
+    status === 'SENT'
+      ? `UPDATE "ReminderDelivery" SET status = 'SENT', "sentAt" = now() WHERE id = $1 RETURNING *`
+      : `UPDATE "ReminderDelivery" SET status = 'FAILED', "failedAt" = now(), "failureReason" = $2 WHERE id = $1 RETURNING *`,
+    status === 'SENT' ? [deliveryId] : [deliveryId, (failureReason ?? '').slice(0, 500)]
+  );
+  return result.rows[0] ?? null;
 }
 
 export async function createPlannedActivity(input: CreatePlannedActivityInput): Promise<PlannedActivity> {
