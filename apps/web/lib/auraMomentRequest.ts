@@ -54,6 +54,10 @@ export interface AuraMomentCreateInput {
   /** Required (and only meaningful) when scope === 'SHARED'; the route
    * resolves+ownership-checks this against the authenticated owner. */
   savedPersonId: string | null;
+  /** Aura Reminders V1 dedup linkage (brief section 7) -- optional; the
+   * route ownership-checks this against the authenticated owner (see
+   * getPlannedActivityForOwner) before ever writing it. */
+  plannedActivityId: string | null;
 }
 
 export type AuraMomentCreateValidationResult =
@@ -117,7 +121,19 @@ export function buildAuraMomentCreateRequest(body: Record<string, unknown>): Aur
     }
   }
 
-  return { ok: true, input: { scope, source, activityId, startAt, endAt, ratingLabel, savedPersonId } };
+  // Aura Reminders V1 (brief section 7) -- optional, only ever set by
+  // PlanWithAuraView's "Make this a Moment" when the same candidate was
+  // already saved as a Plan in the same session. The route re-verifies
+  // ownership; this layer only checks shape.
+  let plannedActivityId: string | null = null;
+  if (body.plannedActivityId !== undefined && body.plannedActivityId !== null) {
+    plannedActivityId = typeof body.plannedActivityId === 'string' ? body.plannedActivityId.trim() : '';
+    if (!plannedActivityId) {
+      return { ok: false, error: 'plannedActivityId must be a non-empty string when provided.', status: 400 };
+    }
+  }
+
+  return { ok: true, input: { scope, source, activityId, startAt, endAt, ratingLabel, savedPersonId, plannedActivityId } };
 }
 
 const VALID_RESPONSE_VALUES = new Set<AuraMomentResponseState>(['ACCEPTED', 'ANOTHER_TIME']);

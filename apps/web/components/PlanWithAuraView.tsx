@@ -509,6 +509,13 @@ export function PlanWithAuraView({ onTimingSearch, onViewDay, onPlanLogged, time
   const [savingOpportunityKey, setSavingOpportunityKey] = useState<string | null>(null);
   const [planActionStates, setPlanActionStates] = useState<Record<string, PlanActionState>>({});
   const [plannedOpportunityKeys, setPlannedOpportunityKeys] = useState<Set<string>>(() => new Set());
+  // Aura Reminders V1 dedup linkage (brief section 7): the real saved
+  // PlannedActivity id for each candidate key that's already been "Plan
+  // this"-saved in this session -- handleMakeMoment passes this along when
+  // the same candidate is then also "Make this a Moment"-saved, so the two
+  // rows can be linked (AuraMoment.plannedActivityId) instead of silently
+  // duplicating the same real-world event.
+  const [plannedActivityIdByKey, setPlannedActivityIdByKey] = useState<Record<string, string>>({});
   const plansSectionRef = useRef<HTMLElement | null>(null);
 
   useEffect(() => {
@@ -792,6 +799,11 @@ export function PlanWithAuraView({ onTimingSearch, onViewDay, onPlanLogged, time
   const handleMakeMoment = async (key: string, params: { activityId: string; start: string; end: string; ratingLabel: string; savedPersonId?: string }) => {
     setMomentSavingKey(key);
     try {
+      // Aura Reminders V1 dedup linkage (brief section 7): only ever set
+      // when THIS candidate was already "Plan this"-saved in this same
+      // session, so the client can honestly vouch for both ids referring to
+      // the same real-world event -- never inferred any other way.
+      const plannedActivityId = plannedOpportunityKeys.has(key) ? plannedActivityIdByKey[key] : undefined;
       const res = await fetch('/api/aura-moments', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -803,6 +815,7 @@ export function PlanWithAuraView({ onTimingSearch, onViewDay, onPlanLogged, time
           endAt: params.end,
           ratingLabel: params.ratingLabel,
           savedPersonId: params.savedPersonId,
+          plannedActivityId,
         }),
       });
       if (!res.ok) throw new Error('Unable to create this moment.');
@@ -959,8 +972,9 @@ export function PlanWithAuraView({ onTimingSearch, onViewDay, onPlanLogged, time
     if (savingOpportunityKey || plannedOpportunityKeys.has(key)) return;
     setSavingOpportunityKey(key);
     try {
-      await handleSavePlan(plan);
+      const saved = await handleSavePlan(plan);
       setPlannedOpportunityKeys((prev) => new Set(prev).add(key));
+      setPlannedActivityIdByKey((prev) => ({ ...prev, [key]: saved.id }));
     } finally {
       setSavingOpportunityKey(null);
     }

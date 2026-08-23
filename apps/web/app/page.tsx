@@ -13,7 +13,8 @@ import { getActionCards, ActionCard } from '../../../packages/recommendation/src
 import { findActivityIntent } from '../../../packages/recommendation/src/personalizedTasks';
 import type { DailyBriefing, PlanningHorizon } from '../../../packages/recommendation/src/dailyAssistant';
 import type { TimingSearchDateRange, TimingSearchMode, TimingSearchResponse, TimingTimePreference } from '../../../packages/recommendation/src/timingSearch';
-import type { AuraUpdatesSummary } from '../lib/auraUpdates';
+import type { AuraUpdatesResponse } from '../lib/auraUpdates';
+import type { AuraReminder } from '../lib/auraReminders';
 
 // UI Modules
 import { HomeDashboard } from '../components/HomeDashboard';
@@ -52,6 +53,8 @@ interface SessionUser {
   latitude: number;
   longitude: number;
   timezone: string;
+  remindersEnabled: boolean;
+  reminderLeadMinutes: number;
 }
 
 interface DailyReflectionState {
@@ -97,7 +100,7 @@ export default function DashboardPage() {
   const [plannedActivities, setPlannedActivities] = useState<PlannedActivityState[]>([]);
   const [planPrefill, setPlanPrefill] = useState<{ activity: string; key: number } | null>(null);
   const [mounted, setMounted] = useState(false);
-  const [auraUpdates, setAuraUpdates] = useState<AuraUpdatesSummary | null>(null);
+  const [auraUpdates, setAuraUpdates] = useState<AuraUpdatesResponse | null>(null);
   // Product Structure V2 -- "Your Moments" now lives inside Plan (brief
   // section 19), so any entry point that used to jump to the standalone
   // Shared Moments tab (Home's actionable card, You's row) now jumps into
@@ -264,10 +267,22 @@ export default function DashboardPage() {
     }
   }, []);
 
+  // Aura Reminders V1 (brief section 27) extended this beyond its original
+  // "once on sign-in" trigger: a Starting Soon reminder is time-sensitive in
+  // a way moment responses alone weren't (a Plan saved for "15 minutes from
+  // now" needs to actually show up within that window, not just at the next
+  // full page load). Reusing the existing per-tab-switch refresh point (the
+  // same activeTab effect above that fires AURA_HOME_VIEWED) rather than
+  // adding a new timer -- signing in, or visiting Home/Updates, simply
+  // re-fetches the same data those screens already render. Deliberately NOT
+  // a setInterval/polling loop (section 27 explicitly forbids that); a
+  // reminder becoming active while the user sits idle on Home only appears
+  // on their next natural visit/switch, matching V1's scope (real-time
+  // delivery while idle is Web Push V1's job).
   useEffect(() => {
     if (!user) return;
-    loadAuraUpdates();
-  }, [user?.id, loadAuraUpdates]);
+    if (activeTab === 'home' || activeTab === 'updates') loadAuraUpdates();
+  }, [activeTab, user?.id, loadAuraUpdates]);
 
   const handleViewMomentUpdate = useCallback((momentToken: string) => {
     window.open(`${window.location.origin}/moment/${momentToken}`, '_blank', 'noopener,noreferrer');
@@ -281,6 +296,23 @@ export default function DashboardPage() {
     setActiveTab('plan');
   }, []);
 
+  // Aura Reminders V1 (brief section 22) -- every reminder needs an
+  // explicit destination: MOMENT_APPROACHING opens the moment's own public
+  // link (same navigation pattern handleViewMomentUpdate already uses,
+  // reused rather than duplicated), PLAN_APPROACHING opens Plan (Plans have
+  // no dedicated detail route -- Home's own Upcoming Plans section already
+  // lives there). Never routes to Home itself.
+  const handleOpenReminder = useCallback((reminder: AuraReminder) => {
+    if (reminder.target.type === 'MOMENT') {
+      window.open(`${window.location.origin}/moment/${reminder.target.momentToken}`, '_blank', 'noopener,noreferrer');
+    } else {
+      setActiveTab('plan');
+    }
+    trackEvent('REMINDER_OPENED', {
+      metadata: { scheduledItemType: reminder.scheduledItemType, leadTimeMinutes: Math.max(0, Math.round((new Date(reminder.startAt).getTime() - new Date(reminder.reminderAt).getTime()) / 60000)) },
+    });
+  }, []);
+
   // The focus token is only meant for ONE visit to Your Moments -- clear it
   // as soon as the tab changes away, so a later, unrelated visit to Plan
   // never auto-re-triggers an old moment's alternatives search.
@@ -291,6 +323,24 @@ export default function DashboardPage() {
   const handleOpenUpdates = useCallback(() => {
     setActiveTab('updates');
   }, []);
+
+  // Aura Reminders V1 (brief section 14/15) -- optimistic toggle, same
+  // pattern as onLocationChanged: update local user state immediately, then
+  // persist. Refetches Aura Updates so a just-disabled toggle clears
+  // Starting Soon/Upcoming without waiting for the next natural refresh.
+  const handleRemindersEnabledChange = useCallback(async (next: boolean) => {
+    setUser((current) => (current ? { ...current, remindersEnabled: next } : current));
+    try {
+      const res = await fetch('/api/users/reminder-preferences', {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ remindersEnabled: next }),
+      });
+      if (res.ok) loadAuraUpdates();
+    } catch {
+      // Best-effort -- the optimistic UI already reflects the user's choice.
+    }
+  }, [loadAuraUpdates]);
 
   const handleOpenMomentsFromYou = useCallback(() => {
     setMomentsFocusKey(Date.now());
@@ -845,6 +895,8 @@ export default function DashboardPage() {
             topMomentUpdate={auraUpdates?.updates?.find((update) => update.requiresAction || (update.type === 'MOMENT_ACCEPTED' && update.unread))}
             onViewMomentUpdate={handleViewMomentUpdate}
             onFindAnotherTimeForMoment={handleFindAnotherTimeForMoment}
+            startingSoonReminder={auraUpdates?.upcoming?.[0]}
+            onOpenReminder={handleOpenReminder}
           />
         )}
 
@@ -908,7 +960,15 @@ export default function DashboardPage() {
             onOpenPeople={() => { setPeopleReturnTo('you'); setActiveTab('people'); }}
             onOpenSharedMoments={handleOpenMomentsFromYou}
             onSignOut={handleLogout}
-            sharedMomentsUnreadCount={auraUpdates?.unreadCount}
+            // Deliberately the MOMENT-only unread count, not the combined
+            // Bell badge total (auraUpdates.unreadCount now also folds in
+            // active reminders, brief section 18) -- this row is
+            // specifically "Moments you've created and their responses", so
+            // it should never show a count driven by an unrelated Plan
+            // reminder.
+            sharedMomentsUnreadCount={auraUpdates?.updates?.filter((update) => update.unread).length}
+            remindersEnabled={user.remindersEnabled}
+            onRemindersEnabledChange={handleRemindersEnabledChange}
           />
         )}
 
@@ -963,9 +1023,11 @@ export default function DashboardPage() {
         {activeTab === 'updates' && (
           <UpdatesView
             updates={auraUpdates?.updates ?? []}
+            upcoming={auraUpdates?.upcoming ?? []}
             onBack={() => setActiveTab('home')}
             onViewMomentUpdate={handleViewMomentUpdate}
             onFindAnotherTimeForMoment={handleFindAnotherTimeForMoment}
+            onOpenReminder={handleOpenReminder}
           />
         )}
       </div>

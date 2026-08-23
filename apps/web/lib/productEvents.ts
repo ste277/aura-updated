@@ -32,7 +32,8 @@ export type ProductEventName =
   | 'AURA_MOMENT_ACCEPTED'
   | 'AURA_MOMENT_ANOTHER_TIME'
   | 'AURA_MOMENT_ALTERNATIVE_CREATED'
-  | 'AURA_MOMENT_FIND_YOUR_OWN_CLICKED';
+  | 'AURA_MOMENT_FIND_YOUR_OWN_CLICKED'
+  | 'REMINDER_OPENED';
 
 export const PRODUCT_EVENT_NAMES: ProductEventName[] = [
   'AURA_HOME_VIEWED',
@@ -52,6 +53,7 @@ export const PRODUCT_EVENT_NAMES: ProductEventName[] = [
   'AURA_MOMENT_ANOTHER_TIME',
   'AURA_MOMENT_ALTERNATIVE_CREATED',
   'AURA_MOMENT_FIND_YOUR_OWN_CLICKED',
+  'REMINDER_OPENED',
 ];
 
 export function isProductEventName(value: string): value is ProductEventName {
@@ -73,6 +75,13 @@ export const CLIENT_TRACKED_EVENTS: ReadonlySet<ProductEventName> = new Set<Prod
   'MUHURTHAM_SCOPE_SELECTED',
   'AURA_MOMENT_SHARE_INITIATED',
   'AURA_MOMENT_FIND_YOUR_OWN_CLICKED',
+  // Aura Reminders V1 (brief section 29/30): a genuine user click, not a
+  // recomputed-per-GET impression -- REMINDER_SURFACED (an impression
+  // event) is deliberately NOT implemented (section 30 explicitly permits
+  // deferring impression analytics when clean dedup isn't straightforward;
+  // reminders are recomputed on every GET /api/aura-updates, so a naive
+  // "surfaced" event would fire on every poll).
+  'REMINDER_OPENED',
 ]);
 
 // Fields that must NEVER appear in ProductEvent.metadata, under any event,
@@ -118,6 +127,9 @@ const RELATIONSHIP_VALUES = new Set(['PARTNER', 'SPOUSE', 'FAMILY', 'FRIEND', 'O
 // AuraMomentSource/PlanningMode already define, not a third copy.
 const SOURCE_VALUES = new Set(['PLAN', 'MUHURTHAM']);
 const PLANNING_MODE_VALUES = new Set(['EVERYDAY', 'IMPORTANT', 'CEREMONIAL']);
+// Aura Reminders V1 (brief section 12): the only two reminder types -- lead
+// time is data (leadTimeMinutes below), not a distinct type per lead time.
+const SCHEDULED_ITEM_TYPE_VALUES = new Set(['PLANNED_ACTIVITY', 'AURA_MOMENT']);
 
 type FieldSchema =
   | { type: 'enum'; values: Set<string> }
@@ -190,6 +202,10 @@ const EVENT_METADATA_SCHEMAS: Record<ProductEventName, Record<string, FieldSchem
     planningMode: planningModeField,
   },
   AURA_MOMENT_FIND_YOUR_OWN_CLICKED: {},
+  REMINDER_OPENED: {
+    scheduledItemType: { type: 'enum', values: SCHEDULED_ITEM_TYPE_VALUES },
+    leadTimeMinutes: { type: 'number', min: 0, max: 120 },
+  },
 };
 
 export type ProductEventMetadataValue = string | number | boolean;

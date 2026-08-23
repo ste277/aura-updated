@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getSessionFromRequest } from '../../../lib/session';
-import { createAuraMoment, getSavedPersonForOwner, getUserById, listAuraMomentsForOwner, listMomentIdsWithSuccessorForOwner } from '../../../lib/db';
+import { createAuraMoment, getPlannedActivityForOwner, getSavedPersonForOwner, getUserById, listAuraMomentsForOwner, listMomentIdsWithSuccessorForOwner } from '../../../lib/db';
 import { parseJsonObject } from '../../../lib/request';
 import { buildAuraMomentCreateRequest } from '../../../lib/auraMomentRequest';
 import { buildMomentShareUrl, defaultExpiresAt, explanationSnapshotFor, generatePublicMomentToken } from '../../../lib/auraMoments';
@@ -49,6 +49,16 @@ export async function POST(req: NextRequest) {
     savedPersonId = person.id;
   }
 
+  // Aura Reminders V1 dedup linkage (brief section 7) -- re-verify
+  // ownership server-side (never trust a client-supplied id where it can be
+  // resolved and checked, same discipline as savedPersonId above).
+  let plannedActivityId: string | null = null;
+  if (input.plannedActivityId) {
+    const plan = await getPlannedActivityForOwner(session.userId, input.plannedActivityId);
+    if (!plan) return NextResponse.json({ error: 'Planned activity not found.' }, { status: 404 });
+    plannedActivityId = plan.id;
+  }
+
   const moment = await createAuraMoment({
     ownerUserId: session.userId,
     publicToken: generatePublicMomentToken(),
@@ -66,6 +76,7 @@ export async function POST(req: NextRequest) {
     ratingLabel: input.ratingLabel,
     explanationSnapshot: explanationSnapshotFor(activity.id, input.scope),
     expiresAt: defaultExpiresAt(input.endAt),
+    plannedActivityId,
   });
 
   void recordProductEvent({

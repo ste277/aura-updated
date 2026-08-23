@@ -1,4 +1,5 @@
 import type { AuraMoment, AuraMomentAlternativePreference } from './db';
+import type { AuraReminder } from './auraReminders';
 
 /**
  * Aura Updates V1 -- an in-app-only representation of "recipient activity
@@ -48,6 +49,19 @@ export interface AuraUpdate {
 export interface AuraUpdatesSummary {
   unreadCount: number;
   updates: AuraUpdate[];
+}
+
+/** GET /api/aura-updates' actual response shape (Aura Reminders V1, brief
+ * section 26) -- an ADDITIVE extension of AuraUpdatesSummary: `updates` and
+ * the moment-response half of `unreadCount` are unchanged, `upcoming` is
+ * new (reminders whose window is currently active, most imminent first --
+ * see deriveAuraReminders in lib/auraReminders.ts). `unreadCount` here also
+ * folds in `upcoming.length` (brief section 18/19: an active reminder
+ * counts toward the Bell badge for as long as its window stays active). */
+export interface AuraUpdatesResponse {
+  unreadCount: number;
+  updates: AuraUpdate[];
+  upcoming: AuraReminder[];
 }
 
 /** Section 5's "reasonable recent limit" for what the API returns in

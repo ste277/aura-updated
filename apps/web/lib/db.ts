@@ -23,6 +23,8 @@ export interface User {
   birthLatitude: number | null;
   birthLongitude: number | null;
   birthTimezone: string | null;
+  remindersEnabled: boolean;
+  reminderLeadMinutes: number;
 }
 
 export interface CustomCity {
@@ -224,6 +226,11 @@ export interface AuraMoment {
    * earlier moment -- see revokeAuraMoment/createAuraMoment's doc comments.
    * The referenced moment is never mutated; this is a one-way pointer. */
   previousMomentId: string | null;
+  /** Aura Reminders V1 dedup linkage (brief section 7) -- set only when the
+   * client already knows this Moment represents the same real-world event
+   * as an existing PlannedActivity (see PlanWithAuraView's handleMakeMoment).
+   * When set, deriveAuraReminders() skips the linked Plan's own reminder. */
+  plannedActivityId: string | null;
   /** Aura Updates V1 -- when the OWNER last saw this moment's response.
    * "Unread" is ALWAYS derived by comparing this to respondedAt (see
    * lib/auraUpdates.ts), never read as a bare boolean. */
@@ -256,6 +263,10 @@ export interface CreateAuraMomentInput {
   explanationSnapshot: string | null;
   expiresAt: Date | null;
   previousMomentId?: string | null;
+  /** Aura Reminders V1 dedup linkage (brief section 7) -- see AuraMoment's
+   * own field doc comment. Omitted/null for the overwhelming majority of
+   * moments, which have no known linked Plan. */
+  plannedActivityId?: string | null;
 }
 
 /** Every write/read below that's scoped to an owner filters by ownerUserId,
@@ -270,8 +281,8 @@ export async function createAuraMoment(input: CreateAuraMomentInput): Promise<Au
     `INSERT INTO "AuraMoment"
        (id, "ownerUserId", "publicToken", scope, source, "activityId", "activityTitle", "activityIcon",
         "startAt", "endAt", timezone, "savedPersonId", "sharedPersonDisplayName", "senderDisplayName",
-        "ratingLabel", "explanationSnapshot", "expiresAt", "previousMomentId")
-     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18)
+        "ratingLabel", "explanationSnapshot", "expiresAt", "previousMomentId", "plannedActivityId")
+     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19)
      RETURNING *`,
     [
       id,
@@ -292,6 +303,7 @@ export async function createAuraMoment(input: CreateAuraMomentInput): Promise<Au
       input.explanationSnapshot,
       input.expiresAt,
       input.previousMomentId ?? null,
+      input.plannedActivityId ?? null,
     ]
   );
   return result.rows[0];
@@ -614,6 +626,60 @@ export async function listAllPlannedActivitiesForExport(userId: string): Promise
     [userId]
   );
   return result.rows;
+}
+
+/** Ownership-scoped single-row lookup -- used by POST /api/aura-moments to
+ * validate a client-supplied plannedActivityId (Aura Reminders V1 dedup
+ * linkage, brief section 7) actually belongs to the requesting owner before
+ * ever writing it onto an AuraMoment row. */
+export async function getPlannedActivityForOwner(userId: string, planId: string): Promise<PlannedActivity | null> {
+  const result = await pool.query(`SELECT * FROM "PlannedActivity" WHERE id = $1 AND "userId" = $2`, [planId, userId]);
+  return result.rows[0] ?? null;
+}
+
+/** Aura Reminders V1 (brief section 25): a BOUNDED query, not full history
+ * -- only plans whose plannedStartAt could plausibly produce an active
+ * reminder right now (see lib/auraReminders.ts's REMINDER_GRACE_PERIOD_MINUTES/
+ * MAX_REMINDER_LEAD_MINUTES, which the caller uses to compute [from, to]).
+ * Only UPCOMING (never LOGGED/CANCELLED -- brief section 8's lifecycle
+ * rule applied to Plans). */
+export async function listPlannedActivitiesForReminders(userId: string, from: Date, to: Date): Promise<PlannedActivity[]> {
+  const result = await pool.query(
+    `SELECT * FROM "PlannedActivity"
+     WHERE "userId" = $1 AND status = 'UPCOMING' AND "plannedStartAt" BETWEEN $2 AND $3
+     ORDER BY "plannedStartAt" ASC`,
+    [userId, from, to]
+  );
+  return result.rows;
+}
+
+/** Aura Reminders V1 (brief section 25) -- the AuraMoment counterpart to
+ * listPlannedActivitiesForReminders above. Only ACTIVE, unexpired moments
+ * (mirrors resolveAuraMomentByToken's own ACTIVE + expiry check) within the
+ * bounded [from, to] window; response-state/lineage lifecycle rules (brief
+ * section 8/9) are applied by deriveAuraReminders(), not here -- this stays
+ * ordinary, cheap retrieval, backed by migration 0021's
+ * (ownerUserId, startAt) index. */
+export async function listAuraMomentsForReminders(ownerUserId: string, from: Date, to: Date): Promise<AuraMoment[]> {
+  const result = await pool.query(
+    `SELECT * FROM "AuraMoment"
+     WHERE "ownerUserId" = $1 AND status = 'ACTIVE' AND ("expiresAt" IS NULL OR "expiresAt" > now())
+       AND "startAt" BETWEEN $2 AND $3
+     ORDER BY "startAt" ASC`,
+    [ownerUserId, from, to]
+  );
+  return result.rows;
+}
+
+export async function updateUserReminderPrefs(
+  userId: string,
+  prefs: { remindersEnabled: boolean; reminderLeadMinutes: number }
+): Promise<User> {
+  const result = await pool.query(
+    `UPDATE "User" SET "remindersEnabled" = $2, "reminderLeadMinutes" = $3 WHERE id = $1 RETURNING *`,
+    [userId, prefs.remindersEnabled, prefs.reminderLeadMinutes]
+  );
+  return result.rows[0];
 }
 
 export async function createPlannedActivity(input: CreatePlannedActivityInput): Promise<PlannedActivity> {

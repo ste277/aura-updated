@@ -5,6 +5,8 @@ import { getPersonalizedTasks, UserChartContext } from '../../../packages/recomm
 import { getActionCards } from '../../../packages/recommendation/src/actionCards';
 import type { DailyBriefing } from '../../../packages/recommendation/src/dailyAssistant';
 import type { AuraUpdate } from '../lib/auraUpdates';
+import type { AuraReminder } from '../lib/auraReminders';
+import { formatReminderTiming } from '../lib/auraReminders';
 import { triggerHaptic } from '../lib/haptics';
 import { stripCountdownWrapper } from '../lib/formatTimeLeft';
 import * as theme from './theme';
@@ -83,6 +85,16 @@ interface HomeDashboardProps {
    * 12: "Do not create a second alternatives flow") -- never runs a search
    * on Home itself. */
   onFindAnotherTimeForMoment?: (momentToken: string) => void;
+  /** Aura Reminders V1 (brief section 20/21) -- the SINGLE most imminent
+   * active reminder (already the first entry of the already-sorted
+   * `upcoming` list GET /api/aura-updates returns), or undefined/null when
+   * nothing is currently starting soon. Home reacts to just this one, using
+   * only its already-saved/safe fields -- no recomputation of any timing
+   * score happens here. */
+  startingSoonReminder?: AuraReminder | null;
+  /** Explicit destination for the reminder's own action button (brief
+   * section 22) -- routes to the relevant Plan or Moment, never to Home. */
+  onOpenReminder?: (reminder: AuraReminder) => void;
 }
 
 interface HomeDayWindow {
@@ -274,6 +286,8 @@ export function HomeDashboard({
   topMomentUpdate,
   onViewMomentUpdate,
   onFindAnotherTimeForMoment,
+  startingSoonReminder,
+  onOpenReminder,
 }: HomeDashboardProps) {
   const [selectedHabit, setSelectedHabit] = useState<string | null>(null);
   const [selectedPlanId, setSelectedPlanId] = useState<string | null>(null);
@@ -594,6 +608,49 @@ export function HomeDashboard({
         </div>
       </section>
 
+      {/* Aura Reminders V1 (brief section 21) -- priority ordering on Home:
+       * (1) a critical/actionable coordination update (topMomentUpdate,
+       * pre-existing), (2) Starting Soon, ahead of (3) the Aura Suggests /
+       * Next Best Moment pair below. The hero panel above stays first --
+       * it's the page's anchor ("Right Now"), not a competing
+       * recommendation card, so moving it would break existing product
+       * intent rather than preserve it. */}
+      {topMomentUpdate && (
+        <section>
+          <SectionHeader label="Your Moments" />
+          {(() => {
+            const update = topMomentUpdate;
+            const { day, time } = formatUpdateDateTime(update.eventStartAt);
+            const isAccepted = update.type === 'MOMENT_ACCEPTED';
+            return (
+              <div style={{ ...panelStyle, padding: 16 }}>
+                <div style={{ fontSize: 13, fontWeight: 800, color: isAccepted ? '#4ade80' : '#facc15' }}>
+                  {isAccepted ? `❤️ ${update.recipientDisplayName ?? 'They'} is in` : `↻ ${update.recipientDisplayName ?? 'They'} want${update.recipientDisplayName ? 's' : ''} another time`}
+                </div>
+                <div style={{ marginTop: 8, fontSize: 14, fontWeight: 750, color: '#f8fafc' }}>{update.activityTitle}</div>
+                <div style={{ marginTop: 3, fontSize: 12, color: '#aab7d2' }}>
+                  {isAccepted ? `${day} · ${time}` : `Prefers: ${PREFERENCE_TEXT[update.preference ?? 'NO_PREFERENCE']}`}
+                </div>
+                <button
+                  type="button"
+                  onClick={() => (isAccepted ? onViewMomentUpdate?.(update.momentToken) : onFindAnotherTimeForMoment?.(update.momentToken))}
+                  style={{ ...outlineButtonStyle, width: 'auto', marginTop: 10, padding: '8px 16px' }}
+                >
+                  {isAccepted ? 'View' : 'Find another time'}
+                </button>
+              </div>
+            );
+          })()}
+        </section>
+      )}
+
+      {startingSoonReminder && (
+        <section>
+          <SectionHeader label="Starting Soon" />
+          <StartingSoonCard reminder={startingSoonReminder} onOpen={onOpenReminder} />
+        </section>
+      )}
+
       <div style={pairGridStyle}>
         <section style={{ ...panelStyle, padding: 18 }}>
           <div style={sectionKickerStyle}>✨ Aura Suggests</div>
@@ -636,42 +693,6 @@ export function HomeDashboard({
           </div>
         </section>
       </div>
-
-      {/* Product Structure V2 (brief section 27): ONE highly actionable
-       * card, not up to 3 -- the bell (now the Updates inbox) already shows
-       * the full list, so Home would otherwise duplicate it entirely.
-       * topMomentUpdate is filtered by the caller (app/page.tsx) to only an
-       * entry that's still actionable/unread -- an already-resolved or
-       * already-seen update is deliberately absent here rather than shown
-       * with a stale prompt, so this section can be entirely absent too. */}
-      {topMomentUpdate && (
-        <section>
-          <SectionHeader label="Your Moments" />
-          {(() => {
-            const update = topMomentUpdate;
-            const { day, time } = formatUpdateDateTime(update.eventStartAt);
-            const isAccepted = update.type === 'MOMENT_ACCEPTED';
-            return (
-              <div style={{ ...panelStyle, padding: 16 }}>
-                <div style={{ fontSize: 13, fontWeight: 800, color: isAccepted ? '#4ade80' : '#facc15' }}>
-                  {isAccepted ? `❤️ ${update.recipientDisplayName ?? 'They'} is in` : `↻ ${update.recipientDisplayName ?? 'They'} want${update.recipientDisplayName ? 's' : ''} another time`}
-                </div>
-                <div style={{ marginTop: 8, fontSize: 14, fontWeight: 750, color: '#f8fafc' }}>{update.activityTitle}</div>
-                <div style={{ marginTop: 3, fontSize: 12, color: '#aab7d2' }}>
-                  {isAccepted ? `${day} · ${time}` : `Prefers: ${PREFERENCE_TEXT[update.preference ?? 'NO_PREFERENCE']}`}
-                </div>
-                <button
-                  type="button"
-                  onClick={() => (isAccepted ? onViewMomentUpdate?.(update.momentToken) : onFindAnotherTimeForMoment?.(update.momentToken))}
-                  style={{ ...outlineButtonStyle, width: 'auto', marginTop: 10, padding: '8px 16px' }}
-                >
-                  {isAccepted ? 'View' : 'Find another time'}
-                </button>
-              </div>
-            );
-          })()}
-        </section>
-      )}
 
       <section>
         <SectionHeader label="Today's Flow" />
@@ -840,6 +861,42 @@ function SectionHeader({ label }: { label: string }) {
     <h2 style={{ margin: '0 0 12px', color: '#aab7d2', fontFamily: 'var(--as-font-mono)', fontSize: 14, textTransform: 'uppercase', letterSpacing: '0.04em' }}>
       {label}
     </h2>
+  );
+}
+
+// Aura Reminders V1 (brief section 20) -- two example layouts, both handled
+// by one card: a Plan reminder never has participant/response copy, a
+// SHARED Moment reminder shows response-aware copy (brief section 9) only
+// when it actually has one. Every field here is already on the reminder
+// DTO -- no recomputation.
+function StartingSoonCard({ reminder, onOpen }: { reminder: AuraReminder; onOpen?: (reminder: AuraReminder) => void }) {
+  const start = new Date(reminder.startAt);
+  const end = new Date(reminder.endAt);
+  const timeRange = `${start.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' })} – ${end.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' })}`;
+  const participantLine = reminder.participantDisplayName
+    ? reminder.momentResponseState === 'ACCEPTED'
+      ? `${reminder.participantDisplayName} confirmed`
+      : `Waiting for ${reminder.participantDisplayName}`
+    : null;
+  const actionLabel = reminder.type === 'MOMENT_APPROACHING' ? 'View Moment' : 'Open Plan';
+
+  return (
+    <div style={{ ...panelStyle, padding: 16, borderColor: 'rgba(250, 204, 21, 0.35)' }}>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+        <span style={{ fontSize: 20 }} aria-hidden="true">{reminder.activityIcon || '✨'}</span>
+        <div style={{ fontSize: 14, fontWeight: 800, color: '#f8fafc' }}>{reminder.activityTitle}</div>
+      </div>
+      <div style={{ marginTop: 8, fontSize: 13, fontWeight: 850, color: '#facc15' }}>{formatReminderTiming(reminder.minutesUntilStart)}</div>
+      <div style={{ marginTop: 3, fontSize: 12, color: '#aab7d2' }}>{timeRange}</div>
+      {participantLine && <div style={{ marginTop: 3, fontSize: 12, color: '#aab7d2' }}>{participantLine}</div>}
+      <button
+        type="button"
+        onClick={() => onOpen?.(reminder)}
+        style={{ ...outlineButtonStyle, width: 'auto', marginTop: 10, padding: '8px 16px', borderColor: 'rgba(250, 204, 21, 0.42)', color: '#facc15' }}
+      >
+        {actionLabel}
+      </button>
+    </div>
   );
 }
 

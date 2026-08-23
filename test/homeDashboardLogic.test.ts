@@ -40,6 +40,7 @@ function fakeMoment(overrides: Partial<AuraMoment>): AuraMoment {
     responsePreference: null,
     respondedAt: new Date('2026-08-22T10:00:00.000Z'),
     previousMomentId: null,
+    plannedActivityId: null,
     ownerSeenResponseAt: null,
     firstOpenedAt: null,
     createdAt: new Date('2026-08-20T00:00:00.000Z'),

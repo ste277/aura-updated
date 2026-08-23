@@ -3,6 +3,7 @@
 import React, { useMemo, useState } from 'react';
 import { LocationPicker } from './LocationPicker';
 import { NotificationSettings } from './NotificationSettings';
+import { ReminderSettings } from './ReminderSettings';
 import type { NotificationPrefs } from '../lib/windowNotifications';
 import * as theme from './theme';
 
@@ -13,6 +14,9 @@ interface YouViewProps {
   timezone: string;
   notificationPrefs: NotificationPrefs;
   onNotificationPrefsChange: (next: NotificationPrefs) => void;
+  /** Aura Reminders V1 (brief section 14/15). */
+  remindersEnabled: boolean;
+  onRemindersEnabledChange: (next: boolean) => void;
   onLocationChanged: (city: { cityName: string; latitude: number; longitude: number; timezone: string }) => void;
   onOpenHome: () => void;
   onOpenChart: () => void;
@@ -36,6 +40,8 @@ export function YouView({
   timezone,
   notificationPrefs,
   onNotificationPrefsChange,
+  remindersEnabled,
+  onRemindersEnabledChange,
   onLocationChanged,
   onOpenHome,
   onOpenChart,
@@ -131,6 +137,8 @@ export function YouView({
       </section>
 
       <div style={{ scrollMarginTop: 18 }}>
+        <div style={{ ...theme.sectionKickerStyle, marginBottom: 10 }}>Notifications &amp; Alerts</div>
+        <ReminderSettings enabled={remindersEnabled} onChange={onRemindersEnabledChange} />
         <NotificationSettings prefs={notificationPrefs} onChange={onNotificationPrefsChange} />
       </div>
 

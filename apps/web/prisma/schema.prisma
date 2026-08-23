@@ -25,6 +25,12 @@ model User {
   birthLongitude  Float?
   birthTimezone   String?   // IANA name
 
+  // Aura Reminders V1 -- user-level preference (brief section 14): default
+  // ON, default lead time 15 minutes before start. No per-activity config
+  // in V1 ("do NOT add per-activity config unless trivial").
+  remindersEnabled    Boolean @default(true)
+  reminderLeadMinutes Int     @default(15)
+
   habitLogs       HabitLog[]
   visitLogs       VisitLog[]
   habits          Habit[]
@@ -137,6 +143,14 @@ model AuraMoment {
   previousMoment          AuraMoment?  @relation("MomentLineage", fields: [previousMomentId], references: [id], onDelete: SetNull)
   supersededBy            AuraMoment[] @relation("MomentLineage")
 
+  // Aura Reminders V1 dedup linkage (brief section 7, migration 0021) --
+  // set only when the client already knows this Moment represents the same
+  // event as an existing Plan (see PlanWithAuraView's handleMakeMoment).
+  // When set, deriveAuraReminders() skips the linked Plan's own reminder in
+  // favor of this Moment's richer one.
+  plannedActivityId       String?
+  plannedActivity         PlannedActivity? @relation(fields: [plannedActivityId], references: [id], onDelete: SetNull)
+
   createdAt               DateTime  @default(now()) @db.Timestamptz(3)
   expiresAt                DateTime? @db.Timestamptz(3)
   // Product Instrumentation V1 -- set once, the first time the public page
@@ -153,6 +167,7 @@ model AuraMoment {
   // represented here to avoid this line implying a different index shape
   // than what's actually created.
   @@index([ownerUserId])
+  @@index([ownerUserId, startAt])
 }
 
 // Product Instrumentation V1 -- a small, generic first-party event log.
@@ -240,6 +255,10 @@ model PlannedActivity {
 
   createdAt       DateTime @default(now()) @db.Timestamptz(3)
   updatedAt       DateTime @updatedAt @db.Timestamptz(3)
+
+  // Aura Reminders V1 dedup linkage inverse (migration 0021) -- normally 0
+  // or 1 row; see AuraMoment.plannedActivityId's own doc comment.
+  linkedAuraMoments AuraMoment[]
 
   @@index([userId, plannedStartAt])
   @@index([userId, status])

@@ -2,6 +2,8 @@
 
 import React from 'react';
 import type { AuraUpdate } from '../lib/auraUpdates';
+import type { AuraReminder } from '../lib/auraReminders';
+import { formatReminderTiming } from '../lib/auraReminders';
 import * as theme from './theme';
 
 /**
@@ -12,13 +14,17 @@ import * as theme from './theme';
  * are built from; this view does not re-derive or re-rank anything, it
  * only splits the same ordered list into NEW (unread) vs EARLIER (already
  * seen) sections. Not a generic notification platform (brief section 26) --
- * this is exclusively AuraMoment response updates.
+ * this is exclusively AuraMoment response updates plus (Aura Reminders V1,
+ * brief section 17) an UPCOMING section for approaching reminders, reusing
+ * `deriveAuraReminders`'s own already-sorted `upcoming` list the same way.
  */
 interface UpdatesViewProps {
   updates: AuraUpdate[];
+  upcoming?: AuraReminder[];
   onBack: () => void;
   onViewMomentUpdate: (momentToken: string) => void;
   onFindAnotherTimeForMoment: (momentToken: string) => void;
+  onOpenReminder?: (reminder: AuraReminder) => void;
 }
 
 const PREFERENCE_TEXT: Record<string, string> = {
@@ -36,7 +42,7 @@ function formatUpdateDateTime(iso: string) {
   };
 }
 
-export function UpdatesView({ updates, onBack, onViewMomentUpdate, onFindAnotherTimeForMoment }: UpdatesViewProps) {
+export function UpdatesView({ updates, upcoming = [], onBack, onViewMomentUpdate, onFindAnotherTimeForMoment, onOpenReminder }: UpdatesViewProps) {
   const unseen = updates.filter((u) => u.unread);
   const seen = updates.filter((u) => !u.unread);
 
@@ -50,10 +56,21 @@ export function UpdatesView({ updates, onBack, onViewMomentUpdate, onFindAnother
         <h1 style={{ fontSize: 20, fontWeight: 700, margin: 0, lineHeight: 1.2 }}>Updates</h1>
       </div>
 
-      {updates.length === 0 && (
+      {updates.length === 0 && upcoming.length === 0 && (
         <div style={cardStyle}>
           <p style={{ fontSize: 13, color: '#94a3b8', margin: 0 }}>Nothing yet -- responses to your shared Moments will show up here.</p>
         </div>
+      )}
+
+      {upcoming.length > 0 && (
+        <section>
+          <SectionKicker label="Upcoming" />
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 10, marginTop: 10 }}>
+            {upcoming.map((reminder) => (
+              <ReminderCard key={reminder.id} reminder={reminder} onOpen={onOpenReminder} />
+            ))}
+          </div>
+        </section>
       )}
 
       {unseen.length > 0 && (
@@ -107,6 +124,29 @@ function UpdateCard({ update, onView, onFindAnotherTime }: { update: AuraUpdate;
         style={actionButtonStyle}
       >
         {isAccepted ? 'View' : 'Find another time'}
+      </button>
+    </div>
+  );
+}
+
+function ReminderCard({ reminder, onOpen }: { reminder: AuraReminder; onOpen?: (reminder: AuraReminder) => void }) {
+  const start = new Date(reminder.startAt);
+  const end = new Date(reminder.endAt);
+  const timeRange = `${start.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' })} – ${end.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' })}`;
+  const participantLine = reminder.participantDisplayName
+    ? reminder.momentResponseState === 'ACCEPTED'
+      ? `${reminder.participantDisplayName} confirmed`
+      : `Waiting for ${reminder.participantDisplayName}`
+    : null;
+  return (
+    <div style={cardStyle}>
+      <div style={{ fontSize: 13, fontWeight: 800, color: '#facc15' }}>
+        {reminder.activityIcon ? `${reminder.activityIcon} ` : ''}{formatReminderTiming(reminder.minutesUntilStart)}
+      </div>
+      <div style={{ marginTop: 8, fontSize: 14, fontWeight: 750, color: '#f8fafc' }}>{reminder.activityTitle}</div>
+      <div style={{ marginTop: 3, fontSize: 12, color: '#aab7d2' }}>{timeRange}{participantLine ? ` · ${participantLine}` : ''}</div>
+      <button type="button" onClick={() => onOpen?.(reminder)} style={actionButtonStyle}>
+        {reminder.type === 'MOMENT_APPROACHING' ? 'View Moment' : 'Open Plan'}
       </button>
     </div>
   );

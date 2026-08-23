@@ -106,6 +106,7 @@ const fullMoment: AuraMoment = {
   responsePreference: 'LATER',
   respondedAt: null,
   previousMomentId: 'previous-moment-internal-id-should-never-appear-publicly',
+  plannedActivityId: 'linked-plan-internal-id-should-never-appear-publicly',
   ownerSeenResponseAt: null,
   firstOpenedAt: null,
   createdAt: new Date('2026-08-22T00:00:00.000Z'),
@@ -122,6 +123,7 @@ check('PublicAuraMoment DTO never contains ownerUserId', !serialized.includes('o
 check('PublicAuraMoment DTO never echoes back the publicToken itself', !serialized.includes('the-token-itself-should-not-be-echoed-back') && !('publicToken' in publicDto));
 check('PublicAuraMoment DTO never contains savedPersonId (only the safe display name)', !serialized.includes('saved-person-id-should-never-appear-publicly') && !('savedPersonId' in publicDto));
 check('PublicAuraMoment DTO never contains the previous moment\'s internal id (only the safe boolean hasSuccessor)', !serialized.includes('previous-moment-internal-id-should-never-appear-publicly') && !('previousMomentId' in publicDto));
+check('PublicAuraMoment DTO never contains the linked plan\'s internal id (Aura Reminders V1 dedup linkage)', !serialized.includes('linked-plan-internal-id-should-never-appear-publicly') && !('plannedActivityId' in publicDto));
 check('PublicAuraMoment DTO never contains any birth/natal field name at all', !/birthDate|birthTime|birthTimezone|birthLatitude|birthLongitude|janmaNakshatra|janmaRashi|natalNakshatraIndex/i.test(serialized));
 check('PublicAuraMoment DTO does carry the safe display fields the brief explicitly allows', publicDto.senderDisplayName === 'Stephen' && publicDto.sharedPersonDisplayName === 'Anu' && publicDto.activityTitle === 'Griha Pravesh');
 check('PublicAuraMoment DTO carries the recipient\'s own preference (safe -- it is their own input) and the hasSuccessor flag passed in', publicDto.responsePreference === 'LATER' && publicDto.hasSuccessor === true);
