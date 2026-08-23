@@ -1,6 +1,7 @@
 'use client';
 
 import React from 'react';
+import { DeviceNotificationSettings } from './DeviceNotificationSettings';
 
 /**
  * Aura Reminders V1 (brief section 14/15) -- the minimal reminder
@@ -92,6 +93,8 @@ export function ReminderSettings({
           />
         </div>
       </button>
+
+      <DeviceNotificationSettings />
     </div>
   );
 }

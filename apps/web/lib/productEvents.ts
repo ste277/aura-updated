@@ -34,7 +34,10 @@ export type ProductEventName =
   | 'AURA_MOMENT_ALTERNATIVE_CREATED'
   | 'AURA_MOMENT_FIND_YOUR_OWN_CLICKED'
   | 'REMINDER_OPENED'
-  | 'ACTIVITY_LOGGED_NOW';
+  | 'ACTIVITY_LOGGED_NOW'
+  | 'WEB_PUSH_ENABLED'
+  | 'WEB_PUSH_DISABLED'
+  | 'REMINDER_PUSH_SENT';
 
 export const PRODUCT_EVENT_NAMES: ProductEventName[] = [
   'AURA_HOME_VIEWED',
@@ -56,6 +59,9 @@ export const PRODUCT_EVENT_NAMES: ProductEventName[] = [
   'AURA_MOMENT_FIND_YOUR_OWN_CLICKED',
   'REMINDER_OPENED',
   'ACTIVITY_LOGGED_NOW',
+  'WEB_PUSH_ENABLED',
+  'WEB_PUSH_DISABLED',
+  'REMINDER_PUSH_SENT',
 ];
 
 export function isProductEventName(value: string): value is ProductEventName {
@@ -92,6 +98,11 @@ export const CLIENT_TRACKED_EVENTS: ReadonlySet<ProductEventName> = new Set<Prod
   // AURA_MOMENT_CREATED is. Tracked as a UI intent signal instead, the same
   // convention as every other CLIENT_TRACKED_EVENTS entry.
   'ACTIVITY_LOGGED_NOW',
+  // Web Push V1 (brief section 30) -- both are user-initiated UI intent
+  // (the "Enable notifications" / "Turn off" buttons), fired at click time,
+  // not server-confirmed subscribe/unsubscribe outcomes.
+  'WEB_PUSH_ENABLED',
+  'WEB_PUSH_DISABLED',
 ]);
 
 // Fields that must NEVER appear in ProductEvent.metadata, under any event,
@@ -150,6 +161,11 @@ const IMMEDIATE_ACTION_TYPE_VALUES = new Set(['LOG_NOW', 'START_NOW']);
 // Good Right Now Action Semantics V1 (brief section 14) -- the same closed
 // vocabulary ActivityDurationMode already defines, not a third copy.
 const DURATION_MODE_VALUES = new Set(['INSTANT', 'FIXED', 'USER_SELECTED', 'SESSION']);
+// Web Push V1 (brief section 31) -- ONE canonical REMINDER_OPENED event
+// with a `source` distinguishing an in-app open (Home/Updates) from a push
+// notification click, rather than a second REMINDER_PUSH_OPENED event
+// representing the same user action ("this reminder was opened").
+const REMINDER_OPEN_SOURCE_VALUES = new Set(['IN_APP', 'PUSH']);
 
 type FieldSchema =
   | { type: 'enum'; values: Set<string> }
@@ -225,6 +241,10 @@ const EVENT_METADATA_SCHEMAS: Record<ProductEventName, Record<string, FieldSchem
   REMINDER_OPENED: {
     scheduledItemType: { type: 'enum', values: SCHEDULED_ITEM_TYPE_VALUES },
     leadTimeMinutes: { type: 'number', min: 0, max: 120 },
+    // Web Push V1 -- optional; existing in-app call sites are unaffected
+    // by adding this (omitted keys are never validated), only the new
+    // push-click path sets it to 'PUSH'.
+    source: { type: 'enum', values: REMINDER_OPEN_SOURCE_VALUES },
   },
   ACTIVITY_LOGGED_NOW: {
     // Omitted for the two Good Right Now cards with no catalog counterpart
@@ -239,6 +259,12 @@ const EVENT_METADATA_SCHEMAS: Record<ProductEventName, Record<string, FieldSchem
     // logged (0 for INSTANT, never a birth/natal/Panchang-detail payload).
     durationMode: { type: 'enum', values: DURATION_MODE_VALUES },
     durationMinutes: { type: 'number', min: 0, max: 180 },
+  },
+  WEB_PUSH_ENABLED: {},
+  WEB_PUSH_DISABLED: {},
+  REMINDER_PUSH_SENT: {
+    scheduledItemType: { type: 'enum', values: SCHEDULED_ITEM_TYPE_VALUES },
+    leadTimeMinutes: { type: 'number', min: 0, max: 120 },
   },
 };
 

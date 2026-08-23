@@ -42,6 +42,7 @@ model User {
   productEvents   ProductEvent[]
   reminderAttentions ReminderAttention[]
   reminderDeliveries ReminderDelivery[]
+  pushSubscriptions  PushSubscription[]
 }
 
 // A lightweight profile for someone the user plans with -- the minimum
@@ -368,12 +369,49 @@ model ReminderDelivery {
   scheduledItemId   String
   reminderAt        DateTime  @db.Timestamptz(3)
   channel           String    // "WEB_PUSH"
-  status            String    @default("PENDING") // "PENDING" | "SENT" | "FAILED"
+  // Web Push V1 (brief section 22/24): "PENDING" | "PROCESSING" | "SENT" |
+  // "FAILED" | "SKIPPED". PROCESSING is the real claim transition a worker
+  // takes via an atomic UPDATE ... WHERE status = 'PENDING' before sending
+  // -- the row's own uniqueness alone stops duplicate CREATION, not
+  // duplicate SENDING; PROCESSING is what stops that. SKIPPED means the
+  // occurrence was re-validated against deriveAuraReminders() immediately
+  // before sending and was no longer eligible (rescheduled/revoked/
+  // superseded) -- never sent, and never retried as this same occurrence.
+  status            String    @default("PENDING")
   createdAt         DateTime  @default(now()) @db.Timestamptz(3)
   sentAt            DateTime? @db.Timestamptz(3)
   failedAt          DateTime? @db.Timestamptz(3)
   failureReason     String?
+  // Web Push V1 (brief section 23) -- bounded retry bookkeeping, no queue.
+  attemptCount      Int       @default(0)
+  lastAttemptAt     DateTime? @db.Timestamptz(3)
 
   @@unique([userId, scheduledItemType, scheduledItemId, reminderAt, channel])
   @@index([status])
+}
+
+// Web Push V1 -- one row per browser/device registration. `endpoint` is
+// globally unique (a push endpoint URL is provider-issued and effectively
+// identifies one subscription slot) -- re-registering the same endpoint
+// upserts in place rather than accumulating duplicates (brief section 4).
+model PushSubscription {
+  id               String    @id @default(uuid())
+  userId           String
+  user             User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  endpoint         String    @unique
+  p256dh           String
+  auth             String
+  userAgent        String?
+  createdAt        DateTime  @default(now()) @db.Timestamptz(3)
+  updatedAt        DateTime  @updatedAt @db.Timestamptz(3)
+  lastSuccessfulAt DateTime? @db.Timestamptz(3)
+  // Web Push V1 (brief section 18/28) -- set when the provider reports the
+  // endpoint is gone (410/404) or the user explicitly turns off device
+  // notifications. A disabled subscription is never sent to and never
+  // deleted outright (keeps the endpoint's history/uniqueness intact,
+  // matches this codebase's existing "disable, don't delete" convention
+  // for state that's cheap to keep and expensive to silently lose).
+  disabledAt       DateTime? @db.Timestamptz(3)
+
+  @@index([userId])
 }

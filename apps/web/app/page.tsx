@@ -267,6 +267,31 @@ export default function DashboardPage() {
     }
   }, []);
 
+  // Web Push V1 (brief section 10) -- when a push notification is clicked
+  // while Aura is ALREADY open, the service worker focuses this tab and
+  // posts a message instead of opening a second one. The mark-seen call
+  // and REMINDER_OPENED analytics already happened in the service worker
+  // itself (sw.js's notificationclick handler) -- this listener only
+  // handles navigation, reusing the EXACT same target semantics
+  // handleOpenReminder already uses for in-app clicks, so a push-driven
+  // open behaves identically to an in-app one once the tab is focused.
+  useEffect(() => {
+    if (typeof navigator === 'undefined' || !('serviceWorker' in navigator)) return;
+    const handleMessage = (event: MessageEvent) => {
+      if (event.data?.type !== 'AURA_REMINDER_NAVIGATE') return;
+      const target = event.data.target as AuraReminder['target'] | undefined;
+      if (!target) return;
+      if (target.type === 'MOMENT') {
+        window.open(`${window.location.origin}/moment/${target.momentToken}`, '_blank', 'noopener,noreferrer');
+      } else {
+        setActiveTab('plan');
+      }
+      loadAuraUpdates();
+    };
+    navigator.serviceWorker.addEventListener('message', handleMessage);
+    return () => navigator.serviceWorker.removeEventListener('message', handleMessage);
+  }, [loadAuraUpdates]);
+
   // Aura Reminders V1 (brief section 27) extended this beyond its original
   // "once on sign-in" trigger: a Starting Soon reminder is time-sensitive in
   // a way moment responses alone weren't (a Plan saved for "15 minutes from
@@ -327,7 +352,14 @@ export default function DashboardPage() {
       }),
     }).catch(() => {}).finally(() => loadAuraUpdates());
     trackEvent('REMINDER_OPENED', {
-      metadata: { scheduledItemType: reminder.scheduledItemType, leadTimeMinutes: Math.max(0, Math.round((new Date(reminder.startAt).getTime() - new Date(reminder.reminderAt).getTime()) / 60000)) },
+      metadata: {
+        scheduledItemType: reminder.scheduledItemType,
+        leadTimeMinutes: Math.max(0, Math.round((new Date(reminder.startAt).getTime() - new Date(reminder.reminderAt).getTime()) / 60000)),
+        // Web Push V1 (brief section 31) -- distinguishes this in-app open
+        // from the service worker's own REMINDER_OPENED call (source:
+        // 'PUSH', sw.js) for the same canonical event.
+        source: 'IN_APP',
+      },
     });
   }, [loadAuraUpdates]);
 

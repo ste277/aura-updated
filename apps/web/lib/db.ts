@@ -751,7 +751,13 @@ export async function listReminderAttentionForOwner(userId: string, from: Date, 
 }
 
 export type ReminderDeliveryChannel = 'WEB_PUSH';
-export type ReminderDeliveryStatus = 'PENDING' | 'SENT' | 'FAILED';
+// Web Push V1 (brief section 22/24): PROCESSING is the real claim
+// transition (see claimReminderDeliveryForSending below) -- the row's
+// creation-time uniqueness alone stops duplicate CREATION, not duplicate
+// SENDING. SKIPPED means the occurrence was re-validated against
+// deriveAuraReminders() immediately before sending and was no longer
+// eligible (rescheduled/revoked/superseded) -- never sent.
+export type ReminderDeliveryStatus = 'PENDING' | 'PROCESSING' | 'SENT' | 'FAILED' | 'SKIPPED';
 
 export interface ReminderDelivery {
   id: string;
@@ -765,6 +771,8 @@ export interface ReminderDelivery {
   sentAt: Date | null;
   failedAt: Date | null;
   failureReason: string | null;
+  attemptCount: number;
+  lastAttemptAt: Date | null;
 }
 
 /** Idempotent claim (brief section 11/15): INSERT ... ON CONFLICT DO
@@ -808,16 +816,146 @@ export async function ensureReminderDelivery(
  * Push worker has a real function to call instead of hand-writing SQL. */
 export async function markReminderDeliveryStatus(
   deliveryId: string,
-  status: 'SENT' | 'FAILED',
+  status: 'SENT' | 'FAILED' | 'SKIPPED',
   failureReason?: string
 ): Promise<ReminderDelivery | null> {
   const result = await pool.query(
     status === 'SENT'
       ? `UPDATE "ReminderDelivery" SET status = 'SENT', "sentAt" = now() WHERE id = $1 RETURNING *`
-      : `UPDATE "ReminderDelivery" SET status = 'FAILED', "failedAt" = now(), "failureReason" = $2 WHERE id = $1 RETURNING *`,
+      : status === 'FAILED'
+        ? `UPDATE "ReminderDelivery" SET status = 'FAILED', "failedAt" = now(), "failureReason" = $2 WHERE id = $1 RETURNING *`
+        : `UPDATE "ReminderDelivery" SET status = 'SKIPPED', "failureReason" = $2 WHERE id = $1 RETURNING *`,
     status === 'SENT' ? [deliveryId] : [deliveryId, (failureReason ?? '').slice(0, 500)]
   );
   return result.rows[0] ?? null;
+}
+
+/** Web Push V1 (brief section 22) -- the actual concurrency-safety
+ * primitive: an atomic conditional UPDATE that only succeeds if the row is
+ * STILL 'PENDING' at the moment it runs. Two workers racing on the same
+ * delivery row: exactly one UPDATE matches the WHERE clause and returns a
+ * row; the other affects 0 rows and gets null back. This is what stops two
+ * workers from both sending the same occurrence -- the delivery row's own
+ * creation-time uniqueness (ensureReminderDelivery) only stops duplicate
+ * CREATION, which is a different race. */
+export async function claimReminderDeliveryForSending(deliveryId: string): Promise<ReminderDelivery | null> {
+  const result = await pool.query(
+    `UPDATE "ReminderDelivery"
+     SET status = 'PROCESSING', "attemptCount" = "attemptCount" + 1, "lastAttemptAt" = now()
+     WHERE id = $1 AND status = 'PENDING'
+     RETURNING *`,
+    [deliveryId]
+  );
+  return result.rows[0] ?? null;
+}
+
+/** Web Push V1 (brief section 21) -- bounded due-user discovery: which
+ * owners have a PlannedActivity/AuraMoment whose startAt falls inside the
+ * SAME reminder-plausible window listPlannedActivitiesForReminders/
+ * listAuraMomentsForReminders already use, so the dispatch worker never
+ * loads every User row and never re-derives its own time bounds. Returns
+ * bare userIds only -- ensureDueReminderDeliveries still does its own
+ * per-user eligibility work (this is discovery, not eligibility). */
+export async function listUserIdsWithPotentialReminders(from: Date, to: Date): Promise<string[]> {
+  const result = await pool.query(
+    `SELECT "userId" FROM "PlannedActivity" WHERE status = 'UPCOMING' AND "plannedStartAt" BETWEEN $1 AND $2
+     UNION
+     SELECT "ownerUserId" AS "userId" FROM "AuraMoment" WHERE status = 'ACTIVE' AND "startAt" BETWEEN $1 AND $2 AND ("expiresAt" IS NULL OR "expiresAt" > now())`,
+    [from, to]
+  );
+  return result.rows.map((row) => row.userId as string);
+}
+
+// ============================================================
+// Web Push V1 -- PushSubscription persistence. Ownership-scoped
+// everywhere: a subscription belongs to exactly one authenticated user,
+// never exposed to another (brief section 3).
+// ============================================================
+
+export interface PushSubscriptionRow {
+  id: string;
+  userId: string;
+  endpoint: string;
+  p256dh: string;
+  auth: string;
+  userAgent: string | null;
+  createdAt: Date;
+  updatedAt: Date;
+  lastSuccessfulAt: Date | null;
+  disabledAt: Date | null;
+}
+
+/** Upsert keyed on `endpoint` (globally unique -- brief section 4): the
+ * same browser re-registering (e.g. after a service worker update) updates
+ * the existing row in place -- including re-ENABLING a previously-disabled
+ * one (a stale/expired subscription re-subscribing is, by definition, live
+ * again) -- rather than accumulating duplicates. Re-registering under a
+ * DIFFERENT userId reassigns ownership to the new user (the only way that
+ * can legitimately happen is the same browser signing into a different
+ * Aura account and re-subscribing, which SHOULD hand this endpoint to the
+ * new owner). */
+export async function upsertPushSubscription(input: {
+  userId: string;
+  endpoint: string;
+  p256dh: string;
+  auth: string;
+  userAgent?: string | null;
+}): Promise<PushSubscriptionRow> {
+  const id = randomUUID();
+  const result = await pool.query(
+    `INSERT INTO "PushSubscription" (id, "userId", endpoint, p256dh, auth, "userAgent")
+     VALUES ($1, $2, $3, $4, $5, $6)
+     ON CONFLICT (endpoint) DO UPDATE SET
+       "userId" = EXCLUDED."userId",
+       p256dh = EXCLUDED.p256dh,
+       auth = EXCLUDED.auth,
+       "userAgent" = EXCLUDED."userAgent",
+       "updatedAt" = now(),
+       "disabledAt" = NULL
+     RETURNING *`,
+    [id, input.userId, input.endpoint, input.p256dh, input.auth, input.userAgent ?? null]
+  );
+  return result.rows[0];
+}
+
+/** Owner-scoped disable -- used both by the user's own "Turn off" action
+ * and (with a different caller) by stale-subscription cleanup after a
+ * provider 404/410 (brief section 18). Never a hard delete (brief: "don't
+ * delete state that's cheap to keep"). No-ops silently if the endpoint
+ * doesn't belong to this owner (same discipline as revokeAuraMoment). */
+export async function disablePushSubscriptionForOwner(userId: string, endpoint: string): Promise<void> {
+  await pool.query(`UPDATE "PushSubscription" SET "disabledAt" = now() WHERE "userId" = $1 AND endpoint = $2`, [userId, endpoint]);
+}
+
+/** Endpoint-only disable, no ownership check -- used by the delivery
+ * service when the PROVIDER (not the user) reports the endpoint is gone.
+ * The delivery service already resolved this subscription via its owner's
+ * own subscription list, so this is trusted, internal-only usage, never
+ * exposed to a client-facing route. */
+export async function disablePushSubscriptionByEndpoint(endpoint: string, reason: string): Promise<void> {
+  await pool.query(`UPDATE "PushSubscription" SET "disabledAt" = now() WHERE endpoint = $1`, [endpoint]);
+  void reason; // Reserved for future structured logging; never persisted (brief section 18: no raw provider payloads).
+}
+
+export async function markPushSubscriptionSuccessful(endpoint: string): Promise<void> {
+  await pool.query(`UPDATE "PushSubscription" SET "lastSuccessfulAt" = now() WHERE endpoint = $1`, [endpoint]);
+}
+
+/** Only ACTIVE (never-disabled) subscriptions -- the delivery service's
+ * one and only read path for "who do we send this owner's push to". */
+export async function listActivePushSubscriptionsForOwner(userId: string): Promise<PushSubscriptionRow[]> {
+  const result = await pool.query(`SELECT * FROM "PushSubscription" WHERE "userId" = $1 AND "disabledAt" IS NULL`, [userId]);
+  return result.rows;
+}
+
+/** The owner's OWN view of their device notification state (brief section
+ * 7/27): "is there at least one active subscription right now" is the
+ * entire V1 "device notifications enabled" signal -- no separate boolean
+ * preference column (see the completion report for why this was judged
+ * sufficient for V1). */
+export async function hasActivePushSubscription(userId: string): Promise<boolean> {
+  const result = await pool.query(`SELECT 1 FROM "PushSubscription" WHERE "userId" = $1 AND "disabledAt" IS NULL LIMIT 1`, [userId]);
+  return result.rows.length > 0;
 }
 
 export async function createPlannedActivity(input: CreatePlannedActivityInput): Promise<PlannedActivity> {

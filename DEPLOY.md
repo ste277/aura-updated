@@ -86,3 +86,120 @@ than a self-hosted instance, set the same env vars in Vercel's project settings,
 set the project's root directory to `apps/web`. Everything else is the same. Worth
 revisiting once you're past the "does anyone actually use this" stage from the MVP
 spec's kill criteria.
+
+(This is the actual live deployment target as of Web Push V1 below — confirmed via
+`apps/web/vercel.json` and the project's own `.vercel/` metadata.)
+
+## Web Push V1 (reminder delivery)
+
+Browser/PWA push notifications for approaching Plans and Aura Moments, sent when the
+app isn't open. See `lib/webPushServer.ts`, `lib/reminderDelivery.ts`, and
+`app/api/internal/reminders/dispatch/route.ts` for the implementation; this section is
+only what's needed to actually turn it on in a deployed environment.
+
+### Required env vars
+
+- `WEB_PUSH_VAPID_PUBLIC_KEY`, `WEB_PUSH_VAPID_PRIVATE_KEY`, `WEB_PUSH_VAPID_SUBJECT` —
+  standard Web Push authentication. Generate a real keypair once:
+  ```bash
+  cd apps/web && npx web-push generate-vapid-keys
+  ```
+  `WEB_PUSH_VAPID_SUBJECT` must be `mailto:you@example.com` or `https://your-domain`
+  (the `web-push` library rejects anything else). If any of the three are unset, the
+  feature fails closed and cleanly: `/api/push/public-key` returns 503, the client's
+  "Enable notifications" button reports a `not_configured` error instead of a prompt,
+  and `sendReminderDelivery` marks any claimed delivery `FAILED` with `errorCode:
+  'not_configured'` rather than throwing. Nothing else in the app depends on these —
+  in-app reminders (Bell/Home/Updates) work identically with push fully unconfigured.
+- `INTERNAL_REMINDER_DISPATCH_SECRET` — gates `POST/GET /api/internal/reminders/dispatch`,
+  the scheduler's only entry point. Generate with `openssl rand -hex 32`. A
+  missing/wrong secret returns 404 (not 401), matching this app's other internal-route
+  convention of not revealing the route exists.
+
+### Scheduling the dispatch worker
+
+`apps/web/vercel.json` already defines a Vercel Cron Job hitting
+`/api/internal/reminders/dispatch` every 5 minutes. Two things to set up for that to
+actually work:
+
+1. In the Vercel dashboard, set `CRON_SECRET` to the **same value** as
+   `INTERNAL_REMINDER_DISPATCH_SECRET`. Vercel Cron sends
+   `Authorization: Bearer $CRON_SECRET` automatically on every invocation — no other
+   wiring needed.
+2. **Plan-tier caveat (read this before assuming reminders are reliable):** Vercel's
+   Hobby (free) tier does not run Cron Jobs on their configured schedule — it
+   silently coalesces every cron job down to **once per day**, at a time Vercel
+   chooses, regardless of what `vercel.json` says. A `*/5 * * * *` schedule on Hobby
+   does NOT give you 5-minute reminders; it gives you roughly one dispatch run per
+   day, which means most 15-minutes-before pushes would simply never fire in time.
+   Do not deploy this feature on Hobby and assume it works — verify your plan tier,
+   or point an external scheduler (cron-job.org, a GitHub Actions scheduled
+   workflow, or any host that can `curl` on a real interval) at the same endpoint
+   with the same bearer secret. Pro and Enterprise tiers honor the real schedule.
+3. Worst-case delay even on a correctly-running 5-minute schedule: up to ~5 minutes
+   after a reminder becomes due before the next dispatch tick picks it up, plus
+   actual send latency (single-digit seconds per user in local testing — see the
+   Performance section of the PR's own completion report for real numbers). A
+   "15-minute reminder" is therefore more accurately "somewhere between ~10 and ~15
+   minutes before start," not an exact 15:00 mark. This is inherent to a polling
+   scheduler and was a known, accepted tradeoff for V1 (brief explicitly ruled out
+   building a true per-reminder job queue).
+
+### Local dev
+
+No cron runs automatically under `next dev`. Trigger a dispatch manually:
+```bash
+curl -X POST http://localhost:3000/api/internal/reminders/dispatch \
+  -H "Authorization: Bearer $INTERNAL_REMINDER_DISPATCH_SECRET"
+```
+Returns `{ usersInspected, deliveriesPending, sent, failed, skipped, alreadyClaimed,
+durationMs }`. Real device notifications also require Notification permission to
+actually be granted in your OS browser — automated/sandboxed browser environments
+(including this project's own preview tooling) deny that permission by default with
+no way to override it, so the "does a real system notification appear" step can only
+be confirmed in an actual local Chrome/Firefox/Edge window, not from an automation
+sandbox. Everything else in the pipeline (subscription storage, delivery creation,
+the atomic claim, re-validation against `deriveAuraReminders()`, the real send
+attempt and its graceful failure handling) was verified end-to-end against the live
+dev database and a real generated VAPID keypair.
+
+### Supported browsers / platform limitations
+
+- Desktop Chrome, Firefox, Edge: fully supported.
+- Android Chrome/Firefox: fully supported.
+- Safari (macOS 16+ / iOS 16.4+): supported, but **only after the site is added to
+  the Home Screen** (installed as a PWA) — Safari does not support the Push API for
+  a regular open browser tab, only for an installed web app.
+- The Capacitor-wrapped iOS/Android app shells (see `MOBILE.md`) have **no native
+  push plugin wired up** — this PR is Web Push (browser/PWA) only. A user running
+  the native shell gets no push notifications from this feature at all, silently
+  (they still get in-app reminders whenever they open the app). Native APNs/FCM
+  integration is explicitly out of scope here and is the natural next step if the
+  native shells need this.
+
+### Disabling push safely
+
+Unset the three `WEB_PUSH_VAPID_*` vars (or pause/delete the Cron Job). The app
+degrades cleanly: existing `PushSubscription` rows are left alone (nothing is
+deleted), `dispatchDueReminderPushes` keeps running if still scheduled and just marks
+every claimed delivery `FAILED` (`not_configured`) instead of sending, and in-app
+reminders are completely unaffected.
+
+### Rotating VAPID keys
+
+Generating a new keypair invalidates every existing browser subscription — a
+subscription is cryptographically tied to the exact public key it was created with.
+After rotating:
+- Every existing `PushSubscription` row is now dead, but **the app does not know
+  that automatically**. This PR's stale-subscription cleanup (`isGone` on the send
+  result) only triggers on an HTTP 404/410 from the push provider, which means "this
+  exact endpoint no longer exists." A key-mismatch after rotation is a different
+  provider error (an auth failure, not a 404/410 in the providers tested), so it is
+  NOT auto-detected — the delivery is marked `FAILED` and the subscription is left
+  active, so `hasActiveSubscription`/the Settings UI will keep claiming "Enabled"
+  even though no push will ever arrive again.
+- The practical fix after a key rotation: affected users need to open Settings,
+  turn notifications off, and re-enable them once (which re-subscribes with the new
+  key). There is no server-side way to force this in V1 — flagging this explicitly
+  as a known gap rather than a hidden one, since it's the kind of thing that's easy
+  to discover the hard way in production.
