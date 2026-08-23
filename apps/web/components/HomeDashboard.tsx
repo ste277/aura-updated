@@ -2,7 +2,7 @@
 
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { getPersonalizedTasks, UserChartContext, FULL_ACTIVITY_CATALOG, normalizeWindowType } from '../../../packages/recommendation/src/personalizedTasks';
-import { getActionCards, ActionCard } from '../../../packages/recommendation/src/actionCards';
+import { getActionCards, getActivityDiscoveryCards, ActionCard } from '../../../packages/recommendation/src/actionCards';
 import { getActivityDefinition, ImmediateAction } from '../../../packages/recommendation/src/activityDefinitions';
 import type { DailyBriefing } from '../../../packages/recommendation/src/dailyAssistant';
 import type { AuraUpdate } from '../lib/auraUpdates';
@@ -260,6 +260,59 @@ function findActionablePlan(plans: HomeUpcomingPlan[]) {
     .sort((a, b) => a.startMs - b.startMs)[0]?.plan ?? null;
 }
 
+/**
+ * "Good right now" -- the deterministic window -> 3 activity cards table
+ * (packages/recommendation/src/actionCards.ts), already used by Timeline's
+ * own tap-arc interaction. A card whose canonical activity has already been
+ * logged TODAY (loggedActivitiesToday), other than one logged from THIS
+ * Home visit's own cards (justLoggedTitles), is swapped for the next-best
+ * still-undone activity for this SAME window, sourced from the existing
+ * catalog-driven getActivityDiscoveryCards() ranking rather than inventing
+ * a second "what else fits this window" concept. PLAN-only alternatives are
+ * excluded -- "Good Right Now" is about doing something now, not proposing
+ * an occasion to plan for later.
+ *
+ * justLoggedTitles exists so a card the user just tapped keeps showing its
+ * own "✓ Logged" confirmation for the rest of THIS visit instead of being
+ * swapped away the instant handleLogActivity's optimistic update lands in
+ * loggedActivitiesToday (a real race: page.tsx updates loggedActivitiesToday
+ * synchronously, before its own network call even resolves). It resets
+ * naturally on the next fresh mount (e.g. navigating away and back to
+ * Home), which is exactly when the swap SHOULD apply -- this is what stops
+ * a logged/started activity from reappearing as clickable again after
+ * leaving and returning to Home.
+ *
+ * Exported (not inlined in the component) so this selection logic is
+ * testable without rendering React -- see test/goodRightNowActions.test.ts.
+ */
+export function selectGoodRightNowCards(
+  activeWindowName: string,
+  loggedActivitiesToday: string[],
+  justLoggedTitles: Set<string> = new Set()
+): ActionCard[] {
+  const loggedTitles = new Set(loggedActivitiesToday.map((title) => title.trim().toLowerCase()));
+  const cardTitle = (card: ActionCard) =>
+    (card.activityId ? FULL_ACTIVITY_CATALOG.find((activity) => activity.id === card.activityId)?.title : undefined) ?? card.title;
+  const isLogged = (card: ActionCard) => {
+    const title = cardTitle(card).toLowerCase();
+    return loggedTitles.has(title) && !justLoggedTitles.has(title);
+  };
+
+  const base = getActionCards(activeWindowName);
+  const kept = base.filter((card) => !isLogged(card));
+  const stillNeeded = 3 - kept.length;
+  if (stillNeeded <= 0) return kept.slice(0, 3);
+
+  const usedActivityKeys = new Set(kept.map((card) => card.activityId ?? card.id));
+  const alternatives = getActivityDiscoveryCards(activeWindowName, 12).filter((card) => {
+    if (isLogged(card) || usedActivityKeys.has(card.activityId ?? card.id)) return false;
+    const definition = card.activityId ? getActivityDefinition(card.activityId) : undefined;
+    return (definition?.experience.immediateAction ?? 'LOG_NOW') !== 'PLAN';
+  });
+
+  return [...kept, ...alternatives.slice(0, stillNeeded)];
+}
+
 export function HomeDashboard({
   userName,
   energyScore,
@@ -477,10 +530,19 @@ export function HomeDashboard({
     return items;
   }, [currentWindowLabel, dailyBriefing, dayWindows, currentMinuteOfDay, nextShift.startTime, nextShift.windowName, tone.color]);
 
-  // "Good right now" -- the existing deterministic window -> 3 activity
-  // cards table (packages/recommendation/src/actionCards.ts), already used
-  // by Timeline's own tap-arc interaction. Reused as-is, never hardcoded.
-  const goodRightNow = useMemo(() => getActionCards(activeWindowName).slice(0, 3), [activeWindowName]);
+  // See selectGoodRightNowCards' own doc comment for the full reasoning --
+  // justLoggedTitles exempts a card the user just logged from THIS Home
+  // visit so it keeps showing its own confirmation instead of being
+  // swapped away mid-flight.
+  const [justLoggedTitles, setJustLoggedTitles] = useState<Set<string>>(() => new Set());
+  const handleCardLogged = (title: string) => {
+    setJustLoggedTitles((prev) => new Set(prev).add(title.trim().toLowerCase()));
+  };
+
+  const goodRightNow = useMemo(
+    () => selectGoodRightNowCards(activeWindowName, loggedActivitiesToday, justLoggedTitles),
+    [activeWindowName, loggedActivitiesToday, justLoggedTitles]
+  );
 
   // Next Best Moment's end time -- nextShift itself only carries a start
   // time (scoreEngine.ts), so this cross-references the SAME real window in
@@ -586,6 +648,7 @@ export function HomeDashboard({
                 activeWindowName={activeWindowName}
                 onLogActivity={onLogActivity}
                 onPlanClick={onPlanClick}
+                onLogged={handleCardLogged}
               />
             ))}
           </div>
@@ -938,11 +1001,16 @@ function GoodRightNowCard({
   activeWindowName,
   onLogActivity,
   onPlanClick,
+  onLogged,
 }: {
   card: ActionCard;
   activeWindowName: string;
   onLogActivity?: HomeDashboardProps['onLogActivity'];
   onPlanClick?: (activity?: string) => void;
+  /** Reports the canonical title back up to HomeDashboard the moment a log
+   * succeeds, so it can be exempted from the "already logged today" swap
+   * for the rest of this visit -- see goodRightNow's own doc comment. */
+  onLogged?: (title: string) => void;
 }) {
   const [status, setStatus] = useState<'idle' | 'loading' | 'logged' | 'error'>('idle');
   const [loggedAtLabel, setLoggedAtLabel] = useState('');
@@ -959,6 +1027,13 @@ function GoodRightNowCard({
   const handleImmediateAction = async (type: 'LOG_NOW' | 'START_NOW') => {
     if (status === 'loading' || !onLogActivity) return;
     setStatus('loading');
+    // Mark this title exempt from the "already logged today" swap BEFORE
+    // calling onLogActivity, not after -- handleLogActivity (page.tsx)
+    // updates loggedActivitiesToday synchronously (before its own network
+    // call even resolves), so calling onLogged() only after await would
+    // lose the race: the parent could already have swapped this card out
+    // (and unmounted this component) before it ever reached setStatus('logged').
+    onLogged?.(planTitle);
     try {
       const durationMinutes = type === 'START_NOW'
         ? definition?.experience.defaultDurationMinutes ?? definition?.experience.suggestedDurations?.[0] ?? 30
