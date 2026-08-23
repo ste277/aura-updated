@@ -10,7 +10,7 @@ import { RELATIONSHIP_ICON, SavedPersonRow } from './PeopleView';
 import { SharedMomentsView } from './SharedMomentsView';
 import * as theme from './theme';
 import { colors, spacing, typography } from './theme';
-import { PageHeader, SegmentedControl, SecondaryButton } from './ui';
+import { PageHeader, SegmentedControl, SecondaryButton, EmptyState } from './ui';
 import type { TimingCandidate, TimingCandidateLabel, TimingSearchDateRange, TimingSearchMode, TimingSearchResponse, TimingTimePreference } from '../../../packages/recommendation/src/timingSearch';
 import type { MuhurtaReason } from '../../../packages/muhurta/src/activityOntology';
 import { formatMuhurtaReason } from '../../../packages/muhurta/src/muhurtaReasonFormat';
@@ -1422,9 +1422,13 @@ export function PlanWithAuraView({ onTimingSearch, onViewDay, onPlanLogged, time
             onConfirmRemove={() => handleCancelPlan(plan)}
           />
         )) : (
-          <div style={emptyPlansStyle}>
-            No upcoming plans yet. Choose an activity above and tap Find My Best Time to create one.
-          </div>
+          <EmptyState
+            title="Nothing planned yet."
+            description="Choose an activity above and tap Find My Best Time to create one."
+            action={
+              <SecondaryButton onClick={() => window.scrollTo({ top: 0, behavior: 'smooth' })}>Find a time</SecondaryButton>
+            }
+          />
         )}
       </section>
 

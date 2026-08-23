@@ -13,7 +13,7 @@ import { stripCountdownWrapper } from '../lib/formatTimeLeft';
 import { trackEvent } from '../lib/trackEvent';
 import * as theme from './theme';
 import { colors, spacing, typography } from './theme';
-import { PageHeader, SectionHeader, SurfaceCard, StatusBadge, IconButton, PrimaryButton, SecondaryButton, TextButton, ActivityChip } from './ui';
+import { PageHeader, SectionHeader, SurfaceCard, StatusBadge, IconButton, PrimaryButton, SecondaryButton, TextButton, ActivityChip, ModalShell, useModalA11y, TextAreaInput } from './ui';
 
 interface HomeDashboardProps {
   userName: string;
@@ -1218,61 +1218,37 @@ function LogActivityModal({
   onCancel: () => void;
   onConfirm: () => void;
 }) {
-  const dialogRef = useRef<HTMLDivElement | null>(null);
-  const noteRef = useRef<HTMLTextAreaElement | null>(null);
-  const previousFocusRef = useRef<HTMLElement | null>(null);
+  const dialogRef = useRef<HTMLDivElement>(null);
+  const noteRef = useRef<HTMLTextAreaElement>(null);
 
-  useEffect(() => {
-    previousFocusRef.current = document.activeElement instanceof HTMLElement ? document.activeElement : null;
-    const previousOverflow = document.body.style.overflow;
-    document.body.style.overflow = 'hidden';
-    const timer = window.setTimeout(() => noteRef.current?.focus(), 0);
-    return () => {
-      window.clearTimeout(timer);
-      document.body.style.overflow = previousOverflow;
-      previousFocusRef.current?.focus?.();
-    };
-  }, []);
-
-  useEffect(() => {
-    const handleKeyDown = (event: KeyboardEvent) => {
-      if (event.key === 'Escape' && !isSubmitting) onCancel();
-      if (event.key !== 'Tab') return;
-
-      const focusable = Array.from(
-        dialogRef.current?.querySelectorAll<HTMLElement>(
-          'button:not([disabled]), textarea:not([disabled]), input:not([disabled]), select:not([disabled]), a[href], [tabindex]:not([tabindex="-1"])'
-        ) ?? []
-      );
-      if (focusable.length === 0) return;
-
-      const first = focusable[0];
-      const last = focusable[focusable.length - 1];
-      if (event.shiftKey && document.activeElement === first) {
-        event.preventDefault();
-        last.focus();
-      } else if (!event.shiftKey && document.activeElement === last) {
-        event.preventDefault();
-        first.focus();
-      }
-    };
-    window.addEventListener('keydown', handleKeyDown);
-    return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [isSubmitting, onCancel]);
+  useModalA11y({ isOpen: true, onClose: () => { if (!isSubmitting) onCancel(); }, dialogRef, initialFocusRef: noteRef });
 
   return (
-    <div style={{ position: 'fixed', inset: 0, background: 'rgba(2, 6, 23, 0.82)', backdropFilter: 'blur(8px)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 10000, padding: 20 }}>
-      <div ref={dialogRef} role="dialog" aria-modal="true" aria-labelledby="home-log-title" aria-describedby="home-log-window" style={{ background: '#0f172a', border: '1px solid #1e293b', borderRadius: 18, padding: 20, width: '100%', maxWidth: 360, boxShadow: '0 25px 50px -12px rgba(0, 0, 0, 0.6)', color: '#f8fafc' }}>
-        <h3 id="home-log-title" style={{ margin: 0, fontSize: 17 }}>Log {title}?</h3>
-        <p id="home-log-window" style={{ fontSize: 12, color: '#94a3b8', marginTop: 5 }}>Tagging this under {formatWindowName(activeWindowName)}.</p>
-        <textarea ref={noteRef} placeholder="Optional notes or reflection..." value={note} onChange={(event) => onNoteChange(event.target.value)} style={{ width: '100%', height: 72, marginTop: 12, borderRadius: 10, background: '#020617', border: '1px solid #334155', color: '#f8fafc', padding: 10, fontSize: 12, resize: 'none', boxSizing: 'border-box', outline: 'none' }} />
-        {error && <div style={{ color: '#fb7185', fontSize: 12, lineHeight: 1.35, marginTop: 10 }}>{error}</div>}
-        <div style={{ display: 'flex', gap: 10, marginTop: 16 }}>
-          <button type="button" onClick={onCancel} disabled={isSubmitting} style={{ flex: 1, padding: '10px 0', borderRadius: 10, background: 'transparent', border: '1px solid #334155', color: '#94a3b8', fontSize: 13, cursor: isSubmitting ? 'default' : 'pointer', opacity: isSubmitting ? 0.6 : 1 }}>Cancel</button>
-          <button type="button" onClick={onConfirm} disabled={isSubmitting} style={{ flex: 1, padding: '10px 0', borderRadius: 10, background: '#4ade80', border: 'none', color: '#020617', fontWeight: 800, fontSize: 13, cursor: isSubmitting ? 'default' : 'pointer', opacity: isSubmitting ? 0.7 : 1 }}>{isSubmitting ? 'Saving...' : 'Confirm Log'}</button>
-        </div>
-      </div>
-    </div>
+    <ModalShell
+      dialogRef={dialogRef}
+      labelledBy="home-log-title"
+      describedBy="home-log-window"
+      title={`Log ${title}?`}
+      description={`Tagging this under ${formatWindowName(activeWindowName)}.`}
+      maxWidth={360}
+      footer={
+        <>
+          <SecondaryButton
+            onClick={onCancel}
+            disabled={isSubmitting}
+            style={{ flex: 1, background: 'transparent', borderColor: colors.borderDefault, color: colors.textMuted }}
+          >
+            Cancel
+          </SecondaryButton>
+          <PrimaryButton onClick={onConfirm} disabled={isSubmitting} loading={isSubmitting} style={{ flex: 1 }}>
+            Confirm log
+          </PrimaryButton>
+        </>
+      }
+    >
+      <TextAreaInput ref={noteRef} placeholder="Optional notes or reflection..." value={note} onChange={(event) => onNoteChange(event.target.value)} rows={3} active={Boolean(note)} />
+      {error && <div style={{ color: colors.danger, fontSize: 12, lineHeight: 1.35, marginTop: spacing.md }}>{error}</div>}
+    </ModalShell>
   );
 }
 
@@ -1381,8 +1357,8 @@ const goodRightNowCardStyle: React.CSSProperties = {
   alignItems: 'flex-start',
   textAlign: 'left',
   minHeight: 132,
-  border: '1px solid rgba(148, 163, 184, 0.18)',
-  borderRadius: 12,
+  border: `1px solid ${colors.borderSubtle}`,
+  borderRadius: theme.radius.md,
   background: 'rgba(2, 6, 23, 0.4)',
   padding: '11px 10px',
 };
@@ -1390,13 +1366,15 @@ const goodRightNowCardStyle: React.CSSProperties = {
 // One primary action per card (brief section 6: never "Log now | Start now
 // | Plan" all at once) -- full-width within the card so it stays legible
 // down to 375px without needing two side-by-side buttons (brief section 22).
+// Same tight sizing as before (this sits in a narrow 3-up grid) -- V2.1
+// section 21 only tokenizes the colors, doesn't touch layout/copy here.
 const goodRightNowActionButtonStyle: React.CSSProperties = {
   width: '100%',
   minHeight: 30,
-  border: '1px solid rgba(74, 222, 128, 0.35)',
-  borderRadius: 8,
-  background: 'rgba(74, 222, 128, 0.12)',
-  color: '#4ade80',
+  border: `1px solid ${colors.accentBorder}`,
+  borderRadius: theme.radius.sm,
+  background: colors.positiveSoft,
+  color: colors.positive,
   fontSize: 11,
   fontWeight: 850,
   cursor: 'pointer',
@@ -1411,7 +1389,7 @@ const goodRightNowSecondaryLinkStyle: React.CSSProperties = {
   marginTop: 6,
   border: 'none',
   background: 'transparent',
-  color: '#94a3b8',
+  color: colors.textMuted,
   fontSize: 10,
   fontWeight: 750,
   cursor: 'pointer',
