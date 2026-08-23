@@ -2,6 +2,8 @@
 
 import React, { useState, useMemo } from 'react';
 import { computeAverageTimedSessionMinutes } from '../lib/activityDuration';
+import { colors, spacing, typography, radius } from './theme';
+import { PageHeader, SegmentedControl, SurfaceCard, StatusBadge, TextButton } from './ui';
 
 export interface LoggedEntryItem {
   id: string;
@@ -288,118 +290,55 @@ export function InsightsView({ logEntries = [], assistantInsight }: InsightsView
         color: '#f8fafc',
       }}
     >
-      {/* Header */}
-      <div>
-        <h1 style={{ fontSize: 20, fontWeight: 700, color: 'var(--as-text, #f8fafc)', margin: 0, lineHeight: 1.2 }}>
-          Insights
-        </h1>
-        <p style={{ fontSize: 12, color: 'var(--as-text-muted, #94a3b8)', marginTop: 4 }}>
-          Patterns from your journey
-        </p>
-      </div>
+      <PageHeader title="Insights" subtitle="Patterns from your journey." />
 
-      {/* Sub-Tab Selector Pills */}
-      <div style={{ display: 'flex', gap: 6 }}>
-        {(['overview', 'patterns', 'trends', 'streaks'] as const).map((tab) => (
-          <button
-            key={tab}
-            onClick={() => setActiveSubTab(tab)}
-            style={{
-              background: activeSubTab === tab ? '#4ade80' : 'rgba(30, 41, 59, 0.6)',
-              color: activeSubTab === tab ? '#020617' : '#94a3b8',
-              border: 'none',
-              borderRadius: 20,
-              padding: '6px 14px',
-              fontSize: 11,
-              fontWeight: 700,
-              cursor: 'pointer',
-              textTransform: 'capitalize',
-              transition: 'all 0.15s ease',
-            }}
-          >
-            {tab}
-          </button>
-        ))}
-      </div>
+      <SegmentedControl
+        options={(['overview', 'patterns', 'trends', 'streaks'] as const).map((tab) => ({
+          value: tab,
+          label: tab.charAt(0).toUpperCase() + tab.slice(1),
+        }))}
+        value={activeSubTab}
+        onChange={setActiveSubTab}
+      />
 
       {/* ==================== TAB 1: OVERVIEW ==================== */}
       {activeSubTab === 'overview' && (
         <>
           {assistantInsight && (
-            <div
-              style={{
-                background: 'var(--as-surface-raised, #0f172a)',
-                border: '1px solid rgba(74, 222, 128, 0.28)',
-                borderRadius: 16,
-                padding: 16,
-              }}
-            >
-              <div style={{ fontSize: 10, fontFamily: 'monospace', textTransform: 'uppercase', color: '#4ade80', letterSpacing: '0.05em', fontWeight: 700 }}>
-                Alignment Proof
-              </div>
-              <div style={{ fontSize: 22, color: '#f8fafc', fontWeight: 800, marginTop: 8 }}>
+            <SurfaceCard accentColor={colors.positive}>
+              <div style={typography.sectionEyebrow}>Your Alignment</div>
+              <div style={{ fontSize: 32, color: colors.textPrimary, fontWeight: 850, marginTop: spacing.sm }}>
                 {Math.max(0, assistantInsight.peakFlowLiftPercent)}%
               </div>
-              <div style={{ fontSize: 12, color: '#cbd5e1', lineHeight: 1.4, marginTop: 4 }}>
+              <div style={{ fontSize: 13, color: colors.textSecondary, lineHeight: 1.4, marginTop: spacing.xs }}>
                 {assistantInsight.insightText}
               </div>
-              <div style={{ fontSize: 11, color: '#94a3b8', marginTop: 8 }}>
+              <div style={{ ...typography.meta, marginTop: spacing.sm }}>
                 {assistantInsight.reflectionCount} check-ins · {assistantInsight.alignedDays} aligned days
               </div>
-            </div>
+            </SurfaceCard>
           )}
 
-          {/* Stat Grid */}
-          <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-            <span
-              style={{
-                fontSize: 10,
-                fontFamily: 'monospace',
-                textTransform: 'uppercase',
-                color: '#94a3b8',
-                letterSpacing: '0.05em',
-                fontWeight: 600,
-              }}
-            >
-              This Month
-            </span>
-
-            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: 8 }}>
-              <StatCard value={analytics.totalActivities} label="Activities Completed" color="#4ade80" />
-              <StatCard value={analytics.streak} label="Day Streak" color="#facc15" />
-              <StatCard value={`${analytics.auraGuidedRate}%`} label="Aura Guided" color="#38bdf8" />
-              <StatCard value={`${analytics.alignmentScore}%`} label="Windows Utilized" color="#c084fc" />
+          {/* This Month -- brief section 50: a lighter 2x2 inline treatment
+           * instead of four separately-bordered boxes. */}
+          <div>
+            <div style={typography.sectionEyebrow}>This Month</div>
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: `${spacing.sm}px ${spacing.lg}px`, marginTop: spacing.sm }}>
+              <InlineStat value={analytics.totalActivities} label="activities" color={colors.positive} />
+              <InlineStat value={analytics.streak} label="day streak" color={colors.caution} />
+              <InlineStat value={`${analytics.auraGuidedRate}%`} label="Aura guided" color={colors.info} />
+              <InlineStat value={`${analytics.alignmentScore}%`} label="supportive windows" color={colors.traditional} />
             </div>
           </div>
 
-          {/* Your Patterns Preview */}
-          <div
-            style={{
-              background: 'var(--as-surface-raised, #0f172a)',
-              border: '1px solid var(--as-border, #1e293b)',
-              borderRadius: 16,
-              padding: 16,
-              display: 'flex',
-              flexDirection: 'column',
-              gap: 12,
-            }}
-          >
-            <span
-              style={{
-                fontSize: 10,
-                fontFamily: 'monospace',
-                textTransform: 'uppercase',
-                color: '#94a3b8',
-                letterSpacing: '0.05em',
-                fontWeight: 600,
-              }}
-            >
-              Your Patterns
-            </span>
-
-            <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+          {/* Your Patterns -- brief section 51: made more prominent, simple
+           * rows/dividers instead of a card full of individually-bordered
+           * row cards. */}
+          <div>
+            <div style={typography.sectionEyebrow}>Your Patterns</div>
+            <div style={{ display: 'flex', flexDirection: 'column', marginTop: spacing.sm }}>
               {patterns.length === 0 && (
-                <span style={{ fontSize: 12, color: '#94a3b8', lineHeight: 1.4 }}>
+                <span style={{ fontSize: 13, color: colors.textFaint, lineHeight: 1.4 }}>
                   Log a few activities and your patterns will appear here — computed from your own data.
                 </span>
               )}
@@ -409,80 +348,45 @@ export function InsightsView({ logEntries = [], assistantInsight }: InsightsView
                   style={{
                     display: 'flex',
                     alignItems: 'center',
-                    gap: 12,
-                    background: 'rgba(30, 41, 59, 0.5)',
-                    border: '1px solid rgba(255, 255, 255, 0.05)',
-                    borderRadius: 12,
-                    padding: '10px 12px',
+                    gap: spacing.md,
+                    padding: `${spacing.md}px 0`,
+                    borderTop: idx > 0 ? `1px solid ${colors.borderSubtle}` : 'none',
                   }}
                 >
-                  <div
-                    style={{
-                      width: 32,
-                      height: 32,
-                      borderRadius: '50%',
-                      background: `${item.color}18`,
-                      border: `1px solid ${item.color}44`,
-                      display: 'flex',
-                      alignItems: 'center',
-                      justifyContent: 'center',
-                      fontSize: 16,
-                      flexShrink: 0,
-                    }}
-                  >
-                    {item.icon}
-                  </div>
-                  <span style={{ fontSize: 12, color: '#e2e8f0', lineHeight: 1.4 }}>{item.text}</span>
+                  <span style={{ fontSize: 18, flexShrink: 0 }} aria-hidden="true">{item.icon}</span>
+                  <span style={{ fontSize: 13, color: colors.textSecondary, lineHeight: 1.4 }}>{item.text}</span>
                 </div>
               ))}
             </div>
           </div>
 
-          {/* Window Distribution */}
-          <div
-            style={{
-              background: 'var(--as-surface-raised, #0f172a)',
-              border: '1px solid var(--as-border, #1e293b)',
-              borderRadius: 16,
-              padding: 18,
-            }}
-          >
-            <div
-              style={{
-                fontSize: 10,
-                fontFamily: 'monospace',
-                textTransform: 'uppercase',
-                color: 'var(--as-text-muted, #94a3b8)',
-                marginBottom: 14,
-                letterSpacing: '0.05em',
-                fontWeight: 600,
-              }}
-            >
-              Solar Window Distribution
-            </div>
+          {/* Window Distribution -- brief section 53: keep the existing
+           * data, simple bars only. */}
+          <SurfaceCard padding={spacing.xl}>
+            <div style={{ ...typography.sectionEyebrow, marginBottom: spacing.lg }}>Window Distribution</div>
 
             {analytics.distribution.length > 0 ? (
-              <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+              <div style={{ display: 'flex', flexDirection: 'column', gap: spacing.md }}>
                 {analytics.distribution.map((item) => (
-                  <div key={item.name} style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
-                    <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 11 }}>
-                      <span style={{ fontWeight: 600, color: '#e2e8f0' }}>{item.name}</span>
-                      <span style={{ fontFamily: 'monospace', color: '#94a3b8' }}>
+                  <div key={item.name} style={{ display: 'flex', flexDirection: 'column', gap: spacing.xs }}>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 12 }}>
+                      <span style={{ fontWeight: 650, color: colors.textSecondary }}>{item.name}</span>
+                      <span style={{ fontFamily: 'var(--as-font-mono)', color: colors.textMuted }}>
                         {item.count} logs ({item.percentage}%)
                       </span>
                     </div>
-                    <div style={{ width: '100%', height: 6, background: '#1e293b', borderRadius: 4, overflow: 'hidden' }}>
+                    <div style={{ width: '100%', height: 6, background: colors.borderSubtle, borderRadius: radius.sm, overflow: 'hidden' }}>
                       <div
                         style={{
                           height: '100%',
                           width: `${item.percentage}%`,
                           background:
                             item.name.includes('RAHU') || item.name.includes('YAMA')
-                              ? '#fb7185'
+                              ? colors.danger
                               : item.name.includes('ABHIJIT') || item.name.includes('BRAHMA')
-                              ? '#4ade80'
-                              : '#38bdf8',
-                          borderRadius: 4,
+                              ? colors.positive
+                              : colors.info,
+                          borderRadius: radius.sm,
                           transition: 'width 0.3s ease',
                         }}
                       />
@@ -491,31 +395,36 @@ export function InsightsView({ logEntries = [], assistantInsight }: InsightsView
                 ))}
               </div>
             ) : (
-              <div style={{ fontSize: 11, color: '#94a3b8', textAlign: 'center', padding: '12px 0' }}>
+              <div style={{ fontSize: 12, color: colors.textFaint, textAlign: 'center', padding: '12px 0' }}>
                 No activity logs recorded yet. Start logging from Home.
               </div>
             )}
-          </div>
+          </SurfaceCard>
 
-          {/* Friction Guardrail Alerts */}
+          {/* Things to watch -- brief section 54: was "Friction Guardrail
+           * Alerts" in error-red styling, which read as too technical/
+           * alarming for ordinary advisory information. Caution (gold)
+           * styling now, calmer copy; internal naming/semantics (still
+           * driven by analytics.frictionLogs -- Rahu Kalam/Yama logs)
+           * unchanged. */}
           {analytics.frictionLogs.length > 0 && (
-            <div style={{ background: 'rgba(244, 63, 94, 0.08)', border: '1px solid rgba(244, 63, 94, 0.25)', borderRadius: 16, padding: 16 }}>
-              <div style={{ display: 'flex', alignItems: 'center', gap: 8, color: '#fb7185', fontSize: 13, fontWeight: 700 }}>
-                <span>⚠️</span>
-                <span>Friction Guardrail Alerts</span>
+            <SurfaceCard accentColor={colors.caution} style={{ background: colors.cautionSoft }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: spacing.sm, color: colors.caution, fontSize: 13, fontWeight: 750 }}>
+                <span aria-hidden="true">☀️</span>
+                <span>Things to watch</span>
               </div>
-              <p style={{ fontSize: 11, color: '#cbd5e1', marginTop: 4, lineHeight: 1.4 }}>
-                Activities logged during friction windows (Rahu Kalam / Yama). Consider rescheduling high-stakes actions to Abhijit or Brahma periods.
+              <p style={{ fontSize: 12, color: colors.textSecondary, marginTop: spacing.xs, lineHeight: 1.4 }}>
+                You logged {analytics.frictionLogs.length} {analytics.frictionLogs.length === 1 ? 'activity' : 'activities'} during caution windows. For important activities, Aura may suggest a more supportive time.
               </p>
-              <div style={{ display: 'flex', flexDirection: 'column', gap: 6, marginTop: 10 }}>
+              <div style={{ display: 'flex', flexDirection: 'column', gap: spacing.xs, marginTop: spacing.sm }}>
                 {analytics.frictionLogs.map((log) => (
-                  <div key={log.id} style={{ fontSize: 11, color: '#fb7185', background: 'rgba(15, 23, 42, 0.6)', padding: '6px 10px', borderRadius: 8, display: 'flex', justifyContent: 'space-between' }}>
+                  <div key={log.id} style={{ fontSize: 12, color: colors.textSecondary, background: 'rgba(15, 23, 42, 0.4)', padding: '6px 10px', borderRadius: radius.sm, display: 'flex', justifyContent: 'space-between' }}>
                     <span>• {log.activityTitle}</span>
-                    <span style={{ fontFamily: 'monospace', opacity: 0.8 }}>{log.activeWindow}</span>
+                    <span style={{ fontFamily: 'var(--as-font-mono)', opacity: 0.8 }}>{log.activeWindow}</span>
                   </div>
                 ))}
               </div>
-            </div>
+            </SurfaceCard>
           )}
         </>
       )}
@@ -817,41 +726,12 @@ export function InsightsView({ logEntries = [], assistantInsight }: InsightsView
   );
 }
 
-function StatCard({
-  value,
-  label,
-  color,
-}: {
-  value: string | number;
-  label: string;
-  color: string;
-}) {
+/** brief section 50 -- a lighter inline stat, no per-stat border/box. */
+function InlineStat({ value, label, color }: { value: string | number; label: string; color: string }) {
   return (
-    <div
-      style={{
-        background: 'var(--as-surface-raised, #0f172a)',
-        border: '1px solid var(--as-border, #1e293b)',
-        borderRadius: 12,
-        padding: '12px 6px',
-        textAlign: 'center',
-        display: 'flex',
-        flexDirection: 'column',
-        alignItems: 'center',
-        justifyContent: 'center',
-      }}
-    >
-      <div style={{ fontSize: 16, fontWeight: 700, color }}>{value}</div>
-      <div
-        style={{
-          fontSize: 9,
-          color: '#94a3b8',
-          marginTop: 4,
-          lineHeight: 1.2,
-          fontWeight: 500,
-        }}
-      >
-        {label}
-      </div>
+    <div style={{ display: 'flex', alignItems: 'baseline', gap: 6 }}>
+      <span style={{ fontSize: 20, fontWeight: 800, color }}>{value}</span>
+      <span style={{ fontSize: 12, color: '#94a3b8' }}>{label}</span>
     </div>
   );
 }
