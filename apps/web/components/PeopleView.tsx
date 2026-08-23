@@ -4,6 +4,8 @@ import React, { useEffect, useMemo, useState } from 'react';
 import { CITY_OPTIONS } from '../lib/cities';
 import type { CityOption } from '../lib/cities';
 import * as theme from './theme';
+import { colors, spacing, typography } from './theme';
+import { SurfaceCard, PrimaryButton, SecondaryButton, DestructiveButton, EmptyState } from './ui';
 
 export type RelationshipType = 'PARTNER' | 'SPOUSE' | 'FAMILY' | 'FRIEND' | 'OTHER';
 
@@ -127,40 +129,39 @@ export function PeopleView({ onBack }: PeopleViewProps) {
 
 function PeopleList({ people, onAddPerson, onViewPerson }: { people: SavedPersonRow[] | null; onAddPerson: () => void; onViewPerson: (id: string) => void }) {
   if (people === null) {
-    return <section style={cardStyle}><div style={{ fontSize: 12, color: '#94a3b8' }}>Loading…</div></section>;
+    return <SurfaceCard><div style={{ fontSize: 12, color: colors.textFaint }}>Loading…</div></SurfaceCard>;
   }
 
   return (
     <>
       {people.length === 0 ? (
-        <section style={cardStyle}>
-          <div style={{ fontSize: 14, fontWeight: 800 }}>No people added yet</div>
-          <p style={{ fontSize: 12, color: '#94a3b8', marginTop: 6, lineHeight: 1.5 }}>
-            Add someone you plan with -- a partner, family member, or friend -- to keep their birth details on hand.
-          </p>
-        </section>
+        <SurfaceCard>
+          <EmptyState
+            title="No people yet"
+            description="Add someone you plan with -- a partner, family member, or friend -- to find shared moments."
+            action={<PrimaryButton onClick={onAddPerson}>+ Add person</PrimaryButton>}
+          />
+        </SurfaceCard>
       ) : (
         <>
-          <div style={{ ...sectionKickerStyle }}>People you&apos;ve added</div>
+          <div style={typography.sectionEyebrow}>People you&apos;ve added</div>
           {people.map((person) => (
-            <section key={person.id} style={cardStyle}>
-              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 10 }}>
+            <SurfaceCard key={person.id}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: spacing.md }}>
                 <div>
-                  <div style={{ fontSize: 15, fontWeight: 800 }}>{RELATIONSHIP_ICON[person.relationshipType]} {person.name}</div>
-                  <div style={{ fontSize: 12, color: '#94a3b8', marginTop: 3 }}>{RELATIONSHIP_LABEL[person.relationshipType]}</div>
+                  <div style={{ fontSize: 15, fontWeight: 800, color: colors.textPrimary }}>{RELATIONSHIP_ICON[person.relationshipType]} {person.name}</div>
+                  <div style={{ fontSize: 12, color: colors.textFaint, marginTop: 3 }}>{RELATIONSHIP_LABEL[person.relationshipType]}</div>
                 </div>
-                <button type="button" onClick={() => onViewPerson(person.id)} style={secondaryButtonStyle}>
+                <SecondaryButton onClick={() => onViewPerson(person.id)} style={{ minHeight: 38, padding: '0 14px' }}>
                   View
-                </button>
+                </SecondaryButton>
               </div>
-            </section>
+            </SurfaceCard>
           ))}
         </>
       )}
 
-      <button type="button" onClick={onAddPerson} style={primaryButtonStyle}>
-        + Add person
-      </button>
+      {people.length > 0 && <PrimaryButton onClick={onAddPerson} style={{ width: '100%' }}>+ Add person</PrimaryButton>}
     </>
   );
 }
@@ -201,52 +202,52 @@ function PersonDetail({ personId, onEdit, onDeleted }: { personId: string; onEdi
     }
   };
 
-  if (error) return <section style={cardStyle}><div style={errorBoxStyle}>{error}</div></section>;
-  if (!person) return <section style={cardStyle}><div style={{ fontSize: 12, color: '#94a3b8' }}>Loading…</div></section>;
+  if (error) return <SurfaceCard><div style={errorBoxStyle}>{error}</div></SurfaceCard>;
+  if (!person) return <SurfaceCard><div style={{ fontSize: 12, color: colors.textFaint }}>Loading…</div></SurfaceCard>;
 
   return (
     <>
-      <section style={cardStyle}>
-        <div style={{ fontSize: 18, fontWeight: 800 }}>{RELATIONSHIP_ICON[person.relationshipType]} {person.name}</div>
-        <div style={{ fontSize: 12, color: '#94a3b8', marginTop: 3 }}>{RELATIONSHIP_LABEL[person.relationshipType]}</div>
+      <SurfaceCard>
+        <div style={{ fontSize: 18, fontWeight: 800, color: colors.textPrimary }}>{RELATIONSHIP_ICON[person.relationshipType]} {person.name}</div>
+        <div style={{ fontSize: 12, color: colors.textFaint, marginTop: 3 }}>{RELATIONSHIP_LABEL[person.relationshipType]}</div>
 
-        <div style={{ ...sectionKickerStyle, marginTop: 16 }}>Birth details</div>
-        <div style={{ fontSize: 13, color: '#dbe7f4', marginTop: 8, lineHeight: 1.7 }}>
+        <div style={{ ...typography.sectionEyebrow, marginTop: spacing.lg }}>Birth details</div>
+        <div style={{ fontSize: 13, color: colors.textSecondary, marginTop: spacing.sm, lineHeight: 1.7 }}>
           📅 {person.birthDate.slice(0, 10)} · ⏰ {person.birthTime}
           {person.birthCityName && <><br />📍 {person.birthCityName}</>}
         </div>
 
         {person.natalContext && (
-          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8, marginTop: 14 }}>
+          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: spacing.sm, marginTop: spacing.md }}>
             <PanchangaMiniCell label="Janma Rashi" value={person.natalContext.janmaRashi} />
             <PanchangaMiniCell label="Janma Nakshatra" value={person.natalContext.janmaNakshatra} />
           </div>
         )}
 
-        <button type="button" onClick={onEdit} style={{ ...secondaryButtonStyle, marginTop: 16 }}>
+        <SecondaryButton onClick={onEdit} style={{ marginTop: spacing.lg }}>
           Edit
-        </button>
-      </section>
+        </SecondaryButton>
+      </SurfaceCard>
 
-      <section style={cardStyle}>
+      <SurfaceCard>
         {!confirmingDelete ? (
           <button type="button" onClick={() => setConfirmingDelete(true)} style={dangerLinkStyle}>
             Remove {person.name} →
           </button>
         ) : (
-          <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
-            <div style={{ fontSize: 12, color: '#dbe7f4' }}>Remove {person.name}? This can&apos;t be undone.</div>
-            <div style={{ display: 'flex', gap: 10 }}>
-              <button type="button" onClick={handleDelete} disabled={deleting} style={dangerButtonStyle}>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: spacing.sm }}>
+            <div style={{ fontSize: 12, color: colors.textSecondary }}>Remove {person.name}? This can&apos;t be undone.</div>
+            <div style={{ display: 'flex', gap: spacing.sm }}>
+              <DestructiveButton onClick={handleDelete} disabled={deleting}>
                 {deleting ? 'Removing…' : 'Yes, remove'}
-              </button>
-              <button type="button" onClick={() => setConfirmingDelete(false)} style={secondaryButtonStyle}>
+              </DestructiveButton>
+              <SecondaryButton onClick={() => setConfirmingDelete(false)}>
                 Cancel
-              </button>
+              </SecondaryButton>
             </div>
           </div>
         )}
-      </section>
+      </SurfaceCard>
     </>
   );
 }
@@ -324,11 +325,11 @@ function PersonForm({ mode, personId, onSaved, onCancel }: { mode: 'ADD' | 'EDIT
     }
   };
 
-  if (!loaded) return <section style={cardStyle}><div style={{ fontSize: 12, color: '#94a3b8' }}>Loading…</div></section>;
+  if (!loaded) return <SurfaceCard><div style={{ fontSize: 12, color: colors.textFaint }}>Loading…</div></SurfaceCard>;
 
   return (
-    <form onSubmit={handleSubmit} style={cardStyle}>
-      <div style={sectionKickerStyle}>{mode === 'ADD' ? 'Add someone' : 'Edit person'}</div>
+    <form onSubmit={handleSubmit} style={theme.surfaceCardStyle}>
+      <div style={typography.sectionEyebrow}>{mode === 'ADD' ? 'Add someone' : 'Edit person'}</div>
 
       <div style={{ display: 'flex', flexDirection: 'column', gap: 12, marginTop: 12 }}>
         <label style={fieldLabelStyle}>
@@ -364,12 +365,12 @@ function PersonForm({ mode, personId, onSaved, onCancel }: { mode: 'ADD' | 'EDIT
           </select>
         </label>
 
-        <button type="submit" disabled={saving} style={{ ...primaryButtonStyle, marginTop: 4, opacity: saving ? 0.7 : 1 }}>
+        <PrimaryButton type="submit" disabled={saving} style={{ width: '100%', marginTop: 4 }}>
           {saving ? 'Saving…' : 'Save person'}
-        </button>
-        <button type="button" onClick={onCancel} style={secondaryButtonStyle}>
+        </PrimaryButton>
+        <SecondaryButton onClick={onCancel} style={{ width: '100%' }}>
           Cancel
-        </button>
+        </SecondaryButton>
         {error && <div style={errorBoxStyle}>{error}</div>}
       </div>
     </form>
@@ -385,9 +386,7 @@ function PanchangaMiniCell({ label, value }: { label: string; value: string }) {
   );
 }
 
-const cardStyle: React.CSSProperties = theme.panelStyle;
 const backButtonStyle: React.CSSProperties = theme.backButtonStyle;
-const sectionKickerStyle: React.CSSProperties = theme.sectionKickerStyle;
 
 const fieldLabelStyle: React.CSSProperties = {
   display: 'flex',
@@ -410,20 +409,6 @@ const inputStyle: React.CSSProperties = {
   padding: '0 10px',
 };
 
-const primaryButtonStyle: React.CSSProperties = {
-  width: '100%',
-  minHeight: 46,
-  borderRadius: 14,
-  border: 'none',
-  background: '#4ade80',
-  color: '#020617',
-  fontSize: 14,
-  fontWeight: 900,
-  cursor: 'pointer',
-};
-
-const secondaryButtonStyle: React.CSSProperties = { ...theme.outlineButtonStyle, minHeight: 38, padding: '0 14px' };
-
 const dangerLinkStyle: React.CSSProperties = {
   border: 'none',
   background: 'transparent',
@@ -434,17 +419,6 @@ const dangerLinkStyle: React.CSSProperties = {
   padding: 0,
 };
 
-const dangerButtonStyle: React.CSSProperties = {
-  minHeight: 38,
-  borderRadius: 12,
-  border: '1px solid rgba(251, 107, 107, 0.35)',
-  background: 'rgba(251, 107, 107, 0.1)',
-  color: theme.colors.danger,
-  fontSize: 12,
-  fontWeight: 800,
-  cursor: 'pointer',
-  padding: '0 14px',
-};
 
 const errorBoxStyle: React.CSSProperties = theme.errorBoxStyle;
 

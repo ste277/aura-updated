@@ -4,6 +4,8 @@ import React from 'react';
 import { SUPPORTED_MUHURTHAM_ACTIVITY_IDS } from '../../../packages/recommendation/src/muhurthamFinder';
 import { FULL_ACTIVITY_CATALOG } from '../../../packages/recommendation/src/personalizedTasks';
 import * as theme from './theme';
+import { typography } from './theme';
+import { PageHeader } from './ui';
 
 /**
  * Product Structure V2 -- Explore owns Panchang + Muhurtham (brief section
@@ -43,14 +45,10 @@ export function ExploreView({ timezone, onOpenPanchang, onOpenMuhurtham, onOpenM
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 20, paddingBottom: 24, fontFamily: 'sans-serif', color: theme.colors.textPrimary }}>
-      <div>
-        <h1 style={{ fontSize: 26, margin: 0, lineHeight: 1.15, fontWeight: 800 }}>Explore ✨</h1>
-        <p style={{ fontSize: 13, color: theme.colors.textFaint, margin: '7px 0 0', lineHeight: 1.45 }}>
-          Understand today.
-          <br />
-          Find the right day for something important.
-        </p>
-      </div>
+      <PageHeader
+        title={<>Explore ✨</>}
+        subtitle={<>Understand today.<br />Find the right day for something important.</>}
+      />
 
       <ExploreFeatureCard
         kicker="Panchang Calendar"
@@ -75,7 +73,7 @@ export function ExploreView({ timezone, onOpenPanchang, onOpenMuhurtham, onOpenM
       />
 
       <section>
-        <div style={theme.sectionKickerStyle}>Quick Explore</div>
+        <div style={typography.sectionEyebrow}>Quick Explore</div>
         <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(170px, 1fr))', gap: 10, marginTop: 12 }}>
           {quickOccasions.map((activity) => (
             <button

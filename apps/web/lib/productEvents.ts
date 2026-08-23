@@ -37,7 +37,10 @@ export type ProductEventName =
   | 'ACTIVITY_LOGGED_NOW'
   | 'WEB_PUSH_ENABLED'
   | 'WEB_PUSH_DISABLED'
-  | 'REMINDER_PUSH_SENT';
+  | 'REMINDER_PUSH_SENT'
+  | 'ASK_AURA_SUBMITTED'
+  | 'ASK_AURA_INTENT_RESOLVED'
+  | 'ASK_AURA_RESULT_ACTION';
 
 export const PRODUCT_EVENT_NAMES: ProductEventName[] = [
   'AURA_HOME_VIEWED',
@@ -62,6 +65,9 @@ export const PRODUCT_EVENT_NAMES: ProductEventName[] = [
   'WEB_PUSH_ENABLED',
   'WEB_PUSH_DISABLED',
   'REMINDER_PUSH_SENT',
+  'ASK_AURA_SUBMITTED',
+  'ASK_AURA_INTENT_RESOLVED',
+  'ASK_AURA_RESULT_ACTION',
 ];
 
 export function isProductEventName(value: string): value is ProductEventName {
@@ -103,6 +109,14 @@ export const CLIENT_TRACKED_EVENTS: ReadonlySet<ProductEventName> = new Set<Prod
   // not server-confirmed subscribe/unsubscribe outcomes.
   'WEB_PUSH_ENABLED',
   'WEB_PUSH_DISABLED',
+  // Ask Aura Orchestration V1 (brief section 30) -- SUBMITTED/RESULT_ACTION
+  // are UI intent signals (send button pressed / result action clicked),
+  // mirroring PLAN_STARTED/PLAN_RESULT_SELECTED's own client-tracked
+  // pattern. INTENT_RESOLVED is deliberately NOT here -- it's recorded
+  // server-side by the route at the moment parsing actually happens
+  // (mirrors PLAN_SEARCH_COMPLETED), never duplicated client-side.
+  'ASK_AURA_SUBMITTED',
+  'ASK_AURA_RESULT_ACTION',
 ]);
 
 // Fields that must NEVER appear in ProductEvent.metadata, under any event,
@@ -166,6 +180,21 @@ const DURATION_MODE_VALUES = new Set(['INSTANT', 'FIXED', 'USER_SELECTED', 'SESS
 // notification click, rather than a second REMINDER_PUSH_OPENED event
 // representing the same user action ("this reminder was opened").
 const REMINDER_OPEN_SOURCE_VALUES = new Set(['IN_APP', 'PUSH']);
+// Ask Aura Orchestration V1 (brief section 30) -- the exact same closed
+// enums askAuraIntent.ts's own AskAuraIntent/AskHorizonPhrase types define,
+// not a third copy. Deliberately excludes activityId's own free-text
+// fallback (taskTitle) and the raw prompt itself -- FORBIDDEN_METADATA_KEYS
+// above already blocks 'query'/'message' outright as defense-in-depth.
+const ASK_INTENT_VALUES = new Set([
+  'GOOD_RIGHT_NOW', 'TIMING_FIND', 'TIMING_CHECK', 'TIMING_COMPARE',
+  'PANCHANG_QUERY', 'PANCHANG_EXPLAIN', 'MUHURTHAM_SEARCH', 'PLAN_OPEN', 'UNKNOWN',
+]);
+const ASK_HORIZON_VALUES = new Set([
+  'NOW', 'TODAY', 'TOMORROW', 'THIS_WEEKEND', 'NEXT_WEEKEND', 'THIS_WEEK',
+  'NEXT_7_DAYS', 'NEXT_MONTH', 'CUSTOM_DATE', 'UNSPECIFIED',
+]);
+const ASK_TIME_PREFERENCE_VALUES = new Set(['ANY', 'MORNING', 'AFTERNOON', 'EVENING', 'NIGHT']);
+const ASK_RESULT_ACTION_VALUES = new Set(['PLAN_THIS', 'CREATE_MOMENT', 'OPEN_PLAN', 'OPEN_TIMELINE', 'OPEN_PANCHANG', 'OPEN_MUHURTHAM']);
 
 type FieldSchema =
   | { type: 'enum'; values: Set<string> }
@@ -265,6 +294,18 @@ const EVENT_METADATA_SCHEMAS: Record<ProductEventName, Record<string, FieldSchem
   REMINDER_PUSH_SENT: {
     scheduledItemType: { type: 'enum', values: SCHEDULED_ITEM_TYPE_VALUES },
     leadTimeMinutes: { type: 'number', min: 0, max: 120 },
+  },
+  ASK_AURA_SUBMITTED: {},
+  ASK_AURA_INTENT_RESOLVED: {
+    intent: { type: 'enum', values: ASK_INTENT_VALUES },
+    activityId: activityIdField,
+    scope: scopeField,
+    horizon: { type: 'enum', values: ASK_HORIZON_VALUES },
+    timePreference: { type: 'enum', values: ASK_TIME_PREFERENCE_VALUES },
+  },
+  ASK_AURA_RESULT_ACTION: {
+    intent: { type: 'enum', values: ASK_INTENT_VALUES },
+    action: { type: 'enum', values: ASK_RESULT_ACTION_VALUES },
   },
 };
 
