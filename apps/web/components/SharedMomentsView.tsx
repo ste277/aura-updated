@@ -414,18 +414,19 @@ function MomentCard({
   };
 
   return (
-    <section style={cardStyle}>
+    <section style={{ ...cardStyle, padding: 18 }}>
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: 10 }}>
-        <div>
-          <div style={{ fontSize: 15, fontWeight: 800 }}>
-            {moment.activityIcon ?? '✨'} {moment.activityTitle}
-          </div>
-          <div style={{ fontSize: 12, color: '#94a3b8', marginTop: 3 }}>
-            {formatMomentDateLabel(moment.startAt, moment.timezone)}
-            {moment.sharedPersonDisplayName ? ` · with ${moment.sharedPersonDisplayName}` : ''}
+        <div style={{ display: 'flex', alignItems: 'flex-start', gap: 12, minWidth: 0 }}>
+          <div style={momentIconCircleStyle}>{moment.activityIcon ?? '✨'}</div>
+          <div style={{ minWidth: 0 }}>
+            <div style={{ fontSize: 15, fontWeight: 800 }}>{moment.activityTitle}</div>
+            <div style={{ fontSize: 12, color: '#94a3b8', marginTop: 3 }}>
+              {formatMomentDateLabel(moment.startAt, moment.timezone)}
+              {moment.sharedPersonDisplayName ? ` · with ${moment.sharedPersonDisplayName}` : ''}
+            </div>
           </div>
         </div>
-        <span style={{ fontSize: 12, fontWeight: 800, color: response.color, whiteSpace: 'nowrap' }}>{response.text}</span>
+        <span style={{ fontSize: 12, fontWeight: 800, color: response.color, whiteSpace: 'nowrap', flexShrink: 0 }}>{response.text}</span>
       </div>
 
       {moment.responseState === 'ANOTHER_TIME' && moment.responsePreference && (
@@ -533,6 +534,22 @@ function MomentCard({
 }
 
 const cardStyle: React.CSSProperties = theme.panelStyle;
+
+// Minor visual-consistency pass only (Plan with Aura redesign) -- matches the
+// icon-circle treatment Upcoming Plans already uses, at a slightly smaller
+// size since this list is intentionally simpler/denser.
+const momentIconCircleStyle: React.CSSProperties = {
+  width: 40,
+  height: 40,
+  flexShrink: 0,
+  borderRadius: 20,
+  background: 'rgba(96, 165, 250, 0.12)',
+  border: '1px solid rgba(96, 165, 250, 0.22)',
+  display: 'flex',
+  alignItems: 'center',
+  justifyContent: 'center',
+  fontSize: 18,
+};
 const backButtonStyle: React.CSSProperties = theme.backButtonStyle;
 const errorBoxStyle: React.CSSProperties = theme.errorBoxStyle;
 const linkButtonStyle: React.CSSProperties = theme.linkButtonStyle;

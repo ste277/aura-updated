@@ -1089,7 +1089,7 @@ export function PlanWithAuraView({ onTimingSearch, onViewDay, onPlanLogged, time
         </section>
       )}
 
-      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10 }}>
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(150px, 1fr))', gap: 10 }}>
         <SelectPanel
           number={2}
           icon="🗓"
@@ -1636,54 +1636,64 @@ function UpcomingPlan({
           width: '100%',
           border: 'none',
           background: 'transparent',
-          display: 'grid',
-          gridTemplateColumns: '66px 1fr auto',
-          alignItems: 'center',
-          gap: 13,
-          padding: 14,
+          display: 'flex',
+          alignItems: 'flex-start',
+          gap: 14,
+          padding: 16,
           textAlign: 'left',
           cursor: 'pointer',
+          boxSizing: 'border-box',
         }}
       >
-        <div style={{ width: 58, height: 58, borderRadius: 29, background: `${plan.accent}18`, border: `1px solid ${plan.accent}44`, color: plan.accent, display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 27 }}>
+        <div style={{ width: 52, height: 52, flexShrink: 0, borderRadius: 26, background: `${plan.accent}18`, border: `1px solid ${plan.accent}44`, color: plan.accent, display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 24 }}>
           <PlanGlyph type={plan.icon} color={plan.accent} />
         </div>
-        <div style={{ minWidth: 0 }}>
-          <div style={{ display: 'flex', alignItems: 'center', gap: 6, color: '#f8fafc', fontSize: 17, fontWeight: 900, lineHeight: 1.2 }}>
-            <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{plan.title}</span>
-            {(plan.match === 'Best Match' || isLogged) && <span style={{ color: '#4ade80', fontSize: 14 }}>✓</span>}
-          </div>
-          <div style={{ color: '#aab7d2', fontSize: 14, marginTop: 3 }}>{plan.when} · {plan.duration}</div>
-          {isLogged ? (
-            <span style={{ display: 'inline-block', marginTop: 7, color: '#4ade80', border: '1px solid rgba(74, 222, 128, 0.3)', background: 'rgba(74, 222, 128, 0.1)', borderRadius: 7, padding: '3px 8px', fontSize: 11, fontWeight: 850 }}>
-              Logged{plan.loggedAt ? ` ${plan.loggedAt}` : ''}
-            </span>
-          ) : plan.match === 'Best Match' ? (
-            <span style={{ display: 'inline-block', marginTop: 7, color: '#4ade80', border: '1px solid rgba(74, 222, 128, 0.3)', background: 'rgba(74, 222, 128, 0.1)', borderRadius: 7, padding: '3px 8px', fontSize: 11, fontWeight: 850 }}>
-              {plan.match}
-            </span>
-          ) : (
-            <div style={{ color: '#76e7a5', fontSize: 12, fontWeight: 800, marginTop: 7 }}>{plan.match}</div>
-          )}
-        </div>
-        <div style={{ display: 'flex', alignItems: 'center', gap: 10, minWidth: 150 }}>
-          <div style={{ minWidth: 0 }}>
-            <div style={{ color: isLogged ? '#a7f3d0' : '#4ade80', fontSize: 15, fontWeight: 900, whiteSpace: 'nowrap' }}>{plan.time}</div>
-            <div style={{ color: '#dbe7f4', fontSize: 13, marginTop: 5 }}>{plan.window}</div>
-            <div style={{ display: 'flex', alignItems: 'center', gap: 7, flexWrap: 'wrap', marginTop: 6 }}>
-              <span style={{ color: '#aab7d2', fontSize: 13 }}>{plan.note}</span>
-              {typeof plan.score === 'number' && (
-                <span style={planScorePillStyle}>{Math.round(plan.score)}/100</span>
-              )}
+        <div style={{ minWidth: 0, flex: 1 }}>
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: 10 }}>
+            <div style={{ minWidth: 0 }}>
+              <div style={{ color: '#f8fafc', fontSize: 16, fontWeight: 900, lineHeight: 1.25 }}>
+                {plan.title}
+                {(plan.match === 'Best Match' || isLogged) && <span style={{ color: '#4ade80', fontSize: 13, marginLeft: 6 }}>✓</span>}
+              </div>
+              <div style={{ color: isLogged ? '#a7f3d0' : '#4ade80', fontSize: 14, fontWeight: 850, marginTop: 4 }}>{plan.time}</div>
             </div>
+            {typeof plan.score === 'number' && <MatchScoreRing score={plan.score} />}
           </div>
-          <span style={{ color: '#aab7d2', fontSize: 27, lineHeight: 1, transform: expanded ? 'rotate(90deg)' : 'none', transition: 'transform 140ms ease' }}>›</span>
+
+          {plan.details && (
+            <p
+              style={{
+                margin: '9px 0 0',
+                color: '#94a3b8',
+                fontSize: 13,
+                lineHeight: 1.42,
+                display: '-webkit-box',
+                WebkitLineClamp: 2,
+                WebkitBoxOrient: 'vertical',
+                overflow: 'hidden',
+              }}
+            >
+              {plan.details}
+            </p>
+          )}
+
+          <div style={{ color: '#aab7d2', fontSize: 12.5, marginTop: 8 }}>{plan.when} · {plan.duration} · {plan.window}</div>
+
+          <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginTop: 9 }}>
+            {isLogged ? (
+              <span style={planMatchBadgeStyle}>Logged{plan.loggedAt ? ` ${plan.loggedAt}` : ''}</span>
+            ) : plan.match === 'Best Match' ? (
+              <span style={planMatchBadgeStyle}>{plan.match}</span>
+            ) : (
+              <span style={{ color: '#76e7a5', fontSize: 12, fontWeight: 800 }}>{plan.match}</span>
+            )}
+            <span style={{ marginLeft: 'auto', color: '#aab7d2', fontSize: 22, lineHeight: 1, transform: expanded ? 'rotate(90deg)' : 'none', transition: 'transform 140ms ease' }}>›</span>
+          </div>
         </div>
       </button>
       {expanded && (
-        <div style={{ borderTop: '1px solid rgba(96, 165, 250, 0.16)', padding: '0 14px 14px 93px' }}>
-          <div style={{ color: '#dbe7f4', fontSize: 12, lineHeight: 1.45 }}>{plan.details}</div>
-          <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8, marginTop: 12 }}>
+        <div style={{ borderTop: '1px solid rgba(96, 165, 250, 0.16)', padding: '14px 16px 16px 82px' }}>
+          <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8 }}>
             {plan.googleCalendarUrl && (
               <a href={plan.googleCalendarUrl} target="_blank" rel="noreferrer" style={planActionStyle}>
                 Add calendar
@@ -1711,6 +1721,19 @@ function UpcomingPlan({
         </div>
       )}
     </article>
+  );
+}
+
+// Compact circular score indicator -- mirrors HomeDashboard's own ScoreGauge
+// visual language (bordered ring, stacked number/unit) so Upcoming Plans
+// reads as part of the same design system, just adapted to the existing
+// 0-100 plan.score scale instead of Home's 0-10 next-shift score.
+function MatchScoreRing({ score }: { score: number }) {
+  return (
+    <div style={{ width: 44, height: 44, flexShrink: 0, borderRadius: 44, border: '3px solid #4ade80', borderLeftColor: 'rgba(148, 163, 184, 0.28)', display: 'flex', flexDirection: 'column', justifyContent: 'center', alignItems: 'center', background: 'rgba(15, 23, 42, 0.75)' }}>
+      <span style={{ color: '#f8fafc', fontSize: 13, fontWeight: 900, lineHeight: 1 }}>{Math.round(score)}</span>
+      <span style={{ color: '#94a3b8', fontSize: 8, lineHeight: 1.3 }}>/100</span>
+    </div>
   );
 }
 
@@ -2134,15 +2157,15 @@ const planActionStyle: React.CSSProperties = {
   fontWeight: 850,
 };
 
-const planScorePillStyle: React.CSSProperties = {
-  border: '1px solid rgba(74, 222, 128, 0.26)',
-  borderRadius: 999,
-  background: 'rgba(74, 222, 128, 0.09)',
-  color: '#a7f3d0',
-  padding: '2px 7px',
+const planMatchBadgeStyle: React.CSSProperties = {
+  display: 'inline-block',
+  color: '#4ade80',
+  border: '1px solid rgba(74, 222, 128, 0.3)',
+  background: 'rgba(74, 222, 128, 0.1)',
+  borderRadius: 7,
+  padding: '3px 8px',
   fontSize: 11,
-  fontWeight: 900,
-  whiteSpace: 'nowrap',
+  fontWeight: 850,
 };
 
 const planSecondaryActionStyle: React.CSSProperties = {

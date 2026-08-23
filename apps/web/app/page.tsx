@@ -789,7 +789,7 @@ export default function DashboardPage() {
         </header>
       )}
 
-      <div style={{ width: '100%', maxWidth: activeTab === 'home' ? 760 : 420 }}>
+      <div style={{ width: '100%', maxWidth: activeTab === 'home' || activeTab === 'plan' ? 760 : 420 }}>
         {activeTab === 'home' && (
           <HomeDashboard
             userName={userNameDisplay}
