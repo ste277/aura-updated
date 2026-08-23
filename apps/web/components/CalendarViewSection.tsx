@@ -2,6 +2,7 @@
 
 import React, { useState, useMemo } from 'react';
 import { PastActivityModal } from './PastActivityModal';
+import { formatActivityDuration } from '../lib/activityDuration';
 
 export interface LoggedEntryItem {
   id: string;
@@ -485,7 +486,7 @@ export function CalendarViewSection({
                           </span>
                         </div>
                         <div style={{ color: '#b6c2d1', fontSize: 10, marginTop: 4, marginLeft: 19 }}>
-                          {new Date(log.loggedAt).toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' })} · {log.durationMinutes ?? 30}m · {log.activeWindow ? log.activeWindow.replace(/_/g, ' ') : 'NEUTRAL'}
+                          {new Date(log.loggedAt).toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' })} · {formatActivityDuration({ durationMinutes: log.durationMinutes ?? 30 })} · {log.activeWindow ? log.activeWindow.replace(/_/g, ' ') : 'NEUTRAL'}
                         </div>
                         {log.notes?.trim() && (
                           <div style={{ color: '#94a3b8', fontSize: 10, lineHeight: 1.4, marginTop: 5, marginLeft: 19 }}>

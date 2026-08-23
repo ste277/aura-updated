@@ -1,6 +1,7 @@
 'use client';
 
 import React, { useState, useMemo } from 'react';
+import { computeAverageTimedSessionMinutes } from '../lib/activityDuration';
 
 export interface LoggedEntryItem {
   id: string;
@@ -196,7 +197,8 @@ export function InsightsView({ logEntries = [], assistantInsight }: InsightsView
         ? Math.min(100, Math.max(0, Math.round((weightedAlignment / totalActivities) * 100)))
         : 0;
 
-    const totalMinutes = logEntries.reduce((sum, e) => sum + (e.durationMinutes ?? 30), 0);
+    const resolvedDurations = logEntries.map((e) => e.durationMinutes ?? 30);
+    const totalMinutes = resolvedDurations.reduce((sum, minutes) => sum + minutes, 0);
     const formattedHours = `${(totalMinutes / 60).toFixed(1)} hrs`;
     const auraGuidedCount = auraPlannedCount + auraDoNowCount;
     const auraGuidedRate = totalActivities > 0 ? Math.round((auraGuidedCount / totalActivities) * 100) : 0;
@@ -224,13 +226,19 @@ export function InsightsView({ logEntries = [], assistantInsight }: InsightsView
         });
       }
 
-      const avgMinutes = Math.round(totalMinutes / totalActivities);
-      patterns.push({
-        icon: '⏱️',
-        color: '#38bdf8',
-        title: 'Session length',
-        text: `Your sessions average ${avgMinutes} minutes.`,
-      });
+      // Only timed activities (durationMinutes > 0) participate in this
+      // average -- an INSTANT completion isn't a session with a length.
+      // null (no timed entries at all yet) hides the stat rather than
+      // claiming "sessions average 0 minutes".
+      const avgMinutes = computeAverageTimedSessionMinutes(resolvedDurations);
+      if (avgMinutes !== null) {
+        patterns.push({
+          icon: '⏱️',
+          color: '#38bdf8',
+          title: 'Session length',
+          text: `Your sessions average ${avgMinutes} minutes.`,
+        });
+      }
 
       const todEntries = Object.entries(todCounts).sort((a, b) => b[1] - a[1]);
       const topTod = todEntries[0];

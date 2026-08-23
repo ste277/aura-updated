@@ -1025,6 +1025,16 @@ function GoodRightNowCard({
   const [status, setStatus] = useState<'idle' | 'loading' | 'logged' | 'error'>('idle');
   const [loggedAtLabel, setLoggedAtLabel] = useState('');
   const [showDurationPicker, setShowDurationPicker] = useState(false);
+  // Duration Display Polish (brief section 9) -- a `status` state check
+  // alone does NOT stop two clicks fired in the same synchronous event
+  // (e.g. a fast physical double-tap on the duration picker, or a stuck
+  // button re-firing): both handlers can read the same stale 'idle' value
+  // before React flushes the first setStatus('loading'), producing two
+  // HabitLog rows for one tap -- confirmed live via a synchronous
+  // double-click during this PR's own verification pass. A ref updates
+  // immediately (no render/flush needed), so it closes that specific race;
+  // `status` still drives all UI/rendering as before.
+  const loggingRef = useRef(false);
 
   const definition = card.activityId ? getActivityDefinition(card.activityId) : undefined;
   const action: ImmediateAction = definition?.experience.immediateAction ?? card.immediateAction ?? 'LOG_NOW';
@@ -1037,7 +1047,8 @@ function GoodRightNowCard({
   const planTitle = catalogTitle ?? card.title;
 
   const logWithDuration = async (durationMinutes: number) => {
-    if (status === 'loading' || !onLogActivity) return;
+    if (loggingRef.current || status === 'loading' || !onLogActivity) return;
+    loggingRef.current = true;
     setStatus('loading');
     setShowDurationPicker(false);
     // Mark this title exempt from the "already logged today" swap BEFORE
@@ -1072,6 +1083,12 @@ function GoodRightNowCard({
       // missing entirely. See the completion report for why a genuine
       // server failure has no reliable signal to surface here today.
       setStatus('error');
+    } finally {
+      // Only the 'error' branch re-renders a clickable button again ('logged'
+      // renders no button at all) -- reset here so a retry after a genuine
+      // failure isn't permanently inert, while a completed log can never be
+      // double-submitted since there's nothing left to click.
+      loggingRef.current = false;
     }
   };
 
