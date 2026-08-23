@@ -2,6 +2,7 @@
 
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { getPersonalizedTasks, UserChartContext } from '../../../packages/recommendation/src/personalizedTasks';
+import { getActionCards } from '../../../packages/recommendation/src/actionCards';
 import type { DailyBriefing } from '../../../packages/recommendation/src/dailyAssistant';
 import type { AuraUpdate } from '../lib/auraUpdates';
 import { triggerHaptic } from '../lib/haptics';
@@ -32,6 +33,12 @@ interface HomeDashboardProps {
     timeRemaining: string;
   };
   activeWindowName?: string;
+  /** Full-day window list, already computed in page.tsx (mappedTimelineWindows)
+   * for TimelineView -- reused here so Today's Flow can show caution/avoid
+   * windows too. dailyBriefing.otherFavorableWindows deliberately excludes
+   * Rahu Kalam/Yama, so it alone can't produce an "avoid" card. */
+  dayWindows?: HomeDayWindow[];
+  currentMinuteOfDay?: number;
   loggedActivitiesToday?: string[];
   dailyBriefing?: DailyBriefing | null;
   todayReflection?: {
@@ -76,6 +83,18 @@ interface HomeDashboardProps {
    * 12: "Do not create a second alternatives flow") -- never runs a search
    * on Home itself. */
   onFindAnotherTimeForMoment?: (momentToken: string) => void;
+}
+
+interface HomeDayWindow {
+  name: string;
+  startTime: string;
+  endTime: string;
+  startMinute: number;
+  endMinute: number;
+  /** 'friction' | 'auspicious' | 'neutral' in practice (see page.tsx's
+   * mappedTimelineWindows) -- left as `string` here since that value is
+   * inferred, not literal-typed, at its source. */
+  type: string;
 }
 
 interface HomeUpcomingPlan {
@@ -126,6 +145,30 @@ function getWindowTone(score: number, windowName: string) {
   return { label: 'Light Flow', pill: 'Steady Time', color: '#facc15', description: 'Good for maintenance, reflection, and gentle progress.' };
 }
 
+// Human-readable hero heading, derived from the same window-type data
+// getWindowTone already reads -- never a fixed "Neutral Flow" heading. Keyed
+// on the same categories getWindowTone/normalizeWindowType use elsewhere.
+function getHeroHeadline(windowName: string): string {
+  const cleanWindow = windowName.toUpperCase();
+  if (cleanWindow.includes('RAHU')) return 'Better to avoid important new starts';
+  if (cleanWindow.includes('YAMA')) return 'Keep things routine for now';
+  if (cleanWindow.includes('BRAHMA')) return 'Quiet time for clarity and reflection';
+  if (cleanWindow.includes('ABHIJIT') || cleanWindow.includes('VIJAYA')) return 'Strong time for important work';
+  if (cleanWindow.includes('GULIKA')) return 'Steady time for ongoing work';
+  return 'Good time to keep things moving';
+}
+
+// nextShift.startsIn is always phrased "In Xh Ym" (scoreEngine.ts) for a
+// window that, by construction, hasn't started yet at the moment it was
+// computed -- but the value can go stale by the time it renders (the clock
+// ticks once a minute). Treating a non-positive/empty remainder as "already
+// started" is a presentation-only safety net, not a new calculation.
+function formatNextMomentTiming(startsIn: string): string {
+  const bare = stripCountdownWrapper(startsIn);
+  const hasRemainingTime = /[1-9]/.test(bare);
+  return hasRemainingTime ? `Starts in ${bare}` : 'Active now';
+}
+
 // dailyBriefing only gives formatted clock strings ("4:38 AM"), not raw minute
 // values, so this recovers a sortable minute-of-day from them — needed to
 // merge the peak window and the other favorable windows into one true
@@ -139,7 +182,11 @@ function parseClockToMinutes(clock: string): number {
 }
 
 function formatWindowName(name: string) {
-  const formatted = name.replace(/_/g, ' ').replace(/\b\w/g, (letter) => letter.toUpperCase());
+  // Callers pass raw SolarWindowType-style strings (e.g. "ABHIJIT",
+  // "RAHU_KALAM") as often as already-cased labels -- lowercasing first
+  // makes the title-case regex actually title-case rather than a no-op on
+  // strings that were already all-uppercase.
+  const formatted = name.replace(/_/g, ' ').toLowerCase().replace(/\b\w/g, (letter) => letter.toUpperCase());
   return formatted.toUpperCase() === 'NEUTRAL' ? 'Neutral Flow' : formatted;
 }
 
@@ -208,6 +255,8 @@ export function HomeDashboard({
   nextShift,
   currentWindow,
   activeWindowName = 'NEUTRAL',
+  dayWindows,
+  currentMinuteOfDay,
   loggedActivitiesToday = [],
   dailyBriefing,
   todayReflection,
@@ -326,6 +375,34 @@ export function HomeDashboard({
   // peak window and otherFavorableWindows are merged into one real
   // chronological order via parseClockToMinutes before labeling.
   const flowItems = useMemo(() => {
+    // Preferred path: the full-day window list (includes friction windows
+    // like Rahu Kalam/Yama, unlike dailyBriefing.otherFavorableWindows which
+    // excludes them) -- lets Today's Flow show a real "avoid" card.
+    if (dayWindows && dayWindows.length > 0 && typeof currentMinuteOfDay === 'number') {
+      const sorted = [...dayWindows].sort((a, b) => a.startMinute - b.startMinute);
+      const currentIndex = sorted.findIndex((w) => w.startMinute <= currentMinuteOfDay && currentMinuteOfDay < w.endMinute);
+      const current = currentIndex >= 0 ? sorted[currentIndex] : null;
+      const upcoming = current ? sorted.slice(currentIndex + 1) : sorted.filter((w) => w.startMinute > currentMinuteOfDay);
+
+      const items = [
+        current
+          ? { label: 'Now', name: formatWindowName(current.name), time: 'Current', accent: '#4ade80' }
+          : { label: 'Now', name: currentWindowLabel, time: 'Current', accent: tone.color },
+      ];
+
+      upcoming.slice(0, 3).forEach((window, index) => {
+        const isFirst = index === 0;
+        const accent = isFirst ? '#38bdf8' : window.type === 'friction' ? '#fb6b6b' : '#facc15';
+        items.push({ label: isFirst ? 'Next' : 'Later', name: formatWindowName(window.name), time: `${window.startTime} - ${window.endTime}`, accent });
+      });
+
+      if (items.length === 1) {
+        items.push({ label: 'Next', name: nextShift.windowName, time: nextShift.startTime, accent: '#38bdf8' });
+      }
+
+      return items;
+    }
+
     if (!dailyBriefing) {
       return [
         { label: 'Now', name: currentWindowLabel, time: 'Current', accent: tone.color },
@@ -374,7 +451,21 @@ export function HomeDashboard({
     }
 
     return items;
-  }, [currentWindowLabel, dailyBriefing, nextShift.startTime, nextShift.windowName, tone.color]);
+  }, [currentWindowLabel, dailyBriefing, dayWindows, currentMinuteOfDay, nextShift.startTime, nextShift.windowName, tone.color]);
+
+  // "Good right now" -- the existing deterministic window -> 3 activity
+  // cards table (packages/recommendation/src/actionCards.ts), already used
+  // by Timeline's own tap-arc interaction. Reused as-is, never hardcoded.
+  const goodRightNow = useMemo(() => getActionCards(activeWindowName).slice(0, 3), [activeWindowName]);
+
+  // Next Best Moment's end time -- nextShift itself only carries a start
+  // time (scoreEngine.ts), so this cross-references the SAME real window in
+  // dayWindows (matched by its already-identical formatted start clock) for
+  // its endTime, rather than fabricating a duration.
+  const nextMomentWindow = useMemo(
+    () => dayWindows?.find((w) => w.startTime === nextShift.startTime) ?? null,
+    [dayWindows, nextShift.startTime]
+  );
 
   const handleConfirmLog = async () => {
     if (!selectedHabit) return;
@@ -436,23 +527,42 @@ export function HomeDashboard({
         </button>
       </header>
 
-      <section style={{ ...panelStyle, display: 'grid', gridTemplateColumns: '104px minmax(0, 1fr)', gap: 18, alignItems: 'center', padding: 18 }}>
-        <FlowRing score={energyScore} color={tone.color} />
-        <div style={{ minWidth: 0 }}>
-          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8, flexWrap: 'wrap' }}>
-            <div style={sectionKickerStyle}>
-              ● Right Now
+      <section style={{ ...panelStyle, padding: 22, boxShadow: `inset 0 1px 0 rgba(255, 255, 255, 0.03), 0 0 0 1px ${tone.color}14, 0 22px 44px -28px ${tone.color}55` }}>
+        <div style={{ display: 'grid', gridTemplateColumns: '128px minmax(0, 1fr)', gap: 20, alignItems: 'center' }}>
+          <FlowRing score={energyScore} color={tone.color} />
+          <div style={{ minWidth: 0 }}>
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8, flexWrap: 'wrap' }}>
+              <div style={sectionKickerStyle}>● Right Now</div>
+              <span style={{ border: `1px solid ${tone.color}80`, color: tone.color, borderRadius: 999, padding: '7px 13px', fontSize: 13, fontWeight: 850, whiteSpace: 'nowrap' }}>
+                {tone.pill}
+              </span>
             </div>
-            <span style={{ border: `1px solid ${tone.color}80`, color: tone.color, borderRadius: 999, padding: '7px 13px', fontSize: 13, fontWeight: 850, whiteSpace: 'nowrap' }}>
-              {tone.pill}
-            </span>
+            <h2 style={{ margin: '13px 0 0', fontSize: 25, color: '#f8fafc', lineHeight: 1.14 }}>{getHeroHeadline(activeWindowName)}</h2>
+            <div style={{ marginTop: 8, color: '#dbe7f4', fontSize: 15, fontWeight: 800 }}>{currentWindowLabel} · {tone.pill}</div>
           </div>
-          <h2 style={{ margin: '13px 0 0', fontSize: 27, color: '#f8fafc', lineHeight: 1.05 }}>{currentWindowLabel}</h2>
-          <div style={{ color: '#f8fafc', fontSize: 15, fontWeight: 850, marginTop: 10, lineHeight: 1.35 }}>
-            {currentTimeRange}
-            <span style={{ color: tone.color, display: 'inline-block', marginLeft: 6 }}>{remainingText}</span>
+        </div>
+        <div style={{ color: '#f8fafc', fontSize: 15, fontWeight: 850, marginTop: 18, lineHeight: 1.35 }}>
+          {currentTimeRange}
+          <span style={{ color: tone.color, display: 'inline-block', marginLeft: 8 }}>{remainingText}</span>
+        </div>
+        <p style={{ margin: '11px 0 0', color: '#aab7d2', fontSize: 15, lineHeight: 1.42 }}>{tone.description}</p>
+
+        <div style={{ marginTop: 20, paddingTop: 18, borderTop: '1px solid rgba(148, 163, 184, 0.14)' }}>
+          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8 }}>
+            <div style={sectionKickerStyle}>Good Right Now</div>
+            {onNextShiftClick && (
+              <button type="button" onClick={onNextShiftClick} style={linkButtonStyle}>See all activities →</button>
+            )}
           </div>
-          <p style={{ margin: '11px 0 0', color: '#aab7d2', fontSize: 15, lineHeight: 1.42 }}>{tone.description}</p>
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, minmax(0, 1fr))', gap: 9, marginTop: 13 }}>
+            {goodRightNow.map((card) => (
+              <button key={card.id} type="button" onClick={() => onPlanClick?.(card.title)} style={goodRightNowCardStyle}>
+                <span style={{ fontSize: 20 }}>{card.icon ?? '✨'}</span>
+                <span style={{ marginTop: 8, color: '#f8fafc', fontSize: 12, fontWeight: 800, lineHeight: 1.3 }}>{card.title}</span>
+                <span style={{ marginTop: 4, color: '#94a3b8', fontSize: 10.5, lineHeight: 1.35, display: '-webkit-box', WebkitLineClamp: 2, WebkitBoxOrient: 'vertical', overflow: 'hidden' }}>{card.description}</span>
+              </button>
+            ))}
+          </div>
         </div>
       </section>
 
@@ -476,43 +586,48 @@ export function HomeDashboard({
         </div>
       </section>
 
-      <section style={{ ...panelStyle, padding: 18 }}>
-        <div style={sectionKickerStyle}>✨ Aura Suggests</div>
-        <div style={{ display: 'grid', gridTemplateColumns: '74px minmax(0, 1fr)', alignItems: 'center', gap: 15, marginTop: 15 }}>
-          <div style={suggestIconStyle}>{assistantSuggestion.icon}</div>
-          <div style={{ minWidth: 0 }}>
-            <h2 style={{ margin: 0, color: '#f8fafc', fontSize: 18, lineHeight: 1.2 }}>{assistantSuggestion.title}</h2>
-            <p style={{ margin: '8px 0 0', color: '#aab7d2', lineHeight: 1.38, fontSize: 14 }}>{assistantSuggestion.description}</p>
+      <div style={pairGridStyle}>
+        <section style={{ ...panelStyle, padding: 18 }}>
+          <div style={sectionKickerStyle}>✨ Aura Suggests</div>
+          <div style={{ display: 'grid', gridTemplateColumns: '74px minmax(0, 1fr)', alignItems: 'center', gap: 15, marginTop: 15 }}>
+            <div style={suggestIconStyle}>{assistantSuggestion.icon}</div>
+            <div style={{ minWidth: 0 }}>
+              <h2 style={{ margin: 0, color: '#f8fafc', fontSize: 18, lineHeight: 1.2 }}>{assistantSuggestion.title}</h2>
+              <p style={{ margin: '8px 0 0', color: '#aab7d2', lineHeight: 1.38, fontSize: 14 }}>{assistantSuggestion.description}</p>
+            </div>
+            <div style={{ gridColumn: '1 / -1', display: 'flex', gap: 12, alignItems: 'center', justifyContent: 'space-between', marginTop: 3 }}>
+              <button
+                type="button"
+                onClick={() => {
+                  setSelectedHabit(assistantSuggestion.title);
+                  setSelectedPlanId(assistantSuggestion.planId ?? null);
+                  setLogError('');
+                }}
+                style={primaryButtonStyle}
+              >
+                {assistantSuggestion.actionLabel}
+              </button>
+              <button type="button" onClick={() => onPlanClick?.(assistantSuggestion.title)} style={linkButtonStyle}>{assistantSuggestion.secondaryLabel} →</button>
+            </div>
           </div>
-          <div style={{ gridColumn: '1 / -1', display: 'flex', gap: 12, alignItems: 'center', justifyContent: 'space-between', marginTop: 3 }}>
-            <button
-              type="button"
-              onClick={() => {
-                setSelectedHabit(assistantSuggestion.title);
-                setSelectedPlanId(assistantSuggestion.planId ?? null);
-                setLogError('');
-              }}
-              style={primaryButtonStyle}
-            >
-              {assistantSuggestion.actionLabel}
-            </button>
-            <button type="button" onClick={() => onPlanClick?.(assistantSuggestion.title)} style={linkButtonStyle}>{assistantSuggestion.secondaryLabel} →</button>
-          </div>
-        </div>
-      </section>
+        </section>
 
-      <section style={{ ...panelStyle, padding: 18, display: 'grid', gridTemplateColumns: '1fr 74px', gap: 14, alignItems: 'center' }}>
-        <div>
-          <div style={{ ...sectionKickerStyle, color: '#facc15' }}>⭐ Next Best Moment</div>
-          <h2 style={{ margin: '14px 0 0', color: '#f8fafc', fontSize: 22 }}>{nextShift.windowName}</h2>
-          <div style={{ marginTop: 7, color: '#38bdf8', fontSize: 15, fontWeight: 850 }}>{nextShift.startTime}</div>
-          <p style={{ color: '#aab7d2', fontSize: 14, margin: '10px 0 0' }}>{nextShift.themeText}</p>
-        </div>
-        <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 10 }}>
-          <ScoreGauge score={scoreLabel(nextShift.score)} color={nextTone.color} />
-          <button type="button" onClick={() => onPlanClick?.()} style={outlineButtonStyle}>Plan this</button>
-        </div>
-      </section>
+        <section style={{ ...panelStyle, padding: 18, display: 'grid', gridTemplateColumns: '1fr 74px', gap: 14, alignItems: 'center' }}>
+          <div>
+            <div style={{ ...sectionKickerStyle, color: '#facc15' }}>⭐ Next Best Moment</div>
+            <h2 style={{ margin: '14px 0 0', color: '#f8fafc', fontSize: 22 }}>{nextShift.windowName}</h2>
+            <div style={{ marginTop: 7, color: '#38bdf8', fontSize: 15, fontWeight: 850 }}>{formatNextMomentTiming(nextShift.startsIn)}</div>
+            {nextMomentWindow && (
+              <div style={{ marginTop: 3, color: '#94a3b8', fontSize: 13 }}>{nextMomentWindow.startTime} – {nextMomentWindow.endTime}</div>
+            )}
+            <p style={{ color: '#aab7d2', fontSize: 14, margin: '10px 0 0' }}>{nextShift.themeText}</p>
+          </div>
+          <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 10 }}>
+            <ScoreGauge score={scoreLabel(nextShift.score)} color={nextTone.color} />
+            <button type="button" onClick={() => onPlanClick?.()} style={outlineButtonStyle}>Plan this</button>
+          </div>
+        </section>
+      </div>
 
       {/* Product Structure V2 (brief section 27): ONE highly actionable
        * card, not up to 3 -- the bell (now the Updates inbox) already shows
@@ -552,23 +667,24 @@ export function HomeDashboard({
 
       <section>
         <SectionHeader label="Today's Flow" />
-        <div style={{ display: 'flex', gap: 10, overflowX: 'auto', paddingBottom: 5 }}>
-          {flowItems.map((item, index) => (
-            <div key={`${item.name}-${item.time}-${index}`} style={{ ...flowPillStyle, borderColor: index === 0 ? 'rgba(74, 222, 128, 0.32)' : 'rgba(96, 165, 250, 0.16)' }}>
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(140px, 1fr))', gap: 10 }}>
+          {flowItems.slice(0, 4).map((item, index) => (
+            <div key={`${item.name}-${item.time}-${index}`} style={{ ...flowPillStyle, flex: 'unset', borderColor: `${item.accent}45`, borderLeft: `3px solid ${item.accent}` }}>
               <div style={{ color: item.accent, fontFamily: 'var(--as-font-mono)', fontSize: 11, fontWeight: 900, textTransform: 'uppercase' }}>{item.label}</div>
-              <div style={{ color: '#f8fafc', marginTop: 9, fontSize: 13, fontWeight: 750, whiteSpace: 'nowrap' }}>{item.name}</div>
-              <div style={{ color: '#aab7d2', marginTop: 7, fontSize: 12, whiteSpace: 'nowrap' }}>{item.time}</div>
+              <div style={{ color: '#f8fafc', marginTop: 9, fontSize: 13, fontWeight: 750 }}>{item.name}</div>
+              <div style={{ color: '#aab7d2', marginTop: 7, fontSize: 12 }}>{item.time}</div>
             </div>
           ))}
         </div>
         <div style={{ display: 'flex', justifyContent: 'center', gap: 18, marginTop: 12 }}>
-          <button type="button" onClick={onNextShiftClick} style={{ ...viewDayButtonStyle, margin: 0 }}>View today&apos;s flow →</button>
+          <button type="button" onClick={onNextShiftClick} style={{ ...viewDayButtonStyle, margin: 0 }}>View full day timeline →</button>
           {onPanchangClick && (
             <button type="button" onClick={onPanchangClick} style={{ ...viewDayButtonStyle, margin: 0, color: '#a78bfa' }}>Today&apos;s Panchang →</button>
           )}
         </div>
       </section>
 
+      <div style={pairGridStyle}>
       {onSubmitReflection && (
         <section style={panelStyle}>
           <div style={{ display: 'flex', justifyContent: 'space-between', gap: 10, alignItems: 'center' }}>
@@ -621,19 +737,30 @@ export function HomeDashboard({
         </section>
       )}
 
-      <section style={{ ...panelStyle, display: 'grid', gridTemplateColumns: '42px 1fr auto', alignItems: 'center', gap: 12 }}>
-        <div style={{ color: '#4ade80', width: 32, height: 32, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+      <section style={{ ...panelStyle, padding: 15, display: 'grid', gridTemplateColumns: '30px 1fr', alignItems: 'start', gap: 11 }}>
+        <div style={{ color: '#4ade80', width: 28, height: 28, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
           <AuraInsightIcon />
         </div>
         <div>
-          <div style={{ ...sectionKickerStyle, marginBottom: 7 }}>Aura Insight</div>
-          <div style={{ color: '#f8fafc', fontSize: 16, lineHeight: 1.35 }}>
+          <div style={{ ...sectionKickerStyle, marginBottom: 6, fontSize: 11 }}>Aura Insight</div>
+          <div style={{ color: '#dbe7f4', fontSize: 13.5, lineHeight: 1.4 }}>
             {bestForToday[0] ? `You tend to do well with ${bestForToday[0].toLowerCase()} during ${currentWindowLabel} windows.` : 'Your best patterns will appear as you log more moments.'}
           </div>
-          {cautionItems[0] && <div style={{ color: '#aab7d2', fontSize: 12, marginTop: 6 }}>Avoid: {cautionItems[0]}</div>}
+          {cautionItems[0] && <div style={{ color: '#94a3b8', fontSize: 11.5, marginTop: 5 }}>Avoid: {cautionItems[0]}</div>}
+          <button type="button" onClick={onInsightsClick} style={{ ...linkButtonStyle, marginTop: 8, fontSize: 12 }}>View insights →</button>
         </div>
-        <button type="button" onClick={onInsightsClick} style={linkButtonStyle}>View insights →</button>
       </section>
+      </div>
+
+      {onPlanClick && (
+        <section style={{ ...panelStyle, background: 'linear-gradient(135deg, rgba(88, 28, 135, 0.55), rgba(30, 41, 82, 0.7))', border: '1px solid rgba(167, 139, 250, 0.32)', padding: 20, display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 16, flexWrap: 'wrap' }}>
+          <div style={{ minWidth: 0, flex: '1 1 220px' }}>
+            <div style={{ color: '#f8fafc', fontSize: 16, fontWeight: 850, lineHeight: 1.3 }}>Need the best time for something important?</div>
+            <div style={{ color: '#c4b5fd', fontSize: 13, marginTop: 6, lineHeight: 1.4 }}>Ask Aura and I&apos;ll find the best window for you.</div>
+          </div>
+          <button type="button" onClick={() => onPlanClick()} style={askAuraCtaStyle}>Ask Aura →</button>
+        </section>
+      )}
 
       {selectedHabit && (
         <LogActivityModal
@@ -657,16 +784,16 @@ export function HomeDashboard({
 }
 
 function FlowRing({ score, color }: { score: number; color: string }) {
-  const radius = 34;
+  const radius = 44;
   const circumference = 2 * Math.PI * radius;
   const normalized = score <= 10 ? score * 10 : score;
   return (
-    <div style={{ position: 'relative', width: 96, height: 96, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-      <svg width="96" height="96" viewBox="0 0 96 96" style={{ transform: 'rotate(-90deg)' }}>
-        <circle cx="48" cy="48" r={radius} stroke="rgba(148, 163, 184, 0.22)" strokeWidth="11" fill="none" />
-        <circle cx="48" cy="48" r={radius} stroke={color} strokeWidth="11" fill="none" strokeLinecap="round" strokeDasharray={circumference} strokeDashoffset={circumference - (Math.min(100, normalized) / 100) * circumference} />
+    <div style={{ position: 'relative', width: 120, height: 120, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+      <svg width="120" height="120" viewBox="0 0 120 120" style={{ transform: 'rotate(-90deg)' }}>
+        <circle cx="60" cy="60" r={radius} stroke="rgba(148, 163, 184, 0.2)" strokeWidth="10" fill="none" />
+        <circle cx="60" cy="60" r={radius} stroke={color} strokeWidth="10" fill="none" strokeLinecap="round" strokeDasharray={circumference} strokeDashoffset={circumference - (Math.min(100, normalized) / 100) * circumference} />
       </svg>
-      <div style={{ position: 'absolute', color: '#facc15', fontSize: 28 }}>✦</div>
+      <div style={{ position: 'absolute', color: '#facc15', fontSize: 34 }}>✦</div>
     </div>
   );
 }
@@ -826,15 +953,18 @@ const topActionStyle: React.CSSProperties = {
 };
 
 const inputShellStyle: React.CSSProperties = {
-  minHeight: 62,
+  minHeight: 64,
   border: '1px solid #2f95ff',
-  borderRadius: 12,
+  borderRadius: 14,
   background: 'rgba(2, 6, 23, 0.52)',
+  boxShadow: '0 0 0 1px rgba(47, 149, 255, 0.14), 0 14px 28px -20px rgba(47, 149, 255, 0.55)',
   display: 'grid',
   gridTemplateColumns: '34px 1fr 44px',
   alignItems: 'center',
   gap: 7,
   padding: '0 10px 0 13px',
+  width: '100%',
+  boxSizing: 'border-box',
 };
 
 const promptButtonStyle: React.CSSProperties = {
@@ -960,6 +1090,43 @@ const outlineButtonStyle: React.CSSProperties = {
   fontSize: 13,
   fontWeight: 850,
   cursor: 'pointer',
+};
+
+// Desktop pairing (Aura Suggests + Next Best Moment; Daily Check-in + Aura
+// Insight) via intrinsic grid responsiveness -- no @media query needed (none
+// exist elsewhere in this app) and no new dependency: auto-fit/minmax alone
+// stacks to one column under ~560px combined width and sits two-up above it.
+const pairGridStyle: React.CSSProperties = {
+  display: 'grid',
+  gridTemplateColumns: 'repeat(auto-fit, minmax(260px, 1fr))',
+  gap: 17,
+  alignItems: 'stretch',
+};
+
+const goodRightNowCardStyle: React.CSSProperties = {
+  display: 'flex',
+  flexDirection: 'column',
+  alignItems: 'flex-start',
+  textAlign: 'left',
+  minHeight: 92,
+  border: '1px solid rgba(148, 163, 184, 0.18)',
+  borderRadius: 12,
+  background: 'rgba(2, 6, 23, 0.4)',
+  padding: '11px 10px',
+  cursor: 'pointer',
+};
+
+const askAuraCtaStyle: React.CSSProperties = {
+  minHeight: 46,
+  padding: '0 20px',
+  border: 'none',
+  borderRadius: 12,
+  background: 'linear-gradient(135deg, #a78bfa, #7c3aed)',
+  color: '#f8fafc',
+  fontSize: 14,
+  fontWeight: 850,
+  cursor: 'pointer',
+  whiteSpace: 'nowrap',
 };
 
 const flowPillStyle: React.CSSProperties = {

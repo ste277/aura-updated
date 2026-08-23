@@ -789,7 +789,7 @@ export default function DashboardPage() {
         </header>
       )}
 
-      <div style={{ width: '100%', maxWidth: 420 }}>
+      <div style={{ width: '100%', maxWidth: activeTab === 'home' ? 760 : 420 }}>
         {activeTab === 'home' && (
           <HomeDashboard
             userName={userNameDisplay}
@@ -800,6 +800,8 @@ export default function DashboardPage() {
             nextShift={safeNextShift}
             currentWindow={currentWindowInfo}
             activeWindowName={activeType}
+            dayWindows={mappedTimelineWindows}
+            currentMinuteOfDay={currentMinuteOfDay}
             loggedActivitiesToday={loggedActivitiesToday}
             dailyBriefing={dailyBriefing}
             todayReflection={todayReflection}
