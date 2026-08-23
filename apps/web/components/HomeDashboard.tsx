@@ -3,7 +3,7 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { getPersonalizedTasks, UserChartContext, FULL_ACTIVITY_CATALOG, normalizeWindowType } from '../../../packages/recommendation/src/personalizedTasks';
 import { getActionCards, getActivityDiscoveryCards, ActionCard } from '../../../packages/recommendation/src/actionCards';
-import { getActivityDefinition, ImmediateAction } from '../../../packages/recommendation/src/activityDefinitions';
+import { getActivityDefinition, ImmediateAction, ActivityDurationMode } from '../../../packages/recommendation/src/activityDefinitions';
 import type { DailyBriefing } from '../../../packages/recommendation/src/dailyAssistant';
 import type { AuraUpdate } from '../lib/auraUpdates';
 import type { AuraReminder } from '../lib/auraReminders';
@@ -967,34 +967,44 @@ function StartingSoonCard({ reminder, onOpen }: { reminder: AuraReminder; onOpen
   );
 }
 
-// Good Right Now Actions V1 -- a deliberately small, fixed duration for
-// LOG_NOW activities (hydration, tea/coffee, a quick check-in): the
-// existing HabitLog model has no "durationless" concept, so this is the
-// smallest honest placeholder, distinct from the 30-minute default meant
-// for genuinely timed activities.
-const LOG_NOW_DURATION_MINUTES = 5;
+/** Good Right Now Action Semantics V1 -- durationMode-driven button copy
+ * (brief section 10). Never exposes internal concepts like LOG_NOW/
+ * durationMode/HabitLog to the user. */
+function primaryActionLabel(durationMode: ActivityDurationMode): string {
+  if (durationMode === 'INSTANT') return 'Log now';
+  if (durationMode === 'FIXED') return 'Do now';
+  return 'Start now'; // USER_SELECTED and SESSION (see the picker fallback below)
+}
 
 /**
- * Good Right Now Actions V1 -- replaces the previous "every card routes to
- * Plan" behavior with canonical per-activity action semantics (brief
- * section 5/6). `card.activityId`, when present, resolves to a real
- * ActivityDefinition via getActivityDefinition() -- never a title regex --
- * whose `experience.immediateAction` decides LOG_NOW / START_NOW / PLAN /
- * BOTH. The two cards with no catalog counterpart (a generic "meal") carry
- * their own explicit `card.immediateAction` fallback instead (see
- * actionCards.ts).
+ * Good Right Now Actions V1/Action Semantics V1 -- replaces the previous
+ * "every card routes to Plan" behavior with canonical per-activity action
+ * semantics (brief section 5/6). `card.activityId`, when present, resolves
+ * to a real ActivityDefinition via getActivityDefinition() -- never a
+ * title regex -- whose `experience.immediateAction` decides LOG_NOW /
+ * START_NOW / PLAN / BOTH and `experience.durationMode` decides HOW that
+ * immediate action's duration is determined:
+ *   INSTANT       -- logs durationMinutes = 0 immediately, no picker.
+ *   FIXED         -- logs the catalog's own defaultDurationMinutes
+ *                    immediately, no picker.
+ *   USER_SELECTED -- reveals a lightweight inline duration picker (the
+ *                    catalog's own suggestedDurations) in place of the
+ *                    action button; tapping one immediately logs that
+ *                    duration. Still no timer.
+ *   SESSION       -- not selected by any current activity (brief section
+ *                    7: architecture-only in this PR); if it ever were,
+ *                    this component falls back to the SAME picker
+ *                    USER_SELECTED uses rather than leaving an unhandled
+ *                    case -- a reasonable stand-in until a real
+ *                    start/running/done flow exists to replace it with.
  *
- * LOG_NOW and START_NOW both reuse the EXACT SAME onLogActivity pipeline
- * Timeline already logs through (brief section 7: "reuse existing activity
- * logging pipeline... do not create another logging implementation") --
- * this component only decides which duration/copy to use, never how a log
- * is persisted. There is no real running-session/timer model anywhere in
- * this app (audited: HabitLog stores a single fixed durationMinutes, no
- * start/stop pair) -- see the completion report for why START_NOW
- * therefore logs immediately using the activity's own default/suggested
- * duration rather than opening a timer (brief section 9/10's documented V1
- * fallback), and for the extension point a future real timer would hook
- * into.
+ * Every path reuses the EXACT SAME onLogActivity pipeline Timeline already
+ * logs through (brief section 8: "do not create a second logging
+ * pipeline") -- this component only decides which duration/copy to use,
+ * never how a log is persisted. There is no real running-session/timer
+ * model anywhere in this app (audited: HabitLog stores a single fixed
+ * durationMinutes, no start/stop pair) -- SESSION above is the extension
+ * point a future real timer would hook into.
  */
 function GoodRightNowCard({
   card,
@@ -1014,9 +1024,11 @@ function GoodRightNowCard({
 }) {
   const [status, setStatus] = useState<'idle' | 'loading' | 'logged' | 'error'>('idle');
   const [loggedAtLabel, setLoggedAtLabel] = useState('');
+  const [showDurationPicker, setShowDurationPicker] = useState(false);
 
   const definition = card.activityId ? getActivityDefinition(card.activityId) : undefined;
   const action: ImmediateAction = definition?.experience.immediateAction ?? card.immediateAction ?? 'LOG_NOW';
+  const durationMode: ActivityDurationMode = definition?.experience.durationMode ?? 'USER_SELECTED';
   // The real catalog title (e.g. "Deep Work"), not this card's own
   // window-flavor copy (e.g. "Regular work block") -- passing the window
   // copy into Plan's existing free-text prefill would silently fail to
@@ -1024,9 +1036,10 @@ function GoodRightNowCard({
   const catalogTitle = card.activityId ? FULL_ACTIVITY_CATALOG.find((activity) => activity.id === card.activityId)?.title : undefined;
   const planTitle = catalogTitle ?? card.title;
 
-  const handleImmediateAction = async (type: 'LOG_NOW' | 'START_NOW') => {
+  const logWithDuration = async (durationMinutes: number) => {
     if (status === 'loading' || !onLogActivity) return;
     setStatus('loading');
+    setShowDurationPicker(false);
     // Mark this title exempt from the "already logged today" swap BEFORE
     // calling onLogActivity, not after -- handleLogActivity (page.tsx)
     // updates loggedActivitiesToday synchronously (before its own network
@@ -1035,13 +1048,10 @@ function GoodRightNowCard({
     // (and unmounted this component) before it ever reached setStatus('logged').
     onLogged?.(planTitle);
     try {
-      const durationMinutes = type === 'START_NOW'
-        ? definition?.experience.defaultDurationMinutes ?? definition?.experience.suggestedDurations?.[0] ?? 30
-        : LOG_NOW_DURATION_MINUTES;
       // overrideWindowType reuses the CURRENT structured window (brief
-      // section 13) already known here as a prop, never re-inferred from a
+      // section 9) already known here as a prop, never re-inferred from a
       // display string -- Insights/window distribution then sees this log
-      // exactly like a Timeline-created one (brief section 14).
+      // exactly like a Timeline-created one.
       await onLogActivity(planTitle, undefined, undefined, activeWindowName, durationMinutes, 'AURA_DO_NOW', definition?.muhurta.significance);
       setStatus('logged');
       setLoggedAtLabel(new Date().toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' }));
@@ -1051,7 +1061,9 @@ function GoodRightNowCard({
           ...(card.activityId ? { activityId: card.activityId } : {}),
           source: 'HOME',
           windowType: normalizeWindowType(activeWindowName),
-          actionType: type,
+          actionType: action === 'BOTH' ? 'START_NOW' : (action as 'LOG_NOW' | 'START_NOW'),
+          durationMode,
+          durationMinutes,
         },
       });
     } catch {
@@ -1060,6 +1072,19 @@ function GoodRightNowCard({
       // missing entirely. See the completion report for why a genuine
       // server failure has no reliable signal to surface here today.
       setStatus('error');
+    }
+  };
+
+  const handlePrimaryClick = () => {
+    if (durationMode === 'INSTANT') {
+      logWithDuration(0);
+    } else if (durationMode === 'FIXED') {
+      // Defensive-only fallback (every FIXED-mapped activity has a real
+      // catalog defaultDurationMinutes) -- the catalog stays the source of
+      // truth, this never overrides it (brief section 5).
+      logWithDuration(definition?.experience.defaultDurationMinutes ?? 10);
+    } else {
+      setShowDurationPicker(true);
     }
   };
 
@@ -1083,16 +1108,22 @@ function GoodRightNowCard({
           <button type="button" onClick={() => onPlanClick?.(planTitle)} style={goodRightNowActionButtonStyle} aria-label={`Plan ${planTitle}`}>
             Plan
           </button>
+        ) : showDurationPicker ? (
+          <DurationPicker
+            options={definition?.experience.suggestedDurations ?? [30, 60, 90]}
+            onSelect={logWithDuration}
+            onCancel={() => setShowDurationPicker(false)}
+          />
         ) : (
           <>
             <button
               type="button"
-              onClick={() => handleImmediateAction(action === 'BOTH' ? 'START_NOW' : action)}
+              onClick={handlePrimaryClick}
               disabled={status === 'loading'}
               style={{ ...goodRightNowActionButtonStyle, opacity: status === 'loading' ? 0.6 : 1, cursor: status === 'loading' ? 'default' : 'pointer' }}
-              aria-label={`${action === 'LOG_NOW' ? 'Log' : 'Start'} ${planTitle} now`}
+              aria-label={`${primaryActionLabel(durationMode)} ${planTitle}`}
             >
-              {status === 'loading' ? 'Logging…' : action === 'LOG_NOW' ? 'Log now' : 'Start now'}
+              {status === 'loading' ? 'Logging…' : primaryActionLabel(durationMode)}
             </button>
             {action === 'BOTH' && (
               <button type="button" onClick={() => onPlanClick?.(planTitle)} style={goodRightNowSecondaryLinkStyle} aria-label={`Plan ${planTitle} for later`}>
@@ -1103,6 +1134,35 @@ function GoodRightNowCard({
         )}
         {status === 'error' && <div style={{ color: '#fb7185', fontSize: 10, marginTop: 5 }}>Couldn&apos;t log. Try again.</div>}
       </div>
+    </div>
+  );
+}
+
+/** Good Right Now Action Semantics V1 (brief section 6) -- the lightweight
+ * duration chooser for USER_SELECTED activities: "keep this lightweight:
+ * inline... no new full-screen flow." Tapping an option immediately logs
+ * it (via the same onLogActivity pipeline the primary button would have
+ * used) -- there is no separate confirm step, matching "Aura should feel
+ * fast." */
+function DurationPicker({ options, onSelect, onCancel }: { options: number[]; onSelect: (minutes: number) => void; onCancel: () => void }) {
+  return (
+    <div>
+      <div style={{ display: 'flex', gap: 5, flexWrap: 'wrap' }}>
+        {options.map((minutes) => (
+          <button
+            key={minutes}
+            type="button"
+            onClick={() => onSelect(minutes)}
+            aria-label={`Start now for ${minutes} minutes`}
+            style={{ ...goodRightNowActionButtonStyle, width: 'auto', flex: '1 1 auto', minWidth: 0, padding: '0 6px' }}
+          >
+            {minutes}m
+          </button>
+        ))}
+      </div>
+      <button type="button" onClick={onCancel} style={{ ...goodRightNowSecondaryLinkStyle, marginTop: 5 }}>
+        Cancel
+      </button>
     </div>
   );
 }

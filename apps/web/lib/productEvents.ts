@@ -147,6 +147,9 @@ const SCHEDULED_ITEM_TYPE_VALUES = new Set(['PLANNED_ACTIVITY', 'AURA_MOMENT']);
 const LOG_ORIGIN_VALUES = new Set(['HOME']);
 const WINDOW_TYPE_VALUES = new Set(['BRAHMA', 'ABHIJIT', 'RAHU_KALAM', 'GULIKA', 'YAMA', 'NEUTRAL']);
 const IMMEDIATE_ACTION_TYPE_VALUES = new Set(['LOG_NOW', 'START_NOW']);
+// Good Right Now Action Semantics V1 (brief section 14) -- the same closed
+// vocabulary ActivityDurationMode already defines, not a third copy.
+const DURATION_MODE_VALUES = new Set(['INSTANT', 'FIXED', 'USER_SELECTED', 'SESSION']);
 
 type FieldSchema =
   | { type: 'enum'; values: Set<string> }
@@ -231,6 +234,11 @@ const EVENT_METADATA_SCHEMAS: Record<ProductEventName, Record<string, FieldSchem
     source: { type: 'enum', values: LOG_ORIGIN_VALUES },
     windowType: { type: 'enum', values: WINDOW_TYPE_VALUES },
     actionType: { type: 'enum', values: IMMEDIATE_ACTION_TYPE_VALUES },
+    // Good Right Now Action Semantics V1 (brief section 14) -- safe,
+    // non-identifying: which duration rule applied and the actual minutes
+    // logged (0 for INSTANT, never a birth/natal/Panchang-detail payload).
+    durationMode: { type: 'enum', values: DURATION_MODE_VALUES },
+    durationMinutes: { type: 'number', min: 0, max: 180 },
   },
 };
 

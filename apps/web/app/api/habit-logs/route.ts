@@ -43,7 +43,18 @@ export async function POST(req: NextRequest) {
     activeWindow: cleanWindow,
     logMinuteOfDay: Math.round(minuteOfDay),
     logTimestamp: customDate,
-    durationMinutes: Math.min(180, Math.max(5, Number(durationMinutes ?? 30))),
+    // Good Right Now Action Semantics V1: the floor used to be 5, silently
+    // bumping any near-zero submission up -- that made it impossible to
+    // ever log a genuinely INSTANT activity (a hydration check) without
+    // manufacturing a fake few minutes of "effort" (brief section 1/4).
+    // 0 is now a legitimate, real value: instantaneous activities log
+    // exactly 0, not a placeholder. Insights/streak calculations were
+    // audited (brief section 1/13) and already treat durationMinutes as
+    // real elapsed effort ONLY where a nullish-coalescing default (?? 30)
+    // is applied -- 0 passes through those unchanged (nullish coalescing
+    // only substitutes for null/undefined, never 0), so this is a
+    // backward-compatible floor change, not a new code path.
+    durationMinutes: Math.min(180, Math.max(0, Number(durationMinutes ?? 30))),
     notes: notes ? String(notes).trim() : undefined,
     logSource: parseLogSource(logSource),
     activitySignificance: parseActivitySignificance(activitySignificance),

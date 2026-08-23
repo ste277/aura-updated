@@ -74,6 +74,31 @@ export type PlanningMode = 'EVERYDAY' | 'IMPORTANT' | 'CEREMONIAL';
  */
 export type ImmediateAction = 'LOG_NOW' | 'START_NOW' | 'PLAN' | 'BOTH';
 
+/**
+ * Good Right Now Action Semantics V1 -- HOW an immediate log's duration is
+ * determined, orthogonal to ImmediateAction (WHICH action is offered):
+ *   INSTANT       -- effectively zero elapsed time (a hydration check). Logs
+ *                    durationMinutes = 0, never a manufactured placeholder.
+ *   FIXED         -- a real but non-negotiable duration, read from the
+ *                    catalog's own defaultDurationMinutes (Tea Break, a
+ *                    light stretch) -- never hardcoded in the UI layer.
+ *   USER_SELECTED -- has real, meaningfully-variable duration (Deep Work,
+ *                    Workout, Learning). Home shows a lightweight duration
+ *                    picker built from the catalog's own suggestedDurations
+ *                    before logging -- still no timer, just a choice made
+ *                    up front and logged immediately.
+ *   SESSION       -- architecture-only in this PR (brief section 7): the
+ *                    eventual "Start -> running -> Done -> actual elapsed
+ *                    duration logged" flow this app has no timer model for
+ *                    yet. Not selected by any current activity's mapping;
+ *                    exists so a future PR has a real value to switch on
+ *                    instead of inventing a new field then.
+ * Only meaningful when immediateAction is LOG_NOW/START_NOW/BOTH -- a PLAN-
+ * only activity's durationMode is never read by anything (brief section 3:
+ * "durationMode should not alter planning behavior").
+ */
+export type ActivityDurationMode = 'INSTANT' | 'FIXED' | 'USER_SELECTED' | 'SESSION';
+
 export interface ActivityExperience {
   /** Whether this activity is offered as a Plan/Muhurtham RESULT the user
    * can turn into an AuraMoment (brief section 3: "An Aura Moment is a
@@ -95,6 +120,11 @@ export interface ActivityExperience {
    * defaultImmediateActionFor() for any future catalog entry with no
    * explicit override) -- never inferred from title text at render time. */
   immediateAction: ImmediateAction;
+  /** See ActivityDurationMode's own doc comment above. Hand-authored per
+   * activity in ACTIVITY_METADATA below (or computed by
+   * defaultDurationModeFor() for any future catalog entry with no explicit
+   * override) -- never inferred from title text at render time. */
+  durationMode: ActivityDurationMode;
 }
 
 export interface ActivityDefinition {
@@ -144,6 +174,7 @@ type ActivityMetadataInput = {
   timingSensitivity: TimingSensitivity;
   socialMode: SocialMode;
   immediateAction?: ImmediateAction;
+  durationMode?: ActivityDurationMode;
   /** Overrides activity.significance when the catalog's existing value is a
    * poor proxy for genuine Muhurta significance (see 'workout' below for
    * why this exists). Omit to reuse activity.significance as-is. */
@@ -214,6 +245,10 @@ const ACTIVITY_METADATA: Record<string, ActivityMetadataInput> = {
     status: 'AMBIGUOUS',
     notes: 'Spans breathwork (MEDITATION) and strategic visioning (reserved STRATEGIC_PLANNING intent). Candidate to split into two activities later.',
     immediateAction: 'START_NOW',
+    // FIXED, not USER_SELECTED: a quick grounding/breathwork moment, not a
+    // meaningfully variable-length session -- see personalizedTasks.ts's
+    // defaultDurationMinutes: 10 on this same catalog entry.
+    durationMode: 'FIXED',
   },
   'task-4': {
     // "Deep Architecture & Writing"
@@ -244,6 +279,9 @@ const ACTIVITY_METADATA: Record<string, ActivityMetadataInput> = {
     timingSensitivity: { start: 'LOW', duration: 'LOW', end: 'LOW' },
     socialMode: 'SOLO',
     immediateAction: 'LOG_NOW',
+    // INSTANT: a hydration/posture check is effectively zero elapsed time --
+    // never a manufactured placeholder duration (brief section 4).
+    durationMode: 'INSTANT',
   },
   'task-7': {
     // "Light Stretch & Mobility" -- reused by Good Right Now Actions V1 for
@@ -254,6 +292,9 @@ const ACTIVITY_METADATA: Record<string, ActivityMetadataInput> = {
     timingSensitivity: { start: 'LOW', duration: 'LOW', end: 'LOW' },
     socialMode: 'SOLO',
     immediateAction: 'START_NOW',
+    // FIXED -- see personalizedTasks.ts's defaultDurationMinutes: 10 on
+    // this same catalog entry.
+    durationMode: 'FIXED',
   },
 
   // -- EXTENDED_ACTIVITY_CATALOG --
@@ -272,6 +313,11 @@ const ACTIVITY_METADATA: Record<string, ActivityMetadataInput> = {
     timingSensitivity: { start: 'MEDIUM', duration: 'MEDIUM', end: 'LOW' },
     socialMode: 'SOLO',
     immediateAction: 'BOTH',
+    // USER_SELECTED: real, meaningfully-variable duration -- Home shows a
+    // lightweight picker built from these exact values before logging
+    // (brief section 6), never a timer.
+    durationMode: 'USER_SELECTED',
+    suggestedDurations: [30, 60, 90],
   },
   workout: {
     // The catalog's own `significance: 'HIGH'` reflects planner priority,
@@ -285,6 +331,8 @@ const ACTIVITY_METADATA: Record<string, ActivityMetadataInput> = {
     socialMode: 'SOLO',
     significance: 'MEDIUM',
     immediateAction: 'BOTH',
+    durationMode: 'USER_SELECTED',
+    suggestedDurations: [30, 45, 60],
   },
   'tea-break': {
     // Kept under HEALTH/RECOVERY for now; candidate to move to a future
@@ -297,6 +345,9 @@ const ACTIVITY_METADATA: Record<string, ActivityMetadataInput> = {
     socialMode: 'ANY',
     notes: 'Candidate to move to a future REST_ROUTINE / BREAK concept distinct from HEALTH.',
     immediateAction: 'LOG_NOW',
+    // FIXED -- see personalizedTasks.ts's defaultDurationMinutes: 10 on
+    // this same catalog entry (brief section 5's own worked example).
+    durationMode: 'FIXED',
   },
   dating: {
     family: 'RELATIONSHIP',
@@ -352,6 +403,8 @@ const ACTIVITY_METADATA: Record<string, ActivityMetadataInput> = {
     timingSensitivity: { start: 'LOW', duration: 'MEDIUM', end: 'LOW' },
     socialMode: 'SOLO',
     immediateAction: 'BOTH',
+    durationMode: 'USER_SELECTED',
+    suggestedDurations: [20, 30, 60],
   },
 
   // -- New explicit occasion activities (see personalizedTasks.ts and the
@@ -466,6 +519,22 @@ function defaultImmediateActionFor(evaluationDepth: MuhurtaClassification['evalu
   return evaluationDepth === 'DEEP' || evaluationDepth === 'CEREMONIAL' ? 'PLAN' : 'BOTH';
 }
 
+/** Good Right Now Action Semantics V1: only reached for an activity with no
+ * explicit durationMode override above -- almost always a PLAN-only
+ * activity, for which durationMode is never actually read (brief section
+ * 3). Never defaults to INSTANT (that must always be a deliberate,
+ * explicit choice -- brief section 4's "do not silently use 5 minutes"
+ * extends to "do not silently assume instant" too): a real
+ * suggestedDurations list with more than one option means a genuine choice
+ * exists (USER_SELECTED); a single defaultDurationMinutes with no options
+ * means one fixed value (FIXED); otherwise USER_SELECTED is the safe
+ * default, since it never invents a number nobody chose. */
+function defaultDurationModeFor(activity: ActivityProfile, metadata: ActivityMetadataInput): ActivityDurationMode {
+  if (metadata.suggestedDurations && metadata.suggestedDurations.length > 1) return 'USER_SELECTED';
+  if (activity.defaultDurationMinutes) return 'FIXED';
+  return 'USER_SELECTED';
+}
+
 /**
  * Legacy engine family per definition id — intentionally kept OUT of
  * ActivityDefinition/MuhurtaClassification (see the comment on
@@ -503,6 +572,7 @@ function buildActivityDefinition(activity: ActivityProfile): ActivityDefinition 
       defaultDurationMinutes: activity.defaultDurationMinutes,
       suggestedDurations: metadata.suggestedDurations,
       immediateAction: metadata.immediateAction ?? defaultImmediateActionFor(metadata.evaluationDepth),
+      durationMode: metadata.durationMode ?? defaultDurationModeFor(activity, metadata),
     },
   };
 }
@@ -606,6 +676,9 @@ export function resolveActivityDefinition(taskTitle: string): ActivityResolution
         // this same STANDARD evaluationDepth): never hides Plan, which
         // remains correct for literally anything.
         immediateAction: 'BOTH',
+        // Same reasoning as defaultDurationModeFor's own fallback: never
+        // invent a number nobody chose for unknown free text.
+        durationMode: 'USER_SELECTED',
       },
       muhurta: {
         family,
