@@ -705,6 +705,20 @@ export default function DashboardPage() {
     setActiveTab('panchang');
   }, []);
 
+  // Bug fix: a plain "open Panchang" entry point (Explore's card, Muhurtham
+  // Finder's "Open Panchang Calendar") used to just setActiveTab('panchang')
+  // directly, leaving whatever panchangDateJump handleViewFullPanchang had
+  // set earlier in the session still in place -- PanchangCalendarView's own
+  // initialSelectedDate effect re-applies it on every fresh mount, so
+  // clicking Explore's "Today · <date>" card could silently land on a stale
+  // date from an unrelated earlier "View full Panchang" click instead of
+  // today. Clearing the jump here (only handleViewFullPanchang above should
+  // ever set a real one) fixes every plain entry point at once.
+  const handleOpenPanchang = useCallback(() => {
+    setPanchangDateJump(null);
+    setActiveTab('panchang');
+  }, []);
+
   // Explore's Quick Explore shortcuts -- identical pattern to
   // handleViewFullPanchang above, just for Muhurtham Finder's activity
   // instead of Panchang's date.
@@ -914,7 +928,7 @@ export default function DashboardPage() {
         {activeTab === 'explore' && (
           <ExploreView
             timezone={user.timezone}
-            onOpenPanchang={() => setActiveTab('panchang')}
+            onOpenPanchang={handleOpenPanchang}
             onOpenMuhurtham={() => setActiveTab('muhurtham')}
             onOpenMuhurthamWithActivity={handleOpenMuhurthamWithActivity}
           />
@@ -936,7 +950,7 @@ export default function DashboardPage() {
           <MuhurthamFinderView
             timezone={user.timezone}
             onBack={() => setActiveTab('explore')}
-            onOpenPanchangCalendar={() => setActiveTab('panchang')}
+            onOpenPanchangCalendar={handleOpenPanchang}
             onViewFullPanchang={handleViewFullPanchang}
             onPlanLogged={loadUserDataAndLogs}
             onOpenBirthProfile={() => setActiveTab('chart')}
