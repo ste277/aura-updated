@@ -975,6 +975,9 @@ export default function DashboardPage() {
             cityName={user.cityName}
             onPlanLogged={loadUserDataAndLogs}
             onViewTimeline={() => setActiveTab('timeline')}
+            onOpenPlan={handleOpenPlan}
+            onOpenPanchang={handleOpenPanchang}
+            onOpenMuhurthamWithActivity={handleOpenMuhurthamWithActivity}
           />
         )}
 
