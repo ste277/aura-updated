@@ -47,11 +47,9 @@ interface HomeDashboardProps {
   };
   activeWindowName?: string;
   /** Full-day window list, already computed in page.tsx (mappedTimelineWindows)
-   * for TimelineView -- reused here so Today's Flow can show caution/avoid
-   * windows too. dailyBriefing.otherFavorableWindows deliberately excludes
-   * Rahu Kalam/Yama, so it alone can't produce an "avoid" card. */
+   * for TimelineView -- reused here only to cross-reference Next Best
+   * Moment's own end time (nextMomentWindow below). */
   dayWindows?: HomeDayWindow[];
-  currentMinuteOfDay?: number;
   loggedActivitiesToday?: string[];
   dailyBriefing?: DailyBriefing | null;
   todayReflection?: {
@@ -231,18 +229,6 @@ function formatNextMomentTiming(startsIn: string): string {
   return hasRemainingTime ? `Starts in ${bare}` : 'Active now';
 }
 
-// dailyBriefing only gives formatted clock strings ("4:38 AM"), not raw minute
-// values, so this recovers a sortable minute-of-day from them — needed to
-// merge the peak window and the other favorable windows into one true
-// chronological order (see flowItems below).
-function parseClockToMinutes(clock: string): number {
-  const match = clock.match(/(\d{1,2}):(\d{2})\s*(AM|PM)/i);
-  if (!match) return 0;
-  let hours = Number(match[1]) % 12;
-  if (match[3].toUpperCase() === 'PM') hours += 12;
-  return hours * 60 + Number(match[2]);
-}
-
 function formatWindowName(name: string) {
   // Callers pass raw SolarWindowType-style strings (e.g. "ABHIJIT",
   // "RAHU_KALAM") as often as already-cased labels -- lowercasing first
@@ -371,7 +357,6 @@ export function HomeDashboard({
   currentWindow,
   activeWindowName = 'NEUTRAL',
   dayWindows,
-  currentMinuteOfDay,
   loggedActivitiesToday = [],
   dailyBriefing,
   todayReflection,
@@ -499,92 +484,6 @@ export function HomeDashboard({
       secondaryLabel: 'More options',
     };
   }, [activeWindowName, personalizedTasks, primaryTask, remainingText, upcomingPlans]);
-
-  // Today's Flow should read Now -> Next -> Later, prioritizing what's still
-  // ahead rather than history. Previously the peak window was always listed
-  // first regardless of whether it had already passed (labeled "Peak" even
-  // hours after it ended), and completed windows crowded out what's actually
-  // coming up. dailyBriefing only exposes formatted clock strings, so the
-  // peak window and otherFavorableWindows are merged into one real
-  // chronological order via parseClockToMinutes before labeling.
-  const flowItems = useMemo(() => {
-    // Preferred path: the full-day window list (includes friction windows
-    // like Rahu Kalam/Yama, unlike dailyBriefing.otherFavorableWindows which
-    // excludes them) -- lets Today's Flow show a real "avoid" card.
-    if (dayWindows && dayWindows.length > 0 && typeof currentMinuteOfDay === 'number') {
-      const sorted = [...dayWindows].sort((a, b) => a.startMinute - b.startMinute);
-      const currentIndex = sorted.findIndex((w) => w.startMinute <= currentMinuteOfDay && currentMinuteOfDay < w.endMinute);
-      const current = currentIndex >= 0 ? sorted[currentIndex] : null;
-      const upcoming = current ? sorted.slice(currentIndex + 1) : sorted.filter((w) => w.startMinute > currentMinuteOfDay);
-
-      const items = [
-        current
-          ? { label: 'Now', name: formatWindowName(current.name), time: 'Current', accent: '#4ade80' }
-          : { label: 'Now', name: currentWindowLabel, time: 'Current', accent: tone.color },
-      ];
-
-      upcoming.slice(0, 3).forEach((window, index) => {
-        const isFirst = index === 0;
-        const accent = isFirst ? '#38bdf8' : window.type === 'friction' ? '#fb6b6b' : '#facc15';
-        items.push({ label: isFirst ? 'Next' : 'Later', name: formatWindowName(window.name), time: `${window.startTime} - ${window.endTime}`, accent });
-      });
-
-      if (items.length === 1) {
-        items.push({ label: 'Next', name: nextShift.windowName, time: nextShift.startTime, accent: '#38bdf8' });
-      }
-
-      return items;
-    }
-
-    if (!dailyBriefing) {
-      return [
-        { label: 'Now', name: currentWindowLabel, time: 'Current', accent: tone.color },
-        { label: 'Next', name: nextShift.windowName, time: nextShift.startTime, accent: '#38bdf8' },
-      ];
-    }
-
-    const candidates = [
-      {
-        name: dailyBriefing.peakWindow.name,
-        startTime: dailyBriefing.peakWindow.startTime,
-        endTime: dailyBriefing.peakWindow.endTime,
-        state: dailyBriefing.briefingState,
-        sortMinute: parseClockToMinutes(dailyBriefing.peakWindow.startTime),
-      },
-      ...dailyBriefing.otherFavorableWindows.map((window) => ({
-        name: window.name,
-        startTime: window.startTime,
-        endTime: window.endTime,
-        state: window.state,
-        sortMinute: parseClockToMinutes(window.startTime),
-      })),
-    ].sort((a, b) => a.sortMinute - b.sortMinute);
-
-    const active = candidates.find((c) => c.state === 'ACTIVE');
-    const upcoming = candidates.filter((c) => c.state === 'UPCOMING');
-
-    const items = [
-      active
-        ? { label: 'Now', name: active.name, time: `${active.startTime} - ${active.endTime}`, accent: '#4ade80' }
-        : { label: 'Now', name: currentWindowLabel, time: 'Current', accent: tone.color },
-    ];
-
-    upcoming.slice(0, 3).forEach((candidate, index) => {
-      items.push({
-        label: index === 0 ? 'Next' : 'Later',
-        name: candidate.name,
-        time: `${candidate.startTime} - ${candidate.endTime}`,
-        accent: index === 0 ? '#38bdf8' : '#facc15',
-      });
-    });
-
-    if (items.length === 1) {
-      // Nothing favorable remains today — fall back to whatever's next overall.
-      items.push({ label: 'Next', name: nextShift.windowName, time: nextShift.startTime, accent: '#38bdf8' });
-    }
-
-    return items;
-  }, [currentWindowLabel, dailyBriefing, dayWindows, currentMinuteOfDay, nextShift.startTime, nextShift.windowName, tone.color]);
 
   // See selectGoodRightNowCards' own doc comment for the full reasoning --
   // justLoggedTitles exempts a card the user just logged from THIS Home
@@ -747,11 +646,18 @@ export function HomeDashboard({
         </div>
       </SurfaceCard>
 
-      {/* My Day V1 -- ONE "What's Next" slot (brief section 31/33), tiered:
-       * (1) actionable Moment coordination issue, (2) Starting Soon,
-       * (3) the next My Day agenda item. The hero panel above stays first
-       * -- it's the page's anchor ("Right Now"), not a competing card. */}
-      {nextThing && (
+      {/* Home cleanup (Daily Reflection & Tomorrow Preview V1 follow-up) --
+       * the standalone "What's Next" card is gone for a normal upcoming
+       * Plan/Moment (tier 3, deriveNextMeaningfulThing's AGENDA_ITEM kind):
+       * that item now gets a NEXT eyebrow directly inside "Your Day" below
+       * instead of a duplicate card up here (see YourDayTimeline's
+       * nextItemId). Tiers 1-2 are NOT duplicates -- an actionable Moment
+       * coordination issue or an active Starting Soon reminder carry
+       * context Your Day's plain row doesn't, so they keep surfacing here
+       * exactly as before. deriveNextMeaningfulThing() itself is
+       * untouched; only which of its outcomes render a standalone card
+       * changed. */}
+      {nextThing && nextThing.kind !== 'AGENDA_ITEM' && (
         <section>
           <SectionHeader label="What's Next" />
           {nextThing.kind === 'MOMENT_UPDATE' && (() => {
@@ -776,23 +682,6 @@ export function HomeDashboard({
             );
           })()}
           {nextThing.kind === 'STARTING_SOON' && <StartingSoonCard reminder={nextThing.reminder} onOpen={onOpenReminder} />}
-          {nextThing.kind === 'AGENDA_ITEM' && (() => {
-            const item = nextThing.item;
-            const time = new Date(item.startAt).toLocaleTimeString('en-US', { timeZone: myDayAgenda?.timezone, hour: 'numeric', minute: '2-digit' });
-            const title = item.type === 'MOMENT' && item.participantDisplayName ? `${item.title} with ${item.participantDisplayName}` : item.title;
-            return (
-              <SurfaceCard>
-                <div style={{ display: 'flex', alignItems: 'center', gap: spacing.sm }}>
-                  <span style={{ fontSize: 20 }} aria-hidden="true">{item.icon || '✨'}</span>
-                  <div style={{ fontSize: 14, fontWeight: 800, color: colors.textPrimary }}>{title}</div>
-                </div>
-                <div style={{ marginTop: spacing.sm, fontSize: 13, color: colors.textFaint }}>{time}</div>
-                <div style={{ marginTop: spacing.md }}>
-                  <SecondaryButton onClick={() => onOpenAgendaItem?.(item)}>View</SecondaryButton>
-                </div>
-              </SurfaceCard>
-            );
-          })()}
         </section>
       )}
 

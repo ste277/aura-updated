@@ -233,6 +233,58 @@ function habitLog(overrides: Partial<HabitLogRow> = {}): HabitLogRow {
   check('An item within the day sorts correctly regardless of proximity to UTC midnight', agenda.items[0].id === 'plan:late');
 }
 
+// ============================================================
+// Home cleanup (Daily Reflection & Tomorrow Preview V1 follow-up) --
+// DailyAgenda.nextItem is now the SAME value YourDayTimeline uses to
+// decide which single row gets the "NEXT" eyebrow, replacing the removed
+// standalone "What's Next" card for a normal upcoming Plan. These prove
+// the underlying selection itself (already used by
+// deriveNextMeaningfulThing's tier 3) is chronologically correct and
+// never picks a completed/missed item -- no new "find next plan" logic
+// was introduced, this is exercising the existing computation.
+// ============================================================
+{
+  // A past COMPLETED plan, a past MISSED plan, and two future UPCOMING
+  // plans -- nextItem must pick the chronologically FIRST of the two
+  // future ones, never the completed or missed ones.
+  const completedPast = plan({ id: 'completed-past', status: 'LOGGED', plannedStartAt: new Date('2026-08-24T02:00:00.000Z'), plannedEndAt: new Date('2026-08-24T03:00:00.000Z') });
+  const missedPast = plan({ id: 'missed-past', plannedStartAt: new Date('2026-08-24T04:00:00.000Z'), plannedEndAt: new Date('2026-08-24T05:00:00.000Z') });
+  const laterUpcoming = plan({ id: 'later-upcoming', plannedStartAt: new Date('2026-08-25T10:00:00.000Z'), plannedEndAt: new Date('2026-08-25T11:00:00.000Z') });
+  const nextUpcoming = plan({ id: 'next-upcoming', plannedStartAt: new Date('2026-08-24T14:00:00.000Z'), plannedEndAt: new Date('2026-08-24T15:00:00.000Z') });
+  const agenda = buildDailyAgenda({
+    now: NOW, localDate: LOCAL_DATE, timezone: TZ, moments: [], momentIdsWithSuccessor: new Set(), habitLogs: [],
+    plans: [completedPast, missedPast, laterUpcoming, nextUpcoming],
+  });
+  check('nextItem picks the chronologically first UPCOMING plan, not the later one', agenda.nextItem?.id === 'plan:next-upcoming');
+  check('nextItem never picks the COMPLETED plan', agenda.nextItem?.id !== 'plan:completed-past');
+  check('nextItem never picks the MISSED plan', agenda.nextItem?.id !== 'plan:missed-past');
+}
+{
+  // Empty agenda -- no next item at all (supports Your Day's own empty
+  // state; nothing to emphasize).
+  const agenda = buildDailyAgenda({ now: NOW, localDate: LOCAL_DATE, timezone: TZ, plans: [], moments: [], momentIdsWithSuccessor: new Set(), habitLogs: [] });
+  check('An empty agenda has no nextItem', agenda.nextItem === undefined);
+}
+{
+  // A day where EVERYTHING has already happened (all COMPLETED/MISSED) --
+  // nextItem must be undefined, not fall back to a past item.
+  const completed = plan({ id: 'done', status: 'LOGGED', plannedStartAt: new Date('2026-08-24T02:00:00.000Z'), plannedEndAt: new Date('2026-08-24T03:00:00.000Z') });
+  const missed = plan({ id: 'gone', plannedStartAt: new Date('2026-08-24T04:00:00.000Z'), plannedEndAt: new Date('2026-08-24T05:00:00.000Z') });
+  const agenda = buildDailyAgenda({ now: NOW, localDate: LOCAL_DATE, timezone: TZ, plans: [completed, missed], moments: [], momentIdsWithSuccessor: new Set(), habitLogs: [] });
+  check('A day with only past completed/missed items has no nextItem', agenda.nextItem === undefined);
+}
+{
+  // Dedup: a linked Plan/Moment pair renders as ONE item -- nextItem must
+  // resolve to that single deduped (Moment) representation, not risk
+  // matching a since-removed Plan row.
+  const linkedPlan = plan({ id: 'linked-next', plannedStartAt: new Date('2026-08-24T14:00:00.000Z'), plannedEndAt: new Date('2026-08-24T15:00:00.000Z') });
+  const linkedMoment = moment({ id: 'moment-linked-next', plannedActivityId: 'linked-next', startAt: new Date('2026-08-24T14:00:00.000Z'), endAt: new Date('2026-08-24T15:00:00.000Z') });
+  const agenda = buildDailyAgenda({
+    now: NOW, localDate: LOCAL_DATE, timezone: TZ, plans: [linkedPlan], moments: [linkedMoment], momentIdsWithSuccessor: new Set(), habitLogs: [],
+  });
+  check('nextItem on a deduped Plan/Moment pair resolves to the single Moment row', agenda.items.length === 1 && agenda.nextItem?.id === agenda.items[0].id);
+}
+
 if (!allPassed) {
   console.error('\nSome daily agenda checks FAILED.');
   process.exit(1);

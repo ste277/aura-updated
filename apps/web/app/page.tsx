@@ -998,7 +998,6 @@ export default function DashboardPage() {
             currentWindow={currentWindowInfo}
             activeWindowName={activeType}
             dayWindows={mappedTimelineWindows}
-            currentMinuteOfDay={currentMinuteOfDay}
             loggedActivitiesToday={loggedActivitiesToday}
             dailyBriefing={dailyBriefing}
             todayReflection={todayReflection}
