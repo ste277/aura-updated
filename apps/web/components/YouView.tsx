@@ -20,10 +20,20 @@ interface YouViewProps {
   /** Aura Reminders V1 (brief section 14/15). */
   remindersEnabled: boolean;
   onRemindersEnabledChange: (next: boolean) => void;
-  /** Intentional Day Builder V1 (brief section 6/35). */
+  /** Intentional Day Builder V1 (brief section 6/35), extended by
+   * Personalization Foundation V1's priorities/priorityPersonIds. */
   dayBuilderEnabled: boolean;
   dayBuilderMutedGroups: string[];
-  onDayBuilderPrefsChange: (next: { dayBuilderEnabled: boolean; dayBuilderMutedGroups: string[] }) => void;
+  dayBuilderPriorities: string[];
+  dayBuilderPriorityPersonIds: string[];
+  onDayBuilderPrefsChange: (
+    next: Partial<{
+      dayBuilderEnabled: boolean;
+      dayBuilderMutedGroups: string[];
+      dayBuilderPriorities: string[];
+      dayBuilderPriorityPersonIds: string[];
+    }>
+  ) => void;
   onLocationChanged: (city: { cityName: string; latitude: number; longitude: number; timezone: string }) => void;
   onOpenHome: () => void;
   onOpenChart: () => void;
@@ -51,6 +61,8 @@ export function YouView({
   onRemindersEnabledChange,
   dayBuilderEnabled,
   dayBuilderMutedGroups,
+  dayBuilderPriorities,
+  dayBuilderPriorityPersonIds,
   onDayBuilderPrefsChange,
   onLocationChanged,
   onOpenHome,
@@ -161,7 +173,13 @@ export function YouView({
 
       <div>
         <SectionHeader label="Day Builder" />
-        <DayBuilderSettings enabled={dayBuilderEnabled} mutedGroups={dayBuilderMutedGroups} onChange={onDayBuilderPrefsChange} />
+        <DayBuilderSettings
+          enabled={dayBuilderEnabled}
+          mutedGroups={dayBuilderMutedGroups}
+          priorities={dayBuilderPriorities}
+          priorityPersonIds={dayBuilderPriorityPersonIds}
+          onChange={onDayBuilderPrefsChange}
+        />
       </div>
 
       <div style={{ scrollMarginTop: 18 }}>

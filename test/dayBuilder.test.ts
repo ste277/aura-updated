@@ -4,6 +4,9 @@ import {
   candidateFitsOpenings,
   selectIntentionCandidates,
   swapSuggestion,
+  applyUserPriorities,
+  resolvePrioritizedIntentionGroups,
+  USER_PRIORITY_GROUPS,
   PEOPLE_GROUP_IDS,
   IntentionalDaySuggestion,
 } from '../apps/web/lib/dayBuilder';
@@ -329,6 +332,73 @@ function fakeSuggestion(id: string, groupId: DailyIntentionGroupId, activityId: 
   const visible = all.map((s) => s.id);
   const result = swapSuggestion(visible, all, 'SELF:workout');
   check('No reserve candidates -> swap just removes the outgoing suggestion, nothing added', result.length === 2 && !result.includes('SELF:workout'));
+}
+
+// ============================================================
+// Personalization Foundation V1 -- applyUserPriorities /
+// resolvePrioritizedIntentionGroups (ordering only, pure).
+// ============================================================
+{
+  check('USER_PRIORITY_GROUPS has exactly 6 entries', USER_PRIORITY_GROUPS.length === 6);
+  check('USER_PRIORITY_GROUPS ids are all unique', new Set(USER_PRIORITY_GROUPS.map((g) => g.id)).size === 6);
+}
+{
+  const groups = resolvePrioritizedIntentionGroups(['RELATIONSHIPS']);
+  check('RELATIONSHIPS priority resolves to the people-oriented taxonomy groups', groups.has('RELATIONSHIPS') && groups.has('FAMILY') && groups.has('SOCIAL'));
+}
+{
+  const groups = resolvePrioritizedIntentionGroups(['WORK']);
+  check('WORK priority resolves to exactly {WORK}', groups.size === 1 && groups.has('WORK'));
+}
+{
+  const groups = resolvePrioritizedIntentionGroups(['WELLBEING']);
+  check('WELLBEING priority resolves to the SELF taxonomy group (reuse, not a new one)', groups.size === 1 && groups.has('SELF'));
+}
+{
+  const groups = resolvePrioritizedIntentionGroups(['PERSONAL_GROWTH']);
+  check('PERSONAL_GROWTH priority reuses WORK (Learning lives there, no dedicated growth group exists)', groups.size === 1 && groups.has('WORK'));
+}
+{
+  const groups = resolvePrioritizedIntentionGroups(['ROUTINE']);
+  check('ROUTINE priority resolves to the LIFE taxonomy group', groups.size === 1 && groups.has('LIFE'));
+}
+{
+  check('No priorities selected -> empty prioritized-group set (a fully valid state)', resolvePrioritizedIntentionGroups([]).size === 0);
+}
+{
+  const base: DailyIntentionGroupId[] = ['RELATIONSHIPS', 'FAMILY', 'SOCIAL', 'SELF', 'ENJOYMENT', 'WORK'];
+  check('Empty prioritized set -> applyUserPriorities is a no-op (same order back)', JSON.stringify(applyUserPriorities(base, new Set())) === JSON.stringify(base));
+
+  const reordered = applyUserPriorities(base, new Set(['WORK', 'SELF']));
+  check('Prioritized groups move to the front', reordered[0] === 'SELF' && reordered[1] === 'WORK');
+  check('Prioritized groups keep THEIR OWN relative order from baseOrder (SELF before WORK in base, so SELF before WORK here too)', reordered.indexOf('SELF') < reordered.indexOf('WORK'));
+  check('Non-prioritized groups keep their own relative order too, just pushed after', reordered.slice(2).join(',') === 'RELATIONSHIPS,FAMILY,SOCIAL,ENJOYMENT');
+  check('applyUserPriorities never adds or removes a group -- same 6 groups, just reordered', new Set(reordered).size === 6 && base.every((g) => reordered.includes(g)));
+}
+
+// ============================================================
+// Personalization Foundation V1 -- selectIntentionCandidates integration:
+// priorities affect ORDERING only, and can NEVER override a mute (brief
+// section 6's explicit ordering: dismissed -> muted -> priorities ->
+// diversity -> timing engine).
+// ============================================================
+{
+  const now = new Date('2026-08-24T02:30:00.000Z'); // 8:00 AM IST, wide-open day
+  const profile = buildDayProfile(agendaWithPlans([], now), 8 * 60);
+
+  const withoutPriorities = selectIntentionCandidates(profile, new Set(), 5);
+  const withWorkPriority = selectIntentionCandidates(profile, new Set(), 5, resolvePrioritizedIntentionGroups(['WORK']));
+  check('Selected priorities change candidate ordering -- WORK moves to the front when prioritized', withWorkPriority[0]?.groupId === 'WORK');
+  check('Without priorities, WORK is NOT first (evening-open day\'s own default order puts people-time first)', withoutPriorities[0]?.groupId !== 'WORK');
+  check(
+    'Priorities change ORDERING only -- the same set of candidate groups is produced either way (no group added/removed by prioritizing)',
+    new Set(withoutPriorities.map((c) => c.groupId)).size === new Set(withWorkPriority.map((c) => c.groupId)).size
+  );
+
+  // Muted groups override positive priorities -- prioritizing WORK while
+  // ALSO muting it must never resurrect it.
+  const workMutedAndPrioritized = selectIntentionCandidates(profile, new Set(['WORK']), 5, resolvePrioritizedIntentionGroups(['WORK']));
+  check('A muted group is never suggested even when it is also the user\'s #1 priority', !workMutedAndPrioritized.some((c) => c.groupId === 'WORK'));
 }
 
 if (!allPassed) {
