@@ -61,7 +61,10 @@ export type ProductEventName =
   | 'DAY_BUILDER_SUGGESTION_ADDED'
   | 'DAY_BUILDER_INVITE_SENT'
   | 'DAY_BUILDER_ANOTHER_IDEA'
-  | 'DAY_BUILDER_SUGGESTION_DISMISSED';
+  | 'DAY_BUILDER_SUGGESTION_DISMISSED'
+  | 'PERSONALIZATION_PROMPT_VIEWED'
+  | 'PERSONALIZATION_PREFERENCES_SAVED'
+  | 'PERSONALIZATION_PREFERENCES_UPDATED';
 
 export const PRODUCT_EVENT_NAMES: ProductEventName[] = [
   'AURA_HOME_VIEWED',
@@ -110,6 +113,9 @@ export const PRODUCT_EVENT_NAMES: ProductEventName[] = [
   'DAY_BUILDER_INVITE_SENT',
   'DAY_BUILDER_ANOTHER_IDEA',
   'DAY_BUILDER_SUGGESTION_DISMISSED',
+  'PERSONALIZATION_PROMPT_VIEWED',
+  'PERSONALIZATION_PREFERENCES_SAVED',
+  'PERSONALIZATION_PREFERENCES_UPDATED',
 ];
 
 export function isProductEventName(value: string): value is ProductEventName {
@@ -214,6 +220,16 @@ export const CLIENT_TRACKED_EVENTS: ReadonlySet<ProductEventName> = new Set<Prod
   'DAY_BUILDER_INVITE_SENT',
   'DAY_BUILDER_ANOTHER_IDEA',
   'DAY_BUILDER_SUGGESTION_DISMISSED',
+  // Personalization Foundation V1 (brief section 9) -- all three are UI
+  // intent/impression signals from the "What matters most lately?" prompt
+  // (PersonalizationPromptCard.tsx) and the You -> Day Builder priorities
+  // editor (DayBuilderSettings.tsx). No server-side write moment exists to
+  // hook these into (updateUserDayBuilderPrefs already fires from a single
+  // shared route used by several unrelated preference changes too), same
+  // reasoning as the DAY_BUILDER_* events above.
+  'PERSONALIZATION_PROMPT_VIEWED',
+  'PERSONALIZATION_PREFERENCES_SAVED',
+  'PERSONALIZATION_PREFERENCES_UPDATED',
 ]);
 
 // Fields that must NEVER appear in ProductEvent.metadata, under any event,
@@ -547,6 +563,22 @@ const EVENT_METADATA_SCHEMAS: Record<ProductEventName, Record<string, FieldSchem
     intentionCategory: myDayIntentionCategoryField,
     hasPerson: { type: 'boolean' },
     dayPhase: myDayDayPhaseField,
+  },
+  // Personalization Foundation V1 (brief section 9) -- counts only, never
+  // the actual selected priority ids/labels, never a SavedPerson id/name,
+  // never birth data or location (all already excluded by
+  // FORBIDDEN_METADATA_KEYS as defense-in-depth, and there's no such field
+  // offered here to begin with -- the schema's own FieldSchema union has
+  // no array type, so "which priorities" is structurally impossible to
+  // pass even by mistake, only a count is representable).
+  PERSONALIZATION_PROMPT_VIEWED: {},
+  PERSONALIZATION_PREFERENCES_SAVED: {
+    priorityCount: { type: 'number', min: 0, max: 3 },
+    hasPriorityPerson: { type: 'boolean' },
+  },
+  PERSONALIZATION_PREFERENCES_UPDATED: {
+    priorityCount: { type: 'number', min: 0, max: 3 },
+    hasPriorityPerson: { type: 'boolean' },
   },
 };
 

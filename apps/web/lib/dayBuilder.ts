@@ -213,17 +213,86 @@ function reasonForCandidate(groupId: DailyIntentionGroupId, profile: DayProfile)
  * handed to it). Returns [] whenever the day genuinely has no room left --
  * zero is a valid, expected result (brief section 13), not a fallback to
  * avoid. */
+/**
+ * Personalization Foundation V1 -- the user-facing "what matters most
+ * lately?" choices (brief section 2/5). Deliberately a SEPARATE, smaller
+ * presentation enum from DailyIntentionGroupId, not a new taxonomy in its
+ * own right: every value below maps onto one or more EXISTING
+ * DailyIntentionGroupId groups via PRIORITY_GROUP_TO_INTENTION_GROUPS
+ * (brief section 1: "do not create a parallel activity taxonomy"). This
+ * only ever affects candidate ORDERING (applyUserPriorities below) --
+ * never which activities exist, never any score.
+ */
+export type UserPriorityGroup = 'RELATIONSHIPS' | 'WORK' | 'WELLBEING' | 'ENJOYMENT' | 'PERSONAL_GROWTH' | 'ROUTINE';
+
+export const USER_PRIORITY_GROUPS: Array<{ id: UserPriorityGroup; label: string; icon: string }> = [
+  { id: 'RELATIONSHIPS', label: 'Relationships', icon: '❤️' },
+  { id: 'WORK', label: 'Work', icon: '💼' },
+  { id: 'WELLBEING', label: 'Wellbeing', icon: '🏃' },
+  { id: 'PERSONAL_GROWTH', label: 'Personal growth', icon: '🌱' },
+  { id: 'ENJOYMENT', label: 'Enjoyment', icon: '🎉' },
+  { id: 'ROUTINE', label: 'Routine', icon: '☕' },
+];
+
+/** Reuse mapping, not a new one: RELATIONSHIPS (the user-facing choice)
+ * reasonably spans all three of the taxonomy's own people-oriented groups
+ * (dailyIntentions.ts has no separate "family" or "friends" choice in the
+ * brief's suggested 6). WELLBEING -> SELF ("do something for myself" --
+ * workout/walk/meditation/quiet time, dailyIntentions.ts's own framing).
+ * PERSONAL_GROWTH -> WORK: the taxonomy's only "Learning" activity lives
+ * in the WORK group (dailyIntentions.ts has no dedicated growth/learning
+ * group) -- the closest honest reuse, not a fabricated new one. ROUTINE ->
+ * LIFE ("errands & home", dailyIntentions.ts's own existing, if
+ * not-yet-first-level-surfaced, group). */
+export const PRIORITY_GROUP_TO_INTENTION_GROUPS: Record<UserPriorityGroup, DailyIntentionGroupId[]> = {
+  RELATIONSHIPS: ['RELATIONSHIPS', 'FAMILY', 'SOCIAL'],
+  WORK: ['WORK'],
+  WELLBEING: ['SELF'],
+  PERSONAL_GROWTH: ['WORK'],
+  ENJOYMENT: ['ENJOYMENT'],
+  ROUTINE: ['LIFE'],
+};
+
+export function resolvePrioritizedIntentionGroups(priorities: UserPriorityGroup[]): Set<DailyIntentionGroupId> {
+  const result = new Set<DailyIntentionGroupId>();
+  for (const priority of priorities) {
+    for (const groupId of PRIORITY_GROUP_TO_INTENTION_GROUPS[priority] ?? []) result.add(groupId);
+  }
+  return result;
+}
+
+/** Brief section 3 -- a stable partition, not a re-sort: every group the
+ * user explicitly prioritized moves to the front, IN THEIR ORIGINAL
+ * relative order from `baseOrder` (never re-ordered relative to each
+ * other by this function -- that relative order already encodes the
+ * existing hasEveningOpen heuristic, e.g. RELATIONSHIPS before FAMILY).
+ * Groups the user did NOT prioritize keep their own original relative
+ * order too, just pushed after. This is ORDERING ONLY: it cannot add,
+ * remove, mute, or re-score a candidate -- selectIntentionCandidates'
+ * existing mutedGroups/presentGroupIds checks run identically afterward
+ * (brief section 6: priorities can never override a mute). */
+export function applyUserPriorities(baseOrder: DailyIntentionGroupId[], prioritizedGroupIds: Set<DailyIntentionGroupId>): DailyIntentionGroupId[] {
+  if (prioritizedGroupIds.size === 0) return baseOrder;
+  const prioritized = baseOrder.filter((g) => prioritizedGroupIds.has(g));
+  const rest = baseOrder.filter((g) => !prioritizedGroupIds.has(g));
+  return [...prioritized, ...rest];
+}
+
 export function selectIntentionCandidates(
   profile: DayProfile,
   mutedGroups: Set<DailyIntentionGroupId>,
-  maxCandidates: number
+  maxCandidates: number,
+  /** Personalization Foundation V1 -- defaults to empty so every existing
+   * caller/test (no personalization configured) is unaffected. */
+  prioritizedGroupIds: Set<DailyIntentionGroupId> = new Set()
 ): IntentionCandidate[] {
   if (profile.isBusy) return [];
   if (profile.openings.length === 0) return [];
 
-  const priorityOrder: DailyIntentionGroupId[] = profile.hasEveningOpen
+  const baseOrder: DailyIntentionGroupId[] = profile.hasEveningOpen
     ? ['RELATIONSHIPS', 'FAMILY', 'SOCIAL', 'SELF', 'ENJOYMENT', 'WORK']
     : ['SELF', 'ENJOYMENT', 'WORK', 'RELATIONSHIPS', 'FAMILY', 'SOCIAL'];
+  const priorityOrder = applyUserPriorities(baseOrder, prioritizedGroupIds);
 
   const candidates: IntentionCandidate[] = [];
   // Two-level dedup (brief section 12): level 1 is exact-activityId, tracked

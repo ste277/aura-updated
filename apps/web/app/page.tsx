@@ -61,6 +61,9 @@ interface SessionUser {
   reminderLeadMinutes: number;
   dayBuilderEnabled: boolean;
   dayBuilderMutedGroups: string[];
+  dayBuilderPriorities: string[];
+  dayBuilderPriorityPersonIds: string[];
+  dayBuilderPrioritiesPromptDismissed: boolean;
 }
 
 interface DailyReflectionState {
@@ -454,9 +457,21 @@ export default function DashboardPage() {
     }
   }, [loadAuraUpdates]);
 
-  // Intentional Day Builder V1 (brief section 6/35) -- same optimistic
-  // pattern as handleRemindersEnabledChange above.
-  const handleDayBuilderPrefsChange = useCallback(async (next: { dayBuilderEnabled: boolean; dayBuilderMutedGroups: string[] }) => {
+  // Intentional Day Builder V1 (brief section 6/35), extended by
+  // Personalization Foundation V1 -- same optimistic pattern as
+  // handleRemindersEnabledChange above. Accepts a PARTIAL update (any
+  // subset of the 5 Day Builder preference fields) -- PATCH
+  // /api/users/day-builder-preferences itself defaults any omitted field
+  // to the user's current stored value, so a caller that only knows about
+  // priorities (PersonalizationPromptCard) never has to also know/send
+  // dayBuilderEnabled/dayBuilderMutedGroups just to avoid wiping them.
+  const handleDayBuilderPrefsChange = useCallback(async (next: Partial<{
+    dayBuilderEnabled: boolean;
+    dayBuilderMutedGroups: string[];
+    dayBuilderPriorities: string[];
+    dayBuilderPriorityPersonIds: string[];
+    dayBuilderPrioritiesPromptDismissed: boolean;
+  }>) => {
     setUser((current) => (current ? { ...current, ...next } : current));
     try {
       await fetch('/api/users/day-builder-preferences', {
@@ -1050,10 +1065,13 @@ export default function DashboardPage() {
             onPlanTomorrow={handlePlanTomorrow}
             onMuteDayBuilderGroup={(groupId) =>
               handleDayBuilderPrefsChange({
-                dayBuilderEnabled: user.dayBuilderEnabled,
                 dayBuilderMutedGroups: Array.from(new Set([...user.dayBuilderMutedGroups, groupId])),
               })
             }
+            dayBuilderEnabled={user.dayBuilderEnabled}
+            dayBuilderPriorities={user.dayBuilderPriorities}
+            dayBuilderPrioritiesPromptDismissed={user.dayBuilderPrioritiesPromptDismissed}
+            onDayBuilderPrefsChange={handleDayBuilderPrefsChange}
           />
         )}
 
@@ -1132,6 +1150,8 @@ export default function DashboardPage() {
             onRemindersEnabledChange={handleRemindersEnabledChange}
             dayBuilderEnabled={user.dayBuilderEnabled}
             dayBuilderMutedGroups={user.dayBuilderMutedGroups}
+            dayBuilderPriorities={user.dayBuilderPriorities}
+            dayBuilderPriorityPersonIds={user.dayBuilderPriorityPersonIds}
             onDayBuilderPrefsChange={handleDayBuilderPrefsChange}
           />
         )}

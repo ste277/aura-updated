@@ -12,8 +12,10 @@ import {
   selectIntentionCandidates,
   candidateFitsOpenings,
   dismissalKey,
+  resolvePrioritizedIntentionGroups,
   PEOPLE_GROUP_RELATIONSHIP_TYPES,
   IntentionalDaySuggestion,
+  UserPriorityGroup,
 } from './dayBuilder';
 import type { DailyIntentionGroupId } from './dailyIntentions';
 
@@ -79,7 +81,14 @@ export async function buildIntentionalDaySuggestions(input: {
 
   const dayProfile = buildDayProfile(agenda, minuteOfDay);
   const mutedGroups = new Set(user.dayBuilderMutedGroups as DailyIntentionGroupId[]);
-  const intentionCandidates = selectIntentionCandidates(dayProfile, mutedGroups, MAX_CANDIDATE_ATTEMPTS);
+  // Personalization Foundation V1 (brief section 3/6) -- ordering only,
+  // computed BEFORE and entirely separately from mutedGroups above;
+  // selectIntentionCandidates() applies mutedGroups' exclusion identically
+  // regardless of priority, so a muted group can never be "un-muted" by
+  // also being a priority (brief section 6's own explicit ordering:
+  // dismissed -> muted -> priorities -> diversity -> timing engine).
+  const prioritizedGroupIds = resolvePrioritizedIntentionGroups(user.dayBuilderPriorities as UserPriorityGroup[]);
+  const intentionCandidates = selectIntentionCandidates(dayProfile, mutedGroups, MAX_CANDIDATE_ATTEMPTS, prioritizedGroupIds);
   // Brief section 13 -- zero is a valid, successful result. Skip every
   // downstream read/search entirely rather than computing anything further.
   if (intentionCandidates.length === 0) return [];
@@ -123,7 +132,14 @@ export async function buildIntentionalDaySuggestions(input: {
     // tea" can still be proposed and added even with no one saved to invite.
     if (candidate.isPeopleOriented) {
       const relationshipTypes = PEOPLE_GROUP_RELATIONSHIP_TYPES[candidate.groupId] ?? [];
-      const person = savedPeople.find((p) => relationshipTypes.includes(p.relationshipType));
+      const eligiblePeople = savedPeople.filter((p) => relationshipTypes.includes(p.relationshipType));
+      // "Make more time for" (brief section 4) -- when more than one
+      // eligible person exists for this group, prefer one the user
+      // explicitly flagged. Never compatibility scoring: just WHICH
+      // already-eligible person gets picked when there's a genuine choice
+      // -- the person still has to independently resolve a real fitting
+      // time below, same as anyone else.
+      const person = eligiblePeople.find((p) => user.dayBuilderPriorityPersonIds.includes(p.id)) ?? eligiblePeople[0];
       // "Not today" against THIS exact person -- a different (undismissed)
       // person, or no person at all, remains a genuinely different
       // suggestion and is never blocked by this.

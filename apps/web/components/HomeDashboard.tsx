@@ -22,6 +22,7 @@ import { deriveNextMeaningfulThing } from '../lib/nextMeaningfulThing';
 import { deriveAuraSuggestion, AuraSuggestion } from '../lib/auraSuggests';
 import { MyDayStoryCard } from './MyDayStoryCard';
 import { DayBuilderCard } from './DayBuilderCard';
+import { PersonalizationPromptCard } from './PersonalizationPromptCard';
 import type { DailyIntentionGroupId } from '../lib/dailyIntentions';
 import { YourDayTimeline } from './YourDayTimeline';
 
@@ -137,6 +138,12 @@ interface HomeDashboardProps {
   /** Day Builder "Show me less like this" (brief: dismiss support) --
    * updates the EXISTING muted-group preference, never a new mechanism. */
   onMuteDayBuilderGroup?: (groupId: DailyIntentionGroupId) => void;
+  /** Personalization Foundation V1 -- drives whether/what
+   * PersonalizationPromptCard shows above DayBuilderCard. */
+  dayBuilderEnabled?: boolean;
+  dayBuilderPriorities?: string[];
+  dayBuilderPrioritiesPromptDismissed?: boolean;
+  onDayBuilderPrefsChange?: (next: Partial<{ dayBuilderPriorities: string[]; dayBuilderPrioritiesPromptDismissed: boolean }>) => void;
 }
 
 interface HomeDayWindow {
@@ -353,6 +360,10 @@ export function HomeDashboard({
   onOpenAgendaItem,
   onPlanTomorrow,
   onMuteDayBuilderGroup,
+  dayBuilderEnabled,
+  dayBuilderPriorities,
+  dayBuilderPrioritiesPromptDismissed,
+  onDayBuilderPrefsChange,
 }: HomeDashboardProps) {
   const [reflectionSaved, setReflectionSaved] = useState(Boolean(todayReflection));
   const [isEditingReflection, setIsEditingReflection] = useState(false);
@@ -492,6 +503,18 @@ export function HomeDashboard({
           onOpenPeople={() => onOpenPeople?.()}
           onCreated={() => onMyDayChanged?.()}
           onPlanTomorrow={(activityTitle) => (onPlanTomorrow ? onPlanTomorrow(activityTitle) : onPlanClick?.())}
+        />
+      )}
+
+      {/* Personalization Foundation V1 -- a quiet, one-time nudge; renders
+       * nothing once priorities are set or the prompt was dismissed (see
+       * PersonalizationPromptCard's own shouldShow logic). */}
+      {onDayBuilderPrefsChange && (
+        <PersonalizationPromptCard
+          dayBuilderEnabled={dayBuilderEnabled ?? true}
+          dayBuilderPriorities={dayBuilderPriorities ?? []}
+          dayBuilderPrioritiesPromptDismissed={dayBuilderPrioritiesPromptDismissed ?? false}
+          onChange={onDayBuilderPrefsChange}
         />
       )}
 

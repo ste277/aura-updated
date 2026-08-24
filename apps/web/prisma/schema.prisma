@@ -37,6 +37,17 @@ model User {
   dayBuilderEnabled      Boolean  @default(true)
   dayBuilderMutedGroups  String[] @default([])
 
+  // Personalization Foundation V1 -- lightweight, explicit, user-controlled
+  // priorities affecting Day Builder candidate ORDERING only (never
+  // timing/scoring). dayBuilderPriorities stores UserPriorityGroup values
+  // (dayBuilder.ts) -- a presentation mapping onto the EXISTING
+  // DailyIntentionGroupId taxonomy, not a new one. dayBuilderPriorityPersonIds
+  // stores existing SavedPerson ids ("make more time for"). An empty
+  // dayBuilderPriorities array is a fully valid, permanent state.
+  dayBuilderPriorities                String[] @default([])
+  dayBuilderPriorityPersonIds         String[] @default([])
+  dayBuilderPrioritiesPromptDismissed Boolean  @default(false)
+
   habitLogs       HabitLog[]
   visitLogs       VisitLog[]
   habits          Habit[]

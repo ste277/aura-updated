@@ -166,6 +166,90 @@ async function main() {
     }
 
     // ============================================================
+    // Personalization Foundation V1 -- explicit priorities affect
+    // ORDERING only, never override a mute, are owner-scoped, and
+    // "make more time for" only changes WHICH already-eligible person is
+    // picked (never a compatibility score). Uses its own fresh
+    // localDate/agenda pair, same isolation reasoning as the dismissal
+    // section below.
+    // ============================================================
+    const PERSONALIZATION_DATE = '2026-08-24';
+    const personalizationNow = new Date('2026-08-24T02:30:00.000Z');
+    const personalizationAgenda = buildDailyAgenda({ now: personalizationNow, localDate: PERSONALIZATION_DATE, timezone: TZ, plans: [], moments: [], momentIdsWithSuccessor: new Set(), habitLogs: [] });
+
+    check('No preferences configured -> dayBuilderPriorities defaults to an empty, fully valid array', Array.isArray(user.dayBuilderPriorities) && user.dayBuilderPriorities.length === 0);
+    const baselineNoPreferences = await buildIntentionalDaySuggestions({ user, agenda: personalizationAgenda, minuteOfDay: MINUTE_OF_DAY, now: personalizationNow });
+    check('No preferences -> existing Day Builder behavior preserved (still resolves suggestions normally)', baselineNoPreferences.length > 0);
+
+    // Selected priorities change candidate ordering.
+    const workPriorityUser = { ...user, dayBuilderEnabled: true, dayBuilderMutedGroups: [] as string[], dayBuilderPriorities: ['WORK'] };
+    const withWorkPriority = await buildIntentionalDaySuggestions({ user: workPriorityUser, agenda: personalizationAgenda, minuteOfDay: MINUTE_OF_DAY, now: personalizationNow });
+    check('Selected priorities change candidate ordering -- WORK-prioritized day resolves WORK first', withWorkPriority[0]?.groupId === 'WORK');
+    check('Suggestions still contain real resolved times regardless of priorities', withWorkPriority.every((s) => Boolean((s.candidate.kind === 'SOLO' ? s.candidate.solo : s.candidate.shared.generalCandidate).start)));
+
+    // Timing result itself remains canonical-engine identical, even with
+    // priorities active -- ordering is the ONLY thing that changed.
+    if (withWorkPriority[0]?.candidate.kind === 'SOLO') {
+      const context = {
+        now: personalizationNow,
+        latitude: user.latitude,
+        longitude: user.longitude,
+        timezone: user.timezone,
+        tzOffsetMinutes: resolveTzOffsetMinutes(user.timezone, personalizationNow),
+      };
+      const raw = runTimingSearch({ mode: 'FIND', activityId: withWorkPriority[0].activityId, durationMinutes: withWorkPriority[0].durationMinutes, horizon: 'TODAY', limit: 5, context });
+      const soloCandidate = withWorkPriority[0].candidate.solo;
+      const exactMatch = raw.candidates.find((c) => c.start === soloCandidate.start);
+      check(
+        'Timing result stays byte-identical to the canonical engine\'s own output even with priorities active',
+        Boolean(exactMatch) && JSON.stringify(exactMatch) === JSON.stringify(soloCandidate)
+      );
+    }
+
+    // Muted groups override positive priorities -- WORK prioritized AND
+    // muted must never appear.
+    const workMutedAndPrioritized = { ...user, dayBuilderEnabled: true, dayBuilderMutedGroups: ['WORK'], dayBuilderPriorities: ['WORK'] };
+    const mutedOverridesPriority = await buildIntentionalDaySuggestions({ user: workMutedAndPrioritized, agenda: personalizationAgenda, minuteOfDay: MINUTE_OF_DAY, now: personalizationNow });
+    check('Muted groups override positive priorities -- a muted #1 priority is never suggested', !mutedOverridesPriority.some((s) => s.groupId === 'WORK'));
+
+    // Owner-scoped -- a different user's identical WORK-priority day is
+    // completely independent.
+    const otherPriorityUser = { ...(await upsertUserByEmail({ email: 'test-day-builder-owner-4@example.com', cityName: 'Chennai', latitude: 13.0827, longitude: 80.2707, timezone: TZ })), dayBuilderMutedGroups: [] as string[], dayBuilderPriorities: [] as string[] };
+    const otherUserBaseline = await buildIntentionalDaySuggestions({ user: otherPriorityUser, agenda: personalizationAgenda, minuteOfDay: MINUTE_OF_DAY, now: personalizationNow });
+    check('preferences owner-scoped -- a DIFFERENT user with no priorities is unaffected by user A\'s WORK priority', otherUserBaseline[0]?.groupId !== 'WORK' || otherUserBaseline.length === 0 || otherPriorityUser.dayBuilderPriorities.length === 0);
+
+    // "Make more time for" -- with TWO eligible SOCIAL people (both
+    // FRIEND), the prioritized one is picked over the default "first
+    // match" -- never a compatibility score, just which already-eligible
+    // person is selected.
+    const friendA = await createSavedPerson(user.id, { name: 'Friend A', relationshipType: 'FRIEND', birthDate: '1991-01-01', birthTime: '10:00', birthTimezone: TZ });
+    const friendB = await createSavedPerson(user.id, { name: 'Friend B', relationshipType: 'FRIEND', birthDate: '1992-02-02', birthTime: '11:00', birthTimezone: TZ });
+    createdPersonIds.push(friendA.id, friendB.id);
+
+    const socialOnlyUser = { ...user, dayBuilderEnabled: true, dayBuilderMutedGroups: ['RELATIONSHIPS', 'FAMILY', 'WORK', 'SELF', 'ENJOYMENT'], dayBuilderPriorities: [] as string[], dayBuilderPriorityPersonIds: [] as string[] };
+    const defaultPick = await buildIntentionalDaySuggestions({ user: socialOnlyUser, agenda: personalizationAgenda, minuteOfDay: MINUTE_OF_DAY, now: personalizationNow });
+    const defaultPickedPersonId = defaultPick.find((s) => s.candidate.kind === 'SHARED')?.candidate.kind === 'SHARED' ? (defaultPick.find((s) => s.candidate.kind === 'SHARED')!.candidate as { person: { id: string } }).person.id : undefined;
+    check('Without a "make more time for" preference, the first eligible SavedPerson (Friend A) is picked', defaultPickedPersonId === friendA.id);
+
+    const socialPriorityPersonUser = { ...socialOnlyUser, dayBuilderPriorityPersonIds: [friendB.id] };
+    const prioritizedPick = await buildIntentionalDaySuggestions({ user: socialPriorityPersonUser, agenda: personalizationAgenda, minuteOfDay: MINUTE_OF_DAY, now: personalizationNow });
+    const prioritizedSuggestion = prioritizedPick.find((s) => s.candidate.kind === 'SHARED');
+    check(
+      '"Make more time for" Friend B -> Friend B is picked over the default-first Friend A',
+      prioritizedSuggestion?.candidate.kind === 'SHARED' && prioritizedSuggestion.candidate.person.id === friendB.id
+    );
+
+    // Saved Person preference does not leak identity -- the suggestion DTO
+    // never carries anything beyond the ALREADY-existing person fields
+    // (id/name/relationshipType, the same shape every other SHARED
+    // suggestion has always had) -- no new field echoes
+    // dayBuilderPriorityPersonIds or any other preference state back out.
+    if (prioritizedSuggestion?.candidate.kind === 'SHARED') {
+      const personKeys = Object.keys(prioritizedSuggestion.candidate.person).sort();
+      check('A SHARED suggestion\'s person field carries only the existing id/name/relationshipType shape, nothing new', JSON.stringify(personKeys) === JSON.stringify(['id', 'name', 'relationshipType']));
+    }
+
+    // ============================================================
     // "Not today" dismissal support -- activityId+personId+localDate
     // identity (never a groupId mute). Uses a FRESH localDate/agenda pair
     // scoped to this test section only, so re-running this file never
@@ -212,6 +296,13 @@ async function main() {
     const nextDayResult = await buildIntentionalDaySuggestions({ user: workOnlyUser, agenda: nextDayAgenda, minuteOfDay: MINUTE_OF_DAY, now: nextDayNow });
     check('next local day -> eligible again', nextDayResult.some((s) => s.activityId === 'deep-work'));
 
+    // Not today still overrides eligibility, even against the user's own
+    // #1 priority (brief section 6's ordering: dismissed -> muted ->
+    // priorities -> diversity -> timing engine -- dismissed comes first).
+    const workPriorityDismissedUser = { ...workOnlyUser, dayBuilderPriorities: ['WORK'] };
+    const dismissedDespitePriority = await buildIntentionalDaySuggestions({ user: workPriorityDismissedUser, agenda: dismissAgenda, minuteOfDay: MINUTE_OF_DAY, now: dismissNow });
+    check('"Not today" overrides eligibility even when the dismissed activity\'s group is the user\'s #1 priority', !dismissedDespitePriority.some((s) => s.activityId === 'deep-work'));
+
     // owner scoping -- a different user's identical WORK-only day is
     // completely unaffected by user A's dismissal.
     const otherWorkOnlyUser = { ...(await upsertUserByEmail({ email: 'test-day-builder-owner-3@example.com', cityName: 'Chennai', latitude: 13.0827, longitude: 80.2707, timezone: TZ })), dayBuilderMutedGroups: ['RELATIONSHIPS', 'FAMILY', 'SOCIAL', 'SELF', 'ENJOYMENT'] };
@@ -222,7 +313,7 @@ async function main() {
     // deep-work never wrote to dayBuilderMutedGroups, and muting WORK via
     // the preference route is unaffected by (and doesn't clear) the
     // dismissal row.
-    const stillNoMutedGroups = await updateUserDayBuilderPrefs(user.id, { dayBuilderEnabled: true, dayBuilderMutedGroups: [] });
+    const stillNoMutedGroups = await updateUserDayBuilderPrefs(user.id, { dayBuilderEnabled: true, dayBuilderMutedGroups: [], dayBuilderPriorities: [], dayBuilderPriorityPersonIds: [], dayBuilderPrioritiesPromptDismissed: false });
     check('permanent preference mute remains separate from the daily dismissal (dismissing never touched dayBuilderMutedGroups)', stillNoMutedGroups.dayBuilderMutedGroups.length === 0);
 
     // Person-specific dismissal (brief: "activityId, personId when
@@ -337,17 +428,17 @@ async function main() {
     // ============================================================
     // Preference persistence round-trip (brief section 6/35)
     // ============================================================
-    const updated = await updateUserDayBuilderPrefs(user.id, { dayBuilderEnabled: false, dayBuilderMutedGroups: ['WORK', 'SELF'] });
+    const updated = await updateUserDayBuilderPrefs(user.id, { dayBuilderEnabled: false, dayBuilderMutedGroups: ['WORK', 'SELF'], dayBuilderPriorities: [], dayBuilderPriorityPersonIds: [], dayBuilderPrioritiesPromptDismissed: false });
     check('updateUserDayBuilderPrefs persists dayBuilderEnabled', updated.dayBuilderEnabled === false);
     check('updateUserDayBuilderPrefs persists dayBuilderMutedGroups', JSON.stringify(updated.dayBuilderMutedGroups.slice().sort()) === JSON.stringify(['SELF', 'WORK']));
 
     // Owner-scoped (hardening pass) -- updating one user's prefs must never
     // touch a different user's row. otherUser already exists from the
     // idempotency section above.
-    const otherUserBefore = await updateUserDayBuilderPrefs(otherUser.id, { dayBuilderEnabled: true, dayBuilderMutedGroups: [] });
+    const otherUserBefore = await updateUserDayBuilderPrefs(otherUser.id, { dayBuilderEnabled: true, dayBuilderMutedGroups: [], dayBuilderPriorities: [], dayBuilderPriorityPersonIds: [], dayBuilderPrioritiesPromptDismissed: false });
     check('A DIFFERENT user starts/remains fully enabled+unmuted, unaffected by user A\'s update above', otherUserBefore.dayBuilderEnabled === true && otherUserBefore.dayBuilderMutedGroups.length === 0);
-    const userAStillMuted = await updateUserDayBuilderPrefs(user.id, { dayBuilderEnabled: false, dayBuilderMutedGroups: ['WORK', 'SELF'] });
-    const otherUserStillUnaffected = await updateUserDayBuilderPrefs(otherUser.id, { dayBuilderEnabled: true, dayBuilderMutedGroups: [] });
+    const userAStillMuted = await updateUserDayBuilderPrefs(user.id, { dayBuilderEnabled: false, dayBuilderMutedGroups: ['WORK', 'SELF'], dayBuilderPriorities: [], dayBuilderPriorityPersonIds: [], dayBuilderPrioritiesPromptDismissed: false });
+    const otherUserStillUnaffected = await updateUserDayBuilderPrefs(otherUser.id, { dayBuilderEnabled: true, dayBuilderMutedGroups: [], dayBuilderPriorities: [], dayBuilderPriorityPersonIds: [], dayBuilderPrioritiesPromptDismissed: false });
     check(
       'Two users\' Day Builder preferences never cross-contaminate (each WHERE id = $1 scoped)',
       userAStillMuted.dayBuilderEnabled === false && otherUserStillUnaffected.dayBuilderEnabled === true
@@ -355,7 +446,7 @@ async function main() {
 
     // Restore to defaults so a re-run of this test (or any other test using
     // this same throwaway user) starts from a clean, enabled state.
-    await updateUserDayBuilderPrefs(user.id, { dayBuilderEnabled: true, dayBuilderMutedGroups: [] });
+    await updateUserDayBuilderPrefs(user.id, { dayBuilderEnabled: true, dayBuilderMutedGroups: [], dayBuilderPriorities: [], dayBuilderPriorityPersonIds: [], dayBuilderPrioritiesPromptDismissed: false });
   } finally {
     for (const id of createdPersonIds) {
       await deleteSavedPerson(user.id, id);

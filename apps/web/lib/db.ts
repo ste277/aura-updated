@@ -27,6 +27,9 @@ export interface User {
   reminderLeadMinutes: number;
   dayBuilderEnabled: boolean;
   dayBuilderMutedGroups: string[];
+  dayBuilderPriorities: string[];
+  dayBuilderPriorityPersonIds: string[];
+  dayBuilderPrioritiesPromptDismissed: boolean;
 }
 
 export interface CustomCity {
@@ -829,18 +832,27 @@ export async function updateUserReminderPrefs(
   return result.rows[0];
 }
 
-/** Intentional Day Builder V1 (brief section 6/35) -- same minimal-surface
- * pattern as updateUserReminderPrefs above. mutedGroups is validated by the
- * caller (route) against the real DailyIntentionGroupId set before this is
- * ever reached -- this function trusts its input, same discipline as
- * updateUserReminderPrefs. */
+/** Intentional Day Builder V1 (brief section 6/35), extended by
+ * Personalization Foundation V1 -- same minimal-surface pattern as
+ * updateUserReminderPrefs above. mutedGroups/priorities are validated by
+ * the caller (route) against their real enum sets before this is ever
+ * reached -- this function trusts its input, same discipline as
+ * updateUserReminderPrefs. Always the full preference object (same
+ * "client sends full merged state" convention already established for
+ * enabled+mutedGroups) -- never a partial/COALESCE update. */
 export async function updateUserDayBuilderPrefs(
   userId: string,
-  prefs: { dayBuilderEnabled: boolean; dayBuilderMutedGroups: string[] }
+  prefs: {
+    dayBuilderEnabled: boolean;
+    dayBuilderMutedGroups: string[];
+    dayBuilderPriorities: string[];
+    dayBuilderPriorityPersonIds: string[];
+    dayBuilderPrioritiesPromptDismissed: boolean;
+  }
 ): Promise<User> {
   const result = await pool.query(
-    `UPDATE "User" SET "dayBuilderEnabled" = $2, "dayBuilderMutedGroups" = $3 WHERE id = $1 RETURNING *`,
-    [userId, prefs.dayBuilderEnabled, prefs.dayBuilderMutedGroups]
+    `UPDATE "User" SET "dayBuilderEnabled" = $2, "dayBuilderMutedGroups" = $3, "dayBuilderPriorities" = $4, "dayBuilderPriorityPersonIds" = $5, "dayBuilderPrioritiesPromptDismissed" = $6 WHERE id = $1 RETURNING *`,
+    [userId, prefs.dayBuilderEnabled, prefs.dayBuilderMutedGroups, prefs.dayBuilderPriorities, prefs.dayBuilderPriorityPersonIds, prefs.dayBuilderPrioritiesPromptDismissed]
   );
   return result.rows[0];
 }
