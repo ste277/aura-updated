@@ -1,7 +1,8 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getSessionFromRequest } from '../../../lib/session';
-import { createPlannedActivity, listPlannedActivities } from '../../../lib/db';
+import { createPlannedActivity, listPlannedActivities, getPlannedActivityForOwner, getGuestConversionRedemption, claimGuestConversionToken, fillGuestConversionRedemption } from '../../../lib/db';
 import { parseJsonObject } from '../../../lib/request';
+import { verifyGuestStateToken, hashGuestConversionToken } from '../../../lib/guestState';
 
 const MIN_PLAN_DURATION_MINUTES = 15;
 const MAX_PLAN_DURATION_MINUTES = 360;
@@ -71,6 +72,48 @@ export async function POST(req: NextRequest) {
   const body = await parseJsonObject(req);
   if (!body) return NextResponse.json({ error: 'A valid JSON request body is required.' }, { status: 400 });
 
+  // Recipient Conversion V1 Hardening (brief section 10) -- an OPTIONAL
+  // idempotency key. Only the guest-conversion save path ever sends this;
+  // every other caller (PlanWithAuraView, Muhurtham Finder, My Day) is
+  // completely unaffected. Re-verified here (not just shape-checked) so an
+  // arbitrary client string can never be used to manipulate the claim.
+  const guestConversionToken = typeof body?.guestConversionToken === 'string' ? body.guestConversionToken : undefined;
+  let guestConversionTokenHash: string | undefined;
+  if (guestConversionToken) {
+    if (!verifyGuestStateToken(guestConversionToken)) {
+      return NextResponse.json({ error: 'That guest session is no longer valid.' }, { status: 400 });
+    }
+    guestConversionTokenHash = hashGuestConversionToken(guestConversionToken);
+
+    const existing = await getGuestConversionRedemption(guestConversionTokenHash);
+    if (existing?.plannedActivityId) {
+      // Idempotent replay -- a double-click, a duplicate verification, a
+      // refresh after a successful save, etc. Return the ALREADY-created
+      // Plan rather than validating/creating a second one.
+      const existingPlan = await getPlannedActivityForOwner(session.userId, existing.plannedActivityId);
+      if (existingPlan) return NextResponse.json(existingPlan);
+      // The referenced Plan is somehow gone -- fall through and create a
+      // fresh one rather than returning a dead end.
+    } else if (!existing) {
+      const claimed = await claimGuestConversionToken(guestConversionTokenHash, session.userId);
+      if (!claimed) {
+        // Lost a genuine sub-second race to a concurrent request from the
+        // same user. Give it one chance to have finished, then just
+        // proceed -- occasionally allowing a duplicate under a rare race
+        // is better than ever silently dropping the user's save.
+        const raced = await getGuestConversionRedemption(guestConversionTokenHash);
+        if (raced?.plannedActivityId) {
+          const racedPlan = await getPlannedActivityForOwner(session.userId, raced.plannedActivityId);
+          if (racedPlan) return NextResponse.json(racedPlan);
+        }
+      }
+    }
+    // else: existing claim with no plannedActivityId yet -- an orphaned
+    // claim from a prior failed attempt (brief section 10's "smallest
+    // idempotency mechanism", not a distributed lock). Falls through and
+    // retries rather than blocking the user's save forever.
+  }
+
   const title = typeof body?.title === 'string' ? body.title.trim() : '';
   const plannedStartAt = parseDate(body?.plannedStartAt);
   const plannedEndAt = parseDate(body?.plannedEndAt);
@@ -124,6 +167,10 @@ export async function POST(req: NextRequest) {
     recommendation,
     calendarUrl,
   });
+
+  if (guestConversionTokenHash) {
+    await fillGuestConversionRedemption(guestConversionTokenHash, plan.id);
+  }
 
   return NextResponse.json(plan);
 }

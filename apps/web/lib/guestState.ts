@@ -1,3 +1,4 @@
+import { createHash } from 'crypto';
 import { sign, verify } from './auth';
 import type { PlanningHorizon } from '../../../packages/recommendation/src/dailyAssistant';
 import type { TimingTimePreference } from '../../../packages/recommendation/src/timingSearch';
@@ -47,4 +48,15 @@ export function createGuestStateToken(payload: Omit<GuestStateTokenPayload, 'exp
 
 export function verifyGuestStateToken(token: string): GuestStateTokenPayload | null {
   return verify<GuestStateTokenPayload>(token);
+}
+
+/** Recipient Conversion V1 Hardening (brief section 10) -- a stable,
+ * collision-resistant key for idempotency bookkeeping (see
+ * GuestConversionRedemption in lib/db.ts), derived from the token itself
+ * rather than storing the (already-signed, already-unguessable) token
+ * verbatim. A plain hash is sufficient here -- this isn't proving knowledge
+ * of a secret the way createSessionToken/createMagicLinkToken's HMAC is,
+ * just deriving a fixed-size DB key from an already-tamper-evident value. */
+export function hashGuestConversionToken(token: string): string {
+  return createHash('sha256').update(token).digest('base64url');
 }

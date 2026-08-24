@@ -37,6 +37,20 @@ type Phase =
   | 'SAVE_ERROR'
   | 'EXPIRED';
 
+/** Recipient Conversion V1 Hardening (brief section 8) -- an already-
+ * signed-in visitor still picks WHAT they're planning (the same lightweight
+ * picker a guest sees), but skips guest search/signup entirely: choosing an
+ * activity routes straight into the authenticated Plan flow with that
+ * activity prefilled (reusing PlanWithAuraView's existing initialActivity
+ * mechanism), preserving their acquisition intent instead of dropping them
+ * on a blank Plan tab.
+ */
+function routeExistingUserToPlan(activityTitle?: string) {
+  const params = new URLSearchParams({ tab: 'plan' });
+  if (activityTitle) params.set('activity', activityTitle);
+  window.location.href = `/?${params.toString()}`;
+}
+
 const POPULAR_ACTIVITY_IDS = ['date-night', 'dinner-date', 'coffee-tea', 'movie-night', 'road-trip', 'party'];
 
 const HORIZON_OPTIONS: Array<{ value: PlanningHorizon; label: string }> = [
@@ -92,6 +106,17 @@ export function GuestFindClient({ initialSource, initialRestoreToken }: { initia
   const [candidates, setCandidates] = useState<TimingCandidate[]>([]);
   const [selectedIndex, setSelectedIndex] = useState(0);
   const [showOthers, setShowOthers] = useState(false);
+  /** Recipient Conversion V1 Hardening (brief section 9) -- true when a
+   * restored search's exact original candidate is no longer available and
+   * we silently substituted the freshest top result instead. Surfaced as a
+   * notice on the result, never hidden. */
+  const [restoredTimeChanged, setRestoredTimeChanged] = useState(false);
+
+  /** Recipient Conversion V1 Hardening (brief section 10) -- the guest-
+   * state token to send back to POST /api/plans as an idempotency key.
+   * Either the restore token from the URL (magic-link-click path) or the
+   * one freshly minted in handleSaveClick (same-tab code-entry path). */
+  const [guestStateToken, setGuestStateToken] = useState<string | null>(null);
 
   const [email, setEmail] = useState('');
   const [signupStep, setSignupStep] = useState<'EMAIL' | 'CODE'>('EMAIL');
@@ -135,10 +160,11 @@ export function GuestFindClient({ initialSource, initialRestoreToken }: { initia
           await restoreGuestState(initialRestoreToken, authed);
           return;
         }
-        if (authed) {
-          window.location.href = '/?tab=plan';
-          return;
-        }
+        // Section 8: whether or not `authed`, there's nothing saved to
+        // hand back yet without a restore token -- show the activity
+        // picker either way. An authenticated visitor still skips guest
+        // search/signup entirely: see handleSelectActivity below, which
+        // routes them straight into Plan instead of continuing this wizard.
         setPhase('ACTIVITY');
       } catch {
         if (!cancelled) setPhase('ACTIVITY');
@@ -163,6 +189,11 @@ export function GuestFindClient({ initialSource, initialRestoreToken }: { initia
       setTimePreference(restored.timePreference);
       setDurationMinutes(restored.durationMinutes);
       setCityName(restored.cityName);
+      // Recipient Conversion V1 Hardening (brief section 10) -- this IS the
+      // idempotency key for the eventual save, whether the user got here
+      // authenticated already (magic-link click) or not yet (shouldn't
+      // happen for a restore, but stored regardless of `authed`).
+      setGuestStateToken(token);
 
       // Re-run the same GENERAL search rather than trusting a stale
       // candidate list -- the guest-state token only carries the search
@@ -183,6 +214,12 @@ export function GuestFindClient({ initialSource, initialRestoreToken }: { initia
       const matchIndex = searchRes.candidates.findIndex((c) => c.start === restored.candidateStart);
       setCandidates(searchRes.candidates);
       setSelectedIndex(matchIndex >= 0 ? matchIndex : 0);
+      // Section 9: never silently swap the suggested time without saying
+      // so -- a distinct notice on the result, not a different EmptyState
+      // (we DO still have a good result to show, just not the exact one
+      // they picked before).
+      setRestoredTimeChanged(matchIndex < 0);
+      trackEvent('GUEST_RESULT_RESTORED', { metadata: { activityId: restored.activityId, source: restored.source } });
       setPhase('RESULT');
     } catch {
       setPhase('EXPIRED');
@@ -206,10 +243,17 @@ export function GuestFindClient({ initialSource, initialRestoreToken }: { initia
   }
 
   const handleSelectActivity = (id: string) => {
+    const found = FULL_ACTIVITY_CATALOG.find((a) => a.id === id);
+    // Section 8: an already-signed-in visitor never enters guest search --
+    // straight into the authenticated Plan flow, activity prefilled, their
+    // acquisition intent preserved instead of thrown away.
+    if (isAuthenticated) {
+      routeExistingUserToPlan(found?.title ?? id);
+      return;
+    }
     setActivityId(id);
     setActivityQuery('');
     const def = getActivityDefinition(id);
-    const found = FULL_ACTIVITY_CATALOG.find((a) => a.id === id);
     setDurationMinutes(def?.experience.defaultDurationMinutes ?? def?.experience.suggestedDurations?.[0] ?? found?.defaultDurationMinutes ?? 60);
     setPhase('DETAILS');
   };
@@ -249,30 +293,6 @@ export function GuestFindClient({ initialSource, initialRestoreToken }: { initia
       return;
     }
 
-    // Mint the short-lived guest-state token BEFORE showing the signup step
-    // so it's ready to ride along on the magic link regardless of whether
-    // the guest ends up clicking the link or typing the code (brief
-    // section 10/24).
-    try {
-      await fetch('/api/guest/state', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          activityId,
-          horizon,
-          timePreference,
-          durationMinutes,
-          cityName,
-          candidateStart: selectedCandidate.start,
-          candidateEnd: selectedCandidate.end,
-          source: initialSource,
-        }),
-      });
-    } catch {
-      // Non-fatal: the code-entry path below never needs this token since
-      // it never leaves the page. Only the magic-link-click path would be
-      // degraded, and that's still a working (if less seamless) fallback.
-    }
     setPhase('SIGNUP');
   };
 
@@ -280,12 +300,28 @@ export function GuestFindClient({ initialSource, initialRestoreToken }: { initia
     if (!selectedCandidate || !activityId) return;
     setPhase('SAVING');
     try {
-      await saveUpcomingPlanFromCandidate(selectedCandidate, durationMinutes);
+      // Recipient Conversion V1 Hardening (brief section 10) -- the same
+      // token used to restore this candidate (or the one just minted for
+      // signup below) doubles as the idempotency key: a refresh, a double
+      // verification, or a re-visited magic link all resolve to the SAME
+      // token, so POST /api/plans returns the already-created Plan instead
+      // of creating a second one.
+      await saveUpcomingPlanFromCandidate(selectedCandidate, durationMinutes, undefined, guestStateToken ?? undefined);
       trackEvent('GUEST_RESULT_SAVED', { metadata: { activityId, source: initialSource } });
+      trackEvent('ONBOARDING_HANDOFF_VIEWED', { metadata: { activityId, source: initialSource } });
       setPhase('SAVED');
     } catch {
       setPhase('SAVE_ERROR');
     }
+  };
+
+  const handleSeeMyDay = () => {
+    trackEvent('MY_DAY_OPENED_FROM_HANDOFF', { metadata: { source: initialSource } });
+    // Section 4: enters the canonical My Day experience -- no guest-
+    // specific version. The Plan just created already exists in the DB by
+    // this point, so it appears in My Day's own agenda exactly like any
+    // other Plan (no special-casing needed to make that true).
+    window.location.href = '/?tab=home';
   };
 
   const handleSignupSubmit = async (e: React.FormEvent) => {
@@ -294,6 +330,11 @@ export function GuestFindClient({ initialSource, initialRestoreToken }: { initia
     setError('');
     trackEvent('GUEST_SIGNUP_STARTED', { metadata: { source: initialSource } });
     try {
+      // ONE token, minted once, reused for both the magic-link-click path
+      // (embedded in the email) and the same-tab code-entry path below
+      // (kept in state for performSave) -- previously two separate tokens
+      // were minted for the same flow, which would have defeated the
+      // idempotency key's whole purpose (brief section 10).
       const guestStateRes = await fetch('/api/guest/state', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -309,6 +350,7 @@ export function GuestFindClient({ initialSource, initialRestoreToken }: { initia
         }),
       });
       const guestStateData = await guestStateRes.json().catch(() => ({}));
+      if (guestStateData?.token) setGuestStateToken(guestStateData.token);
 
       const res = await fetch('/api/auth/request-link', {
         method: 'POST',
@@ -463,6 +505,11 @@ export function GuestFindClient({ initialSource, initialRestoreToken }: { initia
         {(phase === 'RESULT' || phase === 'SAVING' || phase === 'SAVE_ERROR') && selectedCandidate && activity && (
           <>
             <div style={{ ...typography.sectionEyebrow, textAlign: 'center' }}>Your best moment</div>
+            {restoredTimeChanged && (
+              <div style={{ marginTop: spacing.md, padding: spacing.md, borderRadius: radius.md, background: colors.cautionSoft, border: `1px solid ${colors.caution}40`, color: colors.caution, fontSize: 12, textAlign: 'center', lineHeight: 1.4 }}>
+                That suggested time has expired, but we found another good option.
+              </div>
+            )}
             <div style={{ background: colors.surfaceSubtle, border: `1px solid ${colors.borderSubtle}`, borderRadius: radius.lg, padding: spacing.xxl, marginTop: spacing.md, textAlign: 'center' }}>
               <div style={{ fontSize: 34 }}>{activity.icon}</div>
               <h2 style={{ ...typography.pageTitle, fontSize: 20, marginTop: spacing.sm }}>{activity.title}</h2>
@@ -553,14 +600,33 @@ export function GuestFindClient({ initialSource, initialRestoreToken }: { initia
           </>
         )}
 
-        {phase === 'SAVED' && activity && (
+        {/* Recipient Conversion V1 Hardening (brief section 3/5/6/18) -- a
+         * short handoff, not a wizard. Contextual ("your first plan is
+         * ready"), never "Welcome to Aura, let's get started" -- they
+         * already got value before signing up. One primary action (See my
+         * day), two lightweight secondary ones, no feature tour/carousel/
+         * forced personalization. */}
+        {phase === 'SAVED' && activity && selectedCandidate && (
           <div style={{ textAlign: 'center' }}>
-            <div style={{ fontSize: 34 }}>✓</div>
-            <h1 style={{ ...typography.pageTitle, fontSize: 20, marginTop: spacing.sm }}>Saved to your plan</h1>
-            <p style={{ ...typography.body, marginTop: spacing.sm }}>{activity.title} is on your calendar.</p>
-            <SecondaryButton onClick={() => { window.location.href = '/'; }} style={{ marginTop: spacing.xl }}>
-              Open Aura →
-            </SecondaryButton>
+            <div style={{ fontSize: 34, color: colors.positive }}>✓</div>
+            <h1 style={{ ...typography.pageTitle, fontSize: 20, marginTop: spacing.sm }}>Your {activity.title} is saved</h1>
+            <div style={{ ...typography.bodyStrong, marginTop: spacing.sm }}>
+              {formatCandidateWhen(selectedCandidate.start, selectedCandidate.end, CITY_OPTIONS.find((c) => c.cityName === cityName)?.timezone ?? 'UTC')}
+            </div>
+            <p style={{ ...typography.body, marginTop: spacing.lg }}>Aura can now help you shape the rest of your day around the things that matter.</p>
+            <PrimaryButton onClick={handleSeeMyDay} style={{ width: '100%', marginTop: spacing.xl }}>
+              See my day →
+            </PrimaryButton>
+            <div style={{ display: 'flex', justifyContent: 'center', gap: spacing.xl, marginTop: spacing.lg }}>
+              {/* Brief section 6: "prefer routing into existing [My Day]
+               * discovery flows rather than creating new ones here" -- My
+               * Day's own Daily Story card already has this exact prompt
+               * ("What would make today feel well spent?"), so this reuses
+               * that instead of looping back into /find's own picker now
+               * that the user is authenticated. */}
+              <TextButton onClick={() => { window.location.href = '/?tab=home'; }} color={colors.textMuted}>Plan something else</TextButton>
+              <TextButton onClick={() => { window.location.href = '/?tab=ask'; }} color={colors.textMuted}>Ask Aura</TextButton>
+            </div>
           </div>
         )}
       </div>

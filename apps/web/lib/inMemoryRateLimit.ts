@@ -8,11 +8,24 @@
  * narrow-scope endpoint would be substantial new infrastructure the brief
  * explicitly permits skipping ("rate-limit if current infrastructure
  * supports it"). This in-memory version is the smallest thing that actually
- * narrows the attack surface for a single server instance; it does not
- * survive a restart or share state across multiple instances -- a real
- * limitation, not hidden here, and worth a DB-backed limiter (reusing the
- * AuthCode table's pattern) if this endpoint ever needs to survive scaling
- * out horizontally.
+ * narrows the attack surface for a single server instance.
+ *
+ * KNOWN PRODUCTION DEBT (Recipient Conversion V1 Hardening, brief section
+ * 12 -- documented, deliberately NOT fixed in this PR, which is scoped to
+ * hardening the conversion flow itself, not building shared infra):
+ *   - State is process-local: does not survive a restart, and is NOT
+ *     shared across multiple server instances/replicas. In a horizontally
+ *     scaled deployment, the *effective* limit is `maxRequests` per
+ *     instance, not globally -- an attacker distributing requests across
+ *     instances (or simply hitting a load balancer that round-robins) can
+ *     exceed the intended limit by roughly the instance count.
+ *   - No persistence means a deploy/restart silently resets everyone's
+ *     window to zero.
+ *   - If/when this needs to survive horizontal scaling, the fix is a
+ *     DB-backed counter reusing lib/db.ts's countRecentAuthRequests
+ *     pattern (same idea: a row per request, COUNT() over a time window),
+ *     or a shared cache (Redis) if one is ever introduced for other
+ *     reasons -- do not introduce Redis solely for this.
  */
 
 const buckets = new Map<string, number[]>();

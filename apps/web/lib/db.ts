@@ -652,6 +652,42 @@ export async function getPlannedActivityForOwner(userId: string, planId: string)
   return result.rows[0] ?? null;
 }
 
+// ── Guest conversion idempotency (Recipient Conversion V1 Hardening, brief
+// section 10) ──────────────────────────────────────────────────────────
+// See migration 0024's own doc comment for the "claim, then fill" design.
+
+export interface GuestConversionRedemption {
+  tokenHash: string;
+  userId: string;
+  plannedActivityId: string | null;
+  createdAt: Date;
+}
+
+export async function getGuestConversionRedemption(tokenHash: string): Promise<GuestConversionRedemption | null> {
+  const result = await pool.query(`SELECT * FROM "GuestConversionRedemption" WHERE "tokenHash" = $1`, [tokenHash]);
+  return result.rows[0] ?? null;
+}
+
+/** Atomically claims this token hash. Returns true if THIS call won the
+ * claim (caller should proceed to create the Plan, then call
+ * fillGuestConversionRedemption); false if another request already holds
+ * an unfilled claim (a genuine, sub-second concurrent race -- the caller
+ * should re-check getGuestConversionRedemption rather than create a second
+ * Plan). A row that already exists WITH a filled plannedActivityId is
+ * handled by the caller before this is ever reached (that's the normal
+ * "already saved, replay the existing Plan" idempotent-retry path). */
+export async function claimGuestConversionToken(tokenHash: string, userId: string): Promise<boolean> {
+  const result = await pool.query(
+    `INSERT INTO "GuestConversionRedemption" ("tokenHash", "userId") VALUES ($1, $2) ON CONFLICT ("tokenHash") DO NOTHING RETURNING *`,
+    [tokenHash, userId]
+  );
+  return result.rows.length > 0;
+}
+
+export async function fillGuestConversionRedemption(tokenHash: string, plannedActivityId: string): Promise<void> {
+  await pool.query(`UPDATE "GuestConversionRedemption" SET "plannedActivityId" = $1 WHERE "tokenHash" = $2`, [plannedActivityId, tokenHash]);
+}
+
 /** Aura Reminders V1 (brief section 25): a BOUNDED query, not full history
  * -- only plans whose plannedStartAt could plausibly produce an active
  * reminder right now (see lib/auraReminders.ts's REMINDER_GRACE_PERIOD_MINUTES/

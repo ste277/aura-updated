@@ -49,7 +49,10 @@ export type ProductEventName =
   | 'MY_DAY_INTENTION_OPENED'
   | 'MY_DAY_INTENTION_SELECTED'
   | 'MY_DAY_ITEM_OPENED'
-  | 'MY_DAY_ADD_STARTED';
+  | 'MY_DAY_ADD_STARTED'
+  | 'GUEST_RESULT_RESTORED'
+  | 'ONBOARDING_HANDOFF_VIEWED'
+  | 'MY_DAY_OPENED_FROM_HANDOFF';
 
 export const PRODUCT_EVENT_NAMES: ProductEventName[] = [
   'AURA_HOME_VIEWED',
@@ -86,6 +89,9 @@ export const PRODUCT_EVENT_NAMES: ProductEventName[] = [
   'MY_DAY_INTENTION_SELECTED',
   'MY_DAY_ITEM_OPENED',
   'MY_DAY_ADD_STARTED',
+  'GUEST_RESULT_RESTORED',
+  'ONBOARDING_HANDOFF_VIEWED',
+  'MY_DAY_OPENED_FROM_HANDOFF',
 ];
 
 export function isProductEventName(value: string): value is ProductEventName {
@@ -157,6 +163,16 @@ export const CLIENT_TRACKED_EVENTS: ReadonlySet<ProductEventName> = new Set<Prod
   'MY_DAY_INTENTION_SELECTED',
   'MY_DAY_ITEM_OPENED',
   'MY_DAY_ADD_STARTED',
+  // Recipient Conversion V1 Hardening (brief section 16) -- three genuinely
+  // new funnel steps with no existing equivalent (MOMENT_OPENED/
+  // CONVERSION_CLICKED/GUEST_SEARCH_STARTED/GUEST_RESULT_VIEWED/
+  // SIGNUP_STARTED/SIGNUP_COMPLETED already exist under other names --
+  // reused as-is below in GuestFindClient.tsx, not duplicated here. brief's
+  // FIRST_PLAN_SAVED is the same moment as the existing GUEST_RESULT_SAVED
+  // above, also reused rather than duplicated).
+  'GUEST_RESULT_RESTORED',
+  'ONBOARDING_HANDOFF_VIEWED',
+  'MY_DAY_OPENED_FROM_HANDOFF',
 ]);
 
 // Fields that must NEVER appear in ProductEvent.metadata, under any event,
@@ -418,6 +434,19 @@ const EVENT_METADATA_SCHEMAS: Record<ProductEventName, Record<string, FieldSchem
     intentionCategory: myDayIntentionCategoryField,
     activityId: activityIdField,
     dayPhase: myDayDayPhaseField,
+  },
+  // Recipient Conversion V1 Hardening (brief section 16) -- activityId/
+  // source only, same restrained shape as the other GUEST_* events.
+  GUEST_RESULT_RESTORED: {
+    activityId: activityIdField,
+    source: guestSourceField,
+  },
+  ONBOARDING_HANDOFF_VIEWED: {
+    activityId: activityIdField,
+    source: guestSourceField,
+  },
+  MY_DAY_OPENED_FROM_HANDOFF: {
+    source: guestSourceField,
   },
 };
 

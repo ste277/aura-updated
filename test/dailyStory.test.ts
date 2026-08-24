@@ -66,6 +66,25 @@ function emptyAgenda(now: Date): DailyAgenda {
   check('One plan -> narrative mentions the plan title', story.narrative.includes('Deep Work'));
 }
 {
+  // Recipient Conversion V1 Hardening (brief section 15) -- a newly-
+  // converted user whose only Plan is an evening one (e.g. Date Night
+  // saved via guest conversion) still gets a useful, non-empty My Day.
+  const now = new Date('2026-08-24T02:30:00.000Z'); // 8:00 AM IST
+  const agenda = buildDailyAgenda({
+    now, localDate: LOCAL_DATE, timezone: TZ, momentIdsWithSuccessor: new Set(), habitLogs: [], moments: [],
+    plans: [{
+      id: 'p1', userId: 'u', title: 'Date Night', activityType: 'date-night', icon: '❤️', status: 'UPCOMING',
+      plannedStartAt: new Date('2026-08-24T14:00:00.000Z'), plannedEndAt: new Date('2026-08-24T16:00:00.000Z'), // 7:30-9:30 PM IST
+      durationMinutes: 120, windowType: 'NEUTRAL', windowLabel: 'Neutral Flow', matchLabel: 'Good Match', score: 70,
+      recommendation: null, calendarUrl: null, loggedAt: null, habitLogId: null, createdAt: now, updatedAt: now,
+    }],
+  });
+  const story = buildDailyStory(agenda, 8 * 60);
+  check('Single evening Plan -> narrative acknowledges it warmly', story.narrative.includes('Date Night') && story.narrative.toLowerCase().includes('look forward'));
+  check('Single evening Plan -> narrative notes room earlier in the day', story.narrative.toLowerCase().includes('room earlier'));
+  check('Single evening Plan -> still offers the well-spent prompt (morning/afternoon are open)', story.primaryPrompt?.question === 'What would make today feel well spent?');
+}
+{
   // Midday after completion
   const now = new Date('2026-08-24T07:00:00.000Z'); // 12:30 PM IST
   const agenda = buildDailyAgenda({

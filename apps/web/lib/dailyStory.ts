@@ -95,6 +95,19 @@ function buildMorningStory(agenda: DailyAgenda): { headline: string; narrative: 
   }
   if (upcoming.length === 1) {
     const first = upcoming[0];
+    // Recipient Conversion V1 Hardening (brief section 15) -- a
+    // newly-converted user with exactly one saved Plan (typically an
+    // evening one, e.g. a Date Night saved via guest conversion) should
+    // still see My Day as useful, not empty: acknowledge the plan warmly
+    // and point out the rest of the day is still theirs.
+    if (new Date(first.startAt).getHours() >= 17) {
+      return {
+        headline: 'Good morning',
+        narrative: `Your evening has something to look forward to. ${first.title} at ${formatClock(first.startAt, agenda.timezone)}. You still have room earlier in the day.`,
+        primaryPrompt: WELL_SPENT_PROMPT,
+        suggestedIntentions: [],
+      };
+    }
     return {
       headline: 'Good morning',
       narrative: `You have one thing planned today. ${first.title} at ${formatClock(first.startAt, agenda.timezone)}.`,

@@ -100,7 +100,16 @@ export default function DashboardPage() {
   const [assistantInsight, setAssistantInsight] = useState<any>(null);
   const [todayReflection, setTodayReflection] = useState<DailyReflectionState | null>(null);
   const [plannedActivities, setPlannedActivities] = useState<PlannedActivityState[]>([]);
-  const [planPrefill, setPlanPrefill] = useState<{ activity: string; key: number } | null>(null);
+  // Recipient Conversion V1 Hardening (brief section 8) -- an existing
+  // user routed here from /find with `?activity=` (their acquisition
+  // intent, e.g. "Date Night") lands directly in Plan with it prefilled,
+  // via the exact same mechanism handleOpenPlan() already uses for every
+  // other "jump into Plan with this activity" entry point in the app.
+  const [planPrefill, setPlanPrefill] = useState<{ activity: string; key: number } | null>(() => {
+    if (typeof window === 'undefined') return null;
+    const requested = new URLSearchParams(window.location.search).get('activity');
+    return requested?.trim() ? { activity: requested.trim(), key: Date.now() } : null;
+  });
   const [mounted, setMounted] = useState(false);
   const [auraUpdates, setAuraUpdates] = useState<AuraUpdatesResponse | null>(null);
   const [myDay, setMyDay] = useState<{ agenda: DailyAgenda; story: DailyStory } | null>(null);

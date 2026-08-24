@@ -5,7 +5,7 @@
  * for the live end-to-end browser + API walkthrough this doesn't repeat.
  */
 import { buildGuestTimingSearchRequest } from '../apps/web/lib/guestTimingSearchRequest';
-import { createGuestStateToken, verifyGuestStateToken } from '../apps/web/lib/guestState';
+import { createGuestStateToken, verifyGuestStateToken, hashGuestConversionToken } from '../apps/web/lib/guestState';
 import { sign } from '../apps/web/lib/auth';
 import { DailyAssistantContext } from '../packages/recommendation/src/dailyAssistant';
 
@@ -104,6 +104,25 @@ const context: DailyAssistantContext = {
     exp: Date.now() - 1000,
   });
   check('An expired guest-state token is rejected', verifyGuestStateToken(expiredToken) === null);
+}
+
+// ============================================================
+// Recipient Conversion V1 Hardening -- hashGuestConversionToken
+// (brief section 10/11)
+// ============================================================
+{
+  const token = createGuestStateToken({
+    activityId: 'date-night', horizon: 'WEEKEND', timePreference: 'EVENING', durationMinutes: 90,
+    cityName: 'Chennai', candidateStart: '2026-08-29T11:30:00.000Z', candidateEnd: '2026-08-29T13:00:00.000Z', source: 'AURA_MOMENT',
+  });
+  check('Hashing the same token twice is stable', hashGuestConversionToken(token) === hashGuestConversionToken(token));
+
+  const otherToken = createGuestStateToken({
+    activityId: 'coffee-tea', horizon: 'TODAY', timePreference: 'ANY', durationMinutes: 45,
+    cityName: 'Chennai', candidateStart: '2026-08-29T11:30:00.000Z', candidateEnd: '2026-08-29T12:15:00.000Z', source: 'DIRECT',
+  });
+  check('Two distinct tokens hash to distinct values', hashGuestConversionToken(token) !== hashGuestConversionToken(otherToken));
+  check('The hash never contains the raw token substring (not just re-encoded)', !hashGuestConversionToken(token).includes(token.slice(0, 20)));
 }
 
 if (!allPassed) {

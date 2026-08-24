@@ -427,7 +427,15 @@ export function planPayloadFromCandidate(candidate: TimingCandidate, durationMin
  * want the saved plan reflected immediately in their own UI should refetch
  * (e.g. via the onPlanLogged callback already threaded through page.tsx).
  */
-export async function saveUpcomingPlanFromCandidate(candidate: TimingCandidate, durationMinutes: number, sharedWithName?: string): Promise<UpcomingPlan> {
+/**
+ * `guestConversionToken` (Recipient Conversion V1 Hardening, brief section
+ * 10) is optional and only ever passed by the guest-conversion save path
+ * (apps/web/app/find/GuestFindClient.tsx) -- every other caller of this
+ * function is unaffected. POST /api/plans uses it purely as an idempotency
+ * key (see that route's own doc comment); it never changes what gets
+ * created, only whether a retry creates a SECOND Plan.
+ */
+export async function saveUpcomingPlanFromCandidate(candidate: TimingCandidate, durationMinutes: number, sharedWithName?: string, guestConversionToken?: string): Promise<UpcomingPlan> {
   const plan = planPayloadFromCandidate(candidate, durationMinutes, sharedWithName);
   const res = await fetch('/api/plans', {
     method: 'POST',
@@ -445,6 +453,7 @@ export async function saveUpcomingPlanFromCandidate(candidate: TimingCandidate, 
       score: plan.score,
       recommendation: plan.details,
       calendarUrl: plan.googleCalendarUrl,
+      ...(guestConversionToken ? { guestConversionToken } : {}),
     }),
   });
   if (!res.ok) throw new Error('Unable to save plan.');
