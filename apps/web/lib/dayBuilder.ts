@@ -289,3 +289,29 @@ export interface IntentionalDaySuggestion {
   reason: string;
   candidate: IntentionalDayCandidate;
 }
+
+/**
+ * Brief section 24 -- pure selection logic for the "Another idea" swap
+ * (used by DayBuilderCard.tsx). Given the currently-visible suggestion ids
+ * and the full already-resolved set (visible + reserve, exactly what
+ * GET /api/my-day/suggestions returned in one response), returns the NEW
+ * visible id list with `outgoingId` replaced by the next not-yet-shown
+ * suggestion. A pure array recombination -- no fetch, no timing search, no
+ * re-scoring: by construction this function cannot perform I/O (its
+ * signature is array-in, array-out), so the replacement can only ever be a
+ * suggestion the canonical engines already resolved a real time for in
+ * that same original response. Never introduces a duplicate activityId
+ * (selectIntentionCandidates already guarantees every suggestion in
+ * `allSuggestions` has a globally-unique activityId, so any two entries in
+ * its output are automatically distinct too). Returns the list with
+ * `outgoingId` simply removed (one fewer visible suggestion) when no
+ * reserve candidate remains -- the caller's own "Another idea" control
+ * disappearing is a direct, reactive consequence of an empty reserve after
+ * this call, not a separate branch to get wrong.
+ */
+export function swapSuggestion(visibleIds: string[], allSuggestions: IntentionalDaySuggestion[], outgoingId: string): string[] {
+  const reserve = allSuggestions.filter((s) => !visibleIds.includes(s.id));
+  const next = reserve[0];
+  const withoutOutgoing = visibleIds.filter((id) => id !== outgoingId);
+  return next ? [...withoutOutgoing, next.id] : withoutOutgoing;
+}

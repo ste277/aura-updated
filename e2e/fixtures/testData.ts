@@ -129,6 +129,12 @@ export async function listPlans(page: Page): Promise<any[]> {
   return res.json();
 }
 
+export async function listAuraMoments(page: Page): Promise<any[]> {
+  const res = await page.request.get('/api/aura-moments');
+  if (!res.ok()) throw new Error(`GET /api/aura-moments failed: ${res.status()} ${await res.text()}`);
+  return res.json();
+}
+
 export async function listHabitLogs(page: Page): Promise<any[]> {
   const res = await page.request.get('/api/habit-logs');
   if (!res.ok()) throw new Error(`GET /api/habit-logs failed: ${res.status()} ${await res.text()}`);

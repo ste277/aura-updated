@@ -1,7 +1,7 @@
 'use client';
 
 import React, { useEffect, useState } from 'react';
-import type { IntentionalDaySuggestion } from '../lib/dayBuilder';
+import { swapSuggestion, type IntentionalDaySuggestion } from '../lib/dayBuilder';
 import type { DailyStoryPhase } from '../lib/dailyStory';
 import { RESULT_LABEL_TEXT, EVERYDAY_SHARED_RATING_TEXT, saveUpcomingPlanFromCandidate } from './PlanWithAuraView';
 import { trackEvent } from '../lib/trackEvent';
@@ -94,11 +94,10 @@ export function DayBuilderCard({
 
   const swap = (suggestion: IntentionalDaySuggestion) => {
     trackEvent('DAY_BUILDER_ANOTHER_IDEA', { metadata: { intentionCategory: suggestion.groupId, dayPhase } });
-    const next = reserve[0];
-    setVisibleIds((prev) => {
-      const withoutCurrent = prev.filter((id) => id !== suggestion.id);
-      return next ? [...withoutCurrent, next.id] : withoutCurrent;
-    });
+    // Pure array recombination over the ALREADY-fetched suggestion set --
+    // see swapSuggestion's own doc comment for why this can never trigger
+    // a new search/scoring call or create a Plan/Moment.
+    setVisibleIds((prev) => swapSuggestion(prev, suggestions, suggestion.id));
   };
 
   const generalCandidate = (suggestion: IntentionalDaySuggestion) =>
@@ -176,7 +175,12 @@ export function DayBuilderCard({
           const isShared = sharedCandidate !== null;
 
           return (
-            <div key={suggestion.id} style={{ border: `1px solid ${colors.borderSubtle}`, borderRadius: radius.md, padding: spacing.lg }}>
+            <div
+              key={suggestion.id}
+              data-testid="day-builder-suggestion"
+              data-activity-id={suggestion.activityId}
+              style={{ border: `1px solid ${colors.borderSubtle}`, borderRadius: radius.md, padding: spacing.lg }}
+            >
               <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: spacing.sm }}>
                 <div style={{ ...typography.bodyStrong }}>
                   {suggestion.icon} {suggestion.label}

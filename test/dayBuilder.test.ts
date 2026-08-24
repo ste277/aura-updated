@@ -3,11 +3,14 @@ import {
   deriveAgendaOpenings,
   candidateFitsOpenings,
   selectIntentionCandidates,
+  swapSuggestion,
   PEOPLE_GROUP_IDS,
+  IntentionalDaySuggestion,
 } from '../apps/web/lib/dayBuilder';
 import { buildDailyAgenda, DailyAgenda } from '../apps/web/lib/dailyAgenda';
 import type { DailyIntentionGroupId } from '../apps/web/lib/dailyIntentions';
 import type { PlannedActivity } from '../apps/web/lib/db';
+import type { TimingCandidate } from '../packages/recommendation/src/timingSearch';
 
 /**
  * Intentional Day Builder V1 -- pure-domain tests for dayBuilder.ts (brief
@@ -235,6 +238,97 @@ function agendaWithPlans(plans: PlannedActivity[], now: Date): DailyAgenda {
   );
   const profile = buildDayProfile(agenda, 8 * 60);
   check('No real openings left today -> zero candidates', selectIntentionCandidates(profile, new Set(), 5).length === 0);
+}
+
+// ============================================================
+// swapSuggestion -- "Another idea" reserve-pool swap (brief section 24,
+// hardening pass). Pure array recombination -- no fetch, no timing
+// search, no scoring: swapSuggestion's own signature (array in, array
+// out, no async, no imports of anything I/O-capable) makes it structurally
+// impossible for a call to this function to create a Plan/Moment or invoke
+// a new search/scoring algorithm. These tests cover its actual selection
+// behavior; the "cannot perform I/O" half of the guarantee is a property
+// of the function's own definition (see dayBuilder.ts), reinforced by an
+// E2E check in dayBuilderJourney.spec.ts that browsing produces zero new
+// Plans/Moments end to end.
+// ============================================================
+function fakeSolo(start: string, activityId: string): TimingCandidate {
+  return {
+    start,
+    end: new Date(new Date(start).getTime() + 30 * 60000).toISOString(),
+    score: 7,
+    label: 'GOOD',
+    muhurtaScore: 0,
+    reasons: [],
+    metadata: { windowType: 'NEUTRAL', windowLabel: 'Neutral Flow', activityType: activityId, dateLabel: 'Mon, Aug 24' },
+  };
+}
+
+function fakeSuggestion(id: string, groupId: DailyIntentionGroupId, activityId: string): IntentionalDaySuggestion {
+  return {
+    id,
+    groupId,
+    activityId,
+    label: activityId,
+    icon: '✨',
+    durationMinutes: 30,
+    reason: 'test reason',
+    candidate: { kind: 'SOLO', solo: fakeSolo('2026-08-24T10:00:00.000Z', activityId) },
+  };
+}
+
+{
+  const all: IntentionalDaySuggestion[] = [
+    fakeSuggestion('WORK:deep-work', 'WORK', 'deep-work'),
+    fakeSuggestion('SELF:workout', 'SELF', 'workout'),
+    fakeSuggestion('ENJOYMENT:movie-night', 'ENJOYMENT', 'movie-night'),
+    fakeSuggestion('RELATIONSHIPS:coffee-tea', 'RELATIONSHIPS', 'coffee-tea'), // reserve
+    fakeSuggestion('SOCIAL:catch-up', 'SOCIAL', 'catch-up'), // reserve
+  ];
+  const initialVisible = all.slice(0, 3).map((s) => s.id);
+
+  check(
+    'Initial suggestion set has no duplicate activityId (nothing to accidentally re-show)',
+    new Set(all.map((s) => s.activityId)).size === all.length
+  );
+
+  const afterSwap = swapSuggestion(initialVisible, all, 'WORK:deep-work');
+  check('Swap replaces a suggestion -- visible count stays the same', afterSwap.length === initialVisible.length);
+  check('Swap removes the outgoing suggestion', !afterSwap.includes('WORK:deep-work'));
+  check(
+    'Swap\'s replacement comes from the already-resolved reserve pool (was NOT visible before)',
+    afterSwap.some((id) => !initialVisible.includes(id) && all.some((s) => s.id === id))
+  );
+  check('Swap never introduces an id absent from the original resolved set', afterSwap.every((id) => all.some((s) => s.id === id)));
+
+  const afterSwapActivityIds = afterSwap.map((id) => all.find((s) => s.id === id)!.activityId);
+  check('Replacement does not duplicate another still-visible suggestion (no repeated activityId)', new Set(afterSwapActivityIds).size === afterSwapActivityIds.length);
+
+  // Swap a second time -- the reserve pool is recomputed fresh each call
+  // as "everything not currently visible" (a rotating pool, not a
+  // one-time-use queue), so as long as total > visible.length there is
+  // always a next candidate -- including, potentially, a suggestion
+  // dismissed by an EARLIER swap of a different card. That's fine: it's
+  // still a real, already-resolved suggestion, and the pool math still
+  // guarantees it's never shown twice AT ONCE (see the dedup check below).
+  const afterSecondSwap = swapSuggestion(afterSwap, all, afterSwap.find((id) => !initialVisible.includes(id))!);
+  check('A second swap still succeeds while total exceeds the visible count', afterSecondSwap.length === 3);
+  const secondActivityIds = afterSecondSwap.map((id) => all.find((s) => s.id === id)!.activityId);
+  check('After a second swap, still no duplicate activityId among visible suggestions', new Set(secondActivityIds).size === secondActivityIds.length);
+}
+{
+  // Swapping when there is genuinely no reserve at all (3 total resolved,
+  // all 3 visible) -- the very first swap already has nothing to replace
+  // with, matching the component's own `reserve.length > 0` gate that
+  // hides the "Another idea" control in this exact situation.
+  const all: IntentionalDaySuggestion[] = [
+    fakeSuggestion('WORK:deep-work', 'WORK', 'deep-work'),
+    fakeSuggestion('SELF:workout', 'SELF', 'workout'),
+    fakeSuggestion('ENJOYMENT:movie-night', 'ENJOYMENT', 'movie-night'),
+  ];
+  const visible = all.map((s) => s.id);
+  const result = swapSuggestion(visible, all, 'SELF:workout');
+  check('No reserve candidates -> swap just removes the outgoing suggestion, nothing added', result.length === 2 && !result.includes('SELF:workout'));
 }
 
 if (!allPassed) {

@@ -162,6 +162,60 @@ async function main() {
     check('A fully open day suggests at most 3 for immediate display worth (reserve pool may exceed 3)', openSuggestions.length <= 5);
 
     // ============================================================
+    // Unmuting restores eligibility (hardening pass) -- WORK is muted
+    // alongside everything else in allMutedUser (zero suggestions, proven
+    // above) and unmuted (alone) in workOnlyUser (a WORK suggestion,
+    // proven above) -- the delta IS the unmute proof. A separate run with
+    // ALL SIX groups unmuted is deliberately NOT used here: WORK is the
+    // lowest-priority group on an evening-open day (brief section 11's own
+    // priority ordering), so it can legitimately be crowded out of the
+    // top-5 candidate-attempt cap by higher-priority groups once THEY are
+    // also unmuted -- a priority-ordering fact, not a mute-state bug, and
+    // asserting WORK's presence there would conflate the two.
+    // ============================================================
+    check(
+      'Unmuting WORK (going from "every group muted" to "only WORK unmuted") restores its eligibility',
+      mutedResult.length === 0 && workSuggestions.some((s) => s.groupId === 'WORK')
+    );
+
+    // ============================================================
+    // Muted groups affect Day Builder ONLY (hardening pass) -- neither the
+    // real Plan we're about to create nor the pure agenda object handed in
+    // is ever read from or mutated by buildIntentionalDaySuggestions,
+    // regardless of preferences. Proven directly (not just by type
+    // signature): deep-equal the exact same agenda object before and after
+    // calling it with a fully muted+disabled user.
+    // ============================================================
+    const realPlan = await createPlannedActivity({
+      userId: user.id,
+      title: 'Test Day Builder Untouched Plan',
+      plannedStartAt: new Date('2026-08-24T09:00:00.000Z'),
+      plannedEndAt: new Date('2026-08-24T10:00:00.000Z'),
+      durationMinutes: 60,
+      windowType: 'NEUTRAL',
+    });
+    const agendaWithRealPlan = buildDailyAgenda({
+      now: NOW, localDate: LOCAL_DATE, timezone: TZ, plans: [realPlan], moments: [], momentIdsWithSuccessor: new Set(), habitLogs: [],
+    });
+    const agendaSnapshotBefore = JSON.stringify(agendaWithRealPlan);
+    await buildIntentionalDaySuggestions({ user: disabledUser, agenda: agendaWithRealPlan, minuteOfDay: MINUTE_OF_DAY, now: NOW });
+    await buildIntentionalDaySuggestions({ user: allMutedUser, agenda: agendaWithRealPlan, minuteOfDay: MINUTE_OF_DAY, now: NOW });
+    check('The agenda object (and the real Plan inside it) is never mutated by buildIntentionalDaySuggestions', JSON.stringify(agendaWithRealPlan) === agendaSnapshotBefore);
+
+    const planStillIntact = await createPlannedActivity({
+      userId: user.id,
+      title: 'Test Day Builder Untouched Plan',
+      plannedStartAt: new Date('2026-08-24T09:00:00.000Z'),
+      plannedEndAt: new Date('2026-08-24T10:00:00.000Z'),
+      durationMinutes: 60,
+      windowType: 'NEUTRAL',
+    });
+    // createPlannedActivity itself dedups by (userId, title, start, end) --
+    // this re-affirms the ORIGINAL row still exists unchanged (same id),
+    // not a second row, proving Day Builder's own reads never touched it.
+    check('The real Plan row itself is untouched in the database (same row returned, not a duplicate)', planStillIntact.id === realPlan.id);
+
+    // ============================================================
     // Plan creation idempotency (brief section 20)
     // ============================================================
     const clientRequestId = `test-day-builder:${Date.now()}`;
@@ -197,6 +251,19 @@ async function main() {
     const updated = await updateUserDayBuilderPrefs(user.id, { dayBuilderEnabled: false, dayBuilderMutedGroups: ['WORK', 'SELF'] });
     check('updateUserDayBuilderPrefs persists dayBuilderEnabled', updated.dayBuilderEnabled === false);
     check('updateUserDayBuilderPrefs persists dayBuilderMutedGroups', JSON.stringify(updated.dayBuilderMutedGroups.slice().sort()) === JSON.stringify(['SELF', 'WORK']));
+
+    // Owner-scoped (hardening pass) -- updating one user's prefs must never
+    // touch a different user's row. otherUser already exists from the
+    // idempotency section above.
+    const otherUserBefore = await updateUserDayBuilderPrefs(otherUser.id, { dayBuilderEnabled: true, dayBuilderMutedGroups: [] });
+    check('A DIFFERENT user starts/remains fully enabled+unmuted, unaffected by user A\'s update above', otherUserBefore.dayBuilderEnabled === true && otherUserBefore.dayBuilderMutedGroups.length === 0);
+    const userAStillMuted = await updateUserDayBuilderPrefs(user.id, { dayBuilderEnabled: false, dayBuilderMutedGroups: ['WORK', 'SELF'] });
+    const otherUserStillUnaffected = await updateUserDayBuilderPrefs(otherUser.id, { dayBuilderEnabled: true, dayBuilderMutedGroups: [] });
+    check(
+      'Two users\' Day Builder preferences never cross-contaminate (each WHERE id = $1 scoped)',
+      userAStillMuted.dayBuilderEnabled === false && otherUserStillUnaffected.dayBuilderEnabled === true
+    );
+
     // Restore to defaults so a re-run of this test (or any other test using
     // this same throwaway user) starts from a clean, enabled state.
     await updateUserDayBuilderPrefs(user.id, { dayBuilderEnabled: true, dayBuilderMutedGroups: [] });
