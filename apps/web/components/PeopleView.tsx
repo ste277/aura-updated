@@ -5,7 +5,7 @@ import { CITY_OPTIONS } from '../lib/cities';
 import type { CityOption } from '../lib/cities';
 import * as theme from './theme';
 import { colors, spacing, typography } from './theme';
-import { SurfaceCard, PrimaryButton, SecondaryButton, DestructiveButton, EmptyState } from './ui';
+import { SurfaceCard, PrimaryButton, SecondaryButton, DestructiveButton, EmptyState, FieldLabel, TextInput, SelectInput } from './ui';
 
 export type RelationshipType = 'PARTNER' | 'SPOUSE' | 'FAMILY' | 'FRIEND' | 'OTHER';
 
@@ -332,38 +332,38 @@ function PersonForm({ mode, personId, onSaved, onCancel }: { mode: 'ADD' | 'EDIT
       <div style={typography.sectionEyebrow}>{mode === 'ADD' ? 'Add someone' : 'Edit person'}</div>
 
       <div style={{ display: 'flex', flexDirection: 'column', gap: 12, marginTop: 12 }}>
-        <label style={fieldLabelStyle}>
-          Name
-          <input required type="text" value={name} onChange={(e) => setName(e.target.value)} style={inputStyle} maxLength={80} />
-        </label>
+        <div>
+          <FieldLabel htmlFor="person-name">Name</FieldLabel>
+          <TextInput id="person-name" required type="text" value={name} onChange={(e) => setName(e.target.value)} maxLength={80} />
+        </div>
 
-        <label style={fieldLabelStyle}>
-          Relationship
-          <select value={relationshipType} onChange={(e) => setRelationshipType(e.target.value as RelationshipType)} style={inputStyle}>
+        <div>
+          <FieldLabel htmlFor="person-relationship">Relationship</FieldLabel>
+          <SelectInput id="person-relationship" value={relationshipType} onChange={(e) => setRelationshipType(e.target.value as RelationshipType)}>
             {RELATIONSHIP_OPTIONS.map((o) => (
               <option key={o.value} value={o.value}>{o.icon} {o.label}</option>
             ))}
-          </select>
-        </label>
+          </SelectInput>
+        </div>
 
-        <label style={fieldLabelStyle}>
-          Birth date
-          <input required type="date" value={birthDate} onChange={(e) => setBirthDate(e.target.value)} style={inputStyle} />
-        </label>
+        <div>
+          <FieldLabel htmlFor="person-birth-date">Birth date</FieldLabel>
+          <TextInput id="person-birth-date" required type="date" value={birthDate} onChange={(e) => setBirthDate(e.target.value)} />
+        </div>
 
-        <label style={fieldLabelStyle}>
-          Birth time
-          <input required type="time" value={birthTime} onChange={(e) => setBirthTime(e.target.value)} style={inputStyle} />
-        </label>
+        <div>
+          <FieldLabel htmlFor="person-birth-time">Birth time</FieldLabel>
+          <TextInput id="person-birth-time" required type="time" value={birthTime} onChange={(e) => setBirthTime(e.target.value)} />
+        </div>
 
-        <label style={fieldLabelStyle}>
-          Birth location
-          <select value={birthCity} onChange={(e) => setBirthCity(e.target.value)} style={inputStyle}>
+        <div>
+          <FieldLabel htmlFor="person-birth-city">Birth location</FieldLabel>
+          <SelectInput id="person-birth-city" value={birthCity} onChange={(e) => setBirthCity(e.target.value)}>
             {combinedCities.map((c) => (
               <option key={c.cityName} value={c.cityName}>{c.cityName}</option>
             ))}
-          </select>
-        </label>
+          </SelectInput>
+        </div>
 
         <PrimaryButton type="submit" disabled={saving} style={{ width: '100%', marginTop: 4 }}>
           {saving ? 'Saving…' : 'Save person'}
@@ -387,27 +387,6 @@ function PanchangaMiniCell({ label, value }: { label: string; value: string }) {
 }
 
 const backButtonStyle: React.CSSProperties = theme.backButtonStyle;
-
-const fieldLabelStyle: React.CSSProperties = {
-  display: 'flex',
-  flexDirection: 'column',
-  gap: 6,
-  fontSize: 11,
-  color: '#94a3b8',
-  fontWeight: 700,
-  textTransform: 'uppercase',
-  letterSpacing: '0.03em',
-};
-
-const inputStyle: React.CSSProperties = {
-  minHeight: 42,
-  borderRadius: 10,
-  border: '1px solid rgba(255, 255, 255, 0.12)',
-  background: 'rgba(2, 6, 23, 0.5)',
-  color: '#f8fafc',
-  fontSize: 14,
-  padding: '0 10px',
-};
 
 const dangerLinkStyle: React.CSSProperties = {
   border: 'none',

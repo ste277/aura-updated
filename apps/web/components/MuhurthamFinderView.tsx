@@ -72,10 +72,10 @@ const RATING_TEXT: Record<MuhurthamDateCandidate['rating'], string> = {
 };
 
 const RATING_COLOR: Record<MuhurthamDateCandidate['rating'], string> = {
-  EXCELLENT: '#4ade80',
-  STRONG: '#4ade80',
-  FAVORABLE: '#38bdf8',
-  ACCEPTABLE: '#94a3b8',
+  EXCELLENT: theme.colors.positive,
+  STRONG: theme.colors.positive,
+  FAVORABLE: theme.colors.info,
+  ACCEPTABLE: theme.colors.textMuted,
 };
 
 const SHARED_RATING_TEXT: Record<SharedMuhurthamRating, string> = {
@@ -86,10 +86,10 @@ const SHARED_RATING_TEXT: Record<SharedMuhurthamRating, string> = {
 };
 
 const SHARED_RATING_COLOR: Record<SharedMuhurthamRating, string> = {
-  EXCELLENT_SHARED_FIT: '#4ade80',
-  STRONG_SHARED_FIT: '#4ade80',
-  GOOD_SHARED_FIT: '#38bdf8',
-  MIXED_SHARED_FIT: '#facc15',
+  EXCELLENT_SHARED_FIT: theme.colors.positive,
+  STRONG_SHARED_FIT: theme.colors.positive,
+  GOOD_SHARED_FIT: theme.colors.info,
+  MIXED_SHARED_FIT: theme.colors.caution,
 };
 
 const DEFAULT_DISPLAY_COUNT = 5;

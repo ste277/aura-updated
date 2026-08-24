@@ -13,7 +13,14 @@ import { stripCountdownWrapper } from '../lib/formatTimeLeft';
 import { trackEvent } from '../lib/trackEvent';
 import * as theme from './theme';
 import { colors, spacing, typography } from './theme';
-import { PageHeader, SectionHeader, SurfaceCard, StatusBadge, IconButton, PrimaryButton, SecondaryButton, TextButton, ActivityChip } from './ui';
+import { PageHeader, SectionHeader, SurfaceCard, StatusBadge, IconButton, PrimaryButton, SecondaryButton, TextButton, ActivityChip, ModalShell, useModalA11y, TextAreaInput } from './ui';
+import type { DailyAgenda, DailyAgendaItem } from '../lib/dailyAgenda';
+import type { DailyStory } from '../lib/dailyStory';
+import type { DailyReflection } from '../lib/dailyReflection';
+import type { TomorrowPreview } from '../lib/tomorrowPreview';
+import { deriveNextMeaningfulThing } from '../lib/nextMeaningfulThing';
+import { MyDayStoryCard } from './MyDayStoryCard';
+import { YourDayTimeline } from './YourDayTimeline';
 
 interface HomeDashboardProps {
   userName: string;
@@ -99,6 +106,34 @@ interface HomeDashboardProps {
   /** Explicit destination for the reminder's own action button (brief
    * section 22) -- routes to the relevant Plan or Moment, never to Home. */
   onOpenReminder?: (reminder: AuraReminder) => void;
+  /** My Day V1 -- GET /api/my-day's response. Both null/undefined while
+   * loading or if the fetch failed; Home degrades gracefully (no My Day
+   * section rendered) rather than showing an error state for what's meant
+   * to be a lightweight, optional-feeling layer. */
+  myDayAgenda?: DailyAgenda | null;
+  myDayStory?: DailyStory | null;
+  /** Daily Reflection & Tomorrow Preview V1 -- also from GET /api/my-day.
+   * reflection is null until the API returns; tomorrowPreview is only ever
+   * populated at the NIGHT phase (brief section 4/8), null the rest of the
+   * day by design, not a loading state. */
+  myDayReflection?: DailyReflection | null;
+  myDayTomorrowPreview?: TomorrowPreview | null;
+  /** Refetches /api/my-day -- called after "Add to my day"/"Invite
+   * someone" succeeds so Your Day reflects the new item immediately. */
+  onMyDayChanged?: () => void;
+  /** Routes to People (brief section 27's "+ Add person" -- reuses the
+   * existing People screen/add-person form, never a lightweight duplicate
+   * that skips required birth data). */
+  onOpenPeople?: () => void;
+  /** Opens the relevant Plan/Moment for an agenda item tap (brief section
+   * 36) -- same routing convention as onOpenReminder above. */
+  onOpenAgendaItem?: (item: DailyAgendaItem) => void;
+  /** Daily Reflection & Tomorrow Preview V1 (brief section 5) -- routes into
+   * Plan/Timing Search with the TOMORROW horizon (and, when provided, an
+   * activity preselected). Never creates a Plan itself. Falls back to
+   * onPlanClick (today, no horizon override) if not provided, same as the
+   * pre-existing "Plan tomorrow" link's behavior. */
+  onPlanTomorrow?: (activityTitle?: string) => void;
 }
 
 interface HomeDayWindow {
@@ -356,6 +391,14 @@ export function HomeDashboard({
   onFindAnotherTimeForMoment,
   startingSoonReminder,
   onOpenReminder,
+  myDayAgenda,
+  myDayStory,
+  myDayReflection,
+  myDayTomorrowPreview,
+  onMyDayChanged,
+  onOpenPeople,
+  onOpenAgendaItem,
+  onPlanTomorrow,
 }: HomeDashboardProps) {
   const [selectedHabit, setSelectedHabit] = useState<string | null>(null);
   const [selectedPlanId, setSelectedPlanId] = useState<string | null>(null);
@@ -607,6 +650,14 @@ export function HomeDashboard({
     }
   };
 
+  // My Day V1 (brief section 31/33/40) -- consolidates the previously-
+  // separate "Your Moments" and "Starting Soon" cards into ONE "What's
+  // Next" slot instead of asking "what needs my attention?" twice. Reuses
+  // the exact same already-computed states (topMomentUpdate/
+  // startingSoonReminder come from GET /api/aura-updates, myDayAgenda.nextItem
+  // from GET /api/my-day) -- no new eligibility/score is computed here.
+  const nextThing = deriveNextMeaningfulThing({ topMomentUpdate, startingSoonReminder, agenda: myDayAgenda });
+
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: spacing.xxl, paddingBottom: spacing.xxl, fontFamily: 'sans-serif', color: colors.textPrimary }}>
       <PageHeader
@@ -628,6 +679,17 @@ export function HomeDashboard({
           </IconButton>
         }
       />
+
+      {myDayStory && (
+        <MyDayStoryCard
+          story={myDayStory}
+          reflection={myDayReflection ?? null}
+          tomorrowPreview={myDayTomorrowPreview ?? null}
+          onOpenPeople={() => onOpenPeople?.()}
+          onCreated={() => onMyDayChanged?.()}
+          onPlanTomorrow={(activityTitle) => (onPlanTomorrow ? onPlanTomorrow(activityTitle) : onPlanClick?.())}
+        />
+      )}
 
       <SurfaceCard elevated accentColor={tone.color} padding={spacing.xxl}>
         <div style={{ display: 'grid', gridTemplateColumns: '128px minmax(0, 1fr)', gap: spacing.xl, alignItems: 'center' }}>
@@ -685,18 +747,15 @@ export function HomeDashboard({
         </div>
       </SurfaceCard>
 
-      {/* Aura Reminders V1 (brief section 21) -- priority ordering on Home:
-       * (1) a critical/actionable coordination update (topMomentUpdate,
-       * pre-existing), (2) Starting Soon, ahead of (3) the Aura Suggests /
-       * Next Best Moment pair below. The hero panel above stays first --
-       * it's the page's anchor ("Right Now"), not a competing
-       * recommendation card, so moving it would break existing product
-       * intent rather than preserve it. */}
-      {topMomentUpdate && (
+      {/* My Day V1 -- ONE "What's Next" slot (brief section 31/33), tiered:
+       * (1) actionable Moment coordination issue, (2) Starting Soon,
+       * (3) the next My Day agenda item. The hero panel above stays first
+       * -- it's the page's anchor ("Right Now"), not a competing card. */}
+      {nextThing && (
         <section>
-          <SectionHeader label="Your Moments" />
-          {(() => {
-            const update = topMomentUpdate;
+          <SectionHeader label="What's Next" />
+          {nextThing.kind === 'MOMENT_UPDATE' && (() => {
+            const update = nextThing.update;
             const { day, time } = formatUpdateDateTime(update.eventStartAt);
             const isAccepted = update.type === 'MOMENT_ACCEPTED';
             return (
@@ -716,15 +775,28 @@ export function HomeDashboard({
               </SurfaceCard>
             );
           })()}
+          {nextThing.kind === 'STARTING_SOON' && <StartingSoonCard reminder={nextThing.reminder} onOpen={onOpenReminder} />}
+          {nextThing.kind === 'AGENDA_ITEM' && (() => {
+            const item = nextThing.item;
+            const time = new Date(item.startAt).toLocaleTimeString('en-US', { timeZone: myDayAgenda?.timezone, hour: 'numeric', minute: '2-digit' });
+            const title = item.type === 'MOMENT' && item.participantDisplayName ? `${item.title} with ${item.participantDisplayName}` : item.title;
+            return (
+              <SurfaceCard>
+                <div style={{ display: 'flex', alignItems: 'center', gap: spacing.sm }}>
+                  <span style={{ fontSize: 20 }} aria-hidden="true">{item.icon || '✨'}</span>
+                  <div style={{ fontSize: 14, fontWeight: 800, color: colors.textPrimary }}>{title}</div>
+                </div>
+                <div style={{ marginTop: spacing.sm, fontSize: 13, color: colors.textFaint }}>{time}</div>
+                <div style={{ marginTop: spacing.md }}>
+                  <SecondaryButton onClick={() => onOpenAgendaItem?.(item)}>View</SecondaryButton>
+                </div>
+              </SurfaceCard>
+            );
+          })()}
         </section>
       )}
 
-      {startingSoonReminder && (
-        <section>
-          <SectionHeader label="Starting Soon" />
-          <StartingSoonCard reminder={startingSoonReminder} onOpen={onOpenReminder} />
-        </section>
-      )}
+      <YourDayTimeline agenda={myDayAgenda ?? null} onOpenItem={onOpenAgendaItem} onAddSomething={() => onPlanClick?.()} />
 
       <div style={pairGridStyle}>
         <SurfaceCard>
@@ -767,18 +839,14 @@ export function HomeDashboard({
         </SurfaceCard>
       </div>
 
+      {/* My Day V1 (brief section 40) -- decluttered, not removed: the
+       * inline 4-window preview grid duplicated what "Your Day" above and
+       * the full Timeline/Panchang screens (one tap away below) already
+       * show. Panchang's own window-by-window detail belongs on those
+       * screens, not repeated here (brief section 29: Panchang answers
+       * "when", My Day/Your Day answers "what does my day look like"). */}
       <section>
-        <SectionHeader label="Today's Flow" />
-        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(140px, 1fr))', gap: spacing.sm }}>
-          {flowItems.slice(0, 4).map((item, index) => (
-            <div key={`${item.name}-${item.time}-${index}`} style={{ minHeight: 82, borderRadius: theme.radius.md, background: colors.surfaceSubtle, border: `1px solid ${colors.borderSubtle}`, borderLeft: `3px solid ${item.accent}`, padding: spacing.md }}>
-              <div style={{ color: item.accent, fontFamily: 'var(--as-font-mono)', fontSize: 11, fontWeight: 900, textTransform: 'uppercase' }}>{item.label}</div>
-              <div style={{ color: colors.textPrimary, marginTop: spacing.sm, fontSize: 13, fontWeight: 750 }}>{item.name}</div>
-              <div style={{ color: colors.textFaint, marginTop: 7, fontSize: 12 }}>{item.time}</div>
-            </div>
-          ))}
-        </div>
-        <div style={{ display: 'flex', justifyContent: 'center', gap: spacing.xl, marginTop: spacing.md }}>
+        <div style={{ display: 'flex', justifyContent: 'center', gap: spacing.xl }}>
           <TextButton onClick={onNextShiftClick} style={{ display: 'block', margin: '0 auto', fontSize: 15 }}>View full day timeline →</TextButton>
           {onPanchangClick && (
             <TextButton onClick={onPanchangClick} color={colors.traditional} style={{ display: 'block', margin: '0 auto', fontSize: 15 }}>Today&apos;s Panchang →</TextButton>
@@ -854,18 +922,11 @@ export function HomeDashboard({
       </SurfaceCard>
       </div>
 
-      {onPlanClick && (
-        <SurfaceCard
-          style={{ background: 'linear-gradient(135deg, rgba(88, 28, 135, 0.55), rgba(30, 41, 82, 0.7))', borderColor: 'rgba(167, 139, 250, 0.32)', display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: spacing.lg, flexWrap: 'wrap' }}
-          padding={spacing.xl}
-        >
-          <div style={{ minWidth: 0, flex: '1 1 220px' }}>
-            <div style={{ color: colors.textPrimary, fontSize: 16, fontWeight: 850, lineHeight: 1.3 }}>Need the best time for something important?</div>
-            <div style={{ color: '#c4b5fd', fontSize: 13, marginTop: spacing.xs, lineHeight: 1.4 }}>Ask Aura and I&apos;ll find the best window for you.</div>
-          </div>
-          <PrimaryButton onClick={() => onPlanClick()} style={{ background: 'linear-gradient(135deg, #a78bfa, #7c3aed)', color: colors.textPrimary, minHeight: 46 }}>Ask Aura →</PrimaryButton>
-        </SurfaceCard>
-      )}
+      {/* My Day V1 (brief section 40): the bottom "Need the best time for
+       * something important?" banner was a second Ask Aura entry point,
+       * redundant with the "What are you thinking about?" prompt already
+       * at the top of this page -- removed, not just hidden, since the top
+       * one already covers the same action. */}
 
       {selectedHabit && (
         <LogActivityModal
@@ -1218,61 +1279,37 @@ function LogActivityModal({
   onCancel: () => void;
   onConfirm: () => void;
 }) {
-  const dialogRef = useRef<HTMLDivElement | null>(null);
-  const noteRef = useRef<HTMLTextAreaElement | null>(null);
-  const previousFocusRef = useRef<HTMLElement | null>(null);
+  const dialogRef = useRef<HTMLDivElement>(null);
+  const noteRef = useRef<HTMLTextAreaElement>(null);
 
-  useEffect(() => {
-    previousFocusRef.current = document.activeElement instanceof HTMLElement ? document.activeElement : null;
-    const previousOverflow = document.body.style.overflow;
-    document.body.style.overflow = 'hidden';
-    const timer = window.setTimeout(() => noteRef.current?.focus(), 0);
-    return () => {
-      window.clearTimeout(timer);
-      document.body.style.overflow = previousOverflow;
-      previousFocusRef.current?.focus?.();
-    };
-  }, []);
-
-  useEffect(() => {
-    const handleKeyDown = (event: KeyboardEvent) => {
-      if (event.key === 'Escape' && !isSubmitting) onCancel();
-      if (event.key !== 'Tab') return;
-
-      const focusable = Array.from(
-        dialogRef.current?.querySelectorAll<HTMLElement>(
-          'button:not([disabled]), textarea:not([disabled]), input:not([disabled]), select:not([disabled]), a[href], [tabindex]:not([tabindex="-1"])'
-        ) ?? []
-      );
-      if (focusable.length === 0) return;
-
-      const first = focusable[0];
-      const last = focusable[focusable.length - 1];
-      if (event.shiftKey && document.activeElement === first) {
-        event.preventDefault();
-        last.focus();
-      } else if (!event.shiftKey && document.activeElement === last) {
-        event.preventDefault();
-        first.focus();
-      }
-    };
-    window.addEventListener('keydown', handleKeyDown);
-    return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [isSubmitting, onCancel]);
+  useModalA11y({ isOpen: true, onClose: () => { if (!isSubmitting) onCancel(); }, dialogRef, initialFocusRef: noteRef });
 
   return (
-    <div style={{ position: 'fixed', inset: 0, background: 'rgba(2, 6, 23, 0.82)', backdropFilter: 'blur(8px)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 10000, padding: 20 }}>
-      <div ref={dialogRef} role="dialog" aria-modal="true" aria-labelledby="home-log-title" aria-describedby="home-log-window" style={{ background: '#0f172a', border: '1px solid #1e293b', borderRadius: 18, padding: 20, width: '100%', maxWidth: 360, boxShadow: '0 25px 50px -12px rgba(0, 0, 0, 0.6)', color: '#f8fafc' }}>
-        <h3 id="home-log-title" style={{ margin: 0, fontSize: 17 }}>Log {title}?</h3>
-        <p id="home-log-window" style={{ fontSize: 12, color: '#94a3b8', marginTop: 5 }}>Tagging this under {formatWindowName(activeWindowName)}.</p>
-        <textarea ref={noteRef} placeholder="Optional notes or reflection..." value={note} onChange={(event) => onNoteChange(event.target.value)} style={{ width: '100%', height: 72, marginTop: 12, borderRadius: 10, background: '#020617', border: '1px solid #334155', color: '#f8fafc', padding: 10, fontSize: 12, resize: 'none', boxSizing: 'border-box', outline: 'none' }} />
-        {error && <div style={{ color: '#fb7185', fontSize: 12, lineHeight: 1.35, marginTop: 10 }}>{error}</div>}
-        <div style={{ display: 'flex', gap: 10, marginTop: 16 }}>
-          <button type="button" onClick={onCancel} disabled={isSubmitting} style={{ flex: 1, padding: '10px 0', borderRadius: 10, background: 'transparent', border: '1px solid #334155', color: '#94a3b8', fontSize: 13, cursor: isSubmitting ? 'default' : 'pointer', opacity: isSubmitting ? 0.6 : 1 }}>Cancel</button>
-          <button type="button" onClick={onConfirm} disabled={isSubmitting} style={{ flex: 1, padding: '10px 0', borderRadius: 10, background: '#4ade80', border: 'none', color: '#020617', fontWeight: 800, fontSize: 13, cursor: isSubmitting ? 'default' : 'pointer', opacity: isSubmitting ? 0.7 : 1 }}>{isSubmitting ? 'Saving...' : 'Confirm Log'}</button>
-        </div>
-      </div>
-    </div>
+    <ModalShell
+      dialogRef={dialogRef}
+      labelledBy="home-log-title"
+      describedBy="home-log-window"
+      title={`Log ${title}?`}
+      description={`Tagging this under ${formatWindowName(activeWindowName)}.`}
+      maxWidth={360}
+      footer={
+        <>
+          <SecondaryButton
+            onClick={onCancel}
+            disabled={isSubmitting}
+            style={{ flex: 1, background: 'transparent', borderColor: colors.borderDefault, color: colors.textMuted }}
+          >
+            Cancel
+          </SecondaryButton>
+          <PrimaryButton onClick={onConfirm} disabled={isSubmitting} loading={isSubmitting} style={{ flex: 1 }}>
+            Confirm log
+          </PrimaryButton>
+        </>
+      }
+    >
+      <TextAreaInput ref={noteRef} placeholder="Optional notes or reflection..." value={note} onChange={(event) => onNoteChange(event.target.value)} rows={3} active={Boolean(note)} />
+      {error && <div style={{ color: colors.danger, fontSize: 12, lineHeight: 1.35, marginTop: spacing.md }}>{error}</div>}
+    </ModalShell>
   );
 }
 
@@ -1381,8 +1418,8 @@ const goodRightNowCardStyle: React.CSSProperties = {
   alignItems: 'flex-start',
   textAlign: 'left',
   minHeight: 132,
-  border: '1px solid rgba(148, 163, 184, 0.18)',
-  borderRadius: 12,
+  border: `1px solid ${colors.borderSubtle}`,
+  borderRadius: theme.radius.md,
   background: 'rgba(2, 6, 23, 0.4)',
   padding: '11px 10px',
 };
@@ -1390,13 +1427,15 @@ const goodRightNowCardStyle: React.CSSProperties = {
 // One primary action per card (brief section 6: never "Log now | Start now
 // | Plan" all at once) -- full-width within the card so it stays legible
 // down to 375px without needing two side-by-side buttons (brief section 22).
+// Same tight sizing as before (this sits in a narrow 3-up grid) -- V2.1
+// section 21 only tokenizes the colors, doesn't touch layout/copy here.
 const goodRightNowActionButtonStyle: React.CSSProperties = {
   width: '100%',
   minHeight: 30,
-  border: '1px solid rgba(74, 222, 128, 0.35)',
-  borderRadius: 8,
-  background: 'rgba(74, 222, 128, 0.12)',
-  color: '#4ade80',
+  border: `1px solid ${colors.accentBorder}`,
+  borderRadius: theme.radius.sm,
+  background: colors.positiveSoft,
+  color: colors.positive,
   fontSize: 11,
   fontWeight: 850,
   cursor: 'pointer',
@@ -1411,7 +1450,7 @@ const goodRightNowSecondaryLinkStyle: React.CSSProperties = {
   marginTop: 6,
   border: 'none',
   background: 'transparent',
-  color: '#94a3b8',
+  color: colors.textMuted,
   fontSize: 10,
   fontWeight: 750,
   cursor: 'pointer',

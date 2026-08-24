@@ -10,7 +10,7 @@ import { RELATIONSHIP_ICON, SavedPersonRow } from './PeopleView';
 import { SharedMomentsView } from './SharedMomentsView';
 import * as theme from './theme';
 import { colors, spacing, typography } from './theme';
-import { PageHeader, SegmentedControl, SecondaryButton } from './ui';
+import { PageHeader, SegmentedControl, SecondaryButton, EmptyState } from './ui';
 import type { TimingCandidate, TimingCandidateLabel, TimingSearchDateRange, TimingSearchMode, TimingSearchResponse, TimingTimePreference } from '../../../packages/recommendation/src/timingSearch';
 import type { MuhurtaReason } from '../../../packages/muhurta/src/activityOntology';
 import { formatMuhurtaReason } from '../../../packages/muhurta/src/muhurtaReasonFormat';
@@ -51,6 +51,13 @@ interface PlanWithAuraViewProps {
   timezone?: string;
   initialActivity?: string | null;
   initialActivityKey?: number;
+  /** Daily Reflection & Tomorrow Preview V1 (brief section 5) -- the
+   * "Plan tomorrow" handoff from a Tomorrow Preview suggestion preselects
+   * both the activity AND this horizon, so the search itself still runs
+   * through the normal FIND flow below rather than creating a Plan
+   * directly. Only meaningful together with initialActivity/
+   * initialActivityKey (same effect, same key). */
+  initialHorizon?: PlanningHorizon;
   /** Product Structure V2 (brief section 10/22) -- "Add someone" from the
    * Who's-this-with picker navigates to the existing People screen; Plan
    * itself never builds a second Add Person UI. */
@@ -427,7 +434,15 @@ export function planPayloadFromCandidate(candidate: TimingCandidate, durationMin
  * want the saved plan reflected immediately in their own UI should refetch
  * (e.g. via the onPlanLogged callback already threaded through page.tsx).
  */
-export async function saveUpcomingPlanFromCandidate(candidate: TimingCandidate, durationMinutes: number, sharedWithName?: string): Promise<UpcomingPlan> {
+/**
+ * `guestConversionToken` (Recipient Conversion V1 Hardening, brief section
+ * 10) is optional and only ever passed by the guest-conversion save path
+ * (apps/web/app/find/GuestFindClient.tsx) -- every other caller of this
+ * function is unaffected. POST /api/plans uses it purely as an idempotency
+ * key (see that route's own doc comment); it never changes what gets
+ * created, only whether a retry creates a SECOND Plan.
+ */
+export async function saveUpcomingPlanFromCandidate(candidate: TimingCandidate, durationMinutes: number, sharedWithName?: string, guestConversionToken?: string): Promise<UpcomingPlan> {
   const plan = planPayloadFromCandidate(candidate, durationMinutes, sharedWithName);
   const res = await fetch('/api/plans', {
     method: 'POST',
@@ -445,13 +460,14 @@ export async function saveUpcomingPlanFromCandidate(candidate: TimingCandidate, 
       score: plan.score,
       recommendation: plan.details,
       calendarUrl: plan.googleCalendarUrl,
+      ...(guestConversionToken ? { guestConversionToken } : {}),
     }),
   });
   if (!res.ok) throw new Error('Unable to save plan.');
   return mapPlanRow(await res.json());
 }
 
-export function PlanWithAuraView({ onTimingSearch, onViewDay, onPlanLogged, timezone, initialActivity, initialActivityKey, onOpenPeople, focusMomentsKey, onMomentSeen, focusMomentToken }: PlanWithAuraViewProps) {
+export function PlanWithAuraView({ onTimingSearch, onViewDay, onPlanLogged, timezone, initialActivity, initialActivityKey, initialHorizon, onOpenPeople, focusMomentsKey, onMomentSeen, focusMomentToken }: PlanWithAuraViewProps) {
   const [planMode, setPlanMode] = useState<TimingSearchMode>('FIND');
   const [taskTitle, setTaskTitle] = useState('');
   const [, setIsCustomTask] = useState(false);
@@ -521,6 +537,11 @@ export function PlanWithAuraView({ onTimingSearch, onViewDay, onPlanLogged, time
   const plansSectionRef = useRef<HTMLElement | null>(null);
 
   useEffect(() => {
+    // initialHorizon (e.g. Tomorrow Preview's TOMORROW handoff) must apply
+    // even when no specific activity was preselected -- the generic "Plan
+    // tomorrow" link carries a horizon but no activity.
+    if (initialHorizon) setHorizon(initialHorizon);
+
     const nextActivity = initialActivity?.trim();
     if (!nextActivity) return;
 
@@ -538,7 +559,7 @@ export function PlanWithAuraView({ onTimingSearch, onViewDay, onPlanLogged, time
     setPlanActionStates({});
     setPlannedOpportunityKeys(new Set());
     if (typeof window !== 'undefined') window.scrollTo({ top: 0, behavior: 'smooth' });
-  }, [initialActivity, initialActivityKey]);
+  }, [initialActivity, initialActivityKey, initialHorizon]);
 
   useEffect(() => {
     let cancelled = false;
@@ -1422,9 +1443,13 @@ export function PlanWithAuraView({ onTimingSearch, onViewDay, onPlanLogged, time
             onConfirmRemove={() => handleCancelPlan(plan)}
           />
         )) : (
-          <div style={emptyPlansStyle}>
-            No upcoming plans yet. Choose an activity above and tap Find My Best Time to create one.
-          </div>
+          <EmptyState
+            title="Nothing planned yet."
+            description="Choose an activity above and tap Find My Best Time to create one."
+            action={
+              <SecondaryButton onClick={() => window.scrollTo({ top: 0, behavior: 'smooth' })}>Find a time</SecondaryButton>
+            }
+          />
         )}
       </section>
 
@@ -1936,7 +1961,7 @@ function TimingResultCard({
  * gauge and reasons list -- EverydaySharedCandidate carries the general
  * candidate's own reasons but this card focuses on the "for both of you"
  * framing the brief's mockup shows. */
-const EVERYDAY_SHARED_RATING_TEXT: Record<string, string> = {
+export const EVERYDAY_SHARED_RATING_TEXT: Record<string, string> = {
   STRONG_TOGETHER_FIT: 'Strong shared fit',
   GOOD_TOGETHER_FIT: 'Good shared fit',
   EASY_TOGETHER_FIT: 'Easy fit together',

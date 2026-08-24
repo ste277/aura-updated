@@ -3,6 +3,7 @@
 import React, { useState, useMemo } from 'react';
 import { PastActivityModal } from './PastActivityModal';
 import { formatActivityDuration } from '../lib/activityDuration';
+import { EmptyState } from './ui';
 
 export interface LoggedEntryItem {
   id: string;
@@ -22,6 +23,14 @@ function activityCategory(title: string): 'WORK' | 'HEALTH' | 'PERSONAL' {
   if (/(workout|exercise|stretch|walk|run|health|hydration|rest|meditat|sleep|yoga|fitness)/.test(value)) return 'HEALTH';
   return 'PERSONAL';
 }
+
+/** Display label for the client-side grouping above -- never render the raw
+ * 'WORK' | 'HEALTH' | 'PERSONAL' enum value directly (V2.1 section 17). */
+const CATEGORY_LABEL: Record<'WORK' | 'HEALTH' | 'PERSONAL', string> = {
+  WORK: 'Work',
+  HEALTH: 'Health',
+  PERSONAL: 'Personal',
+};
 
 function formatActiveDuration(minutes: number): string {
   if (minutes < 60) return `${minutes}m`;
@@ -466,7 +475,7 @@ export function CalendarViewSection({
             (['WORK', 'HEALTH', 'PERSONAL'] as const).map((category) => groupedSelectedLogs[category].length > 0 && (
               <div key={category}>
                 <div style={{ fontSize: 10, color: '#94a3b8', fontWeight: 800, letterSpacing: '0.08em', marginBottom: 8 }}>
-                  {category} · {groupedSelectedLogs[category].length}
+                  {CATEGORY_LABEL[category]} · {groupedSelectedLogs[category].length}
                 </div>
                 <div style={{ display: 'flex', flexDirection: 'column', gap: 7 }}>
                   {groupedSelectedLogs[category].map((log) => {
@@ -501,9 +510,9 @@ export function CalendarViewSection({
               </div>
             ))
           ) : (
-            <div style={{ fontSize: 12, color: 'var(--as-text-muted, #94a3b8)', textAlign: 'center', padding: '16px 0', fontFamily: 'sans-serif' }}>
-              {isFutureDaySelected ? 'Cannot log activities for future dates.' : 'No activities logged for this day.'}
-            </div>
+            <EmptyState
+              title={isFutureDaySelected ? 'Cannot log activities for future dates.' : 'No activities logged for this day.'}
+            />
           )}
         </div>
       </div>

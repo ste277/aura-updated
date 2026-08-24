@@ -1,6 +1,7 @@
 'use client';
 
-import React from 'react';
+import React, { useEffect, useRef } from 'react';
+import { createPortal } from 'react-dom';
 import { colors, radius, spacing, typography } from './theme';
 
 /**
@@ -603,4 +604,262 @@ export function EmptyState({
       {action && <div style={{ marginTop: spacing.md }}>{action}</div>}
     </div>
   );
+}
+
+// ============================================================
+// Modal (V2.1 section 8) -- every modal/sheet in the app previously
+// reimplemented its own overlay/dialog chrome AND its own Escape/Tab-trap/
+// body-scroll-lock/focus-restore behavior from scratch (confirmed:
+// PastActivityModal and HomeDashboard's LogActivityModal duplicated
+// ~90%-identical logic with slightly different z-index/radius/padding/
+// close-affordance choices). useModalA11y owns the BEHAVIOR (each modal
+// still picks its own initial-focus target, since that's the one thing
+// that legitimately differs per modal); ModalShell owns the shared visual
+// chrome (overlay, card, optional title/description header, optional close
+// button, footer row) so title/description/content-spacing/close-action
+// conventions can't drift apart again.
+// ============================================================
+
+/** Escape-to-close, Tab focus trap, body-scroll lock, and focus restore on
+ * unmount -- the behavior every modal needs, extracted once instead of
+ * reimplemented per component. `initialFocusRef` is optional so a modal
+ * with no sensible first field (e.g. a confirm-only dialog) can omit it. */
+export function useModalA11y({
+  isOpen,
+  onClose,
+  dialogRef,
+  initialFocusRef,
+}: {
+  isOpen: boolean;
+  onClose: () => void;
+  dialogRef: React.RefObject<HTMLElement | null>;
+  initialFocusRef?: React.RefObject<HTMLElement | null>;
+}) {
+  useEffect(() => {
+    if (!isOpen) return undefined;
+    const previousFocus = document.activeElement instanceof HTMLElement ? document.activeElement : null;
+    const previousOverflow = document.body.style.overflow;
+    document.body.style.overflow = 'hidden';
+    const timer = window.setTimeout(() => initialFocusRef?.current?.focus(), 0);
+    return () => {
+      window.clearTimeout(timer);
+      document.body.style.overflow = previousOverflow;
+      previousFocus?.focus?.();
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isOpen]);
+
+  useEffect(() => {
+    if (!isOpen) return undefined;
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') {
+        onClose();
+        return;
+      }
+      if (event.key !== 'Tab' || !dialogRef.current) return;
+      const focusable = Array.from(
+        dialogRef.current.querySelectorAll<HTMLElement>(
+          'button:not([disabled]), input:not([disabled]), select:not([disabled]), textarea:not([disabled]), a[href], [tabindex]:not([tabindex="-1"])'
+        )
+      ).filter((element) => element.offsetParent !== null);
+      if (focusable.length === 0) return;
+      const first = focusable[0];
+      const last = focusable[focusable.length - 1];
+      if (event.shiftKey && document.activeElement === first) {
+        event.preventDefault();
+        last.focus();
+      } else if (!event.shiftKey && document.activeElement === last) {
+        event.preventDefault();
+        first.focus();
+      }
+    };
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [isOpen, onClose, dialogRef]);
+}
+
+/** The one shared overlay+card shell every modal renders into via a portal.
+ * `title`/`description` render the standardized header (with a close
+ * button unless `onClose` is omitted for a no-dismiss confirm dialog);
+ * `footer` is the standardized action row. Content spacing between header/
+ * body/footer is fixed here so no modal has to guess its own gaps again. */
+export function ModalShell({
+  dialogRef,
+  labelledBy,
+  describedBy,
+  title,
+  description,
+  onClose,
+  maxWidth = 400,
+  footer,
+  children,
+}: {
+  dialogRef: React.RefObject<HTMLDivElement>;
+  labelledBy: string;
+  describedBy?: string;
+  title: React.ReactNode;
+  description?: React.ReactNode;
+  onClose?: () => void;
+  maxWidth?: number;
+  footer?: React.ReactNode;
+  children: React.ReactNode;
+}) {
+  // createPortal needs document.body, which doesn't exist during the
+  // server render of this 'use client' component -- gate on mount so a
+  // caller can render ModalShell unconditionally (e.g. `isOpen` defaulting
+  // true, or true on the very first client render) without crashing SSR.
+  const [mounted, setMounted] = React.useState(false);
+  useEffect(() => setMounted(true), []);
+  if (!mounted) return null;
+
+  return createPortal(
+    <div
+      style={{
+        position: 'fixed',
+        inset: 0,
+        zIndex: 9999,
+        background: 'rgba(2, 6, 23, 0.82)',
+        backdropFilter: 'blur(8px)',
+        display: 'flex',
+        alignItems: 'flex-start',
+        justifyContent: 'center',
+        padding: spacing.lg,
+        overflowY: 'auto',
+      }}
+      onClick={onClose}
+    >
+      <div
+        ref={dialogRef}
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby={labelledBy}
+        aria-describedby={describedBy}
+        style={{
+          width: '100%',
+          maxWidth,
+          margin: 'min(6vh, 32px) 0',
+          maxHeight: 'calc(100vh - 32px)',
+          overflowY: 'auto',
+          background: colors.surfaceSubtle,
+          border: `1px solid ${colors.borderDefault}`,
+          borderRadius: radius.lg,
+          padding: spacing.xxl,
+          boxShadow: '0 25px 50px -12px rgba(0, 0, 0, 0.6)',
+          color: colors.textPrimary,
+          boxSizing: 'border-box',
+        }}
+        onClick={(event) => event.stopPropagation()}
+      >
+        <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: spacing.md }}>
+          <div style={{ minWidth: 0 }}>
+            <h2 id={labelledBy} style={typography.sectionTitle}>
+              {title}
+            </h2>
+            {description && (
+              <div id={describedBy} style={{ ...typography.meta, marginTop: spacing.xs }}>
+                {description}
+              </div>
+            )}
+          </div>
+          {onClose && (
+            <button
+              type="button"
+              onClick={onClose}
+              aria-label="Close"
+              style={{ background: 'none', border: 'none', color: colors.textMuted, fontSize: 18, cursor: 'pointer', padding: spacing.xs, lineHeight: 1, flexShrink: 0 }}
+            >
+              ✕
+            </button>
+          )}
+        </div>
+
+        <div style={{ marginTop: spacing.lg }}>{children}</div>
+
+        {footer && <div style={{ display: 'flex', gap: spacing.sm, marginTop: spacing.xxl }}>{footer}</div>}
+      </div>
+    </div>,
+    document.body
+  );
+}
+
+// ============================================================
+// Form field primitives (V2.1 section 9) -- introduced only because real
+// duplication justified it: PastActivityModal, PeopleView, and
+// LocationPicker each hand-rolled their own label/input/select styling
+// with slightly different heights, radii, and focus/error treatment. Not a
+// general-purpose form library -- just label/input/select/hint/error,
+// the five things that were actually duplicated.
+// ============================================================
+
+export function FieldLabel({ children, htmlFor }: { children: React.ReactNode; htmlFor?: string }) {
+  return (
+    <label htmlFor={htmlFor} style={{ display: 'block', ...typography.sectionEyebrow, marginBottom: spacing.sm }}>
+      {children}
+    </label>
+  );
+}
+
+const fieldInputBase: React.CSSProperties = {
+  width: '100%',
+  minHeight: 44,
+  padding: '0 14px',
+  borderRadius: radius.md,
+  background: 'rgba(2, 6, 23, 0.4)',
+  color: colors.textPrimary,
+  fontSize: 13,
+  outline: 'none',
+  boxSizing: 'border-box',
+  fontFamily: 'var(--as-font-body)',
+};
+
+function fieldBorder(hasError?: boolean, active?: boolean): string {
+  if (hasError) return `1px solid ${colors.danger}`;
+  if (active) return `1px solid ${colors.accentBorder}`;
+  return `1px solid ${colors.borderDefault}`;
+}
+
+export const TextInput = React.forwardRef<HTMLInputElement, React.InputHTMLAttributes<HTMLInputElement> & { hasError?: boolean; active?: boolean }>(
+  ({ hasError, active, style, disabled, ...props }, ref) => (
+    <input
+      ref={ref}
+      disabled={disabled}
+      style={{ ...fieldInputBase, border: fieldBorder(hasError, active), opacity: disabled ? 0.55 : 1, ...style }}
+      {...props}
+    />
+  )
+);
+TextInput.displayName = 'TextInput';
+
+export const TextAreaInput = React.forwardRef<HTMLTextAreaElement, React.TextareaHTMLAttributes<HTMLTextAreaElement> & { hasError?: boolean; active?: boolean }>(
+  ({ hasError, active, style, disabled, ...props }, ref) => (
+    <textarea
+      ref={ref}
+      disabled={disabled}
+      style={{ ...fieldInputBase, minHeight: 74, padding: 12, border: fieldBorder(hasError, active), resize: 'vertical', opacity: disabled ? 0.55 : 1, ...style }}
+      {...props}
+    />
+  )
+);
+TextAreaInput.displayName = 'TextAreaInput';
+
+export const SelectInput = React.forwardRef<HTMLSelectElement, React.SelectHTMLAttributes<HTMLSelectElement> & { hasError?: boolean }>(
+  ({ hasError, style, disabled, children, ...props }, ref) => (
+    <select
+      ref={ref}
+      disabled={disabled}
+      style={{ ...fieldInputBase, border: fieldBorder(hasError), opacity: disabled ? 0.55 : 1, cursor: disabled ? 'default' : 'pointer', ...style }}
+      {...props}
+    >
+      {children}
+    </select>
+  )
+);
+SelectInput.displayName = 'SelectInput';
+
+export function FieldHint({ children }: { children: React.ReactNode }) {
+  return <div style={{ ...typography.caption, marginTop: spacing.xs }}>{children}</div>;
+}
+
+export function FieldError({ children }: { children: React.ReactNode }) {
+  return <div style={{ color: colors.danger, fontSize: 12, lineHeight: 1.4, marginTop: spacing.xs }}>{children}</div>;
 }

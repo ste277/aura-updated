@@ -3,7 +3,7 @@
 import React, { useState, useMemo } from 'react';
 import { computeAverageTimedSessionMinutes } from '../lib/activityDuration';
 import { colors, spacing, typography, radius } from './theme';
-import { PageHeader, SegmentedControl, SurfaceCard, StatusBadge, TextButton } from './ui';
+import { PageHeader, SegmentedControl, SurfaceCard, StatusBadge, TextButton, EmptyState } from './ui';
 
 export interface LoggedEntryItem {
   id: string;
@@ -395,9 +395,7 @@ export function InsightsView({ logEntries = [], assistantInsight }: InsightsView
                 ))}
               </div>
             ) : (
-              <div style={{ fontSize: 12, color: colors.textFaint, textAlign: 'center', padding: '12px 0' }}>
-                No activity logs recorded yet. Start logging from Home.
-              </div>
+              <EmptyState title="No activity logs yet." description="Start logging from Home to see your patterns here." />
             )}
           </SurfaceCard>
 

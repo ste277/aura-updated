@@ -40,7 +40,23 @@ export type ProductEventName =
   | 'REMINDER_PUSH_SENT'
   | 'ASK_AURA_SUBMITTED'
   | 'ASK_AURA_INTENT_RESOLVED'
-  | 'ASK_AURA_RESULT_ACTION';
+  | 'ASK_AURA_RESULT_ACTION'
+  | 'GUEST_TIMING_SEARCH_STARTED'
+  | 'GUEST_TIMING_RESULT_VIEWED'
+  | 'GUEST_SIGNUP_STARTED'
+  | 'GUEST_SIGNUP_COMPLETED'
+  | 'GUEST_RESULT_SAVED'
+  | 'MY_DAY_INTENTION_OPENED'
+  | 'MY_DAY_INTENTION_SELECTED'
+  | 'MY_DAY_ITEM_OPENED'
+  | 'MY_DAY_ADD_STARTED'
+  | 'GUEST_RESULT_RESTORED'
+  | 'ONBOARDING_HANDOFF_VIEWED'
+  | 'MY_DAY_OPENED_FROM_HANDOFF'
+  | 'DAILY_REFLECTION_VIEWED'
+  | 'TOMORROW_PREVIEW_VIEWED'
+  | 'TOMORROW_PROMPT_SELECTED'
+  | 'TOMORROW_PLAN_STARTED';
 
 export const PRODUCT_EVENT_NAMES: ProductEventName[] = [
   'AURA_HOME_VIEWED',
@@ -68,6 +84,22 @@ export const PRODUCT_EVENT_NAMES: ProductEventName[] = [
   'ASK_AURA_SUBMITTED',
   'ASK_AURA_INTENT_RESOLVED',
   'ASK_AURA_RESULT_ACTION',
+  'GUEST_TIMING_SEARCH_STARTED',
+  'GUEST_TIMING_RESULT_VIEWED',
+  'GUEST_SIGNUP_STARTED',
+  'GUEST_SIGNUP_COMPLETED',
+  'GUEST_RESULT_SAVED',
+  'MY_DAY_INTENTION_OPENED',
+  'MY_DAY_INTENTION_SELECTED',
+  'MY_DAY_ITEM_OPENED',
+  'MY_DAY_ADD_STARTED',
+  'GUEST_RESULT_RESTORED',
+  'ONBOARDING_HANDOFF_VIEWED',
+  'MY_DAY_OPENED_FROM_HANDOFF',
+  'DAILY_REFLECTION_VIEWED',
+  'TOMORROW_PREVIEW_VIEWED',
+  'TOMORROW_PROMPT_SELECTED',
+  'TOMORROW_PLAN_STARTED',
 ];
 
 export function isProductEventName(value: string): value is ProductEventName {
@@ -117,6 +149,49 @@ export const CLIENT_TRACKED_EVENTS: ReadonlySet<ProductEventName> = new Set<Prod
   // (mirrors PLAN_SEARCH_COMPLETED), never duplicated client-side.
   'ASK_AURA_SUBMITTED',
   'ASK_AURA_RESULT_ACTION',
+  // Recipient Conversion V1 (brief section 22) -- every guest-funnel step is
+  // a UI intent signal fired from the public, unauthenticated /find page
+  // (there is no session to attach a server-side "at DB success" moment to
+  // for most of these, and GUEST_SIGNUP_COMPLETED specifically must NOT
+  // fire from the shared verify/verify-code routes, which also serve every
+  // ordinary returning-user sign-in -- only /find itself knows this
+  // particular session completion belongs to the guest conversion funnel).
+  'GUEST_TIMING_SEARCH_STARTED',
+  'GUEST_TIMING_RESULT_VIEWED',
+  'GUEST_SIGNUP_STARTED',
+  'GUEST_SIGNUP_COMPLETED',
+  'GUEST_RESULT_SAVED',
+  // My Day V1 (brief section 44) -- all four are UI intent signals from the
+  // intention-discovery widget; none corresponds to a clean server-side "DB
+  // write succeeded" moment worth a second event (the actual Add-to-my-day/
+  // Invite-someone outcomes already fire PLAN_RESULT_SELECTED-equivalent/
+  // AURA_MOMENT_CREATED via the existing reused APIs, not a My-Day-specific
+  // completion event -- avoids duplicating that taxonomy).
+  'MY_DAY_INTENTION_OPENED',
+  'MY_DAY_INTENTION_SELECTED',
+  'MY_DAY_ITEM_OPENED',
+  'MY_DAY_ADD_STARTED',
+  // Recipient Conversion V1 Hardening (brief section 16) -- three genuinely
+  // new funnel steps with no existing equivalent (MOMENT_OPENED/
+  // CONVERSION_CLICKED/GUEST_SEARCH_STARTED/GUEST_RESULT_VIEWED/
+  // SIGNUP_STARTED/SIGNUP_COMPLETED already exist under other names --
+  // reused as-is below in GuestFindClient.tsx, not duplicated here. brief's
+  // FIRST_PLAN_SAVED is the same moment as the existing GUEST_RESULT_SAVED
+  // above, also reused rather than duplicated).
+  'GUEST_RESULT_RESTORED',
+  'ONBOARDING_HANDOFF_VIEWED',
+  'MY_DAY_OPENED_FROM_HANDOFF',
+  // Daily Reflection & Tomorrow Preview V1 (brief section 15) -- all four
+  // are UI intent/impression signals from the Home daily-story area; no
+  // clean server-side "DB write succeeded" moment exists for any of them
+  // (viewing a derived reflection/preview never writes anything, and the
+  // actual "start planning tomorrow" handoff is a navigation, not a write
+  // -- the real Plan/Moment creation that might follow still fires its own
+  // existing PLAN_RESULT_SELECTED/AURA_MOMENT_CREATED, not duplicated here).
+  'DAILY_REFLECTION_VIEWED',
+  'TOMORROW_PREVIEW_VIEWED',
+  'TOMORROW_PROMPT_SELECTED',
+  'TOMORROW_PLAN_STARTED',
 ]);
 
 // Fields that must NEVER appear in ProductEvent.metadata, under any event,
@@ -195,6 +270,16 @@ const ASK_HORIZON_VALUES = new Set([
 ]);
 const ASK_TIME_PREFERENCE_VALUES = new Set(['ANY', 'MORNING', 'AFTERNOON', 'EVENING', 'NIGHT']);
 const ASK_RESULT_ACTION_VALUES = new Set(['PLAN_THIS', 'CREATE_MOMENT', 'OPEN_PLAN', 'OPEN_TIMELINE', 'OPEN_PANCHANG', 'OPEN_MUHURTHAM']);
+// Recipient Conversion V1 (brief section 22/23) -- GUEST_HORIZON_VALUES is
+// the exact guest-facing horizon subset lib/guestTimingSearchRequest.ts
+// validates against (not the full PlanningHorizon set, which also has
+// NOW/CUSTOM that guest search never uses). timePreference reuses
+// ASK_TIME_PREFERENCE_VALUES above verbatim -- same closed vocabulary as
+// TimingTimePreference, not a third copy. GUEST_SOURCE_VALUES is a new,
+// deliberately coarse product-level attribution vocabulary (brief section
+// 11): AURA_MOMENT | DIRECT, never a sender/Moment identity.
+const GUEST_HORIZON_VALUES = new Set(['TODAY', 'TOMORROW', 'WEEKEND', 'SEVEN_DAYS']);
+const GUEST_SOURCE_VALUES = new Set(['AURA_MOMENT', 'DIRECT']);
 
 type FieldSchema =
   | { type: 'enum'; values: Set<string> }
@@ -207,6 +292,21 @@ const activityIdField: FieldSchema = { type: 'activityId' };
 const durationField: FieldSchema = { type: 'number', min: 0, max: 120_000 };
 const sourceField: FieldSchema = { type: 'enum', values: SOURCE_VALUES };
 const planningModeField: FieldSchema = { type: 'enum', values: PLANNING_MODE_VALUES };
+const guestHorizonField: FieldSchema = { type: 'enum', values: GUEST_HORIZON_VALUES };
+const guestTimePreferenceField: FieldSchema = { type: 'enum', values: ASK_TIME_PREFERENCE_VALUES };
+const guestSourceField: FieldSchema = { type: 'enum', values: GUEST_SOURCE_VALUES };
+
+// My Day V1 (brief section 44) -- the same closed vocabularies
+// DailyIntentionGroupId/DailyAgendaItemType/DailyStoryPhase already define,
+// not third copies. intentionCategory deliberately excludes the virtual
+// PEOPLE broad choice (brief section 20's umbrella, never itself a real
+// group) -- only the seven real DailyIntentionGroupId values.
+const MY_DAY_INTENTION_CATEGORY_VALUES = new Set(['RELATIONSHIPS', 'FAMILY', 'SOCIAL', 'WORK', 'SELF', 'ENJOYMENT', 'LIFE']);
+const MY_DAY_ITEM_TYPE_VALUES = new Set(['PLAN', 'MOMENT', 'COMPLETED_ACTIVITY']);
+const MY_DAY_DAY_PHASE_VALUES = new Set(['MORNING', 'MIDDAY', 'AFTERNOON', 'EVENING', 'NIGHT']);
+const myDayIntentionCategoryField: FieldSchema = { type: 'enum', values: MY_DAY_INTENTION_CATEGORY_VALUES };
+const myDayItemTypeField: FieldSchema = { type: 'enum', values: MY_DAY_ITEM_TYPE_VALUES };
+const myDayDayPhaseField: FieldSchema = { type: 'enum', values: MY_DAY_DAY_PHASE_VALUES };
 
 const EVENT_METADATA_SCHEMAS: Record<ProductEventName, Record<string, FieldSchema>> = {
   AURA_HOME_VIEWED: {},
@@ -306,6 +406,90 @@ const EVENT_METADATA_SCHEMAS: Record<ProductEventName, Record<string, FieldSchem
   ASK_AURA_RESULT_ACTION: {
     intent: { type: 'enum', values: ASK_INTENT_VALUES },
     action: { type: 'enum', values: ASK_RESULT_ACTION_VALUES },
+  },
+  // Recipient Conversion V1 (brief section 22/23) -- activityId/horizon/
+  // timePreference/durationMinutes bucket/source only. Never free text,
+  // email, person name, public token, location coordinates, or birth
+  // information (brief section 23) -- FORBIDDEN_METADATA_KEYS already
+  // structurally blocks the sensitive ones even if a mistake were made here.
+  GUEST_TIMING_SEARCH_STARTED: {
+    activityId: activityIdField,
+    horizon: guestHorizonField,
+    timePreference: guestTimePreferenceField,
+    source: guestSourceField,
+  },
+  GUEST_TIMING_RESULT_VIEWED: {
+    activityId: activityIdField,
+    resultCount: { type: 'number', min: 0, max: 3 },
+    source: guestSourceField,
+  },
+  GUEST_SIGNUP_STARTED: {
+    source: guestSourceField,
+  },
+  GUEST_SIGNUP_COMPLETED: {
+    source: guestSourceField,
+  },
+  GUEST_RESULT_SAVED: {
+    activityId: activityIdField,
+    source: guestSourceField,
+  },
+  // My Day V1 (brief section 44/45) -- intentionCategory/activityId/
+  // itemType/dayPhase only. Never person name, raw narrative, raw prompt,
+  // birth details, or coordinates (brief section 44) -- all already
+  // structurally blocked by FORBIDDEN_METADATA_KEYS as defense-in-depth.
+  MY_DAY_INTENTION_OPENED: {
+    dayPhase: myDayDayPhaseField,
+  },
+  MY_DAY_INTENTION_SELECTED: {
+    intentionCategory: myDayIntentionCategoryField,
+    activityId: activityIdField,
+    dayPhase: myDayDayPhaseField,
+  },
+  MY_DAY_ITEM_OPENED: {
+    itemType: myDayItemTypeField,
+    dayPhase: myDayDayPhaseField,
+  },
+  MY_DAY_ADD_STARTED: {
+    intentionCategory: myDayIntentionCategoryField,
+    activityId: activityIdField,
+    dayPhase: myDayDayPhaseField,
+  },
+  // Recipient Conversion V1 Hardening (brief section 16) -- activityId/
+  // source only, same restrained shape as the other GUEST_* events.
+  GUEST_RESULT_RESTORED: {
+    activityId: activityIdField,
+    source: guestSourceField,
+  },
+  ONBOARDING_HANDOFF_VIEWED: {
+    activityId: activityIdField,
+    source: guestSourceField,
+  },
+  MY_DAY_OPENED_FROM_HANDOFF: {
+    source: guestSourceField,
+  },
+  // Daily Reflection & Tomorrow Preview V1 (brief section 15) -- aggregate
+  // counts and closed enums only. Never raw journal/reflection text, person
+  // names, birth data, or a Moment token (brief's own explicit forbidden
+  // list) -- FORBIDDEN_METADATA_KEYS already structurally blocks the
+  // sensitive ones (name/email/token/etc) as defense-in-depth, and there is
+  // no free-text field here to forbid in the first place (brief section 12:
+  // no free-text journal storage in V1).
+  DAILY_REFLECTION_VIEWED: {
+    completedCount: { type: 'number', min: 0, max: 100 },
+    missedCount: { type: 'number', min: 0, max: 100 },
+  },
+  TOMORROW_PREVIEW_VIEWED: {
+    hasScheduledItems: { type: 'boolean' },
+    goodForCategoryCount: { type: 'number', min: 0, max: 10 },
+  },
+  TOMORROW_PROMPT_SELECTED: {
+    intentionCategory: myDayIntentionCategoryField,
+    activityId: activityIdField,
+  },
+  TOMORROW_PLAN_STARTED: {
+    // Omitted when the handoff started from the generic "Plan tomorrow"
+    // link rather than a specific "Make room for..." suggestion.
+    activityId: activityIdField,
   },
 };
 
