@@ -38,6 +38,8 @@ Production `new Date()` behavior is unchanged in both cases.
 
 ## What's covered vs. deferred
 
-Covered: My Day → Add Plan (A), shared Moment + recipient accept + Bell (B), reminder → Bell → seen (C), Good Right Now INSTANT/FIXED/USER_SELECTED + double-click regression (D), MISSED-vs-COMPLETED regression (E), Night Reflection + Tomorrow Preview (F), Tomorrow Preview → Plan tomorrow → day rollover (G), Good Right Now/Aura Suggests dedup (J), caution-never-"Best" presentation (K).
+Covered: My Day → Add Plan (A), shared Moment + recipient accept + Bell (B), reminder → Bell → seen (C), Good Right Now INSTANT/FIXED/USER_SELECTED + double-click regression (D), MISSED-vs-COMPLETED regression (E), Night Reflection + Tomorrow Preview (F), Tomorrow Preview → Plan tomorrow → day rollover (G), Recipient Conversion (H) — full guest→signup→restore→Plan loop, idempotency, true concurrent redemption, stale-candidate recovery, expired/tampered guest state, existing-user `/find`, magic-link-click restore, analytics + privacy boundaries — Ask Aura cross-feature handoffs (I) — CHECK/FIND/SHARED/Panchang/Muhurtham intents, casual-vs-Muhurtham routing regression, follow-up context, Why, Unknown/clarification — Good Right Now/Aura Suggests dedup (J), caution-never-"Best" presentation (K).
 
-Not covered by this pass (documented, not silently skipped — see the brief's own completion report): Recipient Conversion (H) and Ask Aura cross-feature handoffs (I). Both are real, valuable journeys; scoped out here to keep this pass's E2E suite reviewable rather than rushed. Good candidates for the next E2E addition.
+Both H and I also carry responsive (375px) and accessibility smoke coverage (`recipientConversionAskAuraSmoke.spec.ts`).
+
+Not covered by this pass: deeper Ask Aura conversational breadth beyond the intents above (only a few representative intents were protected, per the brief's own scope — this suite is a regression net for existing behavior, not exhaustive intent coverage), and acquisition channels other than the Recipient Conversion (shared-Moment) path. Good candidates for a future E2E addition.

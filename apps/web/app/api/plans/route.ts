@@ -44,6 +44,25 @@ function parseWindowType(value: unknown): string {
   return VALID_WINDOW_TYPES.has(trimmed) ? trimmed : '';
 }
 
+/** E2E Journey Coverage V1.1 (brief section 4) -- a short, bounded poll
+ * for the guest-conversion claim's WINNER to finish
+ * createPlannedActivity + fillGuestConversionRedemption, closing the real
+ * race a single immediate re-check missed. Five checks, 100ms apart
+ * (~500ms worst case, far under any request timeout) -- deliberately not
+ * a distributed lock, just enough real time for a genuinely fast concurrent
+ * write to land. */
+async function awaitGuestConversionFill(tokenHash: string, userId: string) {
+  for (let attempt = 0; attempt < 5; attempt++) {
+    await new Promise((resolve) => setTimeout(resolve, 100));
+    const redemption = await getGuestConversionRedemption(tokenHash);
+    if (redemption?.plannedActivityId) {
+      const plan = await getPlannedActivityForOwner(userId, redemption.plannedActivityId);
+      if (plan) return plan;
+    }
+  }
+  return null;
+}
+
 function parseCalendarUrl(value: unknown): string | null {
   const trimmed = cleanString(value, 2000);
   if (!trimmed) return null;
@@ -94,24 +113,31 @@ export async function POST(req: NextRequest) {
       if (existingPlan) return NextResponse.json(existingPlan);
       // The referenced Plan is somehow gone -- fall through and create a
       // fresh one rather than returning a dead end.
-    } else if (!existing) {
+    } else if (existing) {
+      // E2E Journey Coverage V1.1 (brief section 4) -- someone else already
+      // claimed this token but hasn't finished filling it in yet (a
+      // concurrent request from the same code-entry/magic-link double-fire).
+      // Wait for them rather than immediately creating a second Plan.
+      const filled = await awaitGuestConversionFill(guestConversionTokenHash, session.userId);
+      if (filled) return NextResponse.json(filled);
+      // Still unfilled after the bounded wait -- an orphaned claim from a
+      // genuinely failed prior attempt. Falls through and creates a fresh
+      // Plan rather than blocking the user's save forever.
+    } else {
       const claimed = await claimGuestConversionToken(guestConversionTokenHash, session.userId);
       if (!claimed) {
         // Lost a genuine sub-second race to a concurrent request from the
-        // same user. Give it one chance to have finished, then just
-        // proceed -- occasionally allowing a duplicate under a rare race
-        // is better than ever silently dropping the user's save.
-        const raced = await getGuestConversionRedemption(guestConversionTokenHash);
-        if (raced?.plannedActivityId) {
-          const racedPlan = await getPlannedActivityForOwner(session.userId, raced.plannedActivityId);
-          if (racedPlan) return NextResponse.json(racedPlan);
-        }
+        // same user. Previously this checked ONCE immediately and gave up
+        // -- under real concurrency the winner rarely finishes
+        // createPlannedActivity + fillGuestConversionRedemption that fast,
+        // so the loser almost always created its own duplicate Plan
+        // (reproduced live: 5 simultaneous requests for one token produced
+        // 3 distinct Plans). A short bounded wait for the winner closes
+        // this without becoming a distributed lock.
+        const filled = await awaitGuestConversionFill(guestConversionTokenHash, session.userId);
+        if (filled) return NextResponse.json(filled);
       }
     }
-    // else: existing claim with no plannedActivityId yet -- an orphaned
-    // claim from a prior failed attempt (brief section 10's "smallest
-    // idempotency mechanism", not a distributed lock). Falls through and
-    // retries rather than blocking the user's save forever.
   }
 
   const title = typeof body?.title === 'string' ? body.title.trim() : '';
