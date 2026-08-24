@@ -1,7 +1,7 @@
 'use client';
 
 import React, { useEffect, useMemo, useRef, useState } from 'react';
-import { getPersonalizedTasks, UserChartContext, FULL_ACTIVITY_CATALOG, normalizeWindowType, PersonalizedTask } from '../../../packages/recommendation/src/personalizedTasks';
+import { UserChartContext, FULL_ACTIVITY_CATALOG, normalizeWindowType } from '../../../packages/recommendation/src/personalizedTasks';
 import { getActionCards, getActivityDiscoveryCards, ActionCard } from '../../../packages/recommendation/src/actionCards';
 import { getActivityDefinition, ImmediateAction, ActivityDurationMode } from '../../../packages/recommendation/src/activityDefinitions';
 import type { DailyBriefing } from '../../../packages/recommendation/src/dailyAssistant';
@@ -13,7 +13,7 @@ import { stripCountdownWrapper } from '../lib/formatTimeLeft';
 import { trackEvent } from '../lib/trackEvent';
 import * as theme from './theme';
 import { colors, spacing, typography } from './theme';
-import { PageHeader, SectionHeader, SurfaceCard, StatusBadge, IconButton, PrimaryButton, SecondaryButton, TextButton, ActivityChip, ModalShell, useModalA11y, TextAreaInput } from './ui';
+import { PageHeader, SectionHeader, SurfaceCard, StatusBadge, IconButton, PrimaryButton, SecondaryButton, TextButton, ActivityChip } from './ui';
 import type { DailyAgenda, DailyAgendaItem } from '../lib/dailyAgenda';
 import type { DailyStory } from '../lib/dailyStory';
 import type { DailyReflection } from '../lib/dailyReflection';
@@ -348,11 +348,6 @@ export function HomeDashboard({
   onOpenAgendaItem,
   onPlanTomorrow,
 }: HomeDashboardProps) {
-  const [selectedHabit, setSelectedHabit] = useState<string | null>(null);
-  const [selectedPlanId, setSelectedPlanId] = useState<string | null>(null);
-  const [activityNote, setActivityNote] = useState('');
-  const [isSubmitting, setIsSubmitting] = useState(false);
-  const [logError, setLogError] = useState('');
   const [reflectionSaved, setReflectionSaved] = useState(Boolean(todayReflection));
   const [isEditingReflection, setIsEditingReflection] = useState(false);
   const [isSavingReflection, setIsSavingReflection] = useState(false);
@@ -367,16 +362,6 @@ export function HomeDashboard({
     setReflectionError('');
   }, [todayReflection?.outputLevel]);
 
-  const personalizedTasks = useMemo(
-    () => getPersonalizedTasks(activeWindowName, userChart, loggedActivitiesToday),
-    [activeWindowName, userChart, loggedActivitiesToday]
-  );
-  const primaryTask = personalizedTasks[0] ?? {
-    id: 'steady-progress',
-    title: bestForToday[0] ?? 'Steady Progress',
-    description: themeText,
-    icon: '✨',
-  };
   const tone = getWindowTone(energyScore, activeWindowName);
   // The "Next Best Moment" card's OWN tone -- must not reuse `tone` above,
   // which describes the CURRENT window (e.g. a Rahu Kalam caution color
@@ -419,32 +404,21 @@ export function HomeDashboard({
     [activeWindowName, loggedActivitiesToday, justLoggedTitles]
   );
 
-  // Product Journey / E2E Hardening V1 (brief section 17) -- canonical
-  // activityIds already visible in Good Right Now this render, so Aura
-  // Suggests can dedup against them by id, never by fuzzy title matching.
-  const goodRightNowActivityIds = useMemo(
-    () => new Set(goodRightNow.map((card) => card.activityId).filter((id): id is string => Boolean(id))),
-    [goodRightNow]
-  );
-
-  // Home Recommendation Hierarchy V1 -- "Aura Suggests" prefers actual
-  // agenda context (myDayAgenda.nextItem) over a second, disconnected
-  // current-window ranking, and can be hidden entirely when it has nothing
-  // additive over Good Right Now. Only its ACTIVITY_FALLBACK tier ever
-  // recommends a catalog activity at all -- see auraSuggests.ts's own doc
-  // comment for the root-cause history (the caution-window tier used to
-  // pick an activity with no dedup check; it no longer picks one at all).
+  // Home Recommendation Hierarchy V1 (+ amendment) -- Aura Suggests
+  // interprets DailyAgenda/window context only; it never recommends a
+  // catalog activity (that would overlap Good Right Now's own job even
+  // with canonical-id dedup -- see auraSuggests.ts's own doc comment for
+  // the full history). Hidden entirely (null) when it has nothing additive
+  // to say -- a genuinely empty, non-caution day is the expected null
+  // case, not a fallback state to avoid.
   const assistantSuggestion: AuraSuggestion | null = useMemo(
     () =>
       deriveAuraSuggestion({
         agenda: myDayAgenda,
         activeWindowName,
         currentWindowEndTime: currentWindow?.endTime,
-        personalizedTasks: personalizedTasks.length > 0 ? personalizedTasks : [primaryTask as PersonalizedTask],
-        goodRightNowActivityIds,
-        timeLeftBeforeNextShift: stripCountdownWrapper(remainingText),
       }),
-    [myDayAgenda, activeWindowName, currentWindow?.endTime, personalizedTasks, primaryTask, goodRightNowActivityIds, remainingText]
+    [myDayAgenda, activeWindowName, currentWindow?.endTime]
   );
 
   // Next Best Moment's end time -- nextShift itself only carries a start
@@ -455,29 +429,6 @@ export function HomeDashboard({
     () => dayWindows?.find((w) => w.startTime === nextShift.startTime) ?? null,
     [dayWindows, nextShift.startTime]
   );
-
-  const handleConfirmLog = async () => {
-    if (!selectedHabit) return;
-    setIsSubmitting(true);
-    setLogError('');
-    try {
-      if (selectedPlanId && onLogPlan) {
-        await onLogPlan(selectedPlanId);
-      } else if (onLogActivity) {
-        const selectedTask = personalizedTasks.find((task) => task.title === selectedHabit);
-        await onLogActivity(selectedHabit, activityNote, undefined, undefined, 30, 'AURA_DO_NOW', selectedTask?.significance);
-      }
-      triggerHaptic('success');
-      setSelectedHabit(null);
-      setSelectedPlanId(null);
-      setActivityNote('');
-    } catch (err) {
-      console.error('Failed to log activity:', err);
-      setLogError('Could not log this activity. Try again.');
-    } finally {
-      setIsSubmitting(false);
-    }
-  };
 
   const handleReflection = async (outputLevel: 'LOW' | 'MODERATE' | 'PEAK_FLOW') => {
     if (!onSubmitReflection || isSavingReflection) return;
@@ -650,41 +601,28 @@ export function HomeDashboard({
                 <h2 style={{ margin: 0, color: colors.textPrimary, fontSize: 18, lineHeight: 1.2 }}>{assistantSuggestion.title}</h2>
                 <p style={{ margin: '8px 0 0', color: colors.textFaint, lineHeight: 1.38, fontSize: 14 }}>{assistantSuggestion.description}</p>
               </div>
-              {/* CAUTION_CONTEXT carries no actionLabel at all (brief section
-               * 7: "no action required") -- nothing renders below the copy. */}
+              {/* CAUTION_CONTEXT carries no actionLabel at all (brief
+               * amendment section 4/7: "no action required") -- nothing
+               * renders below the copy. Every OTHER type either describes
+               * an existing agenda item (View -> onOpenAgendaItem, the same
+               * routing Your Day's own rows use) or is OPEN_GAP (Add
+               * something -> onPlanClick, reusing Your Day's own timeline
+               * entry point -- never a second Plan flow, never a log
+               * action: Aura Suggests doesn't recommend activities). */}
               {assistantSuggestion.actionLabel && (
                 <div style={{ gridColumn: '1 / -1', display: 'flex', gap: spacing.md, alignItems: 'center', justifyContent: 'space-between', marginTop: 3 }}>
                   <PrimaryButton
                     onClick={() => {
-                      // PREPARE_FOR_PLAN / PREPARE_FOR_MOMENT / COORDINATION
-                      // describe something already on the agenda -- open it
-                      // (the same routing Your Day's own rows use).
                       if (assistantSuggestion.agendaItem) {
                         onOpenAgendaItem?.(assistantSuggestion.agendaItem);
                         return;
                       }
-                      // OPEN_GAP reuses the exact same "Add something" entry
-                      // point Your Day's own timeline already exposes --
-                      // never a second Plan flow.
-                      if (assistantSuggestion.type === 'OPEN_GAP') {
-                        onPlanClick?.();
-                        return;
-                      }
-                      // ACTIVITY_FALLBACK -- the only type that ever logs.
-                      setSelectedHabit(assistantSuggestion.title);
-                      setSelectedPlanId(null);
-                      setLogError('');
+                      onPlanClick?.();
                     }}
                   >
                     {assistantSuggestion.actionLabel}
                   </PrimaryButton>
-                  <TextButton
-                    onClick={() =>
-                      assistantSuggestion.agendaItem || assistantSuggestion.type === 'OPEN_GAP'
-                        ? onNextShiftClick?.()
-                        : onPlanClick?.(assistantSuggestion.title)
-                    }
-                  >
+                  <TextButton onClick={() => onNextShiftClick?.()}>
                     {assistantSuggestion.secondaryLabel} →
                   </TextButton>
                 </div>
@@ -798,24 +736,6 @@ export function HomeDashboard({
        * redundant with the "What are you thinking about?" prompt already
        * at the top of this page -- removed, not just hidden, since the top
        * one already covers the same action. */}
-
-      {selectedHabit && (
-        <LogActivityModal
-          title={selectedHabit}
-          activeWindowName={activeWindowName}
-          note={activityNote}
-          isSubmitting={isSubmitting}
-          error={logError}
-          onNoteChange={setActivityNote}
-          onCancel={() => {
-            if (isSubmitting) return;
-            setSelectedHabit(null);
-            setSelectedPlanId(null);
-            setLogError('');
-          }}
-          onConfirm={handleConfirmLog}
-        />
-      )}
     </div>
   );
 }
@@ -1150,59 +1070,6 @@ function formatReflectionLabel(outputLevel: 'LOW' | 'MODERATE' | 'PEAK_FLOW') {
   if (outputLevel === 'LOW') return 'Low';
   if (outputLevel === 'PEAK_FLOW') return 'Strong';
   return 'Balanced';
-}
-
-function LogActivityModal({
-  title,
-  activeWindowName,
-  note,
-  isSubmitting,
-  error,
-  onNoteChange,
-  onCancel,
-  onConfirm,
-}: {
-  title: string;
-  activeWindowName: string;
-  note: string;
-  isSubmitting: boolean;
-  error: string;
-  onNoteChange: (value: string) => void;
-  onCancel: () => void;
-  onConfirm: () => void;
-}) {
-  const dialogRef = useRef<HTMLDivElement>(null);
-  const noteRef = useRef<HTMLTextAreaElement>(null);
-
-  useModalA11y({ isOpen: true, onClose: () => { if (!isSubmitting) onCancel(); }, dialogRef, initialFocusRef: noteRef });
-
-  return (
-    <ModalShell
-      dialogRef={dialogRef}
-      labelledBy="home-log-title"
-      describedBy="home-log-window"
-      title={`Log ${title}?`}
-      description={`Tagging this under ${formatWindowName(activeWindowName)}.`}
-      maxWidth={360}
-      footer={
-        <>
-          <SecondaryButton
-            onClick={onCancel}
-            disabled={isSubmitting}
-            style={{ flex: 1, background: 'transparent', borderColor: colors.borderDefault, color: colors.textMuted }}
-          >
-            Cancel
-          </SecondaryButton>
-          <PrimaryButton onClick={onConfirm} disabled={isSubmitting} loading={isSubmitting} style={{ flex: 1 }}>
-            Confirm log
-          </PrimaryButton>
-        </>
-      }
-    >
-      <TextAreaInput ref={noteRef} placeholder="Optional notes or reflection..." value={note} onChange={(event) => onNoteChange(event.target.value)} rows={3} active={Boolean(note)} />
-      {error && <div style={{ color: colors.danger, fontSize: 12, lineHeight: 1.35, marginTop: spacing.md }}>{error}</div>}
-    </ModalShell>
-  );
 }
 
 const inputShellStyle: React.CSSProperties = {

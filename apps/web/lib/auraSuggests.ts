@@ -1,41 +1,39 @@
 import type { DailyAgenda, DailyAgendaItem } from './dailyAgenda';
-import type { PersonalizedTask } from '../../../packages/recommendation/src/personalizedTasks';
 
 /**
- * Home Recommendation Hierarchy V1 -- "Aura Suggests" answers "given the
- * shape of my actual day, what would be useful to know or prepare for?",
- * distinct from "Good Right Now" ("what can I actually do right now?").
+ * Home Recommendation Hierarchy V1 (+ amendment) -- three Home surfaces,
+ * three non-overlapping questions:
  *
- * Root cause this rewrite fixes (see the PR's own completion report for the
- * full audit): the previous caution-window tier picked an activity straight
- * from `personalizedTasks` with NO dedup check against Good Right Now --
- * unlike the generic fallback tier below it, which already deduped
- * correctly by canonical activityId. Whenever the caution-window branch
- * fired (i.e. during Rahu Kalam/Yama -- common, not an edge case), it could
- * and did surface the exact same canonical activity Good Right Now was
- * already showing (e.g. "Process Optimization & Docs" in both).
+ *   GOOD RIGHT NOW           "What can I do right now?"
+ *   AURA SUGGESTS            "What should I know about / how should I
+ *                             navigate the day I've already built?"
+ *   INTENTIONAL DAY BUILDER  "What should I intentionally add to my day?"
+ *                             (not built yet -- this file must not compete
+ *                             with it once it exists)
  *
- * The fix is architectural, not just an added exclusion check: only ONE
- * tier (ACTIVITY_FALLBACK) is still allowed to recommend a catalog activity
- * at all. Every other tier is agenda/context guidance derived from
- * DailyAgenda -- structurally incapable of duplicating a Good Right Now
- * activity, because it never chooses one. `CAUTION_CONTEXT` in particular
- * no longer picks a "low-stakes task"; it now says something about the
- * window/day itself (mirroring the brief's own worked example: "Keep this
- * morning light... your first planned activity is not until noon"), using
- * only already-computed window/agenda facts.
+ * Aura Suggests is therefore NOT a generic activity recommender. It never
+ * picks a catalog activity, never scores one, and never routes to the
+ * log-activity flow. It only interprets DailyAgenda (a next Plan/Moment, a
+ * gap, a caution window) -- every branch below either opens an existing
+ * agenda item or says something about the day/window itself. Returns null
+ * when nothing additive remains to say; the card is hidden entirely rather
+ * than duplicating Good Right Now or acting as a second "what should I do"
+ * engine. Zero Aura Suggests is correct, expected behavior, not a fallback
+ * state to avoid.
  *
- * This is presentation/selection logic only: no new scoring engine, no new
- * astrology, no new time-of-day math beyond what the caller already has.
+ * History: this file originally had a sixth tier, ACTIVITY_FALLBACK, that
+ * picked a personalizedTasks() candidate not already shown in Good Right
+ * Now. Canonical-id dedup made it impossible to show the EXACT SAME
+ * activity as Good Right Now, but the two surfaces could still both
+ * recommend "an activity appropriate right now" -- overlapping product
+ * semantics even without a literal duplicate. Removed outright (brief
+ * amendment section 1): no other caller existed, so there was nothing to
+ * preserve. getPersonalizedTasks() itself is untouched in
+ * personalizedTasks.ts -- only this file's use of it as a generic fallback
+ * is gone.
  */
 
-export type AuraSuggestionType =
-  | 'PREPARE_FOR_PLAN'
-  | 'PREPARE_FOR_MOMENT'
-  | 'COORDINATION'
-  | 'OPEN_GAP'
-  | 'CAUTION_CONTEXT'
-  | 'ACTIVITY_FALLBACK';
+export type AuraSuggestionType = 'PREPARE_FOR_PLAN' | 'PREPARE_FOR_MOMENT' | 'COORDINATION' | 'OPEN_GAP' | 'CAUTION_CONTEXT';
 
 export interface AuraSuggestion {
   type: AuraSuggestionType;
@@ -44,16 +42,11 @@ export interface AuraSuggestion {
   icon: string;
   /** Present for PREPARE_FOR_PLAN / PREPARE_FOR_MOMENT / COORDINATION --
    * the primary action opens this agenda item via the existing
-   * onOpenAgendaItem routing (the same one Your Day's own rows use), never
-   * a log-activity modal. */
+   * onOpenAgendaItem routing (the same one Your Day's own rows use). */
   agendaItem?: DailyAgendaItem;
-  /** Present only for ACTIVITY_FALLBACK -- the canonical catalog id behind
-   * this suggestion, so the primary action can log it via the existing
-   * log-activity pipeline. Never present on any other type: most Aura
-   * Suggestions aren't about an activity at all (brief section 6). */
-  activityId?: string;
-  /** Absent entirely for CAUTION_CONTEXT -- brief section 7: "no action
-   * required". Every other type has one. */
+  /** Absent entirely for CAUTION_CONTEXT -- brief section 4/7: "no action
+   * required", never a generic activity attached just to give the card an
+   * action. Every other type has one. */
   actionLabel?: string;
   secondaryLabel?: string;
 }
@@ -80,18 +73,8 @@ export function deriveAuraSuggestion(input: {
    * reused verbatim for CAUTION_CONTEXT's day-framing -- never recomputed,
    * same string HomeDashboard already shows elsewhere (currentWindow.endTime). */
   currentWindowEndTime?: string;
-  /** Already-ranked catalog tasks for the current window (existing
-   * getPersonalizedTasks output) -- never recomputed here. Consulted only
-   * by the ACTIVITY_FALLBACK tier. */
-  personalizedTasks: PersonalizedTask[];
-  /** Canonical activityIds already visible in Good Right Now this render. */
-  goodRightNowActivityIds: Set<string>;
-  /** stripCountdownWrapper(remainingText) from the caller -- e.g. "2h 30m"
-   * or '' -- used only for ACTIVITY_FALLBACK's situating phrase, exactly as
-   * the pre-existing logic did. */
-  timeLeftBeforeNextShift: string;
 }): AuraSuggestion | null {
-  const { agenda, activeWindowName, currentWindowEndTime, personalizedTasks, goodRightNowActivityIds, timeLeftBeforeNextShift } = input;
+  const { agenda, activeWindowName, currentWindowEndTime } = input;
   const nextItem = agenda?.nextItem;
   const nextItemActive = nextItem && nextItem.status !== 'STARTING_SOON' && nextItem.status !== 'CURRENT' ? nextItem : undefined;
 
@@ -127,12 +110,14 @@ export function deriveAuraSuggestion(input: {
     };
   }
 
-  // CAUTION_CONTEXT -- day/window framing, never an activity pick (the bug
-  // this rewrite fixes). Takes priority over a plain next-Plan "prepare"
-  // framing during a caution window (section 12's worked example: "Keep
-  // this morning light... your first planned activity is not until noon"
-  // is the preferred framing over "Prepare for Learning" when both apply),
-  // referencing the next Plan by name when one exists.
+  // CAUTION_CONTEXT -- day/window framing, never an activity pick. Takes
+  // priority over a plain next-Plan "prepare" framing during a caution
+  // window (section 12's worked example: "Keep this morning light... your
+  // first planned activity is not until noon" is the preferred framing
+  // over "Prepare for Learning" when both apply), referencing the next
+  // Plan by name when one exists. Useful even with a fully empty agenda --
+  // it interprets the current timing context, it doesn't need a Plan to
+  // anchor to.
   if (isCautionWindow(activeWindowName)) {
     const nextPlan = nextItemActive?.type === 'PLAN' ? nextItemActive : undefined;
     const agendaClause = nextPlan
@@ -146,7 +131,7 @@ export function deriveAuraSuggestion(input: {
       title: 'Keep this window light',
       description: `${agendaClause}${windowClause}`,
       icon: '🛡️',
-      // Brief section 7: "no action required" -- actionLabel intentionally omitted.
+      // Brief section 4/7: "no action required" -- actionLabel intentionally omitted.
     };
   }
 
@@ -166,40 +151,30 @@ export function deriveAuraSuggestion(input: {
   }
 
   // OPEN_GAP -- nothing left ahead on today's agenda, but there WAS a day
-  // (something planned, current, or already completed) -- a genuinely
-  // meaningful gap, described using only the existing agenda, never
-  // auto-filled with another activity suggestion.
-  if (!nextItemActive && (agenda?.items.length ?? 0) > 0) {
+  // (something planned, current, or already completed). Interprets the gap
+  // using only the existing agenda -- never a disguised activity fallback
+  // (brief amendment section 3): no catalog activity is named or
+  // suggested here. When the most recent past/current item is known,
+  // reference it by name ("Your day is open after Learning") rather than a
+  // bare generic message -- that's the Intentional Day Builder's future
+  // job to fill, not this card's.
+  const items = agenda?.items ?? [];
+  if (!nextItemActive && items.length > 0) {
+    const lastItem = items[items.length - 1];
+    const lastTitle = agendaItemDisplayTitle(lastItem);
     return {
       type: 'OPEN_GAP',
       title: 'Open time ahead',
-      description: "Nothing else is on your agenda right now -- a good stretch of open time.",
+      description: `Your day is open after ${lastTitle}. Nothing else is on your agenda right now.`,
       icon: '🌤️',
       actionLabel: 'Add something',
       secondaryLabel: 'View full day timeline',
     };
   }
 
-  // ACTIVITY_FALLBACK -- the ONLY tier allowed to recommend a catalog
-  // activity, and only the first one Good Right Now isn't already showing
-  // (canonical activityId dedup, never fuzzy title matching).
-  const genericTask = personalizedTasks.find((task) => !goodRightNowActivityIds.has(task.id));
-  if (genericTask) {
-    const description = timeLeftBeforeNextShift
-      ? `You have about ${timeLeftBeforeNextShift} before the next shift, making this a good time to ${genericTask.title.toLowerCase()}.`
-      : genericTask.description;
-    return {
-      type: 'ACTIVITY_FALLBACK',
-      title: genericTask.title,
-      description,
-      icon: genericTask.icon || '✨',
-      activityId: genericTask.id,
-      actionLabel: 'Do it now',
-      secondaryLabel: 'More options',
-    };
-  }
-
-  // Nothing additive to say -- hide entirely rather than duplicate Good
-  // Right Now.
+  // Nothing additive to say -- hide entirely. A genuinely empty,
+  // non-caution day with no agenda context is the expected null case
+  // (brief amendment section 5): Good Right Now still owns "what can I do
+  // right now" on its own, without a second card echoing it.
   return null;
 }

@@ -3,36 +3,66 @@ import { createPlan, logHabitInstant } from '../fixtures/testData';
 import { findNeutralInstant, findInstantBeforeRahuKalam, findInstantDuringRahuKalam } from '../fixtures/panchangWindows';
 
 /**
- * Home Recommendation Hierarchy V1 -- permanent regression coverage for the
- * bug this PR fixes: Good Right Now and Aura Suggests could recommend the
- * exact same canonical activity (e.g. "Process Optimization & Docs" in
- * both), because Aura Suggests' caution-window tier used to pick an
- * activity with no dedup check at all. The fix is architectural (only one
- * Aura Suggests tier, ACTIVITY_FALLBACK, ever recommends a catalog
- * activity; every other tier is agenda/context guidance derived from
- * DailyAgenda) -- these tests protect that architecture, not just the one
- * originally-reported id collision.
+ * Home Recommendation Hierarchy V1 (+ amendment) -- permanent regression
+ * coverage for the bug this PR fixes: Good Right Now and Aura Suggests
+ * could recommend the exact same canonical activity, and even after the
+ * first pass's canonical-id dedup, Aura Suggests could STILL act as a
+ * second "what activity should I do right now" engine via its
+ * ACTIVITY_FALLBACK tier -- overlapping product semantics even without a
+ * literal duplicate. The amendment removed ACTIVITY_FALLBACK entirely:
+ * Aura Suggests now only interprets DailyAgenda/window context (a next
+ * Plan/Moment, a gap, a caution window) and never names a catalog
+ * activity. These tests protect that architecture.
  */
 
-test('overlap regression: Aura Suggests never repeats the exact canonical activity already shown in Good Right Now', async ({ page, testUser }) => {
+test('EMPTY NORMAL DAY: Good Right Now renders, Aura Suggests does not', async ({ page, testUser }) => {
   const neutralInstant = findNeutralInstant(new Date(), testUser.latitude, testUser.longitude, testUser.timezone);
   await page.clock.install({ time: neutralInstant });
   await page.clock.resume();
   await page.goto('/');
 
-  await expect(page.getByText('GOOD RIGHT NOW')).toBeVisible();
+  // No Plans, no Moments, no coordination issue, no meaningful agenda
+  // context, non-caution window -- a fresh testUser fixture is exactly
+  // this state. With ACTIVITY_FALLBACK removed, this is now a
+  // DETERMINISTIC absence, not a conditionally-acceptable one: Aura
+  // Suggests has nothing agenda-aware to say and no generic activity
+  // fallback left to reach for, so it must be null every time.
+  await expect(page.getByText('GOOD RIGHT NOW')).toBeVisible({ timeout: 15000 });
+  const goodRightNowSection = page.locator('div', { has: page.getByText('GOOD RIGHT NOW') });
+  await expect(goodRightNowSection.locator('span').first()).toBeVisible();
+  const goodRightNowTitles = await goodRightNowSection.locator('span').allInnerTexts();
+  expect(goodRightNowTitles.length).toBeGreaterThan(0);
+
+  await expect(page.getByText('✨ Aura Suggests')).toHaveCount(0);
+});
+
+test('EMPTY CAUTION DAY: Good Right Now renders immediate safe actions, Aura Suggests shows contextual caution guidance only', async ({ page, testUser }) => {
+  const rahuInstant = findInstantDuringRahuKalam(new Date(), testUser.latitude, testUser.longitude, testUser.timezone);
+  await setControlledTime(page.context(), rahuInstant.toISOString());
+  await page.clock.install({ time: rahuInstant });
+  await page.clock.resume();
+  await page.goto('/');
+
+  // No Plans/Moments at all -- just a caution window. Good Right Now must
+  // still populate independently (it's a completely separate derivation),
+  // and Aura Suggests may render CAUTION_CONTEXT, but must never recommend
+  // a second activity to fill the time.
+  await expect(page.getByText(/Rahu Kalam/).first()).toBeVisible({ timeout: 15000 });
+  await expect(page.getByText('GOOD RIGHT NOW')).toBeVisible({ timeout: 15000 });
   const goodRightNowSection = page.locator('div', { has: page.getByText('GOOD RIGHT NOW') });
   const goodRightNowTitles = await goodRightNowSection.locator('span').allInnerTexts();
+  expect(goodRightNowTitles.length).toBeGreaterThan(0);
 
-  const auraSuggestsHeading = page.getByText('✨ Aura Suggests');
-  if (await auraSuggestsHeading.count() === 0) {
-    // Hidden entirely -- an explicitly acceptable outcome (brief section 13:
-    // "preferable to duplication"). Nothing further to assert.
-    return;
-  }
-  const auraSuggestsSection = page.locator('div', { has: auraSuggestsHeading });
+  const auraSuggestsSection = page.getByText('✨ Aura Suggests').locator('xpath=..');
+  await expect(async () => {
+    await expect(page.getByText('✨ Aura Suggests')).toBeVisible();
+    await expect(page.getByText('Keep this window light')).toBeVisible();
+    // No action at all -- CAUTION_CONTEXT never attaches a generic activity
+    // just to give the card something to click (brief amendment section 4).
+    await expect(auraSuggestsSection.getByRole('button')).toHaveCount(0);
+  }).toPass({ timeout: 15000 });
+
   const auraSuggestsTitle = await auraSuggestsSection.getByRole('heading').first().innerText();
-
   expect(goodRightNowTitles.some((t) => t.trim() === auraSuggestsTitle.trim())).toBe(false);
 });
 
@@ -109,6 +139,11 @@ test('agenda-aware: logging something with nothing else queued produces open-gap
   await expect(async () => {
     await expect(page.getByText('✨ Aura Suggests')).toBeVisible();
     await expect(page.getByText('Open time ahead')).toBeVisible();
+    // OPEN_GAP references the last completed item by name (adds context)
+    // -- it must NEVER name a different, unrelated catalog activity as
+    // something to go do (brief amendment section 3: "not a disguised
+    // activity fallback").
+    await expect(page.getByText(/Your day is open after Deep Work/)).toBeVisible();
     await expect(auraSuggestsSection.getByRole('button', { name: 'Add something', exact: true })).toBeVisible();
   }).toPass({ timeout: 15000 });
 });
