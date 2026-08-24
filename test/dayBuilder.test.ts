@@ -6,6 +6,8 @@ import {
   swapSuggestion,
   applyUserPriorities,
   resolvePrioritizedIntentionGroups,
+  buildDailyPriorityCoverage,
+  coveredIntentionGroupIds,
   USER_PRIORITY_GROUPS,
   PEOPLE_GROUP_IDS,
   IntentionalDaySuggestion,
@@ -399,6 +401,105 @@ function fakeSuggestion(id: string, groupId: DailyIntentionGroupId, activityId: 
   // ALSO muting it must never resurrect it.
   const workMutedAndPrioritized = selectIntentionCandidates(profile, new Set(['WORK']), 5, resolvePrioritizedIntentionGroups(['WORK']));
   check('A muted group is never suggested even when it is also the user\'s #1 priority', !workMutedAndPrioritized.some((c) => c.groupId === 'WORK'));
+}
+
+// ============================================================
+// Personalized Daily Story V2 -- buildDailyPriorityCoverage /
+// coveredIntentionGroupIds (pure, no timing search involved).
+// ============================================================
+{
+  const now = new Date('2026-08-24T02:30:00.000Z'); // 8:00 AM IST
+  check('No priorities -> empty coverage array', buildDailyPriorityCoverage(agendaWithPlans([], now), []).length === 0);
+}
+{
+  // Completed items count as covered.
+  const now = new Date('2026-08-24T09:00:00.000Z'); // 2:30 PM IST
+  const agenda = agendaWithPlans(
+    [plan({ id: 'p1', title: 'Deep Work', status: 'LOGGED', plannedStartAt: new Date('2026-08-24T03:00:00.000Z'), plannedEndAt: new Date('2026-08-24T04:00:00.000Z') })],
+    now
+  );
+  const coverage = buildDailyPriorityCoverage(agenda, ['WORK']);
+  check('A COMPLETED (LOGGED) item counts as covered', coverage[0]?.state === 'COVERED' && coverage[0]?.agendaItemIds.length === 1);
+}
+{
+  // Cancelled/missed items do not falsely imply accomplishment.
+  const now = new Date('2026-08-24T09:00:00.000Z'); // 2:30 PM IST -- after the plan's own end time, and never logged
+  const agenda = agendaWithPlans(
+    [plan({ id: 'p1', title: 'Deep Work', status: 'UPCOMING', plannedStartAt: new Date('2026-08-24T03:00:00.000Z'), plannedEndAt: new Date('2026-08-24T04:00:00.000Z') })],
+    now
+  );
+  const coverage = buildDailyPriorityCoverage(agenda, ['WORK']);
+  check('A MISSED item (elapsed, never logged) is OPEN, never falsely COVERED', coverage[0]?.state === 'OPEN' && coverage[0]?.agendaItemIds.length === 0);
+}
+{
+  // An UPCOMING (not-yet-happened) item still counts as "already made room for".
+  const now = new Date('2026-08-24T02:30:00.000Z'); // 8:00 AM IST, plan is later today
+  const agenda = agendaWithPlans(
+    [plan({ id: 'p1', title: 'Dinner Date', status: 'UPCOMING', plannedStartAt: new Date('2026-08-24T13:30:00.000Z'), plannedEndAt: new Date('2026-08-24T15:00:00.000Z') })],
+    now
+  );
+  const coverage = buildDailyPriorityCoverage(agenda, ['RELATIONSHIPS']);
+  check('An UPCOMING (not yet happened) matching item still counts as covered', coverage[0]?.state === 'COVERED');
+}
+{
+  const now = new Date('2026-08-24T02:30:00.000Z');
+  const coverage = buildDailyPriorityCoverage(agendaWithPlans([], now), ['RELATIONSHIPS', 'WORK']);
+  check('Nothing on the agenda -> every priority is OPEN', coverage.every((c) => c.state === 'OPEN'));
+  check('coveredIntentionGroupIds of an all-OPEN coverage is empty', coveredIntentionGroupIds(coverage).size === 0);
+}
+{
+  const now = new Date('2026-08-24T02:30:00.000Z');
+  const agenda = agendaWithPlans(
+    [plan({ id: 'p1', title: 'Dinner Date', status: 'UPCOMING', plannedStartAt: new Date('2026-08-24T13:30:00.000Z'), plannedEndAt: new Date('2026-08-24T15:00:00.000Z') })],
+    now
+  );
+  const coverage = buildDailyPriorityCoverage(agenda, ['RELATIONSHIPS']);
+  const covered = coveredIntentionGroupIds(coverage);
+  check('coveredIntentionGroupIds expands a covered UserPriorityGroup to its FULL taxonomy-group mapping', covered.has('RELATIONSHIPS') && covered.has('FAMILY') && covered.has('SOCIAL'));
+}
+
+// ============================================================
+// Personalized Daily Story V2 -- applyUserPriorities with coveredGroupIds
+// (brief section 6: "diversity, not exclusion").
+// ============================================================
+{
+  const base: DailyIntentionGroupId[] = ['RELATIONSHIPS', 'FAMILY', 'SOCIAL', 'SELF', 'ENJOYMENT', 'WORK'];
+  const prioritized = new Set<DailyIntentionGroupId>(['RELATIONSHIPS', 'FAMILY', 'SOCIAL', 'WORK']); // RELATIONSHIPS + WORK user priorities
+  const covered = new Set<DailyIntentionGroupId>(['RELATIONSHIPS', 'FAMILY', 'SOCIAL']); // RELATIONSHIPS priority already covered (Date Night)
+  const reordered = applyUserPriorities(base, prioritized, covered);
+  check('An open prioritized group (WORK) still comes first', reordered[0] === 'WORK');
+  check('A covered prioritized group (RELATIONSHIPS) is demoted below the unprioritized groups, not removed', reordered.includes('RELATIONSHIPS') && reordered.indexOf('SELF') < reordered.indexOf('RELATIONSHIPS'));
+  check('Do not completely suppress the covered priority -- it is still present in the output', new Set(reordered).size === 6);
+}
+{
+  // Zero coveredGroupIds -> identical to the pre-coverage applyUserPriorities behavior.
+  const base: DailyIntentionGroupId[] = ['RELATIONSHIPS', 'FAMILY', 'SOCIAL', 'SELF', 'ENJOYMENT', 'WORK'];
+  const prioritized = new Set<DailyIntentionGroupId>(['WORK']);
+  check('No coverage -> applyUserPriorities behaves exactly as before (backward compatible)', JSON.stringify(applyUserPriorities(base, prioritized)) === JSON.stringify(applyUserPriorities(base, prioritized, new Set())));
+}
+
+// ============================================================
+// Personalized Daily Story V2 -- reasonForCandidate's isPrioritized
+// branch (via selectIntentionCandidates) produces different, still
+// deterministic, still non-repetitive-with-the-generic-case text.
+// ============================================================
+{
+  // An evening-NOT-open day so WORK sits inside the top-5 candidate-attempt
+  // cap regardless of prioritization (baseOrder without evening-open puts
+  // WORK 3rd; on an evening-open day it's 6th/last and would otherwise be
+  // excluded by the cap even before priority is considered, confounding
+  // this specific comparison).
+  const now = new Date('2026-08-24T02:30:00.000Z'); // 8:00 AM IST
+  const agenda = agendaWithPlans(
+    [plan({ id: 'p1', title: 'Dinner Date', status: 'UPCOMING', plannedStartAt: new Date('2026-08-24T18:00:00.000Z'), plannedEndAt: new Date('2026-08-24T19:00:00.000Z') })],
+    now
+  );
+  const profile = buildDayProfile(agenda, 8 * 60);
+  check('Sanity: this agenda has evening NOT open', !profile.hasEveningOpen);
+  const withoutPriority = selectIntentionCandidates(profile, new Set(), 5).find((c) => c.groupId === 'WORK');
+  const withPriority = selectIntentionCandidates(profile, new Set(), 5, resolvePrioritizedIntentionGroups(['WORK'])).find((c) => c.groupId === 'WORK');
+  check('A prioritized candidate gets different reason text than the generic one', Boolean(withoutPriority) && Boolean(withPriority) && withoutPriority!.reason !== withPriority!.reason);
+  check('The personalized reason never spells out the internal group/priority name', !/WORK|UserPriorityGroup|DailyIntentionGroupId/.test(withPriority!.reason));
 }
 
 if (!allPassed) {

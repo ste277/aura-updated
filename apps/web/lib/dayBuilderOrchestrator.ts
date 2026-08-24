@@ -9,6 +9,8 @@ import { findEverydaySharedTiming } from '../../../packages/recommendation/src/e
 import { getActivityDefinition } from '../../../packages/recommendation/src/activityDefinitions';
 import {
   buildDayProfile,
+  buildDailyPriorityCoverage,
+  coveredIntentionGroupIds,
   selectIntentionCandidates,
   candidateFitsOpenings,
   dismissalKey,
@@ -88,7 +90,15 @@ export async function buildIntentionalDaySuggestions(input: {
   // also being a priority (brief section 6's own explicit ordering:
   // dismissed -> muted -> priorities -> diversity -> timing engine).
   const prioritizedGroupIds = resolvePrioritizedIntentionGroups(user.dayBuilderPriorities as UserPriorityGroup[]);
-  const intentionCandidates = selectIntentionCandidates(dayProfile, mutedGroups, MAX_CANDIDATE_ATTEMPTS, prioritizedGroupIds);
+  // Personalized Daily Story V2 (brief section 6) -- "diversity, not
+  // exclusion": a prioritized group already COVERED today (real agenda
+  // content, not inferred) is deprioritized in ordering, never excluded or
+  // muted. Cheap, pure, and computed from the SAME agenda already in hand
+  // -- not a second read, not a duplicated derivation (buildDailyStory's
+  // own personalization uses this identical function via myDayOrchestrator.ts).
+  const coverage = buildDailyPriorityCoverage(agenda, user.dayBuilderPriorities as UserPriorityGroup[]);
+  const coveredGroupIds = coveredIntentionGroupIds(coverage);
+  const intentionCandidates = selectIntentionCandidates(dayProfile, mutedGroups, MAX_CANDIDATE_ATTEMPTS, prioritizedGroupIds, coveredGroupIds);
   // Brief section 13 -- zero is a valid, successful result. Skip every
   // downstream read/search entirely rather than computing anything further.
   if (intentionCandidates.length === 0) return [];
