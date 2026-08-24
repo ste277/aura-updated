@@ -5,14 +5,21 @@
  *
  *   DATABASE_URL="postgresql://..." npx ts-node test/reminderAttentionDb.test.ts
  *
- * Uses one throwaway test user and fully deterministic (never
- * Date.now()-suffixed) scheduledItemIds/reminderAt values -- markReminderSeen
- * is an upsert, so re-running this file never grows the table; there is
- * nothing to clean up (matches test/auraMomentsDb.test.ts's "leaves the
- * User row in place" convention, extended here to the fixture rows too,
- * since ReminderAttention carries no audit significance worth preserving
- * OR worth actively deleting).
+ * Product Journey / E2E Hardening V1 (brief section 29) -- this file
+ * previously used a single hardcoded scheduledItemId shared by BOTH the
+ * PLANNED_ACTIVITY and AURA_MOMENT cross-type-isolation check further
+ * below, reasoning that markReminderSeen's upsert made repeated runs safe.
+ * That reasoning had a real gap: the count assertions below never filtered
+ * by scheduledItemType, so a full prior run's AURA_MOMENT row (same
+ * scheduledItemId, same reminderAt, different type) silently inflated
+ * "exactly N rows" counts on every subsequent run -- reproduced live via
+ * `DATABASE_URL=... npx ts-node test/reminderAttentionDb.test.ts` against
+ * the shared dev database, which had accumulated rows from earlier runs.
+ * Fixed at the root: a fresh, random per-run scheduledItemId (never
+ * reused across runs, so no other run's rows can ever be in scope) rather
+ * than tightening every filter to compensate for a shared identifier.
  */
+import { randomUUID } from 'crypto';
 import { listReminderAttentionForOwner, markReminderSeen, upsertUserByEmail } from '../apps/web/lib/db';
 
 let allPassed = true;
@@ -24,7 +31,7 @@ function check(label: string, condition: boolean) {
 async function main() {
   const owner = await upsertUserByEmail({ email: 'test-reminder-attention-owner@example.com', cityName: 'Chennai', latitude: 13.0827, longitude: 80.2707, timezone: 'Asia/Kolkata' });
 
-  const scheduledItemId = 'plan-attention-fixture';
+  const scheduledItemId = `plan-attention-fixture-${randomUUID()}`;
   const reminderAt = new Date('2026-08-23T10:15:00.000Z');
 
   // ============================================================
