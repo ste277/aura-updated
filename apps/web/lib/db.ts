@@ -25,6 +25,8 @@ export interface User {
   birthTimezone: string | null;
   remindersEnabled: boolean;
   reminderLeadMinutes: number;
+  dayBuilderEnabled: boolean;
+  dayBuilderMutedGroups: string[];
 }
 
 export interface CustomCity {
@@ -652,6 +654,84 @@ export async function getPlannedActivityForOwner(userId: string, planId: string)
   return result.rows[0] ?? null;
 }
 
+// ── Plan creation idempotency (Intentional Day Builder V1, brief section
+// 20) ──────────────────────────────────────────────────────────────────
+// Same "claim, then fill" design as GuestConversionRedemption below, keyed
+// by (userId, clientRequestId) rather than a globally-unique token hash --
+// see migration 0025's own doc comment for why.
+
+export interface PlanCreationClaim {
+  userId: string;
+  clientRequestId: string;
+  plannedActivityId: string | null;
+  createdAt: Date;
+}
+
+export async function getPlanCreationClaim(userId: string, clientRequestId: string): Promise<PlanCreationClaim | null> {
+  const result = await pool.query(
+    `SELECT * FROM "PlanCreationIdempotency" WHERE "userId" = $1 AND "clientRequestId" = $2`,
+    [userId, clientRequestId]
+  );
+  return result.rows[0] ?? null;
+}
+
+/** Returns true if THIS call won the claim (caller should proceed to create
+ * the Plan, then call fillPlanCreationClaim); false if another request
+ * already holds an unfilled claim. Same semantics as
+ * claimGuestConversionToken below. */
+export async function claimPlanCreation(userId: string, clientRequestId: string): Promise<boolean> {
+  const result = await pool.query(
+    `INSERT INTO "PlanCreationIdempotency" ("userId", "clientRequestId") VALUES ($1, $2) ON CONFLICT ("userId", "clientRequestId") DO NOTHING RETURNING *`,
+    [userId, clientRequestId]
+  );
+  return result.rows.length > 0;
+}
+
+export async function fillPlanCreationClaim(userId: string, clientRequestId: string, plannedActivityId: string): Promise<void> {
+  await pool.query(
+    `UPDATE "PlanCreationIdempotency" SET "plannedActivityId" = $1 WHERE "userId" = $2 AND "clientRequestId" = $3`,
+    [plannedActivityId, userId, clientRequestId]
+  );
+}
+
+// ── Day Builder dismissals ("Not today", migration 0026) ─────────────────
+// See that migration's own doc comment for why personId is a '' sentinel
+// rather than nullable.
+
+export interface DayBuilderDismissal {
+  userId: string;
+  localDate: string;
+  activityId: string;
+  personId: string;
+  createdAt: Date;
+}
+
+/** Idempotent by design (ON CONFLICT DO NOTHING on the composite primary
+ * key) -- a double-tap on "Not today" is a no-op, not an error. */
+export async function createDayBuilderDismissal(userId: string, localDate: string, activityId: string, personId: string | null): Promise<void> {
+  await pool.query(
+    `INSERT INTO "DayBuilderDismissal" ("userId", "localDate", "activityId", "personId") VALUES ($1, $2, $3, $4) ON CONFLICT DO NOTHING`,
+    [userId, localDate, activityId, personId ?? '']
+  );
+}
+
+/** Bounded to one local day, same discipline as every other Day Builder
+ * read (brief section 42's "bounded reads only") -- never a full history
+ * scan. */
+export async function listDayBuilderDismissals(userId: string, localDate: string): Promise<DayBuilderDismissal[]> {
+  const result = await pool.query(`SELECT * FROM "DayBuilderDismissal" WHERE "userId" = $1 AND "localDate" = $2`, [userId, localDate]);
+  return result.rows;
+}
+
+/** No route currently calls this -- a dismissal is meant to expire via
+ * real local-day rollover, never deleted in normal product use. Exists so
+ * tests using a fixed fake "today" (dayBuilderDb.test.ts) can clean up
+ * after themselves rather than leaving a permanent dismissal for that
+ * fixed date that would silently affect the next test run. */
+export async function deleteDayBuilderDismissalsForDate(userId: string, localDate: string): Promise<void> {
+  await pool.query(`DELETE FROM "DayBuilderDismissal" WHERE "userId" = $1 AND "localDate" = $2`, [userId, localDate]);
+}
+
 // ── Guest conversion idempotency (Recipient Conversion V1 Hardening, brief
 // section 10) ──────────────────────────────────────────────────────────
 // See migration 0024's own doc comment for the "claim, then fill" design.
@@ -745,6 +825,22 @@ export async function updateUserReminderPrefs(
   const result = await pool.query(
     `UPDATE "User" SET "remindersEnabled" = $2, "reminderLeadMinutes" = $3 WHERE id = $1 RETURNING *`,
     [userId, prefs.remindersEnabled, prefs.reminderLeadMinutes]
+  );
+  return result.rows[0];
+}
+
+/** Intentional Day Builder V1 (brief section 6/35) -- same minimal-surface
+ * pattern as updateUserReminderPrefs above. mutedGroups is validated by the
+ * caller (route) against the real DailyIntentionGroupId set before this is
+ * ever reached -- this function trusts its input, same discipline as
+ * updateUserReminderPrefs. */
+export async function updateUserDayBuilderPrefs(
+  userId: string,
+  prefs: { dayBuilderEnabled: boolean; dayBuilderMutedGroups: string[] }
+): Promise<User> {
+  const result = await pool.query(
+    `UPDATE "User" SET "dayBuilderEnabled" = $2, "dayBuilderMutedGroups" = $3 WHERE id = $1 RETURNING *`,
+    [userId, prefs.dayBuilderEnabled, prefs.dayBuilderMutedGroups]
   );
   return result.rows[0];
 }

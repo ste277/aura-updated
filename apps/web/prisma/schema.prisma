@@ -31,6 +31,12 @@ model User {
   remindersEnabled    Boolean @default(true)
   reminderLeadMinutes Int     @default(15)
 
+  // Intentional Day Builder V1 -- master on/off + muted DailyIntentionGroupId
+  // values (dailyIntentions.ts), same minimal-preference restraint as
+  // remindersEnabled/reminderLeadMinutes above. No per-activity config.
+  dayBuilderEnabled      Boolean  @default(true)
+  dayBuilderMutedGroups  String[] @default([])
+
   habitLogs       HabitLog[]
   visitLogs       VisitLog[]
   habits          Habit[]
@@ -266,6 +272,19 @@ model PlannedActivity {
   @@index([userId, plannedStartAt])
   @@index([userId, status])
 }
+
+// Intentional Day Builder V1 (brief section 20, migration 0025) also adds a
+// "PlanCreationIdempotency" table for Add idempotency, mirroring
+// GuestConversionRedemption's own "claim, then fill" design (see that
+// model's own doc comment above for why PlannedActivity stays unaware of
+// acquisition source). Like GuestConversionRedemption, it's raw-SQL-only
+// and not represented here -- same convention this schema already follows
+// for that table.
+//
+// Migration 0026 similarly adds "DayBuilderDismissal" (the "Not today"
+// dismissal table, keyed by userId + localDate + activityId + personId)
+// -- also raw-SQL-only, same reasoning: it has nothing to do with
+// PlannedActivity's own fields and is a small, scoped side table.
 
 // Tracks app opens (not habit logs) — needed to measure the MVP spec's actual
 // kill criteria: day-2/day-7 return rate. A user can log a habit without this ever

@@ -56,7 +56,12 @@ export type ProductEventName =
   | 'DAILY_REFLECTION_VIEWED'
   | 'TOMORROW_PREVIEW_VIEWED'
   | 'TOMORROW_PROMPT_SELECTED'
-  | 'TOMORROW_PLAN_STARTED';
+  | 'TOMORROW_PLAN_STARTED'
+  | 'DAY_BUILDER_SUGGESTIONS_VIEWED'
+  | 'DAY_BUILDER_SUGGESTION_ADDED'
+  | 'DAY_BUILDER_INVITE_SENT'
+  | 'DAY_BUILDER_ANOTHER_IDEA'
+  | 'DAY_BUILDER_SUGGESTION_DISMISSED';
 
 export const PRODUCT_EVENT_NAMES: ProductEventName[] = [
   'AURA_HOME_VIEWED',
@@ -100,6 +105,11 @@ export const PRODUCT_EVENT_NAMES: ProductEventName[] = [
   'TOMORROW_PREVIEW_VIEWED',
   'TOMORROW_PROMPT_SELECTED',
   'TOMORROW_PLAN_STARTED',
+  'DAY_BUILDER_SUGGESTIONS_VIEWED',
+  'DAY_BUILDER_SUGGESTION_ADDED',
+  'DAY_BUILDER_INVITE_SENT',
+  'DAY_BUILDER_ANOTHER_IDEA',
+  'DAY_BUILDER_SUGGESTION_DISMISSED',
 ];
 
 export function isProductEventName(value: string): value is ProductEventName {
@@ -192,6 +202,18 @@ export const CLIENT_TRACKED_EVENTS: ReadonlySet<ProductEventName> = new Set<Prod
   'TOMORROW_PREVIEW_VIEWED',
   'TOMORROW_PROMPT_SELECTED',
   'TOMORROW_PLAN_STARTED',
+  // Intentional Day Builder V1 (brief section 36) -- ADDED/INVITE_SENT/
+  // ANOTHER_IDEA are UI intent signals from Daily Story's own proactive
+  // suggestion cards (DayBuilderCard.tsx), the same convention as MY_DAY_*
+  // above. SUGGESTIONS_VIEWED is deliberately NOT here -- it's recorded
+  // server-side by GET /api/my-day/suggestions at the moment suggestions
+  // are actually computed (mirrors PLAN_SEARCH_COMPLETED), never duplicated
+  // client-side, and only when at least one suggestion was produced (an
+  // empty result is a successful, quiet outcome, not an impression to log).
+  'DAY_BUILDER_SUGGESTION_ADDED',
+  'DAY_BUILDER_INVITE_SENT',
+  'DAY_BUILDER_ANOTHER_IDEA',
+  'DAY_BUILDER_SUGGESTION_DISMISSED',
 ]);
 
 // Fields that must NEVER appear in ProductEvent.metadata, under any event,
@@ -490,6 +512,41 @@ const EVENT_METADATA_SCHEMAS: Record<ProductEventName, Record<string, FieldSchem
     // Omitted when the handoff started from the generic "Plan tomorrow"
     // link rather than a specific "Make room for..." suggestion.
     activityId: activityIdField,
+  },
+  // Intentional Day Builder V1 (brief section 36) -- intentionCategory/
+  // activityId/dayPhase reuse the exact same closed vocabularies My Day V1
+  // already defined (myDayIntentionCategoryField/activityIdField/
+  // myDayDayPhaseField), not third copies. Never a resolved time, a
+  // person's name, or reason text (all already excluded by
+  // FORBIDDEN_METADATA_KEYS as defense-in-depth, and there's no free-text
+  // field here to forbid in the first place).
+  DAY_BUILDER_SUGGESTIONS_VIEWED: {
+    suggestionCount: { type: 'number', min: 0, max: 3 },
+  },
+  DAY_BUILDER_SUGGESTION_ADDED: {
+    intentionCategory: myDayIntentionCategoryField,
+    activityId: activityIdField,
+    dayPhase: myDayDayPhaseField,
+  },
+  DAY_BUILDER_INVITE_SENT: {
+    intentionCategory: myDayIntentionCategoryField,
+    activityId: activityIdField,
+    dayPhase: myDayDayPhaseField,
+  },
+  DAY_BUILDER_ANOTHER_IDEA: {
+    intentionCategory: myDayIntentionCategoryField,
+    dayPhase: myDayDayPhaseField,
+  },
+  // "Not today" (Day Builder dismiss support) -- hasPerson is a boolean
+  // only (was this a people-oriented/SHARED suggestion), never the actual
+  // person id or name -- FORBIDDEN_METADATA_KEYS already blocks a raw
+  // 'name' key as defense-in-depth, but there's no such field offered here
+  // to begin with.
+  DAY_BUILDER_SUGGESTION_DISMISSED: {
+    activityId: activityIdField,
+    intentionCategory: myDayIntentionCategoryField,
+    hasPerson: { type: 'boolean' },
+    dayPhase: myDayDayPhaseField,
   },
 };
 

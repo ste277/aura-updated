@@ -49,8 +49,12 @@ export default async function globalSetup(config: FullConfig): Promise<void> {
     // Home. Warmed here so every Home-touching test is reliable standalone
     // too, not just as part of the full suite.
     await context.get('/api/my-day').catch(() => {});
+    // Intentional Day Builder V1 -- same cold-compile risk as /api/my-day
+    // above, and now on Home's own critical render path too (DayBuilderCard
+    // fetches it on mount).
+    await context.get('/api/my-day/suggestions').catch(() => {});
 
-    console.log('[e2e warmup] Pre-compiled mark-seen and my-day routes.');
+    console.log('[e2e warmup] Pre-compiled mark-seen, my-day, and my-day/suggestions routes.');
   } finally {
     await context.dispose();
   }
