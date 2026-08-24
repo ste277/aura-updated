@@ -427,23 +427,24 @@ export function HomeDashboard({
     [goodRightNow]
   );
 
-  // Product Journey / E2E Hardening V1 (brief section 14-16) -- "Aura
-  // Suggests" now prefers actual agenda context (myDayAgenda.nextItem) over
-  // a second, disconnected current-window ranking, and can be hidden
-  // entirely when it has nothing additive over Good Right Now. The old
-  // findActionablePlan(upcomingPlans) path was a duplicate derivation of
-  // "what's the next actionable Plan" running in parallel with the
-  // canonical DailyAgenda -- removed in favor of that single source.
+  // Home Recommendation Hierarchy V1 -- "Aura Suggests" prefers actual
+  // agenda context (myDayAgenda.nextItem) over a second, disconnected
+  // current-window ranking, and can be hidden entirely when it has nothing
+  // additive over Good Right Now. Only its ACTIVITY_FALLBACK tier ever
+  // recommends a catalog activity at all -- see auraSuggests.ts's own doc
+  // comment for the root-cause history (the caution-window tier used to
+  // pick an activity with no dedup check; it no longer picks one at all).
   const assistantSuggestion: AuraSuggestion | null = useMemo(
     () =>
       deriveAuraSuggestion({
         agenda: myDayAgenda,
         activeWindowName,
+        currentWindowEndTime: currentWindow?.endTime,
         personalizedTasks: personalizedTasks.length > 0 ? personalizedTasks : [primaryTask as PersonalizedTask],
         goodRightNowActivityIds,
         timeLeftBeforeNextShift: stripCountdownWrapper(remainingText),
       }),
-    [myDayAgenda, activeWindowName, personalizedTasks, primaryTask, goodRightNowActivityIds, remainingText]
+    [myDayAgenda, activeWindowName, currentWindow?.endTime, personalizedTasks, primaryTask, goodRightNowActivityIds, remainingText]
   );
 
   // Next Best Moment's end time -- nextShift itself only carries a start
@@ -635,9 +636,11 @@ export function HomeDashboard({
       <YourDayTimeline agenda={myDayAgenda ?? null} onOpenItem={onOpenAgendaItem} onAddSomething={() => onPlanClick?.()} />
 
       <div style={pairGridStyle}>
-        {/* Product Journey / E2E Hardening V1 (brief section 16) -- hidden
-         * entirely rather than duplicating Good Right Now when
-         * deriveAuraSuggestion() has nothing additive to say. */}
+        {/* Home Recommendation Hierarchy V1 -- hidden entirely rather than
+         * duplicating Good Right Now or repeating a bare agenda fact when
+         * deriveAuraSuggestion() has nothing additive to say. Zero Aura
+         * Suggests is a valid, expected state -- never populated just
+         * because the layout expects a card. */}
         {assistantSuggestion && (
           <SurfaceCard>
             <div style={typography.sectionEyebrow}>✨ Aura Suggests</div>
@@ -647,27 +650,45 @@ export function HomeDashboard({
                 <h2 style={{ margin: 0, color: colors.textPrimary, fontSize: 18, lineHeight: 1.2 }}>{assistantSuggestion.title}</h2>
                 <p style={{ margin: '8px 0 0', color: colors.textFaint, lineHeight: 1.38, fontSize: 14 }}>{assistantSuggestion.description}</p>
               </div>
-              <div style={{ gridColumn: '1 / -1', display: 'flex', gap: spacing.md, alignItems: 'center', justifyContent: 'space-between', marginTop: 3 }}>
-                <PrimaryButton
-                  onClick={() => {
-                    // A PREPARE/CONFIRMED/WAITING suggestion describes
-                    // something already on the agenda -- open it (the same
-                    // routing Your Day's own rows use), never try to log it.
-                    if (assistantSuggestion.agendaItem) {
-                      onOpenAgendaItem?.(assistantSuggestion.agendaItem);
-                      return;
+              {/* CAUTION_CONTEXT carries no actionLabel at all (brief section
+               * 7: "no action required") -- nothing renders below the copy. */}
+              {assistantSuggestion.actionLabel && (
+                <div style={{ gridColumn: '1 / -1', display: 'flex', gap: spacing.md, alignItems: 'center', justifyContent: 'space-between', marginTop: 3 }}>
+                  <PrimaryButton
+                    onClick={() => {
+                      // PREPARE_FOR_PLAN / PREPARE_FOR_MOMENT / COORDINATION
+                      // describe something already on the agenda -- open it
+                      // (the same routing Your Day's own rows use).
+                      if (assistantSuggestion.agendaItem) {
+                        onOpenAgendaItem?.(assistantSuggestion.agendaItem);
+                        return;
+                      }
+                      // OPEN_GAP reuses the exact same "Add something" entry
+                      // point Your Day's own timeline already exposes --
+                      // never a second Plan flow.
+                      if (assistantSuggestion.type === 'OPEN_GAP') {
+                        onPlanClick?.();
+                        return;
+                      }
+                      // ACTIVITY_FALLBACK -- the only type that ever logs.
+                      setSelectedHabit(assistantSuggestion.title);
+                      setSelectedPlanId(null);
+                      setLogError('');
+                    }}
+                  >
+                    {assistantSuggestion.actionLabel}
+                  </PrimaryButton>
+                  <TextButton
+                    onClick={() =>
+                      assistantSuggestion.agendaItem || assistantSuggestion.type === 'OPEN_GAP'
+                        ? onNextShiftClick?.()
+                        : onPlanClick?.(assistantSuggestion.title)
                     }
-                    setSelectedHabit(assistantSuggestion.title);
-                    setSelectedPlanId(assistantSuggestion.planId ?? null);
-                    setLogError('');
-                  }}
-                >
-                  {assistantSuggestion.actionLabel}
-                </PrimaryButton>
-                <TextButton onClick={() => (assistantSuggestion.agendaItem ? onNextShiftClick?.() : onPlanClick?.(assistantSuggestion.title))}>
-                  {assistantSuggestion.secondaryLabel} →
-                </TextButton>
-              </div>
+                  >
+                    {assistantSuggestion.secondaryLabel} →
+                  </TextButton>
+                </div>
+              )}
             </div>
           </SurfaceCard>
         )}

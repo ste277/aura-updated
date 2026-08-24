@@ -42,8 +42,15 @@ export default async function globalSetup(config: FullConfig): Promise<void> {
       },
     }).catch(() => {});
     await context.post('/api/aura-moments/warmup-nonexistent-token/seen').catch(() => {});
+    // Home Recommendation Hierarchy V1 -- discovered via a test run in
+    // isolation (never in a full-suite run, where an earlier test always
+    // warms it first): /api/my-day's first compile can take several
+    // seconds, long enough to flake a test whose FIRST action is visiting
+    // Home. Warmed here so every Home-touching test is reliable standalone
+    // too, not just as part of the full suite.
+    await context.get('/api/my-day').catch(() => {});
 
-    console.log('[e2e warmup] Pre-compiled mark-seen routes.');
+    console.log('[e2e warmup] Pre-compiled mark-seen and my-day routes.');
   } finally {
     await context.dispose();
   }

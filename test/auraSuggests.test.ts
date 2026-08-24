@@ -4,11 +4,11 @@ import type { PersonalizedTask } from '../packages/recommendation/src/personaliz
 import type { PlannedActivity, AuraMoment } from '../apps/web/lib/db';
 
 /**
- * Product Journey / E2E Hardening V1 (brief section 14-17) -- Aura
- * Suggests must (a) prefer agenda context over a second, disconnected
- * catalog ranking, (b) never repeat a canonical activityId already shown
- * in Good Right Now, and (c) hide entirely rather than duplicate when it
- * has nothing additive to say.
+ * Home Recommendation Hierarchy V1 -- Aura Suggests must (a) prefer actual
+ * agenda context over a second, disconnected catalog ranking, (b) never
+ * recommend a catalog activity except in its one ACTIVITY_FALLBACK tier,
+ * deduped by canonical activityId, and (c) hide entirely rather than
+ * duplicate/repeat when it has nothing additive to say.
  */
 
 let allPassed = true;
@@ -53,77 +53,132 @@ function moment(overrides: Partial<AuraMoment> = {}): AuraMoment {
   };
 }
 
+function baseInput(overrides: Partial<Parameters<typeof deriveAuraSuggestion>[0]> = {}): Parameters<typeof deriveAuraSuggestion>[0] {
+  return {
+    agenda: null,
+    activeWindowName: 'NEUTRAL',
+    currentWindowEndTime: undefined,
+    personalizedTasks: [task()],
+    goodRightNowActivityIds: new Set(),
+    timeLeftBeforeNextShift: '',
+    ...overrides,
+  };
+}
+
 // ============================================================
-// Tier 1 -- prepare for an UPCOMING next agenda item
+// A. next Plan exists -> PREPARE_FOR_PLAN
 // ============================================================
 {
   const agenda = buildDailyAgenda({ now: NOW, localDate: LOCAL_DATE, timezone: TZ, plans: [plan()], moments: [], momentIdsWithSuccessor: new Set(), habitLogs: [] });
-  const result = deriveAuraSuggestion({ agenda, activeWindowName: 'NEUTRAL', personalizedTasks: [task()], goodRightNowActivityIds: new Set(), timeLeftBeforeNextShift: '' });
-  check('An UPCOMING next Plan produces a "Prepare for" suggestion', result?.title === 'Prepare for Learning');
-  check('The suggestion carries the agendaItem for View routing (not log-now)', result?.agendaItem?.id === agenda.nextItem?.id);
+  const result = deriveAuraSuggestion(baseInput({ agenda }));
+  check('A. An UPCOMING next Plan produces PREPARE_FOR_PLAN', result?.type === 'PREPARE_FOR_PLAN');
+  check('A. Title reads "Prepare for Learning"', result?.title === 'Prepare for Learning');
+  check('A. Carries the agendaItem for View routing (not log-now)', result?.agendaItem?.id === agenda.nextItem?.id);
+  check('A. No activityId on an agenda-based suggestion', result?.activityId === undefined);
 }
 
 // ============================================================
-// Tier 1 -- a CONFIRMED shared Moment gets "confirmed" phrasing
+// B. next accepted Moment exists -> PREPARE_FOR_MOMENT; a WAITING one
+//    -> COORDINATION
 // ============================================================
 {
   const agenda = buildDailyAgenda({ now: NOW, localDate: LOCAL_DATE, timezone: TZ, plans: [], moments: [moment()], momentIdsWithSuccessor: new Set(), habitLogs: [] });
-  const result = deriveAuraSuggestion({ agenda, activeWindowName: 'NEUTRAL', personalizedTasks: [task()], goodRightNowActivityIds: new Set(), timeLeftBeforeNextShift: '' });
-  check('A CONFIRMED Moment produces "confirmed" phrasing', result?.description.includes('confirmed for') ?? false);
+  const result = deriveAuraSuggestion(baseInput({ agenda }));
+  check('B. A CONFIRMED Moment produces PREPARE_FOR_MOMENT', result?.type === 'PREPARE_FOR_MOMENT');
+  check('B. Names the confirmed participant', result?.description.includes('Anu is confirmed') ?? false);
+}
+{
+  const agenda = buildDailyAgenda({ now: NOW, localDate: LOCAL_DATE, timezone: TZ, plans: [], moments: [moment({ responseState: null, respondedAt: null })], momentIdsWithSuccessor: new Set(), habitLogs: [] });
+  const result = deriveAuraSuggestion(baseInput({ agenda }));
+  check('B. A WAITING Moment produces COORDINATION', result?.type === 'COORDINATION');
 }
 
 // ============================================================
-// STARTING_SOON / CURRENT items are NOT re-surfaced by Aura Suggests --
-// those are already owned by the Starting Soon reminder card / the Right
-// Now hero panel (brief section 19: avoid simultaneous "next" claims).
+// STARTING_SOON / CURRENT items are NOT re-surfaced -- owned by the
+// Starting Soon reminder card / the Right Now hero panel.
 // ============================================================
 {
   const soonPlan = plan({ plannedStartAt: new Date('2026-08-24T05:10:00.000Z'), plannedEndAt: new Date('2026-08-24T06:00:00.000Z') }); // 10 min out
   const agenda = buildDailyAgenda({ now: NOW, localDate: LOCAL_DATE, timezone: TZ, plans: [soonPlan], moments: [], momentIdsWithSuccessor: new Set(), habitLogs: [] });
   check('nextItem is STARTING_SOON (sanity check on the fixture)', agenda.nextItem?.status === 'STARTING_SOON');
-  const result = deriveAuraSuggestion({ agenda, activeWindowName: 'NEUTRAL', personalizedTasks: [task()], goodRightNowActivityIds: new Set(), timeLeftBeforeNextShift: '' });
-  check('A STARTING_SOON item falls through to the generic tier instead of being repeated', result?.agendaItem === undefined);
+  const result = deriveAuraSuggestion(baseInput({ agenda }));
+  check('A STARTING_SOON item falls through instead of being repeated', result?.agendaItem === undefined);
 }
 
 // ============================================================
-// Dedup (brief section 17): never repeat a canonical activityId already
-// shown in Good Right Now, by id -- not by fuzzy title matching.
+// C. meaningful free gap exists (nothing left on the agenda, but there was
+//    a day) -> OPEN_GAP. Never auto-filled with another activity.
+// ============================================================
+{
+  const pastPlan = plan({ id: 'plan-past', title: 'Morning Standup', plannedStartAt: new Date('2026-08-24T02:00:00.000Z'), plannedEndAt: new Date('2026-08-24T02:30:00.000Z'), status: 'LOGGED' });
+  const agenda = buildDailyAgenda({ now: NOW, localDate: LOCAL_DATE, timezone: TZ, plans: [pastPlan], moments: [], momentIdsWithSuccessor: new Set(), habitLogs: [] });
+  check('nextItem is absent but the agenda has a completed item (sanity check)', agenda.nextItem === undefined && agenda.items.length > 0);
+  const result = deriveAuraSuggestion(baseInput({ agenda }));
+  check('C. A day with nothing left ahead produces OPEN_GAP', result?.type === 'OPEN_GAP');
+  check('C. No activity is recommended', result?.activityId === undefined);
+}
+
+// ============================================================
+// D. caution context + a later agenda item -> CAUTION_CONTEXT (not
+//    PREPARE_FOR_PLAN) -- this is the exact scenario that used to duplicate
+//    Good Right Now (brief section 12's worked example).
+// ============================================================
+{
+  const agenda = buildDailyAgenda({ now: NOW, localDate: LOCAL_DATE, timezone: TZ, plans: [plan()], moments: [], momentIdsWithSuccessor: new Set(), habitLogs: [] });
+  const result = deriveAuraSuggestion(baseInput({ agenda, activeWindowName: 'RAHU_KALAM', currentWindowEndTime: '9:04 AM', personalizedTasks: [task({ id: 'task-5', title: 'Process Optimization & Docs' })], goodRightNowActivityIds: new Set(['task-5']) }));
+  check('D. A caution window with a later Plan produces CAUTION_CONTEXT, not PREPARE_FOR_PLAN', result?.type === 'CAUTION_CONTEXT');
+  check('D. References the next Plan by name', result?.description.includes('Learning') ?? false);
+  check('D. References the window end time', result?.description.includes('9:04 AM') ?? false);
+  check('D. No action -- brief section 7: "no action required"', result?.actionLabel === undefined);
+  check('D. No activity is recommended (the root-cause fix)', result?.activityId === undefined);
+}
+{
+  // Caution window, empty agenda -- still CAUTION_CONTEXT, day-only framing.
+  const emptyAgenda = buildDailyAgenda({ now: NOW, localDate: LOCAL_DATE, timezone: TZ, plans: [], moments: [], momentIdsWithSuccessor: new Set(), habitLogs: [] });
+  const result = deriveAuraSuggestion(baseInput({ agenda: emptyAgenda, activeWindowName: 'RAHU_KALAM' }));
+  check('D. Caution window with an empty agenda still produces CAUTION_CONTEXT', result?.type === 'CAUTION_CONTEXT');
+}
+
+// ============================================================
+// E. no agenda-aware context -> generic ACTIVITY_FALLBACK, if additive
 // ============================================================
 {
   const emptyAgenda = buildDailyAgenda({ now: NOW, localDate: LOCAL_DATE, timezone: TZ, plans: [], moments: [], momentIdsWithSuccessor: new Set(), habitLogs: [] });
   const tasks = [task({ id: 'deep-work', title: 'Deep Work' }), task({ id: 'learning', title: 'Study', icon: '📖' })];
-  const result = deriveAuraSuggestion({ agenda: emptyAgenda, activeWindowName: 'NEUTRAL', personalizedTasks: tasks, goodRightNowActivityIds: new Set(['deep-work']), timeLeftBeforeNextShift: '' });
-  check('The top task (already in Good Right Now by id) is skipped', result?.title === 'Study');
-}
-{
-  // A DIFFERENT activity that merely shares similar display text must NOT
-  // be treated as a duplicate -- dedup is by canonical id only.
-  const emptyAgenda = buildDailyAgenda({ now: NOW, localDate: LOCAL_DATE, timezone: TZ, plans: [], moments: [], momentIdsWithSuccessor: new Set(), habitLogs: [] });
-  const tasks = [task({ id: 'deep-work', title: 'Deep Work' })];
-  const result = deriveAuraSuggestion({ agenda: emptyAgenda, activeWindowName: 'NEUTRAL', personalizedTasks: tasks, goodRightNowActivityIds: new Set(['some-other-id']), timeLeftBeforeNextShift: '' });
-  check('A task whose id is NOT in Good Right Now still surfaces, even with unrelated ids present', result?.title === 'Deep Work');
+  const result = deriveAuraSuggestion(baseInput({ agenda: emptyAgenda, personalizedTasks: tasks, goodRightNowActivityIds: new Set(['deep-work']) }));
+  check('E. No agenda context -> ACTIVITY_FALLBACK', result?.type === 'ACTIVITY_FALLBACK');
+  check('E. The top task (already in Good Right Now by id) is skipped', result?.title === 'Study');
+  check('E. Carries the canonical activityId', result?.activityId === 'learning');
 }
 
 // ============================================================
-// Hidden entirely (brief section 16) when every candidate task is already
-// shown in Good Right Now and there's no agenda context or caution window.
+// F. no additive context at all -> null (hidden entirely)
 // ============================================================
 {
   const emptyAgenda = buildDailyAgenda({ now: NOW, localDate: LOCAL_DATE, timezone: TZ, plans: [], moments: [], momentIdsWithSuccessor: new Set(), habitLogs: [] });
   const tasks = [task({ id: 'deep-work' })];
-  const result = deriveAuraSuggestion({ agenda: emptyAgenda, activeWindowName: 'NEUTRAL', personalizedTasks: tasks, goodRightNowActivityIds: new Set(['deep-work']), timeLeftBeforeNextShift: '' });
-  check('Nothing additive to say -> null (hidden entirely, not duplicated)', result === null);
+  const result = deriveAuraSuggestion(baseInput({ agenda: emptyAgenda, personalizedTasks: tasks, goodRightNowActivityIds: new Set(['deep-work']) }));
+  check('F. Nothing additive to say -> null (hidden, not duplicated)', result === null);
 }
 
 // ============================================================
-// Caution-window adjustment guidance (existing rule, reused verbatim) --
-// takes priority over the generic dedup tier.
+// Dedup (canonical activityId only, never fuzzy title matching) --
+// ACTIVITY_FALLBACK is the only tier this applies to, since it's the only
+// tier that ever recommends an activity.
 // ============================================================
 {
   const emptyAgenda = buildDailyAgenda({ now: NOW, localDate: LOCAL_DATE, timezone: TZ, plans: [], moments: [], momentIdsWithSuccessor: new Set(), habitLogs: [] });
-  const lightTask = task({ id: 'hydration', title: 'Hydration Check', significance: 'LOW' });
-  const result = deriveAuraSuggestion({ agenda: emptyAgenda, activeWindowName: 'RAHU_KALAM', personalizedTasks: [task(), lightTask], goodRightNowActivityIds: new Set(), timeLeftBeforeNextShift: '' });
-  check('A caution window surfaces the LOW-significance task with low-stakes framing', result?.title === 'Hydration Check' && result?.description.includes('caution window'));
+  const tasks = [task({ id: 'deep-work', title: 'Deep Work' })];
+  const result = deriveAuraSuggestion(baseInput({ agenda: emptyAgenda, personalizedTasks: tasks, goodRightNowActivityIds: new Set(['some-other-id']) }));
+  check('Dedup: a task whose id is NOT in Good Right Now still surfaces, even with unrelated ids present', result?.title === 'Deep Work');
+}
+{
+  // A task with the SAME display title as a Good Right Now card but a
+  // DIFFERENT canonical id must still surface -- dedup is id-based only.
+  const emptyAgenda = buildDailyAgenda({ now: NOW, localDate: LOCAL_DATE, timezone: TZ, plans: [], moments: [], momentIdsWithSuccessor: new Set(), habitLogs: [] });
+  const tasks = [task({ id: 'sprint-backlog-execution', title: 'Deep Work' })];
+  const result = deriveAuraSuggestion(baseInput({ agenda: emptyAgenda, personalizedTasks: tasks, goodRightNowActivityIds: new Set(['deep-work']) }));
+  check('Dedup: same display title but a different canonical id is NOT excluded (id-based, never fuzzy title matching)', result?.title === 'Deep Work' && result?.activityId === 'sprint-backlog-execution');
 }
 
 if (!allPassed) {
