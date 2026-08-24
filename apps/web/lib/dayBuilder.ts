@@ -136,18 +136,27 @@ export interface DayProfile {
   longestOpeningMinutes: number;
 }
 
+/** Personalized Daily Story V2 -- the single per-item taxonomy-group
+ * resolver, extracted so buildDayProfile's own presentGroupIds and the new
+ * buildDailyPriorityCoverage() below always agree on "what taxonomy
+ * group(s) does this agenda item represent" without maintaining two
+ * separate resolution implementations (brief section 1: "do not duplicate
+ * ... derivation"). An activityId can legitimately belong to more than one
+ * group (e.g. 'coffee-tea' is in RELATIONSHIPS, SOCIAL, and ENJOYMENT) --
+ * every matching group is returned, not just one canonical pick. */
+function resolveItemIntentionGroups(item: DailyAgendaItem): DailyIntentionGroupId[] {
+  const resolved = findActivityIntent(item.title);
+  if (!resolved) return [];
+  return INTENTION_GROUPS.filter((g) => g.activities.some((a) => a.activityId === resolved.id)).map((g) => g.id);
+}
+
 export function buildDayProfile(agenda: DailyAgenda, minuteOfDay: number): DayProfile {
   const presentActivityIds = new Set<string>();
+  const presentGroupIds = new Set<DailyIntentionGroupId>();
   for (const item of agenda.items) {
     const resolved = findActivityIntent(item.title);
     if (resolved) presentActivityIds.add(resolved.id);
-  }
-
-  const presentGroupIds = new Set<DailyIntentionGroupId>();
-  for (const group of INTENTION_GROUPS) {
-    if (group.activities.some((a) => a.activityId && presentActivityIds.has(a.activityId))) {
-      presentGroupIds.add(group.id);
-    }
+    for (const groupId of resolveItemIntentionGroups(item)) presentGroupIds.add(groupId);
   }
 
   const hasEveningOpen = !agenda.items.some((item) => {
@@ -197,9 +206,26 @@ export interface IntentionCandidate {
 
 /** Brief section 16 -- deterministic, template-based reasons grounded only
  * in facts buildDayProfile() already derived (evening open or not, whether
- * anything else is competing for the time). No new signal, no free text. */
-function reasonForCandidate(groupId: DailyIntentionGroupId, profile: DayProfile): string {
+ * anything else is competing for the time). No new signal, no free text.
+ *
+ * Personalized Daily Story V2 (brief section 7) -- `isPrioritized` swaps in
+ * a warmer, ownership-acknowledging phrasing when this candidate's group
+ * is one of the user's own explicit priorities. Deliberately never spells
+ * out the internal UserPriorityGroup/DailyIntentionGroupId name, an
+ * activityId, SHARED/SOLO, or any score -- prose only, same discipline as
+ * the generic branches below. */
+function reasonForCandidate(groupId: DailyIntentionGroupId, profile: DayProfile, isPrioritized = false): string {
   const isPeople = PEOPLE_GROUP_IDS.includes(groupId);
+  if (isPrioritized) {
+    if (isPeople) {
+      return profile.hasEveningOpen
+        ? 'A good opening to spend some time together this evening.'
+        : 'A good opening to spend some time together.';
+    }
+    if (groupId === 'WORK') return 'A little room for focused work before your plans later.';
+    if (groupId === 'SELF') return 'This fits naturally with what you said matters to you.';
+    return 'This fits one of the things that matters most to you lately.';
+  }
   if (isPeople && profile.hasEveningOpen) return 'Your evening is open — a good chance to make room for someone.';
   if (isPeople) return "Nothing else is using this time — a good window to connect with someone.";
   if (groupId === 'WORK') return 'You have a clear stretch open for focused work.';
@@ -261,6 +287,50 @@ export function resolvePrioritizedIntentionGroups(priorities: UserPriorityGroup[
   return result;
 }
 
+/**
+ * Personalized Daily Story V2 (brief section 5) -- "has the user already
+ * made room today for something belonging to this explicit priority?"
+ * Deliberately NOT scoring: a boolean-ish COVERED/OPEN state plus which
+ * real agenda item(s) earned it, nothing weighted or ranked. Built from
+ * the SAME per-item group resolution buildDayProfile() uses
+ * (resolveItemIntentionGroups), applied with a DIFFERENT status filter:
+ * MISSED items never count (brief: "cancelled/missed items do not falsely
+ * imply accomplishment" -- a plan that didn't happen isn't room actually
+ * made). CANCELLED plans never reach here at all (buildDailyAgenda already
+ * excludes them). COMPLETED items DO count (brief: "completed items count
+ * as covered").
+ */
+export interface DailyPriorityCoverage {
+  priorityGroup: UserPriorityGroup;
+  state: 'COVERED' | 'OPEN';
+  agendaItemIds: string[];
+}
+
+export function buildDailyPriorityCoverage(agenda: DailyAgenda, priorities: UserPriorityGroup[]): DailyPriorityCoverage[] {
+  return priorities.map((priorityGroup) => {
+    const intentionGroups = new Set(PRIORITY_GROUP_TO_INTENTION_GROUPS[priorityGroup] ?? []);
+    const agendaItemIds: string[] = [];
+    for (const item of agenda.items) {
+      if (item.status === 'MISSED') continue;
+      const itemGroups = resolveItemIntentionGroups(item);
+      if (itemGroups.some((g) => intentionGroups.has(g))) agendaItemIds.push(item.id);
+    }
+    return { priorityGroup, state: agendaItemIds.length > 0 ? 'COVERED' : 'OPEN', agendaItemIds };
+  });
+}
+
+/** Convenience for callers (dayBuilderOrchestrator.ts) that need the
+ * DailyIntentionGroupId-level union of every COVERED priority's mapped
+ * groups, e.g. to pass into applyUserPriorities' coveredGroupIds param. */
+export function coveredIntentionGroupIds(coverage: DailyPriorityCoverage[]): Set<DailyIntentionGroupId> {
+  const result = new Set<DailyIntentionGroupId>();
+  for (const c of coverage) {
+    if (c.state !== 'COVERED') continue;
+    for (const groupId of PRIORITY_GROUP_TO_INTENTION_GROUPS[c.priorityGroup] ?? []) result.add(groupId);
+  }
+  return result;
+}
+
 /** Brief section 3 -- a stable partition, not a re-sort: every group the
  * user explicitly prioritized moves to the front, IN THEIR ORIGINAL
  * relative order from `baseOrder` (never re-ordered relative to each
@@ -270,12 +340,25 @@ export function resolvePrioritizedIntentionGroups(priorities: UserPriorityGroup[
  * order too, just pushed after. This is ORDERING ONLY: it cannot add,
  * remove, mute, or re-score a candidate -- selectIntentionCandidates'
  * existing mutedGroups/presentGroupIds checks run identically afterward
- * (brief section 6: priorities can never override a mute). */
-export function applyUserPriorities(baseOrder: DailyIntentionGroupId[], prioritizedGroupIds: Set<DailyIntentionGroupId>): DailyIntentionGroupId[] {
+ * (brief section 6: priorities can never override a mute).
+ *
+ * Personalized Daily Story V2 (brief section 6) -- `coveredGroupIds`
+ * (derived from DailyPriorityCoverage) further splits the prioritized
+ * subset in two: STILL-OPEN priorities stay at the very front (most
+ * valuable to suggest), already-COVERED priorities move to the back of
+ * the whole list -- diversity, not exclusion. A covered priority is never
+ * removed or muted, only deprioritized below everything else, so it can
+ * still surface if nothing else in the day has room. */
+export function applyUserPriorities(
+  baseOrder: DailyIntentionGroupId[],
+  prioritizedGroupIds: Set<DailyIntentionGroupId>,
+  coveredGroupIds: Set<DailyIntentionGroupId> = new Set()
+): DailyIntentionGroupId[] {
   if (prioritizedGroupIds.size === 0) return baseOrder;
-  const prioritized = baseOrder.filter((g) => prioritizedGroupIds.has(g));
+  const openPrioritized = baseOrder.filter((g) => prioritizedGroupIds.has(g) && !coveredGroupIds.has(g));
+  const coveredPrioritized = baseOrder.filter((g) => prioritizedGroupIds.has(g) && coveredGroupIds.has(g));
   const rest = baseOrder.filter((g) => !prioritizedGroupIds.has(g));
-  return [...prioritized, ...rest];
+  return [...openPrioritized, ...rest, ...coveredPrioritized];
 }
 
 export function selectIntentionCandidates(
@@ -284,7 +367,12 @@ export function selectIntentionCandidates(
   maxCandidates: number,
   /** Personalization Foundation V1 -- defaults to empty so every existing
    * caller/test (no personalization configured) is unaffected. */
-  prioritizedGroupIds: Set<DailyIntentionGroupId> = new Set()
+  prioritizedGroupIds: Set<DailyIntentionGroupId> = new Set(),
+  /** Personalized Daily Story V2 (brief section 6) -- which of the
+   * prioritized groups are already COVERED today (from
+   * buildDailyPriorityCoverage()). Defaults to empty, same
+   * backward-compatibility discipline as prioritizedGroupIds. */
+  coveredGroupIds: Set<DailyIntentionGroupId> = new Set()
 ): IntentionCandidate[] {
   if (profile.isBusy) return [];
   if (profile.openings.length === 0) return [];
@@ -292,7 +380,7 @@ export function selectIntentionCandidates(
   const baseOrder: DailyIntentionGroupId[] = profile.hasEveningOpen
     ? ['RELATIONSHIPS', 'FAMILY', 'SOCIAL', 'SELF', 'ENJOYMENT', 'WORK']
     : ['SELF', 'ENJOYMENT', 'WORK', 'RELATIONSHIPS', 'FAMILY', 'SOCIAL'];
-  const priorityOrder = applyUserPriorities(baseOrder, prioritizedGroupIds);
+  const priorityOrder = applyUserPriorities(baseOrder, prioritizedGroupIds, coveredGroupIds);
 
   const candidates: IntentionCandidate[] = [];
   // Two-level dedup (brief section 12): level 1 is exact-activityId, tracked
@@ -321,7 +409,7 @@ export function selectIntentionCandidates(
         groupId,
         activity,
         isPeopleOriented: PEOPLE_GROUP_IDS.includes(groupId),
-        reason: reasonForCandidate(groupId, profile),
+        reason: reasonForCandidate(groupId, profile, prioritizedGroupIds.has(groupId)),
       });
       break;
     }

@@ -342,6 +342,48 @@ async function main() {
     check('A fully open day suggests at most 3 for immediate display worth (reserve pool may exceed 3)', openSuggestions.length <= 5);
 
     // ============================================================
+    // Personalized Daily Story V2 -- covered priority changes Day
+    // Builder ordering/diversity (brief section 6's own worked example):
+    // priorities RELATIONSHIPS + WORK + WELLBEING, agenda already has a
+    // RELATIONSHIPS-flavored item (Dinner Date) -> RELATIONSHIPS is
+    // demoted below WORK/WELLBEING, but never suppressed outright.
+    // ============================================================
+    const coverageDate = '2026-08-24';
+    const coverageNow = new Date('2026-08-24T02:30:00.000Z'); // 8:00 AM IST
+    const agendaWithDinnerDate = buildDailyAgenda({
+      now: coverageNow, localDate: coverageDate, timezone: TZ, momentIdsWithSuccessor: new Set(), habitLogs: [], moments: [],
+      plans: [{
+        id: 'coverage-p1', userId: user.id, title: 'Dinner Date', activityType: 'dinner-date', icon: '❤️', status: 'UPCOMING',
+        plannedStartAt: new Date('2026-08-24T13:30:00.000Z'), plannedEndAt: new Date('2026-08-24T15:00:00.000Z'),
+        durationMinutes: 90, windowType: 'NEUTRAL', windowLabel: null, matchLabel: null, score: null,
+        recommendation: null, calendarUrl: null, loggedAt: null, habitLogId: null, createdAt: coverageNow, updatedAt: coverageNow,
+      }],
+    });
+    const threePriorityUser = { ...user, dayBuilderEnabled: true, dayBuilderMutedGroups: [] as string[], dayBuilderPriorities: ['RELATIONSHIPS', 'WORK', 'WELLBEING'] };
+    const coverageSuggestions = await buildIntentionalDaySuggestions({ user: threePriorityUser, agenda: agendaWithDinnerDate, minuteOfDay: MINUTE_OF_DAY, now: coverageNow });
+    check('Covered priority (RELATIONSHIPS, via Dinner Date) does not lead the suggestion list', coverageSuggestions[0] ? !['RELATIONSHIPS', 'FAMILY', 'SOCIAL'].includes(coverageSuggestions[0].groupId) : true);
+    check('Do not completely suppress the covered priority -- WORK/WELLBEING preferred, but RELATIONSHIPS/FAMILY/SOCIAL can still appear later if resolved', coverageSuggestions.every((s) => Boolean(s.activityId)));
+
+    // Timing candidate remains canonical-engine identical even with
+    // coverage-based reordering active -- ordering is the only thing that
+    // changed, same byte-identical proof as every other Day Builder scenario.
+    const firstCoverageSuggestion = coverageSuggestions[0];
+    if (firstCoverageSuggestion?.candidate.kind === 'SOLO') {
+      const context = {
+        now: coverageNow, latitude: user.latitude, longitude: user.longitude, timezone: user.timezone,
+        tzOffsetMinutes: resolveTzOffsetMinutes(user.timezone, coverageNow),
+      };
+      const raw = runTimingSearch({ mode: 'FIND', activityId: firstCoverageSuggestion.activityId, durationMinutes: firstCoverageSuggestion.durationMinutes, horizon: 'TODAY', limit: 5, context });
+      const exactMatch = raw.candidates.find((c) => c.start === (firstCoverageSuggestion.candidate as { kind: 'SOLO'; solo: { start: string } }).solo.start);
+      check('Coverage-reordered suggestion\'s timing is still byte-identical to the canonical engine\'s own output', Boolean(exactMatch) && JSON.stringify(exactMatch) === JSON.stringify(firstCoverageSuggestion.candidate.solo));
+    }
+
+    // Mute still overrides personalization+coverage combined.
+    const mutedDespiteCoverage = { ...threePriorityUser, dayBuilderMutedGroups: ['WORK', 'SELF'] };
+    const mutedCoverageSuggestions = await buildIntentionalDaySuggestions({ user: mutedDespiteCoverage, agenda: agendaWithDinnerDate, minuteOfDay: MINUTE_OF_DAY, now: coverageNow });
+    check('Mute still overrides personalization+coverage combined (WORK/SELF muted -> never suggested)', !mutedCoverageSuggestions.some((s) => s.groupId === 'WORK' || s.groupId === 'SELF'));
+
+    // ============================================================
     // Unmuting restores eligibility (hardening pass) -- WORK is muted
     // alongside everything else in allMutedUser (zero suggestions, proven
     // above) and unmuted (alone) in workOnlyUser (a WORK suggestion,

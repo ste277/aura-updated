@@ -7,9 +7,11 @@ import {
 } from './db';
 import { localDateTimeToUTC, getDatePartsInTimezone, getMinuteOfDayInTimezone } from './timezone';
 import { buildDailyAgenda, DailyAgenda } from './dailyAgenda';
-import { buildDailyStory, DailyStory, resolveDailyStoryPhase } from './dailyStory';
+import { buildDailyStory, DailyStory, DailyStoryPersonalizationInput, resolveDailyStoryPhase } from './dailyStory';
 import { buildDailyReflection, DailyReflection } from './dailyReflection';
 import { buildTomorrowPreview, TomorrowPreview } from './tomorrowPreview';
+import { buildDailyPriorityCoverage, UserPriorityGroup } from './dayBuilder';
+import type { AuraMoment } from './db';
 import { getPanchangForDate } from '../../../packages/panchang/src/panchangDay';
 
 /**
@@ -19,6 +21,26 @@ import { getPanchangForDate } from '../../../packages/panchang/src/panchangDay';
  * narrative logic lives in the pure dailyAgenda.ts/dailyStory.ts, same
  * split as askAuraIntent.ts (pure) / askAuraOrchestrator.ts (I/O).
  */
+
+/** Personalized Daily Story V2 (brief section 8) -- does today's agenda
+ * already contain a real, active Moment with a priority person? Reuses the
+ * SAME `moments` list buildMyDay already fetched (bounded, no second
+ * read) -- AuraMoment.savedPersonId is the only place a real person
+ * identity lives; DailyAgendaItem itself deliberately never carries one
+ * (see dailyAgenda.ts's own doc comment), which is exactly why this
+ * resolution has to happen here, against the raw AuraMoment rows, not
+ * against the already-built DailyAgenda. ANOTHER_TIME moments are excluded
+ * (same as dailyAgenda.ts's own momentToAgendaItem) -- a superseded
+ * original was never really "made room for". Only an active, not-yet-fully-
+ * passed moment counts ("later today"), matching the brief's own example. */
+function resolvePriorityPersonMoment(moments: AuraMoment[], priorityPersonIds: string[], now: Date): DailyStoryPersonalizationInput['priorityPersonMoment'] {
+  if (priorityPersonIds.length === 0) return undefined;
+  const moment = moments.find(
+    (m) => m.savedPersonId && priorityPersonIds.includes(m.savedPersonId) && m.responseState !== 'ANOTHER_TIME' && m.endAt.getTime() >= now.getTime()
+  );
+  if (!moment || !moment.sharedPersonDisplayName) return undefined;
+  return { personName: moment.sharedPersonDisplayName, itemTitle: moment.activityTitle };
+}
 
 function addDaysToDateStr(dateStr: string, days: number): string {
   const [year, month, day] = dateStr.split('-').map(Number);
@@ -80,7 +102,18 @@ export async function buildMyDay(user: User, requestedDate: string | undefined, 
   });
 
   const minuteOfDay = getMinuteOfDayInTimezone(user.timezone, now);
-  const story = buildDailyStory(agenda, minuteOfDay);
+  // Personalized Daily Story V2 (brief section 3/5) -- cheap, pure, derived
+  // from the SAME agenda/moments already fetched above; never a second
+  // bounded read, never a duplicate of Day Builder's own coverage
+  // computation (buildDailyPriorityCoverage is the one shared function
+  // both this and dayBuilderOrchestrator.ts call).
+  const priorities = user.dayBuilderPriorities as UserPriorityGroup[];
+  const personalization: DailyStoryPersonalizationInput = {
+    priorities,
+    coverage: buildDailyPriorityCoverage(agenda, priorities),
+    priorityPersonMoment: resolvePriorityPersonMoment(moments, user.dayBuilderPriorityPersonIds, now),
+  };
+  const story = buildDailyStory(agenda, minuteOfDay, personalization);
   const reflection = buildDailyReflection(agenda);
 
   let tomorrowPreview: TomorrowPreview | undefined;

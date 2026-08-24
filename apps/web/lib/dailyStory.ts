@@ -1,6 +1,7 @@
 import type { DailyAgenda, DailyAgendaItem } from './dailyAgenda';
 import { DailyIntentionGroupId } from './dailyIntentions';
 import { buildDailyReflection } from './dailyReflection';
+import type { UserPriorityGroup, DailyPriorityCoverage } from './dayBuilder';
 
 /**
  * My Day V1 -- the narrative layer (brief section 9). Pure, deterministic,
@@ -39,6 +40,27 @@ export interface DailyStory {
   suggestedIntentions: DailyIntentionSuggestion[];
   nextMeaningfulThing?: DailyStoryAction;
   completedHighlights?: DailyAgendaItem[];
+}
+
+/** Personalized Daily Story V2 -- what buildDailyStory() may safely
+ * consume beyond the agenda itself (brief section 3): explicit
+ * UserPriorityGroups, their DailyPriorityCoverage (already-derived from
+ * the SAME agenda by dayBuilder.ts's buildDailyPriorityCoverage --
+ * dailyStory.ts never recomputes it), and whether a priority person has an
+ * eligible Moment today. Deliberately NOT inferred behavioral data (brief
+ * section 3: "do NOT consume inferred behavioral preferences yet"). */
+export interface DailyStoryPriorityPersonMoment {
+  /** The owner-facing display name only (brief section 8) -- never a
+   * SavedPerson id, matching AuraMoment's own sharedPersonDisplayName
+   * field this is sourced from. */
+  personName: string;
+  itemTitle: string;
+}
+
+export interface DailyStoryPersonalizationInput {
+  priorities: UserPriorityGroup[];
+  coverage: DailyPriorityCoverage[];
+  priorityPersonMoment?: DailyStoryPriorityPersonMoment;
 }
 
 /** Brief section 10 -- no existing shared daypart model to reuse (confirmed
@@ -86,6 +108,81 @@ const EVENING_INTENTIONS: DailyIntentionSuggestion[] = [
 
 const WELL_SPENT_PROMPT: DailyStoryPrompt = { question: 'What would make today feel well spent?' };
 const MAKE_ROOM_PROMPT: DailyStoryPrompt = { question: 'Make room for something else?' };
+
+/** Personalized Daily Story V2 (brief section 4) -- human, narrative-safe
+ * phrasing per priority, never the internal UserPriorityGroup name itself.
+ * "covered" text describes something already on the agenda; "open" text
+ * invites toward it. Deliberately plain nouns/phrases, never a claim about
+ * the user's behavior or feelings (brief: no "you love/always/usually..."). */
+const PRIORITY_NARRATIVE_LABEL: Record<UserPriorityGroup, { covered: string; open: string }> = {
+  RELATIONSHIPS: { covered: 'time with someone important', open: 'time with someone who matters' },
+  WORK: { covered: 'focused work', open: 'focused work' },
+  WELLBEING: { covered: 'something for your wellbeing', open: 'something for yourself' },
+  PERSONAL_GROWTH: { covered: 'some learning', open: 'room to learn something' },
+  ENJOYMENT: { covered: 'something enjoyable', open: 'something enjoyable' },
+  ROUTINE: { covered: 'the everyday things', open: 'room for the everyday things' },
+};
+
+function joinNaturally(items: string[]): string {
+  if (items.length === 0) return '';
+  if (items.length === 1) return items[0];
+  if (items.length === 2) return `${items[0]} and ${items[1]}`;
+  return `${items.slice(0, -1).join(', ')}, and ${items[items.length - 1]}`;
+}
+
+/** Same "3+ upcoming items is a full day" threshold dayBuilder.ts's own
+ * DayProfile.isBusy uses (buildDayProfile) -- kept as a small, independent
+ * constant here rather than importing that whole (heavier, opening-math-
+ * computing) function just for one boolean; the semantic stays identical
+ * by construction (same upcomingPlannedItems() count, same threshold). */
+const BUSY_UPCOMING_ITEM_THRESHOLD = 3;
+
+/**
+ * Personalized Daily Story V2 (brief section 4) -- deterministic,
+ * template-based narrative composed ONLY from real DailyPriorityCoverage
+ * facts (never "you love/always/usually..." -- nothing here is inferred
+ * from behavior, only from what's actually on today's agenda right now).
+ * Returns null whenever the user has no priorities configured, so
+ * buildDailyStory's existing phase-based headline/narrative runs
+ * completely unchanged (brief section 12: "no preferences: preserve
+ * existing behavior").
+ */
+function composePersonalizedNarrative(personalization: DailyStoryPersonalizationInput, isBusy: boolean): { headline: string; narrative: string } | null {
+  const { priorities, coverage, priorityPersonMoment } = personalization;
+  if (priorities.length === 0) return null;
+
+  const covered = coverage.filter((c) => c.state === 'COVERED');
+  const open = coverage.filter((c) => c.state === 'OPEN');
+  const coveredLabels = covered.map((c) => PRIORITY_NARRATIVE_LABEL[c.priorityGroup].covered);
+  const openLabels = open.map((c) => PRIORITY_NARRATIVE_LABEL[c.priorityGroup].open);
+
+  // Brief section 8 -- the most specific, most human framing takes
+  // precedence: a priority person already has real time on the agenda.
+  if (priorityPersonMoment) {
+    const openClause = open.length > 0 ? ', with some open space beforehand' : '';
+    return {
+      headline: "You've made room for what matters",
+      narrative: `You already have time with ${priorityPersonMoment.personName} later today${openClause}.`,
+    };
+  }
+
+  if (isBusy) {
+    return covered.length > 0
+      ? { headline: 'A full day ahead', narrative: `You've already made room for ${joinNaturally(coveredLabels)} today.` }
+      : { headline: 'A full day ahead', narrative: 'Your day already has a lot in it.' };
+  }
+
+  if (covered.length === priorities.length) {
+    return { headline: 'A balanced day ahead', narrative: `You've made room for ${joinNaturally(coveredLabels)} today.` };
+  }
+  if (covered.length === 0) {
+    return { headline: 'A mostly open day', narrative: `There's plenty of room to shape today around ${joinNaturally(openLabels)}.` };
+  }
+  return {
+    headline: 'Your day has structure',
+    narrative: `You've made room for ${joinNaturally(coveredLabels)}, but there's still room for ${joinNaturally(openLabels)}.`,
+  };
+}
 
 function buildMorningStory(agenda: DailyAgenda): { headline: string; narrative: string; primaryPrompt?: DailyStoryPrompt; suggestedIntentions: DailyIntentionSuggestion[] } {
   const upcoming = upcomingPlannedItems(agenda);
@@ -220,21 +317,55 @@ function buildNightStory(agenda: DailyAgenda): { headline: string; narrative: st
   };
 }
 
-export function buildDailyStory(agenda: DailyAgenda, minuteOfDay: number): DailyStory {
+/**
+ * Personalized Daily Story V2 -- `personalization` is entirely optional
+ * and additive (brief section 12: no preferences means unchanged
+ * behavior). When present, it overrides ONLY the phase builder's own
+ * headline/narrative for MORNING/MIDDAY/AFTERNOON/EVENING -- primaryPrompt
+ * and suggestedIntentions (the existing manual-intention-flow affordances
+ * inside MyDayStoryCard) are left exactly as each phase already computes
+ * them. NIGHT is deliberately never personalized here: buildNightStory's
+ * own reflection-based narrative already states completed/missed facts
+ * plainly (brief section 11's own "factually only" rule), and the brief
+ * gives no NIGHT example to extend it by.
+ */
+export function buildDailyStory(agenda: DailyAgenda, minuteOfDay: number, personalization?: DailyStoryPersonalizationInput): DailyStory {
   const phase = resolveDailyStoryPhase(minuteOfDay);
 
   if (phase === 'NIGHT') {
     const night = buildNightStory(agenda);
     return { phase, headline: night.headline, narrative: night.narrative, suggestedIntentions: [], completedHighlights: night.completedHighlights, nextMeaningfulThing: night.nextMeaningfulThing };
   }
+
+  const isBusy = upcomingPlannedItems(agenda).length >= BUSY_UPCOMING_ITEM_THRESHOLD;
+  const personalized = personalization ? composePersonalizedNarrative(personalization, isBusy) : null;
+
   if (phase === 'EVENING') {
     const evening = buildEveningStory(agenda);
-    return { phase, headline: evening.headline, narrative: evening.narrative, primaryPrompt: evening.primaryPrompt, suggestedIntentions: evening.suggestedIntentions };
+    return {
+      phase,
+      headline: personalized?.headline ?? evening.headline,
+      narrative: personalized?.narrative ?? evening.narrative,
+      primaryPrompt: evening.primaryPrompt,
+      suggestedIntentions: evening.suggestedIntentions,
+    };
   }
   if (phase === 'MIDDAY' || phase === 'AFTERNOON') {
     const rest = buildMiddayOrAfternoonStory(agenda, phase);
-    return { phase, headline: rest.headline, narrative: rest.narrative, primaryPrompt: rest.primaryPrompt, suggestedIntentions: rest.suggestedIntentions };
+    return {
+      phase,
+      headline: personalized?.headline ?? rest.headline,
+      narrative: personalized?.narrative ?? rest.narrative,
+      primaryPrompt: rest.primaryPrompt,
+      suggestedIntentions: rest.suggestedIntentions,
+    };
   }
   const morning = buildMorningStory(agenda);
-  return { phase, headline: morning.headline, narrative: morning.narrative, primaryPrompt: morning.primaryPrompt, suggestedIntentions: morning.suggestedIntentions };
+  return {
+    phase,
+    headline: personalized?.headline ?? morning.headline,
+    narrative: personalized?.narrative ?? morning.narrative,
+    primaryPrompt: morning.primaryPrompt,
+    suggestedIntentions: morning.suggestedIntentions,
+  };
 }

@@ -1,8 +1,10 @@
-import { buildDailyStory, resolveDailyStoryPhase } from '../apps/web/lib/dailyStory';
+import { buildDailyStory, resolveDailyStoryPhase, DailyStoryPersonalizationInput } from '../apps/web/lib/dailyStory';
 import { buildDailyAgenda, DailyAgenda } from '../apps/web/lib/dailyAgenda';
+import { buildDailyPriorityCoverage } from '../apps/web/lib/dayBuilder';
 import { INTENTION_GROUPS, PEOPLE_SUBGROUPS, BROAD_CHOICES } from '../apps/web/lib/dailyIntentions';
 import { FULL_ACTIVITY_CATALOG } from '../packages/recommendation/src/personalizedTasks';
 import { getActivityDefinition } from '../packages/recommendation/src/activityDefinitions';
+import type { PlannedActivity } from '../apps/web/lib/db';
 
 let allPassed = true;
 function check(label: string, condition: boolean) {
@@ -15,6 +17,17 @@ const LOCAL_DATE = '2026-08-24';
 
 function emptyAgenda(now: Date): DailyAgenda {
   return buildDailyAgenda({ now, localDate: LOCAL_DATE, timezone: TZ, plans: [], moments: [], momentIdsWithSuccessor: new Set(), habitLogs: [] });
+}
+
+function plan(over: Partial<PlannedActivity> & { id: string; title: string; plannedStartAt: Date; plannedEndAt: Date }): PlannedActivity {
+  return {
+    userId: 'u', activityType: null, icon: null, status: 'UPCOMING',
+    durationMinutes: Math.round((over.plannedEndAt.getTime() - over.plannedStartAt.getTime()) / 60000),
+    windowType: 'NEUTRAL', windowLabel: null, matchLabel: null, score: null,
+    recommendation: null, calendarUrl: null, loggedAt: null, habitLogId: null,
+    createdAt: over.plannedStartAt, updatedAt: over.plannedStartAt,
+    ...over,
+  };
 }
 
 // ============================================================
@@ -189,6 +202,96 @@ function emptyAgenda(now: Date): DailyAgenda {
     }
   }
   check('Every surfaced intention activity is EVERYDAY planningMode (never routes to Muhurtham Finder)', allEveryday);
+}
+
+// ============================================================
+// Personalized Daily Story V2
+// ============================================================
+{
+  // No preferences preserves current story behavior -- byte-identical
+  // whether personalization is omitted entirely or explicitly empty.
+  const now = new Date('2026-08-24T02:30:00.000Z'); // 8:00 AM IST
+  const agenda = emptyAgenda(now);
+  const withoutArg = buildDailyStory(agenda, 8 * 60);
+  const withEmptyPersonalization: DailyStoryPersonalizationInput = { priorities: [], coverage: [], priorityPersonMoment: undefined };
+  const withArg = buildDailyStory(agenda, 8 * 60, withEmptyPersonalization);
+  check('No preferences (personalization omitted) -> unchanged headline', withoutArg.headline === 'Good morning');
+  check('No preferences (personalization explicitly empty) -> byte-identical to omitting it entirely', JSON.stringify(withoutArg) === JSON.stringify(withArg));
+}
+{
+  // Partial coverage (WORK covered, WELLBEING open) -> "Your day has structure".
+  const now = new Date('2026-08-24T02:30:00.000Z'); // 8:00 AM IST, MIDDAY-ish window used below instead
+  const agenda = buildDailyAgenda({
+    now, localDate: LOCAL_DATE, timezone: TZ, momentIdsWithSuccessor: new Set(), habitLogs: [], moments: [],
+    plans: [plan({ id: 'p1', title: 'Deep Work', plannedStartAt: new Date('2026-08-24T05:00:00.000Z'), plannedEndAt: new Date('2026-08-24T06:00:00.000Z') })],
+  });
+  const priorities: DailyStoryPersonalizationInput['priorities'] = ['WORK', 'WELLBEING'];
+  const personalization: DailyStoryPersonalizationInput = { priorities, coverage: buildDailyPriorityCoverage(agenda, priorities), priorityPersonMoment: undefined };
+  const story = buildDailyStory(agenda, 8 * 60, personalization);
+  check('Partial coverage (WORK covered, WELLBEING open) -> "Your day has structure"', story.headline === 'Your day has structure');
+  check('Partial-coverage narrative mentions the covered priority factually', story.narrative.includes('focused work'));
+  check('Partial-coverage narrative also invites toward the open priority', /yourself|wellbeing/.test(story.narrative));
+  check('Never claims inferred behavior ("you love/always/usually")', !/you (love|always|usually)/i.test(story.narrative));
+}
+{
+  // Full coverage (both priorities covered, not busy) -> "A balanced day ahead".
+  const now = new Date('2026-08-24T02:30:00.000Z');
+  const agenda = buildDailyAgenda({
+    now, localDate: LOCAL_DATE, timezone: TZ, momentIdsWithSuccessor: new Set(), habitLogs: [], moments: [],
+    plans: [
+      plan({ id: 'p1', title: 'Deep Work', plannedStartAt: new Date('2026-08-24T05:00:00.000Z'), plannedEndAt: new Date('2026-08-24T06:00:00.000Z') }),
+      plan({ id: 'p2', title: 'Dinner Date', plannedStartAt: new Date('2026-08-24T13:30:00.000Z'), plannedEndAt: new Date('2026-08-24T15:00:00.000Z') }),
+    ],
+  });
+  const priorities: DailyStoryPersonalizationInput['priorities'] = ['WORK', 'RELATIONSHIPS'];
+  const personalization: DailyStoryPersonalizationInput = { priorities, coverage: buildDailyPriorityCoverage(agenda, priorities), priorityPersonMoment: undefined };
+  const story = buildDailyStory(agenda, 8 * 60, personalization);
+  check('Full coverage, not busy -> "A balanced day ahead"', story.headline === 'A balanced day ahead');
+  check('Full-coverage narrative mentions both covered priorities', story.narrative.includes('focused work') && story.narrative.includes('time with someone important'));
+}
+{
+  // Zero coverage on a quiet/open day -> "A mostly open day".
+  const now = new Date('2026-08-24T02:30:00.000Z');
+  const agenda = emptyAgenda(now);
+  const priorities: DailyStoryPersonalizationInput['priorities'] = ['WORK', 'WELLBEING'];
+  const personalization: DailyStoryPersonalizationInput = { priorities, coverage: buildDailyPriorityCoverage(agenda, priorities), priorityPersonMoment: undefined };
+  const story = buildDailyStory(agenda, 8 * 60, personalization);
+  check('Preferences but empty agenda -> "A mostly open day"', story.headline === 'A mostly open day');
+  check('Quiet-day narrative invites toward the priorities, makes no accomplishment claim', story.narrative.includes('room to shape today'));
+}
+{
+  // Busy day (3+ upcoming items) -> "A full day ahead", regardless of coverage specifics.
+  const now = new Date('2026-08-24T02:30:00.000Z');
+  const agenda = buildDailyAgenda({
+    now, localDate: LOCAL_DATE, timezone: TZ, momentIdsWithSuccessor: new Set(), habitLogs: [], moments: [],
+    plans: [
+      plan({ id: 'p1', title: 'Deep Work', plannedStartAt: new Date('2026-08-24T03:00:00.000Z'), plannedEndAt: new Date('2026-08-24T04:00:00.000Z') }),
+      plan({ id: 'p2', title: 'Learning', plannedStartAt: new Date('2026-08-24T05:00:00.000Z'), plannedEndAt: new Date('2026-08-24T06:00:00.000Z') }),
+      plan({ id: 'p3', title: 'Workout', plannedStartAt: new Date('2026-08-24T07:00:00.000Z'), plannedEndAt: new Date('2026-08-24T08:00:00.000Z') }),
+    ],
+  });
+  const priorities: DailyStoryPersonalizationInput['priorities'] = ['WORK'];
+  const personalization: DailyStoryPersonalizationInput = { priorities, coverage: buildDailyPriorityCoverage(agenda, priorities), priorityPersonMoment: undefined };
+  const story = buildDailyStory(agenda, 8 * 60, personalization);
+  check('Busy day (3+ upcoming items) -> "A full day ahead"', story.headline === 'A full day ahead');
+}
+{
+  // A priority person already has a Moment today -> most specific, most human framing, takes precedence.
+  const now = new Date('2026-08-24T02:30:00.000Z');
+  const agenda = buildDailyAgenda({
+    now, localDate: LOCAL_DATE, timezone: TZ, momentIdsWithSuccessor: new Set(), habitLogs: [], moments: [],
+    plans: [plan({ id: 'p1', title: 'Deep Work', plannedStartAt: new Date('2026-08-24T05:00:00.000Z'), plannedEndAt: new Date('2026-08-24T06:00:00.000Z') })],
+  });
+  const priorities: DailyStoryPersonalizationInput['priorities'] = ['RELATIONSHIPS'];
+  const personalization: DailyStoryPersonalizationInput = {
+    priorities,
+    coverage: buildDailyPriorityCoverage(agenda, priorities),
+    priorityPersonMoment: { personName: 'Reena', itemTitle: 'Coffee' },
+  };
+  const story = buildDailyStory(agenda, 8 * 60, personalization);
+  check('A priority person\'s Moment -> "You\'ve made room for what matters"', story.headline === "You've made room for what matters");
+  check('The narrative names the priority person naturally', story.narrative.includes('Reena'));
+  check('Never exposes internal identifiers in the narrative (only the display name)', !/SavedPerson|RELATIONSHIPS|activityId/.test(story.narrative));
 }
 
 if (!allPassed) {

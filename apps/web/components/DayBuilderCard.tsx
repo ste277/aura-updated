@@ -63,6 +63,23 @@ export function DayBuilderCard({
   // itself is already gone by the time this would render).
   const [lastDismissed, setLastDismissed] = useState<{ groupId: DailyIntentionGroupId; label: string } | null>(null);
 
+  /** Personalized Daily Story V2 (brief section 10) -- the ONE place this
+   * component talks to GET /api/my-day/suggestions, reused by both the
+   * mount effect and the post-Add/Invite refresh below. Returns null on
+   * any failure (silent -- an empty/failed fetch just means Day Builder
+   * shows nothing this load; the existing manual intention flow inside
+   * MyDayStoryCard always remains available regardless). */
+  const fetchSuggestions = async (): Promise<IntentionalDaySuggestion[] | null> => {
+    try {
+      const res = await fetch('/api/my-day/suggestions');
+      const data = await res.json().catch(() => null);
+      if (!res.ok || !Array.isArray(data?.suggestions)) return null;
+      return data.suggestions;
+    } catch {
+      return null;
+    }
+  };
+
   // Brief section 27/33/34 -- NIGHT is never fetched at all, matching the
   // orchestrator's own early return; nothing to show and nothing worth a
   // network call for.
@@ -75,18 +92,11 @@ export function DayBuilderCard({
     }
     let cancelled = false;
     (async () => {
-      try {
-        const res = await fetch('/api/my-day/suggestions');
-        const data = await res.json().catch(() => null);
-        if (cancelled || !res.ok || !Array.isArray(data?.suggestions)) return;
-        setSuggestions(data.suggestions);
-        setVisibleIds(data.suggestions.slice(0, 3).map((s: IntentionalDaySuggestion) => s.id));
-        setLastDismissed(null);
-      } catch {
-        // Silent -- an empty/failed fetch just means Day Builder shows
-        // nothing this load. The existing manual intention flow inside
-        // MyDayStoryCard always remains available regardless.
-      }
+      const fresh = await fetchSuggestions();
+      if (cancelled || !fresh) return;
+      setSuggestions(fresh);
+      setVisibleIds(fresh.slice(0, 3).map((s) => s.id));
+      setLastDismissed(null);
     })();
     return () => {
       cancelled = true;
@@ -131,6 +141,7 @@ export function DayBuilderCard({
       trackEvent('DAY_BUILDER_SUGGESTION_ADDED', { metadata: { intentionCategory: suggestion.groupId, activityId: suggestion.activityId, dayPhase } });
       setState(suggestion.id, { addStatus: 'DONE', addedPlannedActivityId: plan.id });
       onCreated();
+      await refreshAfterCreate();
     } catch {
       setState(suggestion.id, { addStatus: 'ERROR', error: 'Could not add this to your day. Try again.' });
     }
@@ -164,8 +175,26 @@ export function DayBuilderCard({
       trackEvent('DAY_BUILDER_INVITE_SENT', { metadata: { intentionCategory: suggestion.groupId, activityId: suggestion.activityId, dayPhase } });
       setState(suggestion.id, { inviteStatus: 'DONE' });
       onCreated();
+      await refreshAfterCreate();
     } catch {
       setState(suggestion.id, { inviteStatus: 'ERROR', error: 'Could not send this invite. Try again.' });
+    }
+  };
+
+  /** Personalized Daily Story V2 (brief section 10) -- after a real
+   * creation (Add or Invite), re-derive Day Builder's own list from
+   * scratch rather than just locally removing the one card: the agenda
+   * (and therefore DailyPriorityCoverage) genuinely changed, so ordering
+   * and diversity for the REMAINING suggestions may have changed too. No
+   * fake client-side narrative -- a real GET against the freshly-updated
+   * agenda. Falls back to a plain local removal if the refetch itself
+   * fails, so a transient network blip never leaves a stale, already-acted-
+   * on suggestion sitting in the reserve pool. */
+  const refreshAfterCreate = async () => {
+    const fresh = await fetchSuggestions();
+    if (fresh) {
+      setSuggestions(fresh);
+      setVisibleIds(fresh.slice(0, 3).map((s) => s.id));
     }
   };
 
@@ -230,6 +259,7 @@ export function DayBuilderCard({
               key={suggestion.id}
               data-testid="day-builder-suggestion"
               data-activity-id={suggestion.activityId}
+              data-group-id={suggestion.groupId}
               style={{ border: `1px solid ${colors.borderSubtle}`, borderRadius: radius.md, padding: spacing.lg }}
             >
               <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: spacing.sm }}>
