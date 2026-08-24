@@ -487,6 +487,13 @@ const ACTIVITY_METADATA: Record<string, ActivityMetadataInput> = {
   'day-trip': { family: 'TRAVEL', intent: 'OUTING', evaluationDepth: 'STANDARD', timingSensitivity: { start: 'HIGH', duration: 'MEDIUM', end: 'LOW' }, socialMode: 'ANY', suggestedDurations: [240, 300, 360], immediateAction: 'PLAN' },
   picnic: { family: 'TRAVEL', intent: 'OUTING', evaluationDepth: 'LIGHT', timingSensitivity: { start: 'LOW', duration: 'LOW', end: 'LOW' }, socialMode: 'ANY', suggestedDurations: [90, 120, 150], immediateAction: 'PLAN' },
   'shopping-trip': { family: 'TRAVEL', intent: 'OUTING', evaluationDepth: 'LIGHT', timingSensitivity: { start: 'LOW', duration: 'LOW', end: 'LOW' }, socialMode: 'ANY', suggestedDurations: [60, 90, 120], immediateAction: 'PLAN' },
+  // My Day V1 -- MEDITATION already existed as a reserved MuhurtaIntent
+  // (stood in for task-3's classification, see the comment on MuhurtaIntent
+  // itself) but had no real, shareable catalog activity using it; this is
+  // the first one. socialMode ANY: solo meditation and a shared quiet
+  // session are both plausible, no reason to force one.
+  meditation: { family: 'HEALTH', intent: 'MEDITATION', evaluationDepth: 'LIGHT', timingSensitivity: { start: 'LOW', duration: 'LOW', end: 'LOW' }, socialMode: 'ANY', immediateAction: 'BOTH', durationMode: 'USER_SELECTED', suggestedDurations: [10, 20, 30] },
+  'quiet-time': { family: 'SOCIAL', intent: 'CASUAL_HANGOUT', evaluationDepth: 'LIGHT', timingSensitivity: { start: 'LOW', duration: 'LOW', end: 'LOW' }, socialMode: 'ANY', immediateAction: 'PLAN', durationMode: 'USER_SELECTED', suggestedDurations: [30, 45, 60] },
 };
 
 /** Best-effort metadata for a catalog activity with no explicit entry above

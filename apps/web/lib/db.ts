@@ -668,6 +668,22 @@ export async function listPlannedActivitiesForReminders(userId: string, from: Da
   return result.rows;
 }
 
+/** My Day V1 -- the bounded-by-local-day counterpart to
+ * listPlannedActivitiesForReminders above. That query exists for a
+ * different purpose (only UPCOMING plans that could plausibly produce an
+ * active reminder right now) and deliberately excludes LOGGED ones; the
+ * daily agenda needs BOTH UPCOMING and LOGGED plans for today (brief
+ * section 4), just never CANCELLED. */
+export async function listPlannedActivitiesForDay(userId: string, from: Date, to: Date): Promise<PlannedActivity[]> {
+  const result = await pool.query(
+    `SELECT * FROM "PlannedActivity"
+     WHERE "userId" = $1 AND status <> 'CANCELLED' AND "plannedStartAt" BETWEEN $2 AND $3
+     ORDER BY "plannedStartAt" ASC`,
+    [userId, from, to]
+  );
+  return result.rows;
+}
+
 /** Aura Reminders V1 (brief section 25) -- the AuraMoment counterpart to
  * listPlannedActivitiesForReminders above. Only ACTIVE, unexpired moments
  * (mirrors resolveAuraMomentByToken's own ACTIVE + expiry check) within the

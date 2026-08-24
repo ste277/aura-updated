@@ -210,6 +210,14 @@ const EXTENDED_ACTIVITY_CATALOG: ActivityProfile[] = [
   { id: 'day-trip', title: 'Day Trip', description: 'Plan a day trip during a supportive window for setting off.', category: 'TRAVEL', nature: 'INITIATE', defaultDurationMinutes: 300, recommendedWindowTypes: ['ABHIJIT', 'NEUTRAL'], acceptableWindowTypes: ['GULIKA'], avoidWindowTypes: ['RAHU_KALAM', 'YAMA'], significance: 'MEDIUM', requiresFreshStart: true, aliases: ['day trip', 'day excursion', 'one day trip'], icon: '🗺️' },
   { id: 'picnic', title: 'Picnic', description: 'Plan a picnic during a relaxed, easy-going window.', category: 'SOCIAL', nature: 'CONNECT', defaultDurationMinutes: 120, recommendedWindowTypes: ['NEUTRAL', 'GULIKA', 'ABHIJIT'], acceptableWindowTypes: ['BRAHMA'], avoidWindowTypes: [], significance: 'LOW', requiresFreshStart: false, aliases: ['picnic', 'go on a picnic', 'park picnic'], icon: '🧺' },
   { id: 'shopping-trip', title: 'Shopping Trip', description: 'Plan a shopping trip during a relaxed, easy-going window.', category: 'SOCIAL', nature: 'CONNECT', defaultDurationMinutes: 90, recommendedWindowTypes: ['NEUTRAL', 'GULIKA'], acceptableWindowTypes: ['ABHIJIT'], avoidWindowTypes: [], significance: 'LOW', requiresFreshStart: false, aliases: ['shopping trip', 'go shopping', 'shopping together'], icon: '🛍️' },
+  // My Day V1 (brief section 18): two genuinely missing everyday activities,
+  // added only because the intention taxonomy needed them and neither
+  // mapped cleanly onto an existing entry (see the completion report's
+  // catalog-coverage audit) -- "Meditation" and "Quiet time" are common
+  // enough SELF/RELATIONSHIPS intentions that faking a match (e.g. reusing
+  // tea-break) would have been the wrong call per brief section 18.
+  { id: 'meditation', title: 'Meditation', description: 'A short meditation or mindfulness session -- no special window needed.', category: 'SPIRITUAL', nature: 'RESTORE', defaultDurationMinutes: 15, recommendedWindowTypes: ['BRAHMA', 'NEUTRAL'], acceptableWindowTypes: ['GULIKA', 'ABHIJIT'], avoidWindowTypes: [], significance: 'LOW', requiresFreshStart: false, aliases: ['meditation', 'meditate', 'mindfulness', 'quiet reflection'], icon: '🧘' },
+  { id: 'quiet-time', title: 'Quiet Time', description: 'Unstructured quiet time, alone or together -- no special window needed.', category: 'REST', nature: 'RESTORE', defaultDurationMinutes: 45, recommendedWindowTypes: ['NEUTRAL', 'GULIKA', 'BRAHMA'], acceptableWindowTypes: ['ABHIJIT'], avoidWindowTypes: [], significance: 'LOW', requiresFreshStart: false, aliases: ['quiet time', 'quiet time together', 'time at home', 'downtime'], icon: '🏠' },
 ];
 
 export const FULL_ACTIVITY_CATALOG = [...ACTIVITY_CATALOG, ...EXTENDED_ACTIVITY_CATALOG];

@@ -45,7 +45,11 @@ export type ProductEventName =
   | 'GUEST_TIMING_RESULT_VIEWED'
   | 'GUEST_SIGNUP_STARTED'
   | 'GUEST_SIGNUP_COMPLETED'
-  | 'GUEST_RESULT_SAVED';
+  | 'GUEST_RESULT_SAVED'
+  | 'MY_DAY_INTENTION_OPENED'
+  | 'MY_DAY_INTENTION_SELECTED'
+  | 'MY_DAY_ITEM_OPENED'
+  | 'MY_DAY_ADD_STARTED';
 
 export const PRODUCT_EVENT_NAMES: ProductEventName[] = [
   'AURA_HOME_VIEWED',
@@ -78,6 +82,10 @@ export const PRODUCT_EVENT_NAMES: ProductEventName[] = [
   'GUEST_SIGNUP_STARTED',
   'GUEST_SIGNUP_COMPLETED',
   'GUEST_RESULT_SAVED',
+  'MY_DAY_INTENTION_OPENED',
+  'MY_DAY_INTENTION_SELECTED',
+  'MY_DAY_ITEM_OPENED',
+  'MY_DAY_ADD_STARTED',
 ];
 
 export function isProductEventName(value: string): value is ProductEventName {
@@ -139,6 +147,16 @@ export const CLIENT_TRACKED_EVENTS: ReadonlySet<ProductEventName> = new Set<Prod
   'GUEST_SIGNUP_STARTED',
   'GUEST_SIGNUP_COMPLETED',
   'GUEST_RESULT_SAVED',
+  // My Day V1 (brief section 44) -- all four are UI intent signals from the
+  // intention-discovery widget; none corresponds to a clean server-side "DB
+  // write succeeded" moment worth a second event (the actual Add-to-my-day/
+  // Invite-someone outcomes already fire PLAN_RESULT_SELECTED-equivalent/
+  // AURA_MOMENT_CREATED via the existing reused APIs, not a My-Day-specific
+  // completion event -- avoids duplicating that taxonomy).
+  'MY_DAY_INTENTION_OPENED',
+  'MY_DAY_INTENTION_SELECTED',
+  'MY_DAY_ITEM_OPENED',
+  'MY_DAY_ADD_STARTED',
 ]);
 
 // Fields that must NEVER appear in ProductEvent.metadata, under any event,
@@ -242,6 +260,18 @@ const planningModeField: FieldSchema = { type: 'enum', values: PLANNING_MODE_VAL
 const guestHorizonField: FieldSchema = { type: 'enum', values: GUEST_HORIZON_VALUES };
 const guestTimePreferenceField: FieldSchema = { type: 'enum', values: ASK_TIME_PREFERENCE_VALUES };
 const guestSourceField: FieldSchema = { type: 'enum', values: GUEST_SOURCE_VALUES };
+
+// My Day V1 (brief section 44) -- the same closed vocabularies
+// DailyIntentionGroupId/DailyAgendaItemType/DailyStoryPhase already define,
+// not third copies. intentionCategory deliberately excludes the virtual
+// PEOPLE broad choice (brief section 20's umbrella, never itself a real
+// group) -- only the seven real DailyIntentionGroupId values.
+const MY_DAY_INTENTION_CATEGORY_VALUES = new Set(['RELATIONSHIPS', 'FAMILY', 'SOCIAL', 'WORK', 'SELF', 'ENJOYMENT', 'LIFE']);
+const MY_DAY_ITEM_TYPE_VALUES = new Set(['PLAN', 'MOMENT', 'COMPLETED_ACTIVITY']);
+const MY_DAY_DAY_PHASE_VALUES = new Set(['MORNING', 'MIDDAY', 'AFTERNOON', 'EVENING', 'NIGHT']);
+const myDayIntentionCategoryField: FieldSchema = { type: 'enum', values: MY_DAY_INTENTION_CATEGORY_VALUES };
+const myDayItemTypeField: FieldSchema = { type: 'enum', values: MY_DAY_ITEM_TYPE_VALUES };
+const myDayDayPhaseField: FieldSchema = { type: 'enum', values: MY_DAY_DAY_PHASE_VALUES };
 
 const EVENT_METADATA_SCHEMAS: Record<ProductEventName, Record<string, FieldSchema>> = {
   AURA_HOME_VIEWED: {},
@@ -367,6 +397,27 @@ const EVENT_METADATA_SCHEMAS: Record<ProductEventName, Record<string, FieldSchem
   GUEST_RESULT_SAVED: {
     activityId: activityIdField,
     source: guestSourceField,
+  },
+  // My Day V1 (brief section 44/45) -- intentionCategory/activityId/
+  // itemType/dayPhase only. Never person name, raw narrative, raw prompt,
+  // birth details, or coordinates (brief section 44) -- all already
+  // structurally blocked by FORBIDDEN_METADATA_KEYS as defense-in-depth.
+  MY_DAY_INTENTION_OPENED: {
+    dayPhase: myDayDayPhaseField,
+  },
+  MY_DAY_INTENTION_SELECTED: {
+    intentionCategory: myDayIntentionCategoryField,
+    activityId: activityIdField,
+    dayPhase: myDayDayPhaseField,
+  },
+  MY_DAY_ITEM_OPENED: {
+    itemType: myDayItemTypeField,
+    dayPhase: myDayDayPhaseField,
+  },
+  MY_DAY_ADD_STARTED: {
+    intentionCategory: myDayIntentionCategoryField,
+    activityId: activityIdField,
+    dayPhase: myDayDayPhaseField,
   },
 };
 

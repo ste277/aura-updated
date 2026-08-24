@@ -1940,7 +1940,7 @@ function TimingResultCard({
  * gauge and reasons list -- EverydaySharedCandidate carries the general
  * candidate's own reasons but this card focuses on the "for both of you"
  * framing the brief's mockup shows. */
-const EVERYDAY_SHARED_RATING_TEXT: Record<string, string> = {
+export const EVERYDAY_SHARED_RATING_TEXT: Record<string, string> = {
   STRONG_TOGETHER_FIT: 'Strong shared fit',
   GOOD_TOGETHER_FIT: 'Good shared fit',
   EASY_TOGETHER_FIT: 'Easy fit together',

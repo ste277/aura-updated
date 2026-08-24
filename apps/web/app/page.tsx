@@ -15,6 +15,8 @@ import type { DailyBriefing, PlanningHorizon } from '../../../packages/recommend
 import type { TimingSearchDateRange, TimingSearchMode, TimingSearchResponse, TimingTimePreference } from '../../../packages/recommendation/src/timingSearch';
 import type { AuraUpdatesResponse } from '../lib/auraUpdates';
 import type { AuraReminder } from '../lib/auraReminders';
+import type { DailyAgenda, DailyAgendaItem } from '../lib/dailyAgenda';
+import type { DailyStory } from '../lib/dailyStory';
 
 // UI Modules
 import { HomeDashboard } from '../components/HomeDashboard';
@@ -101,6 +103,7 @@ export default function DashboardPage() {
   const [planPrefill, setPlanPrefill] = useState<{ activity: string; key: number } | null>(null);
   const [mounted, setMounted] = useState(false);
   const [auraUpdates, setAuraUpdates] = useState<AuraUpdatesResponse | null>(null);
+  const [myDay, setMyDay] = useState<{ agenda: DailyAgenda; story: DailyStory } | null>(null);
   // Product Structure V2 -- "Your Moments" now lives inside Plan (brief
   // section 19), so any entry point that used to jump to the standalone
   // Shared Moments tab (Home's actionable card, You's row) now jumps into
@@ -110,7 +113,7 @@ export default function DashboardPage() {
   // Product Structure V2 (brief section 28): Plan -> People -> Plan return
   // flow. One small piece of local state, not a global navigation
   // framework -- People's own onBack just reads it.
-  const [peopleReturnTo, setPeopleReturnTo] = useState<'you' | 'plan'>('you');
+  const [peopleReturnTo, setPeopleReturnTo] = useState<'you' | 'plan' | 'home'>('you');
 
   type AppTab = 'home' | 'timeline' | 'ask' | 'plan' | 'insights' | 'you' | 'chart' | 'activity' | 'explore' | 'panchang' | 'muhurtham' | 'people' | 'updates';
   const VALID_TABS: AppTab[] = ['home', 'timeline', 'ask', 'plan', 'insights', 'you', 'chart', 'activity', 'explore', 'panchang', 'muhurtham', 'people', 'updates'];
@@ -278,6 +281,21 @@ export default function DashboardPage() {
     }
   }, []);
 
+  // My Day V1 -- same on-mount/on-tab-switch lifecycle as Aura Updates
+  // above, no polling. Home-only (unlike Aura Updates, which also serves
+  // the Updates tab) since My Day's own agenda/story only render on Home.
+  const loadMyDay = useCallback(async () => {
+    try {
+      const res = await fetch('/api/my-day');
+      if (res.ok) {
+        const data = await res.json();
+        setMyDay({ agenda: data.agenda, story: data.story });
+      }
+    } catch {
+      // Best-effort -- Home already degrades gracefully with myDay null.
+    }
+  }, []);
+
   // Web Push V1 (brief section 10) -- when a push notification is clicked
   // while Aura is ALREADY open, the service worker focuses this tab and
   // posts a message instead of opening a second one. The mark-seen call
@@ -318,7 +336,8 @@ export default function DashboardPage() {
   useEffect(() => {
     if (!user) return;
     if (activeTab === 'home' || activeTab === 'updates') loadAuraUpdates();
-  }, [activeTab, user?.id, loadAuraUpdates]);
+    if (activeTab === 'home') loadMyDay();
+  }, [activeTab, user?.id, loadAuraUpdates, loadMyDay]);
 
   const handleViewMomentUpdate = useCallback((momentToken: string) => {
     window.open(`${window.location.origin}/moment/${momentToken}`, '_blank', 'noopener,noreferrer');
@@ -373,6 +392,21 @@ export default function DashboardPage() {
       },
     });
   }, [loadAuraUpdates]);
+
+  // My Day V1 (brief section 36) -- same routing convention
+  // handleOpenReminder already uses: a Moment target opens the owner's own
+  // public /moment/[token] link (the same one Aura Updates' "View" and
+  // reminders already use), everything else opens Plan (My Day items have
+  // no per-row deep link into Plan/Timeline yet -- a reasonable V1 scope
+  // limit, not a new navigation system).
+  const handleOpenAgendaItem = useCallback((item: DailyAgendaItem) => {
+    trackEvent('MY_DAY_ITEM_OPENED', { metadata: { itemType: item.type, dayPhase: myDay?.story.phase ?? 'MORNING' } });
+    if (item.target.type === 'MOMENT') {
+      window.open(`${window.location.origin}/moment/${item.target.id}`, '_blank', 'noopener,noreferrer');
+    } else {
+      setActiveTab('plan');
+    }
+  }, [myDay]);
 
   // The focus token is only meant for ONE visit to Your Moments -- clear it
   // as soon as the tab changes away, so a later, unrelated visit to Plan
@@ -963,6 +997,11 @@ export default function DashboardPage() {
             onFindAnotherTimeForMoment={handleFindAnotherTimeForMoment}
             startingSoonReminder={auraUpdates?.upcoming?.[0]}
             onOpenReminder={handleOpenReminder}
+            myDayAgenda={myDay?.agenda}
+            myDayStory={myDay?.story}
+            onMyDayChanged={loadMyDay}
+            onOpenPeople={() => { setPeopleReturnTo('home'); setActiveTab('people'); }}
+            onOpenAgendaItem={handleOpenAgendaItem}
           />
         )}
 
@@ -1118,7 +1157,7 @@ export default function DashboardPage() {
           zIndex: 9999,
         }}
       >
-        <NavButton label="Home" icon="🏠" active={activeTab === 'home'} onClick={() => setActiveTab('home')} />
+        <NavButton label="Home" icon="🏠" active={activeTab === 'home' || (activeTab === 'people' && peopleReturnTo === 'home')} onClick={() => setActiveTab('home')} />
         <NavButton label="Plan" icon="✨" active={activeTab === 'plan' || (activeTab === 'people' && peopleReturnTo === 'plan')} onClick={() => setActiveTab('plan')} />
         <NavButton label="Explore" icon="🧭" active={activeTab === 'explore' || activeTab === 'panchang' || activeTab === 'muhurtham'} onClick={() => setActiveTab('explore')} />
         <NavButton label="Ask Aura" icon="🤖" active={activeTab === 'ask'} onClick={() => setActiveTab('ask')} />
