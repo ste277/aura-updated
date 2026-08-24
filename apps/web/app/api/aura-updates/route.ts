@@ -11,6 +11,7 @@ import {
 import { summarizeAuraUpdates } from '../../../lib/auraUpdates';
 import { deriveAuraReminders, MAX_REMINDER_LEAD_MINUTES, REMINDER_GRACE_PERIOD_MINUTES } from '../../../lib/auraReminders';
 import { attachReminderSeenState } from '../../../lib/reminderAttention';
+import { resolveRequestNow } from '../../../lib/testTimeOverride';
 
 /**
  * Authenticated only -- returns the current user's own actionable/recent
@@ -34,7 +35,7 @@ export async function GET(req: NextRequest) {
   const user = await getUserById(session.userId);
   if (!user) return NextResponse.json({ error: 'User not found.' }, { status: 404 });
 
-  const now = new Date();
+  const now = resolveRequestNow(req);
   // Bounded query window (brief section 25) -- only records that could
   // plausibly produce an ACTIVE reminder right now, never full history.
   const from = new Date(now.getTime() - REMINDER_GRACE_PERIOD_MINUTES * 60_000);

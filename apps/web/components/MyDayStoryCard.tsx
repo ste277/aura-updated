@@ -93,6 +93,19 @@ export function MyDayStoryCard({
   const [peopleLoading, setPeopleLoading] = useState(false);
   const [selectedPerson, setSelectedPerson] = useState<SavedPersonRow | null>(null);
   const [selectedActivity, setSelectedActivity] = useState<DailyIntentionActivity | null>(null);
+  // Product Journey / E2E Hardening V1 -- the exact duration the search
+  // actually ran with, so the later "Add to my day" save can reuse it
+  // verbatim. Previously handleAddToMyDay recomputed a duration with a
+  // SHORTER fallback chain (defaultDurationMinutes ?? 45, dropping
+  // suggestedDurations) than chooseActivity's own search call
+  // (defaultDurationMinutes ?? suggestedDurations[0] ?? 45) -- for any
+  // USER_SELECTED-duration activity with no defaultDurationMinutes (e.g.
+  // Deep Work: suggestedDurations [30, 60, 90], no default), the search
+  // window was sized to 30 minutes while the save attempted 45, and
+  // POST /api/plans correctly rejected the mismatch every time. Found via
+  // this brief's E2E coverage (My Day -> Add Plan journey), not a
+  // hypothetical.
+  const [selectedDurationMinutes, setSelectedDurationMinutes] = useState<number>(45);
   const [candidate, setCandidate] = useState<ResolvedCandidate | null>(null);
   const [error, setError] = useState('');
   const [tomorrowBroadChoice, setTomorrowBroadChoice] = useState<DailyIntentionBroadChoice | null>(null);
@@ -199,6 +212,7 @@ export function MyDayStoryCard({
 
     const definition = getActivityDefinition(activity.activityId);
     const durationMinutes = definition?.experience.defaultDurationMinutes ?? definition?.experience.suggestedDurations?.[0] ?? 45;
+    setSelectedDurationMinutes(durationMinutes);
 
     setPhase('SEARCHING');
     setError('');
@@ -238,10 +252,20 @@ export function MyDayStoryCard({
 
   const handleAddToMyDay = async () => {
     if (!candidate?.solo || !selectedActivity) return;
-    const durationMinutes = getActivityDefinition(selectedActivity.activityId as string)?.experience.defaultDurationMinutes ?? 45;
     setPhase('CREATING');
     try {
-      await saveUpcomingPlanFromCandidate(candidate.solo, durationMinutes);
+      await saveUpcomingPlanFromCandidate(candidate.solo, selectedDurationMinutes);
+      // Product Journey / E2E Hardening V1 (brief section 26) -- the
+      // My Day intention flow's own doc comment already claimed this
+      // reuses PLAN_RESULT_SELECTED "via the existing reused APIs", but
+      // that never actually fired here -- a real gap in the
+      // MY_DAY_INTENTION_OPENED -> ... -> Plan/Moment created funnel
+      // (the Moment side already fires AURA_MOMENT_CREATED server-side
+      // from POST /api/aura-moments regardless of caller; the Plan side
+      // had no equivalent). Reuses the exact same event
+      // PlanWithAuraView's own "Use this time" already fires for the
+      // identical outcome, not a new My-Day-specific event.
+      trackEvent('PLAN_RESULT_SELECTED', { metadata: { mode: 'FIND' } });
       setPhase('DONE');
     } catch {
       setError('Could not add this to your day. Try again.');
@@ -280,6 +304,7 @@ export function MyDayStoryCard({
     setGroupId(null);
     setSelectedPerson(null);
     setSelectedActivity(null);
+    setSelectedDurationMinutes(45);
     setCandidate(null);
     setError('');
     onCreated();

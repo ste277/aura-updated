@@ -1001,7 +1001,6 @@ export default function DashboardPage() {
             loggedActivitiesToday={loggedActivitiesToday}
             dailyBriefing={dailyBriefing}
             todayReflection={todayReflection}
-            upcomingPlans={plannedActivities.filter((plan) => plan.status === 'UPCOMING')}
             onLogActivity={handleLogActivity}
             onSubmitReflection={handleSubmitReflection}
             onLogPlan={handleLogPlanFromHome}

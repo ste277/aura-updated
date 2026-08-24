@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { getSessionFromRequest } from '../../../lib/session';
 import { getUserById } from '../../../lib/db';
 import { buildMyDay } from '../../../lib/myDayOrchestrator';
+import { resolveRequestNow } from '../../../lib/testTimeOverride';
 
 /**
  * My Day V1 (brief section 41) -- GET /api/my-day?date=YYYY-MM-DD. Thin
@@ -26,7 +27,7 @@ export async function GET(req: NextRequest) {
   }
 
   const startedAt = Date.now();
-  const { agenda, story, reflection, tomorrowPreview } = await buildMyDay(user, rawDate ?? undefined, new Date());
+  const { agenda, story, reflection, tomorrowPreview } = await buildMyDay(user, rawDate ?? undefined, resolveRequestNow(req));
   const durationMs = Date.now() - startedAt;
 
   return NextResponse.json({ agenda, story, reflection, tomorrowPreview, durationMs });

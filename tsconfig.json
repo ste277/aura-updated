@@ -10,6 +10,12 @@
     "outDir": "dist"
   },
   "include": ["packages/**/*.ts", "test/**/*.ts"],
-  "exclude": ["test/planWithAuraViewLogic.test.ts", "test/panchangCalendarLogic.test.ts", "test/muhurthamFinderViewLogic.test.ts"]
+  "exclude": [
+    "test/planWithAuraViewLogic.test.ts",
+    "test/panchangCalendarLogic.test.ts",
+    "test/muhurthamFinderViewLogic.test.ts",
+    "test/homeDashboardGoodRightNow.test.ts",
+    "test/nextMomentSurface.test.ts"
+  ]
 }
 

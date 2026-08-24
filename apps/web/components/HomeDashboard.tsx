@@ -1,7 +1,7 @@
 'use client';
 
 import React, { useEffect, useMemo, useRef, useState } from 'react';
-import { getPersonalizedTasks, UserChartContext, FULL_ACTIVITY_CATALOG, normalizeWindowType } from '../../../packages/recommendation/src/personalizedTasks';
+import { getPersonalizedTasks, UserChartContext, FULL_ACTIVITY_CATALOG, normalizeWindowType, PersonalizedTask } from '../../../packages/recommendation/src/personalizedTasks';
 import { getActionCards, getActivityDiscoveryCards, ActionCard } from '../../../packages/recommendation/src/actionCards';
 import { getActivityDefinition, ImmediateAction, ActivityDurationMode } from '../../../packages/recommendation/src/activityDefinitions';
 import type { DailyBriefing } from '../../../packages/recommendation/src/dailyAssistant';
@@ -19,6 +19,7 @@ import type { DailyStory } from '../lib/dailyStory';
 import type { DailyReflection } from '../lib/dailyReflection';
 import type { TomorrowPreview } from '../lib/tomorrowPreview';
 import { deriveNextMeaningfulThing } from '../lib/nextMeaningfulThing';
+import { deriveAuraSuggestion, AuraSuggestion } from '../lib/auraSuggests';
 import { MyDayStoryCard } from './MyDayStoryCard';
 import { YourDayTimeline } from './YourDayTimeline';
 
@@ -56,7 +57,6 @@ interface HomeDashboardProps {
     outputLevel: 'LOW' | 'MODERATE' | 'PEAK_FLOW';
     followedGuidance: boolean;
   } | null;
-  upcomingPlans?: HomeUpcomingPlan[];
   userChart?: UserChartContext;
   onLogActivity?: (
     activityTitle: string,
@@ -146,29 +146,6 @@ interface HomeDayWindow {
   type: string;
 }
 
-interface HomeUpcomingPlan {
-  id: string;
-  title: string;
-  icon?: string | null;
-  status: 'UPCOMING' | 'LOGGED' | 'CANCELLED';
-  plannedStartAt: string;
-  plannedEndAt: string;
-  durationMinutes: number;
-  windowType?: string | null;
-  windowLabel?: string | null;
-  matchLabel?: string | null;
-  recommendation?: string | null;
-}
-
-interface AssistantSuggestion {
-  title: string;
-  description: string;
-  icon: string;
-  actionLabel: string;
-  secondaryLabel: string;
-  planId?: string;
-}
-
 const PROMPT_CHIPS = ['Workout', 'Deep work', 'Study', 'Date night'];
 
 // "Best Time" is a claim of credibility: it should only appear once the engine
@@ -176,7 +153,7 @@ const PROMPT_CHIPS = ['Workout', 'Deep work', 'Study', 'Date night'];
 // Muhurta peak). Neutral Flow is the *absence* of a special window, not a
 // verdict that now is the best moment for anything — so it always gets its
 // own honest "Flexible" framing here, regardless of its numeric score.
-function getWindowTone(score: number, windowName: string) {
+export function getWindowTone(score: number, windowName: string) {
   const cleanWindow = windowName.toUpperCase();
   if (cleanWindow.includes('RAHU') || cleanWindow.includes('YAMA') || score < 4) {
     return { label: 'Use Caution', pill: 'Caution', color: '#fb6b6b', description: 'Better for routine, low-stakes tasks and cleanup.' };
@@ -192,6 +169,17 @@ function getWindowTone(score: number, windowName: string) {
   if (score >= 7.5) return { label: 'Strong Window', pill: 'Best Time', color: '#4ade80', description: 'Good for focused, important, or momentum-building work.' };
   if (score >= 5) return { label: 'Good Window', pill: 'Good Time', color: '#4ade80', description: 'Good for steady progress, planning, and everyday tasks.' };
   return { label: 'Light Flow', pill: 'Steady Time', color: '#facc15', description: 'Good for maintenance, reflection, and gentle progress.' };
+}
+
+/** Product Journey / E2E Hardening V1 (brief section 18) -- "Next Best
+ * Moment" is a claim of credibility, same principle as getWindowTone's own
+ * "Best Time" doc comment above. Calling a caution/low-quality candidate
+ * "Best" merely because it's the highest-scoring one left today is
+ * conceptually contradictory (the reported example: "Next Best Moment /
+ * Caution Window / 4.2/10"). Reuses getWindowTone's own existing tone
+ * classification -- no new astrology threshold. */
+export function nextMomentSurfaceLabel(tone: { pill: string }): { icon: string; label: string } {
+  return tone.pill === 'Caution' ? { icon: '🕐', label: 'Coming Up' } : { icon: '⭐', label: 'Next Best Moment' };
 }
 
 /** Maps getWindowTone's own hex color to a StatusBadge tone (brief section
@@ -269,30 +257,6 @@ function scoreLabel(score: number) {
   return Math.max(1, Math.min(10, Math.round(score * 10) / 10));
 }
 
-function isCautionWindow(windowName: string) {
-  const cleanWindow = windowName.toUpperCase();
-  return cleanWindow.includes('RAHU') || cleanWindow.includes('YAMA');
-}
-
-function formatPlanClock(value: string) {
-  const date = new Date(value);
-  if (Number.isNaN(date.getTime())) return 'soon';
-  return date.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' });
-}
-
-function findActionablePlan(plans: HomeUpcomingPlan[]) {
-  const now = Date.now();
-  const horizonEnd = now + 90 * 60 * 1000;
-  return plans
-    .filter((plan) => plan.status === 'UPCOMING')
-    .map((plan) => ({
-      plan,
-      startMs: new Date(plan.plannedStartAt).getTime(),
-      endMs: new Date(plan.plannedEndAt).getTime(),
-    }))
-    .filter(({ startMs, endMs }) => Number.isFinite(startMs) && Number.isFinite(endMs) && startMs <= horizonEnd && endMs >= now - 15 * 60 * 1000)
-    .sort((a, b) => a.startMs - b.startMs)[0]?.plan ?? null;
-}
 
 /**
  * "Good right now" -- the deterministic window -> 3 activity cards table
@@ -360,7 +324,6 @@ export function HomeDashboard({
   loggedActivitiesToday = [],
   dailyBriefing,
   todayReflection,
-  upcomingPlans = [],
   userChart,
   onLogActivity,
   onSubmitReflection,
@@ -419,6 +382,7 @@ export function HomeDashboard({
   // which describes the CURRENT window (e.g. a Rahu Kalam caution color
   // would otherwise bleed into a favorable upcoming Abhijit window's gauge).
   const nextTone = getWindowTone(nextShift.score, nextShift.windowName);
+  const nextMomentSurface = nextMomentSurfaceLabel(nextTone);
   const currentWindowLabel = dailyBriefing?.briefingState === 'ACTIVE'
     ? dailyBriefing.peakWindow.name
     : formatWindowName(currentWindow?.name ?? activeWindowName);
@@ -441,50 +405,6 @@ export function HomeDashboard({
     ? `${currentWindow.timeRemaining} left`
     : nextShift.startsIn;
 
-  const assistantSuggestion: AssistantSuggestion = useMemo(() => {
-    const actionablePlan = findActionablePlan(upcomingPlans);
-    if (actionablePlan) {
-      const start = formatPlanClock(actionablePlan.plannedStartAt);
-      const label = actionablePlan.windowLabel || formatWindowName(actionablePlan.windowType || activeWindowName);
-      return {
-        title: actionablePlan.title,
-        description: `You planned this for ${start}. ${label} is the context Aura picked for it.`,
-        icon: actionablePlan.icon || primaryTask.icon || '✨',
-        actionLabel: 'Log now',
-        secondaryLabel: 'Open Plan',
-        planId: actionablePlan.id,
-      };
-    }
-
-    if (isCautionWindow(activeWindowName)) {
-      const lightTask = personalizedTasks.find((task) => task.significance === 'LOW') ?? personalizedTasks[0] ?? primaryTask;
-      return {
-        title: lightTask.title,
-        description: `This is a caution window, so Aura is keeping the suggestion low-stakes. ${lightTask.description}`,
-        icon: lightTask.icon || '✨',
-        actionLabel: 'Do lightly',
-        secondaryLabel: 'Find better time',
-      };
-    }
-
-    // Situate the suggestion in the actual moment (how much usable time is
-    // left before the next shift) rather than just restating a static
-    // catalog description — a recommendation should sound like it looked at
-    // the clock, not like a lookup table entry.
-    const timeLeft = stripCountdownWrapper(remainingText);
-    const situatedDescription = timeLeft
-      ? `You have about ${timeLeft} before the next shift, making this a good time to ${primaryTask.title.toLowerCase()}.`
-      : primaryTask.description;
-
-    return {
-      title: primaryTask.title,
-      description: situatedDescription,
-      icon: primaryTask.icon || '✨',
-      actionLabel: 'Do it now',
-      secondaryLabel: 'More options',
-    };
-  }, [activeWindowName, personalizedTasks, primaryTask, remainingText, upcomingPlans]);
-
   // See selectGoodRightNowCards' own doc comment for the full reasoning --
   // justLoggedTitles exempts a card the user just logged from THIS Home
   // visit so it keeps showing its own confirmation instead of being
@@ -497,6 +417,33 @@ export function HomeDashboard({
   const goodRightNow = useMemo(
     () => selectGoodRightNowCards(activeWindowName, loggedActivitiesToday, justLoggedTitles),
     [activeWindowName, loggedActivitiesToday, justLoggedTitles]
+  );
+
+  // Product Journey / E2E Hardening V1 (brief section 17) -- canonical
+  // activityIds already visible in Good Right Now this render, so Aura
+  // Suggests can dedup against them by id, never by fuzzy title matching.
+  const goodRightNowActivityIds = useMemo(
+    () => new Set(goodRightNow.map((card) => card.activityId).filter((id): id is string => Boolean(id))),
+    [goodRightNow]
+  );
+
+  // Product Journey / E2E Hardening V1 (brief section 14-16) -- "Aura
+  // Suggests" now prefers actual agenda context (myDayAgenda.nextItem) over
+  // a second, disconnected current-window ranking, and can be hidden
+  // entirely when it has nothing additive over Good Right Now. The old
+  // findActionablePlan(upcomingPlans) path was a duplicate derivation of
+  // "what's the next actionable Plan" running in parallel with the
+  // canonical DailyAgenda -- removed in favor of that single source.
+  const assistantSuggestion: AuraSuggestion | null = useMemo(
+    () =>
+      deriveAuraSuggestion({
+        agenda: myDayAgenda,
+        activeWindowName,
+        personalizedTasks: personalizedTasks.length > 0 ? personalizedTasks : [primaryTask as PersonalizedTask],
+        goodRightNowActivityIds,
+        timeLeftBeforeNextShift: stripCountdownWrapper(remainingText),
+      }),
+    [myDayAgenda, activeWindowName, personalizedTasks, primaryTask, goodRightNowActivityIds, remainingText]
   );
 
   // Next Best Moment's end time -- nextShift itself only carries a start
@@ -688,32 +635,46 @@ export function HomeDashboard({
       <YourDayTimeline agenda={myDayAgenda ?? null} onOpenItem={onOpenAgendaItem} onAddSomething={() => onPlanClick?.()} />
 
       <div style={pairGridStyle}>
-        <SurfaceCard>
-          <div style={typography.sectionEyebrow}>✨ Aura Suggests</div>
-          <div style={{ display: 'grid', gridTemplateColumns: '74px minmax(0, 1fr)', alignItems: 'center', gap: spacing.md, marginTop: spacing.md }}>
-            <div style={suggestIconStyle}>{assistantSuggestion.icon}</div>
-            <div style={{ minWidth: 0 }}>
-              <h2 style={{ margin: 0, color: colors.textPrimary, fontSize: 18, lineHeight: 1.2 }}>{assistantSuggestion.title}</h2>
-              <p style={{ margin: '8px 0 0', color: colors.textFaint, lineHeight: 1.38, fontSize: 14 }}>{assistantSuggestion.description}</p>
+        {/* Product Journey / E2E Hardening V1 (brief section 16) -- hidden
+         * entirely rather than duplicating Good Right Now when
+         * deriveAuraSuggestion() has nothing additive to say. */}
+        {assistantSuggestion && (
+          <SurfaceCard>
+            <div style={typography.sectionEyebrow}>✨ Aura Suggests</div>
+            <div style={{ display: 'grid', gridTemplateColumns: '74px minmax(0, 1fr)', alignItems: 'center', gap: spacing.md, marginTop: spacing.md }}>
+              <div style={suggestIconStyle}>{assistantSuggestion.icon}</div>
+              <div style={{ minWidth: 0 }}>
+                <h2 style={{ margin: 0, color: colors.textPrimary, fontSize: 18, lineHeight: 1.2 }}>{assistantSuggestion.title}</h2>
+                <p style={{ margin: '8px 0 0', color: colors.textFaint, lineHeight: 1.38, fontSize: 14 }}>{assistantSuggestion.description}</p>
+              </div>
+              <div style={{ gridColumn: '1 / -1', display: 'flex', gap: spacing.md, alignItems: 'center', justifyContent: 'space-between', marginTop: 3 }}>
+                <PrimaryButton
+                  onClick={() => {
+                    // A PREPARE/CONFIRMED/WAITING suggestion describes
+                    // something already on the agenda -- open it (the same
+                    // routing Your Day's own rows use), never try to log it.
+                    if (assistantSuggestion.agendaItem) {
+                      onOpenAgendaItem?.(assistantSuggestion.agendaItem);
+                      return;
+                    }
+                    setSelectedHabit(assistantSuggestion.title);
+                    setSelectedPlanId(assistantSuggestion.planId ?? null);
+                    setLogError('');
+                  }}
+                >
+                  {assistantSuggestion.actionLabel}
+                </PrimaryButton>
+                <TextButton onClick={() => (assistantSuggestion.agendaItem ? onNextShiftClick?.() : onPlanClick?.(assistantSuggestion.title))}>
+                  {assistantSuggestion.secondaryLabel} →
+                </TextButton>
+              </div>
             </div>
-            <div style={{ gridColumn: '1 / -1', display: 'flex', gap: spacing.md, alignItems: 'center', justifyContent: 'space-between', marginTop: 3 }}>
-              <PrimaryButton
-                onClick={() => {
-                  setSelectedHabit(assistantSuggestion.title);
-                  setSelectedPlanId(assistantSuggestion.planId ?? null);
-                  setLogError('');
-                }}
-              >
-                {assistantSuggestion.actionLabel}
-              </PrimaryButton>
-              <TextButton onClick={() => onPlanClick?.(assistantSuggestion.title)}>{assistantSuggestion.secondaryLabel} →</TextButton>
-            </div>
-          </div>
-        </SurfaceCard>
+          </SurfaceCard>
+        )}
 
         <SurfaceCard style={{ display: 'grid', gridTemplateColumns: '1fr 74px', gap: spacing.md, alignItems: 'center' }}>
           <div>
-            <div style={{ ...typography.sectionEyebrow, color: colors.caution }}>⭐ Next Best Moment</div>
+            <div style={{ ...typography.sectionEyebrow, color: colors.caution }}>{nextMomentSurface.icon} {nextMomentSurface.label}</div>
             <h2 style={{ margin: '14px 0 0', color: colors.textPrimary, fontSize: 22 }}>{nextShift.windowName}</h2>
             <div style={{ marginTop: 7, color: colors.info, fontSize: 15, fontWeight: 850 }}>{formatNextMomentTiming(nextShift.startsIn)}</div>
             {nextMomentWindow && (
@@ -855,7 +816,28 @@ function FlowRing({ score, color }: { score: number; color: string }) {
 
 function ScoreGauge({ score, color }: { score: number; color: string }) {
   return (
-    <div style={{ width: 58, height: 58, borderRadius: 58, border: `4px solid ${color}`, borderLeftColor: 'rgba(148, 163, 184, 0.28)', display: 'flex', flexDirection: 'column', justifyContent: 'center', alignItems: 'center', background: 'rgba(15, 23, 42, 0.75)' }}>
+    <div
+      style={{
+        width: 58,
+        height: 58,
+        borderRadius: 58,
+        // Product Journey / E2E Hardening V1 (brief section 28) -- was a
+        // mixed `border` shorthand + `borderLeftColor` longhand on the
+        // same style object, which React warns about across re-renders
+        // (a `score`/`color` prop change diffs shorthand vs. longhand
+        // inconsistently). All longhand now, same visual result.
+        borderWidth: 4,
+        borderStyle: 'solid',
+        borderTopColor: color,
+        borderRightColor: color,
+        borderBottomColor: color,
+        borderLeftColor: 'rgba(148, 163, 184, 0.28)',
+        display: 'flex',
+        flexDirection: 'column',
+        justifyContent: 'center',
+        alignItems: 'center',
+        background: 'rgba(15, 23, 42, 0.75)',
+      }}>
       <span style={{ color: '#f8fafc', fontSize: 19, fontWeight: 950 }}>{score}</span>
       <span style={{ color: '#aab7d2', fontSize: 10 }}>/10</span>
     </div>
