@@ -352,8 +352,12 @@ export default function DashboardPage() {
 
   const handleViewMomentUpdate = useCallback((momentToken: string) => {
     window.open(`${window.location.origin}/moment/${momentToken}`, '_blank', 'noopener,noreferrer');
-    fetch(`/api/aura-moments/${momentToken}/seen`, { method: 'POST' }).catch(() => {});
-    loadAuraUpdates();
+    // E2E Journey Coverage V1.1 stabilization -- this previously called
+    // loadAuraUpdates() unchained, racing the seen POST instead of waiting
+    // for it (handleOpenReminder below already gets this right). Matching
+    // that convention: never blocks the popup open on the POST, but the
+    // refetch now always happens after it settles.
+    fetch(`/api/aura-moments/${momentToken}/seen`, { method: 'POST' }).catch(() => {}).finally(() => loadAuraUpdates());
   }, [loadAuraUpdates]);
 
   const handleFindAnotherTimeForMoment = useCallback((momentToken: string) => {

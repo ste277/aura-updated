@@ -32,6 +32,7 @@ export default defineConfig({
   retries: process.env.CI ? 1 : 0,
   workers: 1,
   reporter: process.env.CI ? [['github'], ['html', { open: 'never' }]] : [['list'], ['html', { open: 'never' }]],
+  globalSetup: require.resolve('./e2e/fixtures/warmup.ts'),
   globalTeardown: require.resolve('./e2e/fixtures/cleanup.ts'),
   use: {
     baseURL: BASE_URL,

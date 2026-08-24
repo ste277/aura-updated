@@ -14,6 +14,19 @@ The config (`playwright.config.ts`, repo root) spawns `apps/web`'s own dev serve
 
 Requires the same `DATABASE_URL` your normal local dev already uses (`apps/web/.env.local`) — no second database. See "Test data isolation" below for why this is safe against a developer's own rows.
 
+## Local production build verification
+
+`next build` runs under `NODE_ENV=production`, which trips `apps/web/lib/auth.ts`'s intentional guard: `AUTH_SECRET` must be a real 32+ character secret in production, with no weak fallback (see that file's own comment — a missing/short secret must never silently sign tokens with a key published in this repo). CI supplies a placeholder via `AUTH_SECRET=ci-placeholder-secret-not-for-production` inline in `.github/workflows/ci.yml`'s build step; nothing queries the DB or uses this value for anything real at build time.
+
+For the same reason, verify a production build locally with:
+
+```bash
+cd apps/web
+npm run build:check
+```
+
+`build:check` is `next build` with an inline, local-only placeholder `AUTH_SECRET` (`apps/web/package.json`) — never committed as a real secret, never used to weaken the production guard itself, and irrelevant to the client bundle (this value is server-only and never reaches the browser). Plain `npm run build` will still fail at the `AUTH_SECRET` guard, by design, if you haven't set a real one in your shell — that failure is expected and is not a build regression.
+
 ## Test data isolation
 
 Every test gets a freshly signed-in user via `e2e/fixtures/testUser.ts`'s `testUser` auto-fixture, using the app's own dev-only magic-link shortcut (`POST /api/auth/request-link` returns `devLoginUrl` when no email provider is configured and `NODE_ENV !== 'production'`) — no forged sessions. Every email is tagged `e2e-<test-name>-<uuid8>@e2e.aura.local`.
