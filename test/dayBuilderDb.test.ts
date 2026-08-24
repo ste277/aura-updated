@@ -1,0 +1,220 @@
+/**
+ * Live-database tests for Intentional Day Builder V1 -- the orchestrator
+ * (dayBuilderOrchestrator.ts), plan-creation idempotency (db.ts), and
+ * Day Builder preference persistence. Requires a real, reachable
+ * DATABASE_URL, same convention as savedPersonDb.test.ts -- NOT part of
+ * ci.yml's math-core-tests job (no Postgres service provisioned there).
+ * Run locally with a real DATABASE_URL set:
+ *
+ *   DATABASE_URL="postgresql://..." npx ts-node test/dayBuilderDb.test.ts
+ *
+ * Creates one throwaway test user + one throwaway SavedPerson (idempotent
+ * via email upsert), cleans up the SavedPerson it creates, but leaves the
+ * User row in place -- same convention as savedPersonDb.test.ts.
+ */
+import {
+  upsertUserByEmail,
+  createSavedPerson,
+  deleteSavedPerson,
+  updateUserDayBuilderPrefs,
+  claimPlanCreation,
+  getPlanCreationClaim,
+  fillPlanCreationClaim,
+  createPlannedActivity,
+} from '../apps/web/lib/db';
+import { buildDailyAgenda } from '../apps/web/lib/dailyAgenda';
+import { buildIntentionalDaySuggestions } from '../apps/web/lib/dayBuilderOrchestrator';
+import { runTimingSearch } from '../packages/recommendation/src/timingSearch';
+import { findEverydaySharedTiming } from '../packages/recommendation/src/everydayTimingFit';
+import { natalContextFromBirthDetails } from '../apps/web/lib/natalContext';
+import { resolveTzOffsetMinutes } from '../apps/web/lib/timezone';
+
+let allPassed = true;
+function check(label: string, condition: boolean) {
+  console.log(`${condition ? 'OK  ' : 'FAIL'} ${label}`);
+  if (!condition) allPassed = false;
+}
+
+const TZ = 'Asia/Kolkata';
+const LOCAL_DATE = '2026-08-24'; // a Monday -- no weekend-only search branches involved
+const NOW = new Date('2026-08-24T02:30:00.000Z'); // 8:00 AM IST
+const MINUTE_OF_DAY = 8 * 60;
+
+async function main() {
+  const user = await upsertUserByEmail({ email: 'test-day-builder-owner@example.com', cityName: 'Chennai', latitude: 13.0827, longitude: 80.2707, timezone: TZ });
+
+  const createdPersonIds: string[] = [];
+
+  try {
+    // ============================================================
+    // Disabled / muted -> zero suggestions, no search attempted (brief
+    // section 6/13)
+    // ============================================================
+    const emptyAgenda = buildDailyAgenda({ now: NOW, localDate: LOCAL_DATE, timezone: TZ, plans: [], moments: [], momentIdsWithSuccessor: new Set(), habitLogs: [] });
+    const disabledUser = { ...user, dayBuilderEnabled: false, dayBuilderMutedGroups: [] };
+    const disabledResult = await buildIntentionalDaySuggestions({ user: disabledUser, agenda: emptyAgenda, minuteOfDay: MINUTE_OF_DAY, now: NOW });
+    check('dayBuilderEnabled=false -> zero suggestions', disabledResult.length === 0);
+
+    const allMutedUser = { ...user, dayBuilderEnabled: true, dayBuilderMutedGroups: ['RELATIONSHIPS', 'FAMILY', 'SOCIAL', 'WORK', 'SELF', 'ENJOYMENT'] };
+    const mutedResult = await buildIntentionalDaySuggestions({ user: allMutedUser, agenda: emptyAgenda, minuteOfDay: MINUTE_OF_DAY, now: NOW });
+    check('Every real group muted -> zero suggestions', mutedResult.length === 0);
+
+    // ============================================================
+    // NIGHT phase -> zero suggestions, defers to Reflection/Tomorrow
+    // Preview (brief section 27/33/34)
+    // ============================================================
+    const nightResult = await buildIntentionalDaySuggestions({ user, agenda: emptyAgenda, minuteOfDay: 22 * 60, now: new Date('2026-08-24T16:30:00.000Z') });
+    check('NIGHT phase -> zero suggestions (never computed)', nightResult.length === 0);
+
+    // ============================================================
+    // Timing parity (brief section 41) -- a WORK-only day (SELF/ENJOYMENT/
+    // people muted) must resolve a SOLO suggestion whose candidate is
+    // EXACTLY (deep-equal) a member of what runTimingSearch itself returns
+    // for the identical parameters. Day Builder never computes its own
+    // score, label, or reasons -- only selects among the canonical
+    // engine's own output.
+    // ============================================================
+    const workOnlyUser = { ...user, dayBuilderEnabled: true, dayBuilderMutedGroups: ['RELATIONSHIPS', 'FAMILY', 'SOCIAL', 'SELF', 'ENJOYMENT'] };
+    const workSuggestions = await buildIntentionalDaySuggestions({ user: workOnlyUser, agenda: emptyAgenda, minuteOfDay: MINUTE_OF_DAY, now: NOW });
+    check('WORK-only, wide-open day -> at least one suggestion', workSuggestions.length > 0);
+    const workSuggestion = workSuggestions[0];
+    check('WORK-only suggestion is SOLO (no person involved)', workSuggestion?.candidate.kind === 'SOLO');
+
+    if (workSuggestion && workSuggestion.candidate.kind === 'SOLO') {
+      const context = {
+        now: NOW,
+        latitude: user.latitude,
+        longitude: user.longitude,
+        timezone: user.timezone,
+        tzOffsetMinutes: resolveTzOffsetMinutes(user.timezone, NOW),
+      };
+      const raw = runTimingSearch({
+        mode: 'FIND',
+        activityId: workSuggestion.activityId,
+        durationMinutes: workSuggestion.durationMinutes,
+        horizon: 'TODAY',
+        limit: 5,
+        context,
+      });
+      const soloCandidate = workSuggestion.candidate.solo;
+      const exactMatch = raw.candidates.find((c) => c.start === soloCandidate.start);
+      check(
+        'Day Builder\'s SOLO candidate is byte-identical to one runTimingSearch itself returned (same score/label/reasons)',
+        Boolean(exactMatch) && JSON.stringify(exactMatch) === JSON.stringify(soloCandidate)
+      );
+    }
+
+    // ============================================================
+    // People-oriented suggestion with a real SavedPerson (brief section 9:
+    // no fake astrology -- only the person's own already-stored birth data)
+    // ============================================================
+    const partner = await createSavedPerson(user.id, {
+      name: 'Test Partner',
+      relationshipType: 'PARTNER',
+      birthDate: '1990-05-15',
+      birthTime: '09:00',
+      birthTimezone: TZ,
+      birthCityName: 'Chennai',
+      birthLatitude: 13.0827,
+      birthLongitude: 80.2707,
+    });
+    createdPersonIds.push(partner.id);
+
+    const relationshipsOnlyUser = { ...user, dayBuilderEnabled: true, dayBuilderMutedGroups: ['FAMILY', 'SOCIAL', 'WORK', 'SELF', 'ENJOYMENT'] };
+    const peopleSuggestions = await buildIntentionalDaySuggestions({ user: relationshipsOnlyUser, agenda: emptyAgenda, minuteOfDay: MINUTE_OF_DAY, now: NOW });
+    check('RELATIONSHIPS-only day with a real SavedPerson -> at least one suggestion', peopleSuggestions.length > 0);
+    const peopleSuggestion = peopleSuggestions[0];
+    check('RELATIONSHIPS suggestion resolves a SHARED candidate against the real saved partner', peopleSuggestion?.candidate.kind === 'SHARED' && peopleSuggestion.candidate.person.id === partner.id);
+
+    if (peopleSuggestion && peopleSuggestion.candidate.kind === 'SHARED') {
+      const context = {
+        now: NOW,
+        latitude: user.latitude,
+        longitude: user.longitude,
+        timezone: user.timezone,
+        tzOffsetMinutes: resolveTzOffsetMinutes(user.timezone, NOW),
+      };
+      const partnerContext = natalContextFromBirthDetails('1990-05-15', '09:00', TZ);
+      const rawShared = findEverydaySharedTiming({
+        activityId: peopleSuggestion.activityId,
+        durationMinutes: peopleSuggestion.durationMinutes,
+        horizon: 'TODAY',
+        limit: 5,
+        context,
+        partnerContext,
+      });
+      const sharedCandidate = peopleSuggestion.candidate.shared;
+      const match = rawShared.status === 'OK' ? rawShared.candidates.find((c) => c.start === sharedCandidate.start) : undefined;
+      check(
+        'Day Builder\'s SHARED candidate is byte-identical to one findEverydaySharedTiming itself returned',
+        Boolean(match) && JSON.stringify(match) === JSON.stringify(sharedCandidate)
+      );
+    }
+
+    // ============================================================
+    // Diversity: WORK + RELATIONSHIPS both open -> distinct suggestions,
+    // never the same activityId twice.
+    // ============================================================
+    const openUser = { ...user, dayBuilderEnabled: true, dayBuilderMutedGroups: [] };
+    const openSuggestions = await buildIntentionalDaySuggestions({ user: openUser, agenda: emptyAgenda, minuteOfDay: MINUTE_OF_DAY, now: NOW });
+    const activityIds = openSuggestions.map((s) => s.activityId);
+    check('A fully open day never suggests the same activityId twice', new Set(activityIds).size === activityIds.length);
+    check('A fully open day suggests at most 3 for immediate display worth (reserve pool may exceed 3)', openSuggestions.length <= 5);
+
+    // ============================================================
+    // Plan creation idempotency (brief section 20)
+    // ============================================================
+    const clientRequestId = `test-day-builder:${Date.now()}`;
+    const firstClaim = await claimPlanCreation(user.id, clientRequestId);
+    check('First claim on a fresh clientRequestId succeeds', firstClaim === true);
+    const secondClaim = await claimPlanCreation(user.id, clientRequestId);
+    check('A second claim on the SAME clientRequestId fails (already claimed)', secondClaim === false);
+
+    const beforeFill = await getPlanCreationClaim(user.id, clientRequestId);
+    check('An unfilled claim has a null plannedActivityId', beforeFill?.plannedActivityId === null);
+
+    // A real (throwaway) PlannedActivity row -- the fill column has a real
+    // FK to PlannedActivity, so a fake id would violate it, correctly.
+    const throwawayPlan = await createPlannedActivity({
+      userId: user.id,
+      title: 'Test Day Builder Idempotency Plan',
+      plannedStartAt: new Date('2026-08-24T10:00:00.000Z'),
+      plannedEndAt: new Date('2026-08-24T11:00:00.000Z'),
+      durationMinutes: 60,
+      windowType: 'NEUTRAL',
+    });
+    await fillPlanCreationClaim(user.id, clientRequestId, throwawayPlan.id);
+    const afterFill = await getPlanCreationClaim(user.id, clientRequestId);
+    check('After fillPlanCreationClaim, the claim carries the plannedActivityId', afterFill?.plannedActivityId === throwawayPlan.id);
+
+    const otherUser = await upsertUserByEmail({ email: 'test-day-builder-owner-2@example.com', cityName: 'Chennai', latitude: 13.0827, longitude: 80.2707, timezone: TZ });
+    const otherUserClaim = await claimPlanCreation(otherUser.id, clientRequestId);
+    check('The SAME clientRequestId string is independently claimable by a DIFFERENT user (composite key, not global)', otherUserClaim === true);
+
+    // ============================================================
+    // Preference persistence round-trip (brief section 6/35)
+    // ============================================================
+    const updated = await updateUserDayBuilderPrefs(user.id, { dayBuilderEnabled: false, dayBuilderMutedGroups: ['WORK', 'SELF'] });
+    check('updateUserDayBuilderPrefs persists dayBuilderEnabled', updated.dayBuilderEnabled === false);
+    check('updateUserDayBuilderPrefs persists dayBuilderMutedGroups', JSON.stringify(updated.dayBuilderMutedGroups.slice().sort()) === JSON.stringify(['SELF', 'WORK']));
+    // Restore to defaults so a re-run of this test (or any other test using
+    // this same throwaway user) starts from a clean, enabled state.
+    await updateUserDayBuilderPrefs(user.id, { dayBuilderEnabled: true, dayBuilderMutedGroups: [] });
+  } finally {
+    for (const id of createdPersonIds) {
+      await deleteSavedPerson(user.id, id);
+    }
+  }
+
+  if (!allPassed) {
+    console.error('\nSome Day Builder DB checks FAILED.');
+    process.exit(1);
+  } else {
+    console.log('\nALL DAY BUILDER DB CHECKS PASSED');
+  }
+}
+
+main().catch((err) => {
+  console.error(err);
+  process.exit(1);
+});

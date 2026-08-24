@@ -25,6 +25,8 @@ export interface User {
   birthTimezone: string | null;
   remindersEnabled: boolean;
   reminderLeadMinutes: number;
+  dayBuilderEnabled: boolean;
+  dayBuilderMutedGroups: string[];
 }
 
 export interface CustomCity {
@@ -652,6 +654,46 @@ export async function getPlannedActivityForOwner(userId: string, planId: string)
   return result.rows[0] ?? null;
 }
 
+// ── Plan creation idempotency (Intentional Day Builder V1, brief section
+// 20) ──────────────────────────────────────────────────────────────────
+// Same "claim, then fill" design as GuestConversionRedemption below, keyed
+// by (userId, clientRequestId) rather than a globally-unique token hash --
+// see migration 0025's own doc comment for why.
+
+export interface PlanCreationClaim {
+  userId: string;
+  clientRequestId: string;
+  plannedActivityId: string | null;
+  createdAt: Date;
+}
+
+export async function getPlanCreationClaim(userId: string, clientRequestId: string): Promise<PlanCreationClaim | null> {
+  const result = await pool.query(
+    `SELECT * FROM "PlanCreationIdempotency" WHERE "userId" = $1 AND "clientRequestId" = $2`,
+    [userId, clientRequestId]
+  );
+  return result.rows[0] ?? null;
+}
+
+/** Returns true if THIS call won the claim (caller should proceed to create
+ * the Plan, then call fillPlanCreationClaim); false if another request
+ * already holds an unfilled claim. Same semantics as
+ * claimGuestConversionToken below. */
+export async function claimPlanCreation(userId: string, clientRequestId: string): Promise<boolean> {
+  const result = await pool.query(
+    `INSERT INTO "PlanCreationIdempotency" ("userId", "clientRequestId") VALUES ($1, $2) ON CONFLICT ("userId", "clientRequestId") DO NOTHING RETURNING *`,
+    [userId, clientRequestId]
+  );
+  return result.rows.length > 0;
+}
+
+export async function fillPlanCreationClaim(userId: string, clientRequestId: string, plannedActivityId: string): Promise<void> {
+  await pool.query(
+    `UPDATE "PlanCreationIdempotency" SET "plannedActivityId" = $1 WHERE "userId" = $2 AND "clientRequestId" = $3`,
+    [plannedActivityId, userId, clientRequestId]
+  );
+}
+
 // ── Guest conversion idempotency (Recipient Conversion V1 Hardening, brief
 // section 10) ──────────────────────────────────────────────────────────
 // See migration 0024's own doc comment for the "claim, then fill" design.
@@ -745,6 +787,22 @@ export async function updateUserReminderPrefs(
   const result = await pool.query(
     `UPDATE "User" SET "remindersEnabled" = $2, "reminderLeadMinutes" = $3 WHERE id = $1 RETURNING *`,
     [userId, prefs.remindersEnabled, prefs.reminderLeadMinutes]
+  );
+  return result.rows[0];
+}
+
+/** Intentional Day Builder V1 (brief section 6/35) -- same minimal-surface
+ * pattern as updateUserReminderPrefs above. mutedGroups is validated by the
+ * caller (route) against the real DailyIntentionGroupId set before this is
+ * ever reached -- this function trusts its input, same discipline as
+ * updateUserReminderPrefs. */
+export async function updateUserDayBuilderPrefs(
+  userId: string,
+  prefs: { dayBuilderEnabled: boolean; dayBuilderMutedGroups: string[] }
+): Promise<User> {
+  const result = await pool.query(
+    `UPDATE "User" SET "dayBuilderEnabled" = $2, "dayBuilderMutedGroups" = $3 WHERE id = $1 RETURNING *`,
+    [userId, prefs.dayBuilderEnabled, prefs.dayBuilderMutedGroups]
   );
   return result.rows[0];
 }

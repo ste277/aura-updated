@@ -4,6 +4,7 @@ import React, { useMemo, useState } from 'react';
 import { LocationPicker } from './LocationPicker';
 import { NotificationSettings } from './NotificationSettings';
 import { ReminderSettings } from './ReminderSettings';
+import { DayBuilderSettings } from './DayBuilderSettings';
 import type { NotificationPrefs } from '../lib/windowNotifications';
 import * as theme from './theme';
 import { colors, spacing, typography, radius } from './theme';
@@ -19,6 +20,10 @@ interface YouViewProps {
   /** Aura Reminders V1 (brief section 14/15). */
   remindersEnabled: boolean;
   onRemindersEnabledChange: (next: boolean) => void;
+  /** Intentional Day Builder V1 (brief section 6/35). */
+  dayBuilderEnabled: boolean;
+  dayBuilderMutedGroups: string[];
+  onDayBuilderPrefsChange: (next: { dayBuilderEnabled: boolean; dayBuilderMutedGroups: string[] }) => void;
   onLocationChanged: (city: { cityName: string; latitude: number; longitude: number; timezone: string }) => void;
   onOpenHome: () => void;
   onOpenChart: () => void;
@@ -44,6 +49,9 @@ export function YouView({
   onNotificationPrefsChange,
   remindersEnabled,
   onRemindersEnabledChange,
+  dayBuilderEnabled,
+  dayBuilderMutedGroups,
+  onDayBuilderPrefsChange,
   onLocationChanged,
   onOpenHome,
   onOpenChart,
@@ -149,6 +157,11 @@ export function YouView({
             </div>
           )}
         </SurfaceCard>
+      </div>
+
+      <div>
+        <SectionHeader label="Day Builder" />
+        <DayBuilderSettings enabled={dayBuilderEnabled} mutedGroups={dayBuilderMutedGroups} onChange={onDayBuilderPrefsChange} />
       </div>
 
       <div style={{ scrollMarginTop: 18 }}>

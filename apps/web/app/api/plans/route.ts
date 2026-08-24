@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getSessionFromRequest } from '../../../lib/session';
-import { createPlannedActivity, listPlannedActivities, getPlannedActivityForOwner, getGuestConversionRedemption, claimGuestConversionToken, fillGuestConversionRedemption } from '../../../lib/db';
+import { createPlannedActivity, listPlannedActivities, getPlannedActivityForOwner, getGuestConversionRedemption, claimGuestConversionToken, fillGuestConversionRedemption, getPlanCreationClaim, claimPlanCreation, fillPlanCreationClaim } from '../../../lib/db';
 import { parseJsonObject } from '../../../lib/request';
 import { verifyGuestStateToken, hashGuestConversionToken } from '../../../lib/guestState';
 
@@ -62,6 +62,25 @@ async function awaitGuestConversionFill(tokenHash: string, userId: string) {
   }
   return null;
 }
+
+/** Intentional Day Builder V1 (brief section 20) -- the same bounded poll
+ * as awaitGuestConversionFill above, applied to the plan-creation claim
+ * table instead of the guest-conversion one. See that function's own doc
+ * comment for why a short bounded wait (not a distributed lock) is the
+ * right amount of rigor for a single fast synchronous INSERT. */
+async function awaitPlanCreationFill(clientRequestId: string, userId: string) {
+  for (let attempt = 0; attempt < 5; attempt++) {
+    await new Promise((resolve) => setTimeout(resolve, 100));
+    const claim = await getPlanCreationClaim(userId, clientRequestId);
+    if (claim?.plannedActivityId) {
+      const plan = await getPlannedActivityForOwner(userId, claim.plannedActivityId);
+      if (plan) return plan;
+    }
+  }
+  return null;
+}
+
+const MAX_CLIENT_REQUEST_ID_LENGTH = 200;
 
 function parseCalendarUrl(value: unknown): string | null {
   const trimmed = cleanString(value, 2000);
@@ -140,6 +159,35 @@ export async function POST(req: NextRequest) {
     }
   }
 
+  // Intentional Day Builder V1 (brief section 20) -- a SECOND, independent
+  // OPTIONAL idempotency key alongside guestConversionToken above (a
+  // caller could in principle send either, never both -- Day Builder's
+  // Add action is not part of the guest-conversion flow). Unlike a guest
+  // token, a clientRequestId needs no signature verification: it carries
+  // no claim of prior entitlement, it only deduplicates THIS authenticated
+  // user's own repeated request (a double-tap, a duplicate render), so
+  // ownership is already guaranteed by session.userId.
+  const clientRequestId = typeof body?.clientRequestId === 'string' ? body.clientRequestId.trim() : undefined;
+  if (clientRequestId && clientRequestId.length > MAX_CLIENT_REQUEST_ID_LENGTH) {
+    return NextResponse.json({ error: `clientRequestId must be ${MAX_CLIENT_REQUEST_ID_LENGTH} characters or fewer.` }, { status: 400 });
+  }
+  if (clientRequestId) {
+    const existing = await getPlanCreationClaim(session.userId, clientRequestId);
+    if (existing?.plannedActivityId) {
+      const existingPlan = await getPlannedActivityForOwner(session.userId, existing.plannedActivityId);
+      if (existingPlan) return NextResponse.json(existingPlan);
+    } else if (existing) {
+      const filled = await awaitPlanCreationFill(clientRequestId, session.userId);
+      if (filled) return NextResponse.json(filled);
+    } else {
+      const claimed = await claimPlanCreation(session.userId, clientRequestId);
+      if (!claimed) {
+        const filled = await awaitPlanCreationFill(clientRequestId, session.userId);
+        if (filled) return NextResponse.json(filled);
+      }
+    }
+  }
+
   const title = typeof body?.title === 'string' ? body.title.trim() : '';
   const plannedStartAt = parseDate(body?.plannedStartAt);
   const plannedEndAt = parseDate(body?.plannedEndAt);
@@ -196,6 +244,9 @@ export async function POST(req: NextRequest) {
 
   if (guestConversionTokenHash) {
     await fillGuestConversionRedemption(guestConversionTokenHash, plan.id);
+  }
+  if (clientRequestId) {
+    await fillPlanCreationClaim(session.userId, clientRequestId, plan.id);
   }
 
   return NextResponse.json(plan);

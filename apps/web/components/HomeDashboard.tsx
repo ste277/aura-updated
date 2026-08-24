@@ -21,6 +21,7 @@ import type { TomorrowPreview } from '../lib/tomorrowPreview';
 import { deriveNextMeaningfulThing } from '../lib/nextMeaningfulThing';
 import { deriveAuraSuggestion, AuraSuggestion } from '../lib/auraSuggests';
 import { MyDayStoryCard } from './MyDayStoryCard';
+import { DayBuilderCard } from './DayBuilderCard';
 import { YourDayTimeline } from './YourDayTimeline';
 
 interface HomeDashboardProps {
@@ -486,6 +487,21 @@ export function HomeDashboard({
           onOpenPeople={() => onOpenPeople?.()}
           onCreated={() => onMyDayChanged?.()}
           onPlanTomorrow={(activityTitle) => (onPlanTomorrow ? onPlanTomorrow(activityTitle) : onPlanClick?.())}
+        />
+      )}
+
+      {/* Intentional Day Builder V1 -- a self-contained sibling to
+       * MyDayStoryCard above, sharing the same Daily Story visual region
+       * (brief: "Daily Story should evolve... into something that actively
+       * helps shape the day"). Keyed on myDayAgenda?.localDate so it
+       * re-fetches its own suggestions when the local day actually
+       * changes, not on every unrelated My Day refresh. */}
+      {myDayStory && myDayAgenda && (
+        <DayBuilderCard
+          key={myDayAgenda.localDate}
+          dayPhase={myDayStory.phase}
+          localDate={myDayAgenda.localDate}
+          onCreated={() => onMyDayChanged?.()}
         />
       )}
 

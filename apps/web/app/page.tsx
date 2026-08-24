@@ -59,6 +59,8 @@ interface SessionUser {
   timezone: string;
   remindersEnabled: boolean;
   reminderLeadMinutes: number;
+  dayBuilderEnabled: boolean;
+  dayBuilderMutedGroups: string[];
 }
 
 interface DailyReflectionState {
@@ -451,6 +453,21 @@ export default function DashboardPage() {
       // Best-effort -- the optimistic UI already reflects the user's choice.
     }
   }, [loadAuraUpdates]);
+
+  // Intentional Day Builder V1 (brief section 6/35) -- same optimistic
+  // pattern as handleRemindersEnabledChange above.
+  const handleDayBuilderPrefsChange = useCallback(async (next: { dayBuilderEnabled: boolean; dayBuilderMutedGroups: string[] }) => {
+    setUser((current) => (current ? { ...current, ...next } : current));
+    try {
+      await fetch('/api/users/day-builder-preferences', {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(next),
+      });
+    } catch {
+      // Best-effort -- the optimistic UI already reflects the user's choice.
+    }
+  }, []);
 
   const handleOpenMomentsFromYou = useCallback(() => {
     setMomentsFocusKey(Date.now());
@@ -1107,6 +1124,9 @@ export default function DashboardPage() {
             sharedMomentsUnreadCount={auraUpdates?.updates?.filter((update) => update.unread).length}
             remindersEnabled={user.remindersEnabled}
             onRemindersEnabledChange={handleRemindersEnabledChange}
+            dayBuilderEnabled={user.dayBuilderEnabled}
+            dayBuilderMutedGroups={user.dayBuilderMutedGroups}
+            onDayBuilderPrefsChange={handleDayBuilderPrefsChange}
           />
         )}
 

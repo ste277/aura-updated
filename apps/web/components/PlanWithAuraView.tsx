@@ -441,8 +441,14 @@ export function planPayloadFromCandidate(candidate: TimingCandidate, durationMin
  * function is unaffected. POST /api/plans uses it purely as an idempotency
  * key (see that route's own doc comment); it never changes what gets
  * created, only whether a retry creates a SECOND Plan.
+ *
+ * `clientRequestId` (Intentional Day Builder V1, brief section 20) is the
+ * same kind of idempotency key, only ever passed by Day Builder's own Add
+ * action (DayBuilderCard.tsx) -- independent of guestConversionToken, never
+ * both at once in practice. A stable id per (suggestion, local date) so a
+ * double-tap or a benign re-render never creates a second Plan.
  */
-export async function saveUpcomingPlanFromCandidate(candidate: TimingCandidate, durationMinutes: number, sharedWithName?: string, guestConversionToken?: string): Promise<UpcomingPlan> {
+export async function saveUpcomingPlanFromCandidate(candidate: TimingCandidate, durationMinutes: number, sharedWithName?: string, guestConversionToken?: string, clientRequestId?: string): Promise<UpcomingPlan> {
   const plan = planPayloadFromCandidate(candidate, durationMinutes, sharedWithName);
   const res = await fetch('/api/plans', {
     method: 'POST',
@@ -461,6 +467,7 @@ export async function saveUpcomingPlanFromCandidate(candidate: TimingCandidate, 
       recommendation: plan.details,
       calendarUrl: plan.googleCalendarUrl,
       ...(guestConversionToken ? { guestConversionToken } : {}),
+      ...(clientRequestId ? { clientRequestId } : {}),
     }),
   });
   if (!res.ok) throw new Error('Unable to save plan.');

@@ -110,6 +110,13 @@ export async function fetchMyDay(page: Page, dateStr?: string): Promise<any> {
   return res.json();
 }
 
+export async function fetchDayBuilderSuggestions(page: Page, dateStr?: string): Promise<any> {
+  const url = dateStr ? `/api/my-day/suggestions?date=${dateStr}` : '/api/my-day/suggestions';
+  const res = await page.request.get(url);
+  if (!res.ok()) throw new Error(`GET /api/my-day/suggestions failed: ${res.status()} ${await res.text()}`);
+  return res.json();
+}
+
 export async function fetchAuraUpdates(page: Page): Promise<any> {
   const res = await page.request.get('/api/aura-updates');
   if (!res.ok()) throw new Error(`GET /api/aura-updates failed: ${res.status()} ${await res.text()}`);
