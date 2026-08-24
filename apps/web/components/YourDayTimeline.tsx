@@ -51,9 +51,9 @@ function markerColor(item: DailyAgendaItem): string {
   return colors.textMuted;
 }
 
-function AgendaRow({ item, timezone, onOpen }: { item: DailyAgendaItem; timezone: string; onOpen?: (item: DailyAgendaItem) => void }) {
+function AgendaRow({ item, timezone, onOpen, isNext }: { item: DailyAgendaItem; timezone: string; onOpen?: (item: DailyAgendaItem) => void; isNext?: boolean }) {
   const subdued = item.status === 'COMPLETED' || item.status === 'MISSED';
-  const emphasized = item.status === 'CURRENT';
+  const emphasized = item.status === 'CURRENT' || isNext;
   const label = statusLabel(item);
   const title = item.type === 'MOMENT' && item.participantDisplayName ? `${item.title} with ${item.participantDisplayName}` : item.title;
 
@@ -71,6 +71,8 @@ function AgendaRow({ item, timezone, onOpen }: { item: DailyAgendaItem; timezone
         padding: `${spacing.sm}px 0`,
         background: 'transparent',
         border: 'none',
+        borderLeft: isNext ? `2px solid ${colors.info}` : '2px solid transparent',
+        paddingLeft: isNext ? spacing.sm - 2 : 0,
         borderBottom: `1px solid ${colors.borderSubtle}`,
         textAlign: 'left',
         cursor: onOpen ? 'pointer' : 'default',
@@ -82,6 +84,12 @@ function AgendaRow({ item, timezone, onOpen }: { item: DailyAgendaItem; timezone
         {itemMarker(item)}
       </span>
       <span style={{ minWidth: 0 }}>
+        {/* Daily Reflection & Tomorrow Preview V1 follow-up (Home cleanup
+         * brief section 2) -- the small "NEXT" eyebrow replacing the old
+         * standalone "What's Next" card's duplicate content. Never shown
+         * for a COMPLETED/MISSED row -- isNext only ever matches
+         * DailyAgenda.nextItem, which by construction excludes both. */}
+        {isNext && <div style={{ ...typography.caption, color: colors.info, fontWeight: 900, letterSpacing: 0.4, marginBottom: 2 }}>NEXT</div>}
         <div style={{ ...typography.bodyStrong, fontWeight: emphasized ? 850 : 700, textDecoration: item.status === 'COMPLETED' ? 'line-through' : 'none', textDecorationColor: colors.borderDefault, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
           {title}
         </div>
@@ -103,6 +111,14 @@ export function YourDayTimeline({
   onOpenItem?: (item: DailyAgendaItem) => void;
   onAddSomething?: () => void;
 }) {
+  // Home cleanup (Daily Reflection & Tomorrow Preview V1 follow-up) --
+  // agenda.nextItem is the exact same canonical "what's next" DailyAgenda
+  // already computes (and the same value deriveNextMeaningfulThing's own
+  // tier 3 used to read for the now-removed standalone "What's Next"
+  // card) -- reused here, not recomputed, to decide which single row gets
+  // the NEXT eyebrow.
+  const nextItemId = agenda?.nextItem?.id;
+
   return (
     <section>
       <SectionHeader label="Your Day" right={onAddSomething && <TextButton onClick={onAddSomething}>+ Add something</TextButton>} />
@@ -115,7 +131,7 @@ export function YourDayTimeline({
       ) : (
         <div style={{ background: colors.surfaceSubtle, border: `1px solid ${colors.borderSubtle}`, borderRadius: radius.lg, padding: `0 ${spacing.lg}px` }}>
           {agenda.items.map((item) => (
-            <AgendaRow key={item.id} item={item} timezone={agenda.timezone} onOpen={onOpenItem} />
+            <AgendaRow key={item.id} item={item} timezone={agenda.timezone} onOpen={onOpenItem} isNext={item.id === nextItemId} />
           ))}
         </div>
       )}
