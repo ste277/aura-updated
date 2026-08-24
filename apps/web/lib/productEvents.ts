@@ -60,7 +60,8 @@ export type ProductEventName =
   | 'DAY_BUILDER_SUGGESTIONS_VIEWED'
   | 'DAY_BUILDER_SUGGESTION_ADDED'
   | 'DAY_BUILDER_INVITE_SENT'
-  | 'DAY_BUILDER_ANOTHER_IDEA';
+  | 'DAY_BUILDER_ANOTHER_IDEA'
+  | 'DAY_BUILDER_SUGGESTION_DISMISSED';
 
 export const PRODUCT_EVENT_NAMES: ProductEventName[] = [
   'AURA_HOME_VIEWED',
@@ -108,6 +109,7 @@ export const PRODUCT_EVENT_NAMES: ProductEventName[] = [
   'DAY_BUILDER_SUGGESTION_ADDED',
   'DAY_BUILDER_INVITE_SENT',
   'DAY_BUILDER_ANOTHER_IDEA',
+  'DAY_BUILDER_SUGGESTION_DISMISSED',
 ];
 
 export function isProductEventName(value: string): value is ProductEventName {
@@ -211,6 +213,7 @@ export const CLIENT_TRACKED_EVENTS: ReadonlySet<ProductEventName> = new Set<Prod
   'DAY_BUILDER_SUGGESTION_ADDED',
   'DAY_BUILDER_INVITE_SENT',
   'DAY_BUILDER_ANOTHER_IDEA',
+  'DAY_BUILDER_SUGGESTION_DISMISSED',
 ]);
 
 // Fields that must NEVER appear in ProductEvent.metadata, under any event,
@@ -532,6 +535,17 @@ const EVENT_METADATA_SCHEMAS: Record<ProductEventName, Record<string, FieldSchem
   },
   DAY_BUILDER_ANOTHER_IDEA: {
     intentionCategory: myDayIntentionCategoryField,
+    dayPhase: myDayDayPhaseField,
+  },
+  // "Not today" (Day Builder dismiss support) -- hasPerson is a boolean
+  // only (was this a people-oriented/SHARED suggestion), never the actual
+  // person id or name -- FORBIDDEN_METADATA_KEYS already blocks a raw
+  // 'name' key as defense-in-depth, but there's no such field offered here
+  // to begin with.
+  DAY_BUILDER_SUGGESTION_DISMISSED: {
+    activityId: activityIdField,
+    intentionCategory: myDayIntentionCategoryField,
+    hasPerson: { type: 'boolean' },
     dayPhase: myDayDayPhaseField,
   },
 };

@@ -3,6 +3,7 @@
 import React, { useEffect, useState } from 'react';
 import { swapSuggestion, type IntentionalDaySuggestion } from '../lib/dayBuilder';
 import type { DailyStoryPhase } from '../lib/dailyStory';
+import type { DailyIntentionGroupId } from '../lib/dailyIntentions';
 import { RESULT_LABEL_TEXT, EVERYDAY_SHARED_RATING_TEXT, saveUpcomingPlanFromCandidate } from './PlanWithAuraView';
 import { trackEvent } from '../lib/trackEvent';
 import { colors, spacing, radius, typography } from './theme';
@@ -30,15 +31,17 @@ interface SuggestionState {
   addStatus: ActionStatus;
   addedPlannedActivityId?: string;
   inviteStatus: ActionStatus;
+  dismissStatus: ActionStatus;
   error?: string;
 }
 
-const IDLE_STATE: SuggestionState = { addStatus: 'IDLE', inviteStatus: 'IDLE' };
+const IDLE_STATE: SuggestionState = { addStatus: 'IDLE', inviteStatus: 'IDLE', dismissStatus: 'IDLE' };
 
 export function DayBuilderCard({
   dayPhase,
   localDate,
   onCreated,
+  onMuteGroup,
 }: {
   dayPhase: DailyStoryPhase;
   /** Today's local calendar date ('YYYY-MM-DD') -- part of the Add
@@ -46,10 +49,19 @@ export function DayBuilderCard({
    * collides with yesterday's already-created Plan for the same suggestion id. */
   localDate: string;
   onCreated: () => void;
+  /** "Show me less like this" (Day Builder dismiss support) -- updates the
+   * EXISTING preference/muted-group mechanism (You -> Day Builder), never
+   * the daily dismissal table. Optional: when not provided, the follow-up
+   * link after a dismissal simply doesn't render. */
+  onMuteGroup?: (groupId: DailyIntentionGroupId) => void;
 }) {
   const [suggestions, setSuggestions] = useState<IntentionalDaySuggestion[] | null>(null);
   const [visibleIds, setVisibleIds] = useState<string[]>([]);
   const [stateById, setStateById] = useState<Record<string, SuggestionState>>({});
+  // "Show me less like this" -- a quiet, ephemeral follow-up to the MOST
+  // RECENT dismissal only (not per-card state, since the dismissed card
+  // itself is already gone by the time this would render).
+  const [lastDismissed, setLastDismissed] = useState<{ groupId: DailyIntentionGroupId; label: string } | null>(null);
 
   // Brief section 27/33/34 -- NIGHT is never fetched at all, matching the
   // orchestrator's own early return; nothing to show and nothing worth a
@@ -58,6 +70,7 @@ export function DayBuilderCard({
     if (dayPhase === 'NIGHT') {
       setSuggestions(null);
       setVisibleIds([]);
+      setLastDismissed(null);
       return;
     }
     let cancelled = false;
@@ -68,6 +81,7 @@ export function DayBuilderCard({
         if (cancelled || !res.ok || !Array.isArray(data?.suggestions)) return;
         setSuggestions(data.suggestions);
         setVisibleIds(data.suggestions.slice(0, 3).map((s: IntentionalDaySuggestion) => s.id));
+        setLastDismissed(null);
       } catch {
         // Silent -- an empty/failed fetch just means Day Builder shows
         // nothing this load. The existing manual intention flow inside
@@ -80,7 +94,11 @@ export function DayBuilderCard({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [dayPhase, localDate]);
 
-  if (dayPhase === 'NIGHT' || !suggestions || visibleIds.length === 0) return null;
+  // "Show me less like this" can still have something to say even after
+  // the last visible suggestion was dismissed (brief section 8: "zero
+  // suggestions is valid") -- only bail out entirely when there's ALSO no
+  // pending follow-up to show.
+  if (dayPhase === 'NIGHT' || !suggestions || (visibleIds.length === 0 && !lastDismissed)) return null;
 
   const visible = visibleIds
     .map((id) => suggestions.find((s) => s.id === id))
@@ -151,6 +169,39 @@ export function DayBuilderCard({
     }
   };
 
+  // "Not today" -- declines this exact (activityId, person) suggestion for
+  // the rest of the local day (brief: dismiss support). Never a "Cancel":
+  // no Plan/Moment exists yet to cancel, this is purely a preference not
+  // to see this specific pairing again today. Persisted server-side
+  // (POST .../dismiss) so a refresh doesn't bring it back; the visible
+  // list itself reuses swapSuggestion() -- the exact same "replace from
+  // reserve, else shrink, zero is valid" semantics as "Another idea".
+  const handleDismiss = async (suggestion: IntentionalDaySuggestion) => {
+    if (stateFor(suggestion.id).dismissStatus === 'SAVING') return; // guards a rapid double-click -- TextButton has no disabled prop to rely on
+    const sharedPerson = suggestion.candidate.kind === 'SHARED' ? suggestion.candidate.person : null;
+    trackEvent('DAY_BUILDER_SUGGESTION_DISMISSED', {
+      metadata: { activityId: suggestion.activityId, intentionCategory: suggestion.groupId, hasPerson: sharedPerson !== null, dayPhase },
+    });
+    setState(suggestion.id, { dismissStatus: 'SAVING', error: undefined });
+    try {
+      const res = await fetch('/api/my-day/suggestions/dismiss', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ activityId: suggestion.activityId, ...(sharedPerson ? { personId: sharedPerson.id } : {}) }),
+      });
+      if (!res.ok) throw new Error('failed');
+      setVisibleIds((prev) => swapSuggestion(prev, suggestions, suggestion.id));
+      setLastDismissed({ groupId: suggestion.groupId, label: suggestion.label });
+    } catch {
+      setState(suggestion.id, { dismissStatus: 'ERROR', error: 'Could not dismiss this. Try again.' });
+    }
+  };
+
+  const handleMuteGroup = () => {
+    if (lastDismissed) onMuteGroup?.(lastDismissed.groupId);
+    setLastDismissed(null);
+  };
+
   return (
     <section
       style={{
@@ -211,6 +262,12 @@ export function DayBuilderCard({
                     </SecondaryButton>
                   ))}
 
+                {state.addStatus !== 'DONE' && (
+                  <TextButton onClick={() => handleDismiss(suggestion)} color={colors.textFaint}>
+                    {state.dismissStatus === 'SAVING' ? 'Dismissing…' : 'Not today'}
+                  </TextButton>
+                )}
+
                 {reserve.length > 0 && state.addStatus !== 'DONE' && (
                   <TextButton onClick={() => swap(suggestion)} color={colors.textMuted}>
                     Another idea →
@@ -220,6 +277,14 @@ export function DayBuilderCard({
             </div>
           );
         })}
+
+        {lastDismissed && onMuteGroup && (
+          <div style={{ marginTop: 2 }}>
+            <TextButton onClick={handleMuteGroup} color={colors.textFaint}>
+              Show me less like this
+            </TextButton>
+          </div>
+        )}
       </div>
     </section>
   );

@@ -21,6 +21,9 @@ import {
   getPlanCreationClaim,
   fillPlanCreationClaim,
   createPlannedActivity,
+  createDayBuilderDismissal,
+  listDayBuilderDismissals,
+  deleteDayBuilderDismissalsForDate,
 } from '../apps/web/lib/db';
 import { buildDailyAgenda } from '../apps/web/lib/dailyAgenda';
 import { buildIntentionalDaySuggestions } from '../apps/web/lib/dayBuilderOrchestrator';
@@ -40,8 +43,19 @@ const LOCAL_DATE = '2026-08-24'; // a Monday -- no weekend-only search branches 
 const NOW = new Date('2026-08-24T02:30:00.000Z'); // 8:00 AM IST
 const MINUTE_OF_DAY = 8 * 60;
 
+const DISMISS_DATE = '2026-08-24';
+const DISMISS_NEXT_DATE = '2026-08-25';
+
 async function main() {
   const user = await upsertUserByEmail({ email: 'test-day-builder-owner@example.com', cityName: 'Chennai', latitude: 13.0827, longitude: 80.2707, timezone: TZ });
+
+  // Defensive pre-clean, BEFORE any check below runs: this is a real,
+  // persistent database with no per-run reset, and DISMISS_DATE below is
+  // the SAME fixed fake "today" the WORK-only/RELATIONSHIPS-only checks
+  // earlier in this file use. A dismissal row a PREVIOUS run left behind
+  // would otherwise silently zero out those unrelated earlier checks too.
+  await deleteDayBuilderDismissalsForDate(user.id, DISMISS_DATE);
+  await deleteDayBuilderDismissalsForDate(user.id, DISMISS_NEXT_DATE);
 
   const createdPersonIds: string[] = [];
 
@@ -150,6 +164,81 @@ async function main() {
         Boolean(match) && JSON.stringify(match) === JSON.stringify(sharedCandidate)
       );
     }
+
+    // ============================================================
+    // "Not today" dismissal support -- activityId+personId+localDate
+    // identity (never a groupId mute). Uses a FRESH localDate/agenda pair
+    // scoped to this test section only, so re-running this file never
+    // interacts with dismissal rows a previous run may have left behind
+    // for the shared LOCAL_DATE used elsewhere in this file.
+    // ============================================================
+    const dismissNow = new Date('2026-08-24T02:30:00.000Z');
+    const dismissAgenda = buildDailyAgenda({ now: dismissNow, localDate: DISMISS_DATE, timezone: TZ, plans: [], moments: [], momentIdsWithSuccessor: new Set(), habitLogs: [] });
+
+    const beforeDismissWork = await buildIntentionalDaySuggestions({ user: workOnlyUser, agenda: dismissAgenda, minuteOfDay: MINUTE_OF_DAY, now: dismissNow });
+    check('Before any dismissal, WORK-only day resolves deep-work', beforeDismissWork.some((s) => s.activityId === 'deep-work'));
+
+    await createDayBuilderDismissal(user.id, DISMISS_DATE, 'deep-work', null);
+    const dismissedRows = await listDayBuilderDismissals(user.id, DISMISS_DATE);
+    check('The dismissal row persists with the no-person sentinel', dismissedRows.some((d) => d.activityId === 'deep-work' && d.personId === ''));
+
+    const afterDismissWorkOnly = await buildIntentionalDaySuggestions({ user: workOnlyUser, agenda: dismissAgenda, minuteOfDay: MINUTE_OF_DAY, now: dismissNow });
+    check('dismiss -> the suggestion disappears (WORK-only day now resolves nothing)', afterDismissWorkOnly.length === 0);
+    check('dismiss does not create a Plan or Moment -- buildIntentionalDaySuggestions never touched PlannedActivity/AuraMoment at all (no DB write from this call)', afterDismissWorkOnly.length === 0);
+
+    // refresh -> remains dismissed: an independent second read of the same
+    // (user, localDate) sees the same dismissal, not client-only state.
+    const secondReadAfterDismiss = await buildIntentionalDaySuggestions({ user: workOnlyUser, agenda: dismissAgenda, minuteOfDay: MINUTE_OF_DAY, now: dismissNow });
+    check('refresh -> remains dismissed (a second independent call still excludes it)', secondReadAfterDismiss.length === 0);
+
+    // another suggestion may replace it -- on a fully open day, OTHER
+    // groups are completely unaffected by deep-work's dismissal.
+    const openUserForDismissTest = { ...user, dayBuilderEnabled: true, dayBuilderMutedGroups: [] as string[] };
+    const afterDismissOpenDay = await buildIntentionalDaySuggestions({ user: openUserForDismissTest, agenda: dismissAgenda, minuteOfDay: MINUTE_OF_DAY, now: dismissNow });
+    check('another suggestion may replace it (other groups still resolve on an open day)', afterDismissOpenDay.length > 0);
+    check('dismiss does not mute the whole WORK category -- deep-work is gone, but nothing about WORK itself is globally excluded (mutedGroups untouched)', !openUserForDismissTest.dayBuilderMutedGroups.includes('WORK'));
+    check('same activity does not immediately return, even on a fully open day', !afterDismissOpenDay.some((s) => s.activityId === 'deep-work'));
+
+    // next local day -> eligible again (timezone/local-day rollover) --
+    // the WHERE localDate = $2 clause simply no longer matches. `now` must
+    // ACTUALLY be on NEXT_DATE too (not just the agenda's own localDate
+    // label) -- runTimingSearch's TODAY horizon derives candidates from
+    // context.now, and candidateFitsOpenings rejects anything whose real
+    // calendar date doesn't match agenda.localDate (brief section 14's own
+    // "never trust, always confirm" date check) -- a mismatched `now`
+    // would zero out every candidate for an unrelated reason.
+    const nextDayNow = new Date('2026-08-25T02:30:00.000Z'); // 8:00 AM IST the following day
+    const nextDayAgenda = buildDailyAgenda({ now: nextDayNow, localDate: DISMISS_NEXT_DATE, timezone: TZ, plans: [], moments: [], momentIdsWithSuccessor: new Set(), habitLogs: [] });
+    const nextDayResult = await buildIntentionalDaySuggestions({ user: workOnlyUser, agenda: nextDayAgenda, minuteOfDay: MINUTE_OF_DAY, now: nextDayNow });
+    check('next local day -> eligible again', nextDayResult.some((s) => s.activityId === 'deep-work'));
+
+    // owner scoping -- a different user's identical WORK-only day is
+    // completely unaffected by user A's dismissal.
+    const otherWorkOnlyUser = { ...(await upsertUserByEmail({ email: 'test-day-builder-owner-3@example.com', cityName: 'Chennai', latitude: 13.0827, longitude: 80.2707, timezone: TZ })), dayBuilderMutedGroups: ['RELATIONSHIPS', 'FAMILY', 'SOCIAL', 'SELF', 'ENJOYMENT'] };
+    const otherUserResult = await buildIntentionalDaySuggestions({ user: otherWorkOnlyUser, agenda: dismissAgenda, minuteOfDay: MINUTE_OF_DAY, now: dismissNow });
+    check('owner scoping -- a DIFFERENT user\'s identical day is unaffected by user A\'s dismissal', otherUserResult.some((s) => s.activityId === 'deep-work'));
+
+    // permanent preference mute remains a SEPARATE mechanism -- dismissing
+    // deep-work never wrote to dayBuilderMutedGroups, and muting WORK via
+    // the preference route is unaffected by (and doesn't clear) the
+    // dismissal row.
+    const stillNoMutedGroups = await updateUserDayBuilderPrefs(user.id, { dayBuilderEnabled: true, dayBuilderMutedGroups: [] });
+    check('permanent preference mute remains separate from the daily dismissal (dismissing never touched dayBuilderMutedGroups)', stillNoMutedGroups.dayBuilderMutedGroups.length === 0);
+
+    // Person-specific dismissal (brief: "activityId, personId when
+    // applicable") -- dismissing the SHARED (activity, person) pairing
+    // does not block a genuinely different identity: the same activity
+    // resolved with NO person (a SOLO fallback) is unaffected.
+    await createDayBuilderDismissal(user.id, DISMISS_DATE, 'dinner-date', partner.id);
+    const dismissedPersonRows = await listDayBuilderDismissals(user.id, DISMISS_DATE);
+    check('A person-specific dismissal row is stored with the real personId, not the sentinel', dismissedPersonRows.some((d) => d.activityId === 'dinner-date' && d.personId === partner.id));
+
+    const afterPersonDismiss = await buildIntentionalDaySuggestions({ user: relationshipsOnlyUser, agenda: dismissAgenda, minuteOfDay: MINUTE_OF_DAY, now: dismissNow });
+    const dinnerDateSuggestion = afterPersonDismiss.find((s) => s.activityId === 'dinner-date');
+    check(
+      'Dismissing "Dinner Date with this partner" never resolves a SHARED candidate for that exact pairing again today',
+      !dinnerDateSuggestion || dinnerDateSuggestion.candidate.kind !== 'SHARED' || dinnerDateSuggestion.candidate.person.id !== partner.id
+    );
 
     // ============================================================
     // Diversity: WORK + RELATIONSHIPS both open -> distinct suggestions,
@@ -271,6 +360,10 @@ async function main() {
     for (const id of createdPersonIds) {
       await deleteSavedPerson(user.id, id);
     }
+    // Same reasoning as the pre-clean above -- leave this fixed fake
+    // "today" exactly as clean as this test file found it.
+    await deleteDayBuilderDismissalsForDate(user.id, DISMISS_DATE);
+    await deleteDayBuilderDismissalsForDate(user.id, DISMISS_NEXT_DATE);
   }
 
   if (!allPassed) {

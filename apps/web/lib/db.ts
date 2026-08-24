@@ -694,6 +694,44 @@ export async function fillPlanCreationClaim(userId: string, clientRequestId: str
   );
 }
 
+// ── Day Builder dismissals ("Not today", migration 0026) ─────────────────
+// See that migration's own doc comment for why personId is a '' sentinel
+// rather than nullable.
+
+export interface DayBuilderDismissal {
+  userId: string;
+  localDate: string;
+  activityId: string;
+  personId: string;
+  createdAt: Date;
+}
+
+/** Idempotent by design (ON CONFLICT DO NOTHING on the composite primary
+ * key) -- a double-tap on "Not today" is a no-op, not an error. */
+export async function createDayBuilderDismissal(userId: string, localDate: string, activityId: string, personId: string | null): Promise<void> {
+  await pool.query(
+    `INSERT INTO "DayBuilderDismissal" ("userId", "localDate", "activityId", "personId") VALUES ($1, $2, $3, $4) ON CONFLICT DO NOTHING`,
+    [userId, localDate, activityId, personId ?? '']
+  );
+}
+
+/** Bounded to one local day, same discipline as every other Day Builder
+ * read (brief section 42's "bounded reads only") -- never a full history
+ * scan. */
+export async function listDayBuilderDismissals(userId: string, localDate: string): Promise<DayBuilderDismissal[]> {
+  const result = await pool.query(`SELECT * FROM "DayBuilderDismissal" WHERE "userId" = $1 AND "localDate" = $2`, [userId, localDate]);
+  return result.rows;
+}
+
+/** No route currently calls this -- a dismissal is meant to expire via
+ * real local-day rollover, never deleted in normal product use. Exists so
+ * tests using a fixed fake "today" (dayBuilderDb.test.ts) can clean up
+ * after themselves rather than leaving a permanent dismissal for that
+ * fixed date that would silently affect the next test run. */
+export async function deleteDayBuilderDismissalsForDate(userId: string, localDate: string): Promise<void> {
+  await pool.query(`DELETE FROM "DayBuilderDismissal" WHERE "userId" = $1 AND "localDate" = $2`, [userId, localDate]);
+}
+
 // ── Guest conversion idempotency (Recipient Conversion V1 Hardening, brief
 // section 10) ──────────────────────────────────────────────────────────
 // See migration 0024's own doc comment for the "claim, then fill" design.

@@ -1048,6 +1048,12 @@ export default function DashboardPage() {
             onOpenPeople={() => { setPeopleReturnTo('home'); setActiveTab('people'); }}
             onOpenAgendaItem={handleOpenAgendaItem}
             onPlanTomorrow={handlePlanTomorrow}
+            onMuteDayBuilderGroup={(groupId) =>
+              handleDayBuilderPrefsChange({
+                dayBuilderEnabled: user.dayBuilderEnabled,
+                dayBuilderMutedGroups: Array.from(new Set([...user.dayBuilderMutedGroups, groupId])),
+              })
+            }
           />
         )}
 

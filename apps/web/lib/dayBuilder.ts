@@ -274,6 +274,17 @@ export interface IntentionalDayCandidateShared {
 
 export type IntentionalDayCandidate = IntentionalDayCandidateSolo | IntentionalDayCandidateShared;
 
+/** "Not today" dismissal identity: activityId alone for a no-person
+ * suggestion, activityId+personId for a people-oriented one -- personId is
+ * '' (the DB's own sentinel for "no person") in the no-person case, never
+ * undefined/null, so a plain string Set works as the lookup structure.
+ * Kept here (not in db.ts) since it's pure string composition, used by
+ * both dayBuilderOrchestrator.ts (checking) and the dismiss route
+ * (writing) to guarantee they can never drift out of sync. */
+export function dismissalKey(activityId: string, personId: string): string {
+  return `${activityId}|${personId}`;
+}
+
 /**
  * Brief section 17 -- the DTO Daily Story's UI renders. Always carries an
  * already-RESOLVED real time (never just an activity name) -- `candidate`

@@ -1,6 +1,6 @@
 import type { DailyAgenda } from './dailyAgenda';
 import { resolveDailyStoryPhase } from './dailyStory';
-import { User, listSavedPeople } from './db';
+import { User, listSavedPeople, listDayBuilderDismissals } from './db';
 import { resolveTzOffsetMinutes } from './timezone';
 import { buildPersonalMuhurtaContextForUser, natalContextFromBirthDetails } from './natalContext';
 import { DailyAssistantContext } from '../../../packages/recommendation/src/dailyAssistant';
@@ -11,6 +11,7 @@ import {
   buildDayProfile,
   selectIntentionCandidates,
   candidateFitsOpenings,
+  dismissalKey,
   PEOPLE_GROUP_RELATIONSHIP_TYPES,
   IntentionalDaySuggestion,
 } from './dayBuilder';
@@ -83,7 +84,18 @@ export async function buildIntentionalDaySuggestions(input: {
   // downstream read/search entirely rather than computing anything further.
   if (intentionCandidates.length === 0) return [];
 
-  const savedPeople = await listSavedPeople(user.id);
+  const [savedPeople, dismissals] = await Promise.all([
+    listSavedPeople(user.id),
+    listDayBuilderDismissals(user.id, agenda.localDate),
+  ]);
+  // "Not today" (brief: dismiss support) -- a per-(activityId, personId)
+  // identity, NOT a groupId mute, and bounded to TODAY's localDate only
+  // (see migration 0026's own doc comment for why rollover needs no
+  // cleanup). Checked per-attempt below, never at candidate SELECTION time
+  // -- selectIntentionCandidates() has no person context yet, so filtering
+  // there would incorrectly block a people-oriented activity's SHARED
+  // resolution against a person the no-person identity was never about.
+  const dismissedKeys = new Set(dismissals.map((d) => dismissalKey(d.activityId, d.personId)));
 
   const context: DailyAssistantContext = {
     now,
@@ -112,7 +124,10 @@ export async function buildIntentionalDaySuggestions(input: {
     if (candidate.isPeopleOriented) {
       const relationshipTypes = PEOPLE_GROUP_RELATIONSHIP_TYPES[candidate.groupId] ?? [];
       const person = savedPeople.find((p) => relationshipTypes.includes(p.relationshipType));
-      if (person) {
+      // "Not today" against THIS exact person -- a different (undismissed)
+      // person, or no person at all, remains a genuinely different
+      // suggestion and is never blocked by this.
+      if (person && !dismissedKeys.has(dismissalKey(activityId, person.id))) {
         const partnerContext = natalContextFromBirthDetails(formatUTCDateString(person.birthDate), person.birthTime, person.birthTimezone);
         const outcome = findEverydaySharedTiming({
           activityId,
@@ -131,7 +146,9 @@ export async function buildIntentionalDaySuggestions(input: {
       }
     }
 
-    if (!resolved) {
+    // "Not today" against the no-person identity (brief: also covers a
+    // non-people-oriented candidate, whose identity is always no-person).
+    if (!resolved && !dismissedKeys.has(dismissalKey(activityId, ''))) {
       const result = runTimingSearch({ mode: 'FIND', activityId, durationMinutes, horizon: 'TODAY', limit: SEARCH_LIMIT_PER_CANDIDATE, context });
       const fit = result.candidates.find((c) => candidateFitsOpenings(c, dayProfile.openings, agenda.timezone, agenda.localDate));
       if (fit) resolved = { kind: 'SOLO', solo: fit };
