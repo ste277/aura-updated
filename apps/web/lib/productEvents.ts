@@ -52,7 +52,11 @@ export type ProductEventName =
   | 'MY_DAY_ADD_STARTED'
   | 'GUEST_RESULT_RESTORED'
   | 'ONBOARDING_HANDOFF_VIEWED'
-  | 'MY_DAY_OPENED_FROM_HANDOFF';
+  | 'MY_DAY_OPENED_FROM_HANDOFF'
+  | 'DAILY_REFLECTION_VIEWED'
+  | 'TOMORROW_PREVIEW_VIEWED'
+  | 'TOMORROW_PROMPT_SELECTED'
+  | 'TOMORROW_PLAN_STARTED';
 
 export const PRODUCT_EVENT_NAMES: ProductEventName[] = [
   'AURA_HOME_VIEWED',
@@ -92,6 +96,10 @@ export const PRODUCT_EVENT_NAMES: ProductEventName[] = [
   'GUEST_RESULT_RESTORED',
   'ONBOARDING_HANDOFF_VIEWED',
   'MY_DAY_OPENED_FROM_HANDOFF',
+  'DAILY_REFLECTION_VIEWED',
+  'TOMORROW_PREVIEW_VIEWED',
+  'TOMORROW_PROMPT_SELECTED',
+  'TOMORROW_PLAN_STARTED',
 ];
 
 export function isProductEventName(value: string): value is ProductEventName {
@@ -173,6 +181,17 @@ export const CLIENT_TRACKED_EVENTS: ReadonlySet<ProductEventName> = new Set<Prod
   'GUEST_RESULT_RESTORED',
   'ONBOARDING_HANDOFF_VIEWED',
   'MY_DAY_OPENED_FROM_HANDOFF',
+  // Daily Reflection & Tomorrow Preview V1 (brief section 15) -- all four
+  // are UI intent/impression signals from the Home daily-story area; no
+  // clean server-side "DB write succeeded" moment exists for any of them
+  // (viewing a derived reflection/preview never writes anything, and the
+  // actual "start planning tomorrow" handoff is a navigation, not a write
+  // -- the real Plan/Moment creation that might follow still fires its own
+  // existing PLAN_RESULT_SELECTED/AURA_MOMENT_CREATED, not duplicated here).
+  'DAILY_REFLECTION_VIEWED',
+  'TOMORROW_PREVIEW_VIEWED',
+  'TOMORROW_PROMPT_SELECTED',
+  'TOMORROW_PLAN_STARTED',
 ]);
 
 // Fields that must NEVER appear in ProductEvent.metadata, under any event,
@@ -447,6 +466,30 @@ const EVENT_METADATA_SCHEMAS: Record<ProductEventName, Record<string, FieldSchem
   },
   MY_DAY_OPENED_FROM_HANDOFF: {
     source: guestSourceField,
+  },
+  // Daily Reflection & Tomorrow Preview V1 (brief section 15) -- aggregate
+  // counts and closed enums only. Never raw journal/reflection text, person
+  // names, birth data, or a Moment token (brief's own explicit forbidden
+  // list) -- FORBIDDEN_METADATA_KEYS already structurally blocks the
+  // sensitive ones (name/email/token/etc) as defense-in-depth, and there is
+  // no free-text field here to forbid in the first place (brief section 12:
+  // no free-text journal storage in V1).
+  DAILY_REFLECTION_VIEWED: {
+    completedCount: { type: 'number', min: 0, max: 100 },
+    missedCount: { type: 'number', min: 0, max: 100 },
+  },
+  TOMORROW_PREVIEW_VIEWED: {
+    hasScheduledItems: { type: 'boolean' },
+    goodForCategoryCount: { type: 'number', min: 0, max: 10 },
+  },
+  TOMORROW_PROMPT_SELECTED: {
+    intentionCategory: myDayIntentionCategoryField,
+    activityId: activityIdField,
+  },
+  TOMORROW_PLAN_STARTED: {
+    // Omitted when the handoff started from the generic "Plan tomorrow"
+    // link rather than a specific "Make room for..." suggestion.
+    activityId: activityIdField,
   },
 };
 

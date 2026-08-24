@@ -16,6 +16,8 @@ import { colors, spacing, typography } from './theme';
 import { PageHeader, SectionHeader, SurfaceCard, StatusBadge, IconButton, PrimaryButton, SecondaryButton, TextButton, ActivityChip, ModalShell, useModalA11y, TextAreaInput } from './ui';
 import type { DailyAgenda, DailyAgendaItem } from '../lib/dailyAgenda';
 import type { DailyStory } from '../lib/dailyStory';
+import type { DailyReflection } from '../lib/dailyReflection';
+import type { TomorrowPreview } from '../lib/tomorrowPreview';
 import { deriveNextMeaningfulThing } from '../lib/nextMeaningfulThing';
 import { MyDayStoryCard } from './MyDayStoryCard';
 import { YourDayTimeline } from './YourDayTimeline';
@@ -110,6 +112,12 @@ interface HomeDashboardProps {
    * to be a lightweight, optional-feeling layer. */
   myDayAgenda?: DailyAgenda | null;
   myDayStory?: DailyStory | null;
+  /** Daily Reflection & Tomorrow Preview V1 -- also from GET /api/my-day.
+   * reflection is null until the API returns; tomorrowPreview is only ever
+   * populated at the NIGHT phase (brief section 4/8), null the rest of the
+   * day by design, not a loading state. */
+  myDayReflection?: DailyReflection | null;
+  myDayTomorrowPreview?: TomorrowPreview | null;
   /** Refetches /api/my-day -- called after "Add to my day"/"Invite
    * someone" succeeds so Your Day reflects the new item immediately. */
   onMyDayChanged?: () => void;
@@ -120,6 +128,12 @@ interface HomeDashboardProps {
   /** Opens the relevant Plan/Moment for an agenda item tap (brief section
    * 36) -- same routing convention as onOpenReminder above. */
   onOpenAgendaItem?: (item: DailyAgendaItem) => void;
+  /** Daily Reflection & Tomorrow Preview V1 (brief section 5) -- routes into
+   * Plan/Timing Search with the TOMORROW horizon (and, when provided, an
+   * activity preselected). Never creates a Plan itself. Falls back to
+   * onPlanClick (today, no horizon override) if not provided, same as the
+   * pre-existing "Plan tomorrow" link's behavior. */
+  onPlanTomorrow?: (activityTitle?: string) => void;
 }
 
 interface HomeDayWindow {
@@ -379,9 +393,12 @@ export function HomeDashboard({
   onOpenReminder,
   myDayAgenda,
   myDayStory,
+  myDayReflection,
+  myDayTomorrowPreview,
   onMyDayChanged,
   onOpenPeople,
   onOpenAgendaItem,
+  onPlanTomorrow,
 }: HomeDashboardProps) {
   const [selectedHabit, setSelectedHabit] = useState<string | null>(null);
   const [selectedPlanId, setSelectedPlanId] = useState<string | null>(null);
@@ -663,7 +680,16 @@ export function HomeDashboard({
         }
       />
 
-      {myDayStory && <MyDayStoryCard story={myDayStory} onOpenPeople={() => onOpenPeople?.()} onCreated={() => onMyDayChanged?.()} onPlanTomorrow={() => onPlanClick?.()} />}
+      {myDayStory && (
+        <MyDayStoryCard
+          story={myDayStory}
+          reflection={myDayReflection ?? null}
+          tomorrowPreview={myDayTomorrowPreview ?? null}
+          onOpenPeople={() => onOpenPeople?.()}
+          onCreated={() => onMyDayChanged?.()}
+          onPlanTomorrow={(activityTitle) => (onPlanTomorrow ? onPlanTomorrow(activityTitle) : onPlanClick?.())}
+        />
+      )}
 
       <SurfaceCard elevated accentColor={tone.color} padding={spacing.xxl}>
         <div style={{ display: 'grid', gridTemplateColumns: '128px minmax(0, 1fr)', gap: spacing.xl, alignItems: 'center' }}>

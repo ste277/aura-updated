@@ -135,7 +135,7 @@ function emptyAgenda(now: Date): DailyAgenda {
   });
   const story = buildDailyStory(agenda, 22 * 60 + 30);
   check('Night phase resolved', story.phase === 'NIGHT');
-  check('Night -> "2 things you made time for today"', story.narrative.includes('2 things'));
+  check('Night -> narrative reuses buildDailyReflection\'s breakdown ("2 activities you logged")', story.narrative.includes('2 activities you logged'));
   check('Night -> completedHighlights has both items', story.completedHighlights?.length === 2);
   check('Night -> nextMeaningfulThing is "Plan tomorrow" (not a built Tomorrow product)', story.nextMeaningfulThing?.action === 'PLAN_TOMORROW');
   check('Night -> no subjective judgment like "productive day"', !story.narrative.toLowerCase().includes('productive'));

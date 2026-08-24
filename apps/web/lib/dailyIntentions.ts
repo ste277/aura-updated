@@ -94,8 +94,10 @@ export const INTENTION_GROUPS: DailyIntentionGroup[] = [
     icon: '🌿',
     activities: [
       { label: 'Workout', icon: '🏋️', activityId: 'workout' },
+      { label: 'Walk', icon: '🚶', activityId: 'walk-together' },
       { label: 'Meditation', icon: '🧘', activityId: 'meditation' },
       { label: 'Reading', icon: '📖', activityId: 'learning' },
+      { label: 'Tea break', icon: '☕', activityId: 'tea-break' },
       { label: 'Quiet time', icon: '🏠', activityId: 'quiet-time' },
     ],
   },

@@ -13,7 +13,7 @@ import { findActivityIntent } from '../../../packages/recommendation/src/persona
 
 export type DailyAgendaItemType = 'PLAN' | 'MOMENT' | 'COMPLETED_ACTIVITY';
 
-export type DailyAgendaItemStatus = 'UPCOMING' | 'STARTING_SOON' | 'CURRENT' | 'COMPLETED' | 'WAITING' | 'CONFIRMED';
+export type DailyAgendaItemStatus = 'UPCOMING' | 'STARTING_SOON' | 'CURRENT' | 'COMPLETED' | 'WAITING' | 'CONFIRMED' | 'MISSED';
 
 export interface DailyAgendaItem {
   id: string;
@@ -52,8 +52,13 @@ export interface DailyAgenda {
  * 55); this never feeds a reminder or notification decision. */
 const STARTING_SOON_WINDOW_MS = 30 * 60 * 1000;
 
+/** Brief section 3 (Daily Reflection & Tomorrow Preview V1): a Plan whose
+ * window has elapsed is NOT automatically "completed" -- completion is
+ * decided exclusively by plan.status === 'LOGGED' (a real HabitLog exists).
+ * An elapsed, unlogged Plan is 'MISSED': still a truthful fact ("this
+ * didn't happen"), never invented success. */
 function timeBasedStatus(startAt: Date, endAt: Date | undefined, now: Date): DailyAgendaItemStatus {
-  if (endAt && endAt.getTime() < now.getTime()) return 'COMPLETED';
+  if (endAt && endAt.getTime() < now.getTime()) return 'MISSED';
   if (now.getTime() >= startAt.getTime() && (!endAt || now.getTime() <= endAt.getTime())) return 'CURRENT';
   if (startAt.getTime() - now.getTime() <= STARTING_SOON_WINDOW_MS) return 'STARTING_SOON';
   return 'UPCOMING';

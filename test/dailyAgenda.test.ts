@@ -97,10 +97,44 @@ function habitLog(overrides: Partial<HabitLogRow> = {}): HabitLogRow {
   check('Agenda has 3 items (workout log, deep work plan, date night moment)', agenda.items.length === 3);
   check('Chronological order: Workout, Deep Work, Date Night', agenda.items.map((i) => i.title).join(',') === 'Workout,Deep Work,Date Night');
   check('Workout is COMPLETED', agenda.items[0].status === 'COMPLETED');
-  check('Deep Work is COMPLETED (5:00-6:00 UTC, now is 12:00 UTC)', agenda.items[1].status === 'COMPLETED');
+  // Daily Reflection & Tomorrow Preview V1 (brief section 3): an elapsed,
+  // unlogged Plan is MISSED, never auto-COMPLETED -- this Plan's status is
+  // still 'UPCOMING' (never logged), even though its 5:00-6:00 UTC window
+  // has passed by now (12:00 UTC).
+  check('Deep Work is MISSED, not COMPLETED (elapsed but never logged)', agenda.items[1].status === 'MISSED');
   check('Date Night is CONFIRMED (ACCEPTED, still upcoming)', agenda.items[2].status === 'CONFIRMED');
-  check('completedCount is 2 (workout log + deep work plan)', agenda.completedCount === 2);
+  check('completedCount is 1 (workout log only -- the missed plan does not count)', agenda.completedCount === 1);
   check('plannedCount is 2 (plan + moment, not the habit log)', agenda.plannedCount === 2);
+}
+
+// ============================================================
+// Daily Reflection & Tomorrow Preview V1, brief section 3 -- completion is
+// never invented from elapsed time. Only plan.status === 'LOGGED' produces
+// COMPLETED; everything else that has elapsed is MISSED.
+// ============================================================
+{
+  const loggedPlan = plan({ id: 'plan-logged', status: 'LOGGED', plannedStartAt: new Date('2026-08-24T05:00:00.000Z'), plannedEndAt: new Date('2026-08-24T06:00:00.000Z') });
+  const agenda = buildDailyAgenda({
+    now: NOW, localDate: LOCAL_DATE, timezone: TZ, plans: [loggedPlan], moments: [], momentIdsWithSuccessor: new Set(), habitLogs: [],
+  });
+  check('A Plan with status LOGGED is COMPLETED regardless of elapsed time', agenda.items[0].status === 'COMPLETED');
+}
+{
+  // Still in the future: neither COMPLETED nor MISSED.
+  const futurePlan = plan({ id: 'plan-future', plannedStartAt: new Date('2026-08-25T05:00:00.000Z'), plannedEndAt: new Date('2026-08-25T06:00:00.000Z') });
+  const agenda = buildDailyAgenda({
+    now: NOW, localDate: LOCAL_DATE, timezone: TZ, plans: [futurePlan], moments: [], momentIdsWithSuccessor: new Set(), habitLogs: [],
+  });
+  check('A future, unlogged Plan is UPCOMING (not MISSED, not COMPLETED)', agenda.items[0].status === 'UPCOMING');
+}
+{
+  // Cancelled plans are excluded outright, whether or not their window
+  // elapsed -- unrelated to the MISSED/COMPLETED distinction.
+  const cancelledPlan = plan({ id: 'plan-cancelled', status: 'CANCELLED', plannedStartAt: new Date('2026-08-24T05:00:00.000Z'), plannedEndAt: new Date('2026-08-24T06:00:00.000Z') });
+  const agenda = buildDailyAgenda({
+    now: NOW, localDate: LOCAL_DATE, timezone: TZ, plans: [cancelledPlan], moments: [], momentIdsWithSuccessor: new Set(), habitLogs: [],
+  });
+  check('A CANCELLED plan never appears as MISSED (excluded outright)', agenda.items.length === 0);
 }
 
 // ============================================================

@@ -1,5 +1,6 @@
 import type { DailyAgenda, DailyAgendaItem } from './dailyAgenda';
 import { DailyIntentionGroupId } from './dailyIntentions';
+import { buildDailyReflection } from './dailyReflection';
 
 /**
  * My Day V1 -- the narrative layer (brief section 9). Pure, deterministic,
@@ -63,7 +64,10 @@ function plannedItems(agenda: DailyAgenda): DailyAgendaItem[] {
 }
 
 function upcomingPlannedItems(agenda: DailyAgenda): DailyAgendaItem[] {
-  return plannedItems(agenda).filter((item) => item.status !== 'COMPLETED');
+  // MISSED is a past-tense fact, same as COMPLETED -- neither belongs in
+  // "what's ahead" narrative counts (Daily Reflection & Tomorrow Preview
+  // V1, brief section 3).
+  return plannedItems(agenda).filter((item) => item.status !== 'COMPLETED' && item.status !== 'MISSED');
 }
 
 function isEveningOpen(agenda: DailyAgenda): boolean {
@@ -189,19 +193,28 @@ function buildEveningStory(agenda: DailyAgenda): { headline: string; narrative: 
   };
 }
 
+/** Daily Reflection & Tomorrow Preview V1 (brief section 6) -- the NIGHT
+ * headline/narrative now reuses buildDailyReflection()'s own breakdown
+ * (completed Plans + logged activities + meaningful Moments) instead of a
+ * second, narrower "COMPLETED || CONFIRMED" filter, so the two never drift.
+ * MISSED items are deliberately never counted or named here -- calm, no
+ * invented guilt (brief section 3/13). */
 function buildNightStory(agenda: DailyAgenda): { headline: string; narrative: string; completedHighlights: DailyAgendaItem[]; nextMeaningfulThing?: DailyStoryAction } {
-  const highlights = agenda.items.filter((item) => item.status === 'COMPLETED' || item.status === 'CONFIRMED');
+  const reflection = buildDailyReflection(agenda);
+  const highlights = [...reflection.completed, ...reflection.loggedActivities, ...reflection.meaningfulMoments].sort(
+    (a, b) => new Date(a.startAt).getTime() - new Date(b.startAt).getTime()
+  );
   if (highlights.length === 0) {
     return {
       headline: 'Your day',
-      narrative: 'Tomorrow is another day.',
+      narrative: reflection.summary,
       completedHighlights: [],
       nextMeaningfulThing: { label: 'Plan tomorrow →', action: 'PLAN_TOMORROW' },
     };
   }
   return {
     headline: 'Your day',
-    narrative: `${highlights.length} thing${highlights.length === 1 ? '' : 's'} you made time for today. Tomorrow is another day.`,
+    narrative: `${reflection.summary} Tomorrow is another day.`,
     completedHighlights: highlights,
     nextMeaningfulThing: { label: 'Plan tomorrow →', action: 'PLAN_TOMORROW' },
   };

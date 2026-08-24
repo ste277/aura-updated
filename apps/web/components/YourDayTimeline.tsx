@@ -32,6 +32,9 @@ function statusLabel(item: DailyAgendaItem): string | null {
 
 function itemMarker(item: DailyAgendaItem): string {
   if (item.status === 'COMPLETED') return '✓';
+  // Brief section 3/4 (Daily Reflection & Tomorrow Preview V1): a MISSED
+  // item is a calm, plain fact -- a faint dash, never a warning glyph.
+  if (item.status === 'MISSED') return '–';
   if (item.status === 'CURRENT') return '●';
   if (item.status === 'WAITING') return '◌';
   if (item.icon) return item.icon;
@@ -40,13 +43,16 @@ function itemMarker(item: DailyAgendaItem): string {
 
 function markerColor(item: DailyAgendaItem): string {
   if (item.status === 'COMPLETED') return colors.positive;
+  // Deliberately the same muted tone as any other subdued row -- no red,
+  // no caution color. A missed plan is not an error state.
+  if (item.status === 'MISSED') return colors.textMuted;
   if (item.status === 'CURRENT') return colors.info;
   if (item.status === 'WAITING') return colors.caution;
   return colors.textMuted;
 }
 
 function AgendaRow({ item, timezone, onOpen }: { item: DailyAgendaItem; timezone: string; onOpen?: (item: DailyAgendaItem) => void }) {
-  const subdued = item.status === 'COMPLETED';
+  const subdued = item.status === 'COMPLETED' || item.status === 'MISSED';
   const emphasized = item.status === 'CURRENT';
   const label = statusLabel(item);
   const title = item.type === 'MOMENT' && item.participantDisplayName ? `${item.title} with ${item.participantDisplayName}` : item.title;
@@ -76,7 +82,7 @@ function AgendaRow({ item, timezone, onOpen }: { item: DailyAgendaItem; timezone
         {itemMarker(item)}
       </span>
       <span style={{ minWidth: 0 }}>
-        <div style={{ ...typography.bodyStrong, fontWeight: emphasized ? 850 : 700, textDecoration: subdued ? 'line-through' : 'none', textDecorationColor: colors.borderDefault, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+        <div style={{ ...typography.bodyStrong, fontWeight: emphasized ? 850 : 700, textDecoration: item.status === 'COMPLETED' ? 'line-through' : 'none', textDecorationColor: colors.borderDefault, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
           {title}
         </div>
       </span>

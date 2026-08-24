@@ -1,9 +1,12 @@
 'use client';
 
-import React, { useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import type { DailyStory } from '../lib/dailyStory';
+import type { DailyReflection } from '../lib/dailyReflection';
+import type { TomorrowPreview } from '../lib/tomorrowPreview';
 import { BROAD_CHOICES, PEOPLE_SUBGROUPS, getIntentionGroup, DailyIntentionGroupId, DailyIntentionActivity, DailyIntentionBroadChoice } from '../lib/dailyIntentions';
 import { getActivityDefinition } from '../../../packages/recommendation/src/activityDefinitions';
+import { FULL_ACTIVITY_CATALOG } from '../../../packages/recommendation/src/personalizedTasks';
 import type { TimingCandidate } from '../../../packages/recommendation/src/timingSearch';
 import type { EverydaySharedCandidate } from '../../../packages/recommendation/src/everydayTimingFit';
 import { RESULT_LABEL_TEXT, EVERYDAY_SHARED_RATING_TEXT, saveUpcomingPlanFromCandidate } from './PlanWithAuraView';
@@ -21,7 +24,34 @@ import { PrimaryButton, SecondaryButton, TextButton, ActivityChip, StatusBadge, 
  * new creation model (brief section 17/21/26).
  */
 
-type Phase = 'STORY' | 'BROAD' | 'PEOPLE_WHO' | 'ACTIVITY' | 'SEARCHING' | 'RESULT' | 'NO_RESULT' | 'ERROR' | 'CREATING' | 'DONE';
+type Phase =
+  | 'STORY'
+  | 'BROAD'
+  | 'PEOPLE_WHO'
+  | 'ACTIVITY'
+  | 'SEARCHING'
+  | 'RESULT'
+  | 'NO_RESULT'
+  | 'ERROR'
+  | 'CREATING'
+  | 'DONE'
+  // Daily Reflection & Tomorrow Preview V1 (brief section 5/7) -- a
+  // SEPARATE, shorter "Make room for tomorrow?" flow: broad category ->
+  // (who, for PEOPLE) -> activity -> straight to the Plan/Timing Search
+  // handoff. Deliberately never touches SEARCHING/RESULT/CREATING -- it
+  // never calls Timing Search or creates anything itself.
+  | 'TOMORROW_BROAD'
+  | 'TOMORROW_WHO'
+  | 'TOMORROW_ACTIVITY';
+
+/** The exact FULL_ACTIVITY_CATALOG title for a dailyIntentions activityId --
+ * required so the Plan handoff's initialActivity prop resolves via
+ * resolveActivitySelection()'s exact-title match (PlanWithAuraView.tsx)
+ * rather than falling through to a free-text search for a curated label
+ * that doesn't happen to match the catalog's own title string. */
+function catalogTitleFor(activityId: string): string | undefined {
+  return FULL_ACTIVITY_CATALOG.find((a) => a.id === activityId)?.title;
+}
 
 function formatTimeRange(startIso: string, endIso: string): string {
   const opts: Intl.DateTimeFormatOptions = { hour: 'numeric', minute: '2-digit' };
@@ -36,16 +66,25 @@ interface ResolvedCandidate {
 
 export function MyDayStoryCard({
   story,
+  reflection,
+  tomorrowPreview,
   onOpenPeople,
   onCreated,
   onPlanTomorrow,
 }: {
   story: DailyStory | null;
+  /** Daily Reflection & Tomorrow Preview V1 (brief section 3) -- null until
+   * loaded; only meaningfully rendered at the NIGHT phase. */
+  reflection?: DailyReflection | null;
+  /** Brief section 4/8 -- only ever populated at the NIGHT phase (see
+   * myDayOrchestrator.ts); null the rest of the day by design. */
+  tomorrowPreview?: TomorrowPreview | null;
   onOpenPeople: () => void;
   onCreated: () => void;
-  /** Brief section 14: "only the extension point" -- routes into the
-   * existing Plan flow rather than a new Tomorrow product. */
-  onPlanTomorrow?: () => void;
+  /** Brief section 5/14: routes into the existing Plan/Timing Search flow
+   * with the TOMORROW horizon (and, when a specific suggestion was picked,
+   * an activity preselected) -- never creates a Plan itself. */
+  onPlanTomorrow?: (activityTitle?: string) => void;
 }) {
   const [phase, setPhase] = useState<Phase>('STORY');
   const [broadChoice, setBroadChoice] = useState<DailyIntentionBroadChoice | null>(null);
@@ -56,13 +95,61 @@ export function MyDayStoryCard({
   const [selectedActivity, setSelectedActivity] = useState<DailyIntentionActivity | null>(null);
   const [candidate, setCandidate] = useState<ResolvedCandidate | null>(null);
   const [error, setError] = useState('');
+  const [tomorrowBroadChoice, setTomorrowBroadChoice] = useState<DailyIntentionBroadChoice | null>(null);
+  const [tomorrowGroupId, setTomorrowGroupId] = useState<DailyIntentionGroupId | null>(null);
 
   const dayPhase = story?.phase ?? 'MORNING';
   const group = groupId ? getIntentionGroup(groupId) : undefined;
+  const tomorrowGroup = tomorrowGroupId ? getIntentionGroup(tomorrowGroupId) : undefined;
+
+  // Brief section 15 -- one impression event each, fired once per mount of
+  // an actually-populated NIGHT view (never on every render/poll).
+  useEffect(() => {
+    if (dayPhase !== 'NIGHT' || !reflection) return;
+    trackEvent('DAILY_REFLECTION_VIEWED', { metadata: { completedCount: reflection.completed.length, missedCount: reflection.missed.length } });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [dayPhase, reflection?.date]);
+
+  useEffect(() => {
+    if (!tomorrowPreview) return;
+    trackEvent('TOMORROW_PREVIEW_VIEWED', { metadata: { hasScheduledItems: tomorrowPreview.agenda.items.length > 0, goodForCategoryCount: tomorrowPreview.goodForCategories.length } });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [tomorrowPreview?.date]);
 
   const openIntentionPrompt = () => {
     trackEvent('MY_DAY_INTENTION_OPENED', { metadata: { dayPhase } });
     setPhase('BROAD');
+  };
+
+  // Daily Reflection & Tomorrow Preview V1 (brief section 7) -- "Make room
+  // for tomorrow?" reuses the exact same taxonomy (BROAD_CHOICES/
+  // PEOPLE_SUBGROUPS/INTENTION_GROUPS) as today's own intention prompt, but
+  // every path below terminates in onPlanTomorrow(), never a search.
+  const openTomorrowPrompt = () => {
+    setTomorrowBroadChoice(null);
+    setTomorrowGroupId(null);
+    setPhase('TOMORROW_BROAD');
+  };
+
+  const chooseTomorrowBroad = (choice: DailyIntentionBroadChoice) => {
+    setTomorrowBroadChoice(choice);
+    if (choice === 'PEOPLE') {
+      setPhase('TOMORROW_WHO');
+      return;
+    }
+    setTomorrowGroupId(choice as DailyIntentionGroupId);
+    setPhase('TOMORROW_ACTIVITY');
+  };
+
+  const chooseTomorrowSubgroup = (id: DailyIntentionGroupId) => {
+    setTomorrowGroupId(id);
+    setPhase('TOMORROW_ACTIVITY');
+  };
+
+  const chooseTomorrowActivity = (activity: DailyIntentionActivity) => {
+    if (!activity.activityId) return;
+    trackEvent('TOMORROW_PROMPT_SELECTED', { metadata: { intentionCategory: tomorrowGroupId ?? 'WORK', activityId: activity.activityId } });
+    onPlanTomorrow?.(catalogTitleFor(activity.activityId) ?? activity.label);
   };
 
   const choosePeople = async () => {
@@ -232,11 +319,77 @@ export function MyDayStoryCard({
               ))}
             </div>
           )}
-          {story.nextMeaningfulThing?.action === 'PLAN_TOMORROW' && onPlanTomorrow && (
+          {dayPhase === 'NIGHT' && (
             <div style={{ marginTop: spacing.lg }}>
-              <TextButton onClick={onPlanTomorrow}>{story.nextMeaningfulThing.label}</TextButton>
+              <TextButton onClick={openTomorrowPrompt}>What would make tomorrow feel well spent?</TextButton>
             </div>
           )}
+
+          {dayPhase === 'NIGHT' && tomorrowPreview && (
+            <div style={{ marginTop: spacing.xl, paddingTop: spacing.lg, borderTop: '1px solid rgba(148, 163, 184, 0.16)' }}>
+              <div style={{ ...typography.sectionEyebrow }}>{tomorrowPreview.headline}</div>
+              <p style={{ ...typography.body, marginTop: spacing.sm, lineHeight: 1.5 }}>{tomorrowPreview.narrative}</p>
+              {tomorrowPreview.goodForCategories.length > 0 && (
+                <div style={{ display: 'flex', flexWrap: 'wrap', gap: spacing.sm, marginTop: spacing.md }}>
+                  {tomorrowPreview.goodForCategories.map((c) => (
+                    <StatusBadge key={c.activityId} label={`${c.icon} ${c.label}`} tone="neutral" />
+                  ))}
+                </div>
+              )}
+              {tomorrowPreview.agenda.items.length > 0 && (
+                <div style={{ display: 'flex', flexDirection: 'column', gap: spacing.xs, marginTop: spacing.md }}>
+                  {tomorrowPreview.agenda.items.map((item) => (
+                    <div key={item.id} style={{ ...typography.meta, color: colors.textSecondary }}>
+                      {item.icon ?? '•'} {item.title} · {new Date(item.startAt).toLocaleTimeString('en-US', { timeZone: tomorrowPreview.timezone, hour: 'numeric', minute: '2-digit' })}
+                    </div>
+                  ))}
+                </div>
+              )}
+              <div style={{ marginTop: spacing.md }}>
+                <TextButton onClick={() => onPlanTomorrow?.()}>Plan tomorrow →</TextButton>
+              </div>
+            </div>
+          )}
+        </>
+      )}
+
+      {phase === 'TOMORROW_BROAD' && (
+        <>
+          <BackRow onBack={() => setPhase('STORY')} />
+          <h2 style={{ ...typography.pageTitle, fontSize: 19, marginTop: spacing.md }}>What would make tomorrow feel well spent?</h2>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: spacing.sm, marginTop: spacing.lg }}>
+            {BROAD_CHOICES.map((choice) => (
+              <SecondaryButton key={choice.id} onClick={() => chooseTomorrowBroad(choice.id)} style={{ width: '100%', justifyContent: 'flex-start' }}>
+                {choice.icon} {choice.label}
+              </SecondaryButton>
+            ))}
+          </div>
+        </>
+      )}
+
+      {phase === 'TOMORROW_WHO' && (
+        <>
+          <BackRow onBack={() => setPhase('TOMORROW_BROAD')} />
+          <h2 style={{ ...typography.pageTitle, fontSize: 19, marginTop: spacing.md }}>Who with?</h2>
+          <div style={{ display: 'flex', flexWrap: 'wrap', gap: spacing.sm, marginTop: spacing.lg }}>
+            {PEOPLE_SUBGROUPS.map((sg) => (
+              <ActivityChip key={sg.groupId} label={sg.label} icon={sg.icon} onClick={() => chooseTomorrowSubgroup(sg.groupId)} />
+            ))}
+          </div>
+        </>
+      )}
+
+      {phase === 'TOMORROW_ACTIVITY' && tomorrowGroup && (
+        <>
+          <BackRow onBack={() => setPhase(tomorrowBroadChoice === 'PEOPLE' ? 'TOMORROW_WHO' : 'TOMORROW_BROAD')} />
+          <h2 style={{ ...typography.pageTitle, fontSize: 19, marginTop: spacing.md }}>What sounds good?</h2>
+          <div style={{ display: 'flex', flexWrap: 'wrap', gap: spacing.sm, marginTop: spacing.lg }}>
+            {tomorrowGroup.activities
+              .filter((a) => a.activityId)
+              .map((activity) => (
+                <ActivityChip key={activity.label} label={activity.label} icon={activity.icon} onClick={() => chooseTomorrowActivity(activity)} />
+              ))}
+          </div>
         </>
       )}
 

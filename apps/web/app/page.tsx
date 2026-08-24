@@ -17,6 +17,8 @@ import type { AuraUpdatesResponse } from '../lib/auraUpdates';
 import type { AuraReminder } from '../lib/auraReminders';
 import type { DailyAgenda, DailyAgendaItem } from '../lib/dailyAgenda';
 import type { DailyStory } from '../lib/dailyStory';
+import type { DailyReflection } from '../lib/dailyReflection';
+import type { TomorrowPreview } from '../lib/tomorrowPreview';
 
 // UI Modules
 import { HomeDashboard } from '../components/HomeDashboard';
@@ -105,14 +107,14 @@ export default function DashboardPage() {
   // intent, e.g. "Date Night") lands directly in Plan with it prefilled,
   // via the exact same mechanism handleOpenPlan() already uses for every
   // other "jump into Plan with this activity" entry point in the app.
-  const [planPrefill, setPlanPrefill] = useState<{ activity: string; key: number } | null>(() => {
+  const [planPrefill, setPlanPrefill] = useState<{ activity: string; key: number; horizon?: PlanningHorizon } | null>(() => {
     if (typeof window === 'undefined') return null;
     const requested = new URLSearchParams(window.location.search).get('activity');
     return requested?.trim() ? { activity: requested.trim(), key: Date.now() } : null;
   });
   const [mounted, setMounted] = useState(false);
   const [auraUpdates, setAuraUpdates] = useState<AuraUpdatesResponse | null>(null);
-  const [myDay, setMyDay] = useState<{ agenda: DailyAgenda; story: DailyStory } | null>(null);
+  const [myDay, setMyDay] = useState<{ agenda: DailyAgenda; story: DailyStory; reflection: DailyReflection | null; tomorrowPreview: TomorrowPreview | null } | null>(null);
   // Product Structure V2 -- "Your Moments" now lives inside Plan (brief
   // section 19), so any entry point that used to jump to the standalone
   // Shared Moments tab (Home's actionable card, You's row) now jumps into
@@ -298,7 +300,7 @@ export default function DashboardPage() {
       const res = await fetch('/api/my-day');
       if (res.ok) {
         const data = await res.json();
-        setMyDay({ agenda: data.agenda, story: data.story });
+        setMyDay({ agenda: data.agenda, story: data.story, reflection: data.reflection ?? null, tomorrowPreview: data.tomorrowPreview ?? null });
       }
     } catch {
       // Best-effort -- Home already degrades gracefully with myDay null.
@@ -854,6 +856,19 @@ export default function DashboardPage() {
     setActiveTab('plan');
   }, []);
 
+  // Daily Reflection & Tomorrow Preview V1 (brief section 5) -- "Plan
+  // tomorrow" (generic, or from a "Make room for..." suggestion) never
+  // creates a Plan directly. It routes into the exact same Plan/Timing
+  // Search screen handleOpenPlan already uses, just with the horizon
+  // preset to TOMORROW and, when a suggestion carried one, an activity
+  // preselected -- the actual search/creation happens in Plan itself.
+  const handlePlanTomorrow = useCallback((activityTitle?: string) => {
+    const resolvedActivityId = activityTitle ? findActivityIntent(activityTitle)?.id : undefined;
+    trackEvent('TOMORROW_PLAN_STARTED', resolvedActivityId ? { metadata: { activityId: resolvedActivityId } } : undefined);
+    setPlanPrefill({ activity: activityTitle?.trim() ?? '', key: Date.now(), horizon: 'TOMORROW' });
+    setActiveTab('plan');
+  }, []);
+
   const handleViewFullPanchang = useCallback((dateStr: string) => {
     setPanchangDateJump({ date: dateStr, key: Date.now() });
     setActiveTab('panchang');
@@ -1008,9 +1023,12 @@ export default function DashboardPage() {
             onOpenReminder={handleOpenReminder}
             myDayAgenda={myDay?.agenda}
             myDayStory={myDay?.story}
+            myDayReflection={myDay?.reflection}
+            myDayTomorrowPreview={myDay?.tomorrowPreview}
             onMyDayChanged={loadMyDay}
             onOpenPeople={() => { setPeopleReturnTo('home'); setActiveTab('people'); }}
             onOpenAgendaItem={handleOpenAgendaItem}
+            onPlanTomorrow={handlePlanTomorrow}
           />
         )}
 
@@ -1048,6 +1066,7 @@ export default function DashboardPage() {
             timezone={user.timezone}
             initialActivity={planPrefill?.activity}
             initialActivityKey={planPrefill?.key}
+            initialHorizon={planPrefill?.horizon}
             onOpenPeople={() => { setPeopleReturnTo('plan'); setActiveTab('people'); }}
             focusMomentsKey={momentsFocusKey}
             focusMomentToken={momentsFocusToken}

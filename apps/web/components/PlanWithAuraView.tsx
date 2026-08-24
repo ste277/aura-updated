@@ -51,6 +51,13 @@ interface PlanWithAuraViewProps {
   timezone?: string;
   initialActivity?: string | null;
   initialActivityKey?: number;
+  /** Daily Reflection & Tomorrow Preview V1 (brief section 5) -- the
+   * "Plan tomorrow" handoff from a Tomorrow Preview suggestion preselects
+   * both the activity AND this horizon, so the search itself still runs
+   * through the normal FIND flow below rather than creating a Plan
+   * directly. Only meaningful together with initialActivity/
+   * initialActivityKey (same effect, same key). */
+  initialHorizon?: PlanningHorizon;
   /** Product Structure V2 (brief section 10/22) -- "Add someone" from the
    * Who's-this-with picker navigates to the existing People screen; Plan
    * itself never builds a second Add Person UI. */
@@ -460,7 +467,7 @@ export async function saveUpcomingPlanFromCandidate(candidate: TimingCandidate, 
   return mapPlanRow(await res.json());
 }
 
-export function PlanWithAuraView({ onTimingSearch, onViewDay, onPlanLogged, timezone, initialActivity, initialActivityKey, onOpenPeople, focusMomentsKey, onMomentSeen, focusMomentToken }: PlanWithAuraViewProps) {
+export function PlanWithAuraView({ onTimingSearch, onViewDay, onPlanLogged, timezone, initialActivity, initialActivityKey, initialHorizon, onOpenPeople, focusMomentsKey, onMomentSeen, focusMomentToken }: PlanWithAuraViewProps) {
   const [planMode, setPlanMode] = useState<TimingSearchMode>('FIND');
   const [taskTitle, setTaskTitle] = useState('');
   const [, setIsCustomTask] = useState(false);
@@ -530,6 +537,11 @@ export function PlanWithAuraView({ onTimingSearch, onViewDay, onPlanLogged, time
   const plansSectionRef = useRef<HTMLElement | null>(null);
 
   useEffect(() => {
+    // initialHorizon (e.g. Tomorrow Preview's TOMORROW handoff) must apply
+    // even when no specific activity was preselected -- the generic "Plan
+    // tomorrow" link carries a horizon but no activity.
+    if (initialHorizon) setHorizon(initialHorizon);
+
     const nextActivity = initialActivity?.trim();
     if (!nextActivity) return;
 
@@ -547,7 +559,7 @@ export function PlanWithAuraView({ onTimingSearch, onViewDay, onPlanLogged, time
     setPlanActionStates({});
     setPlannedOpportunityKeys(new Set());
     if (typeof window !== 'undefined') window.scrollTo({ top: 0, behavior: 'smooth' });
-  }, [initialActivity, initialActivityKey]);
+  }, [initialActivity, initialActivityKey, initialHorizon]);
 
   useEffect(() => {
     let cancelled = false;

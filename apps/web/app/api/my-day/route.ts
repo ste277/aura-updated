@@ -26,8 +26,8 @@ export async function GET(req: NextRequest) {
   }
 
   const startedAt = Date.now();
-  const { agenda, story } = await buildMyDay(user, rawDate ?? undefined, new Date());
+  const { agenda, story, reflection, tomorrowPreview } = await buildMyDay(user, rawDate ?? undefined, new Date());
   const durationMs = Date.now() - startedAt;
 
-  return NextResponse.json({ agenda, story, durationMs });
+  return NextResponse.json({ agenda, story, reflection, tomorrowPreview, durationMs });
 }
