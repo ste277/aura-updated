@@ -78,3 +78,25 @@ export function findInstantBeforeRahuKalam(now: Date, latitude: number, longitud
   const mm = targetMinute % 60;
   return new Date(Date.UTC(parts.year, parts.month - 1, parts.day, hh, mm) - tzOffsetMinutes * 60_000);
 }
+
+/**
+ * Home Recommendation Hierarchy V1 -- the midpoint of today's Rahu Kalam
+ * window itself (activeWindowName === 'RAHU_KALAM'), as opposed to
+ * findInstantBeforeRahuKalam's "20 minutes before it starts". Needed to
+ * exercise Good Right Now / Aura Suggests's own caution-window branches,
+ * which only activate while a caution window is the CURRENT one, not the
+ * upcoming one.
+ */
+export function findInstantDuringRahuKalam(now: Date, latitude: number, longitude: number, timezone: string): Date {
+  const parts = getDatePartsInTimezone(timezone, now);
+  const tzOffsetMinutes = resolveTzOffsetMinutes(timezone, now);
+  const solar = computeSolarEphemeris({ year: parts.year, month: parts.month, day: parts.day, latitude, longitude, tzOffsetMinutes });
+  const windows = computePanchangWindows(solar, parts.weekday as 0 | 1 | 2 | 3 | 4 | 5 | 6);
+  const rahu = windows.find((w) => w.type === 'RAHU_KALAM');
+  if (!rahu || rahu.startMinute === undefined || rahu.endMinute === undefined) throw new Error('No Rahu Kalam window found for today.');
+
+  const targetMinute = Math.floor((rahu.startMinute + rahu.endMinute) / 2);
+  const hh = Math.floor(targetMinute / 60);
+  const mm = targetMinute % 60;
+  return new Date(Date.UTC(parts.year, parts.month - 1, parts.day, hh, mm) - tzOffsetMinutes * 60_000);
+}
