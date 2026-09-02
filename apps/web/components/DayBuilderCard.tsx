@@ -2,6 +2,8 @@
 
 import React, { useEffect, useState } from 'react';
 import { swapSuggestion, type IntentionalDaySuggestion } from '../lib/dayBuilder';
+import type { TimingCandidate } from '../../../packages/recommendation/src/timingSearch';
+import type { EverydaySharedCandidate } from '../../../packages/recommendation/src/everydayTimingFit';
 import type { DailyStoryPhase } from '../lib/dailyStory';
 import type { DailyIntentionGroupId } from '../lib/dailyIntentions';
 import { RESULT_LABEL_TEXT, EVERYDAY_SHARED_RATING_TEXT, saveUpcomingPlanFromCandidate } from './PlanWithAuraView';
@@ -33,9 +35,16 @@ interface SuggestionState {
   inviteStatus: ActionStatus;
   dismissStatus: ActionStatus;
   error?: string;
+  /** Home Compactness + Flexible Day Story V1 (brief section 26/29) -- a
+   * PURE local UI selection into `suggestion.candidate.candidates`, never
+   * persisted, never triggers a re-search. Defaults to 0 (the engine's own
+   * highest-ranked slot). Switching this does nothing else -- Add/Invite
+   * read it at the moment of the real action, nothing more. */
+  selectedCandidateIndex: number;
+  showOtherTimes: boolean;
 }
 
-const IDLE_STATE: SuggestionState = { addStatus: 'IDLE', inviteStatus: 'IDLE', dismissStatus: 'IDLE' };
+const IDLE_STATE: SuggestionState = { addStatus: 'IDLE', inviteStatus: 'IDLE', dismissStatus: 'IDLE', selectedCandidateIndex: 0, showOtherTimes: false };
 
 export function DayBuilderCard({
   dayPhase,
@@ -128,8 +137,25 @@ export function DayBuilderCard({
     setVisibleIds((prev) => swapSuggestion(prev, suggestions, suggestion.id));
   };
 
-  const generalCandidate = (suggestion: IntentionalDaySuggestion) =>
-    suggestion.candidate.kind === 'SOLO' ? suggestion.candidate.solo : suggestion.candidate.shared.generalCandidate;
+  /** Brief section 26/27/28 -- resolves to the exact TimingCandidate the
+   * client has selected (default index 0, the engine's own highest-ranked
+   * slot), never silently reverting to the top-ranked one regardless of
+   * what the user tapped. For a SHARED suggestion, Add still saves a
+   * personal Plan from the underlying `generalCandidate` (unchanged from
+   * before this brief -- Add and Invite were always two independent
+   * actions on the same resolved time, see handleInvite below for the
+   * SHARED-specific candidate itself). */
+  const selectedGeneralCandidate = (suggestion: IntentionalDaySuggestion): TimingCandidate => {
+    const index = Math.min(stateFor(suggestion.id).selectedCandidateIndex, suggestion.candidate.candidates.length - 1);
+    return suggestion.candidate.kind === 'SOLO' ? suggestion.candidate.candidates[index] : suggestion.candidate.candidates[index].generalCandidate;
+  };
+
+  const selectCandidate = (suggestion: IntentionalDaySuggestion, index: number) => {
+    // Brief section 29 -- a pure local state write. No fetch, no Timing
+    // Search / Shared Timing re-run, no Plan/Moment creation.
+    setState(suggestion.id, { selectedCandidateIndex: index });
+    trackEvent('DAY_BUILDER_SLOT_SELECTED', { metadata: { activityId: suggestion.activityId, candidateRank: index, dayPhase, hasPerson: suggestion.candidate.kind === 'SHARED' } });
+  };
 
   const handleAdd = async (suggestion: IntentionalDaySuggestion) => {
     setState(suggestion.id, { addStatus: 'SAVING', error: undefined });
@@ -137,7 +163,7 @@ export function DayBuilderCard({
       // Brief section 20 -- a stable id per (suggestion, local date), so a
       // double-tap or a benign re-render can never create a second Plan.
       const clientRequestId = `daybuilder:${suggestion.id}:${localDate}`;
-      const plan = await saveUpcomingPlanFromCandidate(generalCandidate(suggestion), suggestion.durationMinutes, undefined, undefined, clientRequestId);
+      const plan = await saveUpcomingPlanFromCandidate(selectedGeneralCandidate(suggestion), suggestion.durationMinutes, undefined, undefined, clientRequestId);
       trackEvent('DAY_BUILDER_SUGGESTION_ADDED', { metadata: { intentionCategory: suggestion.groupId, activityId: suggestion.activityId, dayPhase } });
       setState(suggestion.id, { addStatus: 'DONE', addedPlannedActivityId: plan.id });
       onCreated();
@@ -149,7 +175,7 @@ export function DayBuilderCard({
 
   const handleInvite = async (suggestion: IntentionalDaySuggestion) => {
     if (suggestion.candidate.kind !== 'SHARED') return;
-    const shared = suggestion.candidate.shared;
+    const shared = suggestion.candidate.candidates[Math.min(stateFor(suggestion.id).selectedCandidateIndex, suggestion.candidate.candidates.length - 1)];
     const person = suggestion.candidate.person;
     setState(suggestion.id, { inviteStatus: 'SAVING', error: undefined });
     try {
@@ -160,8 +186,10 @@ export function DayBuilderCard({
           scope: 'SHARED',
           source: 'PLAN',
           activityId: suggestion.activityId,
-          startAt: shared.generalCandidate.start,
-          endAt: shared.generalCandidate.end,
+          // Brief section 28 -- the EXACT selected candidate's own
+          // start/end, never re-derived from generalCandidate or re-searched.
+          startAt: shared.start,
+          endAt: shared.end,
           ratingLabel: shared.rating,
           savedPersonId: person.id,
           // Brief section 22 -- if this suggestion was already Added as a
@@ -241,18 +269,23 @@ export function DayBuilderCard({
       }}
     >
       <div style={{ ...typography.sectionEyebrow }}>Make room for what matters</div>
-      <h2 style={{ ...typography.pageTitle, fontSize: 19, margin: '6px 0 0' }}>What would make today feel worthwhile?</h2>
+      <h2 style={{ ...typography.pageTitle, fontSize: 19, margin: '6px 0 0' }}>{dayPhase === 'MORNING' ? 'Shape your day' : 'What would make today feel worthwhile?'}</h2>
 
       <div style={{ display: 'flex', flexDirection: 'column', gap: spacing.md, marginTop: spacing.lg }}>
         {visible.map((suggestion) => {
           const state = stateFor(suggestion.id);
-          const range = formatTimeRange(generalCandidate(suggestion).start, generalCandidate(suggestion).end);
+          const candidates = suggestion.candidate.candidates;
+          const selectedIndex = Math.min(state.selectedCandidateIndex, candidates.length - 1);
+          const selected = candidates[selectedIndex];
           const fitLabel =
             suggestion.candidate.kind === 'SOLO'
-              ? RESULT_LABEL_TEXT[suggestion.candidate.solo.label]
-              : EVERYDAY_SHARED_RATING_TEXT[suggestion.candidate.shared.rating] ?? 'Good fit';
+              ? RESULT_LABEL_TEXT[(selected as TimingCandidate).label]
+              : EVERYDAY_SHARED_RATING_TEXT[(selected as EverydaySharedCandidate).rating] ?? 'Good fit';
           const sharedCandidate = suggestion.candidate.kind === 'SHARED' ? suggestion.candidate : null;
           const isShared = sharedCandidate !== null;
+          // Brief section 24 -- 2 visible time chips by default, an
+          // "Other times" reveal for a 3rd when one exists.
+          const visibleSlotCount = state.showOtherTimes ? candidates.length : Math.min(2, candidates.length);
 
           return (
             <div
@@ -269,8 +302,42 @@ export function DayBuilderCard({
                 </div>
                 <StatusBadge label={fitLabel} tone={isShared ? 'relationship' : 'positive'} />
               </div>
-              <div style={{ ...typography.meta, color: colors.textSecondary, marginTop: 4 }}>{range}</div>
-              <p style={{ ...typography.caption, color: colors.textFaint, marginTop: 6, lineHeight: 1.4 }}>{suggestion.reason}</p>
+
+              {/* Brief section 24/26/52 -- real, selectable controls (not
+               * plain text): each slot is its own button, the selected one
+               * is visually AND semantically marked (aria-pressed), never
+               * color-only. Switching slots is a pure local state change
+               * (brief section 29) -- no network call happens here. */}
+              <div role="group" aria-label={`Choose a time for ${suggestion.label}`} style={{ display: 'flex', flexWrap: 'wrap', gap: 6, marginTop: 8 }}>
+                {candidates.slice(0, visibleSlotCount).map((c, index) => (
+                  <button
+                    key={c.start}
+                    type="button"
+                    aria-pressed={index === selectedIndex}
+                    onClick={() => selectCandidate(suggestion, index)}
+                    style={{
+                      border: `1px solid ${index === selectedIndex ? colors.accentBorder : colors.borderSubtle}`,
+                      borderRadius: radius.sm,
+                      background: index === selectedIndex ? colors.positiveSoft : 'transparent',
+                      color: index === selectedIndex ? colors.positive : colors.textSecondary,
+                      fontSize: 12.5,
+                      fontWeight: index === selectedIndex ? 850 : 700,
+                      padding: '6px 10px',
+                      cursor: 'pointer',
+                    }}
+                  >
+                    {formatTimeRange(c.start, c.end)}
+                    {index === 0 && candidates.length > 1 ? ' · Best' : ''}
+                  </button>
+                ))}
+                {!state.showOtherTimes && candidates.length > 2 && (
+                  <TextButton onClick={() => setState(suggestion.id, { showOtherTimes: true })} color={colors.textMuted}>
+                    Other times →
+                  </TextButton>
+                )}
+              </div>
+
+              <p style={{ ...typography.caption, color: colors.textFaint, marginTop: 8, lineHeight: 1.4 }}>{suggestion.reason}</p>
 
               {state.error && <div style={{ color: colors.danger, fontSize: 12, marginTop: 6 }}>{state.error}</div>}
 

@@ -75,7 +75,8 @@ function checkNeverActivityFallback(label: string, result: ReturnType<typeof der
   const agenda = buildDailyAgenda({ now: NOW, localDate: LOCAL_DATE, timezone: TZ, plans: [plan()], moments: [], momentIdsWithSuccessor: new Set(), habitLogs: [] });
   const result = deriveAuraSuggestion(baseInput({ agenda }));
   check('An UPCOMING next Plan produces PREPARE_FOR_PLAN', result?.type === 'PREPARE_FOR_PLAN');
-  check('Title reads "Prepare for Learning"', result?.title === 'Prepare for Learning');
+  check('Title reads "Some room before Learning"', result?.title === 'Some room before Learning');
+  check('Description interprets the gap, not just the bare fact', result?.description === 'Learning is at 12:00 PM. Nothing else needs your attention until then.');
   check('Carries the agendaItem for View routing', result?.agendaItem?.id === agenda.nextItem?.id);
   checkNeverActivityFallback('Plan tier', result);
 }

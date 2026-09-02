@@ -41,11 +41,17 @@ test('Relationships + Wellbeing priorities -> Day Builder favors eligible activi
   expect(isPrioritized, `Expected the first suggestion's group (${firstGroupId}) to be RELATIONSHIPS/FAMILY/SOCIAL/SELF`).toBe(true);
 
   // Suggestions still contain real resolved times -- never a bare name.
+  // Home Compactness + Flexible Day Story V1 -- each suggestion now
+  // carries 1-3 ranked candidates (`candidates`) instead of exactly one.
   for (const s of suggestions) {
-    const candidateTime = s.candidate.kind === 'SOLO' ? s.candidate.solo : s.candidate.shared.generalCandidate;
-    expect(typeof candidateTime.start).toBe('string');
-    expect(typeof candidateTime.end).toBe('string');
-    expect(new Date(candidateTime.start).getTime()).toBeGreaterThan(0);
+    expect(Array.isArray(s.candidate.candidates)).toBe(true);
+    expect(s.candidate.candidates.length).toBeGreaterThan(0);
+    for (const c of s.candidate.candidates) {
+      const candidateTime = s.candidate.kind === 'SOLO' ? c : c.generalCandidate;
+      expect(typeof candidateTime.start).toBe('string');
+      expect(typeof candidateTime.end).toBe('string');
+      expect(new Date(candidateTime.start).getTime()).toBeGreaterThan(0);
+    }
   }
 
   // Add creates a normal canonical Plan -- same path as every other Day

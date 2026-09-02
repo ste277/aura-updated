@@ -418,14 +418,24 @@ export function selectIntentionCandidates(
   return candidates;
 }
 
+/**
+ * Home Compactness + Flexible Day Story V1 (brief section 24/26) -- a
+ * suggestion now carries 1-3 already-resolved, ranked timing candidates
+ * instead of exactly one. `candidates[0]` is the default-selected slot
+ * (highest-ranked); every entry is untouched canonical engine output
+ * (runTimingSearch/findEverydaySharedTiming), never re-scored or
+ * re-ordered here. Which one is "selected" is purely a client-side UI
+ * concern (dayBuilderOrchestrator.ts and this file never track selection
+ * state) -- see DayBuilderCard.tsx.
+ */
 export interface IntentionalDayCandidateSolo {
   kind: 'SOLO';
-  solo: TimingCandidate;
+  candidates: TimingCandidate[];
 }
 
 export interface IntentionalDayCandidateShared {
   kind: 'SHARED';
-  shared: EverydaySharedCandidate;
+  candidates: EverydaySharedCandidate[];
   person: { id: string; name: string; relationshipType: SavedPersonRelationshipType };
 }
 

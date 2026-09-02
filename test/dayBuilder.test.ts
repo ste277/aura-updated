@@ -278,7 +278,7 @@ function fakeSuggestion(id: string, groupId: DailyIntentionGroupId, activityId: 
     icon: '✨',
     durationMinutes: 30,
     reason: 'test reason',
-    candidate: { kind: 'SOLO', solo: fakeSolo('2026-08-24T10:00:00.000Z', activityId) },
+    candidate: { kind: 'SOLO', candidates: [fakeSolo('2026-08-24T10:00:00.000Z', activityId)] },
   };
 }
 

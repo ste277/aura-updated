@@ -64,13 +64,34 @@ function timeBasedStatus(startAt: Date, endAt: Date | undefined, now: Date): Dai
   return 'UPCOMING';
 }
 
+/** Home Compactness + Flexible Day Story V1 (brief section 10) -- audit
+ * found the real source of stray internal text like "focus"/"workout"
+ * rendering where an icon glyph belongs: `planIconForTitle()`
+ * (PlanWithAuraView.tsx) returns an internal `PlanIcon` CATEGORY id
+ * ('focus'/'workout'/'study'/'heart'/'meditate'/'meeting'/'journey') meant
+ * only for that component's own local icon lookup -- never an emoji --
+ * but `saveUpcomingPlanFromCandidate()` (the canonical creation path Day
+ * Builder's Add and every Timing Search "Use this time" call through)
+ * stores that raw category string verbatim as `Plan.icon`. Sanitized once
+ * here, at the single point every consumer of DailyAgendaItem.icon reads
+ * from (Your Day's own marker, Aura Suggests' icon, any future consumer),
+ * rather than patched separately in each render site. A genuine emoji is
+ * never plain ASCII letters, so this is a general, forward-compatible
+ * guard, not a hardcoded list of the known category ids -- and it never
+ * touches how `Plan.icon` itself is stored (a separate, PlanWithAuraView-
+ * owned concern out of this brief's scope, brief section 63). */
+function sanitizedIcon(icon: string | null | undefined): string | null {
+  if (!icon) return null;
+  return /^[a-zA-Z]+$/.test(icon) ? null : icon;
+}
+
 function planToAgendaItem(plan: PlannedActivity, now: Date): DailyAgendaItem {
   const status: DailyAgendaItemStatus = plan.status === 'LOGGED' ? 'COMPLETED' : timeBasedStatus(plan.plannedStartAt, plan.plannedEndAt, now);
   return {
     id: `plan:${plan.id}`,
     type: 'PLAN',
     title: plan.title,
-    icon: plan.icon,
+    icon: sanitizedIcon(plan.icon),
     startAt: plan.plannedStartAt.toISOString(),
     endAt: plan.plannedEndAt.toISOString(),
     status,

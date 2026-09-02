@@ -135,14 +135,19 @@ export function deriveAuraSuggestion(input: {
     };
   }
 
-  // PREPARE_FOR_PLAN -- a next Plan, outside a caution window.
+  // PREPARE_FOR_PLAN -- a next Plan, outside a caution window. Home
+  // Compactness + Flexible Day Story V1 (brief section 15) -- the copy
+  // interprets the gap ("some breathing room") rather than just restating
+  // the agenda fact Your Day's own row already shows; the time itself
+  // stays (genuinely useful context for "how much room"), it just isn't
+  // the WHOLE sentence anymore.
   if (nextItemActive?.type === 'PLAN') {
     const time = formatClock(nextItemActive.startAt);
     const displayTitle = agendaItemDisplayTitle(nextItemActive);
     return {
       type: 'PREPARE_FOR_PLAN',
-      title: `Prepare for ${displayTitle}`,
-      description: `You have some time before ${displayTitle} at ${time}.`,
+      title: `Some room before ${displayTitle}`,
+      description: `${displayTitle} is at ${time}. Nothing else needs your attention until then.`,
       icon: nextItemActive.icon || '✨',
       actionLabel: 'View',
       secondaryLabel: 'View full day timeline',
