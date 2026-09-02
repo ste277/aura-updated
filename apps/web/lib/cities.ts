@@ -1,3 +1,5 @@
+import { isValidIanaTimezone } from './timezone';
+
 export interface CityOption {
   cityName: string;
   latitude: number;
@@ -42,18 +44,63 @@ export function findCity(cityName: string): CityOption | undefined {
   return CITY_OPTIONS.find((c) => c.cityName === cityName);
 }
 
+// The actual safe latitude range for this app -- narrower than the
+// geographic -90..90 range. Above/below the Arctic/Antarctic circles,
+// sunrise/sunset (and therefore every Panchang solar window this app is
+// built around) is undefined for parts of the year, which would make
+// computeSolarEphemeris throw. Planning Custom Location UX Fix keeps this
+// exact bound rather than loosening it to -90..90 -- that would let a value
+// be saved successfully here only to fail later inside the Panchang engine,
+// which is precisely what this fix is meant to prevent. The UI's inline
+// validation message reflects this real bound, not a generic -90..90 one.
+export const MIN_VALID_LATITUDE = -66.5;
+export const MAX_VALID_LATITUDE = 66.5;
+export const MIN_VALID_LONGITUDE = -180;
+export const MAX_VALID_LONGITUDE = 180;
+
 // Basic sanity bounds for a manually-entered custom location. Rejects values that
 // would make computeSolarEphemeris throw (poles, where sunrise/sunset is undefined
 // for parts of the year) or that are simply not valid coordinates.
 export function isValidCustomLocation(input: { latitude: number; longitude: number; timezone: string }): boolean {
   const { latitude, longitude, timezone } = input;
   if (Number.isNaN(latitude) || Number.isNaN(longitude)) return false;
-  if (latitude < -66.5 || latitude > 66.5) return false; // outside the Arctic/Antarctic circles
-  if (longitude < -180 || longitude > 180) return false;
-  try {
-    Intl.DateTimeFormat('en-US', { timeZone: timezone }); // throws on invalid IANA name
-  } catch {
-    return false;
-  }
-  return true;
+  if (latitude < MIN_VALID_LATITUDE || latitude > MAX_VALID_LATITUDE) return false;
+  if (longitude < MIN_VALID_LONGITUDE || longitude > MAX_VALID_LONGITUDE) return false;
+  return isValidIanaTimezone(timezone);
+}
+
+/**
+ * Parses a user-typed coordinate into signed decimal degrees. Accepts plain
+ * signed decimals ("8.8932", "-33.8688") and, per Planning Custom Location UX
+ * Fix section 3/4, an optional trailing compass direction ("8.8932 N",
+ * "33.8688 S", "76.6141 E", "74.0060 W") -- N/E are positive, S/W negate the
+ * magnitude. A signed magnitude combined with a direction letter (e.g.
+ * "-8.89 N") is rejected rather than guessing which one wins. This is format
+ * parsing only, not range validation -- callers should still range-check the
+ * result (isValidCustomLocation, or the MIN/MAX constants above) so a
+ * format vs. range error can be reported distinctly.
+ */
+export function parseCoordinate(raw: string, axis: 'lat' | 'lng'): number | null {
+  const trimmed = raw.trim();
+  if (!trimmed) return null;
+  const match = trimmed.match(/^(-?\d+(?:\.\d+)?)\s*°?\s*([NSEWnsew])?$/);
+  if (!match) return null;
+  const magnitude = Number(match[1]);
+  if (!Number.isFinite(magnitude)) return null;
+  const direction = match[2]?.toUpperCase();
+  if (!direction) return magnitude;
+  const validDirections = axis === 'lat' ? ['N', 'S'] : ['E', 'W'];
+  if (!validDirections.includes(direction)) return null;
+  if (magnitude < 0) return null; // ambiguous signed-magnitude-plus-direction input
+  return direction === 'S' || direction === 'W' ? -magnitude : magnitude;
+}
+
+/**
+ * Presentation-only friendly coordinate display (section 7) -- e.g. `8.8932`
+ * -> `8.8932° N`, `-33.8688` -> `33.8688° S`. The stored/persisted value is
+ * always the signed decimal; this is never parsed back in, only displayed.
+ */
+export function formatCoordinateDirectional(value: number, axis: 'lat' | 'lng'): string {
+  const direction = axis === 'lat' ? (value < 0 ? 'S' : 'N') : value < 0 ? 'W' : 'E';
+  return `${Math.abs(value)}° ${direction}`;
 }
