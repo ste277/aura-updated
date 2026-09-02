@@ -285,6 +285,34 @@ function habitLog(overrides: Partial<HabitLogRow> = {}): HabitLogRow {
   check('nextItem on a deduped Plan/Moment pair resolves to the single Moment row', agenda.items.length === 1 && agenda.nextItem?.id === agenda.items[0].id);
 }
 
+// ============================================================
+// Home Compactness + Flexible Day Story V1 (brief section 10/61) -- the
+// real source of a leaked internal string ("focus", "workout", etc.)
+// where an icon glyph belongs: planIconForTitle() (PlanWithAuraView.tsx)
+// stores an internal PlanIcon CATEGORY id, never an emoji, as Plan.icon.
+// A real emoji is never plain ASCII letters -- this must be sanitized to
+// null (falling through to each consumer's own default), not passed
+// through verbatim.
+// ============================================================
+for (const leakedCategory of ['focus', 'workout', 'study', 'heart', 'meditate', 'meeting', 'journey', 'WORK', 'EVERYDAY', 'SHARED']) {
+  const tainted = plan({ id: `icon-${leakedCategory}`, icon: leakedCategory });
+  const agenda = buildDailyAgenda({ now: NOW, localDate: LOCAL_DATE, timezone: TZ, plans: [tainted], moments: [], momentIdsWithSuccessor: new Set(), habitLogs: [] });
+  check(`A Plan.icon of "${leakedCategory}" (an internal category id, not an emoji) is sanitized to null, never rendered verbatim`, agenda.items[0]?.icon === null);
+}
+{
+  // A genuine emoji icon must still pass through unchanged -- this is a
+  // sanitization guard, not a blanket icon suppression.
+  const real = plan({ id: 'icon-real', icon: '🏋️' });
+  const agenda = buildDailyAgenda({ now: NOW, localDate: LOCAL_DATE, timezone: TZ, plans: [real], moments: [], momentIdsWithSuccessor: new Set(), habitLogs: [] });
+  check('A genuine emoji icon passes through unchanged', agenda.items[0]?.icon === '🏋️');
+}
+{
+  // A null/absent icon stays null -- the sanitizer never invents one.
+  const noIcon = plan({ id: 'icon-none', icon: null });
+  const agenda = buildDailyAgenda({ now: NOW, localDate: LOCAL_DATE, timezone: TZ, plans: [noIcon], moments: [], momentIdsWithSuccessor: new Set(), habitLogs: [] });
+  check('No icon stays null', agenda.items[0]?.icon === null);
+}
+
 if (!allPassed) {
   console.error('\nSome daily agenda checks FAILED.');
   process.exit(1);

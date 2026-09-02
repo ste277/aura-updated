@@ -62,6 +62,7 @@ export type ProductEventName =
   | 'DAY_BUILDER_INVITE_SENT'
   | 'DAY_BUILDER_ANOTHER_IDEA'
   | 'DAY_BUILDER_SUGGESTION_DISMISSED'
+  | 'DAY_BUILDER_SLOT_SELECTED'
   | 'PERSONALIZATION_PROMPT_VIEWED'
   | 'PERSONALIZATION_PREFERENCES_SAVED'
   | 'PERSONALIZATION_PREFERENCES_UPDATED';
@@ -113,6 +114,7 @@ export const PRODUCT_EVENT_NAMES: ProductEventName[] = [
   'DAY_BUILDER_INVITE_SENT',
   'DAY_BUILDER_ANOTHER_IDEA',
   'DAY_BUILDER_SUGGESTION_DISMISSED',
+  'DAY_BUILDER_SLOT_SELECTED',
   'PERSONALIZATION_PROMPT_VIEWED',
   'PERSONALIZATION_PREFERENCES_SAVED',
   'PERSONALIZATION_PREFERENCES_UPDATED',
@@ -220,6 +222,12 @@ export const CLIENT_TRACKED_EVENTS: ReadonlySet<ProductEventName> = new Set<Prod
   'DAY_BUILDER_INVITE_SENT',
   'DAY_BUILDER_ANOTHER_IDEA',
   'DAY_BUILDER_SUGGESTION_DISMISSED',
+  // Home Compactness + Flexible Day Story V1 (brief section 49) -- a UI
+  // intent signal (which already-resolved time chip the user tapped),
+  // same convention as the other DAY_BUILDER_* events above. Never carries
+  // a person's name or a raw timing reason (brief: "do not log exact
+  // person name/raw timing reasons").
+  'DAY_BUILDER_SLOT_SELECTED',
   // Personalization Foundation V1 (brief section 9) -- all three are UI
   // intent/impression signals from the "What matters most lately?" prompt
   // (PersonalizationPromptCard.tsx) and the You -> Day Builder priorities
@@ -563,6 +571,17 @@ const EVENT_METADATA_SCHEMAS: Record<ProductEventName, Record<string, FieldSchem
     intentionCategory: myDayIntentionCategoryField,
     hasPerson: { type: 'boolean' },
     dayPhase: myDayDayPhaseField,
+  },
+  // Home Compactness + Flexible Day Story V1 (brief section 49) --
+  // candidateRank is the tapped chip's own index into the already-resolved
+  // candidate list (0 = the engine's own top-ranked slot), never a score or
+  // a resolved time. hasPerson mirrors DAY_BUILDER_SUGGESTION_DISMISSED's
+  // own boolean-only convention above -- never the actual person id/name.
+  DAY_BUILDER_SLOT_SELECTED: {
+    activityId: activityIdField,
+    candidateRank: { type: 'number', min: 0, max: 2 },
+    dayPhase: myDayDayPhaseField,
+    hasPerson: { type: 'boolean' },
   },
   // Personalization Foundation V1 (brief section 9) -- counts only, never
   // the actual selected priority ids/labels, never a SavedPerson id/name,

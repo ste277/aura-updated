@@ -365,6 +365,11 @@ export function HomeDashboard({
   dayBuilderPrioritiesPromptDismissed,
   onDayBuilderPrefsChange,
 }: HomeDashboardProps) {
+  // Home Compactness + Flexible Day Story V1 (brief section 13) -- Popular
+  // chips render only for a fresh/unused state (nothing typed/tapped yet
+  // this session), on focus of the Ask Aura input, or behind this small
+  // disclosure -- never unconditionally on every load.
+  const [askAuraIdeasOpen, setAskAuraIdeasOpen] = useState(false);
   const [reflectionSaved, setReflectionSaved] = useState(Boolean(todayReflection));
   const [isEditingReflection, setIsEditingReflection] = useState(false);
   const [isSavingReflection, setIsSavingReflection] = useState(false);
@@ -575,19 +580,34 @@ export function HomeDashboard({
       <SurfaceCard>
         <div style={inputShellStyle}>
           <span style={{ color: '#93c5fd', fontSize: 23 }}>✦</span>
-          <button type="button" onClick={() => onPlanClick?.()} style={promptButtonStyle}>
-            What are you thinking about?
+          <button
+            type="button"
+            onClick={() => onPlanClick?.()}
+            onFocus={() => setAskAuraIdeasOpen(true)}
+            style={promptButtonStyle}
+          >
+            Ask Aura anything...
           </button>
           <button type="button" onClick={() => onPlanClick?.()} style={voiceButtonStyle} aria-label="Find a time">
             →
           </button>
         </div>
-        <div style={{ marginTop: spacing.lg, color: colors.textFaint, fontSize: 13 }}>Popular</div>
-        <div style={{ display: 'flex', flexWrap: 'wrap', gap: spacing.sm, marginTop: spacing.md }}>
-          {PROMPT_CHIPS.map((chip) => (
-            <ActivityChip key={chip} label={chip} onClick={() => onPlanClick?.(chip)} />
-          ))}
-        </div>
+        {/* Home Compactness + Flexible Day Story V1 (brief section 13) --
+         * Popular chips are no longer unconditionally rendered every visit;
+         * a small "Ideas" disclosure keeps them one tap away without
+         * costing vertical space on every load. Focusing the input above
+         * also reveals them directly (no extra tap needed there). */}
+        {askAuraIdeasOpen ? (
+          <div style={{ display: 'flex', flexWrap: 'wrap', gap: spacing.sm, marginTop: spacing.md }}>
+            {PROMPT_CHIPS.map((chip) => (
+              <ActivityChip key={chip} label={chip} onClick={() => onPlanClick?.(chip)} />
+            ))}
+          </div>
+        ) : (
+          <button type="button" onClick={() => setAskAuraIdeasOpen(true)} style={ideasDisclosureStyle}>
+            Ideas
+          </button>
+        )}
       </SurfaceCard>
 
       {/* Home cleanup (Daily Reflection & Tomorrow Preview V1 follow-up) --
@@ -629,7 +649,7 @@ export function HomeDashboard({
         </section>
       )}
 
-      <YourDayTimeline agenda={myDayAgenda ?? null} onOpenItem={onOpenAgendaItem} onAddSomething={() => onPlanClick?.()} />
+      <YourDayTimeline agenda={myDayAgenda ?? null} onOpenItem={onOpenAgendaItem} onAddSomething={() => onPlanClick?.()} onViewAll={onNextShiftClick} />
 
       <div style={pairGridStyle}>
         {/* Home Recommendation Hierarchy V1 -- hidden entirely rather than
@@ -739,13 +759,17 @@ export function HomeDashboard({
           </div>
           <h2 style={{ margin: '13px 0 0', color: colors.textPrimary, fontSize: 18 }}>How did today feel so far?</h2>
           {reflectionSaved && !isEditingReflection ? (
+            // Home Compactness + Flexible Day Story V1 (brief section 18) --
+            // stays collapsed to one compact line after answering; "Change"
+            // is the only way back to the full Low/Balanced/Strong controls.
             <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: spacing.md, marginTop: spacing.lg }}>
-              <div style={{ color: colors.positive, fontSize: 13, lineHeight: 1.4 }}>
-                Saved{selectedReflection ? `: ${formatReflectionLabel(selectedReflection)}` : ''}. Your insights get stronger with every check-in.
+              <div style={{ display: 'flex', alignItems: 'center', gap: 8, color: colors.textSecondary, fontSize: 13.5, fontWeight: 750 }}>
+                <span aria-hidden="true" style={{ fontSize: 11 }}>{selectedReflection === 'PEAK_FLOW' ? '🟢' : selectedReflection === 'LOW' ? '🔵' : '🟡'}</span>
+                Today feels {selectedReflection ? formatReflectionLabel(selectedReflection) : 'logged'}
               </div>
-              <SecondaryButton onClick={() => setIsEditingReflection(true)} style={{ minHeight: 32, padding: '0 12px' }}>
-                Change
-              </SecondaryButton>
+              <TextButton onClick={() => setIsEditingReflection(true)} color={colors.textMuted}>
+                Change →
+              </TextButton>
             </div>
           ) : (
             <>
@@ -1037,7 +1061,12 @@ function GoodRightNowCard({
     <div style={goodRightNowCardStyle}>
       <span style={{ fontSize: 20 }}>{card.icon ?? '✨'}</span>
       <span style={{ marginTop: 8, color: '#f8fafc', fontSize: 12, fontWeight: 800, lineHeight: 1.3 }}>{card.title}</span>
-      <span style={{ marginTop: 4, color: '#94a3b8', fontSize: 10.5, lineHeight: 1.35, display: '-webkit-box', WebkitLineClamp: 2, WebkitBoxOrient: 'vertical', overflow: 'hidden' }}>{card.description}</span>
+      {/* Home Compactness + Flexible Day Story V1 (brief section 11) --
+       * a short tag line, not a repeated paragraph explaining the current
+       * window again (that's the "Right Now" hero's own job, just above).
+       * Clamped to 1 line -- card.description is already short catalog
+       * copy, so this rarely truncates in practice. */}
+      <span style={{ marginTop: 4, color: '#94a3b8', fontSize: 10.5, lineHeight: 1.35, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', width: '100%' }}>{card.description}</span>
       <div style={{ marginTop: 'auto', paddingTop: 8, width: '100%' }}>
         {action === 'PLAN' ? (
           <button type="button" onClick={() => onPlanClick?.(planTitle)} style={goodRightNowActionButtonStyle} aria-label={`Plan ${planTitle}`}>
@@ -1050,22 +1079,21 @@ function GoodRightNowCard({
             onCancel={() => setShowDurationPicker(false)}
           />
         ) : (
-          <>
-            <button
-              type="button"
-              onClick={handlePrimaryClick}
-              disabled={status === 'loading'}
-              style={{ ...goodRightNowActionButtonStyle, opacity: status === 'loading' ? 0.6 : 1, cursor: status === 'loading' ? 'default' : 'pointer' }}
-              aria-label={`${primaryActionLabel(durationMode)} ${planTitle}`}
-            >
-              {status === 'loading' ? 'Logging…' : primaryActionLabel(durationMode)}
-            </button>
-            {action === 'BOTH' && (
-              <button type="button" onClick={() => onPlanClick?.(planTitle)} style={goodRightNowSecondaryLinkStyle} aria-label={`Plan ${planTitle} for later`}>
-                Plan for later →
-              </button>
-            )}
-          </>
+          // Home Compactness + Flexible Day Story V1 (brief section 12) --
+          // "Plan for later" removed from this compact card: Good Right Now
+          // = immediate action, Day Builder = add meaningful things to
+          // today, Plan = explicit search/planning. A BOTH activity's
+          // planning path remains fully available from Plan/Day Builder,
+          // just not duplicated as a second action on every card here.
+          <button
+            type="button"
+            onClick={handlePrimaryClick}
+            disabled={status === 'loading'}
+            style={{ ...goodRightNowActionButtonStyle, opacity: status === 'loading' ? 0.6 : 1, cursor: status === 'loading' ? 'default' : 'pointer' }}
+            aria-label={`${primaryActionLabel(durationMode)} ${planTitle}`}
+          >
+            {status === 'loading' ? 'Logging…' : primaryActionLabel(durationMode)}
+          </button>
         )}
         {status === 'error' && <div style={{ color: '#fb7185', fontSize: 10, marginTop: 5 }}>Couldn&apos;t log. Try again.</div>}
       </div>
@@ -1139,6 +1167,17 @@ const promptButtonStyle: React.CSSProperties = {
   textAlign: 'left',
   cursor: 'pointer',
   padding: 0,
+};
+
+const ideasDisclosureStyle: React.CSSProperties = {
+  marginTop: spacing.md,
+  border: 'none',
+  background: 'transparent',
+  color: colors.textFaint,
+  fontSize: 12,
+  fontWeight: 750,
+  padding: 0,
+  cursor: 'pointer',
 };
 
 const voiceButtonStyle: React.CSSProperties = {
@@ -1221,7 +1260,10 @@ const goodRightNowCardStyle: React.CSSProperties = {
   flexDirection: 'column',
   alignItems: 'flex-start',
   textAlign: 'left',
-  minHeight: 132,
+  // Home Compactness + Flexible Day Story V1 (brief section 11/51) --
+  // shorter now that the description clamps to 1 line and "Plan for
+  // later" no longer adds a second row under BOTH-type activities.
+  minHeight: 108,
   border: `1px solid ${colors.borderSubtle}`,
   borderRadius: theme.radius.md,
   background: 'rgba(2, 6, 23, 0.4)',

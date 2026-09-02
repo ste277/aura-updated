@@ -1,7 +1,7 @@
 import type { DailyAgenda } from './dailyAgenda';
 import { resolveDailyStoryPhase } from './dailyStory';
 import { User, listSavedPeople, listDayBuilderDismissals } from './db';
-import { resolveTzOffsetMinutes } from './timezone';
+import { resolveTzOffsetMinutes, getMinuteOfDayInTimezone } from './timezone';
 import { buildPersonalMuhurtaContextForUser, natalContextFromBirthDetails } from './natalContext';
 import { DailyAssistantContext } from '../../../packages/recommendation/src/dailyAssistant';
 import { runTimingSearch } from '../../../packages/recommendation/src/timingSearch';
@@ -18,6 +18,7 @@ import {
   PEOPLE_GROUP_RELATIONSHIP_TYPES,
   IntentionalDaySuggestion,
   UserPriorityGroup,
+  AgendaOpening,
 } from './dayBuilder';
 import type { DailyIntentionGroupId } from './dailyIntentions';
 
@@ -51,10 +52,51 @@ const MAX_CANDIDATE_ATTEMPTS = 5;
  * more than a handful of candidates are ever requested, and only for the
  * few intention candidates selectIntentionCandidates() already narrowed to. */
 const SEARCH_LIMIT_PER_CANDIDATE = 5;
+/** Home Compactness + Flexible Day Story V1 (brief section 24/47) -- how
+ * many of the already-ranked, already-openings-filtered candidates each
+ * suggestion keeps for the client to choose between. The UI defaults to
+ * showing 2 with an "Other times" reveal for the 3rd (brief section 24) --
+ * this constant is the DATA cap, not the display default, so the UI can
+ * make that presentation call without a second round trip. */
+const MAX_DISPLAY_CANDIDATES = 3;
+/** Brief section 25 -- "do not show uselessly similar options": a light,
+ * NON-rescoring presentation filter (never adjusts score or discards the
+ * higher-ranked of two candidates from a scoring standpoint -- it simply
+ * skips a later, already-lower-ranked candidate that lands too close in
+ * clock time to one already kept, same spirit as
+ * selectDiversePlanningOptions' own spacing rule in dailyAssistant.ts,
+ * applied here only because SHARED's own ranking (everydayTimingFit.ts)
+ * does not reapply that engine-level spacing after re-scoring by
+ * sharedScore -- see the completion report). */
+const MIN_DISPLAY_CANDIDATE_SPACING_MINUTES = 45;
 
 function durationMinutesFor(activityId: string): number {
   const definition = getActivityDefinition(activityId);
   return definition?.experience.defaultDurationMinutes ?? definition?.experience.suggestedDurations?.[0] ?? 45;
+}
+
+/** Brief section 24/25 -- from an already-ranked candidate list, keep up to
+ * `MAX_DISPLAY_CANDIDATES` that both fit an agenda opening AND aren't
+ * clock-time-redundant with one already kept. Preserves the engine's own
+ * ranking order (candidates[0] stays the default-selected, highest-ranked
+ * slot); never reorders, rescales, or drops the top candidate to make room
+ * for a "more diverse" lower one. */
+function pickDiverseFittingCandidates<T extends { start: string; end: string }>(
+  pool: T[],
+  openings: AgendaOpening[],
+  timezone: string,
+  localDate: string
+): T[] {
+  const kept: T[] = [];
+  for (const candidate of pool) {
+    if (kept.length >= MAX_DISPLAY_CANDIDATES) break;
+    if (!candidateFitsOpenings(candidate, openings, timezone, localDate)) continue;
+    const startMinute = getMinuteOfDayInTimezone(timezone, new Date(candidate.start));
+    const tooClose = kept.some((k) => Math.abs(getMinuteOfDayInTimezone(timezone, new Date(k.start)) - startMinute) < MIN_DISPLAY_CANDIDATE_SPACING_MINUTES);
+    if (tooClose) continue;
+    kept.push(candidate);
+  }
+  return kept;
 }
 
 function formatUTCDateString(date: Date): string {
@@ -164,9 +206,13 @@ export async function buildIntentionalDaySuggestions(input: {
           partnerContext,
         });
         if (outcome.status === 'OK') {
-          const fit = outcome.candidates.find((c) => candidateFitsOpenings(c.generalCandidate, dayProfile.openings, agenda.timezone, agenda.localDate));
-          if (fit) {
-            resolved = { kind: 'SHARED', shared: fit, person: { id: person.id, name: person.name, relationshipType: person.relationshipType } };
+          // candidateFitsOpenings expects {start, end} -- EverydaySharedCandidate
+          // itself carries both directly (mirrors generalCandidate's own
+          // start/end), so the fit check runs against the shared candidate,
+          // not a nested lookup.
+          const fits = pickDiverseFittingCandidates(outcome.candidates, dayProfile.openings, agenda.timezone, agenda.localDate);
+          if (fits.length > 0) {
+            resolved = { kind: 'SHARED', candidates: fits, person: { id: person.id, name: person.name, relationshipType: person.relationshipType } };
           }
         }
       }
@@ -176,8 +222,8 @@ export async function buildIntentionalDaySuggestions(input: {
     // non-people-oriented candidate, whose identity is always no-person).
     if (!resolved && !dismissedKeys.has(dismissalKey(activityId, ''))) {
       const result = runTimingSearch({ mode: 'FIND', activityId, durationMinutes, horizon: 'TODAY', limit: SEARCH_LIMIT_PER_CANDIDATE, context });
-      const fit = result.candidates.find((c) => candidateFitsOpenings(c, dayProfile.openings, agenda.timezone, agenda.localDate));
-      if (fit) resolved = { kind: 'SOLO', solo: fit };
+      const fits = pickDiverseFittingCandidates(result.candidates, dayProfile.openings, agenda.timezone, agenda.localDate);
+      if (fits.length > 0) resolved = { kind: 'SOLO', candidates: fits };
     }
 
     // Brief section 14 -- never invent a time. No fitting candidate today

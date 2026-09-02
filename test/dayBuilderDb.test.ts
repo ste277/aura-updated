@@ -110,11 +110,15 @@ async function main() {
         limit: 5,
         context,
       });
-      const soloCandidate = workSuggestion.candidate.solo;
-      const exactMatch = raw.candidates.find((c) => c.start === soloCandidate.start);
+      const soloCandidates = workSuggestion.candidate.candidates;
+      check('Day Builder now retains more than one candidate when available (or exactly one if that\'s all that fit)', soloCandidates.length >= 1);
+      const allByteIdentical = soloCandidates.every((soloCandidate) => {
+        const exactMatch = raw.candidates.find((c) => c.start === soloCandidate.start);
+        return Boolean(exactMatch) && JSON.stringify(exactMatch) === JSON.stringify(soloCandidate);
+      });
       check(
-        'Day Builder\'s SOLO candidate is byte-identical to one runTimingSearch itself returned (same score/label/reasons)',
-        Boolean(exactMatch) && JSON.stringify(exactMatch) === JSON.stringify(soloCandidate)
+        'Every one of Day Builder\'s SOLO candidates is byte-identical to one runTimingSearch itself returned (same score/label/reasons)',
+        allByteIdentical
       );
     }
 
@@ -157,11 +161,15 @@ async function main() {
         context,
         partnerContext,
       });
-      const sharedCandidate = peopleSuggestion.candidate.shared;
-      const match = rawShared.status === 'OK' ? rawShared.candidates.find((c) => c.start === sharedCandidate.start) : undefined;
+      const sharedCandidates = peopleSuggestion.candidate.candidates;
+      check('Day Builder now retains more than one SHARED candidate when available (or exactly one if that\'s all that fit)', sharedCandidates.length >= 1);
+      const allByteIdentical = sharedCandidates.every((sharedCandidate) => {
+        const match = rawShared.status === 'OK' ? rawShared.candidates.find((c) => c.start === sharedCandidate.start) : undefined;
+        return Boolean(match) && JSON.stringify(match) === JSON.stringify(sharedCandidate);
+      });
       check(
-        'Day Builder\'s SHARED candidate is byte-identical to one findEverydaySharedTiming itself returned',
-        Boolean(match) && JSON.stringify(match) === JSON.stringify(sharedCandidate)
+        'Every one of Day Builder\'s SHARED candidates is byte-identical to one findEverydaySharedTiming itself returned',
+        allByteIdentical
       );
     }
 
@@ -185,7 +193,7 @@ async function main() {
     const workPriorityUser = { ...user, dayBuilderEnabled: true, dayBuilderMutedGroups: [] as string[], dayBuilderPriorities: ['WORK'] };
     const withWorkPriority = await buildIntentionalDaySuggestions({ user: workPriorityUser, agenda: personalizationAgenda, minuteOfDay: MINUTE_OF_DAY, now: personalizationNow });
     check('Selected priorities change candidate ordering -- WORK-prioritized day resolves WORK first', withWorkPriority[0]?.groupId === 'WORK');
-    check('Suggestions still contain real resolved times regardless of priorities', withWorkPriority.every((s) => Boolean((s.candidate.kind === 'SOLO' ? s.candidate.solo : s.candidate.shared.generalCandidate).start)));
+    check('Suggestions still contain real resolved times regardless of priorities', withWorkPriority.every((s) => (s.candidate.kind === 'SOLO' ? s.candidate.candidates : s.candidate.candidates.map((c) => c.generalCandidate)).every((c) => Boolean(c.start))));
 
     // Timing result itself remains canonical-engine identical, even with
     // priorities active -- ordering is the ONLY thing that changed.
@@ -198,11 +206,13 @@ async function main() {
         tzOffsetMinutes: resolveTzOffsetMinutes(user.timezone, personalizationNow),
       };
       const raw = runTimingSearch({ mode: 'FIND', activityId: withWorkPriority[0].activityId, durationMinutes: withWorkPriority[0].durationMinutes, horizon: 'TODAY', limit: 5, context });
-      const soloCandidate = withWorkPriority[0].candidate.solo;
-      const exactMatch = raw.candidates.find((c) => c.start === soloCandidate.start);
+      const allByteIdentical = withWorkPriority[0].candidate.candidates.every((soloCandidate) => {
+        const exactMatch = raw.candidates.find((c) => c.start === soloCandidate.start);
+        return Boolean(exactMatch) && JSON.stringify(exactMatch) === JSON.stringify(soloCandidate);
+      });
       check(
         'Timing result stays byte-identical to the canonical engine\'s own output even with priorities active',
-        Boolean(exactMatch) && JSON.stringify(exactMatch) === JSON.stringify(soloCandidate)
+        allByteIdentical
       );
     }
 
@@ -374,8 +384,11 @@ async function main() {
         tzOffsetMinutes: resolveTzOffsetMinutes(user.timezone, coverageNow),
       };
       const raw = runTimingSearch({ mode: 'FIND', activityId: firstCoverageSuggestion.activityId, durationMinutes: firstCoverageSuggestion.durationMinutes, horizon: 'TODAY', limit: 5, context });
-      const exactMatch = raw.candidates.find((c) => c.start === (firstCoverageSuggestion.candidate as { kind: 'SOLO'; solo: { start: string } }).solo.start);
-      check('Coverage-reordered suggestion\'s timing is still byte-identical to the canonical engine\'s own output', Boolean(exactMatch) && JSON.stringify(exactMatch) === JSON.stringify(firstCoverageSuggestion.candidate.solo));
+      const allByteIdentical = firstCoverageSuggestion.candidate.candidates.every((soloCandidate) => {
+        const exactMatch = raw.candidates.find((c) => c.start === soloCandidate.start);
+        return Boolean(exactMatch) && JSON.stringify(exactMatch) === JSON.stringify(soloCandidate);
+      });
+      check('Coverage-reordered suggestion\'s timing is still byte-identical to the canonical engine\'s own output', allByteIdentical);
     }
 
     // Mute still overrides personalization+coverage combined.
