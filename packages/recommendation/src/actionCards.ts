@@ -128,13 +128,18 @@ const ACTION_CARDS: Record<SolarWindowType, ActionCard[]> = {
       activityId: 'tea-break', // LOG_NOW
     },
   ],
+  // Inauspicious Period Precedence Fix V1: copy revised to "usable/suitable"
+  // framing rather than "good window" -- these activities remain practical
+  // during Gulika, but Gulika itself is not the reason to prefer them (see
+  // capabilitiesForWindow/evaluateSolarWindowReason in this same PR for the
+  // matching scoring-layer correction).
   GULIKA: [
     {
       id: 'gulika-cardio',
       category: 'WORKOUT',
       title: 'Steady cardio or a walk',
-      description: 'Good window for compounding, lower-intensity conditioning.',
-      reasoning: 'Good window for compounding, lower-intensity conditioning.',
+      description: 'Suitable for steady, lower-intensity conditioning.',
+      reasoning: 'Suitable for steady, lower-intensity conditioning.',
       icon: '🚶',
       activityId: 'workout', // BOTH
     },
@@ -142,8 +147,8 @@ const ACTION_CARDS: Record<SolarWindowType, ActionCard[]> = {
       id: 'gulika-skill',
       category: 'FOCUS',
       title: 'Skill-building or learning session',
-      description: 'Traditionally associated with steady, compounding growth.',
-      reasoning: 'Traditionally associated with steady, compounding growth.',
+      description: 'Suitable for steady, low-pressure practice.',
+      reasoning: 'Suitable for steady, low-pressure practice.',
       icon: '📚',
       activityId: 'learning', // BOTH
     },
@@ -151,8 +156,8 @@ const ACTION_CARDS: Record<SolarWindowType, ActionCard[]> = {
       id: 'gulika-social',
       category: 'MICRO_BREAK',
       title: 'Social check-in or coffee break',
-      description: 'Good window to step out and reconnect before the day winds down.',
-      reasoning: 'Good window to step out and reconnect before the day winds down.',
+      description: 'A practical moment to step out and reconnect.',
+      reasoning: 'A practical moment to step out and reconnect.',
       icon: '💬',
       activityId: 'tea-break', // LOG_NOW
     },

@@ -234,12 +234,23 @@ export function evaluatePanchangaYogaKaranaReasons(panchanga: PanchangaSnapshot)
 
 /**
  * Solar-window reason, parameterized on a (possibly undefined) legacy
- * family for the BRAHMA/GULIKA bonus conditions. RAHU_KALAM/YAMA caution and
- * ABHIJIT support are family-independent baselines that always apply.
- * `family` undefined (no legacy-family equivalent exists -- see
- * muhurtaRulePacks.ts's FAMILY_BASE_SOURCE) simply means neither bonus
- * condition can match, which is the correct, honest behavior: no invented
- * bonus for a family with no supporting data.
+ * family for the BRAHMA bonus condition. RAHU_KALAM/YAMA caution and ABHIJIT
+ * support are family-independent baselines that always apply. `family`
+ * undefined (no legacy-family equivalent exists -- see muhurtaRulePacks.ts's
+ * FAMILY_BASE_SOURCE) simply means the BRAHMA bonus condition can't match,
+ * which is the correct, honest behavior: no invented bonus for a family
+ * with no supporting data.
+ *
+ * GULIKA never returns a SUPPORT reason here (Inauspicious Period
+ * Precedence Fix V1 removed the prior ADMIN/LEARNING/SOCIAL +4
+ * GULIKA_SUPPORT bonus): an everyday activity being schedulable during
+ * Gulika must not mean Gulika is a positive reason to prefer it. GULIKA
+ * also deliberately returns no CAUTION reason -- it is not everyday
+ * friction the way RAHU_KALAM/YAMA are (see isFriction() vs.
+ * isInauspiciousCommencementWindow(), packages/panchang/src/windows.ts);
+ * for a significant/commencement-sensitive activity, Gulika's override is
+ * handled entirely by the canonical safety net (scoreCandidate/
+ * scoreContinuousBlock, dailyAssistant.ts), not by a reason returned here.
  */
 export function evaluateSolarWindowReason(windowType: SolarWindowType, family: MuhurtaActivityFamily | undefined): MuhurtaReason | undefined {
   if (windowType === 'RAHU_KALAM' || windowType === 'YAMA') {
@@ -251,9 +262,6 @@ export function evaluateSolarWindowReason(windowType: SolarWindowType, family: M
   }
   if (windowType === 'BRAHMA' && (family === 'MEDITATION' || family === 'LEARNING' || family === 'DEEP_WORK')) {
     return { code: 'BRAHMA_SUPPORT', factor: 'SOLAR_WINDOW', polarity: 'SUPPORT', impact: 7, value: windowType };
-  }
-  if (windowType === 'GULIKA' && (family === 'ADMIN' || family === 'LEARNING' || family === 'SOCIAL')) {
-    return { code: 'GULIKA_SUPPORT', factor: 'SOLAR_WINDOW', polarity: 'SUPPORT', impact: 4, value: windowType };
   }
   return undefined;
 }

@@ -120,21 +120,32 @@ if (completeProfile.status === 'OK') {
 // ============================================================
 
 if (completeProfile.status === 'OK') {
-  const generalOrderTop5 = [...generalNoPersonal.dates].sort((a, b) => b.score - a.score).slice(0, 5).map((d) => d.date);
-  const personalOrderTop5 = [...completeProfile.dates].sort((a, b) => b.combinedScore - a.combinedScore).slice(0, 5).map((d) => d.date);
-  check('PERSONAL re-ranks relative to GENERAL for the same activity/range/natal nakshatra (genuine re-ranking, not just a label change)', JSON.stringify(generalOrderTop5) !== JSON.stringify(personalOrderTop5));
+  // Inauspicious Period Precedence Fix V1 shifted several September 2026
+  // dates' GENERAL scores (any date whose best window previously relied on
+  // an uncaught Rahu/Gulika overlap now scores lower, honestly). The top-5
+  // slice no longer shows a reordering on its own for this fixture, but a
+  // genuine one still exists a little further down (re-verified: top-6
+  // already differs) -- widened to top-8 for headroom rather than the
+  // minimum, so this doesn't go stale again on the next unrelated,
+  // marginal scoring nudge.
+  const generalOrderTop8 = [...generalNoPersonal.dates].sort((a, b) => b.score - a.score).slice(0, 8).map((d) => d.date);
+  const personalOrderTop8 = [...completeProfile.dates].sort((a, b) => b.combinedScore - a.combinedScore).slice(0, 8).map((d) => d.date);
+  check('PERSONAL re-ranks relative to GENERAL for the same activity/range/natal nakshatra (genuine re-ranking, not just a label change)', JSON.stringify(generalOrderTop8) !== JSON.stringify(personalOrderTop8));
 
   // Locked-in fixture: for start-journey, Sep 2026, Chennai, natal nakshatra
   // Ashwini (index 1), 2026-09-07 (Tara=Vadha/CAUTION) ranks BELOW
-  // 2026-09-17 (Tara=Mitra/SUPPORT) in PERSONAL despite 09-07 having a
+  // 2026-09-23 (Tara=Kshema/SUPPORT) in PERSONAL despite 09-07 having a
   // higher GENERAL score -- observed directly via probing, locked in here
-  // as a regression fixture.
+  // as a regression fixture. (Re-picked from the original 09-07/09-17 pair,
+  // which no longer flips under Inauspicious Period Precedence Fix V1's
+  // corrected scores -- same qualitative CAUTION-vs-SUPPORT Tara story,
+  // just a different pair of real dates.)
   const sep07 = completeProfile.dates.find((d) => d.date === '2026-09-07');
-  const sep17 = completeProfile.dates.find((d) => d.date === '2026-09-17');
+  const sep23 = completeProfile.dates.find((d) => d.date === '2026-09-23');
   const sep07General = generalNoPersonal.dates.find((d) => d.date === '2026-09-07');
-  const sep17General = generalNoPersonal.dates.find((d) => d.date === '2026-09-17');
-  check('Regression fixture: 2026-09-07 generally outscores 2026-09-17', Boolean(sep07General && sep17General && sep07General.score > sep17General.score));
-  check('Regression fixture: PERSONAL flips this -- 2026-09-17 (Tara SUPPORT) outranks 2026-09-07 (Tara CAUTION) once personalized', Boolean(sep07 && sep17 && sep17.combinedScore > sep07.combinedScore));
+  const sep23General = generalNoPersonal.dates.find((d) => d.date === '2026-09-23');
+  check('Regression fixture: 2026-09-07 generally outscores 2026-09-23', Boolean(sep07General && sep23General && sep07General.score > sep23General.score));
+  check('Regression fixture: PERSONAL flips this -- 2026-09-23 (Tara SUPPORT) outranks 2026-09-07 (Tara CAUTION) once personalized', Boolean(sep07 && sep23 && sep23.combinedScore > sep07.combinedScore));
 }
 
 console.log(allPassed ? '\nALL PERSONAL MUHURTHAM CHECKS PASSED' : '\nSOME PERSONAL MUHURTHAM CHECKS FAILED');
