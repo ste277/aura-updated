@@ -65,10 +65,17 @@ check('Rahu Kalam explains the blocker (legacy wording preserved)', rahuEval.blo
 // --- 5. Aura Fit scores remain stable for representative activities ---
 // Pinned against the pre-refactor scoring engine (verified identical before
 // and after this PR via a throwaway probe script comparing every window).
+// GULIKA values re-pinned under Inauspicious Period Precedence Fix V1:
+// that PR removed evaluateSolarWindowReason's GULIKA_SUPPORT bonus and
+// capabilitiesForWindow's dedicated (stronger-than-Neutral) Gulika branch,
+// so Gulika's score for an activity is now honestly no better than that
+// same activity's own Neutral score would be from these two factors --
+// start-journey 61->59, deep-work 62->61 (tea-break's GULIKA happened to
+// round to the same 72 either way). All other windows are untouched.
 const auraFitDate = new Date(Date.UTC(2026, 6, 28, 6, 45, 0));
 const AURA_FIT_BASELINE: Record<string, Partial<Record<'ABHIJIT' | 'BRAHMA' | 'GULIKA' | 'NEUTRAL' | 'RAHU_KALAM' | 'YAMA', number>>> = {
-  'start-journey': { ABHIJIT: 76, BRAHMA: 60, GULIKA: 61, NEUTRAL: 49, RAHU_KALAM: 26, YAMA: 26 },
-  'deep-work': { ABHIJIT: 75, BRAHMA: 74, GULIKA: 62, NEUTRAL: 61, RAHU_KALAM: 30, YAMA: 30 },
+  'start-journey': { ABHIJIT: 76, BRAHMA: 60, GULIKA: 59, NEUTRAL: 49, RAHU_KALAM: 26, YAMA: 26 },
+  'deep-work': { ABHIJIT: 75, BRAHMA: 74, GULIKA: 61, NEUTRAL: 61, RAHU_KALAM: 30, YAMA: 30 },
   'tea-break': { ABHIJIT: 76, BRAHMA: 70, GULIKA: 72, NEUTRAL: 62, RAHU_KALAM: 51, YAMA: 51 },
 };
 // 'I need to start my road trip' now resolves to Product Structure V2's

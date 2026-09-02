@@ -172,7 +172,14 @@ const EXTENDED_ACTIVITY_CATALOG: ActivityProfile[] = [
   // documented rule-pack coverage never diverge -- see muhurtaRulePacks.ts.
   { id: 'business-start', title: 'Start a Business', description: 'Begin a new business venture in a clear, supportive window.', category: 'NEW_BEGINNING', nature: 'INITIATE', recommendedWindowTypes: ['ABHIJIT', 'BRAHMA'], acceptableWindowTypes: ['GULIKA', 'NEUTRAL'], avoidWindowTypes: ['RAHU_KALAM', 'YAMA'], significance: 'HIGH', requiresFreshStart: true, aliases: ['start a business', 'business start', 'launch a business', 'open a business', 'start my business', 'new business'], icon: '🏢' },
   { id: 'property-purchase', title: 'Property Purchase', description: 'Finalize a property purchase or closing in a clear, supportive window.', category: 'FINANCE', nature: 'INITIATE', recommendedWindowTypes: ['ABHIJIT'], acceptableWindowTypes: ['GULIKA', 'NEUTRAL'], avoidWindowTypes: ['RAHU_KALAM', 'YAMA'], significance: 'HIGH', requiresFreshStart: true, aliases: ['property purchase', 'buy a property', 'buy a house', 'buy an apartment', 'real estate purchase', 'close on a house', 'sign property papers'], icon: '🏠' },
-  { id: 'engagement', title: 'Engagement Ceremony', description: 'Choose a supportive window for an engagement or ring ceremony.', category: 'RELATIONSHIP', nature: 'CONNECT', recommendedWindowTypes: ['ABHIJIT', 'GULIKA'], acceptableWindowTypes: ['NEUTRAL'], avoidWindowTypes: ['RAHU_KALAM', 'YAMA'], significance: 'HIGH', requiresFreshStart: true, aliases: ['engagement', 'get engaged', 'engagement ceremony', 'ring ceremony', 'proposal ceremony'], icon: '💍' },
+  // Inauspicious Period Precedence Fix V1: GULIKA removed from
+  // recommendedWindowTypes -- a timing-sensitive activity must never list an
+  // inauspicious-commencement window (see isInauspiciousCommencementWindow,
+  // packages/panchang/src/windows.ts) as its top-tier recommendation. The
+  // canonical engine now also hard-excludes Gulika for this activity
+  // regardless of catalog configuration (scoreCandidate's own safety net),
+  // so this is defense-in-depth, not the only thing preventing it.
+  { id: 'engagement', title: 'Engagement Ceremony', description: 'Choose a supportive window for an engagement or ring ceremony.', category: 'RELATIONSHIP', nature: 'CONNECT', recommendedWindowTypes: ['ABHIJIT'], acceptableWindowTypes: ['NEUTRAL'], avoidWindowTypes: ['RAHU_KALAM', 'YAMA'], significance: 'HIGH', requiresFreshStart: true, aliases: ['engagement', 'get engaged', 'engagement ceremony', 'ring ceremony', 'proposal ceremony'], icon: '💍' },
   { id: 'griha-pravesh', title: 'Griha Pravesh', description: 'Choose a supportive window for a housewarming / home-entry ceremony.', category: 'NEW_BEGINNING', nature: 'INITIATE', recommendedWindowTypes: ['ABHIJIT'], acceptableWindowTypes: ['GULIKA', 'NEUTRAL'], avoidWindowTypes: ['RAHU_KALAM', 'YAMA'], significance: 'HIGH', requiresFreshStart: true, aliases: ['griha pravesh', 'housewarming', 'house warming ceremony', 'move into new home', 'home entry ceremony'], icon: '🏡' },
 
   // -- Product Structure V2: everyday moments (brief section 5) -- LIGHT/

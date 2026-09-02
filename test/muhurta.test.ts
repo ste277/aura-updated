@@ -105,8 +105,16 @@ const newYorkBeforeDst = {
   tzOffsetMinutes: -300,
 };
 const newYorkDstPlan = findOptimalTaskTimes('Deep Work', newYorkBeforeDst, 30, 'TOMORROW', undefined, undefined, 'ANYTIME');
-const newYorkAfternoon = (newYorkDstPlan.planningOptions ?? []).find((option) => option.startTime === '12:45 PM');
-check('Planner recomputes timezone offset for future DST dates', newYorkAfternoon?.startsAtLocal === '2026-03-08T16:45:00.000Z');
+// Was asserted against the 12:45 PM option, which straddled a genuine
+// Abhijit/Yama overlap on this date (764-810 / 787-874 in local minutes) --
+// Inauspicious Period Precedence Fix V1 corrects that slot's score to
+// honestly reflect Yama rather than inheriting Abhijit's higher one, which
+// displaces it from the top-3 planningOptions. Reasserting against the
+// 5:45 AM option instead (inside Brahma Muhurtham, no overlap involved) --
+// this still exercises the exact same DST-offset computation this check
+// exists for, on the same date, just a slot unaffected by that fix.
+const newYorkMorning = (newYorkDstPlan.planningOptions ?? []).find((option) => option.startTime === '5:45 AM');
+check('Planner recomputes timezone offset for future DST dates', newYorkMorning?.startsAtLocal === '2026-03-08T09:45:00.000Z');
 
 const newYorkLateBeforeDst = {
   ...newYorkBeforeDst,

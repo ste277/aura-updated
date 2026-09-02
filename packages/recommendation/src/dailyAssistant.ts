@@ -2,6 +2,8 @@ import { computeSolarEphemeris } from '../../astronomy/src/ephemeris';
 import {
   computePanchangWindows,
   getActiveWindow,
+  intervalsOverlap,
+  isInauspiciousCommencementWindow,
   SolarWindowType,
   WeekdayIndex,
   WindowSpan,
@@ -523,6 +525,18 @@ function parseDateOnly(value: string): number | null {
   return date.getUTCFullYear() === Number(match[1]) && date.getUTCMonth() === Number(match[2]) - 1 && date.getUTCDate() === Number(match[3]) ? timestamp : null;
 }
 
+/** Everyday Timing Flexibility V1 introduced isTimingSensitiveActivity() for
+ * catalog activities (muhurtaClassification-based); non-catalog free-text
+ * tasks have no classification, so this preserves the pre-existing legacy
+ * `significance`/`requiresFreshStart` signal for those. Shared by both the
+ * commencement-safety check and (unchanged) scoreCandidate()'s own catalog
+ * branch, so the two can't disagree on what counts as commencement-sensitive. */
+function isCommencementSensitiveProfile(profile: TaskProfile): boolean {
+  return profile.muhurtaClassification
+    ? isTimingSensitiveActivity(profile.muhurtaClassification)
+    : profile.significance === 'HIGH' || Boolean(profile.requiresFreshStart);
+}
+
 export function scoreContinuousBlock(
   candidates: SlotCandidate[],
   profile: TaskProfile,
@@ -530,29 +544,56 @@ export function scoreContinuousBlock(
   end: number,
   dateForMinute?: (minute: number) => Date
 ): number {
+  // Inauspicious Period Precedence Fix V1: explicit interval-overlap safety
+  // check against the candidates' OWN [startMinute,endMinute) spans directly
+  // -- NOT the array-order/first-match segment resolution below. That
+  // resolution can (and, on real dates, did -- see the completion report's
+  // reproduction case: Financial Decision, 2026-09-02, 12:15-12:30 PM,
+  // entirely inside Rahu Kalam but scored GOOD because it never crossed
+  // Abhijit's own end boundary) silently mis-attribute an overlapping
+  // Rahu/Yama/Gulika minute to whichever window is checked first, purely
+  // because of its position in the underlying WindowSpan array. For a
+  // commencement-sensitive profile, ANY overlap with an inauspicious-
+  // commencement window hard-excludes the whole requested block, regardless
+  // of what a positive Abhijit/Brahma window sharing that same span would
+  // otherwise suggest -- independent of window array order (see the
+  // permutation regression test).
+  if (
+    isCommencementSensitiveProfile(profile) &&
+    candidates.some((candidate) => isInauspiciousCommencementWindow(candidate.type) && intervalsOverlap(start, end, candidate.startMinute, candidate.endMinute))
+  ) {
+    return -1;
+  }
+
   const boundaries = [...new Set([start, end, ...candidates.flatMap((candidate) => [candidate.startMinute, candidate.endMinute]).filter((minute) => minute > start && minute < end)])].sort((a, b) => a - b);
   let weighted = 0;
   for (let index = 0; index < boundaries.length - 1; index += 1) {
     const segmentStart = boundaries[index];
     const segmentEnd = boundaries[index + 1];
-    const candidate = candidates.find((item) => containsMinute(item, segmentStart));
+    const candidate = resolveOverlappingCandidate(candidates, segmentStart);
     const segmentScore = candidate ? scoreCandidate(candidate, profile, dateForMinute?.(segmentStart)) : 55;
-    // Everyday Timing Flexibility V1: this block-level friction guard predates
-    // muhurtaClassification and used the legacy `significance` field (which
-    // conflates "important task" with "commencement-sensitive activity" --
-    // e.g. Deep Work/Workout are legacy significance:'HIGH' but everyday-depth).
-    // When a catalog activity's classification is available, defer to the
-    // same isTimingSensitiveActivity() signal scoreCandidate() already uses,
-    // so the two layers can't disagree; fall back to the legacy check only
-    // for non-catalog free-text tasks, which have no classification at all.
-    const isFrictionSegment = isFriction(candidate?.type ?? 'NEUTRAL');
-    const blocksOnFriction = profile.muhurtaClassification
-      ? isTimingSensitiveActivity(profile.muhurtaClassification)
-      : profile.significance === 'HIGH' || profile.requiresFreshStart;
-    if (isFrictionSegment && blocksOnFriction) return -1;
     weighted += segmentScore * (segmentEnd - segmentStart);
   }
   return weighted / (end - start);
+}
+
+/** Inauspicious Period Precedence Fix V1: when multiple windows genuinely
+ * overlap the same minute (e.g. Abhijit's tail end inside Rahu Kalam's
+ * span), prefer whichever is inauspicious-commencement for RANKING
+ * purposes too -- not just array position. This keeps an everyday
+ * activity's segment honestly reflecting the friction window it's actually
+ * (also) inside, rather than silently inheriting a co-occurring Abhijit/
+ * Brahma window's higher score merely because that window is checked
+ * first in the underlying WindowSpan array. Everyday activities still
+ * remain usable (never blocked) here -- this only affects which window's
+ * score they're ranked against for that overlapping stretch. Commencement
+ * safety itself is handled separately, above, independent of this
+ * resolution (a timing-sensitive profile never reaches this loop at all
+ * when an overlap exists, via the early return above). */
+export function resolveOverlappingCandidate(candidates: SlotCandidate[], minute: number): SlotCandidate | undefined {
+  const matches = candidates.filter((item) => containsMinute(item, minute));
+  if (matches.length <= 1) return matches[0];
+  return matches.find((item) => isInauspiciousCommencementWindow(item.type)) ?? matches[0];
 }
 
 function buildPlanSummary(candidates: SlotCandidate[], profile: TaskProfile, start: number, end: number, startDate?: Date): string {
@@ -751,6 +792,19 @@ export function isTimingSensitiveActivity(classification: MuhurtaClassification 
 
 export function scoreCandidate(candidate: SlotCandidate, profile: TaskProfile, date?: Date): number {
   if (profile.activity && date) {
+    // Inauspicious Period Precedence Fix V1: canonical safety net, checked
+    // BEFORE consulting the catalog's own avoidWindowTypes -- a
+    // commencement-sensitive activity is never scored positively during
+    // Rahu Kalam/Yamaganda/Gulika regardless of how that activity's catalog
+    // entry happens to classify the window (avoid/acceptable/recommended).
+    // This is deliberate defense-in-depth: Engagement Ceremony's own catalog
+    // entry listed GULIKA under recommendedWindowTypes before this fix (now
+    // corrected in personalizedTasks.ts), but the canonical engine must
+    // protect a significant commencement even if a FUTURE catalog entry is
+    // misconfigured the same way -- catalog data alone was never meant to be
+    // the only thing standing between a significant commencement and Rahu/
+    // Yama/Gulika.
+    if (isTimingSensitiveActivity(profile.muhurtaClassification) && isInauspiciousCommencementWindow(candidate.type)) return -100;
     const fit = evaluateActivityFit({
       activity: profile.activity,
       date,

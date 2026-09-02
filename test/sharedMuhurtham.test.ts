@@ -128,10 +128,43 @@ const general = findMuhurthams({
   context: baseContext,
 });
 
-if (okResult.status === 'OK') {
-  check('Every SHARED date exists as a GENERAL date too (SHARED never surfaces a date GENERAL would have excluded)', okResult.dates.every((d) => general.dates.some((g) => g.date === d.date)));
-  check('Every SHARED date\'s generalScore matches GENERAL\'s own score for that date exactly (same candidate window, not re-derived)', okResult.dates.every((d) => {
-    const g = general.dates.find((x) => x.date === d.date);
+// The "SHARED dates <= GENERAL dates" and "generalScore matches exactly"
+// checks below use a NARROWER date range than the fixture above, on
+// purpose: MAX_LIMIT (muhurthamFinder.ts) caps displayed dates at 20, and
+// the 30-day range above has more than 20 dates clearing the inclusion
+// floor -- so GENERAL (ranked by its own `score`) and SHARED (ranked by
+// the DIFFERENT `sharedScore` metric) can legitimately keep a slightly
+// different top-20 SET near that cutoff boundary, even though the
+// underlying per-date `findBestWindowsForDate` call both call is provably
+// identical (verified directly: same score, same window, for every date,
+// regardless of which of the two top-level functions calls it). That's an
+// honest consequence of ranking by two different metrics against a shared
+// display cap, not a "SHARED invented a date GENERAL would exclude" bug --
+// this fixture's own date range (2 weeks, well under 20 qualifying dates)
+// avoids that cutoff-boundary ambiguity entirely, so the comparison below
+// tests the real claim: identical per-date candidate generation.
+const generalNarrow = findMuhurthams({
+  activityId: 'start-journey',
+  dateRange: { start: '2026-09-01', end: '2026-09-14' },
+  timePreference: 'ANY',
+  durationMinutes: 60,
+  limit: 30,
+  context: baseContext,
+});
+const sharedNarrow = findSharedMuhurthams({
+  activityId: 'start-journey',
+  dateRange: { start: '2026-09-01', end: '2026-09-14' },
+  timePreference: 'ANY',
+  durationMinutes: 60,
+  limit: 30,
+  context: { ...baseContext, personalContext: userContext },
+  partner,
+});
+
+if (sharedNarrow.status === 'OK') {
+  check('Every SHARED date exists as a GENERAL date too (SHARED never surfaces a date GENERAL would have excluded)', sharedNarrow.dates.every((d) => generalNarrow.dates.some((g) => g.date === d.date)));
+  check('Every SHARED date\'s generalScore matches GENERAL\'s own score for that date exactly (same candidate window, not re-derived)', sharedNarrow.dates.every((d) => {
+    const g = generalNarrow.dates.find((x) => x.date === d.date);
     return g !== undefined && g.score === d.generalScore;
   }));
 }
@@ -156,26 +189,35 @@ if (okResult.status === 'OK') {
 // ============================================================
 // REGRESSION FIXTURE: real, observed SHARED re-ranking relative to GENERAL,
 // for start-journey / Sep 2026 / Chennai / user natal Bharani (index 2) /
-// partner natal Rohini (index 4). 2026-09-22's general score (8.3) beats
-// 2026-09-23's (8.1), but the user's Tara Bala is CAUTION (Vipat) on 09-22
-// and SUPPORT (Kshema) on 09-23, while the partner's Tara Bala is SUPPORT on
-// both dates -- so SHARED flips the ranking: 09-23 (sharedScore 8.2,
-// STRONG_SHARED_FIT, both SUPPORT) outranks 09-22 (sharedScore 8.1,
-// MIXED_SHARED_FIT, user CAUTION). Observed directly via probing, locked in
-// here as a regression fixture -- not manufactured to fit the formula.
+// partner natal Rohini (index 4). 2026-09-17's general score (7.3) beats
+// 2026-09-07's (7.0), but the user's AND partner's Tara Bala are both
+// CAUTION on 09-17 and both SUPPORT on 09-07 -- so SHARED flips the
+// ranking: 09-07 (sharedScore 7.1, GOOD_SHARED_FIT, both SUPPORT) outranks
+// 09-17 (sharedScore 7.0, MIXED_SHARED_FIT, both CAUTION). Observed
+// directly via probing, locked in here as a regression fixture -- not
+// manufactured to fit the formula.
+//
+// Re-picked from the original 2026-09-22/09-23 pair (which no longer
+// flips, and no date in this 30-day/activity/pair combination currently
+// reaches STRONG_SHARED_FIT at all) after Inauspicious Period Precedence
+// Fix V1 corrected several dates' general scores -- same qualitative
+// story (a lower-scoring-but-Tara-supportive date overtakes a higher-
+// scoring-but-Tara-cautious one), same activity/user/partner, just a
+// different pair of real dates and a MIXED-vs-GOOD (rather than
+// MIXED-vs-STRONG) qualitative jump.
 // ============================================================
 
 if (okResult.status === 'OK') {
-  const sep22General = general.dates.find((d) => d.date === '2026-09-22');
-  const sep23General = general.dates.find((d) => d.date === '2026-09-23');
-  check('Regression fixture: 2026-09-22 generally outscores 2026-09-23', Boolean(sep22General && sep23General && sep22General.score > sep23General.score));
+  const sep17General = general.dates.find((d) => d.date === '2026-09-17');
+  const sep07General = general.dates.find((d) => d.date === '2026-09-07');
+  check('Regression fixture: 2026-09-17 generally outscores 2026-09-07', Boolean(sep17General && sep07General && sep17General.score > sep07General.score));
 
-  const sep22 = okResult.dates.find((d) => d.date === '2026-09-22');
-  const sep23 = okResult.dates.find((d) => d.date === '2026-09-23');
-  check('Regression fixture: 2026-09-22 has a CAUTION Tara for the user', sep22?.user.factors.taraBala?.status === 'CAUTION');
-  check('Regression fixture: 2026-09-23 has a SUPPORT Tara for both the user and the partner', sep23?.user.factors.taraBala?.status === 'SUPPORT' && sep23?.person.factors.taraBala?.status === 'SUPPORT');
-  check('Regression fixture: SHARED flips this -- 2026-09-23 outranks 2026-09-22 in sharedScore despite a lower general score', Boolean(sep22 && sep23 && sep23.sharedScore > sep22.sharedScore));
-  check('Regression fixture: the rating itself differs qualitatively (MIXED vs STRONG), not just a marginal score wobble', sep22?.rating === 'MIXED_SHARED_FIT' && sep23?.rating === 'STRONG_SHARED_FIT');
+  const sep17 = okResult.dates.find((d) => d.date === '2026-09-17');
+  const sep07 = okResult.dates.find((d) => d.date === '2026-09-07');
+  check('Regression fixture: 2026-09-17 has a CAUTION Tara for both the user and the partner', sep17?.user.factors.taraBala?.status === 'CAUTION' && sep17?.person.factors.taraBala?.status === 'CAUTION');
+  check('Regression fixture: 2026-09-07 has a SUPPORT Tara for both the user and the partner', sep07?.user.factors.taraBala?.status === 'SUPPORT' && sep07?.person.factors.taraBala?.status === 'SUPPORT');
+  check('Regression fixture: SHARED flips this -- 2026-09-07 outranks 2026-09-17 in sharedScore despite a lower general score', Boolean(sep17 && sep07 && sep07.sharedScore > sep17.sharedScore));
+  check('Regression fixture: the rating itself differs qualitatively (MIXED vs GOOD), not just a marginal score wobble', sep17?.rating === 'MIXED_SHARED_FIT' && sep07?.rating === 'GOOD_SHARED_FIT');
 
   const generalOrderTop5 = [...general.dates].sort((a, b) => b.score - a.score).slice(0, 5).map((d) => d.date);
   const sharedOrderTop5 = [...okResult.dates].sort((a, b) => b.sharedScore - a.sharedScore).slice(0, 5).map((d) => d.date);

@@ -166,12 +166,27 @@ check('No surfaced window (best or alternate) ever carries a FRICTION_WINDOW_BLO
 }));
 
 // Deterministic fixture matching the brief's own section-7 example: on
-// 2026-09-02 in Chennai, ABHIJIT (06:14-07:04 UTC) overlaps RAHU_KALAM
-// (06:40-08:13 UTC). A 30-minute window starting at ABHIJIT's own start
-// (06:14) extends to 06:44 and so crosses into Rahu Kalam at 06:40 -- it
-// must NOT be treated as a clean Abhijit window. A 20-minute window from
-// the same start (06:14-06:34) stays entirely before Rahu begins and should
-// remain the clean, higher-scoring option.
+// 2026-09-02 in Chennai, ABHIJIT (11:44 AM-12:34 PM IST / 06:14-07:04 UTC)
+// overlaps RAHU_KALAM (12:10-1:43 PM IST / 06:40-08:13 UTC). A 30-minute
+// window starting at ABHIJIT's own start (06:14) extends to 06:44 and so
+// crosses into Rahu Kalam at 06:40 -- it must NOT be treated as a clean
+// Abhijit window.
+//
+// Inauspicious Period Precedence Fix V1 correction: this same date ALSO has
+// GULIKA (10:36 AM-12:10 PM IST / 05:06-06:40 UTC) overlapping Abhijit --
+// together, Gulika and Rahu fully cover Abhijit's entire 11:44 AM-12:34 PM
+// span with no gap, so there is in fact no genuinely clean sub-window
+// anywhere inside Abhijit on this date, at any duration. The original
+// version of this test asserted a 20-minute window starting at Abhijit's
+// own start (06:14-06:34 UTC) stayed "clear of Rahu Kalam" and should be
+// selected -- true only because Gulika was not yet checked as an
+// inauspicious-commencement window; this exact 06:14-06:34 span was always
+// inside the Gulika overlap too. Re-verified below: it is now correctly
+// excluded for this commencement-sensitive activity, and Muhurtham Finder
+// falls back to a genuinely clean window elsewhere (Brahma Muhurtham, no
+// overlap with anything) -- proving interval-overlap, evaluated against
+// BOTH Rahu Kalam and Gulika, drives the decision, not mere Abhijit
+// window-membership.
 const overlapDate30min = findMuhurthams({
   activityId: 'start-journey',
   dateRange: { start: '2026-09-02', end: '2026-09-02' },
@@ -190,8 +205,8 @@ const overlapDate20min = findMuhurthams({
   limit: 5,
   context: chennaiContext,
 });
-check('A 20-min window at the same start, which stays clear of Rahu Kalam, IS selected as the best window (interval-overlap, not window-membership, drives the decision)', overlapDate20min.dates.length === 1 && overlapDate20min.dates[0].bestWindow.start === '2026-09-02T06:14:00.000Z');
-check('The 20-min clean Abhijit window scores higher than an inclusion floor and reflects Abhijit support', overlapDate20min.dates.length === 1 && overlapDate20min.dates[0].reasons.some((r) => r.code === 'ABHIJIT_SUPPORT'));
+check('A 20-min window at Abhijit\'s own start, which sits inside the Gulika overlap even though it stays clear of Rahu Kalam, is NOT selected as the best window', overlapDate20min.dates.length === 0 || overlapDate20min.dates[0].bestWindow.start !== '2026-09-02T06:14:00.000Z');
+check('Muhurtham Finder instead falls back to a genuinely clean window (Brahma, no Rahu/Gulika/Yama overlap) for this date', overlapDate20min.dates.length === 1 && overlapDate20min.dates[0].bestWindow.start === '2026-09-01T22:51:00.000Z');
 
 // ============================================================
 // RANGE / TIMEZONE

@@ -29,7 +29,6 @@ import {
   buildSlotCandidates,
   classifyTask,
   computeAssistantWindows,
-  containsMinute,
   evaluateCandidateMuhurta,
   formatMinute,
   formatWindowLabel,
@@ -39,6 +38,7 @@ import {
   normalizeTaskTitle,
   profileFromActivity,
   resolveHorizonDayOffsets,
+  resolveOverlappingCandidate,
   scoreCandidate,
   scoreContinuousBlock,
   selectDailyBestPlanningOptions,
@@ -244,7 +244,12 @@ export function evaluateTimingCandidate(params: {
     conflicts.push({ type: 'FRICTION_WINDOW_BLOCKED', message: 'This time falls in a high-friction period this activity should avoid.' });
   }
 
-  const primaryCandidate: SlotCandidate = candidates.find((candidate) => containsMinute(candidate, startMinute)) ?? candidates[0];
+  // Inauspicious Period Precedence Fix V1: same overlap-aware resolution
+  // scoreContinuousBlock's own segment loop uses (dailyAssistant.ts) --
+  // otherwise this candidate's displayed windowType/windowLabel/auraFitScore
+  // could disagree with its own (correctly overlap-aware) `score`/`label`
+  // whenever the requested instant sits inside more than one window at once.
+  const primaryCandidate: SlotCandidate = resolveOverlappingCandidate(candidates, startMinute) ?? candidates[0];
   const muhurta = evaluateCandidateMuhurta(primaryCandidate, profile, start);
   const auraFit = profile.activity
     ? evaluateActivityFit({ activity: profile.activity, date: start, windowType: primaryCandidate.type, personalContext: profile.personalContext, classification: profile.muhurtaClassification })

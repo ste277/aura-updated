@@ -216,11 +216,19 @@ function capabilitiesForWindow(windowType: SolarWindowType, muhurtaModifier: num
     Object.assign(base, { initiation: 94, focus: 88, performance: 90, routine: 68, social: 58, restoration: 40, friction: 6 });
   } else if (windowType === 'BRAHMA') {
     Object.assign(base, { initiation: 72, focus: 88, routine: 62, social: 35, restoration: 82, performance: 45, nourishment: 50, friction: 8 });
-  } else if (windowType === 'GULIKA') {
-    Object.assign(base, { initiation: 62, focus: 70, routine: 90, social: 72, restoration: 65, performance: 66, nourishment: 62, friction: 16 });
   } else if (windowType === 'RAHU_KALAM' || windowType === 'YAMA') {
     Object.assign(base, { initiation: 18, focus: 42, routine: 78, social: 45, restoration: 82, performance: 38, nourishment: 55, friction: 78 });
   } else {
+    // GULIKA intentionally falls into this default/NEUTRAL branch
+    // (Inauspicious Period Precedence Fix V1) -- it previously had its own
+    // dedicated values (routine:90, friction:16), both stronger than this
+    // default branch's own routine:82/friction:18, meaning Gulika
+    // out-scored an ordinary Neutral period on this axis for no product
+    // reason. An everyday activity remaining USABLE during Gulika (the
+    // correct, preserved behavior) is not the same claim as Gulika being a
+    // BETTER time than Neutral -- reusing this file's own existing default
+    // values, rather than inventing a new "Gulika is exactly as good as
+    // Neutral, no better" number, is the smallest way to guarantee that.
     Object.assign(base, { initiation: 48, focus: 64, routine: 82, social: 52, restoration: 62, performance: 52, nourishment: 65, friction: 18 });
   }
   const boost = muhurtaModifier * 1.2;

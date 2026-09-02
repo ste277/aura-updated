@@ -70,6 +70,34 @@ function segmentSpan(
 }
 
 /**
+ * Inauspicious Period Precedence Fix V1: windows that must override an
+ * otherwise-positive commencement for timing-sensitive/significant
+ * activities. Deliberately distinct from dailyAssistant.ts's isFriction()
+ * (RAHU_KALAM/YAMA only), which governs EVERYDAY scoring/ranking and must
+ * keep excluding Gulika -- an everyday activity during Gulika stays
+ * rankable/usable, never hard-blocked. This is the narrower,
+ * commencement-safety-specific concept: for a significant beginning, Rahu
+ * Kalam, Yamaganda, AND Gulika all count as inauspicious, regardless of
+ * what an overlapping Abhijit/Brahma window sharing the same span would
+ * otherwise suggest.
+ */
+export function isInauspiciousCommencementWindow(type: SolarWindowType): boolean {
+  return type === 'RAHU_KALAM' || type === 'YAMA' || type === 'GULIKA';
+}
+
+/**
+ * True if [aStart, aEnd) and [bStart, bEnd) intersect at all, on any shared
+ * linear numeric axis -- minute-of-day (dailyAssistant.ts's commencement-
+ * safety check) or epoch milliseconds via Date.parse (muhurthamFinder.ts's
+ * ISO-instant one). The one canonical interval-overlap primitive: kept here
+ * (rather than duplicated per caller, each with its own unit) so the actual
+ * overlap math -- `aStart < bEnd && bStart < aEnd` -- exists exactly once.
+ */
+export function intervalsOverlap(aStart: number, aEnd: number, bStart: number, bEnd: number): boolean {
+  return aStart < bEnd && bStart < aEnd;
+}
+
+/**
  * Computes all five panchang windows for a given day's solar ephemeris.
  */
 export function computePanchangWindows(

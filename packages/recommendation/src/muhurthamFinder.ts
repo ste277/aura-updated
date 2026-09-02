@@ -107,10 +107,11 @@
  * server-side callers) are trusted to pass reasonable ranges.
  */
 
-import { DailyAssistantContext, TaskProfile, buildSlotCandidates, computeAssistantWindows, isFriction, matchesTimePreference, profileFromActivity } from './dailyAssistant';
+import { DailyAssistantContext, TaskProfile, buildSlotCandidates, computeAssistantWindows, isTimingSensitiveActivity, matchesTimePreference, profileFromActivity } from './dailyAssistant';
 import { evaluateTimingCandidate, TimingCandidate, TimingCandidateLabel, TimingTimePreference } from './timingSearch';
 import { formatMinutes } from '../../astronomy/src/ephemeris';
 import { getPanchangForDate, PanchangWindowSpan } from '../../panchang/src/panchangDay';
+import { isInauspiciousCommencementWindow } from '../../panchang/src/windows';
 import { isValidCalendarDateString, localDateTimeToUTC } from '../../panchang/src/localDate';
 import { FULL_ACTIVITY_CATALOG } from './personalizedTasks';
 import { ACTIVITY_DEFINITIONS, ActivityDefinition } from './activityDefinitions';
@@ -312,15 +313,21 @@ function instantSpansOverlap(aStart: string, aEnd: string, bStart: string, bEnd:
 
 /**
  * The section-7 safety check: true if [startISO, endISO) intersects any
- * RAHU_KALAM/YAMA window in `panchangWindows` -- the overlap-preserving list
- * from getPanchangForDate(), not the shared, priority-resolved candidate
- * list scoreContinuousBlock uses internally. See this file's module doc
- * comment ("Interval overlap") for why this extra check exists alongside,
- * not instead of, evaluateTimingCandidate()'s own FRICTION_WINDOW_BLOCKED
- * conflict.
+ * inauspicious-commencement window (RAHU_KALAM/YAMA/GULIKA -- Inauspicious
+ * Period Precedence Fix V1 widened this from RAHU_KALAM/YAMA only, since a
+ * significant commencement must be protected from a Gulika overlap exactly
+ * the same way) in `panchangWindows` -- the overlap-preserving list from
+ * getPanchangForDate(), not the shared, priority-resolved candidate list
+ * scoreContinuousBlock uses internally. See this file's module doc comment
+ * ("Interval overlap") for why this extra check exists alongside, not
+ * instead of, evaluateTimingCandidate()'s own FRICTION_WINDOW_BLOCKED
+ * conflict (which itself now also carries this same Gulika-aware overlap
+ * check -- see dailyAssistant.ts's scoreContinuousBlock -- so this remains
+ * a belt-and-suspenders check, not the only one, matching this file's own
+ * prior design intent).
  */
-function spanOverlapsFrictionWindow(startISO: string, endISO: string, panchangWindows: PanchangWindowSpan[]): boolean {
-  return panchangWindows.some((w) => isFriction(w.type) && instantSpansOverlap(startISO, endISO, w.start, w.end));
+function spanOverlapsInauspiciousCommencementWindow(startISO: string, endISO: string, panchangWindows: PanchangWindowSpan[]): boolean {
+  return panchangWindows.some((w) => isInauspiciousCommencementWindow(w.type) && instantSpansOverlap(startISO, endISO, w.start, w.end));
 }
 
 /**
@@ -370,19 +377,27 @@ function evaluateMuhurthamCandidate(
   panchangWindows: PanchangWindowSpan[],
   classification: MuhurtaClassification | undefined
 ): TimingCandidate | null {
-  const isFrictionSensitive = profile.significance === 'HIGH' || profile.requiresFreshStart;
+  // Inauspicious Period Precedence Fix V1: unified with Timing Search's own
+  // commencement-sensitivity signal (isTimingSensitiveActivity, muhurta
+  // classification-based) rather than the legacy `profile.significance`
+  // field this file previously used here alone -- confirmed safe: every
+  // Muhurtham-supported activity's legacy significance already agreed with
+  // its classification (both HIGH/DEEP-or-CEREMONIAL for all six), so this
+  // changes no existing behavior, it just removes a second, independently-
+  // drifting definition of "commencement-sensitive."
+  const isCommencementSensitive = isTimingSensitiveActivity(classification);
   const isStartSensitive = classification?.timingSensitivity.start === 'HIGH';
 
   const candidate = evaluateTimingCandidate({ profile, start, durationMinutes, context });
   if (candidate.conflicts?.some((c) => c.type === 'FRICTION_WINDOW_BLOCKED')) return null;
-  if (isFrictionSensitive && spanOverlapsFrictionWindow(candidate.start, candidate.end, panchangWindows)) return null;
+  if (isCommencementSensitive && spanOverlapsInauspiciousCommencementWindow(candidate.start, candidate.end, panchangWindows)) return null;
 
   if (!isStartSensitive) return candidate;
 
   const probeDurationMinutes = Math.min(durationMinutes, START_SENSITIVITY_PROBE_MINUTES);
   const commencementProbe = evaluateTimingCandidate({ profile, start, durationMinutes: probeDurationMinutes, context });
   if (commencementProbe.conflicts?.some((c) => c.type === 'FRICTION_WINDOW_BLOCKED')) return null;
-  if (isFrictionSensitive && spanOverlapsFrictionWindow(commencementProbe.start, commencementProbe.end, panchangWindows)) return null;
+  if (isCommencementSensitive && spanOverlapsInauspiciousCommencementWindow(commencementProbe.start, commencementProbe.end, panchangWindows)) return null;
 
   const blendedScore = blendStartSensitiveScore(candidate.score, commencementProbe.score);
   return { ...candidate, score: blendedScore, label: labelForBlendedScore(blendedScore) };
