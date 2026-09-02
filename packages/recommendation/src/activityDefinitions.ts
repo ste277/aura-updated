@@ -99,6 +99,26 @@ export type ImmediateAction = 'LOG_NOW' | 'START_NOW' | 'PLAN' | 'BOTH';
  */
 export type ActivityDurationMode = 'INSTANT' | 'FIXED' | 'USER_SELECTED' | 'SESSION';
 
+/**
+ * A real-world clock-time-of-day convention, entirely independent of the
+ * Panchang solar windows (BRAHMA/ABHIJIT/GULIKA/NEUTRAL/RAHU_KALAM/YAMA)
+ * used for astrological favorability. Those solar windows are NOT tied to
+ * a fixed time of day -- GULIKA/RAHU_KALAM/YAMA each rotate to a different
+ * eighth of daylight depending on the weekday (see
+ * packages/panchang/src/windows.ts's own segment tables), and NEUTRAL
+ * covers whatever's left, which is most of any day. So an activity whose
+ * only constraint is "GULIKA or NEUTRAL" (e.g. Date Night) is astrologically
+ * satisfied just as often at 10am as at 8pm -- there was previously no
+ * signal anywhere that a date night, family dinner, or dinner with friends
+ * should actually happen in the evening. This is that signal: an optional,
+ * hand-authored real-world convention consumed by runTimingSearch's FIND
+ * mode (timingSearch.ts) as the default `timePreference` when the caller
+ * doesn't explicitly ask for a different time of day. Only set where a
+ * mismatched time would be genuinely wrong by social convention, never for
+ * an activity where "any time" is honestly fine (e.g. Coffee/Tea, Catch Up).
+ */
+export type ActivityTimeOfDayPreference = 'MORNING' | 'AFTERNOON' | 'EVENING' | 'NIGHT';
+
 export interface ActivityExperience {
   /** Whether this activity is offered as a Plan/Muhurtham RESULT the user
    * can turn into an AuraMoment (brief section 3: "An Aura Moment is a
@@ -125,6 +145,11 @@ export interface ActivityExperience {
    * defaultDurationModeFor() for any future catalog entry with no explicit
    * override) -- never inferred from title text at render time. */
   durationMode: ActivityDurationMode;
+  /** See ActivityTimeOfDayPreference's own doc comment above. Undefined
+   * (the overwhelming majority of activities) means no real-world
+   * time-of-day convention -- purely astrological/opening-based timing,
+   * unchanged from before this field existed. */
+  timeOfDayPreference?: ActivityTimeOfDayPreference;
 }
 
 export interface ActivityDefinition {
@@ -186,6 +211,9 @@ type ActivityMetadataInput = {
    * as quick-pick chips in Plan instead of a bare duration input. Omit to
    * fall back to a single defaultDurationMinutes (or the generic default). */
   suggestedDurations?: number[];
+  /** See ActivityTimeOfDayPreference's own doc comment. Omit for anything
+   * where any time of day is genuinely fine. */
+  timeOfDayPreference?: ActivityTimeOfDayPreference;
 };
 
 /** planningMode is entirely a function of evaluationDepth -- see
@@ -468,21 +496,39 @@ const ACTIVITY_METADATA: Record<string, ActivityMetadataInput> = {
   // classification ambiguity): both are LIGHT/short enough that
   // START_NOW/BOTH reads plausibly if the other person is already present,
   // but PLAN was kept as the safer default since neither can assume that.
-  'date-night': { family: 'RELATIONSHIP', intent: 'DATE', evaluationDepth: 'STANDARD', timingSensitivity: { start: 'MEDIUM', duration: 'LOW', end: 'LOW' }, socialMode: 'PAIR', suggestedDurations: [90, 120, 150], immediateAction: 'PLAN' },
-  'dinner-date': { family: 'RELATIONSHIP', intent: 'DATE', evaluationDepth: 'STANDARD', timingSensitivity: { start: 'MEDIUM', duration: 'LOW', end: 'LOW' }, socialMode: 'PAIR', suggestedDurations: [60, 90, 120], immediateAction: 'PLAN' },
+  // Home Compactness follow-up ("evening slots showing up in the
+  // morning/afternoon") -- these activities are evening/dinner/night
+  // occasions by real-world convention, but their recommendedWindowTypes
+  // (personalizedTasks.ts) is only GULIKA/NEUTRAL -- Panchang solar
+  // windows that rotate to a different eighth of daylight per weekday
+  // (GULIKA) or cover most of the day outright (NEUTRAL), so nothing
+  // previously kept these off a 10am slot. timeOfDayPreference is the
+  // real-world-clock-time signal that was missing; runTimingSearch's FIND
+  // mode (timingSearch.ts) now uses it as the default `timePreference`
+  // whenever the caller doesn't explicitly ask for a different time of
+  // day. `walk-together` is deliberately NOT given one here even though
+  // it's used for an "evening walk" in these same RELATIONSHIPS/SOCIAL
+  // contexts -- this same catalog entry also serves the SELF taxonomy
+  // group's daytime/workout-adjacent "Walk" (dailyIntentions.ts), so a
+  // blanket EVENING default here would wrongly constrain that morning
+  // use too. It's instead resolved per-suggestion in
+  // dayBuilderOrchestrator.ts, keyed on which taxonomy group the
+  // suggestion actually came from.
+  'date-night': { family: 'RELATIONSHIP', intent: 'DATE', evaluationDepth: 'STANDARD', timingSensitivity: { start: 'MEDIUM', duration: 'LOW', end: 'LOW' }, socialMode: 'PAIR', suggestedDurations: [90, 120, 150], immediateAction: 'PLAN', timeOfDayPreference: 'EVENING' },
+  'dinner-date': { family: 'RELATIONSHIP', intent: 'DATE', evaluationDepth: 'STANDARD', timingSensitivity: { start: 'MEDIUM', duration: 'LOW', end: 'LOW' }, socialMode: 'PAIR', suggestedDurations: [60, 90, 120], immediateAction: 'PLAN', timeOfDayPreference: 'EVENING' },
   'coffee-tea': { family: 'SOCIAL', intent: 'CASUAL_HANGOUT', evaluationDepth: 'LIGHT', timingSensitivity: { start: 'LOW', duration: 'LOW', end: 'LOW' }, socialMode: 'ANY', suggestedDurations: [30, 45, 60], immediateAction: 'PLAN' },
-  'movie-night': { family: 'SOCIAL', intent: 'CASUAL_HANGOUT', evaluationDepth: 'LIGHT', timingSensitivity: { start: 'LOW', duration: 'LOW', end: 'LOW' }, socialMode: 'ANY', suggestedDurations: [120, 150, 180], immediateAction: 'PLAN' },
-  'walk-together': { family: 'SOCIAL', intent: 'CASUAL_HANGOUT', evaluationDepth: 'LIGHT', timingSensitivity: { start: 'LOW', duration: 'LOW', end: 'LOW' }, socialMode: 'ANY', suggestedDurations: [30, 45, 60], immediateAction: 'PLAN' }, // immediateAction ambiguous (not a MuhurtaClassification/status-level ambiguity): PLAN was chosen as the safer default, but a walk together is short enough that START_NOW/BOTH is plausible when the other person is already present -- flagged in the Good Right Now Actions V1 completion report, not promoted to `status: AMBIGUOUS` (that axis is reserved for family/intent classification ambiguity, a different concern).
-  'family-dinner': { family: 'SOCIAL', intent: 'FAMILY_GATHERING', evaluationDepth: 'STANDARD', timingSensitivity: { start: 'MEDIUM', duration: 'LOW', end: 'LOW' }, socialMode: 'FAMILY', suggestedDurations: [60, 90, 120], immediateAction: 'PLAN' },
+  'movie-night': { family: 'SOCIAL', intent: 'CASUAL_HANGOUT', evaluationDepth: 'LIGHT', timingSensitivity: { start: 'LOW', duration: 'LOW', end: 'LOW' }, socialMode: 'ANY', suggestedDurations: [120, 150, 180], immediateAction: 'PLAN', timeOfDayPreference: 'EVENING' },
+  'walk-together': { family: 'SOCIAL', intent: 'CASUAL_HANGOUT', evaluationDepth: 'LIGHT', timingSensitivity: { start: 'LOW', duration: 'LOW', end: 'LOW' }, socialMode: 'ANY', suggestedDurations: [30, 45, 60], immediateAction: 'PLAN' }, // immediateAction ambiguous (not a MuhurtaClassification/status-level ambiguity): PLAN was chosen as the safer default, but a walk together is short enough that START_NOW/BOTH is plausible when the other person is already present -- flagged in the Good Right Now Actions V1 completion report, not promoted to `status: AMBIGUOUS` (that axis is reserved for family/intent classification ambiguity, a different concern). No timeOfDayPreference here -- see the block comment above.
+  'family-dinner': { family: 'SOCIAL', intent: 'FAMILY_GATHERING', evaluationDepth: 'STANDARD', timingSensitivity: { start: 'MEDIUM', duration: 'LOW', end: 'LOW' }, socialMode: 'FAMILY', suggestedDurations: [60, 90, 120], immediateAction: 'PLAN', timeOfDayPreference: 'EVENING' },
   'family-outing': { family: 'SOCIAL', intent: 'FAMILY_GATHERING', evaluationDepth: 'STANDARD', timingSensitivity: { start: 'MEDIUM', duration: 'LOW', end: 'LOW' }, socialMode: 'FAMILY', suggestedDurations: [120, 180, 240], immediateAction: 'PLAN' },
   'visit-family': { family: 'SOCIAL', intent: 'FAMILY_GATHERING', evaluationDepth: 'STANDARD', timingSensitivity: { start: 'MEDIUM', duration: 'LOW', end: 'LOW' }, socialMode: 'FAMILY', suggestedDurations: [60, 90, 120], immediateAction: 'PLAN' },
-  'family-movie-night': { family: 'SOCIAL', intent: 'FAMILY_GATHERING', evaluationDepth: 'LIGHT', timingSensitivity: { start: 'LOW', duration: 'LOW', end: 'LOW' }, socialMode: 'FAMILY', suggestedDurations: [120, 150, 180], immediateAction: 'PLAN' },
-  'dinner-with-friends': { family: 'SOCIAL', intent: 'CASUAL_HANGOUT', evaluationDepth: 'STANDARD', timingSensitivity: { start: 'MEDIUM', duration: 'LOW', end: 'LOW' }, socialMode: 'GROUP', suggestedDurations: [90, 120, 150], immediateAction: 'PLAN' },
+  'family-movie-night': { family: 'SOCIAL', intent: 'FAMILY_GATHERING', evaluationDepth: 'LIGHT', timingSensitivity: { start: 'LOW', duration: 'LOW', end: 'LOW' }, socialMode: 'FAMILY', suggestedDurations: [120, 150, 180], immediateAction: 'PLAN', timeOfDayPreference: 'EVENING' },
+  'dinner-with-friends': { family: 'SOCIAL', intent: 'CASUAL_HANGOUT', evaluationDepth: 'STANDARD', timingSensitivity: { start: 'MEDIUM', duration: 'LOW', end: 'LOW' }, socialMode: 'GROUP', suggestedDurations: [90, 120, 150], immediateAction: 'PLAN', timeOfDayPreference: 'EVENING' },
   'catch-up': { family: 'SOCIAL', intent: 'CASUAL_HANGOUT', evaluationDepth: 'LIGHT', timingSensitivity: { start: 'LOW', duration: 'LOW', end: 'LOW' }, socialMode: 'PAIR', suggestedDurations: [45, 60, 90], immediateAction: 'PLAN' }, // immediateAction ambiguous: PLAN was chosen as the safer default, but a spontaneous catch-up is short enough that START_NOW/BOTH is plausible -- flagged in the Good Right Now Actions V1 completion report, not promoted to `status: AMBIGUOUS`.
-  'game-night': { family: 'SOCIAL', intent: 'CASUAL_HANGOUT', evaluationDepth: 'LIGHT', timingSensitivity: { start: 'LOW', duration: 'LOW', end: 'LOW' }, socialMode: 'GROUP', suggestedDurations: [120, 150, 180], immediateAction: 'PLAN' },
+  'game-night': { family: 'SOCIAL', intent: 'CASUAL_HANGOUT', evaluationDepth: 'LIGHT', timingSensitivity: { start: 'LOW', duration: 'LOW', end: 'LOW' }, socialMode: 'GROUP', suggestedDurations: [120, 150, 180], immediateAction: 'PLAN', timeOfDayPreference: 'EVENING' },
   'birthday-party': { family: 'SOCIAL', intent: 'CELEBRATION', evaluationDepth: 'STANDARD', timingSensitivity: { start: 'MEDIUM', duration: 'LOW', end: 'LOW' }, socialMode: 'GROUP', suggestedDurations: [120, 180, 240], immediateAction: 'PLAN' },
-  'anniversary-dinner': { family: 'RELATIONSHIP', intent: 'DATE', evaluationDepth: 'STANDARD', timingSensitivity: { start: 'MEDIUM', duration: 'LOW', end: 'LOW' }, socialMode: 'PAIR', suggestedDurations: [90, 120, 150], immediateAction: 'PLAN' },
-  'celebration-dinner': { family: 'SOCIAL', intent: 'CELEBRATION', evaluationDepth: 'STANDARD', timingSensitivity: { start: 'MEDIUM', duration: 'LOW', end: 'LOW' }, socialMode: 'GROUP', suggestedDurations: [90, 120, 150], immediateAction: 'PLAN' },
+  'anniversary-dinner': { family: 'RELATIONSHIP', intent: 'DATE', evaluationDepth: 'STANDARD', timingSensitivity: { start: 'MEDIUM', duration: 'LOW', end: 'LOW' }, socialMode: 'PAIR', suggestedDurations: [90, 120, 150], immediateAction: 'PLAN', timeOfDayPreference: 'EVENING' },
+  'celebration-dinner': { family: 'SOCIAL', intent: 'CELEBRATION', evaluationDepth: 'STANDARD', timingSensitivity: { start: 'MEDIUM', duration: 'LOW', end: 'LOW' }, socialMode: 'GROUP', suggestedDurations: [90, 120, 150], immediateAction: 'PLAN', timeOfDayPreference: 'EVENING' },
   'road-trip': { family: 'TRAVEL', intent: 'OUTING', evaluationDepth: 'STANDARD', timingSensitivity: { start: 'HIGH', duration: 'MEDIUM', end: 'LOW' }, socialMode: 'ANY', suggestedDurations: [240, 360, 480], notes: 'Distinct from start-journey (IMPORTANT/DEEP): a casual weekend road trip, not an important journey or relocation.', immediateAction: 'PLAN' },
   'day-trip': { family: 'TRAVEL', intent: 'OUTING', evaluationDepth: 'STANDARD', timingSensitivity: { start: 'HIGH', duration: 'MEDIUM', end: 'LOW' }, socialMode: 'ANY', suggestedDurations: [240, 300, 360], immediateAction: 'PLAN' },
   picnic: { family: 'TRAVEL', intent: 'OUTING', evaluationDepth: 'LIGHT', timingSensitivity: { start: 'LOW', duration: 'LOW', end: 'LOW' }, socialMode: 'ANY', suggestedDurations: [90, 120, 150], immediateAction: 'PLAN' },
@@ -580,6 +626,7 @@ function buildActivityDefinition(activity: ActivityProfile): ActivityDefinition 
       suggestedDurations: metadata.suggestedDurations,
       immediateAction: metadata.immediateAction ?? defaultImmediateActionFor(metadata.evaluationDepth),
       durationMode: metadata.durationMode ?? defaultDurationModeFor(activity, metadata),
+      timeOfDayPreference: metadata.timeOfDayPreference,
     },
   };
 }

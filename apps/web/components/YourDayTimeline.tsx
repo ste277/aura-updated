@@ -1,6 +1,6 @@
 'use client';
 
-import React from 'react';
+import React, { useState } from 'react';
 import type { DailyAgenda, DailyAgendaItem } from '../lib/dailyAgenda';
 import { formatActivityDuration } from '../lib/activityDuration';
 import { selectCompactAgendaRows, groupAdjacentByFormattedTime } from '../lib/compactAgenda';
@@ -16,11 +16,18 @@ import { SectionHeader, TextButton, EmptyState } from './ui';
  * card type.
  *
  * Home Compactness + Flexible Day Story V1 (brief section 4/7/8) -- Home
- * itself now renders only a small, compact selection of rows
- * (selectCompactAgendaRows), never the full unbounded list. "View all N"
- * routes to the EXISTING full-day timeline (onViewAll, wired to the same
- * destination HomeDashboard's other "View full day" links already use) --
- * this component gains no new expand-inline state and no new screen.
+ * itself renders only a small, compact selection of rows
+ * (selectCompactAgendaRows) by default, never the full unbounded list.
+ *
+ * Bug fix: "View all N" originally routed to Timeline.tsx (the existing
+ * "View full day timeline" destination), reasoning that reusing an
+ * existing screen beat adding a new one -- but Timeline shows Panchang
+ * solar windows, not a list of the day's own Plans/Moments/completions,
+ * so "View all" landed the user somewhere that didn't actually answer
+ * "what did I add today?" (reported directly by the user). Fixed with a
+ * local expand/collapse toggle instead -- still no new screen, no
+ * navigation, just the SAME rows this file already knows how to render,
+ * unbounded.
  */
 
 function formatRawTime(item: DailyAgendaItem, timezone: string): string {
@@ -173,15 +180,10 @@ export function YourDayTimeline({
   agenda,
   onOpenItem,
   onAddSomething,
-  onViewAll,
 }: {
   agenda: DailyAgenda | null;
   onOpenItem?: (item: DailyAgendaItem) => void;
   onAddSomething?: () => void;
-  /** Home Compactness + Flexible Day Story V1 (brief section 7) -- routes
-   * to the EXISTING full-day timeline. Omitted entirely means "View all"
-   * simply doesn't render (no dead link), never a new inline-expand state. */
-  onViewAll?: () => void;
 }) {
   // Home cleanup (Daily Reflection & Tomorrow Preview V1 follow-up) --
   // agenda.nextItem is the exact same canonical "what's next" DailyAgenda
@@ -190,10 +192,11 @@ export function YourDayTimeline({
   // card) -- reused here, not recomputed, to decide which single row gets
   // the NEXT eyebrow.
   const nextItemId = agenda?.nextItem?.id;
-  const { rows, hiddenCount } = selectCompactAgendaRows(agenda);
+  const [expanded, setExpanded] = useState(false);
+  const totalCount = agenda?.items.length ?? 0;
+  const { rows, hiddenCount } = expanded || !agenda ? { rows: agenda?.items ?? [], hiddenCount: 0 } : selectCompactAgendaRows(agenda);
   const completedRows = rows.filter((item) => item.status === 'COMPLETED');
   const otherRows = rows.filter((item) => item.status !== 'COMPLETED');
-  const totalCount = agenda?.items.length ?? 0;
 
   return (
     <section>
@@ -202,7 +205,8 @@ export function YourDayTimeline({
         right={
           <div style={{ display: 'flex', alignItems: 'center', gap: spacing.md }}>
             {onAddSomething && <TextButton onClick={onAddSomething}>+ Add something</TextButton>}
-            {onViewAll && totalCount > 0 && <TextButton onClick={onViewAll}>View all {totalCount} →</TextButton>}
+            {!expanded && totalCount > 0 && <TextButton onClick={() => setExpanded(true)}>View all {totalCount} →</TextButton>}
+            {expanded && <TextButton onClick={() => setExpanded(false)} color={colors.textMuted}>Show less</TextButton>}
           </div>
         }
       />
@@ -220,11 +224,7 @@ export function YourDayTimeline({
           ))}
           {hiddenCount > 0 && (
             <div style={{ ...typography.caption, color: colors.textMuted, padding: `${spacing.sm}px 0`, textAlign: 'center' }}>
-              {onViewAll ? (
-                <TextButton onClick={onViewAll} color={colors.textMuted}>+ {hiddenCount} earlier {hiddenCount === 1 ? 'activity' : 'activities'}</TextButton>
-              ) : (
-                <>+ {hiddenCount} earlier {hiddenCount === 1 ? 'activity' : 'activities'}</>
-              )}
+              <TextButton onClick={() => setExpanded(true)} color={colors.textMuted}>+ {hiddenCount} earlier {hiddenCount === 1 ? 'activity' : 'activities'}</TextButton>
             </div>
           )}
         </div>

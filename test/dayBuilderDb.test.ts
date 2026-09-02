@@ -437,6 +437,32 @@ async function main() {
     await buildIntentionalDaySuggestions({ user: allMutedUser, agenda: agendaWithRealPlan, minuteOfDay: MINUTE_OF_DAY, now: NOW });
     check('The agenda object (and the real Plan inside it) is never mutated by buildIntentionalDaySuggestions', JSON.stringify(agendaWithRealPlan) === agendaSnapshotBefore);
 
+    // ============================================================
+    // "walk-together" dual context (Home Compactness follow-up -- "an
+    // evening walk shows time slots in the morning/afternoon"): the
+    // resolvePeopleContextTimePreference() decision itself (which
+    // taxonomy-group context makes it EVENING-only) is covered directly,
+    // deterministically, with no DB/fixture involved, in
+    // test/dayBuilder.test.ts. This integration-level check confirms the
+    // wiring end to end instead: whichever activity SOCIAL naturally picks
+    // on a wide-open day resolves fine, and if it's specifically
+    // walk-together, every one of its candidates does land in the evening
+    // -- real proof the override actually reaches runTimingSearch, not
+    // just that the pure function returns the right string in isolation.
+    // ============================================================
+    function istHour(iso: string): number {
+      const d = new Date(iso);
+      return (d.getUTCHours() + 5 + Math.floor((d.getUTCMinutes() + 30) / 60)) % 24;
+    }
+    const socialOnlyForWalkUser = { ...user, dayBuilderEnabled: true, dayBuilderMutedGroups: ['RELATIONSHIPS', 'FAMILY', 'WORK', 'SELF', 'ENJOYMENT'] };
+    const socialSuggestions = await buildIntentionalDaySuggestions({ user: socialOnlyForWalkUser, agenda: emptyAgenda, minuteOfDay: MINUTE_OF_DAY, now: NOW });
+    check('SOCIAL-only, wide-open day -> at least one suggestion (sanity check)', socialSuggestions.length > 0);
+    const socialWalk = socialSuggestions.find((s) => s.activityId === 'walk-together');
+    if (socialWalk) {
+      const times = socialWalk.candidate.candidates.map((c) => c.start);
+      check('When SOCIAL resolves "Walk together" specifically, every candidate lands in EVENING (17:00-21:00 IST)', times.length > 0 && times.every((t) => istHour(t) >= 17 && istHour(t) < 21));
+    }
+
     const planStillIntact = await createPlannedActivity({
       userId: user.id,
       title: 'Test Day Builder Untouched Plan',

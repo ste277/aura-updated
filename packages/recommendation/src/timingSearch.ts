@@ -46,6 +46,7 @@ import {
 } from './dailyAssistant';
 import { evaluateActivityFit } from './auraFitEngine';
 import { FULL_ACTIVITY_CATALOG } from './personalizedTasks';
+import { getActivityDefinition } from './activityDefinitions';
 
 export type TimingSearchMode = 'FIND' | 'CHECK' | 'COMPARE';
 
@@ -318,7 +319,24 @@ function runFind(request: TimingSearchRequest): TimingSearchResponse {
   const safeDuration = Math.min(360, Math.max(15, Math.round(request.durationMinutes)));
   const limit = Math.max(1, request.limit ?? DEFAULT_FIND_LIMIT);
   const dayOffsets = resolveSearchDayOffsets(request);
-  const preference = mapTimingTimePreference(request.timePreference);
+  // A real-world evening/night/etc. convention (e.g. Date Night, Family
+  // Dinner) only ever applies as a DEFAULT -- an explicit request.timePreference
+  // (the caller/user picked a time of day themselves, e.g. via Plan's own
+  // Morning/Afternoon/Evening/Night picker) always wins. See
+  // ActivityTimeOfDayPreference's own doc comment (activityDefinitions.ts)
+  // for why this exists: the Panchang solar windows these activities are
+  // otherwise scored against are not tied to a fixed clock time of day.
+  // 'ANY' is treated the SAME as "unset" here -- apps/web/lib/
+  // timingSearchRequest.ts (the /api/timing-search HTTP validation layer
+  // every manual Plan/Ask Aura search goes through) explicitly defaults a
+  // missing timePreference to the literal string 'ANY' before this ever
+  // runs, so requiring strict `undefined` here would silently defeat the
+  // activity default for every one of those callers (Day Builder's own
+  // in-process calls never go through that layer and were already fine
+  // either way).
+  const activityDefault = request.activityId ? getActivityDefinition(request.activityId)?.experience.timeOfDayPreference : undefined;
+  const explicitPreference = request.timePreference && request.timePreference !== 'ANY' ? request.timePreference : undefined;
+  const preference = mapTimingTimePreference(explicitPreference ?? activityDefault);
   const currentMinute = (() => {
     const local = localDateForContext(request.context);
     return local.getUTCHours() * 60 + local.getUTCMinutes();

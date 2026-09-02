@@ -2,6 +2,7 @@ import type { DailyAgenda, DailyAgendaItem } from './dailyAgenda';
 import { DailyIntentionGroupId } from './dailyIntentions';
 import { buildDailyReflection } from './dailyReflection';
 import type { UserPriorityGroup, DailyPriorityCoverage } from './dayBuilder';
+import { getMinuteOfDayInTimezone } from './timezone';
 
 /**
  * My Day V1 -- the narrative layer (brief section 9). Pure, deterministic,
@@ -81,6 +82,18 @@ function formatClock(iso: string, timezone: string): string {
   return new Date(iso).toLocaleTimeString('en-US', { timeZone: timezone, hour: 'numeric', minute: '2-digit' });
 }
 
+/** Bug fix (Home Compactness follow-up -- "your evening is open" shown
+ * even with several evening activities already added): every "is this
+ * item in the evening?" check below used to read `.getHours()` directly
+ * off the Date object, which reflects the SERVER PROCESS's own local
+ * timezone (UTC in production), not the user's configured
+ * `agenda.timezone` -- a 6pm IST item is 12:30pm UTC, whose .getHours()
+ * is 12, never >=17. Local dev/test runs on an IST machine coincidentally
+ * matched, hiding this in every prior test run. */
+function hourInTimezone(iso: string, timezone: string): number {
+  return Math.floor(getMinuteOfDayInTimezone(timezone, new Date(iso)) / 60);
+}
+
 function plannedItems(agenda: DailyAgenda): DailyAgendaItem[] {
   return agenda.items.filter((item) => item.type !== 'COMPLETED_ACTIVITY');
 }
@@ -94,7 +107,7 @@ function upcomingPlannedItems(agenda: DailyAgenda): DailyAgendaItem[] {
 
 function isEveningOpen(agenda: DailyAgenda): boolean {
   return !plannedItems(agenda).some((item) => {
-    const hour = new Date(item.startAt).getHours();
+    const hour = hourInTimezone(item.startAt, agenda.timezone);
     return hour >= 17;
   });
 }
@@ -201,7 +214,7 @@ function buildMorningStory(agenda: DailyAgenda): { headline: string; narrative: 
     // evening one, e.g. a Date Night saved via guest conversion) should
     // still see My Day as useful, not empty: acknowledge the plan warmly
     // and point out the rest of the day is still theirs.
-    if (new Date(first.startAt).getHours() >= 17) {
+    if (hourInTimezone(first.startAt, agenda.timezone) >= 17) {
       return {
         headline: 'Good morning',
         narrative: `Your evening has something to look forward to. ${first.title} at ${formatClock(first.startAt, agenda.timezone)}. You still have room earlier in the day.`,
@@ -282,7 +295,7 @@ function buildEveningStory(agenda: DailyAgenda): { headline: string; narrative: 
       suggestedIntentions: EVENING_INTENTIONS,
     };
   }
-  const eveningItem = upcomingPlannedItems(agenda).find((item) => new Date(item.startAt).getHours() >= 17);
+  const eveningItem = upcomingPlannedItems(agenda).find((item) => hourInTimezone(item.startAt, agenda.timezone) >= 17);
   return {
     headline: eveningItem ? eveningItem.title : 'Your evening',
     narrative: eveningItem ? `${eveningItem.title} ${eveningItem.status === 'CONFIRMED' ? 'is confirmed for' : 'starts at'} ${formatClock(eveningItem.startAt, agenda.timezone)}.` : 'Your evening is taking shape.',

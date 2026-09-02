@@ -19,6 +19,7 @@ import {
   IntentionalDaySuggestion,
   UserPriorityGroup,
   AgendaOpening,
+  resolvePeopleContextTimePreference,
 } from './dayBuilder';
 import type { DailyIntentionGroupId } from './dailyIntentions';
 
@@ -173,6 +174,14 @@ export async function buildIntentionalDaySuggestions(input: {
     const activityId = candidate.activity.activityId;
     if (!activityId) continue;
     const durationMinutes = durationMinutesFor(activityId);
+    // See resolvePeopleContextTimePreference's own doc comment
+    // (dayBuilder.ts) -- the one activity (walk-together) whose evening-vs-
+    // anytime distinction depends on which taxonomy group it was actually
+    // selected from, not just its own catalog entry. Every other activity
+    // relies on runTimingSearch's own catalog-default fallback
+    // (timingSearch.ts) -- leaving timePreference unset here lets that
+    // default apply normally.
+    const timePreferenceOverride = resolvePeopleContextTimePreference(activityId, candidate.isPeopleOriented);
 
     let resolved: IntentionalDaySuggestion['candidate'] | null = null;
 
@@ -204,6 +213,7 @@ export async function buildIntentionalDaySuggestions(input: {
           limit: SEARCH_LIMIT_PER_CANDIDATE,
           context,
           partnerContext,
+          ...(timePreferenceOverride ? { timePreference: timePreferenceOverride } : {}),
         });
         if (outcome.status === 'OK') {
           // candidateFitsOpenings expects {start, end} -- EverydaySharedCandidate
@@ -221,7 +231,15 @@ export async function buildIntentionalDaySuggestions(input: {
     // "Not today" against the no-person identity (brief: also covers a
     // non-people-oriented candidate, whose identity is always no-person).
     if (!resolved && !dismissedKeys.has(dismissalKey(activityId, ''))) {
-      const result = runTimingSearch({ mode: 'FIND', activityId, durationMinutes, horizon: 'TODAY', limit: SEARCH_LIMIT_PER_CANDIDATE, context });
+      const result = runTimingSearch({
+        mode: 'FIND',
+        activityId,
+        durationMinutes,
+        horizon: 'TODAY',
+        limit: SEARCH_LIMIT_PER_CANDIDATE,
+        context,
+        ...(timePreferenceOverride ? { timePreference: timePreferenceOverride } : {}),
+      });
       const fits = pickDiverseFittingCandidates(result.candidates, dayProfile.openings, agenda.timezone, agenda.localDate);
       if (fits.length > 0) resolved = { kind: 'SOLO', candidates: fits };
     }
