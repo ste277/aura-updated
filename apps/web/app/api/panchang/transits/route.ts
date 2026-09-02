@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getSessionFromRequest } from '../../../../lib/session';
 import { getUserById } from '../../../../lib/db';
+import { localDateTimeToUTC } from '../../../../lib/timezone';
 import { calculateDailyTransits } from '../../../../../../packages/vedic/src/transits';
 
 export async function GET(req: NextRequest) {
@@ -10,11 +11,11 @@ export async function GET(req: NextRequest) {
   }
 
   const user = await getUserById(session.userId);
-  if (!user || !user.birthDate || !user.birthTime) {
+  if (!user || !user.birthDate || !user.birthTime || !user.birthTimezone) {
     return NextResponse.json({ error: 'Birth profile incomplete.' }, { status: 400 });
   }
 
-  const birthDateTime = new Date(`${user.birthDate.toISOString().slice(0, 10)}T${user.birthTime}:00Z`);
+  const birthDateTime = localDateTimeToUTC(user.birthDate.toISOString().slice(0, 10), user.birthTime, user.birthTimezone);
 
   const transits = calculateDailyTransits(
     birthDateTime,
