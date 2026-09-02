@@ -537,7 +537,19 @@ export function scoreContinuousBlock(
     const segmentEnd = boundaries[index + 1];
     const candidate = candidates.find((item) => containsMinute(item, segmentStart));
     const segmentScore = candidate ? scoreCandidate(candidate, profile, dateForMinute?.(segmentStart)) : 55;
-    if (isFriction(candidate?.type ?? 'NEUTRAL') && (profile.significance === 'HIGH' || profile.requiresFreshStart)) return -1;
+    // Everyday Timing Flexibility V1: this block-level friction guard predates
+    // muhurtaClassification and used the legacy `significance` field (which
+    // conflates "important task" with "commencement-sensitive activity" --
+    // e.g. Deep Work/Workout are legacy significance:'HIGH' but everyday-depth).
+    // When a catalog activity's classification is available, defer to the
+    // same isTimingSensitiveActivity() signal scoreCandidate() already uses,
+    // so the two layers can't disagree; fall back to the legacy check only
+    // for non-catalog free-text tasks, which have no classification at all.
+    const isFrictionSegment = isFriction(candidate?.type ?? 'NEUTRAL');
+    const blocksOnFriction = profile.muhurtaClassification
+      ? isTimingSensitiveActivity(profile.muhurtaClassification)
+      : profile.significance === 'HIGH' || profile.requiresFreshStart;
+    if (isFrictionSegment && blocksOnFriction) return -1;
     weighted += segmentScore * (segmentEnd - segmentStart);
   }
   return weighted / (end - start);
@@ -722,6 +734,21 @@ export function buildSlotCandidates(windows: WindowSpan[]): SlotCandidate[] {
   return candidates;
 }
 
+/** Everyday Timing Flexibility V1: for everyday/reversible activities,
+ * Panchang should RANK real availability rather than RESTRICT it -- only
+ * commencement-sensitive/consequential activities keep the hard exclusion
+ * in scoreCandidate() below. Reuses the existing MuhurtaClassification
+ * signal (evaluationDepth + timingSensitivity.start) that already drives
+ * Muhurtham-eligibility gating elsewhere, rather than introducing a new
+ * taxonomy. An activity with no classification is treated as sensitive
+ * (fail safe toward the existing strict behavior). */
+export function isTimingSensitiveActivity(classification: MuhurtaClassification | undefined): boolean {
+  if (!classification) return true;
+  if (classification.evaluationDepth === 'DEEP' || classification.evaluationDepth === 'CEREMONIAL') return true;
+  if (classification.timingSensitivity.start === 'HIGH') return true;
+  return false;
+}
+
 export function scoreCandidate(candidate: SlotCandidate, profile: TaskProfile, date?: Date): number {
   if (profile.activity && date) {
     const fit = evaluateActivityFit({
@@ -731,7 +758,8 @@ export function scoreCandidate(candidate: SlotCandidate, profile: TaskProfile, d
       personalContext: profile.personalContext,
       classification: profile.muhurtaClassification,
     });
-    if (profile.activity.avoidWindowTypes.includes(candidate.type) && !profile.activity.allowDuringAvoidWindow && fit.score < 55) return -100;
+    const isAvoidWindow = profile.activity.avoidWindowTypes.includes(candidate.type) && !profile.activity.allowDuringAvoidWindow && fit.score < 55;
+    if (isAvoidWindow && isTimingSensitiveActivity(profile.muhurtaClassification)) return -100;
     return fit.score;
   }
   const base = profile.avoidWindows?.includes(candidate.type)
