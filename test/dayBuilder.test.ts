@@ -11,6 +11,7 @@ import {
   USER_PRIORITY_GROUPS,
   PEOPLE_GROUP_IDS,
   IntentionalDaySuggestion,
+  resolvePeopleContextTimePreference,
 } from '../apps/web/lib/dayBuilder';
 import { buildDailyAgenda, DailyAgenda } from '../apps/web/lib/dailyAgenda';
 import type { DailyIntentionGroupId } from '../apps/web/lib/dailyIntentions';
@@ -141,11 +142,7 @@ function agendaWithPlans(plans: PlannedActivity[], now: Date): DailyAgenda {
   check('WORK group marked present via resolved activity', profile.presentGroupIds.has('WORK'));
 }
 {
-  // An evening plan -> evening not open. Deliberately a UTC evening hour
-  // (>=17 in UTC directly, not just after a +5:30 IST shift) so this check
-  // is portable across whatever timezone the test process itself runs in
-  // -- hasEveningOpen (like dailyStory.ts's own isEveningOpen it mirrors)
-  // reads Date#getHours() in the RUNTIME's local timezone, not agenda.timezone.
+  // An evening plan -> evening not open (agenda's own IST timezone, 6pm IST).
   const now = new Date('2026-08-24T02:30:00.000Z'); // 8:00 AM IST
   const agenda = agendaWithPlans(
     [plan({ id: 'p1', title: 'Dinner Date', plannedStartAt: new Date('2026-08-24T18:00:00.000Z'), plannedEndAt: new Date('2026-08-24T19:00:00.000Z') })],
@@ -154,6 +151,22 @@ function agendaWithPlans(plans: PlannedActivity[], now: Date): DailyAgenda {
   const profile = buildDayProfile(agenda, 8 * 60);
   check('An evening plan -> hasEveningOpen is false', !profile.hasEveningOpen);
   check('An evening plan -> RELATIONSHIPS group marked present', profile.presentGroupIds.has('RELATIONSHIPS'));
+}
+{
+  // Regression -- hasEveningOpen used to read Date#getHours() in the
+  // SERVER PROCESS's own local timezone (UTC in production), never
+  // agenda.timezone -- silently wrong for any user configured in a
+  // non-UTC zone, and invisible to every test on an IST dev machine since
+  // IST happened to match the fixtures' own assumed zone. Machine-
+  // independent proof: an America/New_York agenda with a real 7pm New
+  // York Plan -- only correct if the fix genuinely reads the Date in the
+  // AGENDA's timezone, not whatever zone this test happens to run in.
+  const NY_TZ = 'America/New_York';
+  const now = new Date('2026-08-24T18:00:00.000Z'); // 2:00 PM EDT (UTC-4)
+  const sevenPmNewYorkPlan = plan({ id: 'ny-evening', title: 'Family Dinner', plannedStartAt: new Date('2026-08-24T23:00:00.000Z'), plannedEndAt: new Date('2026-08-25T00:30:00.000Z') }); // 7:00-8:30 PM EDT
+  const nyAgenda = buildDailyAgenda({ now, localDate: '2026-08-24', timezone: NY_TZ, plans: [sevenPmNewYorkPlan], moments: [], momentIdsWithSuccessor: new Set(), habitLogs: [] });
+  const nyProfile = buildDayProfile(nyAgenda, 14 * 60);
+  check('A real 7pm New York Plan -> hasEveningOpen is correctly false (timezone-correct, not server-local)', !nyProfile.hasEveningOpen);
 }
 
 // ============================================================
@@ -500,6 +513,29 @@ function fakeSuggestion(id: string, groupId: DailyIntentionGroupId, activityId: 
   const withPriority = selectIntentionCandidates(profile, new Set(), 5, resolvePrioritizedIntentionGroups(['WORK'])).find((c) => c.groupId === 'WORK');
   check('A prioritized candidate gets different reason text than the generic one', Boolean(withoutPriority) && Boolean(withPriority) && withoutPriority!.reason !== withPriority!.reason);
   check('The personalized reason never spells out the internal group/priority name', !/WORK|UserPriorityGroup|DailyIntentionGroupId/.test(withPriority!.reason));
+}
+
+// ============================================================
+// Home Compactness follow-up ("a date night or an evening walk shows time
+// slots in the morning and afternoon") -- resolvePeopleContextTimePreference()
+// is the ONE place the dual-context activity (walk-together) is resolved
+// to EVENING or left unconstrained, keyed on the taxonomy GROUP the
+// suggestion actually came from (not a blanket catalog-level default,
+// which would also wrongly constrain SELF's own daytime "Walk").
+// ============================================================
+{
+  check(
+    '"walk-together", selected from a people-oriented group (RELATIONSHIPS/FAMILY/SOCIAL) -> EVENING',
+    resolvePeopleContextTimePreference('walk-together', true) === 'EVENING'
+  );
+  check(
+    '"walk-together", selected from SELF (not people-oriented) -> no override (undefined)',
+    resolvePeopleContextTimePreference('walk-together', false) === undefined
+  );
+  check(
+    'Any OTHER activityId, even if people-oriented, is untouched here -- it relies on its own catalog default instead',
+    resolvePeopleContextTimePreference('dinner-date', true) === undefined && resolvePeopleContextTimePreference('coffee-tea', true) === undefined
+  );
 }
 
 if (!allPassed) {

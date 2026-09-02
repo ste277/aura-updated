@@ -46,12 +46,23 @@ test('MANY-ITEM HOME: Your Day stays compact, shows a hidden count, "View all" r
     expect(bodyText, `Found leaked internal token "${leaked}" in Home's rendered text`).not.toContain(leaked);
   }
 
-  // Brief section 7 -- "View all" routes to the EXISTING full-day timeline
-  // (the same destination Home's own "View full day timeline →" link
-  // already uses), never a new inline-expand state and never a new screen.
+  // Bug fix -- "View all" used to route to Timeline.tsx (Panchang solar
+  // windows, not a list of the day's own Plans/Moments/completions),
+  // reported directly as unhelpful ("clicking on it takes to Today's
+  // Timeline screen instead of the list of activities added for the
+  // day"). It now expands the SAME section inline instead: every one of
+  // today's items becomes visible, still on Home, no navigation.
   await yourDaySection.getByText(/View all \d+ →/).click();
-  await expect(page.getByRole('heading', { name: "Today's Timeline" })).toBeVisible({ timeout: 10000 });
-  await expect(page.getByRole('heading', { name: 'Your Day', exact: true })).toHaveCount(0);
+  await expect(page.getByRole('heading', { name: 'Your Day', exact: true })).toBeVisible();
+  await expect(yourDaySection.getByText('Upcoming A')).toBeVisible({ timeout: 10000 });
+  await expect(yourDaySection.getByText('Upcoming B')).toBeVisible();
+  await expect(yourDaySection.getByText('Completed Task 0')).toBeVisible();
+  await expect(yourDaySection.getByText('Completed Task 5')).toBeVisible();
+  await expect(yourDaySection.getByText(/\+ \d+ earlier activit/)).toHaveCount(0);
+
+  // "Show less" collapses back to the compact view.
+  await yourDaySection.getByRole('button', { name: 'Show less' }).click();
+  await expect(yourDaySection.getByText(/View all \d+ →/)).toBeVisible();
 });
 
 test('DAILY CHECK-IN: collapses to one compact line after answering, "Change" restores full controls', async ({ page }) => {
@@ -191,6 +202,12 @@ test('SOCIAL SLOT CHOICE: selecting the second time and Inviting creates the Aur
   }
 
   const slotButtons = inviteCard.locator('[role="group"]').getByRole('button');
+  // Captured BEFORE clicking Invite -- handleInvite's own refreshAfterCreate()
+  // re-derives and re-renders the whole suggestion list right after
+  // success (brief section 10), so a stale nth()-based card/slot locator
+  // read AFTER that point can end up pointed at a since-replaced DOM
+  // element showing a completely different suggestion's time.
+  const secondSlotLabel = await slotButtons.nth(1).innerText();
   await slotButtons.nth(1).click();
   expect(await slotButtons.nth(1).getAttribute('aria-pressed')).toBe('true');
 
@@ -206,6 +223,5 @@ test('SOCIAL SLOT CHOICE: selecting the second time and Inviting creates the Aur
   // Brief section 28 -- the Moment's own start/end match the SELECTED
   // (second) slot's time range, not the default first slot.
   const createdTime = `${new Date(created.startAt).toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' })}`;
-  const secondSlotLabel = await slotButtons.nth(1).innerText();
   expect(secondSlotLabel.startsWith(createdTime) || secondSlotLabel.includes(createdTime), `Expected the created Moment's start (${createdTime}) to match the selected slot ("${secondSlotLabel}")`).toBe(true);
 });

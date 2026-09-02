@@ -121,6 +121,31 @@ function plan(over: Partial<PlannedActivity> & { id: string; title: string; plan
   check('Open evening -> never claims "you need" (invitational, not prescriptive)', !story.narrative.toLowerCase().includes('you need'));
 }
 {
+  // Regression -- "Your evening is open" was shown even with several
+  // evening Plans already added, because isEveningOpen() read .getHours()
+  // directly (the SERVER PROCESS's own local timezone, UTC in production),
+  // never the agenda's own configured timezone. Machine-independent proof:
+  // a user in America/New_York (NOT this test machine's own local zone)
+  // with a real 7pm New York Plan -- .getHours() on ANY machine whose own
+  // local zone isn't America/New_York would compute the wrong hour for
+  // this exact UTC instant, so this only passes if the fix genuinely reads
+  // the Date in the AGENDA's timezone.
+  const NY_TZ = 'America/New_York';
+  const now = new Date('2026-08-24T22:00:00.000Z'); // 6:00 PM EDT (UTC-4) -- already EVENING locally
+  const sevenPmNewYorkPlan = plan({
+    id: 'ny-evening', title: 'Family Dinner',
+    plannedStartAt: new Date('2026-08-24T23:00:00.000Z'), // 7:00 PM EDT -- still upcoming
+    plannedEndAt: new Date('2026-08-25T00:30:00.000Z'),
+  });
+  const nyAgenda = buildDailyAgenda({ now, localDate: '2026-08-24', timezone: NY_TZ, plans: [sevenPmNewYorkPlan], moments: [], momentIdsWithSuccessor: new Set(), habitLogs: [] });
+  const nyStory = buildDailyStory(nyAgenda, 18 * 60); // 6:00 PM local -- EVENING phase
+  check('Fixture sanity: this lands in EVENING phase', nyStory.phase === 'EVENING');
+  check(
+    'A real 7pm New York evening Plan -> EVENING is correctly NOT reported as open (timezone-correct, not server-local)',
+    nyStory.headline !== 'Your evening is open'
+  );
+}
+{
   // Evening with a Moment
   const now = new Date('2026-08-24T13:00:00.000Z');
   const agenda = buildDailyAgenda({

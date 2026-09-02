@@ -1,4 +1,5 @@
 import { buildTimingSearchRequest } from '../apps/web/lib/timingSearchRequest';
+import { runTimingSearch } from '../packages/recommendation/src/timingSearch';
 import type { DailyAssistantContext } from '../packages/recommendation/src/dailyAssistant';
 
 let allPassed = true;
@@ -134,6 +135,33 @@ check('FIND request validation is timezone-agnostic (context passes through unch
 
 check('dateRange exactly at the 90-day cap is accepted', buildTimingSearchRequest({ mode: 'FIND', taskTitle: 'x', durationMinutes: 30, dateRange: { start: '2026-01-01', end: '2026-04-01' } }, chennaiContext).ok === true);
 check('dateRange of zero days (start === end) is accepted', buildTimingSearchRequest({ mode: 'FIND', taskTitle: 'x', durationMinutes: 30, dateRange: { start: '2026-08-21', end: '2026-08-21' } }, chennaiContext).ok === true);
+
+// ============================================================
+// Home Compactness follow-up -- end-to-end proof through the REAL
+// /api/timing-search request shape: a client that omits timePreference
+// entirely (the common case -- no Morning/Afternoon/Evening/Night picker
+// touched) gets this validation layer's own 'ANY' default (line ~74,
+// `body.timePreference === undefined ? 'ANY' : ...`), and that resolved
+// request must still land Date Night in the evening once handed to
+// runTimingSearch -- this is the exact live bug caught during manual
+// verification (a stricter `request.timePreference ?? activityDefault`
+// check in runFind() would have silently treated the validation layer's
+// own 'ANY' default as an explicit caller preference and skipped the
+// activity default entirely).
+// ============================================================
+function istHourOf(iso: string): number {
+  const d = new Date(iso);
+  return (d.getUTCHours() + 5 + Math.floor((d.getUTCMinutes() + 30) / 60)) % 24;
+}
+const dateNightNoBodyPreference = buildTimingSearchRequest({ mode: 'FIND', activityId: 'date-night', durationMinutes: 90, horizon: 'TODAY', limit: 5 }, chennaiContext);
+check('A body with no timePreference field validates OK and defaults to \'ANY\'', dateNightNoBodyPreference.ok === true && dateNightNoBodyPreference.ok && dateNightNoBodyPreference.request.timePreference === 'ANY');
+if (dateNightNoBodyPreference.ok) {
+  const result = runTimingSearch(dateNightNoBodyPreference.request);
+  check(
+    'That real request, run end to end, still lands every Date Night candidate in the evening (17:00-21:00 IST)',
+    result.candidates.length > 0 && result.candidates.every((c) => istHourOf(c.start) >= 17 && istHourOf(c.start) < 21)
+  );
+}
 
 console.log(allPassed ? '\nALL TIMING SEARCH API CHECKS PASSED' : '\nSOME TIMING SEARCH API CHECKS FAILED');
 process.exit(allPassed ? 0 : 1);

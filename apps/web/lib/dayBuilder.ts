@@ -159,9 +159,18 @@ export function buildDayProfile(agenda: DailyAgenda, minuteOfDay: number): DayPr
     for (const groupId of resolveItemIntentionGroups(item)) presentGroupIds.add(groupId);
   }
 
+  // Bug fix (Home Compactness follow-up -- "your evening is open" shown
+  // even with several evening activities added): `.getHours()` reads the
+  // Date in the SERVER PROCESS's own local timezone (UTC in production),
+  // not the user's configured `agenda.timezone` -- a 6pm IST item is
+  // 12:30pm UTC, whose .getHours() is 12, never >=17. Every local dev/test
+  // run on this machine (also IST) coincidentally matched, hiding this in
+  // every prior test run. getMinuteOfDayInTimezone is the same
+  // timezone-correct helper every other hour-of-day check in this
+  // codebase already uses.
   const hasEveningOpen = !agenda.items.some((item) => {
     if (item.status === 'COMPLETED' || item.status === 'MISSED') return false;
-    return new Date(item.startAt).getHours() >= 17;
+    return Math.floor(getMinuteOfDayInTimezone(agenda.timezone, new Date(item.startAt)) / 60) >= 17;
   });
 
   const openings = deriveAgendaOpenings({ agenda, minuteOfDay });
@@ -231,6 +240,30 @@ function reasonForCandidate(groupId: DailyIntentionGroupId, profile: DayProfile,
   if (groupId === 'WORK') return 'You have a clear stretch open for focused work.';
   if (groupId === 'SELF') return 'Some open time today to do something just for you.';
   return 'Room today to enjoy something, with nothing else competing for the time.';
+}
+
+/**
+ * Home Compactness follow-up ("a date night or an evening walk shows time
+ * slots in the morning and afternoon") -- most evening-social activities
+ * (Date Night, Family Dinner, Dinner With Friends, ...) now carry their own
+ * `timeOfDayPreference: 'EVENING'` directly on the shared catalog entry
+ * (activityDefinitions.ts), which runTimingSearch's FIND mode applies as
+ * its default automatically -- no per-caller override needed for those.
+ *
+ * 'walk-together' is the one exception: the exact same catalog entry also
+ * serves the SELF taxonomy group's daytime "Walk" (dailyIntentions.ts), so
+ * giving it a blanket catalog-level EVENING default would wrongly
+ * constrain that morning/anytime use too. This function is the ONLY place
+ * that distinguishes the two -- using the taxonomy GROUP context
+ * (isPeopleOriented, i.e. was this candidate selected from RELATIONSHIPS/
+ * FAMILY/SOCIAL, which is where "Walk together" as a social occasion
+ * actually comes from) that only the caller (dayBuilderOrchestrator.ts)
+ * has, since dayBuilder.ts's own selection doesn't carry a raw activityId
+ * string this deep. Returns undefined for every other activity, meaning
+ * "no override -- let the catalog's own default (if any) apply".
+ */
+export function resolvePeopleContextTimePreference(activityId: string, isPeopleOriented: boolean): 'EVENING' | undefined {
+  return activityId === 'walk-together' && isPeopleOriented ? 'EVENING' : undefined;
 }
 
 /** Brief section 10/11/13 -- select candidates from the existing taxonomy

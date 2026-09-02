@@ -649,7 +649,7 @@ export function HomeDashboard({
         </section>
       )}
 
-      <YourDayTimeline agenda={myDayAgenda ?? null} onOpenItem={onOpenAgendaItem} onAddSomething={() => onPlanClick?.()} onViewAll={onNextShiftClick} />
+      <YourDayTimeline agenda={myDayAgenda ?? null} onOpenItem={onOpenAgendaItem} onAddSomething={() => onPlanClick?.()} />
 
       <div style={pairGridStyle}>
         {/* Home Recommendation Hierarchy V1 -- hidden entirely rather than

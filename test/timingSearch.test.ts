@@ -85,6 +85,81 @@ const findScarce = runTimingSearch({
 check('FIND returns fewer than the limit when insufficient valid candidates exist (does not manufacture options)', findScarce.candidates.length < 5);
 
 // ============================================================
+// Activity-level timeOfDayPreference default (Home Compactness follow-up
+// -- "a date night or dinner with family shows time slots in the morning
+// and afternoon"). See ActivityTimeOfDayPreference's own doc comment
+// (activityDefinitions.ts) -- these are real-world clock-time defaults,
+// completely independent of the Panchang solar-window scoring, applied
+// ONLY when the caller doesn't explicitly ask for a different time.
+// ============================================================
+function istHourOf(iso: string): number {
+  const d = new Date(iso);
+  return (d.getUTCHours() + 5 + Math.floor((d.getUTCMinutes() + 30) / 60)) % 24;
+}
+
+const dateNightNoExplicitPreference = runTimingSearch({
+  mode: 'FIND',
+  activityId: 'date-night',
+  durationMinutes: 90,
+  horizon: 'TODAY',
+  context: chennaiContext,
+  limit: 5,
+});
+check(
+  'Date Night with NO explicit timePreference defaults to EVENING (17:00-21:00 IST) -- the activity\'s own real-world convention',
+  dateNightNoExplicitPreference.candidates.length > 0 && dateNightNoExplicitPreference.candidates.every((c) => istHourOf(c.start) >= 17 && istHourOf(c.start) < 21)
+);
+
+const coffeeNoExplicitPreference = runTimingSearch({
+  mode: 'FIND',
+  activityId: 'coffee-tea',
+  durationMinutes: 45,
+  horizon: 'SEVEN_DAYS',
+  context: chennaiContext,
+  limit: 8,
+});
+check(
+  'Coffee/Tea has no timeOfDayPreference -- candidates are NOT constrained to evening hours (proves this is per-activity, not a blanket default)',
+  coffeeNoExplicitPreference.candidates.some((c) => istHourOf(c.start) < 17 || istHourOf(c.start) >= 21)
+);
+
+const dateNightExplicitMorning = runTimingSearch({
+  mode: 'FIND',
+  activityId: 'date-night',
+  durationMinutes: 90,
+  horizon: 'TODAY',
+  timePreference: 'MORNING',
+  context: chennaiContext,
+  limit: 3,
+});
+check(
+  'An explicit request.timePreference overrides the activity\'s own default (caller intent always wins)',
+  dateNightExplicitMorning.candidates.length > 0 && dateNightExplicitMorning.candidates.every((c) => istHourOf(c.start) >= 5 && istHourOf(c.start) < 12)
+);
+
+// A literal `timePreference: 'ANY'` must behave the SAME as omitting the
+// field entirely -- apps/web/lib/timingSearchRequest.ts (the real
+// /api/timing-search HTTP validation layer every manual Plan/Ask Aura
+// search goes through) defaults a missing timePreference to the literal
+// string 'ANY' before runTimingSearch ever sees the request, so treating
+// 'ANY' as a real, distinct preference here would silently defeat the
+// activity default for every manual search caller (this was a genuine bug
+// caught via live manual verification, not a hypothetical).
+const dateNightExplicitAny = runTimingSearch({
+  mode: 'FIND',
+  activityId: 'date-night',
+  durationMinutes: 90,
+  horizon: 'TODAY',
+  timePreference: 'ANY',
+  context: chennaiContext,
+  limit: 5,
+});
+check(
+  'timePreference: \'ANY\' (the manual-search API\'s own default for "not specified") still applies Date Night\'s EVENING default',
+  dateNightExplicitAny.candidates.length > 0 && dateNightExplicitAny.candidates.every((c) => istHourOf(c.start) >= 17 && istHourOf(c.start) < 21)
+);
+
+// ============================================================
 // CHECK
 // ============================================================
 
