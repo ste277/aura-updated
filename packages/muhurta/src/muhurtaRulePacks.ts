@@ -395,6 +395,30 @@ export function computeMuhurtaSupportLevel(classification: MuhurtaClassification
 }
 
 /**
+ * True only when the resolved rule pack's Nakshatra data is genuinely
+ * intent-specific (coverage.nakshatra === 'IMPLEMENTED', i.e. an
+ * INTENT_RULE_PACKS override -- not a REUSABLE_BASE_RULE family-base proxy,
+ * and not MISSING) AND `nakshatraName` is in that pack's own `avoid` list.
+ * This is the single authority Muhurtham Finder's event-specific interval
+ * eligibility check (packages/recommendation/src/muhurthamFinder.ts) derives
+ * from, rather than duplicating this distinction itself: REUSABLE_BASE_RULE
+ * data is a legitimate SOFT scoring signal (NAKSHATRA_UNFAVORABLE, via
+ * evaluateMuhurtaWithRulePack below) but was never genuinely sourced FOR
+ * this specific occasion, so it must never hard-reject a candidate on its
+ * own -- only a pack's own dedicated data may do that.
+ */
+export function isAuthoritativeAvoidNakshatra(pack: MuhurtaRulePack, nakshatraName: string): boolean {
+  return pack.coverage.nakshatra === 'IMPLEMENTED' && pack.nakshatra.avoid.includes(nakshatraName);
+}
+
+/** Same authority rule as isAuthoritativeAvoidNakshatra() above, for Tithi
+ * (RegExp-pattern matched, consistent with how the rest of this module
+ * matches Tithi values against a rule pack's favorable/avoid tiers). */
+export function isAuthoritativeAvoidTithi(pack: MuhurtaRulePack, tithiName: string): boolean {
+  return pack.coverage.tithi === 'IMPLEMENTED' && pack.tithi.avoid.some((pattern) => pattern.test(tithiName));
+}
+
+/**
  * Generic rule-pack-driven Muhurta evaluator -- the "evaluate rules
  * generically" counterpart to muhurtaEngine.ts's legacy, per-family
  * evaluateMuhurta(). Reuses the exact same yoga/karana/window helper

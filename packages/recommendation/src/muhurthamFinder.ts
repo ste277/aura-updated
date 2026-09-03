@@ -115,9 +115,10 @@ import { isInauspiciousCommencementWindow } from '../../panchang/src/windows';
 import { isValidCalendarDateString, localDateTimeToUTC } from '../../panchang/src/localDate';
 import { FULL_ACTIVITY_CATALOG } from './personalizedTasks';
 import { ACTIVITY_DEFINITIONS, ActivityDefinition } from './activityDefinitions';
-import { computeMuhurtaSupportLevel, resolveMuhurtaRulePack, AURA_MUHURTA_METHODOLOGY_ID } from '../../muhurta/src/muhurtaRulePacks';
+import { computeMuhurtaSupportLevel, resolveMuhurtaRulePack, isAuthoritativeAvoidNakshatra, isAuthoritativeAvoidTithi, AURA_MUHURTA_METHODOLOGY_ID } from '../../muhurta/src/muhurtaRulePacks';
 import { evaluatePersonalMuhurtaFit, AURA_PERSONAL_FIT_METHODOLOGY_ID, PersonalMuhurtaContext } from './auraFitEngine';
 import { getTaraBala } from '../../vedic/src/natalChart';
+import { findNextTransition, getNakshatra, getTithi } from '../../vedic/src/panchangElements';
 import type { MuhurtaClassification, MuhurtaReason } from '../../muhurta/src/activityOntology';
 
 /**
@@ -331,6 +332,91 @@ function spanOverlapsInauspiciousCommencementWindow(startISO: string, endISO: st
 }
 
 /**
+ * Ceremonial Muhurtham Eligibility + Interval Safety V1: bounds how many
+ * transition instants spanOverlapsAuthoritativeEventAvoid() will walk per
+ * factor (Nakshatra, Tithi) for one candidate span. A Nakshatra averages
+ * ~24h and a Tithi ~23.6h; Muhurtham Finder's longest allowed duration is
+ * 360 minutes (6h -- resolveMuhurthamSearchParams' own cap below), so a real
+ * candidate should never touch more than 2 distinct values of either
+ * factor. This guard is a defensive ceiling against a pathological/
+ * near-zero-length transition gap, never expected to bind in practice.
+ */
+const TRANSITION_WALK_GUARD = 8;
+
+/**
+ * Walks `getValue`/`findNextTransitionOf` forward from `start`, collecting
+ * every distinct value the half-open interval [start, end) actually
+ * touches -- reusing the exact same canonical transition-search primitive
+ * (findNextTransition, packages/vedic/src/panchangElements.ts) already used
+ * for Panchang display data, never a second astronomy algorithm and never
+ * per-minute sampling. Shared by both Nakshatra and Tithi in
+ * spanOverlapsAuthoritativeEventAvoid() below. findNextTransition('TITHI')
+ * can throw if no transition is found within its own 2-day search bound
+ * (see its doc comment) -- defensively treated the same as "no further
+ * transition to walk to" rather than propagating and failing the whole
+ * candidate evaluation.
+ */
+function valuesTouchedByInterval(start: Date, end: Date, getValue: (d: Date) => string, findNextTransitionOf: (d: Date) => Date): string[] {
+  const endMs = end.getTime();
+  const values: string[] = [];
+  let cursor = start;
+  for (let i = 0; i < TRANSITION_WALK_GUARD; i++) {
+    values.push(getValue(cursor));
+    if (cursor.getTime() >= endMs) break;
+    let next: Date | undefined;
+    try {
+      next = findNextTransitionOf(cursor);
+    } catch {
+      break;
+    }
+    if (!next || next.getTime() <= cursor.getTime() || next.getTime() >= endMs) break;
+    cursor = next;
+  }
+  return values;
+}
+
+/**
+ * Ceremonial Muhurtham Eligibility core check: true if [start, end) touches
+ * ANY Nakshatra or Tithi value the resolved rule pack genuinely,
+ * intent-specifically (coverage === 'IMPLEMENTED') marks as avoid for this
+ * occasion -- see isAuthoritativeAvoidNakshatra/isAuthoritativeAvoidTithi
+ * (packages/muhurta/src/muhurtaRulePacks.ts), the single authority this
+ * derives from rather than duplicating. A REUSABLE_BASE_RULE or MISSING
+ * pack (every Muhurtham-eligible activity except Griha Pravesh today)
+ * short-circuits to false immediately -- this never hard-rejects on
+ * generic/reused data, only on data that was actually sourced FOR this
+ * specific event.
+ *
+ * This is what turns the Jyeshtha-plus-everything-else-positive case (a
+ * Griha Pravesh candidate landing on Jyeshtha, an authoritative avoid
+ * Nakshatra for this occasion, while Yoga/Karana/Abhijit are each
+ * independently positive) into a hard exclusion instead of a scoring input
+ * an unrelated positive factor can outweigh: this check runs in
+ * evaluateMuhurthamCandidate() below BEFORE that candidate's computed score
+ * is allowed to stand, so there is no modifier large enough to offset it.
+ *
+ * Exported for direct unit testing in isolation from the rest of the search
+ * pipeline -- same convention as blendStartSensitiveScore()/blendSharedDelta()
+ * above/below.
+ */
+export function spanOverlapsAuthoritativeEventAvoid(start: Date, end: Date, classification: MuhurtaClassification): boolean {
+  const pack = resolveMuhurtaRulePack(classification);
+  if (pack.coverage.nakshatra !== 'IMPLEMENTED' && pack.coverage.tithi !== 'IMPLEMENTED') return false;
+
+  if (pack.coverage.nakshatra === 'IMPLEMENTED') {
+    const nakshatras = valuesTouchedByInterval(start, end, (d) => getNakshatra(d).name, (d) => findNextTransition(d, 'NAKSHATRA'));
+    if (nakshatras.some((n) => isAuthoritativeAvoidNakshatra(pack, n))) return true;
+  }
+
+  if (pack.coverage.tithi === 'IMPLEMENTED') {
+    const tithis = valuesTouchedByInterval(start, end, (d) => getTithi(d).name, (d) => findNextTransition(d, 'TITHI'));
+    if (tithis.some((t) => isAuthoritativeAvoidTithi(pack, t))) return true;
+  }
+
+  return false;
+}
+
+/**
  * Evaluates one candidate per actual solar-window boundary for the date
  * (reusing computeAssistantWindows()/buildSlotCandidates() -- the exact
  * candidate-window generation Timing Search and the legacy planner already
@@ -391,6 +477,11 @@ function evaluateMuhurthamCandidate(
   const candidate = evaluateTimingCandidate({ profile, start, durationMinutes, context });
   if (candidate.conflicts?.some((c) => c.type === 'FRICTION_WINDOW_BLOCKED')) return null;
   if (isCommencementSensitive && spanOverlapsInauspiciousCommencementWindow(candidate.start, candidate.end, panchangWindows)) return null;
+  // Ceremonial Muhurtham Eligibility + Interval Safety V1: checked against
+  // the FULL requested-duration span (never the shortened commencementProbe
+  // below) so a longer booking that only starts clean but runs into an
+  // avoid Nakshatra/Tithi partway through is still excluded.
+  if (classification && spanOverlapsAuthoritativeEventAvoid(new Date(candidate.start), new Date(candidate.end), classification)) return null;
 
   if (!isStartSensitive) return candidate;
 
