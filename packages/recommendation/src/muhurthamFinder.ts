@@ -119,6 +119,8 @@ import { computeMuhurtaSupportLevel, resolveMuhurtaRulePack, isAuthoritativeAvoi
 import { evaluatePersonalMuhurtaFit, AURA_PERSONAL_FIT_METHODOLOGY_ID, PersonalMuhurtaContext } from './auraFitEngine';
 import { getTaraBala } from '../../vedic/src/natalChart';
 import { findNextTransition, getNakshatra, getTithi, getYoga, getKarana } from '../../vedic/src/panchangElements';
+import { isCombust, findNextCombustionTransition } from '../../vedic/src/planetaryCombustion';
+import { spanOverlapsProhibitedPeriod } from './ceremonialPeriods';
 import type { MuhurtaClassification, MuhurtaReason } from '../../muhurta/src/activityOntology';
 
 /**
@@ -442,6 +444,46 @@ export function spanOverlapsAuthoritativeEventAvoid(start: Date, end: Date, clas
   return false;
 }
 
+export type PlanetaryCombustionReasonCode = 'GURU_ASTA' | 'SHUKRA_ASTA';
+
+export interface PlanetaryCombustionResult {
+  eligible: boolean;
+  reason?: PlanetaryCombustionReasonCode;
+}
+
+/**
+ * Marriage Muhurtham Required Eligibility V1: planetary combustion (Guru/
+ * Shukra Asta) hard eligibility for [start, end), gated on
+ * coverage.planetaryCombustion (only Marriage today) and the resolved
+ * pack's own `combustionRules` -- never hardcoded to a specific activity
+ * here, reusable by any future intent that declares the same requirement.
+ * Checked against the candidate's start instant AND any combustion-state
+ * transition inside the span (never only the start) -- combustion periods
+ * last weeks, so a candidate almost always falls uniformly inside or
+ * outside one, but the entry-instant edge case is real and must still be
+ * caught, the same full-span discipline every other authoritative check in
+ * this file already applies.
+ */
+export function spanOverlapsPlanetaryCombustion(start: Date, end: Date, classification: MuhurtaClassification): PlanetaryCombustionResult {
+  const pack = resolveMuhurtaRulePack(classification);
+  if (pack.coverage.planetaryCombustion !== 'IMPLEMENTED' || !pack.combustionRules) return { eligible: true };
+
+  for (const graha of pack.combustionRules) {
+    const reason: PlanetaryCombustionReasonCode = graha === 'Jupiter' ? 'GURU_ASTA' : 'SHUKRA_ASTA';
+    if (isCombust(graha, start)) return { eligible: false, reason };
+    try {
+      const transition = findNextCombustionTransition(graha, start);
+      if (transition.getTime() < end.getTime() && isCombust(graha, new Date(transition.getTime() + 1))) {
+        return { eligible: false, reason };
+      }
+    } catch {
+      // No combustion-state change within the search bound -- nothing to flag.
+    }
+  }
+
+  return { eligible: true };
+}
+
 /**
  * Evaluates one candidate per actual solar-window boundary for the date
  * (reusing computeAssistantWindows()/buildSlotCandidates() -- the exact
@@ -508,6 +550,13 @@ function evaluateMuhurthamCandidate(
   // below) so a longer booking that only starts clean but runs into an
   // avoid Nakshatra/Tithi partway through is still excluded.
   if (classification && spanOverlapsAuthoritativeEventAvoid(new Date(candidate.start), new Date(candidate.end), classification)) return null;
+  // Marriage Muhurtham Required Eligibility V1: same full-span, before-
+  // scoring-is-trusted discipline as the check immediately above -- checked
+  // against the FULL requested-duration span, using the Event Location
+  // context (never the owner's Timing Location read independently; this
+  // `context` IS the effective search location, already resolved upstream).
+  if (classification && !spanOverlapsProhibitedPeriod(new Date(candidate.start), new Date(candidate.end), classification, { latitude: context.latitude, longitude: context.longitude, timezone: context.timezone }).eligible) return null;
+  if (classification && !spanOverlapsPlanetaryCombustion(new Date(candidate.start), new Date(candidate.end), classification).eligible) return null;
 
   if (!isStartSensitive) return candidate;
 

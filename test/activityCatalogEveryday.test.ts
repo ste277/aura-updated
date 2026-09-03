@@ -50,10 +50,16 @@ check(
     return depth === 'LIGHT' || depth === 'STANDARD';
   })
 );
+// Marriage Muhurtham Required Eligibility V1 added 'marriage' to this set
+// (Chaturmas/Kharmas/Adhika Masa + Guru/Shukra Asta coverage now
+// IMPLEMENTED) -- the everyday/Product-Structure-V2 catalog itself is
+// still unaffected, which is what this file's own suite is really about;
+// this single assertion is updated to match, not the everyday-activity
+// behavior under test elsewhere in this file.
 check(
-  'SUPPORTED_MUHURTHAM_ACTIVITY_IDS is unchanged from the pre-V2 ceremonial/important set',
+  'SUPPORTED_MUHURTHAM_ACTIVITY_IDS is unchanged from the pre-V2 ceremonial/important set, plus the now-SUPPORTED marriage activity',
   JSON.stringify([...SUPPORTED_MUHURTHAM_ACTIVITY_IDS].sort()) ===
-    JSON.stringify(['business-start', 'financial-decision', 'griha-pravesh', 'new-beginning', 'property-purchase', 'start-journey'].sort())
+    JSON.stringify(['business-start', 'financial-decision', 'griha-pravesh', 'marriage', 'new-beginning', 'property-purchase', 'start-journey'].sort())
 );
 
 // ============================================================

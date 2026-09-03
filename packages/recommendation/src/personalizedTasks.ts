@@ -190,7 +190,13 @@ const EXTENDED_ACTIVITY_CATALOG: ActivityProfile[] = [
   // routing behavior as an unintended side effect of registering this
   // catalog entry -- explicitly out of scope for this PR, deferred to when
   // canonical Marriage Muhurtham support is complete.
-  { id: 'marriage', title: 'Marriage', description: 'Choose a supportive window for a wedding ceremony.', category: 'RELATIONSHIP', nature: 'CONNECT', recommendedWindowTypes: ['ABHIJIT'], acceptableWindowTypes: ['NEUTRAL'], avoidWindowTypes: ['RAHU_KALAM', 'YAMA'], significance: 'HIGH', requiresFreshStart: true, aliases: [], icon: '💒' },
+  // Marriage Muhurtham Required Eligibility V1: description deliberately
+  // says "core ceremony", not "wedding" alone -- a Marriage Muhurtham
+  // result is a narrow critical-rite window (traditionally the Saptapadi/
+  // core rite instant), never the duration of the whole event, and the
+  // smallest necessary copy change here prevents a 30-60 min result being
+  // misread as "how long your wedding is." No Finder redesign.
+  { id: 'marriage', title: 'Marriage', description: 'Find a suitable window for the core ceremony.', category: 'RELATIONSHIP', nature: 'CONNECT', recommendedWindowTypes: ['ABHIJIT'], acceptableWindowTypes: ['NEUTRAL'], avoidWindowTypes: ['RAHU_KALAM', 'YAMA'], significance: 'HIGH', requiresFreshStart: true, aliases: [], icon: '💒' },
 
   // -- Product Structure V2: everyday moments (brief section 5) -- LIGHT/
   // STANDARD depth only (activityDefinitions.ts's ACTIVITY_METADATA below),

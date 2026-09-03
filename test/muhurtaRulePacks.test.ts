@@ -284,7 +284,8 @@ check('normalizeTithiId handles single-word tithi names', normalizeTithiId('Amav
 // flows through automatically with zero Finder-specific code changes.
 check('griha-pravesh now appears in Muhurtham Finder\'s eligibility list automatically (no Finder code change)', isSupportedMuhurthamActivity('griha-pravesh'));
 check('engagement still does NOT appear (still PARTIAL)', !isSupportedMuhurthamActivity('engagement'));
-check('Finder eligibility list is now 6 activities', SUPPORTED_MUHURTHAM_ACTIVITY_IDS.length === 6);
+// Marriage Muhurtham Required Eligibility V1 added a 7th (marriage).
+check('Finder eligibility list is now 7 activities', SUPPORTED_MUHURTHAM_ACTIVITY_IDS.length === 7);
 
 const grihaSearchContext = { now: new Date('2026-08-21T04:00:00.000Z'), latitude: 13.0827, longitude: 80.2707, timezone: 'Asia/Kolkata', tzOffsetMinutes: 330 };
 const grihaSearchResult = findMuhurthams({ activityId: 'griha-pravesh', dateRange: { start: '2026-09-01', end: '2026-09-30' }, timePreference: 'ANY', durationMinutes: 90, limit: 30, context: grihaSearchContext });
