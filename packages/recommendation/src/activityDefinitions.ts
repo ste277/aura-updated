@@ -471,7 +471,7 @@ const ACTIVITY_METADATA: Record<string, ActivityMetadataInput> = {
     evaluationDepth: 'CEREMONIAL',
     timingSensitivity: { start: 'HIGH', duration: 'MEDIUM', end: 'LOW' },
     socialMode: 'FAMILY',
-    notes: 'No existing family-level rule data legitimately targets a home-entry ceremony (HOME has no MuhurtaRulePack base -- see muhurtaRulePacks.ts). Tithi/Nakshatra coverage is honestly MISSING rather than borrowed from an unrelated family (e.g. ADMIN); resolves to PARTIAL support and is hidden from Muhurtham Finder until dedicated data is added.',
+    notes: 'Has its own dedicated (IMPLEMENTED) Tithi/Nakshatra rule pack -- see GRIHA_PRAVESH in muhurtaRulePacks.ts, sourced from multi-source web research (August 2026) -- rather than a borrowed family base (HOME has no generic MuhurtaRulePack base). Resolves to SUPPORTED and is exposed in Muhurtham Finder.',
     immediateAction: 'PLAN',
   },
 
