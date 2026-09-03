@@ -266,19 +266,32 @@ for (const id of HIGH_SIGNIFICANCE_GUARD_IDS) {
 // safety check now correctly excludes those candidates for this
 // commencement-sensitive activity, so genuinely clean dates (09-04, 09-13,
 // 09-14, 09-21, 09-28) surface instead, at correspondingly lower but
-// honest scores. Re-captured post-fix; still proves determinism/stability
-// going forward, not "never changes" -- see this PR's own dedicated
-// Muhurtham/Gulika regression suite below for the actual override proof.
+// honest scores.
+//
+// Re-captured again under Ceremonial Muhurtham Boundary Augmentation V1 --
+// deliberately: that PR adds Nakshatra/Tithi transition instants (and
+// authoritative-avoid latest-valid-start instants) as extra candidate
+// starts, on top of (never instead of) the existing solar-window/Neutral-
+// gap starts. 2026-09-12 (best window lands exactly on a Uttara
+// Phalguni/Shukla Dvitiya transition -- both favorable for Griha Pravesh)
+// and 2026-09-17 (lands on an Anuradha transition -- also favorable) now
+// score 7.3/7.1 respectively via genuinely new, previously-unsampled
+// candidates, displacing 09-04 (6.9) and 09-28 (7.0) from the top-5. Same
+// additive scoring formula, same eligibility rules -- only candidate
+// DISCOVERY changed. Re-captured post-augmentation; still proves
+// determinism/stability going forward, not "never changes" -- see
+// test/muhurthamBoundaryAugmentation.test.ts for the dedicated
+// augmentation regression suite.
 // ============================================================
 
 {
   const grihaPravesh = findMuhurthams({ activityId: 'griha-pravesh', dateRange: { start: '2026-09-01', end: '2026-09-30' }, timePreference: 'ANY', durationMinutes: 60, limit: 5, context: chennaiContext });
   const captured = [
-    { date: '2026-09-04', score: 6.9, rating: 'ACCEPTABLE', start: '2026-09-03T18:30:00.000Z' },
+    { date: '2026-09-12', score: 7.3, rating: 'FAVORABLE', start: '2026-09-12T02:18:00.000Z' },
     { date: '2026-09-13', score: 7.3, rating: 'FAVORABLE', start: '2026-09-13T08:08:00.000Z' },
     { date: '2026-09-14', score: 7.3, rating: 'FAVORABLE', start: '2026-09-13T18:30:00.000Z' },
+    { date: '2026-09-17', score: 7.1, rating: 'FAVORABLE', start: '2026-09-17T05:20:00.000Z' },
     { date: '2026-09-21', score: 7.3, rating: 'FAVORABLE', start: '2026-09-20T23:39:00.000Z' },
-    { date: '2026-09-28', score: 7, rating: 'FAVORABLE', start: '2026-09-27T18:30:00.000Z' },
   ];
   const actual = grihaPravesh.dates.map((d) => ({ date: d.date, score: d.score, rating: d.rating, start: d.bestWindow.start }));
   check('Griha Pravesh Muhurtham Finder output is deterministic (re-captured after Inauspicious Period Precedence Fix V1)', JSON.stringify(actual) === JSON.stringify(captured));
