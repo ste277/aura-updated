@@ -495,16 +495,13 @@ export function PlanWithAuraView({ onTimingSearch, onViewDay, onPlanLogged, time
       trackEvent('PLAN_RESULT_SELECTED', { metadata: { mode: planMode } });
       return saved;
     } catch {
-      const replacedPlanId = reschedulingPlanId;
-      setSavedPlans((plans) => [
-        { ...plan, status: 'UPCOMING' },
-        ...plans.filter((item) => item.id !== plan.id && item.id !== replacedPlanId),
-      ]);
-      setExpandedPlanId(plan.id);
-      setReschedulingPlanId(null);
-      setShowAllPlans(true);
-      triggerHaptic('success');
-      return plan;
+      // The plan was NOT actually persisted -- do not add it to savedPlans
+      // (that previously faked a success the server never confirmed, so the
+      // plan silently vanished on the next page load/GET /api/plans). Surface
+      // a real error instead, using this view's existing `error` state.
+      setError('Unable to save this plan. Please check your connection and try again.');
+      triggerHaptic('warning');
+      throw new Error('Unable to save plan.');
     }
   };
 
@@ -826,6 +823,9 @@ export function PlanWithAuraView({ onTimingSearch, onViewDay, onPlanLogged, time
       const saved = await handleSavePlan(plan);
       setPlannedOpportunityKeys((prev) => new Set(prev).add(key));
       setPlannedActivityIdByKey((prev) => ({ ...prev, [key]: saved.id }));
+    } catch {
+      // handleSavePlan() already surfaced this via the `error` state -- leave
+      // the opportunity unmarked (not planned) so the user can retry.
     } finally {
       setSavingOpportunityKey(null);
     }
