@@ -239,27 +239,36 @@ check('25c. Engagement does NOT inherit Marriage\'s Yoga/Karana authoritative co
 check('25d. Engagement still resolves to PARTIAL (unaffected by Marriage work)', computeMuhurtaSupportLevel(engagementDefinition.muhurta, engagementPack) === 'PARTIAL');
 
 // ============================================================
-// 26/33. THE CRITICAL GATING REGRESSION: Marriage has a dedicated,
-// genuinely IMPLEMENTED rule pack, yet remains excluded from
-// SUPPORTED_MUHURTHAM_ACTIVITY_IDS / Muhurtham Finder -- the canonical
-// support-level mechanism, not a UI-level special case.
+// 26/33. THE GATING MECHANISM, RECONFIRMED AFTER ACTIVATION: this PR
+// (Marriage Muhurtham Foundation V1 / PR A) proved Marriage's dedicated
+// rule pack correctly stayed gated (PARTIAL) while periodExclusion/
+// planetaryCombustion were MISSING. Marriage Muhurtham Required
+// Eligibility V1 (PR B) has since genuinely implemented both -- see
+// test/marriageRequiredEligibility.test.ts for that PR's own full
+// coverage. These assertions are updated to confirm the SAME
+// coverage-driven mechanism correctly flipped Marriage to SUPPORTED once
+// (and only once) the real hard-rejection paths existed -- not a UI-level
+// special case, and not a premature flip either.
 // ============================================================
 
 check('26/33a. Marriage rule pack has BOTH Tithi and Nakshatra genuinely dedicated (bothDedicated bar cleared)', marriagePack.coverage.tithi === 'IMPLEMENTED' && marriagePack.coverage.nakshatra === 'IMPLEMENTED');
-check('26/33b. Marriage rule pack declares requiresPeriodExclusion (traditionally required, not yet implemented)', marriagePack.requiresPeriodExclusion === true);
-check('26/33c. Marriage rule pack declares requiresPlanetaryCombustion (traditionally required, not yet implemented)', marriagePack.requiresPlanetaryCombustion === true);
-check('26/33d. Marriage rule pack coverage.periodExclusion is MISSING (PR B not yet done)', marriagePack.coverage.periodExclusion === 'MISSING');
-check('26/33e. Marriage rule pack coverage.planetaryCombustion is MISSING (PR B not yet done)', marriagePack.coverage.planetaryCombustion === 'MISSING');
-check('26/33f. Despite dedicated Tithi/Nakshatra/Yoga/Karana coverage, computeMuhurtaSupportLevel resolves Marriage to PARTIAL, not SUPPORTED', computeMuhurtaSupportLevel(marriageClassification, marriagePack) === 'PARTIAL');
-check('26/33g. Marriage is NOT in SUPPORTED_MUHURTHAM_ACTIVITY_IDS', !SUPPORTED_MUHURTHAM_ACTIVITY_IDS.includes('marriage'));
-check('26/33h. isSupportedMuhurthamActivity(\'marriage\') is false', !isSupportedMuhurthamActivity('marriage'));
+check('26/33b. Marriage rule pack declares requiresPeriodExclusion', marriagePack.requiresPeriodExclusion === true);
+check('26/33c. Marriage rule pack declares requiresPlanetaryCombustion', marriagePack.requiresPlanetaryCombustion === true);
+check('26/33d. Marriage rule pack coverage.periodExclusion is now IMPLEMENTED (PR B)', marriagePack.coverage.periodExclusion === 'IMPLEMENTED');
+check('26/33e. Marriage rule pack coverage.planetaryCombustion is now IMPLEMENTED (PR B)', marriagePack.coverage.planetaryCombustion === 'IMPLEMENTED');
+check('26/33f. With dedicated Tithi/Nakshatra/Yoga/Karana coverage AND period/combustion coverage, computeMuhurtaSupportLevel now resolves Marriage to SUPPORTED', computeMuhurtaSupportLevel(marriageClassification, marriagePack) === 'SUPPORTED');
+check('26/33g. Marriage is now in SUPPORTED_MUHURTHAM_ACTIVITY_IDS', SUPPORTED_MUHURTHAM_ACTIVITY_IDS.includes('marriage'));
+check('26/33h. isSupportedMuhurthamActivity(\'marriage\') is now true', isSupportedMuhurthamActivity('marriage'));
+// 2026-09-01..05 falls inside the ratified Chaturmas window (see PR B), so
+// a real search over it legitimately returns zero dates -- the point here
+// is that it no longer THROWS (marriage is genuinely searchable now).
 let findMuhurthamsThrewForMarriage = false;
 try {
   findMuhurthams({ activityId: 'marriage', dateRange: { start: '2026-09-01', end: '2026-09-05' }, context: { now: new Date(), latitude: 13.0827, longitude: 80.2707, timezone: 'Asia/Kolkata', tzOffsetMinutes: 330 } });
 } catch {
   findMuhurthamsThrewForMarriage = true;
 }
-check('26/33i. findMuhurthams throws for marriage (gated, not searchable)', findMuhurthamsThrewForMarriage);
+check('26/33i. findMuhurthams no longer throws for marriage (genuinely searchable; a Chaturmas-window range legitimately returns zero dates instead)', !findMuhurthamsThrewForMarriage);
 
 // ============================================================
 // 27. Finder UI does not expose Marriage.

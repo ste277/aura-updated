@@ -67,7 +67,13 @@ check('A real catalog activity with PARTIAL rule-pack support (engagement) is re
 // activity with its own dedicated rule pack, but stays PARTIAL (gated
 // pending PR B's month-exclusion/planetary-combustion work) -- same
 // rejection path as engagement above, not the "unknown activity" path.
-check('A real catalog activity with PARTIAL rule-pack support pending PR B (marriage) is rejected, not silently exposed', buildMuhurthamSearchRequest({ activityId: 'marriage', dateRange: { start: '2026-09-01', end: '2026-09-05' } }, chennaiContext).ok === false);
+// Marriage Muhurtham Required Eligibility V1: marriage was PARTIAL/gated
+// (see the superseded assertion this replaces) until period-exclusion and
+// planetary-combustion coverage were genuinely implemented -- it is now
+// SUPPORTED, per the same coverage-driven mechanism this file's other
+// SUPPORTED-activity assertions already exercise (business-start/
+// property-purchase/griha-pravesh below).
+check('The now-SUPPORTED marriage activity (Chaturmas/Kharmas/Adhika Masa + Guru/Shukra Asta now implemented) is accepted', buildMuhurthamSearchRequest({ activityId: 'marriage', dateRange: { start: '2026-09-01', end: '2026-09-05' } }, chennaiContext).ok === true);
 check('The new business-start activity (SUPPORTED via reused rule-pack base) is accepted', buildMuhurthamSearchRequest({ activityId: 'business-start', dateRange: { start: '2026-09-01', end: '2026-09-05' } }, chennaiContext).ok === true);
 check('The new property-purchase activity (SUPPORTED via reused rule-pack base) is accepted', buildMuhurthamSearchRequest({ activityId: 'property-purchase', dateRange: { start: '2026-09-01', end: '2026-09-05' } }, chennaiContext).ok === true);
 // griha-pravesh reached SUPPORTED in the Muhurta Knowledge Pack V1 PR (genuine

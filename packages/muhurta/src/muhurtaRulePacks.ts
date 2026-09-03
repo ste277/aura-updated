@@ -83,6 +83,7 @@ import { getFamilyRuleData, evaluatePanchangaNakshatraTithiReasons, evaluatePanc
 import { deriveLegacyMuhurtaText } from './muhurtaReasonFormat';
 import type { SolarWindowType } from '../../panchang/src/windows';
 import type { MuhurtaClassification, MuhurtaFamily, MuhurtaIntent, MuhurtaReason } from './activityOntology';
+import type { CombustibleGraha } from '../../vedic/src/planetaryCombustion';
 
 /** The single methodology identifier every rule pack in this file belongs
  * to -- see this module's doc comment ("The Aura Muhurta methodology"). */
@@ -219,6 +220,28 @@ export interface MuhurtaRulePack {
   /** Same gating principle as requiresPeriodExclusion, for planetary
    * combustion (Guru/Shukra Asta) -- see coverage.planetaryCombustion. */
   requiresPlanetaryCombustion: boolean;
+  /** Marriage Muhurtham Required Eligibility V1: which period-exclusion
+   * sub-rules this pack's traditional rule set actually requires, when
+   * requiresPeriodExclusion is true -- consumed by
+   * spanOverlapsProhibitedPeriod() (packages/recommendation/src/
+   * ceremonialPeriods.ts), never hardcoded to a specific activity there.
+   * Undefined for every pack that doesn't declare requiresPeriodExclusion. */
+  periodRules?: {
+    /** Sidereal Rashi indices (0-11) the Sun must not be transiting
+     * (Kharmas) -- Marriage: Dhanu(8)/Meena(11). */
+    kharmasRashiIndices: number[];
+    /** Whether the lunar Chaturmas window (Devshayani-Prabodhini Ekadashi,
+     * Smarta convention, GENERAL scope -- see this pack's own sources)
+     * applies. */
+    chaturmas: boolean;
+    /** Whether Adhika Masa is an independent exclusion. */
+    adhikaMasa: boolean;
+  };
+  /** Which planets' combustion (Asta) this pack's traditional rule set
+   * requires, when requiresPlanetaryCombustion is true -- consumed by
+   * spanOverlapsPlanetaryCombustion() (muhurthamFinder.ts). Undefined for
+   * every pack that doesn't declare requiresPlanetaryCombustion. */
+  combustionRules?: CombustibleGraha[];
   /** The legacy family this pack's tithi/nakshatra data was sourced from, if
    * any (undefined when coverage is MISSING or the pack is intent-specific).
    * Exposed for audit/debugging, not consumed by scoring. */
@@ -414,7 +437,7 @@ const MARRIAGE_SOURCES: MuhurtaRuleSource[] = [
  * overrides are optional -- Griha Pravesh has none (its own Yoga/Karana
  * coverage stays at the generic/global level only); Marriage supplies both.
  */
-const INTENT_RULE_PACKS: Partial<Record<MuhurtaIntent, { tithi: MuhurtaFactorRuleSet<RegExp>; nakshatra: MuhurtaFactorRuleSet<string>; yoga?: MuhurtaFactorRuleSet<string>; karana?: MuhurtaFactorRuleSet<string>; requiresPeriodExclusion?: boolean; requiresPlanetaryCombustion?: boolean; sources: MuhurtaRuleSource[]; confidence: MuhurtaRuleConfidence; scope: MuhurtaRuleScope; lastReviewed: string; reasonNote: string; note: string }>> = {
+const INTENT_RULE_PACKS: Partial<Record<MuhurtaIntent, { tithi: MuhurtaFactorRuleSet<RegExp>; nakshatra: MuhurtaFactorRuleSet<string>; yoga?: MuhurtaFactorRuleSet<string>; karana?: MuhurtaFactorRuleSet<string>; requiresPeriodExclusion?: boolean; requiresPlanetaryCombustion?: boolean; periodRules?: { kharmasRashiIndices: number[]; chaturmas: boolean; adhikaMasa: boolean }; combustionRules?: CombustibleGraha[]; sources: MuhurtaRuleSource[]; confidence: MuhurtaRuleConfidence; scope: MuhurtaRuleScope; lastReviewed: string; reasonNote: string; note: string }>> = {
   GRIHA_PRAVESH: {
     tithi: {
       favorable: [/Dvitiya/, /Tritiya/, /Panchami/, /Dashami/, /Ekadashi/, /Trayodashi/],
@@ -452,12 +475,40 @@ const INTENT_RULE_PACKS: Partial<Record<MuhurtaIntent, { tithi: MuhurtaFactorRul
     },
     requiresPeriodExclusion: true,
     requiresPlanetaryCombustion: true,
+    // Marriage Muhurtham Required Eligibility V1: both capabilities now
+    // genuinely exist (spanOverlapsProhibitedPeriod / spanOverlapsPlanetaryCombustion,
+    // packages/recommendation/src/ceremonialPeriods.ts and
+    // muhurthamFinder.ts respectively) -- see this file's own coverage
+    // derivation in resolveMuhurtaRulePack, which flips
+    // coverage.periodExclusion/planetaryCombustion to IMPLEMENTED exactly
+    // when these fields are present, never before.
+    periodRules: {
+      // Dhanu(8)/Meena(11) -- Kharmas. Sourced to Dharma Sindhu (via
+      // DrikPanchang's own stated methodology); see the Methodology
+      // Resolution audit's Kharmas section.
+      kharmasRashiIndices: [8, 11],
+      // Devshayani (Ashadha Shukla) -> Prabodhini (Kartika Shukla)
+      // Ekadashi, Smarta end-date convention, GENERAL scope -- an
+      // intentional, documented V1 default (not a universal rule; does
+      // not represent Tamil Aadi/Purattasi practice or the Vaishnava
+      // end-date variant). See findChaturmasWindow() and the Methodology
+      // Resolution audit's Chaturmas section for the full ratified spec.
+      chaturmas: true,
+      // Dharma Sindhu Ch.3: Vivaha explicitly prohibited during Mala Masa
+      // (Adhika Masa) -- an independent exclusion, not merely a
+      // month-boundary bookkeeping concern.
+      adhikaMasa: true,
+    },
+    // Surya Siddhanta Ch.9 (Udayastadhikara) 6-8 -- see
+    // packages/vedic/src/planetaryCombustion.ts for exact thresholds and
+    // sourcing notes.
+    combustionRules: ['Jupiter', 'Venus'],
     sources: MARRIAGE_SOURCES,
     confidence: 'CURATED',
     scope: 'GENERAL',
     lastReviewed: '2026-09-03',
     reasonNote: 'supports an auspicious union',
-    note: 'Genuine intent-specific Tithi/Nakshatra/Yoga/Karana data for Marriage, sourced independently from Griha Pravesh (see MARRIAGE_SOURCES) -- not a relaxed reuse of another ceremony\'s lists. Deliberately still gated out of SUPPORTED (see requiresPeriodExclusion/requiresPlanetaryCombustion and computeMuhurtaSupportLevel) until whole-month/period exclusion and planetary-combustion eligibility exist (PR B) -- Tithi/Nakshatra/Yoga/Karana coverage alone is not, per the audit, sufficient evidence for a defensible Marriage Muhurtham result.',
+    note: 'Genuine intent-specific Tithi/Nakshatra/Yoga/Karana data for Marriage, sourced independently from Griha Pravesh (see MARRIAGE_SOURCES) -- not a relaxed reuse of another ceremony\'s lists. periodRules/combustionRules (Kharmas/Chaturmas/Adhika Masa, Guru/Shukra Asta) were resolved by a dedicated methodology audit (Surya Siddhanta 9.6-9.8 for combustion thresholds; Dharma Sindhu Ch.3 for Kharmas/Adhika Masa; Chaturmas implemented as a documented GENERAL-scope default, not a universal rule) -- see that audit for full sourcing and evidence grading.',
   },
 };
 
@@ -499,6 +550,8 @@ export function resolveMuhurtaRulePack(classification: MuhurtaClassification): M
       karana: intentOverride.karana ?? { favorable: [], avoid: [] },
       requiresPeriodExclusion: intentOverride.requiresPeriodExclusion ?? false,
       requiresPlanetaryCombustion: intentOverride.requiresPlanetaryCombustion ?? false,
+      periodRules: intentOverride.periodRules,
+      combustionRules: intentOverride.combustionRules,
       coverage: {
         tithi: 'IMPLEMENTED',
         nakshatra: 'IMPLEMENTED',
@@ -507,11 +560,13 @@ export function resolveMuhurtaRulePack(classification: MuhurtaClassification): M
         windows: 'IMPLEMENTED',
         yogaAuthoritative: intentOverride.yoga ? 'IMPLEMENTED' : 'MISSING',
         karanaAuthoritative: intentOverride.karana ? 'IMPLEMENTED' : 'MISSING',
-        // Marriage Muhurtham Foundation V1 (PR A): no intent has either of
-        // these implemented yet -- see MuhurtaRulePackCoverage's own doc
-        // comment. PR B's job.
-        periodExclusion: 'MISSING',
-        planetaryCombustion: 'MISSING',
+        // Marriage Muhurtham Required Eligibility V1: IMPLEMENTED exactly
+        // when the pack's own periodRules/combustionRules are present --
+        // i.e. only once the actual hard-rejection primitives genuinely
+        // exist and are wired in (spanOverlapsProhibitedPeriod /
+        // spanOverlapsPlanetaryCombustion). Never flipped ahead of that.
+        periodExclusion: intentOverride.periodRules ? 'IMPLEMENTED' : 'MISSING',
+        planetaryCombustion: intentOverride.combustionRules ? 'IMPLEMENTED' : 'MISSING',
       },
       reasonNote: intentOverride.reasonNote,
       metadata: { methodologyVersion: AURA_MUHURTA_METHODOLOGY_ID, sources: intentOverride.sources, confidence: intentOverride.confidence, scope: intentOverride.scope, lastReviewed: intentOverride.lastReviewed, note: intentOverride.note },

@@ -120,14 +120,20 @@ check('findMuhurthams throws for a genuinely unknown (not-in-catalog) activityId
 // activity" path, since it genuinely exists in the catalog now. See
 // test/marriageMuhurthamFoundation.test.ts for the full gating regression.
 check('marriage is a real catalog activity, not unknown', getActivityDefinition('marriage') !== undefined);
-check('marriage is still NOT in SUPPORTED_MUHURTHAM_ACTIVITY_IDS (gated pending PR B)', !isSupportedMuhurthamActivity('marriage'));
-let threwForMarriageGated = false;
+// Marriage Muhurtham Required Eligibility V1 (PR B) implemented the two
+// coverage gaps (periodExclusion, planetaryCombustion) this block originally
+// documented as pending -- Marriage is now genuinely SUPPORTED, matching
+// every other ceremonial activity's path through findMuhurthams. See
+// test/marriageMuhurthamFoundation.test.ts's "26/33" block for the full
+// gating-to-supported regression.
+check('marriage is now in SUPPORTED_MUHURTHAM_ACTIVITY_IDS (PR B implemented period exclusion + planetary combustion)', isSupportedMuhurthamActivity('marriage'));
+let threwForMarriageSupported = false;
 try {
   findMuhurthams({ activityId: 'marriage', dateRange: { start: '2026-09-01', end: '2026-09-05' }, context: chennaiContext });
 } catch {
-  threwForMarriageGated = true;
+  threwForMarriageSupported = true;
 }
-check('findMuhurthams throws for marriage via the same not-yet-supported path as tea-break (PARTIAL, not unknown)', threwForMarriageGated);
+check('findMuhurthams no longer throws for marriage (genuinely searchable via the same SUPPORTED path as other ceremonial activities)', !threwForMarriageSupported);
 
 // ============================================================
 // REJECTS/PENALIZES BLOCKERS, PRESERVES CAUTIONS (no new scoring formula)
@@ -291,14 +297,16 @@ check('Every returned date across the DST boundary is within the requested range
 // KNOWN ACTIVITY USES ONTOLOGY (no invented rules)
 // ============================================================
 
-// Griha Pravesh reached SUPPORTED in the Muhurta Knowledge Pack V1 PR (see
-// test/muhurtaRulePacks.test.ts for the full rule-pack/coverage detail) and
-// now appears in Finder automatically -- Engagement remains PARTIAL.
+// Griha Pravesh reached SUPPORTED in the Muhurta Knowledge Pack V1 PR, and
+// Marriage reached SUPPORTED in Marriage Muhurtham Required Eligibility V1
+// (period-exclusion + planetary-combustion coverage now IMPLEMENTED) -- see
+// test/muhurtaRulePacks.test.ts and test/marriageRequiredEligibility.test.ts
+// for the full rule-pack/coverage detail. Engagement remains PARTIAL.
 check(
   'Finder eligibility is metadata-derived: DEEP/CEREMONIAL, non-AMBIGUOUS, SUPPORTED-level activities only',
-  SUPPORTED_MUHURTHAM_ACTIVITY_IDS.length === 6 &&
+  SUPPORTED_MUHURTHAM_ACTIVITY_IDS.length === 7 &&
     JSON.stringify([...SUPPORTED_MUHURTHAM_ACTIVITY_IDS].sort()) ===
-      JSON.stringify(['business-start', 'financial-decision', 'griha-pravesh', 'new-beginning', 'property-purchase', 'start-journey'])
+      JSON.stringify(['business-start', 'financial-decision', 'griha-pravesh', 'marriage', 'new-beginning', 'property-purchase', 'start-journey'].sort())
 );
 check('Engagement remains PARTIAL and hidden from Finder (no intent-specific rule pack yet)', !isSupportedMuhurthamActivity('engagement'));
 check('Griha Pravesh is now exposed in Finder (SUPPORTED as of the Muhurta Knowledge Pack V1 PR)', isSupportedMuhurthamActivity('griha-pravesh'));
