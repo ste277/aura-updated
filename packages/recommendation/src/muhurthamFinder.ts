@@ -107,7 +107,7 @@
  * server-side callers) are trusted to pass reasonable ranges.
  */
 
-import { DailyAssistantContext, TaskProfile, buildSlotCandidates, computeAssistantWindows, isTimingSensitiveActivity, matchesTimePreference, profileFromActivity } from './dailyAssistant';
+import { DailyAssistantContext, SlotCandidate, TaskProfile, buildSlotCandidates, computeAssistantWindows, isTimingSensitiveActivity, matchesTimePreference, profileFromActivity } from './dailyAssistant';
 import { evaluateTimingCandidate, TimingCandidate, TimingCandidateLabel, TimingTimePreference } from './timingSearch';
 import { formatMinutes } from '../../astronomy/src/ephemeris';
 import { getPanchangForDate, PanchangWindowSpan } from '../../panchang/src/panchangDay';
@@ -494,6 +494,154 @@ function evaluateMuhurthamCandidate(
   return { ...candidate, score: blendedScore, label: labelForBlendedScore(blendedScore) };
 }
 
+/**
+ * Ceremonial Muhurtham Boundary Augmentation V1: bounds how many transitions
+ * collectTransitionCandidateMinutes() will walk per factor (Nakshatra,
+ * Tithi) within one local day. Real rate is ~1/day each (see the audit's
+ * corrected measurement); this is a defensive ceiling, not expected to bind.
+ */
+const TRANSITION_ENUMERATION_GUARD = 3;
+
+/** "YYYY-MM-DD" -> the next calendar date's "YYYY-MM-DD", timezone-independent
+ * (mirrors enumerateLocalDates()'s own UTC-arithmetic approach above). */
+function nextLocalDateStr(dateStr: string): string {
+  const d = new Date(Date.parse(`${dateStr}T00:00:00Z`) + 86_400_000);
+  return `${d.getUTCFullYear()}-${String(d.getUTCMonth() + 1).padStart(2, '0')}-${String(d.getUTCDate()).padStart(2, '0')}`;
+}
+
+/**
+ * Walks findNextTransition(cursor, kind) forward from `dayStart`, collecting
+ * every transition instant strictly inside the half-open local-day interval
+ * [dayStart, dayEnd) -- reusing the exact same canonical transition-search
+ * primitive (packages/vedic/src/panchangElements.ts) already used by PR #53's
+ * spanOverlapsAuthoritativeEventAvoid(), never a second astronomy algorithm
+ * and never per-minute scanning. Guards against findNextTransition('TITHI')
+ * returning the same instant again when called exactly at a transition (the
+ * audit's finding) with the identical `next <= cursor` non-advancing check
+ * valuesTouchedByInterval() already established -- same pattern, not a new
+ * one. findNextTransition('TITHI') can also throw if no transition is found
+ * within its own 2-day search bound; treated the same as "nothing further to
+ * find" rather than propagating.
+ */
+function collectTransitionInstants(dayStart: Date, dayEnd: Date, kind: 'TITHI' | 'NAKSHATRA'): Date[] {
+  const instants: Date[] = [];
+  let cursor = dayStart;
+  for (let i = 0; i < TRANSITION_ENUMERATION_GUARD; i++) {
+    let next: Date;
+    try {
+      next = findNextTransition(cursor, kind);
+    } catch {
+      break;
+    }
+    if (next.getTime() <= cursor.getTime()) break;
+    if (next.getTime() >= dayEnd.getTime()) break;
+    instants.push(next);
+    cursor = next;
+  }
+  return instants;
+}
+
+/**
+ * Ceremonial Muhurtham Boundary Augmentation V1 (see this file's module doc
+ * comment additions and the "Ceremonial Candidate Discovery V1" audit this
+ * PR responds to): returns extra local-minute-of-day candidate starts, on
+ * top of (never instead of -- see findBestWindowsForDate below) the existing
+ * solar-window/Neutral-gap starts buildSlotCandidates() already produces.
+ *
+ * Two kinds of extra starts:
+ *  1. Every Nakshatra and Tithi transition instant inside this local day
+ *     becomes its own candidate start (rounded to the same whole-minute
+ *     granularity every existing candidate already uses) -- this is what
+ *     lets the Finder discover a favorable-Nakshatra/Tithi stretch, or a
+ *     scoring change, that happens to fall in the *interior* of a wide
+ *     solar-window/Neutral-gap span rather than only at its edge (the
+ *     audit's 2026-09-13 Hasta->Chitra and 2026-09-26 Karana-adjacent
+ *     findings). This is a plain, undirected walk of every transition --
+ *     no favorable/avoid filtering -- the exact same "simplicity over
+ *     premature filtering" the audit recommended, since a candidate that
+ *     turns out to land on an avoid value is simply rejected normally by
+ *     the existing evaluator/eligibility check below, same as any other
+ *     candidate.
+ *  2. For a transition whose NEW value is an authoritative event-specific
+ *     avoid Nakshatra/Tithi (per PR #53's own isAuthoritativeAvoidNakshatra/
+ *     isAuthoritativeAvoidTithi -- the single authority this derives from,
+ *     never duplicated), an additional "latest valid start" candidate at
+ *     `transitionMinute - durationMinutes` is added when that computed
+ *     minute is still >= 0 (i.e. stays within THIS local day -- deliberately
+ *     narrow and skipped rather than wrapped/clamped into the previous
+ *     calendar day, per the brief's explicit "no fragile cross-day
+ *     behavior" gate). This is the smallest form of duration-aware
+ *     discovery: "what's the last full-duration block that avoids this
+ *     specific avoid period," derived only from the two factors that
+ *     already carry hard eligibility -- never from Rahu/Yama/Gulika or any
+ *     other boundary (brief section 27).
+ *
+ * No new astronomy, no new scoring, no favorable/avoid direction filtering
+ * on kind (1) -- the existing evaluator (evaluateMuhurthamCandidate below)
+ * is the ONLY thing that ever accepts or rejects any of these starts, exactly
+ * like every solar-window/Neutral-gap start already flowing through the same
+ * loop. Returns whole-minute integers in [0, 1439], deduplicated against
+ * `existingMinutes` (exact-integer-timestamp dedup -- see this function's
+ * own doc note on precision above; no fuzzy tolerance).
+ */
+export function collectPanchangaTransitionCandidateMinutes(
+  dateStr: string,
+  context: DailyAssistantContext,
+  durationMinutes: number,
+  classification: MuhurtaClassification | undefined,
+  existingMinutes: Set<number>
+): number[] {
+  const dayStart = localDateTimeToUTC(dateStr, '00:00', context.timezone);
+  const dayEnd = localDateTimeToUTC(nextLocalDateStr(dateStr), '00:00', context.timezone);
+  const dayStartMs = dayStart.getTime();
+
+  const pack = classification ? resolveMuhurtaRulePack(classification) : undefined;
+  const minutes = new Set<number>();
+
+  // Two deliberately OPPOSITE roundings of the same instant, both driven by
+  // the Boundary Augmentation audit's finding that findNextTransition's own
+  // sub-second precision band can place an instant a few hundred ms before
+  // the value genuinely changes (e.g. 06:22:00.466Z transitioning
+  // Ashlesha->Magha, or 07:01:45.410Z transitioning Trayodashi->Chaturdashi):
+  //  - ceilMinuteOfDay: a transition-becomes-a-candidate-START minute must
+  //    round FORWARD (never land ON the still-old value) -- Math.round can
+  //    round backward onto :00.000 while the true change hasn't happened
+  //    yet, defeating the point of an avoid-transition-derived candidate.
+  //  - floorMinuteOfDay: a "latest valid start" candidate's END (transition
+  //    minute) must round BACKWARD (never claim clean past the point the
+  //    true avoid value has already begun) -- ceiling here would let the
+  //    derived candidate's span end a few seconds INTO the true avoid
+  //    period, which spanOverlapsAuthoritativeEventAvoid then (correctly)
+  //    rejects, silently wasting the discovery attempt.
+  const ceilMinuteOfDay = (instant: Date) => Math.ceil((instant.getTime() - dayStartMs) / 60000);
+  const floorMinuteOfDay = (instant: Date) => Math.floor((instant.getTime() - dayStartMs) / 60000);
+
+  const addMinute = (minute: number) => {
+    if (minute < 0 || minute >= 1440) return;
+    if (existingMinutes.has(minute) || minutes.has(minute)) return;
+    minutes.add(minute);
+    existingMinutes.add(minute);
+  };
+
+  for (const kind of ['NAKSHATRA', 'TITHI'] as const) {
+    for (const instant of collectTransitionInstants(dayStart, dayEnd, kind)) {
+      addMinute(ceilMinuteOfDay(instant));
+
+      if (!pack) continue;
+      const isAvoid = kind === 'NAKSHATRA'
+        ? isAuthoritativeAvoidNakshatra(pack, getNakshatra(instant).name)
+        : isAuthoritativeAvoidTithi(pack, getTithi(instant).name);
+      if (!isAvoid) continue;
+
+      const latestValidStartMinute = floorMinuteOfDay(instant) - durationMinutes;
+      if (latestValidStartMinute < 0) continue;
+      addMinute(latestValidStartMinute);
+    }
+  }
+
+  return [...minutes];
+}
+
 function findBestWindowsForDate(
   profile: TaskProfile,
   dateStr: string,
@@ -504,7 +652,26 @@ function findBestWindowsForDate(
   classification: MuhurtaClassification | undefined
 ): { best: SampledCandidate; alternates: SampledCandidate[] } | null {
   const dayContext: DailyAssistantContext = { ...context, now: localDateTimeToUTC(dateStr, '12:00', context.timezone) };
-  const slotCandidates = buildSlotCandidates(computeAssistantWindows(dayContext));
+  const solarSlotCandidates = buildSlotCandidates(computeAssistantWindows(dayContext));
+
+  // Ceremonial Muhurtham Boundary Augmentation V1: Muhurtham-specific extra
+  // candidate starts (Nakshatra/Tithi transitions + authoritative-avoid
+  // latest-valid-starts), added ONLY here -- buildSlotCandidates() itself is
+  // untouched, so Timing Search/Day Builder/Good Right Now/the legacy
+  // planner (all of which also call buildSlotCandidates()) are unaffected.
+  const existingMinutes = new Set(solarSlotCandidates.map((slot) => slot.startMinute));
+  const transitionMinutes = collectPanchangaTransitionCandidateMinutes(dateStr, context, durationMinutes, classification, existingMinutes);
+  // endMinute: 1440 (end of local day) rather than a derived "containing
+  // window" boundary -- deliberately generous. type/label are placeholders:
+  // evaluateMuhurthamCandidate() -> evaluateTimingCandidate() independently
+  // re-resolves the REAL window context (windowType/windowLabel/score/
+  // reasons) from the candidate's own start instant via its own
+  // resolveOverlappingCandidate() call (timingSearch.ts) -- it never reads
+  // the SlotCandidate that triggered evaluation, only its own recomputed
+  // `start`. So these fields are inert here (confirmed by tracing
+  // evaluateTimingCandidate's implementation) -- see brief section 14.
+  const transitionSlotCandidates: SlotCandidate[] = transitionMinutes.map((startMinute) => ({ startMinute, endMinute: 1440, type: 'NEUTRAL', label: 'Neutral Flow' }));
+  const slotCandidates = [...solarSlotCandidates, ...transitionSlotCandidates];
 
   const candidates: SampledCandidate[] = [];
   for (const slot of slotCandidates) {

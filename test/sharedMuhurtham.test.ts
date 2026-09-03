@@ -188,39 +188,61 @@ if (okResult.status === 'OK') {
 
 // ============================================================
 // REGRESSION FIXTURE: real, observed SHARED re-ranking relative to GENERAL,
-// for start-journey / Sep 2026 / Chennai / user natal Bharani (index 2) /
-// partner natal Rohini (index 4). 2026-09-17's general score (7.3) beats
-// 2026-09-07's (7.0), but the user's AND partner's Tara Bala are both
-// CAUTION on 09-17 and both SUPPORT on 09-07 -- so SHARED flips the
-// ranking: 09-07 (sharedScore 7.1, GOOD_SHARED_FIT, both SUPPORT) outranks
-// 09-17 (sharedScore 7.0, MIXED_SHARED_FIT, both CAUTION). Observed
-// directly via probing, locked in here as a regression fixture -- not
-// manufactured to fit the formula.
+// for start-journey / Chennai / user natal Bharani (index 2) / partner natal
+// Rohini (index 4). 2026-09-17's general score (7.5) beats 2026-10-30's
+// (7.3), but the user's AND partner's Tara Bala are both CAUTION on 09-17
+// and both SUPPORT on 10-30 -- so SHARED flips the ranking: 10-30
+// (sharedScore 7.4, GOOD_SHARED_FIT, both SUPPORT) outranks 09-17
+// (sharedScore 7.2, MIXED_SHARED_FIT, both CAUTION). Observed directly via
+// probing, locked in here as a regression fixture -- not manufactured to
+// fit the formula. Uses a dedicated Sep-Oct query (not the 30-day
+// `general`/`okResult` above) purely to have a wide enough pool to find a
+// clean flip pair -- MAX_LIMIT (muhurthamFinder.ts) still caps each query
+// at 20 dates, so this stays within the same display-cap semantics as
+// every other check in this file.
 //
-// Re-picked from the original 2026-09-22/09-23 pair (which no longer
-// flips, and no date in this 30-day/activity/pair combination currently
-// reaches STRONG_SHARED_FIT at all) after Inauspicious Period Precedence
-// Fix V1 corrected several dates' general scores -- same qualitative
-// story (a lower-scoring-but-Tara-supportive date overtakes a higher-
-// scoring-but-Tara-cautious one), same activity/user/partner, just a
-// different pair of real dates and a MIXED-vs-GOOD (rather than
-// MIXED-vs-STRONG) qualitative jump.
+// Re-picked from the previous 2026-09-07/09-17 pair (which no longer flips
+// -- 09-17's own general score rose from 7.3 to 7.5 once Ceremonial
+// Muhurtham Boundary Augmentation V1 gave it a genuinely better,
+// previously-unsampled candidate, closing the gap Tara Bala could
+// overcome) -- same qualitative story (a lower-scoring-but-Tara-supportive
+// date overtakes a higher-scoring-but-Tara-cautious one), same activity/
+// user/partner, just a different second date and a wider search range.
 // ============================================================
 
-if (okResult.status === 'OK') {
-  const sep17General = general.dates.find((d) => d.date === '2026-09-17');
-  const sep07General = general.dates.find((d) => d.date === '2026-09-07');
-  check('Regression fixture: 2026-09-17 generally outscores 2026-09-07', Boolean(sep17General && sep07General && sep17General.score > sep07General.score));
+const flipFixtureRange = { start: '2026-09-01', end: '2026-10-31' };
+const generalForFlip = findMuhurthams({
+  activityId: 'start-journey',
+  dateRange: flipFixtureRange,
+  timePreference: 'ANY',
+  durationMinutes: 60,
+  limit: 20,
+  context: baseContext,
+});
+const sharedForFlip = findSharedMuhurthams({
+  activityId: 'start-journey',
+  dateRange: flipFixtureRange,
+  timePreference: 'ANY',
+  durationMinutes: 60,
+  limit: 20,
+  context: { ...baseContext, personalContext: userContext },
+  partner,
+});
 
-  const sep17 = okResult.dates.find((d) => d.date === '2026-09-17');
-  const sep07 = okResult.dates.find((d) => d.date === '2026-09-07');
+if (sharedForFlip.status === 'OK') {
+  const sep17General = generalForFlip.dates.find((d) => d.date === '2026-09-17');
+  const oct30General = generalForFlip.dates.find((d) => d.date === '2026-10-30');
+  check('Regression fixture: 2026-09-17 generally outscores 2026-10-30', Boolean(sep17General && oct30General && sep17General.score > oct30General.score));
+
+  const sep17 = sharedForFlip.dates.find((d) => d.date === '2026-09-17');
+  const oct30 = sharedForFlip.dates.find((d) => d.date === '2026-10-30');
   check('Regression fixture: 2026-09-17 has a CAUTION Tara for both the user and the partner', sep17?.user.factors.taraBala?.status === 'CAUTION' && sep17?.person.factors.taraBala?.status === 'CAUTION');
-  check('Regression fixture: 2026-09-07 has a SUPPORT Tara for both the user and the partner', sep07?.user.factors.taraBala?.status === 'SUPPORT' && sep07?.person.factors.taraBala?.status === 'SUPPORT');
-  check('Regression fixture: SHARED flips this -- 2026-09-07 outranks 2026-09-17 in sharedScore despite a lower general score', Boolean(sep17 && sep07 && sep07.sharedScore > sep17.sharedScore));
-  check('Regression fixture: the rating itself differs qualitatively (MIXED vs GOOD), not just a marginal score wobble', sep17?.rating === 'MIXED_SHARED_FIT' && sep07?.rating === 'GOOD_SHARED_FIT');
+  check('Regression fixture: 2026-10-30 has a SUPPORT Tara for both the user and the partner', oct30?.user.factors.taraBala?.status === 'SUPPORT' && oct30?.person.factors.taraBala?.status === 'SUPPORT');
+  check('Regression fixture: SHARED flips this -- 2026-10-30 outranks 2026-09-17 in sharedScore despite a lower general score', Boolean(sep17 && oct30 && oct30.sharedScore > sep17.sharedScore));
+  check('Regression fixture: the rating itself differs qualitatively (MIXED vs GOOD), not just a marginal score wobble', sep17?.rating === 'MIXED_SHARED_FIT' && oct30?.rating === 'GOOD_SHARED_FIT');
 
-  const generalOrderTop5 = [...general.dates].sort((a, b) => b.score - a.score).slice(0, 5).map((d) => d.date);
-  const sharedOrderTop5 = [...okResult.dates].sort((a, b) => b.sharedScore - a.sharedScore).slice(0, 5).map((d) => d.date);
+  const generalOrderTop5 = [...generalForFlip.dates].sort((a, b) => b.score - a.score).slice(0, 5).map((d) => d.date);
+  const sharedOrderTop5 = [...sharedForFlip.dates].sort((a, b) => b.sharedScore - a.sharedScore).slice(0, 5).map((d) => d.date);
   check('SHARED re-ranks relative to GENERAL for the same activity/range/pair (genuine re-ranking, not just a label change)', JSON.stringify(generalOrderTop5) !== JSON.stringify(sharedOrderTop5));
 }
 
