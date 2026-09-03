@@ -4,7 +4,7 @@ import { getSavedPersonForOwner, getUserById } from '../../../lib/db';
 import { parseJsonObject } from '../../../lib/request';
 import { resolveTzOffsetMinutes } from '../../../lib/timezone';
 import { buildPersonalMuhurtaContextForUser, natalContextFromBirthDetails } from '../../../lib/natalContext';
-import { handleMuhurthamSearchBody, handleSharedMuhurthamSearchBody } from '../../../lib/muhurthamSearchRequest';
+import { handleMuhurthamSearchBody, handleSharedMuhurthamSearchBody, validateEventLocation } from '../../../lib/muhurthamSearchRequest';
 import { DailyAssistantContext } from '../../../../../packages/recommendation/src/dailyAssistant';
 import { recordProductEvent } from '../../../lib/productEvents';
 
@@ -58,6 +58,19 @@ export async function POST(req: NextRequest) {
   const body = await parseJsonObject(req);
   if (!body) return NextResponse.json({ error: 'A valid JSON request body is required.' }, { status: 400 });
 
+  // Event Location Search V1: an optional, request-local override of WHERE
+  // this Muhurtham's Panchang/solar context is computed for -- never the
+  // user's persistent Timing Location (never mutated here), and never the
+  // birth/natal fields personalContext is built from below (see that
+  // variable's own construction, untouched by this). Absent -> fall back to
+  // the user's Timing Location, byte-identical to before this PR. Present
+  // but invalid -> a 400, never a silent fallback (the caller explicitly
+  // asked for a specific location; silently substituting a different one
+  // would be more surprising than refusing the request).
+  const eventLocationResult = validateEventLocation(body.eventLocation);
+  if (!eventLocationResult.ok) return NextResponse.json({ error: eventLocationResult.error }, { status: 400 });
+  const effectiveLocation = eventLocationResult.location ?? { cityName: user.cityName, latitude: user.latitude, longitude: user.longitude, timezone: user.timezone };
+
   const now = new Date();
   // GENERAL requests never need natal data (brief section 10) -- only
   // resolve/compute it (a real natal-chart calculation, not free) when
@@ -67,10 +80,18 @@ export async function POST(req: NextRequest) {
   const requestsNatalData = body.scope === 'PERSONAL' || body.scope === 'SHARED';
   const context: DailyAssistantContext = {
     now,
-    latitude: user.latitude,
-    longitude: user.longitude,
-    timezone: user.timezone,
-    tzOffsetMinutes: resolveTzOffsetMinutes(user.timezone, now),
+    latitude: effectiveLocation.latitude,
+    longitude: effectiveLocation.longitude,
+    timezone: effectiveLocation.timezone,
+    // Must track the EFFECTIVE (possibly Event Location) timezone, not
+    // always user.timezone -- a Kochi event context must never carry a
+    // Dubai UTC offset (brief section 7).
+    tzOffsetMinutes: resolveTzOffsetMinutes(effectiveLocation.timezone, now),
+    // Natal/personal context is built from the user's BIRTH fields only
+    // (buildPersonalMuhurtaContextForUser reads user.birthDate/birthTime/
+    // birthTimezone exclusively -- see that function's own implementation),
+    // never from `effectiveLocation` -- Event Location can never influence
+    // Janma Nakshatra/Tara Bala, structurally, by construction.
     personalContext: requestsNatalData ? buildPersonalMuhurtaContextForUser(user) : undefined,
   };
 

@@ -9,14 +9,29 @@ import { getActivityDefinition } from '../../../packages/recommendation/src/acti
 import { formatMuhurtaReason } from '../../../packages/muhurta/src/muhurtaReasonFormat';
 import { saveUpcomingPlanFromCandidate } from './PlanWithAuraView';
 import { ExploreModeToggle } from './ExploreModeToggle';
-import { getDatePartsInTimezone } from '../lib/timezone';
+import { getDatePartsInTimezone, isValidIanaTimezone, searchTimezones, TimezoneOption } from '../lib/timezone';
+import { CITY_OPTIONS, CityOption, formatCoordinateDirectional, isValidCustomLocation, parseCoordinate } from '../lib/cities';
 import { RELATIONSHIP_ICON, RELATIONSHIP_LABEL, SavedPersonRow } from './PeopleView';
 import { trackEvent } from '../lib/trackEvent';
 import * as theme from './theme';
 import { SegmentedControl } from './ui';
 
-interface MuhurthamFinderViewProps {
+/** Event Location Search V1: the user's persistent everyday Timing
+ * Location -- passed down as a full location object (not just a timezone
+ * string) so this view can both display it as the default and, when the
+ * user searches without an Event Location override, know exactly what was
+ * used. Named `timingLocation`, never `currentLocation` (the app has no
+ * GPS -- brief section 20) or `location` (ambiguous against Event
+ * Location). */
+export interface MuhurthamTimingLocation {
+  cityName: string;
+  latitude: number;
+  longitude: number;
   timezone: string;
+}
+
+interface MuhurthamFinderViewProps {
+  timingLocation: MuhurthamTimingLocation;
   onBack: () => void;
   onOpenPanchangCalendar: () => void;
   /** Jump the existing Panchang Calendar to a specific date (brief section
@@ -165,8 +180,43 @@ function formatClockTime(iso: string, timezone: string): string {
   return new Date(iso).toLocaleTimeString('en-US', { timeZone: timezone, hour: 'numeric', minute: '2-digit' });
 }
 
-export function MuhurthamFinderView({ timezone, onBack, onOpenPanchangCalendar, onViewFullPanchang, onPlanLogged, onOpenBirthProfile, onOpenPeople, initialActivityId, initialActivityIdKey }: MuhurthamFinderViewProps) {
-  const todayDateStr = useMemo(() => getDatePartsInTimezone(timezone, new Date()).dateStr, [timezone]);
+export function MuhurthamFinderView({ timingLocation, onBack, onOpenPanchangCalendar, onViewFullPanchang, onPlanLogged, onOpenBirthProfile, onOpenPeople, initialActivityId, initialActivityIdKey }: MuhurthamFinderViewProps) {
+  // Event Location Search V1: `eventLocation` is the CURRENT picker
+  // selection (null = "use my Timing Location") -- it only ever affects the
+  // NEXT search. `resultEventLocation` is a SNAPSHOT of whatever
+  // eventLocation was active at the moment the currently-displayed result
+  // set was successfully returned -- every date/time formatting call below
+  // reads from this snapshot, never from the live `eventLocation` picker
+  // state, specifically so that changing the picker after a search does NOT
+  // relabel already-displayed results (brief section 23: "Displayed
+  // timezone/location must describe the search that ACTUALLY produced the
+  // results, not merely current picker state").
+  const [eventLocation, setEventLocation] = useState<CityOption | null>(null);
+  const [resultEventLocation, setResultEventLocation] = useState<CityOption | null>(null);
+  const [showEventLocationPicker, setShowEventLocationPicker] = useState(false);
+
+  /** The location that actually produced whatever is currently displayed
+   * (or, before any search, what a search would currently use) -- falls
+   * back to the Timing Location exactly when no Event Location override is
+   * active, which is also the byte-equivalence case (brief section 2). */
+  const displayLocation: MuhurthamTimingLocation = resultEventLocation ?? timingLocation;
+  const displayTimezone = displayLocation.timezone;
+  /** Whether the CURRENTLY DISPLAYED results (if any) were computed with a
+   * custom Event Location rather than the Timing Location -- gates Save/
+   * Share (brief section 36/37: neither PlannedActivity nor AuraMoment can
+   * currently persist a non-Timing-Location timezone, so saving/sharing a
+   * custom-Event-Location result would silently display the wrong local
+   * time later). Search itself is never blocked -- only these two
+   * downstream actions on an already-Event-Location result. */
+  const saveAndShareDisabled = resultEventLocation !== null;
+  const saveAndShareDisabledReason = "Saving and sharing aren't available yet for a custom event location -- switch to your Timing Location to save this time.";
+
+  /** The location the NEXT search will actually use -- the live picker
+   * selection, never the stale result snapshot above. Drives the date
+   * picker's own "today" reference and the request body. */
+  const searchLocation: MuhurthamTimingLocation = eventLocation ?? timingLocation;
+
+  const todayDateStr = useMemo(() => getDatePartsInTimezone(searchLocation.timezone, new Date()).dateStr, [searchLocation.timezone]);
 
   const [activityId, setActivityId] = useState<SupportedMuhurthamActivityId>('start-journey');
   const [rangePreset, setRangePreset] = useState<RangePreset>('NEXT_MONTH');
@@ -210,6 +260,7 @@ export function MuhurthamFinderView({ timezone, onBack, onOpenPanchangCalendar, 
     setResult(null);
     setPersonalOutcome(null);
     setSharedOutcome(null);
+    setResultEventLocation(null);
     setActiveRange(null);
     setShowAllDates(false);
     setShowAcceptable(false);
@@ -242,6 +293,11 @@ export function MuhurthamFinderView({ timezone, onBack, onOpenPanchangCalendar, 
     setShowAcceptable(false);
     setExpandedDate(null);
     trackEvent('MUHURTHAM_SEARCH_STARTED', { metadata: { scope: searchScope, activityId } });
+    // Event Location Search V1: capture the picker's CURRENT selection at
+    // the moment the search is fired -- this is what actually gets sent and
+    // (on success) snapshotted as resultEventLocation, so a picker change
+    // made WHILE this request is in flight can never relabel it.
+    const requestEventLocation = eventLocation;
     try {
       const res = await fetch('/api/muhurtham-search', {
         method: 'POST',
@@ -254,6 +310,11 @@ export function MuhurthamFinderView({ timezone, onBack, onOpenPanchangCalendar, 
           limit: SEARCH_LIMIT,
           scope: searchScope,
           savedPersonId: searchScope === 'SHARED' ? selectedPersonId : undefined,
+          // Omitted entirely when using the Timing Location (brief section
+          // 19: "prefer omitting eventLocation entirely from the request"),
+          // for the clearest possible backward-compatible path -- an absent
+          // key, not an explicit null/undefined value.
+          ...(requestEventLocation ? { eventLocation: requestEventLocation } : {}),
         }),
       });
       const data = await res.json();
@@ -271,11 +332,13 @@ export function MuhurthamFinderView({ timezone, onBack, onOpenPanchangCalendar, 
         setPersonalOutcome(null);
         setSharedOutcome(null);
       }
+      setResultEventLocation(requestEventLocation);
       setActiveRange(range);
     } catch (err) {
       setResult(null);
       setPersonalOutcome(null);
       setSharedOutcome(null);
+      setResultEventLocation(null);
       setActiveRange(null);
       setError(err instanceof Error ? err.message : 'Unable to search for favorable dates.');
     } finally {
@@ -317,6 +380,7 @@ export function MuhurthamFinderView({ timezone, onBack, onOpenPanchangCalendar, 
     setResult(null);
     setPersonalOutcome(null);
     setSharedOutcome(null);
+    setResultEventLocation(null);
     setActiveRange(null);
     setError('');
     trackEvent('MUHURTHAM_SCOPE_SELECTED', { metadata: { scope: nextScope } });
@@ -508,6 +572,31 @@ export function MuhurthamFinderView({ timezone, onBack, onOpenPanchangCalendar, 
           ))}
         </div>
 
+        <div style={{ ...sectionKickerStyle, marginTop: 16 }}>Event location</div>
+        {!showEventLocationPicker ? (
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 10, marginTop: 10 }}>
+            <span style={{ fontSize: 13, color: '#dbe7f4' }}>
+              {eventLocation ? eventLocation.cityName : <>Using your Timing Location: {timingLocation.cityName}</>}
+            </span>
+            <button type="button" onClick={() => setShowEventLocationPicker(true)} style={{ ...linkButtonStyle, fontSize: 12, flexShrink: 0 }}>
+              {eventLocation ? 'Change' : 'Choose another location'}
+            </button>
+          </div>
+        ) : (
+          <EventLocationPicker
+            timingLocation={timingLocation}
+            initialLocation={eventLocation}
+            onDone={(location) => {
+              setEventLocation(location);
+              setShowEventLocationPicker(false);
+            }}
+            onCancel={() => setShowEventLocationPicker(false)}
+          />
+        )}
+        <p style={{ fontSize: 11, color: '#64748b', marginTop: 6, lineHeight: 1.5 }}>
+          Used to calculate Panchang and Muhurtham timings for this event.
+        </p>
+
         <button
           type="button"
           onClick={handleFindDates}
@@ -521,11 +610,12 @@ export function MuhurthamFinderView({ timezone, onBack, onOpenPanchangCalendar, 
 
       {scope === 'GENERAL' && result && (
         <>
+          {resultEventLocation && <EventLocationResultBanner location={resultEventLocation} reason={saveAndShareDisabledReason} />}
           {visibleDates.length === 0 ? (
             <section style={cardStyle}>
               <div style={{ fontSize: 14, fontWeight: 800 }}>No strongly favorable dates were found in this range.</div>
               <p style={{ fontSize: 12, color: '#94a3b8', marginTop: 6, lineHeight: 1.5 }}>
-                {activity?.title ?? 'This activity'} didn&apos;t have a clearly favorable window between {formatDateLabel(result.dateRange.start, timezone)} and {formatDateLabel(result.dateRange.end, timezone)}.
+                {activity?.title ?? 'This activity'} didn&apos;t have a clearly favorable window between {formatDateLabel(result.dateRange.start, displayTimezone)} and {formatDateLabel(result.dateRange.end, displayTimezone)}.
               </p>
               <div style={{ display: 'flex', flexDirection: 'column', gap: 8, marginTop: 14 }}>
                 {canExpandRange && (
@@ -551,7 +641,7 @@ export function MuhurthamFinderView({ timezone, onBack, onOpenPanchangCalendar, 
                 <MuhurthamDateCard
                   key={date.date}
                   date={date}
-                  timezone={timezone}
+                  timezone={displayTimezone}
                   expanded={expandedDate === date.date}
                   onToggleExpand={() => setExpandedDate((current) => (current === date.date ? null : date.date))}
                   onViewFullPanchang={() => onViewFullPanchang(date.date)}
@@ -562,6 +652,7 @@ export function MuhurthamFinderView({ timezone, onBack, onOpenPanchangCalendar, 
                   onShareMoment={(window) => handleShareMoment(date.date, window, 'GENERAL', date.rating)}
                   sharingWindowKey={sharingWindowKey}
                   shareFeedback={shareFeedback}
+                  saveAndShareDisabled={saveAndShareDisabled}
                 />
               ))}
               {!showAllDates && visibleDates.length > DEFAULT_DISPLAY_COUNT && (
@@ -593,11 +684,12 @@ export function MuhurthamFinderView({ timezone, onBack, onOpenPanchangCalendar, 
 
       {scope === 'PERSONAL' && personalOk && (
         <>
+          {resultEventLocation && <EventLocationResultBanner location={resultEventLocation} reason={saveAndShareDisabledReason} />}
           {personalVisible.length === 0 ? (
             <section style={cardStyle}>
               <div style={{ fontSize: 14, fontWeight: 800 }}>No strongly favorable dates were found in this range.</div>
               <p style={{ fontSize: 12, color: '#94a3b8', marginTop: 6, lineHeight: 1.5 }}>
-                {activity?.title ?? 'This activity'} didn&apos;t have a clearly favorable window for you between {formatDateLabel(personalOk.dateRange.start, timezone)} and {formatDateLabel(personalOk.dateRange.end, timezone)}.
+                {activity?.title ?? 'This activity'} didn&apos;t have a clearly favorable window for you between {formatDateLabel(personalOk.dateRange.start, displayTimezone)} and {formatDateLabel(personalOk.dateRange.end, displayTimezone)}.
               </p>
               <div style={{ display: 'flex', flexDirection: 'column', gap: 8, marginTop: 14 }}>
                 {canExpandRange && (
@@ -623,7 +715,7 @@ export function MuhurthamFinderView({ timezone, onBack, onOpenPanchangCalendar, 
                 <MuhurthamPersonalDateCard
                   key={date.date}
                   date={date}
-                  timezone={timezone}
+                  timezone={displayTimezone}
                   isBestForYou={index === 0}
                   expanded={expandedDate === date.date}
                   onToggleExpand={() => setExpandedDate((current) => (current === date.date ? null : date.date))}
@@ -635,6 +727,7 @@ export function MuhurthamFinderView({ timezone, onBack, onOpenPanchangCalendar, 
                   onShareMoment={(window) => handleShareMoment(date.date, window, 'PERSONAL', date.rating)}
                   sharingWindowKey={sharingWindowKey}
                   shareFeedback={shareFeedback}
+                  saveAndShareDisabled={saveAndShareDisabled}
                 />
               ))}
               {!showAllDates && personalVisible.length > DEFAULT_DISPLAY_COUNT && (
@@ -678,11 +771,12 @@ export function MuhurthamFinderView({ timezone, onBack, onOpenPanchangCalendar, 
 
       {scope === 'SHARED' && sharedOk && (
         <>
+          {resultEventLocation && <EventLocationResultBanner location={resultEventLocation} reason={saveAndShareDisabledReason} />}
           {sharedVisible.length === 0 ? (
             <section style={cardStyle}>
               <div style={{ fontSize: 14, fontWeight: 800 }}>No strongly favorable dates were found in this range.</div>
               <p style={{ fontSize: 12, color: '#94a3b8', marginTop: 6, lineHeight: 1.5 }}>
-                {activity?.title ?? 'This activity'} didn&apos;t have a clearly favorable window for both of you between {formatDateLabel(sharedOk.dateRange.start, timezone)} and {formatDateLabel(sharedOk.dateRange.end, timezone)}.
+                {activity?.title ?? 'This activity'} didn&apos;t have a clearly favorable window for both of you between {formatDateLabel(sharedOk.dateRange.start, displayTimezone)} and {formatDateLabel(sharedOk.dateRange.end, displayTimezone)}.
               </p>
               <div style={{ display: 'flex', flexDirection: 'column', gap: 8, marginTop: 14 }}>
                 {canExpandRange && (
@@ -708,7 +802,7 @@ export function MuhurthamFinderView({ timezone, onBack, onOpenPanchangCalendar, 
                 <MuhurthamSharedDateCard
                   key={date.date}
                   date={date}
-                  timezone={timezone}
+                  timezone={displayTimezone}
                   isBestForBoth={index === 0}
                   expanded={expandedDate === date.date}
                   onToggleExpand={() => setExpandedDate((current) => (current === date.date ? null : date.date))}
@@ -720,6 +814,7 @@ export function MuhurthamFinderView({ timezone, onBack, onOpenPanchangCalendar, 
                   onShareMoment={(window) => handleShareMoment(date.date, window, 'SHARED', date.rating, date.person.savedPersonId)}
                   sharingWindowKey={sharingWindowKey}
                   shareFeedback={shareFeedback}
+                  saveAndShareDisabled={saveAndShareDisabled}
                 />
               ))}
               {!showAllDates && sharedVisible.length > DEFAULT_DISPLAY_COUNT && (
@@ -753,6 +848,7 @@ function MuhurthamDateCard({
   onShareMoment,
   sharingWindowKey,
   shareFeedback,
+  saveAndShareDisabled,
 }: {
   date: MuhurthamDateCandidate;
   timezone: string;
@@ -766,6 +862,7 @@ function MuhurthamDateCard({
   onShareMoment: (window: TimingCandidate) => void;
   sharingWindowKey: string | null;
   shareFeedback: { key: string; text: string } | null;
+  saveAndShareDisabled: boolean;
 }) {
   const topReasons = date.reasons.slice(0, 3);
   const bestKey = windowKey(date.date, date.bestWindow);
@@ -796,10 +893,10 @@ function MuhurthamDateCard({
         <button type="button" onClick={onToggleExpand} style={linkButtonStyle}>
           {expanded ? 'Hide details' : 'View details'} {expanded ? '▲' : '▼'}
         </button>
-        <button type="button" onClick={() => onUseThisTime(date.bestWindow)} disabled={bestSaving || bestSaved} style={{ ...linkButtonStyle, color: bestSaved ? '#4ade80' : '#38bdf8' }}>
+        <button type="button" onClick={() => onUseThisTime(date.bestWindow)} disabled={bestSaving || bestSaved || saveAndShareDisabled} style={{ ...linkButtonStyle, color: bestSaved ? '#4ade80' : '#38bdf8' }}>
           {bestSaved ? 'Added to Plan ✓' : bestSaving ? 'Saving…' : 'Use this time →'}
         </button>
-        <ShareMomentButton window={date.bestWindow} onShareMoment={onShareMoment} sharingWindowKey={sharingWindowKey} shareFeedback={shareFeedback} windowKeyValue={bestKey} />
+        <ShareMomentButton window={date.bestWindow} onShareMoment={onShareMoment} sharingWindowKey={sharingWindowKey} shareFeedback={shareFeedback} windowKeyValue={bestKey} disabled={saveAndShareDisabled} />
       </div>
 
       {expanded && (
@@ -848,7 +945,7 @@ function MuhurthamDateCard({
                   return (
                     <div key={key} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 8 }}>
                       <span style={{ fontSize: 12, color: '#dbe7f4' }}>{formatClockTime(window.start, timezone)} – {formatClockTime(window.end, timezone)}</span>
-                      <button type="button" onClick={() => onUseThisTime(window)} disabled={saving || saved} style={{ ...linkButtonStyle, fontSize: 12, color: saved ? '#4ade80' : '#38bdf8' }}>
+                      <button type="button" onClick={() => onUseThisTime(window)} disabled={saving || saved || saveAndShareDisabled} style={{ ...linkButtonStyle, fontSize: 12, color: saved ? '#4ade80' : '#38bdf8' }}>
                         {saved ? 'Added ✓' : saving ? 'Saving…' : 'Use this time →'}
                       </button>
                     </div>
@@ -892,6 +989,7 @@ function MuhurthamPersonalDateCard({
   onShareMoment,
   sharingWindowKey,
   shareFeedback,
+  saveAndShareDisabled,
 }: {
   date: MuhurthamPersonalDateCandidate;
   timezone: string;
@@ -906,6 +1004,7 @@ function MuhurthamPersonalDateCard({
   onShareMoment: (window: TimingCandidate) => void;
   sharingWindowKey: string | null;
   shareFeedback: { key: string; text: string } | null;
+  saveAndShareDisabled: boolean;
 }) {
   const topReasons = date.reasons.slice(0, 3);
   const bestKey = windowKey(date.date, date.bestWindow);
@@ -950,10 +1049,10 @@ function MuhurthamPersonalDateCard({
         <button type="button" onClick={onToggleExpand} style={linkButtonStyle}>
           {expanded ? 'Hide details' : 'Why this time?'} {expanded ? '▲' : '▼'}
         </button>
-        <button type="button" onClick={() => onUseThisTime(date.bestWindow)} disabled={bestSaving || bestSaved} style={{ ...linkButtonStyle, color: bestSaved ? '#4ade80' : '#38bdf8' }}>
+        <button type="button" onClick={() => onUseThisTime(date.bestWindow)} disabled={bestSaving || bestSaved || saveAndShareDisabled} style={{ ...linkButtonStyle, color: bestSaved ? '#4ade80' : '#38bdf8' }}>
           {bestSaved ? 'Added to Plan ✓' : bestSaving ? 'Saving…' : 'Use this time →'}
         </button>
-        <ShareMomentButton window={date.bestWindow} onShareMoment={onShareMoment} sharingWindowKey={sharingWindowKey} shareFeedback={shareFeedback} windowKeyValue={bestKey} />
+        <ShareMomentButton window={date.bestWindow} onShareMoment={onShareMoment} sharingWindowKey={sharingWindowKey} shareFeedback={shareFeedback} windowKeyValue={bestKey} disabled={saveAndShareDisabled} />
       </div>
 
       {expanded && (
@@ -1011,7 +1110,7 @@ function MuhurthamPersonalDateCard({
                   return (
                     <div key={key} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 8 }}>
                       <span style={{ fontSize: 12, color: '#dbe7f4' }}>{formatClockTime(window.start, timezone)} – {formatClockTime(window.end, timezone)}</span>
-                      <button type="button" onClick={() => onUseThisTime(window)} disabled={saving || saved} style={{ ...linkButtonStyle, fontSize: 12, color: saved ? '#4ade80' : '#38bdf8' }}>
+                      <button type="button" onClick={() => onUseThisTime(window)} disabled={saving || saved || saveAndShareDisabled} style={{ ...linkButtonStyle, fontSize: 12, color: saved ? '#4ade80' : '#38bdf8' }}>
                         {saved ? 'Added ✓' : saving ? 'Saving…' : 'Use this time →'}
                       </button>
                     </div>
@@ -1055,6 +1154,7 @@ function MuhurthamSharedDateCard({
   onShareMoment,
   sharingWindowKey,
   shareFeedback,
+  saveAndShareDisabled,
 }: {
   date: MuhurthamSharedDateCandidate;
   timezone: string;
@@ -1069,6 +1169,7 @@ function MuhurthamSharedDateCard({
   onShareMoment: (window: TimingCandidate) => void;
   sharingWindowKey: string | null;
   shareFeedback: { key: string; text: string } | null;
+  saveAndShareDisabled: boolean;
 }) {
   const bestKey = windowKey(date.date, date.bestWindow);
   const bestSaved = savedWindowKeys.has(bestKey);
@@ -1120,10 +1221,10 @@ function MuhurthamSharedDateCard({
         <button type="button" onClick={onToggleExpand} style={linkButtonStyle}>
           {expanded ? 'Hide details' : 'Why this time?'} {expanded ? '▲' : '▼'}
         </button>
-        <button type="button" onClick={() => onUseThisTime(date.bestWindow)} disabled={bestSaving || bestSaved} style={{ ...linkButtonStyle, color: bestSaved ? '#4ade80' : '#38bdf8' }}>
+        <button type="button" onClick={() => onUseThisTime(date.bestWindow)} disabled={bestSaving || bestSaved || saveAndShareDisabled} style={{ ...linkButtonStyle, color: bestSaved ? '#4ade80' : '#38bdf8' }}>
           {bestSaved ? 'Added to Plan ✓' : bestSaving ? 'Saving…' : 'Use this time →'}
         </button>
-        <ShareMomentButton window={date.bestWindow} onShareMoment={onShareMoment} sharingWindowKey={sharingWindowKey} shareFeedback={shareFeedback} windowKeyValue={bestKey} />
+        <ShareMomentButton window={date.bestWindow} onShareMoment={onShareMoment} sharingWindowKey={sharingWindowKey} shareFeedback={shareFeedback} windowKeyValue={bestKey} disabled={saveAndShareDisabled} />
       </div>
 
       {expanded && (
@@ -1194,7 +1295,7 @@ function MuhurthamSharedDateCard({
                   return (
                     <div key={key} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 8 }}>
                       <span style={{ fontSize: 12, color: '#dbe7f4' }}>{formatClockTime(window.start, timezone)} – {formatClockTime(window.end, timezone)}</span>
-                      <button type="button" onClick={() => onUseThisTime(window)} disabled={saving || saved} style={{ ...linkButtonStyle, fontSize: 12, color: saved ? '#4ade80' : '#38bdf8' }}>
+                      <button type="button" onClick={() => onUseThisTime(window)} disabled={saving || saved || saveAndShareDisabled} style={{ ...linkButtonStyle, fontSize: 12, color: saved ? '#4ade80' : '#38bdf8' }}>
                         {saved ? 'Added ✓' : saving ? 'Saving…' : 'Use this time →'}
                       </button>
                     </div>
@@ -1224,17 +1325,19 @@ function ShareMomentButton({
   sharingWindowKey,
   shareFeedback,
   windowKeyValue,
+  disabled,
 }: {
   window: TimingCandidate;
   onShareMoment: (window: TimingCandidate) => void;
   sharingWindowKey: string | null;
   shareFeedback: { key: string; text: string } | null;
   windowKeyValue: string;
+  disabled?: boolean;
 }) {
   const sharing = sharingWindowKey === windowKeyValue;
   const feedback = shareFeedback?.key === windowKeyValue ? shareFeedback.text : null;
   return (
-    <button type="button" onClick={() => onShareMoment(shareWindow)} disabled={sharing} style={{ ...linkButtonStyle, color: feedback ? '#4ade80' : '#38bdf8' }}>
+    <button type="button" onClick={() => onShareMoment(shareWindow)} disabled={sharing || disabled} style={{ ...linkButtonStyle, color: feedback ? '#4ade80' : '#38bdf8' }}>
       {feedback ?? (sharing ? 'Sharing…' : 'Share this moment')}
     </button>
   );
@@ -1245,6 +1348,149 @@ function PanchangaMiniCell({ label, value }: { label: string; value: string }) {
     <div style={panchangaCellStyle}>
       <div style={{ fontSize: 9, color: '#94a3b8', fontFamily: 'var(--as-font-mono)', textTransform: 'uppercase', letterSpacing: '0.03em' }}>{label}</div>
       <div style={{ fontSize: 12, fontWeight: 800, marginTop: 2 }}>{value}</div>
+    </div>
+  );
+}
+
+/** Event Location Search V1: a small banner shown above results that were
+ * computed with a custom Event Location rather than the Timing Location --
+ * names the location that actually produced them (brief section 22) and
+ * explains why Save/Share are disabled on this result set (brief section
+ * 36/37). Deliberately does not touch the result cards themselves. */
+function EventLocationResultBanner({ location, reason }: { location: CityOption; reason: string }) {
+  return (
+    <div style={{ ...cardStyle, padding: '10px 14px', display: 'flex', flexDirection: 'column', gap: 4 }}>
+      <div style={{ fontSize: 12, fontWeight: 800, color: '#dbe7f4' }}>
+        📍 Event location: {location.cityName} ({formatCoordinateDirectional(location.latitude, 'lat')}, {formatCoordinateDirectional(location.longitude, 'lng')})
+      </div>
+      <div style={{ fontSize: 11, color: '#94a3b8', lineHeight: 1.5 }}>{reason}</div>
+    </div>
+  );
+}
+
+/**
+ * Event Location Search V1: a lightweight, self-contained location picker
+ * for a ONE-TIME Muhurtham search override -- reuses the exact same
+ * presentation/parsing/validation primitives Planning Location's own
+ * LocationPicker (components/LocationPicker.tsx) uses (CITY_OPTIONS,
+ * parseCoordinate, isValidCustomLocation, searchTimezones,
+ * isValidIanaTimezone), but is NOT that component and never calls
+ * PATCH /api/users/location -- selecting here only ever calls back to the
+ * parent's own onDone(location), which stores the choice in local
+ * component state (brief section 18: "Keep selected Event Location in
+ * MuhurthamFinderView/client state... Do NOT persist it to User"). No
+ * network request of any kind happens in this component.
+ */
+function EventLocationPicker({
+  timingLocation,
+  initialLocation,
+  onDone,
+  onCancel,
+}: {
+  timingLocation: MuhurthamTimingLocation;
+  initialLocation: CityOption | null;
+  onDone: (location: CityOption | null) => void;
+  onCancel: () => void;
+}) {
+  const OTHER_VALUE = '__other__';
+  const [mode, setMode] = useState<'select' | 'custom'>('select');
+  const [custom, setCustom] = useState({ cityName: initialLocation?.cityName ?? '', latitude: '', longitude: '', timezone: '' });
+  const [touched, setTouched] = useState(false);
+  const [timezoneMenuOpen, setTimezoneMenuOpen] = useState(false);
+
+  const handleSelectChange = (e: React.ChangeEvent<HTMLSelectElement>) => {
+    const value = e.target.value;
+    if (value === OTHER_VALUE) {
+      setMode('custom');
+      return;
+    }
+    const selected = CITY_OPTIONS.find((c) => c.cityName === value);
+    if (selected) onDone(selected);
+  };
+
+  const parsedLatitude = useMemo(() => parseCoordinate(custom.latitude, 'lat'), [custom.latitude]);
+  const parsedLongitude = useMemo(() => parseCoordinate(custom.longitude, 'lng'), [custom.longitude]);
+  const timezoneValid = useMemo(() => isValidIanaTimezone(custom.timezone.trim()), [custom.timezone]);
+  const timezoneSuggestions: TimezoneOption[] = useMemo(() => (custom.timezone.trim() ? searchTimezones(custom.timezone.trim()) : []), [custom.timezone]);
+  const cityNameValid = custom.cityName.trim().length > 0;
+  const formValid = cityNameValid && parsedLatitude !== null && parsedLongitude !== null && timezoneValid
+    && isValidCustomLocation({ latitude: parsedLatitude, longitude: parsedLongitude, timezone: custom.timezone.trim() });
+
+  const handleCustomSubmit = (e: React.FormEvent) => {
+    e.preventDefault();
+    setTouched(true);
+    if (!formValid || parsedLatitude === null || parsedLongitude === null) return;
+    onDone({ cityName: custom.cityName.trim(), latitude: parsedLatitude, longitude: parsedLongitude, timezone: custom.timezone.trim() });
+  };
+
+  if (mode === 'custom') {
+    return (
+      <form onSubmit={handleCustomSubmit} style={{ marginTop: 10, display: 'flex', flexDirection: 'column', gap: 8 }}>
+        <input type="text" placeholder="City name" value={custom.cityName} onChange={(e) => setCustom((c) => ({ ...c, cityName: e.target.value }))} style={dateInputStyle} />
+        {touched && !cityNameValid && <span style={{ fontSize: 11, color: '#f87171' }}>City name is required.</span>}
+        <div style={{ display: 'flex', gap: 8 }}>
+          <input type="text" placeholder="Latitude (e.g. 9.9312 N)" value={custom.latitude} onChange={(e) => setCustom((c) => ({ ...c, latitude: e.target.value }))} style={{ ...dateInputStyle, flex: 1 }} />
+          <input type="text" placeholder="Longitude (e.g. 76.2673 E)" value={custom.longitude} onChange={(e) => setCustom((c) => ({ ...c, longitude: e.target.value }))} style={{ ...dateInputStyle, flex: 1 }} />
+        </div>
+        {touched && (parsedLatitude === null || parsedLongitude === null) && <span style={{ fontSize: 11, color: '#f87171' }}>Enter valid coordinates (e.g. 9.9312 or 9.9312 N).</span>}
+        {touched && parsedLatitude !== null && parsedLongitude !== null && !isValidCustomLocation({ latitude: parsedLatitude, longitude: parsedLongitude, timezone: 'UTC' }) && (
+          <span style={{ fontSize: 11, color: '#f87171' }}>Latitude must be between -66.5 and 66.5, longitude between -180 and 180.</span>
+        )}
+        <div style={{ position: 'relative' }}>
+          <input
+            type="text"
+            placeholder="Timezone (e.g. Asia/Kolkata)"
+            value={custom.timezone}
+            onChange={(e) => setCustom((c) => ({ ...c, timezone: e.target.value }))}
+            onFocus={() => setTimezoneMenuOpen(true)}
+            onBlur={() => setTimeout(() => setTimezoneMenuOpen(false), 150)}
+            style={dateInputStyle}
+          />
+          {timezoneMenuOpen && timezoneSuggestions.length > 0 && (
+            <div style={{ position: 'absolute', top: '100%', left: 0, right: 0, zIndex: 10, background: '#0f172a', border: '1px solid rgba(255,255,255,0.12)', borderRadius: 8, marginTop: 4 }}>
+              {timezoneSuggestions.map((tz) => (
+                <button
+                  key={tz.id}
+                  type="button"
+                  onClick={() => setCustom((c) => ({ ...c, timezone: tz.id }))}
+                  style={{ display: 'block', width: '100%', textAlign: 'left', padding: '6px 10px', background: 'none', border: 'none', color: '#f8fafc', fontSize: 12, cursor: 'pointer' }}
+                >
+                  {tz.id} — {tz.label}
+                </button>
+              ))}
+            </div>
+          )}
+        </div>
+        {touched && !timezoneValid && <span style={{ fontSize: 11, color: '#f87171' }}>Enter a valid timezone name (e.g. &quot;America/Chicago&quot;).</span>}
+        <div style={{ display: 'flex', gap: 12 }}>
+          <button type="submit" style={{ ...linkButtonStyle, color: '#4ade80' }}>Use this location</button>
+          <button type="button" onClick={() => setMode('select')} style={linkButtonStyle}>Back</button>
+        </div>
+      </form>
+    );
+  }
+
+  return (
+    <div style={{ marginTop: 10, display: 'flex', flexDirection: 'column', gap: 8 }}>
+      <select defaultValue="" onChange={handleSelectChange} style={selectStyle}>
+        <option value="" disabled>
+          Choose a city…
+        </option>
+        {CITY_OPTIONS.map((city) => (
+          <option key={city.cityName} value={city.cityName}>
+            {city.cityName}
+          </option>
+        ))}
+        <option value={OTHER_VALUE}>Other (enter coordinates)…</option>
+      </select>
+      <div style={{ display: 'flex', gap: 12 }}>
+        <button type="button" onClick={() => onDone(null)} style={{ ...linkButtonStyle, fontSize: 12 }}>
+          Use Timing Location ({timingLocation.cityName})
+        </button>
+        <button type="button" onClick={onCancel} style={{ ...linkButtonStyle, fontSize: 12 }}>
+          Cancel
+        </button>
+      </div>
     </div>
   );
 }
