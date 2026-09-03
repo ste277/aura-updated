@@ -33,6 +33,8 @@ function fakePlan(overrides: Partial<PlannedActivity>): PlannedActivity {
     calendarUrl: null,
     loggedAt: null,
     habitLogId: null,
+    eventTimezone: null,
+    eventLocationName: null,
     createdAt: NOW,
     updatedAt: NOW,
     ...overrides,

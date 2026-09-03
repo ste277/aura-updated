@@ -30,6 +30,8 @@ function plan(overrides: Partial<PlannedActivity> = {}): PlannedActivity {
     calendarUrl: null,
     loggedAt: null,
     habitLogId: null,
+    eventTimezone: null,
+    eventLocationName: null,
     createdAt: new Date('2026-08-24T00:00:00.000Z'),
     updatedAt: new Date('2026-08-24T00:00:00.000Z'),
     ...overrides,

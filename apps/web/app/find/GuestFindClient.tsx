@@ -306,7 +306,7 @@ export function GuestFindClient({ initialSource, initialRestoreToken }: { initia
       // verification, or a re-visited magic link all resolve to the SAME
       // token, so POST /api/plans returns the already-created Plan instead
       // of creating a second one.
-      await saveUpcomingPlanFromCandidate(selectedCandidate, durationMinutes, undefined, guestStateToken ?? undefined);
+      await saveUpcomingPlanFromCandidate(selectedCandidate, durationMinutes, { guestConversionToken: guestStateToken ?? undefined });
       trackEvent('GUEST_RESULT_SAVED', { metadata: { activityId, source: initialSource } });
       trackEvent('ONBOARDING_HANDOFF_VIEWED', { metadata: { activityId, source: initialSource } });
       setPhase('SAVED');

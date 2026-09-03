@@ -48,6 +48,8 @@ function plan(over: Partial<PlannedActivity> & { id: string; title: string; plan
     calendarUrl: null,
     loggedAt: null,
     habitLogId: null,
+    eventTimezone: null,
+    eventLocationName: null,
     createdAt: over.plannedStartAt,
     updatedAt: over.plannedStartAt,
     ...over,

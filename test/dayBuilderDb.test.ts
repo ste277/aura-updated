@@ -366,7 +366,7 @@ async function main() {
         id: 'coverage-p1', userId: user.id, title: 'Dinner Date', activityType: 'dinner-date', icon: '❤️', status: 'UPCOMING',
         plannedStartAt: new Date('2026-08-24T13:30:00.000Z'), plannedEndAt: new Date('2026-08-24T15:00:00.000Z'),
         durationMinutes: 90, windowType: 'NEUTRAL', windowLabel: null, matchLabel: null, score: null,
-        recommendation: null, calendarUrl: null, loggedAt: null, habitLogId: null, createdAt: coverageNow, updatedAt: coverageNow,
+        recommendation: null, calendarUrl: null, loggedAt: null, habitLogId: null, eventTimezone: null, eventLocationName: null, createdAt: coverageNow, updatedAt: coverageNow,
       }],
     });
     const threePriorityUser = { ...user, dayBuilderEnabled: true, dayBuilderMutedGroups: [] as string[], dayBuilderPriorities: ['RELATIONSHIPS', 'WORK', 'WELLBEING'] };

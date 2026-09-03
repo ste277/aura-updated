@@ -201,15 +201,19 @@ export function MuhurthamFinderView({ timingLocation, onBack, onOpenPanchangCale
    * active, which is also the byte-equivalence case (brief section 2). */
   const displayLocation: MuhurthamTimingLocation = resultEventLocation ?? timingLocation;
   const displayTimezone = displayLocation.timezone;
-  /** Whether the CURRENTLY DISPLAYED results (if any) were computed with a
-   * custom Event Location rather than the Timing Location -- gates Save/
-   * Share (brief section 36/37: neither PlannedActivity nor AuraMoment can
-   * currently persist a non-Timing-Location timezone, so saving/sharing a
-   * custom-Event-Location result would silently display the wrong local
-   * time later). Search itself is never blocked -- only these two
-   * downstream actions on an already-Event-Location result. */
-  const saveAndShareDisabled = resultEventLocation !== null;
-  const saveAndShareDisabledReason = "Saving and sharing aren't available yet for a custom event location -- switch to your Timing Location to save this time.";
+  /** Event Location Plan Persistence V1: Save and Share now have
+   * INDEPENDENT correctness -- PlannedActivity can persist an Event
+   * Location snapshot (eventTimezone/eventLocationName) as of this PR, so
+   * Save is safe to enable unconditionally. AuraMoment cannot yet (still
+   * always writes user.timezone at creation -- that's a separate PR), so
+   * Share remains gated exactly as before. Two flags, not one, precisely
+   * because these two actions now have genuinely different correctness
+   * states for the same custom-Event-Location result (brief section 25/26:
+   * "Do not leave one coupled saveAndShareDisabled flag after the two
+   * paths have different correctness states"). */
+  const saveDisabled = false;
+  const shareDisabled = resultEventLocation !== null;
+  const shareDisabledReason = "Sharing isn't available yet for a custom event location -- switch to your Timing Location to share this time.";
 
   /** The location the NEXT search will actually use -- the live picker
    * selection, never the stale result snapshot above. Drives the date
@@ -408,7 +412,14 @@ export function MuhurthamFinderView({ timingLocation, onBack, onOpenPanchangCale
     const key = windowKey(dateKey, window);
     setSavingWindowKey(key);
     try {
-      await saveUpcomingPlanFromCandidate(window, durationMinutes, sharedWithName);
+      // Event Location Plan Persistence V1: the snapshot that produced the
+      // CURRENTLY DISPLAYED result set -- resultEventLocation, never the
+      // live picker (brief section 5) -- trimmed to {cityName, timezone}
+      // at this save boundary, never coordinates (brief section 7).
+      // Undefined for an ordinary Timing Location result, exactly
+      // preserving prior behavior for that case.
+      const eventLocation = resultEventLocation ? { cityName: resultEventLocation.cityName, timezone: resultEventLocation.timezone } : undefined;
+      await saveUpcomingPlanFromCandidate(window, durationMinutes, { sharedWithName, eventLocation });
       setSavedWindowKeys((prev) => new Set(prev).add(key));
       onPlanLogged?.();
     } catch {
@@ -610,7 +621,7 @@ export function MuhurthamFinderView({ timingLocation, onBack, onOpenPanchangCale
 
       {scope === 'GENERAL' && result && (
         <>
-          {resultEventLocation && <EventLocationResultBanner location={resultEventLocation} reason={saveAndShareDisabledReason} />}
+          {resultEventLocation && <EventLocationResultBanner location={resultEventLocation} reason={shareDisabledReason} />}
           {visibleDates.length === 0 ? (
             <section style={cardStyle}>
               <div style={{ fontSize: 14, fontWeight: 800 }}>No strongly favorable dates were found in this range.</div>
@@ -652,7 +663,8 @@ export function MuhurthamFinderView({ timingLocation, onBack, onOpenPanchangCale
                   onShareMoment={(window) => handleShareMoment(date.date, window, 'GENERAL', date.rating)}
                   sharingWindowKey={sharingWindowKey}
                   shareFeedback={shareFeedback}
-                  saveAndShareDisabled={saveAndShareDisabled}
+                  saveDisabled={saveDisabled}
+                  shareDisabled={shareDisabled}
                 />
               ))}
               {!showAllDates && visibleDates.length > DEFAULT_DISPLAY_COUNT && (
@@ -684,7 +696,7 @@ export function MuhurthamFinderView({ timingLocation, onBack, onOpenPanchangCale
 
       {scope === 'PERSONAL' && personalOk && (
         <>
-          {resultEventLocation && <EventLocationResultBanner location={resultEventLocation} reason={saveAndShareDisabledReason} />}
+          {resultEventLocation && <EventLocationResultBanner location={resultEventLocation} reason={shareDisabledReason} />}
           {personalVisible.length === 0 ? (
             <section style={cardStyle}>
               <div style={{ fontSize: 14, fontWeight: 800 }}>No strongly favorable dates were found in this range.</div>
@@ -727,7 +739,8 @@ export function MuhurthamFinderView({ timingLocation, onBack, onOpenPanchangCale
                   onShareMoment={(window) => handleShareMoment(date.date, window, 'PERSONAL', date.rating)}
                   sharingWindowKey={sharingWindowKey}
                   shareFeedback={shareFeedback}
-                  saveAndShareDisabled={saveAndShareDisabled}
+                  saveDisabled={saveDisabled}
+                  shareDisabled={shareDisabled}
                 />
               ))}
               {!showAllDates && personalVisible.length > DEFAULT_DISPLAY_COUNT && (
@@ -771,7 +784,7 @@ export function MuhurthamFinderView({ timingLocation, onBack, onOpenPanchangCale
 
       {scope === 'SHARED' && sharedOk && (
         <>
-          {resultEventLocation && <EventLocationResultBanner location={resultEventLocation} reason={saveAndShareDisabledReason} />}
+          {resultEventLocation && <EventLocationResultBanner location={resultEventLocation} reason={shareDisabledReason} />}
           {sharedVisible.length === 0 ? (
             <section style={cardStyle}>
               <div style={{ fontSize: 14, fontWeight: 800 }}>No strongly favorable dates were found in this range.</div>
@@ -814,7 +827,8 @@ export function MuhurthamFinderView({ timingLocation, onBack, onOpenPanchangCale
                   onShareMoment={(window) => handleShareMoment(date.date, window, 'SHARED', date.rating, date.person.savedPersonId)}
                   sharingWindowKey={sharingWindowKey}
                   shareFeedback={shareFeedback}
-                  saveAndShareDisabled={saveAndShareDisabled}
+                  saveDisabled={saveDisabled}
+                  shareDisabled={shareDisabled}
                 />
               ))}
               {!showAllDates && sharedVisible.length > DEFAULT_DISPLAY_COUNT && (
@@ -848,7 +862,8 @@ function MuhurthamDateCard({
   onShareMoment,
   sharingWindowKey,
   shareFeedback,
-  saveAndShareDisabled,
+  saveDisabled,
+  shareDisabled,
 }: {
   date: MuhurthamDateCandidate;
   timezone: string;
@@ -862,7 +877,8 @@ function MuhurthamDateCard({
   onShareMoment: (window: TimingCandidate) => void;
   sharingWindowKey: string | null;
   shareFeedback: { key: string; text: string } | null;
-  saveAndShareDisabled: boolean;
+  saveDisabled: boolean;
+  shareDisabled: boolean;
 }) {
   const topReasons = date.reasons.slice(0, 3);
   const bestKey = windowKey(date.date, date.bestWindow);
@@ -893,10 +909,10 @@ function MuhurthamDateCard({
         <button type="button" onClick={onToggleExpand} style={linkButtonStyle}>
           {expanded ? 'Hide details' : 'View details'} {expanded ? '▲' : '▼'}
         </button>
-        <button type="button" onClick={() => onUseThisTime(date.bestWindow)} disabled={bestSaving || bestSaved || saveAndShareDisabled} style={{ ...linkButtonStyle, color: bestSaved ? '#4ade80' : '#38bdf8' }}>
+        <button type="button" onClick={() => onUseThisTime(date.bestWindow)} disabled={bestSaving || bestSaved || saveDisabled} style={{ ...linkButtonStyle, color: bestSaved ? '#4ade80' : '#38bdf8' }}>
           {bestSaved ? 'Added to Plan ✓' : bestSaving ? 'Saving…' : 'Use this time →'}
         </button>
-        <ShareMomentButton window={date.bestWindow} onShareMoment={onShareMoment} sharingWindowKey={sharingWindowKey} shareFeedback={shareFeedback} windowKeyValue={bestKey} disabled={saveAndShareDisabled} />
+        <ShareMomentButton window={date.bestWindow} onShareMoment={onShareMoment} sharingWindowKey={sharingWindowKey} shareFeedback={shareFeedback} windowKeyValue={bestKey} disabled={shareDisabled} />
       </div>
 
       {expanded && (
@@ -945,7 +961,7 @@ function MuhurthamDateCard({
                   return (
                     <div key={key} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 8 }}>
                       <span style={{ fontSize: 12, color: '#dbe7f4' }}>{formatClockTime(window.start, timezone)} – {formatClockTime(window.end, timezone)}</span>
-                      <button type="button" onClick={() => onUseThisTime(window)} disabled={saving || saved || saveAndShareDisabled} style={{ ...linkButtonStyle, fontSize: 12, color: saved ? '#4ade80' : '#38bdf8' }}>
+                      <button type="button" onClick={() => onUseThisTime(window)} disabled={saving || saved || saveDisabled} style={{ ...linkButtonStyle, fontSize: 12, color: saved ? '#4ade80' : '#38bdf8' }}>
                         {saved ? 'Added ✓' : saving ? 'Saving…' : 'Use this time →'}
                       </button>
                     </div>
@@ -989,7 +1005,8 @@ function MuhurthamPersonalDateCard({
   onShareMoment,
   sharingWindowKey,
   shareFeedback,
-  saveAndShareDisabled,
+  saveDisabled,
+  shareDisabled,
 }: {
   date: MuhurthamPersonalDateCandidate;
   timezone: string;
@@ -1004,7 +1021,8 @@ function MuhurthamPersonalDateCard({
   onShareMoment: (window: TimingCandidate) => void;
   sharingWindowKey: string | null;
   shareFeedback: { key: string; text: string } | null;
-  saveAndShareDisabled: boolean;
+  saveDisabled: boolean;
+  shareDisabled: boolean;
 }) {
   const topReasons = date.reasons.slice(0, 3);
   const bestKey = windowKey(date.date, date.bestWindow);
@@ -1049,10 +1067,10 @@ function MuhurthamPersonalDateCard({
         <button type="button" onClick={onToggleExpand} style={linkButtonStyle}>
           {expanded ? 'Hide details' : 'Why this time?'} {expanded ? '▲' : '▼'}
         </button>
-        <button type="button" onClick={() => onUseThisTime(date.bestWindow)} disabled={bestSaving || bestSaved || saveAndShareDisabled} style={{ ...linkButtonStyle, color: bestSaved ? '#4ade80' : '#38bdf8' }}>
+        <button type="button" onClick={() => onUseThisTime(date.bestWindow)} disabled={bestSaving || bestSaved || saveDisabled} style={{ ...linkButtonStyle, color: bestSaved ? '#4ade80' : '#38bdf8' }}>
           {bestSaved ? 'Added to Plan ✓' : bestSaving ? 'Saving…' : 'Use this time →'}
         </button>
-        <ShareMomentButton window={date.bestWindow} onShareMoment={onShareMoment} sharingWindowKey={sharingWindowKey} shareFeedback={shareFeedback} windowKeyValue={bestKey} disabled={saveAndShareDisabled} />
+        <ShareMomentButton window={date.bestWindow} onShareMoment={onShareMoment} sharingWindowKey={sharingWindowKey} shareFeedback={shareFeedback} windowKeyValue={bestKey} disabled={shareDisabled} />
       </div>
 
       {expanded && (
@@ -1110,7 +1128,7 @@ function MuhurthamPersonalDateCard({
                   return (
                     <div key={key} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 8 }}>
                       <span style={{ fontSize: 12, color: '#dbe7f4' }}>{formatClockTime(window.start, timezone)} – {formatClockTime(window.end, timezone)}</span>
-                      <button type="button" onClick={() => onUseThisTime(window)} disabled={saving || saved || saveAndShareDisabled} style={{ ...linkButtonStyle, fontSize: 12, color: saved ? '#4ade80' : '#38bdf8' }}>
+                      <button type="button" onClick={() => onUseThisTime(window)} disabled={saving || saved || saveDisabled} style={{ ...linkButtonStyle, fontSize: 12, color: saved ? '#4ade80' : '#38bdf8' }}>
                         {saved ? 'Added ✓' : saving ? 'Saving…' : 'Use this time →'}
                       </button>
                     </div>
@@ -1154,7 +1172,8 @@ function MuhurthamSharedDateCard({
   onShareMoment,
   sharingWindowKey,
   shareFeedback,
-  saveAndShareDisabled,
+  saveDisabled,
+  shareDisabled,
 }: {
   date: MuhurthamSharedDateCandidate;
   timezone: string;
@@ -1169,7 +1188,8 @@ function MuhurthamSharedDateCard({
   onShareMoment: (window: TimingCandidate) => void;
   sharingWindowKey: string | null;
   shareFeedback: { key: string; text: string } | null;
-  saveAndShareDisabled: boolean;
+  saveDisabled: boolean;
+  shareDisabled: boolean;
 }) {
   const bestKey = windowKey(date.date, date.bestWindow);
   const bestSaved = savedWindowKeys.has(bestKey);
@@ -1221,10 +1241,10 @@ function MuhurthamSharedDateCard({
         <button type="button" onClick={onToggleExpand} style={linkButtonStyle}>
           {expanded ? 'Hide details' : 'Why this time?'} {expanded ? '▲' : '▼'}
         </button>
-        <button type="button" onClick={() => onUseThisTime(date.bestWindow)} disabled={bestSaving || bestSaved || saveAndShareDisabled} style={{ ...linkButtonStyle, color: bestSaved ? '#4ade80' : '#38bdf8' }}>
+        <button type="button" onClick={() => onUseThisTime(date.bestWindow)} disabled={bestSaving || bestSaved || saveDisabled} style={{ ...linkButtonStyle, color: bestSaved ? '#4ade80' : '#38bdf8' }}>
           {bestSaved ? 'Added to Plan ✓' : bestSaving ? 'Saving…' : 'Use this time →'}
         </button>
-        <ShareMomentButton window={date.bestWindow} onShareMoment={onShareMoment} sharingWindowKey={sharingWindowKey} shareFeedback={shareFeedback} windowKeyValue={bestKey} disabled={saveAndShareDisabled} />
+        <ShareMomentButton window={date.bestWindow} onShareMoment={onShareMoment} sharingWindowKey={sharingWindowKey} shareFeedback={shareFeedback} windowKeyValue={bestKey} disabled={shareDisabled} />
       </div>
 
       {expanded && (
@@ -1295,7 +1315,7 @@ function MuhurthamSharedDateCard({
                   return (
                     <div key={key} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 8 }}>
                       <span style={{ fontSize: 12, color: '#dbe7f4' }}>{formatClockTime(window.start, timezone)} – {formatClockTime(window.end, timezone)}</span>
-                      <button type="button" onClick={() => onUseThisTime(window)} disabled={saving || saved || saveAndShareDisabled} style={{ ...linkButtonStyle, fontSize: 12, color: saved ? '#4ade80' : '#38bdf8' }}>
+                      <button type="button" onClick={() => onUseThisTime(window)} disabled={saving || saved || saveDisabled} style={{ ...linkButtonStyle, fontSize: 12, color: saved ? '#4ade80' : '#38bdf8' }}>
                         {saved ? 'Added ✓' : saving ? 'Saving…' : 'Use this time →'}
                       </button>
                     </div>
@@ -1352,11 +1372,13 @@ function PanchangaMiniCell({ label, value }: { label: string; value: string }) {
   );
 }
 
-/** Event Location Search V1: a small banner shown above results that were
- * computed with a custom Event Location rather than the Timing Location --
- * names the location that actually produced them (brief section 22) and
- * explains why Save/Share are disabled on this result set (brief section
- * 36/37). Deliberately does not touch the result cards themselves. */
+/** Event Location Search V1 / Event Location Plan Persistence V1: a small
+ * banner shown above results that were computed with a custom Event
+ * Location rather than the Timing Location -- names the location that
+ * actually produced them (brief section 22) and, since Save re-enabled
+ * (Persistence V1), explains only why Share specifically remains disabled
+ * on this result set. Deliberately does not touch the result cards
+ * themselves. */
 function EventLocationResultBanner({ location, reason }: { location: CityOption; reason: string }) {
   return (
     <div style={{ ...cardStyle, padding: '10px 14px', display: 'flex', flexDirection: 'column', gap: 4 }}>

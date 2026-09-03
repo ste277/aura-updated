@@ -149,7 +149,15 @@ export function deriveAuraReminders({
       activityIcon: plan.icon,
       startAt: startAt.toISOString(),
       endAt: new Date(plan.plannedEndAt).toISOString(),
-      timezone: ownerTimezone,
+      // Event Location Plan Persistence V1: a plan that snapshotted a
+      // custom Event Location displays/speaks in ITS OWN timezone, never
+      // the viewing owner's current Timing Location -- this doc comment's
+      // own type (see `timezone` field above) already anticipated this
+      // exact gap ("PlannedActivity has no timezone column of its own");
+      // it now does, for the plans that used one. The reminderAt/startAt
+      // trigger math above is untouched -- only which timezone the
+      // eventual notification TEXT is formatted in changes.
+      timezone: plan.eventTimezone ?? ownerTimezone,
       reminderAt: reminderAt.toISOString(),
       minutesUntilStart: minutesBetween(startAt, now),
       target: { type: 'PLAN' as const, planId: plan.id },

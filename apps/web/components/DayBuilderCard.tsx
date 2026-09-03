@@ -163,7 +163,7 @@ export function DayBuilderCard({
       // Brief section 20 -- a stable id per (suggestion, local date), so a
       // double-tap or a benign re-render can never create a second Plan.
       const clientRequestId = `daybuilder:${suggestion.id}:${localDate}`;
-      const plan = await saveUpcomingPlanFromCandidate(selectedGeneralCandidate(suggestion), suggestion.durationMinutes, undefined, undefined, clientRequestId);
+      const plan = await saveUpcomingPlanFromCandidate(selectedGeneralCandidate(suggestion), suggestion.durationMinutes, { clientRequestId });
       trackEvent('DAY_BUILDER_SUGGESTION_ADDED', { metadata: { intentionCategory: suggestion.groupId, activityId: suggestion.activityId, dayPhase } });
       setState(suggestion.id, { addStatus: 'DONE', addedPlannedActivityId: plan.id });
       onCreated();

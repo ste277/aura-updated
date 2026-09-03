@@ -3,6 +3,7 @@ import { getSessionFromRequest } from '../../../lib/session';
 import { createPlannedActivity, listPlannedActivities, getPlannedActivityForOwner, getGuestConversionRedemption, claimGuestConversionToken, fillGuestConversionRedemption, getPlanCreationClaim, claimPlanCreation, fillPlanCreationClaim } from '../../../lib/db';
 import { parseJsonObject } from '../../../lib/request';
 import { verifyGuestStateToken, hashGuestConversionToken } from '../../../lib/guestState';
+import { parseEventLocationSnapshot } from '../../../lib/plansRequest';
 
 const MIN_PLAN_DURATION_MINUTES = 15;
 const MAX_PLAN_DURATION_MINUTES = 360;
@@ -94,6 +95,11 @@ function parseCalendarUrl(value: unknown): string | null {
     return '';
   }
 }
+
+// Event Location Plan Persistence V1: `parseEventLocationSnapshot` moved to
+// lib/plansRequest.ts (imported above) -- Next's route modules may only
+// export HTTP handlers, and this needs to be unit-testable without a live
+// server/DB, same reasoning as muhurthamSearchRequest.ts's own extraction.
 
 export async function GET(req: NextRequest) {
   const session = getSessionFromRequest(req);
@@ -201,6 +207,7 @@ export async function POST(req: NextRequest) {
   const matchLabel = parseMatchLabel(body?.matchLabel);
   const recommendation = cleanString(body?.recommendation, 2000);
   const calendarUrl = parseCalendarUrl(body?.calendarUrl);
+  const eventLocationSnapshot = parseEventLocationSnapshot(body?.eventLocation);
 
   if (!title || title.length > 200) return NextResponse.json({ error: 'A title of up to 200 characters is required.' }, { status: 400 });
   if (!plannedStartAt || !plannedEndAt || plannedEndAt <= plannedStartAt) {
@@ -225,6 +232,9 @@ export async function POST(req: NextRequest) {
   if (calendarUrl === '') {
     return NextResponse.json({ error: 'calendarUrl must be a Google Calendar render URL.' }, { status: 400 });
   }
+  if (!eventLocationSnapshot.ok) {
+    return NextResponse.json({ error: eventLocationSnapshot.error }, { status: 400 });
+  }
 
   const plan = await createPlannedActivity({
     userId: session.userId,
@@ -240,6 +250,8 @@ export async function POST(req: NextRequest) {
     score,
     recommendation,
     calendarUrl,
+    eventTimezone: eventLocationSnapshot.eventTimezone,
+    eventLocationName: eventLocationSnapshot.eventLocationName,
   });
 
   if (guestConversionTokenHash) {

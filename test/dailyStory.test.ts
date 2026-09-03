@@ -24,7 +24,7 @@ function plan(over: Partial<PlannedActivity> & { id: string; title: string; plan
     userId: 'u', activityType: null, icon: null, status: 'UPCOMING',
     durationMinutes: Math.round((over.plannedEndAt.getTime() - over.plannedStartAt.getTime()) / 60000),
     windowType: 'NEUTRAL', windowLabel: null, matchLabel: null, score: null,
-    recommendation: null, calendarUrl: null, loggedAt: null, habitLogId: null,
+    recommendation: null, calendarUrl: null, loggedAt: null, habitLogId: null, eventTimezone: null, eventLocationName: null,
     createdAt: over.plannedStartAt, updatedAt: over.plannedStartAt,
     ...over,
   };
@@ -72,7 +72,7 @@ function plan(over: Partial<PlannedActivity> & { id: string; title: string; plan
       id: 'p1', userId: 'u', title: 'Deep Work', activityType: 'deep-work', icon: '💼', status: 'UPCOMING',
       plannedStartAt: new Date('2026-08-24T05:00:00.000Z'), plannedEndAt: new Date('2026-08-24T06:00:00.000Z'),
       durationMinutes: 60, windowType: 'NEUTRAL', windowLabel: 'Neutral Flow', matchLabel: 'Good Match', score: 70,
-      recommendation: null, calendarUrl: null, loggedAt: null, habitLogId: null, createdAt: now, updatedAt: now,
+      recommendation: null, calendarUrl: null, loggedAt: null, habitLogId: null, eventTimezone: null, eventLocationName: null, createdAt: now, updatedAt: now,
     }],
   });
   const story = buildDailyStory(agenda, 8 * 60);
@@ -89,7 +89,7 @@ function plan(over: Partial<PlannedActivity> & { id: string; title: string; plan
       id: 'p1', userId: 'u', title: 'Date Night', activityType: 'date-night', icon: '❤️', status: 'UPCOMING',
       plannedStartAt: new Date('2026-08-24T14:00:00.000Z'), plannedEndAt: new Date('2026-08-24T16:00:00.000Z'), // 7:30-9:30 PM IST
       durationMinutes: 120, windowType: 'NEUTRAL', windowLabel: 'Neutral Flow', matchLabel: 'Good Match', score: 70,
-      recommendation: null, calendarUrl: null, loggedAt: null, habitLogId: null, createdAt: now, updatedAt: now,
+      recommendation: null, calendarUrl: null, loggedAt: null, habitLogId: null, eventTimezone: null, eventLocationName: null, createdAt: now, updatedAt: now,
     }],
   });
   const story = buildDailyStory(agenda, 8 * 60);
@@ -105,7 +105,7 @@ function plan(over: Partial<PlannedActivity> & { id: string; title: string; plan
       { id: 'p1', userId: 'u', title: 'Deep Work', activityType: 'deep-work', icon: '💼', status: 'LOGGED',
         plannedStartAt: new Date('2026-08-24T02:00:00.000Z'), plannedEndAt: new Date('2026-08-24T03:00:00.000Z'),
         durationMinutes: 60, windowType: 'NEUTRAL', windowLabel: 'Neutral Flow', matchLabel: 'Good Match', score: 70,
-        recommendation: null, calendarUrl: null, loggedAt: now, habitLogId: 'log-x', createdAt: now, updatedAt: now },
+        recommendation: null, calendarUrl: null, loggedAt: now, habitLogId: 'log-x', eventTimezone: null, eventLocationName: null, createdAt: now, updatedAt: now },
     ], habitLogs: [],
   });
   const story = buildDailyStory(agenda, 12 * 60 + 30);
