@@ -151,6 +151,16 @@ export function getKarana(date: Date): { index: number; name: string } {
  * finds the same physical instant using tropical longitudes directly, which
  * is both simpler and avoids relying on a sidereal degree target).
  * NAKSHATRA uses targeted binary search over Moon sidereal longitude.
+ * KARANA reuses the exact same Moon-Sun elongation quantity as TITHI (a
+ * Karana is a half-Tithi -- getKarana() derives its index from the identical
+ * `diff` this function's TITHI branch searches on, just partitioned into 6°
+ * steps instead of 12°), so it reuses SearchMoonPhase the same way, stepped
+ * to the next 6° boundary.
+ * YOGA searches a DIFFERENT quantity -- (moonDeg + sunDeg) % 360, not the
+ * Moon-Sun difference SearchMoonPhase measures -- so it cannot reuse
+ * SearchMoonPhase; it uses the same targeted-binary-search technique as
+ * NAKSHATRA instead, tracking the sidereal sum rather than the Moon's own
+ * longitude.
  *
  * (SearchMoonPhase replaced a prior SearchRelativeLongitude(Body.Moon, ...)
  * call here that threw unconditionally -- astronomy-engine's
@@ -163,8 +173,17 @@ export function getKarana(date: Date): { index: number; name: string } {
  * bug is found" allowance -- see the completion report for detail. No
  * ayanamsha/methodology change: getTithi()'s own value calculation is
  * untouched, only the previously-broken transition *search* is fixed.)
+ *
+ * Marriage Muhurtham Foundation V1: YOGA/KARANA support was added so
+ * spanOverlapsAuthoritativeEventAvoid() (packages/recommendation/src/
+ * muhurthamFinder.ts) can walk Yoga/Karana transitions the same way it
+ * already walks Tithi/Nakshatra transitions, for INTERVAL SAFETY only (a
+ * candidate whose span crosses into a prohibited Yoga/Karana mid-window is
+ * still rejected). This does NOT add Yoga/Karana boundary CANDIDATE
+ * discovery (collectPanchangaTransitionCandidateMinutes still only walks
+ * Tithi/Nakshatra) -- that remains explicitly deferred to a later PR.
  */
-export function findNextTransition(date: Date, targetType: 'TITHI' | 'NAKSHATRA'): Date {
+export function findNextTransition(date: Date, targetType: 'TITHI' | 'NAKSHATRA' | 'YOGA' | 'KARANA'): Date {
   const astroTime = new AstroTime(date);
 
   if (targetType === 'TITHI') {
@@ -174,6 +193,51 @@ export function findNextTransition(date: Date, targetType: 'TITHI' | 'NAKSHATRA'
     const res = SearchMoonPhase(targetPhase, astroTime, 2);
     if (!res) throw new Error(`findNextTransition: no TITHI transition found within 2 days of ${date.toISOString()}.`);
     return res.date;
+  }
+
+  if (targetType === 'KARANA') {
+    const currentPhase = MoonPhase(date);
+    const targetPhase = (Math.floor(currentPhase / 6) + 1) * 6 % 360;
+    // A Karana is a half-Tithi, roughly 9.5-13 hours; 1 day is a safe search bound with margin.
+    const res = SearchMoonPhase(targetPhase, astroTime, 1);
+    if (!res) throw new Error(`findNextTransition: no KARANA transition found within 1 day of ${date.toISOString()}.`);
+    return res.date;
+  }
+
+  if (targetType === 'YOGA') {
+    // Yoga transition search: find exact time (moonDeg + sunDeg) % 360
+    // crosses into the next 13°20' segment -- same binary-search shape as
+    // NAKSHATRA below, tracking the Moon+Sun sidereal sum instead of the
+    // Moon's own longitude.
+    const currentSum = (getSiderealLongitude(Body.Moon, date) + getSiderealLongitude(Body.Sun, date)) % 360;
+    const span = 360 / 27;
+    const targetIndex = Math.floor(currentSum / span) + 1;
+    const targetDeg = (targetIndex * span) % 360;
+
+    // Search window: the sidereal sum advances at ~14.2°/day (Moon ~13.2 +
+    // Sun ~1), so a Yoga (13.33° span) transitions within ~23h max; 30 hours
+    // is a safe bound with margin.
+    let low = date.getTime();
+    let high = date.getTime() + 30 * 3600 * 1000;
+
+    for (let i = 0; i < 20; i++) {
+      const mid = Math.floor((low + high) / 2);
+      const midSum = (getSiderealLongitude(Body.Moon, new Date(mid)) + getSiderealLongitude(Body.Sun, new Date(mid))) % 360;
+
+      let diff = midSum - currentSum;
+      if (diff < 0) diff += 360;
+
+      const targetDiff = targetDeg - currentSum;
+      const normTargetDiff = targetDiff < 0 ? targetDiff + 360 : targetDiff;
+
+      if (diff >= normTargetDiff) {
+        high = mid;
+      } else {
+        low = mid;
+      }
+    }
+
+    return new Date(Math.floor((low + high) / 2));
   }
 
   // Nakshatra transition search: Find exact time Moon crosses into next 13°20' segment

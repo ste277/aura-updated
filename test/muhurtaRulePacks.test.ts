@@ -118,7 +118,11 @@ const oneFactorDedicatedPack: MuhurtaRulePack = {
   family: 'HOME', intent: 'GRIHA_PRAVESH',
   tithi: { favorable: [/Panchami/], avoid: [] },
   nakshatra: { favorable: [], avoid: [] },
-  coverage: { tithi: 'IMPLEMENTED', nakshatra: 'REUSABLE_BASE_RULE', yoga: 'IMPLEMENTED', karana: 'IMPLEMENTED', windows: 'IMPLEMENTED' },
+  yoga: { favorable: [], avoid: [] },
+  karana: { favorable: [], avoid: [] },
+  requiresPeriodExclusion: false,
+  requiresPlanetaryCombustion: false,
+  coverage: { tithi: 'IMPLEMENTED', nakshatra: 'REUSABLE_BASE_RULE', yoga: 'IMPLEMENTED', karana: 'IMPLEMENTED', windows: 'IMPLEMENTED', yogaAuthoritative: 'MISSING', karanaAuthoritative: 'MISSING', periodExclusion: 'MISSING', planetaryCombustion: 'MISSING' },
   reasonNote: 'synthetic test fixture',
   metadata: { methodologyVersion: AURA_MUHURTA_METHODOLOGY_ID, sources: [], confidence: 'PROVISIONAL', scope: 'GENERAL', note: 'synthetic test fixture' },
 };
