@@ -38,7 +38,7 @@ function moment(overrides: Partial<AuraMoment> = {}): AuraMoment {
   return {
     id: 'moment-1', ownerUserId: 'user-1', publicToken: 'tok', scope: 'SHARED', source: 'PLAN', activityId: 'date-night',
     activityTitle: 'Date Night', activityIcon: '❤️', startAt: new Date('2026-08-24T11:30:00.000Z'), endAt: new Date('2026-08-24T13:00:00.000Z'),
-    timezone: TZ, savedPersonId: 'sp-1', sharedPersonDisplayName: 'Anu', senderDisplayName: 'Owner', ratingLabel: 'STRONG_SHARED_FIT',
+    timezone: TZ, locationName: null, savedPersonId: 'sp-1', sharedPersonDisplayName: 'Anu', senderDisplayName: 'Owner', ratingLabel: 'STRONG_SHARED_FIT',
     explanationSnapshot: null, status: 'ACTIVE', responseState: 'ACCEPTED', responsePreference: null, respondedAt: new Date('2026-08-24T01:00:00.000Z'),
     previousMomentId: null, plannedActivityId: null, ownerSeenResponseAt: null, firstOpenedAt: null,
     createdAt: new Date('2026-08-24T00:00:00.000Z'), expiresAt: null,

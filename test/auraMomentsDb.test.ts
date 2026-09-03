@@ -33,6 +33,7 @@ async function main() {
     startAt: new Date('2026-10-18T04:42:00.000Z'),
     endAt: new Date('2026-10-18T06:04:00.000Z'),
     timezone: 'Asia/Kolkata',
+    locationName: null,
   };
 
   try {
@@ -156,6 +157,7 @@ async function main() {
       startAt: newStartAt,
       endAt: newEndAt,
       timezone: momentD.timezone,
+      locationName: momentD.locationName,
       savedPersonId: momentD.savedPersonId,
       sharedPersonDisplayName: momentD.sharedPersonDisplayName,
       senderDisplayName: momentD.senderDisplayName,

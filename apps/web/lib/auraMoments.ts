@@ -118,6 +118,12 @@ export interface PublicAuraMoment {
   startAt: string; // ISO
   endAt: string; // ISO
   timezone: string;
+  /** Event Location AuraMoment Persistence V1 -- the human-readable name of
+   * the Event Location that produced this moment's timing, or null when the
+   * owner's Timing Location was used (see db.ts's AuraMoment field doc
+   * comment). Safe to expose publicly -- it's the same tier of detail as
+   * activityTitle; never coordinates. */
+  locationName: string | null;
   senderDisplayName: string | null;
   sharedPersonDisplayName: string | null;
   scope: AuraMomentScope;
@@ -151,6 +157,7 @@ export function toPublicAuraMoment(moment: AuraMoment, hasSuccessor: boolean): P
     startAt: moment.startAt.toISOString(),
     endAt: moment.endAt.toISOString(),
     timezone: moment.timezone,
+    locationName: moment.locationName,
     senderDisplayName: moment.senderDisplayName,
     sharedPersonDisplayName: moment.sharedPersonDisplayName,
     scope: moment.scope,

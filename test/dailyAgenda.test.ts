@@ -51,6 +51,7 @@ function moment(overrides: Partial<AuraMoment> = {}): AuraMoment {
     startAt: new Date('2026-08-24T14:00:00.000Z'), // 7:30 PM IST
     endAt: new Date('2026-08-24T15:30:00.000Z'),
     timezone: TZ,
+    locationName: null,
     savedPersonId: 'sp-1',
     sharedPersonDisplayName: 'Anu',
     senderDisplayName: 'Owner',

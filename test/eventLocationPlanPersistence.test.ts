@@ -231,10 +231,15 @@ check('createPlannedActivity does NOT insert any latitude/longitude column', !/I
 
 const viewSource = fs.readFileSync('apps/web/components/MuhurthamFinderView.tsx', 'utf8');
 check('27/Save. saveDisabled is unconditionally false (Save re-enabled for every result, including custom Event Location)', /const saveDisabled = false;/.test(viewSource));
-check('28/Share. shareDisabled is still gated on resultEventLocation (Share remains disabled for custom Event Location)', /const shareDisabled = resultEventLocation !== null;/.test(viewSource));
-check('9/eventLocation source. handleUseThisTime derives eventLocation from resultEventLocation, never the live eventLocation picker state', /const eventLocation = resultEventLocation \? \{ cityName: resultEventLocation\.cityName, timezone: resultEventLocation\.timezone \}/.test(viewSource));
+// 28/Share was updated by Event Location AuraMoment Persistence V1 (a later
+// PR): shareDisabled is no longer coupled to resultEventLocation, since
+// AuraMoment can now also persist a correct Event Location snapshot -- see
+// test/eventLocationAuraMomentPersistence.test.ts for that PR's own
+// coverage of the Share re-enable.
+check('28/Share. shareDisabled is unconditionally false (Share re-enabled for every result, once AuraMoment could also persist Event Location)', /const shareDisabled = false;/.test(viewSource));
+check('9/eventLocation source (Save). handleUseThisTime derives eventLocation from resultEventLocation, never the live eventLocation picker state', /const eventLocation = resultEventLocation \? \{ cityName: resultEventLocation\.cityName, timezone: resultEventLocation\.timezone \}/.test(viewSource));
 check('20. No coordinate field name (eventLatitude/eventLongitude) appears anywhere in the Muhurtham Finder source', !/eventLatitude|eventLongitude/.test(viewSource));
-check('MuhurthamFinderView never references AuraMoment schema/timezone changes (Share persistence explicitly out of scope for this PR)', !/AuraMoment\.timezone\s*=/.test(viewSource));
+check('MuhurthamFinderView never assigns a value directly to a field literally named "AuraMoment.timezone" (Plan Persistence itself never touched AuraMoment)', !/AuraMoment\.timezone\s*=/.test(viewSource));
 
 console.log(allPassed ? '\nALL EVENT LOCATION PLAN PERSISTENCE CHECKS PASSED' : '\nSOME EVENT LOCATION PLAN PERSISTENCE CHECKS FAILED');
 process.exit(allPassed ? 0 : 1);

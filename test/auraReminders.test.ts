@@ -54,6 +54,7 @@ function fakeMoment(overrides: Partial<AuraMoment>): AuraMoment {
     startAt: new Date(NOW.getTime() + 15 * 60_000),
     endAt: new Date(NOW.getTime() + 105 * 60_000),
     timezone: 'Asia/Kolkata',
+    locationName: null,
     savedPersonId: 'person-1',
     sharedPersonDisplayName: 'Anna',
     senderDisplayName: 'Stephen',

@@ -49,7 +49,7 @@ function fakeMoment(overrides: Partial<AuraMoment> = {}): AuraMoment {
     id: 'moment-1', ownerUserId: 'owner-1', publicToken: 'tok-1', scope: 'SHARED', source: 'MUHURTHAM',
     activityId: 'date-night', activityTitle: 'Date Night', activityIcon: '❤️',
     startAt: new Date('2026-08-23T10:30:00.000Z'), endAt: new Date('2026-08-23T11:30:00.000Z'),
-    timezone: 'Asia/Kolkata', savedPersonId: 'person-1', sharedPersonDisplayName: 'Anna', senderDisplayName: 'Stephen',
+    timezone: 'Asia/Kolkata', locationName: null, savedPersonId: 'person-1', sharedPersonDisplayName: 'Anna', senderDisplayName: 'Stephen',
     ratingLabel: 'STRONG_SHARED_FIT', explanationSnapshot: 'x', status: 'ACTIVE', responseState: null,
     responsePreference: null, respondedAt: null, previousMomentId: null, plannedActivityId: null,
     ownerSeenResponseAt: null, firstOpenedAt: null, createdAt: new Date(), expiresAt: null,

@@ -134,6 +134,17 @@ model AuraMoment {
   startAt                 DateTime  @db.Timestamptz(3)
   endAt                   DateTime  @db.Timestamptz(3)
   timezone                String
+  // Event Location AuraMoment Persistence V1 (migration 0029) -- the
+  // human-readable name of the Event Location that produced this moment's
+  // timing, when one was used (see route.ts: timezone/locationName are set
+  // together from the same resultEventLocation snapshot, or both fall back
+  // to the Timing Location/NULL together). NULL means "this moment used the
+  // owner's Timing Location" -- the common case, and the correct legacy
+  // value for every row that predates this migration (not backfilled --
+  // would fabricate historical information, same reasoning as
+  // PlannedActivity.eventLocationName). No latitude/longitude: nothing
+  // recomputes Panchang/Muhurtham from a saved AuraMoment.
+  locationName            String?
 
   savedPersonId           String?
   savedPerson              SavedPerson? @relation(fields: [savedPersonId], references: [id], onDelete: SetNull)

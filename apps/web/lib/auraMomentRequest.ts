@@ -5,6 +5,13 @@ import { FULL_ACTIVITY_CATALOG } from '../../../packages/recommendation/src/pers
 import { getActivityDefinition } from '../../../packages/recommendation/src/activityDefinitions';
 import { AuraMomentAlternativePreference, AuraMomentResponseState, AuraMomentScope, AuraMomentSource } from './db';
 import { MAX_ALTERNATIVES } from './auraMomentAlternatives';
+// Event Location AuraMoment Persistence V1: reuses the exact same
+// {cityName, timezone} snapshot validator PR #56 built for POST /api/plans
+// (brief section 7: "Prefer the same small persistence shape as PR #56")
+// rather than a second, near-duplicate parser -- the shape and every rule
+// (both-required-together, isValidIanaTimezone, no coordinates) are
+// identical; only the field names differ at the call site below.
+import { parseEventLocationSnapshot } from './plansRequest';
 
 /**
  * Pure request validation for POST /api/aura-moments, kept out of
@@ -13,10 +20,13 @@ import { MAX_ALTERNATIVES } from './auraMomentAlternatives';
  * handlers).
  *
  * Deliberately does NOT accept from the client: activityTitle, activityIcon
- * (resolved server-side from the activity catalog by the route), timezone
- * (the route uses the authenticated owner's own user.timezone), senderDisplayName
- * (derived server-side from the owner's email, never client-supplied --
- * spoofing risk), or explanationSnapshot (always server-templated from scope,
+ * (resolved server-side from the activity catalog by the route), a bare
+ * `timezone` override (the route defaults to the authenticated owner's own
+ * user.timezone -- the ONLY way to override it is the validated
+ * `eventLocation: {cityName, timezone}` snapshot below, which must name a
+ * real place, not an arbitrary zone string), senderDisplayName (derived
+ * server-side from the owner's email, never client-supplied -- spoofing
+ * risk), or explanationSnapshot (always server-templated from scope,
  * see auraMoments.ts's explanationSnapshotForScope -- no free-text public
  * copy from a request body, ever). This mirrors brief section 5: "Do not
  * allow arbitrary birth context in the request" applied broadly -- the
@@ -58,6 +68,15 @@ export interface AuraMomentCreateInput {
    * route ownership-checks this against the authenticated owner (see
    * getPlannedActivityForOwner) before ever writing it. */
   plannedActivityId: string | null;
+  /** Event Location AuraMoment Persistence V1: the validated Event Location
+   * snapshot's timezone/cityName, both null together when the request
+   * omitted eventLocation (the common, backward-compatible case -- share
+   * uses the owner's Timing Location). The route computes the actual
+   * persisted `timezone` as `eventLocationTimezone ?? user.timezone` and
+   * `locationName` as `eventLocationName` directly (brief section 9) --
+   * this layer only validates shape, never touches user.timezone. */
+  eventLocationTimezone: string | null;
+  eventLocationName: string | null;
 }
 
 export type AuraMomentCreateValidationResult =
@@ -133,7 +152,26 @@ export function buildAuraMomentCreateRequest(body: Record<string, unknown>): Aur
     }
   }
 
-  return { ok: true, input: { scope, source, activityId, startAt, endAt, ratingLabel, savedPersonId, plannedActivityId } };
+  // Event Location AuraMoment Persistence V1 (brief section 6-8): validated
+  // the same way PR #56's plan-save request is -- absent/null eventLocation
+  // -> both null (ordinary Timing Location share, unchanged behavior);
+  // present -> cityName and timezone both required, timezone must be a
+  // valid IANA zone. A malformed supplied override is a typed 400, never a
+  // silent fallback to user.timezone (section 8: "Do not silently fall back
+  // ... when a malformed override was explicitly supplied").
+  const eventLocationSnapshot = parseEventLocationSnapshot(body.eventLocation);
+  if (!eventLocationSnapshot.ok) {
+    return { ok: false, error: eventLocationSnapshot.error, status: 400 };
+  }
+
+  return {
+    ok: true,
+    input: {
+      scope, source, activityId, startAt, endAt, ratingLabel, savedPersonId, plannedActivityId,
+      eventLocationTimezone: eventLocationSnapshot.eventTimezone,
+      eventLocationName: eventLocationSnapshot.eventLocationName,
+    },
+  };
 }
 
 const VALID_RESPONSE_VALUES = new Set<AuraMomentResponseState>(['ACCEPTED', 'ANOTHER_TIME']);

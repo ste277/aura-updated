@@ -1,0 +1,18 @@
+-- Event Location AuraMoment Persistence V1: the human-readable name of the
+-- Event Location (PR "Add event-specific location to Muhurtham search") that
+-- produced a shared AuraMoment's timing, when one was used, alongside the
+-- ALREADY-EXISTING non-nullable `timezone` column (which this migration does
+-- not touch -- it already correctly persists whichever timezone actually
+-- produced the moment once the create path is fixed to write it).
+--
+-- Nullable, no default, no backfill: NULL on existing rows correctly and
+-- permanently means "this moment used the owner's Timing Location, not a
+-- custom Event Location" -- backfilling from the owner's CURRENT Timing
+-- Location would manufacture false historical information about what was
+-- actually used to calculate a moment shared before this migration existed.
+--
+-- No latitude/longitude column -- no workflow recomputes Panchang/
+-- Muhurtham from a saved AuraMoment (audited before this PR, same
+-- conclusion as PlannedActivity.eventLocationName), so coordinates would be
+-- unused persisted precision. Data minimization.
+ALTER TABLE "AuraMoment" ADD COLUMN "locationName" TEXT;

@@ -201,19 +201,17 @@ export function MuhurthamFinderView({ timingLocation, onBack, onOpenPanchangCale
    * active, which is also the byte-equivalence case (brief section 2). */
   const displayLocation: MuhurthamTimingLocation = resultEventLocation ?? timingLocation;
   const displayTimezone = displayLocation.timezone;
-  /** Event Location Plan Persistence V1: Save and Share now have
-   * INDEPENDENT correctness -- PlannedActivity can persist an Event
-   * Location snapshot (eventTimezone/eventLocationName) as of this PR, so
-   * Save is safe to enable unconditionally. AuraMoment cannot yet (still
-   * always writes user.timezone at creation -- that's a separate PR), so
-   * Share remains gated exactly as before. Two flags, not one, precisely
-   * because these two actions now have genuinely different correctness
-   * states for the same custom-Event-Location result (brief section 25/26:
-   * "Do not leave one coupled saveAndShareDisabled flag after the two
-   * paths have different correctness states"). */
+  /** Event Location Plan Persistence V1 enabled Save unconditionally
+   * (PlannedActivity persists an Event Location snapshot). Event Location
+   * AuraMoment Persistence V1 does the same for Share: AuraMoment now also
+   * persists a correct snapshot (timezone/locationName, see
+   * handleShareMoment below), so a custom Event Location result no longer
+   * needs to be blocked from sharing either. Kept as two separate flags
+   * (rather than collapsing back to one) since Save and Share still go
+   * through genuinely different persistence paths that could, in
+   * principle, regress independently. */
   const saveDisabled = false;
-  const shareDisabled = resultEventLocation !== null;
-  const shareDisabledReason = "Sharing isn't available yet for a custom event location -- switch to your Timing Location to share this time.";
+  const shareDisabled = false;
 
   /** The location the NEXT search will actually use -- the live picker
    * selection, never the stale result snapshot above. Drives the date
@@ -442,10 +440,17 @@ export function MuhurthamFinderView({ timingLocation, onBack, onOpenPanchangCale
     setSharingWindowKey(key);
     setShareFeedback(null);
     try {
+      // Event Location AuraMoment Persistence V1: the exact same
+      // resultEventLocation snapshot handleUseThisTime uses above (brief
+      // section 6/20) -- never the live eventLocation picker state.
+      // Undefined for an ordinary Timing Location result, so the request
+      // omits eventLocation entirely and the route falls back to
+      // user.timezone, exactly preserving prior behavior for that case.
+      const eventLocation = resultEventLocation ? { cityName: resultEventLocation.cityName, timezone: resultEventLocation.timezone } : undefined;
       const res = await fetch('/api/aura-moments', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ scope, source: 'MUHURTHAM', activityId, startAt: window.start, endAt: window.end, ratingLabel, savedPersonId }),
+        body: JSON.stringify({ scope, source: 'MUHURTHAM', activityId, startAt: window.start, endAt: window.end, ratingLabel, savedPersonId, ...(eventLocation ? { eventLocation } : {}) }),
       });
       const data = await res.json();
       if (!res.ok) throw new Error(data?.error || 'Unable to share this moment.');
@@ -621,7 +626,7 @@ export function MuhurthamFinderView({ timingLocation, onBack, onOpenPanchangCale
 
       {scope === 'GENERAL' && result && (
         <>
-          {resultEventLocation && <EventLocationResultBanner location={resultEventLocation} reason={shareDisabledReason} />}
+          {resultEventLocation && <EventLocationResultBanner location={resultEventLocation} />}
           {visibleDates.length === 0 ? (
             <section style={cardStyle}>
               <div style={{ fontSize: 14, fontWeight: 800 }}>No strongly favorable dates were found in this range.</div>
@@ -696,7 +701,7 @@ export function MuhurthamFinderView({ timingLocation, onBack, onOpenPanchangCale
 
       {scope === 'PERSONAL' && personalOk && (
         <>
-          {resultEventLocation && <EventLocationResultBanner location={resultEventLocation} reason={shareDisabledReason} />}
+          {resultEventLocation && <EventLocationResultBanner location={resultEventLocation} />}
           {personalVisible.length === 0 ? (
             <section style={cardStyle}>
               <div style={{ fontSize: 14, fontWeight: 800 }}>No strongly favorable dates were found in this range.</div>
@@ -784,7 +789,7 @@ export function MuhurthamFinderView({ timingLocation, onBack, onOpenPanchangCale
 
       {scope === 'SHARED' && sharedOk && (
         <>
-          {resultEventLocation && <EventLocationResultBanner location={resultEventLocation} reason={shareDisabledReason} />}
+          {resultEventLocation && <EventLocationResultBanner location={resultEventLocation} />}
           {sharedVisible.length === 0 ? (
             <section style={cardStyle}>
               <div style={{ fontSize: 14, fontWeight: 800 }}>No strongly favorable dates were found in this range.</div>
@@ -1372,20 +1377,17 @@ function PanchangaMiniCell({ label, value }: { label: string; value: string }) {
   );
 }
 
-/** Event Location Search V1 / Event Location Plan Persistence V1: a small
- * banner shown above results that were computed with a custom Event
- * Location rather than the Timing Location -- names the location that
- * actually produced them (brief section 22) and, since Save re-enabled
- * (Persistence V1), explains only why Share specifically remains disabled
- * on this result set. Deliberately does not touch the result cards
- * themselves. */
-function EventLocationResultBanner({ location, reason }: { location: CityOption; reason: string }) {
+/** Event Location Search V1's informational banner -- names the location
+ * that actually produced the currently-displayed results (brief section
+ * 22). Now purely descriptive: Event Location AuraMoment Persistence V1
+ * removed the last reason Save/Share were ever disabled for a custom Event
+ * Location result, so this no longer carries a "why disabled" explanation. */
+function EventLocationResultBanner({ location }: { location: CityOption }) {
   return (
-    <div style={{ ...cardStyle, padding: '10px 14px', display: 'flex', flexDirection: 'column', gap: 4 }}>
+    <div style={{ ...cardStyle, padding: '10px 14px' }}>
       <div style={{ fontSize: 12, fontWeight: 800, color: '#dbe7f4' }}>
         📍 Event location: {location.cityName} ({formatCoordinateDirectional(location.latitude, 'lat')}, {formatCoordinateDirectional(location.longitude, 'lng')})
       </div>
-      <div style={{ fontSize: 11, color: '#94a3b8', lineHeight: 1.5 }}>{reason}</div>
     </div>
   );
 }
