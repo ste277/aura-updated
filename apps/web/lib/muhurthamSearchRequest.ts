@@ -3,6 +3,7 @@ import { DailyAssistantContext } from '../../../packages/recommendation/src/dail
 import { TimingTimePreference } from '../../../packages/recommendation/src/timingSearch';
 import { PersonalMuhurtaContext } from '../../../packages/recommendation/src/auraFitEngine';
 import { isDateOnlyString } from './timingSearchRequest';
+import { CityOption, isValidCustomLocation } from './cities';
 
 /**
  * Pure request validation for POST /api/muhurtham-search, kept out of
@@ -14,6 +15,48 @@ import { isDateOnlyString } from './timingSearchRequest';
  * see muhurthamFinder.ts's own module doc comment for why that's a request
  * concern (an HTTP 400) rather than a domain one.
  */
+
+/**
+ * Event Location Search V1: validates the optional `eventLocation` field on
+ * the Muhurtham search request body. Reuses isValidCustomLocation()
+ * (lib/cities.ts) -- the exact same latitude/longitude/timezone bounds
+ * Planning Location's own custom-location form already enforces (±66.5°
+ * latitude, the Panchang-safe range computeSolarEphemeris needs; ±180°
+ * longitude; a real IANA timezone) -- no second coordinate/timezone
+ * validation system.
+ *
+ * Absent `eventLocation` (undefined) resolves to `{ok: true, location:
+ * undefined}` -- the caller falls back to the user's Timing Location.
+ * A PRESENT but malformed/invalid `eventLocation` resolves to `{ok: false}`
+ * -- never silently falls back to Timing Location, since a caller who
+ * explicitly supplied a location almost certainly did not mean "ignore this
+ * and use my everyday location instead" (brief section 5).
+ */
+export function validateEventLocation(raw: unknown): { ok: true; location: CityOption | undefined } | { ok: false; error: string } {
+  if (raw === undefined) return { ok: true, location: undefined };
+  if (raw === null || typeof raw !== 'object' || Array.isArray(raw)) {
+    return { ok: false, error: 'eventLocation must be an object with cityName, latitude, longitude, and timezone.' };
+  }
+
+  const obj = raw as Record<string, unknown>;
+  const cityName = typeof obj.cityName === 'string' ? obj.cityName.trim() : '';
+  if (!cityName) return { ok: false, error: 'eventLocation.cityName is required.' };
+
+  const latitude = Number(obj.latitude);
+  const longitude = Number(obj.longitude);
+  if (!Number.isFinite(latitude) || !Number.isFinite(longitude)) {
+    return { ok: false, error: 'eventLocation.latitude and eventLocation.longitude must be finite numbers.' };
+  }
+
+  const timezone = typeof obj.timezone === 'string' ? obj.timezone.trim() : '';
+  if (!timezone) return { ok: false, error: 'eventLocation.timezone is required.' };
+
+  if (!isValidCustomLocation({ latitude, longitude, timezone })) {
+    return { ok: false, error: 'eventLocation has an invalid latitude, longitude, or timezone. Latitude must be between -66.5 and 66.5, longitude between -180 and 180, and timezone a valid IANA name.' };
+  }
+
+  return { ok: true, location: { cityName, latitude, longitude, timezone } };
+}
 
 const MIN_DURATION_MINUTES = 15;
 const MAX_DURATION_MINUTES = 360;

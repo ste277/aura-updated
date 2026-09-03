@@ -1192,7 +1192,7 @@ export default function DashboardPage() {
 
         {activeTab === 'muhurtham' && (
           <MuhurthamFinderView
-            timezone={user.timezone}
+            timingLocation={{ cityName: user.cityName, latitude: user.latitude, longitude: user.longitude, timezone: user.timezone }}
             onBack={() => setActiveTab('explore')}
             onOpenPanchangCalendar={handleOpenPanchang}
             onViewFullPanchang={handleViewFullPanchang}
