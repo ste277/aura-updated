@@ -25,7 +25,7 @@ function plan(overrides: Partial<PlannedActivity> = {}): PlannedActivity {
     id: 'plan-1', userId: 'user-1', title: 'Date Night', activityType: 'date-night', icon: '❤️',
     status: 'UPCOMING', plannedStartAt: new Date('2026-07-29T14:00:00.000Z'), plannedEndAt: new Date('2026-07-29T16:00:00.000Z'),
     durationMinutes: 120, windowType: 'NEUTRAL', windowLabel: 'Neutral Flow', matchLabel: 'Good Match', score: 70,
-    recommendation: null, calendarUrl: null, loggedAt: null, habitLogId: null,
+    recommendation: null, calendarUrl: null, loggedAt: null, habitLogId: null, eventTimezone: null, eventLocationName: null,
     createdAt: new Date('2026-07-28T00:00:00.000Z'), updatedAt: new Date('2026-07-28T00:00:00.000Z'),
     ...overrides,
   };

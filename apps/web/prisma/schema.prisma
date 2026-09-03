@@ -273,6 +273,26 @@ model PlannedActivity {
   loggedAt        DateTime? @db.Timestamptz(3)
   habitLogId      String?
 
+  // Event Location Plan Persistence V1 (migration 0028) -- an immutable
+  // snapshot of the Event Location (packages/recommendation/src/
+  // muhurthamFinder.ts's ephemeral request-local override, PR "Add
+  // event-specific location to Muhurtham search") that produced this plan's
+  // plannedStartAt/plannedEndAt, taken ONLY from the client's own
+  // resultEventLocation (the location that actually ran the search that was
+  // saved), never from the User's current Timing Location and never
+  // reconstructed from live picker state. NULL on both fields means
+  // "this plan used the Timing Location, not a custom Event Location" --
+  // the common case, and the correct legacy value for every row that
+  // predates this migration (deliberately NOT backfilled with the owner's
+  // current Timing Location, which would manufacture false historical
+  // information). Always set or left NULL together -- never one without
+  // the other, see route.ts's own validation. No latitude/longitude: no
+  // workflow recomputes Panchang/Muhurtham from a saved PlannedActivity
+  // (confirmed by audit), so coordinates would be unused persisted
+  // precision -- data minimization, not an oversight.
+  eventTimezone     String?
+  eventLocationName String?
+
   createdAt       DateTime @default(now()) @db.Timestamptz(3)
   updatedAt       DateTime @updatedAt @db.Timestamptz(3)
 

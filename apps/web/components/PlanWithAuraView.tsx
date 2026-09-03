@@ -17,6 +17,35 @@ import { formatMuhurtaReason } from '../../../packages/muhurta/src/muhurtaReason
 import { localDateTimeToUTC } from '../lib/timezone';
 import { triggerHaptic } from '../lib/haptics';
 import { trackEvent } from '../lib/trackEvent';
+// Event Location Plan Persistence V1 closeout: pure plan display/formatting
+// logic moved to a plain .ts module so it can be unit-tested under this
+// repo's normal (non-JSX) test runner -- see planFormatting.ts's own doc
+// comment. Re-exported below (RESULT_LABEL_TEXT, findCandidateKey,
+// planPayloadFromCandidate, PlanEventLocation) for the handful of other
+// files that already import them `from './PlanWithAuraView'`, so none of
+// those call sites need to change.
+import type {
+  PlanEventLocation,
+  UpcomingPlan,
+  PlanApiRow,
+  PlanIcon,
+  SaveUpcomingPlanOptions,
+} from '../lib/planFormatting';
+import {
+  RESULT_LABEL_TEXT,
+  durationLabel,
+  minutesFromDuration,
+  windowTypeFromLabel,
+  mapPlanRow,
+  findCandidateKey,
+  planPayloadFromCandidate,
+  getTodayForTimezone,
+  addDays,
+  formatShortDate,
+} from '../lib/planFormatting';
+
+export type { PlanEventLocation };
+export { RESULT_LABEL_TEXT, findCandidateKey, planPayloadFromCandidate };
 
 interface TaskSuggestion {
   title: string;
@@ -153,14 +182,6 @@ const PLAN_MODES: Array<{ value: TimingSearchMode; label: string; helper: string
 /** TimingCandidateLabel -> friendly copy (section 11). Do not invent a second
  * fit classification -- this is purely a display mapping of the engine's own
  * label values. */
-export const RESULT_LABEL_TEXT: Record<TimingCandidateLabel, string> = {
-  EXCELLENT: 'Excellent fit',
-  VERY_GOOD: 'Very good',
-  GOOD: 'Good',
-  USABLE: 'Usable',
-  CAUTION: 'Caution',
-};
-
 const RESULT_LABEL_COLOR: Record<TimingCandidateLabel, string> = {
   EXCELLENT: '#4ade80',
   VERY_GOOD: '#4ade80',
@@ -198,7 +219,6 @@ export function resolveActivitySelection(rawTitle: string): { activityId?: strin
   return known ? { activityId: known.id } : { taskTitle: trimmed };
 }
 
-type PlanIcon = 'workout' | 'focus' | 'heart' | 'study' | 'meditate' | 'meeting' | 'journey';
 type SpeechRecognitionConstructor = new () => {
   continuous: boolean;
   interimResults: boolean;
@@ -209,46 +229,8 @@ type SpeechRecognitionConstructor = new () => {
   start: () => void;
   stop: () => void;
 };
-type UpcomingPlan = {
-  id: string;
-  title: string;
-  icon: PlanIcon;
-  duration: string;
-  time: string;
-  window: string;
-  match: 'Best Match' | 'Good Match';
-  note: string;
-  accent: string;
-  when: string;
-  plannedStartAt: string;
-  plannedEndAt: string;
-  details: string;
-  score?: number;
-  googleCalendarUrl?: string;
-  source?: 'Aura';
-  status?: 'UPCOMING' | 'LOGGED';
-  loggedAt?: string;
-};
 
 type PlanActionState = 'LOGGING' | 'CANCELLING';
-
-type PlanApiRow = {
-  id: string;
-  title?: string | null;
-  activityType?: string | null;
-  icon?: string | null;
-  status?: 'UPCOMING' | 'LOGGED' | 'CANCELLED' | string | null;
-  plannedStartAt: string | Date;
-  plannedEndAt: string | Date;
-  durationMinutes?: number | null;
-  windowType?: string | null;
-  windowLabel?: string | null;
-  matchLabel?: string | null;
-  score?: number | null;
-  recommendation?: string | null;
-  calendarUrl?: string | null;
-  loggedAt?: string | Date | null;
-};
 
 function recommendedPreference(taskTitle: string): TimePreference {
   const title = taskTitle.toLowerCase();
@@ -256,11 +238,6 @@ function recommendedPreference(taskTitle: string): TimePreference {
   if (/(sleep|wind down|night)/.test(title)) return 'NIGHT';
   if (/(workout|exercise|journey|travel|deep work|study|learn|meditat|meeting)/.test(title)) return 'MORNING';
   return 'ANYTIME';
-}
-
-function durationLabel(minutes: number): string {
-  if (minutes < 120) return `${minutes} min`;
-  return `${minutes / 60} hours`;
 }
 
 function getHorizonHelper(horizon: PlanningHorizon, timezone?: string): string {
@@ -277,179 +254,22 @@ function getHorizonHelper(horizon: PlanningHorizon, timezone?: string): string {
   return 'Choose a date range';
 }
 
-function addDays(date: Date, days: number): Date {
-  const next = new Date(date);
-  next.setDate(next.getDate() + days);
-  return next;
-}
-
-function formatShortDate(date: Date): string {
-  return date.toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric', timeZone: 'UTC' });
-}
-
-function getTodayForTimezone(timezone?: string): Date {
-  const formatter = new Intl.DateTimeFormat('en-US', {
-    timeZone: timezone || undefined,
-    year: 'numeric',
-    month: 'numeric',
-    day: 'numeric',
-  });
-  const parts = formatter.formatToParts(new Date());
-  const year = Number(parts.find((part) => part.type === 'year')?.value);
-  const month = Number(parts.find((part) => part.type === 'month')?.value);
-  const day = Number(parts.find((part) => part.type === 'day')?.value);
-  if (!year || !month || !day) return new Date();
-  return new Date(Date.UTC(year, month - 1, day, 12, 0, 0));
-}
-
-function planIconForTitle(title: string): PlanIcon {
-  const lower = title.toLowerCase();
-  if (/workout|exercise|gym|training/.test(lower)) return 'workout';
-  if (/date|relationship|romantic/.test(lower)) return 'heart';
-  if (/study|learn|course|exam|read/.test(lower)) return 'study';
-  if (/meditat|breath|prayer/.test(lower)) return 'meditate';
-  if (/meeting|review|call|interview|presentation/.test(lower)) return 'meeting';
-  if (/journey|travel|trip|flight|train/.test(lower)) return 'journey';
-  return 'focus';
-}
-
-function planAccentForTitle(title: string): string {
-  const lower = title.toLowerCase();
-  if (/date|relationship|romantic|workout|exercise|gym/.test(lower)) return '#ff5f95';
-  if (/study|learn|meditat|breath/.test(lower)) return '#4ade80';
-  if (/journey|travel|trip/.test(lower)) return '#facc15';
-  return '#38bdf8';
-}
-
-function minutesFromDuration(duration: string): number {
-  const hourMatch = duration.match(/(\d+(?:\.\d+)?)\s*h/i);
-  if (hourMatch) return Math.round(Number(hourMatch[1]) * 60);
-  const minuteMatch = duration.match(/(\d+)\s*min/i);
-  if (minuteMatch) return Number(minuteMatch[1]);
-  return 60;
-}
-
-function formatPlanDay(date: Date): string {
-  const today = getTodayForTimezone();
-  const dateKey = date.toISOString().slice(0, 10);
-  const todayKey = today.toISOString().slice(0, 10);
-  const tomorrowKey = addDays(today, 1).toISOString().slice(0, 10);
-  if (dateKey === todayKey) return 'Today';
-  if (dateKey === tomorrowKey) return 'Tomorrow';
-  return formatShortDate(date);
-}
-
-function formatPlanTimeRange(start: Date, end: Date): string {
-  const opts: Intl.DateTimeFormatOptions = { hour: 'numeric', minute: '2-digit' };
-  return `${start.toLocaleTimeString('en-US', opts)} - ${end.toLocaleTimeString('en-US', opts)}`;
-}
-
-function windowTypeFromLabel(label?: string): string {
-  if (!label) return 'NEUTRAL';
-  if (/abhijit/i.test(label)) return 'ABHIJIT';
-  if (/gulika|steady/i.test(label)) return 'GULIKA';
-  if (/brahma/i.test(label)) return 'BRAHMA';
-  if (/rahu/i.test(label)) return 'RAHU_KALAM';
-  if (/yama/i.test(label)) return 'YAMA';
-  return 'NEUTRAL';
-}
-
-function mapPlanRow(row: PlanApiRow): UpcomingPlan {
-  const start = new Date(row.plannedStartAt);
-  const end = new Date(row.plannedEndAt);
-  const title = row.title || row.activityType || 'Planned activity';
-  const status = row.status === 'LOGGED' ? 'LOGGED' : 'UPCOMING';
-  return {
-    id: row.id,
-    title,
-    icon: planIconForTitle(row.icon || title),
-    when: formatPlanDay(start),
-    plannedStartAt: start.toISOString(),
-    plannedEndAt: end.toISOString(),
-    duration: `${row.durationMinutes ?? 60} min`,
-    time: formatPlanTimeRange(start, end),
-    window: row.windowLabel || row.windowType || 'Neutral Flow',
-    match: row.matchLabel === 'Good Match' ? 'Good Match' : 'Best Match',
-    note: status === 'LOGGED' ? 'Logged' : row.matchLabel || 'Good match',
-    accent: planAccentForTitle(title),
-    details: row.recommendation || 'Aura saved this as one of your planned moments.',
-    score: typeof row.score === 'number' ? row.score : undefined,
-    googleCalendarUrl: row.calendarUrl || undefined,
-    source: 'Aura',
-    status,
-    loggedAt: row.loggedAt ? new Date(row.loggedAt).toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' }) : undefined,
-  };
-}
-
-export function findCandidateKey(candidate: TimingCandidate): string {
-  return `${candidate.metadata.activityType}-${candidate.start}-${candidate.end}`.toLowerCase();
-}
-
-/** Adapts a TimingCandidate into the existing UpcomingPlan/handleSavePlan
- * pipeline (POST /api/plans) so Find/Check/Compare's "Use this time" reuses
- * the same persistence path the original Plan flow already had, rather than
- * a second save mechanism. candidate.metadata.windowLabel is produced by the
- * same formatWindowLabel() the old slot-task-backed flow used, so
- * windowTypeFromLabel() below still resolves it correctly.
- *
- * `sharedWithName` (Shared Muhurtham brief section 18): PlannedActivity has
- * no JSON metadata column and this PR does not add one ("do not create a new
- * plan model solely for this") -- so when a SHARED "Use this time" saves a
- * plan, the only schema-migration-free way to preserve that context is a
- * short human-readable prefix on the existing `details`/`recommendation`
- * text field. Omitted (undefined), `details` is byte-identical to before --
- * GENERAL/PERSONAL "Use this time" callers are completely unaffected. */
-export function planPayloadFromCandidate(candidate: TimingCandidate, durationMinutes: number, sharedWithName?: string): UpcomingPlan {
-  const start = new Date(candidate.start);
-  const end = new Date(candidate.end);
-  const title = candidate.metadata.activityType;
-  const reasonDetails = candidate.reasons.length > 0 ? candidate.reasons.map((reason) => formatMuhurtaReason(reason)).join(' ') : 'Aura found this as a good moment for this activity.';
-  return {
-    id: `aura-${findCandidateKey(candidate)}`.replace(/[^a-z0-9]+/g, '-'),
-    title,
-    icon: planIconForTitle(title),
-    when: candidate.metadata.dateLabel,
-    plannedStartAt: candidate.start,
-    plannedEndAt: candidate.end,
-    duration: durationLabel(durationMinutes),
-    time: formatPlanTimeRange(start, end),
-    window: candidate.metadata.windowLabel,
-    match: candidate.label === 'EXCELLENT' || candidate.label === 'VERY_GOOD' ? 'Best Match' : 'Good Match',
-    note: RESULT_LABEL_TEXT[candidate.label],
-    accent: planAccentForTitle(title),
-    details: sharedWithName ? `❤️ Planned with ${sharedWithName}. ${reasonDetails}` : reasonDetails,
-    score: candidate.score * 10,
-    googleCalendarUrl: buildGoogleCalendarUrl(title, candidate.start, candidate.end),
-    source: 'Aura',
-  };
-}
-
 /**
  * Saves a TimingCandidate-shaped result straight to POST /api/plans, using
- * planPayloadFromCandidate() above for the exact same field mapping
- * PlanWithAuraView's own handleSavePlan() uses -- for callers (Muhurtham
- * Finder's "Use this time ->") that need the same save pipeline but aren't
- * PlanWithAuraView itself, so don't have its local savedPlans list state to
- * update. Intentionally does none of that list bookkeeping; callers that
- * want the saved plan reflected immediately in their own UI should refetch
- * (e.g. via the onPlanLogged callback already threaded through page.tsx).
+ * planPayloadFromCandidate() (planFormatting.ts) for the exact same field
+ * mapping PlanWithAuraView's own handleSavePlan() uses -- for callers
+ * (Muhurtham Finder's "Use this time ->") that need the same save pipeline
+ * but aren't PlanWithAuraView itself, so don't have its local savedPlans
+ * list state to update. Intentionally does none of that list bookkeeping;
+ * callers that want the saved plan reflected immediately in their own UI
+ * should refetch (e.g. via the onPlanLogged callback already threaded
+ * through page.tsx). See SaveUpcomingPlanOptions (planFormatting.ts) for
+ * what each option does.
  */
-/**
- * `guestConversionToken` (Recipient Conversion V1 Hardening, brief section
- * 10) is optional and only ever passed by the guest-conversion save path
- * (apps/web/app/find/GuestFindClient.tsx) -- every other caller of this
- * function is unaffected. POST /api/plans uses it purely as an idempotency
- * key (see that route's own doc comment); it never changes what gets
- * created, only whether a retry creates a SECOND Plan.
- *
- * `clientRequestId` (Intentional Day Builder V1, brief section 20) is the
- * same kind of idempotency key, only ever passed by Day Builder's own Add
- * action (DayBuilderCard.tsx) -- independent of guestConversionToken, never
- * both at once in practice. A stable id per (suggestion, local date) so a
- * double-tap or a benign re-render never creates a second Plan.
- */
-export async function saveUpcomingPlanFromCandidate(candidate: TimingCandidate, durationMinutes: number, sharedWithName?: string, guestConversionToken?: string, clientRequestId?: string): Promise<UpcomingPlan> {
-  const plan = planPayloadFromCandidate(candidate, durationMinutes, sharedWithName);
+
+export async function saveUpcomingPlanFromCandidate(candidate: TimingCandidate, durationMinutes: number, options: SaveUpcomingPlanOptions = {}): Promise<UpcomingPlan> {
+  const { sharedWithName, guestConversionToken, clientRequestId, eventLocation } = options;
+  const plan = planPayloadFromCandidate(candidate, durationMinutes, sharedWithName, eventLocation);
   const res = await fetch('/api/plans', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
@@ -468,6 +288,7 @@ export async function saveUpcomingPlanFromCandidate(candidate: TimingCandidate, 
       calendarUrl: plan.googleCalendarUrl,
       ...(guestConversionToken ? { guestConversionToken } : {}),
       ...(clientRequestId ? { clientRequestId } : {}),
+      ...(eventLocation ? { eventLocation } : {}),
     }),
   });
   if (!res.ok) throw new Error('Unable to save plan.');
@@ -576,7 +397,7 @@ export function PlanWithAuraView({ onTimingSearch, onViewDay, onPlanLogged, time
         if (!res.ok) throw new Error('Unable to load plans.');
         const rows = await res.json();
         if (cancelled) return;
-        setSavedPlans(Array.isArray(rows) ? rows.map(mapPlanRow) : []);
+        setSavedPlans(Array.isArray(rows) ? rows.map((row: PlanApiRow) => mapPlanRow(row, timezone)) : []);
       } catch {
         if (!cancelled) setSavedPlans([]);
       }
@@ -655,7 +476,7 @@ export function PlanWithAuraView({ onTimingSearch, onViewDay, onPlanLogged, time
       });
       if (!res.ok) throw new Error('Unable to save plan.');
       const row = await res.json();
-      const saved = mapPlanRow(row);
+      const saved = mapPlanRow(row, timezone);
       const replacedPlanId = reschedulingPlanId;
       if (replacedPlanId && replacedPlanId !== saved.id) {
         fetch(`/api/plans/${replacedPlanId}`, { method: 'DELETE' }).catch((err) => {
@@ -712,7 +533,7 @@ export function PlanWithAuraView({ onTimingSearch, onViewDay, onPlanLogged, time
       const res = await fetch(`/api/plans/${plan.id}/log`, { method: 'POST' });
       if (!res.ok) throw new Error('Unable to log plan.');
       const result = await res.json();
-      const updated = mapPlanRow(result.plan);
+      const updated = mapPlanRow(result.plan, timezone);
       setSavedPlans((plans) => plans.map((item) => item.id === plan.id ? updated : item));
       setExpandedPlanId(plan.id);
       onPlanLogged?.();
@@ -1692,6 +1513,14 @@ function UpcomingPlan({
                 {(plan.match === 'Best Match' || isLogged) && <span style={{ color: '#4ade80', fontSize: 13, marginLeft: 6 }}>✓</span>}
               </div>
               <div style={{ color: isLogged ? '#a7f3d0' : '#4ade80', fontSize: 14, fontWeight: 850, marginTop: 4 }}>{plan.time}</div>
+              {/* Event Location Plan Persistence V1 (brief section 19):
+                  only rendered when this plan actually snapshotted a
+                  custom Event Location -- NULL means the Timing Location
+                  was used, and must never show a fabricated location
+                  label (brief section 20). */}
+              {plan.eventLocationName && (
+                <div style={{ color: '#94a3b8', fontSize: 12, marginTop: 2 }}>📍 {plan.eventLocationName}</div>
+              )}
             </div>
             {typeof plan.score === 'number' && <MatchScoreRing score={plan.score} />}
           </div>

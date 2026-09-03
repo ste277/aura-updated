@@ -515,6 +515,11 @@ export interface PlannedActivity {
   calendarUrl: string | null;
   loggedAt: Date | null;
   habitLogId: string | null;
+  /** Event Location Plan Persistence V1 -- immutable snapshot of the Event
+   * Location that produced this plan's timing, or both null when the
+   * Timing Location was used (see the schema's own doc comment). */
+  eventTimezone: string | null;
+  eventLocationName: string | null;
   createdAt: Date;
   updatedAt: Date;
 }
@@ -533,6 +538,11 @@ export interface CreatePlannedActivityInput {
   score?: number | null;
   recommendation?: string | null;
   calendarUrl?: string | null;
+  /** Both present together, or both absent -- the caller (route.ts) is
+   * responsible for that pairing; this function persists whatever it's
+   * given verbatim. */
+  eventTimezone?: string | null;
+  eventLocationName?: string | null;
 }
 
 export async function createHabit(input: {
@@ -1138,8 +1148,8 @@ export async function createPlannedActivity(input: CreatePlannedActivityInput): 
     `INSERT INTO "PlannedActivity"
        (id, "userId", title, "activityType", icon, "plannedStartAt", "plannedEndAt",
         "durationMinutes", "windowType", "windowLabel", "matchLabel", score,
-        recommendation, "calendarUrl")
-     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14)
+        recommendation, "calendarUrl", "eventTimezone", "eventLocationName")
+     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16)
      RETURNING *`,
     [
       id,
@@ -1156,6 +1166,8 @@ export async function createPlannedActivity(input: CreatePlannedActivityInput): 
       input.score ?? null,
       input.recommendation ?? null,
       input.calendarUrl ?? null,
+      input.eventTimezone ?? null,
+      input.eventLocationName ?? null,
     ]
   );
   return result.rows[0];
