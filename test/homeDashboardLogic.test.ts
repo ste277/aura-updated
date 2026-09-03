@@ -30,6 +30,7 @@ function fakeMoment(overrides: Partial<AuraMoment>): AuraMoment {
     startAt: new Date('2026-10-18T04:42:00.000Z'),
     endAt: new Date('2026-10-18T06:04:00.000Z'),
     timezone: 'Asia/Kolkata',
+    locationName: null,
     savedPersonId: 'person-1',
     sharedPersonDisplayName: 'Anu',
     senderDisplayName: 'Stephen',

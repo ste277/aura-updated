@@ -96,6 +96,7 @@ const fullMoment: AuraMoment = {
   startAt: new Date('2026-10-18T04:42:00.000Z'),
   endAt: new Date('2026-10-18T06:04:00.000Z'),
   timezone: 'Asia/Kolkata',
+  locationName: 'Kochi',
   savedPersonId: 'saved-person-id-should-never-appear-publicly',
   sharedPersonDisplayName: 'Anu',
   senderDisplayName: 'Stephen',
@@ -116,7 +117,12 @@ const fullMoment: AuraMoment = {
 const publicDto = toPublicAuraMoment(fullMoment, true);
 const serialized = JSON.stringify(publicDto);
 
-check('PublicAuraMoment DTO has EXACTLY the allow-listed keys (no accidental extra fields)', Object.keys(publicDto).sort().join(',') === ['activityTitle', 'activityIcon', 'startAt', 'endAt', 'timezone', 'senderDisplayName', 'sharedPersonDisplayName', 'scope', 'planningMode', 'ratingLabel', 'explanationSnapshot', 'responseState', 'responsePreference', 'hasSuccessor'].sort().join(','));
+check('PublicAuraMoment DTO has EXACTLY the allow-listed keys (no accidental extra fields)', Object.keys(publicDto).sort().join(',') === ['activityTitle', 'activityIcon', 'startAt', 'endAt', 'timezone', 'locationName', 'senderDisplayName', 'sharedPersonDisplayName', 'scope', 'planningMode', 'ratingLabel', 'explanationSnapshot', 'responseState', 'responsePreference', 'hasSuccessor'].sort().join(','));
+// Event Location AuraMoment Persistence V1: locationName IS meant to be
+// public (same tier of detail as activityTitle -- brief section 14/32), but
+// only the human-readable name, never coordinates.
+check('PublicAuraMoment DTO exposes locationName (safe -- same tier as activityTitle)', publicDto.locationName === 'Kochi');
+check('PublicAuraMoment DTO never contains a latitude/longitude field name', !/latitude|longitude/i.test(serialized));
 check('PublicAuraMoment DTO planningMode is derived from the activity catalog (griha-pravesh is CEREMONIAL), never the internal AuraMomentSource', publicDto.planningMode === 'CEREMONIAL');
 check('PublicAuraMoment DTO never contains the internal id', !serialized.includes('internal-id-should-never-appear-publicly'));
 check('PublicAuraMoment DTO never contains ownerUserId', !serialized.includes('owner-user-id-should-never-appear-publicly') && !('ownerUserId' in publicDto));

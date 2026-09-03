@@ -192,6 +192,14 @@ export function AuraMomentClient({ token, initialOutcome }: AuraMomentClientProp
 
           <h1 style={{ ...typography.pageTitle, fontSize: 22, marginTop: spacing.lg }}>{moment.activityTitle}</h1>
           <div style={{ ...typography.bodyStrong, marginTop: spacing.sm }}>{formatMomentWhen(moment.startAt, moment.endAt, moment.timezone)}</div>
+          {/* Event Location AuraMoment Persistence V1: understated location
+              label (brief section 15/37), only when this moment snapshotted
+              a custom Event Location -- null on every ordinary/legacy
+              moment renders nothing here, never a fabricated fallback to
+              the owner's current city (section 17). */}
+          {moment.locationName && (
+            <div style={{ ...typography.meta, marginTop: spacing.xs }}>📍 {moment.locationName}</div>
+          )}
 
           {ratingText && (
             <div style={{ marginTop: spacing.md }}>

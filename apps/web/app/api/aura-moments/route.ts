@@ -15,10 +15,18 @@ import { recordProductEvent } from '../../../lib/productEvents';
  * POST accepts only a reference to an already-computed Muhurtham result the
  * owner selected (scope/activityId/startAt/endAt/ratingLabel, plus
  * savedPersonId for SHARED) -- never raw birth/natal context, never a
- * client-supplied title/icon/timezone/sender name (all resolved server-side;
- * see auraMomentRequest.ts's own doc comment for why). It does not re-run
+ * client-supplied title/icon/sender name (all resolved server-side; see
+ * auraMomentRequest.ts's own doc comment for why). It does not re-run
  * Muhurtham Finder or any astrology computation: it snapshots exactly what
  * the client already found.
+ *
+ * Event Location AuraMoment Persistence V1: the one exception to "never
+ * client-supplied timezone" is the optional `eventLocation: {cityName,
+ * timezone}` snapshot -- validated in auraMomentRequest.ts, sourced by the
+ * client ONLY from PR #55's resultEventLocation (never live picker state,
+ * never coordinates). Present -> persists that snapshot's own timezone/name.
+ * Absent -> unchanged prior behavior (the owner's own user.timezone, no
+ * locationName).
  */
 
 export async function POST(req: NextRequest) {
@@ -69,7 +77,12 @@ export async function POST(req: NextRequest) {
     activityIcon: activity.icon,
     startAt: input.startAt,
     endAt: input.endAt,
-    timezone: user.timezone,
+    // Event Location AuraMoment Persistence V1 (brief section 9, the
+    // central correctness rule): a validated Event Location snapshot's
+    // timezone wins; otherwise the owner's own Timing Location, exactly
+    // preserving prior behavior for every request that omits eventLocation.
+    timezone: input.eventLocationTimezone ?? user.timezone,
+    locationName: input.eventLocationName,
     savedPersonId,
     sharedPersonDisplayName,
     senderDisplayName: formatDisplayName(user.email),

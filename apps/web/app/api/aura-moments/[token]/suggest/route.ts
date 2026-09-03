@@ -83,6 +83,13 @@ export async function POST(req: NextRequest, { params }: { params: { token: stri
     startAt: new Date(candidate.startAt),
     endAt: new Date(candidate.endAt),
     timezone: original.timezone,
+    // Event Location AuraMoment Persistence V1: preserve the original's
+    // location snapshot too -- a successor to a moment that used a custom
+    // Event Location must keep describing that same place, not silently
+    // drop back to no location (brief section 33: "ensure locationName/
+    // timezone are not discarded"). null on an ordinary-Timing-Location
+    // original propagates as null, same as timezone above.
+    locationName: original.locationName,
     savedPersonId: original.savedPersonId,
     sharedPersonDisplayName: original.sharedPersonDisplayName,
     senderDisplayName: original.senderDisplayName,

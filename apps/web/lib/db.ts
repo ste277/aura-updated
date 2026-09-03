@@ -218,6 +218,10 @@ export interface AuraMoment {
   startAt: Date;
   endAt: Date;
   timezone: string;
+  /** Event Location AuraMoment Persistence V1 -- the human-readable name of
+   * the Event Location that produced this moment's timing, or null when the
+   * owner's Timing Location was used (see the schema's own doc comment). */
+  locationName: string | null;
   savedPersonId: string | null;
   sharedPersonDisplayName: string | null;
   senderDisplayName: string | null;
@@ -261,6 +265,15 @@ export interface CreateAuraMomentInput {
   startAt: Date;
   endAt: Date;
   timezone: string;
+  /** Event Location AuraMoment Persistence V1 -- see AuraMoment's own field
+   * doc comment. The route is responsible for deriving this (and timezone)
+   * together from a validated eventLocation snapshot, or both fall back to
+   * null/user.timezone together; this function persists whatever it's
+   * given verbatim. Optional (defaults to null) so every pre-existing
+   * caller that doesn't yet know about Event Location keeps compiling
+   * unchanged -- same convention as previousMomentId/plannedActivityId
+   * below. */
+  locationName?: string | null;
   savedPersonId: string | null;
   sharedPersonDisplayName: string | null;
   senderDisplayName: string | null;
@@ -285,9 +298,9 @@ export async function createAuraMoment(input: CreateAuraMomentInput): Promise<Au
   const result = await pool.query(
     `INSERT INTO "AuraMoment"
        (id, "ownerUserId", "publicToken", scope, source, "activityId", "activityTitle", "activityIcon",
-        "startAt", "endAt", timezone, "savedPersonId", "sharedPersonDisplayName", "senderDisplayName",
+        "startAt", "endAt", timezone, "locationName", "savedPersonId", "sharedPersonDisplayName", "senderDisplayName",
         "ratingLabel", "explanationSnapshot", "expiresAt", "previousMomentId", "plannedActivityId")
-     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19)
+     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20)
      RETURNING *`,
     [
       id,
@@ -301,6 +314,7 @@ export async function createAuraMoment(input: CreateAuraMomentInput): Promise<Au
       input.startAt,
       input.endAt,
       input.timezone,
+      input.locationName ?? null,
       input.savedPersonId,
       input.sharedPersonDisplayName,
       input.senderDisplayName,

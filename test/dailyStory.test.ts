@@ -153,7 +153,7 @@ function plan(over: Partial<PlannedActivity> & { id: string; title: string; plan
     moments: [{
       id: 'm1', ownerUserId: 'u', publicToken: 't', scope: 'SHARED', source: 'PLAN', activityId: 'date-night',
       activityTitle: 'Date Night', activityIcon: '❤️', startAt: new Date('2026-08-24T14:00:00.000Z'), endAt: new Date('2026-08-24T15:30:00.000Z'),
-      timezone: TZ, savedPersonId: 'sp', sharedPersonDisplayName: 'Anu', senderDisplayName: 'Owner', ratingLabel: null,
+      timezone: TZ, locationName: null, savedPersonId: 'sp', sharedPersonDisplayName: 'Anu', senderDisplayName: 'Owner', ratingLabel: null,
       explanationSnapshot: null, status: 'ACTIVE', responseState: 'ACCEPTED', responsePreference: null, respondedAt: now,
       previousMomentId: null, plannedActivityId: null, ownerSeenResponseAt: null, firstOpenedAt: null, createdAt: now, expiresAt: null,
     }],
