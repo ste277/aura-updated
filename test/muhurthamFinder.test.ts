@@ -2,6 +2,7 @@ import { blendStartSensitiveScore, findMuhurthams, isSupportedMuhurthamActivity,
 import { evaluateTimingCandidate } from '../packages/recommendation/src/timingSearch';
 import { profileFromActivity } from '../packages/recommendation/src/dailyAssistant';
 import { findActivityIntent } from '../packages/recommendation/src/personalizedTasks';
+import { getActivityDefinition } from '../packages/recommendation/src/activityDefinitions';
 import { localDateTimeToUTC } from '../packages/panchang/src/localDate';
 import type { DailyAssistantContext } from '../packages/recommendation/src/dailyAssistant';
 
@@ -106,11 +107,27 @@ check('findMuhurthams throws for a not-yet-supported activity rather than return
 
 let threwForUnknown = false;
 try {
-  findMuhurthams({ activityId: 'marriage', dateRange: { start: '2026-09-01', end: '2026-09-05' }, context: chennaiContext });
+  findMuhurthams({ activityId: 'not-a-real-activity-id', dateRange: { start: '2026-09-01', end: '2026-09-05' }, context: chennaiContext });
 } catch {
   threwForUnknown = true;
 }
-check('findMuhurthams throws for an unknown activityId (marriage does not exist as a catalog activity yet)', threwForUnknown);
+check('findMuhurthams throws for a genuinely unknown (not-in-catalog) activityId', threwForUnknown);
+
+// Marriage Muhurtham Foundation V1 (PR A): `marriage` IS now a real catalog
+// activity with its own dedicated (IMPLEMENTED) Tithi/Nakshatra/Yoga/Karana
+// rule pack -- but must still be rejected by the SAME "not-yet-supported"
+// path 'tea-break' takes above (PARTIAL, not SUPPORTED), never the "unknown
+// activity" path, since it genuinely exists in the catalog now. See
+// test/marriageMuhurthamFoundation.test.ts for the full gating regression.
+check('marriage is a real catalog activity, not unknown', getActivityDefinition('marriage') !== undefined);
+check('marriage is still NOT in SUPPORTED_MUHURTHAM_ACTIVITY_IDS (gated pending PR B)', !isSupportedMuhurthamActivity('marriage'));
+let threwForMarriageGated = false;
+try {
+  findMuhurthams({ activityId: 'marriage', dateRange: { start: '2026-09-01', end: '2026-09-05' }, context: chennaiContext });
+} catch {
+  threwForMarriageGated = true;
+}
+check('findMuhurthams throws for marriage via the same not-yet-supported path as tea-break (PARTIAL, not unknown)', threwForMarriageGated);
 
 // ============================================================
 // REJECTS/PENALIZES BLOCKERS, PRESERVES CAUTIONS (no new scoring formula)

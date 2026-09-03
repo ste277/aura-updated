@@ -94,16 +94,44 @@ export interface MuhurtaRulePackCoverage {
   tithi: RuleCoverageStatus;
   nakshatra: RuleCoverageStatus;
   /** Global, family/intent-independent (FAVORABLE_YOGAS/DIFFICULT_YOGAS) --
-   * always IMPLEMENTED for every activity today. */
+   * always IMPLEMENTED for every activity today. This describes whether the
+   * always-on GENERIC/SOFT Yoga scoring applies (it always does) -- a
+   * SEPARATE axis from `yogaAuthoritative` below, which describes whether
+   * THIS pack has its own genuinely event-specific, HARD-eligibility Yoga
+   * avoid data. Do not confuse the two: only `yogaAuthoritative` may ever
+   * gate a hard rejection. */
   yoga: RuleCoverageStatus;
   /** Global, family/intent-independent (FAVORABLE_KARANAS + Vishti check) --
-   * always IMPLEMENTED for every activity today. */
+   * always IMPLEMENTED for every activity today. Same "generic/soft, always
+   * on" meaning as `yoga` above -- see `karanaAuthoritative` for the
+   * separate hard-eligibility axis. */
   karana: RuleCoverageStatus;
   /** ABHIJIT support + RAHU_KALAM/YAMA caution are global baselines that
    * always apply -- always IMPLEMENTED. BRAHMA/GULIKA bonus windows are
    * family-conditional extras layered on top when the legacy family
    * qualifies; their absence does not downgrade this to MISSING. */
   windows: RuleCoverageStatus;
+  /** Marriage Muhurtham Foundation V1: whether this pack has genuinely
+   * event-specific (authoritative) Yoga avoid data of its own -- mirrors
+   * tithi/nakshatra's IMPLEMENTED/REUSABLE_BASE_RULE/MISSING semantics
+   * exactly. Only 'IMPLEMENTED' here may ever hard-reject a candidate (see
+   * isAuthoritativeAvoidYoga) -- the same discipline as Tithi/Nakshatra's
+   * own gate. MISSING for every pack except one with its own INTENT_RULE_PACKS
+   * yoga override (Griha Pravesh has none -- see this module's doc comment:
+   * "Only tithi/nakshatra are overridable here"). */
+  yogaAuthoritative: RuleCoverageStatus;
+  /** Same principle as yogaAuthoritative, for Karana (isAuthoritativeAvoidKarana). */
+  karanaAuthoritative: RuleCoverageStatus;
+  /** Marriage Muhurtham Foundation V1 (PR A): whether whole lunar/solar-month
+   * or period-level exclusion (Chaturmas, Kharmas, Adhika Masa, ...) is
+   * implemented. MISSING for every intent today -- no mechanism to express
+   * this exists yet anywhere in the engine (that is PR B's job). An intent
+   * whose own rule pack declares `requiresPeriodExclusion` cannot reach
+   * SUPPORTED while this stays MISSING -- see computeMuhurtaSupportLevel(). */
+  periodExclusion: RuleCoverageStatus;
+  /** Same gating principle as periodExclusion, for planetary combustion
+   * (Guru/Shukra Asta) -- also MISSING for every intent today, also PR B. */
+  planetaryCombustion: RuleCoverageStatus;
 }
 
 /**
@@ -168,7 +196,29 @@ export interface MuhurtaRulePack {
   intent: MuhurtaIntent;
   tithi: MuhurtaFactorRuleSet<RegExp>;
   nakshatra: MuhurtaFactorRuleSet<string>;
+  /** Marriage Muhurtham Foundation V1: event-specific Yoga/Karana rule
+   * sets, matched by exact name (Yoga/Karana names, unlike Tithi, have no
+   * paksha prefix variation to pattern-match around -- see
+   * packages/vedic/src/panchangElements.ts's YOGA_NAMES/KARANA_NAMES).
+   * Empty {favorable: [], avoid: []} for every pack with no dedicated
+   * override (i.e. everything except an INTENT_RULE_PACKS entry that
+   * explicitly supplies one) -- see coverage.yogaAuthoritative/
+   * karanaAuthoritative for whether this data is genuinely authoritative. */
+  yoga: MuhurtaFactorRuleSet<string>;
+  karana: MuhurtaFactorRuleSet<string>;
   coverage: MuhurtaRulePackCoverage;
+  /** Marriage Muhurtham Foundation V1: true when this intent's own
+   * traditional rule set requires whole lunar/solar-month or period-level
+   * exclusion (Chaturmas, Kharmas, Adhika Masa, ...) to be a genuinely
+   * defensible ceremonial result. computeMuhurtaSupportLevel() refuses
+   * SUPPORTED for a CEREMONIAL intent that declares this true until
+   * coverage.periodExclusion also reaches IMPLEMENTED (PR B). False for
+   * every intent today except MARRIAGE -- Griha Pravesh was audited and
+   * found to have no analogous requirement. */
+  requiresPeriodExclusion: boolean;
+  /** Same gating principle as requiresPeriodExclusion, for planetary
+   * combustion (Guru/Shukra Asta) -- see coverage.planetaryCombustion. */
+  requiresPlanetaryCombustion: boolean;
   /** The legacy family this pack's tithi/nakshatra data was sourced from, if
    * any (undefined when coverage is MISSING or the pack is intent-specific).
    * Exposed for audit/debugging, not consumed by scoring. */
@@ -282,14 +332,89 @@ const GRIHA_PRAVESH_SOURCES: MuhurtaRuleSource[] = [
 ];
 
 /**
- * Intent-specific overrides, layered on top of the family base. GRIHA_PRAVESH
- * is the one real entry as of this PR (see GRIHA_PRAVESH_SOURCES above and
- * this module's doc comment for why ENGAGEMENT was researched but NOT
- * populated). Only tithi/nakshatra are overridable here (yoga/karana are
- * global; solar-window bonuses are legacy-family-keyed plumbing, not part
- * of the newer intent model).
+ * Marriage (Vivaha) Muhurtham Tithi/Nakshatra/Yoga/Karana data.
+ *
+ * Sourced from the Marriage Muhurtham architecture audit's external
+ * research (DrikPanchang -- treated as the most textually rigorous source
+ * consulted, citing classical works by name for several rules -- plus
+ * corroborating traditional-reference material), NOT copied or derived from
+ * Griha Pravesh's own data (brief section 9: Marriage requires its own rule
+ * pack, never a relaxed reuse of another ceremony's lists).
+ *
+ * Favorable Tithis (Rikta-avoid core, strongly attested): Dwitiya, Tritiya,
+ * Panchami, Saptami, Ekadashi, Trayodashi.
+ * Avoid Tithis (the three Rikta Tithis -- specifically and universally
+ * prohibited for marriage across every source consulted, not merely the
+ * generic "avoided in general" association): Chaturthi, Navami, Chaturdashi.
+ * Favorable Nakshatras (verified against DrikPanchang's dedicated marriage-
+ * Nakshatra page, exactly 11): Rohini, Mrigashira, Magha, Uttara Phalguni,
+ * Hasta, Swati, Anuradha, Mula, Uttara Ashadha, Uttara Bhadrapada, Revati.
+ * Avoid Nakshatras: deliberately EMPTY -- no source consulted named a
+ * whole-Nakshatra avoid list for Marriage specifically (only pada-level
+ * exceptions within three of the 11 FAVORABLE Nakshatras -- first pada
+ * Magha, first pada Mula, last pada Revati -- which this PR does NOT
+ * implement; pada-aware eligibility is explicitly deferred). See this
+ * module's own doc comment on favorable-vs-exclusive semantics: an unlisted
+ * Nakshatra is NEUTRAL, never implicitly avoided.
+ * Avoid Yogas (DrikPanchang's dedicated "Prohibited Yoga for Marriage"
+ * page, a binary 9-item blocklist -- the remaining 18 are treated as
+ * auspicious, not finely ranked): Vishkambha, Atiganda, Shula, Ganda,
+ * Vyaghapata, Vajra, Vyatipata, Parigha, Vaidhriti. (Spelled to match this
+ * codebase's own YOGA_NAMES exactly -- packages/vedic/src/
+ * panchangElements.ts spells the 13th Yoga "Vyaghapata".)
+ * Avoid Karanas (universally attested, no disagreement found): Vishti
+ * (Bhadra), Shakuni, Chatushpada, Naga. (Spelled to match this codebase's
+ * KARANA_NAMES -- "Naga", not "Nagava".)
+ *
+ * requiresPeriodExclusion / requiresPlanetaryCombustion: TRUE. The audit
+ * found whole lunar/solar-month exclusion (Chaturmas, Kharmas, Adhika Masa)
+ * and Guru/Shukra Asta (Jupiter/Venus planetary combustion) among the most
+ * strongly and consistently attested Marriage-specific rules -- several
+ * sourced to classical texts (Muhurta Chintamani, Dharmasindhu) by name,
+ * with no disagreement across sources. Neither mechanism exists anywhere in
+ * this engine yet (PR B's job) -- until it does, this pack cannot honestly
+ * claim SUPPORTED for a ceremonial result (see computeMuhurtaSupportLevel).
  */
-const INTENT_RULE_PACKS: Partial<Record<MuhurtaIntent, { tithi: MuhurtaFactorRuleSet<RegExp>; nakshatra: MuhurtaFactorRuleSet<string>; sources: MuhurtaRuleSource[]; confidence: MuhurtaRuleConfidence; scope: MuhurtaRuleScope; lastReviewed: string; reasonNote: string; note: string }>> = {
+const MARRIAGE_SOURCES: MuhurtaRuleSource[] = [
+  {
+    id: 'marriage-drikpanchang-date-selection',
+    title: 'Choosing an Auspicious Marriage Date',
+    sourceType: 'TRADITIONAL_REFERENCE',
+    citation: 'https://www.drikpanchang.com/shubh-dates/info/choosing-auspicious-marriage-date.html',
+    notes: 'Rikta Tithis (Chaturthi/Navami/Chaturdashi) specifically prohibited for marriage; favorable core Dwitiya/Tritiya/Panchami/Saptami/Ekadashi/Trayodashi. Also this PR\'s source for the requiresPeriodExclusion/requiresPlanetaryCombustion flags (month/Asta guidance itself is NOT implemented here -- PR B) and for de-prioritizing Vara below Tithi/Nakshatra/Yoga/Karana (not encoded as hard eligibility in this PR -- brief section 16).',
+  },
+  {
+    id: 'marriage-drikpanchang-nakshatra',
+    title: 'Auspicious Nakshatra for Marriage',
+    sourceType: 'TRADITIONAL_REFERENCE',
+    citation: 'https://www.drikpanchang.com/panchang/nakshatra/auspicious-marriage-nakshatra.html',
+    notes: 'Names exactly 11 favorable Nakshatras, citing Jyotirnibandha for pada-level exceptions (first pada Magha/Mula, last pada Revati -- NOT implemented in this PR). No whole-Nakshatra avoid list was sourced for Marriage.',
+  },
+  {
+    id: 'marriage-drikpanchang-yoga',
+    title: 'Prohibited Yoga for Marriage',
+    sourceType: 'TRADITIONAL_REFERENCE',
+    citation: 'https://www.drikpanchang.com/panchang/yoga/prohibited-marriage-yoga.html',
+    notes: 'Names exactly 9 prohibited Yogas as a binary blocklist; the remaining 18 are treated as auspicious, not finely tiered.',
+  },
+  {
+    id: 'marriage-karana-vishti',
+    title: 'Karana exclusions for Marriage (Vishti/Bhadra and others)',
+    sourceType: 'TRADITIONAL_REFERENCE',
+    citation: 'https://www.sri-jyotisa.com/blog/why-vishti-karana-is-avoided/ (Vishti/Bhadra, sourced to Muhurat Chintamani/Muhurat Martand) cross-referenced with DrikPanchang\'s Karana guidance for Shakuni/Chatushpada/Naga',
+    notes: 'Vishti (Bhadra) universally cited as inauspicious for marriage, no disagreement found across sources; Shakuni/Chatushpada/Naga are the remaining 3 of 11 Karanas commonly listed alongside it.',
+  },
+];
+
+/**
+ * Intent-specific overrides, layered on top of the family base. GRIHA_PRAVESH
+ * and (as of Marriage Muhurtham Foundation V1) MARRIAGE are the real entries
+ * (see GRIHA_PRAVESH_SOURCES/MARRIAGE_SOURCES above and this module's doc
+ * comment for why ENGAGEMENT was researched but NOT populated). yoga/karana
+ * overrides are optional -- Griha Pravesh has none (its own Yoga/Karana
+ * coverage stays at the generic/global level only); Marriage supplies both.
+ */
+const INTENT_RULE_PACKS: Partial<Record<MuhurtaIntent, { tithi: MuhurtaFactorRuleSet<RegExp>; nakshatra: MuhurtaFactorRuleSet<string>; yoga?: MuhurtaFactorRuleSet<string>; karana?: MuhurtaFactorRuleSet<string>; requiresPeriodExclusion?: boolean; requiresPlanetaryCombustion?: boolean; sources: MuhurtaRuleSource[]; confidence: MuhurtaRuleConfidence; scope: MuhurtaRuleScope; lastReviewed: string; reasonNote: string; note: string }>> = {
   GRIHA_PRAVESH: {
     tithi: {
       favorable: [/Dvitiya/, /Tritiya/, /Panchami/, /Dashami/, /Ekadashi/, /Trayodashi/],
@@ -308,6 +433,32 @@ const INTENT_RULE_PACKS: Partial<Record<MuhurtaIntent, { tithi: MuhurtaFactorRul
   },
   // ENGAGEMENT: deliberately absent. See this module's doc comment for the
   // research trail and why no source cleared the confidence bar.
+  MARRIAGE: {
+    tithi: {
+      favorable: [/Dvitiya/, /Tritiya/, /Panchami/, /Saptami/, /Ekadashi/, /Trayodashi/],
+      avoid: [/Chaturthi/, /Navami/, /Chaturdashi/],
+    },
+    nakshatra: {
+      favorable: ['Rohini', 'Mrigashira', 'Magha', 'Uttara Phalguni', 'Hasta', 'Swati', 'Anuradha', 'Mula', 'Uttara Ashadha', 'Uttara Bhadrapada', 'Revati'],
+      avoid: [],
+    },
+    yoga: {
+      favorable: [],
+      avoid: ['Vishkambha', 'Atiganda', 'Shula', 'Ganda', 'Vyaghapata', 'Vajra', 'Vyatipata', 'Parigha', 'Vaidhriti'],
+    },
+    karana: {
+      favorable: [],
+      avoid: ['Vishti', 'Shakuni', 'Chatushpada', 'Naga'],
+    },
+    requiresPeriodExclusion: true,
+    requiresPlanetaryCombustion: true,
+    sources: MARRIAGE_SOURCES,
+    confidence: 'CURATED',
+    scope: 'GENERAL',
+    lastReviewed: '2026-09-03',
+    reasonNote: 'supports an auspicious union',
+    note: 'Genuine intent-specific Tithi/Nakshatra/Yoga/Karana data for Marriage, sourced independently from Griha Pravesh (see MARRIAGE_SOURCES) -- not a relaxed reuse of another ceremony\'s lists. Deliberately still gated out of SUPPORTED (see requiresPeriodExclusion/requiresPlanetaryCombustion and computeMuhurtaSupportLevel) until whole-month/period exclusion and planetary-combustion eligibility exist (PR B) -- Tithi/Nakshatra/Yoga/Karana coverage alone is not, per the audit, sufficient evidence for a defensible Marriage Muhurtham result.',
+  },
 };
 
 function emptyRulePack(family: MuhurtaFamily, intent: MuhurtaIntent, note: string): MuhurtaRulePack {
@@ -317,7 +468,11 @@ function emptyRulePack(family: MuhurtaFamily, intent: MuhurtaIntent, note: strin
     intent,
     tithi: { favorable: [], avoid: [] },
     nakshatra: { favorable: [], avoid: [] },
-    coverage: { tithi: 'MISSING', nakshatra: 'MISSING', yoga: 'IMPLEMENTED', karana: 'IMPLEMENTED', windows: 'IMPLEMENTED' },
+    yoga: { favorable: [], avoid: [] },
+    karana: { favorable: [], avoid: [] },
+    coverage: { tithi: 'MISSING', nakshatra: 'MISSING', yoga: 'IMPLEMENTED', karana: 'IMPLEMENTED', windows: 'IMPLEMENTED', yogaAuthoritative: 'MISSING', karanaAuthoritative: 'MISSING', periodExclusion: 'MISSING', planetaryCombustion: 'MISSING' },
+    requiresPeriodExclusion: false,
+    requiresPlanetaryCombustion: false,
     reasonNote: '',
     metadata: { methodologyVersion: AURA_MUHURTA_METHODOLOGY_ID, sources: [], confidence: 'PROVISIONAL', scope: 'GENERAL', note },
   };
@@ -340,7 +495,24 @@ export function resolveMuhurtaRulePack(classification: MuhurtaClassification): M
       intent: classification.intent,
       tithi: intentOverride.tithi,
       nakshatra: intentOverride.nakshatra,
-      coverage: { tithi: 'IMPLEMENTED', nakshatra: 'IMPLEMENTED', yoga: 'IMPLEMENTED', karana: 'IMPLEMENTED', windows: 'IMPLEMENTED' },
+      yoga: intentOverride.yoga ?? { favorable: [], avoid: [] },
+      karana: intentOverride.karana ?? { favorable: [], avoid: [] },
+      requiresPeriodExclusion: intentOverride.requiresPeriodExclusion ?? false,
+      requiresPlanetaryCombustion: intentOverride.requiresPlanetaryCombustion ?? false,
+      coverage: {
+        tithi: 'IMPLEMENTED',
+        nakshatra: 'IMPLEMENTED',
+        yoga: 'IMPLEMENTED',
+        karana: 'IMPLEMENTED',
+        windows: 'IMPLEMENTED',
+        yogaAuthoritative: intentOverride.yoga ? 'IMPLEMENTED' : 'MISSING',
+        karanaAuthoritative: intentOverride.karana ? 'IMPLEMENTED' : 'MISSING',
+        // Marriage Muhurtham Foundation V1 (PR A): no intent has either of
+        // these implemented yet -- see MuhurtaRulePackCoverage's own doc
+        // comment. PR B's job.
+        periodExclusion: 'MISSING',
+        planetaryCombustion: 'MISSING',
+      },
       reasonNote: intentOverride.reasonNote,
       metadata: { methodologyVersion: AURA_MUHURTA_METHODOLOGY_ID, sources: intentOverride.sources, confidence: intentOverride.confidence, scope: intentOverride.scope, lastReviewed: intentOverride.lastReviewed, note: intentOverride.note },
     };
@@ -358,8 +530,12 @@ export function resolveMuhurtaRulePack(classification: MuhurtaClassification): M
     intent: classification.intent,
     tithi: { favorable: legacyRules.preferredTithiPatterns, avoid: legacyRules.avoidTithiPatterns },
     nakshatra: { favorable: legacyRules.preferredNakshatras, avoid: legacyRules.avoidNakshatras },
+    yoga: { favorable: [], avoid: [] },
+    karana: { favorable: [], avoid: [] },
+    requiresPeriodExclusion: false,
+    requiresPlanetaryCombustion: false,
     reasonNote: legacyRules.note,
-    coverage: { tithi: 'REUSABLE_BASE_RULE', nakshatra: 'REUSABLE_BASE_RULE', yoga: 'IMPLEMENTED', karana: 'IMPLEMENTED', windows: 'IMPLEMENTED' },
+    coverage: { tithi: 'REUSABLE_BASE_RULE', nakshatra: 'REUSABLE_BASE_RULE', yoga: 'IMPLEMENTED', karana: 'IMPLEMENTED', windows: 'IMPLEMENTED', yogaAuthoritative: 'MISSING', karanaAuthoritative: 'MISSING', periodExclusion: 'MISSING', planetaryCombustion: 'MISSING' },
     reusedFromLegacyFamily: legacyFamily,
     metadata: { methodologyVersion: AURA_MUHURTA_METHODOLOGY_ID, sources: [LEGACY_FAMILY_BASE_SOURCE_RECORD], confidence: 'ESTABLISHED', scope: 'GENERAL', note: `Reuses ${legacyFamily}'s existing rule data (${legacyRules.note}) as a family-level base -- no ${classification.intent}-specific Tithi/Nakshatra data exists yet.` },
   };
@@ -382,6 +558,16 @@ export function resolveMuhurtaRulePack(classification: MuhurtaClassification): M
  * still true after this PR) or MISSING both land at PARTIAL. Populating
  * only ONE of Tithi/Nakshatra intent-specifically is not enough either --
  * both core factors must be resolved with no gap.
+ *
+ * Marriage Muhurtham Foundation V1 (PR A) adds a further CEREMONIAL-only
+ * gate: an intent whose own rule pack declares requiresPeriodExclusion or
+ * requiresPlanetaryCombustion (Marriage does; Griha Pravesh does not) also
+ * needs the corresponding coverage.periodExclusion/planetaryCombustion to
+ * reach IMPLEMENTED before it can be SUPPORTED -- both are MISSING for
+ * every intent today (PR B's job), so Marriage resolves to PARTIAL despite
+ * having genuinely dedicated Tithi/Nakshatra/Yoga/Karana data, and stays
+ * excluded from SUPPORTED_MUHURTHAM_ACTIVITY_IDS / Muhurtham Finder --
+ * this is the canonical mechanism keeping it gated, not a UI-level check.
  */
 export function computeMuhurtaSupportLevel(classification: MuhurtaClassification, pack: MuhurtaRulePack): MuhurtaSupportLevel {
   const tithiOk = pack.coverage.tithi !== 'MISSING';
@@ -389,7 +575,10 @@ export function computeMuhurtaSupportLevel(classification: MuhurtaClassification
   const bothDedicated = pack.coverage.tithi === 'IMPLEMENTED' && pack.coverage.nakshatra === 'IMPLEMENTED';
 
   if (classification.evaluationDepth === 'CEREMONIAL') {
-    return bothDedicated ? 'SUPPORTED' : 'PARTIAL';
+    if (!bothDedicated) return 'PARTIAL';
+    if (pack.requiresPeriodExclusion && pack.coverage.periodExclusion !== 'IMPLEMENTED') return 'PARTIAL';
+    if (pack.requiresPlanetaryCombustion && pack.coverage.planetaryCombustion !== 'IMPLEMENTED') return 'PARTIAL';
+    return 'SUPPORTED';
   }
   return tithiOk && nakshatraOk ? 'SUPPORTED' : 'NOT_YET_SUPPORTED';
 }
@@ -416,6 +605,24 @@ export function isAuthoritativeAvoidNakshatra(pack: MuhurtaRulePack, nakshatraNa
  * matches Tithi values against a rule pack's favorable/avoid tiers). */
 export function isAuthoritativeAvoidTithi(pack: MuhurtaRulePack, tithiName: string): boolean {
   return pack.coverage.tithi === 'IMPLEMENTED' && pack.tithi.avoid.some((pattern) => pattern.test(tithiName));
+}
+
+/** Marriage Muhurtham Foundation V1: same authority rule as
+ * isAuthoritativeAvoidNakshatra/isAuthoritativeAvoidTithi above, for Yoga
+ * -- gated on coverage.yogaAuthoritative (a SEPARATE axis from
+ * coverage.yoga, which describes the always-on generic/soft Yoga scoring
+ * every activity already gets; see MuhurtaRulePackCoverage's own doc
+ * comment). Exact-name matched, consistent with how Yoga values are
+ * represented (packages/vedic/src/panchangElements.ts's YOGA_NAMES). */
+export function isAuthoritativeAvoidYoga(pack: MuhurtaRulePack, yogaName: string): boolean {
+  return pack.coverage.yogaAuthoritative === 'IMPLEMENTED' && pack.yoga.avoid.includes(yogaName);
+}
+
+/** Same authority rule as isAuthoritativeAvoidYoga above, for Karana --
+ * gated on coverage.karanaAuthoritative (separate from the always-on
+ * coverage.karana global scoring). */
+export function isAuthoritativeAvoidKarana(pack: MuhurtaRulePack, karanaName: string): boolean {
+  return pack.coverage.karanaAuthoritative === 'IMPLEMENTED' && pack.karana.avoid.includes(karanaName);
 }
 
 /**

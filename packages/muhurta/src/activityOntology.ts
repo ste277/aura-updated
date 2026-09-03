@@ -70,6 +70,15 @@ export type MuhurtaIntent =
   // RELATIONSHIP
   | 'DATE'
   | 'ENGAGEMENT'
+  // Marriage Muhurtham Foundation V1: a dedicated intent, deliberately NOT
+  // folded into ENGAGEMENT (a distinct, earlier ceremony) or NEW_BEGINNING/
+  // PROJECT_START (too generic to carry Marriage-specific Panchanga rules --
+  // see muhurtaRulePacks.ts's MARRIAGE rule pack). The activity this intent
+  // is assigned to (packages/recommendation/src/activityDefinitions.ts's
+  // `marriage`) remains gated out of Muhurtham Finder until its rule pack's
+  // requiresPeriodExclusion/requiresPlanetaryCombustion needs are met --
+  // see computeMuhurtaSupportLevel() in muhurtaRulePacks.ts.
+  | 'MARRIAGE'
   // HOME
   | 'GRIHA_PRAVESH'
   // EDUCATION
@@ -114,6 +123,7 @@ export const INTENT_FAMILY: Record<MuhurtaIntent, MuhurtaFamily> = {
   JOURNEY_START: 'TRAVEL',
   DATE: 'RELATIONSHIP',
   ENGAGEMENT: 'RELATIONSHIP',
+  MARRIAGE: 'RELATIONSHIP',
   GRIHA_PRAVESH: 'HOME',
   STUDY: 'EDUCATION',
   WORKOUT: 'HEALTH',

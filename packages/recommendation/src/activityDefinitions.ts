@@ -474,6 +474,27 @@ const ACTIVITY_METADATA: Record<string, ActivityMetadataInput> = {
     notes: 'Has its own dedicated (IMPLEMENTED) Tithi/Nakshatra rule pack -- see GRIHA_PRAVESH in muhurtaRulePacks.ts, sourced from multi-source web research (August 2026) -- rather than a borrowed family base (HOME has no generic MuhurtaRulePack base). Resolves to SUPPORTED and is exposed in Muhurtham Finder.',
     immediateAction: 'PLAN',
   },
+  // Marriage Muhurtham Foundation V1 (PR A): has its own dedicated
+  // (IMPLEMENTED) Tithi/Nakshatra/Yoga/Karana rule pack -- see MARRIAGE in
+  // muhurtaRulePacks.ts, sourced independently from Griha Pravesh. Despite
+  // that dedicated coverage, computeMuhurtaSupportLevel() still resolves
+  // this to PARTIAL (not SUPPORTED) because the pack declares
+  // requiresPeriodExclusion/requiresPlanetaryCombustion, and neither
+  // whole-month exclusion (Chaturmas/Kharmas/Adhika Masa) nor planetary
+  // combustion (Guru/Shukra Asta) eligibility exists anywhere in this
+  // engine yet -- that is PR B's job. Marriage is therefore intentionally
+  // NOT exposed in Muhurtham Finder (SUPPORTED_MUHURTHAM_ACTIVITY_IDS) by
+  // this same canonical mechanism, not a UI-level check -- see
+  // test/marriageMuhurthamFoundation.test.ts's own gating regression.
+  marriage: {
+    family: 'RELATIONSHIP',
+    intent: 'MARRIAGE',
+    evaluationDepth: 'CEREMONIAL',
+    timingSensitivity: { start: 'HIGH', duration: 'MEDIUM', end: 'LOW' },
+    socialMode: 'PAIR',
+    notes: 'Has its own dedicated (IMPLEMENTED) Tithi/Nakshatra/Yoga/Karana rule pack (see MARRIAGE in muhurtaRulePacks.ts), but remains PARTIAL/hidden from Muhurtham Finder until whole-month/period exclusion and planetary-combustion (Guru/Shukra Asta) eligibility are added -- see requiresPeriodExclusion/requiresPlanetaryCombustion on that rule pack and computeMuhurtaSupportLevel(). Deliberately not yet reachable via Ask Aura free-text routing either -- see personalizedTasks.ts\'s catalog entry for why its aliases list is empty in this PR.',
+    immediateAction: 'PLAN',
+  },
 
   // -- Product Structure V2: everyday moments -- every entry below is
   // LIGHT or STANDARD depth, NEVER DEEP/CEREMONIAL, which is what actually
