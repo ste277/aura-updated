@@ -15,6 +15,7 @@
 
 import { findActivityIntent } from './personalizedTasks';
 import { isSupportedMuhurthamActivity } from './muhurthamFinder';
+import { getDatePartsInTimezone } from '../../panchang/src/localDate';
 
 export type AskAuraIntent =
   | 'GOOD_RIGHT_NOW'
@@ -194,6 +195,206 @@ function parseExactClockTime(text: string): AskExactClockParseResult {
 const EXACT_CLOCK_USABLE_HORIZONS: ReadonlySet<AskHorizonPhrase> = new Set(['NOW', 'TODAY', 'TOMORROW', 'CUSTOM_DATE']);
 
 // ============================================================
+// Natural calendar dates -- month-name ("September 20", "Sep 20th 2026")
+// and weekday ("Friday", "next Friday") text (Ask Aura Absolute Date +
+// Weekday Parsing V1), normalized into the SAME {horizonPhrase:
+// 'CUSTOM_DATE', customDate: "YYYY-MM-DD"} representation ISO dates and
+// parseHorizonPhrase already produce -- so every existing consumer
+// (resolveHorizonToDateRange, the exact-clock machinery from PR #66,
+// PANCHANG_QUERY's own customDate threading) picks these up for free with
+// no changes of its own.
+//
+// Deliberately NOT folded into parseHorizonPhrase itself: parseFollowUpChange
+// (below) also calls parseHorizonPhrase on a follow-up delta, and its
+// existing "What about October?" / "What about Chennai?" mis-parses (falls
+// through to the with-a-name fallback) must stay exactly as broken as
+// before -- these new functions are only ever invoked from
+// parseAskAuraRequest's own top-level field extraction, never from the
+// follow-up path, so there is no way for this change to alter that
+// behavior.
+//
+// Pure text + (now, timezone) -> date, no external date library: "today"
+// is resolved in the Timing Location's own local calendar (never the
+// server's UTC date) via getDatePartsInTimezone(), the same DST-aware
+// helper PR #66 already established as the one acceptable way to do
+// timezone-aware date/time conversion anywhere in this codebase.
+// ============================================================
+
+export type AskNaturalDateParseResult =
+  | { status: 'ABSENT' }
+  | { status: 'INVALID' }
+  | { status: 'VALID'; customDate: string };
+
+const MONTH_NAME_TO_NUMBER: Record<string, number> = {
+  january: 1, february: 2, march: 3, april: 4, may: 5, june: 6, july: 7,
+  august: 8, september: 9, sept: 9, october: 10, november: 11, december: 12,
+  jan: 1, feb: 2, mar: 3, apr: 4, jun: 6, jul: 7, aug: 8, sep: 9, oct: 10, nov: 11, dec: 12,
+};
+// Longest-first: regex alternation takes the first branch that matches, not
+// the longest, so "september" must be tried before its own prefix "sep".
+const MONTH_NAME_PATTERN = Object.keys(MONTH_NAME_TO_NUMBER)
+  .sort((a, b) => b.length - a.length)
+  .join('|');
+const MONTH_FIRST_DATE_RE = new RegExp(`\\b(${MONTH_NAME_PATTERN})\\s+(\\d{1,2})(?:st|nd|rd|th)?\\b(?:\\s*,?\\s*(\\d{4})\\b)?`, 'i');
+const DAY_FIRST_DATE_RE = new RegExp(`\\b(\\d{1,2})(?:st|nd|rd|th)?\\s+(${MONTH_NAME_PATTERN})\\b(?:\\s+(\\d{4})\\b)?`, 'i');
+
+const WEEKDAY_NAME_TO_INDEX: Record<string, number> = {
+  sunday: 0, monday: 1, tuesday: 2, wednesday: 3, thursday: 4, friday: 5, saturday: 6,
+};
+const WEEKDAY_NAME_PATTERN = Object.keys(WEEKDAY_NAME_TO_INDEX).join('|');
+const WEEKDAY_DATE_RE = new RegExp(`\\b(?:(next|this)\\s+)?(${WEEKDAY_NAME_PATTERN})\\b`, 'i');
+
+// A hyphen/"to"/"through"/"until" immediately following an otherwise-valid
+// date match means the user actually asked for a RANGE ("September 20-25",
+// "September 20 to September 25", "next Monday through Friday") --
+// explicitly out of scope for V1 (brief section 30/55): never silently keep
+// just the first date and drop the rest. The continuation can be a bare day
+// number ("-25"), a weekday name ("through Friday"), or a full second
+// month-name date ("to September 25"), so all three are checked.
+const RANGE_CONTINUATION_RE = new RegExp(`^\\s*(-|to|through|until)\\s*(\\d|${WEEKDAY_NAME_PATTERN}|${MONTH_NAME_PATTERN})`, 'i');
+
+// `month` is 1-12. Date.UTC's own "month" arg is 0-indexed, so passing
+// `month` (not `month - 1`) directly represents the FOLLOWING month; day 0
+// of that month rolls back to the last real day of the intended 1-12
+// month. Correctly leap-year-aware for February via JS's own Gregorian
+// calendar math -- no manual leap-year table needed.
+function isValidCalendarDayForMonth(year: number, month: number, day: number): boolean {
+  if (day < 1) return false;
+  return day <= new Date(Date.UTC(year, month, 0)).getUTCDate();
+}
+
+// The most days `month` (1-12) can ever have in ANY year -- 2000 is a
+// leap year, so this correctly reports 29 for February. Used to reject a
+// day that's invalid for every possible year (e.g. "April 31",
+// "February 30") independent of which year ends up chosen.
+function maxDaysInMonth(month: number): number {
+  return new Date(Date.UTC(2000, month, 0)).getUTCDate();
+}
+
+function formatDateStr(year: number, month: number, day: number): string {
+  return `${String(year).padStart(4, '0')}-${String(month).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
+}
+
+/** Smallest year >= localYear such that (year, month, day) is both a real
+ * calendar date and on-or-after the Timing Location's local "today" (brief
+ * section 12/13/35): a month/day that already passed this year rolls to
+ * next year; an implicit February 29 in a non-leap year skips forward to
+ * the next valid future leap day -- both handled by this same loop, no
+ * separate leap-day special case. Today's own exact month/day resolves to
+ * THIS year (same-day policy), never rolled forward. */
+function resolveImplicitYear(localYear: number, localMonth: number, localDay: number, month: number, day: number): number {
+  for (let year = localYear; year < localYear + 8; year++) {
+    if (!isValidCalendarDayForMonth(year, month, day)) continue;
+    const onOrAfterToday = year > localYear || month > localMonth || (month === localMonth && day >= localDay);
+    if (onOrAfterToday) return year;
+  }
+  // Unreachable for any genuinely valid (month, day): every ordinary date
+  // recurs every year, and Feb 29 recurs at least once every 8 years.
+  return localYear + 8;
+}
+
+function parseMonthNameDate(text: string, now: Date, timezone: string | undefined): AskNaturalDateParseResult {
+  if (!timezone) return { status: 'ABSENT' };
+
+  const monthFirst = text.match(MONTH_FIRST_DATE_RE);
+  const dayFirst = text.match(DAY_FIRST_DATE_RE);
+
+  let monthToken: string;
+  let dayToken: string;
+  let yearToken: string | undefined;
+  let matchEnd: number;
+  if (monthFirst && (!dayFirst || (monthFirst.index ?? Infinity) <= (dayFirst.index ?? Infinity))) {
+    monthToken = monthFirst[1];
+    dayToken = monthFirst[2];
+    yearToken = monthFirst[3];
+    matchEnd = (monthFirst.index ?? 0) + monthFirst[0].length;
+  } else if (dayFirst) {
+    dayToken = dayFirst[1];
+    monthToken = dayFirst[2];
+    yearToken = dayFirst[3];
+    matchEnd = (dayFirst.index ?? 0) + dayFirst[0].length;
+  } else {
+    return { status: 'ABSENT' };
+  }
+
+  if (RANGE_CONTINUATION_RE.test(text.slice(matchEnd))) return { status: 'INVALID' };
+
+  const month = MONTH_NAME_TO_NUMBER[monthToken.toLowerCase()];
+  const day = Number(dayToken);
+  if (day > maxDaysInMonth(month)) return { status: 'INVALID' };
+
+  if (yearToken) {
+    // Explicit year always wins, even a past one -- preserved exactly,
+    // never silently rolled forward (brief section 11/31); only rejected
+    // if the resulting calendar date isn't real (e.g. "February 29 2027").
+    const year = Number(yearToken);
+    if (!isValidCalendarDayForMonth(year, month, day)) return { status: 'INVALID' };
+    return { status: 'VALID', customDate: formatDateStr(year, month, day) };
+  }
+
+  const local = getDatePartsInTimezone(timezone, now);
+  const year = resolveImplicitYear(local.year, local.month, local.day, month, day);
+  return { status: 'VALID', customDate: formatDateStr(year, month, day) };
+}
+
+function parseWeekdayDate(text: string, now: Date, timezone: string | undefined): AskNaturalDateParseResult {
+  if (!timezone) return { status: 'ABSENT' };
+
+  const match = text.match(WEEKDAY_DATE_RE);
+  if (!match) return { status: 'ABSENT' };
+
+  const matchEnd = (match.index ?? 0) + match[0].length;
+  if (RANGE_CONTINUATION_RE.test(text.slice(matchEnd))) return { status: 'INVALID' };
+
+  const modifier = match[1]?.toLowerCase();
+  const targetWeekday = WEEKDAY_NAME_TO_INDEX[match[2].toLowerCase()];
+  const local = getDatePartsInTimezone(timezone, now);
+
+  // "next Friday" = the Friday of the FOLLOWING calendar week (Sunday..
+  // Saturday, matching getDatePartsInTimezone's own weekday convention and
+  // resolveHorizonDayOffsets' existing weekend-boundary calculation in
+  // dailyAssistant.ts) -- NOT merely the next chronological Friday: if
+  // today is Friday, "next Friday" is 7 days away, not today. Bare/"this"
+  // Friday = the upcoming occurrence INCLUDING today (brief section
+  // 17/18/19) -- if today IS Friday, bare "Friday" means today.
+  const offset = modifier === 'next'
+    ? (7 - local.weekday) + targetWeekday
+    : (targetWeekday - local.weekday + 7) % 7;
+
+  const resultUtc = new Date(Date.UTC(local.year, local.month - 1, local.day + offset));
+  return {
+    status: 'VALID',
+    customDate: formatDateStr(resultUtc.getUTCFullYear(), resultUtc.getUTCMonth() + 1, resultUtc.getUTCDate()),
+  };
+}
+
+/** Tries month-name-date first, then weekday -- a sentence containing both
+ * ("Friday, September 20") treats the more specific explicit date as the
+ * intended one. Only ever called when parseHorizonPhrase itself found no
+ * relative-phrase match, so this never competes with today/tomorrow/next
+ * weekend/next month/etc. */
+function parseNaturalCalendarDate(text: string, now: Date, timezone: string | undefined): AskNaturalDateParseResult {
+  const monthResult = parseMonthNameDate(text, now, timezone);
+  if (monthResult.status !== 'ABSENT') return monthResult;
+  return parseWeekdayDate(text, now, timezone);
+}
+
+/** True when `dateStr` ("YYYY-MM-DD") names a Timing-Location-local date
+ * strictly before today. Lexical comparison is safe/correct for two
+ * zero-padded ISO date strings. Used to reject an explicit past date (Ask
+ * Aura Absolute Date + Weekday Parsing V1 follow-up: neither the generic
+ * Timing Search engine nor the Muhurtham engine has any "must be in the
+ * future" guard of their own -- both will happily compute a real Panchang-
+ * based score for a historical date and even offer a "Plan this" action for
+ * it, since historical timing evaluation was never an intentional Ask Aura
+ * capability, just an unguarded date passthrough). Deliberately NEVER
+ * mutates the date -- callers that detect a past date must reject/clarify,
+ * never silently roll it forward to a future year. */
+function isPastLocalDate(dateStr: string, now: Date, timezone: string): boolean {
+  return dateStr < getDatePartsInTimezone(timezone, now).dateStr;
+}
+
+// ============================================================
 // Horizon phrase (brief section 22).
 // ============================================================
 
@@ -314,6 +515,17 @@ const CEREMONIAL_BEST_DATE_RE = /\b(best|good|auspicious|favorable)\b(?:\s+\w+){
 
 export interface AskAuraParseContext {
   now: Date;
+  /** IANA timezone (e.g. "Asia/Kolkata") for the Timing Location this
+   * request should be interpreted against (Ask Aura Absolute Date +
+   * Weekday Parsing V1) -- required to resolve a bare weekday ("Friday")
+   * or an implicit-year month/day ("September 20") to a concrete date,
+   * since "today" depends on where the user's Timing Location actually is,
+   * never the server's own clock/zone. Optional only so callers that never
+   * exercise natural-date parsing don't need to supply it; when absent,
+   * month-name/weekday text is simply left unparsed (the same
+   * no-match/ABSENT behavior as before this field existed) rather than
+   * guessing a timezone. */
+  timezone?: string;
   /** The prior turn's parsed request, if this looks like a follow-up
    * (brief section 15) -- used to fill in unstated fields (activity,
    * date, scope) rather than re-asking. */
@@ -329,7 +541,36 @@ export function parseAskAuraRequest(rawText: string, context: AskAuraParseContex
     return applyFollowUp(followUp, text, context.previous);
   }
 
-  const { horizonPhrase, customDate } = parseHorizonPhrase(text);
+  const { horizonPhrase: relativeHorizonPhrase, customDate: relativeCustomDate } = parseHorizonPhrase(text);
+  // Only attempted when no relative phrase (today/tomorrow/next month/ISO
+  // date/etc.) already matched, so this never competes with that existing,
+  // higher-precedence vocabulary (brief section 39: "next month" must stay
+  // NEXT_MONTH, never be reinterpreted as a named-month date).
+  const naturalDate = relativeHorizonPhrase ? { status: 'ABSENT' as const } : parseNaturalCalendarDate(text, context.now, context.timezone);
+  if (naturalDate.status === 'INVALID') {
+    // An unsupported date RANGE, or a calendrically impossible date
+    // ("February 30", "April 31", "February 29" in a non-leap year with an
+    // explicit year) -- never silently normalized or dropped, never falls
+    // through to a generic activity search (brief section 27/30).
+    return { intent: 'UNKNOWN', confidence: 'LOW' };
+  }
+  const horizonPhrase = relativeHorizonPhrase ?? (naturalDate.status === 'VALID' ? 'CUSTOM_DATE' : undefined);
+  const customDate = relativeCustomDate ?? (naturalDate.status === 'VALID' ? naturalDate.customDate : undefined);
+  // An explicit PAST date (from either the ISO regex above or the new
+  // month-name/weekday parsing) must never silently proceed as a normal
+  // future-planning result -- neither Timing Search nor the Muhurtham
+  // engine has any "must be in the future" guard of their own, so an
+  // unguarded past customDate would compute a real-looking score and even
+  // offer a "Plan this" action for a historical instant. Never mutates the
+  // date (an explicit past year is preserved exactly, never rolled forward
+  // -- only implicit-year resolution ever looks forward); only rejected
+  // when a timezone is available to know what "today" actually is
+  // locally -- without one, this is left exactly as it always was
+  // (unchecked), same as every other natural-date behavior that needs a
+  // timezone to resolve safely.
+  if (customDate && context.timezone && isPastLocalDate(customDate, context.now, context.timezone)) {
+    return { intent: 'UNKNOWN', confidence: 'LOW' };
+  }
   const timePreference = parseTimePreference(text);
   const durationMinutes = parseDurationMinutes(text);
   const { scope, personNameQuery } = parseScope(text);

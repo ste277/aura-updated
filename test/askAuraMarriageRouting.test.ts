@@ -333,7 +333,15 @@ async function main() {
   // ============================================================
   check('KNOWN LIMITATION (B, richer SHARED phrasing, untouched): "When should Priya and I get married?" does not resolve a SHARED scope with personNameQuery (parseScope has no "X and I" support)', parse('When should Priya and I get married?').personNameQuery === undefined);
   check('KNOWN LIMITATION (B): "Find our best wedding date." does not resolve a SHARED scope ("our" unrecognized)', parse('Find our best wedding date.').scope !== 'SHARED');
-  check('KNOWN LIMITATION (A, CHECK phrasing, untouched): "Is September 20 good for marriage?" stays UNKNOWN (no month-name date parsing exists)', parse('Is September 20 good for marriage?').intent === 'UNKNOWN');
+  // RESOLVED by Ask Aura Absolute Date + Weekday Parsing V1 (previously
+  // KNOWN LIMITATION A: "no month-name date parsing exists"). With no
+  // timezone supplied (this file's own `parse()` helper, matching every
+  // other call in this file), the conservative UNKNOWN result is still
+  // correct -- natural-date parsing requires a timezone by design (see
+  // test/askAuraIntentParser.test.ts's dedicated section for the resolved,
+  // positive-result case, and the marriage-specific section below for
+  // orchestrator-level execution proof).
+  check('"Is September 20 good for marriage?" with no timezone supplied -> still UNKNOWN (natural-date parsing needs a timezone)', parse('Is September 20 good for marriage?').intent === 'UNKNOWN');
   check('KNOWN LIMITATION (C, named Event Location, untouched): "Find a wedding muhurtham in Chennai." carries no location field (Ask Aura has no city-parsing path)', !('eventLocation' in parse('Find a wedding muhurtham in Chennai.')));
 
   // ============================================================
@@ -496,6 +504,103 @@ async function main() {
     check('"Is 10 AM tomorrow good for griha pravesh?" executes the ceremonial evaluator with the exact requested time', response.intent === 'TIMING_CHECK' && !response.message.includes('Best dates for'));
     const card = response.cards?.[0] as { requested?: { startLabel: string } } | undefined;
     check('Griha Pravesh exact-time CHECK requested candidate is exactly 10:00 AM local', card?.requested?.startLabel === '10:00 AM');
+  }
+
+  // ============================================================
+  // Ask Aura Absolute Date + Weekday Parsing V1: marriage-specific
+  // orchestrator-level execution proof. The parser change is generic
+  // (askAuraIntent.ts), but marriage is the activity every prior audit/
+  // implementation in this sequence has used as the primary ceremonial
+  // proof case, so it's proven end-to-end here too -- reusing the SAME
+  // known-good New York marriage fixture (nyNow=2026-06-11, "tomorrow"=
+  // 2026-06-12) the Ceremonial TIMING_CHECK and Exact Clock-Time sections
+  // above already established, to show a month-name date produces the
+  // IDENTICAL result as the existing "tomorrow" phrasing for the same
+  // instant -- proof the new date parser feeds the exact same downstream
+  // machinery, not a parallel path.
+  // ============================================================
+  {
+    const nyNow = new Date('2026-06-11T04:00:00.000Z'); // matches the file's own established fixture above
+    const nyContext: DailyAssistantContext = { now: nyNow, latitude: 40.7128, longitude: -74.006, timezone: 'America/New_York', tzOffsetMinutes: -300 };
+    const nyDeps: AskAuraOrchestratorDeps = { userId: 'test-user-not-a-real-db-row', context: nyContext, activeWindow: 'NEUTRAL' };
+
+    const tomorrowParsed = parseAskAuraRequest('Is 10 AM tomorrow good for marriage?', { now: nyNow, timezone: 'America/New_York' });
+    const monthDateParsed = parseAskAuraRequest('Is 10 AM on June 12 good for marriage?', { now: nyNow, timezone: 'America/New_York' });
+    // "tomorrow" itself carries horizonPhrase=TOMORROW with no customDate at
+    // the PARSER level (customDate is only set for horizonPhrase=CUSTOM_DATE
+    // -- TOMORROW only becomes a concrete date later, in the orchestrator's
+    // own resolveHorizonToDateRange), so the two are compared on the
+    // EXECUTED instant below, not on this raw field.
+    check('"Is 10 AM on June 12 good for marriage?" resolves customDate=2026-06-12', monthDateParsed.customDate === '2026-06-12');
+    check('Both parse identically otherwise (intent, exactTime, activityId)', monthDateParsed.intent === tomorrowParsed.intent && monthDateParsed.exactTime === tomorrowParsed.exactTime && monthDateParsed.activityId === tomorrowParsed.activityId);
+
+    const tomorrowResponse = await orchestrateAskAura(tomorrowParsed, nyDeps);
+    const monthDateResponse = await orchestrateAskAura(monthDateParsed, nyDeps);
+    const tomorrowCard = tomorrowResponse.cards?.[0] as { requested?: { start: string } } | undefined;
+    const monthDateCard = monthDateResponse.cards?.[0] as { requested?: { start: string } } | undefined;
+    check('Month-name date "June 12" executes through the SAME ceremonial evaluator and produces the identical requested instant as "tomorrow"', monthDateResponse.intent === 'TIMING_CHECK' && monthDateCard?.requested?.start === tomorrowCard?.requested?.start);
+
+    // Explicit-year form for the same fixture date.
+    const explicitYearParsed = parseAskAuraRequest('Is 10 AM on June 12 2026 good for marriage?', { now: nyNow, timezone: 'America/New_York' });
+    check('"Is 10 AM on June 12 2026 good for marriage?" also resolves 2026-06-12', explicitYearParsed.customDate === '2026-06-12');
+  }
+
+  // Marriage date-only (no clock) through a month-name date -- must still
+  // execute through the canonical Muhurtham engine (capability redirect,
+  // unchanged), not the generic Timing Search FIND path.
+  {
+    const parsed = parseAskAuraRequest('Is September 20 good for marriage?', { now: NOW, timezone: 'Asia/Kolkata' });
+    check('"Is September 20 good for marriage?" (with timezone) parses TIMING_FIND, customDate=2026-09-20', parsed.intent === 'TIMING_FIND' && parsed.customDate === '2026-09-20');
+    const response = await orchestrateAskAura(parsed, deps);
+    check('Executes through canonical Muhurtham (capability redirect, unaffected by this PR)', response.intent === 'MUHURTHAM_SEARCH');
+  }
+
+  // CRITICAL timezone-date-boundary test: the UTC calendar date and the
+  // Timing Location's local calendar date differ -- weekday resolution
+  // (and therefore which day gets evaluated) must follow the LOCAL date.
+  {
+    // UTC 2026-09-04T20:00:00.000Z is already 2026-09-05 (Saturday) in
+    // Asia/Kolkata (UTC+5:30).
+    const boundaryNow = new Date('2026-09-04T20:00:00.000Z');
+    const parsed = parseAskAuraRequest('Is Saturday good for marriage?', { now: boundaryNow, timezone: 'Asia/Kolkata' });
+    check('"Is Saturday good for marriage?" at a UTC/local calendar-date boundary resolves against LOCAL 2026-09-05, not UTC 2026-09-04', parsed.customDate === '2026-09-05');
+  }
+
+  // ============================================================
+  // Ask Aura Absolute Date + Weekday Parsing V1 follow-up: ceremonial
+  // explicit-past-date safety. Confirmed directly (before this guard
+  // existed) that the ceremonial evaluator has no "must be in the future"
+  // check either -- "Is September 20 2020 good for marriage?" returned a
+  // real MUHURTHAM_SEARCH zero-result message, and the exact-time form
+  // returned a genuine ("I'd avoid this time for Marriage") CAUTION
+  // verdict WITH a "Plan this" action for a 2020 instant. Everyday paths
+  // proven in test/askAuraOrchestrator.test.ts.
+  // ============================================================
+  {
+    const p = parse('Is September 20 2020 good for marriage?');
+    check('Ceremonial date-only explicit past date -> UNKNOWN at the parser (no timezone here; see the timezone-supplied case below)', p.intent === 'UNKNOWN');
+  }
+  {
+    const p = parseAskAuraRequest('Is September 20 2020 good for marriage?', { now: NOW, timezone: 'Asia/Kolkata' });
+    check('Ceremonial date-only explicit past date (timezone supplied) -> UNKNOWN at the parser', p.intent === 'UNKNOWN');
+    const response = await orchestrateAskAura(p, deps);
+    check('-> UNKNOWN response, never a silent MUHURTHAM_SEARCH zero-result message', response.intent === 'UNKNOWN');
+    check('No "Plan this" or "Open Muhurtham Finder" action for a historical instant', !response.actions?.some((a) => a.type === 'PLAN_THIS' || a.type === 'OPEN_MUHURTHAM'));
+  }
+  {
+    const p = parseAskAuraRequest('Is 10 AM on September 20 2020 good for marriage?', { now: NOW, timezone: 'Asia/Kolkata' });
+    check('Ceremonial exact-time explicit past date -> UNKNOWN at the parser', p.intent === 'UNKNOWN');
+    const response = await orchestrateAskAura(p, deps);
+    check('-> UNKNOWN response, never a silent CAUTION verdict for a historical instant', response.intent === 'UNKNOWN');
+    check('No "Plan this" action for a historical instant', !response.actions?.some((a) => a.type === 'PLAN_THIS'));
+  }
+  {
+    // Regression control: a FUTURE explicit date for marriage is completely
+    // unaffected by the past-date guard.
+    const p = parseAskAuraRequest('Is September 20 2026 good for marriage?', { now: NOW, timezone: 'Asia/Kolkata' });
+    check('Ceremonial date-only explicit FUTURE date is unaffected', p.intent === 'TIMING_FIND' && p.customDate === '2026-09-20' && p.activityId === 'marriage');
+    const response = await orchestrateAskAura(p, deps);
+    check('Executes through canonical Muhurtham, not UNKNOWN', response.intent === 'MUHURTHAM_SEARCH');
   }
 
   console.log(allPassed ? '\nALL ASK AURA MARRIAGE ROUTING CHECKS PASSED' : '\nSOME ASK AURA MARRIAGE ROUTING CHECKS FAILED');
