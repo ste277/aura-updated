@@ -248,9 +248,16 @@ async function main() {
     const p = parse('Find a wedding muhurtham with Priya.');
     check('"Find a wedding muhurtham with Priya." -> MUHURTHAM_SEARCH, marriage, SHARED, personNameQuery=priya', p.intent === 'MUHURTHAM_SEARCH' && p.activityId === 'marriage' && p.scope === 'SHARED' && p.personNameQuery === 'priya');
   }
+  // UPDATED by Ask Aura Richer SHARED Grammar V1's fail-closed follow-up:
+  // "for us" (no resolvable other-person name) used to silently execute as
+  // a GENERAL-equivalent Muhurtham search tagged scope=SHARED -- the exact
+  // "SHARED + no partner -> GENERAL execution" gap the follow-up closes.
+  // The core invariant (scope === 'SHARED' && !personNameQuery for an
+  // executable timing request -> clarification) now applies uniformly, so
+  // this becomes UNKNOWN/clarification rather than a silent search.
   {
     const p = parse('Wedding muhurtham for us.');
-    check('"Wedding muhurtham for us." -> MUHURTHAM_SEARCH, marriage, SHARED', p.intent === 'MUHURTHAM_SEARCH' && p.activityId === 'marriage' && p.scope === 'SHARED');
+    check('"Wedding muhurtham for us." (no resolvable partner) -> UNKNOWN, never a silent GENERAL-equivalent Muhurtham search', p.intent === 'UNKNOWN');
   }
 
   // ============================================================
@@ -331,8 +338,23 @@ async function main() {
   // gains CHECK-phrasing/date-language support, this test should be
   // revisited (not silently left describing stale behavior).
   // ============================================================
-  check('KNOWN LIMITATION (B, richer SHARED phrasing, untouched): "When should Priya and I get married?" does not resolve a SHARED scope with personNameQuery (parseScope has no "X and I" support)', parse('When should Priya and I get married?').personNameQuery === undefined);
-  check('KNOWN LIMITATION (B): "Find our best wedding date." does not resolve a SHARED scope ("our" unrecognized)', parse('Find our best wedding date.').scope !== 'SHARED');
+  // RESOLVED by Ask Aura Richer SHARED Grammar V1 (previously KNOWN
+  // LIMITATION B: "parseScope has no 'X and I' support"). "When should
+  // Priya and I get married?" now resolves scope=SHARED with
+  // personNameQuery="priya" -- see test/askAuraIntentParser.test.ts's own
+  // dedicated pair-grammar matrix (all 4 orderings) for the full coverage;
+  // this file's own SHARED-with-Priya tests further above already prove
+  // execution through the real SavedPerson-resolution/capability-redirect
+  // path for the "with Priya" form, which pair grammar now feeds
+  // identically.
+  check('RESOLVED: "When should Priya and I get married?" now resolves scope=SHARED, personNameQuery=priya', parse('When should Priya and I get married?').scope === 'SHARED' && parse('When should Priya and I get married?').personNameQuery === 'priya');
+  // "Find our best wedding date." remains unresolved -- "our" is not
+  // immediately adjacent to "wedding"/"marriage" here (it's "our BEST
+  // wedding date"), so this specific phrasing falls outside the narrow,
+  // bounded "our wedding"/"our marriage" pattern this PR adds (see
+  // OUR_CEREMONIAL_RE in askAuraIntent.ts) -- still a genuine, documented
+  // limitation, unchanged by this PR.
+  check('KNOWN LIMITATION (B): "Find our best wedding date." does not resolve a SHARED scope ("our" not immediately adjacent to a recognized ceremonial noun)', parse('Find our best wedding date.').scope !== 'SHARED');
   // RESOLVED by Ask Aura Absolute Date + Weekday Parsing V1 (previously
   // KNOWN LIMITATION A: "no month-name date parsing exists"). With no
   // timezone supplied (this file's own `parse()` helper, matching every
@@ -601,6 +623,54 @@ async function main() {
     check('Ceremonial date-only explicit FUTURE date is unaffected', p.intent === 'TIMING_FIND' && p.customDate === '2026-09-20' && p.activityId === 'marriage');
     const response = await orchestrateAskAura(p, deps);
     check('Executes through canonical Muhurtham, not UNKNOWN', response.intent === 'MUHURTHAM_SEARCH');
+  }
+
+  // ============================================================
+  // Ask Aura Richer SHARED Grammar V1 fail-closed follow-up: the required
+  // orchestrator-level matrix, proving the parser's UNKNOWN result
+  // actually stops execution -- no GENERAL Muhurtham search, no dates
+  // card, no PLAN_THIS, no OPEN_MUHURTHAM for an unresolved partner.
+  // ============================================================
+  {
+    const parsed = parseAskAuraRequest('Find the best wedding date for us next month.', { now: NOW, timezone: 'Asia/Kolkata' });
+    check('"...for us next month." (no resolvable partner) parses UNKNOWN', parsed.intent === 'UNKNOWN');
+    const response = await orchestrateAskAura(parsed, deps);
+    check('Orchestrator response is UNKNOWN -- never a GENERAL Muhurtham search', response.intent === 'UNKNOWN');
+    check('No OPEN_MUHURTHAM action for a GENERAL result masquerading as SHARED', !response.actions?.some((a) => a.type === 'OPEN_MUHURTHAM'));
+    check('No dates/search card at all', !response.cards?.some((c) => 'dates' in c));
+  }
+  {
+    const parsed = parseAskAuraRequest('Find the best wedding date together next month.', { now: NOW, timezone: 'Asia/Kolkata' });
+    check('"...together next month." (no resolvable partner) parses UNKNOWN', parsed.intent === 'UNKNOWN');
+    const response = await orchestrateAskAura(parsed, deps);
+    check('Orchestrator response is UNKNOWN -- never a GENERAL Muhurtham search', response.intent === 'UNKNOWN');
+    check('No OPEN_MUHURTHAM action', !response.actions?.some((a) => a.type === 'OPEN_MUHURTHAM'));
+  }
+  {
+    const parsed = parseAskAuraRequest('Is 10 AM next Friday good for us to get married?', { now: NOW, timezone: 'Asia/Kolkata' });
+    check('"...for us to get married?" (no resolvable partner) parses UNKNOWN', parsed.intent === 'UNKNOWN');
+    const response = await orchestrateAskAura(parsed, deps);
+    check('Orchestrator response is UNKNOWN -- never a GENERAL ceremonial CHECK evaluation', response.intent === 'UNKNOWN');
+    check('No PLAN_THIS action for an unresolved-partner instant', !response.actions?.some((a) => a.type === 'PLAN_THIS'));
+    check('No requested-candidate card at all', !response.cards?.some((c) => 'requested' in c));
+  }
+
+  // No regression for the paths that MUST still execute normally.
+  {
+    const parsed = parseAskAuraRequest('Find the best wedding date next month.', { now: NOW, timezone: 'Asia/Kolkata' });
+    check('"...next month." (no SHARED signal at all) parses GENERAL, unaffected', parsed.scope === 'GENERAL');
+    const response = await orchestrateAskAura(parsed, deps);
+    check('Executes through canonical Muhurtham as GENERAL, unaffected', response.intent === 'MUHURTHAM_SEARCH');
+  }
+  {
+    const parsed = parseAskAuraRequest('Find the best wedding date for me next month.', { now: NOW, timezone: 'Asia/Kolkata' });
+    check('"...for me next month." parses PERSONAL, unaffected', parsed.scope === 'PERSONAL');
+    const response = await orchestrateAskAura(parsed, deps);
+    check('Executes through canonical Muhurtham as PERSONAL, unaffected', response.intent === 'MUHURTHAM_SEARCH');
+  }
+  {
+    const parsed = parseAskAuraRequest('Plan our wedding', { now: NOW, timezone: 'Asia/Kolkata' });
+    check('"Plan our wedding" (no timing signal) parses PLAN_OPEN, unaffected', parsed.intent === 'PLAN_OPEN' && parsed.activityId === 'marriage');
   }
 
   console.log(allPassed ? '\nALL ASK AURA MARRIAGE ROUTING CHECKS PASSED' : '\nSOME ASK AURA MARRIAGE ROUTING CHECKS FAILED');

@@ -105,9 +105,14 @@ function parse(text: string, previous?: ParsedAskAuraRequest) {
   check('...horizonPhrase = NEXT_MONTH', r.horizonPhrase === 'NEXT_MONTH');
   check('...scope defaults to GENERAL', r.scope === 'GENERAL');
 }
+// UPDATED by Ask Aura Richer SHARED Grammar V1's fail-closed follow-up:
+// "for us" (no resolvable other-person name) used to silently execute as a
+// GENERAL-equivalent Muhurtham search tagged scope=SHARED. The core
+// invariant (scope === 'SHARED' && !personNameQuery for an executable
+// timing request -> clarification) now applies uniformly.
 {
   const r = parse('Good dates for Griha Pravesh for us next month');
-  check('"...for us..." -> scope SHARED', r.scope === 'SHARED');
+  check('"...for us..." (no resolvable partner) -> UNKNOWN, never a silent GENERAL-equivalent search', r.intent === 'UNKNOWN');
 }
 
 // ============================================================
@@ -682,6 +687,229 @@ for (const t of ['Is September 20-25 good for marriage?', 'Is September 20 to Se
 {
   const r = parseTz('Workout Friday morning.', FRIDAY_NOW);
   check('"Workout Friday morning." -> TIMING_FIND, CUSTOM_DATE=2026-09-04 (today, Friday), timePreference=MORNING', r.intent === 'TIMING_FIND' && r.horizonPhrase === 'CUSTOM_DATE' && r.customDate === '2026-09-04' && r.timePreference === 'MORNING');
+}
+
+// ============================================================
+// Ask Aura Richer SHARED Grammar V1: owner+other-person pair grammar
+// ("Priya and I" / "I and Priya" / "Priya and me" / "me and Priya"),
+// normalized to scope=SHARED, personNameQuery="priya" -- the SAME shape
+// the pre-existing "with Priya" form already produces, so every existing
+// consumer (SavedPerson resolution, the capability-driven Muhurtham
+// redirect) picks these up for free.
+// ============================================================
+
+const PAIR_ORDERINGS = [
+  'Priya and I',
+  'I and Priya',
+  'Priya and me',
+  'me and Priya',
+];
+
+// --- Required matrix (brief section 35): all 4 orderings across exact-time
+// CHECK, date-only FIND, and best-date Muhurtham. ---
+for (const pair of PAIR_ORDERINGS) {
+  const r = parseTz(`Is 10 AM tomorrow good for ${pair} to get married?`, FRIDAY_NOW);
+  check(`Exact-time CHECK: "...for ${pair}..." -> TIMING_CHECK, SHARED, priya, exactTime=10:00, marriage`, r.intent === 'TIMING_CHECK' && r.scope === 'SHARED' && r.personNameQuery === 'priya' && r.exactTime === '10:00' && r.activityId === 'marriage');
+}
+for (const pair of PAIR_ORDERINGS) {
+  const r = parseTz(`Is next Friday good for ${pair}?`, FRIDAY_NOW);
+  check(`Date-only FIND: "Is next Friday good for ${pair}?" -> TIMING_FIND, SHARED, priya, customDate=2026-09-11`, r.intent === 'TIMING_FIND' && r.scope === 'SHARED' && r.personNameQuery === 'priya' && r.customDate === '2026-09-11');
+}
+for (const pair of PAIR_ORDERINGS) {
+  const r = parseTz(`Best wedding date for ${pair}`, FRIDAY_NOW);
+  check(`Best-date Muhurtham: "Best wedding date for ${pair}" -> MUHURTHAM_SEARCH, SHARED, priya, marriage`, r.intent === 'MUHURTHAM_SEARCH' && r.scope === 'SHARED' && r.personNameQuery === 'priya' && r.activityId === 'marriage');
+}
+for (const pair of PAIR_ORDERINGS) {
+  const r = parseTz(`When should ${pair} get married?`, FRIDAY_NOW);
+  check(`FIND-verb form: "When should ${pair} get married?" -> TIMING_FIND, SHARED, priya, marriage`, r.intent === 'TIMING_FIND' && r.scope === 'SHARED' && r.personNameQuery === 'priya' && r.activityId === 'marriage');
+}
+
+// --- Existing controls must remain unaffected (brief section 14/15/19). ---
+{
+  const r = parseTz('Find the best wedding date with Priya next month.', FRIDAY_NOW);
+  check('"with Priya" control -> SHARED, priya (regression preserved)', r.scope === 'SHARED' && r.personNameQuery === 'priya');
+}
+// UPDATED by Ask Aura Richer SHARED Grammar V1's fail-closed follow-up:
+// "for us"/"together" alone (no resolvable other-person name) now fails
+// closed to UNKNOWN/clarification for an executable timing request,
+// rather than silently producing scope=SHARED with no way to ever
+// personalize it -- see the dedicated fail-closed matrix further below for
+// the full required-behavior coverage (this section only re-confirms the
+// underlying scope-parsing shape hasn't otherwise changed).
+{
+  const r = parseTz('Is next Friday good for us?', FRIDAY_NOW);
+  check('"for us" (no resolvable partner, timing signal present) -> UNKNOWN, never a silent SHARED-with-no-name execution', r.intent === 'UNKNOWN');
+}
+{
+  const r = parseTz('Is next Friday good together?', FRIDAY_NOW);
+  check('"together" (no resolvable partner, timing signal present) -> UNKNOWN, never a silent SHARED-with-no-name execution', r.intent === 'UNKNOWN');
+}
+{
+  const r = parseTz('Is next Friday good for me?', FRIDAY_NOW);
+  check('PERSONAL "for me" control -> PERSONAL, never SHARED merely because "me" appears (brief section 13)', r.scope === 'PERSONAL');
+}
+
+// --- The critical §17 regression: "for me and X" must never fall into the
+// PERSONAL "for me" substring trap. ---
+{
+  const r = parseTz('Is 10 AM tomorrow good for me and Priya?', FRIDAY_NOW);
+  check('"for me and Priya" -> SHARED, priya, NEVER PERSONAL (the exact substring risk the brief warned about)', r.scope === 'SHARED' && r.personNameQuery === 'priya');
+}
+{
+  const r = parseTz('Best wedding date for me and Priya', FRIDAY_NOW);
+  check('"best wedding date for me and Priya" -> SHARED, priya, NEVER PERSONAL', r.scope === 'SHARED' && r.personNameQuery === 'priya');
+}
+
+// --- "Is next Friday good for Priya?" (bare name, no pair grammar) must
+// stay exactly as it was before this PR -- this PR does not change the
+// meaning of "for <name>" alone (brief section 12). ---
+{
+  const before = parseTz('Is next Friday good for Priya?', FRIDAY_NOW);
+  check('Bare "for Priya" (no pair grammar) -> UNKNOWN, unchanged from before this PR', before.intent === 'UNKNOWN');
+}
+
+// --- Dating collision (brief section 25): pair grammar must not interfere
+// with activity alias resolution. ---
+{
+  const r = parseTz('Is 7 PM next Friday good for Priya and me to go on a date?', FRIDAY_NOW);
+  check('"...Priya and me to go on a date?" -> activityId=dating, not marriage, SHARED, priya', r.activityId === 'dating' && r.scope === 'SHARED' && r.personNameQuery === 'priya');
+}
+
+// --- Duration composition (brief section 21/general regression): duration
+// + exact clock + natural weekday date compose correctly together,
+// unaffected by this PR's changes. ---
+{
+  const r = parseTz('Is 10 AM next Friday good for 2 hours of deep work?', FRIDAY_NOW);
+  check('Duration + exact clock + weekday date compose: exactTime=10:00, durationMinutes=120, customDate=2026-09-11, TIMING_CHECK', r.exactTime === '10:00' && r.durationMinutes === 120 && r.customDate === '2026-09-11' && r.intent === 'TIMING_CHECK');
+}
+
+// --- Explicit FIND precedence preserved with pair grammar present (brief
+// section 22). ---
+{
+  const r = parseTz('Find the best wedding time September 20 for Priya and me.', FRIDAY_NOW);
+  check('Explicit FIND phrasing + pair grammar -> TIMING_FIND, SHARED, priya', r.intent === 'TIMING_FIND' && r.scope === 'SHARED' && r.personNameQuery === 'priya');
+}
+
+// --- Multi-word name (brief section 26): a documented, bounded limitation
+// -- the single-word bound (matching the existing "with X" convention)
+// truncates to the LAST word rather than swallowing an unbounded phrase or
+// silently misresolving activity/date text as part of the name. Not a
+// general NER system; this is the same tradeoff "with Anna" already makes. ---
+{
+  const r = parseTz('Is next Friday good for Mary Jane and I?', FRIDAY_NOW);
+  check('"Mary Jane and I" -> personNameQuery truncated to "jane" (documented single-word-name limitation, matches existing "with X" convention)', r.personNameQuery === 'jane');
+}
+
+// --- Multiple other people (brief section 28): must reject/clarify, never
+// silently choose one of the two names. ---
+{
+  const r = parseTz('When should Priya, Alex and I get married?', FRIDAY_NOW);
+  check('"Priya, Alex and I" (3-person list) -> UNKNOWN, never silently resolves either name', r.intent === 'UNKNOWN' && r.personNameQuery === undefined);
+}
+
+// --- "our wedding" / "our marriage" with an unresolved partner (brief
+// section 14/16): must produce a clarification (UNKNOWN), never silently
+// execute as GENERAL, when a genuine timing signal is present. ---
+{
+  const r = parseTz('Is 10 AM tomorrow good for our wedding?', FRIDAY_NOW);
+  check('"our wedding" + exact clock, no resolvable partner -> UNKNOWN, never a silent GENERAL CHECK', r.intent === 'UNKNOWN');
+}
+{
+  const r = parseTz('Is next Friday good for our marriage?', FRIDAY_NOW);
+  check('"our marriage" + date, no resolvable partner -> UNKNOWN, never a silent GENERAL FIND', r.intent === 'UNKNOWN');
+}
+{
+  const r = parseTz('Best wedding date for our wedding.', FRIDAY_NOW);
+  check('"our wedding" + best-date language, no resolvable partner -> UNKNOWN, never a silent GENERAL Muhurtham search', r.intent === 'UNKNOWN');
+}
+{
+  // "Plan our wedding" has NO timing signal at all -- must remain
+  // completely unaffected (brief section 33), still reaching the ordinary
+  // bare-activity PLAN_OPEN fallback.
+  const r = parseTz('Plan our wedding', FRIDAY_NOW);
+  check('"Plan our wedding" (no timing signal) -> PLAN_OPEN, unaffected by the "our wedding" guard', r.intent === 'PLAN_OPEN' && r.activityId === 'marriage');
+}
+{
+  // When a resolvable name IS present alongside "our wedding", the
+  // unresolved-partner guard must not fire -- normal SHARED resolution
+  // proceeds exactly as it would for "with Priya" alone.
+  const r = parseTz('Is 10 AM tomorrow good for our wedding with Priya?', FRIDAY_NOW);
+  check('"our wedding with Priya" -> SHARED, priya, NOT the unresolved-partner guard (a name IS present)', r.intent === 'TIMING_CHECK' && r.scope === 'SHARED' && r.personNameQuery === 'priya');
+}
+
+// --- Everyday SHARED control (brief section 24): the grammar itself
+// resolves scope=SHARED for a NON-ceremonial activity too -- generic, not
+// marriage-specific. Whether EXECUTION personalizes for the resolved
+// partner is an orchestrator/engine-level question, not a parser one; see
+// test/askAuraOrchestratorDb.test.ts and its own documented finding that
+// the generic (non-Muhurtham) TIMING_CHECK handler does not currently read
+// scope/personNameQuery at all (a pre-existing asymmetry with TIMING_FIND,
+// which does) -- this PR does not change that, per its own explicit
+// non-goal against new product semantics. ---
+{
+  const r = parseTz('Is 10 AM tomorrow good for Priya and me to meditate?', FRIDAY_NOW);
+  check('Everyday activity + pair grammar -> scope=SHARED, priya (grammar-level resolution, generic across activities)', r.scope === 'SHARED' && r.personNameQuery === 'priya' && r.intent === 'TIMING_CHECK');
+}
+
+// --- GENERAL control (brief section 39): plain marriage requests with no
+// SHARED signal at all must remain GENERAL, never implicitly SHARED. ---
+{
+  const r = parseTz('Find the best wedding date next month.', FRIDAY_NOW);
+  check('"Find the best wedding date next month." (no SHARED signal) -> GENERAL', r.scope === 'GENERAL');
+}
+
+// --- PERSONAL control (brief section 40): "for me" alone must remain
+// PERSONAL, never SHARED merely because the grammar now includes "me". ---
+{
+  const r = parseTz('Find the best wedding date for me next month.', FRIDAY_NOW);
+  check('"...for me next month." (no pair grammar) -> PERSONAL, unaffected', r.scope === 'PERSONAL');
+}
+
+// --- Follow-up isolation (brief section 30): the new pair-grammar helper
+// must not be reachable from parseFollowUpChange -- "What about Priya?"
+// remains exactly as unsupported as before (parseScope's own "with X"
+// fallback still requires the literal word "with", which the follow-up
+// delta parser prepends itself; pair grammar requires "and i/me", which a
+// bare name delta never has). ---
+{
+  const previous = parseTz('Is next Friday good with Priya?', FRIDAY_NOW);
+  const delta = parseFollowUpChange('What about Priya?', previous);
+  // parseFollowUpChange prepends "with " to the delta before calling
+  // parseScope -- "with priya" -- so this SPECIFIC phrase still resolves
+  // via the existing "with X" fallback (unrelated to the new pair-grammar
+  // helper, which never fires here since there's no "and i/me" in "with
+  // priya"). Documented as pre-existing, unaffected follow-up behavior.
+  check('Follow-up "What about Priya?" behavior is unchanged by this PR (still governed solely by the pre-existing "with X" fallback, never the new pair-grammar helper)', delta !== null && delta.personNameQuery === 'priya');
+}
+
+// --- Event Location isolation (brief section 31): a trailing city name
+// must not corrupt person extraction, and this PR must not claim any
+// event-location field was set (no such field exists in the contract). ---
+{
+  const r = parseTz('Is next Friday good for Priya and me in Chennai?', FRIDAY_NOW);
+  check('"...Priya and me in Chennai?" -> SHARED, priya (city text does not corrupt the single-word-bounded name extraction)', r.scope === 'SHARED' && r.personNameQuery === 'priya');
+  check('No event-location-shaped field exists on the parsed request', !('eventLocation' in r) && !('location' in r));
+}
+
+// --- Panchang regression (brief section 32): a nonsensical Panchang+pair
+// phrase must preserve whatever it already resolved to, never gain new
+// SHARED Panchang semantics. ---
+{
+  const r = parseTz('What is the Panchang for Priya and me next Friday?', FRIDAY_NOW);
+  check('"What is the Panchang for Priya and me next Friday?" resolves exactly as before this PR (PANCHANG_EXPLAIN, unaffected)', r.intent === 'PANCHANG_EXPLAIN');
+}
+
+// --- UNKNOWN regression (brief section 34): general relationship questions
+// must never become SHARED timing requests, and CHECK_VERB_RE's own bare
+// "should i" requirement is deliberately NOT broadened to match "should
+// Priya and I" (only the FIND-shaped "when should" form was extended). ---
+{
+  const r = parseTz('Does Priya like me?', FRIDAY_NOW);
+  check('"Does Priya like me?" -> UNKNOWN, never a fabricated SHARED timing request', r.intent === 'UNKNOWN');
+}
+{
+  const r = parseTz('Should Priya and I get married?', FRIDAY_NOW);
+  check('"Should Priya and I get married?" (bare "should", no "when") -> UNKNOWN, unaffected -- CHECK_VERB_RE intentionally not broadened', r.intent === 'UNKNOWN');
 }
 
 if (!allPassed) {

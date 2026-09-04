@@ -241,6 +241,32 @@ async function main() {
     check('Executes normally, not UNKNOWN', response.intent === 'TIMING_FIND');
   }
 
+  // ============================================================
+  // Ask Aura Richer SHARED Grammar V1 fail-closed follow-up, section 13:
+  // everyday (non-ceremonial) TIMING_CHECK still cannot perform SHARED
+  // personalization -- documented, not fixed, per this follow-up's own
+  // explicit non-goal against new everyday shared scoring. The parser
+  // correctly resolves scope=SHARED/personNameQuery=priya (a resolvable
+  // name IS present, so the fail-closed guard does not fire), but the
+  // response itself must not misrepresent the result as
+  // partner-personalized: it must be byte-identical to the same request
+  // with no SHARED signal at all.
+  // ============================================================
+  {
+    const sharedParsed = parseAskAuraRequest('Is 10 AM tomorrow good for Priya and me to meditate?', { now: NOW, timezone: 'Asia/Kolkata' });
+    check('"...Priya and me to meditate?" parses TIMING_CHECK, SHARED, priya (a resolvable name -- fail-closed guard does not fire)', sharedParsed.intent === 'TIMING_CHECK' && sharedParsed.scope === 'SHARED' && sharedParsed.personNameQuery === 'priya');
+
+    const genericParsed = parseAskAuraRequest('Is 10 AM tomorrow good for meditation?', { now: NOW, timezone: 'Asia/Kolkata' });
+    check('sanity: the no-SHARED-signal control parses the same activity/time, scope=GENERAL', genericParsed.activityId === sharedParsed.activityId && genericParsed.exactTime === sharedParsed.exactTime && genericParsed.scope === 'GENERAL');
+
+    const sharedResponse = await orchestrateAskAura(sharedParsed, deps);
+    const genericResponse = await orchestrateAskAura(genericParsed, deps);
+    check('Generic (non-ceremonial) TIMING_CHECK does not personalize for the resolved partner -- message is IDENTICAL to the GENERAL-equivalent request, never falsely representing a partner-personalized result', sharedResponse.message === genericResponse.message);
+    const sharedCard = sharedResponse.cards?.[0] as { requested?: { score: number } } | undefined;
+    const genericCard = genericResponse.cards?.[0] as { requested?: { score: number } } | undefined;
+    check('Score is IDENTICAL too -- documented pre-existing limitation, not fixed by this follow-up', sharedCard?.requested?.score === genericCard?.requested?.score);
+  }
+
   console.log(allPassed ? '\nALL ASK AURA ORCHESTRATOR CHECKS PASSED' : '\nSOME ASK AURA ORCHESTRATOR CHECKS FAILED');
   process.exit(allPassed ? 0 : 1);
 }
