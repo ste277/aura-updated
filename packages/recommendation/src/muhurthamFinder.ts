@@ -112,7 +112,7 @@ import { evaluateTimingCandidate, TimingCandidate, TimingCandidateLabel, TimingT
 import { formatMinutes } from '../../astronomy/src/ephemeris';
 import { getPanchangForDate, PanchangWindowSpan } from '../../panchang/src/panchangDay';
 import { isInauspiciousCommencementWindow } from '../../panchang/src/windows';
-import { isValidCalendarDateString, localDateTimeToUTC } from '../../panchang/src/localDate';
+import { getDatePartsInTimezone, isValidCalendarDateString, localDateTimeToUTC } from '../../panchang/src/localDate';
 import { FULL_ACTIVITY_CATALOG } from './personalizedTasks';
 import { ACTIVITY_DEFINITIONS, ActivityDefinition } from './activityDefinitions';
 import { computeMuhurtaSupportLevel, resolveMuhurtaRulePack, isAuthoritativeAvoidNakshatra, isAuthoritativeAvoidTithi, isAuthoritativeAvoidYoga, isAuthoritativeAvoidKarana, AURA_MUHURTA_METHODOLOGY_ID } from '../../muhurta/src/muhurtaRulePacks';
@@ -1658,4 +1658,234 @@ export function findSharedMuhurthams(request: MuhurthamSearchRequest): Muhurtham
     evaluatedDateCount: dateStrs.length,
     provenance: { muhurtaMethodology: AURA_MUHURTA_METHODOLOGY_ID, personalMethodology: AURA_PERSONAL_FIT_METHODOLOGY_ID, sharedMethodology: AURA_SHARED_FIT_METHODOLOGY_ID },
   };
+}
+
+// ============================================================
+// Ask Aura Ceremonial TIMING_CHECK Capability Redirect V1: the canonical
+// single-candidate counterpart to findMuhurthams()/findPersonalMuhurthams()/
+// findSharedMuhurthams() above -- "is THIS exact instant valid", never a
+// date-range search. Fixes the architecture gap the Natural CHECK Phrasing
+// audit identified: TIMING_CHECK for a Muhurtham-eligible activity was
+// falling through to generic Timing Search's own CHECK mode, which has no
+// awareness of ceremonial hard eligibility (authoritative avoid Tithi/
+// Nakshatra/Yoga/Karana, prohibited periods, planetary combustion) at all --
+// producing answers that could directly contradict the SAME activity's own
+// canonical Muhurtham search results for the same day.
+//
+// Deliberately reuses evaluateMuhurthamCandidate() (this file's existing
+// per-candidate evaluator, already shared by all three search functions
+// above) rather than reimplementing any of its checks -- this is a thin
+// wrapper around exactly that function, called once per participant instead
+// of once per scanned candidate in a day. No new eligibility rule, no new
+// scoring formula, no new personalization/shared-blend formula: every
+// GENERAL/PERSONAL/SHARED computation below mirrors the identical sequence
+// findMuhurthams()/findPersonalMuhurthams()/findSharedMuhurthams() already
+// use for their own bestWindow, just anchored to the caller's supplied
+// `start` instead of a scanned/discovered one.
+// ============================================================
+
+export interface MuhurthamCandidateCheckRequest {
+  activityId: string;
+  /** The exact instant to evaluate -- NEVER moved, NEVER replaced by a
+   * searched alternative. This is what makes this a CHECK, not a FIND. */
+  start: Date;
+  durationMinutes?: number;
+  scope: 'GENERAL' | 'PERSONAL' | 'SHARED';
+  /** Same context shape/semantics as MuhurthamSearchRequest.context.
+   * context.personalContext is read ONLY when scope is PERSONAL (mirrors
+   * findMuhurthams()'s own "GENERAL never reads personalContext" rule --
+   * see that function's doc comment -- so passing a context that happens to
+   * carry personalContext with scope:'GENERAL' still evaluates generically). */
+  context: DailyAssistantContext;
+  /** SHARED scope only -- identical shape to MuhurthamSearchRequest.partner. */
+  partner?: { savedPersonId: string; name: string; context: PersonalMuhurtaContext };
+}
+
+/** The single-candidate counterpart to MuhurthamDateCandidate -- same
+ * reasons/cautions/panchangSummary shape, `window` instead of `date` +
+ * `bestWindow` (there is no date-range, so no alternates either: this is
+ * one caller-supplied instant, not a search), and an explicit `eligible`
+ * flag since a CHECK candidate can legitimately fail ceremonial hard
+ * eligibility (unlike a search result, which simply omits an ineligible
+ * date rather than returning one). `window` is evaluateTimingCandidate()'s
+ * OWN result (real reasons/conflicts) even when `eligible` is false, so a
+ * caller can still explain what it found -- it is simply not treated as an
+ * ELIGIBLE Muhurtham, exactly as evaluateMuhurthamCandidate()'s own
+ * ceremonial gates (never re-derived here) determined. */
+export interface MuhurthamCandidateCheckResult {
+  scope: 'GENERAL' | 'PERSONAL' | 'SHARED';
+  status: 'OK';
+  activity: { id: string; title: string; icon: string };
+  eligible: boolean;
+  rating: MuhurthamRating | SharedMuhurthamRating;
+  score: number;
+  window: MuhurthamWindowCandidate;
+  reasons: MuhurtaReason[];
+  cautions: MuhurtaReason[];
+  panchangSummary: MuhurthamPanchangSummary;
+  /** PERSONAL only. */
+  generalScore?: number;
+  personalScore?: number;
+  personalFactors?: PersonalMuhurtaFactors;
+  /** SHARED only. */
+  user?: SharedParticipantFit;
+  person?: SharedParticipantFit & { savedPersonId: string; name: string };
+  balance?: number;
+}
+
+export type MuhurthamCandidateCheckOutcome =
+  | MuhurthamCandidateCheckResult
+  | MuhurthamProfileIncomplete
+  | MuhurthamUserProfileIncomplete
+  | MuhurthamSavedPersonProfileIncomplete;
+
+/**
+ * Evaluates ONE caller-supplied instant as a Muhurtham CHECK -- the
+ * canonical entry point Ask Aura's TIMING_CHECK capability redirect calls
+ * for any isSupportedMuhurthamActivity() activity. Throws under the exact
+ * same conditions resolveMuhurthamSearchParams() already throws for the
+ * search functions (unknown/unsupported activityId) -- callers are expected
+ * to have already checked isSupportedMuhurthamActivity() themselves, same
+ * as every existing caller of findMuhurthams()/findPersonalMuhurthams()/
+ * findSharedMuhurthams() does.
+ */
+export function evaluateMuhurthamCandidateAt(request: MuhurthamCandidateCheckRequest): MuhurthamCandidateCheckOutcome {
+  const activity = FULL_ACTIVITY_CATALOG.find((a) => a.id === request.activityId);
+  if (!activity) {
+    throw new Error(`evaluateMuhurthamCandidateAt: unknown activityId "${request.activityId}".`);
+  }
+  if (!isSupportedMuhurthamActivity(request.activityId)) {
+    throw new Error(`evaluateMuhurthamCandidateAt: "${request.activityId}" is not yet supported by Muhurtham Finder.`);
+  }
+  const durationMinutes = Math.min(360, Math.max(15, Math.round(request.durationMinutes ?? DEFAULT_DURATION_MINUTES)));
+  const { start, context } = request;
+
+  // Same panchangWindows evaluateMuhurthamCandidate() needs for every scope
+  // (the section-7 friction/overlap safety check) -- resolved for `start`'s
+  // OWN local calendar date in the Event/Timing Location's timezone (never
+  // "today"), the exact same getPanchangForDate() call the search functions
+  // make once per scanned date, here made once for the requested instant.
+  const localDateStr = getDatePartsInTimezone(context.timezone, start).dateStr;
+  const panchangDay = getPanchangForDate({ localDate: localDateStr, latitude: context.latitude, longitude: context.longitude, timezone: context.timezone });
+
+  const buildResult = (eligible: boolean, canonical: TimingCandidate, extra: Partial<MuhurthamCandidateCheckResult> = {}): MuhurthamCandidateCheckResult => {
+    const cautionReasons = canonical.reasons.filter((r) => r.polarity === 'CAUTION' || r.polarity === 'BLOCK');
+    const hasCautionOrConflict = !eligible || cautionReasons.length > 0 || Boolean(canonical.conflicts?.length);
+    return {
+      scope: request.scope,
+      status: 'OK',
+      activity: { id: activity.id, title: activity.title, icon: activity.icon },
+      eligible,
+      rating: rateMuhurtham(canonical.score, hasCautionOrConflict),
+      score: canonical.score,
+      // `canonical` IS already a MuhurthamWindowCandidate (a plain
+      // TimingCandidate alias) -- no SampledCandidate.startMinute field to
+      // strip here (that only exists on the day-scan search path), so
+      // toWindowCandidate() is unnecessary.
+      window: canonical,
+      reasons: canonical.reasons.filter((r) => r.polarity === 'SUPPORT'),
+      cautions: cautionReasons,
+      panchangSummary: {
+        vara: panchangDay.panchanga.vara,
+        tithi: panchangDay.panchanga.tithi.name,
+        nakshatra: panchangDay.panchanga.nakshatra.name,
+        yoga: panchangDay.panchanga.yoga.name,
+        karana: panchangDay.panchanga.karana.name,
+      },
+      ...extra,
+    };
+  };
+
+  if (request.scope === 'GENERAL') {
+    const generalContext: DailyAssistantContext = { ...context, personalContext: undefined };
+    const generalProfile = profileFromActivity(activity);
+    // evaluateMuhurthamCandidate() IS the display candidate when eligible --
+    // it already includes the same start-sensitivity blend
+    // (blendStartSensitiveScore) findMuhurthams()'s own bestWindow carries,
+    // so this stays score-identical to the canonical search for the same
+    // instant. Only when ineligible (null) do we fall back to a raw
+    // evaluateTimingCandidate() call, purely for display (see this
+    // exported function's own doc comment above) -- never as the
+    // eligibility gate itself.
+    const eligibleCandidate = evaluateMuhurthamCandidate(generalProfile, start, durationMinutes, generalContext, panchangDay.windows, generalProfile.muhurtaClassification);
+    const canonical = eligibleCandidate ?? evaluateTimingCandidate({ profile: generalProfile, start, durationMinutes, context: generalContext });
+    return buildResult(eligibleCandidate !== null, canonical);
+  }
+
+  if (request.scope === 'PERSONAL') {
+    const personalContext = context.personalContext;
+    if (!personalContext || personalContext.natalNakshatraIndex === undefined) {
+      return { scope: 'PERSONAL', status: 'PERSONAL_PROFILE_INCOMPLETE', requiredFields: REQUIRED_PERSONAL_PROFILE_FIELDS };
+    }
+    const personalProfile = profileFromActivity(activity);
+    personalProfile.personalContext = personalContext;
+    const generalOnlyProfile: TaskProfile = { ...personalProfile, personalContext: undefined };
+    const generalContext: DailyAssistantContext = { ...context, personalContext: undefined };
+
+    // Same dual-profile pattern findPersonalMuhurthams() uses: the
+    // PERSONALIZED profile is the authoritative eligibility/score gate for
+    // this scope (mirrors that function's own `evaluated.best`, including
+    // its start-sensitivity blend), the general-only profile is only the
+    // comparison baseline for generalScore -- never a second eligibility
+    // gate.
+    const eligiblePersonalCandidate = evaluateMuhurthamCandidate(personalProfile, start, durationMinutes, context, panchangDay.windows, personalProfile.muhurtaClassification);
+    const personalCanonical = eligiblePersonalCandidate ?? evaluateTimingCandidate({ profile: personalProfile, start, durationMinutes, context });
+    const personalEligible = eligiblePersonalCandidate !== null;
+    const generalCandidate = evaluateMuhurthamCandidate(generalOnlyProfile, start, durationMinutes, generalContext, panchangDay.windows, personalProfile.muhurtaClassification);
+    const generalScore = generalCandidate?.score ?? personalCanonical.score;
+    const personalFit = evaluatePersonalMuhurtaFit(activity, start, personalContext);
+
+    return buildResult(personalEligible, personalCanonical, {
+      generalScore,
+      personalScore: Math.round(personalFit.score) / 10,
+      personalFactors: { taraBala: taraBalaFactor(personalContext, start) },
+    });
+  }
+
+  // SHARED
+  const userContext = context.personalContext;
+  if (!userContext || userContext.natalNakshatraIndex === undefined) {
+    return { scope: 'SHARED', status: 'USER_PROFILE_INCOMPLETE', requiredFields: REQUIRED_PERSONAL_PROFILE_FIELDS };
+  }
+  const partner = request.partner;
+  if (!partner || partner.context.natalNakshatraIndex === undefined) {
+    return { scope: 'SHARED', status: 'SAVED_PERSON_PROFILE_INCOMPLETE', requiredFields: REQUIRED_PERSONAL_PROFILE_FIELDS };
+  }
+
+  const generalContext: DailyAssistantContext = { ...context, personalContext: undefined };
+  const generalProfile = profileFromActivity(activity);
+
+  // Same pattern as findSharedMuhurthams(): the GENERAL-profile evaluation
+  // (including its start-sensitivity blend) is the single authoritative
+  // eligibility gate for the shared candidate (SHARED never re-derives
+  // eligibility per participant), then each participant's own
+  // combinedScore/delta is layered on top via the exact same
+  // participantCombinedScore()/blendSharedDelta() helpers.
+  const eligibleGeneralCandidate = evaluateMuhurthamCandidate(generalProfile, start, durationMinutes, generalContext, panchangDay.windows, generalProfile.muhurtaClassification);
+  const generalCanonical = eligibleGeneralCandidate ?? evaluateTimingCandidate({ profile: generalProfile, start, durationMinutes, context: generalContext });
+  const eligible = eligibleGeneralCandidate !== null;
+  const generalScore = generalCanonical.score;
+
+  const userCombined = participantCombinedScore(generalProfile, start, durationMinutes, generalContext, userContext, panchangDay.windows, generalScore);
+  const personCombined = participantCombinedScore(generalProfile, start, durationMinutes, generalContext, partner.context, panchangDay.windows, generalScore);
+  const userTara = taraBalaFactor(userContext, start);
+  const personTara = taraBalaFactor(partner.context, start);
+  const userFit = evaluatePersonalMuhurtaFit(activity, start, userContext);
+  const personFit = evaluatePersonalMuhurtaFit(activity, start, partner.context);
+
+  const userDelta = userCombined - generalScore;
+  const personDelta = personCombined - generalScore;
+  const sharedDelta = blendSharedDelta(userDelta, personDelta);
+  const sharedScore = Math.max(0, Math.min(10, Math.round((generalScore + sharedDelta) * 10) / 10));
+  const balance = Math.round(Math.max(0, 10 - Math.abs(userDelta - personDelta) * 10) * 10) / 10;
+  const cautionReasons = generalCanonical.reasons.filter((r) => r.polarity === 'CAUTION' || r.polarity === 'BLOCK');
+  const hasCautionOrConflict = !eligible || cautionReasons.length > 0 || Boolean(generalCanonical.conflicts?.length);
+
+  return buildResult(eligible, generalCanonical, {
+    rating: rateSharedMuhurtham(sharedScore, userTara.status, personTara.status, hasCautionOrConflict),
+    score: sharedScore,
+    user: { score: Math.round(userCombined * 10) / 10, factors: { taraBala: userTara }, reasons: userFit.reasons ?? [] },
+    person: { savedPersonId: partner.savedPersonId, name: partner.name, score: Math.round(personCombined * 10) / 10, factors: { taraBala: personTara }, reasons: personFit.reasons ?? [] },
+    balance,
+  });
 }

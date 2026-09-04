@@ -27,7 +27,7 @@ import { findEverydaySharedTiming } from '../../../packages/recommendation/src/e
 import { getActionCards } from '../../../packages/recommendation/src/actionCards';
 import { FULL_ACTIVITY_CATALOG } from '../../../packages/recommendation/src/personalizedTasks';
 import { handleMuhurthamSearchBody, handleSharedMuhurthamSearchBody } from './muhurthamSearchRequest';
-import { isSupportedMuhurthamActivity, MuhurthamDateCandidate, MuhurthamSearchResult } from '../../../packages/recommendation/src/muhurthamFinder';
+import { evaluateMuhurthamCandidateAt, isSupportedMuhurthamActivity, MuhurthamCandidateCheckOutcome, MuhurthamDateCandidate, MuhurthamSearchResult } from '../../../packages/recommendation/src/muhurthamFinder';
 import { formatMuhurtaReason } from '../../../packages/muhurta/src/muhurtaReasonFormat';
 import { getPanchangForDate } from '../../../packages/panchang/src/panchangDay';
 import { natalContextFromBirthDetails } from './natalContext';
@@ -285,6 +285,22 @@ export async function orchestrateAskAura(parsed: ParsedAskAuraRequest, deps: Ask
     case 'GOOD_RIGHT_NOW':
       return handleGoodRightNow(parsed, deps);
     case 'TIMING_CHECK':
+      // Ask Aura Ceremonial TIMING_CHECK Capability Redirect V1 -- the same
+      // capability-driven redirect TIMING_FIND already has (below), now also
+      // applied to CHECK: a Muhurtham-eligible activity must be checked
+      // through the canonical single-candidate Muhurtham evaluator, never
+      // generic Timing Search alone. Fixes the Natural CHECK Phrasing audit's
+      // top finding -- without this, "Is tomorrow good for marriage?" (FIND,
+      // already redirected) and "Should I get married tomorrow?" (CHECK, NOT
+      // redirected before this PR) could give contradictory answers for the
+      // same instant, since generic Timing Search has no awareness of
+      // ceremonial hard eligibility (authoritative avoid Tithi/Nakshatra/
+      // Yoga/Karana, prohibited periods, planetary combustion). Deliberately
+      // NOT `parsed.activityId === 'marriage'` -- same capability check,
+      // same reasoning as the TIMING_FIND redirect below.
+      if (parsed.activityId && isSupportedMuhurthamActivity(parsed.activityId)) {
+        return handleMuhurthamTimingCheck(parsed, deps);
+      }
       return handleTimingCheck(parsed, deps);
     case 'TIMING_FIND':
       // Ask Aura Marriage Muhurtham Routing V1 -- capability-driven
@@ -379,6 +395,107 @@ async function handleTimingCheck(parsed: ParsedAskAuraRequest, deps: AskAuraOrch
       { type: 'OPEN_PLAN', label: 'Plan better time', activityId: parsed.activityId },
     ],
     context: { ...parsed, activityId: activity?.id ?? parsed.activityId, taskTitle: activity ? undefined : parsed.taskTitle },
+  };
+}
+
+// ---- TIMING_CHECK, ceremonial (Ask Aura Ceremonial TIMING_CHECK Capability
+// Redirect V1) -------------------------------------------------------------
+
+/**
+ * The single-candidate counterpart to handleMuhurthamSearch() -- same
+ * GENERAL/PERSONAL/SHARED dispatch and SavedPerson resolution, but checking
+ * ONE caller-supplied instant (never a date-range search) via
+ * evaluateMuhurthamCandidateAt(). candidateStart is derived EXACTLY the same
+ * way handleTimingCheck() already derives it (the "now" vs horizon-derived-
+ * noon-UTC logic is untouched by this PR -- clock-time parsing is a later
+ * PR's scope) so the only thing this changes is WHICH canonical evaluator
+ * scores that instant for a Muhurtham-eligible activity.
+ */
+async function handleMuhurthamTimingCheck(parsed: ParsedAskAuraRequest, deps: AskAuraOrchestratorDeps): Promise<AskAuraResponse> {
+  if (!parsed.activityId) {
+    return {
+      intent: 'TIMING_CHECK',
+      message: 'What are you checking?',
+      cards: [{ type: 'CLARIFICATION', options: [] }],
+      context: parsed,
+    };
+  }
+  const durationMinutes = resolveDuration(parsed.activityId, parsed.durationMinutes);
+  const activity = FULL_ACTIVITY_CATALOG.find((a) => a.id === parsed.activityId);
+  const activityTitle = activity?.title ?? parsed.taskTitle ?? 'this';
+
+  const candidateStart = parsed.horizonPhrase === 'NOW' || !parsed.horizonPhrase
+    ? deps.context.now.toISOString()
+    : resolveHorizonToDateRange(parsed.horizonPhrase, parsed.customDate, deps.context).start + 'T12:00:00.000Z';
+  const start = new Date(candidateStart);
+
+  if (parsed.scope === 'SHARED' && parsed.personNameQuery) {
+    const resolution = await resolvePersonByName(deps.userId, parsed.personNameQuery);
+    if (resolution.status !== 'RESOLVED') {
+      return {
+        intent: 'TIMING_CHECK',
+        message: resolution.status === 'NOT_FOUND' ? `I couldn't find anyone named "${parsed.personNameQuery}" in your People list.` : `You have more than one "${parsed.personNameQuery}" saved. Who did you mean?`,
+        cards: resolution.status === 'AMBIGUOUS' ? [{ type: 'CLARIFICATION', options: resolution.matches.map((m) => m.name) }] : undefined,
+        context: parsed,
+      };
+    }
+    const person = resolution.person;
+    const partnerContext = natalContextFromBirthDetails(
+      person.birthDate.toISOString().slice(0, 10),
+      person.birthTime,
+      person.birthTimezone
+    );
+    const outcome = evaluateMuhurthamCandidateAt({
+      activityId: parsed.activityId,
+      start,
+      durationMinutes,
+      scope: 'SHARED',
+      context: deps.context,
+      partner: { savedPersonId: person.id, name: person.name, context: partnerContext },
+    });
+    return buildMuhurthamCheckResponse(activityTitle, activity, outcome, deps.context.timezone, parsed);
+  }
+
+  const scope = parsed.scope === 'PERSONAL' ? 'PERSONAL' : 'GENERAL';
+  const outcome = evaluateMuhurthamCandidateAt({ activityId: parsed.activityId, start, durationMinutes, scope, context: deps.context });
+  return buildMuhurthamCheckResponse(activityTitle, activity, outcome, deps.context.timezone, parsed);
+}
+
+/** CHECK-shaped response, never FIND/search wording -- "This is a strong
+ * time for X" / "I'd avoid this time for X", never "Best dates for X:".
+ * The requested instant is always the primary (and only) candidate shown --
+ * no ceremonial nearby-search is performed here (brief: "primary rule --
+ * requested instant must remain primary"; a broader alternative search, if
+ * ever added, is a later PR's scope, mirroring how generic CHECK's own
+ * betterNearby is a separate, explicit feature this function does not
+ * replicate). */
+function buildMuhurthamCheckResponse(
+  activityTitle: string,
+  activity: { icon: string } | undefined,
+  outcome: MuhurthamCandidateCheckOutcome,
+  timezone: string,
+  parsed: ParsedAskAuraRequest
+): AskAuraResponse {
+  if (outcome.status === 'PERSONAL_PROFILE_INCOMPLETE') {
+    return { intent: 'TIMING_CHECK', message: 'Add your complete birth details to get a personalized answer.', context: parsed };
+  }
+  if (outcome.status === 'USER_PROFILE_INCOMPLETE') {
+    return { intent: 'TIMING_CHECK', message: 'Add your complete birth details to get a shared answer.', context: parsed };
+  }
+  if (outcome.status === 'SAVED_PERSON_PROFILE_INCOMPLETE') {
+    return { intent: 'TIMING_CHECK', message: 'Add complete birth details for this person to get a shared answer.', context: parsed };
+  }
+
+  const message = outcome.eligible ? `This is a strong time for ${activityTitle}.` : `I'd avoid this time for ${activityTitle}.`;
+  return {
+    intent: 'TIMING_CHECK',
+    message,
+    cards: [{ type: 'TIMING_RESULT', activityTitle, requested: candidateCard(outcome.window, timezone) }],
+    actions: [
+      { type: 'PLAN_THIS', label: 'Plan this', planPayload: planPayloadFromCandidate(outcome.window, activityTitle, activity?.icon) },
+      { type: 'OPEN_MUHURTHAM', label: 'Open Muhurtham Finder', activityId: outcome.activity.id },
+    ],
+    context: { ...parsed, activityId: outcome.activity.id, taskTitle: undefined },
   };
 }
 

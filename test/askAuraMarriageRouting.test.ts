@@ -336,6 +336,113 @@ async function main() {
   check('KNOWN LIMITATION (A, CHECK phrasing, untouched): "Is September 20 good for marriage?" stays UNKNOWN (no month-name date parsing exists)', parse('Is September 20 good for marriage?').intent === 'UNKNOWN');
   check('KNOWN LIMITATION (C, named Event Location, untouched): "Find a wedding muhurtham in Chennai." carries no location field (Ask Aura has no city-parsing path)', !('eventLocation' in parse('Find a wedding muhurtham in Chennai.')));
 
+  // ============================================================
+  // Ask Aura Ceremonial TIMING_CHECK Capability Redirect V1: TIMING_CHECK
+  // for a Muhurtham-eligible activity must execute through the canonical
+  // single-candidate ceremonial evaluator (evaluateMuhurthamCandidateAt),
+  // never generic Timing Search's own CHECK mode alone -- the same
+  // capability-driven pattern the TIMING_FIND redirect above already
+  // proves, now applied to CHECK. Response wording must be CHECK-shaped
+  // ("This is a strong time for X." / "I'd avoid this time for X."),
+  // never FIND/search wording ("Best dates for X:").
+  // ============================================================
+
+  for (const t of ['Should I get married tomorrow?', 'Can I get married tomorrow?', 'Is now a good time to get married?', 'Is this a good time to get married?']) {
+    const p = parse(t);
+    check(`"${t}" parses TIMING_CHECK, activityId=marriage`, p.intent === 'TIMING_CHECK' && p.activityId === 'marriage');
+    const response = await orchestrateAskAura(p, deps);
+    check(`"${t}" response stays TIMING_CHECK (no new intent introduced)`, response.intent === 'TIMING_CHECK');
+    check(`"${t}" response is CHECK-shaped, never FIND/search wording ("Best dates for")`, !response.message.includes('Best dates for'));
+    check(`"${t}" response says either "strong time" or "avoid this time", conservative wording only`, response.message.includes('strong time') || response.message.includes('avoid this time'));
+    const card = response.cards?.[0] as { requested?: { start: string; end: string } } | undefined;
+    check(`"${t}" card carries a single "requested" candidate (no FIND-shaped "best"/"others"/date list)`, Boolean(card?.requested) && !('dates' in (response.cards?.[0] ?? {})) && !('best' in (response.cards?.[0] ?? {})));
+  }
+
+  // ============================================================
+  // Contradiction regression (the audit's headline finding): for the SAME
+  // real fixture (2026-06-12 New York), a FIND-shaped prompt (already
+  // redirected) and a CHECK-shaped prompt (newly redirected by this PR)
+  // must now both go through the canonical Muhurtham engine -- not
+  // asserting identical wording/instant (CHECK evaluates a different,
+  // horizon-derived instant than FIND's own discovered best window), but
+  // asserting neither one can any longer silently fall back to generic-
+  // only Timing Search for this activity.
+  // ============================================================
+  {
+    const nyNow = new Date('2026-06-11T04:00:00.000Z');
+    const nyContext: DailyAssistantContext = { now: nyNow, latitude: 40.7128, longitude: -74.006, timezone: 'America/New_York', tzOffsetMinutes: -300 };
+    const nyDeps: AskAuraOrchestratorDeps = { userId: 'test-user-not-a-real-db-row', context: nyContext, activeWindow: 'NEUTRAL' };
+
+    const findParsed = parseAskAuraRequest('Is tomorrow good for marriage?', { now: nyNow });
+    const findResponse = await orchestrateAskAura(findParsed, nyDeps);
+    check('"Is tomorrow good for marriage?" (FIND) executes MUHURTHAM_SEARCH', findResponse.intent === 'MUHURTHAM_SEARCH');
+
+    const checkParsed = parseAskAuraRequest('Should I get married tomorrow?', { now: nyNow });
+    const checkResponse = await orchestrateAskAura(checkParsed, nyDeps);
+    check('"Should I get married tomorrow?" (CHECK) stays TIMING_CHECK but now via the ceremonial evaluator (never "Best dates for" wording)', checkResponse.intent === 'TIMING_CHECK' && !checkResponse.message.includes('Best dates for'));
+  }
+
+  // ============================================================
+  // Generic capability tests -- proves the CHECK redirect is capability-
+  // driven (isSupportedMuhurthamActivity), not marriage-specific.
+  // ============================================================
+  for (const [text, activityId] of [
+    ['Should I do griha pravesh tomorrow?', 'griha-pravesh'],
+    ['Should I start my business tomorrow?', 'business-start'],
+  ] as const) {
+    const p = parse(text);
+    check(`"${text}" parses TIMING_CHECK, activityId=${activityId}`, p.intent === 'TIMING_CHECK' && p.activityId === activityId);
+    const response = await orchestrateAskAura(p, deps);
+    check(`"${text}" response is CHECK-shaped (ceremonial evaluator used, not generic-only)`, response.intent === 'TIMING_CHECK' && !response.message.includes('Best dates for'));
+  }
+
+  // ============================================================
+  // Everyday negative controls -- must remain fully unaffected (generic
+  // handler, betterNearby still present, "You can."/"I'd hold off"
+  // wording unchanged).
+  // ============================================================
+  for (const t of ['Can I work out now?', 'Should I do deep work now?', 'Is this a good time for meditation?']) {
+    const p = parse(t);
+    check(`"${t}" activity is not Muhurtham-eligible`, Boolean(p.activityId) && !isSupportedMuhurthamActivity(p.activityId!));
+    const response = await orchestrateAskAura(p, deps);
+    check(`"${t}" uses the UNCHANGED generic CHECK wording ("You can."/"I'd hold off for now.")`, response.message === 'You can.' || response.message === "I'd hold off for now.");
+  }
+
+  // ============================================================
+  // Dating negative control -- Marriage aliases/capability routing must
+  // not affect dating in any way, including under CHECK phrasing.
+  // ============================================================
+  {
+    const p = parse('Should I go on a date tonight?');
+    check('"Should I go on a date tonight?" resolves dating, not marriage', p.activityId === 'dating');
+    const response = await orchestrateAskAura(p, deps);
+    check('"Should I go on a date tonight?" uses the unchanged generic CHECK wording', response.message === 'You can.' || response.message === "I'd hold off for now.");
+  }
+
+  // ============================================================
+  // PERSONAL ceremonial CHECK -- reuses the same natal/Tara Bala signal
+  // path as PERSONAL Muhurtham search, no new personalization formula.
+  // ============================================================
+  {
+    const p = parse('Can I get married for me?');
+    check('"Can I get married for me?" parses TIMING_CHECK, scope=PERSONAL, marriage', p.intent === 'TIMING_CHECK' && p.scope === 'PERSONAL' && p.activityId === 'marriage');
+    const personalDeps: AskAuraOrchestratorDeps = { userId: 'test-user-not-a-real-db-row', context: { ...context, personalContext: { natalNakshatraIndex: 1, janmaNakshatra: 'Ashwini' } }, activeWindow: 'NEUTRAL' };
+    const response = await orchestrateAskAura(p, personalDeps);
+    check('"Can I get married for me?" executes the ceremonial CHECK path (never "Best dates for")', response.intent === 'TIMING_CHECK' && !response.message.includes('Best dates for'));
+  }
+
+  // ============================================================
+  // Duration -- an explicit duration on a CHECK-shaped prompt must be
+  // evaluated as that exact span, not silently dropped or defaulted.
+  // ============================================================
+  {
+    const p = parse('Should I get married tomorrow for 90 minutes?');
+    check('"Should I get married tomorrow for 90 minutes?" parses durationMinutes=90', p.durationMinutes === 90);
+    const response = await orchestrateAskAura(p, deps);
+    const card = response.cards?.[0] as { requested?: { start: string; end: string } } | undefined;
+    check('"Should I get married tomorrow for 90 minutes?" evaluates a genuinely 90-minute span, not the default', Boolean(card?.requested) && (new Date(card!.requested!.end).getTime() - new Date(card!.requested!.start).getTime()) === 90 * 60000);
+  }
+
   console.log(allPassed ? '\nALL ASK AURA MARRIAGE ROUTING CHECKS PASSED' : '\nSOME ASK AURA MARRIAGE ROUTING CHECKS FAILED');
   process.exit(allPassed ? 0 : 1);
 }

@@ -1,4 +1,4 @@
-import { blendStartSensitiveScore, findMuhurthams, isSupportedMuhurthamActivity, START_SENSITIVITY_PROBE_MINUTES, START_SENSITIVITY_WEIGHT, SUPPORTED_MUHURTHAM_ACTIVITY_IDS } from '../packages/recommendation/src/muhurthamFinder';
+import { blendStartSensitiveScore, evaluateMuhurthamCandidateAt, findMuhurthams, isSupportedMuhurthamActivity, START_SENSITIVITY_PROBE_MINUTES, START_SENSITIVITY_WEIGHT, SUPPORTED_MUHURTHAM_ACTIVITY_IDS } from '../packages/recommendation/src/muhurthamFinder';
 import { evaluateTimingCandidate } from '../packages/recommendation/src/timingSearch';
 import { profileFromActivity } from '../packages/recommendation/src/dailyAssistant';
 import { findActivityIntent } from '../packages/recommendation/src/personalizedTasks';
@@ -369,6 +369,106 @@ check('START_SENSITIVITY_WEIGHT keeps the full-duration score dominant (< 50%)',
 // if it were removed or mis-wired, that check would fail because the
 // reported score would equal the raw single-call score instead of the
 // blended one whenever the full-duration and probe scores actually differ.
+
+// ============================================================
+// evaluateMuhurthamCandidateAt (Ask Aura Ceremonial TIMING_CHECK Capability
+// Redirect V1) -- the single-candidate counterpart to findMuhurthams()/
+// findPersonalMuhurthams()/findSharedMuhurthams() above: "is THIS exact
+// instant valid", never a date-range search. A thin wrapper around the
+// SAME evaluateMuhurthamCandidate() internal helper the three search
+// functions already share -- these checks prove that wiring, not a second
+// eligibility/scoring implementation.
+// ============================================================
+
+{
+  // Known-good real fixture (same one PR E's friction-boundary work used):
+  // 2026-06-12 New York, Marriage, RAHU_KALAM.endMinute -- a genuinely
+  // eligible, favorably-scored ABHIJIT instant.
+  const eligibleStart = new Date('2026-06-12T16:55:00.000Z');
+  const eligible = evaluateMuhurthamCandidateAt({ activityId: 'marriage', start: eligibleStart, durationMinutes: 60, scope: 'GENERAL', context: newYorkContext });
+  check('evaluateMuhurthamCandidateAt: a real eligible instant returns eligible=true', eligible.status === 'OK' && eligible.eligible === true);
+  check('evaluateMuhurthamCandidateAt: the eligible instant is not a low/CAUTION score', eligible.status === 'OK' && eligible.score >= 7.0);
+  check('evaluateMuhurthamCandidateAt: window.start/end reflect the EXACT requested instant/duration, never moved', eligible.status === 'OK' && eligible.window.start === eligibleStart.toISOString() && new Date(eligible.window.end).getTime() - eligibleStart.getTime() === 60 * 60000);
+
+  // Score-parity proof: evaluateMuhurthamCandidateAt's score for an
+  // eligible instant must be byte-identical to what findMuhurthams()
+  // itself reports for that exact same date/instant -- i.e. this is
+  // genuinely reusing the SAME start-sensitivity-blended canonical
+  // evaluation, not a second, cheaper approximation.
+  const searchResult = findMuhurthams({ activityId: 'marriage', dateRange: { start: '2026-06-12', end: '2026-06-12' }, timePreference: 'ANY', durationMinutes: 60, limit: 5, context: newYorkContext });
+  check('evaluateMuhurthamCandidateAt score is byte-identical to findMuhurthams()\'s own bestWindow score for the same date/instant', eligible.status === 'OK' && searchResult.dates[0] && eligible.score === searchResult.dates[0].score);
+
+  // Duration overlap: a 90-minute candidate must be evaluated as the full
+  // 90-minute span, not just its start instant.
+  const ninety = evaluateMuhurthamCandidateAt({ activityId: 'marriage', start: eligibleStart, durationMinutes: 90, scope: 'GENERAL', context: newYorkContext });
+  check('evaluateMuhurthamCandidateAt: a 90-minute request evaluates a genuinely 90-minute span', ninety.status === 'OK' && new Date(ninety.window.end).getTime() - eligibleStart.getTime() === 90 * 60000);
+}
+
+{
+  // HARD-ELIGIBILITY REGRESSION (brief section 22): a real 2026 instant
+  // where generic Timing Search scores strongly positive (VERY_GOOD, no
+  // friction/Rahu/Yama/Gulika block at all) but Marriage's own authoritative
+  // avoid-Tithi rule (Krishna Chaturthi is one of Marriage's 6 sourced avoid
+  // Tithis) must still hard-reject it. This is the deterministic proof that
+  // ceremonial CHECK enforces MORE than generic Timing Search, not merely a
+  // relabeled copy of it -- exactly the gap the Natural CHECK Phrasing audit
+  // found (contradictory answers between "Is tomorrow good for marriage?"
+  // and "Should I get married tomorrow?").
+  const chaturthiStart = new Date('2026-06-04T06:11:00.000Z'); // Chennai ABHIJIT start, real Krishna Chaturthi instant
+  const marriageActivity = findActivityIntent('marriage')!;
+  const generic = evaluateTimingCandidate({ profile: profileFromActivity(marriageActivity), start: chaturthiStart, durationMinutes: 60, context: chennaiContext });
+  check('Sanity: generic Timing Search alone scores this instant strongly positive (VERY_GOOD, no friction block)', generic.label === 'VERY_GOOD' && generic.score >= 8.0 && !generic.conflicts?.some((c) => c.type === 'FRICTION_WINDOW_BLOCKED'));
+
+  const ceremonial = evaluateMuhurthamCandidateAt({ activityId: 'marriage', start: chaturthiStart, durationMinutes: 60, scope: 'GENERAL', context: chennaiContext });
+  check('evaluateMuhurthamCandidateAt correctly REJECTS the same instant (authoritative avoid Tithi), despite the strong generic score', ceremonial.status === 'OK' && ceremonial.eligible === false);
+  check('The rejection is a genuine hard exclusion, not merely a lower displayed score: window.score still reflects the real generic score (8.19), only `eligible` differs', ceremonial.status === 'OK' && ceremonial.score >= 8.0);
+}
+
+{
+  // PERSONAL scope: incomplete profile is a typed outcome, never a silent
+  // GENERAL fallback -- mirrors findPersonalMuhurthams()'s own contract.
+  const incomplete = evaluateMuhurthamCandidateAt({ activityId: 'marriage', start: new Date('2026-06-12T16:55:00.000Z'), durationMinutes: 60, scope: 'PERSONAL', context: newYorkContext });
+  check('evaluateMuhurthamCandidateAt PERSONAL with no personalContext returns PERSONAL_PROFILE_INCOMPLETE', incomplete.status === 'PERSONAL_PROFILE_INCOMPLETE');
+
+  const withPersonal = evaluateMuhurthamCandidateAt({
+    activityId: 'marriage',
+    start: new Date('2026-06-12T16:55:00.000Z'),
+    durationMinutes: 60,
+    scope: 'PERSONAL',
+    context: { ...newYorkContext, personalContext: { natalNakshatraIndex: 1, janmaNakshatra: 'Ashwini' } },
+  });
+  check('evaluateMuhurthamCandidateAt PERSONAL with a complete profile returns status OK', withPersonal.status === 'OK');
+  check('evaluateMuhurthamCandidateAt PERSONAL carries generalScore/personalScore alongside the personalized score', withPersonal.status === 'OK' && typeof withPersonal.generalScore === 'number' && typeof withPersonal.personalScore === 'number');
+}
+
+{
+  // SHARED scope: incomplete profiles are typed outcomes too -- no live
+  // SavedPerson resolution needed here (that's a DB-layer/orchestrator
+  // concern, unchanged by this PR), just the domain function's own
+  // USER_PROFILE_INCOMPLETE / SAVED_PERSON_PROFILE_INCOMPLETE contract.
+  const noUser = evaluateMuhurthamCandidateAt({ activityId: 'marriage', start: new Date('2026-06-12T16:55:00.000Z'), durationMinutes: 60, scope: 'SHARED', context: newYorkContext });
+  check('evaluateMuhurthamCandidateAt SHARED with no personalContext returns USER_PROFILE_INCOMPLETE', noUser.status === 'USER_PROFILE_INCOMPLETE');
+
+  const noPartner = evaluateMuhurthamCandidateAt({
+    activityId: 'marriage',
+    start: new Date('2026-06-12T16:55:00.000Z'),
+    durationMinutes: 60,
+    scope: 'SHARED',
+    context: { ...newYorkContext, personalContext: { natalNakshatraIndex: 1, janmaNakshatra: 'Ashwini' } },
+  });
+  check('evaluateMuhurthamCandidateAt SHARED with no partner returns SAVED_PERSON_PROFILE_INCOMPLETE', noPartner.status === 'SAVED_PERSON_PROFILE_INCOMPLETE');
+
+  const withPartner = evaluateMuhurthamCandidateAt({
+    activityId: 'marriage',
+    start: new Date('2026-06-12T16:55:00.000Z'),
+    durationMinutes: 60,
+    scope: 'SHARED',
+    context: { ...newYorkContext, personalContext: { natalNakshatraIndex: 1, janmaNakshatra: 'Ashwini' } },
+    partner: { savedPersonId: 'test-partner', name: 'Test Partner', context: { natalNakshatraIndex: 4 } },
+  });
+  check('evaluateMuhurthamCandidateAt SHARED with both profiles complete returns status OK', withPartner.status === 'OK');
+  check('evaluateMuhurthamCandidateAt SHARED carries per-participant user/person breakdowns', withPartner.status === 'OK' && Boolean(withPartner.user) && Boolean(withPartner.person) && withPartner.person?.savedPersonId === 'test-partner');
+}
 
 console.log(allPassed ? '\nALL MUHURTHAM FINDER CHECKS PASSED' : '\nSOME MUHURTHAM FINDER CHECKS FAILED');
 process.exit(allPassed ? 0 : 1);
