@@ -416,12 +416,37 @@ function parseHorizonPhrase(text: string): { horizonPhrase?: AskHorizonPhrase; c
 }
 
 // ============================================================
-// Scope (brief section 14).
+// Scope (brief section 14; owner+person pair grammar added by Ask Aura
+// Richer SHARED Grammar V1).
 // ============================================================
 
+// Owner+other-person pair grammar -- "Priya and I" / "I and Priya" /
+// "Priya and me" / "me and Priya" -- extracts ONLY the other person's name,
+// never the pronoun. Deliberately a SINGLE word after/before "and", same
+// bound as the existing "with X" pattern below (and for the identical
+// reason: a greedy multi-word capture risks swallowing trailing activity/
+// date words -- brief section 29's own required boundary test, "...for
+// Priya and me to get married?" must extract "priya", never "priya and me
+// to get married"). This single-word bound also naturally rejects a
+// three-person list ("Priya, Alex and I") rather than silently picking one
+// name (brief section 28): the comma right after "Priya" breaks the
+// single-word match, so the whole pattern fails to match at that position
+// and the text falls through to whatever it would otherwise resolve as
+// (typically UNKNOWN), never a fabricated two-person guess.
+const PAIR_GRAMMAR_RE = /\b([a-z][a-z'\-]*)\s+and\s+(?:i|me)\b|\b(?:i|me)\s+and\s+([a-z][a-z'\-]*)\b/i;
+
 function parseScope(text: string): { scope?: AskAuraScope; personNameQuery?: string } {
-  if (/\bfor us\b|\btogether\b/.test(text)) return { scope: 'SHARED' };
-  if (/\bfor me\b/.test(text)) return { scope: 'PERSONAL' };
+  // Checked FIRST, before "for me"/"for us" below (brief section 17/18):
+  // "for me and Priya" contains the literal substring "for me", and
+  // without this precedence it would wrongly resolve PERSONAL instead of
+  // SHARED -- explicit owner+other-person grammar must always win over the
+  // standalone PERSONAL/SHARED-no-name checks, never rely on accidental
+  // substring order.
+  const pairMatch = text.match(PAIR_GRAMMAR_RE);
+  if (pairMatch) {
+    const name = (pairMatch[1] ?? pairMatch[2])?.trim();
+    if (name) return { scope: 'SHARED', personNameQuery: name };
+  }
 
   // "with Anna" / "with Anna and me" -- capture the name only; resolving it
   // against the owner's own SavedPeople list happens server-side.
@@ -429,6 +454,14 @@ function parseScope(text: string): { scope?: AskAuraScope; personNameQuery?: str
   // are one first name ("Anna"), and a greedy two-word capture risks
   // swallowing a following stopword ("with Anna this weekend" -> "anna
   // this"). A two-word name is out of scope for V1's deterministic parser.
+  //
+  // Checked BEFORE the no-name SHARED markers below ("for us"/"together"/
+  // "our wedding") so a request that combines both -- "our wedding with
+  // Priya" -- resolves the explicitly given name, rather than the earlier
+  // no-name clause returning first and discarding it (Ask Aura Richer
+  // SHARED Grammar V1's fail-closed follow-up: this composition is exactly
+  // what distinguishes "a name IS available, proceed normally" from "no
+  // name at all, fail closed" below).
   const withMatch = text.match(/\bwith ([a-z][a-z'\-]*)\b/i);
   if (withMatch) {
     const name = withMatch[1].trim();
@@ -440,6 +473,20 @@ function parseScope(text: string): { scope?: AskAuraScope; personNameQuery?: str
     }
     return { scope: 'SHARED', personNameQuery: name };
   }
+
+  // "for us" / "together" / "our wedding" / "our marriage" -- all three
+  // collapse to the SAME no-name SHARED shape (Ask Aura Richer SHARED
+  // Grammar V1): there is no deterministic mechanism anywhere in this
+  // codebase to know WHICH SavedPerson the request refers to, so this can
+  // never resolve a personNameQuery on its own. "our wedding"/"our
+  // marriage" is deliberately narrow (only these two nouns, not a
+  // generalized "our <activity>" pattern). See the fail-closed guard in
+  // parseAskAuraRequest below (scope === 'SHARED' && !personNameQuery for
+  // an executable timing request -> clarification) -- a single shared
+  // invariant covering all three phrasings, rather than three separate
+  // phrase-specific guards.
+  if (/\bfor us\b|\btogether\b|\bour\s+(wedding|marriage)\b/.test(text)) return { scope: 'SHARED' };
+  if (/\bfor me\b/.test(text)) return { scope: 'PERSONAL' };
 
   return {};
 }
@@ -493,7 +540,16 @@ function detectFollowUp(text: string): AskFollowUpKind | undefined {
 
 const GOOD_RIGHT_NOW_RE = /\b(what should i do|what can i do)\b.*\b(now|right now)?\b|^what should i do\??$|^what can i do( right now)?\??$|\bwhat's good (to do )?right now\b/;
 const CHECK_VERB_RE = /\b(can i|should i|is it (ok|okay|good|fine) to|is now (a )?good time|is this a good time)\b/;
-const FIND_VERB_RE = /\bwhen should i\b|\bwhen('s| is) (the )?best time\b|\bbest time (for|to)\b|\bwhen can i\b|\bfind (a|the best) time\b/;
+// "when should i" only matches when "i" is the word literally adjacent to
+// "should" -- true for "when should I and Priya..." (a genuine substring
+// hit) but NOT for "when should Priya and I...", "when should me and
+// Priya...", "when should Priya and me..." (Ask Aura Richer SHARED
+// Grammar V1's own required matrix, brief section 6/35). The two extra
+// alternatives below cover exactly those three remaining pair orderings,
+// bounded to a single word for the other person's name (same convention
+// PAIR_GRAMMAR_RE uses) so this never spans an unrelated, much longer
+// sentence or silently picks a name out of a longer list.
+const FIND_VERB_RE = /\bwhen should i\b|\bwhen should [a-z][a-z'\-]*\s+and\s+(?:i|me)\b|\bwhen should me\s+and\s+[a-z][a-z'\-]*\b|\bwhen('s| is) (the )?best time\b|\bbest time (for|to)\b|\bwhen can i\b|\bfind (a|the best) time\b/;
 const COMPARE_VERB_RE = /\bwhich is better\b|\bcompare\b.*\btimes?\b|\b(this|that) time or\b/;
 // "auspicious" allows up to ~3 intervening words before date/time/day (Ask
 // Aura Marriage Muhurtham Routing V1) so a named activity between the two
@@ -575,6 +631,40 @@ export function parseAskAuraRequest(rawText: string, context: AskAuraParseContex
   const durationMinutes = parseDurationMinutes(text);
   const { scope, personNameQuery } = parseScope(text);
   const clockResult = parseExactClockTime(text);
+
+  // Ask Aura Richer SHARED Grammar V1 fail-closed follow-up: the CORE
+  // invariant is `scope === 'SHARED' && !personNameQuery` for an
+  // executable timing request -- never a phrase-specific check for "for
+  // us"/"together"/"our wedding" individually (all three already collapse
+  // to this exact same shape via parseScope above). "for us"/"together"/
+  // "our wedding"/"our marriage" clearly express couple intent, but there
+  // is no deterministic way anywhere in this codebase to know WHICH
+  // SavedPerson the request refers to, and guessing (first/most-recent/
+  // alphabetical SavedPerson) is explicitly forbidden -- so this must
+  // never silently execute as if GENERAL. Only short-circuits when the
+  // request ALSO carries a genuine timing signal -- an exact clock, a
+  // resolved horizon/date, an explicit time preference, or
+  // FIND/CHECK/muhurtham-search/ceremonial-best-date language -- so a
+  // non-timing phrase like "Plan our wedding" is completely unaffected and
+  // still reaches step 9's ordinary PLAN_OPEN fallback below (brief
+  // section 33 of the original brief / section 8 of this follow-up).
+  // Deliberately does NOT fire for scope === 'SHARED' WITH a
+  // personNameQuery ("with Priya", pair grammar) -- those must continue
+  // into the existing SavedPerson RESOLVED/AMBIGUOUS/NOT_FOUND resolution
+  // in the orchestrator, never be rejected here at the parser.
+  if (scope === 'SHARED' && !personNameQuery) {
+    const hasTimingSignal =
+      clockResult.status === 'VALID' ||
+      Boolean(horizonPhrase) ||
+      Boolean(timePreference) ||
+      FIND_VERB_RE.test(text) ||
+      CHECK_VERB_RE.test(text) ||
+      MUHURTHAM_SEARCH_RE.test(text) ||
+      CEREMONIAL_BEST_DATE_RE.test(text);
+    if (hasTimingSignal) {
+      return { intent: 'UNKNOWN', confidence: 'LOW' };
+    }
+  }
 
   // 1. Panchang explanation -- "what is X" / "what does X mean" where X is
   // a recognized term. Checked BEFORE Panchang query so "What is Rohini?"

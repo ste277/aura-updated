@@ -87,6 +87,79 @@ async function main() {
     const ambiguousParsed = parseAskAuraRequest('Best time for a date with Anna this weekend', { now: NOW });
     const ambiguousAskResponse = await orchestrateAskAura(ambiguousParsed, deps);
     check('Ambiguous name -> a CLARIFICATION card asking who, not a guess', ambiguousAskResponse.cards?.[0]?.type === 'CLARIFICATION');
+
+    // ============================================================
+    // Ask Aura Richer SHARED Grammar V1: owner+person pair grammar
+    // ("Priya and I" / "I and Priya" / "Priya and me" / "me and Priya")
+    // resolved end-to-end through the SAME SavedPerson resolution and
+    // canonical engines the existing "with Anna" form already uses -- no
+    // duplicated evaluator logic, no new scoring.
+    // ============================================================
+    const priya = await createSavedPerson(owner.id, { name: 'Priya', relationshipType: 'PARTNER', birthDate: '1991-03-10', birthTime: '06:15', birthTimezone: 'Asia/Kolkata' });
+    created.push(priya.id);
+
+    // Section 37 -- SHARED ceremonial CHECK: exact clock + pair grammar,
+    // resolvable partner, canonical single-candidate evaluator.
+    {
+      const parsed = parseAskAuraRequest('Is 10 AM tomorrow good for Priya and me to get married?', { now: NOW, timezone: owner.timezone });
+      check('"Is 10 AM tomorrow good for Priya and me to get married?" parses TIMING_CHECK, SHARED, priya, exactTime=10:00, marriage', parsed.intent === 'TIMING_CHECK' && parsed.scope === 'SHARED' && parsed.personNameQuery === 'priya' && parsed.exactTime === '10:00' && parsed.activityId === 'marriage');
+
+      const response = await orchestrateAskAura(parsed, deps);
+      check('Response stays TIMING_CHECK (canonical ceremonial evaluator, not a new intent)', response.intent === 'TIMING_CHECK');
+      check('Response is CHECK-shaped, never "Best dates for" (single requested candidate, not a full search)', !response.message.includes('Best dates for'));
+      const checkCard = response.cards?.[0] as { requested?: { start: string; startLabel: string } } | undefined;
+      check('Requested candidate is exactly 10:00 AM local -- the owner+partner personalization path, same evaluateMuhurthamCandidateAt() the existing SHARED ceremonial CHECK already uses', checkCard?.requested?.startLabel === '10:00 AM');
+    }
+
+    // Section 38 -- SHARED Muhurtham FIND: "best wedding date" + pair
+    // grammar + "next month" -- parser labels this TIMING_FIND (the SAME
+    // shape the pre-existing "with Priya next month" form already
+    // produces, since a resolved horizon+person hits step 6's precedence
+    // before the bare-best-date step 8b guard is ever reached), and the
+    // orchestrator's existing capability redirect + SHARED dispatch routes
+    // it through the canonical SHARED Muhurtham search, never GENERAL.
+    {
+      const parsed = parseAskAuraRequest('Find the best wedding date for Priya and me next month.', { now: NOW, timezone: owner.timezone });
+      check('"Find the best wedding date for Priya and me next month." parses TIMING_FIND, SHARED, priya, marriage', parsed.intent === 'TIMING_FIND' && parsed.scope === 'SHARED' && parsed.personNameQuery === 'priya' && parsed.activityId === 'marriage');
+
+      const response = await orchestrateAskAura(parsed, deps);
+      check('Executes through the canonical SHARED Muhurtham search (MUHURTHAM_SEARCH), never GENERAL', response.intent === 'MUHURTHAM_SEARCH');
+      const findCard = response.cards?.[0] as { scope?: string; personName?: string } | undefined;
+      check('Response card is scoped SHARED and carries Priya\'s display name', findCard?.scope === 'SHARED' && findCard?.personName === 'Priya');
+    }
+
+    // Section 39 -- GENERAL control: the exact same "best wedding date...
+    // next month" phrasing WITHOUT pair grammar must stay GENERAL, proving
+    // the SHARED routing above is driven by the parsed scope, not merely
+    // by the activity or phrasing.
+    {
+      const parsed = parseAskAuraRequest('Find the best wedding date next month.', { now: NOW, timezone: owner.timezone });
+      check('"Find the best wedding date next month." (no pair grammar) parses scope=GENERAL', parsed.scope === 'GENERAL');
+      const response = await orchestrateAskAura(parsed, deps);
+      const generalCard = response.cards?.[0] as { scope?: string } | undefined;
+      check('Executes as GENERAL (or at least never scoped SHARED)', generalCard?.scope !== 'SHARED');
+    }
+
+    // Section 36 -- pair grammar + AMBIGUOUS SavedPerson -> clarification,
+    // never a silent GENERAL or PERSONAL fallback (brief section 16/17).
+    // Reuses the two Annas already created above.
+    {
+      const parsed = parseAskAuraRequest('Is 10 AM tomorrow good for Anna and me to get married?', { now: NOW, timezone: owner.timezone });
+      check('"...for Anna and me..." parses SHARED, personNameQuery=anna', parsed.scope === 'SHARED' && parsed.personNameQuery === 'anna');
+      const response = await orchestrateAskAura(parsed, deps);
+      check('Ambiguous "Anna" -> CLARIFICATION, never a silent GENERAL/PERSONAL timing result', response.cards?.[0]?.type === 'CLARIFICATION');
+      check('Response intent stays TIMING_CHECK (a clarification WITHIN the intent, never UNKNOWN, never a fabricated GENERAL result)', response.intent === 'TIMING_CHECK');
+    }
+
+    // Section 36 -- pair grammar + NOT_FOUND SavedPerson -> clarification,
+    // never a silent GENERAL/PERSONAL fallback.
+    {
+      const parsed = parseAskAuraRequest('When should Nobody and I get married?', { now: NOW, timezone: owner.timezone });
+      check('"When should Nobody and I get married?" parses SHARED, personNameQuery=nobody', parsed.scope === 'SHARED' && parsed.personNameQuery === 'nobody');
+      const response = await orchestrateAskAura(parsed, deps);
+      check('Unknown name "Nobody" -> a clarification message, never a silent GENERAL Muhurtham search', response.message.toLowerCase().includes("couldn't find"));
+      check('Never silently executes as GENERAL (no OPEN_MUHURTHAM/dates card for an unresolved partner)', response.intent !== 'MUHURTHAM_SEARCH' || !('dates' in (response.cards?.[0] ?? {})));
+    }
   } finally {
     for (const id of created) {
       await deleteSavedPerson(owner.id, id).catch(() => {});
