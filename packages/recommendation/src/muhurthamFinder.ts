@@ -780,6 +780,62 @@ export function collectPanchangaTransitionCandidateMinutes(
   return [...minutes];
 }
 
+/**
+ * Muhurtham Solar Score-Boundary Candidate Augmentation V1 (responds to the
+ * "Marriage 60-Minute Candidate Scoring-Density False Zero" audit): a
+ * sibling candidate source to collectPanchangaTransitionCandidateMinutes()
+ * above, deliberately kept separate since its subject is solar-window
+ * POSITIONING, not a Panchanga factor -- folding it into that function
+ * would make its name misleading.
+ *
+ * evaluateTimingCandidate() scores a requested [start, start+duration) span
+ * via scoreContinuousBlock() (dailyAssistant.ts), which segments the span
+ * ONLY at solar-window boundaries (BRAHMA/ABHIJIT/RAHU_KALAM/GULIKA/YAMA/
+ * NEUTRAL) and duration-weights each segment's own score. BRAHMA and
+ * ABHIJIT are typically ~48-50 minutes wide -- narrower than a 60-minute
+ * request -- so a candidate starting exactly at either window's own start
+ * (already proposed by buildSlotCandidates()) can never fully contain it;
+ * the audit proved the score is then a continuously-varying weighted
+ * average that peaks in an exact, flat plateau across
+ * [windowEnd - durationMinutes, windowStart] -- the range of starts that DO
+ * fully contain the window. `windowStart` is already a candidate; this adds
+ * the other end of that same plateau, `windowEnd - durationMinutes`, using
+ * the identical closed-form-subtraction shape already established for
+ * Tithi/Nakshatra/Yoga/Karana's own latest-valid-start candidates.
+ *
+ * Deliberately generic: gated only on window TYPE (BRAHMA/ABHIJIT are
+ * universally favorable solar windows, not activity-specific data) and on
+ * `windowWidth < durationMinutes` (a window already fully containable from
+ * its own start needs no second candidate) -- never on activityId or any
+ * rule-pack coverage flag, so every activity sharing this candidate path
+ * benefits identically. RAHU_KALAM/GULIKA/YAMA/NEUTRAL are deliberately
+ * excluded (different semantics -- friction windows to avoid, or an
+ * unbounded baseline with no "full capture" concept). Reuses the exact
+ * solar windows scoreContinuousBlock() itself consumes (no new astronomy),
+ * and the same day-bounds/dedup discipline as every other candidate source
+ * here: a derived minute outside [0,1440) is skipped (no cross-day
+ * wrapping), and `existingMinutes` (already duration-aware per Candidate
+ * Discovery Hardening V1's dedup fix) prevents a duplicate evaluation.
+ */
+export function collectSolarScoreBoundaryCandidateMinutes(
+  solarSlotCandidates: SlotCandidate[],
+  durationMinutes: number,
+  existingMinutes: Set<number>
+): number[] {
+  const minutes: number[] = [];
+  for (const slot of solarSlotCandidates) {
+    if (slot.type !== 'BRAHMA' && slot.type !== 'ABHIJIT') continue;
+    const windowWidth = slot.endMinute - slot.startMinute;
+    if (windowWidth >= durationMinutes) continue;
+    const candidateMinute = slot.endMinute - durationMinutes;
+    if (candidateMinute < 0 || candidateMinute >= 1440) continue;
+    if (existingMinutes.has(candidateMinute)) continue;
+    minutes.push(candidateMinute);
+    existingMinutes.add(candidateMinute);
+  }
+  return minutes;
+}
+
 function findBestWindowsForDate(
   profile: TaskProfile,
   dateStr: string,
@@ -816,6 +872,13 @@ function findBestWindowsForDate(
     solarSlotCandidates.filter((slot) => slot.endMinute - slot.startMinute >= durationMinutes).map((slot) => slot.startMinute)
   );
   const transitionMinutes = collectPanchangaTransitionCandidateMinutes(dateStr, context, durationMinutes, classification, existingMinutes);
+  // Muhurtham Solar Score-Boundary Candidate Augmentation V1: sibling
+  // source to the Panchanga transition walk above -- see
+  // collectSolarScoreBoundaryCandidateMinutes()'s own doc comment. Feeds
+  // the SAME `existingMinutes` dedup set (already duration-aware), so it
+  // can never duplicate a solar/Tithi/Nakshatra/Yoga/Karana candidate
+  // already claiming the same minute.
+  const solarScoreBoundaryMinutes = collectSolarScoreBoundaryCandidateMinutes(solarSlotCandidates, durationMinutes, existingMinutes);
   // endMinute: 1440 (end of local day) rather than a derived "containing
   // window" boundary -- deliberately generous. type/label are placeholders:
   // evaluateMuhurthamCandidate() -> evaluateTimingCandidate() independently
@@ -825,7 +888,7 @@ function findBestWindowsForDate(
   // the SlotCandidate that triggered evaluation, only its own recomputed
   // `start`. So these fields are inert here (confirmed by tracing
   // evaluateTimingCandidate's implementation) -- see brief section 14.
-  const transitionSlotCandidates: SlotCandidate[] = transitionMinutes.map((startMinute) => ({ startMinute, endMinute: 1440, type: 'NEUTRAL', label: 'Neutral Flow' }));
+  const transitionSlotCandidates: SlotCandidate[] = [...transitionMinutes, ...solarScoreBoundaryMinutes].map((startMinute) => ({ startMinute, endMinute: 1440, type: 'NEUTRAL', label: 'Neutral Flow' }));
   const slotCandidates = [...solarSlotCandidates, ...transitionSlotCandidates];
 
   const candidates: SampledCandidate[] = [];
