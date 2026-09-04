@@ -27,7 +27,7 @@ import { findEverydaySharedTiming } from '../../../packages/recommendation/src/e
 import { getActionCards } from '../../../packages/recommendation/src/actionCards';
 import { FULL_ACTIVITY_CATALOG } from '../../../packages/recommendation/src/personalizedTasks';
 import { handleMuhurthamSearchBody, handleSharedMuhurthamSearchBody } from './muhurthamSearchRequest';
-import { MuhurthamDateCandidate, MuhurthamSearchResult } from '../../../packages/recommendation/src/muhurthamFinder';
+import { isSupportedMuhurthamActivity, MuhurthamDateCandidate, MuhurthamSearchResult } from '../../../packages/recommendation/src/muhurthamFinder';
 import { formatMuhurtaReason } from '../../../packages/muhurta/src/muhurtaReasonFormat';
 import { getPanchangForDate } from '../../../packages/panchang/src/panchangDay';
 import { natalContextFromBirthDetails } from './natalContext';
@@ -287,6 +287,20 @@ export async function orchestrateAskAura(parsed: ParsedAskAuraRequest, deps: Ask
     case 'TIMING_CHECK':
       return handleTimingCheck(parsed, deps);
     case 'TIMING_FIND':
+      // Ask Aura Marriage Muhurtham Routing V1 -- capability-driven
+      // redirect: ANY resolved activity that is canonically Muhurtham-
+      // eligible (isSupportedMuhurthamActivity, the same capability check
+      // the parser's own MUHURTHAM_SEARCH branch already uses) executes
+      // through the canonical Muhurtham path, never plain Timing Search --
+      // deliberately NOT `parsed.activityId === 'marriage'`, so this covers
+      // every present and future Muhurtham-eligible activity (griha-pravesh,
+      // start-journey, financial-decision, business-start, etc.) the same
+      // way. The parser is free to keep labeling this TIMING_FIND (brief:
+      // "execution correctness matters more than intent-label
+      // normalization") -- only EXECUTION is redirected here.
+      if (parsed.activityId && isSupportedMuhurthamActivity(parsed.activityId)) {
+        return handleMuhurthamSearch(parsed, deps);
+      }
       return handleTimingFind(parsed, deps);
     case 'TIMING_COMPARE':
       return handleTimingCompare(parsed, deps);
@@ -571,7 +585,7 @@ async function handleMuhurthamSearch(parsed: ParsedAskAuraRequest, deps: AskAura
       person.birthTimezone
     );
     const outcome = handleSharedMuhurthamSearchBody(
-      { activityId: parsed.activityId, scope: 'SHARED', dateRange, savedPersonId: person.id },
+      { activityId: parsed.activityId, scope: 'SHARED', dateRange, durationMinutes: parsed.durationMinutes, savedPersonId: person.id },
       deps.context,
       { savedPersonId: person.id, name: person.name, context: partnerContext }
     );
@@ -590,7 +604,7 @@ async function handleMuhurthamSearch(parsed: ParsedAskAuraRequest, deps: AskAura
   }
 
   const scope = parsed.scope === 'PERSONAL' ? 'PERSONAL' : 'GENERAL';
-  const outcome = handleMuhurthamSearchBody({ activityId: parsed.activityId, scope, dateRange }, deps.context);
+  const outcome = handleMuhurthamSearchBody({ activityId: parsed.activityId, scope, dateRange, durationMinutes: parsed.durationMinutes }, deps.context);
   if (!outcome.ok) return { intent: 'MUHURTHAM_SEARCH', message: outcome.error, context: parsed };
   const result = outcome.result as MuhurthamSearchResult;
   const dates = 'dates' in result ? result.dates : [];

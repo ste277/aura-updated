@@ -181,22 +181,26 @@ const EXTENDED_ACTIVITY_CATALOG: ActivityProfile[] = [
   // so this is defense-in-depth, not the only thing preventing it.
   { id: 'engagement', title: 'Engagement Ceremony', description: 'Choose a supportive window for an engagement or ring ceremony.', category: 'RELATIONSHIP', nature: 'CONNECT', recommendedWindowTypes: ['ABHIJIT'], acceptableWindowTypes: ['NEUTRAL'], avoidWindowTypes: ['RAHU_KALAM', 'YAMA'], significance: 'HIGH', requiresFreshStart: true, aliases: ['engagement', 'get engaged', 'engagement ceremony', 'ring ceremony', 'proposal ceremony'], icon: '💍' },
   { id: 'griha-pravesh', title: 'Griha Pravesh', description: 'Choose a supportive window for a housewarming / home-entry ceremony.', category: 'NEW_BEGINNING', nature: 'INITIATE', recommendedWindowTypes: ['ABHIJIT'], acceptableWindowTypes: ['GULIKA', 'NEUTRAL'], avoidWindowTypes: ['RAHU_KALAM', 'YAMA'], significance: 'HIGH', requiresFreshStart: true, aliases: ['griha pravesh', 'housewarming', 'house warming ceremony', 'move into new home', 'home entry ceremony'], icon: '🏡' },
-  // Marriage Muhurtham Foundation V1 (PR A): `aliases` is DELIBERATELY EMPTY
-  // in this PR -- findActivityIntent() (below) matches purely by substring
-  // against this array, and Marriage Muhurtham is not yet complete enough
-  // to expose (see activityDefinitions.ts's `marriage` entry / PR B).
-  // Populating aliases like "marriage"/"wedding" now would change Ask
-  // Aura's current (admittedly buggy, e.g. "best marriage date" -> Dating)
-  // routing behavior as an unintended side effect of registering this
-  // catalog entry -- explicitly out of scope for this PR, deferred to when
-  // canonical Marriage Muhurtham support is complete.
+  // Marriage Muhurtham Foundation V1 (PR A) originally left `aliases` empty
+  // deliberately -- findActivityIntent() (below) matches purely by
+  // substring against this array, and populating "marriage"/"wedding" then
+  // would have changed Ask Aura's routing (e.g. "best marriage date" ->
+  // Dating) as an unintended side effect while Marriage Muhurtham was still
+  // incomplete. Marriage Muhurtham is now canonically SUPPORTED (see
+  // isSupportedMuhurthamActivity in muhurthamFinder.ts) and the Ask Aura
+  // Marriage Muhurtham Routing V1 audit determined the smallest safe fix
+  // is to populate this array like any other activity -- no second,
+  // Ask-Aura-specific vocabulary list. The one collision this creates
+  // (against `dating`'s own bare "date" alias above) is resolved generically
+  // by findActivityIntent()'s existing longest-alias-wins ordering, not by
+  // a special case here.
   // Marriage Muhurtham Required Eligibility V1: description deliberately
   // says "core ceremony", not "wedding" alone -- a Marriage Muhurtham
   // result is a narrow critical-rite window (traditionally the Saptapadi/
   // core rite instant), never the duration of the whole event, and the
   // smallest necessary copy change here prevents a 30-60 min result being
   // misread as "how long your wedding is." No Finder redesign.
-  { id: 'marriage', title: 'Marriage', description: 'Find a suitable window for the core ceremony.', category: 'RELATIONSHIP', nature: 'CONNECT', recommendedWindowTypes: ['ABHIJIT'], acceptableWindowTypes: ['NEUTRAL'], avoidWindowTypes: ['RAHU_KALAM', 'YAMA'], significance: 'HIGH', requiresFreshStart: true, aliases: [], icon: '💒' },
+  { id: 'marriage', title: 'Marriage', description: 'Find a suitable window for the core ceremony.', category: 'RELATIONSHIP', nature: 'CONNECT', recommendedWindowTypes: ['ABHIJIT'], acceptableWindowTypes: ['NEUTRAL'], avoidWindowTypes: ['RAHU_KALAM', 'YAMA'], significance: 'HIGH', requiresFreshStart: true, aliases: ['marriage', 'wedding', 'get married', 'getting married', 'marry', 'married', 'marriage ceremony', 'wedding ceremony'], icon: '💒' },
 
   // -- Product Structure V2: everyday moments (brief section 5) -- LIGHT/
   // STANDARD depth only (activityDefinitions.ts's ACTIVITY_METADATA below),

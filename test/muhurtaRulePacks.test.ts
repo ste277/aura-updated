@@ -318,7 +318,24 @@ check(
 const sampleDate = new Date(Date.UTC(2026, 6, 28, 6, 45, 0));
 let allUnaffectedActivitiesMatch = true;
 for (const def of ACTIVITY_DEFINITIONS) {
-  if (def.id === 'griha-pravesh') continue; // the one activity this PR intentionally changes real scoring for
+  // griha-pravesh: the one activity THIS (muhurtaRulePacks) PR intentionally
+  // changes real scoring for.
+  //
+  // marriage: excluded starting with Ask Aura Marriage Muhurtham Routing
+  // V1 -- not because that PR touched any engine/rule-pack file (it did
+  // not), but because `findActivityIntent('marriage')` only started
+  // resolving once that PR populated `marriage.aliases` (previously `[]`,
+  // deliberately, while Marriage Muhurtham was incomplete). Before that,
+  // this loop's own `if (!activity) continue` silently skipped marriage
+  // entirely, hiding a pre-existing, correct fact about the engine:
+  // Marriage already has a genuinely sourced, IMPLEMENTED Nakshatra/Tithi/
+  // Yoga/Karana rule pack (see test/marriageMuhurthamFoundation.test.ts
+  // checks 2b-2e), so passing `classification` for marriage is NOT a
+  // no-op -- it surfaces a real NAKSHATRA_SUPPORTIVE reason ("Uttara
+  // Ashadha supports an auspicious union") the family-base fallback
+  // cannot produce, exactly the same kind of difference griha-pravesh's
+  // own exclusion above already documents.
+  if (def.id === 'griha-pravesh' || def.id === 'marriage') continue;
   const activity = findActivityIntent(def.id.replace(/-/g, ' '));
   if (!activity) continue;
   for (const windowType of ['ABHIJIT', 'RAHU_KALAM', 'NEUTRAL'] as const) {
@@ -329,7 +346,7 @@ for (const def of ACTIVITY_DEFINITIONS) {
     }
   }
 }
-check('Passing `classification` is a no-op for every activity except griha-pravesh (Journey/Financial Decision/New Beginning/Business Start/Property Purchase/Engagement all unaffected)', allUnaffectedActivitiesMatch);
+check('Passing `classification` is a no-op for every activity except griha-pravesh and marriage (Journey/Financial Decision/New Beginning/Business Start/Property Purchase/Engagement all unaffected)', allUnaffectedActivitiesMatch);
 
 const legacyFamilies = ['DEEP_WORK', 'WORKOUT', 'LEARNING', 'MEDITATION', 'RELATIONSHIP', 'JOURNEY_START', 'SOCIAL', 'MEAL', 'FINANCE', 'NEW_BEGINNING', 'ADMIN', 'WELLBEING', 'FOCUSED_WORK'] as const;
 let allLegacyFamiliesMatch = true;

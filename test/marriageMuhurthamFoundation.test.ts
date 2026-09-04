@@ -279,14 +279,26 @@ check('27. MuhurthamFinderView\'s activity dropdown is driven entirely by SUPPOR
 check('27b. MuhurthamFinderView.tsx source contains no hardcoded reference to a "marriage" activity id, Partner A/B UI, or a Marriage-specific screen', !/'marriage'|"marriage"|Partner A|Partner B/.test(finderViewSource));
 
 // ============================================================
-// 28. Ask Aura does not newly route to incomplete Marriage support.
+// 28. Ask Aura Marriage routing (originally: "does not newly route to
+// incomplete Marriage support" -- Marriage Muhurtham Foundation V1's own
+// aliases:[] was deliberate ONLY while Marriage was incomplete, per that
+// PR's own catalog comment). Marriage Muhurtham is now canonically
+// SUPPORTED (isSupportedMuhurthamActivity('marriage') === true, confirmed
+// by the Ask Aura Marriage Muhurtham Routing V1 audit), and that PR
+// populated `marriage.aliases` and fixed the "best marriage date" ->
+// dating collision generically (via the existing longest-alias-wins
+// ordering in findActivityIntent(), no special-case marriage/dating
+// branch). These checks are updated -- not deleted -- to assert the new,
+// intended behavior; see test/askAuraIntentParser.test.ts and
+// test/askAuraOrchestrator.test.ts for that PR's own dedicated regression
+// coverage.
 // ============================================================
 
-check('28. Marriage catalog entry has an EMPTY aliases array (cannot be matched by findActivityIntent at all)', FULL_ACTIVITY_CATALOG.find((a) => a.id === 'marriage')?.aliases.length === 0);
-check('28b. findActivityIntent("marriage") does not resolve to the marriage activity (no alias to match)', findActivityIntent('marriage')?.id !== 'marriage');
-check('28c. findActivityIntent("wedding") does not resolve to the marriage activity', findActivityIntent('wedding')?.id !== 'marriage');
-check('28d. The known pre-existing "best marriage date" -> dating misroute is UNCHANGED by this PR (not fixed, not made worse)', findActivityIntent('best marriage date')?.id === 'dating');
-check('28e. "find a wedding muhurtham" still does not resolve to marriage', findActivityIntent('find a wedding muhurtham')?.id !== 'marriage');
+check('28. Marriage catalog entry now has a POPULATED aliases array (Ask Aura Marriage Muhurtham Routing V1 -- Marriage is canonically supported, so it is no longer deliberately unreachable)', (FULL_ACTIVITY_CATALOG.find((a) => a.id === 'marriage')?.aliases.length ?? 0) > 0);
+check('28b. findActivityIntent("marriage") now resolves to the marriage activity', findActivityIntent('marriage')?.id === 'marriage');
+check('28c. findActivityIntent("wedding") now resolves to the marriage activity', findActivityIntent('wedding')?.id === 'marriage');
+check('28d. The known pre-existing "best marriage date" -> dating misroute is FIXED: it now resolves to marriage, not dating', findActivityIntent('best marriage date')?.id === 'marriage');
+check('28e. "find a wedding muhurtham" now resolves to marriage', findActivityIntent('find a wedding muhurtham')?.id === 'marriage');
 
 // ============================================================
 // 29. No schema/migration changes.
