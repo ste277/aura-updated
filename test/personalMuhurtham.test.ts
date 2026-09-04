@@ -133,19 +133,25 @@ if (completeProfile.status === 'OK') {
   check('PERSONAL re-ranks relative to GENERAL for the same activity/range/natal nakshatra (genuine re-ranking, not just a label change)', JSON.stringify(generalOrderTop8) !== JSON.stringify(personalOrderTop8));
 
   // Locked-in fixture: for start-journey, Sep 2026, Chennai, natal nakshatra
-  // Ashwini (index 1), 2026-09-07 (Tara=Vadha/CAUTION) ranks BELOW
-  // 2026-09-23 (Tara=Kshema/SUPPORT) in PERSONAL despite 09-07 having a
+  // Ashwini (index 1), 2026-09-05 (Tara=CAUTION) ranks BELOW
+  // 2026-09-28 (Tara=SUPPORT) in PERSONAL despite 09-05 having a
   // higher GENERAL score -- observed directly via probing, locked in here
   // as a regression fixture. (Re-picked from the original 09-07/09-17 pair,
-  // which no longer flips under Inauspicious Period Precedence Fix V1's
-  // corrected scores -- same qualitative CAUTION-vs-SUPPORT Tara story,
-  // just a different pair of real dates.)
-  const sep07 = completeProfile.dates.find((d) => d.date === '2026-09-07');
-  const sep23 = completeProfile.dates.find((d) => d.date === '2026-09-23');
-  const sep07General = generalNoPersonal.dates.find((d) => d.date === '2026-09-07');
-  const sep23General = generalNoPersonal.dates.find((d) => d.date === '2026-09-23');
-  check('Regression fixture: 2026-09-07 generally outscores 2026-09-23', Boolean(sep07General && sep23General && sep07General.score > sep23General.score));
-  check('Regression fixture: PERSONAL flips this -- 2026-09-23 (Tara SUPPORT) outranks 2026-09-07 (Tara CAUTION) once personalized', Boolean(sep07 && sep23 && sep23.combinedScore > sep07.combinedScore));
+  // which no longer flipped under Inauspicious Period Precedence Fix V1's
+  // corrected scores, then re-picked a second time to the 09-07/09-23 pair;
+  // that pair in turn stopped flipping under Muhurtham Gated Friction-End
+  // Eligibility Boundaries (PR E) -- 09-07's own GENERAL score rose from a
+  // genuinely better, previously-unreachable friction-boundary candidate
+  // (YAMA.endMinute=728, overlapping ABHIJIT[702,752)), so even after the
+  // Tara-CAUTION penalty it now outranks 09-23. Re-picked a third time to
+  // the 09-05/09-28 pair, which is unaffected by that candidate source and
+  // still tells the same qualitative CAUTION-vs-SUPPORT Tara story.)
+  const sep05 = completeProfile.dates.find((d) => d.date === '2026-09-05');
+  const sep28 = completeProfile.dates.find((d) => d.date === '2026-09-28');
+  const sep05General = generalNoPersonal.dates.find((d) => d.date === '2026-09-05');
+  const sep28General = generalNoPersonal.dates.find((d) => d.date === '2026-09-28');
+  check('Regression fixture: 2026-09-05 generally outscores 2026-09-28', Boolean(sep05General && sep28General && sep05General.score > sep28General.score));
+  check('Regression fixture: PERSONAL flips this -- 2026-09-28 (Tara SUPPORT) outranks 2026-09-05 (Tara CAUTION) once personalized', Boolean(sep05 && sep28 && sep28.combinedScore > sep05.combinedScore));
 }
 
 console.log(allPassed ? '\nALL PERSONAL MUHURTHAM CHECKS PASSED' : '\nSOME PERSONAL MUHURTHAM CHECKS FAILED');
