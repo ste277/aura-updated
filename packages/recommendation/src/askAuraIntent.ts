@@ -236,8 +236,23 @@ const GOOD_RIGHT_NOW_RE = /\b(what should i do|what can i do)\b.*\b(now|right no
 const CHECK_VERB_RE = /\b(can i|should i|is it (ok|okay|good|fine) to|is now (a )?good time|is this a good time)\b/;
 const FIND_VERB_RE = /\bwhen should i\b|\bwhen('s| is) (the )?best time\b|\bbest time (for|to)\b|\bwhen can i\b|\bfind (a|the best) time\b/;
 const COMPARE_VERB_RE = /\bwhich is better\b|\bcompare\b.*\btimes?\b|\b(this|that) time or\b/;
-const MUHURTHAM_SEARCH_RE = /\bgood dates?\b|\bauspicious (date|time|day)s?\b|\bfavorable dates?\b|\bmuhurtham\b|\bmuhurta\b(?!\s*bala)/;
+// "auspicious" allows up to ~3 intervening words before date/time/day (Ask
+// Aura Marriage Muhurtham Routing V1) so a named activity between the two
+// -- "an auspicious WEDDING date" -- still matches; the original pattern
+// only matched them directly adjacent ("an auspicious date"). Bounded
+// (not `.*`) so this never spans an unrelated, much longer sentence.
+const MUHURTHAM_SEARCH_RE = /\bgood dates?\b|\bauspicious\b(?:\s+\w+){0,3}\s+(date|time|day)s?\b|\bfavorable dates?\b|\bmuhurtham\b|\bmuhurta\b(?!\s*bala)/;
 const PANCHANG_QUERY_RE = /\bwhen is\b|\bwhat('s| is) (today|tomorrow)'?s? panchang\b|\bwhat('s| is) (today|tomorrow)'?s? (nakshatra|tithi|yoga|karana|vara)\b|\brahu kalam\b|\byamagandam\b|\bgulika kalam\b/;
+// Ask Aura Bare Ceremonial "Best Date" Routing follow-up: a bare
+// short phrase asking for a "best/good/auspicious/favorable
+// date/time/day" -- e.g. "Best marriage date." -- with no find/check
+// verb and no adjacency to MUHURTHAM_SEARCH_RE's own direct patterns
+// above. Bounded (not `.*`), same style as MUHURTHAM_SEARCH_RE's own
+// "auspicious ... date" widening, so this never spans an unrelated,
+// much longer sentence. Used ONLY as a narrow, capability-gated guard
+// immediately before the generic bare-activity PLAN_OPEN fallback (see
+// step 8b below) -- never checked this early in the precedence chain.
+const CEREMONIAL_BEST_DATE_RE = /\b(best|good|auspicious|favorable)\b(?:\s+\w+){0,3}\s+(dates?|times?|days?)\b/;
 
 export interface AskAuraParseContext {
   now: Date;
@@ -273,9 +288,50 @@ export function parseAskAuraRequest(rawText: string, context: AskAuraParseContex
     }
   }
 
+  // Shared by the precedence guard below and by step 3 proper: only builds
+  // a MUHURTHAM_SEARCH result when the resolved activity is actually
+  // Muhurtham-eligible (brief section 13: "Do not route casual activities
+  // through Muhurtham Finder" -- this is the section 37 regression test).
+  // Carries `durationMinutes` through (Ask Aura Marriage Muhurtham Routing
+  // V1): duration was already parsed above but was previously dropped for
+  // this intent, so an explicit "90 minute marriage muhurtham" request
+  // silently lost its duration -- the canonical Muhurtham path already
+  // accepts and preserves an explicit duration when supplied, same as any
+  // other Muhurtham-eligible activity.
+  const buildMuhurthamSearchIfEligible = (): ParsedAskAuraRequest | undefined => {
+    const resolved = resolveActivity(text);
+    if (!resolved.activityId || !isSupportedMuhurthamActivity(resolved.activityId)) return undefined;
+    return {
+      intent: 'MUHURTHAM_SEARCH',
+      confidence: 'HIGH',
+      activityId: resolved.activityId,
+      scope: scope ?? 'GENERAL',
+      personNameQuery,
+      durationMinutes,
+      horizonPhrase: horizonPhrase ?? 'NEXT_MONTH',
+      customDate,
+    };
+  };
+
   // 2. Panchang query -- "when is Rahu Kalam tomorrow", "what's today's
   // nakshatra". Checked before activity-based intents so a Panchang-window
   // NAME (Rahu Kalam, Gulika) is never misread as an activity.
+  //
+  // EXCEPTION (Ask Aura Marriage Muhurtham Routing V1): when the text ALSO
+  // matches MUHURTHAM_SEARCH_RE (genuine muhurtham/auspicious-date search
+  // language -- not merely a Panchang-window name) AND resolves to a
+  // Muhurtham-eligible activity, the specific ceremonial timing request
+  // wins over the generic Panchang query -- e.g. "When is a good muhurtham
+  // for my wedding?" must become MUHURTHAM_SEARCH(activityId=marriage), not
+  // PANCHANG_QUERY. Deliberately narrow: it requires BOTH a genuine
+  // search-language match AND a resolved, capability-checked activity, so
+  // a plain "When is Rahu Kalam?" (no eligible activity, no muhurtham/
+  // auspicious-date language beyond the window's own name) is completely
+  // unaffected and still returns PANCHANG_QUERY below.
+  if (PANCHANG_QUERY_RE.test(text) && MUHURTHAM_SEARCH_RE.test(text)) {
+    const muhurthamSearch = buildMuhurthamSearchIfEligible();
+    if (muhurthamSearch) return muhurthamSearch;
+  }
   if (PANCHANG_QUERY_RE.test(text)) {
     return {
       intent: 'PANCHANG_QUERY',
@@ -287,21 +343,10 @@ export function parseAskAuraRequest(rawText: string, context: AskAuraParseContex
   }
 
   // 3. Muhurtham search -- only when the resolved activity is actually
-  // Muhurtham-eligible (brief section 13: "Do not route casual activities
-  // through Muhurtham Finder" -- this is the section 37 regression test).
+  // Muhurtham-eligible (see buildMuhurthamSearchIfEligible above).
   if (MUHURTHAM_SEARCH_RE.test(text)) {
-    const resolved = resolveActivity(text);
-    if (resolved.activityId && isSupportedMuhurthamActivity(resolved.activityId)) {
-      return {
-        intent: 'MUHURTHAM_SEARCH',
-        confidence: 'HIGH',
-        activityId: resolved.activityId,
-        scope: scope ?? 'GENERAL',
-        personNameQuery,
-        horizonPhrase: horizonPhrase ?? 'NEXT_MONTH',
-        customDate,
-      };
-    }
+    const muhurthamSearch = buildMuhurthamSearchIfEligible();
+    if (muhurthamSearch) return muhurthamSearch;
     // "Good dates for coffee" -- the search-y phrasing matched, but coffee
     // isn't Muhurtham-eligible. Fall through to ordinary timing intents
     // below (brief section 37's explicit regression case) rather than
@@ -389,6 +434,25 @@ export function parseAskAuraRequest(rawText: string, context: AskAuraParseContex
       scope: scope ?? 'GENERAL',
       personNameQuery,
     };
+  }
+
+  // 8b. A bare recognized, Muhurtham-eligible activity phrased as a
+  // "best/good/auspicious/favorable date/time/day" request, with no other
+  // find/check verb or timing signal at all (Ask Aura Bare Ceremonial
+  // "Best Date" Routing follow-up) -- e.g. "Best marriage date." Without
+  // this, such a phrase would otherwise fall all the way to step 9's
+  // generic PLAN_OPEN default below, even though the wording is clearly
+  // asking for a timing search, not just "open Plan with this activity."
+  // Checked AFTER step 8's own explicit-signal TIMING_FIND branch (so it
+  // never overrides an already-more-specific match) and capability-gated
+  // via isSupportedMuhurthamActivity -- e.g. "Best time for a date."
+  // (dating, not eligible) never reaches this branch, so dating's own
+  // PLAN_OPEN/TIMING_FIND behavior is completely unaffected. Reuses the
+  // SAME buildMuhurthamSearchIfEligible() helper step 3 already uses,
+  // not a second construction path.
+  if (bareActivity && isSupportedMuhurthamActivity(bareActivity.id) && CEREMONIAL_BEST_DATE_RE.test(text)) {
+    const muhurthamSearch = buildMuhurthamSearchIfEligible();
+    if (muhurthamSearch) return muhurthamSearch;
   }
 
   // 9. A bare recognized activity with no intent verb or timing signal at
