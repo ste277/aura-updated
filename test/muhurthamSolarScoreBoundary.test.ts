@@ -281,16 +281,22 @@ function searchOneDay(activityId: string, dateStr: string, context: DailyAssista
 }
 
 // ============================================================
-// 16. KNOWN RESIDUAL -- 2026-06-12 New York remains unfixed by this PR
-// (Abhijit/Rahu-Kalam boundary overlap; the true optimum sits immediately
-// after the friction window ends, not at a favorable-window boundary).
-// Explicitly out of scope per the audit -- documented here as a known,
-// intentional limitation, not silently left unexplained.
+// 16. KNOWN RESIDUAL (historical, now resolved) -- 2026-06-12 New York was
+// left unfixed by THIS PR (Solar Score-Boundary Candidate Augmentation V1):
+// the true optimum there sits at RAHU_KALAM.endMinute, an ELIGIBILITY
+// boundary (not a scoring-plateau boundary), which this PR's mechanism does
+// not add. That residual was subsequently audited (Muhurtham Friction-
+// Boundary Residual audit) and fixed by Muhurtham Gated Friction-End
+// Eligibility Boundaries (PR E) -- see test/muhurthamFrictionBoundary.test.ts
+// for its dedicated regression suite, including this exact date/duration.
+// This assertion is updated (not deleted) to document that this PR's own
+// scope genuinely stopped here, and a later, deliberately separate PR
+// picked up the remainder.
 // ============================================================
 
 {
   const result = searchOneDay('marriage', '2026-06-12', newYork, 60);
-  check('2026-06-12 New York 60min remains a known residual (NOT fixed by this PR -- see the audit\'s explicit out-of-scope decision)', result.dates.length === 0);
+  check('2026-06-12 New York 60min: no longer a residual -- resolved by Muhurtham Gated Friction-End Eligibility Boundaries (PR E), out of this PR\'s own scope', result.dates.length > 0);
 }
 
 console.log(allPassed ? '\nALL MUHURTHAM SOLAR SCORE-BOUNDARY CHECKS PASSED' : '\nSOME MUHURTHAM SOLAR SCORE-BOUNDARY CHECKS FAILED');

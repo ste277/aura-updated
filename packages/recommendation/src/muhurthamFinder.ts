@@ -836,6 +836,74 @@ export function collectSolarScoreBoundaryCandidateMinutes(
   return minutes;
 }
 
+/**
+ * Muhurtham Gated Friction-End Eligibility Boundary Candidates V1 (responds
+ * to the "Muhurtham Friction-Boundary Residual" audit): a THIRD sibling
+ * candidate source, deliberately separate from both
+ * collectPanchangaTransitionCandidateMinutes() (Panchanga-factor
+ * boundaries) and collectSolarScoreBoundaryCandidateMinutes() (PR D's
+ * duration-relative score-boundary plateau) -- this one's subject is
+ * neither: it is an ELIGIBILITY boundary, not a scoring one.
+ *
+ * RAHU_KALAM/YAMA/GULIKA are hard commencement-blocking half-open
+ * intervals for timing-sensitive activities (spanOverlapsInauspiciousCommencementWindow
+ * / scoreContinuousBlock's own FRICTION_WINDOW_BLOCKED rejection) -- so
+ * `frictionWindow.endMinute` is, structurally, an AVOID->SAFE eligibility
+ * transition, the exact same shape as Tithi/Nakshatra/Yoga/Karana's own
+ * transition-start candidates (collectPanchangaTransitionCandidateMinutes
+ * above), just for a friction window instead of a Panchanga factor value --
+ * and simpler, since friction windows are already fully known
+ * (buildSlotCandidates() output), needing no astronomical search at all.
+ *
+ * The audit found this matters ONLY when the friction window strictly
+ * overlaps a favorable BRAHMA/ABHIJIT window: a candidate placed AT the
+ * favorable window's own start (already proposed elsewhere) can be
+ * friction-blocked if the friction window extends past it, silently
+ * discarding that entire favorable window's value -- frictionEnd is then
+ * the first legal instant that can still capture whatever part of the
+ * favorable window remains. A 540-combo/1620-check sweep found 18 genuine
+ * misses (spanning 3 dates, 4 locations, both Rahu and Yama, 5 activities),
+ * ALL 18 inside this exact overlap condition -- and, just as importantly,
+ * ZERO genuine misses among 966 eligible friction-end candidates with no
+ * nearby favorable window. That 14x noise-to-signal ratio is why this is
+ * gated on STRICT overlap (`a.startMinute < b.endMinute && b.startMinute <
+ * a.endMinute`, never `<=`) rather than unconditional or "nearby" --
+ * merely touching boundaries (no shared minute) does not qualify, and no
+ * adjacency/buffer tolerance is used; the audit proved overlap, not a
+ * principled adjacency threshold, and deliberately left adjacency out of
+ * scope. No duration gate either (unlike PR D's `windowWidth <
+ * durationMinutes`) -- the audit's own canonical case reproduced at 30, 60,
+ * AND 90 minutes, since eligibility opens at frictionEnd regardless of how
+ * much of the favorable window the requested duration can still capture
+ * afterward; scoring (not this candidate source) is what determines whether
+ * that capture is worthwhile.
+ *
+ * RAHU_KALAM/YAMA/GULIKA are treated uniformly (existing commencement-
+ * safety semantics already treat all three identically; the audit's own
+ * skewed Rahu/Yama sample composition, and Gulika's absence from it, reflect
+ * which windows happened to overlap ABHIJIT on the sampled dates, not a
+ * structural difference between the three). Only BRAHMA/ABHIJIT count as
+ * favorable -- never NEUTRAL, and never inferred from a numeric score.
+ */
+export function collectFrictionBoundaryCandidateMinutes(
+  solarSlotCandidates: SlotCandidate[],
+  existingMinutes: Set<number>
+): number[] {
+  const frictionSlots = solarSlotCandidates.filter((slot) => slot.type === 'RAHU_KALAM' || slot.type === 'YAMA' || slot.type === 'GULIKA');
+  const favorableSlots = solarSlotCandidates.filter((slot) => slot.type === 'BRAHMA' || slot.type === 'ABHIJIT');
+  const minutes: number[] = [];
+  for (const friction of frictionSlots) {
+    const overlapsFavorable = favorableSlots.some((favorable) => friction.startMinute < favorable.endMinute && favorable.startMinute < friction.endMinute);
+    if (!overlapsFavorable) continue;
+    const candidateMinute = friction.endMinute;
+    if (candidateMinute < 0 || candidateMinute >= 1440) continue;
+    if (existingMinutes.has(candidateMinute)) continue;
+    minutes.push(candidateMinute);
+    existingMinutes.add(candidateMinute);
+  }
+  return minutes;
+}
+
 function findBestWindowsForDate(
   profile: TaskProfile,
   dateStr: string,
@@ -879,6 +947,12 @@ function findBestWindowsForDate(
   // can never duplicate a solar/Tithi/Nakshatra/Yoga/Karana candidate
   // already claiming the same minute.
   const solarScoreBoundaryMinutes = collectSolarScoreBoundaryCandidateMinutes(solarSlotCandidates, durationMinutes, existingMinutes);
+  // Muhurtham Gated Friction-End Eligibility Boundary Candidates V1: a
+  // THIRD sibling source -- see collectFrictionBoundaryCandidateMinutes()'s
+  // own doc comment. No `durationMinutes` input (unlike the score-boundary
+  // source above): eligibility, not duration-relative score capture, is
+  // this source's subject. Feeds the SAME `existingMinutes` dedup set.
+  const frictionBoundaryMinutes = collectFrictionBoundaryCandidateMinutes(solarSlotCandidates, existingMinutes);
   // endMinute: 1440 (end of local day) rather than a derived "containing
   // window" boundary -- deliberately generous. type/label are placeholders:
   // evaluateMuhurthamCandidate() -> evaluateTimingCandidate() independently
@@ -888,7 +962,7 @@ function findBestWindowsForDate(
   // the SlotCandidate that triggered evaluation, only its own recomputed
   // `start`. So these fields are inert here (confirmed by tracing
   // evaluateTimingCandidate's implementation) -- see brief section 14.
-  const transitionSlotCandidates: SlotCandidate[] = [...transitionMinutes, ...solarScoreBoundaryMinutes].map((startMinute) => ({ startMinute, endMinute: 1440, type: 'NEUTRAL', label: 'Neutral Flow' }));
+  const transitionSlotCandidates: SlotCandidate[] = [...transitionMinutes, ...solarScoreBoundaryMinutes, ...frictionBoundaryMinutes].map((startMinute) => ({ startMinute, endMinute: 1440, type: 'NEUTRAL', label: 'Neutral Flow' }));
   const slotCandidates = [...solarSlotCandidates, ...transitionSlotCandidates];
 
   const candidates: SampledCandidate[] = [];

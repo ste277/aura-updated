@@ -301,16 +301,38 @@ for (const id of HIGH_SIGNIFICANCE_GUARD_IDS) {
 // determinism/stability going forward, not "never changes" -- see
 // test/muhurthamSolarScoreBoundary.test.ts for the dedicated augmentation
 // regression suite.
+//
+// Re-captured a FOURTH time under Muhurtham Gated Friction-End Eligibility
+// Boundaries (PR E) -- that PR adds a candidate at
+// (friction-window).endMinute whenever a RAHU_KALAM/YAMA/GULIKA window
+// strictly overlaps a BRAHMA/ABHIJIT window, again generic and additive
+// (on top of, never instead of, every existing source), so it reaches
+// Griha Pravesh through the same shared candidate path. This time the
+// top-5 MEMBERSHIP itself changes, not just scores: 2026-09-07 and
+// 2026-09-11 newly enter the top-5 (each winning on a genuinely better,
+// previously-unreachable friction-boundary candidate -- YAMA.endMinute=728
+// for 09-07, overlapping ABHIJIT[702,752); RAHU_KALAM.endMinute=726 for
+// 09-11, overlapping ABHIJIT[701,751)), displacing 09-13 and 09-14 out of
+// the top 5. 2026-09-21 keeps its place but re-picks a stronger candidate
+// at YAMA.endMinute=723 (overlapping ABHIJIT[698,746)), score 7.8->7.9,
+// start shifting from the prior day's Abhijit boundary to its own day's
+// friction-end candidate. 2026-09-12 and 09-17 are unaffected (their own
+// best candidates were never near a friction/favorable overlap). Same
+// additive scoring formula, same eligibility rules -- only candidate
+// DISCOVERY changed once more. Re-captured post-augmentation; still
+// proves determinism/stability going forward, not "never changes" -- see
+// test/muhurthamFrictionBoundary.test.ts for the dedicated augmentation
+// regression suite.
 // ============================================================
 
 {
   const grihaPravesh = findMuhurthams({ activityId: 'griha-pravesh', dateRange: { start: '2026-09-01', end: '2026-09-30' }, timePreference: 'ANY', durationMinutes: 60, limit: 5, context: chennaiContext });
   const captured = [
+    { date: '2026-09-07', score: 7.8, rating: 'FAVORABLE', start: '2026-09-07T06:38:00.000Z' },
+    { date: '2026-09-11', score: 8, rating: 'STRONG', start: '2026-09-11T06:36:00.000Z' },
     { date: '2026-09-12', score: 8.1, rating: 'STRONG', start: '2026-09-12T06:00:00.000Z' },
-    { date: '2026-09-13', score: 7.3, rating: 'FAVORABLE', start: '2026-09-13T08:08:00.000Z' },
-    { date: '2026-09-14', score: 7.8, rating: 'FAVORABLE', start: '2026-09-13T22:39:00.000Z' },
     { date: '2026-09-17', score: 8.1, rating: 'STRONG', start: '2026-09-17T05:58:00.000Z' },
-    { date: '2026-09-21', score: 7.8, rating: 'FAVORABLE', start: '2026-09-20T22:39:00.000Z' },
+    { date: '2026-09-21', score: 7.9, rating: 'FAVORABLE', start: '2026-09-21T06:33:00.000Z' },
   ];
   const actual = grihaPravesh.dates.map((d) => ({ date: d.date, score: d.score, rating: d.rating, start: d.bestWindow.start }));
   check('Griha Pravesh Muhurtham Finder output is deterministic (re-captured after Muhurtham Solar Score-Boundary Candidate Augmentation V1)', JSON.stringify(actual) === JSON.stringify(captured));
