@@ -409,17 +409,25 @@ function fmt(m: number) {
 
 // ============================================================
 // 16. RESIDUAL KARANA-DRIVEN GAP (2026-09-26) -- explicitly NOT fixed by
-// this PR (Yoga/Karana boundaries are out of scope). Documents the audit's
-// own control case: Finder best remains 5.7/ACCEPTABLE, unchanged from
-// before augmentation, because the real ~7.78 interior optimum there is
-// driven by a Vishti->Bava KARANA transition, not Nakshatra/Tithi.
+// THIS augmentation (Yoga/Karana boundaries were, and remain, out of scope
+// for Nakshatra/Tithi transition candidates). Muhurtham Solar Score-
+// Boundary Candidate Augmentation V1 (a later, separate, deliberately
+// generic PR targeting narrow BRAHMA/ABHIJIT solar windows -- see that
+// PR's own module doc comment) genuinely recovers a BETTER result here too
+// (5.7 -> 7.2, ACCEPTABLE -> FAVORABLE), since Griha Pravesh shares the
+// exact same candidate-generation path every activity does and this new
+// source is deliberately not Marriage-specific. The Karana-driven ~7.78
+// interior optimum this block originally documented is STILL not reached
+// (7.2 < 7.78) -- the underlying point survives: no single candidate
+// source claims complete candidate discovery, there is still a real,
+// undiscovered Karana-boundary gap here, just a smaller one than before.
 // ============================================================
 
 {
   const day26 = chennaiContextFor(26);
   const result = findMuhurthams({ activityId: 'griha-pravesh', dateRange: { start: '2026-09-26', end: '2026-09-26' }, timePreference: 'ANY', durationMinutes: 60, limit: 5, context: day26 });
-  check('2026-09-26 residual control: Finder best is UNCHANGED at 5.7/ACCEPTABLE (Karana-driven gap correctly NOT recovered by Nakshatra/Tithi augmentation)', result.dates[0]?.score === 5.7 && result.dates[0]?.rating === 'ACCEPTABLE');
-  check('...confirming this PR does not (and must not) claim complete candidate discovery', result.dates[0]?.score !== undefined && result.dates[0].score < 7.78);
+  check('2026-09-26: Finder best is genuinely recovered to 7.2/FAVORABLE by the solar score-boundary source (up from the pre-augmentation 5.7/ACCEPTABLE)', result.dates[0]?.score === 7.2 && result.dates[0]?.rating === 'FAVORABLE');
+  check('...but still below the true ~7.78 Karana-driven optimum, confirming this PR does not (and must not) claim complete candidate discovery', result.dates[0]?.score !== undefined && result.dates[0].score < 7.78);
 }
 
 // ============================================================
@@ -448,31 +456,43 @@ function fmt(m: number) {
 }
 
 // ============================================================
-// 18/9 (brief). NON-RECOVERED ZERO-RESULT CONTROL (2026-09-08) -- remains
-// empty after augmentation. Not every missed opportunity is
-// Nakshatra/Tithi-transition-recoverable; this PR does not force these.
+// 18/9 (brief). FURTHER ZERO-RESULT RECOVERIES -- both 2026-09-05 and
+// 2026-09-08 were ORIGINALLY documented here as a "non-recovered zero-
+// result control" pair: neither was Nakshatra/Tithi-transition-recoverable
+// by THIS PR's own augmentation (still true -- see the recovery mechanisms
+// below, neither is a Nakshatra/Tithi transition candidate). Both have
+// since been genuinely recovered by two DIFFERENT, LATER, unrelated fixes,
+// each responding to its own separate audit:
 //
-// 2026-09-05 was ALSO in this control set originally, but Marriage
-// Muhurtham Candidate Discovery Hardening V1's transition-walk
-// re-entrancy fix (collectTransitionInstants's nudge-and-retry -- see that
-// PR's own doc comment) genuinely, correctly recovers it: 2026-09-05 has a
-// SECOND same-day Tithi transition (Krishna Navami -> Dashami, discovered
-// only when the walk survives past the first transition instead of
-// silently stopping there) that the old walk could never reach, since
-// findNextTransition called exactly at a transition instant can re-find
-// that same instant and previously triggered an early `break` rather than
-// a recovery retry. This was never Karana-specific (the audit's own
-// 2026-03-02 New York finding was the Karana instance of the same bug) --
-// fixing it generically also recovers this latent, pre-existing miss for
-// Griha Pravesh, which uses only Tithi/Nakshatra. See the recovery
-// assertion below.
+// 2026-09-05: Marriage Muhurtham Candidate Discovery Hardening V1's
+// transition-walk re-entrancy fix (collectTransitionInstants's
+// nudge-and-retry -- see that PR's own doc comment) recovers a SECOND
+// same-day Tithi transition (Krishna Navami -> Dashami) the old walk could
+// never reach, since findNextTransition called exactly at a transition
+// instant can re-find that same instant and previously triggered an early
+// `break` rather than a recovery retry. Never Karana-specific (the audit's
+// own 2026-03-02 New York finding was the Karana instance of the same
+// bug) -- fixing it generically also recovers this latent, pre-existing
+// miss for Griha Pravesh, which uses only Tithi/Nakshatra.
+//
+// 2026-09-08: Muhurtham Solar Score-Boundary Candidate Augmentation V1 (a
+// still-later, deliberately generic PR targeting narrow BRAHMA/ABHIJIT
+// solar windows -- see that PR's own module doc comment) recovers a
+// candidate at BRAHMA.endMinute - 60, a position no prior candidate source
+// (solar-window-start, Tithi/Nakshatra/Yoga/Karana transition) ever
+// proposed. Confirms this new source is genuinely activity-agnostic, not
+// Marriage-specific, exactly as that PR requires.
+//
+// Neither recovery proves "complete" candidate discovery -- see section 16
+// above for a residual (2026-09-26) still not fully recovered by any
+// current source.
 // ============================================================
 
 {
   const dateStr = '2026-09-08';
   const ctx = chennaiContextFor(8);
   const result = findMuhurthams({ activityId: 'griha-pravesh', dateRange: { start: dateStr, end: dateStr }, timePreference: 'ANY', durationMinutes: 60, limit: 5, context: ctx });
-  check(`${dateStr} remains a genuinely empty result after augmentation (not every zero-result day is Nakshatra/Tithi-recoverable)`, result.dates.length === 0);
+  check(`${dateStr} now returns a non-empty result (Solar Score-Boundary Candidate Augmentation V1 recovers a candidate at BRAHMA.endMinute - 60, previously never proposed)`, result.dates.length === 1 && result.dates[0].score === 5.7 && result.dates[0].rating === 'ACCEPTABLE');
 }
 
 {

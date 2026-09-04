@@ -282,19 +282,38 @@ for (const id of HIGH_SIGNIFICANCE_GUARD_IDS) {
 // determinism/stability going forward, not "never changes" -- see
 // test/muhurthamBoundaryAugmentation.test.ts for the dedicated
 // augmentation regression suite.
+//
+// Re-captured a THIRD time under Muhurtham Solar Score-Boundary Candidate
+// Augmentation V1 -- deliberately: that PR adds a candidate at
+// (narrow-favorable-solar-window).endMinute - durationMinutes for BRAHMA/
+// ABHIJIT windows narrower than the requested 60 minutes, on top of (never
+// instead of) every existing candidate source -- generic, not
+// Marriage-specific, so it reaches every activity sharing this candidate
+// path, Griha Pravesh included. The SAME five dates still make the top-5
+// (candidate discovery did not change WHICH dates are eligible-and-
+// competitive, only how well several of them are now scored/positioned):
+// 2026-09-12, 09-17, 09-14, and 09-21 each now land on a genuinely better,
+// previously-unsampled BRAHMA/ABHIJIT-boundary-derived candidate (scores
+// rising to 8.1/8.1/7.8/7.8 respectively); 09-13 is unaffected (its own
+// best candidate was never near a narrow BRAHMA/ABHIJIT window). Same
+// additive scoring formula, same eligibility rules -- only candidate
+// DISCOVERY changed again. Re-captured post-augmentation; still proves
+// determinism/stability going forward, not "never changes" -- see
+// test/muhurthamSolarScoreBoundary.test.ts for the dedicated augmentation
+// regression suite.
 // ============================================================
 
 {
   const grihaPravesh = findMuhurthams({ activityId: 'griha-pravesh', dateRange: { start: '2026-09-01', end: '2026-09-30' }, timePreference: 'ANY', durationMinutes: 60, limit: 5, context: chennaiContext });
   const captured = [
-    { date: '2026-09-12', score: 7.3, rating: 'FAVORABLE', start: '2026-09-12T02:18:00.000Z' },
+    { date: '2026-09-12', score: 8.1, rating: 'STRONG', start: '2026-09-12T06:00:00.000Z' },
     { date: '2026-09-13', score: 7.3, rating: 'FAVORABLE', start: '2026-09-13T08:08:00.000Z' },
-    { date: '2026-09-14', score: 7.3, rating: 'FAVORABLE', start: '2026-09-13T18:30:00.000Z' },
-    { date: '2026-09-17', score: 7.1, rating: 'FAVORABLE', start: '2026-09-17T05:20:00.000Z' },
-    { date: '2026-09-21', score: 7.3, rating: 'FAVORABLE', start: '2026-09-20T23:39:00.000Z' },
+    { date: '2026-09-14', score: 7.8, rating: 'FAVORABLE', start: '2026-09-13T22:39:00.000Z' },
+    { date: '2026-09-17', score: 8.1, rating: 'STRONG', start: '2026-09-17T05:58:00.000Z' },
+    { date: '2026-09-21', score: 7.8, rating: 'FAVORABLE', start: '2026-09-20T22:39:00.000Z' },
   ];
   const actual = grihaPravesh.dates.map((d) => ({ date: d.date, score: d.score, rating: d.rating, start: d.bestWindow.start }));
-  check('Griha Pravesh Muhurtham Finder output is deterministic (re-captured after Inauspicious Period Precedence Fix V1)', JSON.stringify(actual) === JSON.stringify(captured));
+  check('Griha Pravesh Muhurtham Finder output is deterministic (re-captured after Muhurtham Solar Score-Boundary Candidate Augmentation V1)', JSON.stringify(actual) === JSON.stringify(captured));
 }
 
 // ============================================================
