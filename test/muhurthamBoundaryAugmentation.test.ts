@@ -297,9 +297,29 @@ function fmt(m: number) {
 }
 
 // ============================================================
-// 13. GENERAL/PERSONAL/SHARED COMPATIBLE -- the augmented candidate set
-// produces the SAME eligible-date set across all three scopes (they all
-// funnel through the same findBestWindowsForDate()).
+// 13. GENERAL/PERSONAL/SHARED WIDE-SWEEP SEMANTICS -- exact final date-set
+// parity between GENERAL and PERSONAL is NOT the real invariant here (see
+// the Muhurtham Wide-Sweep GENERAL/PERSONAL Date Divergence audit,
+// root-caused and closed: candidate discovery and objective hard
+// eligibility ARE identical between the two scopes; but findMuhurthams()'s
+// resolved limit is capped at MAX_LIMIT=20 regardless of what's requested,
+// this fixture has more than 20 objectively-eligible dates for BOTH scopes
+// after augmentation, and PERSONAL legitimately re-ranks using
+// combinedScore (Tara Bala included) -- so a shared top-20 cutoff can
+// legitimately select a slightly different set of dates per scope, exactly
+// as findPersonalMuhurthams()'s own module doc comment already documents
+// ("a date whose Tara Bala is favorable can out-rank a date with a
+// marginally higher general score"). SHARED, by contrast, always selects
+// using generalContext (never a personalized score), so it stays an exact
+// architectural invariant against GENERAL. What this block actually proves:
+// (1) SHARED === GENERAL exactly; (2) every date either scope returns is
+// independently valid under its OWN scope's solo single-day query (rules
+// out augmentation/truncation/ranking corrupting a result into something
+// invalid); (3) any date present in one scope's wide-sweep output but not
+// the other's remains discoverable under the OTHER scope's own solo query
+// too -- proving the divergence is pure ranking/truncation, not a real
+// candidate-discovery or eligibility gap; (4) results are deterministic
+// across repeated calls.
 // ============================================================
 
 {
@@ -318,8 +338,52 @@ function fmt(m: number) {
     const generalDates = general.dates.map((d) => d.date).sort();
     const personalDates = personal.dates.map((d) => d.date).sort();
     const sharedDates = shared.dates.map((d) => d.date).sort();
-    check('PERSONAL surfaces the same eligible-date set as GENERAL after augmentation', JSON.stringify(personalDates) === JSON.stringify(generalDates));
-    check('SHARED surfaces the same eligible-date set as GENERAL after augmentation', JSON.stringify(sharedDates) === JSON.stringify(generalDates));
+
+    // (1) SHARED is a real architectural invariant against GENERAL.
+    check('SHARED surfaces exactly the same set of eligible dates as GENERAL after augmentation (architectural invariant: findSharedMuhurthams always selects using generalContext)', JSON.stringify(sharedDates) === JSON.stringify(generalDates));
+
+    // (2) Every returned date is independently valid under its own scope's
+    // solo single-day query.
+    const soloOneDay = (scope: 'GENERAL' | 'PERSONAL', date: string) => {
+      if (scope === 'GENERAL') {
+        const r = findMuhurthams({ activityId: 'griha-pravesh', dateRange: { start: date, end: date }, timePreference: 'ANY', durationMinutes: 60, limit: 5, context: chennai });
+        return r.dates.length > 0;
+      }
+      const r = findPersonalMuhurthams({ activityId: 'griha-pravesh', dateRange: { start: date, end: date }, timePreference: 'ANY', durationMinutes: 60, limit: 5, context: { ...chennai, personalContext: userContext } });
+      return r.status === 'OK' && r.dates.length > 0;
+    };
+    check('Every GENERAL wide-sweep date is independently valid under a solo single-day GENERAL query', generalDates.every((d) => soloOneDay('GENERAL', d)));
+    check('Every PERSONAL wide-sweep date is independently valid under a solo single-day PERSONAL query', personalDates.every((d) => soloOneDay('PERSONAL', d)));
+
+    // (3) Every divergent date remains discoverable under the OTHER scope's
+    // solo query too -- candidate discovery is proven identical between
+    // scopes elsewhere (this file's own transition-minute checks,
+    // marriageCandidateDiscoveryHardening.test.ts, and the wide-sweep
+    // audit); personalContext never affects which candidate-start instants
+    // are generated, only their score. A divergent date that also
+    // disappeared under solo querying would instead mean personalization
+    // pushed every one of the same candidates below that scope's own
+    // MIN_INCLUSION_SCORE (also legitimate -- see the audit's 2026-09-30
+    // finding, which does not appear in THIS wide sweep's output at all
+    // since it is truncated by ranking regardless of scope). Asserted here
+    // as an explicit, falsifiable expectation for this fixture's current
+    // dates (confirmed by the audit to be pure ranking/truncation), not a
+    // tautology.
+    const onlyGeneral = generalDates.filter((d) => !personalDates.includes(d));
+    const onlyPersonal = personalDates.filter((d) => !generalDates.includes(d));
+    for (const date of onlyGeneral) {
+      check(`${date} (GENERAL-only in the wide sweep) remains discoverable under a solo PERSONAL query (pure ranking/truncation, not a real exclusion)`, soloOneDay('PERSONAL', date));
+    }
+    for (const date of onlyPersonal) {
+      check(`${date} (PERSONAL-only in the wide sweep) remains discoverable under a solo GENERAL query (pure ranking/truncation, not a real exclusion)`, soloOneDay('GENERAL', date));
+    }
+
+    // (4) Deterministic: repeating the exact same wide-sweep calls
+    // produces byte-identical date sets every time.
+    const generalRepeat = findMuhurthams({ activityId: 'griha-pravesh', dateRange: wideRange, timePreference: 'ANY', durationMinutes: 60, limit: 30, context: chennai });
+    const personalRepeat = findPersonalMuhurthams({ activityId: 'griha-pravesh', dateRange: wideRange, timePreference: 'ANY', durationMinutes: 60, limit: 30, context: { ...chennai, personalContext: userContext } });
+    check('GENERAL wide-sweep result is deterministic (identical date set on a repeated call)', JSON.stringify(generalRepeat.dates.map((d) => d.date).sort()) === JSON.stringify(generalDates));
+    check('PERSONAL wide-sweep result is deterministic (identical date set on a repeated call)', personalRepeat.status === 'OK' && JSON.stringify(personalRepeat.dates.map((d) => d.date).sort()) === JSON.stringify(personalDates));
   }
 }
 
@@ -384,18 +448,39 @@ function fmt(m: number) {
 }
 
 // ============================================================
-// 18/9 (brief). NON-RECOVERED ZERO-RESULT CONTROLS (2026-09-05, 2026-09-08)
-// -- remain empty after augmentation. Not every missed opportunity is
+// 18/9 (brief). NON-RECOVERED ZERO-RESULT CONTROL (2026-09-08) -- remains
+// empty after augmentation. Not every missed opportunity is
 // Nakshatra/Tithi-transition-recoverable; this PR does not force these.
+//
+// 2026-09-05 was ALSO in this control set originally, but Marriage
+// Muhurtham Candidate Discovery Hardening V1's transition-walk
+// re-entrancy fix (collectTransitionInstants's nudge-and-retry -- see that
+// PR's own doc comment) genuinely, correctly recovers it: 2026-09-05 has a
+// SECOND same-day Tithi transition (Krishna Navami -> Dashami, discovered
+// only when the walk survives past the first transition instead of
+// silently stopping there) that the old walk could never reach, since
+// findNextTransition called exactly at a transition instant can re-find
+// that same instant and previously triggered an early `break` rather than
+// a recovery retry. This was never Karana-specific (the audit's own
+// 2026-03-02 New York finding was the Karana instance of the same bug) --
+// fixing it generically also recovers this latent, pre-existing miss for
+// Griha Pravesh, which uses only Tithi/Nakshatra. See the recovery
+// assertion below.
 // ============================================================
 
 {
-  for (const day of [5, 8]) {
-    const dateStr = `2026-09-0${day}`;
-    const ctx = chennaiContextFor(day);
-    const result = findMuhurthams({ activityId: 'griha-pravesh', dateRange: { start: dateStr, end: dateStr }, timePreference: 'ANY', durationMinutes: 60, limit: 5, context: ctx });
-    check(`${dateStr} remains a genuinely empty result after augmentation (not every zero-result day is Nakshatra/Tithi-recoverable)`, result.dates.length === 0);
-  }
+  const dateStr = '2026-09-08';
+  const ctx = chennaiContextFor(8);
+  const result = findMuhurthams({ activityId: 'griha-pravesh', dateRange: { start: dateStr, end: dateStr }, timePreference: 'ANY', durationMinutes: 60, limit: 5, context: ctx });
+  check(`${dateStr} remains a genuinely empty result after augmentation (not every zero-result day is Nakshatra/Tithi-recoverable)`, result.dates.length === 0);
+}
+
+{
+  const dateStr = '2026-09-05';
+  const ctx = chennaiContextFor(5);
+  const result = findMuhurthams({ activityId: 'griha-pravesh', dateRange: { start: dateStr, end: dateStr }, timePreference: 'ANY', durationMinutes: 60, limit: 5, context: ctx });
+  check(`${dateStr} now returns a non-empty result (Candidate Discovery Hardening V1's transition-walk re-entrancy fix recovers a previously-unreachable second same-day Tithi transition)`, result.dates.length === 1 && result.dates[0].score === 6.6);
+  check('...specifically reading Krishna Dashami (the second Tithi segment, past the first transition the old walk silently stopped at)', result.dates[0]?.reasons.some((r) => r.factor === 'TITHI' && r.value === 'Krishna Dashami'));
 }
 
 // ============================================================

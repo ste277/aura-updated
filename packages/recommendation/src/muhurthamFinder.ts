@@ -570,12 +570,20 @@ function evaluateMuhurthamCandidate(
 }
 
 /**
- * Ceremonial Muhurtham Boundary Augmentation V1: bounds how many transitions
- * collectTransitionCandidateMinutes() will walk per factor (Nakshatra,
- * Tithi) within one local day. Real rate is ~1/day each (see the audit's
- * corrected measurement); this is a defensive ceiling, not expected to bind.
+ * Ceremonial Muhurtham Boundary Augmentation V1, extended by Marriage
+ * Muhurtham Candidate Discovery Hardening V1 to also bound Karana/Yoga:
+ * bounds how many transitions collectTransitionInstants() will walk per
+ * factor within one local day. Nakshatra/Tithi/Yoga each average ~1/day (a
+ * Tithi/Yoga spans roughly 19.5-26.5h); Karana is a HALF-Tithi and is the
+ * highest-frequency factor walked here, averaging ~2/day with a documented
+ * minimum duration of ~9h55m (half of a Tithi's own documented ~19h50m
+ * minimum) -- so even a generous 25h local day (a DST fall-back day) can
+ * contain at most floor(25h / 9h55m) + 1 = 3 Karana transitions. This
+ * constant is sized with clear headroom above that 3-transition ceiling,
+ * shared by all four factors (the lower-frequency ones never approach it) --
+ * a defensive ceiling, not expected to bind in practice.
  */
-const TRANSITION_ENUMERATION_GUARD = 3;
+const TRANSITION_ENUMERATION_GUARD = 5;
 
 /** "YYYY-MM-DD" -> the next calendar date's "YYYY-MM-DD", timezone-independent
  * (mirrors enumerateLocalDates()'s own UTC-arithmetic approach above). */
@@ -585,20 +593,43 @@ function nextLocalDateStr(dateStr: string): string {
 }
 
 /**
+ * Candidate Discovery Hardening V1: the minimum forward nudge needed to
+ * recover from findNextTransition() boundary re-entrancy inside
+ * collectTransitionInstants() below (search called exactly at a transition
+ * instant re-finds that SAME instant rather than the next one -- a
+ * documented astronomy-engine search characteristic, same family as
+ * lunarCalendar.ts's SANKRANTI_SEARCH_NUDGE_MS). Empirically confirmed
+ * sufficient for KARANA's search convergence (the 2026-03-02 New York
+ * finding: re-calling from the exact transition instant re-found it, but a
+ * 1-second-later re-call correctly advanced to the genuine next transition
+ * hours later) -- unlike Sankranti's SearchSunLongitude, which needed a full
+ * hour, this factor's search converges far more tightly.
+ */
+const TRANSITION_REENTRANCY_NUDGE_MS = 1_000;
+
+/**
  * Walks findNextTransition(cursor, kind) forward from `dayStart`, collecting
  * every transition instant strictly inside the half-open local-day interval
  * [dayStart, dayEnd) -- reusing the exact same canonical transition-search
  * primitive (packages/vedic/src/panchangElements.ts) already used by PR #53's
  * spanOverlapsAuthoritativeEventAvoid(), never a second astronomy algorithm
- * and never per-minute scanning. Guards against findNextTransition('TITHI')
- * returning the same instant again when called exactly at a transition (the
- * audit's finding) with the identical `next <= cursor` non-advancing check
- * valuesTouchedByInterval() already established -- same pattern, not a new
- * one. findNextTransition('TITHI') can also throw if no transition is found
- * within its own 2-day search bound; treated the same as "nothing further to
- * find" rather than propagating.
+ * and never per-minute scanning.
+ *
+ * Recovers from findNextTransition() boundary re-entrancy (see
+ * TRANSITION_REENTRANCY_NUDGE_MS above) with a single nudge-and-retry: a
+ * `next.getTime() <= cursor.getTime()` result no longer just breaks the walk
+ * (which -- Candidate Discovery Hardening V1 audit finding -- silently
+ * truncated the day's walk after only the FIRST transition, hiding any
+ * genuine second same-day transition) but retries once from a small nudge
+ * past `cursor`. This was previously latent for Tithi/Nakshatra (~1/day,
+ * rarely two inside one local day) but became a real, common problem once
+ * Karana (~2/day) was added to this same walk -- the fix applies uniformly
+ * to all four factors, not a Karana-specific branch. findNextTransition can
+ * also throw if no transition is found within its own search bound; treated
+ * the same as "nothing further to find" rather than propagating, both on
+ * the initial call and the retry.
  */
-function collectTransitionInstants(dayStart: Date, dayEnd: Date, kind: 'TITHI' | 'NAKSHATRA'): Date[] {
+function collectTransitionInstants(dayStart: Date, dayEnd: Date, kind: 'TITHI' | 'NAKSHATRA' | 'KARANA' | 'YOGA'): Date[] {
   const instants: Date[] = [];
   let cursor = dayStart;
   for (let i = 0; i < TRANSITION_ENUMERATION_GUARD; i++) {
@@ -608,7 +639,14 @@ function collectTransitionInstants(dayStart: Date, dayEnd: Date, kind: 'TITHI' |
     } catch {
       break;
     }
-    if (next.getTime() <= cursor.getTime()) break;
+    if (next.getTime() <= cursor.getTime()) {
+      try {
+        next = findNextTransition(new Date(cursor.getTime() + TRANSITION_REENTRANCY_NUDGE_MS), kind);
+      } catch {
+        break;
+      }
+      if (next.getTime() <= cursor.getTime()) break;
+    }
     if (next.getTime() >= dayEnd.getTime()) break;
     instants.push(next);
     cursor = next;
@@ -651,13 +689,32 @@ function collectTransitionInstants(dayStart: Date, dayEnd: Date, kind: 'TITHI' |
  *     already carry hard eligibility -- never from Rahu/Yama/Gulika or any
  *     other boundary (brief section 27).
  *
+ * Marriage Muhurtham Candidate Discovery Hardening V1 adds Karana and Yoga
+ * as a THIRD and FOURTH walked kind, using the exact same two-part pattern
+ * above -- reusing findNextTransition('KARANA'|'YOGA') (already exported by
+ * panchangElements.ts, already relied on by spanOverlapsAuthoritativeEventAvoid
+ * for interval safety) and isAuthoritativeAvoidKarana/isAuthoritativeAvoidYoga
+ * (already exported by muhurtaRulePacks.ts). Unlike Nakshatra/Tithi, which
+ * are walked unconditionally for every activity, Karana/Yoga are walked ONLY
+ * when the resolved pack's coverage.karanaAuthoritative/yogaAuthoritative is
+ * 'IMPLEMENTED' (gated below, at the loop's kind-list construction) --
+ * deliberately coverage-driven rather than unconditional, so an activity
+ * with no authoritative Karana/Yoga avoid data (every Muhurtham-eligible
+ * activity except Marriage today) receives zero extra candidates and zero
+ * extra transition-search cost from this addition. Never `if (activityId
+ * === 'marriage')` -- Marriage is simply the only pack with these coverage
+ * flags IMPLEMENTED today, and that fact is read from data, not hardcoded.
+ *
  * No new astronomy, no new scoring, no favorable/avoid direction filtering
  * on kind (1) -- the existing evaluator (evaluateMuhurthamCandidate below)
  * is the ONLY thing that ever accepts or rejects any of these starts, exactly
  * like every solar-window/Neutral-gap start already flowing through the same
  * loop. Returns whole-minute integers in [0, 1439], deduplicated against
  * `existingMinutes` (exact-integer-timestamp dedup -- see this function's
- * own doc note on precision above; no fuzzy tolerance).
+ * own doc note on precision above; no fuzzy tolerance -- and see
+ * findBestWindowsForDate's own doc comment for how `existingMinutes` is now
+ * built only from solar slots that can actually host the requested
+ * duration, fixing a real dedup correctness bug the audit found).
  */
 export function collectPanchangaTransitionCandidateMinutes(
   dateStr: string,
@@ -698,14 +755,20 @@ export function collectPanchangaTransitionCandidateMinutes(
     existingMinutes.add(minute);
   };
 
-  for (const kind of ['NAKSHATRA', 'TITHI'] as const) {
+  const kinds: Array<'NAKSHATRA' | 'TITHI' | 'KARANA' | 'YOGA'> = ['NAKSHATRA', 'TITHI'];
+  if (pack?.coverage.karanaAuthoritative === 'IMPLEMENTED') kinds.push('KARANA');
+  if (pack?.coverage.yogaAuthoritative === 'IMPLEMENTED') kinds.push('YOGA');
+
+  for (const kind of kinds) {
     for (const instant of collectTransitionInstants(dayStart, dayEnd, kind)) {
       addMinute(ceilMinuteOfDay(instant));
 
       if (!pack) continue;
-      const isAvoid = kind === 'NAKSHATRA'
-        ? isAuthoritativeAvoidNakshatra(pack, getNakshatra(instant).name)
-        : isAuthoritativeAvoidTithi(pack, getTithi(instant).name);
+      const isAvoid =
+        kind === 'NAKSHATRA' ? isAuthoritativeAvoidNakshatra(pack, getNakshatra(instant).name) :
+        kind === 'TITHI' ? isAuthoritativeAvoidTithi(pack, getTithi(instant).name) :
+        kind === 'KARANA' ? isAuthoritativeAvoidKarana(pack, getKarana(instant).name) :
+        isAuthoritativeAvoidYoga(pack, getYoga(instant).name);
       if (!isAvoid) continue;
 
       const latestValidStartMinute = floorMinuteOfDay(instant) - durationMinutes;
@@ -730,11 +793,28 @@ function findBestWindowsForDate(
   const solarSlotCandidates = buildSlotCandidates(computeAssistantWindows(dayContext));
 
   // Ceremonial Muhurtham Boundary Augmentation V1: Muhurtham-specific extra
-  // candidate starts (Nakshatra/Tithi transitions + authoritative-avoid
-  // latest-valid-starts), added ONLY here -- buildSlotCandidates() itself is
-  // untouched, so Timing Search/Day Builder/Good Right Now/the legacy
-  // planner (all of which also call buildSlotCandidates()) are unaffected.
-  const existingMinutes = new Set(solarSlotCandidates.map((slot) => slot.startMinute));
+  // candidate starts (Nakshatra/Tithi/Karana/Yoga transitions + authoritative-
+  // avoid latest-valid-starts), added ONLY here -- buildSlotCandidates()
+  // itself is untouched, so Timing Search/Day Builder/Good Right Now/the
+  // legacy planner (all of which also call buildSlotCandidates()) are
+  // unaffected.
+  //
+  // Candidate Discovery Hardening V1 dedup fix: `existingMinutes` seeds the
+  // set of minutes a transition-derived candidate must NOT duplicate. A
+  // solar slot only genuinely "owns" its startMinute for dedup purposes if
+  // it can actually host the REQUESTED duration -- a slot narrower than
+  // durationMinutes cannot represent a full-duration candidate at that
+  // minute, so a transition instant that happens to ceil-round onto that
+  // same minute must still get its own candidate, not be silently dropped
+  // as a false duplicate (the audit's concrete 2026-11-21 Dubai/60min
+  // finding: a Karana transition ceil-rounded onto an existing solar-slot
+  // start minute too narrow for a 60-minute block, and the useful transition
+  // candidate was lost). Filtering here, once, keeps the fix generic across
+  // all four walked factors (Nakshatra/Tithi/Karana/Yoga) without touching
+  // collectPanchangaTransitionCandidateMinutes's own dedup logic.
+  const existingMinutes = new Set(
+    solarSlotCandidates.filter((slot) => slot.endMinute - slot.startMinute >= durationMinutes).map((slot) => slot.startMinute)
+  );
   const transitionMinutes = collectPanchangaTransitionCandidateMinutes(dateStr, context, durationMinutes, classification, existingMinutes);
   // endMinute: 1440 (end of local day) rather than a derived "containing
   // window" boundary -- deliberately generous. type/label are placeholders:
