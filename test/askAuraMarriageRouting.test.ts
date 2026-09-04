@@ -443,6 +443,61 @@ async function main() {
     check('"Should I get married tomorrow for 90 minutes?" evaluates a genuinely 90-minute span, not the default', Boolean(card?.requested) && (new Date(card!.requested!.end).getTime() - new Date(card!.requested!.start).getTime()) === 90 * 60000);
   }
 
+  // ============================================================
+  // Ask Aura Exact Clock-Time CHECK V1: ceremonial exact-time execution.
+  // Fixes the ORIGINAL confirmed defect the Natural CHECK Phrasing audit
+  // found: "Is 10 AM tomorrow good for marriage?" must evaluate EXACTLY
+  // 10 AM -- never silently substitute a different (e.g. 12:55 PM)
+  // searched time -- and must go through the ceremonial single-candidate
+  // evaluator (evaluateMuhurthamCandidateAt, PR #65), never a full-day
+  // Muhurtham search.
+  // ============================================================
+  {
+    const nyNow = new Date('2026-06-11T04:00:00.000Z'); // "tomorrow" = 2026-06-12, known-good marriage fixture
+    const nyContext: DailyAssistantContext = { now: nyNow, latitude: 40.7128, longitude: -74.006, timezone: 'America/New_York', tzOffsetMinutes: -300 };
+    const nyDeps: AskAuraOrchestratorDeps = { userId: 'test-user-not-a-real-db-row', context: nyContext, activeWindow: 'NEUTRAL' };
+
+    const parsed = parseAskAuraRequest('Is 10 AM tomorrow good for marriage?', { now: nyNow });
+    check('"Is 10 AM tomorrow good for marriage?" parses TIMING_CHECK, exactTime=10:00, activityId=marriage', parsed.intent === 'TIMING_CHECK' && parsed.exactTime === '10:00' && parsed.activityId === 'marriage');
+
+    const response = await orchestrateAskAura(parsed, nyDeps);
+    check('Response intent remains TIMING_CHECK (no new intent, no MUHURTHAM_SEARCH)', response.intent === 'TIMING_CHECK');
+    check('Response is CHECK-shaped, never "Best dates for" (no full-day search)', !response.message.includes('Best dates for'));
+
+    const card = response.cards?.[0] as { requested?: { start: string; startLabel: string }; dates?: unknown; best?: unknown } | undefined;
+    check('No FIND/search-shaped card fields ("dates" list or "best") -- single requested candidate only', !('dates' in (card ?? {})) && !('best' in (card ?? {})));
+    check('The requested candidate\'s LOCAL display time is exactly 10:00 AM (never silently substituted, e.g. never 12:55 PM)', card?.requested?.startLabel === '10:00 AM');
+    check('The requested candidate\'s UTC instant corresponds to 10:00 America/New_York on 2026-06-12 (EDT, UTC-4) -- 2026-06-12T14:00:00.000Z', card?.requested?.start === '2026-06-12T14:00:00.000Z');
+  }
+
+  // Section 39: exact time + SHARED -- reuses the same "with <name>"
+  // phrasing and SavedPerson resolution PR #65 already established; parser
+  // level only here (live SavedPerson resolution needs a DB, tested
+  // separately in test/askAuraOrchestratorDb.test.ts, unchanged by this PR).
+  {
+    const p = parse('Is 10 AM tomorrow good for marriage with Priya?');
+    check('"Is 10 AM tomorrow good for marriage with Priya?" -> TIMING_CHECK, scope=SHARED, personNameQuery=priya, exactTime=10:00', p.intent === 'TIMING_CHECK' && p.scope === 'SHARED' && p.personNameQuery === 'priya' && p.exactTime === '10:00' && p.activityId === 'marriage');
+  }
+
+  // Section 38: exact time + PERSONAL.
+  {
+    const p = parse('Is 10 AM tomorrow good for marriage for me?');
+    check('"Is 10 AM tomorrow good for marriage for me?" -> TIMING_CHECK, scope=PERSONAL, exactTime=10:00', p.intent === 'TIMING_CHECK' && p.scope === 'PERSONAL' && p.exactTime === '10:00' && p.activityId === 'marriage');
+    const personalDeps: AskAuraOrchestratorDeps = { userId: 'test-user-not-a-real-db-row', context: { ...context, personalContext: { natalNakshatraIndex: 1, janmaNakshatra: 'Ashwini' } }, activeWindow: 'NEUTRAL' };
+    const response = await orchestrateAskAura(p, personalDeps);
+    check('PERSONAL exact-time CHECK executes the ceremonial evaluator (never "Best dates for")', response.intent === 'TIMING_CHECK' && !response.message.includes('Best dates for'));
+  }
+
+  // Section 51: generic capability control -- griha-pravesh exact-time
+  // CHECK, proving the fix is capability-driven, not marriage-specific.
+  {
+    const p = parse('Is 10 AM tomorrow good for griha pravesh?');
+    const response = await orchestrateAskAura(p, deps);
+    check('"Is 10 AM tomorrow good for griha pravesh?" executes the ceremonial evaluator with the exact requested time', response.intent === 'TIMING_CHECK' && !response.message.includes('Best dates for'));
+    const card = response.cards?.[0] as { requested?: { startLabel: string } } | undefined;
+    check('Griha Pravesh exact-time CHECK requested candidate is exactly 10:00 AM local', card?.requested?.startLabel === '10:00 AM');
+  }
+
   console.log(allPassed ? '\nALL ASK AURA MARRIAGE ROUTING CHECKS PASSED' : '\nSOME ASK AURA MARRIAGE ROUTING CHECKS FAILED');
   process.exit(allPassed ? 0 : 1);
 }
