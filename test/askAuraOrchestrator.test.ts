@@ -151,6 +151,62 @@ async function main() {
     check('No birth/natal/ownership fields leak into the Ask Aura response', forbidden.every((needle) => !serialized.includes(needle)));
   }
 
+  // ============================================================
+  // Ask Aura Exact Clock-Time CHECK V1: everyday exact-time execution +
+  // timezone/DST conversion. TIMING_CHECK + exactTime must evaluate the
+  // EXACT requested local instant -- never a searched/substituted time --
+  // converted through the real, DST-aware timezone utility.
+  // ============================================================
+
+  // Section 42: everyday exact-time execution.
+  {
+    const parsed = parseAskAuraRequest('Is 10 AM tomorrow good for deep work?', { now: NOW });
+    check('"Is 10 AM tomorrow good for deep work?" parses exactTime=10:00', parsed.exactTime === '10:00');
+    const response = await orchestrateAskAura(parsed, deps);
+    check('Everyday exact-time CHECK stays TIMING_CHECK (generic Timing Search CHECK, not FIND)', response.intent === 'TIMING_CHECK');
+    const requested = (response.cards?.[0] as { requested?: { startLabel?: string } } | undefined)?.requested;
+    check('The requested candidate\'s local display time is exactly 10:00 AM, not a different searched time', requested?.startLabel === '10:00 AM');
+  }
+
+  // Section 43: timezone test (Chennai/Asia-Kolkata) -- the brief's own
+  // worked example: 10:00 IST (UTC+5:30) must convert to exactly
+  // 2026-09-20T04:30:00.000Z.
+  {
+    const parsed = parseAskAuraRequest('Is 10 AM on 2026-09-20 good for deep work?', { now: NOW });
+    const response = await orchestrateAskAura(parsed, deps);
+    const requested = (response.cards?.[0] as { requested?: { start?: string } } | undefined)?.requested;
+    check('10:00 Asia/Kolkata on 2026-09-20 converts to exactly 2026-09-20T04:30:00.000Z UTC', requested?.start === '2026-09-20T04:30:00.000Z');
+  }
+
+  // Section 44: non-IST, DST-aware timezone test (America/New_York). The
+  // SAME code path must produce a DIFFERENT, correct UTC offset depending
+  // on the time of year -- proof this is genuine Intl-timezone-database
+  // conversion (packages/panchang/src/localDate.ts's localDateTimeToUTC),
+  // never a hardcoded fixed offset.
+  {
+    const nyContext: DailyAssistantContext = { now: NOW, latitude: 40.7128, longitude: -74.006, timezone: 'America/New_York', tzOffsetMinutes: -300 };
+    const nyDeps: AskAuraOrchestratorDeps = { userId: 'test-user-not-a-real-db-row', context: nyContext, activeWindow: 'NEUTRAL' };
+
+    const septParsed = parseAskAuraRequest('Is 10 AM on 2026-09-20 good for deep work?', { now: NOW });
+    const septResponse = await orchestrateAskAura(septParsed, nyDeps);
+    const septRequested = (septResponse.cards?.[0] as { requested?: { start?: string } } | undefined)?.requested;
+    check('10:00 America/New_York on 2026-09-20 (EDT, UTC-4) converts to 2026-09-20T14:00:00.000Z', septRequested?.start === '2026-09-20T14:00:00.000Z');
+
+    const janParsed = parseAskAuraRequest('Is 10 AM on 2026-01-15 good for deep work?', { now: NOW });
+    const janResponse = await orchestrateAskAura(janParsed, nyDeps);
+    const janRequested = (janResponse.cards?.[0] as { requested?: { start?: string } } | undefined)?.requested;
+    check('10:00 America/New_York on 2026-01-15 (EST, UTC-5) converts to 2026-01-15T15:00:00.000Z -- a DIFFERENT, correct offset from the September case, proving real DST-aware conversion', janRequested?.start === '2026-01-15T15:00:00.000Z');
+  }
+
+  // Section 36: everyday betterNearby is unchanged -- still a separate,
+  // explicitly-labeled field, never conflated with the requested instant.
+  {
+    const parsed = parseAskAuraRequest('Is 10 AM tomorrow good for deep work?', { now: NOW });
+    const response = await orchestrateAskAura(parsed, deps);
+    const card = response.cards?.[0] as { requested?: unknown; betterNearby?: unknown } | undefined;
+    check('Everyday exact-time CHECK can still surface betterNearby as a separate field (unchanged generic CHECK behavior)', 'requested' in (card ?? {}) && 'betterNearby' in (card ?? {}));
+  }
+
   console.log(allPassed ? '\nALL ASK AURA ORCHESTRATOR CHECKS PASSED' : '\nSOME ASK AURA ORCHESTRATOR CHECKS FAILED');
   process.exit(allPassed ? 0 : 1);
 }

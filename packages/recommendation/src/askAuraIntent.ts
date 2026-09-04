@@ -74,6 +74,15 @@ export interface ParsedAskAuraRequest {
 
   timePreference?: AskTimePreference;
 
+  /** Ask Aura Exact Clock-Time CHECK V1 -- an explicit clock time from the
+   * user's own words (e.g. "10 AM" -> "10:00", "6:45 PM" -> "18:45"),
+   * normalized 24-hour "HH:mm". Only ever set when the parser found a
+   * genuine, VALID explicit time; a malformed one (e.g. "13 PM") never
+   * reaches here at all -- see parseExactClockTime()'s own doc comment for
+   * why an invalid clock returns UNKNOWN rather than silently omitting
+   * this field and falling through to a date-only search. */
+  exactTime?: string;
+
   scope?: AskAuraScope;
   /** Raw name text extracted from the prompt (e.g. "Anna") -- resolved
    * against the owner's own SavedPeople list server-side; this parser
@@ -134,6 +143,55 @@ function parseTimePreference(text: string): AskTimePreference | undefined {
   if (/\bnight\b/.test(text)) return 'NIGHT';
   return undefined;
 }
+
+// ============================================================
+// Exact clock time (Ask Aura Exact Clock-Time CHECK V1). ONLY 12-hour
+// AM/PM forms are recognized -- "10 AM", "10:30am", "6 PM", "6:45pm" -- no
+// 24-hour ("18:30") or fuzzy ("around 10", "noon") forms; this is
+// deliberately the narrowest reliable slice, not a general clock parser.
+//
+// Distinguishes three outcomes, not just string | undefined, because a
+// malformed explicit time ("13 PM", "10:60 AM") must never be treated the
+// same as no time being supplied at all (brief section 11/59) -- ABSENT
+// silently falls through to existing date-only/FIND behavior unchanged;
+// INVALID must be caught by the caller and turned into a clarification,
+// never a silent date-only search.
+// ============================================================
+
+export type AskExactClockParseResult =
+  | { status: 'ABSENT' }
+  | { status: 'INVALID' }
+  | { status: 'VALID'; exactTime: string };
+
+// Deliberately loose on hour/minute digit count (not `[01]\d` etc.) so a
+// malformed value like "13" or "60" is CAPTURED, not silently unmatched --
+// validity is checked in code below, not enforced by the regex itself.
+const EXACT_CLOCK_RE = /\b(\d{1,2})(?::(\d{2}))?\s*(am|pm)\b/i;
+
+function parseExactClockTime(text: string): AskExactClockParseResult {
+  const match = text.match(EXACT_CLOCK_RE);
+  if (!match) return { status: 'ABSENT' };
+
+  const hour = Number(match[1]);
+  const minute = match[2] ? Number(match[2]) : 0;
+  const meridiem = match[3].toLowerCase();
+  // 12-hour clock: 1-12 for the hour (never 0, never 13+); 0-59 for the
+  // minute. "0 AM"/"13 PM"/"10:60 AM" are all rejected here.
+  if (hour < 1 || hour > 12 || minute < 0 || minute > 59) return { status: 'INVALID' };
+
+  const hour24 = meridiem === 'am' ? (hour === 12 ? 0 : hour) : hour === 12 ? 12 : hour + 12;
+  return { status: 'VALID', exactTime: `${String(hour24).padStart(2, '0')}:${String(minute).padStart(2, '0')}` };
+}
+
+// The only AskHorizonPhrase values that name a single concrete local
+// calendar date (never a multi-day RANGE like THIS_WEEKEND/NEXT_MONTH) --
+// combining an exact clock with a range horizon is ambiguous ("10 AM" on
+// WHICH day of the weekend?) and out of scope for V1 (brief section 21:
+// "exact clock CHECK should only work with temporal forms already
+// supported by parseHorizonPhrase/customDate... today/tomorrow/tonight/ISO
+// custom date"). NOW is included since parseHorizonPhrase's "tonight"/
+// "today"/(absent) branches already resolve to a single local date.
+const EXACT_CLOCK_USABLE_HORIZONS: ReadonlySet<AskHorizonPhrase> = new Set(['NOW', 'TODAY', 'TOMORROW', 'CUSTOM_DATE']);
 
 // ============================================================
 // Horizon phrase (brief section 22).
@@ -275,6 +333,7 @@ export function parseAskAuraRequest(rawText: string, context: AskAuraParseContex
   const timePreference = parseTimePreference(text);
   const durationMinutes = parseDurationMinutes(text);
   const { scope, personNameQuery } = parseScope(text);
+  const clockResult = parseExactClockTime(text);
 
   // 1. Panchang explanation -- "what is X" / "what does X mean" where X is
   // a recognized term. Checked BEFORE Panchang query so "What is Rohini?"
@@ -370,6 +429,66 @@ export function parseAskAuraRequest(rawText: string, context: AskAuraParseContex
       scope: scope ?? 'GENERAL',
       personNameQuery,
     };
+  }
+
+  // 5b. Exact clock-time CHECK inference (Ask Aura Exact Clock-Time CHECK
+  // V1) -- the semantic discriminator between a CHECK-shaped and a
+  // FIND-shaped "is X good for Y" question is whether an EXACT clock time
+  // was actually stated, never a broadened CHECK_VERB_RE. Deliberately NOT
+  // built as a bigger regex covering every English CHECK-like sentence
+  // shape ("would X be good", "how is X for Y", etc.) -- the presence of a
+  // resolved activity + a valid exact clock + a usable single-date horizon
+  // is what matters, independent of which verb phrasing surrounds it.
+  //
+  // Checked AFTER explicit FIND_VERB_RE (guarded by the SAME
+  // `!FIND_VERB_RE.test(text)` condition step 6 below already effectively
+  // uses) so "Find the best time tomorrow after 10 AM for deep work."
+  // keeps FIND precedence -- there the clock is a search CONSTRAINT/
+  // reference point, not the candidate instant (brief section 16/49).
+  //
+  // Checked BEFORE step 6's own generic OR-condition (not merely after
+  // FIND_VERB_RE) because that condition's second branch --
+  // `(horizonPhrase || timePreference) && (personNameQuery || scope)` --
+  // does not itself require FIND_VERB_RE and would otherwise steal any
+  // SHARED/PERSONAL-scoped clock-bearing phrase ("...good for marriage
+  // with Priya?") into TIMING_FIND before exactTime is ever considered.
+  if (!FIND_VERB_RE.test(text)) {
+    if (clockResult.status === 'VALID') {
+      if (!horizonPhrase || !EXACT_CLOCK_USABLE_HORIZONS.has(horizonPhrase)) {
+        // An exact time with no resolvable single calendar date (absent
+        // entirely, or only a multi-day RANGE horizon like "this weekend")
+        // must not silently default to today/tomorrow, and must not fall
+        // through to a date-only FIND/PLAN_OPEN default either -- this
+        // covers the month-name/weekday negative controls ("Is 10 AM on
+        // September 20 good for marriage?", "Is 10 AM next Friday good for
+        // marriage?": the clock parses fine, but no recognized date exists)
+        // as well as the bare "Is 10 AM good for marriage?" no-date case
+        // (brief section 24/54/55/56) -- all three get the same
+        // conservative clarification, never an invented date.
+        return { intent: 'UNKNOWN', confidence: 'LOW' };
+      }
+      const resolved = resolveActivity(text);
+      if (resolved.activityId || resolved.taskTitle) {
+        return {
+          intent: 'TIMING_CHECK',
+          confidence: 'HIGH',
+          ...resolved,
+          durationMinutes,
+          horizonPhrase,
+          customDate,
+          exactTime: clockResult.exactTime,
+          timePreference,
+          scope: scope ?? 'GENERAL',
+          personNameQuery,
+        };
+      }
+    } else if (clockResult.status === 'INVALID') {
+      // A malformed explicit time ("13 PM", "10:60 AM") must never be
+      // treated the same as no time supplied at all -- it must not
+      // silently disappear into a date-only FIND/PLAN_OPEN default (brief
+      // section 11/47/59).
+      return { intent: 'UNKNOWN', confidence: 'LOW' };
+    }
   }
 
   // 6. Timing Find -- "When should I work out tomorrow?" / "Best time for

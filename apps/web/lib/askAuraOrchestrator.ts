@@ -30,6 +30,7 @@ import { handleMuhurthamSearchBody, handleSharedMuhurthamSearchBody } from './mu
 import { evaluateMuhurthamCandidateAt, isSupportedMuhurthamActivity, MuhurthamCandidateCheckOutcome, MuhurthamDateCandidate, MuhurthamSearchResult } from '../../../packages/recommendation/src/muhurthamFinder';
 import { formatMuhurtaReason } from '../../../packages/muhurta/src/muhurtaReasonFormat';
 import { getPanchangForDate } from '../../../packages/panchang/src/panchangDay';
+import { localDateTimeToUTC } from '../../../packages/panchang/src/localDate';
 import { natalContextFromBirthDetails } from './natalContext';
 import { listSavedPeople, SavedPerson } from './db';
 
@@ -158,6 +159,40 @@ function resolveDuration(activityId: string | undefined, requested: number | und
   // (PlanWithAuraView's own picker default) -- never a new Ask-specific
   // default table (brief section 21).
   return activity?.defaultDurationMinutes ?? 30;
+}
+
+// ============================================================
+// TIMING_CHECK candidate-instant resolution (Ask Aura Exact Clock-Time
+// CHECK V1) -- shared by BOTH handleTimingCheck() (generic) and
+// handleMuhurthamTimingCheck() (ceremonial, PR #65) so the two paths can
+// never independently drift on how a candidate instant is derived.
+//
+// Two cases:
+//  - parsed.exactTime set (a genuine, VALID clock time the parser found --
+//    "10 AM" -> "10:00"): resolve the target LOCAL calendar date (today/
+//    tomorrow/ISO custom date -- parseHorizonPhrase already refuses to set
+//    exactTime unless horizonPhrase names a single concrete date, never a
+//    multi-day range), combine with the parsed HH:mm in the Timing/Event
+//    Location's OWN timezone, and convert via localDateTimeToUTC() -- the
+//    SAME canonical, DST-aware, Intl-timezone-database-driven utility
+//    every other local-date+time conversion in this app already uses,
+//    never a second hand-rolled UTC-offset calculation. Ask Aura's own
+//    Event Location support remains deferred (brief section 28), so this
+//    always uses the caller's Timing Location -- never Birth timezone.
+//  - No exactTime: UNCHANGED existing behavior (this PR does not touch
+//    it) -- "now" uses the literal current instant; any other horizon
+//    falls back to a fixed 'T12:00:00.000Z' (UTC noon) placeholder on that
+//    date, a known, documented limitation left for a later PR.
+// ============================================================
+
+function resolveTimingCheckCandidateStart(parsed: ParsedAskAuraRequest, deps: AskAuraOrchestratorDeps): string {
+  if (parsed.exactTime) {
+    const targetDate = resolveHorizonToDateRange(parsed.horizonPhrase, parsed.customDate, deps.context).start;
+    return localDateTimeToUTC(targetDate, parsed.exactTime, deps.context.timezone).toISOString();
+  }
+  return parsed.horizonPhrase === 'NOW' || !parsed.horizonPhrase
+    ? deps.context.now.toISOString()
+    : resolveHorizonToDateRange(parsed.horizonPhrase, parsed.customDate, deps.context).start + 'T12:00:00.000Z';
 }
 
 // ============================================================
@@ -359,9 +394,7 @@ function handleGoodRightNow(parsed: ParsedAskAuraRequest, deps: AskAuraOrchestra
 
 async function handleTimingCheck(parsed: ParsedAskAuraRequest, deps: AskAuraOrchestratorDeps): Promise<AskAuraResponse> {
   const durationMinutes = resolveDuration(parsed.activityId, parsed.durationMinutes);
-  const candidateStart = parsed.horizonPhrase === 'NOW' || !parsed.horizonPhrase
-    ? deps.context.now.toISOString()
-    : resolveHorizonToDateRange(parsed.horizonPhrase, parsed.customDate, deps.context).start + 'T12:00:00.000Z';
+  const candidateStart = resolveTimingCheckCandidateStart(parsed, deps);
 
   const request: TimingSearchRequest = {
     mode: 'CHECK',
@@ -424,9 +457,7 @@ async function handleMuhurthamTimingCheck(parsed: ParsedAskAuraRequest, deps: As
   const activity = FULL_ACTIVITY_CATALOG.find((a) => a.id === parsed.activityId);
   const activityTitle = activity?.title ?? parsed.taskTitle ?? 'this';
 
-  const candidateStart = parsed.horizonPhrase === 'NOW' || !parsed.horizonPhrase
-    ? deps.context.now.toISOString()
-    : resolveHorizonToDateRange(parsed.horizonPhrase, parsed.customDate, deps.context).start + 'T12:00:00.000Z';
+  const candidateStart = resolveTimingCheckCandidateStart(parsed, deps);
   const start = new Date(candidateStart);
 
   if (parsed.scope === 'SHARED' && parsed.personNameQuery) {
