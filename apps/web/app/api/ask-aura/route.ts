@@ -61,7 +61,7 @@ export async function POST(req: NextRequest) {
   // (brief section 16) -- they carry no independent intent of their own,
   // only a change to the previous turn's fields.
   const followUpChange = previous ? parseFollowUpChange(prompt, previous) : null;
-  const parsed = followUpChange ?? parseAskAuraRequest(prompt, { now, previous });
+  const parsed = followUpChange ?? parseAskAuraRequest(prompt, { now, timezone: user.timezone, previous });
 
   void recordProductEvent({
     eventName: 'ASK_AURA_INTENT_RESOLVED',

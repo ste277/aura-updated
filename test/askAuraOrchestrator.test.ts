@@ -207,6 +207,40 @@ async function main() {
     check('Everyday exact-time CHECK can still surface betterNearby as a separate field (unchanged generic CHECK behavior)', 'requested' in (card ?? {}) && 'betterNearby' in (card ?? {}));
   }
 
+  // ============================================================
+  // Ask Aura Absolute Date + Weekday Parsing V1 follow-up: an explicit past
+  // date must not silently execute as a normal future-planning result.
+  // Confirmed directly (before this guard existed) that neither Timing
+  // Search nor the Muhurtham engine has any "must be in the future" check
+  // of its own -- both computed a real-looking score AND offered a
+  // "Plan this" action for a 2020 date. Everyday date-only and exact-time
+  // paths proven here; ceremonial paths proven in
+  // test/askAuraMarriageRouting.test.ts.
+  // ============================================================
+  {
+    const parsed = parseAskAuraRequest('Is September 20 2020 good for deep work?', { now: NOW, timezone: 'Asia/Kolkata' });
+    check('Everyday date-only explicit past date -> UNKNOWN at the parser', parsed.intent === 'UNKNOWN');
+    const response = await orchestrateAskAura(parsed, deps);
+    check('Everyday date-only explicit past date -> UNKNOWN response, no silent execution', response.intent === 'UNKNOWN');
+    check('No "Plan this" action for a historical instant', !response.actions?.some((a) => a.type === 'PLAN_THIS'));
+  }
+  {
+    const parsed = parseAskAuraRequest('Is 10 AM on September 20 2020 good for deep work?', { now: NOW, timezone: 'Asia/Kolkata' });
+    check('Everyday exact-time explicit past date -> UNKNOWN at the parser', parsed.intent === 'UNKNOWN');
+    const response = await orchestrateAskAura(parsed, deps);
+    check('Everyday exact-time explicit past date -> UNKNOWN response, no silent execution', response.intent === 'UNKNOWN');
+    check('No "Plan this" action for a historical instant', !response.actions?.some((a) => a.type === 'PLAN_THIS'));
+  }
+  {
+    // A FUTURE explicit date must remain completely unaffected by the past-
+    // date guard -- this is the regression control proving the fix is
+    // narrowly scoped to genuinely past dates.
+    const parsed = parseAskAuraRequest('Is September 20 2026 good for deep work?', { now: NOW, timezone: 'Asia/Kolkata' });
+    check('Everyday date-only explicit FUTURE date is unaffected', parsed.intent === 'TIMING_FIND' && parsed.customDate === '2026-09-20');
+    const response = await orchestrateAskAura(parsed, deps);
+    check('Executes normally, not UNKNOWN', response.intent === 'TIMING_FIND');
+  }
+
   console.log(allPassed ? '\nALL ASK AURA ORCHESTRATOR CHECKS PASSED' : '\nSOME ASK AURA ORCHESTRATOR CHECKS FAILED');
   process.exit(allPassed ? 0 : 1);
 }

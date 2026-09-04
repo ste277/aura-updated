@@ -353,16 +353,22 @@ for (const [t, expectedIntent] of [
   check('"Is 2026-09-20 at 10 AM good for marriage?" -> CUSTOM_DATE=2026-09-20, exactTime=10:00', r.intent === 'TIMING_CHECK' && r.horizonPhrase === 'CUSTOM_DATE' && r.customDate === '2026-09-20' && r.exactTime === '10:00');
 }
 
-// Section 54/55: month-name and weekday negative controls -- a valid
-// clock with NO recognized date/horizon must never silently pick
-// today/tomorrow.
+// Section 54/55: month-name and weekday negative controls -- WITHOUT a
+// timezone supplied (backward compat: many callers, including most of this
+// file's own fixtures, never exercise natural-date parsing at all), a
+// valid clock with NO recognized date/horizon must never silently pick
+// today/tomorrow. Updated by Ask Aura Absolute Date + Weekday Parsing V1:
+// month-name/weekday dates ARE now supported, but ONLY when the caller
+// supplies a timezone (see the dedicated section below for the resolved,
+// positive-result tests) -- with no timezone at all (this section), the
+// same conservative UNKNOWN result is preserved unchanged.
 {
   const r = parse('Is 10 AM on September 20 good for marriage?');
-  check('"Is 10 AM on September 20 good for marriage?" -> UNKNOWN (month names remain unsupported, no invented date)', r.intent === 'UNKNOWN');
+  check('"Is 10 AM on September 20 good for marriage?" with NO timezone -> UNKNOWN (natural-date parsing needs a timezone; see below for the resolved case)', r.intent === 'UNKNOWN');
 }
 {
   const r = parse('Is 10 AM next Friday good for marriage?');
-  check('"Is 10 AM next Friday good for marriage?" -> UNKNOWN (weekdays remain unsupported, no invented date)', r.intent === 'UNKNOWN');
+  check('"Is 10 AM next Friday good for marriage?" with NO timezone -> UNKNOWN (natural-date parsing needs a timezone; see below for the resolved case)', r.intent === 'UNKNOWN');
 }
 
 // Section 56: no-date clock control.
@@ -373,6 +379,309 @@ for (const [t, expectedIntent] of [
 {
   const r = parse('Is 10 AM good for deep work?');
   check('"Is 10 AM good for deep work?" (no date at all) -> UNKNOWN, conservative clarification', r.intent === 'UNKNOWN');
+}
+
+// ============================================================
+// Ask Aura Absolute Date + Weekday Parsing V1: month-name ("September 20")
+// and weekday ("Friday", "next Friday") dates, resolved against the Timing
+// Location's own local "today" (never the server's UTC date) via a new
+// `timezone` field on AskAuraParseContext. Only exercised when a timezone
+// is supplied -- see the negative controls above for the no-timezone case.
+// ============================================================
+
+const TZ = 'Asia/Kolkata';
+function parseTz(text: string, now: Date, timezone: string | undefined = TZ) {
+  return parseAskAuraRequest(text, { now, timezone });
+}
+
+// Fixed "now" whose Asia/Kolkata local date is 2026-09-04, a Friday.
+const FRIDAY_NOW = new Date('2026-09-04T10:00:00.000Z');
+
+// --- Month-name date forms ---
+for (const t of [
+  'Is September 20 good for marriage?',
+  'Is Sep 20 good for marriage?',
+  'Is Sept 20 good for marriage?',
+  'Is September 20th good for marriage?',
+  'Is 20 September good for marriage?',
+  'Is 20th September good for marriage?',
+  'Is 20 Sep good for marriage?',
+]) {
+  const r = parseTz(t, FRIDAY_NOW);
+  check(`"${t}" -> customDate=2026-09-20`, r.horizonPhrase === 'CUSTOM_DATE' && r.customDate === '2026-09-20');
+}
+
+// --- Explicit year always wins for a FUTURE date (preserved exactly,
+// never silently rolled forward) ---
+for (const [t, expected] of [
+  ['Is September 20 2026 good for marriage?', '2026-09-20'],
+  ['Is September 20, 2026 good for marriage?', '2026-09-20'],
+  ['Is 20 September 2026 good for marriage?', '2026-09-20'],
+] as const) {
+  const r = parseTz(t, FRIDAY_NOW);
+  check(`"${t}" -> customDate=${expected} (explicit year wins)`, r.customDate === expected);
+}
+
+// --- Explicit PAST date: historical timing is not an intentional Ask Aura
+// capability (neither Timing Search nor the Muhurtham engine has a
+// "must be in the future" guard of their own -- verified directly, both
+// will compute a real-looking score and even offer a "Plan this" action
+// for a historical instant if not stopped here). The date must be
+// preserved EXACTLY internally (never mutated into a future year -- this
+// is what distinguishes it from the implicit-year "already passed this
+// year" case just below, which DOES roll forward) but the request as a
+// whole must resolve to UNKNOWN/clarification, never a silent
+// future-planning-shaped result. ---
+for (const t of ['Is September 20 2020 good for marriage?', 'Is September 20, 2020 good for marriage?', 'Is 20 September 2020 good for marriage?']) {
+  const r = parseTz(t, FRIDAY_NOW);
+  check(`"${t}" (explicit past date) -> UNKNOWN, never a silent past-date result`, r.intent === 'UNKNOWN');
+}
+// Same guard applies to the PRE-EXISTING ISO-date path too (this PR's
+// natural-date and ISO customDate converge into the same field, so a
+// single shared check covers both) -- confirmed via direct trace that
+// this exact gap already existed on main before this PR, just via a
+// different syntax; closing it here rather than leaving one path fixed
+// and the other silently broken.
+{
+  const r = parseTz('Is 2020-09-20 good for marriage?', FRIDAY_NOW);
+  check('"Is 2020-09-20 good for marriage?" (explicit past ISO date) -> UNKNOWN', r.intent === 'UNKNOWN');
+}
+// No timezone supplied -> the past-date guard itself is skipped (it needs
+// a timezone to know what "today" locally even is), so behavior here is
+// UNCHANGED from before this follow-up -- still whatever the pre-existing
+// path already did (UNKNOWN via the generic bare-activity/no-signal
+// fallback for this particular phrasing).
+{
+  const r = parseAskAuraRequest('Is September 20 2020 good for marriage?', { now: FRIDAY_NOW });
+  check('No timezone supplied -> past-date guard not applied (unchanged pre-existing behavior)', r.intent === 'UNKNOWN');
+}
+
+// --- Implicit year: already-passed month/day rolls to next year; today's
+// own exact month/day stays THIS year (same-day policy) ---
+{
+  const r = parseTz('Is August 20 good for marriage?', FRIDAY_NOW);
+  check('"Is August 20 good for marriage?" (already passed this year, local today=2026-09-04) -> 2027-08-20', r.customDate === '2027-08-20');
+}
+{
+  const r = parseTz('Is September 4 good for marriage?', FRIDAY_NOW);
+  check('"Is September 4 good for marriage?" (== local today) -> 2026-09-04, not rolled to next year', r.customDate === '2026-09-04');
+}
+{
+  const r = parseTz('Is September 5 good for marriage?', FRIDAY_NOW);
+  check('"Is September 5 good for marriage?" (tomorrow) -> 2026-09-05', r.customDate === '2026-09-05');
+}
+
+// --- Leap day ---
+{
+  const r = parseTz('Is February 29 2028 good for marriage?', FRIDAY_NOW);
+  check('"February 29 2028" (leap year, explicit) -> valid 2028-02-29', r.customDate === '2028-02-29');
+}
+{
+  const r = parseTz('Is February 29 2027 good for marriage?', FRIDAY_NOW);
+  check('"February 29 2027" (non-leap year, explicit) -> UNKNOWN, never normalized to March 1', r.intent === 'UNKNOWN');
+}
+{
+  const r = parseTz('Is February 29 good for marriage?', FRIDAY_NOW);
+  check('Implicit "February 29" (2026 is not a leap year) -> rolls to next valid future leap day, 2028-02-29', r.customDate === '2028-02-29');
+}
+
+// --- Invalid calendar dates: never silently JS-Date-rollover-normalized ---
+for (const t of ['Is February 30 good for marriage?', 'Is April 31 good for marriage?', 'Is September 31 good for marriage?', 'Is November 31 good for marriage?', 'Is September 32 good for marriage?']) {
+  const r = parseTz(t, FRIDAY_NOW);
+  check(`"${t}" (impossible calendar date) -> UNKNOWN, never a fallback date`, r.intent === 'UNKNOWN');
+}
+
+// --- Weekday semantics: bare weekday = next occurrence INCLUDING today;
+// "next <weekday>" = the following calendar week, not merely the next
+// chronological occurrence (brief's own worked example: today=Friday). ---
+{
+  const r = parseTz('Is Friday good for marriage?', FRIDAY_NOW);
+  check('Bare "Friday" when today IS Friday -> today, 2026-09-04', r.customDate === '2026-09-04');
+}
+{
+  const r = parseTz('Is next Friday good for marriage?', FRIDAY_NOW);
+  check('"next Friday" when today IS Friday -> 7 days later, 2026-09-11 (not today)', r.customDate === '2026-09-11');
+}
+{
+  const r = parseTz('Is this Friday good for marriage?', FRIDAY_NOW);
+  check('"this Friday" when today IS Friday -> today, 2026-09-04 (same inclusive semantics as bare)', r.customDate === '2026-09-04');
+}
+{
+  const r = parseTz('Is Saturday good for marriage?', FRIDAY_NOW);
+  check('Bare "Saturday" when today is Friday -> tomorrow, 2026-09-05', r.customDate === '2026-09-05');
+}
+{
+  const r = parseTz('Is Thursday good for marriage?', FRIDAY_NOW);
+  check('Bare "Thursday" when today is Friday -> next occurrence, 2026-09-10 (6 days away)', r.customDate === '2026-09-10');
+}
+// Second worked example from the brief: today=Thursday -- bare Friday is
+// tomorrow, but "next Friday" is the Friday of the week AFTER this one
+// (8 days away), not merely the next chronological Friday.
+{
+  const THURSDAY_NOW = new Date('2026-09-03T10:00:00.000Z'); // Asia/Kolkata local: 2026-09-03, Thursday
+  const bareFriday = parseTz('Is Friday good for marriage?', THURSDAY_NOW);
+  check('Bare "Friday" when today is Thursday -> tomorrow, 2026-09-04', bareFriday.customDate === '2026-09-04');
+  const nextFriday = parseTz('Is next Friday good for marriage?', THURSDAY_NOW);
+  check('"next Friday" when today is Thursday -> Friday of the FOLLOWING week, 2026-09-11 (not tomorrow)', nextFriday.customDate === '2026-09-11');
+}
+// Bare weekday equal to today, using the file's own shared Sunday fixture.
+{
+  const r = parseTz('Is Sunday good for marriage?', NOW);
+  check('Bare "Sunday" when today IS Sunday (shared file fixture) -> today, 2026-08-23', r.customDate === '2026-08-23');
+}
+
+// --- CRITICAL timezone-date-boundary test: the UTC calendar date and the
+// Timing Location's local calendar date differ -- weekday resolution must
+// use the LOCAL date, never UTC. ---
+{
+  // UTC 2026-09-04T20:00:00.000Z is already 2026-09-05 (Saturday) in
+  // Asia/Kolkata (UTC+5:30).
+  const boundaryNow = new Date('2026-09-04T20:00:00.000Z');
+  const utcParts = { year: boundaryNow.getUTCFullYear(), month: boundaryNow.getUTCMonth() + 1, day: boundaryNow.getUTCDate() };
+  check('sanity: UTC calendar date is 2026-09-04 (Friday), one day behind local', utcParts.month === 9 && utcParts.day === 4);
+  const r = parseTz('Is Saturday good for marriage?', boundaryNow, 'Asia/Kolkata');
+  check('"Is Saturday good for marriage?" resolves against LOCAL 2026-09-05 (Saturday=today locally), not UTC 2026-09-04 (still Friday there)', r.customDate === '2026-09-05');
+}
+
+// --- Range rejection: never silently keep just the first date ---
+for (const t of ['Is September 20-25 good for marriage?', 'Is September 20 to September 25 good for marriage?', 'Is September 20 to 25 good for marriage?', 'Is next Monday through Friday good for marriage?']) {
+  const r = parseTz(t, FRIDAY_NOW);
+  check(`"${t}" (unsupported date RANGE) -> UNKNOWN, never partially consumed`, r.intent === 'UNKNOWN');
+}
+
+// --- Month-only (no day number) must NOT become a single date ---
+{
+  const r = parseTz('Is October good for marriage?', FRIDAY_NOW);
+  check('Bare "October" (no day) -> not resolved as CUSTOM_DATE', r.horizonPhrase !== 'CUSTOM_DATE');
+}
+
+// --- "next month" must stay NEXT_MONTH, never reinterpreted as a named-
+// month date ---
+{
+  const r = parseTz('Find the best time next month for a workout.', FRIDAY_NOW);
+  check('"next month" -> NEXT_MONTH horizon, unaffected by month-name date parsing', r.horizonPhrase === 'NEXT_MONTH');
+}
+
+// --- ISO date / today / tomorrow precedence preserved unchanged ---
+{
+  const r = parseTz('Is 2026-09-20 good for marriage?', FRIDAY_NOW);
+  check('ISO date still resolves directly -> 2026-09-20', r.customDate === '2026-09-20');
+}
+{
+  const r = parseTz('Is today good for marriage?', FRIDAY_NOW);
+  check('"today" -> TODAY horizon (relative-phrase precedence preserved)', r.horizonPhrase === 'TODAY');
+}
+{
+  const r = parseTz('Is tomorrow good for marriage?', FRIDAY_NOW);
+  check('"tomorrow" -> TOMORROW horizon (relative-phrase precedence preserved)', r.horizonPhrase === 'TOMORROW');
+}
+
+// --- No timezone supplied at all -> natural-date parsing stays ABSENT
+// (backward compat: the field is optional). Calling parseAskAuraRequest
+// directly here (not via parseTz, whose `timezone` parameter defaults to
+// TZ even when explicitly passed `undefined` -- JS default-parameter
+// substitution applies to an explicit `undefined` argument too) so the
+// context object genuinely has no `timezone` key at all. ---
+{
+  const r = parseAskAuraRequest('Is September 20 good for marriage?', { now: FRIDAY_NOW });
+  check('No timezone supplied -> "September 20" is NOT parsed as a date', r.horizonPhrase !== 'CUSTOM_DATE');
+}
+{
+  const r = parseAskAuraRequest('Is Friday good for marriage?', { now: FRIDAY_NOW });
+  check('No timezone supplied -> "Friday" is NOT parsed as a date', r.horizonPhrase !== 'CUSTOM_DATE');
+}
+
+// --- Month date / weekday date + exact clock -> TIMING_CHECK (the
+// exact-clock machinery from PR #66 works automatically, unmodified, once
+// customDate is resolved) ---
+{
+  const r = parseTz('Is 10 AM on September 20 good for marriage?', FRIDAY_NOW);
+  check('"Is 10 AM on September 20 good for marriage?" -> TIMING_CHECK, exactTime=10:00, customDate=2026-09-20', r.intent === 'TIMING_CHECK' && r.exactTime === '10:00' && r.customDate === '2026-09-20');
+}
+{
+  const r = parseTz('Is 10 AM next Friday good for marriage?', FRIDAY_NOW);
+  check('"Is 10 AM next Friday good for marriage?" -> TIMING_CHECK, exactTime=10:00, customDate=2026-09-11', r.intent === 'TIMING_CHECK' && r.exactTime === '10:00' && r.customDate === '2026-09-11');
+}
+
+// --- Date-only (no clock) -> TIMING_FIND, never CHECK, for both marriage
+// and an everyday activity (the orchestrator's own capability redirect,
+// unchanged by this PR, is what sends marriage's TIMING_FIND on to the
+// canonical Muhurtham engine -- proven in test/askAuraMarriageRouting.test.ts) ---
+{
+  const r = parseTz('Is September 20 good for marriage?', FRIDAY_NOW);
+  check('Marriage date-only (no clock) -> TIMING_FIND, never TIMING_CHECK', r.intent === 'TIMING_FIND' && r.customDate === '2026-09-20');
+}
+{
+  const r = parseTz('Best time for a workout on September 20?', FRIDAY_NOW);
+  check('Everyday date-only -> TIMING_FIND', r.intent === 'TIMING_FIND' && r.activityId === 'workout' && r.customDate === '2026-09-20');
+}
+{
+  const r = parseTz('Workout on Saturday.', FRIDAY_NOW);
+  check('Everyday bare weekday date -> TIMING_FIND', r.intent === 'TIMING_FIND' && r.activityId === 'workout' && r.customDate === '2026-09-05');
+}
+
+// --- Dating alias regression: "date" terminology near a natural calendar
+// date must not confuse activity resolution ---
+{
+  const r = parseTz('Is Friday at 7 PM good for a date?', FRIDAY_NOW);
+  check('"Is Friday at 7 PM good for a date?" still resolves activityId=dating, unaffected by date-parsing collision', r.activityId === 'dating');
+}
+
+// --- Duration regression: an arbitrary 4-digit number attached to
+// "minutes" must never be mistaken for a year/date ---
+{
+  const r = parseTz('Best time for deep work for 2026 minutes.', FRIDAY_NOW);
+  check('"2026 minutes" duration is never treated as a year/date', r.horizonPhrase !== 'CUSTOM_DATE' && r.durationMinutes === 2026);
+}
+
+// --- SHARED grammar unaffected: only existing "with <name>"/"for us"/"for
+// me" forms, alongside a resolved natural date ---
+{
+  const r = parseTz('Is September 20 good for marriage with Priya?', FRIDAY_NOW);
+  check('SHARED "with Priya" resolves correctly alongside a natural date', r.scope === 'SHARED' && r.personNameQuery === 'priya' && r.customDate === '2026-09-20');
+}
+
+// --- Explicit FIND precedence preserved even with a natural date present ---
+{
+  const r = parseTz('Find the best time on September 20 for a workout.', FRIDAY_NOW);
+  check('Explicit "Find the best time..." phrasing + natural date -> TIMING_FIND', r.intent === 'TIMING_FIND' && r.customDate === '2026-09-20');
+}
+
+// --- Panchang regression: PANCHANG_QUERY_RE's own existing "when is"
+// pattern is untouched, but now incidentally carries a resolved customDate
+// through (the field extraction it already consumed is simply more often
+// populated) -- documented as an incidental benefit, not a redesign. ---
+{
+  const r = parseTz('When is Rahu Kalam on September 20?', FRIDAY_NOW);
+  check('Panchang query now carries the resolved customDate through (incidental improvement, PANCHANG_QUERY_RE itself untouched)', r.intent === 'PANCHANG_QUERY' && r.customDate === '2026-09-20');
+}
+
+// --- Follow-up regression: "What about October?" / "What about Chennai?"
+// must remain EXACTLY as broken as before -- parseFollowUpChange never
+// calls the new natural-date functions, only the original, untouched
+// parseHorizonPhrase, so this is unaffected by construction. ---
+{
+  const previous = parseTz('Is tomorrow good for marriage?', FRIDAY_NOW);
+  check('sanity: previous turn has horizonPhrase=TOMORROW (not CUSTOM_DATE)', previous.horizonPhrase === 'TOMORROW');
+  const octoberDelta = parseFollowUpChange('What about October?', previous);
+  check('Follow-up "What about October?" still mis-parsed exactly as before (personNameQuery=october, delta itself never resolves a date)', octoberDelta !== null && octoberDelta.personNameQuery === 'october' && octoberDelta.horizonPhrase === 'TOMORROW');
+  const chennaiDelta = parseFollowUpChange('What about Chennai?', previous);
+  check('Follow-up "What about Chennai?" still mis-parsed exactly as before (personNameQuery=chennai)', chennaiDelta !== null && chennaiDelta.personNameQuery === 'chennai');
+}
+
+// --- Partial-consumption safety: a date-shaped prefix followed by
+// unrelated garbage must not silently produce a truncated/wrong date ---
+{
+  const r = parseTz('Is Septemberish 20 good for marriage?', FRIDAY_NOW);
+  check('"Septemberish" (not a real month name) -> not resolved as a date', r.horizonPhrase !== 'CUSTOM_DATE');
+}
+
+// --- Stretch goal: "Friday morning" resolves to CUSTOM_DATE + MORNING
+// with FIND semantics (an activity must still be present for this to
+// route anywhere at all). ---
+{
+  const r = parseTz('Workout Friday morning.', FRIDAY_NOW);
+  check('"Workout Friday morning." -> TIMING_FIND, CUSTOM_DATE=2026-09-04 (today, Friday), timePreference=MORNING', r.intent === 'TIMING_FIND' && r.horizonPhrase === 'CUSTOM_DATE' && r.customDate === '2026-09-04' && r.timePreference === 'MORNING');
 }
 
 if (!allPassed) {
