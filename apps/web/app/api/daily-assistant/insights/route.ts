@@ -3,6 +3,8 @@ import { getUserById, listDailyReflections, listHabitLogsForInsights, INSIGHTS_H
 import { getSessionFromRequest } from '../../../../lib/session';
 import { getDatePartsInTimezone } from '../../../../lib/timezone';
 import { classifyInsightsWindow } from '../../../../lib/insightsWindowAlignment';
+import { toInsightsObservation, isInCalendarMonth } from '../../../../lib/insightsTimezone';
+import { summarizeAuraFit } from '../../../../lib/insightsAuraFit';
 
 const REFLECTION_HISTORY_DAYS = 60;
 
@@ -52,6 +54,24 @@ export async function GET(req: NextRequest) {
     if (band === 'FRICTION') existing.friction += 1;
     logsByDay.set(dateKey, existing);
   });
+
+  // Canonical Aura Fit Insights V1 -- a SEPARATE, activity-aware metric
+  // from the window-only Timing Pattern/Alignment calculations above and
+  // in InsightsView.tsx (C1); never blended with them. CURRENT_MONTH
+  // scope, using the exact same Timing-Location calendar-month semantics
+  // as InsightsView.tsx's own "This Month" card (PR #76's
+  // getDatePartsInTimezone/isInCalendarMonth), so `auraFit.totalCount`
+  // means "current-month HabitLogs," not the full up-to-
+  // INSIGHTS_HISTORY_DAYS retrieval set already fetched above. Evaluation
+  // itself uses each log's own absolute logTimestamp
+  // (apps/web/lib/insightsAuraFit.ts); only the SCOPING (which logs count
+  // as "this month") uses the owner's current Timing Location -- two
+  // separate concerns, matching the C3 architecture's own explicit
+  // evaluation/grouping split.
+  const now = new Date();
+  const { year: currentYear, month: currentMonth } = getDatePartsInTimezone(user.timezone, now);
+  const currentMonthLogs = logs.filter((log) => isInCalendarMonth(toInsightsObservation(new Date(log.logTimestamp), user.timezone).dateKey, currentYear, currentMonth));
+  const auraFit = summarizeAuraFit(currentMonthLogs);
 
   let alignedScoreTotal = 0;
   let alignedTotal = 0;
@@ -137,5 +157,10 @@ export async function GET(req: NextRequest) {
     // every call site (apps/web/components/InsightsView.tsx).
     alignmentDeltaPoints,
     insightText,
+    // Canonical Aura Fit Insights V1 -- additive field, always computable
+    // from data already fetched above (no extra DB query). See
+    // apps/web/lib/insightsAuraFit.ts for the full eligibility/aggregation
+    // contract this reflects.
+    auraFit,
   });
 }
