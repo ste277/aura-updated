@@ -1,6 +1,6 @@
 import { Pool } from 'pg';
 import { randomUUID } from 'crypto';
-import { getMinuteOfDayInTimezone } from './timezone';
+import { derivePlanCompletionHistory } from './planCompletionHistory';
 
 // Sandbox-only substitute for @prisma/client (its engine binary can't be downloaded
 // here — see README). Same schema, same Postgres instance, plain SQL. Swap API
@@ -1253,15 +1253,48 @@ export async function logPlannedActivity(userId: string, planId: string): Promis
       throw new Error('Plan is not available to log.');
     }
 
+    // Plan Completion Historical Integrity V1 -- widened from the old
+    // `SELECT timezone` to also fetch latitude/longitude, the two
+    // additional Timing Location fields needed to resolve the ACTUAL
+    // historical solar window at the real completion instant (previously
+    // unavailable inside this transaction). Still exactly one User query,
+    // still on this same transaction client. Deliberately User.latitude/
+    // User.longitude/User.timezone (current Timing Location) -- never
+    // birthLatitude/birthLongitude/birthTimezone (Birth Location) and
+    // never plan.eventTimezone/plan.eventLocationName (Event Location,
+    // which carries no coordinates anyway and is irrelevant to an ordinary
+    // Plan completion).
     const userRes = await client.query(
-      `SELECT timezone FROM "User" WHERE id = $1`,
+      `SELECT latitude, longitude, timezone FROM "User" WHERE id = $1`,
       [userId]
     );
+    const userLatitude: number = userRes.rows[0]?.latitude;
+    const userLongitude: number = userRes.rows[0]?.longitude;
     const userTimezone = userRes.rows[0]?.timezone || 'UTC';
     const habitLogId = randomUUID();
-    const loggedAt = new Date();
-    const logTimestamp = new Date(plan.plannedStartAt);
-    const logMinuteOfDay = getMinuteOfDayInTimezone(userTimezone, logTimestamp);
+
+    // Plan Completion Historical Integrity V1 -- ONE server-authoritative
+    // clock read for the entire completion. Previously, `loggedAt = new
+    // Date()` (the real completion instant) was captured correctly for
+    // PlannedActivity.loggedAt, but HabitLog.logTimestamp/activeWindow/
+    // logMinuteOfDay were independently derived from plan.plannedStartAt/
+    // plan.windowType -- the PLAN, not the OBSERVATION. Both the plan's own
+    // "when did you say you'd do this" (plannedStartAt/plannedEndAt/
+    // windowType, all left untouched below) and this HabitLog's "when did
+    // you actually do this" now come from that single distinction: the
+    // former is never read past this point, the latter -- completionInstant
+    // -- feeds every actual-history field, via derivePlanCompletionHistory
+    // (apps/web/lib/planCompletionHistory.ts), which composes the exact
+    // same resolveHistoricalActiveWindow/getMinuteOfDayInTimezone
+    // primitives POST /api/habit-logs already uses for live and backdated
+    // manual logs -- no new solar-window or timezone math.
+    const completionInstant = new Date();
+    const { logTimestamp, activeWindow, logMinuteOfDay } = derivePlanCompletionHistory({
+      completionInstant,
+      latitude: userLatitude,
+      longitude: userLongitude,
+      timezone: userTimezone,
+    });
     const notes = `Logged from planned Aura activity${plan.recommendation ? `: ${plan.recommendation}` : '.'}`;
 
     const habitLogRes = await client.query(
@@ -1274,7 +1307,7 @@ export async function logPlannedActivity(userId: string, planId: string): Promis
         habitLogId,
         userId,
         plan.title,
-        plan.windowType,
+        activeWindow,
         logMinuteOfDay,
         logTimestamp,
         plan.durationMinutes,
@@ -1290,7 +1323,7 @@ export async function logPlannedActivity(userId: string, planId: string): Promis
            "updatedAt" = now()
        WHERE id = $1 AND "userId" = $2
        RETURNING *`,
-      [planId, userId, loggedAt, habitLogId]
+      [planId, userId, completionInstant, habitLogId]
     );
 
     await client.query('COMMIT');
