@@ -3,6 +3,7 @@ import { createHabitLog, getUserById, listHabitLogsForInsights, INSIGHTS_HISTORY
 import { getSessionFromRequest } from '../../../lib/session';
 import { parseJsonObject } from '../../../lib/request';
 import { resolveHistoricalActiveWindow } from '../../../lib/historicalActivityWindow';
+import { getMinuteOfDayInTimezone } from '../../../lib/timezone';
 
 function parseLogSource(value: unknown): 'AURA_PLANNED' | 'AURA_DO_NOW' | 'MANUAL' | 'OVERRIDE_CAUTION' {
   if (value === 'AURA_PLANNED' || value === 'AURA_DO_NOW' || value === 'MANUAL' || value === 'OVERRIDE_CAUTION') return value;
@@ -26,11 +27,10 @@ export async function POST(req: NextRequest) {
   const body = await parseJsonObject(req);
   if (!body) return NextResponse.json({ error: 'A valid JSON request body is required.' }, { status: 400 });
 
-  const { activityTitle, logMinuteOfDay, logTimestamp, notes, durationMinutes, logSource, activitySignificance } = body;
+  const { activityTitle, logTimestamp, notes, durationMinutes, logSource, activitySignificance } = body;
   const cleanTitle = typeof activityTitle === 'string' ? activityTitle.trim() : '';
-  const minuteOfDay = Number(logMinuteOfDay);
 
-  if (!cleanTitle || !Number.isFinite(minuteOfDay) || minuteOfDay < 0 || minuteOfDay > 1439) {
+  if (!cleanTitle) {
     return NextResponse.json({ error: 'Missing required fields.' }, { status: 400 });
   }
 
@@ -54,11 +54,23 @@ export async function POST(req: NextRequest) {
   // log.
   const activeWindow = resolveHistoricalActiveWindow(customDate, user.latitude, user.longitude, user.timezone);
 
+  // Insights Timezone Consistency V1 -- logMinuteOfDay is now ALSO ALWAYS
+  // computed server-side, from the exact SAME logTimestamp + owner Timing
+  // Location used for activeWindow above, mirroring PR #75's
+  // server-authoritative pattern. Previously the client computed this
+  // value itself (page.tsx: browser-local `targetDate.getHours()*60+
+  // getMinutes()`) and the server trusted it as-is -- an inconsistent
+  // provenance (correct for logPlannedActivity's own server-side path via
+  // getMinuteOfDayInTimezone, but browser-local here) the prior audit
+  // flagged. A client-submitted `logMinuteOfDay`, if present in the
+  // request body, is no longer read or required at all.
+  const logMinuteOfDay = getMinuteOfDayInTimezone(user.timezone, customDate);
+
   const entry = await createHabitLog({
     userId: session.userId,
     activityTitle: cleanTitle,
     activeWindow,
-    logMinuteOfDay: Math.round(minuteOfDay),
+    logMinuteOfDay,
     logTimestamp: customDate,
     // Good Right Now Action Semantics V1: the floor used to be 5, silently
     // bumping any near-zero submission up -- that made it impossible to
