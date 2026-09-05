@@ -7,7 +7,7 @@
  */
 import { createSavedPerson, deleteSavedPerson, upsertUserByEmail } from '../apps/web/lib/db';
 import { parseAskAuraRequest } from '../packages/recommendation/src/askAuraIntent';
-import { orchestrateAskAura, resolveHorizonToDateRange, resolvePersonByName, AskAuraOrchestratorDeps } from '../apps/web/lib/askAuraOrchestrator';
+import { orchestrateAskAura, resolveHorizonToDateRange, resolveEventLocationQuery, resolvePersonByName, AskAuraOrchestratorDeps } from '../apps/web/lib/askAuraOrchestrator';
 import { DailyAssistantContext, profileFromActivity } from '../packages/recommendation/src/dailyAssistant';
 import { evaluateEverydaySharedCandidate } from '../packages/recommendation/src/everydayTimingFit';
 import { nearbyCheckInstants, runTimingSearch } from '../packages/recommendation/src/timingSearch';
@@ -316,6 +316,48 @@ async function main() {
       check('"Should Priya and me meditate at 10 AM tomorrow?" -> TIMING_CHECK, SHARED, priya, exactTime=10:00, unaffected', parsed.intent === 'TIMING_CHECK' && parsed.scope === 'SHARED' && parsed.personNameQuery === 'priya' && parsed.exactTime === '10:00');
       const response = await orchestrateAskAura(parsed, deps);
       check('Executes through the Scope-Aware Everyday TIMING_CHECK path (PR #69), never rerouted to FIND', response.intent === 'TIMING_CHECK');
+    }
+    // ============================================================
+    // Ask Aura Event Location V1: SHARED ceremonial CHECK with a real
+    // partner AND an explicit Event Location, end to end (brief section
+    // 23/24/44) -- the owner+Priya blend is unaffected (partnerContext
+    // comes from Priya's OWN SavedPerson birth fields regardless of
+    // location; the owner's fixture carries no personalContext, same as
+    // every other test in this file), while the CANDIDATE INSTANT and
+    // TIMEZONE come from the Event Location, not the owner's Chennai
+    // Timing Location. San Francisco (America/Los_Angeles) is used
+    // specifically because it differs from the owner's own Asia/Kolkata
+    // Timing Location -- a Chennai Event Location on a Chennai owner
+    // fixture couldn't distinguish "Event Location was applied" from
+    // "nothing changed".
+    // ============================================================
+    {
+      const sanFrancisco = resolveEventLocationQuery('san francisco');
+      check('resolveEventLocationQuery("san francisco") resolves the international CITY_OPTIONS entry', sanFrancisco?.cityName === 'San Francisco, USA' && sanFrancisco?.timezone === 'America/Los_Angeles');
+
+      const parsed = parseAskAuraRequest('Is 10 AM tomorrow good for Priya and me to get married in San Francisco?', { now: NOW, timezone: sanFrancisco!.timezone });
+      check('"...Priya and me to get married in San Francisco?" parses TIMING_CHECK, SHARED, priya, exactTime=10:00, marriage, locationQuery=san francisco', parsed.intent === 'TIMING_CHECK' && parsed.scope === 'SHARED' && parsed.personNameQuery === 'priya' && parsed.exactTime === '10:00' && parsed.activityId === 'marriage' && parsed.locationQuery === 'san francisco');
+
+      const response = await orchestrateAskAura(parsed, { ...deps, eventLocation: sanFrancisco });
+      check('Response stays TIMING_CHECK (canonical SHARED ceremonial evaluator, real Priya fixture, Event Location applied)', response.intent === 'TIMING_CHECK');
+      const card = response.cards?.[0] as { requested?: { startLabel?: string }; eventLocation?: { cityName?: string; timezone?: string } } | undefined;
+      check('Requested candidate displays as 10:00 AM San Francisco-local -- proves the SHARED evaluator used the Event Location\'s timezone, not the owner\'s own Chennai Timing Location', card?.requested?.startLabel === '10:00 AM');
+      check('Response echoes the resolved Event Location', card?.eventLocation?.cityName === 'San Francisco, USA' && card?.eventLocation?.timezone === 'America/Los_Angeles');
+      check('Action safety: no "Plan this" action for a SHARED Event Location result either', !response.actions?.some((a) => a.type === 'PLAN_THIS'));
+
+      const serialized = JSON.stringify(response);
+      const forbidden = ['birthDate', 'birthTime', 'birthTimezone', 'natalNakshatraIndex', 'ownerUserId'];
+      check('Owner/partner natal isolation preserved: SHARED Event Location response never leaks birth/natal/ownership data', forbidden.every((needle) => !serialized.includes(needle)));
+    }
+
+    // Unresolved Event Location on a real, resolvable SHARED partner must
+    // still fail closed -- Priya resolving cleanly must never be mistaken
+    // for the (separate) location resolving.
+    {
+      const parsed = parseAskAuraRequest('Is 10 AM tomorrow good for Priya and me to get married in Atlantis?', { now: NOW, timezone: owner.timezone });
+      check('"...in Atlantis?" parses TIMING_CHECK, SHARED, priya, locationQuery=atlantis (unresolved)', parsed.intent === 'TIMING_CHECK' && parsed.scope === 'SHARED' && parsed.personNameQuery === 'priya' && parsed.locationQuery === 'atlantis');
+      const response = await orchestrateAskAura(parsed, deps); // deps.eventLocation intentionally undefined
+      check('Unresolved Event Location fails closed to a CLARIFICATION even though the SavedPerson itself resolves cleanly', response.cards?.[0]?.type === 'CLARIFICATION');
     }
   } finally {
     for (const id of created) {
