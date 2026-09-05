@@ -268,7 +268,7 @@ function getHorizonHelper(horizon: PlanningHorizon, timezone?: string): string {
  */
 
 export async function saveUpcomingPlanFromCandidate(candidate: TimingCandidate, durationMinutes: number, options: SaveUpcomingPlanOptions = {}): Promise<UpcomingPlan> {
-  const { sharedWithName, guestConversionToken, clientRequestId, eventLocation } = options;
+  const { sharedWithName, guestConversionToken, clientRequestId, eventLocation, activityId } = options;
   const plan = planPayloadFromCandidate(candidate, durationMinutes, sharedWithName, eventLocation);
   const res = await fetch('/api/plans', {
     method: 'POST',
@@ -286,6 +286,10 @@ export async function saveUpcomingPlanFromCandidate(candidate: TimingCandidate, 
       score: plan.score,
       recommendation: plan.details,
       calendarUrl: plan.googleCalendarUrl,
+      // Planned Activity Canonical Identity Propagation V1 -- the caller's
+      // own already-known canonical id (or null when none is known). No
+      // resolution happens here; the server (POST /api/plans) validates.
+      activityId: activityId ?? null,
       ...(guestConversionToken ? { guestConversionToken } : {}),
       ...(clientRequestId ? { clientRequestId } : {}),
       ...(eventLocation ? { eventLocation } : {}),
@@ -454,7 +458,7 @@ export function PlanWithAuraView({ onTimingSearch, onViewDay, onPlanLogged, time
   const visibleCompletedPlans = showAllPlans ? completedPlans.slice(0, 5) : [];
   const canSubmit = Boolean(taskTitle.trim()) && (horizon !== 'CUSTOM' || Boolean(customStartDate && customEndDate && customEndDate >= customStartDate));
 
-  const handleSavePlan = async (plan: UpcomingPlan): Promise<UpcomingPlan> => {
+  const handleSavePlan = async (plan: UpcomingPlan, activityId?: string | null): Promise<UpcomingPlan> => {
     try {
       const res = await fetch('/api/plans', {
         method: 'POST',
@@ -472,6 +476,13 @@ export function PlanWithAuraView({ onTimingSearch, onViewDay, onPlanLogged, time
           score: plan.score,
           recommendation: plan.details,
           calendarUrl: plan.googleCalendarUrl,
+          // Planned Activity Canonical Identity Propagation V1 -- the
+          // already-resolved catalog activity for this search's own
+          // taskTitle (resolveActivitySelection, the same exact-match
+          // resolution FIND/CHECK/COMPARE already use for AuraMoment
+          // creation), or null for a free-text/no-match search. No
+          // resolution happens here; the server validates.
+          activityId: activityId ?? null,
         }),
       });
       if (!res.ok) throw new Error('Unable to save plan.');
@@ -816,11 +827,11 @@ export function PlanWithAuraView({ onTimingSearch, onViewDay, onPlanLogged, time
     });
   };
 
-  const saveOpportunity = async (key: string, plan: UpcomingPlan) => {
+  const saveOpportunity = async (key: string, plan: UpcomingPlan, activityId?: string | null) => {
     if (savingOpportunityKey || plannedOpportunityKeys.has(key)) return;
     setSavingOpportunityKey(key);
     try {
-      const saved = await handleSavePlan(plan);
+      const saved = await handleSavePlan(plan, activityId);
       setPlannedOpportunityKeys((prev) => new Set(prev).add(key));
       setPlannedActivityIdByKey((prev) => ({ ...prev, [key]: saved.id }));
     } catch {
@@ -1009,7 +1020,7 @@ export function PlanWithAuraView({ onTimingSearch, onViewDay, onPlanLogged, time
               durationMinutes={durationMinutes}
               isSaving={savingOpportunityKey === findCandidateKey(findResult.candidates[0])}
               isPlanned={plannedOpportunityKeys.has(findCandidateKey(findResult.candidates[0]))}
-              onPlan={() => saveOpportunity(findCandidateKey(findResult.candidates[0]), planPayloadFromCandidate(findResult.candidates[0], durationMinutes))}
+              onPlan={() => saveOpportunity(findCandidateKey(findResult.candidates[0]), planPayloadFromCandidate(findResult.candidates[0], durationMinutes), resolvedActivityDefinition?.id)}
               onMakeMoment={resolvedActivityDefinition?.experience.momentEligible ? () => handleMakeMoment(findCandidateKey(findResult.candidates[0]), { activityId: resolvedActivityDefinition.id, start: findResult.candidates[0].start, end: findResult.candidates[0].end, ratingLabel: findResult.candidates[0].label }) : undefined}
               isMomentSaving={momentSavingKey === findCandidateKey(findResult.candidates[0])}
               isMomentSaved={momentSavedKeys.has(findCandidateKey(findResult.candidates[0]))}
@@ -1030,7 +1041,7 @@ export function PlanWithAuraView({ onTimingSearch, onViewDay, onPlanLogged, time
                   durationMinutes={durationMinutes}
                   isSaving={savingOpportunityKey === findCandidateKey(candidate)}
                   isPlanned={plannedOpportunityKeys.has(findCandidateKey(candidate))}
-                  onPlan={() => saveOpportunity(findCandidateKey(candidate), planPayloadFromCandidate(candidate, durationMinutes))}
+                  onPlan={() => saveOpportunity(findCandidateKey(candidate), planPayloadFromCandidate(candidate, durationMinutes), resolvedActivityDefinition?.id)}
                   onMakeMoment={resolvedActivityDefinition?.experience.momentEligible ? () => handleMakeMoment(findCandidateKey(candidate), { activityId: resolvedActivityDefinition.id, start: candidate.start, end: candidate.end, ratingLabel: candidate.label }) : undefined}
                   isMomentSaving={momentSavingKey === findCandidateKey(candidate)}
                   isMomentSaved={momentSavedKeys.has(findCandidateKey(candidate))}
@@ -1132,7 +1143,7 @@ export function PlanWithAuraView({ onTimingSearch, onViewDay, onPlanLogged, time
                 durationMinutes={checkDurationMinutes}
                 isSaving={savingOpportunityKey === findCandidateKey(checkResult.requestedCandidate)}
                 isPlanned={plannedOpportunityKeys.has(findCandidateKey(checkResult.requestedCandidate))}
-                onPlan={() => saveOpportunity(findCandidateKey(checkResult.requestedCandidate!), planPayloadFromCandidate(checkResult.requestedCandidate!, checkDurationMinutes))}
+                onPlan={() => saveOpportunity(findCandidateKey(checkResult.requestedCandidate!), planPayloadFromCandidate(checkResult.requestedCandidate!, checkDurationMinutes), resolveActivitySelection(checkTaskTitle).activityId)}
               />
               {checkResult.betterNearby && (
                 <>
@@ -1145,7 +1156,7 @@ export function PlanWithAuraView({ onTimingSearch, onViewDay, onPlanLogged, time
                     planCtaLabel="Use better time"
                     isSaving={savingOpportunityKey === findCandidateKey(checkResult.betterNearby)}
                     isPlanned={plannedOpportunityKeys.has(findCandidateKey(checkResult.betterNearby))}
-                    onPlan={() => saveOpportunity(findCandidateKey(checkResult.betterNearby!), planPayloadFromCandidate(checkResult.betterNearby!, checkDurationMinutes))}
+                    onPlan={() => saveOpportunity(findCandidateKey(checkResult.betterNearby!), planPayloadFromCandidate(checkResult.betterNearby!, checkDurationMinutes), resolveActivitySelection(checkTaskTitle).activityId)}
                   />
                 </>
               )}
@@ -1230,7 +1241,7 @@ export function PlanWithAuraView({ onTimingSearch, onViewDay, onPlanLogged, time
                 durationMinutes={compareDurationMinutes}
                 isSaving={savingOpportunityKey === findCandidateKey(compareResult.candidates[0])}
                 isPlanned={plannedOpportunityKeys.has(findCandidateKey(compareResult.candidates[0]))}
-                onPlan={() => saveOpportunity(findCandidateKey(compareResult.candidates[0]), planPayloadFromCandidate(compareResult.candidates[0], compareDurationMinutes))}
+                onPlan={() => saveOpportunity(findCandidateKey(compareResult.candidates[0]), planPayloadFromCandidate(compareResult.candidates[0], compareDurationMinutes), resolveActivitySelection(compareTaskTitle).activityId)}
               />
               <SectionHeader label="Compared With" />
               {compareResult.candidates.slice(1).map((candidate) => (
@@ -1242,7 +1253,7 @@ export function PlanWithAuraView({ onTimingSearch, onViewDay, onPlanLogged, time
                   durationMinutes={compareDurationMinutes}
                   isSaving={savingOpportunityKey === findCandidateKey(candidate)}
                   isPlanned={plannedOpportunityKeys.has(findCandidateKey(candidate))}
-                  onPlan={() => saveOpportunity(findCandidateKey(candidate), planPayloadFromCandidate(candidate, compareDurationMinutes))}
+                  onPlan={() => saveOpportunity(findCandidateKey(candidate), planPayloadFromCandidate(candidate, compareDurationMinutes), resolveActivitySelection(compareTaskTitle).activityId)}
                 />
               ))}
             </section>

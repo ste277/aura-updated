@@ -120,14 +120,26 @@ check('The PlannedActivity UPDATE never SETs windowType', !/"windowType"\s*=/.te
 check('The PlannedActivity UPDATE only SETs status/loggedAt/habitLogId/updatedAt', /SET status = 'LOGGED',\s*"loggedAt" = \$3,\s*"habitLogId" = \$4,\s*"updatedAt" = now\(\)/.test(updateStatement));
 
 // ============================================================
-// activityId remains NULL -- no C2b in this PR.
+// activityId propagation (Planned Activity Canonical Identity Propagation
+// V1, "C2b") -- a factual copy of plan.activityId onto the HabitLog, never
+// a fresh lookup/inference, and never a disturbance of this PR's own
+// timing invariants. This section previously asserted the OPPOSITE (that
+// C2b did not exist yet, matching PR #80's own scope boundary at the
+// time) -- now that C2b is intentionally implemented, those assertions
+// are replaced with the correct positive post-C2b invariants. See
+// test/plannedActivityCanonicalIdentity.test.ts for C2b's own full
+// eligibility/validation/threading coverage; this file only re-confirms
+// that adding activityId did not regress PR #80's timing contract.
 // ============================================================
 
 const insertStatementMatch = logPlannedActivitySource.match(/INSERT INTO "HabitLog"[\s\S]*?RETURNING[^`]*`/);
 check('Sanity check: the HabitLog INSERT statement was found for isolation', insertStatementMatch !== null);
 const insertStatement = insertStatementMatch ? insertStatementMatch[0] : '';
-check('The HabitLog INSERT column list does not include activityId', !/"activityId"/.test(insertStatement));
-check('logPlannedActivity never references PlannedActivity.activityId (no C2b propagation)', !/plan\.activityId/.test(logPlannedActivitySource));
+check('The HabitLog INSERT column list now includes activityId (C2b, intentional)', /"activityId"/.test(insertStatement));
+check('logPlannedActivity references plan.activityId exactly once in actual code, as the HabitLog INSERT\'s activityId parameter (a factual copy, not a fresh lookup; doc-comment prose excluded)', (stripComments(logPlannedActivitySource).match(/plan\.activityId/g) || []).length === 1);
+check('logPlannedActivity never calls getActivityProfileById/findActivityIntent/classifyTask (activityId is copied verbatim, never revalidated or inferred at completion time)', !/getActivityProfileById|findActivityIntent|classifyTask/.test(stripComments(logPlannedActivitySource)));
+check('Adding activityId did not disturb the positional order of the PR #80 timing parameters -- activeWindow, logMinuteOfDay, logTimestamp, durationMinutes, and notes still appear, in that exact order, immediately after the new activityId parameter', /plan\.activityId \?\? null,\s*activeWindow,\s*logMinuteOfDay,\s*logTimestamp,\s*plan\.durationMinutes,\s*notes,/.test(logPlannedActivitySource));
+check('Adding activityId did not disturb PlannedActivity.loggedAt -- it is still set from completionInstant, in the same UPDATE parameter position', /\[planId, userId, completionInstant, habitLogId\]/.test(logPlannedActivitySource));
 
 // A constructed Plan-completion-shaped HabitLogRow (activityId omitted, as
 // logPlannedActivity would produce) is still correctly ineligible for C3
@@ -151,7 +163,7 @@ check('A Plan-completion-shaped HabitLog (activityId omitted) remains Aura-Fit-i
 // logSource / duration / significance / title unchanged.
 // ============================================================
 
-check('logSource remains the literal \'AURA_PLANNED\'', /VALUES \(\$1, \$2, \$3, \$4, \$5, \$6, \$7, \$8, 'AURA_PLANNED', 'MEDIUM'\)/.test(insertStatement));
+check('logSource remains the literal \'AURA_PLANNED\'', /VALUES \(\$1, \$2, \$3, \$4, \$5, \$6, \$7, \$8, \$9, 'AURA_PLANNED', 'MEDIUM'\)/.test(insertStatement));
 check('activitySignificance remains the literal \'MEDIUM\'', /'AURA_PLANNED', 'MEDIUM'\)/.test(insertStatement));
 check('durationMinutes remains plan.durationMinutes', /plan\.durationMinutes,/.test(logPlannedActivitySource));
 check('activityTitle remains plan.title', /plan\.title,/.test(logPlannedActivitySource));
@@ -240,7 +252,7 @@ check('That branch still COMMITs and returns the EXISTING plan/habitLog pair rat
 
 check('The entire logPlannedActivity body remains wrapped in try { ... } catch (err) { ROLLBACK; throw err; }', /try \{[\s\S]*catch \(err\) \{\s*await client\.query\('ROLLBACK'\);\s*throw err;/.test(logPlannedActivitySource));
 check('derivePlanCompletionHistory is called INSIDE that try block (before the INSERT), so a thrown exception from it rolls back the whole transaction, never leaving a "Plan LOGGED but no HabitLog" or "HabitLog with a fabricated window" state', logPlannedActivitySource.indexOf('derivePlanCompletionHistory(') < logPlannedActivitySource.indexOf('INSERT INTO "HabitLog"'));
-check('No fallback window value (NEUTRAL literal, or plan.windowType) is substituted anywhere if window resolution fails -- the INSERT\'s activeWindow parameter is exclusively the destructured `activeWindow` from derivePlanCompletionHistory', /\[\s*habitLogId,\s*userId,\s*plan\.title,\s*activeWindow,/.test(logPlannedActivitySource));
+check('No fallback window value (NEUTRAL literal, or plan.windowType) is substituted anywhere if window resolution fails -- the INSERT\'s activeWindow parameter is exclusively the destructured `activeWindow` from derivePlanCompletionHistory', /\[\s*habitLogId,\s*userId,\s*plan\.title,\s*plan\.activityId[^,]*,\s*activeWindow,/.test(logPlannedActivitySource));
 
 // ============================================================
 // No backfill -- prospective-only, no mutation of existing rows.

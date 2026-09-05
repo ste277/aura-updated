@@ -1,0 +1,12 @@
+-- Planned Activity Canonical Identity Propagation V1: the canonical
+-- packages/recommendation/src/personalizedTasks.ts ActivityProfile.id a
+-- PlannedActivity was explicitly created from, when genuinely known.
+-- Nullable, no default, no backfill: NULL on existing rows correctly and
+-- permanently means "canonical identity was not known when this Plan was
+-- created" -- never inferred/guessed after the fact from title/activityType
+-- (same discipline as migration 0030's HabitLog.activityId).
+--
+-- Plain nullable TEXT column, no foreign key -- ActivityProfile is a
+-- static in-code catalog (FULL_ACTIVITY_CATALOG), not a Prisma model. No
+-- index: nothing queries PlannedActivity by activityId in this PR.
+ALTER TABLE "PlannedActivity" ADD COLUMN "activityId" TEXT;

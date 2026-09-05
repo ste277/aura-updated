@@ -57,6 +57,11 @@ export type PlanApiRow = {
   id: string;
   title?: string | null;
   activityType?: string | null;
+  // Planned Activity Canonical Identity Propagation V1 -- present here for
+  // wire-format type completeness only; no UI reads or displays this field
+  // (no badge/label/icon). See apps/web/lib/db.ts's PlannedActivity.activityId
+  // for the full contract.
+  activityId?: string | null;
   icon?: string | null;
   status?: 'UPCOMING' | 'LOGGED' | 'CANCELLED' | string | null;
   plannedStartAt: string | Date;
@@ -298,10 +303,21 @@ export function planPayloadFromCandidate(candidate: TimingCandidate, durationMin
  * already had four optional trailing parameters before this PR: a fifth
  * positional would have made the call site unreadable without counting
  * commas.
+ *
+ * `activityId` (Planned Activity Canonical Identity Propagation V1): the
+ * caller's own already-known canonical ActivityProfile.id (Day Builder's
+ * suggestion.activityId, PlanWithAuraView's own resolved catalog
+ * selection, Muhurtham Finder's activityId dropdown -- all real, already-
+ * validated ids from the SAME FULL_ACTIVITY_CATALOG namespace), or omitted
+ * when the Plan originates from free text / no clean canonical match. This
+ * function performs NO resolution/inference of its own -- it only threads
+ * a value the caller already has. The server (POST /api/plans) remains the
+ * sole validation authority regardless of what's passed here.
  */
 export interface SaveUpcomingPlanOptions {
   sharedWithName?: string;
   guestConversionToken?: string;
   clientRequestId?: string;
   eventLocation?: PlanEventLocation;
+  activityId?: string | null;
 }
