@@ -281,6 +281,66 @@ check('formatReminderTiming renders past minutes as "Started X min ago"', format
 }
 
 // ============================================================
+// Ask Aura Event Location V1, PR B (brief section 17/31): a Plan's own
+// eventTimezone -- persisted from an Ask Aura Event Location save, per PR
+// B's own plansRequest.ts/route.ts wiring -- must win over the owner's
+// Timing Location timezone for reminder scheduling/display, exactly as
+// deriveAuraReminders' existing `plan.eventTimezone ?? ownerTimezone`
+// expression already guarantees. This is a REGRESSION test proving that
+// existing precedence, not a new algorithm -- auraReminders.ts itself is
+// untouched by PR B. Chosen so the two timezones' clock-time DIFFERS for
+// the same instant (Asia/Kolkata vs America/New_York), making a silent
+// fallback to ownerTimezone immediately detectable.
+// ============================================================
+
+{
+  const chennaiPlan = fakePlan({ id: 'plan-chennai-event', eventTimezone: 'Asia/Kolkata', eventLocationName: 'Chennai' });
+  const reminders = deriveAuraReminders({
+    now: NOW,
+    leadMinutes: DEFAULT_REMINDER_LEAD_MINUTES,
+    ownerTimezone: 'America/New_York',
+    plans: [chennaiPlan],
+    moments: [],
+    momentIdsWithSuccessor: new Set(),
+  });
+  check('A Plan with its own eventTimezone (Chennai) produces exactly one reminder', reminders.length === 1);
+  check('The reminder\'s timezone is the Plan\'s own eventTimezone (Asia/Kolkata), NOT the owner\'s Timing Location (America/New_York)', reminders[0].timezone === 'Asia/Kolkata');
+}
+{
+  // Control: a Plan with NO eventTimezone (eventTimezone: null, the
+  // fakePlan default) falls back to ownerTimezone, completely unchanged.
+  const ordinaryPlan = fakePlan({ id: 'plan-no-event-location' });
+  const reminders = deriveAuraReminders({
+    now: NOW,
+    leadMinutes: DEFAULT_REMINDER_LEAD_MINUTES,
+    ownerTimezone: 'America/New_York',
+    plans: [ordinaryPlan],
+    moments: [],
+    momentIdsWithSuccessor: new Set(),
+  });
+  check('A Plan with no eventTimezone falls back to the owner\'s own Timing Location, unaffected by PR B', reminders[0].timezone === 'America/New_York');
+}
+{
+  // Moment reminders already unconditionally use moment.timezone (no `??`
+  // fallback needed -- AuraMoment.timezone is NOT NULL) -- confirming this
+  // is unaffected by, and requires no changes for, PR B: a Moment created
+  // from an Ask Aura Event Location save already has its `timezone` column
+  // set correctly AT PERSISTENCE TIME (route.ts's own
+  // `eventLocationTimezone ?? user.timezone`), so the reminder layer just
+  // reads it straight through.
+  const chennaiMoment = fakeMoment({ id: 'moment-chennai-event', timezone: 'Asia/Kolkata', locationName: 'Chennai' });
+  const reminders = deriveAuraReminders({
+    now: NOW,
+    leadMinutes: DEFAULT_REMINDER_LEAD_MINUTES,
+    ownerTimezone: 'America/New_York',
+    plans: [],
+    moments: [chennaiMoment],
+    momentIdsWithSuccessor: new Set(),
+  });
+  check('A Moment persisted with an Event Location timezone (Chennai) is reflected in its reminder, regardless of the owner\'s own Timing Location', reminders[0].timezone === 'Asia/Kolkata');
+}
+
+// ============================================================
 // Privacy (brief section 40/41) -- AuraReminder DTO shape
 // ============================================================
 

@@ -14,6 +14,7 @@ import { nearbyCheckInstants, runTimingSearch } from '../packages/recommendation
 import { FULL_ACTIVITY_CATALOG } from '../packages/recommendation/src/personalizedTasks';
 import { natalContextFromBirthDetails } from '../apps/web/lib/natalContext';
 import { localDateTimeToUTC } from '../packages/panchang/src/localDate';
+import { parseEventLocationSnapshot } from '../apps/web/lib/plansRequest';
 
 let allPassed = true;
 function check(label: string, condition: boolean) {
@@ -340,10 +341,21 @@ async function main() {
 
       const response = await orchestrateAskAura(parsed, { ...deps, eventLocation: sanFrancisco });
       check('Response stays TIMING_CHECK (canonical SHARED ceremonial evaluator, real Priya fixture, Event Location applied)', response.intent === 'TIMING_CHECK');
-      const card = response.cards?.[0] as { requested?: { startLabel?: string }; eventLocation?: { cityName?: string; timezone?: string } } | undefined;
+      const card = response.cards?.[0] as { requested?: { start?: string; startLabel?: string }; eventLocation?: { cityName?: string; timezone?: string } } | undefined;
       check('Requested candidate displays as 10:00 AM San Francisco-local -- proves the SHARED evaluator used the Event Location\'s timezone, not the owner\'s own Chennai Timing Location', card?.requested?.startLabel === '10:00 AM');
       check('Response echoes the resolved Event Location', card?.eventLocation?.cityName === 'San Francisco, USA' && card?.eventLocation?.timezone === 'America/Los_Angeles');
-      check('Action safety: no "Plan this" action for a SHARED Event Location result either', !response.actions?.some((a) => a.type === 'PLAN_THIS'));
+
+      // PR B: PLAN_THIS is restored for SHARED too -- persistence behavior
+      // must be identical across scopes (brief section 23), and the
+      // partner's own identity/natal context must remain entirely separate
+      // from (and absent from) the save payload.
+      const planAction = response.actions?.find((a) => a.type === 'PLAN_THIS');
+      check('PR B: "Plan this" action is restored for a SHARED Event Location result too', Boolean(planAction));
+      const planPayload = planAction?.planPayload as { eventLocation?: { cityName?: string; timezone?: string } } | undefined;
+      check('SHARED planPayload carries the same resolved eventLocation snapshot', planPayload?.eventLocation?.cityName === 'San Francisco, USA' && planPayload?.eventLocation?.timezone === 'America/Los_Angeles');
+      const planSnapshot = parseEventLocationSnapshot(planPayload?.eventLocation);
+      check('SHARED planPayload.eventLocation is ACCEPTED by parseEventLocationSnapshot, unmodified', planSnapshot.ok === true);
+      check('Partner (Priya) identity never appears in the save payload', !JSON.stringify(planPayload ?? {}).includes('Priya') && !JSON.stringify(planPayload ?? {}).includes(priya.id));
 
       const serialized = JSON.stringify(response);
       const forbidden = ['birthDate', 'birthTime', 'birthTimezone', 'natalNakshatraIndex', 'ownerUserId'];

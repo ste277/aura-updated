@@ -12,6 +12,7 @@ import { orchestrateAskAura, resolveHorizonToDateRange, resolveEventLocationQuer
 import { runTimingSearch } from '../packages/recommendation/src/timingSearch';
 import { getActionCards } from '../packages/recommendation/src/actionCards';
 import { DailyAssistantContext } from '../packages/recommendation/src/dailyAssistant';
+import { parseEventLocationSnapshot } from '../apps/web/lib/plansRequest';
 
 let allPassed = true;
 function check(label: string, condition: boolean) {
@@ -317,6 +318,12 @@ async function main() {
     const response = await orchestrateAskAura(parsed, deps);
     check('Ceremonial CHECK response is CHECK-shaped, never "Best dates for" (unaffected by this PR)', response.intent === 'TIMING_CHECK' && !response.message.includes('Best dates for'));
     check('Ceremonial CHECK response never carries a SHARED-everyday-shaped scope/personName field (proves it did NOT reach the new everyday shared handler)', !('scope' in (response.cards?.[0] ?? {})) && !('personName' in (response.cards?.[0] ?? {})));
+    // PR B, omitted-location control (brief section 24): no explicit
+    // Event Location -> PLAN_THIS behaves exactly as it always has, no
+    // eventLocation field manufactured on the payload.
+    const planAction = response.actions?.find((a) => a.type === 'PLAN_THIS');
+    check('PLAN_THIS is present for a no-location ceremonial CHECK, exactly as before this PR', Boolean(planAction));
+    check('No eventLocation field on the payload when no Event Location was resolved', !planAction?.planPayload || !('eventLocation' in planAction.planPayload));
   }
   // The date-only form now correctly reaches the canonical Muhurtham
   // search (via the existing, unchanged capability redirect), never a
@@ -441,22 +448,60 @@ async function main() {
   }
 
   // --- Ceremonial exact-clock TIMING_CHECK with Event Location (brief
-  // section 19/24/26/27/28/31/42): the candidate instant is evaluated in
-  // the EVENT LOCATION's timezone, never the caller's own Timing Location
-  // (New York) -- proven by the formatted display time, which would show a
-  // different clock reading entirely if the instant had been computed
-  // against New York instead. PLAN_THIS is suppressed (action safety). ---
+  // section 19/24/26/27/28/42; PR B section 8/29/30: PLAN_THIS restored):
+  // the candidate instant is evaluated in the EVENT LOCATION's timezone,
+  // never the caller's own Timing Location (New York) -- proven by the
+  // formatted display time, which would show a different clock reading
+  // entirely if the instant had been computed against New York instead.
+  // PR A suppressed PLAN_THIS here because the save payload couldn't carry
+  // the Event Location; PR B threads it through, so PLAN_THIS is restored
+  // unconditionally, and the payload is proven to actually survive
+  // persistence by feeding it through the REAL, unmodified
+  // parseEventLocationSnapshot() validator POST /api/plans itself uses. ---
   {
     const parsed = parseAskAuraRequest('Is 10 AM next Friday good for marriage in Chennai?', { now: NOW, timezone: chennai!.timezone });
     check('Parses TIMING_CHECK, marriage, exactTime=10:00, locationQuery=chennai', parsed.intent === 'TIMING_CHECK' && parsed.activityId === 'marriage' && parsed.exactTime === '10:00' && parsed.locationQuery === 'chennai');
 
     const response = await orchestrateAskAura(parsed, { ...nyDeps, eventLocation: chennai });
     check('Ceremonial exact-clock CHECK with Event Location executes (never a clarification)', response.intent === 'TIMING_CHECK');
-    const card = response.cards?.[0] as { requested?: { startLabel?: string }; eventLocation?: { cityName?: string; timezone?: string } } | undefined;
+    const card = response.cards?.[0] as { requested?: { start?: string; startLabel?: string }; eventLocation?: { cityName?: string; timezone?: string } } | undefined;
     check('Requested instant displays as 10:00 AM Chennai-local -- proves the candidate was computed in Chennai\'s timezone, not the caller\'s own New York Timing Location', card?.requested?.startLabel === '10:00 AM');
     check('Response echoes the resolved Event Location', card?.eventLocation?.cityName === 'Chennai' && card?.eventLocation?.timezone === 'Asia/Kolkata');
-    check('Action safety (brief section 31): no "Plan this" action for an Event Location result -- planPayload does not yet carry location (PR B), so saving it would silently drop it', !response.actions?.some((a) => a.type === 'PLAN_THIS'));
+
+    const planAction = response.actions?.find((a) => a.type === 'PLAN_THIS');
+    check('PR B: "Plan this" action is RESTORED for a location-aware ceremonial CHECK result', Boolean(planAction));
     check('"Open Muhurtham Finder" remains available (it already supports Event Location natively)', Boolean(response.actions?.some((a) => a.type === 'OPEN_MUHURTHAM')));
+
+    const planPayload = planAction?.planPayload as { plannedStartAt?: string; eventLocation?: { cityName?: string; timezone?: string } } | undefined;
+    check('planPayload carries the RESOLVED eventLocation (never re-derived from locationQuery -- brief section 27/28)', planPayload?.eventLocation?.cityName === 'Chennai' && planPayload?.eventLocation?.timezone === 'Asia/Kolkata');
+    check('planPayload.plannedStartAt is the SAME absolute instant as the requested candidate -- never reinterpreted (brief section 15)', planPayload?.plannedStartAt === card?.requested?.start);
+
+    // Persistence-survival proof (brief section 29/30): feed the EXACT
+    // payload through the real, unmodified request-boundary validator
+    // POST /api/plans already uses -- no mock, no re-implementation.
+    const snapshot = parseEventLocationSnapshot(planPayload?.eventLocation);
+    check('The planPayload.eventLocation is ACCEPTED by parseEventLocationSnapshot (would persist correctly via POST /api/plans, unmodified)', snapshot.ok === true);
+    if (snapshot.ok) {
+      check('Persisted eventTimezone would be Chennai\'s Asia/Kolkata, never the caller\'s own New York Timing Location', snapshot.eventTimezone === 'Asia/Kolkata');
+      check('Persisted eventLocationName would be "Chennai"', snapshot.eventLocationName === 'Chennai');
+    }
+  }
+
+  // --- PERSONAL scope, location-aware ceremonial CHECK (brief section 21/
+  // 23): persistence behavior must be identical to GENERAL -- no
+  // scope-specific Event Location logic -- and the owner's own natal
+  // profile (personalContext) must never leak into the save payload. ---
+  {
+    const personalizedNyContext: DailyAssistantContext = { ...nyContext, personalContext: { natalNakshatraIndex: 1, janmaNakshatra: 'Bharani' } };
+    const parsed = parseAskAuraRequest('Is 10 AM next Friday good for marriage for me in Chennai?', { now: NOW, timezone: chennai!.timezone });
+    check('Parses TIMING_CHECK, marriage, PERSONAL, exactTime=10:00, locationQuery=chennai', parsed.intent === 'TIMING_CHECK' && parsed.activityId === 'marriage' && parsed.scope === 'PERSONAL' && parsed.exactTime === '10:00' && parsed.locationQuery === 'chennai');
+
+    const response = await orchestrateAskAura(parsed, { userId: 'test-user-not-a-real-db-row', context: personalizedNyContext, activeWindow: 'NEUTRAL', eventLocation: chennai });
+    const planAction = response.actions?.find((a) => a.type === 'PLAN_THIS');
+    check('PERSONAL scope also gets PLAN_THIS restored, identical to GENERAL', Boolean(planAction));
+    const planPayload = planAction?.planPayload as { eventLocation?: { cityName?: string; timezone?: string } } | undefined;
+    check('PERSONAL scope\'s planPayload carries the same eventLocation snapshot', planPayload?.eventLocation?.cityName === 'Chennai' && planPayload?.eventLocation?.timezone === 'Asia/Kolkata');
+    check('Owner natal profile never leaks into the save payload', !JSON.stringify(planPayload ?? {}).includes('Bharani') && !JSON.stringify(planPayload ?? {}).includes('natalNakshatraIndex'));
   }
 
   // --- Unknown Event Location fails closed (brief section 13/14/32/45):
