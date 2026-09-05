@@ -2,8 +2,27 @@
 
 import React, { useState, useMemo } from 'react';
 import { computeAverageTimedSessionMinutes } from '../lib/activityDuration';
+import { toInsightsObservation, todayDateKey, lastNCalendarDateKeys, isInCalendarMonth } from '../lib/insightsTimezone';
+import { addDaysToDateStr } from '../lib/timezone';
 import { colors, spacing, typography, radius } from './theme';
 import { PageHeader, SegmentedControl, SurfaceCard, StatusBadge, TextButton, EmptyState } from './ui';
+
+/**
+ * Insights Timezone Consistency V1 -- a calendar date's weekday, formatted
+ * deterministically from its "YYYY-MM-DD" string rather than from an
+ * already-local `Date` object. A calendar date has exactly one weekday
+ * regardless of what clock time within that date you evaluate it at, so
+ * anchoring the lookup at UTC noon (nowhere near a UTC-midnight boundary)
+ * and formatting with an explicit `timeZone: 'UTC'` makes this immune to
+ * the executing browser/process's own local timezone -- unlike the
+ * previous `d.toLocaleDateString(...)` call, which implicitly read
+ * whatever `Date` object it was handed.
+ */
+function formatWeekdayLabel(dateKey: string, style: 'narrow' | 'short'): string {
+  const [year, month, day] = dateKey.split('-').map(Number);
+  const anchor = new Date(Date.UTC(year, month - 1, day, 12, 0, 0));
+  return anchor.toLocaleDateString('en-US', { weekday: style, timeZone: 'UTC' });
+}
 
 export interface LoggedEntryItem {
   id: string;
@@ -17,6 +36,18 @@ export interface LoggedEntryItem {
 }
 
 interface InsightsViewProps {
+  /** Insights Timezone Consistency V1 -- the owner's current Timing
+   * Location IANA timezone (`user.timezone`), the sole timezone source for
+   * every calendar-day/daypart calculation in this component (This Month,
+   * past-7-days trend, 30-day heatmap, streak, time-of-day pattern
+   * counts). Never Birth Location, Event Location, SavedPerson, or SHARED
+   * context -- and never implicitly the browser's own local timezone,
+   * which every one of those calculations previously read via bare
+   * `new Date().getFullYear()/getHours()`-style getters. Required (not
+   * optional) because every render site already has `user.timezone`
+   * available at the point it renders this component, matching the same
+   * pattern PlanWithAuraView's own `timezone` prop already uses. */
+  timezone: string;
   logEntries?: LoggedEntryItem[];
   assistantInsight?: {
     reflectionCount: number;
@@ -51,7 +82,7 @@ function scoreLoggedWindow(entry: LoggedEntryItem): number {
   return Math.min(1, Math.max(0, score));
 }
 
-export function InsightsView({ logEntries = [], assistantInsight }: InsightsViewProps) {
+export function InsightsView({ timezone, logEntries = [], assistantInsight }: InsightsViewProps) {
   const [activeSubTab, setActiveSubTab] = useState<'overview' | 'patterns' | 'trends' | 'streaks'>('overview');
 
   // ---------------------------------------------------------------------------
@@ -61,40 +92,42 @@ export function InsightsView({ logEntries = [], assistantInsight }: InsightsView
     const totalActivities = logEntries.length;
     const now = new Date();
 
-    // 1. 30-Day Activity Matrix Heatmap (Past 30 Days)
-    const thirtyDaysAgo = new Date();
-    thirtyDaysAgo.setDate(now.getDate() - 29);
+    // Insights Timezone Consistency V1 -- the ONE timezone-normalization
+    // pass every date-bucketed calculation below reads from, instead of
+    // each individually calling `new Date(e.loggedAt).getFullYear()/
+    // getHours()`-style getters (which read the executing browser/
+    // process's own local timezone, not the owner's Timing Location).
+    // Cached per entry (a Map keyed by entry id) so the 30-day heatmap, the
+    // 7-day trend, the daypart counts, the streak set, and the This-Month
+    // filter below all agree on the exact same observation for a given
+    // log, computed once.
+    const observations = new Map(logEntries.map((entry) => [entry.id, toInsightsObservation(new Date(entry.loggedAt), timezone)]));
+    const observationOf = (entry: LoggedEntryItem) => observations.get(entry.id)!;
 
-    const heatmapDays = Array.from({ length: 30 }, (_, i) => {
-      const d = new Date(thirtyDaysAgo);
-      d.setDate(d.getDate() + i);
-      const dateKey = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
-
-      const dayLogs = logEntries.filter((e) => {
-        const logD = new Date(e.loggedAt);
-        const logKey = `${logD.getFullYear()}-${String(logD.getMonth() + 1).padStart(2, '0')}-${String(logD.getDate()).padStart(2, '0')}`;
-        return logKey === dateKey;
-      });
+    // 1. 30-Day Habit Consistency Heatmap -- 30 Timing-Location calendar
+    // dates ending today (inclusive), DST-safe date-string stepping
+    // (never millisecond arithmetic).
+    const heatmapDateKeys = lastNCalendarDateKeys(timezone, now, 30);
+    const heatmapDays = heatmapDateKeys.map((dateKey) => {
+      const day = Number(dateKey.split('-')[2]);
+      const dayLogs = logEntries.filter((e) => observationOf(e).dateKey === dateKey);
 
       return {
         dateStr: dateKey,
-        dayNum: d.getDate(),
-        weekday: d.toLocaleDateString('en-US', { weekday: 'narrow' }),
+        dayNum: day,
+        weekday: formatWeekdayLabel(dateKey, 'narrow'),
         count: dayLogs.length,
       };
     });
 
-    // 2. 7-Day Weekly Alignment Trend
-    const past7Days = Array.from({ length: 7 }, (_, i) => {
-      const d = new Date();
-      d.setDate(now.getDate() - (6 - i));
-      const dateKey = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
-
-      const dayLogs = logEntries.filter((e) => {
-        const logD = new Date(e.loggedAt);
-        const logKey = `${logD.getFullYear()}-${String(logD.getMonth() + 1).padStart(2, '0')}-${String(logD.getDate()).padStart(2, '0')}`;
-        return logKey === dateKey;
-      });
+    // 2. 7-Day Weekly Alignment Trend -- 7 Timing-Location calendar dates
+    // ending today. Score formula itself is UNCHANGED (Insights Timezone
+    // Consistency V1 fixes the time axis only, never the alignment
+    // scoring -- that is canonical Aura Fit consolidation, a separate,
+    // later PR).
+    const past7DateKeys = lastNCalendarDateKeys(timezone, now, 7);
+    const past7Days = past7DateKeys.map((dateKey) => {
+      const dayLogs = logEntries.filter((e) => observationOf(e).dateKey === dateKey);
 
       const auspicious = dayLogs.filter((e) => {
         const w = (e.activeWindow || '').toUpperCase();
@@ -112,52 +145,79 @@ export function InsightsView({ logEntries = [], assistantInsight }: InsightsView
           : 75;
 
       return {
-        dayLabel: d.toLocaleDateString('en-US', { weekday: 'short' }),
+        dayLabel: formatWeekdayLabel(dateKey, 'short'),
         score,
         count: dayLogs.length,
       };
     });
 
-    // 3. Time-of-Day Pattern Counts
+    // 3. Time-of-Day Pattern Counts -- daypart boundaries UNCHANGED
+    // (05:00/12:00/17:00/22:00), derived in the Timing Location timezone
+    // instead of browser-local. This remains a plain clock-hour bucket,
+    // deliberately distinct from a Panchang solar window (Abhijit/Rahu
+    // Kalam/etc.) -- see classifyDayPart()'s own doc comment.
     const todCounts = { morning: 0, afternoon: 0, evening: 0, night: 0 };
     logEntries.forEach((e) => {
-      const hour = new Date(e.loggedAt).getHours();
-      if (hour >= 5 && hour < 12) todCounts.morning++;
-      else if (hour >= 12 && hour < 17) todCounts.afternoon++;
-      else if (hour >= 17 && hour < 22) todCounts.evening++;
+      const dayPart = observationOf(e).dayPart;
+      if (dayPart === 'MORNING') todCounts.morning++;
+      else if (dayPart === 'AFTERNOON') todCounts.afternoon++;
+      else if (dayPart === 'EVENING') todCounts.evening++;
       else todCounts.night++;
     });
 
-    // Active Day Streak Calculation
-    const loggedDaysSet = new Set(
-      logEntries.map((entry) => {
-        const d = new Date(entry.loggedAt);
-        return `${d.getFullYear()}-${d.getMonth()}-${d.getDate()}`;
-      })
-    );
+    // Active Day Streak Calculation -- consecutive Timing-Location
+    // calendar dates with >=1 log, walking back via date-string stepping
+    // (never millisecond arithmetic, so a DST transition anywhere in the
+    // walk can't skip or duplicate a day). Padded "YYYY-MM-DD" keys
+    // throughout (the old unpadded "y-m-d" variant is gone). Control flow
+    // is otherwise IDENTICAL to the previous browser-local version,
+    // including the existing today-may-be-empty grace.
+    const loggedDaysSet = new Set(logEntries.map((entry) => observationOf(entry).dateKey));
 
     let streak = 0;
-    const checkDate = new Date();
-    checkDate.setHours(0, 0, 0, 0);
+    let cursor = todayDateKey(timezone, now);
 
     while (true) {
-      const key = `${checkDate.getFullYear()}-${checkDate.getMonth()}-${checkDate.getDate()}`;
-      if (loggedDaysSet.has(key)) {
+      if (loggedDaysSet.has(cursor)) {
         streak++;
-        checkDate.setDate(checkDate.getDate() - 1);
+        cursor = addDaysToDateStr(cursor, -1);
       } else {
         if (streak === 0) {
-          checkDate.setDate(checkDate.getDate() - 1);
-          const yesterdayKey = `${checkDate.getFullYear()}-${checkDate.getMonth()}-${checkDate.getDate()}`;
-          if (loggedDaysSet.has(yesterdayKey)) {
+          const yesterday = addDaysToDateStr(cursor, -1);
+          if (loggedDaysSet.has(yesterday)) {
             streak++;
-            checkDate.setDate(checkDate.getDate() - 1);
+            cursor = addDaysToDateStr(yesterday, -1);
             continue;
           }
         }
         break;
       }
     }
+
+    // Insights Timezone Consistency V1, brief section 13 -- "This Month"
+    // month-scoped metrics. A SEPARATE computation from the full-history
+    // ("lifetime", up to INSIGHTS_HISTORY_DAYS) values below: totalActivities/
+    // alignmentScore (unscoped) are still used elsewhere in this component
+    // (the Patterns tab's Planning Loop copy, the Trends tab's 7-Day trend
+    // average) and must NOT be redefined to mean "this month" there --
+    // only the "This Month" card's own four stats are month-scoped.
+    // `streak` deliberately stays the overall/current streak (brief
+    // section 14): the card's own label is "day streak", not "day streak
+    // this month", and truncating a genuine ongoing streak at a month
+    // boundary would misrepresent the user's real data, not correct it.
+    const todayKey = todayDateKey(timezone, now);
+    const [currentYear, currentMonth] = todayKey.split('-').map(Number);
+    const monthEntries = logEntries.filter((e) => isInCalendarMonth(observationOf(e).dateKey, currentYear, currentMonth));
+    const monthTotalActivities = monthEntries.length;
+    let monthWeightedAlignment = 0;
+    let monthAuraGuidedCount = 0;
+    monthEntries.forEach((entry) => {
+      monthWeightedAlignment += scoreLoggedWindow(entry);
+      const source = entry.logSource ?? 'MANUAL';
+      if (source === 'AURA_PLANNED' || source === 'AURA_DO_NOW') monthAuraGuidedCount++;
+    });
+    const monthAlignmentScore = monthTotalActivities > 0 ? Math.min(100, Math.max(0, Math.round((monthWeightedAlignment / monthTotalActivities) * 100))) : 0;
+    const monthAuraGuidedRate = monthTotalActivities > 0 ? Math.round((monthAuraGuidedCount / monthTotalActivities) * 100) : 0;
 
     // Window Breakdown
     let weightedAlignment = 0;
@@ -210,7 +270,6 @@ export function InsightsView({ logEntries = [], assistantInsight }: InsightsView
     const totalMinutes = resolvedDurations.reduce((sum, minutes) => sum + minutes, 0);
     const formattedHours = `${(totalMinutes / 60).toFixed(1)} hrs`;
     const auraGuidedCount = auraPlannedCount + auraDoNowCount;
-    const auraGuidedRate = totalActivities > 0 ? Math.round((auraGuidedCount / totalActivities) * 100) : 0;
     const plannedAlignmentScore = auraPlannedCount > 0 ? Math.round((auraPlannedAlignment / auraPlannedCount) * 100) : 0;
     const manualAlignmentScore = manualCount > 0 ? Math.round((manualAlignment / manualCount) * 100) : 0;
     const planningLift = auraPlannedCount > 0 && manualCount > 0 ? plannedAlignmentScore - manualAlignmentScore : null;
@@ -269,7 +328,6 @@ export function InsightsView({ logEntries = [], assistantInsight }: InsightsView
       auraPlannedCount,
       auraDoNowCount,
       auraGuidedCount,
-      auraGuidedRate,
       manualCount,
       overrideCautionCount,
       plannedAlignmentScore,
@@ -281,8 +339,14 @@ export function InsightsView({ logEntries = [], assistantInsight }: InsightsView
       past7Days,
       todCounts,
       patterns,
+      // Insights Timezone Consistency V1 -- "This Month" card values only;
+      // see the computation above for why these are separate from
+      // totalActivities/alignmentScore/streak above.
+      monthTotalActivities,
+      monthAlignmentScore,
+      monthAuraGuidedRate,
     };
-  }, [logEntries]);
+  }, [logEntries, timezone]);
 
   const patterns = analytics.patterns;
 
@@ -340,14 +404,23 @@ export function InsightsView({ logEntries = [], assistantInsight }: InsightsView
           )}
 
           {/* This Month -- brief section 50: a lighter 2x2 inline treatment
-           * instead of four separately-bordered boxes. */}
+           * instead of four separately-bordered boxes.
+           *
+           * Insights Timezone Consistency V1 (brief section 13): activities/
+           * Aura-guided%/supportive-windows% are now genuinely scoped to
+           * the current Timing-Location calendar month (analytics.month*),
+           * not the full up-to-400-day history this card previously,
+           * silently, drew from. `streak` deliberately stays the overall/
+           * current streak (brief section 14) -- this card's label never
+           * promised "day streak this month", and truncating a real
+           * ongoing streak at a month boundary would be a regression. */}
           <div>
             <div style={typography.sectionEyebrow}>This Month</div>
             <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: `${spacing.sm}px ${spacing.lg}px`, marginTop: spacing.sm }}>
-              <InlineStat value={analytics.totalActivities} label="activities" color={colors.positive} />
+              <InlineStat value={analytics.monthTotalActivities} label="activities" color={colors.positive} />
               <InlineStat value={analytics.streak} label="day streak" color={colors.caution} />
-              <InlineStat value={`${analytics.auraGuidedRate}%`} label="Aura guided" color={colors.info} />
-              <InlineStat value={`${analytics.alignmentScore}%`} label="supportive windows" color={colors.traditional} />
+              <InlineStat value={`${analytics.monthAuraGuidedRate}%`} label="Aura guided" color={colors.info} />
+              <InlineStat value={`${analytics.monthAlignmentScore}%`} label="supportive windows" color={colors.traditional} />
             </div>
           </div>
 

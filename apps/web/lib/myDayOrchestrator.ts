@@ -5,7 +5,7 @@ import {
   listMomentIdsWithSuccessorForOwner,
   listHabitLogs,
 } from './db';
-import { localDateTimeToUTC, getDatePartsInTimezone, getMinuteOfDayInTimezone } from './timezone';
+import { localDateTimeToUTC, getDatePartsInTimezone, getMinuteOfDayInTimezone, addDaysToDateStr } from './timezone';
 import { buildDailyAgenda, DailyAgenda } from './dailyAgenda';
 import { buildDailyStory, DailyStory, DailyStoryPersonalizationInput, resolveDailyStoryPhase } from './dailyStory';
 import { buildDailyReflection, DailyReflection } from './dailyReflection';
@@ -40,13 +40,6 @@ function resolvePriorityPersonMoment(moments: AuraMoment[], priorityPersonIds: s
   );
   if (!moment || !moment.sharedPersonDisplayName) return undefined;
   return { personName: moment.sharedPersonDisplayName, itemTitle: moment.activityTitle };
-}
-
-function addDaysToDateStr(dateStr: string, days: number): string {
-  const [year, month, day] = dateStr.split('-').map(Number);
-  const date = new Date(Date.UTC(year, month - 1, day));
-  date.setUTCDate(date.getUTCDate() + days);
-  return date.toISOString().slice(0, 10);
 }
 
 /** Brief section 43: the local calendar day's [start, end) as real UTC

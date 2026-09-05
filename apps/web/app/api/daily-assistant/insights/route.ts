@@ -1,12 +1,16 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { listDailyReflections, listHabitLogsForInsights, INSIGHTS_HISTORY_DAYS } from '../../../../lib/db';
+import { getUserById, listDailyReflections, listHabitLogsForInsights, INSIGHTS_HISTORY_DAYS } from '../../../../lib/db';
 import { getSessionFromRequest } from '../../../../lib/session';
+import { getDatePartsInTimezone } from '../../../../lib/timezone';
 
 const REFLECTION_HISTORY_DAYS = 60;
 
 export async function GET(req: NextRequest) {
   const session = getSessionFromRequest(req);
   if (!session) return NextResponse.json({ error: 'Not authenticated.' }, { status: 401 });
+
+  const user = await getUserById(session.userId);
+  if (!user) return NextResponse.json({ error: 'User not found.' }, { status: 404 });
 
   // Insights Correctness + Historical Integrity V1 -- switched from the
   // row-count-capped listHabitLogs() (LIMIT 50) to the date-range
@@ -21,9 +25,17 @@ export async function GET(req: NextRequest) {
     listDailyReflections(session.userId, REFLECTION_HISTORY_DAYS),
   ]);
 
+  // Insights Timezone Consistency V1 -- the log side of this join now
+  // buckets each log by its Timing-Location calendar date
+  // (getDatePartsInTimezone(user.timezone, ...), the owner's CURRENT
+  // Timing Location -- Option A of the approved temporal model), never a
+  // UTC-slice of the instant. Previously both sides of this join used
+  // `.toISOString().slice(0,10)` (UTC calendar date) -- internally
+  // consistent with each other, but wrong relative to the user's actual
+  // local "day" for anyone not near UTC+0, especially in the evening.
   const logsByDay = new Map<string, { aligned: number; friction: number; total: number }>();
   logs.forEach((log) => {
-    const dateKey = new Date(log.logTimestamp).toISOString().slice(0, 10);
+    const dateKey = getDatePartsInTimezone(user.timezone, new Date(log.logTimestamp)).dateStr;
     const existing = logsByDay.get(dateKey) ?? { aligned: 0, friction: 0, total: 0 };
     const windowName = String(log.activeWindow || '').toUpperCase();
     existing.total += 1;
@@ -42,6 +54,16 @@ export async function GET(req: NextRequest) {
   let unalignedTotal = 0;
 
   reflections.forEach((reflection) => {
+    // reflectionDate (@db.Date) is a semantic "YYYY-MM-DD" calendar date,
+    // stored via a literal UTC-midnight encoding (see reflection/route.ts's
+    // own getReflectionDate() doc comment) -- `.toISOString().slice(0,10)`
+    // here simply DECODES that same date string back out, unchanged; it is
+    // not a timezone reinterpretation (brief section 16: never
+    // timezone-shift the stored date after it was chosen). The write-time
+    // CHOICE of that date is what Insights Timezone Consistency V1 fixed
+    // (reflection/route.ts now defaults it to the owner's Timing-Location
+    // "today", not server-UTC "today") -- this read-side decode was
+    // already correct and is unchanged here.
     const dateKey = new Date(reflection.reflectionDate).toISOString().slice(0, 10);
     const dayLogs = logsByDay.get(dateKey);
     const followedByLogs = Boolean(dayLogs && dayLogs.aligned > dayLogs.friction);

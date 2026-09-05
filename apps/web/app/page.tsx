@@ -845,6 +845,12 @@ export default function DashboardPage() {
                     // (and everything InsightsView derives from it) reflects
                     // the authoritative value, not the optimistic guess.
                     activeWindow: serverLog.activeWindow ?? item.activeWindow,
+                    // Insights Timezone Consistency V1 -- same reasoning as
+                    // activeWindow above: the optimistic calculatedMinute is
+                    // browser-local, the server now always derives the real
+                    // Timing-Location minute-of-day for the actual
+                    // logTimestamp (apps/web/app/api/habit-logs/route.ts).
+                    logMinuteOfDay: serverLog.logMinuteOfDay ?? item.logMinuteOfDay,
                   }
                 : item
             )
@@ -1141,7 +1147,7 @@ export default function DashboardPage() {
         )}
 
         {activeTab === 'insights' && (
-          <InsightsView logEntries={logEntries} assistantInsight={assistantInsight} />
+          <InsightsView timezone={user.timezone} logEntries={logEntries} assistantInsight={assistantInsight} />
         )}
 
         {activeTab === 'you' && (

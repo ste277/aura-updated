@@ -114,6 +114,27 @@ export function getDatePartsInTimezone(ianaTimezone: string, date: Date): ZonedD
 }
 
 /**
+ * Adds (or, with a negative count, subtracts) whole calendar days to a
+ * "YYYY-MM-DD" date string, returning another "YYYY-MM-DD" string. Pure
+ * date-string stepping -- Date.UTC() component arithmetic on the parsed
+ * Y/M/D, never a millisecond offset (`24*60*60*1000`) -- so it stays
+ * correct even though a real LOCAL calendar day can be 23, 24, or 25 hours
+ * long across a DST transition: a date string has no time-of-day component,
+ * so "the next calendar date" is a pure calendar operation, identical
+ * regardless of which timezone the caller ultimately interprets the string
+ * in. Moved here (Insights Timezone Consistency V1) from its original
+ * private home in myDayOrchestrator.ts so both that file and the Insights
+ * date-bucketing helpers (apps/web/lib/insightsTimezone.ts) share the one
+ * implementation instead of each maintaining their own copy.
+ */
+export function addDaysToDateStr(dateStr: string, days: number): string {
+  const [year, month, day] = dateStr.split('-').map(Number);
+  const date = new Date(Date.UTC(year, month - 1, day));
+  date.setUTCDate(date.getUTCDate() + days);
+  return date.toISOString().slice(0, 10);
+}
+
+/**
  * Converts a local date+time (as typed into a birth-data form, e.g. "1990-03-15"
  * + "14:30" in "Asia/Kolkata") to the actual UTC instant it represents. One
  * correction pass is sufficient in practice — offsets don't change within a
