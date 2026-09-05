@@ -304,12 +304,28 @@ async function main() {
   // activity's TIMING_CHECK must remain completely untouched by this PR,
   // still routing through handleMuhurthamTimingCheck/
   // evaluateMuhurthamCandidateAt, never the new everyday shared path.
+  //
+  // UPDATED by Ask Aura Date-Only CHECK Semantics V1: "Should I get married
+  // tomorrow?" (no exact clock) now correctly parses TIMING_FIND, not
+  // TIMING_CHECK -- an exact-clock variant is used here instead to keep
+  // testing the thing this check actually cares about (a genuinely
+  // CHECK-shaped ceremonial request never reaching the everyday-SHARED
+  // handler PR #69 added).
   {
-    const parsed = parseAskAuraRequest('Should I get married tomorrow?', { now: NOW, timezone: 'Asia/Kolkata' });
-    check('Ceremonial (marriage) parses TIMING_CHECK', parsed.intent === 'TIMING_CHECK' && parsed.activityId === 'marriage');
+    const parsed = parseAskAuraRequest('Should I get married at 10 AM tomorrow?', { now: NOW, timezone: 'Asia/Kolkata' });
+    check('Ceremonial (marriage) exact-clock request parses TIMING_CHECK', parsed.intent === 'TIMING_CHECK' && parsed.activityId === 'marriage' && parsed.exactTime === '10:00');
     const response = await orchestrateAskAura(parsed, deps);
     check('Ceremonial CHECK response is CHECK-shaped, never "Best dates for" (unaffected by this PR)', response.intent === 'TIMING_CHECK' && !response.message.includes('Best dates for'));
     check('Ceremonial CHECK response never carries a SHARED-everyday-shaped scope/personName field (proves it did NOT reach the new everyday shared handler)', !('scope' in (response.cards?.[0] ?? {})) && !('personName' in (response.cards?.[0] ?? {})));
+  }
+  // The date-only form now correctly reaches the canonical Muhurtham
+  // search (via the existing, unchanged capability redirect), never a
+  // fabricated single instant.
+  {
+    const parsed = parseAskAuraRequest('Should I get married tomorrow?', { now: NOW, timezone: 'Asia/Kolkata' });
+    check('"Should I get married tomorrow?" (no exact clock) now parses TIMING_FIND', parsed.intent === 'TIMING_FIND' && parsed.activityId === 'marriage' && parsed.exactTime === undefined);
+    const response = await orchestrateAskAura(parsed, deps);
+    check('Executes through the canonical Muhurtham search, never a fabricated-instant CHECK', response.intent === 'MUHURTHAM_SEARCH');
   }
 
   // Section 27 -- natural-date + duration composition (PR #66/#67) must
@@ -341,6 +357,38 @@ async function main() {
     const instants = nearbyCheckInstants(candidateStart, 30, context);
     check('nearbyCheckInstants never includes the requested instant itself', !instants.includes(candidateStart));
     check('nearbyCheckInstants stays within the default 180-minute window (a sample of the returned instants should differ from candidateStart by at most 180 minutes)', instants.every((iso) => Math.abs(new Date(iso).getTime() - new Date(candidateStart).getTime()) <= 180 * 60000));
+  }
+
+  // ============================================================
+  // Ask Aura Date-Only CHECK Semantics V1: end-to-end proof for an
+  // everyday activity that the fabricated-instant bug is gone. Previously
+  // "Should I meditate tomorrow?" silently evaluated the resolved date +
+  // literal UTC noon -- confirmed via the audit to display as 5:30 PM in
+  // Asia/Kolkata and 8:00 AM in America/New_York for the SAME UTC instant,
+  // for the SAME kind of request. Now it correctly executes as a genuine
+  // FIND across the day, with a result that is a real, specific window
+  // returned by the unmodified canonical engine -- never that fabricated
+  // instant, and never dependent on the server's own timezone.
+  // ============================================================
+  {
+    const parsed = parseAskAuraRequest('Should I meditate tomorrow?', { now: NOW, timezone: 'Asia/Kolkata' });
+    check('"Should I meditate tomorrow?" now parses TIMING_FIND (was a fabricated-instant CHECK)', parsed.intent === 'TIMING_FIND' && parsed.exactTime === undefined);
+    const response = await orchestrateAskAura(parsed, deps);
+    check('Executes as a genuine FIND across the day', response.intent === 'TIMING_FIND');
+    const card = response.cards?.[0] as { best?: { start: string } } | undefined;
+    check('Response carries a real "best" window candidate, never a single fabricated-noon instant', Boolean(card?.best?.start));
+    // The old bug's own signature: a fabricated instant always fell exactly
+    // on 'T12:00:00.000Z'. A genuine FIND-discovered window has no reason
+    // to land there deterministically.
+    check('The returned instant is not the old fabricated UTC-noon signature', !card?.best?.start.endsWith('T12:00:00.000Z'));
+  }
+  {
+    // Range collapse regression: a multi-day horizon must not be reduced
+    // to its first day alone.
+    const parsed = parseAskAuraRequest('Should I meditate this weekend?', { now: NOW, timezone: 'Asia/Kolkata' });
+    check('"Should I meditate this weekend?" parses TIMING_FIND, THIS_WEEKEND (full range preserved)', parsed.intent === 'TIMING_FIND' && parsed.horizonPhrase === 'THIS_WEEKEND');
+    const response = await orchestrateAskAura(parsed, deps);
+    check('Executes as a genuine FIND across the full weekend range', response.intent === 'TIMING_FIND');
   }
 
   console.log(allPassed ? '\nALL ASK AURA ORCHESTRATOR CHECKS PASSED' : '\nSOME ASK AURA ORCHESTRATOR CHECKS FAILED');

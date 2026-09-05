@@ -294,6 +294,29 @@ async function main() {
         check('No betterNearby when the independently-reproduced SHARED comparison also finds none', !card?.betterNearby);
       }
     }
+
+    // ============================================================
+    // Ask Aura Date-Only CHECK Semantics V1: SHARED date-only CHECK-verb
+    // phrasing (no exact clock) now correctly reaches genuine SHARED FIND
+    // (findEverydaySharedTiming, owner+Priya blend) rather than a
+    // fabricated-instant SHARED CHECK -- proving this fix composes
+    // correctly with the real SavedPerson resolution PR #69 established.
+    // ============================================================
+    {
+      const parsed = parseAskAuraRequest('Should Priya and me meditate tomorrow?', { now: NOW, timezone: owner.timezone });
+      check('"Should Priya and me meditate tomorrow?" -> TIMING_FIND, SHARED, priya, no exactTime', parsed.intent === 'TIMING_FIND' && parsed.scope === 'SHARED' && parsed.personNameQuery === 'priya' && parsed.exactTime === undefined);
+      const response = await orchestrateAskAura(parsed, deps);
+      check('Executes through the canonical SHARED everyday FIND (findEverydaySharedTiming), never a fabricated single instant', response.intent === 'TIMING_FIND');
+      const card = response.cards?.[0] as { scope?: string; personName?: string } | undefined;
+      check('Response card is scoped SHARED and carries Priya\'s display name (real two-person blend, not a fabricated-instant CHECK)', card?.scope === 'SHARED' && card?.personName === 'Priya');
+    }
+    // The exact-clock SHARED form remains completely unaffected (PR #69).
+    {
+      const parsed = parseAskAuraRequest('Should Priya and me meditate at 10 AM tomorrow?', { now: NOW, timezone: owner.timezone });
+      check('"Should Priya and me meditate at 10 AM tomorrow?" -> TIMING_CHECK, SHARED, priya, exactTime=10:00, unaffected', parsed.intent === 'TIMING_CHECK' && parsed.scope === 'SHARED' && parsed.personNameQuery === 'priya' && parsed.exactTime === '10:00');
+      const response = await orchestrateAskAura(parsed, deps);
+      check('Executes through the Scope-Aware Everyday TIMING_CHECK path (PR #69), never rerouted to FIND', response.intent === 'TIMING_CHECK');
+    }
   } finally {
     for (const id of created) {
       await deleteSavedPerson(owner.id, id).catch(() => {});

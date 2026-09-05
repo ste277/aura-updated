@@ -847,18 +847,57 @@ export function parseAskAuraRequest(rawText: string, context: AskAuraParseContex
     };
   }
 
-  // 7. Timing Check -- "Can I work out now?" (activity + check-phrasing).
+  // 7. Timing Check -- "Can I work out now?" (activity + check-phrasing) --
+  // ONLY when the request represents a genuine single instant: NOW itself,
+  // or no date signal at all (defaults to NOW below, unchanged from
+  // before). A valid exact clock always already returned at step 5b above
+  // (with `exactTime` set), so by construction `clockResult.status` is
+  // never VALID by the time execution reaches here -- this branch never
+  // needs to check for one itself.
+  //
+  // Ask Aura Date-Only CHECK Semantics V1: a CHECK-verb phrase combined
+  // with a real date/day/range but NO exact clock ("Should I meditate
+  // tomorrow?", "Can I meditate this weekend?", "Should I meditate next
+  // month?") does not supply the precision CHECK requires -- Ask Aura must
+  // never invent an instant the user didn't provide. This used to
+  // fabricate one anyway, downstream in resolveTimingCheckCandidateStart
+  // (askAuraOrchestrator.ts): the resolved date + a literal
+  // 'T12:00:00.000Z' suffix -- NOT local noon, just UTC noon, confirmed to
+  // display as 5:30 PM in Asia/Kolkata and 8:00 AM in America/New_York for
+  // the identical "tomorrow" request, and to silently collapse a multi-day
+  // range (e.g. "this weekend") down to only its first day.
+  //
+  // The fix: fall through to the SAME TIMING_FIND shape step 8 below
+  // already returns for a bare activity + horizon/timePreference/duration
+  // signal -- reusing resolveActivity() here (activityId-or-taskTitle
+  // fallback), not step 8's own catalog-only findActivityIntent(), so an
+  // uncataloged free-text activity doesn't regress from "wrong CHECK" to
+  // UNKNOWN merely because this branch now sometimes returns FIND instead
+  // of CHECK.
   if (CHECK_VERB_RE.test(text)) {
     const resolved = resolveActivity(text);
     if (!resolved.activityId && !resolved.taskTitle) {
       return { intent: 'UNKNOWN', confidence: 'LOW' };
     }
+    if (!horizonPhrase || horizonPhrase === 'NOW') {
+      return {
+        intent: 'TIMING_CHECK',
+        confidence: 'HIGH',
+        ...resolved,
+        durationMinutes,
+        horizonPhrase: horizonPhrase ?? 'NOW',
+        customDate,
+        timePreference,
+        scope: scope ?? 'GENERAL',
+        personNameQuery,
+      };
+    }
     return {
-      intent: 'TIMING_CHECK',
+      intent: 'TIMING_FIND',
       confidence: 'HIGH',
       ...resolved,
       durationMinutes,
-      horizonPhrase: horizonPhrase ?? 'NOW',
+      horizonPhrase,
       customDate,
       timePreference,
       scope: scope ?? 'GENERAL',

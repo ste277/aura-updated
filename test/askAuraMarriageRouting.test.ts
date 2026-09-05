@@ -377,7 +377,11 @@ async function main() {
   // never FIND/search wording ("Best dates for X:").
   // ============================================================
 
-  for (const t of ['Should I get married tomorrow?', 'Can I get married tomorrow?', 'Is now a good time to get married?', 'Is this a good time to get married?']) {
+  // "Is now a good time..."/"Is this a good time..." carry no date signal
+  // at all (NOW or absent -> defaults to NOW) -- these genuinely represent
+  // a single instant, so they correctly remain TIMING_CHECK, unaffected by
+  // Ask Aura Date-Only CHECK Semantics V1.
+  for (const t of ['Is now a good time to get married?', 'Is this a good time to get married?']) {
     const p = parse(t);
     check(`"${t}" parses TIMING_CHECK, activityId=marriage`, p.intent === 'TIMING_CHECK' && p.activityId === 'marriage');
     const response = await orchestrateAskAura(p, deps);
@@ -388,15 +392,47 @@ async function main() {
     check(`"${t}" card carries a single "requested" candidate (no FIND-shaped "best"/"others"/date list)`, Boolean(card?.requested) && !('dates' in (response.cards?.[0] ?? {})) && !('best' in (response.cards?.[0] ?? {})));
   }
 
+  // RESOLVED by Ask Aura Date-Only CHECK Semantics V1 (previously asserted
+  // TIMING_CHECK here): "Should I get married tomorrow?"/"Can I get married
+  // tomorrow?" state a real date ("tomorrow") with no exact clock, so they
+  // now correctly resolve TIMING_FIND -- the orchestrator's EXISTING
+  // capability redirect (unchanged) sends this straight to the canonical
+  // Muhurtham search for that day, never a fabricated-instant CHECK
+  // (previously the resolved date + literal UTC noon, confirmed via the
+  // audit to display as 5:30 PM in Asia/Kolkata for this exact prompt).
+  for (const t of ['Should I get married tomorrow?', 'Can I get married tomorrow?']) {
+    const p = parse(t);
+    check(`"${t}" -> TIMING_FIND, marriage, no exactTime (was a fabricated-instant CHECK)`, p.intent === 'TIMING_FIND' && p.activityId === 'marriage' && p.exactTime === undefined);
+    const response = await orchestrateAskAura(p, deps);
+    check(`"${t}" executes through the canonical Muhurtham search (never a fabricated single instant)`, response.intent === 'MUHURTHAM_SEARCH');
+  }
+
+  // Exact-clock ceremonial CHECK remains completely unaffected -- the fix
+  // only narrows the no-exact-clock case.
+  {
+    const p = parse('Should I get married at 10 AM tomorrow?');
+    check('"Should I get married at 10 AM tomorrow?" -> TIMING_CHECK, exactTime=10:00, unaffected', p.intent === 'TIMING_CHECK' && p.exactTime === '10:00');
+    const response = await orchestrateAskAura(p, deps);
+    check('"Should I get married at 10 AM tomorrow?" response stays TIMING_CHECK via the ceremonial evaluator', response.intent === 'TIMING_CHECK' && !response.message.includes('Best dates for'));
+  }
+
   // ============================================================
   // Contradiction regression (the audit's headline finding): for the SAME
-  // real fixture (2026-06-12 New York), a FIND-shaped prompt (already
-  // redirected) and a CHECK-shaped prompt (newly redirected by this PR)
-  // must now both go through the canonical Muhurtham engine -- not
-  // asserting identical wording/instant (CHECK evaluates a different,
-  // horizon-derived instant than FIND's own discovered best window), but
-  // asserting neither one can any longer silently fall back to generic-
-  // only Timing Search for this activity.
+  // real fixture (2026-06-12 New York), a bare FIND-shaped prompt and a
+  // CHECK-verb-shaped prompt for the SAME date must now both go through
+  // the canonical Muhurtham engine -- neither one can silently fall back
+  // to generic-only Timing Search for this activity.
+  //
+  // UPDATED by Ask Aura Date-Only CHECK Semantics V1: "Should I get married
+  // tomorrow?" states a date with no exact clock, so it now correctly
+  // parses TIMING_FIND (not TIMING_CHECK) -- this is not a weakening of the
+  // original contradiction fix, it's a MORE precise one: both prompts now
+  // converge on the exact same MUHURTHAM_SEARCH execution for the exact
+  // same day, rather than merely both reaching "some ceremonial evaluator"
+  // via two different, differently-derived instants as before. A genuinely
+  // still-CHECK-shaped prompt (exact clock stated) is tested separately
+  // below to prove CHECK phrasing still reaches the ceremonial evaluator
+  // when real precision is actually supplied.
   // ============================================================
   {
     const nyNow = new Date('2026-06-11T04:00:00.000Z');
@@ -408,20 +444,45 @@ async function main() {
     check('"Is tomorrow good for marriage?" (FIND) executes MUHURTHAM_SEARCH', findResponse.intent === 'MUHURTHAM_SEARCH');
 
     const checkParsed = parseAskAuraRequest('Should I get married tomorrow?', { now: nyNow });
+    check('"Should I get married tomorrow?" now parses TIMING_FIND (no exact clock stated)', checkParsed.intent === 'TIMING_FIND');
     const checkResponse = await orchestrateAskAura(checkParsed, nyDeps);
-    check('"Should I get married tomorrow?" (CHECK) stays TIMING_CHECK but now via the ceremonial evaluator (never "Best dates for" wording)', checkResponse.intent === 'TIMING_CHECK' && !checkResponse.message.includes('Best dates for'));
+    check('"Should I get married tomorrow?" executes MUHURTHAM_SEARCH -- the SAME canonical engine as the bare FIND phrasing, never a fabricated single instant', checkResponse.intent === 'MUHURTHAM_SEARCH');
+
+    // A genuinely CHECK-shaped prompt (exact clock stated) for the same day
+    // still correctly reaches the ceremonial single-candidate evaluator.
+    const exactCheckParsed = parseAskAuraRequest('Should I get married at 10 AM tomorrow?', { now: nyNow });
+    check('"Should I get married at 10 AM tomorrow?" parses TIMING_CHECK, exactTime=10:00', exactCheckParsed.intent === 'TIMING_CHECK' && exactCheckParsed.exactTime === '10:00');
+    const exactCheckResponse = await orchestrateAskAura(exactCheckParsed, nyDeps);
+    check('"Should I get married at 10 AM tomorrow?" stays TIMING_CHECK via the ceremonial evaluator (never "Best dates for" wording)', exactCheckResponse.intent === 'TIMING_CHECK' && !exactCheckResponse.message.includes('Best dates for'));
   }
 
   // ============================================================
-  // Generic capability tests -- proves the CHECK redirect is capability-
-  // driven (isSupportedMuhurthamActivity), not marriage-specific.
+  // Generic capability tests -- proves the redirect is capability-driven
+  // (isSupportedMuhurthamActivity), not marriage-specific.
+  //
+  // UPDATED by Ask Aura Date-Only CHECK Semantics V1: "tomorrow" with no
+  // exact clock now correctly parses TIMING_FIND for these activities too
+  // (same fix, generic across every Muhurtham-eligible activity) -- the
+  // existing capability redirect (unchanged) sends both straight to the
+  // canonical Muhurtham search, never a fabricated-instant CHECK.
   // ============================================================
   for (const [text, activityId] of [
     ['Should I do griha pravesh tomorrow?', 'griha-pravesh'],
     ['Should I start my business tomorrow?', 'business-start'],
   ] as const) {
     const p = parse(text);
-    check(`"${text}" parses TIMING_CHECK, activityId=${activityId}`, p.intent === 'TIMING_CHECK' && p.activityId === activityId);
+    check(`"${text}" -> TIMING_FIND, activityId=${activityId}, no exactTime (was a fabricated-instant CHECK)`, p.intent === 'TIMING_FIND' && p.activityId === activityId && p.exactTime === undefined);
+    const response = await orchestrateAskAura(p, deps);
+    check(`"${text}" executes through the canonical Muhurtham search, never generic-only or a fabricated instant`, response.intent === 'MUHURTHAM_SEARCH');
+  }
+
+  // Exact-clock form for the same activities remains completely unaffected.
+  for (const [text, activityId] of [
+    ['Should I do griha pravesh at 10 AM tomorrow?', 'griha-pravesh'],
+    ['Should I start my business at 10 AM tomorrow?', 'business-start'],
+  ] as const) {
+    const p = parse(text);
+    check(`"${text}" parses TIMING_CHECK, activityId=${activityId}, exactTime=10:00, unaffected`, p.intent === 'TIMING_CHECK' && p.activityId === activityId && p.exactTime === '10:00');
     const response = await orchestrateAskAura(p, deps);
     check(`"${text}" response is CHECK-shaped (ceremonial evaluator used, not generic-only)`, response.intent === 'TIMING_CHECK' && !response.message.includes('Best dates for'));
   }
@@ -441,12 +502,26 @@ async function main() {
   // ============================================================
   // Dating negative control -- Marriage aliases/capability routing must
   // not affect dating in any way, including under CHECK phrasing.
+  //
+  // UPDATED by Ask Aura Date-Only CHECK Semantics V1: "tonight" resolves
+  // horizonPhrase=TODAY (a real period, not NOW), so this now correctly
+  // parses TIMING_FIND rather than TIMING_CHECK -- dating is not
+  // Muhurtham-eligible, so it executes through plain generic Timing Search
+  // FIND, proving the capability redirect and this date-only fix are both
+  // completely unaffected by (and unaffecting) dating.
   // ============================================================
   {
     const p = parse('Should I go on a date tonight?');
-    check('"Should I go on a date tonight?" resolves dating, not marriage', p.activityId === 'dating');
+    check('"Should I go on a date tonight?" resolves dating, not marriage, -> TIMING_FIND (no exact clock stated)', p.activityId === 'dating' && p.intent === 'TIMING_FIND');
     const response = await orchestrateAskAura(p, deps);
-    check('"Should I go on a date tonight?" uses the unchanged generic CHECK wording', response.message === 'You can.' || response.message === "I'd hold off for now.");
+    check('"Should I go on a date tonight?" executes generic Timing Search FIND, never a Muhurtham search', response.intent === 'TIMING_FIND');
+  }
+  // Exact-clock dating CHECK remains completely unaffected.
+  {
+    const p = parse('Should I go on a date at 7 PM tonight?');
+    check('"Should I go on a date at 7 PM tonight?" -> TIMING_CHECK, dating, exactTime=19:00, unaffected', p.intent === 'TIMING_CHECK' && p.activityId === 'dating' && p.exactTime === '19:00');
+    const response = await orchestrateAskAura(p, deps);
+    check('"Should I go on a date at 7 PM tonight?" uses the unchanged generic CHECK wording', response.message === 'You can.' || response.message === "I'd hold off for now.");
   }
 
   // ============================================================
@@ -462,15 +537,29 @@ async function main() {
   }
 
   // ============================================================
-  // Duration -- an explicit duration on a CHECK-shaped prompt must be
-  // evaluated as that exact span, not silently dropped or defaulted.
+  // Duration -- an explicit duration must be evaluated as that exact span,
+  // not silently dropped or defaulted.
+  //
+  // UPDATED by Ask Aura Date-Only CHECK Semantics V1: "tomorrow" with no
+  // exact clock now correctly parses TIMING_FIND, executing through the
+  // canonical Muhurtham search (dates-list-shaped card, not a single
+  // "requested" candidate) -- duration must still thread through
+  // correctly to that search. A genuinely CHECK-shaped duration prompt
+  // (exact clock stated) is tested separately below to prove the original
+  // single-instant duration behavior remains intact.
   // ============================================================
   {
     const p = parse('Should I get married tomorrow for 90 minutes?');
-    check('"Should I get married tomorrow for 90 minutes?" parses durationMinutes=90', p.durationMinutes === 90);
+    check('"Should I get married tomorrow for 90 minutes?" -> TIMING_FIND, durationMinutes=90, no exactTime', p.intent === 'TIMING_FIND' && p.durationMinutes === 90 && p.exactTime === undefined);
+    const response = await orchestrateAskAura(p, deps);
+    check('Executes through the canonical Muhurtham search with duration preserved', response.intent === 'MUHURTHAM_SEARCH');
+  }
+  {
+    const p = parse('Should I get married at 10 AM tomorrow for 90 minutes?');
+    check('"Should I get married at 10 AM tomorrow for 90 minutes?" -> TIMING_CHECK, exactTime=10:00, durationMinutes=90, unaffected', p.intent === 'TIMING_CHECK' && p.exactTime === '10:00' && p.durationMinutes === 90);
     const response = await orchestrateAskAura(p, deps);
     const card = response.cards?.[0] as { requested?: { start: string; end: string } } | undefined;
-    check('"Should I get married tomorrow for 90 minutes?" evaluates a genuinely 90-minute span, not the default', Boolean(card?.requested) && (new Date(card!.requested!.end).getTime() - new Date(card!.requested!.start).getTime()) === 90 * 60000);
+    check('"Should I get married at 10 AM tomorrow for 90 minutes?" evaluates a genuinely 90-minute span, not the default', Boolean(card?.requested) && (new Date(card!.requested!.end).getTime() - new Date(card!.requested!.start).getTime()) === 90 * 60000);
   }
 
   // ============================================================
