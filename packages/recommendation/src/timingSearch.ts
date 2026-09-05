@@ -193,7 +193,17 @@ function resolveTaskProfile(request: TimingSearchRequest): TaskProfile {
   return profile;
 }
 
-function labelForRawScore(rawScore: number): TimingCandidateLabel {
+/**
+ * Exported (Ask Aura Scope-Aware Everyday TIMING_CHECK V1) so a caller that
+ * derives its own 0-10 presentation score OUTSIDE this file's own
+ * evaluateTimingCandidate() -- specifically, a blended SHARED score
+ * (generalCandidate.score + a blendSharedDelta() delta) -- can label it
+ * with the SAME thresholds every other TimingCandidate already uses,
+ * rather than inventing a second label scale. Takes the RAW ~0-100 scale
+ * (multiply a 0-10 presentation score by 10 before calling), matching
+ * every other caller in this file.
+ */
+export function labelForRawScore(rawScore: number): TimingCandidateLabel {
   if (rawScore < 0) return 'CAUTION';
   if (rawScore >= 90) return 'EXCELLENT';
   if (rawScore >= 80) return 'VERY_GOOD';
@@ -373,6 +383,34 @@ function runFind(request: TimingSearchRequest): TimingSearchResponse {
 }
 
 /**
+ * The exact minute-range/step CHECK's own betterNearby scan uses --
+ * extracted (Ask Aura Scope-Aware Everyday TIMING_CHECK V1) so
+ * nearbyCheckInstants() below can produce the SAME nearby instants for a
+ * scope-aware caller's own (e.g. blended SHARED) comparison, without
+ * duplicating this range/step/day-boundary arithmetic.
+ */
+function nearbyCheckMinutes(
+  candidateStartIso: string,
+  durationMinutes: number,
+  context: DailyAssistantContext,
+  windowMinutes: number
+): { dayContext: DailyAssistantContext; minutes: number[] } {
+  const start = new Date(candidateStartIso);
+  const dayContext: DailyAssistantContext = { ...context, now: start };
+  const localStart = localDateForContext(dayContext);
+  const startMinute = localStart.getUTCHours() * 60 + localStart.getUTCMinutes();
+  const safeDuration = Math.min(360, Math.max(15, Math.round(durationMinutes)));
+  const rangeStart = Math.max(0, startMinute - windowMinutes);
+  const rangeEnd = Math.min(1440 - safeDuration, startMinute + windowMinutes);
+  const minutes: number[] = [];
+  for (let minute = rangeStart; minute <= rangeEnd; minute += CANDIDATE_SEARCH_STEP_MINUTES) {
+    if (minute === startMinute) continue;
+    minutes.push(minute);
+  }
+  return { dayContext, minutes };
+}
+
+/**
  * CHECK: score exactly the requested instant (never moved), then optionally
  * scan a constrained nearby window on the same local day for a strictly
  * better alternative.
@@ -386,15 +424,9 @@ function runCheck(request: TimingSearchRequest): TimingSearchResponse {
   const nearbyWindow = request.checkNearbyWindowMinutes ?? DEFAULT_CHECK_NEARBY_WINDOW_MINUTES;
   let betterNearby: TimingCandidate | undefined;
   if (nearbyWindow > 0) {
-    const dayContext: DailyAssistantContext = { ...request.context, now: start };
-    const localStart = localDateForContext(dayContext);
-    const startMinute = localStart.getUTCHours() * 60 + localStart.getUTCMinutes();
-    const safeDuration = Math.min(360, Math.max(15, Math.round(request.durationMinutes)));
-    const rangeStart = Math.max(0, startMinute - nearbyWindow);
-    const rangeEnd = Math.min(1440 - safeDuration, startMinute + nearbyWindow);
+    const { dayContext, minutes } = nearbyCheckMinutes(request.candidateStart, request.durationMinutes, request.context, nearbyWindow);
     let best: TimingCandidate | undefined;
-    for (let minute = rangeStart; minute <= rangeEnd; minute += CANDIDATE_SEARCH_STEP_MINUTES) {
-      if (minute === startMinute) continue;
+    for (const minute of minutes) {
       const candidateStart = localInstantForMinute(dayContext, minute);
       const candidate = evaluateTimingCandidate({ profile, start: candidateStart, durationMinutes: request.durationMinutes, context: request.context });
       if (!best || candidate.score > best.score) best = candidate;
@@ -405,6 +437,24 @@ function runCheck(request: TimingSearchRequest): TimingSearchResponse {
   }
 
   return { mode: 'CHECK', candidates: [requested], requestedCandidate: requested, betterNearby };
+}
+
+/**
+ * Exported (Ask Aura Scope-Aware Everyday TIMING_CHECK V1): the same nearby
+ * instants runCheck()'s own betterNearby scan would evaluate, as plain ISO
+ * strings -- for a caller (Ask Aura's SHARED CHECK) that needs to compare
+ * candidates using its OWN scoring (a blended SHARED score, not this file's
+ * own owner-only TimingCandidate.score) while still reusing the identical
+ * scan range/step/day-boundary rules, never re-deriving or broadening them.
+ */
+export function nearbyCheckInstants(
+  candidateStart: string,
+  durationMinutes: number,
+  context: DailyAssistantContext,
+  windowMinutes: number = DEFAULT_CHECK_NEARBY_WINDOW_MINUTES
+): string[] {
+  const { dayContext, minutes } = nearbyCheckMinutes(candidateStart, durationMinutes, context, windowMinutes);
+  return minutes.map((minute) => localInstantForMinute(dayContext, minute).toISOString());
 }
 
 /**

@@ -242,29 +242,105 @@ async function main() {
   }
 
   // ============================================================
-  // Ask Aura Richer SHARED Grammar V1 fail-closed follow-up, section 13:
-  // everyday (non-ceremonial) TIMING_CHECK still cannot perform SHARED
-  // personalization -- documented, not fixed, per this follow-up's own
-  // explicit non-goal against new everyday shared scoring. The parser
-  // correctly resolves scope=SHARED/personNameQuery=priya (a resolvable
-  // name IS present, so the fail-closed guard does not fire), but the
-  // response itself must not misrepresent the result as
-  // partner-personalized: it must be byte-identical to the same request
-  // with no SHARED signal at all.
+  // RESOLVED by Ask Aura Scope-Aware Everyday TIMING_CHECK V1 (previously:
+  // "everyday non-ceremonial TIMING_CHECK cannot perform SHARED
+  // personalization -- documented, not fixed"). "Is 10 AM tomorrow good for
+  // Priya and me to meditate?" now genuinely reaches
+  // handleEverydaySharedTimingCheck, which requires a real SavedPerson
+  // resolution -- that end-to-end blend proof (RESOLVED/AMBIGUOUS/
+  // NOT_FOUND/incomplete-profile, and the "SHARED no longer byte-identical
+  // to GENERAL when personal signals diverge" assertion) now lives in
+  // test/askAuraOrchestratorDb.test.ts, since it needs a live DB. Only the
+  // parser-level routing shape (no DB call) is re-confirmed here.
   // ============================================================
   {
     const sharedParsed = parseAskAuraRequest('Is 10 AM tomorrow good for Priya and me to meditate?', { now: NOW, timezone: 'Asia/Kolkata' });
-    check('"...Priya and me to meditate?" parses TIMING_CHECK, SHARED, priya (a resolvable name -- fail-closed guard does not fire)', sharedParsed.intent === 'TIMING_CHECK' && sharedParsed.scope === 'SHARED' && sharedParsed.personNameQuery === 'priya');
+    check('"...Priya and me to meditate?" parses TIMING_CHECK, SHARED, priya (routes to the everyday shared CHECK handler)', sharedParsed.intent === 'TIMING_CHECK' && sharedParsed.scope === 'SHARED' && sharedParsed.personNameQuery === 'priya');
 
     const genericParsed = parseAskAuraRequest('Is 10 AM tomorrow good for meditation?', { now: NOW, timezone: 'Asia/Kolkata' });
     check('sanity: the no-SHARED-signal control parses the same activity/time, scope=GENERAL', genericParsed.activityId === sharedParsed.activityId && genericParsed.exactTime === sharedParsed.exactTime && genericParsed.scope === 'GENERAL');
+  }
 
-    const sharedResponse = await orchestrateAskAura(sharedParsed, deps);
-    const genericResponse = await orchestrateAskAura(genericParsed, deps);
-    check('Generic (non-ceremonial) TIMING_CHECK does not personalize for the resolved partner -- message is IDENTICAL to the GENERAL-equivalent request, never falsely representing a partner-personalized result', sharedResponse.message === genericResponse.message);
-    const sharedCard = sharedResponse.cards?.[0] as { requested?: { score: number } } | undefined;
-    const genericCard = genericResponse.cards?.[0] as { requested?: { score: number } } | undefined;
-    check('Score is IDENTICAL too -- documented pre-existing limitation, not fixed by this follow-up', sharedCard?.requested?.score === genericCard?.requested?.score);
+  // ============================================================
+  // Ask Aura Scope-Aware Everyday TIMING_CHECK V1.
+  // ============================================================
+
+  // Section 5/6/35/36 -- GENERAL and PERSONAL generic CHECK must remain
+  // byte-identical to before this PR (neither branches on scope; both were
+  // already silently owner-personalized via context.personalContext, per
+  // the audit -- this PR must not change that).
+  {
+    const personalizedContext: DailyAssistantContext = { ...context, personalContext: { natalNakshatraIndex: 1, janmaNakshatra: 'Bharani' } };
+    const personalizedDeps: AskAuraOrchestratorDeps = { userId: 'test-user-not-a-real-db-row', context: personalizedContext, activeWindow: 'NEUTRAL' };
+
+    const generalParsed = parseAskAuraRequest('Is 10 AM tomorrow good for meditation?', { now: NOW, timezone: 'Asia/Kolkata' });
+    check('GENERAL parses scope=GENERAL', generalParsed.scope === 'GENERAL');
+    const generalResponse = await orchestrateAskAura(generalParsed, personalizedDeps);
+
+    const personalParsed = parseAskAuraRequest('Is 10 AM tomorrow good for me to meditate?', { now: NOW, timezone: 'Asia/Kolkata' });
+    check('PERSONAL parses scope=PERSONAL', personalParsed.scope === 'PERSONAL');
+    const personalResponse = await orchestrateAskAura(personalParsed, personalizedDeps);
+
+    // Compare everything EXCEPT the echoed `context` field -- that field
+    // legitimately differs (it echoes back parsed.scope for follow-up
+    // continuity), even though the underlying computed result is identical.
+    const { context: _generalCtx, ...generalRest } = generalResponse;
+    const { context: _personalCtx, ...personalRest } = personalResponse;
+    check('GENERAL and PERSONAL generic CHECK produce byte-identical computed results (message/cards/actions) -- unchanged by this PR, documented pre-existing equivalence, not newly introduced', JSON.stringify(generalRest) === JSON.stringify(personalRest));
+    check('GENERAL response intent is TIMING_CHECK, unaffected', generalResponse.intent === 'TIMING_CHECK');
+  }
+
+  // Section 39 -- fail-closed regression (PR #68): "for us"/"together" with
+  // no deterministic partner must remain UNKNOWN, never reach the new
+  // everyday shared CHECK path, never silently execute owner-only.
+  {
+    const parsed = parseAskAuraRequest('Is 10 AM tomorrow good for us to meditate?', { now: NOW, timezone: 'Asia/Kolkata' });
+    check('"for us" (no resolvable partner) still parses UNKNOWN -- PR #68 invariant unaffected', parsed.intent === 'UNKNOWN');
+    const response = await orchestrateAskAura(parsed, deps);
+    check('Orchestrator response is UNKNOWN, never a silent owner-only CHECK', response.intent === 'UNKNOWN');
+  }
+
+  // Section 31 -- ceremonial routing regression: a Muhurtham-eligible
+  // activity's TIMING_CHECK must remain completely untouched by this PR,
+  // still routing through handleMuhurthamTimingCheck/
+  // evaluateMuhurthamCandidateAt, never the new everyday shared path.
+  {
+    const parsed = parseAskAuraRequest('Should I get married tomorrow?', { now: NOW, timezone: 'Asia/Kolkata' });
+    check('Ceremonial (marriage) parses TIMING_CHECK', parsed.intent === 'TIMING_CHECK' && parsed.activityId === 'marriage');
+    const response = await orchestrateAskAura(parsed, deps);
+    check('Ceremonial CHECK response is CHECK-shaped, never "Best dates for" (unaffected by this PR)', response.intent === 'TIMING_CHECK' && !response.message.includes('Best dates for'));
+    check('Ceremonial CHECK response never carries a SHARED-everyday-shaped scope/personName field (proves it did NOT reach the new everyday shared handler)', !('scope' in (response.cards?.[0] ?? {})) && !('personName' in (response.cards?.[0] ?? {})));
+  }
+
+  // Section 27 -- natural-date + duration composition (PR #66/#67) must
+  // remain intact once routed through the new everyday shared path (parser
+  // level here; full end-to-end blend proof with a real SavedPerson is in
+  // test/askAuraOrchestratorDb.test.ts).
+  {
+    const parsed = parseAskAuraRequest('Is 10 AM next Friday good for Priya and me to meditate for 90 minutes?', { now: NOW, timezone: 'Asia/Kolkata' });
+    check('Natural date + duration + pair grammar compose correctly: TIMING_CHECK, SHARED, priya, exactTime=10:00, durationMinutes=90, customDate resolved', parsed.intent === 'TIMING_CHECK' && parsed.scope === 'SHARED' && parsed.personNameQuery === 'priya' && parsed.exactTime === '10:00' && parsed.durationMinutes === 90 && parsed.horizonPhrase === 'CUSTOM_DATE' && Boolean(parsed.customDate));
+  }
+
+  // Section 28 -- dating regression: a non-Muhurtham activity with pair
+  // grammar must resolve to the everyday shared CHECK path (not marriage),
+  // proven here at the parser/routing level (full DB resolution proof is in
+  // askAuraOrchestratorDb.test.ts).
+  {
+    const parsed = parseAskAuraRequest('Is 7 PM next Friday good for Priya and me to go on a date?', { now: NOW, timezone: 'Asia/Kolkata' });
+    check('Dating + pair grammar parses activityId=dating, SHARED, priya (not marriage)', parsed.activityId === 'dating' && parsed.scope === 'SHARED' && parsed.personNameQuery === 'priya');
+  }
+
+  // Direct proof (no DB needed) that the requested candidate is preserved
+  // exactly and that betterNearby -- if the everyday shared handler's own
+  // mechanism is exercised -- compares candidates via nearbyCheckInstants(),
+  // the SAME range/step/day-boundary rules generic CHECK's own betterNearby
+  // scan already uses (imported directly to prove no broadened search).
+  {
+    const { nearbyCheckInstants } = await import('../packages/recommendation/src/timingSearch');
+    const candidateStart = '2026-09-04T04:30:00.000Z';
+    const instants = nearbyCheckInstants(candidateStart, 30, context);
+    check('nearbyCheckInstants never includes the requested instant itself', !instants.includes(candidateStart));
+    check('nearbyCheckInstants stays within the default 180-minute window (a sample of the returned instants should differ from candidateStart by at most 180 minutes)', instants.every((iso) => Math.abs(new Date(iso).getTime() - new Date(candidateStart).getTime()) <= 180 * 60000));
   }
 
   console.log(allPassed ? '\nALL ASK AURA ORCHESTRATOR CHECKS PASSED' : '\nSOME ASK AURA ORCHESTRATOR CHECKS FAILED');

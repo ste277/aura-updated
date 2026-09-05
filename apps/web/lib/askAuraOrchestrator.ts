@@ -21,9 +21,9 @@ import {
   ParsedAskAuraRequest,
   parseFollowUpChange,
 } from '../../../packages/recommendation/src/askAuraIntent';
-import { DailyAssistantContext, localDateForContext, resolveHorizonDayOffsets } from '../../../packages/recommendation/src/dailyAssistant';
-import { runTimingSearch, TimingCandidate, TimingSearchRequest, TimingTimePreference } from '../../../packages/recommendation/src/timingSearch';
-import { findEverydaySharedTiming } from '../../../packages/recommendation/src/everydayTimingFit';
+import { DailyAssistantContext, localDateForContext, profileFromActivity, resolveHorizonDayOffsets } from '../../../packages/recommendation/src/dailyAssistant';
+import { labelForRawScore, nearbyCheckInstants, runTimingSearch, TimingCandidate, TimingSearchRequest, TimingTimePreference } from '../../../packages/recommendation/src/timingSearch';
+import { evaluateEverydaySharedCandidate, findEverydaySharedTiming } from '../../../packages/recommendation/src/everydayTimingFit';
 import { getActionCards } from '../../../packages/recommendation/src/actionCards';
 import { FULL_ACTIVITY_CATALOG } from '../../../packages/recommendation/src/personalizedTasks';
 import { handleMuhurthamSearchBody, handleSharedMuhurthamSearchBody } from './muhurthamSearchRequest';
@@ -396,6 +396,16 @@ async function handleTimingCheck(parsed: ParsedAskAuraRequest, deps: AskAuraOrch
   const durationMinutes = resolveDuration(parsed.activityId, parsed.durationMinutes);
   const candidateStart = resolveTimingCheckCandidateStart(parsed, deps);
 
+  // SHARED scope with a resolved person -> everyday shared timing (Ask
+  // Aura Scope-Aware Everyday TIMING_CHECK V1), mirroring handleTimingFind's
+  // own SHARED branch exactly -- same SavedPerson resolution, same
+  // RESOLVED/AMBIGUOUS/NOT_FOUND handling, never a silent owner-only
+  // fallback (PR #68's fail-closed invariant already guarantees scope ===
+  // 'SHARED' never reaches here at all without a personNameQuery).
+  if (parsed.scope === 'SHARED' && parsed.personNameQuery) {
+    return handleEverydaySharedTimingCheck(parsed, deps, durationMinutes, candidateStart);
+  }
+
   const request: TimingSearchRequest = {
     mode: 'CHECK',
     activityId: parsed.activityId,
@@ -428,6 +438,149 @@ async function handleTimingCheck(parsed: ParsedAskAuraRequest, deps: AskAuraOrch
       { type: 'OPEN_PLAN', label: 'Plan better time', activityId: parsed.activityId },
     ],
     context: { ...parsed, activityId: activity?.id ?? parsed.activityId, taskTitle: activity ? undefined : parsed.taskTitle },
+  };
+}
+
+// ---- TIMING_CHECK, everyday SHARED (Ask Aura Scope-Aware Everyday
+// TIMING_CHECK V1) -----------------------------------------------------
+
+/**
+ * The exact requested instant, evaluated for BOTH the owner and the
+ * resolved partner and blended via the SAME methodology
+ * findEverydaySharedTiming()/evaluateEverydaySharedCandidate() already
+ * establish for everyday SHARED FIND -- never a second scoring formula.
+ * The candidate instant itself is never moved: `candidateStart` (already
+ * resolved by the caller, identical to the GENERAL/PERSONAL path above) is
+ * evaluated once for the primary result, and nearbyCheckInstants() supplies
+ * the SAME nearby-scan instants runCheck()'s own betterNearby search would
+ * use, compared here by sharedScore instead of the owner-only score, so a
+ * time that's better for the owner alone but worse for the partner cannot
+ * win (brief section 17).
+ */
+async function handleEverydaySharedTimingCheck(
+  parsed: ParsedAskAuraRequest,
+  deps: AskAuraOrchestratorDeps,
+  durationMinutes: number,
+  candidateStart: string
+): Promise<AskAuraResponse> {
+  const resolution = await resolvePersonByName(deps.userId, parsed.personNameQuery!);
+  if (resolution.status === 'NOT_FOUND') {
+    return {
+      intent: 'TIMING_CHECK',
+      message: `I couldn't find anyone named "${parsed.personNameQuery}" in your People list.`,
+      cards: [{ type: 'CLARIFICATION', options: ['Add this person', 'Try General instead'] }],
+      context: parsed,
+    };
+  }
+  if (resolution.status === 'AMBIGUOUS') {
+    return {
+      intent: 'TIMING_CHECK',
+      message: `You have more than one "${parsed.personNameQuery}" saved. Who did you mean?`,
+      cards: [{ type: 'CLARIFICATION', options: resolution.matches.map((m) => m.name) }],
+      context: parsed,
+    };
+  }
+  const activity = FULL_ACTIVITY_CATALOG.find((a) => a.id === parsed.activityId);
+  if (!activity) {
+    // SAME wording handleTimingFind's own SHARED branch already uses for
+    // an unresolved-catalog activity -- an unresolved free-text taskTitle
+    // never gets a shared evaluation, same as it never gets an
+    // auraFitScore/personalization signal at all in the GENERAL/PERSONAL
+    // path (brief section 22).
+    return {
+      intent: 'TIMING_CHECK',
+      message: "I don't have that activity in my catalog yet.",
+      cards: [{ type: 'CLARIFICATION', options: ['Find a time', 'Check a time'] }],
+      context: parsed,
+    };
+  }
+
+  const person = resolution.person;
+  const partnerContext = natalContextFromBirthDetails(
+    person.birthDate.toISOString().slice(0, 10),
+    person.birthTime,
+    person.birthTimezone
+  );
+
+  const profile = profileFromActivity(activity);
+  const activityTitle = activity.title;
+  // personalContext stripped, matching findEverydaySharedTiming's own
+  // generalContext convention exactly -- the CLEAN baseline the owner/
+  // partner deltas are computed against, never the owner-personalized
+  // context deps.context already carries (that owner personalization is
+  // applied inside evaluateEverydaySharedCandidate itself, via `context`
+  // below, not baked into this baseline).
+  const generalContext: DailyAssistantContext = { ...deps.context, personalContext: undefined };
+
+  const evaluateSharedAt = (startIso: string) => {
+    const generalResult = runTimingSearch({
+      mode: 'CHECK',
+      activityId: activity.id,
+      durationMinutes,
+      candidateStart: startIso,
+      context: generalContext,
+    });
+    return evaluateEverydaySharedCandidate({
+      profile,
+      generalCandidate: generalResult.requestedCandidate!,
+      durationMinutes,
+      context: deps.context,
+      partnerContext,
+    });
+  };
+
+  const requested = evaluateSharedAt(candidateStart);
+
+  let betterNearby: ReturnType<typeof evaluateSharedAt> | undefined;
+  for (const nearbyIso of nearbyCheckInstants(candidateStart, durationMinutes, deps.context)) {
+    const candidate = evaluateSharedAt(nearbyIso);
+    if (!betterNearby || candidate.sharedScore > betterNearby.sharedScore) betterNearby = candidate;
+  }
+  // Same "strictly better" half-point margin runCheck() itself uses.
+  if (betterNearby && betterNearby.sharedScore < requested.sharedScore + 0.5) betterNearby = undefined;
+
+  // A synthetic TimingCandidate representing the BLENDED shared result --
+  // reuses every base (Panchang-derived) field from the clean general
+  // candidate (start/end/metadata/reasons/conflicts) untouched, overriding
+  // only score/label with the shared-blended values, so candidateCard()/
+  // planPayloadFromCandidate() (unchanged, shared with every other TIMING_
+  // RESULT card) can render it exactly like any other TimingCandidate.
+  // Reasons stay general/base-only (never a fabricated owner-/partner-
+  // specific reason string) -- the SAME convention findEverydaySharedTiming
+  // already established (brief section 19: "preserve that convention").
+  const toSharedTimingCandidate = (shared: ReturnType<typeof evaluateSharedAt>): TimingCandidate => ({
+    ...shared.generalCandidate,
+    score: shared.sharedScore,
+    label: labelForRawScore(shared.sharedScore * 10),
+  });
+
+  const requestedCard = toSharedTimingCandidate(requested);
+  const betterNearbyCard = betterNearby ? toSharedTimingCandidate(betterNearby) : undefined;
+
+  const canGo = requestedCard.label !== 'CAUTION';
+  // Distinct, conservative SHARED wording -- "works for both of you", never
+  // "compatible"/"relationship"/"auspicious" (brief section 20/27: this is
+  // timing suitability, never relationship or couple compatibility).
+  const message = canGo ? 'That works well for both of you.' : "I'd hold off -- this time doesn't work as well for both of you.";
+
+  return {
+    intent: 'TIMING_CHECK',
+    message,
+    cards: [
+      {
+        type: 'TIMING_RESULT',
+        activityTitle,
+        scope: 'SHARED',
+        personName: person.name,
+        requested: candidateCard(requestedCard, deps.context.timezone),
+        betterNearby: betterNearbyCard ? candidateCard(betterNearbyCard, deps.context.timezone) : undefined,
+      },
+    ],
+    actions: [
+      { type: 'PLAN_THIS', label: 'Plan this', planPayload: planPayloadFromCandidate(betterNearbyCard ?? requestedCard, activityTitle, activity.icon) },
+      { type: 'OPEN_PLAN', label: 'Plan better time', activityId: activity.id },
+    ],
+    context: { ...parsed, activityId: activity.id, taskTitle: undefined },
   };
 }
 
