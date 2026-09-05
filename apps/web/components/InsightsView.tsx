@@ -4,6 +4,7 @@ import React, { useState, useMemo } from 'react';
 import { computeAverageTimedSessionMinutes } from '../lib/activityDuration';
 import { toInsightsObservation, todayDateKey, lastNCalendarDateKeys, isInCalendarMonth } from '../lib/insightsTimezone';
 import { addDaysToDateStr } from '../lib/timezone';
+import { classifyInsightsWindow, insightsWindowWeight } from '../lib/insightsWindowAlignment';
 import { colors, spacing, typography, radius } from './theme';
 import { PageHeader, SegmentedControl, SurfaceCard, StatusBadge, TextButton, EmptyState } from './ui';
 
@@ -65,23 +66,6 @@ interface InsightsViewProps {
   } | null;
 }
 
-function scoreLoggedWindow(entry: LoggedEntryItem): number {
-  const windowName = (entry.activeWindow || '').toUpperCase();
-  const significance = entry.activitySignificance ?? 'MEDIUM';
-  const source = entry.logSource ?? 'MANUAL';
-  let score = 0.7;
-
-  if (windowName.includes('BRAHMA') || windowName.includes('ABHIJIT') || windowName.includes('GULIKA')) {
-    score = 1;
-  } else if (windowName.includes('RAHU') || windowName.includes('YAMA')) {
-    score = significance === 'LOW' ? 0.4 : significance === 'MEDIUM' ? 0.15 : 0;
-  }
-
-  if (source === 'AURA_PLANNED') score += 0.1;
-  if (source === 'OVERRIDE_CAUTION') score -= 0.15;
-  return Math.min(1, Math.max(0, score));
-}
-
 export function InsightsView({ timezone, logEntries = [], assistantInsight }: InsightsViewProps) {
   const [activeSubTab, setActiveSubTab] = useState<'overview' | 'patterns' | 'trends' | 'streaks'>('overview');
 
@@ -121,28 +105,27 @@ export function InsightsView({ timezone, logEntries = [], assistantInsight }: In
     });
 
     // 2. 7-Day Weekly Alignment Trend -- 7 Timing-Location calendar dates
-    // ending today. Score formula itself is UNCHANGED (Insights Timezone
-    // Consistency V1 fixes the time axis only, never the alignment
-    // scoring -- that is canonical Aura Fit consolidation, a separate,
-    // later PR).
+    // ending today (date axis unchanged, Insights Timezone Consistency V1).
+    //
+    // Insights Window-Alignment Semantic Correction V1 -- the score itself
+    // is now built entirely from the shared classifyInsightsWindow()/
+    // INSIGHTS_WINDOW_BAND_WEIGHT taxonomy (SUPPORTIVE=1.0, NEUTRAL=0.7,
+    // FRICTION=0.0 -- GULIKA lands in NEUTRAL, never the top tier). Two
+    // corrections from the previous formula:
+    //   - No artificial 30% floor: an all-friction day now genuinely
+    //     shows 0%, not a floor-clamped 30%.
+    //   - An empty day (no logs at all) is `null`, not a fabricated 75%.
+    //     A day with no observation is not the same claim as a day that
+    //     was observed and scored moderately -- rendering must show a
+    //     distinct "no data" state, never silently substitute a number.
     const past7DateKeys = lastNCalendarDateKeys(timezone, now, 7);
     const past7Days = past7DateKeys.map((dateKey) => {
       const dayLogs = logEntries.filter((e) => observationOf(e).dateKey === dateKey);
 
-      const auspicious = dayLogs.filter((e) => {
-        const w = (e.activeWindow || '').toUpperCase();
-        return w.includes('ABHIJIT') || w.includes('BRAHMA') || w.includes('GULIKA');
-      }).length;
-
-      const friction = dayLogs.filter((e) => {
-        const w = (e.activeWindow || '').toUpperCase();
-        return w.includes('RAHU') || w.includes('YAMA');
-      }).length;
-
-      const score =
+      const score: number | null =
         dayLogs.length > 0
-          ? Math.min(100, Math.max(30, Math.round(((auspicious * 1.0 + (dayLogs.length - auspicious - friction) * 0.7) / dayLogs.length) * 100)))
-          : 75;
+          ? Math.round((dayLogs.reduce((sum, e) => sum + insightsWindowWeight(e.activeWindow), 0) / dayLogs.length) * 100)
+          : null;
 
       return {
         dayLabel: formatWeekdayLabel(dateKey, 'short'),
@@ -212,7 +195,7 @@ export function InsightsView({ timezone, logEntries = [], assistantInsight }: In
     let monthWeightedAlignment = 0;
     let monthAuraGuidedCount = 0;
     monthEntries.forEach((entry) => {
-      monthWeightedAlignment += scoreLoggedWindow(entry);
+      monthWeightedAlignment += insightsWindowWeight(entry.activeWindow);
       const source = entry.logSource ?? 'MANUAL';
       if (source === 'AURA_PLANNED' || source === 'AURA_DO_NOW') monthAuraGuidedCount++;
     });
@@ -236,7 +219,15 @@ export function InsightsView({ timezone, logEntries = [], assistantInsight }: In
       const win = (entry.activeWindow || 'NEUTRAL').toUpperCase().replace(/_/g, ' ');
       windowCounts[win] = (windowCounts[win] || 0) + 1;
 
-      const entryScore = scoreLoggedWindow(entry);
+      // Insights Window-Alignment Semantic Correction V1 -- the per-entry
+      // timing weight now comes ONLY from the shared window-band
+      // classification, never from logSource or activitySignificance.
+      // "Aura guided" (provenance -- did Aura suggest this?) and "timing
+      // pattern" (was this logged during a supportive/neutral/friction
+      // window?) are deliberately independent claims; Aura suggesting an
+      // activity must not, by itself, change how well-timed that activity
+      // is judged to have been.
+      const entryScore = insightsWindowWeight(entry.activeWindow);
       const source = entry.logSource ?? 'MANUAL';
       weightedAlignment += entryScore;
 
@@ -252,7 +243,7 @@ export function InsightsView({ timezone, logEntries = [], assistantInsight }: In
         manualAlignment += entryScore;
       }
 
-      if (win.includes('RAHU') || win.includes('YAMA')) {
+      if (classifyInsightsWindow(entry.activeWindow) === 'FRICTION') {
         frictionCount++;
         frictionLogs.push(entry);
       }
@@ -473,10 +464,16 @@ export function InsightsView({ timezone, logEntries = [], assistantInsight }: In
                         style={{
                           height: '100%',
                           width: `${item.percentage}%`,
+                          // Insights Window-Alignment Semantic Correction V1 --
+                          // shared classification (GULIKA lands in NEUTRAL/
+                          // colors.info here, same as before this change since
+                          // this particular bar-color check never treated
+                          // Gulika as positive, but now centralized rather than
+                          // an independent local check).
                           background:
-                            item.name.includes('RAHU') || item.name.includes('YAMA')
+                            classifyInsightsWindow(item.name) === 'FRICTION'
                               ? colors.danger
-                              : item.name.includes('ABHIJIT') || item.name.includes('BRAHMA')
+                              : classifyInsightsWindow(item.name) === 'SUPPORTIVE'
                               ? colors.positive
                               : colors.info,
                           borderRadius: radius.sm,
@@ -649,19 +646,26 @@ export function InsightsView({ timezone, logEntries = [], assistantInsight }: In
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-end', height: 140, marginTop: 16, padding: '0 8px 8px 8px' }}>
               {analytics.past7Days.map((day, idx) => (
                 <div key={idx} style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', height: '100%', justifyContent: 'flex-end', gap: 6, flex: 1 }}>
-                  <span style={{ fontSize: 9, fontFamily: 'monospace', color: '#94a3b8' }}>{day.score}%</span>
-                  
+                  {/* Insights Window-Alignment Semantic Correction V1 -- a
+                    * null score (no logs that day) renders as "—", never a
+                    * fabricated percentage; the bar track stays empty
+                    * rather than showing a filled bar for a day with no
+                    * observation at all. */}
+                  <span style={{ fontSize: 9, fontFamily: 'monospace', color: '#94a3b8' }}>{day.score !== null ? `${day.score}%` : '—'}</span>
+
                   {/* Fixed Track Container */}
                   <div style={{ width: 18, height: 80, background: 'rgba(255, 255, 255, 0.05)', borderRadius: 4, display: 'flex', alignItems: 'flex-end', overflow: 'hidden' }}>
-                    <div
-                      style={{
-                        width: '100%',
-                        height: `${Math.max(day.score, 15)}%`,
-                        background: day.score > 70 ? '#4ade80' : day.score > 50 ? '#38bdf8' : '#fb6b6b',
-                        borderRadius: 4,
-                        transition: 'height 0.3s ease',
-                      }}
-                    />
+                    {day.score !== null && (
+                      <div
+                        style={{
+                          width: '100%',
+                          height: `${Math.max(day.score, 15)}%`,
+                          background: day.score > 70 ? '#4ade80' : day.score > 50 ? '#38bdf8' : '#fb6b6b',
+                          borderRadius: 4,
+                          transition: 'height 0.3s ease',
+                        }}
+                      />
+                    )}
                   </div>
                   <span style={{ fontSize: 10, color: '#e2e8f0', fontWeight: 600 }}>{day.dayLabel}</span>
                 </div>
