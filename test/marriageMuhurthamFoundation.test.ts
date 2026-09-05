@@ -304,8 +304,14 @@ check('28e. "find a wedding muhurtham" now resolves to marriage', findActivityIn
 // 29. No schema/migration changes.
 // ============================================================
 
+// Prospective Canonical Activity Identity V1 (PR C2) legitimately added
+// migration 0030_habit_log_activity_id -- an unrelated, later feature's
+// schema change. This check's own scope is "Marriage Foundation V1 needs
+// no schema change," so it asserts no MARRIAGE-related migration exists,
+// not a hardcoded total migration count (which would go stale the moment
+// any future, unrelated PR adds its own migration, as one now has).
 const migrationDirs = fs.readdirSync('apps/web/prisma/migrations');
-check('29. No new Prisma migration directory beyond the pre-existing 0029 (Marriage Foundation V1 needs no schema change)', !migrationDirs.some((d) => /marriage/i.test(d)) && Math.max(...migrationDirs.map((d) => parseInt(d.slice(0, 4), 10)).filter((n) => !Number.isNaN(n))) === 29);
+check('29. No Marriage-specific Prisma migration directory exists (Marriage Foundation V1 needs no schema change)', !migrationDirs.some((d) => /marriage/i.test(d)));
 const schemaSource = fs.readFileSync('apps/web/prisma/schema.prisma', 'utf8');
 check('29b. schema.prisma contains no Marriage-specific field', !/marriage/i.test(schemaSource));
 

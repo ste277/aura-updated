@@ -1,0 +1,15 @@
+-- Prospective Canonical Activity Identity V1: the canonical
+-- packages/recommendation/src/personalizedTasks.ts ActivityProfile.id a
+-- HabitLog was explicitly associated with AT LOG TIME. Nullable, no
+-- default, no backfill: NULL on existing rows correctly and permanently
+-- means "canonical identity was not known when this row was created" --
+-- never inferred/guessed after the fact from activityTitle/aliases/
+-- classifyTask (same discipline as PR #75's activeWindow snapshot and
+-- migration 0029's locationName: a historical fact is either genuinely
+-- known at write time or left NULL, never manufactured retroactively).
+--
+-- Plain nullable TEXT column, no foreign key -- ActivityProfile is a
+-- static in-code catalog (FULL_ACTIVITY_CATALOG), not a Prisma model,
+-- matching the existing AuraMoment.activityId column's own precedent. No
+-- index: nothing queries HabitLog by activityId in this PR.
+ALTER TABLE "HabitLog" ADD COLUMN "activityId" TEXT;

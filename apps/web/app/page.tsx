@@ -782,7 +782,14 @@ export default function DashboardPage() {
       overrideWindowType?: string,
       durationMinutes = 30,
       logSource: LogSource = 'MANUAL',
-      activitySignificance?: ActivitySignificance
+      activitySignificance?: ActivitySignificance,
+      // Prospective Canonical Activity Identity V1 -- appended last so
+      // every existing positional caller (Timeline, PastActivityModal via
+      // onConfirmLog, etc.) keeps working unchanged. Passed straight
+      // through to the server, never derived/guessed here -- the server
+      // (POST /api/habit-logs) independently re-validates it against
+      // FULL_ACTIVITY_CATALOG regardless of what this client sends.
+      activityId?: string
     ) => {
       const targetDate = customTimestamp ? new Date(customTimestamp) : new Date();
       const calculatedMinute = targetDate.getHours() * 60 + targetDate.getMinutes();
@@ -810,6 +817,13 @@ export default function DashboardPage() {
 
       const payload = {
         activityTitle,
+        // Prospective Canonical Activity Identity V1 -- only the value
+        // explicitly propagated by the caller (e.g. a Good Right Now
+        // ActionCard's own activityId), never derived/guessed here.
+        // Omitted (undefined) for every non-catalog-backed caller, which
+        // JSON.stringify drops from the request body entirely -- the
+        // server then persists activityId = null, exactly as intended.
+        activityId,
         activeWindow: optimisticEntry.activeWindow,
         logMinuteOfDay: calculatedMinute,
         logTimestamp: targetDate.toISOString(),

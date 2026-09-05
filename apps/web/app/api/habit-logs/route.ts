@@ -4,6 +4,7 @@ import { getSessionFromRequest } from '../../../lib/session';
 import { parseJsonObject } from '../../../lib/request';
 import { resolveHistoricalActiveWindow } from '../../../lib/historicalActivityWindow';
 import { getMinuteOfDayInTimezone } from '../../../lib/timezone';
+import { getActivityProfileById } from '../../../../../packages/recommendation/src/personalizedTasks';
 
 function parseLogSource(value: unknown): 'AURA_PLANNED' | 'AURA_DO_NOW' | 'MANUAL' | 'OVERRIDE_CAUTION' {
   if (value === 'AURA_PLANNED' || value === 'AURA_DO_NOW' || value === 'MANUAL' || value === 'OVERRIDE_CAUTION') return value;
@@ -27,11 +28,34 @@ export async function POST(req: NextRequest) {
   const body = await parseJsonObject(req);
   if (!body) return NextResponse.json({ error: 'A valid JSON request body is required.' }, { status: 400 });
 
-  const { activityTitle, logTimestamp, notes, durationMinutes, logSource, activitySignificance } = body;
+  const { activityTitle, activityId, logTimestamp, notes, durationMinutes, logSource, activitySignificance } = body;
   const cleanTitle = typeof activityTitle === 'string' ? activityTitle.trim() : '';
 
   if (!cleanTitle) {
     return NextResponse.json({ error: 'Missing required fields.' }, { status: 400 });
+  }
+
+  // Prospective Canonical Activity Identity V1 -- activityId is UNTRUSTED
+  // client input, optional. Absent/null/empty -> persist NULL (the
+  // legitimate, expected value for manual/free-text logs -- never treated
+  // as an error). Present -> must resolve to a REAL, current
+  // FULL_ACTIVITY_CATALOG entry via an exact-id lookup (no alias/title/
+  // fuzzy matching); an unknown id is rejected outright rather than
+  // silently dropped to NULL or persisted unvalidated -- a client sending
+  // a bogus id is a request error, not a "we just didn't recognize it"
+  // case. activityTitle is NEVER required to match the resolved
+  // activity's own catalog title (a card's user-visible title can
+  // legitimately differ from the catalog's title, e.g. "Distraction-free
+  // planning block" for activityId "deep-work") -- activityTitle remains
+  // exactly what was submitted, the historical record of what the user
+  // actually saw/logged.
+  let validatedActivityId: string | null = null;
+  if (typeof activityId === 'string' && activityId.trim()) {
+    const activity = getActivityProfileById(activityId.trim());
+    if (!activity) {
+      return NextResponse.json({ error: 'Unknown activity.' }, { status: 400 });
+    }
+    validatedActivityId = activity.id;
   }
 
   // Parse custom timestamp if provided, fallback to current time
@@ -69,6 +93,7 @@ export async function POST(req: NextRequest) {
   const entry = await createHabitLog({
     userId: session.userId,
     activityTitle: cleanTitle,
+    activityId: validatedActivityId,
     activeWindow,
     logMinuteOfDay,
     logTimestamp: customDate,

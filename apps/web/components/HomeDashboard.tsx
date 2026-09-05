@@ -80,7 +80,16 @@ interface HomeDashboardProps {
     overrideWindowType?: string,
     durationMinutes?: number,
     logSource?: 'AURA_PLANNED' | 'AURA_DO_NOW' | 'MANUAL' | 'OVERRIDE_CAUTION',
-    activitySignificance?: 'LOW' | 'MEDIUM' | 'HIGH'
+    activitySignificance?: 'LOW' | 'MEDIUM' | 'HIGH',
+    // Prospective Canonical Activity Identity V1 -- appended as the last,
+    // optional parameter (rather than inserted earlier) so every existing
+    // positional caller keeps working unchanged. The canonical
+    // ActivityProfile.id for this activity, when genuinely known at the
+    // point of logging (e.g. a catalog-backed Good Right Now ActionCard) --
+    // never card.id (a UI/card-slot identifier), never inferred from
+    // activityTitle. Omitted/undefined for manual/free-text logging and
+    // for any card that has no real catalog counterpart.
+    activityId?: string
   ) => Promise<void>;
   onSubmitReflection?: (outputLevel: 'LOW' | 'MODERATE' | 'PEAK_FLOW', followedGuidance: boolean) => Promise<void>;
   onLogPlan?: (planId: string) => Promise<void>;
@@ -1027,7 +1036,13 @@ function GoodRightNowCard({
       // section 9) already known here as a prop, never re-inferred from a
       // display string -- Insights/window distribution then sees this log
       // exactly like a Timeline-created one.
-      await onLogActivity(planTitle, undefined, undefined, activeWindowName, durationMinutes, 'AURA_DO_NOW', definition?.muhurta.significance);
+      //
+      // Prospective Canonical Activity Identity V1 -- card.activityId
+      // (the real catalog id, e.g. "deep-work"), never card.id (a UI/
+      // card-slot identifier like "brahma-focus"). Undefined for the two
+      // curated cards that intentionally have no catalog counterpart (e.g.
+      // "whatever meal you're eating") -- omitted, not fabricated.
+      await onLogActivity(planTitle, undefined, undefined, activeWindowName, durationMinutes, 'AURA_DO_NOW', definition?.muhurta.significance, card.activityId);
       setStatus('logged');
       setLoggedAtLabel(new Date().toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' }));
       triggerHaptic('success');

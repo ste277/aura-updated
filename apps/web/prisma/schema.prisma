@@ -249,6 +249,18 @@ model HabitLog {
   habitId        String?
   habit          Habit?   @relation(fields: [habitId], references: [id])
   activityTitle  String
+  // Prospective Canonical Activity Identity V1 -- the canonical
+  // packages/recommendation/src/personalizedTasks.ts ActivityProfile.id
+  // this log was explicitly associated with AT LOG TIME (never inferred
+  // from activityTitle/aliases after the fact). NULL means canonical
+  // identity was not known when this row was created -- a legitimate,
+  // expected value for manual/free-text logs, never treated as missing/bad
+  // data. Plain nullable String, not a foreign key: ActivityProfile is a
+  // static in-code catalog, not a Prisma model (same precedent as the
+  // existing AuraMoment.activityId column). Deliberately distinct from
+  // habitId above, which references the separate, unrelated Habit
+  // (recurring-habit) model.
+  activityId     String?
   activeWindow   String   // "ABHIJIT" | "RAHU_KALAM" | "GULIKA" | "YAMA" | "BRAHMA" | "NEUTRAL"
   logTimestamp   DateTime @default(now()) @db.Timestamptz(3)
   logMinuteOfDay Int
