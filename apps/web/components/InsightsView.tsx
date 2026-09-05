@@ -22,7 +22,14 @@ interface InsightsViewProps {
     reflectionCount: number;
     alignedDays: number;
     unalignedDays: number;
-    peakFlowLiftPercent: number;
+    /** Insights Correctness + Historical Integrity V1 -- a signed
+     * percentage-POINT delta on the 0-1 outcome scale (never a relative
+     * percent), or `null` when there isn't yet a valid two-sided
+     * comparison (one of the two groups has zero check-ins). Renamed from
+     * the old peakFlowLiftPercent, which conflated a relative-percent
+     * formula with an absolute-percent formula depending on the
+     * denominator, and could not represent a negative result at all. */
+    alignmentDeltaPoints: number | null;
     insightText: string;
   } | null;
 }
@@ -307,9 +314,22 @@ export function InsightsView({ logEntries = [], assistantInsight }: InsightsView
           {assistantInsight && (
             <SurfaceCard accentColor={colors.positive}>
               <div style={typography.sectionEyebrow}>Your Alignment</div>
-              <div style={{ fontSize: 32, color: colors.textPrimary, fontWeight: 850, marginTop: spacing.sm }}>
-                {Math.max(0, assistantInsight.peakFlowLiftPercent)}%
-              </div>
+              {/* Insights Correctness + Historical Integrity V1 -- the
+                * signed delta is shown as-is (never clamped to 0, which
+                * would misrepresent a genuinely negative result as "no
+                * difference"); a null delta (not enough two-sided evidence
+                * yet) shows a plain "Not enough data yet" state instead of
+                * a fabricated number. */}
+              {assistantInsight.alignmentDeltaPoints !== null ? (
+                <div style={{ fontSize: 32, color: colors.textPrimary, fontWeight: 850, marginTop: spacing.sm }}>
+                  {assistantInsight.alignmentDeltaPoints > 0 ? '+' : ''}
+                  {assistantInsight.alignmentDeltaPoints} pts
+                </div>
+              ) : (
+                <div style={{ fontSize: 16, color: colors.textSecondary, fontWeight: 700, marginTop: spacing.sm }}>
+                  Not enough data yet
+                </div>
+              )}
               <div style={{ fontSize: 13, color: colors.textSecondary, lineHeight: 1.4, marginTop: spacing.xs }}>
                 {assistantInsight.insightText}
               </div>

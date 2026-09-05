@@ -116,12 +116,19 @@ export function PastActivityModal({
       if (onConfirmLog) {
         await onConfirmLog(activeTitle, cleanNotes, targetTimestamp, undefined, durationMinutes, 'MANUAL', explicitSignificance);
       } else {
+        // Insights Correctness + Historical Integrity V1 -- activeWindow is
+        // no longer sent here at all: POST /api/habit-logs now always
+        // computes it server-side from logTimestamp + the owner's own
+        // Timing Location (apps/web/lib/historicalActivityWindow.ts),
+        // never trusting a client-supplied value. This block only runs
+        // when the caller omits onConfirmLog (not the case in the current
+        // app -- CalendarViewSection.tsx always wires onConfirmLog to
+        // page.tsx's handleLogActivity), kept as a defensive fallback.
         const res = await fetch('/api/habit-logs', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
             activityTitle: activeTitle,
-            activeWindow: 'NEUTRAL',
             logMinuteOfDay: (hours || 12) * 60 + (minutes || 0),
             logTimestamp: targetTimestamp.toISOString(),
             durationMinutes,
