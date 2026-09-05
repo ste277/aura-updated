@@ -912,6 +912,144 @@ for (const pair of PAIR_ORDERINGS) {
   check('"Should Priya and I get married?" (bare "should", no "when") -> UNKNOWN, unaffected -- CHECK_VERB_RE intentionally not broadened', r.intent === 'UNKNOWN');
 }
 
+// ============================================================
+// Ask Aura Date-Only CHECK Semantics V1: a CHECK-verb phrase ("should I"/
+// "can I"/"is it good to"/etc.) combined with a real date/day/range but NO
+// exact clock must resolve TIMING_FIND, never a TIMING_CHECK that would
+// otherwise have to fabricate an instant (previously the resolved date +
+// literal UTC noon -- confirmed to display as 5:30 PM in Asia/Kolkata and
+// 8:00 AM in America/New_York for the identical "tomorrow" request, and to
+// silently collapse a multi-day range down to only its first day).
+// ============================================================
+
+// --- Required matrix: every currently-supported non-NOW horizon form ---
+for (const [t, expectedHorizon, expectedCustomDate] of [
+  ['Should I meditate tomorrow?', 'TOMORROW', undefined],
+  ['Can I meditate tomorrow?', 'TOMORROW', undefined],
+  ['Should I meditate today?', 'TODAY', undefined],
+  ['Should I meditate next Friday?', 'CUSTOM_DATE', '2026-09-11'],
+  ['Can I meditate September 20?', 'CUSTOM_DATE', '2026-09-20'],
+  ['Should I meditate this weekend?', 'THIS_WEEKEND', undefined],
+  ['Can I meditate next 7 days?', 'NEXT_7_DAYS', undefined],
+  ['Should I meditate next month?', 'NEXT_MONTH', undefined],
+] as const) {
+  const r = parseTz(t, FRIDAY_NOW);
+  check(`"${t}" -> TIMING_FIND (was TIMING_CHECK with a fabricated instant), horizonPhrase=${expectedHorizon}`, r.intent === 'TIMING_FIND' && r.horizonPhrase === expectedHorizon && r.customDate === expectedCustomDate && r.exactTime === undefined);
+}
+
+// --- timePreference must be preserved, never synthesized into a clock ---
+{
+  const r = parseTz('Should I meditate tomorrow morning?', FRIDAY_NOW);
+  check('"Should I meditate tomorrow morning?" -> TIMING_FIND, timePreference=MORNING, no exactTime fabricated from it', r.intent === 'TIMING_FIND' && r.timePreference === 'MORNING' && r.exactTime === undefined);
+}
+{
+  const r = parseTz('Would Friday evening be good for deep work?', FRIDAY_NOW);
+  check('"Would Friday evening be good for deep work?" -> TIMING_FIND, timePreference=EVENING', r.intent === 'TIMING_FIND' && r.activityId === 'deep-work' && r.timePreference === 'EVENING' && r.exactTime === undefined);
+}
+
+// --- duration must be preserved ---
+{
+  const r = parseTz('Should I meditate tomorrow for 90 minutes?', FRIDAY_NOW);
+  check('"Should I meditate tomorrow for 90 minutes?" -> TIMING_FIND, durationMinutes=90', r.intent === 'TIMING_FIND' && r.durationMinutes === 90 && r.horizonPhrase === 'TOMORROW');
+}
+
+// --- Ordinary "is X good for Y" date-only phrasing was already correct;
+// must remain unaffected by this fix (it never matched CHECK_VERB_RE). ---
+{
+  const r = parseTz('Is tomorrow good for meditation?', FRIDAY_NOW);
+  check('"Is tomorrow good for meditation?" (unaffected control) -> TIMING_FIND, unchanged', r.intent === 'TIMING_FIND' && r.horizonPhrase === 'TOMORROW');
+}
+
+// --- NOW must remain TIMING_CHECK -- this fix targets non-NOW periods
+// only, never NOW itself. ---
+for (const t of ['Should I meditate now?', 'Can I meditate now?', 'Is now a good time for meditation?']) {
+  const r = parseTz(t, FRIDAY_NOW);
+  check(`"${t}" -> TIMING_CHECK, horizonPhrase=NOW, unaffected`, r.intent === 'TIMING_CHECK' && r.horizonPhrase === 'NOW');
+}
+
+// --- No-horizon CHECK control: "Should I meditate?" (no date at all)
+// defaults to NOW, exactly as before this fix -- this PR is about explicit
+// non-NOW temporal periods, not a conversational-semantics redesign. ---
+{
+  const r = parseTz('Should I meditate?', FRIDAY_NOW);
+  check('"Should I meditate?" (no date at all) -> TIMING_CHECK, horizonPhrase=NOW, unchanged', r.intent === 'TIMING_CHECK' && r.horizonPhrase === 'NOW');
+}
+
+// --- Exact clock must remain TIMING_CHECK -- never rerouted to FIND. ---
+for (const t of ['Should I meditate at 10 AM tomorrow?', 'Is 10 AM tomorrow good for meditation?']) {
+  const r = parseTz(t, FRIDAY_NOW);
+  check(`"${t}" -> TIMING_CHECK, exactTime=10:00, unaffected`, r.intent === 'TIMING_CHECK' && r.exactTime === '10:00');
+}
+
+// --- Invalid exact clock must retain existing fail-closed behavior (PR
+// #66) -- never silently discarded and downgraded to a date-only FIND. ---
+{
+  const r = parseTz('Should I meditate at 25 PM tomorrow?', FRIDAY_NOW);
+  check('"Should I meditate at 25 PM tomorrow?" (invalid clock) -> UNKNOWN, never silently becomes FIND', r.intent === 'UNKNOWN' && r.exactTime === undefined);
+}
+
+// --- Free-text taskTitle fallback must be preserved: an uncataloged
+// activity + CHECK-verb + date must become TIMING_FIND with taskTitle
+// preserved, never UNKNOWN (the exact regression risk this PR's own
+// implementation brief flagged: step 8's bareActivity is catalog-only, so
+// this branch must keep using resolveActivity()'s taskTitle fallback, not
+// switch to findActivityIntent()). ---
+{
+  const r = parseTz('Should I do unicycle rehearsal tomorrow?', FRIDAY_NOW);
+  check('Uncataloged free-text activity + "should I" + date -> TIMING_FIND (never UNKNOWN), taskTitle preserved', r.intent === 'TIMING_FIND' && r.activityId === undefined && r.taskTitle === 'should i do unicycle rehearsal tomorrow?' && r.horizonPhrase === 'TOMORROW');
+}
+
+// --- PERSONAL date-only: existing scope machinery, now reached via the
+// FIND path automatically. ---
+{
+  const r = parseTz('Is tomorrow good for me to meditate?', FRIDAY_NOW);
+  check('PERSONAL date-only control -> TIMING_FIND, PERSONAL, unaffected', r.intent === 'TIMING_FIND' && r.scope === 'PERSONAL');
+}
+
+// --- SHARED date-only and exact-clock: PR #68/#69 machinery composes
+// automatically through the fixed branch. ---
+{
+  const r = parseTz('Is tomorrow good for Priya and me to meditate?', FRIDAY_NOW);
+  check('SHARED date-only control -> TIMING_FIND, SHARED, priya, unaffected', r.intent === 'TIMING_FIND' && r.scope === 'SHARED' && r.personNameQuery === 'priya');
+}
+{
+  const r = parseTz('Should Priya and me meditate at 10 AM tomorrow?', FRIDAY_NOW);
+  check('SHARED exact-clock -> TIMING_CHECK, SHARED, priya, exactTime=10:00 -- never rerouted to FIND', r.intent === 'TIMING_CHECK' && r.scope === 'SHARED' && r.personNameQuery === 'priya' && r.exactTime === '10:00');
+}
+
+// --- Ceremonial date-only: the most consequential fix -- must reach
+// TIMING_FIND so the orchestrator's existing capability redirect sends it
+// to the canonical Muhurtham search, never a fabricated-instant CHECK. ---
+for (const t of ['Should I get married tomorrow?', 'Can I get married next Friday?']) {
+  const r = parseTz(t, FRIDAY_NOW);
+  check(`"${t}" -> TIMING_FIND, marriage, no exactTime (was a fabricated-instant CHECK)`, r.intent === 'TIMING_FIND' && r.activityId === 'marriage' && r.exactTime === undefined);
+}
+
+// --- Ceremonial exact clock must remain TIMING_CHECK, unaffected. ---
+{
+  const r = parseTz('Should I get married at 10 AM next Friday?', FRIDAY_NOW);
+  check('"Should I get married at 10 AM next Friday?" -> TIMING_CHECK, marriage, exactTime=10:00, unaffected', r.intent === 'TIMING_CHECK' && r.activityId === 'marriage' && r.exactTime === '10:00');
+}
+
+// --- Existing ceremonial FIND control (never matched CHECK_VERB_RE) must
+// stay unaffected. ---
+{
+  const r = parseTz('Is next Friday good for marriage?', FRIDAY_NOW);
+  check('"Is next Friday good for marriage?" (unaffected control) -> TIMING_FIND, marriage', r.intent === 'TIMING_FIND' && r.activityId === 'marriage');
+}
+
+// --- Regressions: Panchang query/explain, PLAN_OPEN, explicit FIND must
+// all remain completely unaffected by this narrowly-scoped fix. ---
+check('"What\'s Rahu Kalam tomorrow?" stays PANCHANG_QUERY, unaffected', parseTz("What's Rahu Kalam tomorrow?", FRIDAY_NOW).intent === 'PANCHANG_QUERY');
+{
+  const r = parseTz('Plan my meditation tomorrow', FRIDAY_NOW);
+  check('"Plan my meditation tomorrow" resolves exactly as before this fix (no CHECK_VERB_RE match, unaffected)', r.intent === 'TIMING_FIND' && r.activityId === 'meditation');
+}
+for (const t of ['Find a good time tomorrow for meditation.', 'When should I meditate tomorrow?', 'Best time tomorrow for meditation.']) {
+  const r = parseTz(t, FRIDAY_NOW);
+  check(`"${t}" (explicit FIND, unaffected) -> TIMING_FIND`, r.intent === 'TIMING_FIND');
+}
+
 if (!allPassed) {
   console.error('\nSome Ask Aura intent parser checks FAILED.');
   process.exit(1);
