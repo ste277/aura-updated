@@ -67,6 +67,17 @@ export interface AskAuraAction {
     windowLabel?: string;
     matchLabel?: string;
     recommendation?: string;
+    /** Ask Aura Event Location V1, PR B -- the SAME coordinate-free
+     * {cityName, timezone} snapshot shape POST /api/plans already accepts
+     * (plansRequest.ts's parseEventLocationSnapshot -- PlanEventLocation in
+     * planFormatting.ts is the identical shape, reused here rather than a
+     * new type). AskAuraView.tsx forwards planPayload verbatim as the POST
+     * body, so this field reaches the API for free once populated here.
+     * Only ever set from the RESOLVED eventLocation already on the result
+     * (never re-derived from locationQuery at save time -- see
+     * buildMuhurthamCheckResponse). Absent for every non-ceremonial or
+     * no-location result, exactly as before this PR. */
+    eventLocation?: { cityName: string; timezone: string };
   };
   momentPayload?: {
     activityId: string;
@@ -323,7 +334,23 @@ function candidateCard(candidate: TimingCandidate, timezone: string) {
   };
 }
 
-function planPayloadFromCandidate(candidate: TimingCandidate, activityTitle: string, icon: string | null | undefined): AskAuraAction['planPayload'] {
+/**
+ * Ask Aura Event Location V1, PR B -- `eventLocation` is only ever the
+ * SAME resolved CityOption already carried on `deps.eventLocation`/the
+ * result's own response card (brief section 27/28: "action persistence
+ * must use the RESOLVED eventLocation from the result/card, not the raw
+ * locationQuery" -- there is no second resolution here, and this function
+ * never sees locationQuery at all). Stripped to `{cityName, timezone}` at
+ * this boundary -- coordinates are never forwarded into a save payload
+ * (brief section 4/13), matching the exact shape POST /api/plans already
+ * validates (parseEventLocationSnapshot).
+ */
+function planPayloadFromCandidate(
+  candidate: TimingCandidate,
+  activityTitle: string,
+  icon: string | null | undefined,
+  eventLocation?: CityOption
+): AskAuraAction['planPayload'] {
   return {
     title: activityTitle,
     activityType: activityTitle,
@@ -335,6 +362,7 @@ function planPayloadFromCandidate(candidate: TimingCandidate, activityTitle: str
     windowLabel: candidate.metadata.windowLabel,
     matchLabel: candidate.label === 'EXCELLENT' || candidate.label === 'VERY_GOOD' ? 'Best Match' : 'Good Match',
     recommendation: candidate.reasons[0] ? formatMuhurtaReason(candidate.reasons[0]) : undefined,
+    ...(eventLocation ? { eventLocation: { cityName: eventLocation.cityName, timezone: eventLocation.timezone } } : {}),
   };
 }
 
@@ -770,19 +798,19 @@ function buildMuhurthamCheckResponse(
 
   const locationSuffix = eventLocation ? ` in ${eventLocation.cityName}` : '';
   const message = outcome.eligible ? `This is a strong time for ${activityTitle}${locationSuffix}.` : `I'd avoid this time for ${activityTitle}${locationSuffix}.`;
-  // Ask Aura Event Location V1, action safety (brief section 31): PR A does
-  // not thread eventLocation through AskAuraAction.planPayload, so a
-  // "Plan this" save here would silently drop the location and persist
-  // the same clock time under the caller's own Timing Location/timezone
-  // instead -- a knowingly incorrect save. Suppressed until PR B extends
-  // the save payloads; "Open Muhurtham Finder" (which already supports
-  // Event Location natively) remains available.
-  const actions: AskAuraAction[] = eventLocation
-    ? [{ type: 'OPEN_MUHURTHAM', label: 'Open Muhurtham Finder', activityId: outcome.activity.id }]
-    : [
-        { type: 'PLAN_THIS', label: 'Plan this', planPayload: planPayloadFromCandidate(outcome.window, activityTitle, activity?.icon) },
-        { type: 'OPEN_MUHURTHAM', label: 'Open Muhurtham Finder', activityId: outcome.activity.id },
-      ];
+  // Ask Aura Event Location V1, PR B (action safety restoration, brief
+  // section 8/29): PR A suppressed PLAN_THIS here because planPayload
+  // couldn't yet carry the Event Location snapshot -- saving would have
+  // silently dropped it and persisted the same clock time under the
+  // caller's own Timing Location/timezone instead. Now that
+  // planPayloadFromCandidate() threads `eventLocation` straight through to
+  // the exact {cityName, timezone} shape POST /api/plans already validates
+  // (parseEventLocationSnapshot), PLAN_THIS is safe again -- restored
+  // unconditionally, no separate/parallel action path.
+  const actions: AskAuraAction[] = [
+    { type: 'PLAN_THIS', label: 'Plan this', planPayload: planPayloadFromCandidate(outcome.window, activityTitle, activity?.icon, eventLocation) },
+    { type: 'OPEN_MUHURTHAM', label: 'Open Muhurtham Finder', activityId: outcome.activity.id },
+  ];
   return {
     intent: 'TIMING_CHECK',
     message,
