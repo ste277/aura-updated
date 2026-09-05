@@ -63,6 +63,19 @@ interface InsightsViewProps {
      * denominator, and could not represent a negative result at all. */
     alignmentDeltaPoints: number | null;
     insightText: string;
+    /** Canonical Aura Fit Insights V1 -- a SEPARATE, activity-aware metric
+     * from every other value on this object and from this component's own
+     * window-only C1 calculations (analytics.alignmentScore/
+     * monthAlignmentScore/past7Days/distribution). Only observations with
+     * a genuinely known canonical ActivityProfile.id are eligible; NULL/
+     * unknown-id logs contribute nothing to averageScore, never a
+     * fabricated neutral value. See apps/web/lib/insightsAuraFit.ts. */
+    auraFit: {
+      state: 'NO_DATA' | 'LIMITED' | 'AVAILABLE';
+      eligibleCount: number;
+      totalCount: number;
+      averageScore: number | null;
+    };
   } | null;
 }
 
@@ -414,6 +427,59 @@ export function InsightsView({ timezone, logEntries = [], assistantInsight }: In
               <InlineStat value={`${analytics.monthAlignmentScore}%`} label="supportive windows" color={colors.traditional} />
             </div>
           </div>
+
+          {/* Aura Fit -- Canonical Aura Fit Insights V1 (C3). A SEPARATE,
+           * activity-aware metric from Alignment/This Month above (C1,
+           * window-only) -- driven entirely by assistantInsight.auraFit
+           * (server-computed, apps/web/lib/insightsAuraFit.ts), never by
+           * this component's own `analytics` useMemo. Only observations
+           * with a genuinely known canonical ActivityProfile.id are
+           * eligible; NO_DATA/LIMITED never show a fabricated percentage. */}
+          {assistantInsight && (
+            <SurfaceCard accentColor={colors.traditional}>
+              <div style={typography.sectionEyebrow}>Aura Fit</div>
+
+              {assistantInsight.auraFit.state === 'AVAILABLE' && (
+                <>
+                  <div style={{ fontSize: 32, color: colors.textPrimary, fontWeight: 850, marginTop: spacing.sm }}>
+                    {assistantInsight.auraFit.averageScore}%
+                  </div>
+                  <div style={{ fontSize: 13, color: colors.textSecondary, lineHeight: 1.4, marginTop: spacing.xs }}>
+                    Activity-aware fit for this month's recognized Aura activities.
+                  </div>
+                </>
+              )}
+
+              {assistantInsight.auraFit.state === 'LIMITED' && (
+                <>
+                  <div style={{ fontSize: 16, color: colors.textSecondary, fontWeight: 700, marginTop: spacing.sm }}>
+                    Building up
+                  </div>
+                  <div style={{ fontSize: 13, color: colors.textSecondary, lineHeight: 1.4, marginTop: spacing.xs }}>
+                    Based on {assistantInsight.auraFit.eligibleCount} {assistantInsight.auraFit.eligibleCount === 1 ? 'activity' : 'activities'} with known Aura context. Log a few more recognized activities to see your monthly Aura Fit.
+                  </div>
+                </>
+              )}
+
+              {assistantInsight.auraFit.state === 'NO_DATA' && (
+                <div style={{ fontSize: 13, color: colors.textSecondary, lineHeight: 1.4, marginTop: spacing.sm }}>
+                  {assistantInsight.auraFit.totalCount > 0
+                    ? "This month's logged activities don't yet have recognized Aura context."
+                    : 'Aura Fit becomes available as you log activities from Good Right Now suggestions that Aura recognizes.'}
+                </div>
+              )}
+
+              {assistantInsight.auraFit.state !== 'NO_DATA' && (
+                <div style={{ ...typography.meta, marginTop: spacing.sm }}>
+                  Based on {assistantInsight.auraFit.eligibleCount} of {assistantInsight.auraFit.totalCount} logged activities this month
+                </div>
+              )}
+
+              <div style={{ fontSize: 11, color: colors.textFaint, lineHeight: 1.4, marginTop: spacing.xs }}>
+                Aura Fit reflects the specific activity; Alignment above reflects the broader timing window.
+              </div>
+            </SurfaceCard>
+          )}
 
           {/* Your Patterns -- brief section 51: made more prominent, simple
            * rows/dividers instead of a card full of individually-bordered
