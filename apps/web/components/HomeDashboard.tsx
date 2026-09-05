@@ -3,6 +3,7 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { UserChartContext, FULL_ACTIVITY_CATALOG, normalizeWindowType } from '../../../packages/recommendation/src/personalizedTasks';
 import { getActionCards, getActivityDiscoveryCards, ActionCard } from '../../../packages/recommendation/src/actionCards';
+import type { PersonalMuhurtaContext } from '../../../packages/recommendation/src/auraFitEngine';
 import { getActivityDefinition, ImmediateAction, ActivityDurationMode } from '../../../packages/recommendation/src/activityDefinitions';
 import type { DailyBriefing } from '../../../packages/recommendation/src/dailyAssistant';
 import type { AuraUpdate } from '../lib/auraUpdates';
@@ -61,6 +62,17 @@ interface HomeDashboardProps {
     followedGuidance: boolean;
   } | null;
   userChart?: UserChartContext;
+  /** Home Good Right Now Personalization V1 -- the owner's derived natal
+   * context (never raw birth date/time/timezone), sourced server-side from
+   * GET /api/daily-assistant/briefing's own buildPersonalMuhurtaContextForUser()
+   * call (page.tsx) and threaded into selectGoodRightNowCards' discovery-card
+   * ranking below -- the SAME optional parameter Ask Aura everyday CHECK/
+   * FIND, Day Builder, and ordinary Plan Timing Search already pass to
+   * evaluateActivityFit(). Undefined for an incomplete birth profile,
+   * exactly buildPersonalMuhurtaContextForUser's own existing contract --
+   * no clarification, no onboarding interruption, natural neutral
+   * degradation to today's existing (unpersonalized) behavior. */
+  personalContext?: PersonalMuhurtaContext;
   onLogActivity?: (
     activityTitle: string,
     notes?: string,
@@ -294,11 +306,20 @@ function scoreLabel(score: number) {
  *
  * Exported (not inlined in the component) so this selection logic is
  * testable without rendering React -- see test/goodRightNowActions.test.ts.
+ *
+ * Home Good Right Now Personalization V1 -- `personalContext` (optional,
+ * from the owner's own derived natal context) is passed ONLY into the
+ * discovery/ranked alternatives path below (getActivityDiscoveryCards) --
+ * never into the static base table (getActionCards, brief section 12: the
+ * pre-authored immediate-action cards are not live-scored candidates), and
+ * never changes logged-activity filtering, just-logged filtering, card
+ * count, or fallback behavior, all of which are untouched.
  */
 export function selectGoodRightNowCards(
   activeWindowName: string,
   loggedActivitiesToday: string[],
-  justLoggedTitles: Set<string> = new Set()
+  justLoggedTitles: Set<string> = new Set(),
+  personalContext?: PersonalMuhurtaContext
 ): ActionCard[] {
   const loggedTitles = new Set(loggedActivitiesToday.map((title) => title.trim().toLowerCase()));
   const cardTitle = (card: ActionCard) =>
@@ -314,7 +335,7 @@ export function selectGoodRightNowCards(
   if (stillNeeded <= 0) return kept.slice(0, 3);
 
   const usedActivityKeys = new Set(kept.map((card) => card.activityId ?? card.id));
-  const alternatives = getActivityDiscoveryCards(activeWindowName, 12).filter((card) => {
+  const alternatives = getActivityDiscoveryCards(activeWindowName, 12, personalContext).filter((card) => {
     if (isLogged(card) || usedActivityKeys.has(card.activityId ?? card.id)) return false;
     const definition = card.activityId ? getActivityDefinition(card.activityId) : undefined;
     return (definition?.experience.immediateAction ?? 'LOG_NOW') !== 'PLAN';
@@ -337,6 +358,7 @@ export function HomeDashboard({
   dailyBriefing,
   todayReflection,
   userChart,
+  personalContext,
   onLogActivity,
   onSubmitReflection,
   onLogPlan,
@@ -422,8 +444,8 @@ export function HomeDashboard({
   };
 
   const goodRightNow = useMemo(
-    () => selectGoodRightNowCards(activeWindowName, loggedActivitiesToday, justLoggedTitles),
-    [activeWindowName, loggedActivitiesToday, justLoggedTitles]
+    () => selectGoodRightNowCards(activeWindowName, loggedActivitiesToday, justLoggedTitles, personalContext),
+    [activeWindowName, loggedActivitiesToday, justLoggedTitles, personalContext]
   );
 
   // Home Recommendation Hierarchy V1 (+ amendment) -- Aura Suggests

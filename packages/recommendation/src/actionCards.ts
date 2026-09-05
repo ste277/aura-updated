@@ -8,7 +8,7 @@
 import type { SolarWindowType } from '../../panchang/src/windows';
 import { FULL_ACTIVITY_CATALOG, normalizeWindowType } from './personalizedTasks';
 import type { ActivityCategory } from './personalizedTasks';
-import { evaluateActivityFit } from './auraFitEngine';
+import { evaluateActivityFit, AuraFitEvaluation, PersonalMuhurtaContext } from './auraFitEngine';
 
 export interface ActionCard {
   id: string;
@@ -239,16 +239,44 @@ export function getActionCards(window: string): ActionCard[] {
 }
 
 /**
+ * Home Good Right Now Personalization V1 -- combines evaluateActivityFit's
+ * two independently-generated summaries into one compact card description,
+ * truthfully reflecting whatever actually influenced the score (brief
+ * section 13/14: "Do not silently change a recommendation for personal
+ * reasons while showing only a generic explanation"). Never invents new
+ * astrology copy -- both halves are exactly the text the canonical
+ * evaluator already generates.
+ *
+ * No personalSummary (no personalContext supplied, or the owner's profile
+ * is incomplete -- evaluatePersonalMuhurtaFit's own neutral-default path)
+ * -> fit.summary byte-for-byte, unchanged from before this PR.
+ */
+export function buildActivityDiscoveryDescription(fit: Pick<AuraFitEvaluation, 'summary' | 'personalSummary'>): string {
+  if (!fit.personalSummary) return fit.summary;
+  return `${fit.summary} ${fit.personalSummary}`;
+}
+
+/**
  * Profile-backed discovery for the Planner and future activity picker.
  * This answers "what could I do in this window?" without making the window
  * the source of truth for task timing.
+ *
+ * Home Good Right Now Personalization V1 -- `personalContext` is passed
+ * straight through to evaluateActivityFit() (auraFitEngine.ts), the exact
+ * same optional parameter Ask Aura everyday CHECK/FIND, Day Builder, and
+ * ordinary Plan Timing Search already supply via
+ * buildPersonalMuhurtaContextForUser() -- no new scoring model, no new
+ * weights. Omitted (undefined) preserves this function's exact prior
+ * behavior byte-for-byte, since evaluateActivityFit/evaluatePersonalMuhurtaFit
+ * already treat a missing personalContext as their existing neutral-default
+ * case.
  */
-export function getActivityDiscoveryCards(window: string, limit = 6): ActionCard[] {
+export function getActivityDiscoveryCards(window: string, limit = 6, personalContext?: PersonalMuhurtaContext): ActionCard[] {
   const windowType = normalizeWindowType(window);
   const date = new Date();
   return FULL_ACTIVITY_CATALOG
     .map((activity) => {
-      const fit = evaluateActivityFit({ activity, date, windowType });
+      const fit = evaluateActivityFit({ activity, date, windowType, personalContext });
       const blocked = activity.avoidWindowTypes.includes(windowType) && !activity.allowDuringAvoidWindow && fit.score < 55;
       return { activity, fit, blocked };
     })
@@ -260,7 +288,7 @@ export function getActivityDiscoveryCards(window: string, limit = 6): ActionCard
       activityId: activity.id,
       category: activity.category,
       title: activity.title,
-      description: fit.summary,
+      description: buildActivityDiscoveryDescription(fit),
       icon: activity.icon,
       significance: activity.significance,
       requiresFreshStart: activity.requiresFreshStart,
