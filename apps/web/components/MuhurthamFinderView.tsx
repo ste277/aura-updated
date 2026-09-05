@@ -417,7 +417,11 @@ export function MuhurthamFinderView({ timingLocation, onBack, onOpenPanchangCale
       // Undefined for an ordinary Timing Location result, exactly
       // preserving prior behavior for that case.
       const eventLocation = resultEventLocation ? { cityName: resultEventLocation.cityName, timezone: resultEventLocation.timezone } : undefined;
-      await saveUpcomingPlanFromCandidate(window, durationMinutes, { sharedWithName, eventLocation });
+      // Planned Activity Canonical Identity Propagation V1 -- this view's
+      // own `activityId` state is already a genuine SUPPORTED_MUHURTHAM_ACTIVITY_IDS
+      // value (a subset of the same FULL_ACTIVITY_CATALOG namespace), never
+      // re-derived here.
+      await saveUpcomingPlanFromCandidate(window, durationMinutes, { sharedWithName, eventLocation, activityId });
       setSavedWindowKeys((prev) => new Set(prev).add(key));
       onPlanLogged?.();
     } catch {

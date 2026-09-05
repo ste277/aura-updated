@@ -78,6 +78,14 @@ export interface AskAuraAction {
      * buildMuhurthamCheckResponse). Absent for every non-ceremonial or
      * no-location result, exactly as before this PR. */
     eventLocation?: { cityName: string; timezone: string };
+    // Planned Activity Canonical Identity Propagation V1 -- the already-
+    // resolved canonical ActivityProfile.id for this action's own activity
+    // (the same strict FULL_ACTIVITY_CATALOG.find(...) resolution every
+    // handler below already performs for momentPayload.activityId), or
+    // null when the request didn't resolve to a known catalog activity.
+    // AskAuraView.tsx forwards planPayload verbatim as the POST body, so
+    // this field reaches POST /api/plans for free once populated here.
+    activityId?: string | null;
   };
   momentPayload?: {
     activityId: string;
@@ -349,7 +357,12 @@ function planPayloadFromCandidate(
   candidate: TimingCandidate,
   activityTitle: string,
   icon: string | null | undefined,
-  eventLocation?: CityOption
+  eventLocation?: CityOption,
+  // Planned Activity Canonical Identity Propagation V1 -- the caller's own
+  // already-resolved catalog `activity` (a strict FULL_ACTIVITY_CATALOG.find
+  // result), or undefined for a free-text/no-match request. No resolution
+  // happens in this function; the server (POST /api/plans) validates.
+  activityId?: string
 ): AskAuraAction['planPayload'] {
   return {
     title: activityTitle,
@@ -362,6 +375,7 @@ function planPayloadFromCandidate(
     windowLabel: candidate.metadata.windowLabel,
     matchLabel: candidate.label === 'EXCELLENT' || candidate.label === 'VERY_GOOD' ? 'Best Match' : 'Good Match',
     recommendation: candidate.reasons[0] ? formatMuhurtaReason(candidate.reasons[0]) : undefined,
+    activityId: activityId ?? null,
     ...(eventLocation ? { eventLocation: { cityName: eventLocation.cityName, timezone: eventLocation.timezone } } : {}),
   };
 }
@@ -561,7 +575,7 @@ async function handleTimingCheck(parsed: ParsedAskAuraRequest, deps: AskAuraOrch
       },
     ],
     actions: [
-      { type: 'PLAN_THIS', label: 'Plan this', planPayload: planPayloadFromCandidate(result.betterNearby ?? requested, activityTitle, activity?.icon) },
+      { type: 'PLAN_THIS', label: 'Plan this', planPayload: planPayloadFromCandidate(result.betterNearby ?? requested, activityTitle, activity?.icon, undefined, activity?.id) },
       { type: 'OPEN_PLAN', label: 'Plan better time', activityId: parsed.activityId },
     ],
     context: { ...parsed, activityId: activity?.id ?? parsed.activityId, taskTitle: activity ? undefined : parsed.taskTitle },
@@ -704,7 +718,7 @@ async function handleEverydaySharedTimingCheck(
       },
     ],
     actions: [
-      { type: 'PLAN_THIS', label: 'Plan this', planPayload: planPayloadFromCandidate(betterNearbyCard ?? requestedCard, activityTitle, activity.icon) },
+      { type: 'PLAN_THIS', label: 'Plan this', planPayload: planPayloadFromCandidate(betterNearbyCard ?? requestedCard, activityTitle, activity.icon, undefined, activity.id) },
       { type: 'OPEN_PLAN', label: 'Plan better time', activityId: activity.id },
     ],
     context: { ...parsed, activityId: activity.id, taskTitle: undefined },
@@ -834,7 +848,7 @@ function buildMuhurthamCheckResponse(
   // (parseEventLocationSnapshot), PLAN_THIS is safe again -- restored
   // unconditionally, no separate/parallel action path.
   const actions: AskAuraAction[] = [
-    { type: 'PLAN_THIS', label: 'Plan this', planPayload: planPayloadFromCandidate(outcome.window, activityTitle, activity?.icon, eventLocation) },
+    { type: 'PLAN_THIS', label: 'Plan this', planPayload: planPayloadFromCandidate(outcome.window, activityTitle, activity?.icon, eventLocation, outcome.activity.id) },
     { type: 'OPEN_MUHURTHAM', label: 'Open Muhurtham Finder', activityId: outcome.activity.id },
   ];
   return {
@@ -950,7 +964,7 @@ async function handleTimingFind(parsed: ParsedAskAuraRequest, deps: AskAuraOrche
     cards: best
       ? [{ type: 'TIMING_RESULT', activityTitle, best: candidateCard(best, deps.context.timezone), others: result.candidates.slice(1).map((c) => candidateCard(c, deps.context.timezone)) }]
       : [],
-    actions: best ? [{ type: 'PLAN_THIS', label: 'Plan this', planPayload: planPayloadFromCandidate(best, activityTitle, activity?.icon) }] : [],
+    actions: best ? [{ type: 'PLAN_THIS', label: 'Plan this', planPayload: planPayloadFromCandidate(best, activityTitle, activity?.icon, undefined, activity?.id) }] : [],
     context: { ...parsed, activityId: activity?.id ?? parsed.activityId, taskTitle: activity ? undefined : parsed.taskTitle },
   };
 }

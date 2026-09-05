@@ -4,6 +4,7 @@ import { createPlannedActivity, listPlannedActivities, getPlannedActivityForOwne
 import { parseJsonObject } from '../../../lib/request';
 import { verifyGuestStateToken, hashGuestConversionToken } from '../../../lib/guestState';
 import { parseEventLocationSnapshot } from '../../../lib/plansRequest';
+import { getActivityProfileById } from '../../../../../packages/recommendation/src/personalizedTasks';
 
 const MIN_PLAN_DURATION_MINUTES = 15;
 const MAX_PLAN_DURATION_MINUTES = 360;
@@ -209,6 +210,27 @@ export async function POST(req: NextRequest) {
   const calendarUrl = parseCalendarUrl(body?.calendarUrl);
   const eventLocationSnapshot = parseEventLocationSnapshot(body?.eventLocation);
 
+  // Planned Activity Canonical Identity Propagation V1 -- activityId is
+  // UNTRUSTED client input, optional. Absent/null/empty -> persist NULL
+  // (the legitimate, expected value for free-text/custom Plans -- never
+  // treated as an error). Present -> must resolve to a REAL, current
+  // FULL_ACTIVITY_CATALOG entry via an exact-id lookup (no alias/title/
+  // fuzzy matching); an unknown id is rejected outright rather than
+  // silently dropped to NULL or persisted unvalidated. `title` is NEVER
+  // required to match the resolved activity's own catalog title -- a Plan's
+  // title is what the user specifically intends to do; activityId is only
+  // what KIND of activity it is (same discipline as C2's HabitLog.activityId,
+  // apps/web/app/api/habit-logs/route.ts).
+  const activityId = body?.activityId;
+  let validatedActivityId: string | null = null;
+  if (typeof activityId === 'string' && activityId.trim()) {
+    const activity = getActivityProfileById(activityId.trim());
+    if (!activity) {
+      return NextResponse.json({ error: 'Unknown activity.' }, { status: 400 });
+    }
+    validatedActivityId = activity.id;
+  }
+
   if (!title || title.length > 200) return NextResponse.json({ error: 'A title of up to 200 characters is required.' }, { status: 400 });
   if (!plannedStartAt || !plannedEndAt || plannedEndAt <= plannedStartAt) {
     return NextResponse.json({ error: 'Valid plannedStartAt and plannedEndAt values are required.' }, { status: 400 });
@@ -252,6 +274,7 @@ export async function POST(req: NextRequest) {
     calendarUrl,
     eventTimezone: eventLocationSnapshot.eventTimezone,
     eventLocationName: eventLocationSnapshot.eventLocationName,
+    activityId: validatedActivityId,
   });
 
   if (guestConversionTokenHash) {

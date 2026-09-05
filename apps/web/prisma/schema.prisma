@@ -282,6 +282,21 @@ model PlannedActivity {
   icon            String?
   status          String   @default("UPCOMING") // "UPCOMING" | "LOGGED" | "CANCELLED"
 
+  // Planned Activity Canonical Identity Propagation V1 (migration 0031) --
+  // the canonical packages/recommendation/src/personalizedTasks.ts
+  // ActivityProfile.id this Plan was explicitly created from, when genuinely
+  // known at creation time (never inferred from title/activityType after
+  // the fact). NULL means no canonical identity was known -- a legitimate,
+  // expected value for free-text/manual Plans, never treated as missing/bad
+  // data. Plain nullable String, not a foreign key -- same precedent as
+  // HabitLog.activityId (ActivityProfile is a static in-code catalog, not a
+  // Prisma model). Copied verbatim (never revalidated) onto HabitLog.activityId
+  // at Plan completion (logPlannedActivity) -- catalog drift after Plan
+  // creation is handled entirely by C3's existing evaluateHabitLogAuraFit
+  // (getActivityProfileById returning undefined -> UNKNOWN_ACTIVITY_ID ->
+  // ineligible), not by clearing or revalidating this field.
+  activityId      String?
+
   plannedStartAt  DateTime @db.Timestamptz(3)
   plannedEndAt    DateTime @db.Timestamptz(3)
   durationMinutes Int

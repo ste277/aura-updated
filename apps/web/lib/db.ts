@@ -528,6 +528,15 @@ export interface PlannedActivity {
   title: string;
   activityType: string | null;
   icon: string | null;
+  // Planned Activity Canonical Identity Propagation V1 -- the canonical
+  // packages/recommendation/src/personalizedTasks.ts ActivityProfile.id
+  // this Plan was explicitly created from, or null when no canonical
+  // identity was known. Never inferred/backfilled -- see the column's own
+  // migration comment (apps/web/prisma/migrations/0031). Optional (matching
+  // HabitLogRow.activityId's own convention) so existing in-memory
+  // PlannedActivity-shaped fixtures elsewhere don't need updating for a
+  // concept they don't touch.
+  activityId?: string | null;
   status: 'UPCOMING' | 'LOGGED' | 'CANCELLED';
   plannedStartAt: Date;
   plannedEndAt: Date;
@@ -554,6 +563,13 @@ export interface CreatePlannedActivityInput {
   title: string;
   activityType?: string | null;
   icon?: string | null;
+  // Planned Activity Canonical Identity Propagation V1 -- an
+  // already-validated canonical activity id, or omitted/null when none is
+  // known. This function performs NO catalog lookup/validation itself --
+  // that belongs at the API/service boundary (apps/web/app/api/plans/route.ts),
+  // the same layer that already validates title/windowType/etc. before
+  // calling this DB helper. Persisted exactly as given.
+  activityId?: string | null;
   plannedStartAt: Date;
   plannedEndAt: Date;
   durationMinutes: number;
@@ -1173,8 +1189,8 @@ export async function createPlannedActivity(input: CreatePlannedActivityInput): 
     `INSERT INTO "PlannedActivity"
        (id, "userId", title, "activityType", icon, "plannedStartAt", "plannedEndAt",
         "durationMinutes", "windowType", "windowLabel", "matchLabel", score,
-        recommendation, "calendarUrl", "eventTimezone", "eventLocationName")
-     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16)
+        recommendation, "calendarUrl", "eventTimezone", "eventLocationName", "activityId")
+     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17)
      RETURNING *`,
     [
       id,
@@ -1193,6 +1209,7 @@ export async function createPlannedActivity(input: CreatePlannedActivityInput): 
       input.calendarUrl ?? null,
       input.eventTimezone ?? null,
       input.eventLocationName ?? null,
+      input.activityId ?? null,
     ]
   );
   return result.rows[0];
@@ -1236,8 +1253,12 @@ export async function logPlannedActivity(userId: string, planId: string): Promis
     const plan: PlannedActivity = planRes.rows[0];
 
     if (plan.status === 'LOGGED' && plan.habitLogId) {
+      // Planned Activity Canonical Identity Propagation V1 -- widened to
+      // include "activityId" (previously omitted), so a second/idempotent
+      // completion request returns the SAME persisted identity as the
+      // first, rather than silently reporting it as undefined.
       const existingLog = await client.query(
-        `SELECT id, "userId", "activityTitle", "activeWindow", "logTimestamp", "logMinuteOfDay", "durationMinutes", notes, "logSource", "activitySignificance"
+        `SELECT id, "userId", "activityTitle", "activityId", "activeWindow", "logTimestamp", "logMinuteOfDay", "durationMinutes", notes, "logSource", "activitySignificance"
          FROM "HabitLog"
          WHERE id = $1 AND "userId" = $2`,
         [plan.habitLogId, userId]
@@ -1297,16 +1318,28 @@ export async function logPlannedActivity(userId: string, planId: string): Promis
     });
     const notes = `Logged from planned Aura activity${plan.recommendation ? `: ${plan.recommendation}` : '.'}`;
 
+    // Planned Activity Canonical Identity Propagation V1 -- plan.activityId
+    // is copied VERBATIM onto HabitLog.activityId: a factual copy, never a
+    // catalog lookup/revalidation. plan.activityId is already available for
+    // free (the plan SELECT above uses SELECT *), and is either a genuinely
+    // known canonical id (persisted at Plan creation, apps/web/app/api/plans/route.ts)
+    // or null (no canonical identity was known) -- both cases pass through
+    // unchanged. If the catalog later drops an id that was valid at Plan
+    // creation time, that historical fact is preserved here rather than
+    // destroyed; C3's existing evaluateHabitLogAuraFit already handles that
+    // drift gracefully (UNKNOWN_ACTIVITY_ID -> ineligible) without any
+    // change to this function.
     const habitLogRes = await client.query(
       `INSERT INTO "HabitLog"
-         (id, "userId", "activityTitle", "activeWindow", "logMinuteOfDay",
+         (id, "userId", "activityTitle", "activityId", "activeWindow", "logMinuteOfDay",
           "logTimestamp", "durationMinutes", notes, "logSource", "activitySignificance")
-       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, 'AURA_PLANNED', 'MEDIUM')
-       RETURNING id, "userId", "activityTitle", "activeWindow", "logTimestamp", "logMinuteOfDay", "durationMinutes", notes, "logSource", "activitySignificance"`,
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, 'AURA_PLANNED', 'MEDIUM')
+       RETURNING id, "userId", "activityTitle", "activityId", "activeWindow", "logTimestamp", "logMinuteOfDay", "durationMinutes", notes, "logSource", "activitySignificance"`,
       [
         habitLogId,
         userId,
         plan.title,
+        plan.activityId ?? null,
         activeWindow,
         logMinuteOfDay,
         logTimestamp,
