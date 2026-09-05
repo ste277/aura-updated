@@ -32,16 +32,79 @@ const deps: AskAuraOrchestratorDeps = { userId: 'test-user-not-a-real-db-row', c
 
 async function main() {
   // ============================================================
-  // Section 31 -- GOOD_RIGHT_NOW: same source of truth as Home
-  // (getActionCards), never a second ranking function.
+  // Section 31 -- GOOD_RIGHT_NOW: Ask Aura GOOD_RIGHT_NOW Personalized
+  // Hybrid V1 -- SEMANTIC (not exact) parity with Home's own Good Right
+  // Now. Composition: the first two curated base cards (getActionCards,
+  // UNCHANGED) as safe anchors, plus one live-ranked, personalized
+  // discovery candidate (getActivityDiscoveryCards) -- never a second
+  // ranking function, always exactly 3 options, no activity-history query
+  // (Ask Aura remains intentionally history-agnostic, unlike Home).
   // ============================================================
   {
     const parsed = parseAskAuraRequest('What should I do right now?', { now: NOW });
     const response = await orchestrateAskAura(parsed, deps);
-    const expected = getActionCards('NEUTRAL').slice(0, 3);
+    const base = getActionCards('NEUTRAL');
     check('GOOD_RIGHT_NOW intent', response.intent === 'GOOD_RIGHT_NOW');
+    const options = (response.cards?.[0]?.options as Array<{ activityId?: string }>) ?? [];
+    check('GOOD_RIGHT_NOW always returns exactly 3 options', options.length === 3);
+    check('First two options are the curated base cards, byte-for-byte (unaffected anchors)', JSON.stringify(options[0]) === JSON.stringify(base[0]) && JSON.stringify(options[1]) === JSON.stringify(base[1]));
+    check('Third option is a genuine discovery candidate, not the original base[2]', options[2]?.activityId !== base[2].activityId);
+    const baseActivityIds = new Set(base.map((c) => c.activityId).filter(Boolean));
+    check('Third option\'s activityId does not duplicate ANY of the three base cards (not just the two displayed anchors)', !baseActivityIds.has(options[2]?.activityId));
+    check('OPEN_TIMELINE action is still present (no action regression)', Boolean(response.actions?.some((a) => a.type === 'OPEN_TIMELINE')));
+  }
+
+  // --- Personalization: the discovery-sourced third card is genuinely
+  // evaluated with deps.context.personalContext, using the real canonical
+  // evaluator -- no fabricated bonus, no mocking. ---
+  {
+    const personalizedDeps: AskAuraOrchestratorDeps = { ...deps, context: { ...context, personalContext: { natalNakshatraIndex: 1, janmaNakshatra: 'Ashwini', moonElement: 'FIRE' } } };
+    const parsed = parseAskAuraRequest('What should I do right now?', { now: NOW });
+    const generalResponse = await orchestrateAskAura(parsed, deps);
+    const personalizedResponse = await orchestrateAskAura(parsed, personalizedDeps);
+    const generalThird = (generalResponse.cards?.[0]?.options as Array<{ activityId?: string; description?: string }>)[2];
+    const personalizedThird = (personalizedResponse.cards?.[0]?.options as Array<{ activityId?: string; description?: string }>)[2];
+    check('Same discovery candidate resolves in both calls (deterministic fixed NOW/window -- personalization here changes the score, not which activity wins)', generalThird?.activityId === personalizedThird?.activityId);
+    check('Personalized description genuinely differs from the general one (canonical personalSummary surfaced, never invented)', generalThird?.description !== personalizedThird?.description);
+  }
+
+  // --- Incomplete/absent birth profile: discovery ranking itself remains
+  // useful even without natal personalization -- still exactly 3 options,
+  // no error, no clarification, no profile-completion requirement. ---
+  {
+    const parsed = parseAskAuraRequest('What should I do right now?', { now: NOW });
+    const response = await orchestrateAskAura(parsed, deps); // deps.context.personalContext is already undefined
     const options = (response.cards?.[0]?.options as unknown[]) ?? [];
-    check('GOOD_RIGHT_NOW cards match getActionCards(activeWindow) exactly (same fixture window)', JSON.stringify(options) === JSON.stringify(expected));
+    check('Incomplete/absent birth profile -> still exactly 3 options, no error, no clarification', options.length === 3 && response.cards?.[0]?.type !== 'CLARIFICATION');
+  }
+
+  // --- Deterministic now: repeated calls with the identical fixed
+  // context.now produce byte-identical output, proving the response is
+  // driven by the request's own canonical instant, never a second,
+  // independent internal wall-clock reading. ---
+  {
+    const parsed = parseAskAuraRequest('What should I do right now?', { now: NOW });
+    const r1 = await orchestrateAskAura(parsed, deps);
+    const r2 = await orchestrateAskAura(parsed, deps);
+    check('Repeated GOOD_RIGHT_NOW calls with the same fixed context.now produce byte-identical cards', JSON.stringify(r1.cards) === JSON.stringify(r2.cards));
+  }
+
+  // --- Event Location structurally irrelevant (brief section 20): a
+  // GOOD_RIGHT_NOW-classified prompt never even attaches a locationQuery in
+  // the first place (step 4's own return in askAuraIntent.ts is a minimal
+  // { intent, confidence } object, pre-existing and unaffected by this PR),
+  // and handleGoodRightNow never reads deps.eventLocation either way -- an
+  // "in X" phrase on such a prompt has zero effect on the response. ---
+  {
+    const withLocationParsed = parseAskAuraRequest('What should I do right now in Chennai?', { now: NOW });
+    check('GOOD_RIGHT_NOW never carries a locationQuery, with or without an "in X" phrase in the prompt', withLocationParsed.intent === 'GOOD_RIGHT_NOW' && withLocationParsed.locationQuery === undefined);
+    const withLocation = await orchestrateAskAura(withLocationParsed, deps);
+    const withoutLocationParsed = parseAskAuraRequest('What should I do right now?', { now: NOW });
+    const withoutLocation = await orchestrateAskAura(withoutLocationParsed, deps);
+    check(
+      'Response cards/actions/message are identical whether or not a location phrase was present (Event Location is ceremonial-only, ignored here)',
+      JSON.stringify(withLocation.cards) === JSON.stringify(withoutLocation.cards) && JSON.stringify(withLocation.actions) === JSON.stringify(withoutLocation.actions) && withLocation.message === withoutLocation.message
+    );
   }
 
   // ============================================================

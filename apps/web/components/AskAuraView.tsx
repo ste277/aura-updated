@@ -399,8 +399,20 @@ function AskAuraCardView({ card, onQuickReply }: { card: AskAuraCard; onQuickRep
     return (
       <div style={{ display: 'flex', flexDirection: 'column', gap: 6, marginTop: 9 }}>
         {options.map((opt) => (
-          <div key={opt.id} style={{ fontSize: 12, color: colors.textSecondary }}>
-            {opt.icon ? `${opt.icon} ` : ''}{opt.title}
+          <div key={opt.id}>
+            <div style={{ fontSize: 12, color: colors.textSecondary }}>
+              {opt.icon ? `${opt.icon} ` : ''}{opt.title}
+            </div>
+            {/* Ask Aura GOOD_RIGHT_NOW Personalized Hybrid V1 -- the
+              * canonical description text (general Panchang summary, plus
+              * the owner's own personalSummary when a discovery candidate
+              * is personalized -- buildActivityDiscoveryDescription() in
+              * actionCards.ts). Rendered exactly as the server already
+              * generates it; never a fabricated explanation, never
+              * fitScore/internal scoring details. */}
+            {opt.description && (
+              <div style={{ marginTop: 2, fontSize: 11, color: colors.textFaint }}>{opt.description}</div>
+            )}
           </div>
         ))}
       </div>

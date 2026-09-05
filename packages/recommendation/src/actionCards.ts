@@ -270,10 +270,17 @@ export function buildActivityDiscoveryDescription(fit: Pick<AuraFitEvaluation, '
  * behavior byte-for-byte, since evaluateActivityFit/evaluatePersonalMuhurtaFit
  * already treat a missing personalContext as their existing neutral-default
  * case.
+ *
+ * Ask Aura GOOD_RIGHT_NOW Personalized Hybrid V1 -- `date` is optional and
+ * defaults to `new Date()`, preserving Home's own existing call sites
+ * (which omit it) byte-for-byte. A server-side caller with its own already-
+ * resolved canonical request instant (Ask Aura's `deps.context.now`) should
+ * pass it explicitly so the WHOLE response is computed against one single
+ * instant, rather than this function silently taking a second, independent
+ * wall-clock reading of its own.
  */
-export function getActivityDiscoveryCards(window: string, limit = 6, personalContext?: PersonalMuhurtaContext): ActionCard[] {
+export function getActivityDiscoveryCards(window: string, limit = 6, personalContext?: PersonalMuhurtaContext, date: Date = new Date()): ActionCard[] {
   const windowType = normalizeWindowType(window);
-  const date = new Date();
   return FULL_ACTIVITY_CATALOG
     .map((activity) => {
       const fit = evaluateActivityFit({ activity, date, windowType, personalContext });
