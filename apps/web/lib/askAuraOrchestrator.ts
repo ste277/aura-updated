@@ -24,7 +24,7 @@ import {
 import { DailyAssistantContext, localDateForContext, profileFromActivity, resolveHorizonDayOffsets } from '../../../packages/recommendation/src/dailyAssistant';
 import { labelForRawScore, nearbyCheckInstants, runTimingSearch, TimingCandidate, TimingSearchRequest, TimingTimePreference } from '../../../packages/recommendation/src/timingSearch';
 import { evaluateEverydaySharedCandidate, findEverydaySharedTiming } from '../../../packages/recommendation/src/everydayTimingFit';
-import { getActionCards } from '../../../packages/recommendation/src/actionCards';
+import { getActionCards, getActivityDiscoveryCards } from '../../../packages/recommendation/src/actionCards';
 import { FULL_ACTIVITY_CATALOG } from '../../../packages/recommendation/src/personalizedTasks';
 import { handleMuhurthamSearchBody, handleSharedMuhurthamSearchBody } from './muhurthamSearchRequest';
 import { evaluateMuhurthamCandidateAt, isSupportedMuhurthamActivity, MuhurthamCandidateCheckOutcome, MuhurthamDateCandidate, MuhurthamSearchResult } from '../../../packages/recommendation/src/muhurthamFinder';
@@ -477,15 +477,41 @@ function eventLocationGate(parsed: ParsedAskAuraRequest, deps: AskAuraOrchestrat
 // ---- GOOD_RIGHT_NOW (brief section 7) --------------------------------
 
 function handleGoodRightNow(parsed: ParsedAskAuraRequest, deps: AskAuraOrchestratorDeps): AskAuraResponse {
-  // The SAME base table Home's own selectGoodRightNowCards() starts from
-  // (getActionCards) -- never a second ranking function. The "already
-  // logged today" swap Home additionally applies is not replicated here in
-  // V1 (Ask has no loggedActivitiesToday in scope); see completion report.
-  const cards = getActionCards(deps.activeWindow).slice(0, 3);
+  // Ask Aura GOOD_RIGHT_NOW Personalized Hybrid V1 -- SEMANTIC parity with
+  // Home's own Good Right Now, not exact parity: Ask Aura stays concise
+  // (always exactly 3 options) and history-agnostic (no
+  // loggedActivitiesToday/justLoggedTitles query -- Ask remains
+  // intentionally simpler here than Home, which is history-aware), while
+  // sharing the SAME canonical scoring/personalization pipeline
+  // (evaluateActivityFit/evaluatePersonalMuhurtaFit via
+  // getActivityDiscoveryCards) Home, Day Builder, and generic Ask Aura
+  // CHECK/FIND already use -- never a second ranking function.
+  //
+  // Composition: the first two curated, window-safe base cards
+  // (getActionCards, UNCHANGED) as safe anchors, plus one live-ranked,
+  // personalized discovery candidate. deps.context.personalContext is
+  // already built for every Ask Aura request (route.ts's
+  // buildPersonalMuhurtaContextForUser call) -- no second profile lookup,
+  // no raw birth fields, no new DTO. deps.context.now is passed explicitly
+  // (getActivityDiscoveryCards' own optional `date` param) so the whole
+  // response is computed against the SAME single request instant, rather
+  // than a second, independent wall-clock reading.
+  const base = getActionCards(deps.activeWindow);
+  const discovery = getActivityDiscoveryCards(deps.activeWindow, 6, deps.context.personalContext, deps.context.now);
+  // Deduplicated against ALL THREE base cards' activityIds, not just the
+  // two displayed anchors -- base[2] itself must never be "rediscovered"
+  // and presented as though it were a personalized pick.
+  const baseActivityIds = new Set(base.map((card) => card.activityId).filter((id): id is string => Boolean(id)));
+  const personalized = discovery.find((card) => card.activityId && !baseActivityIds.has(card.activityId));
+  // Deterministic fallback: if no eligible non-duplicate discovery
+  // candidate exists, the third slot falls back to the base table's own
+  // third card -- the response always returns exactly 3 options, never
+  // fewer because discovery came up empty.
+  const options = [base[0], base[1], personalized ?? base[2]];
   return {
     intent: 'GOOD_RIGHT_NOW',
     message: 'Good choices right now:',
-    cards: [{ type: 'ACTIVITY_OPTIONS', windowLabel: deps.activeWindow, options: cards }],
+    cards: [{ type: 'ACTIVITY_OPTIONS', windowLabel: deps.activeWindow, options }],
     actions: [{ type: 'OPEN_TIMELINE', label: 'See all activities' }],
     context: parsed,
   };

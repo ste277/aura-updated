@@ -177,6 +177,65 @@ check(
   check('getActionCards("RAHU_KALAM") still returns exactly 3 pre-authored cards, unaffected', getActionCards('RAHU_KALAM').length === 3);
 }
 
+// ============================================================
+// Ask Aura GOOD_RIGHT_NOW Personalized Hybrid V1 -- getActivityDiscoveryCards'
+// new optional `date` parameter. Home's own callers (which omit it) must
+// keep working exactly as before; a caller with an explicit fixed instant
+// (Ask Aura's deps.context.now) must get fully deterministic, repeatable
+// output -- the audit's own time-determinism finding, now closed.
+// ============================================================
+
+{
+  const FIXED_NOW = new Date('2026-09-05T09:00:00.000Z');
+  const call1 = getActivityDiscoveryCards('NEUTRAL', 6, undefined, FIXED_NOW);
+  const call2 = getActivityDiscoveryCards('NEUTRAL', 6, undefined, FIXED_NOW);
+  check('Explicit fixed date -> repeated calls produce byte-identical output (deterministic, no hidden internal wall-clock reading)', JSON.stringify(call1) === JSON.stringify(call2));
+}
+{
+  // Existing Home call sites omit `date` entirely -- must keep compiling
+  // and running exactly as before (defaults to `new Date()` internally,
+  // unchanged behavior).
+  const omittedDate = getActivityDiscoveryCards('NEUTRAL', 6);
+  check('Omitting `date` entirely still returns a real, non-empty discovery list (backward-compatible default)', omittedDate.length > 0);
+}
+{
+  const DATE_A = new Date('2026-01-15T09:00:00.000Z');
+  const DATE_B = new Date('2027-01-15T09:00:00.000Z');
+  const resultA = getActivityDiscoveryCards('ABHIJIT', 6, PERSONAL_CONTEXT, DATE_A);
+  const resultB = getActivityDiscoveryCards('ABHIJIT', 6, PERSONAL_CONTEXT, DATE_B);
+  check('Explicit date genuinely drives the computation (a different real date can change scores, e.g. via Tara Bala\'s own date-dependence)', JSON.stringify(resultA) !== JSON.stringify(resultB));
+}
+
+// ============================================================
+// Fallback selection mechanism (Ask Aura GOOD_RIGHT_NOW's own composition,
+// apps/web/lib/askAuraOrchestrator.ts's handleGoodRightNow) -- mirrors the
+// EXACT two-line selection+fallback pattern that function uses (a `.find()`
+// plus a `??`), since that logic is inline and not separately exported.
+// Proves the fallback branch fires correctly when every discovery
+// candidate happens to duplicate a base card -- a scenario deliberately
+// constructed here with synthetic fixtures rather than in production code,
+// per the audit's own instruction not to distort the real catalog merely
+// to make this branch reachable.
+// ============================================================
+
+function selectPersonalizedThirdCard(
+  base: Array<{ activityId?: string }>,
+  discovery: Array<{ activityId?: string }>
+): { activityId?: string } {
+  const baseActivityIds = new Set(base.map((c) => c.activityId).filter((id): id is string => Boolean(id)));
+  const personalized = discovery.find((card) => card.activityId && !baseActivityIds.has(card.activityId));
+  return personalized ?? base[2];
+}
+
+{
+  const base = [{ activityId: 'deep-work' }, { activityId: 'task-7' }, { activityId: 'task-6' }];
+  const discoveryWithAlternative = [{ activityId: 'deep-work' }, { activityId: 'workout' }, { activityId: 'task-6' }];
+  check('A genuine non-duplicate discovery candidate ("workout") is selected over base duplicates ranked above it', selectPersonalizedThirdCard(base, discoveryWithAlternative).activityId === 'workout');
+
+  const discoveryAllDuplicates = [{ activityId: 'deep-work' }, { activityId: 'task-7' }, { activityId: 'task-6' }];
+  check('When EVERY discovery candidate duplicates a base card, the selection falls back to base[2] exactly (deterministic, never fewer than 3 options)', selectPersonalizedThirdCard(base, discoveryAllDuplicates).activityId === 'task-6');
+}
+
 if (!allPassed) {
   console.error('\nSome Home Good Right Now personalization checks FAILED.');
   process.exit(1);
