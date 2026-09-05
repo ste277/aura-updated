@@ -835,6 +835,16 @@ export default function DashboardPage() {
                     ...item,
                     id: serverLog.id,
                     loggedAt: new Date(serverLog.logTimestamp || serverLog.createdAt),
+                    // Insights Correctness + Historical Integrity V1 -- the
+                    // optimistic entry's own activeWindowForLog is at best a
+                    // same-day guess (today's live activeType for a
+                    // backdated log); the server now always computes the
+                    // real, historically-correct window for the actual
+                    // logTimestamp (apps/web/lib/historicalActivityWindow.ts).
+                    // Sync it here so a backdated entry's displayed window
+                    // (and everything InsightsView derives from it) reflects
+                    // the authoritative value, not the optimistic guess.
+                    activeWindow: serverLog.activeWindow ?? item.activeWindow,
                   }
                 : item
             )

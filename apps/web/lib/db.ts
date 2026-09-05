@@ -1529,6 +1529,45 @@ export async function listHabitLogs(userId: string): Promise<HabitLogRow[]> {
   return result.rows;
 }
 
+/**
+ * Insights Correctness + Historical Integrity V1 -- a DATE-RANGE query
+ * (never a row-count LIMIT) for the specific consumers that need real
+ * period-based history: Insights' own "This Month"/7-day trend/30-day
+ * heatmap/active-logging-streak calculations, and the reflection/alignment
+ * correlation in apps/web/app/api/daily-assistant/insights/route.ts. A
+ * row-count cap (listHabitLogs()'s existing LIMIT 50, deliberately left
+ * unmodified above -- apps/web/lib/myDayOrchestrator.ts already relies on
+ * its exact "last 50 overall" contract for a different, single-day
+ * purpose) silently truncates any of those periods for a moderately active
+ * logger, well before 30-50 real days of history are reached.
+ *
+ * `sinceDate` is caller-supplied (see INSIGHTS_HISTORY_DAYS below) rather
+ * than hardcoded here, so callers can reason about/test the exact horizon
+ * being requested.
+ */
+export async function listHabitLogsForInsights(userId: string, sinceDate: Date): Promise<HabitLogRow[]> {
+  const result = await pool.query(
+    `SELECT * FROM "HabitLog" WHERE "userId" = $1 AND "logTimestamp" >= $2 ORDER BY "logTimestamp" DESC`,
+    [userId, sinceDate]
+  );
+  return result.rows;
+}
+
+/**
+ * Insights Correctness + Historical Integrity V1 -- the historical horizon
+ * listHabitLogsForInsights() queries by default. Chosen as a generous,
+ * bounded (not literally unlimited) date range rather than a row count:
+ * comfortably covers every current Insights period (This Month, the 7-day
+ * trend, the 30-day heatmap) and gives the Active Logging Streak over a
+ * full year of headroom -- the UI presents that streak as an unrestricted
+ * current count with no "within the last N days" caveat, so silently
+ * capping it at exactly 30 days would change its product meaning, not just
+ * its performance profile. 400 days is a deliberate compromise: bounded
+ * and indexable (never a truly unlimited lifetime scan), while realistic
+ * habit-logging streaks are extremely unlikely to exceed it.
+ */
+export const INSIGHTS_HISTORY_DAYS = 400;
+
 export async function listAllHabitLogsForExport(userId: string): Promise<HabitLogRow[]> {
   const result = await pool.query(
     `SELECT * FROM "HabitLog" WHERE "userId" = $1 ORDER BY "logTimestamp" DESC`,

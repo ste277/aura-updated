@@ -1,7 +1,8 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { createHabitLog, listHabitLogs } from '../../../lib/db';
+import { createHabitLog, getUserById, listHabitLogsForInsights, INSIGHTS_HISTORY_DAYS } from '../../../lib/db';
 import { getSessionFromRequest } from '../../../lib/session';
 import { parseJsonObject } from '../../../lib/request';
+import { resolveHistoricalActiveWindow } from '../../../lib/historicalActivityWindow';
 
 function parseLogSource(value: unknown): 'AURA_PLANNED' | 'AURA_DO_NOW' | 'MANUAL' | 'OVERRIDE_CAUTION' {
   if (value === 'AURA_PLANNED' || value === 'AURA_DO_NOW' || value === 'MANUAL' || value === 'OVERRIDE_CAUTION') return value;
@@ -19,15 +20,17 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: 'Not authenticated.' }, { status: 401 });
   }
 
+  const user = await getUserById(session.userId);
+  if (!user) return NextResponse.json({ error: 'User not found.' }, { status: 404 });
+
   const body = await parseJsonObject(req);
   if (!body) return NextResponse.json({ error: 'A valid JSON request body is required.' }, { status: 400 });
 
-  const { activityTitle, activeWindow, logMinuteOfDay, logTimestamp, notes, durationMinutes, logSource, activitySignificance } = body;
+  const { activityTitle, logMinuteOfDay, logTimestamp, notes, durationMinutes, logSource, activitySignificance } = body;
   const cleanTitle = typeof activityTitle === 'string' ? activityTitle.trim() : '';
-  const cleanWindow = typeof activeWindow === 'string' ? activeWindow.trim() : '';
   const minuteOfDay = Number(logMinuteOfDay);
 
-  if (!cleanTitle || !cleanWindow || !Number.isFinite(minuteOfDay) || minuteOfDay < 0 || minuteOfDay > 1439) {
+  if (!cleanTitle || !Number.isFinite(minuteOfDay) || minuteOfDay < 0 || minuteOfDay > 1439) {
     return NextResponse.json({ error: 'Missing required fields.' }, { status: 400 });
   }
 
@@ -37,10 +40,24 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: 'logTimestamp must be a valid date.' }, { status: 400 });
   }
 
+  // Insights Correctness + Historical Integrity V1 -- activeWindow is now
+  // ALWAYS computed server-side from this log's own timestamp and the
+  // owner's Timing Location, never accepted from the client. Previously a
+  // client-supplied `activeWindow` was trusted as-is; a backdated entry
+  // (PastActivityModal.tsx) either fell back to today's live window
+  // (activeType, via the wired onConfirmLog path) or a hardcoded 'NEUTRAL'
+  // (the unused direct-fetch fallback path) -- both wrong for a genuinely
+  // past instant. This single server-side computation fixes both, and
+  // removes any possibility of client/server skew for live entries too.
+  // Uses ONLY the owner's Timing Location (never Birth Location, Event
+  // Location, or SavedPerson/SHARED context) -- an ordinary owner activity
+  // log.
+  const activeWindow = resolveHistoricalActiveWindow(customDate, user.latitude, user.longitude, user.timezone);
+
   const entry = await createHabitLog({
     userId: session.userId,
     activityTitle: cleanTitle,
-    activeWindow: cleanWindow,
+    activeWindow,
     logMinuteOfDay: Math.round(minuteOfDay),
     logTimestamp: customDate,
     // Good Right Now Action Semantics V1: the floor used to be 5, silently
@@ -69,7 +86,20 @@ export async function GET(req: NextRequest) {
     return NextResponse.json({ error: 'Not authenticated.' }, { status: 401 });
   }
 
-  const entries = await listHabitLogs(session.userId);
+  // Insights Correctness + Historical Integrity V1 -- this is the ONLY
+  // caller of this route (apps/web/app/page.tsx's client fetch, which
+  // feeds InsightsView.tsx's own client-side analytics -- This Month, the
+  // 7-day trend, the 30-day heatmap, the active logging streak -- as well
+  // as loggedActivitiesToday/Timeline/HomeDashboard, which only ever
+  // filter this same list down to a narrower window and are unaffected by
+  // receiving more history). Switched from the row-count-capped
+  // listHabitLogs() (LIMIT 50, deliberately left unmodified -- see its own
+  // doc comment; apps/web/lib/myDayOrchestrator.ts calls that function
+  // directly, not this route, and is unaffected by this change) to the
+  // date-range listHabitLogsForInsights(), so a moderately active logger's
+  // period-based Insights are no longer silently truncated.
+  const sinceDate = new Date(Date.now() - INSIGHTS_HISTORY_DAYS * 24 * 60 * 60 * 1000);
+  const entries = await listHabitLogsForInsights(session.userId, sinceDate);
 
   return NextResponse.json(entries);
 }
