@@ -257,6 +257,27 @@ export function findActivityIntent(input: string): ActivityProfile | undefined {
     .find((activity) => activity.aliases.some((alias) => normalized.includes(alias)));
 }
 
+/**
+ * Prospective Canonical Activity Identity V1 -- an exact-match-only
+ * catalog lookup by canonical id, deliberately distinct from
+ * findActivityIntent()'s alias-substring matching above. Used to validate
+ * a caller-supplied `ActivityProfile.id` (e.g. a client-submitted
+ * HabitLog.activityId) against the real catalog: no alias matching, no
+ * title matching, no fuzzy matching, no classifyTask() fallback. Returns
+ * `undefined` for any id that isn't a genuine, current catalog entry --
+ * callers must treat that as "unknown activity," never silently accept or
+ * guess a match.
+ *
+ * ActivityProfile.id is treated as stable, persistence-safe identity once
+ * referenced by persisted data (HabitLog.activityId, the existing
+ * AuraMoment.activityId column) -- renaming/removing a catalog id after
+ * it has been persisted is a data-migration concern, not a casual catalog
+ * edit.
+ */
+export function getActivityProfileById(id: string): ActivityProfile | undefined {
+  return FULL_ACTIVITY_CATALOG.find((activity) => activity.id === id);
+}
+
 export function getPersonalizedTasks(
   activeWindowName: string,
   userChart?: UserChartContext,

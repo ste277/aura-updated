@@ -479,6 +479,17 @@ export interface HabitLogRow {
   id: string;
   userId: string;
   activityTitle: string;
+  // Prospective Canonical Activity Identity V1 -- the canonical
+  // packages/recommendation ActivityProfile.id this log was explicitly
+  // associated with at log time, or null/undefined when no canonical
+  // identity was known (manual/free-text logs, and every row created
+  // before this field existed). Optional (matching notes/logSource/
+  // activitySignificance's own convention on this interface) so existing
+  // in-memory HabitLogRow-shaped fixtures elsewhere in the codebase don't
+  // need updating for a concept they don't touch. Never inferred/
+  // backfilled -- see the column's own migration comment
+  // (apps/web/prisma/migrations/0030_habit_log_activity_id).
+  activityId?: string | null;
   activeWindow: string;
   logTimestamp: Date;
   logMinuteOfDay: number;
@@ -1491,6 +1502,14 @@ export async function consumeAuthCode(id: string): Promise<boolean> {
 export async function createHabitLog(input: {
   userId: string;
   activityTitle: string;
+  // Prospective Canonical Activity Identity V1 -- an already-validated
+  // canonical activity id, or omitted/null when none is known. This
+  // function performs NO catalog lookup/validation itself -- that belongs
+  // at the API/service boundary (apps/web/app/api/habit-logs/route.ts),
+  // the same layer that already validates/resolves activeWindow and
+  // logMinuteOfDay before calling this DB helper. Persisted exactly as
+  // given.
+  activityId?: string | null;
   activeWindow: string;
   logMinuteOfDay: number;
   logTimestamp?: Date;
@@ -1503,12 +1522,13 @@ export async function createHabitLog(input: {
   const timestamp = input.logTimestamp ?? new Date();
 
   const result = await pool.query(
-    `INSERT INTO "HabitLog" (id, "userId", "activityTitle", "activeWindow", "logMinuteOfDay", "logTimestamp", "durationMinutes", notes, "logSource", "activitySignificance")
-     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10) RETURNING *`,
+    `INSERT INTO "HabitLog" (id, "userId", "activityTitle", "activityId", "activeWindow", "logMinuteOfDay", "logTimestamp", "durationMinutes", notes, "logSource", "activitySignificance")
+     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11) RETURNING *`,
     [
       id,
       input.userId,
       input.activityTitle,
+      input.activityId ?? null,
       input.activeWindow,
       input.logMinuteOfDay,
       timestamp,
