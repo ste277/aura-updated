@@ -7,8 +7,13 @@
  */
 import { createSavedPerson, deleteSavedPerson, upsertUserByEmail } from '../apps/web/lib/db';
 import { parseAskAuraRequest } from '../packages/recommendation/src/askAuraIntent';
-import { orchestrateAskAura, resolvePersonByName, AskAuraOrchestratorDeps } from '../apps/web/lib/askAuraOrchestrator';
-import { DailyAssistantContext } from '../packages/recommendation/src/dailyAssistant';
+import { orchestrateAskAura, resolveHorizonToDateRange, resolvePersonByName, AskAuraOrchestratorDeps } from '../apps/web/lib/askAuraOrchestrator';
+import { DailyAssistantContext, profileFromActivity } from '../packages/recommendation/src/dailyAssistant';
+import { evaluateEverydaySharedCandidate } from '../packages/recommendation/src/everydayTimingFit';
+import { nearbyCheckInstants, runTimingSearch } from '../packages/recommendation/src/timingSearch';
+import { FULL_ACTIVITY_CATALOG } from '../packages/recommendation/src/personalizedTasks';
+import { natalContextFromBirthDetails } from '../apps/web/lib/natalContext';
+import { localDateTimeToUTC } from '../packages/panchang/src/localDate';
 
 let allPassed = true;
 function check(label: string, condition: boolean) {
@@ -159,6 +164,135 @@ async function main() {
       const response = await orchestrateAskAura(parsed, deps);
       check('Unknown name "Nobody" -> a clarification message, never a silent GENERAL Muhurtham search', response.message.toLowerCase().includes("couldn't find"));
       check('Never silently executes as GENERAL (no OPEN_MUHURTHAM/dates card for an unresolved partner)', response.intent !== 'MUHURTHAM_SEARCH' || !('dates' in (response.cards?.[0] ?? {})));
+    }
+
+    // ============================================================
+    // Ask Aura Scope-Aware Everyday TIMING_CHECK V1: everyday (non-
+    // ceremonial) SHARED TIMING_CHECK, end to end with the real Priya
+    // fixture created above.
+    // ============================================================
+    // The EXACT instant "Is 10 AM tomorrow good for ... to meditate?"
+    // resolves to -- computed the SAME way resolveTimingCheckCandidateStart
+    // itself does (resolveHorizonToDateRange for the local date, then
+    // localDateTimeToUTC for the exact clock time), so the betterNearby
+    // reproduction below evaluates the identical instant the real handler
+    // does, not an approximation.
+    const everydayTomorrow = resolveHorizonToDateRange('TOMORROW', undefined, context).start;
+    const everydayCandidateStart = localDateTimeToUTC(everydayTomorrow, '10:00', owner.timezone);
+
+    // RESOLVED -- genuine two-person blend, exact requested instant
+    // preserved, distinct SHARED wording, no GENERAL/PERSONAL fallback.
+    {
+      const parsed = parseAskAuraRequest('Is 10 AM tomorrow good for Priya and me to meditate?', { now: NOW, timezone: owner.timezone });
+      check('"...Priya and me to meditate?" parses TIMING_CHECK, SHARED, priya, exactTime=10:00, meditation', parsed.intent === 'TIMING_CHECK' && parsed.scope === 'SHARED' && parsed.personNameQuery === 'priya' && parsed.exactTime === '10:00' && parsed.activityId === 'meditation');
+
+      const response = await orchestrateAskAura(parsed, deps);
+      check('Response stays TIMING_CHECK', response.intent === 'TIMING_CHECK');
+      const card = response.cards?.[0] as { scope?: string; personName?: string; requested?: { start: string; startLabel: string; score: number } } | undefined;
+      check('Response card is scoped SHARED and carries Priya\'s display name', card?.scope === 'SHARED' && card?.personName === 'Priya');
+      check('Requested candidate\'s LOCAL display time is exactly 10:00 AM -- the exact requested instant, never moved', card?.requested?.startLabel === '10:00 AM');
+      check('Response uses distinct SHARED wording ("...for both of you"), never GENERAL\'s "You can."/"I\'d hold off for now."', response.message.includes('both of you'));
+      check('Response never claims relationship compatibility -- no "compatible"/"relationship"/"auspicious" wording', !/compatible|relationship|auspicious/i.test(response.message));
+
+      // Deterministic divergence proof: this file's own `deps`/`context`
+      // carries NO owner personalContext (matching its existing
+      // convention throughout this file), so the owner's own delta from
+      // the general baseline is EXACTLY 0 -- meaning sharedScore
+      // necessarily differs from the plain GENERAL score whenever Priya's
+      // real (complete) natal data contributes ANY non-neutral personal
+      // signal, which it deterministically does (her personalPatternScore
+      // can never equal exactly the neutral-context default of 65). No
+      // coincidental match is possible here, unlike an arbitrary owner
+      // fixture would risk.
+      const generalParsed = parseAskAuraRequest('Is 10 AM tomorrow good for meditation?', { now: NOW, timezone: owner.timezone });
+      const generalResponse = await orchestrateAskAura(generalParsed, deps);
+      const generalCard = generalResponse.cards?.[0] as { requested?: { score: number } } | undefined;
+      check('SHARED score genuinely differs from the plain GENERAL score for the identical instant (a real two-person blend, not owner-only)', card?.requested?.score !== generalCard?.requested?.score);
+    }
+
+    // AMBIGUOUS -- everyday SHARED CHECK, reusing the two Annas created
+    // above; must clarify, never silently evaluate GENERAL/PERSONAL.
+    {
+      const parsed = parseAskAuraRequest('Is 10 AM tomorrow good for Anna and me to meditate?', { now: NOW, timezone: owner.timezone });
+      check('"...Anna and me to meditate?" parses SHARED, personNameQuery=anna', parsed.scope === 'SHARED' && parsed.personNameQuery === 'anna');
+      const response = await orchestrateAskAura(parsed, deps);
+      check('Ambiguous "Anna" -> CLARIFICATION, never a silent timing evaluation', response.cards?.[0]?.type === 'CLARIFICATION');
+      check('No requested-candidate card for an ambiguous partner', !('requested' in (response.cards?.[0] ?? {})));
+    }
+
+    // NOT_FOUND -- everyday SHARED CHECK.
+    {
+      const parsed = parseAskAuraRequest('Is 10 AM tomorrow good for Nobody and me to meditate?', { now: NOW, timezone: owner.timezone });
+      check('"...Nobody and me to meditate?" parses SHARED, personNameQuery=nobody', parsed.scope === 'SHARED' && parsed.personNameQuery === 'nobody');
+      const response = await orchestrateAskAura(parsed, deps);
+      check('Unknown name "Nobody" -> a not-found clarification message', response.message.toLowerCase().includes("couldn't find"));
+      check('No requested-candidate card for an unresolved partner', !('requested' in (response.cards?.[0] ?? {})));
+    }
+
+    // Dating regression -- a non-Muhurtham activity's SHARED CHECK must
+    // route through the everyday shared path (never marriage collision),
+    // and genuinely execute (not a clarification, since Priya resolves).
+    {
+      const parsed = parseAskAuraRequest('Is 7 PM next Friday good for Priya and me to go on a date?', { now: NOW, timezone: owner.timezone });
+      check('Dating + pair grammar parses activityId=dating, SHARED, priya', parsed.activityId === 'dating' && parsed.scope === 'SHARED' && parsed.personNameQuery === 'priya');
+      const response = await orchestrateAskAura(parsed, deps);
+      check('Executes as a genuine SHARED CHECK (not a clarification -- Priya resolves cleanly)', response.intent === 'TIMING_CHECK' && response.cards?.[0]?.type === 'TIMING_RESULT');
+      const card = response.cards?.[0] as { scope?: string; personName?: string } | undefined;
+      check('Response card is scoped SHARED for dating, proving no marriage collision', card?.scope === 'SHARED' && card?.personName === 'Priya');
+    }
+
+    // Incomplete partner profile: NOTE -- the SavedPerson DB schema
+    // (SavedPerson.birthDate/birthTime/birthTimezone are all NOT NULL
+    // columns, confirmed in apps/web/lib/db.ts's own SavedPerson/
+    // SavedPersonInput types) makes a genuinely incomplete SavedPerson
+    // impossible to construct via createSavedPerson -- there is no
+    // reachable "SavedPerson exists but birthTime is missing" state in
+    // this data model, unlike the OWNER's own User.birthDate/birthTime/
+    // birthTimezone, which CAN be null (buildPersonalMuhurtaContextForUser
+    // already guards exactly that case). The equivalent code path this
+    // brief cares about -- a missing/incomplete PersonalMuhurtaContext
+    // producing evaluatePersonalMuhurtaFit's neutral default (65) rather
+    // than a hard error -- is already proven directly at the domain level
+    // in test/everydayTimingFit.test.ts ("A partner/user with no natal
+    // data still returns OK"), which passes `partnerContext: {}` straight
+    // into evaluateEverydaySharedCandidate/findEverydaySharedTiming
+    // without going through a SavedPerson at all. No new DB-level test is
+    // added here since the DB layer cannot represent this state.
+
+    // Section 34 -- betterNearby SHARED comparison: prove the winner is
+    // chosen by SHARED score, not the owner-only score, by independently
+    // reproducing the EXACT SAME per-candidate methodology and nearby-scan
+    // range/step (via the same exported primitives the real handler uses)
+    // and asserting the orchestrator's own betterNearby (if any) matches.
+    {
+      const durationMinutes = 30;
+      const candidateStart = everydayCandidateStart.toISOString();
+      const activity = FULL_ACTIVITY_CATALOG.find((a) => a.id === 'meditation')!;
+      const profile = profileFromActivity(activity);
+      const generalContext: DailyAssistantContext = { ...context, personalContext: undefined };
+      const partnerContext = natalContextFromBirthDetails('1991-03-10', '06:15', 'Asia/Kolkata');
+
+      const evaluateSharedAt = (iso: string) => {
+        const generalResult = runTimingSearch({ mode: 'CHECK', activityId: 'meditation', durationMinutes, candidateStart: iso, context: generalContext });
+        return evaluateEverydaySharedCandidate({ profile, generalCandidate: generalResult.requestedCandidate!, durationMinutes, context, partnerContext });
+      };
+      const requestedShared = evaluateSharedAt(candidateStart);
+      let expectedBest: ReturnType<typeof evaluateSharedAt> | undefined;
+      for (const iso of nearbyCheckInstants(candidateStart, durationMinutes, context)) {
+        const candidate = evaluateSharedAt(iso);
+        if (!expectedBest || candidate.sharedScore > expectedBest.sharedScore) expectedBest = candidate;
+      }
+      const expectBetterNearby = Boolean(expectedBest) && expectedBest!.sharedScore >= requestedShared.sharedScore + 0.5;
+
+      const parsed = parseAskAuraRequest('Is 10 AM tomorrow good for Priya and me to meditate?', { now: NOW, timezone: owner.timezone });
+      const response = await orchestrateAskAura(parsed, deps);
+      const card = response.cards?.[0] as { betterNearby?: { score: number } } | undefined;
+      if (expectBetterNearby) {
+        check('betterNearby appears when an independently-reproduced SHARED-score comparison also finds a strictly-better nearby candidate', Boolean(card?.betterNearby));
+        check('betterNearby score matches the independently-reproduced best SHARED score exactly (proves the comparison uses the blended shared score, not an owner-only score)', card?.betterNearby?.score === expectedBest!.sharedScore);
+      } else {
+        check('No betterNearby when the independently-reproduced SHARED comparison also finds none', !card?.betterNearby);
+      }
     }
   } finally {
     for (const id of created) {

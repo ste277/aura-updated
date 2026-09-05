@@ -1,7 +1,8 @@
-import { findEverydaySharedTiming } from '../packages/recommendation/src/everydayTimingFit';
+import { evaluateEverydaySharedCandidate, findEverydaySharedTiming } from '../packages/recommendation/src/everydayTimingFit';
 import { runTimingSearch } from '../packages/recommendation/src/timingSearch';
 import { SUPPORTED_MUHURTHAM_ACTIVITY_IDS } from '../packages/recommendation/src/muhurthamFinder';
-import type { DailyAssistantContext } from '../packages/recommendation/src/dailyAssistant';
+import { profileFromActivity, TaskProfile, type DailyAssistantContext } from '../packages/recommendation/src/dailyAssistant';
+import { FULL_ACTIVITY_CATALOG } from '../packages/recommendation/src/personalizedTasks';
 
 let allPassed = true;
 function check(label: string, condition: boolean) {
@@ -107,6 +108,88 @@ if (dateNightResult.status === 'OK') {
       break;
     }
   }
+}
+
+// ============================================================
+// Ask Aura Scope-Aware Everyday TIMING_CHECK V1: evaluateEverydaySharedCandidate
+// is the extracted per-candidate helper findEverydaySharedTiming's own
+// per-candidate .map() step now calls -- these tests prove it independently,
+// on a SINGLE caller-supplied instant (the CHECK use case), not just as an
+// implicit implementation detail of the FIND pool above.
+// ============================================================
+
+{
+  const meditation = FULL_ACTIVITY_CATALOG.find((a) => a.id === 'meditation')!;
+  const profile: TaskProfile = profileFromActivity(meditation);
+  const instant = new Date('2026-08-22T04:30:00.000Z');
+  const generalContext: DailyAssistantContext = { ...baseContext, now: instant, personalContext: undefined };
+  const generalResult = runTimingSearch({ mode: 'CHECK', activityId: 'meditation', durationMinutes: 30, candidateStart: instant.toISOString(), context: generalContext });
+  const generalCandidate = generalResult.requestedCandidate!;
+
+  const shared = evaluateEverydaySharedCandidate({
+    profile,
+    generalCandidate,
+    durationMinutes: 30,
+    context: { ...baseContext, now: instant, personalContext: userContext },
+    partnerContext,
+  });
+
+  check('evaluateEverydaySharedCandidate preserves the exact instant (start/end untouched)', shared.start === generalCandidate.start && shared.end === generalCandidate.end);
+  check('evaluateEverydaySharedCandidate carries the general candidate untouched', shared.generalCandidate === generalCandidate);
+  check('sharedScore is within 0-10', shared.sharedScore >= 0 && shared.sharedScore <= 10);
+  check('rating is everyday vocabulary, never Muhurtham language', ['STRONG_TOGETHER_FIT', 'GOOD_TOGETHER_FIT', 'EASY_TOGETHER_FIT'].includes(shared.rating));
+
+  // Cross-check against findEverydaySharedTiming's own pool computation for
+  // the IDENTICAL instant/activity/duration/contexts -- proves the
+  // extraction is a pure refactor (byte-identical result), not a
+  // reimplementation that could silently drift.
+  const poolResult = findEverydaySharedTiming({
+    activityId: 'meditation',
+    durationMinutes: 30,
+    dateRange: { start: '2026-08-22', end: '2026-08-22' },
+    limit: 20,
+    context: { ...baseContext, personalContext: userContext },
+    partnerContext,
+  });
+  if (poolResult.status === 'OK') {
+    const matching = poolResult.candidates.find((c) => c.start === generalCandidate.start);
+    if (matching) {
+      check('evaluateEverydaySharedCandidate matches findEverydaySharedTiming\'s own pool computation for the identical instant (pure extraction, not reimplementation)', matching.sharedScore === shared.sharedScore && matching.userScore === shared.userScore && matching.partnerScore === shared.partnerScore);
+    }
+  }
+}
+
+// Divergent owner/partner signals produce a genuinely different sharedScore
+// from either individual score, and from the unpersonalized general score --
+// the exact "SHARED CHECK must not be byte-identical to GENERAL when the
+// fixture creates different personal signals" proof the Scope-Aware
+// TIMING_CHECK brief requires.
+{
+  const meditation = FULL_ACTIVITY_CATALOG.find((a) => a.id === 'meditation')!;
+  const profile: TaskProfile = profileFromActivity(meditation);
+  const instant = new Date('2026-09-04T04:30:00.000Z');
+  const generalContext: DailyAssistantContext = { ...baseContext, now: instant, personalContext: undefined };
+  const generalResult = runTimingSearch({ mode: 'CHECK', activityId: 'meditation', durationMinutes: 30, candidateStart: instant.toISOString(), context: generalContext });
+  const generalCandidate = generalResult.requestedCandidate!;
+
+  const shared = evaluateEverydaySharedCandidate({
+    profile,
+    generalCandidate,
+    durationMinutes: 30,
+    context: { ...baseContext, now: instant, personalContext: { natalNakshatraIndex: 1 } }, // favorable Tara Bala for this date
+    partnerContext: { natalNakshatraIndex: 0 }, // unfavorable Tara Bala for this date
+  });
+
+  check('owner and partner scores genuinely differ for divergent natal signals', shared.userScore !== shared.partnerScore);
+  check('sharedScore differs from the owner-only score (a real blend, not owner-only)', shared.sharedScore !== shared.userScore);
+  check('sharedScore differs from the unpersonalized general score', shared.sharedScore !== generalCandidate.score);
+  // 70/30 weaker-floor blend (SHARED_FLOOR_WEIGHT): since partner is the
+  // weaker (unfavorable) signal here, sharedScore should sit closer to the
+  // partner-driven side than a plain 50/50 average would.
+  const userDelta = shared.userScore - generalCandidate.score;
+  const partnerDelta = shared.partnerScore - generalCandidate.score;
+  const plainAverageScore = generalCandidate.score + (userDelta + partnerDelta) / 2;
+  check('weaker-floor blend pulls sharedScore below the plain average when partner is the weaker signal', shared.sharedScore <= plainAverageScore);
 }
 
 console.log(allPassed ? '\nALL EVERYDAY TIMING FIT CHECKS PASSED' : '\nSOME EVERYDAY TIMING FIT CHECKS FAILED');

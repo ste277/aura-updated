@@ -29,7 +29,7 @@
  * candidate generation instead of Muhurtham's date-range occasion sampling.
  */
 
-import { DailyAssistantContext, PlanningHorizon, profileFromActivity } from './dailyAssistant';
+import { DailyAssistantContext, PlanningHorizon, profileFromActivity, TaskProfile } from './dailyAssistant';
 import { evaluateTimingCandidate, runTimingSearch, TimingCandidate, TimingSearchDateRange, TimingTimePreference } from './timingSearch';
 import { blendSharedDelta } from './muhurthamFinder';
 import type { PersonalMuhurtaContext } from './auraFitEngine';
@@ -96,6 +96,65 @@ export type EverydaySharedFitOutcome =
   | { status: 'UNSUPPORTED_ACTIVITY' };
 
 /**
+ * The per-candidate general+owner+partner+blend calculation -- extracted
+ * (Ask Aura Scope-Aware Everyday TIMING_CHECK V1) so a caller evaluating a
+ * SINGLE exact instant (generic SHARED TIMING_CHECK) can reuse the EXACT
+ * same methodology findEverydaySharedTiming() already applies per-candidate
+ * across its own search pool, without duplicating the general/owner/partner
+ * evaluation, delta computation, blend, or clamp/round logic.
+ *
+ * `generalCandidate` is supplied by the caller (never computed here) so
+ * this stays agnostic to HOW that baseline candidate was produced -- a FIND
+ * pool entry for findEverydaySharedTiming below, or a single CHECK-mode
+ * evaluation of one caller-specified instant for Ask Aura's SHARED CHECK.
+ * Reasons stay general/base-only (generalCandidate.reasons, untouched) --
+ * SAME existing convention this function's inline predecessor already
+ * used: personalization is reflected in sharedScore/userScore/partnerScore
+ * only, never as new owner-/partner-specific reason text (brief section 19
+ * of the Scope-Aware TIMING_CHECK brief: "preserve that convention").
+ */
+export function evaluateEverydaySharedCandidate(params: {
+  profile: TaskProfile;
+  generalCandidate: TimingCandidate;
+  durationMinutes: number;
+  /** The signed-in owner's own context (context.personalContext is the
+   * owner's natal data) -- NOT personalContext-stripped, unlike the context
+   * used to produce `generalCandidate` itself. */
+  context: DailyAssistantContext;
+  partnerContext: PersonalMuhurtaContext;
+}): EverydaySharedCandidate {
+  const { profile, generalCandidate, durationMinutes, context, partnerContext } = params;
+  const start = new Date(generalCandidate.start);
+  const userEval = evaluateTimingCandidate({
+    profile: { ...profile, personalContext: context.personalContext },
+    start,
+    durationMinutes,
+    context,
+  });
+  const partnerEval = evaluateTimingCandidate({
+    profile: { ...profile, personalContext: partnerContext },
+    start,
+    durationMinutes,
+    context,
+  });
+
+  const userDelta = userEval.score - generalCandidate.score;
+  const partnerDelta = partnerEval.score - generalCandidate.score;
+  const sharedDelta = blendSharedDelta(userDelta, partnerDelta);
+  const sharedScore = Math.max(0, Math.min(10, Math.round((generalCandidate.score + sharedDelta) * 10) / 10));
+
+  return {
+    start: generalCandidate.start,
+    end: generalCandidate.end,
+    generalCandidate,
+    sharedScore,
+    rating: rateEverydaySharedFit(sharedScore),
+    userScore: userEval.score,
+    partnerScore: partnerEval.score,
+  };
+}
+
+/**
  * SHARED-scope everyday search. Requires a resolvable catalog activity (any
  * momentEligible activity -- not gated to Muhurtham eligibility) and a
  * partner's personal context. Unlike SHARED Muhurtham, an incomplete user or
@@ -126,36 +185,15 @@ export function findEverydaySharedTiming(request: EverydaySharedFitRequest): Eve
   const profile = profileFromActivity(activity);
   const limit = Math.max(1, request.limit ?? 3);
 
-  const shared: EverydaySharedCandidate[] = pool.candidates.map((generalCandidate) => {
-    const start = new Date(generalCandidate.start);
-    const userEval = evaluateTimingCandidate({
-      profile: { ...profile, personalContext: request.context.personalContext },
-      start,
-      durationMinutes: request.durationMinutes,
-      context: request.context,
-    });
-    const partnerEval = evaluateTimingCandidate({
-      profile: { ...profile, personalContext: request.partnerContext },
-      start,
-      durationMinutes: request.durationMinutes,
-      context: request.context,
-    });
-
-    const userDelta = userEval.score - generalCandidate.score;
-    const partnerDelta = partnerEval.score - generalCandidate.score;
-    const sharedDelta = blendSharedDelta(userDelta, partnerDelta);
-    const sharedScore = Math.max(0, Math.min(10, Math.round((generalCandidate.score + sharedDelta) * 10) / 10));
-
-    return {
-      start: generalCandidate.start,
-      end: generalCandidate.end,
+  const shared: EverydaySharedCandidate[] = pool.candidates.map((generalCandidate) =>
+    evaluateEverydaySharedCandidate({
+      profile,
       generalCandidate,
-      sharedScore,
-      rating: rateEverydaySharedFit(sharedScore),
-      userScore: userEval.score,
-      partnerScore: partnerEval.score,
-    };
-  });
+      durationMinutes: request.durationMinutes,
+      context: request.context,
+      partnerContext: request.partnerContext,
+    })
+  );
 
   const ranked = shared.sort((a, b) => b.sharedScore - a.sharedScore).slice(0, limit);
   return { status: 'OK', candidates: ranked };
