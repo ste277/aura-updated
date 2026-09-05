@@ -90,6 +90,17 @@ export interface ParsedAskAuraRequest {
    * never sees or touches SavedPerson data. */
   personNameQuery?: string;
 
+  /** Ask Aura Event Location V1 -- raw "in <location>" text extracted from
+   * the prompt (e.g. "Chennai"), never resolved here (this file stays
+   * I/O-free, brief section 5) -- resolved against the existing
+   * CITY_OPTIONS list server-side in apps/web/lib/askAuraOrchestrator.ts.
+   * V1 is ceremonial-only (brief section 1/2): this field is populated for
+   * ANY "in X" phrase regardless of activity, but the orchestrator only
+   * ever applies it as an Event Location override for a Muhurtham-eligible
+   * activity -- an everyday activity's "in X" phrase reaches this same
+   * field and is simply never consulted. */
+  locationQuery?: string;
+
   panchangField?: AskPanchangField;
   /** For PANCHANG_EXPLAIN -- the raw term text (e.g. "Rohini"), looked up
    * against a small presentation-layer glossary in the orchestrator. */
@@ -492,6 +503,38 @@ function parseScope(text: string): { scope?: AskAuraScope; personNameQuery?: str
 }
 
 // ============================================================
+// Explicit Event Location (Ask Aura Event Location V1) -- text EXTRACTION
+// ONLY (brief section 5): this function never imports apps/web/lib/cities,
+// never resolves coordinates/timezone, never knows CITY_OPTIONS -- pure
+// regex over the prompt text, matching this file's own I/O-free
+// architecture rule (see the file-level doc comment). Resolution against
+// the actual supported-city list is an I/O-adjacent lookup that belongs
+// entirely in apps/web (askAuraOrchestrator.ts's resolveEventLocationQuery).
+//
+// V1 grammar is deliberately just "in <location>" (brief section 6) -- "at
+// <location>" is intentionally NOT supported, since "at" is already
+// meaningful for an exact clock time ("at 10 AM") and overloading it would
+// create a real grammar collision with EXACT_CLOCK_RE above.
+//
+// Bounded, non-greedy multi-word capture (brief section 7/8): the lazy
+// `[a-z\s'-]*?` only grows as far as the lookahead forces it to, so it
+// stops at the FIRST existing temporal/scope keyword this parser already
+// assigns meaning to (next/this/tomorrow/today/tonight/on/at/for/with/
+// and), at punctuation, or at end of input -- "in Chennai next Friday"
+// extracts "chennai", never "chennai next friday"; "in New Delhi tomorrow"
+// extracts "new delhi", preserving the multi-word city name.
+// ============================================================
+
+const LOCATION_QUERY_RE = /\bin\s+([a-z][a-z\s'-]*?)(?=\s+(?:next|this|tomorrow|today|tonight|on|at|for|with|and)\b|[.,!?;:]|$)/i;
+
+export function extractLocationQuery(rawText: string): string | undefined {
+  const match = rawText.toLowerCase().match(LOCATION_QUERY_RE);
+  if (!match) return undefined;
+  const candidate = match[1].trim();
+  return candidate || undefined;
+}
+
+// ============================================================
 // Panchang term glossary keys (brief section 12) -- just enough to detect
 // "what is <term>" as an EXPLAIN intent vs a QUERY; the actual explanation
 // text lives in the orchestrator's small presentation-layer knowledge map.
@@ -631,6 +674,7 @@ export function parseAskAuraRequest(rawText: string, context: AskAuraParseContex
   const durationMinutes = parseDurationMinutes(text);
   const { scope, personNameQuery } = parseScope(text);
   const clockResult = parseExactClockTime(text);
+  const locationQuery = extractLocationQuery(text);
 
   // Ask Aura Richer SHARED Grammar V1 fail-closed follow-up: the CORE
   // invariant is `scope === 'SHARED' && !personNameQuery` for an
@@ -697,6 +741,7 @@ export function parseAskAuraRequest(rawText: string, context: AskAuraParseContex
       activityId: resolved.activityId,
       scope: scope ?? 'GENERAL',
       personNameQuery,
+      locationQuery,
       durationMinutes,
       horizonPhrase: horizonPhrase ?? 'NEXT_MONTH',
       customDate,
@@ -759,6 +804,7 @@ export function parseAskAuraRequest(rawText: string, context: AskAuraParseContex
       timePreference,
       scope: scope ?? 'GENERAL',
       personNameQuery,
+      locationQuery,
     };
   }
 
@@ -811,6 +857,7 @@ export function parseAskAuraRequest(rawText: string, context: AskAuraParseContex
           timePreference,
           scope: scope ?? 'GENERAL',
           personNameQuery,
+          locationQuery,
         };
       }
     } else if (clockResult.status === 'INVALID') {
@@ -844,6 +891,7 @@ export function parseAskAuraRequest(rawText: string, context: AskAuraParseContex
       timePreference,
       scope: scope ?? 'GENERAL',
       personNameQuery,
+      locationQuery,
     };
   }
 
@@ -890,6 +938,7 @@ export function parseAskAuraRequest(rawText: string, context: AskAuraParseContex
         timePreference,
         scope: scope ?? 'GENERAL',
         personNameQuery,
+        locationQuery,
       };
     }
     return {
@@ -902,6 +951,7 @@ export function parseAskAuraRequest(rawText: string, context: AskAuraParseContex
       timePreference,
       scope: scope ?? 'GENERAL',
       personNameQuery,
+      locationQuery,
     };
   }
 
@@ -922,6 +972,7 @@ export function parseAskAuraRequest(rawText: string, context: AskAuraParseContex
       timePreference,
       scope: scope ?? 'GENERAL',
       personNameQuery,
+      locationQuery,
     };
   }
 

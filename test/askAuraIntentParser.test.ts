@@ -1,5 +1,7 @@
-import { parseAskAuraRequest, parseFollowUpChange, ParsedAskAuraRequest } from '../packages/recommendation/src/askAuraIntent';
+import { extractLocationQuery, parseAskAuraRequest, parseFollowUpChange, ParsedAskAuraRequest } from '../packages/recommendation/src/askAuraIntent';
 import { isSupportedMuhurthamActivity } from '../packages/recommendation/src/muhurthamFinder';
+import { findActivityIntent } from '../packages/recommendation/src/personalizedTasks';
+import { resolveEventLocationQuery } from '../apps/web/lib/askAuraOrchestrator';
 
 let allPassed = true;
 function check(label: string, condition: boolean) {
@@ -1048,6 +1050,225 @@ check('"What\'s Rahu Kalam tomorrow?" stays PANCHANG_QUERY, unaffected', parseTz
 for (const t of ['Find a good time tomorrow for meditation.', 'When should I meditate tomorrow?', 'Best time tomorrow for meditation.']) {
   const r = parseTz(t, FRIDAY_NOW);
   check(`"${t}" (explicit FIND, unaffected) -> TIMING_FIND`, r.intent === 'TIMING_FIND');
+}
+
+// ============================================================
+// Ask Aura Event Location V1: extractLocationQuery() -- pure text
+// extraction, no resolution. This file never imports apps/web/lib/cities;
+// case-insensitivity and CITY_OPTIONS lookup are proven separately in
+// askAuraOrchestrator.test.ts against the actual resolver.
+// ============================================================
+
+// --- Basic single- and multi-word extraction (brief section 39). ---
+for (const [t, expected] of [
+  ['in Chennai', 'chennai'],
+  ['IN CHENNAI', 'chennai'],
+  ['in chennai', 'chennai'],
+  ['in New Delhi', 'new delhi'],
+  ['in New York', 'new york'],
+  ['in San Francisco', 'san francisco'],
+] as const) {
+  check(`extractLocationQuery("${t}") === "${expected}"`, extractLocationQuery(t) === expected);
+}
+
+// --- Boundaries (brief section 8): must stop before existing temporal/
+// scope grammar, punctuation, or end of input -- never swallow it. ---
+for (const [t, expected] of [
+  ['in Chennai next Friday', 'chennai'],
+  ['in New Delhi tomorrow', 'new delhi'],
+  ['in Chennai at 10 AM', 'chennai'],
+  ['in Chennai for me', 'chennai'],
+  ['in Chennai with Priya', 'chennai'],
+  ['in Chennai.', 'chennai'],
+  ['in Chennai?', 'chennai'],
+  ['in Chennai, next week', 'chennai'],
+] as const) {
+  check(`extractLocationQuery("${t}") stops correctly -> "${expected}"`, extractLocationQuery(t) === expected);
+}
+
+// --- No "in X" phrase -> undefined. "within" must not false-positive --
+// \bin\b requires a real word boundary, "within"'s "in" is not preceded by
+// one. ---
+check('extractLocationQuery("Should I get married next Friday?") === undefined (no location phrase)', extractLocationQuery('Should I get married next Friday?') === undefined);
+check('extractLocationQuery("within Chennai") === undefined (word-boundary check, not a false "in" match)', extractLocationQuery('within Chennai') === undefined);
+
+// --- End-to-end parser matrix (brief section 9/40/42/43): locationQuery
+// threaded through the same intents PR #66/#67/#70 already established,
+// reusing the FRIDAY_NOW/TZ fixtures above. ---
+{
+  const r = parseTz('Should I get married in Chennai next Friday?', FRIDAY_NOW);
+  check('"Should I get married in Chennai next Friday?" -> TIMING_FIND, marriage, locationQuery=chennai, date-only (never CHECK)', r.intent === 'TIMING_FIND' && r.activityId === 'marriage' && r.locationQuery === 'chennai' && r.horizonPhrase === 'CUSTOM_DATE');
+}
+{
+  const r = parseTz('Is 10 AM next Friday good for marriage in Chennai?', FRIDAY_NOW);
+  check('"Is 10 AM next Friday good for marriage in Chennai?" -> TIMING_CHECK, exactTime=10:00, locationQuery=chennai', r.intent === 'TIMING_CHECK' && r.activityId === 'marriage' && r.exactTime === '10:00' && r.locationQuery === 'chennai');
+}
+{
+  const r = parseTz('Find a marriage Muhurtham in Chennai next Friday.', FRIDAY_NOW);
+  check('"Find a marriage Muhurtham in Chennai next Friday." -> MUHURTHAM_SEARCH, locationQuery=chennai', r.intent === 'MUHURTHAM_SEARCH' && r.activityId === 'marriage' && r.locationQuery === 'chennai');
+}
+{
+  const r = parseTz('Can Priya and I get married in Chennai next Friday?', FRIDAY_NOW);
+  check('"Can Priya and I get married in Chennai next Friday?" -> TIMING_FIND, SHARED, priya, locationQuery=chennai', r.intent === 'TIMING_FIND' && r.scope === 'SHARED' && r.personNameQuery === 'priya' && r.locationQuery === 'chennai');
+}
+{
+  const r = parseTz('Can Priya and I get married at 10 AM next Friday in Chennai?', FRIDAY_NOW);
+  check('"...at 10 AM next Friday in Chennai?" -> TIMING_CHECK, SHARED, priya, exactTime=10:00, locationQuery=chennai', r.intent === 'TIMING_CHECK' && r.scope === 'SHARED' && r.personNameQuery === 'priya' && r.exactTime === '10:00' && r.locationQuery === 'chennai');
+}
+
+// --- Unknown location text is still EXTRACTED at the parser level -- this
+// file stays I/O-free and never resolves it; fail-closed clarification is
+// an orchestrator-level concern (see askAuraOrchestrator.test.ts). ---
+{
+  const r = parseTz('Should I get married in Atlantis next Friday?', FRIDAY_NOW);
+  check('"...in Atlantis..." -> locationQuery="atlantis" extracted regardless of resolvability', r.intent === 'TIMING_FIND' && r.locationQuery === 'atlantis');
+}
+
+// --- Everyday non-goal (brief section 47): the parser extracts
+// locationQuery for ANY activity -- it is the ORCHESTRATOR's job (never
+// the parser's) to ignore it for a non-Muhurtham-eligible activity. ---
+{
+  const r = parseTz('Should I meditate in Chennai tomorrow?', FRIDAY_NOW);
+  check('"Should I meditate in Chennai tomorrow?" -> TIMING_FIND, meditation, locationQuery still extracted here (orchestrator ignores it for non-ceremonial activities)', r.intent === 'TIMING_FIND' && r.activityId === 'meditation' && r.locationQuery === 'chennai');
+}
+
+// --- Omitted-location control (brief section 25/46): completely
+// unaffected by this PR. ---
+{
+  const r = parseTz('Should I get married next Friday?', FRIDAY_NOW);
+  check('"Should I get married next Friday?" (no location phrase) -> locationQuery undefined, unaffected', r.intent === 'TIMING_FIND' && r.locationQuery === undefined);
+}
+
+// --- Timezone-boundary proof (brief section 40): once an Event Location's
+// timezone is threaded into AskAuraParseContext.timezone -- exactly as
+// route.ts does pre-parse (brief section 10/17) -- it changes which
+// calendar date is resolved, independent of the caller's own Timing
+// Location timezone. NOW is chosen so Asia/Kolkata's local date is already
+// September 5 while America/New_York's is still September 4; "September 4"
+// (no year) then resolves against EACH timezone's own local "today" via
+// resolveImplicitYear's same-day-vs-already-passed policy. ---
+{
+  const BOUNDARY_NOW = new Date('2026-09-04T20:00:00.000Z');
+  const kolkata = parseAskAuraRequest('Is September 4 good for marriage?', { now: BOUNDARY_NOW, timezone: 'Asia/Kolkata' });
+  const newYork = parseAskAuraRequest('Is September 4 good for marriage?', { now: BOUNDARY_NOW, timezone: 'America/New_York' });
+  check('Asia/Kolkata local "today" is already Sept 5 -> "September 4" (already passed) rolls forward to next year', kolkata.customDate === '2027-09-04');
+  check('America/New_York local "today" is still Sept 4 -> "September 4" resolves to THIS year (same-day policy)', newYork.customDate === '2026-09-04');
+  check('Same real-world instant, different Event Location timezone -> genuinely different resolved date', kolkata.customDate !== newYork.customDate);
+}
+
+// ============================================================
+// FIX: Ceremonial-Only Pre-Parse Timezone Gate. The Event Location's
+// timezone must feed AskAuraParseContext.timezone ONLY when the raw
+// prompt targets a Muhurtham-eligible (ceremonial) activity -- an
+// everyday activity's temporal grammar ("tomorrow"/"next Friday") must
+// ALWAYS resolve against the caller's own Timing Location timezone,
+// regardless of whether an "in X" phrase is present and regardless of
+// whether it resolves, since the everyday engines always execute against
+// the caller's own Timing Location. Before this fix, route.ts chose
+// `resolvedEventLocation?.timezone ?? user.timezone` UNCONDITIONALLY --
+// producing an invalid mixed state (date interpreted in Chennai, but
+// executed against the user's own Timing Location coordinates).
+//
+// route.ts is a Next.js API route handler (NextRequest/session/DB) and
+// isn't independently importable in this DB-free harness, so this mirrors
+// its exact decision function using the SAME exported, pure, timezone-
+// independent primitives route.ts itself composes: extractLocationQuery
+// (this file), resolveEventLocationQuery (askAuraOrchestrator.ts),
+// findActivityIntent (personalizedTasks.ts), isSupportedMuhurthamActivity
+// (muhurthamFinder.ts) -- the exact same pair buildMuhurthamSearchIfEligible
+// already composes internally via resolveActivity(), reused here verbatim
+// rather than a new/duplicated capability list. Keep this mirror in sync
+// with route.ts's own gate if that logic ever changes.
+// ============================================================
+
+function resolveParseTimezoneForTest(prompt: string, userTimezone: string): string {
+  const locationQuery = extractLocationQuery(prompt);
+  const eventLocation = locationQuery ? resolveEventLocationQuery(locationQuery) : undefined;
+  const promptActivity = findActivityIntent(prompt);
+  const isCeremonial = Boolean(promptActivity && isSupportedMuhurthamActivity(promptActivity.id));
+  const useEventTimezone = Boolean(eventLocation) && isCeremonial;
+  return useEventTimezone ? eventLocation!.timezone : userTimezone;
+}
+
+const GATE_USER_TZ = 'America/New_York';
+
+// --- The gate itself (brief section 2/9/10/17): ceremonial prompts select
+// the Event Location's timezone; everyday prompts NEVER do, regardless of
+// whether the location resolves. ---
+check('Ceremonial (marriage) + resolvable Chennai -> gate selects Chennai\'s timezone', resolveParseTimezoneForTest('Should I get married in Chennai next Friday?', GATE_USER_TZ) === 'Asia/Kolkata');
+check('Everyday (meditation) + resolvable Chennai + "tomorrow" -> gate selects the USER\'s own timezone, never Chennai', resolveParseTimezoneForTest('Should I meditate in Chennai tomorrow?', GATE_USER_TZ) === GATE_USER_TZ);
+check('Everyday (meditation) + resolvable Chennai + weekday phrasing -> still the USER\'s own timezone', resolveParseTimezoneForTest('Should I meditate in Chennai next Friday?', GATE_USER_TZ) === GATE_USER_TZ);
+check('Everyday (meditation) + resolvable Chennai + exact clock -> still the USER\'s own timezone', resolveParseTimezoneForTest('Is 10 AM next Friday good for meditation in Chennai?', GATE_USER_TZ) === GATE_USER_TZ);
+check('Ceremonial (marriage) + UNRESOLVED city -> falls back to the USER\'s own timezone (no mixed state; the fail-closed clarification is a separate, orchestrator-level concern)', resolveParseTimezoneForTest('Should I get married in Atlantis next Friday?', GATE_USER_TZ) === GATE_USER_TZ);
+check('Everyday (meditation) + UNRESOLVED city ("Atlantis") -> USER\'s own timezone, zero effect either way (brief section 10)', resolveParseTimezoneForTest('Should I meditate in Atlantis tomorrow?', GATE_USER_TZ) === GATE_USER_TZ);
+check('Ceremonial, no location phrase at all -> USER\'s own timezone, unaffected (brief section 3/D)', resolveParseTimezoneForTest('Should I get married next Friday?', GATE_USER_TZ) === GATE_USER_TZ);
+
+// --- "Tomorrow" itself carries no parser-level customDate (parseHorizonPhrase
+// is pure regex, never consults timezone) -- so the gate's choice has NO
+// observable effect on a bare TOMORROW/TODAY/weekend/month phrase either
+// way; the actual date range for those is computed downstream in the
+// orchestrator via resolveHorizonToDateRange(..., deps.context), and
+// deps.context is ALWAYS built from the user's own Timing Location in
+// route.ts, never overridden for an everyday activity. The gate's fix is
+// only numerically OBSERVABLE for weekday/absolute-date forms ("next
+// Friday", "September 4"), proven below. ---
+check('"tomorrow" parses identically regardless of which timezone the gate chose (no customDate to diverge)', parseAskAuraRequest('Should I meditate in Chennai tomorrow?', { now: NOW, timezone: 'Asia/Kolkata' }).horizonPhrase === parseAskAuraRequest('Should I meditate in Chennai tomorrow?', { now: NOW, timezone: GATE_USER_TZ }).horizonPhrase);
+
+// --- Weekday-boundary proof (brief section 11/12): a genuine customDate
+// divergence. NOW is chosen so America/New_York's local date is Saturday
+// Sept 5 while Asia/Kolkata's is already Sunday Sept 6 -- crossing a
+// SATURDAY->SUNDAY boundary specifically (not just any day boundary)
+// because "next Friday"'s own (7 - localWeekday) + 5 offset formula
+// otherwise cancels out a plain one-day date/weekday shift (advancing the
+// local date by 1 also advances the local weekday by 1, leaving the
+// computed offset, and therefore the final date, unchanged) -- confirmed
+// empirically before writing this fixture. Crossing INTO Sunday (weekday
+// wraps 6->0) breaks that cancellation, landing the two timezones on
+// Fridays a full week apart. This test would have FAILED before this fix,
+// since the old code used Chennai's timezone unconditionally whenever "in
+// Chennai" resolved, regardless of activity. ---
+{
+  const BOUNDARY_NOW = new Date('2026-09-06T03:00:00.000Z');
+  const ceremonialText = 'Should I get married in Chennai next Friday?';
+  const everydayText = 'Should I meditate in Chennai next Friday?';
+  const ceremonialTz = resolveParseTimezoneForTest(ceremonialText, GATE_USER_TZ);
+  const everydayTz = resolveParseTimezoneForTest(everydayText, GATE_USER_TZ);
+  check('Ceremonial "next Friday" gate resolves to Chennai (Asia/Kolkata)', ceremonialTz === 'Asia/Kolkata');
+  check('Everyday "next Friday" gate resolves to the user\'s own America/New_York, never Chennai', everydayTz === GATE_USER_TZ);
+  const ceremonialParsed = parseAskAuraRequest(ceremonialText, { now: BOUNDARY_NOW, timezone: ceremonialTz });
+  const everydayParsed = parseAskAuraRequest(everydayText, { now: BOUNDARY_NOW, timezone: everydayTz });
+  check('The two resolved customDates genuinely differ for the identical real-world instant and identical "next Friday" phrase', ceremonialParsed.customDate !== everydayParsed.customDate);
+}
+
+// --- Exact-clock boundary proof (brief section 14): same mechanism, an
+// exact-clock CHECK-shaped phrase, reusing the same Saturday->Sunday
+// boundary instant established above (a plain one-day shift would
+// coincidentally cancel out in "next Friday"'s own offset formula). ---
+{
+  const BOUNDARY_NOW = new Date('2026-09-06T03:00:00.000Z');
+  const ceremonialText = 'Is 10 AM next Friday good for marriage in Chennai?';
+  const everydayText = 'Is 10 AM next Friday good for meditation in Chennai?';
+  const ceremonialTz = resolveParseTimezoneForTest(ceremonialText, GATE_USER_TZ);
+  const everydayTz = resolveParseTimezoneForTest(everydayText, GATE_USER_TZ);
+  const ceremonialParsed = parseAskAuraRequest(ceremonialText, { now: BOUNDARY_NOW, timezone: ceremonialTz });
+  const everydayParsed = parseAskAuraRequest(everydayText, { now: BOUNDARY_NOW, timezone: everydayTz });
+  check('Ceremonial exact-clock "next Friday in Chennai" -> gate=Asia/Kolkata, exactTime=10:00', ceremonialTz === 'Asia/Kolkata' && ceremonialParsed.exactTime === '10:00');
+  check('Everyday exact-clock "next Friday in Chennai" -> gate=America/New_York, exactTime=10:00 (no mixed semantics)', everydayTz === GATE_USER_TZ && everydayParsed.exactTime === '10:00');
+  check('The resolved customDates genuinely differ for the identical exact-clock phrasing', ceremonialParsed.customDate !== everydayParsed.customDate);
+}
+
+// --- Implicit-year absolute-date proof (brief section 13), reusing the
+// SAME boundary fixture already established above. ---
+{
+  const BOUNDARY_NOW = new Date('2026-09-04T20:00:00.000Z');
+  const ceremonialText = 'Is September 4 good for marriage in Chennai?';
+  const everydayText = 'Is September 4 good for meditation in Chennai?';
+  const ceremonialTz = resolveParseTimezoneForTest(ceremonialText, GATE_USER_TZ);
+  const everydayTz = resolveParseTimezoneForTest(everydayText, GATE_USER_TZ);
+  const ceremonialParsed = parseAskAuraRequest(ceremonialText, { now: BOUNDARY_NOW, timezone: ceremonialTz });
+  const everydayParsed = parseAskAuraRequest(everydayText, { now: BOUNDARY_NOW, timezone: everydayTz });
+  check('Ceremonial: Chennai\'s local "today" is already Sept 5 -> "September 4" (already passed) rolls forward to next year', ceremonialParsed.customDate === '2027-09-04');
+  check('Everyday: the user\'s own (New York) local "today" is still Sept 4 -> "September 4" resolves to THIS year (same-day policy), never Chennai\'s rolled-forward date', everydayParsed.customDate === '2026-09-04');
 }
 
 if (!allPassed) {

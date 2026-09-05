@@ -8,7 +8,7 @@
  * test/askAuraOrchestratorDb.test.ts.
  */
 import { parseAskAuraRequest } from '../packages/recommendation/src/askAuraIntent';
-import { orchestrateAskAura, resolveHorizonToDateRange, AskAuraOrchestratorDeps } from '../apps/web/lib/askAuraOrchestrator';
+import { orchestrateAskAura, resolveHorizonToDateRange, resolveEventLocationQuery, AskAuraOrchestratorDeps } from '../apps/web/lib/askAuraOrchestrator';
 import { runTimingSearch } from '../packages/recommendation/src/timingSearch';
 import { getActionCards } from '../packages/recommendation/src/actionCards';
 import { DailyAssistantContext } from '../packages/recommendation/src/dailyAssistant';
@@ -389,6 +389,138 @@ async function main() {
     check('"Should I meditate this weekend?" parses TIMING_FIND, THIS_WEEKEND (full range preserved)', parsed.intent === 'TIMING_FIND' && parsed.horizonPhrase === 'THIS_WEEKEND');
     const response = await orchestrateAskAura(parsed, deps);
     check('Executes as a genuine FIND across the full weekend range', response.intent === 'TIMING_FIND');
+  }
+
+  // ============================================================
+  // Ask Aura Event Location V1: ceremonial-only Event Location routing.
+  // deps/context above are Chennai's own coordinates, so a New York-based
+  // caller context is used below wherever the test needs to PROVE the
+  // Event Location actually overrode the search context, rather than
+  // coincidentally matching it.
+  // ============================================================
+  const nyContext: DailyAssistantContext = { now: NOW, latitude: 40.7128, longitude: -74.006, timezone: 'America/New_York', tzOffsetMinutes: -300 };
+  const nyDeps: AskAuraOrchestratorDeps = { userId: 'test-user-not-a-real-db-row', context: nyContext, activeWindow: 'NEUTRAL' };
+
+  // --- Case-insensitive, comma-suffix-stripped resolution (brief section
+  // 11): "chennai" and "san francisco" both resolve against CITY_OPTIONS. ---
+  const chennai = resolveEventLocationQuery('chennai');
+  check('resolveEventLocationQuery("chennai") resolves case-insensitively', chennai?.cityName === 'Chennai' && chennai?.timezone === 'Asia/Kolkata');
+  check('resolveEventLocationQuery("Chennai") resolves identically regardless of case', resolveEventLocationQuery('Chennai')?.cityName === 'Chennai');
+  const sanFrancisco = resolveEventLocationQuery('san francisco');
+  check('resolveEventLocationQuery("san francisco") resolves the international CITY_OPTIONS entry with its ", USA" suffix stripped for matching', sanFrancisco?.cityName === 'San Francisco, USA' && sanFrancisco?.timezone === 'America/Los_Angeles');
+  check('resolveEventLocationQuery("Atlantis") does not resolve (not in CITY_OPTIONS)', resolveEventLocationQuery('atlantis') === undefined);
+
+  // --- GENERAL Muhurtham search with Event Location (brief section 16/21/
+  // 26/27/28/33/36): fresh context built from the Event Location, owner
+  // personalContext untouched (there is none for GENERAL), response echoes
+  // {cityName, timezone} with no coordinates, wording names the location. ---
+  {
+    // Griha Pravesh (not marriage) over NEXT_MONTH deterministically returns
+    // real candidate dates for this fixture's coordinates/date -- needed to
+    // exercise the non-empty MUHURTHAM_RESULTS card (marriage next Friday/
+    // next month both return zero real matches for this fixture, which
+    // would only prove the OTHER, message-only branch below).
+    const parsed = parseAskAuraRequest('Good dates for Griha Pravesh in Chennai next month', { now: NOW, timezone: chennai!.timezone });
+    check('Parses MUHURTHAM_SEARCH, griha-pravesh, locationQuery=chennai', parsed.intent === 'MUHURTHAM_SEARCH' && parsed.activityId === 'griha-pravesh' && parsed.locationQuery === 'chennai');
+
+    const response = await orchestrateAskAura(parsed, { ...nyDeps, eventLocation: chennai });
+    check('GENERAL Muhurtham search with Event Location still executes MUHURTHAM_SEARCH -- no engine change', response.intent === 'MUHURTHAM_SEARCH');
+    const card = response.cards?.[0] as { dates?: unknown[]; eventLocation?: { cityName?: string; timezone?: string } } | undefined;
+    check('Real candidate dates were found (a non-empty result, exercising the card that carries the echo)', Boolean(card?.dates?.length));
+    check('Response echoes the resolved Event Location (cityName + timezone)', card?.eventLocation?.cityName === 'Chennai' && card?.eventLocation?.timezone === 'Asia/Kolkata');
+    check('Message names the Event Location explicitly', response.message.includes('Chennai'));
+    check('No coordinates leaked into the response (brief section 26: cityName/timezone only)', !JSON.stringify(response).includes('13.0827') && !JSON.stringify(response).includes('80.2707'));
+  }
+  {
+    // The empty-result branch (brief section 27: wording clarity) is a
+    // real, deterministic outcome for THIS fixture -- confirmed directly --
+    // and must still name the Event Location even with no card at all.
+    const parsed = parseAskAuraRequest('Find a marriage Muhurtham in Chennai next Friday.', { now: NOW, timezone: chennai!.timezone });
+    const response = await orchestrateAskAura(parsed, { ...nyDeps, eventLocation: chennai });
+    check('Zero-result Muhurtham search still names the Event Location in its message', response.intent === 'MUHURTHAM_SEARCH' && response.message.includes('Chennai') && !response.cards);
+  }
+
+  // --- Ceremonial exact-clock TIMING_CHECK with Event Location (brief
+  // section 19/24/26/27/28/31/42): the candidate instant is evaluated in
+  // the EVENT LOCATION's timezone, never the caller's own Timing Location
+  // (New York) -- proven by the formatted display time, which would show a
+  // different clock reading entirely if the instant had been computed
+  // against New York instead. PLAN_THIS is suppressed (action safety). ---
+  {
+    const parsed = parseAskAuraRequest('Is 10 AM next Friday good for marriage in Chennai?', { now: NOW, timezone: chennai!.timezone });
+    check('Parses TIMING_CHECK, marriage, exactTime=10:00, locationQuery=chennai', parsed.intent === 'TIMING_CHECK' && parsed.activityId === 'marriage' && parsed.exactTime === '10:00' && parsed.locationQuery === 'chennai');
+
+    const response = await orchestrateAskAura(parsed, { ...nyDeps, eventLocation: chennai });
+    check('Ceremonial exact-clock CHECK with Event Location executes (never a clarification)', response.intent === 'TIMING_CHECK');
+    const card = response.cards?.[0] as { requested?: { startLabel?: string }; eventLocation?: { cityName?: string; timezone?: string } } | undefined;
+    check('Requested instant displays as 10:00 AM Chennai-local -- proves the candidate was computed in Chennai\'s timezone, not the caller\'s own New York Timing Location', card?.requested?.startLabel === '10:00 AM');
+    check('Response echoes the resolved Event Location', card?.eventLocation?.cityName === 'Chennai' && card?.eventLocation?.timezone === 'Asia/Kolkata');
+    check('Action safety (brief section 31): no "Plan this" action for an Event Location result -- planPayload does not yet carry location (PR B), so saving it would silently drop it', !response.actions?.some((a) => a.type === 'PLAN_THIS'));
+    check('"Open Muhurtham Finder" remains available (it already supports Event Location natively)', Boolean(response.actions?.some((a) => a.type === 'OPEN_MUHURTHAM')));
+  }
+
+  // --- Unknown Event Location fails closed (brief section 13/14/32/45):
+  // never executes using the caller's own Timing Location as though the
+  // stated location had succeeded. Proven via BOTH ceremonial dispatch
+  // paths -- the TIMING_FIND->Muhurtham redirect, and the direct
+  // MUHURTHAM_SEARCH intent. ---
+  {
+    const parsed = parseAskAuraRequest('Should I get married in Atlantis next Friday?', { now: NOW, timezone: 'Asia/Kolkata' });
+    check('Parses TIMING_FIND with an unresolved locationQuery=atlantis', parsed.intent === 'TIMING_FIND' && parsed.locationQuery === 'atlantis');
+    const response = await orchestrateAskAura(parsed, deps); // deps.eventLocation intentionally undefined, matching resolveEventLocationQuery('atlantis') === undefined
+    check('Unresolved Event Location fails closed to a CLARIFICATION, never a Muhurtham result', response.cards?.[0]?.type === 'CLARIFICATION');
+    check('No actions offered, as though nothing executed', !response.actions || response.actions.length === 0);
+    check('Clarification message names the unmatched location text', response.message.toLowerCase().includes('atlantis'));
+    check('No timing-result fields leaked from a partial execution (no "dates"/"requested" anywhere in the cards)', !JSON.stringify(response.cards ?? []).includes('"dates"') && !JSON.stringify(response.cards ?? []).includes('"requested"'));
+  }
+  {
+    const parsed = parseAskAuraRequest('Find a marriage Muhurtham in Atlantis next Friday.', { now: NOW, timezone: 'Asia/Kolkata' });
+    check('Parses MUHURTHAM_SEARCH directly with an unresolved locationQuery=atlantis', parsed.intent === 'MUHURTHAM_SEARCH' && parsed.locationQuery === 'atlantis');
+    const response = await orchestrateAskAura(parsed, deps);
+    check('Direct MUHURTHAM_SEARCH intent also fails closed on an unresolved Event Location', response.cards?.[0]?.type === 'CLARIFICATION');
+  }
+
+  // --- Everyday non-goal (brief section 2/47): even when Event Location
+  // resolves successfully AND is explicitly present on deps, a
+  // non-Muhurtham-eligible activity's request must NEVER apply it -- the
+  // response is proven identical in shape to an ordinary Timing Search
+  // FIND, with no trace of the Event Location anywhere. ---
+  {
+    const parsed = parseAskAuraRequest('Should I meditate in Chennai tomorrow?', { now: NOW, timezone: chennai!.timezone });
+    check('Parses TIMING_FIND, meditation, locationQuery=chennai (extracted regardless of activity)', parsed.intent === 'TIMING_FIND' && parsed.activityId === 'meditation' && parsed.locationQuery === 'chennai');
+
+    const response = await orchestrateAskAura(parsed, { ...nyDeps, eventLocation: chennai });
+    check('Everyday (non-ceremonial) activity: still an ordinary TIMING_FIND, unaffected by the resolved Event Location', response.intent === 'TIMING_FIND');
+    check('No eventLocation field anywhere on the response (everyday results never echo one)', !JSON.stringify(response).includes('eventLocation'));
+    // parsed.locationQuery ('chennai') is legitimately carried forward on
+    // response.context (brief section 29: forward-compatible echo, same as
+    // scope/personNameQuery always are, regardless of whether THIS turn's
+    // handler consumed it) -- the actual invariant under test is that
+    // Chennai was never APPLIED: it must not appear in the executed
+    // result's own cards or message.
+    check('Chennai never appears in the executed result itself (cards/message) -- only in the carried-forward parsed context, never applied', !JSON.stringify(response.cards ?? []).toLowerCase().includes('chennai') && !response.message.toLowerCase().includes('chennai'));
+  }
+
+  // --- Omitted-location control (brief section 25/46): completely
+  // byte-identical to pre-PR-A ceremonial behavior. ---
+  {
+    const parsed = parseAskAuraRequest('Should I get married next Friday?', { now: NOW, timezone: 'Asia/Kolkata' });
+    check('No location phrase -> locationQuery undefined', parsed.locationQuery === undefined);
+    const response = await orchestrateAskAura(parsed, deps); // deps.eventLocation is undefined
+    check('Executes MUHURTHAM_SEARCH exactly as before this PR, no eventLocation field anywhere', response.intent === 'MUHURTHAM_SEARCH' && !JSON.stringify(response).includes('eventLocation'));
+  }
+
+  // --- FIX regression matrix item H (unknown EVERYDAY location, brief
+  // section 10): an unresolvable "in X" on a non-ceremonial activity must
+  // NEVER trigger the ceremonial fail-closed CLARIFICATION gate --
+  // eventLocationGate() is only ever consulted from the three ceremonial
+  // dispatch points, so a plain everyday TIMING_FIND must execute
+  // normally here, exactly as if "in Atlantis" had never been said. ---
+  {
+    const parsed = parseAskAuraRequest('Should I meditate in Atlantis tomorrow?', { now: NOW, timezone: 'America/New_York' });
+    check('Everyday activity + unresolvable location parses TIMING_FIND, meditation, locationQuery=atlantis (extracted but inert)', parsed.intent === 'TIMING_FIND' && parsed.activityId === 'meditation' && parsed.locationQuery === 'atlantis');
+    const response = await orchestrateAskAura(parsed, deps); // deps.eventLocation undefined -- Atlantis was never resolvable anyway
+    check('No ceremonial unknown-location CLARIFICATION for an everyday activity -- executes as an ordinary TIMING_FIND', response.intent === 'TIMING_FIND' && response.cards?.[0]?.type !== 'CLARIFICATION');
   }
 
   console.log(allPassed ? '\nALL ASK AURA ORCHESTRATOR CHECKS PASSED' : '\nSOME ASK AURA ORCHESTRATOR CHECKS FAILED');

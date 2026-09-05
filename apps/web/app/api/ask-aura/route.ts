@@ -5,8 +5,10 @@ import { parseJsonObject } from '../../../lib/request';
 import { resolveTzOffsetMinutes } from '../../../lib/timezone';
 import { buildPersonalMuhurtaContextForUser } from '../../../lib/natalContext';
 import { DailyAssistantContext } from '../../../../../packages/recommendation/src/dailyAssistant';
-import { parseAskAuraRequest, parseFollowUpChange, ParsedAskAuraRequest } from '../../../../../packages/recommendation/src/askAuraIntent';
-import { orchestrateAskAura } from '../../../lib/askAuraOrchestrator';
+import { extractLocationQuery, parseAskAuraRequest, parseFollowUpChange, ParsedAskAuraRequest } from '../../../../../packages/recommendation/src/askAuraIntent';
+import { findActivityIntent } from '../../../../../packages/recommendation/src/personalizedTasks';
+import { isSupportedMuhurthamActivity } from '../../../../../packages/recommendation/src/muhurthamFinder';
+import { orchestrateAskAura, resolveEventLocationQuery } from '../../../lib/askAuraOrchestrator';
 import { recordProductEvent } from '../../../lib/productEvents';
 
 export const runtime = 'nodejs';
@@ -48,6 +50,49 @@ export async function POST(req: NextRequest) {
   void recordProductEvent({ eventName: 'ASK_AURA_SUBMITTED', userId: session.userId });
 
   const now = new Date();
+
+  // Ask Aura Event Location V1 -- resolved BEFORE the main parse (brief
+  // section 10) so weekday/absolute-date text ("next Friday") is
+  // interpreted in the STATED location's own local calendar, not always
+  // the caller's Timing Location -- the same requirement PR #67's early-
+  // bound weekday/implicit-year date handling already established for
+  // Timing Location. Pre-parse resolution is possible with a single parse
+  // call (no async two-pass re-parsing) precisely because this lookup is a
+  // synchronous, in-memory CITY_OPTIONS scan, never a remote geocoding
+  // round-trip.
+  const preParseLocationQuery = extractLocationQuery(prompt);
+  const preParseEventLocation = preParseLocationQuery ? resolveEventLocationQuery(preParseLocationQuery) : undefined;
+
+  // Ceremonial-only ceiling on the timezone gate itself (fix for the
+  // "mixed context" bug: an everyday activity's temporal grammar must
+  // NEVER be interpreted in the stated location's timezone, since the
+  // everyday engines always execute against the caller's own Timing
+  // Location -- resolving "tomorrow"/"next Friday" against a different
+  // timezone than the one that will actually be searched is an invalid
+  // mixed state, even though the final coordinates were always correct).
+  // findActivityIntent() (personalizedTasks.ts) + isSupportedMuhurthamActivity()
+  // (muhurthamFinder.ts) are the SAME two existing, exported, pure,
+  // timezone-independent functions parseAskAuraRequest's own
+  // buildMuhurthamSearchIfEligible() composes internally (resolveActivity()
+  // there is just this same findActivityIntent() call plus a taskTitle
+  // fallback that can never be Muhurtham-eligible anyway, since
+  // isSupportedMuhurthamActivity() only ever recognizes a real catalog
+  // activityId) -- reused here verbatim, pre-parse, rather than adding a
+  // second capability list or duplicating any activity-resolution logic.
+  const promptActivity = findActivityIntent(prompt);
+  const promptTargetsCeremonialActivity = Boolean(promptActivity && isSupportedMuhurthamActivity(promptActivity.id));
+  const useEventTimezoneForParse = Boolean(preParseEventLocation) && promptTargetsCeremonialActivity;
+  // An unresolved "in X" on a ceremonial prompt still parses fine here --
+  // it just means the following parseAskAuraRequest() call falls back to
+  // the user's own timezone for date math, same as always; the fail-closed
+  // "couldn't match that location" clarification only fires once
+  // orchestrateAskAura() confirms the resolved activity is actually
+  // Muhurtham-eligible (V1 is ceremonial-only -- brief section 1/2/13). An
+  // "in X" on a non-ceremonial prompt has ZERO effect on parse timezone,
+  // regardless of whether it resolves -- the location is never even looked
+  // at for an everyday request.
+  const parseTimezone = useEventTimezoneForParse ? preParseEventLocation!.timezone : user.timezone;
+
   const context: DailyAssistantContext = {
     now,
     latitude: user.latitude,
@@ -59,9 +104,23 @@ export async function POST(req: NextRequest) {
 
   // "What about morning?" style deltas are checked before the main parser
   // (brief section 16) -- they carry no independent intent of their own,
-  // only a change to the previous turn's fields.
+  // only a change to the previous turn's fields; parseFollowUpChange never
+  // needs a timezone (see its own implementation), so it is unaffected by
+  // parseTimezone above.
   const followUpChange = previous ? parseFollowUpChange(prompt, previous) : null;
-  const parsed = followUpChange ?? parseAskAuraRequest(prompt, { now, timezone: user.timezone, previous });
+  const parsed = followUpChange ?? parseAskAuraRequest(prompt, { now, timezone: parseTimezone, previous });
+
+  // Resolved from the FINAL parsed.locationQuery, not the pre-parse
+  // extraction above -- for a fresh parse these are always identical (the
+  // same deterministic extractLocationQuery() over the same text), but for
+  // a follow-up turn (followUpChange truthy) parsed.locationQuery may
+  // instead be CARRIED OVER from the previous turn's own context (brief
+  // section 29: "do not throw away the resolved Event Location
+  // immediately") -- re-resolving here, rather than reusing
+  // preParseEventLocation, keeps eventLocation always consistent with
+  // whatever locationQuery actually ends up on this response's context,
+  // so a carried-over location is never mistaken for an unresolved one.
+  const eventLocation = parsed.locationQuery ? resolveEventLocationQuery(parsed.locationQuery) : undefined;
 
   void recordProductEvent({
     eventName: 'ASK_AURA_INTENT_RESOLVED',
@@ -75,7 +134,7 @@ export async function POST(req: NextRequest) {
     },
   });
 
-  const response = await orchestrateAskAura(parsed, { userId: session.userId, context, activeWindow });
+  const response = await orchestrateAskAura(parsed, { userId: session.userId, context, activeWindow, eventLocation });
   return NextResponse.json(response);
 }
 

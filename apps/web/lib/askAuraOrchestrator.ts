@@ -33,6 +33,8 @@ import { getPanchangForDate } from '../../../packages/panchang/src/panchangDay';
 import { localDateTimeToUTC } from '../../../packages/panchang/src/localDate';
 import { natalContextFromBirthDetails } from './natalContext';
 import { listSavedPeople, SavedPerson } from './db';
+import { CITY_OPTIONS, CityOption } from './cities';
+import { resolveTzOffsetMinutes } from './timezone';
 
 // ============================================================
 // Structured response model (brief section 17).
@@ -96,6 +98,44 @@ export interface AskAuraOrchestratorDeps {
    * it directly rather than recomputing Panchang windows a second time here
    * (brief section 7: "same source of truth as Home Good Right Now"). */
   activeWindow: string;
+  /** Ask Aura Event Location V1 -- the resolved CityOption for THIS
+   * request's explicit "in <location>" phrase (parsed.locationQuery),
+   * already resolved server-side (resolveEventLocationQuery below) by the
+   * caller (route.ts) BEFORE orchestration -- undefined when no location
+   * phrase was stated, or when one was stated but did not resolve against
+   * CITY_OPTIONS. Only ever consulted by the ceremonial (Muhurtham)
+   * handlers below; every everyday handler ignores this field entirely
+   * (brief section 2: V1 Event Location is ceremonial-only). */
+  eventLocation?: CityOption;
+}
+
+/**
+ * Ask Aura Event Location V1 -- resolves a free-text "in <location>"
+ * capture (askAuraIntent.ts's extractLocationQuery(), never resolved by
+ * the parser itself -- that file stays I/O-free) against the SAME curated
+ * CITY_OPTIONS list Muhurtham Finder's own location picker already uses
+ * (brief section 3/11) -- no geocoding, no second city database, no new
+ * EventLocation domain type.
+ *
+ * findCity() (cities.ts) itself is an exact, case-sensitive `===` match --
+ * correct for the picker's own dropdown, which always supplies an exact
+ * CITY_OPTIONS.cityName string, but wrong for natural chat text ("in
+ * chennai" must resolve the same as "in Chennai"). The smallest safe fix
+ * is added HERE, at the Ask Aura boundary, rather than loosening findCity/
+ * CITY_OPTIONS globally (brief section 11/38): case-insensitive matching,
+ * plus matching against the city name with any ", <Country>" suffix
+ * stripped, so a natural "in New York" resolves CITY_OPTIONS' own "New
+ * York, USA" entry the same way the picker's UI label already reads to a
+ * user. CITY_OPTIONS itself is never modified or duplicated.
+ */
+function normalizeCityKey(name: string): string {
+  return name.split(',')[0].trim().toLowerCase();
+}
+
+export function resolveEventLocationQuery(query: string): CityOption | undefined {
+  const key = normalizeCityKey(query);
+  if (!key) return undefined;
+  return CITY_OPTIONS.find((c) => normalizeCityKey(c.cityName) === key);
 }
 
 // ============================================================
@@ -185,14 +225,14 @@ function resolveDuration(activityId: string | undefined, requested: number | und
 //    date, a known, documented limitation left for a later PR.
 // ============================================================
 
-function resolveTimingCheckCandidateStart(parsed: ParsedAskAuraRequest, deps: AskAuraOrchestratorDeps): string {
+function resolveTimingCheckCandidateStart(parsed: ParsedAskAuraRequest, context: DailyAssistantContext): string {
   if (parsed.exactTime) {
-    const targetDate = resolveHorizonToDateRange(parsed.horizonPhrase, parsed.customDate, deps.context).start;
-    return localDateTimeToUTC(targetDate, parsed.exactTime, deps.context.timezone).toISOString();
+    const targetDate = resolveHorizonToDateRange(parsed.horizonPhrase, parsed.customDate, context).start;
+    return localDateTimeToUTC(targetDate, parsed.exactTime, context.timezone).toISOString();
   }
   return parsed.horizonPhrase === 'NOW' || !parsed.horizonPhrase
-    ? deps.context.now.toISOString()
-    : resolveHorizonToDateRange(parsed.horizonPhrase, parsed.customDate, deps.context).start + 'T12:00:00.000Z';
+    ? context.now.toISOString()
+    : resolveHorizonToDateRange(parsed.horizonPhrase, parsed.customDate, context).start + 'T12:00:00.000Z';
 }
 
 // ============================================================
@@ -334,6 +374,8 @@ export async function orchestrateAskAura(parsed: ParsedAskAuraRequest, deps: Ask
       // NOT `parsed.activityId === 'marriage'` -- same capability check,
       // same reasoning as the TIMING_FIND redirect below.
       if (parsed.activityId && isSupportedMuhurthamActivity(parsed.activityId)) {
+        const locationGate = eventLocationGate(parsed, deps);
+        if (locationGate) return locationGate;
         return handleMuhurthamTimingCheck(parsed, deps);
       }
       return handleTimingCheck(parsed, deps);
@@ -350,6 +392,8 @@ export async function orchestrateAskAura(parsed: ParsedAskAuraRequest, deps: Ask
       // "execution correctness matters more than intent-label
       // normalization") -- only EXECUTION is redirected here.
       if (parsed.activityId && isSupportedMuhurthamActivity(parsed.activityId)) {
+        const locationGate = eventLocationGate(parsed, deps);
+        if (locationGate) return locationGate;
         return handleMuhurthamSearch(parsed, deps);
       }
       return handleTimingFind(parsed, deps);
@@ -359,8 +403,11 @@ export async function orchestrateAskAura(parsed: ParsedAskAuraRequest, deps: Ask
       return handlePanchangQuery(parsed, deps);
     case 'PANCHANG_EXPLAIN':
       return handlePanchangExplain(parsed);
-    case 'MUHURTHAM_SEARCH':
+    case 'MUHURTHAM_SEARCH': {
+      const locationGate = eventLocationGate(parsed, deps);
+      if (locationGate) return locationGate;
       return handleMuhurthamSearch(parsed, deps);
+    }
     case 'PLAN_OPEN':
       return handlePlanOpen(parsed);
     default:
@@ -371,6 +418,32 @@ export async function orchestrateAskAura(parsed: ParsedAskAuraRequest, deps: Ask
         context: parsed,
       };
   }
+}
+
+// ---- Event Location fail-closed gate (Ask Aura Event Location V1,
+// brief section 13/14) ---------------------------------------------------
+
+/**
+ * An explicit "in <location>" phrase that did NOT resolve against
+ * CITY_OPTIONS must never silently execute using the caller's own Timing
+ * Location as though the stated location had succeeded -- e.g. "Should I
+ * get married in Atlantis next Friday?" must return a clarification, never
+ * a Muhurtham result computed against the caller's own Timing Location.
+ * Only called from the three ceremonial dispatch points in
+ * orchestrateAskAura (Muhurtham FIND/CHECK/search) -- V1's Event Location
+ * support is ceremonial-only (brief section 1/2), so an unresolved "in X"
+ * on an everyday activity is never routed through this gate at all, and
+ * simply has no effect (handleTimingFind/handleTimingCheck never read
+ * parsed.locationQuery or deps.eventLocation).
+ */
+function eventLocationGate(parsed: ParsedAskAuraRequest, deps: AskAuraOrchestratorDeps): AskAuraResponse | null {
+  if (!parsed.locationQuery || deps.eventLocation) return null;
+  return {
+    intent: parsed.intent,
+    message: `I couldn't match "${parsed.locationQuery}" to a supported event location. Try one of the available cities, or set the event location in Muhurtham Finder.`,
+    cards: [{ type: 'CLARIFICATION', options: [] }],
+    context: parsed,
+  };
 }
 
 // ---- GOOD_RIGHT_NOW (brief section 7) --------------------------------
@@ -394,7 +467,7 @@ function handleGoodRightNow(parsed: ParsedAskAuraRequest, deps: AskAuraOrchestra
 
 async function handleTimingCheck(parsed: ParsedAskAuraRequest, deps: AskAuraOrchestratorDeps): Promise<AskAuraResponse> {
   const durationMinutes = resolveDuration(parsed.activityId, parsed.durationMinutes);
-  const candidateStart = resolveTimingCheckCandidateStart(parsed, deps);
+  const candidateStart = resolveTimingCheckCandidateStart(parsed, deps.context);
 
   // SHARED scope with a resolved person -> everyday shared timing (Ask
   // Aura Scope-Aware Everyday TIMING_CHECK V1), mirroring handleTimingFind's
@@ -588,6 +661,29 @@ async function handleEverydaySharedTimingCheck(
 // Redirect V1) -------------------------------------------------------------
 
 /**
+ * Ask Aura Event Location V1 -- mirrors the existing muhurtham-search
+ * route's own effectiveLocation-first construction (brief section 16):
+ * when a valid Event Location was resolved for this request, a FRESH
+ * context is built with its latitude/longitude/timezone/tzOffsetMinutes,
+ * leaving `now` and `personalContext` untouched (personalContext is built
+ * exclusively from the owner's BIRTH profile in route.ts, independent of
+ * location -- this never rebuilds it, so Event Location can never
+ * influence Janma Nakshatra/Tara Bala, structurally, by construction).
+ * Absent Event Location -> the caller's own context, byte-identical to
+ * before this PR (brief section 25: omitted-location control).
+ */
+function buildEffectiveContext(deps: AskAuraOrchestratorDeps): DailyAssistantContext {
+  if (!deps.eventLocation) return deps.context;
+  return {
+    ...deps.context,
+    latitude: deps.eventLocation.latitude,
+    longitude: deps.eventLocation.longitude,
+    timezone: deps.eventLocation.timezone,
+    tzOffsetMinutes: resolveTzOffsetMinutes(deps.eventLocation.timezone, deps.context.now),
+  };
+}
+
+/**
  * The single-candidate counterpart to handleMuhurthamSearch() -- same
  * GENERAL/PERSONAL/SHARED dispatch and SavedPerson resolution, but checking
  * ONE caller-supplied instant (never a date-range search) via
@@ -609,8 +705,9 @@ async function handleMuhurthamTimingCheck(parsed: ParsedAskAuraRequest, deps: As
   const durationMinutes = resolveDuration(parsed.activityId, parsed.durationMinutes);
   const activity = FULL_ACTIVITY_CATALOG.find((a) => a.id === parsed.activityId);
   const activityTitle = activity?.title ?? parsed.taskTitle ?? 'this';
+  const effectiveContext = buildEffectiveContext(deps);
 
-  const candidateStart = resolveTimingCheckCandidateStart(parsed, deps);
+  const candidateStart = resolveTimingCheckCandidateStart(parsed, effectiveContext);
   const start = new Date(candidateStart);
 
   if (parsed.scope === 'SHARED' && parsed.personNameQuery) {
@@ -634,15 +731,15 @@ async function handleMuhurthamTimingCheck(parsed: ParsedAskAuraRequest, deps: As
       start,
       durationMinutes,
       scope: 'SHARED',
-      context: deps.context,
+      context: effectiveContext,
       partner: { savedPersonId: person.id, name: person.name, context: partnerContext },
     });
-    return buildMuhurthamCheckResponse(activityTitle, activity, outcome, deps.context.timezone, parsed);
+    return buildMuhurthamCheckResponse(activityTitle, activity, outcome, effectiveContext.timezone, parsed, deps.eventLocation);
   }
 
   const scope = parsed.scope === 'PERSONAL' ? 'PERSONAL' : 'GENERAL';
-  const outcome = evaluateMuhurthamCandidateAt({ activityId: parsed.activityId, start, durationMinutes, scope, context: deps.context });
-  return buildMuhurthamCheckResponse(activityTitle, activity, outcome, deps.context.timezone, parsed);
+  const outcome = evaluateMuhurthamCandidateAt({ activityId: parsed.activityId, start, durationMinutes, scope, context: effectiveContext });
+  return buildMuhurthamCheckResponse(activityTitle, activity, outcome, effectiveContext.timezone, parsed, deps.eventLocation);
 }
 
 /** CHECK-shaped response, never FIND/search wording -- "This is a strong
@@ -658,7 +755,8 @@ function buildMuhurthamCheckResponse(
   activity: { icon: string } | undefined,
   outcome: MuhurthamCandidateCheckOutcome,
   timezone: string,
-  parsed: ParsedAskAuraRequest
+  parsed: ParsedAskAuraRequest,
+  eventLocation?: CityOption
 ): AskAuraResponse {
   if (outcome.status === 'PERSONAL_PROFILE_INCOMPLETE') {
     return { intent: 'TIMING_CHECK', message: 'Add your complete birth details to get a personalized answer.', context: parsed };
@@ -670,15 +768,33 @@ function buildMuhurthamCheckResponse(
     return { intent: 'TIMING_CHECK', message: 'Add complete birth details for this person to get a shared answer.', context: parsed };
   }
 
-  const message = outcome.eligible ? `This is a strong time for ${activityTitle}.` : `I'd avoid this time for ${activityTitle}.`;
+  const locationSuffix = eventLocation ? ` in ${eventLocation.cityName}` : '';
+  const message = outcome.eligible ? `This is a strong time for ${activityTitle}${locationSuffix}.` : `I'd avoid this time for ${activityTitle}${locationSuffix}.`;
+  // Ask Aura Event Location V1, action safety (brief section 31): PR A does
+  // not thread eventLocation through AskAuraAction.planPayload, so a
+  // "Plan this" save here would silently drop the location and persist
+  // the same clock time under the caller's own Timing Location/timezone
+  // instead -- a knowingly incorrect save. Suppressed until PR B extends
+  // the save payloads; "Open Muhurtham Finder" (which already supports
+  // Event Location natively) remains available.
+  const actions: AskAuraAction[] = eventLocation
+    ? [{ type: 'OPEN_MUHURTHAM', label: 'Open Muhurtham Finder', activityId: outcome.activity.id }]
+    : [
+        { type: 'PLAN_THIS', label: 'Plan this', planPayload: planPayloadFromCandidate(outcome.window, activityTitle, activity?.icon) },
+        { type: 'OPEN_MUHURTHAM', label: 'Open Muhurtham Finder', activityId: outcome.activity.id },
+      ];
   return {
     intent: 'TIMING_CHECK',
     message,
-    cards: [{ type: 'TIMING_RESULT', activityTitle, requested: candidateCard(outcome.window, timezone) }],
-    actions: [
-      { type: 'PLAN_THIS', label: 'Plan this', planPayload: planPayloadFromCandidate(outcome.window, activityTitle, activity?.icon) },
-      { type: 'OPEN_MUHURTHAM', label: 'Open Muhurtham Finder', activityId: outcome.activity.id },
+    cards: [
+      {
+        type: 'TIMING_RESULT',
+        activityTitle,
+        ...(eventLocation ? { eventLocation: { cityName: eventLocation.cityName, timezone: eventLocation.timezone } } : {}),
+        requested: candidateCard(outcome.window, timezone),
+      },
     ],
+    actions,
     context: { ...parsed, activityId: outcome.activity.id, taskTitle: undefined },
   };
 }
@@ -866,7 +982,8 @@ async function handleMuhurthamSearch(parsed: ParsedAskAuraRequest, deps: AskAura
       context: parsed,
     };
   }
-  const dateRange = resolveHorizonToDateRange(parsed.horizonPhrase, parsed.customDate, deps.context);
+  const effectiveContext = buildEffectiveContext(deps);
+  const dateRange = resolveHorizonToDateRange(parsed.horizonPhrase, parsed.customDate, effectiveContext);
   const activity = FULL_ACTIVITY_CATALOG.find((a) => a.id === parsed.activityId);
 
   if (parsed.scope === 'SHARED' && parsed.personNameQuery) {
@@ -887,7 +1004,7 @@ async function handleMuhurthamSearch(parsed: ParsedAskAuraRequest, deps: AskAura
     );
     const outcome = handleSharedMuhurthamSearchBody(
       { activityId: parsed.activityId, scope: 'SHARED', dateRange, durationMinutes: parsed.durationMinutes, savedPersonId: person.id },
-      deps.context,
+      effectiveContext,
       { savedPersonId: person.id, name: person.name, context: partnerContext }
     );
     if (!outcome.ok) return { intent: 'MUHURTHAM_SEARCH', message: outcome.error, context: parsed };
@@ -901,15 +1018,15 @@ async function handleMuhurthamSearch(parsed: ParsedAskAuraRequest, deps: AskAura
     // Ask response doesn't surface) -- mapped here rather than widening
     // buildMuhurthamResponse's own type for one caller.
     const dates = sharedDates.map((d) => ({ ...d, score: d.sharedScore }));
-    return buildMuhurthamResponse(activity?.title ?? parsed.activityId, dates, deps.context.timezone, parsed);
+    return buildMuhurthamResponse(activity?.title ?? parsed.activityId, dates, effectiveContext.timezone, parsed, deps.eventLocation);
   }
 
   const scope = parsed.scope === 'PERSONAL' ? 'PERSONAL' : 'GENERAL';
-  const outcome = handleMuhurthamSearchBody({ activityId: parsed.activityId, scope, dateRange, durationMinutes: parsed.durationMinutes }, deps.context);
+  const outcome = handleMuhurthamSearchBody({ activityId: parsed.activityId, scope, dateRange, durationMinutes: parsed.durationMinutes }, effectiveContext);
   if (!outcome.ok) return { intent: 'MUHURTHAM_SEARCH', message: outcome.error, context: parsed };
   const result = outcome.result as MuhurthamSearchResult;
   const dates = 'dates' in result ? result.dates : [];
-  return buildMuhurthamResponse(activity?.title ?? parsed.activityId, dates, deps.context.timezone, parsed);
+  return buildMuhurthamResponse(activity?.title ?? parsed.activityId, dates, effectiveContext.timezone, parsed, deps.eventLocation);
 }
 
 /** GENERAL's MuhurthamDateCandidate and SHARED's MuhurthamSharedDateCandidate
@@ -925,22 +1042,30 @@ interface MuhurthamResultLike {
   reasons: import('../../../packages/muhurta/src/activityOntology').MuhurtaReason[];
 }
 
-function buildMuhurthamResponse(activityTitle: string, dates: MuhurthamResultLike[], timezone: string, parsed: ParsedAskAuraRequest): AskAuraResponse {
+function buildMuhurthamResponse(
+  activityTitle: string,
+  dates: MuhurthamResultLike[],
+  timezone: string,
+  parsed: ParsedAskAuraRequest,
+  eventLocation?: CityOption
+): AskAuraResponse {
+  const locationSuffix = eventLocation ? ` in ${eventLocation.cityName}` : '';
   if (dates.length === 0) {
     return {
       intent: 'MUHURTHAM_SEARCH',
-      message: `I couldn't find a strong Muhurtham for ${activityTitle} in that range.`,
+      message: `I couldn't find a strong Muhurtham for ${activityTitle}${locationSuffix} in that range.`,
       actions: [{ type: 'OPEN_MUHURTHAM', label: 'Open Muhurtham Finder', activityId: parsed.activityId }],
       context: parsed,
     };
   }
   return {
     intent: 'MUHURTHAM_SEARCH',
-    message: `Best dates for ${activityTitle}:`,
+    message: `Best dates for ${activityTitle}${locationSuffix}:`,
     cards: [
       {
         type: 'MUHURTHAM_RESULTS',
         activityTitle,
+        ...(eventLocation ? { eventLocation: { cityName: eventLocation.cityName, timezone: eventLocation.timezone } } : {}),
         dates: dates.slice(0, 3).map((d) => ({
           date: d.date,
           rating: d.rating,
