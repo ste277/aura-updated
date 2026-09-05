@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { getUserById, listDailyReflections, listHabitLogsForInsights, INSIGHTS_HISTORY_DAYS } from '../../../../lib/db';
 import { getSessionFromRequest } from '../../../../lib/session';
 import { getDatePartsInTimezone } from '../../../../lib/timezone';
+import { classifyInsightsWindow } from '../../../../lib/insightsWindowAlignment';
 
 const REFLECTION_HISTORY_DAYS = 60;
 
@@ -33,18 +34,22 @@ export async function GET(req: NextRequest) {
   // `.toISOString().slice(0,10)` (UTC calendar date) -- internally
   // consistent with each other, but wrong relative to the user's actual
   // local "day" for anyone not near UTC+0, especially in the evening.
+  // Insights Window-Alignment Semantic Correction V1 -- classification now
+  // goes through the shared classifyInsightsWindow() taxonomy, the same
+  // one InsightsView.tsx uses, replacing this route's own previously
+  // independent ABHIJIT/BRAHMA/GULIKA-vs-RAHU/YAMA string match. GULIKA
+  // now falls into NEUTRAL, counting toward NEITHER `aligned` nor
+  // `friction` -- a day with only Gulika/Neutral logs is not evidence for
+  // either side of the comparison, rather than being silently counted as
+  // "aligned" the way it previously was.
   const logsByDay = new Map<string, { aligned: number; friction: number; total: number }>();
   logs.forEach((log) => {
     const dateKey = getDatePartsInTimezone(user.timezone, new Date(log.logTimestamp)).dateStr;
     const existing = logsByDay.get(dateKey) ?? { aligned: 0, friction: 0, total: 0 };
-    const windowName = String(log.activeWindow || '').toUpperCase();
+    const band = classifyInsightsWindow(log.activeWindow);
     existing.total += 1;
-    if (windowName.includes('ABHIJIT') || windowName.includes('BRAHMA') || windowName.includes('GULIKA')) {
-      existing.aligned += 1;
-    }
-    if (windowName.includes('RAHU') || windowName.includes('YAMA')) {
-      existing.friction += 1;
-    }
+    if (band === 'SUPPORTIVE') existing.aligned += 1;
+    if (band === 'FRICTION') existing.friction += 1;
     logsByDay.set(dateKey, existing);
   });
 
