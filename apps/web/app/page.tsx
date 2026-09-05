@@ -11,6 +11,7 @@ import {
 import { computeDailyEnergyInsight } from '../lib/scoreEngine';
 import { getActionCards, ActionCard } from '../../../packages/recommendation/src/actionCards';
 import { findActivityIntent } from '../../../packages/recommendation/src/personalizedTasks';
+import type { PersonalMuhurtaContext } from '../../../packages/recommendation/src/auraFitEngine';
 import type { DailyBriefing, PlanningHorizon } from '../../../packages/recommendation/src/dailyAssistant';
 import type { TimingSearchDateRange, TimingSearchMode, TimingSearchResponse, TimingTimePreference } from '../../../packages/recommendation/src/timingSearch';
 import type { AuraUpdatesResponse } from '../lib/auraUpdates';
@@ -104,6 +105,13 @@ export default function DashboardPage() {
   const [logEntries, setLogEntries] = useState<LoggedEntryItem[]>([]);
   const [, setHabits] = useState<any[]>([]);
   const [dailyBriefing, setDailyBriefing] = useState<DailyBriefing | null>(null);
+  // Home Good Right Now Personalization V1 -- the owner's derived natal
+  // context (never raw birth date/time/timezone), returned as a sibling
+  // field alongside DailyBriefing by the SAME existing
+  // GET /api/daily-assistant/briefing request below -- no second Home API
+  // call. Undefined for an incomplete birth profile, exactly
+  // buildPersonalMuhurtaContextForUser's own existing contract.
+  const [personalContext, setPersonalContext] = useState<PersonalMuhurtaContext | undefined>(undefined);
   const [assistantInsight, setAssistantInsight] = useState<any>(null);
   const [todayReflection, setTodayReflection] = useState<DailyReflectionState | null>(null);
   const [plannedActivities, setPlannedActivities] = useState<PlannedActivityState[]>([]);
@@ -266,7 +274,11 @@ export default function DashboardPage() {
         fetch('/api/daily-assistant/reflection'),
       ]);
 
-      if (briefingRes.ok) setDailyBriefing(await briefingRes.json());
+      if (briefingRes.ok) {
+        const briefingData = await briefingRes.json();
+        setDailyBriefing(briefingData);
+        setPersonalContext(briefingData.personalContext);
+      }
       if (insightRes.ok) setAssistantInsight(await insightRes.json());
       if (reflectionRes.ok) {
         const reflection = await reflectionRes.json();
@@ -1036,6 +1048,7 @@ export default function DashboardPage() {
             dayWindows={mappedTimelineWindows}
             loggedActivitiesToday={loggedActivitiesToday}
             dailyBriefing={dailyBriefing}
+            personalContext={personalContext}
             todayReflection={todayReflection}
             onLogActivity={handleLogActivity}
             onSubmitReflection={handleSubmitReflection}
