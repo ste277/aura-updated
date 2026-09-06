@@ -5,6 +5,7 @@ import { getDatePartsInTimezone } from '../../../../lib/timezone';
 import { classifyInsightsWindow } from '../../../../lib/insightsWindowAlignment';
 import { toInsightsObservation, isInCalendarMonth } from '../../../../lib/insightsTimezone';
 import { summarizeAuraFit } from '../../../../lib/insightsAuraFit';
+import { deriveInsightsEvidenceState } from '../../../../lib/insightsEvidence';
 
 const REFLECTION_HISTORY_DAYS = 60;
 
@@ -127,7 +128,17 @@ export async function GET(req: NextRequest) {
   // worst possible outcome", which is a different claim entirely.
   const alignedRate = alignedTotal > 0 ? alignedScoreTotal / alignedTotal : null;
   const unalignedRate = unalignedTotal > 0 ? unalignedScoreTotal / unalignedTotal : null;
-  const hasValidComparison = alignedRate !== null && unalignedRate !== null;
+  const hasBothComparisonGroups = alignedRate !== null && unalignedRate !== null;
+  // Insights Evidence & Sample-Size Integrity V1 -- a comparison must ALSO
+  // rest on enough TOTAL reflections (reused, unmodified 0/1-2/3+
+  // boundary), not merely on both groups being non-empty. Previously
+  // `hasValidComparison` only checked the two-groups condition, so exactly
+  // 2 total reflections (1 aligned + 1 unaligned) could already produce a
+  // real, bolded alignmentDeltaPoints number while insightText below it
+  // (gated separately on `reflections.length < 3`) still said "Log a few
+  // evening check-ins to unlock..." -- a self-contradictory UI. Both the
+  // number and the copy now share one evidence gate.
+  const hasValidComparison = hasBothComparisonGroups && deriveInsightsEvidenceState(reflections.length) === 'AVAILABLE';
   const alignmentDeltaPoints = hasValidComparison ? Math.round((alignedRate! - unalignedRate!) * 100) : null;
 
   let insightText: string;

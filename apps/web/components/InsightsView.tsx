@@ -5,6 +5,7 @@ import { computeAverageTimedSessionMinutes } from '../lib/activityDuration';
 import { toInsightsObservation, todayDateKey, lastNCalendarDateKeys, isInCalendarMonth } from '../lib/insightsTimezone';
 import { addDaysToDateStr } from '../lib/timezone';
 import { classifyInsightsWindow, insightsWindowWeight } from '../lib/insightsWindowAlignment';
+import { deriveInsightsEvidenceState } from '../lib/insightsEvidence';
 import { colors, spacing, typography, radius } from './theme';
 import { PageHeader, SegmentedControl, SurfaceCard, StatusBadge, TextButton, EmptyState } from './ui';
 
@@ -147,6 +148,29 @@ export function InsightsView({ timezone, logEntries = [], assistantInsight }: In
       };
     });
 
+    // Insights Evidence & Sample-Size Integrity V1 -- the "Avg" figure
+    // badged onto the "7-Day Solar Alignment Trend" card must actually be
+    // a 7-day statistic. It previously displayed `alignmentScore` (the
+    // full up-to-400-day lifetime figure defined below) next to a chart
+    // whose seven bars only ever cover the last 7 days -- a real
+    // mislabeling, not just a rounding quirk. Computed the same way C1
+    // computes every other alignment percentage: a weighted mean across
+    // every individual HabitLog whose calendar date falls in the 7-day
+    // range (never a naive average of the seven already-rounded daily
+    // percentages above, which would give a single-log day the same
+    // weight as a ten-log day). Logs outside past7DateKeys never
+    // contribute -- observationOf(e).dateKey is compared by exact string
+    // equality against the Set below, so a log from day 8+ back cannot
+    // leak in. Null (not 0) when zero logs fall in the 7-day range at
+    // all -- the same NO_DATA-vs-real-zero distinction every other fixed
+    // metric in this PR now preserves.
+    const past7DateKeySet = new Set(past7DateKeys);
+    const past7Logs = logEntries.filter((e) => past7DateKeySet.has(observationOf(e).dateKey));
+    const sevenDayAlignmentScore: number | null =
+      past7Logs.length > 0
+        ? Math.round((past7Logs.reduce((sum, e) => sum + insightsWindowWeight(e.activeWindow), 0) / past7Logs.length) * 100)
+        : null;
+
     // 3. Time-of-Day Pattern Counts -- daypart boundaries UNCHANGED
     // (05:00/12:00/17:00/22:00), derived in the Timing Location timezone
     // instead of browser-local. This remains a plain clock-hour bucket,
@@ -212,8 +236,26 @@ export function InsightsView({ timezone, logEntries = [], assistantInsight }: In
       const source = entry.logSource ?? 'MANUAL';
       if (source === 'AURA_PLANNED' || source === 'AURA_DO_NOW') monthAuraGuidedCount++;
     });
-    const monthAlignmentScore = monthTotalActivities > 0 ? Math.min(100, Math.max(0, Math.round((monthWeightedAlignment / monthTotalActivities) * 100))) : 0;
-    const monthAuraGuidedRate = monthTotalActivities > 0 ? Math.round((monthAuraGuidedCount / monthTotalActivities) * 100) : 0;
+    // Insights Evidence & Sample-Size Integrity V1 -- null (not 0) when
+    // there are no current-month activities at all. "0 activities" and "3
+    // activities that all happened to be friction-only" are different
+    // claims; the old `: 0` fallback rendered both as an identical "0%",
+    // indistinguishable from a real, measured worst-case score. The
+    // "This Month" card's own evidence-state gating (below) decides how
+    // to present a null vs. a LIMITED vs. an AVAILABLE score -- this
+    // computation only needs to stop fabricating a number that was never
+    // observed.
+    const monthAlignmentScore: number | null = monthTotalActivities > 0 ? Math.min(100, Math.max(0, Math.round((monthWeightedAlignment / monthTotalActivities) * 100))) : null;
+    const monthAuraGuidedRate: number | null = monthTotalActivities > 0 ? Math.round((monthAuraGuidedCount / monthTotalActivities) * 100) : null;
+    // Insights Evidence & Sample-Size Integrity V1 -- the shared 0/1-2/3+
+    // boundary (apps/web/lib/insightsEvidence.ts), reused rather than a
+    // bespoke threshold, applied to the "This Month" card's own natural
+    // evidence unit: current-month HabitLog count. Drives whether the
+    // card shows a NO_DATA/LIMITED/AVAILABLE presentation for its two
+    // percentage stats -- the factual activity count and streak always
+    // display regardless of this state (facts may be shown immediately;
+    // only percentages/comparisons need to respect the evidence count).
+    const monthEvidenceState = deriveInsightsEvidenceState(monthTotalActivities);
 
     // Window Breakdown
     let weightedAlignment = 0;
@@ -262,13 +304,20 @@ export function InsightsView({ timezone, logEntries = [], assistantInsight }: In
       }
     });
 
-    // All stats are real or zero — no placeholder values. Showing a fake
-    // "50 activities / 3-day streak" to a brand-new user would poison the
-    // product's core claim that insights come from the user's own data.
-    const alignmentScore =
+    // Insights Evidence & Sample-Size Integrity V1 -- null (not 0) with
+    // zero logs. Previously this fallback was defended as "real or zero,
+    // no placeholder values" -- true for a genuine friction-only history,
+    // but a brand-new user with NO history at all is a different claim
+    // ("nothing observed yet") from one whose logs were observed and
+    // scored the worst possible way ("observed, and it was 0"). This
+    // value has no direct render consumer as of this PR (the 7-Day
+    // card's "Avg" badge now uses sevenDayAlignmentScore, its own
+    // correctly 7-day-scoped figure, above) but is fixed here too since
+    // it remains part of this component's public analytics shape.
+    const alignmentScore: number | null =
       totalActivities > 0
         ? Math.min(100, Math.max(0, Math.round((weightedAlignment / totalActivities) * 100)))
-        : 0;
+        : null;
 
     const resolvedDurations = logEntries.map((e) => e.durationMinutes ?? 30);
     const totalMinutes = resolvedDurations.reduce((sum, minutes) => sum + minutes, 0);
@@ -276,7 +325,19 @@ export function InsightsView({ timezone, logEntries = [], assistantInsight }: In
     const auraGuidedCount = auraPlannedCount + auraDoNowCount;
     const plannedAlignmentScore = auraPlannedCount > 0 ? Math.round((auraPlannedAlignment / auraPlannedCount) * 100) : 0;
     const manualAlignmentScore = manualCount > 0 ? Math.round((manualAlignment / manualCount) * 100) : 0;
-    const planningLift = auraPlannedCount > 0 && manualCount > 0 ? plannedAlignmentScore - manualAlignmentScore : null;
+    // Insights Evidence & Sample-Size Integrity V1 -- a comparative "lift"
+    // sentence now also requires the two groups' COMBINED observation
+    // count to reach AVAILABLE (3+), not merely that both groups are
+    // non-empty. Previously 1 Aura-planned + 1 manual log (the weakest
+    // possible non-degenerate comparison) was already enough to produce
+    // "Aura-planned logs are X points more aligned than manual logs" --
+    // comparative language from two single data points. Each GROUP still
+    // only needs >=1 (never require 3 in each group in V1, per design);
+    // only the combined total needs to clear the shared evidence bar.
+    const planningLift =
+      auraPlannedCount > 0 && manualCount > 0 && deriveInsightsEvidenceState(auraPlannedCount + manualCount) === 'AVAILABLE'
+        ? plannedAlignmentScore - manualAlignmentScore
+        : null;
 
     const distribution = Object.entries(windowCounts).map(([winName, count]) => ({
       name: winName,
@@ -301,9 +362,17 @@ export function InsightsView({ timezone, logEntries = [], assistantInsight }: In
       // Only timed activities (durationMinutes > 0) participate in this
       // average -- an INSTANT completion isn't a session with a length.
       // null (no timed entries at all yet) hides the stat rather than
-      // claiming "sessions average 0 minutes".
+      // claiming "sessions average 0 minutes". Insights Evidence &
+      // Sample-Size Integrity V1 -- the overall totalActivities >= 3 gate
+      // above does NOT guarantee 3 TIMED entries (e.g. 3 total activities
+      // where only 1 has a nonzero duration previously still produced
+      // "Your sessions average N minutes" from a single observation, with
+      // no count disclosed at all). This pattern now requires its own
+      // evidence unit -- timed entries -- to independently reach
+      // AVAILABLE (3+) before the behavioral "average" claim is made.
+      const timedDurationsCount = resolvedDurations.filter((minutes) => minutes > 0).length;
       const avgMinutes = computeAverageTimedSessionMinutes(resolvedDurations);
-      if (avgMinutes !== null) {
+      if (avgMinutes !== null && deriveInsightsEvidenceState(timedDurationsCount) === 'AVAILABLE') {
         patterns.push({
           icon: '⏱️',
           color: '#38bdf8',
@@ -312,9 +381,20 @@ export function InsightsView({ timezone, logEntries = [], assistantInsight }: In
         });
       }
 
+      // Insights Evidence & Sample-Size Integrity V1 -- comparative
+      // language ("most consistent time") now requires a STRICT winner.
+      // Previously a tie (e.g. 1/1/1 across three dayparts, or 2/2/1)
+      // still emitted this pattern because only `topTod[1] > 0` was
+      // checked -- an arbitrary Object.entries/sort ordering, not a real
+      // behavioral signal, was being reported as "most consistent". No
+      // percentage-margin threshold is introduced (deliberately out of
+      // scope for this PR) -- a strict greater-than against the
+      // runner-up is enough to stop reporting a coin-flip as a pattern.
       const todEntries = Object.entries(todCounts).sort((a, b) => b[1] - a[1]);
       const topTod = todEntries[0];
-      if (topTod && topTod[1] > 0) {
+      const runnerUpTod = todEntries[1];
+      const hasStrictTodWinner = Boolean(topTod && topTod[1] > 0 && (!runnerUpTod || topTod[1] > runnerUpTod[1]));
+      if (topTod && hasStrictTodWinner) {
         patterns.push({
           icon: '☀️',
           color: '#facc15',
@@ -341,6 +421,7 @@ export function InsightsView({ timezone, logEntries = [], assistantInsight }: In
       frictionLogs,
       heatmapDays,
       past7Days,
+      sevenDayAlignmentScore,
       todCounts,
       patterns,
       // Insights Timezone Consistency V1 -- "This Month" card values only;
@@ -349,6 +430,7 @@ export function InsightsView({ timezone, logEntries = [], assistantInsight }: In
       monthTotalActivities,
       monthAlignmentScore,
       monthAuraGuidedRate,
+      monthEvidenceState,
     };
   }, [logEntries, timezone]);
 
@@ -417,15 +499,41 @@ export function InsightsView({ timezone, logEntries = [], assistantInsight }: In
            * silently, drew from. `streak` deliberately stays the overall/
            * current streak (brief section 14) -- this card's label never
            * promised "day streak this month", and truncating a real
-           * ongoing streak at a month boundary would be a regression. */}
+           * ongoing streak at a month boundary would be a regression.
+           *
+           * Insights Evidence & Sample-Size Integrity V1 -- the two
+           * PERCENTAGE stats (Aura guided / supportive windows) now
+           * respect analytics.monthEvidenceState (the shared 0/1-2/3+
+           * boundary applied to monthTotalActivities); the two FACTUAL
+           * stats (activities count, streak) always display, since facts
+           * may be shown immediately regardless of evidence. NO_DATA
+           * never shows "0%" as though zero were measured; LIMITED shows
+           * a single compact early-signal caption instead of two bold
+           * percentages carrying the same visual authority as a mature
+           * (3+) month; AVAILABLE is the pre-existing, unchanged
+           * percentage-tile presentation. */}
           <div>
             <div style={typography.sectionEyebrow}>This Month</div>
             <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: `${spacing.sm}px ${spacing.lg}px`, marginTop: spacing.sm }}>
               <InlineStat value={analytics.monthTotalActivities} label="activities" color={colors.positive} />
               <InlineStat value={analytics.streak} label="day streak" color={colors.caution} />
-              <InlineStat value={`${analytics.monthAuraGuidedRate}%`} label="Aura guided" color={colors.info} />
-              <InlineStat value={`${analytics.monthAlignmentScore}%`} label="supportive windows" color={colors.traditional} />
+              {analytics.monthEvidenceState === 'AVAILABLE' && (
+                <>
+                  <InlineStat value={`${analytics.monthAuraGuidedRate}%`} label="Aura guided" color={colors.info} />
+                  <InlineStat value={`${analytics.monthAlignmentScore}%`} label="supportive windows" color={colors.traditional} />
+                </>
+              )}
             </div>
+            {analytics.monthEvidenceState === 'LIMITED' && (
+              <div style={{ ...typography.meta, marginTop: spacing.sm }}>
+                Early signal · based on {analytics.monthTotalActivities} {analytics.monthTotalActivities === 1 ? 'activity' : 'activities'} this month
+              </div>
+            )}
+            {analytics.monthEvidenceState === 'NO_DATA' && (
+              <div style={{ ...typography.meta, marginTop: spacing.sm }}>
+                No activities logged this month yet
+              </div>
+            )}
           </div>
 
           {/* Aura Fit -- Canonical Aura Fit Insights V1 (C3). A SEPARATE,
@@ -489,7 +597,7 @@ export function InsightsView({ timezone, logEntries = [], assistantInsight }: In
             <div style={{ display: 'flex', flexDirection: 'column', marginTop: spacing.sm }}>
               {patterns.length === 0 && (
                 <span style={{ fontSize: 13, color: colors.textFaint, lineHeight: 1.4 }}>
-                  Log a few activities and your patterns will appear here — computed from your own data.
+                  Log at least 3 activities to start seeing patterns — computed from your own data.
                 </span>
               )}
               {patterns.map((item, idx) => (
@@ -600,7 +708,7 @@ export function InsightsView({ timezone, logEntries = [], assistantInsight }: In
             <p style={{ fontSize: 12, color: '#cbd5e1', margin: '8px 0 0', lineHeight: 1.45 }}>
               {analytics.auraGuidedCount > 0
                 ? `${analytics.auraGuidedCount} of your ${analytics.totalActivities} activities came through Aura suggestions or planned moments.`
-                : 'Plan or accept a few Aura suggestions to see whether guided timing improves your alignment.'}
+                : 'Plan or accept a few Aura suggestions to compare guided timing against your manual activities.'}
             </p>
             <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 8, marginTop: 14 }}>
               <MiniStat value={analytics.auraPlannedCount} label="Planned" color="#4ade80" />
@@ -609,7 +717,16 @@ export function InsightsView({ timezone, logEntries = [], assistantInsight }: In
             </div>
             {analytics.planningLift !== null && (
               <div style={{ marginTop: 12, color: analytics.planningLift >= 0 ? '#4ade80' : '#fb7185', fontSize: 12, fontWeight: 750 }}>
-                Aura-planned logs are {Math.abs(analytics.planningLift)} points {analytics.planningLift >= 0 ? 'more aligned' : 'less aligned'} than manual logs so far.
+                {/* Insights Evidence & Sample-Size Integrity V1 -- kept
+                  * explicitly observational/past-tense ("were... in your
+                  * logged history"), never causal ("Aura improves...",
+                  * "following Aura made you..."). Aura-guided activities
+                  * were, by construction, already timed favorably by the
+                  * recommendation engine before the user acted on them --
+                  * a higher score among them is expected by that
+                  * construction, not proof the user personally performs
+                  * better during those windows. */}
+                Aura-planned activities were {Math.abs(analytics.planningLift)} points {analytics.planningLift >= 0 ? 'more aligned' : 'less aligned'} than manual activities in your logged history.
               </div>
             )}
           </div>
@@ -656,7 +773,7 @@ export function InsightsView({ timezone, logEntries = [], assistantInsight }: In
             <div style={{ display: 'flex', flexDirection: 'column', gap: 12, marginTop: 14 }}>
               {patterns.length === 0 && (
                 <span style={{ fontSize: 12, color: '#94a3b8', lineHeight: 1.4 }}>
-                  Not enough activity yet. Log at least 3 sessions and this analysis will build itself from your own history.
+                  Log at least 3 activities to start seeing patterns. This analysis builds itself from your own history.
                 </span>
               )}
               {patterns.map((item, idx) => (
@@ -700,8 +817,16 @@ export function InsightsView({ timezone, logEntries = [], assistantInsight }: In
               <span style={{ fontSize: 10, fontFamily: 'monospace', textTransform: 'uppercase', color: '#38bdf8', letterSpacing: '0.05em', fontWeight: 700 }}>
                 7-Day Solar Alignment Trend
               </span>
+              {/* Insights Evidence & Sample-Size Integrity V1 -- this badge
+                * previously showed analytics.alignmentScore, the full
+                * up-to-400-day lifetime figure, mislabeled as a 7-day
+                * statistic next to a chart that only ever covers the last
+                * 7 days. Now sevenDayAlignmentScore, computed strictly
+                * from HabitLogs whose calendar date falls within the same
+                * 7-day range the bars below represent -- null (never a
+                * fabricated 0%) when zero logs fall in that range. */}
               <span style={{ fontSize: 11, color: '#4ade80', fontFamily: 'monospace', fontWeight: 600 }}>
-                Avg: {analytics.alignmentScore}%
+                Avg: {analytics.sevenDayAlignmentScore !== null ? `${analytics.sevenDayAlignmentScore}%` : '—'}
               </span>
             </div>
             <p style={{ fontSize: 11, color: '#94a3b8', marginTop: 4, lineHeight: 1.4 }}>
