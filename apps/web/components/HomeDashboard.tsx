@@ -21,6 +21,8 @@ import type { DailyReflection } from '../lib/dailyReflection';
 import type { TomorrowPreview } from '../lib/tomorrowPreview';
 import { deriveNextMeaningfulThing } from '../lib/nextMeaningfulThing';
 import type { PendingActivityPresentationItem } from '../lib/myDayPendingOverlay';
+import { LoggedEntryItem } from './CalendarViewSection';
+import { resolvePendingActivityStatus } from '../lib/pendingReplayReconciliation';
 import { deriveAuraSuggestion, AuraSuggestion } from '../lib/auraSuggests';
 import { MyDayStoryCard } from './MyDayStoryCard';
 import { DayBuilderCard } from './DayBuilderCard';
@@ -158,6 +160,14 @@ interface HomeDashboardProps {
    * time (agenda rows continue using myDayAgenda.timezone unchanged). */
   myDayPendingActivities?: PendingActivityPresentationItem[];
   timezone?: string;
+  /** Home/Timeline Pending Replay Reconciliation V1 -- the same
+   * page.tsx-owned logEntries array Timeline/CalendarViewSection/
+   * InsightsView already receive directly, threaded down to
+   * GoodRightNowCard so it can reconcile its own locally-remembered
+   * "pending" status against resolvePendingActivityStatus once a background
+   * replay resolves. Never used to derive myDayPendingActivities or
+   * loggedActivitiesToday here -- those remain page.tsx's own. */
+  logEntries?: LoggedEntryItem[];
   /** Refetches /api/my-day -- called after "Add to my day"/"Invite
    * someone" succeeds so Your Day reflects the new item immediately. */
   onMyDayChanged?: () => void;
@@ -406,6 +416,7 @@ export function HomeDashboard({
   myDayTomorrowPreview,
   myDayPendingActivities = [],
   timezone,
+  logEntries = [],
   onMyDayChanged,
   onOpenPeople,
   onOpenAgendaItem,
@@ -622,6 +633,7 @@ export function HomeDashboard({
                 onLogActivity={onLogActivity}
                 onPlanClick={onPlanClick}
                 onLogged={handleCardLogged}
+                logEntries={logEntries}
               />
             ))}
           </div>
@@ -1011,6 +1023,7 @@ function GoodRightNowCard({
   onLogActivity,
   onPlanClick,
   onLogged,
+  logEntries,
 }: {
   card: ActionCard;
   activeWindowName: string;
@@ -1020,6 +1033,11 @@ function GoodRightNowCard({
    * succeeds, so it can be exempted from the "already logged today" swap
    * for the rest of this visit -- see goodRightNow's own doc comment. */
   onLogged?: (title: string) => void;
+  /** Home/Timeline Pending Replay Reconciliation V1 -- passed straight
+   * through from HomeDashboard's own logEntries prop, used only by the
+   * reconciliation effect below to ask resolvePendingActivityStatus
+   * whether this card's own pending log has since resolved. */
+  logEntries?: LoggedEntryItem[];
 }) {
   // Good Right Now / Log Activity Failure State Correctness V1 -- 'pending'
   // added: a genuine network failure queued the log for later replay,
@@ -1050,6 +1068,33 @@ function GoodRightNowCard({
   // match any catalog alias and fall through to the fallback classifier.
   const catalogTitle = card.activityId ? FULL_ACTIVITY_CATALOG.find((activity) => activity.id === card.activityId)?.title : undefined;
   const planTitle = catalogTitle ?? card.title;
+
+  // Home/Timeline Pending Replay Reconciliation V1 -- reacts whenever
+  // logEntries next changes (page.tsx's own syncOfflineLogs effect already
+  // calls loadUserDataAndLogs after every replay attempt, success or
+  // permanent failure -- see pendingReplayReconciliation.ts's own doc
+  // comment for resolvePendingActivityStatus). No polling, no new refresh
+  // call: this
+  // only reads the already-current logEntries prop, using the same
+  // normalized-title identity this card already uses for planTitle
+  // everywhere else.
+  useEffect(() => {
+    if (status !== 'pending') return;
+    const resolved = resolvePendingActivityStatus(logEntries ?? [], planTitle.trim().toLowerCase());
+    if (resolved === 'confirmed') {
+      setStatus('logged');
+      setLoggedAtLabel(new Date().toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' }));
+    } else if (resolved === 'gone') {
+      // Permanent-failure replay outcome (PR #91's own invariant): the
+      // queued entry was discarded and never confirmed. Converge to the
+      // same "never happened" state loadUserDataAndLogs already leaves
+      // logEntries in -- idle, so the card is actionable again, not a
+      // permanent stuck "Pending".
+      setStatus('idle');
+    }
+    // resolved === 'pending' -- still genuinely queued or mid-flight, no
+    // change.
+  }, [logEntries, status, planTitle]);
 
   const logWithDuration = async (durationMinutes: number) => {
     if (loggingRef.current || status === 'loading' || !onLogActivity) return;

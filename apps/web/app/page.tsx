@@ -1353,6 +1353,7 @@ export default function DashboardPage() {
             myDayReflection={myDay?.reflection}
             myDayTomorrowPreview={myDay?.tomorrowPreview}
             myDayPendingActivities={myDayPendingActivities}
+            logEntries={logEntries}
             timezone={userTz}
             onMyDayChanged={loadMyDay}
             onOpenPeople={() => { setPeopleReturnTo('home'); setActiveTab('people'); }}
