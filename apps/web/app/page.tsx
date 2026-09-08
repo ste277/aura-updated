@@ -266,10 +266,13 @@ export default function DashboardPage() {
     loadUserDataAndLogs();
   }, [loadUserDataAndLogs]);
 
-  useEffect(() => {
-    if (!user) return;
-
-    const loadAssistantSignals = async () => {
+  // My Day Timing Location Change Refresh V1 -- extracted from its
+  // original inline form (previously only reachable via the user-id-gated
+  // mount effect below) so it can ALSO be called directly from a confirmed
+  // Timing Location save (handleLocationChanged below). Endpoints, response
+  // handling, and state updates are unchanged; only the shape moved.
+  const loadAssistantSignals = useCallback(async () => {
+    try {
       const [briefingRes, insightRes, reflectionRes] = await Promise.all([
         fetch('/api/daily-assistant/briefing'),
         fetch('/api/daily-assistant/insights'),
@@ -289,12 +292,15 @@ export default function DashboardPage() {
           followedGuidance: Boolean(reflection.followedGuidance),
         } : null);
       }
-    };
-
-    loadAssistantSignals().catch((err) => {
+    } catch (err) {
       console.error('Failed to load daily assistant signals:', err);
-    });
-  }, [user?.id]);
+    }
+  }, []);
+
+  useEffect(() => {
+    if (!user) return;
+    loadAssistantSignals();
+  }, [user?.id, loadAssistantSignals]);
 
   // Aura Updates V1 -- ordinary fetch on the same lifecycle as the other
   // Home data above, no polling faster than the app's existing refresh
@@ -1035,9 +1041,26 @@ export default function DashboardPage() {
     setUser(null);
   }, []);
 
-  const handleLocationChanged = useCallback((city: { cityName: string; latitude: number; longitude: number; timezone: string }) => {
+  // My Day Timing Location Change Refresh V1 -- LocationPicker only ever
+  // calls onChanged (routed here) after PATCH /api/users/location has
+  // already returned a real 2xx, i.e. the User row's cityName/latitude/
+  // longitude/timezone are already committed (audited, not assumed -- see
+  // updateUserLocation's own single UPDATE statement). GET /api/my-day and
+  // GET /api/daily-assistant/* each independently re-read the User row
+  // fresh (getUserById) on every request, so neither refresh below needs
+  // to wait on this setUser's own render -- both are already guaranteed to
+  // observe the new persisted location the moment they run. Client-side
+  // Panchang (solar/windows/activeType/energyInsight, all derived via
+  // useMemo from user.latitude/longitude/timezone) already recomputes
+  // automatically once setUser lands; it never needed a fetch and isn't
+  // touched here. Only the server-derived daily state that previously had
+  // no location-change trigger at all -- My Day's agenda/story/reflection/
+  // tomorrowPreview, and the daily-assistant briefing/insight/reflection
+  // signals -- needed one.
+  const handleLocationChanged = useCallback(async (city: { cityName: string; latitude: number; longitude: number; timezone: string }) => {
     setUser((prev) => (prev ? { ...prev, ...city } : prev));
-  }, []);
+    await Promise.all([loadMyDay(), loadAssistantSignals()]);
+  }, [loadMyDay, loadAssistantSignals]);
 
   const handleTimingSearch = useCallback(async (request: {
     mode: TimingSearchMode;
