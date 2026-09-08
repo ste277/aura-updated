@@ -23,6 +23,14 @@ export interface LoggedEntryItem {
   // server. There is no local 'failed' value -- a failed request is rolled
   // back out of this array entirely rather than lingering in it.
   syncStatus?: 'pending';
+  // Pending Activity Reload Visibility V1 -- the same idempotency key
+  // handleLogActivity generates once per log attempt and the server
+  // persists on HabitLog (migration 0032). Omitted for legacy rows
+  // created before that migration. This is the strong identity used to
+  // reconcile a still-queued offline entry against its own now-confirmed
+  // server row after a reload, so a pending presentation never survives
+  // alongside (or duplicates) the real, confirmed one.
+  clientRequestId?: string;
 }
 
 function activityCategory(title: string): 'WORK' | 'HEALTH' | 'PERSONAL' {

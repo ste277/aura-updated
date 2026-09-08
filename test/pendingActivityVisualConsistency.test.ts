@@ -191,7 +191,12 @@ check('a pending entry in the trail is visibly labeled via StatusBadge label="Pe
 // ============================================================
 
 check('handleLogActivity in page.tsx is unchanged: still returns Promise<\'confirmed\' | \'pending\'>', /Promise<'confirmed' \| 'pending'>/.test(pageSource));
-check('handleLogActivity still sets syncStatus: \'pending\' only from the fetch-exception (network failure) branch', /syncStatus: 'pending' \} : item\)\)\);/.test(pageSource));
+// Pending Activity Reload Visibility V1 added a clientRequestId stamp
+// alongside syncStatus: 'pending' on this same line (needed so a reload
+// can tell a still-queued pending row apart from a permanently-rejected,
+// already-removed one) -- the regex tolerates that addition without
+// weakening what it actually proves: pending is still set only here.
+check('handleLogActivity still sets syncStatus: \'pending\' only from the fetch-exception (network failure) branch', /syncStatus: 'pending'(, clientRequestId)? \} : item\)\)\);/.test(pageSource));
 check('handleLogActivity still clears syncStatus on confirmed success', /syncStatus: undefined,/.test(pageSource));
 check('page.tsx still imports classifyHabitLogSyncOutcome for offline-queue replay (PR #86 untouched)', /classifyHabitLogSyncOutcome/.test(pageSource));
 check('page.tsx still generates clientRequestId once per log attempt (PR #86 idempotency untouched)', /const clientRequestId = crypto\.randomUUID\(\);/.test(pageSource));

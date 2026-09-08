@@ -22,6 +22,7 @@ import type { DailyReflection } from '../lib/dailyReflection';
 import type { TomorrowPreview } from '../lib/tomorrowPreview';
 import { shouldRefreshMyDayForDateChange } from '../lib/myDayRefreshPolicy';
 import { classifyHabitLogSyncOutcome } from '../lib/habitLogSyncPolicy';
+import { readOfflineHabitQueue, toPendingLoggedEntry, mergeConfirmedLogEntries, selectQueueItemsToReconstruct } from '../lib/offlineHabitQueue';
 
 // UI Modules
 import { HomeDashboard } from '../components/HomeDashboard';
@@ -233,19 +234,37 @@ export default function DashboardPage() {
 
       if (logsRes.ok) {
         const logs = await logsRes.json();
-        setLogEntries(
-          logs.map((l: any) => ({
-            id: l.id,
-            activityTitle: l.activityTitle,
-            activeWindow: l.activeWindow,
-            loggedAt: new Date(l.logTimestamp || l.createdAt || Date.now()),
-            logMinuteOfDay: l.logMinuteOfDay,
-            durationMinutes: l.durationMinutes ?? 30,
-            notes: l.notes || null,
-            logSource: l.logSource || 'MANUAL',
-            activitySignificance: l.activitySignificance || 'MEDIUM',
-          }))
-        );
+        const confirmedEntries: LoggedEntryItem[] = logs.map((l: any) => ({
+          id: l.id,
+          activityTitle: l.activityTitle,
+          activeWindow: l.activeWindow,
+          loggedAt: new Date(l.logTimestamp || l.createdAt || Date.now()),
+          logMinuteOfDay: l.logMinuteOfDay,
+          durationMinutes: l.durationMinutes ?? 30,
+          notes: l.notes || null,
+          logSource: l.logSource || 'MANUAL',
+          activitySignificance: l.activitySignificance || 'MEDIUM',
+          // Pending Activity Reload Visibility V1 -- propagated so a
+          // still-queued offline entry (reconstructed from
+          // localStorage's own copy of this same clientRequestId) can be
+          // reliably recognized as now-confirmed and never shown as a
+          // duplicate pending row alongside its real, persisted one.
+          clientRequestId: l.clientRequestId ?? undefined,
+        }));
+        // Pending Activity Reload Visibility V1 -- this used to be a hard
+        // replace (setLogEntries(confirmedEntries)), which would silently
+        // wipe out any pending entry reconstructed from the offline queue
+        // if this confirmed fetch happened to resolve AFTER that
+        // reconstruction ran. mergeConfirmedLogEntries (lib/offlineHabitQueue.ts)
+        // makes the final state the same deterministic union regardless of
+        // which of the two initialization paths finishes first, while
+        // still correctly clearing a permanently-rejected (4xx) entry's
+        // stale row once it's no longer in the queue (PR #86's own
+        // invariant) -- see that function's own doc comment.
+        setLogEntries((prev) => {
+          const queuedClientRequestIds = new Set(readOfflineHabitQueue().map((item) => item.clientRequestId));
+          return mergeConfirmedLogEntries(confirmedEntries, prev, queuedClientRequestIds);
+        });
       }
 
       if (habitsRes.ok) {
@@ -265,6 +284,28 @@ export default function DashboardPage() {
   useEffect(() => {
     loadUserDataAndLogs();
   }, [loadUserDataAndLogs]);
+
+  // Pending Activity Reload Visibility V1 -- a still-queued offline log
+  // (localStorage['offline_habit_queue'], written by handleLogActivity's
+  // own catch branch below) has no server row yet, so the confirmed fetch
+  // above can never know about it. This is a pure, read-only
+  // reconstruction into presentation state -- it never mutates the queue,
+  // never POSTs, and is entirely separate from the Offline Log Sync
+  // Listener effect further down (which does attempt to resync and IS
+  // allowed to mutate the queue). Runs once on mount; order-independent
+  // relative to the confirmed fetch above by construction (see that
+  // effect's own setLogEntries merge comment) -- whichever of the two
+  // resolves first, the other's setLogEntries call preserves it rather
+  // than overwriting it.
+  useEffect(() => {
+    const queued = readOfflineHabitQueue();
+    if (queued.length === 0) return;
+    setLogEntries((prev) => {
+      const reconstructed = selectQueueItemsToReconstruct(queued, prev).map(toPendingLoggedEntry);
+      if (reconstructed.length === 0) return prev;
+      return [...reconstructed, ...prev];
+    });
+  }, []);
 
   // My Day Timing Location Change Refresh V1 -- extracted from its
   // original inline form (previously only reachable via the user-id-gated
@@ -968,7 +1009,17 @@ export default function DashboardPage() {
           body: JSON.stringify(payload),
         });
       } catch {
-        setLogEntries((prev) => prev.map((item) => (item.id === tempId ? { ...item, syncStatus: 'pending' } : item)));
+        // Pending Activity Reload Visibility V1 -- clientRequestId is
+        // stamped here (it already exists as a local variable, generated
+        // above) so this live, in-session pending entry carries the same
+        // identity a reload-reconstructed one does. loadUserDataAndLogs's
+        // own merge needs this to tell a genuinely-still-queued pending
+        // row apart from a stale one whose replay was permanently
+        // rejected (4xx) and already removed from the queue -- without
+        // it, a permanently-failed entry could never be told apart from
+        // a real one and would linger here forever instead of being
+        // correctly cleared, regressing PR #86's own invariant.
+        setLogEntries((prev) => prev.map((item) => (item.id === tempId ? { ...item, syncStatus: 'pending', clientRequestId } : item)));
         const rawQueue = localStorage.getItem('offline_habit_queue');
         const queue = rawQueue ? JSON.parse(rawQueue) : [];
         queue.push({ ...payload, tempId });
