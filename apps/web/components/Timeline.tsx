@@ -4,6 +4,7 @@ import React, { useState, useRef } from 'react';
 import { getActionCards, getActivityDiscoveryCards, ActionCard } from '../../../packages/recommendation/src/actionCards';
 import { LoggedEntryItem } from './CalendarViewSection';
 import { triggerHaptic } from '../lib/haptics';
+import { StatusBadge } from './ui';
 
 export interface TimelineWindowItem {
   name: string;
@@ -397,26 +398,36 @@ export function TimelineView({
             {/* Render Logged Badges inside Banner if Any exist */}
             {currentWindowLogs.length > 0 && (
               <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', marginTop: 8 }}>
-                {currentWindowLogs.map((log) => (
-                  <div
-                    key={log.id}
-                    style={{
-                      background: 'rgba(74, 222, 128, 0.12)',
-                      border: '1px solid rgba(74, 222, 128, 0.3)',
-                      color: '#4ade80',
-                      fontSize: 10,
-                      padding: '2px 8px',
-                      borderRadius: 8,
-                      display: 'flex',
-                      alignItems: 'center',
-                      gap: 4,
-                      fontWeight: 600,
-                    }}
-                  >
-                    <span>✓</span>
-                    <span>{log.activityTitle}</span>
-                  </div>
-                ))}
+                {currentWindowLogs.map((log) =>
+                  // Pending Activity Visual Consistency V1 -- this pill
+                  // previously rendered every entry with the same confirmed
+                  // ✓/green styling regardless of log.syncStatus.
+                  log.syncStatus === 'pending' ? (
+                    <div key={log.id} style={{ display: 'flex', alignItems: 'center', gap: 5 }}>
+                      <StatusBadge label="Pending sync" tone="caution" />
+                      <span style={{ color: '#f8fafc', fontSize: 10, fontWeight: 600 }}>{log.activityTitle}</span>
+                    </div>
+                  ) : (
+                    <div
+                      key={log.id}
+                      style={{
+                        background: 'rgba(74, 222, 128, 0.12)',
+                        border: '1px solid rgba(74, 222, 128, 0.3)',
+                        color: '#4ade80',
+                        fontSize: 10,
+                        padding: '2px 8px',
+                        borderRadius: 8,
+                        display: 'flex',
+                        alignItems: 'center',
+                        gap: 4,
+                        fontWeight: 600,
+                      }}
+                    >
+                      <span>✓</span>
+                      <span>{log.activityTitle}</span>
+                    </div>
+                  )
+                )}
               </div>
             )}
           </div>
@@ -756,6 +767,11 @@ export function TimelineView({
             : `${formatMinStr(win.startMinute)} – ${formatMinStr(win.endMinute)}`;
 
           const windowLogs = getWindowLogs(win.name, win.startMinute, win.endMinute);
+          // Pending Activity Visual Consistency V1 -- windowLogs previously
+          // labeled every entry "logged" regardless of syncStatus, including
+          // a not-yet-server-confirmed offline-queued one.
+          const windowPendingCount = windowLogs.filter((log) => log.syncStatus === 'pending').length;
+          const windowConfirmedCount = windowLogs.length - windowPendingCount;
           const overlappingWindow = sortedWindows.find((other) => {
             if (other === win || !(/ABHIJIT|GULIKA/i.test(win.name) && /ABHIJIT|GULIKA/i.test(other.name))) return false;
             const overlapStart = Math.max(sMin, other.startMinute ?? 0);
@@ -809,7 +825,13 @@ export function TimelineView({
                 <span style={{ fontSize: 10, color: isActive ? '#86efac' : isCompleted ? '#64748b' : '#94a3b8', fontWeight: 700 }}>
                   {isActive ? '● NOW' : isCompleted ? 'Passed' : 'Upcoming'}
                 </span>
-                {windowLogs.length > 0 && <span style={{ fontSize: 10, color: isCompleted ? '#64748b' : '#86efac' }}>{windowLogs.length} logged</span>}
+                {windowLogs.length > 0 && (
+                  <span style={{ fontSize: 10, color: isCompleted ? '#64748b' : '#86efac' }}>
+                    {windowPendingCount > 0
+                      ? `${windowConfirmedCount} logged · ${windowPendingCount} pending sync`
+                      : `${windowLogs.length} logged`}
+                  </span>
+                )}
               </div>
 
               {overlapMinutes > 0 && (

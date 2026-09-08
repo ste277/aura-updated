@@ -3,7 +3,7 @@
 import React, { useState, useMemo } from 'react';
 import { PastActivityModal } from './PastActivityModal';
 import { formatActivityDuration } from '../lib/activityDuration';
-import { EmptyState } from './ui';
+import { EmptyState, StatusBadge } from './ui';
 
 export interface LoggedEntryItem {
   id: string;
@@ -495,7 +495,15 @@ export function CalendarViewSection({
                     <div key={log.id} style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 10, padding: '9px 10px', borderRadius: 10, background: 'rgba(30, 41, 59, 0.5)', border: '1px solid rgba(255, 255, 255, 0.05)' }}>
                       <div style={{ minWidth: 0, flex: 1 }}>
                         <div style={{ display: 'flex', alignItems: 'center', gap: 7, flexWrap: 'wrap' }}>
-                          <span style={{ color: '#4ade80', fontWeight: 800 }}>✓</span>
+                          {/* Pending Activity Visual Consistency V1 -- this ✓ previously
+                           * rendered unconditionally, showing a not-yet-server-confirmed
+                           * offline-queued entry (log.syncStatus === 'pending') with the
+                           * exact same confirmed styling as a real, persisted log. */}
+                          {log.syncStatus === 'pending' ? (
+                            <StatusBadge label="Pending sync" tone="caution" />
+                          ) : (
+                            <span style={{ color: '#4ade80', fontWeight: 800 }}>✓</span>
+                          )}
                           <span style={{ color: '#f8fafc', fontWeight: 650, fontSize: 12, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{log.activityTitle}</span>
                           <span style={{ border: `1px solid ${sourceLabel.border}`, borderRadius: 999, background: sourceLabel.background, color: sourceLabel.color, padding: '1px 6px', fontSize: 9, fontWeight: 850, flexShrink: 0 }}>
                             {sourceLabel.label}
