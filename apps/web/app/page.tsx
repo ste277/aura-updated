@@ -23,6 +23,7 @@ import type { TomorrowPreview } from '../lib/tomorrowPreview';
 import { shouldRefreshMyDayForDateChange } from '../lib/myDayRefreshPolicy';
 import { classifyHabitLogSyncOutcome } from '../lib/habitLogSyncPolicy';
 import { readOfflineHabitQueue, toPendingLoggedEntry, mergeConfirmedLogEntries, selectQueueItemsToReconstruct } from '../lib/offlineHabitQueue';
+import { selectTodaysPendingActivities } from '../lib/myDayPendingOverlay';
 
 // UI Modules
 import { HomeDashboard } from '../components/HomeDashboard';
@@ -702,6 +703,19 @@ export default function DashboardPage() {
       .map((entry) => entry.activityTitle.trim().toLowerCase());
   }, [logEntries, userTz, todayDateStr]);
 
+  // Pending Activity My Day Visibility V1 -- a client-only presentation
+  // composition: today's still-pending logEntries (already reload-safe
+  // and already correctly deduped against confirmation by PR #91's own
+  // mergeConfirmedLogEntries), classified as "today" using the exact
+  // same Timing-Location timezone helper as loggedActivitiesToday above.
+  // myDay/myDay.agenda themselves are never touched -- this is passed
+  // down as a separate prop, composed only at the YourDayTimeline render
+  // boundary.
+  const myDayPendingActivities = useMemo(
+    () => selectTodaysPendingActivities(logEntries, userTz, todayDateStr),
+    [logEntries, userTz, todayDateStr]
+  );
+
   // Date-memoized Solar Ephemeris Calculation
   const solar = useMemo(() => {
     if (!user || !mounted || !todayParts) return null;
@@ -1338,6 +1352,8 @@ export default function DashboardPage() {
             myDayStory={myDay?.story}
             myDayReflection={myDay?.reflection}
             myDayTomorrowPreview={myDay?.tomorrowPreview}
+            myDayPendingActivities={myDayPendingActivities}
+            timezone={userTz}
             onMyDayChanged={loadMyDay}
             onOpenPeople={() => { setPeopleReturnTo('home'); setActiveTab('people'); }}
             onOpenAgendaItem={handleOpenAgendaItem}
