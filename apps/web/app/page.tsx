@@ -21,6 +21,7 @@ import type { DailyStory } from '../lib/dailyStory';
 import type { DailyReflection } from '../lib/dailyReflection';
 import type { TomorrowPreview } from '../lib/tomorrowPreview';
 import { shouldRefreshMyDayForDateChange } from '../lib/myDayRefreshPolicy';
+import { classifyHabitLogSyncOutcome } from '../lib/habitLogSyncPolicy';
 
 // UI Modules
 import { HomeDashboard } from '../components/HomeDashboard';
@@ -558,33 +559,82 @@ export default function DashboardPage() {
   }, []);
 
   // Offline Log Sync Listener
+  // Good Right Now / Log Activity Failure State Correctness V1 -- this
+  // previously POSTed every queued payload without ever checking the
+  // response, then unconditionally cleared the WHOLE queue regardless of
+  // outcome -- a permanently-failing entry was silently and irrecoverably
+  // discarded with no signal to the user. Each item's outcome is now
+  // checked individually: 2xx (including an idempotent replay that finds
+  // its own already-committed row) is confirmed and removed; a 4xx is a
+  // permanent failure (would fail identically forever) and is also
+  // removed, but never counted as a success; a 5xx or a thrown network
+  // exception during replay is retained for a later attempt. The queue is
+  // rewritten to hold only what's still genuinely retry-worthy, never
+  // blanket-cleared.
   useEffect(() => {
     const syncOfflineLogs = async () => {
       const rawQueue = localStorage.getItem('offline_habit_queue');
       if (!rawQueue) return;
 
+      let queue: any[];
       try {
-        const queue: any[] = JSON.parse(rawQueue);
-        if (queue.length === 0) return;
+        queue = JSON.parse(rawQueue);
+      } catch {
+        return;
+      }
+      if (!Array.isArray(queue) || queue.length === 0) return;
 
-        for (const payload of queue) {
-          await fetch('/api/habit-logs', {
+      const remaining: any[] = [];
+      let anyConfirmed = false;
+
+      for (const queuedItem of queue) {
+        const { tempId, ...payload } = queuedItem;
+        try {
+          const res = await fetch('/api/habit-logs', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify(payload),
           });
+          const outcome = classifyHabitLogSyncOutcome(res.status);
+          if (outcome === 'confirmed') {
+            anyConfirmed = true;
+          } else if (outcome === 'retry') {
+            // Transient-looking server failure -- keep for a later retry.
+            remaining.push(queuedItem);
+          }
+          // 'permanent-failure' (a 4xx) here -- deliberately NOT pushed back
+          // onto `remaining`, so it stops being retried, but it was also never
+          // counted in anyConfirmed, so it's never treated as a success.
+        } catch {
+          // Genuine network failure mid-replay -- still ambiguous, keep it.
+          remaining.push(queuedItem);
         }
-
-        localStorage.removeItem('offline_habit_queue');
-        loadUserDataAndLogs();
-      } catch (err) {
-        console.error('Failed to clear offline queue:', err);
       }
+
+      if (remaining.length > 0) {
+        localStorage.setItem('offline_habit_queue', JSON.stringify(remaining));
+      } else {
+        localStorage.removeItem('offline_habit_queue');
+      }
+
+      // Refresh whenever anything was attempted, not only on a confirmed
+      // success -- a permanently-discarded 4xx entry still needs the stale
+      // "pending" optimistic row cleared out of logEntries, which this
+      // full refetch-and-replace already does as a side effect.
+      loadUserDataAndLogs();
+      if (anyConfirmed) loadMyDay();
     };
+
+    // Mount-time reconciliation (brief section 11) -- a queued entry must
+    // not depend indefinitely on a future offline -> online transition
+    // that may never come (e.g. every attempt failed with 5xx while the
+    // browser was online the whole time). This is a one-shot check on
+    // mount, never a poll/interval.
+    syncOfflineLogs();
 
     window.addEventListener('online', syncOfflineLogs);
     return () => window.removeEventListener('online', syncOfflineLogs);
-  }, [loadUserDataAndLogs]);
+  }, [loadUserDataAndLogs, loadMyDay]);
 
   // The panchang day is defined by the USER'S timezone (their selected city),
   // never the browser clock or UTC: the weekday selects the Rahu/Gulika/Yama
@@ -846,10 +896,16 @@ export default function DashboardPage() {
       // (POST /api/habit-logs) independently re-validates it against
       // FULL_ACTIVITY_CATALOG regardless of what this client sends.
       activityId?: string
-    ) => {
+    ): Promise<'confirmed' | 'pending'> => {
       const targetDate = customTimestamp ? new Date(customTimestamp) : new Date();
       const calculatedMinute = targetDate.getHours() * 60 + targetDate.getMinutes();
       const tempId = `temp-${Date.now()}`;
+      // Good Right Now / Log Activity Failure State Correctness V1 --
+      // generated once and reused verbatim across every retry, including
+      // offline-queue replay -- never regenerated per attempt. This is
+      // what lets the server (POST /api/habit-logs's own idempotent-replay
+      // check) recognize a retry as the SAME request instead of a new one.
+      const clientRequestId = crypto.randomUUID();
       const activeWindowForLog = overrideWindowType || activeType || 'NEUTRAL';
       const inferredSignificance = activitySignificance ?? inferActivitySignificance(activityTitle);
       const finalLogSource = logSource === 'MANUAL' && isFrictionWindow(activeWindowForLog) && inferredSignificance !== 'LOW'
@@ -887,69 +943,89 @@ export default function DashboardPage() {
         durationMinutes,
         logSource: finalLogSource,
         activitySignificance: inferredSignificance,
+        clientRequestId,
       };
 
+      // Good Right Now / Log Activity Failure State Correctness V1 -- the
+      // fetch call itself is the ONLY thing wrapped in try/catch. A thrown
+      // exception here means no HTTP response was ever received (DNS
+      // failure, connection reset, genuinely offline) -- the server's
+      // outcome is truly ambiguous, which is the one legitimate case for
+      // the offline queue. A non-2xx response, by contrast, IS a
+      // definitive answer from the server and is handled below, outside
+      // this catch, never queued as if it were a connectivity problem.
+      let res: Response;
       try {
-        const res = await fetch('/api/habit-logs', {
+        res = await fetch('/api/habit-logs', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify(payload),
         });
-
-        if (res.ok) {
-          const serverLog = await res.json();
-          setLogEntries((prev) =>
-            prev.map((item) =>
-              item.id === tempId
-                ? {
-                    ...item,
-                    id: serverLog.id,
-                    loggedAt: new Date(serverLog.logTimestamp || serverLog.createdAt),
-                    // Insights Correctness + Historical Integrity V1 -- the
-                    // optimistic entry's own activeWindowForLog is at best a
-                    // same-day guess (today's live activeType for a
-                    // backdated log); the server now always computes the
-                    // real, historically-correct window for the actual
-                    // logTimestamp (apps/web/lib/historicalActivityWindow.ts).
-                    // Sync it here so a backdated entry's displayed window
-                    // (and everything InsightsView derives from it) reflects
-                    // the authoritative value, not the optimistic guess.
-                    activeWindow: serverLog.activeWindow ?? item.activeWindow,
-                    // Insights Timezone Consistency V1 -- same reasoning as
-                    // activeWindow above: the optimistic calculatedMinute is
-                    // browser-local, the server now always derives the real
-                    // Timing-Location minute-of-day for the actual
-                    // logTimestamp (apps/web/app/api/habit-logs/route.ts).
-                    logMinuteOfDay: serverLog.logMinuteOfDay ?? item.logMinuteOfDay,
-                  }
-                : item
-            )
-          );
-          // Your Day Ghost Activities + Logged Activity Requires Refresh V1
-          // -- a confirmed server-side log can change today's agenda (a
-          // linked Plan flips to COMPLETED, or a bare log becomes a new
-          // COMPLETED_ACTIVITY row), but myDay state is a separate snapshot
-          // from logEntries and was never re-fetched here. Reuses the exact
-          // same onCreated -> onMyDayChanged -> loadMyDay() pattern Plan
-          // creation (MyDayStoryCard) and Day Builder Add (DayBuilderCard)
-          // already use, and only fires after a CONFIRMED success -- never
-          // on the offline-queue/failure branches below, so a failed log
-          // never makes Your Day look like it succeeded.
-          loadMyDay();
-        } else {
-          // Buffer in local storage queue if server returns non-200
-          const rawQueue = localStorage.getItem('offline_habit_queue');
-          const queue = rawQueue ? JSON.parse(rawQueue) : [];
-          queue.push(payload);
-          localStorage.setItem('offline_habit_queue', JSON.stringify(queue));
-        }
-      } catch (err) {
-        // Buffer in local storage queue if offline/network failure
+      } catch {
+        setLogEntries((prev) => prev.map((item) => (item.id === tempId ? { ...item, syncStatus: 'pending' } : item)));
         const rawQueue = localStorage.getItem('offline_habit_queue');
         const queue = rawQueue ? JSON.parse(rawQueue) : [];
-        queue.push(payload);
+        queue.push({ ...payload, tempId });
         localStorage.setItem('offline_habit_queue', JSON.stringify(queue));
+        return 'pending';
       }
+
+      if (!res.ok) {
+        // Good Right Now / Log Activity Failure State Correctness V1 -- ANY
+        // HTTP response, 4xx or 5xx alike, is a definitive server answer,
+        // never an "offline" condition. Roll the optimistic entry back out
+        // entirely (no lingering false-success state) and reject so the
+        // caller's own catch path -- already written in every one of
+        // GoodRightNowCard/Timeline/PastActivityModal, previously
+        // unreachable because this function never used to reject --
+        // actually runs. A 4xx would fail identically on every retry (bad
+        // request/auth/unknown activity); a 5xx deserves a visible,
+        // explicitly-retryable failure, not a silent invisible queue entry.
+        setLogEntries((prev) => prev.filter((item) => item.id !== tempId));
+        throw new Error(`Unable to log this activity (server responded ${res.status}).`);
+      }
+
+      const serverLog = await res.json();
+      setLogEntries((prev) =>
+        prev.map((item) =>
+          item.id === tempId
+            ? {
+                ...item,
+                id: serverLog.id,
+                loggedAt: new Date(serverLog.logTimestamp || serverLog.createdAt),
+                // Insights Correctness + Historical Integrity V1 -- the
+                // optimistic entry's own activeWindowForLog is at best a
+                // same-day guess (today's live activeType for a
+                // backdated log); the server now always computes the
+                // real, historically-correct window for the actual
+                // logTimestamp (apps/web/lib/historicalActivityWindow.ts).
+                // Sync it here so a backdated entry's displayed window
+                // (and everything InsightsView derives from it) reflects
+                // the authoritative value, not the optimistic guess.
+                activeWindow: serverLog.activeWindow ?? item.activeWindow,
+                // Insights Timezone Consistency V1 -- same reasoning as
+                // activeWindow above: the optimistic calculatedMinute is
+                // browser-local, the server now always derives the real
+                // Timing-Location minute-of-day for the actual
+                // logTimestamp (apps/web/app/api/habit-logs/route.ts).
+                logMinuteOfDay: serverLog.logMinuteOfDay ?? item.logMinuteOfDay,
+                syncStatus: undefined,
+              }
+            : item
+        )
+      );
+      // Your Day Ghost Activities + Logged Activity Requires Refresh V1 --
+      // a confirmed server-side log can change today's agenda (a linked
+      // Plan flips to COMPLETED, or a bare log becomes a new
+      // COMPLETED_ACTIVITY row), but myDay state is a separate snapshot
+      // from logEntries and was never re-fetched here. Reuses the exact
+      // same onCreated -> onMyDayChanged -> loadMyDay() pattern Plan
+      // creation (MyDayStoryCard) and Day Builder Add (DayBuilderCard)
+      // already use, and only fires after a CONFIRMED success -- never on
+      // the pending/failure paths above, so a failed or merely-queued log
+      // never makes Your Day look like it succeeded.
+      loadMyDay();
+      return 'confirmed';
     },
     [activeType, loadMyDay]
   );

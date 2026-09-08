@@ -32,7 +32,9 @@ export interface TimelineViewProps {
     notes?: string,
     customTimestamp?: Date,
     overrideWindowType?: string
-  ) => Promise<void>;
+    // Good Right Now / Log Activity Failure State Correctness V1 -- see
+    // HomeDashboard.tsx's own copy of this comment.
+  ) => Promise<'confirmed' | 'pending'>;
   onPlanActivity?: (activityTitle: string) => void;
   onAskAuraClick?: () => void;
 }
@@ -134,6 +136,13 @@ export function TimelineView({
   const [loggingTitle, setLoggingTitle] = useState<string | null>(null);
   const [logError, setLogError] = useState('');
   const [optimisticLogged, setOptimisticLogged] = useState<string[]>([]);
+  // Good Right Now / Log Activity Failure State Correctness V1 -- titles
+  // whose log genuinely could not be confirmed (network failure, safely
+  // queued for later replay). Still counted as "logged" for the disabled/
+  // no-duplicate-submit button state (optimisticLogged/allLoggedNormalized
+  // below), but rendered with distinct copy so a pending sync is never
+  // shown identically to a confirmed one.
+  const [pendingLogged, setPendingLogged] = useState<string[]>([]);
 
   const selectedWindowName = selectedWindowItem?.name || null;
   const activeWindowName = selectedWindowName || currentWindow?.name || 'NEUTRAL';
@@ -171,12 +180,24 @@ export function TimelineView({
 
     try {
       if (onLogActivity) {
-        await onLogActivity(title, undefined, undefined, selectedWindowItem?.name);
-        
-        // Trigger success haptic vibration upon successful quick log
-        triggerHaptic('success');
+        const outcome = await onLogActivity(title, undefined, undefined, selectedWindowItem?.name);
+        if (outcome === 'pending') {
+          // Good Right Now / Log Activity Failure State Correctness V1 --
+          // queued after a genuine network failure, not yet confirmed by
+          // the server. No success haptic: that must mean confirmed
+          // persistence, not "safely queued."
+          setPendingLogged((prev) => [...prev, normTitle]);
+        } else {
+          // Trigger success haptic vibration upon successful quick log
+          triggerHaptic('success');
+        }
       }
     } catch (err) {
+      // Good Right Now / Log Activity Failure State Correctness V1 --
+      // onLogActivity now genuinely rejects on a definitive 4xx/5xx server
+      // response (previously it never rejected for a real server failure),
+      // so this rollback + visible error, already written here, is now
+      // actually reachable.
       console.error('Error logging activity:', err);
       setOptimisticLogged((prev) => prev.filter((item) => item !== normTitle));
       setLogError(`Could not log ${title}. Try again.`);
@@ -417,6 +438,11 @@ export function TimelineView({
           {recommendedCards.map((card, idx) => {
             const cardTitleNorm = card.title.trim().toLowerCase();
             const isAlreadyLogged = allLoggedNormalized.has(cardTitleNorm);
+            // Good Right Now / Log Activity Failure State Correctness V1 --
+            // still counted as "logged" for isAlreadyLogged (no duplicate
+            // submission), but must render distinguishably from a
+            // confirmed log.
+            const isPendingThis = pendingLogged.includes(cardTitleNorm);
             const isLoggingThis = loggingTitle === card.title;
             const fitLabel = card.fit === 'BEST' ? 'Best fit' : card.fit === 'GOOD' ? 'Good fit' : card.fit === 'CAUTION' ? 'Use lightly' : 'Usable';
             const fitColor = card.fit === 'CAUTION' ? '#facc15' : card.fit === 'USABLE' ? '#7dd3fc' : '#4ade80';
@@ -486,7 +512,7 @@ export function TimelineView({
                       fontFamily: 'sans-serif',
                     }}
                   >
-                    {isAlreadyLogged ? '✓ Logged' : isLoggingThis ? 'Logging...' : 'Log'}
+                    {isAlreadyLogged ? (isPendingThis ? '⏳ Pending' : '✓ Logged') : isLoggingThis ? 'Logging...' : 'Log'}
                   </button>
                 </div>
               </div>
@@ -805,7 +831,7 @@ export function TimelineView({
                           </button>
                         )}
                         <button type="button" onClick={(e) => { e.stopPropagation(); handleQuickLog(card.title); }} disabled={allLoggedNormalized.has(card.title.toLowerCase()) || !!loggingTitle} style={{ background: 'rgba(74, 222, 128, 0.12)', border: '1px solid rgba(74, 222, 128, 0.28)', color: '#86efac', borderRadius: 7, fontSize: 9, padding: '3px 6px' }}>
-                          {allLoggedNormalized.has(card.title.toLowerCase()) ? 'Logged' : 'Log'}
+                          {allLoggedNormalized.has(card.title.toLowerCase()) ? (pendingLogged.includes(card.title.toLowerCase()) ? 'Pending' : 'Logged') : 'Log'}
                         </button>
                       </span>
                     </div>

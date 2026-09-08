@@ -497,6 +497,11 @@ export interface HabitLogRow {
   notes?: string | null;
   logSource?: 'AURA_PLANNED' | 'AURA_DO_NOW' | 'MANUAL' | 'OVERRIDE_CAUTION';
   activitySignificance?: 'LOW' | 'MEDIUM' | 'HIGH';
+  // Good Right Now / Log Activity Failure State Correctness V1 -- see the
+  // column's own migration comment (0032). Optional for the same reason
+  // as activityId above: existing fixtures/callers that don't touch this
+  // concept need no changes.
+  clientRequestId?: string | null;
 }
 
 export interface Habit {
@@ -1565,6 +1570,22 @@ export async function consumeAuthCode(id: string): Promise<boolean> {
   return result.rowCount === 1;
 }
 
+/**
+ * Good Right Now / Log Activity Failure State Correctness V1 -- looks up
+ * an existing HabitLog by the same (userId, clientRequestId) pair the
+ * partial unique index (migration 0032) enforces. Used both for the
+ * common case (POST /api/habit-logs's own idempotent-replay check before
+ * inserting) and by createHabitLog's own race-safe fallback below. Scoped
+ * to userId so one user's request id can never resolve another's row.
+ */
+export async function getHabitLogByClientRequestId(userId: string, clientRequestId: string): Promise<HabitLogRow | null> {
+  const result = await pool.query(
+    `SELECT * FROM "HabitLog" WHERE "userId" = $1 AND "clientRequestId" = $2`,
+    [userId, clientRequestId]
+  );
+  return result.rows[0] ?? null;
+}
+
 export async function createHabitLog(input: {
   userId: string;
   activityTitle: string;
@@ -1583,28 +1604,51 @@ export async function createHabitLog(input: {
   notes?: string;
   logSource?: 'AURA_PLANNED' | 'AURA_DO_NOW' | 'MANUAL' | 'OVERRIDE_CAUTION';
   activitySignificance?: 'LOW' | 'MEDIUM' | 'HIGH';
+  // Good Right Now / Log Activity Failure State Correctness V1 -- optional,
+  // omitted/null persists NULL (a legitimate, expected value -- most
+  // callers still don't send one). See migration 0032's own comment.
+  clientRequestId?: string | null;
 }): Promise<HabitLogRow> {
   const id = randomUUID();
   const timestamp = input.logTimestamp ?? new Date();
 
-  const result = await pool.query(
-    `INSERT INTO "HabitLog" (id, "userId", "activityTitle", "activityId", "activeWindow", "logMinuteOfDay", "logTimestamp", "durationMinutes", notes, "logSource", "activitySignificance")
-     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11) RETURNING *`,
-    [
-      id,
-      input.userId,
-      input.activityTitle,
-      input.activityId ?? null,
-      input.activeWindow,
-      input.logMinuteOfDay,
-      timestamp,
-      input.durationMinutes ?? 30,
-      input.notes ?? null,
-      input.logSource ?? 'MANUAL',
-      input.activitySignificance ?? 'MEDIUM',
-    ]
-  );
-  return result.rows[0];
+  try {
+    const result = await pool.query(
+      `INSERT INTO "HabitLog" (id, "userId", "activityTitle", "activityId", "activeWindow", "logMinuteOfDay", "logTimestamp", "durationMinutes", notes, "logSource", "activitySignificance", "clientRequestId")
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12) RETURNING *`,
+      [
+        id,
+        input.userId,
+        input.activityTitle,
+        input.activityId ?? null,
+        input.activeWindow,
+        input.logMinuteOfDay,
+        timestamp,
+        input.durationMinutes ?? 30,
+        input.notes ?? null,
+        input.logSource ?? 'MANUAL',
+        input.activitySignificance ?? 'MEDIUM',
+        input.clientRequestId ?? null,
+      ]
+    );
+    return result.rows[0];
+  } catch (err) {
+    // Good Right Now / Log Activity Failure State Correctness V1 -- a
+    // genuine concurrent race (two near-simultaneous requests carrying the
+    // SAME clientRequestId, e.g. a real retry firing before the original
+    // request's own INSERT has committed) hits the partial unique index
+    // and raises Postgres 23505 (unique_violation) here, not a pre-check
+    // race window this function could otherwise close. The winner's row
+    // already exists at that point -- return it instead of surfacing a
+    // 500 for what is, from the caller's perspective, a successful
+    // idempotent replay.
+    const pgError = err as { code?: string };
+    if (pgError.code === '23505' && input.clientRequestId) {
+      const existing = await getHabitLogByClientRequestId(input.userId, input.clientRequestId);
+      if (existing) return existing;
+    }
+    throw err;
+  }
 }
 
 export async function listHabitLogs(userId: string): Promise<HabitLogRow[]> {

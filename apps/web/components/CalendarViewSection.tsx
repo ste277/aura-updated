@@ -15,6 +15,14 @@ export interface LoggedEntryItem {
   notes?: string | null;
   logSource?: 'AURA_PLANNED' | 'AURA_DO_NOW' | 'MANUAL' | 'OVERRIDE_CAUTION';
   activitySignificance?: 'LOW' | 'MEDIUM' | 'HIGH';
+  // Good Right Now / Log Activity Failure State Correctness V1 -- omitted
+  // (undefined) means confirmed, the default for every server-persisted
+  // row and every pre-existing caller/fixture that never touches this
+  // concept. 'pending' is the one other real state: a genuine network
+  // failure queued this entry for later replay, not yet confirmed by the
+  // server. There is no local 'failed' value -- a failed request is rolled
+  // back out of this array entirely rather than lingering in it.
+  syncStatus?: 'pending';
 }
 
 function activityCategory(title: string): 'WORK' | 'HEALTH' | 'PERSONAL' {
@@ -76,7 +84,9 @@ interface CalendarViewSectionProps {
     durationMinutes?: number,
     logSource?: 'AURA_PLANNED' | 'AURA_DO_NOW' | 'MANUAL' | 'OVERRIDE_CAUTION',
     activitySignificance?: 'LOW' | 'MEDIUM' | 'HIGH'
-  ) => Promise<void>;
+    // Good Right Now / Log Activity Failure State Correctness V1 -- see
+    // HomeDashboard.tsx's own copy of this comment.
+  ) => Promise<'confirmed' | 'pending'>;
   onBack?: () => void;
 }
 

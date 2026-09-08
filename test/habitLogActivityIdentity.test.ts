@@ -127,12 +127,22 @@ check('createHabitLog\'s INSERT column list includes "activityId"', /INSERT INTO
 // ============================================================
 
 const homeDashboardSource = fs.readFileSync('apps/web/components/HomeDashboard.tsx', 'utf8');
-check('HomeDashboard.tsx\'s onLogActivity type gained an activityId parameter', /activityId\?: string\s*\)\s*=> Promise<void>/.test(homeDashboardSource));
+// Good Right Now / Log Activity Failure State Correctness V1 -- the
+// activityId parameter itself, and its position as onLogActivity's final
+// parameter, are unchanged; only the return type changed (Promise<void> ->
+// Promise<'confirmed' | 'pending'>, so callers can distinguish a
+// confirmed persist from a genuinely-queued pending write instead of the
+// promise always resolving regardless of outcome), and an explanatory
+// comment now sits between the parameter and the closing paren -- [\s\S]*?
+// spans that non-whitespace content the original \s*-only regex couldn't.
+check('HomeDashboard.tsx\'s onLogActivity type gained an activityId parameter', /activityId\?: string[\s\S]*?\)\s*=> Promise<'confirmed' \| 'pending'>/.test(homeDashboardSource));
 check('HomeDashboard.tsx passes card.activityId (not card.id) into onLogActivity at the logging call site', /onLogActivity\(planTitle,[\s\S]{0,200}card\.activityId\)/.test(homeDashboardSource));
 check('HomeDashboard.tsx never passes card.id as the activityId argument', !/onLogActivity\([^)]*,\s*card\.id\)/.test(homeDashboardSource));
 
 const pageSource = fs.readFileSync('apps/web/app/page.tsx', 'utf8');
-check('page.tsx\'s handleLogActivity signature gained an activityId parameter', /activityId\?: string\s*\)\s*=>/.test(pageSource));
+// Same reasoning as above -- handleLogActivity's own return type
+// annotation now sits between the closing paren and the arrow.
+check('page.tsx\'s handleLogActivity signature gained an activityId parameter', /activityId\?: string\s*\):\s*Promise<'confirmed' \| 'pending'>\s*=>/.test(pageSource));
 // Strip // comment lines before matching -- the payload's own doc comment
 // legitimately mentions "activityId" in prose several times before the
 // real `activityId,` object-literal field line.

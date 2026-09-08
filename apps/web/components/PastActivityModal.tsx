@@ -19,7 +19,14 @@ interface PastActivityModalProps {
     durationMinutes?: number,
     logSource?: 'AURA_PLANNED' | 'AURA_DO_NOW' | 'MANUAL' | 'OVERRIDE_CAUTION',
     activitySignificance?: 'LOW' | 'MEDIUM' | 'HIGH'
-  ) => Promise<void>;
+    // Good Right Now / Log Activity Failure State Correctness V1 -- see
+    // HomeDashboard.tsx's own copy of this comment. This modal treats
+    // both a confirmed persist and a genuinely-queued pending write the
+    // same way for closing purposes (deliberately not redesigned here) --
+    // the resulting entry's own pending/confirmed state is visible where
+    // it's actually rendered (Activities/Timeline), not in this one-shot
+    // form.
+  ) => Promise<'confirmed' | 'pending'>;
   onSuccess?: () => void;
 }
 
