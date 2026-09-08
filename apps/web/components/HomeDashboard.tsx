@@ -20,6 +20,7 @@ import type { DailyStory } from '../lib/dailyStory';
 import type { DailyReflection } from '../lib/dailyReflection';
 import type { TomorrowPreview } from '../lib/tomorrowPreview';
 import { deriveNextMeaningfulThing } from '../lib/nextMeaningfulThing';
+import type { PendingActivityPresentationItem } from '../lib/myDayPendingOverlay';
 import { deriveAuraSuggestion, AuraSuggestion } from '../lib/auraSuggests';
 import { MyDayStoryCard } from './MyDayStoryCard';
 import { DayBuilderCard } from './DayBuilderCard';
@@ -148,6 +149,15 @@ interface HomeDashboardProps {
    * day by design, not a loading state. */
   myDayReflection?: DailyReflection | null;
   myDayTomorrowPreview?: TomorrowPreview | null;
+  /** Pending Activity My Day Visibility V1 -- today's still-pending
+   * logEntries (page.tsx's own client-side selectTodaysPendingActivities
+   * call), a client-only presentation composition passed straight through
+   * to YourDayTimeline. Never merged into myDayAgenda itself -- the
+   * canonical server agenda above remains exactly what /api/my-day
+   * returned. timezone is used only to format these rows' displayed
+   * time (agenda rows continue using myDayAgenda.timezone unchanged). */
+  myDayPendingActivities?: PendingActivityPresentationItem[];
+  timezone?: string;
   /** Refetches /api/my-day -- called after "Add to my day"/"Invite
    * someone" succeeds so Your Day reflects the new item immediately. */
   onMyDayChanged?: () => void;
@@ -394,6 +404,8 @@ export function HomeDashboard({
   myDayStory,
   myDayReflection,
   myDayTomorrowPreview,
+  myDayPendingActivities = [],
+  timezone,
   onMyDayChanged,
   onOpenPeople,
   onOpenAgendaItem,
@@ -688,7 +700,13 @@ export function HomeDashboard({
         </section>
       )}
 
-      <YourDayTimeline agenda={myDayAgenda ?? null} onOpenItem={onOpenAgendaItem} onAddSomething={() => onPlanClick?.()} />
+      <YourDayTimeline
+        agenda={myDayAgenda ?? null}
+        timezone={timezone}
+        pendingActivities={myDayPendingActivities}
+        onOpenItem={onOpenAgendaItem}
+        onAddSomething={() => onPlanClick?.()}
+      />
 
       <div style={pairGridStyle}>
         {/* Home Recommendation Hierarchy V1 -- hidden entirely rather than

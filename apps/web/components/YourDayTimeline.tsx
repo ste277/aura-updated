@@ -2,10 +2,11 @@
 
 import React, { useState } from 'react';
 import type { DailyAgenda, DailyAgendaItem } from '../lib/dailyAgenda';
+import type { PendingActivityPresentationItem } from '../lib/myDayPendingOverlay';
 import { formatActivityDuration } from '../lib/activityDuration';
 import { selectCompactAgendaRows, groupAdjacentByFormattedTime } from '../lib/compactAgenda';
 import { colors, spacing, radius, typography } from './theme';
-import { SectionHeader, TextButton, EmptyState } from './ui';
+import { SectionHeader, TextButton, EmptyState, StatusBadge } from './ui';
 
 /**
  * My Day V1 (brief section 8/36) -- "Your Day": one clean chronological
@@ -176,12 +177,62 @@ function GroupedCompletedRows({ items, timezone, onOpen }: { items: DailyAgendaI
   );
 }
 
+/**
+ * Pending Activity My Day Visibility V1 -- a client-local presentation
+ * row only, deliberately NOT an AgendaRow variant: AgendaRow/
+ * GroupedCompletedRows/selectCompactAgendaRows all operate on the
+ * canonical, server-derived DailyAgendaItem shape (and its ordering,
+ * grouping, and compact-view selection logic), none of which this row
+ * participates in -- a still-pending activity was never confirmed by the
+ * server and must never be mixed into that machinery. Same grid layout
+ * and spacing as AgendaRow for visual consistency, StatusBadge (already
+ * used identically for this exact label across Calendar/Timeline/
+ * Insights) instead of the confirmed ✓ marker.
+ */
+function PendingActivityRow({ item, timezone }: { item: PendingActivityPresentationItem; timezone: string }) {
+  const time = item.loggedAt.toLocaleTimeString('en-US', { timeZone: timezone, hour: 'numeric', minute: '2-digit' });
+  return (
+    <div
+      style={{
+        display: 'grid',
+        gridTemplateColumns: '24px 1fr auto',
+        alignItems: 'center',
+        gap: spacing.md,
+        width: '100%',
+        padding: `${spacing.sm}px 0`,
+        borderBottom: `1px solid ${colors.borderSubtle}`,
+        minHeight: 44,
+      }}
+    >
+      <span aria-hidden="true" style={{ fontSize: 15, textAlign: 'center' }}>⏳</span>
+      <span style={{ minWidth: 0, display: 'flex', alignItems: 'center', gap: spacing.sm, flexWrap: 'wrap' }}>
+        <span style={{ ...typography.bodyStrong, fontWeight: 700, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+          {item.activityTitle}
+        </span>
+        <StatusBadge label="Pending sync" tone="caution" />
+      </span>
+      <span style={{ textAlign: 'right', flexShrink: 0 }}>
+        <div style={{ ...typography.meta, color: colors.textMuted }}>{time}</div>
+      </span>
+    </div>
+  );
+}
+
 export function YourDayTimeline({
   agenda,
+  timezone,
+  pendingActivities = [],
   onOpenItem,
   onAddSomething,
 }: {
   agenda: DailyAgenda | null;
+  /** Pending Activity My Day Visibility V1 -- used only for formatting
+   * pending rows' displayed time. Agenda rows are unaffected and
+   * continue using agenda.timezone exactly as before -- both are always
+   * the same Timing Location timezone, this is only needed because
+   * pending rows can exist before agenda has ever loaded. */
+  timezone?: string;
+  pendingActivities?: PendingActivityPresentationItem[];
   onOpenItem?: (item: DailyAgendaItem) => void;
   onAddSomething?: () => void;
 }) {
@@ -210,7 +261,7 @@ export function YourDayTimeline({
           </div>
         }
       />
-      {!agenda || agenda.items.length === 0 ? (
+      {(!agenda || agenda.items.length === 0) && pendingActivities.length === 0 ? (
         <EmptyState
           title="Your day is open"
           description="Aura can help you make room for something meaningful."
@@ -218,9 +269,16 @@ export function YourDayTimeline({
         />
       ) : (
         <div style={{ background: colors.surfaceSubtle, border: `1px solid ${colors.borderSubtle}`, borderRadius: radius.lg, padding: `0 ${spacing.lg}px` }}>
-          {completedRows.length > 0 && <GroupedCompletedRows items={completedRows} timezone={agenda.timezone} onOpen={onOpenItem} />}
+          {/* Pending Activity My Day Visibility V1 -- rendered as its own
+           * clearly-separated section, never interleaved into the
+           * canonical agenda rows below (which remain exactly the
+           * server's own DailyAgenda, unmutated, unmodified ordering). */}
+          {pendingActivities.map((item) => (
+            <PendingActivityRow key={item.id} item={item} timezone={timezone ?? agenda?.timezone ?? 'UTC'} />
+          ))}
+          {completedRows.length > 0 && <GroupedCompletedRows items={completedRows} timezone={agenda!.timezone} onOpen={onOpenItem} />}
           {otherRows.map((item) => (
-            <AgendaRow key={item.id} item={item} timezone={agenda.timezone} onOpen={onOpenItem} isNext={item.id === nextItemId} />
+            <AgendaRow key={item.id} item={item} timezone={agenda!.timezone} onOpen={onOpenItem} isNext={item.id === nextItemId} />
           ))}
           {hiddenCount > 0 && (
             <div style={{ ...typography.caption, color: colors.textMuted, padding: `${spacing.sm}px 0`, textAlign: 'center' }}>
