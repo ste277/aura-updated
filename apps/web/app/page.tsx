@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useEffect, useMemo, useState, useCallback } from 'react';
+import React, { useEffect, useMemo, useState, useCallback, useRef } from 'react';
 import { computeSolarEphemeris } from '../../../packages/astronomy/src/ephemeris';
 import {
   computePanchangWindows,
@@ -20,6 +20,7 @@ import type { DailyAgenda, DailyAgendaItem } from '../lib/dailyAgenda';
 import type { DailyStory } from '../lib/dailyStory';
 import type { DailyReflection } from '../lib/dailyReflection';
 import type { TomorrowPreview } from '../lib/tomorrowPreview';
+import { shouldRefreshMyDayForDateChange } from '../lib/myDayRefreshPolicy';
 
 // UI Modules
 import { HomeDashboard } from '../components/HomeDashboard';
@@ -312,17 +313,72 @@ export default function DashboardPage() {
   // My Day V1 -- same on-mount/on-tab-switch lifecycle as Aura Updates
   // above, no polling. Home-only (unlike Aura Updates, which also serves
   // the Updates tab) since My Day's own agenda/story only render on Home.
+  // My Day Day-Boundary Refresh V1 -- lastLoadedMyDayDateKeyRef records
+  // which Timing Location date this snapshot actually reflects, read
+  // straight off the server's own agenda.localDate (no new server field,
+  // no separate client-side "today" computation that could itself drift
+  // from the server's). Only recorded on a CONFIRMED success -- a failed
+  // fetch leaves the previous key in place so a later natural lifecycle
+  // event retries instead of silently giving up (brief section 17).
+  const lastLoadedMyDayDateKeyRef = useRef<string | null>(null);
   const loadMyDay = useCallback(async () => {
     try {
       const res = await fetch('/api/my-day');
       if (res.ok) {
         const data = await res.json();
         setMyDay({ agenda: data.agenda, story: data.story, reflection: data.reflection ?? null, tomorrowPreview: data.tomorrowPreview ?? null });
+        lastLoadedMyDayDateKeyRef.current = data.agenda.localDate;
       }
     } catch {
       // Best-effort -- Home already degrades gracefully with myDay null.
     }
   }, []);
+
+  // My Day Day-Boundary Refresh V1 -- the one thing that decides whether a
+  // "the app just became visible again" moment is worth a refetch is the
+  // pure shouldRefreshMyDayForDateChange() comparison (lib/myDayRefreshPolicy.ts)
+  // against the user's Timing Location date key (getDatePartsInTimezone,
+  // the exact same timezone-aware helper My Day's own display logic
+  // already uses below -- never browser-local, never UTC). Deliberately
+  // NOT a timer: this only runs from the visibilitychange/focus listeners
+  // wired below, so an idle background tab does no work at all until the
+  // user actually returns to it. myDayDateBoundaryRefreshInFlightRef stops
+  // visibilitychange and focus firing together for the same return-to-app
+  // moment from starting two concurrent fetches.
+  const myDayDateBoundaryRefreshInFlightRef = useRef<string | null>(null);
+  const checkMyDayDateBoundary = useCallback(() => {
+    if (!user || typeof document === 'undefined' || document.visibilityState !== 'visible') return;
+    const currentDateKey = getDatePartsInTimezone(user.timezone, new Date()).dateStr;
+    if (!shouldRefreshMyDayForDateChange(lastLoadedMyDayDateKeyRef.current, currentDateKey)) return;
+    if (myDayDateBoundaryRefreshInFlightRef.current === currentDateKey) return;
+    myDayDateBoundaryRefreshInFlightRef.current = currentDateKey;
+    loadMyDay().finally(() => {
+      if (myDayDateBoundaryRefreshInFlightRef.current === currentDateKey) {
+        myDayDateBoundaryRefreshInFlightRef.current = null;
+      }
+    });
+  }, [user, loadMyDay]);
+
+  // visibilitychange covers the app being backgrounded/foregrounded
+  // (mobile web, Capacitor's WKWebView/Android WebView, or a desktop tab
+  // being switched away and back); window focus covers alt-tabbing back
+  // on desktop without a visibility change. Both are standard DOM events
+  // that already fire inside a Capacitor WebView (it's a real browser
+  // context) -- no @capacitor/app plugin needed just for this. Neither
+  // listener does anything by itself; both only ever call the same
+  // guarded checkMyDayDateBoundary, so there is exactly one decision point.
+  useEffect(() => {
+    if (typeof document === 'undefined') return;
+    const handleVisibilityChange = () => {
+      if (document.visibilityState === 'visible') checkMyDayDateBoundary();
+    };
+    document.addEventListener('visibilitychange', handleVisibilityChange);
+    window.addEventListener('focus', checkMyDayDateBoundary);
+    return () => {
+      document.removeEventListener('visibilitychange', handleVisibilityChange);
+      window.removeEventListener('focus', checkMyDayDateBoundary);
+    };
+  }, [checkMyDayDateBoundary]);
 
   // Web Push V1 (brief section 10) -- when a push notification is clicked
   // while Aura is ALREADY open, the service worker focuses this tab and
@@ -869,6 +925,17 @@ export default function DashboardPage() {
                 : item
             )
           );
+          // Your Day Ghost Activities + Logged Activity Requires Refresh V1
+          // -- a confirmed server-side log can change today's agenda (a
+          // linked Plan flips to COMPLETED, or a bare log becomes a new
+          // COMPLETED_ACTIVITY row), but myDay state is a separate snapshot
+          // from logEntries and was never re-fetched here. Reuses the exact
+          // same onCreated -> onMyDayChanged -> loadMyDay() pattern Plan
+          // creation (MyDayStoryCard) and Day Builder Add (DayBuilderCard)
+          // already use, and only fires after a CONFIRMED success -- never
+          // on the offline-queue/failure branches below, so a failed log
+          // never makes Your Day look like it succeeded.
+          loadMyDay();
         } else {
           // Buffer in local storage queue if server returns non-200
           const rawQueue = localStorage.getItem('offline_habit_queue');
@@ -884,7 +951,7 @@ export default function DashboardPage() {
         localStorage.setItem('offline_habit_queue', JSON.stringify(queue));
       }
     },
-    [activeType]
+    [activeType, loadMyDay]
   );
 
   const handleLogout = useCallback(async () => {
