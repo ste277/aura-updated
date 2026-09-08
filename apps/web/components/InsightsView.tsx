@@ -8,6 +8,7 @@ import { classifyInsightsWindow, insightsWindowWeight } from '../lib/insightsWin
 import { deriveInsightsEvidenceState } from '../lib/insightsEvidence';
 import { colors, spacing, typography, radius } from './theme';
 import { PageHeader, SegmentedControl, SurfaceCard, StatusBadge, TextButton, EmptyState } from './ui';
+import { LoggedEntryItem } from './CalendarViewSection';
 
 /**
  * Insights Timezone Consistency V1 -- a calendar date's weekday, formatted
@@ -26,16 +27,13 @@ function formatWeekdayLabel(dateKey: string, style: 'narrow' | 'short'): string 
   return anchor.toLocaleDateString('en-US', { weekday: style, timeZone: 'UTC' });
 }
 
-export interface LoggedEntryItem {
-  id: string;
-  activityTitle: string;
-  activeWindow: string;
-  loggedAt: Date;
-  durationMinutes?: number;
-  notes?: string | null;
-  logSource?: 'AURA_PLANNED' | 'AURA_DO_NOW' | 'MANUAL' | 'OVERRIDE_CAUTION';
-  activitySignificance?: 'LOW' | 'MEDIUM' | 'HIGH';
-}
+// Pending Activity Visual Consistency V1 -- this used to be a second,
+// independently-declared LoggedEntryItem shape that lacked syncStatus,
+// even though the runtime objects this component receives (the exact
+// same array page.tsx passes to Timeline/CalendarViewSection) always
+// carry it. Reusing the canonical type (already the one Timeline.tsx
+// imports) instead of maintaining a third incompatible copy.
+export type { LoggedEntryItem };
 
 interface InsightsViewProps {
   /** Insights Timezone Consistency V1 -- the owner's current Timing
@@ -87,7 +85,15 @@ export function InsightsView({ timezone, logEntries = [], assistantInsight }: In
   // ANALYTICS & INSIGHTS ENGINE
   // ---------------------------------------------------------------------------
   const analytics = useMemo(() => {
-    const totalActivities = logEntries.length;
+    // Pending Activity Visual Consistency V1 -- product decision: pending
+    // (not yet server-confirmed) HabitLogs must not influence evidence-based
+    // Insights. Every calculation below uses confirmedLogEntries, never the
+    // raw logEntries prop -- only the separate Recent Activity Trail render
+    // (outside this useMemo) is allowed to show the full, unfiltered list,
+    // and only because it visibly labels pending entries rather than
+    // treating them as settled evidence.
+    const confirmedLogEntries = logEntries.filter((entry) => entry.syncStatus !== 'pending');
+    const totalActivities = confirmedLogEntries.length;
     const now = new Date();
 
     // Insights Timezone Consistency V1 -- the ONE timezone-normalization
@@ -99,7 +105,7 @@ export function InsightsView({ timezone, logEntries = [], assistantInsight }: In
     // 7-day trend, the daypart counts, the streak set, and the This-Month
     // filter below all agree on the exact same observation for a given
     // log, computed once.
-    const observations = new Map(logEntries.map((entry) => [entry.id, toInsightsObservation(new Date(entry.loggedAt), timezone)]));
+    const observations = new Map(confirmedLogEntries.map((entry) => [entry.id, toInsightsObservation(new Date(entry.loggedAt), timezone)]));
     const observationOf = (entry: LoggedEntryItem) => observations.get(entry.id)!;
 
     // 1. 30-Day Habit Consistency Heatmap -- 30 Timing-Location calendar
@@ -108,7 +114,7 @@ export function InsightsView({ timezone, logEntries = [], assistantInsight }: In
     const heatmapDateKeys = lastNCalendarDateKeys(timezone, now, 30);
     const heatmapDays = heatmapDateKeys.map((dateKey) => {
       const day = Number(dateKey.split('-')[2]);
-      const dayLogs = logEntries.filter((e) => observationOf(e).dateKey === dateKey);
+      const dayLogs = confirmedLogEntries.filter((e) => observationOf(e).dateKey === dateKey);
 
       return {
         dateStr: dateKey,
@@ -134,7 +140,7 @@ export function InsightsView({ timezone, logEntries = [], assistantInsight }: In
     //     distinct "no data" state, never silently substitute a number.
     const past7DateKeys = lastNCalendarDateKeys(timezone, now, 7);
     const past7Days = past7DateKeys.map((dateKey) => {
-      const dayLogs = logEntries.filter((e) => observationOf(e).dateKey === dateKey);
+      const dayLogs = confirmedLogEntries.filter((e) => observationOf(e).dateKey === dateKey);
 
       const score: number | null =
         dayLogs.length > 0
@@ -165,7 +171,7 @@ export function InsightsView({ timezone, logEntries = [], assistantInsight }: In
     // all -- the same NO_DATA-vs-real-zero distinction every other fixed
     // metric in this PR now preserves.
     const past7DateKeySet = new Set(past7DateKeys);
-    const past7Logs = logEntries.filter((e) => past7DateKeySet.has(observationOf(e).dateKey));
+    const past7Logs = confirmedLogEntries.filter((e) => past7DateKeySet.has(observationOf(e).dateKey));
     const sevenDayAlignmentScore: number | null =
       past7Logs.length > 0
         ? Math.round((past7Logs.reduce((sum, e) => sum + insightsWindowWeight(e.activeWindow), 0) / past7Logs.length) * 100)
@@ -177,7 +183,7 @@ export function InsightsView({ timezone, logEntries = [], assistantInsight }: In
     // deliberately distinct from a Panchang solar window (Abhijit/Rahu
     // Kalam/etc.) -- see classifyDayPart()'s own doc comment.
     const todCounts = { morning: 0, afternoon: 0, evening: 0, night: 0 };
-    logEntries.forEach((e) => {
+    confirmedLogEntries.forEach((e) => {
       const dayPart = observationOf(e).dayPart;
       if (dayPart === 'MORNING') todCounts.morning++;
       else if (dayPart === 'AFTERNOON') todCounts.afternoon++;
@@ -192,7 +198,7 @@ export function InsightsView({ timezone, logEntries = [], assistantInsight }: In
     // throughout (the old unpadded "y-m-d" variant is gone). Control flow
     // is otherwise IDENTICAL to the previous browser-local version,
     // including the existing today-may-be-empty grace.
-    const loggedDaysSet = new Set(logEntries.map((entry) => observationOf(entry).dateKey));
+    const loggedDaysSet = new Set(confirmedLogEntries.map((entry) => observationOf(entry).dateKey));
 
     let streak = 0;
     let cursor = todayDateKey(timezone, now);
@@ -227,7 +233,7 @@ export function InsightsView({ timezone, logEntries = [], assistantInsight }: In
     // boundary would misrepresent the user's real data, not correct it.
     const todayKey = todayDateKey(timezone, now);
     const [currentYear, currentMonth] = todayKey.split('-').map(Number);
-    const monthEntries = logEntries.filter((e) => isInCalendarMonth(observationOf(e).dateKey, currentYear, currentMonth));
+    const monthEntries = confirmedLogEntries.filter((e) => isInCalendarMonth(observationOf(e).dateKey, currentYear, currentMonth));
     const monthTotalActivities = monthEntries.length;
     let monthWeightedAlignment = 0;
     let monthAuraGuidedCount = 0;
@@ -270,7 +276,7 @@ export function InsightsView({ timezone, logEntries = [], assistantInsight }: In
     const windowCounts: Record<string, number> = {};
     const frictionLogs: LoggedEntryItem[] = [];
 
-    logEntries.forEach((entry) => {
+    confirmedLogEntries.forEach((entry) => {
       const win = (entry.activeWindow || 'NEUTRAL').toUpperCase().replace(/_/g, ' ');
       windowCounts[win] = (windowCounts[win] || 0) + 1;
 
@@ -319,7 +325,7 @@ export function InsightsView({ timezone, logEntries = [], assistantInsight }: In
         ? Math.min(100, Math.max(0, Math.round((weightedAlignment / totalActivities) * 100)))
         : null;
 
-    const resolvedDurations = logEntries.map((e) => e.durationMinutes ?? 30);
+    const resolvedDurations = confirmedLogEntries.map((e) => e.durationMinutes ?? 30);
     const totalMinutes = resolvedDurations.reduce((sum, minutes) => sum + minutes, 0);
     const formattedHours = `${(totalMinutes / 60).toFixed(1)} hrs`;
     const auraGuidedCount = auraPlannedCount + auraDoNowCount;
@@ -997,8 +1003,14 @@ export function InsightsView({ timezone, logEntries = [], assistantInsight }: In
                 >
                   <div style={{ minWidth: 0 }}>
                     <span style={{ color: '#f8fafc', fontWeight: 600 }}>{entry.activityTitle}</span>
-                    <div style={{ marginTop: 3 }}>
+                    <div style={{ marginTop: 3, display: 'flex', alignItems: 'center', gap: 6 }}>
                       <SourceBadge source={entry.logSource ?? 'MANUAL'} />
+                      {/* Pending Activity Visual Consistency V1 -- this recent-activity
+                       * display is allowed to show a not-yet-confirmed entry (unlike
+                       * every evidence-based calculation above, which excludes it via
+                       * confirmedLogEntries), but only when it's visibly labeled as
+                       * such -- never presented identically to a confirmed log. */}
+                      {entry.syncStatus === 'pending' && <StatusBadge label="Pending sync" tone="caution" />}
                     </div>
                   </div>
                   <span style={{ color: '#4ade80', fontFamily: 'monospace', fontSize: 11, whiteSpace: 'nowrap' }}>{entry.activeWindow}</span>
