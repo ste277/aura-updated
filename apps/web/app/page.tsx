@@ -1063,11 +1063,30 @@ export default function DashboardPage() {
     return res.json();
   }, []);
 
+  // Plan Log -> My Day Refresh Consistency V1 -- POST /api/plans/[planId]/log
+  // (logPlannedActivity) is a single DB transaction: a 2xx response is
+  // unconditional proof BOTH the HabitLog insert and the PlannedActivity
+  // status update committed together (audited, not assumed -- see
+  // logPlannedActivity's own BEGIN/COMMIT). loadUserDataAndLogs already
+  // refreshes user/logEntries/habits/plannedActivities on that same
+  // confirmed-success signal, but never touched myDay -- Your Day
+  // Timeline, Daily Story, and the Next Best Moment selection all stayed
+  // on their pre-log snapshot until an unrelated event (a tab switch, a
+  // day-boundary check) happened to refetch it. One shared callback, used
+  // at every confirmed Plan-log call site, closes that gap the same way
+  // PR #86 already closed it for direct HabitLog logging: both refreshes
+  // are independent GETs, run concurrently, and -- like every other
+  // loadMyDay() call site in this file -- only ever invoked after a real
+  // server confirmation, never from a catch/failure path.
+  const handlePlanLogged = useCallback(async () => {
+    await Promise.all([loadUserDataAndLogs(), loadMyDay()]);
+  }, [loadUserDataAndLogs, loadMyDay]);
+
   const handleLogPlanFromHome = useCallback(async (planId: string) => {
     const res = await fetch(`/api/plans/${planId}/log`, { method: 'POST' });
     if (!res.ok) throw new Error('Unable to log planned activity.');
-    await loadUserDataAndLogs();
-  }, [loadUserDataAndLogs]);
+    await handlePlanLogged();
+  }, [handlePlanLogged]);
 
   const handleOpenPlan = useCallback((activity?: string) => {
     const cleanActivity = activity?.trim();
@@ -1279,7 +1298,7 @@ export default function DashboardPage() {
             userName={userNameDisplay}
             activeWindow={activeType}
             cityName={user.cityName}
-            onPlanLogged={loadUserDataAndLogs}
+            onPlanLogged={handlePlanLogged}
             onViewTimeline={() => setActiveTab('timeline')}
             onOpenPlan={handleOpenPlan}
             onOpenPanchang={handleOpenPanchang}
@@ -1291,7 +1310,7 @@ export default function DashboardPage() {
           <PlanWithAuraView
             onTimingSearch={handleTimingSearch}
             onViewDay={() => setActiveTab('timeline')}
-            onPlanLogged={loadUserDataAndLogs}
+            onPlanLogged={handlePlanLogged}
             timezone={user.timezone}
             initialActivity={planPrefill?.activity}
             initialActivityKey={planPrefill?.key}
@@ -1382,7 +1401,7 @@ export default function DashboardPage() {
             onBack={() => setActiveTab('explore')}
             onOpenPanchangCalendar={handleOpenPanchang}
             onViewFullPanchang={handleViewFullPanchang}
-            onPlanLogged={loadUserDataAndLogs}
+            onPlanLogged={handlePlanLogged}
             onOpenBirthProfile={() => setActiveTab('chart')}
             onOpenPeople={() => { setPeopleReturnTo('you'); setActiveTab('people'); }}
             initialActivityId={muhurthamActivityJump?.activityId}
