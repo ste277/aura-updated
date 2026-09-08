@@ -135,3 +135,87 @@ jobs:
           DATABASE_URL: postgresql://user:pass@localhost:5432/placeholder
           AUTH_SECRET: ci-placeholder-secret-not-for-production
         run: npm run build
+  db-migration-validation:
+    # Database Migration Baseline Reconciliation V1 (PR A) -- proves the
+    # complete repository migration chain (apps/web/prisma/migrations/,
+    # 0001 through the latest) builds a brand-new Postgres database from
+    # zero via the exact command production uses (`prisma migrate deploy`
+    # -- confirmed via the real _prisma_migrations ledger to be the
+    # mechanism already in historical use, not merely intended). This is
+    # the ONLY thing this job proves: that the migration chain itself is
+    # complete and internally consistent. It does NOT prove production has
+    # received any given migration -- that remains a separate, deployment-
+    # time concern (PR B). Disposable, ephemeral Postgres service only;
+    # no production secret of any kind is used or required.
+    name: Database migration validation
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: aura_ci
+          POSTGRES_PASSWORD: aura_ci
+          POSTGRES_DB: aura_ci
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U aura_ci -d aura_ci"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    env:
+      # Disposable CI-only database -- never production, never Vercel/Neon.
+      DATABASE_URL: postgresql://aura_ci:aura_ci@localhost:5432/aura_ci
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+      - name: Install web deps
+        working-directory: apps/web
+        run: npm install
+      - name: Apply the complete migration chain to a fresh database
+        working-directory: apps/web
+        run: npx prisma migrate deploy
+      - name: Verify migration status is up to date
+        working-directory: apps/web
+        run: npx prisma migrate status
+      - name: Verify every repository migration was recorded as applied
+        run: |
+          set -euo pipefail
+          expected="$(find apps/web/prisma/migrations -mindepth 1 -maxdepth 1 -type d | wc -l | tr -d ' ')"
+          # count(DISTINCT migration_name), not raw row count: a migration
+          # that failed once and succeeded on retry (this has happened in
+          # production's own real ledger) legitimately has more than one
+          # row for the same name -- only the successful, non-rolled-back
+          # name should count once.
+          applied="$(PGPASSWORD=aura_ci psql -h localhost -U aura_ci -d aura_ci -tAc \
+            "SELECT count(DISTINCT migration_name) FROM \"_prisma_migrations\" WHERE finished_at IS NOT NULL AND rolled_back_at IS NULL;")"
+          echo "expected migration directories: $expected"
+          echo "successfully applied, recorded migrations: $applied"
+          if [ "$expected" != "$applied" ]; then
+            echo "::error::Migration count mismatch: $expected migration directories under apps/web/prisma/migrations/ but only $applied recorded as successfully applied in _prisma_migrations."
+            exit 1
+          fi
+      - name: Verify the two columns behind the recent production incidents
+        run: |
+          set -euo pipefail
+          PGPASSWORD=aura_ci psql -h localhost -U aura_ci -d aura_ci -v ON_ERROR_STOP=1 -c "
+            DO \$\$
+            BEGIN
+              IF NOT EXISTS (
+                SELECT 1 FROM information_schema.columns
+                WHERE table_name = 'HabitLog' AND column_name = 'activityId'
+                  AND data_type = 'text' AND is_nullable = 'YES'
+              ) THEN
+                RAISE EXCEPTION 'HabitLog.activityId is missing or has an unexpected shape (expected: text, nullable)';
+              END IF;
+              IF NOT EXISTS (
+                SELECT 1 FROM information_schema.columns
+                WHERE table_name = 'PlannedActivity' AND column_name = 'activityId'
+                  AND data_type = 'text' AND is_nullable = 'YES'
+              ) THEN
+                RAISE EXCEPTION 'PlannedActivity.activityId is missing or has an unexpected shape (expected: text, nullable)';
+              END IF;
+            END \$\$;
+          "
