@@ -547,19 +547,20 @@ export function PlanWithAuraView({ onTimingSearch, onViewDay, onPlanLogged, time
       onPlanLogged?.();
       triggerHaptic('success');
     } catch {
-      const loggedAt = new Date().toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' });
-      setSavedPlans((plans) => plans.map((item) => item.id === plan.id
-        ? {
-            ...item,
-            status: 'LOGGED',
-            loggedAt,
-            note: 'Logged',
-            details: `${item.details} Logged at ${loggedAt}.`,
-          }
-        : item
-      ));
-      setExpandedPlanId(plan.id);
-      triggerHaptic('success');
+      // Bug: Logged Plan Returns To Upcoming Plans After Page Refresh --
+      // this previously faked a local 'LOGGED' state on ANY failure
+      // (non-2xx status or a network/exception), the same "trust the
+      // client over the server" mistake handleSavePlan's own catch above
+      // already learned not to make. POST /api/plans/[planId]/log never
+      // actually persisted anything in that case, so status stayed
+      // UPCOMING in the database -- the very next GET /api/plans (a page
+      // reload, or even this same session's next fetch) always overwrote
+      // the fake optimistic entry with the true, still-unlogged row. Real
+      // completion state now comes exclusively from the server's own
+      // response above; a failure surfaces as a real, visible error
+      // instead of a false success.
+      setError('Unable to log this activity. Please check your connection and try again.');
+      triggerHaptic('warning');
     } finally {
       setPlanActionStates((states) => {
         const next = { ...states };
