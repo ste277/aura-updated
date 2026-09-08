@@ -90,7 +90,15 @@ interface HomeDashboardProps {
     // activityTitle. Omitted/undefined for manual/free-text logging and
     // for any card that has no real catalog counterpart.
     activityId?: string
-  ) => Promise<void>;
+    // Good Right Now / Log Activity Failure State Correctness V1 -- the
+    // promise now resolves to the actual outcome instead of always
+    // resolving void: 'confirmed' means the server persisted the row
+    // synchronously; 'pending' means a genuine network failure queued it
+    // for later replay (never yet confirmed). A definitive server
+    // rejection (4xx/5xx) rejects the promise instead of resolving --
+    // callers' own catch blocks (already written, previously unreachable)
+    // now actually run.
+  ) => Promise<'confirmed' | 'pending'>;
   onSubmitReflection?: (outputLevel: 'LOW' | 'MODERATE' | 'PEAK_FLOW', followedGuidance: boolean) => Promise<void>;
   onLogPlan?: (planId: string) => Promise<void>;
   onNextShiftClick?: () => void;
@@ -995,7 +1003,13 @@ function GoodRightNowCard({
    * for the rest of this visit -- see goodRightNow's own doc comment. */
   onLogged?: (title: string) => void;
 }) {
-  const [status, setStatus] = useState<'idle' | 'loading' | 'logged' | 'error'>('idle');
+  // Good Right Now / Log Activity Failure State Correctness V1 -- 'pending'
+  // added: a genuine network failure queued the log for later replay,
+  // never yet confirmed by the server. Previously 'logged' fired
+  // unconditionally after ANY outcome (onLogActivity could not reject),
+  // including a definitive 4xx/5xx server rejection -- the card showed a
+  // permanent checkmark for an activity that was never actually persisted.
+  const [status, setStatus] = useState<'idle' | 'loading' | 'logged' | 'pending' | 'error'>('idle');
   const [loggedAtLabel, setLoggedAtLabel] = useState('');
   const [showDurationPicker, setShowDurationPicker] = useState(false);
   // Duration Display Polish (brief section 9) -- a `status` state check
@@ -1026,10 +1040,19 @@ function GoodRightNowCard({
     setShowDurationPicker(false);
     // Mark this title exempt from the "already logged today" swap BEFORE
     // calling onLogActivity, not after -- handleLogActivity (page.tsx)
-    // updates loggedActivitiesToday synchronously (before its own network
-    // call even resolves), so calling onLogged() only after await would
-    // lose the race: the parent could already have swapped this card out
-    // (and unmounted this component) before it ever reached setStatus('logged').
+    // pushes its own optimistic entry into logEntries synchronously
+    // (before its network call even resolves), and loggedActivitiesToday
+    // is itself derived from logEntries, so calling onLogged() only after
+    // await would lose the race: the parent could already have swapped
+    // this card out for a different suggestion before it ever reached a
+    // final status here. Deliberately kept early even after Good Right Now
+    // / Log Activity Failure State Correctness V1: on a genuine failure
+    // below, handleLogActivity now rolls its own optimistic entry back out
+    // of logEntries, which makes loggedActivitiesToday (and so
+    // selectGoodRightNowCards' own isLogged check) forget this title again
+    // regardless of this now-stale exemption -- moving this call to only
+    // fire after confirmation would just reopen the original mid-flight
+    // swap bug for the SUCCESS path instead.
     onLogged?.(planTitle);
     try {
       // overrideWindowType reuses the CURRENT structured window (brief
@@ -1042,25 +1065,37 @@ function GoodRightNowCard({
       // card-slot identifier like "brahma-focus"). Undefined for the two
       // curated cards that intentionally have no catalog counterpart (e.g.
       // "whatever meal you're eating") -- omitted, not fabricated.
-      await onLogActivity(planTitle, undefined, undefined, activeWindowName, durationMinutes, 'AURA_DO_NOW', definition?.muhurta.significance, card.activityId);
-      setStatus('logged');
-      setLoggedAtLabel(new Date().toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' }));
-      triggerHaptic('success');
-      trackEvent('ACTIVITY_LOGGED_NOW', {
-        metadata: {
-          ...(card.activityId ? { activityId: card.activityId } : {}),
-          source: 'HOME',
-          windowType: normalizeWindowType(activeWindowName),
-          actionType: action === 'BOTH' ? 'START_NOW' : (action as 'LOG_NOW' | 'START_NOW'),
-          durationMode,
-          durationMinutes,
-        },
-      });
+      const outcome = await onLogActivity(planTitle, undefined, undefined, activeWindowName, durationMinutes, 'AURA_DO_NOW', definition?.muhurta.significance, card.activityId);
+      if (outcome === 'pending') {
+        // Good Right Now / Log Activity Failure State Correctness V1 -- a
+        // genuine network failure queued this for later replay. Not
+        // confirmed yet -- no success haptic, no ACTIVITY_LOGGED_NOW
+        // analytics (that event must mean confirmed persistence), no
+        // "Logged at" timestamp.
+        setStatus('pending');
+      } else {
+        setStatus('logged');
+        setLoggedAtLabel(new Date().toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' }));
+        triggerHaptic('success');
+        trackEvent('ACTIVITY_LOGGED_NOW', {
+          metadata: {
+            ...(card.activityId ? { activityId: card.activityId } : {}),
+            source: 'HOME',
+            windowType: normalizeWindowType(activeWindowName),
+            actionType: action === 'BOTH' ? 'START_NOW' : (action as 'LOG_NOW' | 'START_NOW'),
+            durationMode,
+            durationMinutes,
+          },
+        });
+      }
     } catch {
-      // handleLogActivity (page.tsx) is itself optimistic/offline-resilient
-      // and rarely rejects -- this mainly guards the case onLogActivity is
-      // missing entirely. See the completion report for why a genuine
-      // server failure has no reliable signal to surface here today.
+      // Good Right Now / Log Activity Failure State Correctness V1 --
+      // handleLogActivity (page.tsx) now genuinely rejects on a definitive
+      // 4xx/5xx server response (it previously never rejected at all for a
+      // real server failure, only for onLogActivity being missing
+      // entirely) -- this branch is now reachable for real failures, and
+      // the card correctly falls through to its normal actionable button
+      // below with a visible error, not a false "Logged" state.
       setStatus('error');
     } finally {
       // Only the 'error' branch re-renders a clickable button again ('logged'
@@ -1084,12 +1119,19 @@ function GoodRightNowCard({
     }
   };
 
-  if (status === 'logged') {
+  if (status === 'logged' || status === 'pending') {
+    // Good Right Now / Log Activity Failure State Correctness V1 -- same
+    // "no more button" card shape for both, but visibly distinct: pending
+    // must never look like a confirmed, persisted log.
     return (
       <div style={goodRightNowCardStyle}>
         <span style={{ fontSize: 20 }}>{card.icon ?? '✨'}</span>
         <span style={{ marginTop: 8, color: '#f8fafc', fontSize: 12, fontWeight: 800, lineHeight: 1.3 }}>{card.title}</span>
-        <span style={{ marginTop: 'auto', paddingTop: 8, color: '#4ade80', fontSize: 11, fontWeight: 850 }}>✓ Logged at {loggedAtLabel}</span>
+        {status === 'logged' ? (
+          <span style={{ marginTop: 'auto', paddingTop: 8, color: '#4ade80', fontSize: 11, fontWeight: 850 }}>✓ Logged at {loggedAtLabel}</span>
+        ) : (
+          <span style={{ marginTop: 'auto', paddingTop: 8, color: '#facc15', fontSize: 11, fontWeight: 850 }}>⏳ Saved offline · will sync</span>
+        )}
       </div>
     );
   }

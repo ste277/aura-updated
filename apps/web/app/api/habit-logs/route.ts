@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { createHabitLog, getUserById, listHabitLogsForInsights, INSIGHTS_HISTORY_DAYS } from '../../../lib/db';
+import { createHabitLog, getHabitLogByClientRequestId, getUserById, listHabitLogsForInsights, INSIGHTS_HISTORY_DAYS } from '../../../lib/db';
 import { getSessionFromRequest } from '../../../lib/session';
 import { parseJsonObject } from '../../../lib/request';
 import { resolveHistoricalActiveWindow } from '../../../lib/historicalActivityWindow';
@@ -28,11 +28,25 @@ export async function POST(req: NextRequest) {
   const body = await parseJsonObject(req);
   if (!body) return NextResponse.json({ error: 'A valid JSON request body is required.' }, { status: 400 });
 
-  const { activityTitle, activityId, logTimestamp, notes, durationMinutes, logSource, activitySignificance } = body;
+  const { activityTitle, activityId, logTimestamp, notes, durationMinutes, logSource, activitySignificance, clientRequestId } = body;
   const cleanTitle = typeof activityTitle === 'string' ? activityTitle.trim() : '';
 
   if (!cleanTitle) {
     return NextResponse.json({ error: 'Missing required fields.' }, { status: 400 });
+  }
+
+  // Good Right Now / Log Activity Failure State Correctness V1 -- an
+  // OPTIONAL client-generated id (most callers still omit it). Absent ->
+  // ordinary non-idempotent insert, unchanged from before. Present and
+  // already recorded -> this is a retry of a request whose response never
+  // reached the client (e.g. the original offline-queue POST actually
+  // committed, but the client never saw the 200) -- return the SAME row
+  // instead of creating a duplicate. Never trusted to look up another
+  // user's row: scoped to session.userId, same as every other lookup here.
+  const cleanClientRequestId = typeof clientRequestId === 'string' && clientRequestId.trim() ? clientRequestId.trim() : null;
+  if (cleanClientRequestId) {
+    const existing = await getHabitLogByClientRequestId(session.userId, cleanClientRequestId);
+    if (existing) return NextResponse.json(existing);
   }
 
   // Prospective Canonical Activity Identity V1 -- activityId is UNTRUSTED
@@ -112,6 +126,7 @@ export async function POST(req: NextRequest) {
     notes: notes ? String(notes).trim() : undefined,
     logSource: parseLogSource(logSource),
     activitySignificance: parseActivitySignificance(activitySignificance),
+    clientRequestId: cleanClientRequestId,
   });
 
   return NextResponse.json(entry);

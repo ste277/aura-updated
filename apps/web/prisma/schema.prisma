@@ -268,6 +268,19 @@ model HabitLog {
   notes          String?  @db.Text
   logSource      String   @default("MANUAL") // "AURA_PLANNED" | "AURA_DO_NOW" | "MANUAL" | "OVERRIDE_CAUTION"
   activitySignificance String @default("MEDIUM") // "LOW" | "MEDIUM" | "HIGH"
+  // Good Right Now / Log Activity Failure State Correctness V1 (migration
+  // 0032) -- a stable, client-generated id a direct-logging request can
+  // carry so a network-ambiguous retry (queued after the original response
+  // was lost, not necessarily after the original write failed) reuses the
+  // SAME already-committed row instead of creating a duplicate. NULL is the
+  // normal, expected value for every request that doesn't supply one (all
+  // existing rows, and any caller that still doesn't send it) -- never
+  // required, never backfilled. A partial unique index on (userId,
+  // clientRequestId) WHERE clientRequestId IS NOT NULL enforces the actual
+  // dedup guarantee -- Prisma's schema DSL has no partial-index syntax, so
+  // (same precedent as AuraMoment's own partial index from migration 0018)
+  // it lives only in migration 0032's raw SQL, not represented here.
+  clientRequestId String?
 
   @@index([userId, logTimestamp])
 }
