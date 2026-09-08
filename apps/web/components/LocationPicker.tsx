@@ -83,20 +83,37 @@ export function LocationPicker({ currentCity, onChanged }: LocationPickerProps) 
 
     const isStatic = CITY_OPTIONS.some((c) => c.cityName === value);
 
-    const res = await fetch('/api/users/location', {
-      method: 'PATCH',
-      headers: { 'Content-Type': 'application/json' },
-      body: isStatic
-        ? JSON.stringify({ cityName: value })
-        : JSON.stringify({ custom: selectedCity }),
-    });
+    // Timing Location Save Failure State Correctness V1 -- setSaving(false)
+    // previously ran only after a RESOLVED fetch, so a thrown network/fetch
+    // exception (offline, DNS failure, connection reset) skipped it
+    // entirely, leaving this control disabled with no error shown until the
+    // component happened to unmount/remount. finally is now the single,
+    // unconditional cleanup path for both outcomes. onChanged still only
+    // ever fires from the res.ok branch below -- never from catch -- so a
+    // failed save (HTTP or network) still can never reach page.tsx's
+    // handleLocationChanged/loadMyDay/loadAssistantSignals (PR #88).
+    try {
+      const res = await fetch('/api/users/location', {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: isStatic
+          ? JSON.stringify({ cityName: value })
+          : JSON.stringify({ custom: selectedCity }),
+      });
 
-    setSaving(false);
-
-    if (res.ok) {
-      onChanged(selectedCity);
-    } else {
-      setError('Could not update location.');
+      if (res.ok) {
+        onChanged(selectedCity);
+      } else {
+        // Tolerant of a non-JSON/empty error body, same as handleCustomSubmit's
+        // existing failure handling below -- prefer the server's own message,
+        // fall back to a generic one only when it's missing or unusable.
+        const data = await res.json().catch(() => ({}));
+        setError(typeof data.error === 'string' && data.error ? data.error : 'Could not update location.');
+      }
+    } catch {
+      setError("Couldn't save location. Please try again.");
+    } finally {
+      setSaving(false);
     }
   }
 
@@ -156,33 +173,47 @@ export function LocationPicker({ currentCity, onChanged }: LocationPickerProps) 
       timezone: custom.timezone.trim(),
     };
 
-    const res = await fetch('/api/users/location', {
-      method: 'PATCH',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ custom: payload }),
-    });
+    // Timing Location Save Failure State Correctness V1 -- same fix as
+    // handleSelectChange above: setSaving(false) previously ran only after
+    // a RESOLVED fetch, so a thrown network/fetch exception left the submit
+    // button disabled forever with no error shown. finally is now the
+    // single, unconditional cleanup path. The failure branch already
+    // preserved showCustomForm/custom (never reset outside the res.ok
+    // branch) -- that property is untouched, so a retry after either an
+    // HTTP failure or a network failure keeps the user's entered values.
+    // onChanged still only ever fires from the res.ok branch -- never from
+    // catch -- preserving PR #88's confirmed-save boundary.
+    try {
+      const res = await fetch('/api/users/location', {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ custom: payload }),
+      });
 
-    setSaving(false);
+      if (res.ok) {
+        const data = await res.json();
+        const newCity = {
+          cityName: data.cityName,
+          latitude: data.latitude,
+          longitude: data.longitude,
+          timezone: data.timezone,
+        };
 
-    if (res.ok) {
-      const data = await res.json();
-      const newCity = {
-        cityName: data.cityName,
-        latitude: data.latitude,
-        longitude: data.longitude,
-        timezone: data.timezone,
-      };
-
-      // Add to local custom cities list so it shows immediately in the dropdown
-      setCustomCities((prev) => [newCity, ...prev.filter((c) => c.cityName !== newCity.cityName)]);
-      onChanged(newCity);
-      setShowCustomForm(false);
-      setCustom({ cityName: '', latitude: '', longitude: '', timezone: '' });
-      setTouched({ cityName: false, latitude: false, longitude: false, timezone: false });
-      setSubmitAttempted(false);
-    } else {
-      const data = await res.json().catch(() => ({}));
-      setError(data.error ?? 'Could not save that location.');
+        // Add to local custom cities list so it shows immediately in the dropdown
+        setCustomCities((prev) => [newCity, ...prev.filter((c) => c.cityName !== newCity.cityName)]);
+        onChanged(newCity);
+        setShowCustomForm(false);
+        setCustom({ cityName: '', latitude: '', longitude: '', timezone: '' });
+        setTouched({ cityName: false, latitude: false, longitude: false, timezone: false });
+        setSubmitAttempted(false);
+      } else {
+        const data = await res.json().catch(() => ({}));
+        setError(data.error ?? 'Could not save that location.');
+      }
+    } catch {
+      setError("Couldn't save location. Please try again.");
+    } finally {
+      setSaving(false);
     }
   }
 

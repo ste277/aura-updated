@@ -75,7 +75,12 @@ const onChangedCalls = [...locationPickerSource.matchAll(/onChanged\((selectedCi
 check('LocationPicker calls onChanged exactly twice (curated select + custom submit)', onChangedCalls.length === 2);
 
 function checkOnChangedGuardedByResOk(functionName: string, functionBody: string) {
-  const ifElseMatch = functionBody.match(/if \(res\.ok\) \{([\s\S]*?)\n {4}\} else \{([\s\S]*?)\n {4}\}/);
+  // Indentation-tolerant (\s* rather than a fixed space count) -- Timing
+  // Location Save Failure State Correctness V1 nested this if/else one
+  // level deeper inside a try block, shifting its indentation without
+  // changing the invariant this checks: onChanged only ever fires from
+  // the res.ok branch.
+  const ifElseMatch = functionBody.match(/if \(res\.ok\) \{([\s\S]*?)\n\s*\} else \{([\s\S]*?)\n\s*\}/);
   check(`${functionName} has an if (res.ok) {...} else {...} branch`, ifElseMatch !== null);
   const successBranch = ifElseMatch?.[1] ?? '';
   const failureBranch = ifElseMatch?.[2] ?? '';
