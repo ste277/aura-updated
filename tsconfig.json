@@ -15,7 +15,8 @@
     "test/panchangCalendarLogic.test.ts",
     "test/muhurthamFinderViewLogic.test.ts",
     "test/homeDashboardGoodRightNow.test.ts",
-    "test/nextMomentSurface.test.ts"
+    "test/nextMomentSurface.test.ts",
+    "test/pendingActivityReloadVisibility.test.ts"
   ]
 }
 
