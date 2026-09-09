@@ -33,6 +33,15 @@ export function calculateNatalAscendant(birthMomentUTC: Date, latitude: number, 
   assertValidLongitude(longitude);
 
   const time = Astronomy.MakeTime(birthMomentUTC);
+  // Observer height is fixed at 0 (mean sea level) -- V1 does not accept
+  // or model birth elevation. This is a deliberate, documented
+  // simplification (README.md's own "Observer height" section): the
+  // Ascendant is the DIRECTIONAL ecliptic/horizon intersection, and
+  // elevation's own effect on that direction (dip of horizon) is at most
+  // a few arcminutes even for extreme real-world elevations -- far below
+  // this package's own already-larger residual against independent
+  // validation (see README.md's "Independent known-answer validation"
+  // section) -- and is not modeled in V1.
   const observer = new Astronomy.Observer(latitude, longitude, 0);
 
   const tropicalLongitude = findTropicalAscendantLongitude(time, observer);

@@ -197,6 +197,28 @@ input concerns for resolving a local birth time into a UTC instant
 output (verified by constructing the same instant via `Date.UTC` vs. an
 explicit `+00:00` ISO string and confirming identical output).
 
+## Observer height
+
+`astronomy-engine`'s `Observer` also accepts a height (elevation above
+sea level), used for parallax corrections on nearby bodies. This package
+always passes `0` — V1 does not accept or model birth elevation. This is
+a deliberate simplification: the Ascendant is a purely *directional*
+ecliptic/horizon intersection, and elevation's own effect on that
+direction (horizon dip) is at most a few arcminutes even for extreme
+real-world elevations — smaller than this package's own already-larger
+residual against independent validation (see "Independent known-answer
+validation" below) — and is not modeled in V1.
+
+## Atmospheric refraction
+
+The Ascendant is the **geometric** ecliptic/horizon intersection, not the
+apparent position of an observed body. `HorizonFromVector`'s own
+`refraction` parameter is explicitly passed `null` (verified against
+`astronomy-engine`'s own source: `null`/falsy hits its `!refraction`
+branch, which returns `0.0` — no altitude adjustment at all), so the
+root-finder operates on the unrefracted, purely geometric horizon
+altitude throughout.
+
 ## Polar / high-latitude behavior
 
 For any latitude strictly between the poles, the Ascendant is always

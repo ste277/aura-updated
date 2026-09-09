@@ -138,6 +138,7 @@ check('NATAL_LAGNA_ENGINE_VERSION is the stable literal', NATAL_LAGNA_ENGINE_VER
 check('0 degrees -> Mesha (Aries), index 0', toRashiPlacement(0).rashiIndex === 0 && toRashiPlacement(0).rashiName === 'Mesha');
 check('just below 30 degrees still falls in Mesha', toRashiPlacement(30 - 1e-9).rashiIndex === 0);
 check('EXACTLY 30 degrees -> Vrishabha (Taurus), index 1, not Mesha', toRashiPlacement(30).rashiIndex === 1 && toRashiPlacement(30).rashiName === 'Vrishabha');
+check('just above 30 degrees already falls in Vrishabha (Taurus) -- the full below/at/above triad around one boundary, not just the two endpoints', toRashiPlacement(30 + 1e-9).rashiIndex === 1 && toRashiPlacement(30 + 1e-9).rashiName === 'Vrishabha');
 check('EXACTLY 60 degrees -> Mithuna (Gemini), index 2', toRashiPlacement(60).rashiIndex === 2 && toRashiPlacement(60).rashiName === 'Mithuna');
 check('EXACTLY 90 degrees -> Karka (Cancer), index 3', toRashiPlacement(90).rashiIndex === 3);
 check('EXACTLY 120 degrees -> Simha (Leo), index 4', toRashiPlacement(120).rashiIndex === 4);
@@ -262,11 +263,11 @@ check(
 );
 
 check(
-  'calculateNatalAscendant accepts the exact boundary longitudes -180 and 180',
+  'calculateNatalAscendant accepts the exact boundary longitudes -180 and 180, and -- since they are the SAME geographic meridian -- produce the SAME Ascendant geometry to within floating-point precision (~1e-12 degrees; -180 and +180 are not bit-identical inputs to Math.sin/cos, so exact equality is not expected, only angular agreement far tighter than any astronomically meaningful threshold)',
   (() => {
     const a = calculateNatalAscendant(new Date('2000-01-01T00:00:00.000Z'), 10, -180);
     const b = calculateNatalAscendant(new Date('2000-01-01T00:00:00.000Z'), 10, 180);
-    return Number.isFinite(a.tropicalLongitude) && Number.isFinite(b.tropicalLongitude);
+    return Number.isFinite(a.tropicalLongitude) && Number.isFinite(b.tropicalLongitude) && Math.abs(a.tropicalLongitude - b.tropicalLongitude) < 1e-9 && a.rashiIndex === b.rashiIndex;
   })()
 );
 
@@ -408,6 +409,53 @@ check(
     const descendantAltitude = probe(descendant).altitude;
     const descendantAzimuth = probe(descendant).azimuth;
     return Math.abs(descendantAltitude) < 1e-6 && descendantAzimuth > 180 && descendantAzimuth < 360;
+  })()
+);
+
+check(
+  'RISING VS SETTING ROOT DISAMBIGUATION (direct proof, not merely a final-answer check): independently re-scanning for ALL zero-altitude ecliptic/horizon crossings (a separate scan+bisect loop in this test, not calling ascendant.ts\'s own bracket list) finds exactly 2 roots -- one eastern (azimuth in (0,180)), one western (azimuth in (180,360)) -- and confirms findTropicalAscendantLongitude returns the EASTERN one, not the western Descendant',
+  (() => {
+    const time = Astronomy.MakeTime(ENSCHEDE_BIRTH);
+    const observer = new Astronomy.Observer(EXT_ENSCHEDE_LATITUDE, ENSCHEDE_LON, 0);
+    const probe = makeEclipticHorizonProbe(time, observer);
+
+    const sampleCount = 3600; // finer than production's own 1440-sample scan, deliberately independent
+    const roots: number[] = [];
+    let previousAltitude = probe(0).altitude;
+    for (let i = 1; i <= sampleCount; i++) {
+      const lambda = (360 * i) / sampleCount;
+      const currentAltitude = probe(lambda % 360).altitude;
+      const crossed = (previousAltitude <= 0 && currentAltitude > 0) || (previousAltitude >= 0 && currentAltitude < 0);
+      if (crossed) {
+        let lo = lambda - 360 / sampleCount;
+        let hi = lambda;
+        let loAltitude = previousAltitude;
+        for (let iteration = 0; iteration < 60; iteration++) {
+          const mid = (lo + hi) / 2;
+          const midAltitude = probe(normalize360(mid)).altitude;
+          if ((loAltitude <= 0 && midAltitude > 0) || (loAltitude >= 0 && midAltitude < 0)) {
+            hi = mid;
+          } else {
+            lo = mid;
+            loAltitude = midAltitude;
+          }
+        }
+        roots.push(normalize360((lo + hi) / 2));
+      }
+      previousAltitude = currentAltitude;
+    }
+
+    const easternRoots = roots.filter((r) => { const az = probe(r).azimuth; return az > 0 && az < 180; });
+    const westernRoots = roots.filter((r) => { const az = probe(r).azimuth; return az > 180 && az < 360; });
+    const productionAscendant = findTropicalAscendantLongitude(time, observer);
+
+    return (
+      roots.length === 2 &&
+      easternRoots.length === 1 &&
+      westernRoots.length === 1 &&
+      Math.abs(normalize360(productionAscendant - easternRoots[0])) < 1e-6 &&
+      Math.abs(normalize360(productionAscendant - westernRoots[0])) > 1
+    );
   })()
 );
 
