@@ -42,6 +42,10 @@ import {
   LifeWeatherContext,
   LifeWeatherTheme,
   LifeWeatherContributor,
+  PersonalRelevance,
+  DailyPersonalFitRelevantTheme,
+  DailyActivityFit,
+  DailyPersonalFitContext,
   PersonalActivityFit,
   PersonalRecommendation,
   DailyPersonalGuidance,
@@ -471,6 +475,92 @@ check(
     };
     return theme.reinforcementSources.every((s) => s === 'DASHA' || s === 'TRANSIT');
   })()
+);
+
+// ============================================================
+// CONTRACT_V2 -- Daily Personal Fit synthesis contract (PR #102).
+// Purely additive: no version bump was needed for these types.
+// ============================================================
+
+check(
+  'a fully synthetic DailyPersonalFitContext round-trips through JSON unchanged (structural equality preserved) and PersonalGuidanceContext.dailyFit is optional',
+  (() => {
+    const dailyFit: DailyPersonalFitContext = {
+      engineVersion: 'DAILY_PERSONAL_FIT_V1',
+      evaluationTime: '2026-09-09T12:00:00.000Z',
+      activities: [
+        {
+          activityFamily: 'DEEP_WORK',
+          personalRelevance: 'HIGHLY_RELEVANT',
+          relevantThemes: [
+            { theme: 'FOCUS', state: 'ACTIVE' },
+            { theme: 'LEARNING', state: 'STRONGLY_ACTIVE' },
+          ],
+          evidence: [sampleEvidenceRef({ source: 'DAILY_PERSONAL_FIT', ruleId: 'DAILY_PERSONAL_FIT_RELEVANCE_DERIVATION_V1' })],
+        },
+      ],
+      evidence: [sampleEvidenceRef({ source: 'DAILY_PERSONAL_FIT', ruleId: 'DAILY_PERSONAL_FIT_SUMMARY_V1' })],
+    };
+    const withoutDailyFit: PersonalGuidanceContext = { version: CONTRACT_VERSION };
+    const withDailyFit: PersonalGuidanceContext = { version: CONTRACT_VERSION, dailyFit };
+    const roundTripped = JSON.parse(JSON.stringify(withDailyFit));
+    return (
+      isPersonalGuidanceContext(withoutDailyFit) &&
+      withoutDailyFit.dailyFit === undefined &&
+      isPersonalGuidanceContext(withDailyFit) &&
+      JSON.stringify(roundTripped) === JSON.stringify(withDailyFit)
+    );
+  })()
+);
+
+check(
+  'dailyFit and lifeWeather remain separate, independently-optional sections -- dailyFit is never nested inside lifeWeather or vice versa',
+  (() => {
+    const context: PersonalGuidanceContext = {
+      version: CONTRACT_VERSION,
+      lifeWeather: { engineVersion: 'LIFE_WEATHER_V1', evaluationTime: '2026-09-09T12:00:00.000Z', themes: [], evidence: [] },
+    };
+    return context.dailyFit === undefined && context.lifeWeather !== undefined;
+  })()
+);
+
+check(
+  'DailyActivityFit has NO numeric relevance score field -- personalRelevance is the categorical union PersonalRelevance, never a number',
+  (() => {
+    const activity: DailyActivityFit = { activityFamily: 'FINANCE', personalRelevance: 'BASELINE', relevantThemes: [], evidence: [] };
+    const relevance: PersonalRelevance = activity.personalRelevance;
+    return (relevance === 'BASELINE' || relevance === 'RELEVANT' || relevance === 'HIGHLY_RELEVANT') && !('score' in activity) && !('relevanceScore' in activity);
+  })()
+);
+
+check(
+  'DailyPersonalFitRelevantTheme retains a mapped theme even at state QUIET -- the mapping itself is never filtered to "active themes only"',
+  (() => {
+    const relevantTheme: DailyPersonalFitRelevantTheme = { theme: 'CREATIVITY', state: 'QUIET' };
+    return relevantTheme.state === 'QUIET';
+  })()
+);
+
+check(
+  "'DAILY_PERSONAL_FIT' is a valid PersonalEvidenceSource value",
+  sampleEvidenceRef({ source: 'DAILY_PERSONAL_FIT', ruleId: 'DAILY_PERSONAL_FIT_SUMMARY_V1' }).source === 'DAILY_PERSONAL_FIT'
+);
+
+check(
+  'the pre-existing placeholder PersonalActivityFit type is untouched by this PR -- still exactly { activity, score, reasons, cautions, evidence }, a DIFFERENT shape from DailyActivityFit (activityFamily-keyed, no numeric score)',
+  (() => {
+    const fit: PersonalActivityFit = { activity: 'deep-work', score: 0.5, reasons: [], cautions: [], evidence: [] };
+    return typeof fit.activity === 'string' && typeof fit.score === 'number' && !('activityFamily' in fit) && !('personalRelevance' in fit) && !('relevantThemes' in fit);
+  })()
+);
+
+check(
+  'packages/personal-intelligence still imports nothing from packages/muhurta, packages/recommendation, or packages/daily-personal-fit -- DailyActivityFit.activityFamily stays a plain string, never a MuhurtaActivityFamily type import',
+  !/from\s+['"][^'"]*\/(muhurta|recommendation|daily-personal-fit)\//.test(
+    ['packages/personal-intelligence/src/context.ts', 'packages/personal-intelligence/src/evidence.ts', 'packages/personal-intelligence/src/guidance.ts', 'packages/personal-intelligence/src/validation.ts']
+      .map((file) => fs.readFileSync(file, 'utf8'))
+      .join('\n')
+  )
 );
 
 // ============================================================

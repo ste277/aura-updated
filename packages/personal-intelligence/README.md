@@ -299,6 +299,17 @@ source engineVersion = BHRIGU_NATAL_V1                (that engine's own version
   (additive).
 - Added `'LIFE_WEATHER'` to `PersonalEvidenceSource` (additive).
 
+### Still V2 (Daily Personal Fit V1 / PR #102)
+
+- Added `PersonalRelevance`, `DailyPersonalFitRelevantTheme`,
+  `DailyActivityFit`, `DailyPersonalFitContext`, and
+  `PersonalGuidanceContext.dailyFit` (additive).
+- Added `'DAILY_PERSONAL_FIT'` to `PersonalEvidenceSource` (additive).
+- The pre-existing `PersonalActivityFit` (`guidance.ts`) is untouched --
+  a different, older, still-unpopulated placeholder type, not this
+  engine's output. See `packages/daily-personal-fit/README.md`'s own
+  "PersonalActivityFit is a different, older type" section.
+
 ## Immutability / serializability
 
 Every contract shape here is safe for engine boundaries, server/client

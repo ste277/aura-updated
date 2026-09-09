@@ -15,6 +15,13 @@
  * were added. See provenance.ts's own doc comment and
  * packages/life-weather/README.md's "Personal Intelligence contract V1 -> V2"
  * section for the full history and rationale.
+ *
+ * Still V2 (PR #102 / Daily Personal Fit): `DailyPersonalFitContext`/
+ * `PersonalGuidanceContext.dailyFit` were added -- purely additive (a new
+ * optional field), so no version bump was needed for this change alone.
+ * The pre-existing `PersonalActivityFit` (guidance.ts) is a DIFFERENT,
+ * older, still-unpopulated placeholder type -- left untouched by this
+ * change, see guidance.ts's own doc comment.
  */
 import type { NormalizedScore, PersonalTheme, PersonalThemeSignal } from './types';
 import type { PersonalEvidenceRef } from './evidence';
@@ -312,6 +319,59 @@ export interface LifeWeatherContext {
 }
 
 // ============================================================
+// Daily Personal Fit (synthesis layer -- projects an already-computed
+// LifeWeatherContext onto Aura's canonical Muhurta activity-family
+// vocabulary to determine personal relevance). Purely additive to
+// CONTRACT_V2 -- see provenance.ts's own doc comment.
+//
+// `activityFamily` stays a plain `string` (not importing
+// packages/muhurta's own `MuhurtaActivityFamily`) for the identical
+// dependency-direction reason `PersonalMuhurtaWindow.activityFamilies`
+// already does above -- this package still has zero cross-package
+// imports. A real DailyPersonalFitContext's own `activityFamily` values
+// are expected to align with MuhurtaActivityFamily's 13 values BY
+// CONVENTION (packages/daily-personal-fit's own adapter), never enforced
+// via a type import here.
+// ============================================================
+
+/** Purely structural -- no favorable/unfavorable polarity, and NOT the same vocabulary as LifeWeatherState (a DailyActivityFit can be reinforced by multiple themes at different states; see DailyActivityFit's own doc comment for the derivation rule). */
+export type PersonalRelevance = 'BASELINE' | 'RELEVANT' | 'HIGHLY_RELEVANT';
+
+/** One theme this activity family is semantically mapped to, and that theme's own current LifeWeatherState -- included even when QUIET (see DailyActivityFit's own doc comment: the mapping is lossless, never filtered to "active themes only"). */
+export interface DailyPersonalFitRelevantTheme {
+  theme: PersonalTheme;
+  state: LifeWeatherState;
+}
+
+/**
+ * One activity family's personal-relevance picture. `personalRelevance`
+ * is derived from the MAXIMUM state among `relevantThemes` only
+ * (STRONGLY_ACTIVE present anywhere -> HIGHLY_RELEVANT; else ACTIVE
+ * present anywhere -> RELEVANT; else BASELINE) -- never a count, never a
+ * weighted/summed score, and never a function of `natalStrength` or
+ * `natalDirection` (both deliberately absent from `relevantThemes`
+ * itself -- see packages/daily-personal-fit/README.md's own "Natal
+ * strength/direction do not drive fit" section). `relevantThemes`
+ * ALWAYS lists every theme this activity family is semantically mapped
+ * to, regardless of state -- a QUIET mapped theme is not dropped, so the
+ * mapping itself stays fully inspectable/explainable.
+ */
+export interface DailyActivityFit {
+  activityFamily: string;
+  personalRelevance: PersonalRelevance;
+  relevantThemes: DailyPersonalFitRelevantTheme[];
+  evidence: PersonalEvidenceRef[];
+}
+
+/** The complete V1 Daily Personal Fit result -- always one entry per canonical activity family (packages/daily-personal-fit's own canonical order), never sparse, never sorted by relevance (ranking is explicitly out of scope -- see #103). */
+export interface DailyPersonalFitContext {
+  engineVersion: string;
+  evaluationTime: string;
+  activities: DailyActivityFit[];
+  evidence: PersonalEvidenceRef[];
+}
+
+// ============================================================
 // The central, unified context.
 // ============================================================
 
@@ -337,4 +397,6 @@ export interface PersonalGuidanceContext {
   muhurta?: PersonalMuhurtaTimingContext;
   /** The synthesis layer built from `themes`+`lifePeriod`+`transits` -- see LifeWeatherContext's own doc comment. Additive alongside those raw sections, never a replacement for them. */
   lifeWeather?: LifeWeatherContext;
+  /** The synthesis layer built from `lifeWeather` alone, projected onto Aura's canonical Muhurta activity families -- see DailyPersonalFitContext's own doc comment. Additive alongside `lifeWeather`/`muhurta`, never nested inside either. */
+  dailyFit?: DailyPersonalFitContext;
 }

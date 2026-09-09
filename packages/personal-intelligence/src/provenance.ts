@@ -33,5 +33,13 @@
  *   (purely additive -- would not by itself have required a version bump).
  * - Added `'LIFE_WEATHER'` to `PersonalEvidenceSource` (evidence.ts;
  *   purely additive).
+ *
+ * Still V2 (Daily Personal Fit V1 / PR #102) -- purely additive, no bump:
+ * - Added `PersonalRelevance`, `DailyPersonalFitRelevantTheme`,
+ *   `DailyActivityFit`, `DailyPersonalFitContext`, and
+ *   `PersonalGuidanceContext.dailyFit` (context.ts). The pre-existing
+ *   `PersonalActivityFit` (guidance.ts) is untouched -- a different,
+ *   older, still-unpopulated placeholder type, not this engine's output.
+ * - Added `'DAILY_PERSONAL_FIT'` to `PersonalEvidenceSource` (evidence.ts).
  */
 export const CONTRACT_VERSION = 'PERSONAL_INTELLIGENCE_CONTRACT_V2';
