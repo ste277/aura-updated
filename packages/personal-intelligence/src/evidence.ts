@@ -17,13 +17,16 @@
  */
 
 /**
- * Which family of engine this evidence came from. 'LIFE_WEATHER' (added in
- * CONTRACT_V2) is distinct from every upstream source above it: it marks a
- * fact Life Weather itself synthesized (a planet-to-theme projection, a
- * structural state derivation, a cross-system reinforcement observation)
- * rather than a fact copied verbatim from an upstream engine's own evidence
- * -- see packages/life-weather/README.md's "Traditional vs Aura" section
- * for the full boundary this source tag exists to keep visible.
+ * Which family of engine this evidence came from. 'LIFE_WEATHER' and
+ * 'DAILY_PERSONAL_FIT' (both additive to CONTRACT_V2) are distinct from
+ * every upstream source above them: each marks a fact that engine itself
+ * synthesized (a planet-to-theme projection, a structural state
+ * derivation, a cross-system reinforcement observation, an
+ * activity-family-to-theme projection) rather than a fact copied verbatim
+ * from an upstream engine's own evidence -- see
+ * packages/life-weather/README.md's and
+ * packages/daily-personal-fit/README.md's own "Traditional vs Aura"
+ * sections for the full boundary these source tags exist to keep visible.
  */
 export type PersonalEvidenceSource =
   | 'BHRIGU_NATAL'
@@ -33,7 +36,8 @@ export type PersonalEvidenceSource =
   | 'ASHTAKAVARGA'
   | 'PANCHANG'
   | 'MUHURTA'
-  | 'LIFE_WEATHER';
+  | 'LIFE_WEATHER'
+  | 'DAILY_PERSONAL_FIT';
 
 /**
  * The generic evidence reference used throughout every other contract in

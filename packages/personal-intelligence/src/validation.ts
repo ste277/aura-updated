@@ -60,7 +60,7 @@ export function isPersonalGuidanceContext(value: unknown): value is PersonalGuid
   const candidate = value as Record<string, unknown>;
   if (typeof candidate.version !== 'string') return false;
 
-  const optionalObjectSections = ['natal', 'themes', 'lifePeriod', 'transits', 'personalSupport', 'panchang', 'muhurta', 'lifeWeather'] as const;
+  const optionalObjectSections = ['natal', 'themes', 'lifePeriod', 'transits', 'personalSupport', 'panchang', 'muhurta', 'lifeWeather', 'dailyFit'] as const;
   return optionalObjectSections.every((key) => {
     const section = candidate[key];
     return section === undefined || (typeof section === 'object' && section !== null);

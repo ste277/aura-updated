@@ -36,6 +36,10 @@ export type {
   LifeWeatherContributor,
   LifeWeatherTheme,
   LifeWeatherContext,
+  PersonalRelevance,
+  DailyPersonalFitRelevantTheme,
+  DailyActivityFit,
+  DailyPersonalFitContext,
   PersonalGuidanceContext,
 } from './context';
 

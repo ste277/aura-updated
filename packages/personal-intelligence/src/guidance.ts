@@ -16,6 +16,15 @@ import type { PersonalEvidenceRef } from './evidence';
  * AuraFitEvaluation.score). `activity` reuses the existing
  * ActivityIdentifier convention (a plain string matching
  * ActivityProfile.id) rather than a second activity enum.
+ *
+ * NOT the Daily Personal Fit V1 output (PR #102, see
+ * packages/daily-personal-fit): that engine's own output is
+ * `DailyPersonalFitContext`/`DailyActivityFit` (context.ts) -- a
+ * differently-shaped, activity-FAMILY-keyed (not single-activity-id-keyed)
+ * multi-dimensional relevance result with no numeric score. This older
+ * placeholder type is left exactly as-is, unpopulated, for a possible
+ * future single-activity ranked-candidate use case distinct from Daily
+ * Personal Fit's own activity-family relevance vector.
  */
 export interface PersonalActivityFit {
   activity: ActivityIdentifier;
