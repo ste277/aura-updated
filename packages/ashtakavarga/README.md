@@ -63,16 +63,25 @@ sources were identified and compared cell-by-cell:
 1. **Source A**: *"Mastering Ashtakavarga Part 2: Building
    Bhinnashtakavarga Charts"*
    (`vedastro.org/blog/Mastering-Ashtakavarga-Part-2-Building-Bhinnashtakavarga-Charts.html`),
-   fetched directly (not merely via a search-engine summary) — presents
-   the standard **Parashara (BPHS)** Bhinnashtakavarga "Benefic Houses"
-   table, one row per contributor, for all 7 targets.
+   fetched directly (not merely via a search-engine summary) — a modern
+   tabulation presenting itself as the standard **Parashara/BPHS-style**
+   Bhinnashtakavarga "Benefic Houses" table, one row per contributor,
+   for all 7 targets.
 2. **Source B**: *"LESSON No.1 — WHAT IS THE ASHTAKAVARGA SYSTEM?"*
    (KAS Corner, `kascorner.com`, PDF teaching document, pages 7–11,
-   "BHINNASHTAKAVARGA" section), read directly as a PDF — presents the
-   same table as literal per-house dot grids for all 7 targets, **plus a
-   fully worked real chart example** (a natal chart for a birth in
-   Nagpur, India, 26 Oct 1961, 9:45am) whose own resulting BAV/SAV
-   totals independently reproduce 48/49/39/54/56/52/39/337.
+   "BHINNASHTAKAVARGA" section), read directly as a PDF — a second,
+   independent modern tabulation presenting the same table as literal
+   per-house dot grids for all 7 targets, **plus a fully worked real
+   chart example** (a natal chart for a birth in Nagpur, India, 26 Oct
+   1961, 9:45am) whose own resulting BAV/SAV totals independently
+   reproduce 48/49/39/54/56/52/39/337.
+
+Neither source is treated here as a critical edition of the original
+Sanskrit *Brihat Parashara Hora Shastra* text, and no such textual-
+historical claim is made. **Aura V1 locks a Parashara/BPHS-style rule
+table, cross-verified between two independent modern tabulations** — the
+verification claim is about agreement between these two sources (and
+with production), not about primary-source textual criticism.
 
 **Result: all 56 of 56 rules were independently verified at the exact
 house-number level (not merely row-count) between the two sources, with
