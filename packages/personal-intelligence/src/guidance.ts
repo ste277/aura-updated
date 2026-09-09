@@ -1,5 +1,5 @@
 /**
- * Personal Intelligence Contract V1 -- future composed-output contracts.
+ * Personal Intelligence Contract V2 -- future composed-output contracts.
  *
  * PersonalActivityFit and DailyPersonalGuidance describe what a FUTURE
  * scoring/composition engine would eventually produce -- this file

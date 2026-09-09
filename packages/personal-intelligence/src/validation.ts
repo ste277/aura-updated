@@ -1,5 +1,5 @@
 /**
- * Personal Intelligence Contract V1 -- lightweight structural validation.
+ * Personal Intelligence Contract V2 -- lightweight structural validation.
  *
  * Small, pure guard/assert functions only -- no runtime schema framework,
  * no new dependency (matching this repo's own existing convention: every
@@ -11,7 +11,15 @@
  */
 import { PERSONAL_THEMES } from './themes';
 import type { NormalizedScore, PersonalTheme } from './types';
-import type { PersonalGuidanceContext } from './context';
+import type { PersonalGuidanceContext, PersonalTransitRelationship } from './context';
+
+/** The exact, closed set of PersonalTransitRelationship values (context.ts's own doc comment) -- deliberately excludes 'NONE', matching the type itself. */
+const PERSONAL_TRANSIT_RELATIONSHIPS: readonly PersonalTransitRelationship[] = ['SAME_SIGN', 'TRINE', 'OPPOSITION', 'THREE_ELEVEN', 'TWO_TWELVE'];
+
+/** True only for one of the exact 5 supported PersonalTransitRelationship strings -- see context.ts's own doc comment for why 'NONE' is not one of them. */
+export function isPersonalTransitRelationship(value: unknown): value is PersonalTransitRelationship {
+  return typeof value === 'string' && (PERSONAL_TRANSIT_RELATIONSHIPS as readonly string[]).includes(value);
+}
 
 /**
  * True only for a finite number in [0, 1] -- the exact NormalizedScore
@@ -52,7 +60,7 @@ export function isPersonalGuidanceContext(value: unknown): value is PersonalGuid
   const candidate = value as Record<string, unknown>;
   if (typeof candidate.version !== 'string') return false;
 
-  const optionalObjectSections = ['natal', 'themes', 'lifePeriod', 'transits', 'personalSupport', 'panchang', 'muhurta'] as const;
+  const optionalObjectSections = ['natal', 'themes', 'lifePeriod', 'transits', 'personalSupport', 'panchang', 'muhurta', 'lifeWeather'] as const;
   return optionalObjectSections.every((key) => {
     const section = candidate[key];
     return section === undefined || (typeof section === 'object' && section !== null);

@@ -1,5 +1,5 @@
 /**
- * Personal Intelligence Contract V1 -- personal theme taxonomy.
+ * Personal Intelligence Contract V2 -- personal theme taxonomy.
  *
  * PersonalTheme itself is defined in types.ts (see that file's own doc
  * comment for why it is a genuinely new taxonomy, distinct from the

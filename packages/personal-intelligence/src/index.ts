@@ -1,5 +1,5 @@
 /**
- * Personal Intelligence Contract V1 -- public API.
+ * Personal Intelligence Contract V2 -- public API.
  *
  * See ../README.md for what this package is (a shared contract layer for
  * future Aura personalization engines), what it deliberately does not do
@@ -19,6 +19,7 @@ export { toPersonalEvidenceRef } from './evidence';
 export type {
   LifePeriodSegment,
   LifePeriodContext,
+  PersonalTransitRelationship,
   TransitActivation,
   TransitActivationContext,
   PersonalSupportContext,
@@ -27,9 +28,17 @@ export type {
   PersonalMuhurtaTimingContext,
   PersonalNatalContext,
   PersonalThemeContext,
+  LifeWeatherState,
+  LifeWeatherNatalContributor,
+  LifeWeatherMahadashaContributor,
+  LifeWeatherAntardashaContributor,
+  LifeWeatherTransitContributor,
+  LifeWeatherContributor,
+  LifeWeatherTheme,
+  LifeWeatherContext,
   PersonalGuidanceContext,
 } from './context';
 
 export type { PersonalActivityFit, PersonalRecommendation, DailyPersonalGuidance } from './guidance';
 
-export { isNormalizedScore, assertNormalizedScore, isPersonalTheme, isPersonalGuidanceContext } from './validation';
+export { isNormalizedScore, assertNormalizedScore, isPersonalTheme, isPersonalTransitRelationship, isPersonalGuidanceContext } from './validation';

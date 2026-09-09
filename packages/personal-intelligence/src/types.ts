@@ -1,5 +1,5 @@
 /**
- * Personal Intelligence Contract V1 -- foundational shared vocabulary.
+ * Personal Intelligence Contract V2 -- foundational shared vocabulary.
  *
  * This whole package defines CONTRACTS ONLY: what personalization
  * evidence means structurally, never what is good for the user. It

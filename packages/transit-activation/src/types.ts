@@ -38,12 +38,14 @@ export type TransitRelationship = BhriguRelationshipType;
 /**
  * A minimal, structural evidence reference -- shape-compatible in spirit
  * with packages/personal-intelligence's own PersonalEvidenceRef (stable
- * source + ruleId + ruleVersion + human summary + JSON-safe data), so a
- * future adapter could translate it without a structural mismatch.
+ * source + ruleId + ruleVersion + human summary + JSON-safe data).
  * Deliberately a LOCAL type (not importing PersonalEvidenceRef directly)
- * -- this package has zero dependency on packages/personal-intelligence
- * anywhere, including adapter.ts. See README.md's "Personal Intelligence
- * adapter -- deferred" section for why no such adapter is built in V1.
+ * -- the pure engine (engine.ts, activation.ts, relationships.ts,
+ * evidence.ts, validation.ts) still has zero dependency on
+ * packages/personal-intelligence; only adapter.ts's own
+ * `toTransitActivationContext` (PR #101 -- see README.md's own "Personal
+ * Intelligence adapter" section) imports that package, to build its
+ * lossless CONTRACT_V2 output from this local shape.
  */
 export interface TransitActivationEvidenceRef {
   source: 'TRANSIT_ACTIVATION';

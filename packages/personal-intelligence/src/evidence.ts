@@ -1,5 +1,5 @@
 /**
- * Personal Intelligence Contract V1 -- unified evidence model.
+ * Personal Intelligence Contract V2 -- unified evidence model.
  *
  * The single generic envelope every future engine's evidence flows
  * through so a consumer can answer "why did Aura derive this?" without
@@ -16,7 +16,15 @@
  * test/personalIntelligenceContract.test.ts's own compatibility check.
  */
 
-/** Which family of engine this evidence came from. */
+/**
+ * Which family of engine this evidence came from. 'LIFE_WEATHER' (added in
+ * CONTRACT_V2) is distinct from every upstream source above it: it marks a
+ * fact Life Weather itself synthesized (a planet-to-theme projection, a
+ * structural state derivation, a cross-system reinforcement observation)
+ * rather than a fact copied verbatim from an upstream engine's own evidence
+ * -- see packages/life-weather/README.md's "Traditional vs Aura" section
+ * for the full boundary this source tag exists to keep visible.
+ */
 export type PersonalEvidenceSource =
   | 'BHRIGU_NATAL'
   | 'PERSONAL_THEMES'
@@ -24,7 +32,8 @@ export type PersonalEvidenceSource =
   | 'TRANSIT_ACTIVATION'
   | 'ASHTAKAVARGA'
   | 'PANCHANG'
-  | 'MUHURTA';
+  | 'MUHURTA'
+  | 'LIFE_WEATHER';
 
 /**
  * The generic evidence reference used throughout every other contract in

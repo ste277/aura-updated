@@ -1,16 +1,22 @@
 /**
- * Personal Intelligence Contract V1 -- context contracts.
+ * Personal Intelligence Contract V2 -- context contracts.
  *
- * Every future personalization "layer" (natal themes, life period,
- * transit activation, personal support, Panchang, Muhurta) gets a small
- * contract here describing the SHAPE of what that layer would eventually
- * contribute -- never the calculation itself. See ../README.md's
- * "Partial-context principle": every section of PersonalGuidanceContext
- * is optional by design, because Aura may legitimately operate with an
- * incomplete personalization context (no birth profile yet, Dasha not
- * implemented yet, etc.) -- that is intentional, not an invalid state.
+ * Every personalization "layer" (natal themes, life period, transit
+ * activation, personal support, Panchang, Muhurta, and now the Life
+ * Weather synthesis layer) gets a small contract here describing the
+ * SHAPE of what that layer contributes -- never the calculation itself.
+ * See ../README.md's "Partial-context principle": every section of
+ * PersonalGuidanceContext is optional by design, because Aura may
+ * legitimately operate with an incomplete personalization context -- that
+ * is intentional, not an invalid state.
+ *
+ * V1 -> V2: `TransitActivation` changed shape (grouped-by-transiting-planet
+ * -> lossless pair-level), and `LifeWeatherContext`/`PersonalGuidanceContext.lifeWeather`
+ * were added. See provenance.ts's own doc comment and
+ * packages/life-weather/README.md's "Personal Intelligence contract V1 -> V2"
+ * section for the full history and rationale.
  */
-import type { PersonalTheme, PersonalThemeSignal } from './types';
+import type { NormalizedScore, PersonalTheme, PersonalThemeSignal } from './types';
 import type { PersonalEvidenceRef } from './evidence';
 
 // ============================================================
@@ -49,26 +55,50 @@ export interface LifePeriodContext {
 // ============================================================
 
 /**
- * One transiting planet's activation of natal placements. `transitingPlanet`
- * is a plain `string`, not hard-restricted to Jupiter/Saturn/Rahu/Ketu --
- * those four are the initially expected values, but the contract itself
- * stays open so a future engine can activate any planet without a
- * contract-level change. (packages/vedic's own GrahaName --
- * packages/vedic/src/natalChart.ts -- is NOT imported here: doing so
- * would create a cross-package dependency this contract package
- * deliberately avoids, see this file's own module doc comment and
- * ../README.md's "Dependency direction" section. A future adapter can
- * freely assign a GrahaName value into this field, since GrahaName is
- * itself a string-literal union and therefore assignable to `string`.)
+ * The sign-relationship category a directed transit activation can carry --
+ * a CONTRACT-LOCAL vocabulary, deliberately NOT a type import of
+ * packages/bhrigu's own `BhriguRelationshipType` (see this file's own
+ * module doc comment and ../README.md's "Dependency direction" section:
+ * zero cross-package imports anywhere in this package). The 5 string
+ * literals below are expected to align with Bhrigu's own relationship
+ * categories BY CONVENTION (documented here, never enforced via a type
+ * import) -- `'NONE'` is deliberately excluded, since only a genuine
+ * (non-NONE) activation is ever represented as a `TransitActivation`
+ * record at all; there is nothing to report for a NONE pair.
+ */
+export type PersonalTransitRelationship = 'SAME_SIGN' | 'TRINE' | 'OPPOSITION' | 'THREE_ELEVEN' | 'TWO_TWELVE';
+
+/**
+ * CONTRACT_V2 (see provenance.ts): one directed, pair-level
+ * `transitingPlanet -> natalPlanet` activation -- the lossless replacement
+ * for the previous, lossy grouped-by-transiting-planet shape. `transitingPlanet`
+ * and `natalPlanet` are both plain `string` (not hard-restricted to a closed
+ * planet union), for the identical reason `transitingPlanet` was already a
+ * plain string in V1 -- see this file's own module doc comment on
+ * dependency direction; a future adapter can freely assign any planet-name
+ * string, including packages/vedic's own GrahaName values (itself a
+ * string-literal union, therefore assignable to `string`).
+ *
+ * V1's own `activatedThemes`/`natalTargets`/aggregate `strength` are
+ * deliberately NOT carried into V2: those fields either required lossy
+ * grouping (`natalTargets` held natal-planet identity only as untyped
+ * evidence-shaped data, never a typed field) or an invented aggregation
+ * policy (`strength` was a `Math.max(...)` over every natal target a
+ * transiting planet activated, a policy this contract itself never
+ * specified). See packages/life-weather/README.md's "Personal Intelligence
+ * contract V1 -> V2" section for the full audit trail behind this change.
+ * Theme projection is now Life Weather's own job (LifeWeatherContext below),
+ * never this raw-fact contract's.
  */
 export interface TransitActivation {
   transitingPlanet: string;
-  activatedThemes: PersonalThemeSignal[];
-  natalTargets: PersonalEvidenceRef[];
-  strength: number;
+  natalPlanet: string;
+  relationship: PersonalTransitRelationship;
+  strength: NormalizedScore;
   evidence: PersonalEvidenceRef[];
 }
 
+/** One record per directed pair (see TransitActivation's own doc comment) -- never grouped, never aggregated. */
 export interface TransitActivationContext {
   activations: TransitActivation[];
   evidence: PersonalEvidenceRef[];
@@ -198,6 +228,90 @@ export interface PersonalThemeContext {
 }
 
 // ============================================================
+// Life Weather (synthesis layer -- current personal theme activation).
+//
+// Distinct from every context above it: `themes`/`lifePeriod`/`transits`
+// each carry one upstream engine's own RAW output; LifeWeatherContext is
+// the first SYNTHESIS layer that reads several of them together and
+// produces a genuinely new kind of fact (which themes are CURRENTLY
+// active, and which independent systems are reinforcing them) -- never a
+// replacement for the raw sections, always additive alongside them (see
+// PersonalGuidanceContext.lifeWeather below).
+// ============================================================
+
+/** Purely structural -- no favorable/unfavorable polarity. See LifeWeatherTheme's own doc comment for the exact derivation rule. */
+export type LifeWeatherState = 'QUIET' | 'ACTIVE' | 'STRONGLY_ACTIVE';
+
+/** The person's own natal Personal Themes baseline, carried through unmodified -- never recomputed, never incremented by current activity. */
+export interface LifeWeatherNatalContributor {
+  source: 'NATAL';
+  strength: NormalizedScore;
+  evidence: PersonalEvidenceRef[];
+}
+
+/** Categorical only -- no numeric strength. A Mahadasha lord's mere presence is not a magnitude; see this field's own absence as a deliberate choice, not an oversight. */
+export interface LifeWeatherMahadashaContributor {
+  source: 'DASHA_MAHADASHA';
+  natalPlanet: string;
+  evidence: PersonalEvidenceRef[];
+}
+
+/** Categorical only -- see LifeWeatherMahadashaContributor's own doc comment; kept as a fully separate contributor kind from DASHA_MAHADASHA even when both lords are the same planet (see README.md's "Mahadasha == Antardasha" section). */
+export interface LifeWeatherAntardashaContributor {
+  source: 'DASHA_ANTARDASHA';
+  natalPlanet: string;
+  evidence: PersonalEvidenceRef[];
+}
+
+/** `strength` is copied verbatim from the source TransitActivation pair -- never rescaled, summed, or maxed against any other contributor. */
+export interface LifeWeatherTransitContributor {
+  source: 'TRANSIT';
+  transitingPlanet: string;
+  natalPlanet: string;
+  relationship: PersonalTransitRelationship;
+  strength: NormalizedScore;
+  evidence: PersonalEvidenceRef[];
+}
+
+/** A discriminated union on `source` -- a consumer can narrow by `source` to access each kind's own fields, never needing to parse `evidence.data` to recover contributor identity. */
+export type LifeWeatherContributor = LifeWeatherNatalContributor | LifeWeatherMahadashaContributor | LifeWeatherAntardashaContributor | LifeWeatherTransitContributor;
+
+/**
+ * One theme's full current-activation picture. `natalStrength`/`natalDirection`
+ * are copied verbatim from the input PersonalThemeContext (immutable baseline
+ * -- never recomputed as a function of current contributors, see
+ * LifeWeatherNatalContributor's own doc comment). `reinforcementSources`
+ * deliberately excludes `'NATAL'`: natal is the baseline every theme already
+ * has, not a CURRENT activation source -- only `'DASHA'`/`'TRANSIT'` describe
+ * something happening right now, at `evaluationTime`. A theme with
+ * `natalStrength === 0` (e.g. SOCIAL/FINANCE, structurally always 0 in
+ * Personal Themes V1) can still legitimately reach `ACTIVE`/`STRONGLY_ACTIVE`
+ * -- eligibility for a current contributor comes from the canonical
+ * planet-to-theme mapping, never from `natalStrength` itself (see
+ * packages/life-weather/README.md's "Zero natal strength" section).
+ */
+export interface LifeWeatherTheme {
+  theme: PersonalTheme;
+  /** Immutable natal Personal Themes strength -- see this interface's own doc comment. */
+  natalStrength: NormalizedScore;
+  /** Natal-only direction, copied verbatim from PersonalThemeContext -- never a current/dynamic polarity (see LifeWeatherState's own doc comment: Life Weather itself never emits a current polarity). */
+  natalDirection: 'SUPPORTIVE' | 'NEUTRAL' | 'CHALLENGING';
+  state: LifeWeatherState;
+  /** Distinct CURRENT systems reinforcing this theme, in fixed ['DASHA', 'TRANSIT'] canonical order when both are present -- never includes 'NATAL' (see this interface's own doc comment). */
+  reinforcementSources: ('DASHA' | 'TRANSIT')[];
+  contributors: LifeWeatherContributor[];
+  evidence: PersonalEvidenceRef[];
+}
+
+/** The complete V1 Life Weather result -- always all 10 PersonalTheme entries, PERSONAL_THEMES canonical order, never sparse (a QUIET theme with zero current contributors still appears, carrying only its NATAL contributor). */
+export interface LifeWeatherContext {
+  engineVersion: string;
+  evaluationTime: string;
+  themes: LifeWeatherTheme[];
+  evidence: PersonalEvidenceRef[];
+}
+
+// ============================================================
 // The central, unified context.
 // ============================================================
 
@@ -221,4 +335,6 @@ export interface PersonalGuidanceContext {
   personalSupport?: PersonalSupportContext;
   panchang?: PersonalPanchangContext;
   muhurta?: PersonalMuhurtaTimingContext;
+  /** The synthesis layer built from `themes`+`lifePeriod`+`transits` -- see LifeWeatherContext's own doc comment. Additive alongside those raw sections, never a replacement for them. */
+  lifeWeather?: LifeWeatherContext;
 }
