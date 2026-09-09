@@ -271,15 +271,33 @@ set): `NATAL_THEME_SUPPORT`, `LIFE_PERIOD_ALIGNMENT`,
 ## Provenance and versioning
 
 ```typescript
-export const CONTRACT_VERSION = 'PERSONAL_INTELLIGENCE_CONTRACT_V1';
+export const CONTRACT_VERSION = 'PERSONAL_INTELLIGENCE_CONTRACT_V2';
 ```
 
 Two distinct version concepts, kept explicit and never conflated:
 
 ```text
-contractVersion = PERSONAL_INTELLIGENCE_CONTRACT_V1   (this package's own shape version)
+contractVersion = PERSONAL_INTELLIGENCE_CONTRACT_V2   (this package's own shape version)
 source engineVersion = BHRIGU_NATAL_V1                (that engine's own version, carried verbatim)
 ```
+
+### V1 -> V2 (Life Weather V1 / PR #101)
+
+- `TransitActivation` changed from a lossy, grouped-by-transiting-planet
+  shape (`activatedThemes`/`natalTargets`/an invented `Math.max` aggregate
+  `strength`) to a lossless, pair-level shape (`transitingPlanet`,
+  `natalPlanet`, `relationship`, `strength` all first-class -- one record
+  per directed pair). Zero production consumers existed at the time of
+  this change (the V1 shape's only intended producer,
+  `toTransitActivationContext`, was deliberately never built against it --
+  see `packages/transit-activation/README.md`'s own PR #100 history), so
+  this is a historical shape change, not a breaking change to any real
+  caller.
+- Added `PersonalTransitRelationship` (contract-local, 5 values, `'NONE'`
+  deliberately excluded).
+- Added `LifeWeatherContext` and `PersonalGuidanceContext.lifeWeather`
+  (additive).
+- Added `'LIFE_WEATHER'` to `PersonalEvidenceSource` (additive).
 
 ## Immutability / serializability
 

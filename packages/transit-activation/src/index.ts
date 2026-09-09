@@ -12,7 +12,7 @@
  * transiting->natal pair identity).
  */
 export { calculateTransitActivation } from './engine';
-export { calculateTransitActivationFromPositions } from './adapter';
+export { calculateTransitActivationFromPositions, toTransitActivationContext } from './adapter';
 export { evaluatePair, evaluateAllPairs } from './activation';
 export { classifyTransitRelationship, transitRelationshipStrength, transitRelationshipRuleId } from './relationships';
 export { dedupeEvidenceRefs } from './evidence';

@@ -27,6 +27,7 @@ import { getNatalChart } from '../packages/vedic/src/natalChart';
 import {
   calculateTransitActivation,
   calculateTransitActivationFromPositions,
+  toTransitActivationContext,
   evaluatePair,
   evaluateAllPairs,
   classifyTransitRelationship,
@@ -40,7 +41,8 @@ import {
   TRANSIT_ACTIVATION_PAIR_COUNT,
   TransitActivationValidationError,
 } from '../packages/transit-activation/src/index';
-import type { TransitActivationPlanet, TransitRelationship } from '../packages/transit-activation/src/index';
+import type { TransitActivationPlanet, TransitRelationship, TransitActivationPair, TransitActivationResult } from '../packages/transit-activation/src/index';
+import { isPersonalTransitRelationship } from '../packages/personal-intelligence/src/index';
 
 function stripComments(text: string): string {
   return text.replace(/\/\*[\s\S]*?\*\//g, '').replace(/\/\/.*$/gm, '');
@@ -626,27 +628,120 @@ check(
 );
 
 // ============================================================
-// PERSONAL INTELLIGENCE ADAPTER: deliberately NOT built in V1.
+// PERSONAL INTELLIGENCE ADAPTER: restored in PR #101, now lossless.
 //
 // See packages/transit-activation/README.md's "Personal Intelligence
-// adapter -- deferred" section: TRANSIT_ACTIVATION_CONTEXT_V1 has no
-// typed field for natalPlanet/relationship identity, so no
-// toTransitActivationContext export exists to test here. Confirm the
-// package's own public surface stays exactly as documented (no
-// personal-intelligence-shaped export slipped back in).
+// adapter -- restored" section: CONTRACT_V2's own TransitActivation is
+// now a pair-level shape, so toTransitActivationContext is a mechanical
+// 1:1 mapping. These tests are MERGE-CRITICAL: they must never inspect
+// evidence.data to recover transitingPlanet/natalPlanet/relationship --
+// those must be readable as top-level typed fields alone.
 // ============================================================
 
+// Synthetic 3-pair fixture: a single transiting Saturn (sign 0) activating
+// three DIFFERENT natal planets at three DIFFERENT relationship categories
+// -- Moon (sign 0, SAME_SIGN), Venus (sign 8, TRINE), Mercury (sign 6,
+// OPPOSITION). Built from real evaluatePair() output (genuine pair shape
+// and evidence), not fabricated -- only assembled into a hand-built
+// TransitActivationResult so the fixture is exactly 3 activations, never
+// diluted by whatever the other 78 pairs of a full 9x9 evaluation happen
+// to be.
+const SATURN_MOON_PAIR = evaluatePair('Saturn', 'Moon', 0, 0);
+const SATURN_VENUS_PAIR = evaluatePair('Saturn', 'Venus', 0, 8);
+const SATURN_MERCURY_PAIR = evaluatePair('Saturn', 'Mercury', 0, 6);
+
+const LOSSLESS_FIXTURE: TransitActivationResult = {
+  engineVersion: TRANSIT_ACTIVATION_ENGINE_VERSION,
+  relationshipRulesetVersion: TRANSIT_RELATIONSHIP_RULESET_VERSION,
+  evaluationTime: '2026-01-01T00:00:00.000Z',
+  evaluatedPlanets: TRANSIT_ACTIVATION_PLANETS,
+  activations: [SATURN_MOON_PAIR, SATURN_VENUS_PAIR, SATURN_MERCURY_PAIR],
+  evidence: [...SATURN_MOON_PAIR.evidence, ...SATURN_VENUS_PAIR.evidence, ...SATURN_MERCURY_PAIR.evidence],
+};
+
 check(
-  'PERSONAL INTELLIGENCE ADAPTER DEFERRED: package index does not export any toTransitActivationContext (or similarly-named) function',
+  'LOSSLESS ADAPTER: 3 engine activations in produces exactly 3 contract activations out -- never grouped by transiting planet',
   (() => {
-    const indexSrc = fs.readFileSync(require.resolve('../packages/transit-activation/src/index'), 'utf8');
-    return !/toTransitActivationContext/.test(indexSrc);
+    const context = toTransitActivationContext(LOSSLESS_FIXTURE);
+    return LOSSLESS_FIXTURE.activations.length === 3 && context.activations.length === LOSSLESS_FIXTURE.activations.length;
   })()
 );
 
 check(
-  'PERSONAL INTELLIGENCE ADAPTER DEFERRED: adapter.ts has no actual import statement from packages/personal-intelligence (mentioning it in the doc comment explaining the deferral is fine; importing from it is not)',
-  !/import[^;]*from\s+['"][^'"]*personal-intelligence[^'"]*['"]/.test(stripComments(fs.readFileSync(require.resolve('../packages/transit-activation/src/adapter'), 'utf8')))
+  'LOSSLESS ADAPTER: every pair preserves transitingPlanet/natalPlanet/relationship/strength as first-class TOP-LEVEL fields, read without ever touching evidence.data',
+  (() => {
+    const context = toTransitActivationContext(LOSSLESS_FIXTURE);
+    const expected = [
+      { transitingPlanet: 'Saturn', natalPlanet: 'Moon', relationship: 'SAME_SIGN', strength: 1.0 },
+      { transitingPlanet: 'Saturn', natalPlanet: 'Venus', relationship: 'TRINE', strength: 0.75 },
+      { transitingPlanet: 'Saturn', natalPlanet: 'Mercury', relationship: 'OPPOSITION', strength: 0.5 },
+    ];
+    return expected.every((exp, i) => {
+      const actual = context.activations[i];
+      return actual.transitingPlanet === exp.transitingPlanet && actual.natalPlanet === exp.natalPlanet && actual.relationship === exp.relationship && actual.strength === exp.strength;
+    });
+  })()
+);
+
+check(
+  'LOSSLESS ADAPTER: no aggregation -- strength is copied verbatim per pair, never Math.max/summed/averaged across the 3 pairs (1.0, 0.75, 0.5 all survive distinctly)',
+  (() => {
+    const context = toTransitActivationContext(LOSSLESS_FIXTURE);
+    const strengths = context.activations.map((a) => a.strength).sort();
+    return strengths.length === 3 && strengths[0] === 0.5 && strengths[1] === 0.75 && strengths[2] === 1.0;
+  })()
+);
+
+check(
+  'LOSSLESS ADAPTER: two different transiting planets activating the same natal planet remain two independent contract records',
+  (() => {
+    const jupiterToMercury = evaluatePair('Jupiter', 'Mercury', 0, 6); // distance 6 -> OPPOSITION
+    const saturnToMercury = evaluatePair('Saturn', 'Mercury', 4, 0); // distance 4 -> TRINE
+    const result: TransitActivationResult = {
+      engineVersion: TRANSIT_ACTIVATION_ENGINE_VERSION,
+      relationshipRulesetVersion: TRANSIT_RELATIONSHIP_RULESET_VERSION,
+      evaluationTime: '2026-01-01T00:00:00.000Z',
+      evaluatedPlanets: TRANSIT_ACTIVATION_PLANETS,
+      activations: [jupiterToMercury, saturnToMercury],
+      evidence: [...jupiterToMercury.evidence, ...saturnToMercury.evidence],
+    };
+    const context = toTransitActivationContext(result);
+    if (context.activations.length !== 2) return false;
+    const jupiterRecord = context.activations.find((a) => a.transitingPlanet === 'Jupiter');
+    const saturnRecord = context.activations.find((a) => a.transitingPlanet === 'Saturn');
+    return (
+      jupiterRecord !== undefined &&
+      saturnRecord !== undefined &&
+      jupiterRecord.natalPlanet === 'Mercury' &&
+      saturnRecord.natalPlanet === 'Mercury' &&
+      jupiterRecord.relationship === 'OPPOSITION' &&
+      saturnRecord.relationship === 'TRINE' &&
+      jupiterRecord.strength !== saturnRecord.strength
+    );
+  })()
+);
+
+check(
+  'RELATIONSHIP ALIGNMENT: every non-NONE relationship this engine can produce maps validly into Personal Intelligence\'s own PersonalTransitRelationship, without Personal Intelligence importing Bhrigu or this package',
+  (() => {
+    const oneOfEach: TransitActivationPair[] = [
+      evaluatePair('Sun', 'Sun', 0, 0), // SAME_SIGN
+      evaluatePair('Sun', 'Sun', 4, 0), // TRINE
+      evaluatePair('Sun', 'Sun', 6, 0), // OPPOSITION
+      evaluatePair('Sun', 'Sun', 2, 0), // THREE_ELEVEN
+      evaluatePair('Sun', 'Sun', 1, 0), // TWO_TWELVE
+    ];
+    const result: TransitActivationResult = {
+      engineVersion: TRANSIT_ACTIVATION_ENGINE_VERSION,
+      relationshipRulesetVersion: TRANSIT_RELATIONSHIP_RULESET_VERSION,
+      evaluationTime: '2026-01-01T00:00:00.000Z',
+      evaluatedPlanets: TRANSIT_ACTIVATION_PLANETS,
+      activations: oneOfEach,
+      evidence: oneOfEach.flatMap((p) => p.evidence),
+    };
+    const context = toTransitActivationContext(result);
+    return context.activations.length === 5 && context.activations.every((a) => isPersonalTransitRelationship(a.relationship));
+  })()
 );
 
 // ============================================================
@@ -717,7 +812,7 @@ check(
   !/packages\/transit-activation/i.test(fs.readFileSync('packages/vedic/src/natalChart.ts', 'utf8')) && !/packages\/transit-activation/i.test(fs.readFileSync('packages/bhrigu/src/index.ts', 'utf8'))
 );
 
-check('packages/personal-intelligence source is untouched by this PR (no reference to transit-activation package path)', !/packages\/transit-activation/i.test(fs.readFileSync('packages/personal-intelligence/src/context.ts', 'utf8')));
+check('packages/personal-intelligence never imports packages/transit-activation (dependency direction preserved -- Personal Intelligence is imported FROM, never imports FROM this package)', !/packages\/transit-activation/i.test(fs.readFileSync('packages/personal-intelligence/src/context.ts', 'utf8')));
 
 check('packages/ashtakavarga and packages/vimshottari source are untouched (no reference to transit-activation package path)', !/packages\/transit-activation/i.test(fs.readFileSync('packages/ashtakavarga/src/index.ts', 'utf8')) && !/packages\/transit-activation/i.test(fs.readFileSync('packages/vimshottari/src/index.ts', 'utf8')));
 

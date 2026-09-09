@@ -25,6 +25,7 @@ import {
   isNormalizedScore,
   assertNormalizedScore,
   isPersonalTheme,
+  isPersonalTransitRelationship,
   isPersonalGuidanceContext,
   toPersonalEvidenceRef,
   PersonalTheme,
@@ -35,7 +36,12 @@ import {
   PersonalNatalContext,
   PersonalThemeContext,
   LifePeriodContext,
+  TransitActivation,
   TransitActivationContext,
+  PersonalTransitRelationship,
+  LifeWeatherContext,
+  LifeWeatherTheme,
+  LifeWeatherContributor,
   PersonalActivityFit,
   PersonalRecommendation,
   DailyPersonalGuidance,
@@ -236,7 +242,7 @@ check(
       evidence: [],
     };
     const transits: TransitActivationContext = {
-      activations: [{ transitingPlanet: 'Saturn', activatedThemes: [], natalTargets: [], strength: 0.4, evidence: [] }],
+      activations: [{ transitingPlanet: 'Saturn', natalPlanet: 'Moon', relationship: 'SAME_SIGN', strength: 0.4, evidence: [] }],
       evidence: [],
     };
     const context: PersonalGuidanceContext = { version: CONTRACT_VERSION, natal, lifePeriod, transits };
@@ -352,7 +358,120 @@ check(
 // Contract version.
 // ============================================================
 
-check('CONTRACT_VERSION is the stable PERSONAL_INTELLIGENCE_CONTRACT_V1 string', CONTRACT_VERSION === 'PERSONAL_INTELLIGENCE_CONTRACT_V1');
+check('CONTRACT_VERSION is the stable PERSONAL_INTELLIGENCE_CONTRACT_V2 string', CONTRACT_VERSION === 'PERSONAL_INTELLIGENCE_CONTRACT_V2');
+
+// ============================================================
+// CONTRACT_V2 -- pair-level TransitActivation (PR #101).
+// ============================================================
+
+check(
+  'TransitActivation (CONTRACT_V2) is pair-level: transitingPlanet, natalPlanet, relationship, and strength are all first-class top-level fields, with NO activatedThemes/natalTargets/aggregate strength',
+  (() => {
+    const activation: TransitActivation = { transitingPlanet: 'Saturn', natalPlanet: 'Moon', relationship: 'SAME_SIGN', strength: 1.0, evidence: [sampleEvidenceRef()] };
+    const context: TransitActivationContext = { activations: [activation], evidence: [] };
+    return (
+      context.activations.length === 1 &&
+      context.activations[0].transitingPlanet === 'Saturn' &&
+      context.activations[0].natalPlanet === 'Moon' &&
+      context.activations[0].relationship === 'SAME_SIGN' &&
+      context.activations[0].strength === 1.0 &&
+      !('activatedThemes' in context.activations[0]) &&
+      !('natalTargets' in context.activations[0])
+    );
+  })()
+);
+
+check(
+  'multiple directed pairs never collapse -- one TransitActivation record per (transitingPlanet, natalPlanet) pair, no grouping',
+  (() => {
+    const context: TransitActivationContext = {
+      activations: [
+        { transitingPlanet: 'Saturn', natalPlanet: 'Moon', relationship: 'SAME_SIGN', strength: 1.0, evidence: [] },
+        { transitingPlanet: 'Saturn', natalPlanet: 'Venus', relationship: 'TRINE', strength: 0.75, evidence: [] },
+        { transitingPlanet: 'Saturn', natalPlanet: 'Mercury', relationship: 'OPPOSITION', strength: 0.5, evidence: [] },
+      ],
+      evidence: [],
+    };
+    return context.activations.length === 3 && new Set(context.activations.map((a) => a.natalPlanet)).size === 3;
+  })()
+);
+
+check(
+  'isPersonalTransitRelationship accepts exactly the 5 documented PersonalTransitRelationship values and rejects NONE / arbitrary strings',
+  (() => {
+    const valid: PersonalTransitRelationship[] = ['SAME_SIGN', 'TRINE', 'OPPOSITION', 'THREE_ELEVEN', 'TWO_TWELVE'];
+    return valid.every((v) => isPersonalTransitRelationship(v)) && !isPersonalTransitRelationship('NONE') && !isPersonalTransitRelationship('CONJUNCTION') && !isPersonalTransitRelationship(42);
+  })()
+);
+
+check(
+  'packages/personal-intelligence still imports nothing from packages/bhrigu or packages/transit-activation -- PersonalTransitRelationship is a contract-local union, not a Bhrigu type import',
+  !/from\s+['"][^'"]*\/(bhrigu|transit-activation)\//.test(
+    ['packages/personal-intelligence/src/context.ts', 'packages/personal-intelligence/src/evidence.ts', 'packages/personal-intelligence/src/validation.ts']
+      .map((file) => fs.readFileSync(file, 'utf8'))
+      .join('\n')
+  )
+);
+
+// ============================================================
+// CONTRACT_V2 -- Life Weather synthesis contract (PR #101).
+// ============================================================
+
+check(
+  'a fully synthetic LifeWeatherContext round-trips through JSON unchanged (structural equality preserved) and PersonalGuidanceContext.lifeWeather is optional',
+  (() => {
+    const lifeWeather: LifeWeatherContext = {
+      engineVersion: 'LIFE_WEATHER_V1',
+      evaluationTime: '2026-09-09T12:00:00.000Z',
+      themes: PERSONAL_THEMES.map((theme) => ({
+        theme,
+        natalStrength: 0.4,
+        natalDirection: 'NEUTRAL',
+        state: 'QUIET',
+        reinforcementSources: [],
+        contributors: [{ source: 'NATAL', strength: 0.4, evidence: [] }],
+        evidence: [],
+      })),
+      evidence: [sampleEvidenceRef({ source: 'LIFE_WEATHER', ruleId: 'LIFE_WEATHER_SUMMARY_V1' })],
+    };
+    const withoutLifeWeather: PersonalGuidanceContext = { version: CONTRACT_VERSION };
+    const withLifeWeather: PersonalGuidanceContext = { version: CONTRACT_VERSION, lifeWeather };
+    const roundTripped = JSON.parse(JSON.stringify(withLifeWeather));
+    return (
+      isPersonalGuidanceContext(withoutLifeWeather) &&
+      withoutLifeWeather.lifeWeather === undefined &&
+      isPersonalGuidanceContext(withLifeWeather) &&
+      JSON.stringify(roundTripped) === JSON.stringify(withLifeWeather)
+    );
+  })()
+);
+
+check(
+  'LifeWeatherContributor is a discriminated union on `source` -- each of the 4 kinds carries its own distinct fields',
+  (() => {
+    const natal: LifeWeatherContributor = { source: 'NATAL', strength: 0.5, evidence: [] };
+    const mahadasha: LifeWeatherContributor = { source: 'DASHA_MAHADASHA', natalPlanet: 'Jupiter', evidence: [] };
+    const antardasha: LifeWeatherContributor = { source: 'DASHA_ANTARDASHA', natalPlanet: 'Mercury', evidence: [] };
+    const transit: LifeWeatherContributor = { source: 'TRANSIT', transitingPlanet: 'Saturn', natalPlanet: 'Moon', relationship: 'SAME_SIGN', strength: 1.0, evidence: [] };
+    return natal.source === 'NATAL' && mahadasha.source === 'DASHA_MAHADASHA' && antardasha.source === 'DASHA_ANTARDASHA' && transit.source === 'TRANSIT';
+  })()
+);
+
+check(
+  'LifeWeatherTheme.reinforcementSources is typed to only ever contain DASHA/TRANSIT, never NATAL',
+  (() => {
+    const theme: LifeWeatherTheme = {
+      theme: 'LEARNING',
+      natalStrength: 0.6,
+      natalDirection: 'SUPPORTIVE',
+      state: 'STRONGLY_ACTIVE',
+      reinforcementSources: ['DASHA', 'TRANSIT'],
+      contributors: [],
+      evidence: [],
+    };
+    return theme.reinforcementSources.every((s) => s === 'DASHA' || s === 'TRANSIT');
+  })()
+);
 
 // ============================================================
 // Naming collision guard -- packages/recommendation/src/auraFitEngine.ts

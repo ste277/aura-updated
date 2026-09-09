@@ -39,10 +39,12 @@ Findings:
 
 - **`TransitActivation`/`TransitActivationContext` already exist** as a
   forward-looking contract in `packages/personal-intelligence/src/context.ts`
-  (from PR #95) — `{ transitingPlanet: string; activatedThemes:
+  (from PR #95) — at that time: `{ transitingPlanet: string; activatedThemes:
   PersonalThemeSignal[]; natalTargets: PersonalEvidenceRef[]; strength:
-  number; evidence: PersonalEvidenceRef[] }`. See "Personal Intelligence
-  adapter" below for why this package does **not** attempt to produce
+  number; evidence: PersonalEvidenceRef[] }` (CONTRACT_V1). See "Personal
+  Intelligence adapter" below for why this package's own adapter into that
+  contract was initially deferred, and how PR #101's CONTRACT_V2 evolution
+  later made a lossless adapter possible.
   that contract in V1.
 - **`packages/vedic/src/transits.ts` already exists**, and its own
   `calculateDailyTransits` already calls `getNatalChart(currentDate)` to
@@ -188,6 +190,7 @@ only, then echoed straight through into the result and evidence.
 ```typescript
 calculateTransitActivation(input: TransitActivationInput): TransitActivationResult
 calculateTransitActivationFromPositions(natalPositions, transitPositions, evaluationTimeUTC: Date): TransitActivationResult
+toTransitActivationContext(result: TransitActivationResult): TransitActivationContext
 ```
 
 `calculateTransitActivationFromPositions` extracts each of the 9
@@ -195,65 +198,64 @@ required planets' own `rashiIndex` from real `GrahaPosition[]` arrays
 (rejecting a missing or duplicated planet in either chart,
 array-order-independent) and delegates to the pure engine.
 
-## Personal Intelligence adapter — deferred
+## Personal Intelligence adapter — restored (V1: deferred, V2: lossless)
 
-**Personal Intelligence adapter deferred because
-`TRANSIT_ACTIVATION_CONTEXT_V1` cannot losslessly represent directed
-transit→natal activation identity.**
+At PR #100 merge time, `packages/personal-intelligence`'s own
+`TransitActivation` contract was keyed by one `transitingPlanet: string`
+per entry, with `natalTargets: PersonalEvidenceRef[]` and a single
+`strength: number` scalar — no typed field for the activated natal
+planet's own identity or the relationship category. Mapping this
+engine's own pair-level output into that shape was necessarily lossy
+(e.g. a transiting Saturn activating three natal placements collapsed
+into one contract record, with an invented `Math.max` aggregate
+strength discarding the other two activations' own strengths). PR #100
+therefore deliberately deferred `toTransitActivationContext` rather than
+ship a lossy adapter or modify the protected `packages/personal-intelligence`
+package outside its own scope.
 
-The existing `TransitActivation` contract in
-`packages/personal-intelligence/src/context.ts` is keyed by one
-`transitingPlanet: string` per entry, with `natalTargets:
-PersonalEvidenceRef[]` and a single `strength: number` scalar. It has
-**no typed field** for the activated natal planet's own identity and
-**no typed field** for the relationship category — both would have to
-be smuggled into an untyped `PersonalEvidenceRef.data` bag. That is
-evidence metadata, not a typed domain field a downstream engine (Life
-Weather, PR #101) could safely rely on without parsing arbitrary
-evidence content to recover essential domain identity.
+PR #101's own architecture audit evolved the Personal Intelligence
+contract to `PERSONAL_INTELLIGENCE_CONTRACT_V2`
+(`packages/personal-intelligence/src/provenance.ts`): `TransitActivation`
+is now a **pair-level** record —
+`{ transitingPlanet, natalPlanet, relationship, strength, evidence }`,
+one record per directed pair, never grouped, never aggregated. This
+package's own natural output grain already IS one record per directed
+pair, so `toTransitActivationContext` is now a purely mechanical 1:1
+mapping:
 
-Concretely: a transiting Saturn activating three natal placements
-(natal Moon `SAME_SIGN` 1.00, natal Venus `TRINE` 0.75, natal Mercury
-`OPPOSITION` 0.50) is **3 engine records**. Mapped into the existing
-contract shape, that collapses into **1 contract record** — one
-`TransitActivation` keyed by `transitingPlanet: "Saturn"` — since the
-contract has only one `strength` scalar per transiting planet.
-`natalPlanet` and `relationship` survive only inside each
-`PersonalEvidenceRef.data`, never as first-class fields, and any single
-scalar strength would have to pick a policy (e.g. maximum) to collapse
-1.00 / 0.75 / 0.50 into one number — discarding the other two
-activations' own strengths entirely. That aggregation policy is not
-specified anywhere in the existing contract; it would be invented here,
-baking a Transit-Activation-specific product decision into what must
-stay a pure geometry-detection engine.
+```text
+result.activations.length === context.activations.length
+```
 
-This package therefore does **not** modify `packages/personal-intelligence`
-and does **not** ship a `toTransitActivationContext` adapter in V1. It
-exposes only `calculateTransitActivation(...)` and
-`calculateTransitActivationFromPositions(...)` until the contract is
-intentionally evolved (a deliberate, future decision — likely alongside
-Life Weather, PR #101 — not smuggled into this PR to fit an insufficient
-forward-looking shape).
+always holds. Every pair's `transitingPlanet`/`natalPlanet`/`relationship`/
+`strength` survive as first-class typed fields — no downstream consumer
+ever needs to parse `evidence.data` to recover activation identity. No
+`Math.max`/sum/average, no grouping, and no theme projection (theme
+projection is Life Weather's own job, `packages/life-weather` — this
+adapter never imports `packages/personal-themes` or projects any
+`PersonalTheme`).
 
-`activatedThemes` would in any case always be `[]`: `packages/bhrigu`'s
-own publicly exported karaka/theme mapping (`getKarakaThemes`) uses a
-different, lowercase, free-text vocabulary (`'identity'`, `'authority'`,
-...) that does not correspond to `packages/personal-intelligence`'s own
-closed `PersonalTheme` union (`'FOCUS'`, `'CAREER'`, ...) — translating
-between the two would require inventing a new planet-to-theme mapping,
-which this PR's own scope explicitly prohibits. Theme projection is
-deferred to a later composition PR, matching `packages/ashtakavarga`'s
-own precedent for the identical reason.
+`PersonalTransitRelationship` (the contract's own relationship type) is
+a **contract-local** 5-value union (`SAME_SIGN`/`TRINE`/`OPPOSITION`/
+`THREE_ELEVEN`/`TWO_TWELVE`, deliberately excluding `NONE`) — Personal
+Intelligence still imports nothing from this package or from
+`packages/bhrigu` (see that package's own "zero cross-package imports"
+architecture). Alignment between this engine's own `TransitRelationship`
+values and `PersonalTransitRelationship` is documented convention, never
+a type import; `toPersonalTransitRelationship` in `adapter.ts` maps
+between them at the one point they meet.
 
 ## No aggregation policy invented
 
 This package performs **no aggregation of any kind** — not sum, not
 max. Each of the up-to-81 evaluated pairs is returned as its own
-independent, directed activation record. Any cross-record aggregation
-(e.g. "the strongest activation currently affecting natal Venus")
-belongs to a later consumer (Life Weather) that can make that policy
-decision explicitly, once the contract it writes into can represent the
-inputs losslessly.
+independent, directed activation record, and `toTransitActivationContext`
+preserves that independence exactly (see above). Any cross-record
+synthesis (e.g. "which of my current transits, combined with my current
+Dasha, most reinforces LEARNING") belongs to Life Weather
+(`packages/life-weather`), which reads the lossless per-pair facts this
+package produces and applies its own, separately-documented synthesis
+model on top of them.
 
 ## No Ashtakavarga / Dasha / Bhrigu-graph dependency
 
