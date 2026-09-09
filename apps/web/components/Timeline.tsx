@@ -1,10 +1,11 @@
 'use client';
 
-import React, { useState, useRef } from 'react';
+import React, { useState, useRef, useEffect } from 'react';
 import { getActionCards, getActivityDiscoveryCards, ActionCard } from '../../../packages/recommendation/src/actionCards';
 import { LoggedEntryItem } from './CalendarViewSection';
 import { triggerHaptic } from '../lib/haptics';
 import { StatusBadge } from './ui';
+import { resolvePendingActivityStatus } from '../lib/pendingReplayReconciliation';
 
 export interface TimelineWindowItem {
   name: string;
@@ -144,6 +145,27 @@ export function TimelineView({
   // below), but rendered with distinct copy so a pending sync is never
   // shown identically to a confirmed one.
   const [pendingLogged, setPendingLogged] = useState<string[]>([]);
+
+  // Home/Timeline Pending Replay Reconciliation V1 -- reacts whenever
+  // logEntries next changes (page.tsx's own syncOfflineLogs effect already
+  // calls loadUserDataAndLogs after every replay attempt, success or
+  // permanent failure -- see pendingReplayReconciliation.ts's own doc
+  // comment for resolvePendingActivityStatus). No polling, no new refresh
+  // call: reuses
+  // the same normalized-title identity allLoggedNormalized/loggedActivitiesToday
+  // already use for every other "is this activity logged/pending" check in
+  // this file -- handleLogActivity's own return value stays a bare
+  // 'confirmed' | 'pending' string (pinned unchanged by
+  // pendingActivityVisualConsistency.test.ts and
+  // pendingActivityReloadVisibility.test.ts), so no clientRequestId is
+  // available at this call site to key off instead.
+  useEffect(() => {
+    setPendingLogged((prev) => {
+      if (prev.length === 0) return prev;
+      const next = prev.filter((title) => resolvePendingActivityStatus(logEntries, title) === 'pending');
+      return next.length === prev.length ? prev : next;
+    });
+  }, [logEntries]);
 
   const selectedWindowName = selectedWindowItem?.name || null;
   const activeWindowName = selectedWindowName || currentWindow?.name || 'NEUTRAL';
