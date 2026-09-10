@@ -40,6 +40,10 @@ export type {
   DailyPersonalFitRelevantTheme,
   DailyActivityFit,
   DailyPersonalFitContext,
+  DailyGuidanceSelectionReason,
+  DailyGuidanceTiming,
+  DailyGuidanceRecommendation,
+  DailyGuidanceContext,
   PersonalGuidanceContext,
 } from './context';
 

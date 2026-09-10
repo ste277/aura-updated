@@ -22,6 +22,16 @@
  * The pre-existing `PersonalActivityFit` (guidance.ts) is a DIFFERENT,
  * older, still-unpopulated placeholder type -- left untouched by this
  * change, see guidance.ts's own doc comment.
+ *
+ * Still V2 (PR #104 / Daily Guidance): `DailyGuidanceSelectionReason`/
+ * `DailyGuidanceTiming`/`DailyGuidanceRecommendation`/`DailyGuidanceContext`/
+ * `PersonalGuidanceContext.dailyGuidance` were added -- purely additive.
+ * The pre-existing `DailyPersonalGuidance` (guidance.ts) is a DIFFERENT,
+ * older, still-unpopulated placeholder type -- semantically incompatible
+ * with this PR's own output (a single collapsed `NormalizedScore`,
+ * pre-rendered `headline`/`summary` prose, and `date`/`timezone`
+ * ownership, none of which #104 produces) -- left untouched, see
+ * guidance.ts's own doc comment.
  */
 import type { NormalizedScore, PersonalTheme, PersonalThemeSignal } from './types';
 import type { PersonalEvidenceRef } from './evidence';
@@ -372,6 +382,106 @@ export interface DailyPersonalFitContext {
 }
 
 // ============================================================
+// Daily Guidance (synthesis layer -- joins DailyPersonalFitContext's own
+// personal-relevance axis with an already-ranked, per-family
+// WindowRankingContext's own timing axis to select up to N cross-family
+// recommendations). Purely additive to CONTRACT_V2 -- see provenance.ts's
+// own doc comment.
+//
+// ZERO-COUPLING BOUNDARY (merge-critical, see ../README.md's "Dependency
+// direction" section): `activityFamily` stays a plain `string` (not
+// importing packages/muhurta's own `MuhurtaActivityFamily`, matching
+// DailyActivityFit's own precedent above), and `DailyGuidanceTiming.label`
+// stays a plain `string` (not importing packages/recommendation's own
+// `TimingCandidateLabel`) -- both are expected to align with their real
+// upstream unions BY CONVENTION, never enforced via a type import here.
+// packages/daily-guidance (the engine that actually PRODUCES a
+// DailyGuidanceContext) is allowed to import both of those packages --
+// this file only describes the SHAPE, never the calculation.
+// ============================================================
+
+/**
+ * Which of #104's three staged eligibility passes selected this
+ * recommendation (see packages/daily-guidance/README.md's "Selection
+ * policy" section for the full rule). Ordinal by construction --
+ * PRIMARY_FLOOR_MET is always considered, in full, before
+ * RELAXED_TIMING_FLOOR ever runs, which is in turn always considered, in
+ * full, before RELAXED_RELEVANCE_FLOOR ever runs -- this is what makes
+ * `RELEVANT + EXCELLENT` beat `HIGHLY_RELEVANT + USABLE` (the former is
+ * PRIMARY_FLOOR_MET, the latter is RELAXED_TIMING_FLOOR, and Stage 1 fills
+ * every available slot before Stage 2 is ever consulted). There is no
+ * fourth value: CAUTION-labeled timing is never eligible for a
+ * DailyGuidanceRecommendation at all, in any stage.
+ */
+export type DailyGuidanceSelectionReason = 'PRIMARY_FLOOR_MET' | 'RELAXED_TIMING_FLOOR' | 'RELAXED_RELEVANCE_FLOOR';
+
+/**
+ * The timing axis of one recommendation, copied verbatim from the
+ * selected family's own `WindowRankingContext.windows[0]` -- never
+ * recomputed, rescaled, or relabeled. `label` mirrors
+ * `TimingCandidateLabel`'s 5 values (`EXCELLENT`/`VERY_GOOD`/`GOOD`/
+ * `USABLE`/`CAUTION`) BY CONVENTION (see this section's own module doc
+ * comment on the zero-coupling boundary) -- a `DailyGuidanceRecommendation`
+ * never carries a CAUTION `label`, since CAUTION is never eligible (see
+ * `DailyGuidanceSelectionReason`'s own doc comment). `windowRank` is
+ * always `1` in V1 (only a family's own best window is ever selected --
+ * see packages/daily-guidance/README.md's "Best window only" section) --
+ * kept as an explicit field, rather than an assumed constant, so a future
+ * V2 that legitimately needs a different rank has somewhere to put it
+ * without a shape change here.
+ */
+export interface DailyGuidanceTiming {
+  start: string;
+  end: string;
+  score: number;
+  label: string;
+  windowRank: number;
+}
+
+/**
+ * One cross-family recommendation. `rank` is #104's OWN cross-family
+ * rank (1-based, in final selection order) -- distinct from
+ * `timing.windowRank`, which belongs to #103 (see DailyGuidanceTiming's
+ * own doc comment). `personalRelevance`/`relevantThemes` are copied
+ * verbatim from the selected family's own `DailyActivityFit` -- never
+ * recomputed, never filtered. `evidence` is a small, composer-owned set
+ * of `PersonalEvidenceRef` entries (the selection-rule fact itself, plus
+ * compact forwarded timing reasons/conflicts) -- never a full copy of any
+ * upstream engine's own evidence tree (see
+ * packages/daily-guidance/README.md's "Evidence strategy" section).
+ */
+export interface DailyGuidanceRecommendation {
+  rank: number;
+  activityFamily: string;
+  personalRelevance: PersonalRelevance;
+  relevantThemes: DailyPersonalFitRelevantTheme[];
+  timing: DailyGuidanceTiming;
+  selectionReason: DailyGuidanceSelectionReason;
+  evidence: PersonalEvidenceRef[];
+}
+
+/**
+ * The complete V1 Daily Guidance result. `recommendations` may legitimately
+ * contain FEWER than the requested `limit` entries (quality over padding
+ * -- see packages/daily-guidance/README.md's "Up to N, never exactly N"
+ * section) and may legitimately be `[]` (no family cleared any stage's
+ * eligibility bar today) -- both are valid, non-error results, never
+ * fabricated guidance. `evaluationTime` is read verbatim from the input
+ * `DailyPersonalFitContext.evaluationTime` -- this layer introduces no
+ * date/timezone concept of its own. `omittedActivities`/reason-coded
+ * omission reporting was deliberately NOT added in V1 -- see
+ * packages/daily-guidance/README.md's "No omittedActivities in V1"
+ * section for why that is future (#106-adjacent) scope, not an oversight.
+ */
+export interface DailyGuidanceContext {
+  engineVersion: string;
+  selectionPolicyVersion: string;
+  evaluationTime: string;
+  recommendations: DailyGuidanceRecommendation[];
+  evidence: PersonalEvidenceRef[];
+}
+
+// ============================================================
 // The central, unified context.
 // ============================================================
 
@@ -399,4 +509,6 @@ export interface PersonalGuidanceContext {
   lifeWeather?: LifeWeatherContext;
   /** The synthesis layer built from `lifeWeather` alone, projected onto Aura's canonical Muhurta activity families -- see DailyPersonalFitContext's own doc comment. Additive alongside `lifeWeather`/`muhurta`, never nested inside either. */
   dailyFit?: DailyPersonalFitContext;
+  /** The cross-family synthesis layer built from `dailyFit` plus an already-ranked, per-family timing source -- see DailyGuidanceContext's own doc comment. Additive alongside `dailyFit`, never a replacement for it. */
+  dailyGuidance?: DailyGuidanceContext;
 }

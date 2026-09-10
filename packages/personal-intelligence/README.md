@@ -94,7 +94,7 @@ only `{ version }` is just as valid as one with every section populated.
 | [`types.ts`](src/types.ts) | `NormalizedScore`, `ActivityIdentifier`, `PersonalTheme`, `PersonalThemeSignal`, `PersonalReason` (+ canonical starter codes) |
 | [`themes.ts`](src/themes.ts) | `PERSONAL_THEMES` — the canonical, ordered theme list |
 | [`evidence.ts`](src/evidence.ts) | `PersonalEvidenceSource`, `PersonalEvidenceRef`, `PersonalEvidence<TFacts>`, `toPersonalEvidenceRef` |
-| [`context.ts`](src/context.ts) | `LifePeriodContext`, `TransitActivationContext`, `PersonalSupportContext`, `PersonalPanchangContext`, `PersonalMuhurtaTimingContext`, `PersonalNatalContext`, `PersonalThemeContext`, `PersonalGuidanceContext` |
+| [`context.ts`](src/context.ts) | `LifePeriodContext`, `TransitActivationContext`, `PersonalSupportContext`, `PersonalPanchangContext`, `PersonalMuhurtaTimingContext`, `PersonalNatalContext`, `PersonalThemeContext`, `LifeWeatherContext`, `DailyPersonalFitContext`, `DailyGuidanceContext`, `PersonalGuidanceContext` |
 | [`guidance.ts`](src/guidance.ts) | `PersonalActivityFit`, `PersonalRecommendation`, `DailyPersonalGuidance` (future output shapes only) |
 | [`validation.ts`](src/validation.ts) | `isNormalizedScore`, `assertNormalizedScore`, `isPersonalTheme`, `isPersonalGuidanceContext` |
 | [`provenance.ts`](src/provenance.ts) | `CONTRACT_VERSION` |
@@ -309,6 +309,25 @@ source engineVersion = BHRIGU_NATAL_V1                (that engine's own version
   a different, older, still-unpopulated placeholder type, not this
   engine's output. See `packages/daily-personal-fit/README.md`'s own
   "PersonalActivityFit is a different, older type" section.
+
+### Still V2 (Daily Guidance V1 / PR #104)
+
+- Added `DailyGuidanceSelectionReason`, `DailyGuidanceTiming`,
+  `DailyGuidanceRecommendation`, `DailyGuidanceContext`, and
+  `PersonalGuidanceContext.dailyGuidance` (additive).
+- Added `'DAILY_GUIDANCE'` to `PersonalEvidenceSource` (additive).
+- The pre-existing `DailyPersonalGuidance`/`PersonalRecommendation`
+  (`guidance.ts`) are untouched -- older, still-unpopulated placeholder
+  types, semantically incompatible with this engine's own output (a
+  single collapsed `NormalizedScore`, pre-rendered `headline`/`summary`
+  prose, and `date`/`timezone` ownership, none of which #104 produces).
+  See `packages/daily-guidance/README.md`'s own "Why not
+  DailyPersonalGuidance" section.
+- `activityFamily` (`DailyGuidanceRecommendation`) and `label`
+  (`DailyGuidanceTiming`) stay plain `string`, matching this package's
+  existing zero-coupling convention -- never a type import of
+  `packages/muhurta`'s `MuhurtaActivityFamily` or
+  `packages/recommendation`'s `TimingCandidateLabel`.
 
 ## Immutability / serializability
 
