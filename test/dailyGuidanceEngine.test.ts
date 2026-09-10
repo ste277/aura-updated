@@ -134,6 +134,30 @@ check(
 );
 
 // ============================================================
+// WITHIN-STAGE-1 EDGE CASE (isolated, merge-critical): once both
+// candidates already clear Stage 1's own GOOD+ timing floor, personal
+// relevance is the FIRST within-stage tuple key -- HIGHLY_RELEVANT+GOOD
+// ranks ahead of RELEVANT+EXCELLENT, the opposite of the cross-STAGE
+// rule (RELEVANT+EXCELLENT beats HIGHLY_RELEVANT+USABLE) tested below.
+// These are two different, deliberately distinct rules: the cross-stage
+// rule is about which STAGE runs first; this one is about ordering
+// WITHIN a stage once both candidates are already in it.
+// ============================================================
+
+check(
+  'WITHIN STAGE 1 (isolated, 2-way): HIGHLY_RELEVANT + GOOD ranks AHEAD of RELEVANT + EXCELLENT -- both already cleared the Stage-1 GOOD+ floor, so relevance (the first within-stage tuple key) decides, even though EXCELLENT has a higher timing label/score',
+  (() => {
+    const dailyPersonalFit = buildDailyPersonalFit({ DEEP_WORK: 'HIGHLY_RELEVANT', LEARNING: 'RELEVANT' });
+    const windowRankings = [
+      buildRanking('DEEP_WORK', [buildWindow({ start: '2026-09-09T02:00:00.000Z', end: '2026-09-09T03:00:00.000Z', label: 'GOOD', score: 8.0 })]),
+      buildRanking('LEARNING', [buildWindow({ start: '2026-09-09T05:00:00.000Z', end: '2026-09-09T06:00:00.000Z', label: 'EXCELLENT', score: 9.2 })]),
+    ];
+    const result = deriveDailyGuidance({ dailyPersonalFit, windowRankings, limit: 2 });
+    return result.recommendations.length === 2 && result.recommendations[0].activityFamily === 'DEEP_WORK' && result.recommendations[0].selectionReason === 'PRIMARY_FLOOR_MET' && result.recommendations[1].activityFamily === 'LEARNING' && result.recommendations[1].selectionReason === 'PRIMARY_FLOOR_MET';
+  })()
+);
+
+// ============================================================
 // MERGE-CRITICAL: RELEVANT+EXCELLENT beats HIGHLY_RELEVANT+USABLE.
 // ============================================================
 
