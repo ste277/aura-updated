@@ -175,6 +175,26 @@ check(
 );
 
 check(
+  'SAME-FAMILY SOURCE PRIORITY DOES NOT OVERRIDE TIMING QUALITY (merge-critical, isolated): a DAY_BUILDER_INTENTION with EXCELLENT timing beats a PLAN with only GOOD timing -- source priority is the FOURTH tuple key, consulted only after label/score/start all tie',
+  (() => {
+    const planGood = buildCandidate({ activityId: 'plan-good', source: 'PLAN', timingCandidates: [buildWindow({ label: 'GOOD', score: 7.0 })] });
+    const dayBuilderExcellent = buildCandidate({ activityId: 'daybuilder-excellent', source: 'DAY_BUILDER_INTENTION', timingCandidates: [buildWindow({ label: 'EXCELLENT', score: 9.5 })] });
+    const selected = selectOneCandidatePerFamily([planGood, dayBuilderExcellent]);
+    return selected.get('DEEP_WORK')?.source === 'DAY_BUILDER_INTENTION' && selected.get('DEEP_WORK')?.activityId === 'daybuilder-excellent';
+  })()
+);
+
+check(
+  'SAME-FAMILY SOURCE PRIORITY DOES NOT OVERRIDE SCORE (merge-critical, isolated): equal label, but a DAY_BUILDER_INTENTION with a higher score beats a PLAN with a lower score -- source priority never overrides the score key either',
+  (() => {
+    const planLowerScore = buildCandidate({ activityId: 'plan-lower', source: 'PLAN', timingCandidates: [buildWindow({ label: 'GOOD', score: 7.0 })] });
+    const dayBuilderHigherScore = buildCandidate({ activityId: 'daybuilder-higher', source: 'DAY_BUILDER_INTENTION', timingCandidates: [buildWindow({ label: 'GOOD', score: 8.5 })] });
+    const selected = selectOneCandidatePerFamily([planLowerScore, dayBuilderHigherScore]);
+    return selected.get('DEEP_WORK')?.source === 'DAY_BUILDER_INTENTION';
+  })()
+);
+
+check(
   'SAME-FAMILY STABLE ID: equal label + score + start + source -> lexicographically smaller activityId wins, deterministically',
   (() => {
     const a = buildCandidate({ activityId: 'aaa', timingCandidates: [buildWindow({ label: 'GOOD', score: 8.0 })] });
