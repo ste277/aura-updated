@@ -41,5 +41,15 @@
  *   `PersonalActivityFit` (guidance.ts) is untouched -- a different,
  *   older, still-unpopulated placeholder type, not this engine's output.
  * - Added `'DAILY_PERSONAL_FIT'` to `PersonalEvidenceSource` (evidence.ts).
+ *
+ * Still V2 (Daily Guidance V1 / PR #104) -- purely additive, no bump:
+ * - Added `DailyGuidanceSelectionReason`, `DailyGuidanceTiming`,
+ *   `DailyGuidanceRecommendation`, `DailyGuidanceContext`, and
+ *   `PersonalGuidanceContext.dailyGuidance` (context.ts). The pre-existing
+ *   `DailyPersonalGuidance`/`PersonalRecommendation` (guidance.ts) are
+ *   untouched -- semantically incompatible older placeholder types (a
+ *   single collapsed `NormalizedScore`, pre-rendered prose, `date`/
+ *   `timezone` ownership), not this engine's output.
+ * - Added `'DAILY_GUIDANCE'` to `PersonalEvidenceSource` (evidence.ts).
  */
 export const CONTRACT_VERSION = 'PERSONAL_INTELLIGENCE_CONTRACT_V2';

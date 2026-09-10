@@ -17,16 +17,23 @@
  */
 
 /**
- * Which family of engine this evidence came from. 'LIFE_WEATHER' and
- * 'DAILY_PERSONAL_FIT' (both additive to CONTRACT_V2) are distinct from
- * every upstream source above them: each marks a fact that engine itself
- * synthesized (a planet-to-theme projection, a structural state
- * derivation, a cross-system reinforcement observation, an
- * activity-family-to-theme projection) rather than a fact copied verbatim
- * from an upstream engine's own evidence -- see
- * packages/life-weather/README.md's and
- * packages/daily-personal-fit/README.md's own "Traditional vs Aura"
- * sections for the full boundary these source tags exist to keep visible.
+ * Which family of engine this evidence came from. 'LIFE_WEATHER',
+ * 'DAILY_PERSONAL_FIT', and 'DAILY_GUIDANCE' (all additive to CONTRACT_V2)
+ * are distinct from every upstream source above them: each marks a fact
+ * that engine itself synthesized (a planet-to-theme projection, a
+ * structural state derivation, a cross-system reinforcement observation,
+ * an activity-family-to-theme projection, a cross-family selection-rule
+ * decision) rather than a fact copied verbatim from an upstream engine's
+ * own evidence -- see packages/life-weather/README.md's,
+ * packages/daily-personal-fit/README.md's, and
+ * packages/daily-guidance/README.md's own "Traditional vs Aura" sections
+ * for the full boundary these source tags exist to keep visible.
+ * 'DAILY_GUIDANCE' evidence is used ONLY for #104's own composer-owned
+ * selection-rule fact -- forwarded timing reasons/conflicts (originally
+ * `MuhurtaReason`/`TimingConflict`, packages/muhurta and
+ * packages/recommendation) are tagged 'MUHURTA', matching this contract's
+ * existing convention of tagging evidence by the ORIGINATING calculation,
+ * never by whichever engine merely forwards it.
  */
 export type PersonalEvidenceSource =
   | 'BHRIGU_NATAL'
@@ -37,7 +44,8 @@ export type PersonalEvidenceSource =
   | 'PANCHANG'
   | 'MUHURTA'
   | 'LIFE_WEATHER'
-  | 'DAILY_PERSONAL_FIT';
+  | 'DAILY_PERSONAL_FIT'
+  | 'DAILY_GUIDANCE';
 
 /**
  * The generic evidence reference used throughout every other contract in
