@@ -31,9 +31,14 @@ interface ExploreViewProps {
   /** Quick Explore shortcuts: open Muhurtham Finder with this occasion
    * already selected (see MuhurthamFinderView's initialActivityId/Key). */
   onOpenMuhurthamWithActivity: (activityId: string) => void;
+  /** Forward Planner V1 -- opens the "Plan Ahead" surface (activity + future
+   * date range -> best personalized future times). A dedicated, user-invoked
+   * screen, same entry-point convention as Muhurtham Finder above -- never
+   * added to Home. */
+  onOpenForwardPlanner: () => void;
 }
 
-export function ExploreView({ timezone, onOpenPanchang, onOpenMuhurtham, onOpenMuhurthamWithActivity }: ExploreViewProps) {
+export function ExploreView({ timezone, onOpenPanchang, onOpenMuhurtham, onOpenMuhurthamWithActivity, onOpenForwardPlanner }: ExploreViewProps) {
   const todayLabel = new Date().toLocaleDateString('en-US', { timeZone: timezone, month: 'short', day: 'numeric', year: 'numeric' });
 
   // Reuses the SAME occasion list Muhurtham Finder's own dropdown is built
@@ -70,6 +75,17 @@ export function ExploreView({ timezone, onOpenPanchang, onOpenMuhurtham, onOpenM
         footerIcon="✨"
         footer="Browse important occasions"
         onClick={onOpenMuhurtham}
+      />
+
+      <ExploreFeatureCard
+        kicker="Plan Ahead"
+        actionLabel="Find the best future time"
+        description="Pick an activity and a future date range — Aura finds your best personalized time."
+        icon="📅"
+        accent={theme.colors.positive}
+        footerIcon="🔭"
+        footer="Tomorrow, this weekend, or next 7 days"
+        onClick={onOpenForwardPlanner}
       />
 
       <section>

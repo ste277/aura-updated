@@ -40,6 +40,7 @@ import { MuhurthamFinderView } from '../components/MuhurthamFinderView';
 import { PeopleView } from '../components/PeopleView';
 import { ExploreView } from '../components/ExploreView';
 import { UpdatesView } from '../components/UpdatesView';
+import { ForwardPlannerView } from '../components/ForwardPlannerView';
 
 import { BirthChartSection } from '../components/BirthChartSection';
 import { LoginScreen } from '../components/LoginScreen';
@@ -152,8 +153,8 @@ export default function DashboardPage() {
   // framework -- People's own onBack just reads it.
   const [peopleReturnTo, setPeopleReturnTo] = useState<'you' | 'plan' | 'home'>('you');
 
-  type AppTab = 'home' | 'timeline' | 'ask' | 'plan' | 'insights' | 'you' | 'chart' | 'activity' | 'explore' | 'panchang' | 'muhurtham' | 'people' | 'updates';
-  const VALID_TABS: AppTab[] = ['home', 'timeline', 'ask', 'plan', 'insights', 'you', 'chart', 'activity', 'explore', 'panchang', 'muhurtham', 'people', 'updates'];
+  type AppTab = 'home' | 'timeline' | 'ask' | 'plan' | 'insights' | 'you' | 'chart' | 'activity' | 'explore' | 'panchang' | 'muhurtham' | 'people' | 'updates' | 'planner';
+  const VALID_TABS: AppTab[] = ['home', 'timeline', 'ask', 'plan', 'insights', 'you', 'chart', 'activity', 'explore', 'panchang', 'muhurtham', 'people', 'updates', 'planner'];
   // Recipient Conversion V1 (brief section 16/33) -- an already-signed-in
   // visitor who lands on /find (e.g. via "Find your own moment" on a Moment
   // they received) is redirected to `/?tab=plan` rather than the guest
@@ -1532,7 +1533,12 @@ export default function DashboardPage() {
             onOpenPanchang={handleOpenPanchang}
             onOpenMuhurtham={() => setActiveTab('muhurtham')}
             onOpenMuhurthamWithActivity={handleOpenMuhurthamWithActivity}
+            onOpenForwardPlanner={() => setActiveTab('planner')}
           />
+        )}
+
+        {activeTab === 'planner' && (
+          <ForwardPlannerView timezone={user.timezone} onBack={() => setActiveTab('explore')} onOpenBirthProfile={() => setActiveTab('chart')} />
         )}
 
         {activeTab === 'panchang' && (
@@ -1592,7 +1598,7 @@ export default function DashboardPage() {
       >
         <NavButton label="Home" icon="🏠" active={activeTab === 'home' || (activeTab === 'people' && peopleReturnTo === 'home')} onClick={() => setActiveTab('home')} />
         <NavButton label="Plan" icon="✨" active={activeTab === 'plan' || (activeTab === 'people' && peopleReturnTo === 'plan')} onClick={() => setActiveTab('plan')} />
-        <NavButton label="Explore" icon="🧭" active={activeTab === 'explore' || activeTab === 'panchang' || activeTab === 'muhurtham'} onClick={() => setActiveTab('explore')} />
+        <NavButton label="Explore" icon="🧭" active={activeTab === 'explore' || activeTab === 'panchang' || activeTab === 'muhurtham' || activeTab === 'planner'} onClick={() => setActiveTab('explore')} />
         <NavButton label="Ask Aura" icon="🤖" active={activeTab === 'ask'} onClick={() => setActiveTab('ask')} />
         <NavButton label="Insights" icon="📊" active={activeTab === 'insights'} onClick={() => setActiveTab('insights')} />
         <NavButton label="You" icon="👤" active={activeTab === 'you' || activeTab === 'chart' || activeTab === 'activity' || (activeTab === 'people' && peopleReturnTo === 'you')} onClick={() => setActiveTab('you')} />
