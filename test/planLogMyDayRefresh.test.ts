@@ -11,11 +11,13 @@
  * this follows the established source-text/regex structural-assertion
  * pattern (see test/habitLogActivityIdentity.test.ts) rather than
  * introducing one: it proves (a) handlePlanLogged combines
- * loadUserDataAndLogs() with loadMyDay(), and (b) every Plan-logging
- * surface -- all four, including handleLogPlanFromHome, discovered during
- * implementation and not named in the prior audit's "three wiring sites"
- * framing -- is wired through it, with no surface left on the old
- * loadUserDataAndLogs-only pattern.
+ * loadUserDataAndLogs() with loadMyDay() (and, since New Aura Home V1,
+ * loadGuidance() alongside them -- a logged Plan can change today's
+ * eligible-intent set), and (b) every Plan-logging surface -- all four,
+ * including handleLogPlanFromHome, discovered during implementation and
+ * not named in the prior audit's "three wiring sites" framing -- is wired
+ * through it, with no surface left on the old loadUserDataAndLogs-only
+ * pattern.
  */
 import * as fs from 'fs';
 
@@ -42,13 +44,18 @@ const handlePlanLoggedDeps = handlePlanLoggedMatch?.[2] ?? '';
 
 check('handlePlanLogged calls loadUserDataAndLogs()', /loadUserDataAndLogs\(\)/.test(handlePlanLoggedBody));
 check('handlePlanLogged calls loadMyDay()', /loadMyDay\(\)/.test(handlePlanLoggedBody));
+// New Aura Home V1 -- loadGuidance() joined the same Promise.all as a
+// third refresh (a logged Plan can change today's eligible-intent set
+// for GET /api/daily-assistant/guidance); loadUserDataAndLogs()/loadMyDay()
+// keep running concurrently exactly as before, unchanged.
+check('handlePlanLogged calls loadGuidance()', /loadGuidance\(\)/.test(handlePlanLoggedBody));
 check(
-  'handlePlanLogged runs both refreshes concurrently via Promise.all (not sequential awaits)',
-  /Promise\.all\(\s*\[\s*loadUserDataAndLogs\(\),\s*loadMyDay\(\)\s*\]\s*\)/.test(handlePlanLoggedBody)
+  'handlePlanLogged runs all three refreshes concurrently via Promise.all (not sequential awaits)',
+  /Promise\.all\(\s*\[\s*loadUserDataAndLogs\(\),\s*loadMyDay\(\),\s*loadGuidance\(\)\s*\]\s*\)/.test(handlePlanLoggedBody)
 );
 check(
-  'handlePlanLogged depends on both loadUserDataAndLogs and loadMyDay',
-  /\bloadUserDataAndLogs\b/.test(handlePlanLoggedDeps) && /\bloadMyDay\b/.test(handlePlanLoggedDeps)
+  'handlePlanLogged depends on loadUserDataAndLogs, loadMyDay, and loadGuidance',
+  /\bloadUserDataAndLogs\b/.test(handlePlanLoggedDeps) && /\bloadMyDay\b/.test(handlePlanLoggedDeps) && /\bloadGuidance\b/.test(handlePlanLoggedDeps)
 );
 
 // ============================================================

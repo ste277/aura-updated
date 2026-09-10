@@ -24,6 +24,7 @@ import { shouldRefreshMyDayForDateChange } from '../lib/myDayRefreshPolicy';
 import { classifyHabitLogSyncOutcome } from '../lib/habitLogSyncPolicy';
 import { readOfflineHabitQueue, toPendingLoggedEntry, mergeConfirmedLogEntries, selectQueueItemsToReconstruct } from '../lib/offlineHabitQueue';
 import { selectTodaysPendingActivities } from '../lib/myDayPendingOverlay';
+import type { GuidanceUiState } from '../lib/bestForYouViewModel';
 
 // UI Modules
 import { HomeDashboard } from '../components/HomeDashboard';
@@ -132,6 +133,14 @@ export default function DashboardPage() {
   const [mounted, setMounted] = useState(false);
   const [auraUpdates, setAuraUpdates] = useState<AuraUpdatesResponse | null>(null);
   const [myDay, setMyDay] = useState<{ agenda: DailyAgenda; story: DailyStory; reflection: DailyReflection | null; tomorrowPreview: TomorrowPreview | null } | null>(null);
+  // New Aura Home V1 -- the "Best For You" section's own guidance fetch
+  // state. Reset to 'loading' on every user?.id change (stricter than
+  // several legacy Home slices, which only ever overwrite on the next
+  // successful fetch and never explicitly reset) -- see the loadGuidance
+  // effect below for why this one is deliberately stricter: guidance is
+  // highly personalized, so a stale prior user's recommendations must
+  // never render attributed to a different logged-in user.
+  const [guidance, setGuidance] = useState<GuidanceUiState>({ status: 'loading' });
   // Product Structure V2 -- "Your Moments" now lives inside Plan (brief
   // section 19), so any entry point that used to jump to the standalone
   // Shared Moments tab (Home's actionable card, You's row) now jumps into
@@ -343,6 +352,38 @@ export default function DashboardPage() {
     if (!user) return;
     loadAssistantSignals();
   }, [user?.id, loadAssistantSignals]);
+
+  // New Aura Home V1 -- GET /api/daily-assistant/guidance, same
+  // best-effort fetch discipline as loadAssistantSignals/loadMyDay above
+  // (silent console.error on failure, no retry infrastructure, no global
+  // error UI). Parses the response as PersonalDailyGuidanceResult
+  // verbatim -- never reorders/filters `recommendations`, that stays
+  // #104's own contract.
+  const loadGuidance = useCallback(async () => {
+    try {
+      const res = await fetch('/api/daily-assistant/guidance');
+      if (res.ok) {
+        setGuidance(await res.json());
+      } else {
+        setGuidance({ status: 'error' });
+      }
+    } catch (err) {
+      console.error('Failed to load daily guidance:', err);
+      setGuidance({ status: 'error' });
+    }
+  }, []);
+
+  // New Aura Home V1 -- resets to 'loading' on EVERY user?.id change
+  // (including a transition to no user at all) BEFORE fetching, so a
+  // prior user's personalized recommendations can never render
+  // attributed to a different logged-in user during the gap -- stricter
+  // than the loadAssistantSignals/loadMyDay effect above, deliberately,
+  // since this state is the most personalized slice on Home.
+  useEffect(() => {
+    setGuidance({ status: 'loading' });
+    if (!user) return;
+    loadGuidance();
+  }, [user?.id, loadGuidance]);
 
   // Aura Updates V1 -- ordinary fetch on the same lifecycle as the other
   // Home data above, no polling faster than the app's existing refresh
@@ -1096,9 +1137,14 @@ export default function DashboardPage() {
       // the pending/failure paths above, so a failed or merely-queued log
       // never makes Your Day look like it succeeded.
       loadMyDay();
+      // New Aura Home V1 -- a confirmed log can also change what Plans/
+      // intent exist for today, which GET /api/daily-assistant/guidance
+      // depends on; refreshed alongside loadMyDay() above, same
+      // confirmed-success-only discipline.
+      loadGuidance();
       return 'confirmed';
     },
-    [activeType, loadMyDay]
+    [activeType, loadMyDay, loadGuidance]
   );
 
   const handleLogout = useCallback(async () => {
@@ -1167,8 +1213,21 @@ export default function DashboardPage() {
   // loadMyDay() call site in this file -- only ever invoked after a real
   // server confirmation, never from a catch/failure path.
   const handlePlanLogged = useCallback(async () => {
-    await Promise.all([loadUserDataAndLogs(), loadMyDay()]);
-  }, [loadUserDataAndLogs, loadMyDay]);
+    // New Aura Home V1 -- loadGuidance() added alongside the existing two
+    // refreshes; a logged Plan can change today's eligible-intent set.
+    await Promise.all([loadUserDataAndLogs(), loadMyDay(), loadGuidance()]);
+  }, [loadUserDataAndLogs, loadMyDay, loadGuidance]);
+
+  // New Aura Home V1 -- passed to HomeDashboard as onMyDayChanged in
+  // place of the bare loadMyDay reference, so both of its own existing
+  // confirmed-success call sites (MyDayStoryCard's onCreated after a new
+  // Plan is created, DayBuilderCard's onCreated after "Add") also refresh
+  // guidance -- a newly-created Plan/intent is exactly what
+  // GET /api/daily-assistant/guidance needs to see.
+  const handleMyDayOrGuidanceChanged = useCallback(() => {
+    loadMyDay();
+    loadGuidance();
+  }, [loadMyDay, loadGuidance]);
 
   const handleLogPlanFromHome = useCallback(async (planId: string) => {
     const res = await fetch(`/api/plans/${planId}/log`, { method: 'POST' });
@@ -1355,7 +1414,9 @@ export default function DashboardPage() {
             myDayPendingActivities={myDayPendingActivities}
             logEntries={logEntries}
             timezone={userTz}
-            onMyDayChanged={loadMyDay}
+            onMyDayChanged={handleMyDayOrGuidanceChanged}
+            guidance={guidance}
+            onOpenBirthProfile={() => setActiveTab('chart')}
             onOpenPeople={() => { setPeopleReturnTo('home'); setActiveTab('people'); }}
             onOpenAgendaItem={handleOpenAgendaItem}
             onPlanTomorrow={handlePlanTomorrow}
