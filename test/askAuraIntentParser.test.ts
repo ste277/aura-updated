@@ -42,7 +42,8 @@ function parse(text: string, previous?: ParsedAskAuraRequest) {
 // ============================================================
 {
   const r = parse('When should I do deep work tomorrow morning for 60 minutes?');
-  check('-> TIMING_FIND', r.intent === 'TIMING_FIND');
+  // Ask Aura V1 (#109): TOMORROW is a future horizon -> FORWARD_PLAN.
+  check('-> FORWARD_PLAN', r.intent === 'FORWARD_PLAN');
   check('...activityId = deep-work', r.activityId === 'deep-work');
   check('...horizonPhrase = TOMORROW', r.horizonPhrase === 'TOMORROW');
   check('...timePreference = MORNING', r.timePreference === 'MORNING');
@@ -123,7 +124,9 @@ function parse(text: string, previous?: ParsedAskAuraRequest) {
 // ============================================================
 {
   const r = parse('Best time for coffee tomorrow');
-  check('"Best time for coffee tomorrow" -> TIMING_FIND, never MUHURTHAM_SEARCH', r.intent === 'TIMING_FIND');
+  // Ask Aura V1 (#109): TOMORROW is a future horizon, so this now routes to
+  // FORWARD_PLAN instead of TIMING_FIND -- never MUHURTHAM_SEARCH either way.
+  check('"Best time for coffee tomorrow" -> FORWARD_PLAN, never MUHURTHAM_SEARCH', r.intent === 'FORWARD_PLAN');
   // "coffee" alone isn't in coffee-tea's own alias list (only "grab
   // coffee"/"meet for coffee"/etc) -- findActivityIntent() correctly
   // returns no match, so this falls through to the SAME free-text fallback
@@ -142,7 +145,8 @@ function parse(text: string, previous?: ParsedAskAuraRequest) {
 // ============================================================
 {
   const first = parse('When should I work out tomorrow?');
-  check('First turn -> TIMING_FIND, workout, tomorrow', first.intent === 'TIMING_FIND' && first.activityId === 'workout' && first.horizonPhrase === 'TOMORROW');
+  // Ask Aura V1 (#109): TOMORROW is a future horizon -> FORWARD_PLAN.
+  check('First turn -> FORWARD_PLAN, workout, tomorrow', first.intent === 'FORWARD_PLAN' && first.activityId === 'workout' && first.horizonPhrase === 'TOMORROW');
 
   const delta = parseFollowUpChange('What about morning?', first);
   check('Follow-up "What about morning?" is recognized as a delta', delta !== null);
@@ -188,7 +192,8 @@ function parse(text: string, previous?: ParsedAskAuraRequest) {
 }
 {
   const r = parse('Workout tomorrow morning');
-  check('"Workout tomorrow morning" -> TIMING_FIND (activity + horizon, no verb needed)', r.intent === 'TIMING_FIND');
+  // Ask Aura V1 (#109): TOMORROW is a future horizon -> FORWARD_PLAN.
+  check('"Workout tomorrow morning" -> FORWARD_PLAN (activity + horizon, no verb needed)', r.intent === 'FORWARD_PLAN');
   check('...horizonPhrase = TOMORROW', r.horizonPhrase === 'TOMORROW');
   check('...timePreference = MORNING', r.timePreference === 'MORNING');
 }
@@ -290,12 +295,16 @@ for (const t of [
 
 // Section 48: date-only CHECK-shaped language must remain completely
 // unaffected -- no exactTime present, so existing FIND semantics apply.
+// Ask Aura V1 (#109): TOMORROW/THIS_WEEKEND are future horizons -> these
+// four now route to FORWARD_PLAN instead of TIMING_FIND; NEXT_MONTH is
+// deliberately NOT a Forward Planner horizon (see isFutureHorizonForPlanning's
+// own doc comment) so that one stays on the existing TIMING_FIND path.
 for (const [t, expectedIntent] of [
-  ['Is tomorrow good for marriage?', 'TIMING_FIND'],
-  ['Is tomorrow good for deep work?', 'TIMING_FIND'],
-  ['Is this weekend good for marriage?', 'TIMING_FIND'],
+  ['Is tomorrow good for marriage?', 'FORWARD_PLAN'],
+  ['Is tomorrow good for deep work?', 'FORWARD_PLAN'],
+  ['Is this weekend good for marriage?', 'FORWARD_PLAN'],
   ['Is next month good for marriage?', 'TIMING_FIND'],
-  ['Is tomorrow morning good for deep work?', 'TIMING_FIND'],
+  ['Is tomorrow morning good for deep work?', 'FORWARD_PLAN'],
 ] as const) {
   const r = parse(t);
   check(`"${t}" (date-only, no clock) -> ${expectedIntent}, no exactTime`, r.intent === expectedIntent && r.exactTime === undefined);
@@ -303,22 +312,30 @@ for (const [t, expectedIntent] of [
 
 // Section 49: explicit FIND language must retain full precedence over
 // exact-clock CHECK inference -- the clock there is a search constraint/
-// reference point, not the candidate instant.
+// reference point, not the candidate instant. Ask Aura V1 (#109): TOMORROW
+// is a future horizon -> FORWARD_PLAN for the two everyday-activity FIND
+// phrasings. "When is the best time tomorrow for deep work?" used to be a
+// documented pre-existing bug (bare PANCHANG_QUERY_RE "when is" firing
+// before any FIND logic ran) -- #109 fixes that bug (see PANCHANG_QUERY_RE's
+// own updated doc comment) and widens FIND_VERB_RE to also cover "when is
+// the best time" phrasing, so this now correctly resolves as a future-
+// planning request instead of a Panchang dump.
 for (const [t, expectedIntent] of [
-  ['Find the best time tomorrow for deep work.', 'TIMING_FIND'],
-  ['When is the best time tomorrow for deep work?', 'PANCHANG_QUERY'], // pre-existing PANCHANG_QUERY_RE "when is" match, unrelated to this PR -- see implementation report
+  ['Find the best time tomorrow for deep work.', 'FORWARD_PLAN'],
+  ['When is the best time tomorrow for deep work?', 'FORWARD_PLAN'],
   ['Find a wedding muhurtham tomorrow.', 'MUHURTHAM_SEARCH'],
-  ['Best wedding time tomorrow.', 'TIMING_FIND'],
+  ['Best wedding time tomorrow.', 'FORWARD_PLAN'],
 ] as const) {
   const r = parse(t);
   check(`"${t}" (explicit FIND/search language) -> ${expectedIntent}, unaffected`, r.intent === expectedIntent);
 }
 {
   // The critical explicit-FIND-with-clock-as-constraint case: "10 AM" here
-  // is a search boundary ("after 10 AM"), not the candidate instant --
-  // must remain TIMING_FIND, never captured by exact-clock CHECK inference.
+  // is a search boundary ("after 10 AM"), not the candidate instant -- must
+  // remain a FIND-shaped result, never captured by exact-clock CHECK
+  // inference. Ask Aura V1 (#109): TOMORROW is a future horizon -> FORWARD_PLAN.
   const r = parse('Find the best time tomorrow after 10 AM for deep work.');
-  check('"Find the best time tomorrow after 10 AM for deep work." stays TIMING_FIND (clock is a constraint, not a CHECK instant)', r.intent === 'TIMING_FIND');
+  check('"Find the best time tomorrow after 10 AM for deep work." stays FORWARD_PLAN (clock is a constraint, not a CHECK instant)', r.intent === 'FORWARD_PLAN');
 }
 
 // Section 50: dating regression -- exact-clock CHECK must not affect
@@ -610,21 +627,25 @@ for (const t of ['Is September 20-25 good for marriage?', 'Is September 20 to Se
   check('"Is 10 AM next Friday good for marriage?" -> TIMING_CHECK, exactTime=10:00, customDate=2026-09-11', r.intent === 'TIMING_CHECK' && r.exactTime === '10:00' && r.customDate === '2026-09-11');
 }
 
-// --- Date-only (no clock) -> TIMING_FIND, never CHECK, for both marriage
-// and an everyday activity (the orchestrator's own capability redirect,
-// unchanged by this PR, is what sends marriage's TIMING_FIND on to the
-// canonical Muhurtham engine -- proven in test/askAuraMarriageRouting.test.ts) ---
+// --- Date-only (no clock) -> never CHECK, for both marriage and an
+// everyday activity (the orchestrator's own capability redirect, unchanged
+// by this PR, is what sends marriage's own result on to the canonical
+// Muhurtham engine -- proven in test/askAuraMarriageRouting.test.ts). Ask
+// Aura V1 (#109): a resolved CUSTOM_DATE strictly after today's local date
+// (here, both 2026-09-20 and 2026-09-05 are after FRIDAY_NOW's own
+// 2026-09-04) is a future date, so these now route to FORWARD_PLAN instead
+// of TIMING_FIND -- see isFutureHorizonForPlanning's own doc comment. ---
 {
   const r = parseTz('Is September 20 good for marriage?', FRIDAY_NOW);
-  check('Marriage date-only (no clock) -> TIMING_FIND, never TIMING_CHECK', r.intent === 'TIMING_FIND' && r.customDate === '2026-09-20');
+  check('Marriage future date-only (no clock) -> FORWARD_PLAN, never TIMING_CHECK', r.intent === 'FORWARD_PLAN' && r.customDate === '2026-09-20');
 }
 {
   const r = parseTz('Best time for a workout on September 20?', FRIDAY_NOW);
-  check('Everyday date-only -> TIMING_FIND', r.intent === 'TIMING_FIND' && r.activityId === 'workout' && r.customDate === '2026-09-20');
+  check('Everyday future date-only -> FORWARD_PLAN', r.intent === 'FORWARD_PLAN' && r.activityId === 'workout' && r.customDate === '2026-09-20');
 }
 {
   const r = parseTz('Workout on Saturday.', FRIDAY_NOW);
-  check('Everyday bare weekday date -> TIMING_FIND', r.intent === 'TIMING_FIND' && r.activityId === 'workout' && r.customDate === '2026-09-05');
+  check('Everyday bare weekday future date -> FORWARD_PLAN', r.intent === 'FORWARD_PLAN' && r.activityId === 'workout' && r.customDate === '2026-09-05');
 }
 
 // --- Dating alias regression: "date" terminology near a natural calendar
@@ -648,10 +669,11 @@ for (const t of ['Is September 20-25 good for marriage?', 'Is September 20 to Se
   check('SHARED "with Priya" resolves correctly alongside a natural date', r.scope === 'SHARED' && r.personNameQuery === 'priya' && r.customDate === '2026-09-20');
 }
 
-// --- Explicit FIND precedence preserved even with a natural date present ---
+// --- Explicit FIND precedence preserved even with a natural date present.
+// Ask Aura V1 (#109): a future customDate now routes to FORWARD_PLAN. ---
 {
   const r = parseTz('Find the best time on September 20 for a workout.', FRIDAY_NOW);
-  check('Explicit "Find the best time..." phrasing + natural date -> TIMING_FIND', r.intent === 'TIMING_FIND' && r.customDate === '2026-09-20');
+  check('Explicit "Find the best time..." phrasing + future natural date -> FORWARD_PLAN', r.intent === 'FORWARD_PLAN' && r.customDate === '2026-09-20');
 }
 
 // --- Panchang regression: PANCHANG_QUERY_RE's own existing "when is"
@@ -924,42 +946,56 @@ for (const pair of PAIR_ORDERINGS) {
 // silently collapse a multi-day range down to only its first day).
 // ============================================================
 
-// --- Required matrix: every currently-supported non-NOW horizon form ---
-for (const [t, expectedHorizon, expectedCustomDate] of [
-  ['Should I meditate tomorrow?', 'TOMORROW', undefined],
-  ['Can I meditate tomorrow?', 'TOMORROW', undefined],
-  ['Should I meditate today?', 'TODAY', undefined],
-  ['Should I meditate next Friday?', 'CUSTOM_DATE', '2026-09-11'],
-  ['Can I meditate September 20?', 'CUSTOM_DATE', '2026-09-20'],
-  ['Should I meditate this weekend?', 'THIS_WEEKEND', undefined],
-  ['Can I meditate next 7 days?', 'NEXT_7_DAYS', undefined],
-  ['Should I meditate next month?', 'NEXT_MONTH', undefined],
+// --- Required matrix: every currently-supported non-NOW horizon form.
+// Ask Aura V1 (#109): the genuinely future entries (TOMORROW, a future
+// CUSTOM_DATE, THIS_WEEKEND, NEXT_7_DAYS) now resolve FORWARD_PLAN instead
+// of TIMING_FIND -- TODAY and NEXT_MONTH are not Forward Planner horizons
+// (see isFutureHorizonForPlanning's own doc comment) and stay TIMING_FIND. ---
+for (const [t, expectedHorizon, expectedCustomDate, expectedIntent] of [
+  ['Should I meditate tomorrow?', 'TOMORROW', undefined, 'FORWARD_PLAN'],
+  ['Can I meditate tomorrow?', 'TOMORROW', undefined, 'FORWARD_PLAN'],
+  ['Should I meditate today?', 'TODAY', undefined, 'TIMING_FIND'],
+  ['Should I meditate next Friday?', 'CUSTOM_DATE', '2026-09-11', 'FORWARD_PLAN'],
+  ['Can I meditate September 20?', 'CUSTOM_DATE', '2026-09-20', 'FORWARD_PLAN'],
+  ['Should I meditate this weekend?', 'THIS_WEEKEND', undefined, 'FORWARD_PLAN'],
+  ['Can I meditate next 7 days?', 'NEXT_7_DAYS', undefined, 'FORWARD_PLAN'],
+  ['Should I meditate next month?', 'NEXT_MONTH', undefined, 'TIMING_FIND'],
 ] as const) {
   const r = parseTz(t, FRIDAY_NOW);
-  check(`"${t}" -> TIMING_FIND (was TIMING_CHECK with a fabricated instant), horizonPhrase=${expectedHorizon}`, r.intent === 'TIMING_FIND' && r.horizonPhrase === expectedHorizon && r.customDate === expectedCustomDate && r.exactTime === undefined);
+  check(
+    `"${t}" -> ${expectedIntent} (was TIMING_CHECK with a fabricated instant), horizonPhrase=${expectedHorizon}`,
+    r.intent === expectedIntent && r.horizonPhrase === expectedHorizon && r.customDate === expectedCustomDate && r.exactTime === undefined
+  );
 }
 
-// --- timePreference must be preserved, never synthesized into a clock ---
+// --- timePreference must be preserved, never synthesized into a clock.
+// Ask Aura V1 (#109): TOMORROW/future-CUSTOM_DATE -> FORWARD_PLAN. ---
 {
   const r = parseTz('Should I meditate tomorrow morning?', FRIDAY_NOW);
-  check('"Should I meditate tomorrow morning?" -> TIMING_FIND, timePreference=MORNING, no exactTime fabricated from it', r.intent === 'TIMING_FIND' && r.timePreference === 'MORNING' && r.exactTime === undefined);
+  check('"Should I meditate tomorrow morning?" -> FORWARD_PLAN, timePreference=MORNING, no exactTime fabricated from it', r.intent === 'FORWARD_PLAN' && r.timePreference === 'MORNING' && r.exactTime === undefined);
 }
 {
+  // "Friday" resolves to TODAY here (FRIDAY_NOW's own local date IS a
+  // Friday -- a bare weekday name resolves to its next occurrence, which
+  // can be today itself, unlike "next Friday"), so this is NOT a future
+  // date and correctly stays on the existing TIMING_FIND path (Ask Aura
+  // V1 (#109) only redirects a CUSTOM_DATE strictly after today).
   const r = parseTz('Would Friday evening be good for deep work?', FRIDAY_NOW);
-  check('"Would Friday evening be good for deep work?" -> TIMING_FIND, timePreference=EVENING', r.intent === 'TIMING_FIND' && r.activityId === 'deep-work' && r.timePreference === 'EVENING' && r.exactTime === undefined);
+  check('"Would Friday evening be good for deep work?" -> TIMING_FIND, timePreference=EVENING (Friday = today here, not future)', r.intent === 'TIMING_FIND' && r.activityId === 'deep-work' && r.timePreference === 'EVENING' && r.exactTime === undefined && r.customDate === '2026-09-04');
 }
 
 // --- duration must be preserved ---
 {
   const r = parseTz('Should I meditate tomorrow for 90 minutes?', FRIDAY_NOW);
-  check('"Should I meditate tomorrow for 90 minutes?" -> TIMING_FIND, durationMinutes=90', r.intent === 'TIMING_FIND' && r.durationMinutes === 90 && r.horizonPhrase === 'TOMORROW');
+  check('"Should I meditate tomorrow for 90 minutes?" -> FORWARD_PLAN, durationMinutes=90', r.intent === 'FORWARD_PLAN' && r.durationMinutes === 90 && r.horizonPhrase === 'TOMORROW');
 }
 
 // --- Ordinary "is X good for Y" date-only phrasing was already correct;
-// must remain unaffected by this fix (it never matched CHECK_VERB_RE). ---
+// must remain unaffected by the CHECK-semantics fix (it never matched
+// CHECK_VERB_RE) -- Ask Aura V1 (#109): TOMORROW -> FORWARD_PLAN. ---
 {
   const r = parseTz('Is tomorrow good for meditation?', FRIDAY_NOW);
-  check('"Is tomorrow good for meditation?" (unaffected control) -> TIMING_FIND, unchanged', r.intent === 'TIMING_FIND' && r.horizonPhrase === 'TOMORROW');
+  check('"Is tomorrow good for meditation?" (unaffected control) -> FORWARD_PLAN', r.intent === 'FORWARD_PLAN' && r.horizonPhrase === 'TOMORROW');
 }
 
 // --- NOW must remain TIMING_CHECK -- this fix targets non-NOW periods
@@ -998,14 +1034,20 @@ for (const t of ['Should I meditate at 10 AM tomorrow?', 'Is 10 AM tomorrow good
 // switch to findActivityIntent()). ---
 {
   const r = parseTz('Should I do unicycle rehearsal tomorrow?', FRIDAY_NOW);
-  check('Uncataloged free-text activity + "should I" + date -> TIMING_FIND (never UNKNOWN), taskTitle preserved', r.intent === 'TIMING_FIND' && r.activityId === undefined && r.taskTitle === 'should i do unicycle rehearsal tomorrow?' && r.horizonPhrase === 'TOMORROW');
+  // Ask Aura V1 (#109): TOMORROW -> FORWARD_PLAN. The orchestrator must
+  // still handle "no real activityId, only taskTitle" for FORWARD_PLAN by
+  // returning a CLARIFICATION (Forward Planner requires a resolved
+  // activityId) -- never passing raw free text into #108's own engine.
+  check('Uncataloged free-text activity + "should I" + date -> FORWARD_PLAN (never UNKNOWN), taskTitle preserved', r.intent === 'FORWARD_PLAN' && r.activityId === undefined && r.taskTitle === 'should i do unicycle rehearsal tomorrow?' && r.horizonPhrase === 'TOMORROW');
 }
 
 // --- PERSONAL date-only: existing scope machinery, now reached via the
-// FIND path automatically. ---
+// FIND path automatically. Ask Aura V1 (#109): TOMORROW -> FORWARD_PLAN
+// (PERSONAL scope, unlike SHARED, does not block the redirect -- Forward
+// Planner is inherently personal/self-only). ---
 {
   const r = parseTz('Is tomorrow good for me to meditate?', FRIDAY_NOW);
-  check('PERSONAL date-only control -> TIMING_FIND, PERSONAL, unaffected', r.intent === 'TIMING_FIND' && r.scope === 'PERSONAL');
+  check('PERSONAL date-only control -> FORWARD_PLAN, PERSONAL', r.intent === 'FORWARD_PLAN' && r.scope === 'PERSONAL');
 }
 
 // --- SHARED date-only and exact-clock: PR #68/#69 machinery composes
@@ -1019,12 +1061,16 @@ for (const t of ['Should I meditate at 10 AM tomorrow?', 'Is 10 AM tomorrow good
   check('SHARED exact-clock -> TIMING_CHECK, SHARED, priya, exactTime=10:00 -- never rerouted to FIND', r.intent === 'TIMING_CHECK' && r.scope === 'SHARED' && r.personNameQuery === 'priya' && r.exactTime === '10:00');
 }
 
-// --- Ceremonial date-only: the most consequential fix -- must reach
-// TIMING_FIND so the orchestrator's existing capability redirect sends it
-// to the canonical Muhurtham search, never a fabricated-instant CHECK. ---
+// --- Ceremonial date-only: the most consequential fix -- must reach a
+// FIND-shaped result so the orchestrator's existing capability redirect
+// sends it to the canonical Muhurtham search, never a fabricated-instant
+// CHECK. Ask Aura V1 (#109): TOMORROW/future-CUSTOM_DATE -> FORWARD_PLAN;
+// the orchestrator's own Muhurtham-eligibility gate (unchanged) still takes
+// precedence over Forward Planner for a Muhurtham-eligible activity like
+// marriage -- see askAuraOrchestrator.ts's own dispatch. ---
 for (const t of ['Should I get married tomorrow?', 'Can I get married next Friday?']) {
   const r = parseTz(t, FRIDAY_NOW);
-  check(`"${t}" -> TIMING_FIND, marriage, no exactTime (was a fabricated-instant CHECK)`, r.intent === 'TIMING_FIND' && r.activityId === 'marriage' && r.exactTime === undefined);
+  check(`"${t}" -> FORWARD_PLAN, marriage, no exactTime (was a fabricated-instant CHECK)`, r.intent === 'FORWARD_PLAN' && r.activityId === 'marriage' && r.exactTime === undefined);
 }
 
 // --- Ceremonial exact clock must remain TIMING_CHECK, unaffected. ---
@@ -1033,23 +1079,28 @@ for (const t of ['Should I get married tomorrow?', 'Can I get married next Frida
   check('"Should I get married at 10 AM next Friday?" -> TIMING_CHECK, marriage, exactTime=10:00, unaffected', r.intent === 'TIMING_CHECK' && r.activityId === 'marriage' && r.exactTime === '10:00');
 }
 
-// --- Existing ceremonial FIND control (never matched CHECK_VERB_RE) must
-// stay unaffected. ---
+// --- Existing ceremonial FIND control (never matched CHECK_VERB_RE).
+// Ask Aura V1 (#109): next Friday resolves to a future CUSTOM_DATE ->
+// FORWARD_PLAN (the orchestrator's own Muhurtham-eligibility gate,
+// unchanged, is what actually sends a marriage FORWARD_PLAN result on to
+// the canonical Muhurtham engine instead of Forward Planner's own). ---
 {
   const r = parseTz('Is next Friday good for marriage?', FRIDAY_NOW);
-  check('"Is next Friday good for marriage?" (unaffected control) -> TIMING_FIND, marriage', r.intent === 'TIMING_FIND' && r.activityId === 'marriage');
+  check('"Is next Friday good for marriage?" -> FORWARD_PLAN, marriage', r.intent === 'FORWARD_PLAN' && r.activityId === 'marriage');
 }
 
 // --- Regressions: Panchang query/explain, PLAN_OPEN, explicit FIND must
-// all remain completely unaffected by this narrowly-scoped fix. ---
+// all remain completely unaffected by this narrowly-scoped fix (Ask Aura
+// V1 (#109) only changes which intent tag a future-horizon FIND-shaped
+// result carries, never Panchang/PLAN_OPEN routing). ---
 check('"What\'s Rahu Kalam tomorrow?" stays PANCHANG_QUERY, unaffected', parseTz("What's Rahu Kalam tomorrow?", FRIDAY_NOW).intent === 'PANCHANG_QUERY');
 {
   const r = parseTz('Plan my meditation tomorrow', FRIDAY_NOW);
-  check('"Plan my meditation tomorrow" resolves exactly as before this fix (no CHECK_VERB_RE match, unaffected)', r.intent === 'TIMING_FIND' && r.activityId === 'meditation');
+  check('"Plan my meditation tomorrow" -> FORWARD_PLAN (TOMORROW is a future horizon)', r.intent === 'FORWARD_PLAN' && r.activityId === 'meditation');
 }
 for (const t of ['Find a good time tomorrow for meditation.', 'When should I meditate tomorrow?', 'Best time tomorrow for meditation.']) {
   const r = parseTz(t, FRIDAY_NOW);
-  check(`"${t}" (explicit FIND, unaffected) -> TIMING_FIND`, r.intent === 'TIMING_FIND');
+  check(`"${t}" (explicit FIND, future horizon) -> FORWARD_PLAN`, r.intent === 'FORWARD_PLAN');
 }
 
 // ============================================================
@@ -1097,7 +1148,8 @@ check('extractLocationQuery("within Chennai") === undefined (word-boundary check
 // reusing the FRIDAY_NOW/TZ fixtures above. ---
 {
   const r = parseTz('Should I get married in Chennai next Friday?', FRIDAY_NOW);
-  check('"Should I get married in Chennai next Friday?" -> TIMING_FIND, marriage, locationQuery=chennai, date-only (never CHECK)', r.intent === 'TIMING_FIND' && r.activityId === 'marriage' && r.locationQuery === 'chennai' && r.horizonPhrase === 'CUSTOM_DATE');
+  // Ask Aura V1 (#109): "next Friday" is a future CUSTOM_DATE -> FORWARD_PLAN.
+  check('"Should I get married in Chennai next Friday?" -> FORWARD_PLAN, marriage, locationQuery=chennai, date-only (never CHECK)', r.intent === 'FORWARD_PLAN' && r.activityId === 'marriage' && r.locationQuery === 'chennai' && r.horizonPhrase === 'CUSTOM_DATE');
 }
 {
   const r = parseTz('Is 10 AM next Friday good for marriage in Chennai?', FRIDAY_NOW);
@@ -1121,7 +1173,8 @@ check('extractLocationQuery("within Chennai") === undefined (word-boundary check
 // an orchestrator-level concern (see askAuraOrchestrator.test.ts). ---
 {
   const r = parseTz('Should I get married in Atlantis next Friday?', FRIDAY_NOW);
-  check('"...in Atlantis..." -> locationQuery="atlantis" extracted regardless of resolvability', r.intent === 'TIMING_FIND' && r.locationQuery === 'atlantis');
+  // Ask Aura V1 (#109): "next Friday" is a future CUSTOM_DATE -> FORWARD_PLAN.
+  check('"...in Atlantis..." -> locationQuery="atlantis" extracted regardless of resolvability', r.intent === 'FORWARD_PLAN' && r.locationQuery === 'atlantis');
 }
 
 // --- Everyday non-goal (brief section 47): the parser extracts
@@ -1129,14 +1182,16 @@ check('extractLocationQuery("within Chennai") === undefined (word-boundary check
 // the parser's) to ignore it for a non-Muhurtham-eligible activity. ---
 {
   const r = parseTz('Should I meditate in Chennai tomorrow?', FRIDAY_NOW);
-  check('"Should I meditate in Chennai tomorrow?" -> TIMING_FIND, meditation, locationQuery still extracted here (orchestrator ignores it for non-ceremonial activities)', r.intent === 'TIMING_FIND' && r.activityId === 'meditation' && r.locationQuery === 'chennai');
+  // Ask Aura V1 (#109): TOMORROW -> FORWARD_PLAN.
+  check('"Should I meditate in Chennai tomorrow?" -> FORWARD_PLAN, meditation, locationQuery still extracted here (orchestrator ignores it for non-ceremonial activities)', r.intent === 'FORWARD_PLAN' && r.activityId === 'meditation' && r.locationQuery === 'chennai');
 }
 
 // --- Omitted-location control (brief section 25/46): completely
 // unaffected by this PR. ---
 {
   const r = parseTz('Should I get married next Friday?', FRIDAY_NOW);
-  check('"Should I get married next Friday?" (no location phrase) -> locationQuery undefined, unaffected', r.intent === 'TIMING_FIND' && r.locationQuery === undefined);
+  // Ask Aura V1 (#109): "next Friday" is a future CUSTOM_DATE -> FORWARD_PLAN.
+  check('"Should I get married next Friday?" (no location phrase) -> locationQuery undefined, FORWARD_PLAN', r.intent === 'FORWARD_PLAN' && r.locationQuery === undefined);
 }
 
 // --- Timezone-boundary proof (brief section 40): once an Event Location's
@@ -1269,6 +1324,158 @@ check('"tomorrow" parses identically regardless of which timezone the gate chose
   const everydayParsed = parseAskAuraRequest(everydayText, { now: BOUNDARY_NOW, timezone: everydayTz });
   check('Ceremonial: Chennai\'s local "today" is already Sept 5 -> "September 4" (already passed) rolls forward to next year', ceremonialParsed.customDate === '2027-09-04');
   check('Everyday: the user\'s own (New York) local "today" is still Sept 4 -> "September 4" resolves to THIS year (same-day policy), never Chennai\'s rolled-forward date', everydayParsed.customDate === '2026-09-04');
+}
+
+// ============================================================
+// Ask Aura V1 (#109) -- TODAY_GUIDANCE, FORWARD_PLAN, and the two
+// classifier bug fixes. New section, appended rather than interleaved, so
+// the extensive pre-existing sections above stay easy to diff against.
+// ============================================================
+
+// --- TODAY_GUIDANCE: general personal-guidance phrasing. ---
+for (const t of [
+  'What should I focus on today?',
+  "What's best for me today?",
+  'What should I prioritize today?',
+  'What should I do today?',
+  'What are my best activities today?',
+]) {
+  const r = parse(t);
+  check(`"${t}" -> TODAY_GUIDANCE, HIGH confidence`, r.intent === 'TODAY_GUIDANCE' && r.confidence === 'HIGH');
+}
+
+// --- TODAY_GUIDANCE collision guards: must NOT swallow other intents that
+// merely happen to contain "today" or "what should i do". ---
+{
+  const r = parse('When should I work out today?');
+  check('"When should I work out today?" -> TIMING_FIND (TODAY is not a Forward Planner horizon), never TODAY_GUIDANCE', r.intent === 'TIMING_FIND' && r.activityId === 'workout');
+}
+{
+  const r = parse('Is 4 PM good for meditation today?');
+  check('"Is 4 PM good for meditation today?" -> TIMING_CHECK, never TODAY_GUIDANCE', r.intent === 'TIMING_CHECK' && r.exactTime === '16:00');
+}
+{
+  const r = parse("What is today's Panchang?");
+  check('"What is today\'s Panchang?" -> PANCHANG_QUERY, never TODAY_GUIDANCE', r.intent === 'PANCHANG_QUERY');
+}
+{
+  const r = parse('What should I do right now?');
+  check('"What should I do right now?" (no "today") -> GOOD_RIGHT_NOW, unaffected by the new TODAY_GUIDANCE check', r.intent === 'GOOD_RIGHT_NOW');
+}
+
+// --- FORWARD_PLAN: the brief's own core acceptance examples. A timezone
+// is required for weekday-name parsing ("Friday" -> a resolved
+// CUSTOM_DATE) -- see the file's own "no timezone -> stays ABSENT"
+// precedent above -- so these use parseTz/TZ rather than the bare
+// no-timezone `parse()` helper. ---
+for (const t of [
+  'When should I work out tomorrow?',
+  'Find a good time this weekend for meditation.',
+  'When should I study in the next 7 days?',
+  'Best time on Friday for deep work?',
+]) {
+  const r = parseTz(t, NOW, TZ);
+  check(`"${t}" -> FORWARD_PLAN with a resolved activity/range`, r.intent === 'FORWARD_PLAN' && Boolean(r.activityId) && Boolean(r.horizonPhrase));
+}
+
+// --- Exact-time precedence: an explicit clock+date+activity must remain
+// TIMING_CHECK, never FORWARD_PLAN, even though the horizon is future. ---
+{
+  const r = parse('Is tomorrow at 10 AM good for a 30 minute workout?');
+  check('"Is tomorrow at 10 AM good for a 30 minute workout?" -> TIMING_CHECK, not FORWARD_PLAN', r.intent === 'TIMING_CHECK' && r.exactTime === '10:00' && r.activityId === 'workout' && r.durationMinutes === 30);
+}
+
+// --- Later-today must remain on the existing same-day TIMING_FIND path,
+// never Forward Planner (which is explicitly future-only). ---
+{
+  const r = parse('Find me a good time later today for deep work');
+  check('"Find me a good time later today for deep work" -> TIMING_FIND (TODAY), never FORWARD_PLAN', r.intent === 'TIMING_FIND' && r.horizonPhrase === 'TODAY' && r.activityId === 'deep-work');
+}
+
+// --- next 7 days: the parser only tags the intent + horizonPhrase; the
+// orchestrator (see askAuraOrchestrator.test.ts) is what actually maps
+// NEXT_7_DAYS to Forward Planner's own future-only SEVEN_DAYS, never
+// Ask Aura's own today-inclusive resolveHorizonToDateRange. ---
+{
+  const r = parse('When should I study in the next 7 days?');
+  check('"...next 7 days" -> FORWARD_PLAN, horizonPhrase=NEXT_7_DAYS, activityId=learning', r.intent === 'FORWARD_PLAN' && r.horizonPhrase === 'NEXT_7_DAYS' && r.activityId === 'learning');
+}
+
+// --- Weekend tests across weekdays (parser-level: the horizon tag is the
+// same THIS_WEEKEND regardless of which weekday "now" is -- the actual
+// Saturday/Sunday-only Forward Planner semantics live entirely in
+// forwardPlanner.ts's own resolveForwardPlannerRange, unmodified by #109;
+// see askAuraOrchestrator.test.ts for the end-to-end date proof). ---
+for (const weekdayNow of [
+  new Date('2026-09-10T04:00:00.000Z'), // Thursday
+  new Date('2026-09-11T04:00:00.000Z'), // Friday
+  new Date('2026-09-12T04:00:00.000Z'), // Saturday
+  new Date('2026-09-13T04:00:00.000Z'), // Sunday
+]) {
+  const r = parseAskAuraRequest('Find a good time this weekend for meditation.', { now: weekdayNow, timezone: TZ });
+  check(`Weekend request on ${weekdayNow.toISOString().slice(0, 10)} -> FORWARD_PLAN, horizonPhrase=THIS_WEEKEND`, r.intent === 'FORWARD_PLAN' && r.horizonPhrase === 'THIS_WEEKEND');
+}
+
+// --- Next weekend: parser already supports this horizon; the orchestrator
+// maps it to Forward Planner's own CUSTOM range (see #109's own
+// architecture audit item 13) -- #108's contract itself is never widened. ---
+{
+  const r = parse('Find a good time next weekend for meditation.');
+  check('"...next weekend..." -> FORWARD_PLAN, horizonPhrase=NEXT_WEEKEND', r.intent === 'FORWARD_PLAN' && r.horizonPhrase === 'NEXT_WEEKEND');
+}
+
+// --- "When is" bug fix: a genuine timing question must no longer be
+// swallowed by PANCHANG_QUERY_RE's own bare "when is" alternative. ---
+{
+  const r = parse('When is a good time tomorrow for workout?');
+  check('"When is a good time tomorrow for workout?" -> FORWARD_PLAN, never PANCHANG_QUERY', r.intent === 'FORWARD_PLAN' && r.activityId === 'workout');
+}
+{
+  const r = parse('When is the best time this weekend for meditation?');
+  check('"When is the best time this weekend for meditation?" -> FORWARD_PLAN, never PANCHANG_QUERY', r.intent === 'FORWARD_PLAN' && r.activityId === 'meditation');
+}
+// --- Legitimate Panchang "when is" questions must remain completely
+// unaffected -- the fix is a narrow negative lookahead, not a removal. ---
+for (const t of ['When is Rahu Kalam tomorrow?', 'When is the nakshatra today?', 'When is Abhijit Muhurta?']) {
+  const r = parse(t);
+  check(`"${t}" -> PANCHANG_QUERY, unaffected by the "when is" fix`, r.intent === 'PANCHANG_QUERY');
+}
+
+// --- "marry" bug fix: an out-of-domain fortune-telling question must
+// never resolve as a confident PLAN_OPEN(marriage). ---
+{
+  const r = parse('Who will I marry?');
+  check('"Who will I marry?" -> UNKNOWN, never PLAN_OPEN(marriage)', r.intent === 'UNKNOWN');
+}
+for (const t of ['Will I get married?', 'When will I get married?', 'Am I going to get married?']) {
+  const r = parse(t);
+  check(`"${t}" -> UNKNOWN, never PLAN_OPEN(marriage)`, r.intent === 'UNKNOWN');
+}
+// --- Genuine marriage-planning requests must remain completely
+// unaffected -- the fix is scoped only to step 9's bare-activity fallback,
+// never any earlier, more specific match. ---
+{
+  // "good time" here matches CEREMONIAL_BEST_DATE_RE (step 8b, pre-existing,
+  // untouched by #109) -- marriage being Muhurtham-eligible, this correctly
+  // routes to MUHURTHAM_SEARCH, same as before the fortune-telling guard
+  // was added (that guard only applies at step 9, never reached here).
+  const r = parse('Find a good time for marriage');
+  check('"Find a good time for marriage" -> MUHURTHAM_SEARCH (unaffected by the fortune-telling guard), never UNKNOWN', r.intent === 'MUHURTHAM_SEARCH' && r.activityId === 'marriage');
+}
+{
+  const r = parse('Best marriage date.');
+  check('"Best marriage date." -> MUHURTHAM_SEARCH, unaffected', r.intent === 'MUHURTHAM_SEARCH' && r.activityId === 'marriage');
+}
+{
+  const r = parse('Marriage');
+  check('Bare "Marriage" (no fortune-telling phrasing) -> still PLAN_OPEN, unaffected', r.intent === 'PLAN_OPEN' && r.activityId === 'marriage');
+}
+
+// --- Garbage-taskTitle guard: TODAY_GUIDANCE precedence prevents these
+// specific phrases from ever reaching the old free-text-taskTitle fallback. ---
+{
+  const r = parse('What should I focus on today?');
+  check('"What should I focus on today?" never falls through to a raw-sentence taskTitle', r.intent === 'TODAY_GUIDANCE' && r.taskTitle === undefined && r.activityId === undefined);
 }
 
 if (!allPassed) {

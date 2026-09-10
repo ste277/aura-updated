@@ -31,6 +31,7 @@ import { orchestrateAskAura, AskAuraOrchestratorDeps } from '../apps/web/lib/ask
 import { DailyAssistantContext } from '../packages/recommendation/src/dailyAssistant';
 import { findActivityIntent } from '../packages/recommendation/src/personalizedTasks';
 import { isSupportedMuhurthamActivity } from '../packages/recommendation/src/muhurthamFinder';
+import { User } from '../apps/web/lib/db';
 
 let allPassed = true;
 function check(label: string, condition: boolean) {
@@ -40,7 +41,31 @@ function check(label: string, condition: boolean) {
 
 const NOW = new Date('2026-08-23T10:00:00.000Z');
 const context: DailyAssistantContext = { now: NOW, latitude: 13.0827, longitude: 80.2707, timezone: 'Asia/Kolkata', tzOffsetMinutes: 330 };
-const deps: AskAuraOrchestratorDeps = { userId: 'test-user-not-a-real-db-row', context, activeWindow: 'NEUTRAL' };
+// Plain, not-a-real-db-row fixture -- only satisfies AskAuraOrchestratorDeps.user's
+// type; none of this file's marriage-routing checks read deps.user.
+const FAKE_USER: User = {
+  id: 'test-user-not-a-real-db-row',
+  email: 'test-ask-aura-marriage@example.com',
+  cityName: 'Chennai',
+  latitude: 13.0827,
+  longitude: 80.2707,
+  timezone: 'Asia/Kolkata',
+  createdAt: NOW,
+  birthDate: new Date('1990-06-15T00:00:00.000Z'),
+  birthTime: '08:30',
+  birthCityName: 'Chennai',
+  birthLatitude: 13.0827,
+  birthLongitude: 80.2707,
+  birthTimezone: 'Asia/Kolkata',
+  remindersEnabled: true,
+  reminderLeadMinutes: 15,
+  dayBuilderEnabled: true,
+  dayBuilderMutedGroups: [],
+  dayBuilderPriorities: [],
+  dayBuilderPriorityPersonIds: [],
+  dayBuilderPrioritiesPromptDismissed: true,
+};
+const deps: AskAuraOrchestratorDeps = { userId: 'test-user-not-a-real-db-row', user: FAKE_USER, context, activeWindow: 'NEUTRAL' };
 
 function parse(text: string) {
   return parseAskAuraRequest(text, { now: NOW });
@@ -217,7 +242,7 @@ async function main() {
   {
     const nyNow = new Date('2026-05-01T04:00:00.000Z');
     const nyContext: DailyAssistantContext = { now: nyNow, latitude: 40.7128, longitude: -74.006, timezone: 'America/New_York', tzOffsetMinutes: -300 };
-    const nyDeps: AskAuraOrchestratorDeps = { userId: 'test-user-not-a-real-db-row', context: nyContext, activeWindow: 'NEUTRAL' };
+    const nyDeps: AskAuraOrchestratorDeps = { userId: 'test-user-not-a-real-db-row', user: FAKE_USER, context: nyContext, activeWindow: 'NEUTRAL' };
 
     async function firstDateEntry(text: string) {
       const p = parseAskAuraRequest(text, { now: nyNow });
@@ -402,7 +427,7 @@ async function main() {
   // audit to display as 5:30 PM in Asia/Kolkata for this exact prompt).
   for (const t of ['Should I get married tomorrow?', 'Can I get married tomorrow?']) {
     const p = parse(t);
-    check(`"${t}" -> TIMING_FIND, marriage, no exactTime (was a fabricated-instant CHECK)`, p.intent === 'TIMING_FIND' && p.activityId === 'marriage' && p.exactTime === undefined);
+    check(`"${t}" -> FORWARD_PLAN, marriage, no exactTime (was a fabricated-instant CHECK)`, p.intent === 'FORWARD_PLAN' && p.activityId === 'marriage' && p.exactTime === undefined);
     const response = await orchestrateAskAura(p, deps);
     check(`"${t}" executes through the canonical Muhurtham search (never a fabricated single instant)`, response.intent === 'MUHURTHAM_SEARCH');
   }
@@ -437,14 +462,14 @@ async function main() {
   {
     const nyNow = new Date('2026-06-11T04:00:00.000Z');
     const nyContext: DailyAssistantContext = { now: nyNow, latitude: 40.7128, longitude: -74.006, timezone: 'America/New_York', tzOffsetMinutes: -300 };
-    const nyDeps: AskAuraOrchestratorDeps = { userId: 'test-user-not-a-real-db-row', context: nyContext, activeWindow: 'NEUTRAL' };
+    const nyDeps: AskAuraOrchestratorDeps = { userId: 'test-user-not-a-real-db-row', user: FAKE_USER, context: nyContext, activeWindow: 'NEUTRAL' };
 
     const findParsed = parseAskAuraRequest('Is tomorrow good for marriage?', { now: nyNow });
     const findResponse = await orchestrateAskAura(findParsed, nyDeps);
     check('"Is tomorrow good for marriage?" (FIND) executes MUHURTHAM_SEARCH', findResponse.intent === 'MUHURTHAM_SEARCH');
 
     const checkParsed = parseAskAuraRequest('Should I get married tomorrow?', { now: nyNow });
-    check('"Should I get married tomorrow?" now parses TIMING_FIND (no exact clock stated)', checkParsed.intent === 'TIMING_FIND');
+    check('"Should I get married tomorrow?" now parses FORWARD_PLAN (no exact clock stated)', checkParsed.intent === 'FORWARD_PLAN');
     const checkResponse = await orchestrateAskAura(checkParsed, nyDeps);
     check('"Should I get married tomorrow?" executes MUHURTHAM_SEARCH -- the SAME canonical engine as the bare FIND phrasing, never a fabricated single instant', checkResponse.intent === 'MUHURTHAM_SEARCH');
 
@@ -471,7 +496,7 @@ async function main() {
     ['Should I start my business tomorrow?', 'business-start'],
   ] as const) {
     const p = parse(text);
-    check(`"${text}" -> TIMING_FIND, activityId=${activityId}, no exactTime (was a fabricated-instant CHECK)`, p.intent === 'TIMING_FIND' && p.activityId === activityId && p.exactTime === undefined);
+    check(`"${text}" -> FORWARD_PLAN, activityId=${activityId}, no exactTime (was a fabricated-instant CHECK)`, p.intent === 'FORWARD_PLAN' && p.activityId === activityId && p.exactTime === undefined);
     const response = await orchestrateAskAura(p, deps);
     check(`"${text}" executes through the canonical Muhurtham search, never generic-only or a fabricated instant`, response.intent === 'MUHURTHAM_SEARCH');
   }
@@ -531,7 +556,7 @@ async function main() {
   {
     const p = parse('Can I get married for me?');
     check('"Can I get married for me?" parses TIMING_CHECK, scope=PERSONAL, marriage', p.intent === 'TIMING_CHECK' && p.scope === 'PERSONAL' && p.activityId === 'marriage');
-    const personalDeps: AskAuraOrchestratorDeps = { userId: 'test-user-not-a-real-db-row', context: { ...context, personalContext: { natalNakshatraIndex: 1, janmaNakshatra: 'Ashwini' } }, activeWindow: 'NEUTRAL' };
+    const personalDeps: AskAuraOrchestratorDeps = { userId: 'test-user-not-a-real-db-row', user: FAKE_USER, context: { ...context, personalContext: { natalNakshatraIndex: 1, janmaNakshatra: 'Ashwini' } }, activeWindow: 'NEUTRAL' };
     const response = await orchestrateAskAura(p, personalDeps);
     check('"Can I get married for me?" executes the ceremonial CHECK path (never "Best dates for")', response.intent === 'TIMING_CHECK' && !response.message.includes('Best dates for'));
   }
@@ -550,7 +575,7 @@ async function main() {
   // ============================================================
   {
     const p = parse('Should I get married tomorrow for 90 minutes?');
-    check('"Should I get married tomorrow for 90 minutes?" -> TIMING_FIND, durationMinutes=90, no exactTime', p.intent === 'TIMING_FIND' && p.durationMinutes === 90 && p.exactTime === undefined);
+    check('"Should I get married tomorrow for 90 minutes?" -> FORWARD_PLAN, durationMinutes=90, no exactTime', p.intent === 'FORWARD_PLAN' && p.durationMinutes === 90 && p.exactTime === undefined);
     const response = await orchestrateAskAura(p, deps);
     check('Executes through the canonical Muhurtham search with duration preserved', response.intent === 'MUHURTHAM_SEARCH');
   }
@@ -574,7 +599,7 @@ async function main() {
   {
     const nyNow = new Date('2026-06-11T04:00:00.000Z'); // "tomorrow" = 2026-06-12, known-good marriage fixture
     const nyContext: DailyAssistantContext = { now: nyNow, latitude: 40.7128, longitude: -74.006, timezone: 'America/New_York', tzOffsetMinutes: -300 };
-    const nyDeps: AskAuraOrchestratorDeps = { userId: 'test-user-not-a-real-db-row', context: nyContext, activeWindow: 'NEUTRAL' };
+    const nyDeps: AskAuraOrchestratorDeps = { userId: 'test-user-not-a-real-db-row', user: FAKE_USER, context: nyContext, activeWindow: 'NEUTRAL' };
 
     const parsed = parseAskAuraRequest('Is 10 AM tomorrow good for marriage?', { now: nyNow });
     check('"Is 10 AM tomorrow good for marriage?" parses TIMING_CHECK, exactTime=10:00, activityId=marriage', parsed.intent === 'TIMING_CHECK' && parsed.exactTime === '10:00' && parsed.activityId === 'marriage');
@@ -602,7 +627,7 @@ async function main() {
   {
     const p = parse('Is 10 AM tomorrow good for marriage for me?');
     check('"Is 10 AM tomorrow good for marriage for me?" -> TIMING_CHECK, scope=PERSONAL, exactTime=10:00', p.intent === 'TIMING_CHECK' && p.scope === 'PERSONAL' && p.exactTime === '10:00' && p.activityId === 'marriage');
-    const personalDeps: AskAuraOrchestratorDeps = { userId: 'test-user-not-a-real-db-row', context: { ...context, personalContext: { natalNakshatraIndex: 1, janmaNakshatra: 'Ashwini' } }, activeWindow: 'NEUTRAL' };
+    const personalDeps: AskAuraOrchestratorDeps = { userId: 'test-user-not-a-real-db-row', user: FAKE_USER, context: { ...context, personalContext: { natalNakshatraIndex: 1, janmaNakshatra: 'Ashwini' } }, activeWindow: 'NEUTRAL' };
     const response = await orchestrateAskAura(p, personalDeps);
     check('PERSONAL exact-time CHECK executes the ceremonial evaluator (never "Best dates for")', response.intent === 'TIMING_CHECK' && !response.message.includes('Best dates for'));
   }
@@ -633,7 +658,7 @@ async function main() {
   {
     const nyNow = new Date('2026-06-11T04:00:00.000Z'); // matches the file's own established fixture above
     const nyContext: DailyAssistantContext = { now: nyNow, latitude: 40.7128, longitude: -74.006, timezone: 'America/New_York', tzOffsetMinutes: -300 };
-    const nyDeps: AskAuraOrchestratorDeps = { userId: 'test-user-not-a-real-db-row', context: nyContext, activeWindow: 'NEUTRAL' };
+    const nyDeps: AskAuraOrchestratorDeps = { userId: 'test-user-not-a-real-db-row', user: FAKE_USER, context: nyContext, activeWindow: 'NEUTRAL' };
 
     const tomorrowParsed = parseAskAuraRequest('Is 10 AM tomorrow good for marriage?', { now: nyNow, timezone: 'America/New_York' });
     const monthDateParsed = parseAskAuraRequest('Is 10 AM on June 12 good for marriage?', { now: nyNow, timezone: 'America/New_York' });
@@ -661,7 +686,7 @@ async function main() {
   // unchanged), not the generic Timing Search FIND path.
   {
     const parsed = parseAskAuraRequest('Is September 20 good for marriage?', { now: NOW, timezone: 'Asia/Kolkata' });
-    check('"Is September 20 good for marriage?" (with timezone) parses TIMING_FIND, customDate=2026-09-20', parsed.intent === 'TIMING_FIND' && parsed.customDate === '2026-09-20');
+    check('"Is September 20 good for marriage?" (with timezone) parses FORWARD_PLAN, customDate=2026-09-20', parsed.intent === 'FORWARD_PLAN' && parsed.customDate === '2026-09-20');
     const response = await orchestrateAskAura(parsed, deps);
     check('Executes through canonical Muhurtham (capability redirect, unaffected by this PR)', response.intent === 'MUHURTHAM_SEARCH');
   }
@@ -709,7 +734,7 @@ async function main() {
     // Regression control: a FUTURE explicit date for marriage is completely
     // unaffected by the past-date guard.
     const p = parseAskAuraRequest('Is September 20 2026 good for marriage?', { now: NOW, timezone: 'Asia/Kolkata' });
-    check('Ceremonial date-only explicit FUTURE date is unaffected', p.intent === 'TIMING_FIND' && p.customDate === '2026-09-20' && p.activityId === 'marriage');
+    check('Ceremonial date-only explicit FUTURE date routes to FORWARD_PLAN (still redirected to Muhurtham below)', p.intent === 'FORWARD_PLAN' && p.customDate === '2026-09-20' && p.activityId === 'marriage');
     const response = await orchestrateAskAura(p, deps);
     check('Executes through canonical Muhurtham, not UNKNOWN', response.intent === 'MUHURTHAM_SEARCH');
   }

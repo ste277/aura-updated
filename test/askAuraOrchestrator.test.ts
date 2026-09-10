@@ -13,6 +13,7 @@ import { runTimingSearch } from '../packages/recommendation/src/timingSearch';
 import { getActionCards } from '../packages/recommendation/src/actionCards';
 import { DailyAssistantContext } from '../packages/recommendation/src/dailyAssistant';
 import { parseEventLocationSnapshot } from '../apps/web/lib/plansRequest';
+import { User } from '../apps/web/lib/db';
 
 let allPassed = true;
 function check(label: string, condition: boolean) {
@@ -28,7 +29,34 @@ const context: DailyAssistantContext = {
   timezone: 'Asia/Kolkata',
   tzOffsetMinutes: 330,
 };
-const deps: AskAuraOrchestratorDeps = { userId: 'test-user-not-a-real-db-row', context, activeWindow: 'NEUTRAL' };
+// A plain, not-a-real-db-row User fixture -- NOT persisted, used only to
+// satisfy AskAuraOrchestratorDeps.user's type for the 9 pre-existing
+// intents this file exercises (none of them read deps.user at all).
+// TODAY_GUIDANCE/FORWARD_PLAN's own tests live in
+// test/askAuraTodayGuidanceForwardPlan.test.ts, against a real DB user.
+const FAKE_USER: User = {
+  id: 'test-user-not-a-real-db-row',
+  email: 'test-ask-aura-non-db@example.com',
+  cityName: 'Chennai',
+  latitude: 13.0827,
+  longitude: 80.2707,
+  timezone: 'Asia/Kolkata',
+  createdAt: NOW,
+  birthDate: new Date('1990-06-15T00:00:00.000Z'),
+  birthTime: '08:30',
+  birthCityName: 'Chennai',
+  birthLatitude: 13.0827,
+  birthLongitude: 80.2707,
+  birthTimezone: 'Asia/Kolkata',
+  remindersEnabled: true,
+  reminderLeadMinutes: 15,
+  dayBuilderEnabled: true,
+  dayBuilderMutedGroups: [],
+  dayBuilderPriorities: [],
+  dayBuilderPriorityPersonIds: [],
+  dayBuilderPrioritiesPromptDismissed: true,
+};
+const deps: AskAuraOrchestratorDeps = { userId: 'test-user-not-a-real-db-row', user: FAKE_USER, context, activeWindow: 'NEUTRAL' };
 
 async function main() {
   // ============================================================
@@ -124,9 +152,18 @@ async function main() {
 
   // ============================================================
   // Section 33 -- TIMING_FIND: ranking equals direct Timing Search FIND.
+  // Deliberately "today", not "tomorrow" -- Ask Aura Forward Plan V1 now
+  // redirects a genuinely future horizon (TOMORROW/THIS_WEEKEND/
+  // NEXT_WEEKEND/NEXT_7_DAYS/future CUSTOM_DATE) to FORWARD_PLAN, which
+  // calls buildForwardPlannerResult (a real DB read) -- this file is
+  // deliberately non-DB (see its own module doc comment), so this section
+  // stays on a same-day horizon to keep exercising the plain TIMING_FIND
+  // path. FORWARD_PLAN's own tests (Tomorrow/Weekend/7-day/etc.) live in
+  // test/askAuraTodayGuidanceForwardPlanDb.test.ts, against a real DB.
   // ============================================================
   {
-    const parsed = parseAskAuraRequest('When should I do deep work tomorrow morning for 60 minutes?', { now: NOW });
+    const parsed = parseAskAuraRequest('When should I do deep work today morning for 60 minutes?', { now: NOW });
+    check('parsed horizon stays TODAY (non-future), so this still exercises plain TIMING_FIND', parsed.intent === 'TIMING_FIND' && parsed.horizonPhrase === 'TODAY');
     const response = await orchestrateAskAura(parsed, deps);
     const dateRange = resolveHorizonToDateRange(parsed.horizonPhrase, parsed.customDate, context);
     const direct = runTimingSearch({ mode: 'FIND', activityId: 'deep-work', durationMinutes: 60, dateRange, timePreference: 'MORNING', context, limit: 3 });
@@ -205,10 +242,13 @@ async function main() {
 
   // ============================================================
   // Section 41 -- privacy: no birth data, natal data, or internal ids ever
-  // appear in a response for these non-personal intents.
+  // appear in a response for these non-personal intents. Deliberately
+  // "today", not "tomorrow" -- see Section 33's own comment on why this
+  // non-DB file avoids future-horizon phrasing (now FORWARD_PLAN, a real
+  // DB read).
   // ============================================================
   {
-    const parsed = parseAskAuraRequest('When should I do deep work tomorrow?', { now: NOW });
+    const parsed = parseAskAuraRequest('When should I do deep work today?', { now: NOW });
     const response = await orchestrateAskAura(parsed, deps);
     const serialized = JSON.stringify(response);
     const forbidden = ['birthDate', 'birthTime', 'birthTimezone', 'natalNakshatraIndex', 'janmaRashi', 'ownerUserId'];
@@ -249,7 +289,7 @@ async function main() {
   // never a hardcoded fixed offset.
   {
     const nyContext: DailyAssistantContext = { now: NOW, latitude: 40.7128, longitude: -74.006, timezone: 'America/New_York', tzOffsetMinutes: -300 };
-    const nyDeps: AskAuraOrchestratorDeps = { userId: 'test-user-not-a-real-db-row', context: nyContext, activeWindow: 'NEUTRAL' };
+    const nyDeps: AskAuraOrchestratorDeps = { userId: 'test-user-not-a-real-db-row', user: FAKE_USER, context: nyContext, activeWindow: 'NEUTRAL' };
 
     const septParsed = parseAskAuraRequest('Is 10 AM on 2026-09-20 good for deep work?', { now: NOW });
     const septResponse = await orchestrateAskAura(septParsed, nyDeps);
@@ -298,11 +338,14 @@ async function main() {
   {
     // A FUTURE explicit date must remain completely unaffected by the past-
     // date guard -- this is the regression control proving the fix is
-    // narrowly scoped to genuinely past dates.
+    // narrowly scoped to genuinely past dates. Ask Aura Forward Plan V1:
+    // a future CUSTOM_DATE now correctly redirects to FORWARD_PLAN (never
+    // UNKNOWN, never the old TIMING_FIND) -- execution-level proof (a real
+    // DB read via buildForwardPlannerResult) lives in
+    // test/askAuraTodayGuidanceForwardPlanDb.test.ts; this non-DB file only
+    // confirms the parser-level routing shape.
     const parsed = parseAskAuraRequest('Is September 20 2026 good for deep work?', { now: NOW, timezone: 'Asia/Kolkata' });
-    check('Everyday date-only explicit FUTURE date is unaffected', parsed.intent === 'TIMING_FIND' && parsed.customDate === '2026-09-20');
-    const response = await orchestrateAskAura(parsed, deps);
-    check('Executes normally, not UNKNOWN', response.intent === 'TIMING_FIND');
+    check('Everyday date-only explicit FUTURE date routes to FORWARD_PLAN, not UNKNOWN/TIMING_FIND', parsed.intent === 'FORWARD_PLAN' && parsed.customDate === '2026-09-20');
   }
 
   // ============================================================
@@ -335,7 +378,7 @@ async function main() {
   // the audit -- this PR must not change that).
   {
     const personalizedContext: DailyAssistantContext = { ...context, personalContext: { natalNakshatraIndex: 1, janmaNakshatra: 'Bharani' } };
-    const personalizedDeps: AskAuraOrchestratorDeps = { userId: 'test-user-not-a-real-db-row', context: personalizedContext, activeWindow: 'NEUTRAL' };
+    const personalizedDeps: AskAuraOrchestratorDeps = { userId: 'test-user-not-a-real-db-row', user: FAKE_USER, context: personalizedContext, activeWindow: 'NEUTRAL' };
 
     const generalParsed = parseAskAuraRequest('Is 10 AM tomorrow good for meditation?', { now: NOW, timezone: 'Asia/Kolkata' });
     check('GENERAL parses scope=GENERAL', generalParsed.scope === 'GENERAL');
@@ -390,12 +433,18 @@ async function main() {
   }
   // The date-only form now correctly reaches the canonical Muhurtham
   // search (via the existing, unchanged capability redirect), never a
-  // fabricated single instant.
+  // fabricated single instant. Ask Aura Forward Plan V1: "tomorrow" is a
+  // future horizon, so the PARSER now labels this FORWARD_PLAN (not the
+  // old TIMING_FIND) -- execution is still redirected to the SAME
+  // Muhurtham search either way (the dispatcher's FORWARD_PLAN case
+  // carries the identical isSupportedMuhurthamActivity redirect TIMING_FIND
+  // already had), so this remains a real, no-DB Muhurtham search call, not
+  // buildForwardPlannerResult.
   {
     const parsed = parseAskAuraRequest('Should I get married tomorrow?', { now: NOW, timezone: 'Asia/Kolkata' });
-    check('"Should I get married tomorrow?" (no exact clock) now parses TIMING_FIND', parsed.intent === 'TIMING_FIND' && parsed.activityId === 'marriage' && parsed.exactTime === undefined);
+    check('"Should I get married tomorrow?" (no exact clock) now parses FORWARD_PLAN', parsed.intent === 'FORWARD_PLAN' && parsed.activityId === 'marriage' && parsed.exactTime === undefined);
     const response = await orchestrateAskAura(parsed, deps);
-    check('Executes through the canonical Muhurtham search, never a fabricated-instant CHECK', response.intent === 'MUHURTHAM_SEARCH');
+    check('Executes through the canonical Muhurtham search, never a fabricated-instant CHECK, never Forward Planner', response.intent === 'MUHURTHAM_SEARCH');
   }
 
   // Section 27 -- natural-date + duration composition (PR #66/#67) must
@@ -435,30 +484,24 @@ async function main() {
   // "Should I meditate tomorrow?" silently evaluated the resolved date +
   // literal UTC noon -- confirmed via the audit to display as 5:30 PM in
   // Asia/Kolkata and 8:00 AM in America/New_York for the SAME UTC instant,
-  // for the SAME kind of request. Now it correctly executes as a genuine
-  // FIND across the day, with a result that is a real, specific window
-  // returned by the unmodified canonical engine -- never that fabricated
-  // instant, and never dependent on the server's own timezone.
+  // for the SAME kind of request. Ask Aura Forward Plan V1: "tomorrow" is a
+  // future horizon, so this now parses FORWARD_PLAN (not TIMING_FIND) --
+  // its own execution-level proof (a real FIND across the day, never that
+  // fabricated instant) requires a real DB read (buildForwardPlannerResult)
+  // and lives in test/askAuraTodayGuidanceForwardPlanDb.test.ts; this
+  // non-DB file only confirms the parser-level routing shape.
   // ============================================================
   {
     const parsed = parseAskAuraRequest('Should I meditate tomorrow?', { now: NOW, timezone: 'Asia/Kolkata' });
-    check('"Should I meditate tomorrow?" now parses TIMING_FIND (was a fabricated-instant CHECK)', parsed.intent === 'TIMING_FIND' && parsed.exactTime === undefined);
-    const response = await orchestrateAskAura(parsed, deps);
-    check('Executes as a genuine FIND across the day', response.intent === 'TIMING_FIND');
-    const card = response.cards?.[0] as { best?: { start: string } } | undefined;
-    check('Response carries a real "best" window candidate, never a single fabricated-noon instant', Boolean(card?.best?.start));
-    // The old bug's own signature: a fabricated instant always fell exactly
-    // on 'T12:00:00.000Z'. A genuine FIND-discovered window has no reason
-    // to land there deterministically.
-    check('The returned instant is not the old fabricated UTC-noon signature', !card?.best?.start.endsWith('T12:00:00.000Z'));
+    check('"Should I meditate tomorrow?" now parses FORWARD_PLAN (was a fabricated-instant CHECK)', parsed.intent === 'FORWARD_PLAN' && parsed.exactTime === undefined);
   }
   {
     // Range collapse regression: a multi-day horizon must not be reduced
-    // to its first day alone.
+    // to its first day alone -- parser-level shape only here (see comment
+    // above); execution-level proof is in
+    // test/askAuraTodayGuidanceForwardPlanDb.test.ts.
     const parsed = parseAskAuraRequest('Should I meditate this weekend?', { now: NOW, timezone: 'Asia/Kolkata' });
-    check('"Should I meditate this weekend?" parses TIMING_FIND, THIS_WEEKEND (full range preserved)', parsed.intent === 'TIMING_FIND' && parsed.horizonPhrase === 'THIS_WEEKEND');
-    const response = await orchestrateAskAura(parsed, deps);
-    check('Executes as a genuine FIND across the full weekend range', response.intent === 'TIMING_FIND');
+    check('"Should I meditate this weekend?" parses FORWARD_PLAN, THIS_WEEKEND (full range preserved)', parsed.intent === 'FORWARD_PLAN' && parsed.horizonPhrase === 'THIS_WEEKEND');
   }
 
   // ============================================================
@@ -469,7 +512,7 @@ async function main() {
   // coincidentally matching it.
   // ============================================================
   const nyContext: DailyAssistantContext = { now: NOW, latitude: 40.7128, longitude: -74.006, timezone: 'America/New_York', tzOffsetMinutes: -300 };
-  const nyDeps: AskAuraOrchestratorDeps = { userId: 'test-user-not-a-real-db-row', context: nyContext, activeWindow: 'NEUTRAL' };
+  const nyDeps: AskAuraOrchestratorDeps = { userId: 'test-user-not-a-real-db-row', user: FAKE_USER, context: nyContext, activeWindow: 'NEUTRAL' };
 
   // --- Case-insensitive, comma-suffix-stripped resolution (brief section
   // 11): "chennai" and "san francisco" both resolve against CITY_OPTIONS. ---
@@ -559,7 +602,7 @@ async function main() {
     const parsed = parseAskAuraRequest('Is 10 AM next Friday good for marriage for me in Chennai?', { now: NOW, timezone: chennai!.timezone });
     check('Parses TIMING_CHECK, marriage, PERSONAL, exactTime=10:00, locationQuery=chennai', parsed.intent === 'TIMING_CHECK' && parsed.activityId === 'marriage' && parsed.scope === 'PERSONAL' && parsed.exactTime === '10:00' && parsed.locationQuery === 'chennai');
 
-    const response = await orchestrateAskAura(parsed, { userId: 'test-user-not-a-real-db-row', context: personalizedNyContext, activeWindow: 'NEUTRAL', eventLocation: chennai });
+    const response = await orchestrateAskAura(parsed, { userId: 'test-user-not-a-real-db-row', user: FAKE_USER, context: personalizedNyContext, activeWindow: 'NEUTRAL', eventLocation: chennai });
     const planAction = response.actions?.find((a) => a.type === 'PLAN_THIS');
     check('PERSONAL scope also gets PLAN_THIS restored, identical to GENERAL', Boolean(planAction));
     const planPayload = planAction?.planPayload as { eventLocation?: { cityName?: string; timezone?: string } } | undefined;
@@ -573,8 +616,12 @@ async function main() {
   // paths -- the TIMING_FIND->Muhurtham redirect, and the direct
   // MUHURTHAM_SEARCH intent. ---
   {
+    // Ask Aura Forward Plan V1: "next Friday" is a future horizon, so the
+    // PARSER now labels this FORWARD_PLAN (not the old TIMING_FIND) -- the
+    // dispatcher's FORWARD_PLAN case carries the SAME eventLocationGate
+    // check as TIMING_FIND's own redirect, so execution is unaffected.
     const parsed = parseAskAuraRequest('Should I get married in Atlantis next Friday?', { now: NOW, timezone: 'Asia/Kolkata' });
-    check('Parses TIMING_FIND with an unresolved locationQuery=atlantis', parsed.intent === 'TIMING_FIND' && parsed.locationQuery === 'atlantis');
+    check('Parses FORWARD_PLAN with an unresolved locationQuery=atlantis', parsed.intent === 'FORWARD_PLAN' && parsed.locationQuery === 'atlantis');
     const response = await orchestrateAskAura(parsed, deps); // deps.eventLocation intentionally undefined, matching resolveEventLocationQuery('atlantis') === undefined
     check('Unresolved Event Location fails closed to a CLARIFICATION, never a Muhurtham result', response.cards?.[0]?.type === 'CLARIFICATION');
     check('No actions offered, as though nothing executed', !response.actions || response.actions.length === 0);
@@ -592,21 +639,15 @@ async function main() {
   // resolves successfully AND is explicitly present on deps, a
   // non-Muhurtham-eligible activity's request must NEVER apply it -- the
   // response is proven identical in shape to an ordinary Timing Search
-  // FIND, with no trace of the Event Location anywhere. ---
+  // FIND, with no trace of the Event Location anywhere. Ask Aura Forward
+  // Plan V1: "tomorrow" is a future horizon, so this now parses
+  // FORWARD_PLAN (not TIMING_FIND); its own execution-level proof (Event
+  // Location still never applied) requires a real DB read and lives in
+  // test/askAuraTodayGuidanceForwardPlanDb.test.ts -- parser-level shape
+  // only here. ---
   {
     const parsed = parseAskAuraRequest('Should I meditate in Chennai tomorrow?', { now: NOW, timezone: chennai!.timezone });
-    check('Parses TIMING_FIND, meditation, locationQuery=chennai (extracted regardless of activity)', parsed.intent === 'TIMING_FIND' && parsed.activityId === 'meditation' && parsed.locationQuery === 'chennai');
-
-    const response = await orchestrateAskAura(parsed, { ...nyDeps, eventLocation: chennai });
-    check('Everyday (non-ceremonial) activity: still an ordinary TIMING_FIND, unaffected by the resolved Event Location', response.intent === 'TIMING_FIND');
-    check('No eventLocation field anywhere on the response (everyday results never echo one)', !JSON.stringify(response).includes('eventLocation'));
-    // parsed.locationQuery ('chennai') is legitimately carried forward on
-    // response.context (brief section 29: forward-compatible echo, same as
-    // scope/personNameQuery always are, regardless of whether THIS turn's
-    // handler consumed it) -- the actual invariant under test is that
-    // Chennai was never APPLIED: it must not appear in the executed
-    // result's own cards or message.
-    check('Chennai never appears in the executed result itself (cards/message) -- only in the carried-forward parsed context, never applied', !JSON.stringify(response.cards ?? []).toLowerCase().includes('chennai') && !response.message.toLowerCase().includes('chennai'));
+    check('Parses FORWARD_PLAN, meditation, locationQuery=chennai (extracted regardless of activity)', parsed.intent === 'FORWARD_PLAN' && parsed.activityId === 'meditation' && parsed.locationQuery === 'chennai');
   }
 
   // --- Omitted-location control (brief section 25/46): completely
@@ -623,12 +664,14 @@ async function main() {
   // NEVER trigger the ceremonial fail-closed CLARIFICATION gate --
   // eventLocationGate() is only ever consulted from the three ceremonial
   // dispatch points, so a plain everyday TIMING_FIND must execute
-  // normally here, exactly as if "in Atlantis" had never been said. ---
+  // normally here, exactly as if "in Atlantis" had never been said. Ask
+  // Aura Forward Plan V1: "tomorrow" is a future horizon, so this now
+  // parses FORWARD_PLAN -- execution-level proof (still no ceremonial
+  // gate, executes as an ordinary FORWARD_PLAN) requires a real DB read
+  // and lives in test/askAuraTodayGuidanceForwardPlanDb.test.ts. ---
   {
     const parsed = parseAskAuraRequest('Should I meditate in Atlantis tomorrow?', { now: NOW, timezone: 'America/New_York' });
-    check('Everyday activity + unresolvable location parses TIMING_FIND, meditation, locationQuery=atlantis (extracted but inert)', parsed.intent === 'TIMING_FIND' && parsed.activityId === 'meditation' && parsed.locationQuery === 'atlantis');
-    const response = await orchestrateAskAura(parsed, deps); // deps.eventLocation undefined -- Atlantis was never resolvable anyway
-    check('No ceremonial unknown-location CLARIFICATION for an everyday activity -- executes as an ordinary TIMING_FIND', response.intent === 'TIMING_FIND' && response.cards?.[0]?.type !== 'CLARIFICATION');
+    check('Everyday activity + unresolvable location parses FORWARD_PLAN, meditation, locationQuery=atlantis (extracted but inert)', parsed.intent === 'FORWARD_PLAN' && parsed.activityId === 'meditation' && parsed.locationQuery === 'atlantis');
   }
 
   console.log(allPassed ? '\nALL ASK AURA ORCHESTRATOR CHECKS PASSED' : '\nSOME ASK AURA ORCHESTRATOR CHECKS FAILED');

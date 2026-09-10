@@ -26,6 +26,23 @@ export type AskAuraIntent =
   | 'PANCHANG_EXPLAIN'
   | 'MUHURTHAM_SEARCH'
   | 'PLAN_OPEN'
+  /** Ask Aura V1 (#109) -- "what should I focus on today?" style general
+   * personal-guidance questions, routed to the existing #104/#105
+   * buildPersonalDailyGuidance(user, now) verbatim -- never a second
+   * ranking. Carries no activity/date/time fields of its own (see
+   * TODAY_GUIDANCE_RE below): this is a parameterless request for the
+   * day's own already-computed guidance, not a search. */
+  | 'TODAY_GUIDANCE'
+  /** Ask Aura V1 (#109) -- a FIND-shaped question whose resolved horizon is
+   * genuinely in the future (TOMORROW/THIS_WEEKEND/NEXT_WEEKEND/NEXT_7_DAYS/
+   * a future CUSTOM_DATE), routed to the existing #108
+   * buildForwardPlannerResult(...) instead of the existing, non-personalized
+   * TIMING_FIND path -- see isFutureHorizonForPlanning below. Reuses the
+   * exact same field shape (activityId/taskTitle/durationMinutes/
+   * horizonPhrase/customDate) a TIMING_FIND result already carries; the
+   * orchestrator is what actually decides which engine to call, this
+   * parser only tags which one is more appropriate. */
+  | 'FORWARD_PLAN'
   | 'UNKNOWN';
 
 export type AskAuraScope = 'GENERAL' | 'PERSONAL' | 'SHARED';
@@ -427,6 +444,31 @@ function parseHorizonPhrase(text: string): { horizonPhrase?: AskHorizonPhrase; c
 }
 
 // ============================================================
+// Ask Aura V1 (#109) -- future-horizon routing boundary. TODAY/NOW/THIS_WEEK
+// stay on the existing, unchanged TIMING_FIND path (Forward Planner is
+// explicitly future-only -- #108's own boundary); TOMORROW/THIS_WEEKEND/
+// NEXT_WEEKEND/NEXT_7_DAYS and a genuinely future CUSTOM_DATE route to
+// FORWARD_PLAN instead. THIS_WEEK is deliberately excluded -- Forward
+// Planner has no equivalent horizon and the brief does not ask for one; a
+// "this week" request stays on the existing, unmodified TIMING_FIND
+// behavior it already has today. A CUSTOM_DATE is only "future" when a
+// timezone is available to compare against local "today" -- with no
+// timezone, this conservatively stays on the existing TIMING_FIND path
+// (never guesses), the same "no timezone -> leave existing behavior
+// unchanged" convention this file already uses for past-date rejection.
+// ============================================================
+
+const FORWARD_PLAN_HORIZONS: ReadonlySet<AskHorizonPhrase> = new Set(['TOMORROW', 'THIS_WEEKEND', 'NEXT_WEEKEND', 'NEXT_7_DAYS']);
+
+function isFutureHorizonForPlanning(horizonPhrase: AskHorizonPhrase | undefined, customDate: string | undefined, now: Date, timezone: string | undefined): boolean {
+  if (horizonPhrase && FORWARD_PLAN_HORIZONS.has(horizonPhrase)) return true;
+  if (horizonPhrase === 'CUSTOM_DATE' && customDate && timezone) {
+    return customDate > getDatePartsInTimezone(timezone, now).dateStr;
+  }
+  return false;
+}
+
+// ============================================================
 // Scope (brief section 14; owner+person pair grammar added by Ask Aura
 // Richer SHARED Grammar V1).
 // ============================================================
@@ -592,15 +634,40 @@ const CHECK_VERB_RE = /\b(can i|should i|is it (ok|okay|good|fine) to|is now (a 
 // bounded to a single word for the other person's name (same convention
 // PAIR_GRAMMAR_RE uses) so this never spans an unrelated, much longer
 // sentence or silently picks a name out of a longer list.
-const FIND_VERB_RE = /\bwhen should i\b|\bwhen should [a-z][a-z'\-]*\s+and\s+(?:i|me)\b|\bwhen should me\s+and\s+[a-z][a-z'\-]*\b|\bwhen('s| is) (the )?best time\b|\bbest time (for|to)\b|\bwhen can i\b|\bfind (a|the best) time\b/;
+// Ask Aura V1 (#109) -- widened from `(the )?best time` to also accept "a
+// good time"/"a great time"/"the best time" (the phrasing brief item 18/44's
+// own "When is a good time tomorrow for workout?" example actually uses,
+// which the original pattern's literal "best time" requirement missed
+// entirely). Narrow, targeted addition -- every previously-matching phrase
+// still matches unchanged.
+const FIND_VERB_RE = /\bwhen should i\b|\bwhen should [a-z][a-z'\-]*\s+and\s+(?:i|me)\b|\bwhen should me\s+and\s+[a-z][a-z'\-]*\b|\bwhen('s| is) (a |the )?(good|great|best) time\b|\bbest time (for|to)\b|\bwhen can i\b|\bfind (a|the best) time\b/;
 const COMPARE_VERB_RE = /\bwhich is better\b|\bcompare\b.*\btimes?\b|\b(this|that) time or\b/;
+// Ask Aura V1 (#109) -- "what should I focus on today?" / "what's best for
+// me today?" / "what should I prioritize today?" / "what are my best
+// activities today?" -- general personal-guidance questions, distinguished
+// from GOOD_RIGHT_NOW_RE's own "what should i do" (no explicit "today")
+// by requiring the literal word "today" to be present. Checked BEFORE
+// GOOD_RIGHT_NOW_RE (step 4) so "What should I do today?" -- which would
+// otherwise also match GOOD_RIGHT_NOW_RE's own overly permissive first
+// alternative -- resolves to the more specific TODAY_GUIDANCE instead.
+const TODAY_GUIDANCE_RE = /\b(what should i (focus on|prioritize|do)|what'?s best for me|what are my best activities)\b.*\btoday\b/;
 // "auspicious" allows up to ~3 intervening words before date/time/day (Ask
 // Aura Marriage Muhurtham Routing V1) so a named activity between the two
 // -- "an auspicious WEDDING date" -- still matches; the original pattern
 // only matched them directly adjacent ("an auspicious date"). Bounded
 // (not `.*`) so this never spans an unrelated, much longer sentence.
 const MUHURTHAM_SEARCH_RE = /\bgood dates?\b|\bauspicious\b(?:\s+\w+){0,3}\s+(date|time|day)s?\b|\bfavorable dates?\b|\bmuhurtham\b|\bmuhurta\b(?!\s*bala)/;
-const PANCHANG_QUERY_RE = /\bwhen is\b|\bwhat('s| is) (today|tomorrow)'?s? panchang\b|\bwhat('s| is) (today|tomorrow)'?s? (nakshatra|tithi|yoga|karana|vara)\b|\brahu kalam\b|\byamagandam\b|\bgulika kalam\b/;
+// Ask Aura V1 (#109) -- fix for a pre-existing bug: the bare `when is`
+// alternative used to fire unconditionally, so "When is a good time
+// tomorrow for workout?" (a timing question, no Panchang vocabulary at
+// all) was misrouted to a full Panchang dump before FIND_VERB_RE ever got
+// a chance to run. The negative lookahead excludes exactly the "good/
+// great/best time" phrasing FIND_VERB_RE now owns (see above) -- every
+// genuine Panchang "when is" question (Rahu Kalam, a nakshatra/tithi/
+// yoga/karana/vara, a named term) is completely unaffected, since none of
+// them are immediately followed by "(a/the) good/great/best time".
+const PANCHANG_QUERY_RE =
+  /\bwhen is\b(?!\s+(?:a|the)?\s*(?:good|great|best|supportive|workable)\s+(?:time|day|date)\b)|\bwhat('s| is) (today|tomorrow)'?s? panchang\b|\bwhat('s| is) (today|tomorrow)'?s? (nakshatra|tithi|yoga|karana|vara)\b|\brahu kalam\b|\byamagandam\b|\bgulika kalam\b/;
 // Ask Aura Bare Ceremonial "Best Date" Routing follow-up: a bare
 // short phrase asking for a "best/good/auspicious/favorable
 // date/time/day" -- e.g. "Best marriage date." -- with no find/check
@@ -611,6 +678,12 @@ const PANCHANG_QUERY_RE = /\bwhen is\b|\bwhat('s| is) (today|tomorrow)'?s? panch
 // immediately before the generic bare-activity PLAN_OPEN fallback (see
 // step 8b below) -- never checked this early in the precedence chain.
 const CEREMONIAL_BEST_DATE_RE = /\b(best|good|auspicious|favorable)\b(?:\s+\w+){0,3}\s+(dates?|times?|days?)\b/;
+// Ask Aura V1 (#109) -- out-of-domain fortune-telling phrasing ("Who will I
+// marry?", "Will I get promoted?"), used ONLY to guard step 9's bare-
+// activity PLAN_OPEN fallback (see its own doc comment) -- never checked
+// anywhere earlier, so it can never suppress a genuinely more specific,
+// higher-precedence match.
+const FORTUNE_TELLING_RE = /\b(will i|who will i|when will i|am i going to)\b/;
 
 export interface AskAuraParseContext {
   now: Date;
@@ -788,6 +861,18 @@ export function parseAskAuraRequest(rawText: string, context: AskAuraParseContex
     // returning MUHURTHAM_SEARCH for a casual activity.
   }
 
+  // 3.5. Ask Aura V1 (#109) -- Today Guidance. Checked BEFORE Good Right Now
+  // so "What should I do today?" (which also matches GOOD_RIGHT_NOW_RE's
+  // own overly permissive "what should i do" + anything alternative)
+  // resolves to the more specific TODAY_GUIDANCE instead -- the presence of
+  // the literal word "today" is what distinguishes the two; a bare "What
+  // should I do (right now)?" with no "today" still falls through to step 4
+  // below, unchanged. Parameterless by design -- see the intent's own doc
+  // comment on the AskAuraIntent union.
+  if (TODAY_GUIDANCE_RE.test(text)) {
+    return { intent: 'TODAY_GUIDANCE', confidence: 'HIGH' };
+  }
+
   // 4. Good Right Now -- no activity mentioned, asking what to do now.
   if (GOOD_RIGHT_NOW_RE.test(text) && !FIND_VERB_RE.test(text)) {
     return { intent: 'GOOD_RIGHT_NOW', confidence: 'HIGH' };
@@ -881,8 +966,15 @@ export function parseAskAuraRequest(rawText: string, context: AskAuraParseContex
     if (!resolved.activityId && !resolved.taskTitle) {
       return { intent: 'UNKNOWN', confidence: 'LOW' };
     }
+    // Ask Aura V1 (#109) -- a genuinely future horizon routes to
+    // FORWARD_PLAN instead, UNLESS this is a SHARED (with-a-person)
+    // request: Forward Planner has no shared/person concept at all, so a
+    // resolved personNameQuery always stays on the existing, unmodified
+    // TIMING_FIND (shared-timing) path regardless of horizon.
+    const intent: AskAuraIntent =
+      !personNameQuery && scope !== 'SHARED' && isFutureHorizonForPlanning(horizonPhrase, customDate, context.now, context.timezone) ? 'FORWARD_PLAN' : 'TIMING_FIND';
     return {
-      intent: 'TIMING_FIND',
+      intent,
       confidence: 'HIGH',
       ...resolved,
       durationMinutes,
@@ -941,8 +1033,15 @@ export function parseAskAuraRequest(rawText: string, context: AskAuraParseContex
         locationQuery,
       };
     }
+    // Ask Aura V1 (#109) -- same future-horizon redirect as steps 6/8 above
+    // (a genuinely future date/day, no SHARED person involved), applied
+    // here too for consistency: "Should I meditate this weekend?" and "Is
+    // this weekend good for meditation?" must resolve to the SAME intent,
+    // never diverge based on verb phrasing alone.
+    const dateOnlyIntent: AskAuraIntent =
+      !personNameQuery && scope !== 'SHARED' && isFutureHorizonForPlanning(horizonPhrase, customDate, context.now, context.timezone) ? 'FORWARD_PLAN' : 'TIMING_FIND';
     return {
-      intent: 'TIMING_FIND',
+      intent: dateOnlyIntent,
       confidence: 'HIGH',
       ...resolved,
       durationMinutes,
@@ -962,8 +1061,12 @@ export function parseAskAuraRequest(rawText: string, context: AskAuraParseContex
   // timing signal always wins over the "just an activity name" default.
   const bareActivity = findActivityIntent(text);
   if (bareActivity && (horizonPhrase || timePreference || durationMinutes)) {
+    // Ask Aura V1 (#109) -- same future-horizon redirect as step 6 above,
+    // same SHARED exclusion (Forward Planner has no person concept).
+    const intent: AskAuraIntent =
+      !personNameQuery && scope !== 'SHARED' && isFutureHorizonForPlanning(horizonPhrase, customDate, context.now, context.timezone) ? 'FORWARD_PLAN' : 'TIMING_FIND';
     return {
-      intent: 'TIMING_FIND',
+      intent,
       confidence: 'HIGH',
       activityId: bareActivity.id,
       durationMinutes,
@@ -1000,7 +1103,20 @@ export function parseAskAuraRequest(rawText: string, context: AskAuraParseContex
   // pre-filled (brief section 5: "default to activity selection / planning
   // assistance, not an arbitrary Panchang explanation"), never a guessed
   // timing search.
-  if (bareActivity && text.split(/\s+/).length <= 4) {
+  //
+  // Ask Aura V1 (#109) -- fix for a pre-existing bug: "marry" is a literal
+  // alias of the catalog's own `marriage` activity (personalizedTasks.ts),
+  // so a fortune-telling question like "Who will I marry?" (4 words) used
+  // to resolve as PLAN_OPEN(marriage) at HIGH confidence -- an unsupported
+  // out-of-domain question given a confident, actionable answer. This
+  // guard is scoped ONLY to this bare-activity fallback (never applied to
+  // any earlier, more specific match above -- MUHURTHAM_SEARCH/FIND/CHECK
+  // all require much more specific triggering language that would never
+  // co-occur with "who will I marry" phrasing anyway), so genuine planning
+  // requests ("Find a good time for marriage", "Best marriage date.") are
+  // completely unaffected -- they already resolve via their own,
+  // higher-precedence steps before this fallback is ever reached.
+  if (bareActivity && text.split(/\s+/).length <= 4 && !FORTUNE_TELLING_RE.test(text)) {
     return { intent: 'PLAN_OPEN', confidence: 'HIGH', activityId: bareActivity.id };
   }
 

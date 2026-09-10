@@ -134,7 +134,7 @@ export async function POST(req: NextRequest) {
     },
   });
 
-  const response = await orchestrateAskAura(parsed, { userId: session.userId, context, activeWindow, eventLocation });
+  const response = await orchestrateAskAura(parsed, { userId: session.userId, user, context, activeWindow, eventLocation });
   return NextResponse.json(response);
 }
 
