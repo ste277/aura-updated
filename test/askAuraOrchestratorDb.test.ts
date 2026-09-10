@@ -29,7 +29,7 @@ async function main() {
   const otherOwner = await upsertUserByEmail({ email: 'test-ask-aura-other-owner@example.com', cityName: 'Chennai', latitude: 13.0827, longitude: 80.2707, timezone: 'Asia/Kolkata' });
 
   const context: DailyAssistantContext = { now: NOW, latitude: owner.latitude, longitude: owner.longitude, timezone: owner.timezone, tzOffsetMinutes: 330 };
-  const deps: AskAuraOrchestratorDeps = { userId: owner.id, context, activeWindow: 'NEUTRAL' };
+  const deps: AskAuraOrchestratorDeps = { userId: owner.id, user: owner, context, activeWindow: 'NEUTRAL' };
 
   const created: string[] = [];
   try {

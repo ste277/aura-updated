@@ -5,6 +5,8 @@ import { colors, spacing, typography, radius } from './theme';
 import { PageHeader, TextButton, SecondaryButton, StatusBadge } from './ui';
 import { trackEvent } from '../lib/trackEvent';
 import { FULL_ACTIVITY_CATALOG } from '../../../packages/recommendation/src/personalizedTasks';
+import { saveUpcomingPlanFromCandidate } from './PlanWithAuraView';
+import type { TimingSearchResponse } from '../../../packages/recommendation/src/timingSearch';
 
 /**
  * Ask Aura Orchestration V1 -- this view no longer parses intent or streams
@@ -20,14 +22,19 @@ import { FULL_ACTIVITY_CATALOG } from '../../../packages/recommendation/src/pers
 // duplicated (not imported) because that module pulls in server-only code
 // (db.ts) that must never end up in a client bundle.
 interface AskAuraCard {
-  type: 'ACTIVITY_OPTIONS' | 'TIMING_RESULT' | 'PANCHANG_SUMMARY' | 'MUHURTHAM_RESULTS' | 'CLARIFICATION';
+  type: 'ACTIVITY_OPTIONS' | 'TIMING_RESULT' | 'PANCHANG_SUMMARY' | 'MUHURTHAM_RESULTS' | 'CLARIFICATION' | 'FORWARD_PLAN_RESULT';
   [key: string]: unknown;
 }
 interface AskAuraAction {
-  type: 'PLAN_THIS' | 'CREATE_MOMENT' | 'OPEN_PLAN' | 'OPEN_TIMELINE' | 'OPEN_PANCHANG' | 'OPEN_MUHURTHAM';
+  type: 'PLAN_THIS' | 'CREATE_MOMENT' | 'OPEN_PLAN' | 'OPEN_TIMELINE' | 'OPEN_PANCHANG' | 'OPEN_MUHURTHAM' | 'SCHEDULE_FORWARD_PLAN';
   label: string;
   planPayload?: Record<string, unknown>;
   momentPayload?: { activityId: string; startAt: string; endAt: string; savedPersonId?: string };
+  // Ask Aura FORWARD_PLAN V1 -- see askAuraOrchestrator.ts's own
+  // AskAuraAction.forwardPlanPayload doc comment: runAction below re-runs
+  // the EXACT SAME CHECK-before-save sequence ForwardPlannerView.tsx's own
+  // handleSchedule already established, never a direct/stale save.
+  forwardPlanPayload?: { activityId: string; durationMinutes: number; candidateStart: string };
   activityId?: string;
 }
 interface AskAuraResponse {
@@ -181,6 +188,24 @@ export function AskAuraView({
           }),
         });
         if (!res.ok) throw new Error('Unable to create Moment.');
+      } else if (action.type === 'SCHEDULE_FORWARD_PLAN' && action.forwardPlanPayload) {
+        // Ask Aura FORWARD_PLAN V1 -- the EXACT SAME CHECK-before-save
+        // sequence ForwardPlannerView.tsx's own handleSchedule already
+        // established: re-resolve a fresh, exact-instant TimingCandidate
+        // via CHECK immediately before saving, never a stale/direct save
+        // of the ForwardPlannerOption computed earlier in the conversation.
+        const { activityId, durationMinutes, candidateStart } = action.forwardPlanPayload;
+        const checkRes = await fetch('/api/timing-search', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ mode: 'CHECK', activityId, durationMinutes, candidateStart, checkNearbyWindowMinutes: 0 }),
+        });
+        if (!checkRes.ok) throw new Error('Unable to verify this time.');
+        const checkBody: TimingSearchResponse = await checkRes.json();
+        const candidate = checkBody.requestedCandidate;
+        if (!candidate) throw new Error('Unable to verify this time.');
+        await saveUpcomingPlanFromCandidate(candidate, durationMinutes, { activityId });
+        onPlanLogged?.();
       }
       setActionState((prev) => ({ ...prev, [key]: 'done' }));
     } catch {
@@ -443,6 +468,28 @@ function AskAuraCardView({ card, onQuickReply }: { card: AskAuraCard; onQuickRep
           <div style={{ marginTop: 6, fontSize: 11, color: colors.textFaint }}>
             {results.slice(1).map((r, i) => (
               <div key={i}>{r.startLabel} – {r.endLabel}{r.sharedScore ? ` · ${r.sharedScore}/10` : ''}</div>
+            ))}
+          </div>
+        )}
+      </div>
+    );
+  }
+
+  if (card.type === 'FORWARD_PLAN_RESULT') {
+    const best = card.best as { localDate: string; dateLabel: string; startLabel: string; endLabel: string; timingLabel: string } | undefined;
+    const others = (card.others as Array<{ dateLabel: string; startLabel: string; endLabel: string; timingLabel: string }>) ?? [];
+    return (
+      <div style={{ marginTop: 9, fontSize: 12, color: colors.textSecondary }}>
+        {best && (
+          <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
+            <strong style={{ color: colors.textPrimary }}>{best.dateLabel}, {best.startLabel} – {best.endLabel}</strong>
+            <StatusBadge label={best.timingLabel} tone={best.timingLabel === 'CAUTION' ? 'caution' : 'positive'} />
+          </div>
+        )}
+        {others.length > 0 && (
+          <div style={{ marginTop: 6, fontSize: 11, color: colors.textFaint }}>
+            {others.map((o, i) => (
+              <div key={i}>{o.dateLabel}, {o.startLabel} – {o.endLabel} · {o.timingLabel}</div>
             ))}
           </div>
         )}

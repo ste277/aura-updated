@@ -32,22 +32,27 @@ import { formatMuhurtaReason } from '../../../packages/muhurta/src/muhurtaReason
 import { getPanchangForDate } from '../../../packages/panchang/src/panchangDay';
 import { localDateTimeToUTC } from '../../../packages/panchang/src/localDate';
 import { natalContextFromBirthDetails } from './natalContext';
-import { listSavedPeople, SavedPerson } from './db';
+import { listSavedPeople, SavedPerson, User } from './db';
 import { CITY_OPTIONS, CityOption } from './cities';
-import { resolveTzOffsetMinutes } from './timezone';
+import { resolveTzOffsetMinutes, addDaysToDateStr } from './timezone';
+import { buildPersonalDailyGuidance } from './dailyGuidanceOrchestrator';
+import { mapGuidanceToBestForYouItems } from './bestForYouViewModel';
+import { buildForwardPlannerRequest, buildForwardPlannerResult, ForwardPlannerOption } from './forwardPlannerOrchestrator';
+import { resolveForwardPlannerRange, ForwardPlannerHorizon } from './forwardPlanner';
+import { buildWhyAuraExplanation } from './whyAuraViewModel';
 
 // ============================================================
 // Structured response model (brief section 17).
 // ============================================================
 
-export type AskAuraCardType = 'ACTIVITY_OPTIONS' | 'TIMING_RESULT' | 'PANCHANG_SUMMARY' | 'MUHURTHAM_RESULTS' | 'CLARIFICATION';
+export type AskAuraCardType = 'ACTIVITY_OPTIONS' | 'TIMING_RESULT' | 'PANCHANG_SUMMARY' | 'MUHURTHAM_RESULTS' | 'CLARIFICATION' | 'FORWARD_PLAN_RESULT';
 
 export interface AskAuraCard {
   type: AskAuraCardType;
   [key: string]: unknown;
 }
 
-export type AskAuraActionType = 'PLAN_THIS' | 'CREATE_MOMENT' | 'OPEN_PLAN' | 'OPEN_TIMELINE' | 'OPEN_PANCHANG' | 'OPEN_MUHURTHAM';
+export type AskAuraActionType = 'PLAN_THIS' | 'CREATE_MOMENT' | 'OPEN_PLAN' | 'OPEN_TIMELINE' | 'OPEN_PANCHANG' | 'OPEN_MUHURTHAM' | 'SCHEDULE_FORWARD_PLAN';
 
 export interface AskAuraAction {
   type: AskAuraActionType;
@@ -93,6 +98,19 @@ export interface AskAuraAction {
     endAt: string;
     savedPersonId?: string;
   };
+  /** Ask Aura FORWARD_PLAN V1 -- SCHEDULE_FORWARD_PLAN's own payload.
+   * Deliberately NOT a `planPayload` (never the unprotected direct-save
+   * PLAN_THIS path -- see handleForwardPlan's own doc comment): the client
+   * (AskAuraView.tsx's runAction) uses this to re-run the EXACT SAME
+   * CHECK-before-save sequence ForwardPlannerView.tsx's own handleSchedule
+   * already established (POST /api/timing-search mode:CHECK for this exact
+   * candidateStart, then saveUpcomingPlanFromCandidate) -- never a stale
+   * candidate saved directly. */
+  forwardPlanPayload?: {
+    activityId: string;
+    durationMinutes: number;
+    candidateStart: string;
+  };
   activityId?: string;
 }
 
@@ -111,6 +129,14 @@ export interface AskAuraResponse {
 
 export interface AskAuraOrchestratorDeps {
   userId: string;
+  /** Ask Aura V1 -- TODAY_GUIDANCE/FORWARD_PLAN V1: the full session user,
+   * needed because `buildPersonalDailyGuidance`/`buildForwardPlannerResult`
+   * both require a complete `User` (birthDate/birthTime/birthTimezone/etc.),
+   * not just `userId`+`DailyAssistantContext` -- route.ts already fetches
+   * this via `getUserById` before calling orchestrateAskAura, so this is
+   * the same object, never a second DB lookup. Every one of the 9
+   * pre-existing intents continues to ignore this field entirely. */
+  user: User;
   context: DailyAssistantContext;
   /** The client's own current Panchang window (the SAME value Home computes
    * and already sends today, page.tsx's activeType) -- GOOD_RIGHT_NOW reuses
@@ -385,7 +411,7 @@ function planPayloadFromCandidate(
 // ============================================================
 
 export async function orchestrateAskAura(parsed: ParsedAskAuraRequest, deps: AskAuraOrchestratorDeps): Promise<AskAuraResponse> {
-  if (parsed.followUp === 'WHY') return handleWhy(parsed);
+  if (parsed.followUp === 'WHY') return handleWhy(parsed, deps);
   if (parsed.followUp === 'OTHER_TIMES') return handleOtherTimes(parsed, deps);
   if (parsed.followUp === 'PLAN_IT') return handlePlanIt(parsed);
 
@@ -452,6 +478,23 @@ export async function orchestrateAskAura(parsed: ParsedAskAuraRequest, deps: Ask
     }
     case 'PLAN_OPEN':
       return handlePlanOpen(parsed);
+    case 'TODAY_GUIDANCE':
+      return handleTodayGuidance(parsed, deps);
+    case 'FORWARD_PLAN':
+      // Ask Aura Forward Plan Ceremonial Redirect V1 -- the EXACT SAME
+      // capability-driven redirect TIMING_FIND/TIMING_CHECK already use
+      // above: a Muhurtham-eligible activity (marriage, griha-pravesh, ...)
+      // must never be routed through Forward Planner's own generic
+      // multi-day engine, which has no awareness of ceremonial hard
+      // eligibility -- it always executes through the canonical Muhurtham
+      // search instead. Deliberately NOT `parsed.activityId === 'marriage'`,
+      // for the same reason the two redirects above aren't either.
+      if (parsed.activityId && isSupportedMuhurthamActivity(parsed.activityId)) {
+        const locationGate = eventLocationGate(parsed, deps);
+        if (locationGate) return locationGate;
+        return handleMuhurthamSearch(parsed, deps);
+      }
+      return handleForwardPlan(parsed, deps);
     default:
       return {
         intent: 'UNKNOWN',
@@ -969,6 +1012,232 @@ async function handleTimingFind(parsed: ParsedAskAuraRequest, deps: AskAuraOrche
   };
 }
 
+// ---- TODAY_GUIDANCE (Ask Aura V1) --------------------------------------
+
+/**
+ * Direct, verbatim reuse of #105's own `buildPersonalDailyGuidance(user, now)`
+ * -- never a second candidate-collection/ranking pass, never HTTP-fetching
+ * GET /api/daily-assistant/guidance. `guidance.recommendations` is rendered
+ * in EXACTLY the order #104 itself produced (mapGuidanceToBestForYouItems,
+ * #106's own view model, never reordered/filtered here) -- the same order
+ * Best For You already shows on Home.
+ *
+ * The TOP recommendation's resolved activityId is echoed on `context` so a
+ * following "Why?" can re-derive and explain that SAME recommendation (see
+ * handleWhy's TODAY_GUIDANCE branch below) -- Ask Aura carries no persisted
+ * server-side conversation state of its own (brief section 15).
+ */
+async function handleTodayGuidance(parsed: ParsedAskAuraRequest, deps: AskAuraOrchestratorDeps): Promise<AskAuraResponse> {
+  const result = await buildPersonalDailyGuidance(deps.user, deps.context.now);
+
+  if (result.status === 'BIRTH_PROFILE_REQUIRED') {
+    return {
+      intent: 'TODAY_GUIDANCE',
+      message: 'Add your birth details to get recommendations tailored to you.',
+      context: parsed,
+    };
+  }
+  if (result.status === 'NO_ACTIVITY_INTENT') {
+    return {
+      intent: 'TODAY_GUIDANCE',
+      message: "You haven't told me what you want to do today yet, so I don't have anything to prioritize. Add a Plan or a Day Builder intention first.",
+      context: parsed,
+    };
+  }
+
+  const recommendations = result.guidance.recommendations;
+  if (recommendations.length === 0) {
+    return {
+      intent: 'TODAY_GUIDANCE',
+      message: "Nothing you're already planning has strong timing today.",
+      context: parsed,
+    };
+  }
+
+  const items = mapGuidanceToBestForYouItems(result.guidance, result.selectedActivities);
+  const options = items.map((item, index) => {
+    const metadata = result.selectedActivities[recommendations[index].activityFamily];
+    const activity = metadata ? FULL_ACTIVITY_CATALOG.find((a) => a.id === metadata.activityId) : undefined;
+    return {
+      id: item.sourceEntityId || `today-guidance-${index}`,
+      icon: activity?.icon,
+      title: item.title,
+      description: `${formatClock(item.start, deps.context.timezone)} – ${formatClock(item.end, deps.context.timezone)}`,
+    };
+  });
+  const topActivityId = result.selectedActivities[recommendations[0].activityFamily]?.activityId;
+
+  return {
+    intent: 'TODAY_GUIDANCE',
+    message: "Here's what I'd prioritize today:",
+    cards: [{ type: 'ACTIVITY_OPTIONS', options }],
+    actions: [{ type: 'OPEN_TIMELINE', label: 'See all activities' }],
+    context: { ...parsed, activityId: topActivityId ?? parsed.activityId },
+  };
+}
+
+// ---- FORWARD_PLAN (Ask Aura V1) -----------------------------------------
+
+const FORWARD_PLAN_DATE_LABEL_FORMAT: Intl.DateTimeFormatOptions = { weekday: 'long', month: 'short', day: 'numeric', timeZone: 'UTC' };
+
+function formatForwardPlanDateLabel(localDate: string): string {
+  const [year, month, day] = localDate.split('-').map(Number);
+  return new Date(Date.UTC(year, month - 1, day)).toLocaleDateString('en-US', FORWARD_PLAN_DATE_LABEL_FORMAT);
+}
+
+/**
+ * Maps an Ask Aura horizon (already confirmed future by
+ * `isFutureHorizonForPlanning` in the parser) onto Forward Planner's OWN
+ * `ForwardPlannerHorizon`/range contract (brief: "NEXT_7_DAYS must map to
+ * Forward Planner's own SEVEN_DAYS directly", "THIS_WEEKEND must reuse
+ * Forward Planner's own range contract, never Ask Aura's local Sunday
+ * normalization", "NEXT_WEEKEND maps to CUSTOM using deterministic computed
+ * dates"). NEXT_WEEKEND is computed by taking Forward Planner's OWN
+ * `resolveForwardPlannerRange('WEEKEND', ...)` result (its Saturday/Sunday
+ * boundary math, including the Sat/Sun "remaining weekend" normalization)
+ * and shifting both ends 7 days forward -- never a second, locally
+ * reimplemented weekend calculation. Returns `null` only defensively (the
+ * parser's own `FORWARD_PLAN_HORIZONS` set already guarantees one of these
+ * four cases, or a future CUSTOM_DATE, whenever this intent is reached).
+ */
+function mapAskHorizonToForwardPlannerInput(
+  horizonPhrase: AskHorizonPhrase | undefined,
+  customDate: string | undefined,
+  now: Date,
+  timezone: string
+): { horizon: ForwardPlannerHorizon; customStartDate?: string; customEndDate?: string } | null {
+  if (horizonPhrase === 'TOMORROW') return { horizon: 'TOMORROW' };
+  if (horizonPhrase === 'THIS_WEEKEND') return { horizon: 'WEEKEND' };
+  if (horizonPhrase === 'NEXT_7_DAYS') return { horizon: 'SEVEN_DAYS' };
+  if (horizonPhrase === 'NEXT_WEEKEND') {
+    const thisWeekend = resolveForwardPlannerRange('WEEKEND', now, timezone);
+    if (!thisWeekend.ok) return null;
+    return {
+      horizon: 'CUSTOM',
+      customStartDate: addDaysToDateStr(thisWeekend.range.startLocalDate, 7),
+      customEndDate: addDaysToDateStr(thisWeekend.range.endLocalDate, 7),
+    };
+  }
+  if (horizonPhrase === 'CUSTOM_DATE' && customDate) return { horizon: 'CUSTOM', customStartDate: customDate, customEndDate: customDate };
+  return null;
+}
+
+/**
+ * A narrow, deterministic "Why?" explanation built ONLY from
+ * `ForwardPlannerOption`'s own public fields (`personalRelevance`,
+ * `relevantThemes`, `timingLabel`) -- deliberately NOT a call into
+ * `buildWhyAuraExplanation` (whyAuraViewModel.ts), which requires a full
+ * `DailyGuidanceRecommendation` (rank/activityFamily/selectionReason/
+ * evidence) that Forward Planner's own public contract never produces (see
+ * forwardPlannerOrchestrator.ts's own "deliberately excludes ... never
+ * customer-facing" doc comment) -- constructing a fake one would mean
+ * inventing a `selectionReason` Forward Planner never computed. This
+ * mirrors that file's tone/wording without touching it (brief: "do not
+ * change whyAuraViewModel.ts").
+ */
+function buildForwardPlanWhyLines(option: ForwardPlannerOption): string[] {
+  const lines: string[] = [];
+  const activeThemes = option.relevantThemes.filter((t) => t.state === 'ACTIVE' || t.state === 'STRONGLY_ACTIVE').slice(0, 2);
+  if (option.personalRelevance !== 'BASELINE' && activeThemes.length > 0) {
+    const labels = activeThemes.map((t) => t.theme.toLowerCase());
+    const themeList = labels.length === 1 ? `your ${labels[0]} theme` : `your ${labels[0]} and ${labels[1]} themes`;
+    lines.push(`This date fits ${themeList}, active for you then.`);
+  }
+  const TIMING_LINE: Partial<Record<string, string>> = {
+    EXCELLENT: 'The timing is especially supportive for this.',
+    VERY_GOOD: 'The timing is very supportive for this.',
+    GOOD: 'The timing is supportive for this.',
+    USABLE: 'The timing is workable for this.',
+  };
+  const timingLine = TIMING_LINE[option.timingLabel];
+  if (timingLine) lines.push(timingLine);
+  return lines;
+}
+
+/**
+ * Resolves an activity + a future range, then calls
+ * `buildForwardPlannerResult` DIRECTLY (never HTTP-fetching
+ * POST /api/forward-planner) -- #108's own engine, completely unmodified.
+ * A Muhurtham-eligible activity never reaches this function at all (see the
+ * dispatcher's own redirect above); an unresolved activity returns the
+ * existing generic CLARIFICATION card, never a new result type, and never
+ * forwards a raw taskTitle into #108 (brief: "never raw taskTitle passed to
+ * #108").
+ *
+ * SCHEDULE ACTION: mirrors ForwardPlannerView.tsx's own established
+ * CHECK-before-save pattern exactly -- rather than a `planPayload` (the old,
+ * unprotected direct-save PLAN_THIS path), the top option becomes a
+ * `forwardPlanPayload`; AskAuraView.tsx's runAction re-resolves a fresh,
+ * exact-instant TimingCandidate via POST /api/timing-search (mode: CHECK)
+ * immediately before saving, exactly like #108's own UI already does.
+ */
+async function handleForwardPlan(parsed: ParsedAskAuraRequest, deps: AskAuraOrchestratorDeps): Promise<AskAuraResponse> {
+  const activity = FULL_ACTIVITY_CATALOG.find((a) => a.id === parsed.activityId);
+  if (!activity) {
+    return {
+      intent: 'FORWARD_PLAN',
+      message: "I'm not sure what you'd like me to plan ahead for you. What activity did you mean?",
+      cards: [{ type: 'CLARIFICATION', options: [] }],
+      context: parsed,
+    };
+  }
+
+  const durationMinutes = resolveDuration(activity.id, parsed.durationMinutes);
+  const horizonInput = mapAskHorizonToForwardPlannerInput(parsed.horizonPhrase, parsed.customDate, deps.context.now, deps.context.timezone);
+  if (!horizonInput) {
+    return {
+      intent: 'FORWARD_PLAN',
+      message: "I couldn't work out which future date range you meant.",
+      context: { ...parsed, activityId: activity.id },
+    };
+  }
+
+  const validated = buildForwardPlannerRequest(
+    { activityId: activity.id, durationMinutes, horizon: horizonInput.horizon, customStartDate: horizonInput.customStartDate, customEndDate: horizonInput.customEndDate },
+    deps.context.now,
+    deps.context.timezone
+  );
+  if (!validated.ok) {
+    return { intent: 'FORWARD_PLAN', message: validated.error, context: { ...parsed, activityId: activity.id } };
+  }
+
+  const result = await buildForwardPlannerResult(deps.user, deps.context.now, validated.request);
+
+  if (result.status === 'BIRTH_PROFILE_REQUIRED') {
+    return { intent: 'FORWARD_PLAN', message: 'Add your birth details to get recommendations tailored to you.', context: { ...parsed, activityId: activity.id } };
+  }
+  if (result.status === 'NO_SUITABLE_WINDOW') {
+    return {
+      intent: 'FORWARD_PLAN',
+      message: `I couldn't find a strong time for ${activity.title} in that range. Try another date range.`,
+      context: { ...parsed, activityId: activity.id, taskTitle: undefined },
+    };
+  }
+
+  const best = result.options[0];
+  const optionCard = (option: ForwardPlannerOption) => ({
+    localDate: option.localDate,
+    dateLabel: formatForwardPlanDateLabel(option.localDate),
+    startLabel: formatClock(option.start, deps.context.timezone),
+    endLabel: formatClock(option.end, deps.context.timezone),
+    timingLabel: option.timingLabel,
+  });
+
+  return {
+    intent: 'FORWARD_PLAN',
+    message: `I'd choose ${formatForwardPlanDateLabel(best.localDate)}, ${formatClock(best.start, deps.context.timezone)} for ${result.activity.title}.`,
+    cards: [{ type: 'FORWARD_PLAN_RESULT', activityTitle: result.activity.title, best: optionCard(best), others: result.options.slice(1).map(optionCard) }],
+    actions: [
+      {
+        type: 'SCHEDULE_FORWARD_PLAN',
+        label: `Schedule ${formatForwardPlanDateLabel(best.localDate)}`,
+        forwardPlanPayload: { activityId: activity.id, durationMinutes, candidateStart: best.start },
+      },
+    ],
+    context: { ...parsed, activityId: activity.id, taskTitle: undefined },
+  };
+}
+
 // ---- TIMING_COMPARE ----------------------------------------------------
 
 async function handleTimingCompare(parsed: ParsedAskAuraRequest, deps: AskAuraOrchestratorDeps): Promise<AskAuraResponse> {
@@ -1163,9 +1432,58 @@ function handlePlanOpen(parsed: ParsedAskAuraRequest): AskAuraResponse {
 
 // ---- Follow-ups (brief section 15/16) ---------------------------------
 
-function handleWhy(parsed: ParsedAskAuraRequest): AskAuraResponse {
-  // "Why?" expands reasons already present in the previous turn's own
-  // context -- never a recomputed/invented explanation (brief section 39).
+/**
+ * "Why?" expands reasons for the previous turn's own result. For the two
+ * new intents (TODAY_GUIDANCE/FORWARD_PLAN), this RE-DERIVES the same
+ * deterministic domain result from the echoed `parsed` context (Ask Aura
+ * carries no persisted server-side conversation state -- brief section 15
+ * -- so there is nothing else to read a stored explanation from) and
+ * explains the TOP result specifically, via #107's own
+ * `buildWhyAuraExplanation` for TODAY_GUIDANCE (a real
+ * `DailyGuidanceRecommendation`, its genuine input contract) or the narrow
+ * `buildForwardPlanWhyLines` helper for FORWARD_PLAN (whose public contract
+ * does not fit `buildWhyAuraExplanation`'s -- see that helper's own doc
+ * comment). Every other intent's placeholder behavior is untouched.
+ */
+async function handleWhy(parsed: ParsedAskAuraRequest, deps: AskAuraOrchestratorDeps): Promise<AskAuraResponse> {
+  if (parsed.intent === 'TODAY_GUIDANCE' && parsed.activityId) {
+    const result = await buildPersonalDailyGuidance(deps.user, deps.context.now);
+    if (result.status === 'READY') {
+      const activityFamily = Object.keys(result.selectedActivities).find((family) => result.selectedActivities[family].activityId === parsed.activityId);
+      const metadata = activityFamily ? result.selectedActivities[activityFamily] : undefined;
+      const recommendation = activityFamily ? result.guidance.recommendations.find((r) => r.activityFamily === activityFamily) : undefined;
+      if (metadata && recommendation) {
+        const explanation = buildWhyAuraExplanation(recommendation, metadata.source);
+        if (explanation.lines.length > 0) {
+          return { intent: parsed.intent, message: explanation.lines.join(' '), context: parsed };
+        }
+      }
+    }
+  }
+
+  if (parsed.intent === 'FORWARD_PLAN' && parsed.activityId) {
+    const horizonInput = mapAskHorizonToForwardPlannerInput(parsed.horizonPhrase, parsed.customDate, deps.context.now, deps.context.timezone);
+    if (horizonInput) {
+      const durationMinutes = resolveDuration(parsed.activityId, parsed.durationMinutes);
+      const validated = buildForwardPlannerRequest(
+        { activityId: parsed.activityId, durationMinutes, horizon: horizonInput.horizon, customStartDate: horizonInput.customStartDate, customEndDate: horizonInput.customEndDate },
+        deps.context.now,
+        deps.context.timezone
+      );
+      if (validated.ok) {
+        const result = await buildForwardPlannerResult(deps.user, deps.context.now, validated.request);
+        if (result.status === 'READY' && result.options[0]) {
+          const lines = buildForwardPlanWhyLines(result.options[0]);
+          if (lines.length > 0) {
+            return { intent: parsed.intent, message: lines.join(' '), context: parsed };
+          }
+        }
+      }
+    }
+  }
+
+  // Default: "Why?" expands reasons already present in the previous turn's
+  // own context -- never a recomputed/invented explanation (brief section 39).
   return {
     intent: parsed.intent,
     message: 'Here’s why: see the reasons on the last result above.',
