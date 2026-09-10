@@ -29,6 +29,12 @@ import { DayBuilderCard } from './DayBuilderCard';
 import { PersonalizationPromptCard } from './PersonalizationPromptCard';
 import type { DailyIntentionGroupId } from '../lib/dailyIntentions';
 import { YourDayTimeline } from './YourDayTimeline';
+import { BestForYouSection } from './BestForYouSection';
+import { mapGuidanceToBestForYouItems } from '../lib/bestForYouViewModel';
+import type { GuidanceUiState, BestForYouItem } from '../lib/bestForYouViewModel';
+
+/** Matches page.tsx's own FALLBACK_TZ (the same default it already applies before passing `timezone` down as a prop) -- `timezone` is optional on HomeDashboardProps only for type-safety at the boundary; page.tsx always supplies a real value today. Defensive only, never a silent browser-local default. */
+const FALLBACK_HOME_TZ = 'Asia/Kolkata';
 
 interface HomeDashboardProps {
   userName: string;
@@ -193,6 +199,10 @@ interface HomeDashboardProps {
   dayBuilderPriorities?: string[];
   dayBuilderPrioritiesPromptDismissed?: boolean;
   onDayBuilderPrefsChange?: (next: Partial<{ dayBuilderPriorities: string[]; dayBuilderPrioritiesPromptDismissed: boolean }>) => void;
+  /** New Aura Home V1 -- GET /api/daily-assistant/guidance's own result, wrapped with the two UI-only 'loading'/'error' states (see lib/bestForYouViewModel.ts's own GuidanceUiState doc comment). Defaults to 'loading' when omitted, matching every other Home data slice's own "not yet fetched" convention. */
+  guidance?: GuidanceUiState;
+  /** New Aura Home V1 -- navigates to the existing birth-profile setup surface (the 'chart' tab, BirthChartSection.tsx) using the app's own existing tab-state mechanism; no new route. */
+  onOpenBirthProfile?: () => void;
 }
 
 interface HomeDayWindow {
@@ -426,6 +436,8 @@ export function HomeDashboard({
   dayBuilderPriorities,
   dayBuilderPrioritiesPromptDismissed,
   onDayBuilderPrefsChange,
+  guidance,
+  onOpenBirthProfile,
 }: HomeDashboardProps) {
   // Home Compactness + Flexible Day Story V1 (brief section 13) -- Popular
   // chips render only for a fresh/unused state (nothing typed/tapped yet
@@ -487,6 +499,28 @@ export function HomeDashboard({
     () => selectGoodRightNowCards(activeWindowName, loggedActivitiesToday, justLoggedTitles, personalContext),
     [activeWindowName, loggedActivitiesToday, justLoggedTitles, personalContext]
   );
+
+  // New Aura Home V1 -- defaults to 'loading' when the caller hasn't
+  // supplied a guidance prop yet, matching every other Home data slice's
+  // own "not fetched yet" convention.
+  const guidanceState: GuidanceUiState = guidance ?? { status: 'loading' };
+  const bestForYouItems: BestForYouItem[] = useMemo(
+    () => (guidanceState.status === 'READY' ? mapGuidanceToBestForYouItems(guidanceState.guidance, guidanceState.selectedActivities) : []),
+    [guidanceState]
+  );
+
+  // Intentional Day Builder V1 -- a self-contained sibling to
+  // MyDayStoryCard, sharing the same Daily Story visual region (brief:
+  // "Daily Story should evolve... into something that actively helps
+  // shape the day"). Keyed on myDayAgenda?.localDate so it re-fetches its
+  // own suggestions when the local day actually changes, not on every
+  // unrelated My Day refresh. New Aura Home V1 -- this single element is
+  // rendered at one of two JSX positions depending on guidanceState
+  // (see the two conditional render sites below), never both at once.
+  const dayBuilderCard =
+    myDayStory && myDayAgenda ? (
+      <DayBuilderCard key={myDayAgenda.localDate} dayPhase={myDayStory.phase} localDate={myDayAgenda.localDate} onCreated={() => onMyDayChanged?.()} onMuteGroup={onMuteDayBuilderGroup} />
+    ) : null;
 
   // Home Recommendation Hierarchy V1 (+ amendment) -- Aura Suggests
   // interprets DailyAgenda/window context only; it never recommends a
@@ -562,6 +596,21 @@ export function HomeDashboard({
         }
       />
 
+      {/* New Aura Home V1 -- Day Builder is promoted to the top action
+       * slot, immediately after the header, only when the user has told
+       * Aura nothing about today yet (NO_ACTIVITY_INTENT). In every other
+       * guidance state it stays in its existing, secondary position below
+       * -- see dayBuilderCard's own single definition further down, never
+       * rendered twice. */}
+      {guidanceState.status === 'NO_ACTIVITY_INTENT' && dayBuilderCard}
+
+      {/* New Aura Home V1 -- the primary personalized recommendation
+       * layer, consuming GET /api/daily-assistant/guidance exclusively
+       * (via bestForYouItems/guidanceState, computed above from props).
+       * Renders nothing at all for NO_ACTIVITY_INTENT -- Day Builder
+       * (promoted above) already owns that state's own call to action. */}
+      <BestForYouSection state={guidanceState} items={bestForYouItems} timezone={timezone ?? FALLBACK_HOME_TZ} onOpenBirthProfile={onOpenBirthProfile} />
+
       {myDayStory && (
         <MyDayStoryCard
           story={myDayStory}
@@ -585,21 +634,7 @@ export function HomeDashboard({
         />
       )}
 
-      {/* Intentional Day Builder V1 -- a self-contained sibling to
-       * MyDayStoryCard above, sharing the same Daily Story visual region
-       * (brief: "Daily Story should evolve... into something that actively
-       * helps shape the day"). Keyed on myDayAgenda?.localDate so it
-       * re-fetches its own suggestions when the local day actually
-       * changes, not on every unrelated My Day refresh. */}
-      {myDayStory && myDayAgenda && (
-        <DayBuilderCard
-          key={myDayAgenda.localDate}
-          dayPhase={myDayStory.phase}
-          localDate={myDayAgenda.localDate}
-          onCreated={() => onMyDayChanged?.()}
-          onMuteGroup={onMuteDayBuilderGroup}
-        />
-      )}
+      {guidanceState.status !== 'NO_ACTIVITY_INTENT' && dayBuilderCard}
 
       <SurfaceCard elevated accentColor={tone.color} padding={spacing.xxl}>
         <div style={{ display: 'grid', gridTemplateColumns: '128px minmax(0, 1fr)', gap: spacing.xl, alignItems: 'center' }}>
