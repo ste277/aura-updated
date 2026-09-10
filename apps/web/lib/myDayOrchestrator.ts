@@ -44,8 +44,12 @@ function resolvePriorityPersonMoment(moments: AuraMoment[], priorityPersonIds: s
 
 /** Brief section 43: the local calendar day's [start, end) as real UTC
  * instants, never a UTC-day approximation -- reuses the exact same
- * localDateTimeToUTC() birth-time forms already use, just with "00:00". */
-function localDayBoundsUTC(dateStr: string, timezone: string): { from: Date; to: Date } {
+ * localDateTimeToUTC() birth-time forms already use, just with "00:00".
+ * Exported (Personal Guidance Orchestration V1) so that orchestrator can
+ * compute the identical "today" bounds for its own direct
+ * listPlannedActivitiesForDay() call, rather than duplicating this logic
+ * -- see apps/web/lib/dailyGuidanceCandidates.ts's own doc comment. */
+export function localDayBoundsUTC(dateStr: string, timezone: string): { from: Date; to: Date } {
   const from = localDateTimeToUTC(dateStr, '00:00', timezone);
   const to = localDateTimeToUTC(addDaysToDateStr(dateStr, 1), '00:00', timezone);
   return { from, to };
