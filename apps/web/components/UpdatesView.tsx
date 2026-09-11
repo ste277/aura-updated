@@ -7,7 +7,7 @@ import { formatReminderTiming } from '../lib/auraReminders';
 import type { ReminderWithAttention } from '../lib/reminderAttention';
 import * as theme from './theme';
 import { colors, spacing, typography } from './theme';
-import { SurfaceCard, SecondaryButton, EmptyState } from './ui';
+import { SurfaceCard, SecondaryButton, TextButton, EmptyState } from './ui';
 
 /**
  * Product Structure V2 -- the bell's destination (brief section 25/26).
@@ -31,7 +31,16 @@ interface UpdatesViewProps {
   updates: AuraUpdate[];
   upcoming?: ReminderWithAttention[];
   onBack: () => void;
+  /** Moment View Navigation Fix -- "View details" on an accepted Moment
+   * update opens the owner's own canonical Plan/Moment details (the Plan
+   * tab), never the public /moment/[token] invitation page -- see
+   * onViewMomentInvitation below for the separate, explicit way to reach
+   * that page. */
   onViewMomentUpdate: (momentToken: string) => void;
+  /** Moment View Navigation Fix -- the separate, explicit "View
+   * invitation" action, preserving access to the public /moment/[token]
+   * page. */
+  onViewMomentInvitation: (momentToken: string) => void;
   onFindAnotherTimeForMoment: (momentToken: string) => void;
   onOpenReminder?: (reminder: AuraReminder) => void;
 }
@@ -51,7 +60,7 @@ function formatUpdateDateTime(iso: string) {
   };
 }
 
-export function UpdatesView({ updates, upcoming = [], onBack, onViewMomentUpdate, onFindAnotherTimeForMoment, onOpenReminder }: UpdatesViewProps) {
+export function UpdatesView({ updates, upcoming = [], onBack, onViewMomentUpdate, onViewMomentInvitation, onFindAnotherTimeForMoment, onOpenReminder }: UpdatesViewProps) {
   const unseen = updates.filter((u) => u.unread);
   const seen = updates.filter((u) => !u.unread);
 
@@ -87,7 +96,7 @@ export function UpdatesView({ updates, upcoming = [], onBack, onViewMomentUpdate
           <SectionKicker label="New" />
           <div style={{ display: 'flex', flexDirection: 'column', gap: 10, marginTop: 10 }}>
             {unseen.map((update) => (
-              <UpdateCard key={update.id} update={update} onView={onViewMomentUpdate} onFindAnotherTime={onFindAnotherTimeForMoment} />
+              <UpdateCard key={update.id} update={update} onView={onViewMomentUpdate} onViewInvitation={onViewMomentInvitation} onFindAnotherTime={onFindAnotherTimeForMoment} />
             ))}
           </div>
         </section>
@@ -98,7 +107,7 @@ export function UpdatesView({ updates, upcoming = [], onBack, onViewMomentUpdate
           <SectionKicker label="Earlier" />
           <div style={{ display: 'flex', flexDirection: 'column', gap: 10, marginTop: 10 }}>
             {seen.map((update) => (
-              <UpdateCard key={update.id} update={update} onView={onViewMomentUpdate} onFindAnotherTime={onFindAnotherTimeForMoment} />
+              <UpdateCard key={update.id} update={update} onView={onViewMomentUpdate} onViewInvitation={onViewMomentInvitation} onFindAnotherTime={onFindAnotherTimeForMoment} />
             ))}
           </div>
         </section>
@@ -115,7 +124,17 @@ function SectionKicker({ label }: { label: string }) {
   );
 }
 
-function UpdateCard({ update, onView, onFindAnotherTime }: { update: AuraUpdate; onView: (token: string) => void; onFindAnotherTime: (token: string) => void }) {
+function UpdateCard({
+  update,
+  onView,
+  onViewInvitation,
+  onFindAnotherTime,
+}: {
+  update: AuraUpdate;
+  onView: (token: string) => void;
+  onViewInvitation: (token: string) => void;
+  onFindAnotherTime: (token: string) => void;
+}) {
   const isAccepted = update.type === 'MOMENT_ACCEPTED';
   const { day, time } = formatUpdateDateTime(update.eventStartAt);
   return (
@@ -127,10 +146,18 @@ function UpdateCard({ update, onView, onFindAnotherTime }: { update: AuraUpdate;
       <div style={{ marginTop: 3, fontSize: 12, color: colors.textFaint }}>
         {isAccepted ? `${day} · ${time}` : `Prefers: ${PREFERENCE_TEXT[update.preference ?? 'NO_PREFERENCE']}`}
       </div>
-      <div style={{ marginTop: spacing.sm }}>
+      <div style={{ marginTop: spacing.sm, display: 'flex', alignItems: 'center', gap: spacing.md, flexWrap: 'wrap' }}>
         <SecondaryButton onClick={() => (isAccepted ? onView(update.momentToken) : onFindAnotherTime(update.momentToken))}>
-          {isAccepted ? 'View' : 'Find another time'}
+          {isAccepted ? 'View details' : 'Find another time'}
         </SecondaryButton>
+        {/* Moment View Navigation Fix -- a separate, explicit way to still
+         * reach the public invitation/confirmation page, never the
+         * default "View details" destination above. */}
+        {isAccepted && (
+          <TextButton onClick={() => onViewInvitation(update.momentToken)} color={colors.textMuted}>
+            View invitation
+          </TextButton>
+        )}
       </div>
     </SurfaceCard>
   );
