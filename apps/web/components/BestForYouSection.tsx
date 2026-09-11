@@ -191,7 +191,12 @@ export function BestForYouSection({ state, items, timezone, onOpenBirthProfile }
         <ul style={{ display: 'flex', flexDirection: 'column', gap: spacing.sm, margin: 0, padding: 0 }}>
           {items.map((item) => {
             const recommendation = recommendationsByRank?.get(item.rank);
-            const explanation = recommendation ? buildWhyAuraExplanation(recommendation, item.source) : { lines: [] };
+            // Behavior-aware Why Aura V1 -- `state.selectedActivities` is
+            // already present on `state` when READY (same object Why Aura's
+            // own `source` join already reads via `item.source`); no new
+            // fetch, just reading a field that already reached the client.
+            const behavioralAffinity = recommendation && state.status === 'READY' ? state.selectedActivities[recommendation.activityFamily]?.behavioralAffinity : undefined;
+            const explanation = recommendation ? buildWhyAuraExplanation(recommendation, item.source, behavioralAffinity) : { lines: [] };
             return (
               <BestForYouCard
                 key={item.rank}

@@ -233,6 +233,137 @@ check(
 );
 
 // ============================================================
+// BEHAVIORAL PATTERN (Behavior-aware Why Aura V1) -- descriptive only,
+// never causal. See whyAuraViewModel.ts's own module doc comment for the
+// truthfulness distinction this section proves.
+// ============================================================
+
+check(
+  'STRONG: behavioral line appears exactly once, as the final line, alongside personal + timing (PRIMARY_FLOOR_MET)',
+  (() => {
+    const rec = buildRecommendation({ personalRelevance: 'RELEVANT', selectionReason: 'PRIMARY_FLOOR_MET' });
+    const { lines } = buildWhyAuraExplanation(rec, PLAN, 'STRONG');
+    return lines.length === 3 && lines[0].includes('theme') && lines[1].includes('supportive') && lines[2].includes('pattern');
+  })()
+);
+
+check(
+  'STRONG: behavioral line appears last after RELAXED_TIMING_FLOOR\'s personal-then-timing order',
+  (() => {
+    const rec = buildRecommendation({ personalRelevance: 'RELEVANT', selectionReason: 'RELAXED_TIMING_FLOOR' });
+    const { lines } = buildWhyAuraExplanation(rec, PLAN, 'STRONG');
+    return lines.length === 3 && lines[0].includes('theme') && lines[1].includes('supportive') && lines[2].includes('pattern');
+  })()
+);
+
+check(
+  'STRONG: behavioral line appears last after RELAXED_RELEVANCE_FLOOR\'s timing-then-personal order',
+  (() => {
+    const rec = buildRecommendation({ personalRelevance: 'RELEVANT', selectionReason: 'RELAXED_RELEVANCE_FLOOR' });
+    const { lines } = buildWhyAuraExplanation(rec, PLAN, 'STRONG');
+    return lines.length === 3 && lines[0].includes('supportive') && lines[1].includes('theme') && lines[2].includes('pattern');
+  })()
+);
+
+check(
+  'STRONG + BASELINE (RELAXED_RELEVANCE_FLOOR, no personal reason at all): behavioral line still appears last, after timing only',
+  (() => {
+    const rec = buildRecommendation({ personalRelevance: 'BASELINE', selectionReason: 'RELAXED_RELEVANCE_FLOOR' });
+    const { lines } = buildWhyAuraExplanation(rec, PLAN, 'STRONG');
+    return lines.length === 2 && !lines[0].includes('theme') && lines[1].includes('pattern');
+  })()
+);
+
+check('MODERATE: no behavioral line -- identical to omitting the argument entirely', (() => {
+  const rec = buildRecommendation();
+  const withModerate = buildWhyAuraExplanation(rec, PLAN, 'MODERATE');
+  const withoutBehavior = buildWhyAuraExplanation(rec, PLAN);
+  return JSON.stringify(withModerate) === JSON.stringify(withoutBehavior) && !withModerate.lines.join(' ').includes('pattern');
+})());
+
+check('NEUTRAL: no behavioral line -- identical to omitting the argument entirely', (() => {
+  const rec = buildRecommendation();
+  const withNeutral = buildWhyAuraExplanation(rec, PLAN, 'NEUTRAL');
+  const withoutBehavior = buildWhyAuraExplanation(rec, PLAN);
+  return JSON.stringify(withNeutral) === JSON.stringify(withoutBehavior);
+})());
+
+check('UNDEFINED (explicit): no behavioral line -- identical to omitting the argument entirely', (() => {
+  const rec = buildRecommendation();
+  const withExplicitUndefined = buildWhyAuraExplanation(rec, PLAN, undefined);
+  const withoutBehavior = buildWhyAuraExplanation(rec, PLAN);
+  return JSON.stringify(withExplicitUndefined) === JSON.stringify(withoutBehavior);
+})());
+
+check(
+  'BACKWARD COMPATIBILITY (merge-critical): every pre-existing 2-argument call site\'s output is byte-for-byte unchanged by this feature',
+  (() => {
+    const combos = (['HIGHLY_RELEVANT', 'RELEVANT', 'BASELINE'] as const).flatMap((relevance) =>
+      (['PRIMARY_FLOOR_MET', 'RELAXED_TIMING_FLOOR', 'RELAXED_RELEVANCE_FLOOR'] as const).map((selectionReason) => buildRecommendation({ personalRelevance: relevance, selectionReason }))
+    );
+    return combos.every((rec) => JSON.stringify(buildWhyAuraExplanation(rec, PLAN)) === JSON.stringify(buildWhyAuraExplanation(rec, PLAN, undefined)));
+  })()
+);
+
+check(
+  'NO INTERNAL-TERM LEAKAGE: rendered output never contains "Behavioral Affinity", "STRONG", "MODERATE", or "NEUTRAL"',
+  (() => {
+    const lines = buildWhyAuraExplanation(buildRecommendation({ personalRelevance: 'HIGHLY_RELEVANT' }), PLAN, 'STRONG').lines.join(' ');
+    return !/Behavioral Affinity|STRONG|MODERATE|NEUTRAL/.test(lines);
+  })()
+);
+
+check(
+  'NO CAUSAL LANGUAGE: behavioral line never claims Aura\'s decision was influenced ("because", "helped", "prioritize", "rank", "caused", "chose it")',
+  (() => {
+    const lines = buildWhyAuraExplanation(buildRecommendation({ personalRelevance: 'HIGHLY_RELEVANT' }), PLAN, 'STRONG').lines.join(' ').toLowerCase();
+    return !/because|helped|prioritiz|\brank\b|caused|chose it for you/i.test(lines);
+  })()
+);
+
+check(
+  'NO PERSONALITY/PREFERENCE-STRENGTH LANGUAGE: behavioral line never says "prefer", "love", "always", "habit", "your personality", or "Aura is learning"',
+  (() => {
+    const lines = buildWhyAuraExplanation(buildRecommendation({ personalRelevance: 'HIGHLY_RELEVANT' }), PLAN, 'STRONG').lines.join(' ').toLowerCase();
+    return !/prefer|\blove\b|always|habit|personality|learning your|kind of person/i.test(lines);
+  })()
+);
+
+check(
+  'FIXED SENTENCE: STRONG always renders the exact same behavioral sentence regardless of source/relevance/selectionReason',
+  (() => {
+    const line1 = buildWhyAuraExplanation(buildRecommendation({ personalRelevance: 'HIGHLY_RELEVANT', selectionReason: 'PRIMARY_FLOOR_MET' }), PLAN, 'STRONG').lines.at(-1);
+    const line2 = buildWhyAuraExplanation(buildRecommendation({ personalRelevance: 'BASELINE', selectionReason: 'RELAXED_RELEVANCE_FLOOR' }), DAY_BUILDER, 'STRONG').lines.at(-1);
+    return line1 === line2 && line1 === "This also matches a pattern in what you've been choosing recently.";
+  })()
+);
+
+check(
+  'DETERMINISM WITH BEHAVIOR: same recommendation/source/behavioralAffinity -> same lines, same order',
+  (() => {
+    const rec = buildRecommendation({ personalRelevance: 'RELEVANT', selectionReason: 'RELAXED_RELEVANCE_FLOOR' });
+    const first = buildWhyAuraExplanation(rec, DAY_BUILDER, 'STRONG');
+    const second = buildWhyAuraExplanation(rec, DAY_BUILDER, 'STRONG');
+    return JSON.stringify(first) === JSON.stringify(second);
+  })()
+);
+
+check(
+  'deriveWhyAuraExplanation: STRONG produces a BEHAVIORAL_PATTERN reason with no extra payload field',
+  (() => {
+    const rec = buildRecommendation();
+    const explanation = deriveWhyAuraExplanation(rec, 'STRONG');
+    const behavioral = explanation.reasons.find((r) => r.kind === 'BEHAVIORAL_PATTERN');
+    return behavioral !== undefined && behavioral.themes === undefined && behavioral.timingLabel === undefined;
+  })()
+);
+
+check(
+  'deriveWhyAuraExplanation: MODERATE/NEUTRAL/undefined never produce a BEHAVIORAL_PATTERN reason',
+  (['MODERATE', 'NEUTRAL', undefined] as const).every((tier) => !deriveWhyAuraExplanation(buildRecommendation(), tier).reasons.some((r) => r.kind === 'BEHAVIORAL_PATTERN'))
+);
+
+// ============================================================
 // SOURCE-SPECIFIC TIMING WORDING.
 // ============================================================
 
@@ -449,17 +580,46 @@ check('NO EVIDENCE-SUMMARY ACCESS: whyAuraViewModel.ts never reads `.summary` an
 check('NO EVIDENCE ACCESS: whyAuraViewModel.ts never reads `.evidence` anywhere in its own source', !/\.evidence\b/.test(readViewModelSource()));
 
 check(
-  'NO ENGINE IMPORT: whyAuraViewModel.ts imports only types (DailyGuidanceRecommendation, ConcreteGuidanceCandidateSource, PersonalTheme) -- no runtime import of any engine package',
+  'NO ENGINE IMPORT: whyAuraViewModel.ts imports only types (DailyGuidanceRecommendation, ConcreteGuidanceCandidateSource, SelectedActivityMetadata, PersonalTheme) -- no runtime import of any engine package, including the Behavioral Affinity engine',
   (() => {
     const code = readViewModelSource(false);
     const importLines = code.match(/^import[^;]*;/gm) ?? [];
-    return importLines.every((line) => /^import type /.test(line)) && !/deriveLifeWeather\(|deriveDailyPersonalFit\(|deriveDailyGuidance\(|deriveThemeContext\(|evaluateMuhurta\(|runTimingSearch\(/.test(code);
+    return (
+      importLines.every((line) => /^import type /.test(line)) &&
+      !importLines.some((line) => /behavioralAffinity|dailyGuidanceBehavior/.test(line)) &&
+      !/deriveLifeWeather\(|deriveDailyPersonalFit\(|deriveDailyGuidance\(|deriveThemeContext\(|evaluateMuhurta\(|runTimingSearch\(|deriveBehavioralProfile\(|listHabitLogsForInsights\(|buildBehavioralAffinityByFamily\(/.test(code)
+    );
   })()
 );
 
 check(
   'NO RAW ASTROLOGY TERM IN SOURCE: whyAuraViewModel.ts never mentions a Dasha lord, Nakshatra, Rahu/Ketu, or Bhrigu relationship type in its own source (outside doc comments, which are already stripped)',
   !/Mahadasha|Antardasha|Nakshatra|\bRahu\b|\bKetu\b|SAME_SIGN|\bTRINE\b|OPPOSITION|THREE_ELEVEN|TWO_TWELVE/.test(readViewModelSource())
+);
+
+// ============================================================
+// HOME CALL-SITE CONTRACT (Behavior-aware Why Aura V1) -- this repo has no
+// JSX/component test harness (every *ViewModel.test.ts deliberately avoids
+// .tsx imports for exactly that reason), so this proves the wiring the same
+// way test/momentViewNavigation.test.ts's own precedent does: a source-scan
+// against the real, current BestForYouSection.tsx text, not a rendered
+// component. Confirms the call site passes a THIRD argument sourced from
+// the SAME recommendation's own activityFamily on `state.selectedActivities`
+// -- never a hardcoded family, never an unrelated state field.
+// ============================================================
+
+function readBestForYouSectionSource(): string {
+  return fs.readFileSync('apps/web/components/BestForYouSection.tsx', 'utf8');
+}
+
+check(
+  'HOME CALL SITE: buildWhyAuraExplanation is called with a third argument (the behavioral tier), not just the pre-existing two',
+  /buildWhyAuraExplanation\(recommendation,\s*item\.source,\s*behavioralAffinity\)/.test(readBestForYouSectionSource())
+);
+
+check(
+  'HOME CALL SITE: the behavioral tier is read from state.selectedActivities keyed by THIS card\'s own recommendation.activityFamily -- never a hardcoded family or an unrelated field',
+  /state\.selectedActivities\[recommendation\.activityFamily\]\?\.behavioralAffinity/.test(readBestForYouSectionSource())
 );
 
 if (!allPassed) {

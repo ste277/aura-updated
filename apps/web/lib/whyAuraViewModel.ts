@@ -12,11 +12,27 @@
  * reaches the browser via `GET /api/daily-assistant/guidance`'s existing
  * `PersonalDailyGuidanceResult` payload -- `personalRelevance`,
  * `relevantThemes` (theme+state pairs), `timing.label`, `selectionReason`,
- * and `selectedActivities[activityFamily].source`. No new fetch, no new
- * endpoint, no engine import, and no read of `recommendation.evidence`
- * (`PersonalEvidenceRef.summary`/`.data` are audit/debug provenance, never
- * product copy -- confirmed across every engine package this feature's own
- * audit read; see that audit's evidence-provenance table).
+ * `selectedActivities[activityFamily].source`, and (Behavior-aware Why Aura
+ * V1) `selectedActivities[activityFamily].behavioralAffinity`. No new
+ * fetch, no new endpoint, no engine import, and no read of
+ * `recommendation.evidence` (`PersonalEvidenceRef.summary`/`.data` are
+ * audit/debug provenance, never product copy -- confirmed across every
+ * engine package this feature's own audit read; see that audit's
+ * evidence-provenance table).
+ *
+ * BEHAVIOR IS DESCRIPTIVE, NEVER CAUSAL (merge-critical, see this feature's
+ * own architecture audit's central truthfulness finding): a `STRONG`
+ * `behavioralAffinity` is real evidence that the user repeatedly chooses
+ * this kind of activity -- it is NOT evidence that behavior actually
+ * changed this recommendation's rank (affinity is only the 4th of six
+ * ranking-tuple keys in `packages/daily-guidance/src/ordering.ts`,
+ * consulted only after relevance/label/score have already tied; nothing
+ * in the current data model records whether that key was ever reached for
+ * a given family). This file therefore only ever states the observational
+ * fact ("this matches a pattern"), never a decision-causality claim
+ * ("this is why/because Aura ranked it here"). `MODERATE`/`NEUTRAL`/
+ * absent all produce no behavioral line -- see `deriveWhyAuraExplanation`'s
+ * own doc comment.
  *
  * NO RAW ASTROLOGY: this file never names a Dasha lord, a transit pair, a
  * Bhrigu relationship, or a raw Panchang term (Nakshatra/Tithi/Yoga/Karana/
@@ -25,24 +41,33 @@
  * reinforcementSources` does not survive into `DailyPersonalFitRelevantTheme`
  * / `DailyGuidanceRecommendation.relevantThemes`, which only carry
  * `{theme, state}`) -- so this file only ever says a theme is "active for
- * you today", never which system reinforced it.
+ * you today", never which system reinforced it. Equally, it never names
+ * `Behavioral Affinity`/`STRONG`/`MODERATE`/`NEUTRAL`, an evidence count, a
+ * timestamp, `preferredDaypart`, or `typicalDurationMinutes` -- those stay
+ * internal, matching `apps/web/lib/behavioralAffinity.ts`'s own privacy
+ * contract.
  */
 import type { DailyGuidanceRecommendation } from '../../../packages/personal-intelligence/src/context';
-import type { ConcreteGuidanceCandidateSource } from './dailyGuidanceTypes';
+import type { ConcreteGuidanceCandidateSource, SelectedActivityMetadata } from './dailyGuidanceTypes';
 import type { PersonalTheme } from '../../../packages/personal-intelligence/src/types';
 
 // ============================================================
 // Semantic contract -- structured facts before any copy is chosen.
 // ============================================================
 
-export type WhyAuraReasonKind = 'PERSONAL_THEME' | 'TIMING_SUPPORT';
+export type WhyAuraReasonKind = 'PERSONAL_THEME' | 'TIMING_SUPPORT' | 'BEHAVIORAL_PATTERN';
 
 /**
  * One semantic fact this explanation is built from. `themes` is present
  * only on a `PERSONAL_THEME` reason (already filtered to ACTIVE/
  * STRONGLY_ACTIVE and truncated -- see `selectDisplayThemes`);
  * `timingLabel` is present only on a `TIMING_SUPPORT` reason, copied
- * verbatim from `recommendation.timing.label`.
+ * verbatim from `recommendation.timing.label`. A `BEHAVIORAL_PATTERN`
+ * reason (Behavior-aware Why Aura V1) carries no extra field at all -- its
+ * single fixed sentence (`BEHAVIORAL_PATTERN_LINE`) needs no per-instance
+ * data, and this is deliberate: it keeps the reason strictly descriptive,
+ * with no place to smuggle in a causal claim, an evidence count, or a raw
+ * tier value later without a visible contract change.
  */
 export interface WhyAuraReason {
   kind: WhyAuraReasonKind;
@@ -54,10 +79,20 @@ export interface WhyAuraExplanation {
   reasons: WhyAuraReason[];
 }
 
-/** Final, ready-to-render output. At most 2 lines: one personal-fit line, one timing-fit line. Empty when nothing honest can be said (see buildWhyAuraExplanation's own doc comment) -- a caller must hide its "Why?" affordance in that case, never fabricate a generic line. */
+/** Final, ready-to-render output. At most 3 lines: one personal-fit line, one timing-fit line, and (Behavior-aware Why Aura V1) one behavioral-pattern line when `behavioralAffinity === 'STRONG'`. Empty when nothing honest can be said (see buildWhyAuraExplanation's own doc comment) -- a caller must hide its "Why?" affordance in that case, never fabricate a generic line. */
 export interface WhyAuraViewModel {
   lines: string[];
 }
+
+/**
+ * Behavior-aware Why Aura V1's own fixed, single sentence -- deliberately
+ * ONE literal, never multiple variants, never assembled from a template
+ * with an interpolated tier/count. Observational register only ("matches a
+ * pattern"), never causal ("because"/"helped"/"prioritized") or
+ * personality-adjacent ("you prefer"/"your habit") -- see this file's own
+ * module doc comment for why that distinction is load-bearing.
+ */
+const BEHAVIORAL_PATTERN_LINE = "This also matches a pattern in what you've been choosing recently.";
 
 // ============================================================
 // Personal theme labels -- the first PersonalTheme label map in this repo
@@ -146,11 +181,12 @@ function buildPersonalLine(themes: PersonalTheme[], strong: boolean): string | n
 
 /**
  * Derives the semantic facts only -- no copy, no ordering, no source-
- * specific wording. Canonical order is always `[personal?, timing]`
- * (personal first when present); `orderReasonsBySelectionReason` below is
- * the only place emphasis order changes. Exposed separately so the
- * semantic layer is directly testable independent of final copy (see this
- * file's own module doc comment on the semantic-contract-before-copy
+ * specific wording. Canonical order is always `[personal?, timing,
+ * behavioral?]` (personal first when present, behavioral always last);
+ * `orderReasonsBySelectionReason` below is the only place emphasis order
+ * changes, and it too always keeps behavioral last. Exposed separately so
+ * the semantic layer is directly testable independent of final copy (see
+ * this file's own module doc comment on the semantic-contract-before-copy
  * design, and item 86 of this feature's own architecture audit on
  * evidence traceability).
  *
@@ -160,13 +196,25 @@ function buildPersonalLine(themes: PersonalTheme[], strong: boolean): string | n
  * `selectDisplayThemes` (should not happen -- `personalRelevance` is
  * itself derived as the max state among `relevantThemes`) also omits the
  * reason defensively, rather than claiming a theme with nothing to name.
+ *
+ * BEHAVIORAL POLICY (Behavior-aware Why Aura V1, merge-critical): a
+ * `BEHAVIORAL_PATTERN` reason is produced ONLY when `behavioralAffinity`
+ * is exactly `'STRONG'`. `'MODERATE'`, `'NEUTRAL'`, and `undefined`
+ * (missing/absent, including every payload produced before this feature
+ * existed) are all treated identically -- no reason, no line, byte-for-
+ * byte the same output as if this parameter did not exist. This is
+ * deliberate, not an oversight: `MODERATE` (as few as 3 events in 60 days)
+ * is too thin a basis for user-facing "pattern" language in V1 -- see this
+ * feature's own architecture audit.
  */
-export function deriveWhyAuraExplanation(recommendation: DailyGuidanceRecommendation): WhyAuraExplanation {
+export function deriveWhyAuraExplanation(recommendation: DailyGuidanceRecommendation, behavioralAffinity?: SelectedActivityMetadata['behavioralAffinity']): WhyAuraExplanation {
   const displayThemes = selectDisplayThemes(recommendation.relevantThemes);
   const personalReason: WhyAuraReason | null =
     recommendation.personalRelevance === 'BASELINE' || displayThemes.length === 0 ? null : { kind: 'PERSONAL_THEME', themes: displayThemes };
   const timingReason: WhyAuraReason = { kind: 'TIMING_SUPPORT', timingLabel: recommendation.timing.label };
-  return { reasons: personalReason ? [personalReason, timingReason] : [timingReason] };
+  const behavioralReason: WhyAuraReason | null = behavioralAffinity === 'STRONG' ? { kind: 'BEHAVIORAL_PATTERN' } : null;
+  const reasons = personalReason ? [personalReason, timingReason] : [timingReason];
+  return { reasons: behavioralReason ? [...reasons, behavioralReason] : reasons };
 }
 
 /**
@@ -177,15 +225,25 @@ export function deriveWhyAuraExplanation(recommendation: DailyGuidanceRecommenda
  * qualify, so timing is the stronger claim). Never changes a reason's own
  * content -- `timing.label`/`personalRelevance` already reflect genuine
  * strength, so no separate "soften the wording" step is needed.
+ *
+ * BEHAVIORAL_PATTERN always sorts last, in every branch (Behavior-aware
+ * Why Aura V1) -- it mirrors the ranking tuple's own strength order
+ * (behavioral affinity is the weakest of the ranking keys, consulted only
+ * after relevance/label/score already tied), regardless of which
+ * selectionReason applies. The default branch below relies on
+ * `deriveWhyAuraExplanation`'s own single append point already placing it
+ * last; only the RELAXED_RELEVANCE_FLOOR branch needs to re-append it
+ * explicitly, since that branch rebuilds the array from scratch.
  */
 function orderReasonsBySelectionReason(reasons: WhyAuraReason[], selectionReason: DailyGuidanceRecommendation['selectionReason']): WhyAuraReason[] {
   if (selectionReason !== 'RELAXED_RELEVANCE_FLOOR') return reasons;
   const timing = reasons.filter((reason) => reason.kind === 'TIMING_SUPPORT');
   const personal = reasons.filter((reason) => reason.kind === 'PERSONAL_THEME');
-  return [...timing, ...personal];
+  const behavioral = reasons.filter((reason) => reason.kind === 'BEHAVIORAL_PATTERN');
+  return [...timing, ...personal, ...behavioral];
 }
 
-/** Renders ordered semantic reasons into final copy -- the only place `source` is read (it selects the PLAN-vs-DAY_BUILDER_INTENTION timing-wording table, never changes which facts are present). */
+/** Renders ordered semantic reasons into final copy -- the only place `source` is read (it selects the PLAN-vs-DAY_BUILDER_INTENTION timing-wording table, never changes which facts are present). `BEHAVIORAL_PATTERN` always renders the same fixed `BEHAVIORAL_PATTERN_LINE`, never a source-specific or tier-specific variant. */
 function presentReasons(reasons: WhyAuraReason[], source: ConcreteGuidanceCandidateSource, strongPersonalFit: boolean): string[] {
   const lines: string[] = [];
   for (const reason of reasons) {
@@ -195,6 +253,8 @@ function presentReasons(reasons: WhyAuraReason[], source: ConcreteGuidanceCandid
     } else if (reason.kind === 'TIMING_SUPPORT' && reason.timingLabel) {
       const line = buildTimingLine(reason.timingLabel, source);
       if (line) lines.push(line);
+    } else if (reason.kind === 'BEHAVIORAL_PATTERN') {
+      lines.push(BEHAVIORAL_PATTERN_LINE);
     }
   }
   return lines;
@@ -202,16 +262,24 @@ function presentReasons(reasons: WhyAuraReason[], source: ConcreteGuidanceCandid
 
 /**
  * Derives, orders, and renders a recommendation's explanation in one pure
- * call. Pure and deterministic: same `recommendation`/`source` -> same
- * `lines`, same order, same wording; never mutates either argument.
+ * call. Pure and deterministic: same `recommendation`/`source`/
+ * `behavioralAffinity` -> same `lines`, same order, same wording; never
+ * mutates either argument.
+ *
+ * `behavioralAffinity` (Behavior-aware Why Aura V1) is OPTIONAL and
+ * BACKWARD COMPATIBLE by construction: omitting it entirely (every caller
+ * written before this feature existed) produces byte-for-byte the same
+ * output as passing `undefined` explicitly, which in turn produces the
+ * same output as `'MODERATE'`/`'NEUTRAL'` -- see `deriveWhyAuraExplanation`'s
+ * own doc comment for the full policy.
  *
  * `lines` is `[]` when nothing survives (should not happen in practice --
  * `timing.label` is always present on a real recommendation -- but this
  * function still never throws): a caller must hide its "Why?" affordance
  * entirely in that case, never render a generic fallback sentence.
  */
-export function buildWhyAuraExplanation(recommendation: DailyGuidanceRecommendation, source: ConcreteGuidanceCandidateSource): WhyAuraViewModel {
-  const explanation = deriveWhyAuraExplanation(recommendation);
+export function buildWhyAuraExplanation(recommendation: DailyGuidanceRecommendation, source: ConcreteGuidanceCandidateSource, behavioralAffinity?: SelectedActivityMetadata['behavioralAffinity']): WhyAuraViewModel {
+  const explanation = deriveWhyAuraExplanation(recommendation, behavioralAffinity);
   const ordered = orderReasonsBySelectionReason(explanation.reasons, recommendation.selectionReason);
   const lines = presentReasons(ordered, source, recommendation.personalRelevance === 'HIGHLY_RELEVANT');
   return { lines };
