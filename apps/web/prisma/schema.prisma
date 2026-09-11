@@ -60,6 +60,7 @@ model User {
   reminderAttentions ReminderAttention[]
   reminderDeliveries ReminderDelivery[]
   pushSubscriptions  PushSubscription[]
+  activityPreferences UserActivityPreference[]
 }
 
 // A lightweight profile for someone the user plans with -- the minimum
@@ -514,5 +515,33 @@ model PushSubscription {
   // for state that's cheap to keep and expensive to silently lose).
   disabledAt       DateTime? @db.Timestamptz(3)
 
+  @@index([userId])
+}
+
+// Explicit Duration Preferences Foundation V1 -- one row per (userId,
+// activityId) ONLY when the user has explicitly declared how long they
+// usually want to spend on that activity. Row absence IS the "no
+// preference" state -- never create a row merely because a catalog default
+// or a behavioral typical duration exists (see apps/web/lib/
+// behavioralAffinity.ts's own doc comment for why that signal is a
+// DIFFERENT axis: recent observed frequency/duration, not a user-declared
+// statement). activityId is validated against the code-defined activity
+// catalog (packages/recommendation/src/personalizedTasks.ts's
+// getActivityProfileById) at write time, so it is intentionally a plain
+// String here, not a foreign key -- same convention as HabitLog.activityId
+// and PlannedActivity.activityId. This table has no consumer yet in V1
+// (foundation only, brief section 52) -- see apps/web/lib/
+// activityPreferences.ts for the read/write/clear service and the
+// deliberately minimal app-facing contract.
+model UserActivityPreference {
+  id                       String   @id @default(uuid())
+  userId                   String
+  user                     User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  activityId               String
+  preferredDurationMinutes Int
+  createdAt                DateTime @default(now()) @db.Timestamptz(3)
+  updatedAt                DateTime @updatedAt @db.Timestamptz(3)
+
+  @@unique([userId, activityId])
   @@index([userId])
 }
