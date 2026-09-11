@@ -17,6 +17,7 @@
 import type { DailyGuidanceContext } from '../../../packages/personal-intelligence/src/context';
 import type { MuhurtaActivityFamily } from '../../../packages/muhurta/src/muhurtaEngine';
 import type { TimingCandidate } from '../../../packages/recommendation/src/timingSearch';
+import type { BehavioralAffinityTier } from '../../../packages/daily-guidance/src/types';
 
 /** Which existing product surface a concrete candidate activity came from -- never a fabricated/generic source. */
 export type ConcreteGuidanceCandidateSource = 'PLAN' | 'DAY_BUILDER_INTENTION';
@@ -45,12 +46,29 @@ export interface ConcreteGuidanceCandidate {
   timingCandidates: TimingCandidate[];
 }
 
-/** Compact metadata for the ONE concrete activity actually selected to represent a family that made it into `DailyGuidanceContext.recommendations` -- never a full copy of the source Plan/suggestion object. */
+/**
+ * Compact metadata for the ONE concrete activity actually selected to
+ * represent a family that made it into `DailyGuidanceContext.recommendations`
+ * -- never a full copy of the source Plan/suggestion object.
+ *
+ * `behavioralAffinity` (Behavioral Integration V1) is OPTIONAL,
+ * forward-compat-only metadata for a future Why Aura behavioral-
+ * explanation PR -- it is NOT consumed by anything in this PR (no UI, no
+ * copy, no new Why Aura reason kind), and optional so every pre-existing
+ * construction site (e.g. test fixtures built before this field existed)
+ * stays valid with zero changes. Deliberately the SAME minimal
+ * `'STRONG' | 'MODERATE' | 'NEUTRAL'` tier #104's own input carries, never
+ * `evidenceCount`/raw HabitLog rows/timestamps/`preferredDaypart`/
+ * `typicalDurationMinutes` (see apps/web/lib/behavioralAffinity.ts's own
+ * privacy-contract doc comment -- the identical minimal-exposure
+ * discipline applies here).
+ */
 export interface SelectedActivityMetadata {
   activityId: string;
   title: string;
   source: ConcreteGuidanceCandidateSource;
   sourceEntityId: string;
+  behavioralAffinity?: BehavioralAffinityTier;
 }
 
 /**

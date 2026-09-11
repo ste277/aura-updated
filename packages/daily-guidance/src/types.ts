@@ -12,15 +12,36 @@ import type { WindowRankingContext, RankedTimingWindow } from '../../window-rank
 import type { MuhurtaActivityFamily } from '../../muhurta/src/muhurtaEngine';
 
 /**
+ * Behavioral Integration V1 -- this package's own LOCAL copy of #110's
+ * (apps/web/lib/behavioralAffinity.ts) `BehavioralAffinity` tier, never
+ * imported from apps/web (packages must never depend on app-layer code --
+ * see constants.ts's own CANONICAL_ACTIVITY_FAMILIES doc comment for the
+ * identical "independently re-declared, not a new shared dependency"
+ * precedent this mirrors). The app-level orchestrator maps #110's real
+ * output onto this structurally-equivalent local type before calling
+ * `deriveDailyGuidance`.
+ */
+export type BehavioralAffinityTier = 'STRONG' | 'MODERATE' | 'NEUTRAL';
+
+/**
  * The core engine's own input. `windowRankings` need NOT cover all 13
  * canonical families -- a family with no supplied WindowRankingContext
  * simply cannot become a recommendation (no timing data to join against).
  * `limit` defaults to 3 (constants.ts's own DEFAULT_LIMIT) when omitted.
+ *
+ * `behavioralAffinityByFamily` (Behavioral Integration V1) is entirely
+ * OPTIONAL -- omitted entirely (every pre-existing caller/test) or a
+ * family missing from the map both resolve to `NEUTRAL` in
+ * eligibility.ts's own `buildCandidates` (never thrown), reproducing V1's
+ * pre-integration ranking output exactly. This is an ORDERING signal only
+ * -- see ordering.ts's own doc comment for where it sits in the tuple; it
+ * is never consulted by eligibility.ts (stage membership is unaffected).
  */
 export interface DailyGuidanceInput {
   dailyPersonalFit: DailyPersonalFitContext;
   windowRankings: WindowRankingContext[];
   limit?: number;
+  behavioralAffinityByFamily?: Partial<Record<MuhurtaActivityFamily, BehavioralAffinityTier>>;
 }
 
 /** Thrown by engine.ts/validation.ts on malformed input -- see validation.ts's own doc comment for exactly which conditions reject. */
@@ -44,4 +65,9 @@ export interface DailyGuidanceCandidate {
   personalRelevance: 'HIGHLY_RELEVANT' | 'RELEVANT' | 'BASELINE';
   relevantThemes: DailyPersonalFitContext['activities'][number]['relevantThemes'];
   window: RankedTimingWindow;
+  /** Behavioral Integration V1 -- always resolved to a concrete tier by
+   * eligibility.ts's own `buildCandidates` (missing input/family both
+   * default to `NEUTRAL`), never left undefined -- see ordering.ts for
+   * where this is consulted. */
+  behavioralAffinity: BehavioralAffinityTier;
 }

@@ -125,6 +125,32 @@ function assertValidLimit(limit: unknown): void {
   }
 }
 
+const VALID_BEHAVIORAL_AFFINITY_TIERS = new Set(['STRONG', 'MODERATE', 'NEUTRAL']);
+
+/**
+ * Behavioral Integration V1 -- OPTIONAL, matching assertValidLimit's own
+ * "undefined is always valid" discipline: an omitted map (every caller
+ * before Behavioral Integration V1) is valid and resolves every candidate to NEUTRAL in
+ * eligibility.ts's own buildCandidates (see that function's doc comment).
+ * When supplied, only rejects a genuinely malformed shape -- a
+ * non-canonical family key or a non-tier value -- never re-validates
+ * anything #110 itself already guarantees.
+ */
+function assertValidBehavioralAffinityByFamily(behavioralAffinityByFamily: unknown): void {
+  if (behavioralAffinityByFamily === undefined) return;
+  if (behavioralAffinityByFamily == null || typeof behavioralAffinityByFamily !== 'object' || Array.isArray(behavioralAffinityByFamily)) {
+    throw new DailyGuidanceValidationError('behavioralAffinityByFamily must be an object when supplied.');
+  }
+  for (const [family, tier] of Object.entries(behavioralAffinityByFamily)) {
+    if (!CANONICAL_FAMILY_SET.has(family)) {
+      throw new DailyGuidanceValidationError(`behavioralAffinityByFamily contains a non-canonical activityFamily: ${family}.`);
+    }
+    if (!VALID_BEHAVIORAL_AFFINITY_TIERS.has(tier as string)) {
+      throw new DailyGuidanceValidationError(`behavioralAffinityByFamily[${family}] must be one of STRONG/MODERATE/NEUTRAL, got: ${String(tier)}.`);
+    }
+  }
+}
+
 export function assertValidDailyGuidanceInput(input: DailyGuidanceInput): void {
   if (input == null || typeof input !== 'object') {
     throw new DailyGuidanceValidationError('DailyGuidanceInput must be an object with dailyPersonalFit and windowRankings properties.');
@@ -133,4 +159,5 @@ export function assertValidDailyGuidanceInput(input: DailyGuidanceInput): void {
   assertValidWindowRankings(input.windowRankings);
   assertJoinCompleteness(input);
   assertValidLimit(input.limit);
+  assertValidBehavioralAffinityByFamily(input.behavioralAffinityByFamily);
 }

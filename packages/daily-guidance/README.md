@@ -80,21 +80,58 @@ fixed lexicographic tuple, comparing one key at a time and stopping at
 the first non-zero comparison:
 
 ```text
-1. personal relevance tier   (HIGHLY_RELEVANT=0, RELEVANT=1, BASELINE=2)
-2. timing label tier         (EXCELLENT=0, VERY_GOOD=1, GOOD=2, USABLE=3, CAUTION=4)
-3. timing score, descending  (verbatim upstream 0-10 presentation score)
-4. start time, ascending
-5. canonical family order    (final deterministic tie-break)
+1. personal relevance tier    (HIGHLY_RELEVANT=0, RELEVANT=1, BASELINE=2)
+2. timing label tier          (EXCELLENT=0, VERY_GOOD=1, GOOD=2, USABLE=3, CAUTION=4)
+3. timing score, descending   (verbatim upstream 0-10 presentation score)
+4. behavioral affinity tier   (STRONG=0, MODERATE=1, NEUTRAL=2 -- Behavioral Integration V1)
+5. start time, ascending
+6. canonical family order     (final deterministic tie-break)
 ```
 
-`RELEVANCE_TIER_ORDER`/`TIMING_LABEL_TIER_ORDER` (constants.ts) are
-**ordinal ordering keys only** — they are never added, multiplied, or
-otherwise combined across axes into one number. Forbidden patterns:
-`guidanceScore`, `personalScore`, `combinedScore`, `priorityScore`, or
-any `HIGHLY_RELEVANT = 100` / `RELEVANT = 70` / `BASELINE = 40` style
-mapping. Both axes stay first-class and independently explainable in the
-output (`personalRelevance` and `timing.label`/`timing.score` are always
-present side by side on every recommendation).
+`RELEVANCE_TIER_ORDER`/`TIMING_LABEL_TIER_ORDER`/`BEHAVIORAL_AFFINITY_TIER_ORDER`
+(constants.ts) are **ordinal ordering keys only** — they are never added,
+multiplied, or otherwise combined across axes into one number. Forbidden
+patterns: `guidanceScore`, `personalScore`, `combinedScore`,
+`priorityScore`, or any `HIGHLY_RELEVANT = 100` / `RELEVANT = 70` /
+`BASELINE = 40` style mapping. Every axis stays first-class and
+independently explainable in the output (`personalRelevance` and
+`timing.label`/`timing.score` are always present side by side on every
+recommendation; behavioral affinity is input-only, never a new output
+field — see "Behavioral affinity" below).
+
+### Behavioral affinity (Behavioral Integration V1)
+
+`DailyGuidanceInput.behavioralAffinityByFamily` is an OPTIONAL,
+family-keyed map of `'STRONG' | 'MODERATE' | 'NEUTRAL'` — this package's
+own local copy of #110's (`apps/web/lib/behavioralAffinity.ts`)
+`BehavioralAffinity` tier, never imported from app-layer code (packages
+never depend on `apps/web`). The app-level orchestrator derives #110's
+real `BehavioralProfileContext` once per request and maps it onto this
+structurally-equivalent local type before calling `deriveDailyGuidance`.
+
+Three invariants, all merge-critical:
+
+- **Ordering only, never eligibility.** Affinity is read exclusively in
+  `ordering.ts`'s own `compareCandidates` — `eligibility.ts`'s
+  `isEligibleForStage` never sees it, so stage membership (which of the
+  three fixed stages a candidate clears) is completely unaffected. A
+  `STRONG`-affinity `CAUTION`-labeled candidate remains exactly as
+  ineligible as before; there is still no fourth stage.
+- **Deliberately positioned after timing score, not before it.** Personal
+  relevance and timing label are real, structural product floors; timing
+  score is a genuine, continuous timing-quality signal within one label
+  (see `packages/recommendation/src/timingSearch.ts`'s own
+  `toPresentationScore`) — a same-label score gap (e.g. `GOOD` 89 vs
+  `GOOD` 74) is a real timing-quality difference that historical
+  repetition must never override. Affinity therefore only ever breaks a
+  tie that would otherwise fall through to the already-arbitrary
+  `start`/`canonical family order` tail.
+- **Missing input reproduces pre-integration output exactly.** An omitted
+  `behavioralAffinityByFamily` (every pre-Behavioral-Integration-V1
+  caller), or a family absent from it, both resolve to `NEUTRAL` in
+  `eligibility.ts`'s own `buildCandidates` — never thrown. `NEUTRAL` vs
+  `NEUTRAL` is always a comparison no-op, so cold start / no-history
+  output is byte-for-byte identical to V1's pre-integration ranking.
 
 ## Best window only (merge-critical)
 
@@ -311,8 +348,8 @@ READMEs already draw for their own synthesis layers.
 
 | File | Contents |
 |---|---|
-| `constants.ts` | `CANONICAL_ACTIVITY_FAMILIES`, `RELEVANCE_TIER_ORDER`, `TIMING_LABEL_TIER_ORDER`, `PRIMARY_TIMING_LABELS`, `RELAXED_TIMING_LABELS`, `DEFAULT_LIMIT` |
-| `types.ts` | `DailyGuidanceInput`, `DailyGuidanceValidationError`, `DailyGuidanceCandidate` (internal) |
+| `constants.ts` | `CANONICAL_ACTIVITY_FAMILIES`, `RELEVANCE_TIER_ORDER`, `TIMING_LABEL_TIER_ORDER`, `BEHAVIORAL_AFFINITY_TIER_ORDER`, `PRIMARY_TIMING_LABELS`, `RELAXED_TIMING_LABELS`, `DEFAULT_LIMIT` |
+| `types.ts` | `DailyGuidanceInput`, `DailyGuidanceValidationError`, `DailyGuidanceCandidate` (internal), `BehavioralAffinityTier` |
 | `validation.ts` | `assertValidDailyGuidanceInput` |
 | `eligibility.ts` | `buildCandidates`, `isEligibleForStage`, `SELECTION_STAGES` |
 | `ordering.ts` | `compareCandidates`, `sortCandidates` |
@@ -325,8 +362,15 @@ READMEs already draw for their own synthesis layers.
 
 ```typescript
 export const DAILY_GUIDANCE_ENGINE_VERSION = 'DAILY_GUIDANCE_V1';
-export const DAILY_GUIDANCE_SELECTION_POLICY_VERSION = 'DAILY_GUIDANCE_SELECTION_POLICY_V1';
+export const DAILY_GUIDANCE_SELECTION_POLICY_VERSION = 'DAILY_GUIDANCE_SELECTION_POLICY_V2';
 ```
+
+`SELECTION_POLICY_VERSION` bumped to `V2` under Behavioral Integration V1
+— the within-stage ordinal tuple gained a new key (behavioral affinity
+tier), which is exactly PRODUCT selection semantics, not a contract shape
+change. `ENGINE_VERSION` stayed `V1`: `DailyGuidanceContext`/
+`DailyGuidanceRecommendation` gained no new field — behavioral affinity is
+an input-only ordering signal (see "Behavioral affinity" above).
 
 Kept deliberately separate: the engine version describes the *contract
 and plumbing* (what fields exist, what they mean structurally); the

@@ -334,7 +334,7 @@ check('DEDUPE: two Day Builder suggestions for different activityIds are both ke
 // STATIC SOURCE GUARDS -- merge-critical.
 // ============================================================
 
-const ORCHESTRATION_FILES = ['dailyGuidancePipeline', 'dailyGuidanceCandidates', 'dailyGuidanceSameFamily', 'dailyGuidanceOrchestrator', 'dailyGuidanceTypes'];
+const ORCHESTRATION_FILES = ['dailyGuidancePipeline', 'dailyGuidanceCandidates', 'dailyGuidanceSameFamily', 'dailyGuidanceOrchestrator', 'dailyGuidanceTypes', 'dailyGuidanceBehavior'];
 
 function readOrchestrationSource(stripped = true): string {
   return ORCHESTRATION_FILES.map((name) => {

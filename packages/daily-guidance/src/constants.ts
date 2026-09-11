@@ -19,6 +19,7 @@
  */
 import type { MuhurtaActivityFamily } from '../../muhurta/src/muhurtaEngine';
 import type { TimingCandidateLabel } from '../../recommendation/src/timingSearch';
+import type { BehavioralAffinityTier } from './types';
 
 /** The complete, fixed canonical order used for final deterministic tie-breaking (see ordering.ts) -- never used to re-sort or exclude a family from the input itself. */
 export const CANONICAL_ACTIVITY_FAMILIES: readonly MuhurtaActivityFamily[] = [
@@ -67,3 +68,17 @@ export const PRIMARY_TIMING_LABELS: readonly TimingCandidateLabel[] = ['EXCELLEN
 export const RELAXED_TIMING_LABELS: readonly TimingCandidateLabel[] = ['USABLE'];
 
 export const DEFAULT_LIMIT = 3;
+
+/**
+ * Behavioral Integration V1 -- see RELEVANCE_TIER_ORDER's own doc comment
+ * above; the identical ordinal-only discipline applies here. A lower index
+ * sorts first (= stronger, preferred). Consulted by ordering.ts ONLY after
+ * personal relevance, timing label, AND timing score have all already
+ * tied -- see ordering.ts's own doc comment for why affinity sits there
+ * and not higher in the tuple.
+ */
+export const BEHAVIORAL_AFFINITY_TIER_ORDER: Record<BehavioralAffinityTier, number> = {
+  STRONG: 0,
+  MODERATE: 1,
+  NEUTRAL: 2,
+};

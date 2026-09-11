@@ -26,7 +26,9 @@
  *     (dailyGuidanceCandidates.ts) -> ConcreteGuidanceCandidate[]
  *   selectOneCandidatePerFamily + buildWindowRankingContexts
  *     (dailyGuidanceSameFamily.ts) -> WindowRankingContext[]
- *   deriveDailyGuidance (packages/daily-guidance, UNMODIFIED)
+ *   buildBehavioralAffinityByFamily (dailyGuidanceBehavior.ts, Behavioral
+ *     Integration V1) -> Partial<Record<MuhurtaActivityFamily, BehavioralAffinityTier>>
+ *   deriveDailyGuidance (packages/daily-guidance)
  *     -> DailyGuidanceContext
  *   -> PersonalDailyGuidanceResult (this file's own assembly)
  *
@@ -36,9 +38,11 @@
 import { buildDailyPersonalFitForUser } from './dailyGuidancePipeline';
 import { collectPlanCandidates, collectDayBuilderCandidates, dedupeCandidates } from './dailyGuidanceCandidates';
 import { selectOneCandidatePerFamily, buildWindowRankingContexts } from './dailyGuidanceSameFamily';
+import { buildBehavioralAffinityByFamily } from './dailyGuidanceBehavior';
 import { deriveDailyGuidance } from '../../../packages/daily-guidance/src/engine';
 import type { User } from './db';
 import type { PersonalDailyGuidanceResult, SelectedActivityMetadata } from './dailyGuidanceTypes';
+import type { MuhurtaActivityFamily } from '../../../packages/muhurta/src/muhurtaEngine';
 
 /**
  * The single public entry point. `now` must be captured ONCE by the
@@ -49,8 +53,15 @@ import type { PersonalDailyGuidanceResult, SelectedActivityMetadata } from './da
  * Order of checks (cheapest, most-blocking first): birth-profile
  * completeness is checked before any Plan/Day Builder DB read happens
  * (buildDailyPersonalFitForUser's own early `undefined` return, mirroring
- * buildPersonalMuhurtaContextForUser's existing contract) -- no wasted
- * work, and no engine invocation after a known prerequisite failure.
+ * buildPersonalMuhurtaContextForUser's existing contract); declared-intent
+ * discovery runs next, with its own NO_ACTIVITY_INTENT early return. Only
+ * once real intent is confirmed to exist does the new Behavioral
+ * Integration V1 HabitLog fetch run (buildBehavioralAffinityByFamily) --
+ * never for BIRTH_PROFILE_REQUIRED or NO_ACTIVITY_INTENT, so this
+ * additive signal is never fetched when it could not possibly be used. A
+ * genuine failure of that fetch propagates like every other DB call in
+ * this pipeline -- never silently converted to an all-NEUTRAL fallback
+ * (see dailyGuidanceBehavior.ts's own doc comment).
  */
 export async function buildPersonalDailyGuidance(user: User, now: Date): Promise<PersonalDailyGuidanceResult> {
   const dailyPersonalFit = buildDailyPersonalFitForUser(user, now);
@@ -64,14 +75,22 @@ export async function buildPersonalDailyGuidance(user: User, now: Date): Promise
   if (selected.size === 0) return { status: 'NO_ACTIVITY_INTENT' }; // every candidate had zero timing windows -- nothing to represent any family with
 
   const windowRankings = buildWindowRankingContexts(selected);
-  const guidance = deriveDailyGuidance({ dailyPersonalFit, windowRankings });
+  const behavioralAffinityByFamily = await buildBehavioralAffinityByFamily(user, now);
+  const guidance = deriveDailyGuidance({ dailyPersonalFit, windowRankings, behavioralAffinityByFamily });
 
   // Recommendation-only metadata (brief section 42/92): only families
   // #104 actually selected into `recommendations` get a selectedActivities
   // entry -- a family that was searched/consolidated but not chosen by
   // #104's own staged policy is simply absent, keeping the payload
   // minimal (matches #104's own "compact evidence, never a full copy"
-  // discipline).
+  // discipline). `behavioralAffinity` (Behavioral Integration V1) is
+  // forward-compat metadata only -- #104's own output carries no such
+  // field (see packages/daily-guidance/src/types.ts's own
+  // DailyGuidanceInput doc comment); this is app-level glue re-attaching
+  // the SAME map already computed above, never a second derivation, so a
+  // future Why Aura explanation PR can consume it without re-deriving
+  // behavior. Defaults to 'NEUTRAL' when the family carries no evidence,
+  // matching buildCandidates' own default exactly.
   const selectedActivities: Record<string, SelectedActivityMetadata> = {};
   for (const recommendation of guidance.recommendations) {
     const candidate = selected.get(recommendation.activityFamily);
@@ -81,6 +100,7 @@ export async function buildPersonalDailyGuidance(user: User, now: Date): Promise
       title: candidate.title,
       source: candidate.source,
       sourceEntityId: candidate.sourceEntityId,
+      behavioralAffinity: behavioralAffinityByFamily[recommendation.activityFamily as MuhurtaActivityFamily] ?? 'NEUTRAL',
     };
   }
 

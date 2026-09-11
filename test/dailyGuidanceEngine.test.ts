@@ -28,7 +28,7 @@ function stripComments(text: string): string {
 }
 
 import { deriveDailyGuidance, CANONICAL_ACTIVITY_FAMILIES, DAILY_GUIDANCE_ENGINE_VERSION, DAILY_GUIDANCE_SELECTION_POLICY_VERSION, DailyGuidanceValidationError } from '../packages/daily-guidance/src/index';
-import type { DailyGuidanceInput } from '../packages/daily-guidance/src/index';
+import type { DailyGuidanceInput, BehavioralAffinityTier } from '../packages/daily-guidance/src/index';
 import type { MuhurtaActivityFamily } from '../packages/muhurta/src/muhurtaEngine';
 import type { WindowRankingContext, RankedTimingWindow } from '../packages/window-ranking/src/index';
 import type { DailyActivityFit, DailyPersonalFitContext, PersonalRelevance, DailyPersonalFitRelevantTheme } from '../packages/personal-intelligence/src/context';
@@ -97,7 +97,7 @@ function expectThrows(fn: () => unknown): boolean {
 
 check('CANONICAL_ACTIVITY_FAMILIES matches the independently hard-coded 13-value set exactly, in order', JSON.stringify(CANONICAL_ACTIVITY_FAMILIES) === JSON.stringify(EXPECTED_CANONICAL_FAMILIES));
 check('engineVersion is the stable DAILY_GUIDANCE_V1 literal', DAILY_GUIDANCE_ENGINE_VERSION === 'DAILY_GUIDANCE_V1');
-check('selectionPolicyVersion is the stable DAILY_GUIDANCE_SELECTION_POLICY_V1 literal', DAILY_GUIDANCE_SELECTION_POLICY_VERSION === 'DAILY_GUIDANCE_SELECTION_POLICY_V1');
+check('selectionPolicyVersion is the stable DAILY_GUIDANCE_SELECTION_POLICY_V2 literal (bumped by Behavioral Integration V1 -- the ordinal tuple itself changed)', DAILY_GUIDANCE_SELECTION_POLICY_VERSION === 'DAILY_GUIDANCE_SELECTION_POLICY_V2');
 
 check(
   'result stamps both DAILY_GUIDANCE_ENGINE_VERSION and DAILY_GUIDANCE_SELECTION_POLICY_VERSION verbatim',
@@ -556,6 +556,167 @@ check(
 );
 
 // ============================================================
+// BEHAVIORAL AFFINITY (Behavioral Integration V1) -- merge-critical.
+// Two same-relevance, same-label, same-score candidates (DEEP_WORK,
+// LEARNING) isolate the new tuple key from every other one.
+// ============================================================
+
+function buildTiedCandidatesInput(affinities: Partial<Record<'DEEP_WORK' | 'LEARNING', BehavioralAffinityTier>>): DailyGuidanceInput {
+  const dailyPersonalFit = buildDailyPersonalFit({ DEEP_WORK: 'HIGHLY_RELEVANT', LEARNING: 'HIGHLY_RELEVANT' });
+  const windowRankings = [
+    buildRanking('DEEP_WORK', [buildWindow({ start: '2026-09-09T02:00:00.000Z', end: '2026-09-09T03:00:00.000Z', label: 'GOOD', score: 8.0 })]),
+    buildRanking('LEARNING', [buildWindow({ start: '2026-09-09T05:00:00.000Z', end: '2026-09-09T06:00:00.000Z', label: 'GOOD', score: 8.0 })]),
+  ];
+  return { dailyPersonalFit, windowRankings, limit: 2, behavioralAffinityByFamily: affinities };
+}
+
+check(
+  'ABSENT INPUT: omitting behavioralAffinityByFamily entirely reproduces the exact same order as an explicit all-NEUTRAL map',
+  (() => {
+    const { behavioralAffinityByFamily, ...withoutBehavior } = buildTiedCandidatesInput({});
+    const resultAbsent = deriveDailyGuidance(withoutBehavior);
+    const resultAllNeutral = deriveDailyGuidance(buildTiedCandidatesInput({ DEEP_WORK: 'NEUTRAL', LEARNING: 'NEUTRAL' }));
+    return JSON.stringify(resultAbsent) === JSON.stringify(resultAllNeutral);
+  })()
+);
+
+check(
+  'ABSENT INPUT reproduces the pre-Behavioral-Integration-V1 tie-break exactly (falls through to start-time ascending: DEEP_WORK\'s earlier start wins)',
+  (() => {
+    const { behavioralAffinityByFamily, ...withoutBehavior } = buildTiedCandidatesInput({});
+    const result = deriveDailyGuidance(withoutBehavior);
+    return result.recommendations[0].activityFamily === 'DEEP_WORK';
+  })()
+);
+
+check(
+  'AFFINITY TIE-BREAK: STRONG beats MODERATE, all else equal',
+  deriveDailyGuidance(buildTiedCandidatesInput({ DEEP_WORK: 'MODERATE', LEARNING: 'STRONG' })).recommendations[0].activityFamily === 'LEARNING'
+);
+
+check(
+  'AFFINITY TIE-BREAK: MODERATE beats NEUTRAL, all else equal',
+  deriveDailyGuidance(buildTiedCandidatesInput({ DEEP_WORK: 'NEUTRAL', LEARNING: 'MODERATE' })).recommendations[0].activityFamily === 'LEARNING'
+);
+
+check(
+  'AFFINITY TIE-BREAK: STRONG beats NEUTRAL, all else equal',
+  deriveDailyGuidance(buildTiedCandidatesInput({ DEEP_WORK: 'NEUTRAL', LEARNING: 'STRONG' })).recommendations[0].activityFamily === 'LEARNING'
+);
+
+check(
+  'MISSING FAMILY: a family absent from behavioralAffinityByFamily resolves to NEUTRAL (never throws) -- STRONG for the other family still wins',
+  deriveDailyGuidance(buildTiedCandidatesInput({ LEARNING: 'STRONG' })).recommendations[0].activityFamily === 'LEARNING'
+);
+
+check(
+  'PERSONAL RELEVANCE OUTRANKS AFFINITY (merge-critical): HIGHLY_RELEVANT + NEUTRAL beats RELEVANT + STRONG',
+  (() => {
+    const dailyPersonalFit = buildDailyPersonalFit({ DEEP_WORK: 'HIGHLY_RELEVANT', LEARNING: 'RELEVANT' });
+    const windowRankings = [
+      buildRanking('DEEP_WORK', [buildWindow({ start: '2026-09-09T02:00:00.000Z', end: '2026-09-09T03:00:00.000Z', label: 'GOOD', score: 8.0 })]),
+      buildRanking('LEARNING', [buildWindow({ start: '2026-09-09T05:00:00.000Z', end: '2026-09-09T06:00:00.000Z', label: 'GOOD', score: 8.0 })]),
+    ];
+    const result = deriveDailyGuidance({ dailyPersonalFit, windowRankings, limit: 2, behavioralAffinityByFamily: { DEEP_WORK: 'NEUTRAL', LEARNING: 'STRONG' } });
+    return result.recommendations[0].activityFamily === 'DEEP_WORK';
+  })()
+);
+
+check(
+  'TIMING LABEL OUTRANKS AFFINITY (merge-critical): VERY_GOOD + NEUTRAL beats GOOD + STRONG',
+  (() => {
+    const dailyPersonalFit = buildDailyPersonalFit({ DEEP_WORK: 'HIGHLY_RELEVANT', LEARNING: 'HIGHLY_RELEVANT' });
+    const windowRankings = [
+      buildRanking('DEEP_WORK', [buildWindow({ start: '2026-09-09T02:00:00.000Z', end: '2026-09-09T03:00:00.000Z', label: 'VERY_GOOD', score: 8.0 })]),
+      buildRanking('LEARNING', [buildWindow({ start: '2026-09-09T05:00:00.000Z', end: '2026-09-09T06:00:00.000Z', label: 'GOOD', score: 8.0 })]),
+    ];
+    const result = deriveDailyGuidance({ dailyPersonalFit, windowRankings, limit: 2, behavioralAffinityByFamily: { DEEP_WORK: 'NEUTRAL', LEARNING: 'STRONG' } });
+    return result.recommendations[0].activityFamily === 'DEEP_WORK';
+  })()
+);
+
+check(
+  'TIMING SCORE OUTRANKS AFFINITY (merge-critical, proves affinity sits AFTER score in the tuple): same relevance, same label -- score 8.9 + NEUTRAL beats score 7.4 + STRONG',
+  (() => {
+    const dailyPersonalFit = buildDailyPersonalFit({ DEEP_WORK: 'HIGHLY_RELEVANT', LEARNING: 'HIGHLY_RELEVANT' });
+    const windowRankings = [
+      buildRanking('DEEP_WORK', [buildWindow({ start: '2026-09-09T02:00:00.000Z', end: '2026-09-09T03:00:00.000Z', label: 'GOOD', score: 8.9 })]),
+      buildRanking('LEARNING', [buildWindow({ start: '2026-09-09T05:00:00.000Z', end: '2026-09-09T06:00:00.000Z', label: 'GOOD', score: 7.4 })]),
+    ];
+    const result = deriveDailyGuidance({ dailyPersonalFit, windowRankings, limit: 2, behavioralAffinityByFamily: { DEEP_WORK: 'NEUTRAL', LEARNING: 'STRONG' } });
+    return result.recommendations[0].activityFamily === 'DEEP_WORK';
+  })()
+);
+
+check(
+  'CAUTION NEVER PROMOTED (merge-critical): HIGHLY_RELEVANT + CAUTION + STRONG is still never selected',
+  (() => {
+    const dailyPersonalFit = buildDailyPersonalFit({ FINANCE: 'HIGHLY_RELEVANT' });
+    const windowRankings = [buildRanking('FINANCE', [buildWindow({ label: 'CAUTION', score: -2.0 })])];
+    const result = deriveDailyGuidance({ dailyPersonalFit, windowRankings, limit: 3, behavioralAffinityByFamily: { FINANCE: 'STRONG' } });
+    return result.recommendations.length === 0;
+  })()
+);
+
+check(
+  'NO FOURTH STAGE (merge-critical): BASELINE + USABLE + STRONG is still never selected -- affinity creates no new stage',
+  (() => {
+    const dailyPersonalFit = buildDailyPersonalFit(); // every family BASELINE
+    const windowRankings = [buildRanking('MEAL', [buildWindow({ label: 'USABLE', score: 6.0 })])];
+    const result = deriveDailyGuidance({ dailyPersonalFit, windowRankings, limit: 3, behavioralAffinityByFamily: { MEAL: 'STRONG' } });
+    return result.recommendations.length === 0;
+  })()
+);
+
+check(
+  'STAGE MEMBERSHIP UNCHANGED: affinity only sorts WITHIN a stage -- a RELEVANT+EXCELLENT+NEUTRAL candidate (Stage 1) still beats a HIGHLY_RELEVANT+USABLE+STRONG candidate (Stage 2)',
+  (() => {
+    const dailyPersonalFit = buildDailyPersonalFit({ DEEP_WORK: 'HIGHLY_RELEVANT', LEARNING: 'RELEVANT' });
+    const windowRankings = [
+      buildRanking('DEEP_WORK', [buildWindow({ start: '2026-09-09T02:00:00.000Z', end: '2026-09-09T03:00:00.000Z', label: 'USABLE', score: 6.0 })]),
+      buildRanking('LEARNING', [buildWindow({ start: '2026-09-09T05:00:00.000Z', end: '2026-09-09T06:00:00.000Z', label: 'EXCELLENT', score: 9.2 })]),
+    ];
+    const result = deriveDailyGuidance({ dailyPersonalFit, windowRankings, limit: 1, behavioralAffinityByFamily: { DEEP_WORK: 'STRONG', LEARNING: 'NEUTRAL' } });
+    return result.recommendations.length === 1 && result.recommendations[0].activityFamily === 'LEARNING' && result.recommendations[0].selectionReason === 'PRIMARY_FLOOR_MET';
+  })()
+);
+
+check(
+  'DETERMINISM: behavioralAffinityByFamily key insertion order never affects the result',
+  (() => {
+    const a = deriveDailyGuidance(buildTiedCandidatesInput({ DEEP_WORK: 'NEUTRAL', LEARNING: 'STRONG' }));
+    const b = deriveDailyGuidance(buildTiedCandidatesInput({ LEARNING: 'STRONG', DEEP_WORK: 'NEUTRAL' }));
+    return JSON.stringify(a) === JSON.stringify(b);
+  })()
+);
+
+check(
+  'VALIDATION: a non-canonical family key in behavioralAffinityByFamily throws',
+  expectThrows(() => {
+    const input = buildTiedCandidatesInput({});
+    (input.behavioralAffinityByFamily as Record<string, string>)['NOT_A_FAMILY'] = 'STRONG';
+    return deriveDailyGuidance(input);
+  })
+);
+
+check(
+  'VALIDATION: an invalid tier value in behavioralAffinityByFamily throws',
+  expectThrows(() => {
+    const input = buildTiedCandidatesInput({});
+    (input.behavioralAffinityByFamily as Record<string, string>)['DEEP_WORK'] = 'VERY_STRONG';
+    return deriveDailyGuidance(input);
+  })
+);
+
+check(
+  'OUTPUT UNCHANGED: DailyGuidanceRecommendation carries no behavioralAffinity field -- #104\'s own public output contract is byte-for-byte unchanged by Behavioral Integration V1',
+  (() => {
+    const result = deriveDailyGuidance(buildTiedCandidatesInput({ DEEP_WORK: 'STRONG' }));
+    return !('behavioralAffinity' in result.recommendations[0]);
+  })()
+);
+
+// ============================================================
 // STATIC SOURCE GUARDS.
 // ============================================================
 
@@ -588,10 +749,13 @@ check(
 );
 
 check(
-  'NO NUMERIC COMPOSITE: no forbidden identifier (guidanceScore/personalScore/combinedScore/priorityScore/weightedScore) and no arithmetic combination of RELEVANCE_TIER_ORDER with TIMING_LABEL_TIER_ORDER anywhere in this package',
+  'NO NUMERIC COMPOSITE: no forbidden identifier (guidanceScore/personalScore/combinedScore/priorityScore/weightedScore) and no arithmetic combination of RELEVANCE_TIER_ORDER, TIMING_LABEL_TIER_ORDER, or BEHAVIORAL_AFFINITY_TIER_ORDER with each other anywhere in this package',
   (() => {
     const code = readDailyGuidanceSource();
-    return !/guidanceScore|personalScore|combinedScore|priorityScore|weightedScore/i.test(code) && !/RELEVANCE_TIER_ORDER\[[^\]]*\]\s*[+*]|TIMING_LABEL_TIER_ORDER\[[^\]]*\]\s*[+*]/.test(code);
+    return (
+      !/guidanceScore|personalScore|combinedScore|priorityScore|weightedScore/i.test(code) &&
+      !/RELEVANCE_TIER_ORDER\[[^\]]*\]\s*[+*]|TIMING_LABEL_TIER_ORDER\[[^\]]*\]\s*[+*]|BEHAVIORAL_AFFINITY_TIER_ORDER\[[^\]]*\]\s*[+*]/.test(code)
+    );
   })()
 );
 

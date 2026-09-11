@@ -32,6 +32,13 @@ import type { DailyGuidanceSelectionReason } from '../../personal-intelligence/s
  * "HIGHLY_RELEVANT with no window" (or with a WindowRankingContext simply
  * never supplied) produces no candidate at all, never a fabricated one
  * (see README.md's "Empty/missing window handling" section).
+ *
+ * Behavioral Integration V1: `behavioralAffinity` is resolved here from
+ * the OPTIONAL `input.behavioralAffinityByFamily` -- an omitted map, or a
+ * family missing from it, both resolve to `NEUTRAL` (never thrown; see
+ * types.ts's own `DailyGuidanceInput.behavioralAffinityByFamily` doc
+ * comment). This is purely a join-time lookup, never consulted by
+ * `isEligibleForStage` below -- stage membership stays exactly as before.
  */
 export function buildCandidates(input: DailyGuidanceInput): DailyGuidanceCandidate[] {
   const fitByFamily = new Map(input.dailyPersonalFit.activities.map((a) => [a.activityFamily, a]));
@@ -48,6 +55,7 @@ export function buildCandidates(input: DailyGuidanceInput): DailyGuidanceCandida
       personalRelevance: fit.personalRelevance,
       relevantThemes: fit.relevantThemes,
       window: ranking.windows[0],
+      behavioralAffinity: input.behavioralAffinityByFamily?.[ranking.activityFamily] ?? 'NEUTRAL',
     });
   }
   return candidates;
