@@ -58,6 +58,32 @@
  * MISSING_ACTIVITY_ID / UNKNOWN_ACTIVITY_ID fail-closed pattern
  * insightsAuraFit.ts's evaluateHabitLogAuraFit() already established.
  * Never inferred from activityTitle/Habit.category/free text.
+ *
+ * SEMANTICS (Behavioral Semantics Correction V1, architecture audit
+ * "Confidence & Signal Quality"): every field this module derives is a
+ * DESCRIPTIVE RECENT-BEHAVIOR AGGREGATE, not a validated preference
+ * signal -- read each field's own doc comment below for the exact
+ * distinction (`BehavioralAffinity` measures observed completion
+ * frequency, never liking/psychological affinity; `preferredDaypart`
+ * measures the dominant logged daypart, never a proven or unconstrained
+ * time-of-day preference). Both are also OPPORTUNITY-BIASED: a family or
+ * daypart a user performs/logs often accumulates evidence faster than a
+ * rare one, and some activities are daypart-constrained by their own
+ * nature (e.g. a breakfast-labeled activity clusters in the morning for
+ * nearly everyone) -- neither effect is preference strength, and no
+ * derivation step here corrects for it. `logSource` is intentionally
+ * never read by this module (see resolveEligibleObservations below) --
+ * every eligible HabitLog counts identically regardless of whether the
+ * user chose it entirely themselves or accepted an Aura-originated
+ * suggestion verbatim, so these aggregates are source-agnostic as well as
+ * unvalidated against real outcomes (see the architecture audit's own
+ * "no product telemetry currently joins HabitLog to acceptance/override
+ * outcomes" finding). None of this makes the signals unsafe for their
+ * CURRENT consumers (see each consumer's own doc comment for why), but it
+ * does mean no consumer or future reader should describe a `STRONG`
+ * affinity, a `preferredDaypart`, or a `typicalDurationMinutes` as this
+ * user's stated or inferred preference -- only as what was recently,
+ * repeatedly logged.
  */
 import type { HabitLogRow } from './db';
 import { classifyDayPart, toInsightsObservation, InsightsDayPart } from './insightsTimezone';
@@ -126,11 +152,35 @@ const DURATION_CONSISTENCY_WINDOW_MINUTES = 30;
 // Public contract.
 // ============================================================
 
+/** Behavioral Semantics Correction V1 (architecture audit "Confidence &
+ * Signal Quality") -- despite the name, this tier is derived SOLELY from
+ * `evidenceCount` (see `affinityForEvidenceCount` below): `STRONG` means
+ * "5 or more eligible completions were logged for this family in the
+ * trailing BEHAVIORAL_AFFINITY_RECENCY_DAYS window," `MODERATE` means "3
+ * or 4," `NEUTRAL` means fewer. It reflects OBSERVED COMPLETION FREQUENCY,
+ * never an inferred psychological preference, liking, or intrinsic
+ * interest -- and it carries no consistency/stability structure of its
+ * own (unlike `preferredDaypart`'s 2/3-dominance gate or
+ * `typicalDurationMinutes`'s range gate). Because it is pure frequency,
+ * families with naturally higher execution opportunity (e.g. MEAL,
+ * WORKOUT) will reach `STRONG` faster than genuinely rare-but-important
+ * ones (e.g. JOURNEY_START, NEW_BEGINNING) independent of how strongly
+ * the user actually prefers either -- `STRONG` tiers must never be
+ * compared across families as if they represented equivalent preference
+ * strength. */
 export type BehavioralAffinity = 'STRONG' | 'MODERATE' | 'NEUTRAL';
 
 /** Deliberately minimal (brief: PRIVACY CONTRACT) -- no activity titles,
  * no individual timestamps, no raw log/Plan ids, no notes, no raw event
  * arrays. Aggregate facts only.
+ *
+ * `affinity` -- see `BehavioralAffinity`'s own doc comment for exactly
+ * what this tier does and does not represent (recent frequency, not
+ * preference).
+ *
+ * `preferredDaypart` -- see `derivePreferredDaypart`'s own doc comment
+ * for its exact semantics (the dominant logged daypart, not a proven
+ * time-of-day preference).
  *
  * `typicalDurationMinutes` here is a FAMILY-LEVEL aggregate, not an
  * activity-specific one -- several families contain multiple activities
@@ -236,6 +286,21 @@ interface EligibleObservation {
  * resolves to a real catalog entry, is excluded -- never guessed from
  * activityTitle/Habit.category/free text, matching
  * insightsAuraFit.ts's evaluateHabitLogAuraFit() precedent exactly.
+ *
+ * SOURCE-AGNOSTIC BY DESIGN (Behavioral Semantics Correction V1): `log.logSource`
+ * (`'MANUAL' | 'AURA_PLANNED' | 'AURA_DO_NOW' | 'OVERRIDE_CAUTION'`) is
+ * intentionally never read here -- every eligible completion counts
+ * identically in V1/V2 regardless of how it originated. This is why the
+ * signals this module derives are descriptive aggregates of what was
+ * logged, not a measure of how independently or deliberately each entry
+ * was chosen (see the module's own SEMANTICS doc comment above).
+ * `OVERRIDE_CAUTION` specifically is not a distinct higher-intent user
+ * action -- apps/web/app/page.tsx's own handleLogActivity retroactively
+ * relabels an ordinary `'MANUAL'` log as `OVERRIDE_CAUTION` whenever it
+ * happens to fall inside an inauspicious Muhurta window with non-LOW
+ * significance; the user never sees or confirms an explicit
+ * "continue despite caution" action tied to that label, so it must not be
+ * read as stronger evidence of intent than any other MANUAL entry.
  */
 function resolveEligibleObservations(habitLogs: readonly HabitLogRow[]): EligibleObservation[] {
   const eligible: EligibleObservation[] = [];
@@ -259,6 +324,19 @@ function affinityForEvidenceCount(count: number): BehavioralAffinity {
  * family has enough evidence AND one daypart is not merely the plurality
  * but at least 2/3 of observations. A tie at the maximum observed count
  * is always ambiguous, regardless of which daypart the tie involves.
+ *
+ * SEMANTICS (Behavioral Semantics Correction V1): despite the field name
+ * `preferredDaypart`, this is the DOMINANT LOGGED DAYPART among recent
+ * eligible observations -- the daypart this family was most often
+ * completed/logged in, not a proven or unconstrained statement of when
+ * the user prefers it. Some activities are structurally associated with a
+ * time of day regardless of who is doing them (a breakfast-labeled
+ * activity clusters in the morning for nearly every user) -- for those,
+ * the 2/3-dominance gate below can be satisfied by the activity's own
+ * nature rather than by anything specific to this user, and this
+ * derivation has no way to distinguish the two cases. Callers should
+ * treat this field as "commonly logged at this time," not as a validated
+ * preference claim.
  */
 function derivePreferredDaypart(observations: readonly EligibleObservation[], timezone: string): InsightsDayPart | undefined {
   if (observations.length < MODERATE_MIN_EVIDENCE) return undefined;
