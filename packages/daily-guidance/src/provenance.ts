@@ -15,6 +15,13 @@
  *   the contract SHAPE itself changing. See README.md's "Two version
  *   constants" section.
  *
+ * Behavioral Integration V1 bumped SELECTION_POLICY to V2 (ordering.ts's
+ * own tuple gained a new key, behavioral affinity tier) while
+ * ENGINE_VERSION stays V1 -- the public DailyGuidanceContext/
+ * DailyGuidanceRecommendation contract shape is byte-for-byte unchanged
+ * (behavioral affinity is an input-only ordering signal, never a new
+ * output field; see types.ts's own DailyGuidanceInput doc comment).
+ *
  * Every rule id below is this engine's OWN synthesis fact (a selection
  * decision) -- never a traditional astrology calculation, never a Muhurta/
  * Aura Fit calculation, and never copied verbatim from an upstream
@@ -24,7 +31,7 @@
  * these rule ids exist to keep visible.
  */
 export const DAILY_GUIDANCE_ENGINE_VERSION = 'DAILY_GUIDANCE_V1' as const;
-export const DAILY_GUIDANCE_SELECTION_POLICY_VERSION = 'DAILY_GUIDANCE_SELECTION_POLICY_V1' as const;
+export const DAILY_GUIDANCE_SELECTION_POLICY_VERSION = 'DAILY_GUIDANCE_SELECTION_POLICY_V2' as const;
 
 /** One recommendation's own selection-rule fact (which stage selected it, and the tuple values that stage compared). */
 export const DAILY_GUIDANCE_SELECTION_V1 = 'DAILY_GUIDANCE_SELECTION_V1';

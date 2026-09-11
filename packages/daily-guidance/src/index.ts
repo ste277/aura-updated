@@ -21,7 +21,7 @@ export { assertValidDailyGuidanceInput } from './validation';
 
 export { DAILY_GUIDANCE_ENGINE_VERSION, DAILY_GUIDANCE_SELECTION_POLICY_VERSION, DAILY_GUIDANCE_SELECTION_V1, DAILY_GUIDANCE_SUMMARY_V1 } from './provenance';
 
-export { CANONICAL_ACTIVITY_FAMILIES, CANONICAL_ACTIVITY_FAMILY_COUNT, RELEVANCE_TIER_ORDER, TIMING_LABEL_TIER_ORDER, DEFAULT_LIMIT } from './constants';
+export { CANONICAL_ACTIVITY_FAMILIES, CANONICAL_ACTIVITY_FAMILY_COUNT, RELEVANCE_TIER_ORDER, TIMING_LABEL_TIER_ORDER, BEHAVIORAL_AFFINITY_TIER_ORDER, DEFAULT_LIMIT } from './constants';
 
-export type { DailyGuidanceInput, DailyGuidanceCandidate } from './types';
+export type { DailyGuidanceInput, DailyGuidanceCandidate, BehavioralAffinityTier } from './types';
 export { DailyGuidanceValidationError } from './types';
