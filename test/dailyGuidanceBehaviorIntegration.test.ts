@@ -95,7 +95,11 @@ function buildRanking(family: string, windows: RankedTimingWindow[]): WindowRank
 function buildProfile(daypartByFamily: Record<string, string | undefined>): BehavioralProfileContext {
   return {
     engineVersion: 'BEHAVIORAL_AFFINITY_V1',
-    policyVersion: 'BEHAVIORAL_AFFINITY_POLICY_V1',
+    // Activity-Level Typical Duration Foundation V1 bumped this to V2 (a
+    // new, unrelated additive field/policy) -- no Preferred Daypart
+    // semantics changed, so this fixture's own literal is updated purely
+    // to keep compiling, never a test-behavior change.
+    policyVersion: 'BEHAVIORAL_AFFINITY_POLICY_V2',
     evaluationTime: '2026-09-09T12:00:00.000Z',
     activities: Object.entries(daypartByFamily).map(([activityFamily, preferredDaypart]) => ({
       activityFamily: activityFamily as BehavioralProfileContext['activities'][number]['activityFamily'],
@@ -103,6 +107,10 @@ function buildProfile(daypartByFamily: Record<string, string | undefined>): Beha
       evidenceCount: 5,
       preferredDaypart: preferredDaypart as BehavioralProfileContext['activities'][number]['preferredDaypart'],
     })),
+    // Activity-Level Typical Duration Foundation V1 -- this file's own
+    // tests exercise preferredDaypart only, never duration; an empty array
+    // is the correct, inert fixture value (no activity-level signal).
+    activityDurations: [],
   };
 }
 

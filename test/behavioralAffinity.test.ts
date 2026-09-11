@@ -20,6 +20,7 @@ import {
   BEHAVIORAL_AFFINITY_POLICY_VERSION,
   BEHAVIORAL_AFFINITY_RECENCY_DAYS,
   BehavioralActivityAffinity,
+  BehavioralActivityDuration,
 } from '../apps/web/lib/behavioralAffinity';
 import { CANONICAL_ACTIVITY_FAMILIES } from '../packages/daily-personal-fit/src/constants';
 
@@ -54,13 +55,20 @@ function findFamily(activities: BehavioralActivityAffinity[], family: string): B
   return entry;
 }
 
+/** Activity-Level Typical Duration Foundation V1 -- `activityDurations` is
+ * sparse (unlike `activities`), so "absent" is a legitimate outcome, not a
+ * contract violation -- returns `undefined` rather than throwing. */
+function findActivityDuration(activityDurations: BehavioralActivityDuration[], activityId: string): BehavioralActivityDuration | undefined {
+  return activityDurations.find((a) => a.activityId === activityId);
+}
+
 // ============================================================
 // Version stamps.
 // ============================================================
 {
   const profile = deriveBehavioralProfile([], TZ, NOW);
   check('engineVersion is BEHAVIORAL_AFFINITY_V1', profile.engineVersion === 'BEHAVIORAL_AFFINITY_V1' && profile.engineVersion === BEHAVIORAL_AFFINITY_ENGINE_VERSION);
-  check('policyVersion is BEHAVIORAL_AFFINITY_POLICY_V1', profile.policyVersion === 'BEHAVIORAL_AFFINITY_POLICY_V1' && profile.policyVersion === BEHAVIORAL_AFFINITY_POLICY_VERSION);
+  check('policyVersion is BEHAVIORAL_AFFINITY_POLICY_V2 (Activity-Level Typical Duration Foundation V1)', profile.policyVersion === 'BEHAVIORAL_AFFINITY_POLICY_V2' && profile.policyVersion === BEHAVIORAL_AFFINITY_POLICY_VERSION);
   check('evaluationTime is the caller-supplied now, ISO-formatted', profile.evaluationTime === NOW.toISOString());
   check('BEHAVIORAL_AFFINITY_RECENCY_DAYS is a positive V1 policy placeholder (60)', BEHAVIORAL_AFFINITY_RECENCY_DAYS === 60);
 }
@@ -76,6 +84,7 @@ function findFamily(activities: BehavioralActivityAffinity[], family: string): B
   check('cold start: every family is NEUTRAL with evidenceCount 0', profile.activities.every((a) => a.affinity === 'NEUTRAL' && a.evidenceCount === 0));
   check('cold start: no family carries a preferredDaypart', profile.activities.every((a) => a.preferredDaypart === undefined));
   check('cold start: no family carries a typicalDurationMinutes', profile.activities.every((a) => a.typicalDurationMinutes === undefined));
+  check('cold start: activityDurations is an empty array, never undefined/missing (Activity-Level Typical Duration Foundation V1)', Array.isArray(profile.activityDurations) && profile.activityDurations.length === 0);
 }
 
 // ============================================================
@@ -309,6 +318,177 @@ function findFamily(activities: BehavioralActivityAffinity[], family: string): B
   ];
   const thirtyOneResult = findFamily(deriveBehavioralProfile(thirtyOneSpread, TZ, NOW).activities, 'WORKOUT');
   check('DURATION CONSISTENCY BOUNDARY: max-min exactly 31 -> undefined (just over the inclusive floor)', thirtyOneResult.typicalDurationMinutes === undefined);
+}
+
+// ============================================================
+// ACTIVITY-LEVEL TYPICAL DURATION (Activity-Level Typical Duration
+// Foundation V1) -- the SAME duration policy (valid-duration filter,
+// 3-observation floor, <=30-minute consistency window, median+round)
+// applied per canonical activityId instead of per family, resolving the
+// exact granularity gap that blocked using the family-level aggregate as
+// a per-activity default (architecture audit, Typical Duration
+// Personalization V1: BLOCKED).
+// ============================================================
+{
+  // MINIMUM EVIDENCE -- 2 valid durations for the same activityId -> no
+  // entry; 3 valid consistent durations -> exactly one entry.
+  const twoOnly = [makeLog({ activityId: 'coffee-tea', durationMinutes: 30 }), makeLog({ activityId: 'coffee-tea', durationMinutes: 30 })];
+  const twoOnlyProfile = deriveBehavioralProfile(twoOnly, TZ, NOW);
+  check('ACTIVITY DURATION MIN EVIDENCE: 2 observations (below the floor) -> no activityDurations entry', findActivityDuration(twoOnlyProfile.activityDurations, 'coffee-tea') === undefined);
+
+  const threeConsistentActivity = [
+    makeLog({ activityId: 'coffee-tea', durationMinutes: 30 }),
+    makeLog({ activityId: 'coffee-tea', durationMinutes: 30 }),
+    makeLog({ activityId: 'coffee-tea', durationMinutes: 45 }),
+  ];
+  const threeConsistentProfile = deriveBehavioralProfile(threeConsistentActivity, TZ, NOW);
+  check('ACTIVITY DURATION MIN EVIDENCE: 3 valid consistent durations -> exactly one activityDurations entry', threeConsistentProfile.activityDurations.length === 1 && findActivityDuration(threeConsistentProfile.activityDurations, 'coffee-tea')?.typicalDurationMinutes === 30);
+
+  // ODD MEDIAN
+  const oddMedian = [
+    makeLog({ activityId: 'coffee-tea', durationMinutes: 30 }),
+    makeLog({ activityId: 'coffee-tea', durationMinutes: 45 }),
+    makeLog({ activityId: 'coffee-tea', durationMinutes: 60 }),
+  ];
+  check('ACTIVITY DURATION ODD MEDIAN: 30/45/60 -> 45', findActivityDuration(deriveBehavioralProfile(oddMedian, TZ, NOW).activityDurations, 'coffee-tea')?.typicalDurationMinutes === 45);
+
+  // EVEN MEDIAN -- (45+60)/2 = 52.5 -> Math.round -> 53.
+  const evenMedian = [
+    makeLog({ activityId: 'coffee-tea', durationMinutes: 30 }),
+    makeLog({ activityId: 'coffee-tea', durationMinutes: 45 }),
+    makeLog({ activityId: 'coffee-tea', durationMinutes: 60 }),
+    makeLog({ activityId: 'coffee-tea', durationMinutes: 60 }),
+  ];
+  check('ACTIVITY DURATION EVEN MEDIAN: 30/45/60/60 -> (45+60)/2 = 52.5 -> Math.round -> 53', findActivityDuration(deriveBehavioralProfile(evenMedian, TZ, NOW).activityDurations, 'coffee-tea')?.typicalDurationMinutes === 53);
+
+  // CONSISTENCY BOUNDARY -- range exactly 30 -> signal; range 31 -> no signal.
+  const rangeThirty = [
+    makeLog({ activityId: 'coffee-tea', durationMinutes: 30 }),
+    makeLog({ activityId: 'coffee-tea', durationMinutes: 45 }),
+    makeLog({ activityId: 'coffee-tea', durationMinutes: 60 }),
+  ];
+  check('ACTIVITY DURATION CONSISTENCY BOUNDARY: range exactly 30 -> signal (inclusive)', findActivityDuration(deriveBehavioralProfile(rangeThirty, TZ, NOW).activityDurations, 'coffee-tea')?.typicalDurationMinutes === 45);
+
+  const rangeThirtyOne = [
+    makeLog({ activityId: 'coffee-tea', durationMinutes: 30 }),
+    makeLog({ activityId: 'coffee-tea', durationMinutes: 45 }),
+    makeLog({ activityId: 'coffee-tea', durationMinutes: 61 }),
+  ];
+  check('ACTIVITY DURATION CONSISTENCY BOUNDARY: range 31 -> no signal', findActivityDuration(deriveBehavioralProfile(rangeThirtyOne, TZ, NOW).activityDurations, 'coffee-tea') === undefined);
+
+  // FAMILY COLLISION (merge-critical) -- coffee-tea and birthday-party are
+  // BOTH canonical SOCIAL-family activities. A family-level median blending
+  // both would be meaningless (30 vs 150) -- this is the exact scenario
+  // that BLOCKED Typical Duration Personalization V1. Activity-level
+  // grouping must resolve them into two fully independent signals, AND
+  // this same fixture proves the family-level aggregate correctly stays
+  // undefined (its own combined range far exceeds 30), while BOTH
+  // activity-level values are populated -- the direct proof that
+  // activity-level derivation is independent of, not merely copied from,
+  // the family-level aggregate.
+  const familyCollisionLogs = [
+    makeLog({ activityId: 'coffee-tea', durationMinutes: 30 }),
+    makeLog({ activityId: 'coffee-tea', durationMinutes: 30 }),
+    makeLog({ activityId: 'coffee-tea', durationMinutes: 45 }),
+    makeLog({ activityId: 'birthday-party', durationMinutes: 120 }),
+    makeLog({ activityId: 'birthday-party', durationMinutes: 150 }),
+    makeLog({ activityId: 'birthday-party', durationMinutes: 150 }),
+  ];
+  const familyCollisionProfile = deriveBehavioralProfile(familyCollisionLogs, TZ, NOW);
+  const coffeeTeaDuration = findActivityDuration(familyCollisionProfile.activityDurations, 'coffee-tea');
+  const birthdayPartyDuration = findActivityDuration(familyCollisionProfile.activityDurations, 'birthday-party');
+  check('FAMILY COLLISION: coffee-tea (SOCIAL) resolves its own independent typical duration (30)', coffeeTeaDuration?.typicalDurationMinutes === 30);
+  check('FAMILY COLLISION: birthday-party (SAME SOCIAL family) resolves its own independent typical duration (150), never blended with coffee-tea', birthdayPartyDuration?.typicalDurationMinutes === 150);
+  check('FAMILY COLLISION: both activity-level signals are present simultaneously in one profile', familyCollisionProfile.activityDurations.length === 2);
+  check(
+    'FAMILY VS ACTIVITY INDEPENDENCE: the family-level SOCIAL aggregate stays undefined (combined range 30-150 far exceeds 30) even though BOTH activity-level signals are populated -- proves activity-level derivation is independent of, not copied from, the family-level aggregate',
+    findFamily(familyCollisionProfile.activities, 'SOCIAL').typicalDurationMinutes === undefined
+  );
+
+  // SPARSE OUTPUT -- a qualifying activity, a too-sparse activity, and an
+  // inconsistent activity in the same profile: only the qualifying one appears.
+  const sparseLogs = [
+    makeLog({ activityId: 'coffee-tea', durationMinutes: 30 }),
+    makeLog({ activityId: 'coffee-tea', durationMinutes: 30 }),
+    makeLog({ activityId: 'coffee-tea', durationMinutes: 45 }),
+    makeLog({ activityId: 'deep-work', durationMinutes: 60 }), // only 1 observation -- below floor
+    makeLog({ activityId: 'workout', durationMinutes: 20 }),
+    makeLog({ activityId: 'workout', durationMinutes: 60 }),
+    makeLog({ activityId: 'workout', durationMinutes: 100 }), // inconsistent -- range 80
+  ];
+  const sparseProfile = deriveBehavioralProfile(sparseLogs, TZ, NOW);
+  check('SPARSE OUTPUT: only the one qualifying activityId appears in activityDurations', sparseProfile.activityDurations.length === 1 && sparseProfile.activityDurations[0].activityId === 'coffee-tea');
+
+  // CROSS-FAMILY INDEPENDENCE -- workout (WORKOUT family) and coffee-tea
+  // (SOCIAL family) each resolve independently regardless of family membership.
+  const crossFamilyLogs = [
+    makeLog({ activityId: 'workout', durationMinutes: 30 }),
+    makeLog({ activityId: 'workout', durationMinutes: 40 }),
+    makeLog({ activityId: 'workout', durationMinutes: 50 }),
+    makeLog({ activityId: 'coffee-tea', durationMinutes: 30 }),
+    makeLog({ activityId: 'coffee-tea', durationMinutes: 30 }),
+    makeLog({ activityId: 'coffee-tea', durationMinutes: 30 }),
+  ];
+  const crossFamilyProfile = deriveBehavioralProfile(crossFamilyLogs, TZ, NOW);
+  check('CROSS-FAMILY INDEPENDENCE: workout (WORKOUT family) resolves its own typical duration (40) unaffected by coffee-tea (SOCIAL family)', findActivityDuration(crossFamilyProfile.activityDurations, 'workout')?.typicalDurationMinutes === 40);
+  check('CROSS-FAMILY INDEPENDENCE: coffee-tea resolves its own typical duration (30) unaffected by workout', findActivityDuration(crossFamilyProfile.activityDurations, 'coffee-tea')?.typicalDurationMinutes === 30);
+
+  // UNKNOWN/RETIRED ACTIVITY ID -- excluded silently, never crashes, never
+  // affects other qualifying activities' own derivation.
+  const unknownIdLogs = [
+    makeLog({ activityId: 'not-a-real-catalog-activity-id', durationMinutes: 30 }),
+    makeLog({ activityId: 'not-a-real-catalog-activity-id', durationMinutes: 30 }),
+    makeLog({ activityId: 'not-a-real-catalog-activity-id', durationMinutes: 30 }),
+    makeLog({ activityId: 'coffee-tea', durationMinutes: 30 }),
+    makeLog({ activityId: 'coffee-tea', durationMinutes: 30 }),
+    makeLog({ activityId: 'coffee-tea', durationMinutes: 30 }),
+  ];
+  const unknownIdProfile = deriveBehavioralProfile(unknownIdLogs, TZ, NOW);
+  check('UNKNOWN ID: an unresolvable activityId never appears in activityDurations, never crashes derivation', findActivityDuration(unknownIdProfile.activityDurations, 'not-a-real-catalog-activity-id') === undefined);
+  check('UNKNOWN ID: a genuinely canonical activity in the SAME batch still derives normally', findActivityDuration(unknownIdProfile.activityDurations, 'coffee-tea')?.typicalDurationMinutes === 30);
+
+  // LOG SOURCE INDEPENDENCE -- identical activityId/durations, varying
+  // logSource, must produce the identical typical duration (no source
+  // weighting, matching #110's own established family-level policy).
+  const sourceIndependenceA = [
+    makeLog({ activityId: 'coffee-tea', durationMinutes: 30, logSource: 'MANUAL' }),
+    makeLog({ activityId: 'coffee-tea', durationMinutes: 45, logSource: 'AURA_PLANNED' }),
+    makeLog({ activityId: 'coffee-tea', durationMinutes: 60, logSource: 'AURA_DO_NOW' }),
+  ];
+  const sourceIndependenceB = [
+    makeLog({ activityId: 'coffee-tea', durationMinutes: 60, logSource: 'OVERRIDE_CAUTION' }),
+    makeLog({ activityId: 'coffee-tea', durationMinutes: 30, logSource: 'MANUAL' }),
+    makeLog({ activityId: 'coffee-tea', durationMinutes: 45, logSource: 'AURA_PLANNED' }),
+  ];
+  const durationA = findActivityDuration(deriveBehavioralProfile(sourceIndependenceA, TZ, NOW).activityDurations, 'coffee-tea')?.typicalDurationMinutes;
+  const durationB = findActivityDuration(deriveBehavioralProfile(sourceIndependenceB, TZ, NOW).activityDurations, 'coffee-tea')?.typicalDurationMinutes;
+  check('LOG SOURCE INDEPENDENCE: identical durations under different logSource values/order produce the identical typical duration', durationA === 45 && durationA === durationB);
+
+  // RECENCY -- reuses the exact same 60-day boundary already proven for
+  // family-level duration; no activity-duration-specific horizon exists.
+  const activityInsideWindow = new Date(NOW.getTime() - (BEHAVIORAL_AFFINITY_RECENCY_DAYS - 1) * 24 * 60 * 60 * 1000);
+  const activityJustOutsideWindow = new Date(NOW.getTime() - (BEHAVIORAL_AFFINITY_RECENCY_DAYS * 24 * 60 * 60 * 1000 + 60 * 1000));
+  const recencyLogs = [
+    makeLog({ activityId: 'coffee-tea', durationMinutes: 30, logTimestamp: activityInsideWindow }),
+    makeLog({ activityId: 'coffee-tea', durationMinutes: 30, logTimestamp: activityInsideWindow }),
+    makeLog({ activityId: 'coffee-tea', durationMinutes: 30, logTimestamp: activityInsideWindow }),
+    makeLog({ activityId: 'coffee-tea', durationMinutes: 999, logTimestamp: activityJustOutsideWindow }), // outside window -- must not corrupt the in-window signal
+  ];
+  check('ACTIVITY DURATION RECENCY: an observation just outside the 60-day window is excluded, never corrupting the in-window signal', findActivityDuration(deriveBehavioralProfile(recencyLogs, TZ, NOW).activityDurations, 'coffee-tea')?.typicalDurationMinutes === 30);
+
+  // BACKWARD COMPATIBILITY -- activity-level derivation must not alter any
+  // existing family-level field's own value. Reuses threeConsistentActivity
+  // (3 coffee-tea logs, 30/30/45 -- SOCIAL family) from MIN EVIDENCE above.
+  const backwardCompatProfile = deriveBehavioralProfile(threeConsistentActivity, TZ, NOW);
+  const backwardCompatSocial = findFamily(backwardCompatProfile.activities, 'SOCIAL');
+  check('BACKWARD COMPATIBILITY: adding activityDurations does not alter the existing family-level typicalDurationMinutes value (still 30)', backwardCompatSocial.typicalDurationMinutes === 30);
+  check('BACKWARD COMPATIBILITY: existing family-level evidenceCount/affinity are unaffected', backwardCompatSocial.evidenceCount === 3 && backwardCompatSocial.affinity === 'MODERATE');
+
+  // DETERMINISM -- activityDurations must not depend on HabitLog input order.
+  const orderA = familyCollisionLogs;
+  const orderB = [familyCollisionLogs[3], familyCollisionLogs[1], familyCollisionLogs[5], familyCollisionLogs[0], familyCollisionLogs[4], familyCollisionLogs[2]];
+  check('ACTIVITY DURATION DETERMINISM: shuffled input order produces byte-identical activityDurations', JSON.stringify(deriveBehavioralProfile(orderA, TZ, NOW).activityDurations) === JSON.stringify(deriveBehavioralProfile(orderB, TZ, NOW).activityDurations));
+  check('ACTIVITY DURATION ORDERING: output is sorted by activityId ascending (birthday-party before coffee-tea)', familyCollisionProfile.activityDurations[0].activityId === 'birthday-party' && familyCollisionProfile.activityDurations[1].activityId === 'coffee-tea');
 }
 
 // ============================================================
