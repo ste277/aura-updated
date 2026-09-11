@@ -17,6 +17,8 @@ import {
   resolvePrioritizedIntentionGroups,
   PEOPLE_GROUP_RELATIONSHIP_TYPES,
   IntentionalDaySuggestion,
+  IntentionCandidate,
+  DayProfile,
   UserPriorityGroup,
   AgendaOpening,
   resolvePeopleContextTimePreference,
@@ -71,9 +73,76 @@ const MAX_DISPLAY_CANDIDATES = 3;
  * sharedScore -- see the completion report). */
 const MIN_DISPLAY_CANDIDATE_SPACING_MINUTES = 45;
 
-function durationMinutesFor(activityId: string): number {
+/**
+ * Behavior-aware Day Builder Duration V1 -- `behavioralDurationByActivityId`
+ * is OPTIONAL (every pre-existing caller omits it, so this is a
+ * backward-compatible additive parameter, not a breaking signature
+ * change) and, when supplied, wins over the static catalog chain below --
+ * see this feature's own architecture audit for the full precedence
+ * rationale (activity-level behavioral duration means "recently typical
+ * LOGGED duration for this specific activity," never "preferred" or
+ * "optimal"). Never consults family-level `typicalDurationMinutes`
+ * (merge-critical -- see BehavioralActivityAffinity's own doc comment for
+ * why that would be unsafe) and never overrides an explicit duration --
+ * there is no explicit-duration input on this path today, so this
+ * precedence is purely forward-proofing (see the architecture audit's own
+ * "explicit user duration > ... > behavioral activity duration > ..."
+ * chain).
+ */
+export function durationMinutesFor(activityId: string, behavioralDurationByActivityId?: Readonly<Record<string, number>>): number {
   const definition = getActivityDefinition(activityId);
-  return definition?.experience.defaultDurationMinutes ?? definition?.experience.suggestedDurations?.[0] ?? 45;
+  return behavioralDurationByActivityId?.[activityId] ?? definition?.experience.defaultDurationMinutes ?? definition?.experience.suggestedDurations?.[0] ?? 45;
+}
+
+/**
+ * Behavior-aware Day Builder Duration V1 -- the EXACT SAME brief-section-
+ * 6/13/27/33/34 gates and intention-selection logic
+ * buildIntentionalDaySuggestions itself already ran inline before its own
+ * first DB read, extracted so a caller can cheaply know "is there any raw
+ * Day Builder intent at all today" BEFORE fetching a behavioral profile or
+ * running any timing search -- the architecture audit's own resolution to
+ * the "can NO_ACTIVITY_INTENT stay zero-behavioral-query" question. Pure,
+ * synchronous, no DB beyond the `agenda` the caller already fetched (the
+ * SAME agenda `buildIntentionalDaySuggestions` itself needs) -- calling
+ * this before deciding whether to fetch behavior adds no new query.
+ *
+ * Returns `dayProfile` alongside `intentionCandidates` -- `undefined` in
+ * the disabled/NIGHT early-exit cases (preserving the original "nothing
+ * computed at all" short-circuit exactly, brief section 6), populated
+ * otherwise -- so buildIntentionalDaySuggestions (which also needs
+ * `dayProfile.openings` later, but only ever reaches that point when
+ * `intentionCandidates.length > 0`) never has to recompute it a second
+ * time when it calls this function itself.
+ */
+export function discoverDayBuilderIntentionCandidates(user: User, agenda: DailyAgenda, minuteOfDay: number): { dayProfile?: DayProfile; intentionCandidates: IntentionCandidate[] } {
+  // Brief section 6 -- a muted/disabled user gets nothing computed at all,
+  // not just nothing rendered (never spend the search budget on a
+  // suggestion the user has already said they don't want).
+  if (!user.dayBuilderEnabled) return { intentionCandidates: [] };
+  // Brief section 27/33/34 -- NIGHT defers entirely to Daily Reflection /
+  // Tomorrow Preview, which already own "what's next" at that phase. Not
+  // just hidden in the UI: nothing is computed, so there's no wasted search.
+  if (resolveDailyStoryPhase(minuteOfDay) === 'NIGHT') return { intentionCandidates: [] };
+
+  const dayProfile = buildDayProfile(agenda, minuteOfDay);
+  const mutedGroups = new Set(user.dayBuilderMutedGroups as DailyIntentionGroupId[]);
+  // Personalization Foundation V1 (brief section 3/6) -- ordering only,
+  // computed BEFORE and entirely separately from mutedGroups above;
+  // selectIntentionCandidates() applies mutedGroups' exclusion identically
+  // regardless of priority, so a muted group can never be "un-muted" by
+  // also being a priority (brief section 6's own explicit ordering:
+  // dismissed -> muted -> priorities -> diversity -> timing engine).
+  const prioritizedGroupIds = resolvePrioritizedIntentionGroups(user.dayBuilderPriorities as UserPriorityGroup[]);
+  // Personalized Daily Story V2 (brief section 6) -- "diversity, not
+  // exclusion": a prioritized group already COVERED today (real agenda
+  // content, not inferred) is deprioritized in ordering, never excluded or
+  // muted. Cheap, pure, and computed from the SAME agenda already in hand
+  // -- not a second read, not a duplicated derivation (buildDailyStory's
+  // own personalization uses this identical function via myDayOrchestrator.ts).
+  const coverage = buildDailyPriorityCoverage(agenda, user.dayBuilderPriorities as UserPriorityGroup[]);
+  const coveredGroupIds = coveredIntentionGroupIds(coverage);
+  const intentionCandidates = selectIntentionCandidates(dayProfile, mutedGroups, MAX_CANDIDATE_ATTEMPTS, prioritizedGroupIds, coveredGroupIds);
+  return { dayProfile, intentionCandidates };
 }
 
 /** Brief section 24/25 -- from an already-ranked candidate list, keep up to
@@ -112,39 +181,24 @@ export async function buildIntentionalDaySuggestions(input: {
   agenda: DailyAgenda;
   minuteOfDay: number;
   now: Date;
+  /** Behavior-aware Day Builder Duration V1 -- OPTIONAL, additive (every
+   * pre-existing caller omits it). Sourced from
+   * activityDurationByActivityId(profile) (behavioralAffinity.ts), fetched
+   * by the CALLER -- this function never fetches behavior itself, see
+   * module doc comment. */
+  behavioralDurationByActivityId?: Readonly<Record<string, number>>;
 }): Promise<IntentionalDaySuggestion[]> {
-  const { user, agenda, minuteOfDay, now } = input;
+  const { user, agenda, minuteOfDay, now, behavioralDurationByActivityId } = input;
 
-  // Brief section 6 -- a muted/disabled user gets nothing computed at all,
-  // not just nothing rendered (never spend the search budget on a
-  // suggestion the user has already said they don't want).
-  if (!user.dayBuilderEnabled) return [];
-  // Brief section 27/33/34 -- NIGHT defers entirely to Daily Reflection /
-  // Tomorrow Preview, which already own "what's next" at that phase. Not
-  // just hidden in the UI: nothing is computed, so there's no wasted search.
-  if (resolveDailyStoryPhase(minuteOfDay) === 'NIGHT') return [];
-
-  const dayProfile = buildDayProfile(agenda, minuteOfDay);
-  const mutedGroups = new Set(user.dayBuilderMutedGroups as DailyIntentionGroupId[]);
-  // Personalization Foundation V1 (brief section 3/6) -- ordering only,
-  // computed BEFORE and entirely separately from mutedGroups above;
-  // selectIntentionCandidates() applies mutedGroups' exclusion identically
-  // regardless of priority, so a muted group can never be "un-muted" by
-  // also being a priority (brief section 6's own explicit ordering:
-  // dismissed -> muted -> priorities -> diversity -> timing engine).
-  const prioritizedGroupIds = resolvePrioritizedIntentionGroups(user.dayBuilderPriorities as UserPriorityGroup[]);
-  // Personalized Daily Story V2 (brief section 6) -- "diversity, not
-  // exclusion": a prioritized group already COVERED today (real agenda
-  // content, not inferred) is deprioritized in ordering, never excluded or
-  // muted. Cheap, pure, and computed from the SAME agenda already in hand
-  // -- not a second read, not a duplicated derivation (buildDailyStory's
-  // own personalization uses this identical function via myDayOrchestrator.ts).
-  const coverage = buildDailyPriorityCoverage(agenda, user.dayBuilderPriorities as UserPriorityGroup[]);
-  const coveredGroupIds = coveredIntentionGroupIds(coverage);
-  const intentionCandidates = selectIntentionCandidates(dayProfile, mutedGroups, MAX_CANDIDATE_ATTEMPTS, prioritizedGroupIds, coveredGroupIds);
   // Brief section 13 -- zero is a valid, successful result. Skip every
-  // downstream read/search entirely rather than computing anything further.
-  if (intentionCandidates.length === 0) return [];
+  // downstream read/search entirely rather than computing anything
+  // further. Reuses discoverDayBuilderIntentionCandidates -- the EXACT
+  // SAME selection logic this function used to run inline -- so there is
+  // only ever one source of intention-selection truth, whether a caller
+  // pre-checked raw intent (Behavior-aware Day Builder Duration V1's own
+  // pre-FIND behavioral-fetch gate) or not.
+  const { dayProfile, intentionCandidates } = discoverDayBuilderIntentionCandidates(user, agenda, minuteOfDay);
+  if (intentionCandidates.length === 0 || !dayProfile) return [];
 
   const [savedPeople, dismissals] = await Promise.all([
     listSavedPeople(user.id),
@@ -173,7 +227,7 @@ export async function buildIntentionalDaySuggestions(input: {
   for (const candidate of intentionCandidates) {
     const activityId = candidate.activity.activityId;
     if (!activityId) continue;
-    const durationMinutes = durationMinutesFor(activityId);
+    const durationMinutes = durationMinutesFor(activityId, behavioralDurationByActivityId);
     // See resolvePeopleContextTimePreference's own doc comment
     // (dayBuilder.ts) -- the one activity (walk-together) whose evening-vs-
     // anytime distinction depends on which taxonomy group it was actually

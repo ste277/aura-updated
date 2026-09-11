@@ -23,13 +23,14 @@
  */
 import { listPlannedActivitiesForDay } from './db';
 import { localDayBoundsUTC, buildMyDay } from './myDayOrchestrator';
-import { buildIntentionalDaySuggestions } from './dayBuilderOrchestrator';
+import { buildIntentionalDaySuggestions, discoverDayBuilderIntentionCandidates } from './dayBuilderOrchestrator';
 import { resolveTzOffsetMinutes, getDatePartsInTimezone, getMinuteOfDayInTimezone } from './timezone';
 import { buildPersonalMuhurtaContextForUser } from './natalContext';
 import { getActivityProfileById } from '../../../packages/recommendation/src/personalizedTasks';
 import { familyForActivityProfile } from '../../../packages/recommendation/src/auraFitEngine';
 import { runTimingSearch } from '../../../packages/recommendation/src/timingSearch';
 import type { User, PlannedActivity } from './db';
+import type { DailyAgenda } from './dailyAgenda';
 import type { ConcreteGuidanceCandidate } from './dailyGuidanceTypes';
 
 /**
@@ -98,14 +99,49 @@ function isEligiblePlan(plan: PlannedActivity, now: Date): boolean {
 }
 
 /**
+ * Behavior-aware Day Builder Duration V1 -- the result of the cheap,
+ * agenda-only discovery phase: `agenda`/`minuteOfDay` are fetched/derived
+ * exactly once here and threaded through to `resolveDayBuilderCandidates`
+ * below (never re-fetched), and `hasIntent` is the caller's own signal for
+ * "should I fetch a behavioral profile before resolving this further" --
+ * the architecture audit's own resolution to the "can NO_ACTIVITY_INTENT
+ * stay zero-behavioral-query" question.
+ */
+export interface DayBuilderDiscovery {
+  agenda: DailyAgenda;
+  minuteOfDay: number;
+  hasIntent: boolean;
+}
+
+/**
+ * Day Builder's own cheap, agenda-only discovery phase (brief section
+ * 8/9's first half) -- fetches the SAME agenda `GET /api/my-day/suggestions`
+ * already fetches (reused, never a second read), then runs
+ * `discoverDayBuilderIntentionCandidates` (dayBuilderOrchestrator.ts) --
+ * pure, synchronous, no further DB, no timing search, no behavioral
+ * profile -- to determine whether ANY raw Day Builder intent exists today.
+ * Callers use `hasIntent` to decide whether fetching a behavioral profile
+ * (needed to resolve implicit Day Builder durations, Behavior-aware Day
+ * Builder Duration V1) is worthwhile BEFORE calling
+ * `resolveDayBuilderCandidates` -- never call that function needlessly
+ * when there is no raw intent to resolve.
+ */
+export async function discoverDayBuilderCandidates(user: User, now: Date): Promise<DayBuilderDiscovery> {
+  const { agenda } = await buildMyDay(user, undefined, now);
+  const minuteOfDay = getMinuteOfDayInTimezone(user.timezone, now);
+  const { intentionCandidates } = discoverDayBuilderIntentionCandidates(user, agenda, minuteOfDay);
+  return { agenda, minuteOfDay, hasIntent: intentionCandidates.length > 0 };
+}
+
+/**
  * Day Builder's own already-resolved intention suggestions (brief section
- * 8/9). Reuses `buildIntentionalDaySuggestions` wholesale -- the exact
- * same function `GET /api/my-day/suggestions` already calls -- rather
- * than re-deriving any Day Builder logic. Only `kind: 'SOLO'` suggestions
- * participate in V1: a `'SHARED'` suggestion's own `candidates` are
- * `EverydaySharedCandidate[]`, a structurally different shape (a second
- * person's own profile/consent semantics), explicitly out of scope for
- * this PR's own single-user Daily Guidance pipeline.
+ * 8/9's second half). Reuses `buildIntentionalDaySuggestions` wholesale --
+ * the exact same function `GET /api/my-day/suggestions` already calls --
+ * rather than re-deriving any Day Builder logic. Only `kind: 'SOLO'`
+ * suggestions participate in V1: a `'SHARED'` suggestion's own
+ * `candidates` are `EverydaySharedCandidate[]`, a structurally different
+ * shape (a second person's own profile/consent semantics), explicitly out
+ * of scope for this PR's own single-user Daily Guidance pipeline.
  *
  * TIMING REUSE DECISION (confirmed during implementation, matching brief
  * section 9/102): `IntentionalDayCandidateSolo.candidates` is already a
@@ -113,15 +149,21 @@ function isEligiblePlan(plan: PlannedActivity, now: Date): boolean {
  * VERBATIM here, never re-run. This was verified directly from
  * apps/web/lib/dayBuilder.ts's own `IntentionalDayCandidateSolo` type
  * before writing this function.
+ *
+ * `discovery` must be the SAME object `discoverDayBuilderCandidates`
+ * already returned for this exact request -- `agenda`/`minuteOfDay` are
+ * reused verbatim, never re-fetched/re-derived here (Behavior-aware Day
+ * Builder Duration V1: avoids a second `buildMyDay` DB read).
+ * `behavioralDurationByActivityId` is OPTIONAL and purely additive --
+ * omitting it reproduces this function's exact pre-existing behavior.
  */
-export async function collectDayBuilderCandidates(user: User, now: Date): Promise<ConcreteGuidanceCandidate[]> {
-  // Reuses buildMyDay() wholesale for the agenda -- the exact same call
-  // GET /api/my-day/suggestions itself makes -- rather than re-deriving
-  // its bounded Plan/Moment/HabitLog reads independently.
-  const { agenda } = await buildMyDay(user, undefined, now);
-  const minuteOfDay = getMinuteOfDayInTimezone(user.timezone, now);
-
-  const suggestions = await buildIntentionalDaySuggestions({ user, agenda, minuteOfDay, now });
+export async function resolveDayBuilderCandidates(
+  user: User,
+  now: Date,
+  discovery: Pick<DayBuilderDiscovery, 'agenda' | 'minuteOfDay'>,
+  behavioralDurationByActivityId?: Readonly<Record<string, number>>
+): Promise<ConcreteGuidanceCandidate[]> {
+  const suggestions = await buildIntentionalDaySuggestions({ user, agenda: discovery.agenda, minuteOfDay: discovery.minuteOfDay, now, behavioralDurationByActivityId });
 
   const candidates: ConcreteGuidanceCandidate[] = [];
   for (const suggestion of suggestions) {
@@ -140,6 +182,25 @@ export async function collectDayBuilderCandidates(user: User, now: Date): Promis
     });
   }
   return candidates;
+}
+
+/**
+ * Backward-compatible wrapper preserving the exact pre-Behavior-aware-Day-
+ * Builder-Duration-V1 signature/behavior of this module's own original
+ * `collectDayBuilderCandidates` -- discovers then resolves with no
+ * behavioral map (byte-identical to today's output), matching this
+ * repo's own established wrapper convention (see
+ * dailyGuidanceBehavior.ts's own `buildBehavioralAffinityByFamily`). Kept
+ * so existing call sites/tests written against this exact name (e.g.
+ * test/dailyGuidanceOrchestratorDb.test.ts) continue to work unmodified;
+ * `buildPersonalDailyGuidance` itself now calls `discoverDayBuilderCandidates`
+ * + `resolveDayBuilderCandidates` directly so it can gate the behavioral
+ * profile fetch on real raw intent first.
+ */
+export async function collectDayBuilderCandidates(user: User, now: Date): Promise<ConcreteGuidanceCandidate[]> {
+  const discovery = await discoverDayBuilderCandidates(user, now);
+  if (!discovery.hasIntent) return [];
+  return resolveDayBuilderCandidates(user, now, discovery);
 }
 
 /**
