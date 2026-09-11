@@ -84,8 +84,9 @@ the first non-zero comparison:
 2. timing label tier          (EXCELLENT=0, VERY_GOOD=1, GOOD=2, USABLE=3, CAUTION=4)
 3. timing score, descending   (verbatim upstream 0-10 presentation score)
 4. behavioral affinity tier   (STRONG=0, MODERATE=1, NEUTRAL=2 -- Behavioral Integration V1)
-5. start time, ascending
-6. canonical family order     (final deterministic tie-break)
+5. preferred-daypart match    (true beats false -- Preferred Daypart Personalization V1)
+6. start time, ascending
+7. canonical family order     (final deterministic tie-break)
 ```
 
 `RELEVANCE_TIER_ORDER`/`TIMING_LABEL_TIER_ORDER`/`BEHAVIORAL_AFFINITY_TIER_ORDER`
@@ -96,8 +97,9 @@ patterns: `guidanceScore`, `personalScore`, `combinedScore`,
 `BASELINE = 40` style mapping. Every axis stays first-class and
 independently explainable in the output (`personalRelevance` and
 `timing.label`/`timing.score` are always present side by side on every
-recommendation; behavioral affinity is input-only, never a new output
-field — see "Behavioral affinity" below).
+recommendation; behavioral affinity and preferred-daypart match are both
+input-only, never a new output field — see "Behavioral affinity" and
+"Preferred daypart match" below).
 
 ### Behavioral affinity (Behavioral Integration V1)
 
@@ -132,6 +134,50 @@ Three invariants, all merge-critical:
   `eligibility.ts`'s own `buildCandidates` — never thrown. `NEUTRAL` vs
   `NEUTRAL` is always a comparison no-op, so cold start / no-history
   output is byte-for-byte identical to V1's pre-integration ranking.
+
+### Preferred daypart match (Preferred Daypart Personalization V1)
+
+`DailyGuidanceInput.preferredDaypartMatchByFamily` is an OPTIONAL,
+family-keyed map of `boolean` — deliberately a bare primitive, never a
+daypart enum, never a timezone. The app-level orchestrator already knows
+the family's own rank-1 window (`ConcreteGuidanceCandidate.timingCandidates[0]`),
+the user's own timezone, and #110's own derived `preferredDaypart` for
+that family; it resolves the yes/no fact ("does this family's selected
+window match") once, before this input is ever built. This package never
+imports `InsightsDayPart`, `BehavioralProfileContext`, or any
+`apps/web/lib` module — it receives only the already-resolved boolean,
+keeping it fully timezone-agnostic and behavioral-engine-agnostic, the
+identical dependency-direction discipline `behavioralAffinityByFamily`
+already established.
+
+Four invariants, all merge-critical:
+
+- **Ordering only, never eligibility.** Identical to behavioral affinity
+  — read exclusively in `ordering.ts`'s own `compareCandidates`,
+  `eligibility.ts`'s `isEligibleForStage` never sees it. A `true`-match
+  `CAUTION`-labeled candidate remains exactly as ineligible as before;
+  still no fourth stage.
+- **Deliberately positioned after behavioral affinity, not before it.**
+  Behavioral Affinity measures established commitment to an entire
+  activity family; a preferred-daypart match is a narrower refinement of
+  *when* within an already-observed pattern — a materially weaker signal
+  that must never outrank a more established overall pattern. Placed
+  before `start`/`canonical family order`, exactly where affinity itself
+  sits relative to that same tail.
+- **Positive-only signal.** A genuine mismatch, no behavioral history,
+  and an app-excluded Plan candidate (the app never computes a match for
+  a `source: 'PLAN'` candidate — an explicit Plan time is never
+  second-guessed by behavior) are ALL represented by the identical
+  `false`. There is no way for this package to distinguish or penalize
+  any of them differently — a match only ever adds a boost, absence of
+  one is always neutral, never a penalty.
+- **Missing input reproduces pre-integration output exactly.** An omitted
+  `preferredDaypartMatchByFamily` (every pre-Preferred-Daypart-
+  Personalization-V1 caller), a family absent from it, or an explicit
+  `false` entry all resolve to `false` in `eligibility.ts`'s own
+  `buildCandidates` — never thrown. `false` vs `false` is always a
+  comparison no-op, so cold start / no-history output is byte-for-byte
+  identical to this feature's own pre-integration ranking.
 
 ## Best window only (merge-critical)
 
@@ -349,7 +395,7 @@ READMEs already draw for their own synthesis layers.
 | File | Contents |
 |---|---|
 | `constants.ts` | `CANONICAL_ACTIVITY_FAMILIES`, `RELEVANCE_TIER_ORDER`, `TIMING_LABEL_TIER_ORDER`, `BEHAVIORAL_AFFINITY_TIER_ORDER`, `PRIMARY_TIMING_LABELS`, `RELAXED_TIMING_LABELS`, `DEFAULT_LIMIT` |
-| `types.ts` | `DailyGuidanceInput`, `DailyGuidanceValidationError`, `DailyGuidanceCandidate` (internal), `BehavioralAffinityTier` |
+| `types.ts` | `DailyGuidanceInput`, `DailyGuidanceValidationError`, `DailyGuidanceCandidate` (internal), `BehavioralAffinityTier` -- `preferredDaypartMatch`/`preferredDaypartMatchByFamily` are plain `boolean`, no new type |
 | `validation.ts` | `assertValidDailyGuidanceInput` |
 | `eligibility.ts` | `buildCandidates`, `isEligibleForStage`, `SELECTION_STAGES` |
 | `ordering.ts` | `compareCandidates`, `sortCandidates` |
@@ -362,15 +408,18 @@ READMEs already draw for their own synthesis layers.
 
 ```typescript
 export const DAILY_GUIDANCE_ENGINE_VERSION = 'DAILY_GUIDANCE_V1';
-export const DAILY_GUIDANCE_SELECTION_POLICY_VERSION = 'DAILY_GUIDANCE_SELECTION_POLICY_V2';
+export const DAILY_GUIDANCE_SELECTION_POLICY_VERSION = 'DAILY_GUIDANCE_SELECTION_POLICY_V3';
 ```
 
 `SELECTION_POLICY_VERSION` bumped to `V2` under Behavioral Integration V1
 — the within-stage ordinal tuple gained a new key (behavioral affinity
 tier), which is exactly PRODUCT selection semantics, not a contract shape
-change. `ENGINE_VERSION` stayed `V1`: `DailyGuidanceContext`/
-`DailyGuidanceRecommendation` gained no new field — behavioral affinity is
-an input-only ordering signal (see "Behavioral affinity" above).
+change — then to `V3` under Preferred Daypart Personalization V1 for the
+identical reason (one more tuple key, preferred-daypart match). `ENGINE_VERSION`
+stayed `V1` both times: `DailyGuidanceContext`/`DailyGuidanceRecommendation`
+gained no new field either time — both behavioral affinity and
+preferred-daypart match are input-only ordering signals (see "Behavioral
+affinity" and "Preferred daypart match" above).
 
 Kept deliberately separate: the engine version describes the *contract
 and plumbing* (what fields exist, what they mean structurally); the

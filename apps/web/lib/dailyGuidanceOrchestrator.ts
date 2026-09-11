@@ -26,8 +26,11 @@
  *     (dailyGuidanceCandidates.ts) -> ConcreteGuidanceCandidate[]
  *   selectOneCandidatePerFamily + buildWindowRankingContexts
  *     (dailyGuidanceSameFamily.ts) -> WindowRankingContext[]
- *   buildBehavioralAffinityByFamily (dailyGuidanceBehavior.ts, Behavioral
- *     Integration V1) -> Partial<Record<MuhurtaActivityFamily, BehavioralAffinityTier>>
+ *   buildBehavioralProfileForUser (dailyGuidanceBehavior.ts, ONE HabitLog
+ *     query + ONE #110 derivation) -> BehavioralProfileContext
+ *   affinityByFamily + buildPreferredDaypartMatchByFamily
+ *     (dailyGuidanceBehavior.ts, both PURE projections of the SAME profile,
+ *     Behavioral Integration V1 / Preferred Daypart Personalization V1)
  *   deriveDailyGuidance (packages/daily-guidance)
  *     -> DailyGuidanceContext
  *   -> PersonalDailyGuidanceResult (this file's own assembly)
@@ -38,7 +41,7 @@
 import { buildDailyPersonalFitForUser } from './dailyGuidancePipeline';
 import { collectPlanCandidates, collectDayBuilderCandidates, dedupeCandidates } from './dailyGuidanceCandidates';
 import { selectOneCandidatePerFamily, buildWindowRankingContexts } from './dailyGuidanceSameFamily';
-import { buildBehavioralAffinityByFamily } from './dailyGuidanceBehavior';
+import { buildBehavioralProfileForUser, affinityByFamily, buildPreferredDaypartMatchByFamily } from './dailyGuidanceBehavior';
 import { deriveDailyGuidance } from '../../../packages/daily-guidance/src/engine';
 import type { User } from './db';
 import type { PersonalDailyGuidanceResult, SelectedActivityMetadata } from './dailyGuidanceTypes';
@@ -55,13 +58,16 @@ import type { MuhurtaActivityFamily } from '../../../packages/muhurta/src/muhurt
  * (buildDailyPersonalFitForUser's own early `undefined` return, mirroring
  * buildPersonalMuhurtaContextForUser's existing contract); declared-intent
  * discovery runs next, with its own NO_ACTIVITY_INTENT early return. Only
- * once real intent is confirmed to exist does the new Behavioral
- * Integration V1 HabitLog fetch run (buildBehavioralAffinityByFamily) --
- * never for BIRTH_PROFILE_REQUIRED or NO_ACTIVITY_INTENT, so this
- * additive signal is never fetched when it could not possibly be used. A
- * genuine failure of that fetch propagates like every other DB call in
- * this pipeline -- never silently converted to an all-NEUTRAL fallback
- * (see dailyGuidanceBehavior.ts's own doc comment).
+ * once real intent is confirmed to exist does the behavioral HabitLog
+ * fetch run (buildBehavioralProfileForUser) -- never for
+ * BIRTH_PROFILE_REQUIRED or NO_ACTIVITY_INTENT, so this additive signal is
+ * never fetched when it could not possibly be used. Exactly ONE such
+ * fetch happens on the READY path, feeding BOTH `affinityByFamily` and
+ * `buildPreferredDaypartMatchByFamily` (Behavioral Integration V1 /
+ * Preferred Daypart Personalization V1) -- never a second HabitLog query.
+ * A genuine failure of that fetch propagates like every other DB call in
+ * this pipeline -- never silently converted to an all-NEUTRAL/no-match
+ * fallback (see dailyGuidanceBehavior.ts's own doc comment).
  */
 export async function buildPersonalDailyGuidance(user: User, now: Date): Promise<PersonalDailyGuidanceResult> {
   const dailyPersonalFit = buildDailyPersonalFitForUser(user, now);
@@ -75,8 +81,10 @@ export async function buildPersonalDailyGuidance(user: User, now: Date): Promise
   if (selected.size === 0) return { status: 'NO_ACTIVITY_INTENT' }; // every candidate had zero timing windows -- nothing to represent any family with
 
   const windowRankings = buildWindowRankingContexts(selected);
-  const behavioralAffinityByFamily = await buildBehavioralAffinityByFamily(user, now);
-  const guidance = deriveDailyGuidance({ dailyPersonalFit, windowRankings, behavioralAffinityByFamily });
+  const behavioralProfile = await buildBehavioralProfileForUser(user, now);
+  const behavioralAffinityByFamily = affinityByFamily(behavioralProfile);
+  const preferredDaypartMatchByFamily = buildPreferredDaypartMatchByFamily(behavioralProfile, selected, user.timezone);
+  const guidance = deriveDailyGuidance({ dailyPersonalFit, windowRankings, behavioralAffinityByFamily, preferredDaypartMatchByFamily });
 
   // Recommendation-only metadata (brief section 42/92): only families
   // #104 actually selected into `recommendations` get a selectedActivities

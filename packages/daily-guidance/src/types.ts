@@ -36,12 +36,32 @@ export type BehavioralAffinityTier = 'STRONG' | 'MODERATE' | 'NEUTRAL';
  * pre-integration ranking output exactly. This is an ORDERING signal only
  * -- see ordering.ts's own doc comment for where it sits in the tuple; it
  * is never consulted by eligibility.ts (stage membership is unaffected).
+ *
+ * `preferredDaypartMatchByFamily` (Preferred Daypart Personalization V1)
+ * is likewise entirely OPTIONAL, and deliberately a bare `boolean` --
+ * never a daypart enum, never a timezone, never a raw preference value.
+ * The app layer already resolved the family's own rank-1 window against
+ * its own local-timezone midpoint and its own behavioral preference
+ * before this input is ever built; this package only ever receives the
+ * already-resolved yes/no fact ("does this family's own selected window
+ * match"), keeping this package fully timezone-agnostic and behavioral-
+ * engine-agnostic (never importing `InsightsDayPart`,
+ * `BehavioralProfileContext`, or any apps/web/lib module -- see
+ * dailyGuidanceBehavior.ts's own doc comment for the app-side computation
+ * this mirrors). ONLY `true` should ever be present in a well-formed map
+ * (see eligibility.ts's own doc comment) -- an absent entry, an omitted
+ * map entirely, and an explicit `false` all collapse to the identical
+ * "no boost" outcome in ordering.ts, by design: a genuine mismatch, no
+ * behavioral history, and an excluded Plan candidate must never be
+ * distinguishable from each other downstream (see ordering.ts's own
+ * doc comment on why this is a positive-only signal).
  */
 export interface DailyGuidanceInput {
   dailyPersonalFit: DailyPersonalFitContext;
   windowRankings: WindowRankingContext[];
   limit?: number;
   behavioralAffinityByFamily?: Partial<Record<MuhurtaActivityFamily, BehavioralAffinityTier>>;
+  preferredDaypartMatchByFamily?: Partial<Record<MuhurtaActivityFamily, boolean>>;
 }
 
 /** Thrown by engine.ts/validation.ts on malformed input -- see validation.ts's own doc comment for exactly which conditions reject. */
@@ -70,4 +90,9 @@ export interface DailyGuidanceCandidate {
    * default to `NEUTRAL`), never left undefined -- see ordering.ts for
    * where this is consulted. */
   behavioralAffinity: BehavioralAffinityTier;
+  /** Preferred Daypart Personalization V1 -- always resolved to a concrete
+   * boolean by eligibility.ts's own `buildCandidates` (missing input/
+   * family/explicit `false` all default to `false`), never left
+   * undefined -- see ordering.ts for where this is consulted. */
+  preferredDaypartMatch: boolean;
 }
