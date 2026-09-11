@@ -1453,7 +1453,7 @@ async function handleWhy(parsed: ParsedAskAuraRequest, deps: AskAuraOrchestrator
       const metadata = activityFamily ? result.selectedActivities[activityFamily] : undefined;
       const recommendation = activityFamily ? result.guidance.recommendations.find((r) => r.activityFamily === activityFamily) : undefined;
       if (metadata && recommendation) {
-        const explanation = buildWhyAuraExplanation(recommendation, metadata.source);
+        const explanation = buildWhyAuraExplanation(recommendation, metadata.source, metadata.behavioralAffinity);
         if (explanation.lines.length > 0) {
           return { intent: parsed.intent, message: explanation.lines.join(' '), context: parsed };
         }

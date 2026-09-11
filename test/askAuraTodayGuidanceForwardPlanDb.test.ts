@@ -22,7 +22,7 @@
  * and the ceremonial-redirect regression is covered in
  * test/askAuraMarriageRouting.test.ts.
  */
-import { upsertUserByEmail, updateBirthProfile, createPlannedActivity, cancelPlannedActivity, deletePlannedActivity, updateUserDayBuilderPrefs, listPlannedActivitiesForDay } from '../apps/web/lib/db';
+import { upsertUserByEmail, updateBirthProfile, createPlannedActivity, cancelPlannedActivity, deletePlannedActivity, updateUserDayBuilderPrefs, listPlannedActivitiesForDay, createHabitLog } from '../apps/web/lib/db';
 import { parseAskAuraRequest, parseFollowUpChange } from '../packages/recommendation/src/askAuraIntent';
 import { orchestrateAskAura, AskAuraOrchestratorDeps } from '../apps/web/lib/askAuraOrchestrator';
 import { DailyAssistantContext } from '../packages/recommendation/src/dailyAssistant';
@@ -148,8 +148,94 @@ async function main() {
         const why = parseFollowUpChange('Why?', todayGuidanceResponse.context) ?? parseAskAuraRequest('Why?', { now: NOW, previous: todayGuidanceResponse.context });
         const whyResponse = await orchestrateAskAura(why, deps);
         check('TODAY_GUIDANCE WHY: a real explanation, not the generic placeholder', whyResponse.message.length > 0 && !whyResponse.message.includes('see the reasons on the last result above'));
+        // Behavior-aware Why Aura V1 -- this shared fixture user carries
+        // zero HabitLog history, so its behavioralAffinity is NEUTRAL/
+        // absent for every family: confirms absent behavior produces the
+        // exact same WHY output as before this feature existed.
+        check("TODAY_GUIDANCE WHY (zero behavioral history): no behavioral-pattern sentence appears", !whyResponse.message.includes("pattern in what you've been choosing"));
       } else {
         check('TODAY_GUIDANCE WHY: previous response carried a context to follow up from', false);
+      }
+    }
+
+    // ============================================================
+    // TODAY_GUIDANCE WHY -- Behavior-aware Why Aura V1, STRONG case. Uses
+    // a SEPARATE, dedicated user (never this file's own shared fixture)
+    // because HabitLog has no delete function anywhere in this codebase
+    // (see test/behavioralAffinityDb.test.ts's own doc comment) -- writing
+    // real WORKOUT evidence onto the shared `test-daily-guidance-owner`
+    // fixture would permanently and irreversibly change its behavioral
+    // profile for every other test file that reuses it. This dedicated
+    // user already carries >=5 real WORKOUT HabitLog rows from
+    // test/dailyGuidanceBehaviorIntegration.test.ts's own earlier run (or
+    // creates them fresh here if run first) -- either way, WORKOUT is
+    // genuinely STRONG by the time this check runs.
+    // ============================================================
+    {
+      const behaviorUser0 = await upsertUserByEmail({ email: 'test-daily-guidance-behavior-owner-a@example.com', cityName: 'Chennai', latitude: 13.0827, longitude: 80.2707, timezone: TZ });
+      const behaviorUser = await updateBirthProfile(behaviorUser0.id, { birthDate: '1990-06-15', birthTime: '08:30', birthCityName: 'Chennai', birthLatitude: 13.0827, birthLongitude: 80.2707, birthTimezone: TZ });
+      // Day Builder disabled deliberately -- the ONLY candidate this block
+      // creates is the single WORKOUT Plan below, so WORKOUT is
+      // guaranteed to be the sole family entering #104's selection
+      // (never competing against a real, non-deterministic Day Builder
+      // suggestion), making "WORKOUT is the top recommendation" a
+      // reliable, non-flaky outcome rather than a probabilistic one.
+      await updateUserDayBuilderPrefs(behaviorUser.id, { dayBuilderEnabled: false, dayBuilderMutedGroups: [], dayBuilderPriorities: [], dayBuilderPriorityPersonIds: [], dayBuilderPrioritiesPromptDismissed: true });
+      for (let i = 0; i < 5; i++) {
+        await createHabitLog({
+          userId: behaviorUser.id,
+          activityTitle: 'Morning workout',
+          activityId: 'workout',
+          activeWindow: 'ABHIJIT',
+          logMinuteOfDay: 360,
+          logTimestamp: new Date(NOW.getTime() - i * 24 * 60 * 60 * 1000),
+          durationMinutes: 45,
+          logSource: 'MANUAL',
+        });
+      }
+
+      const behaviorContext = buildContext(NOW, behaviorUser.latitude, behaviorUser.longitude, behaviorUser.timezone, buildPersonalMuhurtaContextForUser(behaviorUser));
+      const behaviorDeps: AskAuraOrchestratorDeps = { userId: behaviorUser.id, user: behaviorUser, context: behaviorContext, activeWindow: 'NEUTRAL' };
+
+      const workoutPlan = await createPlannedActivity({
+        userId: behaviorUser.id,
+        title: 'Workout Block',
+        activityId: 'workout',
+        plannedStartAt: new Date('2026-09-09T05:00:00.000Z'),
+        plannedEndAt: new Date('2026-09-09T05:30:00.000Z'),
+        durationMinutes: 30,
+        windowType: 'NEUTRAL',
+      });
+      createdPlanIds.push(workoutPlan.id);
+
+      try {
+        const direct = await buildPersonalDailyGuidance(behaviorUser, NOW);
+        // "Why?" always explains the TOP recommendation specifically (see
+        // handleTodayGuidance's own topActivityId echo in
+        // askAuraOrchestrator.ts) -- so this must confirm WORKOUT is
+        // genuinely rank 1, not merely present somewhere in the list.
+        const workoutSelected = direct.status === 'READY' && direct.guidance.recommendations[0]?.activityFamily === 'WORKOUT' && direct.selectedActivities['WORKOUT']?.behavioralAffinity === 'STRONG';
+        check('sanity: dedicated behavior user\'s real WORKOUT affinity is STRONG and WORKOUT is the TOP recommendation', workoutSelected);
+
+        const parsed = parseAskAuraRequest('What should I focus on today?', { now: NOW });
+        const response = await orchestrateAskAura(parsed, behaviorDeps);
+        if (workoutSelected && response.context) {
+          const why = parseFollowUpChange('Why?', response.context) ?? parseAskAuraRequest('Why?', { now: NOW, previous: response.context });
+          const whyResponse = await orchestrateAskAura(why, behaviorDeps);
+          check(
+            "TODAY_GUIDANCE WHY (STRONG behavioral history): the descriptive behavioral-pattern sentence is included in the real WHY response",
+            whyResponse.message.includes("This also matches a pattern in what you've been choosing recently.")
+          );
+        } else {
+          // WORKOUT did not win the top slot this run (a different real,
+          // eligible family outranked it on relevance/label/score) --
+          // valid, non-error outcome; nothing false to assert either way.
+          check('TODAY_GUIDANCE WHY (STRONG behavioral history): skipped -- WORKOUT was not the top-ranked recommendation this run', true);
+        }
+      } finally {
+        await cancelPlannedActivity(behaviorUser.id, workoutPlan.id);
+        await deletePlannedActivity(behaviorUser.id, workoutPlan.id);
+        createdPlanIds.splice(createdPlanIds.indexOf(workoutPlan.id), 1);
       }
     }
 
