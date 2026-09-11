@@ -39,6 +39,16 @@ import type { DailyGuidanceSelectionReason } from '../../personal-intelligence/s
  * types.ts's own `DailyGuidanceInput.behavioralAffinityByFamily` doc
  * comment). This is purely a join-time lookup, never consulted by
  * `isEligibleForStage` below -- stage membership stays exactly as before.
+ *
+ * Preferred Daypart Personalization V1: `preferredDaypartMatch` is
+ * resolved the identical way from the OPTIONAL
+ * `input.preferredDaypartMatchByFamily` -- an omitted map, a family
+ * missing from it, or an explicit `false` entry all resolve to `false`
+ * (never thrown, never distinguished from one another downstream; see
+ * types.ts's own doc comment on why a genuine mismatch, no behavioral
+ * history, and an app-excluded Plan candidate must collapse to the
+ * identical "no boost" outcome). Also purely a join-time lookup, never
+ * consulted by `isEligibleForStage` below.
  */
 export function buildCandidates(input: DailyGuidanceInput): DailyGuidanceCandidate[] {
   const fitByFamily = new Map(input.dailyPersonalFit.activities.map((a) => [a.activityFamily, a]));
@@ -56,6 +66,7 @@ export function buildCandidates(input: DailyGuidanceInput): DailyGuidanceCandida
       relevantThemes: fit.relevantThemes,
       window: ranking.windows[0],
       behavioralAffinity: input.behavioralAffinityByFamily?.[ranking.activityFamily] ?? 'NEUTRAL',
+      preferredDaypartMatch: input.preferredDaypartMatchByFamily?.[ranking.activityFamily] === true,
     });
   }
   return candidates;

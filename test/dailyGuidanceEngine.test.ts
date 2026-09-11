@@ -97,7 +97,7 @@ function expectThrows(fn: () => unknown): boolean {
 
 check('CANONICAL_ACTIVITY_FAMILIES matches the independently hard-coded 13-value set exactly, in order', JSON.stringify(CANONICAL_ACTIVITY_FAMILIES) === JSON.stringify(EXPECTED_CANONICAL_FAMILIES));
 check('engineVersion is the stable DAILY_GUIDANCE_V1 literal', DAILY_GUIDANCE_ENGINE_VERSION === 'DAILY_GUIDANCE_V1');
-check('selectionPolicyVersion is the stable DAILY_GUIDANCE_SELECTION_POLICY_V2 literal (bumped by Behavioral Integration V1 -- the ordinal tuple itself changed)', DAILY_GUIDANCE_SELECTION_POLICY_VERSION === 'DAILY_GUIDANCE_SELECTION_POLICY_V2');
+check('selectionPolicyVersion is the stable DAILY_GUIDANCE_SELECTION_POLICY_V3 literal (bumped by Preferred Daypart Personalization V1 -- the ordinal tuple itself changed again)', DAILY_GUIDANCE_SELECTION_POLICY_VERSION === 'DAILY_GUIDANCE_SELECTION_POLICY_V3');
 
 check(
   'result stamps both DAILY_GUIDANCE_ENGINE_VERSION and DAILY_GUIDANCE_SELECTION_POLICY_VERSION verbatim',
@@ -717,6 +717,185 @@ check(
 );
 
 // ============================================================
+// PREFERRED DAYPART MATCH (Preferred Daypart Personalization V1) --
+// merge-critical. Same DEEP_WORK/LEARNING tied fixture, now also holding
+// behavioralAffinity fixed (equal on both sides, or explicitly varied
+// where the test is specifically about affinity-vs-daypart precedence)
+// so daypart match is isolated as the ONLY differing key.
+// ============================================================
+
+function buildTiedCandidatesWithDaypartInput(
+  matches: Partial<Record<'DEEP_WORK' | 'LEARNING', boolean>>,
+  affinities: Partial<Record<'DEEP_WORK' | 'LEARNING', BehavioralAffinityTier>> = {}
+): DailyGuidanceInput {
+  const dailyPersonalFit = buildDailyPersonalFit({ DEEP_WORK: 'HIGHLY_RELEVANT', LEARNING: 'HIGHLY_RELEVANT' });
+  const windowRankings = [
+    buildRanking('DEEP_WORK', [buildWindow({ start: '2026-09-09T02:00:00.000Z', end: '2026-09-09T03:00:00.000Z', label: 'GOOD', score: 8.0 })]),
+    buildRanking('LEARNING', [buildWindow({ start: '2026-09-09T05:00:00.000Z', end: '2026-09-09T06:00:00.000Z', label: 'GOOD', score: 8.0 })]),
+  ];
+  return { dailyPersonalFit, windowRankings, limit: 2, behavioralAffinityByFamily: affinities, preferredDaypartMatchByFamily: matches };
+}
+
+check(
+  'ABSENT INPUT: omitting preferredDaypartMatchByFamily entirely reproduces the exact same order as an explicit all-false map',
+  (() => {
+    const { preferredDaypartMatchByFamily, ...withoutDaypart } = buildTiedCandidatesWithDaypartInput({});
+    const resultAbsent = deriveDailyGuidance(withoutDaypart);
+    const resultAllFalse = deriveDailyGuidance(buildTiedCandidatesWithDaypartInput({ DEEP_WORK: false, LEARNING: false }));
+    return JSON.stringify(resultAbsent) === JSON.stringify(resultAllFalse);
+  })()
+);
+
+check(
+  'ABSENT INPUT reproduces the pre-Preferred-Daypart-Personalization-V1 tie-break exactly (falls through to start-time ascending: DEEP_WORK\'s earlier start wins)',
+  (() => {
+    const { preferredDaypartMatchByFamily, ...withoutDaypart } = buildTiedCandidatesWithDaypartInput({});
+    const result = deriveDailyGuidance(withoutDaypart);
+    return result.recommendations[0].activityFamily === 'DEEP_WORK';
+  })()
+);
+
+check(
+  'DAYPART TIE-BREAK: match beats no-match, all else (including affinity) equal',
+  deriveDailyGuidance(buildTiedCandidatesWithDaypartInput({ DEEP_WORK: false, LEARNING: true })).recommendations[0].activityFamily === 'LEARNING'
+);
+
+check(
+  'MISSING FAMILY: a family absent from preferredDaypartMatchByFamily resolves to false (never throws) -- true for the other family still wins',
+  deriveDailyGuidance(buildTiedCandidatesWithDaypartInput({ LEARNING: true })).recommendations[0].activityFamily === 'LEARNING'
+);
+
+check(
+  'EXPLICIT FALSE: behaves identically to an absent entry -- neither is a penalty relative to the other',
+  (() => {
+    const withExplicitFalse = deriveDailyGuidance(buildTiedCandidatesWithDaypartInput({ DEEP_WORK: false, LEARNING: true }));
+    const withAbsentEntry = deriveDailyGuidance(buildTiedCandidatesWithDaypartInput({ LEARNING: true }));
+    return JSON.stringify(withExplicitFalse) === JSON.stringify(withAbsentEntry);
+  })()
+);
+
+check(
+  'PERSONAL RELEVANCE OUTRANKS DAYPART MATCH (merge-critical): HIGHLY_RELEVANT + no-match beats RELEVANT + match',
+  (() => {
+    const dailyPersonalFit = buildDailyPersonalFit({ DEEP_WORK: 'HIGHLY_RELEVANT', LEARNING: 'RELEVANT' });
+    const windowRankings = [
+      buildRanking('DEEP_WORK', [buildWindow({ start: '2026-09-09T02:00:00.000Z', end: '2026-09-09T03:00:00.000Z', label: 'GOOD', score: 8.0 })]),
+      buildRanking('LEARNING', [buildWindow({ start: '2026-09-09T05:00:00.000Z', end: '2026-09-09T06:00:00.000Z', label: 'GOOD', score: 8.0 })]),
+    ];
+    const result = deriveDailyGuidance({ dailyPersonalFit, windowRankings, limit: 2, preferredDaypartMatchByFamily: { LEARNING: true } });
+    return result.recommendations[0].activityFamily === 'DEEP_WORK';
+  })()
+);
+
+check(
+  'TIMING LABEL OUTRANKS DAYPART MATCH (merge-critical): VERY_GOOD + no-match beats GOOD + match',
+  (() => {
+    const dailyPersonalFit = buildDailyPersonalFit({ DEEP_WORK: 'HIGHLY_RELEVANT', LEARNING: 'HIGHLY_RELEVANT' });
+    const windowRankings = [
+      buildRanking('DEEP_WORK', [buildWindow({ start: '2026-09-09T02:00:00.000Z', end: '2026-09-09T03:00:00.000Z', label: 'VERY_GOOD', score: 8.0 })]),
+      buildRanking('LEARNING', [buildWindow({ start: '2026-09-09T05:00:00.000Z', end: '2026-09-09T06:00:00.000Z', label: 'GOOD', score: 8.0 })]),
+    ];
+    const result = deriveDailyGuidance({ dailyPersonalFit, windowRankings, limit: 2, preferredDaypartMatchByFamily: { LEARNING: true } });
+    return result.recommendations[0].activityFamily === 'DEEP_WORK';
+  })()
+);
+
+check(
+  'TIMING SCORE OUTRANKS DAYPART MATCH (merge-critical, proves daypart sits AFTER score in the tuple): same relevance, same label -- score 8.9 + no-match beats score 7.4 + match',
+  (() => {
+    const dailyPersonalFit = buildDailyPersonalFit({ DEEP_WORK: 'HIGHLY_RELEVANT', LEARNING: 'HIGHLY_RELEVANT' });
+    const windowRankings = [
+      buildRanking('DEEP_WORK', [buildWindow({ start: '2026-09-09T02:00:00.000Z', end: '2026-09-09T03:00:00.000Z', label: 'GOOD', score: 8.9 })]),
+      buildRanking('LEARNING', [buildWindow({ start: '2026-09-09T05:00:00.000Z', end: '2026-09-09T06:00:00.000Z', label: 'GOOD', score: 7.4 })]),
+    ];
+    const result = deriveDailyGuidance({ dailyPersonalFit, windowRankings, limit: 2, preferredDaypartMatchByFamily: { LEARNING: true } });
+    return result.recommendations[0].activityFamily === 'DEEP_WORK';
+  })()
+);
+
+check(
+  'BEHAVIORAL AFFINITY OUTRANKS DAYPART MATCH (merge-critical, proves daypart sits AFTER affinity in the tuple): same relevance/label/score -- STRONG + no-match beats MODERATE + match',
+  deriveDailyGuidance(buildTiedCandidatesWithDaypartInput({ DEEP_WORK: false, LEARNING: true }, { DEEP_WORK: 'STRONG', LEARNING: 'MODERATE' })).recommendations[0].activityFamily === 'DEEP_WORK'
+);
+
+check(
+  'DAYPART MATCH OUTRANKS START TIME: a later-starting match beats an earlier-starting non-match when relevance/label/score/affinity all tie',
+  (() => {
+    // LEARNING starts later (05:00Z) than DEEP_WORK (02:00Z) in the shared fixture -- DEEP_WORK would win on start alone, but LEARNING's match must win first.
+    const result = deriveDailyGuidance(buildTiedCandidatesWithDaypartInput({ DEEP_WORK: false, LEARNING: true }));
+    return result.recommendations[0].activityFamily === 'LEARNING';
+  })()
+);
+
+check(
+  'CAUTION NEVER PROMOTED (merge-critical): HIGHLY_RELEVANT + CAUTION + match is still never selected',
+  (() => {
+    const dailyPersonalFit = buildDailyPersonalFit({ FINANCE: 'HIGHLY_RELEVANT' });
+    const windowRankings = [buildRanking('FINANCE', [buildWindow({ label: 'CAUTION', score: -2.0 })])];
+    const result = deriveDailyGuidance({ dailyPersonalFit, windowRankings, limit: 3, preferredDaypartMatchByFamily: { FINANCE: true } });
+    return result.recommendations.length === 0;
+  })()
+);
+
+check(
+  'NO FOURTH STAGE (merge-critical): BASELINE + USABLE + match is still never selected -- daypart match creates no new stage',
+  (() => {
+    const dailyPersonalFit = buildDailyPersonalFit(); // every family BASELINE
+    const windowRankings = [buildRanking('MEAL', [buildWindow({ label: 'USABLE', score: 6.0 })])];
+    const result = deriveDailyGuidance({ dailyPersonalFit, windowRankings, limit: 3, preferredDaypartMatchByFamily: { MEAL: true } });
+    return result.recommendations.length === 0;
+  })()
+);
+
+check(
+  'STAGE MEMBERSHIP UNCHANGED: daypart match only sorts WITHIN a stage -- a RELEVANT+EXCELLENT+no-match candidate (Stage 1) still beats a HIGHLY_RELEVANT+USABLE+match candidate (Stage 2)',
+  (() => {
+    const dailyPersonalFit = buildDailyPersonalFit({ DEEP_WORK: 'HIGHLY_RELEVANT', LEARNING: 'RELEVANT' });
+    const windowRankings = [
+      buildRanking('DEEP_WORK', [buildWindow({ start: '2026-09-09T02:00:00.000Z', end: '2026-09-09T03:00:00.000Z', label: 'USABLE', score: 6.0 })]),
+      buildRanking('LEARNING', [buildWindow({ start: '2026-09-09T05:00:00.000Z', end: '2026-09-09T06:00:00.000Z', label: 'EXCELLENT', score: 9.2 })]),
+    ];
+    const result = deriveDailyGuidance({ dailyPersonalFit, windowRankings, limit: 1, preferredDaypartMatchByFamily: { DEEP_WORK: true, LEARNING: false } });
+    return result.recommendations.length === 1 && result.recommendations[0].activityFamily === 'LEARNING' && result.recommendations[0].selectionReason === 'PRIMARY_FLOOR_MET';
+  })()
+);
+
+check(
+  'DETERMINISM: preferredDaypartMatchByFamily key insertion order never affects the result',
+  (() => {
+    const a = deriveDailyGuidance(buildTiedCandidatesWithDaypartInput({ DEEP_WORK: false, LEARNING: true }));
+    const b = deriveDailyGuidance(buildTiedCandidatesWithDaypartInput({ LEARNING: true, DEEP_WORK: false }));
+    return JSON.stringify(a) === JSON.stringify(b);
+  })()
+);
+
+check(
+  'VALIDATION: a non-canonical family key in preferredDaypartMatchByFamily throws',
+  expectThrows(() => {
+    const input = buildTiedCandidatesWithDaypartInput({});
+    (input.preferredDaypartMatchByFamily as Record<string, unknown>)['NOT_A_FAMILY'] = true;
+    return deriveDailyGuidance(input);
+  })
+);
+
+check(
+  'VALIDATION: a non-boolean value in preferredDaypartMatchByFamily throws',
+  expectThrows(() => {
+    const input = buildTiedCandidatesWithDaypartInput({});
+    (input.preferredDaypartMatchByFamily as Record<string, unknown>)['DEEP_WORK'] = 'true';
+    return deriveDailyGuidance(input);
+  })
+);
+
+check(
+  'OUTPUT UNCHANGED: DailyGuidanceRecommendation carries no preferredDaypartMatch field -- #104\'s own public output contract is byte-for-byte unchanged by Preferred Daypart Personalization V1',
+  (() => {
+    const result = deriveDailyGuidance(buildTiedCandidatesWithDaypartInput({ DEEP_WORK: true }));
+    return !('preferredDaypartMatch' in result.recommendations[0]);
+  })()
+);
+
+// ============================================================
 // STATIC SOURCE GUARDS.
 // ============================================================
 
@@ -749,12 +928,13 @@ check(
 );
 
 check(
-  'NO NUMERIC COMPOSITE: no forbidden identifier (guidanceScore/personalScore/combinedScore/priorityScore/weightedScore) and no arithmetic combination of RELEVANCE_TIER_ORDER, TIMING_LABEL_TIER_ORDER, or BEHAVIORAL_AFFINITY_TIER_ORDER with each other anywhere in this package',
+  'NO NUMERIC COMPOSITE: no forbidden identifier (guidanceScore/personalScore/combinedScore/priorityScore/weightedScore) and no arithmetic combination of RELEVANCE_TIER_ORDER, TIMING_LABEL_TIER_ORDER, BEHAVIORAL_AFFINITY_TIER_ORDER, or preferredDaypartMatch with each other anywhere in this package',
   (() => {
     const code = readDailyGuidanceSource();
     return (
       !/guidanceScore|personalScore|combinedScore|priorityScore|weightedScore/i.test(code) &&
-      !/RELEVANCE_TIER_ORDER\[[^\]]*\]\s*[+*]|TIMING_LABEL_TIER_ORDER\[[^\]]*\]\s*[+*]|BEHAVIORAL_AFFINITY_TIER_ORDER\[[^\]]*\]\s*[+*]/.test(code)
+      !/RELEVANCE_TIER_ORDER\[[^\]]*\]\s*[+*]|TIMING_LABEL_TIER_ORDER\[[^\]]*\]\s*[+*]|BEHAVIORAL_AFFINITY_TIER_ORDER\[[^\]]*\]\s*[+*]/.test(code) &&
+      !/Number\([^)]*preferredDaypartMatch[^)]*\)\s*[+*]\s*\d|preferredDaypartMatch\s*[+*]/.test(code)
     );
   })()
 );

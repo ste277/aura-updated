@@ -151,6 +151,30 @@ function assertValidBehavioralAffinityByFamily(behavioralAffinityByFamily: unkno
   }
 }
 
+/**
+ * Preferred Daypart Personalization V1 -- OPTIONAL, matching
+ * assertValidBehavioralAffinityByFamily's own discipline exactly: an
+ * omitted map (every caller before this feature) is valid and resolves
+ * every candidate to `false` in eligibility.ts's own buildCandidates.
+ * When supplied, only rejects a genuinely malformed shape -- a
+ * non-canonical family key or a non-boolean value -- never re-validates
+ * anything #110's own daypart derivation already guarantees.
+ */
+function assertValidPreferredDaypartMatchByFamily(preferredDaypartMatchByFamily: unknown): void {
+  if (preferredDaypartMatchByFamily === undefined) return;
+  if (preferredDaypartMatchByFamily == null || typeof preferredDaypartMatchByFamily !== 'object' || Array.isArray(preferredDaypartMatchByFamily)) {
+    throw new DailyGuidanceValidationError('preferredDaypartMatchByFamily must be an object when supplied.');
+  }
+  for (const [family, match] of Object.entries(preferredDaypartMatchByFamily)) {
+    if (!CANONICAL_FAMILY_SET.has(family)) {
+      throw new DailyGuidanceValidationError(`preferredDaypartMatchByFamily contains a non-canonical activityFamily: ${family}.`);
+    }
+    if (typeof match !== 'boolean') {
+      throw new DailyGuidanceValidationError(`preferredDaypartMatchByFamily[${family}] must be a boolean, got: ${String(match)}.`);
+    }
+  }
+}
+
 export function assertValidDailyGuidanceInput(input: DailyGuidanceInput): void {
   if (input == null || typeof input !== 'object') {
     throw new DailyGuidanceValidationError('DailyGuidanceInput must be an object with dailyPersonalFit and windowRankings properties.');
@@ -160,4 +184,5 @@ export function assertValidDailyGuidanceInput(input: DailyGuidanceInput): void {
   assertJoinCompleteness(input);
   assertValidLimit(input.limit);
   assertValidBehavioralAffinityByFamily(input.behavioralAffinityByFamily);
+  assertValidPreferredDaypartMatchByFamily(input.preferredDaypartMatchByFamily);
 }
