@@ -8,6 +8,19 @@
  * Personal Fit. Recommendation-ranking integration is explicitly deferred
  * to a future PR (per the architecture audit's own Option A verdict).
  *
+ * Activity-Level Typical Duration Foundation V1 additionally derives a
+ * per-ACTIVITY (not per-family) typical-duration signal
+ * (`BehavioralProfileContext.activityDurations`) from the exact same
+ * HabitLog input, exactly one fetch, zero new queries. Also FOUNDATION
+ * ONLY, per its own architecture audit's Option A verdict ("FOUNDATION
+ * READY, CONSUMPTION DEFERRED") -- nothing outside this file and its own
+ * tests reads `activityDurations` yet. See that field's own doc comment
+ * for why this exists alongside the family-level `typicalDurationMinutes`
+ * above (short answer: several families contain multiple activities with
+ * substantially different natural durations, so family-level duration is
+ * not a safe per-activity default -- Typical Duration Personalization V1
+ * was BLOCKED for exactly this reason).
+ *
  * PURE: no DB import, no fetch, no Date.now(), no request/session access,
  * no mutation, no LLM. `habitLogs`/`timezone`/`now` are all explicit
  * caller-supplied inputs (the same discipline
@@ -60,7 +73,13 @@ import type { MuhurtaActivityFamily } from '../../../packages/muhurta/src/muhurt
 // ============================================================
 
 export const BEHAVIORAL_AFFINITY_ENGINE_VERSION = 'BEHAVIORAL_AFFINITY_V1' as const;
-export const BEHAVIORAL_AFFINITY_POLICY_VERSION = 'BEHAVIORAL_AFFINITY_POLICY_V1' as const;
+/** Bumped V1 -> V2 for Activity-Level Typical Duration Foundation V1: a
+ * new derivation policy/output capability (activityDurations) was added.
+ * ENGINE_VERSION stays V1 -- every existing output field
+ * (affinity/evidenceCount/preferredDaypart/family-level
+ * typicalDurationMinutes) and its own derivation semantics are byte-for-
+ * byte unchanged; activityDurations is purely additive. */
+export const BEHAVIORAL_AFFINITY_POLICY_VERSION = 'BEHAVIORAL_AFFINITY_POLICY_V2' as const;
 
 // ============================================================
 // V1 policy constants -- EXPLICIT PRODUCT PLACEHOLDERS, not statistically
@@ -111,13 +130,37 @@ export type BehavioralAffinity = 'STRONG' | 'MODERATE' | 'NEUTRAL';
 
 /** Deliberately minimal (brief: PRIVACY CONTRACT) -- no activity titles,
  * no individual timestamps, no raw log/Plan ids, no notes, no raw event
- * arrays. Aggregate facts only. */
+ * arrays. Aggregate facts only.
+ *
+ * `typicalDurationMinutes` here is a FAMILY-LEVEL aggregate, not an
+ * activity-specific one -- several families contain multiple activities
+ * with substantially different natural durations (architecture audit,
+ * Typical Duration Personalization V1: BLOCKED), so this value must never
+ * be used as a per-activity default. See `BehavioralActivityDuration`
+ * below for the activity-level signal this module also derives. */
 export interface BehavioralActivityAffinity {
   activityFamily: MuhurtaActivityFamily;
   affinity: BehavioralAffinity;
   evidenceCount: number;
   preferredDaypart?: InsightsDayPart;
   typicalDurationMinutes?: number;
+}
+
+/**
+ * Activity-Level Typical Duration Foundation V1 -- a per-ACTIVITY sibling
+ * to the family-level `typicalDurationMinutes` above, resolving the exact
+ * granularity gap that blocked using the family-level aggregate as a
+ * per-activity default (architecture audit, Typical Duration
+ * Personalization V1). Same privacy discipline as
+ * `BehavioralActivityAffinity`: no evidence count, no timestamps, no raw
+ * durations, no logSource -- only the derived fact itself. FOUNDATION
+ * ONLY: this has no consumer yet (see module doc comment); nothing reads
+ * `BehavioralProfileContext.activityDurations` outside this file and its
+ * own tests.
+ */
+export interface BehavioralActivityDuration {
+  activityId: string;
+  typicalDurationMinutes: number;
 }
 
 /**
@@ -139,6 +182,15 @@ export interface BehavioralProfileContext {
    * never a fresh Date.now() read inside this module. */
   evaluationTime: string;
   activities: BehavioralActivityAffinity[];
+  /** Activity-Level Typical Duration Foundation V1 -- SPARSE (only
+   * activityIds that clear the same evidence/consistency policy
+   * `typicalDurationMinutes` already uses are present; never a full
+   * catalog-sized vector with `undefined` entries -- unlike `activities`
+   * above, there is no existing fixed-cardinality contract for this
+   * signal to match, and the activity catalog is open-ended). Ordered by
+   * `activityId` ascending, never by HabitLog input order -- see
+   * deriveBehavioralProfile's own determinism doc comment. */
+  activityDurations: BehavioralActivityDuration[];
 }
 
 // ============================================================
@@ -147,6 +199,13 @@ export interface BehavioralProfileContext {
 
 interface EligibleObservation {
   family: MuhurtaActivityFamily;
+  /** Activity-Level Typical Duration Foundation V1 -- the SAME already-
+   * validated canonical id resolveEligibleObservations() below confirms via
+   * getActivityProfileById(), carried through rather than discarded. Never
+   * a second lookup, never a second normalization path -- this is exactly
+   * the id family-level grouping already trusts, just not thrown away
+   * before activity-level grouping gets a chance to use it too. */
+  activityId: string;
   instant: Date;
   durationMinutes: number;
 }
@@ -165,7 +224,7 @@ function resolveEligibleObservations(habitLogs: readonly HabitLogRow[]): Eligibl
     if (!log.activityId) continue; // MISSING_ACTIVITY_ID
     const activity = getActivityProfileById(log.activityId);
     if (!activity) continue; // UNKNOWN_ACTIVITY_ID (catalog drift)
-    eligible.push({ family: familyForActivityProfile(activity), instant: log.logTimestamp, durationMinutes: log.durationMinutes });
+    eligible.push({ family: familyForActivityProfile(activity), activityId: log.activityId, instant: log.logTimestamp, durationMinutes: log.durationMinutes });
   }
   return eligible;
 }
@@ -236,6 +295,42 @@ function deriveTypicalDuration(observations: readonly EligibleObservation[]): nu
   return Math.round(median(durations));
 }
 
+/**
+ * Activity-Level Typical Duration Foundation V1: the SAME duration policy
+ * as `deriveTypicalDuration` (identical valid-duration filter, identical
+ * MODERATE_MIN_EVIDENCE floor, identical DURATION_CONSISTENCY_WINDOW_MINUTES
+ * range guard, identical median+round) applied per canonical `activityId`
+ * instead of per `family` -- resolving the exact granularity gap the
+ * architecture audit found: several families contain multiple activities
+ * with substantially different natural durations, so a family-level
+ * median is not a safe stand-in for any one activity's own typical
+ * duration. No new threshold, no new statistics, no source weighting.
+ *
+ * SPARSE, DETERMINISTIC OUTPUT: only activityIds that clear
+ * deriveTypicalDuration's own bar are included (never a full-catalog
+ * vector with undefined entries -- there is no fixed-cardinality contract
+ * for this signal, unlike the 13-entry family vector), and the result is
+ * always sorted by `activityId` ascending -- never by HabitLog/Map
+ * insertion order -- so output is independent of `eligible`'s own input
+ * order, matching deriveBehavioralProfile's own determinism guarantee.
+ */
+function deriveActivityDurations(eligible: readonly EligibleObservation[]): BehavioralActivityDuration[] {
+  const byActivityId = new Map<string, EligibleObservation[]>();
+  for (const obs of eligible) {
+    const list = byActivityId.get(obs.activityId);
+    if (list) list.push(obs);
+    else byActivityId.set(obs.activityId, [obs]);
+  }
+
+  const activityDurations: BehavioralActivityDuration[] = [];
+  for (const [activityId, observations] of byActivityId) {
+    const typicalDurationMinutes = deriveTypicalDuration(observations);
+    if (typicalDurationMinutes !== undefined) activityDurations.push({ activityId, typicalDurationMinutes });
+  }
+
+  return activityDurations.sort((a, b) => (a.activityId < b.activityId ? -1 : a.activityId > b.activityId ? 1 : 0));
+}
+
 // ============================================================
 // Public entry point.
 // ============================================================
@@ -254,7 +349,15 @@ function deriveTypicalDuration(observations: readonly EligibleObservation[]): nu
  * first-occurrence/insertion order for its OWN output (see
  * derivePreferredDaypart's tie-handling and deriveTypicalDuration's sort).
  * `activities` is always ordered by CANONICAL_ACTIVITY_FAMILIES, never by
- * input row order.
+ * input row order; `activityDurations` (Activity-Level Typical Duration
+ * Foundation V1) is always ordered by `activityId` ascending, same
+ * discipline, for the same reason.
+ *
+ * ONE fetch, THREE pure projections of the SAME `eligible` set (Activity-
+ * Level Typical Duration Foundation V1): `byFamily`/`activities` and
+ * `deriveActivityDurations` both read the identical `eligible` array this
+ * function already computed -- never a second HabitLog read, never a
+ * second recency filter.
  */
 export function deriveBehavioralProfile(habitLogs: readonly HabitLogRow[], timezone: string, now: Date): BehavioralProfileContext {
   const cutoff = now.getTime() - BEHAVIORAL_AFFINITY_RECENCY_DAYS * MS_PER_DAY;
@@ -283,5 +386,6 @@ export function deriveBehavioralProfile(habitLogs: readonly HabitLogRow[], timez
     policyVersion: BEHAVIORAL_AFFINITY_POLICY_VERSION,
     evaluationTime: now.toISOString(),
     activities,
+    activityDurations: deriveActivityDurations(eligible),
   };
 }
