@@ -127,7 +127,7 @@ export function buildPreferredDaypartMatchByFamily(
   for (const [family, candidate] of selected) {
     if (candidate.source !== 'DAY_BUILDER_INTENTION') continue; // PLAN candidates: never boosted, never penalized
     const preferredDaypart = preferredDaypartByFamily.get(family as MuhurtaActivityFamily);
-    if (!preferredDaypart) continue; // no established preference for this family -- neutral
+    if (!preferredDaypart) continue; // no established behavioral daypart pattern for this family -- neutral (Behavioral Semantics Correction V1: preferredDaypart is a dominant-logged-daypart signal, not a proven preference -- see behavioralAffinity.ts's own doc comment)
     const window = candidate.timingCandidates[0];
     if (!window) continue; // structurally unreachable -- selectOneCandidatePerFamily only ever selects a candidate with >=1 timing window
     const midpoint = new Date((new Date(window.start).getTime() + new Date(window.end).getTime()) / 2);
