@@ -49,13 +49,26 @@ test('shared Moment: recipient accepts -> owner sees the update, Bell count, and
   await page.goto('/');
   await expect(page.getByText(/is in/i)).toBeVisible({ timeout: 10000 });
 
-  // Opening the update marks it seen -- Bell count decreases correctly.
+  // Moment View Navigation Fix -- "View invitation" is the separate,
+  // explicit action that still opens the public /moment/[token] page in a
+  // new tab; it does not navigate this tab away from Home, so the card
+  // stays available for the "View details" step below.
   const whatsNextSection = page.locator('section', { hasText: "What's Next" });
-  const [popup] = await Promise.all([
+  const [invitationPopup] = await Promise.all([
     context.waitForEvent('page'),
-    whatsNextSection.getByRole('button', { name: 'View' }).first().click(),
+    whatsNextSection.getByRole('button', { name: 'View invitation', exact: true }).click(),
   ]);
-  await popup.close();
+  await expect(invitationPopup.getByText(/confirmed|in!|you're in/i).first()).toBeVisible({ timeout: 10000 });
+  await invitationPopup.close();
+
+  // The main "View details" CTA routes in-app to the owner's own Plan/
+  // Moment details (the Plan tab) -- no new tab, exactly like a Planned
+  // Activity reminder's "Open Plan" (see reminderJourney.spec.ts). This is
+  // the actual fix: it must NEVER open the recipient-facing invitation
+  // page as the default destination. Opening it still marks the update
+  // seen -- Bell count decreases correctly, same as before this fix.
+  await whatsNextSection.getByRole('button', { name: 'View details', exact: true }).click();
+  await expect(page.getByRole('heading', { name: 'Plan with Aura' })).toBeVisible();
 
   await expect(async () => {
     const seenUpdates = await fetchAuraUpdates(page);

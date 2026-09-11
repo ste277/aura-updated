@@ -514,15 +514,42 @@ export default function DashboardPage() {
     if (activeTab === 'home') loadMyDay();
   }, [activeTab, user?.id, loadAuraUpdates, loadMyDay]);
 
+  // Moment View Navigation Fix -- the owner's own "View details" on a
+  // responded-to Moment update must land on the OWNER's canonical Plan/
+  // Moment details destination (the Plan tab, PlanWithAuraView.tsx via
+  // setActiveTab('plan')), the exact same destination every other "open my
+  // own scheduled item" action in this app already uses
+  // (handleOpenAgendaItem's PLAN branch, handleOpenReminder's
+  // PLAN_APPROACHING branch, handleFindAnotherTimeForMoment below).
+  // Previously this opened /moment/[token] -- the PUBLIC, RECIPIENT-facing
+  // page (see AuraMomentClient.tsx: "✓ [sender] will know you're in", "Does
+  // this work for you?") -- which reads as wrong/confusing from the
+  // owner's own point of view, and is never the right default destination
+  // for the owner's "View" action regardless of SOLO/SHARED scope or
+  // response state. The invitation page itself is untouched and remains
+  // reachable via the separate, explicit handleViewMomentInvitation below.
   const handleViewMomentUpdate = useCallback((momentToken: string) => {
-    window.open(`${window.location.origin}/moment/${momentToken}`, '_blank', 'noopener,noreferrer');
+    setActiveTab('plan');
     // E2E Journey Coverage V1.1 stabilization -- this previously called
     // loadAuraUpdates() unchained, racing the seen POST instead of waiting
     // for it (handleOpenReminder below already gets this right). Matching
-    // that convention: never blocks the popup open on the POST, but the
+    // that convention: never blocks the navigation on the POST, but the
     // refetch now always happens after it settles.
     fetch(`/api/aura-moments/${momentToken}/seen`, { method: 'POST' }).catch(() => {}).finally(() => loadAuraUpdates());
   }, [loadAuraUpdates]);
+
+  // Moment View Navigation Fix -- the SEPARATE, explicit "View invitation"
+  // action (brief: "if the invitation screen is still needed, expose it as
+  // a separate explicit action"). This is exactly handleViewMomentUpdate's
+  // OWN previous behavior, preserved verbatim and simply no longer the
+  // default -- the public /moment/[token] page and its own accept/decline/
+  // response logic are completely untouched by this fix. Deliberately no
+  // /seen POST here: that side effect stays tied to the main "View
+  // details" action above, which is the action guaranteed to be available
+  // for every update; this secondary action is purely navigational.
+  const handleViewMomentInvitation = useCallback((momentToken: string) => {
+    window.open(`${window.location.origin}/moment/${momentToken}`, '_blank', 'noopener,noreferrer');
+  }, []);
 
   const handleFindAnotherTimeForMoment = useCallback((momentToken: string) => {
     setMomentsFocusToken(momentToken);
@@ -1405,6 +1432,7 @@ export default function DashboardPage() {
             // time" prompt after the owner had already handled it.
             topMomentUpdate={auraUpdates?.updates?.find((update) => update.requiresAction || (update.type === 'MOMENT_ACCEPTED' && update.unread))}
             onViewMomentUpdate={handleViewMomentUpdate}
+            onViewMomentInvitation={handleViewMomentInvitation}
             onFindAnotherTimeForMoment={handleFindAnotherTimeForMoment}
             startingSoonReminder={auraUpdates?.upcoming?.[0]}
             onOpenReminder={handleOpenReminder}
@@ -1573,6 +1601,7 @@ export default function DashboardPage() {
             upcoming={auraUpdates?.upcoming ?? []}
             onBack={() => setActiveTab('home')}
             onViewMomentUpdate={handleViewMomentUpdate}
+            onViewMomentInvitation={handleViewMomentInvitation}
             onFindAnotherTimeForMoment={handleFindAnotherTimeForMoment}
             onOpenReminder={handleOpenReminder}
           />

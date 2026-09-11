@@ -128,9 +128,21 @@ interface HomeDashboardProps {
    * Home doesn't duplicate the bell's own Updates screen. Omitted or
    * undefined renders no section at all -- never an empty state. */
   topMomentUpdate?: AuraUpdate;
-  /** Opens the moment's own public link (View / View moment) AND marks its
-   * response seen -- both happen together, see page.tsx. */
+  /** Moment View Navigation Fix -- "View details" on an accepted Moment
+   * update. Opens the OWNER's own canonical Plan/Moment details (the Plan
+   * tab) AND marks the response seen -- both happen together, see
+   * page.tsx. Deliberately NOT the public /moment/[token] invitation page
+   * (that page is written entirely from the RECIPIENT's own point of view
+   * and is never the right default destination for the owner) -- see
+   * onViewMomentInvitation below for the separate, explicit way to reach
+   * it. */
   onViewMomentUpdate?: (momentToken: string) => void;
+  /** Moment View Navigation Fix -- the separate, explicit "View
+   * invitation" action, preserving access to the public /moment/[token]
+   * page for whoever still wants to see it. Purely navigational (no seen-
+   * marking side effect of its own -- that stays on onViewMomentUpdate
+   * above). */
+  onViewMomentInvitation?: (momentToken: string) => void;
   /** Routes into the EXISTING Shared Moments reschedule flow (brief section
    * 12: "Do not create a second alternatives flow") -- never runs a search
    * on Home itself. */
@@ -417,6 +429,7 @@ export function HomeDashboard({
   onPanchangClick,
   topMomentUpdate,
   onViewMomentUpdate,
+  onViewMomentInvitation,
   onFindAnotherTimeForMoment,
   startingSoonReminder,
   onOpenReminder,
@@ -735,10 +748,18 @@ export function HomeDashboard({
                 <div style={{ marginTop: 3, fontSize: 12, color: colors.textFaint }}>
                   {isAccepted ? `${day} · ${time}` : `Prefers: ${PREFERENCE_TEXT[update.preference ?? 'NO_PREFERENCE']}`}
                 </div>
-                <div style={{ marginTop: spacing.md }}>
+                <div style={{ marginTop: spacing.md, display: 'flex', alignItems: 'center', gap: spacing.md, flexWrap: 'wrap' }}>
                   <SecondaryButton onClick={() => (isAccepted ? onViewMomentUpdate?.(update.momentToken) : onFindAnotherTimeForMoment?.(update.momentToken))}>
-                    {isAccepted ? 'View' : 'Find another time'}
+                    {isAccepted ? 'View details' : 'Find another time'}
                   </SecondaryButton>
+                  {/* Moment View Navigation Fix -- a separate, explicit way
+                   * to still reach the public invitation/confirmation page,
+                   * never the default "View details" destination above. */}
+                  {isAccepted && (
+                    <TextButton onClick={() => onViewMomentInvitation?.(update.momentToken)} color={colors.textMuted}>
+                      View invitation
+                    </TextButton>
+                  )}
                 </div>
               </SurfaceCard>
             );
