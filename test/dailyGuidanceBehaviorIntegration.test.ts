@@ -45,10 +45,12 @@
  * failed, then reverting.
  */
 import { upsertUserByEmail, updateBirthProfile, createHabitLog, createPlannedActivity, cancelPlannedActivity, deletePlannedActivity, updateUserDayBuilderPrefs } from '../apps/web/lib/db';
-import { buildBehavioralAffinityByFamily, buildPreferredDaypartMatchByFamily } from '../apps/web/lib/dailyGuidanceBehavior';
+import { buildBehavioralAffinityByFamily, buildPreferredDaypartMatchByFamily, buildBehavioralProfileForUser } from '../apps/web/lib/dailyGuidanceBehavior';
 import * as dailyGuidanceBehaviorModule from '../apps/web/lib/dailyGuidanceBehavior';
+import { activityDurationByActivityId } from '../apps/web/lib/behavioralAffinity';
 import { buildDailyPersonalFitForUser } from '../apps/web/lib/dailyGuidancePipeline';
 import { buildPersonalDailyGuidance } from '../apps/web/lib/dailyGuidanceOrchestrator';
+import { collectPlanCandidates } from '../apps/web/lib/dailyGuidanceCandidates';
 import { deriveDailyGuidance } from '../packages/daily-guidance/src/engine';
 import * as fs from 'fs';
 import type { WindowRankingContext, RankedTimingWindow } from '../packages/window-ranking/src/types';
@@ -419,8 +421,17 @@ async function main() {
       behaviorCallIndices.length > 0 && behaviorCallIndices.every((i) => i > birthProfileReturnIndex)
     );
     check(
-      'SEQUENCING: buildBehavioralProfileForUser is called AFTER both NO_ACTIVITY_INTENT early returns in source order',
-      noActivityIntentIndices.length === 2 && behaviorCallIndices.every((i) => noActivityIntentIndices.every((j) => i > j))
+      // Behavior-aware Day Builder Duration V1 added a THIRD
+      // NO_ACTIVITY_INTENT return site -- a cheap, pre-behavioral-fetch
+      // raw-intent check (Plan candidates + raw Day Builder intent, no
+      // behavior needed for either) -- so buildBehavioralProfileForUser is
+      // now called AFTER that FIRST check (preserving the zero-query
+      // guarantee for a genuine no-intent request) but BEFORE the other
+      // two (which only run after Day Builder resolution, which itself
+      // needs the behavioral duration projection).
+      'SEQUENCING: buildBehavioralProfileForUser is called AFTER the first (raw-intent) NO_ACTIVITY_INTENT check but BEFORE the other two (which run after Day Builder resolution)',
+      noActivityIntentIndices.length === 3 &&
+        behaviorCallIndices.every((i) => i > noActivityIntentIndices[0] && i < noActivityIntentIndices[1] && i < noActivityIntentIndices[2])
     );
     check(
       'QUERY COUNT (merge-critical): buildBehavioralProfileForUser -- the ONE function that calls listHabitLogsForInsights -- appears EXACTLY ONCE in the orchestrator\'s own source, proving Preferred Daypart Personalization V1 added zero additional HabitLog queries to the READY path',
@@ -460,6 +471,164 @@ async function main() {
       check('RUNTIME-PROVEN QUERY COUNT: the spied call still produces a READY result -- patching the module does not alter real behavior', spiedResult.status === 'READY');
     } finally {
       (dailyGuidanceBehaviorModule as { buildBehavioralProfileForUser: typeof originalBuildProfile }).buildBehavioralProfileForUser = originalBuildProfile;
+    }
+
+    // ============================================================
+    // BEHAVIOR-AWARE DAY BUILDER DURATION V1 -- SHARED PROFILE PROOF
+    // (merge-critical). userA already carries 5 real WORKOUT HabitLog rows,
+    // all durationMinutes: 45 (established above for the affinity proof) --
+    // exactly 5 valid, consistent (range 0) observations, so the SAME
+    // already-derived profile also carries a real, non-synthetic
+    // typicalDurationMinutes for 'workout'. Proves activity duration is
+    // projected from the identical profile affinity/daypart already use --
+    // no second derivation, no second fetch.
+    // ============================================================
+    {
+      const profile = await buildBehavioralProfileForUser(userA, NOW);
+      const durationMap = activityDurationByActivityId(profile);
+      check('SHARED PROFILE: the SAME already-fetched profile carries a real typicalDurationMinutes for workout (45, from userA\'s own 5 real HabitLog rows)', durationMap.workout === 45);
+      check('SHARED PROFILE: that profile ALSO carries real WORKOUT affinity STRONG -- one fetch, both signals', profile.activities.find((a) => a.activityFamily === 'WORKOUT')?.affinity === 'STRONG');
+    }
+
+    // ============================================================
+    // BEHAVIOR-AWARE DAY BUILDER DURATION V1 -- RAW-INTENT GATE (merge-
+    // critical). A dedicated, throwaway user with Day Builder disabled and
+    // zero Plans today: buildPersonalDailyGuidance must return
+    // NO_ACTIVITY_INTENT with ZERO behavioral queries -- proven with the
+    // SAME genuine runtime spy technique as RUNTIME-PROVEN QUERY COUNT
+    // above, not just source inspection.
+    // ============================================================
+    {
+      const noIntentOwner = await upsertUserByEmail({ email: 'test-daily-guidance-behavior-no-intent@example.com', cityName: 'Chennai', latitude: 13.0827, longitude: 80.2707, timezone: TZ });
+      const noIntentUser = await updateBirthProfile(noIntentOwner.id, { birthDate: '1990-06-15', birthTime: '08:30', birthCityName: 'Chennai', birthLatitude: 13.0827, birthLongitude: 80.2707, birthTimezone: TZ });
+      await updateUserDayBuilderPrefs(noIntentUser.id, { dayBuilderEnabled: false, dayBuilderMutedGroups: [], dayBuilderPriorities: [], dayBuilderPriorityPersonIds: [], dayBuilderPrioritiesPromptDismissed: true });
+
+      const originalForGate = dailyGuidanceBehaviorModule.buildBehavioralProfileForUser;
+      let gateFetchCount = 0;
+      (dailyGuidanceBehaviorModule as { buildBehavioralProfileForUser: typeof originalForGate }).buildBehavioralProfileForUser = async (user, now) => {
+        gateFetchCount++;
+        return originalForGate(user, now);
+      };
+      try {
+        // REVIEW COVERAGE STRENGTHENING (pre-PR review) -- an IN-MEMORY
+        // override (never persisted), matching dayBuilderDb.test.ts's own
+        // established `{ ...user, dayBuilderEnabled: false }` convention.
+        // Deliberately never uses noIntentOwner's own real DB row for
+        // "incomplete" here: this SAME test's very next line calls
+        // updateBirthProfile on that exact row, so on any run after the
+        // first, the row's real persisted birth profile is already
+        // complete (upsertUserByEmail returns its CURRENT, not a fresh,
+        // state) -- exactly the "must run repeatably" trap this file's own
+        // COLD START comment already warns about elsewhere. The in-memory
+        // override is reliable on every run, not just the first.
+        const incompleteBirthProfileUser = { ...noIntentUser, birthDate: null };
+        const birthRequiredResult = await buildPersonalDailyGuidance(incompleteBirthProfileUser, NOW);
+        check('BIRTH-PROFILE GATE (merge-critical): an incomplete birth profile -> status BIRTH_PROFILE_REQUIRED', birthRequiredResult.status === 'BIRTH_PROFILE_REQUIRED');
+        check('BIRTH-PROFILE GATE (merge-critical): buildBehavioralProfileForUser is called ZERO times, proven by a real runtime spy (not just source-scan)', gateFetchCount === 0);
+
+        const noIntentResult = await buildPersonalDailyGuidance(noIntentUser, NOW);
+        check('RAW-INTENT GATE (merge-critical): no Plans + Day Builder disabled -> status NO_ACTIVITY_INTENT', noIntentResult.status === 'NO_ACTIVITY_INTENT');
+        check('RAW-INTENT GATE (merge-critical): buildBehavioralProfileForUser is called ZERO times for a genuine no-intent request, proven by a real runtime spy', gateFetchCount === 0);
+      } finally {
+        (dailyGuidanceBehaviorModule as { buildBehavioralProfileForUser: typeof originalForGate }).buildBehavioralProfileForUser = originalForGate;
+      }
+    }
+
+    // ============================================================
+    // BEHAVIOR-AWARE DAY BUILDER DURATION V1 -- READY ONE-FETCH, ISOLATED
+    // (merge-critical, pre-PR review). userA (used elsewhere in this file)
+    // has Day Builder ENABLED throughout, so a READY result via userA could
+    // always be resolving BOTH a Plan candidate AND a real Day Builder
+    // candidate simultaneously -- never cleanly isolating "Day-Builder-only"
+    // from "Plan-only." Two dedicated, single-purpose throwaway users
+    // isolate each path genuinely: one with Day Builder enabled and zero
+    // Plans (only Day Builder can produce a candidate), one with Day
+    // Builder disabled and exactly one Plan (only the Plan can).
+    // ============================================================
+    {
+      const originalForReady = dailyGuidanceBehaviorModule.buildBehavioralProfileForUser;
+      let readyFetchCount = 0;
+      (dailyGuidanceBehaviorModule as { buildBehavioralProfileForUser: typeof originalForReady }).buildBehavioralProfileForUser = async (user, now) => {
+        readyFetchCount++;
+        return originalForReady(user, now);
+      };
+      try {
+        // Day-Builder-only: enabled, wide open, zero Plans today.
+        readyFetchCount = 0;
+        const dayBuilderOnlyOwner = await upsertUserByEmail({ email: 'test-daily-guidance-behavior-day-builder-only@example.com', cityName: 'Chennai', latitude: 13.0827, longitude: 80.2707, timezone: TZ });
+        const dayBuilderOnlyUser = await updateBirthProfile(dayBuilderOnlyOwner.id, { birthDate: '1990-06-15', birthTime: '08:30', birthCityName: 'Chennai', birthLatitude: 13.0827, birthLongitude: 80.2707, birthTimezone: TZ });
+        await updateUserDayBuilderPrefs(dayBuilderOnlyUser.id, { dayBuilderEnabled: true, dayBuilderMutedGroups: [], dayBuilderPriorities: [], dayBuilderPriorityPersonIds: [], dayBuilderPrioritiesPromptDismissed: true });
+        const dayBuilderOnlyResult = await buildPersonalDailyGuidance(dayBuilderOnlyUser, new Date());
+        check('READY DAY-BUILDER-ONLY (isolated): a wide-open day with zero Plans produces status READY via Day Builder alone', dayBuilderOnlyResult.status === 'READY');
+        check('READY DAY-BUILDER-ONLY (isolated, merge-critical): buildBehavioralProfileForUser is called EXACTLY ONCE, proven by a real runtime spy', readyFetchCount === 1);
+
+        // Plan-only: disabled, exactly one real Plan today.
+        readyFetchCount = 0;
+        const planOnlyOwner = await upsertUserByEmail({ email: 'test-daily-guidance-behavior-plan-only@example.com', cityName: 'Chennai', latitude: 13.0827, longitude: 80.2707, timezone: TZ });
+        const planOnlyUser = await updateBirthProfile(planOnlyOwner.id, { birthDate: '1990-06-15', birthTime: '08:30', birthCityName: 'Chennai', birthLatitude: 13.0827, birthLongitude: 80.2707, birthTimezone: TZ });
+        await updateUserDayBuilderPrefs(planOnlyUser.id, { dayBuilderEnabled: false, dayBuilderMutedGroups: [], dayBuilderPriorities: [], dayBuilderPriorityPersonIds: [], dayBuilderPrioritiesPromptDismissed: true });
+        const planOnlyPlan = await createPlannedActivity({
+          userId: planOnlyUser.id,
+          title: 'Workout Block',
+          activityId: 'workout',
+          plannedStartAt: new Date(Date.now() + 2 * 60 * 60 * 1000),
+          plannedEndAt: new Date(Date.now() + 2.5 * 60 * 60 * 1000),
+          durationMinutes: 30,
+          windowType: 'NEUTRAL',
+        });
+        try {
+          const planOnlyResult = await buildPersonalDailyGuidance(planOnlyUser, new Date());
+          check('READY PLAN-ONLY (isolated): Day Builder disabled, one real Plan -> status READY via the Plan alone', planOnlyResult.status === 'READY');
+          check('READY PLAN-ONLY (isolated, merge-critical): buildBehavioralProfileForUser is called EXACTLY ONCE, proven by a real runtime spy', readyFetchCount === 1);
+        } finally {
+          await cancelPlannedActivity(planOnlyUser.id, planOnlyPlan.id);
+          await deletePlannedActivity(planOnlyUser.id, planOnlyPlan.id);
+        }
+      } finally {
+        (dailyGuidanceBehaviorModule as { buildBehavioralProfileForUser: typeof originalForReady }).buildBehavioralProfileForUser = originalForReady;
+      }
+    }
+
+    // ============================================================
+    // BEHAVIOR-AWARE DAY BUILDER DURATION V1 -- PLAN NEUTRALITY. userA's
+    // real WORKOUT typicalDurationMinutes (45, established above) must
+    // never affect a Plan's own explicit, already-scheduled duration --
+    // even a Plan for the SAME activityId, at a DIFFERENT duration.
+    // ============================================================
+    {
+      const neutralPlan = await createPlannedActivity({
+        userId: userA.id,
+        title: 'Workout Block',
+        activityId: 'workout',
+        plannedStartAt: new Date(Date.now() + 2 * 60 * 60 * 1000),
+        plannedEndAt: new Date(Date.now() + 3 * 60 * 60 * 1000),
+        durationMinutes: 60,
+        windowType: 'NEUTRAL',
+      });
+      try {
+        // Directly at the candidate level (collectPlanCandidates itself
+        // never accepts a behavioral parameter -- structurally impossible
+        // for it to consult one), rather than through the full
+        // ranking/window pipeline: #104's own CHECK-based window ranking
+        // can select a nearby ALTERNATIVE slot when it scores better than
+        // the exact requested instant (existing, pre-this-feature
+        // behavior, unrelated to duration) -- so `timing.start`/`.end` on
+        // the FINAL recommendation is not a reliable proxy for "the Plan's
+        // own duration was preserved." `candidate.durationMinutes` is.
+        const planCandidates = await collectPlanCandidates(userA, new Date());
+        const workoutPlanCandidate = planCandidates.find((c) => c.sourceEntityId === neutralPlan.id);
+        check('PLAN NEUTRALITY: the real Plan produces exactly one PLAN candidate for its own id', workoutPlanCandidate !== undefined);
+        check(
+          'PLAN NEUTRALITY (merge-critical): the Plan candidate keeps its own 60-minute durationMinutes -- never overridden by the real 45-minute behavioral signal for the same activityId (collectPlanCandidates never even accepts a behavioral parameter)',
+          workoutPlanCandidate?.durationMinutes === 60
+        );
+
+        const planResult = await buildPersonalDailyGuidance(userA, new Date());
+        check('PLAN NEUTRALITY: a real Plan produces status READY', planResult.status === 'READY');
+      } finally {
+        await cancelPlannedActivity(userA.id, neutralPlan.id);
+        await deletePlannedActivity(userA.id, neutralPlan.id);
+      }
     }
   } finally {
     for (const planId of createdPlanIds) {

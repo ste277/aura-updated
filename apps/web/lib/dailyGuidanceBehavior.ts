@@ -26,40 +26,29 @@
  * as #110 defines them) and does NOT query PlannedActivity -- see
  * behavioralAffinity.ts's own module doc comment for why HabitLog alone
  * is already complete, non-double-counting evidence.
+ *
+ * Behavior-aware Day Builder Duration V1 -- the actual fetch+derive
+ * implementation of `buildBehavioralProfileForUser` now lives in
+ * behavioralProfileFetch.ts (a feature-agnostic shared helper, reused by
+ * GET /api/my-day/suggestions without that route importing this
+ * Daily-Guidance-specific module). This file keeps its OWN thin wrapper
+ * of the same name -- a real function, not a re-export -- purely so
+ * existing call sites/tests (including
+ * test/dailyGuidanceBehaviorIntegration.test.ts's own runtime
+ * query-count spy, which patches this exact module's own
+ * `buildBehavioralProfileForUser` property) continue to work completely
+ * unmodified.
  */
-import { listHabitLogsForInsights } from './db';
-import { deriveBehavioralProfile, BEHAVIORAL_AFFINITY_RECENCY_DAYS } from './behavioralAffinity';
 import { toInsightsObservation } from './insightsTimezone';
+import { buildBehavioralProfileForUser as buildBehavioralProfileForUserShared } from './behavioralProfileFetch';
 import type { User } from './db';
 import type { BehavioralProfileContext } from './behavioralAffinity';
 import type { ConcreteGuidanceCandidate } from './dailyGuidanceTypes';
 import type { MuhurtaActivityFamily } from '../../../packages/muhurta/src/muhurtaEngine';
 import type { BehavioralAffinityTier } from '../../../packages/daily-guidance/src/types';
 
-const MS_PER_DAY = 24 * 60 * 60 * 1000;
-
-/**
- * The single shared async entry point -- fetches HabitLog history and
- * derives #110's full profile EXACTLY ONCE. `now` must be the SAME
- * explicit instant already threaded through
- * `buildPersonalDailyGuidance(user, now)` -- this function never reads
- * `Date.now()`/`new Date()` itself, and derives `sinceDate` from that
- * same `now` (never a second captured time).
- *
- * `user.timezone` (current location), never `user.birthTimezone` -- #110's
- * own daypart classification is about when the user actually acts today,
- * not their birth circumstances.
- *
- * Never throws for a HabitLog query failure -- a genuine infrastructure
- * error propagates to the caller exactly like every other DB call in this
- * pipeline (dailyGuidanceCandidates.ts's own listPlannedActivitiesForDay
- * call included), never silently degraded to an all-NEUTRAL/no-match
- * fallback.
- */
 export async function buildBehavioralProfileForUser(user: User, now: Date): Promise<BehavioralProfileContext> {
-  const sinceDate = new Date(now.getTime() - BEHAVIORAL_AFFINITY_RECENCY_DAYS * MS_PER_DAY);
-  const habitLogs = await listHabitLogsForInsights(user.id, sinceDate);
-  return deriveBehavioralProfile(habitLogs, user.timezone, now);
+  return buildBehavioralProfileForUserShared(user, now);
 }
 
 /**

@@ -7,15 +7,21 @@
  * repo's established pattern (see test/insightsAuraFit.test.ts,
  * test/habitLogActivityIdentity.test.ts).
  *
- * FOUNDATION ONLY: this suite proves the engine's own contract -- it does
- * NOT touch Daily Guidance, Best For You, Forward Planner, Ask Aura, Why
- * Aura, Timing Search, GOOD_RIGHT_NOW, Muhurtham Finder, Aura Fit, Window
- * Ranking, Life Weather, or Daily Personal Fit, because this module has no
- * consumer yet.
+ * FOUNDATION ONLY (affinity/preferredDaypart/family-level+activity-level
+ * duration derivation): this suite proves the engine's own contract -- it
+ * does NOT touch Daily Guidance, Best For You, Forward Planner, Ask Aura,
+ * Why Aura, Timing Search, GOOD_RIGHT_NOW, Muhurtham Finder, Aura Fit,
+ * Window Ranking, Life Weather, or Daily Personal Fit, because this module
+ * has no consumer for those signals. Behavior-aware Day Builder Duration
+ * V1 is the ONE exception: `activityDurationByActivityId` (tested below)
+ * is a real, consumed projection -- see apps/web/lib/dayBuilderOrchestrator.ts
+ * and apps/web/app/api/my-day/suggestions/route.ts -- but it is still
+ * pure/DB-free HERE; its own consumers own the DB access.
  */
 import type { HabitLogRow } from '../apps/web/lib/db';
 import {
   deriveBehavioralProfile,
+  activityDurationByActivityId,
   BEHAVIORAL_AFFINITY_ENGINE_VERSION,
   BEHAVIORAL_AFFINITY_POLICY_VERSION,
   BEHAVIORAL_AFFINITY_RECENCY_DAYS,
@@ -540,6 +546,45 @@ function findActivityDuration(activityDurations: BehavioralActivityDuration[], a
   deriveBehavioralProfile(logs, TZ, NOW);
   check('IMMUTABILITY: the input habitLogs array is unchanged after derivation', JSON.stringify(logs) === JSON.stringify(snapshot));
   check('IMMUTABILITY: input array length is unchanged (never spliced/pushed into)', logs.length === 2);
+}
+
+// ============================================================
+// ACTIVITY DURATION PROJECTION (Behavior-aware Day Builder Duration V1) --
+// activityDurationByActivityId(profile) reshapes the sparse
+// activityDurations array into a plain lookup map, built solely from that
+// array -- no DB, no family-level data, no fallback resolution.
+// ============================================================
+{
+  const explicitProfile = {
+    engineVersion: BEHAVIORAL_AFFINITY_ENGINE_VERSION,
+    policyVersion: BEHAVIORAL_AFFINITY_POLICY_VERSION,
+    evaluationTime: NOW.toISOString(),
+    activities: [],
+    activityDurations: [
+      { activityId: 'workout', typicalDurationMinutes: 45 },
+      { activityId: 'coffee-tea', typicalDurationMinutes: 30 },
+    ],
+  };
+  const map = activityDurationByActivityId(explicitProfile);
+  check('PROJECTION: activityDurationByActivityId maps activityDurations entries to a plain lookup object', map.workout === 45 && map['coffee-tea'] === 30);
+  check('PROJECTION: the map has exactly the entries activityDurations carried, nothing extra', Object.keys(map).length === 2);
+
+  const emptyProfile = { ...explicitProfile, activityDurations: [] };
+  check('PROJECTION: an empty activityDurations array projects to an empty map', Object.keys(activityDurationByActivityId(emptyProfile)).length === 0);
+
+  // Real derivation round-trip: the SAME family-collision fixture proven
+  // above (coffee-tea 30, birthday-party 150, both SOCIAL) projects
+  // correctly through deriveBehavioralProfile -> activityDurationByActivityId.
+  const realLogs = [
+    makeLog({ activityId: 'coffee-tea', durationMinutes: 30 }),
+    makeLog({ activityId: 'coffee-tea', durationMinutes: 30 }),
+    makeLog({ activityId: 'coffee-tea', durationMinutes: 45 }),
+    makeLog({ activityId: 'birthday-party', durationMinutes: 120 }),
+    makeLog({ activityId: 'birthday-party', durationMinutes: 150 }),
+    makeLog({ activityId: 'birthday-party', durationMinutes: 150 }),
+  ];
+  const realMap = activityDurationByActivityId(deriveBehavioralProfile(realLogs, TZ, NOW));
+  check('PROJECTION (real derivation): coffee-tea and birthday-party both resolve independently through the full pipeline', realMap['coffee-tea'] === 30 && realMap['birthday-party'] === 150);
 }
 
 if (!allPassed) {

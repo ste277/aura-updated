@@ -2,10 +2,13 @@ import { NextRequest, NextResponse } from 'next/server';
 import { getSessionFromRequest } from '../../../../lib/session';
 import { getUserById } from '../../../../lib/db';
 import { buildMyDay } from '../../../../lib/myDayOrchestrator';
-import { buildIntentionalDaySuggestions } from '../../../../lib/dayBuilderOrchestrator';
+import { buildIntentionalDaySuggestions, discoverDayBuilderIntentionCandidates } from '../../../../lib/dayBuilderOrchestrator';
+import { buildBehavioralProfileForUser } from '../../../../lib/behavioralProfileFetch';
+import { activityDurationByActivityId } from '../../../../lib/behavioralAffinity';
 import { getMinuteOfDayInTimezone } from '../../../../lib/timezone';
 import { resolveRequestNow } from '../../../../lib/testTimeOverride';
 import { recordProductEvent } from '../../../../lib/productEvents';
+import type { IntentionalDaySuggestion } from '../../../../lib/dayBuilder';
 
 /**
  * Intentional Day Builder V1 (brief section 37) -- GET
@@ -17,6 +20,19 @@ import { recordProductEvent } from '../../../../lib/productEvents';
  * not Day Builder ever renders anything. Reuses buildMyDay() for the
  * agenda itself (same bounded reads, not duplicated) rather than
  * re-fetching Plans/Moments/logs a second time.
+ *
+ * Behavior-aware Day Builder Duration V1 -- this route now uses the EXACT
+ * SAME duration-resolution policy as Daily Guidance's own Day Builder
+ * candidate pipeline (this feature's own architecture audit's merge-
+ * critical "same activity + same user + same now/timezone -> same
+ * resolved duration in both callers" rule): `discoverDayBuilderIntentionCandidates`
+ * (dayBuilderOrchestrator.ts, cheap, pure, no DB beyond the already-
+ * fetched `agenda`) decides whether raw Day Builder intent exists BEFORE
+ * this route pays for a new HabitLog query -- zero raw intent means zero
+ * new behavioral cost, unchanged from before this feature. A genuine
+ * behavior-fetch failure propagates (matches Daily Guidance's own existing
+ * precedent, see behavioralProfileFetch.ts's own doc comment) -- no
+ * static-duration fallback, no empty-profile fallback.
  */
 
 const DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
@@ -37,7 +53,14 @@ export async function GET(req: NextRequest) {
   const startedAt = Date.now();
   const { agenda } = await buildMyDay(user, rawDate ?? undefined, now);
   const minuteOfDay = getMinuteOfDayInTimezone(user.timezone, now);
-  const suggestions = await buildIntentionalDaySuggestions({ user, agenda, minuteOfDay, now });
+
+  const { intentionCandidates } = discoverDayBuilderIntentionCandidates(user, agenda, minuteOfDay);
+  let suggestions: IntentionalDaySuggestion[] = [];
+  if (intentionCandidates.length > 0) {
+    const behavioralProfile = await buildBehavioralProfileForUser(user, now);
+    const behavioralDurationByActivityId = activityDurationByActivityId(behavioralProfile);
+    suggestions = await buildIntentionalDaySuggestions({ user, agenda, minuteOfDay, now, behavioralDurationByActivityId });
+  }
   const durationMs = Date.now() - startedAt;
 
   if (suggestions.length > 0) {

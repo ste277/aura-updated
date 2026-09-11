@@ -164,6 +164,25 @@ export interface BehavioralActivityDuration {
 }
 
 /**
+ * Behavior-aware Day Builder Duration V1 -- the one pure projection this
+ * feature's own architecture audit calls for: `profile.activityDurations`
+ * (a sparse array) collapsed into a plain, easy-to-look-up map, built
+ * SOLELY from that array -- no DB, no date/time logic, no fallback
+ * resolution, and no family-level `typicalDurationMinutes` (see that
+ * field's own doc comment for why it must never be used as a per-activity
+ * default). Consumers (dayBuilderOrchestrator.ts's own duration resolver)
+ * decide what to do with a missing key; this function only reshapes
+ * already-derived data.
+ */
+export function activityDurationByActivityId(profile: BehavioralProfileContext): Readonly<Record<string, number>> {
+  const byActivityId: Record<string, number> = {};
+  for (const entry of profile.activityDurations) {
+    byActivityId[entry.activityId] = entry.typicalDurationMinutes;
+  }
+  return byActivityId;
+}
+
+/**
  * COLD-START CONTRACT (architecture audit item 8, resolved): `activities`
  * always contains exactly `CANONICAL_ACTIVITY_FAMILIES.length` (13)
  * entries, one per canonical family, in that fixed order -- never sparse,

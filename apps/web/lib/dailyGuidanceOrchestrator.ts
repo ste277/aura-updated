@@ -22,15 +22,24 @@
  * Pipeline:
  *   buildDailyPersonalFitForUser (dailyGuidancePipeline.ts)
  *     -> DailyPersonalFitContext, or `undefined` if birth profile incomplete
- *   collectPlanCandidates + collectDayBuilderCandidates + dedupeCandidates
- *     (dailyGuidanceCandidates.ts) -> ConcreteGuidanceCandidate[]
- *   selectOneCandidatePerFamily + buildWindowRankingContexts
- *     (dailyGuidanceSameFamily.ts) -> WindowRankingContext[]
+ *   collectPlanCandidates + discoverDayBuilderCandidates (dailyGuidanceCandidates.ts,
+ *     run in parallel) -> Plan candidates + cheap raw Day-Builder-intent signal,
+ *     NEITHER of which needs a behavioral profile
+ *   if neither exists -> NO_ACTIVITY_INTENT, still zero behavioral queries
  *   buildBehavioralProfileForUser (dailyGuidanceBehavior.ts, ONE HabitLog
  *     query + ONE #110 derivation) -> BehavioralProfileContext
+ *   activityDurationByActivityId (behavioralAffinity.ts, PURE projection of
+ *     that SAME profile, Behavior-aware Day Builder Duration V1)
+ *   resolveDayBuilderCandidates (dailyGuidanceCandidates.ts, only when raw
+ *     Day Builder intent exists) -> Day Builder candidates, FIND now
+ *     resolved using the behavioral duration map above
+ *   dedupeCandidates -> ConcreteGuidanceCandidate[]
+ *   selectOneCandidatePerFamily + buildWindowRankingContexts
+ *     (dailyGuidanceSameFamily.ts) -> WindowRankingContext[]
  *   affinityByFamily + buildPreferredDaypartMatchByFamily
- *     (dailyGuidanceBehavior.ts, both PURE projections of the SAME profile,
- *     Behavioral Integration V1 / Preferred Daypart Personalization V1)
+ *     (dailyGuidanceBehavior.ts, both PURE projections of the SAME already-
+ *     fetched profile, Behavioral Integration V1 / Preferred Daypart
+ *     Personalization V1) -- no second HabitLog query
  *   deriveDailyGuidance (packages/daily-guidance)
  *     -> DailyGuidanceContext
  *   -> PersonalDailyGuidanceResult (this file's own assembly)
@@ -39,9 +48,10 @@
  * page.tsx/HomeDashboard.tsx -- that belongs to the New Aura Home PR.
  */
 import { buildDailyPersonalFitForUser } from './dailyGuidancePipeline';
-import { collectPlanCandidates, collectDayBuilderCandidates, dedupeCandidates } from './dailyGuidanceCandidates';
+import { collectPlanCandidates, discoverDayBuilderCandidates, resolveDayBuilderCandidates, dedupeCandidates } from './dailyGuidanceCandidates';
 import { selectOneCandidatePerFamily, buildWindowRankingContexts } from './dailyGuidanceSameFamily';
 import { buildBehavioralProfileForUser, affinityByFamily, buildPreferredDaypartMatchByFamily } from './dailyGuidanceBehavior';
+import { activityDurationByActivityId } from './behavioralAffinity';
 import { deriveDailyGuidance } from '../../../packages/daily-guidance/src/engine';
 import type { User } from './db';
 import type { PersonalDailyGuidanceResult, SelectedActivityMetadata } from './dailyGuidanceTypes';
@@ -57,31 +67,48 @@ import type { MuhurtaActivityFamily } from '../../../packages/muhurta/src/muhurt
  * completeness is checked before any Plan/Day Builder DB read happens
  * (buildDailyPersonalFitForUser's own early `undefined` return, mirroring
  * buildPersonalMuhurtaContextForUser's existing contract); declared-intent
- * discovery runs next, with its own NO_ACTIVITY_INTENT early return. Only
- * once real intent is confirmed to exist does the behavioral HabitLog
- * fetch run (buildBehavioralProfileForUser) -- never for
- * BIRTH_PROFILE_REQUIRED or NO_ACTIVITY_INTENT, so this additive signal is
- * never fetched when it could not possibly be used. Exactly ONE such
- * fetch happens on the READY path, feeding BOTH `affinityByFamily` and
- * `buildPreferredDaypartMatchByFamily` (Behavioral Integration V1 /
+ * DISCOVERY runs next (collectPlanCandidates + discoverDayBuilderCandidates,
+ * in parallel) -- neither needs a behavioral profile, so a genuine
+ * NO_ACTIVITY_INTENT (no Plan candidates AND no raw Day Builder intent)
+ * returns here with ZERO behavioral queries, unchanged from before
+ * Behavior-aware Day Builder Duration V1. Only once real intent is
+ * confirmed to exist does the behavioral HabitLog fetch run
+ * (buildBehavioralProfileForUser) -- never for BIRTH_PROFILE_REQUIRED or
+ * this first NO_ACTIVITY_INTENT check. Exactly ONE such fetch happens on
+ * the READY path, feeding `activityDurationByActivityId` (Behavior-aware
+ * Day Builder Duration V1, used to RESOLVE Day Builder candidates below --
+ * shaping FIND input only, never a ranking signal), `affinityByFamily`,
+ * and `buildPreferredDaypartMatchByFamily` (Behavioral Integration V1 /
  * Preferred Daypart Personalization V1) -- never a second HabitLog query.
- * A genuine failure of that fetch propagates like every other DB call in
- * this pipeline -- never silently converted to an all-NEUTRAL/no-match
- * fallback (see dailyGuidanceBehavior.ts's own doc comment).
+ * A second NO_ACTIVITY_INTENT is still possible after RESOLUTION (raw
+ * intent existed but FIND/CHECK produced zero valid candidates) -- that is
+ * expected and does NOT indicate a query-count regression: behavior was
+ * already legitimately fetched because raw intent existed.
+ * A genuine failure of the behavioral fetch propagates like every other DB
+ * call in this pipeline -- never silently converted to an all-NEUTRAL/no-
+ * match/static-default fallback (see behavioralProfileFetch.ts's own doc
+ * comment).
  */
 export async function buildPersonalDailyGuidance(user: User, now: Date): Promise<PersonalDailyGuidanceResult> {
   const dailyPersonalFit = buildDailyPersonalFitForUser(user, now);
   if (!dailyPersonalFit) return { status: 'BIRTH_PROFILE_REQUIRED' };
 
-  const [planCandidates, dayBuilderCandidates] = await Promise.all([collectPlanCandidates(user, now), collectDayBuilderCandidates(user, now)]);
+  const [planCandidates, dayBuilderDiscovery] = await Promise.all([collectPlanCandidates(user, now), discoverDayBuilderCandidates(user, now)]);
+  if (planCandidates.length === 0 && !dayBuilderDiscovery.hasIntent) return { status: 'NO_ACTIVITY_INTENT' };
+
+  const behavioralProfile = await buildBehavioralProfileForUser(user, now);
+  const behavioralDurationByActivityId = activityDurationByActivityId(behavioralProfile);
+  const dayBuilderCandidates = dayBuilderDiscovery.hasIntent
+    ? await resolveDayBuilderCandidates(user, now, dayBuilderDiscovery, behavioralDurationByActivityId)
+    : [];
+
   const candidates = dedupeCandidates([...planCandidates, ...dayBuilderCandidates]);
-  if (candidates.length === 0) return { status: 'NO_ACTIVITY_INTENT' };
+  if (candidates.length === 0) return { status: 'NO_ACTIVITY_INTENT' }; // raw intent existed but nothing resolved into a valid candidate
 
   const selected = selectOneCandidatePerFamily(candidates);
   if (selected.size === 0) return { status: 'NO_ACTIVITY_INTENT' }; // every candidate had zero timing windows -- nothing to represent any family with
 
   const windowRankings = buildWindowRankingContexts(selected);
-  const behavioralProfile = await buildBehavioralProfileForUser(user, now);
   const behavioralAffinityByFamily = affinityByFamily(behavioralProfile);
   const preferredDaypartMatchByFamily = buildPreferredDaypartMatchByFamily(behavioralProfile, selected, user.timezone);
   const guidance = deriveDailyGuidance({ dailyPersonalFit, windowRankings, behavioralAffinityByFamily, preferredDaypartMatchByFamily });

@@ -123,6 +123,38 @@ async function main() {
     }
 
     // ============================================================
+    // BEHAVIOR-AWARE DAY BUILDER DURATION V1 -- live wiring proof. Reuses
+    // the SAME WORK-only fixture above: workSuggestion.activityId's own
+    // static-default duration is already known (workSuggestion.durationMinutes,
+    // computed above with NO behavioral map) -- calling
+    // buildIntentionalDaySuggestions again with a behavioral map for that
+    // exact activityId, at a DELIBERATELY DIFFERENT duration, proves the
+    // resolved value genuinely reaches FIND (not just the suggestion's own
+    // metadata field) and that the returned candidate window's own
+    // end-start genuinely reflects it -- search/save consistency, live.
+    // ============================================================
+    if (workSuggestion) {
+      const staticDuration = workSuggestion.durationMinutes;
+      const behavioralDuration = staticDuration === 60 ? 90 : 60;
+      const behavioralDurationByActivityId = { [workSuggestion.activityId]: behavioralDuration };
+      const behavioralSuggestions = await buildIntentionalDaySuggestions({ user: workOnlyUser, agenda: emptyAgenda, minuteOfDay: MINUTE_OF_DAY, now: NOW, behavioralDurationByActivityId });
+      const behavioralSuggestion = behavioralSuggestions.find((s) => s.activityId === workSuggestion.activityId);
+      check('BEHAVIOR-AWARE DURATION: a behavioral signal for this exact activity changes the resolved suggestion.durationMinutes away from the static default', behavioralSuggestion?.durationMinutes === behavioralDuration && behavioralDuration !== staticDuration);
+      if (behavioralSuggestion && behavioralSuggestion.candidate.kind === 'SOLO' && behavioralSuggestion.candidate.candidates[0]) {
+        const window = behavioralSuggestion.candidate.candidates[0];
+        const windowMinutes = Math.round((new Date(window.end).getTime() - new Date(window.start).getTime()) / 60000);
+        check('BEHAVIOR-AWARE DURATION (search/save consistency): the actual FIND-returned window length equals the resolved behavioral duration, never a re-derived static value', windowMinutes === behavioralDuration);
+      }
+
+      // NO SIGNAL -- an activity with no behavioral entry falls straight
+      // through to today's exact static resolver, byte-identical to the
+      // pre-this-feature suggestion computed above (backward compatibility).
+      const noSignalSuggestions = await buildIntentionalDaySuggestions({ user: workOnlyUser, agenda: emptyAgenda, minuteOfDay: MINUTE_OF_DAY, now: NOW, behavioralDurationByActivityId: { 'some-other-activity-entirely': 999 } });
+      const noSignalSuggestion = noSignalSuggestions.find((s) => s.activityId === workSuggestion.activityId);
+      check('NO SIGNAL: an unrelated behavioral map entry never affects this activity -- duration stays the exact static default', noSignalSuggestion?.durationMinutes === staticDuration);
+    }
+
+    // ============================================================
     // People-oriented suggestion with a real SavedPerson (brief section 9:
     // no fake astrology -- only the person's own already-stored birth data)
     // ============================================================

@@ -272,11 +272,17 @@ check(
 );
 
 check(
-  'STRUCTURAL: dailyGuidanceOrchestrator.ts\'s own NO_ACTIVITY_INTENT checks (comments stripped) test candidates.length/selected.size only -- never guidance.recommendations, confirming READY-empty is unreachable as NO_ACTIVITY_INTENT',
+  // Behavior-aware Day Builder Duration V1 added a THIRD NO_ACTIVITY_INTENT
+  // return site -- the cheap, pre-behavioral-fetch raw-intent check
+  // (planCandidates.length === 0 && !dayBuilderDiscovery.hasIntent),
+  // preserving the zero-query invariant for a genuine no-intent request.
+  // The other two (candidates.length === 0 after Day Builder resolution;
+  // selected.size === 0) are unchanged from before this feature.
+  'STRUCTURAL: dailyGuidanceOrchestrator.ts\'s own NO_ACTIVITY_INTENT checks (comments stripped) test candidates.length/selected.size/raw-intent only -- never guidance.recommendations, confirming READY-empty is unreachable as NO_ACTIVITY_INTENT',
   (() => {
     const code = stripComments(fs.readFileSync('apps/web/lib/dailyGuidanceOrchestrator.ts', 'utf8'));
     const noActivityIntentLines = code.split('\n').filter((line) => line.includes("status: 'NO_ACTIVITY_INTENT'"));
-    return noActivityIntentLines.length === 2 && noActivityIntentLines.every((line) => !/recommendations/i.test(line)) && !/guidance\.recommendations\.length\s*===\s*0/.test(code);
+    return noActivityIntentLines.length === 3 && noActivityIntentLines.every((line) => !/recommendations/i.test(line)) && !/guidance\.recommendations\.length\s*===\s*0/.test(code);
   })()
 );
 
