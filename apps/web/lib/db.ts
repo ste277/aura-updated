@@ -1889,3 +1889,55 @@ export async function listProductEventDurationsSince(eventName: string, since: D
   }
   return Array.from(byGroup.entries()).map(([group, durationsMs]) => ({ group, durationsMs }));
 }
+
+// ── Explicit activity duration preferences (Explicit Duration Preferences
+// Foundation V1, migration 0033) ──────────────────────────────────────────
+// Row absence IS "no explicit preference" -- these are raw persistence
+// primitives only; see apps/web/lib/activityPreferences.ts for activityId/
+// duration validation and the minimal app-facing contract built on top.
+
+export interface UserActivityPreferenceRow {
+  id: string;
+  userId: string;
+  activityId: string;
+  preferredDurationMinutes: number;
+  createdAt: Date;
+  updatedAt: Date;
+}
+
+export async function listUserActivityPreferenceRows(userId: string): Promise<UserActivityPreferenceRow[]> {
+  const result = await pool.query(
+    `SELECT id, "userId", "activityId", "preferredDurationMinutes", "createdAt", "updatedAt"
+     FROM "UserActivityPreference"
+     WHERE "userId" = $1
+     ORDER BY "activityId" ASC`,
+    [userId]
+  );
+  return result.rows;
+}
+
+/** Idempotent by design (ON CONFLICT ("userId", "activityId") DO UPDATE) --
+ * setting the same activity's preference twice updates the one row rather
+ * than erroring or duplicating it. */
+export async function upsertUserActivityPreference(
+  userId: string,
+  activityId: string,
+  preferredDurationMinutes: number
+): Promise<UserActivityPreferenceRow> {
+  const id = randomUUID();
+  const result = await pool.query(
+    `INSERT INTO "UserActivityPreference" (id, "userId", "activityId", "preferredDurationMinutes")
+     VALUES ($1, $2, $3, $4)
+     ON CONFLICT ("userId", "activityId")
+     DO UPDATE SET "preferredDurationMinutes" = EXCLUDED."preferredDurationMinutes", "updatedAt" = now()
+     RETURNING id, "userId", "activityId", "preferredDurationMinutes", "createdAt", "updatedAt"`,
+    [id, userId, activityId, preferredDurationMinutes]
+  );
+  return result.rows[0];
+}
+
+/** Idempotent: clearing a preference that doesn't exist deletes zero rows
+ * and never errors. */
+export async function deleteUserActivityPreference(userId: string, activityId: string): Promise<void> {
+  await pool.query(`DELETE FROM "UserActivityPreference" WHERE "userId" = $1 AND "activityId" = $2`, [userId, activityId]);
+}
