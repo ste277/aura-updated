@@ -27,6 +27,7 @@ import {
 } from '../apps/web/lib/db';
 import { buildDailyAgenda } from '../apps/web/lib/dailyAgenda';
 import { buildIntentionalDaySuggestions } from '../apps/web/lib/dayBuilderOrchestrator';
+import { setPreferredActivityDuration, clearPreferredActivityDuration, listUserActivityPreferences, preferredDurationByActivityId } from '../apps/web/lib/activityPreferences';
 import { runTimingSearch } from '../packages/recommendation/src/timingSearch';
 import { findEverydaySharedTiming } from '../packages/recommendation/src/everydayTimingFit';
 import { natalContextFromBirthDetails } from '../apps/web/lib/natalContext';
@@ -152,6 +153,102 @@ async function main() {
       const noSignalSuggestions = await buildIntentionalDaySuggestions({ user: workOnlyUser, agenda: emptyAgenda, minuteOfDay: MINUTE_OF_DAY, now: NOW, behavioralDurationByActivityId: { 'some-other-activity-entirely': 999 } });
       const noSignalSuggestion = noSignalSuggestions.find((s) => s.activityId === workSuggestion.activityId);
       check('NO SIGNAL: an unrelated behavioral map entry never affects this activity -- duration stays the exact static default', noSignalSuggestion?.durationMinutes === staticDuration);
+
+      // ============================================================
+      // EXPLICIT DURATION PREFERENCES CONTROLS + CONSUMPTION V1 -- live
+      // wiring proof, reusing the SAME WORK-only fixture and the SAME
+      // deliberately-different behavioralDuration computed above. A real
+      // UserActivityPreference row is set for this exact activityId at a
+      // THIRD distinct value, proving preferred beats behavioral through
+      // the real durationMinutesFor precedence, all the way into FIND's
+      // own returned window length (search/save consistency, live) --
+      // never just the suggestion's own metadata field.
+      // ============================================================
+      const preferredDuration = [staticDuration, behavioralDuration].includes(30) ? 90 : 30;
+      await setPreferredActivityDuration({ userId: workOnlyUser.id, activityId: workSuggestion.activityId, preferredDurationMinutes: preferredDuration });
+      try {
+        const preferenceRows = await listUserActivityPreferences(workOnlyUser.id);
+        const preferredDurationMap = preferredDurationByActivityId(preferenceRows);
+        check('PREFERENCE FETCH: the real listUserActivityPreferences call returns the row just set', preferredDurationMap[workSuggestion.activityId] === preferredDuration);
+
+        const preferredSuggestions = await buildIntentionalDaySuggestions({
+          user: workOnlyUser,
+          agenda: emptyAgenda,
+          minuteOfDay: MINUTE_OF_DAY,
+          now: NOW,
+          preferredDurationByActivityId: preferredDurationMap,
+          behavioralDurationByActivityId,
+        });
+        const preferredSuggestion = preferredSuggestions.find((s) => s.activityId === workSuggestion.activityId);
+        check(
+          'PREFERRED BEATS BEHAVIORAL: with both a stored preference and a behavioral signal present, the resolved suggestion.durationMinutes is the PREFERRED value',
+          preferredSuggestion?.durationMinutes === preferredDuration && preferredDuration !== behavioralDuration && preferredDuration !== staticDuration
+        );
+        if (preferredSuggestion && preferredSuggestion.candidate.kind === 'SOLO' && preferredSuggestion.candidate.candidates[0]) {
+          const window = preferredSuggestion.candidate.candidates[0];
+          const windowMinutes = Math.round((new Date(window.end).getTime() - new Date(window.start).getTime()) / 60000);
+          check('PREFERRED (search/save consistency): the actual FIND-returned window length equals the resolved PREFERRED duration', windowMinutes === preferredDuration);
+        }
+
+        // CLEAR FALLBACK (merge-critical, architecture audit item 45/49) --
+        // deleting the preference row means the NEXT fetch's projection
+        // simply omits this activityId; feeding that (now preference-less)
+        // map back into the resolver, with the SAME behavioral map still
+        // present, must fall straight through to the behavioral value --
+        // no stale cache, no leftover preferred value anywhere.
+        await clearPreferredActivityDuration({ userId: workOnlyUser.id, activityId: workSuggestion.activityId });
+        const rowsAfterClear = await listUserActivityPreferences(workOnlyUser.id);
+        const mapAfterClear = preferredDurationByActivityId(rowsAfterClear);
+        check('CLEAR FALLBACK: after clearing, the fresh projection no longer carries this activityId', mapAfterClear[workSuggestion.activityId] === undefined);
+
+        const afterClearSuggestions = await buildIntentionalDaySuggestions({
+          user: workOnlyUser,
+          agenda: emptyAgenda,
+          minuteOfDay: MINUTE_OF_DAY,
+          now: NOW,
+          preferredDurationByActivityId: mapAfterClear,
+          behavioralDurationByActivityId,
+        });
+        const afterClearSuggestion = afterClearSuggestions.find((s) => s.activityId === workSuggestion.activityId);
+        check(
+          'CLEAR FALLBACK: with the preference gone, the SAME request (same behavioral map) resolves back to the behavioral value, not a stale preferred value',
+          afterClearSuggestion?.durationMinutes === behavioralDuration
+        );
+      } finally {
+        await clearPreferredActivityDuration({ userId: workOnlyUser.id, activityId: workSuggestion.activityId }).catch(() => undefined);
+      }
+
+      // ============================================================
+      // USER ISOLATION (orchestration level, not just the service layer
+      // activityPreferencesDb.test.ts already proves) -- a second,
+      // independent user with a DIFFERENT preference for the SAME
+      // activityId must resolve independently all the way through
+      // buildIntentionalDaySuggestions; user A's own preference-driven
+      // suggestion above must remain completely unaffected.
+      // ============================================================
+      const ownerB = await upsertUserByEmail({ email: 'test-day-builder-owner-b@example.com', cityName: 'Chennai', latitude: 13.0827, longitude: 80.2707, timezone: TZ });
+      const ownerBWorkOnly = { ...ownerB, dayBuilderEnabled: true, dayBuilderMutedGroups: ['RELATIONSHIPS', 'FAMILY', 'SOCIAL', 'SELF', 'ENJOYMENT'] };
+      const isolationDuration = preferredDuration === 30 ? 120 : 45;
+      try {
+        await setPreferredActivityDuration({ userId: ownerB.id, activityId: workSuggestion.activityId, preferredDurationMinutes: isolationDuration });
+        const [prefsA, prefsB] = await Promise.all([listUserActivityPreferences(workOnlyUser.id), listUserActivityPreferences(ownerB.id)]);
+        const mapA = preferredDurationByActivityId(prefsA);
+        const mapB = preferredDurationByActivityId(prefsB);
+        check('USER ISOLATION: ownerA no longer has a preference for this activityId (cleared above)', mapA[workSuggestion.activityId] === undefined);
+        check('USER ISOLATION: ownerB\'s own preference is present and independent', mapB[workSuggestion.activityId] === isolationDuration);
+
+        const ownerBSuggestions = await buildIntentionalDaySuggestions({
+          user: ownerBWorkOnly,
+          agenda: emptyAgenda,
+          minuteOfDay: MINUTE_OF_DAY,
+          now: NOW,
+          preferredDurationByActivityId: mapB,
+        });
+        const ownerBSuggestion = ownerBSuggestions.find((s) => s.activityId === workSuggestion.activityId);
+        check('USER ISOLATION: ownerB\'s own suggestion resolves ownerB\'s own preferred duration', ownerBSuggestion?.durationMinutes === isolationDuration);
+      } finally {
+        await clearPreferredActivityDuration({ userId: ownerB.id, activityId: workSuggestion.activityId }).catch(() => undefined);
+      }
     }
 
     // ============================================================

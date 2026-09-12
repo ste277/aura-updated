@@ -74,24 +74,38 @@ const MAX_DISPLAY_CANDIDATES = 3;
 const MIN_DISPLAY_CANDIDATE_SPACING_MINUTES = 45;
 
 /**
- * Behavior-aware Day Builder Duration V1 -- `behavioralDurationByActivityId`
- * is OPTIONAL (every pre-existing caller omits it, so this is a
- * backward-compatible additive parameter, not a breaking signature
- * change) and, when supplied, wins over the static catalog chain below --
- * see this feature's own architecture audit for the full precedence
- * rationale (activity-level behavioral duration means "recently typical
- * LOGGED duration for this specific activity," never "preferred" or
- * "optimal"). Never consults family-level `typicalDurationMinutes`
- * (merge-critical -- see BehavioralActivityAffinity's own doc comment for
- * why that would be unsafe) and never overrides an explicit duration --
- * there is no explicit-duration input on this path today, so this
- * precedence is purely forward-proofing (see the architecture audit's own
- * "explicit user duration > ... > behavioral activity duration > ..."
- * chain).
+ * Behavior-aware Day Builder Duration V1 / Explicit Duration Preferences
+ * Controls + Consumption V1 -- both `preferredDurationByActivityId` and
+ * `behavioralDurationByActivityId` are OPTIONAL (every pre-existing caller
+ * omits them, so each is a backward-compatible additive parameter, not a
+ * breaking signature change). `preferredDurationByActivityId` is the
+ * user's own EXPLICITLY SAVED duration (apps/web/lib/activityPreferences.ts)
+ * -- it wins over everything else, since a user-declared statement beats
+ * any inference. `behavioralDurationByActivityId` (activity-level "recently
+ * typical LOGGED duration," never "preferred" or "optimal") wins over the
+ * static catalog chain below it, same as before this feature. Never
+ * consults family-level `typicalDurationMinutes` (merge-critical -- see
+ * BehavioralActivityAffinity's own doc comment for why that would be
+ * unsafe). There is no REQUEST-specific explicit duration on this path
+ * today (a one-off "find me a 30-minute workout" override), so this
+ * function's own precedence still stops at the stored preference -- see
+ * this feature's own architecture audit for the full chain this is one
+ * link of: request-specific duration > stored explicit preference >
+ * behavioral activity duration > catalog default > suggested duration > 45.
  */
-export function durationMinutesFor(activityId: string, behavioralDurationByActivityId?: Readonly<Record<string, number>>): number {
+export function durationMinutesFor(
+  activityId: string,
+  preferredDurationByActivityId?: Readonly<Record<string, number>>,
+  behavioralDurationByActivityId?: Readonly<Record<string, number>>
+): number {
   const definition = getActivityDefinition(activityId);
-  return behavioralDurationByActivityId?.[activityId] ?? definition?.experience.defaultDurationMinutes ?? definition?.experience.suggestedDurations?.[0] ?? 45;
+  return (
+    preferredDurationByActivityId?.[activityId] ??
+    behavioralDurationByActivityId?.[activityId] ??
+    definition?.experience.defaultDurationMinutes ??
+    definition?.experience.suggestedDurations?.[0] ??
+    45
+  );
 }
 
 /**
@@ -181,6 +195,12 @@ export async function buildIntentionalDaySuggestions(input: {
   agenda: DailyAgenda;
   minuteOfDay: number;
   now: Date;
+  /** Explicit Duration Preferences Controls + Consumption V1 -- OPTIONAL,
+   * additive (every pre-existing caller omits it). Sourced from
+   * preferredDurationByActivityId(preferences) (activityPreferences.ts),
+   * fetched by the CALLER -- this function never fetches preferences
+   * itself, same discipline as behavioralDurationByActivityId below. */
+  preferredDurationByActivityId?: Readonly<Record<string, number>>;
   /** Behavior-aware Day Builder Duration V1 -- OPTIONAL, additive (every
    * pre-existing caller omits it). Sourced from
    * activityDurationByActivityId(profile) (behavioralAffinity.ts), fetched
@@ -188,7 +208,7 @@ export async function buildIntentionalDaySuggestions(input: {
    * module doc comment. */
   behavioralDurationByActivityId?: Readonly<Record<string, number>>;
 }): Promise<IntentionalDaySuggestion[]> {
-  const { user, agenda, minuteOfDay, now, behavioralDurationByActivityId } = input;
+  const { user, agenda, minuteOfDay, now, preferredDurationByActivityId, behavioralDurationByActivityId } = input;
 
   // Brief section 13 -- zero is a valid, successful result. Skip every
   // downstream read/search entirely rather than computing anything
@@ -227,7 +247,7 @@ export async function buildIntentionalDaySuggestions(input: {
   for (const candidate of intentionCandidates) {
     const activityId = candidate.activity.activityId;
     if (!activityId) continue;
-    const durationMinutes = durationMinutesFor(activityId, behavioralDurationByActivityId);
+    const durationMinutes = durationMinutesFor(activityId, preferredDurationByActivityId, behavioralDurationByActivityId);
     // See resolvePeopleContextTimePreference's own doc comment
     // (dayBuilder.ts) -- the one activity (walk-together) whose evening-vs-
     // anytime distinction depends on which taxonomy group it was actually

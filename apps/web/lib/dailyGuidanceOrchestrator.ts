@@ -27,12 +27,20 @@
  *     NEITHER of which needs a behavioral profile
  *   if neither exists -> NO_ACTIVITY_INTENT, still zero behavioral queries
  *   buildBehavioralProfileForUser (dailyGuidanceBehavior.ts, ONE HabitLog
- *     query + ONE #110 derivation) -> BehavioralProfileContext
+ *     query + ONE #110 derivation) -> BehavioralProfileContext, run in
+ *     parallel with listUserActivityPreferences (activityPreferences.ts,
+ *     Explicit Duration Preferences Controls + Consumption V1 -- gated
+ *     behind raw Day Builder intent specifically, narrower than the
+ *     behavioral fetch, since only Day Builder intention candidates ever
+ *     consult a stored preference)
  *   activityDurationByActivityId (behavioralAffinity.ts, PURE projection of
- *     that SAME profile, Behavior-aware Day Builder Duration V1)
+ *     that SAME profile, Behavior-aware Day Builder Duration V1) +
+ *     preferredDurationByActivityId (activityPreferences.ts, PURE
+ *     projection of the preference rows above)
  *   resolveDayBuilderCandidates (dailyGuidanceCandidates.ts, only when raw
  *     Day Builder intent exists) -> Day Builder candidates, FIND now
- *     resolved using the behavioral duration map above
+ *     resolved using the stored preference map (wins) then the behavioral
+ *     duration map (fallback) above
  *   dedupeCandidates -> ConcreteGuidanceCandidate[]
  *   selectOneCandidatePerFamily + buildWindowRankingContexts
  *     (dailyGuidanceSameFamily.ts) -> WindowRankingContext[]
@@ -52,6 +60,7 @@ import { collectPlanCandidates, discoverDayBuilderCandidates, resolveDayBuilderC
 import { selectOneCandidatePerFamily, buildWindowRankingContexts } from './dailyGuidanceSameFamily';
 import { buildBehavioralProfileForUser, affinityByFamily, buildPreferredDaypartMatchByFamily } from './dailyGuidanceBehavior';
 import { activityDurationByActivityId } from './behavioralAffinity';
+import { listUserActivityPreferences, preferredDurationByActivityId } from './activityPreferences';
 import { deriveDailyGuidance } from '../../../packages/daily-guidance/src/engine';
 import type { User } from './db';
 import type { PersonalDailyGuidanceResult, SelectedActivityMetadata } from './dailyGuidanceTypes';
@@ -96,10 +105,22 @@ export async function buildPersonalDailyGuidance(user: User, now: Date): Promise
   const [planCandidates, dayBuilderDiscovery] = await Promise.all([collectPlanCandidates(user, now), discoverDayBuilderCandidates(user, now)]);
   if (planCandidates.length === 0 && !dayBuilderDiscovery.hasIntent) return { status: 'NO_ACTIVITY_INTENT' };
 
-  const behavioralProfile = await buildBehavioralProfileForUser(user, now);
+  const [behavioralProfile, preferenceRows] = await Promise.all([
+    buildBehavioralProfileForUser(user, now),
+    // Explicit Duration Preferences Controls + Consumption V1 -- gated
+    // narrower than the behavioral fetch above: preferences are only ever
+    // consumed by durationMinutesFor for a Day Builder INTENTION candidate
+    // (Plan candidates always use their own stored plan.durationMinutes),
+    // so a Plan-only READY path (real intent, but zero raw Day Builder
+    // intent specifically) costs zero preference queries, even though the
+    // behavioral fetch above still runs (it also feeds affinity/daypart
+    // signals used by Plan-sourced candidates too).
+    dayBuilderDiscovery.hasIntent ? listUserActivityPreferences(user.id) : Promise.resolve([]),
+  ]);
   const behavioralDurationByActivityId = activityDurationByActivityId(behavioralProfile);
+  const preferredDurationMap = preferredDurationByActivityId(preferenceRows);
   const dayBuilderCandidates = dayBuilderDiscovery.hasIntent
-    ? await resolveDayBuilderCandidates(user, now, dayBuilderDiscovery, behavioralDurationByActivityId)
+    ? await resolveDayBuilderCandidates(user, now, dayBuilderDiscovery, preferredDurationMap, behavioralDurationByActivityId)
     : [];
 
   const candidates = dedupeCandidates([...planCandidates, ...dayBuilderCandidates]);

@@ -5,6 +5,7 @@ import { buildMyDay } from '../../../../lib/myDayOrchestrator';
 import { buildIntentionalDaySuggestions, discoverDayBuilderIntentionCandidates } from '../../../../lib/dayBuilderOrchestrator';
 import { buildBehavioralProfileForUser } from '../../../../lib/behavioralProfileFetch';
 import { activityDurationByActivityId } from '../../../../lib/behavioralAffinity';
+import { listUserActivityPreferences, preferredDurationByActivityId } from '../../../../lib/activityPreferences';
 import { getMinuteOfDayInTimezone } from '../../../../lib/timezone';
 import { resolveRequestNow } from '../../../../lib/testTimeOverride';
 import { recordProductEvent } from '../../../../lib/productEvents';
@@ -33,6 +34,13 @@ import type { IntentionalDaySuggestion } from '../../../../lib/dayBuilder';
  * behavior-fetch failure propagates (matches Daily Guidance's own existing
  * precedent, see behavioralProfileFetch.ts's own doc comment) -- no
  * static-duration fallback, no empty-profile fallback.
+ *
+ * Explicit Duration Preferences Controls + Consumption V1 -- the
+ * explicit-preference fetch (listUserActivityPreferences) is gated behind
+ * the SAME raw-intent check as the behavioral fetch above, and the two
+ * independent fetches run in parallel (Promise.all) -- zero raw Day
+ * Builder intent means zero preference query too, same invariant as the
+ * behavioral fetch.
  */
 
 const DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
@@ -57,9 +65,13 @@ export async function GET(req: NextRequest) {
   const { intentionCandidates } = discoverDayBuilderIntentionCandidates(user, agenda, minuteOfDay);
   let suggestions: IntentionalDaySuggestion[] = [];
   if (intentionCandidates.length > 0) {
-    const behavioralProfile = await buildBehavioralProfileForUser(user, now);
+    const [behavioralProfile, preferences] = await Promise.all([
+      buildBehavioralProfileForUser(user, now),
+      listUserActivityPreferences(user.id),
+    ]);
     const behavioralDurationByActivityId = activityDurationByActivityId(behavioralProfile);
-    suggestions = await buildIntentionalDaySuggestions({ user, agenda, minuteOfDay, now, behavioralDurationByActivityId });
+    const preferredDurationMap = preferredDurationByActivityId(preferences);
+    suggestions = await buildIntentionalDaySuggestions({ user, agenda, minuteOfDay, now, preferredDurationByActivityId: preferredDurationMap, behavioralDurationByActivityId });
   }
   const durationMs = Date.now() - startedAt;
 
