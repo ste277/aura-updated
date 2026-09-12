@@ -62,28 +62,36 @@ function emptyAgenda(now: Date = NOW) {
 }
 
 // ============================================================
-// durationMinutesFor (Behavior-aware Day Builder Duration V1's own
-// precedence chain: behavioral > static default > suggestedDurations[0] > 45)
+// durationMinutesFor (Behavior-aware Day Builder Duration V1 / Explicit
+// Duration Preferences Controls + Consumption V1's own precedence chain:
+// preferred > behavioral > static default > suggestedDurations[0] > 45)
+//
+// SIGNATURE NOTE: durationMinutesFor(activityId, preferredDurationByActivityId?,
+// behavioralDurationByActivityId?) -- every call below that exercises the
+// BEHAVIORAL slot explicitly passes `undefined` for the (now second)
+// preferred slot, so these calls keep testing exactly what they always
+// tested (behavioral precedence over the static chain), unaffected by the
+// new leading parameter.
 // ============================================================
 {
   // 'workout' has no defaultDurationMinutes, suggestedDurations: [30, 45, 60]
   // (packages/recommendation/src/activityDefinitions.ts) -- static
   // fallback is 30.
-  check('RESOLVER: behavioral signal present -> behavioral wins over static default', durationMinutesFor('workout', { workout: 45 }) === 45);
+  check('RESOLVER: behavioral signal present -> behavioral wins over static default', durationMinutesFor('workout', undefined, { workout: 45 }) === 45);
   check('RESOLVER: no behavioral map at all -> exact current static resolver result (30, suggestedDurations[0])', durationMinutesFor('workout') === 30);
-  check('RESOLVER: behavioral map present but no entry for this activity -> falls through to static default', durationMinutesFor('workout', { 'coffee-tea': 30 }) === 30);
+  check('RESOLVER: behavioral map present but no entry for this activity -> falls through to static default', durationMinutesFor('workout', undefined, { 'coffee-tea': 30 }) === 30);
 
   // 'coffee-tea' and 'birthday-party' are both SOCIAL-family, with
   // different static defaults (30 vs 120) -- each activity must resolve
   // its own behavioral entry independently, never blended.
   const sameFamilyMap = { 'coffee-tea': 30, 'birthday-party': 150 };
-  check('RESOLVER (same family, different activities): coffee-tea uses its own behavioral value (30)', durationMinutesFor('coffee-tea', sameFamilyMap) === 30);
-  check('RESOLVER (same family, different activities): birthday-party uses its OWN behavioral value (150), never coffee-tea\'s', durationMinutesFor('birthday-party', sameFamilyMap) === 150);
+  check('RESOLVER (same family, different activities): coffee-tea uses its own behavioral value (30)', durationMinutesFor('coffee-tea', undefined, sameFamilyMap) === 30);
+  check('RESOLVER (same family, different activities): birthday-party uses its OWN behavioral value (150), never coffee-tea\'s', durationMinutesFor('birthday-party', undefined, sameFamilyMap) === 150);
 
   // Unknown activityId -> getActivityDefinition returns undefined ->
   // static chain falls all the way through to the final 45 fallback.
   check('RESOLVER: unknown activityId, no behavioral entry -> final 45 fallback', durationMinutesFor('not-a-real-catalog-activity-id') === 45);
-  check('RESOLVER: unknown activityId, WITH a behavioral entry for it -> behavioral still wins (resolver never validates the id itself)', durationMinutesFor('not-a-real-catalog-activity-id', { 'not-a-real-catalog-activity-id': 20 }) === 20);
+  check('RESOLVER: unknown activityId, WITH a behavioral entry for it -> behavioral still wins (resolver never validates the id itself)', durationMinutesFor('not-a-real-catalog-activity-id', undefined, { 'not-a-real-catalog-activity-id': 20 }) === 20);
 
   // REVIEW COVERAGE STRENGTHENING (pre-PR review): the cases above all
   // exercise the suggestedDurations[0] fallback branch -- 'tea-break' is a
@@ -91,7 +99,45 @@ function emptyAgenda(now: Date = NOW) {
   // itself set, proving the OTHER static fallback branch (defaultDurationMinutes,
   // which wins over suggestedDurations[0] in the ?? chain) independently.
   check('RESOLVER: no behavioral map -> exact current static resolver result via defaultDurationMinutes (10), the OTHER static fallback branch', durationMinutesFor('tea-break') === 10);
-  check('RESOLVER: behavioral signal present for an activity with a defaultDurationMinutes -> behavioral still wins over that branch too', durationMinutesFor('tea-break', { 'tea-break': 25 }) === 25);
+  check('RESOLVER: behavioral signal present for an activity with a defaultDurationMinutes -> behavioral still wins over that branch too', durationMinutesFor('tea-break', undefined, { 'tea-break': 25 }) === 25);
+
+  // ==========================================================
+  // Explicit Duration Preferences Controls + Consumption V1 -- the NEW
+  // preferred-duration slot's own precedence, added directly (not merely
+  // reproven indirectly via the behavioral cases above).
+  // ==========================================================
+
+  // A. preferred beats behavioral (both supplied for the same activity).
+  check('RESOLVER: preferred beats behavioral when both are supplied', durationMinutesFor('workout', { workout: 60 }, { workout: 45 }) === 60);
+
+  // B. behavioral beats catalog default (already proven above; restated
+  // here for the item-by-item precedence-chain record this feature's own
+  // implementation ticket asks for).
+  check('RESOLVER: behavioral beats catalog default (tea-break, no preferred entry)', durationMinutesFor('tea-break', undefined, { 'tea-break': 25 }) === 25);
+
+  // C. catalog default beats suggestedDurations[0] (already proven above
+  // via tea-break with no maps at all; restated for the record).
+  check('RESOLVER: catalog default beats suggestedDurations[0] (tea-break, no maps at all)', durationMinutesFor('tea-break') === 10);
+
+  // D. suggestedDurations[0] beats the final 45 (already proven above via
+  // workout with no maps; restated for the record).
+  check('RESOLVER: suggestedDurations[0] beats the final 45 fallback (workout, no maps at all)', durationMinutesFor('workout') === 30);
+
+  // E. two same-family activities retain distinct PREFERRED durations
+  // (never collapsed to a family-level value) -- coffee-tea/birthday-party
+  // are both SOCIAL.
+  const samePreferredFamilyMap = { 'coffee-tea': 20, 'birthday-party': 180 };
+  check('RESOLVER: preferred duration is activity-level, not family-level -- coffee-tea (SOCIAL) uses its own preferred value (20)', durationMinutesFor('coffee-tea', samePreferredFamilyMap) === 20);
+  check('RESOLVER: preferred duration is activity-level, not family-level -- birthday-party (SAME SOCIAL family) uses its OWN preferred value (180), never coffee-tea\'s', durationMinutesFor('birthday-party', samePreferredFamilyMap) === 180);
+
+  // F. no preferred entry for THIS activity (map supplied, but sparse) ->
+  // restores behavioral, exactly as if no preferred map existed at all.
+  check('RESOLVER: preferred map supplied but has no entry for this activity -> falls through to behavioral', durationMinutesFor('workout', { 'coffee-tea': 20 }, { workout: 45 }) === 45);
+  check('RESOLVER: preferred map supplied but has no entry for this activity, and no behavioral either -> falls through to static default', durationMinutesFor('workout', { 'coffee-tea': 20 }) === 30);
+
+  // Preferred + unknown activityId: same "resolver never validates the id
+  // itself" contract as the pre-existing behavioral case above.
+  check('RESOLVER: unknown activityId, WITH a preferred entry for it -> preferred still wins', durationMinutesFor('not-a-real-catalog-activity-id', { 'not-a-real-catalog-activity-id': 99 }) === 99);
 }
 
 // ============================================================

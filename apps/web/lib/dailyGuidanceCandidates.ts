@@ -154,16 +154,18 @@ export async function discoverDayBuilderCandidates(user: User, now: Date): Promi
  * already returned for this exact request -- `agenda`/`minuteOfDay` are
  * reused verbatim, never re-fetched/re-derived here (Behavior-aware Day
  * Builder Duration V1: avoids a second `buildMyDay` DB read).
- * `behavioralDurationByActivityId` is OPTIONAL and purely additive --
- * omitting it reproduces this function's exact pre-existing behavior.
+ * `preferredDurationByActivityId`/`behavioralDurationByActivityId` are both
+ * OPTIONAL and purely additive -- omitting either (or both) reproduces
+ * this function's exact pre-existing behavior.
  */
 export async function resolveDayBuilderCandidates(
   user: User,
   now: Date,
   discovery: Pick<DayBuilderDiscovery, 'agenda' | 'minuteOfDay'>,
+  preferredDurationByActivityId?: Readonly<Record<string, number>>,
   behavioralDurationByActivityId?: Readonly<Record<string, number>>
 ): Promise<ConcreteGuidanceCandidate[]> {
-  const suggestions = await buildIntentionalDaySuggestions({ user, agenda: discovery.agenda, minuteOfDay: discovery.minuteOfDay, now, behavioralDurationByActivityId });
+  const suggestions = await buildIntentionalDaySuggestions({ user, agenda: discovery.agenda, minuteOfDay: discovery.minuteOfDay, now, preferredDurationByActivityId, behavioralDurationByActivityId });
 
   const candidates: ConcreteGuidanceCandidate[] = [];
   for (const suggestion of suggestions) {

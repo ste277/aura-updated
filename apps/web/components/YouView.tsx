@@ -5,6 +5,7 @@ import { LocationPicker } from './LocationPicker';
 import { NotificationSettings } from './NotificationSettings';
 import { ReminderSettings } from './ReminderSettings';
 import { DayBuilderSettings } from './DayBuilderSettings';
+import { ActivityDurationPreferences } from './ActivityDurationPreferences';
 import type { NotificationPrefs } from '../lib/windowNotifications';
 import * as theme from './theme';
 import { colors, spacing, typography, radius } from './theme';
@@ -180,6 +181,14 @@ export function YouView({
           priorityPersonIds={dayBuilderPriorityPersonIds}
           onChange={onDayBuilderPrefsChange}
         />
+      </div>
+
+      {/* Explicit Duration Preferences Controls + Consumption V1 -- a
+       * self-contained panel (owns its own GET/PUT/DELETE), not driven by
+       * User-object props like the two panels above. */}
+      <div>
+        <SectionHeader label="Preferred durations" />
+        <ActivityDurationPreferences />
       </div>
 
       <div style={{ scrollMarginTop: 18 }}>
