@@ -8,7 +8,8 @@
 import type { SolarWindowType } from '../../panchang/src/windows';
 import { FULL_ACTIVITY_CATALOG, normalizeWindowType } from './personalizedTasks';
 import type { ActivityCategory } from './personalizedTasks';
-import { evaluateActivityFit, AuraFitEvaluation, PersonalMuhurtaContext } from './auraFitEngine';
+import { evaluateActivityFit, labelText, AuraFitEvaluation, PersonalMuhurtaContext } from './auraFitEngine';
+import { summarizeReasonsPlainly } from '../../muhurta/src/muhurtaPlainLanguage';
 
 export interface ActionCard {
   id: string;
@@ -240,20 +241,26 @@ export function getActionCards(window: string): ActionCard[] {
 
 /**
  * Home Good Right Now Personalization V1 -- combines evaluateActivityFit's
- * two independently-generated summaries into one compact card description,
- * truthfully reflecting whatever actually influenced the score (brief
- * section 13/14: "Do not silently change a recommendation for personal
- * reasons while showing only a generic explanation"). Never invents new
- * astrology copy -- both halves are exactly the text the canonical
- * evaluator already generates.
+ * output into one compact card description for a default assistant surface
+ * (Home's Good Right Now strip, Ask Aura's GOOD_RIGHT_NOW list).
  *
- * No personalSummary (no personalContext supplied, or the owner's profile
- * is incomplete -- evaluatePersonalMuhurtaFit's own neutral-default path)
- * -> fit.summary byte-for-byte, unchanged from before this PR.
+ * AURA HOME IA V2 FOLLOW-UP FIXES, Finding B: `fit.summary`/
+ * `fit.personalSummary` are NOT used here -- both can embed raw Panchang
+ * prose (fit.summary via buildFitSummary's own muhurtaSummary append,
+ * personalSummary via formatPersonalReasons), and auraFitEngine.ts's own
+ * scoring/summary construction is deliberately left untouched by this PR
+ * (no engine change). Instead this reads only already-public, already-
+ * jargon-free fields the engine also returns -- `label` (via labelText(),
+ * "Good fit"/"Best fit"/etc, unchanged) and the structured `reasons`
+ * (projected through summarizeReasonsPlainly(), the same shared plain-
+ * language helper Plan/Ask Aura use) -- so the underlying evaluation is
+ * fully preserved and still available on `fit` itself for any other
+ * consumer; only this card's own display text changes.
  */
-export function buildActivityDiscoveryDescription(fit: Pick<AuraFitEvaluation, 'summary' | 'personalSummary'>): string {
-  if (!fit.personalSummary) return fit.summary;
-  return `${fit.summary} ${fit.personalSummary}`;
+export function buildActivityDiscoveryDescription(activityTitle: string, fit: Pick<AuraFitEvaluation, 'label' | 'reasons'>): string {
+  const opening = `${labelText(fit.label)} for ${activityTitle.toLowerCase()} right now.`;
+  const plainReason = summarizeReasonsPlainly(fit.reasons);
+  return plainReason ? `${opening} ${plainReason}` : opening;
 }
 
 /**
@@ -295,7 +302,7 @@ export function getActivityDiscoveryCards(window: string, limit = 6, personalCon
       activityId: activity.id,
       category: activity.category,
       title: activity.title,
-      description: buildActivityDiscoveryDescription(fit),
+      description: buildActivityDiscoveryDescription(activity.title, fit),
       icon: activity.icon,
       significance: activity.significance,
       requiresFreshStart: activity.requiresFreshStart,

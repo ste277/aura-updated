@@ -9,6 +9,7 @@ import {
   WeekdayIndex,
 } from '../../../packages/panchang/src/windows';
 import { computeDailyEnergyInsight } from '../lib/scoreEngine';
+import { computeCurrentWindowStatus } from '../lib/currentWindowStatus';
 import { getActionCards, ActionCard } from '../../../packages/recommendation/src/actionCards';
 import { findActivityIntent } from '../../../packages/recommendation/src/personalizedTasks';
 import type { PersonalMuhurtaContext } from '../../../packages/recommendation/src/auraFitEngine';
@@ -865,72 +866,10 @@ export default function DashboardPage() {
   // window's own end time and fell back to literal midnight for Neutral,
   // which produced misleading "8h 9m left" countdowns straight through a
   // window that started in the next hour.
-  const currentWindowInfo = useMemo(() => {
-    const activeTypeClean = activeType ? String(activeType).replace('_', ' ').toUpperCase() : 'NEUTRAL';
-
-    const parseMinute = (val: any) => {
-      if (typeof val === 'number' && !isNaN(val)) return val;
-      if (typeof val === 'string' && val.includes(':')) {
-        const [h, m] = val.split(':').map(Number);
-        if (!isNaN(h) && !isNaN(m)) return h * 60 + m;
-      }
-      return null;
-    };
-
-    const formatMinute = (minute: number) => {
-      const totalMins = ((Math.floor(minute) % 1440) + 1440) % 1440;
-      const hrs = Math.floor(totalMins / 60);
-      const mins = totalMins % 60;
-      const period = hrs >= 12 ? 'PM' : 'AM';
-      const formattedHr = hrs % 12 === 0 ? 12 : hrs % 12;
-      return `${formattedHr}:${String(mins).padStart(2, '0')} ${period}`;
-    };
-
-    const activeWin = windows.find((w: any) => {
-      const rawType = String(w.type || w.windowType || w.name || '').replace('_', ' ').toUpperCase();
-      return rawType === activeTypeClean;
-    });
-
-    // Windows sorted chronologically by start minute, so we can find the
-    // soonest upcoming boundary regardless of which order they were computed in.
-    const sortedByStart = [...windows]
-      .map((w: any) => ({ w, start: parseMinute(w.startMinutes ?? w.startMinute) ?? 0 }))
-      .sort((a, b) => a.start - b.start);
-
-    let startMin: number | null;
-    let nextBoundaryMin: number;
-
-    if (activeWin) {
-      // Currently inside a real (named) window: the boundary is simply its own end.
-      startMin = parseMinute(activeWin.startMinutes ?? activeWin.startMinute);
-      nextBoundaryMin = parseMinute(activeWin.endMinutes ?? activeWin.endMinute) ?? currentMinuteOfDay;
-    } else {
-      // Currently in a Neutral gap: the boundary is the start of whichever
-      // named window begins soonest — today if one remains, otherwise the
-      // earliest one tomorrow (wrapping past midnight).
-      startMin = null;
-      const upcomingToday = sortedByStart.find(({ start }) => start > currentMinuteOfDay);
-      const soonest = upcomingToday ?? sortedByStart[0];
-      let boundary = soonest ? soonest.start : currentMinuteOfDay;
-      if (boundary <= currentMinuteOfDay) boundary += 1440; // wraps to tomorrow
-      nextBoundaryMin = boundary;
-    }
-
-    const endTimeStr = formatMinute(nextBoundaryMin);
-
-    let diff = nextBoundaryMin - currentMinuteOfDay;
-    if (diff < 0) diff += 1440;
-    const remHrs = Math.floor(diff / 60);
-    const remMins = diff % 60;
-    const timeRemainingStr = remHrs > 0 ? `${remHrs}h ${remMins}m` : `${remMins}m`;
-
-    return {
-      name: activeType.replace('_', ' '),
-      startTime: startMin === null ? 'Current' : formatMinute(startMin),
-      endTime: endTimeStr,
-      timeRemaining: timeRemainingStr,
-    };
-  }, [windows, activeType, currentMinuteOfDay]);
+  const currentWindowInfo = useMemo(
+    () => computeCurrentWindowStatus(activeType, windows, currentMinuteOfDay),
+    [windows, activeType, currentMinuteOfDay]
+  );
 
   // Dynamically map timeline windows and auto-fill unassigned time gaps as Neutral Flow
   const mappedTimelineWindows = useMemo(() => {

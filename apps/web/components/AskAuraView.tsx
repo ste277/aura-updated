@@ -6,7 +6,8 @@ import { PageHeader, TextButton, SecondaryButton, StatusBadge } from './ui';
 import { trackEvent } from '../lib/trackEvent';
 import { FULL_ACTIVITY_CATALOG } from '../../../packages/recommendation/src/personalizedTasks';
 import { saveUpcomingPlanFromCandidate } from './PlanWithAuraView';
-import type { TimingSearchResponse } from '../../../packages/recommendation/src/timingSearch';
+import { RESULT_LABEL_TEXT } from '../lib/planFormatting';
+import type { TimingCandidateLabel, TimingSearchResponse } from '../../../packages/recommendation/src/timingSearch';
 
 /**
  * Ask Aura Orchestration V1 -- this view no longer parses intent or streams
@@ -455,19 +456,19 @@ function AskAuraCardView({ card, onQuickReply }: { card: AskAuraCard; onQuickRep
         {primary && (
           <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
             <strong style={{ color: colors.textPrimary }}>{primary.startLabel} – {primary.endLabel}</strong>
-            <StatusBadge label={`${primary.score}/10 · ${primary.label}`} tone={primary.label === 'CAUTION' ? 'caution' : 'positive'} />
+            <StatusBadge label={RESULT_LABEL_TEXT[primary.label as TimingCandidateLabel] ?? primary.label} tone={primary.label === 'CAUTION' ? 'caution' : 'positive'} />
           </div>
         )}
         {primary?.reasons?.[0] && <div style={{ marginTop: 4, fontSize: 11, color: colors.textFaint }}>{primary.reasons[0]}</div>}
         {betterNearby && (
           <div style={{ marginTop: 6, fontSize: 11, color: colors.textFaint }}>
-            Better nearby: {betterNearby.startLabel} · {betterNearby.score}/10
+            Better nearby: {betterNearby.startLabel}
           </div>
         )}
         {results && results.length > 1 && (
           <div style={{ marginTop: 6, fontSize: 11, color: colors.textFaint }}>
             {results.slice(1).map((r, i) => (
-              <div key={i}>{r.startLabel} – {r.endLabel}{r.sharedScore ? ` · ${r.sharedScore}/10` : ''}</div>
+              <div key={i}>{r.startLabel} – {r.endLabel}</div>
             ))}
           </div>
         )}
