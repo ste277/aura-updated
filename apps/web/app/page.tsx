@@ -1257,12 +1257,6 @@ export default function DashboardPage() {
     loadGuidance();
   }, [loadMyDay, loadGuidance]);
 
-  const handleLogPlanFromHome = useCallback(async (planId: string) => {
-    const res = await fetch(`/api/plans/${planId}/log`, { method: 'POST' });
-    if (!res.ok) throw new Error('Unable to log planned activity.');
-    await handlePlanLogged();
-  }, [handlePlanLogged]);
-
   const handleOpenPlan = useCallback((activity?: string) => {
     const cleanActivity = activity?.trim();
     if (cleanActivity) {
@@ -1407,8 +1401,6 @@ export default function DashboardPage() {
             userName={userNameDisplay}
             energyScore={energyInsight.score}
             themeText={energyInsight.themeText}
-            bestForToday={energyInsight.bestForToday}
-            cautionItems={energyInsight.cautionItems}
             nextShift={safeNextShift}
             currentWindow={currentWindowInfo}
             activeWindowName={activeType}
@@ -1419,7 +1411,6 @@ export default function DashboardPage() {
             todayReflection={todayReflection}
             onLogActivity={handleLogActivity}
             onSubmitReflection={handleSubmitReflection}
-            onLogPlan={handleLogPlanFromHome}
             onNextShiftClick={() => setActiveTab('timeline')}
             onPlanClick={handleOpenPlan}
             onInsightsClick={() => setActiveTab('insights')}
@@ -1443,10 +1434,10 @@ export default function DashboardPage() {
             myDayPendingActivities={myDayPendingActivities}
             logEntries={logEntries}
             timezone={userTz}
+            currentMinuteOfDay={currentMinuteOfDay}
             onMyDayChanged={handleMyDayOrGuidanceChanged}
             guidance={guidance}
             onOpenBirthProfile={() => setActiveTab('chart')}
-            onOpenPeople={() => { setPeopleReturnTo('home'); setActiveTab('people'); }}
             onOpenAgendaItem={handleOpenAgendaItem}
             onPlanTomorrow={handlePlanTomorrow}
             onMuteDayBuilderGroup={(groupId) =>
@@ -1458,6 +1449,8 @@ export default function DashboardPage() {
             dayBuilderPriorities={user.dayBuilderPriorities}
             dayBuilderPrioritiesPromptDismissed={user.dayBuilderPrioritiesPromptDismissed}
             onDayBuilderPrefsChange={handleDayBuilderPrefsChange}
+            onTimingSearch={handleTimingSearch}
+            assistantInsight={assistantInsight}
           />
         )}
 

@@ -310,8 +310,14 @@ check(
 );
 
 check(
-  'apps/web/components/YourDayTimeline.tsx is untouched by this change (My Day pending overlay rendering itself was not modified)',
-  !/resolvePendingActivityStatus|pendingReplayReconciliation/.test(fs.readFileSync('apps/web/components/YourDayTimeline.tsx', 'utf8'))
+  // Home UI V2 evolved YourDayTimeline.tsx into HomeTimeline.tsx (the
+  // canonical timeline now also renders opportunities/context, per
+  // apps/web/lib/homeTimelineComposer.ts) -- this check's own intent (the
+  // timeline's own rendering never references pending-replay
+  // reconciliation logic) is unaffected and still holds against the
+  // successor file.
+  'apps/web/components/HomeTimeline.tsx is untouched by this change (My Day pending overlay rendering itself was not modified)',
+  !/resolvePendingActivityStatus|pendingReplayReconciliation/.test(fs.readFileSync('apps/web/components/HomeTimeline.tsx', 'utf8'))
 );
 
 check(
