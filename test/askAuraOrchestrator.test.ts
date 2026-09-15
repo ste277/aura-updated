@@ -90,10 +90,22 @@ async function main() {
     const parsed = parseAskAuraRequest('What should I do right now?', { now: NOW });
     const generalResponse = await orchestrateAskAura(parsed, deps);
     const personalizedResponse = await orchestrateAskAura(parsed, personalizedDeps);
-    const generalThird = (generalResponse.cards?.[0]?.options as Array<{ activityId?: string; description?: string }>)[2];
-    const personalizedThird = (personalizedResponse.cards?.[0]?.options as Array<{ activityId?: string; description?: string }>)[2];
+    const generalThird = (generalResponse.cards?.[0]?.options as Array<{ activityId?: string; description?: string; fitScore?: number }>)[2];
+    const personalizedThird = (personalizedResponse.cards?.[0]?.options as Array<{ activityId?: string; description?: string; fitScore?: number }>)[2];
     check('Same discovery candidate resolves in both calls (deterministic fixed NOW/window -- personalization here changes the score, not which activity wins)', generalThird?.activityId === personalizedThird?.activityId);
-    check('Personalized description genuinely differs from the general one (canonical personalSummary surfaced, never invented)', generalThird?.description !== personalizedThird?.description);
+    // AURA HOME IA V2 FOLLOW-UP FIXES, Finding B: `description` is now a
+    // plain-language projection (label + summarizeReasonsPlainly(reasons))
+    // that only encodes the SUPPORT/CAUTION balance, not each reason's own
+    // identity -- so a personal reason landing in the same polarity bucket
+    // as the general reasons can legitimately produce byte-identical copy.
+    // `fitScore` (the engine's own untouched 0-100 number) is the
+    // structurally-guaranteed signal that personalization genuinely
+    // reached this card; see actionCards.ts's own doc comment.
+    check('Personalized fitScore genuinely differs from the general one (canonical personal signal surfaced, never invented)', generalThird?.fitScore !== personalizedThird?.fitScore);
+    check(
+      'Neither description names a raw Panchang term or a raw numeric score',
+      [generalThird?.description, personalizedThird?.description].every((text) => Boolean(text) && !/tithi|nakshatra|yoga|karana|tara\b|\d+\s*\/\s*100/i.test(text!))
+    );
   }
 
   // --- Incomplete/absent birth profile: discovery ranking itself remains

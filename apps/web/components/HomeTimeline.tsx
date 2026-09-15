@@ -300,13 +300,6 @@ function TimelineRow({
               {line}
             </div>
           ))}
-          {isOpportunity && (
-            <div style={{ marginTop: spacing.xs }}>
-              <PrimaryButton onClick={() => onPlan?.(item)} disabled={isPlanning} style={{ padding: '6px 16px', fontSize: 13 }}>
-                {isPlanning ? 'Planning…' : 'Plan'}
-              </PrimaryButton>
-            </div>
-          )}
         </div>
       )}
     </div>

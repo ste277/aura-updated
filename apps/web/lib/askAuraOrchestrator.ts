@@ -29,6 +29,7 @@ import { FULL_ACTIVITY_CATALOG } from '../../../packages/recommendation/src/pers
 import { handleMuhurthamSearchBody, handleSharedMuhurthamSearchBody } from './muhurthamSearchRequest';
 import { evaluateMuhurthamCandidateAt, isSupportedMuhurthamActivity, MuhurthamCandidateCheckOutcome, MuhurthamDateCandidate, MuhurthamSearchResult } from '../../../packages/recommendation/src/muhurthamFinder';
 import { formatMuhurtaReason } from '../../../packages/muhurta/src/muhurtaReasonFormat';
+import { summarizeReasonsPlainly } from '../../../packages/muhurta/src/muhurtaPlainLanguage';
 import { getPanchangForDate } from '../../../packages/panchang/src/panchangDay';
 import { localDateTimeToUTC } from '../../../packages/panchang/src/localDate';
 import { natalContextFromBirthDetails } from './natalContext';
@@ -356,6 +357,7 @@ function formatClock(iso: string, timezone: string): string {
 }
 
 function candidateCard(candidate: TimingCandidate, timezone: string) {
+  const plainReason = summarizeReasonsPlainly(candidate.reasons);
   return {
     start: candidate.start,
     end: candidate.end,
@@ -364,7 +366,10 @@ function candidateCard(candidate: TimingCandidate, timezone: string) {
     score: candidate.score,
     label: candidate.label,
     windowLabel: candidate.metadata.windowLabel,
-    reasons: candidate.reasons.map((r) => formatMuhurtaReason(r)),
+    // Default assistant surface (AURA HOME IA V2 FOLLOW-UP FIXES, Finding
+    // B) -- plain-language only, never formatMuhurtaReason's raw Panchang
+    // prose. At most one line; a caller renders reasons[0] only.
+    reasons: plainReason ? [plainReason] : [],
   };
 }
 
@@ -400,7 +405,11 @@ function planPayloadFromCandidate(
     windowType: candidate.metadata.windowType,
     windowLabel: candidate.metadata.windowLabel,
     matchLabel: candidate.label === 'EXCELLENT' || candidate.label === 'VERY_GOOD' ? 'Best Match' : 'Good Match',
-    recommendation: candidate.reasons[0] ? formatMuhurtaReason(candidate.reasons[0]) : undefined,
+    // Default assistant surface (AURA HOME IA V2 FOLLOW-UP FIXES, Finding
+    // B) -- this becomes the saved Plan's persisted `recommendation` text
+    // (Plan cards/details), so it must be plain language, never a raw
+    // single Panchang reason.
+    recommendation: summarizeReasonsPlainly(candidate.reasons),
     activityId: activityId ?? null,
     ...(eventLocation ? { eventLocation: { cityName: eventLocation.cityName, timezone: eventLocation.timezone } } : {}),
   };

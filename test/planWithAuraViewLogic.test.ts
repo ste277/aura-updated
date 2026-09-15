@@ -15,7 +15,7 @@ import {
 } from '../apps/web/components/PlanWithAuraView';
 import { runTimingSearch } from '../packages/recommendation/src/timingSearch';
 import type { TimingCandidate } from '../packages/recommendation/src/timingSearch';
-import { formatMuhurtaReason } from '../packages/muhurta/src/muhurtaReasonFormat';
+import { summarizeReasonsPlainly } from '../packages/muhurta/src/muhurtaPlainLanguage';
 
 let allPassed = true;
 function check(label: string, condition: boolean) {
@@ -88,7 +88,12 @@ check('planPayloadFromCandidate carries the candidate\'s exact start/end instant
 check('planPayloadFromCandidate carries the candidate\'s windowLabel verbatim (so windowTypeFromLabel still resolves it)', planPayload.window === 'Abhijit Muhurta');
 check('planPayloadFromCandidate\'s note uses the friendly RESULT_LABEL_TEXT, not the raw engine label', planPayload.note === 'Very good');
 check('planPayloadFromCandidate rescales the 0-10 score back to the existing /100 plan-list convention', planPayload.score === 82);
-check('planPayloadFromCandidate\'s details are built from the existing English formatter, not new prose', planPayload.details === sampleCandidateA.reasons.map((r) => formatMuhurtaReason(r)).join(' '));
+// AURA HOME IA V2 FOLLOW-UP FIXES, Finding B: `details` (persisted as the
+// saved Plan's `recommendation` -- a default assistant surface, Plan
+// cards/details) is now plain language via the shared summarizeReasonsPlainly()
+// helper, never formatMuhurtaReason's raw per-reason Panchang prose.
+check('planPayloadFromCandidate\'s details match the shared plain-language projection of the candidate\'s reasons', planPayload.details === summarizeReasonsPlainly(sampleCandidateA.reasons));
+check('planPayloadFromCandidate\'s details never name a raw Panchang term (Rohini/Shukla Panchami/Nakshatra/Tithi)', !/rohini|shukla panchami|nakshatra|tithi/i.test(planPayload.details));
 check('planPayloadFromCandidate always produces a googleCalendarUrl', typeof planPayload.googleCalendarUrl === 'string' && planPayload.googleCalendarUrl!.includes('calendar.google.com'));
 
 // ============================================================

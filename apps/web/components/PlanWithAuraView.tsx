@@ -1534,7 +1534,6 @@ function UpcomingPlan({
                 <div style={{ color: '#94a3b8', fontSize: 12, marginTop: 2 }}>📍 {plan.eventLocationName}</div>
               )}
             </div>
-            {typeof plan.score === 'number' && <MatchScoreRing score={plan.score} />}
           </div>
 
           {plan.details && (
@@ -1598,19 +1597,6 @@ function UpcomingPlan({
         </div>
       )}
     </article>
-  );
-}
-
-// Compact circular score indicator -- mirrors HomeDashboard's own ScoreGauge
-// visual language (bordered ring, stacked number/unit) so Upcoming Plans
-// reads as part of the same design system, just adapted to the existing
-// 0-100 plan.score scale instead of Home's 0-10 next-shift score.
-function MatchScoreRing({ score }: { score: number }) {
-  return (
-    <div style={{ width: 44, height: 44, flexShrink: 0, borderRadius: 44, border: '3px solid #4ade80', borderLeftColor: 'rgba(148, 163, 184, 0.28)', display: 'flex', flexDirection: 'column', justifyContent: 'center', alignItems: 'center', background: 'rgba(15, 23, 42, 0.75)' }}>
-      <span style={{ color: '#f8fafc', fontSize: 13, fontWeight: 900, lineHeight: 1 }}>{Math.round(score)}</span>
-      <span style={{ color: '#94a3b8', fontSize: 8, lineHeight: 1.3 }}>/100</span>
-    </div>
   );
 }
 

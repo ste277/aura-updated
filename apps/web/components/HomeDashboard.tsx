@@ -15,7 +15,7 @@ import { triggerHaptic } from '../lib/haptics';
 import { trackEvent } from '../lib/trackEvent';
 import * as theme from './theme';
 import { colors, spacing, typography } from './theme';
-import { PageHeader, SectionHeader, SurfaceCard, StatusBadge, IconButton, SecondaryButton, TextButton, ActivityChip } from './ui';
+import { PageHeader, SectionHeader, SurfaceCard, StatusBadge, IconButton, SecondaryButton, TextButton, PrimaryButton, ActivityChip } from './ui';
 import type { DailyAgenda, DailyAgendaItem } from '../lib/dailyAgenda';
 import type { DailyStory } from '../lib/dailyStory';
 import type { DailyReflection } from '../lib/dailyReflection';
@@ -30,6 +30,7 @@ import { saveUpcomingPlanFromCandidate } from './PlanWithAuraView';
 import type { DailyIntentionGroupId } from '../lib/dailyIntentions';
 import { HomeTimeline } from './HomeTimeline';
 import { buildHomeTimeline } from '../lib/homeTimelineComposer';
+import { selectRightNowState } from '../lib/rightNowSelection';
 import type { HomeTimelineContextWindow, HomeTimelineItem } from '../lib/homeTimelineTypes';
 import { buildWhyAuraExplanation } from '../lib/whyAuraViewModel';
 import type { GuidanceUiState } from '../lib/bestForYouViewModel';
@@ -50,8 +51,16 @@ interface HomeDashboardProps {
   };
   currentWindow?: {
     name: string;
-    startTime: string;
+    /** null when there is no active named window right now (a Neutral gap)
+     * -- see Finding C (AURA HOME IA V2 FOLLOW-UP FIXES): this used to be
+     * the literal string 'Current' in that case, a non-time sentinel that
+     * rendered as a fabricated clock time. */
+    startTime: string | null;
     endTime: string;
+    /** True when `endTime` is tomorrow's clock, not today's (the boundary
+     * wrapped past midnight) -- must be surfaced explicitly rather than
+     * left for the reader to infer from a bare clock time. */
+    boundaryIsTomorrow?: boolean;
     timeRemaining: string;
   };
   activeWindowName?: string;
@@ -357,10 +366,20 @@ export function HomeDashboard({
   const currentWindowLabel = dailyBriefing?.briefingState === 'ACTIVE'
     ? dailyBriefing.peakWindow.name
     : formatWindowName(currentWindow?.name ?? activeWindowName);
+  // Finding C (AURA HOME IA V2 FOLLOW-UP FIXES): currentWindow.startTime is
+  // null while in a Neutral gap (no active named window) -- previously this
+  // templated straight into "{startTime} - {endTime}" using the literal
+  // string 'Current' as a fake start time, producing labels like
+  // "Current - 4:31 AM" that read as "it is currently 4:31 AM" when it was
+  // actually evening. A gap now gets its own honest sentence naming
+  // `endTime` as the next window's boundary, not "now" -- and calls out
+  // explicitly when that boundary is tomorrow's clock, not today's.
   const currentTimeRange = dailyBriefing?.briefingState === 'ACTIVE'
     ? `${dailyBriefing.peakWindow.startTime} - ${dailyBriefing.peakWindow.endTime}`
     : currentWindow
-      ? `${currentWindow.startTime} - ${currentWindow.endTime}`
+      ? currentWindow.startTime !== null
+        ? `${currentWindow.startTime} - ${currentWindow.endTime}`
+        : `Open until ${currentWindow.endTime}${currentWindow.boundaryIsTomorrow ? ' tomorrow' : ''}`
       : `Next shift ${nextShift.startTime}`;
   const remainingText = currentWindow ? `${currentWindow.timeRemaining} left` : nextShift.startsIn;
 
@@ -424,10 +443,24 @@ export function HomeDashboard({
 
   // Home UI V2 -- the current-guidance spotlight (architecture audit §9):
   // a preview of the SAME canonical timeline object, never a second
-  // recommendation source. rank===1 is Daily Guidance's own top pick;
-  // isCurrent is the composer's own classification.
-  const spotlightItem = useMemo(() => homeTimeline.find((item) => item.rank === 1 && item.metadata?.isCurrent === true), [homeTimeline]);
+  // recommendation source.
+  //
+  // AURA HOME IA V2 FOLLOW-UP FIXES, Finding E: rank===1 alone used to be
+  // treated as "the best option right now" regardless of whether it was
+  // already a committed Plan -- selectRightNowState (rightNowSelection.ts)
+  // still only ever looks at the SAME single rank-1 item, but reinterprets
+  // its own source/agendaStatus/isCurrent into the correct one of four
+  // states (ACTIVE_PLAN/IMMINENT_PLAN/OPPORTUNITY/CONTEXT_OPEN) -- see that
+  // module's own doc comment for the full contract. PLANNED != RECOMMENDED
+  // OPTION.
+  const rightNowState = useMemo(() => selectRightNowState(homeTimeline), [homeTimeline]);
+  const spotlightItem = rightNowState.kind !== 'CONTEXT_OPEN' ? rightNowState.item : undefined;
   const spotlightExplanation = spotlightItem ? explanationsById[spotlightItem.id] : undefined;
+  // Finding D: the spotlight's own "Why?" now expands INLINE (below),
+  // sharing `expandedTimelineId` with HomeTimeline's own row toggle so
+  // both stay in sync -- never a click that only ever affects a distant,
+  // possibly off-screen row with no visible feedback at the click site.
+  const spotlightWhyExpanded = Boolean(spotlightItem && expandedTimelineId === spotlightItem.id);
 
   // Home UI V2 -- Your Day is genuinely empty only when the composer's own
   // output has nothing to show. Distinguishing this from "still loading"
@@ -565,16 +598,63 @@ export function HomeDashboard({
         <p style={{ margin: '11px 0 0', color: colors.textFaint, fontSize: 15, lineHeight: 1.42 }}>{tone.description}</p>
 
         <div style={{ marginTop: spacing.xl, paddingTop: spacing.lg, borderTop: `1px solid ${colors.borderSubtle}` }}>
-          <SectionHeader label={spotlightItem ? 'Best option right now' : 'Good Right Now'} />
+          <SectionHeader
+            label={
+              rightNowState.kind === 'ACTIVE_PLAN'
+                ? 'Happening now'
+                : rightNowState.kind === 'IMMINENT_PLAN'
+                  ? 'Coming up'
+                  : rightNowState.kind === 'OPPORTUNITY'
+                    ? 'Best option right now'
+                    : 'Good Right Now'
+            }
+          />
           {spotlightItem ? (
             <div>
-              <div style={{ ...typography.bodyStrong, fontSize: 15 }}>{spotlightItem.title} is a strong option right now.</div>
-              <div style={{ display: 'flex', alignItems: 'center', gap: spacing.sm, marginTop: spacing.sm }}>
+              {/* Finding E -- PLANNED != RECOMMENDED OPTION: an ACTIVE_PLAN/
+               * IMMINENT_PLAN is a commitment the user already made, never
+               * described as an "option" (that copy is reserved for a
+               * genuine, unplanned OPPORTUNITY). */}
+              <div style={{ ...typography.bodyStrong, fontSize: 15 }}>
+                {rightNowState.kind === 'ACTIVE_PLAN' && `${spotlightItem.title} is happening now.`}
+                {rightNowState.kind === 'IMMINENT_PLAN' && `${spotlightItem.title} starts soon.`}
+                {rightNowState.kind === 'OPPORTUNITY' && `${spotlightItem.title} is a strong option right now.`}
+              </div>
+              <div style={{ display: 'flex', alignItems: 'center', gap: spacing.sm, marginTop: spacing.sm, flexWrap: 'wrap' }}>
                 {spotlightItem.status && <StatusBadge label={spotlightItem.status} tone={spotlightItem.status === 'Best' ? 'positive' : 'info'} />}
+                {/* Finding D -- a Why control only ever renders when a real
+                 * explanation exists (fail closed, never a dead no-op), and
+                 * activating it now toggles an explanation panel rendered
+                 * INLINE right here, sharing state with HomeTimeline's own
+                 * row so both stay in sync. */}
                 {spotlightExplanation && spotlightExplanation.length > 0 && (
-                  <TextButton onClick={() => setExpandedTimelineId(spotlightItem.id)}>Why? →</TextButton>
+                  <TextButton onClick={() => handleToggleExpand(spotlightItem.id)} aria-expanded={spotlightWhyExpanded}>
+                    {spotlightWhyExpanded ? 'Why? ↑' : 'Why? →'}
+                  </TextButton>
+                )}
+                {/* Finding E §4.C -- OPPORTUNITY supports the existing Plan
+                 * action, the same canonical CHECK-then-save path
+                 * HomeTimeline's own Opportunity rows already use. */}
+                {rightNowState.kind === 'OPPORTUNITY' && (
+                  <PrimaryButton
+                    onClick={() => handlePlanOpportunity(spotlightItem)}
+                    disabled={planningOpportunityId === spotlightItem.id}
+                    style={{ padding: '6px 16px', fontSize: 13, marginLeft: 'auto' }}
+                  >
+                    {planningOpportunityId === spotlightItem.id ? 'Planning…' : 'Plan'}
+                  </PrimaryButton>
                 )}
               </div>
+              {spotlightWhyExpanded && spotlightExplanation && spotlightExplanation.length > 0 && (
+                <div style={{ marginTop: spacing.sm, display: 'flex', flexDirection: 'column', gap: 4 }}>
+                  <div style={{ ...typography.caption, color: colors.textMuted, fontWeight: 800 }}>Why this time?</div>
+                  {spotlightExplanation.map((line, index) => (
+                    <div key={index} style={{ ...typography.caption, color: colors.textSecondary }}>
+                      {line}
+                    </div>
+                  ))}
+                </div>
+              )}
             </div>
           ) : (
             goodRightNow[0] && (

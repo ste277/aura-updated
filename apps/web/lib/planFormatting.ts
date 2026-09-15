@@ -1,5 +1,5 @@
 import { buildGoogleCalendarUrl } from '../../../packages/recommendation/src/dailyAssistant';
-import { formatMuhurtaReason } from '../../../packages/muhurta/src/muhurtaReasonFormat';
+import { summarizeReasonsPlainly } from '../../../packages/muhurta/src/muhurtaPlainLanguage';
 import type { TimingCandidate, TimingCandidateLabel } from '../../../packages/recommendation/src/timingSearch';
 
 /**
@@ -251,7 +251,7 @@ export function planPayloadFromCandidate(candidate: TimingCandidate, durationMin
   const start = new Date(candidate.start);
   const end = new Date(candidate.end);
   const title = candidate.metadata.activityType;
-  const reasonDetails = candidate.reasons.length > 0 ? candidate.reasons.map((reason) => formatMuhurtaReason(reason)).join(' ') : 'Aura found this as a good moment for this activity.';
+  const reasonDetails = summarizeReasonsPlainly(candidate.reasons) ?? 'Aura found this as a good moment for this activity.';
   return {
     id: `aura-${findCandidateKey(candidate)}`.replace(/[^a-z0-9]+/g, '-'),
     title,

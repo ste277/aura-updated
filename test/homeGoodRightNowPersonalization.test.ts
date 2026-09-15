@@ -119,8 +119,25 @@ check('Fixture sanity: "workout" resolves from the real catalog', Boolean(workou
   const generalWorkout = general.find((c) => c.activityId === 'workout');
   const personalizedWorkout = personalized.find((c) => c.activityId === 'workout');
   check('"workout" resolves in both the general and personalized discovery lists', Boolean(generalWorkout) && Boolean(personalizedWorkout));
-  check('Personalized description differs from the general one (personalSummary is genuinely surfaced)', generalWorkout?.description !== personalizedWorkout?.description);
-  check('Personalized description still contains the original general summary text (additive, not a replacement)', Boolean(generalWorkout && personalizedWorkout?.description.startsWith(generalWorkout.description)));
+  // AURA HOME IA V2 FOLLOW-UP FIXES, Finding B: the description no longer
+  // echoes fit.summary/fit.personalSummary verbatim (both can embed raw
+  // Panchang prose) -- it's projected from `label` + the structured
+  // `reasons` through summarizeReasonsPlainly() instead, which only
+  // encodes the SUPPORT/CAUTION balance, not each reason's own identity.
+  // So a personal Tara Bala reason landing in the SAME polarity bucket as
+  // the general reasons can legitimately produce a byte-identical
+  // description -- that's the deliberate jargon-suppression trade-off, not
+  // a bug. `fitScore` (unchanged, still the raw engine's own 0-100 number)
+  // remains the structurally-guaranteed, date-independent signal that
+  // personalization genuinely reached this card, exactly as section 16/28
+  // above already proved at the evaluateActivityFit level.
+  check('Personalized fitScore differs from the general one (personalization genuinely reaches the discovery card)', generalWorkout?.fitScore !== personalizedWorkout?.fitScore);
+  check(
+    'Neither description names a raw Panchang term (Tithi/Nakshatra/Yoga/Karana/Tara/Nakshatra) or a raw numeric score',
+    [generalWorkout?.description, personalizedWorkout?.description].every(
+      (text) => Boolean(text) && !/tithi|nakshatra|yoga|karana|tara\b|\d+\s*\/\s*100/i.test(text!)
+    )
+  );
 }
 
 // Omitted personalContext (undefined, or the 2-arg call) is byte-for-byte
@@ -148,20 +165,41 @@ check('Fixture sanity: "workout" resolves from the real catalog', Boolean(workou
 // ============================================================
 // Section 29 -- description composition helper, fully deterministic (no
 // engine call needed).
+//
+// AURA HOME IA V2 FOLLOW-UP FIXES, Finding B: rewritten for the new
+// contract -- buildActivityDiscoveryDescription(activityTitle, fit) reads
+// only `label` (via labelText(), already public/clean) and the structured
+// `reasons` (via summarizeReasonsPlainly(), the same shared helper Plan/
+// Ask Aura use), never `fit.summary`/`fit.personalSummary` (both of which
+// can embed raw Panchang prose from auraFitEngine.ts's own buildFitSummary/
+// formatPersonalReasons -- see actionCards.ts's own doc comment on this
+// function for the full reasoning). auraFitEngine.ts itself is completely
+// untouched by this PR: `summary`/`personalSummary`/`score` still compute
+// exactly as before and remain available on `fit` for any other consumer.
 // ============================================================
 
 check(
-  'No personalSummary -> description is fit.summary byte-for-byte, unchanged from before this PR',
-  buildActivityDiscoveryDescription({ summary: 'A clean start suits deep work right now.', personalSummary: undefined }) === 'A clean start suits deep work right now.'
+  'No reasons -> description is just the label sentence, no trailing space',
+  buildActivityDiscoveryDescription('deep work', { label: 'GOOD', reasons: [] }) === 'Good fit for deep work right now.'
 );
 check(
-  'Meaningful personalSummary -> general summary first, then personal summary, space-joined',
-  buildActivityDiscoveryDescription({ summary: 'A clean start suits deep work right now.', personalSummary: 'Your personal timing is also supportive.' }) ===
-    'A clean start suits deep work right now. Your personal timing is also supportive.'
+  'All-SUPPORT reasons -> label sentence plus a plainly-supportive line, never naming the raw factor/value',
+  buildActivityDiscoveryDescription('deep work', {
+    label: 'BEST',
+    reasons: [{ code: 'TITHI_SUPPORTIVE', factor: 'TITHI', polarity: 'SUPPORT', value: 'Shukla Panchami' }],
+  }) === 'Best fit for deep work right now. Conditions are supportive for this.'
 );
 check(
-  'Empty-string personalSummary is treated as "no personalSummary" (falsy), never an empty trailing space',
-  buildActivityDiscoveryDescription({ summary: 'General text.', personalSummary: '' }) === 'General text.'
+  'A mix of SUPPORT and CAUTION reasons never surfaces the raw Panchang term or a numeric score',
+  !/tithi|nakshatra|yoga|karana|tara\b|shukla|vaidhriti|\d+\s*\/\s*100/i.test(
+    buildActivityDiscoveryDescription('deep work', {
+      label: 'GOOD',
+      reasons: [
+        { code: 'TITHI_SUPPORTIVE', factor: 'TITHI', polarity: 'SUPPORT', value: 'Shukla Panchami' },
+        { code: 'YOGA_UNFAVORABLE', factor: 'YOGA', polarity: 'CAUTION', value: 'Vaidhriti' },
+      ],
+    })
+  )
 );
 
 // ============================================================
