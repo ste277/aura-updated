@@ -195,7 +195,17 @@ check('myDayPendingOverlay.ts never calls buildDailyAgenda/buildDailyStory (pres
 
 const pageSource = fs.readFileSync('apps/web/app/page.tsx', 'utf8');
 const homeDashboardSource = fs.readFileSync('apps/web/components/HomeDashboard.tsx', 'utf8');
-const timelineSource = fs.readFileSync('apps/web/components/YourDayTimeline.tsx', 'utf8');
+// Home UI V2 -- YourDayTimeline.tsx was evolved into HomeTimeline.tsx (the
+// canonical timeline now also renders unscheduled opportunities/Panchang
+// context, per apps/web/lib/homeTimelineComposer.ts); this file's own
+// checks below are updated to point at that successor and to reflect
+// nextItemId now being computed once in HomeDashboard.tsx (from the same
+// agenda.nextItem.id, never recomputed) and threaded down as a prop,
+// rather than recomputed inside the timeline component itself. Every
+// check's own INTENT (canonical agenda rows never derived from pending
+// data, nextItemId never recomputed from pending data, pending rows stay
+// in their own separate section) is preserved unchanged.
+const timelineSource = fs.readFileSync('apps/web/components/HomeTimeline.tsx', 'utf8');
 
 check('J. page.tsx still passes myDay?.agenda to HomeDashboard completely unmodified (no spread/merge with pending data)', /myDayAgenda=\{myDay\?\.agenda\}/.test(pageSource));
 check('N. page.tsx still passes myDay?.story to HomeDashboard completely unmodified (Daily Story untouched by this feature)', /myDayStory=\{myDay\?\.story\}/.test(pageSource));
@@ -203,11 +213,22 @@ check('page.tsx never calls setMyDay from the new pending-overlay code (myDayPen
   const overlayMemoMatch = pageSource.match(/const myDayPendingActivities = useMemo\(([\s\S]*?)\n {2}\);/);
   return overlayMemoMatch !== null && !/setMyDay/.test(overlayMemoMatch[1]);
 })());
-check('K/L/M. YourDayTimeline never references completedCount/plannedCount/nextItem\'s value being recomputed from pending data (nextItemId still comes only from agenda.nextItem)', /const nextItemId = agenda\?\.nextItem\?\.id;/.test(timelineSource) && !/completedCount/.test(timelineSource) && !/plannedCount/.test(timelineSource));
-check('the canonical agenda rows (completedRows/otherRows) are still derived only from agenda.items, never from pendingActivities', /const \{ rows, hiddenCount \} = expanded \|\| !agenda \? \{ rows: agenda\?\.items \?\? \[\], hiddenCount: 0 \} : selectCompactAgendaRows\(agenda\);/.test(timelineSource));
-check('pending rows are rendered as their own separate section (PendingActivityRow), never passed into AgendaRow/GroupedCompletedRows/selectCompactAgendaRows', /pendingActivities\.map\(\(item\) => \(\s*<PendingActivityRow/.test(timelineSource));
+check(
+  'K/L/M. Home UI V2: nextItemId still comes only from agenda.nextItem.id (now sourced once in HomeDashboard.tsx and passed down, never recomputed from pending data), and HomeTimeline.tsx itself never references completedCount/plannedCount',
+  /nextItemId=\{myDayAgenda\?\.nextItem\?\.id\}/.test(homeDashboardSource) && !/completedCount/.test(timelineSource) && !/plannedCount/.test(timelineSource)
+);
+check(
+  'the canonical timeline rows are still derived only from the `items` prop (buildHomeTimeline\'s own output), never from pendingActivities',
+  (() => {
+    const hasItemsMap = /\{items\.map\(\(item\) =>/.test(timelineSource);
+    const timelineRowBody = timelineSource.split('function TimelineRow(')[1] ?? '';
+    const contextBandBody = timelineSource.split('function ContextBand(')[1] ?? '';
+    return hasItemsMap && !/pendingActivities/.test(timelineRowBody) && !/pendingActivities/.test(contextBandBody);
+  })()
+);
+check('pending rows are rendered as their own separate section (PendingActivityRow), never passed into TimelineRow/ContextBand', /pendingActivities\.map\(\(item\) => \(\s*<PendingActivityRow/.test(timelineSource));
 check('PendingActivityRow uses the existing StatusBadge label="Pending sync" tone="caution" (no new visual language)', /<StatusBadge label="Pending sync" tone="caution" \/>/.test(timelineSource));
-check('HomeDashboard passes myDayPendingActivities straight through to YourDayTimeline (no local filtering/recomputation in HomeDashboard)', /pendingActivities=\{myDayPendingActivities\}/.test(homeDashboardSource));
+check('HomeDashboard passes myDayPendingActivities straight through to HomeTimeline (no local filtering/recomputation in HomeDashboard)', /pendingActivities=\{myDayPendingActivities\}/.test(homeDashboardSource));
 check('DailyAgendaItemStatus is not touched by this PR (no new "PENDING" status value added to the shared server-derived type)', !/'PENDING'/.test(fs.readFileSync('apps/web/lib/dailyAgenda.ts', 'utf8')));
 
 // ============================================================

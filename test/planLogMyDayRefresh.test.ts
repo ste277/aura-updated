@@ -13,11 +13,19 @@
  * introducing one: it proves (a) handlePlanLogged combines
  * loadUserDataAndLogs() with loadMyDay() (and, since New Aura Home V1,
  * loadGuidance() alongside them -- a logged Plan can change today's
- * eligible-intent set), and (b) every Plan-logging surface -- all four,
- * including handleLogPlanFromHome, discovered during implementation and
- * not named in the prior audit's "three wiring sites" framing -- is wired
- * through it, with no surface left on the old loadUserDataAndLogs-only
- * pattern.
+ * eligible-intent set), and (b) every real Plan-logging surface -- the
+ * three PlanWithAuraView-shaped onPlanLogged call sites (Ask Aura, the
+ * Plan tab itself, and the Muhurtham finder) -- is wired through it, with
+ * no surface left on the old loadUserDataAndLogs-only pattern.
+ *
+ * Home UI V2 pre-PR review note: an earlier revision of this file also
+ * asserted a fourth surface, handleLogPlanFromHome/HomeDashboard's
+ * onLogPlan prop. That review found handleLogPlanFromHome had always been
+ * dead production code (HomeDashboard never actually called onLogPlan,
+ * confirmed against the pre-Home-UI-V2 base revision) that earlier PRs
+ * carried forward unremoved rather than genuinely-used Home wiring --
+ * removed for real in this PR rather than continuing to preserve it
+ * solely to satisfy this test.
  */
 import * as fs from 'fs';
 
@@ -59,11 +67,7 @@ check(
 );
 
 // ============================================================
-// All four Plan-logging surfaces route through handlePlanLogged.
-// Three are the PlanWithAuraView-shaped onPlanLogged prop (Ask Aura, the
-// Plan tab itself, and the Muhurtham finder); the fourth is
-// handleLogPlanFromHome, a separate direct fetch wired to HomeDashboard's
-// onLogPlan prop, discovered during implementation.
+// All three real Plan-logging surfaces route through handlePlanLogged.
 // ============================================================
 
 const onPlanLoggedWirings = pageSource.match(/onPlanLogged=\{[^}]*\}/g) ?? [];
@@ -77,30 +81,10 @@ check(
   !/onPlanLogged=\{loadUserDataAndLogs\}/.test(pageSource)
 );
 
-check('HomeDashboard is wired to handleLogPlanFromHome via onLogPlan', /onLogPlan=\{handleLogPlanFromHome\}/.test(pageSource));
-
-const handleLogPlanFromHomeMatch = pageSource.match(
-  /const handleLogPlanFromHome = useCallback\(async \(planId: string\) => \{([\s\S]*?)\}, \[([^\]]*)\]\);/
-);
-check('handleLogPlanFromHome is defined as a useCallback in page.tsx', handleLogPlanFromHomeMatch !== null);
-
-const handleLogPlanFromHomeBody = handleLogPlanFromHomeMatch?.[1] ?? '';
-const handleLogPlanFromHomeDeps = handleLogPlanFromHomeMatch?.[2] ?? '';
-
-check('handleLogPlanFromHome calls handlePlanLogged() (not loadUserDataAndLogs directly)', /await handlePlanLogged\(\);/.test(handleLogPlanFromHomeBody));
-check('handleLogPlanFromHome does not call loadUserDataAndLogs directly (no bypass of the shared callback)', !/loadUserDataAndLogs\(/.test(handleLogPlanFromHomeBody));
-check('handleLogPlanFromHome depends on handlePlanLogged', /\bhandlePlanLogged\b/.test(handleLogPlanFromHomeDeps));
-
-// Failure safety: the refresh must run strictly after the res.ok check, so
-// a non-2xx response throws before handlePlanLogged (and therefore
-// loadMyDay) is ever invoked -- matching PR #84/#86's confirmed-only
-// refresh invariant.
-const notOkIndex = handleLogPlanFromHomeBody.indexOf('if (!res.ok)');
-const refreshCallIndex = handleLogPlanFromHomeBody.indexOf('await handlePlanLogged();');
-check(
-  'handleLogPlanFromHome checks res.ok and throws BEFORE calling handlePlanLogged (failure never triggers a refresh)',
-  notOkIndex !== -1 && refreshCallIndex !== -1 && notOkIndex < refreshCallIndex
-);
+// Home UI V2 pre-PR review -- confirms the dead handleLogPlanFromHome/
+// onLogPlan wiring (see this file's own header comment) is genuinely gone,
+// not just unused-but-lingering.
+check('page.tsx no longer defines the dead handleLogPlanFromHome/onLogPlan wiring', !/handleLogPlanFromHome/.test(pageSource) && !/onLogPlan/.test(pageSource));
 
 // ============================================================
 // PlanWithAuraView.handleLogPlan (the other 3 surfaces' shared success

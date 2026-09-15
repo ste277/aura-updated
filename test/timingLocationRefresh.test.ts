@@ -186,7 +186,16 @@ check('handlePlanLogged still combines loadUserDataAndLogs() and loadMyDay()', (
 
 const onPlanLoggedWirings = pageSource.match(/onPlanLogged=\{[^}]*\}/g) ?? [];
 check('page.tsx still wires onPlanLogged exactly 3 times, all to handlePlanLogged', onPlanLoggedWirings.length === 3 && onPlanLoggedWirings.every((w) => w === 'onPlanLogged={handlePlanLogged}'));
-check('page.tsx still wires HomeDashboard onLogPlan to handleLogPlanFromHome', /onLogPlan=\{handleLogPlanFromHome\}/.test(pageSource));
+// Home UI V2 pre-PR review -- handleLogPlanFromHome/onLogPlan were dead
+// production wiring (HomeDashboard never called onLogPlan, confirmed via
+// the pre-this-PR base revision) that earlier PRs carried forward
+// unremoved; this PR's own review removed both rather than continuing to
+// preserve dead API surface merely to satisfy this assertion. The real
+// invariant this section protects -- every genuine Plan-logging surface
+// refreshes consistently via handlePlanLogged -- is already fully covered
+// by the onPlanLogged checks immediately above (the 3 real call sites:
+// Ask Aura, Plan, Muhurtham).
+check('page.tsx no longer defines the dead handleLogPlanFromHome/onLogPlan wiring', !/handleLogPlanFromHome/.test(pageSource) && !/onLogPlan/.test(pageSource));
 
 // ============================================================
 // 14. PR #86 (direct HabitLog CONFIRMED/PENDING/FAILED + idempotency)
