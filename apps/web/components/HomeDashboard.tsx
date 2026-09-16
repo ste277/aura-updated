@@ -91,6 +91,16 @@ interface HomeDashboardProps {
   onSubmitReflection?: (outputLevel: 'LOW' | 'MODERATE' | 'PEAK_FLOW', followedGuidance: boolean) => Promise<void>;
   onNextShiftClick?: () => void;
   onPlanClick?: (activity?: string) => void;
+  /** Day Constructor V1 -- PR F2. Navigates to the dedicated `/plan-day`
+   * entry experience (this ticket's own section 6) -- distinct from
+   * `onPlanClick` (Ask Aura, single-activity search/check) and Day
+   * Builder's own single-suggestion add affordance (HomeTimeline's own
+   * `onAddSomething`): this is the only Home entry point for arranging
+   * MULTIPLE things together in one pass. A real navigation (cross-route,
+   * not another `activeTab`), so this component never performs it itself
+   * -- the caller (page.tsx) owns the actual redirect, matching every
+   * other cross-route Home callback's own convention. */
+  onPlanDay?: () => void;
   onInsightsClick?: () => void;
   onNotificationsClick?: () => void;
   unreadUpdatesCount?: number;
@@ -304,6 +314,7 @@ export function HomeDashboard({
   onSubmitReflection,
   onNextShiftClick,
   onPlanClick,
+  onPlanDay,
   onInsightsClick,
   onNotificationsClick,
   unreadUpdatesCount = 0,
@@ -743,6 +754,35 @@ export function HomeDashboard({
           </button>
         )}
       </SurfaceCard>
+
+      {/* ============================================================
+       * PLAN MY DAY -- Day Constructor V1 PR F2. The ONE entry point for
+       * arranging multiple things together in one pass (this ticket's own
+       * section 6/49) -- deliberately a single, quiet row, not a second
+       * hero card; distinct from Ask Aura above (single-activity search)
+       * and Day Builder's own single-suggestion add affordance below (one
+       * proactive suggestion at a time).
+       * ============================================================ */}
+      {onPlanDay && (
+        <SurfaceCard>
+          <button
+            type="button"
+            onClick={onPlanDay}
+            style={{ display: 'flex', alignItems: 'center', gap: spacing.md, width: '100%', background: 'transparent', border: 'none', padding: 0, cursor: 'pointer', textAlign: 'left' }}
+          >
+            <span style={{ color: '#93c5fd', fontSize: 20 }} aria-hidden="true">
+              ✦
+            </span>
+            <div style={{ flex: 1, minWidth: 0 }}>
+              <div style={typography.bodyStrong}>Plan my day</div>
+              <div style={{ ...typography.caption, marginTop: 2 }}>Arrange today&rsquo;s tasks together</div>
+            </div>
+            <span style={{ color: colors.textMuted, fontSize: 16 }} aria-hidden="true">
+              →
+            </span>
+          </button>
+        </SurfaceCard>
+      )}
 
       {/* ============================================================
        * YOUR DAY

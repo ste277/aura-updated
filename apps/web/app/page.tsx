@@ -1352,6 +1352,7 @@ export default function DashboardPage() {
             onSubmitReflection={handleSubmitReflection}
             onNextShiftClick={() => setActiveTab('timeline')}
             onPlanClick={handleOpenPlan}
+            onPlanDay={() => { window.location.href = '/plan-day'; }}
             onInsightsClick={() => setActiveTab('insights')}
             onNotificationsClick={handleOpenUpdates}
             unreadUpdatesCount={auraUpdates?.unreadCount}
