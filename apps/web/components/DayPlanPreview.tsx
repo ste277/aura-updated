@@ -17,6 +17,7 @@ import {
   classifyProposalSummary,
 } from '../lib/dayPlanPreviewPresentation';
 import { formatActivityDuration } from '../lib/activityDuration';
+import { hasSubmittableProposal, type DayPlanAcceptanceUiState } from '../lib/dayPlanAcceptancePresentation';
 import { colors, spacing, typography } from './theme';
 import { SectionHeader, SurfaceCard, StatusBadge, PrimaryButton, SecondaryButton, EmptyState, type StatusTone } from './ui';
 
@@ -44,15 +45,37 @@ export interface DayPlanPreviewProps {
   preview: ConstructDayPreview;
   onContinue?: (preview: ConstructDayPreview) => void;
   onDiscard?: () => void;
+  /** PR E3 (Confirmation / Save wiring) -- OPTIONAL. Omitted (the
+   * default), this component behaves exactly as PR D shipped it: a plain
+   * idle Continue/Discard row, no persistence awareness at all. An owning
+   * controller (DayPlanPreviewController.tsx) that actually submits the
+   * reviewed proposal passes this to reflect SAVING/SAVED/STALE/FAILED
+   * without this component ever performing the submission itself. */
+  actionState?: DayPlanAcceptanceUiState;
+  /** Only meaningful when `actionState.kind === 'FAILED'` -- retries the
+   * SAME reviewed proposal under the SAME clientRequestId (owned by the
+   * controller, never regenerated here). */
+  onRetry?: () => void;
+  /** Only meaningful when `actionState.kind === 'STALE'` -- the day
+   * changed since this proposal was reviewed; this never re-submits the
+   * stale proposal itself, only asks the owning experience for a fresh
+   * one (this ticket's own section 13/20: "must NOT automatically
+   * reconstruct and save another day"). */
+  onReviewAgain?: () => void;
 }
 
-export function DayPlanPreview({ preview, onContinue, onDiscard }: DayPlanPreviewProps) {
+export function DayPlanPreview({ preview, onContinue, onDiscard, actionState, onRetry, onReviewAgain }: DayPlanPreviewProps) {
   const { targetDate, timezone, resolvedIntents, constructedDay, warnings } = preview;
   const capacity = presentCapacityState(constructedDay.requestedCapacity.capacityState);
   const summaryState = classifyProposalSummary(preview);
   const sortedProposed = sortProposedItemsForDisplay(constructedDay.proposedItems);
   const warningsByIntentId = groupWarningsByIntentId(presentWarnings(warnings, resolvedIntents));
   const everythingFits = summaryState === 'HAS_ITEMS' && constructedDay.deferredItems.length === 0;
+  // This ticket's own section 23: zero proposed items must never reach an
+  // acceptance submission -- Continue is disabled (never hidden, so its
+  // presence/absence never has to be reasoned about elsewhere) whenever
+  // there is nothing to save.
+  const hasProposedItems = hasSubmittableProposal(preview);
 
   return (
     <div>
@@ -98,9 +121,24 @@ export function DayPlanPreview({ preview, onContinue, onDiscard }: DayPlanPrevie
         </section>
       )}
 
+      {actionState && (actionState.kind === 'STALE' || actionState.kind === 'FAILED') && (
+        <p style={{ ...typography.body, color: actionState.kind === 'STALE' ? colors.caution : colors.danger, marginTop: spacing.lg }}>{actionState.message}</p>
+      )}
+
       <div style={{ display: 'flex', justifyContent: 'flex-end', gap: spacing.md, marginTop: spacing.xxl }}>
-        {onDiscard && <SecondaryButton onClick={onDiscard}>Discard</SecondaryButton>}
-        {onContinue && <PrimaryButton onClick={() => onContinue(preview)}>Continue</PrimaryButton>}
+        {actionState?.kind !== 'SAVED' && onDiscard && (
+          <SecondaryButton onClick={onDiscard} disabled={actionState?.kind === 'SAVING'}>
+            Discard
+          </SecondaryButton>
+        )}
+        {(!actionState || actionState.kind === 'IDLE' || actionState.kind === 'SAVING') && onContinue && (
+          <PrimaryButton onClick={() => onContinue(preview)} disabled={!hasProposedItems || actionState?.kind === 'SAVING'}>
+            {actionState?.kind === 'SAVING' ? 'Saving…' : 'Continue'}
+          </PrimaryButton>
+        )}
+        {actionState?.kind === 'SAVED' && <StatusBadge label="✓ Your day is planned" tone="positive" />}
+        {actionState?.kind === 'STALE' && onReviewAgain && <SecondaryButton onClick={onReviewAgain}>Review again</SecondaryButton>}
+        {actionState?.kind === 'FAILED' && onRetry && <PrimaryButton onClick={onRetry}>Try again</PrimaryButton>}
       </div>
     </div>
   );

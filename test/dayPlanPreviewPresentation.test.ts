@@ -278,7 +278,15 @@ check('43. presentation/component source never calls runTimingSearch( (no re-run
 check('44. presentation/component source never calls computeCapacitySnapshot( (no capacity recomputation)', !/computeCapacitySnapshot\(/.test(combinedSource));
 check('45. presentation/component source never calls constructDay( (no placement logic)', !/constructDay\(/.test(combinedSource));
 check('46. presentation/component source never calls createPlannedActivity( or saveUpcomingPlanFromCandidate( (no persistence dependency)', !/createPlannedActivity\(|saveUpcomingPlanFromCandidate\(/.test(combinedSource));
-check('47. presentation/component source contains no CHECK/save call (no clientRequestId, no /api/plans)', !/clientRequestId|\/api\/plans/.test(combinedSource));
+// PR E3 (Confirmation / Save wiring) note: DayPlanPreview.tsx now carries
+// an OPTIONAL `actionState` prop whose own doc comment legitimately
+// mentions `clientRequestId` (explaining that it belongs to the owning
+// controller, never regenerated here) -- this was always PR D's own
+// explicitly deferred concern ("what Continue actually does belongs to a
+// future PR E"), so this check is narrowed to the pure presentation-
+// adapter file alone, which still has and must keep zero acceptance
+// awareness of any kind.
+check('47. dayPlanPreviewPresentation.ts alone contains no CHECK/save call (no clientRequestId, no /api/plans)', !/clientRequestId|\/api\/plans/.test(presentationSource));
 check("48. presentation/component source never imports from './db' or '../lib/db' (no DB dependency)", !/from ['"](\.\.?\/)*db['"]/.test(combinedSource));
 check('49. component source contains no fetch( or XHR call (no API route dependency)', !/\bfetch\(|XMLHttpRequest/.test(componentSource));
 check('50. component source never creates an app/api route file itself (structural: this test only ever imports from lib/ and components/)', true);
@@ -286,7 +294,13 @@ check('51. component source never mutates a Plan (no update/cancel/delete Planne
 check('52. component gates the "Couldn\'t fit" section on deferredItems.length > 0 (hidden when empty)', /deferredItems\.length > 0/.test(componentSource));
 check('53. component never renders the phrase "optimal plan" or "best possible" in a string literal', !/optimal plan|best possible|globally best/i.test(combinedSource));
 check('54. component never renders a persisted-sounding phrase like "added to your day" or "saved"', !/added to your day|has been saved|plan saved/i.test(componentSource));
-check('55. onContinue/onDiscard are the only two callback props on DayPlanPreviewProps (small API, this ticket\'s own section 25)', /onContinue\?: \(preview: ConstructDayPreview\) => void;\s*onDiscard\?: \(\) => void;/.test(componentSource));
+// PR E3 note: DayPlanPreviewProps legitimately grew by three OPTIONAL
+// props (`actionState`/`onRetry`/`onReviewAgain`) for the owning
+// controller to drive -- this check now confirms onContinue/onDiscard
+// remain adjacent and unchanged in their own original signatures, not
+// that they are the interface's only members (PR D's own original,
+// narrower claim, superseded by this ticket's own explicit extension).
+check("55. onContinue/onDiscard keep their original PR D signatures, unchanged and adjacent, on DayPlanPreviewProps", /onContinue\?: \(preview: ConstructDayPreview\) => void;\s*onDiscard\?: \(\) => void;/.test(componentSource));
 check('56. neither PR A/B/C file (dayIntent.ts/dayCapacity.ts/dayConstructor.ts/dayConstructorOrchestrator.ts) is imported for mutation, only for its exported types/values', /from '..\/lib\/dayConstructor'/.test(componentSource) && /from '..\/lib\/dayConstructorOrchestrator'/.test(componentSource));
 
 if (!allPassed) {
