@@ -708,14 +708,34 @@ function placeOneIntent(
  *      `INVALID_CONSTRUCTION_WINDOW`/`NO_USABLE_CAPACITY` (section 18).
  *   2. Sort intents by `compareByOverloadPrecedence` (PR A, reused
  *      verbatim -- section 9).
- *   3. For each intent in that order: validate duration, then branch on
- *      `flexibility` (pre-commit review fix) -- FIXED consults its own
- *      `fixedConstraintsByIntentId` entry exclusively (`placeFixedIntent`);
- *      FLEXIBLE consults its own `candidatesByIntentId` entry, filters
- *      infeasible candidates, ranks the rest, places the best. Either
- *      way, reserve the exact placed interval for every intent processed
- *      after it. GREEDY, no backtracking (section 12/13).
- *   4. Compute a second capacity snapshot against only the minutes
+ *   3. FIXED RESERVATION INVARIANT (post-V1 audit gap G1): EVALUATE in
+ *      two phases over that SAME precedence-sorted sequence -- every
+ *      FIXED intent first (in its own precedence-relative order), then
+ *      every FLEXIBLE intent (in its own precedence-relative order) --
+ *      so a successfully-placed FIXED intent's exact interval always
+ *      enters `placedIntervals` before any FLEXIBLE candidate is ever
+ *      evaluated, regardless of submission/precedence order between the
+ *      two. `compareByOverloadPrecedence` itself is NEVER modified --
+ *      reservation (can a FLEXIBLE intent occupy a FIXED intent's
+ *      declared time? no) and precedence (which intent is deferred when
+ *      the day is impossible? unchanged) remain separate concerns; this
+ *      two-phase EVALUATION order only changes when each intent's own
+ *      placement is attempted, never how same-flexibility intents rank
+ *      against each other (still `compareByOverloadPrecedence`,
+ *      unmodified). An invalid/infeasible FIXED intent contributes
+ *      nothing to `placedIntervals` (only a successful `outcome.proposed`
+ *      ever does, exactly as before) -- never a phantom reservation.
+ *   4. RESULT ORDER is deliberately NOT the evaluation order: every
+ *      outcome is recorded by intent id during the two-phase evaluation,
+ *      then `proposedItems`/`deferredItems`/`conflicts` are rebuilt by
+ *      walking `orderedIntents` (the SAME single global precedence
+ *      sequence step 2 already produced) exactly once more. This
+ *      preserves the pre-existing, externally-observable result-array
+ *      ordering contract byte-for-byte (e.g. `DayPlanPreview`'s own
+ *      "Couldn't fit" section renders `deferredItems` in raw array order,
+ *      never re-sorted) -- evaluation order changed to fix placement
+ *      correctness; result order did not change at all.
+ *   5. Compute a second capacity snapshot against only the minutes
  *      actually placed (section 18).
  */
 export function constructDay(input: ConstructDayInput): ConstructDayResult {
@@ -730,21 +750,36 @@ export function constructDay(input: ConstructDayInput): ConstructDayResult {
   const normalizedBlockers = normalizeBlockedIntervals(blockedIntervals, window);
   const orderedIntents = sortByOverloadPrecedence(intents, today);
 
-  const proposedItems: ProposedItem[] = [];
-  const deferredItems: DeferredItem[] = [];
-  const conflicts: PlacementConflict[] = [];
+  // Reservation invariant (G1) -- a stable partition of the SAME
+  // precedence-sorted sequence: every FIXED intent (own relative order
+  // preserved), then every FLEXIBLE intent (own relative order
+  // preserved). Evaluation order only -- see this function's own doc
+  // comment, steps 3/4.
+  const evaluationOrder = [...orderedIntents.filter((intent) => intent.flexibility === 'FIXED'), ...orderedIntents.filter((intent) => intent.flexibility === 'FLEXIBLE')];
+
+  const outcomesByIntentId = new Map<string, PlaceOneIntentOutcome>();
   const placedIntervals: OwnedInterval[] = [];
 
-  for (const intent of orderedIntents) {
+  for (const intent of evaluationOrder) {
     const candidates = candidatesByIntentId[intent.id] ?? [];
     const fixedConstraints = fixedConstraintsByIntentId[intent.id] ?? [];
     const outcome = placeOneIntent(intent, candidates, fixedConstraints, window, normalizedBlockers, placedIntervals);
-    if (outcome.proposed) {
-      proposedItems.push(outcome.proposed);
-      if (outcome.placedInterval) {
-        placedIntervals.push({ ...outcome.placedInterval, intentId: intent.id });
-      }
+    outcomesByIntentId.set(intent.id, outcome);
+    if (outcome.proposed && outcome.placedInterval) {
+      placedIntervals.push({ ...outcome.placedInterval, intentId: intent.id });
     }
+  }
+
+  // Result order is deliberately NOT evaluation order -- rebuilt by
+  // walking `orderedIntents` (the single global precedence sequence),
+  // preserving the pre-existing, externally-observable array ordering
+  // contract byte-for-byte.
+  const proposedItems: ProposedItem[] = [];
+  const deferredItems: DeferredItem[] = [];
+  const conflicts: PlacementConflict[] = [];
+  for (const intent of orderedIntents) {
+    const outcome = outcomesByIntentId.get(intent.id)!;
+    if (outcome.proposed) proposedItems.push(outcome.proposed);
     if (outcome.deferred) deferredItems.push(outcome.deferred);
     if (outcome.conflict) conflicts.push(outcome.conflict);
   }
