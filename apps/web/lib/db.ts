@@ -1,4 +1,4 @@
-import { Pool } from 'pg';
+import { Pool, type PoolClient } from 'pg';
 import { randomUUID } from 'crypto';
 import { derivePlanCompletionHistory } from './planCompletionHistory';
 
@@ -8,6 +8,20 @@ import { derivePlanCompletionHistory } from './planCompletionHistory';
 // environment with normal internet access.
 
 const pool = new Pool({ connectionString: process.env.DATABASE_URL });
+
+/**
+ * Day Constructor V1 PR E2 -- the one minimal primitive a caller needs to
+ * drive its OWN multi-statement atomic transaction (the same
+ * `pool.connect()` + `BEGIN` idiom `logPlannedActivity` below already
+ * uses inline), without this module exposing `pool` itself. The caller
+ * owns `COMMIT`/`ROLLBACK`/`client.release()` -- both already plain
+ * methods on the returned client, needing no further wrapping here.
+ */
+export async function beginTransaction(): Promise<PoolClient> {
+  const client = await pool.connect();
+  await client.query('BEGIN');
+  return client;
+}
 
 export interface User {
   id: string;
@@ -708,8 +722,8 @@ export async function listAllPlannedActivitiesForExport(userId: string): Promise
  * validate a client-supplied plannedActivityId (Aura Reminders V1 dedup
  * linkage, brief section 7) actually belongs to the requesting owner before
  * ever writing it onto an AuraMoment row. */
-export async function getPlannedActivityForOwner(userId: string, planId: string): Promise<PlannedActivity | null> {
-  const result = await pool.query(`SELECT * FROM "PlannedActivity" WHERE id = $1 AND "userId" = $2`, [planId, userId]);
+export async function getPlannedActivityForOwner(userId: string, planId: string, executor: QueryExecutor = pool): Promise<PlannedActivity | null> {
+  const result = await executor.query(`SELECT * FROM "PlannedActivity" WHERE id = $1 AND "userId" = $2`, [planId, userId]);
   return result.rows[0] ?? null;
 }
 
@@ -726,28 +740,67 @@ export interface PlanCreationClaim {
   createdAt: Date;
 }
 
-export async function getPlanCreationClaim(userId: string, clientRequestId: string): Promise<PlanCreationClaim | null> {
-  const result = await pool.query(
+/**
+ * `executor` (pre-commit review addition, Day Constructor V1 PR E2) --
+ * OPTIONAL, defaults to `pool`, so every existing call site (all of which
+ * omit it) keeps its exact current pool-based behavior unchanged. Passing
+ * a `PoolClient` (from `pool.connect()`, mid-transaction) lets a caller
+ * that needs this claim check/write to participate in ITS OWN atomic
+ * transaction do so -- `Pool` and `PoolClient` share the identical
+ * `query(text, params)` signature, so no branching is needed here.
+ */
+type QueryExecutor = Pool | PoolClient;
+
+export async function getPlanCreationClaim(userId: string, clientRequestId: string, executor: QueryExecutor = pool): Promise<PlanCreationClaim | null> {
+  const result = await executor.query(
     `SELECT * FROM "PlanCreationIdempotency" WHERE "userId" = $1 AND "clientRequestId" = $2`,
     [userId, clientRequestId]
   );
   return result.rows[0] ?? null;
 }
 
+/**
+ * Day Constructor V1 PR E2 (pre-commit review fix) -- discovers EVERY
+ * `PlanCreationIdempotency` row for `userId` whose own `clientRequestId`
+ * column value starts with `prefix`, exactly. Built for one caller: Day
+ * Constructor acceptance derives one composite `clientRequestId` value
+ * PER accepted item (`day-constructor:<len>:<clientRequestId>:<intentId>`,
+ * see `deriveAcceptanceIdempotencyKey`), all sharing one common,
+ * deterministic prefix -- this is the read-side counterpart that lets a
+ * caller discover the COMPLETE stored set for one acceptance, not just
+ * whichever keys it already knows to ask about.
+ *
+ * DELIBERATELY uses `left("clientRequestId", length($2)) = $2` -- exact
+ * substring EQUALITY, never `LIKE`/`ILIKE`. This is the reason `%`/`_`
+ * (SQL `LIKE` wildcard characters), literal `:`, unicode, or an
+ * arbitrarily long `clientRequestId` can never cause a wildcard-ambiguity
+ * false match: `left()`/`=` perform plain byte-for-byte comparison of a
+ * fixed-length prefix, with no pattern-matching semantics at all. Both
+ * `prefix` and its own length are passed as ordinary, fully-parameterized
+ * query arguments -- never interpolated into the query text.
+ */
+export async function findPlanCreationClaimsByPrefix(userId: string, prefix: string, executor: QueryExecutor = pool): Promise<PlanCreationClaim[]> {
+  const result = await executor.query(
+    `SELECT * FROM "PlanCreationIdempotency" WHERE "userId" = $1 AND left("clientRequestId", length($2)) = $2`,
+    [userId, prefix]
+  );
+  return result.rows;
+}
+
 /** Returns true if THIS call won the claim (caller should proceed to create
  * the Plan, then call fillPlanCreationClaim); false if another request
  * already holds an unfilled claim. Same semantics as
  * claimGuestConversionToken below. */
-export async function claimPlanCreation(userId: string, clientRequestId: string): Promise<boolean> {
-  const result = await pool.query(
+export async function claimPlanCreation(userId: string, clientRequestId: string, executor: QueryExecutor = pool): Promise<boolean> {
+  const result = await executor.query(
     `INSERT INTO "PlanCreationIdempotency" ("userId", "clientRequestId") VALUES ($1, $2) ON CONFLICT ("userId", "clientRequestId") DO NOTHING RETURNING *`,
     [userId, clientRequestId]
   );
   return result.rows.length > 0;
 }
 
-export async function fillPlanCreationClaim(userId: string, clientRequestId: string, plannedActivityId: string): Promise<void> {
-  await pool.query(
+export async function fillPlanCreationClaim(userId: string, clientRequestId: string, plannedActivityId: string, executor: QueryExecutor = pool): Promise<void> {
+  await executor.query(
     `UPDATE "PlanCreationIdempotency" SET "plannedActivityId" = $1 WHERE "userId" = $2 AND "clientRequestId" = $3`,
     [plannedActivityId, userId, clientRequestId]
   );
@@ -849,8 +902,8 @@ export async function listPlannedActivitiesForReminders(userId: string, from: Da
  * active reminder right now) and deliberately excludes LOGGED ones; the
  * daily agenda needs BOTH UPCOMING and LOGGED plans for today (brief
  * section 4), just never CANCELLED. */
-export async function listPlannedActivitiesForDay(userId: string, from: Date, to: Date): Promise<PlannedActivity[]> {
-  const result = await pool.query(
+export async function listPlannedActivitiesForDay(userId: string, from: Date, to: Date, executor: QueryExecutor = pool): Promise<PlannedActivity[]> {
+  const result = await executor.query(
     `SELECT * FROM "PlannedActivity"
      WHERE "userId" = $1 AND status <> 'CANCELLED' AND "plannedStartAt" BETWEEN $2 AND $3
      ORDER BY "plannedStartAt" ASC`,
@@ -1191,6 +1244,73 @@ export async function createPlannedActivity(input: CreatePlannedActivityInput): 
 
   const id = randomUUID();
   const result = await pool.query(
+    `INSERT INTO "PlannedActivity"
+       (id, "userId", title, "activityType", icon, "plannedStartAt", "plannedEndAt",
+        "durationMinutes", "windowType", "windowLabel", "matchLabel", score,
+        recommendation, "calendarUrl", "eventTimezone", "eventLocationName", "activityId")
+     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17)
+     RETURNING *`,
+    [
+      id,
+      input.userId,
+      input.title,
+      input.activityType ?? null,
+      input.icon ?? null,
+      input.plannedStartAt,
+      input.plannedEndAt,
+      input.durationMinutes,
+      input.windowType,
+      input.windowLabel ?? null,
+      input.matchLabel ?? null,
+      input.score ?? null,
+      input.recommendation ?? null,
+      input.calendarUrl ?? null,
+      input.eventTimezone ?? null,
+      input.eventLocationName ?? null,
+      input.activityId ?? null,
+    ]
+  );
+  return result.rows[0];
+}
+
+/**
+ * Day Constructor V1 PR E2 -- the ONLY other Plan-insert primitive besides
+ * `createPlannedActivity` above, used exclusively by the Day Constructor
+ * acceptance persistence path (`dayConstructorAcceptancePersistence.ts`)
+ * from inside its own atomic transaction. Two deliberate differences from
+ * `createPlannedActivity`, both explained here rather than left implicit:
+ *
+ *   1. REQUIRES a `PoolClient` (never falls back to `pool`) -- a caller
+ *      that already holds a transaction is the only legitimate caller;
+ *      there is no non-transactional use case for this function.
+ *   2. Performs NO content-based soft-dedup `SELECT` before inserting.
+ *      `createPlannedActivity`'s own dedup check exists to protect ad-hoc
+ *      callers (Forward Planner, Ask Aura, etc.) that have no other
+ *      idempotency mechanism of their own. Day Constructor acceptance
+ *      already has its OWN authoritative replay mechanism --
+ *      `PlanCreationIdempotency`, keyed by a deterministic per-item id
+ *      derived from the acceptance's own `clientRequestId` (see
+ *      `deriveAcceptanceIdempotencyKey`) -- checked BEFORE this function
+ *      is ever called. Reusing the title/time-based soft dedup here would
+ *      risk exactly the confusion this ticket's own review flagged: a
+ *      coincidentally-identical Plan created by a wholly unrelated action
+ *      (e.g. a manual `POST /api/plans` call) could be mistaken for this
+ *      acceptance's own output and have this acceptance's idempotency
+ *      claim filled with SOMEONE ELSE'S Plan id. In practice this
+ *      soft-dedup collision is already vanishingly unlikely to matter here
+ *      even before considering idempotency: `evaluateAcceptance`'s own
+ *      fresh-blocker revalidation (re-run inside this same transaction,
+ *      see `dayConstructorAcceptancePersistence.ts`) already treats any
+ *      existing Plan occupying the same interval as a `CONFLICT` and
+ *      rejects the whole proposal BEFORE any insert is attempted -- so a
+ *      title/time collision with a real, currently-active Plan can no
+ *      longer reach this function at all. This function's own plain
+ *      INSERT is therefore both simpler and strictly safer for this one
+ *      caller than reusing the soft-dedup path would be.
+ */
+export async function createPlannedActivityWithClient(client: PoolClient, input: CreatePlannedActivityInput): Promise<PlannedActivity> {
+  const id = randomUUID();
+  const result = await client.query(
     `INSERT INTO "PlannedActivity"
        (id, "userId", title, "activityType", icon, "plannedStartAt", "plannedEndAt",
         "durationMinutes", "windowType", "windowLabel", "matchLabel", score,

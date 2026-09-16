@@ -219,3 +219,49 @@ jobs:
               END IF;
             END \$\$;
           "
+  day-constructor-acceptance-db-tests:
+    # Day Constructor V1 PR E2 -- the ONE live-Postgres test file this
+    # repository has for Day Constructor acceptance persistence
+    # (test/dayConstructorAcceptancePersistenceDb.test.ts). Its own atomic
+    # multi-item save, rollback, replay, concurrency, and set-identity
+    # collision behavior all depend materially on real Postgres
+    # transactions/advisory locks, which no DB-free job can exercise --
+    # this is a dedicated job (not bundled into math-core-tests, which has
+    # no Postgres service, and deliberately not folded into
+    # db-migration-validation, which proves a different, narrower thing:
+    # that the migration chain itself is complete). Same disposable,
+    # ephemeral Postgres service pattern as db-migration-validation above
+    # -- never production, never Vercel/Neon.
+    name: Day Constructor acceptance DB tests
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: aura_ci
+          POSTGRES_PASSWORD: aura_ci
+          POSTGRES_DB: aura_ci
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U aura_ci -d aura_ci"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    env:
+      DATABASE_URL: postgresql://aura_ci:aura_ci@localhost:5432/aura_ci
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+      - name: Install root deps
+        run: npm install
+      - name: Install web deps
+        working-directory: apps/web
+        run: npm install
+      - name: Apply the complete migration chain to a fresh database
+        working-directory: apps/web
+        run: npx prisma migrate deploy
+      - name: Run Day Constructor acceptance persistence DB tests
+        run: npx ts-node test/dayConstructorAcceptancePersistenceDb.test.ts
