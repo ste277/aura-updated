@@ -444,7 +444,13 @@ check('7. compareCandidatesForPlacement: same fit+start, lower candidateOrder wi
   check('10.7 FIXED_WINDOW_CONFLICT reported', day.deferredItems[0].primaryReason === 'FIXED_WINDOW_CONFLICT' && day.conflicts.some((c) => c.intentId === a.id && c.reason === 'FIXED_WINDOW_CONFLICT'));
 }
 
-// 10.8 FIXED constraint conflicts already-proposed higher-precedence item
+// 10.8 FIXED reservation invariant (G1 fix) -- a FIXED intent's declared
+// interval always wins over a FLEXIBLE intent requesting the same slot,
+// regardless of the FLEXIBLE intent's own higher overload precedence.
+// Pre-G1 this test named the opposite outcome ("higher-precedence
+// FLEXIBLE item placed first... FIXED_WINDOW_CONFLICT naming the
+// winner") -- that was the exact bug this fix closes, not a preserved
+// behavior.
 {
   resetIntentOrder();
   const higher = intent({ title: 'Higher', targetDate: TODAY, importance: 'HIGH', estimatedDurationMinutes: 60 });
@@ -458,8 +464,11 @@ check('7. compareCandidatesForPlacement: same fit+start, lower candidateOrder wi
     fixedConstraintsByIntentId: { [fixedLower.id]: [fixedConstraint(fixedLower.id, ...sameSlot)] },
     today: TODAY,
   });
-  check('10.8 higher-precedence FLEXIBLE item placed first', day.proposedItems.some((p) => p.intentId === higher.id));
-  check('10.8 FIXED constraint conflicting that already-placed item -> FIXED_WINDOW_CONFLICT naming the winner', day.deferredItems.find((d) => d.intentId === fixedLower.id)?.primaryReason === 'FIXED_WINDOW_CONFLICT' && day.conflicts.find((c) => c.intentId === fixedLower.id)?.conflictingIntentId === higher.id);
+  check('10.8 the FIXED intent keeps its declared interval even though the other intent has higher overload precedence', day.proposedItems.some((p) => p.intentId === fixedLower.id));
+  check(
+    '10.8 the higher-precedence FLEXIBLE intent is deferred, conflicting with the FIXED reservation',
+    day.deferredItems.find((d) => d.intentId === higher.id)?.primaryReason === 'CONFLICTS_WITH_PROPOSED_ITEM' && day.conflicts.find((c) => c.intentId === higher.id)?.conflictingIntentId === fixedLower.id
+  );
 }
 
 // 10.9 FIXED constraint duration mismatch
@@ -509,7 +518,13 @@ check('7. compareCandidatesForPlacement: same fit+start, lower candidateOrder wi
   check('10.12 FLEXIBLE ranking/duration-trimming behavior is unchanged', day.proposedItems[0].start.getTime() === iso('2026-09-16T12:00:00Z').getTime() && day.proposedItems[0].end.getTime() === iso('2026-09-16T12:30:00Z').getTime() && day.proposedItems[0].placementSource === 'SELECTED_CANDIDATE');
 }
 
-// 10.13 FIXED does not receive an importance boost
+// 10.13 FIXED still confers no IMPORTANCE-comparator boost (compareByOverloadPrecedence
+// itself is unmodified by G1 and still never reads flexibility) -- but
+// the RESERVATION invariant (G1) is a separate mechanism that
+// independently guarantees a valid FIXED intent keeps its own declared
+// interval regardless of a competing FLEXIBLE intent's higher importance.
+// Pre-G1 this test named the opposite outcome ("FLEXIBLE HIGH is
+// processed first and wins the slot") -- that was the bug.
 {
   resetIntentOrder();
   const fixedLow = intent({ title: 'Fixed but LOW', targetDate: TODAY, importance: 'LOW', flexibility: 'FIXED', estimatedDurationMinutes: 30 });
@@ -523,8 +538,8 @@ check('7. compareCandidatesForPlacement: same fit+start, lower candidateOrder wi
     fixedConstraintsByIntentId: { [fixedLow.id]: [fixedConstraint(fixedLow.id, ...sameSlot)] },
     today: TODAY,
   });
-  check('10.13 FLEXIBLE HIGH is processed first and wins the slot -- FIXED alone confers no precedence boost', day.proposedItems.some((p) => p.intentId === flexHigh.id));
-  check('10.13 FIXED LOW is the one deferred', day.deferredItems.some((d) => d.intentId === fixedLow.id));
+  check('10.13 the LOW-importance FIXED intent keeps its declared interval (reservation, not precedence)', day.proposedItems.some((p) => p.intentId === fixedLow.id));
+  check('10.13 the HIGH-importance FLEXIBLE intent is deferred, conflicting with the FIXED reservation', day.deferredItems.some((d) => d.intentId === flexHigh.id));
 }
 
 // 10.14 two overlapping FIXED intents retain existing precedence semantics
@@ -832,6 +847,245 @@ check(
     return !('reasons' in c) && !('evidence' in c) && !('reasons' in f) && !('evidence' in f);
   })()
 );
+
+// ============================================================
+// FIXED RESERVATION INVARIANT (post-V1 audit gap G1). A valid FIXED
+// intent's declared interval must be unavailable to FLEXIBLE placement
+// regardless of submission/precedence order between the two -- this is
+// RESERVATION, a separate concern from PRECEDENCE (compareByOverloadPrecedence
+// itself is untouched, verified throughout below by intra-group ordering
+// still working exactly as before).
+// ============================================================
+
+// 51.1 FLEXIBLE submitted first, has an alternate candidate -- the core
+// scenario this fix exists for.
+{
+  resetIntentOrder();
+  const workout = intent({ title: 'Workout', targetDate: TODAY, estimatedDurationMinutes: 60 });
+  const doctor = intent({ title: 'Doctor', targetDate: TODAY, flexibility: 'FIXED', estimatedDurationMinutes: 60 });
+  const day = readyDay({
+    intents: [workout, doctor],
+    window: FULL_DAY(),
+    blockedIntervals: [],
+    candidatesByIntentId: {
+      [workout.id]: [candidate(workout.id, '2026-09-16T16:00:00Z', '2026-09-16T17:00:00Z', { timingFit: 'BEST', candidateOrder: 0 }), candidate(workout.id, '2026-09-16T09:00:00Z', '2026-09-16T10:00:00Z', { timingFit: 'GOOD', candidateOrder: 1 })],
+    },
+    fixedConstraintsByIntentId: { [doctor.id]: [fixedConstraint(doctor.id, '2026-09-16T16:00:00Z', '2026-09-16T17:00:00Z')] },
+    today: TODAY,
+  });
+  const doctorItem = day.proposedItems.find((p) => p.intentId === doctor.id);
+  const workoutItem = day.proposedItems.find((p) => p.intentId === workout.id);
+  check('51.1 Doctor (FIXED) keeps its declared 16:00-17:00 interval', doctorItem?.start.getTime() === iso('2026-09-16T16:00:00Z').getTime() && doctorItem?.end.getTime() === iso('2026-09-16T17:00:00Z').getTime());
+  check('51.1 Workout (FLEXIBLE, submitted first) takes its alternate candidate instead of the reserved slot', workoutItem?.start.getTime() === iso('2026-09-16T09:00:00Z').getTime());
+  check('51.1 both intents are proposed -- neither was dropped', day.proposedItems.length === 2 && day.deferredItems.length === 0);
+}
+
+// 51.2 Input-order independence: the logically identical case with FIXED
+// submitted first must reach the SAME semantic placement (never raw
+// array-order equality -- result order intentionally reflects
+// orderedIntents/precedence, which differs by submission order between
+// this test and 51.1).
+{
+  resetIntentOrder();
+  const doctor = intent({ title: 'Doctor', targetDate: TODAY, flexibility: 'FIXED', estimatedDurationMinutes: 60 });
+  const workout = intent({ title: 'Workout', targetDate: TODAY, estimatedDurationMinutes: 60 });
+  const day = readyDay({
+    intents: [doctor, workout],
+    window: FULL_DAY(),
+    blockedIntervals: [],
+    candidatesByIntentId: {
+      [workout.id]: [candidate(workout.id, '2026-09-16T16:00:00Z', '2026-09-16T17:00:00Z', { timingFit: 'BEST', candidateOrder: 0 }), candidate(workout.id, '2026-09-16T09:00:00Z', '2026-09-16T10:00:00Z', { timingFit: 'GOOD', candidateOrder: 1 })],
+    },
+    fixedConstraintsByIntentId: { [doctor.id]: [fixedConstraint(doctor.id, '2026-09-16T16:00:00Z', '2026-09-16T17:00:00Z')] },
+    today: TODAY,
+  });
+  const doctorItem = day.proposedItems.find((p) => p.intentId === doctor.id);
+  const workoutItem = day.proposedItems.find((p) => p.intentId === workout.id);
+  check('51.2 (reverse submission order) Doctor still keeps 16:00-17:00', doctorItem?.start.getTime() === iso('2026-09-16T16:00:00Z').getTime());
+  check('51.2 (reverse submission order) Workout still takes the alternate -- input order does not determine reservation survival', workoutItem?.start.getTime() === iso('2026-09-16T09:00:00Z').getTime());
+}
+
+// 51.3 FLEXIBLE has no alternate candidate -- the only offered slot
+// overlaps a FIXED reservation, so it is deferred rather than the FIXED
+// intent losing its guaranteed time.
+{
+  resetIntentOrder();
+  const workout = intent({ title: 'Workout', targetDate: TODAY, estimatedDurationMinutes: 60 });
+  const doctor = intent({ title: 'Doctor', targetDate: TODAY, flexibility: 'FIXED', estimatedDurationMinutes: 60 });
+  const day = readyDay({
+    intents: [workout, doctor],
+    window: FULL_DAY(),
+    blockedIntervals: [],
+    candidatesByIntentId: { [workout.id]: [candidate(workout.id, '2026-09-16T16:00:00Z', '2026-09-16T17:00:00Z')] },
+    fixedConstraintsByIntentId: { [doctor.id]: [fixedConstraint(doctor.id, '2026-09-16T16:00:00Z', '2026-09-16T17:00:00Z')] },
+    today: TODAY,
+  });
+  check('51.3 Doctor (FIXED) is placed at its declared time', day.proposedItems.some((p) => p.intentId === doctor.id));
+  check(
+    '51.3 Workout (FLEXIBLE, no alternate) is deferred with a typed conflict reason naming Doctor as the owner',
+    day.deferredItems.find((d) => d.intentId === workout.id)?.primaryReason === 'CONFLICTS_WITH_PROPOSED_ITEM' && day.conflicts.find((c) => c.intentId === workout.id)?.conflictingIntentId === doctor.id
+  );
+}
+
+// 51.4 An invalid/unplaceable FIXED intent contributes NO reservation --
+// a FLEXIBLE intent may freely use that same interval (proves no
+// phantom reservation, this ticket's own section 7/19).
+{
+  resetIntentOrder();
+  // Duration mismatch (45 min intent, 60 min constraint span) -> FIXED_WINDOW_INVALID,
+  // never reaches placement at all.
+  const invalidFixed = intent({ title: 'Bad fixed', targetDate: TODAY, flexibility: 'FIXED', estimatedDurationMinutes: 45 });
+  const workout = intent({ title: 'Workout', targetDate: TODAY, estimatedDurationMinutes: 60 });
+  const day = readyDay({
+    intents: [invalidFixed, workout],
+    window: FULL_DAY(),
+    blockedIntervals: [],
+    candidatesByIntentId: { [workout.id]: [candidate(workout.id, '2026-09-16T16:00:00Z', '2026-09-16T17:00:00Z')] },
+    fixedConstraintsByIntentId: { [invalidFixed.id]: [fixedConstraint(invalidFixed.id, '2026-09-16T16:00:00Z', '2026-09-16T17:00:00Z')] },
+    today: TODAY,
+  });
+  check('51.4 the invalid FIXED intent is deferred FIXED_WINDOW_INVALID, never placed', day.deferredItems.find((d) => d.intentId === invalidFixed.id)?.primaryReason === 'FIXED_WINDOW_INVALID');
+  check('51.4 the FLEXIBLE intent freely uses the interval the invalid FIXED intent declared -- no phantom reservation', day.proposedItems.find((p) => p.intentId === workout.id)?.start.getTime() === iso('2026-09-16T16:00:00Z').getTime());
+}
+
+// 51.5 Multiple non-conflicting FIXED reservations plus several FLEXIBLE
+// intents -- every successfully-placed FIXED interval is unavailable to
+// every FLEXIBLE candidate.
+{
+  resetIntentOrder();
+  const flexA = intent({ title: 'Flex A', targetDate: TODAY, estimatedDurationMinutes: 30 });
+  const flexB = intent({ title: 'Flex B', targetDate: TODAY, estimatedDurationMinutes: 30 });
+  const fixed1 = intent({ title: 'Fixed 1', targetDate: TODAY, flexibility: 'FIXED', estimatedDurationMinutes: 30 });
+  const fixed2 = intent({ title: 'Fixed 2', targetDate: TODAY, flexibility: 'FIXED', estimatedDurationMinutes: 30 });
+  const day = readyDay({
+    intents: [flexA, flexB, fixed1, fixed2],
+    window: FULL_DAY(),
+    blockedIntervals: [],
+    candidatesByIntentId: {
+      // flexA's only candidate overlaps fixed1; flexB's only candidate overlaps fixed2.
+      [flexA.id]: [candidate(flexA.id, '2026-09-16T10:00:00Z', '2026-09-16T10:30:00Z')],
+      [flexB.id]: [candidate(flexB.id, '2026-09-16T13:00:00Z', '2026-09-16T13:30:00Z')],
+    },
+    fixedConstraintsByIntentId: {
+      [fixed1.id]: [fixedConstraint(fixed1.id, '2026-09-16T10:00:00Z', '2026-09-16T10:30:00Z')],
+      [fixed2.id]: [fixedConstraint(fixed2.id, '2026-09-16T13:00:00Z', '2026-09-16T13:30:00Z')],
+    },
+    today: TODAY,
+  });
+  check('51.5 both FIXED intents are placed at their declared times', day.proposedItems.some((p) => p.intentId === fixed1.id) && day.proposedItems.some((p) => p.intentId === fixed2.id));
+  check('51.5 both FLEXIBLE intents are deferred -- neither reservation was available to steal', day.deferredItems.some((d) => d.intentId === flexA.id) && day.deferredItems.some((d) => d.intentId === flexB.id));
+}
+
+// 51.6 Timing-fit ranking never overrides a reservation: the FLEXIBLE
+// intent's top-ranked (BEST) candidate overlaps a FIXED reservation; a
+// weaker-ranked but feasible candidate is selected instead. Proves
+// feasibility (including reservation) is evaluated strictly before
+// timing-quality ranking.
+{
+  resetIntentOrder();
+  const flex = intent({ title: 'Flex', targetDate: TODAY, estimatedDurationMinutes: 30 });
+  const fixed = intent({ title: 'Fixed', targetDate: TODAY, flexibility: 'FIXED', estimatedDurationMinutes: 30 });
+  const day = readyDay({
+    intents: [flex, fixed],
+    window: FULL_DAY(),
+    blockedIntervals: [],
+    candidatesByIntentId: {
+      [flex.id]: [
+        candidate(flex.id, '2026-09-16T14:00:00Z', '2026-09-16T14:30:00Z', { timingFit: 'BEST', candidateOrder: 0 }), // overlaps the FIXED reservation
+        candidate(flex.id, '2026-09-16T09:00:00Z', '2026-09-16T09:30:00Z', { timingFit: 'WORKABLE', candidateOrder: 1 }),
+      ],
+    },
+    fixedConstraintsByIntentId: { [fixed.id]: [fixedConstraint(fixed.id, '2026-09-16T14:00:00Z', '2026-09-16T14:30:00Z')] },
+    today: TODAY,
+  });
+  const flexItem = day.proposedItems.find((p) => p.intentId === flex.id);
+  check('51.6 the weaker-ranked but feasible (non-reserved) candidate is selected, never the BEST-ranked reserved one', flexItem?.start.getTime() === iso('2026-09-16T09:00:00Z').getTime() && flexItem?.timingFit === 'WORKABLE');
+}
+
+// 51.7 Precedence WITHIN each group is unaffected by the reservation
+// invariant: two FLEXIBLE intents with no reservation conflict at all
+// still resolve by deadline-today/importance/originalOrder exactly as
+// before (spot check, not a full re-audit -- sections 6-49 above already
+// exhaustively cover precedence and remain green, proving zero
+// regression there).
+{
+  resetIntentOrder();
+  const flexHigh = intent({ title: 'Flex HIGH', targetDate: TODAY, importance: 'HIGH', estimatedDurationMinutes: 30 });
+  const flexLow = intent({ title: 'Flex LOW', targetDate: TODAY, importance: 'LOW', estimatedDurationMinutes: 30 });
+  const sameSlot = ['2026-09-16T10:00:00Z', '2026-09-16T10:30:00Z'] as const;
+  const day = readyDay({
+    intents: [flexLow, flexHigh],
+    window: FULL_DAY(),
+    blockedIntervals: [],
+    candidatesByIntentId: { [flexHigh.id]: [candidate(flexHigh.id, ...sameSlot)], [flexLow.id]: [candidate(flexLow.id, ...sameSlot)] },
+    today: TODAY,
+  });
+  check('51.7 within the FLEXIBLE group, HIGH importance still wins a genuinely contested slot over LOW (unchanged)', day.proposedItems.some((p) => p.intentId === flexHigh.id) && day.deferredItems.some((d) => d.intentId === flexLow.id));
+}
+
+// 51.8 Capacity classification is unaffected by the reservation
+// invariant for an input with no reservation conflict at all -- the
+// snapshot only ever depends on window/blockedIntervals/summed minutes,
+// none of which this fix touches.
+{
+  resetIntentOrder();
+  const fixed = intent({ title: 'Fixed', targetDate: TODAY, flexibility: 'FIXED', estimatedDurationMinutes: 60 });
+  const flex = intent({ title: 'Flex', targetDate: TODAY, estimatedDurationMinutes: 60 });
+  const day = readyDay({
+    intents: [fixed, flex],
+    window: FULL_DAY(), // 09:00-17:00 = 480 usable minutes
+    blockedIntervals: [],
+    candidatesByIntentId: { [flex.id]: [candidate(flex.id, '2026-09-16T09:00:00Z', '2026-09-16T10:00:00Z')] },
+    fixedConstraintsByIntentId: { [fixed.id]: [fixedConstraint(fixed.id, '2026-09-16T14:00:00Z', '2026-09-16T15:00:00Z')] },
+    today: TODAY,
+  });
+  check('51.8 requestedCapacity reflects the full 120 requested minutes against 480 usable, unchanged capacity math', day.requestedCapacity.requestedMinutes === 120 && day.requestedCapacity.usableMinutes === 480);
+  check('51.8 proposedCapacity reflects both items actually placed (no conflict here)', day.proposedCapacity.requestedMinutes === 120 && day.proposedItems.length === 2);
+}
+
+// 51.9 Result order is NOT evaluation order: proposedItems/deferredItems
+// still reflect the single global precedence sequence (orderedIntents),
+// never the internal FIXED-then-FLEXIBLE evaluation order (this ticket's
+// own section 13 -- do not blindly redefine the result contract). A
+// FLEXIBLE intent submitted (and thus precedence-ordered) BEFORE a FIXED
+// intent must still appear BEFORE it in the raw proposedItems array,
+// even though the FIXED intent was evaluated first internally.
+{
+  resetIntentOrder();
+  const flexFirst = intent({ title: 'Flex first', targetDate: TODAY, estimatedDurationMinutes: 30 });
+  const fixedSecond = intent({ title: 'Fixed second', targetDate: TODAY, flexibility: 'FIXED', estimatedDurationMinutes: 30 });
+  const day = readyDay({
+    intents: [flexFirst, fixedSecond],
+    window: FULL_DAY(),
+    blockedIntervals: [],
+    candidatesByIntentId: { [flexFirst.id]: [candidate(flexFirst.id, '2026-09-16T09:00:00Z', '2026-09-16T09:30:00Z')] },
+    fixedConstraintsByIntentId: { [fixedSecond.id]: [fixedConstraint(fixedSecond.id, '2026-09-16T14:00:00Z', '2026-09-16T14:30:00Z')] },
+    today: TODAY,
+  });
+  check(
+    '51.9 raw proposedItems array order still matches submission/precedence order, not internal FIXED-first evaluation order',
+    day.proposedItems.length === 2 && day.proposedItems[0].intentId === flexFirst.id && day.proposedItems[1].intentId === fixedSecond.id
+  );
+}
+
+// 51.10 Deterministic repeat invocation for a genuinely mixed,
+// reservation-conflicting batch (broader than 10.15's pure-FIXED case).
+{
+  resetIntentOrder();
+  const workout = intent({ title: 'Workout', targetDate: TODAY, estimatedDurationMinutes: 60 });
+  const doctor = intent({ title: 'Doctor', targetDate: TODAY, flexibility: 'FIXED', estimatedDurationMinutes: 60 });
+  const inputData = buildInput({
+    intents: [workout, doctor],
+    window: FULL_DAY(),
+    blockedIntervals: [],
+    candidatesByIntentId: { [workout.id]: [candidate(workout.id, '2026-09-16T16:00:00Z', '2026-09-16T17:00:00Z')] },
+    fixedConstraintsByIntentId: { [doctor.id]: [fixedConstraint(doctor.id, '2026-09-16T16:00:00Z', '2026-09-16T17:00:00Z')] },
+    today: TODAY,
+  });
+  const first = constructDay(inputData);
+  const second = constructDay(inputData);
+  check('51.10 identical mixed FIXED/FLEXIBLE reservation-conflicting input produces byte-equivalent output on repeated invocation', JSON.stringify(first) === JSON.stringify(second));
+}
 
 if (!allPassed) {
   console.error('\nSome Day Constructor checks FAILED.');
