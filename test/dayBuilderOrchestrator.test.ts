@@ -16,7 +16,7 @@
  * intent exists) and now also covers the live wiring of behavioral
  * duration into FIND/save.
  */
-import { durationMinutesFor, discoverDayBuilderIntentionCandidates } from '../apps/web/lib/dayBuilderOrchestrator';
+import { durationMinutesFor, discoverDayBuilderIntentionCandidates, GENERIC_DURATION_FALLBACK_MINUTES } from '../apps/web/lib/dayBuilderOrchestrator';
 import { buildDailyAgenda } from '../apps/web/lib/dailyAgenda';
 import type { User } from '../apps/web/lib/db';
 
@@ -91,6 +91,12 @@ function emptyAgenda(now: Date = NOW) {
   // Unknown activityId -> getActivityDefinition returns undefined ->
   // static chain falls all the way through to the final 45 fallback.
   check('RESOLVER: unknown activityId, no behavioral entry -> final 45 fallback', durationMinutesFor('not-a-real-catalog-activity-id') === 45);
+  // Intent Fidelity V1 PR G2 -- GENERIC_DURATION_FALLBACK_MINUTES is the
+  // SAME single source of truth this exact final case now uses (extracted,
+  // never duplicated) and that dayConstructorOrchestrator.ts's own
+  // resolveDuration reuses for a free-text intent with no resolved
+  // activityId at all -- proven here rather than merely asserted.
+  check('RESOLVER: the exported GENERIC_DURATION_FALLBACK_MINUTES constant equals this exact final-case value (single source of truth, PR G2)', GENERIC_DURATION_FALLBACK_MINUTES === 45 && durationMinutesFor('not-a-real-catalog-activity-id') === GENERIC_DURATION_FALLBACK_MINUTES);
   check('RESOLVER: unknown activityId, WITH a behavioral entry for it -> behavioral still wins (resolver never validates the id itself)', durationMinutesFor('not-a-real-catalog-activity-id', undefined, { 'not-a-real-catalog-activity-id': 20 }) === 20);
 
   // REVIEW COVERAGE STRENGTHENING (pre-PR review): the cases above all

@@ -16,6 +16,7 @@ import {
   type DayConstructorOrchestratorDeps,
   type RequestedDayIntent,
 } from '../apps/web/lib/dayConstructorOrchestrator';
+import { GENERIC_DURATION_FALLBACK_MINUTES } from '../apps/web/lib/dayBuilderOrchestrator';
 import type { TimingCandidate, TimingCandidateLabel } from '../packages/recommendation/src/timingSearch';
 
 let allPassed = true;
@@ -168,12 +169,24 @@ async function main() {
     check('10. no generic-fallback warning when a real preference resolved it', result.status === 'READY' && !result.preview.warnings.some((w) => w.intentId === 'i10' && w.code === 'DURATION_FROM_GENERIC_FALLBACK'));
   }
 
-  // 11. unresolved duration stays unresolved
+  // 11. Intent Fidelity V1 PR G2 -- a free-text title with no resolved
+  // activityId and no explicit duration now receives the SAME generic
+  // duration floor a resolved activity's own empty chain would reach
+  // (GENERIC_DURATION_FALLBACK_MINUTES), rather than staying unresolved.
+  // This intent still has zero supplied candidates in this bare
+  // noopDeps() scenario, so it is still deferred -- but now for
+  // NO_CANDIDATES (it reached real timing search), never DURATION_UNKNOWN
+  // (it never even reached that far pre-G2). See test 61 for the
+  // corresponding full end-to-end placement success.
   {
     const intent = requestedIntent({ id: 'i11', title: 'finish the investor presentation' }); // no activityId, no explicit duration
     const result = await orchestrateConstructDay(baseRequest({ intents: [intent] }), noopDeps());
-    check('11. duration stays unresolved (undefined) when no activityId and no explicit duration exist', result.status === 'READY' && result.preview.resolvedIntents[0].dayIntent.estimatedDurationMinutes === undefined);
-    check('11. the unresolved intent is deferred by constructDay as DURATION_UNKNOWN, never guessed', result.status === 'READY' && result.preview.constructedDay.deferredItems.some((d) => d.intentId === 'i11' && d.primaryReason === 'DURATION_UNKNOWN'));
+    check('11. duration resolves to the generic fallback instead of staying unresolved (G2)', result.status === 'READY' && result.preview.resolvedIntents[0].dayIntent.estimatedDurationMinutes === GENERIC_DURATION_FALLBACK_MINUTES);
+    check('11. DURATION_FROM_GENERIC_FALLBACK warning recorded for this intent', result.status === 'READY' && result.preview.warnings.some((w) => w.intentId === 'i11' && w.code === 'DURATION_FROM_GENERIC_FALLBACK'));
+    check(
+      '11. with zero supplied candidates the intent is still deferred, but NOW because timing search found nothing (NO_CANDIDATES) -- it reached real search, never DURATION_UNKNOWN',
+      result.status === 'READY' && result.preview.constructedDay.deferredItems.some((d) => d.intentId === 'i11' && d.primaryReason === 'NO_CANDIDATES')
+    );
   }
 
   // 12. no new arbitrary fallback
@@ -679,6 +692,127 @@ async function main() {
     const first = await orchestrateConstructDay(request, deps);
     const second = await orchestrateConstructDay(request, deps);
     check('60. identical request + injected deps produce byte-equivalent output on repeated invocation', JSON.stringify(first) === JSON.stringify(second));
+  }
+
+  // ============================================================
+  // INTENT FIDELITY V1 -- PR G2 (natural intent duration fallback,
+  // 61-69). A free-text intent that never resolved a real activityId
+  // now receives GENERIC_DURATION_FALLBACK_MINUTES instead of staying
+  // unresolved -- closing post-V1 audit gap G2 -- without ever
+  // fabricating an activityId, and without changing the resolved-
+  // activity duration chain (durationMinutesFor, dayBuilderOrchestrator.ts,
+  // unmodified) at all.
+  // ============================================================
+
+  // 61. Full end-to-end placement success: an unknown title + Automatic
+  // duration, given a real candidate, is actually PLACED -- reaching the
+  // already-existing taskTitle-based FIND search path (previously dead
+  // code for this input shape, since duration never resolved far enough
+  // to reach it).
+  {
+    let capturedRequest: { taskTitle?: string; activityId?: string; durationMinutes?: number } | undefined;
+    const intent = requestedIntent({ id: 'i61', title: 'sort out the garage' }); // no activityId, no explicit duration
+    const deps = noopDeps({
+      searchTiming: (request) => {
+        capturedRequest = request as typeof capturedRequest;
+        return { candidates: [timingCandidate('2026-09-16T10:00:00Z', '2026-09-16T10:45:00Z', 'GOOD')] };
+      },
+    });
+    const result = await orchestrateConstructDay(baseRequest({ intents: [intent] }), deps);
+    check('61. the intent is actually PROPOSED (placed), not deferred', result.status === 'READY' && result.preview.constructedDay.proposedItems.some((p) => p.intentId === 'i61'));
+    check('61. its duration is the generic fallback', result.status === 'READY' && result.preview.resolvedIntents[0].dayIntent.estimatedDurationMinutes === GENERIC_DURATION_FALLBACK_MINUTES);
+    check('61. timing search was reached via the free-text taskTitle path (no activityId to search by)', capturedRequest?.activityId === undefined && capturedRequest?.taskTitle === 'sort out the garage');
+    check('61. the search request carries the resolved generic-fallback duration, not an omitted/guessed one', capturedRequest?.durationMinutes === GENERIC_DURATION_FALLBACK_MINUTES);
+  }
+
+  // 62. Explicit duration on an unknown title still wins outright -- G2
+  // never overrides an explicit value, and never flags it as a fallback.
+  {
+    const intent = requestedIntent({ id: 'i62', title: 'sort out the garage', durationMinutes: 30 });
+    const result = await orchestrateConstructDay(baseRequest({ intents: [intent] }), noopDeps({ searchTiming: () => ({ candidates: [timingCandidate('2026-09-16T10:00:00Z', '2026-09-16T10:30:00Z', 'GOOD')] }) }));
+    check('62. the explicit duration is used verbatim, never replaced by the generic fallback', result.status === 'READY' && result.preview.resolvedIntents[0].dayIntent.estimatedDurationMinutes === 30);
+    check('62. no generic-fallback warning when an explicit duration was supplied', result.status === 'READY' && !result.preview.warnings.some((w) => w.intentId === 'i62' && w.code === 'DURATION_FROM_GENERIC_FALLBACK'));
+  }
+
+  // 63. Known-activity resolution is completely unaffected by G2:
+  // behavioral duration still wins over the catalog chain for a resolved
+  // activityId (regression guard -- durationMinutesFor itself is
+  // untouched).
+  {
+    const intent = requestedIntent({ id: 'i63', activityId: 'workout' });
+    const result = await orchestrateConstructDay(baseRequest({ intents: [intent] }), noopDeps({ loadDurationContext: async () => ({ preferredDurationByActivityId: {}, behavioralDurationByActivityId: { workout: 40 } }) }));
+    check('63. behavioral duration still wins over the catalog chain for a resolved activity', result.status === 'READY' && result.preview.resolvedIntents[0].dayIntent.estimatedDurationMinutes === 40);
+    check('63. no generic-fallback warning when a real behavioral signal resolved it', result.status === 'READY' && !result.preview.warnings.some((w) => w.intentId === 'i63' && w.code === 'DURATION_FROM_GENERIC_FALLBACK'));
+  }
+
+  // 64. A coarse-family-only title (a real, named classifyTask family --
+  // not the generic catch-all) with Automatic duration: activityFamily is
+  // still preserved (never fabricated activityId), and duration now
+  // resolves instead of staying unresolved.
+  {
+    const intent = requestedIntent({ id: 'i64', title: 'finish the investor presentation' }); // classifyTask -> a real named family, no catalog alias
+    const result = await orchestrateConstructDay(baseRequest({ intents: [intent] }), noopDeps({ searchTiming: () => ({ candidates: [timingCandidate('2026-09-16T10:00:00Z', '2026-09-16T10:45:00Z', 'GOOD')] }) }));
+    check('64. activityId stays undefined -- never fabricated to obtain a duration', result.status === 'READY' && result.preview.resolvedIntents[0].dayIntent.activityId === undefined);
+    check('64. a coarse activityFamily is still resolved', result.status === 'READY' && result.preview.resolvedIntents[0].dayIntent.activityFamily !== undefined);
+    check('64. duration resolves to the generic fallback rather than staying unresolved', result.status === 'READY' && result.preview.resolvedIntents[0].dayIntent.estimatedDurationMinutes === GENERIC_DURATION_FALLBACK_MINUTES);
+  }
+
+  // 65. classifyTask's own generic catch-all (no specific keyword match at
+  // all, e.g. "tax return" -- confirmed by this feature's own earlier
+  // architecture audit to fall through every named pattern) behaves
+  // IDENTICALLY to a named coarse family for G2 purposes -- the generic
+  // fallback duration does not depend on which family classifyTask
+  // returned.
+  {
+    const intent = requestedIntent({ id: 'i65', title: 'tax return' });
+    const result = await orchestrateConstructDay(baseRequest({ intents: [intent] }), noopDeps({ searchTiming: () => ({ candidates: [timingCandidate('2026-09-16T10:00:00Z', '2026-09-16T10:45:00Z', 'GOOD')] }) }));
+    check('65. the generic catch-all family still resolves the same generic duration fallback', result.status === 'READY' && result.preview.resolvedIntents[0].dayIntent.estimatedDurationMinutes === GENERIC_DURATION_FALLBACK_MINUTES);
+  }
+
+  // 66. FIXED unknown-title intent + Automatic: the fixed constraint is
+  // now constructible (it was never registered pre-G2, since
+  // fixedConstraintsByIntentId population itself requires a resolved
+  // duration).
+  {
+    const intent = requestedIntent({ id: 'i66', title: 'doctor follow-up', flexibility: 'FIXED', fixedStart: iso('2026-09-16T16:00:00Z') });
+    const result = await orchestrateConstructDay(baseRequest({ intents: [intent] }), noopDeps());
+    check(
+      '66. the FIXED intent is placed at its declared time, duration resolved from the generic fallback',
+      result.status === 'READY' &&
+        result.preview.constructedDay.proposedItems.some((p) => p.intentId === 'i66' && p.start.getTime() === iso('2026-09-16T16:00:00Z').getTime() && p.end.getTime() === iso('2026-09-16T16:00:00Z').getTime() + GENERIC_DURATION_FALLBACK_MINUTES * 60000)
+    );
+  }
+
+  // 67. Deterministic repeat invocation for a mixed G2 case (unknown
+  // title, Automatic duration, a real candidate).
+  {
+    const intent = requestedIntent({ id: 'i67', title: 'sort out the garage' });
+    const request = baseRequest({ intents: [intent] });
+    const deps = noopDeps({ searchTiming: () => ({ candidates: [timingCandidate('2026-09-16T10:00:00Z', '2026-09-16T10:45:00Z', 'GOOD')] }) });
+    const first = await orchestrateConstructDay(request, deps);
+    const second = await orchestrateConstructDay(request, deps);
+    check('67. identical G2 (generic-fallback-duration) request produces byte-equivalent output on repeated invocation', JSON.stringify(first) === JSON.stringify(second));
+  }
+
+  // 68. G1 (fixed reservation invariant) regression: an unknown-title
+  // FLEXIBLE intent -- now constructible thanks to G2 -- must still yield
+  // to a FIXED intent's declared interval, exactly like a known-activity
+  // FLEXIBLE intent already does. G1's own implementation is untouched;
+  // this proves G2 didn't accidentally bypass it by changing which
+  // intents reach placement at all.
+  {
+    const flexUnknown = requestedIntent({ id: 'i68-flex', title: 'sort out the garage', originalOrder: 0 });
+    const fixedDoctor = requestedIntent({ id: 'i68-fixed', title: 'Doctor', flexibility: 'FIXED', fixedStart: iso('2026-09-16T16:00:00Z'), durationMinutes: 45, originalOrder: 1 });
+    const deps = noopDeps({ searchTiming: () => ({ candidates: [timingCandidate('2026-09-16T16:00:00Z', '2026-09-16T16:45:00Z', 'EXCELLENT')] }) }); // the FLEXIBLE intent's only candidate overlaps the FIXED slot
+    const result = await orchestrateConstructDay(baseRequest({ intents: [flexUnknown, fixedDoctor] }), deps);
+    check(
+      '68. the FIXED intent keeps its declared interval even though the newly-constructible FLEXIBLE intent was submitted first',
+      result.status === 'READY' && result.preview.constructedDay.proposedItems.some((p) => p.intentId === 'i68-fixed')
+    );
+    check(
+      '68. the FLEXIBLE intent (no other candidate) is deferred, conflicting with the FIXED reservation -- never displacing it',
+      result.status === 'READY' && result.preview.constructedDay.deferredItems.some((d) => d.intentId === 'i68-flex' && d.primaryReason === 'CONFLICTS_WITH_PROPOSED_ITEM')
+    );
   }
 
   if (!allPassed) {
