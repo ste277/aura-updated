@@ -6,6 +6,7 @@ import { NotificationSettings } from './NotificationSettings';
 import { ReminderSettings } from './ReminderSettings';
 import { DayBuilderSettings } from './DayBuilderSettings';
 import { ActivityDurationPreferences } from './ActivityDurationPreferences';
+import { AvailabilitySettings } from './AvailabilitySettings';
 import type { NotificationPrefs } from '../lib/windowNotifications';
 import * as theme from './theme';
 import { colors, spacing, typography, radius } from './theme';
@@ -189,6 +190,13 @@ export function YouView({
       <div>
         <SectionHeader label="Preferred durations" />
         <ActivityDurationPreferences />
+      </div>
+
+      {/* Availability Context V1 PR H2 -- a self-contained panel (owns its
+       * own GET/PUT/DELETE), same pattern as Preferred durations above. */}
+      <div>
+        <SectionHeader label="Availability" />
+        <AvailabilitySettings />
       </div>
 
       <div style={{ scrollMarginTop: 18 }}>

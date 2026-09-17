@@ -2149,3 +2149,78 @@ export async function setAvailabilityConfigured(userId: string, configured: bool
 export async function deleteUserAvailabilityPeriods(userId: string): Promise<void> {
   await pool.query(`DELETE FROM "UserAvailabilityPeriod" WHERE "userId" = $1`, [userId]);
 }
+
+// ── Availability Settings V1 PR H2 -- high-level, atomic operations built
+// on H1's own low-level primitives above. The Settings API route calls
+// ONLY these three; it never orchestrates multiple raw writes itself
+// (this ticket's own section 31). ─────────────────────────────────────
+
+export interface UserAvailabilityConfigurationView {
+  configured: boolean;
+  periods: UserAvailabilityPeriodRow[];
+}
+
+/** Read-only combination of `User.availabilityConfigured` + this user's
+ * saved periods -- `null` only when the user itself doesn't exist (never
+ * for a genuinely UNCONFIGURED or CONFIGURED_EMPTY user, both of which
+ * are real, valid results). */
+export async function getUserAvailabilityConfiguration(userId: string): Promise<UserAvailabilityConfigurationView | null> {
+  const user = await getUserById(userId);
+  if (!user) return null;
+  const periods = await listUserAvailabilityPeriods(userId);
+  return { configured: user.availabilityConfigured === true, periods };
+}
+
+/**
+ * REPLACE semantics (this ticket's own section 20/21): the submitted
+ * period set becomes the user's ENTIRE saved week, atomically, and
+ * `availabilityConfigured` becomes `true` -- including when `periods` is
+ * empty (this ticket's own section 22: a real, deliberate all-week-empty
+ * CONFIGURED state, never silently reinterpreted as a reset). Delete +
+ * insert + flag update all happen inside ONE transaction (mirrors
+ * `persistAcceptedConstructedDay`'s own `beginTransaction`/COMMIT/
+ * ROLLBACK convention, dayConstructorAcceptancePersistence.ts) -- a
+ * failure at any point leaves the user's PREVIOUS configuration
+ * untouched, never a partial replacement.
+ */
+export async function replaceUserAvailabilityConfiguration(userId: string, periods: readonly { weekday: number; startTime: string; endTime: string }[]): Promise<void> {
+  const client = await beginTransaction();
+  try {
+    await client.query(`DELETE FROM "UserAvailabilityPeriod" WHERE "userId" = $1`, [userId]);
+    for (const period of periods) {
+      const id = randomUUID();
+      await client.query(
+        `INSERT INTO "UserAvailabilityPeriod" (id, "userId", weekday, "startTime", "endTime") VALUES ($1, $2, $3, $4, $5)`,
+        [id, userId, period.weekday, period.startTime, period.endTime]
+      );
+    }
+    await client.query(`UPDATE "User" SET "availabilityConfigured" = true WHERE id = $1`, [userId]);
+    await client.query('COMMIT');
+  } catch (err) {
+    await client.query('ROLLBACK').catch(() => {});
+    throw err;
+  } finally {
+    client.release();
+  }
+}
+
+/**
+ * The ONLY operation that returns a user to UNCONFIGURED (this ticket's
+ * own section 23/29) -- deliberately distinct from
+ * `replaceUserAvailabilityConfiguration(userId, [])`, which means
+ * CONFIGURED with an all-empty week, not UNCONFIGURED. Same atomic
+ * transaction shape as the replace above.
+ */
+export async function resetUserAvailabilityConfiguration(userId: string): Promise<void> {
+  const client = await beginTransaction();
+  try {
+    await client.query(`DELETE FROM "UserAvailabilityPeriod" WHERE "userId" = $1`, [userId]);
+    await client.query(`UPDATE "User" SET "availabilityConfigured" = false WHERE id = $1`, [userId]);
+    await client.query('COMMIT');
+  } catch (err) {
+    await client.query('ROLLBACK').catch(() => {});
+    throw err;
+  } finally {
+    client.release();
+  }
+}
