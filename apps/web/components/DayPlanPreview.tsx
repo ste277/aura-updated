@@ -15,6 +15,7 @@ import {
   sortProposedItemsForDisplay,
   titleForIntentId,
   classifyProposalSummary,
+  presentDeferredProvenance,
 } from '../lib/dayPlanPreviewPresentation';
 import { formatActivityDuration } from '../lib/activityDuration';
 import { hasSubmittableProposal, type DayPlanAcceptanceUiState } from '../lib/dayPlanAcceptancePresentation';
@@ -114,6 +115,7 @@ export function DayPlanPreview({ preview, onContinue, onDiscard, actionState, on
                 key={item.intentId}
                 item={item}
                 title={titleForIntentId(resolvedIntents, item.intentId)}
+                provenanceTexts={presentDeferredProvenance(resolvedIntents, item.intentId, targetDate)}
                 warningTexts={warningsByIntentId[item.intentId] ?? []}
               />
             ))}
@@ -174,7 +176,7 @@ function ProposedItemRow({ item, timezone, warningTexts }: { item: ProposedItem;
   );
 }
 
-function DeferredItemRow({ item, title, warningTexts }: { item: DeferredItem; title: string; warningTexts: string[] }) {
+function DeferredItemRow({ item, title, provenanceTexts, warningTexts }: { item: DeferredItem; title: string; provenanceTexts: string[]; warningTexts: string[] }) {
   return (
     <SurfaceCard style={{ opacity: 0.8 }}>
       <div style={{ display: 'flex', alignItems: 'flex-start', gap: spacing.md }}>
@@ -183,6 +185,12 @@ function DeferredItemRow({ item, title, warningTexts }: { item: DeferredItem; ti
         </span>
         <div style={{ minWidth: 0 }}>
           <div style={typography.cardTitle}>{title}</div>
+          {/* Intent Fidelity V1 PR G3/G4 -- minimal factual provenance
+              only (this ticket's own section 24): the exact facts the
+              user supplied through Plan My Day, never a generated "why"
+              explanation. Never rendered for a placed item -- this text
+              exists on ProposedItemRow nowhere in this file. */}
+          {provenanceTexts.length > 0 && <div style={{ ...typography.caption, color: colors.textMuted, marginTop: 2 }}>{provenanceTexts.join(' · ')}</div>}
           <div style={{ ...typography.meta, marginTop: spacing.xs }}>{presentDeferralReason(item.primaryReason)}</div>
           {warningTexts.map((text, index) => (
             <div key={index} style={{ ...typography.caption, color: colors.textMuted, marginTop: 2 }}>

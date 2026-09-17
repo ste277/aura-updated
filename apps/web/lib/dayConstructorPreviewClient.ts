@@ -16,15 +16,24 @@
  * is rejected (`UNKNOWN_RESPONSE`) rather than partially revived if any of
  * them fails to parse.
  *
- * Never sends `userId`/`timezone`/`now`/`originalOrder`/`importance`/
- * `deadline`/`activityId`/`constructionWindowSource` -- F2's V1 request is
- * exactly `{ targetDate, intents: [{id, title, durationMinutes?,
- * flexibility, fixedStart? }] }` (planning-date hardening, this ticket's
- * own section 7: `targetDate` is always the same server-established
- * planning date FIXED-time assembly used, never omitted once established).
+ * Never sends `userId`/`timezone`/`now`/`originalOrder`/`activityId`/
+ * `constructionWindowSource` -- F2's V1 request is exactly
+ * `{ targetDate, intents: [{id, title, durationMinutes?, flexibility,
+ * fixedStart? }] }` (planning-date hardening, this ticket's own section
+ * 7: `targetDate` is always the same server-established planning date
+ * FIXED-time assembly used, never omitted once established).
+ *
+ * Intent Fidelity V1 PR G3/G4 -- `importance`/`deadline` are now sent
+ * (per-intent, both optional): F1 (dayConstructorPreviewRequest.ts) has
+ * accepted and validated both since PR C/F1 shipped; only the client
+ * side previously withheld them (planDayEntry.ts's own
+ * `buildRequestedIntentsForSubmission`). `userId`/`timezone`/`now`/
+ * `originalOrder` remain permanently client-unauthoritative -- unaffected
+ * by this change.
  */
 
 import type { ConstructDayPreview } from './dayConstructorOrchestrator';
+import type { DayIntentImportance } from './dayIntent';
 
 // ============================================================
 // Request body (F1's own accepted shape, dayConstructorPreviewRequest.ts)
@@ -34,6 +43,18 @@ export interface PreviewRequestIntentBody {
   id: string;
   title: string;
   durationMinutes?: number;
+  /** Intent Fidelity V1 PR G3/G4. F2's own UI only ever produces `'HIGH'`
+   * (the "Important" toggle) or omits this field entirely -- it never
+   * sends `'MEDIUM'`/`'LOW'` (this repo's own locked UX decision,
+   * planDayEntry.ts) -- but the type itself is F1's real
+   * `DayIntentImportance`, not a narrowed alias, since F1's own parser
+   * validates against the full enum regardless of which value a
+   * particular caller happens to send. */
+  importance?: DayIntentImportance;
+  /** Intent Fidelity V1 PR G3/G4. Same `YYYY-MM-DD` civil-date convention
+   * F1 already validates (`isValidCalendarDateString`) -- never a `Date`
+   * instant. */
+  deadline?: string;
   flexibility: 'FIXED' | 'FLEXIBLE';
   /** Only meaningful when `flexibility === 'FIXED'`. A real `Date` here --
    * `JSON.stringify` (inside `previewConstructedDay` below) serializes it
@@ -164,8 +185,11 @@ export interface ConstructDayPreviewRequestBody {
  * omitted -- so F1 never has to independently re-derive "today" from its
  * own fresh `now` and risk disagreeing with the exact civil date this
  * request's own FIXED `fixedStart` values were assembled against. Still
- * never sends `userId`/`timezone`/`now`/`originalOrder`/`importance`/
- * `deadline`/`constructionWindowSource` (this ticket's own section 7/22).
+ * never sends `userId`/`timezone`/`now`/`originalOrder`/
+ * `constructionWindowSource` (this ticket's own section 7/22).
+ * `importance`/`deadline` are sent per-intent when present (Intent
+ * Fidelity V1 PR G3/G4) -- this function itself passes `intents` through
+ * verbatim regardless, so no change was needed here beyond this comment.
  */
 export function buildPreviewRequestBody(intents: PreviewRequestIntentBody[], targetDate: string): ConstructDayPreviewRequestBody {
   return { targetDate, intents };

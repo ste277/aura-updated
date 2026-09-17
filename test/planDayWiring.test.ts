@@ -119,13 +119,31 @@ function main() {
   // ============================================================
   check('30. page.tsx is a real async Server Component doing the session/user read itself (matches the established app/moment/[token]/page.tsx precedent)', /export default async function PlanDayPage\(\)/.test(planDayPageSource));
   check('31. page.tsx reads the authoritative clock exactly once, passed by reference into resolvePlanDayServerProps', occurrences(planDayPageSource, 'new Date()') === 1 && planDayPageSource.includes('now: () => new Date()'));
-  check('32. the clock closure is provided TO resolvePlanDayServerProps, never read by PlanDayClient or planDayEntry.ts', occurrences(planDayEntrySource, 'new Date(') === 0 && occurrences(planDayClientSource, 'new Date(') === 0);
+  // Intent Fidelity V1 PR G3/G4 added `resolveThisWeekDeadline`'s own
+  // `new Date(Date.UTC(year, month - 1, day))` to planDayEntry.ts -- the
+  // SAME pure, explicit-Y/M/D calendar-arithmetic idiom `timezone.ts`'s
+  // own `addDaysToDateStr` already uses, never an ambient clock read.
+  // This check is refined (matching planDayEntry.test.ts's own check 25)
+  // to forbid an actual clock read -- a zero-argument `new Date()` or
+  // `Date.now()` -- rather than the bare `new Date(` substring, which
+  // would also incorrectly reject this exact non-clock-reading idiom.
+  check(
+    '32. the clock closure is provided TO resolvePlanDayServerProps, never read by PlanDayClient or planDayEntry.ts (Date.UTC(explicit y/m/d) calendar arithmetic is not a clock read)',
+    !/new Date\(\s*\)/.test(planDayEntrySource) && !planDayEntrySource.includes('Date.now(') && occurrences(planDayClientSource, 'new Date(') === 0
+  );
   check('33. page.tsx delegates the actual session/user/date decision to resolvePlanDayServerProps -- it makes no decision of its own beyond wiring closures', planDayPageSource.includes('resolvePlanDayServerProps({'));
   check('34. planDayBootstrap.ts imports no next/server or next/headers of its own -- fully framework-independent, directly testable (mirrors F1s own handleDayConstructorPreviewRequest pattern)', !/next\/server|next\/headers/.test(planDayBootstrapSource));
   check('35. resolvePlanDayBootstrap reuses the canonical getDatePartsInTimezone helper -- no second civil-date derivation', planDayBootstrapSource.includes("from './timezone'"));
   check('36. PlanDayClient accepts timezone/planningDate as props (server-supplied), not internal state derived from a fetch', /export function PlanDayClient\(\{ timezone, planningDate \}: PlanDayClientProps\)/.test(planDayClientSource));
   check('37. buildRequestedIntentsForSubmission and previewConstructedDay are both called with the SAME planningDate value at the submit call site', /buildRequestedIntentsForSubmission\(rows, timezone, planningDate\)/.test(planDayClientSource) && /previewConstructedDay\(intents, planningDate\)/.test(planDayClientSource));
   check('38. page.tsx never accepts planningDate/timezone from a query string, header, or client-suppliable input -- both come exclusively from resolvePlanDayServerProps\'s own return value', !/searchParams|req\.query|req\.headers/.test(planDayPageSource));
+
+  // ============================================================
+  // Intent Fidelity V1 PR G3/G4 -- Important/Due-by wiring (39-41)
+  // ============================================================
+  check('39. the Submit gate now also requires planningDate, matching canSubmitPlanDay\'s own extended (rows, planningDate) signature', /canSubmitPlanDay\(rows, planningDate\)/.test(planDayClientSource));
+  check('40. the row card never sends an explicit MEDIUM/LOW UI label -- HIGH/MEDIUM/LOW are not used as UI vocabulary anywhere in this file', !/label="HIGH"|label="MEDIUM"|label="LOW"|label='HIGH'|label='MEDIUM'|label='LOW'/.test(planDayClientSource));
+  check('41. the Important control and the FIXED-time control remain visually/lexically distinct -- deadline is labeled "Due by", never "Due at"', planDayClientSource.includes('Due by') && !planDayClientSource.includes('Due at'));
 
   if (!allPassed) {
     console.error('\nSome Plan Day Wiring checks FAILED.');

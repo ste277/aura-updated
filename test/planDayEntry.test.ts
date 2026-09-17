@@ -12,11 +12,14 @@ import {
   canSubmitPlanDay,
   canAddAnotherRow,
   resolveFixedStart,
+  resolveDeadline,
   buildRequestedIntentsForSubmission,
   presentPlanDayPreviewFailure,
   MAX_PLAN_DAY_INTENTS,
   PLAN_DAY_DURATION_OPTIONS_MINUTES,
+  NO_DEADLINE,
   type PlanDayIntentRow,
+  type PlanDayDeadlineChoice,
 } from '../apps/web/lib/planDayEntry';
 import type { ConstructDayPreviewClientResult } from '../apps/web/lib/dayConstructorPreviewClient';
 
@@ -26,8 +29,10 @@ function check(label: string, condition: boolean) {
   if (!condition) allPassed = false;
 }
 
+const PLANNING_DATE = '2026-09-16'; // a Wednesday -- used as the default gate/mapping planningDate throughout this file.
+
 function row(overrides: Partial<PlanDayIntentRow> = {}): PlanDayIntentRow {
-  return { id: overrides.id ?? 'row-x', title: '', durationMinutes: null, timeMode: 'FLEXIBLE', fixedTime: null, ...overrides };
+  return { id: overrides.id ?? 'row-x', title: '', durationMinutes: null, timeMode: 'FLEXIBLE', fixedTime: null, important: false, deadlineChoice: NO_DEADLINE, ...overrides };
 }
 
 function main() {
@@ -38,6 +43,7 @@ function main() {
     const a = createEmptyIntentRow();
     const b = createEmptyIntentRow();
     check('1. a new row has a blank title, Automatic duration, and FLEXIBLE timing by default', a.title === '' && a.durationMinutes === null && a.timeMode === 'FLEXIBLE' && a.fixedTime === null);
+    check('1b. a new row defaults to important=false and no deadline (Intent Fidelity V1 PR G3/G4)', a.important === false && a.deadlineChoice.kind === 'NONE');
     check('2. two rows created in sequence have distinct, stable ids', a.id !== b.id);
     check('3. an id is never derived from the (blank) title', a.id.length > 0 && !a.id.includes('title'));
     check('4. id is a non-empty opaque string', typeof a.id === 'string' && a.id.length > 0);
@@ -47,16 +53,18 @@ function main() {
   // countSubmittableIntentRows / canSubmitPlanDay (5-15)
   // ============================================================
   check('5. a single blank row has zero submittable intents', countSubmittableIntentRows([row()]) === 0);
-  check('6. a single blank row cannot be submitted', canSubmitPlanDay([row()]) === false);
+  check('6. a single blank row cannot be submitted', canSubmitPlanDay([row()], PLANNING_DATE) === false);
   check('7. a whitespace-only title is treated as blank, not counted', countSubmittableIntentRows([row({ title: '   ' })]) === 0);
-  check('8. one real title makes the form submittable', canSubmitPlanDay([row({ title: 'Workout' })]) === true);
-  check('9. a blank row alongside a valid row does not block submission (blank rows are simply excluded)', canSubmitPlanDay([row({ title: 'Workout' }), row()]) === true);
+  check('8. one real title makes the form submittable', canSubmitPlanDay([row({ title: 'Workout' })], PLANNING_DATE) === true);
+  check('9. a blank row alongside a valid row does not block submission (blank rows are simply excluded)', canSubmitPlanDay([row({ title: 'Workout' }), row()], PLANNING_DATE) === true);
   check('10. multiple valid rows all count', countSubmittableIntentRows([row({ title: 'A' }), row({ title: 'B' }), row()]) === 2);
-  check('11. FIXED with a title but no chosen time is INCOMPLETE -- never submittable', canSubmitPlanDay([row({ title: 'Call Mum', timeMode: 'FIXED', fixedTime: null })]) === false);
-  check('12. FIXED with a title and a chosen time is submittable', canSubmitPlanDay([row({ title: 'Call Mum', timeMode: 'FIXED', fixedTime: '14:30' })]) === true);
-  check('13. an incomplete FIXED row blocks the WHOLE submission even when another row is complete', canSubmitPlanDay([row({ title: 'Workout' }), row({ title: 'Call Mum', timeMode: 'FIXED', fixedTime: null })]) === false);
-  check('14. a blank row toggled to FIXED with no time is still just "blank" -- never blocks submission on its own', canSubmitPlanDay([row({ title: 'Workout' }), row({ title: '', timeMode: 'FIXED', fixedTime: null })]) === true);
-  check('15. zero rows (defensive) cannot be submitted', canSubmitPlanDay([]) === false);
+  check('11. FIXED with a title but no chosen time is INCOMPLETE -- never submittable', canSubmitPlanDay([row({ title: 'Call Mum', timeMode: 'FIXED', fixedTime: null })], PLANNING_DATE) === false);
+  check('12. FIXED with a title and a chosen time is submittable', canSubmitPlanDay([row({ title: 'Call Mum', timeMode: 'FIXED', fixedTime: '14:30' })], PLANNING_DATE) === true);
+  check('13. an incomplete FIXED row blocks the WHOLE submission even when another row is complete', canSubmitPlanDay([row({ title: 'Workout' }), row({ title: 'Call Mum', timeMode: 'FIXED', fixedTime: null })], PLANNING_DATE) === false);
+  check('14. a blank row toggled to FIXED with no time is still just "blank" -- never blocks submission on its own', canSubmitPlanDay([row({ title: 'Workout' }), row({ title: '', timeMode: 'FIXED', fixedTime: null })], PLANNING_DATE) === true);
+  check('15. zero rows (defensive) cannot be submitted', canSubmitPlanDay([], PLANNING_DATE) === false);
+  check('15b. a title with a CUSTOM deadline before planningDate is INCOMPLETE -- never submittable (this ticket\'s own section 8)', canSubmitPlanDay([row({ title: 'Late task', deadlineChoice: { kind: 'CUSTOM', date: '2026-09-15' } })], PLANNING_DATE) === false);
+  check('15c. the SAME row with a CUSTOM deadline on/after planningDate IS submittable', canSubmitPlanDay([row({ title: 'On-time task', deadlineChoice: { kind: 'CUSTOM', date: '2026-09-16' } })], PLANNING_DATE) === true);
 
   // ============================================================
   // canAddAnotherRow (16-18)
@@ -87,8 +95,20 @@ function main() {
   }
   check('24. resolveFixedStart takes a planningDate STRING, never a Date/now -- no client-clock-dependent parameter exists on this function\'s own signature', resolveFixedStart.length === 3);
   check(
-    '25. planDayEntry.ts has no clock of its own anywhere (planning-date hardening: no client new Date() may determine the planning civil date)',
-    !require('fs').readFileSync(require('path').join(__dirname, '../apps/web/lib/planDayEntry.ts'), 'utf8').includes('new Date(')
+    // Intent Fidelity V1 PR G3/G4 added `resolveThisWeekDeadline`'s own
+    // `new Date(Date.UTC(year, month - 1, day))` -- the SAME pure,
+    // explicit-Y/M/D calendar-arithmetic idiom `timezone.ts`'s own
+    // `addDaysToDateStr` and `dayPlanPreviewPresentation.ts`'s own
+    // `formatTargetDateLabel` already use, never an ambient clock read.
+    // This check is refined to forbid what "no clock of its own" ACTUALLY
+    // means -- a zero-argument `new Date()` or `Date.now()` -- rather than
+    // banning `new Date(` as a bare substring, which would also reject
+    // this exact, already-established, non-clock-reading idiom.
+    '25. planDayEntry.ts has no clock of its own anywhere (planning-date hardening: no new Date() / Date.now() may determine the planning civil date -- Date.UTC(explicit y/m/d) calendar arithmetic is not a clock read)',
+    (() => {
+      const source: string = require('fs').readFileSync(require('path').join(__dirname, '../apps/web/lib/planDayEntry.ts'), 'utf8');
+      return !/new Date\(\s*\)/.test(source) && !source.includes('Date.now(');
+    })()
   );
 
   // ============================================================
@@ -120,8 +140,8 @@ function main() {
     const keys = Object.keys(intents[0]);
     check('35. originalOrder is never sent (array position IS the order -- F1 derives it itself)', !keys.includes('originalOrder'));
     check('36. activityId is never sent in V1 (title-only path)', !keys.includes('activityId'));
-    check('37. importance is never sent in V1', !keys.includes('importance'));
-    check('38. deadline is never sent in V1', !keys.includes('deadline'));
+    check('37. importance is OMITTED (never sent, not even as MEDIUM) for a default row (important=false) -- Intent Fidelity V1 PR G3/G4', !keys.includes('importance'));
+    check('38. deadline is OMITTED (never sent) for a default row (deadlineChoice=NONE) -- Intent Fidelity V1 PR G3/G4', !keys.includes('deadline'));
   }
   {
     const intents = buildRequestedIntentsForSubmission([row({ id: 'first', title: 'First' }), row({ id: 'second', title: 'Second' }), row({ id: 'third', title: 'Third' })], 'Asia/Kolkata', '2026-09-16');
@@ -138,6 +158,112 @@ function main() {
     const intents = buildRequestedIntentsForSubmission([row({ id: 'r1', title: 'Open presents', timeMode: 'FIXED', fixedTime: '09:00' })], 'Asia/Kolkata', planningDate);
     const expected = resolveFixedStart({ timeMode: 'FIXED', fixedTime: '09:00' }, planningDate, 'Asia/Kolkata');
     check('40. buildRequestedIntentsForSubmission assembles fixedStart against the EXACT same planningDate a caller would also send as targetDate', intents[0].fixedStart?.getTime() === expected?.getTime());
+  }
+
+  // ============================================================
+  // Intent Fidelity V1 PR G3/G4 -- resolveDeadline (53-64). Every branch
+  // is a pure civil-date-string operation on a fixed `planningDate`, no
+  // clock involved anywhere (this ticket's own section 14).
+  // ============================================================
+  check('53. NONE resolves to undefined', resolveDeadline(NO_DEADLINE, PLANNING_DATE) === undefined);
+  check('54. TODAY resolves to planningDate itself', resolveDeadline({ kind: 'TODAY' }, PLANNING_DATE) === PLANNING_DATE);
+  check('55. TOMORROW resolves to planningDate + 1 civil day, no browser clock involved', resolveDeadline({ kind: 'TOMORROW' }, PLANNING_DATE) === '2026-09-17');
+  check('56. CUSTOM preserves the exact YYYY-MM-DD string supplied', resolveDeadline({ kind: 'CUSTOM', date: '2026-10-05' }, PLANNING_DATE) === '2026-10-05');
+  {
+    // THIS_WEEK worked examples (this ticket's own section 7) -- Sunday
+    // of the week containing planningDate, never planningDate + 7 days.
+    check('57. THIS_WEEK from a Monday resolves to the FOLLOWING Sunday', resolveDeadline({ kind: 'THIS_WEEK' }, '2026-09-14') === '2026-09-20'); // Mon 9/14 -> Sun 9/20
+    check('58. THIS_WEEK from a Wednesday resolves to the FOLLOWING Sunday', resolveDeadline({ kind: 'THIS_WEEK' }, '2026-09-16') === '2026-09-20'); // Wed 9/16 -> Sun 9/20
+    check('59. THIS_WEEK from a Saturday resolves to the FOLLOWING Sunday', resolveDeadline({ kind: 'THIS_WEEK' }, '2026-09-19') === '2026-09-20'); // Sat 9/19 -> Sun 9/20
+    check('60. THIS_WEEK from a Sunday resolves to the SAME day', resolveDeadline({ kind: 'THIS_WEEK' }, '2026-09-20') === '2026-09-20'); // Sun 9/20 -> Sun 9/20
+    check('61. THIS_WEEK is never planningDate + 7 days (Monday case would wrongly be 9/21)', resolveDeadline({ kind: 'THIS_WEEK' }, '2026-09-14') !== '2026-09-21');
+    // Month/year boundary: Sat 2026-12-27 is Saturday -> following Sunday
+    // is 2026-12-28 (no boundary crossing here); Wed 2026-12-30 IS a
+    // genuine boundary case -- its following Sunday (2027-01-03) crosses
+    // both the month AND the year.
+    check('62. THIS_WEEK correctly crosses a month/year boundary (Wed Dec 30, 2026 -> Sun Jan 3, 2027)', resolveDeadline({ kind: 'THIS_WEEK' }, '2026-12-30') === '2027-01-03');
+    check('63. THIS_WEEK from a Sunday (Dec 27, 2026) resolves to the SAME day, staying in that year', resolveDeadline({ kind: 'THIS_WEEK' }, '2026-12-27') === '2026-12-27');
+  }
+  check('64. resolveDeadline takes a planningDate STRING, never a Date/now', resolveDeadline.length === 2);
+
+  // ============================================================
+  // Intent Fidelity V1 PR G3/G4 -- buildRequestedIntentsForSubmission's
+  // new importance/deadline mapping (65-84).
+  // ============================================================
+  {
+    // 65-66: default row (important=false, NO_DEADLINE) produces the
+    // EXACT same request body shape as before G3/G4 -- this ticket's
+    // own section 44, an explicit regression proof.
+    const before = { id: 'r1', title: 'Read', flexibility: 'FLEXIBLE' as const };
+    const intents = buildRequestedIntentsForSubmission([row({ id: 'r1', title: 'Read' })], 'Asia/Kolkata', PLANNING_DATE);
+    check('65. a default row (title/Automatic/Flexible only) produces a request body with no new fields at all', JSON.stringify(intents[0]) === JSON.stringify(before));
+    check('66. importance/deadline stay absent for a default row', !('importance' in intents[0]) && !('deadline' in intents[0]));
+  }
+  {
+    // 67-68: important=true -> importance HIGH; important=false -> omitted.
+    const on = buildRequestedIntentsForSubmission([row({ id: 'r1', title: 'Board report', important: true })], 'Asia/Kolkata', PLANNING_DATE);
+    check('67. important=true maps to importance: HIGH', on[0].importance === 'HIGH');
+    const off = buildRequestedIntentsForSubmission([row({ id: 'r1', title: 'Board report', important: false })], 'Asia/Kolkata', PLANNING_DATE);
+    check('68. important=false OMITS importance entirely -- never an explicit MEDIUM', !('importance' in off[0]));
+  }
+  {
+    // 69: Today.
+    const intents = buildRequestedIntentsForSubmission([row({ id: 'r1', title: 'X', deadlineChoice: { kind: 'TODAY' } })], 'Asia/Kolkata', PLANNING_DATE);
+    check('69. Today maps to deadline === planningDate', intents[0].deadline === PLANNING_DATE);
+  }
+  {
+    // 70: Tomorrow, no browser clock involved.
+    const intents = buildRequestedIntentsForSubmission([row({ id: 'r1', title: 'X', deadlineChoice: { kind: 'TOMORROW' } })], 'Asia/Kolkata', PLANNING_DATE);
+    check('70. Tomorrow maps to planningDate + 1 civil day', intents[0].deadline === '2026-09-17');
+  }
+  {
+    // 71: Pick date, planningDate-or-future -> exact string preserved.
+    const intents = buildRequestedIntentsForSubmission([row({ id: 'r1', title: 'X', deadlineChoice: { kind: 'CUSTOM', date: '2026-10-05' } })], 'Asia/Kolkata', PLANNING_DATE);
+    check('71. Pick date preserves the exact YYYY-MM-DD string chosen', intents[0].deadline === '2026-10-05');
+  }
+  {
+    // 72: past custom date -> fail closed, no request emitted.
+    let threw = false;
+    try {
+      buildRequestedIntentsForSubmission([row({ id: 'r1', title: 'X', deadlineChoice: { kind: 'CUSTOM', date: '2026-09-01' } })], 'Asia/Kolkata', PLANNING_DATE);
+    } catch {
+      threw = true;
+    }
+    check('72. a CUSTOM deadline before planningDate fails closed (throws) in buildRequestedIntentsForSubmission -- never normalized, never sent', threw === true);
+  }
+  {
+    // 73: clear -> back to NONE -> omitted.
+    const intents = buildRequestedIntentsForSubmission([row({ id: 'r1', title: 'X', deadlineChoice: NO_DEADLINE })], 'Asia/Kolkata', PLANNING_DATE);
+    check('73. NO_DEADLINE (post-Clear state) omits deadline entirely', !('deadline' in intents[0]));
+  }
+  {
+    // 74: important + deadline coexist in the same intent, no conflict.
+    const intents = buildRequestedIntentsForSubmission([row({ id: 'r1', title: 'Board report', important: true, deadlineChoice: { kind: 'TODAY' } })], 'Asia/Kolkata', PLANNING_DATE);
+    check('74. important=true and a supplied deadline coexist in the same built intent', intents[0].importance === 'HIGH' && intents[0].deadline === PLANNING_DATE);
+  }
+  {
+    // 75-76: FIXED + deadline -- no interaction, fixedStart computed exactly as before, deadline stays a civil-date string.
+    const intents = buildRequestedIntentsForSubmission([row({ id: 'r1', title: 'Doctor', timeMode: 'FIXED', fixedTime: '16:00', deadlineChoice: { kind: 'TODAY' } })], 'Asia/Kolkata', PLANNING_DATE);
+    const expectedFixedStart = resolveFixedStart({ timeMode: 'FIXED', fixedTime: '16:00' }, PLANNING_DATE, 'Asia/Kolkata');
+    check('75. FIXED + deadline: fixedStart is computed exactly as F2 already did (unaffected by deadline)', intents[0].fixedStart?.getTime() === expectedFixedStart?.getTime());
+    check('76. FIXED + deadline: deadline remains a plain civil-date string, never converted toward an instant', intents[0].deadline === PLANNING_DATE && typeof intents[0].deadline === 'string');
+  }
+  {
+    // 77: G2 interaction -- unknown natural task, Automatic duration,
+    // Important + deadline: no activityId is ever sent (never
+    // fabricated), duration stays omitted (Automatic, resolved
+    // server-side via G2's own generic fallback), importance/deadline
+    // both pass through untouched.
+    const intents = buildRequestedIntentsForSubmission([row({ id: 'r1', title: 'Prepare for Sarah meeting', important: true, deadlineChoice: { kind: 'TODAY' } })], 'Asia/Kolkata', PLANNING_DATE);
+    const keys = Object.keys(intents[0]);
+    check('77. unknown natural title + Automatic + Important + deadline: no activityId, no durationMinutes, importance HIGH, deadline present (G2 interaction)', !keys.includes('activityId') && !keys.includes('durationMinutes') && intents[0].importance === 'HIGH' && intents[0].deadline === PLANNING_DATE);
+  }
+  {
+    // 78: determinism -- same rows/planningDate/timezone -> byte-identical output.
+    const rows = [row({ id: 'r1', title: 'A', important: true, deadlineChoice: { kind: 'TOMORROW' } }), row({ id: 'r2', title: 'B', timeMode: 'FIXED', fixedTime: '09:00' })];
+    const first = buildRequestedIntentsForSubmission(rows, 'Asia/Kolkata', PLANNING_DATE);
+    const second = buildRequestedIntentsForSubmission(rows, 'Asia/Kolkata', PLANNING_DATE);
+    check('78. identical inputs (planningDate/rows/timezone) produce byte-equivalent submissions -- no clock/randomness', JSON.stringify(first) === JSON.stringify(second));
   }
 
   // ============================================================

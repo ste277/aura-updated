@@ -27,6 +27,7 @@ import {
   sortProposedItemsForDisplay,
   titleForIntentId,
   classifyProposalSummary,
+  presentDeferredProvenance,
 } from '../apps/web/lib/dayPlanPreviewPresentation';
 import type { ConstructDayPreview, ResolvedIntentSummary, ConstructDayWarning } from '../apps/web/lib/dayConstructorOrchestrator';
 import type { ProposedItem, DeferredItem, ConstructedDay, PlacementDeferralReason, PlacementTimingFit } from '../apps/web/lib/dayConstructor';
@@ -263,6 +264,28 @@ check('titleForIntentId recovers the resolved title for a deferred intentId', ti
 check('titleForIntentId falls back safely for an unknown intentId (never throws)', titleForIntentId([], 'missing') === 'Untitled');
 
 // ============================================================
+// 57-65: Intent Fidelity V1 PR G3/G4 -- deferred-item provenance.
+// Deliberately MINIMAL/factual (this ticket's own section 24): only the
+// two facts the user can actually supply through Plan My Day.
+// ============================================================
+
+const PLANNING_DATE = '2026-09-16';
+
+check('57. a default deferred intent (MEDIUM, no deadline) gets NO provenance text at all -- MEDIUM is never presented as a stated choice', presentDeferredProvenance([resolvedIntent('a', 'Read')], 'a', PLANNING_DATE).length === 0);
+check('58. an explicitly Important deferred intent shows "Important"', presentDeferredProvenance([resolvedIntent('a', 'Board report', { importance: 'HIGH' })], 'a', PLANNING_DATE).includes('Important'));
+check('59. "Important" is never shown for a default (MEDIUM) row', !presentDeferredProvenance([resolvedIntent('a', 'Read')], 'a', PLANNING_DATE).includes('Important'));
+check('59b. LOW is never presented as "Low priority" (LOW is not exposed by this UI at all)', !presentDeferredProvenance([resolvedIntent('a', 'Read', { importance: 'LOW' })], 'a', PLANNING_DATE).some((t) => t.toLowerCase().includes('low')));
+check('60. a deferred intent with deadline === planningDate shows "Due today"', presentDeferredProvenance([resolvedIntent('a', 'Board report', { deadline: PLANNING_DATE })], 'a', PLANNING_DATE).includes('Due today'));
+check('61. a deferred intent with deadline === planningDate+1 shows "Due tomorrow"', presentDeferredProvenance([resolvedIntent('a', 'X', { deadline: '2026-09-17' })], 'a', PLANNING_DATE).includes('Due tomorrow'));
+check('62. a deferred intent with a distant deadline shows a compact absolute date, never invented urgency language', presentDeferredProvenance([resolvedIntent('a', 'X', { deadline: '2026-09-20' })], 'a', PLANNING_DATE).some((t) => t === 'Due Sep 20'));
+check('63. Important + deadline both present -> both texts returned together', (() => {
+  const texts = presentDeferredProvenance([resolvedIntent('a', 'Board report', { importance: 'HIGH', deadline: PLANNING_DATE })], 'a', PLANNING_DATE);
+  return texts.includes('Important') && texts.includes('Due today');
+})());
+check('64. an unknown intentId returns [] rather than throwing', presentDeferredProvenance([], 'missing', PLANNING_DATE).length === 0);
+check('65. no provenance text ever contains a raw domain enum ("HIGH"/"MEDIUM"/"LOW")', !presentDeferredProvenance([resolvedIntent('a', 'Board report', { importance: 'HIGH', deadline: PLANNING_DATE })], 'a', PLANNING_DATE).some((t) => t === 'HIGH' || t === 'MEDIUM' || t === 'LOW'));
+
+// ============================================================
 // Structural source checks (architecture guarantees, this ticket's own
 // sections 5/10/13/21-25/34/36/47-56) -- mirrors
 // dayConstructorOrchestrator.test.ts's own tests 55-59 convention of
@@ -302,6 +325,12 @@ check('54. component never renders a persisted-sounding phrase like "added to yo
 // narrower claim, superseded by this ticket's own explicit extension).
 check("55. onContinue/onDiscard keep their original PR D signatures, unchanged and adjacent, on DayPlanPreviewProps", /onContinue\?: \(preview: ConstructDayPreview\) => void;\s*onDiscard\?: \(\) => void;/.test(componentSource));
 check('56. neither PR A/B/C file (dayIntent.ts/dayCapacity.ts/dayConstructor.ts/dayConstructorOrchestrator.ts) is imported for mutation, only for its exported types/values', /from '..\/lib\/dayConstructor'/.test(componentSource) && /from '..\/lib\/dayConstructorOrchestrator'/.test(componentSource));
+
+// Intent Fidelity V1 PR G3/G4 -- provenance wiring (this ticket's own
+// section 29: never on a placed item).
+check('66. DeferredItemRow\'s own call site passes provenanceTexts', /<DeferredItemRow[\s\S]{0,300}provenanceTexts=/.test(componentSource));
+check('67. ProposedItemRow\'s own call site never receives provenanceTexts (placed items get no priority/deadline badges)', !/<ProposedItemRow[\s\S]{0,300}provenanceTexts=/.test(componentSource));
+check('68. component never renders a generated "why" explanation string for provenance (this ticket\'s own section 24/45)', !/Aura chose|ranking narrative|prioritized over|comparison sentence/i.test(componentSource));
 
 if (!allPassed) {
   console.error('SOME DAY PLAN PREVIEW PRESENTATION CHECKS FAILED');

@@ -26,7 +26,9 @@ import {
   buildRequestedIntentsForSubmission,
   presentPlanDayPreviewFailure,
   PLAN_DAY_DURATION_OPTIONS_MINUTES,
+  NO_DEADLINE,
   type PlanDayIntentRow,
+  type PlanDayDeadlineChoice,
 } from '../../lib/planDayEntry';
 
 /**
@@ -101,7 +103,20 @@ export function PlanDayClient({ timezone, planningDate }: PlanDayClientProps) {
     if (!timezone || !planningDate || phase === 'SUBMITTING') return;
     setPhase('SUBMITTING');
     setEntryError(null);
-    const intents = buildRequestedIntentsForSubmission(rows, timezone, planningDate);
+    // `buildRequestedIntentsForSubmission` throws only for a past-deadline
+    // row that "somehow" bypassed the primary UI gate (`canSubmitPlanDay`'s
+    // own `isRowComplete` check, plus each date input's own
+    // `min={planningDate}`) -- this ticket's own section 8 fail-closed
+    // requirement. This should never actually happen through the real UI;
+    // caught defensively rather than left to crash the component.
+    let intents;
+    try {
+      intents = buildRequestedIntentsForSubmission(rows, timezone, planningDate);
+    } catch {
+      setEntryError({ message: "Something about your day didn't come through correctly. Try again.", retryable: false });
+      setPhase('PREVIEW_ERROR');
+      return;
+    }
     const result = await previewConstructedDay(intents, planningDate);
     if (result.status === 'READY') {
       setPreview(result.preview);
@@ -161,6 +176,7 @@ export function PlanDayClient({ timezone, planningDate }: PlanDayClientProps) {
                   key={row.id}
                   row={row}
                   index={index}
+                  planningDate={planningDate}
                   canRemove={rows.length > 1}
                   disabled={phase === 'SUBMITTING'}
                   onChange={(patch) => updateRow(row.id, patch)}
@@ -186,7 +202,7 @@ export function PlanDayClient({ timezone, planningDate }: PlanDayClientProps) {
             )}
 
             <div style={{ marginTop: spacing.xxl, display: 'flex', justifyContent: 'flex-end' }}>
-              <PrimaryButton onClick={() => void submitPreview()} disabled={!canSubmitPlanDay(rows)} loading={phase === 'SUBMITTING'} ariaLabel="Plan my day">
+              <PrimaryButton onClick={() => void submitPreview()} disabled={!planningDate || !canSubmitPlanDay(rows, planningDate)} loading={phase === 'SUBMITTING'} ariaLabel="Plan my day">
                 Plan my day
               </PrimaryButton>
             </div>
@@ -200,6 +216,7 @@ export function PlanDayClient({ timezone, planningDate }: PlanDayClientProps) {
 function IntentRowCard({
   row,
   index,
+  planningDate,
   canRemove,
   disabled,
   onChange,
@@ -207,6 +224,7 @@ function IntentRowCard({
 }: {
   row: PlanDayIntentRow;
   index: number;
+  planningDate: string | null;
   canRemove: boolean;
   disabled: boolean;
   onChange: (patch: Partial<PlanDayIntentRow>) => void;
@@ -215,6 +233,7 @@ function IntentRowCard({
   const titleId = `plan-day-title-${row.id}`;
   const timeInputId = `plan-day-time-${row.id}`;
   const showIncompleteTimeError = row.title.trim().length > 0 && row.timeMode === 'FIXED' && !row.fixedTime;
+  const showPastDeadlineError = row.title.trim().length > 0 && row.deadlineChoice.kind === 'CUSTOM' && !!planningDate && row.deadlineChoice.date < planningDate;
 
   return (
     <SurfaceCard>
@@ -264,6 +283,97 @@ function IntentRowCard({
           </div>
         )}
       </div>
+
+      <div style={{ marginTop: spacing.md }}>
+        <DurationChip label="Important" selected={row.important} onClick={() => onChange({ important: !row.important })} />
+      </div>
+
+      <div style={{ marginTop: spacing.md }}>
+        <DueByControl
+          rowId={row.id}
+          deadlineChoice={row.deadlineChoice}
+          planningDate={planningDate}
+          disabled={disabled}
+          hasError={showPastDeadlineError}
+          onChange={(deadlineChoice) => onChange({ deadlineChoice })}
+        />
+        {showPastDeadlineError && <FieldError>Pick today or a later date.</FieldError>}
+      </div>
     </SurfaceCard>
+  );
+}
+
+/**
+ * "Due by" (this ticket's own section 5/10) -- progressive disclosure,
+ * collapsed by default (`NO_DEADLINE`), never a permanent full date
+ * picker per row. Deliberately never worded as if it were a clock time
+ * (this ticket's own section 10) -- a row's `important`/deadline facts are
+ * always rendered in a visually SEPARATE control from "At a specific
+ * time" above, so the two intent facts (urgency vs. scheduling
+ * constraint) are never presented as one choice.
+ */
+function DueByControl({
+  rowId,
+  deadlineChoice,
+  planningDate,
+  disabled,
+  hasError,
+  onChange,
+}: {
+  rowId: string;
+  deadlineChoice: PlanDayDeadlineChoice;
+  planningDate: string | null;
+  disabled: boolean;
+  hasError: boolean;
+  onChange: (choice: PlanDayDeadlineChoice) => void;
+}) {
+  const [expanded, setExpanded] = useState(deadlineChoice.kind !== 'NONE');
+  const dateInputId = `plan-day-deadline-${rowId}`;
+
+  if (!expanded) {
+    return (
+      <TextButton onClick={() => setExpanded(true)} color={colors.textMuted} style={{ opacity: disabled ? 0.4 : 1, pointerEvents: disabled ? 'none' : 'auto' }}>
+        + Due by
+      </TextButton>
+    );
+  }
+
+  return (
+    <div>
+      <FieldLabel>Due by</FieldLabel>
+      <div style={{ display: 'flex', flexWrap: 'wrap', gap: spacing.xs }}>
+        <DurationChip label="Today" selected={deadlineChoice.kind === 'TODAY'} onClick={() => onChange({ kind: 'TODAY' })} />
+        <DurationChip label="Tomorrow" selected={deadlineChoice.kind === 'TOMORROW'} onClick={() => onChange({ kind: 'TOMORROW' })} />
+        <DurationChip label="This week" selected={deadlineChoice.kind === 'THIS_WEEK'} onClick={() => onChange({ kind: 'THIS_WEEK' })} />
+        <DurationChip label="Pick date" selected={deadlineChoice.kind === 'CUSTOM'} onClick={() => onChange({ kind: 'CUSTOM', date: planningDate ?? '' })} />
+      </div>
+      {deadlineChoice.kind === 'CUSTOM' && (
+        <div style={{ marginTop: spacing.sm }}>
+          <TextInput
+            id={dateInputId}
+            type="date"
+            value={deadlineChoice.date}
+            min={planningDate ?? undefined}
+            onChange={(e) => onChange({ kind: 'CUSTOM', date: e.target.value })}
+            disabled={disabled}
+            hasError={hasError}
+          />
+        </div>
+      )}
+      {deadlineChoice.kind !== 'NONE' && (
+        <div style={{ marginTop: spacing.xs }}>
+          <TextButton
+            onClick={() => {
+              onChange(NO_DEADLINE);
+              setExpanded(false);
+            }}
+            color={colors.textMuted}
+            style={{ opacity: disabled ? 0.4 : 1, pointerEvents: disabled ? 'none' : 'auto' }}
+          >
+            Clear
+          </TextButton>
+        </div>
+      )}
+    </div>
   );
 }
