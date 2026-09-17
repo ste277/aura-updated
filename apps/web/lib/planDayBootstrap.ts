@@ -15,18 +15,29 @@
  */
 
 import { getDatePartsInTimezone } from './timezone';
+import { resolvePlanningTargetDate, type PlanningHorizon } from './planningHorizon';
 
 export interface PlanDayBootstrap {
   timezone: string;
   planningDate: string;
 }
 
-/** Pure. The one civil-date derivation this entire feature performs --
+/**
+ * Pure. The one civil-date derivation this entire feature performs --
  * reused verbatim by both the FIXED-time assembly (planDayEntry.ts) and
  * the preview request's own `targetDate` (this ticket's own section 7),
- * so both can never disagree about which day is being planned. */
-export function resolvePlanDayBootstrap(userTimezone: string, now: Date): PlanDayBootstrap {
-  return { timezone: userTimezone, planningDate: getDatePartsInTimezone(userTimezone, now).dateStr };
+ * so both can never disagree about which day is being planned.
+ *
+ * Planning Horizon V1 PR P1 -- `horizon` defaults to `'TODAY'`, so every
+ * existing caller that supplies no horizon stays byte-equivalent to
+ * before this parameter existed (this ticket's own section 5: "Existing
+ * callers that provide no horizon must remain byte-equivalent"). No UI
+ * exposes a non-default horizon yet (P2's own scope) -- this parameter
+ * only proves the server-side resolution itself is correct.
+ */
+export function resolvePlanDayBootstrap(userTimezone: string, now: Date, horizon: PlanningHorizon = 'TODAY'): PlanDayBootstrap {
+  const currentDate = getDatePartsInTimezone(userTimezone, now).dateStr;
+  return { timezone: userTimezone, planningDate: resolvePlanningTargetDate({ horizon, currentDate }) };
 }
 
 export interface PlanDayBootstrapDeps {
@@ -49,8 +60,16 @@ export interface PlanDayBootstrapDeps {
  * exactly like this app's own established client-side pattern
  * (window.location.href), never a second, server-side redirect mechanism
  * (this ticket's own section 15/19: no new architecture).
+ *
+ * Planning Horizon V1 PR P1 -- `horizon` defaults to `'TODAY'` and is
+ * forwarded verbatim to `resolvePlanDayBootstrap`, so this full
+ * session -> user -> bootstrap sequence is directly testable against a
+ * requested horizon with no cookie-framework/NextRequest involvement,
+ * exactly like every other boundary in this file. `page.tsx` (the real
+ * Server Component caller) does not pass a horizon yet -- P2's own
+ * scope.
  */
-export async function resolvePlanDayServerProps(deps: PlanDayBootstrapDeps): Promise<PlanDayBootstrap | null> {
+export async function resolvePlanDayServerProps(deps: PlanDayBootstrapDeps, horizon: PlanningHorizon = 'TODAY'): Promise<PlanDayBootstrap | null> {
   const token = deps.getSessionToken();
   if (!token) return null;
 
@@ -60,5 +79,5 @@ export async function resolvePlanDayServerProps(deps: PlanDayBootstrapDeps): Pro
   const user = await deps.getUser(session.userId);
   if (!user) return null;
 
-  return resolvePlanDayBootstrap(user.timezone, deps.now());
+  return resolvePlanDayBootstrap(user.timezone, deps.now(), horizon);
 }

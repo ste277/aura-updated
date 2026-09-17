@@ -63,7 +63,58 @@ async function main() {
   check('1. derives planningDate from the SUPPLIED now, in the user\'s own timezone', resolvePlanDayBootstrap('Asia/Kolkata', new Date('2026-09-16T20:00:00.000Z')).planningDate === '2026-09-17');
   check('2. timezone passes through unchanged', resolvePlanDayBootstrap('America/New_York', new Date('2026-09-16T12:00:00.000Z')).timezone === 'America/New_York');
   check('3. a different timezone for the SAME instant can yield a different civil date (never a fixed/UTC date)', resolvePlanDayBootstrap('America/Los_Angeles', new Date('2026-09-17T02:00:00.000Z')).planningDate === '2026-09-16');
-  check('4. this function has no clock of its own -- now is always a parameter', resolvePlanDayBootstrap.length === 2);
+  check('4. this function\'s required-parameter arity is unchanged (horizon is a DEFAULTED third parameter, so .length stays 2)', resolvePlanDayBootstrap.length === 2);
+
+  // ============================================================
+  // Planning Horizon V1 PR P1 -- resolvePlanDayBootstrap horizon support
+  // (16-24)
+  // ============================================================
+
+  // 16. Default-TODAY regression -- omitting horizon entirely stays byte-
+  // equivalent to every pre-P1 caller (this ticket's own section 5/31).
+  check(
+    '16. omitting horizon entirely still resolves TODAY (byte-equivalent pre-P1 default)',
+    resolvePlanDayBootstrap('Asia/Kolkata', new Date('2026-09-16T20:00:00.000Z')).planningDate === '2026-09-17'
+  );
+  // 17. Explicit horizon='TODAY' is identical to omitting it.
+  check(
+    "17. explicit horizon='TODAY' resolves identically to the default",
+    resolvePlanDayBootstrap('Asia/Kolkata', new Date('2026-09-16T20:00:00.000Z'), 'TODAY').planningDate === '2026-09-17'
+  );
+  // 18. TOMORROW resolves one civil day ahead of TODAY, in the same timezone.
+  check(
+    "18. horizon='TOMORROW' resolves one civil day ahead of TODAY, same instant/timezone",
+    resolvePlanDayBootstrap('Asia/Kolkata', new Date('2026-09-16T20:00:00.000Z'), 'TOMORROW').planningDate === '2026-09-18'
+  );
+  // 19. TOMORROW never touches timezone -- still passed through verbatim.
+  check(
+    "19. horizon='TOMORROW' does not change which timezone is returned",
+    resolvePlanDayBootstrap('America/New_York', new Date('2026-09-16T12:00:00.000Z'), 'TOMORROW').timezone === 'America/New_York'
+  );
+  // 20/21. Timezone-boundary proof (this ticket's own section 24) -- the
+  // SAME server instant can fall on different civil "today"s depending on
+  // the user's own timezone, and TOMORROW must be one civil day past
+  // EACH of those, never a single shared UTC-anchored date.
+  {
+    const instant = new Date('2026-09-16T23:30:00.000Z'); // late UTC evening.
+    const kolkataTomorrow = resolvePlanDayBootstrap('Asia/Kolkata', instant, 'TOMORROW').planningDate; // already Sep 17 05:00 IST -> tomorrow is Sep 18.
+    const newYorkTomorrow = resolvePlanDayBootstrap('America/New_York', instant, 'TOMORROW').planningDate; // still Sep 16 19:30 EDT -> tomorrow is Sep 17.
+    check('20. Asia/Kolkata TOMORROW for a late-UTC instant resolves 2026-09-18 (already the next IST day)', kolkataTomorrow === '2026-09-18');
+    check('21. America/New_York TOMORROW for the SAME instant resolves 2026-09-17 (still the same EDT day)', newYorkTomorrow === '2026-09-17');
+  }
+  // 22. Month boundary via the real bootstrap (not just the pure helper).
+  check('22. TOMORROW crosses a month boundary through the real bootstrap', resolvePlanDayBootstrap('UTC', new Date('2026-09-30T12:00:00.000Z'), 'TOMORROW').planningDate === '2026-10-01');
+  // 23. Year boundary via the real bootstrap.
+  check('23. TOMORROW crosses a year boundary through the real bootstrap', resolvePlanDayBootstrap('UTC', new Date('2026-12-31T12:00:00.000Z'), 'TOMORROW').planningDate === '2027-01-01');
+  // 24. Never now+24h -- proven structurally: an instant just before local
+  // midnight rollover still resolves the SAME civil TOMORROW as an
+  // instant just after it would for the following day, i.e. TOMORROW
+  // only ever depends on the resolved civil TODAY, never a raw 24h offset
+  // from the instant itself.
+  check(
+    '24. TOMORROW is derived from the resolved civil date, never now+24h milliseconds',
+    resolvePlanDayBootstrap('UTC', new Date('2026-09-16T00:00:01.000Z'), 'TOMORROW').planningDate === '2026-09-17'
+  );
 
   // ============================================================
   // resolvePlanDayServerProps -- full sequence (5-15)
@@ -98,6 +149,29 @@ async function main() {
     const f = fixture();
     await resolvePlanDayServerProps(f.deps);
     check('15. getSessionToken is called exactly once per resolution', f.calls.getSessionToken === 1);
+  }
+
+  // ============================================================
+  // Planning Horizon V1 PR P1 -- resolvePlanDayServerProps horizon
+  // forwarding (25-27). No real caller (page.tsx) passes a horizon yet
+  // (P2's own scope) -- these prove the full session -> user -> bootstrap
+  // boundary correctly forwards one when supplied, and defaults to TODAY
+  // exactly like resolvePlanDayBootstrap itself when omitted.
+  // ============================================================
+  {
+    const f = fixture({ now: new Date('2026-09-16T20:00:00.000Z') }); // Asia/Kolkata user (fixture default).
+    const result = await resolvePlanDayServerProps(f.deps); // no horizon supplied.
+    check('25. resolvePlanDayServerProps with no horizon supplied still resolves TODAY (default-TODAY regression at the full server-props boundary)', result?.planningDate === '2026-09-17');
+  }
+  {
+    const f = fixture({ now: new Date('2026-09-16T20:00:00.000Z') });
+    const result = await resolvePlanDayServerProps(f.deps, 'TOMORROW');
+    check("26. resolvePlanDayServerProps forwards an explicit horizon='TOMORROW' through to the real bootstrap", result?.planningDate === '2026-09-18');
+  }
+  {
+    const f = fixture({ token: null });
+    const result = await resolvePlanDayServerProps(f.deps, 'TOMORROW');
+    check('27. an unauthenticated request with horizon=TOMORROW still returns null before any date is ever resolved (no new auth bypass)', result === null && f.calls.now === 0);
   }
 
   if (!allPassed) {
