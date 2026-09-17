@@ -76,6 +76,10 @@ function countingDeps(overrides: Partial<DayConstructorOrchestratorDeps> = {}): 
       calls.searchTiming += 1;
       return overrides.searchTiming ? overrides.searchTiming(request) : { candidates: [] };
     },
+    // Availability Context V1 PR H1 -- UNCONFIGURED default, byte-
+    // equivalent to this file's own pre-H1 behavior for every test that
+    // doesn't override it.
+    loadAvailabilityConfiguration: overrides.loadAvailabilityConfiguration ?? (async () => ({ configured: false, periods: [] })),
   };
 }
 
@@ -405,7 +409,7 @@ async function main() {
     const deps = countingDeps();
     check(
       '53. the injected deps object exposes only read-shaped operations -- no save/accept/persist-style method exists for this function to have called even by accident',
-      Object.keys(deps).sort().join(',') === ['calls', 'loadBlockingPlans', 'loadDurationContext', 'searchTiming'].sort().join(',')
+      Object.keys(deps).sort().join(',') === ['calls', 'loadBlockingPlans', 'loadDurationContext', 'searchTiming', 'loadAvailabilityConfiguration'].sort().join(',')
     );
   }
 

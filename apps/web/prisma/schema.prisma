@@ -48,6 +48,12 @@ model User {
   dayBuilderPriorityPersonIds         String[] @default([])
   dayBuilderPrioritiesPromptDismissed Boolean  @default(false)
 
+  // Availability Context V1 PR H1 -- true only once the user has
+  // explicitly saved an availability schedule (even an empty one is a
+  // real, deliberate CONFIGURED state). Every existing user defaults to
+  // false -- no backfill ever sets this true.
+  availabilityConfigured Boolean @default(false)
+
   habitLogs       HabitLog[]
   visitLogs       VisitLog[]
   habits          Habit[]
@@ -61,6 +67,7 @@ model User {
   reminderDeliveries ReminderDelivery[]
   pushSubscriptions  PushSubscription[]
   activityPreferences UserActivityPreference[]
+  availabilityPeriods UserAvailabilityPeriod[]
 }
 
 // A lightweight profile for someone the user plans with -- the minimum
@@ -543,5 +550,29 @@ model UserActivityPreference {
   updatedAt                DateTime @updatedAt @db.Timestamptz(3)
 
   @@unique([userId, activityId])
+  @@index([userId])
+}
+
+// Availability Context V1 PR H1 -- one row per saved usable period. weekday
+// is 0 (Sunday) - 6 (Saturday), the same convention apps/web/lib/
+// availabilityContext.ts's own getWeekdayForDateStr uses. startTime/endTime
+// are plain "HH:mm" 24h civil-time strings, resolved against User.timezone
+// at read time (this table stores no timezone of its own). Multiple rows
+// per weekday are expected and supported (e.g. a lunch gap) -- no
+// uniqueness constraint on weekday, unlike UserActivityPreference's own
+// (userId, activityId) uniqueness. Row PRESENCE/ABSENCE in this table is
+// NOT the configured/unconfigured signal -- see User.availabilityConfigured
+// for that; a real, deliberately empty saved week has zero rows here and
+// is still CONFIGURED.
+model UserAvailabilityPeriod {
+  id        String   @id @default(uuid())
+  userId    String
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  weekday   Int
+  startTime String
+  endTime   String
+  createdAt DateTime @default(now()) @db.Timestamptz(3)
+  updatedAt DateTime @updatedAt @db.Timestamptz(3)
+
   @@index([userId])
 }

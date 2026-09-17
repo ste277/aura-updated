@@ -25,7 +25,8 @@
  */
 
 import type { User, HabitLogRow } from './db';
-import { listPlannedActivitiesForDay, listHabitLogs } from './db';
+import { listPlannedActivitiesForDay, listHabitLogs, listUserAvailabilityPeriods } from './db';
+import { resolveAvailability, normalizeUsableWindowsToConstructionWindow, type AvailabilityConfiguration } from './availabilityContext';
 import { listUserActivityPreferences, preferredDurationByActivityId, type UserActivityPreference } from './activityPreferences';
 import { deriveBehavioralProfile, activityDurationByActivityId } from './behavioralAffinity';
 import { durationMinutesFor, GENERIC_DURATION_FALLBACK_MINUTES } from './dayBuilderOrchestrator';
@@ -40,6 +41,7 @@ import type { MuhurtaActivityFamily } from '../../../packages/muhurta/src/muhurt
 import {
   buildDayIntent,
   validateConstructionWindow,
+  sumConstructibleDurationMinutes,
   type ConstructionWindow,
   type ConstructionWindowSource,
   type ConstructionWindowValidationError,
@@ -236,6 +238,15 @@ export interface DayConstructorOrchestratorDeps {
    * silently reinterpreting a thrown error as "zero candidates found"
    * (this ticket's own section 19). */
   searchTiming: (request: Omit<TimingSearchRequest, 'context'>) => { candidates: TimingCandidate[] };
+  /** Availability Context V1 PR H1 -- the user's saved availability
+   * schedule, in the exact shape `resolveAvailability`
+   * (availabilityContext.ts) consumes. Called EXACTLY ONCE per
+   * orchestration run, same convention as `loadDurationContext` above.
+   * This dependency's own job is only to fetch `User.
+   * availabilityConfigured` + the raw period rows -- it makes no
+   * resolution decision of its own (that stays entirely inside the pure
+   * `resolveAvailability`, never duplicated here). */
+  loadAvailabilityConfiguration: () => Promise<AvailabilityConfiguration>;
 }
 
 /**
@@ -285,6 +296,13 @@ export function createRealDayConstructorOrchestratorDeps(user: User, now: Date):
         personalContext: buildPersonalMuhurtaContextForUser(user),
       };
       return runTimingSearch({ ...request, context } as TimingSearchRequest);
+    },
+    loadAvailabilityConfiguration: async () => {
+      const periods = await listUserAvailabilityPeriods(user.id);
+      return {
+        configured: user.availabilityConfigured === true,
+        periods: periods.map((row) => ({ weekday: row.weekday as AvailabilityConfiguration['periods'][number]['weekday'], startTime: row.startTime, endTime: row.endTime })),
+      };
     },
   };
 }
@@ -412,6 +430,52 @@ function resolveDuration(
   const catalogProfile = getActivityProfileById(activityId);
   const cameFromCatalog = catalogProfile?.defaultDurationMinutes !== undefined;
   return { estimatedDurationMinutes: resolved, fromGenericFallback: !cameFromPreference && !cameFromBehavior && !cameFromCatalog };
+}
+
+/**
+ * Availability Context V1 PR H1 hardening -- the ONE shared per-intent
+ * resolution step (`resolveActivity` + `resolveDuration` +
+ * `buildDayIntent`), extracted so the CONFIGURED_EMPTY early-exit path
+ * below and the normal per-intent loop both call the EXACT SAME code,
+ * never a second/duplicated resolution. Deliberately excludes
+ * `runTimingSearch`/`FixedPlacementConstraint` construction -- those are
+ * placement concerns, not duration-resolution concerns (this ticket's
+ * own section 9/13: "duration resolution and timing search are separate
+ * concerns... avoid duplicating resolveActivity/resolveDuration... if
+ * existing orchestration can expose/reuse them cleanly"), so a caller
+ * that only needs a resolved `DayIntent` (e.g. to sum requested minutes)
+ * never pays for a timing-search call it doesn't need.
+ */
+function resolveRequestedDayIntent(
+  requested: RequestedDayIntent,
+  targetDate: string,
+  durationContext: { preferredDurationByActivityId: Readonly<Record<string, number>>; behavioralDurationByActivityId: Readonly<Record<string, number>> }
+): { dayIntent: DayIntent; warnings: ConstructDayWarning[] } {
+  const warnings: ConstructDayWarning[] = [];
+  const activity = resolveActivity(requested);
+  if (activity.resolvedToCoarseFamily) warnings.push({ intentId: requested.id, code: 'ACTIVITY_RESOLVED_TO_COARSE_FAMILY' });
+
+  const duration = resolveDuration(requested, activity.activityId, durationContext);
+  if (duration.fromGenericFallback) warnings.push({ intentId: requested.id, code: 'DURATION_FROM_GENERIC_FALLBACK' });
+
+  // buildDayIntent performs its own validation/defaulting (importance,
+  // flexibility, dates); its auto-assigned `id` is then overridden with
+  // the caller's own requested id (see RequestedDayIntent.id's own doc
+  // comment) -- everything else about the built DayIntent is kept.
+  const built = buildDayIntent(
+    {
+      title: requested.title,
+      targetDate,
+      deadline: requested.deadline,
+      importance: requested.importance,
+      activityId: activity.activityId,
+      activityFamily: activity.activityFamily,
+      estimatedDurationMinutes: duration.estimatedDurationMinutes,
+      flexibility: requested.flexibility,
+    },
+    requested.originalOrder
+  );
+  return { dayIntent: { ...built, id: requested.id }, warnings };
 }
 
 // ============================================================
@@ -560,10 +624,94 @@ function normalizeCandidate(intentId: string, candidate: TimingCandidate, candid
 // this function only resolves real data into that call's own inputs.
 // ============================================================
 
+/**
+ * Availability Context V1 PR H1 -- resolves the target-day window using a
+ * user's saved availability when one exists, otherwise defers entirely to
+ * the EXISTING `resolveConstructionWindow` (below, untouched). Only ever
+ * consulted for `constructionWindowSource === 'REMAINING_TODAY'` --
+ * `EXPLICIT_RANGE` is an already-fully-specified caller-supplied window
+ * and is never reinterpreted through availability (architecture audit's
+ * own section 40 recommendation).
+ *
+ * UNCONFIGURED -> `{ status: 'UNCONFIGURED' }`: the caller must fall
+ * through to `resolveConstructionWindow(request)` verbatim (this
+ * ticket's own section 19 -- zero behavioral change for an existing
+ * user).
+ *
+ * CONFIGURED with zero usable windows (this ticket's own section 18,
+ * "CONFIGURED_EMPTY") -> `{ status: 'NO_USABLE_CAPACITY' }`: the caller
+ * must report this directly, NEVER fabricate a zero-length
+ * `ConstructionWindow` to pass through the normal path (this ticket's
+ * own section 28 -- `validateConstructionWindow` already rejects
+ * `start >= end` as `INVALID_CONSTRUCTION_WINDOW`, the wrong status for
+ * a genuinely, deliberately empty day).
+ *
+ * CONFIGURED with at least one usable window -> `{ status: 'READY',
+ * window, gapBlockers }`: `window` replaces what
+ * `resolveConstructionWindow` would have produced; `gapBlockers` must be
+ * merged into the existing Plan-blocker list before normalization
+ * (architecture audit's own section 23/56 -- `dayConstructor.ts`/
+ * `dayCapacity.ts` still consume exactly one window + one blocker list,
+ * unchanged).
+ */
+async function resolveAvailabilityAwareWindow(
+  request: ConstructDayRequest,
+  deps: DayConstructorOrchestratorDeps
+): Promise<{ status: 'UNCONFIGURED' } | { status: 'NO_USABLE_CAPACITY' } | { status: 'READY'; window: ConstructionWindow; gapBlockers: BlockedInterval[] }> {
+  const availabilityConfig = await deps.loadAvailabilityConfiguration();
+  const resolution = resolveAvailability({ targetDate: request.targetDate, timezone: request.timezone, now: request.now, configuration: availabilityConfig });
+  if (resolution.status === 'UNCONFIGURED') return { status: 'UNCONFIGURED' };
+  if (resolution.usableWindows.length === 0) return { status: 'NO_USABLE_CAPACITY' };
+  const normalized = normalizeUsableWindowsToConstructionWindow(resolution.usableWindows, request.targetDate, request.timezone)!;
+  return { status: 'READY', window: normalized.window, gapBlockers: normalized.gapBlockers };
+}
+
 export async function orchestrateConstructDay(request: ConstructDayRequest, deps: DayConstructorOrchestratorDeps): Promise<OrchestrateConstructDayResult> {
-  const windowResolution = resolveConstructionWindow(request);
-  if (windowResolution.status !== 'READY') return windowResolution;
-  const window = windowResolution.window;
+  // Same defensive runtime checks `resolveConstructionWindow` itself
+  // performs (below, untouched) -- duplicated here ONLY so a malformed
+  // request fails before `deps.loadAvailabilityConfiguration`'s own I/O
+  // is ever attempted, never to change either check's own behavior.
+  if (!request.timezone || !request.timezone.trim()) return { status: 'TIMEZONE_MISSING' };
+  if (!(request.now instanceof Date) || Number.isNaN(request.now.getTime())) return { status: 'INVALID_REQUEST', reason: 'now must be a valid Date, for either constructionWindowSource.' };
+
+  let window: ConstructionWindow;
+  let availabilityGapBlockers: BlockedInterval[] = [];
+
+  if (request.constructionWindowSource === 'REMAINING_TODAY') {
+    const availabilityWindow = await resolveAvailabilityAwareWindow(request, deps);
+    if (availabilityWindow.status === 'NO_USABLE_CAPACITY') {
+      // CONFIGURED_EMPTY hardening: `requestedMinutes` means "the total
+      // resolved duration requested by the user," identical to the
+      // normal path's own semantics -- never "0 because we exited
+      // early." Resolves each intent's real duration via the EXACT SAME
+      // `resolveRequestedDayIntent` (and its own `resolveActivity`/
+      // `resolveDuration`/`buildDayIntent`) the normal per-intent loop
+      // below calls, then sums via the SAME canonical
+      // `sumConstructibleDurationMinutes` `constructDay` itself uses --
+      // no second duration resolver, no timing search (never reached:
+      // this file's own `resolveRequestedDayIntent` never calls
+      // `deps.searchTiming`), no `constructDay` call, no candidate
+      // generation, no fabricated window.
+      const durationContext = await deps.loadDurationContext();
+      const dayIntents = request.intents.map((requested) => resolveRequestedDayIntent(requested, request.targetDate, durationContext).dayIntent);
+      const { totalMinutes: requestedMinutes } = sumConstructibleDurationMinutes(dayIntents);
+      return { status: 'NO_USABLE_CAPACITY', constructionWindowMinutes: 0, blockedMinutes: 0, requestedMinutes };
+    }
+    if (availabilityWindow.status === 'READY') {
+      window = availabilityWindow.window;
+      availabilityGapBlockers = availabilityWindow.gapBlockers;
+    } else {
+      // UNCONFIGURED -- the exact existing REMAINING_TODAY path, unchanged.
+      const windowResolution = resolveConstructionWindow(request);
+      if (windowResolution.status !== 'READY') return windowResolution;
+      window = windowResolution.window;
+    }
+  } else {
+    // EXPLICIT_RANGE -- never touched by availability resolution.
+    const windowResolution = resolveConstructionWindow(request);
+    if (windowResolution.status !== 'READY') return windowResolution;
+    window = windowResolution.window;
+  }
 
   // Real-data fetches -- EXACTLY ONCE each per orchestration run (this
   // ticket's own section 20), never once per intent.
@@ -576,10 +724,13 @@ export async function orchestrateConstructDay(request: ConstructDayRequest, deps
   // blocks) vs CANCELLED (never blocks) vs UPCOMING (blocks only while
   // not yet elapsed relative to `request.now`, the SAME reference
   // instant regardless of window source -- see ConstructDayRequest.now's
-  // own doc comment).
-  const blockedIntervals: BlockedInterval[] = blockingPlanCandidates
-    .filter((plan) => isActivePlanBlocker(plan, request.now))
-    .map((plan) => ({ start: plan.start, end: plan.end, source: 'FIXED_PLAN' }));
+  // own doc comment). Availability-gap blockers (Availability Context V1
+  // PR H1) are prepended -- `[]` for every UNCONFIGURED/EXPLICIT_RANGE
+  // request, so this list is byte-identical to before in those cases.
+  const blockedIntervals: BlockedInterval[] = [
+    ...availabilityGapBlockers,
+    ...blockingPlanCandidates.filter((plan) => isActivePlanBlocker(plan, request.now)).map((plan) => ({ start: plan.start, end: plan.end, source: 'FIXED_PLAN' as const })),
+  ];
 
   const warnings: ConstructDayWarning[] = [];
   const resolvedIntents: ResolvedIntentSummary[] = [];
@@ -587,30 +738,8 @@ export async function orchestrateConstructDay(request: ConstructDayRequest, deps
   const fixedConstraintsByIntentId: Record<string, FixedPlacementConstraint[]> = {};
 
   for (const requested of request.intents) {
-    const activity = resolveActivity(requested);
-    if (activity.resolvedToCoarseFamily) warnings.push({ intentId: requested.id, code: 'ACTIVITY_RESOLVED_TO_COARSE_FAMILY' });
-
-    const duration = resolveDuration(requested, activity.activityId, durationContext);
-    if (duration.fromGenericFallback) warnings.push({ intentId: requested.id, code: 'DURATION_FROM_GENERIC_FALLBACK' });
-
-    // buildDayIntent performs its own validation/defaulting (importance,
-    // flexibility, dates); its auto-assigned `id` is then overridden with
-    // the caller's own requested id (see RequestedDayIntent.id's own doc
-    // comment) -- everything else about the built DayIntent is kept.
-    const built = buildDayIntent(
-      {
-        title: requested.title,
-        targetDate: request.targetDate,
-        deadline: requested.deadline,
-        importance: requested.importance,
-        activityId: activity.activityId,
-        activityFamily: activity.activityFamily,
-        estimatedDurationMinutes: duration.estimatedDurationMinutes,
-        flexibility: requested.flexibility,
-      },
-      requested.originalOrder
-    );
-    const dayIntent: DayIntent = { ...built, id: requested.id };
+    const { dayIntent, warnings: intentWarnings } = resolveRequestedDayIntent(requested, request.targetDate, durationContext);
+    warnings.push(...intentWarnings);
     resolvedIntents.push({ requestedIntentId: requested.id, dayIntent });
 
     if (requested.flexibility === 'FIXED') {
@@ -633,8 +762,8 @@ export async function orchestrateConstructDay(request: ConstructDayRequest, deps
     // FLEXIBLE
     if (dayIntent.estimatedDurationMinutes === undefined) continue; // constructDay's own DURATION_UNKNOWN gate handles this; no search to run.
 
-    const searchRequest: Omit<TimingSearchRequest, 'context'> = activity.activityId
-      ? { mode: 'FIND', activityId: activity.activityId, durationMinutes: dayIntent.estimatedDurationMinutes, dateRange: { start: request.targetDate, end: request.targetDate } }
+    const searchRequest: Omit<TimingSearchRequest, 'context'> = dayIntent.activityId
+      ? { mode: 'FIND', activityId: dayIntent.activityId, durationMinutes: dayIntent.estimatedDurationMinutes, dateRange: { start: request.targetDate, end: request.targetDate } }
       : { mode: 'FIND', taskTitle: requested.title, durationMinutes: dayIntent.estimatedDurationMinutes, dateRange: { start: request.targetDate, end: request.targetDate } };
 
     let searchResult: { candidates: TimingCandidate[] };
