@@ -31,11 +31,17 @@ function iso(s: string): Date {
 
 const TARGET_DATE = '2026-09-16';
 
+// Availability Context V1 PR H1 -- every pre-existing test in this file
+// implicitly exercises the UNCONFIGURED path (the default here), which is
+// byte-equivalent to this file's own pre-H1 behavior (there was no
+// availability concept before). Tests exercising CONFIGURED/CONFIGURED_
+// EMPTY override this explicitly.
 function noopDeps(overrides: Partial<DayConstructorOrchestratorDeps> = {}): DayConstructorOrchestratorDeps {
   return {
     loadBlockingPlans: async () => [],
     loadDurationContext: async () => ({ preferredDurationByActivityId: {}, behavioralDurationByActivityId: {} }),
     searchTiming: () => ({ candidates: [] }),
+    loadAvailabilityConfiguration: async () => ({ configured: false, periods: [] }),
     ...overrides,
   };
 }
@@ -812,6 +818,263 @@ async function main() {
     check(
       '68. the FLEXIBLE intent (no other candidate) is deferred, conflicting with the FIXED reservation -- never displacing it',
       result.status === 'READY' && result.preview.constructedDay.deferredItems.some((d) => d.intentId === 'i68-flex' && d.primaryReason === 'CONFLICTS_WITH_PROPOSED_ITEM')
+    );
+  }
+
+  // ============================================================
+  // Availability Context V1 PR H1 -- orchestrator integration (69-85).
+  // Every test below uses `constructionWindowSource: 'REMAINING_TODAY'`
+  // (the ONLY source availability resolution ever touches -- EXPLICIT_
+  // RANGE, exercised by every test above via `baseRequest`'s own
+  // default, is completely unaffected, already proven by 1-68 above all
+  // still passing unmodified).
+  // ============================================================
+
+  function remainingTodayRequest(overrides: Partial<ConstructDayRequest> = {}): ConstructDayRequest {
+    return baseRequest({ constructionWindowSource: 'REMAINING_TODAY', explicitStart: undefined, explicitEnd: undefined, ...overrides });
+  }
+
+  // 69. UNCONFIGURED preserves the exact existing REMAINING_TODAY window (now -> midnight).
+  {
+    const now = iso('2026-09-16T08:30:00Z'); // 14:00 IST-equivalent-ish in whatever tz; using UTC here since baseRequest's own timezone is 'UTC'.
+    const result = await orchestrateConstructDay(remainingTodayRequest({ timezone: 'UTC', now }), noopDeps());
+    check(
+      '69. UNCONFIGURED preserves the exact existing REMAINING_TODAY behavior (window start=now, end=target civil midnight)',
+      result.status === 'READY' && result.preview.constructionWindow.start.getTime() === now.getTime() && result.preview.constructionWindow.end.toISOString() === '2026-09-17T00:00:00.000Z'
+    );
+  }
+
+  // 70. CONFIGURED today clips to now.
+  {
+    const now = iso('2026-09-16T08:30:00Z'); // Wednesday.
+    const deps = noopDeps({ loadAvailabilityConfiguration: async () => ({ configured: true, periods: [{ weekday: 3, startTime: '06:00', endTime: '17:00' }] }) });
+    const result = await orchestrateConstructDay(remainingTodayRequest({ timezone: 'UTC', now }), deps);
+    check(
+      '70. CONFIGURED today clips the saved period\'s start to now',
+      result.status === 'READY' && result.preview.constructionWindow.start.getTime() === now.getTime() && result.preview.constructionWindow.end.toISOString() === '2026-09-16T17:00:00.000Z'
+    );
+  }
+
+  // 71. CONFIGURED future day is not clipped.
+  {
+    const deps = noopDeps({ loadAvailabilityConfiguration: async () => ({ configured: true, periods: [{ weekday: 4, startTime: '09:00', endTime: '17:00' }] }) }); // Thursday=4
+    const result = await orchestrateConstructDay(remainingTodayRequest({ timezone: 'UTC', targetDate: '2026-09-17', now: iso('2026-09-16T16:00:00Z') }), deps);
+    check(
+      '71. a future targetDate\'s configured availability is not clipped against today\'s now',
+      result.status === 'READY' && result.preview.constructionWindow.start.toISOString() === '2026-09-17T09:00:00.000Z' && result.preview.constructionWindow.end.toISOString() === '2026-09-17T17:00:00.000Z'
+    );
+  }
+
+  // 72. CONFIGURED_EMPTY reaches NO_USABLE_CAPACITY, never a fallback.
+  {
+    const deps = noopDeps({ loadAvailabilityConfiguration: async () => ({ configured: true, periods: [{ weekday: 0, startTime: '10:00', endTime: '13:00' }] }) }); // only Sunday configured; targetDate is a Wednesday.
+    const result = await orchestrateConstructDay(remainingTodayRequest({ timezone: 'UTC', now: iso('2026-09-16T00:00:00Z') }), deps);
+    check('72. a configured schedule with zero periods for the target weekday reaches NO_USABLE_CAPACITY, never a REMAINING_TODAY fallback', result.status === 'NO_USABLE_CAPACITY');
+  }
+
+  // 73. Existing Plan inside availability subtracts capacity.
+  {
+    const deps = noopDeps({
+      loadAvailabilityConfiguration: async () => ({ configured: true, periods: [{ weekday: 3, startTime: '09:00', endTime: '17:00' }] }),
+      loadBlockingPlans: async () => [blockerPlan('2026-09-16T10:00:00Z', '2026-09-16T11:00:00Z')],
+    });
+    const intent = requestedIntent({ id: 'i73', durationMinutes: 30 });
+    const result = await orchestrateConstructDay(remainingTodayRequest({ timezone: 'UTC', now: iso('2026-09-16T00:00:00Z'), intents: [intent] }), deps);
+    check(
+      '73. an existing Plan inside availability subtracts from usableMinutes exactly as before (8h window - 1h Plan = 7h = 420 min usable)',
+      result.status === 'READY' && result.preview.constructedDay.requestedCapacity.usableMinutes === 420
+    );
+  }
+
+  // 74/75/32. Multiple periods produce the exact gap-blocker capacity example from the architecture audit itself: 09-12 + 14-18, Plan 10-11 -> usable = 360.
+  {
+    const deps = noopDeps({
+      loadAvailabilityConfiguration: async () => ({ configured: true, periods: [{ weekday: 3, startTime: '09:00', endTime: '12:00' }, { weekday: 3, startTime: '14:00', endTime: '18:00' }] }),
+      loadBlockingPlans: async () => [blockerPlan('2026-09-16T10:00:00Z', '2026-09-16T11:00:00Z')],
+    });
+    const result = await orchestrateConstructDay(remainingTodayRequest({ timezone: 'UTC', now: iso('2026-09-16T00:00:00Z') }), deps);
+    check(
+      '74/32. the architecture audit\'s own worked capacity example (09-12 + 14-18, Plan 10-11) resolves to exactly 360 usable minutes',
+      result.status === 'READY' &&
+        result.preview.constructedDay.requestedCapacity.constructionWindowMinutes === 540 &&
+        result.preview.constructedDay.requestedCapacity.blockedMinutes === 180 &&
+        result.preview.constructedDay.requestedCapacity.usableMinutes === 360
+    );
+  }
+
+  // 31/34/40. A FIXED intent placed inside the gap between two usable periods is deferred as blocked (the gap blocker + Plan blocker normalize/merge correctly together).
+  {
+    const deps = noopDeps({ loadAvailabilityConfiguration: async () => ({ configured: true, periods: [{ weekday: 3, startTime: '09:00', endTime: '12:00' }, { weekday: 3, startTime: '14:00', endTime: '18:00' }] }) });
+    const fixedInGap = requestedIntent({ id: 'i-gap', flexibility: 'FIXED', fixedStart: iso('2026-09-16T12:30:00Z'), durationMinutes: 60 });
+    const result = await orchestrateConstructDay(remainingTodayRequest({ timezone: 'UTC', now: iso('2026-09-16T00:00:00Z'), intents: [fixedInGap] }), deps);
+    check(
+      '31/34. a FIXED intent placed inside the availability GAP (12:30-13:30, between 09-12 and 14-18) is deferred as blocked, not treated as outside the outer window',
+      result.status === 'READY' && result.preview.constructedDay.deferredItems.some((d) => d.intentId === 'i-gap' && d.primaryReason === 'FIXED_WINDOW_CONFLICT')
+    );
+  }
+
+  // 33. FIXED entirely outside availability (before the outer window) is deferred OUTSIDE_CONSTRUCTION_WINDOW.
+  {
+    const deps = noopDeps({ loadAvailabilityConfiguration: async () => ({ configured: true, periods: [{ weekday: 3, startTime: '09:00', endTime: '17:00' }] }) });
+    const fixedBefore = requestedIntent({ id: 'i-before', flexibility: 'FIXED', fixedStart: iso('2026-09-16T08:30:00Z'), durationMinutes: 60 });
+    const result = await orchestrateConstructDay(remainingTodayRequest({ timezone: 'UTC', now: iso('2026-09-16T00:00:00Z'), intents: [fixedBefore] }), deps);
+    check(
+      '33. a FIXED intent entirely before the resolved availability window is deferred OUTSIDE_CONSTRUCTION_WINDOW -- availability is never automatically expanded to accommodate it',
+      result.status === 'READY' && result.preview.constructedDay.deferredItems.some((d) => d.intentId === 'i-before' && d.primaryReason === 'OUTSIDE_CONSTRUCTION_WINDOW')
+    );
+  }
+
+  // 35/30. G1: LOW FIXED (inside availability) still reserves its interval before a HIGH FLEXIBLE candidate, with availability resolution active.
+  {
+    const deps = noopDeps({
+      loadAvailabilityConfiguration: async () => ({ configured: true, periods: [{ weekday: 3, startTime: '09:00', endTime: '17:00' }] }),
+      searchTiming: () => ({ candidates: [timingCandidate('2026-09-16T10:00:00Z', '2026-09-16T11:00:00Z', 'EXCELLENT')] }),
+    });
+    const lowFixed = requestedIntent({ id: 'i-lowfixed', importance: 'LOW', flexibility: 'FIXED', fixedStart: iso('2026-09-16T10:00:00Z'), durationMinutes: 60, originalOrder: 0 });
+    const highFlex = requestedIntent({ id: 'i-highflex', importance: 'HIGH', durationMinutes: 60, originalOrder: 1 });
+    const result = await orchestrateConstructDay(remainingTodayRequest({ timezone: 'UTC', now: iso('2026-09-16T00:00:00Z'), intents: [lowFixed, highFlex] }), deps);
+    check(
+      '35/30. G1 reservation holds unchanged under availability resolution: LOW FIXED keeps its interval, HIGH FLEXIBLE is deferred',
+      result.status === 'READY' && result.preview.constructedDay.proposedItems.some((p) => p.intentId === 'i-lowfixed') && result.preview.constructedDay.deferredItems.some((d) => d.intentId === 'i-highflex')
+    );
+  }
+
+  // 36. G2: unknown natural title + Automatic still resolves via the generic duration fallback under availability resolution.
+  {
+    const deps = noopDeps({
+      loadAvailabilityConfiguration: async () => ({ configured: true, periods: [{ weekday: 3, startTime: '09:00', endTime: '17:00' }] }),
+      searchTiming: () => ({ candidates: [timingCandidate('2026-09-16T10:00:00Z', '2026-09-16T10:45:00Z', 'GOOD')] }),
+    });
+    const unknown = requestedIntent({ id: 'i-unknown', title: 'sort out the garage' });
+    const result = await orchestrateConstructDay(remainingTodayRequest({ timezone: 'UTC', now: iso('2026-09-16T00:00:00Z'), intents: [unknown] }), deps);
+    check(
+      '36. G2 unknown-title + Automatic duration still resolves via the generic 45-minute fallback, unaffected by availability resolution',
+      result.status === 'READY' && result.preview.constructedDay.proposedItems.some((p) => p.intentId === 'i-unknown' && p.end.getTime() - p.start.getTime() === 45 * 60000)
+    );
+  }
+
+  // 37/38. G3/G4: importance and deadline pass through unaffected by availability.
+  {
+    const deps = noopDeps({ loadAvailabilityConfiguration: async () => ({ configured: true, periods: [{ weekday: 3, startTime: '09:00', endTime: '17:00' }] }) });
+    const intent = requestedIntent({ id: 'i-g34', importance: 'HIGH', deadline: '2026-09-16', durationMinutes: 30 });
+    const result = await orchestrateConstructDay(remainingTodayRequest({ timezone: 'UTC', now: iso('2026-09-16T00:00:00Z'), intents: [intent] }), deps);
+    check(
+      '37/38. importance and deadline pass through to the resolved DayIntent unchanged under availability resolution',
+      result.status === 'READY' && result.preview.resolvedIntents[0].dayIntent.importance === 'HIGH' && result.preview.resolvedIntents[0].dayIntent.deadline === '2026-09-16'
+    );
+  }
+
+  // 39. Timing quality cannot escape availability -- an EXCELLENT candidate entirely outside the resolved window is still infeasible.
+  {
+    const deps = noopDeps({
+      loadAvailabilityConfiguration: async () => ({ configured: true, periods: [{ weekday: 3, startTime: '09:00', endTime: '12:00' }] }),
+      searchTiming: () => ({ candidates: [timingCandidate('2026-09-16T15:00:00Z', '2026-09-16T15:30:00Z', 'EXCELLENT')] }), // outside 09-12
+    });
+    const intent = requestedIntent({ id: 'i-excellent', durationMinutes: 30 });
+    const result = await orchestrateConstructDay(remainingTodayRequest({ timezone: 'UTC', now: iso('2026-09-16T00:00:00Z'), intents: [intent] }), deps);
+    check(
+      '39. an EXCELLENT-rated candidate outside the resolved availability window remains unavailable -- timing quality never overrides availability feasibility',
+      result.status === 'READY' && result.preview.constructedDay.deferredItems.some((d) => d.intentId === 'i-excellent')
+    );
+  }
+
+  // 41. Deterministic orchestration -- identical request/deps produce a byte-equivalent preview.
+  {
+    const deps = noopDeps({ loadAvailabilityConfiguration: async () => ({ configured: true, periods: [{ weekday: 3, startTime: '09:00', endTime: '12:00' }, { weekday: 3, startTime: '14:00', endTime: '18:00' }] }) });
+    const request = remainingTodayRequest({ timezone: 'UTC', now: iso('2026-09-16T00:00:00Z'), intents: [requestedIntent({ id: 'i-det', durationMinutes: 30 })] });
+    const first = await orchestrateConstructDay(request, deps);
+    const second = await orchestrateConstructDay(request, deps);
+    check(
+      '41. identical request/deps produce a byte-equivalent resolved construction window across two runs',
+      first.status === 'READY' && second.status === 'READY' && first.preview.constructionWindow.start.getTime() === second.preview.constructionWindow.start.getTime() && first.preview.constructionWindow.end.getTime() === second.preview.constructionWindow.end.getTime()
+    );
+  }
+
+  // ============================================================
+  // Availability Context V1 PR H1 hardening -- CONFIGURED_EMPTY
+  // requestedMinutes must mean "the total resolved duration requested,"
+  // identical to the normal path's own semantics, never "0 because we
+  // exited early" (42-50).
+  // ============================================================
+
+  function configuredEmptyDeps(overrides: Partial<DayConstructorOrchestratorDeps> = {}): DayConstructorOrchestratorDeps {
+    // Sunday=0 configured; every fixture below targets TARGET_DATE (a
+    // Wednesday), so this is always CONFIGURED_EMPTY for these tests.
+    return noopDeps({ loadAvailabilityConfiguration: async () => ({ configured: true, periods: [{ weekday: 0, startTime: '10:00', endTime: '13:00' }] }), ...overrides });
+  }
+
+  // 42/1. explicit 60 -> requestedMinutes 60.
+  {
+    const intent = requestedIntent({ id: 'ce-1', durationMinutes: 60 });
+    const result = await orchestrateConstructDay(remainingTodayRequest({ timezone: 'UTC', now: iso('2026-09-16T00:00:00Z'), intents: [intent] }), configuredEmptyDeps());
+    check('42. CONFIGURED_EMPTY + one explicit-60-minute intent -> requestedMinutes is 60, not 0', result.status === 'NO_USABLE_CAPACITY' && result.requestedMinutes === 60);
+  }
+
+  // 43/2. explicit 60 + explicit 30 -> requestedMinutes 90.
+  {
+    const a = requestedIntent({ id: 'ce-2a', durationMinutes: 60, originalOrder: 0 });
+    const b = requestedIntent({ id: 'ce-2b', durationMinutes: 30, originalOrder: 1 });
+    const result = await orchestrateConstructDay(remainingTodayRequest({ timezone: 'UTC', now: iso('2026-09-16T00:00:00Z'), intents: [a, b] }), configuredEmptyDeps());
+    check('43. CONFIGURED_EMPTY + two explicit intents (60 + 30) -> requestedMinutes sums to 90', result.status === 'NO_USABLE_CAPACITY' && result.requestedMinutes === 90);
+  }
+
+  // 44/3. unknown natural title + Automatic -> requestedMinutes 45 via G2's own generic fallback, no activityId fabricated.
+  {
+    const intent = requestedIntent({ id: 'ce-3', title: 'sort out the garage' });
+    const result = await orchestrateConstructDay(remainingTodayRequest({ timezone: 'UTC', now: iso('2026-09-16T00:00:00Z'), intents: [intent] }), configuredEmptyDeps());
+    check('44. CONFIGURED_EMPTY + unknown Automatic -> requestedMinutes is 45 (G2 generic fallback), same as the normal path would resolve', result.status === 'NO_USABLE_CAPACITY' && result.requestedMinutes === 45);
+  }
+
+  // 45/4. never a fabricated zero-length window -- INVALID_CONSTRUCTION_WINDOW/TIMEZONE_MISSING never appear; status is exactly NO_USABLE_CAPACITY with a zero constructionWindowMinutes/blockedMinutes reported directly, never derived from a real (invalid) ConstructionWindow object.
+  {
+    const result = await orchestrateConstructDay(remainingTodayRequest({ timezone: 'UTC', now: iso('2026-09-16T00:00:00Z'), intents: [requestedIntent({ id: 'ce-4', durationMinutes: 15 })] }), configuredEmptyDeps());
+    check(
+      '45. CONFIGURED_EMPTY never fabricates/validates a zero-length ConstructionWindow -- status is exactly NO_USABLE_CAPACITY with constructionWindowMinutes=0, blockedMinutes=0 reported directly',
+      result.status === 'NO_USABLE_CAPACITY' && result.constructionWindowMinutes === 0 && result.blockedMinutes === 0
+    );
+  }
+
+  // 46/5. timing search is never called for CONFIGURED_EMPTY.
+  {
+    let searchTimingCalls = 0;
+    const deps = configuredEmptyDeps({ searchTiming: () => { searchTimingCalls += 1; return { candidates: [] }; } });
+    const intent = requestedIntent({ id: 'ce-5' }); // FLEXIBLE, Automatic -- would normally trigger a search on the READY path.
+    await orchestrateConstructDay(remainingTodayRequest({ timezone: 'UTC', now: iso('2026-09-16T00:00:00Z'), intents: [intent] }), deps);
+    check('46. CONFIGURED_EMPTY never calls deps.searchTiming -- duration resolution and timing search stay separate concerns', searchTimingCalls === 0);
+  }
+
+  // 47/6. status remains exactly NO_USABLE_CAPACITY (explicit, standalone).
+  {
+    const result = await orchestrateConstructDay(remainingTodayRequest({ timezone: 'UTC', now: iso('2026-09-16T00:00:00Z'), intents: [] }), configuredEmptyDeps());
+    check('47. CONFIGURED_EMPTY remains status NO_USABLE_CAPACITY even with zero requested intents', result.status === 'NO_USABLE_CAPACITY' && result.requestedMinutes === 0);
+  }
+
+  // 48/7. UNCONFIGURED fallback is untouched by this hardening (never reaches the CONFIGURED_EMPTY branch at all).
+  {
+    const now = iso('2026-09-16T08:30:00Z');
+    const result = await orchestrateConstructDay(remainingTodayRequest({ timezone: 'UTC', now }), noopDeps());
+    check('48. UNCONFIGURED still preserves the exact existing REMAINING_TODAY window, unaffected by the CONFIGURED_EMPTY hardening', result.status === 'READY' && result.preview.constructionWindow.start.getTime() === now.getTime());
+  }
+
+  // 49/8. Normal CONFIGURED (non-empty) availability's own requestedMinutes is unaffected by this refactor (READY path, real capacity snapshot).
+  {
+    const deps = noopDeps({ loadAvailabilityConfiguration: async () => ({ configured: true, periods: [{ weekday: 3, startTime: '09:00', endTime: '17:00' }] }) });
+    const intent = requestedIntent({ id: 'ce-8', durationMinutes: 30 });
+    const result = await orchestrateConstructDay(remainingTodayRequest({ timezone: 'UTC', now: iso('2026-09-16T00:00:00Z'), intents: [intent] }), deps);
+    check('49. normal (non-empty) configured availability still reports the real requestedMinutes on the READY path, unaffected by the CONFIGURED_EMPTY refactor', result.status === 'READY' && result.preview.constructedDay.requestedCapacity.requestedMinutes === 30);
+  }
+
+  // 50/9. The ordinary G2 (non-empty availability) path is unaffected by the resolveRequestedDayIntent extraction -- an unknown title still resolves the generic fallback and gets PLACED (not merely counted).
+  {
+    const deps = noopDeps({
+      loadAvailabilityConfiguration: async () => ({ configured: true, periods: [{ weekday: 3, startTime: '09:00', endTime: '17:00' }] }),
+      searchTiming: () => ({ candidates: [timingCandidate('2026-09-16T10:00:00Z', '2026-09-16T10:45:00Z', 'GOOD')] }),
+    });
+    const intent = requestedIntent({ id: 'ce-9', title: 'sort out the garage' });
+    const result = await orchestrateConstructDay(remainingTodayRequest({ timezone: 'UTC', now: iso('2026-09-16T00:00:00Z'), intents: [intent] }), deps);
+    check(
+      '50. the ordinary G2 path (non-empty configured availability) still places an unknown-title Automatic intent via the generic fallback, unaffected by the resolveRequestedDayIntent extraction',
+      result.status === 'READY' && result.preview.constructedDay.proposedItems.some((p) => p.intentId === 'ce-9' && p.end.getTime() - p.start.getTime() === 45 * 60000)
     );
   }
 

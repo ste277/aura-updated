@@ -44,6 +44,21 @@ export interface User {
   dayBuilderPriorities: string[];
   dayBuilderPriorityPersonIds: string[];
   dayBuilderPrioritiesPromptDismissed: boolean;
+  /** Availability Context V1 PR H1 -- `true` only once the user has
+   * explicitly saved an availability schedule (even an empty one is a
+   * real, deliberate CONFIGURED state -- see availabilityContext.ts's
+   * own `AvailabilityConfiguration.configured` doc comment for the exact
+   * UNCONFIGURED-vs-CONFIGURED_EMPTY distinction this field exists to
+   * carry). Every existing user is `false` by migration default -- never
+   * inferred true, never backfilled. Optional here (unlike every other
+   * required `User` field) so existing in-memory `User`-shaped test
+   * fixtures elsewhere don't need updating for a concept they don't
+   * touch -- the SAME convention `PlannedActivity.activityId?` (below)
+   * already established for exactly this reason; a real database row
+   * always has a concrete `boolean` (`NOT NULL DEFAULT false`), so
+   * `undefined` here only ever appears in a fixture that never set it,
+   * and is treated identically to `false`. */
+  availabilityConfigured?: boolean;
 }
 
 export interface CustomCity {
@@ -2060,4 +2075,77 @@ export async function upsertUserActivityPreference(
  * and never errors. */
 export async function deleteUserActivityPreference(userId: string, activityId: string): Promise<void> {
   await pool.query(`DELETE FROM "UserActivityPreference" WHERE "userId" = $1 AND "activityId" = $2`, [userId, activityId]);
+}
+
+// ── Availability periods (Availability Context V1 PR H1, migration 0034)
+// ──────────────────────────────────────────────────────────────────────
+// Raw persistence primitives only, mirroring UserActivityPreference's own
+// convention above -- see apps/web/lib/availabilityContext.ts for the pure
+// resolver these rows feed into. `User.availabilityConfigured` (not a row
+// in this table) is the ONLY signal that distinguishes "no schedule saved
+// at all" from "schedule saved, this weekday has zero periods" -- a table
+// containing only period rows can never make that distinction by itself
+// (a user with a real but entirely-empty saved week would be
+// indistinguishable from a user who never configured anything, if
+// configured-state were inferred from row presence alone). Only the
+// minimal helpers H1 itself needs (list + a single-row create, for its
+// own pure-resolver integration and test seeding) -- H2 owns the real
+// user-facing replace/CRUD surface (add/remove/reorder periods) on top of
+// these same primitives.
+
+export interface UserAvailabilityPeriodRow {
+  id: string;
+  userId: string;
+  weekday: number;
+  startTime: string;
+  endTime: string;
+  createdAt: Date;
+  updatedAt: Date;
+}
+
+export async function listUserAvailabilityPeriods(userId: string): Promise<UserAvailabilityPeriodRow[]> {
+  const result = await pool.query(
+    `SELECT id, "userId", weekday, "startTime", "endTime", "createdAt", "updatedAt"
+     FROM "UserAvailabilityPeriod"
+     WHERE "userId" = $1
+     ORDER BY weekday ASC, "startTime" ASC`,
+    [userId]
+  );
+  return result.rows;
+}
+
+/** No upsert/uniqueness constraint -- unlike `UserActivityPreference`
+ * (unique per activityId), a user may legitimately have several periods
+ * for the SAME weekday (this ticket's own section 15/17: multiple
+ * periods per day, e.g. a lunch gap), so there is no natural single key
+ * to conflict on. Each call always inserts a new row. */
+export async function createUserAvailabilityPeriod(userId: string, weekday: number, startTime: string, endTime: string): Promise<UserAvailabilityPeriodRow> {
+  const id = randomUUID();
+  const result = await pool.query(
+    `INSERT INTO "UserAvailabilityPeriod" (id, "userId", weekday, "startTime", "endTime")
+     VALUES ($1, $2, $3, $4, $5)
+     RETURNING id, "userId", weekday, "startTime", "endTime", "createdAt", "updatedAt"`,
+    [id, userId, weekday, startTime, endTime]
+  );
+  return result.rows[0];
+}
+
+/** Sets the single `User.availabilityConfigured` flag -- the CONFIGURED/
+ * UNCONFIGURED discriminant itself (see this section's own module note
+ * above). H2's own future settings API is the real production caller;
+ * exported now only because H1's own DB tests need a way to seed both
+ * states deterministically. */
+export async function setAvailabilityConfigured(userId: string, configured: boolean): Promise<void> {
+  await pool.query(`UPDATE "User" SET "availabilityConfigured" = $2 WHERE id = $1`, [userId, configured]);
+}
+
+/** Clears every saved period for a user -- exported for H1's own live-DB
+ * test cleanup (this repository's own established convention: a
+ * throwaway test user's rows are always deleted in a `finally` block,
+ * e.g. `dayConstructorAcceptancePersistenceDb.test.ts`'s own
+ * `deletePlannedActivity` cleanup). H2's real settings API will likely
+ * use a per-row delete/replace instead; this whole-user clear is not
+ * exposed as end-user-facing behavior. */
+export async function deleteUserAvailabilityPeriods(userId: string): Promise<void> {
+  await pool.query(`DELETE FROM "UserAvailabilityPeriod" WHERE "userId" = $1`, [userId]);
 }

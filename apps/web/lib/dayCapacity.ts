@@ -53,9 +53,14 @@ import { validateConstructionWindow, type ConstructionWindowValidationError } fr
  * calls for this exact shape to later admit non-Plan sources without any
  * Forward Planner coupling). `'EXTERNAL'` is reserved, unused in V1, for
  * a future MCP/calendar adapter (architecture audit section 18) -- no
- * adapter is implemented here.
+ * adapter is implemented here. `'AVAILABILITY_GAP'` (Availability
+ * Context V1 PR H1) is the one new value this milestone adds: a
+ * synthetic span BETWEEN two saved usable sub-windows on the same day
+ * (e.g. a lunch gap between "09-12" and "14-18"), distinct from a real
+ * external commitment -- never provider-specific, matching this file's
+ * own existing non-provider-coupled convention exactly.
  */
-export type BlockedIntervalSource = 'FIXED_PLAN' | 'EXTERNAL';
+export type BlockedIntervalSource = 'FIXED_PLAN' | 'EXTERNAL' | 'AVAILABILITY_GAP';
 
 /**
  * One normalized span of time the constructor may not place anything
