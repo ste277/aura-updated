@@ -14,7 +14,7 @@
  * the imported pure helpers, never the component itself).
  */
 
-import { localDateTimeToUTC } from './timezone';
+import { localDateTimeToUTC, addDaysToDateStr } from './timezone';
 import type { PreviewRequestIntentBody } from './dayConstructorPreviewClient';
 import type { ConstructDayPreviewClientResult } from './dayConstructorPreviewClient';
 
@@ -24,7 +24,25 @@ import type { ConstructDayPreviewClientResult } from './dayConstructorPreviewCli
 // RequestedDayIntent field"). `id` is the STABLE, client-generated,
 // opaque intent id (section 23) -- never regenerated, never derived from
 // title.
+//
+// Intent Fidelity V1 PR G3/G4 -- `important`/`deadlineChoice` added.
+// LOCKED UX (this ticket's own section 3/4): `important` is a plain
+// boolean, never HIGH/MEDIUM/LOW as UI vocabulary, and LOW is not
+// exposed at all -- the row model has no way to represent it, by
+// construction, not merely by convention.
 // ============================================================
+
+/**
+ * A discriminated deadline choice (this ticket's own section 11: "prefer
+ * a discriminated representation if it makes invalid states
+ * impossible") -- `'CUSTOM'` is the only variant that carries a `date`,
+ * so there is no reachable state where a non-custom choice has a
+ * dangling/stale date payload the mapper would need to remember to
+ * ignore.
+ */
+export type PlanDayDeadlineChoice = { kind: 'NONE' } | { kind: 'TODAY' } | { kind: 'TOMORROW' } | { kind: 'THIS_WEEK' } | { kind: 'CUSTOM'; date: string };
+
+export const NO_DEADLINE: PlanDayDeadlineChoice = { kind: 'NONE' };
 
 export interface PlanDayIntentRow {
   id: string;
@@ -41,6 +59,16 @@ export interface PlanDayIntentRow {
   /** Raw `<input type="time">` value ("HH:mm"), or `null` before the user
    * has picked one. Only meaningful when `timeMode === 'FIXED'`. */
   fixedTime: string | null;
+  /** `false` is the default (this ticket's own section 12) -- maps to
+   * `importance: 'HIGH'` only when `true`; when `false` the field is
+   * OMITTED from the request entirely (never an explicit `'MEDIUM'`), so
+   * the domain's own `DEFAULT_IMPORTANCE` (dayIntent.ts) remains the
+   * single source of truth for "no explicit priority stated." */
+  important: boolean;
+  /** `NO_DEADLINE` is the default. Resolved to a concrete `YYYY-MM-DD`
+   * civil-date string (or omitted entirely) only at submission time --
+   * see `resolveDeadline`/`buildRequestedIntentsForSubmission` below. */
+  deadlineChoice: PlanDayDeadlineChoice;
 }
 
 export const MAX_PLAN_DAY_INTENTS = 12; // mirrors F1's own MAX_INTENTS_PER_REQUEST (dayConstructorPreviewRequest.ts) -- the hard upper bound, not a new limit.
@@ -62,7 +90,7 @@ let rowIdCounter = 0;
  * within one session already has a distinct, stable id. */
 export function createEmptyIntentRow(): PlanDayIntentRow {
   rowIdCounter += 1;
-  return { id: `plan-day-row-${rowIdCounter}`, title: '', durationMinutes: null, timeMode: 'FLEXIBLE', fixedTime: null };
+  return { id: `plan-day-row-${rowIdCounter}`, title: '', durationMinutes: null, timeMode: 'FLEXIBLE', fixedTime: null, important: false, deadlineChoice: NO_DEADLINE };
 }
 
 // ============================================================
@@ -72,15 +100,23 @@ export function createEmptyIntentRow(): PlanDayIntentRow {
 // silently downgraded to FLEXIBLE -- this ticket's own section 16/34's
 // "never manufacture/never silently downgrade" principle, extended
 // client-side to "never silently reinterpret an incomplete choice").
+//
+// Intent Fidelity V1 PR G3/G4 (implementation ticket's own section 8) --
+// a `CUSTOM` deadline earlier than `planningDate` is ALSO treated as
+// INCOMPLETE, the exact same shape as the pre-existing FIXED/no-time-yet
+// rule: it blocks submission (Submit stays disabled) rather than being
+// silently normalized, cleared, or sent anyway. `planningDate` is now a
+// required parameter of this gate for exactly that reason.
 // ============================================================
 
 function hasTitle(row: PlanDayIntentRow): boolean {
   return row.title.trim().length > 0;
 }
 
-function isRowComplete(row: PlanDayIntentRow): boolean {
+function isRowComplete(row: PlanDayIntentRow, planningDate: string): boolean {
   if (!hasTitle(row)) return true; // a blank row is simply excluded, not a blocking error.
-  if (row.timeMode === 'FIXED') return !!row.fixedTime;
+  if (row.timeMode === 'FIXED' && !row.fixedTime) return false;
+  if (row.deadlineChoice.kind === 'CUSTOM' && row.deadlineChoice.date < planningDate) return false;
   return true;
 }
 
@@ -89,10 +125,11 @@ export function countSubmittableIntentRows(rows: readonly PlanDayIntentRow[]): n
 }
 
 /** Never allow submission with zero valid intents, and never while any
- * non-blank row is an incomplete FIXED selection (this ticket's own
- * section 19). */
-export function canSubmitPlanDay(rows: readonly PlanDayIntentRow[]): boolean {
-  return countSubmittableIntentRows(rows) > 0 && rows.every(isRowComplete);
+ * non-blank row is an incomplete FIXED selection or an incomplete/past
+ * deadline selection (this ticket's own section 19, extended by G3/G4's
+ * own section 8). */
+export function canSubmitPlanDay(rows: readonly PlanDayIntentRow[], planningDate: string): boolean {
+  return countSubmittableIntentRows(rows) > 0 && rows.every((row) => isRowComplete(row, planningDate));
 }
 
 export function canAddAnotherRow(rows: readonly PlanDayIntentRow[]): boolean {
@@ -118,26 +155,96 @@ export function resolveFixedStart(row: Pick<PlanDayIntentRow, 'timeMode' | 'fixe
 }
 
 // ============================================================
+// Deadline resolution (implementation ticket's own sections 5-7) --
+// EVERY branch is a pure civil-date-string operation on `planningDate`
+// (the same server-established anchor `resolveFixedStart` above already
+// uses) -- never a `Date` instant, never the browser's own clock or
+// timezone (this ticket's own section 14: preserves F2's existing
+// two-clock hardening exactly, extended to deadlines rather than
+// reintroducing a second, independent client-clock-dependent path).
+// ============================================================
+
+/**
+ * "This week" = the Sunday of the week containing `planningDate` (this
+ * ticket's own section 7, locked definition), computed via
+ * `addDaysToDateStr` (timezone.ts) -- NEVER `planningDate + 7 days`. Uses
+ * the exact same `Date.UTC(...).getUTCDay()` calendar-arithmetic
+ * technique `addDaysToDateStr` itself already uses internally, so this
+ * stays a pure date-string operation, never an instant read.
+ * `getUTCDay()`: Sunday=0 ... Saturday=6. `(7 - weekday) % 7` is 0 for
+ * Sunday itself (same day), 6 for Monday, ..., 1 for Saturday --
+ * matching this ticket's own worked examples exactly.
+ */
+function resolveThisWeekDeadline(planningDate: string): string {
+  const [year, month, day] = planningDate.split('-').map(Number);
+  const weekday = new Date(Date.UTC(year, month - 1, day)).getUTCDay();
+  const daysUntilSunday = (7 - weekday) % 7;
+  return addDaysToDateStr(planningDate, daysUntilSunday);
+}
+
+/** Never sends `deadline` at all for `'NONE'` (this ticket's own section
+ * 6: "No deadline -> undefined"). */
+export function resolveDeadline(choice: PlanDayDeadlineChoice, planningDate: string): string | undefined {
+  switch (choice.kind) {
+    case 'NONE':
+      return undefined;
+    case 'TODAY':
+      return planningDate;
+    case 'TOMORROW':
+      return addDaysToDateStr(planningDate, 1);
+    case 'THIS_WEEK':
+      return resolveThisWeekDeadline(planningDate);
+    case 'CUSTOM':
+      return choice.date;
+  }
+}
+
+// ============================================================
 // Row -> F1 request mapping (this ticket's own section 22, updated by the
-// planning-date hardening ticket's own section 7) -- blank rows excluded,
-// `originalOrder` never sent (array position IS the order, F1 derives it
-// itself), `activityId`/`importance`/`deadline`/`constructionWindowSource`
-// never sent (this ticket's own sections 12/20/21/7). `targetDate` is now
-// ALWAYS the same server-established `planningDate` used for FIXED-time
-// assembly (this ticket's own section 7: "ensures FIXED fixedStart date ==
-// preview targetDate" -- never independently re-derived).
+// planning-date hardening ticket's own section 7, and by Intent Fidelity
+// V1 PR G3/G4's own section 13) -- blank rows excluded, `originalOrder`
+// never sent (array position IS the order, F1 derives it itself),
+// `activityId`/`constructionWindowSource` never sent (this ticket's own
+// sections 12/20/21/7). `targetDate` is ALWAYS the same server-established
+// `planningDate` used for FIXED-time assembly (planning-date hardening's
+// own section 7: "ensures FIXED fixedStart date == preview targetDate" --
+// never independently re-derived).
+//
+// `importance`/`deadline` are now sent (G3/G4's own section 13):
+// `important: true` -> `importance: 'HIGH'`; `important: false` -> the
+// field is OMITTED (never an explicit `'MEDIUM'`, this ticket's own
+// section 3/12). `deadlineChoice.kind === 'NONE'` -> `deadline` OMITTED;
+// any other choice resolves to a concrete `YYYY-MM-DD` string via
+// `resolveDeadline` above.
+//
+// Fail-closed past-deadline guard (this ticket's own section 8): a
+// resolved deadline earlier than `planningDate` THROWS rather than being
+// silently normalized, cleared, or sent anyway -- defense-in-depth
+// behind the primary UI gate (`canSubmitPlanDay`'s own `isRowComplete`
+// check above, plus the date input's own `min={planningDate}`
+// constraint at the component layer), mirroring `dayIntent.ts`'s own
+// established "REJECTS, never silently coerces" convention for exactly
+// this class of date-validity guard. This should never actually trigger
+// through the real UI; it exists so a row that "somehow" bypasses the
+// UI gate cannot silently produce a stale-urgency request instead.
 // ============================================================
 
 export function buildRequestedIntentsForSubmission(rows: readonly PlanDayIntentRow[], timezone: string, planningDate: string): PreviewRequestIntentBody[] {
   const intents: PreviewRequestIntentBody[] = [];
   for (const row of rows) {
     if (!hasTitle(row)) continue;
+    const deadline = resolveDeadline(row.deadlineChoice, planningDate);
+    if (deadline !== undefined && deadline < planningDate) {
+      throw new Error(`Row "${row.title.trim()}" has a deadline before today. This must never be sent to the server.`);
+    }
     const intent: PreviewRequestIntentBody = {
       id: row.id,
       title: row.title.trim(),
       flexibility: row.timeMode,
     };
     if (row.durationMinutes !== null) intent.durationMinutes = row.durationMinutes;
+    if (row.important) intent.importance = 'HIGH';
+    if (deadline !== undefined) intent.deadline = deadline;
     const fixedStart = resolveFixedStart(row, planningDate, timezone);
     if (fixedStart) intent.fixedStart = fixedStart;
     intents.push(intent);

@@ -19,6 +19,7 @@ import type { CapacityState } from './dayCapacity';
 import type { ConstructDayPreview, ConstructDayWarning, ResolvedIntentSummary } from './dayConstructorOrchestrator';
 import type { PlacementDeferralReason, PlacementTimingFit, ProposedItem } from './dayConstructor';
 import type { MuhurtaActivityFamily } from '../../../packages/muhurta/src/muhurtaEngine';
+import { addDaysToDateStr } from './timezone';
 
 // ============================================================
 // Capacity state (this ticket's own section 7/8). No independent capacity
@@ -227,6 +228,62 @@ export function sortProposedItemsForDisplay(items: readonly ProposedItem[]): Pro
 
 export function titleForIntentId(resolvedIntents: readonly ResolvedIntentSummary[], intentId: string): string {
   return resolvedIntents.find((resolved) => resolved.requestedIntentId === intentId)?.dayIntent.title ?? 'Untitled';
+}
+
+// ============================================================
+// Deferred-item provenance (Intent Fidelity V1 PR G3/G4, implementation
+// ticket's own sections 24-29) -- MINIMAL, factual-only. Only two facts
+// the user can actually supply through Plan My Day today: `important`
+// (-> domain `importance: 'HIGH'`) and `deadline`. Never rendered for a
+// PLACED item (this ticket's own section 29) -- callers must only ever
+// invoke this for a deferred item's own row.
+//
+// `dayIntent.importance === 'HIGH'` is safe to present as "Important"
+// WITHOUT a separate explicit/defaulted flag (this ticket's own section
+// 27's own question) because `buildDayIntent`'s `DEFAULT_IMPORTANCE`
+// (dayIntent.ts) is `'MEDIUM'`, never `'HIGH'` -- structurally, for
+// EVERY caller, not merely by Plan My Day's own current convention --
+// so `'HIGH'` can only ever mean a caller explicitly supplied it. No new
+// domain/orchestrator plumbing is required (this ticket's own section
+// 27's "if the preview currently drops the required facts, add the
+// smallest necessary plumbing" -- it does not: `ResolvedIntentSummary.
+// dayIntent.importance`/`.deadline` already carry both facts verbatim).
+// Similarly, `deadline` itself is sufficient provenance (this ticket's
+// own section 28) -- no new enum.
+// ============================================================
+
+function formatCompactDeadlineDateLabel(deadline: string): string {
+  const [year, month, day] = deadline.split('-').map(Number);
+  const date = new Date(Date.UTC(year, month - 1, day));
+  return date.toLocaleDateString('en-US', { month: 'short', day: 'numeric', timeZone: 'UTC' });
+}
+
+/** Purely factual, never an urgency judgment (this ticket's own section
+ * 26: "do not invent urgency language") -- a deadline before
+ * `planningDate` (which Plan My Day's own client-mapping guard should
+ * never actually produce) still renders as a plain compact date, never
+ * as "Overdue" or similar invented language. */
+function presentDeadlineProvenanceLabel(deadline: string, planningDate: string): string {
+  if (deadline === planningDate) return 'Due today';
+  if (deadline === addDaysToDateStr(planningDate, 1)) return 'Due tomorrow';
+  return `Due ${formatCompactDeadlineDateLabel(deadline)}`;
+}
+
+/**
+ * Looks up the ONE deferred item's own `DayIntent` (via `resolvedIntents`,
+ * the same lookup convention `titleForIntentId` above already
+ * establishes) and returns plain factual labels -- `[]` when neither
+ * fact is present, so a default row (MEDIUM, no deadline) renders no
+ * provenance at all (this ticket's own section 25/43: never present
+ * "Normal"/"MEDIUM" as if it were a stated choice).
+ */
+export function presentDeferredProvenance(resolvedIntents: readonly ResolvedIntentSummary[], intentId: string, planningDate: string): string[] {
+  const dayIntent = resolvedIntents.find((resolved) => resolved.requestedIntentId === intentId)?.dayIntent;
+  if (!dayIntent) return [];
+  const texts: string[] = [];
+  if (dayIntent.importance === 'HIGH') texts.push('Important');
+  if (dayIntent.deadline !== undefined) texts.push(presentDeadlineProvenanceLabel(dayIntent.deadline, planningDate));
+  return texts;
 }
 
 // ============================================================
