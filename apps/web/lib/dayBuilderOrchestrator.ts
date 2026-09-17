@@ -74,6 +74,20 @@ const MAX_DISPLAY_CANDIDATES = 3;
 const MIN_DISPLAY_CANDIDATE_SPACING_MINUTES = 45;
 
 /**
+ * Day Constructor V1 -- Intent Fidelity V1 PR G2's own single source of
+ * truth for "we have no better duration information at all" -- reused
+ * verbatim by `durationMinutesFor`'s own final case below AND by
+ * `dayConstructorOrchestrator.ts`'s `resolveDuration` for a free-text
+ * intent that never resolved a real `activityId` (so `durationMinutesFor`
+ * itself, which requires one, can never be called for it). Proven by
+ * this file's own existing test suite to already be a general "no
+ * activity-specific signal at all" default, not one scoped to valid
+ * catalog activities: `durationMinutesFor('not-a-real-catalog-activity-id')`
+ * already returns this exact value today.
+ */
+export const GENERIC_DURATION_FALLBACK_MINUTES = 45;
+
+/**
  * Behavior-aware Day Builder Duration V1 / Explicit Duration Preferences
  * Controls + Consumption V1 -- both `preferredDurationByActivityId` and
  * `behavioralDurationByActivityId` are OPTIONAL (every pre-existing caller
@@ -91,7 +105,8 @@ const MIN_DISPLAY_CANDIDATE_SPACING_MINUTES = 45;
  * function's own precedence still stops at the stored preference -- see
  * this feature's own architecture audit for the full chain this is one
  * link of: request-specific duration > stored explicit preference >
- * behavioral activity duration > catalog default > suggested duration > 45.
+ * behavioral activity duration > catalog default > suggested duration >
+ * `GENERIC_DURATION_FALLBACK_MINUTES`.
  */
 export function durationMinutesFor(
   activityId: string,
@@ -104,7 +119,7 @@ export function durationMinutesFor(
     behavioralDurationByActivityId?.[activityId] ??
     definition?.experience.defaultDurationMinutes ??
     definition?.experience.suggestedDurations?.[0] ??
-    45
+    GENERIC_DURATION_FALLBACK_MINUTES
   );
 }
 

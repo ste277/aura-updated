@@ -28,7 +28,7 @@ import type { User, HabitLogRow } from './db';
 import { listPlannedActivitiesForDay, listHabitLogs } from './db';
 import { listUserActivityPreferences, preferredDurationByActivityId, type UserActivityPreference } from './activityPreferences';
 import { deriveBehavioralProfile, activityDurationByActivityId } from './behavioralAffinity';
-import { durationMinutesFor } from './dayBuilderOrchestrator';
+import { durationMinutesFor, GENERIC_DURATION_FALLBACK_MINUTES } from './dayBuilderOrchestrator';
 import { localDayBoundsUTC } from './myDayOrchestrator';
 import { resolveTzOffsetMinutes } from './timezone';
 import { buildPersonalMuhurtaContextForUser } from './natalContext';
@@ -354,31 +354,47 @@ function resolveActivity(requested: RequestedDayIntent): ActivityResolution {
 }
 
 // ============================================================
-// Duration resolution (this ticket's own section 7). Reuses
-// `durationMinutesFor` (dayBuilderOrchestrator.ts) verbatim -- the SAME
-// canonical chain already documented there: explicit preference ->
-// behavioral typical duration -> catalog default -> catalog suggested ->
-// 45min. That 45-minute floor is NOT a new arbitrary fallback invented
-// by this file -- it is `durationMinutesFor`'s own, already-canonical,
-// already-shipped final case. This file adds exactly one new rule ABOVE
-// that chain (explicit request duration wins outright, matching this
-// ticket's own section 7 step 1) and one rule that `durationMinutesFor`
-// cannot express on its own: `durationMinutesFor` REQUIRES a real
-// `activityId` (it calls `getActivityDefinition(activityId)`
-// internally), so when resolution never produced one (a pure
-// coarse-family fallback, or resolution failed entirely), THIS file
-// never fabricates a placeholder id merely to obtain a number --
-// `estimatedDurationMinutes` is left `undefined` (DURATION_UNKNOWN,
-// resolved downstream by `constructDay` itself, never guessed here).
+// Duration resolution (this ticket's own section 7, extended by Intent
+// Fidelity V1 PR G2). Reuses `durationMinutesFor` (dayBuilderOrchestrator.ts)
+// verbatim -- the SAME canonical chain already documented there: explicit
+// preference -> behavioral typical duration -> catalog default -> catalog
+// suggested -> `GENERIC_DURATION_FALLBACK_MINUTES`. That floor is NOT a
+// new arbitrary fallback invented by this file -- it is
+// `durationMinutesFor`'s own, already-canonical, already-shipped final
+// case, and its own existing test suite already proves it is a general
+// "no activity-specific signal at all" default (it fires even for a
+// syntactically-valid but nonexistent activity id), not one scoped to
+// resolved catalog activities.
+//
+// PR G2 (post-V1 audit gap G2): a free-text intent that never resolved a
+// real `activityId` (a pure coarse-family fallback, or no classification
+// signal at all) used to leave `estimatedDurationMinutes` `undefined`
+// here -- `durationMinutesFor` cannot be called at all without a real
+// `activityId` string (it looks up `getActivityDefinition(activityId)`
+// internally), and the domain-level 45-minute floor lived ONLY inside
+// that function, unreachable from this branch. This file still never
+// fabricates a placeholder id merely to reach that function (identity
+// and duration estimation stay separate concerns, this ticket's own
+// section 7/9) -- instead it now applies the SAME
+// `GENERIC_DURATION_FALLBACK_MINUTES` directly, since the audit
+// confirmed that value already means "no better information exists,"
+// which is exactly the situation an unresolved `activityId` represents.
+// `fromGenericFallback: true` here activates the SAME already-shipped
+// `DURATION_FROM_GENERIC_FALLBACK` warning/"Estimated duration" preview
+// copy a resolved activity would get from `durationMinutesFor`'s own
+// final case -- no new presentation path, this file's own already-built
+// one simply becomes reachable for this input shape too.
 // ============================================================
 
 interface DurationResolution {
   estimatedDurationMinutes?: number;
-  /** True only when the returned value came from `durationMinutesFor`'s
-   * own generic 45-minute floor (neither an explicit request, a stored
-   * preference, a behavioral pattern, nor a real catalog default/
-   * suggested duration was available) -- an explanation fact, not a
-   * failure. */
+  /** True whenever the returned value came from the generic duration
+   * floor rather than an explicit request, a stored preference, a
+   * behavioral pattern, or a real catalog default/suggested duration --
+   * whether that floor was reached via `durationMinutesFor` (a resolved
+   * activity with no stronger signal) or applied directly here (no
+   * resolved activity at all, this ticket's own PR G2). An explanation
+   * fact, not a failure. */
   fromGenericFallback: boolean;
 }
 
@@ -388,7 +404,7 @@ function resolveDuration(
   durationContext: { preferredDurationByActivityId: Readonly<Record<string, number>>; behavioralDurationByActivityId: Readonly<Record<string, number>> }
 ): DurationResolution {
   if (requested.durationMinutes !== undefined) return { estimatedDurationMinutes: requested.durationMinutes, fromGenericFallback: false };
-  if (!activityId) return { estimatedDurationMinutes: undefined, fromGenericFallback: false };
+  if (!activityId) return { estimatedDurationMinutes: GENERIC_DURATION_FALLBACK_MINUTES, fromGenericFallback: true };
 
   const resolved = durationMinutesFor(activityId, durationContext.preferredDurationByActivityId, durationContext.behavioralDurationByActivityId);
   const cameFromPreference = durationContext.preferredDurationByActivityId[activityId] !== undefined;
