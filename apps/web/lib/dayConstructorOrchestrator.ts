@@ -31,7 +31,7 @@ import { listUserActivityPreferences, preferredDurationByActivityId, type UserAc
 import { deriveBehavioralProfile, activityDurationByActivityId } from './behavioralAffinity';
 import { durationMinutesFor, GENERIC_DURATION_FALLBACK_MINUTES } from './dayBuilderOrchestrator';
 import { localDayBoundsUTC } from './myDayOrchestrator';
-import { resolveTzOffsetMinutes } from './timezone';
+import { resolveTzOffsetMinutes, getDatePartsInTimezone } from './timezone';
 import { buildPersonalMuhurtaContextForUser } from './natalContext';
 import { findActivityIntent, getActivityProfileById } from '../../../packages/recommendation/src/personalizedTasks';
 import { classifyTask } from '../../../packages/recommendation/src/dailyAssistant';
@@ -535,7 +535,22 @@ export type OrchestrateConstructDayResult =
   | { status: 'INVALID_CONSTRUCTION_WINDOW'; error: ConstructionWindowValidationError }
   | { status: 'TIMEZONE_MISSING' }
   | { status: 'INVALID_REQUEST'; reason: string }
-  | { status: 'TIMING_SEARCH_FAILED'; requestedIntentId: string; reason: string };
+  | { status: 'TIMING_SEARCH_FAILED'; requestedIntentId: string; reason: string }
+  /** Planning Horizon V1 PR P1 (this ticket's own section 8/12/13/22) --
+   * `constructionWindowSource === 'REMAINING_TODAY'`, availability is
+   * UNCONFIGURED, and `targetDate` is NOT the caller's own current civil
+   * day. The pre-P1 REMAINING_TODAY fallback (`start = request.now`,
+   * `end = that future day's own midnight`) is only ever correct when
+   * `targetDate` IS today -- reusing it for a future date would silently
+   * construct a window spanning from right now through a LATER day's
+   * midnight. Rather than inventing a full-civil-day/default-daytime/
+   * 9-5 fallback (which `dayIntent.ts`'s own locked principle forbids:
+   * "the constructor must never pretend that an application default
+   * represents known user availability"), this fails closed: future
+   * planning requires a real, saved Availability configuration. `TODAY`
+   * + UNCONFIGURED is completely unaffected -- see
+   * `resolveAvailabilityAwareWindow` below. */
+  | { status: 'FUTURE_AVAILABILITY_REQUIRED' };
 
 // ============================================================
 // Construction window resolution (this ticket's own section 5) -- no
@@ -633,10 +648,19 @@ function normalizeCandidate(intentId: string, candidate: TimingCandidate, candid
  * and is never reinterpreted through availability (architecture audit's
  * own section 40 recommendation).
  *
- * UNCONFIGURED -> `{ status: 'UNCONFIGURED' }`: the caller must fall
- * through to `resolveConstructionWindow(request)` verbatim (this
- * ticket's own section 19 -- zero behavioral change for an existing
- * user).
+ * UNCONFIGURED -> `{ status: 'UNCONFIGURED_TODAY' }` (targetDate IS the
+ * caller's own current civil day) -> the caller must fall through to
+ * `resolveConstructionWindow(request)` verbatim (this ticket's own
+ * section 19 -- zero behavioral change for an existing user), OR
+ * `{ status: 'FUTURE_AVAILABILITY_REQUIRED' }` (targetDate is NOT today
+ * -- Planning Horizon V1 PR P1, this ticket's own section 8/12) -- the
+ * caller must fail the whole orchestration closed, NEVER fall through to
+ * `resolveConstructionWindow(request)` for a non-today date (see
+ * `OrchestrateConstructDayResult['FUTURE_AVAILABILITY_REQUIRED']`'s own
+ * doc comment for why). `resolveAvailability` itself is untouched --
+ * this "is targetDate today" check is deliberately made HERE, at the
+ * orchestration boundary (this ticket's own section 8: "Prefer enforcing
+ * this at the orchestration boundary"), never inside the pure resolver.
  *
  * CONFIGURED with zero usable windows (this ticket's own section 18,
  * "CONFIGURED_EMPTY") -> `{ status: 'NO_USABLE_CAPACITY' }`: the caller
@@ -644,7 +668,8 @@ function normalizeCandidate(intentId: string, candidate: TimingCandidate, candid
  * `ConstructionWindow` to pass through the normal path (this ticket's
  * own section 28 -- `validateConstructionWindow` already rejects
  * `start >= end` as `INVALID_CONSTRUCTION_WINDOW`, the wrong status for
- * a genuinely, deliberately empty day).
+ * a genuinely, deliberately empty day). Unaffected by P1 -- CONFIGURED_
+ * EMPTY reaches this status regardless of which date it targets.
  *
  * CONFIGURED with at least one usable window -> `{ status: 'READY',
  * window, gapBlockers }`: `window` replaces what
@@ -652,15 +677,25 @@ function normalizeCandidate(intentId: string, candidate: TimingCandidate, candid
  * merged into the existing Plan-blocker list before normalization
  * (architecture audit's own section 23/56 -- `dayConstructor.ts`/
  * `dayCapacity.ts` still consume exactly one window + one blocker list,
- * unchanged).
+ * unchanged). Unaffected by P1 -- a future date's CONFIGURED windows
+ * were already correctly unclipped by `resolveAvailability` before this
+ * ticket existed.
  */
 async function resolveAvailabilityAwareWindow(
   request: ConstructDayRequest,
   deps: DayConstructorOrchestratorDeps
-): Promise<{ status: 'UNCONFIGURED' } | { status: 'NO_USABLE_CAPACITY' } | { status: 'READY'; window: ConstructionWindow; gapBlockers: BlockedInterval[] }> {
+): Promise<
+  | { status: 'UNCONFIGURED_TODAY' }
+  | { status: 'FUTURE_AVAILABILITY_REQUIRED' }
+  | { status: 'NO_USABLE_CAPACITY' }
+  | { status: 'READY'; window: ConstructionWindow; gapBlockers: BlockedInterval[] }
+> {
   const availabilityConfig = await deps.loadAvailabilityConfiguration();
   const resolution = resolveAvailability({ targetDate: request.targetDate, timezone: request.timezone, now: request.now, configuration: availabilityConfig });
-  if (resolution.status === 'UNCONFIGURED') return { status: 'UNCONFIGURED' };
+  if (resolution.status === 'UNCONFIGURED') {
+    const isTargetDateToday = request.targetDate === getDatePartsInTimezone(request.timezone, request.now).dateStr;
+    return isTargetDateToday ? { status: 'UNCONFIGURED_TODAY' } : { status: 'FUTURE_AVAILABILITY_REQUIRED' };
+  }
   if (resolution.usableWindows.length === 0) return { status: 'NO_USABLE_CAPACITY' };
   const normalized = normalizeUsableWindowsToConstructionWindow(resolution.usableWindows, request.targetDate, request.timezone)!;
   return { status: 'READY', window: normalized.window, gapBlockers: normalized.gapBlockers };
@@ -679,6 +714,14 @@ export async function orchestrateConstructDay(request: ConstructDayRequest, deps
 
   if (request.constructionWindowSource === 'REMAINING_TODAY') {
     const availabilityWindow = await resolveAvailabilityAwareWindow(request, deps);
+    if (availabilityWindow.status === 'FUTURE_AVAILABILITY_REQUIRED') {
+      // Planning Horizon V1 PR P1 -- fails the whole orchestration closed
+      // before any real-data fetch beyond `loadAvailabilityConfiguration`
+      // is attempted (this ticket's own section 8/12): never falls
+      // through to `resolveConstructionWindow`'s REMAINING_TODAY branch,
+      // which is only correct for today.
+      return { status: 'FUTURE_AVAILABILITY_REQUIRED' };
+    }
     if (availabilityWindow.status === 'NO_USABLE_CAPACITY') {
       // CONFIGURED_EMPTY hardening: `requestedMinutes` means "the total
       // resolved duration requested by the user," identical to the
@@ -701,7 +744,10 @@ export async function orchestrateConstructDay(request: ConstructDayRequest, deps
       window = availabilityWindow.window;
       availabilityGapBlockers = availabilityWindow.gapBlockers;
     } else {
-      // UNCONFIGURED -- the exact existing REMAINING_TODAY path, unchanged.
+      // UNCONFIGURED_TODAY (the only remaining possibility here -- the
+      // FUTURE_AVAILABILITY_REQUIRED case already returned above) -- the
+      // exact existing REMAINING_TODAY path, unchanged (this ticket's
+      // own section 9).
       const windowResolution = resolveConstructionWindow(request);
       if (windowResolution.status !== 'READY') return windowResolution;
       window = windowResolution.window;

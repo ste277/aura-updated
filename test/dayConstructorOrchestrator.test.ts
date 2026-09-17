@@ -1078,6 +1078,130 @@ async function main() {
     );
   }
 
+  // ============================================================
+  // Planning Horizon V1 PR P1 -- Tomorrow readiness (51-60). Every test
+  // below uses `remainingTodayRequest` (constructionWindowSource stays
+  // 'REMAINING_TODAY' -- P1 never introduces a second source) with a
+  // `targetDate` one civil day ahead of `now`'s own civil date.
+  // ============================================================
+
+  const TODAY_NOW = iso('2026-09-16T08:00:00Z'); // Wednesday, matches TARGET_DATE.
+  const TOMORROW_DATE = '2026-09-17'; // Thursday.
+
+  // 51. TODAY + UNCONFIGURED is completely unaffected by P1 -- exact
+  // existing REMAINING_TODAY fallback, still reached.
+  {
+    const result = await orchestrateConstructDay(remainingTodayRequest({ timezone: 'UTC', now: TODAY_NOW }), noopDeps());
+    check(
+      '51. TODAY + UNCONFIGURED is unaffected by Planning Horizon V1 -- still resolves the existing REMAINING_TODAY fallback (window start=now, end=today\'s own midnight)',
+      result.status === 'READY' && result.preview.constructionWindow.start.getTime() === TODAY_NOW.getTime() && result.preview.constructionWindow.end.toISOString() === '2026-09-17T00:00:00.000Z'
+    );
+  }
+
+  // 52. TOMORROW + UNCONFIGURED fails closed as FUTURE_AVAILABILITY_REQUIRED -- never reaches the REMAINING_TODAY fallback for a future date.
+  {
+    const result = await orchestrateConstructDay(remainingTodayRequest({ timezone: 'UTC', now: TODAY_NOW, targetDate: TOMORROW_DATE }), noopDeps());
+    check('52. TOMORROW + UNCONFIGURED returns FUTURE_AVAILABILITY_REQUIRED, never a fabricated now->tomorrow-midnight window', result.status === 'FUTURE_AVAILABILITY_REQUIRED');
+  }
+
+  // 53. The FUTURE_AVAILABILITY_REQUIRED path never calls searchTiming/loadBlockingPlans -- fails closed before any further real-data fetch, mirroring the existing CONFIGURED_EMPTY discipline.
+  {
+    let searchTimingCalls = 0;
+    let loadBlockingPlansCalls = 0;
+    const deps = noopDeps({ searchTiming: () => { searchTimingCalls += 1; return { candidates: [] }; }, loadBlockingPlans: async () => { loadBlockingPlansCalls += 1; return []; } });
+    const intent = requestedIntent({ id: 'i-future-unconf', durationMinutes: 30 });
+    await orchestrateConstructDay(remainingTodayRequest({ timezone: 'UTC', now: TODAY_NOW, targetDate: TOMORROW_DATE, intents: [intent] }), deps);
+    check('53. FUTURE_AVAILABILITY_REQUIRED never calls searchTiming or loadBlockingPlans', searchTimingCalls === 0 && loadBlockingPlansCalls === 0);
+  }
+
+  // 54. TOMORROW + CONFIGURED split availability resolves the full, unclipped configured windows for that weekday (Thursday=4) -- no availability-algorithm change (reuses resolveAvailability verbatim).
+  {
+    const deps = noopDeps({ loadAvailabilityConfiguration: async () => ({ configured: true, periods: [{ weekday: 4, startTime: '09:00', endTime: '12:00' }, { weekday: 4, startTime: '14:00', endTime: '18:00' }] }) });
+    const result = await orchestrateConstructDay(remainingTodayRequest({ timezone: 'UTC', now: TODAY_NOW, targetDate: TOMORROW_DATE }), deps);
+    check(
+      '54. TOMORROW + CONFIGURED split availability resolves the full unclipped outer span (09:00-18:00), not clipped against today\'s now',
+      result.status === 'READY' && result.preview.constructionWindow.start.toISOString() === '2026-09-17T09:00:00.000Z' && result.preview.constructionWindow.end.toISOString() === '2026-09-17T18:00:00.000Z'
+    );
+  }
+
+  // 55. Same TOMORROW split-availability request also correctly nets out the gap (09-12 + 14-18 = 420 usable minutes before any Plan/intent).
+  {
+    const deps = noopDeps({ loadAvailabilityConfiguration: async () => ({ configured: true, periods: [{ weekday: 4, startTime: '09:00', endTime: '12:00' }, { weekday: 4, startTime: '14:00', endTime: '18:00' }] }) });
+    const result = await orchestrateConstructDay(remainingTodayRequest({ timezone: 'UTC', now: TODAY_NOW, targetDate: TOMORROW_DATE }), deps);
+    check(
+      '55. TOMORROW\'s own availability gap (12:00-14:00) is still correctly excluded from usable capacity (540 total window minutes - 120 gap = 420 usable)',
+      result.status === 'READY' && result.preview.constructedDay.requestedCapacity.usableMinutes === 420
+    );
+  }
+
+  // 56. TOMORROW + CONFIGURED_EMPTY (zero periods for Thursday) still reaches NO_USABLE_CAPACITY, never reinterpreted as UNCONFIGURED/FUTURE_AVAILABILITY_REQUIRED.
+  {
+    const deps = noopDeps({ loadAvailabilityConfiguration: async () => ({ configured: true, periods: [{ weekday: 0, startTime: '10:00', endTime: '13:00' }] }) }); // only Sunday configured.
+    const result = await orchestrateConstructDay(remainingTodayRequest({ timezone: 'UTC', now: TODAY_NOW, targetDate: TOMORROW_DATE }), deps);
+    check('56. TOMORROW + CONFIGURED_EMPTY reaches NO_USABLE_CAPACITY, distinct from FUTURE_AVAILABILITY_REQUIRED (a real, saved-but-empty schedule is never treated as unconfigured)', result.status === 'NO_USABLE_CAPACITY');
+  }
+
+  // 57. An existing Plan tomorrow blocks its own interval.
+  {
+    const deps = noopDeps({
+      loadAvailabilityConfiguration: async () => ({ configured: true, periods: [{ weekday: 4, startTime: '09:00', endTime: '17:00' }] }),
+      loadBlockingPlans: async () => [blockerPlan('2026-09-17T10:00:00Z', '2026-09-17T11:00:00Z')],
+    });
+    const result = await orchestrateConstructDay(remainingTodayRequest({ timezone: 'UTC', now: TODAY_NOW, targetDate: TOMORROW_DATE }), deps);
+    check(
+      '57. an existing Plan tomorrow subtracts from tomorrow\'s usable capacity exactly as it would for today (8h window - 1h Plan = 420 usable minutes)',
+      result.status === 'READY' && result.preview.constructedDay.requestedCapacity.usableMinutes === 420
+    );
+  }
+
+  // 58. Today's own Plans never block Tomorrow -- loadBlockingPlans is always scoped by the request's own targetDate (localDayBoundsUTC), never today's bounds.
+  {
+    let loadBlockingPlansArgs: { from: Date; to: Date } | undefined;
+    const deps = noopDeps({
+      loadAvailabilityConfiguration: async () => ({ configured: true, periods: [{ weekday: 4, startTime: '09:00', endTime: '17:00' }] }),
+      loadBlockingPlans: async (bounds) => { loadBlockingPlansArgs = bounds; return []; },
+    });
+    await orchestrateConstructDay(remainingTodayRequest({ timezone: 'UTC', now: TODAY_NOW, targetDate: TOMORROW_DATE }), deps);
+    check(
+      "58. TOMORROW's own blocking-plan query is scoped to tomorrow's own day bounds, never today's",
+      loadBlockingPlansArgs !== undefined && loadBlockingPlansArgs.from.toISOString() === '2026-09-17T00:00:00.000Z' && loadBlockingPlansArgs.to.toISOString() === '2026-09-18T00:00:00.000Z'
+    );
+  }
+
+  // 59/60. FIXED intent tomorrow -- resolveFixedStart-equivalent proof at
+  // the orchestrator layer: a fixedStart already anchored to tomorrow's
+  // own civil date (as planDayEntry.ts's own resolveFixedStart would
+  // produce, given the SAME request.timezone) places correctly inside
+  // tomorrow's configured window, proven in two different real-world
+  // timezones. The request's own `timezone` is always the ONE
+  // authenticated user's own zone -- both the configured-period window
+  // and the FIXED instant are resolved against it consistently, exactly
+  // as `resolveAvailability`/`resolveFixedStart` both do in production.
+  {
+    // Asia/Kolkata (UTC+5:30): configuring the whole civil day (00:00-23:59)
+    // for weekday=4 (Thursday) resolves to [2026-09-16T18:30:00Z,
+    // 2026-09-17T18:29:00Z). 09:00 IST on 2026-09-17 == 2026-09-17T03:30:00Z.
+    const deps = noopDeps({ loadAvailabilityConfiguration: async () => ({ configured: true, periods: [{ weekday: 4, startTime: '00:00', endTime: '23:59' }] }) });
+    const fixedKolkata = requestedIntent({ id: 'i-fixed-ist', flexibility: 'FIXED', fixedStart: iso('2026-09-17T03:30:00Z'), durationMinutes: 60 });
+    const resultKolkata = await orchestrateConstructDay(remainingTodayRequest({ timezone: 'Asia/Kolkata', now: TODAY_NOW, targetDate: TOMORROW_DATE, intents: [fixedKolkata] }), deps);
+    check(
+      '59. a FIXED 09:00 Asia/Kolkata start correctly anchored to tomorrow\'s civil date is placed (no browser/client date authority -- the instant alone determines placement)',
+      resultKolkata.status === 'READY' && resultKolkata.preview.constructedDay.proposedItems.some((p) => p.intentId === 'i-fixed-ist')
+    );
+  }
+  {
+    // America/New_York (EDT, UTC-4 in September): configuring the whole
+    // civil day for weekday=4 resolves to [2026-09-17T04:00:00Z,
+    // 2026-09-18T03:59:00Z). 09:00 EDT on 2026-09-17 == 2026-09-17T13:00:00Z.
+    const deps = noopDeps({ loadAvailabilityConfiguration: async () => ({ configured: true, periods: [{ weekday: 4, startTime: '00:00', endTime: '23:59' }] }) });
+    const fixedNewYork = requestedIntent({ id: 'i-fixed-edt', flexibility: 'FIXED', fixedStart: iso('2026-09-17T13:00:00Z'), durationMinutes: 60 });
+    const resultNewYork = await orchestrateConstructDay(remainingTodayRequest({ timezone: 'America/New_York', now: TODAY_NOW, targetDate: TOMORROW_DATE, intents: [fixedNewYork] }), deps);
+    check(
+      '60. a FIXED 09:00 America/New_York start correctly anchored to tomorrow\'s civil date is placed, proving FIXED-tomorrow works regardless of which real-world timezone the user is in',
+      resultNewYork.status === 'READY' && resultNewYork.preview.constructedDay.proposedItems.some((p) => p.intentId === 'i-fixed-edt')
+    );
+  }
+
   if (!allPassed) {
     console.error('\nSome Day Constructor Orchestrator checks FAILED.');
     process.exit(1);
