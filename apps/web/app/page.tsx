@@ -1357,6 +1357,7 @@ export default function DashboardPage() {
             onNotificationsClick={handleOpenUpdates}
             unreadUpdatesCount={auraUpdates?.unreadCount}
             onPanchangClick={() => setActiveTab('explore')}
+            onExploreClick={() => setActiveTab('explore')}
             // Only surface something that still needs the owner's attention --
             // updates[0] alone could be an already-resolved/seen entry that's
             // merely the most recent, which read as a stale "Find another

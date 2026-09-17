@@ -137,6 +137,15 @@ interface HomeDashboardProps {
   onDayBuilderPrefsChange?: (next: Partial<{ dayBuilderPriorities: string[]; dayBuilderPrioritiesPromptDismissed: boolean }>) => void;
   guidance?: GuidanceUiState;
   onOpenBirthProfile?: () => void;
+  /** Home Plan/Add Actions fix -- "+ Add something"'s own fallback when
+   * Day Builder has nothing to show (NIGHT phase / no agenda yet, see
+   * `dayBuilderBlock` below): the SAME existing Explore navigation
+   * `onPanchangClick` already performs (`setActiveTab('explore')` in
+   * page.tsx) -- a second, distinctly-named prop for a distinct caller
+   * rather than repurposing `onPanchangClick` for an unrelated action,
+   * but no new navigation mechanism. Never fires while Day Builder's own
+   * block is available -- see `handleAddSomething` below. */
+  onExploreClick?: () => void;
   /** Home UI V2 -- reuses page.tsx's existing `handleTimingSearch`
    * (already passed to Plan/Ask Aura/Muhurtham) so an OPPORTUNITY row's
    * "Plan" action can re-evaluate its own already-chosen instant via a
@@ -345,6 +354,7 @@ export function HomeDashboard({
   onOpenBirthProfile,
   onTimingSearch,
   assistantInsight,
+  onExploreClick,
 }: HomeDashboardProps) {
   const effectiveTimezone = timezone ?? FALLBACK_HOME_TZ;
 
@@ -494,6 +504,27 @@ export function HomeDashboard({
         <DayBuilderCard key={myDayAgenda.localDate} dayPhase={dayPhase} localDate={myDayAgenda.localDate} onCreated={() => { setShowDayBuilder(false); onMyDayChanged?.(); }} onMuteGroup={onMuteDayBuilderGroup} />
       </div>
     ) : null;
+
+  /**
+   * Home Plan/Add Actions fix -- "+ Add something" must never produce a
+   * click with no visible result (the dead-click audit's own §12
+   * invariant). `dayBuilderBlock` above is the ONLY thing toggling
+   * `showDayBuilder` can ever reveal; when it's `null` (NIGHT phase, or
+   * `myDayAgenda` not yet loaded), toggling state that renders to nothing
+   * is exactly the bug being fixed here -- so this falls through to the
+   * existing Explore navigation instead, the SAME one-line
+   * `setActiveTab('explore')` pattern `onPanchangClick` already uses.
+   * Day Builder's own NIGHT semantics are completely unchanged by this --
+   * this only decides what HOME does when Day Builder has nothing to
+   * show, never what Day Builder itself shows.
+   */
+  const handleAddSomething = () => {
+    if (dayBuilderBlock) {
+      setShowDayBuilder((current) => !current);
+    } else {
+      onExploreClick?.();
+    }
+  };
 
   const nextThing = deriveNextMeaningfulThing({ topMomentUpdate, startingSoonReminder, agenda: myDayAgenda });
 
@@ -656,6 +687,16 @@ export function HomeDashboard({
                   </PrimaryButton>
                 )}
               </div>
+              {/* Home Plan/Add Actions fix -- moved here from far below
+               * HomeTimeline (this ticket's own §4/§25): a CHECK/save
+               * failure must be visible where the user actually tapped
+               * "Plan," not require scrolling past the entire "Your Day"
+               * list to discover. `handlePlanOpportunity` already clears
+               * this at the start of every new attempt (`setOpportunityError('')`),
+               * so a stale error never lingers into a fresh Planning… state. */}
+              {rightNowState.kind === 'OPPORTUNITY' && opportunityError && (
+                <div style={{ color: colors.danger, fontSize: 12, marginTop: spacing.xs }}>{opportunityError}</div>
+              )}
               {spotlightWhyExpanded && spotlightExplanation && spotlightExplanation.length > 0 && (
                 <div style={{ marginTop: spacing.sm, display: 'flex', flexDirection: 'column', gap: 4 }}>
                   <div style={{ ...typography.caption, color: colors.textMuted, fontWeight: 800 }}>Why this time?</div>
@@ -798,10 +839,9 @@ export function HomeDashboard({
         onOpenItem={handleOpenTimelineItem}
         onPlanOpportunity={handlePlanOpportunity}
         planningId={planningOpportunityId}
-        onAddSomething={() => setShowDayBuilder((current) => !current)}
+        onAddSomething={handleAddSomething}
         emptyStateExtra={isTimelineEmpty ? dayBuilderBlock : showDayBuilder ? dayBuilderBlock : undefined}
       />
-      {opportunityError && <div style={{ color: colors.danger, fontSize: 12 }}>{opportunityError}</div>}
 
       {/* ============================================================
        * DAILY REFLECTION
