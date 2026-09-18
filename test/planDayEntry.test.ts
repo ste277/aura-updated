@@ -8,6 +8,9 @@
  */
 import {
   createEmptyIntentRow,
+  createIntentRowFromQuickPick,
+  isRowUntouched,
+  formatIntentRowSummary,
   countSubmittableIntentRows,
   canSubmitPlanDay,
   canAddAnotherRow,
@@ -22,6 +25,7 @@ import {
   type PlanDayDeadlineChoice,
 } from '../apps/web/lib/planDayEntry';
 import type { ConstructDayPreviewClientResult } from '../apps/web/lib/dayConstructorPreviewClient';
+import { PLAN_DAY_QUICK_PICKS } from '../apps/web/lib/planDayQuickPicks';
 
 let allPassed = true;
 function check(label: string, condition: boolean) {
@@ -321,6 +325,109 @@ function main() {
     '59. the SAME generic copy under TODAY is byte-identical to the pre-P2 wording (regression)',
     presentPlanDayPreviewFailure(outcome('INVALID_CONSTRUCTION_WINDOW'), 'TODAY').message === "Aura couldn't build a plan for today right now."
   );
+
+  // ============================================================
+  // Plan My Day UX V2 PR U1 -- locked Quick Pick set + canonical mapping
+  // (60-66)
+  // ============================================================
+  {
+    const byLabel = Object.fromEntries(PLAN_DAY_QUICK_PICKS.map((p) => [p.label, p.activityId]));
+    check('60. exactly the six locked picks exist, in the locked order', PLAN_DAY_QUICK_PICKS.map((p) => p.label).join(',') === 'Focus,Workout,Learn,Errands,Meditate,Quiet time');
+    check('61. Focus -> deep-work', byLabel['Focus'] === 'deep-work');
+    check('62. Workout -> workout', byLabel['Workout'] === 'workout');
+    check('63. Learn -> learning', byLabel['Learn'] === 'learning');
+    check('64. Errands has NO activityId (no catalog entry -- never manufactured)', byLabel['Errands'] === undefined);
+    check('65. Meditate -> meditation', byLabel['Meditate'] === 'meditation');
+    check('66. Quiet time -> quiet-time', byLabel['Quiet time'] === 'quiet-time');
+    check('66b. "Wellbeing"/"Personal" are NOT present (locked exclusion, this ticket\'s own section 3)', !('Wellbeing' in byLabel) && !('Personal' in byLabel));
+  }
+
+  // ============================================================
+  // createIntentRowFromQuickPick / isRowUntouched (67-76)
+  // ============================================================
+  {
+    const r = createIntentRowFromQuickPick({ label: 'Workout', activityId: 'workout' });
+    check('67. a Quick Pick row carries the exact title', r.title === 'Workout');
+    check('68. a Quick Pick row carries the exact activityId', r.activityId === 'workout');
+    check('69. a Quick Pick row otherwise matches every createEmptyIntentRow default: duration Automatic', r.durationMinutes === null);
+    check('70. default: Flexible', r.timeMode === 'FLEXIBLE');
+    check('71. default: no fixed time', r.fixedTime === null);
+    check('72. default: not Important', r.important === false);
+    check('73. default: no Deadline', r.deadlineChoice.kind === 'NONE');
+    check('73b. Errands (no activityId) produces a row with activityId undefined, never a fabricated one', createIntentRowFromQuickPick({ label: 'Errands' }).activityId === undefined);
+  }
+  check('74. isRowUntouched is true for a freshly created empty row', isRowUntouched(createEmptyIntentRow()));
+  check('74b. isRowUntouched is false once title is set', !isRowUntouched(row({ title: 'x' })));
+  check('75. isRowUntouched is false once duration is customized, even with a blank title (this ticket\'s own section 15: "a row with scheduling customization but blank title should not be silently overwritten")', !isRowUntouched(row({ durationMinutes: 30 })));
+  check('75b. isRowUntouched is false once Important is set, even with a blank title', !isRowUntouched(row({ important: true })));
+  check('75c. isRowUntouched is false once a Deadline is set, even with a blank title', !isRowUntouched(row({ deadlineChoice: { kind: 'TOMORROW' } })));
+  check('75d. isRowUntouched is false once timeMode is FIXED, even with a blank title', !isRowUntouched(row({ timeMode: 'FIXED' })));
+  check('76. isRowUntouched is false once a Quick Pick has populated the row (title+activityId both set)', !isRowUntouched(createIntentRowFromQuickPick({ label: 'Workout', activityId: 'workout' })));
+
+  // ============================================================
+  // Request mapping for picker vs typed intents (77-82) -- proves
+  // equivalence EXCEPT the one intentional divergence this ticket's own
+  // section 37/47 calls for.
+  // ============================================================
+  {
+    const pickerRow = createIntentRowFromQuickPick({ label: 'Workout', activityId: 'workout' });
+    const [pickerIntent] = buildRequestedIntentsForSubmission([pickerRow], 'Asia/Kolkata', PLANNING_DATE);
+    check('77. a picker-created Workout intent includes activityId "workout" in the request', pickerIntent.activityId === 'workout');
+  }
+  {
+    const typedRow = row({ title: 'Workout' }); // no activityId -- exactly what a typed row looks like.
+    const [typedIntent] = buildRequestedIntentsForSubmission([typedRow], 'Asia/Kolkata', PLANNING_DATE);
+    check('78. a typed Workout intent omits activityId entirely (never undefined-but-present as an explicit key)', !('activityId' in typedIntent));
+  }
+  {
+    const errandsRow = createIntentRowFromQuickPick({ label: 'Errands' });
+    const [errandsIntent] = buildRequestedIntentsForSubmission([errandsRow], 'Asia/Kolkata', PLANNING_DATE);
+    check('79. an Errands picker intent omits activityId (no catalog id exists for it)', !('activityId' in errandsIntent));
+  }
+  {
+    // Simulates the edited-title case: the row's own activityId was
+    // already cleared (by PlanDayClient's title onChange, this ticket's
+    // own section 6/55) before submission -- this proves the request
+    // mapper itself has no independent logic that could resurrect it.
+    const editedRow = { ...createIntentRowFromQuickPick({ label: 'Workout', activityId: 'workout' }), title: '30-minute run', activityId: undefined };
+    const [editedIntent] = buildRequestedIntentsForSubmission([editedRow], 'Asia/Kolkata', PLANNING_DATE);
+    check('80. an edited-title row (activityId already cleared) omits activityId from the request', !('activityId' in editedIntent));
+    check('80b. the edited row\'s new title is sent verbatim', editedIntent.title === '30-minute run');
+  }
+  check(
+    '81. every OTHER request field (title/flexibility/duration/importance/deadline/fixedStart) is completely unaffected by activityId presence -- same mapping logic, just one extra optional key',
+    (() => {
+      const withId = buildRequestedIntentsForSubmission([createIntentRowFromQuickPick({ label: 'Focus', activityId: 'deep-work' })], 'Asia/Kolkata', PLANNING_DATE)[0];
+      const withoutId = buildRequestedIntentsForSubmission([row({ title: 'Focus' })], 'Asia/Kolkata', PLANNING_DATE)[0];
+      const { activityId: _a, id: _idA, ...withIdRest } = withId as any;
+      const { activityId: _b, id: _idB, ...withoutIdRest } = withoutId as any;
+      return JSON.stringify({ ...withIdRest, title: 'x' }) === JSON.stringify({ ...withoutIdRest, title: 'x' });
+    })()
+  );
+  check('82. MAX_PLAN_DAY_INTENTS is unchanged by U1 (still the single existing cap Quick Picks/Something else both respect)', MAX_PLAN_DAY_INTENTS === 12);
+
+  // ============================================================
+  // formatIntentRowSummary (83-90) -- collapsed-card summary text, exact
+  // worked examples from this ticket's own section 19.
+  // ============================================================
+  check('83. Flexible + Automatic + not important + no deadline', formatIntentRowSummary(row(), 'TODAY') === 'Flexible · Automatic');
+  check('84. Flexible + 60 min + Important', formatIntentRowSummary(row({ durationMinutes: 60, important: true }), 'TODAY') === 'Flexible · 60 min · Important');
+  check('85. Specific time 10:00 AM + Automatic', formatIntentRowSummary(row({ timeMode: 'FIXED', fixedTime: '10:00' }), 'TODAY') === 'Specific time 10:00 AM · Automatic');
+  check(
+    '86. Specific time 3:30 PM + 30 min + Deadline tomorrow',
+    formatIntentRowSummary(row({ timeMode: 'FIXED', fixedTime: '15:30', durationMinutes: 30, deadlineChoice: { kind: 'TOMORROW' } }), 'TODAY') === 'Specific time 3:30 PM · 30 min · Deadline tomorrow'
+  );
+  check('87. midnight (00:00) formats as 12:00 AM, not 0:00 AM', formatIntentRowSummary(row({ timeMode: 'FIXED', fixedTime: '00:00' }), 'TODAY') === 'Specific time 12:00 AM · Automatic');
+  check('88. noon (12:00) formats as 12:00 PM, not 0:00 PM', formatIntentRowSummary(row({ timeMode: 'FIXED', fixedTime: '12:00' }), 'TODAY') === 'Specific time 12:00 PM · Automatic');
+  check(
+    '89. a TODAY deadline choice under a TOMORROW horizon reads "Deadline same day" (matching DeadlineControl\'s own first-chip label, never disagreeing)',
+    formatIntentRowSummary(row({ deadlineChoice: { kind: 'TODAY' } }), 'TOMORROW') === 'Flexible · Automatic · Deadline same day'
+  );
+  check(
+    '89b. the SAME TODAY deadline choice under a TODAY horizon reads "Deadline today"',
+    formatIntentRowSummary(row({ deadlineChoice: { kind: 'TODAY' } }), 'TODAY') === 'Flexible · Automatic · Deadline today'
+  );
+  check('90. a CUSTOM deadline shows the concrete date', formatIntentRowSummary(row({ deadlineChoice: { kind: 'CUSTOM', date: '2026-10-01' } }), 'TODAY') === 'Flexible · Automatic · Deadline 2026-10-01');
 
   if (!allPassed) {
     console.error('\nSome Plan Day Entry checks FAILED.');
