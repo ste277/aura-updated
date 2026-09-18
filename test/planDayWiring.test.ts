@@ -363,25 +363,31 @@ function main() {
   check('72. DeadlineControl\'s own "Clear" button still only calls onChange(NO_DEADLINE) -- never onRemove', /Clear\s*<\/TextButton>/.test(planDayClientSource) && (() => { const m = planDayClientSource.match(/function DeadlineControl[\s\S]*?\n\}\n/); return !!m && !m[0].includes('onRemove'); })());
   check('72b. the row-level Remove control is unchanged -- still the IconButton with an explicit "Remove ..." accessible name', /ariaLabel=\{`Remove \$\{row\.title\.trim\(\) \|\| `task \$\{index \+ 1\}`\}`\}/.test(planDayClientSource));
 
-  // 73. "+ Add another" is gone; "+ Something else" is the one add-a-
-  // free-text-row control (this ticket's own section 31/37).
-  check('73. the old "+ Add another" control no longer exists', !planDayClientSource.includes('+ Add another'));
-  check('73b. "+ Something else" exists and calls handleSomethingElse', /onClick=\{handleSomethingElse\}[\s\S]{0,40}\+ Something else/.test(planDayClientSource) || (planDayClientSource.includes('+ Something else') && planDayClientSource.includes('onClick={handleSomethingElse}')));
-  check('73c. there is exactly ONE rendered add-a-free-text-row control (handleSomethingElse wired to exactly one control -- doc-comment prose mentioning the label elsewhere is fine)', occurrences(planDayClientSource, 'onClick={handleSomethingElse}') === 1);
+  // 73. Plan My Day UX V2 PR U2 supersedes U1's "'+ Add another' is
+  // gone" decision (this ticket's own section 5/15/18): "+ Add another"
+  // is reintroduced as a compact picker-reveal affordance once a plan
+  // already exists, wired to reveal the SAME shared picker block --
+  // never a second/duplicate "+ Something else" implementation.
+  check('73. "+ Add another" is reintroduced as a compact picker-reveal control', planDayClientSource.includes('+ Add another'));
+  check('73a. "+ Add another" is wired to reveal the picker (setAddPickerExpanded(true)), never a second row-adding implementation of its own', /onClick=\{\(\) => setAddPickerExpanded\(true\)\}[\s\S]{0,150}\+ Add another/.test(planDayClientSource));
+  check('73b. the "+ Something else" TextButton is implemented exactly ONCE in source (<TextButton onClick={onSomethingElse}...>) -- the one shared QuickPicksAndSomethingElse implementation, rendered from multiple call sites, never duplicated (doc-comment prose mentioning the label elsewhere is fine)', occurrences(planDayClientSource, '<TextButton onClick={onSomethingElse}') === 1);
+  check('73c. both QuickPicksAndSomethingElse call sites wire the SAME handleSomethingElse via the extracted onSomethingElse prop -- never a second handler', occurrences(planDayClientSource, 'onSomethingElse={handleSomethingElse}') === 2);
 
-  // 74. Quick Picks remain visible at all times while building the plan
-  // -- never conditionally hidden after the first selection (this
-  // ticket's own section 32) -- the picker grid is NOT inside any
-  // `rows.length`-gated conditional.
+  // 74. Plan My Day UX V2 PR U2 supersedes U1's "always visible" Quick
+  // Picks decision (this ticket's own section 5/8): the picker is now
+  // gated by planRevealed/addPickerExpanded (real user actions), never
+  // directly by rows.length or row content.
   check(
-    '74. the Quick Picks grid renders unconditionally (not gated behind rows.length or any "has at least one intent" check)',
-    !/rows\.length[\s\S]{0,120}PLAN_DAY_QUICK_PICKS\.map/.test(planDayClientSource)
+    '74. the Quick Picks grid is never gated directly by rows.length or "has a real title" row content -- only by the planRevealed/addPickerExpanded UI-action flags',
+    !/rows\.length[\s\S]{0,120}PLAN_DAY_QUICK_PICKS\.map/.test(planDayClientSource) && !/rows\.some\([\s\S]{0,150}QuickPicksAndSomethingElse/.test(planDayClientSource)
   );
 
-  // 75. "Your plan" heading only appears once a real (non-blank) intent
-  // exists (this ticket's own section 17) -- never shown above an
-  // entirely empty plan.
-  check('75. the "Your plan" heading is gated on at least one row having a real title', /rows\.some\(\(row\) => row\.title\.trim\(\)\.length > 0\)[\s\S]{0,150}Your plan/.test(planDayClientSource));
+  // 75. Plan My Day UX V2 PR U2 -- the "Your plan" heading (and the rest
+  // of the revealed-state UI) is now gated on `planRevealed`, a real
+  // user ACTION flag, never derived from row content alone (this
+  // ticket's own section 5/8) -- fixes the U1 issue where a still-blank
+  // internal row rendered a visible card before any action was taken.
+  check('75. the "Your plan" heading is gated on planRevealed, never on row content', /\{planRevealed && \([\s\S]{0,200}Your plan/.test(planDayClientSource));
 
   // 76. Task numbering preserved for U1 (this ticket's own section 17:
   // "If removing numbering requires broad structural churn, preserve it
@@ -389,26 +395,32 @@ function main() {
   // present, matching the implementation report's own stated decision.
   check('76. row numbering ("Task N") is preserved (explicit U1 scope decision, not an oversight)', planDayClientSource.includes('`Task ${index + 1}`'));
 
-  // 77. Horizon/picker hierarchy unchanged (this ticket's own section
-  // 32/41 of the original audit) -- horizon selector, then "What do you
-  // want to accomplish?", then Quick Picks, then Your plan, in that
-  // source order.
+  // 77. Plan My Day UX V2 PR U2 -- horizon/picker hierarchy: the horizon
+  // selector still precedes both plan-entry states in source order; the
+  // fresh (!planRevealed) state -- heading + shared picker -- is written
+  // before the revealed (planRevealed) state -- Your plan + rows + Add
+  // another -- even though only one of the two ever renders at once
+  // (this ticket's own section 5).
   {
     const horizonIdx = planDayClientSource.indexOf('When are you planning for?');
+    const freshStateIdx = planDayClientSource.indexOf('{!planRevealed && (');
     const accomplishIdx = planDayClientSource.indexOf('What do you want to accomplish?');
-    const quickPicksIdx = planDayClientSource.indexOf('PLAN_DAY_QUICK_PICKS.map(');
+    const revealedStateIdx = planDayClientSource.indexOf('{planRevealed && (');
     const yourPlanIdx = planDayClientSource.indexOf('Your plan');
-    check('77. source order is horizon selector -> "What do you want to accomplish?" -> Quick Picks -> Your plan', horizonIdx > 0 && horizonIdx < accomplishIdx && accomplishIdx < quickPicksIdx && quickPicksIdx < yourPlanIdx);
+    check(
+      '77. source order is horizon selector -> fresh-state (!planRevealed) heading+picker -> revealed-state (planRevealed) Your plan',
+      horizonIdx > 0 && horizonIdx < freshStateIdx && freshStateIdx < accomplishIdx && accomplishIdx < revealedStateIdx && revealedStateIdx < yourPlanIdx
+    );
   }
 
   // 78. Tomorrow-unconfigured prerequisite still suppresses the ENTIRE
-  // picker/form (this ticket's own section 33) -- the Quick Picks grid
-  // sits inside the SAME showAvailabilityPrerequisite ? (...) : (...)
-  // conditional's else-branch the intent-row list already used before
-  // U1.
+  // picker/form (this ticket's own section 33) -- the shared picker's
+  // call sites sit inside the SAME showAvailabilityPrerequisite ? (...)
+  // : (...) conditional's else-branch the intent-row list already used
+  // before U1/U2.
   check(
-    '78. the Quick Picks grid is rendered inside the showAvailabilityPrerequisite else-branch -- never visible alongside the prerequisite card',
-    /showAvailabilityPrerequisite \? \([\s\S]*?Set availability[\s\S]*?\) : \([\s\S]*?PLAN_DAY_QUICK_PICKS\.map\(/.test(planDayClientSource)
+    '78. the QuickPicksAndSomethingElse call site(s) render inside the showAvailabilityPrerequisite else-branch -- never visible alongside the prerequisite card',
+    /showAvailabilityPrerequisite \? \([\s\S]*?Set availability[\s\S]*?\) : \([\s\S]*?<QuickPicksAndSomethingElse/.test(planDayClientSource)
   );
 
   // 79. Errands has no canonical id anywhere in the picker source (this
@@ -420,6 +432,128 @@ function main() {
   // (this ticket's own section 43) -- never a new icon dependency.
   check('80. quickPickIcon reads ActivityProfile.icon from the existing catalog, never a second icon literal', planDayQuickPicksSource.includes('getActivityProfileById(pick.activityId)?.icon'));
   check('80b. no new icon package is imported anywhere in the picker file', !/from ['"]react-icons|from ['"]@heroicons|from ['"]lucide/.test(planDayQuickPicksSource));
+
+  // ============================================================
+  // Plan My Day UX V2 PR U2 -- entry-state + picker-density polish
+  // (81-90). Fixes: (a) a still-blank internal row rendering a visible
+  // card/CTA before any user action, (b) the full picker permanently
+  // consuming space once a plan grows.
+  // ============================================================
+
+  // 81/82. Both new flags are real UI-action state, defaulting to
+  // false, never derived from row content.
+  check('81. planRevealed starts false -- the fresh page shows no blank card/CTA before any user action', /const \[planRevealed, setPlanRevealed\] = useState\(false\);/.test(planDayClientSource));
+  check('82. addPickerExpanded starts false -- "+ Add another" begins collapsed once a plan exists', /const \[addPickerExpanded, setAddPickerExpanded\] = useState\(false\);/.test(planDayClientSource));
+
+  // 83/84. A Quick Pick or "+ Something else" both reveal the plan and
+  // collapse Add-another BEFORE touching rows -- the reveal is driven by
+  // the action itself, never by inspecting the resulting row content.
+  check('83. handleQuickPick reveals the plan (setPlanRevealed(true)) before mutating rows', /function handleQuickPick\(pick: PlanDayQuickPick\) \{\s*setPlanRevealed\(true\);[\s\S]*?setRows\(/.test(planDayClientSource));
+  check('83b. handleQuickPick also collapses Add-another (setAddPickerExpanded(false)) before mutating rows', /function handleQuickPick[\s\S]*?setAddPickerExpanded\(false\);[\s\S]*?setRows\(/.test(planDayClientSource));
+  check('84. handleSomethingElse reveals the plan before mutating rows', /function handleSomethingElse\(\) \{[\s\S]*?setPlanRevealed\(true\);[\s\S]*?setRows\(/.test(planDayClientSource));
+  check('84b. handleSomethingElse also collapses Add-another before mutating rows', /function handleSomethingElse[\s\S]*?setAddPickerExpanded\(false\);[\s\S]*?setRows\(/.test(planDayClientSource));
+
+  // 85. Your plan heading, row list, Add-another/picker, error card, and
+  // CTA all sit downstream of the SAME planRevealed gate, in that order
+  // -- none of them is independently gated, so none can render while
+  // planRevealed is false.
+  {
+    const revealedIdx = planDayClientSource.indexOf('{planRevealed && (');
+    const yourPlanIdx = planDayClientSource.indexOf('Your plan');
+    const addAnotherIdx = planDayClientSource.indexOf('setAddPickerExpanded(true)}');
+    const errorCardIdx = planDayClientSource.indexOf("phase === 'PREVIEW_ERROR' && entryError");
+    const ctaIdx = planDayClientSource.lastIndexOf('Plan my day');
+    check(
+      '85. Your plan / row list / Add-another / error card / CTA are all nested downstream of the single planRevealed gate, in that order',
+      revealedIdx > 0 && revealedIdx < yourPlanIdx && yourPlanIdx < addAnotherIdx && addAnotherIdx < errorCardIdx && errorCardIdx < ctaIdx
+    );
+  }
+
+  // 86. The fresh (!planRevealed) block and the revealed (planRevealed)
+  // block are mutually exclusive siblings -- both direct children of the
+  // same else-branch fragment, never one nested inside the other (which
+  // would make the fresh heading/picker linger after reveal).
+  check(
+    '86. the !planRevealed and planRevealed blocks are sibling conditionals, not nested one inside the other',
+    (() => {
+      const freshIdx = planDayClientSource.indexOf('{!planRevealed && (');
+      const revealedIdx = planDayClientSource.indexOf('{planRevealed && (');
+      if (freshIdx < 0 || revealedIdx < 0) return false;
+      const between = planDayClientSource.slice(freshIdx, revealedIdx);
+      const freshOpens = occurrences(between, '{!planRevealed && (');
+      return freshOpens === 1 && between.includes(')}');
+    })()
+  );
+
+  // 87. QuickPicksAndSomethingElse is the ONE picker implementation,
+  // rendered from exactly two call sites -- the fresh entry state and
+  // the expanded Add-another affordance -- never a third, a modal, or a
+  // new route (this ticket's own section 16/18).
+  check('87. QuickPicksAndSomethingElse is rendered from exactly two call sites', occurrences(planDayClientSource, '<QuickPicksAndSomethingElse') === 2);
+  check('87b. both call sites pass the identical onQuickPick={handleQuickPick} prop -- the SAME handler, never a second quick-pick handler', occurrences(planDayClientSource, 'onQuickPick={handleQuickPick}') === 2);
+  check('87c. no modal/drawer/new route is introduced for the Add-another affordance', !/Modal|Drawer|Dialog/.test(planDayClientSource) && !planDayPageSource.includes('add-another'));
+
+  // 88. "+ Add another" is disabled at the SAME existing intent cap as
+  // the Quick Picks themselves -- never a second/looser limit.
+  check('88. the "+ Add another" control is disabled at atIntentCap, the same cap Quick Picks/Something-else already respect', /\+ Add another[\s\S]{0,60}<\/SecondaryButton>/.test(planDayClientSource) && /onClick=\{\(\) => setAddPickerExpanded\(true\)\} disabled=\{phase === 'SUBMITTING' \|\| atIntentCap\}/.test(planDayClientSource));
+
+  // 89. A completed pick/something-else always returns Add-another to
+  // its collapsed state (this ticket's own section 19) -- never leaves
+  // it stuck open after a successful add. A third site (the section-12
+  // remove-to-empty collapse effect, checked separately below) also
+  // resets it as part of collapsing all the way back to fresh.
+  check('89. setAddPickerExpanded(false) is called from handleQuickPick and handleSomethingElse (at least)', /function handleQuickPick[\s\S]*?setAddPickerExpanded\(false\);/.test(planDayClientSource) && /function handleSomethingElse[\s\S]*?setAddPickerExpanded\(false\);/.test(planDayClientSource));
+  check('89b. setAddPickerExpanded(false) appears exactly THREE times total -- the two handlers plus the one remove-to-empty collapse effect, never a fourth/duplicate site', occurrences(planDayClientSource, 'setAddPickerExpanded(false);') === 3);
+
+  // 90. planDayEntry.ts itself is completely untouched by U2 -- all new
+  // state is presentation-only, living in PlanDayClient.tsx (this
+  // ticket's own explicit design constraint).
+  check('90. planDayEntry.ts defines no planRevealed/addPickerExpanded of its own', !planDayEntrySource.includes('planRevealed') && !planDayEntrySource.includes('addPickerExpanded'));
+
+  // ============================================================
+  // Plan My Day UX V2 PR U2 Release Gate (section 12) -- editing/
+  // removing intents back down to "no meaningful content at all" must
+  // collapse back to the fresh entry state, never leave Your plan/Add
+  // another/CTA showing over a blank row.
+  // ============================================================
+
+  // 91. setPlanRevealed is called from exactly THREE sites: true from
+  // handleQuickPick, true from handleSomethingElse, and false from the
+  // new remove-to-empty collapse effect -- never a fourth/duplicate path.
+  check('91. setPlanRevealed(true) is called from exactly two sites (handleQuickPick, handleSomethingElse)', occurrences(planDayClientSource, 'setPlanRevealed(true);') === 2);
+  check('91b. setPlanRevealed(false) is called from exactly one site (the remove-to-empty collapse effect)', occurrences(planDayClientSource, 'setPlanRevealed(false);') === 1);
+
+  // 92. The collapse effect is keyed ONLY on `rows` -- it only ever
+  // reconsiders when row CONTENT changes, never merely because
+  // planRevealed/pendingFocusRowId themselves changed on their own.
+  check(
+    '92. the collapse-to-fresh effect depends only on [rows]',
+    /useEffect\(\(\) => \{\s*if \(planRevealed && pendingFocusRowId === null && rows\.every\(isRowUntouched\)\) \{\s*setPlanRevealed\(false\);\s*setAddPickerExpanded\(false\);\s*\}\s*\}, \[rows\]\);/.test(planDayClientSource)
+  );
+
+  // 93. The collapse effect checks pendingFocusRowId === null -- it must
+  // never fire in the same render pass `handleSomethingElse` reveals a
+  // still-untouched row for the user to type into (pendingFocusRowId is
+  // set in that exact same batch, this ticket's own section 8/20).
+  check('93. the collapse effect guards on pendingFocusRowId === null', /pendingFocusRowId === null && rows\.every\(isRowUntouched\)/.test(planDayClientSource));
+
+  // 94. The collapse decision uses the SAME isRowUntouched helper every
+  // other blank-row check already uses (planDayEntry.ts) -- never a
+  // second/looser "is this row empty" definition invented locally.
+  check('94. the collapse effect reuses the shared isRowUntouched helper, never a new inline emptiness check', /rows\.every\(isRowUntouched\)/.test(planDayClientSource));
+
+  // 95. updateRow/removeRow themselves stay plain generic reducers with
+  // no baked-in awareness of planRevealed/collapse logic (a call-site/
+  // effect decision, matching this file's own established pattern for
+  // activityId-clearing -- check 65b).
+  check(
+    '95. updateRow remains a plain merge with no planRevealed-aware logic of its own',
+    /function updateRow\(id: string, patch: Partial<PlanDayIntentRow>\) \{\s*setRows\(\(current\) => current\.map\(\(row\) => \(row\.id === id \? \{ \.\.\.row, \.\.\.patch \} : row\)\)\);\s*\}/.test(planDayClientSource)
+  );
+  check(
+    '95b. removeRow remains a plain filter with no planRevealed-aware logic of its own',
+    /function removeRow\(id: string\) \{\s*setRows\(\(current\) => \(current\.length > 1 \? current\.filter\(\(row\) => row\.id !== id\) : current\)\);\s*\}/.test(planDayClientSource)
+  );
 
   if (!allPassed) {
     console.error('\nSome Plan Day Wiring checks FAILED.');

@@ -86,6 +86,18 @@ import {
  * the domain row model). A row collapses to a one-line summary
  * (`formatIntentRowSummary`, planDayEntry.ts) by default; "Edit"/"Done"
  * toggles disclosure without ever discarding values.
+ *
+ * Plan My Day UX V2 PR U2 -- `planRevealed` is likewise PRESENTATION-ONLY
+ * UI state (this ticket's own section 5): the internal single untouched
+ * blank row from U1 is deliberately RETAINED (smallest safe
+ * implementation, this ticket's own section 5's own explicit
+ * permission) -- U2 only stops RENDERING a plan card/CTA for it until
+ * the user has actually taken an action (a Quick Pick or `+ Something
+ * else`), both of which set this flag. `addPickerExpanded` toggles the
+ * compact `+ Add another` affordance open/closed once a real plan
+ * exists -- it reuses the EXACT SAME `QuickPicksAndSomethingElse` block
+ * (same data, same handlers) the fresh state already renders, never a
+ * second picker implementation (this ticket's own section 18).
  */
 
 type Phase = 'REDIRECTING' | 'ENTRY' | 'SUBMITTING' | 'PREVIEW' | 'PREVIEW_ERROR' | 'SAVED';
@@ -117,6 +129,17 @@ export function PlanDayClient({ timezone, planningDate, horizon, availabilityCon
   // row (this ticket's own section 16: "focus it"). Quick Picks never
   // set this -- they already fill the title themselves.
   const [pendingFocusRowId, setPendingFocusRowId] = useState<string | null>(null);
+  // Plan My Day UX V2 PR U2 -- true once the user has taken a real
+  // action (a Quick Pick or `+ Something else`), never derived from row
+  // content alone: this is what lets `+ Something else` on a fresh page
+  // reveal/focus the SAME still-untouched internal blank row (this
+  // ticket's own section 8) without that row already having rendered as
+  // a visible card the instant before.
+  const [planRevealed, setPlanRevealed] = useState(false);
+  // Whether the compact `+ Add another` affordance is currently showing
+  // the full Quick Picks grid (this ticket's own section 15/19) -- only
+  // meaningful once `planRevealed` is true.
+  const [addPickerExpanded, setAddPickerExpanded] = useState(false);
   const [preview, setPreview] = useState<ConstructDayPreview | null>(null);
   const [entryError, setEntryError] = useState<EntryErrorState | null>(null);
   // Planning Horizon V1 PR P2 -- true only when a Preview call returned
@@ -151,6 +174,25 @@ export function PlanDayClient({ timezone, planningDate, horizon, availabilityCon
     setPendingFocusRowId(null);
   }, [pendingFocusRowId]);
 
+  // Plan My Day UX V2 PR U2 Release Gate (section 12) -- editing a row's
+  // title back to blank, or removing rows, can bring the plan back to
+  // "no meaningful content at all" (every remaining row is itself
+  // untouched). Left alone, the revealed-state UI (the plan heading,
+  // Add-another, CTA) would keep showing with nothing real behind it -- this
+  // collapses back to the fresh entry state instead, matching this
+  // ticket's own explicit invariant. Depending only on `rows` (never on
+  // `planRevealed`/`pendingFocusRowId` themselves) means this only ever
+  // reconsiders when row CONTENT changes, and reads pendingFocusRowId as
+  // of that same render -- so it never fires in the render pass
+  // `handleSomethingElse` reveals a still-untouched row for the user to
+  // type into (pendingFocusRowId is set in that exact same batch).
+  useEffect(() => {
+    if (planRevealed && pendingFocusRowId === null && rows.every(isRowUntouched)) {
+      setPlanRevealed(false);
+      setAddPickerExpanded(false);
+    }
+  }, [rows]);
+
   function updateRow(id: string, patch: Partial<PlanDayIntentRow>) {
     setRows((current) => current.map((row) => (row.id === id ? { ...row, ...patch } : row)));
   }
@@ -176,6 +218,13 @@ export function PlanDayClient({ timezone, planningDate, horizon, availabilityCon
   // defines "blank" by full row state, never title alone. Never focuses
   // the title input -- the pick already supplied it.
   function handleQuickPick(pick: PlanDayQuickPick) {
+    setPlanRevealed(true);
+    // Plan My Day UX V2 PR U2 (this ticket's own section 19) -- a
+    // successful pick always returns the Add-another picker to its
+    // collapsed state, whether it was opened from the compact `+ Add
+    // another` affordance or this was simply the very first pick on a
+    // fresh page (where it is already false, a harmless no-op).
+    setAddPickerExpanded(false);
     setRows((current) => {
       if (current.length === 1 && isRowUntouched(current[0])) {
         return [{ ...current[0], title: pick.label, activityId: pick.activityId }];
@@ -190,6 +239,13 @@ export function PlanDayClient({ timezone, planningDate, horizon, availabilityCon
   // afterward (typing is the whole point of this action) instead of
   // pre-filling it.
   function handleSomethingElse() {
+    // Plan My Day UX V2 PR U2 (this ticket's own section 8/20) -- reveals
+    // the plan (and, on a fresh page, the still-untouched internal blank
+    // row this reuses) in the SAME render pass the focus is requested in,
+    // so the title input already exists in the DOM by the time the
+    // pending-focus effect below runs.
+    setPlanRevealed(true);
+    setAddPickerExpanded(false);
     setRows((current) => {
       if (current.length === 1 && isRowUntouched(current[0])) {
         setPendingFocusRowId(current[0].id);
@@ -334,60 +390,72 @@ export function PlanDayClient({ timezone, planningDate, horizon, availabilityCon
               </SurfaceCard>
             ) : (
               <>
-                <div style={{ marginTop: spacing.lg }}>
-                  <FieldLabel>What do you want to accomplish?</FieldLabel>
-                  <p style={{ margin: `${spacing.xs}px 0 ${spacing.sm}px`, fontSize: 12, color: colors.textFaint, fontWeight: 700, letterSpacing: 0.4, textTransform: 'uppercase' }}>Quick picks</p>
-                  <div style={{ display: 'flex', flexWrap: 'wrap', gap: spacing.xs }}>
-                    {PLAN_DAY_QUICK_PICKS.map((pick) => (
-                      <QuickPickButton key={pick.label} pick={pick} disabled={phase === 'SUBMITTING' || atIntentCap} onClick={() => handleQuickPick(pick)} />
-                    ))}
-                  </div>
-                  <div style={{ marginTop: spacing.sm }}>
-                    <TextButton onClick={handleSomethingElse} color={colors.info} style={{ opacity: phase === 'SUBMITTING' || atIntentCap ? 0.4 : 1, pointerEvents: phase === 'SUBMITTING' || atIntentCap ? 'none' : 'auto' }}>
-                      + Something else
-                    </TextButton>
-                  </div>
-                </div>
-
-                {rows.some((row) => row.title.trim().length > 0) && (
-                  <div style={{ marginTop: spacing.xl }}>
-                    <FieldLabel>Your plan</FieldLabel>
-                  </div>
-                )}
-
-                <div style={{ display: 'flex', flexDirection: 'column', gap: spacing.md, marginTop: spacing.sm }}>
-                  {rows.map((row, index) => (
-                    <IntentRowCard
-                      key={row.id}
-                      row={row}
-                      index={index}
-                      planningDate={planningDate}
-                      horizon={horizon}
-                      expanded={expandedRowIds.has(row.id)}
-                      canRemove={rows.length > 1}
-                      disabled={phase === 'SUBMITTING'}
-                      onChange={(patch) => updateRow(row.id, patch)}
-                      onRemove={() => removeRow(row.id)}
-                      onToggleExpanded={() => toggleRowExpanded(row.id)}
+                {!planRevealed && (
+                  <div style={{ marginTop: spacing.lg }}>
+                    <FieldLabel>What do you want to accomplish?</FieldLabel>
+                    <QuickPicksAndSomethingElse
+                      disabled={phase === 'SUBMITTING' || atIntentCap}
+                      onQuickPick={handleQuickPick}
+                      onSomethingElse={handleSomethingElse}
                     />
-                  ))}
-                </div>
-
-                {phase === 'PREVIEW_ERROR' && entryError && (
-                  <SurfaceCard style={{ marginTop: spacing.lg }}>
-                    <FieldError>{entryError.message}</FieldError>
-                    <div style={{ display: 'flex', gap: spacing.md, marginTop: spacing.md }}>
-                      <SecondaryButton onClick={() => setPhase('ENTRY')}>Edit</SecondaryButton>
-                      {entryError.retryable && <PrimaryButton onClick={() => void submitPreview()}>Try again</PrimaryButton>}
-                    </div>
-                  </SurfaceCard>
+                  </div>
                 )}
 
-                <div style={{ marginTop: spacing.xxl, display: 'flex', justifyContent: 'flex-end' }}>
-                  <PrimaryButton onClick={() => void submitPreview()} disabled={!planningDate || !canSubmitPlanDay(rows, planningDate)} loading={phase === 'SUBMITTING'} ariaLabel="Plan my day">
-                    Plan my day
-                  </PrimaryButton>
-                </div>
+                {planRevealed && (
+                  <>
+                    <div style={{ marginTop: spacing.xl }}>
+                      <FieldLabel>Your plan</FieldLabel>
+                    </div>
+
+                    <div style={{ display: 'flex', flexDirection: 'column', gap: spacing.md, marginTop: spacing.sm }}>
+                      {rows.map((row, index) => (
+                        <IntentRowCard
+                          key={row.id}
+                          row={row}
+                          index={index}
+                          planningDate={planningDate}
+                          horizon={horizon}
+                          expanded={expandedRowIds.has(row.id)}
+                          canRemove={rows.length > 1}
+                          disabled={phase === 'SUBMITTING'}
+                          onChange={(patch) => updateRow(row.id, patch)}
+                          onRemove={() => removeRow(row.id)}
+                          onToggleExpanded={() => toggleRowExpanded(row.id)}
+                        />
+                      ))}
+                    </div>
+
+                    <div style={{ marginTop: spacing.md }}>
+                      {addPickerExpanded ? (
+                        <QuickPicksAndSomethingElse
+                          disabled={phase === 'SUBMITTING' || atIntentCap}
+                          onQuickPick={handleQuickPick}
+                          onSomethingElse={handleSomethingElse}
+                        />
+                      ) : (
+                        <SecondaryButton onClick={() => setAddPickerExpanded(true)} disabled={phase === 'SUBMITTING' || atIntentCap}>
+                          + Add another
+                        </SecondaryButton>
+                      )}
+                    </div>
+
+                    {phase === 'PREVIEW_ERROR' && entryError && (
+                      <SurfaceCard style={{ marginTop: spacing.lg }}>
+                        <FieldError>{entryError.message}</FieldError>
+                        <div style={{ display: 'flex', gap: spacing.md, marginTop: spacing.md }}>
+                          <SecondaryButton onClick={() => setPhase('ENTRY')}>Edit</SecondaryButton>
+                          {entryError.retryable && <PrimaryButton onClick={() => void submitPreview()}>Try again</PrimaryButton>}
+                        </div>
+                      </SurfaceCard>
+                    )}
+
+                    <div style={{ marginTop: spacing.xxl, display: 'flex', justifyContent: 'flex-end' }}>
+                      <PrimaryButton onClick={() => void submitPreview()} disabled={!planningDate || !canSubmitPlanDay(rows, planningDate)} loading={phase === 'SUBMITTING'} ariaLabel="Plan my day">
+                        Plan my day
+                      </PrimaryButton>
+                    </div>
+                  </>
+                )}
               </>
             )}
           </>
@@ -436,6 +504,41 @@ function QuickPickButton({ pick, disabled, onClick }: { pick: PlanDayQuickPick; 
       {icon && <span aria-hidden="true">{icon}</span>}
       {pick.label}
     </button>
+  );
+}
+
+/**
+ * Plan My Day UX V2 PR U2 -- the ONE picks-plus-Something-else
+ * implementation (this ticket's own section 18: "Reuse the same
+ * data/actions" -- never a second picker). Rendered from two places in
+ * `PlanDayClient` below: the fresh, pre-`planRevealed` entry state, and
+ * the expanded `+ Add another` affordance once a plan already exists.
+ * Markup/handlers are byte-identical to U1's own original inline block --
+ * only extracted, not changed.
+ */
+function QuickPicksAndSomethingElse({
+  disabled,
+  onQuickPick,
+  onSomethingElse,
+}: {
+  disabled: boolean;
+  onQuickPick: (pick: PlanDayQuickPick) => void;
+  onSomethingElse: () => void;
+}) {
+  return (
+    <>
+      <p style={{ margin: `${spacing.xs}px 0 ${spacing.sm}px`, fontSize: 12, color: colors.textFaint, fontWeight: 700, letterSpacing: 0.4, textTransform: 'uppercase' }}>Quick picks</p>
+      <div style={{ display: 'flex', flexWrap: 'wrap', gap: spacing.xs }}>
+        {PLAN_DAY_QUICK_PICKS.map((pick) => (
+          <QuickPickButton key={pick.label} pick={pick} disabled={disabled} onClick={() => onQuickPick(pick)} />
+        ))}
+      </div>
+      <div style={{ marginTop: spacing.sm }}>
+        <TextButton onClick={onSomethingElse} color={colors.info} style={{ opacity: disabled ? 0.4 : 1, pointerEvents: disabled ? 'none' : 'auto' }}>
+          + Something else
+        </TextButton>
+      </div>
+    </>
   );
 }
 
