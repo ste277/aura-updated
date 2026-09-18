@@ -17,6 +17,7 @@
 import { localDateTimeToUTC, addDaysToDateStr } from './timezone';
 import type { PreviewRequestIntentBody } from './dayConstructorPreviewClient';
 import type { ConstructDayPreviewClientResult } from './dayConstructorPreviewClient';
+import type { PlanningHorizon } from './planningHorizon';
 
 // ============================================================
 // Row model (this ticket's own section 10) -- deliberately NOT every
@@ -268,10 +269,27 @@ export interface PlanDayEntryErrorPresentation {
   retryable: boolean;
 }
 
-export function presentPlanDayPreviewFailure(result: Exclude<ConstructDayPreviewClientResult, { status: 'READY' }>): PlanDayEntryErrorPresentation {
+/**
+ * Planning Horizon V1 PR P2 -- `horizon` makes the copy below correct
+ * for a future day too (this ticket's own section 19: `NO_USABLE_
+ * CAPACITY`'s pre-P2 wording hardcoded "today," which would misleadingly
+ * describe a Tomorrow CONFIGURED_EMPTY day as though it were still
+ * today's own elapsed capacity). `FUTURE_AVAILABILITY_REQUIRED` is
+ * handled here only defensively/for completeness -- the real UI
+ * (PlanDayClient.tsx) intercepts that status before ever calling this
+ * function, routing it to the same actionable "Set your availability
+ * first" card the bootstrap-known case already shows (this ticket's own
+ * section 16/17), never this generic message.
+ */
+export function presentPlanDayPreviewFailure(result: Exclude<ConstructDayPreviewClientResult, { status: 'READY' }>, horizon: PlanningHorizon): PlanDayEntryErrorPresentation {
+  const dayDescription = horizon === 'TOMORROW' ? 'tomorrow' : 'today';
   switch (result.status) {
     case 'NO_USABLE_CAPACITY':
-      return { message: "There's no usable time left in the part of today Aura can plan.", retryable: false };
+      return horizon === 'TOMORROW'
+        ? { message: "There's no availability configured for that day.", retryable: false }
+        : { message: "There's no usable time left in the part of today Aura can plan.", retryable: false };
+    case 'FUTURE_AVAILABILITY_REQUIRED':
+      return { message: 'Aura needs to know when you\'re usually available before it can plan a future day.', retryable: false };
     case 'TIMING_SEARCH_FAILED':
       return { message: "Aura couldn't finish checking timing just now.", retryable: true };
     case 'INVALID_CONSTRUCTION_WINDOW':
@@ -280,13 +298,13 @@ export function presentPlanDayPreviewFailure(result: Exclude<ConstructDayPreview
       // construction window, and the server always has a real
       // user.timezone) -- generic copy, never raw diagnostics (this
       // ticket's own section 30).
-      return { message: "Aura couldn't build a plan for today right now.", retryable: true };
+      return { message: `Aura couldn't build a plan for ${dayDescription} right now.`, retryable: true };
     case 'INVALID_REQUEST':
       return { message: "Something about your day didn't come through correctly. Try again.", retryable: true };
     case 'HTTP_ERROR':
       return result.httpStatus === 401
         ? { message: 'Your session expired. Please sign in again.', retryable: false }
-        : { message: "Aura couldn't build a plan for today right now.", retryable: true };
+        : { message: `Aura couldn't build a plan for ${dayDescription} right now.`, retryable: true };
     case 'NETWORK_ERROR':
       return { message: "Aura couldn't be reached. Check your connection and try again.", retryable: true };
     case 'UNKNOWN_RESPONSE':

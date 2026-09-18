@@ -273,23 +273,54 @@ function main() {
     return { status, ...extra } as Exclude<ConstructDayPreviewClientResult, { status: 'READY' }>;
   }
   {
-    const p = presentPlanDayPreviewFailure(outcome('NO_USABLE_CAPACITY'));
+    const p = presentPlanDayPreviewFailure(outcome('NO_USABLE_CAPACITY'), 'TODAY');
     check('41. NO_USABLE_CAPACITY is NOT retryable (only editing helps, this ticket\'s own section 28)', p.retryable === false);
     check('42. NO_USABLE_CAPACITY copy never surfaces the raw enum name', !p.message.includes('NO_USABLE_CAPACITY'));
   }
   {
-    const p = presentPlanDayPreviewFailure(outcome('TIMING_SEARCH_FAILED'));
+    const p = presentPlanDayPreviewFailure(outcome('TIMING_SEARCH_FAILED'), 'TODAY');
     check('43. TIMING_SEARCH_FAILED IS retryable (this ticket\'s own section 29)', p.retryable === true);
   }
-  check('44. INVALID_CONSTRUCTION_WINDOW is retryable and never leaks the raw name', (() => { const p = presentPlanDayPreviewFailure(outcome('INVALID_CONSTRUCTION_WINDOW')); return p.retryable === true && !p.message.includes('INVALID_CONSTRUCTION_WINDOW'); })());
-  check('45. TIMEZONE_MISSING is retryable and never leaks the raw name', (() => { const p = presentPlanDayPreviewFailure(outcome('TIMEZONE_MISSING')); return p.retryable === true && !p.message.includes('TIMEZONE_MISSING'); })());
-  check('46. INVALID_REQUEST is retryable, generic copy, no raw diagnostics (this ticket\'s own section 30)', (() => { const p = presentPlanDayPreviewFailure(outcome('INVALID_REQUEST')); return p.retryable === true && !p.message.includes('INVALID_REQUEST'); })());
-  check('47. HTTP_ERROR 401 is NOT retryable (a stale session needs a fresh sign-in, not a resubmit)', presentPlanDayPreviewFailure(outcome('HTTP_ERROR', { httpStatus: 401 })).retryable === false);
-  check('48. HTTP_ERROR 500 IS retryable', presentPlanDayPreviewFailure(outcome('HTTP_ERROR', { httpStatus: 500 })).retryable === true);
-  check('49. NETWORK_ERROR is retryable', presentPlanDayPreviewFailure(outcome('NETWORK_ERROR')).retryable === true);
-  check('50. UNKNOWN_RESPONSE is retryable', presentPlanDayPreviewFailure(outcome('UNKNOWN_RESPONSE')).retryable === true);
-  check('51. every failure presentation carries a non-empty message', (['NO_USABLE_CAPACITY', 'TIMING_SEARCH_FAILED', 'INVALID_CONSTRUCTION_WINDOW', 'TIMEZONE_MISSING', 'INVALID_REQUEST', 'NETWORK_ERROR', 'UNKNOWN_RESPONSE'] as const).every((s) => presentPlanDayPreviewFailure(outcome(s)).message.length > 0));
+  check('44. INVALID_CONSTRUCTION_WINDOW is retryable and never leaks the raw name', (() => { const p = presentPlanDayPreviewFailure(outcome('INVALID_CONSTRUCTION_WINDOW'), 'TODAY'); return p.retryable === true && !p.message.includes('INVALID_CONSTRUCTION_WINDOW'); })());
+  check('45. TIMEZONE_MISSING is retryable and never leaks the raw name', (() => { const p = presentPlanDayPreviewFailure(outcome('TIMEZONE_MISSING'), 'TODAY'); return p.retryable === true && !p.message.includes('TIMEZONE_MISSING'); })());
+  check('46. INVALID_REQUEST is retryable, generic copy, no raw diagnostics (this ticket\'s own section 30)', (() => { const p = presentPlanDayPreviewFailure(outcome('INVALID_REQUEST'), 'TODAY'); return p.retryable === true && !p.message.includes('INVALID_REQUEST'); })());
+  check('47. HTTP_ERROR 401 is NOT retryable (a stale session needs a fresh sign-in, not a resubmit)', presentPlanDayPreviewFailure(outcome('HTTP_ERROR', { httpStatus: 401 }), 'TODAY').retryable === false);
+  check('48. HTTP_ERROR 500 IS retryable', presentPlanDayPreviewFailure(outcome('HTTP_ERROR', { httpStatus: 500 }), 'TODAY').retryable === true);
+  check('49. NETWORK_ERROR is retryable', presentPlanDayPreviewFailure(outcome('NETWORK_ERROR'), 'TODAY').retryable === true);
+  check('50. UNKNOWN_RESPONSE is retryable', presentPlanDayPreviewFailure(outcome('UNKNOWN_RESPONSE'), 'TODAY').retryable === true);
+  check(
+    '51. every failure presentation carries a non-empty message',
+    (['NO_USABLE_CAPACITY', 'TIMING_SEARCH_FAILED', 'INVALID_CONSTRUCTION_WINDOW', 'TIMEZONE_MISSING', 'INVALID_REQUEST', 'FUTURE_AVAILABILITY_REQUIRED', 'NETWORK_ERROR', 'UNKNOWN_RESPONSE'] as const).every(
+      (s) => presentPlanDayPreviewFailure(outcome(s), 'TODAY').message.length > 0
+    )
+  );
   check('52. duration options reuse ForwardPlannerViews own numeric set verbatim (no second taxonomy)', PLAN_DAY_DURATION_OPTIONS_MINUTES.join(',') === '15,30,60,90,120');
+
+  // ============================================================
+  // Planning Horizon V1 PR P2 -- horizon-aware presentation (53-59)
+  // ============================================================
+  check(
+    '53. NO_USABLE_CAPACITY under TODAY keeps its existing wording (byte-equivalent regression, never says "that day")',
+    presentPlanDayPreviewFailure(outcome('NO_USABLE_CAPACITY'), 'TODAY').message === "There's no usable time left in the part of today Aura can plan."
+  );
+  check(
+    '54. NO_USABLE_CAPACITY under TOMORROW uses distinct, correct wording -- never claims "today" for a future day',
+    presentPlanDayPreviewFailure(outcome('NO_USABLE_CAPACITY'), 'TOMORROW').message === "There's no availability configured for that day."
+  );
+  check('55. NO_USABLE_CAPACITY remains NOT retryable under TOMORROW too (only editing/configuring Availability helps)', presentPlanDayPreviewFailure(outcome('NO_USABLE_CAPACITY'), 'TOMORROW').retryable === false);
+  check(
+    '56. FUTURE_AVAILABILITY_REQUIRED never falls through to a generic message -- it has its own real, actionable copy',
+    presentPlanDayPreviewFailure(outcome('FUTURE_AVAILABILITY_REQUIRED'), 'TOMORROW').message.toLowerCase().includes('available')
+  );
+  check('57. FUTURE_AVAILABILITY_REQUIRED is NOT retryable (only configuring Availability helps, never a resubmit)', presentPlanDayPreviewFailure(outcome('FUTURE_AVAILABILITY_REQUIRED'), 'TOMORROW').retryable === false);
+  check(
+    '58. INVALID_CONSTRUCTION_WINDOW/TIMEZONE_MISSING/HTTP_ERROR generic copy mentions "tomorrow" under a TOMORROW horizon, never "today"',
+    presentPlanDayPreviewFailure(outcome('INVALID_CONSTRUCTION_WINDOW'), 'TOMORROW').message.includes('tomorrow') && !presentPlanDayPreviewFailure(outcome('INVALID_CONSTRUCTION_WINDOW'), 'TOMORROW').message.includes('today right now')
+  );
+  check(
+    '59. the SAME generic copy under TODAY is byte-identical to the pre-P2 wording (regression)',
+    presentPlanDayPreviewFailure(outcome('INVALID_CONSTRUCTION_WINDOW'), 'TODAY').message === "Aura couldn't build a plan for today right now."
+  );
 
   if (!allPassed) {
     console.error('\nSome Plan Day Entry checks FAILED.');

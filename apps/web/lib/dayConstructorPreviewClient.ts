@@ -64,11 +64,16 @@ export interface PreviewRequestIntentBody {
 }
 
 // ============================================================
-// Client result contract -- F1's own six domain statuses, plus
-// `HTTP_ERROR` for a non-200 protocol-level response (401/400/404/500,
-// none of which carry an F1 domain `status` at all -- see
-// dayConstructorPreviewRequest.ts's own route wiring), and the same two
-// purely client-side outcomes `acceptConstructedDay.ts` already
+// Client result contract -- F1's own seven domain statuses (the sixth,
+// `FUTURE_AVAILABILITY_REQUIRED`, added by Planning Horizon V1 PR P1's
+// own orchestrator guard and explicitly supported here by P2 -- this
+// ticket's own section 16: it must never fall through to
+// `UNKNOWN_RESPONSE`, since a stale/racing Availability reset between
+// page load and Preview is a real, reachable case, not merely
+// hypothetical), plus `HTTP_ERROR` for a non-200 protocol-level response
+// (401/400/404/500, none of which carry an F1 domain `status` at all --
+// see dayConstructorPreviewRequest.ts's own route wiring), and the same
+// two purely client-side outcomes `acceptConstructedDay.ts` already
 // establishes (`NETWORK_ERROR`, `UNKNOWN_RESPONSE`).
 // ============================================================
 
@@ -79,6 +84,7 @@ export type ConstructDayPreviewClientResult =
   | { status: 'TIMEZONE_MISSING' }
   | { status: 'INVALID_REQUEST' }
   | { status: 'TIMING_SEARCH_FAILED' }
+  | { status: 'FUTURE_AVAILABILITY_REQUIRED' }
   | { status: 'HTTP_ERROR'; httpStatus: number }
   | { status: 'NETWORK_ERROR' }
   | { status: 'UNKNOWN_RESPONSE' };
@@ -162,6 +168,8 @@ export function parsePreviewResponseBody(body: unknown, httpStatus: number): Con
       return { status: 'INVALID_REQUEST' };
     case 'TIMING_SEARCH_FAILED':
       return { status: 'TIMING_SEARCH_FAILED' };
+    case 'FUTURE_AVAILABILITY_REQUIRED':
+      return { status: 'FUTURE_AVAILABILITY_REQUIRED' };
     default:
       return { status: 'UNKNOWN_RESPONSE' };
   }

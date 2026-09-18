@@ -24,7 +24,7 @@ function fixture(overrides: {
   /** `null` simulates no cookie present; omitted/undefined uses the default real token. */
   token?: string | null;
   session?: { userId: string } | null;
-  user?: { timezone: string } | null;
+  user?: { timezone: string; availabilityConfigured?: boolean } | null;
   now?: Date;
 } = {}): DepsFixture {
   const calls = { getSessionToken: 0, verifySession: 0, getUser: 0, now: 0 };
@@ -172,6 +172,50 @@ async function main() {
     const f = fixture({ token: null });
     const result = await resolvePlanDayServerProps(f.deps, 'TOMORROW');
     check('27. an unauthenticated request with horizon=TOMORROW still returns null before any date is ever resolved (no new auth bypass)', result === null && f.calls.now === 0);
+  }
+
+  // ============================================================
+  // Planning Horizon V1 PR P2 -- availabilityConfigured exposure (28-33).
+  // Sourced from the SAME already-fetched `user` row `getUser` returns
+  // for `.timezone` -- no extra query, no duplication of H1/H2's own
+  // resolution logic (this ticket's own section 8).
+  // ============================================================
+  {
+    const f = fixture({ user: { timezone: 'Asia/Kolkata', availabilityConfigured: true } });
+    const result = await resolvePlanDayServerProps(f.deps);
+    check('28. availabilityConfigured: true on the fetched user is exposed verbatim', result?.availabilityConfigured === true);
+  }
+  {
+    const f = fixture({ user: { timezone: 'Asia/Kolkata', availabilityConfigured: false } });
+    const result = await resolvePlanDayServerProps(f.deps);
+    check('29. availabilityConfigured: false on the fetched user is exposed verbatim', result?.availabilityConfigured === false);
+  }
+  {
+    // A fixture user with no availabilityConfigured field at all (every
+    // pre-P2 test fixture in this file, and any real pre-migration row
+    // shape) must be treated as false, never a fabricated true.
+    const f = fixture({ user: { timezone: 'Asia/Kolkata' } });
+    const result = await resolvePlanDayServerProps(f.deps);
+    check('30. a missing availabilityConfigured field resolves to false, never a fabricated true', result?.availabilityConfigured === false);
+  }
+  {
+    const f = fixture({ user: { timezone: 'Asia/Kolkata', availabilityConfigured: true } });
+    await resolvePlanDayServerProps(f.deps);
+    check('31. getUser is called exactly once per resolution -- availabilityConfigured never triggers a second/duplicate query', f.calls.getUser === 1);
+  }
+  {
+    // 32. resolvePlanDayBootstrap itself (the pure civil-date function)
+    // stays completely unaware of availability -- confirmed structurally
+    // by its own unchanged 3-argument signature (timezone, now, horizon)
+    // and return shape (no availabilityConfigured field on
+    // PlanDayBootstrap, only on the wider PlanDayServerProps).
+    const bootstrap = resolvePlanDayBootstrap('Asia/Kolkata', new Date('2026-09-16T12:00:00.000Z'));
+    check("32. resolvePlanDayBootstrap's own return value carries no availabilityConfigured field", !('availabilityConfigured' in bootstrap));
+  }
+  {
+    const f = fixture({ user: { timezone: 'Asia/Kolkata', availabilityConfigured: true } });
+    const result = await resolvePlanDayServerProps(f.deps, 'TOMORROW');
+    check('33. availabilityConfigured is exposed correctly alongside an explicit TOMORROW horizon too', result?.planningDate === '2026-09-17' && result?.availabilityConfigured === true);
   }
 
   if (!allPassed) {
