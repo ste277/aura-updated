@@ -15,14 +15,18 @@ import {
   FieldLabel,
   FieldError,
 } from '../../components/ui';
-import { colors, spacing } from '../../components/theme';
+import { colors, spacing, radius } from '../../components/theme';
 import { DayPlanPreviewController } from '../../components/DayPlanPreviewController';
 import type { ConstructDayPreview } from '../../lib/dayConstructorOrchestrator';
 import type { PersistedPlanSummary } from '../../lib/acceptConstructedDay';
 import { previewConstructedDay } from '../../lib/dayConstructorPreviewClient';
 import type { PlanningHorizon } from '../../lib/planningHorizon';
+import { PLAN_DAY_QUICK_PICKS, quickPickIcon, type PlanDayQuickPick } from '../../lib/planDayQuickPicks';
 import {
   createEmptyIntentRow,
+  createIntentRowFromQuickPick,
+  isRowUntouched,
+  formatIntentRowSummary,
   canSubmitPlanDay,
   canAddAnotherRow,
   buildRequestedIntentsForSubmission,
@@ -72,6 +76,16 @@ import {
  * `/plan-day?horizon=...`, which re-invokes page.tsx (a Server Component)
  * and re-derives every one of these props fresh -- this file only ever
  * renders whatever the server most recently issued.
+ *
+ * Plan My Day UX V2 PR U1 -- Quick Picks (planDayQuickPicks.ts) let a
+ * user add a common intent without typing; typing remains fully
+ * available (`+ Something else`, and every row's own title stays
+ * editable regardless of collapsed/expanded state). `expandedRowIds` is
+ * PRESENTATION-ONLY UI state -- never added to `PlanDayIntentRow` itself
+ * (this ticket's own section 7: no field beyond `activityId` belongs on
+ * the domain row model). A row collapses to a one-line summary
+ * (`formatIntentRowSummary`, planDayEntry.ts) by default; "Edit"/"Done"
+ * toggles disclosure without ever discarding values.
  */
 
 type Phase = 'REDIRECTING' | 'ENTRY' | 'SUBMITTING' | 'PREVIEW' | 'PREVIEW_ERROR' | 'SAVED';
@@ -93,6 +107,16 @@ export function PlanDayClient({ timezone, planningDate, horizon, availabilityCon
   const authenticated = !!timezone && !!planningDate && !!horizon;
   const [phase, setPhase] = useState<Phase>(() => (authenticated ? 'ENTRY' : 'REDIRECTING'));
   const [rows, setRows] = useState<PlanDayIntentRow[]>(() => [createEmptyIntentRow()]);
+  // Plan My Day UX V2 PR U1 -- every row starts collapsed, including a
+  // freshly-typed one (this ticket's own section 23: defaults already
+  // require no configuration, so there is no product reason to force
+  // Edit open merely because a row is new).
+  const [expandedRowIds, setExpandedRowIds] = useState<ReadonlySet<string>>(new Set());
+  // The one row id (if any) that should receive keyboard focus on the
+  // NEXT render -- set by `+ Something else` reusing/creating a blank
+  // row (this ticket's own section 16: "focus it"). Quick Picks never
+  // set this -- they already fill the title themselves.
+  const [pendingFocusRowId, setPendingFocusRowId] = useState<string | null>(null);
   const [preview, setPreview] = useState<ConstructDayPreview | null>(null);
   const [entryError, setEntryError] = useState<EntryErrorState | null>(null);
   // Planning Horizon V1 PR P2 -- true only when a Preview call returned
@@ -118,16 +142,64 @@ export function PlanDayClient({ timezone, planningDate, horizon, availabilityCon
     setPhase((current) => (current === 'PREVIEW_ERROR' ? 'ENTRY' : current));
   }, [horizon]);
 
+  // Plan My Day UX V2 PR U1 -- `+ Something else` focus handoff. Uses the
+  // SAME deterministic `plan-day-title-${id}` element id every row's own
+  // title input already carries (no new ref plumbing).
+  useEffect(() => {
+    if (!pendingFocusRowId) return;
+    document.getElementById(`plan-day-title-${pendingFocusRowId}`)?.focus();
+    setPendingFocusRowId(null);
+  }, [pendingFocusRowId]);
+
   function updateRow(id: string, patch: Partial<PlanDayIntentRow>) {
     setRows((current) => current.map((row) => (row.id === id ? { ...row, ...patch } : row)));
   }
 
-  function addRow() {
-    setRows((current) => (canAddAnotherRow(current) ? [...current, createEmptyIntentRow()] : current));
-  }
-
   function removeRow(id: string) {
     setRows((current) => (current.length > 1 ? current.filter((row) => row.id !== id) : current));
+  }
+
+  function toggleRowExpanded(id: string) {
+    setExpandedRowIds((current) => {
+      const next = new Set(current);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  }
+
+  // Plan My Day UX V2 PR U1 -- Quick Pick tap (this ticket's own sections
+  // 12/13/15). ACTIONS, never a toggle/multi-select: every tap adds one
+  // intent, duplicates always allowed (section 13). The single existing
+  // untouched blank row is reused in place rather than left alongside a
+  // second, redundant row (section 15) -- `isRowUntouched` (planDayEntry.ts)
+  // defines "blank" by full row state, never title alone. Never focuses
+  // the title input -- the pick already supplied it.
+  function handleQuickPick(pick: PlanDayQuickPick) {
+    setRows((current) => {
+      if (current.length === 1 && isRowUntouched(current[0])) {
+        return [{ ...current[0], title: pick.label, activityId: pick.activityId }];
+      }
+      if (!canAddAnotherRow(current)) return current;
+      return [...current, createIntentRowFromQuickPick(pick)];
+    });
+  }
+
+  // "+ Something else" (this ticket's own section 16) -- the SAME
+  // blank-row-reuse rule as a Quick Pick, but focuses the title input
+  // afterward (typing is the whole point of this action) instead of
+  // pre-filling it.
+  function handleSomethingElse() {
+    setRows((current) => {
+      if (current.length === 1 && isRowUntouched(current[0])) {
+        setPendingFocusRowId(current[0].id);
+        return current;
+      }
+      if (!canAddAnotherRow(current)) return current;
+      const row = createEmptyIntentRow();
+      setPendingFocusRowId(row.id);
+      return [...current, row];
+    });
   }
 
   function selectHorizon(next: PlanningHorizon) {
@@ -221,6 +293,7 @@ export function PlanDayClient({ timezone, planningDate, horizon, availabilityCon
   }
 
   const showAvailabilityPrerequisite = (horizon === 'TOMORROW' && availabilityConfigured === false) || availabilityRequiredStale;
+  const atIntentCap = !canAddAnotherRow(rows) && !(rows.length === 1 && isRowUntouched(rows[0]));
 
   return (
     <div style={{ minHeight: '100vh', background: 'var(--as-bg)', color: colors.textPrimary, fontFamily: 'var(--as-font-body)', display: 'flex', justifyContent: 'center', padding: `${spacing.xxxl}px ${spacing.lg}px` }}>
@@ -261,7 +334,28 @@ export function PlanDayClient({ timezone, planningDate, horizon, availabilityCon
               </SurfaceCard>
             ) : (
               <>
-                <div style={{ display: 'flex', flexDirection: 'column', gap: spacing.md, marginTop: spacing.lg }}>
+                <div style={{ marginTop: spacing.lg }}>
+                  <FieldLabel>What do you want to accomplish?</FieldLabel>
+                  <p style={{ margin: `${spacing.xs}px 0 ${spacing.sm}px`, fontSize: 12, color: colors.textFaint, fontWeight: 700, letterSpacing: 0.4, textTransform: 'uppercase' }}>Quick picks</p>
+                  <div style={{ display: 'flex', flexWrap: 'wrap', gap: spacing.xs }}>
+                    {PLAN_DAY_QUICK_PICKS.map((pick) => (
+                      <QuickPickButton key={pick.label} pick={pick} disabled={phase === 'SUBMITTING' || atIntentCap} onClick={() => handleQuickPick(pick)} />
+                    ))}
+                  </div>
+                  <div style={{ marginTop: spacing.sm }}>
+                    <TextButton onClick={handleSomethingElse} color={colors.info} style={{ opacity: phase === 'SUBMITTING' || atIntentCap ? 0.4 : 1, pointerEvents: phase === 'SUBMITTING' || atIntentCap ? 'none' : 'auto' }}>
+                      + Something else
+                    </TextButton>
+                  </div>
+                </div>
+
+                {rows.some((row) => row.title.trim().length > 0) && (
+                  <div style={{ marginTop: spacing.xl }}>
+                    <FieldLabel>Your plan</FieldLabel>
+                  </div>
+                )}
+
+                <div style={{ display: 'flex', flexDirection: 'column', gap: spacing.md, marginTop: spacing.sm }}>
                   {rows.map((row, index) => (
                     <IntentRowCard
                       key={row.id}
@@ -269,18 +363,14 @@ export function PlanDayClient({ timezone, planningDate, horizon, availabilityCon
                       index={index}
                       planningDate={planningDate}
                       horizon={horizon}
+                      expanded={expandedRowIds.has(row.id)}
                       canRemove={rows.length > 1}
                       disabled={phase === 'SUBMITTING'}
                       onChange={(patch) => updateRow(row.id, patch)}
                       onRemove={() => removeRow(row.id)}
+                      onToggleExpanded={() => toggleRowExpanded(row.id)}
                     />
                   ))}
-                </div>
-
-                <div style={{ marginTop: spacing.md }}>
-                  <TextButton onClick={addRow} color={colors.info} style={{ opacity: canAddAnotherRow(rows) ? 1 : 0.4, pointerEvents: canAddAnotherRow(rows) ? 'auto' : 'none' }}>
-                    + Add another
-                  </TextButton>
                 </div>
 
                 {phase === 'PREVIEW_ERROR' && entryError && (
@@ -307,24 +397,70 @@ export function PlanDayClient({ timezone, planningDate, horizon, availabilityCon
   );
 }
 
+/**
+ * Plan My Day UX V2 PR U1 -- a Quick Pick is an ACTION button (this
+ * ticket's own section 12: "not radio buttons, toggles, multi-select
+ * state"), deliberately NOT `DurationChip` (ui.tsx): that component
+ * always sets `aria-pressed`/a persistent "selected" look, which is the
+ * correct semantic for a genuine mutually-exclusive choice (Duration,
+ * Flexible/Specific time, the Today/Tomorrow horizon) but would
+ * misrepresent a button that can be tapped repeatedly to add several
+ * independent intents. Visual language still matches this screen's own
+ * existing chip styling for consistency -- only the semantics differ.
+ */
+function QuickPickButton({ pick, disabled, onClick }: { pick: PlanDayQuickPick; disabled: boolean; onClick: () => void }) {
+  const icon = quickPickIcon(pick);
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      disabled={disabled}
+      aria-label={`Add ${pick.label}`}
+      style={{
+        minHeight: 40,
+        padding: '0 14px',
+        borderRadius: radius.md,
+        border: `1px solid ${colors.borderSubtle}`,
+        background: 'rgba(15, 23, 42, 0.6)',
+        color: colors.textSecondary,
+        fontSize: 13,
+        fontWeight: 800,
+        cursor: disabled ? 'default' : 'pointer',
+        opacity: disabled ? 0.4 : 1,
+        flex: '1 1 auto',
+        display: 'inline-flex',
+        alignItems: 'center',
+        gap: 6,
+      }}
+    >
+      {icon && <span aria-hidden="true">{icon}</span>}
+      {pick.label}
+    </button>
+  );
+}
+
 function IntentRowCard({
   row,
   index,
   planningDate,
   horizon,
+  expanded,
   canRemove,
   disabled,
   onChange,
   onRemove,
+  onToggleExpanded,
 }: {
   row: PlanDayIntentRow;
   index: number;
   planningDate: string | null;
   horizon: PlanningHorizon | null;
+  expanded: boolean;
   canRemove: boolean;
   disabled: boolean;
   onChange: (patch: Partial<PlanDayIntentRow>) => void;
   onRemove: () => void;
+  onToggleExpanded: () => void;
 }) {
   const titleId = `plan-day-title-${row.id}`;
   const timeInputId = `plan-day-time-${row.id}`;
@@ -339,7 +475,14 @@ function IntentRowCard({
           <TextInput
             id={titleId}
             value={row.title}
-            onChange={(e) => onChange({ title: e.target.value })}
+            // Plan My Day UX V2 PR U1 -- any title edit clears a picker-
+            // supplied activityId unconditionally (this ticket's own
+            // section 6/21/55: visible text and hidden canonical identity
+            // must never silently diverge). A no-op when the row never
+            // had one. Never a dynamic client-side reclassification --
+            // the existing server-side resolver re-classifies the edited
+            // title exactly as it would for any typed row.
+            onChange={(e) => onChange({ title: e.target.value, activityId: undefined })}
             placeholder="e.g. Finish investor deck"
             disabled={disabled}
             maxLength={200}
@@ -352,62 +495,77 @@ function IntentRowCard({
         )}
       </div>
 
-      <div style={{ marginTop: spacing.md }}>
-        <FieldLabel>Duration</FieldLabel>
-        <div style={{ display: 'flex', flexWrap: 'wrap', gap: spacing.xs }}>
-          <DurationChip label="Automatic" selected={row.durationMinutes === null} onClick={() => onChange({ durationMinutes: null })} />
-          {PLAN_DAY_DURATION_OPTIONS_MINUTES.map((minutes) => (
-            <DurationChip key={minutes} label={`${minutes}m`} selected={row.durationMinutes === minutes} onClick={() => onChange({ durationMinutes: minutes })} />
-          ))}
+      {!expanded ? (
+        <div style={{ marginTop: spacing.sm, display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: spacing.sm }}>
+          <span style={{ fontSize: 12, color: colors.textFaint }}>{formatIntentRowSummary(row, horizon)}</span>
+          <SecondaryButton onClick={onToggleExpanded}>Edit</SecondaryButton>
         </div>
-      </div>
-
-      <div style={{ marginTop: spacing.md }}>
-        <FieldLabel>Time</FieldLabel>
-        <SegmentedControl
-          options={[
-            { value: 'FLEXIBLE', label: 'Flexible' },
-            { value: 'FIXED', label: 'At a specific time' },
-          ]}
-          value={row.timeMode}
-          onChange={(value) => onChange({ timeMode: value })}
-        />
-        {row.timeMode === 'FIXED' && (
-          <div style={{ marginTop: spacing.sm }}>
-            <TextInput id={timeInputId} type="time" value={row.fixedTime ?? ''} onChange={(e) => onChange({ fixedTime: e.target.value || null })} disabled={disabled} hasError={showIncompleteTimeError} />
-            {showIncompleteTimeError && <FieldError>Pick a time, or switch back to Flexible.</FieldError>}
+      ) : (
+        <>
+          <div style={{ marginTop: spacing.md }}>
+            <FieldLabel>Duration</FieldLabel>
+            <div style={{ display: 'flex', flexWrap: 'wrap', gap: spacing.xs }}>
+              <DurationChip label="Automatic" selected={row.durationMinutes === null} onClick={() => onChange({ durationMinutes: null })} />
+              {PLAN_DAY_DURATION_OPTIONS_MINUTES.map((minutes) => (
+                <DurationChip key={minutes} label={`${minutes}m`} selected={row.durationMinutes === minutes} onClick={() => onChange({ durationMinutes: minutes })} />
+              ))}
+            </div>
           </div>
-        )}
-      </div>
 
-      <div style={{ marginTop: spacing.md }}>
-        <DurationChip label="Important" selected={row.important} onClick={() => onChange({ important: !row.important })} />
-      </div>
+          <div style={{ marginTop: spacing.md }}>
+            <FieldLabel>Time</FieldLabel>
+            <SegmentedControl
+              options={[
+                { value: 'FLEXIBLE', label: 'Flexible' },
+                { value: 'FIXED', label: 'At a specific time' },
+              ]}
+              value={row.timeMode}
+              onChange={(value) => onChange({ timeMode: value })}
+            />
+            {row.timeMode === 'FIXED' && (
+              <div style={{ marginTop: spacing.sm }}>
+                <TextInput id={timeInputId} type="time" value={row.fixedTime ?? ''} onChange={(e) => onChange({ fixedTime: e.target.value || null })} disabled={disabled} hasError={showIncompleteTimeError} />
+                {showIncompleteTimeError && <FieldError>Pick a time, or switch back to Flexible.</FieldError>}
+              </div>
+            )}
+          </div>
 
-      <div style={{ marginTop: spacing.md }}>
-        <DueByControl
-          rowId={row.id}
-          deadlineChoice={row.deadlineChoice}
-          planningDate={planningDate}
-          horizon={horizon}
-          disabled={disabled}
-          hasError={showPastDeadlineError}
-          onChange={(deadlineChoice) => onChange({ deadlineChoice })}
-        />
-        {showPastDeadlineError && <FieldError>Pick today or a later date.</FieldError>}
-      </div>
+          <div style={{ marginTop: spacing.md }}>
+            <DurationChip label="Important" selected={row.important} onClick={() => onChange({ important: !row.important })} />
+          </div>
+
+          <div style={{ marginTop: spacing.md }}>
+            <DeadlineControl
+              rowId={row.id}
+              deadlineChoice={row.deadlineChoice}
+              planningDate={planningDate}
+              horizon={horizon}
+              disabled={disabled}
+              hasError={showPastDeadlineError}
+              onChange={(deadlineChoice) => onChange({ deadlineChoice })}
+            />
+            {showPastDeadlineError && <FieldError>Pick today or a later date.</FieldError>}
+          </div>
+
+          <div style={{ marginTop: spacing.md, display: 'flex', justifyContent: 'flex-end' }}>
+            <SecondaryButton onClick={onToggleExpanded}>Done</SecondaryButton>
+          </div>
+        </>
+      )}
     </SurfaceCard>
   );
 }
 
 /**
- * "Due by" (this ticket's own section 5/10) -- progressive disclosure,
- * collapsed by default (`NO_DEADLINE`), never a permanent full date
- * picker per row. Deliberately never worded as if it were a clock time
- * (this ticket's own section 10) -- a row's `important`/deadline facts are
- * always rendered in a visually SEPARATE control from "At a specific
- * time" above, so the two intent facts (urgency vs. scheduling
- * constraint) are never presented as one choice.
+ * "Deadline" (this ticket's own section 28, renamed from "Due by" --
+ * presentation only, `PlanDayDeadlineChoice`/`resolveDeadline` are
+ * byte-unchanged) -- progressive disclosure, collapsed by default
+ * (`NO_DEADLINE`), never a permanent full date picker per row.
+ * Deliberately never worded as if it were a clock time (a row's
+ * `important`/deadline facts are always rendered in a visually SEPARATE
+ * control from "At a specific time" above, so the two intent facts
+ * -- urgency vs. scheduling constraint -- are never presented as one
+ * choice).
  *
  * Planning Horizon V1 PR P2 -- `resolveDeadline`'s own `'TODAY'` choice
  * (planDayEntry.ts) has always resolved to `planningDate` verbatim,
@@ -420,7 +578,7 @@ function IntentRowCard({
  * own `kind: 'TODAY'` value, and the deadline it resolves to, are
  * unchanged.
  */
-function DueByControl({
+function DeadlineControl({
   rowId,
   deadlineChoice,
   planningDate,
@@ -444,14 +602,14 @@ function DueByControl({
   if (!expanded) {
     return (
       <TextButton onClick={() => setExpanded(true)} color={colors.textMuted} style={{ opacity: disabled ? 0.4 : 1, pointerEvents: disabled ? 'none' : 'auto' }}>
-        + Due by
+        + Deadline
       </TextButton>
     );
   }
 
   return (
     <div>
-      <FieldLabel>Due by</FieldLabel>
+      <FieldLabel>Deadline</FieldLabel>
       <div style={{ display: 'flex', flexWrap: 'wrap', gap: spacing.xs }}>
         <DurationChip label={firstChipLabel} selected={deadlineChoice.kind === 'TODAY'} onClick={() => onChange({ kind: 'TODAY' })} />
         <DurationChip label="Tomorrow" selected={deadlineChoice.kind === 'TOMORROW'} onClick={() => onChange({ kind: 'TOMORROW' })} />

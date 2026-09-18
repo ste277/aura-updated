@@ -70,6 +70,18 @@ export interface PlanDayIntentRow {
    * civil-date string (or omitted entirely) only at submission time --
    * see `resolveDeadline`/`buildRequestedIntentsForSubmission` below. */
   deadlineChoice: PlanDayDeadlineChoice;
+  /** Plan My Day UX V2 PR U1 -- set only by a Quick Pick tap
+   * (planDayQuickPicks.ts), to a real, current catalog id. Untrusted
+   * once it reaches the server, exactly like any other client-supplied
+   * value (F1/the orchestrator's own `resolveActivity` already
+   * re-validate it via `getActivityProfileById`, falling through to
+   * ordinary title resolution otherwise -- this ticket's own section 5,
+   * zero new trust boundary). MUST be cleared the instant the row's own
+   * title is edited by the user (this ticket's own section 6/21: visible
+   * text and hidden identity must never silently diverge) -- the ONLY
+   * call site that ever clears it is the title input's own onChange
+   * (PlanDayClient.tsx), never this file, never a generic patch merge. */
+  activityId?: string;
 }
 
 export const MAX_PLAN_DAY_INTENTS = 12; // mirrors F1's own MAX_INTENTS_PER_REQUEST (dayConstructorPreviewRequest.ts) -- the hard upper bound, not a new limit.
@@ -92,6 +104,97 @@ let rowIdCounter = 0;
 export function createEmptyIntentRow(): PlanDayIntentRow {
   rowIdCounter += 1;
   return { id: `plan-day-row-${rowIdCounter}`, title: '', durationMinutes: null, timeMode: 'FLEXIBLE', fixedTime: null, important: false, deadlineChoice: NO_DEADLINE };
+}
+
+// ============================================================
+// Plan My Day UX V2 PR U1 -- Quick Picks (this ticket's own sections
+// 10-16). Row CREATION only; picker configuration itself lives in
+// planDayQuickPicks.ts (never duplicated here).
+// ============================================================
+
+/** A Quick Pick tap always produces a row with every OTHER field at its
+ * exact `createEmptyIntentRow()` default (this ticket's own section 39:
+ * "No additional interaction required before Preview") -- reuses that
+ * same factory (same id-counter, same defaults) rather than a second,
+ * parallel row-construction path, then overrides only `title`/
+ * `activityId`. */
+export function createIntentRowFromQuickPick(pick: { label: string; activityId?: string }): PlanDayIntentRow {
+  return { ...createEmptyIntentRow(), title: pick.label, activityId: pick.activityId };
+}
+
+/** True only for a row that is BYTE-IDENTICAL to a freshly-created empty
+ * row in every field except `id` (this ticket's own section 15: "Define
+ * 'blank' using row state, not title alone if other fields have been
+ * configured... A row with scheduling customization but blank title
+ * should not be silently overwritten"). Used both to decide whether a
+ * Quick Pick/`+ Something else` tap may reuse the single existing row in
+ * place, rather than appending a second one alongside an untouched
+ * default row. */
+export function isRowUntouched(row: PlanDayIntentRow): boolean {
+  return (
+    row.title === '' &&
+    row.durationMinutes === null &&
+    row.timeMode === 'FLEXIBLE' &&
+    row.fixedTime === null &&
+    row.important === false &&
+    row.deadlineChoice.kind === 'NONE' &&
+    row.activityId === undefined
+  );
+}
+
+// ============================================================
+// Plan My Day UX V2 PR U1 -- collapsed-card summary (this ticket's own
+// sections 18-19/58-59). Presentation only: reads the exact same fields
+// the expanded controls already edit, never a new domain fact. Kept as a
+// pure function (not inline JSX string-building) so it is directly
+// testable, matching this file's own established convention.
+// ============================================================
+
+/** "HH:mm" (24h) -> "H:MM AM/PM" -- pure string/number formatting, no
+ * Date instant, no timezone (the underlying value is already a plain
+ * civil clock-time string; see `resolveFixedStart`'s own doc comment). */
+function formatFixedTimeLabel(fixedTime: string): string {
+  const [hourStr, minuteStr] = fixedTime.split(':');
+  const hour24 = Number(hourStr);
+  const period = hour24 >= 12 ? 'PM' : 'AM';
+  const hour12 = hour24 % 12 === 0 ? 12 : hour24 % 12;
+  return `${hour12}:${minuteStr} ${period}`;
+}
+
+/** `undefined` for `NONE` (never shown in the summary at all -- this
+ * ticket's own section 19: "Deadline only if set"). `'TODAY'` reuses the
+ * SAME horizon-aware wording `DueByControl`'s own first chip already
+ * shows (PlanDayClient.tsx) -- "same day" under Tomorrow, "today"
+ * otherwise -- so the collapsed summary and the expanded control can
+ * never disagree about what "today" currently means. */
+function formatDeadlineSummaryLabel(choice: PlanDayDeadlineChoice, horizon: PlanningHorizon | null): string | undefined {
+  switch (choice.kind) {
+    case 'NONE':
+      return undefined;
+    case 'TODAY':
+      return horizon === 'TOMORROW' ? 'Deadline same day' : 'Deadline today';
+    case 'TOMORROW':
+      return 'Deadline tomorrow';
+    case 'THIS_WEEK':
+      return 'Deadline this week';
+    case 'CUSTOM':
+      return `Deadline ${choice.date}`;
+  }
+}
+
+/** The exact compact line a collapsed task card shows (this ticket's own
+ * section 19 worked examples, reproduced verbatim by this function):
+ * flexibility/time, then duration, then Important only if true, then
+ * Deadline only if set -- joined with " · ", never exposing a raw enum
+ * name. */
+export function formatIntentRowSummary(row: PlanDayIntentRow, horizon: PlanningHorizon | null): string {
+  const parts: string[] = [];
+  parts.push(row.timeMode === 'FIXED' && row.fixedTime ? `Specific time ${formatFixedTimeLabel(row.fixedTime)}` : 'Flexible');
+  parts.push(row.durationMinutes === null ? 'Automatic' : `${row.durationMinutes} min`);
+  if (row.important) parts.push('Important');
+  const deadlineLabel = formatDeadlineSummaryLabel(row.deadlineChoice, horizon);
+  if (deadlineLabel) parts.push(deadlineLabel);
+  return parts.join(' · ');
 }
 
 // ============================================================
@@ -205,8 +308,12 @@ export function resolveDeadline(choice: PlanDayDeadlineChoice, planningDate: str
 // planning-date hardening ticket's own section 7, and by Intent Fidelity
 // V1 PR G3/G4's own section 13) -- blank rows excluded, `originalOrder`
 // never sent (array position IS the order, F1 derives it itself),
-// `activityId`/`constructionWindowSource` never sent (this ticket's own
-// sections 12/20/21/7). `targetDate` is ALWAYS the same server-established
+// `constructionWindowSource` never sent (this ticket's own sections
+// 12/20/21/7). Plan My Day UX V2 PR U1 -- `activityId` IS now sent, but
+// only when a row actually carries one (a Quick Pick tap, never a typed
+// row): F1/the orchestrator already accept and re-validate this exact
+// optional field (dayConstructorPreviewRequest.ts/dayConstructorOrchestrator.ts,
+// zero server change required -- this ticket's own section 9). `targetDate` is ALWAYS the same server-established
 // `planningDate` used for FIXED-time assembly (planning-date hardening's
 // own section 7: "ensures FIXED fixedStart date == preview targetDate" --
 // never independently re-derived).
@@ -246,6 +353,7 @@ export function buildRequestedIntentsForSubmission(rows: readonly PlanDayIntentR
     if (row.durationMinutes !== null) intent.durationMinutes = row.durationMinutes;
     if (row.important) intent.importance = 'HIGH';
     if (deadline !== undefined) intent.deadline = deadline;
+    if (row.activityId !== undefined) intent.activityId = row.activityId;
     const fixedStart = resolveFixedStart(row, planningDate, timezone);
     if (fixedStart) intent.fixedStart = fixedStart;
     intents.push(intent);

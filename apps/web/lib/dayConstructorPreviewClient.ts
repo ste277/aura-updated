@@ -61,6 +61,15 @@ export interface PreviewRequestIntentBody {
    * to an ISO string the same way `acceptConstructedDay.ts`'s own request
    * body does, never a hand-formatted string. */
   fixedStart?: Date;
+  /** Plan My Day UX V2 PR U1 -- a real, current catalog id, set only by a
+   * Quick Pick (planDayQuickPicks.ts/planDayEntry.ts), never by a typed
+   * row. F1's own request parser already accepts and re-validates this
+   * exact optional field (dayConstructorPreviewRequest.ts, confirmed by
+   * direct read -- this is not a new field on F1's own contract, only
+   * the first client caller to ever populate it). Untrusted server-side
+   * regardless of who sends it -- see `resolveActivity`'s own
+   * `getActivityProfileById` re-check (dayConstructorOrchestrator.ts). */
+  activityId?: string;
 }
 
 // ============================================================

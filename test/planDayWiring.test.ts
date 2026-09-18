@@ -35,6 +35,7 @@ const homeTimelineSource: string = fs.readFileSync(path.join(__dirname, '../apps
 const planDayEntrySource: string = fs.readFileSync(path.join(__dirname, '../apps/web/lib/planDayEntry.ts'), 'utf8');
 const planningHorizonSource: string = fs.readFileSync(path.join(__dirname, '../apps/web/lib/planningHorizon.ts'), 'utf8');
 const dayConstructorPreviewClientSource: string = fs.readFileSync(path.join(__dirname, '../apps/web/lib/dayConstructorPreviewClient.ts'), 'utf8');
+const planDayQuickPicksSource: string = fs.readFileSync(path.join(__dirname, '../apps/web/lib/planDayQuickPicks.ts'), 'utf8');
 
 function occurrences(haystack: string, needle: string): number {
   return haystack.split(needle).length - 1;
@@ -161,7 +162,10 @@ function main() {
   // ============================================================
   check('39. the Submit gate now also requires planningDate, matching canSubmitPlanDay\'s own extended (rows, planningDate) signature', /canSubmitPlanDay\(rows, planningDate\)/.test(planDayClientSource));
   check('40. the row card never sends an explicit MEDIUM/LOW UI label -- HIGH/MEDIUM/LOW are not used as UI vocabulary anywhere in this file', !/label="HIGH"|label="MEDIUM"|label="LOW"|label='HIGH'|label='MEDIUM'|label='LOW'/.test(planDayClientSource));
-  check('41. the Important control and the FIXED-time control remain visually/lexically distinct -- deadline is labeled "Due by", never "Due at"', planDayClientSource.includes('Due by') && !planDayClientSource.includes('Due at'));
+  check(
+    '41. the Important control and the FIXED-time control remain visually/lexically distinct -- deadline is labeled "Deadline" (renamed from "Due by" by Plan My Day UX V2 PR U1, this ticket\'s own section 28/60), never "Due at"',
+    /\+ Deadline|<FieldLabel>Deadline<\/FieldLabel>/.test(planDayClientSource) && !planDayClientSource.includes('Due at')
+  );
 
   // ============================================================
   // Planning Horizon V1 PR P2 -- horizon selector, navigation, gating,
@@ -251,6 +255,171 @@ function main() {
   // 59. Intent-row preservation -- PlanDayClient is never remounted/keyed by horizon (this ticket's own section 13/46): no `key={horizon}` anywhere, and `rows` state is declared once, outside any horizon-conditional branch.
   check('59. PlanDayClient carries no key={horizon} (or similar) that would force a remount/state-reset on horizon switch', !/key=\{horizon\}/.test(planDayClientSource));
   check('59b. the rows state itself is declared exactly once, unconditionally (never re-initialized inside a horizon branch)', occurrences(planDayClientSource, 'useState<PlanDayIntentRow[]>') === 1);
+
+  // ============================================================
+  // Plan My Day UX V2 PR U1 -- Quick Picks, simplified task cards
+  // (60-90).
+  // ============================================================
+
+  // 60. Quick Pick semantics -- ACTION buttons, never aria-pressed/toggle
+  // semantics (this ticket's own section 12).
+  check('60. QuickPickButton never sets aria-pressed (it is an action button, not a toggle/selection)', !/function QuickPickButton[\s\S]*?aria-pressed/.test(planDayClientSource));
+  check('60b. QuickPickButton has a real, specific accessible name ("Add <label>")', /aria-label=\{`Add \$\{pick\.label\}`\}/.test(planDayClientSource));
+  check('60c. Quick Picks render from the single shared PLAN_DAY_QUICK_PICKS list, never a second inline copy', planDayClientSource.includes('PLAN_DAY_QUICK_PICKS.map('));
+
+  // 61. Duplicates allowed -- handleQuickPick never checks for an
+  // existing same-label/activityId row before appending (this ticket's
+  // own section 13).
+  {
+    const m = planDayClientSource.match(/function handleQuickPick\(pick: PlanDayQuickPick\) \{([\s\S]*?)\n  \}/);
+    const body = m?.[0] ?? '';
+    check('61. handleQuickPick never deduplicates by label/activityId/title (no .find/.some/.includes guard against an existing row)', body.length > 0 && !/\.find\(|\.some\(|\.includes\(/.test(body));
+  }
+
+  // 62. Max-intent cap respected -- Quick Picks and Something Else both
+  // gate through the SAME existing canAddAnotherRow, never a second
+  // limit (this ticket's own section 14).
+  check('62. handleQuickPick respects the existing canAddAnotherRow cap before appending', /function handleQuickPick[\s\S]*?canAddAnotherRow\(current\)/.test(planDayClientSource));
+  check('62b. handleSomethingElse respects the SAME existing cap', /function handleSomethingElse[\s\S]*?canAddAnotherRow\(current\)/.test(planDayClientSource));
+  check('62c. no second/new MAX constant is introduced in this file (only the existing MAX_PLAN_DAY_INTENTS, imported, is ever consulted)', !/const\s+\w*MAX\w*\s*=\s*\d+/.test(planDayClientSource));
+
+  // 63. Initial-blank-row reuse -- both Quick Pick and Something Else
+  // check isRowUntouched (planDayEntry.ts) before appending, never title
+  // alone (this ticket's own section 15).
+  check('63. handleQuickPick reuses the single untouched blank row via isRowUntouched, never a bare title check', /function handleQuickPick[\s\S]*?isRowUntouched\(current\[0\]\)/.test(planDayClientSource));
+  check('63b. handleSomethingElse reuses the SAME single untouched blank row via isRowUntouched', /function handleSomethingElse[\s\S]*?isRowUntouched\(current\[0\]\)/.test(planDayClientSource));
+  check('63c. isRowUntouched itself is imported from planDayEntry.ts, never reimplemented locally in the component', planDayClientSource.includes('isRowUntouched,') && !/function isRowUntouched/.test(planDayClientSource));
+
+  // 64. Something Else focuses the blank/new row (this ticket's own
+  // section 16) via the existing deterministic title-input element id,
+  // never a new ref-plumbing mechanism.
+  check('64. handleSomethingElse sets a pending-focus row id rather than leaving the new/reused row unfocused', /function handleSomethingElse[\s\S]*?setPendingFocusRowId\(/.test(planDayClientSource));
+  check('64b. the focus effect targets the SAME deterministic `plan-day-title-${id}` element id the title input itself already uses', /document\.getElementById\(`plan-day-title-\$\{pendingFocusRowId\}`\)/.test(planDayClientSource) && planDayClientSource.includes('const titleId = `plan-day-title-${row.id}`;'));
+  {
+    const m = planDayClientSource.match(/function handleQuickPick\(pick: PlanDayQuickPick\) \{([\s\S]*?)\n  \}/);
+    check('64c. handleQuickPick never sets pending focus (the pick already supplies the title, this ticket\'s own section 15: "Never focuses the title input")', !!m && !m[0].includes('setPendingFocusRowId'));
+  }
+
+  // 65. Edited-title identity clearing (this ticket's own section 6/21) --
+  // the ONLY call site that clears activityId is the title input's own
+  // onChange, unconditionally, never a generic patch merge inside
+  // updateRow itself (which would incorrectly also clear it on unrelated
+  // field edits).
+  check(
+    '65. the title input\'s own onChange always clears activityId alongside the new title, in the SAME patch object',
+    /onChange=\{\(e\) => onChange\(\{ title: e\.target\.value, activityId: undefined \}\)\}/.test(planDayClientSource)
+  );
+  check(
+    '65b. updateRow itself performs a plain merge with no special-cased activityId-clearing logic of its own (identity-clearing is a CALL-SITE decision, not baked into the generic patch reducer)',
+    /function updateRow\(id: string, patch: Partial<PlanDayIntentRow>\) \{\s*setRows\(\(current\) => current\.map\(\(row\) => \(row\.id === id \? \{ \.\.\.row, \.\.\.patch \} : row\)\)\);\s*\}/.test(planDayClientSource)
+  );
+
+  // 66. Collapsed default state -- a new row (whichever way it was
+  // created) never starts expanded (this ticket's own section 39: "No
+  // additional interaction required before Preview").
+  check('66. expandedRowIds starts as an empty Set -- every row begins collapsed', /useState<ReadonlySet<string>>\(new Set\(\)\)/.test(planDayClientSource));
+
+  // 67/68. Collapsed card never exposes the full control set; Edit
+  // reveals it; Done collapses without discarding values (this ticket's
+  // own section 18/20/21/22) -- proven structurally: the six controls
+  // only ever appear inside the `expanded &&`-equivalent branch, and
+  // "Done" never resets any row field.
+  {
+    const cardMatch = planDayClientSource.match(/function IntentRowCard\([\s\S]*?\n\}\n/);
+    const cardBody = cardMatch?.[0] ?? '';
+    check('67. the collapsed branch (!expanded) renders only the summary text and an Edit button -- no Duration/Time/Important/Deadline controls', /\{!expanded \? \(\s*<div[\s\S]*?formatIntentRowSummary\(row, horizon\)[\s\S]*?Edit<\/SecondaryButton>\s*<\/div>\s*\) : \(/.test(cardBody));
+    check(
+      '68. the expanded branch exposes Duration, Time, Important, and Deadline controls, and a Done button',
+      /<FieldLabel>Duration<\/FieldLabel>/.test(cardBody) && /Flexible[\s\S]*At a specific time/.test(cardBody) && cardBody.includes('Important') && cardBody.includes('DeadlineControl') && cardBody.includes('Done</SecondaryButton>')
+    );
+    check('68b. Edit/Done both call the SAME onToggleExpanded -- toggling never clears/resets any row field', occurrences(cardBody, 'onClick={onToggleExpanded}') === 2);
+  }
+
+  // 69. Title remains editable regardless of collapsed/expanded state
+  // (this ticket's own section 23) -- the title TextInput is rendered
+  // OUTSIDE the `!expanded ? ... : ...` branch entirely.
+  check(
+    '69. the title input is rendered unconditionally, before the collapsed/expanded branch -- never gated on `expanded`',
+    /<TextInput\s*\n\s*id=\{titleId\}[\s\S]*?\{!expanded \? \(/.test(planDayClientSource)
+  );
+
+  // 70. Automatic/Flexible collapsed summary uses formatIntentRowSummary
+  // (planDayEntry.ts), never a second inline formatter (this ticket's
+  // own section 59: "Prefer pure summary formatting helper").
+  check('70. the collapsed summary is rendered via the shared, pure formatIntentRowSummary helper', planDayClientSource.includes('formatIntentRowSummary(row, horizon)'));
+  check('70b. formatIntentRowSummary is imported from planDayEntry.ts, never reimplemented in the component', planDayClientSource.includes('formatIntentRowSummary,') && !/function formatIntentRowSummary/.test(planDayClientSource));
+
+  // 71. Deadline rename -- the expanded control is DeadlineControl
+  // (renamed from DueByControl), and its own heading/disclosure text
+  // read "Deadline", never "Due by" (this ticket's own section 28/60).
+  check('71. the renamed DeadlineControl component exists (DueByControl no longer does)', planDayClientSource.includes('function DeadlineControl(') && !planDayClientSource.includes('function DueByControl('));
+  check('71b. the collapsed disclosure button reads "+ Deadline"', planDayClientSource.includes('+ Deadline'));
+  check('71c. the expanded heading reads "Deadline"', planDayClientSource.includes('<FieldLabel>Deadline</FieldLabel>'));
+
+  // 72. Deadline Clear vs row Remove stay distinct actions/labels (this
+  // ticket's own section 27/29/30) -- Clear still only resets the
+  // deadline choice (never calls onRemove), Remove still only removes
+  // the row (via the existing IconButton, unchanged).
+  check('72. DeadlineControl\'s own "Clear" button still only calls onChange(NO_DEADLINE) -- never onRemove', /Clear\s*<\/TextButton>/.test(planDayClientSource) && (() => { const m = planDayClientSource.match(/function DeadlineControl[\s\S]*?\n\}\n/); return !!m && !m[0].includes('onRemove'); })());
+  check('72b. the row-level Remove control is unchanged -- still the IconButton with an explicit "Remove ..." accessible name', /ariaLabel=\{`Remove \$\{row\.title\.trim\(\) \|\| `task \$\{index \+ 1\}`\}`\}/.test(planDayClientSource));
+
+  // 73. "+ Add another" is gone; "+ Something else" is the one add-a-
+  // free-text-row control (this ticket's own section 31/37).
+  check('73. the old "+ Add another" control no longer exists', !planDayClientSource.includes('+ Add another'));
+  check('73b. "+ Something else" exists and calls handleSomethingElse', /onClick=\{handleSomethingElse\}[\s\S]{0,40}\+ Something else/.test(planDayClientSource) || (planDayClientSource.includes('+ Something else') && planDayClientSource.includes('onClick={handleSomethingElse}')));
+  check('73c. there is exactly ONE rendered add-a-free-text-row control (handleSomethingElse wired to exactly one control -- doc-comment prose mentioning the label elsewhere is fine)', occurrences(planDayClientSource, 'onClick={handleSomethingElse}') === 1);
+
+  // 74. Quick Picks remain visible at all times while building the plan
+  // -- never conditionally hidden after the first selection (this
+  // ticket's own section 32) -- the picker grid is NOT inside any
+  // `rows.length`-gated conditional.
+  check(
+    '74. the Quick Picks grid renders unconditionally (not gated behind rows.length or any "has at least one intent" check)',
+    !/rows\.length[\s\S]{0,120}PLAN_DAY_QUICK_PICKS\.map/.test(planDayClientSource)
+  );
+
+  // 75. "Your plan" heading only appears once a real (non-blank) intent
+  // exists (this ticket's own section 17) -- never shown above an
+  // entirely empty plan.
+  check('75. the "Your plan" heading is gated on at least one row having a real title', /rows\.some\(\(row\) => row\.title\.trim\(\)\.length > 0\)[\s\S]{0,150}Your plan/.test(planDayClientSource));
+
+  // 76. Task numbering preserved for U1 (this ticket's own section 17:
+  // "If removing numbering requires broad structural churn, preserve it
+  // for U1 and report that decision") -- explicitly verified still
+  // present, matching the implementation report's own stated decision.
+  check('76. row numbering ("Task N") is preserved (explicit U1 scope decision, not an oversight)', planDayClientSource.includes('`Task ${index + 1}`'));
+
+  // 77. Horizon/picker hierarchy unchanged (this ticket's own section
+  // 32/41 of the original audit) -- horizon selector, then "What do you
+  // want to accomplish?", then Quick Picks, then Your plan, in that
+  // source order.
+  {
+    const horizonIdx = planDayClientSource.indexOf('When are you planning for?');
+    const accomplishIdx = planDayClientSource.indexOf('What do you want to accomplish?');
+    const quickPicksIdx = planDayClientSource.indexOf('PLAN_DAY_QUICK_PICKS.map(');
+    const yourPlanIdx = planDayClientSource.indexOf('Your plan');
+    check('77. source order is horizon selector -> "What do you want to accomplish?" -> Quick Picks -> Your plan', horizonIdx > 0 && horizonIdx < accomplishIdx && accomplishIdx < quickPicksIdx && quickPicksIdx < yourPlanIdx);
+  }
+
+  // 78. Tomorrow-unconfigured prerequisite still suppresses the ENTIRE
+  // picker/form (this ticket's own section 33) -- the Quick Picks grid
+  // sits inside the SAME showAvailabilityPrerequisite ? (...) : (...)
+  // conditional's else-branch the intent-row list already used before
+  // U1.
+  check(
+    '78. the Quick Picks grid is rendered inside the showAvailabilityPrerequisite else-branch -- never visible alongside the prerequisite card',
+    /showAvailabilityPrerequisite \? \([\s\S]*?Set availability[\s\S]*?\) : \([\s\S]*?PLAN_DAY_QUICK_PICKS\.map\(/.test(planDayClientSource)
+  );
+
+  // 79. Errands has no canonical id anywhere in the picker source (this
+  // ticket's own section 38/41) -- and the activity catalog itself is
+  // never edited by this PR.
+  check('79. planDayQuickPicks.ts never fabricates an "errands"/"admin"/"personal" catalog id', !/activityId:\s*'errands'|activityId:\s*'admin'|activityId:\s*'personal'/.test(planDayQuickPicksSource));
+
+  // 80. Icons are optional and sourced from the existing catalog only
+  // (this ticket's own section 43) -- never a new icon dependency.
+  check('80. quickPickIcon reads ActivityProfile.icon from the existing catalog, never a second icon literal', planDayQuickPicksSource.includes('getActivityProfileById(pick.activityId)?.icon'));
+  check('80b. no new icon package is imported anywhere in the picker file', !/from ['"]react-icons|from ['"]@heroicons|from ['"]lucide/.test(planDayQuickPicksSource));
 
   if (!allPassed) {
     console.error('\nSome Plan Day Wiring checks FAILED.');
