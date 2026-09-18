@@ -30,3 +30,25 @@ export function resolvePlanningTargetDate(input: { horizon: PlanningHorizon; cur
       return addDaysToDateStr(input.currentDate, 1);
   }
 }
+
+/**
+ * Planning Horizon V1 -- PR P2: the one place a raw `?horizon=` URL value
+ * becomes a real `PlanningHorizon`. Pure string matching only -- no
+ * clock, no civil-date resolution (that stays `resolvePlanningTargetDate`
+ * above's own job). `value` accepts Next.js's own `searchParams` shape
+ * for a possibly-repeated query key (`string | string[] | undefined`) --
+ * only its first occurrence is ever consulted, matching this
+ * repository's own `?tab=` precedent (`apps/web/app/page.tsx`) of
+ * treating an unexpected/duplicated param defensively rather than
+ * throwing.
+ *
+ * Only the literal `"tomorrow"` selects `'TOMORROW'` -- every other
+ * value (missing, `"today"`, unknown, malformed, empty string) resolves
+ * `'TODAY'` (this ticket's own section 4: "Missing/unknown/malformed ->
+ * TODAY. No not-found/error page."), which is already the correct
+ * default, so no separate `"today"` branch is needed.
+ */
+export function parseHorizonSearchParam(value: string | string[] | undefined): PlanningHorizon {
+  const raw = Array.isArray(value) ? value[0] : value;
+  return raw === 'tomorrow' ? 'TOMORROW' : 'TODAY';
+}

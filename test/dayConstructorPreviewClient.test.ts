@@ -85,6 +85,10 @@ function main() {
   check('25. INVALID_REQUEST passes through', parsePreviewResponseBody({ status: 'INVALID_REQUEST' }, 200).status === 'INVALID_REQUEST');
   check('26. TIMING_SEARCH_FAILED passes through', parsePreviewResponseBody({ status: 'TIMING_SEARCH_FAILED' }, 200).status === 'TIMING_SEARCH_FAILED');
   check('27. an unrecognized status string at HTTP 200 is UNKNOWN_RESPONSE', parsePreviewResponseBody({ status: 'SOMETHING_NEW' }, 200).status === 'UNKNOWN_RESPONSE');
+  check(
+    "27b. Planning Horizon V1 PR P2 -- FUTURE_AVAILABILITY_REQUIRED passes through as its OWN real status, never falling into UNKNOWN_RESPONSE (this is the exact gap P2 closes -- unreachable through P1's own UI, but a real, race-reachable server response once Tomorrow is exposed)",
+    parsePreviewResponseBody({ status: 'FUTURE_AVAILABILITY_REQUIRED' }, 200).status === 'FUTURE_AVAILABILITY_REQUIRED'
+  );
 
   // ============================================================
   // parsePreviewResponseBody -- protocol-level failures (28-33)

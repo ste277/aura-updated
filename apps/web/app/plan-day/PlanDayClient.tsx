@@ -1,6 +1,7 @@
 'use client';
 
 import React, { useEffect, useState } from 'react';
+import { useRouter } from 'next/navigation';
 import {
   PageHeader,
   SurfaceCard,
@@ -19,6 +20,7 @@ import { DayPlanPreviewController } from '../../components/DayPlanPreviewControl
 import type { ConstructDayPreview } from '../../lib/dayConstructorOrchestrator';
 import type { PersistedPlanSummary } from '../../lib/acceptConstructedDay';
 import { previewConstructedDay } from '../../lib/dayConstructorPreviewClient';
+import type { PlanningHorizon } from '../../lib/planningHorizon';
 import {
   createEmptyIntentRow,
   canSubmitPlanDay,
@@ -62,9 +64,17 @@ import {
  * client-side-navigation convention -- never a second auth check, never
  * an authentication network call of its own (removed: the server already
  * performed the authoritative check before this component ever rendered).
+ *
+ * Planning Horizon V1 PR P2 -- `horizon`/`availabilityConfigured` are the
+ * SAME kind of SERVER prop as `timezone`/`planningDate`: this component
+ * reads no clock and performs no civil-date arithmetic of its own to
+ * derive Tomorrow. Selecting Today/Tomorrow navigates to
+ * `/plan-day?horizon=...`, which re-invokes page.tsx (a Server Component)
+ * and re-derives every one of these props fresh -- this file only ever
+ * renders whatever the server most recently issued.
  */
 
-type Phase = 'REDIRECTING' | 'ENTRY' | 'SUBMITTING' | 'PREVIEW' | 'PREVIEW_ERROR';
+type Phase = 'REDIRECTING' | 'ENTRY' | 'SUBMITTING' | 'PREVIEW' | 'PREVIEW_ERROR' | 'SAVED';
 
 interface EntryErrorState {
   message: string;
@@ -74,18 +84,39 @@ interface EntryErrorState {
 export interface PlanDayClientProps {
   timezone: string | null;
   planningDate: string | null;
+  horizon: PlanningHorizon | null;
+  availabilityConfigured: boolean | null;
 }
 
-export function PlanDayClient({ timezone, planningDate }: PlanDayClientProps) {
-  const authenticated = !!timezone && !!planningDate;
+export function PlanDayClient({ timezone, planningDate, horizon, availabilityConfigured }: PlanDayClientProps) {
+  const router = useRouter();
+  const authenticated = !!timezone && !!planningDate && !!horizon;
   const [phase, setPhase] = useState<Phase>(() => (authenticated ? 'ENTRY' : 'REDIRECTING'));
   const [rows, setRows] = useState<PlanDayIntentRow[]>(() => [createEmptyIntentRow()]);
   const [preview, setPreview] = useState<ConstructDayPreview | null>(null);
   const [entryError, setEntryError] = useState<EntryErrorState | null>(null);
+  // Planning Horizon V1 PR P2 -- true only when a Preview call returned
+  // FUTURE_AVAILABILITY_REQUIRED despite bootstrap saying configured
+  // (another tab/session reset Availability between page load and
+  // Preview -- a real, reachable race, not hypothetical). Reset whenever
+  // `horizon` itself changes (below) so switching back to Today never
+  // leaves a stale Tomorrow-only block in place.
+  const [availabilityRequiredStale, setAvailabilityRequiredStale] = useState(false);
 
   useEffect(() => {
     if (phase === 'REDIRECTING') window.location.href = '/';
   }, [phase]);
+
+  // A horizon switch is a fresh server render (page.tsx) landing on the
+  // SAME mounted component -- React preserves `rows` across it by default
+  // (this ticket's own section 13, intentionally relied upon, never
+  // reimplemented). Only per-request UI state that could otherwise
+  // describe the WRONG day is reset here.
+  useEffect(() => {
+    setEntryError(null);
+    setAvailabilityRequiredStale(false);
+    setPhase((current) => (current === 'PREVIEW_ERROR' ? 'ENTRY' : current));
+  }, [horizon]);
 
   function updateRow(id: string, patch: Partial<PlanDayIntentRow>) {
     setRows((current) => current.map((row) => (row.id === id ? { ...row, ...patch } : row)));
@@ -99,8 +130,13 @@ export function PlanDayClient({ timezone, planningDate }: PlanDayClientProps) {
     setRows((current) => (current.length > 1 ? current.filter((row) => row.id !== id) : current));
   }
 
+  function selectHorizon(next: PlanningHorizon) {
+    if (next === horizon) return;
+    router.push(next === 'TOMORROW' ? '/plan-day?horizon=tomorrow' : '/plan-day?horizon=today');
+  }
+
   async function submitPreview() {
-    if (!timezone || !planningDate || phase === 'SUBMITTING') return;
+    if (!timezone || !planningDate || !horizon || phase === 'SUBMITTING') return;
     setPhase('SUBMITTING');
     setEntryError(null);
     // `buildRequestedIntentsForSubmission` throws only for a past-deadline
@@ -121,8 +157,14 @@ export function PlanDayClient({ timezone, planningDate }: PlanDayClientProps) {
     if (result.status === 'READY') {
       setPreview(result.preview);
       setPhase('PREVIEW');
+    } else if (result.status === 'FUTURE_AVAILABILITY_REQUIRED') {
+      // Stale-availability race (this ticket's own section 17) -- route
+      // to the SAME actionable prerequisite card the bootstrap-known case
+      // renders, never a generic error.
+      setAvailabilityRequiredStale(true);
+      setPhase('ENTRY');
     } else {
-      setEntryError(presentPlanDayPreviewFailure(result));
+      setEntryError(presentPlanDayPreviewFailure(result, horizon));
       setPhase('PREVIEW_ERROR');
     }
   }
@@ -143,15 +185,42 @@ export function PlanDayClient({ timezone, planningDate }: PlanDayClientProps) {
   }
 
   function handleSaved(_plans: PersistedPlanSummary[]) {
-    // Return to Home; Home's own on-mount effects (loadMyDay/loadGuidance,
-    // gated on activeTab==='home'/user?.id) already refresh Plan-backed
-    // state on every fresh mount of `/` -- no additional refresh signal is
-    // needed across this route boundary (this ticket's own section 38,
-    // confirmed by direct audit of apps/web/app/page.tsx).
+    // TODAY -- unchanged: return to Home; Home's own on-mount effects
+    // (loadMyDay/loadGuidance, gated on activeTab==='home'/user?.id)
+    // already refresh Plan-backed state on every fresh mount of `/` (this
+    // ticket's own section 38, confirmed by direct audit of
+    // apps/web/app/page.tsx).
+    //
+    // Planning Horizon V1 PR P2 -- TOMORROW: Home's own agenda queries are
+    // Today-scoped, so a Tomorrow Plan would be silently invisible there.
+    // Stay on this page and show an explicit confirmation instead of a
+    // redirect that would read as though the save vanished (this ticket's
+    // own section 28/29).
+    if (horizon === 'TOMORROW') {
+      setPhase('SAVED');
+      return;
+    }
     window.location.href = '/';
   }
 
   if (phase === 'REDIRECTING') return null;
+
+  if (phase === 'SAVED') {
+    return (
+      <div style={{ minHeight: '100vh', background: 'var(--as-bg)', color: colors.textPrimary, fontFamily: 'var(--as-font-body)', display: 'flex', justifyContent: 'center', padding: `${spacing.xxxl}px ${spacing.lg}px` }}>
+        <div style={{ width: '100%', maxWidth: 480 }}>
+          <SurfaceCard>
+            <p style={{ margin: 0, fontWeight: 700 }}>Tomorrow is planned.</p>
+            <div style={{ marginTop: spacing.md }}>
+              <PrimaryButton onClick={() => { window.location.href = '/'; }}>Back to Home</PrimaryButton>
+            </div>
+          </SurfaceCard>
+        </div>
+      </div>
+    );
+  }
+
+  const showAvailabilityPrerequisite = (horizon === 'TOMORROW' && availabilityConfigured === false) || availabilityRequiredStale;
 
   return (
     <div style={{ minHeight: '100vh', background: 'var(--as-bg)', color: colors.textPrimary, fontFamily: 'var(--as-font-body)', display: 'flex', justifyContent: 'center', padding: `${spacing.xxxl}px ${spacing.lg}px` }}>
@@ -168,44 +237,69 @@ export function PlanDayClient({ timezone, planningDate }: PlanDayClientProps) {
           <DayPlanPreviewController preview={preview} onDiscard={handleDiscard} onSaved={handleSaved} onRefreshRequested={handleRefreshRequested} />
         ) : (
           <>
-            <PageHeader title="Plan my day" subtitle="What do you want to get done today?" />
+            <PageHeader title="Plan my day" subtitle={horizon === 'TOMORROW' ? 'What do you want to get done tomorrow?' : 'What do you want to get done today?'} />
 
-            <div style={{ display: 'flex', flexDirection: 'column', gap: spacing.md, marginTop: spacing.xl }}>
-              {rows.map((row, index) => (
-                <IntentRowCard
-                  key={row.id}
-                  row={row}
-                  index={index}
-                  planningDate={planningDate}
-                  canRemove={rows.length > 1}
-                  disabled={phase === 'SUBMITTING'}
-                  onChange={(patch) => updateRow(row.id, patch)}
-                  onRemove={() => removeRow(row.id)}
-                />
-              ))}
+            <div style={{ marginTop: spacing.xl }}>
+              <FieldLabel>When are you planning for?</FieldLabel>
+              <SegmentedControl
+                options={[
+                  { value: 'TODAY', label: 'Today' },
+                  { value: 'TOMORROW', label: 'Tomorrow' },
+                ]}
+                value={horizon ?? 'TODAY'}
+                onChange={(value) => selectHorizon(value)}
+              />
             </div>
 
-            <div style={{ marginTop: spacing.md }}>
-              <TextButton onClick={addRow} color={colors.info} style={{ opacity: canAddAnotherRow(rows) ? 1 : 0.4, pointerEvents: canAddAnotherRow(rows) ? 'auto' : 'none' }}>
-                + Add another
-              </TextButton>
-            </div>
-
-            {phase === 'PREVIEW_ERROR' && entryError && (
+            {showAvailabilityPrerequisite ? (
               <SurfaceCard style={{ marginTop: spacing.lg }}>
-                <FieldError>{entryError.message}</FieldError>
-                <div style={{ display: 'flex', gap: spacing.md, marginTop: spacing.md }}>
-                  <SecondaryButton onClick={() => setPhase('ENTRY')}>Edit</SecondaryButton>
-                  {entryError.retryable && <PrimaryButton onClick={() => void submitPreview()}>Try again</PrimaryButton>}
+                <p style={{ margin: 0, fontWeight: 700 }}>Set your availability first</p>
+                <p style={{ marginTop: spacing.xs, marginBottom: 0, color: colors.textSecondary }}>Aura needs to know when you're usually available before it can plan a future day.</p>
+                <div style={{ marginTop: spacing.md }}>
+                  <PrimaryButton onClick={() => { window.location.href = '/?tab=you'; }}>Set availability</PrimaryButton>
                 </div>
               </SurfaceCard>
-            )}
+            ) : (
+              <>
+                <div style={{ display: 'flex', flexDirection: 'column', gap: spacing.md, marginTop: spacing.lg }}>
+                  {rows.map((row, index) => (
+                    <IntentRowCard
+                      key={row.id}
+                      row={row}
+                      index={index}
+                      planningDate={planningDate}
+                      horizon={horizon}
+                      canRemove={rows.length > 1}
+                      disabled={phase === 'SUBMITTING'}
+                      onChange={(patch) => updateRow(row.id, patch)}
+                      onRemove={() => removeRow(row.id)}
+                    />
+                  ))}
+                </div>
 
-            <div style={{ marginTop: spacing.xxl, display: 'flex', justifyContent: 'flex-end' }}>
-              <PrimaryButton onClick={() => void submitPreview()} disabled={!planningDate || !canSubmitPlanDay(rows, planningDate)} loading={phase === 'SUBMITTING'} ariaLabel="Plan my day">
-                Plan my day
-              </PrimaryButton>
-            </div>
+                <div style={{ marginTop: spacing.md }}>
+                  <TextButton onClick={addRow} color={colors.info} style={{ opacity: canAddAnotherRow(rows) ? 1 : 0.4, pointerEvents: canAddAnotherRow(rows) ? 'auto' : 'none' }}>
+                    + Add another
+                  </TextButton>
+                </div>
+
+                {phase === 'PREVIEW_ERROR' && entryError && (
+                  <SurfaceCard style={{ marginTop: spacing.lg }}>
+                    <FieldError>{entryError.message}</FieldError>
+                    <div style={{ display: 'flex', gap: spacing.md, marginTop: spacing.md }}>
+                      <SecondaryButton onClick={() => setPhase('ENTRY')}>Edit</SecondaryButton>
+                      {entryError.retryable && <PrimaryButton onClick={() => void submitPreview()}>Try again</PrimaryButton>}
+                    </div>
+                  </SurfaceCard>
+                )}
+
+                <div style={{ marginTop: spacing.xxl, display: 'flex', justifyContent: 'flex-end' }}>
+                  <PrimaryButton onClick={() => void submitPreview()} disabled={!planningDate || !canSubmitPlanDay(rows, planningDate)} loading={phase === 'SUBMITTING'} ariaLabel="Plan my day">
+                    Plan my day
+                  </PrimaryButton>
+                </div>
+              </>
+            )}
           </>
         )}
       </div>
@@ -217,6 +311,7 @@ function IntentRowCard({
   row,
   index,
   planningDate,
+  horizon,
   canRemove,
   disabled,
   onChange,
@@ -225,6 +320,7 @@ function IntentRowCard({
   row: PlanDayIntentRow;
   index: number;
   planningDate: string | null;
+  horizon: PlanningHorizon | null;
   canRemove: boolean;
   disabled: boolean;
   onChange: (patch: Partial<PlanDayIntentRow>) => void;
@@ -293,6 +389,7 @@ function IntentRowCard({
           rowId={row.id}
           deadlineChoice={row.deadlineChoice}
           planningDate={planningDate}
+          horizon={horizon}
           disabled={disabled}
           hasError={showPastDeadlineError}
           onChange={(deadlineChoice) => onChange({ deadlineChoice })}
@@ -311,11 +408,23 @@ function IntentRowCard({
  * always rendered in a visually SEPARATE control from "At a specific
  * time" above, so the two intent facts (urgency vs. scheduling
  * constraint) are never presented as one choice.
+ *
+ * Planning Horizon V1 PR P2 -- `resolveDeadline`'s own `'TODAY'` choice
+ * (planDayEntry.ts) has always resolved to `planningDate` verbatim,
+ * whatever `planningDate` currently is -- the domain never distinguished
+ * "the real calendar today" from "the day being planned." That was
+ * invisible while only Today existed; once Tomorrow is selectable, a
+ * chip literally labeled "Today" would misleadingly describe a same-day
+ * (Tomorrow-relative) deadline. This is a PRESENTATION-ONLY fix
+ * (`firstChipLabel` below) -- `resolveDeadline`/`PlanDayDeadlineChoice`'s
+ * own `kind: 'TODAY'` value, and the deadline it resolves to, are
+ * unchanged.
  */
 function DueByControl({
   rowId,
   deadlineChoice,
   planningDate,
+  horizon,
   disabled,
   hasError,
   onChange,
@@ -323,12 +432,14 @@ function DueByControl({
   rowId: string;
   deadlineChoice: PlanDayDeadlineChoice;
   planningDate: string | null;
+  horizon: PlanningHorizon | null;
   disabled: boolean;
   hasError: boolean;
   onChange: (choice: PlanDayDeadlineChoice) => void;
 }) {
   const [expanded, setExpanded] = useState(deadlineChoice.kind !== 'NONE');
   const dateInputId = `plan-day-deadline-${rowId}`;
+  const firstChipLabel = horizon === 'TOMORROW' ? 'Same day' : 'Today';
 
   if (!expanded) {
     return (
@@ -342,7 +453,7 @@ function DueByControl({
     <div>
       <FieldLabel>Due by</FieldLabel>
       <div style={{ display: 'flex', flexWrap: 'wrap', gap: spacing.xs }}>
-        <DurationChip label="Today" selected={deadlineChoice.kind === 'TODAY'} onClick={() => onChange({ kind: 'TODAY' })} />
+        <DurationChip label={firstChipLabel} selected={deadlineChoice.kind === 'TODAY'} onClick={() => onChange({ kind: 'TODAY' })} />
         <DurationChip label="Tomorrow" selected={deadlineChoice.kind === 'TOMORROW'} onClick={() => onChange({ kind: 'TOMORROW' })} />
         <DurationChip label="This week" selected={deadlineChoice.kind === 'THIS_WEEK'} onClick={() => onChange({ kind: 'THIS_WEEK' })} />
         <DurationChip label="Pick date" selected={deadlineChoice.kind === 'CUSTOM'} onClick={() => onChange({ kind: 'CUSTOM', date: planningDate ?? '' })} />

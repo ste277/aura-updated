@@ -23,6 +23,21 @@ export interface PlanDayBootstrap {
 }
 
 /**
+ * Planning Horizon V1 PR P2 -- what `resolvePlanDayServerProps` actually
+ * returns: `PlanDayBootstrap`'s own pure civil-date facts, plus the ONE
+ * additional fact the Tomorrow UI needs (this ticket's own section 8):
+ * whether the user has a saved Availability configuration at all.
+ * `resolvePlanDayBootstrap` itself stays entirely unaware of
+ * availability (single responsibility preserved) -- this fact is
+ * attached here, one level up, where `user` (already fetched for
+ * `user.timezone`) is already in scope, so it costs zero extra query and
+ * never duplicates H1/H2's own resolution logic.
+ */
+export interface PlanDayServerProps extends PlanDayBootstrap {
+  availabilityConfigured: boolean;
+}
+
+/**
  * Pure. The one civil-date derivation this entire feature performs --
  * reused verbatim by both the FIXED-time assembly (planDayEntry.ts) and
  * the preview request's own `targetDate` (this ticket's own section 7),
@@ -48,8 +63,13 @@ export interface PlanDayBootstrapDeps {
    * ticket's own section 15: reuse the existing mechanism, never a
    * second auth model). */
   verifySession: (token: string) => { userId: string } | null;
-  /** `getUserById` (db.ts), passed by reference. */
-  getUser: (userId: string) => Promise<{ timezone: string } | null>;
+  /** `getUserById` (db.ts), passed by reference. `availabilityConfigured`
+   * is optional here (this ticket's own section 8) -- the real `User` row
+   * always carries it, but a test fixture supplying only `{ timezone }`
+   * (P1's own established convention) must keep working unchanged; a
+   * missing value is treated identically to `false` (see
+   * `resolvePlanDayServerProps` below), never a fabricated `true`. */
+  getUser: (userId: string) => Promise<{ timezone: string; availabilityConfigured?: boolean } | null>;
   /** The authoritative server clock, read exactly once. */
   now: () => Date;
 }
@@ -69,7 +89,7 @@ export interface PlanDayBootstrapDeps {
  * Server Component caller) does not pass a horizon yet -- P2's own
  * scope.
  */
-export async function resolvePlanDayServerProps(deps: PlanDayBootstrapDeps, horizon: PlanningHorizon = 'TODAY'): Promise<PlanDayBootstrap | null> {
+export async function resolvePlanDayServerProps(deps: PlanDayBootstrapDeps, horizon: PlanningHorizon = 'TODAY'): Promise<PlanDayServerProps | null> {
   const token = deps.getSessionToken();
   if (!token) return null;
 
@@ -79,5 +99,6 @@ export async function resolvePlanDayServerProps(deps: PlanDayBootstrapDeps, hori
   const user = await deps.getUser(session.userId);
   if (!user) return null;
 
-  return resolvePlanDayBootstrap(user.timezone, deps.now(), horizon);
+  const bootstrap = resolvePlanDayBootstrap(user.timezone, deps.now(), horizon);
+  return { ...bootstrap, availabilityConfigured: user.availabilityConfigured === true };
 }

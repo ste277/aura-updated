@@ -33,6 +33,8 @@ const homeDashboardSource: string = fs.readFileSync(path.join(__dirname, '../app
 const pageSource: string = fs.readFileSync(path.join(__dirname, '../apps/web/app/page.tsx'), 'utf8');
 const homeTimelineSource: string = fs.readFileSync(path.join(__dirname, '../apps/web/components/HomeTimeline.tsx'), 'utf8');
 const planDayEntrySource: string = fs.readFileSync(path.join(__dirname, '../apps/web/lib/planDayEntry.ts'), 'utf8');
+const planningHorizonSource: string = fs.readFileSync(path.join(__dirname, '../apps/web/lib/planningHorizon.ts'), 'utf8');
+const dayConstructorPreviewClientSource: string = fs.readFileSync(path.join(__dirname, '../apps/web/lib/dayConstructorPreviewClient.ts'), 'utf8');
 
 function occurrences(haystack: string, needle: string): number {
   return haystack.split(needle).length - 1;
@@ -68,7 +70,10 @@ function main() {
   check('13. onDiscard never calls the preview or accept network path', (() => { const m = planDayClientSource.match(/function handleDiscard\(\)\s*\{([\s\S]*?)\n\s*\}/); return !!m && !m[1].includes('fetch') && !m[1].includes('previewConstructedDay'); })());
   check('14. onRefreshRequested reruns the preview request rather than reusing a stale one', /function handleRefreshRequested\(\)\s*\{[^}]*submitPreview\(\)/.test(planDayClientSource));
   check('15. onRefreshRequested never itself calls acceptance/save', (() => { const m = planDayClientSource.match(/function handleRefreshRequested\(\)\s*\{([\s\S]*?)\n\s*\}/); return !!m && !m[1].includes('accept') && !m[1].includes('/api/plans'); })());
-  check('16. onSaved navigates back to Home (a real cross-route navigation, matching this app\'s own established convention)', /function handleSaved\([^)]*\)\s*\{[^}]*window\.location\.href = '\/'/.test(planDayClientSource));
+  check(
+    '16. onSaved still navigates back to Home for the TODAY case (a real cross-route navigation, matching this app\'s own established convention)',
+    /function handleSaved\([^)]*\)\s*\{[\s\S]*?window\.location\.href = '\/';/.test(planDayClientSource)
+  );
   check('17. no Redux/Zustand/global event bus is introduced', !/redux|zustand|eventemitter|globalThis\.__/i.test(planDayClientSource));
   check('18. DayPlanPreviewController is only ever rendered while phase === \'PREVIEW\' (never for the empty/unsubmitted entry state)', planDayClientSource.includes("phase === 'PREVIEW' && preview ?"));
 
@@ -117,7 +122,10 @@ function main() {
   // Planning-date hardening -- server-authoritative bootstrap wiring
   // (30-38)
   // ============================================================
-  check('30. page.tsx is a real async Server Component doing the session/user read itself (matches the established app/moment/[token]/page.tsx precedent)', /export default async function PlanDayPage\(\)/.test(planDayPageSource));
+  check(
+    '30. page.tsx is a real async Server Component doing the session/user read itself (matches the established app/moment/[token]/page.tsx precedent)',
+    /export default async function PlanDayPage\(\{ searchParams \}/.test(planDayPageSource)
+  );
   check('31. page.tsx reads the authoritative clock exactly once, passed by reference into resolvePlanDayServerProps', occurrences(planDayPageSource, 'new Date()') === 1 && planDayPageSource.includes('now: () => new Date()'));
   // Intent Fidelity V1 PR G3/G4 added `resolveThisWeekDeadline`'s own
   // `new Date(Date.UTC(year, month - 1, day))` to planDayEntry.ts -- the
@@ -134,9 +142,19 @@ function main() {
   check('33. page.tsx delegates the actual session/user/date decision to resolvePlanDayServerProps -- it makes no decision of its own beyond wiring closures', planDayPageSource.includes('resolvePlanDayServerProps({'));
   check('34. planDayBootstrap.ts imports no next/server or next/headers of its own -- fully framework-independent, directly testable (mirrors F1s own handleDayConstructorPreviewRequest pattern)', !/next\/server|next\/headers/.test(planDayBootstrapSource));
   check('35. resolvePlanDayBootstrap reuses the canonical getDatePartsInTimezone helper -- no second civil-date derivation', planDayBootstrapSource.includes("from './timezone'"));
-  check('36. PlanDayClient accepts timezone/planningDate as props (server-supplied), not internal state derived from a fetch', /export function PlanDayClient\(\{ timezone, planningDate \}: PlanDayClientProps\)/.test(planDayClientSource));
+  check(
+    '36. PlanDayClient accepts timezone/planningDate/horizon/availabilityConfigured as props (server-supplied), not internal state derived from a fetch',
+    /export function PlanDayClient\(\{ timezone, planningDate, horizon, availabilityConfigured \}: PlanDayClientProps\)/.test(planDayClientSource)
+  );
   check('37. buildRequestedIntentsForSubmission and previewConstructedDay are both called with the SAME planningDate value at the submit call site', /buildRequestedIntentsForSubmission\(rows, timezone, planningDate\)/.test(planDayClientSource) && /previewConstructedDay\(intents, planningDate\)/.test(planDayClientSource));
-  check('38. page.tsx never accepts planningDate/timezone from a query string, header, or client-suppliable input -- both come exclusively from resolvePlanDayServerProps\'s own return value', !/searchParams|req\.query|req\.headers/.test(planDayPageSource));
+  check(
+    '38. page.tsx reads searchParams ONLY for horizon selection -- planningDate/timezone are NEVER read from a query string, header, or other client-suppliable input; both still come exclusively from resolvePlanDayServerProps\'s own return value',
+    /searchParams\.horizon/.test(planDayPageSource) &&
+      !/searchParams\.(timezone|planningDate)/.test(planDayPageSource) &&
+      !/req\.query|req\.headers/.test(planDayPageSource) &&
+      planDayPageSource.includes('timezone={bootstrap?.timezone ?? null}') &&
+      planDayPageSource.includes('planningDate={bootstrap?.planningDate ?? null}')
+  );
 
   // ============================================================
   // Intent Fidelity V1 PR G3/G4 -- Important/Due-by wiring (39-41)
@@ -144,6 +162,95 @@ function main() {
   check('39. the Submit gate now also requires planningDate, matching canSubmitPlanDay\'s own extended (rows, planningDate) signature', /canSubmitPlanDay\(rows, planningDate\)/.test(planDayClientSource));
   check('40. the row card never sends an explicit MEDIUM/LOW UI label -- HIGH/MEDIUM/LOW are not used as UI vocabulary anywhere in this file', !/label="HIGH"|label="MEDIUM"|label="LOW"|label='HIGH'|label='MEDIUM'|label='LOW'/.test(planDayClientSource));
   check('41. the Important control and the FIXED-time control remain visually/lexically distinct -- deadline is labeled "Due by", never "Due at"', planDayClientSource.includes('Due by') && !planDayClientSource.includes('Due at'));
+
+  // ============================================================
+  // Planning Horizon V1 PR P2 -- horizon selector, navigation, gating,
+  // stale-availability handling, Tomorrow confirmation (42-59).
+  // ============================================================
+
+  // 42. Horizon parser exists, is pure, and lives with the domain helper (this ticket's own section 4).
+  check('42. planningHorizon.ts exports a pure parseHorizonSearchParam helper', planningHorizonSource.includes('export function parseHorizonSearchParam('));
+  check('42b. page.tsx uses that SAME parser rather than a second, ad-hoc one of its own', planDayPageSource.includes('parseHorizonSearchParam(searchParams.horizon)'));
+
+  // 43. Selector navigation targets the canonical URLs, never mutates planningDate locally.
+  check('43. selecting Today navigates to /plan-day?horizon=today', planDayClientSource.includes("'/plan-day?horizon=today'"));
+  check('44. selecting Tomorrow navigates to /plan-day?horizon=tomorrow', planDayClientSource.includes("'/plan-day?horizon=tomorrow'"));
+  check('44b. horizon selection uses next/navigation\'s router, never a full window.location reload', planDayClientSource.includes("from 'next/navigation'") && planDayClientSource.includes('router.push('));
+  check('44c. selectHorizon never itself computes a date (no addDaysToDateStr/getDatePartsInTimezone call in PlanDayClient.tsx)', !/addDaysToDateStr|getDatePartsInTimezone/.test(planDayClientSource));
+
+  // 45. No This Week control anywhere in the horizon selector.
+  check(
+    '45. the horizon selector offers exactly Today/Tomorrow -- no This Week/date-picker/multi-day control',
+    /options=\{\[\s*\{ value: 'TODAY', label: 'Today' \},\s*\{ value: 'TOMORROW', label: 'Tomorrow' \},\s*\]\}/.test(planDayClientSource)
+  );
+
+  // 46. Default Home entry unaffected -- page.tsx's own onPlanDay wiring (check 27 above) still carries no horizon param.
+  check('46. Home\'s own Plan my day link still carries no horizon param (default entry stays Today)', pageSource.includes("onPlanDay={() => { window.location.href = '/plan-day'; }}") && !pageSource.includes('/plan-day?horizon'));
+
+  // 47/48. Tomorrow-unconfigured prerequisite gating -- known at bootstrap.
+  check(
+    '47. TOMORROW + availabilityConfigured=== false renders the Availability prerequisite as the PRIMARY state (not the ordinary intent form)',
+    /const showAvailabilityPrerequisite = \(horizon === 'TOMORROW' && availabilityConfigured === false\)/.test(planDayClientSource)
+  );
+  check('48. the Availability prerequisite links to the existing You tab (/?tab=you), never a new Settings route', planDayClientSource.includes("'/?tab=you'"));
+
+  // 49. Backend guard (P1) is never removed/bypassed -- FUTURE_AVAILABILITY_REQUIRED remains a real, distinct client status.
+  check('49. FUTURE_AVAILABILITY_REQUIRED is a real member of ConstructDayPreviewClientResult, never folded into UNKNOWN_RESPONSE', dayConstructorPreviewClientSource.includes("{ status: 'FUTURE_AVAILABILITY_REQUIRED' }"));
+  check(
+    "49b. the preview response parser has an explicit case for it (never falls through to the 'default: UNKNOWN_RESPONSE' branch)",
+    /case 'FUTURE_AVAILABILITY_REQUIRED':\s*\n\s*return \{ status: 'FUTURE_AVAILABILITY_REQUIRED' \};/.test(dayConstructorPreviewClientSource)
+  );
+
+  // 50. Stale-availability race -- PlanDayClient routes a runtime FUTURE_AVAILABILITY_REQUIRED to the SAME prerequisite UI, not a generic error.
+  check(
+    "50. a runtime FUTURE_AVAILABILITY_REQUIRED result sets availabilityRequiredStale rather than a generic entryError",
+    /result\.status === 'FUTURE_AVAILABILITY_REQUIRED'\) \{[\s\S]*?setAvailabilityRequiredStale\(true\)/.test(planDayClientSource)
+  );
+  check(
+    '50b. availabilityRequiredStale feeds the SAME showAvailabilityPrerequisite flag the bootstrap-known case uses -- one prerequisite UI, not two',
+    /showAvailabilityPrerequisite = \(horizon === 'TOMORROW' && availabilityConfigured === false\) \|\| availabilityRequiredStale/.test(planDayClientSource)
+  );
+  check(
+    '50c. the stale-availability flag is reset whenever horizon itself changes, so switching back to Today never leaves a stale Tomorrow-only block in place',
+    /useEffect\(\(\) => \{[\s\S]*?setAvailabilityRequiredStale\(false\);[\s\S]*?\}, \[horizon\]\);/.test(planDayClientSource)
+  );
+
+  // 51. CONFIGURED_EMPTY must never trigger the unconfigured prerequisite -- it's a distinct, allowed-to-preview state.
+  check(
+    "51. the Availability prerequisite condition checks availabilityConfigured === false specifically -- a CONFIGURED_EMPTY day (availabilityConfigured === true) can never trigger it",
+    planDayClientSource.includes("availabilityConfigured === false")
+  );
+
+  // 52. Horizon-aware NO_USABLE_CAPACITY copy is call-site-wired with the real horizon, not a hardcoded 'TODAY'.
+  check('52. submitPreview passes the real horizon into presentPlanDayPreviewFailure (not a hardcoded default)', /presentPlanDayPreviewFailure\(result, horizon\)/.test(planDayClientSource));
+
+  // 53. FIXED conversion still uses only planningDate + timezone -- no per-row date field, no THIS_WEEK ambiguity introduced.
+  check('53. resolveFixedStart\'s own call site (via buildRequestedIntentsForSubmission) is unaffected -- still exactly planningDate/timezone, no new date parameter', planDayEntrySource.includes('resolveFixedStart(row, planningDate, timezone)'));
+
+  // 54. Acceptance path -- zero diff proof (structural, mirrors check 6-9 above but reconfirmed post-P2).
+  check('54. DayPlanPreviewController is still the ONLY acceptance-owning import -- P2 added no second accept path', occurrences(planDayClientSource, "from '../../components/DayPlanPreviewController'") === 1);
+
+  // 55/56. Tomorrow success -- no immediate Home redirect, explicit confirmation with a real action.
+  check(
+    "55. TOMORROW success does NOT immediately redirect to Home -- it sets phase to 'SAVED' instead",
+    /if \(horizon === 'TOMORROW'\) \{\s*setPhase\('SAVED'\);\s*return;\s*\}/.test(planDayClientSource)
+  );
+  check('56. the SAVED phase renders an explicit confirmation message', planDayClientSource.includes('Tomorrow is planned.'));
+  check('56b. the SAVED phase offers a real Back to Home action (not a dead end)', /phase === 'SAVED'[\s\S]*?Back to Home/.test(planDayClientSource));
+
+  // 57. TODAY success is unaffected -- reconfirms check 16 from the opposite direction (the conditional branch, not just the fallback line).
+  check(
+    "57. TODAY (horizon !== 'TOMORROW') still falls through to the pre-P2 immediate Home redirect, unconditionally",
+    /if \(horizon === 'TOMORROW'\) \{\s*setPhase\('SAVED'\);\s*return;\s*\}\s*\n\s*window\.location\.href = '\/';/.test(planDayClientSource)
+  );
+
+  // 58. Due-by label -- presentation only, domain kind:'TODAY' unchanged.
+  check('58. the first Due-by chip\'s label is horizon-aware (Same day under Tomorrow) while its own kind stays TODAY', /const firstChipLabel = horizon === 'TOMORROW' \? 'Same day' : 'Today';/.test(planDayClientSource) && planDayClientSource.includes("kind: 'TODAY'"));
+  check('58b. resolveDeadline/PlanDayDeadlineChoice\'s own TODAY variant is never renamed -- planDayEntry.ts is untouched at the type level', planDayEntrySource.includes("{ kind: 'TODAY' }"));
+
+  // 59. Intent-row preservation -- PlanDayClient is never remounted/keyed by horizon (this ticket's own section 13/46): no `key={horizon}` anywhere, and `rows` state is declared once, outside any horizon-conditional branch.
+  check('59. PlanDayClient carries no key={horizon} (or similar) that would force a remount/state-reset on horizon switch', !/key=\{horizon\}/.test(planDayClientSource));
+  check('59b. the rows state itself is declared exactly once, unconditionally (never re-initialized inside a horizon branch)', occurrences(planDayClientSource, 'useState<PlanDayIntentRow[]>') === 1);
 
   if (!allPassed) {
     console.error('\nSome Plan Day Wiring checks FAILED.');

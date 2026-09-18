@@ -3,6 +3,7 @@ import { cookies } from 'next/headers';
 import { verifySessionToken, SESSION_COOKIE_NAME } from '../../lib/auth';
 import { getUserById } from '../../lib/db';
 import { resolvePlanDayServerProps } from '../../lib/planDayBootstrap';
+import { parseHorizonSearchParam } from '../../lib/planningHorizon';
 import { PlanDayClient } from './PlanDayClient';
 
 /**
@@ -25,6 +26,15 @@ import { PlanDayClient } from './PlanDayClient';
  * standard, first-party Next.js primitive for reading that SAME cookie
  * from within a Server Component (where a `NextRequest` isn't available),
  * not a second authentication model (this ticket's own section 15).
+ *
+ * Planning Horizon V1 PR P2 -- `searchParams.horizon` is parsed here,
+ * server-side, into a real `PlanningHorizon` (`parseHorizonSearchParam`,
+ * planningHorizon.ts) and forwarded to `resolvePlanDayServerProps`.
+ * Selecting a horizon client-side (PlanDayClient.tsx) navigates to
+ * `/plan-day?horizon=...`, which re-invokes THIS Server Component --
+ * every horizon resolution is therefore a genuinely fresh server render,
+ * with its own fresh `now()` read (never `oldPlanningDate + 1`, never a
+ * browser-clock computation -- this ticket's own section 6/7).
  */
 
 export const metadata: Metadata = {
@@ -32,12 +42,20 @@ export const metadata: Metadata = {
   description: 'Tell Aura what you want to get done today and see how it fits.',
 };
 
-export default async function PlanDayPage() {
+export default async function PlanDayPage({ searchParams }: { searchParams: { horizon?: string | string[] } }) {
+  const horizon = parseHorizonSearchParam(searchParams.horizon);
   const bootstrap = await resolvePlanDayServerProps({
     getSessionToken: () => cookies().get(SESSION_COOKIE_NAME)?.value,
     verifySession: (token) => verifySessionToken(token),
     getUser: (userId) => getUserById(userId),
     now: () => new Date(),
-  });
-  return <PlanDayClient timezone={bootstrap?.timezone ?? null} planningDate={bootstrap?.planningDate ?? null} />;
+  }, horizon);
+  return (
+    <PlanDayClient
+      timezone={bootstrap?.timezone ?? null}
+      planningDate={bootstrap?.planningDate ?? null}
+      horizon={bootstrap ? horizon : null}
+      availabilityConfigured={bootstrap?.availabilityConfigured ?? null}
+    />
+  );
 }

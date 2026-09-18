@@ -6,7 +6,11 @@
  * repository's own established convention for testing `addDaysToDateStr`
  * itself (timezone.ts).
  */
-import { resolvePlanningTargetDate, type PlanningHorizon } from '../apps/web/lib/planningHorizon';
+import fs from 'fs';
+import path from 'path';
+import { resolvePlanningTargetDate, parseHorizonSearchParam, type PlanningHorizon } from '../apps/web/lib/planningHorizon';
+
+const planningHorizonSource: string = fs.readFileSync(path.join(__dirname, '../apps/web/lib/planningHorizon.ts'), 'utf8');
 
 let allPassed = true;
 function check(label: string, condition: boolean) {
@@ -53,6 +57,28 @@ function main() {
   // convention -- see this file's own module doc comment).
   // ============================================================
   check('11. resolvePlanningTargetDate takes no Date/clock argument -- pure civil-date-string input only', resolvePlanningTargetDate.length === 1);
+
+  // ============================================================
+  // Planning Horizon V1 PR P2 -- parseHorizonSearchParam (12-20). Pure
+  // string matching only, mirroring this repository's own `?tab=`
+  // precedent (apps/web/app/page.tsx: an unrecognized value silently
+  // falls back, never a not-found/error page).
+  // ============================================================
+  check('12. missing (undefined) resolves TODAY', parseHorizonSearchParam(undefined) === 'TODAY');
+  check("13. explicit 'today' resolves TODAY", parseHorizonSearchParam('today') === 'TODAY');
+  check("14. 'tomorrow' resolves TOMORROW", parseHorizonSearchParam('tomorrow') === 'TOMORROW');
+  check("15. an unknown value resolves TODAY, never a thrown error or a third state", parseHorizonSearchParam('nextweek') === 'TODAY');
+  check("16. a malformed/empty-string value resolves TODAY", parseHorizonSearchParam('') === 'TODAY');
+  check("17. case sensitivity: 'Tomorrow'/'TOMORROW' do NOT match (only the exact lowercase 'tomorrow') -- resolves TODAY, deterministic and simple rather than permissive", parseHorizonSearchParam('Tomorrow') === 'TODAY' && parseHorizonSearchParam('TOMORROW') === 'TODAY');
+  check(
+    '18. Next.js\'s own repeated-query-param shape (string[]) is handled -- only the first occurrence is consulted, matching the ?tab= precedent',
+    parseHorizonSearchParam(['tomorrow', 'today']) === 'TOMORROW' && parseHorizonSearchParam(['today', 'tomorrow']) === 'TODAY'
+  );
+  check('19. an empty array resolves TODAY, never a crash on an out-of-bounds index', parseHorizonSearchParam([]) === 'TODAY');
+  check(
+    '20. parseHorizonSearchParam reads no clock and performs no civil-date arithmetic -- pure string matching only',
+    !/addDaysToDateStr|getDatePartsInTimezone|new Date/.test(planningHorizonSource.split('export function parseHorizonSearchParam')[1] ?? '')
+  );
 
   if (!allPassed) {
     console.error('\nSome Planning Horizon checks FAILED.');
