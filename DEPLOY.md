@@ -90,6 +90,131 @@ spec's kill criteria.
 (This is the actual live deployment target as of Web Push V1 below — confirmed via
 `apps/web/vercel.json` and the project's own `.vercel/` metadata.)
 
+## Production database migrations (Production Migration Release Safety V1)
+
+**Incident this exists to prevent:** migration `0034_user_availability` was merged
+and deployed to Production application code before the Production Postgres database
+had actually received that migration — CI's own migration-chain validation job only
+proves the migration *chain* is internally consistent against a fresh, disposable
+database, never that a specific deployed environment has received it. The result was
+two live failures (`GET /api/users/availability-preferences` and
+`POST /api/day-constructor/preview` both throwing on the missing `UserAvailabilityPeriod`
+table) until the migration was applied manually.
+
+**When migrations run:** automatically, as the first step of every **Production**
+Vercel build — never for Preview deployments, never for local dev, never as part of
+this repository's own PR CI (`.github/workflows/ci.yml`'s "Next.js production build"
+job still runs the plain, migration-free `next build`, unchanged).
+
+**Mechanism:** `apps/web/package.json`'s `vercel-build` script (Vercel's own
+documented build-command-override convention — recognized automatically, no Vercel
+dashboard configuration needed) runs `apps/web/scripts/vercel-build.sh`, which:
+
+1. Checks `VERCEL_ENV` — a system variable Vercel itself injects into every build,
+   never configured by this repository. Only when it equals exactly `production` does
+   the next step run.
+2. Runs `npx prisma migrate deploy` (via `set -e`: if this fails, the script exits
+   non-zero immediately and `next build` is never reached).
+3. Runs `next build` as normal.
+
+**Why the build step, not a separate GitHub Actions job:** Vercel only serves traffic
+from a deployment whose build step exited `0` — a failed build is never promoted, so
+the previous (already-migration-compatible) deployment keeps serving. That
+build-must-succeed-before-promotion rule is the only genuine "migration completes
+before the new code goes live" guarantee this architecture has. A GitHub Actions
+workflow triggered by the same push would run as an independent process racing
+Vercel's own auto-deploy, with nothing coordinating which one finishes first — it
+cannot provide that ordering.
+
+**Why gated on `VERCEL_ENV`, not database inspection:** whether Preview deployments'
+`DATABASE_URL` points at a database genuinely isolated from Production could not be
+established with confidence from this repository's own Vercel/Neon configuration
+(`vercel env ls` shows `DATABASE_URL` configured identically for both "Preview" and
+"Production" scopes, unlike e.g. `AUTH_SECRET`, which has two separate values — this
+is suggestive but not conclusive either way, and this repository does not have
+sufficient evidence to assert Preview/Production database isolation with confidence).
+Rather than infer that topology, the safety gate uses Vercel's own authoritative,
+unspoofable `VERCEL_ENV` value, so this is safe regardless of how those databases
+actually relate.
+
+**Command policy:** only `prisma migrate deploy` is ever used against Production.
+**Never** `prisma migrate dev` (interactive, can prompt/reset) or `prisma db push`
+(bypasses the migration history table entirely) — both are unsafe against a live
+database with real user data and must never be run against Production, by hand or
+otherwise.
+
+**Failure behavior:**
+- No migrations pending → documented no-op (`prisma migrate deploy` prints "No
+  pending migrations to apply.") → build proceeds normally.
+- A migration fails to apply → the script exits non-zero → the Vercel build fails →
+  this deployment is never promoted → Production keeps serving the previous,
+  compatible deployment. The failure and Prisma's own error (including the exact
+  Postgres error code/message) appear in that deployment's Vercel build logs.
+- Two Production builds run close together (e.g. two merges in quick succession) →
+  `prisma migrate deploy` uses a Postgres advisory lock internally, so concurrent
+  invocations serialize safely; the second to acquire the lock simply finds nothing
+  left pending. Verified directly against a disposable local Postgres database as
+  part of this change (two concurrent invocations, one applied the pending migration,
+  the other correctly saw "No pending migrations to apply", no duplicate/corrupted
+  migration record).
+
+**How to verify migration state at any time** (read-only, safe against Production):
+```bash
+cd apps/web && npx prisma migrate status
+```
+Reports every migration found locally and whether the connected database has applied
+it. Requires the target `DATABASE_URL` — never run this against Production with a
+DATABASE_URL you have not deliberately and explicitly confirmed is the real
+Production one (see the "stale checkout" pitfall below).
+
+**Known pitfall this repo has already hit:** `prisma migrate status`'s own "N
+migrations found" line reflects the **local migrations folder** the command is run
+from, not anything about the connected database. Running it from a stale/outdated
+local checkout (missing a recently-merged migration directory) will under-count and
+can make a genuinely-pending migration invisible to the check, silently. Before
+trusting a migration-status result, confirm the local checkout's migration folder
+count matches `main` (`ls apps/web/prisma/migrations | wc -l`) — this exact mistake
+delayed diagnosing the `0034` incident.
+
+**Emergency/manual procedure**, if the automated build-time step cannot run (or its
+result needs independent confirmation): from a checkout confirmed to be at the
+intended commit, with the real Production `DATABASE_URL` set,
+```bash
+cd apps/web && npx prisma migrate status   # read-only — confirm what's actually pending first
+cd apps/web && npx prisma migrate deploy   # only after confirming the above
+```
+Never substitute `migrate dev` or `db push` for this, even in an emergency.
+
+### Destructive / backwards-incompatible migrations
+
+Because the migration now runs immediately before the *new* code builds, but the
+*previous* deployment keeps serving traffic until the new build finishes and gets
+promoted, there is a real window where old application code and new schema coexist.
+An **additive** migration (new table, new nullable/defaulted column, new index) is
+safe through that window by construction — old code simply never looks at the new
+column/table. A **destructive** migration is not made safe merely by running
+`migrate deploy` first:
+
+- Dropping a column/table still read by the currently-serving (old) code will break
+  it mid-transition.
+- Renaming a required column in one step is equivalent to dropping the old name and
+  adding a new one simultaneously — same problem.
+- Narrowing/incompatible type changes can reject values the old code still writes.
+
+For any destructive or renaming schema change, use an **expand/migrate/contract**
+sequence across separate deploys instead of a single migration:
+1. **Expand** — add the new column/table alongside the old one (additive; safe with
+   old code still running).
+2. **Migrate** — ship application code that writes to both, then backfills and reads
+   from the new shape; deploy and let it run until no old-shape reads remain.
+3. **Contract** — once nothing depends on the old column/table, drop it in its own
+   migration.
+
+This repository has no destructive migrations in its history yet (0001 through 0034
+are all additive) — this section exists so the next one doesn't reintroduce the same
+class of incident in a different shape. Not a framework, just the sequencing this
+project commits to when the need arises.
+
 ## Web Push V1 (reminder delivery)
 
 Browser/PWA push notifications for approaching Plans and Aura Moments, sent when the
