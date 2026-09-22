@@ -187,3 +187,40 @@ export function flattenWeekDraft(draft: WeekAvailabilityDraft): AvailabilityPeri
   }
   return flattened.sort((a, b) => (a.weekday !== b.weekday ? a.weekday - b.weekday : a.startTime < b.startTime ? -1 : a.startTime > b.startTime ? 1 : a.endTime < b.endTime ? -1 : a.endTime > b.endTime ? 1 : 0));
 }
+
+// ============================================================
+// Collapsed-summary display formatting (Availability Settings UX V2 PR A
+// -- this ticket's own section 8/9/17). Presentation-only: never
+// consumed by validation/flatten/persistence, and never changes what a
+// period IS -- only how AvailabilitySettings.tsx displays one when
+// collapsed.
+// ============================================================
+
+/** "HH:mm" (24h) -> "H:MM AM/PM" -- pure string/number formatting, no
+ * Date instant, no timezone (the value is already a plain civil
+ * clock-time string). Mirrors planDayEntry.ts's own private
+ * `formatFixedTimeLabel` convention for the identical "HH:mm" input
+ * shape -- reimplemented here rather than imported, since planDayEntry.ts
+ * is a Plan Day file this ticket's own section 43/45 requires zero diff
+ * to, and that helper is unexported besides. */
+export function formatPeriodTimeLabel(time: string): string {
+  const [hourStr, minuteStr] = time.split(':');
+  const hour24 = Number(hourStr);
+  const period = hour24 >= 12 ? 'PM' : 'AM';
+  const hour12 = hour24 % 12 === 0 ? 12 : hour24 % 12;
+  return `${hour12}:${minuteStr} ${period}`;
+}
+
+/** The collapsed weekday summary text (this ticket's own section 8/9):
+ * "Not available" for zero periods (wording locked verbatim, section 9)
+ * -- else every period as "H:MM AM/PM – H:MM AM/PM", joined by " · " for
+ * more than one (section 8: never expose "Period 1"/"Period 2" in the
+ * collapsed visual summary). Sorts by startTime first -- draft period
+ * order is insertion order, not necessarily chronological
+ * (`addPeriod` always appends), and an unsorted summary would read
+ * strangely (e.g. an afternoon period listed before a morning one). */
+export function formatWeekdaySummary(periods: readonly Pick<AvailabilityPeriodDraft, 'startTime' | 'endTime'>[]): string {
+  if (periods.length === 0) return 'Not available';
+  const sorted = [...periods].sort((a, b) => (a.startTime < b.startTime ? -1 : a.startTime > b.startTime ? 1 : 0));
+  return sorted.map((p) => `${formatPeriodTimeLabel(p.startTime)} – ${formatPeriodTimeLabel(p.endTime)}`).join(' · ');
+}

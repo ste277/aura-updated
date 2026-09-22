@@ -791,9 +791,22 @@ export function ModalShell({
 // the five things that were actually duplicated.
 // ============================================================
 
-export function FieldLabel({ children, htmlFor }: { children: React.ReactNode; htmlFor?: string }) {
+/** `visuallyHidden` (Availability Settings UX V2 PR A -- this ticket's
+ * own section 20) keeps a real `<label htmlFor>`/input association for
+ * assistive tech while removing the label from ordinary sighted
+ * rendering -- standard clip-based visually-hidden technique, additive
+ * and backward-compatible (every existing caller renders exactly as
+ * before; `visuallyHidden` defaults to falsy). */
+export function FieldLabel({ children, htmlFor, visuallyHidden }: { children: React.ReactNode; htmlFor?: string; visuallyHidden?: boolean }) {
   return (
-    <label htmlFor={htmlFor} style={{ display: 'block', ...typography.sectionEyebrow, marginBottom: spacing.sm }}>
+    <label
+      htmlFor={htmlFor}
+      style={
+        visuallyHidden
+          ? { position: 'absolute', width: 1, height: 1, padding: 0, margin: -1, overflow: 'hidden', clip: 'rect(0, 0, 0, 0)', whiteSpace: 'nowrap', border: 0 }
+          : { display: 'block', ...typography.sectionEyebrow, marginBottom: spacing.sm }
+      }
+    >
       {children}
     </label>
   );
