@@ -13,6 +13,7 @@ import {
   copyMondayToWeekdays,
   validateWeekDraft,
   flattenWeekDraft,
+  formatWeekdaySummary,
   type WeekAvailabilityDraft,
 } from '../lib/availabilitySettings';
 import type { Weekday } from '../lib/availabilityContext';
@@ -34,6 +35,19 @@ import type { Weekday } from '../lib/availabilityContext';
  * inferred Mon-Fri 9-5) with no special "unconfigured" banner needed --
  * an empty week already reads correctly either way, and the very first
  * Save the user performs is what sets `configured = true` server-side.
+ *
+ * Availability Settings UX V2 PR A -- PRESENTATION ONLY (this ticket's
+ * own section 2/4). Every weekday now renders as a compact collapsed
+ * summary ("Monday · 9:00 AM – 5:00 PM · Edit") by default; the always-
+ * expanded administrative form (a visible "MONDAY PERIOD 1 START TIME"
+ * label per input, for every period of every weekday, unconditionally)
+ * is gone. `expandedWeekdays` (below) is the ONLY new state -- it is
+ * UI-only, never touches the request body, `draft`, or persistence, and
+ * several weekdays may be expanded simultaneously (no accordion
+ * semantics forced, this ticket's own section 13). Every other piece of
+ * this file -- GET/PUT/DELETE, `draft`/`dirty`/`canSave`, add/remove/
+ * copy/validate/flatten -- is byte-for-byte the same architecture as
+ * before; only what gets RENDERED for a given weekday changed.
  */
 
 type LoadState = { kind: 'LOADING' } | { kind: 'ERROR'; message: string } | { kind: 'READY'; configured: boolean; timezone: string; savedPeriodsKey: string };
@@ -46,6 +60,10 @@ export function AvailabilitySettings() {
   const [saved, setSaved] = useState(false);
   const [resetConfirming, setResetConfirming] = useState(false);
   const [resetting, setResetting] = useState(false);
+  // Availability Settings UX V2 PR A (this ticket's own section 13) --
+  // which weekdays currently show their full period editor. Presentation
+  // ONLY: never read by canSave/dirty/flatten, never sent to the server.
+  const [expandedWeekdays, setExpandedWeekdays] = useState<ReadonlySet<Weekday>>(new Set());
 
   useEffect(() => {
     (async () => {
@@ -66,9 +84,17 @@ export function AvailabilitySettings() {
   const flattened = useMemo(() => flattenWeekDraft(draft), [draft]);
   const validation = useMemo(() => validateWeekDraft(draft), [draft]);
   const dirty = load.kind === 'READY' && JSON.stringify(flattened) !== load.savedPeriodsKey;
-  const mondayHasPeriods = draft.find((d) => d.weekday === 1)?.periods.length !== 0 && (draft.find((d) => d.weekday === 1)?.periods.length ?? 0) > 0;
 
   const canSave = load.kind === 'READY' && dirty && validation.ok && !saving;
+
+  function toggleWeekdayExpanded(weekday: Weekday) {
+    setExpandedWeekdays((current) => {
+      const next = new Set(current);
+      if (next.has(weekday)) next.delete(weekday);
+      else next.add(weekday);
+      return next;
+    });
+  }
 
   async function handleSave() {
     if (!canSave) return;
@@ -126,54 +152,64 @@ export function AvailabilitySettings() {
       {load.kind === 'READY' && <p style={{ fontSize: 12, color: colors.textFaint, marginTop: 0, marginBottom: spacing.md }}>Times use your timezone: {load.timezone}</p>}
       {load.kind === 'ERROR' && <FieldError>{load.message}</FieldError>}
 
-      <div style={{ display: 'flex', flexDirection: 'column', gap: spacing.md }}>
-        {draft.map((day) => (
-          <WeekdayRow
-            key={day.weekday}
-            weekday={day.weekday}
-            periods={day.periods}
-            disabled={saving || resetting}
-            showCopy={day.weekday === 1 && day.periods.length > 0}
-            onAdd={() => setDraft((current) => addPeriod(current, day.weekday))}
-            onRemove={(periodId) => setDraft((current) => removePeriod(current, day.weekday, periodId))}
-            onChangeTime={(periodId, field, value) => setDraft((current) => updatePeriodTime(current, day.weekday, periodId, field, value))}
-            onCopyToWeekdays={() => setDraft((current) => copyMondayToWeekdays(current))}
-          />
-        ))}
-      </div>
+      {/* Availability Settings UX V2 PR A (this ticket's own section 36)
+       * -- a load error never renders alongside a misleadingly-editable
+       * empty week; there is nothing valid to edit or save until a real
+       * GET succeeds. */}
+      {load.kind === 'READY' && (
+        <>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: spacing.md }}>
+            {draft.map((day) => (
+              <WeekdayRow
+                key={day.weekday}
+                weekday={day.weekday}
+                periods={day.periods}
+                disabled={saving || resetting}
+                expanded={expandedWeekdays.has(day.weekday)}
+                showCopy={day.weekday === 1 && day.periods.length > 0}
+                onToggleExpanded={() => toggleWeekdayExpanded(day.weekday)}
+                onAdd={() => setDraft((current) => addPeriod(current, day.weekday))}
+                onRemove={(periodId) => setDraft((current) => removePeriod(current, day.weekday, periodId))}
+                onChangeTime={(periodId, field, value) => setDraft((current) => updatePeriodTime(current, day.weekday, periodId, field, value))}
+                onCopyToWeekdays={() => setDraft((current) => copyMondayToWeekdays(current))}
+              />
+            ))}
+          </div>
 
-      {!validation.ok && <FieldError>{validation.error}</FieldError>}
-      {saveError && <FieldError>{saveError}</FieldError>}
+          {!validation.ok && <FieldError>{validation.error}</FieldError>}
+          {saveError && <FieldError>{saveError}</FieldError>}
 
-      <div style={{ display: 'flex', alignItems: 'center', gap: spacing.md, marginTop: spacing.lg }}>
-        <PrimaryButton onClick={handleSave} disabled={!canSave} ariaLabel="Save availability">
-          {saving ? 'Saving…' : 'Save'}
-        </PrimaryButton>
-        {saved && !dirty && <span style={{ fontSize: 12, color: colors.positive }}>Saved</span>}
-      </div>
+          <div style={{ display: 'flex', alignItems: 'center', gap: spacing.md, marginTop: spacing.lg }}>
+            <PrimaryButton onClick={handleSave} disabled={!canSave} ariaLabel="Save availability">
+              {saving ? 'Saving…' : 'Save'}
+            </PrimaryButton>
+            {saved && !dirty && <span style={{ fontSize: 12, color: colors.positive }}>Saved</span>}
+          </div>
 
-      {load.kind === 'READY' && load.configured && (
-        <div style={{ marginTop: spacing.xl, paddingTop: spacing.md, borderTop: `1px solid ${colors.borderSubtle}` }}>
-          {!resetConfirming ? (
-            <TextButton onClick={() => setResetConfirming(true)} color={colors.textMuted}>
-              Reset availability
-            </TextButton>
-          ) : (
-            <div>
-              <p style={{ fontSize: 12, color: colors.textSecondary, marginTop: 0, marginBottom: spacing.sm, lineHeight: 1.5 }}>
-                Aura will stop using a saved weekly availability schedule and will return to its default planning behavior.
-              </p>
-              <div style={{ display: 'flex', gap: spacing.sm }}>
-                <DestructiveButton onClick={handleResetConfirmed} disabled={resetting}>
-                  {resetting ? 'Resetting…' : 'Reset availability'}
-                </DestructiveButton>
-                <SecondaryButton onClick={() => setResetConfirming(false)} disabled={resetting}>
-                  Cancel
-                </SecondaryButton>
-              </div>
+          {load.configured && (
+            <div style={{ marginTop: spacing.xl, paddingTop: spacing.md, borderTop: `1px solid ${colors.borderSubtle}` }}>
+              {!resetConfirming ? (
+                <TextButton onClick={() => setResetConfirming(true)} color={colors.textMuted}>
+                  Reset availability
+                </TextButton>
+              ) : (
+                <div>
+                  <p style={{ fontSize: 12, color: colors.textSecondary, marginTop: 0, marginBottom: spacing.sm, lineHeight: 1.5 }}>
+                    Aura will stop using this weekly availability schedule and return to its default planning behavior.
+                  </p>
+                  <div style={{ display: 'flex', gap: spacing.sm }}>
+                    <DestructiveButton onClick={handleResetConfirmed} disabled={resetting}>
+                      {resetting ? 'Resetting…' : 'Reset availability'}
+                    </DestructiveButton>
+                    <SecondaryButton onClick={() => setResetConfirming(false)} disabled={resetting}>
+                      Cancel
+                    </SecondaryButton>
+                  </div>
+                </div>
+              )}
             </div>
           )}
-        </div>
+        </>
       )}
     </SurfaceCard>
   );
@@ -183,7 +219,9 @@ function WeekdayRow({
   weekday,
   periods,
   disabled,
+  expanded,
   showCopy,
+  onToggleExpanded,
   onAdd,
   onRemove,
   onChangeTime,
@@ -192,15 +230,44 @@ function WeekdayRow({
   weekday: Weekday;
   periods: WeekAvailabilityDraft[number]['periods'];
   disabled: boolean;
+  expanded: boolean;
   showCopy: boolean;
+  onToggleExpanded: () => void;
   onAdd: () => void;
   onRemove: (periodId: string) => void;
   onChangeTime: (periodId: string, field: 'startTime' | 'endTime', value: string) => void;
   onCopyToWeekdays: () => void;
 }) {
+  const label = WEEKDAY_LABELS[weekday];
+
+  // Availability Settings UX V2 PR A (this ticket's own section 7/10) --
+  // the collapsed default: weekday name, a plain-language summary
+  // ("Not available" or "9:00 AM – 5:00 PM"), and an explicit Edit
+  // affordance. Never a bare tappable row with no visible control (this
+  // ticket's own section 10).
+  if (!expanded) {
+    return (
+      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: spacing.sm }}>
+        <div>
+          <div style={{ fontSize: 13, fontWeight: 800, color: colors.textPrimary }}>{label}</div>
+          <div style={{ fontSize: 13, color: colors.textSecondary, marginTop: 2 }}>{formatWeekdaySummary(periods)}</div>
+        </div>
+        <SecondaryButton onClick={onToggleExpanded} disabled={disabled} ariaLabel={`Edit ${label} availability`}>
+          Edit
+        </SecondaryButton>
+      </div>
+    );
+  }
+
+  // Availability Settings UX V2 PR A (this ticket's own section 11/19/21)
+  // -- the expanded editor. Every implementation-facing visible label
+  // ("MONDAY PERIOD 1 START TIME") is gone; each time input keeps the
+  // SAME accessible name as before via a visually-hidden FieldLabel
+  // (this ticket's own section 20), and a plain "→" separates start from
+  // end so a period reads as one range, not two unrelated fields.
   return (
     <div>
-      <div style={{ fontSize: 13, fontWeight: 800, color: colors.textPrimary, marginBottom: spacing.xs }}>{WEEKDAY_LABELS[weekday]}</div>
+      <div style={{ fontSize: 13, fontWeight: 800, color: colors.textPrimary, marginBottom: spacing.xs }}>{label}</div>
       {periods.length === 0 ? (
         <div style={{ fontSize: 12, color: colors.textFaint, marginBottom: spacing.xs }}>Not available</div>
       ) : (
@@ -210,16 +277,12 @@ function WeekdayRow({
             const endId = `availability-${weekday}-${period.id}-end`;
             return (
               <div key={period.id} style={{ display: 'flex', alignItems: 'center', gap: spacing.sm, flexWrap: 'wrap' }}>
-                <div>
-                  <FieldLabel htmlFor={startId}>{`${WEEKDAY_LABELS[weekday]} period ${index + 1} start time`}</FieldLabel>
-                  <TextInput id={startId} type="time" value={period.startTime} onChange={(e) => onChangeTime(period.id, 'startTime', e.target.value)} disabled={disabled} style={{ width: 120 }} />
-                </div>
-                <span style={{ color: colors.textFaint, marginTop: 18 }}>–</span>
-                <div>
-                  <FieldLabel htmlFor={endId}>{`${WEEKDAY_LABELS[weekday]} period ${index + 1} end time`}</FieldLabel>
-                  <TextInput id={endId} type="time" value={period.endTime} onChange={(e) => onChangeTime(period.id, 'endTime', e.target.value)} disabled={disabled} style={{ width: 120 }} />
-                </div>
-                <IconButton ariaLabel={`Remove ${WEEKDAY_LABELS[weekday]} period ${index + 1}`} onClick={() => onRemove(period.id)} style={{ marginTop: 18, width: 36, height: 36 }}>
+                <FieldLabel htmlFor={startId} visuallyHidden>{`${label} period ${index + 1} start time`}</FieldLabel>
+                <TextInput id={startId} type="time" value={period.startTime} onChange={(e) => onChangeTime(period.id, 'startTime', e.target.value)} disabled={disabled} style={{ width: 120 }} />
+                <span aria-hidden="true" style={{ color: colors.textFaint }}>→</span>
+                <FieldLabel htmlFor={endId} visuallyHidden>{`${label} period ${index + 1} end time`}</FieldLabel>
+                <TextInput id={endId} type="time" value={period.endTime} onChange={(e) => onChangeTime(period.id, 'endTime', e.target.value)} disabled={disabled} style={{ width: 120 }} />
+                <IconButton ariaLabel={`Remove ${label} period ${index + 1}`} onClick={() => onRemove(period.id)} style={{ width: 36, height: 36 }}>
                   ✕
                 </IconButton>
               </div>
@@ -227,15 +290,18 @@ function WeekdayRow({
           })}
         </div>
       )}
-      <div style={{ display: 'flex', gap: spacing.md, alignItems: 'center' }}>
+      <div style={{ display: 'flex', gap: spacing.md, alignItems: 'center', flexWrap: 'wrap' }}>
         <TextButton onClick={onAdd} color={colors.info} style={{ opacity: disabled ? 0.4 : 1, pointerEvents: disabled ? 'none' : 'auto' }}>
-          + Add period
+          {periods.length === 0 ? '+ Add period' : '+ Add another period'}
         </TextButton>
         {showCopy && (
           <TextButton onClick={onCopyToWeekdays} color={colors.textMuted} style={{ opacity: disabled ? 0.4 : 1, pointerEvents: disabled ? 'none' : 'auto' }}>
             Copy to weekdays
           </TextButton>
         )}
+        <SecondaryButton onClick={onToggleExpanded} disabled={disabled} ariaLabel={`Done editing ${label} availability`} style={{ marginLeft: 'auto' }}>
+          Done
+        </SecondaryButton>
       </div>
     </div>
   );

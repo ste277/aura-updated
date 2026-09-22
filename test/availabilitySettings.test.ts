@@ -15,6 +15,8 @@ import {
   validateWeekDraft,
   flattenWeekDraft,
   periodsOverlap,
+  formatPeriodTimeLabel,
+  formatWeekdaySummary,
   type WeekAvailabilityDraft,
 } from '../apps/web/lib/availabilitySettings';
 import type { AvailabilityPeriodInput } from '../apps/web/lib/availabilityContext';
@@ -201,6 +203,63 @@ function main() {
     check('20. the flattened persistence payload never contains a timezone field', flattened.every((p) => !('timezone' in p)));
     check('20b. the flattened persistence payload never contains the draft-only local id field', flattened.every((p) => !('id' in p)));
   }
+
+  // ============================================================
+  // Availability Settings UX V2 PR A -- collapsed-summary display
+  // helpers (this ticket's own section 8/9/17/48/49). Presentation-only:
+  // never consumed by validation/flatten/persistence above.
+  // ============================================================
+
+  // 21. formatPeriodTimeLabel -- "HH:mm" -> "H:MM AM/PM".
+  check('21. formatPeriodTimeLabel("09:00") === "9:00 AM"', formatPeriodTimeLabel('09:00') === '9:00 AM');
+  check('21b. formatPeriodTimeLabel("17:00") === "5:00 PM"', formatPeriodTimeLabel('17:00') === '5:00 PM');
+  check('21c. formatPeriodTimeLabel("00:00") === "12:00 AM" (midnight, not "0:00 AM")', formatPeriodTimeLabel('00:00') === '12:00 AM');
+  check('21d. formatPeriodTimeLabel("12:00") === "12:00 PM" (noon, not "0:00 PM")', formatPeriodTimeLabel('12:00') === '12:00 PM');
+  check('21e. formatPeriodTimeLabel never mutates its input (pure)', (() => { const t = '09:30'; formatPeriodTimeLabel(t); return t === '09:30'; })());
+
+  // 22. formatWeekdaySummary -- empty day (this ticket's own section 9,
+  // wording LOCKED verbatim -- never "Unavailable"/"Off"/"Closed"/"No
+  // working hours").
+  check('22. formatWeekdaySummary([]) === "Not available"', formatWeekdaySummary([]) === 'Not available');
+
+  // 23. formatWeekdaySummary -- one period (this ticket's own section 8).
+  check(
+    '23. formatWeekdaySummary([{09:00-17:00}]) === "9:00 AM – 5:00 PM"',
+    formatWeekdaySummary([{ startTime: '09:00', endTime: '17:00' }]) === '9:00 AM – 5:00 PM'
+  );
+
+  // 24. formatWeekdaySummary -- multiple periods, joined, never exposing
+  // "Period 1"/"Period 2" (this ticket's own section 8).
+  {
+    const summary = formatWeekdaySummary([
+      { startTime: '09:00', endTime: '12:00' },
+      { startTime: '14:00', endTime: '17:00' },
+    ]);
+    check('24. formatWeekdaySummary joins two periods with " · "', summary === '9:00 AM – 12:00 PM · 2:00 PM – 5:00 PM');
+    check('24b. formatWeekdaySummary never mentions "Period" in its output', !summary.includes('Period') && !summary.includes('period'));
+  }
+
+  // 25. formatWeekdaySummary -- sorts by startTime regardless of input
+  // order (draft period order is insertion order, not necessarily
+  // chronological -- addPeriod always appends).
+  {
+    const summary = formatWeekdaySummary([
+      { startTime: '14:00', endTime: '17:00' },
+      { startTime: '09:00', endTime: '12:00' },
+    ]);
+    check('25. formatWeekdaySummary sorts periods chronologically regardless of input order', summary === '9:00 AM – 12:00 PM · 2:00 PM – 5:00 PM');
+  }
+
+  // 26. formatWeekdaySummary never mutates its input (pure).
+  check(
+    '26. formatWeekdaySummary never mutates its input array',
+    (() => {
+      const periods = [{ startTime: '14:00', endTime: '17:00' }, { startTime: '09:00', endTime: '12:00' }];
+      const before = JSON.stringify(periods);
+      formatWeekdaySummary(periods);
+      return JSON.stringify(periods) === before;
+    })()
+  );
 
   if (!allPassed) {
     console.error('\nSome Availability Settings checks FAILED.');
