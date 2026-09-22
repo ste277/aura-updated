@@ -6,6 +6,7 @@
     "dev": "next dev",
     "build": "next build",
     "build:check": "AUTH_SECRET=local-build-verification-placeholder-not-for-prod next build",
+    "vercel-build": "sh scripts/vercel-build.sh",
     "start": "next start",
     "cap:sync": "cap sync",
     "cap:ios": "cap open ios",
