@@ -180,7 +180,7 @@ export function findAuraMomentAlternatives(params: {
   if (auraMoment.responseState !== 'ANOTHER_TIME' || !auraMoment.responsePreference) return { status: 'NOT_APPLICABLE' };
 
   const originalLocalDate = getDatePartsInTimezone(auraMoment.timezone, auraMoment.startAt).dateStr;
-  const todayLocalDate = getDatePartsInTimezone(auraMoment.timezone, new Date()).dateStr;
+  const todayLocalDate = getDatePartsInTimezone(auraMoment.timezone, ownerContext.now).dateStr;
   const range = computeAlternativeDateRange(originalLocalDate, auraMoment.responsePreference, todayLocalDate);
   const originalStartIso = auraMoment.startAt.toISOString();
   const durationMinutes = Math.round((auraMoment.endAt.getTime() - auraMoment.startAt.getTime()) / 60_000);
