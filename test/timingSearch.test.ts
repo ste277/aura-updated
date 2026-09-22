@@ -322,5 +322,100 @@ const midnightCheck = runTimingSearch({
 });
 check('CHECK flags a duration that would cross local midnight instead of silently mis-scoring it', Boolean(midnightCheck.requestedCandidate?.conflicts?.some((conflict) => conflict.type === 'DURATION_EXCEEDS_DAY')));
 
+// ============================================================
+// Construction-Window-Aware Timing Search V1 -- `searchWindow` (FIND
+// only, optional). Root cause this fixes: FIND previously ranked
+// candidates across the ENTIRE target day and truncated to a small
+// default `limit` (3) with zero awareness of the caller's actual usable
+// planning bounds, so a narrow real availability window could have its
+// own genuinely-feasible candidates crowded out by higher-scoring but
+// unusable day-wide ones before the caller (Day Constructor) ever saw
+// them (see the "AURA -- Tomorrow Activity Placement Comparison Audit"
+// completion report). These checks prove the new field in isolation,
+// directly against the real engine -- no fake/mocked timing search.
+// ============================================================
+
+// Tomorrow (Aug 22 2026 IST) relative to chennaiContext's own `now` (Aug
+// 21 2026 IST) -- narrow real availability window, 05:00-09:00 IST,
+// expressed as the SAME absolute-instant shape ConstructionWindow.start/
+// end already use (dayConstructorOrchestrator.ts passes this straight
+// through with zero conversion).
+const TOMORROW_DATE = '2026-08-22';
+const narrowSearchWindow = { start: new Date('2026-08-21T23:30:00.000Z'), end: new Date('2026-08-22T03:30:00.000Z') }; // 05:00-09:00 IST
+
+const boundedFind = runTimingSearch({
+  mode: 'FIND',
+  activityId: 'workout',
+  durationMinutes: 30,
+  dateRange: { start: TOMORROW_DATE, end: TOMORROW_DATE },
+  context: chennaiContext,
+  searchWindow: narrowSearchWindow,
+  limit: 3,
+});
+check('searchWindow: FIND still returns candidates when real capacity exists inside the bounds', boundedFind.candidates.length > 0);
+check('searchWindow: every returned candidate starts at/after the window start', boundedFind.candidates.every((c) => new Date(c.start).getTime() >= narrowSearchWindow.start.getTime()));
+check('searchWindow: every returned candidate ends at/before the window end (half-open, same convention as isWithinWindow/ConstructionWindow)', boundedFind.candidates.every((c) => new Date(c.end).getTime() <= narrowSearchWindow.end.getTime()));
+
+// The DAY-WIDE unbounded top candidate for this exact activity/day/context
+// is NOT inside the narrow window (proven by the audit's own reproduction)
+// -- confirms the bounded call is genuinely constraining generation, not
+// coincidentally landing inside the window anyway.
+const unboundedFindSameDay = runTimingSearch({
+  mode: 'FIND',
+  activityId: 'workout',
+  durationMinutes: 30,
+  dateRange: { start: TOMORROW_DATE, end: TOMORROW_DATE },
+  context: chennaiContext,
+  limit: 20,
+});
+const unboundedInWindowCount = unboundedFindSameDay.candidates.filter((c) => new Date(c.start).getTime() >= narrowSearchWindow.start.getTime() && new Date(c.end).getTime() <= narrowSearchWindow.end.getTime()).length;
+const unboundedOutOfWindowCount = unboundedFindSameDay.candidates.length - unboundedInWindowCount;
+check('searchWindow: the unbounded day-wide search (for comparison) does return at least one candidate outside the narrow window, proving the bound is doing real work', unboundedOutOfWindowCount > 0);
+
+// Truncation-before-ranking regression -- the exact defect class the audit
+// found: request a small `limit` while many more in-window candidates
+// exist than the limit, confirming the returned set is drawn from WITHIN
+// bounds first, never day-wide-ranked-then-filtered (which would often
+// return zero in-window results, exactly the bug).
+const tightLimitBounded = runTimingSearch({
+  mode: 'FIND',
+  activityId: 'meditation',
+  durationMinutes: 30,
+  dateRange: { start: TOMORROW_DATE, end: TOMORROW_DATE },
+  context: chennaiContext,
+  searchWindow: narrowSearchWindow,
+  limit: 3,
+});
+check('searchWindow: filtering happens before the result limit is applied (limit=3 still returns in-window candidates, never an empty/out-of-window set)', tightLimitBounded.candidates.length > 0 && tightLimitBounded.candidates.every((c) => new Date(c.start).getTime() >= narrowSearchWindow.start.getTime()));
+
+// Timing quality preserved (this ticket's own section 9) -- ranking/
+// duration/scoring semantics inside the bounded search are byte-identical
+// to the unbounded engine's own existing rules, never "first available
+// minute."
+check('searchWindow: bounded FIND still respects the requested duration exactly', boundedFind.candidates.every((c) => new Date(c.end).getTime() - new Date(c.start).getTime() === 30 * 60000));
+// Ranking metric, not the separate presentation `.score` (scoreContinuousBlock-
+// based, not guaranteed monotonic with the ranking metric even in the
+// pre-existing unbounded engine -- a real, independent characteristic
+// this PR does not touch): the engine's own final sort key is exactly
+// `auraFitScore ?? muhurtaScore * 5 + 55` (runFind's own `toRanked` call,
+// timingSearch.ts), reproduced verbatim here rather than asserting on a
+// field the engine never promised to keep monotonic.
+check('searchWindow: bounded FIND is still ranked by the engine\'s own real ranking metric (auraFitScore, unmodified)', boundedFind.candidates.every((c, i) => {
+  if (i === 0) return true;
+  const rank = (x: typeof c) => x.auraFitScore ?? x.muhurtaScore * 5 + 55;
+  return rank(boundedFind.candidates[i - 1]) >= rank(c);
+}));
+
+// Full-day / unbounded callers (every EXISTING caller in the repository)
+// omit `searchWindow` entirely -- proves omitting it is completely inert:
+// the unbounded call above already exercises the exact same code path
+// every pre-existing caller uses, and every ORIGINAL check earlier in
+// this file (none of which set `searchWindow`) still passes unmodified,
+// which is the real proof of "zero behavioral change for every existing
+// caller" -- this additional check only re-confirms the unbounded
+// day-wide candidate COUNT is unaffected by this field's mere existence
+// in the type.
+check('searchWindow: omitting the field entirely still returns the full day-wide candidate set (existing callers unaffected)', unboundedFindSameDay.candidates.length === 20);
+
 console.log(allPassed ? '\nALL TIMING SEARCH CHECKS PASSED' : '\nSOME TIMING SEARCH CHECKS FAILED');
 process.exit(allPassed ? 0 : 1);

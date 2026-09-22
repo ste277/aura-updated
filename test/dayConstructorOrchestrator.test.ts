@@ -1202,6 +1202,55 @@ async function main() {
     );
   }
 
+  // ============================================================
+  // Construction-Window-Aware Timing Search V1 -- wiring proof. This
+  // file's own `noopDeps().searchTiming` is a plain fake (never the real
+  // engine), so this checks WIRING only: does the orchestrator thread the
+  // exact resolved `ConstructionWindow` through to `deps.searchTiming`'s
+  // own request as `searchWindow`? The real end-to-end behavioral proof
+  // (the audit's own reproduced bug, now fixed) lives in
+  // test/tomorrowWindowAwareTimingSearch.test.ts, against the REAL
+  // engine -- kept separate rather than duplicated here, matching this
+  // repo's own established split between a fake-dependency wiring suite
+  // (this file) and a real-engine behavioral suite (that one).
+  // ============================================================
+  {
+    const capturedRequests: { start: string | undefined; searchWindow: { start: Date; end: Date } | undefined }[] = [];
+    const deps = noopDeps({
+      loadAvailabilityConfiguration: async () => ({ configured: true, periods: [{ weekday: 4, startTime: '05:00', endTime: '09:00' }] }),
+      searchTiming: (request) => {
+        capturedRequests.push({ start: request.dateRange?.start, searchWindow: request.searchWindow });
+        return { candidates: [] };
+      },
+    });
+    const flexIntent = requestedIntent({ id: 'i-search-window', flexibility: 'FLEXIBLE', activityId: 'workout', durationMinutes: 30 });
+    const result = await orchestrateConstructDay(remainingTodayRequest({ timezone: 'UTC', targetDate: '2026-09-17', now: iso('2026-09-16T16:00:00Z'), intents: [flexIntent] }), deps);
+    check('61. a FLEXIBLE intent\'s searchTiming call receives searchWindow', result.status === 'READY' && capturedRequests.length === 1 && capturedRequests[0].searchWindow !== undefined);
+    check(
+      '62. searchWindow passed to searchTiming matches the resolved ConstructionWindow exactly (same start/end instants, zero conversion)',
+      result.status === 'READY' &&
+        capturedRequests[0].searchWindow?.start.getTime() === result.preview.constructionWindow.start.getTime() &&
+        capturedRequests[0].searchWindow?.end.getTime() === result.preview.constructionWindow.end.getTime()
+    );
+  }
+  {
+    // A FIXED intent never calls searchTiming at all (unchanged, pre-
+    // existing architecture) -- confirms this PR did not newly route
+    // FIXED intents through timing search merely because searchWindow
+    // now exists.
+    const capturedRequests: unknown[] = [];
+    const deps = noopDeps({
+      loadAvailabilityConfiguration: async () => ({ configured: true, periods: [{ weekday: 4, startTime: '05:00', endTime: '09:00' }] }),
+      searchTiming: (request) => {
+        capturedRequests.push(request);
+        return { candidates: [] };
+      },
+    });
+    const fixedIntent = requestedIntent({ id: 'i-fixed-no-search', flexibility: 'FIXED', fixedStart: iso('2026-09-17T06:00:00Z'), durationMinutes: 30 });
+    await orchestrateConstructDay(remainingTodayRequest({ timezone: 'UTC', targetDate: '2026-09-17', now: iso('2026-09-16T16:00:00Z'), intents: [fixedIntent] }), deps);
+    check('63. a FIXED intent still never calls searchTiming (searchWindow addition did not change this)', capturedRequests.length === 0);
+  }
+
   if (!allPassed) {
     console.error('\nSome Day Constructor Orchestrator checks FAILED.');
     process.exit(1);

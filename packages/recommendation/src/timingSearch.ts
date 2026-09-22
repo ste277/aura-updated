@@ -94,6 +94,48 @@ export interface TimingSearchRequest {
   /** FIND only. Default 3. */
   limit?: number;
 
+  /**
+   * FIND only, optional. Construction-Window-Aware Timing Search V1 --
+   * when supplied, a candidate is only generated/ranked/diversified if its
+   * own `[start, start + durationMinutes)` interval lies ENTIRELY inside
+   * `[searchWindow.start, searchWindow.end)` (same half-open convention
+   * `isWithinWindow`/`ConstructionWindow` already use, apps/web/lib/
+   * dayConstructor.ts). Applied BEFORE ranking/diversification/`limit`
+   * (this is the entire point -- see this field's own completion report
+   * section "why filter before, not after"), so a narrow caller-supplied
+   * window can never have its own in-bounds candidates crowded out by a
+   * higher-scoring but useless out-of-bounds one that happened to win the
+   * day-wide top-N cut.
+   *
+   * Absolute instants, not a local-minute-of-day range, so this is
+   * unambiguous across any timezone/DST edge without this file having to
+   * re-derive one -- the SAME representation `ConstructionWindow.start`/
+   * `.end` already use, so a caller with one already in hand (e.g. Day
+   * Constructor's own orchestrator) passes it straight through with zero
+   * conversion.
+   *
+   * Intentionally scoped to a SINGLE absolute interval, not a list of
+   * disjoint ones: this field exists only to keep candidate generation
+   * from wasting its ranked/limited result on times a caller could not
+   * possibly use, never to express "unavailable gaps WITHIN an otherwise
+   * usable span" (a day with disjoint availability, e.g. two separate
+   * periods) -- that distinction stays exactly where it already correctly
+   * lives, in the Day Constructor's own `BLOCKED_BY_COMMITMENT` gate
+   * (`evaluateCandidate`, dayConstructor.ts), which already receives
+   * gap-blockers as ordinary `BlockedInterval`s and rejects a candidate
+   * landing in one regardless of this field. A caller with disjoint
+   * availability still passes the outer span here (earliest start to
+   * latest end across every period) -- exactly what
+   * `normalizeUsableWindowsToConstructionWindow` (availabilityContext.ts)
+   * already produces as `ConstructionWindow.start`/`.end` today, unchanged
+   * by this field's addition.
+   *
+   * Every existing caller omits this field and is completely unaffected:
+   * no filter runs, full-day generation/ranking/limit behavior is
+   * byte-identical to before this field existed.
+   */
+  searchWindow?: { start: Date; end: Date };
+
   /** CHECK only: exact ISO instant to evaluate. */
   candidateStart?: string;
   /** CHECK only: how far (minutes, each direction, same local day) to look
@@ -365,6 +407,19 @@ function runFind(request: TimingSearchRequest): TimingSearchResponse {
     for (let startMinute = dayStart; startMinute <= maxStart; startMinute += CANDIDATE_SEARCH_STEP_MINUTES) {
       if (!matchesTimePreference(startMinute, preference)) continue;
       const start = localInstantForMinute(dayContext, startMinute);
+      // Construction-Window-Aware Timing Search V1 -- skip BEFORE the
+      // expensive Panchang/Muhurta evaluation (evaluateTimingCandidate),
+      // not merely before ranking: an out-of-bounds instant is never
+      // useful to a caller that supplied `searchWindow`, so there is no
+      // reason to pay for its evaluation at all. This is what keeps a
+      // bounded search from doing MORE work than an unbounded one -- it
+      // does strictly less (see this field's own doc comment on
+      // TimingSearchRequest.searchWindow for why filtering happens here,
+      // before ranking/diversification/`limit`, rather than after).
+      if (request.searchWindow) {
+        const candidateEnd = start.getTime() + safeDuration * 60000;
+        if (start.getTime() < request.searchWindow.start.getTime() || candidateEnd > request.searchWindow.end.getTime()) continue;
+      }
       const candidate = evaluateTimingCandidate({ profile, start, durationMinutes: safeDuration, context: request.context });
       if (candidate.conflicts?.some((conflict) => conflict.type === 'FRICTION_WINDOW_BLOCKED')) continue;
       ranked.push(toRanked(candidate, startMinute, candidate.auraFitScore ?? candidate.muhurtaScore * 5 + 55));

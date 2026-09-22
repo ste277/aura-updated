@@ -808,9 +808,24 @@ export async function orchestrateConstructDay(request: ConstructDayRequest, deps
     // FLEXIBLE
     if (dayIntent.estimatedDurationMinutes === undefined) continue; // constructDay's own DURATION_UNKNOWN gate handles this; no search to run.
 
+    // Construction-Window-Aware Timing Search V1 -- `searchWindow` is the
+    // SAME resolved `window` every candidate is later checked against in
+    // `evaluateCandidate` (dayConstructor.ts's own `isWithinWindow` gate),
+    // passed straight through with zero conversion (both are already the
+    // same `{ start: Date; end: Date }` absolute-instant shape). This is
+    // what fixes the root cause the audit found: FIND's own candidate
+    // ranking/limit now only ever considers instants this specific
+    // orchestration run could actually use, so a narrow construction
+    // window can no longer have its own genuinely-feasible in-window
+    // candidates silently truncated away in favor of higher-scoring but
+    // useless out-of-window ones. `dayConstructor.ts`'s own feasibility
+    // gates (window/blockers/conflicts) are completely unchanged and
+    // remain the sole authority on final placement -- this only narrows
+    // what FIND bothers to generate and rank in the first place.
+    const searchWindow = { start: window.start, end: window.end };
     const searchRequest: Omit<TimingSearchRequest, 'context'> = dayIntent.activityId
-      ? { mode: 'FIND', activityId: dayIntent.activityId, durationMinutes: dayIntent.estimatedDurationMinutes, dateRange: { start: request.targetDate, end: request.targetDate } }
-      : { mode: 'FIND', taskTitle: requested.title, durationMinutes: dayIntent.estimatedDurationMinutes, dateRange: { start: request.targetDate, end: request.targetDate } };
+      ? { mode: 'FIND', activityId: dayIntent.activityId, durationMinutes: dayIntent.estimatedDurationMinutes, dateRange: { start: request.targetDate, end: request.targetDate }, searchWindow }
+      : { mode: 'FIND', taskTitle: requested.title, durationMinutes: dayIntent.estimatedDurationMinutes, dateRange: { start: request.targetDate, end: request.targetDate }, searchWindow };
 
     let searchResult: { candidates: TimingCandidate[] };
     try {
