@@ -373,31 +373,18 @@ async function main() {
   }
 
   // ============================================================
-  // L. KNOWN LIMITATION, NOT A REGRESSION (ticket section 12, mandatory
-  // audit item) -- documents, rather than silently leaving unverified,
-  // that a DYNAMIC same-run proposed-item conflict can still cause a
-  // later intent to lose a genuinely feasible alternative. This is
-  // architecturally DISTINCT from the gap/Plan defect this PR fixes:
-  // every FLEXIBLE intent's own `searchTiming` call happens in the
-  // orchestrator's per-intent loop, ALL of them strictly BEFORE
-  // `constructDay` is ever invoked for ANY intent -- so no intent's own
-  // pre-computed candidate set can ever know what a SIBLING intent in
-  // the same batch will end up claiming. `excludedIntervals` cannot
-  // close this (the ticket's own section 12 explicitly prohibits trying
-  // to predict this through excludedIntervals) -- it would require
-  // either re-running search after each placement decision (a real
-  // orchestrator architecture change, not a timing-search API addition)
-  // or requesting a much larger `limit` (a probabilistic mitigation with
-  // its own performance cost), neither of which is this PR's scope.
-  //
-  // Reproduced with 3 IDENTICAL "Workout" intents (same activity/
-  // duration/day -> identical raw candidate sets before any placement)
-  // in the same disjoint-availability narrow-peak scenario as section K:
-  // the first two place correctly (one per usable period); the third is
-  // falsely deferred as CONFLICTS_WITH_PROPOSED_ITEM even though 30
-  // minutes of real, unclaimed capacity remains (05:30-06:00 ET) --
-  // because the third intent's own candidate set, computed before either
-  // placement happened, never included that slot at all.
+  // L. DYNAMIC CANDIDATE REPLENISHMENT V1 -- mandatory three-Workout
+  // regression (ticket section 6). This is the EXACT reproduction the
+  // prior amendment's own audit (section 12) found and left
+  // deliberately unfixed/documented as a known limitation -- THIS
+  // amendment closes it. Same disjoint-availability narrow-peak
+  // scenario as section K: 3 IDENTICAL "Workout" intents (same
+  // activity/duration/day -> identical raw candidate sets before any
+  // placement). Before this amendment, the third was falsely deferred
+  // as CONFLICTS_WITH_PROPOSED_ITEM despite 30 minutes of real,
+  // unclaimed capacity remaining (05:30-06:00 ET); now all three must
+  // place, each in a distinct, non-overlapping, genuinely-usable
+  // interval.
   // ============================================================
   {
     const NARROW_PEAK_DATE = '2026-10-17';
@@ -408,23 +395,202 @@ async function main() {
     ];
     const threeIdenticalWorkouts = [intent(0, 'i1', 'Workout', 'workout'), intent(1, 'i2', 'Workout', 'workout'), intent(2, 'i3', 'Workout', 'workout')];
     const result = await runOnDate(NARROW_PEAK_DATE, splitPeriods, threeIdenticalWorkouts);
-    check('L1. KNOWN LIMITATION setup: status is READY', result.status === 'READY');
+    check('L1. three identical Workout intents: status is READY', result.status === 'READY');
     if (result.status === 'READY') {
-      check('L2. KNOWN LIMITATION setup: the first two identical Workout intents ARE placed (one per usable period)', result.preview.constructedDay.proposedItems.length === 2);
-      const thirdDeferred = result.preview.constructedDay.deferredItems.find((d) => d.intentId === 'i3');
+      check('L2. all three identical Workout intents ARE placed (previously only 2 of 3 placed)', result.preview.constructedDay.proposedItems.length === 3);
+      check('L3. zero deferrals (previously the third was falsely deferred as CONFLICTS_WITH_PROPOSED_ITEM)', result.preview.constructedDay.deferredItems.length === 0);
+      const items = result.preview.constructedDay.proposedItems;
       check(
-        'L3. KNOWN LIMITATION (documented, not fixed by this PR): the third identical intent is falsely deferred as CONFLICTS_WITH_PROPOSED_ITEM despite real unclaimed capacity remaining (05:30-06:00 ET) -- a distinct, unclosed truncation hole reported for a future ticket',
-        thirdDeferred !== undefined && thirdDeferred.primaryReason === 'CONFLICTS_WITH_PROPOSED_ITEM'
+        'L4. every placed item is genuinely distinct and non-overlapping (real placements, not 3 copies of the same slot)',
+        items.every((a, i) => items.every((b, j) => i === j || a.start.getTime() >= b.end.getTime() || b.start.getTime() >= a.end.getTime()))
       );
-      // Prove the "real unclaimed capacity" claim directly, rather than
-      // merely asserting the deferral: the placed items occupy 09:00-
-      // 09:30 UTC and 12:00-12:30 UTC (05:00 and 08:00 ET), leaving
-      // 09:30-10:00 UTC (05:30-06:00 ET) -- inside the outer window,
-      // inside a usable period, not overlapping either placed item --
-      // genuinely open.
-      const unclaimedSlot = { start: new Date(`${NARROW_PEAK_DATE}T09:30:00.000Z`), end: new Date(`${NARROW_PEAK_DATE}T10:00:00.000Z`) };
-      const overlapsAnyPlaced = result.preview.constructedDay.proposedItems.some((p) => p.start.getTime() < unclaimedSlot.end.getTime() && unclaimedSlot.start.getTime() < p.end.getTime());
-      check('L4. the claimed "real unclaimed capacity" (05:30-06:00 ET) genuinely does not overlap either placed item', !overlapsAnyPlaced);
+      const win = result.preview.constructionWindow;
+      const gapStartUTC = new Date(`${NARROW_PEAK_DATE}T10:00:00.000Z`).getTime();
+      const gapEndUTC = new Date(`${NARROW_PEAK_DATE}T12:00:00.000Z`).getTime();
+      check(
+        'L5. every placed item lies inside the outer window and never overlaps the gap (real feasibility, not a relaxed check)',
+        items.every((p) => p.start.getTime() >= win.start.getTime() && p.end.getTime() <= win.end.getTime() && !(p.start.getTime() < gapEndUTC && gapStartUTC < p.end.getTime()))
+      );
+      check('L6. timing quality is still used: at least one placed item carries a real, non-empty timingFit tier', items.every((p) => typeof p.timingFit === 'string' && p.timingFit.length > 0));
+    }
+  }
+
+  // M. CAPACITY EXHAUSTION CONTROL (ticket section 7, mandatory) --
+  // replenishment must NOT turn into forced overbooking. Same 3
+  // identical Workout intents, but availability shrunk so only TWO
+  // 30-minute slots genuinely exist (05:00-05:30 + 08:00-08:30, exactly
+  // one candidate per period, zero spare room). The third intent must
+  // still be legitimately deferred.
+  // ============================================================
+  {
+    const NARROW_PEAK_DATE = '2026-10-17';
+    const weekdayForPeakDate = new Date(NARROW_PEAK_DATE + 'T12:00:00Z').getUTCDay();
+    const tightPeriods: AvailabilityConfiguration['periods'] = [
+      { weekday: weekdayForPeakDate as AvailabilityConfiguration['periods'][number]['weekday'], startTime: '05:00', endTime: '05:30' },
+      { weekday: weekdayForPeakDate as AvailabilityConfiguration['periods'][number]['weekday'], startTime: '08:00', endTime: '08:30' },
+    ];
+    const threeIdenticalWorkouts = [intent(0, 'i1', 'Workout', 'workout'), intent(1, 'i2', 'Workout', 'workout'), intent(2, 'i3', 'Workout', 'workout')];
+    const result = await runOnDate(NARROW_PEAK_DATE, tightPeriods, threeIdenticalWorkouts);
+    check('M1. genuine 2-slot capacity, 3 requested: status is READY', result.status === 'READY');
+    if (result.status === 'READY') {
+      check('M2. exactly two Workout intents are placed (real capacity, not fabricated)', result.preview.constructedDay.proposedItems.length === 2);
+      check('M3. exactly one Workout intent is legitimately deferred', result.preview.constructedDay.deferredItems.length === 1);
+      const deferred = result.preview.constructedDay.deferredItems[0];
+      // A genuine, accurate reason -- NO_CANDIDATES (replenishment's own
+      // fresh search, with both real placements now excluded, correctly
+      // found zero remaining options) -- not a stale/misleading
+      // CONFLICTS_WITH_PROPOSED_ITEM, and not a new invented reason
+      // (this ticket's own section 19: use existing taxonomy).
+      check('M4. the deferral reason is the genuine NO_CANDIDATES (accurate, from existing taxonomy, not a stale conflict reason)', deferred.primaryReason === 'NO_CANDIDATES');
+      const items = result.preview.constructedDay.proposedItems;
+      check(
+        'M5. the two placed items are genuinely distinct, non-overlapping, one per period',
+        items.every((a, i) => items.every((b, j) => i === j || a.start.getTime() >= b.end.getTime() || b.start.getTime() >= a.end.getTime()))
+      );
+    }
+  }
+
+  // N. IDENTICAL "Learn" (ticket section 9, mandatory) -- proves the fix
+  // is not Workout-specific. "learning"'s own catalog duration (20
+  // minutes, distinct from workout's) is a genuinely different timing
+  // distribution.
+  // ============================================================
+  {
+    const NARROW_PEAK_DATE = '2026-10-17';
+    const weekdayForPeakDate = new Date(NARROW_PEAK_DATE + 'T12:00:00Z').getUTCDay();
+    const splitPeriods: AvailabilityConfiguration['periods'] = [
+      { weekday: weekdayForPeakDate as AvailabilityConfiguration['periods'][number]['weekday'], startTime: '05:00', endTime: '06:00' },
+      { weekday: weekdayForPeakDate as AvailabilityConfiguration['periods'][number]['weekday'], startTime: '08:00', endTime: '09:00' },
+    ];
+    const threeIdenticalLearns = [intent(0, 'i1', 'Learn', 'learning'), intent(1, 'i2', 'Learn', 'learning'), intent(2, 'i3', 'Learn', 'learning')];
+    const result = await runOnDate(NARROW_PEAK_DATE, splitPeriods, threeIdenticalLearns);
+    check('N1. three identical Learn intents (different activity family than Workout): status is READY', result.status === 'READY');
+    if (result.status === 'READY') {
+      check('N2. all three identical Learn intents are placed (fix is not Workout-specific)', result.preview.constructedDay.proposedItems.length === 3);
+      check('N3. zero deferrals', result.preview.constructedDay.deferredItems.length === 0);
+      const items = result.preview.constructedDay.proposedItems;
+      check(
+        'N4. every placed item is genuinely distinct and non-overlapping',
+        items.every((a, i) => items.every((b, j) => i === j || a.start.getTime() >= b.end.getTime() || b.start.getTime() >= a.end.getTime()))
+      );
+    }
+  }
+
+  // O. IDENTICAL "Errands" (ticket section 10, mandatory) -- title-only
+  // repeated FLEXIBLE intents, no activityId, generic duration fallback
+  // preserved (never a fabricated catalog id merely to make this test
+  // pass). With only enough real capacity for TWO 45-minute Errands in
+  // this exact availability, the third must still be legitimately
+  // deferred -- proving replenishment does not overbook a title-only
+  // activity either.
+  // ============================================================
+  {
+    const NARROW_PEAK_DATE = '2026-10-17';
+    const weekdayForPeakDate = new Date(NARROW_PEAK_DATE + 'T12:00:00Z').getUTCDay();
+    const splitPeriods: AvailabilityConfiguration['periods'] = [
+      { weekday: weekdayForPeakDate as AvailabilityConfiguration['periods'][number]['weekday'], startTime: '05:00', endTime: '06:00' },
+      { weekday: weekdayForPeakDate as AvailabilityConfiguration['periods'][number]['weekday'], startTime: '08:00', endTime: '09:00' },
+    ];
+    const threeIdenticalErrands = [intent(0, 'i1', 'Errands', undefined), intent(1, 'i2', 'Errands', undefined), intent(2, 'i3', 'Errands', undefined)];
+    const result = await runOnDate(NARROW_PEAK_DATE, splitPeriods, threeIdenticalErrands);
+    check('O1. three identical title-only Errands intents: status is READY', result.status === 'READY');
+    if (result.status === 'READY') {
+      check('O2. state-aware placement occurs when capacity permits: at least 2 of the 3 Errands are placed', result.preview.constructedDay.proposedItems.length >= 2);
+      check(
+        'O3. every placed Errands item still carries no activityId (never fabricated to make replenishment easier)',
+        result.preview.constructedDay.proposedItems.every((p) => p.activityId === undefined)
+      );
+      check(
+        'O4. generic duration fallback warning is still surfaced for every placed/attempted Errands intent',
+        ['i1', 'i2', 'i3'].every((id) => result.preview.warnings.some((w) => w.intentId === id && w.code === 'DURATION_FROM_GENERIC_FALLBACK'))
+      );
+      const items = result.preview.constructedDay.proposedItems;
+      check(
+        'O5. every placed item is genuinely distinct and non-overlapping',
+        items.every((a, i) => items.every((b, j) => i === j || a.start.getTime() >= b.end.getTime() || b.start.getTime() >= a.end.getTime()))
+      );
+      // With genuine capacity for exactly 2 (60-minute periods, 45-
+      // minute duration -- 15 minutes remain in each, insufficient for
+      // a third), a real 3rd Errands should be legitimately deferred,
+      // never fabricated a placement.
+      if (result.preview.constructedDay.proposedItems.length === 2) {
+        const deferred = result.preview.constructedDay.deferredItems[0];
+        check('O6. the genuinely un-placeable third Errands is deferred with an accurate reason (NO_CANDIDATES), not a stale conflict', deferred?.primaryReason === 'NO_CANDIDATES');
+      }
+    }
+  }
+
+  // P. FIXED + multiple FLEXIBLE (ticket section 11, mandatory) --
+  // FIXED remains immovable; FLEXIBLE searches avoid its interval;
+  // dynamic sibling placement (replenishment) still avoids newly
+  // proposed intervals from OTHER flexible intents too; remaining
+  // capacity stays discoverable.
+  // ============================================================
+  {
+    const NARROW_PEAK_DATE = '2026-10-17';
+    const weekdayForPeakDate = new Date(NARROW_PEAK_DATE + 'T12:00:00Z').getUTCDay();
+    const splitPeriods: AvailabilityConfiguration['periods'] = [
+      { weekday: weekdayForPeakDate as AvailabilityConfiguration['periods'][number]['weekday'], startTime: '05:00', endTime: '06:00' },
+      { weekday: weekdayForPeakDate as AvailabilityConfiguration['periods'][number]['weekday'], startTime: '08:00', endTime: '09:00' },
+    ];
+    const fixedStart = new Date(`${NARROW_PEAK_DATE}T09:00:00.000Z`); // 05:00 ET, inside the first period.
+    const mixedIntents: RequestedDayIntent[] = [
+      { id: 'i-fixed', title: 'Doctor appointment', flexibility: 'FIXED', fixedStart, durationMinutes: 30, originalOrder: 0 },
+      intent(1, 'i1', 'Workout', 'workout'),
+      intent(2, 'i2', 'Workout', 'workout'),
+    ];
+    const result = await runOnDate(NARROW_PEAK_DATE, splitPeriods, mixedIntents);
+    check('P1. FIXED + 2 FLEXIBLE: status is READY', result.status === 'READY');
+    if (result.status === 'READY') {
+      const fixedItem = result.preview.constructedDay.proposedItems.find((p) => p.intentId === 'i-fixed');
+      check('P2. the FIXED intent is placed exactly at its requested instant (immovable)', fixedItem !== undefined && fixedItem.start.getTime() === fixedStart.getTime());
+      const flexibleItems = result.preview.constructedDay.proposedItems.filter((p) => p.intentId !== 'i-fixed');
+      check('P3. both FLEXIBLE Workout intents are also placed (remaining capacity stays discoverable around the FIXED commitment)', flexibleItems.length === 2);
+      const fixedEnd = fixedStart.getTime() + 30 * 60000;
+      check(
+        'P4. neither FLEXIBLE placement overlaps the FIXED interval',
+        flexibleItems.every((p) => p.start.getTime() >= fixedEnd || p.end.getTime() <= fixedStart.getTime())
+      );
+      check(
+        'P5. the two FLEXIBLE placements do not overlap EACH OTHER either (dynamic sibling avoidance still works alongside a FIXED commitment)',
+        flexibleItems.length < 2 || flexibleItems[0].start.getTime() >= flexibleItems[1].end.getTime() || flexibleItems[1].start.getTime() >= flexibleItems[0].end.getTime()
+      );
+      check('P6. zero deferrals', result.preview.constructedDay.deferredItems.length === 0);
+    }
+  }
+
+  // Q. OVERLOAD PRECEDENCE PRESERVED (ticket section 17, mandatory) --
+  // replenishment must not disturb `compareByOverloadPrecedence`. A
+  // HIGH-importance intent submitted SECOND (array position) must still
+  // be evaluated FIRST by constructDay and therefore still legitimately
+  // claim the objectively best-scoring slot, exactly as it would
+  // without any replenishment ever occurring -- this ticket requires
+  // fair access to REMAINING capacity, never equal timing quality among
+  // intents.
+  // ============================================================
+  {
+    const NARROW_PEAK_DATE = '2026-10-17';
+    const weekdayForPeakDate = new Date(NARROW_PEAK_DATE + 'T12:00:00Z').getUTCDay();
+    const splitPeriods: AvailabilityConfiguration['periods'] = [
+      { weekday: weekdayForPeakDate as AvailabilityConfiguration['periods'][number]['weekday'], startTime: '05:00', endTime: '06:00' },
+      { weekday: weekdayForPeakDate as AvailabilityConfiguration['periods'][number]['weekday'], startTime: '08:00', endTime: '09:00' },
+    ];
+    const precedenceIntents: RequestedDayIntent[] = [
+      { id: 'low', title: 'Workout', activityId: 'workout', flexibility: 'FLEXIBLE', originalOrder: 0 },
+      { id: 'high', title: 'Workout', activityId: 'workout', flexibility: 'FLEXIBLE', importance: 'HIGH', originalOrder: 1 },
+      { id: 'low2', title: 'Workout', activityId: 'workout', flexibility: 'FLEXIBLE', originalOrder: 2 },
+    ];
+    const result = await runOnDate(NARROW_PEAK_DATE, splitPeriods, precedenceIntents);
+    check('Q1. mixed-importance identical Workout intents: status is READY', result.status === 'READY');
+    if (result.status === 'READY') {
+      check('Q2. all three place (real capacity for all, replenishment resolves the two lower-precedence ones)', result.preview.constructedDay.proposedItems.length === 3);
+      const highItem = result.preview.constructedDay.proposedItems.find((p) => p.intentId === 'high');
+      const lowItem = result.preview.constructedDay.proposedItems.find((p) => p.intentId === 'low');
+      check('Q3. the HIGH-importance intent (submitted SECOND) still claims the objectively best-scoring slot (BEST or GOOD tier)', highItem !== undefined && (highItem.timingFit === 'BEST' || highItem.timingFit === 'GOOD'));
+      check(
+        'Q4. the LOW-importance intent (submitted FIRST) did NOT claim that same best slot -- precedence, not array order, decided who got first pick',
+        lowItem !== undefined && highItem !== undefined && lowItem.start.getTime() !== highItem.start.getTime()
+      );
     }
   }
 

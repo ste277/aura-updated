@@ -1317,6 +1317,86 @@ async function main() {
     check('68. a FIXED intent under disjoint availability still never calls searchTiming (excludedIntervals did not change this)', capturedRequests.length === 0);
   }
 
+  // ============================================================
+  // Dynamic Candidate Replenishment V1 -- termination safety (this
+  // ticket's own section 14, mandatory: "prove it terminates... a
+  // deterministic bound... do not introduce an unbounded retry loop").
+  // Deliberately ADVERSARIAL fake `searchTiming`: it ALWAYS returns the
+  // exact SAME single candidate, completely ignoring `excludedIntervals`
+  // -- a maximally degenerate response a real engine would never
+  // produce, chosen specifically to stress-test the orchestrator's OWN
+  // stopping condition rather than rely on a real search engine
+  // eventually running out of genuinely new candidates. If the
+  // orchestrator's own round/no-forward-progress bound is broken, this
+  // test hangs or makes an unbounded number of `searchTiming` calls;
+  // it does neither.
+  // ============================================================
+  {
+    let searchCallCount = 0;
+    const fixedCandidateSlot = timingCandidate('2026-09-17T09:00:00Z', '2026-09-17T09:30:00Z', 'GOOD');
+    const deps = noopDeps({
+      loadAvailabilityConfiguration: async () => ({ configured: true, periods: [{ weekday: 4, startTime: '05:00', endTime: '09:00' }] }),
+      searchTiming: () => {
+        searchCallCount += 1;
+        return { candidates: [fixedCandidateSlot] }; // Same instant every single call, regardless of excludedIntervals.
+      },
+    });
+    const FLEXIBLE_INTENT_COUNT = 5;
+    const intents = Array.from({ length: FLEXIBLE_INTENT_COUNT }, (_, i) => requestedIntent({ id: `i-term-${i}`, flexibility: 'FLEXIBLE', activityId: 'workout', durationMinutes: 30, originalOrder: i }));
+    const result = await orchestrateConstructDay(remainingTodayRequest({ timezone: 'America/New_York', targetDate: '2026-09-17', now: iso('2026-09-16T16:00:00Z'), intents }), deps);
+    check('69. termination safety: the orchestration completes (does not hang) even with a degenerate always-same-candidate fake', result.status === 'READY');
+    if (result.status === 'READY') {
+      check('70. termination safety: exactly ONE intent is placed (the degenerate fake never offers a genuinely different slot)', result.preview.constructedDay.proposedItems.length === 1);
+      check('71. termination safety: the remaining 4 intents are correctly, terminally deferred (not silently dropped)', result.preview.constructedDay.deferredItems.length === 4);
+      // Bounded call count (this ticket's own section 14/32): round 0 is
+      // exactly FLEXIBLE_INTENT_COUNT calls (one per intent, unchanged
+      // from pre-replenishment behavior); the no-forward-progress check
+      // then stops after exactly ONE replenishment round (every
+      // conflicted intent gets re-queried once, the fake returns the
+      // identical unhelpful candidate again, the conflicted-id set does
+      // not shrink, the loop stops) -- never `FLEXIBLE_INTENT_COUNT`
+      // full rounds, and never unbounded.
+      const expectedCallCount = FLEXIBLE_INTENT_COUNT + (FLEXIBLE_INTENT_COUNT - 1);
+      check(`72. termination safety: exactly ${expectedCallCount} total searchTiming calls (round 0's ${FLEXIBLE_INTENT_COUNT} + exactly ONE replenishment round's ${FLEXIBLE_INTENT_COUNT - 1}), proving the loop stops on the FIRST no-forward-progress round rather than exhausting its full safety cap`, searchCallCount === expectedCallCount);
+    }
+  }
+
+  // Duplicate-candidate safety (this ticket's own section 15) --
+  // `excludedIntervals` genuinely GROWS between the initial round and a
+  // replenishment round (never shrinks, never resets), which is the
+  // structural mechanism that makes a repeat of the exact same rejected
+  // candidate impossible on a real engine (proven separately, real-
+  // engine, in test/timingSearch.test.ts and
+  // test/tomorrowWindowAwareTimingSearch.test.ts's own L/M/N/O
+  // sections) -- this check isolates and proves the ACCUMULATION itself
+  // at the wiring level.
+  // ============================================================
+  {
+    const excludedIntervalsLengthsByCall: number[] = [];
+    const conflictingCandidate = timingCandidate('2026-09-17T09:00:00Z', '2026-09-17T09:30:00Z', 'GOOD');
+    const deps = noopDeps({
+      loadAvailabilityConfiguration: async () => ({ configured: true, periods: [{ weekday: 4, startTime: '05:00', endTime: '09:00' }] }),
+      searchTiming: (request) => {
+        excludedIntervalsLengthsByCall.push(request.excludedIntervals?.length ?? 0);
+        return { candidates: [conflictingCandidate] };
+      },
+    });
+    const intents = [
+      requestedIntent({ id: 'i-dup-1', flexibility: 'FLEXIBLE', activityId: 'workout', durationMinutes: 30, originalOrder: 0 }),
+      requestedIntent({ id: 'i-dup-2', flexibility: 'FLEXIBLE', activityId: 'workout', durationMinutes: 30, originalOrder: 1 }),
+    ];
+    await orchestrateConstructDay(remainingTodayRequest({ timezone: 'America/New_York', targetDate: '2026-09-17', now: iso('2026-09-16T16:00:00Z'), intents }), deps);
+    // Round 0: both intents' calls see the SAME baseline excludedIntervals
+    // (0 -- UNCONFIGURED/no gap/Plan here). Round 1 (replenishment for
+    // the one conflicted intent): its own excludedIntervals now includes
+    // the one item round 0 actually proposed -- strictly larger.
+    check('73. duplicate-candidate safety: round 0 calls see the baseline excludedIntervals length', excludedIntervalsLengthsByCall.length >= 3 && excludedIntervalsLengthsByCall[0] === 0 && excludedIntervalsLengthsByCall[1] === 0);
+    check(
+      '74. duplicate-candidate safety: the replenishment round\'s excludedIntervals is strictly LARGER than round 0\'s (the newly-proposed interval was added, never lost/reset)',
+      excludedIntervalsLengthsByCall.length >= 3 && excludedIntervalsLengthsByCall[2] > excludedIntervalsLengthsByCall[0]
+    );
+  }
+
   if (!allPassed) {
     console.error('\nSome Day Constructor Orchestrator checks FAILED.');
     process.exit(1);
