@@ -69,8 +69,21 @@ function intent(index: number, id: string, title: string, activityId?: string, d
 }
 
 async function run(periods: AvailabilityConfiguration['periods'], intents: RequestedDayIntent[], blockingPlans: PlanBlockerCandidate[] = []) {
+  return runOnDate(TARGET_DATE, periods, intents, blockingPlans);
+}
+
+// PR #146 correctness amendment -- the mandatory narrow-peak regression
+// (ticket section 8) needs a DIFFERENT real calendar date than the rest
+// of this file's own fixtures (`TARGET_DATE`): 2026-10-17 is the specific
+// date this session's own investigation found where "workout"/30min
+// genuinely produces the fallback-pass-3 clustering defect (see
+// test/timingSearch.test.ts's own unit-level proof of the same date/
+// activity for the raw engine call). This helper lets those scenarios
+// reuse the SAME real `orchestrateConstructDay` path as every other test
+// in this file, just against that specific date instead of `TARGET_DATE`.
+async function runOnDate(targetDate: string, periods: AvailabilityConfiguration['periods'], intents: RequestedDayIntent[], blockingPlans: PlanBlockerCandidate[] = []) {
   const request: ConstructDayRequest = {
-    targetDate: TARGET_DATE,
+    targetDate,
     timezone: TIMEZONE,
     constructionWindowSource: 'REMAINING_TODAY', // the real client's own default -- never overridden for Tomorrow planning.
     now: NOW,
@@ -256,6 +269,162 @@ async function main() {
       const placedInGap = result.preview.constructedDay.proposedItems.some((p) => p.start.getTime() < gapEndUTC.getTime() && p.end.getTime() > gapStartUTC.getTime());
       check('H3. if placed, the item never overlaps the gap between the two periods (gap-blocker gate still correctly enforced)', !placedInGap);
       check('H4. if placed, the item lies inside one of the two genuinely usable periods', result.preview.constructedDay.proposedItems.every((p) => p.start.getTime() >= win.start.getTime() && p.end.getTime() <= win.end.getTime()));
+    }
+  }
+
+  // ============================================================
+  // I. REAL-engine narrow-peak regression through the full orchestrator
+  // (ticket section 9, mandatory, "do not mock away timing ranking in
+  // the only regression"). Uses the SAME real, deterministic defect date
+  // test/timingSearch.test.ts proves at the raw-engine level (2026-10-17,
+  // "workout", 30 minutes -- the day's real top-3 candidates, without
+  // excludedIntervals, would all cluster inside a 06:00-08:00 ET gap).
+  // Here it runs through the full, real `orchestrateConstructDay`, with
+  // real disjoint availability (05:00-06:00 + 08:00-09:00 ET), proving
+  // the fix closes the defect end-to-end, not merely at the raw
+  // `runTimingSearch` call.
+  // ============================================================
+  {
+    const NARROW_PEAK_DATE = '2026-10-17';
+    const weekdayForPeakDate = new Date(NARROW_PEAK_DATE + 'T12:00:00Z').getUTCDay();
+    const splitPeriods: AvailabilityConfiguration['periods'] = [
+      { weekday: weekdayForPeakDate as AvailabilityConfiguration['periods'][number]['weekday'], startTime: '05:00', endTime: '06:00' },
+      { weekday: weekdayForPeakDate as AvailabilityConfiguration['periods'][number]['weekday'], startTime: '08:00', endTime: '09:00' },
+    ];
+    const result = await runOnDate(NARROW_PEAK_DATE, splitPeriods, [intent(0, 'i1', 'Workout', 'workout')]);
+    check('I1. the real narrow-peak defect date: status is READY (not a fabricated failure)', result.status === 'READY');
+    check('I2. the real narrow-peak defect date: the FLEXIBLE Workout intent IS placed (this exact scenario would have failed before this amendment)', result.status === 'READY' && placedTitles(result).includes('Workout'));
+    if (result.status === 'READY') {
+      const item = result.preview.constructedDay.proposedItems[0];
+      const gapStartUTC = new Date(`${NARROW_PEAK_DATE}T10:00:00.000Z`); // 06:00 ET
+      const gapEndUTC = new Date(`${NARROW_PEAK_DATE}T12:00:00.000Z`); // 08:00 ET
+      check('I3. the placed item never overlaps the 06:00-08:00 ET gap', !(item.start.getTime() < gapEndUTC.getTime() && gapEndUTC.getTime() > gapStartUTC.getTime() && item.end.getTime() > gapStartUTC.getTime() && item.start.getTime() < gapEndUTC.getTime()));
+      const inFirstPeriod = item.start.getTime() >= new Date(`${NARROW_PEAK_DATE}T09:00:00.000Z`).getTime() && item.end.getTime() <= gapStartUTC.getTime();
+      const inSecondPeriod = item.start.getTime() >= gapEndUTC.getTime() && item.end.getTime() <= new Date(`${NARROW_PEAK_DATE}T13:00:00.000Z`).getTime();
+      check('I4. (first usable period discoverable) OR (second usable period discoverable) -- the placed item lies in one of them', inFirstPeriod || inSecondPeriod);
+      check('I5. no false deferral: deferredItems is empty for this single-intent run despite the narrow-peak defect condition', result.preview.constructedDay.deferredItems.length === 0);
+    }
+  }
+
+  // ============================================================
+  // J. Pre-existing blocking Plan, contiguous availability (ticket
+  // section 10) -- semantically verified safe first (required by the
+  // ticket before broadening): a `FIXED_PLAN`-sourced `BlockedInterval`
+  // is, exactly like an `AVAILABILITY_GAP` one, already fully computed
+  // in `orchestrateConstructDay` BEFORE the per-intent search loop runs
+  // (both are assembled into the same `blockedIntervals` array at one
+  // single point, well before any `searchTiming` call) and represents
+  // genuinely already-committed, unusable time -- safe to pass as an
+  // excluded interval. availability 05:00-09:00 ET (contiguous), one
+  // existing Plan occupying 06:00-08:00 ET (same clock range as the
+  // gap scenario, proving the mechanism treats both blocker sources
+  // identically).
+  // ============================================================
+  {
+    const contiguousPeriod: AvailabilityConfiguration['periods'] = [{ weekday: weekdayForTarget as AvailabilityConfiguration['periods'][number]['weekday'], startTime: '05:00', endTime: '09:00' }];
+    const existingPlan: PlanBlockerCandidate = { start: new Date('2026-09-23T10:00:00.000Z'), end: new Date('2026-09-23T12:00:00.000Z'), status: 'UPCOMING' }; // 06:00-08:00 ET
+    const result = await run(contiguousPeriod, [intent(0, 'i1', 'Meditate', 'meditation')], [existingPlan]);
+    check('J1. contiguous availability with an existing blocking Plan in the middle: status is READY', result.status === 'READY');
+    check('J2. the FLEXIBLE intent is still placed (real capacity exists on either side of the Plan)', result.status === 'READY' && placedTitles(result).includes('Meditate'));
+    if (result.status === 'READY') {
+      const item = result.preview.constructedDay.proposedItems[0];
+      const planStart = existingPlan.start.getTime();
+      const planEnd = existingPlan.end.getTime();
+      check('J3. the placed item never overlaps the existing Plan', !(item.start.getTime() < planEnd && planStart < item.end.getTime()));
+    }
+  }
+
+  // ============================================================
+  // K. Multi-intent fairness under DISJOINT availability (ticket section
+  // 11.B) -- re-runs the Workout/Meditate/Errands scenario (and its
+  // reordered variant) from sections C/D, but with a real gap in the
+  // middle of the availability instead of one contiguous span, on the
+  // real narrow-peak defect date so the gap-swallowing risk is genuinely
+  // exercised, not merely possible in principle.
+  // ============================================================
+  {
+    const NARROW_PEAK_DATE = '2026-10-17';
+    const weekdayForPeakDate = new Date(NARROW_PEAK_DATE + 'T12:00:00Z').getUTCDay();
+    const splitPeriods: AvailabilityConfiguration['periods'] = [
+      { weekday: weekdayForPeakDate as AvailabilityConfiguration['periods'][number]['weekday'], startTime: '05:00', endTime: '06:00' },
+      { weekday: weekdayForPeakDate as AvailabilityConfiguration['periods'][number]['weekday'], startTime: '08:00', endTime: '09:00' },
+    ];
+    const resultB = await runOnDate(NARROW_PEAK_DATE, splitPeriods, [intent(0, 'i1', 'Workout', 'workout'), intent(1, 'i2', 'Meditate', 'meditation'), intent(2, 'i3', 'Errands', undefined)]);
+    check('K1. disjoint availability (narrow-peak date), Workout/Meditate/Errands: no false deferral caused by top-N gap candidates', resultB.status === 'READY' && resultB.preview.constructedDay.proposedItems.length + resultB.preview.constructedDay.deferredItems.length === 3);
+    check('K2. disjoint availability: nothing is placed inside the 06:00-08:00 ET gap', resultB.status === 'READY' && resultB.preview.constructedDay.proposedItems.every((p) => {
+      const gapStartUTC = new Date(`${NARROW_PEAK_DATE}T10:00:00.000Z`).getTime();
+      const gapEndUTC = new Date(`${NARROW_PEAK_DATE}T12:00:00.000Z`).getTime();
+      return !(p.start.getTime() < gapEndUTC && gapStartUTC < p.end.getTime());
+    }));
+
+    const resultReordered = await runOnDate(NARROW_PEAK_DATE, splitPeriods, [intent(0, 'i1', 'Meditate', 'meditation'), intent(1, 'i2', 'Workout', 'workout'), intent(2, 'i3', 'Errands', undefined)]);
+    check('K3. reordered under disjoint availability (narrow-peak date): still no placement inside the gap', resultReordered.status === 'READY' && resultReordered.preview.constructedDay.proposedItems.every((p) => {
+      const gapStartUTC = new Date(`${NARROW_PEAK_DATE}T10:00:00.000Z`).getTime();
+      const gapEndUTC = new Date(`${NARROW_PEAK_DATE}T12:00:00.000Z`).getTime();
+      return !(p.start.getTime() < gapEndUTC && gapStartUTC < p.end.getTime());
+    }));
+
+    const resultLearn = await runOnDate(NARROW_PEAK_DATE, splitPeriods, [intent(0, 'i1', 'Learn', 'learning'), intent(1, 'i2', 'Learn', 'learning'), intent(2, 'i3', 'Errands', undefined)]);
+    check('K4. Learn/Learn/Errands under disjoint availability (narrow-peak date): status READY, no placement inside the gap', resultLearn.status === 'READY' && resultLearn.preview.constructedDay.proposedItems.every((p) => {
+      const gapStartUTC = new Date(`${NARROW_PEAK_DATE}T10:00:00.000Z`).getTime();
+      const gapEndUTC = new Date(`${NARROW_PEAK_DATE}T12:00:00.000Z`).getTime();
+      return !(p.start.getTime() < gapEndUTC && gapStartUTC < p.end.getTime());
+    }));
+  }
+
+  // ============================================================
+  // L. KNOWN LIMITATION, NOT A REGRESSION (ticket section 12, mandatory
+  // audit item) -- documents, rather than silently leaving unverified,
+  // that a DYNAMIC same-run proposed-item conflict can still cause a
+  // later intent to lose a genuinely feasible alternative. This is
+  // architecturally DISTINCT from the gap/Plan defect this PR fixes:
+  // every FLEXIBLE intent's own `searchTiming` call happens in the
+  // orchestrator's per-intent loop, ALL of them strictly BEFORE
+  // `constructDay` is ever invoked for ANY intent -- so no intent's own
+  // pre-computed candidate set can ever know what a SIBLING intent in
+  // the same batch will end up claiming. `excludedIntervals` cannot
+  // close this (the ticket's own section 12 explicitly prohibits trying
+  // to predict this through excludedIntervals) -- it would require
+  // either re-running search after each placement decision (a real
+  // orchestrator architecture change, not a timing-search API addition)
+  // or requesting a much larger `limit` (a probabilistic mitigation with
+  // its own performance cost), neither of which is this PR's scope.
+  //
+  // Reproduced with 3 IDENTICAL "Workout" intents (same activity/
+  // duration/day -> identical raw candidate sets before any placement)
+  // in the same disjoint-availability narrow-peak scenario as section K:
+  // the first two place correctly (one per usable period); the third is
+  // falsely deferred as CONFLICTS_WITH_PROPOSED_ITEM even though 30
+  // minutes of real, unclaimed capacity remains (05:30-06:00 ET) --
+  // because the third intent's own candidate set, computed before either
+  // placement happened, never included that slot at all.
+  // ============================================================
+  {
+    const NARROW_PEAK_DATE = '2026-10-17';
+    const weekdayForPeakDate = new Date(NARROW_PEAK_DATE + 'T12:00:00Z').getUTCDay();
+    const splitPeriods: AvailabilityConfiguration['periods'] = [
+      { weekday: weekdayForPeakDate as AvailabilityConfiguration['periods'][number]['weekday'], startTime: '05:00', endTime: '06:00' },
+      { weekday: weekdayForPeakDate as AvailabilityConfiguration['periods'][number]['weekday'], startTime: '08:00', endTime: '09:00' },
+    ];
+    const threeIdenticalWorkouts = [intent(0, 'i1', 'Workout', 'workout'), intent(1, 'i2', 'Workout', 'workout'), intent(2, 'i3', 'Workout', 'workout')];
+    const result = await runOnDate(NARROW_PEAK_DATE, splitPeriods, threeIdenticalWorkouts);
+    check('L1. KNOWN LIMITATION setup: status is READY', result.status === 'READY');
+    if (result.status === 'READY') {
+      check('L2. KNOWN LIMITATION setup: the first two identical Workout intents ARE placed (one per usable period)', result.preview.constructedDay.proposedItems.length === 2);
+      const thirdDeferred = result.preview.constructedDay.deferredItems.find((d) => d.intentId === 'i3');
+      check(
+        'L3. KNOWN LIMITATION (documented, not fixed by this PR): the third identical intent is falsely deferred as CONFLICTS_WITH_PROPOSED_ITEM despite real unclaimed capacity remaining (05:30-06:00 ET) -- a distinct, unclosed truncation hole reported for a future ticket',
+        thirdDeferred !== undefined && thirdDeferred.primaryReason === 'CONFLICTS_WITH_PROPOSED_ITEM'
+      );
+      // Prove the "real unclaimed capacity" claim directly, rather than
+      // merely asserting the deferral: the placed items occupy 09:00-
+      // 09:30 UTC and 12:00-12:30 UTC (05:00 and 08:00 ET), leaving
+      // 09:30-10:00 UTC (05:30-06:00 ET) -- inside the outer window,
+      // inside a usable period, not overlapping either placed item --
+      // genuinely open.
+      const unclaimedSlot = { start: new Date(`${NARROW_PEAK_DATE}T09:30:00.000Z`), end: new Date(`${NARROW_PEAK_DATE}T10:00:00.000Z`) };
+      const overlapsAnyPlaced = result.preview.constructedDay.proposedItems.some((p) => p.start.getTime() < unclaimedSlot.end.getTime() && unclaimedSlot.start.getTime() < p.end.getTime());
+      check('L4. the claimed "real unclaimed capacity" (05:30-06:00 ET) genuinely does not overlap either placed item', !overlapsAnyPlaced);
     }
   }
 

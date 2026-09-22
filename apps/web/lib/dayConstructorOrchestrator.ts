@@ -823,9 +823,38 @@ export async function orchestrateConstructDay(request: ConstructDayRequest, deps
     // remain the sole authority on final placement -- this only narrows
     // what FIND bothers to generate and rank in the first place.
     const searchWindow = { start: window.start, end: window.end };
+    // Correctness amendment (PR #146 review) -- `excludedIntervals` is
+    // the SAME `blockedIntervals` array assembled ONCE above (line 776),
+    // BEFORE this per-intent loop ever runs, straight-mapped to the bare
+    // `{start,end}` shape `runTimingSearch` needs (its own `source` tag
+    // is a Day-Constructor-only concept, meaningless to that package).
+    // Deliberately the ENTIRE array, every source: `'AVAILABILITY_GAP'`
+    // (the gap between two disjoint configured periods) and `'FIXED_PLAN'`
+    // (an existing active commitment) are BOTH already known, fixed, and
+    // genuinely unusable before ANY intent's search runs -- exactly the
+    // category this field exists for (see its own doc comment,
+    // timingSearch.ts, for why `'EXTERNAL'`, reserved/unused in V1, would
+    // be correct to include too if it were ever populated: it carries the
+    // identical "already known, already unusable" semantic by
+    // construction of `BlockedInterval` itself, not something this file
+    // needs to special-case).
+    //
+    // Deliberately NEVER includes a same-run proposed-item conflict: at
+    // this point in `orchestrateConstructDay`, `constructDay` has not
+    // been called yet for ANY intent (every intent's own `searchTiming`
+    // call happens here, in this loop, strictly before the single
+    // `constructDay(constructInput)` call below) -- there is no
+    // "already-placed item" to know about yet, for any intent, even the
+    // very first one submitted. That conflict category is unavoidably,
+    // and correctly, `constructDay`'s own `CONFLICTS_WITH_PROPOSED_ITEM`
+    // gate's job alone (see this ticket's own audit item on whether a
+    // later intent can still lose feasible alternatives to an
+    // already-proposed item -- answered in the completion report, not
+    // silently addressed here).
+    const excludedIntervals = blockedIntervals.map((blocker) => ({ start: blocker.start, end: blocker.end }));
     const searchRequest: Omit<TimingSearchRequest, 'context'> = dayIntent.activityId
-      ? { mode: 'FIND', activityId: dayIntent.activityId, durationMinutes: dayIntent.estimatedDurationMinutes, dateRange: { start: request.targetDate, end: request.targetDate }, searchWindow }
-      : { mode: 'FIND', taskTitle: requested.title, durationMinutes: dayIntent.estimatedDurationMinutes, dateRange: { start: request.targetDate, end: request.targetDate }, searchWindow };
+      ? { mode: 'FIND', activityId: dayIntent.activityId, durationMinutes: dayIntent.estimatedDurationMinutes, dateRange: { start: request.targetDate, end: request.targetDate }, searchWindow, excludedIntervals }
+      : { mode: 'FIND', taskTitle: requested.title, durationMinutes: dayIntent.estimatedDurationMinutes, dateRange: { start: request.targetDate, end: request.targetDate }, searchWindow, excludedIntervals };
 
     let searchResult: { candidates: TimingCandidate[] };
     try {
