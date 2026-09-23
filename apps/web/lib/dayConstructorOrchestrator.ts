@@ -12,10 +12,16 @@
  * ORCHESTRATOR ASSEMBLES. CONSTRUCTOR DECIDES. This file makes zero
  * placement decisions of its own: it never ranks candidates, never
  * chooses a slot, never decides what gets deferred. Every one of those
- * decisions is made by `constructDay` (dayConstructor.ts), called
- * exactly once per orchestration run. This file's only job is turning
- * real, already-fetched application data into the exact inputs
- * `constructDay` already knows how to consume.
+ * decisions is made by `constructDay` (dayConstructor.ts) -- still a
+ * pure, synchronous, self-contained function, still with zero callback/
+ * I/O capability of its own. Dynamic Candidate Replenishment V1 (see
+ * `orchestrateConstructDay`'s own doc comment) means this file may now
+ * call it MORE THAN ONCE per orchestration run -- each individual call
+ * is byte-identical in shape/behavior to before that amendment; only
+ * this file's own OWN coordination between calls is new. This file's
+ * job remains turning real, already-fetched application data into the
+ * exact inputs `constructDay` already knows how to consume -- now
+ * possibly refreshed and re-submitted, never placed here.
  *
  * PREVIEW ONLY (this ticket's own section 2/22/23): this file never
  * calls `createPlannedActivity`, `saveUpcomingPlanFromCandidate`, any
@@ -56,6 +62,7 @@ import {
   type ConstructedDay,
   type FixedPlacementConstraint,
   type PlacementCandidate,
+  type PlacementDiagnostic,
   type PlacementTimingFit,
 } from './dayConstructor';
 import type { BlockedInterval } from './dayCapacity';
@@ -625,6 +632,41 @@ function resolveConstructionWindow(request: ConstructDayRequest): ConstructionWi
 // all (`null` return, filtered by the caller).
 // ============================================================
 
+// ============================================================
+// Dynamic Candidate Replenishment V1 -- two small, pure helpers the
+// replenishment loop (orchestrateConstructDay, below) uses. Kept
+// deliberately trivial and separate so the loop's own control flow
+// reads as "what" (converge / no progress / next round), not "how" a
+// diagnostic is classified or two sets are compared.
+// ============================================================
+
+/** True only when at least one of this deferred intent's own rejected
+ * candidates failed SPECIFICALLY because it overlapped a same-run
+ * proposed item -- never for an intent whose every candidate failed for
+ * a reason replenishment cannot help with (DURATION_UNKNOWN/
+ * NO_CANDIDATES carry no diagnostics at all; a candidate rejected as
+ * OUTSIDE_CONSTRUCTION_WINDOW or BLOCKED_BY_COMMITMENT will be rejected
+ * for the exact same reason again no matter how many times search is
+ * re-run, since neither the window nor the pre-existing blockers ever
+ * change between rounds). Deliberately checks every diagnostic, not
+ * only a `primaryReason` of exactly `'CONFLICTS_WITH_PROPOSED_ITEM'` --
+ * `summarizeRejections` (dayConstructor.ts) collapses a MIXED set of
+ * per-candidate reasons to `'NO_FEASIBLE_WINDOW'`, and an intent whose
+ * candidates failed for a mix of reasons, one of which is a same-run
+ * conflict, still deserves a replenishment attempt (this ticket's own
+ * product invariant: "the intent must not be falsely deferred merely
+ * because its original bounded top-N candidates became occupied by
+ * sibling activities"). */
+function isReplenishableConflict(diagnostics: readonly PlacementDiagnostic[]): boolean {
+  return diagnostics.some((d) => d.reason === 'CONFLICTS_WITH_PROPOSED_ITEM');
+}
+
+function setsEqual(a: ReadonlySet<string>, b: ReadonlySet<string>): boolean {
+  if (a.size !== b.size) return false;
+  for (const value of a) if (!b.has(value)) return false;
+  return true;
+}
+
 function normalizeCandidate(intentId: string, candidate: TimingCandidate, candidateOrder: number): PlacementCandidate | null {
   const start = new Date(candidate.start);
   const end = new Date(candidate.end);
@@ -782,6 +824,15 @@ export async function orchestrateConstructDay(request: ConstructDayRequest, deps
   const resolvedIntents: ResolvedIntentSummary[] = [];
   const candidatesByIntentId: Record<string, PlacementCandidate[]> = {};
   const fixedConstraintsByIntentId: Record<string, FixedPlacementConstraint[]> = {};
+  /** Dynamic Candidate Replenishment V1 -- one entry per FLEXIBLE intent
+   * that reached a real `searchTiming` call below, carrying exactly the
+   * three fields a replenishment round (below) needs to re-issue that
+   * SAME intent's own FIND request later. Never populated for FIXED
+   * intents (they never call `searchTiming` at all, unaffected by this
+   * ticket) or for a FLEXIBLE intent with an unresolved duration
+   * (`constructDay`'s own `DURATION_UNKNOWN` gate handles that, no
+   * search ever ran for it to replenish). */
+  const flexibleSearchMetaByIntentId: Record<string, { activityId?: string; title: string; durationMinutes: number }> = {};
 
   for (const requested of request.intents) {
     const { dayIntent, warnings: intentWarnings } = resolveRequestedDayIntent(requested, request.targetDate, durationContext);
@@ -808,9 +859,53 @@ export async function orchestrateConstructDay(request: ConstructDayRequest, deps
     // FLEXIBLE
     if (dayIntent.estimatedDurationMinutes === undefined) continue; // constructDay's own DURATION_UNKNOWN gate handles this; no search to run.
 
+    // Construction-Window-Aware Timing Search V1 -- `searchWindow` is the
+    // SAME resolved `window` every candidate is later checked against in
+    // `evaluateCandidate` (dayConstructor.ts's own `isWithinWindow` gate),
+    // passed straight through with zero conversion (both are already the
+    // same `{ start: Date; end: Date }` absolute-instant shape). This is
+    // what fixes the root cause the audit found: FIND's own candidate
+    // ranking/limit now only ever considers instants this specific
+    // orchestration run could actually use, so a narrow construction
+    // window can no longer have its own genuinely-feasible in-window
+    // candidates silently truncated away in favor of higher-scoring but
+    // useless out-of-window ones. `dayConstructor.ts`'s own feasibility
+    // gates (window/blockers/conflicts) are completely unchanged and
+    // remain the sole authority on final placement -- this only narrows
+    // what FIND bothers to generate and rank in the first place.
+    const searchWindow = { start: window.start, end: window.end };
+    // Correctness amendment (PR #146 review) -- `excludedIntervals` is
+    // the SAME `blockedIntervals` array assembled ONCE above (line 776),
+    // BEFORE this per-intent loop ever runs, straight-mapped to the bare
+    // `{start,end}` shape `runTimingSearch` needs (its own `source` tag
+    // is a Day-Constructor-only concept, meaningless to that package).
+    // Deliberately the ENTIRE array, every source: `'AVAILABILITY_GAP'`
+    // (the gap between two disjoint configured periods) and `'FIXED_PLAN'`
+    // (an existing active commitment) are BOTH already known, fixed, and
+    // genuinely unusable before ANY intent's search runs -- exactly the
+    // category this field exists for (see its own doc comment,
+    // timingSearch.ts, for why `'EXTERNAL'`, reserved/unused in V1, would
+    // be correct to include too if it were ever populated: it carries the
+    // identical "already known, already unusable" semantic by
+    // construction of `BlockedInterval` itself, not something this file
+    // needs to special-case).
+    //
+    // Deliberately NEVER includes a same-run proposed-item conflict: at
+    // this point in `orchestrateConstructDay`, `constructDay` has not
+    // been called yet for ANY intent (every intent's own `searchTiming`
+    // call happens here, in this loop, strictly before the single
+    // `constructDay(constructInput)` call below) -- there is no
+    // "already-placed item" to know about yet, for any intent, even the
+    // very first one submitted. That conflict category is unavoidably,
+    // and correctly, `constructDay`'s own `CONFLICTS_WITH_PROPOSED_ITEM`
+    // gate's job alone (see this ticket's own audit item on whether a
+    // later intent can still lose feasible alternatives to an
+    // already-proposed item -- answered in the completion report, not
+    // silently addressed here).
+    const excludedIntervals = blockedIntervals.map((blocker) => ({ start: blocker.start, end: blocker.end }));
     const searchRequest: Omit<TimingSearchRequest, 'context'> = dayIntent.activityId
-      ? { mode: 'FIND', activityId: dayIntent.activityId, durationMinutes: dayIntent.estimatedDurationMinutes, dateRange: { start: request.targetDate, end: request.targetDate } }
-      : { mode: 'FIND', taskTitle: requested.title, durationMinutes: dayIntent.estimatedDurationMinutes, dateRange: { start: request.targetDate, end: request.targetDate } };
+      ? { mode: 'FIND', activityId: dayIntent.activityId, durationMinutes: dayIntent.estimatedDurationMinutes, dateRange: { start: request.targetDate, end: request.targetDate }, searchWindow, excludedIntervals }
+      : { mode: 'FIND', taskTitle: requested.title, durationMinutes: dayIntent.estimatedDurationMinutes, dateRange: { start: request.targetDate, end: request.targetDate }, searchWindow, excludedIntervals };
 
     let searchResult: { candidates: TimingCandidate[] };
     try {
@@ -828,20 +923,138 @@ export async function orchestrateConstructDay(request: ConstructDayRequest, deps
       .filter((candidate): candidate is PlacementCandidate => candidate !== null);
     candidatesByIntentId[dayIntent.id] = normalized;
     if (normalized.length === 0) warnings.push({ intentId: requested.id, code: 'NO_TIMING_CANDIDATES_FOUND' });
+    // Dynamic Candidate Replenishment V1 -- kept for exactly the same
+    // reason `excludedIntervals` was kept above: a replenishment round
+    // (below) needs to re-issue THIS intent's own FIND request later,
+    // against a larger `excludedIntervals`, without re-deriving
+    // `activityId`/`title`/`estimatedDurationMinutes` from `requested`/
+    // `dayIntent` a second time.
+    flexibleSearchMetaByIntentId[dayIntent.id] = { activityId: dayIntent.activityId, title: requested.title, durationMinutes: dayIntent.estimatedDurationMinutes };
   }
 
-  // Exactly one constructDay call -- every placement decision is made
-  // there, never in this file (this ticket's own section 3).
-  const constructInput: ConstructDayInput = {
-    intents: resolvedIntents.map((r) => r.dayIntent),
+  const intentsForConstructDay = resolvedIntents.map((r) => r.dayIntent);
+
+  // ============================================================
+  // Dynamic Candidate Replenishment V1 (PR #146's final correctness
+  // amendment). `constructDay` itself is UNCHANGED and untouched --
+  // still one pure, synchronous, self-contained call per invocation,
+  // still the sole authority on feasibility/placement/precedence. What
+  // changes here is that this file may now call it MORE THAN ONCE:
+  //
+  //   ROOT CAUSE this closes: every FLEXIBLE intent's own `searchTiming`
+  //   call (the loop above) happens BEFORE `constructDay` places ANY
+  //   intent -- so intent C's own candidate set can never know that
+  //   intent A or B (processed earlier, same precedence order) will end
+  //   up claiming one of C's own top-`limit` candidates. `excludedIntervals`
+  //   (this file's own earlier amendment) cannot help here: it only
+  //   carries what is known BEFORE search runs (availability gaps,
+  //   existing Plans) -- a same-run proposed item does not exist yet at
+  //   that point, for ANY intent, even the first one submitted.
+  //
+  //   THE FIX: run `constructDay` once with the candidates already
+  //   gathered above (byte-identical to pre-amendment behavior for every
+  //   request that never hits this condition -- the overwhelming
+  //   majority, and the ENTIRE reason this stays a fast path, this
+  //   ticket's own section 20). Then, for any FLEXIBLE intent deferred
+  //   this round for a reason that INCLUDES `CONFLICTS_WITH_PROPOSED_ITEM`
+  //   in its own diagnostics (never any other reason -- see
+  //   `isReplenishableConflict` below), re-issue ONLY that intent's own
+  //   FIND request, with `excludedIntervals` grown to also cover every
+  //   interval `constructDay` actually proposed this round (real,
+  //   already-committed-within-this-run time, exactly the same
+  //   "already known unusable" category `excludedIntervals` already
+  //   expresses -- never a same-run item that MIGHT still move, since
+  //   nothing here ever un-places an already-proposed item). Re-run
+  //   `constructDay` with the refreshed candidate set. Repeat.
+  //
+  //   OWNERSHIP BOUNDARY PRESERVED (this ticket's own section 4):
+  //   `runTimingSearch` still only ever receives temporal bounds
+  //   (`searchWindow`/`excludedIntervals`) -- it is never told about
+  //   precedence, overload, or commit semantics, and never asked to
+  //   place anything. `constructDay` still makes every placement
+  //   decision, unchanged, called with a plain, complete
+  //   `ConstructDayInput` each time -- it has no callback, no loop, no
+  //   awareness that it might be invoked again. ONLY this orchestrator
+  //   coordinates the state-aware interaction between the two, exactly
+  //   the role this file's own module doc comment already assigns it.
+  //
+  //   TERMINATION (this ticket's own section 14, mandatory, deterministic
+  //   bound, no unbounded retry): capped at `flexibleIntentCount` rounds
+  //   -- a conservative but always-safe bound, since every round that
+  //   makes forward progress permanently resolves (places) at least one
+  //   previously-conflicted intent (an intent, once placed by
+  //   `constructDay`, is never revisited -- its own candidate set is
+  //   never touched again), and the loop stops immediately, before that
+  //   bound is ever reached in practice, the instant a round produces
+  //   the IDENTICAL still-conflicted intent-id set as the round before
+  //   it (no forward progress -- accept the result as final; this is
+  //   what correctly distinguishes a resolvable dynamic conflict from
+  //   genuine capacity exhaustion, this ticket's own section 7/19).
+  //
+  //   DUPLICATE-CANDIDATE SAFETY (this ticket's own section 15): since
+  //   `excludedIntervals` only ever GROWS between rounds (every
+  //   already-proposed interval accumulates, none are ever removed), a
+  //   replenished FIND call for the same intent can never return the
+  //   exact interval that conflicted in an earlier round -- that
+  //   interval is now itself part of `excludedIntervals`, filtered
+  //   before generation, by construction. No separate cursor/dedupe
+  //   bookkeeping is needed.
+  // ============================================================
+  const flexibleIntentCount = intentsForConstructDay.filter((i) => i.flexibility === 'FLEXIBLE').length;
+  let result: ConstructDayResult = constructDay({
+    intents: intentsForConstructDay,
     window,
     blockedIntervals,
     candidatesByIntentId,
     fixedConstraintsByIntentId,
     today: request.targetDate,
-  };
-  const result: ConstructDayResult = constructDay(constructInput);
+  });
   if (result.status !== 'READY') return result;
+
+  let previouslyConflictedIds: Set<string> | undefined;
+  for (let round = 0; round < flexibleIntentCount; round += 1) {
+    const conflictedIds = new Set(
+      result.day.deferredItems.filter((d) => isReplenishableConflict(d.diagnostics)).map((d) => d.intentId)
+    );
+    if (conflictedIds.size === 0) break; // Converged: nothing left that replenishment could help.
+    if (previouslyConflictedIds && setsEqual(conflictedIds, previouslyConflictedIds)) break; // No forward progress -- genuine remaining deferral, stop.
+    previouslyConflictedIds = conflictedIds;
+
+    // Every interval `constructDay` actually proposed THIS round is now
+    // real, committed-within-this-run time -- union with the original
+    // gap/Plan blockers (never shrinks, never replaces).
+    const proposedThisRound = result.day.proposedItems.map((p) => ({ start: p.start, end: p.end }));
+    const excludedIntervals = [...blockedIntervals.map((b) => ({ start: b.start, end: b.end })), ...proposedThisRound];
+
+    for (const intentId of conflictedIds) {
+      const meta = flexibleSearchMetaByIntentId[intentId];
+      if (!meta || meta.durationMinutes === undefined) continue; // Structurally unreachable (only ever set for FLEXIBLE intents that already had a resolved duration), defensive only.
+      const searchWindow = { start: window.start, end: window.end };
+      const searchRequest: Omit<TimingSearchRequest, 'context'> = meta.activityId
+        ? { mode: 'FIND', activityId: meta.activityId, durationMinutes: meta.durationMinutes, dateRange: { start: request.targetDate, end: request.targetDate }, searchWindow, excludedIntervals }
+        : { mode: 'FIND', taskTitle: meta.title, durationMinutes: meta.durationMinutes, dateRange: { start: request.targetDate, end: request.targetDate }, searchWindow, excludedIntervals };
+
+      let replenishedResult: { candidates: TimingCandidate[] };
+      try {
+        replenishedResult = deps.searchTiming(searchRequest);
+      } catch (err) {
+        return { status: 'TIMING_SEARCH_FAILED', requestedIntentId: intentId, reason: err instanceof Error ? err.message : String(err) };
+      }
+      candidatesByIntentId[intentId] = replenishedResult.candidates
+        .map((candidate, index) => normalizeCandidate(intentId, candidate, index))
+        .filter((candidate): candidate is PlacementCandidate => candidate !== null);
+    }
+
+    result = constructDay({
+      intents: intentsForConstructDay,
+      window,
+      blockedIntervals,
+      candidatesByIntentId,
+      fixedConstraintsByIntentId,
+      today: request.targetDate,
+    });
+    if (result.status !== 'READY') return result;
+  }
 
   return {
     status: 'READY',

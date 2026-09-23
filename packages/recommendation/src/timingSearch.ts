@@ -94,6 +94,87 @@ export interface TimingSearchRequest {
   /** FIND only. Default 3. */
   limit?: number;
 
+  /**
+   * FIND only, optional. Construction-Window-Aware Timing Search V1 --
+   * when supplied, a candidate is only generated/ranked/diversified if its
+   * own `[start, start + durationMinutes)` interval lies ENTIRELY inside
+   * `[searchWindow.start, searchWindow.end)` (same half-open convention
+   * `isWithinWindow`/`ConstructionWindow` already use, apps/web/lib/
+   * dayConstructor.ts). Applied BEFORE ranking/diversification/`limit`
+   * (this is the entire point -- see this field's own completion report
+   * section "why filter before, not after"), so a narrow caller-supplied
+   * window can never have its own in-bounds candidates crowded out by a
+   * higher-scoring but useless out-of-bounds one that happened to win the
+   * day-wide top-N cut.
+   *
+   * Absolute instants, not a local-minute-of-day range, so this is
+   * unambiguous across any timezone/DST edge without this file having to
+   * re-derive one -- the SAME representation `ConstructionWindow.start`/
+   * `.end` already use, so a caller with one already in hand (e.g. Day
+   * Constructor's own orchestrator) passes it straight through with zero
+   * conversion.
+   *
+   * Intentionally scoped to a SINGLE absolute interval, not a list of
+   * disjoint ones: this field expresses the OUTER span a caller could
+   * possibly use (earliest start to latest end across every configured
+   * period) -- exactly what `normalizeUsableWindowsToConstructionWindow`
+   * (availabilityContext.ts) already produces as `ConstructionWindow.
+   * start`/`.end`. It never by itself expresses "unavailable gaps WITHIN
+   * that span" (a day with disjoint availability, e.g. two separate
+   * periods, or an existing blocking commitment) -- see
+   * `excludedIntervals` (below) for that, added by this same ticket's own
+   * correctness amendment after review found this field alone was
+   * insufficient: `selectDiversePlanningOptions`'s own fallback pass (no
+   * spacing guarantee) can still let every one of a narrow result set
+   * cluster inside a caller-known-unusable gap, silently starving
+   * `constructDay` of the genuinely feasible candidates that exist
+   * elsewhere in the outer span.
+   *
+   * Every existing caller omits this field and is completely unaffected:
+   * no filter runs, full-day generation/ranking/limit behavior is
+   * byte-identical to before this field existed.
+   */
+  searchWindow?: { start: Date; end: Date };
+
+  /**
+   * FIND only, optional. Construction-Window-Aware Timing Search V1 --
+   * correctness amendment (PR #146 review). Zero or more sub-intervals,
+   * WITHIN `searchWindow` (when both are supplied), that the caller
+   * already knows are unusable BEFORE candidate search even runs -- e.g.
+   * the gap between two disjoint configured availability periods, or an
+   * existing committed Plan/commitment. A candidate is excluded if its
+   * own `[start, start + durationMinutes)` interval OVERLAPS any entry
+   * here, using the exact same half-open overlap formula the rest of this
+   * repository's interval logic already uses (`aStart < bEnd && bStart <
+   * aEnd` -- dayCapacity.ts's own `intervalsOverlap`, reproduced here
+   * rather than imported to avoid a cross-package dependency this file
+   * has never had): a candidate that merely STARTS in usable time but
+   * whose own required duration would extend into an excluded interval
+   * is still excluded (checked against the full candidate span, never
+   * just its start instant) -- and a candidate that ends EXACTLY where an
+   * excluded interval begins (or begins exactly where one ends) is NOT
+   * excluded (adjacency is legal, same convention as `isWithinWindow`).
+   *
+   * Applied in the SAME place, and for the SAME reason, as
+   * `searchWindow`: before the expensive Panchang/Muhurta evaluation and
+   * before ranking/diversification/`limit`, so a narrow known-unusable
+   * gap can never consume the caller's entire truncated result the way it
+   * could before this field existed.
+   *
+   * Deliberately narrow in what it may represent (see the caller-side
+   * doc comment on `dayConstructorOrchestrator.ts`'s own construction of
+   * this list for the full audit): only time already known unusable
+   * BEFORE this specific search call runs. A conflict with an item
+   * `constructDay` itself proposes LATER, during its own greedy placement
+   * across multiple intents in the same run, can never be expressed here
+   * -- that remains, unavoidably and correctly, `constructDay`'s own
+   * `CONFLICTS_WITH_PROPOSED_ITEM` gate's job, since no per-intent search
+   * call can know what a later intent in the same batch will claim.
+   *
+   * Every existing caller omits this field and is completely unaffected.
+   */
+  excludedIntervals?: { start: Date; end: Date }[];
+
   /** CHECK only: exact ISO instant to evaluate. */
   candidateStart?: string;
   /** CHECK only: how far (minutes, each direction, same local day) to look
@@ -365,6 +446,30 @@ function runFind(request: TimingSearchRequest): TimingSearchResponse {
     for (let startMinute = dayStart; startMinute <= maxStart; startMinute += CANDIDATE_SEARCH_STEP_MINUTES) {
       if (!matchesTimePreference(startMinute, preference)) continue;
       const start = localInstantForMinute(dayContext, startMinute);
+      // Construction-Window-Aware Timing Search V1 -- skip BEFORE the
+      // expensive Panchang/Muhurta evaluation (evaluateTimingCandidate),
+      // not merely before ranking: an out-of-bounds instant is never
+      // useful to a caller that supplied `searchWindow`, so there is no
+      // reason to pay for its evaluation at all. This is what keeps a
+      // bounded search from doing MORE work than an unbounded one -- it
+      // does strictly less (see this field's own doc comment on
+      // TimingSearchRequest.searchWindow for why filtering happens here,
+      // before ranking/diversification/`limit`, rather than after).
+      const candidateStartMs = start.getTime();
+      const candidateEndMs = candidateStartMs + safeDuration * 60000;
+      if (request.searchWindow) {
+        if (candidateStartMs < request.searchWindow.start.getTime() || candidateEndMs > request.searchWindow.end.getTime()) continue;
+      }
+      // Correctness amendment (PR #146 review) -- skip a candidate whose
+      // OWN span overlaps any caller-known-unusable interval, same
+      // before-evaluation placement as the searchWindow check above, and
+      // the same half-open overlap formula this repository's interval
+      // logic already uses elsewhere (dayCapacity.ts's own
+      // `intervalsOverlap`: `aStart < bEnd && bStart < aEnd`). Checked
+      // against the candidate's full `[start, end)` span, never just
+      // `start`, so a candidate that only STARTS in usable time but would
+      // run into an excluded interval is still correctly excluded.
+      if (request.excludedIntervals?.some((excluded) => candidateStartMs < excluded.end.getTime() && excluded.start.getTime() < candidateEndMs)) continue;
       const candidate = evaluateTimingCandidate({ profile, start, durationMinutes: safeDuration, context: request.context });
       if (candidate.conflicts?.some((conflict) => conflict.type === 'FRICTION_WINDOW_BLOCKED')) continue;
       ranked.push(toRanked(candidate, startMinute, candidate.auraFitScore ?? candidate.muhurtaScore * 5 + 55));
