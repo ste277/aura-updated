@@ -119,10 +119,20 @@ function main() {
   }
 
   // ============================================================
-  // 22. No /goals UI exists yet (this PR's own explicit boundary).
+  // 22. No /goals UI existed at PR A's own merge (this PR's own explicit
+  // boundary at the time). PR B (Goals -> Planning Integration V1 PR B)
+  // has since legitimately added apps/web/app/goals/** -- that directory
+  // existing in the live tree is expected from PR B onward, not a
+  // regression of PR A's own boundary, so the "directory absent" form of
+  // this check is retired (it did its job: PR A's own merged diff,
+  // reviewed at the time, added no UI). PR B owns verifying ITS OWN
+  // boundary now (test/goalsUiWiring.test.ts) -- what remains load-
+  // bearing here is that no GoalCard/GoalReviewCard component was ever
+  // added directly under components/ (PR B instead used dedicated
+  // app/goals/** client components, following this repo's own routed-
+  // page convention -- see goalsUiWiring.test.ts for that verification).
   // ============================================================
-  check('22. no app/goals directory exists yet (no Goals UI in PR A)', !fs.existsSync(path.join(__dirname, '../apps/web/app/goals')));
-  check('22. no GoalCard/GoalReviewCard component exists yet', !fs.existsSync(path.join(__dirname, '../apps/web/components/GoalCard.tsx')) && !fs.existsSync(path.join(__dirname, '../apps/web/components/GoalReviewCard.tsx')));
+  check('22. no GoalCard/GoalReviewCard component exists directly under components/', !fs.existsSync(path.join(__dirname, '../apps/web/components/GoalCard.tsx')) && !fs.existsSync(path.join(__dirname, '../apps/web/components/GoalReviewCard.tsx')));
 
   if (!allPassed) {
     console.error('SOME GOALS WIRING CHECKS FAILED');

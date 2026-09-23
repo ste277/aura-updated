@@ -118,6 +118,21 @@ export function YouView({
         </div>
       </SurfaceCard>
 
+      {/* Goals -> Planning Integration V1 PR B -- the smallest appropriate
+       * navigation entry point (this ticket's own section 4): a single
+       * row navigating to the dedicated /goals route, mirroring exactly
+       * how /plan-day is reached elsewhere in this app (a bare
+       * window.location.href, not a new activeTab/bottom-nav entry, which
+       * would crowd an already-full 6-slot bar). No new props threaded
+       * through page.tsx -- this is a self-contained navigation, same as
+       * every other cross-route link in this app. */}
+      <div>
+        <SectionHeader label="Goals" />
+        <SurfaceCard padding={0} style={{ overflow: 'hidden' }}>
+          <SettingsRow icon="🎯" title="Goals" detail="Track what you're working toward" onClick={() => { window.location.href = '/goals'; }} />
+        </SurfaceCard>
+      </div>
+
       {/* Your Aura (brief section 57/58) -- the identity/personalization
        * features get top billing, not buried in an undifferentiated list. */}
       <div>
