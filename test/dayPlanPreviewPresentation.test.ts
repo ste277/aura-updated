@@ -26,6 +26,7 @@ import {
   groupWarningsByIntentId,
   sortProposedItemsForDisplay,
   titleForIntentId,
+  flexibilityForIntentId,
   classifyProposalSummary,
   presentDeferredProvenance,
 } from '../apps/web/lib/dayPlanPreviewPresentation';
@@ -157,19 +158,27 @@ const allDeferralReasons: PlacementDeferralReason[] = [
   'DURATION_UNKNOWN', 'NO_CANDIDATES', 'NO_FEASIBLE_WINDOW', 'BLOCKED_BY_COMMITMENT',
   'CONFLICTS_WITH_PROPOSED_ITEM', 'OUTSIDE_CONSTRUCTION_WINDOW', 'FIXED_WINDOW_INVALID', 'FIXED_WINDOW_CONFLICT',
 ];
-check('15. every real PlacementDeferralReason value maps to non-empty, non-enum text', allDeferralReasons.every((reason) => {
-  const text = presentDeferralReason(reason);
+check('15. every real PlacementDeferralReason value maps to non-empty, non-enum text (FIXED)', allDeferralReasons.every((reason) => {
+  const text = presentDeferralReason(reason, 'FIXED');
   return text.length > 0 && text !== reason;
 }));
-check('16. DURATION_UNKNOWN maps to the expected plain-language explanation', presentDeferralReason('DURATION_UNKNOWN').includes("doesn't know how much time"));
-check('17. NO_CANDIDATES maps to the expected plain-language explanation', presentDeferralReason('NO_CANDIDATES').includes("couldn't find a suitable time"));
-check('18. NO_FEASIBLE_WINDOW maps to the expected plain-language explanation', presentDeferralReason('NO_FEASIBLE_WINDOW').includes("isn't enough open time"));
-check('19. OUTSIDE_CONSTRUCTION_WINDOW maps to the expected plain-language explanation', presentDeferralReason('OUTSIDE_CONSTRUCTION_WINDOW').includes('outside the part of the day'));
-check('20. FIXED_WINDOW_CONFLICT maps to the expected plain-language explanation', presentDeferralReason('FIXED_WINDOW_CONFLICT').includes('conflicts with something already in your day'));
-check('21. FIXED_WINDOW_INVALID maps to the expected plain-language explanation', presentDeferralReason('FIXED_WINDOW_INVALID').includes("couldn't be used"));
-check('22. BLOCKED_BY_COMMITMENT maps to the expected plain-language explanation', presentDeferralReason('BLOCKED_BY_COMMITMENT').includes('already taken by something on your schedule'));
-check('23. CONFLICTS_WITH_PROPOSED_ITEM maps to the expected plain-language explanation', presentDeferralReason('CONFLICTS_WITH_PROPOSED_ITEM').includes('conflicts with another activity Aura placed today'));
-check('24. no raw PlacementDeferralReason enum string is ever returned verbatim', allDeferralReasons.every((reason) => presentDeferralReason(reason) !== reason));
+check('15b. every real PlacementDeferralReason value maps to non-empty, non-enum text (FLEXIBLE)', allDeferralReasons.every((reason) => {
+  const text = presentDeferralReason(reason, 'FLEXIBLE');
+  return text.length > 0 && text !== reason;
+}));
+check('16. DURATION_UNKNOWN maps to the expected plain-language explanation', presentDeferralReason('DURATION_UNKNOWN', 'FLEXIBLE').includes("doesn't know how much time"));
+check('17. NO_CANDIDATES maps to the expected plain-language explanation', presentDeferralReason('NO_CANDIDATES', 'FLEXIBLE').includes("couldn't find a suitable time"));
+check('18. NO_FEASIBLE_WINDOW maps to the expected plain-language explanation', presentDeferralReason('NO_FEASIBLE_WINDOW', 'FLEXIBLE').includes("isn't enough open time"));
+check('19. FIXED + OUTSIDE_CONSTRUCTION_WINDOW: "requested time" wording remains valid (this ticket\'s own section 3/U3 section 3B -- the user genuinely chose a time)', presentDeferralReason('OUTSIDE_CONSTRUCTION_WINDOW', 'FIXED').includes('requested time') && presentDeferralReason('OUTSIDE_CONSTRUCTION_WINDOW', 'FIXED').includes('outside the part of the day'));
+check('19b. FLEXIBLE + OUTSIDE_CONSTRUCTION_WINDOW: never says "requested time" (Plan My Day U3 section 3A -- no time was ever requested)', !presentDeferralReason('OUTSIDE_CONSTRUCTION_WINDOW', 'FLEXIBLE').toLowerCase().includes('requested time'));
+check('19c. FLEXIBLE + OUTSIDE_CONSTRUCTION_WINDOW still names the real, truthful fact: no suitable time within the planned part of the day', presentDeferralReason('OUTSIDE_CONSTRUCTION_WINDOW', 'FLEXIBLE').includes("couldn't find a suitable time") && presentDeferralReason('OUTSIDE_CONSTRUCTION_WINDOW', 'FLEXIBLE').includes('part of the day'));
+check('19d. FIXED and FLEXIBLE OUTSIDE_CONSTRUCTION_WINDOW copy genuinely differ (not the same string reused)', presentDeferralReason('OUTSIDE_CONSTRUCTION_WINDOW', 'FIXED') !== presentDeferralReason('OUTSIDE_CONSTRUCTION_WINDOW', 'FLEXIBLE'));
+check('20. FIXED_WINDOW_CONFLICT maps to the expected plain-language explanation', presentDeferralReason('FIXED_WINDOW_CONFLICT', 'FIXED').includes('conflicts with something already in your day'));
+check('21. FIXED_WINDOW_INVALID maps to the expected plain-language explanation', presentDeferralReason('FIXED_WINDOW_INVALID', 'FIXED').includes("couldn't be used"));
+check('22. BLOCKED_BY_COMMITMENT maps to the expected plain-language explanation', presentDeferralReason('BLOCKED_BY_COMMITMENT', 'FLEXIBLE').includes('already taken by something on your schedule'));
+check('23. CONFLICTS_WITH_PROPOSED_ITEM maps to the expected plain-language explanation', presentDeferralReason('CONFLICTS_WITH_PROPOSED_ITEM', 'FLEXIBLE').includes('conflicts with another activity Aura placed today'));
+check('24. no raw PlacementDeferralReason enum string is ever returned verbatim (either flexibility)', allDeferralReasons.every((reason) => presentDeferralReason(reason, 'FIXED') !== reason && presentDeferralReason(reason, 'FLEXIBLE') !== reason));
+check('24b. every reason OTHER than OUTSIDE_CONSTRUCTION_WINDOW is unaffected by flexibility (byte-identical copy both ways)', allDeferralReasons.filter((r) => r !== 'OUTSIDE_CONSTRUCTION_WINDOW').every((reason) => presentDeferralReason(reason, 'FIXED') === presentDeferralReason(reason, 'FLEXIBLE')));
 
 // ============================================================
 // 25-28: warnings
@@ -263,6 +272,11 @@ check('42. warning-only preview (no deferrals) surfaces both warnings grouped un
 check('titleForIntentId recovers the resolved title for a deferred intentId', titleForIntentId([resolvedIntent('f', 'Follow up with accountant')], 'f') === 'Follow up with accountant');
 check('titleForIntentId falls back safely for an unknown intentId (never throws)', titleForIntentId([], 'missing') === 'Untitled');
 
+// flexibilityForIntentId lookup (Plan My Day U3) -- drives presentDeferralReason's own FIXED-vs-FLEXIBLE branch.
+check('flexibilityForIntentId recovers FIXED for a FIXED deferred intent', flexibilityForIntentId([resolvedIntent('g', 'Doctor appt', { flexibility: 'FIXED' })], 'g') === 'FIXED');
+check('flexibilityForIntentId recovers FLEXIBLE for a FLEXIBLE deferred intent', flexibilityForIntentId([resolvedIntent('h', 'Workout', { flexibility: 'FLEXIBLE' })], 'h') === 'FLEXIBLE');
+check('flexibilityForIntentId defaults safely to FLEXIBLE for an unknown intentId (never throws, never fabricates a "you requested this" claim)', flexibilityForIntentId([], 'missing') === 'FLEXIBLE');
+
 // ============================================================
 // 57-65: Intent Fidelity V1 PR G3/G4 -- deferred-item provenance.
 // Deliberately MINIMAL/factual (this ticket's own section 24): only the
@@ -331,6 +345,19 @@ check('56. neither PR A/B/C file (dayIntent.ts/dayCapacity.ts/dayConstructor.ts/
 check('66. DeferredItemRow\'s own call site passes provenanceTexts', /<DeferredItemRow[\s\S]{0,300}provenanceTexts=/.test(componentSource));
 check('67. ProposedItemRow\'s own call site never receives provenanceTexts (placed items get no priority/deadline badges)', !/<ProposedItemRow[\s\S]{0,300}provenanceTexts=/.test(componentSource));
 check('68. component never renders a generated "why" explanation string for provenance (this ticket\'s own section 24/45)', !/Aura chose|ranking narrative|prioritized over|comparison sentence/i.test(componentSource));
+
+// ============================================================
+// Plan My Day U3 -- structural checks for the zero/partial/full
+// placement CTA rework (this ticket's own sections 6/7/8). Same
+// source-scan convention as the checks immediately above (no component-
+// render infrastructure in this repo -- see this file's own header
+// comment); the actual rendered result is verified separately via the
+// browser preview tool.
+// ============================================================
+check('69. Continue is gated on summaryState === \'HAS_ITEMS\' (never rendered merely-disabled for a zero-placement preview)', /summaryState === 'HAS_ITEMS'[\s\S]{0,120}onContinue/.test(componentSource));
+check('70. a zero-placement (non-HAS_ITEMS) preview renders a relabeled "Edit activities" primary recovery action', /Edit activities/.test(componentSource));
+check('71. the "Edit activities" action reuses the existing onDiscard callback (no new prop/plumbing invented)', /onClick=\{onDiscard\}\s+ariaLabel="Edit activities"/.test(componentSource));
+check('72. "Discard" (the HAS_ITEMS label) and "Edit activities" (the zero-placement label) are both still present as distinct strings', />\s*Discard\s*</.test(componentSource) && /Edit activities/.test(componentSource));
 
 if (!allPassed) {
   console.error('SOME DAY PLAN PREVIEW PRESENTATION CHECKS FAILED');

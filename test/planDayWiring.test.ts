@@ -555,6 +555,30 @@ function main() {
     /function removeRow\(id: string\) \{\s*setRows\(\(current\) => \(current\.length > 1 \? current\.filter\(\(row\) => row\.id !== id\) : current\)\);\s*\}/.test(planDayClientSource)
   );
 
+  // ============================================================
+  // Plan My Day U3 -- failure explanations & recovery (96-108). Source-
+  // scan convention matching this file's own established style
+  // throughout.
+  // ============================================================
+  check('96. the local EntryErrorState duplicate type is gone -- PlanDayEntryErrorPresentation is imported from planDayEntry.ts instead', !/interface EntryErrorState/.test(planDayClientSource) && /PlanDayEntryErrorPresentation/.test(planDayClientSource));
+  check('97. the PREVIEW_ERROR card carries role="alert" for assistive technology (this ticket\'s own section 17)', /role="alert"/.test(planDayClientSource));
+  check(
+    '98. the bottom "Plan my day" CTA is hidden during PREVIEW_ERROR (this ticket\'s own section 13 -- no duplicate resubmit action alongside Try again)',
+    /phase !== 'PREVIEW_ERROR' &&[\s\S]{0,400}ariaLabel="Plan my day"/.test(planDayClientSource)
+  );
+  check('99. the PREVIEW_ERROR recovery action is labeled "Edit activities" (this ticket\'s own section 6, more accessible/truthful than a bare "Edit")', /ariaLabel="Edit activities">\s*Edit activities/.test(planDayClientSource));
+  check('99b. the PREVIEW_ERROR recovery action reuses setPhase(\'ENTRY\') -- the SAME transition the pre-existing row-level Edit toggle pattern establishes, no new phase invented', /onClick=\{\(\) => setPhase\('ENTRY'\)\} ariaLabel="Edit activities"/.test(planDayClientSource));
+  check('100. Edit always returns to ENTRY via setPhase(\'ENTRY\') -- never clears rows itself (no setRows call anywhere near it)', /setPhase\('ENTRY'\)/.test(planDayClientSource));
+  check('100b. submitPreview (both the initial call and every PREVIEW_ERROR retry) always reads the live `rows` state -- never a snapshot/copy that could go stale', (planDayClientSource.match(/buildRequestedIntentsForSubmission\(rows,/g) ?? []).length >= 1);
+  check('101. HTTP_ERROR 401 renders a real, wired Sign in action navigating to \'/\' (this app\'s own real LoginScreen surface, this ticket\'s own section 14 -- never a claim with no action behind it)', /SIGN_IN'\)[\s\S]{0,700}window\.location\.href = '\/'/.test(planDayClientSource));
+  check('102. FUTURE_AVAILABILITY_REQUIRED / NO_USABLE_CAPACITY (Tomorrow) Configure availability action navigates to the SAME real \'/?tab=you\' destination the bootstrap-known prerequisite card already uses (this ticket\'s own section 9 -- no second/new destination invented)', (planDayClientSource.match(/\/\?tab=you/g) ?? []).length >= 2);
+  check('103. the RETRY action (Try again) is the ONLY action inside the PREVIEW_ERROR card that calls submitPreview again', /entryError\.actions\.includes\('RETRY'\)[\s\S]{0,700}submitPreview\(\)/.test(planDayClientSource));
+  check('104. rows/IntentRowCard are never disabled by phase === \'PREVIEW_ERROR\' (only SUBMITTING disables them) -- a user can edit a row directly without first clicking Edit activities', /disabled=\{phase === 'SUBMITTING'\}/.test(planDayClientSource) && !/disabled=\{phase === 'PREVIEW_ERROR'/.test(planDayClientSource));
+  check('105. this file never claims a raw ConstructDayPreviewClientResult status string in a message literal (no leaked enum names in JSX)', !/\{status\}.*outside the part/.test(planDayClientSource));
+  check('106. presentPlanDayPreviewFailure is still the ONLY source of PREVIEW_ERROR copy for a server-returned status (never a second, inline copy table in this file)', /presentPlanDayPreviewFailure\(result, horizon\)/.test(planDayClientSource));
+  check('107. the component never reimplements sign-in/authentication logic of its own (only navigates to the existing \'/\' destination)', !/signIn\(|login\(|authenticate\(/.test(planDayClientSource));
+  check('108. Estimated duration presentation (DURATION_FROM_GENERIC_FALLBACK -> "Estimated duration") is untouched by this ticket -- still sourced from dayPlanPreviewPresentation.ts, never reimplemented here', !/Estimated duration/.test(planDayClientSource));
+
   if (!allPassed) {
     console.error('\nSome Plan Day Wiring checks FAILED.');
     process.exit(1);

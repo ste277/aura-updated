@@ -3,6 +3,7 @@
 import React from 'react';
 import type { ConstructDayPreview } from '../lib/dayConstructorOrchestrator';
 import type { ProposedItem, DeferredItem } from '../lib/dayConstructor';
+import type { DayIntentFlexibility } from '../lib/dayIntent';
 import {
   presentCapacityState,
   formatTargetDateLabel,
@@ -14,6 +15,7 @@ import {
   groupWarningsByIntentId,
   sortProposedItemsForDisplay,
   titleForIntentId,
+  flexibilityForIntentId,
   classifyProposalSummary,
   presentDeferredProvenance,
 } from '../lib/dayPlanPreviewPresentation';
@@ -72,10 +74,18 @@ export function DayPlanPreview({ preview, onContinue, onDiscard, actionState, on
   const sortedProposed = sortProposedItemsForDisplay(constructedDay.proposedItems);
   const warningsByIntentId = groupWarningsByIntentId(presentWarnings(warnings, resolvedIntents));
   const everythingFits = summaryState === 'HAS_ITEMS' && constructedDay.deferredItems.length === 0;
-  // This ticket's own section 23: zero proposed items must never reach an
-  // acceptance submission -- Continue is disabled (never hidden, so its
-  // presence/absence never has to be reasoned about elsewhere) whenever
-  // there is nothing to save.
+  // Plan My Day U3, this ticket's own section 6/23: zero proposed items
+  // must never reach an acceptance submission. Pre-U3 this disabled
+  // Continue rather than hiding it -- U3 tightens this: `summaryState`
+  // (dayPlanPreviewPresentation.ts's own classification, already fully
+  // determined by `constructedDay.proposedItems.length`) is `HAS_ITEMS`
+  // if and only if `hasSubmittableProposal` is true (structurally --
+  // both read the exact same `proposedItems.length > 0` fact), so gating
+  // Continue's very presence on `summaryState === 'HAS_ITEMS'` is exactly
+  // equivalent, never a looser check. `hasProposedItems` is kept as an
+  // explicit defense-in-depth `disabled` condition anyway (matching this
+  // file's own established paranoid style elsewhere), not because the
+  // two facts could ever actually disagree.
   const hasProposedItems = hasSubmittableProposal(preview);
 
   return (
@@ -115,6 +125,7 @@ export function DayPlanPreview({ preview, onContinue, onDiscard, actionState, on
                 key={item.intentId}
                 item={item}
                 title={titleForIntentId(resolvedIntents, item.intentId)}
+                flexibility={flexibilityForIntentId(resolvedIntents, item.intentId)}
                 provenanceTexts={presentDeferredProvenance(resolvedIntents, item.intentId, targetDate)}
                 warningTexts={warningsByIntentId[item.intentId] ?? []}
               />
@@ -128,12 +139,33 @@ export function DayPlanPreview({ preview, onContinue, onDiscard, actionState, on
       )}
 
       <div style={{ display: 'flex', justifyContent: 'flex-end', gap: spacing.md, marginTop: spacing.xxl }}>
+        {/* Plan My Day U3, this ticket's own section 6: zero placed
+            activities means there is genuinely nothing to commit --
+            Continue is no longer rendered at all in that case (not
+            merely disabled, which could read as "there's a plan, just
+            not clickable right now"). `onDiscard` becomes the sole,
+            PRIMARY recovery action, relabeled "Edit activities" (this
+            ticket's own suggested wording) since "Discard" would
+            misdescribe throwing away a proposal that was never actually
+            produced. For HAS_ITEMS (partial or full placement, this
+            ticket's own sections 7/8), both actions render exactly as
+            before this ticket -- "Discard" remains accurate there
+            (there IS a real proposal being set aside), and Continue
+            remains the primary action, unchanged. */}
         {actionState?.kind !== 'SAVED' && onDiscard && (
-          <SecondaryButton onClick={onDiscard} disabled={actionState?.kind === 'SAVING'}>
-            Discard
-          </SecondaryButton>
+          summaryState === 'HAS_ITEMS' ? (
+            <SecondaryButton onClick={onDiscard} disabled={actionState?.kind === 'SAVING'}>
+              Discard
+            </SecondaryButton>
+          ) : (
+            (!actionState || actionState.kind === 'IDLE') && (
+              <PrimaryButton onClick={onDiscard} ariaLabel="Edit activities">
+                Edit activities
+              </PrimaryButton>
+            )
+          )
         )}
-        {(!actionState || actionState.kind === 'IDLE' || actionState.kind === 'SAVING') && onContinue && (
+        {summaryState === 'HAS_ITEMS' && (!actionState || actionState.kind === 'IDLE' || actionState.kind === 'SAVING') && onContinue && (
           <PrimaryButton onClick={() => onContinue(preview)} disabled={!hasProposedItems || actionState?.kind === 'SAVING'}>
             {actionState?.kind === 'SAVING' ? 'Saving…' : 'Continue'}
           </PrimaryButton>
@@ -176,7 +208,7 @@ function ProposedItemRow({ item, timezone, warningTexts }: { item: ProposedItem;
   );
 }
 
-function DeferredItemRow({ item, title, provenanceTexts, warningTexts }: { item: DeferredItem; title: string; provenanceTexts: string[]; warningTexts: string[] }) {
+function DeferredItemRow({ item, title, flexibility, provenanceTexts, warningTexts }: { item: DeferredItem; title: string; flexibility: DayIntentFlexibility; provenanceTexts: string[]; warningTexts: string[] }) {
   return (
     <SurfaceCard style={{ opacity: 0.8 }}>
       <div style={{ display: 'flex', alignItems: 'flex-start', gap: spacing.md }}>
@@ -191,7 +223,7 @@ function DeferredItemRow({ item, title, provenanceTexts, warningTexts }: { item:
               explanation. Never rendered for a placed item -- this text
               exists on ProposedItemRow nowhere in this file. */}
           {provenanceTexts.length > 0 && <div style={{ ...typography.caption, color: colors.textMuted, marginTop: 2 }}>{provenanceTexts.join(' · ')}</div>}
-          <div style={{ ...typography.meta, marginTop: spacing.xs }}>{presentDeferralReason(item.primaryReason)}</div>
+          <div style={{ ...typography.meta, marginTop: spacing.xs }}>{presentDeferralReason(item.primaryReason, flexibility)}</div>
           {warningTexts.map((text, index) => (
             <div key={index} style={{ ...typography.caption, color: colors.textMuted, marginTop: 2 }}>
               {text}
