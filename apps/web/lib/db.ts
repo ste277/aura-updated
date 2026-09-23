@@ -2224,3 +2224,211 @@ export async function resetUserAvailabilityConfiguration(userId: string): Promis
     client.release();
   }
 }
+
+// ============================================================
+// Goals -> Planning Integration V1 PR A (migration 0035, apps/web/lib/
+// goals.ts for the pure domain logic this persistence layer wraps). Like
+// createPlannedActivity, these functions perform NO catalog lookup/
+// validation themselves -- that belongs at the API/service boundary
+// (app/api/goals/**/route.ts), same convention as every other
+// activityId-accepting write in this file.
+// ============================================================
+
+export interface Goal {
+  id: string;
+  userId: string;
+  title: string;
+  // A plain "YYYY-MM-DD" civil-date string, deliberately never a JS Date
+  // here. node-postgres's default type parser for a `date` column (OID
+  // 1082) constructs a Date at LOCAL midnight in the reading process's own
+  // timezone, not UTC midnight -- confirmed directly (test/goalsDb.test.ts
+  // caught this exact bug during PR A's own validation: `SELECT
+  // '2026-09-25'::date` came back as `2026-09-24T18:30:00.000Z` under
+  // IST). Every query below that touches "targetDate" casts it to
+  // ::text explicitly, so this field is a plain string straight out of
+  // Postgres, never re-interpreted through any timezone at all -- the
+  // exact property this ticket's own section 4 asked to be verified, not
+  // just assumed.
+  targetDate: string | null;
+  status: 'ACTIVE' | 'ARCHIVED';
+  createdAt: Date;
+  updatedAt: Date;
+  archivedAt: Date | null;
+}
+
+export interface GoalActivity {
+  id: string;
+  userId: string;
+  goalId: string;
+  title: string;
+  activityId: string | null;
+  status: 'SUGGESTED' | 'DISMISSED';
+  plannedActivityId: string | null;
+  createdAt: Date;
+  updatedAt: Date;
+}
+
+export interface GoalActivityWithLinkedPlanStatus extends GoalActivity {
+  linkedPlanStatus: 'UPCOMING' | 'LOGGED' | 'CANCELLED' | null;
+}
+
+// Explicit column list, "targetDate" cast to ::text -- see Goal's own
+// targetDate doc comment above for exactly why RETURNING */SELECT * would
+// silently corrupt this column via node-postgres's default date parsing.
+const GOAL_COLUMNS = `id, "userId", title, "targetDate"::text AS "targetDate", status, "createdAt", "updatedAt", "archivedAt"`;
+
+export async function listGoalsForUser(userId: string, status: 'ACTIVE' | 'ARCHIVED' = 'ACTIVE'): Promise<Goal[]> {
+  const result = await pool.query(`SELECT ${GOAL_COLUMNS} FROM "Goal" WHERE "userId" = $1 AND status = $2 ORDER BY "updatedAt" DESC`, [userId, status]);
+  return result.rows;
+}
+
+export async function getGoalForUser(userId: string, goalId: string): Promise<Goal | null> {
+  const result = await pool.query(`SELECT ${GOAL_COLUMNS} FROM "Goal" WHERE id = $1 AND "userId" = $2`, [goalId, userId]);
+  return result.rows[0] ?? null;
+}
+
+/**
+ * Creates a Goal and (optionally) its initial GoalActivity rows in one
+ * transaction (implementation design section 14 / this PR's own section
+ * 14 -- "if suggestion insertion fails, the Goal creation should roll
+ * back"). `activities` is already fully resolved by the caller (title +
+ * catalog-matched activityId, or an empty array for a free-text Goal with
+ * no template) -- this function performs no catalog lookup itself, same
+ * convention as createPlannedActivity above.
+ */
+export async function createGoalWithActivities(input: {
+  userId: string;
+  title: string;
+  // Already-validated "YYYY-MM-DD" (isValidCivilDateString), or null.
+  // Passed straight to Postgres as a string parameter -- $4::date casts it
+  // server-side; no JS Date object is ever constructed for this value, so
+  // there is nothing for a timezone to shift.
+  targetDate: string | null;
+  activities: ReadonlyArray<{ title: string; activityId: string | null }>;
+}): Promise<{ goal: Goal; activities: GoalActivity[] }> {
+  const client = await beginTransaction();
+  try {
+    const goalId = randomUUID();
+    const goalResult = await client.query(
+      `INSERT INTO "Goal" (id, "userId", title, "targetDate") VALUES ($1, $2, $3, $4::date) RETURNING ${GOAL_COLUMNS}`,
+      [goalId, input.userId, input.title, input.targetDate]
+    );
+    const goal: Goal = goalResult.rows[0];
+
+    const activities: GoalActivity[] = [];
+    for (const activity of input.activities) {
+      const result = await client.query(
+        `INSERT INTO "GoalActivity" (id, "userId", "goalId", title, "activityId") VALUES ($1, $2, $3, $4, $5) RETURNING *`,
+        [randomUUID(), input.userId, goalId, activity.title, activity.activityId]
+      );
+      activities.push(result.rows[0]);
+    }
+
+    await client.query('COMMIT');
+    return { goal, activities };
+  } catch (err) {
+    await client.query('ROLLBACK').catch(() => {});
+    throw err;
+  } finally {
+    client.release();
+  }
+}
+
+/**
+ * Idempotent -- COALESCE keeps the original archivedAt on a repeat
+ * archive call, not just the status, matching archiveHabit's own
+ * idempotent-by-design shape above. Returns null if the Goal doesn't
+ * exist or isn't owned by this user (ownership check via the WHERE
+ * clause, never via id alone).
+ */
+export async function archiveGoal(userId: string, goalId: string): Promise<Goal | null> {
+  const result = await pool.query(
+    `UPDATE "Goal" SET status = 'ARCHIVED', "archivedAt" = COALESCE("archivedAt", now())
+     WHERE id = $1 AND "userId" = $2 RETURNING ${GOAL_COLUMNS}`,
+    [goalId, userId]
+  );
+  return result.rows[0] ?? null;
+}
+
+export async function goalHasScheduledHistory(userId: string, goalId: string, executor: Pool | PoolClient = pool): Promise<boolean> {
+  const result = await executor.query(
+    `SELECT 1 FROM "GoalActivity" WHERE "userId" = $1 AND "goalId" = $2 AND "plannedActivityId" IS NOT NULL LIMIT 1`,
+    [userId, goalId]
+  );
+  return result.rows.length > 0;
+}
+
+/**
+ * Hard delete, gated on scheduling history (this PR's own section 20 --
+ * "even CANCELLED/LOGGED history counts as real scheduling history", so
+ * this checks plannedActivityId presence, never the linked Plan's current
+ * status). Row-locks the Goal first (FOR UPDATE, same convention as
+ * logHabitCompletion above) so a concurrent acceptance linking a
+ * GoalActivity under this Goal can't race past the history check.
+ */
+export async function deleteGoal(userId: string, goalId: string): Promise<'DELETED' | 'NOT_FOUND' | 'HAS_HISTORY'> {
+  const client = await beginTransaction();
+  try {
+    const goalRes = await client.query(`SELECT 1 FROM "Goal" WHERE id = $1 AND "userId" = $2 FOR UPDATE`, [goalId, userId]);
+    if (goalRes.rows.length === 0) {
+      await client.query('ROLLBACK');
+      return 'NOT_FOUND';
+    }
+    if (await goalHasScheduledHistory(userId, goalId, client)) {
+      await client.query('ROLLBACK');
+      return 'HAS_HISTORY';
+    }
+    await client.query(`DELETE FROM "Goal" WHERE id = $1 AND "userId" = $2`, [goalId, userId]);
+    await client.query('COMMIT');
+    return 'DELETED';
+  } catch (err) {
+    await client.query('ROLLBACK').catch(() => {});
+    throw err;
+  } finally {
+    client.release();
+  }
+}
+
+/** Ownership-checks the parent Goal first (via getGoalForUser) -- returns
+ * null rather than inserting under a Goal that doesn't exist or isn't
+ * owned by this user. */
+export async function addGoalActivity(userId: string, goalId: string, input: { title: string; activityId: string | null }): Promise<GoalActivity | null> {
+  const goal = await getGoalForUser(userId, goalId);
+  if (!goal) return null;
+  const result = await pool.query(
+    `INSERT INTO "GoalActivity" (id, "userId", "goalId", title, "activityId") VALUES ($1, $2, $3, $4, $5) RETURNING *`,
+    [randomUUID(), userId, goalId, input.title, input.activityId]
+  );
+  return result.rows[0];
+}
+
+/** Idempotent (repeat dismissal is a harmless no-op re-write of the same
+ * status). Scoped by userId AND goalId AND id together, so a
+ * goalActivityId belonging to a different Goal or a different user's Goal
+ * never matches -- returns null rather than throwing. */
+export async function dismissGoalActivity(userId: string, goalId: string, goalActivityId: string): Promise<GoalActivity | null> {
+  const result = await pool.query(
+    `UPDATE "GoalActivity" SET status = 'DISMISSED' WHERE id = $1 AND "goalId" = $2 AND "userId" = $3 RETURNING *`,
+    [goalActivityId, goalId, userId]
+  );
+  return result.rows[0] ?? null;
+}
+
+/**
+ * One query, LEFT JOINed against PlannedActivity for its status, so the
+ * API/presentation layer can call deriveGoalActivityState (lib/goals.ts)
+ * per row without an N+1 lookup. linkedPlanStatus is null both when
+ * plannedActivityId is null and when the referenced row is gone (already
+ * handled identically by deriveGoalActivityState).
+ */
+export async function listGoalActivitiesWithLinkedPlanStatus(userId: string, goalId: string): Promise<GoalActivityWithLinkedPlanStatus[]> {
+  const result = await pool.query(
+    `SELECT ga.*, pa.status AS "linkedPlanStatus"
+     FROM "GoalActivity" ga
+     LEFT JOIN "PlannedActivity" pa ON pa.id = ga."plannedActivityId"
+     WHERE ga."userId" = $1 AND ga."goalId" = $2
+     ORDER BY ga."createdAt"`,
+    [userId, goalId]
+  );
+  return result.rows;
+}
