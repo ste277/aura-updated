@@ -422,21 +422,43 @@ export function presentPlanDayPreviewFailure(result: Exclude<ConstructDayPreview
   const dayDescription = horizon === 'TOMORROW' ? 'tomorrow' : 'today';
   switch (result.status) {
     case 'NO_USABLE_CAPACITY':
-      // Plan My Day U3, this ticket's own section 2/9 truthfulness fix --
-      // for TOMORROW this status means CONFIGURED_EMPTY specifically
-      // (dayConstructorOrchestrator.ts's own `resolveAvailabilityAwareWindow`
-      // doc comment: a real, deliberate saved schedule that simply has no
-      // usable window on this particular day) -- genuinely distinct from
-      // "no availability configured" (that unconfigured case is instead
-      // `FUTURE_AVAILABILITY_REQUIRED`, handled separately below). The
-      // OLD copy ("There's no availability configured for that day")
-      // falsely told a user who HAD configured a schedule that they had
-      // not -- fixed here; "Configure availability" (the same real `/?
-      // tab=you` destination the unconfigured case already uses) remains
-      // the correct action either way, since editing THIS day's saved
-      // hours is what the diagnostic actually proves would help.
+      // Plan My Day U3, this ticket's own section 2/9/11 truthfulness fix
+      // -- final review (PR #147) found this status is reachable through
+      // TWO genuinely distinct causes the client cannot tell apart (the
+      // HTTP response collapses both to the same bare status, discarding
+      // `dayCapacity.ts`'s own `constructionWindowMinutes`/`blockedMinutes`
+      // fields that would distinguish them):
+      //
+      //   1. CONFIGURED_EMPTY (dayConstructorOrchestrator.ts's own
+      //      `resolveAvailabilityAwareWindow`): a real, deliberate saved
+      //      schedule with zero periods for this specific weekday --
+      //      genuinely distinct from "no availability configured" (that
+      //      unconfigured case is `FUTURE_AVAILABILITY_REQUIRED`, handled
+      //      separately below).
+      //   2. Real configured hours exist for this weekday, but an
+      //      EXISTING blocking Plan already occupies all of them --
+      //      `computeCapacitySnapshot` (dayCapacity.ts) fails closed to
+      //      this exact same status whenever `usableMinutes === 0`,
+      //      regardless of why (that function's own doc comment: "zero
+      //      usable capacity ALWAYS produces NO_USABLE_CAPACITY").
+      //
+      // An earlier draft of this fix claimed "your availability schedule
+      // doesn't include usable time on that day" -- TRUE for cause 1, but
+      // FALSE for cause 2 (a schedule that genuinely does include time,
+      // simply already spoken for). Since the diagnostic cannot prove
+      // which cause applies, the message now states only the observable
+      // FACT (no usable time remains) without asserting why -- the exact
+      // same non-committal pattern the pre-existing, already-accepted
+      // TODAY message below already uses ("There's no usable time left in
+      // the part of today Aura can plan" -- itself never claims a specific
+      // cause either, and reaches this same dual-cause status). Configure
+      // availability remains offered because it is a real, non-dead-end
+      // destination that can genuinely help under EITHER cause (directly
+      // for cause 1; by adding non-conflicting hours elsewhere in the day
+      // for cause 2) -- offering a real, possibly-helpful action is not
+      // the same claim as asserting a specific unproven cause.
       return horizon === 'TOMORROW'
-        ? { message: "Your availability schedule doesn't include usable time on that day.", showEdit: true, actions: ['CONFIGURE_AVAILABILITY'] }
+        ? { message: "There's no usable time left in tomorrow's availability for Aura to plan.", showEdit: true, actions: ['CONFIGURE_AVAILABILITY'] }
         : { message: "There's no usable time left in the part of today Aura can plan.", showEdit: true, actions: [] };
     case 'FUTURE_AVAILABILITY_REQUIRED':
       return { message: 'Aura needs to know when you\'re usually available before it can plan a future day.', showEdit: true, actions: ['CONFIGURE_AVAILABILITY'] };

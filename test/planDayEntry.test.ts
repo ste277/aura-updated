@@ -334,11 +334,15 @@ function main() {
     presentPlanDayPreviewFailure(outcome('NO_USABLE_CAPACITY'), 'TODAY').message === "There's no usable time left in the part of today Aura can plan."
   );
   check(
-    '54. NO_USABLE_CAPACITY under TOMORROW uses distinct, TRUTHFUL wording (Plan My Day U3 correction, this ticket\'s own section 2/9): this status means CONFIGURED_EMPTY, a real saved schedule with no usable time this day -- never claims "no availability configured" (that would be FUTURE_AVAILABILITY_REQUIRED instead), never claims "today" for a future day',
-    presentPlanDayPreviewFailure(outcome('NO_USABLE_CAPACITY'), 'TOMORROW').message === "Your availability schedule doesn't include usable time on that day."
+    '54. NO_USABLE_CAPACITY under TOMORROW uses distinct wording, never claims "today" for a future day',
+    presentPlanDayPreviewFailure(outcome('NO_USABLE_CAPACITY'), 'TOMORROW').message === "There's no usable time left in tomorrow's availability for Aura to plan."
   );
   check('54b. the corrected TOMORROW message never says "not configured"/"no availability configured" (that phrase would misdescribe CONFIGURED_EMPTY as UNCONFIGURED)', !presentPlanDayPreviewFailure(outcome('NO_USABLE_CAPACITY'), 'TOMORROW').message.toLowerCase().includes('no availability configured'));
-  check('55. NO_USABLE_CAPACITY (TOMORROW) offers CONFIGURE_AVAILABILITY -- the diagnostic genuinely proves editing the saved schedule would help here (unlike the TODAY case, this ticket\'s own section 9)', presentPlanDayPreviewFailure(outcome('NO_USABLE_CAPACITY'), 'TOMORROW').actions.includes('CONFIGURE_AVAILABILITY'));
+  check(
+    '54c. PR #147 final-review correction: the TOMORROW message no longer asserts a specific unproven cause ("doesn\'t include usable time on that day" was TRUE for CONFIGURED_EMPTY but FALSE for the OTHER real path to this same status -- a genuinely configured day fully consumed by an existing blocking Plan, dayCapacity.ts\'s own computeCapacitySnapshot). The message states only the observable fact, matching the already-accepted TODAY message\'s own non-committal pattern (check 53) -- never claims WHY.',
+    !presentPlanDayPreviewFailure(outcome('NO_USABLE_CAPACITY'), 'TOMORROW').message.toLowerCase().includes("doesn't include") && !presentPlanDayPreviewFailure(outcome('NO_USABLE_CAPACITY'), 'TOMORROW').message.toLowerCase().includes('schedule')
+  );
+  check('55. NO_USABLE_CAPACITY (TOMORROW) offers CONFIGURE_AVAILABILITY -- a real, non-dead-end destination that can genuinely help under either reachable cause (this ticket\'s own section 9)', presentPlanDayPreviewFailure(outcome('NO_USABLE_CAPACITY'), 'TOMORROW').actions.includes('CONFIGURE_AVAILABILITY'));
   check('55b. NO_USABLE_CAPACITY remains NOT retryable under TOMORROW too (only editing/configuring Availability helps)', !presentPlanDayPreviewFailure(outcome('NO_USABLE_CAPACITY'), 'TOMORROW').actions.includes('RETRY'));
   check(
     '56. FUTURE_AVAILABILITY_REQUIRED never falls through to a generic message -- it has its own real, actionable copy',
