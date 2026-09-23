@@ -2350,7 +2350,20 @@ export async function archiveGoal(userId: string, goalId: string): Promise<Goal 
   return result.rows[0] ?? null;
 }
 
-export async function goalHasScheduledHistory(userId: string, goalId: string, executor: Pool | PoolClient = pool): Promise<boolean> {
+/**
+ * Checks for a CURRENT, existing PlannedActivity linkage -- i.e. some
+ * GoalActivity under this Goal still has a non-null plannedActivityId
+ * right now, regardless of that linked Plan's own status (UPCOMING/
+ * LOGGED/CANCELLED all count equally; only NULL doesn't). This is
+ * deliberately NOT a durable "was this Goal ever scheduled" tombstone:
+ * the plannedActivityId FK is ON DELETE SET NULL (schema.prisma), so once
+ * the underlying PlannedActivity is itself hard-deleted, this check
+ * naturally reports false again and the Goal becomes eligible for hard
+ * deletion -- Aura intentionally keeps no separate "ever scheduled"
+ * record solely to block a later Goal deletion. See deleteGoal's own doc
+ * comment for exactly what this protects against and what it does not.
+ */
+export async function goalHasRetainedPlanLinkage(userId: string, goalId: string, executor: Pool | PoolClient = pool): Promise<boolean> {
   const result = await executor.query(
     `SELECT 1 FROM "GoalActivity" WHERE "userId" = $1 AND "goalId" = $2 AND "plannedActivityId" IS NOT NULL LIMIT 1`,
     [userId, goalId]
@@ -2359,12 +2372,18 @@ export async function goalHasScheduledHistory(userId: string, goalId: string, ex
 }
 
 /**
- * Hard delete, gated on scheduling history (this PR's own section 20 --
- * "even CANCELLED/LOGGED history counts as real scheduling history", so
- * this checks plannedActivityId presence, never the linked Plan's current
- * status). Row-locks the Goal first (FOR UPDATE, same convention as
+ * Hard delete, gated on RETAINED PlannedActivity linkage, not durable
+ * history (this PR's own delete-history semantics decision): a
+ * GoalActivity whose plannedActivityId currently points at a real
+ * PlannedActivity blocks deletion regardless of that Plan's status
+ * (UPCOMING/LOGGED/CANCELLED all block equally) -- but this is a snapshot
+ * of CURRENT linkage, not a permanent record. If that PlannedActivity is
+ * later hard-deleted, its FK's own ON DELETE SET NULL clears the linkage
+ * (unchanged, still the only mechanism -- no everPlannedAt column, no
+ * separate association-history table), and the Goal becomes deletable
+ * again. Row-locks the Goal first (FOR UPDATE, same convention as
  * logHabitCompletion above) so a concurrent acceptance linking a
- * GoalActivity under this Goal can't race past the history check.
+ * GoalActivity under this Goal can't race past the linkage check.
  */
 export async function deleteGoal(userId: string, goalId: string): Promise<'DELETED' | 'NOT_FOUND' | 'HAS_HISTORY'> {
   const client = await beginTransaction();
@@ -2374,7 +2393,7 @@ export async function deleteGoal(userId: string, goalId: string): Promise<'DELET
       await client.query('ROLLBACK');
       return 'NOT_FOUND';
     }
-    if (await goalHasScheduledHistory(userId, goalId, client)) {
+    if (await goalHasRetainedPlanLinkage(userId, goalId, client)) {
       await client.query('ROLLBACK');
       return 'HAS_HISTORY';
     }

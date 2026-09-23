@@ -29,7 +29,12 @@ export async function DELETE(req: NextRequest, { params }: { params: { goalId: s
   const result = await deleteGoal(session.userId, params.goalId);
   if (result === 'NOT_FOUND') return NextResponse.json({ error: 'Goal not found.' }, { status: 404 });
   if (result === 'HAS_HISTORY') {
-    return NextResponse.json({ error: 'This goal has real scheduling history and cannot be deleted. Archive it instead.' }, { status: 409 });
+    // Deliberately "existing PlannedActivity linkage," not "ever
+    // scheduled" -- this check clears itself (goalHasRetainedPlanLinkage)
+    // once the linked PlannedActivity is hard-deleted, since Aura keeps no
+    // separate durable tombstone for it. The user can retry delete later,
+    // or archive now.
+    return NextResponse.json({ error: 'This goal has an existing PlannedActivity linkage and cannot be deleted right now. Archive it instead.' }, { status: 409 });
   }
   return NextResponse.json({ deleted: true });
 }

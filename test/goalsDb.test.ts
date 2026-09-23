@@ -25,7 +25,7 @@ import {
   createGoalWithActivities,
   archiveGoal,
   deleteGoal,
-  goalHasScheduledHistory,
+  goalHasRetainedPlanLinkage,
   addGoalActivity,
   dismissGoalActivity,
   listGoalActivitiesWithLinkedPlanStatus,
@@ -38,6 +38,7 @@ import {
 } from '../apps/web/lib/db';
 import { deriveGoalActivityState } from '../apps/web/lib/goals';
 import { FULL_ACTIVITY_CATALOG } from '../packages/recommendation/src/personalizedTasks';
+import { randomUUID } from 'crypto';
 
 let allPassed = true;
 function check(label: string, condition: boolean) {
@@ -92,7 +93,52 @@ async function main() {
     });
     createdGoalIds.push({ userId: userA.id, goalId: templated.goal.id });
     check('D. templated Goal creates exactly the given activities, all SUGGESTED', templated.activities.length === 3 && templated.activities.every((a) => a.status === 'SUGGESTED'));
-    check('AA. Goal + its template activities all share the same goalId, created in one atomic call', templated.activities.every((a) => a.goalId === templated.goal.id));
+    check(
+      'AA(happy path only). Goal + its template activities all share the same goalId, created in one atomic call -- NOTE: this alone only proves the happy-path shape, not that a failure actually rolls back; see the failure-injection check immediately below for that',
+      templated.activities.every((a) => a.goalId === templated.goal.id)
+    );
+
+    // ============================================================
+    // AA(failure injection) -- transaction atomicity, verified for real.
+    // The shared-goalId check above only proves what a SUCCESSFUL call
+    // produces; it says nothing about what happens when one of the later
+    // activity inserts fails mid-transaction. This forces a real Postgres
+    // error (a NOT NULL violation on the second activity's title,
+    // deliberately bypassing TypeScript) AFTER the Goal row and the first
+    // activity row have already been written inside the same open
+    // transaction, then verifies via raw queries (not through
+    // getGoalForUser/listGoalActivitiesWithLinkedPlanStatus, which are
+    // themselves scoped by id and would trivially return nothing for an id
+    // we never got back) that NEITHER row survived -- proving createGoal-
+    // WithActivities's ROLLBACK actually undoes an already-succeeded
+    // earlier statement in the same transaction, not just skips the
+    // failing one.
+    // ============================================================
+    const failureInjectionGoalTitle = `Atomicity failure-injection goal ${randomUUID()}`;
+    const failureInjectionFirstActivityTitle = `Should be rolled back ${randomUUID()}`;
+    let failureInjectionThrew = false;
+    try {
+      await createGoalWithActivities({
+        userId: userA.id,
+        title: failureInjectionGoalTitle,
+        targetDate: null,
+        activities: [
+          { title: failureInjectionFirstActivityTitle, activityId: null },
+          { title: null as unknown as string, activityId: null }, // violates GoalActivity.title NOT NULL, mid-transaction, on purpose
+        ],
+      });
+    } catch {
+      failureInjectionThrew = true;
+    }
+    check('AA(failure-injection). createGoalWithActivities throws when a later activity insert violates a real constraint (NOT NULL on title)', failureInjectionThrew);
+
+    const verifyClient = await beginTransaction();
+    const leakedGoal = await verifyClient.query(`SELECT 1 FROM "Goal" WHERE title = $1`, [failureInjectionGoalTitle]);
+    const leakedActivity = await verifyClient.query(`SELECT 1 FROM "GoalActivity" WHERE title = $1`, [failureInjectionFirstActivityTitle]);
+    await verifyClient.query('ROLLBACK'); // read-only -- nothing to commit
+    verifyClient.release();
+    check('AA(failure-injection). the Goal row itself was rolled back too, not left behind as a partial commit', leakedGoal.rows.length === 0);
+    check('AA(failure-injection). the EARLIER, already-succeeded first activity insert was also rolled back (real transactional atomicity, not best-effort cleanup)', leakedActivity.rows.length === 0);
 
     // ============================================================
     // E. free-text/unmatched Goal -> zero activities (already covered by
@@ -208,15 +254,19 @@ async function main() {
     check('16. ?status=ARCHIVED returns the archived Goal', archivedList.some((g: Goal) => g.id === plain.goal.id));
 
     // ============================================================
-    // T. delete Goal with no scheduled history / U. reject delete with history
+    // T. delete Goal with no retained PlannedActivity linkage / U. reject
+    // delete while a linkage is retained. Deliberately NOT "no scheduled
+    // history" / "nothing was ever scheduled" -- goalHasRetainedPlanLinkage
+    // checks CURRENT linkage (a non-null plannedActivityId right now), not
+    // a durable "ever scheduled" record; see its own doc comment in db.ts.
     // ============================================================
     const deletable = await createGoalWithActivities({ userId: userA.id, title: 'Deletable goal', targetDate: null, activities: [{ title: 'Unlinked activity', activityId: null }] });
-    check('T. a Goal with no linked PlannedActivity has no scheduled history', (await goalHasScheduledHistory(userA.id, deletable.goal.id)) === false);
+    check('T. a Goal with no linked PlannedActivity has no retained linkage', (await goalHasRetainedPlanLinkage(userA.id, deletable.goal.id)) === false);
     const deleteResult = await deleteGoal(userA.id, deletable.goal.id);
-    check('T. deleteGoal succeeds (DELETED) when nothing real was ever scheduled', deleteResult === 'DELETED');
+    check('T. deleteGoal succeeds (DELETED) when no PlannedActivity linkage is retained', deleteResult === 'DELETED');
     check('T. the deleted Goal is truly gone', (await getGoalForUser(userA.id, deletable.goal.id)) === null);
 
-    const stillLinkedGoal = await createGoalWithActivities({ userId: userA.id, title: 'Goal with live history', targetDate: null, activities: [] });
+    const stillLinkedGoal = await createGoalWithActivities({ userId: userA.id, title: 'Goal with a retained linkage', targetDate: null, activities: [] });
     createdGoalIds.push({ userId: userA.id, goalId: stillLinkedGoal.goal.id });
     const historyTarget = await addGoalActivity(userA.id, stillLinkedGoal.goal.id, { title: 'Real commitment', activityId: null });
     const historyPlan = await createPlannedActivity({
@@ -232,9 +282,41 @@ async function main() {
     await client3.query(`UPDATE "GoalActivity" SET "plannedActivityId" = $1 WHERE id = $2`, [historyPlan.id, historyTarget!.id]);
     await client3.query('COMMIT');
     client3.release();
-    check('U. goalHasScheduledHistory is true once a GoalActivity is linked', (await goalHasScheduledHistory(userA.id, stillLinkedGoal.goal.id)) === true);
-    check('U. deleteGoal rejects with HAS_HISTORY, never silently deletes real history', (await deleteGoal(userA.id, stillLinkedGoal.goal.id)) === 'HAS_HISTORY');
+    check('U. goalHasRetainedPlanLinkage is true once a GoalActivity is linked', (await goalHasRetainedPlanLinkage(userA.id, stillLinkedGoal.goal.id)) === true);
+    check('U. deleteGoal rejects with HAS_HISTORY while the linkage is retained, never silently deletes it', (await deleteGoal(userA.id, stillLinkedGoal.goal.id)) === 'HAS_HISTORY');
     check('U. the Goal still exists after a rejected delete', (await getGoalForUser(userA.id, stillLinkedGoal.goal.id)) !== null);
+
+    // ============================================================
+    // Delete-history semantics decision: hard-deleting the underlying
+    // PlannedActivity clears the linkage (existing ON DELETE SET NULL,
+    // unchanged) and the Goal becomes eligible for hard deletion again --
+    // proving this is NOT a durable "ever scheduled" tombstone. No
+    // everPlannedAt column, no separate association-history table. Uses a
+    // SEPARATE Goal/activity/plan trio (not stillLinkedGoal, which the
+    // V-Z cross-user checks below still need intact).
+    // ============================================================
+    const reclaimableGoal = await createGoalWithActivities({ userId: userA.id, title: 'Goal whose linkage will be cleared by a hard delete', targetDate: null, activities: [] });
+    createdGoalIds.push({ userId: userA.id, goalId: reclaimableGoal.goal.id });
+    const reclaimableTarget = await addGoalActivity(userA.id, reclaimableGoal.goal.id, { title: 'Real commitment, later removed', activityId: null });
+    const reclaimablePlan = await createPlannedActivity({
+      userId: userA.id,
+      title: 'Plan to be hard-deleted for the reclaim test',
+      plannedStartAt: new Date('2026-09-19T09:00:00Z'),
+      plannedEndAt: new Date('2026-09-19T09:30:00Z'),
+      durationMinutes: 30,
+      windowType: 'NEUTRAL',
+    });
+    const client4 = await beginTransaction();
+    await client4.query(`UPDATE "GoalActivity" SET "plannedActivityId" = $1 WHERE id = $2`, [reclaimablePlan.id, reclaimableTarget!.id]);
+    await client4.query('COMMIT');
+    client4.release();
+    check('linkage blocks delete before the linked Plan is removed', (await deleteGoal(userA.id, reclaimableGoal.goal.id)) === 'HAS_HISTORY');
+
+    await cancelPlannedActivity(userA.id, reclaimablePlan.id);
+    await deletePlannedActivity(userA.id, reclaimablePlan.id); // triggers ON DELETE SET NULL on GoalActivity.plannedActivityId
+    check('once the linked PlannedActivity is hard-deleted (SetNull, unchanged mechanism), goalHasRetainedPlanLinkage reports false again', (await goalHasRetainedPlanLinkage(userA.id, reclaimableGoal.goal.id)) === false);
+    check('the Goal is now eligible for hard deletion again -- no durable "ever scheduled" tombstone blocks it', (await deleteGoal(userA.id, reclaimableGoal.goal.id)) === 'DELETED');
+    createdGoalIds.pop(); // already deleted -- don't double-delete in cleanup
 
     // ============================================================
     // V-Z. cross-user isolation
