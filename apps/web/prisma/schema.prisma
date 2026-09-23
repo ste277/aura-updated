@@ -68,6 +68,8 @@ model User {
   pushSubscriptions  PushSubscription[]
   activityPreferences UserActivityPreference[]
   availabilityPeriods UserAvailabilityPeriod[]
+  goals               Goal[]
+  goalActivities      GoalActivity[]
 }
 
 // A lightweight profile for someone the user plans with -- the minimum
@@ -359,6 +361,22 @@ model PlannedActivity {
   // or 1 row; see AuraMoment.plannedActivityId's own doc comment.
   linkedAuraMoments AuraMoment[]
 
+  // Goals -> Planning Integration V1 PR A (migration 0035) -- Prisma's
+  // relation validator requires a back-relation field whenever the OTHER
+  // side (GoalActivity.plannedActivity) declares `@relation(fields: ...,
+  // references: ...)` pointing here (confirmed directly: `prisma validate`
+  // rejects the one-sided form with error P1012, "missing an opposite
+  // relation field"). This field is PURELY a Prisma Client navigation
+  // convenience -- confirmed via `prisma migrate diff --from-empty`, it
+  // adds ZERO columns to the PlannedActivity table; the plannedActivityId
+  // column and its FK constraint live entirely on GoalActivity (same
+  // one-directional shape as AuraMoment.plannedActivityId above). No
+  // application code reads this field -- see PlannedActivity's own house
+  // rule (`PlanCreationIdempotency`'s doc comment above): "PlannedActivity
+  // stays completely unaware of acquisition source" means no persisted
+  // GOAL DATA column here, not zero schema text mentioning GoalActivity.
+  goalActivity      GoalActivity?
+
   @@index([userId, plannedStartAt])
   @@index([userId, status])
 }
@@ -575,4 +593,77 @@ model UserAvailabilityPeriod {
   updatedAt DateTime @updatedAt @db.Timestamptz(3)
 
   @@index([userId])
+}
+
+// Goals -> Planning Integration V1 PR A (migration 0035) -- a user-owned,
+// long-lived objective (e.g. "Finish investor deck by Friday") that Aura
+// decomposes into reviewable GoalActivity suggestions, entirely independent
+// of any single Plan My Day session (see lib/goals.ts for the domain
+// logic). No persisted COMPLETED state: a Goal can always produce more
+// GoalActivities later, so "all current activities done" is never treated
+// as proof the Goal itself is finished. ARCHIVED is the only terminal-ish
+// state, soft and reversible -- same convention as Habit.archivedAt.
+model Goal {
+  id         String    @id @default(uuid())
+  userId     String
+  user       User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  title      String
+  // Civil date (e.g. "2026-09-25"), never an instant -- same convention as
+  // DailyReflection.reflectionDate (encoded as literal UTC midnight, never
+  // re-interpreted through any timezone afterward; see route.ts's own
+  // getGoalTargetDate).
+  targetDate DateTime? @db.Date
+
+  status     String    @default("ACTIVE") // "ACTIVE" | "ARCHIVED"
+  createdAt  DateTime  @default(now()) @db.Timestamptz(3)
+  updatedAt  DateTime  @updatedAt @db.Timestamptz(3)
+  archivedAt DateTime? @db.Timestamptz(3)
+
+  activities GoalActivity[]
+
+  @@index([userId, status])
+}
+
+// Goals -> Planning Integration V1 PR A (migration 0035) -- a single
+// suggested or manually-added action under a Goal. Persists ONLY two real
+// lifecycle states (SUGGESTED/DISMISSED) -- SELECTED (a mid Plan-My-Day-
+// session choice) is deliberately never stored here at all (client-local
+// only, see the implementation design's own section 4/6), and
+// PLANNED/COMPLETED are deliberately never stored either: both are derived
+// by joining plannedActivityId's linked PlannedActivity.status (see
+// lib/goals.ts's deriveGoalActivityState), so they can never drift from
+// what actually happened. plannedActivityId is the ONLY persisted link to
+// a real commitment, and it points AT PlannedActivity -- see
+// PlannedActivity.goalActivity's own doc comment for why the relation runs
+// this direction only, never the reverse.
+model GoalActivity {
+  id                String           @id @default(uuid())
+  userId            String
+  user              User             @relation(fields: [userId], references: [id], onDelete: Cascade)
+  goalId            String
+  goal              Goal             @relation(fields: [goalId], references: [id], onDelete: Cascade)
+
+  title             String
+  // Same convention as HabitLog.activityId/PlannedActivity.activityId --
+  // plain nullable String, not a foreign key (ActivityProfile is a static
+  // in-code catalog, not a Prisma model). NULL means no high-confidence
+  // catalog match was found/supplied; never forced.
+  activityId        String?
+
+  status            String           @default("SUGGESTED") // "SUGGESTED" | "DISMISSED"
+
+  // 0..1 link to the real commitment this activity produced, if any.
+  // @unique enforces the 0..1 cardinality (one PlannedActivity is claimed
+  // by at most one GoalActivity) at the database level, not just in app
+  // code. SetNull on PlannedActivity deletion so a hard-deleted Plan (only
+  // ever LOGGED/CANCELLED rows, see deletePlannedActivity) cleanly unlinks
+  // rather than leaving a dangling reference.
+  plannedActivityId String?          @unique
+  plannedActivity   PlannedActivity? @relation(fields: [plannedActivityId], references: [id], onDelete: SetNull)
+
+  createdAt         DateTime         @default(now()) @db.Timestamptz(3)
+  updatedAt         DateTime         @updatedAt @db.Timestamptz(3)
+
+  @@index([userId, goalId, status])
 }
