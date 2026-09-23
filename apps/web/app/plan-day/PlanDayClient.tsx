@@ -35,6 +35,7 @@ import {
   NO_DEADLINE,
   type PlanDayIntentRow,
   type PlanDayDeadlineChoice,
+  type PlanDayEntryErrorPresentation,
 } from '../../lib/planDayEntry';
 
 /**
@@ -102,11 +103,6 @@ import {
 
 type Phase = 'REDIRECTING' | 'ENTRY' | 'SUBMITTING' | 'PREVIEW' | 'PREVIEW_ERROR' | 'SAVED';
 
-interface EntryErrorState {
-  message: string;
-  retryable: boolean;
-}
-
 export interface PlanDayClientProps {
   timezone: string | null;
   planningDate: string | null;
@@ -141,7 +137,7 @@ export function PlanDayClient({ timezone, planningDate, horizon, availabilityCon
   // meaningful once `planRevealed` is true.
   const [addPickerExpanded, setAddPickerExpanded] = useState(false);
   const [preview, setPreview] = useState<ConstructDayPreview | null>(null);
-  const [entryError, setEntryError] = useState<EntryErrorState | null>(null);
+  const [entryError, setEntryError] = useState<PlanDayEntryErrorPresentation | null>(null);
   // Planning Horizon V1 PR P2 -- true only when a Preview call returned
   // FUTURE_AVAILABILITY_REQUIRED despite bootstrap saying configured
   // (another tab/session reset Availability between page load and
@@ -277,7 +273,7 @@ export function PlanDayClient({ timezone, planningDate, horizon, availabilityCon
     try {
       intents = buildRequestedIntentsForSubmission(rows, timezone, planningDate);
     } catch {
-      setEntryError({ message: "Something about your day didn't come through correctly. Try again.", retryable: false });
+      setEntryError({ message: "Something about your day didn't come through correctly.", showEdit: true, actions: [] });
       setPhase('PREVIEW_ERROR');
       return;
     }
@@ -440,20 +436,64 @@ export function PlanDayClient({ timezone, planningDate, horizon, availabilityCon
                     </div>
 
                     {phase === 'PREVIEW_ERROR' && entryError && (
-                      <SurfaceCard style={{ marginTop: spacing.lg }}>
-                        <FieldError>{entryError.message}</FieldError>
-                        <div style={{ display: 'flex', gap: spacing.md, marginTop: spacing.md }}>
-                          <SecondaryButton onClick={() => setPhase('ENTRY')}>Edit</SecondaryButton>
-                          {entryError.retryable && <PrimaryButton onClick={() => void submitPreview()}>Try again</PrimaryButton>}
-                        </div>
-                      </SurfaceCard>
+                      // Plan My Day U3, this ticket's own section 17 --
+                      // `role="alert"` so assistive technology announces
+                      // the failure as soon as it renders, matching the
+                      // standard ARIA live-region pattern for a message
+                      // that just appeared (this repo has no prior
+                      // convention for this exact case, confirmed by
+                      // audit -- introduced here rather than left silent).
+                      // Applied on a plain wrapping <div>, not SurfaceCard
+                      // itself (no prop passthrough on that shared
+                      // primitive, and this ticket does not modify it).
+                      <div role="alert" style={{ marginTop: spacing.lg }}>
+                        <SurfaceCard>
+                          <FieldError>{entryError.message}</FieldError>
+                          <div style={{ display: 'flex', gap: spacing.md, marginTop: spacing.md, flexWrap: 'wrap' }}>
+                            {/* This ticket's own section 14: `showEdit` is
+                                false only for an expired session (401) --
+                                editing activity rows cannot fix that, so
+                                offering it there would be a real dead end,
+                                not merely a redundant one. */}
+                            {entryError.showEdit && (
+                              <SecondaryButton onClick={() => setPhase('ENTRY')} ariaLabel="Edit activities">
+                                Edit activities
+                              </SecondaryButton>
+                            )}
+                            {entryError.actions.includes('CONFIGURE_AVAILABILITY') && (
+                              <PrimaryButton onClick={() => { window.location.href = '/?tab=you'; }}>Configure availability</PrimaryButton>
+                            )}
+                            {entryError.actions.includes('SIGN_IN') && (
+                              // This ticket's own section 14 -- `/` is this
+                              // app's real, only sign-in surface (its own
+                              // LoginScreen, shown to any unauthenticated
+                              // visitor), the SAME destination this file's
+                              // own "Back to Home" link already uses --
+                              // never a claim with no action behind it.
+                              <PrimaryButton onClick={() => { window.location.href = '/'; }}>Sign in</PrimaryButton>
+                            )}
+                            {entryError.actions.includes('RETRY') && (
+                              // This ticket's own section 13 -- the ONLY
+                              // resubmit action ever rendered during
+                              // PREVIEW_ERROR; the bottom "Plan my day" CTA
+                              // is hidden below whenever this phase is
+                              // active, so a retryable failure never shows
+                              // two buttons that do the identical unchanged
+                              // resubmission at once.
+                              <PrimaryButton onClick={() => void submitPreview()}>Try again</PrimaryButton>
+                            )}
+                          </div>
+                        </SurfaceCard>
+                      </div>
                     )}
 
-                    <div style={{ marginTop: spacing.xxl, display: 'flex', justifyContent: 'flex-end' }}>
-                      <PrimaryButton onClick={() => void submitPreview()} disabled={!planningDate || !canSubmitPlanDay(rows, planningDate)} loading={phase === 'SUBMITTING'} ariaLabel="Plan my day">
-                        Plan my day
-                      </PrimaryButton>
-                    </div>
+                    {phase !== 'PREVIEW_ERROR' && (
+                      <div style={{ marginTop: spacing.xxl, display: 'flex', justifyContent: 'flex-end' }}>
+                        <PrimaryButton onClick={() => void submitPreview()} disabled={!planningDate || !canSubmitPlanDay(rows, planningDate)} loading={phase === 'SUBMITTING'} ariaLabel="Plan my day">
+                          Plan my day
+                        </PrimaryButton>
+                      </div>
+                    )}
                   </>
                 )}
               </>

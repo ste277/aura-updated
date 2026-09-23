@@ -18,6 +18,7 @@
 import type { CapacityState } from './dayCapacity';
 import type { ConstructDayPreview, ConstructDayWarning, ResolvedIntentSummary } from './dayConstructorOrchestrator';
 import type { PlacementDeferralReason, PlacementTimingFit, ProposedItem } from './dayConstructor';
+import type { DayIntentFlexibility } from './dayIntent';
 import type { MuhurtaActivityFamily } from '../../../packages/muhurta/src/muhurtaEngine';
 import { addDaysToDateStr } from './timezone';
 
@@ -122,13 +123,32 @@ export function presentTimingFit(fit: PlacementTimingFit): { label: string; tone
 }
 
 // ============================================================
-// Deferred reason mapping (this ticket's own section 13) -- ONE explicit
-// adapter, covering every real `PlacementDeferralReason` value (not just
-// the ticket's own illustrative subset), never exposing a raw enum
-// string, never inventing causal detail the diagnostic doesn't state.
+// Deferred reason mapping (this ticket's own section 13; U3's own
+// section 3 amendment below) -- ONE explicit adapter, covering every
+// real `PlacementDeferralReason` value (not just the ticket's own
+// illustrative subset), never exposing a raw enum string, never
+// inventing causal detail the diagnostic doesn't state.
+//
+// FLEXIBLE VS FIXED (Plan My Day U3, this ticket's own section 3) --
+// `OUTSIDE_CONSTRUCTION_WINDOW` is the ONLY `PlacementDeferralReason`
+// value reachable by BOTH a FIXED and a FLEXIBLE intent (confirmed by
+// direct audit of `placeFixedIntent`/`placeOneIntent`, dayConstructor.ts:
+// every OTHER FIXED-only rejection maps to `FIXED_WINDOW_INVALID`/
+// `FIXED_WINDOW_CONFLICT` instead, never the generic reasons a FLEXIBLE
+// intent's own multi-candidate diagnosis uses). For a FIXED intent, "the
+// requested time" is literally true -- the user typed/picked that exact
+// clock time (`resolveFixedStart`, planDayEntry.ts). For a FLEXIBLE
+// intent, NO time was ever requested -- `constructDay` generated and
+// rejected candidate times of its own choosing (this file's own module
+// doc comment: presentation renders constructor truth verbatim, and the
+// truth here is that timing search, not the user, picked and lost every
+// candidate it tried within the part of the day being planned). Saying
+// "requested time" for a FLEXIBLE intent was therefore a genuine
+// truthfulness bug, not a wording preference -- fixed here, never
+// upstream (this file still never re-evaluates a deferred reason).
 // ============================================================
 
-export function presentDeferralReason(reason: PlacementDeferralReason): string {
+export function presentDeferralReason(reason: PlacementDeferralReason, flexibility: DayIntentFlexibility): string {
   switch (reason) {
     case 'DURATION_UNKNOWN':
       return "Aura doesn't know how much time this needs yet.";
@@ -137,7 +157,9 @@ export function presentDeferralReason(reason: PlacementDeferralReason): string {
     case 'NO_FEASIBLE_WINDOW':
       return "There isn't enough open time that fits this activity.";
     case 'OUTSIDE_CONSTRUCTION_WINDOW':
-      return "The requested time is outside the part of the day you're planning.";
+      return flexibility === 'FIXED'
+        ? "The requested time is outside the part of the day you're planning."
+        : "Aura couldn't find a suitable time for this activity within the part of the day being planned.";
     case 'FIXED_WINDOW_CONFLICT':
       return 'That time conflicts with something already in your day.';
     case 'FIXED_WINDOW_INVALID':
@@ -228,6 +250,18 @@ export function sortProposedItemsForDisplay(items: readonly ProposedItem[]): Pro
 
 export function titleForIntentId(resolvedIntents: readonly ResolvedIntentSummary[], intentId: string): string {
   return resolvedIntents.find((resolved) => resolved.requestedIntentId === intentId)?.dayIntent.title ?? 'Untitled';
+}
+
+/** Plan My Day U3 -- the SAME lookup convention `titleForIntentId` above
+ * already establishes, needed so `presentDeferralReason`'s own FLEXIBLE-
+ * vs-FIXED branch (this file's own section above) can be driven by the
+ * real resolved intent rather than a caller guessing. Defaults to
+ * `'FLEXIBLE'` for an unknown intentId -- the SAME safe default
+ * `buildDayIntent` itself uses (`DEFAULT_FLEXIBILITY`, dayIntent.ts) --
+ * never `'FIXED'`, which would fabricate a "you requested this time"
+ * claim for an intent this file cannot actually verify chose one. */
+export function flexibilityForIntentId(resolvedIntents: readonly ResolvedIntentSummary[], intentId: string): DayIntentFlexibility {
+  return resolvedIntents.find((resolved) => resolved.requestedIntentId === intentId)?.dayIntent.flexibility ?? 'FLEXIBLE';
 }
 
 // ============================================================

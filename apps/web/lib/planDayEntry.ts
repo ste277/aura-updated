@@ -362,19 +362,48 @@ export function buildRequestedIntentsForSubmission(rows: readonly PlanDayIntentR
 }
 
 // ============================================================
-// Domain-result presentation (this ticket's own sections 27-30) -- every
-// non-READY outcome (both F1's own typed domain statuses and this
-// client's own protocol-level ones) maps to plain human copy, never a raw
-// enum/diagnostic surfaced directly. `retryable` distinguishes "Try
-// again" (the same request might succeed) from a case where only editing
-// the input could help (NO_USABLE_CAPACITY, this ticket's own section 28:
-// "Allow user to return/edit," never "automatically alter the
-// construction window").
+// Domain-result presentation (this ticket's own sections 27-30; Plan My
+// Day U3's own sections 9-14 amendment below) -- every non-READY outcome
+// (both F1's own typed domain statuses and this client's own protocol-
+// level ones) maps to plain human copy, never a raw enum/diagnostic
+// surfaced directly.
+//
+// U3 replaces the original single `retryable: boolean` with an explicit
+// `actions` list plus `showEdit`, because a boolean could only ever
+// express "resubmit or don't" -- it had no way to express a DIFFERENT
+// corrective action (Configure availability, Sign in) without the
+// calling component inventing its own ad hoc branching per status (this
+// ticket's own section 9: "map deterministic problems to useful existing
+// actions... every rendered action must have a real implemented
+// destination"). Every `action` here corresponds to a real, already-
+// wired destination in PlanDayClient.tsx -- never a placeholder.
+//
+// DETERMINISTIC VS TRANSIENT (U3's own sections 10/11, verified per-
+// status rather than assumed): `NO_USABLE_CAPACITY`, `FUTURE_
+// AVAILABILITY_REQUIRED`, `INVALID_CONSTRUCTION_WINDOW`, `TIMEZONE_
+// MISSING`, and `INVALID_REQUEST` all describe a fact about the CURRENT
+// server-side state (stored availability, or a malformed request body)
+// that an unchanged resubmission cannot change -- none of these ever
+// offer 'RETRY' (U3 correction: the four non-NO_USABLE_CAPACITY cases
+// were previously marked retryable, which was untrue -- resubmitting the
+// identical request against unchanged server state was always expected
+// to reproduce the identical failure). `TIMING_SEARCH_FAILED`,
+// `HTTP_ERROR` (non-401), `NETWORK_ERROR`, and `UNKNOWN_RESPONSE` are
+// genuinely transient/system-level and keep 'RETRY'.
 // ============================================================
+
+export type PlanDayEntryRecoveryAction = 'RETRY' | 'CONFIGURE_AVAILABILITY' | 'SIGN_IN';
 
 export interface PlanDayEntryErrorPresentation {
   message: string;
-  retryable: boolean;
+  /** Whether the always-available "return to editing, rows preserved"
+   * action should render. `false` only for a 401 (U3's own section 14):
+   * editing activity rows cannot resolve an expired session, and
+   * offering it there would be a real, not merely cosmetic, dead end. */
+  showEdit: boolean;
+  /** Zero or more corrective/recovery actions, in display order, beyond
+   * plain Edit. */
+  actions: readonly PlanDayEntryRecoveryAction[];
 }
 
 /**
@@ -393,29 +422,83 @@ export function presentPlanDayPreviewFailure(result: Exclude<ConstructDayPreview
   const dayDescription = horizon === 'TOMORROW' ? 'tomorrow' : 'today';
   switch (result.status) {
     case 'NO_USABLE_CAPACITY':
+      // Plan My Day U3, this ticket's own section 2/9/11 truthfulness fix
+      // -- final review (PR #147) found this status is reachable through
+      // TWO genuinely distinct causes the client cannot tell apart (the
+      // HTTP response collapses both to the same bare status, discarding
+      // `dayCapacity.ts`'s own `constructionWindowMinutes`/`blockedMinutes`
+      // fields that would distinguish them):
+      //
+      //   1. CONFIGURED_EMPTY (dayConstructorOrchestrator.ts's own
+      //      `resolveAvailabilityAwareWindow`): a real, deliberate saved
+      //      schedule with zero periods for this specific weekday --
+      //      genuinely distinct from "no availability configured" (that
+      //      unconfigured case is `FUTURE_AVAILABILITY_REQUIRED`, handled
+      //      separately below).
+      //   2. Real configured hours exist for this weekday, but an
+      //      EXISTING blocking Plan already occupies all of them --
+      //      `computeCapacitySnapshot` (dayCapacity.ts) fails closed to
+      //      this exact same status whenever `usableMinutes === 0`,
+      //      regardless of why (that function's own doc comment: "zero
+      //      usable capacity ALWAYS produces NO_USABLE_CAPACITY").
+      //
+      // An earlier draft of this fix claimed "your availability schedule
+      // doesn't include usable time on that day" -- TRUE for cause 1, but
+      // FALSE for cause 2 (a schedule that genuinely does include time,
+      // simply already spoken for). Since the diagnostic cannot prove
+      // which cause applies, the message now states only the observable
+      // FACT (no usable time remains) without asserting why -- the exact
+      // same non-committal pattern the pre-existing, already-accepted
+      // TODAY message below already uses ("There's no usable time left in
+      // the part of today Aura can plan" -- itself never claims a specific
+      // cause either, and reaches this same dual-cause status). Configure
+      // availability remains offered because it is a real, non-dead-end
+      // destination that can genuinely help under EITHER cause (directly
+      // for cause 1; by adding non-conflicting hours elsewhere in the day
+      // for cause 2) -- offering a real, possibly-helpful action is not
+      // the same claim as asserting a specific unproven cause.
       return horizon === 'TOMORROW'
-        ? { message: "There's no availability configured for that day.", retryable: false }
-        : { message: "There's no usable time left in the part of today Aura can plan.", retryable: false };
+        ? { message: "There's no usable time left in tomorrow's availability for Aura to plan.", showEdit: true, actions: ['CONFIGURE_AVAILABILITY'] }
+        : { message: "There's no usable time left in the part of today Aura can plan.", showEdit: true, actions: [] };
     case 'FUTURE_AVAILABILITY_REQUIRED':
-      return { message: 'Aura needs to know when you\'re usually available before it can plan a future day.', retryable: false };
+      return { message: 'Aura needs to know when you\'re usually available before it can plan a future day.', showEdit: true, actions: ['CONFIGURE_AVAILABILITY'] };
     case 'TIMING_SEARCH_FAILED':
-      return { message: "Aura couldn't finish checking timing just now.", retryable: true };
+      return { message: "Aura couldn't finish checking timing just now.", showEdit: true, actions: ['RETRY'] };
     case 'INVALID_CONSTRUCTION_WINDOW':
     case 'TIMEZONE_MISSING':
       // Defensive-only in practice (this form never sends an explicit
       // construction window, and the server always has a real
       // user.timezone) -- generic copy, never raw diagnostics (this
-      // ticket's own section 30).
-      return { message: `Aura couldn't build a plan for ${dayDescription} right now.`, retryable: true };
+      // ticket's own section 30). U3 correction: this is a deterministic
+      // fact about server-side request validation, not a transient
+      // failure -- an unchanged resubmission was never expected to
+      // succeed, so 'RETRY' no longer renders (this ticket's own section
+      // 11, verified rather than assumed for this exact status).
+      return { message: `Aura couldn't build a plan for ${dayDescription} right now.`, showEdit: true, actions: [] };
     case 'INVALID_REQUEST':
-      return { message: "Something about your day didn't come through correctly. Try again.", retryable: true };
+      // U3 correction (this ticket's own section 11): a malformed request
+      // BODY is a deterministic fact about what this client just sent --
+      // resubmitting the SAME rows would reconstruct the SAME body and
+      // reproduce the SAME failure. 'RETRY' removed; Edit (which lets the
+      // user actually change something first) remains the honest path.
+      return { message: "Something about your day didn't come through correctly.", showEdit: true, actions: [] };
     case 'HTTP_ERROR':
+      // U3, this ticket's own section 14 -- a 401 previously claimed
+      // "Please sign in again" with no actual sign-in action rendered
+      // anywhere (Edit was the only button shown, and editing activity
+      // rows cannot restore an expired session). `/` already hosts this
+      // app's real, only sign-in surface (its own LoginScreen, rendered
+      // there for any unauthenticated visitor -- confirmed by direct
+      // audit of PlanDayClient.tsx's own existing "Back to Home"
+      // navigation, the SAME destination reused here, never a new auth
+      // flow). `showEdit: false` because there is nothing edit-and-
+      // resubmit could accomplish while unauthenticated.
       return result.httpStatus === 401
-        ? { message: 'Your session expired. Please sign in again.', retryable: false }
-        : { message: `Aura couldn't build a plan for ${dayDescription} right now.`, retryable: true };
+        ? { message: 'Your session expired.', showEdit: false, actions: ['SIGN_IN'] }
+        : { message: `Aura couldn't build a plan for ${dayDescription} right now.`, showEdit: true, actions: ['RETRY'] };
     case 'NETWORK_ERROR':
-      return { message: "Aura couldn't be reached. Check your connection and try again.", retryable: true };
+      return { message: "Aura couldn't be reached. Check your connection and try again.", showEdit: true, actions: ['RETRY'] };
     case 'UNKNOWN_RESPONSE':
-      return { message: 'Something went wrong. Try again.', retryable: true };
+      return { message: 'Something went wrong.', showEdit: true, actions: ['RETRY'] };
   }
 }
