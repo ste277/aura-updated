@@ -123,7 +123,11 @@ function main() {
   check('37/38. PlannedActivity model block is unchanged from PR A/B (still no Goal-data column, still only the back-relation field)', plannedActivityBlockMatch !== null && !/goalId|goalActivityId\s+String/.test(plannedActivityBlockMatch![0]));
   check('39. no new migration directory exists beyond 0035_goals', !fs.existsSync(path.join(__dirname, '../apps/web/prisma/migrations/0036_placeholder')));
   const migrationDirs = fs.readdirSync(path.join(__dirname, '../apps/web/prisma/migrations')).filter((d) => /^\d{4}_/.test(d));
-  check('39. exactly 35 migrations exist (no new migration added by this PR)', migrationDirs.length === 35);
+  // Quick Capture V1 PR A legitimately added 0036_captures after this PR C
+  // guard was written; what this check still proves is that PR C itself
+  // added no migration: 0035_goals remains the newest Goals-era migration
+  // and nothing handoff/link-named exists.
+  check('39. 0035_goals is present and no handoff/goal-link migration was added by PR C', migrationDirs.includes('0035_goals') && !migrationDirs.some((d) => /handoff|goal.?link|goalactivity.?link/i.test(d)) && migrationDirs.filter((d) => d > '0035_goals').every((d) => d === '0036_captures'));
   check('36. no Habit/HabitLog mention anywhere in the new handoff files', !/\bHabit\b/.test(read('../apps/web/lib/planDayBootstrap.ts')) && !/\bHabit\b/.test(planDayClientSource));
   const allHandoffSource = [read('../apps/web/lib/planDayEntry.ts'), read('../apps/web/lib/planDayBootstrap.ts'), read('../apps/web/lib/acceptConstructedDay.ts'), read('../apps/web/lib/dayConstructorAcceptancePersistence.ts'), read('../apps/web/lib/db.ts')].join('\n');
   check('34. no Capture/InboxItem/Intention/generic-Task model or import exists anywhere in the touched files', !/\bInboxItem\b|\bCaptureItem\b/.test(allHandoffSource));

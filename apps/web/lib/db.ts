@@ -1,6 +1,7 @@
 import { Pool, type PoolClient } from 'pg';
 import { randomUUID } from 'crypto';
 import { derivePlanCompletionHistory } from './planCompletionHistory';
+import { validateCaptureTitle } from './captures';
 
 // Sandbox-only substitute for @prisma/client (its engine binary can't be downloaded
 // here — see README). Same schema, same Postgres instance, plain SQL. Swap API
@@ -2509,4 +2510,154 @@ export async function linkGoalActivityToPlannedActivity(
     [plannedActivityId, goalActivityId, userId]
   );
   return (result.rowCount ?? 0) === 1;
+}
+
+// ============================================================
+// Quick Capture V1 PR A (migration 0036) -- see lib/captures.ts.
+// ============================================================
+
+export interface Capture {
+  id: string;
+  userId: string;
+  title: string;
+  status: 'OPEN' | 'DISMISSED';
+  completedAt: Date | null;
+  plannedActivityId: string | null;
+  createdAt: Date;
+  updatedAt: Date;
+}
+
+export interface CaptureWithLinkedPlanStatus extends Capture {
+  linkedPlanStatus: 'UPCOMING' | 'LOGGED' | 'CANCELLED' | null;
+}
+
+/** Validates via the same pure rule the API uses; duplicates are allowed. */
+export async function createCapture(userId: string, title: string): Promise<Capture> {
+  const checked = validateCaptureTitle(title);
+  if (!checked.ok) throw new Error(checked.error);
+  const result = await pool.query(
+    `INSERT INTO "Capture" (id, "userId", title) VALUES ($1, $2, $3) RETURNING *`,
+    [randomUUID(), userId, checked.title]
+  );
+  return result.rows[0];
+}
+
+/**
+ * Every Capture the user owns (any state), newest first, LEFT JOINed to the
+ * linked PlannedActivity's status so deriveCaptureState can run per row
+ * without an N+1. Deliberately NOT filtered to the active list: callers
+ * apply isActiveCaptureState (lib/captures.ts) so completed/dismissed rows
+ * stay retrievable for future history/review.
+ */
+export async function listCapturesWithLinkedPlanStatus(userId: string): Promise<CaptureWithLinkedPlanStatus[]> {
+  const result = await pool.query(
+    `SELECT c.*, pa.status AS "linkedPlanStatus"
+     FROM "Capture" c
+     LEFT JOIN "PlannedActivity" pa ON pa.id = c."plannedActivityId"
+     WHERE c."userId" = $1
+     ORDER BY c."createdAt" DESC, c.id`,
+    [userId]
+  );
+  return result.rows;
+}
+
+export async function getCaptureWithLinkedPlanStatus(userId: string, captureId: string): Promise<CaptureWithLinkedPlanStatus | null> {
+  const result = await pool.query(
+    `SELECT c.*, pa.status AS "linkedPlanStatus"
+     FROM "Capture" c
+     LEFT JOIN "PlannedActivity" pa ON pa.id = c."plannedActivityId"
+     WHERE c.id = $1 AND c."userId" = $2`,
+    [captureId, userId]
+  );
+  return result.rows[0] ?? null;
+}
+
+export type CompleteCaptureResult =
+  | { result: 'COMPLETED'; capture: CaptureWithLinkedPlanStatus }
+  | { result: 'ALREADY_COMPLETED'; capture: CaptureWithLinkedPlanStatus }
+  | { result: 'NOT_FOUND' }
+  | { result: 'DISMISSED' }
+  | { result: 'HAS_LIVE_PLAN' };
+
+/**
+ * Direct completion ("I did it without scheduling it"). ONE conditional
+ * UPDATE carries every invariant (owned, OPEN, not already completed, no
+ * live UPCOMING plan), so two concurrent completes / a complete racing a
+ * remove cannot both win. Creates no PlannedActivity and no HabitLog.
+ *
+ * A retained CANCELLED link stays as historical provenance. A LOGGED link
+ * with a null completedAt (transitional) materializes completedAt from the
+ * plan's real loggedAt. A repeat call never moves completedAt: the first
+ * timestamp stays authoritative (ALREADY_COMPLETED).
+ */
+export async function completeCapture(userId: string, captureId: string): Promise<CompleteCaptureResult> {
+  const updated = await pool.query(
+    `UPDATE "Capture" c
+     SET "completedAt" = COALESCE(
+           (SELECT pa."loggedAt" FROM "PlannedActivity" pa WHERE pa.id = c."plannedActivityId" AND pa.status = 'LOGGED'),
+           now()
+         ),
+         "updatedAt" = now()
+     WHERE c.id = $1 AND c."userId" = $2 AND c.status = 'OPEN' AND c."completedAt" IS NULL
+       AND NOT EXISTS (SELECT 1 FROM "PlannedActivity" pa WHERE pa.id = c."plannedActivityId" AND pa.status = 'UPCOMING')
+     RETURNING c.id`,
+    [captureId, userId]
+  );
+  const current = await getCaptureWithLinkedPlanStatus(userId, captureId);
+  if (!current) return { result: 'NOT_FOUND' };
+  if ((updated.rowCount ?? 0) === 1) return { result: 'COMPLETED', capture: current };
+  if (current.status === 'DISMISSED') return { result: 'DISMISSED' };
+  if (current.completedAt) return { result: 'ALREADY_COMPLETED', capture: current };
+  return { result: 'HAS_LIVE_PLAN' };
+}
+
+export type RemoveCaptureResult = 'DELETED' | 'DISMISSED' | 'NOT_FOUND' | 'HAS_LIVE_PLAN';
+
+/**
+ * "I don't need to do this anymore." Row-locks the Capture (FOR UPDATE) so a
+ * concurrent link/complete cannot race past the decision:
+ *  - live UPCOMING plan            -> HAS_LIVE_PLAN (cancel the plan first)
+ *  - never linked, never completed -> hard DELETE
+ *  - any history (retained link or completedAt) -> status = DISMISSED,
+ *    keeping completedAt and the link (completion history is never destroyed)
+ * Already-DISMISSED is an idempotent 'DISMISSED'.
+ */
+export async function removeCapture(userId: string, captureId: string): Promise<RemoveCaptureResult> {
+  const client = await beginTransaction();
+  try {
+    const res = await client.query(
+      `SELECT c.status, c."completedAt", c."plannedActivityId", pa.status AS "linkedPlanStatus"
+       FROM "Capture" c
+       LEFT JOIN "PlannedActivity" pa ON pa.id = c."plannedActivityId"
+       WHERE c.id = $1 AND c."userId" = $2
+       FOR UPDATE OF c`,
+      [captureId, userId]
+    );
+    const row = res.rows[0];
+    if (!row) {
+      await client.query('ROLLBACK');
+      return 'NOT_FOUND';
+    }
+    if (row.status === 'DISMISSED') {
+      await client.query('ROLLBACK');
+      return 'DISMISSED';
+    }
+    if (row.linkedPlanStatus === 'UPCOMING') {
+      await client.query('ROLLBACK');
+      return 'HAS_LIVE_PLAN';
+    }
+    if (!row.plannedActivityId && !row.completedAt) {
+      await client.query(`DELETE FROM "Capture" WHERE id = $1 AND "userId" = $2`, [captureId, userId]);
+      await client.query('COMMIT');
+      return 'DELETED';
+    }
+    await client.query(`UPDATE "Capture" SET status = 'DISMISSED', "updatedAt" = now() WHERE id = $1 AND "userId" = $2`, [captureId, userId]);
+    await client.query('COMMIT');
+    return 'DISMISSED';
+  } catch (err) {
+    await client.query('ROLLBACK').catch(() => {});
+    throw err;
+  } finally {
+    client.release();
+  }
 }
