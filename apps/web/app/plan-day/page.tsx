@@ -1,8 +1,8 @@
 import type { Metadata } from 'next';
 import { cookies } from 'next/headers';
 import { verifySessionToken, SESSION_COOKIE_NAME } from '../../lib/auth';
-import { getUserById, listGoalActivitiesWithLinkedPlanStatus } from '../../lib/db';
-import { resolvePlanDayServerProps, resolveGoalActivityHandoff } from '../../lib/planDayBootstrap';
+import { getUserById, listGoalActivitiesWithLinkedPlanStatus, listCapturesWithLinkedPlanStatus } from '../../lib/db';
+import { resolvePlanDayServerProps, resolveGoalActivityHandoff, resolveCaptureHandoff } from '../../lib/planDayBootstrap';
 import { parseHorizonSearchParam } from '../../lib/planningHorizon';
 import { PlanDayClient } from './PlanDayClient';
 
@@ -45,7 +45,7 @@ export const metadata: Metadata = {
 export default async function PlanDayPage({
   searchParams,
 }: {
-  searchParams: { horizon?: string | string[]; fromGoal?: string | string[]; activities?: string | string[] };
+  searchParams: { horizon?: string | string[]; fromGoal?: string | string[]; activities?: string | string[]; captures?: string | string[] };
 }) {
   const horizon = parseHorizonSearchParam(searchParams.horizon);
   const bootstrap = await resolvePlanDayServerProps({
@@ -72,6 +72,17 @@ export default async function PlanDayPage({
     activitiesParam
   );
 
+  // Quick Capture V1 PR B -- same fresh, server-side, ids-only resolution.
+  const capturesParam = typeof searchParams.captures === 'string' ? searchParams.captures : null;
+  const captures = await resolveCaptureHandoff(
+    {
+      getSessionToken: () => cookies().get(SESSION_COOKIE_NAME)?.value,
+      verifySession: (token) => verifySessionToken(token),
+      listCaptures: (userId) => listCapturesWithLinkedPlanStatus(userId),
+    },
+    capturesParam
+  );
+
   return (
     <PlanDayClient
       timezone={bootstrap?.timezone ?? null}
@@ -79,6 +90,7 @@ export default async function PlanDayPage({
       horizon={bootstrap ? horizon : null}
       availabilityConfigured={bootstrap?.availabilityConfigured ?? null}
       goalActivities={goalActivities}
+      captures={captures}
     />
   );
 }

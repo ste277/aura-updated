@@ -1500,6 +1500,18 @@ export async function logPlannedActivity(userId: string, planId: string): Promis
       [planId, userId, completionInstant, habitLogId]
     );
 
+    // Quick Capture V1 PR B -- materialize the durable Capture-level
+    // completion fact on the SAME transaction client, with the EXACT SAME
+    // instant that was just written to PlannedActivity.loggedAt (never a
+    // second clock read). COALESCE keeps any earlier completion timestamp.
+    // A failure here throws into this function's own catch -> ROLLBACK, so
+    // "plan LOGGED but linked Capture still PLANNED" cannot persist.
+    await client.query(
+      `UPDATE "Capture" SET "completedAt" = COALESCE("completedAt", $3), "updatedAt" = now()
+       WHERE "plannedActivityId" = $1 AND "userId" = $2`,
+      [planId, userId, completionInstant]
+    );
+
     await client.query('COMMIT');
     return { plan: updatedPlanRes.rows[0], habitLog: habitLogRes.rows[0] };
   } catch (err) {
@@ -2660,4 +2672,38 @@ export async function removeCapture(userId: string, captureId: string): Promise<
   } finally {
     client.release();
   }
+}
+
+/**
+ * Quick Capture V1 PR B -- the atomic Capture -> PlannedActivity link, the
+ * exact sibling of linkGoalActivityToPlannedActivity. Called from INSIDE the
+ * Day Constructor acceptance transaction on the same `client`. One
+ * conditional UPDATE (no check-then-act): owned by this user, status OPEN,
+ * not completed, and either unlinked or linked to a CANCELLED plan of the
+ * same user (replan replaces the retained link; the old plan stays as
+ * history). Returns false when nothing matched -- the caller decides
+ * (acceptance throws, rolling back the whole transaction).
+ */
+export async function linkCaptureToPlannedActivity(
+  userId: string,
+  captureId: string,
+  plannedActivityId: string,
+  executor: Pool | PoolClient = pool
+): Promise<boolean> {
+  const result = await executor.query(
+    `UPDATE "Capture"
+     SET "plannedActivityId" = $1, "updatedAt" = now()
+     WHERE id = $2
+       AND "userId" = $3
+       AND status = 'OPEN'
+       AND "completedAt" IS NULL
+       AND (
+         "plannedActivityId" IS NULL
+         OR "plannedActivityId" IN (
+           SELECT id FROM "PlannedActivity" WHERE "userId" = $3 AND status = 'CANCELLED'
+         )
+       )`,
+    [plannedActivityId, captureId, userId]
+  );
+  return (result.rowCount ?? 0) === 1;
 }

@@ -2,7 +2,7 @@
 
 import React, { useRef, useState } from 'react';
 import type { ConstructDayPreview } from '../lib/dayConstructorOrchestrator';
-import { acceptConstructedDay, type PersistedPlanSummary, type GoalActivityLink } from '../lib/acceptConstructedDay';
+import { acceptConstructedDay, type PersistedPlanSummary, type GoalActivityLink, type CaptureLink } from '../lib/acceptConstructedDay';
 import { classifyAcceptanceUiState, resolveClientRequestId, computePreviewIdentityKey, shouldSubmitAcceptance, hasSubmittableProposal, type ClientRequestIdCache, type DayPlanAcceptanceUiState } from '../lib/dayPlanAcceptancePresentation';
 import { DayPlanPreview } from './DayPlanPreview';
 
@@ -61,9 +61,11 @@ export interface DayPlanPreviewControllerProps {
    * proposal." The owning experience (PlanDayClient.tsx) is the only
    * place that has both `rows` and `preview` in scope to build it. */
   goalActivityLinks?: readonly GoalActivityLink[];
+  /** Quick Capture V1 PR B -- same opaque pass-through, for Capture provenance. */
+  captureLinks?: readonly CaptureLink[];
 }
 
-export function DayPlanPreviewController({ preview, onDiscard, onSaved, onRefreshRequested, goalActivityLinks }: DayPlanPreviewControllerProps) {
+export function DayPlanPreviewController({ preview, onDiscard, onSaved, onRefreshRequested, goalActivityLinks, captureLinks }: DayPlanPreviewControllerProps) {
   const [actionState, setActionState] = useState<DayPlanAcceptanceUiState>({ kind: 'IDLE' });
   // Preview IDENTITY, not object reference (pre-commit review hardening --
   // see dayPlanAcceptancePresentation.ts's own doc comment on
@@ -96,7 +98,7 @@ export function DayPlanPreviewController({ preview, onDiscard, onSaved, onRefres
     if (!shouldSubmitAcceptance(actionState)) return; // double-submit guard (this ticket's own section 9) -- ignored, not queued.
     if (!hasSubmittableProposal(preview)) return; // this ticket's own section 23 -- zero proposed items never POSTs, defense-in-depth alongside DayPlanPreview's own disabled Continue button.
     setActionState({ kind: 'SAVING' });
-    const result = await acceptConstructedDay(preview, clientRequestId, goalActivityLinks);
+    const result = await acceptConstructedDay(preview, clientRequestId, goalActivityLinks, captureLinks);
     const nextState = classifyAcceptanceUiState(result);
     setActionState(nextState);
     if (nextState.kind === 'SAVED') {

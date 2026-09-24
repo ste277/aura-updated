@@ -38,6 +38,7 @@ import {
   getPlannedActivityForOwner,
   getUserById,
   linkGoalActivityToPlannedActivity,
+  linkCaptureToPlannedActivity,
   type PlannedActivity,
   type CreatePlannedActivityInput,
 } from './db';
@@ -274,7 +275,10 @@ export async function persistAcceptedConstructedDay(
   // never receives this parameter at all -- it is consulted ONLY inside
   // this file's own write loop, after E1 has already decided
   // `decision.writeIntents`.
-  goalActivityLinks: ReadonlyMap<string, string> = new Map()
+  goalActivityLinks: ReadonlyMap<string, string> = new Map(),
+  // Quick Capture V1 PR B -- the sibling of goalActivityLinks above, same
+  // rules: consulted only in the write loop, never seen by E1.
+  captureLinks: ReadonlyMap<string, string> = new Map()
 ): Promise<AcceptConstructedDayPersistenceResult> {
   if (!request.clientRequestId || request.clientRequestId.length > MAX_CLIENT_REQUEST_ID_LENGTH) {
     return { status: 'REJECTED', reason: 'INVALID_REQUEST', diagnostics: [{ intentId: '', reason: 'INVALID_REQUEST', detail: 'INVALID_CLIENT_REQUEST_ID' }] };
@@ -384,6 +388,14 @@ export async function persistAcceptedConstructedDay(
       // or removed-before-preview Goal row is never a key here, so it
       // never receives a link (this PR's own section 22).
       const goalActivityId = goalActivityLinks.get(writeIntent.intentId);
+      const captureId = captureLinks.get(writeIntent.intentId);
+      // A planning row has at most one source; a request claiming both for
+      // one intent is malformed -- fail the whole acceptance.
+      if (goalActivityId && captureId) throw new Error('AMBIGUOUS_SOURCE_LINK');
+      if (captureId) {
+        const captureLinked = await linkCaptureToPlannedActivity(userId, captureId, plan.id, client);
+        if (!captureLinked) throw new Error('CAPTURE_LINK_FAILED');
+      }
       if (goalActivityId) {
         const linked = await linkGoalActivityToPlannedActivity(userId, goalActivityId, plan.id, client);
         if (!linked) {

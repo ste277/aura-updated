@@ -37,6 +37,12 @@ export interface GoalActivityLink {
   goalActivityId: string;
 }
 
+/** Quick Capture V1 PR B -- the sibling of GoalActivityLink: same rules, never merged into proposedItems. */
+export interface CaptureLink {
+  intentId: string;
+  captureId: string;
+}
+
 export interface AcceptConstructedDayRequestBody {
   clientRequestId: string;
   constructionWindow: ConstructDayPreview['constructionWindow'];
@@ -52,9 +58,11 @@ export interface AcceptConstructedDayRequestBody {
    * provenance -- omitted entirely otherwise, so an ordinary typed-only
    * acceptance sends byte-identical JSON to before this PR. */
   goalActivityLinks?: GoalActivityLink[];
+  /** Present only when at least one accepted row carries Capture provenance. */
+  captureLinks?: CaptureLink[];
 }
 
-export function buildAcceptRequestBody(preview: ConstructDayPreview, clientRequestId: string, goalActivityLinks?: readonly GoalActivityLink[]): AcceptConstructedDayRequestBody {
+export function buildAcceptRequestBody(preview: ConstructDayPreview, clientRequestId: string, goalActivityLinks?: readonly GoalActivityLink[], captureLinks?: readonly CaptureLink[]): AcceptConstructedDayRequestBody {
   return {
     clientRequestId,
     constructionWindow: preview.constructionWindow,
@@ -67,6 +75,7 @@ export function buildAcceptRequestBody(preview: ConstructDayPreview, clientReque
       placementSource: item.placementSource,
     })),
     ...(goalActivityLinks && goalActivityLinks.length > 0 ? { goalActivityLinks: [...goalActivityLinks] } : {}),
+    ...(captureLinks && captureLinks.length > 0 ? { captureLinks: [...captureLinks] } : {}),
   };
 }
 
@@ -125,13 +134,13 @@ export function parseAcceptResponseBody(body: unknown): AcceptConstructedDayClie
  * `NETWORK_ERROR`, distinct from every server-returned status, so a
  * caller can safely retry with the identical request.
  */
-export async function acceptConstructedDay(preview: ConstructDayPreview, clientRequestId: string, goalActivityLinks?: readonly GoalActivityLink[]): Promise<AcceptConstructedDayClientResult> {
+export async function acceptConstructedDay(preview: ConstructDayPreview, clientRequestId: string, goalActivityLinks?: readonly GoalActivityLink[], captureLinks?: readonly CaptureLink[]): Promise<AcceptConstructedDayClientResult> {
   let response: Response;
   try {
     response = await fetch('/api/day-constructor/accept', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(buildAcceptRequestBody(preview, clientRequestId, goalActivityLinks)),
+      body: JSON.stringify(buildAcceptRequestBody(preview, clientRequestId, goalActivityLinks, captureLinks)),
     });
   } catch {
     return { status: 'NETWORK_ERROR' };

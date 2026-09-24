@@ -27,6 +27,9 @@ import {
   createInitialIntentRow,
   createIntentRowFromQuickPick,
   createIntentRowFromGoalActivity,
+  createIntentRowFromCapture,
+  buildCaptureLinksForAccept,
+  MAX_PLAN_DAY_INTENTS,
   isRowUntouched,
   formatIntentRowSummary,
   canSubmitPlanDay,
@@ -40,7 +43,7 @@ import {
   type PlanDayDeadlineChoice,
   type PlanDayEntryErrorPresentation,
 } from '../../lib/planDayEntry';
-import type { GoalActivityHandoffItem } from '../../lib/planDayBootstrap';
+import type { GoalActivityHandoffItem, CaptureHandoffItem } from '../../lib/planDayBootstrap';
 
 /**
  * Day Constructor V1 -- PR F2. The user-reachable "Plan my day" entry
@@ -118,9 +121,11 @@ export interface PlanDayClientProps {
    * `?fromGoal=&activities=` URL, BEFORE this component ever mounts.
    * Empty for an ordinary `/plan-day` visit. */
   goalActivities: readonly GoalActivityHandoffItem[];
+  /** Quick Capture V1 PR B -- already ownership/eligibility-resolved server-side (`resolveCaptureHandoff`) from `?captures=`. Empty for an ordinary visit. */
+  captures: readonly CaptureHandoffItem[];
 }
 
-export function PlanDayClient({ timezone, planningDate, horizon, availabilityConfigured, goalActivities }: PlanDayClientProps) {
+export function PlanDayClient({ timezone, planningDate, horizon, availabilityConfigured, goalActivities, captures }: PlanDayClientProps) {
   const router = useRouter();
   const authenticated = !!timezone && !!planningDate && !!horizon;
   const [phase, setPhase] = useState<Phase>(() => (authenticated ? 'ENTRY' : 'REDIRECTING'));
@@ -132,7 +137,9 @@ export function PlanDayClient({ timezone, planningDate, horizon, availabilityCon
   // session never re-seeds (this file reads no `goalActivities` value
   // again after this initializer).
   const [rows, setRows] = useState<PlanDayIntentRow[]>(() =>
-    goalActivities.length > 0 ? goalActivities.map(createIntentRowFromGoalActivity) : [createInitialIntentRow()]
+    goalActivities.length + captures.length > 0
+      ? [...goalActivities.map(createIntentRowFromGoalActivity), ...captures.map(createIntentRowFromCapture)].slice(0, MAX_PLAN_DAY_INTENTS)
+      : [createInitialIntentRow()]
   );
   // Plan My Day UX V2 PR U1 -- every row starts collapsed, including a
   // freshly-typed one (this ticket's own section 23: defaults already
@@ -156,7 +163,7 @@ export function PlanDayClient({ timezone, planningDate, horizon, availabilityCon
   // here to review (this ticket's own section 45's own manual flow:
   // "Plan My Day opens -> exactly 2 rows seeded", i.e. immediately
   // visible, not behind a picker).
-  const [planRevealed, setPlanRevealed] = useState(goalActivities.length > 0);
+  const [planRevealed, setPlanRevealed] = useState(goalActivities.length + captures.length > 0);
   // Whether the compact `+ Add another` affordance is currently showing
   // the full Quick Picks grid (this ticket's own section 15/19) -- only
   // meaningful once `planRevealed` is true.
@@ -394,6 +401,7 @@ export function PlanDayClient({ timezone, planningDate, horizon, availabilityCon
             onSaved={handleSaved}
             onRefreshRequested={handleRefreshRequested}
             goalActivityLinks={buildGoalActivityLinksForAccept(rows, preview.constructedDay.proposedItems)}
+            captureLinks={buildCaptureLinksForAccept(rows, preview.constructedDay.proposedItems)}
           />
         ) : (
           <>
