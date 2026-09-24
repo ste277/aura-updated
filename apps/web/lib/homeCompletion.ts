@@ -34,6 +34,16 @@ export function overlayLoggedPlans(timeline: HomeTimelineItem[], loggedPlanIds: 
   });
 }
 
+export interface CompletionError {
+  planId: string;
+  message: string;
+}
+
+/** A completion error belongs to the plan that failed: it is shown only while THAT plan is the one Done would act on. */
+export function visibleCompletionError(error: CompletionError | null, currentPlanId: string | null): string | null {
+  return error && currentPlanId !== null && error.planId === currentPlanId ? error.message : null;
+}
+
 export type CompletePlanResult = 'DONE' | 'FAILED' | 'BUSY';
 
 /**

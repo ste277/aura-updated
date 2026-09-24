@@ -35,7 +35,7 @@ import type { HomeTimelineContextWindow, HomeTimelineItem } from '../lib/homeTim
 import { buildWhyAuraExplanation } from '../lib/whyAuraViewModel';
 import type { GuidanceUiState } from '../lib/bestForYouViewModel';
 import { HomeQuickCapture } from './HomeQuickCapture';
-import { createPlanCompleter, completablePlanId, overlayLoggedPlans } from '../lib/homeCompletion';
+import { createPlanCompleter, completablePlanId, overlayLoggedPlans, visibleCompletionError, type CompletionError } from '../lib/homeCompletion';
 
 /** Matches page.tsx's own FALLBACK_TZ -- defensive only, page.tsx always supplies a real value today. */
 const FALLBACK_HOME_TZ = 'Asia/Kolkata';
@@ -446,8 +446,9 @@ export function HomeDashboard({
   // refresh catches up (or if it fails).
   const [loggedPlanIds, setLoggedPlanIds] = useState<ReadonlySet<string>>(new Set());
   const planCompleter = useRef(createPlanCompleter());
-  const [completingPlanId, setCompletingPlanId] = useState<string | null>(null);
-  const [completeError, setCompleteError] = useState<string | null>(null);
+  // Per-plan in-flight ids and a plan-owned error: A's saving state / error never leak onto B.
+  const [completingPlanIds, setCompletingPlanIds] = useState<ReadonlySet<string>>(new Set());
+  const [completeError, setCompleteError] = useState<CompletionError | null>(null);
 
   const composedTimeline: HomeTimelineItem[] = useMemo(
     () =>
@@ -508,22 +509,32 @@ export function HomeDashboard({
   const completablePlanIdNow = completablePlanId(rightNowState);
 
   const handleCompleteRightNow = async (planId: string) => {
-    // The completer's own synchronous in-flight guard is what blocks same-task
-    // bursts; the state below is presentation only.
-    setCompleteError(null);
-    setCompletingPlanId(planId);
+    // planId is captured at click time; every state change below is keyed by it,
+    // never by whichever plan Right Now shows when the response arrives. The
+    // completer's own synchronous in-flight guard blocks same-task bursts.
+    setCompleteError((current) => (current?.planId === planId ? null : current));
+    setCompletingPlanIds((current) => new Set(current).add(planId));
     const result = await planCompleter.current(planId);
     if (result === 'BUSY') return;
-    setCompletingPlanId(null);
+    setCompletingPlanIds((current) => {
+      const next = new Set(current);
+      next.delete(planId);
+      return next;
+    });
     if (result === 'FAILED') {
-      setCompleteError("Couldn't mark that done. Try again.");
+      // Pre-commit failure: the completion did not happen; the plan stays actionable.
+      setCompleteError({ planId, message: "Couldn't mark that done. Try again." });
       return;
     }
+    // The server CONFIRMED LOGGED for this plan id: remember it and clear its error.
     setLoggedPlanIds((current) => new Set(current).add(planId));
+    setCompleteError((current) => (current?.planId === planId ? null : current));
+    // Reconciliation is secondary and can never fail the completion: the refresh
+    // keeps last-known-good state on any failure (lib/homeRefresh.ts).
     try {
       await onPlanCompleted?.();
     } catch {
-      // The completion is already confirmed and overlaid; a failed refresh keeps the last valid Home.
+      // last valid Home stays
     }
   };
   const spotlightExplanation = spotlightItem ? explanationsById[spotlightItem.id] : undefined;
@@ -749,11 +760,11 @@ export function HomeDashboard({
                 {completablePlanIdNow && (
                   <SecondaryButton
                     onClick={() => void handleCompleteRightNow(completablePlanIdNow)}
-                    disabled={completingPlanId === completablePlanIdNow}
+                    disabled={completingPlanIds.has(completablePlanIdNow)}
                     ariaLabel={`Mark "${spotlightItem.title}" done`}
                     style={{ padding: '6px 16px', fontSize: 13, marginLeft: 'auto' }}
                   >
-                    {completingPlanId === completablePlanIdNow ? 'Saving…' : 'Done'}
+                    {completingPlanIds.has(completablePlanIdNow) ? 'Saving…' : 'Done'}
                   </SecondaryButton>
                 )}
                 {rightNowState.kind === 'OPPORTUNITY' && (
@@ -773,8 +784,8 @@ export function HomeDashboard({
                * list to discover. `handlePlanOpportunity` already clears
                * this at the start of every new attempt (`setOpportunityError('')`),
                * so a stale error never lingers into a fresh Planning… state. */}
-              {completablePlanIdNow && completeError && (
-                <div role="alert" style={{ color: colors.danger, fontSize: 12, marginTop: spacing.xs }}>{completeError}</div>
+              {visibleCompletionError(completeError, completablePlanIdNow) && (
+                <div role="alert" style={{ color: colors.danger, fontSize: 12, marginTop: spacing.xs }}>{visibleCompletionError(completeError, completablePlanIdNow)}</div>
               )}
               {rightNowState.kind === 'OPPORTUNITY' && opportunityError && (
                 <div style={{ color: colors.danger, fontSize: 12, marginTop: spacing.xs }}>{opportunityError}</div>
