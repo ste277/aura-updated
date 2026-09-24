@@ -70,6 +70,7 @@ model User {
   availabilityPeriods UserAvailabilityPeriod[]
   goals               Goal[]
   goalActivities      GoalActivity[]
+  captures            Capture[]
 }
 
 // A lightweight profile for someone the user plans with -- the minimum
@@ -376,6 +377,10 @@ model PlannedActivity {
   // stays completely unaware of acquisition source" means no persisted
   // GOAL DATA column here, not zero schema text mentioning GoalActivity.
   goalActivity      GoalActivity?
+  // Quick Capture V1 PR A (migration 0036) -- same Prisma-only opposite
+  // relation as goalActivity above: ZERO columns on PlannedActivity; the
+  // plannedActivityId FK lives entirely on Capture.
+  capture           Capture?
 
   @@index([userId, plannedStartAt])
   @@index([userId, status])
@@ -666,4 +671,31 @@ model GoalActivity {
   updatedAt         DateTime         @updatedAt @db.Timestamptz(3)
 
   @@index([userId, goalId, status])
+}
+
+// Quick Capture V1 PR A (migration 0036) -- "I want to do this, but I have
+// not committed to when." One user-authored, one-off desire. NOT a task,
+// intent, activity, GoalActivity, Habit or PlannedActivity (see
+// lib/captures.ts). Persists ONLY OPEN/DISMISSED; PLANNED/COMPLETED are
+// derived (lib/captures.ts deriveCaptureState). completedAt is the durable
+// truth that the Capture was completed (directly, or through its linked
+// plan) so losing the linked PlannedActivity (ON DELETE SET NULL) can never
+// silently reopen it. No activityId/duration/deadline/importance/goal
+// columns by design: those stay planning-session properties.
+model Capture {
+  id                String           @id @default(uuid())
+  userId            String
+  user              User             @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  title             String
+  status            String           @default("OPEN") // "OPEN" | "DISMISSED"
+  completedAt       DateTime?        @db.Timestamptz(3)
+
+  plannedActivityId String?          @unique
+  plannedActivity   PlannedActivity? @relation(fields: [plannedActivityId], references: [id], onDelete: SetNull)
+
+  createdAt         DateTime         @default(now()) @db.Timestamptz(3)
+  updatedAt         DateTime         @updatedAt @db.Timestamptz(3)
+
+  @@index([userId, status, createdAt])
 }
