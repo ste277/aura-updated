@@ -93,7 +93,7 @@ check('E: only OPPORTUNITY still uses "is a strong option right now."', /\$\{spo
 // rightNowSelection.test.ts's own coverage).
 // ============================================================
 
-check('E: HomeDashboard imports and calls the real selectRightNowState, not a local reimplementation', /import \{ selectRightNowState \} from '\.\.\/lib\/rightNowSelection';/.test(source) && /const rightNowState = useMemo\(\(\) => selectRightNowState\(homeTimeline\), \[homeTimeline\]\);/.test(source));
+check('E: HomeDashboard imports and calls the real selectRightNowState, not a local reimplementation', /import \{ selectRightNowState \} from '\.\.\/lib\/rightNowSelection';/.test(source) && /const rightNowState = useMemo\(\(\) => selectRightNowState\(homeTimeline, new Date\(\)\), \[homeTimeline, currentMinuteOfDay\]\);/.test(source));
 
 // ============================================================
 // Composer boundary (ticket §6) -- this fix must never touch
