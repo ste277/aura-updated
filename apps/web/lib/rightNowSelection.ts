@@ -1,49 +1,49 @@
 /**
- * AURA HOME IA V2 FOLLOW-UP FIXES -- Finding E (Right Now state contract).
+ * Right Now selection -- COMMITTED DAY FIRST, guidance second.
  *
- * Pure presentation/selection boundary over the ALREADY-composed canonical
- * `HomeTimelineItem[]` (homeTimelineComposer.ts) -- this module reads that
- * output, it never re-derives, re-ranks, or re-joins anything the Composer
- * already owns (Plan+Guidance join, chronology, lifecycle override,
- * fail-closed source resolution, context semantics/ids, duration
- * personalization all stay exactly as the Composer produced them).
+ * Pure selection boundary over the ALREADY-composed canonical
+ * `HomeTimelineItem[]` (homeTimelineComposer.ts). It never re-derives,
+ * re-ranks or re-joins anything the Composer owns.
  *
- * PLANNED != RECOMMENDED OPTION (the ticket's own critical semantic rule):
- * an existing Plan answers "what have I committed to?"; an Opportunity
- * answers "what would be good to do?". Only the single rank-1 item is ever
- * considered here -- the same item the pre-existing spotlight already
- * looked at -- so this never widens which item can appear in Right Now,
- * it only reinterprets that ONE item's own already-available metadata
- * (source, agendaStatus, isCurrent) into the correct one of four states:
+ * PLANNED != RECOMMENDED OPTION. An existing PlannedActivity answers "what
+ * have I committed to?"; an Opportunity answers "what would be good to do?".
+ * Guidance `rank` therefore has NO authority over committed plans: a plan
+ * happening now is Right Now whether or not the guidance engine annotated
+ * it, and however it was created (Goal, Capture, Opportunity, Day Builder,
+ * typed Plan My Day, ...). `rank` is used ONLY to order competing
+ * Opportunities.
  *
- *   ACTIVE_PLAN   -- rank-1 is a Plan AND genuinely happening now
- *                    (metadata.agendaStatus === 'CURRENT', the exact
- *                    field dailyAgenda.ts's own timeBasedStatus() already
- *                    computes for this question -- not re-derived here).
- *   IMMINENT_PLAN -- rank-1 is a Plan AND about to start
- *                    (metadata.agendaStatus === 'STARTING_SOON', reusing
- *                    dailyAgenda.ts's own pre-existing 30-minute "about to
- *                    start" heuristic -- STARTING_SOON_WINDOW_MS -- rather
- *                    than inventing a new threshold, per the ticket's own
- *                    explicit instruction).
- *   OPPORTUNITY   -- rank-1 is an unscheduled Day Builder suggestion AND
- *                    its own window currently contains "now"
- *                    (metadata.isCurrent, the Composer's generic temporal
- *                    classifier -- Opportunities carry no agendaStatus at
- *                    all, since they were never a commitment).
- *   CONTEXT_OPEN  -- everything else: no rank-1 item at all, a rank-1 Plan
- *                    that is neither current nor imminent (a "future
- *                    non-imminent Plan must not win Best Option Right Now
- *                    merely because its rank/fit is high" -- the ticket's
- *                    own explicit rule), or a rank-1 Opportunity whose
- *                    window isn't current yet. A COMPLETED/MISSED Plan can
- *                    never reach ACTIVE_PLAN/IMMINENT_PLAN here: the
- *                    Composer's own lifecycle override already forces
- *                    `agendaStatus` to 'COMPLETED'/'MISSED' for those (see
- *                    homeTimelineComposer.ts's projectAgendaItem), neither
- *                    of which is 'CURRENT' or 'STARTING_SOON'.
+ * Contract, in strict order:
+ *   1. ACTIVE_PLAN    a PLAN item happening now.
+ *   2. IMMINENT_PLAN  else, the next PLAN item starting within the existing
+ *                     STARTING_SOON window (30 minutes, dailyAgenda.ts).
+ *   3. OPPORTUNITY    else, a current Opportunity (lowest guidance rank).
+ *   4. CONTEXT_OPEN   else.
+ *
+ * TIME SOURCES. "Now" comes from the Composer's own ticking
+ * `currentMinuteOfDay` (`metadata.isCurrent` / `isPast` / `startsInMinutes`),
+ * not from `agendaStatus`, which is fixed at agenda-fetch time and can go
+ * stale while the Home tab stays open. `agendaStatus` is consumed only for
+ * lifecycle facts: COMPLETED (logged) and MISSED (elapsed, unlogged) plans
+ * are never eligible. If a hand-built item carries no temporal metadata,
+ * `agendaStatus` CURRENT / STARTING_SOON is used as the fallback.
+ *
+ * OVERLAP. If several plans are active (or imminent) at once, the winner is
+ * the earliest start, then the earliest end, then the lowest id -- an explicit
+ * total order, so the result never depends on input/database row order (the
+ * Composer's own same-start tie-break is only stable/first-seen). No scoring
+ * is invented here.
+ *
+ * Threshold boundary: a plan starting in exactly 30 minutes IS imminent
+ * (inclusive, matching dailyAgenda.ts's `<=`); 31 is not. A plan whose end
+ * minute equals now is still active (the Composer's inclusive bounds); the
+ * agenda marks it MISSED only once now is strictly past its end.
+ *
+ * Only PLAN-sourced items are commitments here. Shared Moments are not
+ * considered by this selector.
  */
 import type { HomeTimelineItem } from './homeTimelineTypes';
+import { STARTING_SOON_WINDOW_MS } from './dailyAgenda';
 
 export type RightNowState =
   | { kind: 'ACTIVE_PLAN'; item: HomeTimelineItem }
@@ -51,19 +51,46 @@ export type RightNowState =
   | { kind: 'OPPORTUNITY'; item: HomeTimelineItem }
   | { kind: 'CONTEXT_OPEN' };
 
+const IMMINENT_WINDOW_MINUTES = STARTING_SOON_WINDOW_MS / 60000;
+
+function isResolved(item: HomeTimelineItem): boolean {
+  const status = item.metadata?.agendaStatus;
+  return status === 'COMPLETED' || status === 'MISSED' || item.metadata?.isCompleted === true;
+}
+
+function isActive(item: HomeTimelineItem): boolean {
+  const md = item.metadata;
+  return md?.isCurrent !== undefined ? md.isCurrent === true : md?.agendaStatus === 'CURRENT';
+}
+
+function byCommitmentOrder(a: HomeTimelineItem, b: HomeTimelineItem): number {
+  if (a.start !== b.start) return a.start < b.start ? -1 : 1;
+  const aEnd = a.end ?? a.start;
+  const bEnd = b.end ?? b.start;
+  if (aEnd !== bEnd) return aEnd < bEnd ? -1 : 1;
+  return a.id < b.id ? -1 : a.id > b.id ? 1 : 0;
+}
+
+function isImminent(item: HomeTimelineItem): boolean {
+  const md = item.metadata;
+  if (md?.isPast === true) return false;
+  if (md?.startsInMinutes !== undefined) return md.startsInMinutes >= 0 && md.startsInMinutes <= IMMINENT_WINDOW_MINUTES;
+  return md?.agendaStatus === 'STARTING_SOON';
+}
+
 export function selectRightNowState(homeTimeline: HomeTimelineItem[]): RightNowState {
-  const rank1Item = homeTimeline.find((item) => item.rank === 1);
-  if (!rank1Item) return { kind: 'CONTEXT_OPEN' };
+  const eligiblePlans = homeTimeline.filter((item) => item.source === 'PLAN' && !isResolved(item));
 
-  if (rank1Item.source === 'PLAN') {
-    if (rank1Item.metadata?.agendaStatus === 'CURRENT') return { kind: 'ACTIVE_PLAN', item: rank1Item };
-    if (rank1Item.metadata?.agendaStatus === 'STARTING_SOON') return { kind: 'IMMINENT_PLAN', item: rank1Item };
-    return { kind: 'CONTEXT_OPEN' };
-  }
+  const active = eligiblePlans.filter(isActive).sort(byCommitmentOrder)[0];
+  if (active) return { kind: 'ACTIVE_PLAN', item: active };
 
-  if (rank1Item.kind === 'OPPORTUNITY' && rank1Item.metadata?.isCurrent === true) {
-    return { kind: 'OPPORTUNITY', item: rank1Item };
-  }
+  const imminent = eligiblePlans.filter(isImminent).sort(byCommitmentOrder)[0];
+  if (imminent) return { kind: 'IMMINENT_PLAN', item: imminent };
+
+  const opportunity = homeTimeline
+    .filter((item) => item.kind === 'OPPORTUNITY' && item.metadata?.isCurrent === true)
+    .sort((a, b) => (a.rank ?? Number.MAX_SAFE_INTEGER) - (b.rank ?? Number.MAX_SAFE_INTEGER))[0];
+  if (opportunity) return { kind: 'OPPORTUNITY', item: opportunity };
 
   return { kind: 'CONTEXT_OPEN' };
 }

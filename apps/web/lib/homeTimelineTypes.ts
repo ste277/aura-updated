@@ -80,6 +80,13 @@ export interface HomeTimelineItemMetadata {
   isCurrent?: boolean;
   isPast?: boolean;
   isCompleted?: boolean;
+  /** Whole minutes from the caller's current minute-of-day until this
+   * agenda item starts; present only for an item that has not started yet
+   * (start minute strictly after now). Derived by the Composer from the SAME
+   * ticking `currentMinuteOfDay` it already uses for `isCurrent`/`isPast`,
+   * so it never goes stale between agenda fetches the way a fetch-time
+   * `agendaStatus` can. Presentation classification only. */
+  startsInMinutes?: number;
 }
 
 export interface HomeTimelineItem {

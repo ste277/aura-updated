@@ -154,6 +154,7 @@ function projectAgendaItem(item: DailyAgendaItem, currentMinuteOfDay: number, ti
     isCurrent,
     isPast,
     isCompleted: item.status === 'COMPLETED',
+    ...(startMinute > currentMinuteOfDay ? { startsInMinutes: startMinute - currentMinuteOfDay } : {}),
   };
 
   return {

@@ -88,8 +88,11 @@ function opportunityItem(overrides: Partial<HomeTimelineItem> = {}): HomeTimelin
   const timelineActivePlanWins = [planItem({ rank: 1 }), opportunityItem({ id: 'opportunity-2', rank: 2 })];
   check('4a. Rank-1 active Plan coexisting with a lower-ranked Opportunity: ACTIVE_PLAN wins (the rank-1 item is a commitment)', selectRightNowState(timelineActivePlanWins).kind === 'ACTIVE_PLAN');
 
+  // Daily Experience V1 PR A: guidance rank has no authority over committed
+  // plans. This used to assert OPPORTUNITY (rank-1 Opportunity beat a lower-
+  // ranked active Plan); the committed day now wins.
   const timelineOpportunityWins = [opportunityItem({ rank: 1 }), planItem({ id: 'plan-2', rank: 2, metadata: { agendaStatus: 'CURRENT', isCurrent: true, isPast: false } })];
-  check('4b. Rank-1 Opportunity coexisting with a lower-ranked active Plan: OPPORTUNITY wins (the rank-1 item is genuinely current)', selectRightNowState(timelineOpportunityWins).kind === 'OPPORTUNITY');
+  check('4b. Rank-1 Opportunity coexisting with a lower-ranked active Plan: ACTIVE_PLAN wins (committed day first, guidance rank cannot hide it)', selectRightNowState(timelineOpportunityWins).kind === 'ACTIVE_PLAN');
 }
 
 // ============================================================
@@ -111,7 +114,9 @@ function opportunityItem(overrides: Partial<HomeTimelineItem> = {}): HomeTimelin
 // ============================================================
 {
   check('6. Empty timeline -> CONTEXT_OPEN', selectRightNowState([]).kind === 'CONTEXT_OPEN');
-  check('6. Timeline with no rank-1 item at all -> CONTEXT_OPEN', selectRightNowState([planItem({ rank: undefined })]).kind === 'CONTEXT_OPEN');
+  // Daily Experience V1 PR A: an active plan with NO guidance annotation (no rank) is still Right Now.
+  check('6. An active Plan with no rank (no guidance annotation) -> ACTIVE_PLAN', selectRightNowState([planItem({ rank: undefined })]).kind === 'ACTIVE_PLAN');
+  check('6. Timeline with no plan and no opportunity -> CONTEXT_OPEN', selectRightNowState([opportunityItem({ metadata: { isCurrent: false, isPast: false } })]).kind === 'CONTEXT_OPEN');
 }
 
 // ============================================================
@@ -171,14 +176,16 @@ function opportunityItem(overrides: Partial<HomeTimelineItem> = {}): HomeTimelin
 }
 
 // ============================================================
-// 9/10 (regression, not new behavior): selectRightNowState never sorts,
-// reorders, or filters the timeline it's given -- it only reads the
-// single rank-1 item exactly as the Composer already ordered/ranked it.
+// 9/10 (regression): selectRightNowState never sorts, reorders, or mutates
+// the timeline it's given. Daily Experience V1 PR A: a lower-ranked (or
+// unranked) active Plan now beats a rank-1 Opportunity.
 // ============================================================
 {
   const timeline = [planItem({ id: 'a', rank: 2, metadata: { agendaStatus: 'CURRENT', isCurrent: true, isPast: false } }), opportunityItem({ id: 'b', rank: 1 })];
+  const snapshot = JSON.stringify(timeline);
   const state = selectRightNowState(timeline);
-  check('Only the genuine rank-1 item is ever selected, even when a differently-ranked item appears earlier in the array (no re-ranking/re-sorting here)', state.kind === 'OPPORTUNITY' && state.item.id === 'b');
+  check('An active Plan beats a differently-ranked Opportunity regardless of array order or rank', state.kind === 'ACTIVE_PLAN' && state.item.id === 'a');
+  check('The input timeline is never mutated/reordered', JSON.stringify(timeline) === snapshot);
 }
 
 if (!allPassed) {
