@@ -83,18 +83,24 @@ function parseAcceptRequest(body: Record<string, unknown>): AcceptConstructedDay
  * `linkGoalActivityToPlannedActivity`) -- this parser only shapes the
  * data, it trusts nothing.
  */
-function parseGoalActivityLinks(value: unknown): Map<string, string> {
+function parseSourceLinks(value: unknown, idKey: 'goalActivityId' | 'captureId'): Map<string, string> {
   const links = new Map<string, string>();
   if (!Array.isArray(value)) return links;
   for (const raw of value) {
     if (!raw || typeof raw !== 'object') continue;
     const entry = raw as Record<string, unknown>;
     if (typeof entry.intentId !== 'string' || !entry.intentId || entry.intentId.length > MAX_INTENT_ID_LENGTH) continue;
-    if (typeof entry.goalActivityId !== 'string' || !entry.goalActivityId) continue;
-    links.set(entry.intentId, entry.goalActivityId);
+    const sourceId = entry[idKey];
+    if (typeof sourceId !== 'string' || !sourceId) continue;
+    links.set(entry.intentId, sourceId);
   }
   return links;
 }
+
+const parseGoalActivityLinks = (value: unknown) => parseSourceLinks(value, 'goalActivityId');
+// Quick Capture V1 PR B -- the sibling `captureLinks` envelope, parsed by the
+// same rules and equally kept out of AcceptConstructedDayRequest.
+const parseCaptureLinks = (value: unknown) => parseSourceLinks(value, 'captureId');
 
 export async function POST(req: NextRequest) {
   const session = getSessionFromRequest(req);
@@ -106,12 +112,13 @@ export async function POST(req: NextRequest) {
   const request = parseAcceptRequest(body);
   if (!request) return NextResponse.json({ error: 'A valid Day Constructor acceptance request is required.' }, { status: 400 });
   const goalActivityLinks = parseGoalActivityLinks(body.goalActivityLinks);
+  const captureLinks = parseCaptureLinks(body.captureLinks);
 
   // Authoritative clock -- read EXACTLY ONCE, at this outer boundary, then
   // threaded through everything downstream (this ticket's own section 14).
   const now = new Date();
 
-  const result = await persistAcceptedConstructedDay(session.userId, request, now, goalActivityLinks);
+  const result = await persistAcceptedConstructedDay(session.userId, request, now, goalActivityLinks, captureLinks);
 
   switch (result.status) {
     case 'SAVED':

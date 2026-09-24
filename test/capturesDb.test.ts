@@ -149,6 +149,10 @@ async function main() {
     await link(cLogged.id, planLogged.id);
     const logged = await logPlannedActivity(userA.id, planLogged.id);
     habitLogIds.push(logged.habitLog.id);
+    // Quick Capture V1 PR B: normal logging now materializes completedAt. The
+    // transitional/legacy state this block exists to cover (LOGGED plan, null
+    // completedAt) is therefore reproduced explicitly.
+    await sql(`UPDATE "Capture" SET "completedAt" = NULL WHERE id = $1`, [cLogged.id]);
     check('Q. LOGGED link with null completedAt derives COMPLETED (transitional compatibility)', (await derived(userA.id, cLogged.id)) === 'COMPLETED');
     const logsMid = await countRows('HabitLog', userA.id);
     const materialize = await completeCapture(userA.id, cLogged.id);

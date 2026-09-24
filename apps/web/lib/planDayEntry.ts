@@ -18,7 +18,7 @@ import { localDateTimeToUTC, addDaysToDateStr } from './timezone';
 import type { PreviewRequestIntentBody } from './dayConstructorPreviewClient';
 import type { ConstructDayPreviewClientResult } from './dayConstructorPreviewClient';
 import type { PlanningHorizon } from './planningHorizon';
-import type { GoalActivityLink } from './acceptConstructedDay';
+import type { GoalActivityLink, CaptureLink } from './acceptConstructedDay';
 
 // ============================================================
 // Row model (this ticket's own section 10) -- deliberately NOT every
@@ -101,6 +101,11 @@ export interface PlanDayIntentRow {
    * may still point back to the originating GoalActivity"). Consumed only
    * at accept time, by `buildGoalActivityLinksForAccept` below. */
   goalActivityId?: string;
+  /** Quick Capture V1 PR B -- CLIENT-ONLY provenance, the sibling of
+   * `goalActivityId`: set only by `createIntentRowFromCapture`, never in the
+   * preview request, never cleared by editing. A row carries AT MOST ONE of
+   * `goalActivityId` / `captureId` (the link builders below enforce it). */
+  captureId?: string;
 }
 
 export const MAX_PLAN_DAY_INTENTS = 12; // mirrors F1's own MAX_INTENTS_PER_REQUEST (dayConstructorPreviewRequest.ts) -- the hard upper bound, not a new limit.
@@ -168,6 +173,14 @@ export function createIntentRowFromQuickPick(pick: { label: string; activityId?:
 // it already does for a typed row with no `activityId` -- no GoalActivity
 // is required to map to the static catalog.
 // ============================================================
+
+/** Quick Capture V1 PR B -- seeds a row from a Capture: title only. No
+ * activityId is inferred or stored; whatever typed-row behavior later
+ * resolves activity semantics applies unchanged. The id is namespaced and
+ * deterministic (SSR-safe, see INITIAL_INTENT_ROW_ID). */
+export function createIntentRowFromCapture(capture: { id: string; title: string }): PlanDayIntentRow {
+  return { ...blankIntentRow(`plan-day-capture-${capture.id}`), title: capture.title, captureId: capture.id };
+}
 
 export function createIntentRowFromGoalActivity(goalActivity: { id: string; title: string; activityId: string | null }): PlanDayIntentRow {
   return { ...blankIntentRow(`plan-day-goal-${goalActivity.id}`), title: goalActivity.title, activityId: goalActivity.activityId ?? undefined, goalActivityId: goalActivity.id };
@@ -428,8 +441,22 @@ export function buildGoalActivityLinksForAccept(rows: readonly PlanDayIntentRow[
   const proposedIntentIds = new Set(proposedItems.map((item) => item.intentId));
   const links: GoalActivityLink[] = [];
   for (const row of rows) {
-    if (row.goalActivityId && proposedIntentIds.has(row.id)) {
+    if (row.goalActivityId && !row.captureId && proposedIntentIds.has(row.id)) {
       links.push({ intentId: row.id, goalActivityId: row.goalActivityId });
+    }
+  }
+  return links;
+}
+
+/** Quick Capture V1 PR B -- the sibling of buildGoalActivityLinksForAccept:
+ * only rows that carry Capture provenance (and no Goal provenance) AND were
+ * actually placed. Deferred, removed and typed rows never link. */
+export function buildCaptureLinksForAccept(rows: readonly PlanDayIntentRow[], proposedItems: readonly { intentId: string }[]): CaptureLink[] {
+  const proposedIntentIds = new Set(proposedItems.map((item) => item.intentId));
+  const links: CaptureLink[] = [];
+  for (const row of rows) {
+    if (row.captureId && !row.goalActivityId && proposedIntentIds.has(row.id)) {
+      links.push({ intentId: row.id, captureId: row.captureId });
     }
   }
   return links;

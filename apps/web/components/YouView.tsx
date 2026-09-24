@@ -130,6 +130,8 @@ export function YouView({
         <SectionHeader label="Goals" />
         <SurfaceCard padding={0} style={{ overflow: 'hidden' }}>
           <SettingsRow icon="🎯" title="Goals" detail="Track what you're working toward" onClick={() => { window.location.href = '/goals'; }} />
+          {/* Quick Capture V1 PR B -- one row, alongside Goals: a bare navigation to /captures, same pattern as Goals above. */}
+          <SettingsRow icon="✍️" title="Things you want to do" detail="Capture it now, plan it when you're ready" onClick={() => { window.location.href = '/captures'; }} />
         </SurfaceCard>
       </div>
 

@@ -1,5 +1,5 @@
 /**
- * Quick Capture V1 PR A -- structural boundary suite (source-reading, same
+ * Quick Capture V1 PR A boundary suite, updated for PR B -- structural boundary suite (source-reading, same
  * convention as goalsWiring.test.ts). Proves PR A's own boundary: a
  * domain/API-only change that touches no UI, no planning/acceptance code,
  * no Goal/Habit code, and adds no column to PlannedActivity.
@@ -35,28 +35,23 @@ check('migration count is exactly 36', fs.readdirSync(path.join(__dirname, '../a
 const goalActivityBlock = (schema.match(/model GoalActivity \{[\s\S]*?\n\}/) ?? [''])[0];
 check('GoalActivity and Habit blocks do not mention Capture', !/Capture/.test(goalActivityBlock) && !/Capture/.test((schema.match(/model Habit \{[\s\S]*?\n\}/) ?? [''])[0]));
 
-// Files that must stay Capture-unaware in PR A.
+// Files that must stay Capture-unaware. Quick Capture V1 PR B legitimately
+// added Capture wiring to the plan-day handoff/accept files and the You row
+// (removed from this list; captureWiringPrB.test.ts owns proving that wiring
+// stays narrow). Everything below must STILL never mention Capture.
 const UNTOUCHED = [
   '../apps/web/lib/dayIntent.ts',
   '../apps/web/lib/dayConstructor.ts',
   '../apps/web/lib/dayConstructorOrchestrator.ts',
   '../apps/web/lib/dayConstructorAcceptance.ts',
-  '../apps/web/lib/dayConstructorAcceptancePersistence.ts',
   '../apps/web/lib/dayConstructorPreviewRequest.ts',
-  '../apps/web/lib/acceptConstructedDay.ts',
-  '../apps/web/lib/planDayEntry.ts',
-  '../apps/web/lib/planDayBootstrap.ts',
-  '../apps/web/app/plan-day/PlanDayClient.tsx',
-  '../apps/web/app/plan-day/page.tsx',
-  '../apps/web/app/api/day-constructor/accept/route.ts',
   '../apps/web/lib/goals.ts',
   '../apps/web/components/HomeDashboard.tsx',
-  '../apps/web/components/YouView.tsx',
   '../packages/recommendation/src/timingSearch.ts',
 ];
 for (const rel of UNTOUCHED) check(`${rel.replace('../', '')} has no Capture reference`, !/capture(Id|Links)?\b/i.test(stripComments(read(rel))));
 
-check('no UI: no /captures page or Capture component exists', !fs.existsSync(path.join(__dirname, '../apps/web/app/captures')) && !fs.readdirSync(path.join(__dirname, '../apps/web/components')).some((f) => /capture/i.test(f)));
+check('no Home Capture composer and no History/conversion UI (PR C / later work)', !/capture/i.test(stripComments(read('../apps/web/components/HomeDashboard.tsx'))) && !fs.existsSync(path.join(__dirname, '../apps/web/app/captures/history')));
 
 // API security
 const routes = ['../apps/web/app/api/captures/route.ts', '../apps/web/app/api/captures/[captureId]/route.ts', '../apps/web/app/api/captures/[captureId]/complete/route.ts'];
@@ -69,14 +64,14 @@ for (const rel of routes) {
 const dbSrc = stripComments(read('../apps/web/lib/db.ts'));
 const capDb = dbSrc.slice(dbSrc.indexOf('export interface Capture {'));
 check('every Capture mutation/read query in db.ts is scoped by "userId"', (capDb.match(/"userId" = \$\d|c\."userId" = \$\d/g) ?? []).length >= 6);
-check('no Capture db helper accepts a plannedActivityId parameter (PR A creates no link)', !/export async function \w*Capture\w*\([^)]*plannedActivityId/.test(capDb));
+check('the only Capture db helper accepting a plannedActivityId is the acceptance-transaction link helper (PR B)', (capDb.match(/export async function \w*Capture\w*\([^)]*plannedActivityId/g) ?? []).every((m) => m.includes('linkCaptureToPlannedActivity')));
 check('completeCapture is a single conditional UPDATE (no check-then-act)', /UPDATE "Capture" c[\s\S]{0,900}NOT EXISTS[\s\S]{0,200}'UPCOMING'/.test(capDb));
 check('completeCapture/removeCapture never touch HabitLog or PlannedActivity writes', !/INSERT INTO "(HabitLog|PlannedActivity)"|UPDATE "PlannedActivity"|DELETE FROM "PlannedActivity"/.test(capDb));
 check('lib/captures.ts imports nothing (pure)', !/^import /m.test(read('../apps/web/lib/captures.ts')));
 
-// PR B seam is unchanged and identifiable
-const logSrc = stripComments(dbSrc);
-check('logging seam intact: logPlannedActivity still sets status LOGGED inside its own transaction (PR B seam)', /export async function logPlannedActivity[\s\S]*?SET status = 'LOGGED'/.test(logSrc) && !/logPlannedActivity[\s\S]{0,6000}"Capture"/.test(logSrc.slice(logSrc.indexOf('export async function logPlannedActivity'), logSrc.indexOf('export async function logPlannedActivity') + 6000)));
+// PR B seam: logPlannedActivity now materializes Capture.completedAt in the SAME transaction.
+const logBody = dbSrc.slice(dbSrc.indexOf('export async function logPlannedActivity'), dbSrc.indexOf('export async function logPlannedActivity') + 9000);
+check('logPlannedActivity still sets status LOGGED and now also materializes Capture.completedAt on the same client', /SET status = 'LOGGED'/.test(logBody) && /UPDATE "Capture" SET "completedAt" = COALESCE\("completedAt", \$3\)/.test(logBody));
 
 if (!allPassed) {
   console.error('SOME CAPTURE WIRING CHECKS FAILED');

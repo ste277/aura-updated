@@ -18,6 +18,7 @@ import { getDatePartsInTimezone } from './timezone';
 import { resolvePlanningTargetDate, type PlanningHorizon } from './planningHorizon';
 import { MAX_PLAN_DAY_INTENTS } from './planDayEntry';
 import { deriveGoalActivityState, type GoalActivityStatus, type PlannedActivityStatus } from './goals';
+import { deriveCaptureState, type CaptureStatus, type LinkedPlanStatus } from './captures';
 
 export interface PlanDayBootstrap {
   timezone: string;
@@ -186,4 +187,59 @@ export async function resolveGoalActivityHandoff(deps: GoalActivityHandoffDeps, 
         }) === 'SUGGESTED'
     )
     .map((activity) => ({ id: activity.id, title: activity.title, activityId: activity.activityId }));
+}
+
+// ============================================================
+// Quick Capture V1 PR B -- the Capture -> Plan My Day handoff, the exact
+// sibling of resolveGoalActivityHandoff above. `?captures=<id,id,...>`
+// supplies ID REFERENCES ONLY; every title is re-read from the database for
+// the authenticated user, and eligibility (derived state OPEN) is
+// re-evaluated on EVERY render, so a stale/reloaded link never seeds a
+// Capture that has since been planned, completed or removed.
+// ============================================================
+
+export interface CaptureHandoffItem {
+  id: string;
+  title: string;
+}
+
+export interface CaptureHandoffDeps {
+  getSessionToken: () => string | undefined;
+  verifySession: (token: string) => { userId: string } | null;
+  /** `listCapturesWithLinkedPlanStatus` (db.ts), passed by reference. */
+  listCaptures: (
+    userId: string
+  ) => Promise<ReadonlyArray<{ id: string; title: string; status: string; completedAt: Date | null; linkedPlanStatus: string | null }>>;
+}
+
+/**
+ * Returns [] for every unauthenticated/malformed/not-owned/ineligible case
+ * and never throws. Ids are de-duplicated here (authoritatively -- React keys
+ * never hide duplicates). Output order is the user's own list order (newest
+ * first, as shown on the Things-you-want-to-do page), not URL order: the
+ * DB read already scopes by userId, so foreign ids simply never match.
+ */
+export async function resolveCaptureHandoff(deps: CaptureHandoffDeps, capturesParam: string | null): Promise<CaptureHandoffItem[]> {
+  if (!capturesParam) return [];
+  const requestedIds = Array.from(new Set(capturesParam.split(',').map((id) => id.trim()).filter(Boolean))).slice(0, MAX_PLAN_DAY_INTENTS);
+  if (requestedIds.length === 0) return [];
+
+  const token = deps.getSessionToken();
+  if (!token) return [];
+  const session = deps.verifySession(token);
+  if (!session) return [];
+
+  const requested = new Set(requestedIds);
+  const captures = await deps.listCaptures(session.userId);
+  return captures
+    .filter((capture) => requested.has(capture.id))
+    .filter(
+      (capture) =>
+        deriveCaptureState({
+          status: capture.status as CaptureStatus,
+          completedAt: capture.completedAt,
+          linkedPlanStatus: capture.linkedPlanStatus as LinkedPlanStatus | null,
+        }) === 'OPEN'
+    )
+    .map((capture) => ({ id: capture.id, title: capture.title }));
 }

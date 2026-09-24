@@ -476,8 +476,11 @@ function main() {
   // where goalActivities is empty) -- still starts false there, byte-
   // for-byte the same as before this PR.
   check(
-    '81. planRevealed starts false for an ordinary visit (goalActivities.length > 0 ? true : false) -- the fresh page still shows no blank card/CTA before any user action when there is no Goal handoff',
-    /const \[planRevealed, setPlanRevealed\] = useState\(goalActivities\.length > 0\);/.test(planDayClientSource)
+    // Quick Capture V1 PR B widened this from `goalActivities.length > 0`:
+    // a Capture handoff seeds real rows too. An ordinary visit (both lists
+    // empty) still starts false, byte-for-byte as before.
+    '81. planRevealed starts false for an ordinary visit (no Goal/Capture handoff) -- the fresh page still shows no blank card/CTA before any user action',
+    /const \[planRevealed, setPlanRevealed\] = useState\(goalActivities\.length \+ captures\.length > 0\);/.test(planDayClientSource)
   );
   check('82. addPickerExpanded starts false -- "+ Add another" begins collapsed once a plan exists', /const \[addPickerExpanded, setAddPickerExpanded\] = useState\(false\);/.test(planDayClientSource));
 
