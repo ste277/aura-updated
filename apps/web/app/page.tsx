@@ -1377,6 +1377,7 @@ export default function DashboardPage() {
             timezone={userTz}
             currentMinuteOfDay={currentMinuteOfDay}
             onMyDayChanged={handleMyDayOrGuidanceChanged}
+            onPlanCompleted={handlePlanLogged}
             guidance={guidance}
             onOpenBirthProfile={() => setActiveTab('chart')}
             onOpenAgendaItem={handleOpenAgendaItem}
