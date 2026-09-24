@@ -69,7 +69,7 @@ check('16. mapPlanRow preserves a SKIPPED row as SKIPPED (never LOGGED or UPCOMI
 const planTab = strip(read('../apps/web/components/PlanWithAuraView.tsx'));
 check("16. the Plan tab derives its upcoming/completed lists from presentation predicates (mapPlanRow preserves SKIPPED; status-preservation suite covers replay)", /savedPlans\.filter\(isActionableUpcomingPlan\)/.test(planTab) && /savedPlans\.filter\(isCompletedPlan\)/.test(planTab));
 const db = strip(read('../apps/web/lib/db.ts'));
-check("16. listPlannedActivities (Plan tab / calendar feed source) excludes SKIPPED at the query", /status NOT IN \('CANCELLED', 'SKIPPED'\)/.test(db));
+check("16. listPlannedActivities (Plan tab / calendar feed source) excludes SKIPPED at the query", /status NOT IN \('CANCELLED', 'SKIPPED', 'MOVED'\)/.test(db));
 
 // 20-23. UPCOMING-keyed readers naturally exclude SKIPPED (no SKIPPED handling was added there)
 check("20. reminder discovery queries stay keyed on status = 'UPCOMING'", /listPlannedActivitiesForReminders[\s\S]{0,400}status = 'UPCOMING'/.test(db) && /\.filter\(\(plan\) => plan\.status === 'UPCOMING'/.test(strip(read('../apps/web/lib/auraReminders.ts'))));
@@ -93,7 +93,7 @@ const schema = read('../apps/web/prisma/schema.prisma');
 check('2. schema: skippedAt DateTime? @db.Timestamptz(3); status stays a plain String (no enum)', /skippedAt\s+DateTime\?\s+@db\.Timestamptz\(3\)/.test(schema) && /status\s+String\s+@default\("UPCOMING"\)/.test(schema));
 
 // 15. link SQL accepts both CANCELLED and SKIPPED, and only those
-check("15. both source-link UPDATEs may replace a link only over a CANCELLED or SKIPPED plan", (db.match(/status IN \('CANCELLED', 'SKIPPED'\)/g) ?? []).length === 2 && !/AND status = 'CANCELLED'\s*\)/.test(db));
+check("15. both source-link UPDATEs may replace a link only over a CANCELLED, SKIPPED or (stale) MOVED plan", (db.match(/status IN \('CANCELLED', 'SKIPPED', 'MOVED'\)/g) ?? []).length === 2 && !/AND status = 'CANCELLED'\s*\)/.test(db));
 
 // PR B Done regression: Home completion code untouched by C1
 const homeFiles = ['homeCompletion.ts', 'homeRefresh.ts', 'reminderConsistency.ts'].map((f) => read(`../apps/web/lib/${f}`)).join('\n');

@@ -304,7 +304,7 @@ model PlannedActivity {
   title           String
   activityType    String?
   icon            String?
-  status          String   @default("UPCOMING") // "UPCOMING" | "LOGGED" | "CANCELLED" | "SKIPPED"
+  status          String   @default("UPCOMING") // "UPCOMING" | "LOGGED" | "CANCELLED" | "SKIPPED" | "MOVED"
 
   // Planned Activity Canonical Identity Propagation V1 (migration 0031) --
   // the canonical packages/recommendation/src/personalizedTasks.ts
@@ -336,6 +336,14 @@ model PlannedActivity {
   // Daily Experience V1 PR C1 (migration 0037) -- set together with status
   // "SKIPPED"; NULL otherwise. Server-generated, never a client value.
   skippedAt       DateTime? @db.Timestamptz(3)
+
+  // Daily Experience V1 PR D2 (migration 0038) -- Move lineage. Set ONLY on a
+  // successor created by movePlannedActivity: this plan exists because the
+  // referenced plan (now status "MOVED") was moved. Unique: at most one
+  // successor per plan. Deliberately no forward pointer, movedAt or reason.
+  rescheduledFromPlanId String? @unique
+  rescheduledFrom       PlannedActivity? @relation("PlanMoveLineage", fields: [rescheduledFromPlanId], references: [id], onDelete: SetNull)
+  rescheduledTo         PlannedActivity? @relation("PlanMoveLineage")
   habitLogId      String?
 
   // Event Location Plan Persistence V1 (migration 0028) -- an immutable
