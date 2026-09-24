@@ -22,6 +22,8 @@ export interface HomeRefreshDeps {
   applyPlans: (json: unknown) => void;
   refreshMyDay: () => Promise<void>;
   refreshGuidance: () => Promise<void>;
+  /** Reminder projection source. Reconciliation only: Home's confirmed-completion filter stays authoritative even if this returns stale data. */
+  refreshAuraUpdates: () => Promise<void>;
   reauthenticate: () => Promise<void>;
 }
 
@@ -53,6 +55,7 @@ export async function refreshAfterHomeCompletion(deps: HomeRefreshDeps): Promise
     pull('/api/plans', deps.applyPlans),
     safely(deps.refreshMyDay),
     safely(deps.refreshGuidance),
+    safely(deps.refreshAuraUpdates),
   ]);
   if (unauthorized) await safely(deps.reauthenticate);
   return { unauthorized };

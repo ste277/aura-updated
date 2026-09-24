@@ -1212,9 +1212,10 @@ export default function DashboardPage() {
         applyPlans: (json) => setPlannedActivities(json as any),
         refreshMyDay: loadMyDay,
         refreshGuidance: loadGuidance,
+        refreshAuraUpdates: loadAuraUpdates,
         reauthenticate: loadUserDataAndLogs,
       }).then(() => undefined),
-    [applyConfirmedLogs, loadMyDay, loadGuidance, loadUserDataAndLogs]
+    [applyConfirmedLogs, loadMyDay, loadGuidance, loadAuraUpdates, loadUserDataAndLogs]
   );
 
   const handleMyDayOrGuidanceChanged = useCallback(() => {
@@ -1392,7 +1393,7 @@ export default function DashboardPage() {
             onViewMomentUpdate={handleViewMomentUpdate}
             onViewMomentInvitation={handleViewMomentInvitation}
             onFindAnotherTimeForMoment={handleFindAnotherTimeForMoment}
-            startingSoonReminder={auraUpdates?.upcoming?.[0]}
+            startingSoonReminders={auraUpdates?.upcoming}
             onOpenReminder={handleOpenReminder}
             myDayAgenda={myDay?.agenda}
             myDayStory={myDay?.story}

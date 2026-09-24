@@ -36,6 +36,7 @@ import { buildWhyAuraExplanation } from '../lib/whyAuraViewModel';
 import type { GuidanceUiState } from '../lib/bestForYouViewModel';
 import { HomeQuickCapture } from './HomeQuickCapture';
 import { createPlanCompleter, completablePlanId, overlayLoggedPlans, visibleCompletionError, type CompletionError } from '../lib/homeCompletion';
+import { selectVisibleStartingSoonReminder } from '../lib/reminderConsistency';
 
 /** Matches page.tsx's own FALLBACK_TZ -- defensive only, page.tsx always supplies a real value today. */
 const FALLBACK_HOME_TZ = 'Asia/Kolkata';
@@ -111,7 +112,8 @@ interface HomeDashboardProps {
   onViewMomentUpdate?: (momentToken: string) => void;
   onViewMomentInvitation?: (momentToken: string) => void;
   onFindAnotherTimeForMoment?: (momentToken: string) => void;
-  startingSoonReminder?: AuraReminder | null;
+  /** The authoritative upcoming reminders (auraUpdates.upcoming). Home filters out plans it has CONFIRMED logged, then shows the first remaining one (lib/reminderConsistency.ts). */
+  startingSoonReminders?: readonly AuraReminder[] | null;
   onOpenReminder?: (reminder: AuraReminder) => void;
   myDayAgenda?: DailyAgenda | null;
   /** Home UI V2 -- only `.phase` is still read (Day Builder's own
@@ -336,7 +338,7 @@ export function HomeDashboard({
   onViewMomentUpdate,
   onViewMomentInvitation,
   onFindAnotherTimeForMoment,
-  startingSoonReminder,
+  startingSoonReminders,
   onOpenReminder,
   myDayAgenda,
   myDayStory,
@@ -606,6 +608,7 @@ export function HomeDashboard({
     handleAddSomething();
   };
 
+  const startingSoonReminder = selectVisibleStartingSoonReminder(startingSoonReminders, loggedPlanIds);
   const nextThing = deriveNextMeaningfulThing({ topMomentUpdate, startingSoonReminder, agenda: myDayAgenda });
 
   const handleReflection = async (outputLevel: 'LOW' | 'MODERATE' | 'PEAK_FLOW') => {

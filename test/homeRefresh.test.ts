@@ -24,11 +24,11 @@ const read = (rel: string) => fs.readFileSync(path.join(__dirname, rel), 'utf8')
 const strip = (s: string) => s.replace(/\/\*[\s\S]*?\*\//g, '').replace(/\/\/.*$/gm, '');
 
 // ---------- a tiny model of the page state the refresh writes into ----------
-interface AppState { user: { id: string } | null; plans: unknown[]; habits: unknown[]; logs: unknown[]; myDay: string; guidance: string }
-const freshState = (): AppState => ({ user: { id: 'u1' }, plans: ['old-plan'], habits: ['old-habit'], logs: ['old-log'], myDay: 'old-myday', guidance: 'old-guidance' });
+interface AppState { user: { id: string } | null; plans: unknown[]; habits: unknown[]; logs: unknown[]; myDay: string; guidance: string; aura: string }
+const freshState = (): AppState => ({ user: { id: 'u1' }, plans: ['old-plan'], habits: ['old-habit'], logs: ['old-log'], myDay: 'old-myday', guidance: 'old-guidance', aura: 'old-aura' });
 
 type Mode = 'ok' | 'reject' | 'http500' | 'http401' | 'badjson';
-type Failures = Partial<Record<'habit-logs' | 'habits' | 'plans' | 'myday' | 'guidance', Mode>>;
+type Failures = Partial<Record<'habit-logs' | 'habits' | 'plans' | 'myday' | 'guidance' | 'aura', Mode>>;
 function harness(failures: Failures) {
   const state = freshState();
   const calls: string[] = [];
@@ -59,6 +59,7 @@ function harness(failures: Failures) {
     applyPlans: (j) => { state.plans = j as unknown[]; },
     refreshMyDay: step(failures.myday, () => { state.myDay = 'new-myday'; }),
     refreshGuidance: step(failures.guidance, () => { state.guidance = 'new-guidance'; }),
+    refreshAuraUpdates: step(failures.aura, () => { state.aura = 'new-aura'; }),
     reauthenticate: async () => { reauth += 1; },
   };
   return { state, calls, deps, reauthCount: () => reauth };
@@ -68,7 +69,7 @@ async function main() {
   // ---- refresh contract ----
   const ok = harness({});
   const rOk = await refreshAfterHomeCompletion(ok.deps);
-  check('10. successful refresh updates every slice and never re-authenticates', ok.state.logs[0] === 'new-log' && ok.state.habits[0] === 'new-habit' && ok.state.plans[0] === 'new-plan' && ok.state.myDay === 'new-myday' && ok.state.guidance === 'new-guidance' && !rOk.unauthorized && ok.reauthCount() === 0);
+  check('10. successful refresh updates every slice and never re-authenticates', ok.state.logs[0] === 'new-log' && ok.state.habits[0] === 'new-habit' && ok.state.plans[0] === 'new-plan' && ok.state.myDay === 'new-myday' && ok.state.guidance === 'new-guidance' && ok.state.aura === 'new-aura' && !rOk.unauthorized && ok.reauthCount() === 0);
 
   for (const [label, failures] of [
     ['11. /api/plans rejects', { plans: 'reject' }],
@@ -90,7 +91,10 @@ async function main() {
   const guidanceFail = harness({ guidance: 'reject' });
   await refreshAfterHomeCompletion(guidanceFail.deps);
   check('16. guidance refresh fails: same', guidanceFail.state.guidance === 'old-guidance' && guidanceFail.state.plans[0] === 'new-plan' && guidanceFail.state.user?.id === 'u1');
-  const everything = harness({ plans: 'reject', habits: 'reject', 'habit-logs': 'reject', myday: 'reject', guidance: 'reject' });
+  const auraFail = harness({ aura: 'reject' });
+  await refreshAfterHomeCompletion(auraFail.deps);
+  check('9/10/23. Aura Updates refresh fails: it keeps its last-known-good value, everything else still refreshes, the user is retained, no re-auth', auraFail.state.aura === 'old-aura' && auraFail.state.plans[0] === 'new-plan' && auraFail.state.user?.id === 'u1' && auraFail.reauthCount() === 0);
+  const everything = harness({ plans: 'reject', habits: 'reject', 'habit-logs': 'reject', myday: 'reject', guidance: 'reject', aura: 'reject' });
   let threw = false;
   try { await refreshAfterHomeCompletion(everything.deps); } catch { threw = true; }
   check('17. EVERY refresh fails: the refresh never throws, the user and all last-known-good data remain, no re-auth', !threw && JSON.stringify(everything.state) === JSON.stringify(freshState()) && everything.reauthCount() === 0);
@@ -152,7 +156,7 @@ async function main() {
     const result = await createPlanCompleter(logFetch)(target!);
     const confirmed = new Set<string>(result === 'DONE' ? [target!] : []);
     // every subsequent refresh fails (the exact blocker scenario)
-    const h = harness({ plans: 'reject', habits: 'reject', 'habit-logs': 'reject', myday: 'reject', guidance: 'reject' });
+    const h = harness({ plans: 'reject', habits: 'reject', 'habit-logs': 'reject', myday: 'reject', guidance: 'reject', aura: 'reject' });
     h.deps.reauthenticate = async () => { state.user = null; };
     await refreshAfterHomeCompletion({ ...h.deps });
     const after = homeView(plans, now, confirmed, withOpp);
