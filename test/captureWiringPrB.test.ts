@@ -77,7 +77,7 @@ check('the page never creates plans/HabitLogs or touches the Constructor', !/day
 check('re-syncs from the server on bfcache restore', /pageshow/.test(captures));
 
 // ---- scope boundaries ----
-check('no Home Capture composer', !/capture/i.test(cap('../apps/web/components/HomeDashboard.tsx')) && !/capture/i.test(cap('../apps/web/components/HomeTimeline.tsx')));
+// (PR B originally proved 'no Home Capture composer'; Quick Capture V1 PR C intentionally added one -- captureHomePrC.test.ts now owns the Home boundary.)
 check('no History/Completed/Dismissed UI, Goal/Habit conversion, or task-manager features on the page (checked against user-visible wording and control types)', !/>[^<{]*\b(History|Completed|Dismissed|Move to Goal|Attach to Goal|Convert|Make this a habit|Priority|Reminder|Recurring|Kanban|Search|Sort|Filter|Tags?|Labels?|Project)\b[^<}]*</.test(captures) && !/type="search"|<select|SegmentedControl/.test(captures));
 check('no Capture provenance in Goal or Habit domain code', !/capture/i.test(cap('../apps/web/lib/goals.ts')) && !/capture/i.test(cap('../apps/web/lib/goalsPresentation.ts')));
 check('no migration added by PR B (migrations still 36)', fs.readdirSync(path.join(__dirname, '../apps/web/prisma/migrations')).filter((f) => /^\d{4}_/.test(f)).length === 36);

@@ -86,6 +86,13 @@ export interface HomeTimelineProps {
   onPlanOpportunity?: (item: HomeTimelineItem) => void;
   planningId?: string | null;
   onAddSomething?: () => void;
+  /** Quick Capture V1 PR C -- opens the Home capture composer. When provided,
+   * the "+ Add something" header action opens capture (the previous Day
+   * Builder / Explore behavior stays reachable from inside the composer via
+   * `onAddSomething`, which the empty state's "Plan your day" also keeps). */
+  onQuickCapture?: () => void;
+  /** The composer (or its confirmation), rendered directly beneath the header. */
+  quickCaptureSlot?: React.ReactNode;
   /** Rendered inside the empty state (Day Builder's own intent-setting UI,
    * reused unchanged) -- this component owns no intent-setting logic of
    * its own. */
@@ -107,14 +114,25 @@ export function HomeTimeline({
   onPlanOpportunity,
   planningId,
   onAddSomething,
+  onQuickCapture,
+  quickCaptureSlot,
   emptyStateExtra,
   pendingActivities = [],
   nextItemId,
 }: HomeTimelineProps) {
+  const addSomethingAction = onQuickCapture ? (
+    <span data-home-add-something>
+      <TextButton onClick={onQuickCapture}>+ Add something</TextButton>
+    </span>
+  ) : onAddSomething ? (
+    <TextButton onClick={onAddSomething}>+ Add something</TextButton>
+  ) : undefined;
+
   if (items.length === 0 && pendingActivities.length === 0) {
     return (
       <section>
-        <SectionHeader label="Your Day" />
+        <SectionHeader label="Your Day" right={addSomethingAction} />
+        {quickCaptureSlot}
         <EmptyState
           title="Your day is open"
           description="Aura can help you make room for something meaningful."
@@ -127,7 +145,8 @@ export function HomeTimeline({
 
   return (
     <section>
-      <SectionHeader label="Your Day" right={onAddSomething ? <TextButton onClick={onAddSomething}>+ Add something</TextButton> : undefined} />
+      <SectionHeader label="Your Day" right={addSomethingAction} />
+      {quickCaptureSlot}
       <div style={{ background: colors.surfaceSubtle, border: `1px solid ${colors.borderSubtle}`, borderRadius: radius.lg, padding: `0 ${spacing.lg}px` }}>
         {/* Pending Activity My Day Visibility V1 -- its own clearly-separated
          * section, never interleaved into the composer's own ordering. */}
