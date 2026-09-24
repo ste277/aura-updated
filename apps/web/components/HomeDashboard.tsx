@@ -484,7 +484,13 @@ export function HomeDashboard({
   // states (ACTIVE_PLAN/IMMINENT_PLAN/OPPORTUNITY/CONTEXT_OPEN) -- see that
   // module's own doc comment for the full contract. PLANNED != RECOMMENDED
   // OPTION.
-  const rightNowState = useMemo(() => selectRightNowState(homeTimeline), [homeTimeline]);
+  // Right Now is decided from ABSOLUTE instants against the current instant.
+  // `currentMinuteOfDay` is the per-minute clock tick this component already
+  // receives; listing it as a dependency re-evaluates "now" every minute, so
+  // future -> imminent -> active -> past happens on a mounted Home without
+  // refetching the agenda.
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  const rightNowState = useMemo(() => selectRightNowState(homeTimeline, new Date()), [homeTimeline, currentMinuteOfDay]);
   const spotlightItem = rightNowState.kind !== 'CONTEXT_OPEN' ? rightNowState.item : undefined;
   const spotlightExplanation = spotlightItem ? explanationsById[spotlightItem.id] : undefined;
   // Finding D: the spotlight's own "Why?" now expands INLINE (below),

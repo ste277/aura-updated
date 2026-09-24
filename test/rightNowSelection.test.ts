@@ -1,7 +1,7 @@
 /**
  * AURA HOME IA V2 FOLLOW-UP FIXES -- Finding E regression coverage.
  *
- * selectRightNowState() (apps/web/lib/rightNowSelection.ts) is a pure
+ * sel() (apps/web/lib/rightNowSelection.ts) is a pure
  * function over an already-composed HomeTimelineItem[] -- fully testable
  * here without a component harness, a live DATABASE_URL, or the real
  * homeTimelineComposer pipeline. Fixtures below are minimal, hand-built
@@ -12,6 +12,12 @@
  */
 import { selectRightNowState } from '../apps/web/lib/rightNowSelection';
 import type { HomeTimelineItem } from '../apps/web/lib/homeTimelineTypes';
+
+// The ticking "now" instant Home supplies. Right Now decides from ABSOLUTE
+// start/end instants against it (never the Composer's minute-of-day fields).
+const NOW = new Date('2026-09-15T14:30:00.000Z');
+const sel = (timeline: HomeTimelineItem[], now: Date = NOW) => selectRightNowState(timeline, now);
+const iso = (hhmm: string, day = '15') => `2026-09-${day}T${hhmm}:00.000Z`;
 
 let allPassed = true;
 function check(label: string, condition: boolean) {
@@ -38,8 +44,8 @@ function opportunityItem(overrides: Partial<HomeTimelineItem> = {}): HomeTimelin
   return {
     id: 'opportunity-1',
     kind: 'OPPORTUNITY',
-    start: '2026-09-15T15:29:00.000Z',
-    end: '2026-09-15T15:59:00.000Z',
+    start: '2026-09-15T14:15:00.000Z',
+    end: '2026-09-15T14:59:00.000Z',
     title: 'Deep Work',
     planned: false,
     source: 'DAY_BUILDER_INTENTION',
@@ -55,7 +61,7 @@ function opportunityItem(overrides: Partial<HomeTimelineItem> = {}): HomeTimelin
 // ============================================================
 {
   const timeline = [planItem()];
-  const state = selectRightNowState(timeline);
+  const state = sel(timeline);
   check('1. An active Plan (agendaStatus CURRENT, rank 1) resolves to ACTIVE_PLAN', state.kind === 'ACTIVE_PLAN');
   check('1. ACTIVE_PLAN never reads as an "option" state', state.kind !== 'OPPORTUNITY');
 }
@@ -65,8 +71,9 @@ function opportunityItem(overrides: Partial<HomeTimelineItem> = {}): HomeTimelin
 // highly ranked.
 // ============================================================
 {
-  const timeline = [planItem({ metadata: { agendaStatus: 'UPCOMING', isCurrent: false, isPast: false } })];
-  const state = selectRightNowState(timeline);
+  // (Daily Experience V1 PR A correction: 'not current' is now expressed as absolute instants, 3.5h after NOW.)
+  const timeline = [planItem({ start: iso('18:00'), end: iso('19:00'), metadata: { agendaStatus: 'UPCOMING', isCurrent: false, isPast: false } })];
+  const state = sel(timeline);
   check('2. A rank-1 Plan that is neither CURRENT nor STARTING_SOON falls through to CONTEXT_OPEN, never OPPORTUNITY', state.kind === 'CONTEXT_OPEN');
 }
 
@@ -75,7 +82,7 @@ function opportunityItem(overrides: Partial<HomeTimelineItem> = {}): HomeTimelin
 // ============================================================
 {
   const timeline = [opportunityItem()];
-  const state = selectRightNowState(timeline);
+  const state = sel(timeline);
   check('3. A currently-actionable rank-1 Opportunity resolves to OPPORTUNITY', state.kind === 'OPPORTUNITY');
 }
 
@@ -86,10 +93,13 @@ function opportunityItem(overrides: Partial<HomeTimelineItem> = {}): HomeTimelin
 // ============================================================
 {
   const timelineActivePlanWins = [planItem({ rank: 1 }), opportunityItem({ id: 'opportunity-2', rank: 2 })];
-  check('4a. Rank-1 active Plan coexisting with a lower-ranked Opportunity: ACTIVE_PLAN wins (the rank-1 item is a commitment)', selectRightNowState(timelineActivePlanWins).kind === 'ACTIVE_PLAN');
+  check('4a. Rank-1 active Plan coexisting with a lower-ranked Opportunity: ACTIVE_PLAN wins (the rank-1 item is a commitment)', sel(timelineActivePlanWins).kind === 'ACTIVE_PLAN');
 
+  // Daily Experience V1 PR A: guidance rank has no authority over committed
+  // plans. This used to assert OPPORTUNITY (rank-1 Opportunity beat a lower-
+  // ranked active Plan); the committed day now wins.
   const timelineOpportunityWins = [opportunityItem({ rank: 1 }), planItem({ id: 'plan-2', rank: 2, metadata: { agendaStatus: 'CURRENT', isCurrent: true, isPast: false } })];
-  check('4b. Rank-1 Opportunity coexisting with a lower-ranked active Plan: OPPORTUNITY wins (the rank-1 item is genuinely current)', selectRightNowState(timelineOpportunityWins).kind === 'OPPORTUNITY');
+  check('4b. Rank-1 Opportunity coexisting with a lower-ranked active Plan: ACTIVE_PLAN wins (committed day first, guidance rank cannot hide it)', sel(timelineOpportunityWins).kind === 'ACTIVE_PLAN');
 }
 
 // ============================================================
@@ -102,7 +112,7 @@ function opportunityItem(overrides: Partial<HomeTimelineItem> = {}): HomeTimelin
 // ============================================================
 {
   const timeline = [planItem({ id: 'family-dinner-plan', rank: 1 })];
-  const state = selectRightNowState(timeline);
+  const state = sel(timeline);
   check('5. A Plan that also matches the rank-1 recommendation resolves as a commitment state, never OPPORTUNITY', state.kind === 'ACTIVE_PLAN' || state.kind === 'IMMINENT_PLAN');
 }
 
@@ -110,8 +120,10 @@ function opportunityItem(overrides: Partial<HomeTimelineItem> = {}): HomeTimelin
 // 6. No Plan + no Opportunity -> contextual/open fallback.
 // ============================================================
 {
-  check('6. Empty timeline -> CONTEXT_OPEN', selectRightNowState([]).kind === 'CONTEXT_OPEN');
-  check('6. Timeline with no rank-1 item at all -> CONTEXT_OPEN', selectRightNowState([planItem({ rank: undefined })]).kind === 'CONTEXT_OPEN');
+  check('6. Empty timeline -> CONTEXT_OPEN', sel([]).kind === 'CONTEXT_OPEN');
+  // Daily Experience V1 PR A: an active plan with NO guidance annotation (no rank) is still Right Now.
+  check('6. An active Plan with no rank (no guidance annotation) -> ACTIVE_PLAN', sel([planItem({ rank: undefined })]).kind === 'ACTIVE_PLAN');
+  check('6. Timeline with no plan and no opportunity -> CONTEXT_OPEN', sel([opportunityItem({ start: iso('16:00'), end: iso('16:30'), metadata: { isCurrent: false, isPast: false } })]).kind === 'CONTEXT_OPEN');
 }
 
 // ============================================================
@@ -122,7 +134,7 @@ function opportunityItem(overrides: Partial<HomeTimelineItem> = {}): HomeTimelin
   // isCurrent=false for a COMPLETED item -- this fixture mirrors that real
   // contract rather than inventing a new one.
   const timeline = [planItem({ metadata: { agendaStatus: 'COMPLETED', isCurrent: false, isPast: true, isCompleted: true } })];
-  const state = selectRightNowState(timeline);
+  const state = sel(timeline);
   check('7. A COMPLETED Plan never resolves to ACTIVE_PLAN or IMMINENT_PLAN', state.kind !== 'ACTIVE_PLAN' && state.kind !== 'IMMINENT_PLAN');
   check('7. A COMPLETED Plan resolves to CONTEXT_OPEN', state.kind === 'CONTEXT_OPEN');
 }
@@ -132,7 +144,7 @@ function opportunityItem(overrides: Partial<HomeTimelineItem> = {}): HomeTimelin
 // ============================================================
 {
   const timeline = [planItem({ metadata: { agendaStatus: 'MISSED', isCurrent: false, isPast: true } })];
-  const state = selectRightNowState(timeline);
+  const state = sel(timeline);
   check('8. A MISSED Plan never resolves to ACTIVE_PLAN or IMMINENT_PLAN', state.kind !== 'ACTIVE_PLAN' && state.kind !== 'IMMINENT_PLAN');
   check('8. A MISSED Plan resolves to CONTEXT_OPEN', state.kind === 'CONTEXT_OPEN');
 }
@@ -142,8 +154,9 @@ function opportunityItem(overrides: Partial<HomeTimelineItem> = {}): HomeTimelin
 // STARTING_SOON convention (no new threshold invented here).
 // ============================================================
 {
-  const timeline = [planItem({ metadata: { agendaStatus: 'STARTING_SOON', isCurrent: false, isPast: false } })];
-  const state = selectRightNowState(timeline);
+  // starts 15 minutes after NOW (inside the 30-minute STARTING_SOON window)
+  const timeline = [planItem({ start: iso('14:45'), end: iso('15:45'), metadata: { agendaStatus: 'STARTING_SOON', isCurrent: false, isPast: false } })];
+  const state = sel(timeline);
   check('A Plan starting soon (agendaStatus STARTING_SOON) resolves to IMMINENT_PLAN, never OPPORTUNITY or ACTIVE_PLAN', state.kind === 'IMMINENT_PLAN');
 }
 
@@ -152,8 +165,8 @@ function opportunityItem(overrides: Partial<HomeTimelineItem> = {}): HomeTimelin
 // Option Right Now merely because it's rank 1.
 // ============================================================
 {
-  const timeline = [opportunityItem({ metadata: { isCurrent: false, isPast: false } })];
-  const state = selectRightNowState(timeline);
+  const timeline = [opportunityItem({ start: iso('16:00'), end: iso('16:30'), metadata: { isCurrent: false, isPast: false } })];
+  const state = sel(timeline);
   check('A rank-1 Opportunity that is not currently actionable falls through to CONTEXT_OPEN, never OPPORTUNITY', state.kind === 'CONTEXT_OPEN');
 }
 
@@ -166,19 +179,21 @@ function opportunityItem(overrides: Partial<HomeTimelineItem> = {}): HomeTimelin
   const timeline: HomeTimelineItem[] = [
     { id: 'moment-1', kind: 'MOMENT', start: '2026-09-15T10:00:00.000Z', title: 'Coffee with Priya', planned: true, source: 'MOMENT', rank: 1, metadata: { agendaStatus: 'CURRENT', isCurrent: true } },
   ];
-  const state = selectRightNowState(timeline);
+  const state = sel(timeline);
   check('A rank-1 item whose source is neither PLAN nor an OPPORTUNITY kind resolves defensively to CONTEXT_OPEN, never fabricated as an option', state.kind === 'CONTEXT_OPEN');
 }
 
 // ============================================================
-// 9/10 (regression, not new behavior): selectRightNowState never sorts,
-// reorders, or filters the timeline it's given -- it only reads the
-// single rank-1 item exactly as the Composer already ordered/ranked it.
+// 9/10 (regression): selectRightNowState never sorts, reorders, or mutates
+// the timeline it's given. Daily Experience V1 PR A: a lower-ranked (or
+// unranked) active Plan now beats a rank-1 Opportunity.
 // ============================================================
 {
   const timeline = [planItem({ id: 'a', rank: 2, metadata: { agendaStatus: 'CURRENT', isCurrent: true, isPast: false } }), opportunityItem({ id: 'b', rank: 1 })];
-  const state = selectRightNowState(timeline);
-  check('Only the genuine rank-1 item is ever selected, even when a differently-ranked item appears earlier in the array (no re-ranking/re-sorting here)', state.kind === 'OPPORTUNITY' && state.item.id === 'b');
+  const snapshot = JSON.stringify(timeline);
+  const state = sel(timeline);
+  check('An active Plan beats a differently-ranked Opportunity regardless of array order or rank', state.kind === 'ACTIVE_PLAN' && state.item.id === 'a');
+  check('The input timeline is never mutated/reordered', JSON.stringify(timeline) === snapshot);
 }
 
 if (!allPassed) {

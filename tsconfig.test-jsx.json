@@ -1,0 +1,6 @@
+{
+  "extends": "./tsconfig.json",
+  "compilerOptions": { "jsx": "react-jsx", "lib": ["DOM", "ES2020"] },
+  "include": ["packages/**/*.ts", "test/homeDashboardGoodRightNow.test.ts"],
+  "exclude": []
+}

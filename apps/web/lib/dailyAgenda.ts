@@ -50,7 +50,7 @@ export interface DailyAgenda {
  * emphasis"). Deliberately NOT the same thing as reminder eligibility --
  * that stays deriveAuraReminders()'s exclusive concern (brief section 32/
  * 55); this never feeds a reminder or notification decision. */
-const STARTING_SOON_WINDOW_MS = 30 * 60 * 1000;
+export const STARTING_SOON_WINDOW_MS = 30 * 60 * 1000;
 
 /** Brief section 3 (Daily Reflection & Tomorrow Preview V1): a Plan whose
  * window has elapsed is NOT automatically "completed" -- completion is
