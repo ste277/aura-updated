@@ -38,7 +38,9 @@ check('GoalActivity and Habit blocks do not mention Capture', !/Capture/.test(go
 // Files that must stay Capture-unaware. Quick Capture V1 PR B legitimately
 // added Capture wiring to the plan-day handoff/accept files and the You row
 // (removed from this list; captureWiringPrB.test.ts owns proving that wiring
-// stays narrow). Everything below must STILL never mention Capture.
+// stays narrow). Quick Capture V1 PR C likewise added the Home composer
+// (HomeDashboard.tsx removed from this list; captureHomePrC.test.ts owns that
+// boundary). Everything below must STILL never mention Capture.
 const UNTOUCHED = [
   '../apps/web/lib/dayIntent.ts',
   '../apps/web/lib/dayConstructor.ts',
@@ -46,12 +48,11 @@ const UNTOUCHED = [
   '../apps/web/lib/dayConstructorAcceptance.ts',
   '../apps/web/lib/dayConstructorPreviewRequest.ts',
   '../apps/web/lib/goals.ts',
-  '../apps/web/components/HomeDashboard.tsx',
   '../packages/recommendation/src/timingSearch.ts',
 ];
 for (const rel of UNTOUCHED) check(`${rel.replace('../', '')} has no Capture reference`, !/capture(Id|Links)?\b/i.test(stripComments(read(rel))));
 
-check('no Home Capture composer and no History/conversion UI (PR C / later work)', !/capture/i.test(stripComments(read('../apps/web/components/HomeDashboard.tsx'))) && !fs.existsSync(path.join(__dirname, '../apps/web/app/captures/history')));
+check('no History/conversion UI (later work; the Home composer arrived in PR C)', !fs.existsSync(path.join(__dirname, '../apps/web/app/captures/history')));
 
 // API security
 const routes = ['../apps/web/app/api/captures/route.ts', '../apps/web/app/api/captures/[captureId]/route.ts', '../apps/web/app/api/captures/[captureId]/complete/route.ts'];

@@ -34,6 +34,7 @@ import { selectRightNowState } from '../lib/rightNowSelection';
 import type { HomeTimelineContextWindow, HomeTimelineItem } from '../lib/homeTimelineTypes';
 import { buildWhyAuraExplanation } from '../lib/whyAuraViewModel';
 import type { GuidanceUiState } from '../lib/bestForYouViewModel';
+import { HomeQuickCapture } from './HomeQuickCapture';
 
 /** Matches page.tsx's own FALLBACK_TZ -- defensive only, page.tsx always supplies a real value today. */
 const FALLBACK_HOME_TZ = 'Asia/Kolkata';
@@ -373,6 +374,15 @@ export function HomeDashboard({
   // Your Day's own empty state or its "+ Add something" toggle, never a
   // permanently-visible top-level module.
   const [showDayBuilder, setShowDayBuilder] = useState(false);
+  // Quick Capture V1 PR C -- the Home capture composer (open/closed) and its
+  // transient confirmation. No Capture list lives on Home.
+  const [captureOpen, setCaptureOpen] = useState(false);
+  const [captureConfirmed, setCaptureConfirmed] = useState(false);
+  useEffect(() => {
+    if (!captureConfirmed) return;
+    const timer = setTimeout(() => setCaptureConfirmed(false), 5000);
+    return () => clearTimeout(timer);
+  }, [captureConfirmed]);
   const [planningOpportunityId, setPlanningOpportunityId] = useState<string | null>(null);
   const [opportunityError, setOpportunityError] = useState('');
 
@@ -524,6 +534,25 @@ export function HomeDashboard({
     } else {
       onExploreClick?.();
     }
+  };
+
+  const focusAddSomethingOpener = () => {
+    // After the composer closes, return focus to the opener (a button, so no
+    // on-screen keyboard is summoned).
+    setTimeout(() => document.querySelector<HTMLButtonElement>('[data-home-add-something] button')?.focus(), 0);
+  };
+  const handleCloseCapture = () => {
+    setCaptureOpen(false);
+    focusAddSomethingOpener();
+  };
+  const handleCaptureSaved = () => {
+    setCaptureOpen(false);
+    setCaptureConfirmed(true);
+    focusAddSomethingOpener();
+  };
+  const handleSeeSuggestions = () => {
+    setCaptureOpen(false);
+    handleAddSomething();
   };
 
   const nextThing = deriveNextMeaningfulThing({ topMomentUpdate, startingSoonReminder, agenda: myDayAgenda });
@@ -840,6 +869,17 @@ export function HomeDashboard({
         onPlanOpportunity={handlePlanOpportunity}
         planningId={planningOpportunityId}
         onAddSomething={handleAddSomething}
+        onQuickCapture={() => { setCaptureConfirmed(false); setCaptureOpen(true); }}
+        quickCaptureSlot={
+          captureOpen ? (
+            <HomeQuickCapture onClose={handleCloseCapture} onSaved={handleCaptureSaved} onSeeSuggestions={handleSeeSuggestions} />
+          ) : captureConfirmed ? (
+            <div role="status" style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: spacing.md, marginBottom: spacing.md }}>
+              <span style={{ ...typography.body, color: colors.textSecondary }}>Added to Things you want to do</span>
+              <TextButton onClick={() => { window.location.href = '/captures'; }}>View →</TextButton>
+            </div>
+          ) : null
+        }
         emptyStateExtra={isTimelineEmpty ? dayBuilderBlock : showDayBuilder ? dayBuilderBlock : undefined}
       />
 
