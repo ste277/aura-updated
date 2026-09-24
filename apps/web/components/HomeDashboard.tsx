@@ -35,6 +35,8 @@ import type { HomeTimelineContextWindow, HomeTimelineItem } from '../lib/homeTim
 import { buildWhyAuraExplanation } from '../lib/whyAuraViewModel';
 import type { GuidanceUiState } from '../lib/bestForYouViewModel';
 import { HomeQuickCapture } from './HomeQuickCapture';
+import { createPlanCompleter, completablePlanId, overlayLoggedPlans, visibleCompletionError, type CompletionError } from '../lib/homeCompletion';
+import { selectVisibleStartingSoonReminder } from '../lib/reminderConsistency';
 
 /** Matches page.tsx's own FALLBACK_TZ -- defensive only, page.tsx always supplies a real value today. */
 const FALLBACK_HOME_TZ = 'Asia/Kolkata';
@@ -110,7 +112,8 @@ interface HomeDashboardProps {
   onViewMomentUpdate?: (momentToken: string) => void;
   onViewMomentInvitation?: (momentToken: string) => void;
   onFindAnotherTimeForMoment?: (momentToken: string) => void;
-  startingSoonReminder?: AuraReminder | null;
+  /** The authoritative upcoming reminders (auraUpdates.upcoming). Home filters out plans it has CONFIRMED logged, then shows the first remaining one (lib/reminderConsistency.ts). */
+  startingSoonReminders?: readonly AuraReminder[] | null;
   onOpenReminder?: (reminder: AuraReminder) => void;
   myDayAgenda?: DailyAgenda | null;
   /** Home UI V2 -- only `.phase` is still read (Day Builder's own
@@ -129,6 +132,8 @@ interface HomeDashboardProps {
   currentMinuteOfDay: number;
   logEntries?: LoggedEntryItem[];
   onMyDayChanged?: () => void;
+  /** Daily Experience V1 PR B -- called after the server CONFIRMS a plan was logged from Home; page.tsx passes the same handler the Plan tab uses (refreshes logs, My Day, guidance). */
+  onPlanCompleted?: () => Promise<void> | void;
   onOpenAgendaItem?: (item: DailyAgendaItem) => void;
   onPlanTomorrow?: (activityTitle?: string) => void;
   onMuteDayBuilderGroup?: (groupId: DailyIntentionGroupId) => void;
@@ -333,7 +338,7 @@ export function HomeDashboard({
   onViewMomentUpdate,
   onViewMomentInvitation,
   onFindAnotherTimeForMoment,
-  startingSoonReminder,
+  startingSoonReminders,
   onOpenReminder,
   myDayAgenda,
   myDayStory,
@@ -344,6 +349,7 @@ export function HomeDashboard({
   currentMinuteOfDay,
   logEntries = [],
   onMyDayChanged,
+  onPlanCompleted,
   onOpenAgendaItem,
   onPlanTomorrow,
   onMuteDayBuilderGroup,
@@ -437,7 +443,16 @@ export function HomeDashboard({
     [dayWindows]
   );
 
-  const homeTimeline: HomeTimelineItem[] = useMemo(
+  // Daily Experience V1 PR B -- plans the server has confirmed as logged from
+  // Home, overlaid on the composed timeline until the authoritative agenda
+  // refresh catches up (or if it fails).
+  const [loggedPlanIds, setLoggedPlanIds] = useState<ReadonlySet<string>>(new Set());
+  const planCompleter = useRef(createPlanCompleter());
+  // Per-plan in-flight ids and a plan-owned error: A's saving state / error never leak onto B.
+  const [completingPlanIds, setCompletingPlanIds] = useState<ReadonlySet<string>>(new Set());
+  const [completeError, setCompleteError] = useState<CompletionError | null>(null);
+
+  const composedTimeline: HomeTimelineItem[] = useMemo(
     () =>
       buildHomeTimeline({
         agenda: myDayAgenda ?? null,
@@ -449,6 +464,7 @@ export function HomeDashboard({
       }),
     [myDayAgenda, readyGuidance, timelineWindows, currentMinuteOfDay, effectiveTimezone]
   );
+  const homeTimeline: HomeTimelineItem[] = useMemo(() => overlayLoggedPlans(composedTimeline, loggedPlanIds), [composedTimeline, loggedPlanIds]);
 
   // Home UI V2 -- Why Aura lines, resolved once here (never inside
   // HomeTimeline itself) by matching each annotated item back to its
@@ -492,6 +508,37 @@ export function HomeDashboard({
   // eslint-disable-next-line react-hooks/exhaustive-deps
   const rightNowState = useMemo(() => selectRightNowState(homeTimeline, new Date()), [homeTimeline, currentMinuteOfDay]);
   const spotlightItem = rightNowState.kind !== 'CONTEXT_OPEN' ? rightNowState.item : undefined;
+  const completablePlanIdNow = completablePlanId(rightNowState);
+
+  const handleCompleteRightNow = async (planId: string) => {
+    // planId is captured at click time; every state change below is keyed by it,
+    // never by whichever plan Right Now shows when the response arrives. The
+    // completer's own synchronous in-flight guard blocks same-task bursts.
+    setCompleteError((current) => (current?.planId === planId ? null : current));
+    setCompletingPlanIds((current) => new Set(current).add(planId));
+    const result = await planCompleter.current(planId);
+    if (result === 'BUSY') return;
+    setCompletingPlanIds((current) => {
+      const next = new Set(current);
+      next.delete(planId);
+      return next;
+    });
+    if (result === 'FAILED') {
+      // Pre-commit failure: the completion did not happen; the plan stays actionable.
+      setCompleteError({ planId, message: "Couldn't mark that done. Try again." });
+      return;
+    }
+    // The server CONFIRMED LOGGED for this plan id: remember it and clear its error.
+    setLoggedPlanIds((current) => new Set(current).add(planId));
+    setCompleteError((current) => (current?.planId === planId ? null : current));
+    // Reconciliation is secondary and can never fail the completion: the refresh
+    // keeps last-known-good state on any failure (lib/homeRefresh.ts).
+    try {
+      await onPlanCompleted?.();
+    } catch {
+      // last valid Home stays
+    }
+  };
   const spotlightExplanation = spotlightItem ? explanationsById[spotlightItem.id] : undefined;
   // Finding D: the spotlight's own "Why?" now expands INLINE (below),
   // sharing `expandedTimelineId` with HomeTimeline's own row toggle so
@@ -561,6 +608,7 @@ export function HomeDashboard({
     handleAddSomething();
   };
 
+  const startingSoonReminder = selectVisibleStartingSoonReminder(startingSoonReminders, loggedPlanIds);
   const nextThing = deriveNextMeaningfulThing({ topMomentUpdate, startingSoonReminder, agenda: myDayAgenda });
 
   const handleReflection = async (outputLevel: 'LOW' | 'MODERATE' | 'PEAK_FLOW') => {
@@ -712,6 +760,16 @@ export function HomeDashboard({
                 {/* Finding E §4.C -- OPPORTUNITY supports the existing Plan
                  * action, the same canonical CHECK-then-save path
                  * HomeTimeline's own Opportunity rows already use. */}
+                {completablePlanIdNow && (
+                  <SecondaryButton
+                    onClick={() => void handleCompleteRightNow(completablePlanIdNow)}
+                    disabled={completingPlanIds.has(completablePlanIdNow)}
+                    ariaLabel={`Mark "${spotlightItem.title}" done`}
+                    style={{ padding: '6px 16px', fontSize: 13, marginLeft: 'auto' }}
+                  >
+                    {completingPlanIds.has(completablePlanIdNow) ? 'Saving…' : 'Done'}
+                  </SecondaryButton>
+                )}
                 {rightNowState.kind === 'OPPORTUNITY' && (
                   <PrimaryButton
                     onClick={() => handlePlanOpportunity(spotlightItem)}
@@ -729,6 +787,9 @@ export function HomeDashboard({
                * list to discover. `handlePlanOpportunity` already clears
                * this at the start of every new attempt (`setOpportunityError('')`),
                * so a stale error never lingers into a fresh Planning… state. */}
+              {visibleCompletionError(completeError, completablePlanIdNow) && (
+                <div role="alert" style={{ color: colors.danger, fontSize: 12, marginTop: spacing.xs }}>{visibleCompletionError(completeError, completablePlanIdNow)}</div>
+              )}
               {rightNowState.kind === 'OPPORTUNITY' && opportunityError && (
                 <div style={{ color: colors.danger, fontSize: 12, marginTop: spacing.xs }}>{opportunityError}</div>
               )}

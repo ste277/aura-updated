@@ -24,6 +24,7 @@ import type { TomorrowPreview } from '../lib/tomorrowPreview';
 import { shouldRefreshMyDayForDateChange } from '../lib/myDayRefreshPolicy';
 import { classifyHabitLogSyncOutcome } from '../lib/habitLogSyncPolicy';
 import { readOfflineHabitQueue, toPendingLoggedEntry, mergeConfirmedLogEntries, selectQueueItemsToReconstruct } from '../lib/offlineHabitQueue';
+import { refreshAfterHomeCompletion } from '../lib/homeRefresh';
 import { selectTodaysPendingActivities } from '../lib/myDayPendingOverlay';
 import type { GuidanceUiState } from '../lib/bestForYouViewModel';
 
@@ -224,6 +225,42 @@ export default function DashboardPage() {
 
   const currentMinuteOfDay = useCurrentMinuteOfDay(user?.timezone ?? FALLBACK_TZ);
 
+  // Shared by loadUserDataAndLogs and the Home post-completion refresh: maps
+  // the confirmed /api/habit-logs rows into Home's log entries (unchanged logic).
+  const applyConfirmedLogs = useCallback((logs: any[]) => {
+    const confirmedEntries: LoggedEntryItem[] = logs.map((l: any) => ({
+      id: l.id,
+      activityTitle: l.activityTitle,
+      activeWindow: l.activeWindow,
+      loggedAt: new Date(l.logTimestamp || l.createdAt || Date.now()),
+      logMinuteOfDay: l.logMinuteOfDay,
+      durationMinutes: l.durationMinutes ?? 30,
+      notes: l.notes || null,
+      logSource: l.logSource || 'MANUAL',
+      activitySignificance: l.activitySignificance || 'MEDIUM',
+      // Pending Activity Reload Visibility V1 -- propagated so a
+      // still-queued offline entry (reconstructed from
+      // localStorage's own copy of this same clientRequestId) can be
+      // reliably recognized as now-confirmed and never shown as a
+      // duplicate pending row alongside its real, persisted one.
+      clientRequestId: l.clientRequestId ?? undefined,
+    }));
+    // Pending Activity Reload Visibility V1 -- this used to be a hard
+    // replace (setLogEntries(confirmedEntries)), which would silently
+    // wipe out any pending entry reconstructed from the offline queue
+    // if this confirmed fetch happened to resolve AFTER that
+    // reconstruction ran. mergeConfirmedLogEntries (lib/offlineHabitQueue.ts)
+    // makes the final state the same deterministic union regardless of
+    // which of the two initialization paths finishes first, while
+    // still correctly clearing a permanently-rejected (4xx) entry's
+    // stale row once it's no longer in the queue (PR #86's own
+    // invariant) -- see that function's own doc comment.
+    setLogEntries((prev) => {
+      const queuedClientRequestIds = new Set(readOfflineHabitQueue().map((item) => item.clientRequestId));
+      return mergeConfirmedLogEntries(confirmedEntries, prev, queuedClientRequestIds);
+    });
+  }, []);
+
   // Parallelize Session & Initial Data Fetches
   const loadUserDataAndLogs = useCallback(async () => {
     try {
@@ -245,38 +282,7 @@ export default function DashboardPage() {
       ]);
 
       if (logsRes.ok) {
-        const logs = await logsRes.json();
-        const confirmedEntries: LoggedEntryItem[] = logs.map((l: any) => ({
-          id: l.id,
-          activityTitle: l.activityTitle,
-          activeWindow: l.activeWindow,
-          loggedAt: new Date(l.logTimestamp || l.createdAt || Date.now()),
-          logMinuteOfDay: l.logMinuteOfDay,
-          durationMinutes: l.durationMinutes ?? 30,
-          notes: l.notes || null,
-          logSource: l.logSource || 'MANUAL',
-          activitySignificance: l.activitySignificance || 'MEDIUM',
-          // Pending Activity Reload Visibility V1 -- propagated so a
-          // still-queued offline entry (reconstructed from
-          // localStorage's own copy of this same clientRequestId) can be
-          // reliably recognized as now-confirmed and never shown as a
-          // duplicate pending row alongside its real, persisted one.
-          clientRequestId: l.clientRequestId ?? undefined,
-        }));
-        // Pending Activity Reload Visibility V1 -- this used to be a hard
-        // replace (setLogEntries(confirmedEntries)), which would silently
-        // wipe out any pending entry reconstructed from the offline queue
-        // if this confirmed fetch happened to resolve AFTER that
-        // reconstruction ran. mergeConfirmedLogEntries (lib/offlineHabitQueue.ts)
-        // makes the final state the same deterministic union regardless of
-        // which of the two initialization paths finishes first, while
-        // still correctly clearing a permanently-rejected (4xx) entry's
-        // stale row once it's no longer in the queue (PR #86's own
-        // invariant) -- see that function's own doc comment.
-        setLogEntries((prev) => {
-          const queuedClientRequestIds = new Set(readOfflineHabitQueue().map((item) => item.clientRequestId));
-          return mergeConfirmedLogEntries(confirmedEntries, prev, queuedClientRequestIds);
-        });
+        applyConfirmedLogs(await logsRes.json());
       }
 
       if (habitsRes.ok) {
@@ -291,7 +297,7 @@ export default function DashboardPage() {
       setUser(null);
       setPlannedActivities([]);
     }
-  }, []);
+  }, [applyConfirmedLogs]);
 
   useEffect(() => {
     loadUserDataAndLogs();
@@ -1191,6 +1197,27 @@ export default function DashboardPage() {
   // Plan is created, DayBuilderCard's onCreated after "Add") also refresh
   // guidance -- a newly-created Plan/intent is exactly what
   // GET /api/daily-assistant/guidance needs to see.
+  // Daily Experience V1 PR B -- Home's own post-completion synchronization. NOT
+  // handlePlanLogged: loadUserDataAndLogs clears the authenticated user on ANY
+  // exception, so a transient refresh failure right after a durable completion
+  // would render the sign-in screen. This path never touches `user`; each slice
+  // keeps its last-known-good value on failure; a definitive 401 re-runs the
+  // authoritative session check (loadUserDataAndLogs).
+  const handleHomePlanCompleted = useCallback(
+    () =>
+      refreshAfterHomeCompletion({
+        fetchImpl: (...args) => fetch(...args),
+        applyLogs: (json) => applyConfirmedLogs(json as any[]),
+        applyHabits: (json) => setHabits(json as any),
+        applyPlans: (json) => setPlannedActivities(json as any),
+        refreshMyDay: loadMyDay,
+        refreshGuidance: loadGuidance,
+        refreshAuraUpdates: loadAuraUpdates,
+        reauthenticate: loadUserDataAndLogs,
+      }).then(() => undefined),
+    [applyConfirmedLogs, loadMyDay, loadGuidance, loadAuraUpdates, loadUserDataAndLogs]
+  );
+
   const handleMyDayOrGuidanceChanged = useCallback(() => {
     loadMyDay();
     loadGuidance();
@@ -1366,7 +1393,7 @@ export default function DashboardPage() {
             onViewMomentUpdate={handleViewMomentUpdate}
             onViewMomentInvitation={handleViewMomentInvitation}
             onFindAnotherTimeForMoment={handleFindAnotherTimeForMoment}
-            startingSoonReminder={auraUpdates?.upcoming?.[0]}
+            startingSoonReminders={auraUpdates?.upcoming}
             onOpenReminder={handleOpenReminder}
             myDayAgenda={myDay?.agenda}
             myDayStory={myDay?.story}
@@ -1377,6 +1404,7 @@ export default function DashboardPage() {
             timezone={userTz}
             currentMinuteOfDay={currentMinuteOfDay}
             onMyDayChanged={handleMyDayOrGuidanceChanged}
+            onPlanCompleted={handleHomePlanCompleted}
             guidance={guidance}
             onOpenBirthProfile={() => setActiveTab('chart')}
             onOpenAgendaItem={handleOpenAgendaItem}
