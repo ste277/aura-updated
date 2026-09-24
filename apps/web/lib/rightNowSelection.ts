@@ -64,7 +64,7 @@ function instants(item: HomeTimelineItem): { startMs: number; endMs: number } | 
 
 function isResolved(item: HomeTimelineItem): boolean {
   const status = item.metadata?.agendaStatus;
-  return status === 'COMPLETED' || status === 'MISSED' || item.metadata?.isCompleted === true;
+  return status === 'COMPLETED' || status === 'MISSED' || status === 'SKIPPED' || item.metadata?.isCompleted === true;
 }
 
 function isActiveAt(item: HomeTimelineItem, nowMs: number): boolean {

@@ -39,7 +39,7 @@ function describeAgenda(items: DailyAgendaItem[], timezone: string): string {
 
 export function buildTomorrowPreview(agenda: DailyAgenda, panchangDay: PanchangDay): TomorrowPreview {
   const goodForCategories = getGoodForDayCategories(panchangDay);
-  const agendaLine = describeAgenda(agenda.items, agenda.timezone);
+  const agendaLine = describeAgenda(agenda.items.filter((item) => item.status !== 'SKIPPED'), agenda.timezone);
 
   const narrative =
     goodForCategories.length > 0

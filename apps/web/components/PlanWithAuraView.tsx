@@ -37,6 +37,8 @@ import {
   minutesFromDuration,
   windowTypeFromLabel,
   mapPlanRow,
+  isActionableUpcomingPlan,
+  isCompletedPlan,
   findCandidateKey,
   planPayloadFromCandidate,
   getTodayForTimezone,
@@ -452,8 +454,8 @@ export function PlanWithAuraView({ onTimingSearch, onViewDay, onPlanLogged, time
   const selectedHorizon = HORIZONS.find((item) => item.value === horizon) ?? HORIZONS[0];
   const selectedDuration = DURATIONS.find((item) => item.value === durationMinutes) ?? DURATIONS[2];
   const horizonHelper = useMemo(() => getHorizonHelper(horizon, timezone), [horizon, timezone]);
-  const upcomingPlans = useMemo(() => savedPlans.filter((plan) => plan.status !== 'LOGGED'), [savedPlans]);
-  const completedPlans = useMemo(() => savedPlans.filter((plan) => plan.status === 'LOGGED'), [savedPlans]);
+  const upcomingPlans = useMemo(() => savedPlans.filter(isActionableUpcomingPlan), [savedPlans]);
+  const completedPlans = useMemo(() => savedPlans.filter(isCompletedPlan), [savedPlans]);
   const visibleUpcomingPlans = showAllPlans ? upcomingPlans : upcomingPlans.slice(0, 3);
   const visibleCompletedPlans = showAllPlans ? completedPlans.slice(0, 5) : [];
   const canSubmit = Boolean(taskTitle.trim()) && (horizon !== 'CUSTOM' || Boolean(customStartDate && customEndDate && customEndDate >= customStartDate));
@@ -535,7 +537,7 @@ export function PlanWithAuraView({ onTimingSearch, onViewDay, onPlanLogged, time
   };
 
   const handleLogPlan = async (plan: UpcomingPlan) => {
-    if (planActionStates[plan.id] || plan.status === 'LOGGED') return;
+    if (planActionStates[plan.id] || plan.status === 'LOGGED' || plan.status === 'CANCELLED' || plan.status === 'SKIPPED') return;
     setPlanActionStates((states) => ({ ...states, [plan.id]: 'LOGGING' }));
     try {
       const res = await fetch(`/api/plans/${plan.id}/log`, { method: 'POST' });

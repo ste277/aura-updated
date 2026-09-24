@@ -40,7 +40,7 @@ const MINUTES_PER_DAY = 1440;
  * already in the past as COMPLETED/MISSED). Only these block an opening;
  * a completed/missed item has no future minutes left to protect. */
 function blockingItems(agenda: DailyAgenda): DailyAgendaItem[] {
-  return agenda.items.filter((item) => item.status !== 'COMPLETED' && item.status !== 'MISSED' && item.endAt);
+  return agenda.items.filter((item) => item.status !== 'COMPLETED' && item.status !== 'MISSED' && item.status !== 'SKIPPED' && item.endAt);
 }
 
 /** Local minute-of-day range for one agenda item. Returns null for a
@@ -154,6 +154,7 @@ export function buildDayProfile(agenda: DailyAgenda, minuteOfDay: number): DayPr
   const presentActivityIds = new Set<string>();
   const presentGroupIds = new Set<DailyIntentionGroupId>();
   for (const item of agenda.items) {
+    if (item.status === 'SKIPPED') continue; // a deliberately skipped occurrence does not represent the activity as present today
     const resolved = findActivityIntent(item.title);
     if (resolved) presentActivityIds.add(resolved.id);
     for (const groupId of resolveItemIntentionGroups(item)) presentGroupIds.add(groupId);
@@ -169,13 +170,13 @@ export function buildDayProfile(agenda: DailyAgenda, minuteOfDay: number): DayPr
   // timezone-correct helper every other hour-of-day check in this
   // codebase already uses.
   const hasEveningOpen = !agenda.items.some((item) => {
-    if (item.status === 'COMPLETED' || item.status === 'MISSED') return false;
+    if (item.status === 'COMPLETED' || item.status === 'MISSED' || item.status === 'SKIPPED') return false;
     return Math.floor(getMinuteOfDayInTimezone(agenda.timezone, new Date(item.startAt)) / 60) >= 17;
   });
 
   const openings = deriveAgendaOpenings({ agenda, minuteOfDay });
   const longestOpeningMinutes = openings.reduce((max, o) => Math.max(max, o.endMinute - o.startMinute), 0);
-  const upcomingCount = agenda.items.filter((i) => i.status !== 'COMPLETED' && i.status !== 'MISSED').length;
+  const upcomingCount = agenda.items.filter((i) => i.status !== 'COMPLETED' && i.status !== 'MISSED' && i.status !== 'SKIPPED').length;
 
   return {
     minuteOfDay,
@@ -344,7 +345,7 @@ export function buildDailyPriorityCoverage(agenda: DailyAgenda, priorities: User
     const intentionGroups = new Set(PRIORITY_GROUP_TO_INTENTION_GROUPS[priorityGroup] ?? []);
     const agendaItemIds: string[] = [];
     for (const item of agenda.items) {
-      if (item.status === 'MISSED') continue;
+      if (item.status === 'MISSED' || item.status === 'SKIPPED') continue;
       const itemGroups = resolveItemIntentionGroups(item);
       if (itemGroups.some((g) => intentionGroups.has(g))) agendaItemIds.push(item.id);
     }

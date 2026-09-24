@@ -38,7 +38,7 @@ function markerFor(item: HomeTimelineItem): string {
   if (item.kind === 'OPPORTUNITY') return '○';
   if (item.metadata?.agendaStatus === 'COMPLETED') return '✓';
   // A calm, plain fact -- never a warning glyph (matches YourDayTimeline's own convention).
-  if (item.metadata?.agendaStatus === 'MISSED') return '–';
+  if (item.metadata?.agendaStatus === 'MISSED' || item.metadata?.agendaStatus === 'SKIPPED') return '–';
   if (item.metadata?.isCurrent) return '●';
   if (item.metadata?.agendaStatus === 'WAITING') return '◌';
   if (item.icon && isDisplayableIcon(item.icon)) return item.icon;
@@ -48,7 +48,7 @@ function markerFor(item: HomeTimelineItem): string {
 function markerColor(item: HomeTimelineItem): string {
   if (item.kind === 'OPPORTUNITY') return colors.textMuted;
   if (item.metadata?.agendaStatus === 'COMPLETED') return colors.positive;
-  if (item.metadata?.agendaStatus === 'MISSED') return colors.textMuted;
+  if (item.metadata?.agendaStatus === 'MISSED' || item.metadata?.agendaStatus === 'SKIPPED') return colors.textMuted;
   if (item.metadata?.isCurrent) return colors.info;
   if (item.metadata?.agendaStatus === 'WAITING') return colors.caution;
   return colors.textMuted;
@@ -58,6 +58,7 @@ function markerColor(item: HomeTimelineItem): string {
 function lifecycleLabel(item: HomeTimelineItem): string | null {
   if (item.metadata?.agendaStatus === 'WAITING') return 'Waiting for response';
   if (item.metadata?.agendaStatus === 'CONFIRMED') return 'Confirmed';
+  if (item.metadata?.agendaStatus === 'SKIPPED') return 'Skipped';
   return null;
 }
 
@@ -241,7 +242,7 @@ function TimelineRow({
   isNext?: boolean;
 }) {
   const isOpportunity = item.kind === 'OPPORTUNITY';
-  const subdued = item.metadata?.agendaStatus === 'COMPLETED' || item.metadata?.agendaStatus === 'MISSED';
+  const subdued = item.metadata?.agendaStatus === 'COMPLETED' || item.metadata?.agendaStatus === 'MISSED' || item.metadata?.agendaStatus === 'SKIPPED';
   const emphasized = item.metadata?.isCurrent === true || isNext;
   const hasExplanation = explanationLines.length > 0;
   const label = lifecycleLabel(item);
