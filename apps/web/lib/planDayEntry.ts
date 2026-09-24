@@ -18,6 +18,7 @@ import { localDateTimeToUTC, addDaysToDateStr } from './timezone';
 import type { PreviewRequestIntentBody } from './dayConstructorPreviewClient';
 import type { ConstructDayPreviewClientResult } from './dayConstructorPreviewClient';
 import type { PlanningHorizon } from './planningHorizon';
+import type { GoalActivityLink } from './acceptConstructedDay';
 
 // ============================================================
 // Row model (this ticket's own section 10) -- deliberately NOT every
@@ -82,6 +83,24 @@ export interface PlanDayIntentRow {
    * call site that ever clears it is the title input's own onChange
    * (PlanDayClient.tsx), never this file, never a generic patch merge. */
   activityId?: string;
+  /** Goals -> Planning Integration V1 PR C -- CLIENT-ONLY provenance (this
+   * ticket's own section 9/10). Set only by `createIntentRowFromGoalActivity`
+   * below, for a row seeded from the Goal handoff. Deliberately never
+   * serialized into `PreviewRequestIntentBody`/`RequestedDayIntent`/
+   * `DayIntent` -- `buildRequestedIntentsForSubmission` below never reads
+   * this field, by construction (this ticket's own section 15/16). It
+   * survives editing/preview/retry for free: every `setRows` call site in
+   * PlanDayClient.tsx either patch-merges (`{...row, ...patch}`, never
+   * including this field in a patch) or filters/spreads the existing row
+   * objects -- nothing reconstructs a row from server/preview data. It is
+   * NOT cleared when the row's title is edited (unlike `activityId`
+   * above): `activityId` is a CATALOG IDENTITY claim that an edited title
+   * may no longer match, but `goalActivityId` is a PROVENANCE fact about
+   * where this row came from, which editing the planning-session wording
+   * does not change (this ticket's own section 13 -- "the provenance link
+   * may still point back to the originating GoalActivity"). Consumed only
+   * at accept time, by `buildGoalActivityLinksForAccept` below. */
+  goalActivityId?: string;
 }
 
 export const MAX_PLAN_DAY_INTENTS = 12; // mirrors F1's own MAX_INTENTS_PER_REQUEST (dayConstructorPreviewRequest.ts) -- the hard upper bound, not a new limit.
@@ -120,6 +139,22 @@ export function createEmptyIntentRow(): PlanDayIntentRow {
  * `activityId`. */
 export function createIntentRowFromQuickPick(pick: { label: string; activityId?: string }): PlanDayIntentRow {
   return { ...createEmptyIntentRow(), title: pick.label, activityId: pick.activityId };
+}
+
+// ============================================================
+// Goals -> Planning Integration V1 PR C (this ticket's own section 10) --
+// a small, explicit sibling factory, reusing `createEmptyIntentRow`'s own
+// defaults exactly like `createIntentRowFromQuickPick` above, rather than
+// a second, parallel row-construction path. `goalActivity.activityId`
+// is preserved verbatim where present (this ticket's own section 11); a
+// `null`/absent value is left `undefined` on the row, letting the exact
+// same downstream activity-resolution/classification behavior operate as
+// it already does for a typed row with no `activityId` -- no GoalActivity
+// is required to map to the static catalog.
+// ============================================================
+
+export function createIntentRowFromGoalActivity(goalActivity: { id: string; title: string; activityId: string | null }): PlanDayIntentRow {
+  return { ...createEmptyIntentRow(), title: goalActivity.title, activityId: goalActivity.activityId ?? undefined, goalActivityId: goalActivity.id };
 }
 
 /** True only for a row that is BYTE-IDENTICAL to a freshly-created empty
@@ -359,6 +394,29 @@ export function buildRequestedIntentsForSubmission(rows: readonly PlanDayIntentR
     intents.push(intent);
   }
   return intents;
+}
+
+// ============================================================
+// Goals -> Planning Integration V1 PR C, this ticket's own section 21/22
+// -- built ONLY at accept time, entirely separate from
+// `buildRequestedIntentsForSubmission` above (which never reads
+// `goalActivityId` at all, preserving the preview boundary exactly).
+// Includes a row only when it BOTH carries Goal provenance AND was
+// actually placed by the Constructor (present in the accepted preview's
+// own `proposedItems`) -- a deferred item, or a row the user removed
+// before ever previewing it, is silently excluded here by construction,
+// never producing a phantom link (this ticket's own section 22).
+// ============================================================
+
+export function buildGoalActivityLinksForAccept(rows: readonly PlanDayIntentRow[], proposedItems: readonly { intentId: string }[]): GoalActivityLink[] {
+  const proposedIntentIds = new Set(proposedItems.map((item) => item.intentId));
+  const links: GoalActivityLink[] = [];
+  for (const row of rows) {
+    if (row.goalActivityId && proposedIntentIds.has(row.id)) {
+      links.push({ intentId: row.id, goalActivityId: row.goalActivityId });
+    }
+  }
+  return links;
 }
 
 // ============================================================

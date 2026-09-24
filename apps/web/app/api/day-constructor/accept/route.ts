@@ -70,6 +70,32 @@ function parseAcceptRequest(body: Record<string, unknown>): AcceptConstructedDay
   return { clientRequestId: body.clientRequestId, constructionWindow, proposedItems };
 }
 
+/**
+ * Goals -> Planning Integration V1 PR C, this ticket's own section 20 --
+ * a SIBLING field on the raw HTTP body, deliberately parsed separately
+ * from `parseAcceptRequest` above and never folded into the
+ * `AcceptConstructedDayRequest` object that function returns, so E1's
+ * `evaluateAcceptance` (unmodified) never sees it. Malformed entries are
+ * dropped individually, never fail the whole request -- a client-side
+ * bug in this optional envelope should never block an otherwise-valid
+ * scheduling acceptance. `goalActivityId`/`intentId` ownership itself is
+ * enforced later, inside the transaction (db.ts's own
+ * `linkGoalActivityToPlannedActivity`) -- this parser only shapes the
+ * data, it trusts nothing.
+ */
+function parseGoalActivityLinks(value: unknown): Map<string, string> {
+  const links = new Map<string, string>();
+  if (!Array.isArray(value)) return links;
+  for (const raw of value) {
+    if (!raw || typeof raw !== 'object') continue;
+    const entry = raw as Record<string, unknown>;
+    if (typeof entry.intentId !== 'string' || !entry.intentId || entry.intentId.length > MAX_INTENT_ID_LENGTH) continue;
+    if (typeof entry.goalActivityId !== 'string' || !entry.goalActivityId) continue;
+    links.set(entry.intentId, entry.goalActivityId);
+  }
+  return links;
+}
+
 export async function POST(req: NextRequest) {
   const session = getSessionFromRequest(req);
   if (!session) return NextResponse.json({ error: 'Not authenticated.' }, { status: 401 });
@@ -79,12 +105,13 @@ export async function POST(req: NextRequest) {
 
   const request = parseAcceptRequest(body);
   if (!request) return NextResponse.json({ error: 'A valid Day Constructor acceptance request is required.' }, { status: 400 });
+  const goalActivityLinks = parseGoalActivityLinks(body.goalActivityLinks);
 
   // Authoritative clock -- read EXACTLY ONCE, at this outer boundary, then
   // threaded through everything downstream (this ticket's own section 14).
   const now = new Date();
 
-  const result = await persistAcceptedConstructedDay(session.userId, request, now);
+  const result = await persistAcceptedConstructedDay(session.userId, request, now, goalActivityLinks);
 
   switch (result.status) {
     case 'SAVED':

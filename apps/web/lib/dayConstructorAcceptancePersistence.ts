@@ -17,6 +17,14 @@
  *
  * E2 never changes the proposal PR E1 decided was acceptable -- this file
  * only decides HOW (and whether) to durably persist that decision.
+ *
+ * Goals -> Planning Integration V1 PR C -- `persistAcceptedConstructedDay`
+ * gained one new, optional, SIBLING parameter (`goalActivityLinks`, never
+ * merged into `AcceptConstructedDayRequest`/E1's own scheduling-domain
+ * contract) and one new atomic write inside the existing per-item loop
+ * (`linkGoalActivityToPlannedActivity`, db.ts) -- see that loop's own
+ * comment for the exact eligibility/atomicity rules. `evaluateAcceptance`
+ * (E1) itself is untouched.
  */
 
 import type { PoolClient } from 'pg';
@@ -29,6 +37,7 @@ import {
   listPlannedActivitiesForDay,
   getPlannedActivityForOwner,
   getUserById,
+  linkGoalActivityToPlannedActivity,
   type PlannedActivity,
   type CreatePlannedActivityInput,
 } from './db';
@@ -254,7 +263,19 @@ function createRealAcceptanceDeps(userId: string, client: PoolClient, timingCont
 // explicit, separate architecture decision this PR does not make.
 // ============================================================
 
-export async function persistAcceptedConstructedDay(userId: string, request: AcceptConstructedDayRequest, now: Date): Promise<AcceptConstructedDayPersistenceResult> {
+export async function persistAcceptedConstructedDay(
+  userId: string,
+  request: AcceptConstructedDayRequest,
+  now: Date,
+  // Goals -> Planning Integration V1 PR C -- a SIBLING envelope, never
+  // merged into `AcceptConstructedDayRequest` (this PR's own section 20:
+  // "keep the Goal linkage envelope outside" E1's scheduling-domain
+  // contract). `evaluateAcceptance` (E1, imported below, unmodified)
+  // never receives this parameter at all -- it is consulted ONLY inside
+  // this file's own write loop, after E1 has already decided
+  // `decision.writeIntents`.
+  goalActivityLinks: ReadonlyMap<string, string> = new Map()
+): Promise<AcceptConstructedDayPersistenceResult> {
   if (!request.clientRequestId || request.clientRequestId.length > MAX_CLIENT_REQUEST_ID_LENGTH) {
     return { status: 'REJECTED', reason: 'INVALID_REQUEST', diagnostics: [{ intentId: '', reason: 'INVALID_REQUEST', detail: 'INVALID_CLIENT_REQUEST_ID' }] };
   }
@@ -353,6 +374,32 @@ export async function persistAcceptedConstructedDay(userId: string, request: Acc
       const plan = await createPlannedActivityWithClient(client, toCreatePlannedActivityInput(userId, writeIntent));
       const key = deriveAcceptanceIdempotencyKey(request.clientRequestId, writeIntent.intentId);
       await fillPlanCreationClaim(userId, key, plan.id, client);
+
+      // Goals -> Planning Integration V1 PR C, this file's own section
+      // 26/27 -- the atomic reverse link, on the SAME `client`/
+      // transaction as the PlannedActivity insert immediately above it.
+      // Only rows the CALLER already proved (a) carry Goal provenance and
+      // (b) were actually placed reach this map at all (see
+      // buildGoalActivityLinksForAccept, planDayEntry.ts) -- a deferred
+      // or removed-before-preview Goal row is never a key here, so it
+      // never receives a link (this PR's own section 22).
+      const goalActivityId = goalActivityLinks.get(writeIntent.intentId);
+      if (goalActivityId) {
+        const linked = await linkGoalActivityToPlannedActivity(userId, goalActivityId, plan.id, client);
+        if (!linked) {
+          // This PR's own section 24/25/27: the GoalActivity does not
+          // exist, is not owned by this user, is DISMISSED, or already
+          // retains a live (UPCOMING/LOGGED) linkage to a DIFFERENT Plan
+          // -- never silently continue. Throwing here is caught by this
+          // function's own outer try/catch below, which ROLLBACKs the
+          // WHOLE transaction (this Plan insert included) and returns
+          // SAVE_FAILED -- no orphan PlannedActivity, no half-linked
+          // GoalActivity, no partial mixed-source acceptance (this PR's
+          // own section 26/31).
+          throw new Error('GOAL_ACTIVITY_LINK_FAILED');
+        }
+      }
+
       plans.push(plan);
     }
 

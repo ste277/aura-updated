@@ -48,12 +48,19 @@ function main() {
   const allGoalsUiSource = Object.values(sources).join('\n');
 
   // ============================================================
-  // Z/38. No Plan My Day handoff yet -- no ?fromGoal=/?activities= query
-  // params, no import from any Plan My Day/Day Constructor/acceptance
-  // module.
+  // Z/38. PR B's own boundary was "no Plan My Day handoff yet" -- true at
+  // PR B's OWN MERGE. Goals -> Planning Integration V1 PR C is the
+  // ticket explicitly authorized to add exactly this handoff (its own
+  // section 6: "/plan-day?fromGoal=<goalId>&activities=<goalActivityIds>"),
+  // through GoalDetailClient.tsx specifically -- so the two query-param-
+  // absence checks that used to live here are retired (not silently
+  // weakened: PR C's own goalPlanningHandoffUi.test.ts re-proves the
+  // handoff URL is built correctly -- ids only, via URLSearchParams,
+  // never a title/activityId). What remains load-bearing below is
+  // unchanged: no import from any Plan My Day/Day Constructor/acceptance
+  // module anywhere in the Goals UI (PR C added a URL navigation, never
+  // an import of scheduling-domain code).
   // ============================================================
-  check('Z. no "fromGoal" query param anywhere in the Goals UI', !/fromGoal/.test(allGoalsUiSource));
-  check('Z. no "?activities=" query param construction anywhere in the Goals UI', !/[?&]activities=/.test(allGoalsUiSource));
   const forbiddenSchedulingImports = [
     'planDayEntry', 'planDayBootstrap', 'planDayQuickPicks', 'planningHorizon',
     'dayIntent', 'dayConstructor', 'dayConstructorOrchestrator',
@@ -140,14 +147,20 @@ function main() {
   check('34. no internal field name is ever passed as a literal string into JSX children', !/\{\s*['"](templateCategory|plannedActivityId|derivedState|GoalActivity)['"]\s*\}/.test(codeOnlySource));
 
   // ============================================================
-  // 18/19. Selection is either absent or, if present, provably local
-  // state only (this ticket's own explicit "prefer avoiding dead UI").
-  // PR B's own implementation choice: selection checkboxes are omitted
-  // entirely (see GoalDetailClient's ActivityRow doc comment) -- verified
-  // here as a real structural fact, not just a claim.
+  // 18/19. PR B's own choice was to omit selection entirely ("prefer
+  // avoiding dead UI" until a real destination existed). Goals ->
+  // Planning Integration V1 PR C is that destination -- it legitimately
+  // adds a real selection checkbox + "Plan with Aura" CTA to
+  // GoalDetailClient.tsx (its own section 3/4/5), so the "no checkbox"
+  // check below is retired, not weakened: PR C's own
+  // goalPlanningHandoffUi.test.ts re-proves the checkbox is correctly
+  // gated to SUGGESTED activities only and that selection stays pure
+  // local state (no fetch, no GoalActivity mutation). "Plan selected" is
+  // still absent as literal copy -- PR C's own CTA says "Plan with Aura"
+  // instead (this ticket's own section 5 preferred wording), so that
+  // check remains fully valid, unchanged.
   // ============================================================
-  check('18/19. no "Plan selected" action exists anywhere in the Goals UI (not shipped in PR B, per this ticket\'s own explicit instruction)', !/Plan selected/i.test(allGoalsUiSource));
-  check('18/19. no selection checkbox/"selected" local state exists on activity rows (selection controls omitted entirely, not merely disabled -- "prefer avoiding dead UI")', !/type="checkbox"/.test(sources['Goal detail client']));
+  check('18/19. no "Plan selected" action exists anywhere in the Goals UI (PR C uses "Plan with Aura" instead, per this ticket\'s own section 5 preferred wording)', !/Plan selected/i.test(allGoalsUiSource));
 
   // ============================================================
   // 24/25. No scheduling controls on PLANNED/COMPLETED rows -- no

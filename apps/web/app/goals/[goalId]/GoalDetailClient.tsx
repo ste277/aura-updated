@@ -108,6 +108,40 @@ function GoalDetailBody({ detail, onChanged }: { detail: GoalDetailView; onChang
   // too).
   const primaryActivities = activities.filter((a) => a.derivedState !== 'DISMISSED');
 
+  // Goals -> Planning Integration V1 PR C -- selection lives HERE (the
+  // parent), not on each ActivityRow, because the primary CTA (below)
+  // needs the complete selected set, and because eligibility can change
+  // out from under a stale selection (e.g. `onChanged` refetches after a
+  // Dismiss/Add elsewhere on this same page) -- `effectiveSelectedIds`
+  // recomputes the intersection with CURRENTLY-SUGGESTED activities on
+  // every render, so a row that became ineligible between selection and
+  // render is silently dropped from the count/CTA rather than seeding a
+  // stale id (this ticket's own section 8 applied client-side too, as a
+  // first line of defense -- the real enforcement is server-side, at
+  // /plan-day's own bootstrap).
+  const [selectedIds, setSelectedIds] = useState<ReadonlySet<string>>(new Set());
+  const suggestedIds = new Set(primaryActivities.filter((a) => a.derivedState === 'SUGGESTED').map((a) => a.id));
+  const effectiveSelectedIds = Array.from(selectedIds).filter((id) => suggestedIds.has(id));
+
+  const toggleSelected = (id: string) => {
+    setSelectedIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  };
+
+  const handlePlanWithAura = () => {
+    if (effectiveSelectedIds.length === 0) return;
+    // This ticket's own section 6 -- IDs only, never titles/activityIds.
+    // Plan My Day's own bootstrap (planDayBootstrap.ts's
+    // resolveGoalActivityHandoff) re-resolves everything server-side from
+    // these ids alone.
+    const params = new URLSearchParams({ fromGoal: goal.id, activities: effectiveSelectedIds.join(',') });
+    window.location.href = `/plan-day?${params.toString()}`;
+  };
+
   return (
     <div>
       <PageHeader title={goal.title} subtitle={goal.targetDate ? `Target ${formatGoalTargetDateLabel(goal.targetDate)}` : undefined} />
@@ -125,6 +159,7 @@ function GoalDetailBody({ detail, onChanged }: { detail: GoalDetailView; onChang
 
       <div style={{ marginTop: spacing.xxl }}>
         <h2 style={typography.sectionEyebrow}>Activities</h2>
+        {suggestedIds.size > 0 && <p style={{ ...typography.meta, marginTop: spacing.xs }}>What would you like Aura to help you plan?</p>}
         <div style={{ display: 'flex', flexDirection: 'column', gap: spacing.md, marginTop: spacing.md }}>
           {primaryActivities.length === 0 && (
             <SurfaceCard>
@@ -132,9 +167,28 @@ function GoalDetailBody({ detail, onChanged }: { detail: GoalDetailView; onChang
             </SurfaceCard>
           )}
           {primaryActivities.map((activity) => (
-            <ActivityRow key={activity.id} activity={activity} onChanged={onChanged} />
+            <ActivityRow
+              key={activity.id}
+              activity={activity}
+              onChanged={onChanged}
+              selected={activity.derivedState === 'SUGGESTED' ? selectedIds.has(activity.id) : undefined}
+              onToggleSelect={activity.derivedState === 'SUGGESTED' ? () => toggleSelected(activity.id) : undefined}
+            />
           ))}
         </div>
+
+        {/* This ticket's own section 5 -- appears only once at least one
+            eligible activity is selected; "Plan with Aura" (existing
+            product vocabulary), never "Schedule automatically" (Aura has
+            committed nothing yet). */}
+        {effectiveSelectedIds.length > 0 && (
+          <div style={{ marginTop: spacing.md }}>
+            <PrimaryButton onClick={handlePlanWithAura}>
+              Plan with Aura{effectiveSelectedIds.length > 1 ? ` (${effectiveSelectedIds.length})` : ''}
+            </PrimaryButton>
+          </div>
+        )}
+
         <div style={{ marginTop: spacing.md }}>
           <AddActivityControl goalId={goal.id} onAdded={onChanged} />
         </div>
@@ -151,10 +205,26 @@ function GoalDetailBody({ detail, onChanged }: { detail: GoalDetailView; onChang
 // ActivityRow (this ticket's own section 17/18/24/25/26)
 // ============================================================
 
-function ActivityRow({ activity, onChanged }: { activity: GoalActivityView; onChanged: () => void }) {
+function ActivityRow({
+  activity,
+  onChanged,
+  selected,
+  onToggleSelect,
+}: {
+  activity: GoalActivityView;
+  onChanged: () => void;
+  /** Goals -> Planning Integration V1 PR C -- undefined for any non-
+   * SUGGESTED activity (PLANNED/COMPLETED render no checkbox at all, not
+   * a disabled one -- this ticket's own section 4: eligibility is
+   * SUGGESTED only). Selection is local UI state owned by the parent; see
+   * GoalDetailBody's own doc comment for why it lives there, not here. */
+  selected?: boolean;
+  onToggleSelect?: () => void;
+}) {
   const [dismissing, setDismissing] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const stateLabel = presentGoalActivityStateLabel(activity.derivedState);
+  const isSelectable = activity.derivedState === 'SUGGESTED' && onToggleSelect !== undefined;
 
   const handleDismiss = async () => {
     if (dismissing) return;
@@ -171,9 +241,28 @@ function ActivityRow({ activity, onChanged }: { activity: GoalActivityView; onCh
   };
 
   return (
-    <SurfaceCard style={activity.derivedState === 'COMPLETED' ? { opacity: 0.7 } : undefined}>
+    <SurfaceCard style={activity.derivedState === 'COMPLETED' ? { opacity: 0.7 } : selected ? { borderColor: colors.accentBorder } : undefined}>
       <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: spacing.md, flexWrap: 'wrap' }}>
-        <div style={{ ...typography.bodyStrong, minWidth: 0 }}>{activity.title}</div>
+        {/* Goals -> Planning Integration V1 PR C -- this ticket's own
+            section 3/4: a real selection control now exists, answering
+            "What would you like Aura to help you plan?" A checkbox
+            renders ONLY for SUGGESTED (PLANNED/COMPLETED never show
+            one, matching this ticket's own eligibility rule exactly).
+            Selecting is pure local state -- it never mutates
+            GoalActivity, never creates a PlannedActivity, never calls
+            Day Constructor (this ticket's own section 4). */}
+        <label style={{ display: 'flex', alignItems: 'center', gap: spacing.sm, minWidth: 0, cursor: isSelectable ? 'pointer' : 'default' }}>
+          {isSelectable && (
+            <input
+              type="checkbox"
+              checked={selected ?? false}
+              onChange={onToggleSelect}
+              aria-label={`Select "${activity.title}" to plan with Aura`}
+              style={{ width: 18, height: 18, flexShrink: 0, accentColor: colors.positive }}
+            />
+          )}
+          <span style={{ ...typography.bodyStrong, minWidth: 0 }}>{activity.title}</span>
+        </label>
         {stateLabel && <StatusBadge label={stateLabel} tone={activity.derivedState === 'COMPLETED' ? 'positive' : 'info'} />}
       </div>
 
@@ -183,13 +272,9 @@ function ActivityRow({ activity, onChanged }: { activity: GoalActivityView; onCh
         </div>
       )}
 
-      {/* SUGGESTED is the only state with an action. Deliberately no
-          selection checkbox here (this ticket's own section 19: "the
-          selection controls themselves may also be omitted if they serve
-          no useful purpose until PR C/D... prefer avoiding dead UI" --
-          a checkbox with nothing to act on it would be exactly that dead
-          UI). PLANNED/COMPLETED render as pure read-only status; there is
-          no reschedule/cancel/mark-complete action anywhere on this page
+      {/* SUGGESTED is the only state with a Dismiss action. PLANNED/
+          COMPLETED render as pure read-only status; there is no
+          reschedule/cancel/mark-complete action anywhere on this page
           (this ticket's own section 24/25). */}
       {activity.derivedState === 'SUGGESTED' && (
         <div style={{ marginTop: spacing.sm }}>

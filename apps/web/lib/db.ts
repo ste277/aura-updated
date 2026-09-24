@@ -2451,3 +2451,62 @@ export async function listGoalActivitiesWithLinkedPlanStatus(userId: string, goa
   );
   return result.rows;
 }
+
+/**
+ * Goals -> Planning Integration V1 PR C -- the one atomic write that
+ * closes the GoalActivity -> PlannedActivity handoff. Called from INSIDE
+ * the existing Day Constructor acceptance transaction
+ * (dayConstructorAcceptancePersistence.ts), on the SAME `client`, never
+ * as a second request/eventual-consistency repair (this PR's own section
+ * 26).
+ *
+ * A single conditional UPDATE, not a check-then-act pair (this PR's own
+ * section 25/27: "use conditional linkage semantics", avoiding a TOCTOU
+ * race entirely) -- ownership (`userId`), non-DISMISSED, and eligibility
+ * are all enforced in the WHERE clause itself, so the row either matches
+ * exactly the one eligible GoalActivity or matches nothing at all.
+ *
+ * ELIGIBILITY (this PR's own section 29, the mandatory design check):
+ * linkage is allowed when the GoalActivity is currently unlinked
+ * (`plannedActivityId IS NULL`) OR its existing link points at a
+ * PlannedActivity that is itself CANCELLED for this same user -- the
+ * exact "safe rule" the ticket proposes, and the only rule consistent
+ * with PR A's own established derived-state semantics: a linked-but-
+ * CANCELLED GoalActivity already derives back to SUGGESTED
+ * (deriveGoalActivityState, lib/goals.ts) and is therefore already
+ * eligible for re-selection at the handoff bootstrap boundary
+ * (resolveGoalActivityHandoff, planDayBootstrap.ts) -- requiring a bare
+ * `plannedActivityId IS NULL` here would silently make that already-
+ * eligible state impossible to ever actually replan, a real
+ * inconsistency between the two layers. A GoalActivity linked to an
+ * UPCOMING or LOGGED Plan is NEVER eligible -- this function never
+ * steals/relinks a currently retained active linkage.
+ *
+ * Returns true iff EXACTLY ONE row was linked. The caller MUST treat
+ * `false` as a hard failure and roll back the entire transaction (this
+ * PR's own section 27: "if zero rows: throw -> rollback... do not
+ * silently continue") -- this function itself never throws; the
+ * rowCount check is the caller's own explicit decision point.
+ */
+export async function linkGoalActivityToPlannedActivity(
+  userId: string,
+  goalActivityId: string,
+  plannedActivityId: string,
+  executor: Pool | PoolClient = pool
+): Promise<boolean> {
+  const result = await executor.query(
+    `UPDATE "GoalActivity"
+     SET "plannedActivityId" = $1, "updatedAt" = now()
+     WHERE id = $2
+       AND "userId" = $3
+       AND status != 'DISMISSED'
+       AND (
+         "plannedActivityId" IS NULL
+         OR "plannedActivityId" IN (
+           SELECT id FROM "PlannedActivity" WHERE "userId" = $3 AND status = 'CANCELLED'
+         )
+       )`,
+    [plannedActivityId, goalActivityId, userId]
+  );
+  return (result.rowCount ?? 0) === 1;
+}
