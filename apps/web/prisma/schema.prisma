@@ -304,7 +304,7 @@ model PlannedActivity {
   title           String
   activityType    String?
   icon            String?
-  status          String   @default("UPCOMING") // "UPCOMING" | "LOGGED" | "CANCELLED"
+  status          String   @default("UPCOMING") // "UPCOMING" | "LOGGED" | "CANCELLED" | "SKIPPED"
 
   // Planned Activity Canonical Identity Propagation V1 (migration 0031) --
   // the canonical packages/recommendation/src/personalizedTasks.ts
@@ -333,6 +333,9 @@ model PlannedActivity {
   calendarUrl     String?  @db.Text
 
   loggedAt        DateTime? @db.Timestamptz(3)
+  // Daily Experience V1 PR C1 (migration 0037) -- set together with status
+  // "SKIPPED"; NULL otherwise. Server-generated, never a client value.
+  skippedAt       DateTime? @db.Timestamptz(3)
   habitLogId      String?
 
   // Event Location Plan Persistence V1 (migration 0028) -- an immutable

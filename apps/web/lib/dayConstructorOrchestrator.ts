@@ -162,7 +162,7 @@ export interface ConstructDayRequest {
  * interface (which carries many fields irrelevant to blocking, e.g.
  * `recommendation`/`score`/`calendarUrl`).
  */
-export type PlanBlockerStatus = 'UPCOMING' | 'LOGGED' | 'CANCELLED';
+export type PlanBlockerStatus = 'UPCOMING' | 'LOGGED' | 'CANCELLED' | 'SKIPPED';
 
 /** The minimal shape `isActivePlanBlocker` needs to decide whether one
  * Plan blocks time -- deliberately NOT the full `PlannedActivity`
@@ -190,6 +190,7 @@ export interface PlanBlockerCandidate {
  *     `listPlannedActivitiesForDay`'s own SQL filter in production
  *     (`status <> 'CANCELLED'`); re-checked here defensively for any
  *     other caller of this function.
+ *   - `'SKIPPED'` never blocks (terminal, nothing occupied the slot).
  *   - `'LOGGED'` ALWAYS blocks, regardless of the reference instant.
  *     `dailyAgenda.ts`'s own rule --
  *     `plan.status === 'LOGGED' ? 'COMPLETED' : timeBasedStatus(...)` --
@@ -215,6 +216,8 @@ export interface PlanBlockerCandidate {
  */
 export function isActivePlanBlocker(plan: PlanBlockerCandidate, referenceInstant: Date): boolean {
   if (plan.status === 'CANCELLED') return false;
+  // SKIPPED: the user decided not to do it -- the slot is free (unlike LOGGED, nothing occupied it).
+  if (plan.status === 'SKIPPED') return false;
   if (plan.status === 'LOGGED') return true;
   return plan.end.getTime() >= referenceInstant.getTime();
 }

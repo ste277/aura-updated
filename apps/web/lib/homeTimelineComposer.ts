@@ -144,7 +144,7 @@ function projectAgendaItem(item: DailyAgendaItem, currentMinuteOfDay: number, ti
   // still falls inside its nominal window. Only these two already-resolved
   // agenda statuses override; every other status (UPCOMING/STARTING_SOON/
   // CURRENT/WAITING/CONFIRMED) stays purely temporal.
-  const lifecycleResolved = item.status === 'COMPLETED' || item.status === 'MISSED';
+  const lifecycleResolved = item.status === 'COMPLETED' || item.status === 'MISSED' || item.status === 'SKIPPED';
   const isCurrent = lifecycleResolved ? false : temporal.isCurrent;
   const isPast = lifecycleResolved ? true : temporal.isPast;
 

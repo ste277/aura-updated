@@ -63,7 +63,7 @@ export type PlanApiRow = {
   // for the full contract.
   activityId?: string | null;
   icon?: string | null;
-  status?: 'UPCOMING' | 'LOGGED' | 'CANCELLED' | string | null;
+  status?: 'UPCOMING' | 'LOGGED' | 'CANCELLED' | 'SKIPPED' | string | null;
   plannedStartAt: string | Date;
   plannedEndAt: string | Date;
   durationMinutes?: number | null;

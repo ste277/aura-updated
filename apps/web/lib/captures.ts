@@ -12,7 +12,7 @@ export const MAX_CAPTURE_TITLE_LENGTH = 200;
 
 export type CaptureStatus = 'OPEN' | 'DISMISSED';
 export type DerivedCaptureState = 'OPEN' | 'PLANNED' | 'COMPLETED' | 'DISMISSED';
-export type LinkedPlanStatus = 'UPCOMING' | 'LOGGED' | 'CANCELLED';
+export type LinkedPlanStatus = 'UPCOMING' | 'LOGGED' | 'CANCELLED' | 'SKIPPED';
 
 export type CaptureTitleResult = { ok: true; title: string } | { ok: false; error: string };
 
@@ -42,7 +42,7 @@ export interface CaptureLifecycleInput {
  *     completedAt still derives COMPLETED (it is what actually happened);
  *     the logging path is expected to materialize completedAt, after which
  *     this branch is never load-bearing.
- *  5. Otherwise OPEN -- including a CANCELLED link (available again).
+ *  5. Otherwise OPEN -- including a CANCELLED or SKIPPED link (available again).
  */
 export function deriveCaptureState(input: CaptureLifecycleInput): DerivedCaptureState {
   if (input.status === 'DISMISSED') return 'DISMISSED';

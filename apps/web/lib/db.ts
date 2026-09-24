@@ -572,7 +572,7 @@ export interface PlannedActivity {
   // PlannedActivity-shaped fixtures elsewhere don't need updating for a
   // concept they don't touch.
   activityId?: string | null;
-  status: 'UPCOMING' | 'LOGGED' | 'CANCELLED';
+  status: 'UPCOMING' | 'LOGGED' | 'CANCELLED' | 'SKIPPED';
   plannedStartAt: Date;
   plannedEndAt: Date;
   durationMinutes: number;
@@ -583,6 +583,7 @@ export interface PlannedActivity {
   recommendation: string | null;
   calendarUrl: string | null;
   loggedAt: Date | null;
+  skippedAt?: Date | null;
   habitLogId: string | null;
   /** Event Location Plan Persistence V1 -- immutable snapshot of the Event
    * Location that produced this plan's timing, or both null when the
@@ -713,7 +714,7 @@ export async function listPlannedActivities(userId: string): Promise<PlannedActi
   const result = await pool.query(
     `SELECT *
      FROM "PlannedActivity"
-     WHERE "userId" = $1 AND status <> 'CANCELLED'
+     WHERE "userId" = $1 AND status NOT IN ('CANCELLED', 'SKIPPED')
      ORDER BY
        CASE WHEN status = 'UPCOMING' THEN 0 ELSE 1 END,
        "plannedStartAt" ASC,
@@ -1367,6 +1368,42 @@ export async function cancelPlannedActivity(userId: string, planId: string): Pro
   );
   if (result.rows.length === 0) throw new Error('Plan not found or cannot be cancelled.');
   return result.rows[0];
+}
+
+export class PlanSkipError extends Error {
+  constructor(public readonly code: 'NOT_FOUND' | 'INVALID_STATE', message: string) {
+    super(message);
+    this.name = 'PlanSkipError';
+  }
+}
+
+/**
+ * Daily Experience V1 PR C1 -- "the user explicitly decided not to perform
+ * this committed occurrence." UPCOMING -> SKIPPED only (including an elapsed,
+ * derived-MISSED plan). One conditional UPDATE, so Skip/Skip, Skip/Log and
+ * Skip/Cancel cannot both win: logPlannedActivity holds the row's FOR UPDATE
+ * lock and re-checks status, cancelPlannedActivity is likewise conditional
+ * on status = 'UPCOMING'. skippedAt = now() is the DB clock, set once; a
+ * retry on an already-SKIPPED plan returns the original row unchanged.
+ * Writes no HabitLog, Capture or GoalActivity row (both derive from the
+ * linked plan's status).
+ */
+export async function skipPlannedActivity(userId: string, planId: string): Promise<PlannedActivity> {
+  const updated = await pool.query(
+    `UPDATE "PlannedActivity"
+     SET status = 'SKIPPED',
+         "skippedAt" = now(),
+         "updatedAt" = now()
+     WHERE id = $1 AND "userId" = $2 AND status = 'UPCOMING'
+     RETURNING *`,
+    [planId, userId]
+  );
+  if (updated.rows.length === 1) return updated.rows[0];
+
+  const current = await pool.query(`SELECT * FROM "PlannedActivity" WHERE id = $1 AND "userId" = $2`, [planId, userId]);
+  if (current.rows.length === 0) throw new PlanSkipError('NOT_FOUND', 'Plan not found.');
+  if (current.rows[0].status === 'SKIPPED') return current.rows[0];
+  throw new PlanSkipError('INVALID_STATE', 'Plan cannot be skipped.');
 }
 
 /** Permanently removes a plan from the list -- scoped to LOGGED/CANCELLED
@@ -2282,7 +2319,7 @@ export interface GoalActivity {
 }
 
 export interface GoalActivityWithLinkedPlanStatus extends GoalActivity {
-  linkedPlanStatus: 'UPCOMING' | 'LOGGED' | 'CANCELLED' | null;
+  linkedPlanStatus: 'UPCOMING' | 'LOGGED' | 'CANCELLED' | 'SKIPPED' | null;
 }
 
 // Explicit column list, "targetDate" cast to ::text -- see Goal's own
@@ -2482,7 +2519,7 @@ export async function listGoalActivitiesWithLinkedPlanStatus(userId: string, goa
  * ELIGIBILITY (this PR's own section 29, the mandatory design check):
  * linkage is allowed when the GoalActivity is currently unlinked
  * (`plannedActivityId IS NULL`) OR its existing link points at a
- * PlannedActivity that is itself CANCELLED for this same user -- the
+ * PlannedActivity that is itself CANCELLED or SKIPPED for this same user -- the
  * exact "safe rule" the ticket proposes, and the only rule consistent
  * with PR A's own established derived-state semantics: a linked-but-
  * CANCELLED GoalActivity already derives back to SUGGESTED
@@ -2516,7 +2553,7 @@ export async function linkGoalActivityToPlannedActivity(
        AND (
          "plannedActivityId" IS NULL
          OR "plannedActivityId" IN (
-           SELECT id FROM "PlannedActivity" WHERE "userId" = $3 AND status = 'CANCELLED'
+           SELECT id FROM "PlannedActivity" WHERE "userId" = $3 AND status IN ('CANCELLED', 'SKIPPED')
          )
        )`,
     [plannedActivityId, goalActivityId, userId]
@@ -2540,7 +2577,7 @@ export interface Capture {
 }
 
 export interface CaptureWithLinkedPlanStatus extends Capture {
-  linkedPlanStatus: 'UPCOMING' | 'LOGGED' | 'CANCELLED' | null;
+  linkedPlanStatus: 'UPCOMING' | 'LOGGED' | 'CANCELLED' | 'SKIPPED' | null;
 }
 
 /** Validates via the same pure rule the API uses; duplicates are allowed. */
@@ -2679,7 +2716,7 @@ export async function removeCapture(userId: string, captureId: string): Promise<
  * exact sibling of linkGoalActivityToPlannedActivity. Called from INSIDE the
  * Day Constructor acceptance transaction on the same `client`. One
  * conditional UPDATE (no check-then-act): owned by this user, status OPEN,
- * not completed, and either unlinked or linked to a CANCELLED plan of the
+ * not completed, and either unlinked or linked to a CANCELLED/SKIPPED plan of the
  * same user (replan replaces the retained link; the old plan stays as
  * history). Returns false when nothing matched -- the caller decides
  * (acceptance throws, rolling back the whole transaction).
@@ -2700,7 +2737,7 @@ export async function linkCaptureToPlannedActivity(
        AND (
          "plannedActivityId" IS NULL
          OR "plannedActivityId" IN (
-           SELECT id FROM "PlannedActivity" WHERE "userId" = $3 AND status = 'CANCELLED'
+           SELECT id FROM "PlannedActivity" WHERE "userId" = $3 AND status IN ('CANCELLED', 'SKIPPED')
          )
        )`,
     [plannedActivityId, captureId, userId]

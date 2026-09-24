@@ -401,7 +401,7 @@ export function PlanWithAuraView({ onTimingSearch, onViewDay, onPlanLogged, time
         if (!res.ok) throw new Error('Unable to load plans.');
         const rows = await res.json();
         if (cancelled) return;
-        setSavedPlans(Array.isArray(rows) ? rows.map((row: PlanApiRow) => mapPlanRow(row, timezone)) : []);
+        setSavedPlans(Array.isArray(rows) ? rows.filter((row: PlanApiRow) => row.status !== 'SKIPPED').map((row: PlanApiRow) => mapPlanRow(row, timezone)) : []);
       } catch {
         if (!cancelled) setSavedPlans([]);
       }
