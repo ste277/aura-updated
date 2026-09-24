@@ -323,25 +323,29 @@ export function TextButton({
   color,
   style,
   ariaLabel,
+  disabled,
 }: {
   children: React.ReactNode;
   onClick?: () => void;
   color?: string;
   style?: React.CSSProperties;
   ariaLabel?: string;
+  disabled?: boolean;
 }) {
   return (
     <button
       type="button"
       onClick={onClick}
       aria-label={ariaLabel}
+      disabled={disabled}
       style={{
         border: 'none',
         background: 'transparent',
         color: color ?? colors.info,
         fontSize: 13,
         fontWeight: 850,
-        cursor: 'pointer',
+        cursor: disabled ? 'default' : 'pointer',
+        opacity: disabled ? 0.55 : 1,
         padding: 0,
         minHeight: 32,
         ...style,
