@@ -24,6 +24,7 @@ import type { PlanningHorizon } from '../../lib/planningHorizon';
 import { PLAN_DAY_QUICK_PICKS, quickPickIcon, type PlanDayQuickPick } from '../../lib/planDayQuickPicks';
 import {
   createEmptyIntentRow,
+  createInitialIntentRow,
   createIntentRowFromQuickPick,
   createIntentRowFromGoalActivity,
   isRowUntouched,
@@ -131,7 +132,7 @@ export function PlanDayClient({ timezone, planningDate, horizon, availabilityCon
   // session never re-seeds (this file reads no `goalActivities` value
   // again after this initializer).
   const [rows, setRows] = useState<PlanDayIntentRow[]>(() =>
-    goalActivities.length > 0 ? goalActivities.map(createIntentRowFromGoalActivity) : [createEmptyIntentRow()]
+    goalActivities.length > 0 ? goalActivities.map(createIntentRowFromGoalActivity) : [createInitialIntentRow()]
   );
   // Plan My Day UX V2 PR U1 -- every row starts collapsed, including a
   // freshly-typed one (this ticket's own section 23: defaults already
@@ -245,12 +246,13 @@ export function PlanDayClient({ timezone, planningDate, horizon, availabilityCon
     // another` affordance or this was simply the very first pick on a
     // fresh page (where it is already false, a harmless no-op).
     setAddPickerExpanded(false);
+    const newRow = createIntentRowFromQuickPick(pick);
     setRows((current) => {
       if (current.length === 1 && isRowUntouched(current[0])) {
         return [{ ...current[0], title: pick.label, activityId: pick.activityId }];
       }
       if (!canAddAnotherRow(current)) return current;
-      return [...current, createIntentRowFromQuickPick(pick)];
+      return [...current, newRow];
     });
   }
 
@@ -266,13 +268,16 @@ export function PlanDayClient({ timezone, planningDate, horizon, availabilityCon
     // pending-focus effect below runs.
     setPlanRevealed(true);
     setAddPickerExpanded(false);
+    // Created outside the updater so a double-invoked updater (React
+    // StrictMode) can never produce a focus id that differs from the row
+    // actually appended.
+    const row = createEmptyIntentRow();
     setRows((current) => {
       if (current.length === 1 && isRowUntouched(current[0])) {
         setPendingFocusRowId(current[0].id);
         return current;
       }
       if (!canAddAnotherRow(current)) return current;
-      const row = createEmptyIntentRow();
       setPendingFocusRowId(row.id);
       return [...current, row];
     });

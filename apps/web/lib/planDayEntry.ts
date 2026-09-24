@@ -115,14 +115,30 @@ export const PLAN_DAY_DURATION_OPTIONS_MINUTES = [15, 30, 60, 90, 120] as const;
 
 let rowIdCounter = 0;
 
-/** Deterministic-enough per-session id -- this module has no `crypto`
- * dependency (kept trivially testable in a plain ts-node process); the
- * component itself may prefer `crypto.randomUUID()` at the call site if
- * it wants global uniqueness, but every row created via this function
- * within one session already has a distinct, stable id. */
+/** Id of the single blank row a fresh page starts with. Fixed (never drawn
+ * from `rowIdCounter`) because that row is created inside a `useState`
+ * initializer, which runs on the server AND again on the client -- a
+ * module-level counter would hand each side a different id and mismatch
+ * the hydrated `htmlFor`/`id` attributes. */
+export const INITIAL_INTENT_ROW_ID = 'plan-day-row-initial';
+
+/** The blank starting row. Deterministic, so safe to create during SSR. */
+export function createInitialIntentRow(): PlanDayIntentRow {
+  return { ...blankIntentRow(INITIAL_INTENT_ROW_ID) };
+}
+
+function blankIntentRow(id: string): PlanDayIntentRow {
+  return { id, title: '', durationMinutes: null, timeMode: 'FLEXIBLE', fixedTime: null, important: false, deadlineChoice: NO_DEADLINE };
+}
+
+/** A blank row for a user action (`+ Something else`, Quick Pick). Draws
+ * from a per-page-load counter, so it must only be called from client event
+ * handlers, never during render/`useState` initialization (see
+ * `createInitialIntentRow`). Its `plan-day-row-<n>` ids can never equal the
+ * fixed initial id or a Goal-derived id. */
 export function createEmptyIntentRow(): PlanDayIntentRow {
   rowIdCounter += 1;
-  return { id: `plan-day-row-${rowIdCounter}`, title: '', durationMinutes: null, timeMode: 'FLEXIBLE', fixedTime: null, important: false, deadlineChoice: NO_DEADLINE };
+  return blankIntentRow(`plan-day-row-${rowIdCounter}`);
 }
 
 // ============================================================
@@ -154,7 +170,7 @@ export function createIntentRowFromQuickPick(pick: { label: string; activityId?:
 // ============================================================
 
 export function createIntentRowFromGoalActivity(goalActivity: { id: string; title: string; activityId: string | null }): PlanDayIntentRow {
-  return { ...createEmptyIntentRow(), title: goalActivity.title, activityId: goalActivity.activityId ?? undefined, goalActivityId: goalActivity.id };
+  return { ...blankIntentRow(`plan-day-goal-${goalActivity.id}`), title: goalActivity.title, activityId: goalActivity.activityId ?? undefined, goalActivityId: goalActivity.id };
 }
 
 /** True only for a row that is BYTE-IDENTICAL to a freshly-created empty
