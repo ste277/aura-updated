@@ -25,6 +25,11 @@ export interface PlanEventLocation {
   timezone: string;
 }
 
+/** The persisted PlannedActivity lifecycle as it crosses the API boundary.
+ * mapPlanRow maps it faithfully; which states a surface shows is a
+ * presentation decision made by the surface, never by this mapper. */
+export type PersistedPlanStatus = 'UPCOMING' | 'LOGGED' | 'CANCELLED' | 'SKIPPED';
+
 export type UpcomingPlan = {
   id: string;
   title: string;
@@ -42,7 +47,7 @@ export type UpcomingPlan = {
   score?: number;
   googleCalendarUrl?: string;
   source?: 'Aura';
-  status?: 'UPCOMING' | 'LOGGED';
+  status?: PersistedPlanStatus;
   loggedAt?: string;
   /** Event Location Plan Persistence V1 -- the immutable snapshot (both
    * present, or both absent -- never one without the other), kept
@@ -63,7 +68,7 @@ export type PlanApiRow = {
   // for the full contract.
   activityId?: string | null;
   icon?: string | null;
-  status?: 'UPCOMING' | 'LOGGED' | 'CANCELLED' | 'SKIPPED' | string | null;
+  status?: PersistedPlanStatus | null;
   plannedStartAt: string | Date;
   plannedEndAt: string | Date;
   durationMinutes?: number | null;
@@ -185,11 +190,37 @@ export function windowTypeFromLabel(label?: string): string {
  * by the one call site with nothing better available (see
  * formatPlanTimeRange's own doc comment); every call site inside the
  * PlanWithAuraView component itself passes its own `timezone` prop. */
+/** Exhaustive on purpose: a new persisted status fails to compile here
+ * instead of silently falling through to UPCOMING. An absent status (legacy
+ * rows/fixtures) has always meant UPCOMING. */
+export function mapPersistedPlanStatus(status: PersistedPlanStatus | null | undefined): PersistedPlanStatus {
+  switch (status) {
+    case undefined:
+    case null:
+      return 'UPCOMING';
+    case 'UPCOMING':
+    case 'LOGGED':
+    case 'CANCELLED':
+    case 'SKIPPED':
+      return status;
+    default: {
+      const unreachable: never = status;
+      throw new Error(`Unknown plan status: ${String(unreachable)}`);
+    }
+  }
+}
+
+/** Plan-tab presentation (the mapper above never decides this): only an
+ * UPCOMING plan is actionable work; only LOGGED shows as completed.
+ * CANCELLED/SKIPPED have no representation on this surface. */
+export const isActionableUpcomingPlan = (plan: { status?: PersistedPlanStatus }): boolean => (plan.status ?? 'UPCOMING') === 'UPCOMING';
+export const isCompletedPlan = (plan: { status?: PersistedPlanStatus }): boolean => plan.status === 'LOGGED';
+
 export function mapPlanRow(row: PlanApiRow, fallbackTimezone?: string): UpcomingPlan {
   const start = new Date(row.plannedStartAt);
   const end = new Date(row.plannedEndAt);
   const title = row.title || row.activityType || 'Planned activity';
-  const status = row.status === 'LOGGED' ? 'LOGGED' : 'UPCOMING';
+  const status = mapPersistedPlanStatus(row.status);
   const eventTimezone = row.eventTimezone || undefined;
   const eventLocationName = row.eventLocationName || undefined;
   return {

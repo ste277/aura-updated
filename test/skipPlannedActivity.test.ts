@@ -65,9 +65,9 @@ check('19. compact agenda: a SKIPPED plan is not offered as an upcoming row', co
 
 // 16. Plan tab: never shown as upcoming
 const row = mapPlanRow({ id: 'x', title: 'T', status: 'SKIPPED', plannedStartAt: '2026-06-10T17:00:00Z', plannedEndAt: '2026-06-10T18:00:00Z' } as any, TZ);
-check('16. mapPlanRow does not present a SKIPPED row as LOGGED', row.status !== 'LOGGED');
+check('16. mapPlanRow preserves a SKIPPED row as SKIPPED (never LOGGED or UPCOMING)', row.status === 'SKIPPED');
 const planTab = strip(read('../apps/web/components/PlanWithAuraView.tsx'));
-check("16. the Plan tab filters SKIPPED rows out before they can reach the upcoming list", /rows\.filter\(\(row: PlanApiRow\) => row\.status !== 'SKIPPED'\)/.test(planTab));
+check("16. the Plan tab derives its upcoming/completed lists from presentation predicates (mapPlanRow preserves SKIPPED; status-preservation suite covers replay)", /savedPlans\.filter\(isActionableUpcomingPlan\)/.test(planTab) && /savedPlans\.filter\(isCompletedPlan\)/.test(planTab));
 const db = strip(read('../apps/web/lib/db.ts'));
 check("16. listPlannedActivities (Plan tab / calendar feed source) excludes SKIPPED at the query", /status NOT IN \('CANCELLED', 'SKIPPED'\)/.test(db));
 
