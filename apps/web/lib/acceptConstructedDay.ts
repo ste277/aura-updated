@@ -23,6 +23,20 @@ import type { AcceptanceRejectionReason, AcceptanceDiagnostic } from './dayConst
 // facts. Never includes `deferredItems`.
 // ============================================================
 
+/**
+ * Goals -> Planning Integration V1 PR C, this ticket's own section 20 --
+ * a SIBLING envelope entry, never merged into `proposedItems` (E1's own
+ * scheduling-domain shape is untouched). `intentId` is the exact id a
+ * placed `proposedItems[].intentId` already carries; `goalActivityId` is
+ * the originating GoalActivity's id. See `buildGoalActivityLinksForAccept`
+ * (planDayEntry.ts) for how this array is actually built -- only rows
+ * that both carry Goal provenance AND were actually placed reach here.
+ */
+export interface GoalActivityLink {
+  intentId: string;
+  goalActivityId: string;
+}
+
 export interface AcceptConstructedDayRequestBody {
   clientRequestId: string;
   constructionWindow: ConstructDayPreview['constructionWindow'];
@@ -34,9 +48,13 @@ export interface AcceptConstructedDayRequestBody {
     end: Date;
     placementSource: 'FIXED_CONSTRAINT' | 'SELECTED_CANDIDATE';
   }>;
+  /** Present only when at least one accepted row actually carries Goal
+   * provenance -- omitted entirely otherwise, so an ordinary typed-only
+   * acceptance sends byte-identical JSON to before this PR. */
+  goalActivityLinks?: GoalActivityLink[];
 }
 
-export function buildAcceptRequestBody(preview: ConstructDayPreview, clientRequestId: string): AcceptConstructedDayRequestBody {
+export function buildAcceptRequestBody(preview: ConstructDayPreview, clientRequestId: string, goalActivityLinks?: readonly GoalActivityLink[]): AcceptConstructedDayRequestBody {
   return {
     clientRequestId,
     constructionWindow: preview.constructionWindow,
@@ -48,6 +66,7 @@ export function buildAcceptRequestBody(preview: ConstructDayPreview, clientReque
       end: item.end,
       placementSource: item.placementSource,
     })),
+    ...(goalActivityLinks && goalActivityLinks.length > 0 ? { goalActivityLinks: [...goalActivityLinks] } : {}),
   };
 }
 
@@ -106,13 +125,13 @@ export function parseAcceptResponseBody(body: unknown): AcceptConstructedDayClie
  * `NETWORK_ERROR`, distinct from every server-returned status, so a
  * caller can safely retry with the identical request.
  */
-export async function acceptConstructedDay(preview: ConstructDayPreview, clientRequestId: string): Promise<AcceptConstructedDayClientResult> {
+export async function acceptConstructedDay(preview: ConstructDayPreview, clientRequestId: string, goalActivityLinks?: readonly GoalActivityLink[]): Promise<AcceptConstructedDayClientResult> {
   let response: Response;
   try {
     response = await fetch('/api/day-constructor/accept', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(buildAcceptRequestBody(preview, clientRequestId)),
+      body: JSON.stringify(buildAcceptRequestBody(preview, clientRequestId, goalActivityLinks)),
     });
   } catch {
     return { status: 'NETWORK_ERROR' };

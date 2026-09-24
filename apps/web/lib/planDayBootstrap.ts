@@ -16,6 +16,8 @@
 
 import { getDatePartsInTimezone } from './timezone';
 import { resolvePlanningTargetDate, type PlanningHorizon } from './planningHorizon';
+import { MAX_PLAN_DAY_INTENTS } from './planDayEntry';
+import { deriveGoalActivityState, type GoalActivityStatus, type PlannedActivityStatus } from './goals';
 
 export interface PlanDayBootstrap {
   timezone: string;
@@ -101,4 +103,87 @@ export async function resolvePlanDayServerProps(deps: PlanDayBootstrapDeps, hori
 
   const bootstrap = resolvePlanDayBootstrap(user.timezone, deps.now(), horizon);
   return { ...bootstrap, availabilityConfigured: user.availabilityConfigured === true };
+}
+
+// ============================================================
+// Goals -> Planning Integration V1 PR C -- the Goal -> Plan My Day
+// handoff (this ticket's own section 6/7/8). Resolved server-side, at
+// bootstrap time, exactly like `resolvePlanDayServerProps` above:
+// `?fromGoal=&activities=` supplies ID REFERENCES ONLY (this ticket's own
+// section 6 -- "do NOT serialize titles/activity metadata into the URL"),
+// and every title/activityId this function returns is re-fetched fresh
+// from the database, never trusted from the client. Eligibility
+// (derivedState === 'SUGGESTED') is re-evaluated on EVERY call, which is
+// what makes this reload-safe by construction (this ticket's own section
+// 8 -- "Tab B must not seed the now-PLANNED activity"): a stale tab that
+// reloads re-invokes the whole Server Component, which calls this
+// function fresh, which re-derives eligibility from the CURRENT database
+// state, not from anything the originating Goal detail screen once knew.
+// ============================================================
+
+export interface GoalActivityHandoffItem {
+  id: string;
+  title: string;
+  activityId: string | null;
+}
+
+export interface GoalActivityHandoffDeps {
+  /** Same shape as `PlanDayBootstrapDeps.getSessionToken` -- a second,
+   * independent session read (this file's own established convention:
+   * `resolvePlanDayServerProps` above already does its own; every Goals
+   * route (app/goals/page.tsx, app/goals/[goalId]/page.tsx) already does
+   * its own too). A cookie read + HMAC verify is cheap; this is not a
+   * meaningful duplication cost. */
+  getSessionToken: () => string | undefined;
+  verifySession: (token: string) => { userId: string } | null;
+  /** `listGoalActivitiesWithLinkedPlanStatus` (db.ts), passed by
+   * reference -- the SAME already-merged PR A read this ticket's own
+   * section 40's "reuse the already-merged PR A APIs" instruction asks
+   * for, never a duplicate query. */
+  listGoalActivities: (
+    userId: string,
+    goalId: string
+  ) => Promise<
+    ReadonlyArray<{ id: string; title: string; activityId: string | null; status: string; plannedActivityId: string | null; linkedPlanStatus: string | null }>
+  >;
+}
+
+/**
+ * `goalId`/`activitiesParam` are the raw, untrusted `?fromGoal=`/
+ * `?activities=` query string values (or `null`/absent). Returns an empty
+ * array for every unauthenticated/malformed/not-owned/ineligible case --
+ * never throws, never distinguishes "doesn't exist" from "not yours" from
+ * "not eligible right now" (this ticket's own section 7/8: a stale or
+ * foreign id simply fails to seed a row, silently, exactly like every
+ * other ownership boundary already established in this codebase, e.g.
+ * PR A's own `addGoalActivity` returning `null` for an unowned Goal).
+ */
+export async function resolveGoalActivityHandoff(deps: GoalActivityHandoffDeps, goalId: string | null, activitiesParam: string | null): Promise<GoalActivityHandoffItem[]> {
+  if (!goalId || !activitiesParam) return [];
+  const requestedIds = Array.from(new Set(activitiesParam.split(',').map((id) => id.trim()).filter(Boolean))).slice(0, MAX_PLAN_DAY_INTENTS);
+  if (requestedIds.length === 0) return [];
+
+  const token = deps.getSessionToken();
+  if (!token) return [];
+  const session = deps.verifySession(token);
+  if (!session) return [];
+
+  const requestedIdSet = new Set(requestedIds);
+  // Already scoped to `(userId, goalId)` inside the query itself -- a
+  // non-owned or non-existent Goal simply returns zero rows, no separate
+  // existence check needed (same "identical presentation, no leak" pattern
+  // this ticket's own section 8/PR B's 404 handling already established).
+  const activities = await deps.listGoalActivities(session.userId, goalId);
+
+  return activities
+    .filter((activity) => requestedIdSet.has(activity.id))
+    .filter(
+      (activity) =>
+        deriveGoalActivityState({
+          status: activity.status as GoalActivityStatus,
+          plannedActivityId: activity.plannedActivityId,
+          linkedPlanStatus: activity.linkedPlanStatus as PlannedActivityStatus | null,
+        }) === 'SUGGESTED'
+    )
+    .map((activity) => ({ id: activity.id, title: activity.title, activityId: activity.activityId }));
 }

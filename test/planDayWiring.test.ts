@@ -87,8 +87,16 @@ function main() {
   check('19. an unauthenticated visitor (null props) is sent to Home, never shown a duplicate LoginScreen', planDayClientSource.includes("window.location.href = '/';"));
   check('20. PlanDayClient performs no session/user fetch of its own -- authentication is entirely server-established before this component ever renders', !planDayClientSource.includes('/api/auth/session'));
   check(
+    // Goals -> Planning Integration V1 PR C legitimately added a second
+    // named import (listGoalActivitiesWithLinkedPlanStatus) to the SAME
+    // `from '../../lib/db'` line, which broke this check's old exact-
+    // adjacent-substring form (it required `getUserById` to be
+    // immediately followed by `}`) without breaking the underlying
+    // invariant it proves -- widened to "getUserById appears as one of
+    // the named imports from lib/db", still real substring matching,
+    // never weakened to "imports something from lib/db".
     '21. page.tsx (the Server Component route shell) reuses the existing canonical session verification (verifySessionToken/SESSION_COOKIE_NAME/getUserById) -- no second auth model',
-    planDayPageSource.includes("verifySessionToken, SESSION_COOKIE_NAME } from '../../lib/auth'") && planDayPageSource.includes("getUserById } from '../../lib/db'")
+    planDayPageSource.includes("verifySessionToken, SESSION_COOKIE_NAME } from '../../lib/auth'") && /import \{[^}]*\bgetUserById\b[^}]*\} from '\.\.\/\.\.\/lib\/db'/.test(planDayPageSource)
   );
 
   // ============================================================
@@ -124,8 +132,14 @@ function main() {
   // (30-38)
   // ============================================================
   check(
+    // Goals -> Planning Integration V1 PR C reformatted the destructured
+    // parameter onto multiple lines (adding fromGoal/activities to the
+    // searchParams type) -- \s* tolerates both the old single-line and
+    // the new multi-line form; the underlying fact (a real async Server
+    // Component destructuring searchParams as its parameter) is
+    // unchanged and still directly asserted.
     '30. page.tsx is a real async Server Component doing the session/user read itself (matches the established app/moment/[token]/page.tsx precedent)',
-    /export default async function PlanDayPage\(\{ searchParams \}/.test(planDayPageSource)
+    /export default async function PlanDayPage\(\{\s*searchParams/.test(planDayPageSource)
   );
   check('31. page.tsx reads the authoritative clock exactly once, passed by reference into resolvePlanDayServerProps', occurrences(planDayPageSource, 'new Date()') === 1 && planDayPageSource.includes('now: () => new Date()'));
   // Intent Fidelity V1 PR G3/G4 added `resolveThisWeekDeadline`'s own
@@ -144,8 +158,16 @@ function main() {
   check('34. planDayBootstrap.ts imports no next/server or next/headers of its own -- fully framework-independent, directly testable (mirrors F1s own handleDayConstructorPreviewRequest pattern)', !/next\/server|next\/headers/.test(planDayBootstrapSource));
   check('35. resolvePlanDayBootstrap reuses the canonical getDatePartsInTimezone helper -- no second civil-date derivation', planDayBootstrapSource.includes("from './timezone'"));
   check(
+    // Goals -> Planning Integration V1 PR C added a 5th server-supplied
+    // prop (goalActivities, itself already ownership/eligibility-
+    // resolved server-side -- see PR C's own report) to the SAME
+    // destructured parameter list -- widened from an exact 4-name
+    // sequence to "all 4 original names appear, still destructured
+    // straight off PlanDayClientProps", so this still fails if any of
+    // the original four were ever removed or reintroduced as internal
+    // state.
     '36. PlanDayClient accepts timezone/planningDate/horizon/availabilityConfigured as props (server-supplied), not internal state derived from a fetch',
-    /export function PlanDayClient\(\{ timezone, planningDate, horizon, availabilityConfigured \}: PlanDayClientProps\)/.test(planDayClientSource)
+    /export function PlanDayClient\(\{[^}]*\btimezone\b[^}]*\bplanningDate\b[^}]*\bhorizon\b[^}]*\bavailabilityConfigured\b[^}]*\}: PlanDayClientProps\)/.test(planDayClientSource)
   );
   check('37. buildRequestedIntentsForSubmission and previewConstructedDay are both called with the SAME planningDate value at the submit call site', /buildRequestedIntentsForSubmission\(rows, timezone, planningDate\)/.test(planDayClientSource) && /previewConstructedDay\(intents, planningDate\)/.test(planDayClientSource));
   check(
@@ -442,7 +464,21 @@ function main() {
 
   // 81/82. Both new flags are real UI-action state, defaulting to
   // false, never derived from row content.
-  check('81. planRevealed starts false -- the fresh page shows no blank card/CTA before any user action', /const \[planRevealed, setPlanRevealed\] = useState\(false\);/.test(planDayClientSource));
+  // Goals -> Planning Integration V1 PR C: planRevealed no longer starts
+  // UNCONDITIONALLY false -- it now starts true when a Goal handoff
+  // already seeded real, non-blank rows (goalActivities.length > 0),
+  // matching PR C's own section 45 manual flow ("Plan My Day opens ->
+  // exactly 2 rows seeded", i.e. immediately visible, never hidden
+  // behind the Quick-Picks landing screen). The invariant this check
+  // originally proved -- "the fresh page shows no blank card/CTA before
+  // any user action" -- is verified here for the case this file's own
+  // fixtures actually exercise (an ORDINARY visit, no Goal handoff,
+  // where goalActivities is empty) -- still starts false there, byte-
+  // for-byte the same as before this PR.
+  check(
+    '81. planRevealed starts false for an ordinary visit (goalActivities.length > 0 ? true : false) -- the fresh page still shows no blank card/CTA before any user action when there is no Goal handoff',
+    /const \[planRevealed, setPlanRevealed\] = useState\(goalActivities\.length > 0\);/.test(planDayClientSource)
+  );
   check('82. addPickerExpanded starts false -- "+ Add another" begins collapsed once a plan exists', /const \[addPickerExpanded, setAddPickerExpanded\] = useState\(false\);/.test(planDayClientSource));
 
   // 83/84. A Quick Pick or "+ Something else" both reveal the plan and

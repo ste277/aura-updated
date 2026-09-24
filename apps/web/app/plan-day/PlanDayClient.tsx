@@ -25,11 +25,13 @@ import { PLAN_DAY_QUICK_PICKS, quickPickIcon, type PlanDayQuickPick } from '../.
 import {
   createEmptyIntentRow,
   createIntentRowFromQuickPick,
+  createIntentRowFromGoalActivity,
   isRowUntouched,
   formatIntentRowSummary,
   canSubmitPlanDay,
   canAddAnotherRow,
   buildRequestedIntentsForSubmission,
+  buildGoalActivityLinksForAccept,
   presentPlanDayPreviewFailure,
   PLAN_DAY_DURATION_OPTIONS_MINUTES,
   NO_DEADLINE,
@@ -37,6 +39,7 @@ import {
   type PlanDayDeadlineChoice,
   type PlanDayEntryErrorPresentation,
 } from '../../lib/planDayEntry';
+import type { GoalActivityHandoffItem } from '../../lib/planDayBootstrap';
 
 /**
  * Day Constructor V1 -- PR F2. The user-reachable "Plan my day" entry
@@ -108,13 +111,28 @@ export interface PlanDayClientProps {
   planningDate: string | null;
   horizon: PlanningHorizon | null;
   availabilityConfigured: boolean | null;
+  /** Goals -> Planning Integration V1 PR C (this ticket's own section
+   * 6/7/8) -- already ownership/eligibility-resolved server-side
+   * (planDayBootstrap.ts's own `resolveGoalActivityHandoff`) from the
+   * `?fromGoal=&activities=` URL, BEFORE this component ever mounts.
+   * Empty for an ordinary `/plan-day` visit. */
+  goalActivities: readonly GoalActivityHandoffItem[];
 }
 
-export function PlanDayClient({ timezone, planningDate, horizon, availabilityConfigured }: PlanDayClientProps) {
+export function PlanDayClient({ timezone, planningDate, horizon, availabilityConfigured, goalActivities }: PlanDayClientProps) {
   const router = useRouter();
   const authenticated = !!timezone && !!planningDate && !!horizon;
   const [phase, setPhase] = useState<Phase>(() => (authenticated ? 'ENTRY' : 'REDIRECTING'));
-  const [rows, setRows] = useState<PlanDayIntentRow[]>(() => [createEmptyIntentRow()]);
+  // Goals -> Planning Integration V1 PR C -- a Goal handoff seeds one row
+  // per resolved, still-eligible GoalActivity (this ticket's own section
+  // 9/10); an ordinary visit (empty `goalActivities`) keeps the existing
+  // single-blank-row default byte-for-byte. Resolved ONCE, from the
+  // initial server-supplied props -- re-navigating within the same
+  // session never re-seeds (this file reads no `goalActivities` value
+  // again after this initializer).
+  const [rows, setRows] = useState<PlanDayIntentRow[]>(() =>
+    goalActivities.length > 0 ? goalActivities.map(createIntentRowFromGoalActivity) : [createEmptyIntentRow()]
+  );
   // Plan My Day UX V2 PR U1 -- every row starts collapsed, including a
   // freshly-typed one (this ticket's own section 23: defaults already
   // require no configuration, so there is no product reason to force
@@ -131,7 +149,13 @@ export function PlanDayClient({ timezone, planningDate, horizon, availabilityCon
   // reveal/focus the SAME still-untouched internal blank row (this
   // ticket's own section 8) without that row already having rendered as
   // a visible card the instant before.
-  const [planRevealed, setPlanRevealed] = useState(false);
+  // Goals -> Planning Integration V1 PR C -- a Goal handoff already
+  // seeded real, non-blank rows above; showing the Quick-Picks landing
+  // screen on top of them would hide exactly what the user navigated
+  // here to review (this ticket's own section 45's own manual flow:
+  // "Plan My Day opens -> exactly 2 rows seeded", i.e. immediately
+  // visible, not behind a picker).
+  const [planRevealed, setPlanRevealed] = useState(goalActivities.length > 0);
   // Whether the compact `+ Add another` affordance is currently showing
   // the full Quick Picks grid (this ticket's own section 15/19) -- only
   // meaningful once `planRevealed` is true.
@@ -359,7 +383,13 @@ export function PlanDayClient({ timezone, planningDate, horizon, availabilityCon
         )}
 
         {phase === 'PREVIEW' && preview ? (
-          <DayPlanPreviewController preview={preview} onDiscard={handleDiscard} onSaved={handleSaved} onRefreshRequested={handleRefreshRequested} />
+          <DayPlanPreviewController
+            preview={preview}
+            onDiscard={handleDiscard}
+            onSaved={handleSaved}
+            onRefreshRequested={handleRefreshRequested}
+            goalActivityLinks={buildGoalActivityLinksForAccept(rows, preview.constructedDay.proposedItems)}
+          />
         ) : (
           <>
             <PageHeader title="Plan my day" subtitle={horizon === 'TOMORROW' ? 'What do you want to get done tomorrow?' : 'What do you want to get done today?'} />

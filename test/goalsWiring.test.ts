@@ -21,6 +21,22 @@ function read(relPath: string): string {
   return fs.readFileSync(path.join(__dirname, relPath), 'utf8');
 }
 
+// Goals -> Planning Integration V1 PR C -- five files were REMOVED from
+// this "must stay Goal-unaware forever" list: acceptConstructedDay.ts,
+// dayConstructorAcceptancePersistence.ts, planDayEntry.ts,
+// planDayBootstrap.ts, and app/plan-day/PlanDayClient.tsx. PR A's own
+// boundary (this file's own module doc comment above) was correct AT PR
+// A's OWN MERGE -- PR C is the ticket explicitly authorized to add the
+// Goal <-> Plan My Day handoff through exactly these five files (its own
+// section 3/6/9/10/20/26), so their presence in this list is now
+// superseded, not a regression. Every OTHER file below (Day Constructor
+// core/orchestrator, DayIntent, Timing Search, both preview files, E1
+// acceptance evaluation, availability, Home timeline composer, Day
+// Builder) remains correctly Goal-unaware -- PR C's own explicit
+// boundary (its own section 16/17/18/19) -- and PR C's own dedicated
+// suite (goalPlanningHandoffWiring.test.ts) re-proves that, plus proves
+// the five files above only gained the narrow, sibling-envelope
+// additions PR C's own design calls for, never anything deeper.
 const UNTOUCHED_FILES: Record<string, string> = {
   'Day Constructor core': '../apps/web/lib/dayConstructor.ts',
   'Day Constructor orchestrator': '../apps/web/lib/dayConstructorOrchestrator.ts',
@@ -28,14 +44,9 @@ const UNTOUCHED_FILES: Record<string, string> = {
   'Timing search': '../packages/recommendation/src/timingSearch.ts',
   'Preview request parsing (wire contract)': '../apps/web/lib/dayConstructorPreviewRequest.ts',
   'Preview client (wire contract)': '../apps/web/lib/dayConstructorPreviewClient.ts',
-  'Accept client helper': '../apps/web/lib/acceptConstructedDay.ts',
   'Acceptance evaluation (E1)': '../apps/web/lib/dayConstructorAcceptance.ts',
-  'Acceptance persistence (E2)': '../apps/web/lib/dayConstructorAcceptancePersistence.ts',
   'Availability context': '../apps/web/lib/availabilityContext.ts',
   'Home timeline composer': '../apps/web/lib/homeTimelineComposer.ts',
-  'Plan My Day entry/row model': '../apps/web/lib/planDayEntry.ts',
-  'Plan My Day bootstrap': '../apps/web/lib/planDayBootstrap.ts',
-  'Plan My Day client component': '../apps/web/app/plan-day/PlanDayClient.tsx',
   'Day Builder': '../apps/web/lib/dayBuilder.ts',
   'Day Builder card component': '../apps/web/components/DayBuilderCard.tsx',
 };

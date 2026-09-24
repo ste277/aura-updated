@@ -1,8 +1,8 @@
 import type { Metadata } from 'next';
 import { cookies } from 'next/headers';
 import { verifySessionToken, SESSION_COOKIE_NAME } from '../../lib/auth';
-import { getUserById } from '../../lib/db';
-import { resolvePlanDayServerProps } from '../../lib/planDayBootstrap';
+import { getUserById, listGoalActivitiesWithLinkedPlanStatus } from '../../lib/db';
+import { resolvePlanDayServerProps, resolveGoalActivityHandoff } from '../../lib/planDayBootstrap';
 import { parseHorizonSearchParam } from '../../lib/planningHorizon';
 import { PlanDayClient } from './PlanDayClient';
 
@@ -42,7 +42,11 @@ export const metadata: Metadata = {
   description: 'Tell Aura what you want to get done today and see how it fits.',
 };
 
-export default async function PlanDayPage({ searchParams }: { searchParams: { horizon?: string | string[] } }) {
+export default async function PlanDayPage({
+  searchParams,
+}: {
+  searchParams: { horizon?: string | string[]; fromGoal?: string | string[]; activities?: string | string[] };
+}) {
   const horizon = parseHorizonSearchParam(searchParams.horizon);
   const bootstrap = await resolvePlanDayServerProps({
     getSessionToken: () => cookies().get(SESSION_COOKIE_NAME)?.value,
@@ -50,12 +54,31 @@ export default async function PlanDayPage({ searchParams }: { searchParams: { ho
     getUser: (userId) => getUserById(userId),
     now: () => new Date(),
   }, horizon);
+
+  // Goals -> Planning Integration V1 PR C -- resolved fresh on every
+  // render (this ticket's own section 8: reload-safety), entirely
+  // separate from the bootstrap above. A malformed/repeated query param
+  // (Next.js's `string | string[]` typing for a duplicated key) is
+  // treated as absent, never guessed at.
+  const fromGoal = typeof searchParams.fromGoal === 'string' ? searchParams.fromGoal : null;
+  const activitiesParam = typeof searchParams.activities === 'string' ? searchParams.activities : null;
+  const goalActivities = await resolveGoalActivityHandoff(
+    {
+      getSessionToken: () => cookies().get(SESSION_COOKIE_NAME)?.value,
+      verifySession: (token) => verifySessionToken(token),
+      listGoalActivities: (userId, goalId) => listGoalActivitiesWithLinkedPlanStatus(userId, goalId),
+    },
+    fromGoal,
+    activitiesParam
+  );
+
   return (
     <PlanDayClient
       timezone={bootstrap?.timezone ?? null}
       planningDate={bootstrap?.planningDate ?? null}
       horizon={bootstrap ? horizon : null}
       availabilityConfigured={bootstrap?.availabilityConfigured ?? null}
+      goalActivities={goalActivities}
     />
   );
 }
