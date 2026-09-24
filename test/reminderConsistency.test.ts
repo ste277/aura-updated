@@ -149,7 +149,7 @@ async function main() {
   // ---- wiring ----
   const dash = read('../apps/web/components/HomeDashboard.tsx');
   const page = read('../apps/web/app/page.tsx');
-  check('26. auraUpdates state stays in page.tsx (no second copy in Home): Home receives the authoritative list and filters it with its own confirmed ids', /startingSoonReminders=\{auraUpdates\?\.upcoming\}/.test(page) && /const startingSoonReminder = selectVisibleStartingSoonReminder\(startingSoonReminders, loggedPlanIds\)/.test(dash) && !/useState<[^>]*AuraUpdates/.test(dash));
+  check('26. auraUpdates state stays in page.tsx (no second copy in Home): Home receives the authoritative list and filters it with its own confirmed ids', /startingSoonReminders=\{auraUpdates\?\.upcoming\}/.test(page) && /const startingSoonReminder = selectVisibleStartingSoonReminder\(startingSoonReminders, executionFacts\)/.test(dash) && !/useState<[^>]*AuraUpdates/.test(dash));
   check('9/26. Aura Updates is refreshed by the existing loader (loadAuraUpdates) as one independent, failure-tolerant reconciliation step', /refreshAuraUpdates: loadAuraUpdates/.test(page) && /safely\(deps\.refreshAuraUpdates\)/.test(read('../apps/web/lib/homeRefresh.ts')));
   check('27. Home-tab entry still refreshes Aura Updates (unchanged)', /if \(activeTab === 'home' \|\| activeTab === 'updates'\) loadAuraUpdates\(\)/.test(page));
   check('24/25. the filter depends only on the confirmed set (not on errors or in-flight state)', !/completingPlanIds|completeError/.test(dash.slice(dash.indexOf('selectVisibleStartingSoonReminder(startingSoonReminders'), dash.indexOf('selectVisibleStartingSoonReminder(startingSoonReminders') + 200)));

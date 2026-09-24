@@ -10,6 +10,7 @@
  */
 import type { HomeTimelineItem } from './homeTimelineTypes';
 import type { RightNowState } from './rightNowSelection';
+import type { DailyAgenda, DailyAgendaItem } from './dailyAgenda';
 
 /** DailyAgenda projects a plan as `plan:<PlannedActivity.id>` (dailyAgenda.ts). Returns null for anything else. */
 export function planIdFromTimelineItem(item: HomeTimelineItem): string | null {
@@ -24,14 +25,56 @@ export function completablePlanId(state: RightNowState): string | null {
   return planIdFromTimelineItem(state.item);
 }
 
-/** Overlays a CONFIRMED completion onto the composed timeline so the day stays truthful even if the follow-up agenda refresh fails or is slow. Only marks the confirmed plans; everything else is untouched. */
-export function overlayLoggedPlans(timeline: HomeTimelineItem[], loggedPlanIds: ReadonlySet<string>): HomeTimelineItem[] {
-  if (loggedPlanIds.size === 0) return timeline;
+/** Daily Experience V1 PR C2 -- the server-CONFIRMED execution outcome of a plan, held by Home until the authoritative refresh catches up (or fails). Deliberately two values, not a generic "resolved": Done and Skip stay distinct facts. */
+export type ExecutionOutcome = 'COMPLETED' | 'SKIPPED';
+
+/** Skip is offered only for the committed plan that is happening NOW (Right Now's absolute-instant ACTIVE_PLAN). Never for an imminent plan, an Opportunity, the context state, or anything already resolved. */
+export function skippablePlanId(state: RightNowState): string | null {
+  if (state.kind !== 'ACTIVE_PLAN') return null;
+  return planIdFromTimelineItem(state.item);
+}
+
+/** Overlays CONFIRMED execution outcomes onto the composed timeline so the day stays truthful even if the follow-up agenda refresh fails, is slow, or returns stale data. Only marks the confirmed plans; everything else is untouched. COMPLETED and SKIPPED keep distinct agendaStatus values. */
+export function overlayExecutionFacts(timeline: HomeTimelineItem[], facts: ReadonlyMap<string, ExecutionOutcome>): HomeTimelineItem[] {
+  if (facts.size === 0) return timeline;
   return timeline.map((item) => {
     const planId = planIdFromTimelineItem(item);
-    if (!planId || !loggedPlanIds.has(planId) || item.metadata?.isCompleted) return item;
-    return { ...item, metadata: { ...item.metadata, agendaStatus: 'COMPLETED', isCompleted: true, isCurrent: false, isPast: true } };
+    const outcome = planId ? facts.get(planId) : undefined;
+    if (!outcome) return item;
+    if (outcome === 'COMPLETED') {
+      if (item.metadata?.isCompleted) return item;
+      return { ...item, metadata: { ...item.metadata, agendaStatus: 'COMPLETED', isCompleted: true, isCurrent: false, isPast: true } };
+    }
+    if (item.metadata?.agendaStatus === 'SKIPPED') return item;
+    return { ...item, metadata: { ...item.metadata, agendaStatus: 'SKIPPED', isCompleted: false, isCurrent: false, isPast: true } };
   });
+}
+
+/** PR B's completion-only overlay, kept as the single-outcome form its suite exercises. */
+export function overlayLoggedPlans(timeline: HomeTimelineItem[], loggedPlanIds: ReadonlySet<string>): HomeTimelineItem[] {
+  return overlayExecutionFacts(timeline, new Map([...loggedPlanIds].map((id): [string, ExecutionOutcome] => [id, 'COMPLETED'])));
+}
+
+const NEXT_ITEM_STATUSES = new Set(['UPCOMING', 'STARTING_SOON', 'WAITING', 'CONFIRMED']);
+
+function planIdFromAgendaItem(item: DailyAgendaItem): string | null {
+  if (item.type !== 'PLAN' || !item.id.startsWith('plan:')) return null;
+  const id = item.id.slice('plan:'.length);
+  return id.length > 0 ? id : null;
+}
+
+/** A plan with a confirmed outcome must not remain the agenda's "next" item. Replaces it with the next eligible unresolved item (or none); a next item that is not a resolved plan is returned untouched. */
+export function agendaWithoutResolvedNext(agenda: DailyAgenda | null | undefined, facts: { has(planId: string): boolean }): DailyAgenda | null | undefined {
+  const next = agenda?.nextItem;
+  if (!agenda || !next) return agenda;
+  const nextPlanId = planIdFromAgendaItem(next);
+  if (!nextPlanId || !facts.has(nextPlanId)) return agenda;
+  const replacement = agenda.items.find((item) => {
+    if (!NEXT_ITEM_STATUSES.has(item.status)) return false;
+    const id = planIdFromAgendaItem(item);
+    return !(id && facts.has(id));
+  });
+  return { ...agenda, nextItem: replacement };
 }
 
 export interface CompletionError {
@@ -45,26 +88,40 @@ export function visibleCompletionError(error: CompletionError | null, currentPla
 }
 
 export type CompletePlanResult = 'DONE' | 'FAILED' | 'BUSY';
+export type SkipPlanResult = 'SKIPPED' | 'FAILED' | 'BUSY';
 
 /**
- * One submitter per Home instance. `inFlight` is a closure Set, so a second
- * call for the same plan in the SAME task sees the first (React state would
- * not). Success requires the server to report the plan as LOGGED.
+ * One execution-action submitter per Home instance, shared by Done and Skip.
+ * `inFlight` is a single closure Set keyed by plan id, so a second action --
+ * of EITHER kind -- for the same plan in the SAME task sees the first (React
+ * state would not) and never issues a competing request. Success requires
+ * the server to report the plan in the expected terminal state (LOGGED for
+ * Done, SKIPPED for Skip); anything else is FAILED.
  */
-export function createPlanCompleter(fetchImpl: typeof fetch = (...args) => fetch(...args)) {
+export function createPlanExecutor(fetchImpl: typeof fetch = (...args) => fetch(...args)) {
   const inFlight = new Set<string>();
-  return async function complete(planId: string): Promise<CompletePlanResult> {
+  const run = async <R extends string>(planId: string, action: 'log' | 'skip', expectedStatus: 'LOGGED' | 'SKIPPED', success: R): Promise<R | 'FAILED' | 'BUSY'> => {
     if (inFlight.has(planId)) return 'BUSY';
     inFlight.add(planId);
     try {
-      const res = await fetchImpl(`/api/plans/${encodeURIComponent(planId)}/log`, { method: 'POST' });
+      const res = await fetchImpl(`/api/plans/${encodeURIComponent(planId)}/${action}`, { method: 'POST' });
       if (!res.ok) return 'FAILED';
       const body = await res.json().catch(() => null);
-      return body?.plan?.status === 'LOGGED' ? 'DONE' : 'FAILED';
+      return body?.plan?.status === expectedStatus ? success : 'FAILED';
     } catch {
       return 'FAILED';
     } finally {
       inFlight.delete(planId);
     }
   };
+  return {
+    isBusy: (planId: string) => inFlight.has(planId),
+    complete: (planId: string): Promise<CompletePlanResult> => run(planId, 'log', 'LOGGED', 'DONE'),
+    skip: (planId: string): Promise<SkipPlanResult> => run(planId, 'skip', 'SKIPPED', 'SKIPPED'),
+  };
+}
+
+/** PR B's completion-only submitter form, backed by the shared executor. */
+export function createPlanCompleter(fetchImpl?: typeof fetch) {
+  return createPlanExecutor(fetchImpl).complete;
 }

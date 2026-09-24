@@ -97,7 +97,8 @@ check("15. both source-link UPDATEs may replace a link only over a CANCELLED or 
 
 // PR B Done regression: Home completion code untouched by C1
 const homeFiles = ['homeCompletion.ts', 'homeRefresh.ts', 'reminderConsistency.ts'].map((f) => read(`../apps/web/lib/${f}`)).join('\n');
-check('49. Home completion/refresh/reminder-consistency modules do not mention SKIPPED (Done semantics untouched; C2 owns Home UX)', !/SKIPPED|skipPlannedActivity/.test(homeFiles));
+const homeCompletionSrc = read('../apps/web/lib/homeCompletion.ts');
+check("49. Done semantics stay separate from Skip in Home: the refresh module never mentions SKIPPED, and Done is still exactly POST .../log expecting LOGGED (Skip UX lives in C2's own executor entry)", !/SKIPPED|skipPlannedActivity/.test(read('../apps/web/lib/homeRefresh.ts')) && /complete: \(planId: string\): Promise<CompletePlanResult> => run\(planId, 'log', 'LOGGED', 'DONE'\)/.test(homeCompletionSrc));
 
 if (!allPassed) { console.error('SOME SKIP CHECKS FAILED'); process.exit(1); }
 console.log('ALL SKIP CHECKS PASSED');

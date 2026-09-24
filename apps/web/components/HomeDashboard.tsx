@@ -35,7 +35,7 @@ import type { HomeTimelineContextWindow, HomeTimelineItem } from '../lib/homeTim
 import { buildWhyAuraExplanation } from '../lib/whyAuraViewModel';
 import type { GuidanceUiState } from '../lib/bestForYouViewModel';
 import { HomeQuickCapture } from './HomeQuickCapture';
-import { createPlanCompleter, completablePlanId, overlayLoggedPlans, visibleCompletionError, type CompletionError } from '../lib/homeCompletion';
+import { createPlanExecutor, completablePlanId, skippablePlanId, overlayExecutionFacts, agendaWithoutResolvedNext, visibleCompletionError, type CompletionError, type ExecutionOutcome } from '../lib/homeCompletion';
 import { selectVisibleStartingSoonReminder } from '../lib/reminderConsistency';
 
 /** Matches page.tsx's own FALLBACK_TZ -- defensive only, page.tsx always supplies a real value today. */
@@ -446,11 +446,17 @@ export function HomeDashboard({
   // Daily Experience V1 PR B -- plans the server has confirmed as logged from
   // Home, overlaid on the composed timeline until the authoritative agenda
   // refresh catches up (or if it fails).
-  const [loggedPlanIds, setLoggedPlanIds] = useState<ReadonlySet<string>>(new Set());
-  const planCompleter = useRef(createPlanCompleter());
+  // Daily Experience V1 PR C2 -- generalized to both confirmed outcomes: Done
+  // (COMPLETED) and Skip (SKIPPED). One map, keyed by plan id, never a generic
+  // "resolved" state: presentation keeps the outcome distinct.
+  const [executionFacts, setExecutionFacts] = useState<ReadonlyMap<string, ExecutionOutcome>>(new Map());
+  // One shared execution guard per plan: Done and Skip can never race each other from this client.
+  const planExecutor = useRef(createPlanExecutor());
   // Per-plan in-flight ids and a plan-owned error: A's saving state / error never leak onto B.
   const [completingPlanIds, setCompletingPlanIds] = useState<ReadonlySet<string>>(new Set());
+  const [skippingPlanIds, setSkippingPlanIds] = useState<ReadonlySet<string>>(new Set());
   const [completeError, setCompleteError] = useState<CompletionError | null>(null);
+  const [skipError, setSkipError] = useState<CompletionError | null>(null);
 
   const composedTimeline: HomeTimelineItem[] = useMemo(
     () =>
@@ -464,7 +470,7 @@ export function HomeDashboard({
       }),
     [myDayAgenda, readyGuidance, timelineWindows, currentMinuteOfDay, effectiveTimezone]
   );
-  const homeTimeline: HomeTimelineItem[] = useMemo(() => overlayLoggedPlans(composedTimeline, loggedPlanIds), [composedTimeline, loggedPlanIds]);
+  const homeTimeline: HomeTimelineItem[] = useMemo(() => overlayExecutionFacts(composedTimeline, executionFacts), [composedTimeline, executionFacts]);
 
   // Home UI V2 -- Why Aura lines, resolved once here (never inside
   // HomeTimeline itself) by matching each annotated item back to its
@@ -509,14 +515,17 @@ export function HomeDashboard({
   const rightNowState = useMemo(() => selectRightNowState(homeTimeline, new Date()), [homeTimeline, currentMinuteOfDay]);
   const spotlightItem = rightNowState.kind !== 'CONTEXT_OPEN' ? rightNowState.item : undefined;
   const completablePlanIdNow = completablePlanId(rightNowState);
+  const skippablePlanIdNow = skippablePlanId(rightNowState);
 
   const handleCompleteRightNow = async (planId: string) => {
     // planId is captured at click time; every state change below is keyed by it,
     // never by whichever plan Right Now shows when the response arrives. The
     // completer's own synchronous in-flight guard blocks same-task bursts.
+    if (planExecutor.current.isBusy(planId)) return;
     setCompleteError((current) => (current?.planId === planId ? null : current));
+    setSkipError((current) => (current?.planId === planId ? null : current));
     setCompletingPlanIds((current) => new Set(current).add(planId));
-    const result = await planCompleter.current(planId);
+    const result = await planExecutor.current.complete(planId);
     if (result === 'BUSY') return;
     setCompletingPlanIds((current) => {
       const next = new Set(current);
@@ -529,10 +538,40 @@ export function HomeDashboard({
       return;
     }
     // The server CONFIRMED LOGGED for this plan id: remember it and clear its error.
-    setLoggedPlanIds((current) => new Set(current).add(planId));
+    setExecutionFacts((current) => new Map(current).set(planId, 'COMPLETED'));
     setCompleteError((current) => (current?.planId === planId ? null : current));
     // Reconciliation is secondary and can never fail the completion: the refresh
     // keeps last-known-good state on any failure (lib/homeRefresh.ts).
+    try {
+      await onPlanCompleted?.();
+    } catch {
+      // last valid Home stays
+    }
+  };
+  // Skip is a separate execution outcome (POST /api/plans/[id]/skip), never a
+  // variant of Done. Same ownership rules: keyed by the plan id captured at click,
+  // never applied optimistically, reconciliation can never fail a confirmed Skip.
+  const handleSkipRightNow = async (planId: string) => {
+    if (planExecutor.current.isBusy(planId)) return;
+    setSkipError((current) => (current?.planId === planId ? null : current));
+    setCompleteError((current) => (current?.planId === planId ? null : current));
+    setSkippingPlanIds((current) => new Set(current).add(planId));
+    const result = await planExecutor.current.skip(planId);
+    if (result === 'BUSY') return;
+    setSkippingPlanIds((current) => {
+      const next = new Set(current);
+      next.delete(planId);
+      return next;
+    });
+    if (result === 'FAILED') {
+      // Pre-confirmation failure: nothing is recorded; the plan stays actionable.
+      setSkipError({ planId, message: "Couldn't skip that. Try again." });
+      return;
+    }
+    setExecutionFacts((current) => new Map(current).set(planId, 'SKIPPED'));
+    setSkipError((current) => (current?.planId === planId ? null : current));
+    // The Skip button unmounts on success: hand focus to the stable, updated Right Now region rather than <body>.
+    setTimeout(() => document.querySelector<HTMLElement>('[data-home-right-now-label]')?.focus(), 0);
     try {
       await onPlanCompleted?.();
     } catch {
@@ -608,8 +647,8 @@ export function HomeDashboard({
     handleAddSomething();
   };
 
-  const startingSoonReminder = selectVisibleStartingSoonReminder(startingSoonReminders, loggedPlanIds);
-  const nextThing = deriveNextMeaningfulThing({ topMomentUpdate, startingSoonReminder, agenda: myDayAgenda });
+  const startingSoonReminder = selectVisibleStartingSoonReminder(startingSoonReminders, executionFacts);
+  const nextThing = deriveNextMeaningfulThing({ topMomentUpdate, startingSoonReminder, agenda: agendaWithoutResolvedNext(myDayAgenda, executionFacts) });
 
   const handleReflection = async (outputLevel: 'LOW' | 'MODERATE' | 'PEAK_FLOW') => {
     if (!onSubmitReflection || isSavingReflection) return;
@@ -709,7 +748,7 @@ export function HomeDashboard({
           <FlowRing score={energyScore} color={tone.color} />
           <div style={{ minWidth: 0 }}>
             <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: spacing.sm, flexWrap: 'wrap' }}>
-              <div style={typography.sectionEyebrow}>● Right Now</div>
+              <div data-home-right-now-label tabIndex={-1} style={{ ...typography.sectionEyebrow, outline: 'none' }}>● Right Now</div>
               <StatusBadge label={tone.pill} tone={toneToStatusTone(tone.color)} />
             </div>
             <h2 style={{ margin: '13px 0 0', fontSize: 25, color: colors.textPrimary, lineHeight: 1.14 }}>{getHeroHeadline(activeWindowName)}</h2>
@@ -763,12 +802,23 @@ export function HomeDashboard({
                 {completablePlanIdNow && (
                   <SecondaryButton
                     onClick={() => void handleCompleteRightNow(completablePlanIdNow)}
-                    disabled={completingPlanIds.has(completablePlanIdNow)}
+                    disabled={completingPlanIds.has(completablePlanIdNow) || skippingPlanIds.has(completablePlanIdNow)}
                     ariaLabel={`Mark "${spotlightItem.title}" done`}
                     style={{ padding: '6px 16px', fontSize: 13, marginLeft: 'auto' }}
                   >
                     {completingPlanIds.has(completablePlanIdNow) ? 'Saving…' : 'Done'}
                   </SecondaryButton>
+                )}
+                {skippablePlanIdNow && (
+                  <TextButton
+                    onClick={() => void handleSkipRightNow(skippablePlanIdNow)}
+                    disabled={skippingPlanIds.has(skippablePlanIdNow) || completingPlanIds.has(skippablePlanIdNow)}
+                    ariaLabel={`Skip "${spotlightItem.title}"`}
+                    color={colors.textSecondary}
+                    style={{ minHeight: 44, padding: '0 8px' }}
+                  >
+                    {skippingPlanIds.has(skippablePlanIdNow) ? 'Skipping…' : 'Skip'}
+                  </TextButton>
                 )}
                 {rightNowState.kind === 'OPPORTUNITY' && (
                   <PrimaryButton
@@ -789,6 +839,9 @@ export function HomeDashboard({
                * so a stale error never lingers into a fresh Planning… state. */}
               {visibleCompletionError(completeError, completablePlanIdNow) && (
                 <div role="alert" style={{ color: colors.danger, fontSize: 12, marginTop: spacing.xs }}>{visibleCompletionError(completeError, completablePlanIdNow)}</div>
+              )}
+              {visibleCompletionError(skipError, skippablePlanIdNow) && (
+                <div role="alert" style={{ color: colors.danger, fontSize: 12, marginTop: spacing.xs }}>{visibleCompletionError(skipError, skippablePlanIdNow)}</div>
               )}
               {rightNowState.kind === 'OPPORTUNITY' && opportunityError && (
                 <div style={{ color: colors.danger, fontSize: 12, marginTop: spacing.xs }}>{opportunityError}</div>
