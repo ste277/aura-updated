@@ -90,7 +90,18 @@ const untouched = ['apps/web/lib/dayConstructor.ts', 'apps/web/lib/dayCapacity.t
 check('28/29/50. the Constructor, capacity, availability, orchestrator, acceptance evaluation, agenda, composer and Home never mention schedulingMode (no recomposition, ranking or eligibility work)', untouched.every((f) => !/schedulingMode|hasFlexibleScheduling/.test(read(f))));
 const moveSrc = strip(read('apps/web/lib/planMove.ts'));
 check('23/24/50. Move eligibility is unchanged: planMove only COPIES the mode onto the successor and never branches on it (no FIXED gate; HAS_LINKED_MOMENT untouched)', !/schedulingMode\s*(===|!==|==)|hasFlexibleScheduling/.test(moveSrc) && /HAS_LINKED_MOMENT/.test(moveSrc));
-check('50. (F1 scope, updated through F3) the only recomposition-ACCEPTANCE code is F3\'s single signed-token module and route, there is no separate batch-move module, and F1 mode semantics are consumed only through hasFlexibleScheduling', prod.filter((f) => /recompositionAccept/i.test(f)).map((f) => f.split(path.sep).join('/')).sort().join() === 'apps/web/lib/remainingDayRecompositionAcceptance.ts' && !prod.some((f) => /(batchMove|applyRecomposition|recomposeAccept)/i.test(f)) && fs.existsSync(path.join(root, 'apps/web/app/api/day/recompose/accept/route.ts')) && !/schedulingMode\s*(===|!==)/.test(strip(read('apps/web/lib/remainingDayRecompositionAcceptance.ts'))));
+check('50. (F1 scope, through F3) the ONLY production mutation surface for Aura-driven scheduling is pinned: applyMoveWrites has exactly two callers (manual Move and the signed-token F3 acceptance); the acceptance verifies the token before it opens a transaction and is reached only through its route; no batch-move module exists; a Move source is re-verified as an exact FLEXIBLE by hasFlexibleScheduling, never by a client field', (() => {
+  const callers = prod.filter((f) => /applyMoveWrites\(/.test(strip(read(f)))).map((f) => f.split(path.sep).join('/')).sort();
+  const acc = strip(read('apps/web/lib/remainingDayRecompositionAcceptance.ts'));
+  const importers = prod.filter((f) => /acceptRemainingDayRecomposition\(/.test(strip(read(f))) && !/remainingDayRecompositionAcceptance\.ts$/.test(f)).map((f) => f.split(path.sep).join('/'));
+  return callers.join() === 'apps/web/lib/planMove.ts,apps/web/lib/remainingDayRecompositionAcceptance.ts'
+    && (strip(read('apps/web/lib/planMove.ts')).match(/applyMoveWrites\(client, userId, a,/g) ?? []).length === 1
+    && (acc.match(/applyMoveWrites\(client/g) ?? []).length === 1
+    && acc.indexOf('verifyRecompositionProposalToken(') > 0 && acc.indexOf('verifyRecompositionProposalToken(') < acc.indexOf('beginTransaction()')
+    && importers.join() === 'apps/web/app/api/day/recompose/accept/route.ts'
+    && !prod.some((f) => /(batchMove|applyRecomposition|recomposeAccept)/i.test(f))
+    && /hasFlexibleScheduling\(row\)/.test(acc) && !/schedulingMode\s*(===|!==)/.test(acc);
+})());
 check('17. the client row mapper (mapPlanRow / UpcomingPlan) deliberately does not carry the mode: no client consumer needs it, and the server read paths (SELECT *) already return it for future state gathering', !/schedulingMode/.test(read('apps/web/lib/planFormatting.ts')) && /SELECT \*\s+FROM "PlannedActivity"/.test(read('apps/web/lib/db.ts')));
 check('17. the PlannedActivity domain type carries an OPTIONAL, nullable schedulingMode (an in-memory fixture without it is unknown = protected, never flexible)', /schedulingMode\?: PlannedActivitySchedulingMode \| null;/.test(read('apps/web/lib/db.ts')));
 

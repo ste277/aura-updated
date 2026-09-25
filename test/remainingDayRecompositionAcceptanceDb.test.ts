@@ -6,11 +6,11 @@
  */
 import {
   upsertUserByEmail, updateBirthProfile, createPlannedActivity, createCapture, getCaptureWithLinkedPlanStatus, createGoalWithActivities, addGoalActivity, deleteGoal,
-  listGoalActivitiesWithLinkedPlanStatus, getUserById, beginTransaction,
+  listGoalActivitiesWithLinkedPlanStatus, getUserById, beginTransaction, logPlannedActivity,
 } from '../apps/web/lib/db';
 import { createSessionToken, sign } from '../apps/web/lib/auth';
 import { signRecompositionProposal } from '../apps/web/lib/remainingDayRecompositionIntegrity';
-import { acceptRemainingDayRecomposition, type RecompositionAcceptanceDeps } from '../apps/web/lib/remainingDayRecompositionAcceptance';
+import { acceptRemainingDayRecomposition, realRecompositionAcceptanceDeps, type RecompositionAcceptanceDeps } from '../apps/web/lib/remainingDayRecompositionAcceptance';
 import { movePlannedActivity } from '../apps/web/lib/planMove';
 import { getWeekdayForDateStr } from '../apps/web/lib/availabilityContext';
 import { deriveCaptureState } from '../apps/web/lib/captures';
@@ -63,7 +63,8 @@ async function main() {
   const KEEP = (p: any) => ({ decision: 'KEEP', planId: p.id, title: p.title, current: slotOfPlan(p) });
   const UNRES = (p: any) => ({ decision: 'UNRESOLVED', planId: p.id, title: p.title, current: slotOfPlan(p) });
   const token = (user: typeof A, decisions: any[], state = 'CHANGES_PROPOSED') => signRecompositionProposal(user.U.id, { generatedAt: boot, targetDate, timezone: TZ, summary: { state }, decisions } as any)!;
-  const accept = (user: typeof A, tk: string, now?: Date, deps?: RecompositionAcceptanceDeps) => acceptRemainingDayRecomposition(user.U.id, tk, now ?? new Date(), deps);
+  /** `now` (when given) is the post-lock acceptance clock supplied through the explicit TEST SEAM (deps.readClock); production never passes one. */
+  const accept = (user: typeof A, tk: string, now?: Date, deps?: Partial<RecompositionAcceptanceDeps>) => acceptRemainingDayRecomposition(user.U.id, tk, { ...realRecompositionAcceptanceDeps, ...(deps ?? {}), ...(now ? { readClock: async () => now } : {}) });
   const viaRoute = async (user: typeof A | null, body: unknown) => { const res = await acceptRoute(fakeReq(user?.tok, body)); return { status: res.status, json: await res.json() }; };
   const row = async (id: string) => (await sql(`SELECT * FROM "PlannedActivity" WHERE id = $1`, [id]))[0];
   const successors = async (id: string) => sql(`SELECT * FROM "PlannedActivity" WHERE "rescheduledFromPlanId" = $1`, [id]);
@@ -174,7 +175,7 @@ async function main() {
     check('46. ACCEPTANCE vs SKIP of a source: either the skip wins (whole proposal STALE, B untouched) or the acceptance wins (skip refused) -- never a half-recomposed day', (rd.status === 'STALE' && bS.length === 0 && (await row(a.id)).status === 'SKIPPED') || (rd.status === 'ACCEPTED' && bS.length === 1 && (await row(a.id)).status === 'MOVED' && skipStatus !== 200));
 
     // ================= staleness matrix: whole proposal rejects, nothing partial =================
-    const scenario = async (label: string, reason: string, mutate: (m: { a: any; b: any; k: any }) => Promise<void> | void, opts: { now?: (m: { a: any; b: any }) => Date; deps?: RecompositionAcceptanceDeps; decisions?: (m: { a: any; b: any; k: any }) => any[] } = {}) => {
+    const scenario = async (label: string, reason: string, mutate: (m: { a: any; b: any; k: any }) => Promise<void> | void, opts: { now?: (m: { a: any; b: any }) => Date; deps?: Partial<RecompositionAcceptanceDeps>; decisions?: (m: { a: any; b: any; k: any }) => any[] } = {}) => {
       await reset();
       const sa2 = await mk(A, 1, 'FLEXIBLE'); const sb2 = await mk(A, 2, 'FLEXIBLE'); const sk2 = await mk(A, 3, 'FLEXIBLE');
       const m = { a: sa2, b: sb2, k: sk2 };
@@ -198,9 +199,9 @@ async function main() {
     await scenario('a source is ACTIVE at acceptance (its start has passed while the user viewed the proposal)', 'ACTIVE_OR_MISSED', () => {}, { now: (m) => new Date(new Date(m.a.plannedStartAt).getTime() + MIN) });
     await scenario('a source is MISSED at acceptance (its end has passed)', 'ACTIVE_OR_MISSED', () => {}, { now: (m) => new Date(new Date(m.a.plannedEndAt).getTime() + MIN) });
     await scenario('a destination has entered the past (clock advanced beyond it)', 'DESTINATION_PAST', () => {}, { decisions: (m) => [MOVE_TO(m.b, startOf(0), new Date(startOf(0).getTime() + HOUR)), MOVE(m.a, 6), KEEP(m.k)], now: (m) => new Date(startOf(0).getTime() + 30 * MIN + 0 * (m.a ? 1 : 0)) });
-    await scenario('the local day changed (accepted after local midnight)', 'DAY_CHANGED', () => {}, { now: () => new Date(base + 26 * HOUR) });
+    await scenario('the local day changed (the request began on day D; the post-lock acceptance clock is already D+1)', 'DAY_CHANGED', () => {}, { now: () => new Date(base + 26 * HOUR) });
     await scenario('the user\'s timezone changed after the proposal', 'TIMEZONE_CHANGED', async () => { await sql(`UPDATE "User" SET timezone = $1 WHERE id = $2`, [TZ === 'Asia/Tokyo' ? 'Asia/Kolkata' : 'Asia/Tokyo', A.U.id]); });
-    const availDeps = (periods: { weekday: number; startTime: string; endTime: string }[] | null): RecompositionAcceptanceDeps => ({ getUser: (id) => getUserById(id), loadAvailabilityConfiguration: async () => ({ configured: periods !== null, periods: periods ?? [] }) as any });
+    const availDeps = (periods: { weekday: number; startTime: string; endTime: string }[] | null): Partial<RecompositionAcceptanceDeps> => ({ loadAvailabilityConfiguration: async () => ({ configured: periods !== null, periods: periods ?? [] }) as any });
     const weekday = getWeekdayForDateStr(targetDate);
     await scenario('availability changed: destinations fall outside the configured windows', 'AVAILABILITY_CHANGED', () => {}, { deps: availDeps([{ weekday, startTime: '00:00', endTime: '00:30' }]) });
     await scenario('availability changed to CONFIGURED-EMPTY (never becomes "the whole day")', 'AVAILABILITY_CHANGED', () => {}, { deps: availDeps([]) });
@@ -221,6 +222,77 @@ async function main() {
     a = await mk(A, 1, 'FLEXIBLE');
     const okAvail = await accept(A, token(A, [MOVE(a, 5)]), undefined, availDeps([{ weekday, startTime: '00:00', endTime: '23:59' }]));
     check('24/47. availability, positive: a configured full-day availability accepts a valid destination (availability semantics reused)', okAvail.status === 'ACCEPTED');
+
+    // ================= ACCEPTANCE CLOCK: lock-wait time counts (F3 final-review correction) =================
+    const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
+    const holdAdvisoryLock = async (userId: string) => {
+      const holder = await beginTransaction();
+      await holder.query('SELECT pg_advisory_xact_lock(hashtext($1))', [`day-constructor-accept:${userId}`]);
+      return { release: async () => { await holder.query('COMMIT'); holder.release(); } };
+    };
+    await reset();
+    const lwCap = await createCapture(A.U.id, 'Lock-wait capture');
+    const lwGoal = await createGoalWithActivities({ userId: A.U.id, title: 'Lock-wait goal', targetDate: null, activities: [] });
+    goalIds.push(lwGoal.goal.id);
+    const lwGa = await addGoalActivity(A.U.id, lwGoal.goal.id, { title: 'Lock-wait step', activityId: null });
+    a = await mk(A, 1, 'FLEXIBLE'); b = await mk(A, 2, 'FLEXIBLE');
+    await sql(`UPDATE "Capture" SET "plannedActivityId" = $1 WHERE id = $2`, [a.id, lwCap.id]);
+    await sql(`UPDATE "GoalActivity" SET "plannedActivityId" = $1 WHERE id = $2`, [b.id, lwGa!.id]);
+    const soon = new Date(Date.now() + 3000);
+    const lwToken = token(A, [MOVE_TO(a, soon, new Date(soon.getTime() + HOUR)), MOVE(b, 6)]); // A's destination starts 3 seconds from now
+    const held = await holdAdvisoryLock(A.U.id);
+    const lwStarted = Date.now();
+    const lwPending = viaRoute(A, { proposalToken: lwToken }); // the REAL route: it must not capture a clock before waiting for the lock
+    await sleep(5000); // the signed destination start is now in the past while the request still waits
+    await held.release();
+    const lwRes = await lwPending;
+    const capAfterLw = (await sql(`SELECT "plannedActivityId" FROM "Capture" WHERE id = $1`, [lwCap.id]))[0];
+    const gaAfterLw = (await sql(`SELECT "plannedActivityId" FROM "GoalActivity" WHERE id = $1`, [lwGa!.id]))[0];
+    check('2/17. LOCK-WAIT REGRESSION (the review probe): a destination that was future when the request arrived but passed while it waited for the advisory lock is rejected -- 409 STALE / DESTINATION_PAST on the source; no successor, both sources still UPCOMING, no Capture or Goal repoint, no partial sibling Move', Date.now() - lwStarted >= 4500 && lwRes.status === 409 && lwRes.json.status === 'STALE' && lwRes.json.reason === 'DESTINATION_PAST' && lwRes.json.planId === a.id && (await untouched(a, b)) && capAfterLw.plannedActivityId === a.id && gaAfterLw.plannedActivityId === b.id);
+
+    await reset();
+    const nowMs = Date.now();
+    const soonSrc = await createPlannedActivity({ userId: A.U.id, title: `Starts soon ${nowMs}`, plannedStartAt: new Date(nowMs + 4000), plannedEndAt: new Date(nowMs + 4000 + HOUR), durationMinutes: 60, windowType: 'NEUTRAL', schedulingMode: 'FLEXIBLE' });
+    b = await mk(A, 2, 'FLEXIBLE');
+    const activeToken = token(A, [MOVE(soonSrc, 6), MOVE(b, 7)]);
+    const held2 = await holdAdvisoryLock(A.U.id);
+    const activePending = viaRoute(A, { proposalToken: activeToken });
+    await sleep(6000); // the source was future at request entry and has STARTED (ACTIVE) while waiting
+    await held2.release();
+    const activeRes = await activePending;
+    check('10/18. ACTIVE-WHILE-WAITING: a source that was future at request entry and became ACTIVE while the request waited for the lock is rejected after the lock (409 ACTIVE_OR_MISSED) with zero writes', activeRes.status === 409 && activeRes.json.reason === 'ACTIVE_OR_MISSED' && (await untouched(soonSrc, b)));
+
+    // one clock, read once, after the locks, on the transaction connection; failure fails closed
+    await reset();
+    a = await mk(A, 1, 'FLEXIBLE'); b = await mk(A, 2, 'FLEXIBLE');
+    let clockReads = 0; const seenAfterLock: number[] = [];
+    const countingClock = async (client: any) => { clockReads += 1; const lockRows = await client.query(`SELECT count(*)::int n FROM pg_locks WHERE locktype = 'advisory' AND pid = pg_backend_pid()`); seenAfterLock.push(Number(lockRows.rows[0].n)); return new Date(); };
+    const oneClock = await accept(A, token(A, [MOVE(a, 5), MOVE(b, 6)]), undefined, { readClock: countingClock });
+    check('5/7/20. ONE authoritative clock: read exactly once per acceptance, on the transaction connection, AFTER the advisory lock was taken (the same backend already holds it), and reused for every time-sensitive decision', oneClock.status === 'ACCEPTED' && clockReads === 1 && seenAfterLock[0] >= 1);
+    const replayClock = await accept(A, token(A, [MOVE(a, 5), MOVE(b, 6)]), undefined, { readClock: countingClock });
+    check('27. REPLAY ORDER: an identical replay is recognised BEFORE the clock is even read -- it cannot be turned into DESTINATION_PAST or DAY_CHANGED by time passing', replayClock.status === 'ALREADY_ACCEPTED' && clockReads === 1);
+    const laterToken = token(A, [MOVE(a, 5), MOVE(b, 6)]);
+    const replayAfterDestinations = await accept(A, laterToken, new Date(startOf(9).getTime()));
+    const replayNextDay = await accept(A, laterToken, new Date(base + 30 * HOUR));
+    check('26/27. an ALREADY-ACCEPTED proposal replays as ALREADY_ACCEPTED even after its destinations have passed and even after local midnight (retry safety), with the original mapping', replayAfterDestinations.status === 'ALREADY_ACCEPTED' && replayNextDay.status === 'ALREADY_ACCEPTED' && (await successors(a.id)).length === 1 && (await successors(b.id)).length === 1);
+    await reset();
+    a = await mk(A, 1, 'FLEXIBLE'); b = await mk(A, 2, 'FLEXIBLE');
+    const failingClock = await accept(A, token(A, [MOVE(a, 5), MOVE(b, 6)]), undefined, { readClock: async () => { throw new Error('clock unavailable'); } });
+    check('8. CLOCK FAILURE fails closed: SAVE_FAILED, rolled back, no fallback to a route/pre-lock clock, nothing written', failingClock.status === 'SAVE_FAILED' && (await untouched(a, b)));
+
+    // Done vs acceptance: real concurrency with several relative start offsets; every round must end coherent
+    let doneWon = 0; let acceptWon = 0; let incoherent = 0;
+    for (const delay of [0, 2, 5, 10, 20, 40]) {
+      await reset();
+      const da = await mk(A, 1, 'FLEXIBLE'); const db = await mk(A, 2, 'FLEXIBLE');
+      const dtk = token(A, [MOVE(da, 5), MOVE(db, 6)]);
+      const [res, done] = await Promise.all([accept(A, dtk), sleep(delay).then(() => logPlannedActivity(A.U.id, da.id).then(() => 'DONE_OK', () => 'DONE_FAILED'))]);
+      const rowA = await row(da.id); const rowB = await row(db.id);
+      const succ = (await successors(da.id)).length + (await successors(db.id)).length;
+      const coherent = (res.status === 'ACCEPTED' && done === 'DONE_FAILED' && rowA.status === 'MOVED' && rowB.status === 'MOVED' && succ === 2) || (res.status === 'STALE' && done === 'DONE_OK' && rowA.status === 'LOGGED' && rowB.status === 'UPCOMING' && succ === 0);
+      if (!coherent) incoherent += 1; else if (res.status === 'ACCEPTED') acceptWon += 1; else doneWon += 1;
+    }
+    check(`24/30. DONE vs ACCEPTANCE (6 real concurrent rounds at different offsets; ${acceptWon} won by acceptance, ${doneWon} by Done): every round is coherent -- either the whole proposal applied and Done was refused, or Done won and the whole proposal is STALE with the sibling untouched; no duplicate successor, no lifecycle corruption`, incoherent === 0 && acceptWon + doneWon === 6);
 
     // ================= tokens through the real route =================
     await reset();

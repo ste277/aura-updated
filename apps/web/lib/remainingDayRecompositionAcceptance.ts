@@ -11,15 +11,23 @@
  * SIGNED PROVENANCE != CURRENT SAFETY. The token only proves what Aura proposed. Everything below is re-checked
  * against current state, inside the transaction, after the locks are held.
  *
- * TRANSACTION AND LOCK HIERARCHY (deadlock-safe, shared with manual Move and Day Constructor acceptance):
+ * TRANSACTION, LOCK AND CLOCK ORDER (deadlock-safe, shared with manual Move and Day Constructor acceptance):
  *   1. verify the token (no DB, before anything is opened) -> INVALID_TOKEN
  *   2. BEGIN; per-user advisory lock `day-constructor-accept:<userId>` (the SAME namespace movePlannedActivity and
  *      persistAcceptedConstructedDay use, so all three serialize per user)
  *   3. SELECT ... FOR UPDATE on EVERY reconsidered plan (MOVE, KEEP and UNRESOLVED), ordered by id -- a deterministic
  *      lock order, so two acceptances sharing plans can never deadlock, and Done/Skip/Cancel (which take only row
  *      locks, never the advisory lock) cannot slip in between validation and writes
- *   4. replay detection, then staleness validation, then FINAL-STATE validation
- *   5. writes (sorted by plan id) through the SAME internals as a manual Move (`applyMoveWrites`), COMMIT
+ *   4. identical-replay recognition (state only: it needs no clock, and a proposal that was ACCEPTED must still read as
+ *      ALREADY_ACCEPTED after its destinations, or the day, have passed -- retry safety)
+ *   5. THE ACCEPTANCE CLOCK: `clock_timestamp()` read ONCE, on this same transaction connection, AFTER the locks.
+ *      LOCK-WAIT TIME COUNTS: a proposal that was future when the request arrived but became past-due (or a source
+ *      became ACTIVE/MISSED, or local midnight passed) while it waited is rejected. This is the same principle as manual
+ *      Move (a clock read after its lock). No route-entry / pre-lock clock is ever used; that single instant feeds every
+ *      time-sensitive decision below (destination future, ACTIVE/MISSED, local day, availability window, moment lookup,
+ *      collision blocker rule). A failure to read it fails the acceptance (SAVE_FAILED, rolled back) -- no fallback.
+ *   6. staleness validation, then FINAL-STATE validation
+ *   7. writes (sorted by plan id) through the SAME internals as a manual Move (`applyMoveWrites`), COMMIT
  * A manual Move takes the advisory lock and then one row lock, in that same order, so no lock-order inversion exists.
  *
  * FINAL-STATE VALIDATION: all MOVE source slots are released together and all destinations are validated together
@@ -37,8 +45,20 @@
  * ALREADY_ACCEPTED with no writes; a mixture is stale. The advisory lock makes concurrent identical requests
  * serialize: exactly one performs the moves, the other observes the replay state.
  *
- * NOT DONE HERE: no UI, no automatic acceptance, no paging, no tomorrow/week; POST /api/plans can still create a plan
- * without the advisory lock (pre-existing), which the in-transaction collision check narrows but cannot eliminate.
+ * GUARANTEE (exactly what is provided): F3 validates the exact signed proposal against the state committed and visible to
+ * its transaction at its validation boundary (after the locks, at the acceptance clock) and applies its own Move set
+ * atomically -- all of it or none of it. It does NOT claim that no other writer can ever add an overlapping plan.
+ *
+ * KNOWN, CLASSIFIED V1 BOUNDARIES (pre-existing writers that do not take the advisory lock; each yields an end state
+ * that equals a legal serial history, because none of them validates overlap or availability itself, and existing plans
+ * are never retro-validated):
+ *   - POST /api/plans (createPlannedActivity: plain autocommit INSERT, no overlap check) can add a plan between F3's
+ *     validation and its commit;
+ *   - the availability writer can change availability after F3 read it (F3 reads it through the pool, after the locks);
+ *   - an AuraMoment can be linked to a source after the moment check (manual Move has the same window);
+ *   - Day Constructor acceptance shares the advisory lock, so it serializes; only writers WITHOUT the lock are listed.
+ *
+ * NOT DONE HERE: no UI, no automatic acceptance, no paging, no tomorrow/week.
  */
 import { beginTransaction, getUserById, listPlanIdsWithActiveMoment, type PlannedActivity, type User } from './db';
 import {
@@ -89,13 +109,31 @@ export type AcceptRecompositionResult =
   | { status: 'STALE'; reason: RecompositionStaleReason; planId?: string }
   | { status: 'SAVE_FAILED' };
 
+type TransactionClient = { query: (text: string, params?: unknown[]) => Promise<{ rows: any[] }> };
+
 export interface RecompositionAcceptanceDeps {
   getUser: (userId: string) => Promise<User | null>;
+  /**
+   * The acceptance clock, called ONCE, after the advisory and row locks, with the transaction's own connection.
+   * Production always uses the default (`clock_timestamp()` on that connection). Overriding it is an explicit TEST SEAM
+   * only -- no production path passes one, and the HTTP route supplies no clock at all.
+   */
+  readClock: (client: TransactionClient) => Promise<Date>;
   /** Current availability configuration (the same reader the Day Constructor uses). */
   loadAvailabilityConfiguration: (user: User, now: Date) => ReturnType<DayConstructorOrchestratorDeps['loadAvailabilityConfiguration']>;
 }
-const realDeps: RecompositionAcceptanceDeps = {
+/** The authoritative acceptance clock: PostgreSQL `clock_timestamp()` on the SAME transaction connection, read after the locks. Throws (no fallback) if it cannot be read. */
+export async function readTransactionClock(client: TransactionClient): Promise<Date> {
+  const result = await client.query('SELECT clock_timestamp() AS now');
+  const value = result.rows[0]?.now;
+  const clock = value instanceof Date ? value : new Date(value);
+  if (Number.isNaN(clock.getTime())) throw new Error('The acceptance clock could not be read.');
+  return clock;
+}
+
+export const realRecompositionAcceptanceDeps: RecompositionAcceptanceDeps = {
   getUser: (userId) => getUserById(userId),
+  readClock: readTransactionClock,
   loadAvailabilityConfiguration: (user, now) => createRealDayConstructorOrchestratorDeps(user, now).loadAvailabilityConfiguration(),
 };
 
@@ -133,7 +171,7 @@ export function validateDestinations(moves: ReadonlyArray<{ planId: string; to: 
 // Acceptance
 // ------------------------------------------------------------
 
-export async function acceptRemainingDayRecomposition(userId: string, proposalToken: unknown, now: Date, deps: RecompositionAcceptanceDeps = realDeps): Promise<AcceptRecompositionResult> {
+export async function acceptRemainingDayRecomposition(userId: string, proposalToken: unknown, deps: RecompositionAcceptanceDeps = realRecompositionAcceptanceDeps): Promise<AcceptRecompositionResult> {
   const verified = verifyRecompositionProposalToken(userId, proposalToken);
   if (!verified.ok) return { status: 'INVALID_TOKEN' };
   const proposal = verified.proposal;
@@ -146,11 +184,6 @@ export async function acceptRemainingDayRecomposition(userId: string, proposalTo
       await client.query(commit ? 'COMMIT' : 'ROLLBACK');
       return result;
     };
-
-    const user = await deps.getUser(userId);
-    if (!user) return finish({ status: 'INVALID_TOKEN' }, false);
-    if (user.timezone !== proposal.timezone) return finish(stale('TIMEZONE_CHANGED'), false);
-    if (getDatePartsInTimezone(proposal.timezone, now).dateStr !== proposal.targetDate) return finish(stale('DAY_CHANGED'), false);
 
     // Lock EVERY reconsidered plan in id order (deterministic; see the lock hierarchy above).
     const ids = proposal.decisions.map((d) => d.planId); // canonical: strictly ascending
@@ -174,6 +207,13 @@ export async function acceptRemainingDayRecomposition(userId: string, proposalTo
       }
       return finish({ status: 'ALREADY_ACCEPTED', targetDate: proposal.targetDate, moves: replay }, true);
     }
+
+    // ---- the ONE acceptance clock (post-lock, this transaction's connection) and the user context it is judged in ----
+    const now = await deps.readClock(client);
+    const user = await deps.getUser(userId);
+    if (!user) return finish({ status: 'INVALID_TOKEN' }, false);
+    if (user.timezone !== proposal.timezone) return finish(stale('TIMEZONE_CHANGED'), false);
+    if (getDatePartsInTimezone(proposal.timezone, now).dateStr !== proposal.targetDate) return finish(stale('DAY_CHANGED'), false);
 
     // ---- staleness: what the proposal relies on must still be exactly true ----
     for (const decision of proposal.decisions) {
