@@ -37,6 +37,7 @@ import type { GuidanceUiState } from '../lib/bestForYouViewModel';
 import { HomeQuickCapture } from './HomeQuickCapture';
 import { createPlanExecutor, completablePlanId, skippablePlanId, moveablePlanId, overlayExecutionFacts, agendaWithoutResolvedNext, visibleCompletionError, type CompletionError, type ExecutionOutcome } from '../lib/homeCompletion';
 import { selectVisibleStartingSoonReminder } from '../lib/reminderConsistency';
+import { createSuccessorFocusController, successorOnAgendaDay, type SuccessorFocusController } from '../lib/homeSuccessorFocus';
 import { missedRecoveryPlanId, overlayElapsedMissed } from '../lib/homeMissedRecovery';
 import { applyConfirmedSuccessors, hideMovedTimelineItems, defaultMoveSelection, resolveMoveDestination, moveDestinationMessage, moveFailureMessage, formatMoveTime, type MoveSelection } from '../lib/homeMove';
 import type { PlannedActivity } from '../lib/db';
@@ -620,14 +621,32 @@ export function HomeDashboard({
     setMoveError(null);
     focusMoveTrigger();
   };
-  // The successor row is rendered by the state updates just made, so wait briefly (bounded) for it; if B is not on today's list (a Move to tomorrow) fall back to the stable Right Now region.
-  const focusMoveSuccessor = (successorId: string, attempt = 0) =>
-    setTimeout(() => {
-      const row = document.querySelector<HTMLElement>(`[data-timeline-item-id="plan:${successorId}"]`);
-      if (row) row.focus();
-      else if (attempt < 8) focusMoveSuccessor(successorId, attempt + 1);
-      else document.querySelector<HTMLElement>('[data-home-right-now-label]')?.focus();
-    }, attempt === 0 ? 0 : 60);
+  // The successor row is rendered by the state updates just made, so a bounded wait for it is owned by ONE
+  // component-level controller (lib/homeSuccessorFocus.ts): newer Move supersedes older, user focus/pointer/key
+  // activity or unmount cancels, and only a still-current request may focus B or the Right Now fallback.
+  const successorFocus = useRef<SuccessorFocusController | null>(null);
+  if (successorFocus.current === null) {
+    successorFocus.current = createSuccessorFocusController<HTMLElement>({
+      schedule: (fn, ms) => setTimeout(fn, ms),
+      clear: (handle) => clearTimeout(handle as ReturnType<typeof setTimeout>),
+      findRow: (successorId) => document.querySelector<HTMLElement>(`[data-timeline-item-id="plan:${successorId}"]`),
+      focus: (element) => element.focus(),
+      focusFallback: () => document.querySelector<HTMLElement>('[data-home-right-now-label]')?.focus(),
+    });
+  }
+  useEffect(() => {
+    const controller = successorFocus.current!;
+    const onUserIntent = () => controller.noteUserIntent();
+    document.addEventListener('focusin', onUserIntent, true);
+    document.addEventListener('pointerdown', onUserIntent, true);
+    document.addEventListener('keydown', onUserIntent, true);
+    return () => {
+      document.removeEventListener('focusin', onUserIntent, true);
+      document.removeEventListener('pointerdown', onUserIntent, true);
+      document.removeEventListener('keydown', onUserIntent, true);
+      controller.cancel();
+    };
+  }, []);
   const handleMoveRightNow = async (planId: string, currentStartIso: string) => {
     if (planExecutor.current.isBusy(planId)) return;
     const destination = resolveMoveDestination(moveSelection, currentStartIso, new Date(), effectiveTimezone);
@@ -635,6 +654,8 @@ export function HomeDashboard({
       setMoveError({ planId, message: moveDestinationMessage(destination.reason) });
       return;
     }
+    // User activity between now (submit) and the confirmed success means the user has moved on: no successor focus then.
+    const focusIntentEpoch = successorFocus.current!.epoch();
     setMoveError(null);
     setCompleteError((current) => (current?.planId === planId ? null : current));
     setSkipError((current) => (current?.planId === planId ? null : current));
@@ -664,7 +685,7 @@ export function HomeDashboard({
     setMovePickerFor(null);
     setMoveError(null);
     // Focus the successor when it is on today's list, otherwise the stable Right Now region.
-    focusMoveSuccessor(successor.id);
+    successorFocus.current!.request(successor.id, { expectRow: successorOnAgendaDay(successor.plannedStartAt, agendaForHome), since: focusIntentEpoch });
     try {
       await onPlanCompleted?.();
     } catch {
