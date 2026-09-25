@@ -85,7 +85,7 @@ function sanitizedIcon(icon: string | null | undefined): string | null {
   return /^[a-zA-Z]+$/.test(icon) ? null : icon;
 }
 
-function planToAgendaItem(plan: PlannedActivity, now: Date): DailyAgendaItem {
+export function planToAgendaItem(plan: PlannedActivity, now: Date): DailyAgendaItem {
   // Terminal persisted outcomes win over time; time-derived states apply only to UPCOMING.
   const status: DailyAgendaItemStatus =
     plan.status === 'LOGGED' ? 'COMPLETED' : plan.status === 'SKIPPED' ? 'SKIPPED' : plan.status === 'MOVED' ? 'MOVED' : timeBasedStatus(plan.plannedStartAt, plan.plannedEndAt, now);

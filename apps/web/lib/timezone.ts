@@ -134,22 +134,9 @@ export function addDaysToDateStr(dateStr: string, days: number): string {
   return date.toISOString().slice(0, 10);
 }
 
-/**
- * Converts a local date+time (as typed into a birth-data form, e.g. "1990-03-15"
- * + "14:30" in "Asia/Kolkata") to the actual UTC instant it represents. One
- * correction pass is sufficient in practice — offsets don't change within a
- * single day except exactly at a DST transition moment, which is an acceptable
- * edge case for a birth-time input.
- */
-export function localDateTimeToUTC(dateStr: string, timeStr: string, ianaTimezone: string): Date {
-  const [year, month, day] = dateStr.split('-').map(Number);
-  const [hour, minute] = timeStr.split(':').map(Number);
-
-  // First guess: treat the components as if they were UTC, then correct.
-  const guessUTC = new Date(Date.UTC(year, month - 1, day, hour, minute));
-  const offsetMinutes = resolveTzOffsetMinutes(ianaTimezone, guessUTC);
-  return new Date(guessUTC.getTime() - offsetMinutes * 60000);
-}
+// The local wall time -> UTC conversion has ONE implementation (packages/panchang),
+// re-exported here so every apps/web caller keeps its existing import path.
+export { localDateTimeToUTC, resolveLocalDateTime, type LocalDateTimeResolution } from '../../../packages/panchang/src/localDate';
 
 /**
  * Planning Custom Location UX Fix -- a real IANA timezone check ("Choose a

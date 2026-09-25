@@ -251,7 +251,10 @@ function TimelineRow({
 
   return (
     <div
+      data-timeline-item-id={item.id}
+      tabIndex={-1}
       style={{
+        outline: 'none',
         padding: `${spacing.sm}px 0`,
         borderBottom: `1px solid ${colors.borderSubtle}`,
         borderLeft: isNext ? `2px solid ${colors.info}` : '2px solid transparent',

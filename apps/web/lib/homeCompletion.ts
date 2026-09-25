@@ -11,6 +11,7 @@
 import type { HomeTimelineItem } from './homeTimelineTypes';
 import type { RightNowState } from './rightNowSelection';
 import type { DailyAgenda, DailyAgendaItem } from './dailyAgenda';
+import { parseMoveResponse, type MoveOutcome } from './homeMove';
 
 /** DailyAgenda projects a plan as `plan:<PlannedActivity.id>` (dailyAgenda.ts). Returns null for anything else. */
 export function planIdFromTimelineItem(item: HomeTimelineItem): string | null {
@@ -26,11 +27,17 @@ export function completablePlanId(state: RightNowState): string | null {
 }
 
 /** Daily Experience V1 PR C2 -- the server-CONFIRMED execution outcome of a plan, held by Home until the authoritative refresh catches up (or fails). Deliberately two values, not a generic "resolved": Done and Skip stay distinct facts. */
-export type ExecutionOutcome = 'COMPLETED' | 'SKIPPED';
+export type ExecutionOutcome = 'COMPLETED' | 'SKIPPED' | 'MOVED';
 
 /** Skip is offered only for the committed plan that is happening NOW (Right Now's absolute-instant ACTIVE_PLAN). Never for an imminent plan, an Opportunity, the context state, or anything already resolved. */
 export function skippablePlanId(state: RightNowState): string | null {
   if (state.kind !== 'ACTIVE_PLAN') return null;
+  return planIdFromTimelineItem(state.item);
+}
+
+/** Move is offered for a committed plan Right Now is showing -- active or imminent (D2's domain also allows missed, but Home exposure for that is a later slice). Never for an Opportunity, the context state, or anything resolved. */
+export function moveablePlanId(state: RightNowState): string | null {
+  if (state.kind !== 'ACTIVE_PLAN' && state.kind !== 'IMMINENT_PLAN') return null;
   return planIdFromTimelineItem(state.item);
 }
 
@@ -45,8 +52,9 @@ export function overlayExecutionFacts(timeline: HomeTimelineItem[], facts: Reado
       if (item.metadata?.isCompleted) return item;
       return { ...item, metadata: { ...item.metadata, agendaStatus: 'COMPLETED', isCompleted: true, isCurrent: false, isPast: true } };
     }
-    if (item.metadata?.agendaStatus === 'SKIPPED') return item;
-    return { ...item, metadata: { ...item.metadata, agendaStatus: 'SKIPPED', isCompleted: false, isCurrent: false, isPast: true } };
+    const status = outcome === 'MOVED' ? 'MOVED' : 'SKIPPED';
+    if (item.metadata?.agendaStatus === status) return item;
+    return { ...item, metadata: { ...item.metadata, agendaStatus: status, isCompleted: false, isCurrent: false, isPast: true } };
   });
 }
 
@@ -118,6 +126,24 @@ export function createPlanExecutor(fetchImpl: typeof fetch = (...args) => fetch(
     isBusy: (planId: string) => inFlight.has(planId),
     complete: (planId: string): Promise<CompletePlanResult> => run(planId, 'log', 'LOGGED', 'DONE'),
     skip: (planId: string): Promise<SkipPlanResult> => run(planId, 'skip', 'SKIPPED', 'SKIPPED'),
+    /** Move shares the SAME synchronous per-plan guard as Done and Skip. */
+    move: async (planId: string, newStartAt: string): Promise<MoveOutcome | { status: 'BUSY' }> => {
+      if (inFlight.has(planId)) return { status: 'BUSY' };
+      inFlight.add(planId);
+      try {
+        const res = await fetchImpl(`/api/plans/${encodeURIComponent(planId)}/move`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ newStartAt }),
+        });
+        const body = await res.json().catch(() => null);
+        return parseMoveResponse(planId, res.ok, body);
+      } catch {
+        return { status: 'FAILED' };
+      } finally {
+        inFlight.delete(planId);
+      }
+    },
   };
 }
 
