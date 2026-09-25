@@ -130,7 +130,7 @@ async function main() {
   const dash = strip(read('../apps/web/components/HomeDashboard.tsx'));
   check('21. a retry of A clears A\'s error at the start; success clears it; other plans\' errors are left alone', /setCompleteError\(\(current\) => \(current\?\.planId === planId \? null : current\)\);\s*setSkipError\(\(current\) => \(current\?\.planId === planId \? null : current\)\);\s*setCompletingPlanIds/.test(dash) && /setExecutionFacts[\s\S]{0,120}setCompleteError\(\(current\) => \(current\?\.planId === planId \? null : current\)\)/.test(dash));
   check('22. in-flight state is a per-plan Set: A in flight never shows B as Saving, and A finishing does not clear B', /completingPlanIds\.has\(completablePlanIdNow\)/.test(dash) && /const next = new Set\(current\);\s*next\.delete\(planId\);/.test(dash));
-  check('23. every state change after the request is keyed by the plan id captured at click (never by the current Right Now plan)', !/completablePlanIdNow[\s\S]{0,40}await planCompleter/.test(dash) && /const handleCompleteRightNow = async \(planId: string\)/.test(dash));
+  check('23. every state change after the request is keyed by the plan id captured at click (never by the current Right Now plan)', !/completablePlanIdNow[\s\S]{0,40}await planCompleter/.test(dash) && /const handleCompleteRightNow = async \(planId: string, origin/.test(dash));
 
   // ---- the blocker, end to end on the real pipeline ----
   const TZ = 'Asia/Kolkata';

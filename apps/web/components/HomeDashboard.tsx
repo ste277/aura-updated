@@ -37,6 +37,8 @@ import type { GuidanceUiState } from '../lib/bestForYouViewModel';
 import { HomeQuickCapture } from './HomeQuickCapture';
 import { createPlanExecutor, completablePlanId, skippablePlanId, moveablePlanId, overlayExecutionFacts, agendaWithoutResolvedNext, visibleCompletionError, type CompletionError, type ExecutionOutcome } from '../lib/homeCompletion';
 import { selectVisibleStartingSoonReminder } from '../lib/reminderConsistency';
+import { createSuccessorFocusController, successorOnAgendaDay, type SuccessorFocusController } from '../lib/homeSuccessorFocus';
+import { missedRecoveryPlanId, overlayElapsedMissed } from '../lib/homeMissedRecovery';
 import { applyConfirmedSuccessors, hideMovedTimelineItems, defaultMoveSelection, resolveMoveDestination, moveDestinationMessage, moveFailureMessage, formatMoveTime, type MoveSelection } from '../lib/homeMove';
 import type { PlannedActivity } from '../lib/db';
 
@@ -485,7 +487,9 @@ export function HomeDashboard({
       }),
     [agendaForHome, readyGuidance, timelineWindows, currentMinuteOfDay, effectiveTimezone]
   );
-  const homeTimeline: HomeTimelineItem[] = useMemo(() => hideMovedTimelineItems(overlayExecutionFacts(composedTimeline, executionFacts)), [composedTimeline, executionFacts]);
+  // Daily Experience V1 PR E -- an elapsed, unresolved plan reads as MISSED against the live clock (same rule as the agenda's own derivation); confirmed execution facts are overlaid AFTER, so a stale MISSED never beats a server-confirmed outcome.
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  const homeTimeline: HomeTimelineItem[] = useMemo(() => hideMovedTimelineItems(overlayExecutionFacts(overlayElapsedMissed(composedTimeline, new Date()), executionFacts)), [composedTimeline, executionFacts, currentMinuteOfDay]);
 
   // Home UI V2 -- Why Aura lines, resolved once here (never inside
   // HomeTimeline itself) by matching each annotated item back to its
@@ -533,7 +537,9 @@ export function HomeDashboard({
   const skippablePlanIdNow = skippablePlanId(rightNowState);
   const moveablePlanIdNow = moveablePlanId(rightNowState);
 
-  const handleCompleteRightNow = async (planId: string) => {
+  // `origin` only chooses where focus lands afterwards (Right Now region vs the resolved Timeline row); the lifecycle path is identical.
+  const focusTimelineRow = (planId: string) => setTimeout(() => (document.querySelector<HTMLElement>(`[data-timeline-item-id="plan:${planId}"]`) ?? document.querySelector<HTMLElement>('[data-home-timeline-region]'))?.focus(), 0);
+  const handleCompleteRightNow = async (planId: string, origin: 'RIGHT_NOW' | 'TIMELINE' = 'RIGHT_NOW') => {
     // planId is captured at click time; every state change below is keyed by it,
     // never by whichever plan Right Now shows when the response arrives. The
     // completer's own synchronous in-flight guard blocks same-task bursts.
@@ -556,6 +562,7 @@ export function HomeDashboard({
     // The server CONFIRMED LOGGED for this plan id: remember it and clear its error.
     setExecutionFacts((current) => new Map(current).set(planId, 'COMPLETED'));
     setCompleteError((current) => (current?.planId === planId ? null : current));
+    if (origin === 'TIMELINE') focusTimelineRow(planId);
     // Reconciliation is secondary and can never fail the completion: the refresh
     // keeps last-known-good state on any failure (lib/homeRefresh.ts).
     try {
@@ -567,7 +574,7 @@ export function HomeDashboard({
   // Skip is a separate execution outcome (POST /api/plans/[id]/skip), never a
   // variant of Done. Same ownership rules: keyed by the plan id captured at click,
   // never applied optimistically, reconciliation can never fail a confirmed Skip.
-  const handleSkipRightNow = async (planId: string) => {
+  const handleSkipRightNow = async (planId: string, origin: 'RIGHT_NOW' | 'TIMELINE' = 'RIGHT_NOW') => {
     if (planExecutor.current.isBusy(planId)) return;
     setSkipError((current) => (current?.planId === planId ? null : current));
     setCompleteError((current) => (current?.planId === planId ? null : current));
@@ -587,7 +594,8 @@ export function HomeDashboard({
     setExecutionFacts((current) => new Map(current).set(planId, 'SKIPPED'));
     setSkipError((current) => (current?.planId === planId ? null : current));
     // The Skip button unmounts on success: hand focus to the stable, updated Right Now region rather than <body>.
-    setTimeout(() => document.querySelector<HTMLElement>('[data-home-right-now-label]')?.focus(), 0);
+    if (origin === 'TIMELINE') focusTimelineRow(planId);
+    else setTimeout(() => document.querySelector<HTMLElement>('[data-home-right-now-label]')?.focus(), 0);
     try {
       await onPlanCompleted?.();
     } catch {
@@ -597,11 +605,14 @@ export function HomeDashboard({
   // Move = "I still intend to do this, but at another time" -- an exact time the user
   // picks, sent to the existing POST /api/plans/[id]/move. The server is authoritative
   // for conflicts, lifecycle state and linked Moments; Home is never optimistic.
-  const focusMoveTrigger = () => setTimeout(() => document.querySelector<HTMLElement>('button[aria-label^="Move \\""]')?.focus(), 0);
+  // The trigger is found by plan id (Right Now's Move and each missed row's Move can coexist).
+  const moveTriggerPlanRef = useRef<string | null>(null);
+  const focusMoveTrigger = () => setTimeout(() => document.getElementById(`home-move-trigger-${moveTriggerPlanRef.current}`)?.focus(), 0);
   const openMovePicker = (planId: string) => {
     setMoveError(null);
     // No default (null) leaves the time empty so the user must choose a valid one.
     setMoveSelection(defaultMoveSelection(new Date(), effectiveTimezone) ?? { day: 'TODAY', time: '' });
+    moveTriggerPlanRef.current = planId;
     setMovePickerFor(planId);
     setTimeout(() => moveDayRef.current?.focus(), 0);
   };
@@ -610,6 +621,32 @@ export function HomeDashboard({
     setMoveError(null);
     focusMoveTrigger();
   };
+  // The successor row is rendered by the state updates just made, so a bounded wait for it is owned by ONE
+  // component-level controller (lib/homeSuccessorFocus.ts): newer Move supersedes older, user focus/pointer/key
+  // activity or unmount cancels, and only a still-current request may focus B or the Right Now fallback.
+  const successorFocus = useRef<SuccessorFocusController | null>(null);
+  if (successorFocus.current === null) {
+    successorFocus.current = createSuccessorFocusController<HTMLElement>({
+      schedule: (fn, ms) => setTimeout(fn, ms),
+      clear: (handle) => clearTimeout(handle as ReturnType<typeof setTimeout>),
+      findRow: (successorId) => document.querySelector<HTMLElement>(`[data-timeline-item-id="plan:${successorId}"]`),
+      focus: (element) => element.focus(),
+      focusFallback: () => document.querySelector<HTMLElement>('[data-home-right-now-label]')?.focus(),
+    });
+  }
+  useEffect(() => {
+    const controller = successorFocus.current!;
+    const onUserIntent = () => controller.noteUserIntent();
+    document.addEventListener('focusin', onUserIntent, true);
+    document.addEventListener('pointerdown', onUserIntent, true);
+    document.addEventListener('keydown', onUserIntent, true);
+    return () => {
+      document.removeEventListener('focusin', onUserIntent, true);
+      document.removeEventListener('pointerdown', onUserIntent, true);
+      document.removeEventListener('keydown', onUserIntent, true);
+      controller.cancel();
+    };
+  }, []);
   const handleMoveRightNow = async (planId: string, currentStartIso: string) => {
     if (planExecutor.current.isBusy(planId)) return;
     const destination = resolveMoveDestination(moveSelection, currentStartIso, new Date(), effectiveTimezone);
@@ -617,6 +654,8 @@ export function HomeDashboard({
       setMoveError({ planId, message: moveDestinationMessage(destination.reason) });
       return;
     }
+    // User activity between now (submit) and the confirmed success means the user has moved on: no successor focus then.
+    const focusIntentEpoch = successorFocus.current!.epoch();
     setMoveError(null);
     setCompleteError((current) => (current?.planId === planId ? null : current));
     setSkipError((current) => (current?.planId === planId ? null : current));
@@ -646,12 +685,95 @@ export function HomeDashboard({
     setMovePickerFor(null);
     setMoveError(null);
     // Focus the successor when it is on today's list, otherwise the stable Right Now region.
-    setTimeout(() => (document.querySelector<HTMLElement>(`[data-timeline-item-id="plan:${successor.id}"]`) ?? document.querySelector<HTMLElement>('[data-home-right-now-label]'))?.focus(), 0);
+    successorFocus.current!.request(successor.id, { expectRow: successorOnAgendaDay(successor.plannedStartAt, agendaForHome), since: focusIntentEpoch });
     try {
       await onPlanCompleted?.();
     } catch {
       // last valid Home stays
     }
+  };
+  // The single Move picker (Right Now and Missed Recovery both render THIS -- there is no second picker).
+  const renderMovePicker = (planId: string, title: string, currentStartIso: string, durationMinutes: number | undefined) => (
+    <form
+      aria-label={`Move "${title}" to another time`}
+      onSubmit={(event) => {
+        event.preventDefault();
+        void handleMoveRightNow(planId, currentStartIso);
+      }}
+      onKeyDown={(event) => {
+        if (event.key === 'Escape') {
+          event.stopPropagation();
+          closeMovePicker();
+        }
+      }}
+      style={{ marginTop: spacing.md, padding: spacing.md, border: `1px solid ${colors.borderSubtle}`, borderRadius: 12, display: 'flex', flexDirection: 'column', gap: spacing.sm }}
+    >
+      <div style={{ ...typography.caption, color: colors.textSecondary }}>
+        Same activity{durationMinutes ? `, still ${durationMinutes} min` : ''} — pick a new start time.
+      </div>
+      <div style={{ display: 'grid', gridTemplateColumns: 'minmax(0, 1fr) minmax(0, 1fr)', gap: spacing.sm }}>
+        <div>
+          <FieldLabel htmlFor="home-move-day">Day</FieldLabel>
+          <SelectInput id="home-move-day" ref={moveDayRef} value={moveSelection.day} onChange={(event) => setMoveSelection((current) => ({ ...current, day: event.target.value as MoveSelection['day'] }))} disabled={movingPlanIds.has(planId)}>
+            <option value="TODAY">Today</option>
+            <option value="TOMORROW">Tomorrow</option>
+          </SelectInput>
+        </div>
+        <div>
+          <FieldLabel htmlFor="home-move-time">Start time</FieldLabel>
+          <TextInput id="home-move-time" type="time" step={60} value={moveSelection.time} onChange={(event) => setMoveSelection((current) => ({ ...current, time: event.target.value }))} disabled={movingPlanIds.has(planId)} />
+        </div>
+      </div>
+      <div style={{ display: 'flex', alignItems: 'center', gap: spacing.sm, flexWrap: 'wrap' }}>
+        <PrimaryButton type="submit" disabled={movingPlanIds.has(planId)} style={{ padding: '6px 16px', fontSize: 13 }}>
+          {movingPlanIds.has(planId) ? 'Moving…' : (() => { const preview = resolveMoveDestination(moveSelection, currentStartIso, new Date(), effectiveTimezone); return preview.ok ? `Move to ${formatMoveTime(preview.newStartAt, effectiveTimezone)}` : 'Move'; })()}
+        </PrimaryButton>
+        <TextButton onClick={closeMovePicker} disabled={movingPlanIds.has(planId)} style={{ minHeight: 44, padding: '0 8px' }} color={colors.textSecondary}>
+          Cancel
+        </TextButton>
+      </div>
+      {visibleCompletionError(moveError, planId) && (
+        <div role="alert" style={{ color: colors.danger, fontSize: 12 }}>{visibleCompletionError(moveError, planId)}</div>
+      )}
+    </form>
+  );
+  // Daily Experience V1 PR E -- Missed Recovery. Rendered beneath a derived-MISSED plan row: the SAME Done / Skip / Move
+  // paths as Right Now (shared executor + guard, confirmed facts, single Move picker). Three direct actions fit at 375px
+  // (they wrap), so there is no overflow menu. Cancel is deliberately absent: the occurrence already passed.
+  const renderMissedRecovery = (item: HomeTimelineItem) => {
+    const planId = missedRecoveryPlanId(item, new Date(), executionFacts);
+    if (planId === null) return null;
+    const busy = completingPlanIds.has(planId) || skippingPlanIds.has(planId) || movingPlanIds.has(planId);
+    const error = visibleCompletionError(completeError, planId) ?? visibleCompletionError(skipError, planId);
+    return (
+      <div role="group" aria-label={`What happened with "${item.title}"?`} data-missed-recovery={planId}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: spacing.sm, flexWrap: 'wrap' }}>
+          <span style={{ ...typography.caption, color: colors.textMuted }}>What happened?</span>
+          <TextButton onClick={() => void handleCompleteRightNow(planId, 'TIMELINE')} disabled={busy} ariaLabel={`Mark "${item.title}" done`} style={{ minHeight: 44, padding: '0 8px' }}>
+            {completingPlanIds.has(planId) ? 'Saving…' : 'Done'}
+          </TextButton>
+          <TextButton onClick={() => void handleSkipRightNow(planId, 'TIMELINE')} disabled={busy} ariaLabel={`Skip "${item.title}"`} color={colors.textSecondary} style={{ minHeight: 44, padding: '0 8px' }}>
+            {skippingPlanIds.has(planId) ? 'Skipping…' : 'Skip'}
+          </TextButton>
+          <TextButton
+            id={`home-move-trigger-${planId}`}
+            onClick={() => (movePickerFor === planId ? closeMovePicker() : openMovePicker(planId))}
+            disabled={busy}
+            ariaLabel={`Move "${item.title}"`}
+            color={colors.textSecondary}
+            style={{ minHeight: 44, padding: '0 8px' }}
+          >
+            Move
+          </TextButton>
+        </div>
+        {error && (
+          <div role="alert" style={{ color: colors.danger, fontSize: 12 }}>
+            {error}
+          </div>
+        )}
+        {movePickerFor === planId && renderMovePicker(planId, item.title, item.start, item.metadata?.durationMinutes)}
+      </div>
+    );
   };
   const spotlightExplanation = spotlightItem ? explanationsById[spotlightItem.id] : undefined;
   // Finding D: the spotlight's own "Why?" now expands INLINE (below),
@@ -897,6 +1019,7 @@ export function HomeDashboard({
                 )}
                 {moveablePlanIdNow && (
                   <TextButton
+                    id={`home-move-trigger-${moveablePlanIdNow}`}
                     onClick={() => (movePickerFor === moveablePlanIdNow ? closeMovePicker() : openMovePicker(moveablePlanIdNow))}
                     disabled={movingPlanIds.has(moveablePlanIdNow) || completingPlanIds.has(moveablePlanIdNow) || skippingPlanIds.has(moveablePlanIdNow)}
                     ariaLabel={`Move "${spotlightItem.title}"`}
@@ -929,50 +1052,7 @@ export function HomeDashboard({
               {visibleCompletionError(skipError, skippablePlanIdNow) && (
                 <div role="alert" style={{ color: colors.danger, fontSize: 12, marginTop: spacing.xs }}>{visibleCompletionError(skipError, skippablePlanIdNow)}</div>
               )}
-              {moveablePlanIdNow && movePickerFor === moveablePlanIdNow && (
-                <form
-                  aria-label={`Move "${spotlightItem.title}" to another time`}
-                  onSubmit={(event) => {
-                    event.preventDefault();
-                    void handleMoveRightNow(moveablePlanIdNow, spotlightItem.start);
-                  }}
-                  onKeyDown={(event) => {
-                    if (event.key === 'Escape') {
-                      event.stopPropagation();
-                      closeMovePicker();
-                    }
-                  }}
-                  style={{ marginTop: spacing.md, padding: spacing.md, border: `1px solid ${colors.borderSubtle}`, borderRadius: 12, display: 'flex', flexDirection: 'column', gap: spacing.sm }}
-                >
-                  <div style={{ ...typography.caption, color: colors.textSecondary }}>
-                    Same activity{spotlightItem.metadata?.durationMinutes ? `, still ${spotlightItem.metadata.durationMinutes} min` : ''} — pick a new start time.
-                  </div>
-                  <div style={{ display: 'grid', gridTemplateColumns: 'minmax(0, 1fr) minmax(0, 1fr)', gap: spacing.sm }}>
-                    <div>
-                      <FieldLabel htmlFor="home-move-day">Day</FieldLabel>
-                      <SelectInput id="home-move-day" ref={moveDayRef} value={moveSelection.day} onChange={(event) => setMoveSelection((current) => ({ ...current, day: event.target.value as MoveSelection['day'] }))} disabled={movingPlanIds.has(moveablePlanIdNow)}>
-                        <option value="TODAY">Today</option>
-                        <option value="TOMORROW">Tomorrow</option>
-                      </SelectInput>
-                    </div>
-                    <div>
-                      <FieldLabel htmlFor="home-move-time">Start time</FieldLabel>
-                      <TextInput id="home-move-time" type="time" step={60} value={moveSelection.time} onChange={(event) => setMoveSelection((current) => ({ ...current, time: event.target.value }))} disabled={movingPlanIds.has(moveablePlanIdNow)} />
-                    </div>
-                  </div>
-                  <div style={{ display: 'flex', alignItems: 'center', gap: spacing.sm, flexWrap: 'wrap' }}>
-                    <PrimaryButton type="submit" disabled={movingPlanIds.has(moveablePlanIdNow)} style={{ padding: '6px 16px', fontSize: 13 }}>
-                      {movingPlanIds.has(moveablePlanIdNow) ? 'Moving…' : (() => { const preview = resolveMoveDestination(moveSelection, spotlightItem.start, new Date(), effectiveTimezone); return preview.ok ? `Move to ${formatMoveTime(preview.newStartAt, effectiveTimezone)}` : 'Move'; })()}
-                    </PrimaryButton>
-                    <TextButton onClick={closeMovePicker} disabled={movingPlanIds.has(moveablePlanIdNow)} style={{ minHeight: 44, padding: '0 8px' }} color={colors.textSecondary}>
-                      Cancel
-                    </TextButton>
-                  </div>
-                  {visibleCompletionError(moveError, moveablePlanIdNow) && (
-                    <div role="alert" style={{ color: colors.danger, fontSize: 12 }}>{visibleCompletionError(moveError, moveablePlanIdNow)}</div>
-                  )}
-                </form>
-              )}
+              {moveablePlanIdNow && movePickerFor === moveablePlanIdNow && spotlightItem && renderMovePicker(moveablePlanIdNow, spotlightItem.title, spotlightItem.start, spotlightItem.metadata?.durationMinutes)}
               {rightNowState.kind === 'OPPORTUNITY' && opportunityError && (
                 <div style={{ color: colors.danger, fontSize: 12, marginTop: spacing.xs }}>{opportunityError}</div>
               )}
@@ -1112,6 +1192,7 @@ export function HomeDashboard({
         timezone={effectiveTimezone}
         pendingActivities={myDayPendingActivities}
         nextItemId={myDayAgenda?.nextItem?.id}
+        recoverySlot={renderMissedRecovery}
         explanationsById={explanationsById}
         expandedId={expandedTimelineId}
         onToggleExpand={handleToggleExpand}
