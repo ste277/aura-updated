@@ -69,7 +69,7 @@ check('16. mapPlanRow preserves a SKIPPED row as SKIPPED (never LOGGED or UPCOMI
 const planTab = strip(read('../apps/web/components/PlanWithAuraView.tsx'));
 check("16. the Plan tab derives its upcoming/completed lists from presentation predicates (mapPlanRow preserves SKIPPED; status-preservation suite covers replay)", /savedPlans\.filter\(isActionableUpcomingPlan\)/.test(planTab) && /savedPlans\.filter\(isCompletedPlan\)/.test(planTab));
 const db = strip(read('../apps/web/lib/db.ts'));
-check("16. listPlannedActivities (Plan tab / calendar feed source) excludes SKIPPED at the query", /status NOT IN \('CANCELLED', 'SKIPPED'\)/.test(db));
+check("16. listPlannedActivities (Plan tab / calendar feed source) excludes SKIPPED at the query", /status NOT IN \('CANCELLED', 'SKIPPED', 'MOVED'\)/.test(db));
 
 // 20-23. UPCOMING-keyed readers naturally exclude SKIPPED (no SKIPPED handling was added there)
 check("20. reminder discovery queries stay keyed on status = 'UPCOMING'", /listPlannedActivitiesForReminders[\s\S]{0,400}status = 'UPCOMING'/.test(db) && /\.filter\(\(plan\) => plan\.status === 'UPCOMING'/.test(strip(read('../apps/web/lib/auraReminders.ts'))));

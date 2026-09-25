@@ -84,7 +84,7 @@ interface PlannedActivityState {
   id: string;
   title: string;
   icon?: string | null;
-  status: 'UPCOMING' | 'LOGGED' | 'CANCELLED' | 'SKIPPED';
+  status: 'UPCOMING' | 'LOGGED' | 'CANCELLED' | 'SKIPPED' | 'MOVED';
   plannedStartAt: string;
   plannedEndAt: string;
   durationMinutes: number;

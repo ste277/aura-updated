@@ -12,7 +12,7 @@ export const MAX_CAPTURE_TITLE_LENGTH = 200;
 
 export type CaptureStatus = 'OPEN' | 'DISMISSED';
 export type DerivedCaptureState = 'OPEN' | 'PLANNED' | 'COMPLETED' | 'DISMISSED';
-export type LinkedPlanStatus = 'UPCOMING' | 'LOGGED' | 'CANCELLED' | 'SKIPPED';
+export type LinkedPlanStatus = 'UPCOMING' | 'LOGGED' | 'CANCELLED' | 'SKIPPED' | 'MOVED';
 
 export type CaptureTitleResult = { ok: true; title: string } | { ok: false; error: string };
 
@@ -43,6 +43,10 @@ export interface CaptureLifecycleInput {
  *     the logging path is expected to materialize completedAt, after which
  *     this branch is never load-bearing.
  *  5. Otherwise OPEN -- including a CANCELLED or SKIPPED link (available again).
+ *     A link still pointing at a MOVED plan is a malformed state (Move repoints
+ *     the source to the successor atomically); it falls here too: never PLANNED
+ *     or COMPLETED. This is DISPLAY-only: generic planning cannot relink it
+ *     (linkCaptureToPlannedActivity fails closed for a MOVED link).
  */
 export function deriveCaptureState(input: CaptureLifecycleInput): DerivedCaptureState {
   if (input.status === 'DISMISSED') return 'DISMISSED';

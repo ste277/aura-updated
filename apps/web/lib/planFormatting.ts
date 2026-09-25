@@ -28,7 +28,7 @@ export interface PlanEventLocation {
 /** The persisted PlannedActivity lifecycle as it crosses the API boundary.
  * mapPlanRow maps it faithfully; which states a surface shows is a
  * presentation decision made by the surface, never by this mapper. */
-export type PersistedPlanStatus = 'UPCOMING' | 'LOGGED' | 'CANCELLED' | 'SKIPPED';
+export type PersistedPlanStatus = 'UPCOMING' | 'LOGGED' | 'CANCELLED' | 'SKIPPED' | 'MOVED';
 
 export type UpcomingPlan = {
   id: string;
@@ -202,6 +202,7 @@ export function mapPersistedPlanStatus(status: PersistedPlanStatus | null | unde
     case 'LOGGED':
     case 'CANCELLED':
     case 'SKIPPED':
+    case 'MOVED':
       return status;
     default: {
       const unreachable: never = status;
@@ -212,7 +213,7 @@ export function mapPersistedPlanStatus(status: PersistedPlanStatus | null | unde
 
 /** Plan-tab presentation (the mapper above never decides this): only an
  * UPCOMING plan is actionable work; only LOGGED shows as completed.
- * CANCELLED/SKIPPED have no representation on this surface. */
+ * CANCELLED/SKIPPED/MOVED have no representation on this surface. */
 export const isActionableUpcomingPlan = (plan: { status?: PersistedPlanStatus }): boolean => (plan.status ?? 'UPCOMING') === 'UPCOMING';
 export const isCompletedPlan = (plan: { status?: PersistedPlanStatus }): boolean => plan.status === 'LOGGED';
 

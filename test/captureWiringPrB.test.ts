@@ -80,7 +80,7 @@ check('re-syncs from the server on bfcache restore', /pageshow/.test(captures));
 // (PR B originally proved 'no Home Capture composer'; Quick Capture V1 PR C intentionally added one -- captureHomePrC.test.ts now owns the Home boundary.)
 check('no History/Completed/Dismissed UI, Goal/Habit conversion, or task-manager features on the page (checked against user-visible wording and control types)', !/>[^<{]*\b(History|Completed|Dismissed|Move to Goal|Attach to Goal|Convert|Make this a habit|Priority|Reminder|Recurring|Kanban|Search|Sort|Filter|Tags?|Labels?|Project)\b[^<}]*</.test(captures) && !/type="search"|<select|SegmentedControl/.test(captures));
 check('no Capture provenance in Goal or Habit domain code', !/capture/i.test(cap('../apps/web/lib/goals.ts')) && !/capture/i.test(cap('../apps/web/lib/goalsPresentation.ts')));
-check('no migration added by PR B (migrations 36 + 0037 skippedAt added by Skip C1)', fs.readdirSync(path.join(__dirname, '../apps/web/prisma/migrations')).filter((f) => /^\d{4}_/.test(f)).length === 37);
+check('no migration added by PR B (migrations: 36 + 0037 Skip C1 + 0038 Move D2)', fs.readdirSync(path.join(__dirname, '../apps/web/prisma/migrations')).filter((f) => /^\d{4}_/.test(f)).length === 38);
 const schema = read('../apps/web/prisma/schema.prisma');
 check('schema unchanged: PlannedActivity still has no Capture column', (schema.match(/model PlannedActivity \{[\s\S]*?\n\}/) ?? [''])[0].split('\n').filter((l) => /Capture/.test(l) && !l.trim().startsWith('//')).every((l) => /capture\s+Capture\?/.test(l) && !l.includes('fields:')));
 

@@ -46,7 +46,7 @@ export function selectCompactAgendaRows(agenda: DailyAgenda | null | undefined):
 
   // agenda.items is already chronologically sorted (dailyAgenda.ts), so a
   // plain filter preserves ascending order -- no re-sort needed.
-  const upcoming = agenda.items.filter((item) => item.status !== 'COMPLETED' && item.status !== 'MISSED' && item.status !== 'SKIPPED');
+  const upcoming = agenda.items.filter((item) => item.status !== 'COMPLETED' && item.status !== 'MISSED' && item.status !== 'SKIPPED' && item.status !== 'MOVED');
 
   const selectedUpcoming: DailyAgendaItem[] = [];
   if (upcoming[0]) selectedUpcoming.push(upcoming[0]);

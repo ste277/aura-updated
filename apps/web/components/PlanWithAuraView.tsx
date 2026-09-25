@@ -537,7 +537,7 @@ export function PlanWithAuraView({ onTimingSearch, onViewDay, onPlanLogged, time
   };
 
   const handleLogPlan = async (plan: UpcomingPlan) => {
-    if (planActionStates[plan.id] || plan.status === 'LOGGED' || plan.status === 'CANCELLED' || plan.status === 'SKIPPED') return;
+    if (planActionStates[plan.id] || plan.status === 'LOGGED' || plan.status === 'CANCELLED' || plan.status === 'SKIPPED' || plan.status === 'MOVED') return;
     setPlanActionStates((states) => ({ ...states, [plan.id]: 'LOGGING' }));
     try {
       const res = await fetch(`/api/plans/${plan.id}/log`, { method: 'POST' });

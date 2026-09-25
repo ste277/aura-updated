@@ -572,7 +572,7 @@ export interface PlannedActivity {
   // PlannedActivity-shaped fixtures elsewhere don't need updating for a
   // concept they don't touch.
   activityId?: string | null;
-  status: 'UPCOMING' | 'LOGGED' | 'CANCELLED' | 'SKIPPED';
+  status: 'UPCOMING' | 'LOGGED' | 'CANCELLED' | 'SKIPPED' | 'MOVED';
   plannedStartAt: Date;
   plannedEndAt: Date;
   durationMinutes: number;
@@ -584,6 +584,8 @@ export interface PlannedActivity {
   calendarUrl: string | null;
   loggedAt: Date | null;
   skippedAt?: Date | null;
+  /** Set only on a Move successor: the (now MOVED) plan this one replaces. */
+  rescheduledFromPlanId?: string | null;
   habitLogId: string | null;
   /** Event Location Plan Persistence V1 -- immutable snapshot of the Event
    * Location that produced this plan's timing, or both null when the
@@ -714,7 +716,7 @@ export async function listPlannedActivities(userId: string): Promise<PlannedActi
   const result = await pool.query(
     `SELECT *
      FROM "PlannedActivity"
-     WHERE "userId" = $1 AND status NOT IN ('CANCELLED', 'SKIPPED')
+     WHERE "userId" = $1 AND status NOT IN ('CANCELLED', 'SKIPPED', 'MOVED')
      ORDER BY
        CASE WHEN status = 'UPCOMING' THEN 0 ELSE 1 END,
        "plannedStartAt" ASC,
@@ -2319,7 +2321,7 @@ export interface GoalActivity {
 }
 
 export interface GoalActivityWithLinkedPlanStatus extends GoalActivity {
-  linkedPlanStatus: 'UPCOMING' | 'LOGGED' | 'CANCELLED' | 'SKIPPED' | null;
+  linkedPlanStatus: 'UPCOMING' | 'LOGGED' | 'CANCELLED' | 'SKIPPED' | 'MOVED' | null;
 }
 
 // Explicit column list, "targetDate" cast to ::text -- see Goal's own
@@ -2577,7 +2579,7 @@ export interface Capture {
 }
 
 export interface CaptureWithLinkedPlanStatus extends Capture {
-  linkedPlanStatus: 'UPCOMING' | 'LOGGED' | 'CANCELLED' | 'SKIPPED' | null;
+  linkedPlanStatus: 'UPCOMING' | 'LOGGED' | 'CANCELLED' | 'SKIPPED' | 'MOVED' | null;
 }
 
 /** Validates via the same pure rule the API uses; duplicates are allowed. */

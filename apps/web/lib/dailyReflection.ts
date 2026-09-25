@@ -19,7 +19,7 @@ export interface DailyReflection {
   summary: string;
 }
 
-// SKIPPED is deliberately absent everywhere below: not upcoming, not completed, not missed (no Day Review yet).
+// SKIPPED and MOVED are deliberately absent everywhere below: not upcoming, not completed, not missed (no Day Review yet).
 const UPCOMING_STATUSES = new Set(['UPCOMING', 'STARTING_SOON', 'CURRENT', 'WAITING', 'CONFIRMED']);
 
 function pluralize(count: number, singular: string, plural: string): string {

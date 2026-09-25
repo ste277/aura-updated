@@ -95,9 +95,10 @@ function hourInTimezone(iso: string, timezone: string): number {
 }
 
 function plannedItems(agenda: DailyAgenda): DailyAgendaItem[] {
+  // MOVED is a superseded occurrence (its successor is the live plan) and
   // SKIPPED is a deliberate non-execution: not planned-pending, not completed,
   // not missed-by-time -- the story simply does not mention it.
-  return agenda.items.filter((item) => item.type !== 'COMPLETED_ACTIVITY' && item.status !== 'SKIPPED');
+  return agenda.items.filter((item) => item.type !== 'COMPLETED_ACTIVITY' && item.status !== 'SKIPPED' && item.status !== 'MOVED');
 }
 
 function upcomingPlannedItems(agenda: DailyAgenda): DailyAgendaItem[] {

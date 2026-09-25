@@ -22,7 +22,7 @@ import { findActivityIntent } from '../../../packages/recommendation/src/persona
 
 export type GoalStatus = 'ACTIVE' | 'ARCHIVED';
 export type GoalActivityStatus = 'SUGGESTED' | 'DISMISSED';
-export type PlannedActivityStatus = 'UPCOMING' | 'LOGGED' | 'CANCELLED' | 'SKIPPED';
+export type PlannedActivityStatus = 'UPCOMING' | 'LOGGED' | 'CANCELLED' | 'SKIPPED' | 'MOVED';
 
 /** The full set of states a GoalActivity can be shown in, once persisted
  * state is combined with its linked PlannedActivity's real status. Never
@@ -52,7 +52,10 @@ export function deriveGoalActivityState(input: GoalActivityLifecycleInput): Deri
   if (!input.plannedActivityId || !input.linkedPlanStatus) return 'SUGGESTED';
   // available to plan again (replanning relinks the same row -- see db.ts).
   // A SKIPPED link is a deliberate non-execution: never PLANNED/COMPLETED.
-  if (input.linkedPlanStatus === 'CANCELLED' || input.linkedPlanStatus === 'SKIPPED') return 'SUGGESTED';
+  // A link still on a MOVED plan is malformed (Move repoints to the successor
+  // atomically): displayed as SUGGESTED, never PLANNED-forever or COMPLETED.
+  // DISPLAY-only: linkGoalActivityToPlannedActivity fails closed for a MOVED link.
+  if (input.linkedPlanStatus === 'CANCELLED' || input.linkedPlanStatus === 'SKIPPED' || input.linkedPlanStatus === 'MOVED') return 'SUGGESTED';
   if (input.linkedPlanStatus === 'LOGGED') return 'COMPLETED';
   return 'PLANNED'; // linkedPlanStatus === 'UPCOMING'
 }

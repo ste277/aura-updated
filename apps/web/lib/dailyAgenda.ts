@@ -13,7 +13,7 @@ import { findActivityIntent } from '../../../packages/recommendation/src/persona
 
 export type DailyAgendaItemType = 'PLAN' | 'MOMENT' | 'COMPLETED_ACTIVITY';
 
-export type DailyAgendaItemStatus = 'UPCOMING' | 'STARTING_SOON' | 'CURRENT' | 'COMPLETED' | 'WAITING' | 'CONFIRMED' | 'MISSED' | 'SKIPPED';
+export type DailyAgendaItemStatus = 'UPCOMING' | 'STARTING_SOON' | 'CURRENT' | 'COMPLETED' | 'WAITING' | 'CONFIRMED' | 'MISSED' | 'SKIPPED' | 'MOVED';
 
 export interface DailyAgendaItem {
   id: string;
@@ -88,7 +88,7 @@ function sanitizedIcon(icon: string | null | undefined): string | null {
 function planToAgendaItem(plan: PlannedActivity, now: Date): DailyAgendaItem {
   // Terminal persisted outcomes win over time; time-derived states apply only to UPCOMING.
   const status: DailyAgendaItemStatus =
-    plan.status === 'LOGGED' ? 'COMPLETED' : plan.status === 'SKIPPED' ? 'SKIPPED' : timeBasedStatus(plan.plannedStartAt, plan.plannedEndAt, now);
+    plan.status === 'LOGGED' ? 'COMPLETED' : plan.status === 'SKIPPED' ? 'SKIPPED' : plan.status === 'MOVED' ? 'MOVED' : timeBasedStatus(plan.plannedStartAt, plan.plannedEndAt, now);
   return {
     id: `plan:${plan.id}`,
     type: 'PLAN',
@@ -223,6 +223,6 @@ export function buildDailyAgenda(input: BuildDailyAgendaInput): DailyAgenda {
     currentItem,
     nextItem,
     completedCount: items.filter((item) => item.status === 'COMPLETED').length,
-    plannedCount: items.filter((item) => item.type !== 'COMPLETED_ACTIVITY' && item.status !== 'SKIPPED').length,
+    plannedCount: items.filter((item) => item.type !== 'COMPLETED_ACTIVITY' && item.status !== 'SKIPPED' && item.status !== 'MOVED').length,
   };
 }
