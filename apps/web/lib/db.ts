@@ -731,6 +731,22 @@ export async function listPlannedActivities(userId: string): Promise<PlannedActi
   return result.rows;
 }
 
+/**
+ * Remaining-Day Recomposition V1 PR F2 -- READ-ONLY. Which of the given plans currently have an ACTIVE, unexpired
+ * shared AuraMoment linked -- the exact restriction `movePlannedActivity` enforces (`HAS_LINKED_MOMENT`), evaluated
+ * against a caller-supplied instant so a proposal is reproducible. Such a plan cannot be moved, so recomposition
+ * must not reconsider it.
+ */
+export async function listPlanIdsWithActiveMoment(planIds: readonly string[], now: Date): Promise<Set<string>> {
+  if (planIds.length === 0) return new Set();
+  const result = await pool.query(
+    `SELECT DISTINCT "plannedActivityId" FROM "AuraMoment"
+     WHERE "plannedActivityId" = ANY($1::text[]) AND status = 'ACTIVE' AND ("expiresAt" IS NULL OR "expiresAt" > $2)`,
+    [planIds, now]
+  );
+  return new Set(result.rows.map((row) => row.plannedActivityId as string));
+}
+
 export async function listAllPlannedActivitiesForExport(userId: string): Promise<PlannedActivity[]> {
   const result = await pool.query(
     `SELECT *
