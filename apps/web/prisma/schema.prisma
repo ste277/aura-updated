@@ -296,6 +296,11 @@ model HabitLog {
   @@index([userId, logTimestamp])
 }
 
+enum PlannedActivitySchedulingMode {
+  FIXED
+  FLEXIBLE
+}
+
 model PlannedActivity {
   id              String   @id @default(uuid())
   userId          String
@@ -341,6 +346,14 @@ model PlannedActivity {
   // successor created by movePlannedActivity: this plan exists because the
   // referenced plan (now status "MOVED") was moved. Unique: at most one
   // successor per plan. Deliberately no forward pointer, movedAt or reason.
+  // Remaining-Day Recomposition V1 PR F1 (migration 0039) -- the scheduling
+  // CONSTRAINT of this committed occurrence. FIXED = its time is a commitment
+  // (protected from Aura-driven recomposition); FLEXIBLE = Aura may PROPOSE
+  // another time (explicit acceptance still required); NULL = legacy/unknown,
+  // treated as PROTECTED. No default, no backfill. Server-derived from the
+  // planning path that created the plan -- never a client value. An explicit
+  // user Move is independent of it, and a Move successor inherits it.
+  schedulingMode  PlannedActivitySchedulingMode?
   rescheduledFromPlanId String? @unique
   rescheduledFrom       PlannedActivity? @relation("PlanMoveLineage", fields: [rescheduledFromPlanId], references: [id], onDelete: SetNull)
   rescheduledTo         PlannedActivity? @relation("PlanMoveLineage")

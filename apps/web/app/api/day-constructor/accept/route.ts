@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { getSessionFromRequest } from '../../../../lib/session';
 import { parseJsonObject } from '../../../../lib/request';
 import { persistAcceptedConstructedDay, MAX_CLIENT_REQUEST_ID_LENGTH, MAX_INTENT_ID_LENGTH } from '../../../../lib/dayConstructorAcceptancePersistence';
+import { verifyAcceptanceItems } from '../../../../lib/dayConstructorPreviewIntegrity';
 import type { AcceptConstructedDayRequest, AcceptedProposedItem } from '../../../../lib/dayConstructorAcceptance';
 import type { ConstructionWindowSource } from '../../../../lib/dayIntent';
 
@@ -102,6 +103,22 @@ const parseGoalActivityLinks = (value: unknown) => parseSourceLinks(value, 'goal
 // same rules and equally kept out of AcceptConstructedDayRequest.
 const parseCaptureLinks = (value: unknown) => parseSourceLinks(value, 'captureId');
 
+/**
+ * F1 trust correction: the per-item server-signed `acceptanceToken` the preview handed out, kept OUT of
+ * `AcceptConstructedDayRequest` (the scheduling-domain contract). Collected by intentId; a missing or non-string
+ * value is simply absent and fails verification.
+ */
+function parseAcceptanceTokens(value: unknown): Map<string, unknown> {
+  const tokens = new Map<string, unknown>();
+  if (!Array.isArray(value)) return tokens;
+  for (const raw of value) {
+    if (!raw || typeof raw !== 'object') continue;
+    const item = raw as Record<string, unknown>;
+    if (typeof item.intentId === 'string') tokens.set(item.intentId, item.acceptanceToken);
+  }
+  return tokens;
+}
+
 export async function POST(req: NextRequest) {
   const session = getSessionFromRequest(req);
   if (!session) return NextResponse.json({ error: 'Not authenticated.' }, { status: 401 });
@@ -111,6 +128,14 @@ export async function POST(req: NextRequest) {
 
   const request = parseAcceptRequest(body);
   if (!request) return NextResponse.json({ error: 'A valid Day Constructor acceptance request is required.' }, { status: 400 });
+  // Integrity gate (F1 trust correction): the browser is not authoritative for what a server-generated proposed
+  // item means. Every item must carry a token the preview signed for THIS user, THIS window and exactly these
+  // facts (start/end, intent, activity, title, placementSource). Checked before anything is trusted or written --
+  // and before the replay/idempotency classification inside persistAcceptedConstructedDay.
+  const integrityDiagnostics = verifyAcceptanceItems(session.userId, request.constructionWindow, request.proposedItems, parseAcceptanceTokens(body.proposedItems));
+  if (integrityDiagnostics.length > 0) {
+    return NextResponse.json({ status: 'REJECTED', reason: 'INVALID_REQUEST', diagnostics: integrityDiagnostics });
+  }
   const goalActivityLinks = parseGoalActivityLinks(body.goalActivityLinks);
   const captureLinks = parseCaptureLinks(body.captureLinks);
 

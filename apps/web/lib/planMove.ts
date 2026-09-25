@@ -19,6 +19,7 @@
 import { randomUUID } from 'crypto';
 import { beginTransaction, type PlannedActivity } from './db';
 import { isActivePlanBlocker } from './dayConstructorOrchestrator';
+import { parseSchedulingMode } from './plannedActivitySchedulingMode';
 import { buildGoogleCalendarUrl } from '../../../packages/recommendation/src/dailyAssistant';
 
 export type MovePlanErrorCode =
@@ -114,19 +115,21 @@ export async function movePlannedActivity(userId: string, planId: string, input:
 
     // B is inserted directly (never through createPlannedActivity, whose
     // same-title/same-time dedupe could hand back someone else's plan).
-    // Time-specific Aura evaluation is NOT carried over: it described A's time.
+    // Time-specific Aura evaluation is NOT carried over: it described A's time. The scheduling MODE is inherited
+    // exactly (FIXED stays FIXED, FLEXIBLE stays FLEXIBLE, unknown stays unknown): Move neither grants nor removes
+    // recomposition permission, and it is independent of whether the user may Move a plan.
     const bId = randomUUID();
     const bRes = await client.query(
       `INSERT INTO "PlannedActivity"
          (id, "userId", title, "activityType", icon, status, "plannedStartAt", "plannedEndAt", "durationMinutes",
           "windowType", "windowLabel", "matchLabel", score, recommendation, "calendarUrl",
-          "eventTimezone", "eventLocationName", "activityId", "rescheduledFromPlanId")
-       VALUES ($1, $2, $3, $4, $5, 'UPCOMING', $6, $7, $8, 'NEUTRAL', NULL, NULL, NULL, NULL, $9, $10, $11, $12, $13)
+          "eventTimezone", "eventLocationName", "schedulingMode", "activityId", "rescheduledFromPlanId")
+       VALUES ($1, $2, $3, $4, $5, 'UPCOMING', $6, $7, $8, 'NEUTRAL', NULL, NULL, NULL, NULL, $9, $10, $11, $12, $13, $14)
        RETURNING *`,
       [
         bId, userId, a.title, a.activityType, a.icon, newStartAt, newEndAt, a.durationMinutes,
         buildGoogleCalendarUrl(a.title, newStartAt.toISOString(), newEndAt.toISOString()),
-        a.eventTimezone, a.eventLocationName, a.activityId ?? null, planId,
+        a.eventTimezone, a.eventLocationName, parseSchedulingMode(a.schedulingMode), a.activityId ?? null, planId,
       ]
     );
 

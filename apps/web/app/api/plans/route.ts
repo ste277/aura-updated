@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getSessionFromRequest } from '../../../lib/session';
+import { DIRECT_PLAN_SCHEDULING_MODE } from '../../../lib/plannedActivitySchedulingMode';
 import { createPlannedActivity, listPlannedActivities, getPlannedActivityForOwner, getGuestConversionRedemption, claimGuestConversionToken, fillGuestConversionRedemption, getPlanCreationClaim, claimPlanCreation, fillPlanCreationClaim } from '../../../lib/db';
 import { parseJsonObject } from '../../../lib/request';
 import { verifyGuestStateToken, hashGuestConversionToken } from '../../../lib/guestState';
@@ -275,6 +276,9 @@ export async function POST(req: NextRequest) {
     eventTimezone: eventLocationSnapshot.eventTimezone,
     eventLocationName: eventLocationSnapshot.eventLocationName,
     activityId: validatedActivityId,
+    // F1: a direct plan is an explicit exact-time choice made outside the Constructor's flexible-placement flow.
+    // Server constant, never read from the request body -- a client cannot grant recomposition permission.
+    schedulingMode: DIRECT_PLAN_SCHEDULING_MODE,
   });
 
   if (guestConversionTokenHash) {

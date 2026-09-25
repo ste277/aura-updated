@@ -140,7 +140,7 @@ async function main() {
   check('17/26. a failed completion (pre-commit) shows a compact PLAN-OWNED alert, leaves the plan visible and never adds it to the logged set', /if \(result === 'FAILED'\) \{[\s\S]{0,200}setCompleteError\(\{ planId, message: "Couldn't mark that done\. Try again\." \}\);\s*return;\s*\}[\s\S]{0,120}setExecutionFacts/.test(dash) && /role="alert"/.test(dash));
   check('the existing selector, Composer, Constructor and Timing code are untouched by this feature', !/homeCompletion|overlayLoggedPlans/.test(strip(read('../apps/web/lib/rightNowSelection.ts')) + strip(read('../apps/web/lib/homeTimelineComposer.ts')) + strip(read('../apps/web/lib/dayConstructor.ts'))));
   check('26. the Plan tab completion path is unchanged (handleLogPlan still posts /api/plans/<id>/log)', /fetch\(`\/api\/plans\/\$\{plan\.id\}\/log`, \{ method: 'POST' \}\)/.test(read('../apps/web/components/PlanWithAuraView.tsx')));
-  check('54. no migration added by this PR (37 + 0038 from Move D2)', fs.readdirSync(path.join(__dirname, '../apps/web/prisma/migrations')).filter((f) => /^\d{4}_/.test(f)).length === 38);
+  check('54. no migration added by this PR (37 + 0038 from Move D2 + 0039 F1)', fs.readdirSync(path.join(__dirname, '../apps/web/prisma/migrations')).filter((f) => /^\d{4}_/.test(f)).length === 39);
 
   if (!allPassed) {
     console.error('SOME HOME COMPLETION CHECKS FAILED');
