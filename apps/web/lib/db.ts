@@ -737,9 +737,9 @@ export async function listPlannedActivities(userId: string): Promise<PlannedActi
  * against a caller-supplied instant so a proposal is reproducible. Such a plan cannot be moved, so recomposition
  * must not reconsider it.
  */
-export async function listPlanIdsWithActiveMoment(planIds: readonly string[], now: Date): Promise<Set<string>> {
+export async function listPlanIdsWithActiveMoment(planIds: readonly string[], now: Date, executor: QueryExecutor = pool): Promise<Set<string>> {
   if (planIds.length === 0) return new Set();
-  const result = await pool.query(
+  const result = await executor.query(
     `SELECT DISTINCT "plannedActivityId" FROM "AuraMoment"
      WHERE "plannedActivityId" = ANY($1::text[]) AND status = 'ACTIVE' AND ("expiresAt" IS NULL OR "expiresAt" > $2)`,
     [planIds, now]

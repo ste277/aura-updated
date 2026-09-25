@@ -581,7 +581,7 @@ type ConstructionWindowResolution =
   | { status: 'TIMEZONE_MISSING' }
   | { status: 'INVALID_CONSTRUCTION_WINDOW'; error: ConstructionWindowValidationError };
 
-function resolveConstructionWindow(request: ConstructDayRequest): ConstructionWindowResolution {
+export function resolveConstructionWindow(request: ConstructDayRequest): ConstructionWindowResolution {
   if (!request.timezone || !request.timezone.trim()) return { status: 'TIMEZONE_MISSING' };
   // `now` is required for BOTH window sources as of the pre-commit
   // review fix (see ConstructDayRequest.now's own doc comment) -- a
@@ -729,7 +729,7 @@ function normalizeCandidate(intentId: string, candidate: TimingCandidate, candid
  * were already correctly unclipped by `resolveAvailability` before this
  * ticket existed.
  */
-async function resolveAvailabilityAwareWindow(
+export async function resolveAvailabilityAwareWindow(
   request: ConstructDayRequest,
   deps: DayConstructorOrchestratorDeps
 ): Promise<

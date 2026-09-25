@@ -13,6 +13,7 @@ import { createRealDayConstructorOrchestratorDeps } from './dayConstructorOrches
 import { resolveTzOffsetMinutes } from './timezone';
 import { buildPersonalMuhurtaContextForUser } from './natalContext';
 import { runTimingSearch, type TimingSearchRequest } from '../../../packages/recommendation/src/timingSearch';
+import { signRecompositionProposal } from './remainingDayRecompositionIntegrity';
 import { recomposeRemainingDay, type RecompositionDeps, type RemainingDayRecompositionResult } from './remainingDayRecomposition';
 
 export function createRealRecompositionDeps(user: User, now: Date): RecompositionDeps {
@@ -66,7 +67,10 @@ export async function handleRemainingDayRecompositionRequest(deps: Recomposition
   const now = deps.now();
   try {
     const result: RemainingDayRecompositionResult = await (deps.recompose ?? recomposeRemainingDay)({ timezone: user.timezone, now }, deps.createDeps(user, now));
-    return { httpStatus: 200, body: result as unknown as Record<string, unknown> };
+    // F3: only a CHANGES_PROPOSED proposal carries a signed acceptance token (nothing else is ever committable). Signing
+    // reads the final proposal only -- no persistence, and the response is otherwise byte-identical to F2's.
+    const proposalToken = result.status === 'READY' ? signRecompositionProposal(user.id, result.proposal) : null;
+    return { httpStatus: 200, body: { ...(result as unknown as Record<string, unknown>), ...(proposalToken ? { proposalToken } : {}) } };
   } catch (err) {
     console.error('day/recompose: unexpected failure', err);
     return { httpStatus: 500, body: { error: 'Something went wrong reviewing your day.' } };
