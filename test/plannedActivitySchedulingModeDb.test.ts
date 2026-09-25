@@ -14,6 +14,7 @@ import { movePlannedActivity } from '../apps/web/lib/planMove';
 import { deriveCaptureState } from '../apps/web/lib/captures';
 import { deriveGoalActivityState } from '../apps/web/lib/goals';
 import { hasFlexibleScheduling, parseSchedulingMode } from '../apps/web/lib/plannedActivitySchedulingMode';
+import { signPreviewItem } from '../apps/web/lib/dayConstructorPreviewIntegrity';
 import { POST as plansRoute } from '../apps/web/app/api/plans/route';
 import { POST as acceptRoute } from '../apps/web/app/api/day-constructor/accept/route';
 import { POST as moveRoute } from '../apps/web/app/api/plans/[planId]/move/route';
@@ -104,9 +105,16 @@ async function main() {
     check('4/49. createPlannedActivity with no mode stated persists NULL (the DB helper never grants FLEXIBLE by default)', helperPlan.schedulingMode === null);
     const garbage = await createPlannedActivity({ userId: U.id, title: `Helper garbage ${Date.now()}`, plannedStartAt: new Date(Date.now() + 211 * DAY), plannedEndAt: new Date(Date.now() + 211 * DAY + HOUR), durationMinutes: 60, windowType: 'NEUTRAL', schedulingMode: 'MOVABLE' as any });
     check('49. an unrecognised mode handed to the DB helper degrades to NULL (protected), never to FLEXIBLE and never a crash', garbage.schedulingMode === null);
-    const wrongKind = await acceptRoute(fakeReq(tok, { clientRequestId: `trust-${Date.now()}`, constructionWindow: { date: '2027-06-20', start: '2027-06-20T09:00:00Z', end: '2027-06-20T17:00:00Z', timezone: TZ, source: 'EXPLICIT_RANGE' }, proposedItems: [{ intentId: 'x1', title: 'Trust check', start: '2027-06-20T10:00:00Z', end: '2027-06-20T10:30:00Z', placementSource: 'FIXED_CONSTRAINT', schedulingMode: 'FLEXIBLE' }] }));
+    const trustWindow = { date: '2027-06-20', start: new Date('2027-06-20T09:00:00Z'), end: new Date('2027-06-20T17:00:00Z'), timezone: TZ, source: 'EXPLICIT_RANGE' as const };
+    const trustItem = { intentId: 'x1', title: 'Trust check', start: new Date('2027-06-20T10:00:00Z'), end: new Date('2027-06-20T10:30:00Z'), placementSource: 'FIXED_CONSTRAINT' as const };
+    const trustBody = (over: Record<string, unknown> = {}) => JSON.parse(JSON.stringify({ clientRequestId: `trust-${Date.now()}-${n++}`, constructionWindow: trustWindow, proposedItems: [{ ...trustItem, acceptanceToken: signPreviewItem({ userId: U.id, window: trustWindow, item: trustItem }), ...over }], schedulingMode: 'FLEXIBLE' }));
+    const wrongKind = await acceptRoute(fakeReq(tok, trustBody({ schedulingMode: 'FLEXIBLE' })));
     const wrongKindBody = await wrongKind.json();
-    check('18/38. the accept route ignores a client schedulingMode field: a FIXED_CONSTRAINT item stays FIXED even when the body says FLEXIBLE', wrongKindBody.status === 'SAVED' && wrongKindBody.plans[0].schedulingMode === 'FIXED');
+    check('18/38. the accept route ignores a client schedulingMode field: a verified FIXED_CONSTRAINT item stays FIXED even when the body says FLEXIBLE', wrongKindBody.status === 'SAVED' && wrongKindBody.plans[0].schedulingMode === 'FIXED');
+    const forged = await (await acceptRoute(fakeReq(tok, trustBody({ placementSource: 'SELECTED_CANDIDATE' })))).json();
+    check('10/11. a forged placementSource (FIXED_CONSTRAINT -> SELECTED_CANDIDATE) with the original token is REJECTED, so it can never persist FLEXIBLE', forged.status === 'REJECTED' && forged.diagnostics.some((d: any) => d.detail === 'PREVIEW_TOKEN_MISMATCH'));
+    const unsigned = await (await acceptRoute(fakeReq(tok, JSON.parse(JSON.stringify({ clientRequestId: `trust-u-${Date.now()}`, constructionWindow: trustWindow, proposedItems: [trustItem] }))))).json();
+    check('26. an unsigned acceptance (no acceptanceToken) is REJECTED -- there is no compatibility path', unsigned.status === 'REJECTED' && unsigned.diagnostics.some((d: any) => d.detail === 'PREVIEW_TOKEN_MISSING'));
 
     // ---- Move inheritance (14/15/23) ----
     const mkPlan = async (mode: 'FIXED' | 'FLEXIBLE' | null, title: string, startMs: number) => createPlannedActivity({ userId: U.id, title: `${title} ${Date.now()}-${n++}`, plannedStartAt: new Date(startMs), plannedEndAt: new Date(startMs + HOUR), durationMinutes: 60, windowType: 'NEUTRAL', schedulingMode: mode });

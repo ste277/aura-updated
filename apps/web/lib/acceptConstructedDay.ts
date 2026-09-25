@@ -53,6 +53,8 @@ export interface AcceptConstructedDayRequestBody {
     start: Date;
     end: Date;
     placementSource: 'FIXED_CONSTRAINT' | 'SELECTED_CANDIDATE';
+    /** The opaque server-signed token the preview returned for this item; passed back verbatim, never decoded. */
+    acceptanceToken?: string;
   }>;
   /** Present only when at least one accepted row actually carries Goal
    * provenance -- omitted entirely otherwise, so an ordinary typed-only
@@ -73,6 +75,7 @@ export function buildAcceptRequestBody(preview: ConstructDayPreview, clientReque
       start: item.start,
       end: item.end,
       placementSource: item.placementSource,
+      acceptanceToken: (item as { acceptanceToken?: string }).acceptanceToken,
     })),
     ...(goalActivityLinks && goalActivityLinks.length > 0 ? { goalActivityLinks: [...goalActivityLinks] } : {}),
     ...(captureLinks && captureLinks.length > 0 ? { captureLinks: [...captureLinks] } : {}),

@@ -31,6 +31,7 @@ import {
   type RequestedDayIntent,
 } from './dayConstructorOrchestrator';
 import type { ConstructionWindowSource, DayIntentFlexibility, DayIntentImportance } from './dayIntent';
+import { signPreviewResultBody } from './dayConstructorPreviewIntegrity';
 import type { User } from './db';
 
 // ============================================================
@@ -345,7 +346,9 @@ export async function handleDayConstructorPreviewRequest(deps: DayConstructorPre
 
   try {
     const orchestratorDeps = deps.createOrchestratorDeps(user, now);
-    return await runDayConstructorPreview(body, user.timezone, now, orchestratorDeps);
+    const result = await runDayConstructorPreview(body, user.timezone, now, orchestratorDeps);
+    // F1 trust correction: sign each proposed item for THIS user so acceptance can verify what it means.
+    return { ...result, body: signPreviewResultBody(session.userId, result.body) };
   } catch (err) {
     // Genuine infrastructure/unexpected failure -- never leaked to the
     // client (this ticket's own section 13), distinct from every typed

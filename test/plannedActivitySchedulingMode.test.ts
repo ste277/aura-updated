@@ -61,7 +61,10 @@ check('10/11. the direct-plan constant is FIXED (an explicit exact-time choice; 
 
 // ---------- 6/9/17. creation-path audit (complete list, structural) ----------
 const prod = [...walk('apps/web'), ...walk('packages')].filter((f) => !/\.test\./.test(f) && !f.includes(`${path.sep}prisma${path.sep}`));
-const insertSites = prod.filter((f) => /INSERT INTO "PlannedActivity"/.test(read(f)));
+// Broadened guard: any casing / whitespace / unquoted table form of a raw INSERT, a dynamic `INSERT INTO ${...}`, and the
+// Prisma client forms (this repository uses raw `pg`, so the Prisma forms are a tripwire, not an expected path).
+const CREATOR_PATTERNS = [/INSERT\s+INTO\s+"?PlannedActivity"?/i, /INSERT\s+INTO\s+\$\{/i, /plannedActivity\s*\.\s*(create|createMany|upsert)\s*\(/, /\$executeRaw[\s\S]{0,120}PlannedActivity/i];
+const insertSites = prod.filter((f) => CREATOR_PATTERNS.some((re) => re.test(strip(read(f)))) || /INSERT INTO "PlannedActivity"/.test(read(f)));
 check('6. the COMPLETE set of production files that INSERT a PlannedActivity is exactly db.ts (createPlannedActivity + createPlannedActivityWithClient) and planMove.ts (the Move successor)', insertSites.map((f) => f.split(path.sep).join('/')).sort().join() === 'apps/web/lib/db.ts,apps/web/lib/planMove.ts');
 const dbSrc = strip(read('apps/web/lib/db.ts'));
 const inserts = dbSrc.match(/INSERT INTO "PlannedActivity"[\s\S]*?RETURNING \*/g) ?? [];
