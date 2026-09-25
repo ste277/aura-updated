@@ -99,57 +99,94 @@ export async function movePlannedActivity(userId: string, planId: string, input:
     const now: Date = (await client.query('SELECT clock_timestamp() AS now')).rows[0].now;
     const { newStartAt, newEndAt } = validateMoveDestination(a, input.newStartAt, now);
 
-    // Conflict: any OTHER plan whose [start, end) overlaps the destination and
-    // that the existing blocker rule says still blocks. A itself is excluded.
-    const candidates = await client.query(
-      `SELECT "plannedStartAt", "plannedEndAt", status FROM "PlannedActivity"
-       WHERE "userId" = $1 AND id <> $2 AND "plannedStartAt" < $4 AND "plannedEndAt" > $3`,
-      [userId, planId, newStartAt, newEndAt]
-    );
-    const conflict = candidates.rows.some(
-      (row) =>
-        isActivePlanBlocker({ start: new Date(row.plannedStartAt), end: new Date(row.plannedEndAt), status: row.status }, now) &&
-        overlaps(newStartAt, newEndAt, new Date(row.plannedStartAt), new Date(row.plannedEndAt))
-    );
+    // Conflict: any OTHER plan whose [start, end) overlaps the destination and that the existing blocker rule says
+    // still blocks. A itself is excluded. (Shared with recomposition acceptance.)
+    const conflict = await findBlockingPlanForRange(client, userId, [planId], newStartAt, newEndAt, now);
     if (conflict) throw new MovePlanError('CONFLICT', 'That time overlaps another plan.');
 
-    // B is inserted directly (never through createPlannedActivity, whose
-    // same-title/same-time dedupe could hand back someone else's plan).
-    // Time-specific Aura evaluation is NOT carried over: it described A's time. The scheduling MODE is inherited
-    // exactly (FIXED stays FIXED, FLEXIBLE stays FLEXIBLE, unknown stays unknown): Move neither grants nor removes
-    // recomposition permission, and it is independent of whether the user may Move a plan.
-    const bId = randomUUID();
-    const bRes = await client.query(
-      `INSERT INTO "PlannedActivity"
-         (id, "userId", title, "activityType", icon, status, "plannedStartAt", "plannedEndAt", "durationMinutes",
-          "windowType", "windowLabel", "matchLabel", score, recommendation, "calendarUrl",
-          "eventTimezone", "eventLocationName", "schedulingMode", "activityId", "rescheduledFromPlanId")
-       VALUES ($1, $2, $3, $4, $5, 'UPCOMING', $6, $7, $8, 'NEUTRAL', NULL, NULL, NULL, NULL, $9, $10, $11, $12, $13, $14)
-       RETURNING *`,
-      [
-        bId, userId, a.title, a.activityType, a.icon, newStartAt, newEndAt, a.durationMinutes,
-        buildGoogleCalendarUrl(a.title, newStartAt.toISOString(), newEndAt.toISOString()),
-        a.eventTimezone, a.eventLocationName, parseSchedulingMode(a.schedulingMode), a.activityId ?? null, planId,
-      ]
-    );
-
-    const aMoved = await client.query(
-      `UPDATE "PlannedActivity" SET status = 'MOVED', "updatedAt" = now()
-       WHERE id = $1 AND "userId" = $2 AND status = 'UPCOMING' RETURNING *`,
-      [planId, userId]
-    );
-    if (aMoved.rows.length !== 1) throw new MovePlanError('INVALID_STATE', 'Plan cannot be moved.');
-
-    // Continuity: the source follows the commitment. Zero rows for a source-less plan.
-    await client.query(`UPDATE "Capture" SET "plannedActivityId" = $1, "updatedAt" = now() WHERE "plannedActivityId" = $2 AND "userId" = $3`, [bId, planId, userId]);
-    await client.query(`UPDATE "GoalActivity" SET "plannedActivityId" = $1, "updatedAt" = now() WHERE "plannedActivityId" = $2 AND "userId" = $3`, [bId, planId, userId]);
+    const result = await applyMoveWrites(client, userId, a, newStartAt, newEndAt);
 
     await client.query('COMMIT');
-    return { from: aMoved.rows[0], to: bRes.rows[0] };
+    return result;
   } catch (err) {
     await client.query('ROLLBACK').catch(() => {});
     throw err;
   } finally {
     client.release();
   }
+}
+
+// ---------------------------------------------------------------------------
+// Shared internals (used by movePlannedActivity above AND by recomposition acceptance, F3). Declared after the
+// public operation so the single-plan flow reads top to bottom; hoisting makes the order irrelevant at runtime.
+// ---------------------------------------------------------------------------
+
+/**
+ * SHARED with recomposition acceptance (F3): does any plan OTHER than `excludePlanIds` that the existing blocker rule
+ * says still blocks overlap `[newStartAt, newEndAt)`? One definition of Move collision semantics -- `[start, end)`
+ * (touching is allowed), `isActivePlanBlocker` lifecycle rules, every plan of the user regardless of day.
+ */
+export async function findBlockingPlanForRange(
+  client: { query: (text: string, params?: unknown[]) => Promise<{ rows: any[] }> },
+  userId: string,
+  excludePlanIds: readonly string[],
+  newStartAt: Date,
+  newEndAt: Date,
+  now: Date
+): Promise<boolean> {
+  const candidates = await client.query(
+    `SELECT "plannedStartAt", "plannedEndAt", status FROM "PlannedActivity"
+     WHERE "userId" = $1 AND id <> ALL($2::text[]) AND "plannedStartAt" < $4 AND "plannedEndAt" > $3`,
+    [userId, [...excludePlanIds], newStartAt, newEndAt]
+  );
+  return candidates.rows.some(
+    (row) =>
+      isActivePlanBlocker({ start: new Date(row.plannedStartAt), end: new Date(row.plannedEndAt), status: row.status }, now) &&
+      overlaps(newStartAt, newEndAt, new Date(row.plannedStartAt), new Date(row.plannedEndAt))
+  );
+}
+
+/**
+ * SHARED with recomposition acceptance (F3): the writes of ONE Move inside the caller's transaction -- successor B
+ * inserted directly (never through createPlannedActivity, whose same-title/same-time dedupe could hand back someone
+ * else's plan), A transitioned UPCOMING -> MOVED (conditional), and the source (Capture / GoalActivity) repointed to B.
+ * Time-specific Aura evaluation is NOT carried over: it described A's time. The scheduling MODE is inherited exactly
+ * (FIXED stays FIXED, FLEXIBLE stays FLEXIBLE, unknown stays unknown): Move neither grants nor removes recomposition
+ * permission, and it is independent of whether the user may Move a plan. The caller owns validation, locking and the
+ * transaction; a lost conditional update throws INVALID_STATE so the caller rolls back.
+ */
+export async function applyMoveWrites(
+  client: { query: (text: string, params?: unknown[]) => Promise<{ rows: any[] }> },
+  userId: string,
+  a: PlannedActivity,
+  newStartAt: Date,
+  newEndAt: Date
+): Promise<MovePlanResult> {
+  const bId = randomUUID();
+  const bRes = await client.query(
+    `INSERT INTO "PlannedActivity"
+       (id, "userId", title, "activityType", icon, status, "plannedStartAt", "plannedEndAt", "durationMinutes",
+        "windowType", "windowLabel", "matchLabel", score, recommendation, "calendarUrl",
+        "eventTimezone", "eventLocationName", "schedulingMode", "activityId", "rescheduledFromPlanId")
+     VALUES ($1, $2, $3, $4, $5, 'UPCOMING', $6, $7, $8, 'NEUTRAL', NULL, NULL, NULL, NULL, $9, $10, $11, $12, $13, $14)
+     RETURNING *`,
+    [
+      bId, userId, a.title, a.activityType, a.icon, newStartAt, newEndAt, a.durationMinutes,
+      buildGoogleCalendarUrl(a.title, newStartAt.toISOString(), newEndAt.toISOString()),
+      a.eventTimezone, a.eventLocationName, parseSchedulingMode(a.schedulingMode), a.activityId ?? null, a.id,
+    ]
+  );
+
+  const aMoved = await client.query(
+    `UPDATE "PlannedActivity" SET status = 'MOVED', "updatedAt" = now()
+     WHERE id = $1 AND "userId" = $2 AND status = 'UPCOMING' RETURNING *`,
+    [a.id, userId]
+  );
+  if (aMoved.rows.length !== 1) throw new MovePlanError('INVALID_STATE', 'Plan cannot be moved.');
+
+  // Continuity: the source follows the commitment. Zero rows for a source-less plan.
+  await client.query(`UPDATE "Capture" SET "plannedActivityId" = $1, "updatedAt" = now() WHERE "plannedActivityId" = $2 AND "userId" = $3`, [bId, a.id, userId]);
+  await client.query(`UPDATE "GoalActivity" SET "plannedActivityId" = $1, "updatedAt" = now() WHERE "plannedActivityId" = $2 AND "userId" = $3`, [bId, a.id, userId]);
+
+  return { from: aMoved.rows[0], to: bRes.rows[0] };
 }

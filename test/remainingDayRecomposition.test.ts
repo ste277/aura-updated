@@ -38,7 +38,7 @@ function mkPlan(over: Partial<PlannedActivity> & { title: string; start: string;
 }
 const LABEL: Record<string, TimingCandidateLabel> = { EXCELLENT: 'EXCELLENT', GOOD: 'GOOD', USABLE: 'USABLE', CAUTION: 'CAUTION' };
 type Table = Record<string, Record<string, TimingCandidateLabel>>; // title -> start HH:MM -> label
-interface Opts { table: Table; availability?: { configured: boolean; periods: { weekday: number; startTime: string; endTime: string }[] }; moments?: string[]; failSearch?: boolean; failCheck?: boolean; checkTable?: Table; unfiltered?: boolean; tz?: string; now?: Date; calls?: { search: number; load: number; bounds: { from: Date; to: Date }[] } }
+interface Opts { table: Table; availability?: { configured: boolean; periods: { weekday: number; startTime: string; endTime: string }[] }; moments?: string[]; failSearch?: boolean; failCheck?: boolean; checkTable?: Table; failAfterSearches?: number; unfiltered?: boolean; tz?: string; now?: Date; calls?: { search: number; load: number; bounds: { from: Date; to: Date }[] } }
 function deps(plans: PlannedActivity[], o: Opts): RecompositionDeps {
   const calls = o.calls ?? { search: 0, load: 0, bounds: [] };
   const candidate = (start: Date, dur: number, label: TimingCandidateLabel): TimingCandidate => ({ start: start.toISOString(), end: new Date(start.getTime() + dur * 60000).toISOString(), score: 7, label, muhurtaScore: 0, reasons: [] } as unknown as TimingCandidate);
@@ -49,7 +49,7 @@ function deps(plans: PlannedActivity[], o: Opts): RecompositionDeps {
     loadAvailabilityConfiguration: async () => (o.availability ?? { configured: false, periods: [] }) as any,
     searchTiming: (request: any) => {
       calls.search += 1;
-      if (o.failSearch) throw new Error('search exploded');
+      if (o.failSearch || (o.failAfterSearches !== undefined && calls.search > o.failAfterSearches)) throw new Error('search exploded');
       const rows = o.table[request.taskTitle ?? ''] ?? {};
       const dur = request.durationMinutes as number;
       const excluded: { start: string; end: string }[] = request.excludedIntervals ?? [];
@@ -160,7 +160,8 @@ async function main() {
     check('21/35/68. a current slot that overlaps a protected commitment is invalid: MOVE with reason CURRENT_SLOT_INVALID even to a WORSE tier', moved.decision === 'MOVE' && moved.reason === 'CURRENT_SLOT_INVALID' && hhmm(moved.to.start) === '16:00' && moved.evidence.currentSlotInvalid === 'BLOCKED_OR_UNAVAILABLE' && moved.evidence.currentTier === 'GOOD' && moved.evidence.proposedTier === 'WORKABLE');
     const stuck = await propose([a, overlapping], { table: { 'Zork invalid': { '14:00': 'GOOD' } } });
     const s = dec(stuck, a);
-    check('24/69. invalid current slot and NO alternative -> UNRESOLVED: nothing is deleted, deferred or moved; the plan keeps its slot in the proposal', s.decision === 'UNRESOLVED' && s.reason === 'CURRENT_SLOT_INVALID_NO_ALTERNATIVE' && stuck.proposedState.find((x) => x.planId === a.id)!.slot.start.getTime() === at('14:00').getTime() && stuck.summary.state === 'NO_CHANGES' && stuck.summary.unresolvedCount === 1);
+    check('24/69. invalid current slot and NO alternative -> UNRESOLVED: nothing is deleted, deferred or moved; the plan keeps its slot in the proposal', s.decision === 'UNRESOLVED' && s.reason === 'CURRENT_SLOT_INVALID_NO_ALTERNATIVE' && stuck.proposedState.find((x) => x.planId === a.id)!.slot.start.getTime() === at('14:00').getTime() && stuck.summary.state === 'NEEDS_ATTENTION' && stuck.summary.unresolvedCount === 1 && stuck.summary.moveCount === 0);
+    check('43. F3 follow-up: an UNRESOLVED-only proposal is NEEDS_ATTENTION -- never the all-KEEP "your day already fits" NO_CHANGES; a MOVE is CHANGES_PROPOSED even alongside an UNRESOLVED plan', stuck.summary.state !== 'NO_CHANGES' && (await propose([a, overlapping, mkPlan({ title: 'Zork mover', start: '17:00', mode: 'FLEXIBLE' })], { table: { 'Zork invalid': { '14:00': 'GOOD' }, 'Zork mover': { '17:00': 'USABLE', '12:00': 'EXCELLENT' } } })).summary.state === 'CHANGES_PROPOSED');
     const gap = mkPlan({ title: 'Zork gap', start: '12:30', mode: 'FLEXIBLE' });
     const availability = { configured: true, periods: [{ weekday: 3, startTime: '10:00', endTime: '12:00' }, { weekday: 3, startTime: '14:00', endTime: '18:00' }] };
     const gapDecision = dec(await propose([gap], { table: { 'Zork gap': { '12:30': 'GOOD', '15:00': 'USABLE' } }, availability }), gap);
@@ -211,6 +212,18 @@ async function main() {
     const c = await run([a], { table: t, failCheck: true });
     check('77. a timing SEARCH failure yields TIMING_FAILED (never reinterpreted as "no candidates"/KEEP)', s.status === 'TIMING_FAILED');
     check('77. a timing CHECK failure on the current slot yields TIMING_FAILED (no fallback tier is invented)', c.status === 'TIMING_FAILED');
+  }
+
+  // ---------- F3 follow-up: a Timing Search failure on a LATER fixed-point iteration fails the whole proposal ----------
+  {
+    const A = mkPlan({ title: 'Zork A', start: '14:00', mode: 'FLEXIBLE' });
+    const B = mkPlan({ title: 'Zork B', start: '16:00', mode: 'FLEXIBLE' });
+    const table: Table = { 'Zork A': { '14:00': 'GOOD', '11:00': 'GOOD' }, 'Zork B': { '16:00': 'USABLE', '14:00': 'EXCELLENT' } };
+    const calls = { search: 0, load: 0, bounds: [] as { from: Date; to: Date }[] };
+    const ok = await run([A, B], { table, calls });
+    const firstPass = 2; // one search per reconsidered plan in the first placement run
+    const late = await run([A, B], { table, failAfterSearches: firstPass });
+    check('46/F3. iteration 1 succeeds (A is pinned), iteration 2\'s Timing Search fails -> TIMING_FAILED with NO partial proposal from iteration 1', ok.status === 'READY' && (ok as any).proposal.summary.placementRuns === 2 && late.status === 'TIMING_FAILED' && !('proposal' in late));
   }
 
   // ---------- 61/59/60. today only, timezone, clock ----------

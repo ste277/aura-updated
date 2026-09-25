@@ -40,6 +40,13 @@
  *    left exactly where it is (never cancelled, skipped or deferred).
  *  - The current-slot tier is a timing CHECK by activityId (or title, the acceptance convention); alternatives come
  *    from the orchestrator's FIND, which resolves the activity the same way.
+ *  - CANDIDATE CAP: at most MAX_RECOMPOSITION_CANDIDATES (12, the preview's own per-request cap; no measurement singles
+ *    out 12) of the chronologically earliest eligible plans are reconsidered; the rest are reported as
+ *    OVER_CANDIDATE_LIMIT, stay protected and keep BLOCKING. Repeated calls on the same day therefore never reach plan
+ *    #13 until an earlier plan becomes active/missed or is resolved. Deterministic and fail-closed; no paging.
+ *  - CURRENT-SLOT FEASIBILITY ignores the OTHER reconsidered plans: it asks the Constructor whether this slot is feasible
+ *    against the window, availability and PROTECTED commitments with every reconsidered plan released, so two flexible
+ *    plans that already overlap each other are not, by themselves, "invalid".
  *  - The separate open-time discrepancy (DailyAgenda openings vs Constructor blockers on LOGGED time) is NOT solved
  *    here and this proposal exposes no "minutes gained" figure.
  */
@@ -98,6 +105,7 @@ export interface KeepDecision {
   title: string;
   current: RecompositionSlot;
   reason: 'NO_STRICT_IMPROVEMENT';
+  /** `alternative` is the Constructor's best alternative AT THE MOMENT this plan was pinned (iteration-scoped): later passes only add blockers, so it may no longer be available in the final proposal. It explains why KEEP won; it is not a promise that the slot is free. */
   evidence: { currentTier: PlacementTimingFit | null; alternative: KeepAlternative };
 }
 export interface MoveDecision {
@@ -134,7 +142,8 @@ export interface RemainingDayRecompositionProposal {
   /** Plans that were considered but are protected, with why. History (LOGGED / SKIPPED / MOVED) is not listed. */
   protectedPlans: ProtectedPlan[];
   summary: {
-    state: 'NO_CHANGES' | 'CHANGES_PROPOSED';
+    /** NO_CHANGES: every reconsidered plan is a valid KEEP ("your day already fits"). CHANGES_PROPOSED: one or more MOVE. NEEDS_ATTENTION: no MOVE but at least one UNRESOLVED (a committed plan is in a slot that is no longer feasible and nothing could fix it) -- this must never be presented as "fits". */
+    state: 'NO_CHANGES' | 'CHANGES_PROPOSED' | 'NEEDS_ATTENTION';
     moveCount: number;
     keepCount: number;
     unresolvedCount: number;
@@ -358,7 +367,7 @@ export async function recomposeRemainingDay(input: { timezone: string; now: Date
       currentState: candidates.map((plan) => ({ planId: plan.id, title: plan.title, slot: slotOf(plan) })),
       proposedState: decisions.map((d) => ({ planId: d.planId, title: d.title, slot: d.decision === 'MOVE' ? d.to : d.current })),
       decisions, protectedPlans,
-      summary: { state: moveCount > 0 ? 'CHANGES_PROPOSED' : 'NO_CHANGES', moveCount, keepCount: decisions.filter((d) => d.decision === 'KEEP').length, unresolvedCount: decisions.filter((d) => d.decision === 'UNRESOLVED').length, placementRuns },
+      summary: { state: moveCount > 0 ? 'CHANGES_PROPOSED' : decisions.some((d) => d.decision === 'UNRESOLVED') ? 'NEEDS_ATTENTION' : 'NO_CHANGES', moveCount, keepCount: decisions.filter((d) => d.decision === 'KEEP').length, unresolvedCount: decisions.filter((d) => d.decision === 'UNRESOLVED').length, placementRuns },
     },
   };
 }
