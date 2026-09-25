@@ -155,7 +155,7 @@ async function main() {
   check('24/25. the filter depends only on the confirmed set (not on errors or in-flight state)', !/completingPlanIds|completeError/.test(dash.slice(dash.indexOf('selectVisibleStartingSoonReminder(startingSoonReminders'), dash.indexOf('selectVisibleStartingSoonReminder(startingSoonReminders') + 200)));
   check('17/18. Right Now selection and the Timeline Composer are untouched by this correction', !/reminder|auraUpdates/i.test(read('../apps/web/lib/rightNowSelection.ts') + read('../apps/web/lib/homeTimelineComposer.ts')));
   check('3. completion is unchanged: the reminder module contains no completion, HabitLog, Capture or Goal logic', !/fetch|habit|capture|goal|logPlanned/i.test(read('../apps/web/lib/reminderConsistency.ts').replace(/\/\*[\s\S]*?\*\//g, '')));
-  check('no migration by this PR (37 + 0038 from Move D2)', fs.readdirSync(path.join(__dirname, '../apps/web/prisma/migrations')).filter((f) => /^\d{4}_/.test(f)).length === 38);
+  check('no migration by this PR (37 + 0038 from Move D2 + 0039 F1)', fs.readdirSync(path.join(__dirname, '../apps/web/prisma/migrations')).filter((f) => /^\d{4}_/.test(f)).length === 39);
 
   if (!allPassed) {
     console.error('SOME REMINDER CONSISTENCY CHECKS FAILED');

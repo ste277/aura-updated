@@ -204,7 +204,7 @@ async function main() {
   check('38. after a confirmed Skip focus moves to the stable Right Now region (tabIndex -1), never left on the unmounted button; no focus trap or new focus framework', /set\(planId, 'SKIPPED'\)[\s\S]{0,400}querySelector<HTMLElement>\('\[data-home-right-now-label\]'\)\?\.focus\(\)/.test(dash) && /data-home-right-now-label tabIndex=\{-1\}/.test(dash));
   check('7. no new API routes: the only Skip endpoint is the C1 route; no home-specific route exists', fs.existsSync(path.join(__dirname, '../apps/web/app/api/plans/[planId]/skip/route.ts')) && !fs.existsSync(path.join(__dirname, '../apps/web/app/api/home')));
   check('4/22. selector, Composer, Constructor and the Skip domain are untouched by C2 (Right Now already treats SKIPPED as resolved)', !/homeCompletion|executionFacts/.test(strip(read('../apps/web/lib/rightNowSelection.ts')) + strip(read('../apps/web/lib/homeTimelineComposer.ts')) + strip(read('../apps/web/lib/dayConstructor.ts'))) && /status === 'SKIPPED'/.test(strip(read('../apps/web/lib/rightNowSelection.ts'))));
-  check('64. no migration by C2 (38 total after D2)', fs.readdirSync(path.join(__dirname, '../apps/web/prisma/migrations')).filter((f) => /^\d{4}_/.test(f)).length === 38);
+  check('64. no migration by C2 (39 total after D2 + F1)', fs.readdirSync(path.join(__dirname, '../apps/web/prisma/migrations')).filter((f) => /^\d{4}_/.test(f)).length === 39);
 
   if (!allPassed) { console.error('SOME HOME SKIP CHECKS FAILED'); process.exit(1); }
   console.log('ALL HOME SKIP CHECKS PASSED');

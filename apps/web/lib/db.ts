@@ -2,6 +2,7 @@ import { Pool, type PoolClient } from 'pg';
 import { randomUUID } from 'crypto';
 import { derivePlanCompletionHistory } from './planCompletionHistory';
 import { validateCaptureTitle } from './captures';
+import { parseSchedulingMode, type PlannedActivitySchedulingMode } from './plannedActivitySchedulingMode';
 
 // Sandbox-only substitute for @prisma/client (its engine binary can't be downloaded
 // here — see README). Same schema, same Postgres instance, plain SQL. Swap API
@@ -586,6 +587,8 @@ export interface PlannedActivity {
   skippedAt?: Date | null;
   /** Set only on a Move successor: the (now MOVED) plan this one replaces. */
   rescheduledFromPlanId?: string | null;
+  /** F1: the persisted scheduling constraint (see plannedActivitySchedulingMode.ts). null/absent = legacy/unknown = protected. */
+  schedulingMode?: PlannedActivitySchedulingMode | null;
   habitLogId: string | null;
   /** Event Location Plan Persistence V1 -- immutable snapshot of the Event
    * Location that produced this plan's timing, or both null when the
@@ -622,6 +625,8 @@ export interface CreatePlannedActivityInput {
    * given verbatim. */
   eventTimezone?: string | null;
   eventLocationName?: string | null;
+  /** F1: persisted after `parseSchedulingMode` (anything unrecognised becomes null = protected). Omitted = null: this helper never grants FLEXIBLE by default; each creation path states its own mode. */
+  schedulingMode?: PlannedActivitySchedulingMode | null;
 }
 
 export async function createHabit(input: {
@@ -1266,8 +1271,8 @@ export async function createPlannedActivity(input: CreatePlannedActivityInput): 
     `INSERT INTO "PlannedActivity"
        (id, "userId", title, "activityType", icon, "plannedStartAt", "plannedEndAt",
         "durationMinutes", "windowType", "windowLabel", "matchLabel", score,
-        recommendation, "calendarUrl", "eventTimezone", "eventLocationName", "activityId")
-     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17)
+        recommendation, "calendarUrl", "eventTimezone", "eventLocationName", "schedulingMode", "activityId")
+     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18)
      RETURNING *`,
     [
       id,
@@ -1286,6 +1291,7 @@ export async function createPlannedActivity(input: CreatePlannedActivityInput): 
       input.calendarUrl ?? null,
       input.eventTimezone ?? null,
       input.eventLocationName ?? null,
+      parseSchedulingMode(input.schedulingMode),
       input.activityId ?? null,
     ]
   );
@@ -1333,8 +1339,8 @@ export async function createPlannedActivityWithClient(client: PoolClient, input:
     `INSERT INTO "PlannedActivity"
        (id, "userId", title, "activityType", icon, "plannedStartAt", "plannedEndAt",
         "durationMinutes", "windowType", "windowLabel", "matchLabel", score,
-        recommendation, "calendarUrl", "eventTimezone", "eventLocationName", "activityId")
-     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17)
+        recommendation, "calendarUrl", "eventTimezone", "eventLocationName", "schedulingMode", "activityId")
+     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18)
      RETURNING *`,
     [
       id,
@@ -1353,6 +1359,7 @@ export async function createPlannedActivityWithClient(client: PoolClient, input:
       input.calendarUrl ?? null,
       input.eventTimezone ?? null,
       input.eventLocationName ?? null,
+      parseSchedulingMode(input.schedulingMode),
       input.activityId ?? null,
     ]
   );

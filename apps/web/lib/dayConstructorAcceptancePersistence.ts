@@ -53,7 +53,9 @@ import {
   type AcceptanceDeps,
   type AcceptanceRejectionReason,
   type AcceptanceDiagnostic,
+  type AcceptedPlanWrite,
 } from './dayConstructorAcceptance';
+import { schedulingModeFromPlacementSource } from './plannedActivitySchedulingMode';
 
 // ============================================================
 // Idempotency key derivation (this ticket's own section 3/5). Length-
@@ -115,12 +117,13 @@ export function plansMatchAcceptedItem(plan: PlannedActivity, item: AcceptedProp
     (plan.activityId ?? null) === (item.activityId ?? null)
   );
   // `placementSource` is deliberately NOT compared -- it is never persisted
-  // onto `PlannedActivity` (this ticket's own section 18/27: "PlannedActivity
+  // as acquisition provenance (this ticket's own section 18/27: "PlannedActivity
   // stays completely unaware of acquisition source" is an already-
-  // established house rule, migration 0025's own doc comment), so the
-  // persisted row is byte-identical regardless of which placementSource a
-  // resubmission claims for the same title/start/end/activityId. Treating
-  // that as a match is harmless: nothing about what gets WRITTEN differs.
+  // established house rule, migration 0025's own doc comment). F1 persists the
+  // scheduling CONSTRAINT derived from it (`schedulingMode`) on the FIRST accept;
+  // a replay returns the already-persisted plans and never rewrites that value,
+  // so a resubmission claiming a different placementSource is still an idempotent
+  // replay of the original acceptance, never a change of its scheduling mode.
 }
 
 // ============================================================
@@ -135,7 +138,7 @@ export function plansMatchAcceptedItem(plan: PlannedActivity, item: AcceptedProp
 // its own already-established optional/nullable meaning on this table.
 // ============================================================
 
-export function toCreatePlannedActivityInput(userId: string, write: { activityId?: string; title: string; plannedStartAt: Date; plannedEndAt: Date; durationMinutes: number }): CreatePlannedActivityInput {
+export function toCreatePlannedActivityInput(userId: string, write: { activityId?: string; title: string; plannedStartAt: Date; plannedEndAt: Date; durationMinutes: number; placementSource?: AcceptedPlanWrite['placementSource'] }): CreatePlannedActivityInput {
   return {
     userId,
     title: write.title,
@@ -145,6 +148,9 @@ export function toCreatePlannedActivityInput(userId: string, write: { activityId
     durationMinutes: write.durationMinutes,
     windowType: 'NEUTRAL',
     activityId: write.activityId ?? null,
+    // F1: the intent's own constraint (FIXED_CONSTRAINT -> FIXED, SELECTED_CANDIDATE -> FLEXIBLE). Accepting the
+    // proposed time never turns a FLEXIBLE intent into FIXED. Absent/unknown placementSource -> null = protected.
+    schedulingMode: schedulingModeFromPlacementSource(write.placementSource),
   };
 }
 
