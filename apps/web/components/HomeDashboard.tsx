@@ -41,6 +41,8 @@ import { createSuccessorFocusController, successorOnAgendaDay, type SuccessorFoc
 import { missedRecoveryPlanId, overlayElapsedMissed } from '../lib/homeMissedRecovery';
 import { applyConfirmedSuccessors, hideMovedTimelineItems, defaultMoveSelection, resolveMoveDestination, moveDestinationMessage, moveFailureMessage, formatMoveTime, type MoveSelection } from '../lib/homeMove';
 import type { PlannedActivity } from '../lib/db';
+import { RecompositionCard } from './RecompositionCard';
+import { createRecompositionStore, initialRecompositionState, shouldOfferRecomposition, sourcesObservedMoved, withConfirmedMoves, withMovedSources, type ConfirmedMove, type RecompositionStore } from '../lib/homeRecomposition';
 
 /** Matches page.tsx's own FALLBACK_TZ -- defensive only, page.tsx always supplies a real value today. */
 const FALLBACK_HOME_TZ = 'Asia/Kolkata';
@@ -472,6 +474,58 @@ export function HomeDashboard({
   const [moveError, setMoveError] = useState<CompletionError | null>(null);
   const moveDayRef = useRef<HTMLSelectElement>(null);
 
+  // Remaining-Day Recomposition V1 PR F4 -- an explicit, user-requested proposal. The store (lib/homeRecomposition.ts)
+  // owns the state machine and the async races; Home only mirrors its state and supplies the projection/reconcile seams.
+  // F2 decides, F3 validates + commits, Home explains and lets the user act: nothing here schedules anything.
+  const onPlanCompletedRef = useRef(onPlanCompleted);
+  onPlanCompletedRef.current = onPlanCompleted;
+  const recompositionStoreRef = useRef<RecompositionStore | null>(null);
+  if (recompositionStoreRef.current === null) {
+    recompositionStoreRef.current = createRecompositionStore({
+      fetchImpl: (...args) => fetch(...args),
+      // ONE batched transition for the whole confirmed batch: every source resolves and every successor appears together.
+      applyConfirmedMoves: (moves: ConfirmedMove[]) => {
+        setExecutionFacts((current) => withMovedSources(current, moves));
+        setConfirmedSuccessors((current) => withConfirmedMoves(current, moves));
+      },
+      reconcile: async () => {
+        await onPlanCompletedRef.current?.();
+      },
+      observeMovedSources: async (sourcePlanIds) => {
+        const res = await fetch('/api/my-day');
+        return res.ok ? sourcesObservedMoved(await res.json().catch(() => null), sourcePlanIds) : false;
+      },
+    });
+  }
+  const recompositionStore = recompositionStoreRef.current;
+  const [recomposition, setRecomposition] = useState(initialRecompositionState);
+  useEffect(() => {
+    const detach = recompositionStore.attach();
+    const unsubscribe = recompositionStore.subscribe(setRecomposition);
+    setRecomposition(recompositionStore.getState());
+    return () => {
+      unsubscribe();
+      detach(); // leaving Home destroys the proposal: nothing is persisted, returning needs a fresh request
+    };
+  }, [recompositionStore]);
+  // A proposal never survives a local-day rollover.
+  const agendaLocalDate = myDayAgenda?.localDate;
+  useEffect(() => {
+    recompositionStore.reset();
+  }, [recompositionStore, agendaLocalDate]);
+  const recompositionAccepting = recomposition.phase === 'ACCEPTING';
+  // Focus follows the card's own transitions (never a successor, never a scroll jump): the heading when a proposal/status
+  // appears or changes, the success status after a batch acceptance.
+  const previousRecomposition = useRef(initialRecompositionState);
+  useEffect(() => {
+    const keyOf = (state: typeof recomposition) => (state.phase === 'IDLE' ? `IDLE:${state.updated}` : state.phase);
+    const changed = keyOf(previousRecomposition.current) !== keyOf(recomposition);
+    previousRecomposition.current = recomposition;
+    if (!changed) return;
+    const selector = recomposition.phase === 'IDLE' ? (recomposition.updated ? '[data-recomposition-status]' : null) : '[data-recomposition-heading]';
+    if (selector) setTimeout(() => document.querySelector<HTMLElement>(selector)?.focus({ preventScroll: true }), 0);
+  }, [recomposition]);
+
   // eslint-disable-next-line react-hooks/exhaustive-deps
   const agendaForHome = useMemo(() => applyConfirmedSuccessors(myDayAgenda ?? null, confirmedSuccessors, new Date()), [myDayAgenda, confirmedSuccessors, currentMinuteOfDay]);
 
@@ -544,6 +598,7 @@ export function HomeDashboard({
     // never by whichever plan Right Now shows when the response arrives. The
     // completer's own synchronous in-flight guard blocks same-task bursts.
     if (planExecutor.current.isBusy(planId)) return;
+    if (recompositionStore.isAccepting()) return; // a batch acceptance is in flight: no conflicting per-plan mutation
     setCompleteError((current) => (current?.planId === planId ? null : current));
     setSkipError((current) => (current?.planId === planId ? null : current));
     setCompletingPlanIds((current) => new Set(current).add(planId));
@@ -561,6 +616,7 @@ export function HomeDashboard({
     }
     // The server CONFIRMED LOGGED for this plan id: remember it and clear its error.
     setExecutionFacts((current) => new Map(current).set(planId, 'COMPLETED'));
+    recompositionStore.invalidate(); // the day changed: any open proposal is obsolete
     setCompleteError((current) => (current?.planId === planId ? null : current));
     if (origin === 'TIMELINE') focusTimelineRow(planId);
     // Reconciliation is secondary and can never fail the completion: the refresh
@@ -576,6 +632,7 @@ export function HomeDashboard({
   // never applied optimistically, reconciliation can never fail a confirmed Skip.
   const handleSkipRightNow = async (planId: string, origin: 'RIGHT_NOW' | 'TIMELINE' = 'RIGHT_NOW') => {
     if (planExecutor.current.isBusy(planId)) return;
+    if (recompositionStore.isAccepting()) return; // a batch acceptance is in flight: no conflicting per-plan mutation
     setSkipError((current) => (current?.planId === planId ? null : current));
     setCompleteError((current) => (current?.planId === planId ? null : current));
     setSkippingPlanIds((current) => new Set(current).add(planId));
@@ -592,6 +649,7 @@ export function HomeDashboard({
       return;
     }
     setExecutionFacts((current) => new Map(current).set(planId, 'SKIPPED'));
+    recompositionStore.invalidate();
     setSkipError((current) => (current?.planId === planId ? null : current));
     // The Skip button unmounts on success: hand focus to the stable, updated Right Now region rather than <body>.
     if (origin === 'TIMELINE') focusTimelineRow(planId);
@@ -649,6 +707,7 @@ export function HomeDashboard({
   }, []);
   const handleMoveRightNow = async (planId: string, currentStartIso: string) => {
     if (planExecutor.current.isBusy(planId)) return;
+    if (recompositionStore.isAccepting()) return; // a batch acceptance is in flight: no conflicting per-plan mutation
     const destination = resolveMoveDestination(moveSelection, currentStartIso, new Date(), effectiveTimezone);
     if (!destination.ok) {
       setMoveError({ planId, message: moveDestinationMessage(destination.reason) });
@@ -682,6 +741,7 @@ export function HomeDashboard({
     const successor = result.successor;
     setExecutionFacts((current) => new Map(current).set(planId, 'MOVED'));
     setConfirmedSuccessors((current) => new Map(current).set(planId, successor));
+    recompositionStore.invalidate();
     setMovePickerFor(null);
     setMoveError(null);
     // Focus the successor when it is on today's list, otherwise the stable Right Now region.
@@ -743,7 +803,7 @@ export function HomeDashboard({
   const renderMissedRecovery = (item: HomeTimelineItem) => {
     const planId = missedRecoveryPlanId(item, new Date(), executionFacts);
     if (planId === null) return null;
-    const busy = completingPlanIds.has(planId) || skippingPlanIds.has(planId) || movingPlanIds.has(planId);
+    const busy = completingPlanIds.has(planId) || skippingPlanIds.has(planId) || movingPlanIds.has(planId) || recompositionAccepting;
     const error = visibleCompletionError(completeError, planId) ?? visibleCompletionError(skipError, planId);
     return (
       <div role="group" aria-label={`What happened with "${item.title}"?`} data-missed-recovery={planId}>
@@ -787,6 +847,35 @@ export function HomeDashboard({
   // is intentionally left to myDayAgenda's own null vs. real-empty-array
   // shape, matching every other My Day slice's existing convention.
   const isTimelineEmpty = homeTimeline.length === 0;
+
+  // Remaining-Day Recomposition V1 PR F4 -- entry visibility is a PRESENTATION heuristic only (today, something still
+  // upcoming, nothing conflicting running); whether anything can actually change is F2's call, never Home's.
+  const recompositionCardVisible = recomposition.phase !== 'IDLE' || recomposition.updated;
+  const planMutationRunning = completingPlanIds.size > 0 || skippingPlanIds.size > 0 || movingPlanIds.size > 0;
+  const offerRecomposition = !recompositionCardVisible && shouldOfferRecomposition({ agendaLocalDate: myDayAgenda?.localDate, now: new Date(), timezone: effectiveTimezone, items: homeTimeline, mutationInFlight: planMutationRunning });
+  const handleRecompositionDismiss = () => {
+    recompositionStore.dismiss();
+    setTimeout(() => document.getElementById('home-recomposition-entry')?.focus(), 0);
+  };
+  const recompositionSlot = (
+    <>
+      {offerRecomposition && (
+        <div style={{ marginBottom: spacing.sm }}>
+          <TextButton id="home-recomposition-entry" onClick={() => void recompositionStore.request()} style={{ minHeight: 44, padding: '0 8px' }}>
+            Reorganize the rest of my day
+          </TextButton>
+        </div>
+      )}
+      <RecompositionCard
+        state={recomposition}
+        timezone={effectiveTimezone}
+        acceptBlocked={planMutationRunning}
+        onAccept={() => void recompositionStore.accept()}
+        onDismiss={handleRecompositionDismiss}
+        onRetry={() => void recompositionStore.request()}
+      />
+    </>
+  );
 
   const dayPhase = myDayStory?.phase ?? 'MORNING';
   const dayBuilderBlock =
@@ -999,7 +1088,7 @@ export function HomeDashboard({
                 {completablePlanIdNow && (
                   <SecondaryButton
                     onClick={() => void handleCompleteRightNow(completablePlanIdNow)}
-                    disabled={completingPlanIds.has(completablePlanIdNow) || skippingPlanIds.has(completablePlanIdNow) || movingPlanIds.has(completablePlanIdNow)}
+                    disabled={completingPlanIds.has(completablePlanIdNow) || skippingPlanIds.has(completablePlanIdNow) || movingPlanIds.has(completablePlanIdNow) || recompositionAccepting}
                     ariaLabel={`Mark "${spotlightItem.title}" done`}
                     style={{ padding: '6px 16px', fontSize: 13, marginLeft: 'auto' }}
                   >
@@ -1009,7 +1098,7 @@ export function HomeDashboard({
                 {skippablePlanIdNow && (
                   <TextButton
                     onClick={() => void handleSkipRightNow(skippablePlanIdNow)}
-                    disabled={skippingPlanIds.has(skippablePlanIdNow) || completingPlanIds.has(skippablePlanIdNow) || movingPlanIds.has(skippablePlanIdNow)}
+                    disabled={skippingPlanIds.has(skippablePlanIdNow) || completingPlanIds.has(skippablePlanIdNow) || movingPlanIds.has(skippablePlanIdNow) || recompositionAccepting}
                     ariaLabel={`Skip "${spotlightItem.title}"`}
                     color={colors.textSecondary}
                     style={{ minHeight: 44, padding: '0 8px' }}
@@ -1021,7 +1110,7 @@ export function HomeDashboard({
                   <TextButton
                     id={`home-move-trigger-${moveablePlanIdNow}`}
                     onClick={() => (movePickerFor === moveablePlanIdNow ? closeMovePicker() : openMovePicker(moveablePlanIdNow))}
-                    disabled={movingPlanIds.has(moveablePlanIdNow) || completingPlanIds.has(moveablePlanIdNow) || skippingPlanIds.has(moveablePlanIdNow)}
+                    disabled={movingPlanIds.has(moveablePlanIdNow) || completingPlanIds.has(moveablePlanIdNow) || skippingPlanIds.has(moveablePlanIdNow) || recompositionAccepting}
                     ariaLabel={`Move "${spotlightItem.title}"`}
                     color={colors.textSecondary}
                     style={{ minHeight: 44, padding: '0 8px' }}
@@ -1202,14 +1291,17 @@ export function HomeDashboard({
         onAddSomething={handleAddSomething}
         onQuickCapture={() => { setCaptureConfirmed(false); setCaptureOpen(true); }}
         quickCaptureSlot={
-          captureOpen ? (
+          <>
+            {recompositionSlot}
+            {captureOpen ? (
             <HomeQuickCapture onClose={handleCloseCapture} onSaved={handleCaptureSaved} onSeeSuggestions={handleSeeSuggestions} />
           ) : captureConfirmed ? (
             <div role="status" style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: spacing.md, marginBottom: spacing.md }}>
               <span style={{ ...typography.body, color: colors.textSecondary }}>Added to Things you want to do</span>
               <TextButton onClick={() => { window.location.href = '/captures'; }}>View →</TextButton>
             </div>
-          ) : null
+          ) : null}
+          </>
         }
         emptyStateExtra={isTimelineEmpty ? dayBuilderBlock : showDayBuilder ? dayBuilderBlock : undefined}
       />
