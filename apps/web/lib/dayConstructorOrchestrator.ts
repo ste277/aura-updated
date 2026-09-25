@@ -336,7 +336,7 @@ export function createRealDayConstructorOrchestratorDeps(user: User, now: Date):
 // hatch was not needed).
 // ============================================================
 
-function mapTimingLabelToPlacementFit(label: TimingCandidateLabel): PlacementTimingFit {
+export function mapTimingLabelToPlacementFit(label: TimingCandidateLabel): PlacementTimingFit {
   switch (label) {
     case 'EXCELLENT':
     case 'VERY_GOOD':
