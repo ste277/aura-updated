@@ -10,7 +10,7 @@
 import { planToAgendaItem, type DailyAgenda, type DailyAgendaItem } from './dailyAgenda';
 import type { PlannedActivity } from './db';
 import type { HomeTimelineItem } from './homeTimelineTypes';
-import { addDaysToDateStr, getDatePartsInTimezone, getMinuteOfDayInTimezone, localDateTimeToUTC } from './timezone';
+import { addDaysToDateStr, getDatePartsInTimezone, getMinuteOfDayInTimezone, resolveLocalDateTime } from './timezone';
 
 // ---------------------------------------------------------------------------
 // Destination selection (Today / Tomorrow + a minute-precision time)
@@ -38,38 +38,67 @@ const pad = (n: number) => String(n).padStart(2, '0');
 /**
  * A sensible, NON-committed default: the next quarter hour at least 30 minutes
  * from now, in the Home timezone -- Today, or Tomorrow when that instant has
- * already rolled into the next local date.
+ * already rolled into the next local date. If that wall time is one that does
+ * not exist or happens twice because the clocks change, the default advances by
+ * quarter hours (bounded to 4 hours) to the next wall time that exists exactly once, so the
+ * pre-filled value is never one Home Move would refuse.
  */
 export function defaultMoveSelection(now: Date, timezone: string): MoveSelection {
-  const candidate = new Date(Math.ceil((now.getTime() + DEFAULT_LEAD_MS) / QUARTER_MS) * QUARTER_MS);
-  const minuteOfDay = getMinuteOfDayInTimezone(timezone, candidate);
-  const sameDay = getDatePartsInTimezone(timezone, candidate).dateStr === getDatePartsInTimezone(timezone, now).dateStr;
-  return { day: sameDay ? 'TODAY' : 'TOMORROW', time: `${pad(Math.floor(minuteOfDay / 60))}:${pad(minuteOfDay % 60)}` };
+  const today = getDatePartsInTimezone(timezone, now).dateStr;
+  const first = Math.ceil((now.getTime() + DEFAULT_LEAD_MS) / QUARTER_MS) * QUARTER_MS;
+  let fallback: MoveSelection | null = null;
+  // A fall-back overlap repeats a wall-time hour, i.e. spans 2 real hours (8 quarter-hour steps), so the bound is 4 hours.
+  for (let step = 0; step < 16; step++) {
+    const candidate = new Date(first + step * QUARTER_MS);
+    const minuteOfDay = getMinuteOfDayInTimezone(timezone, candidate);
+    const date = getDatePartsInTimezone(timezone, candidate).dateStr;
+    const selection: MoveSelection = { day: date === today ? 'TODAY' : 'TOMORROW', time: `${pad(Math.floor(minuteOfDay / 60))}:${pad(minuteOfDay % 60)}` };
+    fallback = fallback ?? selection;
+    if (resolveLocalDateTime(date, selection.time, timezone).status === 'OK') return selection;
+  }
+  return fallback as MoveSelection;
 }
 
-export type MoveDestination = { ok: true; newStartAt: string } | { ok: false; reason: 'INVALID' | 'PAST' | 'SAME' };
+export type MoveDestinationRejection = 'INVALID' | 'PAST' | 'SAME' | 'NONEXISTENT' | 'AMBIGUOUS';
+export type MoveDestination = { ok: true; newStartAt: string } | { ok: false; reason: MoveDestinationRejection };
 
 /**
- * Local selection -> absolute instant via the canonical `localDateTimeToUTC`
- * (no new timezone math). Rejects only what is obviously wrong before a
- * request (invalid value, not in the future, identical to the current start).
- * Conflicts, lifecycle state, linked Moments and the DB-clock future check
- * stay with the server; touching a blocker's end is NOT rejected here.
+ * Local selection -> absolute instant via the canonical strict resolver
+ * (resolveLocalDateTime; no new timezone math). The instant returned is the
+ * one whose wall time in the Home timezone is EXACTLY the selection: a wall
+ * time that does not exist (spring-forward gap) or occurs twice (fall-back
+ * overlap) is refused rather than silently corrected or guessed. Also rejects
+ * only what is obviously wrong before a request (invalid value, not in the
+ * future, identical to the current start). Conflicts, lifecycle state, linked
+ * Moments and the DB-clock future check stay with the server; touching a
+ * blocker's end is NOT rejected here.
  */
 export function resolveMoveDestination(selection: MoveSelection, currentStartIso: string, now: Date, timezone: string): MoveDestination {
   const match = /^(\d{2}):(\d{2})$/.exec(selection.time);
   if (!match || Number(match[1]) > 23 || Number(match[2]) > 59) return { ok: false, reason: 'INVALID' };
-  const start = localDateTimeToUTC(moveDayDate(selection.day, now, timezone), selection.time, timezone);
-  if (!Number.isFinite(start.getTime())) return { ok: false, reason: 'INVALID' };
+  const resolved = resolveLocalDateTime(moveDayDate(selection.day, now, timezone), selection.time, timezone);
+  if (resolved.status === 'NONEXISTENT') return { ok: false, reason: 'NONEXISTENT' };
+  if (resolved.status === 'AMBIGUOUS') return { ok: false, reason: 'AMBIGUOUS' };
+  if (resolved.status !== 'OK' || !Number.isFinite(resolved.instant.getTime())) return { ok: false, reason: 'INVALID' };
+  const start = resolved.instant;
   if (start.getTime() <= now.getTime()) return { ok: false, reason: 'PAST' };
   if (start.getTime() === Date.parse(currentStartIso)) return { ok: false, reason: 'SAME' };
   return { ok: true, newStartAt: start.toISOString() };
 }
 
-export function moveDestinationMessage(reason: 'INVALID' | 'PAST' | 'SAME'): string {
-  if (reason === 'INVALID') return 'Choose a valid time.';
-  if (reason === 'PAST') return 'Choose a time later than now.';
-  return 'Choose a different time than the current one.';
+export function moveDestinationMessage(reason: MoveDestinationRejection): string {
+  switch (reason) {
+    case 'INVALID':
+      return 'Choose a valid time.';
+    case 'PAST':
+      return 'Choose a time later than now.';
+    case 'NONEXISTENT':
+      return "That local time doesn't exist because the clocks change. Choose another time.";
+    case 'AMBIGUOUS':
+      return 'That time occurs twice because the clocks change. Choose another time.';
+    case 'SAME':
+      return 'Choose a different time than the current one.';
+  }
 }
 
 /** "3:30 PM" in the Home timezone, for the confirm label. */

@@ -16,7 +16,7 @@ import type { AcceptConstructedDayRequest, AcceptedProposedItem } from '../apps/
 import { deriveCaptureState } from '../apps/web/lib/captures';
 import { deriveGoalActivityState } from '../apps/web/lib/goals';
 import { createPlanExecutor, moveablePlanId, overlayExecutionFacts, type ExecutionOutcome } from '../apps/web/lib/homeCompletion';
-import { applyConfirmedSuccessors, hideMovedTimelineItems } from '../apps/web/lib/homeMove';
+import { applyConfirmedSuccessors, hideMovedTimelineItems, resolveMoveDestination, formatMoveTime } from '../apps/web/lib/homeMove';
 import { buildDailyAgenda } from '../apps/web/lib/dailyAgenda';
 import { buildHomeTimeline } from '../apps/web/lib/homeTimelineComposer';
 import { selectRightNowState } from '../apps/web/lib/rightNowSelection';
@@ -159,6 +159,34 @@ async function main() {
     const [mv, dn] = await Promise.all([clientA.move(race2.id, dest().toISOString()), clientB.complete(race2.id)]);
     const fin = await row(race2.id);
     check('two Home sessions racing Move vs Done: exactly one terminal outcome wins on the server (never a hybrid)', (fin.status === 'MOVED' && mv.status === 'MOVED' && dn === 'FAILED' && fin.habitLogId === null) || (fin.status === 'LOGGED' && dn === 'DONE' && mv.status === 'INVALID_STATE' && !!fin.habitLogId));
+
+    // ---- DST transition day: the wall time the user picks is the time Aura commits (real executor -> real route -> real DB) ----
+    const LA = 'America/Los_Angeles';
+    const offsetOf = (ms: number) => { const m = new Intl.DateTimeFormat('en-US', { timeZone: LA, timeZoneName: 'shortOffset' }).formatToParts(new Date(ms)).find((p) => p.type === 'timeZoneName')!.value.match(/GMT([+-])(\d+)/)!; return (m[1] === '-' ? -1 : 1) * Number(m[2]); };
+    /** First local date (after ~30 days out) on which LA's offset changes in the requested direction; found by scanning noon-UTC offsets, independent of the code under test. */
+    const nextTransition = (kind: 'SPRING' | 'FALL') => { const start = Math.floor((Date.now() + 30 * DAY) / DAY) * DAY; for (let i = 1; i < 500; i++) { const day = start + i * DAY; const prev = offsetOf(day - DAY + 12 * HOUR); const cur = offsetOf(day + 12 * HOUR); if ((kind === 'SPRING' && cur > prev) || (kind === 'FALL' && cur < prev)) return new Date(day).toISOString().slice(0, 10); } throw new Error('no transition found'); };
+    const wallOf = (ms: number) => { const p: Record<string, string> = {}; for (const x of new Intl.DateTimeFormat('en-CA', { timeZone: LA, year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', hourCycle: 'h23' }).formatToParts(new Date(ms))) p[x.type] = x.value; return { date: `${p.year}-${p.month}-${p.day}`, time: `${p.hour}:${p.minute}` }; };
+    const dayBefore = (date: string) => new Date(Date.parse(`${date}T00:00:00Z`) - DAY).toISOString().slice(0, 10);
+    for (const kind of ['SPRING', 'FALL'] as const) {
+      const T = nextTransition(kind);
+      const syntheticNow = new Date(`${dayBefore(T)}T20:00:00Z`);
+      const aDst = await mk(`DST ${kind} subject`, Date.now() - 10 * MIN);
+      const chosen = resolveMoveDestination({ day: 'TOMORROW', time: '09:00' }, aDst.plannedStartAt.toISOString(), syntheticNow, LA);
+      check(`18. ${kind} ${T}: picker "Tomorrow 09:00" (Los Angeles) resolves to an instant whose confirm label is "Move to 9:00 AM"`, chosen.ok && formatMoveTime(chosen.newStartAt, LA) === '9:00 AM' && wallOf(Date.parse(chosen.newStartAt)).date === T && wallOf(Date.parse(chosen.newStartAt)).time === '09:00');
+      if (!chosen.ok) continue;
+      const before = routeCalls.length;
+      const moved = await createPlanExecutor(homeFetch()).move(aDst.id, chosen.newStartAt);
+      const bRow = moved.status === 'MOVED' ? await row((moved as any).successor.id) : null;
+      const bStart = bRow ? new Date(bRow.plannedStartAt).getTime() : 0;
+      const bEnd = bRow ? new Date(bRow.plannedEndAt).getTime() : 0;
+      check(`27. ${kind} ${T}: the server-created B starts at exactly the requested instant (${chosen.newStartAt}) and rendering B in Los Angeles gives exactly ${T} 09:00 (end 10:00 = the original 60-minute duration)`, moved.status === 'MOVED' && routeCalls.length === before + 1 && bStart === Date.parse(chosen.newStartAt) && wallOf(bStart).date === T && wallOf(bStart).time === '09:00' && wallOf(bEnd).time === '10:00' && (await row(aDst.id)).status === 'MOVED');
+      check(`22. ${kind} ${T}: selected wall time, confirm label, request payload, stored B and rendered B all agree (09:00 / "9:00 AM" / ${chosen.newStartAt})`, moved.status === 'MOVED' && formatMoveTime(new Date(bStart).toISOString(), LA) === '9:00 AM');
+    }
+    const springDay = nextTransition('SPRING');
+    const aGap = await mk('DST gap subject', Date.now() - 5 * MIN);
+    const callsBeforeGap = routeCalls.length;
+    const gapPick = resolveMoveDestination({ day: 'TOMORROW', time: '02:30' }, aGap.plannedStartAt.toISOString(), new Date(`${dayBefore(springDay)}T20:00:00Z`), LA);
+    check('7/15. a wall time that does not exist on the spring-forward day (02:30) is refused before any request: no Move POST, A untouched, no successor', !gapPick.ok && (gapPick as any).reason === 'NONEXISTENT' && routeCalls.length === callsBeforeGap && (await row(aGap.id)).status === 'UPCOMING' && (await sql(`SELECT count(*)::int AS n FROM "PlannedActivity" WHERE "rescheduledFromPlanId" = $1`, [aGap.id]))[0].n === 0);
   } finally {
     await sql(`UPDATE "Capture" SET "plannedActivityId" = NULL WHERE "userId" = $1`, [U.id]).catch(() => {});
     await sql(`UPDATE "GoalActivity" SET "plannedActivityId" = NULL WHERE "userId" = $1`, [U.id]).catch(() => {});
