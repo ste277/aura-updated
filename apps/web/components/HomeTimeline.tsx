@@ -60,6 +60,8 @@ function lifecycleLabel(item: HomeTimelineItem): string | null {
   if (item.metadata?.agendaStatus === 'CONFIRMED') return 'Confirmed';
   if (item.metadata?.agendaStatus === 'SKIPPED') return 'Skipped';
   if (item.metadata?.agendaStatus === 'MOVED') return 'Moved';
+  // Calm, plain fact (never 'Failed'): the scheduled time passed without a recorded outcome.
+  if (item.metadata?.agendaStatus === 'MISSED') return 'Missed';
   return null;
 }
 
@@ -104,6 +106,8 @@ export interface HomeTimelineProps {
    * unchanged) -- never recomputed here, only used to flag which row gets
    * the NEXT eyebrow. */
   nextItemId?: string;
+  /** Daily Experience V1 PR E -- Missed Recovery. The caller (HomeDashboard) decides which rows are recoverable and renders the actions; this component only places what it returns directly beneath the row and owns no lifecycle logic. */
+  recoverySlot?: (item: HomeTimelineItem) => React.ReactNode;
 }
 
 export function HomeTimeline({
@@ -121,6 +125,7 @@ export function HomeTimeline({
   emptyStateExtra,
   pendingActivities = [],
   nextItemId,
+  recoverySlot,
 }: HomeTimelineProps) {
   const addSomethingAction = onQuickCapture ? (
     <span data-home-add-something>
@@ -146,7 +151,7 @@ export function HomeTimeline({
   }
 
   return (
-    <section>
+    <section data-home-timeline-region tabIndex={-1} style={{ outline: 'none' }}>
       <SectionHeader label="Your Day" right={addSomethingAction} />
       {quickCaptureSlot}
       <div style={{ background: colors.surfaceSubtle, border: `1px solid ${colors.borderSubtle}`, borderRadius: radius.lg, padding: `0 ${spacing.lg}px` }}>
@@ -170,6 +175,7 @@ export function HomeTimeline({
               onPlan={onPlanOpportunity}
               isPlanning={planningId === item.id}
               isNext={item.id === nextItemId}
+              recovery={recoverySlot?.(item)}
             />
           )
         )}
@@ -231,6 +237,7 @@ function TimelineRow({
   onPlan,
   isPlanning,
   isNext,
+  recovery,
 }: {
   item: HomeTimelineItem;
   timezone: string;
@@ -241,6 +248,7 @@ function TimelineRow({
   onPlan?: (item: HomeTimelineItem) => void;
   isPlanning: boolean;
   isNext?: boolean;
+  recovery?: React.ReactNode;
 }) {
   const isOpportunity = item.kind === 'OPPORTUNITY';
   const subdued = item.metadata?.agendaStatus === 'COMPLETED' || item.metadata?.agendaStatus === 'MISSED' || item.metadata?.agendaStatus === 'SKIPPED' || item.metadata?.agendaStatus === 'MOVED';
@@ -290,7 +298,7 @@ function TimelineRow({
         </button>
         <span style={{ textAlign: 'right', flexShrink: 0 }}>
           <div style={{ ...typography.meta, color: emphasized ? colors.info : colors.textMuted }}>{formatItemTime(item.start, timezone)}</div>
-          {label && <div style={{ ...typography.caption, color: item.metadata?.agendaStatus === 'WAITING' ? colors.caution : colors.positive, marginTop: 2 }}>{label}</div>}
+          {label && <div style={{ ...typography.caption, color: item.metadata?.agendaStatus === 'WAITING' ? colors.caution : item.metadata?.agendaStatus === 'MISSED' ? colors.textMuted : colors.positive, marginTop: 2 }}>{label}</div>}
         </span>
       </div>
       <div style={{ display: 'flex', alignItems: 'center', gap: spacing.md, paddingLeft: 24 + spacing.md, marginTop: 2 }}>
@@ -309,6 +317,7 @@ function TimelineRow({
           </TextButton>
         )}
       </div>
+      {recovery && <div style={{ paddingLeft: 24 + spacing.md, marginTop: spacing.xs }}>{recovery}</div>}
       {isOpportunity && (
         <div style={{ paddingLeft: 24 + spacing.md, marginTop: spacing.sm }}>
           <PrimaryButton onClick={() => onPlan?.(item)} disabled={isPlanning} style={{ padding: '6px 16px', fontSize: 13 }}>

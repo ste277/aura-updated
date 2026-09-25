@@ -324,6 +324,7 @@ export function TextButton({
   style,
   ariaLabel,
   disabled,
+  id,
 }: {
   children: React.ReactNode;
   onClick?: () => void;
@@ -331,10 +332,12 @@ export function TextButton({
   style?: React.CSSProperties;
   ariaLabel?: string;
   disabled?: boolean;
+  id?: string;
 }) {
   return (
     <button
       type="button"
+      id={id}
       onClick={onClick}
       aria-label={ariaLabel}
       disabled={disabled}

@@ -57,7 +57,7 @@ export const STARTING_SOON_WINDOW_MS = 30 * 60 * 1000;
  * decided exclusively by plan.status === 'LOGGED' (a real HabitLog exists).
  * An elapsed, unlogged Plan is 'MISSED': still a truthful fact ("this
  * didn't happen"), never invented success. */
-function timeBasedStatus(startAt: Date, endAt: Date | undefined, now: Date): DailyAgendaItemStatus {
+export function timeBasedStatus(startAt: Date, endAt: Date | undefined, now: Date): DailyAgendaItemStatus {
   if (endAt && endAt.getTime() < now.getTime()) return 'MISSED';
   if (now.getTime() >= startAt.getTime() && (!endAt || now.getTime() <= endAt.getTime())) return 'CURRENT';
   if (startAt.getTime() - now.getTime() <= STARTING_SOON_WINDOW_MS) return 'STARTING_SOON';
