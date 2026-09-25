@@ -45,7 +45,8 @@ export interface CaptureLifecycleInput {
  *  5. Otherwise OPEN -- including a CANCELLED or SKIPPED link (available again).
  *     A link still pointing at a MOVED plan is a malformed state (Move repoints
  *     the source to the successor atomically); it falls here too: never PLANNED
- *     or COMPLETED, and replannable.
+ *     or COMPLETED. This is DISPLAY-only: generic planning cannot relink it
+ *     (linkCaptureToPlannedActivity fails closed for a MOVED link).
  */
 export function deriveCaptureState(input: CaptureLifecycleInput): DerivedCaptureState {
   if (input.status === 'DISMISSED') return 'DISMISSED';

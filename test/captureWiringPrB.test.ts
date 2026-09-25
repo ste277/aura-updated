@@ -43,7 +43,7 @@ check('the Capture link runs inside the acceptance write loop on the SAME client
 check('a failed Capture link throws into the outer catch (whole transaction rolls back)', /if \(!captureLinked\) throw new Error\('CAPTURE_LINK_FAILED'\)/.test(persist));
 const db = cap('../apps/web/lib/db.ts');
 const linkFn = db.slice(db.indexOf('export async function linkCaptureToPlannedActivity'));
-check('linkCaptureToPlannedActivity is one conditional UPDATE: owned, OPEN, not completed, unlinked-or-CANCELLED/SKIPPED/MOVED', /UPDATE "Capture"[\s\S]*"userId" = \$3[\s\S]*status = 'OPEN'[\s\S]*"completedAt" IS NULL[\s\S]*"plannedActivityId" IS NULL[\s\S]*status IN \('CANCELLED', 'SKIPPED', 'MOVED'\)/.test(linkFn));
+check('linkCaptureToPlannedActivity is one conditional UPDATE: owned, OPEN, not completed, unlinked-or-CANCELLED/SKIPPED', /UPDATE "Capture"[\s\S]*"userId" = \$3[\s\S]*status = 'OPEN'[\s\S]*"completedAt" IS NULL[\s\S]*"plannedActivityId" IS NULL[\s\S]*status IN \('CANCELLED', 'SKIPPED'\)/.test(linkFn));
 const logFn = db.slice(db.indexOf('export async function logPlannedActivity'), db.indexOf('export async function logPlannedActivity') + 12000);
 check('logPlannedActivity materializes Capture.completedAt on the SAME client with the SAME completionInstant used for loggedAt', /"loggedAt" = \$3[\s\S]*\[planId, userId, completionInstant, habitLogId\][\s\S]*client\.query\(\s*`UPDATE "Capture" SET "completedAt" = COALESCE\("completedAt", \$3\)[\s\S]*\[planId, userId, completionInstant\]/.test(logFn));
 check('the materialization happens BEFORE COMMIT', logFn.indexOf('UPDATE "Capture"') > 0 && logFn.indexOf('UPDATE "Capture"') < logFn.indexOf("await client.query('COMMIT')", logFn.indexOf('UPDATE "Capture"')));

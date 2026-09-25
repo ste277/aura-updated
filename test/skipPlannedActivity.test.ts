@@ -93,7 +93,7 @@ const schema = read('../apps/web/prisma/schema.prisma');
 check('2. schema: skippedAt DateTime? @db.Timestamptz(3); status stays a plain String (no enum)', /skippedAt\s+DateTime\?\s+@db\.Timestamptz\(3\)/.test(schema) && /status\s+String\s+@default\("UPCOMING"\)/.test(schema));
 
 // 15. link SQL accepts both CANCELLED and SKIPPED, and only those
-check("15. both source-link UPDATEs may replace a link only over a CANCELLED, SKIPPED or (stale) MOVED plan", (db.match(/status IN \('CANCELLED', 'SKIPPED', 'MOVED'\)/g) ?? []).length === 2 && !/AND status = 'CANCELLED'\s*\)/.test(db));
+check("15. both source-link UPDATEs may replace a link only over a CANCELLED or SKIPPED plan", (db.match(/status IN \('CANCELLED', 'SKIPPED'\)/g) ?? []).length === 2 && !/AND status = 'CANCELLED'\s*\)/.test(db));
 
 // PR B Done regression: Home completion code untouched by C1
 const homeFiles = ['homeCompletion.ts', 'homeRefresh.ts', 'reminderConsistency.ts'].map((f) => read(`../apps/web/lib/${f}`)).join('\n');

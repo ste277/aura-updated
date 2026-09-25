@@ -53,7 +53,8 @@ export function deriveGoalActivityState(input: GoalActivityLifecycleInput): Deri
   // available to plan again (replanning relinks the same row -- see db.ts).
   // A SKIPPED link is a deliberate non-execution: never PLANNED/COMPLETED.
   // A link still on a MOVED plan is malformed (Move repoints to the successor
-  // atomically): defensively SUGGESTED (replannable), never PLANNED-forever or COMPLETED.
+  // atomically): displayed as SUGGESTED, never PLANNED-forever or COMPLETED.
+  // DISPLAY-only: linkGoalActivityToPlannedActivity fails closed for a MOVED link.
   if (input.linkedPlanStatus === 'CANCELLED' || input.linkedPlanStatus === 'SKIPPED' || input.linkedPlanStatus === 'MOVED') return 'SUGGESTED';
   if (input.linkedPlanStatus === 'LOGGED') return 'COMPLETED';
   return 'PLANNED'; // linkedPlanStatus === 'UPCOMING'
