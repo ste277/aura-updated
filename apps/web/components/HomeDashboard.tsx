@@ -600,7 +600,8 @@ export function HomeDashboard({
   const focusMoveTrigger = () => setTimeout(() => document.querySelector<HTMLElement>('button[aria-label^="Move \\""]')?.focus(), 0);
   const openMovePicker = (planId: string) => {
     setMoveError(null);
-    setMoveSelection(defaultMoveSelection(new Date(), effectiveTimezone));
+    // No default (null) leaves the time empty so the user must choose a valid one.
+    setMoveSelection(defaultMoveSelection(new Date(), effectiveTimezone) ?? { day: 'TODAY', time: '' });
     setMovePickerFor(planId);
     setTimeout(() => moveDayRef.current?.focus(), 0);
   };

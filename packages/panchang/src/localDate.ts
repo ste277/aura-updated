@@ -130,30 +130,45 @@ export function resolveLocalDateTime(dateStr: string, timeStr: string, ianaTimez
 }
 
 /**
- * Converts a local date+time (e.g. "2026-08-21" + "05:36" in "Asia/Kolkata")
- * to the absolute UTC instant it represents. A wall time that exists exactly
- * once (every ordinary time, INCLUDING ordinary times on a DST-transition day)
- * converts exactly. This function is total, so the two wall times that have no
- * single answer keep a fixed, documented fallback: a time inside a spring-
- * forward gap moves forward by the gap (02:30 -> 03:30), and a time repeated by
- * a fall-back resolves to its first occurrence. Callers that must not guess
- * (Home Move) use resolveLocalDateTime and fail closed instead.
+ * The ORIGINAL single-sample conversion, kept byte-for-byte in behavior: read
+ * the wall time as if it were UTC, sample the zone's offset AT THAT INSTANT, and
+ * subtract it. It is only exact when no transition lies between that sample and
+ * the true instant, and for a wall time that does not exist or occurs twice its
+ * result depends on the zone's offset sign and the transition's geometry (it is
+ * not a policy). It exists solely so existing total-function callers keep the
+ * exact results they had for those two classes of input; it is never used for a
+ * wall time that exists exactly once.
+ */
+function legacySingleSampleLocalDateTimeToUTC(dateStr: string, timeStr: string, ianaTimezone: string): Date {
+  const [year, month, day] = dateStr.split('-').map(Number);
+  const [hour, minute] = timeStr.split(':').map(Number);
+
+  const guessUTC = new Date(Date.UTC(year, month - 1, day, hour, minute));
+  const offsetMinutes = resolveTzOffsetMinutes(ianaTimezone, guessUTC);
+  return new Date(guessUTC.getTime() - offsetMinutes * MINUTE_MS);
+}
+
+/**
+ * BACKWARD-COMPATIBLE TOTAL API for existing callers: converts a local
+ * date+time (e.g. "2026-08-21" + "05:36" in "Asia/Kolkata") to a UTC instant and
+ * never rejects.
+ *  - A wall time that exists exactly once (every ordinary time, INCLUDING
+ *    ordinary times on a DST-transition day) resolves EXACTLY, via
+ *    resolveLocalDateTime.
+ *  - A wall time inside a spring-forward gap, one repeated by a fall-back
+ *    overlap, or unparseable text keeps the legacy single-sample result
+ *    (legacySingleSampleLocalDateTimeToUTC) exactly as before this correction.
+ *    That legacy result is a compatibility artifact, NOT a recommended policy:
+ *    it depends on the zone and the transition, and differs between eastern and
+ *    western zones.
+ * Interactive scheduling that takes a wall time from a person should call
+ * resolveLocalDateTime and handle NONEXISTENT / AMBIGUOUS explicitly (as Home
+ * Move does) instead of using this function.
  */
 export function localDateTimeToUTC(dateStr: string, timeStr: string, ianaTimezone: string): Date {
   const resolved = resolveLocalDateTime(dateStr, timeStr, ianaTimezone);
   if (resolved.status === 'OK') return resolved.instant;
-  if (resolved.status === 'AMBIGUOUS') return resolved.earlier;
-
-  const [year, month, day] = dateStr.split('-').map(Number);
-  const [hour, minute] = timeStr.split(':').map(Number);
-  const naive = Date.UTC(year, month - 1, day, hour, minute);
-  if (resolved.status === 'NONEXISTENT') {
-    // The offset in force before the gap.
-    return new Date(naive - resolveTzOffsetMinutes(ianaTimezone, new Date(naive - DAY_MS)) * MINUTE_MS);
-  }
-  // INVALID text keeps the historical behavior exactly (e.g. an hour past 23 rolls into the next day).
-  const guessUTC = new Date(naive);
-  return new Date(guessUTC.getTime() - resolveTzOffsetMinutes(ianaTimezone, guessUTC) * MINUTE_MS);
+  return legacySingleSampleLocalDateTimeToUTC(dateStr, timeStr, ianaTimezone);
 }
 
 /**

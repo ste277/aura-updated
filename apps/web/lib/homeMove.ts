@@ -35,28 +35,33 @@ export function moveDayDate(day: MoveDay, now: Date, timezone: string): string {
 
 const pad = (n: number) => String(n).padStart(2, '0');
 
+/** Quarter-hour steps searched for a default: 24 steps = 6 hours, enough for the longest known ambiguity (a 2-hour DST shift repeats a wall-time span that lasts 4 real hours) with margin. */
+export const DEFAULT_MOVE_SEARCH_STEPS = 24;
+
 /**
  * A sensible, NON-committed default: the next quarter hour at least 30 minutes
  * from now, in the Home timezone -- Today, or Tomorrow when that instant has
- * already rolled into the next local date. If that wall time is one that does
- * not exist or happens twice because the clocks change, the default advances by
- * quarter hours (bounded to 4 hours) to the next wall time that exists exactly once, so the
- * pre-filled value is never one Home Move would refuse.
+ * already rolled into the next local date.
+ *
+ * INVARIANT: a default is returned ONLY if the strict resolver says its wall
+ * time exists exactly once (status OK). A candidate whose wall time is repeated
+ * or missing because the clocks change is skipped, and the search advances by
+ * quarter hours up to `maxSteps` (bounded). If no unique wall time is found in
+ * that bound it returns null -- never the last candidate, never an ambiguous or
+ * invalid one -- and the picker starts empty so the user must choose. The bound
+ * is a search limit, not a claim about how long DST changes can be.
  */
-export function defaultMoveSelection(now: Date, timezone: string): MoveSelection {
+export function defaultMoveSelection(now: Date, timezone: string, maxSteps: number = DEFAULT_MOVE_SEARCH_STEPS): MoveSelection | null {
   const today = getDatePartsInTimezone(timezone, now).dateStr;
   const first = Math.ceil((now.getTime() + DEFAULT_LEAD_MS) / QUARTER_MS) * QUARTER_MS;
-  let fallback: MoveSelection | null = null;
-  // A fall-back overlap repeats a wall-time hour, i.e. spans 2 real hours (8 quarter-hour steps), so the bound is 4 hours.
-  for (let step = 0; step < 16; step++) {
+  for (let step = 0; step < maxSteps; step++) {
     const candidate = new Date(first + step * QUARTER_MS);
     const minuteOfDay = getMinuteOfDayInTimezone(timezone, candidate);
     const date = getDatePartsInTimezone(timezone, candidate).dateStr;
-    const selection: MoveSelection = { day: date === today ? 'TODAY' : 'TOMORROW', time: `${pad(Math.floor(minuteOfDay / 60))}:${pad(minuteOfDay % 60)}` };
-    fallback = fallback ?? selection;
-    if (resolveLocalDateTime(date, selection.time, timezone).status === 'OK') return selection;
+    const time = `${pad(Math.floor(minuteOfDay / 60))}:${pad(minuteOfDay % 60)}`;
+    if (resolveLocalDateTime(date, time, timezone).status === 'OK') return { day: date === today ? 'TODAY' : 'TOMORROW', time };
   }
-  return fallback as MoveSelection;
+  return null;
 }
 
 export type MoveDestinationRejection = 'INVALID' | 'PAST' | 'SAME' | 'NONEXISTENT' | 'AMBIGUOUS';

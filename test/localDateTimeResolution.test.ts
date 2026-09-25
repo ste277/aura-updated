@@ -9,6 +9,7 @@ import fs from 'fs';
 import path from 'path';
 import { resolveLocalDateTime, localDateTimeToUTC } from '../packages/panchang/src/localDate';
 import { localDateTimeToUTC as webLocalDateTimeToUTC, resolveLocalDateTime as webResolve } from '../apps/web/lib/timezone';
+import { localDayBoundsUTC } from '../apps/web/lib/myDayOrchestrator';
 
 let allPassed = true;
 function check(label: string, condition: boolean) {
@@ -116,6 +117,48 @@ check('8. AMBIGUOUS: NY 2026-11-01 01:30 reports BOTH instants (05:30Z EDT first
 check('8. no existing Aura policy for ambiguous wall times exists elsewhere; the strict resolver fails closed and the total function keeps a documented fallback (see below)', /AMBIGUOUS/.test(read('../packages/panchang/src/localDate.ts')));
 check('30-minute Lord Howe gap: 02:00-02:29 do not exist on 2026-10-04, 02:30 does', one('Australia/Lord_Howe', '2026-10-04', '02:00') === 'NONEXISTENT' && one('Australia/Lord_Howe', '2026-10-04', '02:15') === 'NONEXISTENT' && one('Australia/Lord_Howe', '2026-10-04', '02:30') !== 'NONEXISTENT');
 
+// ---- BACKWARD COMPATIBILITY of the total function (existing callers) ----
+/** The pre-correction algorithm, copied from the base commit 5485524 (packages/panchang/src/localDate.ts, identical in apps/web/lib/timezone.ts). */
+const baseAlgorithm = (dateStr: string, timeStr: string, tz: string): Date => {
+  const [y, mo, d] = dateStr.split('-').map(Number); const [h, mi] = timeStr.split(':').map(Number);
+  const g = new Date(Date.UTC(y, mo - 1, d, h, mi));
+  const m = new Intl.DateTimeFormat('en-US', { timeZone: tz, timeZoneName: 'shortOffset' }).formatToParts(g).find((p) => p.type === 'timeZoneName')!.value.match(/GMT([+-])(\d+)(?::(\d+))?/);
+  const offset = m ? (m[1] === '-' ? -1 : 1) * (Number(m[2]) * 60 + Number(m[3] ?? 0)) : 0;
+  return new Date(g.getTime() - offset * MIN);
+};
+const iso = (tz: string, date: string, time: string) => localDateTimeToUTC(date, time, tz).toISOString();
+// Literal values produced by the ACTUAL base module (executed from git 5485524 when this correction was made), not derived from the current code:
+check('6. Berlin gap 2026-03-29 02:30: total function == base 2026-03-29T00:30:00.000Z (strict: NONEXISTENT)', iso('Europe/Berlin', '2026-03-29', '02:30') === '2026-03-29T00:30:00.000Z' && one('Europe/Berlin', '2026-03-29', '02:30') === 'NONEXISTENT');
+check('7. Sydney gap 2026-10-04 02:30: total function == base 2026-10-03T15:30:00.000Z (strict: NONEXISTENT)', iso('Australia/Sydney', '2026-10-04', '02:30') === '2026-10-03T15:30:00.000Z' && one('Australia/Sydney', '2026-10-04', '02:30') === 'NONEXISTENT');
+const sydOverlap = resolveLocalDateTime('2026-04-05', '02:30', 'Australia/Sydney');
+check('8. Sydney overlap 2026-04-05 02:30: total function == base 2026-04-04T16:30:00.000Z; the strict resolver still returns AMBIGUOUS with BOTH instants (15:30Z and 16:30Z)', iso('Australia/Sydney', '2026-04-05', '02:30') === '2026-04-04T16:30:00.000Z' && sydOverlap.status === 'AMBIGUOUS' && sydOverlap.earlier.toISOString() === '2026-04-04T15:30:00.000Z' && sydOverlap.later.toISOString() === '2026-04-04T16:30:00.000Z');
+check('9. Cairo midnight-transition 2026-04-24 00:00: total function == base 2026-04-23T21:00:00.000Z (strict: NONEXISTENT); existing day-bound semantics are NOT reinterpreted', iso('Africa/Cairo', '2026-04-24', '00:00') === '2026-04-23T21:00:00.000Z' && one('Africa/Cairo', '2026-04-24', '00:00') === 'NONEXISTENT');
+check('9/33. the real day-bound caller (myDayOrchestrator.localDayBoundsUTC) is unchanged for Cairo on the transition day: [2026-04-23T21:00Z, 2026-04-24T21:00Z)', localDayBoundsUTC('2026-04-24', 'Africa/Cairo').from.toISOString() === '2026-04-23T21:00:00.000Z' && localDayBoundsUTC('2026-04-24', 'Africa/Cairo').to.toISOString() === '2026-04-24T21:00:00.000Z');
+check('10. negative-offset control (New York): spring gap 02:30 -> 07:30Z and fall overlap 01:30 -> 05:30Z, identical to base; Berlin autumn overlap 02:30 == base 2026-10-25T01:30:00.000Z; Auckland gap == base 2026-09-26T13:30:00.000Z', iso('America/New_York', '2026-03-08', '02:30') === '2026-03-08T07:30:00.000Z' && iso('America/New_York', '2026-11-01', '01:30') === '2026-11-01T05:30:00.000Z' && iso('Europe/Berlin', '2026-10-25', '02:30') === '2026-10-25T01:30:00.000Z' && iso('Pacific/Auckland', '2026-09-27', '02:30') === '2026-09-26T13:30:00.000Z');
+check('11. UNIQUE transition-day times stay CORRECTED (the D3 blocker): LA spring 09:00 = 16:00Z (base said 17:00Z), NY spring 05:00 = 09:00Z (base 10:00Z), Sydney transition-day 09:00 = 2026-10-03T22:00Z', iso('America/Los_Angeles', '2026-03-08', '09:00') === '2026-03-08T16:00:00.000Z' && baseAlgorithm('2026-03-08', '09:00', 'America/Los_Angeles').toISOString() === '2026-03-08T17:00:00.000Z' && iso('America/New_York', '2026-03-08', '05:00') === '2026-03-08T09:00:00.000Z' && baseAlgorithm('2026-03-08', '05:00', 'America/New_York').toISOString() === '2026-03-08T10:00:00.000Z' && iso('Australia/Sydney', '2026-10-04', '09:00') === '2026-10-03T22:00:00.000Z');
+{
+  const COMPAT_ZONES: Array<{ tz: string; transitions: string[] }> = [
+    ...ZONES.map(({ tz, transitions }) => ({ tz, transitions })),
+    { tz: 'Europe/Berlin', transitions: ['2026-03-29', '2026-10-25'] },
+    { tz: 'Africa/Cairo', transitions: ['2026-04-24', '2026-10-30'] },
+    { tz: 'Pacific/Auckland', transitions: ['2026-04-05', '2026-09-27'] },
+    { tz: 'America/Havana', transitions: ['2026-03-08', '2026-11-01'] },
+    { tz: 'Antarctica/Troll', transitions: ['2026-03-29', '2026-10-25'] },
+  ];
+  let gapSame = 0; let overlapSame = 0; let uniqueSame = 0; let gapDiff = 0; let overlapDiff = 0; let uniqueDiff = 0; let uniqueChangedFromBase = 0;
+  for (const { tz, transitions } of COMPAT_ZONES) for (const t0 of transitions) for (const date of [addDay(t0, -1), t0, addDay(t0, 1)]) for (const time of times) {
+    const strict = resolveLocalDateTime(date, time, tz); const total = localDateTimeToUTC(date, time, tz).getTime(); const base = baseAlgorithm(date, time, tz).getTime();
+    if (strict.status === 'NONEXISTENT') { if (total === base) gapSame++; else gapDiff++; }
+    else if (strict.status === 'AMBIGUOUS') { if (total === base) overlapSame++; else overlapDiff++; }
+    else if (strict.status === 'OK') { if (total === strict.instant.getTime()) uniqueSame++; else uniqueDiff++; if (total !== base) uniqueChangedFromBase++; }
+  }
+  console.log(`     compatibility matrix vs base algorithm: gap ${gapSame} same / ${gapDiff} different; overlap ${overlapSame} same / ${overlapDiff} different; unique ${uniqueSame} equal the strict result (${uniqueDiff} not), ${uniqueChangedFromBase} unique times differ from base (the corrected ones)`);
+  check('12. compatibility matrix (11 zones incl. eastern hemisphere, midnight-transition zones and Troll; day before / transition day / day after): EVERY nonexistent wall time equals base and EVERY ambiguous wall time equals base', gapSame > 0 && overlapSame > 0 && gapDiff === 0 && overlapDiff === 0);
+  check('11/12. for every UNIQUE wall time the total function equals the strict corrected result, and the corrected times are exactly the ones that used to be wrong', uniqueSame > 0 && uniqueDiff === 0 && uniqueChangedFromBase > 0);
+}
+check('3/13. the compatibility fallback is one private single-sample function used only when the strict result is not OK; resolveLocalDateTime is untouched and Home Move imports the strict resolver only', (() => { const src = read('../packages/panchang/src/localDate.ts'); return /function legacySingleSampleLocalDateTimeToUTC/.test(src) && /if \(resolved\.status === 'OK'\) return resolved\.instant;\s*return legacySingleSampleLocalDateTimeToUTC/.test(src) && !/resolveLocalDateTime\(.*legacy/.test(src) && /resolveLocalDateTime/.test(read('../apps/web/lib/homeMove.ts')) && !/localDateTimeToUTC/.test(read('../apps/web/lib/homeMove.ts')); })());
+check('14. documentation: the total function is labelled a compatibility API, the legacy result is not called correct, and interactive callers are pointed at the strict resolver', (() => { const src = read('../packages/panchang/src/localDate.ts'); return /BACKWARD-COMPATIBLE TOTAL API/.test(src) && /compatibility artifact, NOT a recommended policy/.test(src) && /should call\s+\* resolveLocalDateTime/.test(src); })());
+
 // ---- date boundaries ----
 const bounds = ['00:00', '00:15', '23:45'];
 const boundaryOk = ZONES.every(({ tz, transitions }) => transitions.every((t0) => [addDay(t0, -1), t0, addDay(t0, 1)].every((date) => bounds.every((time) => { const r = resolveLocalDateTime(date, time, tz); return r.status !== 'OK' || wall(tz, r.instant.getTime()) === `${date} ${time}`; }))));
@@ -124,7 +167,7 @@ check('14. 00:00 / 00:15 / 23:45 never shift the local calendar date, in every z
 // ---- the total function (existing callers) ----
 check('24. one implementation: apps/web/lib/timezone.ts re-exports the package functions (no second, divergent copy)', webLocalDateTimeToUTC === localDateTimeToUTC && webResolve === resolveLocalDateTime && !/const guessUTC/.test(read('../apps/web/lib/timezone.ts')));
 check('24. localDateTimeToUTC is exact for every unique wall time (LA 09:00 spring, NY 05:00 fall) and unchanged for ordinary days', localDateTimeToUTC('2026-03-08', '09:00', 'America/Los_Angeles').toISOString() === '2026-03-08T16:00:00.000Z' && localDateTimeToUTC('2026-11-01', '05:00', 'America/New_York').toISOString() === '2026-11-01T10:00:00.000Z' && localDateTimeToUTC('2026-06-15', '14:30', 'America/New_York').toISOString() === '2026-06-15T18:30:00.000Z' && localDateTimeToUTC('1990-03-15', '14:30', 'Asia/Kolkata').toISOString() === '1990-03-15T09:00:00.000Z');
-check('24. localDateTimeToUTC stays TOTAL with a fixed documented fallback: a gap time moves forward by the gap (NY 02:30 -> 03:30 EDT = 07:30Z), an overlap time is its first occurrence (NY 01:30 -> 05:30Z)', localDateTimeToUTC('2026-03-08', '02:30', 'America/New_York').toISOString() === '2026-03-08T07:30:00.000Z' && localDateTimeToUTC('2026-11-01', '01:30', 'America/New_York').toISOString() === '2026-11-01T05:30:00.000Z');
+check('24. localDateTimeToUTC stays TOTAL: for a gap/overlap wall time it returns the legacy single-sample result (New York: 02:30 gap -> 07:30Z, 01:30 overlap -> 05:30Z, identical to base)', localDateTimeToUTC('2026-03-08', '02:30', 'America/New_York').toISOString() === '2026-03-08T07:30:00.000Z' && localDateTimeToUTC('2026-11-01', '01:30', 'America/New_York').toISOString() === '2026-11-01T05:30:00.000Z');
 const legacy = (date: string, time: string, tz: string) => { const [y, mo, d] = date.split('-').map(Number); const [h, mi] = time.split(':').map(Number); const g = new Date(Date.UTC(y, mo - 1, d, h, mi)); const off = new Intl.DateTimeFormat('en-US', { timeZone: tz, timeZoneName: 'shortOffset' }).formatToParts(g).find((p) => p.type === 'timeZoneName')!.value.match(/GMT([+-])(\d+)(?::(\d+))?/)!; return new Date(g.getTime() - (off[1] === '-' ? -1 : 1) * (Number(off[2]) * 60 + Number(off[3] ?? 0)) * MIN); };
 check('24. invalid text keeps the historical behavior exactly (hour past 23 rolls forward as before; "5:30" still parses)', localDateTimeToUTC('2026-08-24', '25:00', 'Asia/Kolkata').getTime() === legacy('2026-08-24', '25:00', 'Asia/Kolkata').getTime() && localDateTimeToUTC('2026-08-24', '5:30', 'Asia/Kolkata').toISOString() === '2026-08-24T00:00:00.000Z');
 check('24. invalid text is INVALID for the strict resolver', resolveLocalDateTime('2026-02-30', '09:00', 'Asia/Kolkata').status === 'INVALID' && resolveLocalDateTime('2026-08-24', '24:00', 'Asia/Kolkata').status === 'INVALID' && resolveLocalDateTime('nope', '09:00', 'Asia/Kolkata').status === 'INVALID');
