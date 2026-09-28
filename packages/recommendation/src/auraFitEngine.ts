@@ -1,6 +1,7 @@
 import type { SolarWindowType } from '../../panchang/src/windows';
 import { evaluateMuhurta, MuhurtaActivityFamily } from '../../muhurta/src/muhurtaEngine';
 import type { MuhurtaReason, MuhurtaClassification } from '../../muhurta/src/activityOntology';
+import type { ActionPhase } from '../../muhurta/src/actionPhase';
 import { formatPersonalReasons } from '../../muhurta/src/muhurtaReasonFormat';
 import { computeMuhurtaSupportLevel, evaluateMuhurtaWithRulePack, resolveMuhurtaRulePack } from '../../muhurta/src/muhurtaRulePacks';
 import { getTaraBala } from '../../vedic/src/natalChart';
@@ -109,13 +110,21 @@ export function evaluateActivityFit(params: {
    * by this parameter -- see muhurtaRulePacks.ts's module doc comment for
    * the full reasoning. */
   classification?: MuhurtaClassification;
+  /** Lunar Intelligence V1 L2 -- an explicit evaluation-context hook ("what part of this occurrence are we
+   * evaluating": START/CONTINUE/FINISH/PREPARE/REVIEW), passed through unchanged to evaluateMuhurtaWithRulePack()
+   * when that path is used. Currently UNREAD anywhere -- no score, reason, or eligibility here or downstream
+   * branches on it -- so supplying it changes nothing; absent, it changes nothing either. See
+   * packages/muhurta/src/actionPhase.ts's own doc comment for why this is a per-evaluation input, never part of
+   * `classification` (the same activity can genuinely be a different phase on different days). Never passed to the
+   * legacy evaluateMuhurta() path below -- that path predates this concept and stays untouched. */
+  actionPhase?: ActionPhase;
 }): AuraFitEvaluation {
   const family = familyForActivityProfile(params.activity);
   const rulePack = params.classification ? resolveMuhurtaRulePack(params.classification) : undefined;
   const supportLevel = params.classification && rulePack ? computeMuhurtaSupportLevel(params.classification, rulePack) : undefined;
   const usesGenericRulePack = rulePack !== undefined && !(rulePack.coverage.tithi === 'REUSABLE_BASE_RULE' && rulePack.coverage.nakshatra === 'REUSABLE_BASE_RULE');
   const muhurta = usesGenericRulePack
-    ? evaluateMuhurtaWithRulePack({ classification: params.classification!, date: params.date, windowType: params.windowType })
+    ? evaluateMuhurtaWithRulePack({ classification: params.classification!, date: params.date, windowType: params.windowType, actionPhase: params.actionPhase })
     : evaluateMuhurta({
         taskTitle: params.activity.title,
         date: params.date,
