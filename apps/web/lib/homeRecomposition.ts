@@ -88,8 +88,11 @@ export function parseRecomposeResponse(httpOk: boolean, body: unknown): Recompos
   }
 
   // The summary must agree with the decisions it summarises; a disagreement is a contract violation, not a display choice.
-  if (state === 'NO_CHANGES') return moves.length === 0 && unresolved.length === 0 ? { kind: 'VIEW', view: { kind: 'NO_CHANGES', keepCount } } : { kind: 'ERROR' };
-  if (state === 'NEEDS_ATTENTION') return moves.length === 0 && unresolved.length > 0 ? { kind: 'VIEW', view: { kind: 'NEEDS_ATTENTION', unresolved, keepCount } } : { kind: 'ERROR' };
+  // Only CHANGES_PROPOSED may carry an acceptance token: a token attached to any other summary is a contract
+  // violation, not something to silently drop -- fail closed rather than accept a proposal whose shape is wrong.
+  const hasToken = body.proposalToken !== undefined && body.proposalToken !== null;
+  if (state === 'NO_CHANGES') return moves.length === 0 && unresolved.length === 0 && !hasToken ? { kind: 'VIEW', view: { kind: 'NO_CHANGES', keepCount } } : { kind: 'ERROR' };
+  if (state === 'NEEDS_ATTENTION') return moves.length === 0 && unresolved.length > 0 && !hasToken ? { kind: 'VIEW', view: { kind: 'NEEDS_ATTENTION', unresolved, keepCount } } : { kind: 'ERROR' };
   if (moves.length === 0 || !isNonEmptyString(body.proposalToken)) return { kind: 'ERROR' };
   return { kind: 'VIEW', view: { kind: 'CHANGES_PROPOSED', proposalToken: body.proposalToken, moves, unresolved, keepCount } };
 }
@@ -163,15 +166,6 @@ export function withConfirmedMoves(successors: ReadonlyMap<string, PlannedActivi
   const next = new Map(successors);
   for (const move of moves) next.set(move.sourcePlanId, move.successor);
   return next;
-}
-
-/** After a lost accept response: true only if a fresh /api/my-day read shows EVERY source plan as MOVED. Anything unreadable is "not observed". */
-export function sourcesObservedMoved(myDayBody: unknown, sourcePlanIds: readonly string[]): boolean {
-  const items = isObject(myDayBody) && isObject(myDayBody.agenda) && Array.isArray(myDayBody.agenda.items) ? myDayBody.agenda.items : null;
-  if (!items || sourcePlanIds.length === 0) return false;
-  const moved = new Set<string>();
-  for (const item of items) if (isObject(item) && typeof item.id === 'string' && item.status === 'MOVED') moved.add(item.id);
-  return sourcePlanIds.every((id) => moved.has(`plan:${id}`));
 }
 
 // ---------------------------------------------------------------------------
@@ -257,10 +251,13 @@ export interface RecompositionStoreDeps {
   fetchImpl: typeof fetch;
   /** Project a SERVER-CONFIRMED batch into Home in one update. Never called for anything unconfirmed. */
   applyConfirmedMoves: (moves: ConfirmedMove[]) => void;
-  /** Best-effort Home reconciliation (the existing refresh). Rejections are swallowed here: a refresh never decides truth. */
+  /** Best-effort Home reconciliation (the existing refresh). It reconciles VISIBLE Home state; it is never proof that
+   * this proposal committed -- Home's own agenda carries no lineage back to a specific F3 acceptance, so a plan
+   * merely reading MOVED after a refresh is not evidence this token was the one that moved it. */
   reconcile: () => Promise<void> | void;
-  /** A fresh authoritative read after a lost accept response: true iff every source plan is observed as moved. */
-  observeMovedSources: (sourcePlanIds: string[]) => Promise<boolean>;
+  /** True while a conflicting Home mutation (Done/Skip/Move) is in flight -- an optional second guard alongside the
+   * UI's own disabled state; accept() also checks it at handler entry. */
+  isMutationInFlight?: () => boolean;
 }
 
 export interface RecompositionStore {
@@ -323,6 +320,7 @@ export function createRecompositionStore(deps: RecompositionStoreDeps): Recompos
   const accept = async () => {
     const start = state;
     if (acceptInFlight || start.phase !== 'PROPOSAL' || start.view.kind !== 'CHANGES_PROPOSED') return;
+    if (deps.isMutationInFlight?.()) return; // a conflicting plan mutation is running; the UI's own guard already prevents this, this is a cheap second check
     const view = start.view;
     const generation = start.generation;
     acceptInFlight = true; // synchronous: a second click in the same task sees this before any re-render
@@ -350,17 +348,15 @@ export function createRecompositionStore(deps: RecompositionStoreDeps): Recompos
         dispatch(current ? { type: 'ACCEPT_SUCCEEDED', generation } : { type: 'COMMITTED_ELSEWHERE' });
         await reconcile();
       } else if (outcome.kind === 'UNKNOWN') {
-        // The server may have committed before the answer was lost: never claim failure. Refresh, then look.
+        // The server may have committed before the answer was lost: the outcome is UNKNOWN, never a claimed success
+        // or a claimed failure. Home's own agenda carries no lineage back to a specific F3 acceptance, so nothing
+        // observable here -- a source reading MOVED, a row disappearing -- is evidence THIS proposal committed;
+        // only F3 itself can resolve that. Refresh for VISIBLE truth (never treated as proof), keep the exact same
+        // token, and let the existing Accept control retry it: F3 is state-idempotent, so a retry safely resolves
+        // to ALREADY_ACCEPTED if it already committed, or ACCEPTED if it did not.
         if (isCurrent()) dispatch({ type: 'ACCEPT_RECONCILING', generation });
         await reconcile();
-        let observed = false;
-        try {
-          observed = await deps.observeMovedSources(sourceIds);
-        } catch {
-          observed = false;
-        }
-        if (observed) dispatch(isCurrent() ? { type: 'ACCEPT_SUCCEEDED', generation } : { type: 'COMMITTED_ELSEWHERE' });
-        else dispatch({ type: 'ACCEPT_UNCONFIRMED', generation }); // same token stays retryable (F3 is state-idempotent)
+        dispatch({ type: 'ACCEPT_UNCONFIRMED', generation });
       } else if (outcome.kind === 'SAVE_FAILED') {
         dispatch({ type: 'ACCEPT_SAVE_FAILED', generation });
       } else if (outcome.kind === 'STALE') {
@@ -425,9 +421,25 @@ export function keepSummary(keepCount: number): string | null {
   return keepCount === 1 ? '1 thing stays as it is' : `${keepCount} things stay as they are`;
 }
 
-/** Plain reason an unresolved item needs the user: its current time no longer works and nothing else fits today. */
+/**
+ * Plain reason an unresolved item needs the user. F2's UNRESOLVED means the current slot was found infeasible AND
+ * one greedy hypothetical placement pass found no other slot for it -- not a proof that no slot exists anywhere
+ * today (the Constructor is greedy and other reconsidered plans may have taken the room). The copy says only what
+ * that supports: this time no longer fits, and Aura's search came up empty -- never "nothing else fits" or
+ * "impossible today".
+ */
 export function unresolvedText(row: RecompositionUnresolvedRow, timezone: string): string {
-  return `${row.title}, at ${formatRecompositionTime(row.atIso, timezone)}. This time no longer works and nothing else fits today.`;
+  return `${row.title}, at ${formatRecompositionTime(row.atIso, timezone)}. This time no longer fits, and Aura couldn't find another time for it today.`;
+}
+
+/**
+ * F2's NO_CHANGES means every reconsidered plan was evaluated and kept (a genuine "nothing needs to move"). A
+ * keepCount of 0 means there was nothing TO reconsider (no candidates at all -- an empty day, or every plan is
+ * protected), which is a materially different case: Aura evaluated nothing, so the copy must not imply it checked
+ * the whole day and found it already works.
+ */
+export function noChangesText(keepCount: number): string {
+  return keepCount > 0 ? 'Nothing needs to move.' : "There's nothing Aura can rearrange right now.";
 }
 
 /**

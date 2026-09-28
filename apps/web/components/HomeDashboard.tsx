@@ -42,7 +42,7 @@ import { missedRecoveryPlanId, overlayElapsedMissed } from '../lib/homeMissedRec
 import { applyConfirmedSuccessors, hideMovedTimelineItems, defaultMoveSelection, resolveMoveDestination, moveDestinationMessage, moveFailureMessage, formatMoveTime, type MoveSelection } from '../lib/homeMove';
 import type { PlannedActivity } from '../lib/db';
 import { RecompositionCard } from './RecompositionCard';
-import { createRecompositionStore, initialRecompositionState, shouldOfferRecomposition, sourcesObservedMoved, withConfirmedMoves, withMovedSources, type ConfirmedMove, type RecompositionStore } from '../lib/homeRecomposition';
+import { createRecompositionStore, initialRecompositionState, shouldOfferRecomposition, withConfirmedMoves, withMovedSources, type ConfirmedMove, type RecompositionStore } from '../lib/homeRecomposition';
 
 /** Matches page.tsx's own FALLBACK_TZ -- defensive only, page.tsx always supplies a real value today. */
 const FALLBACK_HOME_TZ = 'Asia/Kolkata';
@@ -479,6 +479,9 @@ export function HomeDashboard({
   // F2 decides, F3 validates + commits, Home explains and lets the user act: nothing here schedules anything.
   const onPlanCompletedRef = useRef(onPlanCompleted);
   onPlanCompletedRef.current = onPlanCompleted;
+  // Read fresh on every render (the store below is created once, so its own closures cannot see later renders' state).
+  const mutationInFlightRef = useRef(false);
+  mutationInFlightRef.current = completingPlanIds.size > 0 || skippingPlanIds.size > 0 || movingPlanIds.size > 0;
   const recompositionStoreRef = useRef<RecompositionStore | null>(null);
   if (recompositionStoreRef.current === null) {
     recompositionStoreRef.current = createRecompositionStore({
@@ -488,13 +491,14 @@ export function HomeDashboard({
         setExecutionFacts((current) => withMovedSources(current, moves));
         setConfirmedSuccessors((current) => withConfirmedMoves(current, moves));
       },
+      // Best-effort reconciliation only -- NEVER evidence that a specific F3 acceptance committed. Home's own agenda
+      // carries no lineage back to a signed proposal, so an unknown accept outcome is resolved by retrying the SAME
+      // token through F3 (state-idempotent: ALREADY_ACCEPTED if it already landed), never by inferring from refreshed
+      // Home state.
       reconcile: async () => {
         await onPlanCompletedRef.current?.();
       },
-      observeMovedSources: async (sourcePlanIds) => {
-        const res = await fetch('/api/my-day');
-        return res.ok ? sourcesObservedMoved(await res.json().catch(() => null), sourcePlanIds) : false;
-      },
+      isMutationInFlight: () => mutationInFlightRef.current,
     });
   }
   const recompositionStore = recompositionStoreRef.current;
@@ -515,7 +519,11 @@ export function HomeDashboard({
   }, [recompositionStore, agendaLocalDate]);
   const recompositionAccepting = recomposition.phase === 'ACCEPTING';
   // Focus follows the card's own transitions (never a successor, never a scroll jump): the heading when a proposal/status
-  // appears or changes, the success status after a batch acceptance.
+  // appears or changes, the success status after a batch acceptance -- but ONLY while focus is still owned by the
+  // recomposition interaction (the entry button that started it, or the card itself). If the user has since focused
+  // something else -- typed into Quick Capture, opened another Home control -- an arriving proposal/status must never
+  // steal that focus back: a plain activeElement check at the moment of focusing is enough here (no need for
+  // homeSuccessorFocus's fuller epoch/cancel machinery, which exists for a bounded DOM-polling wait this doesn't have).
   const previousRecomposition = useRef(initialRecompositionState);
   useEffect(() => {
     const keyOf = (state: typeof recomposition) => (state.phase === 'IDLE' ? `IDLE:${state.updated}` : state.phase);
@@ -523,7 +531,13 @@ export function HomeDashboard({
     previousRecomposition.current = recomposition;
     if (!changed) return;
     const selector = recomposition.phase === 'IDLE' ? (recomposition.updated ? '[data-recomposition-status]' : null) : '[data-recomposition-heading]';
-    if (selector) setTimeout(() => document.querySelector<HTMLElement>(selector)?.focus({ preventScroll: true }), 0);
+    if (!selector) return;
+    setTimeout(() => {
+      const active = document.activeElement;
+      const focusOwnedByRecomposition = !active || active === document.body || active.id === 'home-recomposition-entry' || !!active.closest('[data-recomposition-card]');
+      if (!focusOwnedByRecomposition) return;
+      document.querySelector<HTMLElement>(selector)?.focus({ preventScroll: true });
+    }, 0);
   }, [recomposition]);
 
   // eslint-disable-next-line react-hooks/exhaustive-deps

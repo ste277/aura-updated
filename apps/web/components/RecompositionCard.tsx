@@ -1,7 +1,7 @@
 import React from 'react';
 import { colors, spacing, typography } from './theme';
 import { SurfaceCard, PrimaryButton, SecondaryButton, TextButton } from './ui';
-import { keepSummary, presentMove, unresolvedText, type RecompositionUnresolvedRow, type RecompositionState, type RecompositionView } from '../lib/homeRecomposition';
+import { keepSummary, noChangesText, presentMove, unresolvedText, type RecompositionUnresolvedRow, type RecompositionState, type RecompositionView } from '../lib/homeRecomposition';
 
 /**
  * Remaining-Day Recomposition V1 PR F4 -- the inline proposal card. PRESENTATIONAL ONLY: it fetches nothing, holds no
@@ -142,7 +142,7 @@ function renderView(
     return (
       <>
         <p role="status" style={typography.bodyStrong}>
-          Your day already works. Nothing to move.
+          {noChangesText(view.keepCount)}
         </p>
         <div style={actionsStyle}>{ctx.closeButton('Done')}</div>
       </>
@@ -189,7 +189,7 @@ function renderView(
         </p>
       ) : notice === 'UNCONFIRMED' ? (
         <p role="alert" style={{ ...typography.bodyStrong, color: colors.caution }}>
-          We couldn&apos;t confirm whether your day was updated. Check your day, then try again if needed.
+          We couldn&apos;t confirm whether the new arrangement was saved. Accept again to check.
         </p>
       ) : null}
       <div style={actionsStyle}>

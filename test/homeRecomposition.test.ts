@@ -9,12 +9,12 @@ import {
   createRecompositionStore,
   initialRecompositionState,
   keepSummary,
+  noChangesText,
   parseAcceptResponse,
   parseRecomposeResponse,
   presentMove,
   recompositionReducer,
   shouldOfferRecomposition,
-  sourcesObservedMoved,
   unresolvedText,
   withConfirmedMoves,
   withMovedSources,
@@ -79,7 +79,7 @@ const acceptedBody = (status: 'ACCEPTED' | 'ALREADY_ACCEPTED' = 'ACCEPTED') => (
 
 interface Call { url: string; init?: RequestInit }
 type Reply = { ok: boolean; status?: number; body: unknown } | 'THROW' | 'DEFER';
-function makeHarness(script: { recompose?: Reply[]; accept?: Reply[]; observe?: boolean[] }) {
+function makeHarness(script: { recompose?: Reply[]; accept?: Reply[]; mutationInFlight?: () => boolean }) {
   const calls: Call[] = [];
   const deferred: Array<(r: { ok: boolean; body: unknown } | 'THROW') => void> = [];
   const projected: ConfirmedMove[][] = [];
@@ -97,12 +97,11 @@ function makeHarness(script: { recompose?: Reply[]; accept?: Reply[]; observe?: 
     if (reply === 'DEFER') return new Promise<Response>((resolve, reject) => deferred.push((r) => { try { resolve(settle(r)); } catch (e) { reject(e); } }));
     return settle(reply === 'THROW' ? 'THROW' : reply);
   }) as unknown as typeof fetch;
-  const observe = [...(script.observe ?? [])];
   const deps: RecompositionStoreDeps = {
     fetchImpl,
     applyConfirmedMoves: (moves) => { projected.push(moves); events.push('project'); },
     reconcile: async () => { reconciles += 1; events.push('reconcile'); },
-    observeMovedSources: async () => { events.push('observe'); return observe.shift() ?? false; },
+    isMutationInFlight: script.mutationInFlight,
   };
   const store = createRecompositionStore(deps);
   const states: RecompositionState[] = [];
@@ -145,9 +144,12 @@ async function main() {
     ['NEEDS_ATTENTION without unresolved', ready('NEEDS_ATTENTION', [keepD('K', 'k', '10:00', '11:00')])],
     ['duplicate plan ids', ready('CHANGES_PROPOSED', [moveD('A', 'a', '10:00', '11:00', '14:00', '15:00'), keepD('A', 'a', '10:00', '11:00')], 'tok')],
     ['empty token', ready('CHANGES_PROPOSED', [moveD('A', 'a', '10:00', '11:00', '14:00', '15:00')], '')],
+    ['NO_CHANGES carrying a token', { ...ready('NO_CHANGES', [keepD('K', 'k', '10:00', '11:00')]), proposalToken: 'tok' }],
+    ['NEEDS_ATTENTION carrying a token', { ...ready('NEEDS_ATTENTION', [unresD('U', 'u', '10:00', '11:00')]), proposalToken: 'tok' }],
   ];
   // an empty-string token is dropped by the fixture helper, which is exactly "no token"
   check('5. every malformed/unknown/inconsistent F2 response fails closed to ERROR: ' + bad.map(([n]) => n).join(', '), bad.every(([, body, ok]) => p(body, ok ?? true).kind === 'ERROR'));
+  check('28/29. only CHANGES_PROPOSED may carry a proposalToken: NO_CHANGES/NEEDS_ATTENTION with one attached fails closed (never silently dropped)', p({ ...ready('NO_CHANGES', [keepD('K', 'k', '10:00', '11:00')]), proposalToken: 'tok' }).kind === 'ERROR' && p({ ...ready('NEEDS_ATTENTION', [unresD('U', 'u', '10:00', '11:00')]), proposalToken: 'tok' }).kind === 'ERROR' && viewOf(p(ready('NO_CHANGES', [keepD('K', 'k', '10:00', '11:00')])))?.kind === 'NO_CHANGES');
 
   // ============================ parsing (F3) ============================
   const expected = ['A', 'B', 'C'];
@@ -265,7 +267,7 @@ async function main() {
   function THROWS(): Reply { return 'THROW'; }
 
   // ============================ store: accept ============================
-  const openProposal = async (script: { accept?: Reply[]; observe?: boolean[] }) => {
+  const openProposal = async (script: { accept?: Reply[]; mutationInFlight?: () => boolean }) => {
     const h = makeHarness({ recompose: [okRes(changes3())], ...script });
     await h.store.request();
     return h;
@@ -323,43 +325,73 @@ async function main() {
     check('53. the retry re-sends the SAME token and succeeds', h.calls.filter((c) => c.url.endsWith('/accept')).length === 2 && h.calls[1].init?.body === h.calls[2].init?.body && h.projected.length === 1 && (h.store.getState() as { updated?: boolean }).updated === true);
   }
 
-  // ---- 27/54 lost response ----
+  // ---- 1/7/13-17. lost response: UNKNOWN must never be inferred to success from refreshed Home state ----
   {
-    // The server committed; only the response was lost. A fresh read shows every source MOVED.
-    const h = await openProposal({ accept: ['THROW'], observe: [true] });
-    await h.store.accept();
-    const st = h.store.getState();
-    check('54. lost response + commit observed after refresh: converges to success (no failure claim, refresh performed first)', st.phase === 'IDLE' && (st as { updated?: boolean }).updated === true && h.events.slice(-3).join('>') === 'reconcile>observe>state:IDLE+updated');
-    check('54. ...and nothing was projected from an answer that never arrived (the refresh is the truth)', h.projected.length === 0);
-  }
-  {
-    // Not observable: the same token stays retryable and never says "nothing was changed".
-    const h = await openProposal({ accept: ['THROW', okRes(acceptedBody('ALREADY_ACCEPTED'))], observe: [false] });
-    await h.store.accept();
-    const st = h.store.getState();
-    check('54. lost response + commit NOT observable: back to PROPOSAL with the UNCONFIRMED notice (not SAVE_FAILED), refresh attempted', st.phase === 'PROPOSAL' && st.notice === 'UNCONFIRMED' && h.reconciles() === 1);
-    await h.store.accept();
-    check('54. the SAME token is safely retried and the idempotent ALREADY_ACCEPTED converges to success', h.calls[2].init?.body === h.calls[1].init?.body && h.projected.length === 1 && (h.store.getState() as { updated?: boolean }).updated === true);
-  }
-  {
+    // The server committed; only the response was lost. A fresh read WOULD show every source MOVED -- but Home's own
+    // agenda carries no lineage back to this specific F3 acceptance, so that can never be used as proof. This is the
+    // exact false-positive scenario final review found: it must FAIL against the reviewed head (5645e9a), which
+    // treated "every source observed MOVED" as success.
     const h = await openProposal({ accept: ['THROW'] });
-    await h.store.accept(); // observe defaults to false; a throwing observation is also "not observed"
-    check('27. an unreadable follow-up read is "not observed", never a failure claim', h.store.getState().phase === 'PROPOSAL' && (h.store.getState() as { notice?: string }).notice === 'UNCONFIRMED');
-    const h2 = await openProposal({ accept: [okRes({ status: 'ACCEPTED', moves: [] })], observe: [true] });
-    await h2.store.accept();
-    check('27. a 200 whose mapping is unusable is treated as UNKNOWN and reconciled (not projected, not called a failure)', h2.projected.length === 0 && (h2.store.getState() as { updated?: boolean }).updated === true);
+    await h.store.accept();
+    const st = h.store.getState();
+    check('13. lost response: the outcome stays UNKNOWN/UNCONFIRMED -- refreshed Home state is never treated as proof this proposal committed', st.phase === 'PROPOSAL' && (st as { notice?: string }).notice === 'UNCONFIRMED');
+    check('13. no success is claimed: nothing is projected and no "Your day is updated" status', h.projected.length === 0 && !(h.store.getState() as { updated?: boolean }).updated);
+    check('13. the exact same token is retained for retry (the view -- and its proposalToken -- is unchanged)', st.phase === 'PROPOSAL' && st.view.kind === 'CHANGES_PROPOSED' && st.view.proposalToken === 'signed.token.1');
+    check('11/13. the refresh happens (visible-truth reconciliation) but the store makes no /api/my-day (or any other) identity read of its own', h.reconciles() === 1 && h.calls.map((c) => c.url).join() === '/api/day/recompose,/api/day/recompose/accept');
   }
   {
-    // While the refresh after a transport error is pending, the UI is ACCEPTING(reconciling): still blocked, still honest.
+    // 14: the same holds with every one of the proposal's multiple sources -- "all sources would read MOVED" is
+    // exactly as insufficient as one, because the store never inspects source state at all any more.
+    const h = await openProposal({ accept: ['THROW'] });
+    await h.store.accept();
+    check('14. all-sources-MOVED is not special-cased back in: still UNCONFIRMED for a proposal with 3 MOVE sources', h.store.getState().phase === 'PROPOSAL' && (h.store.getState() as { notice?: string }).notice === 'UNCONFIRMED');
+  }
+  {
+    // 15: UNKNOWN -> same-token retry -> the original request actually DID commit -> F3 authoritatively says so.
+    const h = await openProposal({ accept: ['THROW', okRes(acceptedBody('ALREADY_ACCEPTED'))] });
+    await h.store.accept();
+    check('15. UNKNOWN, then a same-token retry: no premature success', h.projected.length === 0);
+    await h.store.accept();
+    check('15. retry -> ALREADY_ACCEPTED with authoritative mappings: same token, atomic projection, success status, refresh', h.calls[2].init?.body === h.calls[1].init?.body && h.projected.length === 1 && h.projected[0].length === 3 && (h.store.getState() as { updated?: boolean }).updated === true && h.reconciles() === 2);
+  }
+  {
+    // 16: UNKNOWN -> same-token retry -> the original request did NOT commit -> a plain ACCEPTED.
+    const h = await openProposal({ accept: ['THROW', okRes(acceptedBody('ACCEPTED'))] });
+    await h.store.accept();
+    await h.store.accept();
+    check('16. retry -> ACCEPTED takes the exact same successful projection path as ALREADY_ACCEPTED', h.calls[2].init?.body === h.calls[1].init?.body && h.projected.length === 1 && h.projected[0].length === 3 && (h.store.getState() as { updated?: boolean }).updated === true);
+  }
+  {
+    // 8/9/10: retry can also resolve to STALE, INVALID_TOKEN or SAVE_FAILED -- each keeps its own existing behavior.
+    const stale = await openProposal({ accept: ['THROW', errRes({ status: 'STALE' })] });
+    await stale.store.accept(); await stale.store.accept();
+    check('8. UNKNOWN retry -> STALE discards the proposal/token exactly as a direct STALE would', stale.store.getState().phase === 'STALE');
+    const invalid = await openProposal({ accept: ['THROW', errRes({ status: 'INVALID_TOKEN' })] });
+    await invalid.store.accept(); await invalid.store.accept();
+    check('9. UNKNOWN retry -> INVALID_TOKEN behaves exactly as a direct INVALID_TOKEN would', invalid.store.getState().phase === 'ERROR' && (invalid.store.getState() as { error?: string }).error === 'INVALID_TOKEN');
+    const saveFailed = await openProposal({ accept: ['THROW', errRes({ status: 'SAVE_FAILED' })] });
+    await saveFailed.store.accept(); await saveFailed.store.accept();
+    const sfState = saveFailed.store.getState();
+    check('10. UNKNOWN retry -> SAVE_FAILED is its own explicit notice, never conflated with UNCONFIRMED', sfState.phase === 'PROPOSAL' && (sfState as { notice?: string }).notice === 'SAVE_FAILED');
+  }
+  {
+    // 17: a malformed "success" body is UNKNOWN, not success -- and a refresh cannot upgrade it. Only a SUBSEQUENT
+    // authoritative valid F3 response (the retry) may resolve it.
+    const h = await openProposal({ accept: [okRes({ status: 'ACCEPTED', moves: [] }), okRes(acceptedBody())] });
+    await h.store.accept();
+    check('17. a malformed ACCEPTED body (no usable moves) is UNKNOWN, never treated as success', h.projected.length === 0 && !(h.store.getState() as { updated?: boolean }).updated);
+    await h.store.accept();
+    check('17. only the retry\'s valid, authoritative response resolves it', h.projected.length === 1 && (h.store.getState() as { updated?: boolean }).updated === true);
+  }
+  {
+    // While the refresh after a transport error is pending, the UI is ACCEPTING(reconciling): still blocked, still
+    // honest -- and once the refresh settles the outcome is UNCONFIRMED, never inferred success.
     let releaseRefresh: () => void = () => {};
     const gate = new Promise<void>((resolve) => { releaseRefresh = resolve; });
-    const rec = makeHarness({ recompose: [okRes(changes3())], accept: ['THROW'] });
-    void rec;
     const store = createRecompositionStore({
       fetchImpl: (async (url: string) => { if (url.endsWith('/accept')) throw new TypeError('network'); return { ok: true, json: async () => changes3() } as unknown as Response; }) as unknown as typeof fetch,
       applyConfirmedMoves: () => {},
       reconcile: () => gate,
-      observeMovedSources: async () => true,
     });
     await store.request();
     const pending = store.accept();
@@ -368,7 +400,15 @@ async function main() {
     check('27. after a transport error the UI enters ACCEPTING(reconciling) and stays blocked until the refresh settles', mid.phase === 'ACCEPTING' && mid.reconciling && store.isAccepting());
     releaseRefresh();
     await pending;
-    check('27. ...then converges (commit observed) with no failure claim on the way', store.getState().phase === 'IDLE');
+    const settled = store.getState();
+    check('11/27. ...then settles UNCONFIRMED (the refresh reconciles VISIBLE state; it is never proof of THIS commit)', settled.phase === 'PROPOSAL' && (settled as { notice?: string }).notice === 'UNCONFIRMED');
+  }
+  {
+    // 30 (optional hardening): accept() itself refuses to start while a conflicting plan mutation is in flight, using
+    // the same synchronous state Home already tracks -- a second guard alongside the UI's own disabled Accept button.
+    const h = await openProposal({ mutationInFlight: () => true });
+    await h.store.accept();
+    check('30. accept() itself refuses to start an accept request while a plan mutation is in flight', h.calls.filter((c) => c.url.endsWith('/accept')).length === 0 && h.store.getState().phase === 'PROPOSAL');
   }
 
   // ---- 28/55 late accept ----
@@ -433,12 +473,6 @@ async function main() {
     check('19. projection does not mutate the maps it was given', (() => { const f = new Map<string, ExecutionOutcome>([['X', 'COMPLETED']]); const sM = new Map<string, PlannedActivity>(); withMovedSources(f, committed); withConfirmedMoves(sM, committed); return f.size === 1 && sM.size === 0; })());
   }
 
-  // ============================ observation ============================
-  {
-    const body = { agenda: { items: [{ id: 'plan:A', status: 'MOVED' }, { id: 'plan:B', status: 'MOVED' }, { id: 'plan:C', status: 'MOVED' }, { id: 'plan:A2', status: 'UPCOMING' }] } };
-    check('54. commit is observed only if EVERY source plan reads back as MOVED', sourcesObservedMoved(body, ['A', 'B', 'C']) && !sourcesObservedMoved(body, ['A', 'B', 'D']) && !sourcesObservedMoved({ agenda: { items: [{ id: 'plan:A', status: 'UPCOMING' }] } }, ['A']) && !sourcesObservedMoved(null, ['A']) && !sourcesObservedMoved({ agenda: {} }, ['A']) && !sourcesObservedMoved(body, []));
-  }
-
   // ============================ visibility heuristic ============================
   {
     const item = (status: string, kind = 'PLAN', planned = true) => ({ kind, planned, metadata: { agendaStatus: status } });
@@ -474,23 +508,27 @@ async function main() {
     ['stale', render(st('STALE'))],
     ['updated', render(st('IDLE', { updated: true }))],
   ];
+  const noChangesWithKeepsMarkup = allMarkups[7][1];
+  const noChangesZeroMarkup = render(st('PROPOSAL', { view: { kind: 'NO_CHANGES', keepCount: 0 }, notice: null }));
   const visibleText = (m: string) => m.replace(/<[^>]+>/g, ' ');
   check('8/48. MOVE rows show the title and old -> new time, with the accessible "from X to Y" equivalent', proposalMarkup.includes('Finish presentation') && proposalMarkup.includes('2:00 PM') && proposalMarkup.includes(', from 10:00 AM to 2:00 PM') && proposalMarkup.includes('10:00 AM → 2:00 PM') && presentMove({ planId: 'A', title: 'Finish presentation', fromIso: at('14:00').toISOString(), toIso: at('15:30').toISOString() }, TZ).accessibleText === 'Finish presentation, from 2:00 PM to 3:30 PM');
   check('8. the arrow is decorative only (aria-hidden) so the change is never conveyed by an arrow alone', /aria-hidden="true"[^>]*>10:00 AM → 2:00 PM/.test(proposalMarkup));
   check('7. the proposal card is labelled as not applied yet', proposalMarkup.includes('Suggested changes — not applied yet'));
   check('9/48. unchanged plans are collapsed to a count, not listed', proposalMarkup.includes('2 things stay as they are') && !proposalMarkup.includes('Lunch') && !proposalMarkup.includes('Walk') && keepSummary(1) === '1 thing stays as it is' && keepSummary(0) === null);
   const unresolvedMarkup = allMarkups[1][1];
-  check('10/48. unresolved items render plainly under "Needs your attention" with the time and a plain reason', unresolvedMarkup.includes('Needs your attention') && unresolvedMarkup.includes('Dentist, at 10:00 AM. This time no longer works and nothing else fits today.') && unresolvedText({ planId: 'U', title: 'Dentist', atIso: at('10:00').toISOString() }, TZ).startsWith('Dentist, at 10:00 AM'));
+  check('17/18. unresolved items render plainly under "Needs your attention" with the time and copy supported by F2 (found infeasible AND Aura\'s own search found nothing else), never "nothing else fits" / "no other time exists" / "impossible"', unresolvedMarkup.includes('Needs your attention') && unresolvedMarkup.includes("Dentist, at 10:00 AM. This time no longer fits, and Aura couldn&#x27;t find another time for it today.") && unresolvedText({ planId: 'U', title: 'Dentist', atIso: at('10:00').toISOString() }, TZ).startsWith('Dentist, at 10:00 AM') && !/nothing else fits|no other time exists|impossible/i.test(visibleText(unresolvedMarkup)));
   check('10/16. a proposal that also has unresolved items still offers no partial acceptance: exactly one Accept, for the whole proposal', (unresolvedMarkup.match(/Accept new arrangement/g) ?? []).length === 1);
   check('48. no internal enum, timing tier, Constructor/Panchang/Vedic terminology or token appears in ANY rendering', allMarkups.every(([, m]) => !FORBIDDEN.test(visibleText(m))) && allMarkups.every(([, m]) => !FORBIDDEN.test(m.replace(/ (?:class|style|id|aria-[a-z]+|role|type|data-[a-z-]+|tabindex)="[^"]*"/g, '').replace(/ (?:disabled|data-[a-z-]+|aria-busy)(?==|>| )/g, ''))));
   check('11. no Why/causal copy is invented anywhere', allMarkups.every(([, m]) => !/moved to fit|to fit your|because|why\b|better timing|remaining time/i.test(visibleText(m))));
-  check('12/47. NO_CHANGES: compact status, no Accept, a Done control', allMarkups[7][1].includes('Your day already works. Nothing to move.') && !allMarkups[7][1].includes('Accept new arrangement') && allMarkups[7][1].includes('>Done<'));
+  check('20/22. NO_CHANGES with real KEEP decisions: "Nothing needs to move." (not the overstated "Your day already works."), no Accept, a Done control', noChangesWithKeepsMarkup.includes('Nothing needs to move.') && !noChangesWithKeepsMarkup.includes('Your day already works') && !noChangesWithKeepsMarkup.includes('Accept new arrangement') && noChangesWithKeepsMarkup.includes('>Done<') && noChangesText(2) === 'Nothing needs to move.');
+  check('21/22. NO_CHANGES with zero decisions/keeps: neutral copy that never implies the whole day was evaluated, no Accept', noChangesZeroMarkup.includes("There&#x27;s nothing Aura can rearrange right now.") && !noChangesZeroMarkup.includes('Nothing needs to move.') && !noChangesZeroMarkup.includes('Your day already works') && !noChangesZeroMarkup.includes('Accept new arrangement') && noChangesText(0) === "There's nothing Aura can rearrange right now.");
+  check('19/48. the NO_CHANGES variants carry no internal vocabulary and no overclaim either', [noChangesWithKeepsMarkup, noChangesZeroMarkup].every((m) => !FORBIDDEN.test(visibleText(m)) && !/works|optimal|evaluated your (whole|entire) day/i.test(visibleText(m))));
   check('13/47. NEEDS_ATTENTION: decision summary + unresolved rows, no Accept', allMarkups[8][1].includes('A few things need your decision first.') && allMarkups[8][1].includes('Dentist') && !allMarkups[8][1].includes('Accept new arrangement'));
   check('14/47. TIMING_FAILED: retryable failure copy and "Try again", never implying the day is optimal', allMarkups[10][1].includes("Couldn&#x27;t check your day right now. Nothing was changed.") && allMarkups[10][1].includes('Try again') && !allMarkups[10][1].includes('Accept new arrangement') && !/works|optimal|fits/i.test(visibleText(allMarkups[10][1])));
   check('15/47. NO_USABLE_CAPACITY: concise practical copy, no Accept', allMarkups[9][1].includes('There isn&#x27;t any usable time left today to rearrange.') && !allMarkups[9][1].includes('Accept new arrangement'));
   check('16. CHANGES_PROPOSED: primary "Accept new arrangement" and secondary "Not now"; no modal/dialog markup', proposalMarkup.includes('Accept new arrangement') && proposalMarkup.includes('Not now') && !/role="(?:alert)?dialog"|<dialog|aria-modal/.test(proposalMarkup));
   check('24. STALE copy + Check again; INVALID copy + Check again; neither exposes token vocabulary', allMarkups[13][1].includes('Your day changed while you were reviewing.') && allMarkups[13][1].includes('Check again') && allMarkups[12][1].includes('This suggestion is no longer valid.') && allMarkups[12][1].includes('Check again') && !/token/i.test(allMarkups[12][1]));
-  check('26. SAVE_FAILED shows a concise failure with the proposal still acceptable; UNCONFIRMED never claims nothing changed', allMarkups[2][1].includes('Nothing was changed. Try again.') && allMarkups[2][1].includes('Accept new arrangement') && allMarkups[3][1].includes('couldn&#x27;t confirm whether your day was updated') && !/Nothing was changed/.test(allMarkups[3][1]) && !/Nothing was changed/.test(allMarkups[4][1] + allMarkups[5][1]));
+  check('26/35. SAVE_FAILED shows its own concise failure with the proposal still acceptable; UNCONFIRMED is a distinct, neutral notice that claims neither success nor failure', allMarkups[2][1].includes('Nothing was changed. Try again.') && allMarkups[2][1].includes('Accept new arrangement') && allMarkups[3][1].includes("We couldn&#x27;t confirm whether the new arrangement was saved.") && allMarkups[3][1].includes('Accept new arrangement') && !/Nothing was changed/.test(allMarkups[3][1]) && !/Your day is updated/.test(allMarkups[3][1]) && !/Nothing was changed/.test(allMarkups[4][1] + allMarkups[5][1]));
   check('22. success status: "Your day is updated." as a focusable status', allMarkups[14][1].includes('Your day is updated.') && /role="status"[^>]*data-recomposition-status[^>]*tabindex="-1"|data-recomposition-status[^>]*role="status"/.test(allMarkups[14][1]));
   check('18. ACCEPTING: aria-busy, Accept and Not now disabled, saving status; reconciling says "Checking your day…"', (() => { const m = allMarkups[4][1]; return m.includes('aria-busy="true"') && /<button[^>]*disabled[^>]*>Accept new arrangement/.test(m) && /<button[^>]*disabled[^>]*>Not now/.test(m) && m.includes('Saving your new arrangement…') && allMarkups[5][1].includes('Checking your day…'); })());
   check('18. Accept also waits while a conflicting plan mutation runs (acceptBlocked)', /<button[^>]*disabled[^>]*>Accept new arrangement/.test(render(st('PROPOSAL', { view: proposal, notice: null }), true)));
