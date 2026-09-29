@@ -122,6 +122,7 @@ import { findNextTransition, getNakshatra, getTithi, getYoga, getKarana } from '
 import { isCombust, findNextCombustionTransition } from '../../vedic/src/planetaryCombustion';
 import { spanOverlapsProhibitedPeriod } from './ceremonialPeriods';
 import type { MuhurtaClassification, MuhurtaReason } from '../../muhurta/src/activityOntology';
+import type { ActionPhase } from '../../muhurta/src/actionPhase';
 
 /**
  * Finder eligibility (brief section 10): derived from ActivityDefinition +
@@ -235,6 +236,31 @@ const MIN_INCLUSION_SCORE = 5.5;
  * moment again". */
 const ALTERNATE_WINDOW_SEPARATION_MINUTES = 90;
 const MAX_ALTERNATE_WINDOWS = 2;
+
+/**
+ * Lunar Intelligence V1 L5 -- MUHURTHAM FINDER WORKFLOW -> START.
+ *
+ * Per the Lunar Intelligence V1 L5.1 audit, Muhurtham Finder's own search
+ * entry points (findMuhurthams/findPersonalMuhurthams/findSharedMuhurthams
+ * below) are a SAFE_START_WORKFLOW: isSupportedMuhurthamActivity() restricts
+ * every search to a fixed, curated set of one-off commencement-occasion
+ * activities (requiresFreshStart: true on every one), and this screen has no
+ * continuation/finish/prepare/review mode at all -- the workflow ITSELF, not
+ * any inspected activity/intent, is what establishes commencement here. This
+ * constant is therefore supplied UNCONDITIONALLY by those three functions'
+ * own calls below, before any classification/intent is even considered --
+ * never derived from `classification.intent` (see packages/muhurta/src/
+ * actionPhase.ts's own "not inferred, not defaulted" contract, and the L5.1
+ * audit's explicit prohibition on an intent->phase mapping).
+ *
+ * evaluateMuhurthamCandidateAt() below (Ask Aura's own canonical TIMING_CHECK
+ * entry point, which also calls the same evaluateMuhurthamCandidate()/
+ * participantCombinedScore() helpers) deliberately never references this
+ * constant -- Ask Aura's own L5.1 audit finding (AMBIGUOUS: no structural
+ * verb/phase parsing exists) is preserved exactly, so Ask Aura stays
+ * phase-neutral.
+ */
+const MUHURTHAM_FINDER_WORKFLOW_ACTION_PHASE: ActionPhase = 'START';
 
 /**
  * Section 7 start-sensitivity model -- see this file's module doc comment
@@ -529,7 +555,15 @@ function evaluateMuhurthamCandidate(
   durationMinutes: number,
   context: DailyAssistantContext,
   panchangWindows: PanchangWindowSpan[],
-  classification: MuhurtaClassification | undefined
+  classification: MuhurtaClassification | undefined,
+  /** Lunar Intelligence V1 L5 -- optional, forwarded verbatim to both
+   * evaluateTimingCandidate() calls below, never inferred or defaulted here.
+   * Omitted by evaluateMuhurthamCandidateAt() (Ask Aura's own entry point,
+   * which also calls this function) so Ask Aura stays phase-neutral; supplied
+   * as 'START' only by the search-path callers below findMuhurthams()/
+   * findPersonalMuhurthams()/findSharedMuhurthams() -- see each call site's
+   * own "MUHURTHAM FINDER WORKFLOW -> START" comment. */
+  actionPhase?: ActionPhase
 ): TimingCandidate | null {
   // Inauspicious Period Precedence Fix V1: unified with Timing Search's own
   // commencement-sensitivity signal (isTimingSensitiveActivity, muhurta
@@ -542,7 +576,7 @@ function evaluateMuhurthamCandidate(
   const isCommencementSensitive = isTimingSensitiveActivity(classification);
   const isStartSensitive = classification?.timingSensitivity.start === 'HIGH';
 
-  const candidate = evaluateTimingCandidate({ profile, start, durationMinutes, context });
+  const candidate = evaluateTimingCandidate({ profile, start, durationMinutes, context, actionPhase });
   if (candidate.conflicts?.some((c) => c.type === 'FRICTION_WINDOW_BLOCKED')) return null;
   if (isCommencementSensitive && spanOverlapsInauspiciousCommencementWindow(candidate.start, candidate.end, panchangWindows)) return null;
   // Ceremonial Muhurtham Eligibility + Interval Safety V1: checked against
@@ -561,7 +595,7 @@ function evaluateMuhurthamCandidate(
   if (!isStartSensitive) return candidate;
 
   const probeDurationMinutes = Math.min(durationMinutes, START_SENSITIVITY_PROBE_MINUTES);
-  const commencementProbe = evaluateTimingCandidate({ profile, start, durationMinutes: probeDurationMinutes, context });
+  const commencementProbe = evaluateTimingCandidate({ profile, start, durationMinutes: probeDurationMinutes, context, actionPhase });
   if (commencementProbe.conflicts?.some((c) => c.type === 'FRICTION_WINDOW_BLOCKED')) return null;
   if (isCommencementSensitive && spanOverlapsInauspiciousCommencementWindow(commencementProbe.start, commencementProbe.end, panchangWindows)) return null;
 
@@ -911,7 +945,10 @@ function findBestWindowsForDate(
   durationMinutes: number,
   preference: TimingTimePreference,
   panchangWindows: PanchangWindowSpan[],
-  classification: MuhurtaClassification | undefined
+  classification: MuhurtaClassification | undefined,
+  /** Lunar Intelligence V1 L5 -- optional, forwarded verbatim to
+   * evaluateMuhurthamCandidate() below; see that function's own doc comment. */
+  actionPhase?: ActionPhase
 ): { best: SampledCandidate; alternates: SampledCandidate[] } | null {
   const dayContext: DailyAssistantContext = { ...context, now: localDateTimeToUTC(dateStr, '12:00', context.timezone) };
   const solarSlotCandidates = buildSlotCandidates(computeAssistantWindows(dayContext));
@@ -970,7 +1007,7 @@ function findBestWindowsForDate(
     if (slot.endMinute - slot.startMinute < durationMinutes) continue;
     if (!matchesTimePreference(slot.startMinute, preference === 'ANY' ? 'ANYTIME' : preference)) continue;
     const start = localDateTimeToUTC(dateStr, formatMinutes(slot.startMinute), context.timezone);
-    const effectiveCandidate = evaluateMuhurthamCandidate(profile, start, durationMinutes, context, panchangWindows, classification);
+    const effectiveCandidate = evaluateMuhurthamCandidate(profile, start, durationMinutes, context, panchangWindows, classification, actionPhase);
     if (!effectiveCandidate) continue;
     if (effectiveCandidate.score < MIN_INCLUSION_SCORE) continue;
     candidates.push({ ...effectiveCandidate, startMinute: slot.startMinute });
@@ -1052,7 +1089,7 @@ export function findMuhurthams(request: MuhurthamSearchRequest): MuhurthamSearch
       timezone: request.context.timezone,
     });
 
-    const evaluated = findBestWindowsForDate(profile, dateStr, generalContext, durationMinutes, preference, panchangDay.windows, profile.muhurtaClassification);
+    const evaluated = findBestWindowsForDate(profile, dateStr, generalContext, durationMinutes, preference, panchangDay.windows, profile.muhurtaClassification, MUHURTHAM_FINDER_WORKFLOW_ACTION_PHASE);
     if (!evaluated) continue;
 
     const supportReasons = evaluated.best.reasons.filter((r) => r.polarity === 'SUPPORT');
@@ -1284,11 +1321,11 @@ export function findPersonalMuhurthams(request: MuhurthamSearchRequest): Muhurth
     // Scan and rank by combinedScore -- the personalized profile is used
     // throughout, so a date's best window is chosen WITH personal factors
     // in mind, not merely re-scored after the fact.
-    const evaluated = findBestWindowsForDate(personalProfile, dateStr, request.context, durationMinutes, preference, panchangDay.windows, personalProfile.muhurtaClassification);
+    const evaluated = findBestWindowsForDate(personalProfile, dateStr, request.context, durationMinutes, preference, panchangDay.windows, personalProfile.muhurtaClassification, MUHURTHAM_FINDER_WORKFLOW_ACTION_PHASE);
     if (!evaluated) continue;
 
     const bestStart = new Date(evaluated.best.start);
-    const generalCandidate = evaluateMuhurthamCandidate(generalOnlyProfile, bestStart, durationMinutes, generalContext, panchangDay.windows, personalProfile.muhurtaClassification) ?? evaluated.best;
+    const generalCandidate = evaluateMuhurthamCandidate(generalOnlyProfile, bestStart, durationMinutes, generalContext, panchangDay.windows, personalProfile.muhurtaClassification, MUHURTHAM_FINDER_WORKFLOW_ACTION_PHASE) ?? evaluated.best;
     const personalFit = evaluatePersonalMuhurtaFit(activity, bestStart, personalContext);
 
     const supportReasons = evaluated.best.reasons.filter((r) => r.polarity === 'SUPPORT');
@@ -1485,10 +1522,13 @@ function participantCombinedScore(
   context: DailyAssistantContext,
   personalContext: PersonalMuhurtaContext,
   panchangWindows: PanchangWindowSpan[],
-  generalFallbackScore: number
+  generalFallbackScore: number,
+  /** Lunar Intelligence V1 L5 -- optional, forwarded verbatim to
+   * evaluateMuhurthamCandidate() below; see that function's own doc comment. */
+  actionPhase?: ActionPhase
 ): number {
   const participantProfile: TaskProfile = { ...generalProfile, personalContext };
-  const evaluated = evaluateMuhurthamCandidate(participantProfile, bestStart, durationMinutes, context, panchangWindows, generalProfile.muhurtaClassification);
+  const evaluated = evaluateMuhurthamCandidate(participantProfile, bestStart, durationMinutes, context, panchangWindows, generalProfile.muhurtaClassification, actionPhase);
   return evaluated?.score ?? generalFallbackScore;
 }
 
@@ -1597,14 +1637,14 @@ export function findSharedMuhurthams(request: MuhurthamSearchRequest): Muhurtham
     // Same GENERAL candidate generation findMuhurthams() uses -- SHARED
     // never re-derives or re-picks window candidates using either person's
     // personal context (brief section 1 / section 7).
-    const evaluated = findBestWindowsForDate(generalProfile, dateStr, generalContext, durationMinutes, preference, panchangDay.windows, generalProfile.muhurtaClassification);
+    const evaluated = findBestWindowsForDate(generalProfile, dateStr, generalContext, durationMinutes, preference, panchangDay.windows, generalProfile.muhurtaClassification, MUHURTHAM_FINDER_WORKFLOW_ACTION_PHASE);
     if (!evaluated) continue;
 
     const bestStart = new Date(evaluated.best.start);
     const generalScore = evaluated.best.score;
 
-    const userCombined = participantCombinedScore(generalProfile, bestStart, durationMinutes, generalContext, userContext, panchangDay.windows, generalScore);
-    const personCombined = participantCombinedScore(generalProfile, bestStart, durationMinutes, generalContext, partner.context, panchangDay.windows, generalScore);
+    const userCombined = participantCombinedScore(generalProfile, bestStart, durationMinutes, generalContext, userContext, panchangDay.windows, generalScore, MUHURTHAM_FINDER_WORKFLOW_ACTION_PHASE);
+    const personCombined = participantCombinedScore(generalProfile, bestStart, durationMinutes, generalContext, partner.context, panchangDay.windows, generalScore, MUHURTHAM_FINDER_WORKFLOW_ACTION_PHASE);
 
     const userTara = taraBalaFactor(userContext, bestStart);
     const personTara = taraBalaFactor(partner.context, bestStart);

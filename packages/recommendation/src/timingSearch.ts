@@ -20,6 +20,7 @@
 
 import type { SolarWindowType } from '../../panchang/src/windows';
 import type { MuhurtaReason } from '../../muhurta/src/activityOntology';
+import type { ActionPhase } from '../../muhurta/src/actionPhase';
 import {
   DailyAssistantContext,
   PlanningHorizon,
@@ -310,8 +311,18 @@ export function evaluateTimingCandidate(params: {
   start: Date;
   durationMinutes: number;
   context: DailyAssistantContext;
+  /** Lunar Intelligence V1 L5 -- an explicit, optional occurrence/evaluation
+   * input (packages/muhurta/src/actionPhase.ts), never inferred here. Omitted
+   * by every caller of evaluateTimingCandidate() except Muhurtham Finder's own
+   * search functions (packages/recommendation/src/muhurthamFinder.ts), which
+   * are the one workflow the Lunar Intelligence V1 L5.1 audit established as
+   * a SAFE_START_WORKFLOW -- see that module's own comments at each call site
+   * that supplies 'START'. This function itself makes no decision about the
+   * value; it only forwards whatever it receives (or nothing) to
+   * evaluateActivityFit() below, exactly like every other param here. */
+  actionPhase?: ActionPhase;
 }): TimingCandidate {
-  const { profile, start, durationMinutes, context } = params;
+  const { profile, start, durationMinutes, context, actionPhase } = params;
   const dayContext: DailyAssistantContext = { ...context, now: start };
   const windows = computeAssistantWindows(dayContext);
   const candidates = buildSlotCandidates(windows);
@@ -343,7 +354,7 @@ export function evaluateTimingCandidate(params: {
   const primaryCandidate: SlotCandidate = resolveOverlappingCandidate(candidates, startMinute) ?? candidates[0];
   const muhurta = evaluateCandidateMuhurta(primaryCandidate, profile, start);
   const auraFit = profile.activity
-    ? evaluateActivityFit({ activity: profile.activity, date: start, windowType: primaryCandidate.type, personalContext: profile.personalContext, classification: profile.muhurtaClassification })
+    ? evaluateActivityFit({ activity: profile.activity, date: start, windowType: primaryCandidate.type, personalContext: profile.personalContext, classification: profile.muhurtaClassification, actionPhase })
     : undefined;
 
   const end = new Date(start.getTime() + durationMinutes * 60000);

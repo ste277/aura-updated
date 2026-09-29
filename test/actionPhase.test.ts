@@ -154,9 +154,17 @@ async function main() {
   // exact-Tithi resolver takes the same explicit ActionPhase parameter, same no-inference contract), plus its own
   // unit test.
   const l4ConsumerFiles = ['packages/muhurta/src/lunarExactTithiRules.ts', 'test/lunarExactTithiRules.test.ts'];
-  const ALLOWED = new Set([...REQUIRED, l1DomainTestFile, ...l3ConsumerFiles, ...l4ConsumerFiles]);
+  // Lunar Intelligence V1 L5 wired the one safe production caller (per the L5.1
+  // ActionPhase Production Wiring Audit): Muhurtham Finder's own search entry
+  // points now supply ActionPhase.START unconditionally at the workflow level
+  // (never derived from MuhurtaIntent) -- packages/recommendation/src/
+  // timingSearch.ts gained the optional pass-through parameter on
+  // evaluateTimingCandidate(), and packages/recommendation/src/muhurthamFinder.ts
+  // is the one caller that supplies a concrete value, plus its own test coverage.
+  const l5ConsumerFiles = ['packages/recommendation/src/timingSearch.ts', 'packages/recommendation/src/muhurthamFinder.ts', 'test/muhurthamFinder.test.ts'];
+  const ALLOWED = new Set([...REQUIRED, l1DomainTestFile, ...l3ConsumerFiles, ...l4ConsumerFiles, ...l5ConsumerFiles]);
   const unexpected = grepOut.filter((f: string) => !ALLOWED.has(f));
-  check('F. repo-wide, only the four L2 files (plus this test, L1\'s incidental regex-literal match, and Lunar Intelligence L3/L4\'s deliberate consumer files) reference ActionPhase/actionPhase: ' + (unexpected.length ? 'unexpected: ' + unexpected.join(', ') : 'none unexpected'), unexpected.length === 0);
+  check('F. repo-wide, only the four L2 files (plus this test, L1\'s incidental regex-literal match, and Lunar Intelligence L3/L4/L5\'s deliberate consumer files) reference ActionPhase/actionPhase: ' + (unexpected.length ? 'unexpected: ' + unexpected.join(', ') : 'none unexpected'), unexpected.length === 0);
   check('F. all four expected production/test files DO reference it (the wiring actually exists)', REQUIRED.every((f) => grepOut.includes(f)));
 
   // ============================ G. no inference exists ============================
