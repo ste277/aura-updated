@@ -208,6 +208,13 @@ export type MuhurtaReasonCode =
   | 'ACTIVITY_RULE_BLOCK'
   | 'PERSONAL_TARA_SUPPORT'
   | 'PERSONAL_TARA_CAUTION'
+  /** Lunar Intelligence V1 L3 -- a traditional Tithi-FAMILY-level caution (packages/muhurta/src/lunarFamilyRules.ts),
+   * distinct from TITHI_UNFAVORABLE (a specific activity/intent's own exact-Tithi pattern match). Deliberately no
+   * matching 'TITHI_FAMILY_SUPPORT' yet -- L3's first slice implements only the caution side (see
+   * lunarFamilyRules.ts's own doc comment for why the support/removal side is not yet reliably identifiable from
+   * the current activity ontology). Never emitted alongside TITHI_SUPPORTIVE/TITHI_UNFAVORABLE for the same
+   * evaluation -- see evaluateMuhurtaWithRulePack's precedence handling (muhurtaRulePacks.ts). */
+  | 'TITHI_FAMILY_CAUTION'
   | 'OTHER';
 
 export interface MuhurtaReason {

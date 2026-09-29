@@ -146,9 +146,13 @@ async function main() {
   // literal path string so this explanatory comment/allowlist entry does not itself trip THAT test's own separate
   // substring guard (which greps the whole tree for its own module name).
   const l1DomainTestFile = ['test/', 'lunar', 'Tithi', 'Context', '.test.ts'].join('');
-  const ALLOWED = new Set([...REQUIRED, l1DomainTestFile]);
+  // Lunar Intelligence V1 L3 is the deliberate, later consumer of ActionPhase (packages/muhurta/src/lunarFamilyRules.ts,
+  // and its own test/integration coverage) -- allowed explicitly, as an intentional consequence of L3's own wiring,
+  // not scope creep in this L2 test.
+  const l3ConsumerFiles = ['packages/muhurta/src/lunarFamilyRules.ts', 'test/lunarFamilyRules.test.ts', 'test/muhurtaRulePacks.test.ts'];
+  const ALLOWED = new Set([...REQUIRED, l1DomainTestFile, ...l3ConsumerFiles]);
   const unexpected = grepOut.filter((f: string) => !ALLOWED.has(f));
-  check('F. repo-wide, only the four expected files (plus this test, plus L1\'s own incidental regex-literal match) reference ActionPhase/actionPhase: ' + (unexpected.length ? 'unexpected: ' + unexpected.join(', ') : 'none unexpected'), unexpected.length === 0);
+  check('F. repo-wide, only the four L2 files (plus this test, L1\'s incidental regex-literal match, and Lunar Intelligence L3\'s deliberate consumer files) reference ActionPhase/actionPhase: ' + (unexpected.length ? 'unexpected: ' + unexpected.join(', ') : 'none unexpected'), unexpected.length === 0);
   check('F. all four expected production/test files DO reference it (the wiring actually exists)', REQUIRED.every((f) => grepOut.includes(f)));
 
   // ============================ G. no inference exists ============================
@@ -157,12 +161,24 @@ async function main() {
   check('G. actionPhase.ts contains no function/logic -- only the type declaration', !/\bfunction\b|=>/.test(lib));
   const rulePackSrc = strip(read('../packages/muhurta/src/muhurtaRulePacks.ts'));
   const rulePackFn = rulePackSrc.slice(rulePackSrc.indexOf('export function evaluateMuhurtaWithRulePack'), rulePackSrc.indexOf('export function evaluateMuhurtaWithRulePack') + 1500);
-  check('G. evaluateMuhurtaWithRulePack never reads params.actionPhase (accepted, never touched in the function body)', !/params\.actionPhase|actionPhase\./.test(rulePackFn.replace(/actionPhase\?: ActionPhase;/, '')));
+  // Lunar Intelligence V1 L3 deliberately made evaluateMuhurtaWithRulePack the one place that DOES read
+  // params.actionPhase (that is the entire point of L3 -- see packages/muhurta/src/lunarFamilyRules.ts and the L3
+  // integration tests in test/muhurtaRulePacks.test.ts). L2's own claim was narrower and stays true unmodified:
+  // auraFitEngine.ts itself never branches on it (checked separately below) -- only passes it through.
+  // Lunar Intelligence V1 L3.2 refactored evaluateMuhurtaWithRulePack to call the SHARED overlay
+  // (applyLunarFamilyOverlay, packages/muhurta/src/lunarFamilyRules.ts) rather than resolveLunarFamilyReason
+  // directly -- still forwarding params.actionPhase opaquely, never branching on its VALUE inline.
+  check('G. evaluateMuhurtaWithRulePack DOES read params.actionPhase now (Lunar Intelligence L3\'s designated point of consumption) -- but ONLY by forwarding it into the shared applyLunarFamilyOverlay, never by branching on its value directly inline', /applyLunarFamilyOverlay\([^)]*params\.actionPhase/.test(rulePackFn) && !/params\.actionPhase\s*(===|!==|\?\?|\?[^:]|&&|\|\|)/.test(rulePackFn));
   const fitSrc = strip(read('../packages/recommendation/src/auraFitEngine.ts'));
+  // Lunar Intelligence V1 L3.2 added a second, real (opaque) use of actionPhase in auraFitEngine.ts: forwarding it
+  // into applyLunarFamilyOverlay for the legacy-path overlay. The invariant that actually matters -- no inference,
+  // no branching on its VALUE -- is unchanged and re-checked directly below; the "exactly N occurrences" style of
+  // check from L2 no longer applies now that L3.2 legitimately reads it a second time.
   check(
-    'G. auraFitEngine.ts never branches on actionPhase -- every occurrence is either the param declaration or the bare pass-through `actionPhase: params.actionPhase` (no if/ternary/comparison/default)',
+    'G. auraFitEngine.ts never branches on the VALUE of actionPhase (no ===/!==/??/?:/&&/|| /if/switch against it anywhere) -- every occurrence is the type import, the param declaration, or an opaque pass-through into evaluateMuhurtaWithRulePack/applyLunarFamilyOverlay',
     !/actionPhase\s*(===|!==|\?\?|\?[^:]|&&|\|\|)|(if|switch)\s*\([^)]*actionPhase/.test(fitSrc) &&
-      (fitSrc.match(/actionPhase/g) ?? []).length === 4 // the './actionPhase' import path + the param declaration + `actionPhase:` key + `params.actionPhase` value, exactly the pass-through shape
+      /actionPhase: params\.actionPhase/.test(fitSrc) &&
+      /applyLunarFamilyOverlay\([^)]*params\.actionPhase/.test(fitSrc)
   );
   check('G. no mapping exists anywhere from TimingSensitivity/PlannedActivity.status/DailyAgenda status/title to ActionPhase', !/timingSensitivity[\s\S]{0,80}ActionPhase|status[\s\S]{0,80}ActionPhase|title[\s\S]{0,80}ActionPhase|ActionPhase[\s\S]{0,80}timingSensitivity/.test(lib + rulePackSrc + fitSrc));
 

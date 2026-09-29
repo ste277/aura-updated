@@ -161,11 +161,17 @@ async function main() {
   check('H. lunarTithiContext.ts imports nothing from recommendation/Aura Fit/Day Constructor/activityOntology/muhurtaRulePacks -- it stands alone', imports.every((i) => !FORBIDDEN_IMPORTS.test(i)));
   check('H. the only import is the canonical Tithi source (packages/vedic/panchangElements)', imports.length === 1 && /vedic\/src\/panchangElements$/.test(imports[0]));
   check('H. no scoring/reason/activity vocabulary in the module\'s actual CODE (comments explaining what L1 deliberately avoids are fine; favorable/unfavorable/auspicious/score/modifier/MuhurtaReason/activity family/intent/action phase must never appear outside prose)', !/favorable|unfavorable|auspicious|inauspicious|\bscore\b|\bmodifier\b|MuhurtaReason|activityFamily|MuhurtaIntent|actionPhase/i.test(code));
-  check('H. no production consumer imports lunarTithiContext.ts yet (grep of the whole tree, this test file excluded)', (() => {
+  // Lunar Intelligence V1 L3 deliberately wired muhurtaRulePacks.ts as the one designated production consumer
+  // (packages/muhurta/src/lunarFamilyRules.ts and its own test carry the word too, as legitimate downstream
+  // consequences of that same wiring) -- this guard now allows exactly that intentional set, no more.
+  check('H. the only production consumers of lunarTithiContext.ts are muhurtaRulePacks.ts and auraFitEngine.ts (Lunar Intelligence L3/L3.2\'s two designated integration points) -- no other file reaches it', (() => {
     const { execSync } = require('child_process');
     const out = execSync(`grep -rl "lunarTithiContext" apps packages test --include="*.ts" --include="*.tsx" 2>/dev/null || true`, { cwd: path.join(__dirname, '..') }).toString();
     const files = out.split('\n').filter(Boolean).map((f: string) => f.replace(/\\/g, '/'));
-    return files.every((f: string) => f === 'packages/muhurta/src/lunarTithiContext.ts' || f === 'test/lunarTithiContext.test.ts');
+    // Lunar Intelligence V1 L3.2 added auraFitEngine.ts as a second, deliberate consumer (the legacy-path overlay
+    // integration point -- see auraFitEngine.ts's own comment), alongside muhurtaRulePacks.ts.
+    const ALLOWED = new Set(['packages/muhurta/src/lunarTithiContext.ts', 'test/lunarTithiContext.test.ts', 'packages/muhurta/src/muhurtaRulePacks.ts', 'packages/muhurta/src/lunarFamilyRules.ts', 'test/lunarFamilyRules.test.ts', 'test/muhurtaRulePacks.test.ts', 'packages/recommendation/src/auraFitEngine.ts']);
+    return files.every((f: string) => ALLOWED.has(f));
   })());
 
   if (!allPassed) { console.error('SOME LUNAR TITHI CONTEXT CHECKS FAILED'); process.exit(1); }

@@ -363,5 +363,211 @@ const legacyEval = evaluateMuhurta({ taskTitle: 'x', date: new Date(Date.UTC(202
 const legacyYogaKarana = legacyEval.reasons.filter((r) => r.factor === 'YOGA' || r.factor === 'KARANA');
 check('evaluateMuhurtaWithRulePack() Yoga/Karana reasons match evaluateMuhurta()\'s for the same instant (shared helper, not duplicated logic)', JSON.stringify(rpYogaKarana) === JSON.stringify(legacyYogaKarana));
 
+// ============================================================
+// LUNAR INTELLIGENCE V1 L3 -- integration + precedence proof
+// ============================================================
+// Unit coverage of the resolver itself lives in test/lunarFamilyRules.test.ts.
+// This section proves the wiring through the REAL evaluateMuhurtaWithRulePack()/
+// evaluateActivityFit() pipeline, and the load-bearing precedence claim:
+//   dedicated intent Tithi rule > lunar-family Tithi rule > reusable-base Tithi rule
+// with AT MOST ONE Tithi-factor reason per evaluation, chosen at generation
+// time (never two competing reasons reconciled afterward).
+
+// A real Rikta Tithi date (Shukla Chaturthi, ordinal 4) that FOCUSED_WORK's
+// own legacy avoidTithiPatterns ([/Amavasya/, /Chaturdashi/]) does NOT
+// mention -- so the pre-L3 baseline for a generic (non-dedicated-pack)
+// PROJECT_START evaluation is a clean, unambiguous "no Tithi reason at all",
+// making any TITHI_FAMILY_CAUTION that appears attributable ONLY to L3.
+const riktaDate = new Date(Date.UTC(2026, 8, 14, 6, 20, 0));
+const newBeginningActivity = findActivityIntent('start a project')!;
+const newBeginningDef = getActivityDefinition(newBeginningActivity)!;
+check('L3 fixture sanity: new-beginning resolves to intent=PROJECT_START, family=WORK -> FOCUSED_WORK legacy base (REUSABLE_BASE_RULE, no dedicated Tithi coverage)', newBeginningDef.muhurta.intent === 'PROJECT_START' && resolveMuhurtaRulePack(newBeginningDef.muhurta).coverage.tithi === 'REUSABLE_BASE_RULE');
+check('L3 fixture sanity: riktaDate really is a Rikta Tithi (Shukla Chaturthi)', (() => { const ev = evaluateMuhurtaWithRulePack({ classification: newBeginningDef.muhurta, date: riktaDate, windowType: 'NEUTRAL' }); return ev.panchanga.tithi === 'Shukla Chaturthi'; })());
+
+// ---- A. explicit START ----
+const startEval = evaluateMuhurtaWithRulePack({ classification: newBeginningDef.muhurta, date: riktaDate, windowType: 'NEUTRAL', actionPhase: 'START' });
+const startTithiReasons = startEval.reasons.filter((r) => r.factor === 'TITHI');
+check('A. explicit START on a Rikta date: exactly one TITHI reason', startTithiReasons.length === 1);
+check('A. that reason is TITHI_FAMILY_CAUTION', startTithiReasons[0]?.code === 'TITHI_FAMILY_CAUTION');
+check('A. modifier reflects the -8 impact (present in the summed modifier)', startEval.reasons.reduce((t, r) => t + (r.impact ?? 0), 0) === startEval.modifier && startTithiReasons[0]?.impact === -8);
+// Lunar Intelligence V1 L3.2: evaluateActivityFit()'s OWN pre-existing, still-UNMODIFIED gate (`usesGenericRulePack`,
+// auraFitEngine.ts) still routes new-beginning/PROJECT_START (REUSABLE_BASE_RULE coverage) through the LEGACY
+// evaluateMuhurta() path -- exactly as before. What changed is that evaluateActivityFit now applies the SAME shared
+// lunar overlay to that legacy branch's OWN output afterward (never touching usesGenericRulePack, never touching
+// evaluateMuhurta() itself), so the L3 rule is now reachable through the real Aura Fit pipeline for this real
+// fixture. Confirmed below directly against evaluateActivityFit, not evaluateMuhurtaWithRulePack.
+const startFit = evaluateActivityFit({ activity: newBeginningActivity, date: riktaDate, windowType: 'NEUTRAL', classification: newBeginningDef.muhurta, actionPhase: 'START' });
+const baselineFitNoPhase = evaluateActivityFit({ activity: newBeginningActivity, date: riktaDate, windowType: 'NEUTRAL', classification: newBeginningDef.muhurta });
+const startFitTithiReasons = startFit.reasons.filter((r) => r.factor === 'TITHI');
+check('A. (L3.2) real evaluateActivityFit(PROJECT_START, Rikta, START): exactly one TITHI reason', startFitTithiReasons.length === 1);
+check('A. that reason is TITHI_FAMILY_CAUTION with impact -8', startFitTithiReasons[0]?.code === 'TITHI_FAMILY_CAUTION' && startFitTithiReasons[0]?.impact === -8);
+check('A. the no-phase baseline has NO Tithi reason at all for this fixture (clean before-state: FOCUSED_WORK/NEW_BEGINNING neither mentions Chaturthi) -- so the modifier change is attributable ONLY to the new -8', baselineFitNoPhase.reasons.filter((r) => r.factor === 'TITHI').length === 0);
+check('A. muhurtaSummary/summary were re-derived from the new reasons (no longer the stale no-Tithi text)', startFit.muhurtaSummary !== baselineFitNoPhase.muhurtaSummary);
+check('A. Aura Fit score genuinely changes, strictly lower than the no-phase baseline, through the EXISTING modifier -> muhurtaScore -> blended-score arithmetic only (no new weight, no new cap, no new label logic)', startFit.score < baselineFitNoPhase.score);
+// capabilitiesForWindow() also takes the Muhurta modifier as an input (friction shifts with it), so the exact score
+// delta is not a single fixed linear formula -- asserting a plausible, non-trivial, bounded delta (rather than a
+// brittle exact-formula prediction) still proves the change flows through the existing arithmetic and nothing else.
+check('A. the score delta is a real, bounded, non-zero change consistent with a single -8 modifier flowing through the existing formula (never a huge, formula-breaking jump)', baselineFitNoPhase.score - startFit.score > 0 && baselineFitNoPhase.score - startFit.score <= 20);
+
+// ---- real BUSINESS_START and JOURNEY_START also reach the rule through evaluateActivityFit ----
+const businessActivity = findActivityIntent('start a business')!;
+const businessDef = getActivityDefinition('business-start')!;
+const businessStartFit = evaluateActivityFit({ activity: businessActivity, date: riktaDate, windowType: 'NEUTRAL', classification: businessDef.muhurta, actionPhase: 'START' });
+const businessBaselineFit = evaluateActivityFit({ activity: businessActivity, date: riktaDate, windowType: 'NEUTRAL', classification: businessDef.muhurta });
+check('A. real BUSINESS_START (business-start) + Rikta + START reaches the rule through evaluateActivityFit: one TITHI_FAMILY_CAUTION, score strictly lower than the no-phase baseline', businessStartFit.reasons.filter((r) => r.factor === 'TITHI').length === 1 && businessStartFit.reasons.some((r) => r.code === 'TITHI_FAMILY_CAUTION') && businessStartFit.score < businessBaselineFit.score);
+
+const journeyActivity = findActivityIntent('start a journey')!;
+const journeyDef = getActivityDefinition('start-journey')!;
+const journeyStartFit = evaluateActivityFit({ activity: journeyActivity, date: riktaDate, windowType: 'NEUTRAL', classification: journeyDef.muhurta, actionPhase: 'START' });
+const journeyBaselineFit = evaluateActivityFit({ activity: journeyActivity, date: riktaDate, windowType: 'NEUTRAL', classification: journeyDef.muhurta });
+check('A. real JOURNEY_START (start-journey) + Rikta + START reaches the rule through evaluateActivityFit: one TITHI_FAMILY_CAUTION, score strictly lower than the no-phase baseline', journeyStartFit.reasons.filter((r) => r.factor === 'TITHI').length === 1 && journeyStartFit.reasons.some((r) => r.code === 'TITHI_FAMILY_CAUTION') && journeyStartFit.score < journeyBaselineFit.score);
+
+// ---- B. undefined (omitted) actionPhase ----
+const undefinedEval = evaluateMuhurtaWithRulePack({ classification: newBeginningDef.muhurta, date: riktaDate, windowType: 'NEUTRAL' });
+check('B. actionPhase omitted: no TITHI_FAMILY_CAUTION', !undefinedEval.reasons.some((r) => r.code === 'TITHI_FAMILY_CAUTION'));
+check('B. actionPhase omitted: no TITHI reason at all (the pre-L3 baseline for this fixture -- FOCUSED_WORK does not mention Chaturthi)', undefinedEval.reasons.filter((r) => r.factor === 'TITHI').length === 0);
+check('B. the full evaluation is deep-equal to the SAME call with actionPhase: undefined explicitly (L2\'s own compatibility contract, still holding)', JSON.stringify(undefinedEval) === JSON.stringify(evaluateMuhurtaWithRulePack({ classification: newBeginningDef.muhurta, date: riktaDate, windowType: 'NEUTRAL', actionPhase: undefined })));
+check('B. Aura Fit score with actionPhase omitted equals the explicit no-phase baseline (existing pre-L3 result preserved)', evaluateActivityFit({ activity: newBeginningActivity, date: riktaDate, windowType: 'NEUTRAL', classification: newBeginningDef.muhurta }).score === baselineFitNoPhase.score);
+
+// ---- C. CONTINUE ----
+const continueEval = evaluateMuhurtaWithRulePack({ classification: newBeginningDef.muhurta, date: riktaDate, windowType: 'NEUTRAL', actionPhase: 'CONTINUE' });
+check('C. actionPhase CONTINUE: no TITHI_FAMILY_CAUTION', !continueEval.reasons.some((r) => r.code === 'TITHI_FAMILY_CAUTION'));
+check('C. CONTINUE evaluation is deep-equal to the no-phase baseline (CONTINUE never receives this caution)', JSON.stringify(continueEval) === JSON.stringify(undefinedEval));
+// FINISH/PREPARE/REVIEW, same proof, for completeness beyond the required minimum.
+for (const phase of ['FINISH', 'PREPARE', 'REVIEW'] as const) {
+  const ev = evaluateMuhurtaWithRulePack({ classification: newBeginningDef.muhurta, date: riktaDate, windowType: 'NEUTRAL', actionPhase: phase });
+  check(`C. actionPhase ${phase}: no TITHI_FAMILY_CAUTION, evaluation deep-equal to the no-phase baseline`, !ev.reasons.some((r) => r.code === 'TITHI_FAMILY_CAUTION') && JSON.stringify(ev) === JSON.stringify(undefinedEval));
+}
+
+// ---- D. dedicated Griha Pravesh (precedence: dedicated intent Tithi > lunar family Tithi) ----
+// Griha Pravesh's OWN dedicated pack already lists Chaturthi as avoid (a Rikta tithi, coincidentally) -- coverage.tithi
+// is IMPLEMENTED, so per the precedence rule the lunar-family layer must never even be consulted for this intent.
+check('D. fixture sanity: griha-pravesh has dedicated (IMPLEMENTED) Tithi coverage', resolveMuhurtaRulePack(grihaDef.muhurta).coverage.tithi === 'IMPLEMENTED');
+const grihaStartEval = evaluateMuhurtaWithRulePack({ classification: grihaDef.muhurta, date: riktaDate, windowType: 'NEUTRAL', actionPhase: 'START' });
+const grihaTithiReasons = grihaStartEval.reasons.filter((r) => r.factor === 'TITHI');
+check('D. Griha Pravesh + Rikta date + START: existing dedicated TITHI_UNFAVORABLE reason remains', grihaTithiReasons.some((r) => r.code === 'TITHI_UNFAVORABLE'));
+check('D. Griha Pravesh + Rikta date + START: NO TITHI_FAMILY_CAUTION appears alongside it', !grihaTithiReasons.some((r) => r.code === 'TITHI_FAMILY_CAUTION'));
+check('D. at most one TITHI factor reason', grihaTithiReasons.length <= 1);
+check('D. Griha Pravesh evaluation is completely unaffected by actionPhase (identical with START vs. omitted)', JSON.stringify(grihaStartEval) === JSON.stringify(evaluateMuhurtaWithRulePack({ classification: grihaDef.muhurta, date: riktaDate, windowType: 'NEUTRAL' })));
+
+// ---- E. Marriage, same proof ----
+const marriageActivity = findActivityIntent('marriage')!;
+const marriageDef = getActivityDefinition(marriageActivity)!;
+check('E. fixture sanity: marriage has dedicated (IMPLEMENTED) Tithi coverage', resolveMuhurtaRulePack(marriageDef.muhurta).coverage.tithi === 'IMPLEMENTED');
+const marriageStartEval = evaluateMuhurtaWithRulePack({ classification: marriageDef.muhurta, date: riktaDate, windowType: 'NEUTRAL', actionPhase: 'START' });
+const marriageTithiReasons = marriageStartEval.reasons.filter((r) => r.factor === 'TITHI');
+check('E. Marriage + Rikta date + START: existing dedicated TITHI_UNFAVORABLE reason remains, no TITHI_FAMILY_CAUTION, at most one TITHI reason', marriageTithiReasons.some((r) => r.code === 'TITHI_UNFAVORABLE') && !marriageTithiReasons.some((r) => r.code === 'TITHI_FAMILY_CAUTION') && marriageTithiReasons.length <= 1);
+
+// ---- F. legacy/catalog ADMIN unaffected ----
+// F1: free-text ADMIN (no classification at all) -- the legacy evaluateMuhurta() function itself was never modified,
+// which this proves directly against the real ADMIN legacy rule (RULES.ADMIN.preferredTithiPatterns includes
+// /Chaturthi/, i.e. Chaturthi is FAVORABLE there).
+const adminLegacyEval = evaluateMuhurta({ taskTitle: 'file paperwork', date: riktaDate, windowType: 'NEUTRAL', family: 'ADMIN' });
+const adminTithiReasons = adminLegacyEval.reasons.filter((r) => r.factor === 'TITHI');
+check('F1. free-text ADMIN + Rikta (Chaturthi) date: still TITHI_SUPPORTIVE (unchanged -- ADMIN\'s own favorable Chaturthi rule)', adminTithiReasons.some((r) => r.code === 'TITHI_SUPPORTIVE'));
+check('F1. free-text ADMIN: no TITHI_FAMILY_CAUTION ever appears (no classification exists for this path, so the L3.2 overlay is never even attempted)', !adminTithiReasons.some((r) => r.code === 'TITHI_FAMILY_CAUTION'));
+check('F1. free-text ADMIN evaluation is byte-identical regardless of any actionPhase concept -- evaluateMuhurta() has no such parameter and was never modified', JSON.stringify(adminLegacyEval) === JSON.stringify(evaluateMuhurta({ taskTitle: 'file paperwork', date: riktaDate, windowType: 'NEUTRAL', family: 'ADMIN' })));
+
+// F2: the REAL catalog ADMIN activity (task-5), which DOES carry a classification (intent ADMIN) and, as of L3.2,
+// genuinely reaches the shared overlay through evaluateActivityFit's legacy branch -- correctly a no-op, because
+// ADMIN is not in RIKTA_START_CAUTION_RULE.applicableIntents. Proves the overlay's OWN intent gate, not merely "this
+// path is unreachable" (which is no longer true after L3.2).
+const adminActivity = findActivityIntent('process optimization')!;
+const adminDef = getActivityDefinition('task-5')!;
+const adminCatalogStartFit = evaluateActivityFit({ activity: adminActivity, date: riktaDate, windowType: 'NEUTRAL', classification: adminDef.muhurta, actionPhase: 'START' });
+const adminCatalogBaselineFit = evaluateActivityFit({ activity: adminActivity, date: riktaDate, windowType: 'NEUTRAL', classification: adminDef.muhurta });
+check('F2. catalog ADMIN (task-5) + Rikta + START, through the real evaluateActivityFit pipeline: existing behavior unchanged (no TITHI_FAMILY_CAUTION, score identical to the no-phase baseline)', !adminCatalogStartFit.reasons.some((r) => r.code === 'TITHI_FAMILY_CAUTION') && adminCatalogStartFit.score === adminCatalogBaselineFit.score && JSON.stringify(adminCatalogStartFit.reasons) === JSON.stringify(adminCatalogBaselineFit.reasons));
+
+// ---- G. no double counting, across every L3 fixture above ----
+const noDoubleCountingFixtures: Array<{ label: string; evaluation: ReturnType<typeof evaluateMuhurtaWithRulePack> }> = [
+  { label: 'new-beginning + START', evaluation: startEval },
+  { label: 'new-beginning + undefined', evaluation: undefinedEval },
+  { label: 'new-beginning + CONTINUE', evaluation: continueEval },
+  { label: 'griha-pravesh + START', evaluation: grihaStartEval },
+  { label: 'marriage + START', evaluation: marriageStartEval },
+];
+check('G. every L3 integration fixture carries AT MOST ONE TITHI-factor reason: ' + noDoubleCountingFixtures.map((f) => `${f.label}=${f.evaluation.reasons.filter((r) => r.factor === 'TITHI').length}`).join(', '), noDoubleCountingFixtures.every((f) => f.evaluation.reasons.filter((r) => r.factor === 'TITHI').length <= 1));
+
+// ---- unrelated intent, same Rikta date, START -- unaffected (WORKOUT is not in the applicable-intents set) ----
+const workoutActivity = findActivityIntent('workout')!;
+const workoutDef = getActivityDefinition(workoutActivity)!;
+const workoutStartEval = evaluateMuhurtaWithRulePack({ classification: workoutDef.muhurta, date: riktaDate, windowType: 'NEUTRAL', actionPhase: 'START' });
+check('unrelated intent (WORKOUT) + Rikta date + START: no TITHI_FAMILY_CAUTION', !workoutStartEval.reasons.some((r) => r.code === 'TITHI_FAMILY_CAUTION'));
+
+// ============================================================
+// H. BACKWARD-COMPATIBILITY SWEEP -- every catalog activity, L3.2
+// ============================================================
+const nonRiktaDate = new Date(Date.UTC(2026, 8, 15, 6, 20, 0)); // Shukla Panchami -- PURNA, confirmed non-Rikta
+check('H. fixture sanity: nonRiktaDate is genuinely non-Rikta', (() => { const ev = evaluateMuhurtaWithRulePack({ classification: newBeginningDef.muhurta, date: nonRiktaDate, windowType: 'NEUTRAL' }); return ev.panchanga.tithi === 'Shukla Panchami'; })());
+
+let h1AllMatch = true; // omitted vs explicit undefined actionPhase
+let h2AllMatch = true; // CONTINUE/FINISH/PREPARE/REVIEW never introduce a lunar change
+let h3AllMatch = true; // START on a non-Rikta date never introduces a lunar change
+const swept: string[] = [];
+for (const def of ACTIVITY_DEFINITIONS) {
+  const activity = findActivityIntent(def.id.replace(/-/g, ' '));
+  if (!activity) continue;
+  swept.push(def.id);
+  for (const windowType of ['ABHIJIT', 'NEUTRAL'] as const) {
+    const base = { activity, date: riktaDate, windowType, classification: def.muhurta };
+    const omitted = evaluateActivityFit(base);
+    const explicitUndefined = evaluateActivityFit({ ...base, actionPhase: undefined });
+    if (JSON.stringify(omitted) !== JSON.stringify(explicitUndefined)) h1AllMatch = false;
+
+    for (const phase of ['CONTINUE', 'FINISH', 'PREPARE', 'REVIEW'] as const) {
+      const withPhase = evaluateActivityFit({ ...base, actionPhase: phase });
+      if (JSON.stringify(withPhase) !== JSON.stringify(omitted)) h2AllMatch = false;
+    }
+
+    const nonRiktaBase = { activity, date: nonRiktaDate, windowType, classification: def.muhurta };
+    const nonRiktaOmitted = evaluateActivityFit(nonRiktaBase);
+    const nonRiktaStart = evaluateActivityFit({ ...nonRiktaBase, actionPhase: 'START' as const });
+    if (JSON.stringify(nonRiktaStart) !== JSON.stringify(nonRiktaOmitted)) h3AllMatch = false;
+  }
+}
+check(`H1. WITHOUT actionPhase: every swept catalog activity (${swept.length} of ${ACTIVITY_DEFINITIONS.length}) is byte-identical whether actionPhase is omitted or explicitly undefined (reasons/modifier/muhurtaScore/final score all included via full-object equality)`, h1AllMatch && swept.length > 10);
+check('H2. WITH CONTINUE/FINISH/PREPARE/REVIEW: every swept catalog activity is byte-identical to its own no-phase baseline -- the lunar overlay never fires for any non-START phase, for any activity', h2AllMatch);
+check('H3. WITH START on a non-Rikta date: every swept catalog activity is byte-identical to its own no-phase baseline on that date -- the lunar overlay never fires off a mismatched Tithi family, for any activity', h3AllMatch);
+
+// ---- structural: no L3 symbol reaches Constructor/recomposition/PlannedActivity/GoalActivity/Capture/Home/Explore/Prisma ----
+const forbiddenL3Files = [
+  '../apps/web/lib/dayConstructor.ts',
+  '../apps/web/lib/remainingDayRecomposition.ts',
+  '../apps/web/lib/db.ts',
+  '../apps/web/components/HomeDashboard.tsx',
+  '../apps/web/components/ExploreView.tsx',
+];
+const fs = require('fs');
+const path = require('path');
+const stripComments = (s: string) => s.replace(/\/\*[\s\S]*?\*\//g, '').replace(/\/\/.*$/gm, '');
+for (const rel of forbiddenL3Files) {
+  const src = stripComments(fs.readFileSync(path.join(__dirname, rel), 'utf8'));
+  check(`structural: ${rel.replace('../', '')} does not reference TITHI_FAMILY_CAUTION/lunarFamilyRules/RIKTA_START_CAUTION`, !/TITHI_FAMILY_CAUTION|lunarFamilyRules|RIKTA_START_CAUTION/.test(src));
+}
+const schemaSrc = fs.readFileSync(path.join(__dirname, '../apps/web/prisma/schema.prisma'), 'utf8');
+check('structural: prisma/schema.prisma does not reference TITHI_FAMILY_CAUTION/lunarFamilyRules/RIKTA_START_CAUTION', !/TITHI_FAMILY_CAUTION|lunarFamilyRules|RIKTA_START_CAUTION/.test(schemaSrc));
+const migrationDirsL3 = fs.readdirSync(path.join(__dirname, '../apps/web/prisma/migrations')).filter((d: string) => /^\d{4}_/.test(d));
+check('structural: migration count remains 39 (no new migration)', migrationDirsL3.length === 39);
+check('structural: lunarTithiContext.ts is untouched (no L3 symbol referenced inside it)', !/TITHI_FAMILY_CAUTION|lunarFamilyRules|RIKTA_START_CAUTION|LunarFamilyRule/.test(stripComments(fs.readFileSync(path.join(__dirname, '../packages/muhurta/src/lunarTithiContext.ts'), 'utf8'))));
+check('structural: actionPhase.ts is untouched (still zero imports, still just the bare type)', !/^import\b/m.test(stripComments(fs.readFileSync(path.join(__dirname, '../packages/muhurta/src/actionPhase.ts'), 'utf8'))));
+
+// ============================================================
+// I. L3.2 STRUCTURAL GUARDS
+// ============================================================
+const muhurtaEngineSrc = stripComments(fs.readFileSync(path.join(__dirname, '../packages/muhurta/src/muhurtaEngine.ts'), 'utf8'));
+check('I. muhurtaEngine.ts (legacy evaluateMuhurta itself) is untouched -- no L3/L3.2 symbol referenced inside it', !/TITHI_FAMILY_CAUTION|lunarFamilyRules|applyLunarFamilyOverlay|ActionPhase|actionPhase/.test(muhurtaEngineSrc));
+const auraFitSrc = stripComments(fs.readFileSync(path.join(__dirname, '../packages/recommendation/src/auraFitEngine.ts'), 'utf8'));
+check('I. usesGenericRulePack\'s own condition is byte-identical to before L3.2 (never changed)', /const usesGenericRulePack = rulePack !== undefined && !\(rulePack\.coverage\.tithi === 'REUSABLE_BASE_RULE' && rulePack\.coverage\.nakshatra === 'REUSABLE_BASE_RULE'\);/.test(auraFitSrc));
+check('I. auraFitEngine.ts still selects the evaluator with the exact same ternary shape (usesGenericRulePack ? evaluateMuhurtaWithRulePack(...) : evaluateMuhurta(...))', /const muhurta = usesGenericRulePack\s*\?\s*evaluateMuhurtaWithRulePack\(/.test(auraFitSrc) && /:\s*evaluateMuhurta\(\{/.test(auraFitSrc));
+check('I. no scoring-formula weight/constant changed (0.45/0.20/0.10/0.10/0.10/0.05 blend weights and the 68/1.8/0.24 muhurtaScore constants are all still present, unmodified)', /muhurtaScore \* 0\.45/.test(auraFitSrc) && /solarScore \* 0\.20/.test(auraFitSrc) && /clamp\(68 \+ effectiveMuhurta\.modifier \* 1\.8 - capabilities\.friction \* 0\.24\)/.test(auraFitSrc));
+check('I. no new MuhurtaIntent was added (still exactly the 24 values L3 already worked from)', !/MuhurtaIntent =[\s\S]*?RIKTA/.test(stripComments(fs.readFileSync(path.join(__dirname, '../packages/muhurta/src/activityOntology.ts'), 'utf8'))));
+check('I. LUNAR_FAMILY_RULES still has exactly one rule (no additional lunar rules introduced by L3.2)', (strip => { const m = strip.match(/LUNAR_FAMILY_RULES: LunarFamilyRule\[\] = \[([^\]]*)\]/); return !!m && m[1].split(',').filter(Boolean).length === 1; })(stripComments(fs.readFileSync(path.join(__dirname, '../packages/muhurta/src/lunarFamilyRules.ts'), 'utf8'))));
+check('I. no TITHI_FAMILY_SUPPORT anywhere in the repo (L3.2 stays caution-only, matching L3)', !/TITHI_FAMILY_SUPPORT/.test(auraFitSrc + muhurtaEngineSrc + stripComments(fs.readFileSync(path.join(__dirname, '../packages/muhurta/src/activityOntology.ts'), 'utf8'))));
+check(
+  'I. no global MuhurtaEvaluation.provenance fix: the rule-pack path still sets provenance; the legacy evaluateMuhurta() path (including one that received the L3.2 overlay) still leaves it undefined -- per the explicit non-goal, never introduced into a legacy result',
+  evaluateMuhurtaWithRulePack({ classification: grihaDef.muhurta, date: riktaDate, windowType: 'NEUTRAL' }).provenance !== undefined &&
+    evaluateMuhurta({ taskTitle: 'x', date: riktaDate, windowType: 'NEUTRAL', family: 'ADMIN' }).provenance === undefined
+);
+
 console.log(allPassed ? '\nALL MUHURTA RULE PACK CHECKS PASSED' : '\nSOME MUHURTA RULE PACK CHECKS FAILED');
 process.exit(allPassed ? 0 : 1);

@@ -46,6 +46,10 @@ export function formatMuhurtaReason(reason: MuhurtaReason, locale: 'en' = 'en'):
       return `${value} is a helpful tithi`;
     case 'TITHI_UNFAVORABLE':
       return `${value} is better for lower-stakes work`;
+    case 'TITHI_FAMILY_CAUTION':
+      // value is a TithiFamily ('RIKTA' today) -- neutral, traditional-context phrasing, never "bad"/"inauspicious
+      // for everything"/an instruction not to proceed.
+      return `${value.charAt(0)}${value.slice(1).toLowerCase()} tithis are traditionally considered less suitable for starting this kind of important undertaking`;
     case 'YOGA_SUPPORTIVE':
       return `${value} yoga adds support`;
     case 'YOGA_UNFAVORABLE':
