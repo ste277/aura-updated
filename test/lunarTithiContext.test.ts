@@ -170,7 +170,9 @@ async function main() {
     const files = out.split('\n').filter(Boolean).map((f: string) => f.replace(/\\/g, '/'));
     // Lunar Intelligence V1 L3.2 added auraFitEngine.ts as a second, deliberate consumer (the legacy-path overlay
     // integration point -- see auraFitEngine.ts's own comment), alongside muhurtaRulePacks.ts.
-    const ALLOWED = new Set(['packages/muhurta/src/lunarTithiContext.ts', 'test/lunarTithiContext.test.ts', 'packages/muhurta/src/muhurtaRulePacks.ts', 'packages/muhurta/src/lunarFamilyRules.ts', 'test/lunarFamilyRules.test.ts', 'test/muhurtaRulePacks.test.ts', 'packages/recommendation/src/auraFitEngine.ts']);
+    // Lunar Intelligence V1 L4 added lunarExactTithiRules.ts as a third, deliberate consumer (a type-only import of
+    // LunarTithiContext -- see that module's own doc comment), alongside its own test file.
+    const ALLOWED = new Set(['packages/muhurta/src/lunarTithiContext.ts', 'test/lunarTithiContext.test.ts', 'packages/muhurta/src/muhurtaRulePacks.ts', 'packages/muhurta/src/lunarFamilyRules.ts', 'test/lunarFamilyRules.test.ts', 'test/muhurtaRulePacks.test.ts', 'packages/recommendation/src/auraFitEngine.ts', 'packages/muhurta/src/lunarExactTithiRules.ts', 'test/lunarExactTithiRules.test.ts']);
     return files.every((f: string) => ALLOWED.has(f));
   })());
 

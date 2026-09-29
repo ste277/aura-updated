@@ -50,6 +50,11 @@ export function formatMuhurtaReason(reason: MuhurtaReason, locale: 'en' = 'en'):
       // value is a TithiFamily ('RIKTA' today) -- neutral, traditional-context phrasing, never "bad"/"inauspicious
       // for everything"/an instruction not to proceed.
       return `${value.charAt(0)}${value.slice(1).toLowerCase()} tithis are traditionally considered less suitable for starting this kind of important undertaking`;
+    case 'TITHI_EXACT_CAUTION':
+      // value is the exact canonical Tithi name (e.g. "Amavasya") -- traditional, commencement-specific, advisory
+      // phrasing only. Deliberately never says "bad day"/"negative energy"/"bad luck"/"danger"/anything implying an
+      // already-underway activity is unfavorable (see the L4.1 evidence audit's own "claims Aura must not make").
+      return `${value} is traditionally treated with more care for important new beginnings`;
     case 'YOGA_SUPPORTIVE':
       return `${value} yoga adds support`;
     case 'YOGA_UNFAVORABLE':

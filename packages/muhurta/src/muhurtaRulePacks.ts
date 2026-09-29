@@ -85,7 +85,7 @@ import type { SolarWindowType } from '../../panchang/src/windows';
 import type { MuhurtaClassification, MuhurtaFamily, MuhurtaIntent, MuhurtaReason } from './activityOntology';
 import type { ActionPhase } from './actionPhase';
 import { buildLunarTithiContext } from './lunarTithiContext';
-import { applyLunarFamilyOverlay } from './lunarFamilyRules';
+import { applyLunarTithiOverlay } from './lunarFamilyRules';
 import type { CombustibleGraha } from '../../vedic/src/planetaryCombustion';
 
 /** The single methodology identifier every rule pack in this file belongs
@@ -732,13 +732,14 @@ export function evaluateMuhurtaWithRulePack(params: {
   const windowReason = evaluateSolarWindowReason(params.windowType, legacyFamilyForWindowBonus);
   if (windowReason) preOverlayReasons.push(windowReason);
 
-  // Lunar Intelligence V1 L3.2 -- the ONE shared, evaluator-independent overlay (lunarFamilyRules.ts) owns
-  // precedence/suppression/replacement; this call site never duplicates that logic. Reuses panchanga.tithi (already
-  // computed above) -- no second getTithi() call, no new astronomy. lunarContext is null exactly when
-  // coverage.tithi is 'IMPLEMENTED' (a dedicated pack, e.g. Griha Pravesh/Marriage, already owns Tithi outright),
-  // matching applyLunarFamilyOverlay's own identity condition -- so this is a no-op for those, by construction.
+  // Lunar Intelligence V1 L3.2/L4 -- the ONE shared, evaluator-independent overlay (lunarFamilyRules.ts) owns
+  // precedence/suppression/replacement for BOTH the exact-Tithi (lunarExactTithiRules.ts) and Tithi-family layers;
+  // this call site never duplicates that logic. Reuses panchanga.tithi (already computed above) -- no second
+  // getTithi() call, no new astronomy. lunarContext is null exactly when coverage.tithi is 'IMPLEMENTED' (a
+  // dedicated pack, e.g. Griha Pravesh/Marriage, already owns Tithi outright), matching applyLunarTithiOverlay's own
+  // identity condition -- so this is a no-op for those, by construction.
   const lunarContext = pack.coverage.tithi === 'IMPLEMENTED' ? null : buildLunarTithiContext(panchanga.tithi);
-  const reasons = applyLunarFamilyOverlay(preOverlayReasons, pack.coverage.tithi, lunarContext, params.classification, params.actionPhase);
+  const reasons = applyLunarTithiOverlay(preOverlayReasons, pack.coverage.tithi, lunarContext, params.classification, params.actionPhase);
 
   const modifier = reasons.reduce((total, reason) => total + (reason.impact ?? 0), 0);
   const legacy = deriveLegacyMuhurtaText(reasons);

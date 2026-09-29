@@ -17,27 +17,38 @@
  * NEW_BEGINNING, which sounded plausible, is NOT one of them -- it is a
  * legacy MuhurtaActivityFamily, not a MuhurtaIntent; see activityOntology.ts).
  *
- * PRECEDENCE (enforced by the CALLER, packages/muhurta/src/muhurtaRulePacks.ts,
- * not by this module): a dedicated intent-specific rule pack (Griha Pravesh,
- * Marriage) always owns the Tithi factor for its own intent outright -- this
- * module is never even asked to resolve a reason when that's true. This
- * module only ever runs for a classification whose resolved rule pack has
- * NO dedicated Tithi coverage (a reusable legacy family base, or none).
+ * PRECEDENCE, as of Lunar Intelligence V1 L4 (enforced by this module's own
+ * applyLunarTithiOverlay, the ONE shared entry point both evaluation paths
+ * call -- see that function's own doc comment below):
+ *
+ *   dedicated intent Tithi (coverage.tithi === 'IMPLEMENTED')
+ *   > exact-Tithi special case (lunarExactTithiRules.ts, e.g. Amavasya)
+ *   > Tithi-family rule (this module's own RIKTA_START_CAUTION_RULE)
+ *   > reusable legacy/family-base Tithi
+ *
+ * A dedicated intent-specific rule pack (Griha Pravesh, Marriage) always
+ * owns the Tithi factor for its own intent outright -- neither this
+ * module's resolver nor lunarExactTithiRules.ts's is even invoked when
+ * that's true. Below that, an exact-Tithi match always wins over a
+ * family-level match when both could in principle apply (see
+ * applyLunarTithiOverlay: it tries the exact resolver first).
  *
  * EXTENSIBILITY WITHOUT REWRITING THE EVALUATOR: `resolveLunarFamilyReason`
  * returns the FIRST rule in `LUNAR_FAMILY_RULES` that matches. A future,
- * more specific rule (e.g. an exact-Tithi override, or a Rikta FINISH/
- * removal-support rule once the activity ontology can identify that
- * reliably) only needs to be placed earlier in that array -- the "most
- * specific match wins" precedence this module's own design audit called
- * for falls out of ordinary list order, with no change to the resolver's
- * control flow and no change to any caller.
+ * more specific family-level rule (e.g. a Rikta FINISH/removal-support rule
+ * once the activity ontology can identify that reliably) only needs to be
+ * placed earlier in that array -- the "most specific match wins" precedence
+ * this module's own design audit called for falls out of ordinary list
+ * order, with no change to the resolver's control flow and no change to any
+ * caller. A future EXACT-Tithi rule, by contrast, belongs in
+ * lunarExactTithiRules.ts, not here -- see this module's own applyLunarTithiOverlay for why that module is deliberately kept separate.
  */
 
 import type { LunarTithiContext, TithiFamily } from './lunarTithiContext';
 import type { ActionPhase } from './actionPhase';
 import type { MuhurtaClassification, MuhurtaIntent, MuhurtaReason } from './activityOntology';
 import type { MuhurtaRuleSource, MuhurtaRuleConfidence, MuhurtaRuleScope } from './muhurtaRulePacks';
+import { resolveLunarExactTithiReason } from './lunarExactTithiRules';
 
 /**
  * Provenance for a lunar-family rule -- deliberately reuses the exact same
@@ -193,30 +204,43 @@ export function resolveLunarFamilyReason(
   return null;
 }
 
+/** Removes any existing reason whose factor is 'TITHI' and appends `newReason` in its place -- shared by both match
+ * branches of applyLunarTithiOverlay below, so the result never carries more than one TITHI-factor reason no matter
+ * which layer (exact or family) produced it. Every non-TITHI reason is preserved exactly, in its original order. */
+function replaceTithiReason(reasons: MuhurtaReason[], newReason: MuhurtaReason): MuhurtaReason[] {
+  return [...reasons.filter((reason) => reason.factor !== 'TITHI'), newReason];
+}
+
 /**
- * Lunar Intelligence V1 L3.2 -- the ONE shared, evaluator-independent entry point for applying a lunar-family Tithi
- * rule to an already-computed set of MuhurtaReasons. Both evaluation paths (the rule-pack path,
+ * Lunar Intelligence V1 L3.2/L4 -- the ONE shared, evaluator-independent entry point for applying BOTH the
+ * exact-Tithi (lunarExactTithiRules.ts) and Tithi-family (this module) layers to an already-computed set of
+ * MuhurtaReasons, as a single deterministic Tithi-precedence operation. Both evaluation paths (the rule-pack path,
  * evaluateMuhurtaWithRulePack, and the legacy path, evaluateActivityFit's own legacy evaluateMuhurta() branch) call
  * this SAME function on their own output -- never a second, separately-maintained copy of the suppression/precedence
- * logic. This is a pure function: it does no astronomy, no Panchang read, no classification resolution -- the
- * caller has already done all of that and hands in exactly what's needed.
+ * logic, and never the exact and family layers applied independently (which could otherwise leave a stale/duplicate
+ * TITHI reason if both happened to match on the same input). This is a pure function: it does no astronomy, no
+ * Panchang read, no classification resolution -- the caller has already done all of that and hands in exactly what's
+ * needed.
  *
- * PRECEDENCE, enforced here (matching muhurtaRulePacks.ts's own L3 doc comment):
- *   dedicated intent Tithi (tithiCoverage === 'IMPLEMENTED') > lunar-family Tithi > reusable/legacy Tithi.
+ * PRECEDENCE, enforced here (matching this module's own top-of-file doc comment):
+ *   dedicated intent Tithi (tithiCoverage === 'IMPLEMENTED')
+ *   > exact-Tithi special case (resolveLunarExactTithiReason, tried FIRST)
+ *   > Tithi-family rule (resolveLunarFamilyReason, tried only if the exact resolver found nothing)
+ *   > reusable/legacy Tithi (neither resolver matches -- `reasons` returned unchanged).
  *
  * IDENTITY (returns `reasons` completely unchanged -- same array reference, not a copy) whenever:
- *   - actionPhase is undefined, or any phase other than 'START' (no inference, ever)
  *   - lunarContext is null (nothing to resolve against -- see callers: null exactly when tithiCoverage is
  *     'IMPLEMENTED', since a dedicated pack already owns the Tithi factor and lunarTithiContext is never built)
  *   - tithiCoverage is 'IMPLEMENTED' (dedicated pack owns Tithi outright -- protects Griha Pravesh/Marriage)
- *   - the lunar context's family is not RIKTA, or classification.intent is not in the rule's applicableIntents
+ *   - neither the exact resolver nor the family resolver matches (wrong phase, wrong Tithi/family, or an
+ *     unsupported intent -- each resolver's own "no inference, ever" contract, unchanged)
  *
- * MATCH behavior: removes any existing reason whose factor is 'TITHI' (the reusable-base/legacy pattern match, if
- * one fired) and appends the new TITHI_FAMILY_CAUTION reason -- so the result NEVER carries more than one
+ * MATCH behavior: exactly one of the two resolvers' output (whichever matched, exact taking priority) replaces any
+ * existing 'TITHI'-factor reason via replaceTithiReason() above -- the result NEVER carries more than one
  * TITHI-factor reason. Every non-TITHI reason (Nakshatra/Yoga/Karana/solar-window/activity/personal) is preserved
  * exactly, in its original order, untouched.
  */
-export function applyLunarFamilyOverlay(
+export function applyLunarTithiOverlay(
   reasons: MuhurtaReason[],
   tithiCoverage: 'IMPLEMENTED' | 'REUSABLE_BASE_RULE' | 'MISSING',
   lunarContext: LunarTithiContext | null,
@@ -224,7 +248,9 @@ export function applyLunarFamilyOverlay(
   actionPhase: ActionPhase | undefined
 ): MuhurtaReason[] {
   if (tithiCoverage === 'IMPLEMENTED' || lunarContext === null) return reasons;
-  const lunarReason = resolveLunarFamilyReason(lunarContext, classification, actionPhase);
-  if (lunarReason === null) return reasons;
-  return [...reasons.filter((reason) => reason.factor !== 'TITHI'), lunarReason];
+  const exactReason = resolveLunarExactTithiReason(lunarContext, classification, actionPhase);
+  if (exactReason !== null) return replaceTithiReason(reasons, exactReason);
+  const familyReason = resolveLunarFamilyReason(lunarContext, classification, actionPhase);
+  if (familyReason !== null) return replaceTithiReason(reasons, familyReason);
+  return reasons;
 }

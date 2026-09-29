@@ -5,7 +5,7 @@ import type { ActionPhase } from '../../muhurta/src/actionPhase';
 import { formatPersonalReasons, deriveLegacyMuhurtaText } from '../../muhurta/src/muhurtaReasonFormat';
 import { computeMuhurtaSupportLevel, evaluateMuhurtaWithRulePack, resolveMuhurtaRulePack } from '../../muhurta/src/muhurtaRulePacks';
 import { buildLunarTithiContext } from '../../muhurta/src/lunarTithiContext';
-import { applyLunarFamilyOverlay } from '../../muhurta/src/lunarFamilyRules';
+import { applyLunarTithiOverlay } from '../../muhurta/src/lunarFamilyRules';
 import { getTaraBala } from '../../vedic/src/natalChart';
 import type { ActivityProfile } from './personalizedTasks';
 
@@ -133,7 +133,7 @@ export function evaluateActivityFit(params: {
         windowType: params.windowType,
         family,
       });
-  // Lunar Intelligence V1 L3.2 -- applied ONLY when the LEGACY branch above just ran (never usesGenericRulePack,
+  // Lunar Intelligence V1 L3.2/L4 -- applied ONLY when the LEGACY branch above just ran (never usesGenericRulePack,
   // which is NEVER changed by this): the rule-pack branch already applied this exact same shared overlay inside
   // evaluateMuhurtaWithRulePack itself (muhurtaRulePacks.ts), so applying it again here would be a second,
   // redundant call, not a genuinely new evaluation -- each evaluation gets the overlay exactly once. The legacy
@@ -144,12 +144,13 @@ export function evaluateActivityFit(params: {
   // (provenance stays undefined -- never contaminated with rule-pack provenance for a legacy result); only
   // `reasons`/`modifier` and their purely-derived text (`blockers`/`supports`/`summary`, via the same
   // deriveLegacyMuhurtaText() the rule-pack path already uses) are updated, and ONLY when the overlay genuinely
-  // changed something.
+  // changed something. applyLunarTithiOverlay tries the exact-Tithi layer (Amavasya) before the Tithi-family layer
+  // (Rikta) internally -- this call site does not choose between them.
   const effectiveMuhurta =
     !usesGenericRulePack && rulePack
       ? (() => {
           const lunarContext = rulePack.coverage.tithi === 'IMPLEMENTED' ? null : buildLunarTithiContext(muhurta.panchanga.tithi);
-          const overlaidReasons = applyLunarFamilyOverlay(muhurta.reasons, rulePack.coverage.tithi, lunarContext, params.classification!, params.actionPhase);
+          const overlaidReasons = applyLunarTithiOverlay(muhurta.reasons, rulePack.coverage.tithi, lunarContext, params.classification!, params.actionPhase);
           if (overlaidReasons === muhurta.reasons) return muhurta; // identity: nothing matched, behaviorally unchanged
           const overlaidModifier = overlaidReasons.reduce((total, reason) => total + (reason.impact ?? 0), 0);
           const overlaidText = deriveLegacyMuhurtaText(overlaidReasons);

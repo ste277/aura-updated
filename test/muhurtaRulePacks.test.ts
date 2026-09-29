@@ -13,6 +13,7 @@ import {
 } from '../packages/muhurta/src/muhurtaRulePacks';
 import type { MuhurtaClassification } from '../packages/muhurta/src/activityOntology';
 import { SUPPORTED_MUHURTHAM_ACTIVITY_IDS, isSupportedMuhurthamActivity, findMuhurthams } from '../packages/recommendation/src/muhurthamFinder';
+import { buildLunarTithiContext } from '../packages/muhurta/src/lunarTithiContext';
 
 let allPassed = true;
 function check(label: string, condition: boolean) {
@@ -495,14 +496,97 @@ const workoutStartEval = evaluateMuhurtaWithRulePack({ classification: workoutDe
 check('unrelated intent (WORKOUT) + Rikta date + START: no TITHI_FAMILY_CAUTION', !workoutStartEval.reasons.some((r) => r.code === 'TITHI_FAMILY_CAUTION'));
 
 // ============================================================
-// H. BACKWARD-COMPATIBILITY SWEEP -- every catalog activity, L3.2
+// LUNAR INTELLIGENCE V1 L4 -- exact-Tithi (Amavasya) integration + precedence proof
+// ============================================================
+// Unit coverage of the resolver itself lives in test/lunarExactTithiRules.test.ts.
+// This section proves the wiring through the REAL evaluateMuhurtaWithRulePack()/
+// evaluateActivityFit() pipeline, and the full precedence claim:
+//   dedicated intent Tithi > exact-Tithi special case > Tithi-family rule > reusable legacy Tithi
+// with AT MOST ONE Tithi-factor reason per evaluation.
+
+// A real Amavasya date (confirmed via packages/vedic/src/panchangElements.ts's own getTithi()).
+const amavasyaDate = new Date(Date.UTC(2026, 8, 10, 6, 20, 0));
+check('L4 fixture sanity: amavasyaDate really is Amavasya', (() => { const ev = evaluateMuhurtaWithRulePack({ classification: newBeginningDef.muhurta, date: amavasyaDate, windowType: 'NEUTRAL' }); return ev.panchanga.tithi === 'Amavasya'; })());
+check('L4 fixture sanity: Amavasya resolves to TithiFamily.PURNA, not RIKTA (the ordinal-mod-5 collision the exact rule exists to avoid -- see lunarExactTithiRules.ts\'s own doc comment)', buildLunarTithiContext('Amavasya').family === 'PURNA');
+// FOCUSED_WORK/NEW_BEGINNING/JOURNEY_START (the legacy families PROJECT_START/BUSINESS_START/JOURNEY_START reuse via
+// FAMILY_BASE_SOURCE) ALL already avoid Amavasya in the pre-existing legacy RULES table -- unlike the Rikta fixture
+// above, the no-phase baseline here is NOT "no Tithi reason at all", it is an existing TITHI_UNFAVORABLE reason
+// (impact -8, the same magnitude muhurtaEngine.ts already used). This makes these fixtures the strongest possible
+// proof of "replaces, not added beside it": if the exact-Tithi overlay ever appended instead of replacing, the
+// modifier would double to -16 and two TITHI reasons would appear -- neither happens.
+const amavasyaBaselineEval = evaluateMuhurtaWithRulePack({ classification: newBeginningDef.muhurta, date: amavasyaDate, windowType: 'NEUTRAL' });
+const amavasyaBaselineTithi = amavasyaBaselineEval.reasons.filter((r) => r.factor === 'TITHI');
+check('L4 fixture sanity: the no-phase Amavasya baseline already carries a legacy TITHI_UNFAVORABLE reason (impact -8) -- the pre-existing behavior this rule must cleanly replace, not duplicate', amavasyaBaselineTithi.length === 1 && amavasyaBaselineTithi[0].code === 'TITHI_UNFAVORABLE' && amavasyaBaselineTithi[0].impact === -8);
+
+// ---- A. explicit START ----
+const amavasyaStartEval = evaluateMuhurtaWithRulePack({ classification: newBeginningDef.muhurta, date: amavasyaDate, windowType: 'NEUTRAL', actionPhase: 'START' });
+const amavasyaStartTithi = amavasyaStartEval.reasons.filter((r) => r.factor === 'TITHI');
+check('A. explicit START on Amavasya: exactly one TITHI reason', amavasyaStartTithi.length === 1);
+check('A. that reason is TITHI_EXACT_CAUTION with impact -8 and value "Amavasya"', amavasyaStartTithi[0]?.code === 'TITHI_EXACT_CAUTION' && amavasyaStartTithi[0]?.impact === -8 && amavasyaStartTithi[0]?.value === 'Amavasya');
+check('A. the legacy TITHI_UNFAVORABLE reason is REPLACED, not accumulated alongside the new one (modifier unchanged at -8 total contribution, reasons count unchanged, code differs from the no-phase baseline)', amavasyaStartEval.modifier === amavasyaBaselineEval.modifier && amavasyaStartEval.reasons.length === amavasyaBaselineEval.reasons.length && amavasyaStartTithi[0]?.code !== amavasyaBaselineTithi[0]?.code);
+
+// ---- A. (L4) real evaluateActivityFit for all three supported intents ----
+const amavasyaStartFit = evaluateActivityFit({ activity: newBeginningActivity, date: amavasyaDate, windowType: 'NEUTRAL', classification: newBeginningDef.muhurta, actionPhase: 'START' });
+const amavasyaBaselineFit = evaluateActivityFit({ activity: newBeginningActivity, date: amavasyaDate, windowType: 'NEUTRAL', classification: newBeginningDef.muhurta });
+const amavasyaStartFitTithi = amavasyaStartFit.reasons.filter((r) => r.factor === 'TITHI');
+check('A. (L4) real evaluateActivityFit(PROJECT_START, Amavasya, START): exactly one TITHI_EXACT_CAUTION reason, replacing the legacy one', amavasyaStartFitTithi.length === 1 && amavasyaStartFitTithi[0]?.code === 'TITHI_EXACT_CAUTION' && amavasyaStartFitTithi[0]?.impact === -8);
+check('A. (L4) the exact reason participates in the modifier exactly like the legacy reason it replaced -- score is IDENTICAL to the no-phase baseline (both draw -8 from a single Tithi reason; a numeric coincidence that only holds because the magnitudes match, not evidence the overlay was skipped -- the code/value assertions above prove it fired)', amavasyaStartFit.score === amavasyaBaselineFit.score && amavasyaStartFit.muhurtaSummary !== amavasyaBaselineFit.muhurtaSummary);
+
+const businessAmavasyaFit = evaluateActivityFit({ activity: businessActivity, date: amavasyaDate, windowType: 'NEUTRAL', classification: businessDef.muhurta, actionPhase: 'START' });
+check('A. (L4) real BUSINESS_START + Amavasya + START reaches the rule through evaluateActivityFit: one TITHI_EXACT_CAUTION, replacing the legacy reason', businessAmavasyaFit.reasons.filter((r) => r.factor === 'TITHI').length === 1 && businessAmavasyaFit.reasons.some((r) => r.code === 'TITHI_EXACT_CAUTION'));
+
+const journeyAmavasyaFit = evaluateActivityFit({ activity: journeyActivity, date: amavasyaDate, windowType: 'NEUTRAL', classification: journeyDef.muhurta, actionPhase: 'START' });
+check('A. (L4) real JOURNEY_START + Amavasya + START reaches the rule through evaluateActivityFit: one TITHI_EXACT_CAUTION, replacing the legacy reason', journeyAmavasyaFit.reasons.filter((r) => r.factor === 'TITHI').length === 1 && journeyAmavasyaFit.reasons.some((r) => r.code === 'TITHI_EXACT_CAUTION'));
+
+// ---- B. exact-Tithi rule NEVER matches undefined/CONTINUE/FINISH/PREPARE/REVIEW (no inference) ----
+for (const phase of [undefined, 'CONTINUE', 'FINISH', 'PREPARE', 'REVIEW'] as const) {
+  const ev = phase === undefined
+    ? evaluateMuhurtaWithRulePack({ classification: newBeginningDef.muhurta, date: amavasyaDate, windowType: 'NEUTRAL' })
+    : evaluateMuhurtaWithRulePack({ classification: newBeginningDef.muhurta, date: amavasyaDate, windowType: 'NEUTRAL', actionPhase: phase });
+  const tithi = ev.reasons.filter((r) => r.factor === 'TITHI');
+  check(`B. actionPhase ${phase ?? 'undefined'} on Amavasya: no TITHI_EXACT_CAUTION -- the legacy TITHI_UNFAVORABLE reason remains untouched`, !tithi.some((r) => r.code === 'TITHI_EXACT_CAUTION') && tithi.length === 1 && tithi[0].code === 'TITHI_UNFAVORABLE');
+}
+
+// ---- C. exact > family: Amavasya's own family (PURNA) can never collide with the RIKTA family rule in real data ----
+check('C. exact > family: Amavasya is structurally never RIKTA (confirmed above), so lunarFamilyRules.ts\'s resolver can never match it -- the exact resolver is the ONLY one that can fire for this Tithi, by construction, not merely by precedence order', buildLunarTithiContext('Amavasya').family !== 'RIKTA');
+check('C. existing Rikta START tests (section A above) remain green -- family-level precedence for RIKTA is unaffected by the exact-Tithi layer\'s addition', startTithiReasons.length === 1 && startTithiReasons[0]?.code === 'TITHI_FAMILY_CAUTION');
+
+// ---- D. dedicated Griha Pravesh + Marriage: exact-Tithi layer never even consulted ----
+check('D. fixture sanity: griha-pravesh has dedicated (IMPLEMENTED) Tithi coverage', resolveMuhurtaRulePack(grihaDef.muhurta).coverage.tithi === 'IMPLEMENTED');
+const grihaAmavasyaEval = evaluateMuhurtaWithRulePack({ classification: grihaDef.muhurta, date: amavasyaDate, windowType: 'NEUTRAL', actionPhase: 'START' });
+const grihaAmavasyaTithi = grihaAmavasyaEval.reasons.filter((r) => r.factor === 'TITHI');
+check('D. Griha Pravesh + Amavasya + START: existing dedicated TITHI_UNFAVORABLE reason remains (Griha Pravesh\'s own /^Amavasya$/ avoid pattern), no TITHI_EXACT_CAUTION appears alongside it', grihaAmavasyaTithi.some((r) => r.code === 'TITHI_UNFAVORABLE') && !grihaAmavasyaTithi.some((r) => r.code === 'TITHI_EXACT_CAUTION') && grihaAmavasyaTithi.length === 1);
+
+const marriageAmavasyaEval = evaluateMuhurtaWithRulePack({ classification: marriageDef.muhurta, date: amavasyaDate, windowType: 'NEUTRAL', actionPhase: 'START' });
+const marriageAmavasyaTithi = marriageAmavasyaEval.reasons.filter((r) => r.factor === 'TITHI');
+check('D. Marriage + Amavasya + START: NO Tithi reason at all (Marriage\'s own dedicated avoid list deliberately does not mention Amavasya -- neutral by omission), and critically NO TITHI_EXACT_CAUTION fills that gap -- dedicated coverage suppresses the overlay outright, even where the dedicated pack itself has nothing to say', marriageAmavasyaTithi.length === 0);
+check('D. this proves the ticket\'s own constraint directly: Marriage\'s stance on Amavasya (favorable/neutral/unfavorable) is completely unchanged by L4', JSON.stringify(marriageAmavasyaEval) === JSON.stringify(evaluateMuhurtaWithRulePack({ classification: marriageDef.muhurta, date: amavasyaDate, windowType: 'NEUTRAL' })));
+
+// ---- unrelated intent, same Amavasya date, START -- unaffected ----
+const workoutAmavasyaEval = evaluateMuhurtaWithRulePack({ classification: workoutDef.muhurta, date: amavasyaDate, windowType: 'NEUTRAL', actionPhase: 'START' });
+check('unrelated intent (WORKOUT) + Amavasya date + START: no TITHI_EXACT_CAUTION', !workoutAmavasyaEval.reasons.some((r) => r.code === 'TITHI_EXACT_CAUTION'));
+
+// ---- no double counting, across every L4 fixture above ----
+const noDoubleCountingL4Fixtures: Array<{ label: string; evaluation: ReturnType<typeof evaluateMuhurtaWithRulePack> }> = [
+  { label: 'new-beginning + Amavasya + START', evaluation: amavasyaStartEval },
+  { label: 'new-beginning + Amavasya + no-phase', evaluation: amavasyaBaselineEval },
+  { label: 'griha-pravesh + Amavasya + START', evaluation: grihaAmavasyaEval },
+  { label: 'marriage + Amavasya + START', evaluation: marriageAmavasyaEval },
+];
+check('every L4 integration fixture carries AT MOST ONE TITHI-factor reason: ' + noDoubleCountingL4Fixtures.map((f) => `${f.label}=${f.evaluation.reasons.filter((r) => r.factor === 'TITHI').length}`).join(', '), noDoubleCountingL4Fixtures.every((f) => f.evaluation.reasons.filter((r) => r.factor === 'TITHI').length <= 1));
+
+// ============================================================
+// H. BACKWARD-COMPATIBILITY SWEEP -- every catalog activity, L3.2/L4
 // ============================================================
 const nonRiktaDate = new Date(Date.UTC(2026, 8, 15, 6, 20, 0)); // Shukla Panchami -- PURNA, confirmed non-Rikta
 check('H. fixture sanity: nonRiktaDate is genuinely non-Rikta', (() => { const ev = evaluateMuhurtaWithRulePack({ classification: newBeginningDef.muhurta, date: nonRiktaDate, windowType: 'NEUTRAL' }); return ev.panchanga.tithi === 'Shukla Panchami'; })());
 
 let h1AllMatch = true; // omitted vs explicit undefined actionPhase
-let h2AllMatch = true; // CONTINUE/FINISH/PREPARE/REVIEW never introduce a lunar change
+let h2AllMatch = true; // CONTINUE/FINISH/PREPARE/REVIEW never introduce a lunar change (Rikta date)
 let h3AllMatch = true; // START on a non-Rikta date never introduces a lunar change
+let h4AllMatch = true; // CONTINUE/FINISH/PREPARE/REVIEW never introduce a lunar change (Amavasya date)
+let h5AllMatch = true; // START on Amavasya never introduces a change for an UNSUPPORTED intent
+const AMAVASYA_SUPPORTED_INTENTS = new Set(['PROJECT_START', 'BUSINESS_START', 'JOURNEY_START']);
 const swept: string[] = [];
 for (const def of ACTIVITY_DEFINITIONS) {
   const activity = findActivityIntent(def.id.replace(/-/g, ' '));
@@ -523,11 +607,25 @@ for (const def of ACTIVITY_DEFINITIONS) {
     const nonRiktaOmitted = evaluateActivityFit(nonRiktaBase);
     const nonRiktaStart = evaluateActivityFit({ ...nonRiktaBase, actionPhase: 'START' as const });
     if (JSON.stringify(nonRiktaStart) !== JSON.stringify(nonRiktaOmitted)) h3AllMatch = false;
+
+    // L4: same two invariants, re-proved on the Amavasya date.
+    const amavasyaBase = { activity, date: amavasyaDate, windowType, classification: def.muhurta };
+    const amavasyaOmitted = evaluateActivityFit(amavasyaBase);
+    for (const phase of ['CONTINUE', 'FINISH', 'PREPARE', 'REVIEW'] as const) {
+      const withPhase = evaluateActivityFit({ ...amavasyaBase, actionPhase: phase });
+      if (JSON.stringify(withPhase) !== JSON.stringify(amavasyaOmitted)) h4AllMatch = false;
+    }
+    if (!AMAVASYA_SUPPORTED_INTENTS.has(def.muhurta.intent)) {
+      const amavasyaStart = evaluateActivityFit({ ...amavasyaBase, actionPhase: 'START' as const });
+      if (JSON.stringify(amavasyaStart) !== JSON.stringify(amavasyaOmitted)) h5AllMatch = false;
+    }
   }
 }
 check(`H1. WITHOUT actionPhase: every swept catalog activity (${swept.length} of ${ACTIVITY_DEFINITIONS.length}) is byte-identical whether actionPhase is omitted or explicitly undefined (reasons/modifier/muhurtaScore/final score all included via full-object equality)`, h1AllMatch && swept.length > 10);
-check('H2. WITH CONTINUE/FINISH/PREPARE/REVIEW: every swept catalog activity is byte-identical to its own no-phase baseline -- the lunar overlay never fires for any non-START phase, for any activity', h2AllMatch);
+check('H2. WITH CONTINUE/FINISH/PREPARE/REVIEW (Rikta date): every swept catalog activity is byte-identical to its own no-phase baseline -- the lunar overlay never fires for any non-START phase, for any activity', h2AllMatch);
 check('H3. WITH START on a non-Rikta date: every swept catalog activity is byte-identical to its own no-phase baseline on that date -- the lunar overlay never fires off a mismatched Tithi family, for any activity', h3AllMatch);
+check('H4. WITH CONTINUE/FINISH/PREPARE/REVIEW (Amavasya date): every swept catalog activity is byte-identical to its own no-phase Amavasya baseline -- the exact-Tithi overlay never fires for any non-START phase either, for any activity', h4AllMatch);
+check('H5. WITH START on Amavasya, for every catalog activity whose intent is NOT PROJECT_START/BUSINESS_START/JOURNEY_START: byte-identical to its own no-phase Amavasya baseline -- the exact rule never leaks beyond its 3 evidenced intents', h5AllMatch);
 
 // ---- structural: no L3 symbol reaches Constructor/recomposition/PlannedActivity/GoalActivity/Capture/Home/Explore/Prisma ----
 const forbiddenL3Files = [
@@ -540,29 +638,34 @@ const forbiddenL3Files = [
 const fs = require('fs');
 const path = require('path');
 const stripComments = (s: string) => s.replace(/\/\*[\s\S]*?\*\//g, '').replace(/\/\/.*$/gm, '');
+const FORBIDDEN_L3_L4_SYMBOLS = /TITHI_FAMILY_CAUTION|lunarFamilyRules|RIKTA_START_CAUTION|TITHI_EXACT_CAUTION|lunarExactTithiRules|AMAVASYA_START_CAUTION/;
 for (const rel of forbiddenL3Files) {
   const src = stripComments(fs.readFileSync(path.join(__dirname, rel), 'utf8'));
-  check(`structural: ${rel.replace('../', '')} does not reference TITHI_FAMILY_CAUTION/lunarFamilyRules/RIKTA_START_CAUTION`, !/TITHI_FAMILY_CAUTION|lunarFamilyRules|RIKTA_START_CAUTION/.test(src));
+  check(`structural: ${rel.replace('../', '')} does not reference TITHI_FAMILY_CAUTION/lunarFamilyRules/RIKTA_START_CAUTION/TITHI_EXACT_CAUTION/lunarExactTithiRules/AMAVASYA_START_CAUTION`, !FORBIDDEN_L3_L4_SYMBOLS.test(src));
 }
 const schemaSrc = fs.readFileSync(path.join(__dirname, '../apps/web/prisma/schema.prisma'), 'utf8');
-check('structural: prisma/schema.prisma does not reference TITHI_FAMILY_CAUTION/lunarFamilyRules/RIKTA_START_CAUTION', !/TITHI_FAMILY_CAUTION|lunarFamilyRules|RIKTA_START_CAUTION/.test(schemaSrc));
+check('structural: prisma/schema.prisma does not reference any L3/L4 lunar symbol', !FORBIDDEN_L3_L4_SYMBOLS.test(schemaSrc));
 const migrationDirsL3 = fs.readdirSync(path.join(__dirname, '../apps/web/prisma/migrations')).filter((d: string) => /^\d{4}_/.test(d));
 check('structural: migration count remains 39 (no new migration)', migrationDirsL3.length === 39);
-check('structural: lunarTithiContext.ts is untouched (no L3 symbol referenced inside it)', !/TITHI_FAMILY_CAUTION|lunarFamilyRules|RIKTA_START_CAUTION|LunarFamilyRule/.test(stripComments(fs.readFileSync(path.join(__dirname, '../packages/muhurta/src/lunarTithiContext.ts'), 'utf8'))));
+check('structural: lunarTithiContext.ts is untouched (no L3/L4 symbol referenced inside it)', !/TITHI_FAMILY_CAUTION|lunarFamilyRules|RIKTA_START_CAUTION|LunarFamilyRule|TITHI_EXACT_CAUTION|lunarExactTithiRules|AMAVASYA_START_CAUTION|LunarExactTithiRule/.test(stripComments(fs.readFileSync(path.join(__dirname, '../packages/muhurta/src/lunarTithiContext.ts'), 'utf8'))));
 check('structural: actionPhase.ts is untouched (still zero imports, still just the bare type)', !/^import\b/m.test(stripComments(fs.readFileSync(path.join(__dirname, '../packages/muhurta/src/actionPhase.ts'), 'utf8'))));
 
 // ============================================================
-// I. L3.2 STRUCTURAL GUARDS
+// I. L3.2/L4 STRUCTURAL GUARDS
 // ============================================================
 const muhurtaEngineSrc = stripComments(fs.readFileSync(path.join(__dirname, '../packages/muhurta/src/muhurtaEngine.ts'), 'utf8'));
-check('I. muhurtaEngine.ts (legacy evaluateMuhurta itself) is untouched -- no L3/L3.2 symbol referenced inside it', !/TITHI_FAMILY_CAUTION|lunarFamilyRules|applyLunarFamilyOverlay|ActionPhase|actionPhase/.test(muhurtaEngineSrc));
+check('I. muhurtaEngine.ts (legacy evaluateMuhurta itself) is untouched -- no L3/L3.2/L4 symbol referenced inside it', !/TITHI_FAMILY_CAUTION|lunarFamilyRules|applyLunarTithiOverlay|ActionPhase|actionPhase|TITHI_EXACT_CAUTION|lunarExactTithiRules/.test(muhurtaEngineSrc));
 const auraFitSrc = stripComments(fs.readFileSync(path.join(__dirname, '../packages/recommendation/src/auraFitEngine.ts'), 'utf8'));
 check('I. usesGenericRulePack\'s own condition is byte-identical to before L3.2 (never changed)', /const usesGenericRulePack = rulePack !== undefined && !\(rulePack\.coverage\.tithi === 'REUSABLE_BASE_RULE' && rulePack\.coverage\.nakshatra === 'REUSABLE_BASE_RULE'\);/.test(auraFitSrc));
 check('I. auraFitEngine.ts still selects the evaluator with the exact same ternary shape (usesGenericRulePack ? evaluateMuhurtaWithRulePack(...) : evaluateMuhurta(...))', /const muhurta = usesGenericRulePack\s*\?\s*evaluateMuhurtaWithRulePack\(/.test(auraFitSrc) && /:\s*evaluateMuhurta\(\{/.test(auraFitSrc));
 check('I. no scoring-formula weight/constant changed (0.45/0.20/0.10/0.10/0.10/0.05 blend weights and the 68/1.8/0.24 muhurtaScore constants are all still present, unmodified)', /muhurtaScore \* 0\.45/.test(auraFitSrc) && /solarScore \* 0\.20/.test(auraFitSrc) && /clamp\(68 \+ effectiveMuhurta\.modifier \* 1\.8 - capabilities\.friction \* 0\.24\)/.test(auraFitSrc));
 check('I. no new MuhurtaIntent was added (still exactly the 24 values L3 already worked from)', !/MuhurtaIntent =[\s\S]*?RIKTA/.test(stripComments(fs.readFileSync(path.join(__dirname, '../packages/muhurta/src/activityOntology.ts'), 'utf8'))));
-check('I. LUNAR_FAMILY_RULES still has exactly one rule (no additional lunar rules introduced by L3.2)', (strip => { const m = strip.match(/LUNAR_FAMILY_RULES: LunarFamilyRule\[\] = \[([^\]]*)\]/); return !!m && m[1].split(',').filter(Boolean).length === 1; })(stripComments(fs.readFileSync(path.join(__dirname, '../packages/muhurta/src/lunarFamilyRules.ts'), 'utf8'))));
+check('I. LUNAR_FAMILY_RULES still has exactly one rule (no additional lunar rules introduced by L3.2/L4)', (strip => { const m = strip.match(/LUNAR_FAMILY_RULES: LunarFamilyRule\[\] = \[([^\]]*)\]/); return !!m && m[1].split(',').filter(Boolean).length === 1; })(stripComments(fs.readFileSync(path.join(__dirname, '../packages/muhurta/src/lunarFamilyRules.ts'), 'utf8'))));
 check('I. no TITHI_FAMILY_SUPPORT anywhere in the repo (L3.2 stays caution-only, matching L3)', !/TITHI_FAMILY_SUPPORT/.test(auraFitSrc + muhurtaEngineSrc + stripComments(fs.readFileSync(path.join(__dirname, '../packages/muhurta/src/activityOntology.ts'), 'utf8'))));
+const lunarExactTithiRulesSrc = stripComments(fs.readFileSync(path.join(__dirname, '../packages/muhurta/src/lunarExactTithiRules.ts'), 'utf8'));
+check('I. LUNAR_EXACT_TITHI_RULES has exactly one rule (no additional exact-Tithi rules introduced by L4)', (() => { const m = lunarExactTithiRulesSrc.match(/LUNAR_EXACT_TITHI_RULES: LunarExactTithiRule\[\] = \[([^\]]*)\]/); return !!m && m[1].split(',').filter(Boolean).length === 1; })());
+check('I. no TITHI_EXACT_SUPPORT anywhere in the repo (L4 stays caution-only, matching L3)', !/TITHI_EXACT_SUPPORT/.test(auraFitSrc + muhurtaEngineSrc + lunarExactTithiRulesSrc + stripComments(fs.readFileSync(path.join(__dirname, '../packages/muhurta/src/activityOntology.ts'), 'utf8'))));
+check('I. Griha Pravesh\'s and Marriage\'s dedicated Tithi data is byte-for-byte untouched by L4 (their avoid/favorable regex arrays still match exactly what L3/L3.2 already established)', /avoid: \[\/\^Amavasya\$\/, \/Chaturthi\/, \/Ashtami\/, \/Navami\/, \/Chaturdashi\/\]/.test(stripComments(fs.readFileSync(path.join(__dirname, '../packages/muhurta/src/muhurtaRulePacks.ts'), 'utf8'))) && /avoid: \[\/Chaturthi\/, \/Navami\/, \/Chaturdashi\/\]/.test(stripComments(fs.readFileSync(path.join(__dirname, '../packages/muhurta/src/muhurtaRulePacks.ts'), 'utf8'))));
 check(
   'I. no global MuhurtaEvaluation.provenance fix: the rule-pack path still sets provenance; the legacy evaluateMuhurta() path (including one that received the L3.2 overlay) still leaves it undefined -- per the explicit non-goal, never introduced into a legacy result',
   evaluateMuhurtaWithRulePack({ classification: grihaDef.muhurta, date: riktaDate, windowType: 'NEUTRAL' }).provenance !== undefined &&

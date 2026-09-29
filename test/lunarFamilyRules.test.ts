@@ -7,7 +7,7 @@
 import fs from 'fs';
 import path from 'path';
 import { buildLunarTithiContext } from '../packages/muhurta/src/lunarTithiContext';
-import { resolveLunarFamilyReason, applyLunarFamilyOverlay, RIKTA_START_CAUTION_RULE } from '../packages/muhurta/src/lunarFamilyRules';
+import { resolveLunarFamilyReason, applyLunarTithiOverlay, RIKTA_START_CAUTION_RULE } from '../packages/muhurta/src/lunarFamilyRules';
 import type { MuhurtaClassification, MuhurtaReason } from '../packages/muhurta/src/activityOntology';
 import type { ActionPhase } from '../packages/muhurta/src/actionPhase';
 
@@ -96,7 +96,7 @@ async function main() {
     check('14. PakshaBand does not alter the resolved reason (identical polarity/impact/code regardless of WEAK vs STRONG)', JSON.stringify({ ...a, value: null }) === JSON.stringify({ ...b, value: null }) && a?.value === 'RIKTA' && b?.value === 'RIKTA');
   }
 
-  // ============================ 15. applyLunarFamilyOverlay -- shared, evaluator-independent overlay ============================
+  // ============================ 15. applyLunarTithiOverlay -- shared, evaluator-independent overlay ============================
   const nakshatraReason: MuhurtaReason = { code: 'NAKSHATRA_SUPPORTIVE', factor: 'NAKSHATRA', polarity: 'SUPPORT', impact: 8, value: 'Rohini' };
   const yogaReason: MuhurtaReason = { code: 'YOGA_SUPPORTIVE', factor: 'YOGA', polarity: 'SUPPORT', impact: 4, value: 'Siddhi' };
   const existingTithiSupportive: MuhurtaReason = { code: 'TITHI_SUPPORTIVE', factor: 'TITHI', polarity: 'SUPPORT', impact: 5, value: 'Shukla Chaturthi' };
@@ -109,47 +109,47 @@ async function main() {
   const projectStart = classification('PROJECT_START');
 
   // ---- identity: actionPhase absent/wrong ----
-  check('15. identity: actionPhase undefined -> reasons returned UNCHANGED (same array reference)', applyLunarFamilyOverlay(withSupportiveTithi, 'REUSABLE_BASE_RULE', riktaCtx, projectStart, undefined) === withSupportiveTithi);
+  check('15. identity: actionPhase undefined -> reasons returned UNCHANGED (same array reference)', applyLunarTithiOverlay(withSupportiveTithi, 'REUSABLE_BASE_RULE', riktaCtx, projectStart, undefined) === withSupportiveTithi);
   for (const phase of ['CONTINUE', 'FINISH', 'PREPARE', 'REVIEW'] as ActionPhase[]) {
-    check(`15. identity: actionPhase ${phase} -> reasons returned UNCHANGED (same array reference)`, applyLunarFamilyOverlay(withSupportiveTithi, 'REUSABLE_BASE_RULE', riktaCtx, projectStart, phase) === withSupportiveTithi);
+    check(`15. identity: actionPhase ${phase} -> reasons returned UNCHANGED (same array reference)`, applyLunarTithiOverlay(withSupportiveTithi, 'REUSABLE_BASE_RULE', riktaCtx, projectStart, phase) === withSupportiveTithi);
   }
   // ---- identity: lunar context is not RIKTA ----
-  check('15. identity: lunar context is non-Rikta (Shukla Panchami) -> reasons returned UNCHANGED', applyLunarFamilyOverlay(withSupportiveTithi, 'REUSABLE_BASE_RULE', nonRiktaCtx, projectStart, 'START') === withSupportiveTithi);
+  check('15. identity: lunar context is non-Rikta (Shukla Panchami) -> reasons returned UNCHANGED', applyLunarTithiOverlay(withSupportiveTithi, 'REUSABLE_BASE_RULE', nonRiktaCtx, projectStart, 'START') === withSupportiveTithi);
   // ---- identity: unsupported intent ----
-  check('15. identity: unsupported intent (WORKOUT) -> reasons returned UNCHANGED', applyLunarFamilyOverlay(withSupportiveTithi, 'REUSABLE_BASE_RULE', riktaCtx, classification('WORKOUT'), 'START') === withSupportiveTithi);
+  check('15. identity: unsupported intent (WORKOUT) -> reasons returned UNCHANGED', applyLunarTithiOverlay(withSupportiveTithi, 'REUSABLE_BASE_RULE', riktaCtx, classification('WORKOUT'), 'START') === withSupportiveTithi);
   // ---- identity: Tithi coverage IMPLEMENTED (dedicated pack owns Tithi outright -- Griha Pravesh/Marriage) ----
-  check('15. identity: tithiCoverage IMPLEMENTED -> reasons returned UNCHANGED regardless of phase/context (dedicated-pack precedence)', applyLunarFamilyOverlay(withUnfavorableTithi, 'IMPLEMENTED', riktaCtx, classification('GRIHA_PRAVESH'), 'START') === withUnfavorableTithi);
-  check('15. identity: tithiCoverage MISSING with no match still returns the SAME reference when nothing applies', applyLunarFamilyOverlay(noTithiReasons, 'MISSING', riktaCtx, classification('WORKOUT'), 'START') === noTithiReasons);
+  check('15. identity: tithiCoverage IMPLEMENTED -> reasons returned UNCHANGED regardless of phase/context (dedicated-pack precedence)', applyLunarTithiOverlay(withUnfavorableTithi, 'IMPLEMENTED', riktaCtx, classification('GRIHA_PRAVESH'), 'START') === withUnfavorableTithi);
+  check('15. identity: tithiCoverage MISSING with no match still returns the SAME reference when nothing applies', applyLunarTithiOverlay(noTithiReasons, 'MISSING', riktaCtx, classification('WORKOUT'), 'START') === noTithiReasons);
 
   // ---- matching: replaces an existing TITHI_SUPPORTIVE reason ----
   {
-    const result = applyLunarFamilyOverlay(withSupportiveTithi, 'REUSABLE_BASE_RULE', riktaCtx, projectStart, 'START');
+    const result = applyLunarTithiOverlay(withSupportiveTithi, 'REUSABLE_BASE_RULE', riktaCtx, projectStart, 'START');
     const tithiReasons = result.filter((r) => r.factor === 'TITHI');
     check('15. match: existing TITHI_SUPPORTIVE is replaced -- exactly one TITHI reason remains, and it is TITHI_FAMILY_CAUTION', tithiReasons.length === 1 && tithiReasons[0].code === 'TITHI_FAMILY_CAUTION');
     check('15. match: non-TITHI reasons (Nakshatra, Yoga) are preserved exactly, same objects, same relative order', result.includes(nakshatraReason) && result.includes(yogaReason) && result.indexOf(nakshatraReason) < result.indexOf(yogaReason));
   }
   // ---- matching: replaces an existing TITHI_UNFAVORABLE reason ----
   {
-    const result = applyLunarFamilyOverlay(withUnfavorableTithi, 'REUSABLE_BASE_RULE', riktaCtx, projectStart, 'START');
+    const result = applyLunarTithiOverlay(withUnfavorableTithi, 'REUSABLE_BASE_RULE', riktaCtx, projectStart, 'START');
     const tithiReasons = result.filter((r) => r.factor === 'TITHI');
     check('15. match: existing TITHI_UNFAVORABLE is replaced -- exactly one TITHI reason remains, and it is TITHI_FAMILY_CAUTION', tithiReasons.length === 1 && tithiReasons[0].code === 'TITHI_FAMILY_CAUTION');
     check('15. match: non-TITHI reasons preserved exactly here too', result.includes(nakshatraReason) && result.includes(yogaReason));
   }
   // ---- matching: no existing Tithi reason at all -- still adds exactly one ----
   {
-    const result = applyLunarFamilyOverlay(noTithiReasons, 'REUSABLE_BASE_RULE', riktaCtx, projectStart, 'START');
+    const result = applyLunarTithiOverlay(noTithiReasons, 'REUSABLE_BASE_RULE', riktaCtx, projectStart, 'START');
     const tithiReasons = result.filter((r) => r.factor === 'TITHI');
     check('15. match: no prior Tithi reason -- overlay still adds exactly one TITHI_FAMILY_CAUTION', tithiReasons.length === 1 && tithiReasons[0].code === 'TITHI_FAMILY_CAUTION');
     check('15. match: non-TITHI reasons preserved exactly when there was no prior Tithi reason', result.includes(nakshatraReason) && result.includes(yogaReason));
   }
   // ---- shape of the added reason ----
   {
-    const result = applyLunarFamilyOverlay(withSupportiveTithi, 'REUSABLE_BASE_RULE', riktaCtx, projectStart, 'START');
+    const result = applyLunarTithiOverlay(withSupportiveTithi, 'REUSABLE_BASE_RULE', riktaCtx, projectStart, 'START');
     const added = result.find((r) => r.code === 'TITHI_FAMILY_CAUTION')!;
     check('15. added reason shape: factor TITHI, polarity CAUTION, impact -8, value RIKTA', added.factor === 'TITHI' && added.polarity === 'CAUTION' && added.impact === -8 && added.value === 'RIKTA');
   }
   // ---- REUSABLE_BASE_RULE vs MISSING both count as "not dedicated" for precedence purposes ----
-  check('15. tithiCoverage MISSING (no legacy proxy at all) still allows a match, same as REUSABLE_BASE_RULE', applyLunarFamilyOverlay(noTithiReasons, 'MISSING', riktaCtx, projectStart, 'START').some((r) => r.code === 'TITHI_FAMILY_CAUTION'));
+  check('15. tithiCoverage MISSING (no legacy proxy at all) still allows a match, same as REUSABLE_BASE_RULE', applyLunarTithiOverlay(noTithiReasons, 'MISSING', riktaCtx, projectStart, 'START').some((r) => r.code === 'TITHI_FAMILY_CAUTION'));
 
   // ============================ structural: minimal, non-speculative surface ============================
   const src = strip(read('../packages/muhurta/src/lunarFamilyRules.ts'));
