@@ -81,9 +81,13 @@ function main() {
   check('17. PlannedActivity model block is present and extractable', plannedActivityBlockMatch !== null);
   const plannedActivityBlock = plannedActivityBlockMatch ? plannedActivityBlockMatch[0] : '';
   const goalMentionLines = plannedActivityBlock.split('\n').filter((line) => /Goal/.test(line) && !line.trim().startsWith('//'));
+  // Goals V2 G2.2.1 added a second, equally back-relation-only navigation
+  // field (goalActivityExecution GoalActivityExecution?) for the same
+  // reason as goalActivity above -- broadened to accept either, still
+  // rejecting any line that carries a real `fields:` FK attribute.
   check(
-    '17. every non-comment line in the PlannedActivity model block mentioning Goal is the back-relation-only field (no @relation(fields:...) attribute, i.e. no real column/FK)',
-    goalMentionLines.length > 0 && goalMentionLines.every((line) => /goalActivity\s+GoalActivity\?/.test(line) && !line.includes('fields:'))
+    '17. every non-comment line in the PlannedActivity model block mentioning Goal is a back-relation-only field (no @relation(fields:...) attribute, i.e. no real column/FK)',
+    goalMentionLines.length > 0 && goalMentionLines.every((line) => (/goalActivity\s+GoalActivity\?/.test(line) || /goalActivityExecution\s+GoalActivityExecution\?/.test(line)) && !line.includes('fields:'))
   );
 
   // ============================================================

@@ -646,9 +646,9 @@ for (const rel of forbiddenL3Files) {
 const schemaSrc = fs.readFileSync(path.join(__dirname, '../apps/web/prisma/schema.prisma'), 'utf8');
 check('structural: prisma/schema.prisma does not reference any L3/L4 lunar symbol', !FORBIDDEN_L3_L4_SYMBOLS.test(schemaSrc));
 const migrationDirsL3 = fs.readdirSync(path.join(__dirname, '../apps/web/prisma/migrations')).filter((d: string) => /^\d{4}_/.test(d));
-// Goals V2 G2.1 added migration 0040 (completion requirement model,
-// unrelated to L4) -- bumped from 39.
-check('structural: migration count remains 40 (no new L4 migration)', migrationDirsL3.length === 40);
+// Goals V2 G2.1/G2.2.1 added migrations 0040/0041 (unrelated to L4) --
+// bumped from 39.
+check('structural: migration count remains 41 (no new L4 migration)', migrationDirsL3.length === 41);
 check('structural: lunarTithiContext.ts is untouched (no L3/L4 symbol referenced inside it)', !/TITHI_FAMILY_CAUTION|lunarFamilyRules|RIKTA_START_CAUTION|LunarFamilyRule|TITHI_EXACT_CAUTION|lunarExactTithiRules|AMAVASYA_START_CAUTION|LunarExactTithiRule/.test(stripComments(fs.readFileSync(path.join(__dirname, '../packages/muhurta/src/lunarTithiContext.ts'), 'utf8'))));
 check('structural: actionPhase.ts is untouched (still zero imports, still just the bare type)', !/^import\b/m.test(stripComments(fs.readFileSync(path.join(__dirname, '../packages/muhurta/src/actionPhase.ts'), 'utf8'))));
 

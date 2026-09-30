@@ -110,13 +110,13 @@ const migDir = path.join(root, 'apps/web/prisma/migrations');
 const migs = fs.readdirSync(migDir).filter((d) => /^\d{4}_/.test(d));
 const sqlText = fs.readFileSync(path.join(migDir, '0039_planned_activity_scheduling_mode/migration.sql'), 'utf8');
 const sqlCode = sqlText.replace(/--.*$/gm, '');
-// Goals V2 G2.1 later added migration 0040 (completion requirement model,
-// unrelated to scheduling mode) -- bumped from 39; 0039 is no longer the
-// sorted-last migration, but is still the LAST migration before 0040, which
-// is what actually matters for this PR's own "no other migration was
-// touched" claim (see the very next check below, itself already tautological
-// and unaffected by this).
-check('5/40. the migration chain now has 40 migrations, 0039 present and immediately followed only by the later, unrelated Goals V2 G2.1 0040', migs.length === 40 && migs.includes('0039_planned_activity_scheduling_mode') && migs.sort()[migs.length - 1] === '0040_goal_activity_completion_requirement');
+// Goals V2 G2.1/G2.2.1 later added migrations 0040/0041 (unrelated to
+// scheduling mode) -- bumped from 39; 0039 is no longer the sorted-last
+// migration, but is still the LAST migration before 0040/0041, which is
+// what actually matters for this PR's own "no other migration was touched"
+// claim (see the very next check below, itself already tautological and
+// unaffected by this).
+check('5/40. the migration chain now has 41 migrations, 0039 present and immediately followed only by the later, unrelated Goals V2 G2.1/G2.2.1 0040/0041', migs.length === 41 && migs.includes('0039_planned_activity_scheduling_mode') && migs.sort()[migs.length - 1] === '0041_goal_activity_execution');
 check('4/5/40. the migration is additive: one enum type + one nullable column; NO default, NO backfill/UPDATE, NO drop/alter of existing data', /CREATE TYPE "PlannedActivitySchedulingMode" AS ENUM \('FIXED', 'FLEXIBLE'\);/.test(sqlCode) && /ALTER TABLE "PlannedActivity" ADD COLUMN "schedulingMode" "PlannedActivitySchedulingMode";/.test(sqlCode) && !/\bDEFAULT\b|\bUPDATE\b|\bDROP\b|\bNOT NULL\b|\bDELETE\b/i.test(sqlCode));
 const schema = read('apps/web/prisma/schema.prisma');
 check('5/47/48. the Prisma schema declares the enum PlannedActivitySchedulingMode { FIXED FLEXIBLE } and a nullable, default-less PlannedActivity.schedulingMode', /enum PlannedActivitySchedulingMode \{\s*FIXED\s*FLEXIBLE\s*\}/.test(schema) && /schedulingMode\s+PlannedActivitySchedulingMode\?\s*\n/.test(schema) && !/schedulingMode[^\n]*@default/.test(schema));

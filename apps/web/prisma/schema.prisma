@@ -70,6 +70,7 @@ model User {
   availabilityPeriods UserAvailabilityPeriod[]
   goals               Goal[]
   goalActivities      GoalActivity[]
+  goalActivityExecutions GoalActivityExecution[]
   captures            Capture[]
 }
 
@@ -405,6 +406,10 @@ model PlannedActivity {
   // relation as goalActivity above: ZERO columns on PlannedActivity; the
   // plannedActivityId FK lives entirely on Capture.
   capture           Capture?
+  // Goals V2 G2.2.1 (migration 0041) -- same Prisma-only opposite relation
+  // as goalActivity/capture above: ZERO columns on PlannedActivity; the
+  // plannedActivityId FK lives entirely on GoalActivityExecution.
+  goalActivityExecution GoalActivityExecution?
 
   @@index([userId, plannedStartAt])
   @@index([userId, status])
@@ -714,7 +719,94 @@ model GoalActivity {
   createdAt         DateTime         @default(now()) @db.Timestamptz(3)
   updatedAt         DateTime         @updatedAt @db.Timestamptz(3)
 
+  // Goals V2 G2.2.1 (migration 0041) -- Prisma's relation validator requires
+  // this opposite navigation field (same reasoning as PlannedActivity.goalActivity's
+  // own doc comment above: zero DB footprint, the FK lives entirely on
+  // GoalActivityExecution). Many rows over time are legitimate here (one per
+  // real occurrence across replans/Moves) -- NOT a 0..1 relationship the way
+  // plannedActivityId above is.
+  executions        GoalActivityExecution[]
+
   @@index([userId, goalId, status])
+}
+
+// Goals V2 G2.2.1 (migration 0041) -- a durable execution/progress fact for
+// one GoalActivity occurrence (apps/web/lib/goalActivityExecution.ts). Exists
+// because the G2.2 architecture audit established that PlannedActivity is a
+// DISPOSABLE schedule placement, not an enduring occurrence identity: Move
+// cancels the original row in place (status -> MOVED) and inserts a brand
+// new row for the live successor (packages/.../planMove.ts's applyMoveWrites),
+// exactly the same "repoint, don't recreate" pattern GoalActivity.plannedActivityId
+// and Capture.plannedActivityId already rely on. A progress fact tied
+// directly to PlannedActivity.id would therefore be silently lost across a
+// Move; keying it to GoalActivity instead makes it survive Move automatically.
+//
+// This model is OCCURRENCE-BOUND ONLY (Read 20 pages, Workout 30 minutes) --
+// it deliberately has no day-bucket/localDate concept and does not attempt
+// to represent day-accumulating targets (Drink 8 glasses, Walk 6000 steps),
+// which remain valid CompletionRequirement kinds (G2.1) but stay
+// progress-inert until a future, separate day-scoped design exists.
+//
+// G2.2.1 is schema/domain-only: no production code path creates, updates,
+// reads, or displays a row of this model yet.
+model GoalActivityExecution {
+  id             String       @id @default(uuid())
+  userId         String
+  user           User         @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  // Required, immutable after creation (never updated by any writer) --
+  // the stable identity this whole model exists to provide. Cascade on
+  // Goal->GoalActivity deletion already removes GoalActivity rows outright
+  // (existing precedent above); an execution fact has no independent
+  // meaning once its own GoalActivity is gone, so it cascades too.
+  goalActivityId String
+  goalActivity   GoalActivity @relation(fields: [goalActivityId], references: [id], onDelete: Cascade)
+
+  // The current/live PlannedActivity this execution is associated with.
+  // Nullable + SetNull -- same precedent as GoalActivity.plannedActivityId
+  // and Capture.plannedActivityId above -- so that deletePlannedActivity's
+  // existing, already-shipped hard-delete of an old LOGGED/CANCELLED plan
+  // (users clearing "Recently Completed") cleanly unlinks rather than
+  // destroying the historical execution fact (its snapshot + currentValue
+  // remain queryable with plannedActivityId simply NULL afterward). UNIQUE
+  // so one live PlannedActivity can never be claimed by more than one
+  // execution record at a time.
+  plannedActivityId String?         @unique
+  plannedActivity   PlannedActivity? @relation(fields: [plannedActivityId], references: [id], onDelete: SetNull)
+
+  // Immutable snapshot of GoalActivity's CompletionRequirement (G2.1,
+  // apps/web/lib/goalCompletion.ts) AT THE MOMENT this execution was
+  // created -- "what counted as completion when this began?" NEVER
+  // re-derived by joining the live GoalActivity later: if the GoalActivity's
+  // own target is edited afterward, this snapshot must NOT change, so a
+  // historical "20/20 pages" can never silently become "20/30". Same
+  // validation rules as CompletionRequirement itself (validateCompletionRequirement).
+  completionKindSnapshot        String
+  completionTargetValueSnapshot Float?
+  completionUnitSnapshot        String?
+
+  // The measured fact. NULL for DONE (nothing to measure). Never clamped to
+  // the snapshotted target -- an actual value may legitimately exceed it.
+  // DOUBLE PRECISION, same fractional-preserving convention as
+  // completionTargetValueSnapshot/GoalActivity.completionTargetValue.
+  currentValue Float?
+
+  // Minimally compatible, deliberately loose nullable string -- HabitLog.logSource
+  // ('AURA_PLANNED' | 'AURA_DO_NOW' | 'MANUAL' | 'OVERRIDE_CAUTION', db.ts) is
+  // the closest existing execution-fact source vocabulary in this codebase,
+  // but it has never been exported as a single canonical shared TS type (it
+  // is repeated inline at each db.ts call site) -- there is nothing clean to
+  // import and reuse here. This column is intended to draw values from that
+  // SAME conceptual vocabulary (never a new, incompatible enum), without
+  // inventing connector-specific values (no APPLE_HEALTH/HEALTH_CONNECT/
+  // EXTERNAL_OBSERVATION) ahead of any actual connector existing. No
+  // production writer sets this in G2.2.1.
+  source String?
+
+  createdAt DateTime @default(now()) @db.Timestamptz(3)
+  updatedAt DateTime @updatedAt @db.Timestamptz(3)
+
+  @@index([userId, goalActivityId])
 }
 
 // Quick Capture V1 PR A (migration 0036) -- "I want to do this, but I have
