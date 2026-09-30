@@ -1,12 +1,17 @@
 /**
- * Goals V2 G2.2.1/G2.2.2 -- narrow structural guards confirming these
- * slices stayed exactly as scoped as intended, each scoped to exactly the
- * model/module in question -- never a brittle repo-wide grep. G2.2.1's own
- * guards (schema shape, taxonomy reuse) are unchanged; G2.2.2 adds guards
- * for its own section 41: GoalActivityExecution is now legitimately
- * referenced by the completion path (db.ts's logPlannedActivity) but must
- * remain absent from Constructor, the Move path, Home presentation,
- * DailyAgenda, and Goal progress computation.
+ * Goals V2 G2.2.1/G2.2.2/G2.2.3 -- narrow structural guards confirming
+ * these slices stayed exactly as scoped as intended, each scoped to
+ * exactly the model/module in question -- never a brittle repo-wide grep.
+ * G2.2.1's guards (schema shape, taxonomy reuse) are unchanged. G2.2.2
+ * added guards for its own section 41: GoalActivityExecution is
+ * legitimately referenced by the completion path (db.ts's
+ * logPlannedActivity). G2.2.3 adds guards for its own section 34:
+ * GoalActivityExecution is now ALSO legitimately referenced by
+ * planMove.ts's applyMoveWrites (a pure pointer repoint, alongside the
+ * existing Capture/GoalActivity continuity lines) -- but that repoint must
+ * never reference completion-definition fields, currentValue, or source,
+ * and must remain absent from Constructor, Home presentation, and
+ * DailyAgenda.
  */
 import * as fs from 'fs';
 import * as path from 'path';
@@ -68,8 +73,20 @@ const logPlannedActivityBody = dbSrc.slice(dbSrc.indexOf('export async function 
 check('G2.2.2: db.ts logPlannedActivity DOES reference GoalActivityExecution -- the intended completion-time write', /GoalActivityExecution/.test(logPlannedActivityBody));
 check('G2.2.2: logPlannedActivity resolves GoalActivity linkage server-side (queries WHERE "plannedActivityId" = ...), never trusts a client-supplied goalActivityId', /SELECT \* FROM "GoalActivity" WHERE "plannedActivityId"/.test(logPlannedActivityBody));
 check('G2.2.2: logPlannedActivity never re-snapshots from a live GoalActivity when an execution already exists (uses fromPersistedGoalActivityExecutionSnapshot on the existing row, not normalizeGoalActivityCompletionRequirement, in that branch)', /existingExecution\s*\n\s*\?\s*fromPersistedGoalActivityExecutionSnapshot/.test(logPlannedActivityBody));
-check('planMove.ts (movePlannedActivity/applyMoveWrites) does not reference GoalActivityExecution -- Move continuity is a later slice (G2.2.3)', !/GoalActivityExecution/.test(read('apps/web/lib/planMove.ts')));
-check('homeCompletion.ts (Home/Right Now) does not reference GoalActivityExecution -- no UX change in G2.2.2', !/GoalActivityExecution/.test(read('apps/web/lib/homeCompletion.ts')));
+const planMoveSrc = read('apps/web/lib/planMove.ts');
+const applyMoveWritesBodyRaw = planMoveSrc.slice(planMoveSrc.indexOf('export async function applyMoveWrites'));
+// Field-declaration/statement checks below must ignore this function's own
+// doc-comment prose (which legitimately discusses currentValue/source in
+// explaining why they're untouched) -- only real code should trip them.
+const applyMoveWritesBody = stripComments(applyMoveWritesBodyRaw);
+check('G2.2.3: applyMoveWrites DOES reference GoalActivityExecution -- the intended continuity repoint', /GoalActivityExecution/.test(applyMoveWritesBody));
+check('G2.2.3: the GoalActivityExecution statement in applyMoveWrites is a pure pointer UPDATE (plannedActivityId only) -- it never references completionKind/completionTargetValue/completionUnit (would mean re-snapshotting from a live GoalActivity)', /UPDATE "GoalActivityExecution" SET "plannedActivityId"/.test(applyMoveWritesBody) && !/completionKind|completionTargetValue|completionUnit/.test(applyMoveWritesBody));
+check('G2.2.3: applyMoveWrites never references currentValue -- Move must not reset/default/clamp/recalculate it', !/currentValue/.test(applyMoveWritesBody));
+check('G2.2.3: applyMoveWrites never references source -- moving a plan is not a progress observation', !/"source"/.test(applyMoveWritesBody));
+check('G2.2.3: applyMoveWrites contains no INSERT INTO "GoalActivityExecution" -- Move never creates an execution row', !/INSERT INTO "GoalActivityExecution"/.test(applyMoveWritesBody));
+check('G2.2.3: applyMoveWrites contains no DELETE FROM "GoalActivityExecution" -- Move never deletes an execution row', !/DELETE FROM "GoalActivityExecution"/.test(applyMoveWritesBody));
+check('G2.2.3: movePlannedActivity\'s public input shape (MovePlanInput) still carries only newStartAt -- no new client-supplied executionId/goalActivityId/currentValue/completionRequirement field', /export interface MovePlanInput \{\s*newStartAt: Date;\s*\}/.test(planMoveSrc));
+check('homeCompletion.ts (Home/Right Now) does not reference GoalActivityExecution -- no UX change in G2.2.2/G2.2.3', !/GoalActivityExecution/.test(read('apps/web/lib/homeCompletion.ts')));
 check('dailyAgenda.ts does not reference GoalActivityExecution', !/GoalActivityExecution/.test(read('apps/web/lib/dailyAgenda.ts')));
 check('goals.ts (computeGoalProgress) does not reference GoalActivityExecution -- Goal progress stays activity-count-derived, unaffected by currentValue', !/GoalActivityExecution/.test(read('apps/web/lib/goals.ts')));
 check('goalsPresentation.ts does not reference GoalActivityExecution (no read-model exposure yet)', !/GoalActivityExecution/.test(read('apps/web/lib/goalsPresentation.ts')));
