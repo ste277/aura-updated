@@ -691,6 +691,26 @@ model GoalActivity {
   plannedActivityId String?          @unique
   plannedActivity   PlannedActivity? @relation(fields: [plannedActivityId], references: [id], onDelete: SetNull)
 
+  // Goals V2 G2.1 (migration 0040) -- the canonical answer to "what counts
+  // as completing one occurrence of this GoalActivity?" (apps/web/lib/
+  // goalCompletion.ts). Three independent nullable columns, no default, no
+  // backfill -- same convention as PlannedActivity.schedulingMode's own
+  // NULL = legacy/unknown precedent. completionKind = NULL means "never
+  // specified" and is ALWAYS normalized to canonical DONE
+  // (normalizeGoalActivityCompletionRequirement) -- this is deliberately
+  // indistinguishable from an explicit DONE, since the two behave
+  // identically and every existing/legacy row must keep meaning exactly
+  // "tap Done and the occurrence is complete" without any migration. Not
+  // yet written by any production call site in G2.1 -- every current
+  // GoalActivity creation path (createGoalWithActivities, addGoalActivity,
+  // GOAL_TEMPLATES) continues to leave these NULL.
+  completionKind        String?
+  // DOUBLE PRECISION, same convention as User.latitude/longitude -- a
+  // fractional target (e.g. 2.5 km) must be representable exactly, never
+  // rounded to an integer.
+  completionTargetValue Float?
+  completionUnit        String?
+
   createdAt         DateTime         @default(now()) @db.Timestamptz(3)
   updatedAt         DateTime         @updatedAt @db.Timestamptz(3)
 

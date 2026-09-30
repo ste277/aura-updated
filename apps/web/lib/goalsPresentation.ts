@@ -16,6 +16,7 @@
  */
 
 import { isValidCivilDateString, type DerivedGoalActivityState, type GoalActivityStatus, type GoalStatus, type GoalTemplateCategory } from './goals';
+import type { CompletionRequirement } from './goalCompletion';
 
 export interface GoalSummary {
   id: string;
@@ -35,6 +36,11 @@ export interface GoalActivityView {
   status: GoalActivityStatus;
   plannedActivityId: string | null;
   derivedState: DerivedGoalActivityState;
+  // Goals V2 G2.1 -- additive, not yet consumed by any UI (the G2.1 ticket's
+  // own scope boundary: no progress bars, no numeric controls, no UI
+  // redesign). Always the canonical, normalized shape -- see
+  // normalizeGoalActivityCompletionRequirement in ./goalCompletion.
+  completionRequirement: CompletionRequirement;
   createdAt: string;
   updatedAt: string;
 }

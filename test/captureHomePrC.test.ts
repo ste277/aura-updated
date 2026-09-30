@@ -84,7 +84,9 @@ async function main() {
   check('K/L. no Plan My Day / Constructor / Timing Search / acceptance references in the composer', !/plan-day|dayConstructor|timingSearch|acceptConstructedDay|createPlannedActivity|fetch\('\/api\/(plans|day-constructor|timing)/.test(composer + strip(read('../apps/web/lib/quickCaptureSubmit.ts'))));
   check('the composer only writes through the existing endpoint', (strip(read('../apps/web/lib/quickCaptureSubmit.ts')).match(/fetchImpl\('/g) ?? []).length === 1 && /'\/api\/captures'/.test(read('../apps/web/lib/quickCaptureSubmit.ts')));
   check('the only new Home wiring is the composer slot + opener (Right Now / Timeline / Opportunities props untouched)', /quickCaptureSlot=/.test(dash) && /onQuickCapture=/.test(dash) && /onPlanOpportunity=\{handlePlanOpportunity\}/.test(dash) && /nextItemId=\{myDayAgenda\?\.nextItem\?\.id\}/.test(dash));
-  check('scope: no schema/migration change, no lifecycle/planning/acceptance file references Home capture', fs.readdirSync(path.join(__dirname, '../apps/web/prisma/migrations')).filter((f) => /^\d{4}_/.test(f)).length === 39 && !/quickCapture|HomeQuickCapture/i.test(strip(read('../apps/web/lib/planDayEntry.ts')) + strip(read('../apps/web/lib/dayConstructorAcceptancePersistence.ts')) + strip(read('../apps/web/lib/captures.ts'))));
+  // Goals V2 G2.1 added migration 0040 (completion requirement model,
+  // unrelated to Home capture) -- bumped from 39.
+  check('scope: no schema/migration change, no lifecycle/planning/acceptance file references Home capture', fs.readdirSync(path.join(__dirname, '../apps/web/prisma/migrations')).filter((f) => /^\d{4}_/.test(f)).length === 40 && !/quickCapture|HomeQuickCapture/i.test(strip(read('../apps/web/lib/planDayEntry.ts')) + strip(read('../apps/web/lib/dayConstructorAcceptancePersistence.ts')) + strip(read('../apps/web/lib/captures.ts'))));
 
   if (!allPassed) {
     console.error('SOME CAPTURE HOME PR C CHECKS FAILED');

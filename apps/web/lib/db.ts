@@ -3,6 +3,7 @@ import { randomUUID } from 'crypto';
 import { derivePlanCompletionHistory } from './planCompletionHistory';
 import { validateCaptureTitle } from './captures';
 import { parseSchedulingMode, type PlannedActivitySchedulingMode } from './plannedActivitySchedulingMode';
+import { toPersistedCompletionRequirement, type CompletionRequirement } from './goalCompletion';
 
 // Sandbox-only substitute for @prisma/client (its engine binary can't be downloaded
 // here — see README). Same schema, same Postgres instance, plain SQL. Swap API
@@ -2339,6 +2340,14 @@ export interface GoalActivity {
   activityId: string | null;
   status: 'SUGGESTED' | 'DISMISSED';
   plannedActivityId: string | null;
+  // Goals V2 G2.1 (migration 0040) -- the raw persisted shape; see
+  // apps/web/lib/goalCompletion.ts's normalizeGoalActivityCompletionRequirement
+  // for turning these into the canonical CompletionRequirement (null
+  // completionKind, from any existing/legacy row or an omitted G2.1
+  // requirement, always normalizes to DONE).
+  completionKind: string | null;
+  completionTargetValue: number | null;
+  completionUnit: string | null;
   createdAt: Date;
   updatedAt: Date;
 }
@@ -2379,7 +2388,14 @@ export async function createGoalWithActivities(input: {
   // server-side; no JS Date object is ever constructed for this value, so
   // there is nothing for a timezone to shift.
   targetDate: string | null;
-  activities: ReadonlyArray<{ title: string; activityId: string | null }>;
+  // Goals V2 G2.1 -- completionRequirement is optional and NOT yet
+  // supplied by any production caller (GOAL_TEMPLATES/the POST /api/goals
+  // route never set it): omitted means DONE, via
+  // toPersistedCompletionRequirement(DONE_COMPLETION_REQUIREMENT)'s own
+  // all-null encoding -- identical to every row this function persisted
+  // before G2.1. Establishes the plumbing for a later slice without
+  // changing today's behavior.
+  activities: ReadonlyArray<{ title: string; activityId: string | null; completionRequirement?: CompletionRequirement }>;
 }): Promise<{ goal: Goal; activities: GoalActivity[] }> {
   const client = await beginTransaction();
   try {
@@ -2392,9 +2408,11 @@ export async function createGoalWithActivities(input: {
 
     const activities: GoalActivity[] = [];
     for (const activity of input.activities) {
+      const persistedCompletion = toPersistedCompletionRequirement(activity.completionRequirement ?? { kind: 'DONE' });
       const result = await client.query(
-        `INSERT INTO "GoalActivity" (id, "userId", "goalId", title, "activityId") VALUES ($1, $2, $3, $4, $5) RETURNING *`,
-        [randomUUID(), input.userId, goalId, activity.title, activity.activityId]
+        `INSERT INTO "GoalActivity" (id, "userId", "goalId", title, "activityId", "completionKind", "completionTargetValue", "completionUnit")
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8) RETURNING *`,
+        [randomUUID(), input.userId, goalId, activity.title, activity.activityId, persistedCompletion.completionKind, persistedCompletion.completionTargetValue, persistedCompletion.completionUnit]
       );
       activities.push(result.rows[0]);
     }
@@ -2486,12 +2504,17 @@ export async function deleteGoal(userId: string, goalId: string): Promise<'DELET
 /** Ownership-checks the parent Goal first (via getGoalForUser) -- returns
  * null rather than inserting under a Goal that doesn't exist or isn't
  * owned by this user. */
-export async function addGoalActivity(userId: string, goalId: string, input: { title: string; activityId: string | null }): Promise<GoalActivity | null> {
+// Goals V2 G2.1 -- completionRequirement is optional and NOT yet supplied
+// by the POST /api/goals/[goalId]/activities route: omitted means DONE
+// (see createGoalWithActivities's identical convention above).
+export async function addGoalActivity(userId: string, goalId: string, input: { title: string; activityId: string | null; completionRequirement?: CompletionRequirement }): Promise<GoalActivity | null> {
   const goal = await getGoalForUser(userId, goalId);
   if (!goal) return null;
+  const persistedCompletion = toPersistedCompletionRequirement(input.completionRequirement ?? { kind: 'DONE' });
   const result = await pool.query(
-    `INSERT INTO "GoalActivity" (id, "userId", "goalId", title, "activityId") VALUES ($1, $2, $3, $4, $5) RETURNING *`,
-    [randomUUID(), userId, goalId, input.title, input.activityId]
+    `INSERT INTO "GoalActivity" (id, "userId", "goalId", title, "activityId", "completionKind", "completionTargetValue", "completionUnit")
+     VALUES ($1, $2, $3, $4, $5, $6, $7, $8) RETURNING *`,
+    [randomUUID(), userId, goalId, input.title, input.activityId, persistedCompletion.completionKind, persistedCompletion.completionTargetValue, persistedCompletion.completionUnit]
   );
   return result.rows[0];
 }

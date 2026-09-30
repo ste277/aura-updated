@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { getSessionFromRequest } from '../../../../lib/session';
 import { getGoalForUser, listGoalActivitiesWithLinkedPlanStatus, deleteGoal } from '../../../../lib/db';
 import { deriveGoalActivityState, computeGoalProgress } from '../../../../lib/goals';
+import { normalizeGoalActivityCompletionRequirement } from '../../../../lib/goalCompletion';
 
 export async function GET(req: NextRequest, { params }: { params: { goalId: string } }) {
   const session = getSessionFromRequest(req);
@@ -16,6 +17,10 @@ export async function GET(req: NextRequest, { params }: { params: { goalId: stri
   const activities = rows.map((row) => ({
     ...row,
     derivedState: deriveGoalActivityState({ status: row.status, plannedActivityId: row.plannedActivityId, linkedPlanStatus: row.linkedPlanStatus }),
+    // Goals V2 G2.1 -- additive: the canonical requirement (null persisted
+    // fields, from any legacy row or an activity created without one,
+    // normalizes to DONE). Not consumed by any UI yet.
+    completionRequirement: normalizeGoalActivityCompletionRequirement(row),
   }));
   const progress = computeGoalProgress(activities.map((activity) => activity.derivedState));
 
