@@ -20,6 +20,7 @@
 
 import type { SolarWindowType } from '../../panchang/src/windows';
 import type { MuhurtaReason } from '../../muhurta/src/activityOntology';
+import type { ActionPhase } from '../../muhurta/src/actionPhase';
 import {
   DailyAssistantContext,
   PlanningHorizon,
@@ -310,8 +311,25 @@ export function evaluateTimingCandidate(params: {
   start: Date;
   durationMinutes: number;
   context: DailyAssistantContext;
+  /** Lunar Intelligence V1 L5/L6.1 -- an explicit, optional occurrence/
+   * evaluation input (packages/muhurta/src/actionPhase.ts), never inferred
+   * here. Omitted by every caller of evaluateTimingCandidate() except
+   * Muhurtham Finder's own search functions (packages/recommendation/src/
+   * muhurthamFinder.ts), which are the one workflow the Lunar Intelligence
+   * V1 L5.1 audit established as a SAFE_START_WORKFLOW -- see that module's
+   * own comments at each call site that supplies 'START'. This function
+   * itself makes no decision about the value; it only forwards whatever it
+   * receives (or nothing) to BOTH evaluations below that ultimately consult
+   * Muhurta/Lunar reasons -- the outer evaluateActivityFit() call (producing
+   * auraFitScore/reasons) AND, as of L6.1, the scoreContinuousBlock() ->
+   * scoreCandidate() -> evaluateActivityFit() path that produces this
+   * candidate's own `score` (see L6's audit for why these were previously
+   * two independently-invoked evaluations that silently disagreed on
+   * ActionPhase -- the reasons/auraFitScore path had it, the score path did
+   * not). Both now receive the identical value from this single param. */
+  actionPhase?: ActionPhase;
 }): TimingCandidate {
-  const { profile, start, durationMinutes, context } = params;
+  const { profile, start, durationMinutes, context, actionPhase } = params;
   const dayContext: DailyAssistantContext = { ...context, now: start };
   const windows = computeAssistantWindows(dayContext);
   const candidates = buildSlotCandidates(windows);
@@ -326,10 +344,10 @@ export function evaluateTimingCandidate(params: {
     // start past `1440 - duration`) -- surfaced explicitly here rather than
     // silently scored, since evaluateTimingCandidate accepts an arbitrary
     // instant a caller could ask about directly (CHECK/COMPARE).
-    rawScore = scoreContinuousBlock(candidates, profile, startMinute, 1440, (minute) => localInstantForMinute(dayContext, minute));
+    rawScore = scoreContinuousBlock(candidates, profile, startMinute, 1440, (minute) => localInstantForMinute(dayContext, minute), actionPhase);
     conflicts.push({ type: 'DURATION_EXCEEDS_DAY', message: 'This duration extends past midnight; scored against the remainder of the day only.' });
   } else {
-    rawScore = scoreContinuousBlock(candidates, profile, startMinute, endMinute, (minute) => localInstantForMinute(dayContext, minute));
+    rawScore = scoreContinuousBlock(candidates, profile, startMinute, endMinute, (minute) => localInstantForMinute(dayContext, minute), actionPhase);
   }
   if (rawScore < 0) {
     conflicts.push({ type: 'FRICTION_WINDOW_BLOCKED', message: 'This time falls in a high-friction period this activity should avoid.' });
@@ -343,7 +361,7 @@ export function evaluateTimingCandidate(params: {
   const primaryCandidate: SlotCandidate = resolveOverlappingCandidate(candidates, startMinute) ?? candidates[0];
   const muhurta = evaluateCandidateMuhurta(primaryCandidate, profile, start);
   const auraFit = profile.activity
-    ? evaluateActivityFit({ activity: profile.activity, date: start, windowType: primaryCandidate.type, personalContext: profile.personalContext, classification: profile.muhurtaClassification })
+    ? evaluateActivityFit({ activity: profile.activity, date: start, windowType: primaryCandidate.type, personalContext: profile.personalContext, classification: profile.muhurtaClassification, actionPhase })
     : undefined;
 
   const end = new Date(start.getTime() + durationMinutes * 60000);

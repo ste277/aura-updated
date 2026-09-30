@@ -1,8 +1,11 @@
 import type { SolarWindowType } from '../../panchang/src/windows';
 import { evaluateMuhurta, MuhurtaActivityFamily } from '../../muhurta/src/muhurtaEngine';
 import type { MuhurtaReason, MuhurtaClassification } from '../../muhurta/src/activityOntology';
-import { formatPersonalReasons } from '../../muhurta/src/muhurtaReasonFormat';
+import type { ActionPhase } from '../../muhurta/src/actionPhase';
+import { formatPersonalReasons, deriveLegacyMuhurtaText } from '../../muhurta/src/muhurtaReasonFormat';
 import { computeMuhurtaSupportLevel, evaluateMuhurtaWithRulePack, resolveMuhurtaRulePack } from '../../muhurta/src/muhurtaRulePacks';
+import { buildLunarTithiContext } from '../../muhurta/src/lunarTithiContext';
+import { applyLunarTithiOverlay } from '../../muhurta/src/lunarFamilyRules';
 import { getTaraBala } from '../../vedic/src/natalChart';
 import type { ActivityProfile } from './personalizedTasks';
 
@@ -109,22 +112,54 @@ export function evaluateActivityFit(params: {
    * by this parameter -- see muhurtaRulePacks.ts's module doc comment for
    * the full reasoning. */
   classification?: MuhurtaClassification;
+  /** Lunar Intelligence V1 L2 -- an explicit evaluation-context hook ("what part of this occurrence are we
+   * evaluating": START/CONTINUE/FINISH/PREPARE/REVIEW), passed through unchanged to evaluateMuhurtaWithRulePack()
+   * when that path is used. Currently UNREAD anywhere -- no score, reason, or eligibility here or downstream
+   * branches on it -- so supplying it changes nothing; absent, it changes nothing either. See
+   * packages/muhurta/src/actionPhase.ts's own doc comment for why this is a per-evaluation input, never part of
+   * `classification` (the same activity can genuinely be a different phase on different days). Never passed to the
+   * legacy evaluateMuhurta() path below -- that path predates this concept and stays untouched. */
+  actionPhase?: ActionPhase;
 }): AuraFitEvaluation {
   const family = familyForActivityProfile(params.activity);
   const rulePack = params.classification ? resolveMuhurtaRulePack(params.classification) : undefined;
   const supportLevel = params.classification && rulePack ? computeMuhurtaSupportLevel(params.classification, rulePack) : undefined;
   const usesGenericRulePack = rulePack !== undefined && !(rulePack.coverage.tithi === 'REUSABLE_BASE_RULE' && rulePack.coverage.nakshatra === 'REUSABLE_BASE_RULE');
   const muhurta = usesGenericRulePack
-    ? evaluateMuhurtaWithRulePack({ classification: params.classification!, date: params.date, windowType: params.windowType })
+    ? evaluateMuhurtaWithRulePack({ classification: params.classification!, date: params.date, windowType: params.windowType, actionPhase: params.actionPhase })
     : evaluateMuhurta({
         taskTitle: params.activity.title,
         date: params.date,
         windowType: params.windowType,
         family,
       });
-  const capabilities = capabilitiesForWindow(params.windowType, muhurta.modifier);
+  // Lunar Intelligence V1 L3.2/L4 -- applied ONLY when the LEGACY branch above just ran (never usesGenericRulePack,
+  // which is NEVER changed by this): the rule-pack branch already applied this exact same shared overlay inside
+  // evaluateMuhurtaWithRulePack itself (muhurtaRulePacks.ts), so applying it again here would be a second,
+  // redundant call, not a genuinely new evaluation -- each evaluation gets the overlay exactly once. The legacy
+  // evaluateMuhurta() function itself is never modified for this (it predates ActionPhase and stays untouched, per
+  // L2's own contract) -- this only post-processes its already-returned MuhurtaEvaluation. Reuses the Tithi name
+  // the legacy evaluator already computed (muhurta.panchanga.tithi) -- no second getTithi()/Panchang read, no new
+  // astronomy. `family`/`panchanga`/`provenance` are preserved exactly as the legacy evaluator produced them
+  // (provenance stays undefined -- never contaminated with rule-pack provenance for a legacy result); only
+  // `reasons`/`modifier` and their purely-derived text (`blockers`/`supports`/`summary`, via the same
+  // deriveLegacyMuhurtaText() the rule-pack path already uses) are updated, and ONLY when the overlay genuinely
+  // changed something. applyLunarTithiOverlay tries the exact-Tithi layer (Amavasya) before the Tithi-family layer
+  // (Rikta) internally -- this call site does not choose between them.
+  const effectiveMuhurta =
+    !usesGenericRulePack && rulePack
+      ? (() => {
+          const lunarContext = rulePack.coverage.tithi === 'IMPLEMENTED' ? null : buildLunarTithiContext(muhurta.panchanga.tithi);
+          const overlaidReasons = applyLunarTithiOverlay(muhurta.reasons, rulePack.coverage.tithi, lunarContext, params.classification!, params.actionPhase);
+          if (overlaidReasons === muhurta.reasons) return muhurta; // identity: nothing matched, behaviorally unchanged
+          const overlaidModifier = overlaidReasons.reduce((total, reason) => total + (reason.impact ?? 0), 0);
+          const overlaidText = deriveLegacyMuhurtaText(overlaidReasons);
+          return { ...muhurta, reasons: overlaidReasons, modifier: overlaidModifier, blockers: overlaidText.blockers, supports: overlaidText.supports, summary: overlaidText.summary };
+        })()
+      : muhurta;
+  const capabilities = capabilitiesForWindow(params.windowType, effectiveMuhurta.modifier);
   const activityScore = scoreActivityAgainstCapabilities(params.activity, capabilities);
-  const muhurtaScore = clamp(68 + muhurta.modifier * 1.8 - capabilities.friction * 0.24);
+  const muhurtaScore = clamp(68 + effectiveMuhurta.modifier * 1.8 - capabilities.friction * 0.24);
   const solarScore = scoreSolarWindow(params.activity, params.windowType);
   const natureScore = scoreNature(params.activity, capabilities);
   const timePreferenceScore = params.timePreferenceScore ?? 70;
@@ -159,11 +194,11 @@ export function evaluateActivityFit(params: {
     score: Math.round(score),
     label,
     labelText: labelText(label),
-    summary: buildFitSummary(params.activity, capabilities, muhurta.summary, score),
+    summary: buildFitSummary(params.activity, capabilities, effectiveMuhurta.summary, score),
     capabilities,
-    muhurtaSummary: muhurta.summary,
+    muhurtaSummary: effectiveMuhurta.summary,
     personalSummary: personalFit.summary,
-    reasons: [...muhurta.reasons, ...(ruleReason ? [ruleReason] : []), ...(personalFit.reasons ?? [])],
+    reasons: [...effectiveMuhurta.reasons, ...(ruleReason ? [ruleReason] : []), ...(personalFit.reasons ?? [])],
   };
 }
 

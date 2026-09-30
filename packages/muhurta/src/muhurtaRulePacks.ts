@@ -83,6 +83,9 @@ import { getFamilyRuleData, evaluatePanchangaNakshatraTithiReasons, evaluatePanc
 import { deriveLegacyMuhurtaText } from './muhurtaReasonFormat';
 import type { SolarWindowType } from '../../panchang/src/windows';
 import type { MuhurtaClassification, MuhurtaFamily, MuhurtaIntent, MuhurtaReason } from './activityOntology';
+import type { ActionPhase } from './actionPhase';
+import { buildLunarTithiContext } from './lunarTithiContext';
+import { applyLunarTithiOverlay } from './lunarFamilyRules';
 import type { CombustibleGraha } from '../../vedic/src/planetaryCombustion';
 
 /** The single methodology identifier every rule pack in this file belongs
@@ -705,12 +708,17 @@ export function evaluateMuhurtaWithRulePack(params: {
   classification: MuhurtaClassification;
   date: Date;
   windowType: SolarWindowType;
+  /** Lunar Intelligence V1 L2 -- an explicit evaluation-context hook for a future rule pack to read ("what part of
+   * this occurrence are we evaluating"), currently UNREAD here: this parameter changes nothing about the evaluation
+   * below. See packages/muhurta/src/actionPhase.ts's own doc comment for why it is a per-evaluation input rather
+   * than part of `classification` itself. */
+  actionPhase?: ActionPhase;
 }): MuhurtaEvaluation {
   const pack = resolveMuhurtaRulePack(params.classification);
   const legacyFamilyForWindowBonus = FAMILY_BASE_SOURCE[params.classification.family];
   const panchanga = getPanchangaSnapshot(params.date);
 
-  const reasons: MuhurtaReason[] = [
+  const preOverlayReasons: MuhurtaReason[] = [
     ...evaluatePanchangaNakshatraTithiReasons(panchanga, {
       preferredNakshatras: pack.nakshatra.favorable,
       avoidNakshatras: pack.nakshatra.avoid,
@@ -722,7 +730,16 @@ export function evaluateMuhurtaWithRulePack(params: {
   ];
 
   const windowReason = evaluateSolarWindowReason(params.windowType, legacyFamilyForWindowBonus);
-  if (windowReason) reasons.push(windowReason);
+  if (windowReason) preOverlayReasons.push(windowReason);
+
+  // Lunar Intelligence V1 L3.2/L4 -- the ONE shared, evaluator-independent overlay (lunarFamilyRules.ts) owns
+  // precedence/suppression/replacement for BOTH the exact-Tithi (lunarExactTithiRules.ts) and Tithi-family layers;
+  // this call site never duplicates that logic. Reuses panchanga.tithi (already computed above) -- no second
+  // getTithi() call, no new astronomy. lunarContext is null exactly when coverage.tithi is 'IMPLEMENTED' (a
+  // dedicated pack, e.g. Griha Pravesh/Marriage, already owns Tithi outright), matching applyLunarTithiOverlay's own
+  // identity condition -- so this is a no-op for those, by construction.
+  const lunarContext = pack.coverage.tithi === 'IMPLEMENTED' ? null : buildLunarTithiContext(panchanga.tithi);
+  const reasons = applyLunarTithiOverlay(preOverlayReasons, pack.coverage.tithi, lunarContext, params.classification, params.actionPhase);
 
   const modifier = reasons.reduce((total, reason) => total + (reason.impact ?? 0), 0);
   const legacy = deriveLegacyMuhurtaText(reasons);

@@ -10,6 +10,7 @@ import {
 } from '../../panchang/src/windows';
 import { evaluateMuhurta, MuhurtaActivityFamily } from '../../muhurta/src/muhurtaEngine';
 import type { MuhurtaClassification } from '../../muhurta/src/activityOntology';
+import type { ActionPhase } from '../../muhurta/src/actionPhase';
 import { getActionCards } from './actionCards';
 import { ActivityProfile, findActivityIntent } from './personalizedTasks';
 import { evaluateActivityFit, familyForActivityProfile, PersonalMuhurtaContext } from './auraFitEngine';
@@ -542,7 +543,10 @@ export function scoreContinuousBlock(
   profile: TaskProfile,
   start: number,
   end: number,
-  dateForMinute?: (minute: number) => Date
+  dateForMinute?: (minute: number) => Date,
+  /** Lunar Intelligence V1 L6.1 -- optional, forwarded verbatim to
+   * scoreCandidate() below; see that function's own doc comment. */
+  actionPhase?: ActionPhase
 ): number {
   // Inauspicious Period Precedence Fix V1: explicit interval-overlap safety
   // check against the candidates' OWN [startMinute,endMinute) spans directly
@@ -571,7 +575,7 @@ export function scoreContinuousBlock(
     const segmentStart = boundaries[index];
     const segmentEnd = boundaries[index + 1];
     const candidate = resolveOverlappingCandidate(candidates, segmentStart);
-    const segmentScore = candidate ? scoreCandidate(candidate, profile, dateForMinute?.(segmentStart)) : 55;
+    const segmentScore = candidate ? scoreCandidate(candidate, profile, dateForMinute?.(segmentStart), actionPhase) : 55;
     weighted += segmentScore * (segmentEnd - segmentStart);
   }
   return weighted / (end - start);
@@ -790,7 +794,23 @@ export function isTimingSensitiveActivity(classification: MuhurtaClassification 
   return false;
 }
 
-export function scoreCandidate(candidate: SlotCandidate, profile: TaskProfile, date?: Date): number {
+export function scoreCandidate(
+  candidate: SlotCandidate,
+  profile: TaskProfile,
+  date?: Date,
+  /** Lunar Intelligence V1 L6.1 -- an explicit, optional occurrence/evaluation
+   * input (packages/muhurta/src/actionPhase.ts), never inferred here. Omitted
+   * by every existing caller of scoreCandidate() except the score-producing
+   * path reached from Muhurtham Finder (via evaluateTimingCandidate() ->
+   * scoreContinuousBlock(), packages/recommendation/src/timingSearch.ts),
+   * which is the one workflow the Lunar Intelligence V1 L5.1 audit established
+   * as a SAFE_START_WORKFLOW. This function makes no decision about the
+   * value; it only forwards whatever it receives (or nothing) to
+   * evaluateActivityFit() below, exactly like every other param here -- see
+   * that function's own optional actionPhase param for the identical
+   * contract. */
+  actionPhase?: ActionPhase
+): number {
   if (profile.activity && date) {
     // Inauspicious Period Precedence Fix V1: canonical safety net, checked
     // BEFORE consulting the catalog's own avoidWindowTypes -- a
@@ -811,6 +831,7 @@ export function scoreCandidate(candidate: SlotCandidate, profile: TaskProfile, d
       windowType: candidate.type,
       personalContext: profile.personalContext,
       classification: profile.muhurtaClassification,
+      actionPhase,
     });
     const isAvoidWindow = profile.activity.avoidWindowTypes.includes(candidate.type) && !profile.activity.allowDuringAvoidWindow && fit.score < 55;
     if (isAvoidWindow && isTimingSensitiveActivity(profile.muhurtaClassification)) return -100;
