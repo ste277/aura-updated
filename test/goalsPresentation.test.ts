@@ -16,6 +16,7 @@ import {
   presentGoalActivityStateLabel,
   formatGoalProgressLabel,
   formatGoalTargetDateLabel,
+  formatGoalActivityCompletion,
   isValidCivilDateString,
 } from '../apps/web/lib/goalsPresentation';
 import { GOAL_TEMPLATE_CATEGORIES, type GoalTemplateCategory } from '../apps/web/lib/goals';
@@ -64,6 +65,47 @@ check('G. a year-boundary date displays correctly ("2026-01-01" -> "Jan 1")', fo
 check('G. a last-day-of-month date displays correctly ("2026-12-31" -> "Dec 31")', formatGoalTargetDateLabel('2026-12-31') === 'Dec 31');
 check('G. isValidCivilDateString (reused directly from lib/goals.ts) accepts the exact format the UI submits', isValidCivilDateString('2026-09-25') === true);
 check('G. isValidCivilDateString rejects a browser-locale date string, so the UI cannot accidentally submit one', isValidCivilDateString('09/25/2026') === false);
+
+// ============================================================
+// Goals V2 G3.2 -- formatGoalActivityCompletion (activity-level "what
+// counts as doing this, and what happened")
+// ============================================================
+
+// 32/45. DONE -- no completion-detail line at all, regardless of
+// currentValue (legacy-normalized DONE reads identically).
+check('32. DONE + currentValue null -> null (no line)', formatGoalActivityCompletion({ kind: 'DONE' }, null) === null);
+check('45. legacy-normalized DONE -> null, no crash', formatGoalActivityCompletion({ kind: 'DONE' }, null) === null);
+
+// 33-37. DURATION
+check('33. DURATION 30 / null -> "30 min"', formatGoalActivityCompletion({ kind: 'DURATION', targetValue: 30 }, null) === '30 min');
+check('34. DURATION 30 / 30 (matching, COMPLETED) -> compact "30 min", no redundant 30/30', formatGoalActivityCompletion({ kind: 'DURATION', targetValue: 30 }, 30) === '30 min');
+check('35. DURATION 30 / 18 (differs) -> "18 / 30 min"', formatGoalActivityCompletion({ kind: 'DURATION', targetValue: 30 }, 18) === '18 / 30 min');
+check('36. DURATION 30 / 45 (above target) -> "45 / 30 min", no clamp', formatGoalActivityCompletion({ kind: 'DURATION', targetValue: 30 }, 45) === '45 / 30 min');
+check('37. DURATION 30 / 0 (zero, execution exists) -> "0 / 30 min", never treated as missing', formatGoalActivityCompletion({ kind: 'DURATION', targetValue: 30 }, 0) === '0 / 30 min');
+
+// 38-41. MEASURED_TARGET
+check('38. MEASURED_TARGET 20 pages / null -> "20 pages"', formatGoalActivityCompletion({ kind: 'MEASURED_TARGET', targetValue: 20, unit: 'pages' }, null) === '20 pages');
+check('39. MEASURED_TARGET 20 pages / 12 -> "12 / 20 pages"', formatGoalActivityCompletion({ kind: 'MEASURED_TARGET', targetValue: 20, unit: 'pages' }, 12) === '12 / 20 pages');
+check('40. MEASURED_TARGET 20 pages / 25 (above) -> "25 / 20 pages", no clamp', formatGoalActivityCompletion({ kind: 'MEASURED_TARGET', targetValue: 20, unit: 'pages' }, 25) === '25 / 20 pages');
+check('41. MEASURED_TARGET 20 pages / 0 -> "0 / 20 pages"', formatGoalActivityCompletion({ kind: 'MEASURED_TARGET', targetValue: 20, unit: 'pages' }, 0) === '0 / 20 pages');
+check('MEASURED_TARGET matching target (symmetric with DURATION\'s own compact-match rule) -> "20 pages", not "20 / 20 pages"', formatGoalActivityCompletion({ kind: 'MEASURED_TARGET', targetValue: 20, unit: 'pages' }, 20) === '20 pages');
+
+// 42. fractional values -- no accidental integer rounding, no trailing .0/.50
+check('42. DURATION 12.5 / null -> "12.5 min"', formatGoalActivityCompletion({ kind: 'DURATION', targetValue: 12.5 }, null) === '12.5 min');
+check('42. MEASURED_TARGET 1.25 km / null -> "1.25 km"', formatGoalActivityCompletion({ kind: 'MEASURED_TARGET', targetValue: 1.25, unit: 'km' }, null) === '1.25 km');
+check('42. MEASURED_TARGET 1.25 km / 0.75 -> "0.75 / 1.25 km"', formatGoalActivityCompletion({ kind: 'MEASURED_TARGET', targetValue: 1.25, unit: 'km' }, 0.75) === '0.75 / 1.25 km');
+check('42. a whole-number target never grows a trailing ".0"', formatGoalActivityCompletion({ kind: 'DURATION', targetValue: 30 }, null) === '30 min');
+
+// 16. free-form unit rendered verbatim, no taxonomy/pluralization heuristics
+check('16. unit "glasses" rendered verbatim', formatGoalActivityCompletion({ kind: 'MEASURED_TARGET', targetValue: 8, unit: 'glasses' }, null) === '8 glasses');
+check('16. unit "reps" rendered verbatim', formatGoalActivityCompletion({ kind: 'MEASURED_TARGET', targetValue: 10, unit: 'reps' }, 10) === '10 reps');
+check('17. DURATION unit is always the implicit "min", never a persisted completionUnit (DURATION never carries one per G2.1)', formatGoalActivityCompletion({ kind: 'DURATION', targetValue: 5 }, null) === '5 min');
+
+// 21/22/43. lifecycle independence -- the formatter itself takes no
+// derivedState input at all, so it is structurally incapable of inferring
+// completion/failure from numeric progress; re-asserted explicitly here.
+check('21/43. currentValue (25) > target (20) produces a plain factual string -- the formatter has no derivedState parameter to threshold against', formatGoalActivityCompletion({ kind: 'MEASURED_TARGET', targetValue: 20, unit: 'pages' }, 25) === '25 / 20 pages');
+check('22/43. currentValue (12) < target (20) produces a plain factual string, never "Partial"/"Failed"/"Incomplete"/"Missed target"', /partial|fail|incomplete|missed/i.test(formatGoalActivityCompletion({ kind: 'MEASURED_TARGET', targetValue: 20, unit: 'pages' }, 12) ?? '') === false);
 
 if (!allPassed) {
   console.error('SOME GOALS PRESENTATION CHECKS FAILED');

@@ -3,7 +3,7 @@
 import React, { useEffect, useState } from 'react';
 import { colors, spacing, typography } from '../../../components/theme';
 import { PageHeader, SurfaceCard, PrimaryButton, SecondaryButton, TextButton, DestructiveButton, StatusBadge, EmptyState, FieldLabel, TextInput, FieldError } from '../../../components/ui';
-import { formatGoalProgressLabel, formatGoalTargetDateLabel, presentGoalActivityStateLabel, type GoalActivityView, type GoalDetailView } from '../../../lib/goalsPresentation';
+import { formatGoalActivityCompletion, formatGoalProgressLabel, formatGoalTargetDateLabel, presentGoalActivityStateLabel, type GoalActivityView, type GoalDetailView } from '../../../lib/goalsPresentation';
 
 /**
  * Goals -> Planning Integration V1 PR B -- Goal detail: "What does
@@ -225,6 +225,13 @@ function ActivityRow({
   const [error, setError] = useState<string | null>(null);
   const stateLabel = presentGoalActivityStateLabel(activity.derivedState);
   const isSelectable = activity.derivedState === 'SUGGESTED' && onToggleSelect !== undefined;
+  // Goals V2 G3.2 -- "what counts as doing this, and what happened" (this
+  // ticket's own section 5 hierarchy: title primary, this secondary,
+  // lifecycle state tertiary). Deliberately independent of derivedState --
+  // see formatGoalActivityCompletion's own doc comment for why numeric
+  // progress never infers/overrides lifecycle truth. null for DONE (no
+  // line at all, this ticket's own section 6).
+  const completionDetail = formatGoalActivityCompletion(activity.completionRequirement, activity.currentValue);
 
   const handleDismiss = async () => {
     if (dismissing) return;
@@ -265,6 +272,13 @@ function ActivityRow({
         </label>
         {stateLabel && <StatusBadge label={stateLabel} tone={activity.derivedState === 'COMPLETED' ? 'positive' : 'info'} />}
       </div>
+
+      {/* Goals V2 G3.2 -- one compact secondary line (this ticket's own
+          section 24: never a per-activity progress bar, never a taller
+          row). Readable text, not color/icon/width-only (section 23) --
+          reuses the same typography.meta/textSecondary treatment the
+          existing target-date line already uses elsewhere on this page. */}
+      {completionDetail && <div style={{ ...typography.meta, color: colors.textSecondary, marginTop: 2 }}>{completionDetail}</div>}
 
       {error && (
         <div role="alert" style={{ marginTop: spacing.sm }}>
