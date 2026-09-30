@@ -133,8 +133,8 @@ if (completeProfile.status === 'OK') {
   check('PERSONAL re-ranks relative to GENERAL for the same activity/range/natal nakshatra (genuine re-ranking, not just a label change)', JSON.stringify(generalOrderTop8) !== JSON.stringify(personalOrderTop8));
 
   // Locked-in fixture: for start-journey, Sep 2026, Chennai, natal nakshatra
-  // Ashwini (index 1), 2026-09-05 (Tara=CAUTION) ranks BELOW
-  // 2026-09-28 (Tara=SUPPORT) in PERSONAL despite 09-05 having a
+  // Ashwini (index 1), 2026-09-07 (Tara=CAUTION) ranks BELOW
+  // 2026-09-28 (Tara=SUPPORT) in PERSONAL despite 09-07 having a
   // higher GENERAL score -- observed directly via probing, locked in here
   // as a regression fixture. (Re-picked from the original 09-07/09-17 pair,
   // which no longer flipped under Inauspicious Period Precedence Fix V1's
@@ -144,14 +144,33 @@ if (completeProfile.status === 'OK') {
   // genuinely better, previously-unreachable friction-boundary candidate
   // (YAMA.endMinute=728, overlapping ABHIJIT[702,752)), so even after the
   // Tara-CAUTION penalty it now outranks 09-23. Re-picked a third time to
-  // the 09-05/09-28 pair, which is unaffected by that candidate source and
-  // still tells the same qualitative CAUTION-vs-SUPPORT Tara story.)
-  const sep05 = completeProfile.dates.find((d) => d.date === '2026-09-05');
+  // the 09-05/09-28 pair, which was unaffected by that candidate source and
+  // still told the same qualitative CAUTION-vs-SUPPORT Tara story -- until
+  // Lunar Intelligence V1 L6.1 corrected a production scoring-path defect
+  // (packages/recommendation/src/dailyAssistant.ts's scoreCandidate/
+  // scoreContinuousBlock now genuinely apply the occurrence-level START
+  // phase's Tithi reasons to the ranking score, not just to
+  // `reasons`/`auraFitScore`): 2026-09-05 is genuinely Krishna Navami (a
+  // RIKTA Tithi), so its own GENERAL score correctly dropped by the -8
+  // TITHI_FAMILY_CAUTION once the START phase (which Muhurtham Finder has
+  // always supplied internally since L5) finally reached that score too --
+  // 09-05 no longer outscores 09-28 in GENERAL, because that prior ordering
+  // was itself an artifact of the very bug L6.1 fixed, not a fact about
+  // personalization.
+  // Re-picked a fourth time to the 09-07/09-28 pair below, which tells the
+  // SAME CAUTION-vs-SUPPORT Tara story but is Lunar-clean on both sides
+  // (neither date carries any TITHI_FAMILY_CAUTION/TITHI_EXACT_CAUTION --
+  // both only carry a plain TITHI_SUPPORTIVE reason), so the flip this
+  // fixture demonstrates is now attributable to Tara Bala personalization
+  // alone, with no risk of being re-invalidated by a future, unrelated
+  // Lunar-scoring correction the way the 09-05 pairing was.
+  const sep07 = completeProfile.dates.find((d) => d.date === '2026-09-07');
   const sep28 = completeProfile.dates.find((d) => d.date === '2026-09-28');
-  const sep05General = generalNoPersonal.dates.find((d) => d.date === '2026-09-05');
+  const sep07General = generalNoPersonal.dates.find((d) => d.date === '2026-09-07');
   const sep28General = generalNoPersonal.dates.find((d) => d.date === '2026-09-28');
-  check('Regression fixture: 2026-09-05 generally outscores 2026-09-28', Boolean(sep05General && sep28General && sep05General.score > sep28General.score));
-  check('Regression fixture: PERSONAL flips this -- 2026-09-28 (Tara SUPPORT) outranks 2026-09-05 (Tara CAUTION) once personalized', Boolean(sep05 && sep28 && sep28.combinedScore > sep05.combinedScore));
+  check('Regression fixture: 2026-09-07 generally outscores 2026-09-28', Boolean(sep07General && sep28General && sep07General.score > sep28General.score));
+  check('Regression fixture: PERSONAL flips this -- 2026-09-28 (Tara SUPPORT) outranks 2026-09-07 (Tara CAUTION) once personalized', Boolean(sep07 && sep28 && sep28.combinedScore > sep07.combinedScore));
+  check('Regression fixture: neither date carries a Lunar Tithi caution -- this flip is attributable to Tara Bala personalization alone, not Tithi rules', Boolean(sep07 && sep28 && !sep07.bestWindow.reasons.some((r) => r.code === 'TITHI_FAMILY_CAUTION' || r.code === 'TITHI_EXACT_CAUTION') && !sep28.bestWindow.reasons.some((r) => r.code === 'TITHI_FAMILY_CAUTION' || r.code === 'TITHI_EXACT_CAUTION')));
 }
 
 console.log(allPassed ? '\nALL PERSONAL MUHURTHAM CHECKS PASSED' : '\nSOME PERSONAL MUHURTHAM CHECKS FAILED');

@@ -162,9 +162,21 @@ async function main() {
   // evaluateTimingCandidate(), and packages/recommendation/src/muhurthamFinder.ts
   // is the one caller that supplies a concrete value, plus its own test coverage.
   const l5ConsumerFiles = ['packages/recommendation/src/timingSearch.ts', 'packages/recommendation/src/muhurthamFinder.ts', 'test/muhurthamFinder.test.ts'];
-  const ALLOWED = new Set([...REQUIRED, l1DomainTestFile, ...l3ConsumerFiles, ...l4ConsumerFiles, ...l5ConsumerFiles]);
+  // Lunar Intelligence V1 L6.1 repaired a production scoring-path defect L6's
+  // audit discovered: evaluateTimingCandidate() already forwarded ActionPhase
+  // to its own direct evaluateActivityFit() call (L5), but NOT to the separate
+  // scoreContinuousBlock() -> scoreCandidate() -> evaluateActivityFit() path
+  // that actually produces TimingCandidate.score (the field Muhurtham Finder's
+  // ranking/rating/MIN_INCLUSION_SCORE all use) -- so L3/L4 correctly appeared
+  // in reasons/auraFitScore but never affected ranking. scoreCandidate() and
+  // scoreContinuousBlock() (packages/recommendation/src/dailyAssistant.ts) each
+  // gained the identical optional pass-through parameter already established
+  // by L5, still supplied a concrete value only via Muhurtham Finder's own
+  // existing constant -- no new consumer, no new file beyond this one.
+  const l61ConsumerFiles = ['packages/recommendation/src/dailyAssistant.ts'];
+  const ALLOWED = new Set([...REQUIRED, l1DomainTestFile, ...l3ConsumerFiles, ...l4ConsumerFiles, ...l5ConsumerFiles, ...l61ConsumerFiles]);
   const unexpected = grepOut.filter((f: string) => !ALLOWED.has(f));
-  check('F. repo-wide, only the four L2 files (plus this test, L1\'s incidental regex-literal match, and Lunar Intelligence L3/L4/L5\'s deliberate consumer files) reference ActionPhase/actionPhase: ' + (unexpected.length ? 'unexpected: ' + unexpected.join(', ') : 'none unexpected'), unexpected.length === 0);
+  check('F. repo-wide, only the four L2 files (plus this test, L1\'s incidental regex-literal match, and Lunar Intelligence L3/L4/L5/L6.1\'s deliberate consumer files) reference ActionPhase/actionPhase: ' + (unexpected.length ? 'unexpected: ' + unexpected.join(', ') : 'none unexpected'), unexpected.length === 0);
   check('F. all four expected production/test files DO reference it (the wiring actually exists)', REQUIRED.every((f) => grepOut.includes(f)));
 
   // ============================ G. no inference exists ============================
