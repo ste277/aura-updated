@@ -47,12 +47,20 @@ check('goalCompletion.ts never defines a CHECKLIST kind', !/'CHECKLIST'/.test(go
 check('goalCompletion.ts never defines separate COUNT/QUANTITY kinds (collapsed into MEASURED_TARGET per G1 decision 5)', !/'COUNT'|'QUANTITY'/.test(goalCompletionSrc));
 
 // ============================================================
-// Existing templates remain unclassified (still DONE by omission)
+// Existing templates remained unclassified as of G2.1 (still DONE by
+// omission). Goals V2 G3.4 (a later, separately-authorized ticket)
+// intentionally enriched GOAL_TEMPLATES with a canonical
+// CompletionRequirement per activity, reusing this exact module's own
+// CompletionRequirement type -- see test/goals.test.ts and
+// test/goalCompletionStructuralGuards.test.ts's own G3.4-era checks below
+// for what stayed narrow (no CHECKLIST, no Rhythm, no scheduling-duration
+// conflation, no backfill).
 // ============================================================
 const goalsSrcPath = path.join(__dirname, '..', 'apps', 'web', 'lib', 'goals.ts');
 const goalsSrc = fs.readFileSync(goalsSrcPath, 'utf8');
-check('lib/goals.ts (GOAL_TEMPLATES) was not reclassified with a completion kind -- no DURATION/MEASURED_TARGET reference anywhere in the template table', !/GOAL_TEMPLATES[\s\S]*?(DURATION|MEASURED_TARGET)/.test(goalsSrc));
-check('lib/goals.ts does not import from goalCompletion.ts -- template resolution stays completion-kind-unaware in G2.1', !/from ['"]\.\/goalCompletion['"]/.test(goalsSrc));
+check('lib/goals.ts imports ONLY the CompletionRequirement type from goalCompletion.ts, type-only -- never the validator/normalizer/persister (template resolution stays a pure pass-through, never its own competing validation or persistence path)', /import type \{ CompletionRequirement \} from '\.\/goalCompletion'/.test(goalsSrc) && !/validateCompletionRequirement|normalizeGoalActivityCompletionRequirement|toPersistedCompletionRequirement/.test(goalsSrc));
+check('lib/goals.ts (GOAL_TEMPLATES) assigns DURATION in EXACTLY the one deterministic, audited case (MEDITATE_REGULARLY\'s "Meditate 10 minutes") -- exactly one \'DURATION\' string literal anywhere in the file', (goalsSrc.match(/'DURATION'/g) ?? []).length === 1);
+check('lib/goals.ts (GOAL_TEMPLATES) assigns NO MEASURED_TARGET requirement -- G3.4\'s own audit found no template activity with a deterministic, explicit measured unit+quantity', !/'MEASURED_TARGET'/.test(goalsSrc));
 
 if (!allPassed) {
   console.error('SOME GOAL COMPLETION STRUCTURAL GUARD CHECKS FAILED');

@@ -2491,13 +2491,14 @@ export async function createGoalWithActivities(input: {
   // server-side; no JS Date object is ever constructed for this value, so
   // there is nothing for a timezone to shift.
   targetDate: string | null;
-  // Goals V2 G2.1 -- completionRequirement is optional and NOT yet
-  // supplied by any production caller (GOAL_TEMPLATES/the POST /api/goals
-  // route never set it): omitted means DONE, via
+  // Goals V2 G2.1 established this as optional plumbing, unused by any
+  // production caller at the time. G3.4 is the first production caller to
+  // supply it (GOAL_TEMPLATES's own per-activity completionRequirement,
+  // resolved server-side and passed straight through by the POST
+  // /api/goals route -- see lib/goals.ts). Omitted still means DONE, via
   // toPersistedCompletionRequirement(DONE_COMPLETION_REQUIREMENT)'s own
   // all-null encoding -- identical to every row this function persisted
-  // before G2.1. Establishes the plumbing for a later slice without
-  // changing today's behavior.
+  // before G2.1; this function's own write path is otherwise unchanged.
   activities: ReadonlyArray<{ title: string; activityId: string | null; completionRequirement?: CompletionRequirement }>;
 }): Promise<{ goal: Goal; activities: GoalActivity[] }> {
   const client = await beginTransaction();
