@@ -15,6 +15,12 @@ export async function GET(req: NextRequest, { params }: { params: { goalId: stri
 
   const rows = await listGoalActivitiesWithLinkedPlanStatus(session.userId, params.goalId);
   const activities = rows.map((row) => ({
+    // Goals V2 G3.1 -- `row` already carries `currentValue` (the CURRENT
+    // execution's measured fact, resolved server-side via the same
+    // plannedActivityId this row's own linkage uses -- see
+    // listGoalActivitiesWithLinkedPlanStatus's own doc comment), so this
+    // spread exposes it automatically. No execution id/source/snapshot
+    // columns/timestamps are ever selected into `row` in the first place.
     ...row,
     derivedState: deriveGoalActivityState({ status: row.status, plannedActivityId: row.plannedActivityId, linkedPlanStatus: row.linkedPlanStatus }),
     // Goals V2 G2.1 -- additive: the canonical requirement (null persisted

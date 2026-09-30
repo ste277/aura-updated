@@ -2447,6 +2447,16 @@ export interface GoalActivity {
 
 export interface GoalActivityWithLinkedPlanStatus extends GoalActivity {
   linkedPlanStatus: 'UPCOMING' | 'LOGGED' | 'CANCELLED' | 'SKIPPED' | 'MOVED' | null;
+  // Goals V2 G3.1 -- the CURRENT execution's measured fact, resolved by
+  // joining on the SAME plannedActivityId this row already carries (never a
+  // second/"latest" concept -- GoalActivityExecution.plannedActivityId is
+  // unique, and is only ever set by logPlannedActivity's own server-side
+  // resolution of THIS exact GoalActivity, so there is no ambiguity to
+  // resolve). NULL both when plannedActivityId is null and when no
+  // execution row exists yet for the current link -- identical "nothing
+  // recorded" meaning either way, same convention as linkedPlanStatus
+  // itself above.
+  currentValue: number | null;
 }
 
 // Explicit column list, "targetDate" cast to ::text -- see Goal's own
@@ -2633,14 +2643,71 @@ export async function dismissGoalActivity(userId: string, goalId: string, goalAc
  */
 export async function listGoalActivitiesWithLinkedPlanStatus(userId: string, goalId: string): Promise<GoalActivityWithLinkedPlanStatus[]> {
   const result = await pool.query(
-    `SELECT ga.*, pa.status AS "linkedPlanStatus"
+    `SELECT ga.*, pa.status AS "linkedPlanStatus", gae."currentValue"
      FROM "GoalActivity" ga
      LEFT JOIN "PlannedActivity" pa ON pa.id = ga."plannedActivityId"
+     LEFT JOIN "GoalActivityExecution" gae ON gae."plannedActivityId" = ga."plannedActivityId"
      WHERE ga."userId" = $1 AND ga."goalId" = $2
      ORDER BY ga."createdAt"`,
     [userId, goalId]
   );
   return result.rows;
+}
+
+// Goals V2 G3.1 -- read-only Goal context for the Home/DailyAgenda read
+// model (apps/web/lib/dailyAgenda.ts). Deliberately NOT
+// GoalActivityWithLinkedPlanStatus's shape: the client needs MEANING
+// (a normalized CompletionRequirement, a measured value), never storage
+// structure -- no execution id/source/snapshot columns/timestamps.
+export interface PlanGoalContext {
+  goal: { id: string; title: string };
+  goalActivity: { id: string; completionRequirement: CompletionRequirement };
+  currentValue: number | null;
+}
+
+/**
+ * Goals V2 G3.1 -- ONE batched query for every plan id in a day's agenda,
+ * never one query per item (avoids N+1). Keyed by "plannedActivityId" so
+ * the caller can do a plain Map lookup per DailyAgendaItem. Scoped to
+ * "userId" on the base row (GoalActivity) -- same convention
+ * listGoalActivitiesWithLinkedPlanStatus already uses (a LEFT JOIN target
+ * is never independently re-scoped by userId in this codebase; the FK
+ * relationship itself, plus the owning row's own userId filter, is what
+ * already prevents cross-user leakage everywhere else). A plan id with no
+ * GoalActivity link simply has no entry in the returned Map -- never a
+ * null-valued entry, so `.get(planId)` doubles as a clean existence check.
+ * completionKind/TargetValue/Unit are normalized through the canonical G2.1
+ * helper (normalizeGoalActivityCompletionRequirement) -- a legacy/never-set
+ * GoalActivity therefore always reads as DONE here, exactly like every
+ * other consumer of that helper.
+ */
+export async function loadGoalContextsForPlanIds(userId: string, planIds: readonly string[]): Promise<Map<string, PlanGoalContext>> {
+  const contexts = new Map<string, PlanGoalContext>();
+  if (planIds.length === 0) return contexts;
+  const result = await pool.query(
+    `SELECT ga."plannedActivityId", ga.id AS "goalActivityId", ga."completionKind", ga."completionTargetValue", ga."completionUnit",
+            g.id AS "goalId", g.title AS "goalTitle", gae."currentValue"
+     FROM "GoalActivity" ga
+     JOIN "Goal" g ON g.id = ga."goalId"
+     LEFT JOIN "GoalActivityExecution" gae ON gae."plannedActivityId" = ga."plannedActivityId"
+     WHERE ga."userId" = $1 AND ga."plannedActivityId" = ANY($2::text[])`,
+    [userId, [...planIds]]
+  );
+  for (const row of result.rows) {
+    contexts.set(row.plannedActivityId, {
+      goal: { id: row.goalId, title: row.goalTitle },
+      goalActivity: {
+        id: row.goalActivityId,
+        completionRequirement: normalizeGoalActivityCompletionRequirement({
+          completionKind: row.completionKind,
+          completionTargetValue: row.completionTargetValue,
+          completionUnit: row.completionUnit,
+        }),
+      },
+      currentValue: row.currentValue,
+    });
+  }
+  return contexts;
 }
 
 /**

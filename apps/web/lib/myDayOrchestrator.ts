@@ -4,6 +4,7 @@ import {
   listAuraMomentsForReminders,
   listMomentIdsWithSuccessorForOwner,
   listHabitLogs,
+  loadGoalContextsForPlanIds,
 } from './db';
 import { localDateTimeToUTC, getDatePartsInTimezone, getMinuteOfDayInTimezone, addDaysToDateStr } from './timezone';
 import { buildDailyAgenda, DailyAgenda } from './dailyAgenda';
@@ -88,6 +89,11 @@ export async function buildMyDay(user: User, requestedDate: string | undefined, 
   // reused here rather than adding a new query, filtered to this local day.
   const habitLogs = habitLogsRecent.filter((log) => getDatePartsInTimezone(user.timezone, log.logTimestamp).dateStr === localDate);
 
+  // Goals V2 G3.1 -- ONE batched query for every plan in today's agenda
+  // (never one query per item, see loadGoalContextsForPlanIds's own doc
+  // comment). A plan with no Goal linkage simply has no entry.
+  const goalContextsByPlanId = await loadGoalContextsForPlanIds(user.id, plans.map((p) => p.id));
+
   const agenda = buildDailyAgenda({
     now,
     localDate,
@@ -96,6 +102,7 @@ export async function buildMyDay(user: User, requestedDate: string | undefined, 
     moments,
     momentIdsWithSuccessor,
     habitLogs,
+    goalContextsByPlanId,
   });
 
   const minuteOfDay = getMinuteOfDayInTimezone(user.timezone, now);

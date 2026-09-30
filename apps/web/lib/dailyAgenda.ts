@@ -1,4 +1,4 @@
-import type { PlannedActivity, AuraMoment, HabitLogRow } from './db';
+import type { PlannedActivity, AuraMoment, HabitLogRow, PlanGoalContext } from './db';
 import { formatActivityDuration } from './activityDuration';
 import { findActivityIntent } from '../../../packages/recommendation/src/personalizedTasks';
 
@@ -33,6 +33,13 @@ export interface DailyAgendaItem {
   /** HABIT_LOG items have no dedicated permalink today -- honest about
    * that rather than pointing at a Plan id that doesn't apply. */
   target: { type: 'PLAN' | 'MOMENT' | 'HABIT_LOG'; id: string };
+  /** Goals V2 G3.1 -- only ever present for a PLAN item whose
+   * PlannedActivity is CURRENTLY linked from a GoalActivity
+   * (GoalActivity.plannedActivityId = this plan's id). Absent for every
+   * MOMENT/COMPLETED_ACTIVITY item and for any PLAN with no such linkage --
+   * never fabricated, never inferred from title/history. See db.ts's
+   * PlanGoalContext for exactly what it carries and why. */
+  goalContext?: PlanGoalContext;
 }
 
 export interface DailyAgenda {
@@ -85,7 +92,7 @@ function sanitizedIcon(icon: string | null | undefined): string | null {
   return /^[a-zA-Z]+$/.test(icon) ? null : icon;
 }
 
-export function planToAgendaItem(plan: PlannedActivity, now: Date): DailyAgendaItem {
+export function planToAgendaItem(plan: PlannedActivity, now: Date, goalContext?: PlanGoalContext): DailyAgendaItem {
   // Terminal persisted outcomes win over time; time-derived states apply only to UPCOMING.
   const status: DailyAgendaItemStatus =
     plan.status === 'LOGGED' ? 'COMPLETED' : plan.status === 'SKIPPED' ? 'SKIPPED' : plan.status === 'MOVED' ? 'MOVED' : timeBasedStatus(plan.plannedStartAt, plan.plannedEndAt, now);
@@ -100,6 +107,7 @@ export function planToAgendaItem(plan: PlannedActivity, now: Date): DailyAgendaI
     durationMinutes: plan.durationMinutes,
     windowType: plan.windowType,
     target: { type: 'PLAN', id: plan.id },
+    ...(goalContext ? { goalContext } : {}),
   };
 }
 
@@ -182,10 +190,19 @@ export interface BuildDailyAgendaInput {
    * preferring the richer Moment representation -- exact id match only, no
    * fuzzy title/time matching. */
   linkedPlanIdsWithMoment?: Set<string>;
+  /** Goals V2 G3.1 -- pre-fetched by the caller (db.ts's
+   * loadGoalContextsForPlanIds, ONE batched query for every plan in this
+   * agenda -- never queried per item here, preserving this module's own
+   * "no DB access" purity). Keyed by PlannedActivity.id. Omitted entirely
+   * (undefined) is identical to an empty Map -- every plan simply gets no
+   * goalContext, the correct behavior for the overwhelming majority
+   * (non-Goal) case and for every existing caller that hasn't been updated
+   * to supply it. */
+  goalContextsByPlanId?: ReadonlyMap<string, PlanGoalContext>;
 }
 
 export function buildDailyAgenda(input: BuildDailyAgendaInput): DailyAgenda {
-  const { now, localDate, timezone, plans, moments, momentIdsWithSuccessor, habitLogs } = input;
+  const { now, localDate, timezone, plans, moments, momentIdsWithSuccessor, habitLogs, goalContextsByPlanId } = input;
   const linkedPlanIds = input.linkedPlanIdsWithMoment ?? new Set(moments.filter((m) => m.plannedActivityId).map((m) => m.plannedActivityId as string));
 
   const items: DailyAgendaItem[] = [];
@@ -194,7 +211,7 @@ export function buildDailyAgenda(input: BuildDailyAgendaInput): DailyAgenda {
     if (plan.status === 'CANCELLED') continue;
     // Brief section 6 dedup -- prefer the Moment, skip the plain Plan item.
     if (linkedPlanIds.has(plan.id)) continue;
-    items.push(planToAgendaItem(plan, now));
+    items.push(planToAgendaItem(plan, now, goalContextsByPlanId?.get(plan.id)));
   }
 
   for (const moment of moments) {

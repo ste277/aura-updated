@@ -41,6 +41,14 @@ export interface GoalActivityView {
   // redesign). Always the canonical, normalized shape -- see
   // normalizeGoalActivityCompletionRequirement in ./goalCompletion.
   completionRequirement: CompletionRequirement;
+  // Goals V2 G3.1 -- the CURRENT execution's measured fact (resolved
+  // server-side via this activity's own plannedActivityId linkage -- see
+  // db.ts's listGoalActivitiesWithLinkedPlanStatus). NULL when no
+  // execution exists yet for the current link. Additive, not yet consumed
+  // by any UI. No execution id/source/snapshot internals -- a plain number
+  // or null, same "meaning, not storage" contract as completionRequirement
+  // above.
+  currentValue: number | null;
   createdAt: string;
   updatedAt: string;
 }

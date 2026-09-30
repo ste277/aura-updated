@@ -10,6 +10,7 @@
  * ownership boundary this PR is scoped to.
  */
 import type { DailyAgenda, DailyAgendaItemStatus } from './dailyAgenda';
+import type { PlanGoalContext } from './db';
 import type { DailyGuidanceContext } from '../../../packages/personal-intelligence/src/context';
 import type { SelectedActivityMetadata } from './dailyGuidanceTypes';
 import type { BehavioralAffinityTier } from '../../../packages/daily-guidance/src/types';
@@ -80,6 +81,11 @@ export interface HomeTimelineItemMetadata {
   isCurrent?: boolean;
   isPast?: boolean;
   isCompleted?: boolean;
+  /** Goals V2 G3.1 -- copied verbatim from the source DailyAgendaItem's own
+   * optional goalContext (see dailyAgenda.ts), never re-derived or
+   * re-queried here. Present only for a PLAN item currently linked from a
+   * GoalActivity. Not yet rendered by any component. */
+  goalContext?: PlanGoalContext;
 }
 
 export interface HomeTimelineItem {

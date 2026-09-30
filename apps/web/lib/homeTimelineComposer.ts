@@ -154,6 +154,9 @@ function projectAgendaItem(item: DailyAgendaItem, currentMinuteOfDay: number, ti
     isCurrent,
     isPast,
     isCompleted: item.status === 'COMPLETED',
+    // Goals V2 G3.1 -- pure passthrough, never re-derived; see
+    // HomeTimelineItemMetadata's own doc comment.
+    ...(item.goalContext ? { goalContext: item.goalContext } : {}),
   };
 
   return {
