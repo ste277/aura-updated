@@ -1,15 +1,17 @@
 /**
- * Goals V2 G2.2.1 -- pure domain representation of a GoalActivityExecution
- * snapshot: "what counted as completion, and what was actually recorded,
- * for one GoalActivity occurrence." No DB access here -- same convention as
- * lib/goalCompletion.ts, which this module builds directly on (reuses
- * CompletionKind/CompletionRequirement/validateCompletionRequirement rather
- * than defining a second, competing vocabulary).
+ * Goals V2 G2.2.1/G2.2.2 -- pure domain representation of a
+ * GoalActivityExecution snapshot: "what counted as completion, and what was
+ * actually recorded, for one GoalActivity occurrence." No DB access here --
+ * same convention as lib/goalCompletion.ts, which this module builds
+ * directly on (reuses CompletionKind/CompletionRequirement/
+ * validateCompletionRequirement rather than defining a second, competing
+ * vocabulary).
  *
- * This slice is schema/domain-only: nothing in this module is called from
- * any production write/read path yet (no completion action, no Move/Skip
- * path, no Goal API, no UI). It exists so G2.2.2+ has a correct, already-
- * tested foundation to build the actual write path on.
+ * G2.2.1 added the schema/domain foundation with no production write path.
+ * G2.2.2 connects resolveCompletionActualValue (below) to the EXISTING
+ * completion transaction (apps/web/lib/db.ts's logPlannedActivity) -- the
+ * only production consumer of this module. Still no Move/Skip/Constructor/
+ * Home-UX/UI involvement.
  */
 
 import { validateCompletionRequirement, type CompletionRequirement } from './goalCompletion';
@@ -112,4 +114,44 @@ export function fromPersistedGoalActivityExecutionSnapshot(persisted: PersistedG
   });
   if (!result.ok) throw new Error(`Corrupt GoalActivityExecution snapshot: ${result.error}`);
   return { completionRequirement: result.requirement, currentValue: persisted.currentValue };
+}
+
+export type ResolveCompletionActualValueResult =
+  | { ok: true; value: number | null }
+  | { ok: false; error: string };
+
+/**
+ * Goals V2 G2.2.2 -- what currentValue should be written when a Goal-linked
+ * PlannedActivity is completed (tap Done), given an OPTIONAL client-supplied
+ * actualValue. Pure decision logic, no DB access; apps/web/lib/db.ts's
+ * logPlannedActivity is the sole caller.
+ *
+ *   DONE             -> actualValue must be absent/null (there is nothing
+ *                        to measure); supplied -> invalid, never silently
+ *                        dropped.
+ *   DURATION         -> absent -> the requirement's OWN target (one-tap
+ *                        Done means "I completed the intended duration";
+ *                        the user is never forced to re-type it). Supplied
+ *                        -> must be finite and >= 0, then used verbatim
+ *                        (may exceed target, never clamped).
+ *   MEASURED_TARGET   -> identical rule to DURATION.
+ *
+ * Deliberately takes the ALREADY-RESOLVED requirement as input (the
+ * caller's job is to decide whether that requirement came from the live
+ * GoalActivity, first-write case, or from an ALREADY-EXISTING execution's
+ * own immutable snapshot, existing-execution case -- see logPlannedActivity's
+ * own doc comment) -- this function has no opinion on which.
+ */
+export function resolveCompletionActualValue(requirement: CompletionRequirement, actualValue?: number | null): ResolveCompletionActualValueResult {
+  const hasActualValue = actualValue !== undefined && actualValue !== null;
+
+  if (requirement.kind === 'DONE') {
+    if (hasActualValue) return { ok: false, error: 'actualValue must not be supplied when completing a DONE-kind Goal activity.' };
+    return { ok: true, value: null };
+  }
+
+  // DURATION / MEASURED_TARGET
+  if (!hasActualValue) return { ok: true, value: requirement.targetValue ?? null };
+  if (!isValidCurrentValue(actualValue)) return { ok: false, error: 'actualValue must be a finite number greater than or equal to 0.' };
+  return { ok: true, value: actualValue };
 }

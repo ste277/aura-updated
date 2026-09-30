@@ -1,13 +1,15 @@
 /**
- * Goals V2 G2.2.1 -- pure domain regression suite for
+ * Goals V2 G2.2.1/G2.2.2 -- pure domain regression suite for
  * apps/web/lib/goalActivityExecution.ts (execution snapshot validation,
- * persisted<->canonical mapping). No DB access -- see
- * goalActivityExecutionDb.test.ts for live-Postgres persistence coverage.
+ * persisted<->canonical mapping, and G2.2.2's completion-time actualValue
+ * resolution). No DB access -- see goalActivityExecutionDb.test.ts for
+ * live-Postgres persistence coverage.
  */
 import {
   validateGoalActivityExecutionSnapshot,
   toPersistedGoalActivityExecutionSnapshot,
   fromPersistedGoalActivityExecutionSnapshot,
+  resolveCompletionActualValue,
 } from '../apps/web/lib/goalActivityExecution';
 
 let allPassed = true;
@@ -151,6 +153,50 @@ check(
     // change -- re-reading it later still reports the ORIGINAL target, not the new one.
     const rehydrated = fromPersistedGoalActivityExecutionSnapshot(septemberThirtySnapshot);
     return rehydrated.completionRequirement.targetValue === 20 && rehydrated.currentValue === 20 && laterLiveRequirement.targetValue === 30;
+  })()
+);
+
+// ============================================================
+// Goals V2 G2.2.2 -- resolveCompletionActualValue (domain helper section 26)
+// ============================================================
+check('DONE: actualValue absent -> ok, value null', (() => { const r = resolveCompletionActualValue({ kind: 'DONE' }); return r.ok === true && r.value === null; })());
+check('DONE: actualValue supplied -> invalid', resolveCompletionActualValue({ kind: 'DONE' }, 5).ok === false);
+check('DONE: actualValue = 0 supplied -> still invalid (DONE carries no numeric progress at all)', resolveCompletionActualValue({ kind: 'DONE' }, 0).ok === false);
+
+check(
+  '30. DURATION: omitted -> defaults to the REQUIREMENT target (30), never PlannedActivity.durationMinutes (this helper never even sees scheduling duration)',
+  (() => { const r = resolveCompletionActualValue({ kind: 'DURATION', targetValue: 30 }); return r.ok === true && r.value === 30; })()
+);
+check(
+  '31. DURATION: override (18) preserved exactly, does not fall back to target',
+  (() => { const r = resolveCompletionActualValue({ kind: 'DURATION', targetValue: 30 }, 18); return r.ok === true && r.value === 18; })()
+);
+check(
+  '32. MEASURED_TARGET: omitted -> defaults to target (20)',
+  (() => { const r = resolveCompletionActualValue({ kind: 'MEASURED_TARGET', targetValue: 20, unit: 'pages' }); return r.ok === true && r.value === 20; })()
+);
+check(
+  '33. MEASURED_TARGET: override (12) preserved exactly',
+  (() => { const r = resolveCompletionActualValue({ kind: 'MEASURED_TARGET', targetValue: 20, unit: 'pages' }, 12); return r.ok === true && r.value === 12; })()
+);
+check(
+  '34. MEASURED_TARGET: actualValue (25) exceeding target (20) -> accepted verbatim, no clamp, no validation failure',
+  (() => { const r = resolveCompletionActualValue({ kind: 'MEASURED_TARGET', targetValue: 20, unit: 'pages' }, 25); return r.ok === true && r.value === 25; })()
+);
+check(
+  '35. zero is a valid explicit actualValue for DURATION (plan still becomes LOGGED via the existing completion action regardless)',
+  (() => { const r = resolveCompletionActualValue({ kind: 'DURATION', targetValue: 30 }, 0); return r.ok === true && r.value === 0; })()
+);
+check('35. zero is a valid explicit actualValue for MEASURED_TARGET', resolveCompletionActualValue({ kind: 'MEASURED_TARGET', targetValue: 20, unit: 'pages' }, 0).ok === true);
+check('36. negative actualValue rejected for DURATION', resolveCompletionActualValue({ kind: 'DURATION', targetValue: 30 }, -1).ok === false);
+check('36. NaN actualValue rejected', resolveCompletionActualValue({ kind: 'DURATION', targetValue: 30 }, NaN).ok === false);
+check('36. Infinity actualValue rejected', resolveCompletionActualValue({ kind: 'MEASURED_TARGET', targetValue: 20, unit: 'pages' }, Infinity).ok === false);
+check(
+  '38. resolving against an EXISTING execution\'s own immutable snapshot (target 20) rather than a changed live GoalActivity (target 30) -- proven by simply passing the snapshot requirement, never the live one',
+  (() => {
+    const existingSnapshotRequirement = { kind: 'MEASURED_TARGET' as const, targetValue: 20, unit: 'pages' }; // what the execution row itself already snapshotted
+    const r = resolveCompletionActualValue(existingSnapshotRequirement); // no actualValue supplied -> defaults from THIS requirement
+    return r.ok === true && r.value === 20; // NOT 30
   })()
 );
 

@@ -3,7 +3,8 @@ import { randomUUID } from 'crypto';
 import { derivePlanCompletionHistory } from './planCompletionHistory';
 import { validateCaptureTitle } from './captures';
 import { parseSchedulingMode, type PlannedActivitySchedulingMode } from './plannedActivitySchedulingMode';
-import { toPersistedCompletionRequirement, type CompletionRequirement } from './goalCompletion';
+import { toPersistedCompletionRequirement, normalizeGoalActivityCompletionRequirement, type CompletionRequirement } from './goalCompletion';
+import { toPersistedGoalActivityExecutionSnapshot, fromPersistedGoalActivityExecutionSnapshot, resolveCompletionActualValue } from './goalActivityExecution';
 
 // Sandbox-only substitute for @prisma/client (its engine binary can't be downloaded
 // here — see README). Same schema, same Postgres instance, plain SQL. Swap API
@@ -1444,7 +1445,15 @@ export async function deletePlannedActivity(userId: string, planId: string): Pro
   if (result.rowCount === 0) throw new Error('Plan not found or cannot be removed.');
 }
 
-export async function logPlannedActivity(userId: string, planId: string): Promise<{ plan: PlannedActivity; habitLog: HabitLogRow }> {
+// Goals V2 G2.2.2 -- optional, backward-compatible: every existing caller
+// (Home/Right Now's createPlanExecutor, the Plan tab, every pre-G2.2.2 test)
+// omits this entirely and is completely unaffected. See this function's own
+// GoalActivityExecution section below for exactly what it does.
+export interface LogPlannedActivityOptions {
+  actualValue?: number;
+}
+
+export async function logPlannedActivity(userId: string, planId: string, options?: LogPlannedActivityOptions): Promise<{ plan: PlannedActivity; habitLog: HabitLogRow }> {
   const client = await pool.connect();
   try {
     await client.query('BEGIN');
@@ -1476,6 +1485,64 @@ export async function logPlannedActivity(userId: string, planId: string): Promis
 
     if (plan.status !== 'UPCOMING') {
       throw new Error('Plan is not available to log.');
+    }
+
+    // Goals V2 G2.2.2 -- resolve Goal linkage and validate actualValue
+    // BEFORE any write, so an invalid actualValue fails the whole
+    // completion attempt cleanly (nothing partially attempted) rather than
+    // being caught only after other writes ran (atomicity is guaranteed by
+    // the transaction either way, but failing fast here avoids doing work
+    // that's about to be thrown away). Deliberately placed AFTER the
+    // idempotent-retry early-return above: a second /log call for an
+    // already-LOGGED plan returns there and never reaches this block at
+    // all, so no duplicate GoalActivityExecution write is even attempted --
+    // idempotency here is structural (the code path itself is never
+    // re-entered), not dependent on the DB's unique constraint catching a
+    // race.
+    //
+    // The GoalActivity is resolved SERVER-SIDE from persisted linkage
+    // (GoalActivity.plannedActivityId = this plan's id) -- never trusted
+    // from any client-supplied id. A plan with no such linkage is an
+    // ordinary, non-Goal completion: entirely unaffected by anything below.
+    const goalActivityRes = await client.query(`SELECT * FROM "GoalActivity" WHERE "plannedActivityId" = $1 AND "userId" = $2`, [planId, userId]);
+    const goalActivity: GoalActivity | undefined = goalActivityRes.rows[0];
+
+    let executionWrite: { goalActivityId: string; existingExecutionId: string | null; requirement: CompletionRequirement; currentValue: number | null } | null = null;
+    if (goalActivity) {
+      // If an execution row already exists for THIS plan (not possible yet
+      // via any production path in G2.2.2, since nothing creates one before
+      // Done -- future partial-progress work will change that), its
+      // immutable snapshot is authoritative: NEVER re-snapshot from the
+      // live GoalActivity, which may have been edited since the execution
+      // began (e.g. target 20 -> 30 pages). A first-write, by contrast,
+      // snapshots the CURRENT canonical requirement -- that moment becomes
+      // this execution's own historical definition from now on.
+      const existingExecRes = await client.query(`SELECT * FROM "GoalActivityExecution" WHERE "plannedActivityId" = $1 AND "userId" = $2`, [planId, userId]);
+      const existingExecution = existingExecRes.rows[0];
+      const requirement = existingExecution
+        ? fromPersistedGoalActivityExecutionSnapshot({
+            completionKindSnapshot: existingExecution.completionKindSnapshot,
+            completionTargetValueSnapshot: existingExecution.completionTargetValueSnapshot,
+            completionUnitSnapshot: existingExecution.completionUnitSnapshot,
+            currentValue: existingExecution.currentValue,
+          }).completionRequirement
+        : normalizeGoalActivityCompletionRequirement({
+            completionKind: goalActivity.completionKind,
+            completionTargetValue: goalActivity.completionTargetValue,
+            completionUnit: goalActivity.completionUnit,
+          });
+
+      const actualValueResult = resolveCompletionActualValue(requirement, options?.actualValue);
+      if (!actualValueResult.ok) throw new Error(actualValueResult.error);
+
+      executionWrite = { goalActivityId: goalActivity.id, existingExecutionId: existingExecution ? existingExecution.id : null, requirement, currentValue: actualValueResult.value };
+    } else if (options?.actualValue !== undefined && options?.actualValue !== null) {
+      // A caller supplied actualValue for a plan that isn't linked to any
+      // Goal activity -- there is nothing for it to apply to. Reject rather
+      // than silently discard it, same "never store meaningless numeric
+      // progress" principle resolveCompletionActualValue already applies to
+      // a DONE-kind Goal activity.
+      throw new Error('actualValue was supplied, but this plan is not linked to a Goal activity.');
     }
 
     // Plan Completion Historical Integrity V1 -- widened from the old
@@ -1574,6 +1641,32 @@ export async function logPlannedActivity(userId: string, planId: string): Promis
        WHERE "plannedActivityId" = $1 AND "userId" = $2`,
       [planId, userId, completionInstant]
     );
+
+    // Goals V2 G2.2.2 -- the SAME 'AURA_PLANNED' source this exact function
+    // already used for the HabitLog insert above: this completion IS an
+    // Aura-planned Done, so both records agree without a second, divergent
+    // source calculation. currentValue never controls completion status --
+    // PlannedActivity.status (already set to LOGGED above) remains the sole
+    // completion truth regardless of what currentValue is written here, even
+    // 0 or a value below target.
+    if (executionWrite) {
+      if (executionWrite.existingExecutionId) {
+        // Only mutable facts change; goalActivityId/the snapshot/createdAt
+        // are never touched.
+        await client.query(
+          `UPDATE "GoalActivityExecution" SET "currentValue" = $1, "source" = $2, "updatedAt" = now() WHERE id = $3`,
+          [executionWrite.currentValue, 'AURA_PLANNED', executionWrite.existingExecutionId]
+        );
+      } else {
+        const persisted = toPersistedGoalActivityExecutionSnapshot({ completionRequirement: executionWrite.requirement, currentValue: executionWrite.currentValue });
+        await client.query(
+          `INSERT INTO "GoalActivityExecution"
+             (id, "userId", "goalActivityId", "plannedActivityId", "completionKindSnapshot", "completionTargetValueSnapshot", "completionUnitSnapshot", "currentValue", "source")
+           VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)`,
+          [randomUUID(), userId, executionWrite.goalActivityId, planId, persisted.completionKindSnapshot, persisted.completionTargetValueSnapshot, persisted.completionUnitSnapshot, executionWrite.currentValue, 'AURA_PLANNED']
+        );
+      }
+    }
 
     await client.query('COMMIT');
     return { plan: updatedPlanRes.rows[0], habitLog: habitLogRes.rows[0] };

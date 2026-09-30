@@ -1,8 +1,12 @@
 /**
- * Goals V2 G2.2.1 -- narrow structural guards confirming this slice stayed
- * exactly as inert and as scoped as intended (its own section 26), each
- * scoped to exactly the model/module in question -- never a brittle
- * repo-wide grep.
+ * Goals V2 G2.2.1/G2.2.2 -- narrow structural guards confirming these
+ * slices stayed exactly as scoped as intended, each scoped to exactly the
+ * model/module in question -- never a brittle repo-wide grep. G2.2.1's own
+ * guards (schema shape, taxonomy reuse) are unchanged; G2.2.2 adds guards
+ * for its own section 41: GoalActivityExecution is now legitimately
+ * referenced by the completion path (db.ts's logPlannedActivity) but must
+ * remain absent from Constructor, the Move path, Home presentation,
+ * DailyAgenda, and Goal progress computation.
  */
 import * as fs from 'fs';
 import * as path from 'path';
@@ -60,11 +64,18 @@ function read(rel: string): string {
   return fs.readFileSync(path.join(__dirname, '..', rel), 'utf8');
 }
 const dbSrc = read('apps/web/lib/db.ts');
-check('db.ts: logPlannedActivity does not reference GoalActivityExecution', !/logPlannedActivity[\s\S]*?GoalActivityExecution/.test(dbSrc.slice(dbSrc.indexOf('export async function logPlannedActivity'), dbSrc.indexOf('export async function logPlannedActivity') + 4000)));
-check('planMove.ts (movePlannedActivity/applyMoveWrites) does not reference GoalActivityExecution', !/GoalActivityExecution/.test(read('apps/web/lib/planMove.ts')));
-check('homeCompletion.ts (Home/Right Now) does not reference GoalActivityExecution', !/GoalActivityExecution/.test(read('apps/web/lib/homeCompletion.ts')));
+const logPlannedActivityBody = dbSrc.slice(dbSrc.indexOf('export async function logPlannedActivity'), dbSrc.indexOf('export async function upsertUserByEmail'));
+check('G2.2.2: db.ts logPlannedActivity DOES reference GoalActivityExecution -- the intended completion-time write', /GoalActivityExecution/.test(logPlannedActivityBody));
+check('G2.2.2: logPlannedActivity resolves GoalActivity linkage server-side (queries WHERE "plannedActivityId" = ...), never trusts a client-supplied goalActivityId', /SELECT \* FROM "GoalActivity" WHERE "plannedActivityId"/.test(logPlannedActivityBody));
+check('G2.2.2: logPlannedActivity never re-snapshots from a live GoalActivity when an execution already exists (uses fromPersistedGoalActivityExecutionSnapshot on the existing row, not normalizeGoalActivityCompletionRequirement, in that branch)', /existingExecution\s*\n\s*\?\s*fromPersistedGoalActivityExecutionSnapshot/.test(logPlannedActivityBody));
+check('planMove.ts (movePlannedActivity/applyMoveWrites) does not reference GoalActivityExecution -- Move continuity is a later slice (G2.2.3)', !/GoalActivityExecution/.test(read('apps/web/lib/planMove.ts')));
+check('homeCompletion.ts (Home/Right Now) does not reference GoalActivityExecution -- no UX change in G2.2.2', !/GoalActivityExecution/.test(read('apps/web/lib/homeCompletion.ts')));
+check('dailyAgenda.ts does not reference GoalActivityExecution', !/GoalActivityExecution/.test(read('apps/web/lib/dailyAgenda.ts')));
+check('goals.ts (computeGoalProgress) does not reference GoalActivityExecution -- Goal progress stays activity-count-derived, unaffected by currentValue', !/GoalActivityExecution/.test(read('apps/web/lib/goals.ts')));
 check('goalsPresentation.ts does not reference GoalActivityExecution (no read-model exposure yet)', !/GoalActivityExecution/.test(read('apps/web/lib/goalsPresentation.ts')));
 check('app/api/goals/[goalId]/route.ts does not reference GoalActivityExecution', !/GoalActivityExecution/.test(read('apps/web/app/api/goals/[goalId]/route.ts')));
+check('dayConstructorOrchestrator.ts does not reference GoalActivityExecution', !/GoalActivityExecution/.test(read('apps/web/lib/dayConstructorOrchestrator.ts')));
+check('dayConstructorAcceptancePersistence.ts does not reference GoalActivityExecution', !/GoalActivityExecution/.test(read('apps/web/lib/dayConstructorAcceptancePersistence.ts')));
 
 if (!allPassed) {
   console.error('SOME GOAL ACTIVITY EXECUTION STRUCTURAL GUARD CHECKS FAILED');
