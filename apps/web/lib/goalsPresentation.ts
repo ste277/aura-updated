@@ -17,6 +17,7 @@
 
 import { isValidCivilDateString, type DerivedGoalActivityState, type GoalActivityStatus, type GoalStatus, type GoalTemplateCategory } from './goals';
 import type { CompletionRequirement } from './goalCompletion';
+import { formatGoalActivityCompletion } from './goalActivityExecution';
 
 export interface GoalSummary {
   id: string;
@@ -123,54 +124,15 @@ export function formatGoalProgressLabel(progress: GoalProgressView): string {
   return `${progress.completed} of ${progress.total} completed`;
 }
 
-// ============================================================
-// Goals V2 G3.2 -- activity-level completion detail ("what counts as
-// doing this, and what happened"). Deliberately separate from
-// presentGoalActivityStateLabel (lifecycle truth) -- this function has NO
-// opinion on SUGGESTED/PLANNED/COMPLETED and never reads derivedState; the
-// two are composed together in JSX, never merged into one inference
-// (G3.2's own section 21/22 invariant: numeric progress must never imply
-// or override lifecycle state).
-//
-// Plain template-literal number interpolation (never toFixed/
-// Intl.NumberFormat) is the whole "fractional formatting" story here:
-// `${30}` -> "30", `${12.5}` -> "12.5", `${1.25}` -> "1.25" -- JS's own
-// default Number-to-string coercion already avoids both integer rounding
-// and trailing zeros, so there is nothing further to implement.
-// ============================================================
-
-export function formatGoalActivityCompletion(completionRequirement: CompletionRequirement, currentValue: number | null): string | null {
-  const { kind, targetValue, unit } = completionRequirement;
-  // DONE carries no numeric progress at all (G2.1's own invariant) --
-  // title + lifecycle state is sufficient; rendering "Target: Done" or a
-  // fake 1/1 would be the exact over-explaining this slice avoids.
-  if (kind === 'DONE') return null;
-
-  // DURATION's unit is always implicitly "min" -- completionRequirement
-  // never carries one for DURATION (G2.1's own invariant), and this
-  // function never reads/persists a duration unit from anywhere else.
-  const unitLabel = kind === 'DURATION' ? 'min' : unit;
-  const targetLabel = `${targetValue} ${unitLabel}`;
-
-  // No execution yet: target only. NULL means "nothing recorded", never
-  // coerced to "0 <unit>" -- that would misrepresent an activity that
-  // hasn't been attempted as one that was attempted and produced nothing.
-  if (currentValue === null) return targetLabel;
-
-  // Actual matches target exactly: the compact, non-redundant form (this
-  // slice's own section 8/preferred design) -- applies identically to
-  // DURATION and MEASURED_TARGET, since the underlying reasoning ("the
-  // target and actual are identical, repeating both adds no information")
-  // is not kind-specific.
-  if (currentValue === targetValue) return targetLabel;
-
-  // Actual differs from target (below, above, or exactly zero) -- always
-  // shown factually, current-value first, target second. Never clamped to
-  // the target, never converted to a percentage, never labeled
-  // partial/failed/missed/overachieved -- G2.2's own established
-  // "actual is a fact, never judged" invariant.
-  return `${currentValue} / ${targetLabel}`;
-}
+// Goals V2 G3.2/G3.3 -- formatGoalActivityCompletion now lives in
+// goalActivityExecution.ts (a neutral Goal-DOMAIN module, not a Goal-UI
+// module): G3.3 needed the SAME formatter from Right Now (Home), and
+// importing a "Goals UI" file from Home would have been exactly the
+// inappropriate-dependency case this ticket's own section 3 warned
+// against. Re-exported here unchanged so Goal Detail's existing import
+// site (`from '../../../lib/goalsPresentation'`) keeps working without
+// modification -- one canonical implementation, two import paths.
+export { formatGoalActivityCompletion };
 
 // ============================================================
 // Civil-date display (this ticket's own section 13) -- "YYYY-MM-DD" in,

@@ -9,9 +9,12 @@
  *
  * G2.2.1 added the schema/domain foundation with no production write path.
  * G2.2.2 connects resolveCompletionActualValue (below) to the EXISTING
- * completion transaction (apps/web/lib/db.ts's logPlannedActivity) -- the
- * only production consumer of this module. Still no Move/Skip/Constructor/
- * Home-UX/UI involvement.
+ * completion transaction (apps/web/lib/db.ts's logPlannedActivity). G3.2/
+ * G3.3 add formatGoalActivityCompletion (below), a pure presentation
+ * helper deliberately placed HERE rather than in goalsPresentation.ts (a
+ * Goal-UI-specific module) -- both Goal Detail and Right Now (Home) import
+ * it from this single, neutral Goal-domain module, so there is exactly one
+ * canonical formatting rule, never a Home->Goal-UI dependency.
  */
 
 import { validateCompletionRequirement, type CompletionRequirement } from './goalCompletion';
@@ -154,4 +157,52 @@ export function resolveCompletionActualValue(requirement: CompletionRequirement,
   if (!hasActualValue) return { ok: true, value: requirement.targetValue ?? null };
   if (!isValidCurrentValue(actualValue)) return { ok: false, error: 'actualValue must be a finite number greater than or equal to 0.' };
   return { ok: true, value: actualValue };
+}
+
+// ============================================================
+// Goals V2 G3.2/G3.3 -- activity-level completion detail ("what counts as
+// doing this, and what happened"), the single canonical presentation rule
+// shared by Goal Detail and Right Now. Deliberately separate from any
+// lifecycle/derivedState label -- this function has NO opinion on
+// SUGGESTED/PLANNED/COMPLETED and never receives that input at all,
+// structurally incapable of inferring/overriding lifecycle truth from a
+// numeric value (G3.2's own section 21/22 invariant).
+//
+// Plain template-literal number interpolation (never toFixed/
+// Intl.NumberFormat) is the whole "fractional formatting" story here:
+// `${30}` -> "30", `${12.5}` -> "12.5", `${1.25}` -> "1.25" -- JS's own
+// default Number-to-string coercion already avoids both integer rounding
+// and trailing zeros, so there is nothing further to implement.
+// ============================================================
+
+export function formatGoalActivityCompletion(completionRequirement: CompletionRequirement, currentValue: number | null): string | null {
+  const { kind, targetValue, unit } = completionRequirement;
+  // DONE carries no numeric progress at all (G2.1's own invariant) --
+  // title + lifecycle state is sufficient; rendering "Target: Done" or a
+  // fake 1/1 would be the exact over-explaining this slice avoids.
+  if (kind === 'DONE') return null;
+
+  // DURATION's unit is always implicitly "min" -- completionRequirement
+  // never carries one for DURATION (G2.1's own invariant), and this
+  // function never reads/persists a duration unit from anywhere else.
+  const unitLabel = kind === 'DURATION' ? 'min' : unit;
+  const targetLabel = `${targetValue} ${unitLabel}`;
+
+  // No execution yet: target only. NULL means "nothing recorded", never
+  // coerced to "0 <unit>" -- that would misrepresent an activity that
+  // hasn't been attempted as one that was attempted and produced nothing.
+  if (currentValue === null) return targetLabel;
+
+  // Actual matches target exactly: the compact, non-redundant form --
+  // applies identically to DURATION and MEASURED_TARGET, since the
+  // underlying reasoning ("the target and actual are identical, repeating
+  // both adds no information") is not kind-specific.
+  if (currentValue === targetValue) return targetLabel;
+
+  // Actual differs from target (below, above, or exactly zero) -- always
+  // shown factually, current-value first, target second. Never clamped to
+  // the target, never converted to a percentage, never labeled
+  // partial/failed/missed/overachieved -- G2.2's own established
+  // "actual is a fact, never judged" invariant.
+  return `${currentValue} / ${targetLabel}`;
 }

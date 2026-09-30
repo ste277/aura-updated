@@ -44,11 +44,15 @@ check('homeTimelineComposer.ts passes goalContext through verbatim (item.goalCon
 check('homeTimelineComposer.ts remains pure -- no DB/fetch call added', !/pool\.query|client\.query|await fetch/.test(composerSrc));
 
 // ============================================================
-// No UI rendering consumes Goal context yet (section 23)
+// No UI rendering consumed Goal context as of G3.1 (section 23). Goals V2
+// G3.3 (a later, separately-authorized ticket) intentionally made
+// HomeDashboard.tsx the Right Now spotlight's own consumer of goalContext
+// -- see test/rightNowGoalContext.test.ts for G3.3's own guards. Every
+// OTHER surface this section covers remains untouched and is still
+// asserted here.
 // ============================================================
 check('GoalDetailClient.tsx does not render goalContext (currentValue exposure is API-only in G3.1)', !/goalContext/.test(read('apps/web/app/goals/[goalId]/GoalDetailClient.tsx')));
-check('HomeDashboard.tsx does not reference goalContext', !/goalContext/.test(read('apps/web/components/HomeDashboard.tsx')));
-check('HomeTimeline.tsx does not reference goalContext', !/goalContext/.test(read('apps/web/components/HomeTimeline.tsx')));
+check('HomeTimeline.tsx (ordinary Timeline rows) does not reference goalContext -- the Right Now spotlight is G3.3\'s only consumer, never every row', !/goalContext/.test(read('apps/web/components/HomeTimeline.tsx')));
 check('RecompositionCard.tsx does not reference goalContext', !/goalContext/.test(read('apps/web/components/RecompositionCard.tsx')));
 
 // ============================================================

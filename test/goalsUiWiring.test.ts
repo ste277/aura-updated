@@ -104,14 +104,24 @@ function main() {
   check('36. copy never claims Aura "generated a personalized plan" for the deterministic templates', !/generated a personalized/i.test(allGoalsUiSource));
 
   // ============================================================
-  // 39. No Home integration beyond the single dedicated nav entry --
-  // HomeDashboard.tsx / app/page.tsx gain zero Goal awareness; the ONLY
-  // new reference anywhere in the existing app shell is the one row this
-  // PR adds to YouView.tsx.
+  // 39. No Home integration beyond the single dedicated nav entry (this
+  // PR's own scope) -- HomeDashboard.tsx / app/page.tsx gain zero Goal
+  // BROWSING/LIST awareness; the ONLY new reference anywhere in the
+  // existing app shell (at THIS PR's time) is the one row this PR adds to
+  // YouView.tsx. Goals V2 G3.3 (a later, separately-authorized ticket)
+  // intentionally adds a small, read-only "For: <goal title>" Right Now
+  // context line -- NOT a Goal card/section/list/opportunity, never a
+  // fetch to the Goals list/detail endpoints, never new navigation -- so
+  // this check is narrowed to what it actually still protects against
+  // rather than the word "Goal" appearing at all. See
+  // test/rightNowGoalContext.test.ts for G3.3's own, narrower guards.
   // ============================================================
   const homeDashboardSource = read('../apps/web/components/HomeDashboard.tsx');
   const pageSource = read('../apps/web/app/page.tsx');
-  check('39. HomeDashboard.tsx has zero mention of Goal (no Goal cards/opportunities added to Home)', !/\bGoal(s)?\b/.test(homeDashboardSource));
+  check(
+    '39. HomeDashboard.tsx has no Goal BROWSING surface (no Goal card/section/list component, no fetch to the Goals list/detail API, no new "/goals" navigation) -- Goals V2 G3.3\'s own minimal, read-only Right Now context line is the one intentional exception',
+    !/GoalCard|GoalSection|GoalsList|fetch\(`\/api\/goals/.test(homeDashboardSource) && !/\/goals/.test(homeDashboardSource)
+  );
   check('39. app/page.tsx has zero mention of "/goals" (no new activeTab/navigation wired there)', !/\/goals/.test(pageSource));
   const youViewSource = read('../apps/web/components/YouView.tsx');
   check('4. YouView.tsx contains exactly one FUNCTIONAL navigation to /goals (the single nav entry this ticket asks for -- doc-comment mentions of "/goals" are excluded, not a second entry)', (stripComments(youViewSource).match(/\/goals/g) ?? []).length === 1);

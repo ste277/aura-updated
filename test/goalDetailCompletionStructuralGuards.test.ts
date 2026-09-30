@@ -43,9 +43,15 @@ check('no per-activity progress bar was added (role="progressbar" appears at mos
 check('no threshold-based completion inference (no ">= " comparison against currentValue/targetValue anywhere in this file)', !/currentValue\s*>=|targetValue\s*<=/.test(detailSrc));
 check('no percentage conversion was introduced for activity rows (the existing Goal-level Math.round(...) percentage usage is untouched, and no new one was added)', (detailSrc.match(/Math\.round/g) ?? []).length === 1);
 
-check('homeCompletion.ts (Home/Right Now) does not reference formatGoalActivityCompletion', !/formatGoalActivityCompletion/.test(read('../apps/web/lib/homeCompletion.ts')));
-check('HomeDashboard.tsx does not reference formatGoalActivityCompletion', !/formatGoalActivityCompletion/.test(read('../apps/web/components/HomeDashboard.tsx')));
-check('HomeTimeline.tsx does not reference formatGoalActivityCompletion', !/formatGoalActivityCompletion/.test(read('../apps/web/components/HomeTimeline.tsx')));
+check('homeCompletion.ts (the Done/Skip/Move action layer, not presentation) does not reference formatGoalActivityCompletion', !/formatGoalActivityCompletion/.test(read('../apps/web/lib/homeCompletion.ts')));
+// Goals V2 G3.3 (a later, separately-authorized ticket) intentionally made
+// HomeDashboard.tsx the Right Now spotlight's own consumer of this exact
+// formatter -- see test/rightNowGoalContext.test.ts for G3.3's own guards
+// (canonical single-source reuse, Timeline-boundary enforcement, no new
+// action/write). HomeTimeline.tsx (ordinary Timeline rows) remains the
+// real boundary this file still protects: G3.3 explicitly keeps numeric
+// Goal progress OFF every Timeline row, spotlight-only.
+check('HomeTimeline.tsx (ordinary Timeline rows) does not reference formatGoalActivityCompletion -- numeric Goal progress stays spotlight-only, never on every row', !/formatGoalActivityCompletion/.test(read('../apps/web/components/HomeTimeline.tsx')));
 check('dayConstructorOrchestrator.ts does not reference formatGoalActivityCompletion', !/formatGoalActivityCompletion/.test(read('../apps/web/lib/dayConstructorOrchestrator.ts')));
 check('planMove.ts does not reference formatGoalActivityCompletion', !/formatGoalActivityCompletion/.test(read('../apps/web/lib/planMove.ts')));
 
