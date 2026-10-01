@@ -547,9 +547,15 @@ function main() {
   // its collapsed state (this ticket's own section 19) -- never leaves
   // it stuck open after a successful add. A third site (the section-12
   // remove-to-empty collapse effect, checked separately below) also
-  // resets it as part of collapsing all the way back to fresh.
+  // resets it as part of collapsing all the way back to fresh. Goals V2
+  // Candidate A3.3 added exactly one more intentionally-reviewed site,
+  // handleIncludeAutoGoalSuggestion -- the SAME "a completed add always
+  // collapses Add-another" rule, extended to the one new way a row can be
+  // added (this ticket's own section 5, reusing handleQuickPick's own
+  // established pattern verbatim).
   check('89. setAddPickerExpanded(false) is called from handleQuickPick and handleSomethingElse (at least)', /function handleQuickPick[\s\S]*?setAddPickerExpanded\(false\);/.test(planDayClientSource) && /function handleSomethingElse[\s\S]*?setAddPickerExpanded\(false\);/.test(planDayClientSource));
-  check('89b. setAddPickerExpanded(false) appears exactly THREE times total -- the two handlers plus the one remove-to-empty collapse effect, never a fourth/duplicate site', occurrences(planDayClientSource, 'setAddPickerExpanded(false);') === 3);
+  check('89b. setAddPickerExpanded(false) appears exactly FOUR times total -- the two U2 handlers, the remove-to-empty collapse effect, and A3.3\'s own handleIncludeAutoGoalSuggestion, never a fifth/duplicate site', occurrences(planDayClientSource, 'setAddPickerExpanded(false);') === 4);
+  check('89c. handleIncludeAutoGoalSuggestion is one of the four setAddPickerExpanded(false) call sites', /function handleIncludeAutoGoalSuggestion[\s\S]*?setAddPickerExpanded\(false\);/.test(planDayClientSource));
 
   // 90. planDayEntry.ts itself is completely untouched by U2 -- all new
   // state is presentation-only, living in PlanDayClient.tsx (this
@@ -563,10 +569,15 @@ function main() {
   // another/CTA showing over a blank row.
   // ============================================================
 
-  // 91. setPlanRevealed is called from exactly THREE sites: true from
-  // handleQuickPick, true from handleSomethingElse, and false from the
-  // new remove-to-empty collapse effect -- never a fourth/duplicate path.
-  check('91. setPlanRevealed(true) is called from exactly two sites (handleQuickPick, handleSomethingElse)', occurrences(planDayClientSource, 'setPlanRevealed(true);') === 2);
+  // 91. setPlanRevealed is called from exactly FOUR sites: true from
+  // handleQuickPick, true from handleSomethingElse, true from Goals V2
+  // Candidate A3.3's own handleIncludeAutoGoalSuggestion (this ticket's
+  // own section 5 -- including a suggestion is "a real plan now exists,"
+  // the same fact a Quick Pick/Something-else already establishes), and
+  // false from the remove-to-empty collapse effect -- never a fifth/
+  // duplicate path.
+  check('91. setPlanRevealed(true) is called from exactly three sites (handleQuickPick, handleSomethingElse, handleIncludeAutoGoalSuggestion)', occurrences(planDayClientSource, 'setPlanRevealed(true);') === 3);
+  check('91c. handleIncludeAutoGoalSuggestion is one of the setPlanRevealed(true) call sites', /function handleIncludeAutoGoalSuggestion[\s\S]*?setPlanRevealed\(true\);/.test(planDayClientSource));
   check('91b. setPlanRevealed(false) is called from exactly one site (the remove-to-empty collapse effect)', occurrences(planDayClientSource, 'setPlanRevealed(false);') === 1);
 
   // 92. The collapse effect is keyed ONLY on `rows` -- it only ever
@@ -628,12 +639,16 @@ function main() {
   // ============================================================
   // Goals V2 Candidate A3.2 -- automatic Goal-demand bootstrap wiring
   // (109-122). The A3 architecture audit's own section 11/12/13/14/17/
-  // 25: the prop must reach PlanDayClient inert, never seed `rows`, never
-  // alter the preview/accept request, and the Constructor/orchestrator/
-  // acceptance layers must remain completely untouched by this ticket.
+  // 25: the prop must reach PlanDayClient, never seed `rows` BY ITSELF,
+  // never alter the preview/accept request for a non-included suggestion,
+  // and the Constructor/orchestrator/acceptance layers must remain
+  // completely untouched. Candidate A3.3 (this ticket's own section 4/5)
+  // is explicitly what's authorized to make the prop genuinely consumed
+  // (surfaced + actionable) -- checks 110/114 below were narrowed from
+  // A3.2's original "deliberately inert" wording to reflect that.
   // ============================================================
   check('109. PlanDayClientProps declares the new autoGoalSuggestions prop', /autoGoalSuggestions: readonly GoalDemandCandidate\[\]/.test(planDayClientSource));
-  check('110. PlanDayClient destructures autoGoalSuggestions (renamed _autoGoalSuggestions, marking it deliberately unread in A3.2)', /autoGoalSuggestions: _autoGoalSuggestions \}: PlanDayClientProps/.test(planDayClientSource));
+  check('110. PlanDayClient destructures autoGoalSuggestions under its own real name (no longer renamed/marked unread -- A3.3 is the ticket authorized to end A3.2\'s own temporary inertness)', /\bautoGoalSuggestions\b[\s\S]{0,5}\}: PlanDayClientProps/.test(planDayClientSource) && !/_autoGoalSuggestions/.test(planDayClientSource));
   check(
     '111. the `rows` useState initializer is byte-identical to before A3.2 -- autoGoalSuggestions never seeds a row',
     /const \[rows, setRows\] = useState<PlanDayIntentRow\[\]>\(\(\) =>\s*goalActivities\.length \+ captures\.length > 0\s*\? \[\.\.\.goalActivities\.map\(createIntentRowFromGoalActivity\), \.\.\.captures\.map\(createIntentRowFromCapture\)\]\.slice\(0, MAX_PLAN_DAY_INTENTS\)\s*: \[createInitialIntentRow\(\)\]\s*\);/.test(
@@ -646,8 +661,11 @@ function main() {
     /goalActivityLinks=\{buildGoalActivityLinksForAccept\(rows, preview\.constructedDay\.proposedItems\)\}\s*captureLinks=\{buildCaptureLinksForAccept\(rows, preview\.constructedDay\.proposedItems\)\}/.test(planDayClientSource)
   );
   check(
-    '114. `_autoGoalSuggestions` is referenced only in its own destructure and the one explanatory comment immediately below it -- never inside rows/JSX/preview/accept wiring',
-    (planDayClientSource.match(/_autoGoalSuggestions/g) ?? []).length === 2
+    '114. autoGoalSuggestions is consumed ONLY by deriveAvailableAutoGoalSuggestions (A3.3) -- never read directly by the `rows` initializer, buildRequestedIntentsForSubmission, or the accept-time link builders',
+    /deriveAvailableAutoGoalSuggestions\(autoGoalSuggestions, rows\)/.test(planDayClientSource) &&
+      !/useState<PlanDayIntentRow\[\]>\(\(\) =>[\s\S]{0,400}autoGoalSuggestions/i.test(planDayClientSource) &&
+      !/buildRequestedIntentsForSubmission\(rows, timezone, planningDate, autoGoalSuggestions/.test(planDayClientSource) &&
+      !/buildGoalActivityLinksForAccept\(rows, preview\.constructedDay\.proposedItems, autoGoalSuggestions/.test(planDayClientSource)
   );
   check('115. page.tsx passes autoGoalSuggestions={autoGoalSuggestions} to <PlanDayClient>', /autoGoalSuggestions=\{autoGoalSuggestions\}/.test(planDayPageSource));
   check(
@@ -664,6 +682,48 @@ function main() {
   check('121. the orchestrator (dayConstructorOrchestrator.ts) does not reference Goal demand', !/goalDemandCandidates|goalPlanningSourceAdapter|autoGoalSuggestions/i.test(dayConstructorOrchestratorSource));
   check('122. acceptance (dayConstructorAcceptance.ts) does not yet decode goal-demand intent ids or reference the Goal planning-source adapter (Option 4/A3.4 not started)', !/goal-demand:|goalPlanningSourceAdapter|encodeGoalDemandIntentId/i.test(dayConstructorAcceptanceSource));
   check('122b. acceptance persistence (dayConstructorAcceptancePersistence.ts) does not reference Goal demand/the planning-source adapter', !/goalDemandCandidates|goalPlanningSourceAdapter/i.test(dayConstructorAcceptancePersistenceSource));
+
+  // ============================================================
+  // Goals V2 Candidate A3.3 -- "Aura suggests" UX wiring (123-140). The
+  // ticket's own core invariant: SURFACED != INCLUDED != PREVIEWED !=
+  // COMMITTED. Re-verifies 120-122b's own Constructor/orchestrator/
+  // acceptance-blindness facts still hold after this ticket's production
+  // changes (never assumes a guard proven once stays proven).
+  // ============================================================
+  check('123. AutoGoalSuggestionsSection is rendered conditionally, only when at least one suggestion is available -- never an empty container (this ticket\'s own section 19)', /\{availableAutoGoalSuggestions\.length > 0 && \(/.test(planDayClientSource));
+  check('124. the suggestions list is rendered via a plain .map with no .sort()/.slice()/.filter(\\(.*,\\s*index\\) applied to availableAutoGoalSuggestions anywhere (no ranking/truncation, this ticket\'s own section 13/33/34)', !/availableAutoGoalSuggestions\.(sort|slice)\(/.test(planDayClientSource));
+  check('125. the Add action reuses the EXACT SAME atIntentCap variable every other add-affordance (Quick Picks, Something-else, + Add another) already respects -- never a second/looser limit (this ticket\'s own section 14)', /<AutoGoalSuggestionsSection suggestions=\{availableAutoGoalSuggestions\} disabled=\{phase === 'SUBMITTING' \|\| atIntentCap\}/.test(planDayClientSource));
+  check('126. handleIncludeAutoGoalSuggestion reuses canAddAnotherRow -- the SAME existing 12-row gate, never a redefined/duplicated limit', /function handleIncludeAutoGoalSuggestion[\s\S]{0,500}canAddAnotherRow\(rows\)/.test(planDayClientSource));
+  check(
+    '127. handleIncludeAutoGoalSuggestion performs zero DB/network calls (no fetch/API import) -- inclusion is a pure client-state change (this ticket\'s own section 18/22/46/47)',
+    (() => {
+      const match = planDayClientSource.match(/function handleIncludeAutoGoalSuggestion\([\s\S]*?\n  \}/);
+      return !!match && !/fetch\(|axios|await /.test(match[0]);
+    })()
+  );
+  check('128. the suggestion card never renders remainingThisWeek (eligibility data, not presentation pressure -- this ticket\'s own explicit section 3 instruction)', !/suggestion\.remainingThisWeek/.test(planDayClientSource));
+  {
+    // Bounded to the AutoGoalSuggestionCard function's own BODY (not an
+    // unbounded to-end-of-file search, which would false-positive on
+    // unrelated later code), and comments stripped (this file's own doc
+    // comments describing the "avoid" list itself legitimately contain
+    // these words in prose -- only real rendered JSX/strings count).
+    const cardBodyMatch = planDayClientSource.match(/function AutoGoalSuggestionCard\([\s\S]*?\n\}/);
+    const cardBody = cardBodyMatch ? cardBodyMatch[0] : '';
+    const cardBodyNoComments = cardBody.replace(/\/\*[\s\S]*?\*\//g, '').replace(/\/\/.*$/gm, '');
+    check('129. the suggestion card never renders a score/priority/streak/urgency string literal', !!cardBodyMatch && !/remaining this week|streak|urgent|priority:/i.test(cardBodyNoComments));
+    check('132. no fixed-width style is applied to the suggestion card (responsive, this ticket\'s own section 23 -- only the shared flexible minWidth:0 pattern IntentRowCard already uses)', !!cardBodyMatch && !/\bwidth:\s*\d/.test(cardBodyNoComments));
+  }
+  check('130. AutoGoalSuggestionCard shows exactly the activity title and "For: <Goal title>" -- no additional Goal metadata rendered', /\{suggestion\.title\}/.test(planDayClientSource) && /For: \{suggestion\.goalTitle\}/.test(planDayClientSource));
+  check('131. the Add control carries a real, descriptive accessible name (never icon/color-only) -- this ticket\'s own section 22', /ariaLabel=\{`Add \$\{suggestion\.title\}/.test(planDayClientSource));
+  check('133. goalTitle is read only inside the two new presentation components -- never inside buildRequestedIntentsForSubmission/PreviewRequestIntentBody-adjacent code (this ticket\'s own section 9: presentation metadata never enters the Constructor-facing request)', !/buildRequestedIntentsForSubmission\([\s\S]{0,200}goalTitle/.test(planDayClientSource));
+  check('134. goalTitle never appears in planDayEntry.ts at all (the generic row/intent pipeline stays completely unaware of it)', !/goalTitle/.test(planDayEntrySource));
+  check('135. the Constructor core (dayConstructor.ts) still does not reference Goal demand after this ticket\'s own changes', !/goalDemandCandidates|goalPlanningSourceAdapter|autoGoalSuggestions|goalDemandIntentId/i.test(dayConstructorSource));
+  check('136. the orchestrator (dayConstructorOrchestrator.ts) still does not reference Goal demand', !/goalDemandCandidates|goalPlanningSourceAdapter|autoGoalSuggestions|goalDemandIntentId/i.test(dayConstructorOrchestratorSource));
+  check('137. acceptance (dayConstructorAcceptance.ts) still does not decode goal-demand ids or reference the planning-source adapter/encoder (A3.4 not started)', !/goal-demand:|goalPlanningSourceAdapter|encodeGoalDemandIntentId|goalDemandIntentId/i.test(dayConstructorAcceptanceSource));
+  check('138. acceptance persistence (dayConstructorAcceptancePersistence.ts) still does not reference Goal demand/the planning-source adapter/encoder', !/goalDemandCandidates|goalPlanningSourceAdapter|goalDemandIntentId/i.test(dayConstructorAcceptancePersistenceSource));
+  check('139. createIntentRowFromAutoGoalSuggestion never invents a duration (no durationMinutes argument/assignment beyond blankIntentRow\'s own null default)', !/createIntentRowFromAutoGoalSuggestion[\s\S]{0,200}durationMinutes:\s*\d/.test(planDayEntrySource));
+  check('140. goalDemandIntentId.ts (the client-safe encoder module) is imported directly by PlanDayClient.tsx -- never goalPlanningSourceAdapter.ts itself (which would pull db.ts/`pg` into the client bundle)', planDayClientSource.includes("from '../../lib/goalDemandIntentId'") && !/from '\.\.\/\.\.\/lib\/goalPlanningSourceAdapter'/.test(planDayClientSource));
 
   if (!allPassed) {
     console.error('\nSome Plan Day Wiring checks FAILED.');

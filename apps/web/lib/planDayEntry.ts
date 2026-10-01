@@ -19,6 +19,7 @@ import type { PreviewRequestIntentBody } from './dayConstructorPreviewClient';
 import type { ConstructDayPreviewClientResult } from './dayConstructorPreviewClient';
 import type { PlanningHorizon } from './planningHorizon';
 import type { GoalActivityLink, CaptureLink } from './acceptConstructedDay';
+import type { GoalDemandCandidate } from './goalDemandCandidates';
 
 // ============================================================
 // Row model (this ticket's own section 10) -- deliberately NOT every
@@ -184,6 +185,45 @@ export function createIntentRowFromCapture(capture: { id: string; title: string 
 
 export function createIntentRowFromGoalActivity(goalActivity: { id: string; title: string; activityId: string | null }): PlanDayIntentRow {
   return { ...blankIntentRow(`plan-day-goal-${goalActivity.id}`), title: goalActivity.title, activityId: goalActivity.activityId ?? undefined, goalActivityId: goalActivity.id };
+}
+
+/**
+ * Goals V2 Candidate A3.3 -- the SAME field mapping as
+ * createIntentRowFromGoalActivity above (title/activityId/goalActivityId,
+ * every other field at blankIntentRow's own FLEXIBLE/no-duration default
+ * -- this ticket's own section 8: "flexibility = existing Goal/manual
+ * default... do not invent duration"), with exactly one deliberate
+ * difference: `id` is the CALLER-SUPPLIED canonical automatic Goal-demand
+ * intent id (`goal-demand:<planningLocalDate>:<goalActivityId>`,
+ * goalDemandIntentId.ts's own `encodeGoalDemandIntentId`), never the
+ * manual handoff's own `plan-day-goal-<id>` scheme (this ticket's own
+ * section 6/12: an included suggestion and a manually-seeded row must
+ * never share an id scheme). This function never computes that id itself
+ * -- the caller (PlanDayClient.tsx) derives it from the canonical
+ * planningDate prop it already receives, never a client clock read.
+ */
+export function createIntentRowFromAutoGoalSuggestion(suggestion: { title: string; activityId: string | null; goalActivityId: string }, intentId: string): PlanDayIntentRow {
+  return { ...blankIntentRow(intentId), title: suggestion.title, activityId: suggestion.activityId ?? undefined, goalActivityId: suggestion.goalActivityId };
+}
+
+/**
+ * Goals V2 Candidate A3.3 -- "available" automatic Goal suggestions (this
+ * ticket's own section 10): `autoGoalSuggestions` minus whichever
+ * GoalActivities already have a row in `rows`, regardless of that row's
+ * own origin (an included automatic row, or a manually-seeded one --
+ * A3.2's own server-side dedup already prevents a manually-seeded
+ * GoalActivity from ever appearing in `autoGoalSuggestions` to begin
+ * with, so filtering against every row here is defensive, never the
+ * primary mechanism). A pure function, matching this file's own
+ * established "no component-rendering tests" convention -- PlanDayClient.tsx
+ * calls this directly rather than reimplementing the derivation inline,
+ * so the derivation itself is testable without a rendering harness.
+ * Preserves `autoGoalSuggestions`'s own input order verbatim (this
+ * ticket's own section 13: no ranking/scoring/sorting).
+ */
+export function deriveAvailableAutoGoalSuggestions(autoGoalSuggestions: readonly GoalDemandCandidate[], rows: readonly PlanDayIntentRow[]): GoalDemandCandidate[] {
+  const includedGoalActivityIds = new Set(rows.map((row) => row.goalActivityId).filter((id): id is string => id !== undefined));
+  return autoGoalSuggestions.filter((suggestion) => !includedGoalActivityIds.has(suggestion.goalActivityId));
 }
 
 /** True only for a row that is BYTE-IDENTICAL to a freshly-created empty

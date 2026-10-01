@@ -28,6 +28,8 @@ import {
   createIntentRowFromQuickPick,
   createIntentRowFromGoalActivity,
   createIntentRowFromCapture,
+  createIntentRowFromAutoGoalSuggestion,
+  deriveAvailableAutoGoalSuggestions,
   buildCaptureLinksForAccept,
   MAX_PLAN_DAY_INTENTS,
   isRowUntouched,
@@ -45,6 +47,7 @@ import {
 } from '../../lib/planDayEntry';
 import type { GoalActivityHandoffItem, CaptureHandoffItem } from '../../lib/planDayBootstrap';
 import type { GoalDemandCandidate } from '../../lib/goalDemandCandidates';
+import { encodeGoalDemandIntentId } from '../../lib/goalDemandIntentId';
 
 /**
  * Day Constructor V1 -- PR F2. The user-reachable "Plan my day" entry
@@ -129,23 +132,21 @@ export interface PlanDayClientProps {
    * immutable bootstrap input (`resolveAutomaticGoalDemand`,
    * planDayBootstrap.ts): the factual set of recurring GoalActivities
    * Aura COULD suggest for this planning date, already deduplicated
-   * against the explicit/manual Goal handoff above. Deliberately INERT in
-   * this ticket's own scope (A3 architecture audit's own section
-   * 11/12/17): never read by the `rows` initializer, never passed to
-   * `buildRequestedIntentsForSubmission`/`buildGoalActivityLinksForAccept`,
-   * never rendered -- consumed only by a later, separately-authorized
-   * ticket (A3.3), which is what turns an explicitly-included suggestion
-   * into a real row through the existing row pipeline. This prop exists
-   * so the data safely reaches the client boundary and nothing else.
+   * against the explicit/manual Goal handoff above.
+   *
+   * Candidate A3.3 -- now surfaced under "Aura suggests" and actionable
+   * (see `AutoGoalSuggestionsSection`/`handleIncludeAutoGoalSuggestion`
+   * below). Still never read by the `rows` initializer -- an eligible
+   * suggestion only ever becomes a row through one explicit user action
+   * (this ticket's own core invariant: SURFACED != INCLUDED). Still
+   * never passed directly to `buildRequestedIntentsForSubmission`/
+   * `buildGoalActivityLinksForAccept` -- only a row that was EXPLICITLY
+   * included (and therefore lives in `rows`) ever reaches either.
    */
   autoGoalSuggestions: readonly GoalDemandCandidate[];
 }
 
-export function PlanDayClient({ timezone, planningDate, horizon, availabilityConfigured, goalActivities, captures, autoGoalSuggestions: _autoGoalSuggestions }: PlanDayClientProps) {
-  // `_autoGoalSuggestions` (Goals V2 Candidate A3.2) is deliberately
-  // unread here -- see its own prop doc comment above. Destructured only
-  // so TypeScript still proves every PlanDayClientProps field is a real,
-  // named prop this component accepts; A3.3 is what actually consumes it.
+export function PlanDayClient({ timezone, planningDate, horizon, availabilityConfigured, goalActivities, captures, autoGoalSuggestions }: PlanDayClientProps) {
   const router = useRouter();
   const authenticated = !!timezone && !!planningDate && !!horizon;
   const [phase, setPhase] = useState<Phase>(() => (authenticated ? 'ENTRY' : 'REDIRECTING'));
@@ -310,6 +311,38 @@ export function PlanDayClient({ timezone, planningDate, horizon, availabilityCon
     });
   }
 
+  // Goals V2 Candidate A3.3 -- "available" suggestions (this ticket's own
+  // section 10) are DERIVED from `autoGoalSuggestions` minus whichever
+  // GoalActivities already have a row in `rows` -- never a second,
+  // separately-maintained "included" Set (deriveAvailableAutoGoalSuggestions,
+  // planDayEntry.ts). This is what makes removal (`removeRow`, unmodified)
+  // automatically return a suggestion to this list with zero extra code:
+  // once a row is gone, its goalActivityId no longer appears in `rows`,
+  // so the next render includes it again.
+  const availableAutoGoalSuggestions = deriveAvailableAutoGoalSuggestions(autoGoalSuggestions, rows);
+
+  // "Add" (this ticket's own section 5/6/8) -- the ONE moment a factual
+  // suggestion becomes a real planning intent. Reuses the EXACT SAME
+  // blank-row-reuse/12-row-cap pattern `handleQuickPick` already
+  // establishes above -- never a second Preview path, never a
+  // Goal-specific submission flow. The row's own `id` is the canonical
+  // A2 automatic intent id (`encodeGoalDemandIntentId`, goalDemandIntentId.ts),
+  // keyed off `planningDate` -- the SAME server-established civil date
+  // this component already receives as a prop, never a client clock read
+  // (this ticket's own section 7).
+  function handleIncludeAutoGoalSuggestion(suggestion: GoalDemandCandidate) {
+    if (!planningDate || !canAddAnotherRow(rows)) return;
+    setPlanRevealed(true);
+    setAddPickerExpanded(false);
+    const intentId = encodeGoalDemandIntentId(planningDate, suggestion.goalActivityId);
+    const row = createIntentRowFromAutoGoalSuggestion(suggestion, intentId);
+    setRows((current) => {
+      if (current.length === 1 && isRowUntouched(current[0])) return [row];
+      if (!canAddAnotherRow(current)) return current;
+      return [...current, row];
+    });
+  }
+
   function selectHorizon(next: PlanningHorizon) {
     if (next === horizon) return;
     router.push(next === 'TOMORROW' ? '/plan-day?horizon=tomorrow' : '/plan-day?horizon=today');
@@ -449,6 +482,24 @@ export function PlanDayClient({ timezone, planningDate, horizon, availabilityCon
               </SurfaceCard>
             ) : (
               <>
+                {/* Goals V2 Candidate A3.3 -- "Aura suggests" (this
+                    ticket's own section 3/4/19): rendered whenever a real
+                    available suggestion exists, independent of
+                    planRevealed -- a user with nothing else to plan yet
+                    must still be able to see and act on it (this ticket's
+                    own section 4: opening Plan My Day never itself
+                    selects/includes anything, but it must not HIDE a
+                    real suggestion behind an unrelated reveal gate
+                    either). Absent entirely when the list is empty (this
+                    ticket's own section 19: never an empty container
+                    merely to announce nothing exists) -- which already
+                    covers the LOAD_FAILED case, since A3.2 degrades that
+                    to [] before this component ever sees it (section 20:
+                    no new error message here). */}
+                {availableAutoGoalSuggestions.length > 0 && (
+                  <AutoGoalSuggestionsSection suggestions={availableAutoGoalSuggestions} disabled={phase === 'SUBMITTING' || atIntentCap} onAdd={handleIncludeAutoGoalSuggestion} />
+                )}
+
                 {!planRevealed && (
                   <div style={{ marginTop: spacing.lg }}>
                     <FieldLabel>What do you want to accomplish?</FieldLabel>
@@ -642,6 +693,58 @@ function QuickPicksAndSomethingElse({
         </TextButton>
       </div>
     </>
+  );
+}
+
+/**
+ * Goals V2 Candidate A3.3 -- "Aura suggests" (this ticket's own section
+ * 3/13/21/23). Deliberately lightweight: a label, a list, one action per
+ * suggestion -- no progress bars, no weekly counters, no Goal
+ * configuration (this ticket's own section 21's own explicit "avoid"
+ * list). `suggestions` is rendered in the exact order the caller passes
+ * it (A1's own stable, non-semantic order, survived unmodified through
+ * A3.2's bootstrap and this component's own derivation) -- this file
+ * never ranks/scores/sorts it by anything (this ticket's own section 13).
+ */
+function AutoGoalSuggestionsSection({ suggestions, disabled, onAdd }: { suggestions: readonly GoalDemandCandidate[]; disabled: boolean; onAdd: (suggestion: GoalDemandCandidate) => void }) {
+  return (
+    <div style={{ marginTop: spacing.lg }}>
+      <FieldLabel>Aura suggests</FieldLabel>
+      <div style={{ display: 'flex', flexDirection: 'column', gap: spacing.sm, marginTop: spacing.sm }}>
+        {suggestions.map((suggestion) => (
+          <AutoGoalSuggestionCard key={suggestion.goalActivityId} suggestion={suggestion} disabled={disabled} onAdd={() => onAdd(suggestion)} />
+        ))}
+      </div>
+    </div>
+  );
+}
+
+/**
+ * Shows exactly two facts (this ticket's own section 3: activity title,
+ * Goal context) and one action -- never `remainingThisWeek` (eligibility
+ * data, not presentation pressure, this ticket's own explicit
+ * instruction) and never a Rhythm/streak/urgency signal of any kind.
+ * Reuses `SurfaceCard`/`SecondaryButton` (this screen's own existing
+ * primitives, this ticket's own section 21: no new visual language) --
+ * the same flexible `minWidth: 0` text-wrapping pattern `IntentRowCard`
+ * already uses for its own title input, so a long activity or Goal title
+ * wraps instead of overflowing at the existing mobile breakpoint (this
+ * ticket's own section 23), and the Add button keeps a real accessible
+ * name (never icon/color-only, this ticket's own section 22).
+ */
+function AutoGoalSuggestionCard({ suggestion, disabled, onAdd }: { suggestion: GoalDemandCandidate; disabled: boolean; onAdd: () => void }) {
+  return (
+    <SurfaceCard>
+      <div style={{ display: 'flex', alignItems: 'center', gap: spacing.sm }}>
+        <div style={{ flex: 1, minWidth: 0 }}>
+          <p style={{ margin: 0, fontWeight: 700, overflowWrap: 'break-word' }}>{suggestion.title}</p>
+          <p style={{ margin: 0, marginTop: 2, fontSize: 13, color: colors.textSecondary, overflowWrap: 'break-word' }}>For: {suggestion.goalTitle}</p>
+        </div>
+        <SecondaryButton onClick={onAdd} disabled={disabled} ariaLabel={`Add ${suggestion.title} (for ${suggestion.goalTitle}) to today's plan`}>
+          Add
+        </SecondaryButton>
+      </div>
+    </SurfaceCard>
   );
 }
 
