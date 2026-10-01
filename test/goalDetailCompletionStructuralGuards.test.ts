@@ -33,9 +33,18 @@ check('Goal Detail consumes currentValue via the same call', /activity\.currentV
 check('No GoalActivityExecution persistence field (id/source/snapshot columns/timestamps) reaches GoalDetailClient.tsx JSX', !/executionId|\.source\b|completionKindSnapshot|completionTargetValueSnapshot|completionUnitSnapshot|execution\.createdAt|execution\.updatedAt/.test(detailSrc));
 check('formatGoalActivityCompletion itself never references execution id/source/timestamps -- only kind/targetValue/unit/currentValue', !/executionId|\bsource\b|createdAt|updatedAt/.test(presentationSrc.slice(presentationSrc.indexOf('export function formatGoalActivityCompletion'), presentationSrc.indexOf('export function formatGoalActivityCompletion') + 1200)));
 
-check('no new progress-write fetch/POST was added to GoalDetailClient.tsx (still exactly the pre-existing load/dismiss/add/archive/delete endpoints)', (() => {
+// Goals V2 Rhythm R5 (a later, separately-authorized ticket) legitimately
+// added one more endpoint -- PATCH .../activities/[id]/rhythm, the one
+// allowed per-row Rhythm edit affordance (this ticket's own section 20;
+// see test/goalActivityRhythmGoalDetailStructuralGuards.test.ts for R5's
+// own narrower proof that this is a pure policy write, never a progress/
+// completion write). The real invariant this check still protects is
+// narrower than "still exactly 5": no COMPLETION/PROGRESS-write endpoint
+// was added -- the one new endpoint is Rhythm, a wholly separate
+// dimension (this ticket's own section 24).
+check('no new progress-write fetch/POST was added to GoalDetailClient.tsx (still exactly the pre-existing load/dismiss/add/archive/delete endpoints, plus Rhythm R5\'s own single, separate rhythm-edit endpoint)', (() => {
   const fetchCalls = detailSrc.match(/fetch\(`[^`]*`/g) ?? [];
-  return fetchCalls.length === 5 && fetchCalls.every((call) => /\/api\/goals\/\$\{goalId\}`|\/dismiss`|\/activities`|\/archive`|\/api\/goals\/\$\{goal\.id\}`/.test(call));
+  return fetchCalls.length === 6 && fetchCalls.every((call) => /\/api\/goals\/\$\{goalId\}`|\/dismiss`|\/activities`|\/archive`|\/api\/goals\/\$\{goal\.id\}`|\/activities\/\$\{activity\.id\}\/rhythm`/.test(call));
 })());
 check('no "Done"/"Complete" action button was added to Goal Detail (execution stays in Home/Right Now)', !/>Done<|>Complete<|>Mark done</.test(read('../apps/web/app/goals/[goalId]/GoalDetailClient.tsx')));
 check('no Progress/Adjust/Edit target/+1/History button was added', !/>Progress<|>Adjust<|>Edit target<|>\+1<|>History</.test(read('../apps/web/app/goals/[goalId]/GoalDetailClient.tsx')));

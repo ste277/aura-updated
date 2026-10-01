@@ -45,7 +45,6 @@ const PRODUCTION_FILES: Record<string, string> = {
   'Home timeline composer (homeTimelineComposer.ts)': '../apps/web/lib/homeTimelineComposer.ts',
   'Right Now selection (rightNowSelection.ts)': '../apps/web/lib/rightNowSelection.ts',
   'Home completion (homeCompletion.ts)': '../apps/web/lib/homeCompletion.ts',
-  'GOAL_TEMPLATES (goals.ts)': '../apps/web/lib/goals.ts',
   'Goal completion domain (goalCompletion.ts)': '../apps/web/lib/goalCompletion.ts',
   'Goal activity execution domain (goalActivityExecution.ts)': '../apps/web/lib/goalActivityExecution.ts',
 };
@@ -139,10 +138,32 @@ check('remainingDayRecompositionAcceptance.ts never references Rhythm/GoalActivi
 
 // ============================================================
 // No template Rhythm defaults, no title/activity frequency inference.
+//
+// Rhythm R5 (a later, separately-authorized ticket: minimum setup UX)
+// legitimately added GOAL_TEMPLATE_LIKELY_ONGOING to goals.ts -- a purely
+// advisory boolean table deciding only whether Create Goal's template
+// step SHOWS a frequency question, never an exact N (this ticket's own
+// section 10/11; see test/goalActivityRhythmStructuralGuards.test.ts and
+// test/goalActivityRhythmSetupStructuralGuards.test.ts for R5's own
+// exhaustive proof). The real invariant narrows to: GOAL_TEMPLATES's own
+// per-activity entries still carry no rhythm field, and nothing in
+// goals.ts assigns a default N or computes eligibility.
 // ============================================================
 const goalsSrc = stripComments(read('../apps/web/lib/goals.ts'));
-check('GOAL_TEMPLATES gained no Rhythm defaults -- goals.ts still has zero Rhythm reference of its own', !RHYTHM_PATTERN.test(goalsSrc));
-check('no Goal/GoalActivity title string anywhere in db.ts is used to choose a targetPerWeek/frequency (no title-keyed lookup table near materializeGoalActivityRhythmOccurrence)', !/title.*targetPerWeek|targetPerWeek.*title/i.test(stripComments(dbSrc)));
+check(
+  'GOAL_TEMPLATES gained no Rhythm DEFAULTS (R5\'s own GOAL_TEMPLATE_LIKELY_ONGOING is advisory-only -- no targetPerWeek assignment, no eligibility computation, GOAL_TEMPLATES\'s own entries carry no rhythm field)',
+  !/computeGoalActivityRhythmEligibility|targetPerWeek:\s*\d/.test(goalsSrc) && !/rhythm:/i.test(goalsSrc.slice(goalsSrc.indexOf('GOAL_TEMPLATES ='), goalsSrc.indexOf('export interface ResolvedGoalTemplateActivity')))
+);
+// (Requires an actual conditional/lookup construct between the two
+// identifiers -- plain proximity is not evidence of a title-keyed lookup.
+// A naive "title...targetPerWeek within one regex line" check
+// false-positived on createGoalWithActivities's own INSERT column list,
+// where "title" and "...targetPerWeek" are simply neighboring, unrelated
+// column references -- never a lookup.)
+check(
+  'no Goal/GoalActivity title string anywhere in db.ts is used to choose a targetPerWeek/frequency (no title-keyed lookup table/conditional near materializeGoalActivityRhythmOccurrence)',
+  !/if\s*\([^)]*title[^)]*\)[^;{]*targetPerWeek|switch\s*\([^)]*title\)/i.test(stripComments(dbSrc))
+);
 
 // ============================================================
 // No AURA_DECIDES, no RRULE, no bulk weekly materialization, no future-

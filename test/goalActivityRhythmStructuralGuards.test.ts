@@ -42,7 +42,6 @@ const PRODUCTION_FILES: Record<string, string> = {
   'Recomposition decision engine (remainingDayRecomposition.ts)': '../apps/web/lib/remainingDayRecomposition.ts',
   'Recomposition server wiring (remainingDayRecompositionServer.ts)': '../apps/web/lib/remainingDayRecompositionServer.ts',
   'Recomposition acceptance (remainingDayRecompositionAcceptance.ts)': '../apps/web/lib/remainingDayRecompositionAcceptance.ts',
-  'GOAL_TEMPLATES (goals.ts)': '../apps/web/lib/goals.ts',
   'Goal completion domain (goalCompletion.ts)': '../apps/web/lib/goalCompletion.ts',
   'Goal activity execution domain (goalActivityExecution.ts)': '../apps/web/lib/goalActivityExecution.ts',
 };
@@ -50,6 +49,25 @@ const PRODUCTION_FILES: Record<string, string> = {
 for (const [label, relPath] of Object.entries(PRODUCTION_FILES)) {
   check(`${label} does not reference Rhythm`, !RHYTHM_PATTERN.test(read(relPath)));
 }
+
+// Rhythm R5 (a still-further, separately-authorized ticket: minimum
+// setup UX) legitimately added GOAL_TEMPLATE_LIKELY_ONGOING to goals.ts
+// -- a PURELY ADVISORY, boolean-only table (this ticket's own section
+// 10/11) deciding only whether Create Goal's own template step shows a
+// frequency QUESTION at all. It assigns no exact N, computes no
+// eligibility, and is never consulted by any write path
+// (createGoalWithActivities/addGoalActivity accept an explicit,
+// user-chosen rhythm or default to NONE regardless of this table -- see
+// test/goalActivityRhythmSetupStructuralGuards.test.ts for R5's own
+// guards proving exactly that). Narrowed to that exact invariant rather
+// than the original blanket "zero Rhythm reference."
+const goalsSrcForTemplateCheck = read('../apps/web/lib/goals.ts');
+check(
+  'GOAL_TEMPLATES (goals.ts) references Rhythm ONLY via the advisory GOAL_TEMPLATE_LIKELY_ONGOING boolean table (R5) -- never assigns an exact N, never computes eligibility, GOAL_TEMPLATES itself carries no rhythm field',
+  /GOAL_TEMPLATE_LIKELY_ONGOING/.test(goalsSrcForTemplateCheck) &&
+    !/computeGoalActivityRhythmEligibility|targetPerWeek:\s*\d/.test(goalsSrcForTemplateCheck) &&
+    !/rhythm:/i.test(stripComments(goalsSrcForTemplateCheck).slice(stripComments(goalsSrcForTemplateCheck).indexOf('GOAL_TEMPLATES ='), stripComments(goalsSrcForTemplateCheck).indexOf('export interface ResolvedGoalTemplateActivity')))
+);
 
 // ============================================================
 // planMove.ts / GoalDetailClient.tsx / goalsPresentation.ts /
@@ -131,8 +149,28 @@ function functionBody(source: string, name: string): string {
 }
 check('logPlannedActivity itself does not reference Rhythm', !RHYTHM_PATTERN.test(functionBody(dbSrc, 'logPlannedActivity')));
 check('skipPlannedActivity itself does not reference Rhythm', !RHYTHM_PATTERN.test(functionBody(dbSrc, 'skipPlannedActivity')));
-check('createGoalWithActivities itself does not reference Rhythm (no production writer)', !RHYTHM_PATTERN.test(functionBody(dbSrc, 'createGoalWithActivities')));
-check('addGoalActivity itself does not reference Rhythm (no production writer)', !RHYTHM_PATTERN.test(functionBody(dbSrc, 'addGoalActivity')));
+// Rhythm R5 (a still-further, separately-authorized ticket: minimum setup
+// UX) legitimately gave both of these functions an optional `rhythm`
+// parameter, persisted via the canonical toPersistedGoalActivityRhythm
+// helper -- see test/goalActivityRhythmSetupStructuralGuards.test.ts for
+// R5's own exhaustive proof that server validation/persistence is correct
+// and that neither function reimplements eligibility or policy math.
+// Narrowed to that exact invariant. (NOT verified via this file's own
+// functionBody() helper here: createGoalWithActivities's parameter list
+// opens with an inline object TYPE -- `input: { ... }` -- whose own nested
+// braces close well before the function's real body does, so
+// functionBody()'s brace-matching mis-extracts just that type signature
+// for this one function. Matching the exact call-site text directly
+// against the whole file sidesteps that pre-existing helper limitation
+// without touching the shared helper itself.)
+check(
+  'createGoalWithActivities persists Rhythm ONLY via toPersistedGoalActivityRhythm(activity.rhythm ...) (R5) -- no eligibility computation anywhere in db.ts\'s own Goal-creation write path',
+  /toPersistedGoalActivityRhythm\(activity\.rhythm \?\? NONE_GOAL_ACTIVITY_RHYTHM\)/.test(dbSrc)
+);
+check(
+  'addGoalActivity persists Rhythm ONLY via toPersistedGoalActivityRhythm(input.rhythm ...) (R5) -- no eligibility computation anywhere in db.ts\'s own manual-add write path',
+  /toPersistedGoalActivityRhythm\(input\.rhythm \?\? NONE_GOAL_ACTIVITY_RHYTHM\)/.test(dbSrc)
+);
 // This R2 ticket originally asserted db.ts defines ONLY the one allowed
 // read-only loader. Rhythm R3 (a later, separately-authorized ticket) added
 // exactly one intentionally-reviewed second function,
@@ -142,14 +180,19 @@ check('addGoalActivity itself does not reference Rhythm (no production writer)',
 // .test.ts). Rhythm R4 (a still-further, separately-authorized ticket) then
 // added exactly one more intentionally-reviewed function,
 // loadGoalActivityRhythmFactsForActivities -- a batched, read-only sibling of
-// loadGoalActivityRhythmFacts (this ticket's own section 40 N+1 fix). The
-// real invariant that still must hold is narrower than "only two": db.ts's
-// Rhythm-named functions are limited to exactly these three named,
-// intentionally-reviewed functions -- never a fourth, undocumented one.
+// loadGoalActivityRhythmFacts (this ticket's own section 40 N+1 fix). Rhythm
+// R5 (a yet further, separately-authorized ticket) then added exactly one
+// more intentionally-reviewed function, setGoalActivityRhythm -- the one
+// allowed Rhythm WRITE path for an EXISTING GoalActivity (this ticket's own
+// section 20), proved exhaustively in
+// test/goalActivityRhythmSetupStructuralGuards.test.ts. The real invariant
+// that still must hold is narrower than "only three": db.ts's Rhythm-named
+// functions are limited to exactly these four named, intentionally-reviewed
+// functions -- never a fifth, undocumented one.
 check(
-  'db.ts defines ONLY the three allowed, intentionally-reviewed Rhythm functions (loadGoalActivityRhythmFacts [read-only], loadGoalActivityRhythmFactsForActivities [R4\'s batched read-only sibling], and materializeGoalActivityRhythmOccurrence [R3\'s sole occurrence writer]) -- no other function references Rhythm',
+  'db.ts defines ONLY the four allowed, intentionally-reviewed Rhythm functions (loadGoalActivityRhythmFacts [read-only], loadGoalActivityRhythmFactsForActivities [R4\'s batched read-only sibling], materializeGoalActivityRhythmOccurrence [R3\'s sole occurrence writer], and setGoalActivityRhythm [R5\'s sole existing-activity policy writer]) -- no other function references Rhythm',
   [...new Set((dbSrc.match(/function \w*[Rr]hythm\w*/g) ?? []))].sort().join(',') ===
-    ['function loadGoalActivityRhythmFacts', 'function loadGoalActivityRhythmFactsForActivities', 'function materializeGoalActivityRhythmOccurrence'].sort().join(',')
+    ['function loadGoalActivityRhythmFacts', 'function loadGoalActivityRhythmFactsForActivities', 'function materializeGoalActivityRhythmOccurrence', 'function setGoalActivityRhythm'].sort().join(',')
 );
 check('loadGoalActivityRhythmFacts itself contains no INSERT/UPDATE/DELETE (read-only, this ticket\'s own section 23)', !/INSERT\s|UPDATE\s|DELETE\s/.test(functionBody(dbSrc, 'loadGoalActivityRhythmFacts')));
 

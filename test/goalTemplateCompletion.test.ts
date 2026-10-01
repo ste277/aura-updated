@@ -173,7 +173,18 @@ function stripComments(source: string): string {
   check('39. goals.ts reuses the canonical CompletionRequirement type via a type-only import (never redefines DONE/DURATION/MEASURED_TARGET as its own union)', /import type \{ CompletionRequirement \} from '\.\/goalCompletion'/.test(goalsSrc) && !/type CompletionRequirement =|type CompletionKind =/.test(goalsSrc));
   check('39. completionRequirement is never derived from findActivityIntent/catalog metadata (no defaultDurationMinutes CODE reference in goals.ts -- doc-comment prose explaining why it must never be used is excluded)', !/defaultDurationMinutes/.test(goalsSrcNoComments));
   check('39. resolveGoalTemplateActivities passes completionRequirement straight from the static table, never computed from the resolved activityId/catalog entry', /completionRequirement: entry\.completionRequirement/.test(goalsSrc));
-  check('39. createGoalWithActivities\'s own INSERT statement is unchanged (completionRequirement was already accepted/persisted since G2.1 -- zero new write path added by G3.4)', /INSERT INTO "GoalActivity" \(id, "userId", "goalId", title, "activityId", "completionKind", "completionTargetValue", "completionUnit"\)/.test(dbSrc));
+  // Goals V2 Rhythm R5 (a later, separately-authorized ticket) legitimately
+  // extended this same INSERT with two more trailing columns
+  // (rhythmKind/rhythmTargetPerWeek) for its own, entirely independent
+  // per-activity Rhythm input -- see test/goalActivityRhythmSetupDb.test.ts
+  // for R5's own guards. The real invariant this check still protects is
+  // narrower than "unchanged": the completion columns themselves remain
+  // exactly where G3.4 put them, in the same order, with no new write path
+  // for THEM specifically.
+  check(
+    '39. createGoalWithActivities\'s own INSERT still targets the completion columns exactly as G3.4 left them (completionRequirement was already accepted/persisted since G2.1 -- zero new write path added by G3.4; Rhythm R5 only appended its own trailing columns, never touching these)',
+    /INSERT INTO "GoalActivity" \(id, "userId", "goalId", title, "activityId", "completionKind", "completionTargetValue", "completionUnit"/.test(dbSrc)
+  );
   check('39. db.ts gained no new SQL UPDATE targeting existing GoalActivity completion columns (no backfill of historical rows)', !/UPDATE "GoalActivity" SET "completionKind"|UPDATE "GoalActivity" SET "completionTargetValue"/.test(dbSrc));
   check('39. no new migration directory was added for G3.4 (still 41)', fs.readdirSync(path.join(__dirname, '..', 'apps', 'web', 'prisma', 'migrations')).filter((d) => /^\d{4}_/.test(d)).length === 43);
   const goalActivityBlockMatch = schemaSrc.match(/model GoalActivity \{([\s\S]*?)\n\}/);

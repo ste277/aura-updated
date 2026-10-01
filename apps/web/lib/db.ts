@@ -4,7 +4,16 @@ import { derivePlanCompletionHistory } from './planCompletionHistory';
 import { validateCaptureTitle } from './captures';
 import { parseSchedulingMode, type PlannedActivitySchedulingMode } from './plannedActivitySchedulingMode';
 import { toPersistedCompletionRequirement, normalizeGoalActivityCompletionRequirement, type CompletionRequirement } from './goalCompletion';
-import { deriveGoalActivityRhythmContribution, normalizeGoalActivityRhythm, computeGoalActivityRhythmEligibility, type GoalActivityRhythmOccurrenceFact, type PlannedActivityStatusForRhythm } from './goalActivityRhythm';
+import {
+  deriveGoalActivityRhythmContribution,
+  normalizeGoalActivityRhythm,
+  computeGoalActivityRhythmEligibility,
+  toPersistedGoalActivityRhythm,
+  NONE_GOAL_ACTIVITY_RHYTHM,
+  type GoalActivityRhythmOccurrenceFact,
+  type PlannedActivityStatusForRhythm,
+  type GoalActivityRhythm,
+} from './goalActivityRhythm';
 import { getDatePartsInTimezone } from './timezone';
 import { toPersistedGoalActivityExecutionSnapshot, fromPersistedGoalActivityExecutionSnapshot, resolveCompletionActualValue } from './goalActivityExecution';
 
@@ -2508,7 +2517,15 @@ export async function createGoalWithActivities(input: {
   // toPersistedCompletionRequirement(DONE_COMPLETION_REQUIREMENT)'s own
   // all-null encoding -- identical to every row this function persisted
   // before G2.1; this function's own write path is otherwise unchanged.
-  activities: ReadonlyArray<{ title: string; activityId: string | null; completionRequirement?: CompletionRequirement }>;
+  // Goals V2 Rhythm R5 -- rhythm is likewise optional and additive, per
+  // activity (Rhythm belongs to GoalActivity, this ticket's own section
+  // 13 domain-truth decision -- never a single Goal-level frequency
+  // copied across activities). Omitted means NONE, identical to every
+  // activity this function persisted before R5 (this ticket's own section
+  // 42/50 API-compatibility requirement -- a template creation that omits
+  // rhythm entirely, which is every creation before this ticket and every
+  // "Start from scratch" creation after it, is byte-identical to before).
+  activities: ReadonlyArray<{ title: string; activityId: string | null; completionRequirement?: CompletionRequirement; rhythm?: GoalActivityRhythm }>;
 }): Promise<{ goal: Goal; activities: GoalActivity[] }> {
   const client = await beginTransaction();
   try {
@@ -2522,10 +2539,11 @@ export async function createGoalWithActivities(input: {
     const activities: GoalActivity[] = [];
     for (const activity of input.activities) {
       const persistedCompletion = toPersistedCompletionRequirement(activity.completionRequirement ?? { kind: 'DONE' });
+      const persistedRhythm = toPersistedGoalActivityRhythm(activity.rhythm ?? NONE_GOAL_ACTIVITY_RHYTHM);
       const result = await client.query(
-        `INSERT INTO "GoalActivity" (id, "userId", "goalId", title, "activityId", "completionKind", "completionTargetValue", "completionUnit")
-         VALUES ($1, $2, $3, $4, $5, $6, $7, $8) RETURNING *`,
-        [randomUUID(), input.userId, goalId, activity.title, activity.activityId, persistedCompletion.completionKind, persistedCompletion.completionTargetValue, persistedCompletion.completionUnit]
+        `INSERT INTO "GoalActivity" (id, "userId", "goalId", title, "activityId", "completionKind", "completionTargetValue", "completionUnit", "rhythmKind", "rhythmTargetPerWeek")
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10) RETURNING *`,
+        [randomUUID(), input.userId, goalId, activity.title, activity.activityId, persistedCompletion.completionKind, persistedCompletion.completionTargetValue, persistedCompletion.completionUnit, persistedRhythm.rhythmKind, persistedRhythm.rhythmTargetPerWeek]
       );
       activities.push(result.rows[0]);
     }
@@ -2620,16 +2638,50 @@ export async function deleteGoal(userId: string, goalId: string): Promise<'DELET
 // Goals V2 G2.1 -- completionRequirement is optional and NOT yet supplied
 // by the POST /api/goals/[goalId]/activities route: omitted means DONE
 // (see createGoalWithActivities's identical convention above).
-export async function addGoalActivity(userId: string, goalId: string, input: { title: string; activityId: string | null; completionRequirement?: CompletionRequirement }): Promise<GoalActivity | null> {
+//
+// Goals V2 Rhythm R5 -- rhythm is likewise optional and additive. Omitted
+// means NONE (toPersistedGoalActivityRhythm(NONE_GOAL_ACTIVITY_RHYTHM)'s own
+// all-null encoding -- identical to every row this function persisted
+// before R5, this ticket's own section 42 API-compatibility requirement).
+// The caller (POST /api/goals/[goalId]/activities) is responsible for
+// validating any client-supplied rhythm through the canonical R2
+// validator (validateGoalActivityRhythm) BEFORE calling this function --
+// this function trusts its input the same way it already trusts
+// completionRequirement.
+export async function addGoalActivity(userId: string, goalId: string, input: { title: string; activityId: string | null; completionRequirement?: CompletionRequirement; rhythm?: GoalActivityRhythm }): Promise<GoalActivity | null> {
   const goal = await getGoalForUser(userId, goalId);
   if (!goal) return null;
   const persistedCompletion = toPersistedCompletionRequirement(input.completionRequirement ?? { kind: 'DONE' });
+  const persistedRhythm = toPersistedGoalActivityRhythm(input.rhythm ?? NONE_GOAL_ACTIVITY_RHYTHM);
   const result = await pool.query(
-    `INSERT INTO "GoalActivity" (id, "userId", "goalId", title, "activityId", "completionKind", "completionTargetValue", "completionUnit")
-     VALUES ($1, $2, $3, $4, $5, $6, $7, $8) RETURNING *`,
-    [randomUUID(), userId, goalId, input.title, input.activityId, persistedCompletion.completionKind, persistedCompletion.completionTargetValue, persistedCompletion.completionUnit]
+    `INSERT INTO "GoalActivity" (id, "userId", "goalId", title, "activityId", "completionKind", "completionTargetValue", "completionUnit", "rhythmKind", "rhythmTargetPerWeek")
+     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10) RETURNING *`,
+    [randomUUID(), userId, goalId, input.title, input.activityId, persistedCompletion.completionKind, persistedCompletion.completionTargetValue, persistedCompletion.completionUnit, persistedRhythm.rhythmKind, persistedRhythm.rhythmTargetPerWeek]
   );
   return result.rows[0];
+}
+
+/**
+ * Goals V2 Rhythm R5 -- the one allowed Rhythm WRITE path for an EXISTING
+ * GoalActivity (creation-time Rhythm goes through addGoalActivity /
+ * createGoalWithActivities instead -- this function is never called from
+ * either). A pure policy change: never touches plannedActivityId, never
+ * creates/deletes a GoalActivityOccurrence row, never cancels an existing
+ * UPCOMING commitment (this ticket's own section 21/22 -- eligibility
+ * simply recalculates prospectively from the new policy the next time it
+ * is read; nothing here is migrated or backfilled). Scoped by userId AND
+ * goalId AND id together, same ownership convention as
+ * dismissGoalActivity. The caller is responsible for validating `rhythm`
+ * through validateGoalActivityRhythm first -- this function trusts its
+ * input, same convention as every other persistence function in this file.
+ */
+export async function setGoalActivityRhythm(userId: string, goalId: string, goalActivityId: string, rhythm: GoalActivityRhythm): Promise<GoalActivity | null> {
+  const persisted = toPersistedGoalActivityRhythm(rhythm);
+  const result = await pool.query(
+    `UPDATE "GoalActivity" SET "rhythmKind" = $1, "rhythmTargetPerWeek" = $2, "updatedAt" = now() WHERE id = $3 AND "goalId" = $4 AND "userId" = $5 RETURNING *`,
+    [persisted.rhythmKind, persisted.rhythmTargetPerWeek, goalActivityId, goalId, userId]
+  );
+  return result.rows[0] ?? null;
 }
 
 /** Idempotent (repeat dismissal is a harmless no-op re-write of the same

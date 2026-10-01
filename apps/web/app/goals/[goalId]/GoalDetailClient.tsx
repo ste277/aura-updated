@@ -3,6 +3,7 @@
 import React, { useEffect, useState } from 'react';
 import { colors, spacing, typography } from '../../../components/theme';
 import { PageHeader, SurfaceCard, PrimaryButton, SecondaryButton, TextButton, DestructiveButton, StatusBadge, EmptyState, FieldLabel, TextInput, FieldError } from '../../../components/ui';
+import { RhythmPicker, type RhythmPickerValue } from '../../../components/RhythmPicker';
 import {
   formatGoalActivityCompletion,
   formatGoalActivityRhythmFrequencyLabel,
@@ -350,6 +351,18 @@ function ActivityRow({
         </div>
       )}
 
+      {/* Goals V2 Rhythm R5 -- this ticket's own section 20 decision: a
+          small inline edit affordance, available on EVERY row regardless
+          of derivedState (a policy change is independent of any specific
+          occurrence's lifecycle -- this ticket's own section 21). This is
+          also how a template-created activity (which always starts NONE,
+          this ticket's own section 34) reaches an explicit weekly
+          frequency -- the SAME control, never a separate creation-time
+          wizard. */}
+      <div style={{ marginTop: spacing.sm }}>
+        <RhythmEditor activity={activity} onSaved={onChanged} />
+      </div>
+
       {/* SUGGESTED is the only state with a Dismiss action. PLANNED/
           COMPLETED render as pure read-only status; there is no
           reschedule/cancel/mark-complete action anywhere on this page
@@ -366,6 +379,84 @@ function ActivityRow({
 }
 
 // ============================================================
+// Goals V2 Rhythm R5 -- RhythmPicker itself now lives in
+// ../../../components/RhythmPicker.tsx (shared with CreateGoalModal's own
+// template frequency step in GoalsListClient.tsx -- one mechanism, not two,
+// this ticket's own section 9). RhythmEditor below is Goal-Detail-specific
+// (it PATCHes the one allowed edit endpoint for an EXISTING row), so it
+// stays here.
+// ============================================================
+
+/**
+ * The per-row edit affordance (this ticket's own section 20). Collapsed by
+ * default to a single TextButton -- available on every row, regardless of
+ * derivedState, since a Rhythm policy change is independent of any
+ * specific occurrence (section 21/22/23). Saving PATCHes the one allowed
+ * edit endpoint; the server independently re-validates (section 19) --
+ * this component's own RhythmPicker validation is client-side convenience
+ * only.
+ */
+function RhythmEditor({ activity, onSaved }: { activity: GoalActivityView; onSaved: () => void }) {
+  const [editing, setEditing] = useState(false);
+  const initialValue: RhythmPickerValue = activity.rhythm.kind === 'N_PER_WEEK' ? { kind: 'N_PER_WEEK', targetPerWeek: activity.rhythm.targetPerWeek } : { kind: 'NONE' };
+  const [value, setValue] = useState<RhythmPickerValue | null>(initialValue);
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  if (!editing) {
+    return (
+      <TextButton onClick={() => { setValue(initialValue); setEditing(true); }} color={colors.info}>
+        {activity.rhythm.kind === 'N_PER_WEEK' ? 'Change frequency' : 'Set weekly frequency'}
+      </TextButton>
+    );
+  }
+
+  const handleSave = async () => {
+    if (value === null || saving) return;
+    setSaving(true);
+    setError(null);
+    try {
+      const res = await fetch(`/api/goals/${activity.goalId}/activities/${activity.id}/rhythm`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ rhythm: value }),
+      });
+      const data = await res.json().catch(() => null);
+      if (!res.ok) {
+        setError(data?.error ?? 'Could not save this. Try again.');
+        setSaving(false);
+        return;
+      }
+      setEditing(false);
+      setSaving(false);
+      onSaved();
+    } catch {
+      setError('Could not save this. Try again.');
+      setSaving(false);
+    }
+  };
+
+  return (
+    <div>
+      <RhythmPicker value={value ?? initialValue} onChange={setValue} idPrefix={`activity-${activity.id}`} />
+      {error && (
+        <div role="alert" style={{ marginTop: spacing.sm }}>
+          <FieldError>{error}</FieldError>
+        </div>
+      )}
+      <div style={{ display: 'flex', gap: spacing.sm, marginTop: spacing.md }}>
+        <PrimaryButton onClick={handleSave} disabled={value === null || saving} loading={saving}>
+          Save
+        </PrimaryButton>
+        <SecondaryButton onClick={() => setEditing(false)} disabled={saving}>
+          Cancel
+        </SecondaryButton>
+      </div>
+    </div>
+  );
+}
+
+// ============================================================
 // AddActivityControl (this ticket's own section 20/21) -- title-only,
 // no catalog/activityId exposure.
 // ============================================================
@@ -373,6 +464,10 @@ function ActivityRow({
 function AddActivityControl({ goalId, onAdded }: { goalId: string; onAdded: () => void }) {
   const [open, setOpen] = useState(false);
   const [title, setTitle] = useState('');
+  // Goals V2 Rhythm R5 -- this ticket's own section 16: default is Once
+  // (NONE), so old behavior remains the default; Rhythm configuration is
+  // never required to add an activity.
+  const [rhythm, setRhythm] = useState<RhythmPickerValue | null>({ kind: 'NONE' });
   const [status, setStatus] = useState<'IDLE' | 'SAVING' | 'ERROR'>('IDLE');
   const [error, setError] = useState<string | null>(null);
 
@@ -388,17 +483,18 @@ function AddActivityControl({ goalId, onAdded }: { goalId: string; onAdded: () =
 
   const handleAdd = async (event: React.FormEvent) => {
     event.preventDefault();
-    if (!trimmed || status === 'SAVING') return;
+    if (!trimmed || rhythm === null || status === 'SAVING') return;
     setStatus('SAVING');
     setError(null);
     try {
       const res = await fetch(`/api/goals/${goalId}/activities`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ title: trimmed }),
+        body: JSON.stringify({ title: trimmed, rhythm }),
       });
       if (!res.ok) throw new Error('failed');
       setTitle('');
+      setRhythm({ kind: 'NONE' });
       setOpen(false);
       setStatus('IDLE');
       onAdded();
@@ -415,13 +511,16 @@ function AddActivityControl({ goalId, onAdded }: { goalId: string; onAdded: () =
           Activity title
         </FieldLabel>
         <TextInput id="add-activity-title" value={title} onChange={(e) => setTitle(e.target.value)} placeholder="Check final numbers" maxLength={200} disabled={status === 'SAVING'} autoFocus />
+        <div style={{ marginTop: spacing.lg }}>
+          <RhythmPicker value={rhythm ?? { kind: 'NONE' }} onChange={setRhythm} idPrefix="add-activity" />
+        </div>
         {error && (
           <div role="alert" style={{ marginTop: spacing.sm }}>
             <FieldError>{error}</FieldError>
           </div>
         )}
         <div style={{ display: 'flex', gap: spacing.sm, marginTop: spacing.md }}>
-          <PrimaryButton type="submit" disabled={!trimmed} loading={status === 'SAVING'}>
+          <PrimaryButton type="submit" disabled={!trimmed || rhythm === null} loading={status === 'SAVING'}>
             Add activity
           </PrimaryButton>
           <SecondaryButton onClick={() => { setOpen(false); setError(null); }} disabled={status === 'SAVING'}>

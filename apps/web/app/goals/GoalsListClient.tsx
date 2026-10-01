@@ -18,6 +18,8 @@ import {
   FieldError,
 } from '../../components/ui';
 import { GOAL_TEMPLATE_OPTIONS, formatGoalProgressLabel, formatGoalTargetDateLabel, isValidCivilDateString, type GoalSummary } from '../../lib/goalsPresentation';
+import { GOAL_TEMPLATES, GOAL_TEMPLATE_LIKELY_ONGOING, type GoalTemplateCategory } from '../../lib/goals';
+import { RhythmPicker, type RhythmPickerValue } from '../../components/RhythmPicker';
 
 /**
  * Goals -> Planning Integration V1 PR B -- the primary "What am I working
@@ -210,11 +212,37 @@ function CreateGoalModal({ onClose }: { onClose: () => void }) {
   const [title, setTitle] = useState('');
   const [targetDate, setTargetDate] = useState(''); // "" | "YYYY-MM-DD"
   const [templateCategory, setTemplateCategory] = useState<string>(''); // '' means "Start from scratch" (null)
+  // Goals V2 Rhythm R5 -- this ticket's own section 9/13: Rhythm belongs
+  // to GoalActivity, never a single Goal-level frequency, so this is one
+  // entry per template activity, in the same order as GOAL_TEMPLATES[cat]
+  // (array length always matches that template's own activity count).
+  // Defaults to Once (NONE) for every entry -- no unsupported preselected
+  // default (this ticket's own section 15).
+  const [activityRhythms, setActivityRhythms] = useState<ReadonlyArray<RhythmPickerValue | null>>([]);
   const [status, setStatus] = useState<'IDLE' | 'SUBMITTING' | 'ERROR'>('IDLE');
   const [error, setError] = useState<string | null>(null);
 
+  const activeCategory = (templateCategory || null) as GoalTemplateCategory | null;
+  // This ticket's own section 10/11 classification -- PURELY advisory: it
+  // decides only whether this step shows the frequency question at all,
+  // never which N (section 15/34 -- FINISH_PROJECT's own activities stay
+  // NONE unless the user later opts in through Goal Detail's per-row edit
+  // affordance instead).
+  const isOngoingTemplate = activeCategory !== null && GOAL_TEMPLATE_LIKELY_ONGOING[activeCategory];
+  const templateActivities = activeCategory ? GOAL_TEMPLATES[activeCategory] : [];
+
+  const handleTemplateChange = (next: string) => {
+    setTemplateCategory(next);
+    const nextCategory = (next || null) as GoalTemplateCategory | null;
+    setActivityRhythms(nextCategory ? GOAL_TEMPLATES[nextCategory].map(() => ({ kind: 'NONE' })) : []);
+  };
+
   const trimmedTitle = title.trim();
-  const canSubmit = trimmedTitle.length > 0 && trimmedTitle.length <= 200 && (targetDate === '' || isValidCivilDateString(targetDate));
+  // This ticket's own section 44 -- an ongoing template whose frequency
+  // question is showing must not silently submit with an unresolved
+  // Custom entry; every row must resolve to a real value first.
+  const rhythmsValid = !isOngoingTemplate || (activityRhythms.length === templateActivities.length && activityRhythms.every((v) => v !== null));
+  const canSubmit = trimmedTitle.length > 0 && trimmedTitle.length <= 200 && (targetDate === '' || isValidCivilDateString(targetDate)) && rhythmsValid;
 
   const handleSubmit = async (event: React.FormEvent) => {
     event.preventDefault();
@@ -229,6 +257,11 @@ function CreateGoalModal({ onClose }: { onClose: () => void }) {
           title: trimmedTitle,
           ...(targetDate ? { targetDate } : {}), // submitted verbatim as "YYYY-MM-DD" -- never a constructed JS Date/timestamp (this ticket's own section 13)
           ...(templateCategory ? { templateCategory } : {}),
+          // Only sent for an ongoing template actually showing the
+          // question -- FINISH_PROJECT/"Start from scratch" never include
+          // this at all, so the server's own omitted-means-NONE default
+          // applies identically to before this ticket (section 42).
+          ...(isOngoingTemplate ? { activityRhythms } : {}),
         }),
       });
       const data = await res.json().catch(() => null);
@@ -281,7 +314,7 @@ function CreateGoalModal({ onClose }: { onClose: () => void }) {
 
         <div style={{ marginTop: spacing.lg }}>
           <FieldLabel htmlFor="goal-template-select">Starting activities (optional)</FieldLabel>
-          <SelectInput id="goal-template-select" value={templateCategory} onChange={(e) => setTemplateCategory(e.target.value)} disabled={status === 'SUBMITTING'}>
+          <SelectInput id="goal-template-select" value={templateCategory} onChange={(e) => handleTemplateChange(e.target.value)} disabled={status === 'SUBMITTING'}>
             {GOAL_TEMPLATE_OPTIONS.map((option) => (
               <option key={option.value ?? 'SCRATCH'} value={option.value ?? ''}>
                 {option.label}
@@ -289,6 +322,32 @@ function CreateGoalModal({ onClose }: { onClose: () => void }) {
             ))}
           </SelectInput>
         </div>
+
+        {/* Goals V2 Rhythm R5 -- this ticket's own section 13/14: shown
+            ONLY for a template classified ongoing (never for FINISH_PROJECT
+            or "Start from scratch" -- no unnecessary question, this
+            ticket's own section 34/58). One compact RhythmPicker per
+            activity, reusing the exact same control Goal Detail's own Add
+            activity/edit affordance use (one mechanism, section 9) --
+            never a separate recurrence editor. */}
+        {isOngoingTemplate && (
+          <div style={{ marginTop: spacing.lg }}>
+            <div style={{ ...typography.bodyStrong, fontSize: 14 }}>How often would these help?</div>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: spacing.md, marginTop: spacing.sm }}>
+              {templateActivities.map((templateActivity, index) => (
+                <div key={templateActivity.title}>
+                  <div style={{ ...typography.meta, color: colors.textSecondary, marginBottom: spacing.xs }}>{templateActivity.title}</div>
+                  <RhythmPicker
+                    value={activityRhythms[index] ?? { kind: 'NONE' }}
+                    onChange={(next) => setActivityRhythms((prev) => prev.map((v, i) => (i === index ? next : v)))}
+                    idPrefix={`create-goal-activity-${index}`}
+                    hideLabel
+                  />
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
 
         {error && (
           <div role="alert" style={{ marginTop: spacing.md }}>

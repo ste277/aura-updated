@@ -185,6 +185,31 @@ export const GOAL_TEMPLATES: Readonly<Record<GoalTemplateCategory, readonly Goal
   STUDY_CONSISTENTLY: [{ title: 'Study session' }],
 };
 
+/**
+ * Goals V2 Rhythm R5 -- this ticket's own section 10/11 audit. Purely
+ * ADVISORY: it decides only whether Create Goal's own template step shows
+ * a "how often would these help?" frequency section at all -- it never
+ * chooses an exact N, never persists a default, and is not consulted by
+ * any server-side write path (createGoalWithActivities/addGoalActivity
+ * accept an explicit, user-chosen rhythm per activity or default to NONE
+ * regardless of this table). GET_FITTER/MEDITATE_REGULARLY/
+ * STUDY_CONSISTENTLY are activities a user plausibly repeats week over
+ * week; FINISH_PROJECT's three activities ("Block focus time"/"Review
+ * progress"/"Final push session") describe a bounded, one-time push
+ * toward a deadline, so FINISH_PROJECT is classified finite and its own
+ * Create Goal step never asks the frequency question at all (this
+ * ticket's own section 34 -- FINISH_PROJECT activities persist NONE
+ * unless the user later, explicitly, opts one into a weekly frequency
+ * through Goal Detail's own per-row edit affordance, same as any other
+ * activity).
+ */
+export const GOAL_TEMPLATE_LIKELY_ONGOING: Readonly<Record<GoalTemplateCategory, boolean>> = {
+  GET_FITTER: true,
+  MEDITATE_REGULARLY: true,
+  FINISH_PROJECT: false,
+  STUDY_CONSISTENTLY: true,
+};
+
 export interface ResolvedGoalTemplateActivity {
   title: string;
   activityId: string | null;

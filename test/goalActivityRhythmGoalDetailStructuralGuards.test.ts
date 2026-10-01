@@ -48,9 +48,27 @@ check('route.ts never creates a GoalActivityOccurrence row (no INSERT reference 
 // (Word-boundary'd method matching -- a naive /PUT|POST|PATCH/i would false
 // -positive on substrings like "TextInput"; this requires the literal HTTP
 // method string as fetch() actually spells it.)
+// Goals V2 Rhythm R5 (a later, separately-authorized ticket) legitimately
+// added exactly TWO Rhythm-authoring fetch call sites: the pre-existing
+// "Add activity" POST (which this ticket's own section 16 extends to
+// carry an optional `rhythm` field in its body, same endpoint as before
+// R5) and the new per-row edit PATCH .../rhythm endpoint (this ticket's
+// own section 20). Narrowed to confirm these are the ONLY two write-method
+// call sites referencing "rhythm" -- never a third, wider write surface.
+// (A small fixed window around each `method: '...'` token, rather than a
+// single sprawling regex, so this stays precise as the file grows.)
+const methodTokenPositions: number[] = [];
+{
+  const re = /method:\s*'(POST|PUT|PATCH)'/g;
+  let m: RegExpExecArray | null;
+  while ((m = re.exec(goalDetailSrc)) !== null) methodTokenPositions.push(m.index);
+}
+const rhythmWriteCallSites = methodTokenPositions.filter((pos) => /rhythm/i.test(goalDetailSrc.slice(Math.max(0, pos - 200), pos + 200)));
 check(
-  "GoalDetailClient.tsx never issues a Rhythm-authoring fetch (no method: 'POST'/'PUT'/'PATCH' call body referencing a rhythm field)",
-  !/method:\s*'(POST|PUT|PATCH)'[\s\S]{0,300}rhythm/i.test(goalDetailSrc)
+  'GoalDetailClient.tsx issues Rhythm-authoring fetches ONLY through its two allowed R5 call sites (the existing Add-activity POST, extended with an optional rhythm field, and the new per-row edit PATCH .../rhythm endpoint) -- never a third',
+  rhythmWriteCallSites.length === 2 &&
+    /body: JSON\.stringify\(\{ title: trimmed, rhythm \}\)/.test(goalDetailSrc) &&
+    /fetch\(`\/api\/goals\/\$\{activity\.goalId\}\/activities\/\$\{activity\.id\}\/rhythm`,\s*\{\s*method:\s*'PATCH'/.test(goalDetailSrc)
 );
 check('GoalDetailClient.tsx\'s own fetch endpoints are still exactly the pre-R4 set (load/dismiss/add/archive/delete) -- no new endpoint was added', (goalDetailSrc.match(/fetch\(`\/api\/goals/g) ?? []).length === (stripComments(read('../apps/web/app/goals/[goalId]/GoalDetailClient.tsx')).match(/fetch\(`\/api\/goals/g) ?? []).length);
 
