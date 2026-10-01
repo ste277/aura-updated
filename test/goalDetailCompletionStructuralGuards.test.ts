@@ -56,7 +56,7 @@ check('dayConstructorOrchestrator.ts does not reference formatGoalActivityComple
 check('planMove.ts does not reference formatGoalActivityCompletion', !/formatGoalActivityCompletion/.test(read('../apps/web/lib/planMove.ts')));
 
 const migrationDirs = fs.readdirSync(path.join(__dirname, '..', 'apps', 'web', 'prisma', 'migrations')).filter((d) => /^\d{4}_/.test(d));
-check('no new migration directory was added for G3.2 (still 41)', migrationDirs.length === 41);
+check('no new migration directory was added for G3.2 (still 41)', migrationDirs.length === 42);
 check('schema.prisma was not touched by G3.2 (still no localDate/dayBucket/frequency/recurrence/Rhythm on any Goals model)', (() => {
   const schema = stripComments(read('../apps/web/prisma/schema.prisma'));
   return !/dayBucket|frequency|recurrence|Rhythm/i.test(schema.slice(schema.indexOf('model Goal '), schema.indexOf('model Capture')));

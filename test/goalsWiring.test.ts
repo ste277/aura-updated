@@ -84,10 +84,13 @@ function main() {
   // Goals V2 G2.2.1 added a second, equally back-relation-only navigation
   // field (goalActivityExecution GoalActivityExecution?) for the same
   // reason as goalActivity above -- broadened to accept either, still
-  // rejecting any line that carries a real `fields:` FK attribute.
+  // rejecting any line that carries a real `fields:` FK attribute. Rhythm
+  // R1 (migration 0042) added a THIRD, identically-shaped navigation field
+  // (goalActivityOccurrence GoalActivityOccurrence?) for the identical
+  // reason -- broadened again, same rejection of any `fields:` attribute.
   check(
     '17. every non-comment line in the PlannedActivity model block mentioning Goal is a back-relation-only field (no @relation(fields:...) attribute, i.e. no real column/FK)',
-    goalMentionLines.length > 0 && goalMentionLines.every((line) => (/goalActivity\s+GoalActivity\?/.test(line) || /goalActivityExecution\s+GoalActivityExecution\?/.test(line)) && !line.includes('fields:'))
+    goalMentionLines.length > 0 && goalMentionLines.every((line) => (/goalActivity\s+GoalActivity\?/.test(line) || /goalActivityExecution\s+GoalActivityExecution\?/.test(line) || /goalActivityOccurrence\s+GoalActivityOccurrence\?/.test(line)) && !line.includes('fields:'))
   );
 
   // ============================================================

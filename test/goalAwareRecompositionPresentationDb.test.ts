@@ -7,7 +7,7 @@
  * (one loadGoalContexts call regardless of decision count), and that acceptance remains completely unaffected --
  * still exactly `{ proposalToken }`, still succeeds, still preserves G2.2.3's own Move continuity (already
  * covered end-to-end by remainingDayRecompositionAcceptanceDb.test.ts; re-run as part of this ticket's targeted
- * suite rather than duplicated here). Requires DATABASE_URL (fresh, 41 migrations), same convention as every
+ * suite rather than duplicated here). Requires DATABASE_URL (fresh, 42 migrations), same convention as every
  * other Recomposition DB test.
  */
 import {

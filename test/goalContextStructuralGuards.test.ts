@@ -70,7 +70,7 @@ check('planMove.ts does not reference goalContext/PlanGoalContext (Move continui
 // No schema/migration change
 // ============================================================
 const migrationDirs = fs.readdirSync(path.join(__dirname, '..', 'apps', 'web', 'prisma', 'migrations')).filter((d) => /^\d{4}_/.test(d));
-check('no new migration directory was added for G3.1 (still 41, the G2.2.3 count)', migrationDirs.length === 41);
+check('no new migration directory was added for G3.1 (still 41, the G2.2.3 count)', migrationDirs.length === 42);
 check('schema.prisma was not touched (GoalActivityExecution model has no new field beyond what G2.2.1 already defined)', (() => {
   const schema = stripComments(read('apps/web/prisma/schema.prisma'));
   const match = schema.match(/model GoalActivityExecution \{([\s\S]*?)\n\}/);

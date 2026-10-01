@@ -107,7 +107,7 @@ check('RecompositionCard.tsx never references formatGoalActivityCompletion/compl
 check('planMove.ts does not reference formatGoalActivityCompletion', !/formatGoalActivityCompletion/.test(fs.readFileSync('apps/web/lib/planMove.ts', 'utf8')));
 
 const migrationDirs = fs.readdirSync('apps/web/prisma/migrations').filter((d) => /^\d{4}_/.test(d));
-check('no new migration directory was added for G3.3 (still 41)', migrationDirs.length === 41);
+check('no new migration directory was added for G3.3 (still 41)', migrationDirs.length === 42);
 check('no Rhythm/recurrence concept anywhere in HomeDashboard.tsx', !/\bRhythm\b|\bRRULE\b/.test(src));
 check('no day-scoped progress concept (dayBucket/dailyTarget) anywhere in HomeDashboard.tsx', !/dayBucket|dailyTarget/.test(src));
 check('no history/aggregate concept (executionHistory/weeklyTotal/allExecutions) anywhere in HomeDashboard.tsx', !/executionHistory|weeklyTotal|allExecutions/.test(src));
