@@ -73,6 +73,12 @@ jobs:
         run: npx ts-node test/formatTimeLeft.test.ts
       - name: Run Intentional Day Builder domain test
         run: npx ts-node test/dayBuilder.test.ts
+      # Goals V2 Rhythm structural guards -- reads apps/web source files as
+      # plain text via `fs`/`path` only (no module import of anything under
+      # apps/web/lib), so it needs no apps/web/node_modules and belongs in
+      # this root-deps-only group, not the "Install web deps" group below.
+      - name: Run Goal Activity Rhythm structural guards test
+        run: npx ts-node test/goalActivityRhythmStructuralGuards.test.ts
       # test/savedPersonDb.test.ts, test/auraMomentsDb.test.ts,
       # test/auraUpdatesDb.test.ts, test/productEventsDb.test.ts, and
       # test/dayBuilderDb.test.ts are intentionally NOT run here -- they
@@ -97,6 +103,16 @@ jobs:
       # it also has to run after "Install web deps".
       - name: Run product events validation test
         run: npx ts-node test/productEvents.test.ts
+      # Goals V2 Candidate A1 -- goalDemandCandidates.ts imports apps/web/lib/db.ts
+      # (for its `pg` dependency), same apps/web/node_modules requirement as
+      # the Aura Moment/product events tests above.
+      - name: Run Goal demand candidates test
+        run: npx ts-node test/goalDemandCandidates.test.ts
+      # Goals V2 Candidate A2 -- goalPlanningSourceAdapter.ts imports
+      # dayConstructorPreviewRequest.ts, which transitively imports
+      # apps/web/lib/db.ts -- same apps/web/node_modules requirement.
+      - name: Run Goal planning-source adapter test
+        run: npx ts-node test/goalPlanningSourceAdapter.test.ts
       - name: Run Plan-with-Aura view logic test
         env:
           TS_NODE_COMPILER_OPTIONS: '{"jsx":"react"}'
@@ -220,8 +236,8 @@ jobs:
             END \$\$;
           "
   day-constructor-acceptance-db-tests:
-    # Day Constructor V1 PR E2 -- the ONE live-Postgres test file this
-    # repository has for Day Constructor acceptance persistence
+    # Day Constructor V1 PR E2 -- the live-Postgres test job for Day
+    # Constructor acceptance persistence
     # (test/dayConstructorAcceptancePersistenceDb.test.ts). Its own atomic
     # multi-item save, rollback, replay, concurrency, and set-identity
     # collision behavior all depend materially on real Postgres
@@ -232,6 +248,13 @@ jobs:
     # that the migration chain itself is complete). Same disposable,
     # ephemeral Postgres service pattern as db-migration-validation above
     # -- never production, never Vercel/Neon.
+    #
+    # Goals V2 Candidate A3.1 -- this job's own already-correct
+    # Postgres-service/migrate-deploy environment is also the smallest
+    # existing home for test/goalDemandCandidatesDb.test.ts (Candidate A1),
+    # which depends on the exact same real-transaction/advisory-lock
+    # machinery (materializeGoalActivityRhythmOccurrence) -- no second
+    # Postgres-backed job was created for it.
     name: Day Constructor acceptance DB tests
     runs-on: ubuntu-latest
     services:
@@ -265,3 +288,5 @@ jobs:
         run: npx prisma migrate deploy
       - name: Run Day Constructor acceptance persistence DB tests
         run: npx ts-node test/dayConstructorAcceptancePersistenceDb.test.ts
+      - name: Run Goal demand candidates DB test
+        run: npx ts-node test/goalDemandCandidatesDb.test.ts
