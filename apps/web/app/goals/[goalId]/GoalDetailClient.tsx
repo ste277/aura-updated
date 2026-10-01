@@ -120,8 +120,14 @@ function GoalDetailBody({ detail, onChanged }: { detail: GoalDetailView; onChang
   // first line of defense -- the real enforcement is server-side, at
   // /plan-day's own bootstrap).
   const [selectedIds, setSelectedIds] = useState<ReadonlySet<string>>(new Set());
-  const suggestedIds = new Set(primaryActivities.filter((a) => a.derivedState === 'SUGGESTED').map((a) => a.id));
-  const effectiveSelectedIds = Array.from(selectedIds).filter((id) => suggestedIds.has(id));
+  // Goals V2 Rhythm R3 -- selectable now means SUGGESTED (unchanged) OR a
+  // COMPLETED activity whose own Rhythm policy still has weekly capacity
+  // (server-derived, this ticket's own section 37's "smallest Goal Detail
+  // lifecycle adjustment necessary" -- a finite/NONE COMPLETED activity, or
+  // any PLANNED activity, remains unselectable exactly as before R3).
+  const isSelectable = (a: GoalActivityView) => a.derivedState === 'SUGGESTED' || (a.derivedState === 'COMPLETED' && a.rhythmEligibleForAnotherOccurrence);
+  const selectableIds = new Set(primaryActivities.filter(isSelectable).map((a) => a.id));
+  const effectiveSelectedIds = Array.from(selectedIds).filter((id) => selectableIds.has(id));
 
   const toggleSelected = (id: string) => {
     setSelectedIds((prev) => {
@@ -159,7 +165,7 @@ function GoalDetailBody({ detail, onChanged }: { detail: GoalDetailView; onChang
 
       <div style={{ marginTop: spacing.xxl }}>
         <h2 style={typography.sectionEyebrow}>Activities</h2>
-        {suggestedIds.size > 0 && <p style={{ ...typography.meta, marginTop: spacing.xs }}>What would you like Aura to help you plan?</p>}
+        {selectableIds.size > 0 && <p style={{ ...typography.meta, marginTop: spacing.xs }}>What would you like Aura to help you plan?</p>}
         <div style={{ display: 'flex', flexDirection: 'column', gap: spacing.md, marginTop: spacing.md }}>
           {primaryActivities.length === 0 && (
             <SurfaceCard>
@@ -171,8 +177,8 @@ function GoalDetailBody({ detail, onChanged }: { detail: GoalDetailView; onChang
               key={activity.id}
               activity={activity}
               onChanged={onChanged}
-              selected={activity.derivedState === 'SUGGESTED' ? selectedIds.has(activity.id) : undefined}
-              onToggleSelect={activity.derivedState === 'SUGGESTED' ? () => toggleSelected(activity.id) : undefined}
+              selected={isSelectable(activity) ? selectedIds.has(activity.id) : undefined}
+              onToggleSelect={isSelectable(activity) ? () => toggleSelected(activity.id) : undefined}
             />
           ))}
         </div>
@@ -213,18 +219,24 @@ function ActivityRow({
 }: {
   activity: GoalActivityView;
   onChanged: () => void;
-  /** Goals -> Planning Integration V1 PR C -- undefined for any non-
-   * SUGGESTED activity (PLANNED/COMPLETED render no checkbox at all, not
-   * a disabled one -- this ticket's own section 4: eligibility is
-   * SUGGESTED only). Selection is local UI state owned by the parent; see
-   * GoalDetailBody's own doc comment for why it lives there, not here. */
+  /** Goals -> Planning Integration V1 PR C -- undefined for any
+   * non-selectable activity (PLANNED/DISMISSED, and a finite/NONE
+   * COMPLETED activity, render no checkbox at all, not a disabled one).
+   * Goals V2 Rhythm R3 -- ALSO defined for a COMPLETED activity whose own
+   * Rhythm policy still has weekly capacity (GoalDetailBody's own
+   * `isSelectable`, this ticket's own section 37) -- the parent is the
+   * single source of truth for eligibility; this component trusts
+   * whichever of `selected`/`onToggleSelect` it is actually given, never
+   * re-derives SUGGESTED-only itself. Selection is local UI state owned by
+   * the parent; see GoalDetailBody's own doc comment for why it lives
+   * there, not here. */
   selected?: boolean;
   onToggleSelect?: () => void;
 }) {
   const [dismissing, setDismissing] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const stateLabel = presentGoalActivityStateLabel(activity.derivedState);
-  const isSelectable = activity.derivedState === 'SUGGESTED' && onToggleSelect !== undefined;
+  const isSelectable = onToggleSelect !== undefined;
   // Goals V2 G3.2 -- "what counts as doing this, and what happened" (this
   // ticket's own section 5 hierarchy: title primary, this secondary,
   // lifecycle state tertiary). Deliberately independent of derivedState --

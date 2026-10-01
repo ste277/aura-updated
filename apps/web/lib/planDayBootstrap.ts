@@ -19,6 +19,7 @@ import { resolvePlanningTargetDate, type PlanningHorizon } from './planningHoriz
 import { MAX_PLAN_DAY_INTENTS } from './planDayEntry';
 import { deriveGoalActivityState, type GoalActivityStatus, type PlannedActivityStatus } from './goals';
 import { deriveCaptureState, type CaptureStatus, type LinkedPlanStatus } from './captures';
+import { normalizeGoalActivityRhythm, computeGoalActivityRhythmEligibility } from './goalActivityRhythm';
 
 export interface PlanDayBootstrap {
   timezone: string;
@@ -140,13 +141,24 @@ export interface GoalActivityHandoffDeps {
   /** `listGoalActivitiesWithLinkedPlanStatus` (db.ts), passed by
    * reference -- the SAME already-merged PR A read this ticket's own
    * section 40's "reuse the already-merged PR A APIs" instruction asks
-   * for, never a duplicate query. */
+   * for, never a duplicate query. Rhythm R3 -- `rhythmKind`/
+   * `rhythmTargetPerWeek` are additive, OPTIONAL fields (this same row has
+   * always returned them since migration 0043/R2; optional here only so
+   * an existing test fixture supplying the pre-R3 shape keeps compiling
+   * unchanged -- a real production row always has them). */
   listGoalActivities: (
     userId: string,
     goalId: string
   ) => Promise<
-    ReadonlyArray<{ id: string; title: string; activityId: string | null; status: string; plannedActivityId: string | null; linkedPlanStatus: string | null }>
+    ReadonlyArray<{ id: string; title: string; activityId: string | null; status: string; plannedActivityId: string | null; linkedPlanStatus: string | null; rhythmKind?: string | null; rhythmTargetPerWeek?: number | null }>
   >;
+  /** Rhythm R3 -- `loadGoalActivityRhythmFacts` (db.ts), passed by
+   * reference; the SAME batched-per-activity read model R2 already
+   * established, never a second eligibility formula. OPTIONAL: an existing
+   * test fixture that supplies no Rhythm-aware deps at all simply never
+   * admits a COMPLETED activity (the pre-R3, SUGGESTED-only behavior),
+   * never a runtime error. */
+  loadGoalActivityRhythmFacts?: (userId: string, goalActivityId: string, timezone: string) => Promise<ReadonlyArray<{ localDate: string; contribution: 'COMPLETED' | 'COMMITTED' | 'NONE' }>>;
 }
 
 /**
@@ -158,8 +170,19 @@ export interface GoalActivityHandoffDeps {
  * foreign id simply fails to seed a row, silently, exactly like every
  * other ownership boundary already established in this codebase, e.g.
  * PR A's own `addGoalActivity` returning `null` for an unowned Goal).
+ *
+ * Rhythm R3 -- `planningDate`/`timezone` are the SAME authoritative facts
+ * `resolvePlanDayServerProps` already resolves for this exact request
+ * (page.tsx calls both in the same render); passed in rather than
+ * re-derived, so this function and the rest of the page can never disagree
+ * about which date is being planned (this ticket's own section 9/10 --
+ * never a second, independent "today" computation, never a browser clock).
+ * `null` (an unauthenticated/malformed bootstrap, structurally never
+ * expected to disagree with THIS function's own independent session check)
+ * simply means no GoalActivity can be admitted beyond the existing
+ * SUGGESTED case -- fails closed, never guesses a date.
  */
-export async function resolveGoalActivityHandoff(deps: GoalActivityHandoffDeps, goalId: string | null, activitiesParam: string | null): Promise<GoalActivityHandoffItem[]> {
+export async function resolveGoalActivityHandoff(deps: GoalActivityHandoffDeps, goalId: string | null, activitiesParam: string | null, planningDate: string | null = null, timezone: string | null = null): Promise<GoalActivityHandoffItem[]> {
   if (!goalId || !activitiesParam) return [];
   const requestedIds = Array.from(new Set(activitiesParam.split(',').map((id) => id.trim()).filter(Boolean))).slice(0, MAX_PLAN_DAY_INTENTS);
   if (requestedIds.length === 0) return [];
@@ -176,17 +199,32 @@ export async function resolveGoalActivityHandoff(deps: GoalActivityHandoffDeps, 
   // this ticket's own section 8/PR B's 404 handling already established).
   const activities = await deps.listGoalActivities(session.userId, goalId);
 
-  return activities
-    .filter((activity) => requestedIdSet.has(activity.id))
-    .filter(
-      (activity) =>
-        deriveGoalActivityState({
-          status: activity.status as GoalActivityStatus,
-          plannedActivityId: activity.plannedActivityId,
-          linkedPlanStatus: activity.linkedPlanStatus as PlannedActivityStatus | null,
-        }) === 'SUGGESTED'
-    )
-    .map((activity) => ({ id: activity.id, title: activity.title, activityId: activity.activityId }));
+  const candidates = activities.filter((activity) => requestedIdSet.has(activity.id));
+  const admitted = await Promise.all(
+    candidates.map(async (activity) => {
+      const state = deriveGoalActivityState({
+        status: activity.status as GoalActivityStatus,
+        plannedActivityId: activity.plannedActivityId,
+        linkedPlanStatus: activity.linkedPlanStatus as PlannedActivityStatus | null,
+      });
+      if (state === 'SUGGESTED') return true;
+      // Rhythm R3's own primary behavioral requirement: a COMPLETED
+      // N_PER_WEEK activity with remaining weekly capacity is admitted
+      // too -- re-derived fresh, server-side, from THIS activity's own
+      // persisted rhythmKind/rhythmTargetPerWeek and occurrence facts,
+      // never trusted from any client-supplied Rhythm field (this
+      // ticket's own section 20). A finite (NONE) COMPLETED activity, or
+      // any PLANNED/DISMISSED activity, is never admitted here -- the
+      // legacy SUGGESTED-only behavior for everything else is unchanged.
+      if (state !== 'COMPLETED' || !planningDate || !timezone || !deps.loadGoalActivityRhythmFacts) return false;
+      const rhythm = normalizeGoalActivityRhythm({ rhythmKind: activity.rhythmKind ?? null, rhythmTargetPerWeek: activity.rhythmTargetPerWeek ?? null });
+      if (rhythm.kind !== 'N_PER_WEEK') return false;
+      const facts = await deps.loadGoalActivityRhythmFacts(session.userId, activity.id, timezone);
+      return computeGoalActivityRhythmEligibility({ rhythm, planningLocalDate: planningDate, occurrences: facts }).eligible;
+    })
+  );
+
+  return candidates.filter((_, index) => admitted[index]).map((activity) => ({ id: activity.id, title: activity.title, activityId: activity.activityId }));
 }
 
 // ============================================================

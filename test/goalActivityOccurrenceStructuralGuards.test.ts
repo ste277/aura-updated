@@ -20,6 +20,16 @@ function read(relPath: string): string {
   return fs.readFileSync(path.join(__dirname, relPath), 'utf8');
 }
 
+// Strips `//` and `/* ... */` comments -- same convention as the Rhythm
+// structural guard files (test/goalActivityRhythmStructuralGuards.test.ts
+// etc.), needed here now that Rhythm R3's own doc comments legitimately
+// discuss GoalActivityOccurrence in prose outside the one allowed writer's
+// body (e.g. db.ts's doc comment directly above
+// materializeGoalActivityRhythmOccurrence).
+function stripComments(source: string): string {
+  return source.replace(/\/\*[\s\S]*?\*\//g, '').replace(/\/\/.*$/gm, '');
+}
+
 const PRODUCTION_FILES: Record<string, string> = {
   'Goal Detail (GoalDetailClient.tsx)': '../apps/web/app/goals/[goalId]/GoalDetailClient.tsx',
   'Goal API (goals/[goalId]/route.ts)': '../apps/web/app/api/goals/[goalId]/route.ts',
@@ -38,7 +48,6 @@ const PRODUCTION_FILES: Record<string, string> = {
   'Recomposition card (RecompositionCard.tsx)': '../apps/web/components/RecompositionCard.tsx',
   'Home recomposition lib (homeRecomposition.ts)': '../apps/web/lib/homeRecomposition.ts',
   'Plan with Aura handoff (planDayBootstrap.ts)': '../apps/web/lib/planDayBootstrap.ts',
-  'Move (planMove.ts)': '../apps/web/lib/planMove.ts',
   'GOAL_TEMPLATES (goals.ts)': '../apps/web/lib/goals.ts',
   'Goal completion domain (goalCompletion.ts)': '../apps/web/lib/goalCompletion.ts',
   'Goal activity execution domain (goalActivityExecution.ts)': '../apps/web/lib/goalActivityExecution.ts',
@@ -48,6 +57,23 @@ const PRODUCTION_FILES: Record<string, string> = {
 for (const [label, relPath] of Object.entries(PRODUCTION_FILES)) {
   check(`${label} does not reference GoalActivityOccurrence`, !/GoalActivityOccurrence/.test(read(relPath)));
 }
+
+// ============================================================
+// Move (planMove.ts): this R1 ticket originally asserted a blanket zero
+// -reference guard here too. Rhythm R3 (a later, separately-authorized
+// ticket: occurrence materialization + planning handoff) legitimately added
+// exactly one repoint UPDATE so a Move keeps an existing occurrence's
+// plannedActivityId current -- see
+// test/goalActivityRhythmMaterializationStructuralGuards.test.ts for R3's
+// own exhaustive proof that this is the only write, never an INSERT.
+// Narrowed to that exact invariant rather than deleted.
+// ============================================================
+const planMoveSrc = read('../apps/web/lib/planMove.ts');
+const planMoveSrcNoComments = stripComments(planMoveSrc);
+check(
+  'Move (planMove.ts) references GoalActivityOccurrence ONLY via its one documented repoint UPDATE (R3) -- never INSERT/DELETE, never a second reference in real code',
+  (planMoveSrcNoComments.match(/GoalActivityOccurrence/g) ?? []).length === 1 && /UPDATE "GoalActivityOccurrence"/.test(planMoveSrcNoComments) && !/INSERT INTO "GoalActivityOccurrence"|DELETE FROM "GoalActivityOccurrence"/.test(planMoveSrcNoComments)
+);
 
 // ============================================================
 // db.ts: the one file where a FUTURE occurrence write/read path would
@@ -65,7 +91,23 @@ const dbSrc = read('../apps/web/lib/db.ts');
 // ONLY function referencing the table. Narrowed to that exact invariant
 // here, rather than "zero reference at all" (which R1 itself could only
 // ever assert because no later ticket existed yet).
-check('db.ts references GoalActivityOccurrence ONLY inside the one allowed read-only loader (loadGoalActivityRhythmFacts) -- no write, no second reader, no exported CRUD function of its own', (dbSrc.match(/GoalActivityOccurrence/g) ?? []).length === (functionBody(dbSrc, 'loadGoalActivityRhythmFacts').match(/GoalActivityOccurrence/g) ?? []).length && !/INSERT INTO "GoalActivityOccurrence"|UPDATE "GoalActivityOccurrence"|DELETE FROM "GoalActivityOccurrence"/.test(dbSrc));
+//
+// Rhythm R3 (a further, separately-authorized ticket) then added exactly
+// one more intentionally-reviewed function, materializeGoalActivityRhythmOccurrence
+// -- db.ts's sole production WRITER of this table (its one INSERT), proved
+// exhaustively exactly-once in
+// test/goalActivityRhythmMaterializationStructuralGuards.test.ts. The real
+// invariant narrows further: db.ts references GoalActivityOccurrence ONLY
+// inside these two named, intentionally-reviewed functions -- never a third,
+// undocumented one -- and the one INSERT lives only inside the R3 writer.
+const dbSrcNoComments = stripComments(dbSrc);
+const allowedOccurrenceFnBodiesNoComments = stripComments(functionBody(dbSrc, 'loadGoalActivityRhythmFacts')) + stripComments(functionBody(dbSrc, 'materializeGoalActivityRhythmOccurrence'));
+check(
+  'db.ts references GoalActivityOccurrence ONLY inside the two allowed, intentionally-reviewed functions (loadGoalActivityRhythmFacts [read-only] and materializeGoalActivityRhythmOccurrence [R3\'s sole writer]) -- no third function in real code, no UPDATE/DELETE anywhere',
+  (dbSrcNoComments.match(/GoalActivityOccurrence/g) ?? []).length === (allowedOccurrenceFnBodiesNoComments.match(/GoalActivityOccurrence/g) ?? []).length &&
+    (dbSrcNoComments.match(/INSERT INTO "GoalActivityOccurrence"/g) ?? []).length === 1 &&
+    !/UPDATE "GoalActivityOccurrence"|DELETE FROM "GoalActivityOccurrence"/.test(dbSrcNoComments)
+);
 
 // ============================================================
 // logPlannedActivity / skipPlannedActivity / applyMoveWrites: explicitly

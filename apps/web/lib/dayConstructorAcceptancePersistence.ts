@@ -38,6 +38,7 @@ import {
   getPlannedActivityForOwner,
   getUserById,
   linkGoalActivityToPlannedActivity,
+  materializeGoalActivityRhythmOccurrence,
   linkCaptureToPlannedActivity,
   type PlannedActivity,
   type CreatePlannedActivityInput,
@@ -403,18 +404,47 @@ export async function persistAcceptedConstructedDay(
         if (!captureLinked) throw new Error('CAPTURE_LINK_FAILED');
       }
       if (goalActivityId) {
-        const linked = await linkGoalActivityToPlannedActivity(userId, goalActivityId, plan.id, client);
-        if (!linked) {
-          // This PR's own section 24/25/27: the GoalActivity does not
-          // exist, is not owned by this user, is DISMISSED, or already
-          // retains a live (UPCOMING/LOGGED) linkage to a DIFFERENT Plan
-          // -- never silently continue. Throwing here is caught by this
-          // function's own outer try/catch below, which ROLLBACKs the
-          // WHOLE transaction (this Plan insert included) and returns
-          // SAVE_FAILED -- no orphan PlannedActivity, no half-linked
-          // GoalActivity, no partial mixed-source acceptance (this PR's
-          // own section 26/31).
+        // Goals V2 Rhythm R3 -- tried FIRST, as a pure read when this
+        // GoalActivity's own rhythmKind isn't 'N_PER_WEEK' (the common
+        // case, zero side effect, `NOT_RHYTHM_ELIGIBLE`): this is what lets
+        // the SAME call correctly cover a brand-new N_PER_WEEK
+        // GoalActivity's very FIRST occurrence (current plannedActivityId
+        // is NULL -- the EXISTING link below would also succeed for that
+        // case, but would never create the occurrence row R3 requires for
+        // every N_PER_WEEK link, first or not) and a re-eligible occurrence
+        // after a prior one was LOGGED (which the existing link below
+        // correctly refuses). Every check inside re-reads fresh state on
+        // THIS client, inside THIS transaction's own per-user advisory
+        // lock -- never trusting anything rendered to the client earlier
+        // (this ticket's own section 21).
+        const materialized = await materializeGoalActivityRhythmOccurrence(userId, goalActivityId, plan.id, request.constructionWindow.date, user.timezone, client);
+        if (!materialized.ok && materialized.reason !== 'NOT_RHYTHM_ELIGIBLE') {
+          // A genuine Rhythm-specific refusal (a live UPCOMING commitment
+          // already exists, or weekly capacity is exhausted) -- never fall
+          // through to the legacy link below, which would refuse for the
+          // exact same underlying reason anyway. Same all-or-nothing
+          // contract as every other link failure in this loop: throwing
+          // here is caught by this function's own outer try/catch, which
+          // ROLLBACKs the WHOLE transaction (this Plan insert included)
+          // and returns SAVE_FAILED -- no orphan PlannedActivity, no
+          // occurrence created without a successful link, no partial
+          // acceptance (this PR's own section 26/31, preserved unchanged).
           throw new Error('GOAL_ACTIVITY_LINK_FAILED');
+        }
+        if (!materialized.ok) {
+          // NOT_RHYTHM_ELIGIBLE -- this GoalActivity is finite (NONE) or
+          // carries no Rhythm policy at all. Falls through to the EXISTING,
+          // completely unmodified link, which owns every NONE/first-link/
+          // CANCELLED-or-SKIPPED-relink case exactly as before R3 (this
+          // ticket's own section 4: the finite legacy path is untouched).
+          const linked = await linkGoalActivityToPlannedActivity(userId, goalActivityId, plan.id, client);
+          if (!linked) {
+            // This PR's own section 24/25/27: the GoalActivity does not
+            // exist, is not owned by this user, is DISMISSED, or already
+            // retains a live (UPCOMING/LOGGED) linkage to a DIFFERENT Plan
+            // -- never silently continue. Same rollback contract as above.
+            throw new Error('GOAL_ACTIVITY_LINK_FAILED');
+          }
         }
       }
 

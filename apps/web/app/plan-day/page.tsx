@@ -1,7 +1,7 @@
 import type { Metadata } from 'next';
 import { cookies } from 'next/headers';
 import { verifySessionToken, SESSION_COOKIE_NAME } from '../../lib/auth';
-import { getUserById, listGoalActivitiesWithLinkedPlanStatus, listCapturesWithLinkedPlanStatus } from '../../lib/db';
+import { getUserById, listGoalActivitiesWithLinkedPlanStatus, listCapturesWithLinkedPlanStatus, loadGoalActivityRhythmFacts } from '../../lib/db';
 import { resolvePlanDayServerProps, resolveGoalActivityHandoff, resolveCaptureHandoff } from '../../lib/planDayBootstrap';
 import { parseHorizonSearchParam } from '../../lib/planningHorizon';
 import { PlanDayClient } from './PlanDayClient';
@@ -67,9 +67,15 @@ export default async function PlanDayPage({
       getSessionToken: () => cookies().get(SESSION_COOKIE_NAME)?.value,
       verifySession: (token) => verifySessionToken(token),
       listGoalActivities: (userId, goalId) => listGoalActivitiesWithLinkedPlanStatus(userId, goalId),
+      loadGoalActivityRhythmFacts: (userId, goalActivityId, timezone) => loadGoalActivityRhythmFacts(userId, goalActivityId, timezone),
     },
     fromGoal,
-    activitiesParam
+    activitiesParam,
+    // Rhythm R3 -- the SAME authoritative planning date/timezone `bootstrap`
+    // above already resolved for this exact request, never a second,
+    // independent "today" computation.
+    bootstrap?.planningDate ?? null,
+    bootstrap?.timezone ?? null
   );
 
   // Quick Capture V1 PR B -- same fresh, server-side, ids-only resolution.

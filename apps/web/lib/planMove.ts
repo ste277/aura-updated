@@ -204,6 +204,20 @@ export async function applyMoveWrites(
   // caller wraps everything in BEGIN/COMMIT/ROLLBACK), never a partially-moved A
   // or a partially-repointed GoalActivity left behind.
   await client.query(`UPDATE "GoalActivityExecution" SET "plannedActivityId" = $1, "updatedAt" = now() WHERE "plannedActivityId" = $2 AND "userId" = $3`, [bId, a.id, userId]);
+  // Goals V2 Rhythm R1/R3 -- same continuity, for the SAME reason:
+  // GoalActivityOccurrence (apps/web/lib/db.ts's materializeGoalActivityRhythmOccurrence)
+  // is durable OCCURRENCE identity, while PlannedActivity is only current
+  // PLACEMENT identity. Move repoints which plan an occurrence is
+  // associated with; it never creates a new occurrence (R3's own hard
+  // invariant -- "no new occurrence on Move"). Zero rows for a plan with
+  // no occurrence -- every pre-R3 Move, and every Move of a finite (NONE)
+  // GoalActivity's plan, which never has an occurrence row at all -- this
+  // UPDATE is then simply a no-op, exactly like the two lines above for a
+  // source-less plan. "plannedActivityId"'s own UNIQUE constraint
+  // (migration 0042) rejects the write outright rather than silently
+  // double-claiming B, with the same whole-transaction-rollback guarantee
+  // the GoalActivityExecution line above already relies on.
+  await client.query(`UPDATE "GoalActivityOccurrence" SET "plannedActivityId" = $1 WHERE "plannedActivityId" = $2 AND "userId" = $3`, [bId, a.id, userId]);
 
   return { from: aMoved.rows[0], to: bRes.rows[0] };
 }

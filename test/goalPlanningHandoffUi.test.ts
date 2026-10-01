@@ -28,8 +28,18 @@ function main() {
   // ============================================================
   // A/B/C/4 -- a checkbox renders ONLY for SUGGESTED; PLANNED/COMPLETED
   // never get one (isSelectable's own guard).
+  //
+  // Goals V2 Rhythm R3 (a later, separately-authorized ticket) legitimately
+  // widened this gate: a COMPLETED activity is now ALSO selectable, but
+  // ONLY when it is independently proven Rhythm-eligible for another
+  // occurrence (rhythmEligibleForAnotherOccurrence, re-derived server-side
+  // every time -- see goalActivityRhythmMaterializationStructuralGuards
+  // .test.ts). SUGGESTED remains unconditionally selectable on its own, and
+  // no other COMPLETED path (without that explicit Rhythm proof) is
+  // granted a checkbox -- narrowed to that exact invariant rather than the
+  // original "ONLY SUGGESTED, full stop".
   // ============================================================
-  check('A/4. the checkbox is gated on derivedState === \'SUGGESTED\'', /isSelectable = activity\.derivedState === 'SUGGESTED'/.test(source));
+  check('A/4. the checkbox is gated on derivedState === \'SUGGESTED\' (unconditionally), OR COMPLETED gated strictly on rhythmEligibleForAnotherOccurrence (R3)', /isSelectable = \(a: GoalActivityView\) => a\.derivedState === 'SUGGESTED' \|\| \(a\.derivedState === 'COMPLETED' && a\.rhythmEligibleForAnotherOccurrence\)/.test(source));
   check('B/C. PLANNED/COMPLETED never render a checkbox -- isSelectable is false for every state except SUGGESTED (single boolean gate, no PLANNED/COMPLETED branch grants it)', !/isSelectable[\s\S]{0,80}'PLANNED'/.test(source) && !/isSelectable[\s\S]{0,80}'COMPLETED'/.test(source));
   check('4. the checkbox itself is conditionally rendered only when isSelectable', /\{isSelectable && \(/.test(source));
 
@@ -60,12 +70,18 @@ function main() {
   // Stale-selection defense (client-side first line of defense; server-
   // side bootstrap re-resolution is the REAL enforcement, this ticket's
   // own section 8) -- effectiveSelectedIds intersects the current
-  // SUGGESTED set on every render, never trusting a stale selectedIds
+  // selectable set on every render, never trusting a stale selectedIds
   // value directly.
+  //
+  // Rhythm R3 renamed the underlying set from suggestedIds to
+  // selectableIds (built via the widened isSelectable gate checked above)
+  // -- the real invariant this check protects, that effectiveSelectedIds
+  // is ALWAYS a fresh intersection against the current eligible set rather
+  // than raw selectedIds, is unchanged.
   // ============================================================
   check(
-    'effectiveSelectedIds is derived by intersecting selectedIds with the CURRENT suggestedIds set (never used raw)',
-    /effectiveSelectedIds = Array\.from\(selectedIds\)\.filter\(\(id\) => suggestedIds\.has\(id\)\)/.test(source)
+    'effectiveSelectedIds is derived by intersecting selectedIds with the CURRENT selectableIds set (never used raw)',
+    /effectiveSelectedIds = Array\.from\(selectedIds\)\.filter\(\(id\) => selectableIds\.has\(id\)\)/.test(source)
   );
   check('the CTA/handler use effectiveSelectedIds, never the raw selectedIds Set directly', !/window\.location\.href = `\/plan-day\?\$\{new URLSearchParams\(\{ fromGoal: goal\.id, activities: Array\.from\(selectedIds\)/.test(source));
 
@@ -84,8 +100,12 @@ function main() {
   // 47 -- product copy check: the question framing exists, using the
   // ticket's own preferred phrasing, and does not appear unconditionally
   // (only when there's something to select).
+  //
+  // Rhythm R3 renamed the gating set from suggestedIds to selectableIds
+  // (see above) -- the invariant itself (the prompt only appears when at
+  // least one activity is actually selectable) is unchanged.
   // ============================================================
-  check('47. "What would you like Aura to help you plan?" appears, gated on suggestedIds.size > 0', /suggestedIds\.size > 0 && <p[\s\S]{0,120}What would you like Aura to help you plan\?/.test(source));
+  check('47. "What would you like Aura to help you plan?" appears, gated on selectableIds.size > 0', /selectableIds\.size > 0 && <p[\s\S]{0,120}What would you like Aura to help you plan\?/.test(source));
 
   if (!allPassed) {
     console.error('SOME GOAL PLANNING HANDOFF UI CHECKS FAILED');

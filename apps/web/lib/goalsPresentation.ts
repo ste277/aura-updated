@@ -50,6 +50,10 @@ export interface GoalActivityView {
   // or null, same "meaning, not storage" contract as completionRequirement
   // above.
   currentValue: number | null;
+  // Goals V2 Rhythm R3 -- presentation-only, server-computed against
+  // "today" (see app/api/goals/[goalId]/route.ts's own doc comment); never
+  // authoritative for any write. `false` for every finite (NONE) activity.
+  rhythmEligibleForAnotherOccurrence: boolean;
   createdAt: string;
   updatedAt: string;
 }

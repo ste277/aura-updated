@@ -4,7 +4,7 @@ import { derivePlanCompletionHistory } from './planCompletionHistory';
 import { validateCaptureTitle } from './captures';
 import { parseSchedulingMode, type PlannedActivitySchedulingMode } from './plannedActivitySchedulingMode';
 import { toPersistedCompletionRequirement, normalizeGoalActivityCompletionRequirement, type CompletionRequirement } from './goalCompletion';
-import { deriveGoalActivityRhythmContribution, type GoalActivityRhythmOccurrenceFact, type PlannedActivityStatusForRhythm } from './goalActivityRhythm';
+import { deriveGoalActivityRhythmContribution, normalizeGoalActivityRhythm, computeGoalActivityRhythmEligibility, type GoalActivityRhythmOccurrenceFact, type PlannedActivityStatusForRhythm } from './goalActivityRhythm';
 import { getDatePartsInTimezone } from './timezone';
 import { toPersistedGoalActivityExecutionSnapshot, fromPersistedGoalActivityExecutionSnapshot, resolveCompletionActualValue } from './goalActivityExecution';
 
@@ -2735,9 +2735,16 @@ export async function loadGoalContextsForPlanIds(userId: string, planIds: readon
  * production occurrence writer exists). `localDate` is derived via
  * getDatePartsInTimezone from the plan's OWN plannedStartAt, in the
  * caller-supplied timezone -- never the server's own clock/timezone.
+ *
+ * Rhythm R3 -- `executor` is optional (defaults to `pool`, same convention
+ * as `goalHasRetainedPlanLinkage`) so the authoritative, pre-materialization
+ * re-check (`materializeGoalActivityRhythmOccurrence`, below) can read
+ * facts on the SAME transaction client as the write it is about to
+ * authorize, inside the caller's own per-user advisory lock -- never a
+ * second, unlocked connection racing the write it is meant to gate.
  */
-export async function loadGoalActivityRhythmFacts(userId: string, goalActivityId: string, timezone: string): Promise<GoalActivityRhythmOccurrenceFact[]> {
-  const result = await pool.query(
+export async function loadGoalActivityRhythmFacts(userId: string, goalActivityId: string, timezone: string, executor: Pool | PoolClient = pool): Promise<GoalActivityRhythmOccurrenceFact[]> {
+  const result = await executor.query(
     `SELECT pa."plannedStartAt", pa.status
      FROM "GoalActivityOccurrence" gao
      JOIN "PlannedActivity" pa ON pa.id = gao."plannedActivityId"
@@ -2748,6 +2755,98 @@ export async function loadGoalActivityRhythmFacts(userId: string, goalActivityId
     localDate: getDatePartsInTimezone(timezone, new Date(row.plannedStartAt)).dateStr,
     contribution: deriveGoalActivityRhythmContribution(row.status as PlannedActivityStatusForRhythm),
   }));
+}
+
+export type MaterializeGoalActivityRhythmOccurrenceResult =
+  | { ok: true; occurrenceId: string }
+  | { ok: false; reason: 'NOT_FOUND' | 'NOT_RHYTHM_ELIGIBLE' | 'HAS_LIVE_COMMITMENT' | 'CAPACITY_EXHAUSTED' };
+
+/**
+ * Goals V2 Rhythm R3 -- the one new atomic write this slice introduces:
+ * "an N_PER_WEEK GoalActivity whose current linked plan is either absent
+ * (first-ever occurrence) or no longer live (LOGGED/SKIPPED/CANCELLED --
+ * never UPCOMING) still has weekly capacity, so link it to a NEWLY CREATED
+ * PlannedActivity and record a new GoalActivityOccurrence." Called from
+ * EXACTLY ONE place (dayConstructorAcceptancePersistence.ts's own write
+ * loop), on the SAME `client` as the PlannedActivity insert that already
+ * happened immediately before it, tried FIRST for every Goal-linked write
+ * (a pure, side-effect-free read -- `NOT_RHYTHM_ELIGIBLE` -- for any
+ * GoalActivity whose own rhythmKind isn't 'N_PER_WEEK'). The existing,
+ * UNCHANGED `linkGoalActivityToPlannedActivity` is tried only as the
+ * fallback for that exact `NOT_RHYTHM_ELIGIBLE` case, and alone still owns
+ * every NONE/first-link/CANCELLED-or-SKIPPED-relink case exactly as before
+ * R3 (this ticket's own section 4: the finite legacy path is untouched).
+ * This ordering (Rhythm-aware tried first) is what lets ONE call correctly
+ * cover a brand-new N_PER_WEEK GoalActivity's very FIRST occurrence too --
+ * the legacy function alone would successfully link a NULL-plannedActivityId
+ * GoalActivity but would never create the occurrence row every N_PER_WEEK
+ * link requires.
+ *
+ * EVERY check here reads FRESH state on this same client, inside the
+ * caller's own already-held per-user advisory lock
+ * (`day-constructor-accept:<userId>`, persistAcceptedConstructedDay) --
+ * this is what makes two genuinely concurrent requests for the same user
+ * safe without any new locking: the second request blocks on the SAME
+ * lock key until the first's transaction fully commits or rolls back, then
+ * re-reads this exact fresh state and correctly sees reduced (or
+ * exhausted) capacity (this ticket's own section 22). A GENUINE RETRY of
+ * the identical acceptance (same clientRequestId) never reaches this
+ * function a second time at all -- it short-circuits at the EXISTING
+ * PlanCreationIdempotency replay check, before the write loop even starts
+ * (this ticket's own section 56 -- the existing mechanism is reused
+ * verbatim, never duplicated).
+ *
+ * Deliberately refuses (HAS_LIVE_COMMITMENT) when the CURRENT linked plan
+ * is UPCOMING: an already-live, not-yet-done commitment is not something
+ * R3's planning UX offers to replace (this ticket's own section 27 -- a
+ * GoalActivity with a live UPCOMING plan is never selectable in the first
+ * place today, so this is defense-in-depth against a stale/malicious
+ * client, never a path any current UI can reach).
+ *
+ * Creates the occurrence with no status, no windowKey, no Rhythm/
+ * CompletionRequirement snapshot (this ticket's own section 15) -- R1's
+ * own minimal shape, unextended.
+ */
+export async function materializeGoalActivityRhythmOccurrence(
+  userId: string,
+  goalActivityId: string,
+  newPlannedActivityId: string,
+  planningLocalDate: string,
+  timezone: string,
+  client: PoolClient
+): Promise<MaterializeGoalActivityRhythmOccurrenceResult> {
+  const gaRes = await client.query(
+    `SELECT ga.status, ga."rhythmKind", ga."rhythmTargetPerWeek", pa.status AS "linkedPlanStatus"
+     FROM "GoalActivity" ga
+     LEFT JOIN "PlannedActivity" pa ON pa.id = ga."plannedActivityId"
+     WHERE ga.id = $1 AND ga."userId" = $2`,
+    [goalActivityId, userId]
+  );
+  if (gaRes.rows.length === 0) return { ok: false, reason: 'NOT_FOUND' };
+  const row = gaRes.rows[0];
+  if (row.status === 'DISMISSED') return { ok: false, reason: 'NOT_FOUND' };
+
+  const rhythm = normalizeGoalActivityRhythm({ rhythmKind: row.rhythmKind, rhythmTargetPerWeek: row.rhythmTargetPerWeek });
+  if (rhythm.kind !== 'N_PER_WEEK') return { ok: false, reason: 'NOT_RHYTHM_ELIGIBLE' };
+  if (row.linkedPlanStatus === 'UPCOMING') return { ok: false, reason: 'HAS_LIVE_COMMITMENT' };
+
+  const facts = await loadGoalActivityRhythmFacts(userId, goalActivityId, timezone, client);
+  const eligibility = computeGoalActivityRhythmEligibility({ rhythm, planningLocalDate, occurrences: facts });
+  if (!eligibility.eligible) return { ok: false, reason: 'CAPACITY_EXHAUSTED' };
+
+  const relinked = await client.query(
+    `UPDATE "GoalActivity" SET "plannedActivityId" = $1, "updatedAt" = now()
+     WHERE id = $2 AND "userId" = $3 AND status != 'DISMISSED' AND "rhythmKind" = 'N_PER_WEEK'`,
+    [newPlannedActivityId, goalActivityId, userId]
+  );
+  if ((relinked.rowCount ?? 0) !== 1) return { ok: false, reason: 'NOT_FOUND' };
+
+  const occurrenceId = randomUUID();
+  await client.query(
+    `INSERT INTO "GoalActivityOccurrence" (id, "userId", "goalActivityId", "plannedActivityId") VALUES ($1, $2, $3, $4)`,
+    [occurrenceId, userId, goalActivityId, newPlannedActivityId]
+  );
+  return { ok: true, occurrenceId };
 }
 
 /**

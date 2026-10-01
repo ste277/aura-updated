@@ -42,18 +42,51 @@ const PRODUCTION_FILES: Record<string, string> = {
   'Recomposition decision engine (remainingDayRecomposition.ts)': '../apps/web/lib/remainingDayRecomposition.ts',
   'Recomposition server wiring (remainingDayRecompositionServer.ts)': '../apps/web/lib/remainingDayRecompositionServer.ts',
   'Recomposition acceptance (remainingDayRecompositionAcceptance.ts)': '../apps/web/lib/remainingDayRecompositionAcceptance.ts',
-  'Move (planMove.ts)': '../apps/web/lib/planMove.ts',
-  'Goal Detail (GoalDetailClient.tsx)': '../apps/web/app/goals/[goalId]/GoalDetailClient.tsx',
-  'Goals presentation (goalsPresentation.ts)': '../apps/web/lib/goalsPresentation.ts',
   'GOAL_TEMPLATES (goals.ts)': '../apps/web/lib/goals.ts',
   'Goal completion domain (goalCompletion.ts)': '../apps/web/lib/goalCompletion.ts',
   'Goal activity execution domain (goalActivityExecution.ts)': '../apps/web/lib/goalActivityExecution.ts',
-  'Plan with Aura handoff (planDayBootstrap.ts)': '../apps/web/lib/planDayBootstrap.ts',
 };
 
 for (const [label, relPath] of Object.entries(PRODUCTION_FILES)) {
   check(`${label} does not reference Rhythm`, !RHYTHM_PATTERN.test(read(relPath)));
 }
+
+// ============================================================
+// planMove.ts / GoalDetailClient.tsx / goalsPresentation.ts /
+// planDayBootstrap.ts -- this R2 ticket originally asserted a blanket zero
+// -Rhythm-reference guard on these four files. Rhythm R3 (a later,
+// separately-authorized ticket: occurrence materialization + planning
+// handoff) legitimately and intentionally gave each of them a narrow,
+// specific Rhythm touchpoint. Per this session's own established
+// discipline, the blanket check is narrowed -- never deleted -- to
+// whatever real invariant it still protects: each file may reference
+// Rhythm ONLY via its one documented R3 touchpoint, never anything wider
+// (no new policy mutation, no second eligibility computation path, no
+// client-authored Rhythm data).
+// ============================================================
+const planMoveSrc = read('../apps/web/lib/planMove.ts');
+check(
+  'planMove.ts references Rhythm ONLY via its one documented GoalActivityOccurrence repoint UPDATE (R3) -- no eligibility computation, no policy mutation',
+  /UPDATE "GoalActivityOccurrence"/.test(planMoveSrc) && !/computeGoalActivityRhythmEligibility|rhythmKind|rhythmTargetPerWeek/.test(planMoveSrc)
+);
+
+const goalDetailClientSrc = read('../apps/web/app/goals/[goalId]/GoalDetailClient.tsx');
+check(
+  'GoalDetailClient.tsx references Rhythm ONLY via its one documented rhythmEligibleForAnotherOccurrence read (R3) -- never authors rhythmKind/rhythmTargetPerWeek',
+  /rhythmEligibleForAnotherOccurrence/.test(goalDetailClientSrc) && !/rhythmKind|rhythmTargetPerWeek/.test(goalDetailClientSrc)
+);
+
+const goalsPresentationSrc = read('../apps/web/lib/goalsPresentation.ts');
+check(
+  'goalsPresentation.ts references Rhythm ONLY via its one documented rhythmEligibleForAnotherOccurrence field (R3) -- no rhythmKind/targetPerWeek/eligibility-engine import',
+  /rhythmEligibleForAnotherOccurrence/.test(goalsPresentationSrc) && !/rhythmKind|rhythmTargetPerWeek|computeGoalActivityRhythmEligibility/.test(goalsPresentationSrc)
+);
+
+const planDayBootstrapSrc = read('../apps/web/lib/planDayBootstrap.ts');
+check(
+  'planDayBootstrap.ts\'s resolveGoalActivityHandoff re-derives eligibility server-side from persisted facts (R3) -- never trusts a client-supplied Rhythm/eligibility flag',
+  /computeGoalActivityRhythmEligibility\(/.test(planDayBootstrapSrc) && !/activitiesParam.*rhythm|rhythm.*activitiesParam/i.test(stripComments(planDayBootstrapSrc))
+);
 
 // ============================================================
 // Ask Aura -- explicitly named by this ticket's own section 38.
@@ -90,7 +123,20 @@ check('logPlannedActivity itself does not reference Rhythm', !RHYTHM_PATTERN.tes
 check('skipPlannedActivity itself does not reference Rhythm', !RHYTHM_PATTERN.test(functionBody(dbSrc, 'skipPlannedActivity')));
 check('createGoalWithActivities itself does not reference Rhythm (no production writer)', !RHYTHM_PATTERN.test(functionBody(dbSrc, 'createGoalWithActivities')));
 check('addGoalActivity itself does not reference Rhythm (no production writer)', !RHYTHM_PATTERN.test(functionBody(dbSrc, 'addGoalActivity')));
-check('db.ts defines ONLY the one allowed read-only loader (loadGoalActivityRhythmFacts) -- no write/mutation function references Rhythm', (dbSrc.match(/function \w*[Rr]hythm\w*/g) ?? []).join() === 'function loadGoalActivityRhythmFacts');
+// This R2 ticket originally asserted db.ts defines ONLY the one allowed
+// read-only loader. Rhythm R3 (a later, separately-authorized ticket) added
+// exactly one intentionally-reviewed second function,
+// materializeGoalActivityRhythmOccurrence -- NOT read-only, by design (it is
+// the sole production writer of GoalActivityOccurrence rows, proved exactly
+// once and exhaustively in goalActivityRhythmMaterializationStructuralGuards
+// .test.ts). The real invariant that still must hold is narrower than "only
+// one": db.ts's Rhythm-named functions are limited to exactly these two
+// named, intentionally-reviewed functions -- never a third, undocumented one.
+check(
+  'db.ts defines ONLY the two allowed, intentionally-reviewed Rhythm functions (loadGoalActivityRhythmFacts [read-only] and materializeGoalActivityRhythmOccurrence [R3\'s sole occurrence writer]) -- no other function references Rhythm',
+  [...new Set((dbSrc.match(/function \w*[Rr]hythm\w*/g) ?? []))].sort().join(',') ===
+    ['function loadGoalActivityRhythmFacts', 'function materializeGoalActivityRhythmOccurrence'].sort().join(',')
+);
 check('loadGoalActivityRhythmFacts itself contains no INSERT/UPDATE/DELETE (read-only, this ticket\'s own section 23)', !/INSERT\s|UPDATE\s|DELETE\s/.test(functionBody(dbSrc, 'loadGoalActivityRhythmFacts')));
 
 // ============================================================

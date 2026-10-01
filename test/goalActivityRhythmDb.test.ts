@@ -178,25 +178,26 @@ async function main() {
     check('end-to-end: 3/week with 1 completed + 1 committed (skip/cancel ignored) -> remaining 1, eligible', eligibility.eligible === true && eligibility.remainingOccurrences === 1);
 
     // ============================================================
-    // 15/21. Move safety -- prove the pure model + loader support
-    // "repoint, don't duplicate" once a future ticket wires it, WITHOUT any
-    // production wiring existing yet in R1/R2.
+    // 15/21. Move safety -- re-proven for Rhythm R3's own reality. R2's
+    // own original version of this section manually simulated a repoint
+    // via raw SQL, since no production wiring existed yet to repoint
+    // GoalActivityOccurrence on Move. Rhythm R3 (a later, separately-
+    // authorized ticket) added exactly that wiring to applyMoveWrites
+    // (planMove.ts) -- see test/goalActivityRhythmMaterializationDb.test.ts's
+    // own section 52 for the full, dedicated proof of that production
+    // behavior end-to-end. This section is narrowed to re-confirm, at the
+    // fact-loader level, that a REAL Move (now automatically repointing)
+    // still produces exactly the same safe shape: no duplicate fact, no
+    // double-counted commitment.
     // ============================================================
     // A safely-future instant relative to the REAL wall clock (movePlannedActivity
     // rejects a past destination) -- the exact date is otherwise irrelevant to
     // this test's own assertions (contribution counts, never a specific week).
     const moveResult = await movePlannedActivity(user.id, planUpcoming.id, { newStartAt: new Date(Math.ceil((Date.now() + 3 * 3600000) / 60000) * 60000) });
-    const factsAfterMoveUnrepointed = await loadGoalActivityRhythmFacts(user.id, goalActivity!.id, TZ);
-    check('15. immediately after a Move, with NO production repoint wiring yet, the occurrence still points at the now-MOVED plan -- contributes NONE (fails safe, never double-counts, never COMMITTED off a dead row)', factsAfterMoveUnrepointed.filter((f) => f.contribution === 'COMMITTED').length === 0 && factsAfterMoveUnrepointed.some((f) => f.contribution === 'NONE'));
-
-    // Manually repoint the occurrence to the successor -- simulating EXACTLY
-    // what a future production wiring ticket (R3+) will do atomically inside
-    // applyMoveWrites, proven here at the schema/loader level only.
-    await sql(`UPDATE "GoalActivityOccurrence" SET "plannedActivityId" = $1 WHERE "plannedActivityId" = $2`, [moveResult.to.id, planUpcoming.id]);
     createdPlanIds.push(moveResult.to.id);
-    const factsAfterRepoint = await loadGoalActivityRhythmFacts(user.id, goalActivity!.id, TZ);
-    check('15/21. after repointing to the successor, there are STILL exactly 4 facts (never 5) -- the Move never created a second occurrence/fact', factsAfterRepoint.length === 4);
-    check('15/21. the repointed occurrence now correctly contributes COMMITTED again (its successor is UPCOMING) -- same occurrence, different schedule placement, never double-counted alongside the old MOVED row', factsAfterRepoint.filter((f) => f.contribution === 'COMMITTED').length === 1 && factsAfterRepoint.filter((f) => f.contribution === 'COMPLETED').length === 1 && factsAfterRepoint.filter((f) => f.contribution === 'NONE').length === 2);
+    const factsAfterMove = await loadGoalActivityRhythmFacts(user.id, goalActivity!.id, TZ);
+    check('15/21. a REAL Move (R3\'s own production wiring) already repoints the occurrence automatically -- still exactly 4 facts (never 5), the Move never creates a second occurrence/fact', factsAfterMove.length === 4);
+    check('15/21. the occurrence now correctly contributes COMMITTED (its successor is UPCOMING) -- same occurrence, different schedule placement, never double-counted alongside the old MOVED row, and never left stuck at NONE', factsAfterMove.filter((f) => f.contribution === 'COMMITTED').length === 1 && factsAfterMove.filter((f) => f.contribution === 'COMPLETED').length === 1 && factsAfterMove.filter((f) => f.contribution === 'NONE').length === 2);
   } finally {
     await cleanup();
   }
