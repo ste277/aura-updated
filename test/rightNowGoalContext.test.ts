@@ -97,7 +97,13 @@ check('the "Why?" control is untouched -- still gated on spotlightExplanation, s
 check('HomeTimeline.tsx (ordinary Timeline rows) does not reference goalContext -- the Right Now spotlight is the only G3.3 consumer', !/goalContext/.test(fs.readFileSync('apps/web/components/HomeTimeline.tsx', 'utf8')));
 check('GoalDetailClient.tsx was not touched by G3.3 (still only its own G3.2 completionDetail usage, never spotlightGoalContext/spotlightCompletionDetail)', !/spotlightGoalContext|spotlightCompletionDetail/.test(fs.readFileSync('apps/web/app/goals/[goalId]/GoalDetailClient.tsx', 'utf8')));
 check('dayConstructorOrchestrator.ts does not reference goalContext/formatGoalActivityCompletion', !/goalContext|formatGoalActivityCompletion/.test(fs.readFileSync('apps/web/lib/dayConstructorOrchestrator.ts', 'utf8')));
-check('RecompositionCard.tsx does not reference goalContext/formatGoalActivityCompletion (Recomposition messaging is a later slice)', !/goalContext|formatGoalActivityCompletion/.test(fs.readFileSync('apps/web/components/RecompositionCard.tsx', 'utf8')));
+// Goals V2 G3.5 (a later, separately-authorized ticket) intentionally made
+// RecompositionCard.tsx a consumer of Goal IDENTITY only (its own
+// goalTitle field) -- see test/goalAwareRecompositionPresentation.test.ts
+// for G3.5's own guards. It still never references the completion
+// formatter or any completion/progress internal, which this check now
+// narrows to.
+check('RecompositionCard.tsx never references formatGoalActivityCompletion/completionRequirement/currentValue (Goal identity only, no completion/progress detail -- G3.3\'s own formatter stays Right-Now-exclusive)', !/formatGoalActivityCompletion|completionRequirement|currentValue/.test(fs.readFileSync('apps/web/components/RecompositionCard.tsx', 'utf8')));
 check('planMove.ts does not reference formatGoalActivityCompletion', !/formatGoalActivityCompletion/.test(fs.readFileSync('apps/web/lib/planMove.ts', 'utf8')));
 
 const migrationDirs = fs.readdirSync('apps/web/prisma/migrations').filter((d) => /^\d{4}_/.test(d));

@@ -167,12 +167,22 @@ function renderView(
         {view.moves.map((move) => {
           const row = presentMove(move, ctx.timezone);
           return (
-            <li key={row.key} style={{ display: 'flex', flexWrap: 'wrap', alignItems: 'baseline', columnGap: spacing.sm }}>
-              <span style={typography.bodyStrong}>{row.title}</span>
-              <span style={visuallyHidden}>{`, from ${row.from} to ${row.to}`}</span>
-              <span aria-hidden="true" style={typography.meta}>
-                {row.from} → {row.to}
-              </span>
+            <li key={row.key} style={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
+              <div style={{ display: 'flex', flexWrap: 'wrap', alignItems: 'baseline', columnGap: spacing.sm }}>
+                <span style={typography.bodyStrong}>{row.title}</span>
+                <span style={visuallyHidden}>{`, from ${row.from} to ${row.to}`}</span>
+                <span aria-hidden="true" style={typography.meta}>
+                  {row.from} → {row.to}
+                </span>
+              </div>
+              {/* Goals V2 G3.5 -- at most one compact Goal-context line, plain
+                  VISIBLE readable text (never aria-hidden, never color
+                  alone -- the label word "For:" carries the meaning, not
+                  just the color). Conditional on the move's own
+                  goalContext: absent for every non-Goal plan, never a
+                  placeholder/blank line. No progress/completion detail
+                  here -- Right Now (G3.3) owns that. */}
+              {row.goalTitle && <span style={{ ...typography.meta, color: colors.textSecondary }}>{`For: ${row.goalTitle}`}</span>}
             </li>
           );
         })}

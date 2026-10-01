@@ -21,11 +21,20 @@ import { getDatePartsInTimezone } from './timezone';
 // Parsed shapes (own types on purpose: nothing from the scheduling domain leaks into Home)
 // ---------------------------------------------------------------------------
 
+/** Goals V2 G3.5 -- Goal IDENTITY only (id/title): never execution id, source, completion snapshot or
+ * currentValue. Recomposition explains "how should the remaining day change", not action progress (Right Now
+ * already owns that, G3.3). */
+export interface RecompositionGoalContext {
+  goal: { id: string; title: string };
+}
+
 export interface RecompositionMoveRow {
   planId: string;
   title: string;
   fromIso: string;
   toIso: string;
+  /** Goals V2 G3.5 -- additive, optional. Absent for a non-Goal-linked plan: never a placeholder/blank line. */
+  goalContext?: RecompositionGoalContext;
 }
 
 export interface RecompositionUnresolvedRow {
@@ -51,9 +60,23 @@ function parseSlotStart(value: unknown): string | null {
 }
 
 /**
+ * Goals V2 G3.5 -- `undefined` = genuinely absent (a non-Goal-linked plan: fine, never an error). `null` = present
+ * but malformed: fails closed exactly like every other field this parser reads, rather than silently dropping a
+ * corrupt Goal reference. Only goal.id/goal.title are ever read -- no execution/completion field has a parse path
+ * here at all, so one could never leak in even if the server sent it.
+ */
+function parseGoalContext(value: unknown): RecompositionGoalContext | null | undefined {
+  if (value === undefined) return undefined;
+  if (!isObject(value) || !isObject(value.goal) || !isNonEmptyString(value.goal.id) || typeof value.goal.title !== 'string') return null;
+  return { goal: { id: value.goal.id, title: value.goal.title } };
+}
+
+/**
  * F2 response -> what Home may show. Only fields Home actually presents are read (ids, titles, times, the summary
  * state and the token); evidence, timing tiers and protected-plan reasons are never copied, so they cannot leak into
- * the UI. Anything inconsistent fails closed to ERROR -- a proposal is never half-trusted.
+ * the UI. Anything inconsistent fails closed to ERROR -- a proposal is never half-trusted. Goals V2 G3.5 --
+ * decision.goalContext is read ONLY for a MOVE decision (Recomposition's own presentation scope, this ticket's
+ * section 10 -- KEEP is never itemised in the card at all, and UNRESOLVED rows stay exactly as before).
  */
 export function parseRecomposeResponse(httpOk: boolean, body: unknown): RecomposeOutcome {
   if (!httpOk || !isObject(body)) return { kind: 'ERROR' };
@@ -79,7 +102,9 @@ export function parseRecomposeResponse(httpOk: boolean, body: unknown): Recompos
     } else if (decision.decision === 'MOVE') {
       const toIso = parseSlotStart(decision.to);
       if (toIso === null) return { kind: 'ERROR' };
-      moves.push({ planId: decision.planId, title: decision.title, fromIso, toIso });
+      const goalContext = parseGoalContext(decision.goalContext);
+      if (goalContext === null) return { kind: 'ERROR' }; // present but malformed -- fail closed
+      moves.push({ planId: decision.planId, title: decision.title, fromIso, toIso, ...(goalContext ? { goalContext } : {}) });
     } else if (decision.decision === 'UNRESOLVED') {
       unresolved.push({ planId: decision.planId, title: decision.title, atIso: fromIso });
     } else {
@@ -405,14 +430,20 @@ export interface PresentedMove {
   title: string;
   from: string;
   to: string;
-  /** "Finish presentation, from 2:00 PM to 3:30 PM" -- the readable equivalent of the visual arrow. */
+  /** "Finish presentation, from 2:00 PM to 3:30 PM" -- the readable equivalent of the visual arrow. Goals V2 G3.5:
+   * for a Goal-linked move, "for <goal title>" is folded in right after the title (a screen reader hears the
+   * context inline, not as a disconnected second line) -- absent entirely for a non-Goal move, byte-identical to
+   * pre-G3.5 text. */
   accessibleText: string;
+  /** Goals V2 G3.5 -- secondary context only; absent for a non-Goal-linked plan. */
+  goalTitle?: string;
 }
 
 export function presentMove(move: RecompositionMoveRow, timezone: string): PresentedMove {
   const from = formatRecompositionTime(move.fromIso, timezone);
   const to = formatRecompositionTime(move.toIso, timezone);
-  return { key: move.planId, title: move.title, from, to, accessibleText: `${move.title}, from ${from} to ${to}` };
+  const accessibleText = move.goalContext ? `${move.title}, for ${move.goalContext.goal.title}, from ${from} to ${to}` : `${move.title}, from ${from} to ${to}`;
+  return { key: move.planId, title: move.title, from, to, accessibleText, ...(move.goalContext ? { goalTitle: move.goalContext.goal.title } : {}) };
 }
 
 /** "3 things stay as they are" -- null when nothing stays (never a "0 things" line). */
