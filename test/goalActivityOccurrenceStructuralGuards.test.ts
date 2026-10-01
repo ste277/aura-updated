@@ -57,7 +57,15 @@ for (const [label, relPath] of Object.entries(PRODUCTION_FILES)) {
 // reason. db.ts must therefore have no reference at all.
 // ============================================================
 const dbSrc = read('../apps/web/lib/db.ts');
-check('db.ts does not reference GoalActivityOccurrence anywhere (no exported function, no inline query -- R1 adds zero write/read path)', !/GoalActivityOccurrence/.test(dbSrc));
+// Goals V2 Rhythm R2 (a later, separately-authorized ticket) intentionally
+// added the one allowed READ-ONLY fact loader (loadGoalActivityRhythmFacts)
+// that reads FROM "GoalActivityOccurrence" -- see
+// test/goalActivityRhythmStructuralGuards.test.ts for R2's own guards
+// proving it is read-only (no INSERT/UPDATE/DELETE) and that it is the
+// ONLY function referencing the table. Narrowed to that exact invariant
+// here, rather than "zero reference at all" (which R1 itself could only
+// ever assert because no later ticket existed yet).
+check('db.ts references GoalActivityOccurrence ONLY inside the one allowed read-only loader (loadGoalActivityRhythmFacts) -- no write, no second reader, no exported CRUD function of its own', (dbSrc.match(/GoalActivityOccurrence/g) ?? []).length === (functionBody(dbSrc, 'loadGoalActivityRhythmFacts').match(/GoalActivityOccurrence/g) ?? []).length && !/INSERT INTO "GoalActivityOccurrence"|UPDATE "GoalActivityOccurrence"|DELETE FROM "GoalActivityOccurrence"/.test(dbSrc));
 
 // ============================================================
 // logPlannedActivity / skipPlannedActivity / applyMoveWrites: explicitly
@@ -90,7 +98,13 @@ check('skipPlannedActivity itself does not reference GoalActivityOccurrence', !/
 const schemaSrc = read('../apps/web/prisma/schema.prisma');
 check('schema.prisma DOES define the GoalActivityOccurrence model (the one allowed production reference)', /model GoalActivityOccurrence \{/.test(schemaSrc));
 check('migration 0042_goal_activity_occurrence exists and creates exactly the GoalActivityOccurrence table', fs.existsSync(path.join(__dirname, '../apps/web/prisma/migrations/0042_goal_activity_occurrence/migration.sql')) && /CREATE TABLE "GoalActivityOccurrence"/.test(fs.readFileSync(path.join(__dirname, '../apps/web/prisma/migrations/0042_goal_activity_occurrence/migration.sql'), 'utf8')));
-check('no new migration directory was added beyond 0042 (still exactly 42)', fs.readdirSync(path.join(__dirname, '../apps/web/prisma/migrations')).filter((d) => /^\d{4}_/.test(d)).length === 42);
+// Goals V2 Rhythm R2 (a later, separately-authorized ticket) added
+// migration 0043_goal_activity_rhythm (two nullable columns on
+// GoalActivity) -- unrelated to this file's own R1 scope. The real
+// invariant this check still protects -- that 0042 itself remains exactly
+// what R1 created -- is covered by the check above; this one is narrowed
+// to the current total only.
+check('no migration directory beyond 0042 was added BY R1 (43 total, including the later, unrelated Rhythm R2 0043)', fs.readdirSync(path.join(__dirname, '../apps/web/prisma/migrations')).filter((d) => /^\d{4}_/.test(d)).length === 43);
 
 // ============================================================
 // No status/windowKey column was added to the new model (this ticket's own

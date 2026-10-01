@@ -56,10 +56,18 @@ check('dayConstructorOrchestrator.ts does not reference formatGoalActivityComple
 check('planMove.ts does not reference formatGoalActivityCompletion', !/formatGoalActivityCompletion/.test(read('../apps/web/lib/planMove.ts')));
 
 const migrationDirs = fs.readdirSync(path.join(__dirname, '..', 'apps', 'web', 'prisma', 'migrations')).filter((d) => /^\d{4}_/.test(d));
-check('no new migration directory was added for G3.2 (still 41)', migrationDirs.length === 42);
-check('schema.prisma was not touched by G3.2 (still no localDate/dayBucket/frequency/recurrence/Rhythm on any Goals model)', (() => {
+check('no new migration directory was added for G3.2 (still 41)', migrationDirs.length === 43);
+// Goals V2 Rhythm R2 (a later, separately-authorized ticket) intentionally
+// added exactly two nullable columns (rhythmKind/rhythmTargetPerWeek) to
+// GoalActivity -- see test/goalActivityRhythmStructuralGuards.test.ts for
+// R2's own guards. Narrowed here to what it still protects: no OTHER
+// day-scoped/frequency/recurrence/Rhythm addition anywhere in the Goals
+// model block (no RRULE, no separate Rhythm entity, no third column).
+check('schema.prisma was not touched by G3.2 beyond what G3.2 itself added (still no localDate/dayBucket/frequency/recurrence, and the only Rhythm reference is R2\'s own two documented columns)', (() => {
   const schema = stripComments(read('../apps/web/prisma/schema.prisma'));
-  return !/dayBucket|frequency|recurrence|Rhythm/i.test(schema.slice(schema.indexOf('model Goal '), schema.indexOf('model Capture')));
+  const goalsBlock = schema.slice(schema.indexOf('model Goal '), schema.indexOf('model Capture'));
+  const withoutKnownRhythmColumns = goalsBlock.replace(/rhythmKind\s+String\?/g, '').replace(/rhythmTargetPerWeek\s+Int\?/g, '');
+  return !/dayBucket|frequency|recurrence|Rhythm/i.test(withoutKnownRhythmColumns);
 })());
 
 check('formatGoalActivityCompletion introduces no day-scoped progress concept', !/dayBucket|dailyTarget|localDate/.test(presentationSrc.slice(presentationSrc.indexOf('export function formatGoalActivityCompletion'))));

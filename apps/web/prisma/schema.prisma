@@ -722,6 +722,30 @@ model GoalActivity {
   completionTargetValue Float?
   completionUnit        String?
 
+  // Goals V2 Rhythm R2 (migration 0043) -- "when should another occurrence
+  // of this GoalActivity become eligible?" (apps/web/lib/goalActivityRhythm.ts),
+  // orthogonal to completionKind/completionTargetValue/completionUnit above
+  // (which answer "what counts as completing ONE occurrence" -- a Rhythm
+  // policy never changes that answer). Two independent nullable columns,
+  // no default, no backfill -- the EXACT same convention
+  // completionKind/completionTargetValue/completionUnit already established
+  // for CompletionRequirement: rhythmKind = NULL means "never specified"
+  // and is ALWAYS normalized to canonical NONE (normalizeGoalActivityRhythm)
+  // -- every existing/legacy row keeps meaning exactly "finite, one
+  // occurrence" without any migration. A separate GoalActivityRhythm
+  // entity was considered (the G3.6 architecture audit's own suggestion)
+  // and rejected for V1 (see this migration's own doc comment): V1 needs
+  // exactly one policy per GoalActivity, no history, no sharing, no
+  // polymorphism -- none of the properties that would justify a separate
+  // table. Not yet written by any production call site in R2 -- every
+  // current GoalActivity creation path continues to leave these NULL.
+  rhythmKind            String?
+  // INTEGER (never Float, unlike completionTargetValue) -- a weekly
+  // occurrence count is always a whole number; validateGoalActivityRhythm
+  // rejects any fractional/zero/negative value before it ever reaches
+  // persistence.
+  rhythmTargetPerWeek   Int?
+
   createdAt         DateTime         @default(now()) @db.Timestamptz(3)
   updatedAt         DateTime         @updatedAt @db.Timestamptz(3)
 

@@ -86,7 +86,7 @@ async function main() {
   check('the only new Home wiring is the composer slot + opener (Right Now / Timeline / Opportunities props untouched)', /quickCaptureSlot=/.test(dash) && /onQuickCapture=/.test(dash) && /onPlanOpportunity=\{handlePlanOpportunity\}/.test(dash) && /nextItemId=\{myDayAgenda\?\.nextItem\?\.id\}/.test(dash));
   // Goals V2 G2.1/G2.2.1 added migrations 0040/0041 (unrelated to Home
   // capture) -- bumped from 39.
-  check('scope: no schema/migration change, no lifecycle/planning/acceptance file references Home capture', fs.readdirSync(path.join(__dirname, '../apps/web/prisma/migrations')).filter((f) => /^\d{4}_/.test(f)).length === 42 && !/quickCapture|HomeQuickCapture/i.test(strip(read('../apps/web/lib/planDayEntry.ts')) + strip(read('../apps/web/lib/dayConstructorAcceptancePersistence.ts')) + strip(read('../apps/web/lib/captures.ts'))));
+  check('scope: no schema/migration change, no lifecycle/planning/acceptance file references Home capture', fs.readdirSync(path.join(__dirname, '../apps/web/prisma/migrations')).filter((f) => /^\d{4}_/.test(f)).length === 43 && !/quickCapture|HomeQuickCapture/i.test(strip(read('../apps/web/lib/planDayEntry.ts')) + strip(read('../apps/web/lib/dayConstructorAcceptancePersistence.ts')) + strip(read('../apps/web/lib/captures.ts'))));
 
   if (!allPassed) {
     console.error('SOME CAPTURE HOME PR C CHECKS FAILED');

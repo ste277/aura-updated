@@ -1,0 +1,42 @@
+-- Goals V2 Rhythm R2: the minimum deterministic Rhythm policy, answering
+-- "when should another occurrence of this GoalActivity become eligible?"
+-- (apps/web/lib/goalActivityRhythm.ts). Orthogonal to
+-- "completionKind"/"completionTargetValue"/"completionUnit" (which answer
+-- "what counts as completing ONE occurrence" -- a Rhythm policy never
+-- changes that answer).
+--
+-- VOCABULARY (V1, deliberately minimal): NONE | N_PER_WEEK(N). NONE means
+-- finite under current behavior -- Rhythm never requests another
+-- occurrence. N_PER_WEEK(N) means ongoing, aiming for N completed
+-- occurrences per user-local calendar week, where N is an explicit
+-- positive integer -- never inferred from a Goal/GoalActivity title,
+-- template category, activity catalog metadata, target date, or
+-- CompletionRequirement.
+--
+-- TWO NULLABLE COLUMNS DIRECTLY ON "GoalActivity", NOT A SEPARATE TABLE:
+-- the G3.6 architecture audit suggested a separate GoalActivityRhythm
+-- policy entity, but this ticket's own narrow schema audit found no
+-- current V1 invariant that justifies one -- exactly one policy per
+-- GoalActivity, no policy history, no sharing across GoalActivities, no
+-- polymorphic configuration. Two nullable columns are the exact same
+-- shape G2.1 already proved safe for CompletionRequirement
+-- ("completionKind"/"completionTargetValue"/"completionUnit", migration
+-- 0040). "rhythmKind" = NULL means "never specified" and is ALWAYS
+-- normalized to canonical NONE (normalizeGoalActivityRhythm) -- every
+-- existing/legacy row keeps meaning exactly "finite, one occurrence"
+-- without any migration.
+--
+-- "rhythmTargetPerWeek" is INTEGER (never DOUBLE PRECISION, unlike
+-- "completionTargetValue") -- a weekly occurrence count is always a whole
+-- number; the domain validator (validateGoalActivityRhythm) rejects any
+-- fractional/zero/negative/missing value before it ever reaches
+-- persistence.
+--
+-- Additive only: no existing row is touched, no backfill, no existing
+-- GoalActivity receives a Rhythm policy. Not yet written by any
+-- production call site in R2 -- every current GoalActivity creation path
+-- (createGoalWithActivities, addGoalActivity, GOAL_TEMPLATES) continues
+-- to leave these NULL.
+
+ALTER TABLE "GoalActivity" ADD COLUMN "rhythmKind" TEXT;
+ALTER TABLE "GoalActivity" ADD COLUMN "rhythmTargetPerWeek" INTEGER;

@@ -562,7 +562,7 @@ async function main() {
   check('34/35. leaving Home detaches the store; a local-day change resets it', /unsubscribe\(\);\s*detach\(\);/.test(dash) && /recompositionStore\.reset\(\);\s*\}, \[recompositionStore, agendaLocalDate\]\)/.test(dash));
   check('37. focus: heading on appear, status after success, entry action after dismiss', /\[data-recomposition-status\]/.test(dash) && /\[data-recomposition-heading\]/.test(dash) && /getElementById\('home-recomposition-entry'\)\?\.focus\(\)/.test(dash) && /preventScroll: true/.test(dash));
   check('39. no analytics: no trackEvent/productEvents in the F4 code and no product-events change', !/trackEvent|productEvent/i.test(lib + card) && !/recompos/i.test(read('../apps/web/lib/productEvents.ts')));
-  check('41/66. no backend/domain/schema change is needed: 41 migrations (incl. the unrelated Goals V2 G2.1/G2.2.1 0040/0041 migrations), no new dependency in package.json', fs.readdirSync(path.join(__dirname, '../apps/web/prisma/migrations')).filter((f) => /^\d{4}_/.test(f)).length === 42);
+  check('41/66. no backend/domain/schema change is needed: 41 migrations (incl. the unrelated Goals V2 G2.1/G2.2.1 0040/0041 migrations), no new dependency in package.json', fs.readdirSync(path.join(__dirname, '../apps/web/prisma/migrations')).filter((f) => /^\d{4}_/.test(f)).length === 43);
 
   if (!allPassed) { console.error('SOME HOME RECOMPOSITION CHECKS FAILED'); process.exit(1); }
   console.log('ALL HOME RECOMPOSITION CHECKS PASSED');

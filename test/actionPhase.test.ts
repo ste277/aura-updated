@@ -110,7 +110,7 @@ async function main() {
   // Goals V2 G2.1/G2.2.1 added migrations 0040/0041 (completion requirement
   // + execution record, unrelated to ActionPhase) -- bumped from 39, same
   // convention as every other hardcoded migration-count guard in this repo.
-  check('F. migration count remains 41 -- no new Lunar/ActionPhase migration', migrationDirs.length === 42);
+  check('F. migration count remains 41 -- no new Lunar/ActionPhase migration', migrationDirs.length === 43);
   const migrationsMention = migrationDirs.some((d) => /ActionPhase|actionPhase/.test(read(`../apps/web/prisma/migrations/${d}/migration.sql`)));
   check('F. no migration.sql references ActionPhase/actionPhase', !migrationsMention);
 

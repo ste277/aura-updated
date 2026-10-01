@@ -70,7 +70,7 @@ check('planMove.ts does not reference goalContext/PlanGoalContext (Move continui
 // No schema/migration change
 // ============================================================
 const migrationDirs = fs.readdirSync(path.join(__dirname, '..', 'apps', 'web', 'prisma', 'migrations')).filter((d) => /^\d{4}_/.test(d));
-check('no new migration directory was added for G3.1 (still 41, the G2.2.3 count)', migrationDirs.length === 42);
+check('no new migration directory was added for G3.1 (still 41, the G2.2.3 count)', migrationDirs.length === 43);
 check('schema.prisma was not touched (GoalActivityExecution model has no new field beyond what G2.2.1 already defined)', (() => {
   const schema = stripComments(read('apps/web/prisma/schema.prisma'));
   const match = schema.match(/model GoalActivityExecution \{([\s\S]*?)\n\}/);
@@ -83,12 +83,22 @@ check('schema.prisma was not touched (GoalActivityExecution model has no new fie
 // touched files
 // ============================================================
 const touchedFiles = ['apps/web/lib/dailyAgenda.ts', 'apps/web/lib/db.ts', 'apps/web/lib/homeTimelineComposer.ts', 'apps/web/lib/homeTimelineTypes.ts', 'apps/web/lib/myDayOrchestrator.ts', 'apps/web/lib/goalsPresentation.ts', 'apps/web/app/api/goals/[goalId]/route.ts'];
+// Goals V2 Rhythm R2 (a later, separately-authorized ticket) intentionally
+// added ONE read-only Rhythm fact loader (loadGoalActivityRhythmFacts) to
+// db.ts -- see test/goalActivityRhythmStructuralGuards.test.ts for R2's own
+// guards proving it is read-only and that every OTHER file in this exact
+// list still has zero Rhythm reference. Narrowed here to what it still
+// protects: no Rhythm/RRULE reference in any of the G3.1-era files this
+// section covers EXCEPT db.ts.
 for (const f of touchedFiles) {
   const src = stripComments(read(f));
   check(`${f}: no day-scoped progress concept (localDate/dayBucket/dailyTarget)`, !/dayBucket|dailyTarget/.test(src));
-  check(`${f}: no Rhythm/recurrence concept`, !/\bRhythm\b|\bRRULE\b/.test(src));
+  if (f !== 'apps/web/lib/db.ts') {
+    check(`${f}: no Rhythm/recurrence concept`, !/\bRhythm\b|\bRRULE\b/.test(src));
+  }
   check(`${f}: no history/aggregate query (weekly total, execution history array)`, !/executionHistory|weeklyTotal|allExecutions/.test(src));
 }
+check('db.ts (Rhythm R2\'s own one exception) references Rhythm ONLY through the single allowed read-only loader (loadGoalActivityRhythmFacts) -- no RRULE, no Rhythm write/mutation', /loadGoalActivityRhythmFacts/.test(stripComments(read('apps/web/lib/db.ts'))) && !/RRULE/.test(stripComments(read('apps/web/lib/db.ts'))));
 
 if (!allPassed) {
   console.error('SOME GOAL CONTEXT STRUCTURAL GUARD CHECKS FAILED');

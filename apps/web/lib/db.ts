@@ -4,6 +4,8 @@ import { derivePlanCompletionHistory } from './planCompletionHistory';
 import { validateCaptureTitle } from './captures';
 import { parseSchedulingMode, type PlannedActivitySchedulingMode } from './plannedActivitySchedulingMode';
 import { toPersistedCompletionRequirement, normalizeGoalActivityCompletionRequirement, type CompletionRequirement } from './goalCompletion';
+import { deriveGoalActivityRhythmContribution, type GoalActivityRhythmOccurrenceFact, type PlannedActivityStatusForRhythm } from './goalActivityRhythm';
+import { getDatePartsInTimezone } from './timezone';
 import { toPersistedGoalActivityExecutionSnapshot, fromPersistedGoalActivityExecutionSnapshot, resolveCompletionActualValue } from './goalActivityExecution';
 
 // Sandbox-only substitute for @prisma/client (its engine binary can't be downloaded
@@ -2441,6 +2443,13 @@ export interface GoalActivity {
   completionKind: string | null;
   completionTargetValue: number | null;
   completionUnit: string | null;
+  // Goals V2 Rhythm R2 (migration 0043) -- the raw persisted shape; see
+  // apps/web/lib/goalActivityRhythm.ts's normalizeGoalActivityRhythm for
+  // turning these into the canonical GoalActivityRhythm (null rhythmKind,
+  // from any existing/legacy row or an omitted R2 policy, always
+  // normalizes to NONE).
+  rhythmKind: string | null;
+  rhythmTargetPerWeek: number | null;
   createdAt: Date;
   updatedAt: Date;
 }
@@ -2709,6 +2718,36 @@ export async function loadGoalContextsForPlanIds(userId: string, planIds: readon
     });
   }
   return contexts;
+}
+
+/**
+ * Goals V2 Rhythm R2 -- READ-ONLY fact loader for the pure eligibility
+ * engine (apps/web/lib/goalActivityRhythm.ts's own
+ * computeGoalActivityRhythmEligibility). User-scoped, one query, no
+ * occurrence/plan/execution/GoalActivity row is ever created, updated or
+ * deleted here (this ticket's own section 23). Policy logic itself lives
+ * entirely in the pure engine -- this function does nothing but join and
+ * shape rows; it holds no eligibility semantics of its own.
+ *
+ * Only occurrences with a LIVE linked PlannedActivity (INNER JOIN) produce
+ * a fact -- an occurrence with a null plannedActivityId has no date to
+ * belong to any week yet, and R1/R2 together never create one anyway (no
+ * production occurrence writer exists). `localDate` is derived via
+ * getDatePartsInTimezone from the plan's OWN plannedStartAt, in the
+ * caller-supplied timezone -- never the server's own clock/timezone.
+ */
+export async function loadGoalActivityRhythmFacts(userId: string, goalActivityId: string, timezone: string): Promise<GoalActivityRhythmOccurrenceFact[]> {
+  const result = await pool.query(
+    `SELECT pa."plannedStartAt", pa.status
+     FROM "GoalActivityOccurrence" gao
+     JOIN "PlannedActivity" pa ON pa.id = gao."plannedActivityId"
+     WHERE gao."userId" = $1 AND gao."goalActivityId" = $2`,
+    [userId, goalActivityId]
+  );
+  return result.rows.map((row): GoalActivityRhythmOccurrenceFact => ({
+    localDate: getDatePartsInTimezone(timezone, new Date(row.plannedStartAt)).dateStr,
+    contribution: deriveGoalActivityRhythmContribution(row.status as PlannedActivityStatusForRhythm),
+  }));
 }
 
 /**
