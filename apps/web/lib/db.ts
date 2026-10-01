@@ -2844,6 +2844,54 @@ export async function loadGoalActivityRhythmFactsForActivities(userId: string, g
   return factsByActivity;
 }
 
+// Goals V2 Candidate A1 -- the ownership-scoped discovery query for
+// "which of this user's N_PER_WEEK GoalActivities are structurally
+// eligible to be CONSIDERED for another occurrence." Mirrors
+// materializeGoalActivityRhythmOccurrence's own gate exactly (same file,
+// above): status != DISMISSED, rhythmKind = N_PER_WEEK, and the linked
+// plan (if any) is not UPCOMING (a live commitment is never offered
+// again -- HAS_LIVE_COMMITMENT there, excluded here by construction
+// rather than by a second, separately-maintained check). Weekly CAPACITY
+// is deliberately NOT evaluated in SQL -- that stays the authoritative,
+// already-tested computeGoalActivityRhythmEligibility (goalActivityRhythm.ts),
+// applied by the caller (goalDemandCandidates.ts) against a second,
+// batched facts query, never duplicated here as a second counting
+// formula. Scoped by "userId" on GoalActivity only (ga."userId" = $1) --
+// the same convention loadGoalContextsForPlanIds above already
+// established: a JOIN target is never independently re-scoped by userId,
+// the FK relationship plus the owning row's own filter is what already
+// prevents cross-user leakage throughout this file. ARCHIVED Goals and
+// Rhythm NONE/undefined activities are filtered in SQL, never pulled back
+// just to be discarded in application code (this ticket's own section
+// 4/14: filter as early as safely possible).
+export interface CandidateGoalActivityForRhythmDemandRow {
+  goalActivityId: string;
+  goalId: string;
+  goalTitle: string;
+  title: string;
+  activityId: string | null;
+  rhythmKind: string | null;
+  rhythmTargetPerWeek: number | null;
+}
+
+export async function loadCandidateGoalActivitiesForRhythmDemand(userId: string): Promise<CandidateGoalActivityForRhythmDemandRow[]> {
+  const result = await pool.query(
+    `SELECT ga.id AS "goalActivityId", ga."goalId", g.title AS "goalTitle", ga.title, ga."activityId",
+            ga."rhythmKind", ga."rhythmTargetPerWeek"
+     FROM "GoalActivity" ga
+     JOIN "Goal" g ON g.id = ga."goalId"
+     LEFT JOIN "PlannedActivity" pa ON pa.id = ga."plannedActivityId"
+     WHERE ga."userId" = $1
+       AND g.status = 'ACTIVE'
+       AND ga.status != 'DISMISSED'
+       AND ga."rhythmKind" = 'N_PER_WEEK'
+       AND pa.status IS DISTINCT FROM 'UPCOMING'
+     ORDER BY ga.id`,
+    [userId]
+  );
+  return result.rows;
+}
+
 export type MaterializeGoalActivityRhythmOccurrenceResult =
   | { ok: true; occurrenceId: string }
   | { ok: false; reason: 'NOT_FOUND' | 'NOT_RHYTHM_ELIGIBLE' | 'HAS_LIVE_COMMITMENT' | 'CAPACITY_EXHAUSTED' };
