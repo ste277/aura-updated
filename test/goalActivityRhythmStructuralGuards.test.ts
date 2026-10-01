@@ -185,15 +185,22 @@ check(
 // more intentionally-reviewed function, setGoalActivityRhythm -- the one
 // allowed Rhythm WRITE path for an EXISTING GoalActivity (this ticket's own
 // section 20), proved exhaustively in
-// test/goalActivityRhythmSetupStructuralGuards.test.ts. The real invariant
-// that still must hold is narrower than "only three": db.ts's Rhythm-named
-// functions are limited to exactly these four named, intentionally-reviewed
-// functions -- never a fifth, undocumented one.
+// test/goalActivityRhythmSetupStructuralGuards.test.ts. Candidate A1 (a yet
+// further, separately-authorized ticket) then added exactly one more
+// intentionally-reviewed function, loadCandidateGoalActivitiesForRhythmDemand
+// -- a read-only discovery query mirroring materializeGoalActivityRhythmOccurrence's
+// own non-capacity gate (status != DISMISSED, rhythmKind = N_PER_WEEK, linked
+// plan not UPCOMING) in SQL, never a second capacity/eligibility formula (this
+// ticket's own section 3). The real invariant that still must hold is
+// narrower than "only four": db.ts's Rhythm-named functions are limited to
+// exactly these five named, intentionally-reviewed functions -- never a
+// sixth, undocumented one.
 check(
-  'db.ts defines ONLY the four allowed, intentionally-reviewed Rhythm functions (loadGoalActivityRhythmFacts [read-only], loadGoalActivityRhythmFactsForActivities [R4\'s batched read-only sibling], materializeGoalActivityRhythmOccurrence [R3\'s sole occurrence writer], and setGoalActivityRhythm [R5\'s sole existing-activity policy writer]) -- no other function references Rhythm',
+  'db.ts defines ONLY the five allowed, intentionally-reviewed Rhythm functions (loadGoalActivityRhythmFacts [read-only], loadGoalActivityRhythmFactsForActivities [R4\'s batched read-only sibling], materializeGoalActivityRhythmOccurrence [R3\'s sole occurrence writer], setGoalActivityRhythm [R5\'s sole existing-activity policy writer], and loadCandidateGoalActivitiesForRhythmDemand [Candidate A1\'s read-only discovery query]) -- no other function references Rhythm',
   [...new Set((dbSrc.match(/function \w*[Rr]hythm\w*/g) ?? []))].sort().join(',') ===
-    ['function loadGoalActivityRhythmFacts', 'function loadGoalActivityRhythmFactsForActivities', 'function materializeGoalActivityRhythmOccurrence', 'function setGoalActivityRhythm'].sort().join(',')
+    ['function loadGoalActivityRhythmFacts', 'function loadGoalActivityRhythmFactsForActivities', 'function materializeGoalActivityRhythmOccurrence', 'function setGoalActivityRhythm', 'function loadCandidateGoalActivitiesForRhythmDemand'].sort().join(',')
 );
+check('loadCandidateGoalActivitiesForRhythmDemand itself contains no INSERT/UPDATE/DELETE (read-only, this ticket\'s own section 15)', !/INSERT\s|UPDATE\s|DELETE\s/.test(functionBody(dbSrc, 'loadCandidateGoalActivitiesForRhythmDemand')));
 check('loadGoalActivityRhythmFacts itself contains no INSERT/UPDATE/DELETE (read-only, this ticket\'s own section 23)', !/INSERT\s|UPDATE\s|DELETE\s/.test(functionBody(dbSrc, 'loadGoalActivityRhythmFacts')));
 
 // ============================================================
