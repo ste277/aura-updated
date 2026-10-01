@@ -3,6 +3,7 @@ import { getSessionFromRequest } from '../../../../../lib/session';
 import { addGoalActivity } from '../../../../../lib/db';
 import { parseJsonObject } from '../../../../../lib/request';
 import { getActivityProfileById } from '../../../../../../../packages/recommendation/src/personalizedTasks';
+import { validateGoalActivityRhythm, NONE_GOAL_ACTIVITY_RHYTHM, type GoalActivityRhythm } from '../../../../../lib/goalActivityRhythm';
 
 const MAX_TITLE_LENGTH = 200;
 
@@ -32,7 +33,22 @@ export async function POST(req: NextRequest, { params }: { params: { goalId: str
     activityId = activity.id;
   }
 
-  const activity = await addGoalActivity(session.userId, params.goalId, { title, activityId });
+  // Goals V2 Rhythm R5 -- optional, additive. Omitted entirely means NONE
+  // (this ticket's own section 42 API compatibility), server-validated
+  // through the canonical R2 validator -- never trusted raw from the
+  // client, never coerced (0/negative/fractional/missing-target are
+  // rejected outright, this ticket's own section 19).
+  let rhythm: GoalActivityRhythm = NONE_GOAL_ACTIVITY_RHYTHM;
+  if (body.rhythm !== undefined && body.rhythm !== null) {
+    if (typeof body.rhythm !== 'object') {
+      return NextResponse.json({ error: 'rhythm must be an object with a kind field.' }, { status: 400 });
+    }
+    const validated = validateGoalActivityRhythm(body.rhythm as { kind: unknown; targetPerWeek?: unknown });
+    if (!validated.ok) return NextResponse.json({ error: validated.error }, { status: 400 });
+    rhythm = validated.rhythm;
+  }
+
+  const activity = await addGoalActivity(session.userId, params.goalId, { title, activityId, rhythm });
   if (!activity) return NextResponse.json({ error: 'Goal not found.' }, { status: 404 });
   return NextResponse.json(activity);
 }

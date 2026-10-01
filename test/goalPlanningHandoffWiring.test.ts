@@ -127,7 +127,14 @@ function main() {
   // guard was written; what this check still proves is that PR C itself
   // added no migration: 0035_goals remains the newest Goals-era migration
   // and nothing handoff/link-named exists.
-  check('39. 0035_goals is present and no handoff/goal-link migration was added by PR C', migrationDirs.includes('0035_goals') && !migrationDirs.some((d) => /handoff|goal.?link|goalactivity.?link/i.test(d)) && migrationDirs.filter((d) => d > '0035_goals').every((d) => d === '0036_captures' || d === '0037_planned_activity_skipped_at' || d === '0038_planned_activity_move_lineage' || d === '0039_planned_activity_scheduling_mode'));
+  // Goals V2 G2.1 added migration 0040_goal_activity_completion_requirement
+  // -- a real, expected new Goal-domain migration (not a handoff/goal-link
+  // migration, and not added by this PR), so it's added to the known-good
+  // list rather than tripping the "no handoff/goal-link migration" guard.
+  // Goals V2 G2.2.1 added migration 0041_goal_activity_execution -- another
+  // real, expected new Goal-domain migration (not a handoff/goal-link
+  // migration, and not added by this PR), added to the known-good list.
+  check('39. 0035_goals is present and no handoff/goal-link migration was added by PR C', migrationDirs.includes('0035_goals') && !migrationDirs.some((d) => /handoff|goal.?link|goalactivity.?link/i.test(d)) && migrationDirs.filter((d) => d > '0035_goals').every((d) => d === '0036_captures' || d === '0037_planned_activity_skipped_at' || d === '0038_planned_activity_move_lineage' || d === '0039_planned_activity_scheduling_mode' || d === '0040_goal_activity_completion_requirement' || d === '0041_goal_activity_execution' || d === '0042_goal_activity_occurrence' || d === '0043_goal_activity_rhythm'));
   check('36. no Habit/HabitLog mention anywhere in the new handoff files', !/\bHabit\b/.test(read('../apps/web/lib/planDayBootstrap.ts')) && !/\bHabit\b/.test(planDayClientSource));
   const allHandoffSource = [read('../apps/web/lib/planDayEntry.ts'), read('../apps/web/lib/planDayBootstrap.ts'), read('../apps/web/lib/acceptConstructedDay.ts'), read('../apps/web/lib/dayConstructorAcceptancePersistence.ts'), read('../apps/web/lib/db.ts')].join('\n');
   check('34. no Capture/InboxItem/Intention/generic-Task model or import exists anywhere in the touched files', !/\bInboxItem\b|\bCaptureItem\b/.test(allHandoffSource));

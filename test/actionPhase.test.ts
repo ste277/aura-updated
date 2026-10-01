@@ -107,7 +107,10 @@ async function main() {
   const schema = read('../apps/web/prisma/schema.prisma');
   check('F. prisma/schema.prisma does not reference ActionPhase/actionPhase', !/ActionPhase|actionPhase/.test(schema));
   const migrationDirs = fs.readdirSync(path.join(__dirname, '../apps/web/prisma/migrations')).filter((d) => /^\d{4}_/.test(d));
-  check('F. migration count remains 39 -- no new migration', migrationDirs.length === 39);
+  // Goals V2 G2.1/G2.2.1 added migrations 0040/0041 (completion requirement
+  // + execution record, unrelated to ActionPhase) -- bumped from 39, same
+  // convention as every other hardcoded migration-count guard in this repo.
+  check('F. migration count remains 41 -- no new Lunar/ActionPhase migration', migrationDirs.length === 43);
   const migrationsMention = migrationDirs.some((d) => /ActionPhase|actionPhase/.test(read(`../apps/web/prisma/migrations/${d}/migration.sql`)));
   check('F. no migration.sql references ActionPhase/actionPhase', !migrationsMention);
 

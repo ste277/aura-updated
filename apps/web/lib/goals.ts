@@ -8,6 +8,7 @@
  */
 
 import { findActivityIntent } from '../../../packages/recommendation/src/personalizedTasks';
+import type { CompletionRequirement } from './goalCompletion';
 
 // ============================================================
 // Persisted lifecycle (implementation design section 2/3) -- GoalActivity
@@ -110,21 +111,48 @@ export function isGoalTemplateCategory(value: unknown): value is GoalTemplateCat
 }
 
 /**
- * Suggested GoalActivity titles per template category. Deliberately just
- * titles, not pre-baked activityId values: db.ts's createGoalWithTemplate
- * resolves each title against the LIVE catalog via findActivityIntent at
- * generation time (implementation design section 11/19 of this ticket --
- * "do not invent activity IDs", "do not persist a fallback activityId
- * unless the existing catalog semantics genuinely support that mapping").
- * Verified directly against the real catalog (packages/recommendation/src/
- * personalizedTasks.ts) before choosing these exact titles: "Go for a
- * run"/"Strength training session" both resolve to 'workout' (aliases
- * include 'run'/'training'), "Stretch / mobility" resolves to 'task-7'
- * ("Light Stretch & Mobility", aliases include 'stretch'/'mobility'),
- * "Meditate 10 minutes" resolves to 'meditation', "Study session"
- * resolves to 'learning' -- but "Block focus time"/"Review progress"/
- * "Final push session" resolve to NO catalog entry (deep-work's aliases
- * are 'deep work'/'focus work'/'focus session', none of which is a
+ * One template-defined activity: a static title plus an OPTIONAL canonical
+ * CompletionRequirement (Goals V2 G3.4). Omitted means DONE, identically to
+ * every other omitted-completionRequirement call site in this codebase
+ * (createGoalWithActivities/addGoalActivity's own convention) -- there is
+ * no separate "unset" template-only state to track.
+ *
+ * completionRequirement is assigned ONLY where the deterministic template
+ * text itself, as already authored by this static table, unambiguously
+ * states a quantity ("Meditate 10 minutes" literally contains "10
+ * minutes") -- never inferred from the activity's catalog entry (a
+ * catalog's defaultDurationMinutes is SCHEDULING metadata, not a
+ * completion target -- see findActivityIntent's own ActivityProfile;
+ * 'meditation' carries defaultDurationMinutes: 15, deliberately DIFFERENT
+ * from this template's own DURATION target of 10, proving the two are
+ * unrelated fields that must never be conflated), and never guessed to
+ * make the feature look richer. G3.4's own audit (see its ticket section
+ * 7) found exactly one such case across all four categories; every other
+ * template activity stays DONE because its title carries no explicit,
+ * deterministic quantity to safely encode.
+ */
+export interface GoalTemplateActivityDefinition {
+  title: string;
+  completionRequirement?: CompletionRequirement;
+}
+
+/**
+ * Suggested GoalActivity titles (Goals V2 G3.4: plus an optional canonical
+ * completionRequirement per activity) per template category. Deliberately
+ * just titles, not pre-baked activityId values: db.ts's
+ * createGoalWithTemplate resolves each title against the LIVE catalog via
+ * findActivityIntent at generation time (implementation design section
+ * 11/19 of this ticket -- "do not invent activity IDs", "do not persist a
+ * fallback activityId unless the existing catalog semantics genuinely
+ * support that mapping"). Verified directly against the real catalog
+ * (packages/recommendation/src/personalizedTasks.ts) before choosing these
+ * exact titles: "Go for a run"/"Strength training session" both resolve to
+ * 'workout' (aliases include 'run'/'training'), "Stretch / mobility"
+ * resolves to 'task-7' ("Light Stretch & Mobility", aliases include
+ * 'stretch'/'mobility'), "Meditate 10 minutes" resolves to 'meditation',
+ * "Study session" resolves to 'learning' -- but "Block focus time"/"Review
+ * progress"/"Final push session" resolve to NO catalog entry (deep-work's
+ * aliases are 'deep work'/'focus work'/'focus session', none of which is a
  * substring of any of those three titles), so FINISH_PROJECT's
  * activities are correctly persisted with activityId = null, never
  * forced onto 'deep-work'.
@@ -138,17 +166,54 @@ export function isGoalTemplateCategory(value: unknown): value is GoalTemplateCat
  * deadline column to GoalActivity (implementation design section 12); any
  * such propagation happens later, in the Plan My Day handoff PR, derived
  * from Goal.targetDate at handoff time, never duplicated here.
+ *
+ * G3.4 EXACT mapping (see its ticket section 7 for the full audit): every
+ * activity below stays DONE (no completionRequirement field at all)
+ * EXCEPT MEDITATE_REGULARLY's own "Meditate 10 minutes", which carries the
+ * one deterministic, EXPLICIT quantity found anywhere in this table.
+ * GET_FITTER's three activities ("Go for a run" etc.), FINISH_PROJECT's
+ * three, and STUDY_CONSISTENTLY's one all carry no explicit numeric target
+ * in their own static title text -- inventing one (e.g. "Study session" ->
+ * 30 min) would be exactly the subjective guessing this slice forbids, so
+ * they remain DONE and stay that way until a future ticket deterministically
+ * justifies otherwise.
  */
-export const GOAL_TEMPLATES: Readonly<Record<GoalTemplateCategory, readonly string[]>> = {
-  GET_FITTER: ['Go for a run', 'Strength training session', 'Stretch / mobility'],
-  MEDITATE_REGULARLY: ['Meditate 10 minutes'],
-  FINISH_PROJECT: ['Block focus time', 'Review progress', 'Final push session'],
-  STUDY_CONSISTENTLY: ['Study session'],
+export const GOAL_TEMPLATES: Readonly<Record<GoalTemplateCategory, readonly GoalTemplateActivityDefinition[]>> = {
+  GET_FITTER: [{ title: 'Go for a run' }, { title: 'Strength training session' }, { title: 'Stretch / mobility' }],
+  MEDITATE_REGULARLY: [{ title: 'Meditate 10 minutes', completionRequirement: { kind: 'DURATION', targetValue: 10 } }],
+  FINISH_PROJECT: [{ title: 'Block focus time' }, { title: 'Review progress' }, { title: 'Final push session' }],
+  STUDY_CONSISTENTLY: [{ title: 'Study session' }],
+};
+
+/**
+ * Goals V2 Rhythm R5 -- this ticket's own section 10/11 audit. Purely
+ * ADVISORY: it decides only whether Create Goal's own template step shows
+ * a "how often would these help?" frequency section at all -- it never
+ * chooses an exact N, never persists a default, and is not consulted by
+ * any server-side write path (createGoalWithActivities/addGoalActivity
+ * accept an explicit, user-chosen rhythm per activity or default to NONE
+ * regardless of this table). GET_FITTER/MEDITATE_REGULARLY/
+ * STUDY_CONSISTENTLY are activities a user plausibly repeats week over
+ * week; FINISH_PROJECT's three activities ("Block focus time"/"Review
+ * progress"/"Final push session") describe a bounded, one-time push
+ * toward a deadline, so FINISH_PROJECT is classified finite and its own
+ * Create Goal step never asks the frequency question at all (this
+ * ticket's own section 34 -- FINISH_PROJECT activities persist NONE
+ * unless the user later, explicitly, opts one into a weekly frequency
+ * through Goal Detail's own per-row edit affordance, same as any other
+ * activity).
+ */
+export const GOAL_TEMPLATE_LIKELY_ONGOING: Readonly<Record<GoalTemplateCategory, boolean>> = {
+  GET_FITTER: true,
+  MEDITATE_REGULARLY: true,
+  FINISH_PROJECT: false,
+  STUDY_CONSISTENTLY: true,
 };
 
 export interface ResolvedGoalTemplateActivity {
   title: string;
   activityId: string | null;
+  completionRequirement?: CompletionRequirement;
 }
 
 /**
@@ -158,9 +223,18 @@ export interface ResolvedGoalTemplateActivity {
  * stale. Kept in this pure domain module (not db.ts) so db.ts's
  * createGoalWithActivities stays catalog-unaware, same convention as
  * createPlannedActivity's own "no catalog lookup" rule.
+ *
+ * completionRequirement (Goals V2 G3.4) passes straight through from the
+ * static table -- never derived from the resolved catalog entry (see
+ * GOAL_TEMPLATES's own doc comment on why scheduling-duration metadata
+ * must never become a completion target).
  */
 export function resolveGoalTemplateActivities(category: GoalTemplateCategory): ResolvedGoalTemplateActivity[] {
-  return GOAL_TEMPLATES[category].map((title) => ({ title, activityId: findActivityIntent(title)?.id ?? null }));
+  return GOAL_TEMPLATES[category].map((entry) => ({
+    title: entry.title,
+    activityId: findActivityIntent(entry.title)?.id ?? null,
+    completionRequirement: entry.completionRequirement,
+  }));
 }
 
 // ============================================================

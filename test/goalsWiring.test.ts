@@ -81,9 +81,16 @@ function main() {
   check('17. PlannedActivity model block is present and extractable', plannedActivityBlockMatch !== null);
   const plannedActivityBlock = plannedActivityBlockMatch ? plannedActivityBlockMatch[0] : '';
   const goalMentionLines = plannedActivityBlock.split('\n').filter((line) => /Goal/.test(line) && !line.trim().startsWith('//'));
+  // Goals V2 G2.2.1 added a second, equally back-relation-only navigation
+  // field (goalActivityExecution GoalActivityExecution?) for the same
+  // reason as goalActivity above -- broadened to accept either, still
+  // rejecting any line that carries a real `fields:` FK attribute. Rhythm
+  // R1 (migration 0042) added a THIRD, identically-shaped navigation field
+  // (goalActivityOccurrence GoalActivityOccurrence?) for the identical
+  // reason -- broadened again, same rejection of any `fields:` attribute.
   check(
-    '17. every non-comment line in the PlannedActivity model block mentioning Goal is the back-relation-only field (no @relation(fields:...) attribute, i.e. no real column/FK)',
-    goalMentionLines.length > 0 && goalMentionLines.every((line) => /goalActivity\s+GoalActivity\?/.test(line) && !line.includes('fields:'))
+    '17. every non-comment line in the PlannedActivity model block mentioning Goal is a back-relation-only field (no @relation(fields:...) attribute, i.e. no real column/FK)',
+    goalMentionLines.length > 0 && goalMentionLines.every((line) => (/goalActivity\s+GoalActivity\?/.test(line) || /goalActivityExecution\s+GoalActivityExecution\?/.test(line) || /goalActivityOccurrence\s+GoalActivityOccurrence\?/.test(line)) && !line.includes('fields:'))
   );
 
   // ============================================================
@@ -105,13 +112,23 @@ function main() {
 
   // ============================================================
   // 20. lib/goals.ts itself never imports anything from the Day
-  // Constructor/acceptance/Plan-My-Day stack -- its only external
-  // dependency is the static activity catalog (findActivityIntent), which
-  // it needs for template resolution.
+  // Constructor/acceptance/Plan-My-Day stack -- its external dependencies
+  // are the static activity catalog (findActivityIntent, for template
+  // resolution) and, as of Goals V2 G3.4 (a later, separately-authorized
+  // ticket), a TYPE-ONLY import of the canonical CompletionRequirement
+  // from its own sibling Goals-domain module (goalCompletion.ts) -- never
+  // a value import, and never anything from the Constructor/acceptance/
+  // Plan-My-Day stack this check actually protects against. See
+  // test/goalTemplateCompletion.test.ts's own section-39 guards for the
+  // narrower, G3.4-specific proof (type-only import, no validator/
+  // normalizer/persister imported).
   // ============================================================
   const goalsLibSource = read('../apps/web/lib/goals.ts');
   const importLines = goalsLibSource.split('\n').filter((line) => line.trim().startsWith('import'));
-  check('20. lib/goals.ts has exactly one import, from the activity catalog only', importLines.length === 1 && importLines[0].includes('personalizedTasks'));
+  check(
+    '20. lib/goals.ts imports only the activity catalog (value import) and, since G3.4, a type-only CompletionRequirement import from its own sibling goalCompletion.ts -- nothing from the Day Constructor/acceptance/Plan-My-Day stack',
+    importLines.length === 2 && importLines[0].includes('personalizedTasks') && importLines[1].startsWith('import type') && importLines[1].includes('./goalCompletion')
+  );
 
   // ============================================================
   // 21. No app/api/goals/** route imports anything from the Day

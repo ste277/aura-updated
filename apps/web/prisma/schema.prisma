@@ -70,6 +70,8 @@ model User {
   availabilityPeriods UserAvailabilityPeriod[]
   goals               Goal[]
   goalActivities      GoalActivity[]
+  goalActivityExecutions GoalActivityExecution[]
+  goalActivityOccurrences GoalActivityOccurrence[]
   captures            Capture[]
 }
 
@@ -405,6 +407,15 @@ model PlannedActivity {
   // relation as goalActivity above: ZERO columns on PlannedActivity; the
   // plannedActivityId FK lives entirely on Capture.
   capture           Capture?
+  // Goals V2 G2.2.1 (migration 0041) -- same Prisma-only opposite relation
+  // as goalActivity/capture above: ZERO columns on PlannedActivity; the
+  // plannedActivityId FK lives entirely on GoalActivityExecution.
+  goalActivityExecution GoalActivityExecution?
+  // Goals V2 Rhythm R1 (migration 0042) -- same Prisma-only opposite
+  // relation as goalActivity/capture/goalActivityExecution above: ZERO
+  // columns on PlannedActivity; the plannedActivityId FK lives entirely on
+  // GoalActivityOccurrence.
+  goalActivityOccurrence GoalActivityOccurrence?
 
   @@index([userId, plannedStartAt])
   @@index([userId, status])
@@ -691,10 +702,226 @@ model GoalActivity {
   plannedActivityId String?          @unique
   plannedActivity   PlannedActivity? @relation(fields: [plannedActivityId], references: [id], onDelete: SetNull)
 
+  // Goals V2 G2.1 (migration 0040) -- the canonical answer to "what counts
+  // as completing one occurrence of this GoalActivity?" (apps/web/lib/
+  // goalCompletion.ts). Three independent nullable columns, no default, no
+  // backfill -- same convention as PlannedActivity.schedulingMode's own
+  // NULL = legacy/unknown precedent. completionKind = NULL means "never
+  // specified" and is ALWAYS normalized to canonical DONE
+  // (normalizeGoalActivityCompletionRequirement) -- this is deliberately
+  // indistinguishable from an explicit DONE, since the two behave
+  // identically and every existing/legacy row must keep meaning exactly
+  // "tap Done and the occurrence is complete" without any migration. Not
+  // yet written by any production call site in G2.1 -- every current
+  // GoalActivity creation path (createGoalWithActivities, addGoalActivity,
+  // GOAL_TEMPLATES) continues to leave these NULL.
+  completionKind        String?
+  // DOUBLE PRECISION, same convention as User.latitude/longitude -- a
+  // fractional target (e.g. 2.5 km) must be representable exactly, never
+  // rounded to an integer.
+  completionTargetValue Float?
+  completionUnit        String?
+
+  // Goals V2 Rhythm R2 (migration 0043) -- "when should another occurrence
+  // of this GoalActivity become eligible?" (apps/web/lib/goalActivityRhythm.ts),
+  // orthogonal to completionKind/completionTargetValue/completionUnit above
+  // (which answer "what counts as completing ONE occurrence" -- a Rhythm
+  // policy never changes that answer). Two independent nullable columns,
+  // no default, no backfill -- the EXACT same convention
+  // completionKind/completionTargetValue/completionUnit already established
+  // for CompletionRequirement: rhythmKind = NULL means "never specified"
+  // and is ALWAYS normalized to canonical NONE (normalizeGoalActivityRhythm)
+  // -- every existing/legacy row keeps meaning exactly "finite, one
+  // occurrence" without any migration. A separate GoalActivityRhythm
+  // entity was considered (the G3.6 architecture audit's own suggestion)
+  // and rejected for V1 (see this migration's own doc comment): V1 needs
+  // exactly one policy per GoalActivity, no history, no sharing, no
+  // polymorphism -- none of the properties that would justify a separate
+  // table. Not yet written by any production call site in R2 -- every
+  // current GoalActivity creation path continues to leave these NULL.
+  rhythmKind            String?
+  // INTEGER (never Float, unlike completionTargetValue) -- a weekly
+  // occurrence count is always a whole number; validateGoalActivityRhythm
+  // rejects any fractional/zero/negative value before it ever reaches
+  // persistence.
+  rhythmTargetPerWeek   Int?
+
   createdAt         DateTime         @default(now()) @db.Timestamptz(3)
   updatedAt         DateTime         @updatedAt @db.Timestamptz(3)
 
+  // Goals V2 G2.2.1 (migration 0041) -- Prisma's relation validator requires
+  // this opposite navigation field (same reasoning as PlannedActivity.goalActivity's
+  // own doc comment above: zero DB footprint, the FK lives entirely on
+  // GoalActivityExecution). Many rows over time are legitimate here (one per
+  // real occurrence across replans/Moves) -- NOT a 0..1 relationship the way
+  // plannedActivityId above is.
+  executions        GoalActivityExecution[]
+  // Goals V2 Rhythm R1 (migration 0042) -- same Prisma-only opposite
+  // relation shape as executions above: the FK lives entirely on
+  // GoalActivityOccurrence. Many rows over time are legitimate here by
+  // design (R1's own fundamental capability) -- NOT a 0..1 relationship the
+  // way plannedActivityId above is.
+  occurrences       GoalActivityOccurrence[]
+
   @@index([userId, goalId, status])
+}
+
+// Goals V2 G2.2.1 (migration 0041) -- a durable execution/progress fact for
+// one GoalActivity occurrence (apps/web/lib/goalActivityExecution.ts). Exists
+// because the G2.2 architecture audit established that PlannedActivity is a
+// DISPOSABLE schedule placement, not an enduring occurrence identity: Move
+// cancels the original row in place (status -> MOVED) and inserts a brand
+// new row for the live successor (packages/.../planMove.ts's applyMoveWrites),
+// exactly the same "repoint, don't recreate" pattern GoalActivity.plannedActivityId
+// and Capture.plannedActivityId already rely on. A progress fact tied
+// directly to PlannedActivity.id would therefore be silently lost across a
+// Move; keying it to GoalActivity instead makes it survive Move automatically.
+//
+// This model is OCCURRENCE-BOUND ONLY (Read 20 pages, Workout 30 minutes) --
+// it deliberately has no day-bucket/localDate concept and does not attempt
+// to represent day-accumulating targets (Drink 8 glasses, Walk 6000 steps),
+// which remain valid CompletionRequirement kinds (G2.1) but stay
+// progress-inert until a future, separate day-scoped design exists.
+//
+// G2.2.1 is schema/domain-only: no production code path creates, updates,
+// reads, or displays a row of this model yet.
+model GoalActivityExecution {
+  id             String       @id @default(uuid())
+  userId         String
+  user           User         @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  // Required, immutable after creation (never updated by any writer) --
+  // the stable identity this whole model exists to provide. Cascade on
+  // Goal->GoalActivity deletion already removes GoalActivity rows outright
+  // (existing precedent above); an execution fact has no independent
+  // meaning once its own GoalActivity is gone, so it cascades too.
+  goalActivityId String
+  goalActivity   GoalActivity @relation(fields: [goalActivityId], references: [id], onDelete: Cascade)
+
+  // The current/live PlannedActivity this execution is associated with.
+  // Nullable + SetNull -- same precedent as GoalActivity.plannedActivityId
+  // and Capture.plannedActivityId above -- so that deletePlannedActivity's
+  // existing, already-shipped hard-delete of an old LOGGED/CANCELLED plan
+  // (users clearing "Recently Completed") cleanly unlinks rather than
+  // destroying the historical execution fact (its snapshot + currentValue
+  // remain queryable with plannedActivityId simply NULL afterward). UNIQUE
+  // so one live PlannedActivity can never be claimed by more than one
+  // execution record at a time.
+  plannedActivityId String?         @unique
+  plannedActivity   PlannedActivity? @relation(fields: [plannedActivityId], references: [id], onDelete: SetNull)
+
+  // Immutable snapshot of GoalActivity's CompletionRequirement (G2.1,
+  // apps/web/lib/goalCompletion.ts) AT THE MOMENT this execution was
+  // created -- "what counted as completion when this began?" NEVER
+  // re-derived by joining the live GoalActivity later: if the GoalActivity's
+  // own target is edited afterward, this snapshot must NOT change, so a
+  // historical "20/20 pages" can never silently become "20/30". Same
+  // validation rules as CompletionRequirement itself (validateCompletionRequirement).
+  completionKindSnapshot        String
+  completionTargetValueSnapshot Float?
+  completionUnitSnapshot        String?
+
+  // The measured fact. NULL for DONE (nothing to measure). Never clamped to
+  // the snapshotted target -- an actual value may legitimately exceed it.
+  // DOUBLE PRECISION, same fractional-preserving convention as
+  // completionTargetValueSnapshot/GoalActivity.completionTargetValue.
+  currentValue Float?
+
+  // Minimally compatible, deliberately loose nullable string -- HabitLog.logSource
+  // ('AURA_PLANNED' | 'AURA_DO_NOW' | 'MANUAL' | 'OVERRIDE_CAUTION', db.ts) is
+  // the closest existing execution-fact source vocabulary in this codebase,
+  // but it has never been exported as a single canonical shared TS type (it
+  // is repeated inline at each db.ts call site) -- there is nothing clean to
+  // import and reuse here. This column is intended to draw values from that
+  // SAME conceptual vocabulary (never a new, incompatible enum), without
+  // inventing connector-specific values (no APPLE_HEALTH/HEALTH_CONNECT/
+  // EXTERNAL_OBSERVATION) ahead of any actual connector existing. No
+  // production writer sets this in G2.2.1.
+  source String?
+
+  createdAt DateTime @default(now()) @db.Timestamptz(3)
+  updatedAt DateTime @updatedAt @db.Timestamptz(3)
+
+  @@index([userId, goalActivityId])
+}
+
+// Goals V2 Rhythm R1 (migration 0042) -- the architecture-foundation slice
+// identified by the G3.6 Rhythm architecture audit: a stable identity for
+// ONE CONCRETE OCCURRENCE of a GoalActivity, introduced ALONGSIDE the
+// existing GoalActivity.plannedActivityId 0..1 link (unchanged, still the
+// sole production link in G2.1-G3.5) rather than replacing it. R1 is
+// schema/domain-only -- no production code path creates, updates, reads,
+// or displays a row of this table yet (mirrors G2.1's and G2.2.1's own
+// identical "model before writes" discipline).
+//
+// WHY THIS EXISTS: the audit found that neither PlannedActivity (disposable
+// schedule placement, hard-deletable) nor GoalActivityExecution (completion/
+// progress TRUTH, which must never represent "eligible but not yet
+// attempted") can safely double as a durable, queryable identity for "which
+// occurrence is this" once a GoalActivity can have more than one occurrence
+// over time (future Rhythm). This table exists ONLY to hold that identity.
+//
+// NO STATUS COLUMN (deliberate): occurrence lifecycle is fully derivable
+// from its linked PlannedActivity's own status (UPCOMING/LOGGED/CANCELLED/
+// SKIPPED/MOVED) exactly the way GoalActivity's own derived state already
+// works (lib/goals.ts deriveGoalActivityState) -- duplicating that into a
+// second, independently-mutable column would create a second lifecycle
+// truth that could drift from the first. No demonstrated invariant in R1
+// requires one.
+//
+// NO windowKey COLUMN (deliberate, see this ticket's own section 7/8/9):
+// the G3.6 audit's own proposed uniqueness -- one occurrence per
+// (goalActivityId, eligibility window key) -- was already identified by
+// this ticket as WRONG for N_PER_WEEK > 1 (three weekly sessions need
+// three occurrences inside the SAME window, distinguished by an ordinal,
+// not collapsed by one). Since the real future identity shape
+// (window + ordinal, or something else entirely) is not yet decided, and a
+// field named for a weekly/daily window would encode Rhythm semantics this
+// slice is explicitly forbidden from defining, no window/idempotency field
+// is added now. A later Rhythm ticket adds whatever identity field its own
+// eligibility design actually needs.
+//
+// CARDINALITY: many "GoalActivityOccurrence" rows may belong to one
+// "GoalActivity" over time -- this is the fundamental capability this
+// migration introduces (proven by test/goalActivityOccurrenceDb.test.ts).
+// "plannedActivityId" is UNIQUE so one live PlannedActivity can never be
+// claimed by more than one occurrence at once -- same invariant
+// "GoalActivity.plannedActivityId"/"GoalActivityExecution.plannedActivityId"
+// already enforce for their own live links. Nullable because an occurrence
+// is expected to exist (in a LATER slice) before Aura has found it a slot --
+// R1 itself never creates a row with either a null or non-null
+// plannedActivityId in production; this nullability only has to be VALID,
+// not yet exercised by any writer.
+//
+// FK BEHAVIOR: "goalActivityId" CASCADEs (an occurrence has no independent
+// meaning once its own GoalActivity is gone -- same convention
+// "GoalActivityExecution.goalActivityId" already uses). "plannedActivityId"
+// SET NULLs on delete (same convention every other plannedActivityId FK in
+// this schema already uses) so a hard-deleted old LOGGED/CANCELLED plan
+// cleanly unlinks rather than destroying the occurrence's own durable
+// identity -- occurrence identity must outlive disposable schedule
+// placement (this ticket's own section 18).
+//
+// Additive only: no existing table/column touched, no backfill, no data
+// migrated. Zero rows exist for any pre-existing GoalActivity after this
+// migration runs -- intentional (this ticket's own section 13).
+model GoalActivityOccurrence {
+  id                String           @id @default(uuid())
+  userId            String
+  user              User             @relation(fields: [userId], references: [id], onDelete: Cascade)
+  goalActivityId    String
+  goalActivity      GoalActivity     @relation(fields: [goalActivityId], references: [id], onDelete: Cascade)
+
+  // 0..1 link to the real commitment this occurrence produced, if any.
+  // @unique enforces the 0..1 cardinality at the database level. Nullable
+  // for the future "eligible, not yet scheduled" case (see this model's own
+  // doc comment) -- never written as non-null by any R1 production path.
+  plannedActivityId String?          @unique
+  plannedActivity   PlannedActivity? @relation(fields: [plannedActivityId], references: [id], onDelete: SetNull)
+
+  createdAt         DateTime         @default(now()) @db.Timestamptz(3)
+
+  @@index([userId, goalActivityId])
 }
 
 // Quick Capture V1 PR A (migration 0036) -- "I want to do this, but I have

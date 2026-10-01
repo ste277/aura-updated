@@ -43,6 +43,7 @@ import { applyConfirmedSuccessors, hideMovedTimelineItems, defaultMoveSelection,
 import type { PlannedActivity } from '../lib/db';
 import { RecompositionCard } from './RecompositionCard';
 import { createRecompositionStore, initialRecompositionState, shouldOfferRecomposition, withConfirmedMoves, withMovedSources, type ConfirmedMove, type RecompositionStore } from '../lib/homeRecomposition';
+import { formatGoalActivityCompletion } from '../lib/goalActivityExecution';
 
 /** Matches page.tsx's own FALLBACK_TZ -- defensive only, page.tsx always supplies a real value today. */
 const FALLBACK_HOME_TZ = 'Asia/Kolkata';
@@ -855,6 +856,14 @@ export function HomeDashboard({
   // both stay in sync -- never a click that only ever affects a distant,
   // possibly off-screen row with no visible feedback at the click site.
   const spotlightWhyExpanded = Boolean(spotlightItem && expandedTimelineId === spotlightItem.id);
+  // Goals V2 G3.3 -- present only, never a selection/ranking input:
+  // spotlightItem is already fully decided above (rightNowSelection.ts
+  // never reads goalContext); this is purely "does the ALREADY-CHOSEN item
+  // happen to be Goal-linked". Absent for every non-Goal item (Capture/
+  // Habit/Opportunity/typed Plan/etc.) -- undefined, not a fabricated
+  // empty value, so the conditional renders below simply emit nothing.
+  const spotlightGoalContext = spotlightItem?.metadata?.goalContext;
+  const spotlightCompletionDetail = spotlightGoalContext ? formatGoalActivityCompletion(spotlightGoalContext.goalActivity.completionRequirement, spotlightGoalContext.currentValue) : null;
 
   // Home UI V2 -- Your Day is genuinely empty only when the composer's own
   // output has nothing to show. Distinguishing this from "still loading"
@@ -1084,6 +1093,19 @@ export function HomeDashboard({
                 {rightNowState.kind === 'IMMINENT_PLAN' && `${spotlightItem.title} starts soon.`}
                 {rightNowState.kind === 'OPPORTUNITY' && `${spotlightItem.title} is a strong option right now.`}
               </div>
+              {/* Goals V2 G3.3 -- SECONDARY tier (title is PRIMARY, existing
+                  timing/status/Why stays TERTIARY below): at most one Goal-
+                  context line plus one completion-detail line, both plain
+                  text (never color/icon-only), entirely conditional on the
+                  ALREADY-SELECTED item happening to carry goalContext.
+                  Distinct from "Why?" (which explains Aura's OWN placement
+                  reasoning, expands lazily, and is never replaced here) --
+                  Goal context instead answers "why is this part of my day
+                  at all", visible immediately, no toggle needed. */}
+              {spotlightGoalContext && (
+                <div style={{ ...typography.meta, color: colors.textSecondary, marginTop: spacing.xs }}>For: {spotlightGoalContext.goal.title}</div>
+              )}
+              {spotlightCompletionDetail && <div style={{ ...typography.meta, color: colors.textSecondary, marginTop: 2 }}>{spotlightCompletionDetail}</div>}
               <div style={{ display: 'flex', alignItems: 'center', gap: spacing.sm, marginTop: spacing.sm, flexWrap: 'wrap' }}>
                 {spotlightItem.status && <StatusBadge label={spotlightItem.status} tone={spotlightItem.status === 'Best' ? 'positive' : 'info'} />}
                 {/* Finding D -- a Why control only ever renders when a real

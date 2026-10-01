@@ -3,6 +3,19 @@ import { randomUUID } from 'crypto';
 import { derivePlanCompletionHistory } from './planCompletionHistory';
 import { validateCaptureTitle } from './captures';
 import { parseSchedulingMode, type PlannedActivitySchedulingMode } from './plannedActivitySchedulingMode';
+import { toPersistedCompletionRequirement, normalizeGoalActivityCompletionRequirement, type CompletionRequirement } from './goalCompletion';
+import {
+  deriveGoalActivityRhythmContribution,
+  normalizeGoalActivityRhythm,
+  computeGoalActivityRhythmEligibility,
+  toPersistedGoalActivityRhythm,
+  NONE_GOAL_ACTIVITY_RHYTHM,
+  type GoalActivityRhythmOccurrenceFact,
+  type PlannedActivityStatusForRhythm,
+  type GoalActivityRhythm,
+} from './goalActivityRhythm';
+import { getDatePartsInTimezone } from './timezone';
+import { toPersistedGoalActivityExecutionSnapshot, fromPersistedGoalActivityExecutionSnapshot, resolveCompletionActualValue } from './goalActivityExecution';
 
 // Sandbox-only substitute for @prisma/client (its engine binary can't be downloaded
 // here — see README). Same schema, same Postgres instance, plain SQL. Swap API
@@ -1443,7 +1456,15 @@ export async function deletePlannedActivity(userId: string, planId: string): Pro
   if (result.rowCount === 0) throw new Error('Plan not found or cannot be removed.');
 }
 
-export async function logPlannedActivity(userId: string, planId: string): Promise<{ plan: PlannedActivity; habitLog: HabitLogRow }> {
+// Goals V2 G2.2.2 -- optional, backward-compatible: every existing caller
+// (Home/Right Now's createPlanExecutor, the Plan tab, every pre-G2.2.2 test)
+// omits this entirely and is completely unaffected. See this function's own
+// GoalActivityExecution section below for exactly what it does.
+export interface LogPlannedActivityOptions {
+  actualValue?: number;
+}
+
+export async function logPlannedActivity(userId: string, planId: string, options?: LogPlannedActivityOptions): Promise<{ plan: PlannedActivity; habitLog: HabitLogRow }> {
   const client = await pool.connect();
   try {
     await client.query('BEGIN');
@@ -1475,6 +1496,64 @@ export async function logPlannedActivity(userId: string, planId: string): Promis
 
     if (plan.status !== 'UPCOMING') {
       throw new Error('Plan is not available to log.');
+    }
+
+    // Goals V2 G2.2.2 -- resolve Goal linkage and validate actualValue
+    // BEFORE any write, so an invalid actualValue fails the whole
+    // completion attempt cleanly (nothing partially attempted) rather than
+    // being caught only after other writes ran (atomicity is guaranteed by
+    // the transaction either way, but failing fast here avoids doing work
+    // that's about to be thrown away). Deliberately placed AFTER the
+    // idempotent-retry early-return above: a second /log call for an
+    // already-LOGGED plan returns there and never reaches this block at
+    // all, so no duplicate GoalActivityExecution write is even attempted --
+    // idempotency here is structural (the code path itself is never
+    // re-entered), not dependent on the DB's unique constraint catching a
+    // race.
+    //
+    // The GoalActivity is resolved SERVER-SIDE from persisted linkage
+    // (GoalActivity.plannedActivityId = this plan's id) -- never trusted
+    // from any client-supplied id. A plan with no such linkage is an
+    // ordinary, non-Goal completion: entirely unaffected by anything below.
+    const goalActivityRes = await client.query(`SELECT * FROM "GoalActivity" WHERE "plannedActivityId" = $1 AND "userId" = $2`, [planId, userId]);
+    const goalActivity: GoalActivity | undefined = goalActivityRes.rows[0];
+
+    let executionWrite: { goalActivityId: string; existingExecutionId: string | null; requirement: CompletionRequirement; currentValue: number | null } | null = null;
+    if (goalActivity) {
+      // If an execution row already exists for THIS plan (not possible yet
+      // via any production path in G2.2.2, since nothing creates one before
+      // Done -- future partial-progress work will change that), its
+      // immutable snapshot is authoritative: NEVER re-snapshot from the
+      // live GoalActivity, which may have been edited since the execution
+      // began (e.g. target 20 -> 30 pages). A first-write, by contrast,
+      // snapshots the CURRENT canonical requirement -- that moment becomes
+      // this execution's own historical definition from now on.
+      const existingExecRes = await client.query(`SELECT * FROM "GoalActivityExecution" WHERE "plannedActivityId" = $1 AND "userId" = $2`, [planId, userId]);
+      const existingExecution = existingExecRes.rows[0];
+      const requirement = existingExecution
+        ? fromPersistedGoalActivityExecutionSnapshot({
+            completionKindSnapshot: existingExecution.completionKindSnapshot,
+            completionTargetValueSnapshot: existingExecution.completionTargetValueSnapshot,
+            completionUnitSnapshot: existingExecution.completionUnitSnapshot,
+            currentValue: existingExecution.currentValue,
+          }).completionRequirement
+        : normalizeGoalActivityCompletionRequirement({
+            completionKind: goalActivity.completionKind,
+            completionTargetValue: goalActivity.completionTargetValue,
+            completionUnit: goalActivity.completionUnit,
+          });
+
+      const actualValueResult = resolveCompletionActualValue(requirement, options?.actualValue);
+      if (!actualValueResult.ok) throw new Error(actualValueResult.error);
+
+      executionWrite = { goalActivityId: goalActivity.id, existingExecutionId: existingExecution ? existingExecution.id : null, requirement, currentValue: actualValueResult.value };
+    } else if (options?.actualValue !== undefined && options?.actualValue !== null) {
+      // A caller supplied actualValue for a plan that isn't linked to any
+      // Goal activity -- there is nothing for it to apply to. Reject rather
+      // than silently discard it, same "never store meaningless numeric
+      // progress" principle resolveCompletionActualValue already applies to
+      // a DONE-kind Goal activity.
+      throw new Error('actualValue was supplied, but this plan is not linked to a Goal activity.');
     }
 
     // Plan Completion Historical Integrity V1 -- widened from the old
@@ -1573,6 +1652,32 @@ export async function logPlannedActivity(userId: string, planId: string): Promis
        WHERE "plannedActivityId" = $1 AND "userId" = $2`,
       [planId, userId, completionInstant]
     );
+
+    // Goals V2 G2.2.2 -- the SAME 'AURA_PLANNED' source this exact function
+    // already used for the HabitLog insert above: this completion IS an
+    // Aura-planned Done, so both records agree without a second, divergent
+    // source calculation. currentValue never controls completion status --
+    // PlannedActivity.status (already set to LOGGED above) remains the sole
+    // completion truth regardless of what currentValue is written here, even
+    // 0 or a value below target.
+    if (executionWrite) {
+      if (executionWrite.existingExecutionId) {
+        // Only mutable facts change; goalActivityId/the snapshot/createdAt
+        // are never touched.
+        await client.query(
+          `UPDATE "GoalActivityExecution" SET "currentValue" = $1, "source" = $2, "updatedAt" = now() WHERE id = $3`,
+          [executionWrite.currentValue, 'AURA_PLANNED', executionWrite.existingExecutionId]
+        );
+      } else {
+        const persisted = toPersistedGoalActivityExecutionSnapshot({ completionRequirement: executionWrite.requirement, currentValue: executionWrite.currentValue });
+        await client.query(
+          `INSERT INTO "GoalActivityExecution"
+             (id, "userId", "goalActivityId", "plannedActivityId", "completionKindSnapshot", "completionTargetValueSnapshot", "completionUnitSnapshot", "currentValue", "source")
+           VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)`,
+          [randomUUID(), userId, executionWrite.goalActivityId, planId, persisted.completionKindSnapshot, persisted.completionTargetValueSnapshot, persisted.completionUnitSnapshot, executionWrite.currentValue, 'AURA_PLANNED']
+        );
+      }
+    }
 
     await client.query('COMMIT');
     return { plan: updatedPlanRes.rows[0], habitLog: habitLogRes.rows[0] };
@@ -2339,12 +2444,37 @@ export interface GoalActivity {
   activityId: string | null;
   status: 'SUGGESTED' | 'DISMISSED';
   plannedActivityId: string | null;
+  // Goals V2 G2.1 (migration 0040) -- the raw persisted shape; see
+  // apps/web/lib/goalCompletion.ts's normalizeGoalActivityCompletionRequirement
+  // for turning these into the canonical CompletionRequirement (null
+  // completionKind, from any existing/legacy row or an omitted G2.1
+  // requirement, always normalizes to DONE).
+  completionKind: string | null;
+  completionTargetValue: number | null;
+  completionUnit: string | null;
+  // Goals V2 Rhythm R2 (migration 0043) -- the raw persisted shape; see
+  // apps/web/lib/goalActivityRhythm.ts's normalizeGoalActivityRhythm for
+  // turning these into the canonical GoalActivityRhythm (null rhythmKind,
+  // from any existing/legacy row or an omitted R2 policy, always
+  // normalizes to NONE).
+  rhythmKind: string | null;
+  rhythmTargetPerWeek: number | null;
   createdAt: Date;
   updatedAt: Date;
 }
 
 export interface GoalActivityWithLinkedPlanStatus extends GoalActivity {
   linkedPlanStatus: 'UPCOMING' | 'LOGGED' | 'CANCELLED' | 'SKIPPED' | 'MOVED' | null;
+  // Goals V2 G3.1 -- the CURRENT execution's measured fact, resolved by
+  // joining on the SAME plannedActivityId this row already carries (never a
+  // second/"latest" concept -- GoalActivityExecution.plannedActivityId is
+  // unique, and is only ever set by logPlannedActivity's own server-side
+  // resolution of THIS exact GoalActivity, so there is no ambiguity to
+  // resolve). NULL both when plannedActivityId is null and when no
+  // execution row exists yet for the current link -- identical "nothing
+  // recorded" meaning either way, same convention as linkedPlanStatus
+  // itself above.
+  currentValue: number | null;
 }
 
 // Explicit column list, "targetDate" cast to ::text -- see Goal's own
@@ -2379,7 +2509,23 @@ export async function createGoalWithActivities(input: {
   // server-side; no JS Date object is ever constructed for this value, so
   // there is nothing for a timezone to shift.
   targetDate: string | null;
-  activities: ReadonlyArray<{ title: string; activityId: string | null }>;
+  // Goals V2 G2.1 established this as optional plumbing, unused by any
+  // production caller at the time. G3.4 is the first production caller to
+  // supply it (GOAL_TEMPLATES's own per-activity completionRequirement,
+  // resolved server-side and passed straight through by the POST
+  // /api/goals route -- see lib/goals.ts). Omitted still means DONE, via
+  // toPersistedCompletionRequirement(DONE_COMPLETION_REQUIREMENT)'s own
+  // all-null encoding -- identical to every row this function persisted
+  // before G2.1; this function's own write path is otherwise unchanged.
+  // Goals V2 Rhythm R5 -- rhythm is likewise optional and additive, per
+  // activity (Rhythm belongs to GoalActivity, this ticket's own section
+  // 13 domain-truth decision -- never a single Goal-level frequency
+  // copied across activities). Omitted means NONE, identical to every
+  // activity this function persisted before R5 (this ticket's own section
+  // 42/50 API-compatibility requirement -- a template creation that omits
+  // rhythm entirely, which is every creation before this ticket and every
+  // "Start from scratch" creation after it, is byte-identical to before).
+  activities: ReadonlyArray<{ title: string; activityId: string | null; completionRequirement?: CompletionRequirement; rhythm?: GoalActivityRhythm }>;
 }): Promise<{ goal: Goal; activities: GoalActivity[] }> {
   const client = await beginTransaction();
   try {
@@ -2392,9 +2538,12 @@ export async function createGoalWithActivities(input: {
 
     const activities: GoalActivity[] = [];
     for (const activity of input.activities) {
+      const persistedCompletion = toPersistedCompletionRequirement(activity.completionRequirement ?? { kind: 'DONE' });
+      const persistedRhythm = toPersistedGoalActivityRhythm(activity.rhythm ?? NONE_GOAL_ACTIVITY_RHYTHM);
       const result = await client.query(
-        `INSERT INTO "GoalActivity" (id, "userId", "goalId", title, "activityId") VALUES ($1, $2, $3, $4, $5) RETURNING *`,
-        [randomUUID(), input.userId, goalId, activity.title, activity.activityId]
+        `INSERT INTO "GoalActivity" (id, "userId", "goalId", title, "activityId", "completionKind", "completionTargetValue", "completionUnit", "rhythmKind", "rhythmTargetPerWeek")
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10) RETURNING *`,
+        [randomUUID(), input.userId, goalId, activity.title, activity.activityId, persistedCompletion.completionKind, persistedCompletion.completionTargetValue, persistedCompletion.completionUnit, persistedRhythm.rhythmKind, persistedRhythm.rhythmTargetPerWeek]
       );
       activities.push(result.rows[0]);
     }
@@ -2486,14 +2635,53 @@ export async function deleteGoal(userId: string, goalId: string): Promise<'DELET
 /** Ownership-checks the parent Goal first (via getGoalForUser) -- returns
  * null rather than inserting under a Goal that doesn't exist or isn't
  * owned by this user. */
-export async function addGoalActivity(userId: string, goalId: string, input: { title: string; activityId: string | null }): Promise<GoalActivity | null> {
+// Goals V2 G2.1 -- completionRequirement is optional and NOT yet supplied
+// by the POST /api/goals/[goalId]/activities route: omitted means DONE
+// (see createGoalWithActivities's identical convention above).
+//
+// Goals V2 Rhythm R5 -- rhythm is likewise optional and additive. Omitted
+// means NONE (toPersistedGoalActivityRhythm(NONE_GOAL_ACTIVITY_RHYTHM)'s own
+// all-null encoding -- identical to every row this function persisted
+// before R5, this ticket's own section 42 API-compatibility requirement).
+// The caller (POST /api/goals/[goalId]/activities) is responsible for
+// validating any client-supplied rhythm through the canonical R2
+// validator (validateGoalActivityRhythm) BEFORE calling this function --
+// this function trusts its input the same way it already trusts
+// completionRequirement.
+export async function addGoalActivity(userId: string, goalId: string, input: { title: string; activityId: string | null; completionRequirement?: CompletionRequirement; rhythm?: GoalActivityRhythm }): Promise<GoalActivity | null> {
   const goal = await getGoalForUser(userId, goalId);
   if (!goal) return null;
+  const persistedCompletion = toPersistedCompletionRequirement(input.completionRequirement ?? { kind: 'DONE' });
+  const persistedRhythm = toPersistedGoalActivityRhythm(input.rhythm ?? NONE_GOAL_ACTIVITY_RHYTHM);
   const result = await pool.query(
-    `INSERT INTO "GoalActivity" (id, "userId", "goalId", title, "activityId") VALUES ($1, $2, $3, $4, $5) RETURNING *`,
-    [randomUUID(), userId, goalId, input.title, input.activityId]
+    `INSERT INTO "GoalActivity" (id, "userId", "goalId", title, "activityId", "completionKind", "completionTargetValue", "completionUnit", "rhythmKind", "rhythmTargetPerWeek")
+     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10) RETURNING *`,
+    [randomUUID(), userId, goalId, input.title, input.activityId, persistedCompletion.completionKind, persistedCompletion.completionTargetValue, persistedCompletion.completionUnit, persistedRhythm.rhythmKind, persistedRhythm.rhythmTargetPerWeek]
   );
   return result.rows[0];
+}
+
+/**
+ * Goals V2 Rhythm R5 -- the one allowed Rhythm WRITE path for an EXISTING
+ * GoalActivity (creation-time Rhythm goes through addGoalActivity /
+ * createGoalWithActivities instead -- this function is never called from
+ * either). A pure policy change: never touches plannedActivityId, never
+ * creates/deletes a GoalActivityOccurrence row, never cancels an existing
+ * UPCOMING commitment (this ticket's own section 21/22 -- eligibility
+ * simply recalculates prospectively from the new policy the next time it
+ * is read; nothing here is migrated or backfilled). Scoped by userId AND
+ * goalId AND id together, same ownership convention as
+ * dismissGoalActivity. The caller is responsible for validating `rhythm`
+ * through validateGoalActivityRhythm first -- this function trusts its
+ * input, same convention as every other persistence function in this file.
+ */
+export async function setGoalActivityRhythm(userId: string, goalId: string, goalActivityId: string, rhythm: GoalActivityRhythm): Promise<GoalActivity | null> {
+  const persisted = toPersistedGoalActivityRhythm(rhythm);
+  const result = await pool.query(
+    `UPDATE "GoalActivity" SET "rhythmKind" = $1, "rhythmTargetPerWeek" = $2, "updatedAt" = now() WHERE id = $3 AND "goalId" = $4 AND "userId" = $5 RETURNING *`,
+    [persisted.rhythmKind, persisted.rhythmTargetPerWeek, goalActivityId, goalId, userId]
+  );
+  return result.rows[0] ?? null;
 }
 
 /** Idempotent (repeat dismissal is a harmless no-op re-write of the same
@@ -2517,14 +2705,235 @@ export async function dismissGoalActivity(userId: string, goalId: string, goalAc
  */
 export async function listGoalActivitiesWithLinkedPlanStatus(userId: string, goalId: string): Promise<GoalActivityWithLinkedPlanStatus[]> {
   const result = await pool.query(
-    `SELECT ga.*, pa.status AS "linkedPlanStatus"
+    `SELECT ga.*, pa.status AS "linkedPlanStatus", gae."currentValue"
      FROM "GoalActivity" ga
      LEFT JOIN "PlannedActivity" pa ON pa.id = ga."plannedActivityId"
+     LEFT JOIN "GoalActivityExecution" gae ON gae."plannedActivityId" = ga."plannedActivityId"
      WHERE ga."userId" = $1 AND ga."goalId" = $2
      ORDER BY ga."createdAt"`,
     [userId, goalId]
   );
   return result.rows;
+}
+
+// Goals V2 G3.1 -- read-only Goal context for the Home/DailyAgenda read
+// model (apps/web/lib/dailyAgenda.ts). Deliberately NOT
+// GoalActivityWithLinkedPlanStatus's shape: the client needs MEANING
+// (a normalized CompletionRequirement, a measured value), never storage
+// structure -- no execution id/source/snapshot columns/timestamps.
+export interface PlanGoalContext {
+  goal: { id: string; title: string };
+  goalActivity: { id: string; completionRequirement: CompletionRequirement };
+  currentValue: number | null;
+}
+
+/**
+ * Goals V2 G3.1 -- ONE batched query for every plan id in a day's agenda,
+ * never one query per item (avoids N+1). Keyed by "plannedActivityId" so
+ * the caller can do a plain Map lookup per DailyAgendaItem. Scoped to
+ * "userId" on the base row (GoalActivity) -- same convention
+ * listGoalActivitiesWithLinkedPlanStatus already uses (a LEFT JOIN target
+ * is never independently re-scoped by userId in this codebase; the FK
+ * relationship itself, plus the owning row's own userId filter, is what
+ * already prevents cross-user leakage everywhere else). A plan id with no
+ * GoalActivity link simply has no entry in the returned Map -- never a
+ * null-valued entry, so `.get(planId)` doubles as a clean existence check.
+ * completionKind/TargetValue/Unit are normalized through the canonical G2.1
+ * helper (normalizeGoalActivityCompletionRequirement) -- a legacy/never-set
+ * GoalActivity therefore always reads as DONE here, exactly like every
+ * other consumer of that helper.
+ */
+export async function loadGoalContextsForPlanIds(userId: string, planIds: readonly string[]): Promise<Map<string, PlanGoalContext>> {
+  const contexts = new Map<string, PlanGoalContext>();
+  if (planIds.length === 0) return contexts;
+  const result = await pool.query(
+    `SELECT ga."plannedActivityId", ga.id AS "goalActivityId", ga."completionKind", ga."completionTargetValue", ga."completionUnit",
+            g.id AS "goalId", g.title AS "goalTitle", gae."currentValue"
+     FROM "GoalActivity" ga
+     JOIN "Goal" g ON g.id = ga."goalId"
+     LEFT JOIN "GoalActivityExecution" gae ON gae."plannedActivityId" = ga."plannedActivityId"
+     WHERE ga."userId" = $1 AND ga."plannedActivityId" = ANY($2::text[])`,
+    [userId, [...planIds]]
+  );
+  for (const row of result.rows) {
+    contexts.set(row.plannedActivityId, {
+      goal: { id: row.goalId, title: row.goalTitle },
+      goalActivity: {
+        id: row.goalActivityId,
+        completionRequirement: normalizeGoalActivityCompletionRequirement({
+          completionKind: row.completionKind,
+          completionTargetValue: row.completionTargetValue,
+          completionUnit: row.completionUnit,
+        }),
+      },
+      currentValue: row.currentValue,
+    });
+  }
+  return contexts;
+}
+
+/**
+ * Goals V2 Rhythm R2 -- READ-ONLY fact loader for the pure eligibility
+ * engine (apps/web/lib/goalActivityRhythm.ts's own
+ * computeGoalActivityRhythmEligibility). User-scoped, one query, no
+ * occurrence/plan/execution/GoalActivity row is ever created, updated or
+ * deleted here (this ticket's own section 23). Policy logic itself lives
+ * entirely in the pure engine -- this function does nothing but join and
+ * shape rows; it holds no eligibility semantics of its own.
+ *
+ * Only occurrences with a LIVE linked PlannedActivity (INNER JOIN) produce
+ * a fact -- an occurrence with a null plannedActivityId has no date to
+ * belong to any week yet, and R1/R2 together never create one anyway (no
+ * production occurrence writer exists). `localDate` is derived via
+ * getDatePartsInTimezone from the plan's OWN plannedStartAt, in the
+ * caller-supplied timezone -- never the server's own clock/timezone.
+ *
+ * Rhythm R3 -- `executor` is optional (defaults to `pool`, same convention
+ * as `goalHasRetainedPlanLinkage`) so the authoritative, pre-materialization
+ * re-check (`materializeGoalActivityRhythmOccurrence`, below) can read
+ * facts on the SAME transaction client as the write it is about to
+ * authorize, inside the caller's own per-user advisory lock -- never a
+ * second, unlocked connection racing the write it is meant to gate.
+ */
+export async function loadGoalActivityRhythmFacts(userId: string, goalActivityId: string, timezone: string, executor: Pool | PoolClient = pool): Promise<GoalActivityRhythmOccurrenceFact[]> {
+  const result = await executor.query(
+    `SELECT pa."plannedStartAt", pa.status
+     FROM "GoalActivityOccurrence" gao
+     JOIN "PlannedActivity" pa ON pa.id = gao."plannedActivityId"
+     WHERE gao."userId" = $1 AND gao."goalActivityId" = $2`,
+    [userId, goalActivityId]
+  );
+  return result.rows.map((row): GoalActivityRhythmOccurrenceFact => ({
+    localDate: getDatePartsInTimezone(timezone, new Date(row.plannedStartAt)).dateStr,
+    contribution: deriveGoalActivityRhythmContribution(row.status as PlannedActivityStatusForRhythm),
+  }));
+}
+
+/**
+ * Goals V2 Rhythm R4 -- ONE batched query for every N_PER_WEEK GoalActivity
+ * on a single Goal Detail page, never one query per activity (this
+ * ticket's own section 40; same batching convention as
+ * loadGoalContextsForPlanIds above). Purely an N+1 fix: the per-row shaping
+ * is identical to loadGoalActivityRhythmFacts above (same localDate
+ * derivation, same deriveGoalActivityRhythmContribution mapping) -- this is
+ * NOT a second eligibility/counting implementation, just a batched way to
+ * produce the same facts for several activities in one round trip. A
+ * goalActivityId with zero occurrences simply has no entry in the returned
+ * Map (never an empty-array entry), matching loadGoalContextsForPlanIds'
+ * own "no entry means none" convention.
+ */
+export async function loadGoalActivityRhythmFactsForActivities(userId: string, goalActivityIds: readonly string[], timezone: string): Promise<Map<string, GoalActivityRhythmOccurrenceFact[]>> {
+  const factsByActivity = new Map<string, GoalActivityRhythmOccurrenceFact[]>();
+  if (goalActivityIds.length === 0) return factsByActivity;
+  const result = await pool.query(
+    `SELECT gao."goalActivityId", pa."plannedStartAt", pa.status
+     FROM "GoalActivityOccurrence" gao
+     JOIN "PlannedActivity" pa ON pa.id = gao."plannedActivityId"
+     WHERE gao."userId" = $1 AND gao."goalActivityId" = ANY($2::text[])`,
+    [userId, [...goalActivityIds]]
+  );
+  for (const row of result.rows) {
+    const fact: GoalActivityRhythmOccurrenceFact = {
+      localDate: getDatePartsInTimezone(timezone, new Date(row.plannedStartAt)).dateStr,
+      contribution: deriveGoalActivityRhythmContribution(row.status as PlannedActivityStatusForRhythm),
+    };
+    const existing = factsByActivity.get(row.goalActivityId);
+    if (existing) existing.push(fact);
+    else factsByActivity.set(row.goalActivityId, [fact]);
+  }
+  return factsByActivity;
+}
+
+export type MaterializeGoalActivityRhythmOccurrenceResult =
+  | { ok: true; occurrenceId: string }
+  | { ok: false; reason: 'NOT_FOUND' | 'NOT_RHYTHM_ELIGIBLE' | 'HAS_LIVE_COMMITMENT' | 'CAPACITY_EXHAUSTED' };
+
+/**
+ * Goals V2 Rhythm R3 -- the one new atomic write this slice introduces:
+ * "an N_PER_WEEK GoalActivity whose current linked plan is either absent
+ * (first-ever occurrence) or no longer live (LOGGED/SKIPPED/CANCELLED --
+ * never UPCOMING) still has weekly capacity, so link it to a NEWLY CREATED
+ * PlannedActivity and record a new GoalActivityOccurrence." Called from
+ * EXACTLY ONE place (dayConstructorAcceptancePersistence.ts's own write
+ * loop), on the SAME `client` as the PlannedActivity insert that already
+ * happened immediately before it, tried FIRST for every Goal-linked write
+ * (a pure, side-effect-free read -- `NOT_RHYTHM_ELIGIBLE` -- for any
+ * GoalActivity whose own rhythmKind isn't 'N_PER_WEEK'). The existing,
+ * UNCHANGED `linkGoalActivityToPlannedActivity` is tried only as the
+ * fallback for that exact `NOT_RHYTHM_ELIGIBLE` case, and alone still owns
+ * every NONE/first-link/CANCELLED-or-SKIPPED-relink case exactly as before
+ * R3 (this ticket's own section 4: the finite legacy path is untouched).
+ * This ordering (Rhythm-aware tried first) is what lets ONE call correctly
+ * cover a brand-new N_PER_WEEK GoalActivity's very FIRST occurrence too --
+ * the legacy function alone would successfully link a NULL-plannedActivityId
+ * GoalActivity but would never create the occurrence row every N_PER_WEEK
+ * link requires.
+ *
+ * EVERY check here reads FRESH state on this same client, inside the
+ * caller's own already-held per-user advisory lock
+ * (`day-constructor-accept:<userId>`, persistAcceptedConstructedDay) --
+ * this is what makes two genuinely concurrent requests for the same user
+ * safe without any new locking: the second request blocks on the SAME
+ * lock key until the first's transaction fully commits or rolls back, then
+ * re-reads this exact fresh state and correctly sees reduced (or
+ * exhausted) capacity (this ticket's own section 22). A GENUINE RETRY of
+ * the identical acceptance (same clientRequestId) never reaches this
+ * function a second time at all -- it short-circuits at the EXISTING
+ * PlanCreationIdempotency replay check, before the write loop even starts
+ * (this ticket's own section 56 -- the existing mechanism is reused
+ * verbatim, never duplicated).
+ *
+ * Deliberately refuses (HAS_LIVE_COMMITMENT) when the CURRENT linked plan
+ * is UPCOMING: an already-live, not-yet-done commitment is not something
+ * R3's planning UX offers to replace (this ticket's own section 27 -- a
+ * GoalActivity with a live UPCOMING plan is never selectable in the first
+ * place today, so this is defense-in-depth against a stale/malicious
+ * client, never a path any current UI can reach).
+ *
+ * Creates the occurrence with no status, no windowKey, no Rhythm/
+ * CompletionRequirement snapshot (this ticket's own section 15) -- R1's
+ * own minimal shape, unextended.
+ */
+export async function materializeGoalActivityRhythmOccurrence(
+  userId: string,
+  goalActivityId: string,
+  newPlannedActivityId: string,
+  planningLocalDate: string,
+  timezone: string,
+  client: PoolClient
+): Promise<MaterializeGoalActivityRhythmOccurrenceResult> {
+  const gaRes = await client.query(
+    `SELECT ga.status, ga."rhythmKind", ga."rhythmTargetPerWeek", pa.status AS "linkedPlanStatus"
+     FROM "GoalActivity" ga
+     LEFT JOIN "PlannedActivity" pa ON pa.id = ga."plannedActivityId"
+     WHERE ga.id = $1 AND ga."userId" = $2`,
+    [goalActivityId, userId]
+  );
+  if (gaRes.rows.length === 0) return { ok: false, reason: 'NOT_FOUND' };
+  const row = gaRes.rows[0];
+  if (row.status === 'DISMISSED') return { ok: false, reason: 'NOT_FOUND' };
+
+  const rhythm = normalizeGoalActivityRhythm({ rhythmKind: row.rhythmKind, rhythmTargetPerWeek: row.rhythmTargetPerWeek });
+  if (rhythm.kind !== 'N_PER_WEEK') return { ok: false, reason: 'NOT_RHYTHM_ELIGIBLE' };
+  if (row.linkedPlanStatus === 'UPCOMING') return { ok: false, reason: 'HAS_LIVE_COMMITMENT' };
+
+  const facts = await loadGoalActivityRhythmFacts(userId, goalActivityId, timezone, client);
+  const eligibility = computeGoalActivityRhythmEligibility({ rhythm, planningLocalDate, occurrences: facts });
+  if (!eligibility.eligible) return { ok: false, reason: 'CAPACITY_EXHAUSTED' };
+
+  const relinked = await client.query(
+    `UPDATE "GoalActivity" SET "plannedActivityId" = $1, "updatedAt" = now()
+     WHERE id = $2 AND "userId" = $3 AND status != 'DISMISSED' AND "rhythmKind" = 'N_PER_WEEK'`,
+    [newPlannedActivityId, goalActivityId, userId]
+  );
+  if ((relinked.rowCount ?? 0) !== 1) return { ok: false, reason: 'NOT_FOUND' };
+
+  const occurrenceId = randomUUID();
+  await client.query(
+    `INSERT INTO "GoalActivityOccurrence" (id, "userId", "goalActivityId", "plannedActivityId") VALUES ($1, $2, $3, $4)`,
+    [occurrenceId, userId, goalActivityId, newPlannedActivityId]
+  );
+  return { ok: true, occurrenceId };
 }
 
 /**

@@ -3,7 +3,17 @@
 import React, { useEffect, useState } from 'react';
 import { colors, spacing, typography } from '../../../components/theme';
 import { PageHeader, SurfaceCard, PrimaryButton, SecondaryButton, TextButton, DestructiveButton, StatusBadge, EmptyState, FieldLabel, TextInput, FieldError } from '../../../components/ui';
-import { formatGoalProgressLabel, formatGoalTargetDateLabel, presentGoalActivityStateLabel, type GoalActivityView, type GoalDetailView } from '../../../lib/goalsPresentation';
+import { RhythmPicker, type RhythmPickerValue } from '../../../components/RhythmPicker';
+import {
+  formatGoalActivityCompletion,
+  formatGoalActivityRhythmFrequencyLabel,
+  formatGoalActivityRhythmWeeklyProgressLabel,
+  formatGoalProgressLabel,
+  formatGoalTargetDateLabel,
+  presentGoalActivityRhythmAwareStateLabel,
+  type GoalActivityView,
+  type GoalDetailView,
+} from '../../../lib/goalsPresentation';
 
 /**
  * Goals -> Planning Integration V1 PR B -- Goal detail: "What does
@@ -120,8 +130,19 @@ function GoalDetailBody({ detail, onChanged }: { detail: GoalDetailView; onChang
   // first line of defense -- the real enforcement is server-side, at
   // /plan-day's own bootstrap).
   const [selectedIds, setSelectedIds] = useState<ReadonlySet<string>>(new Set());
-  const suggestedIds = new Set(primaryActivities.filter((a) => a.derivedState === 'SUGGESTED').map((a) => a.id));
-  const effectiveSelectedIds = Array.from(selectedIds).filter((id) => suggestedIds.has(id));
+  // Goals V2 Rhythm R3 -- selectable now means SUGGESTED (unchanged) OR a
+  // COMPLETED activity whose own Rhythm policy still has weekly capacity
+  // (server-derived, this ticket's own section 37's "smallest Goal Detail
+  // lifecycle adjustment necessary" -- a finite/NONE COMPLETED activity, or
+  // any PLANNED activity, remains unselectable exactly as before R3).
+  // Rhythm R4 reads this same fact through the canonical `rhythm` shape
+  // (`rhythm.eligibleForAnotherOccurrence`) instead of R3's own interim
+  // flat `rhythmEligibleForAnotherOccurrence` field -- identical logic, one
+  // canonical read model (see goalsPresentation.ts's own doc comment on
+  // GoalActivityView.rhythm).
+  const isSelectable = (a: GoalActivityView) => a.derivedState === 'SUGGESTED' || (a.derivedState === 'COMPLETED' && a.rhythm.kind === 'N_PER_WEEK' && a.rhythm.eligibleForAnotherOccurrence);
+  const selectableIds = new Set(primaryActivities.filter(isSelectable).map((a) => a.id));
+  const effectiveSelectedIds = Array.from(selectedIds).filter((id) => selectableIds.has(id));
 
   const toggleSelected = (id: string) => {
     setSelectedIds((prev) => {
@@ -146,20 +167,31 @@ function GoalDetailBody({ detail, onChanged }: { detail: GoalDetailView; onChang
     <div>
       <PageHeader title={goal.title} subtitle={goal.targetDate ? `Target ${formatGoalTargetDateLabel(goal.targetDate)}` : undefined} />
 
-      <div style={{ marginTop: spacing.lg }}>
-        <SurfaceCard>
-          <div style={{ ...typography.bodyStrong }}>{formatGoalProgressLabel(progress)}</div>
-          {progress.total > 0 && (
-            <div style={{ marginTop: spacing.sm, height: 6, borderRadius: 999, background: colors.borderSubtle, overflow: 'hidden' }} role="progressbar" aria-valuenow={progress.completed} aria-valuemin={0} aria-valuemax={progress.total} aria-label="Goal progress">
-              <div style={{ height: '100%', width: `${Math.round((progress.completed / progress.total) * 100)}%`, background: colors.positive, borderRadius: 999 }} />
-            </div>
-          )}
-        </SurfaceCard>
-      </div>
+      {/* Goals V2 Rhythm R4 -- this ticket's own section 17-19: a finite
+          "N of M completed" bar cannot honestly describe a Goal containing
+          an ongoing N_PER_WEEK activity (it could show "1 of 1 completed"
+          the moment a single ongoing session is logged, directly
+          contradicting the fact that another occurrence is still eligible
+          this week, or will be again next week). formatGoalProgressLabel
+          returns null for exactly that case (server-computed
+          hasOngoingRhythmActivity) -- the whole card, including the bar,
+          is hidden rather than shown with misleading numbers. */}
+      {formatGoalProgressLabel(progress) && (
+        <div style={{ marginTop: spacing.lg }}>
+          <SurfaceCard>
+            <div style={{ ...typography.bodyStrong }}>{formatGoalProgressLabel(progress)}</div>
+            {progress.total > 0 && (
+              <div style={{ marginTop: spacing.sm, height: 6, borderRadius: 999, background: colors.borderSubtle, overflow: 'hidden' }} role="progressbar" aria-valuenow={progress.completed} aria-valuemin={0} aria-valuemax={progress.total} aria-label="Goal progress">
+                <div style={{ height: '100%', width: `${Math.round((progress.completed / progress.total) * 100)}%`, background: colors.positive, borderRadius: 999 }} />
+              </div>
+            )}
+          </SurfaceCard>
+        </div>
+      )}
 
       <div style={{ marginTop: spacing.xxl }}>
         <h2 style={typography.sectionEyebrow}>Activities</h2>
-        {suggestedIds.size > 0 && <p style={{ ...typography.meta, marginTop: spacing.xs }}>What would you like Aura to help you plan?</p>}
+        {selectableIds.size > 0 && <p style={{ ...typography.meta, marginTop: spacing.xs }}>What would you like Aura to help you plan?</p>}
         <div style={{ display: 'flex', flexDirection: 'column', gap: spacing.md, marginTop: spacing.md }}>
           {primaryActivities.length === 0 && (
             <SurfaceCard>
@@ -171,8 +203,8 @@ function GoalDetailBody({ detail, onChanged }: { detail: GoalDetailView; onChang
               key={activity.id}
               activity={activity}
               onChanged={onChanged}
-              selected={activity.derivedState === 'SUGGESTED' ? selectedIds.has(activity.id) : undefined}
-              onToggleSelect={activity.derivedState === 'SUGGESTED' ? () => toggleSelected(activity.id) : undefined}
+              selected={isSelectable(activity) ? selectedIds.has(activity.id) : undefined}
+              onToggleSelect={isSelectable(activity) ? () => toggleSelected(activity.id) : undefined}
             />
           ))}
         </div>
@@ -213,18 +245,49 @@ function ActivityRow({
 }: {
   activity: GoalActivityView;
   onChanged: () => void;
-  /** Goals -> Planning Integration V1 PR C -- undefined for any non-
-   * SUGGESTED activity (PLANNED/COMPLETED render no checkbox at all, not
-   * a disabled one -- this ticket's own section 4: eligibility is
-   * SUGGESTED only). Selection is local UI state owned by the parent; see
-   * GoalDetailBody's own doc comment for why it lives there, not here. */
+  /** Goals -> Planning Integration V1 PR C -- undefined for any
+   * non-selectable activity (PLANNED/DISMISSED, and a finite/NONE
+   * COMPLETED activity, render no checkbox at all, not a disabled one).
+   * Goals V2 Rhythm R3 -- ALSO defined for a COMPLETED activity whose own
+   * Rhythm policy still has weekly capacity (GoalDetailBody's own
+   * `isSelectable`, this ticket's own section 37) -- the parent is the
+   * single source of truth for eligibility; this component trusts
+   * whichever of `selected`/`onToggleSelect` it is actually given, never
+   * re-derives SUGGESTED-only itself. Selection is local UI state owned by
+   * the parent; see GoalDetailBody's own doc comment for why it lives
+   * there, not here. */
   selected?: boolean;
   onToggleSelect?: () => void;
 }) {
   const [dismissing, setDismissing] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const stateLabel = presentGoalActivityStateLabel(activity.derivedState);
-  const isSelectable = activity.derivedState === 'SUGGESTED' && onToggleSelect !== undefined;
+  // Goals V2 Rhythm R4 -- Rhythm-aware: a permanent "Completed" badge is
+  // misleading for an N_PER_WEEK activity (this ticket's own section
+  // 14/15/23 -- it can become eligible again next week). NONE activities
+  // pass straight through to the original presentGoalActivityStateLabel
+  // unchanged (this ticket's own section 15 "preserve current derivedState
+  // labels exactly").
+  const stateLabel = presentGoalActivityRhythmAwareStateLabel(activity.derivedState, activity.rhythm);
+  const isSelectable = onToggleSelect !== undefined;
+  // Goals V2 Rhythm R4 -- an ongoing activity that is still eligible for
+  // another occurrence this week should not read as "done and dimmed" the
+  // way a truly finite COMPLETED activity does (this ticket's own section
+  // 15 -- it remains actionable, not a closed-out row).
+  const isDimmed = activity.derivedState === 'COMPLETED' && !(activity.rhythm.kind === 'N_PER_WEEK' && activity.rhythm.eligibleForAnotherOccurrence);
+  // Goals V2 G3.2 -- "what counts as doing this, and what happened" (this
+  // ticket's own section 5 hierarchy: title primary, this secondary,
+  // lifecycle state tertiary). Deliberately independent of derivedState --
+  // see formatGoalActivityCompletion's own doc comment for why numeric
+  // progress never infers/overrides lifecycle truth. null for DONE (no
+  // line at all, this ticket's own section 6).
+  const completionDetail = formatGoalActivityCompletion(activity.completionRequirement, activity.currentValue);
+  // Goals V2 Rhythm R4 -- frequency + this-week progress (this ticket's own
+  // section 4/9/10/12). null for NONE -- a finite activity's row is
+  // completely unaffected (this ticket's own section 42 DB test / section
+  // 4 "behaviorally and visually equivalent to the existing finite
+  // experience").
+  const rhythmFrequencyLabel = activity.rhythm.kind === 'N_PER_WEEK' ? formatGoalActivityRhythmFrequencyLabel(activity.rhythm.targetPerWeek) : null;
+  const rhythmWeeklyProgressLabel = formatGoalActivityRhythmWeeklyProgressLabel(activity.rhythm);
 
   const handleDismiss = async () => {
     if (dismissing) return;
@@ -241,7 +304,7 @@ function ActivityRow({
   };
 
   return (
-    <SurfaceCard style={activity.derivedState === 'COMPLETED' ? { opacity: 0.7 } : selected ? { borderColor: colors.accentBorder } : undefined}>
+    <SurfaceCard style={isDimmed ? { opacity: 0.7 } : selected ? { borderColor: colors.accentBorder } : undefined}>
       <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: spacing.md, flexWrap: 'wrap' }}>
         {/* Goals -> Planning Integration V1 PR C -- this ticket's own
             section 3/4: a real selection control now exists, answering
@@ -266,11 +329,39 @@ function ActivityRow({
         {stateLabel && <StatusBadge label={stateLabel} tone={activity.derivedState === 'COMPLETED' ? 'positive' : 'info'} />}
       </div>
 
+      {/* Goals V2 G3.2 -- one compact secondary line (this ticket's own
+          section 24: never a per-activity progress bar, never a taller
+          row). Readable text, not color/icon/width-only (section 23) --
+          reuses the same typography.meta/textSecondary treatment the
+          existing target-date line already uses elsewhere on this page. */}
+      {completionDetail && <div style={{ ...typography.meta, color: colors.textSecondary, marginTop: 2 }}>{completionDetail}</div>}
+
+      {/* Goals V2 Rhythm R4 -- this ticket's own section 12/34: at most two
+          additional secondary lines (frequency, then this week's factual
+          progress), visually/semantically separate from completionDetail
+          above (section 34 -- "10 min" and "5 times a week" are different
+          dimensions, never merged into one sentence). Both null for NONE,
+          so a finite activity's row is unchanged. */}
+      {rhythmFrequencyLabel && <div style={{ ...typography.meta, color: colors.textSecondary, marginTop: 2 }}>{rhythmFrequencyLabel}</div>}
+      {rhythmWeeklyProgressLabel && <div style={{ ...typography.meta, color: colors.textSecondary, marginTop: 2 }}>{rhythmWeeklyProgressLabel}</div>}
+
       {error && (
         <div role="alert" style={{ marginTop: spacing.sm }}>
           <FieldError>{error}</FieldError>
         </div>
       )}
+
+      {/* Goals V2 Rhythm R5 -- this ticket's own section 20 decision: a
+          small inline edit affordance, available on EVERY row regardless
+          of derivedState (a policy change is independent of any specific
+          occurrence's lifecycle -- this ticket's own section 21). This is
+          also how a template-created activity (which always starts NONE,
+          this ticket's own section 34) reaches an explicit weekly
+          frequency -- the SAME control, never a separate creation-time
+          wizard. */}
+      <div style={{ marginTop: spacing.sm }}>
+        <RhythmEditor activity={activity} onSaved={onChanged} />
+      </div>
 
       {/* SUGGESTED is the only state with a Dismiss action. PLANNED/
           COMPLETED render as pure read-only status; there is no
@@ -288,6 +379,84 @@ function ActivityRow({
 }
 
 // ============================================================
+// Goals V2 Rhythm R5 -- RhythmPicker itself now lives in
+// ../../../components/RhythmPicker.tsx (shared with CreateGoalModal's own
+// template frequency step in GoalsListClient.tsx -- one mechanism, not two,
+// this ticket's own section 9). RhythmEditor below is Goal-Detail-specific
+// (it PATCHes the one allowed edit endpoint for an EXISTING row), so it
+// stays here.
+// ============================================================
+
+/**
+ * The per-row edit affordance (this ticket's own section 20). Collapsed by
+ * default to a single TextButton -- available on every row, regardless of
+ * derivedState, since a Rhythm policy change is independent of any
+ * specific occurrence (section 21/22/23). Saving PATCHes the one allowed
+ * edit endpoint; the server independently re-validates (section 19) --
+ * this component's own RhythmPicker validation is client-side convenience
+ * only.
+ */
+function RhythmEditor({ activity, onSaved }: { activity: GoalActivityView; onSaved: () => void }) {
+  const [editing, setEditing] = useState(false);
+  const initialValue: RhythmPickerValue = activity.rhythm.kind === 'N_PER_WEEK' ? { kind: 'N_PER_WEEK', targetPerWeek: activity.rhythm.targetPerWeek } : { kind: 'NONE' };
+  const [value, setValue] = useState<RhythmPickerValue | null>(initialValue);
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  if (!editing) {
+    return (
+      <TextButton onClick={() => { setValue(initialValue); setEditing(true); }} color={colors.info}>
+        {activity.rhythm.kind === 'N_PER_WEEK' ? 'Change frequency' : 'Set weekly frequency'}
+      </TextButton>
+    );
+  }
+
+  const handleSave = async () => {
+    if (value === null || saving) return;
+    setSaving(true);
+    setError(null);
+    try {
+      const res = await fetch(`/api/goals/${activity.goalId}/activities/${activity.id}/rhythm`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ rhythm: value }),
+      });
+      const data = await res.json().catch(() => null);
+      if (!res.ok) {
+        setError(data?.error ?? 'Could not save this. Try again.');
+        setSaving(false);
+        return;
+      }
+      setEditing(false);
+      setSaving(false);
+      onSaved();
+    } catch {
+      setError('Could not save this. Try again.');
+      setSaving(false);
+    }
+  };
+
+  return (
+    <div>
+      <RhythmPicker value={value ?? initialValue} onChange={setValue} idPrefix={`activity-${activity.id}`} />
+      {error && (
+        <div role="alert" style={{ marginTop: spacing.sm }}>
+          <FieldError>{error}</FieldError>
+        </div>
+      )}
+      <div style={{ display: 'flex', gap: spacing.sm, marginTop: spacing.md }}>
+        <PrimaryButton onClick={handleSave} disabled={value === null || saving} loading={saving}>
+          Save
+        </PrimaryButton>
+        <SecondaryButton onClick={() => setEditing(false)} disabled={saving}>
+          Cancel
+        </SecondaryButton>
+      </div>
+    </div>
+  );
+}
+
+// ============================================================
 // AddActivityControl (this ticket's own section 20/21) -- title-only,
 // no catalog/activityId exposure.
 // ============================================================
@@ -295,6 +464,10 @@ function ActivityRow({
 function AddActivityControl({ goalId, onAdded }: { goalId: string; onAdded: () => void }) {
   const [open, setOpen] = useState(false);
   const [title, setTitle] = useState('');
+  // Goals V2 Rhythm R5 -- this ticket's own section 16: default is Once
+  // (NONE), so old behavior remains the default; Rhythm configuration is
+  // never required to add an activity.
+  const [rhythm, setRhythm] = useState<RhythmPickerValue | null>({ kind: 'NONE' });
   const [status, setStatus] = useState<'IDLE' | 'SAVING' | 'ERROR'>('IDLE');
   const [error, setError] = useState<string | null>(null);
 
@@ -310,17 +483,18 @@ function AddActivityControl({ goalId, onAdded }: { goalId: string; onAdded: () =
 
   const handleAdd = async (event: React.FormEvent) => {
     event.preventDefault();
-    if (!trimmed || status === 'SAVING') return;
+    if (!trimmed || rhythm === null || status === 'SAVING') return;
     setStatus('SAVING');
     setError(null);
     try {
       const res = await fetch(`/api/goals/${goalId}/activities`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ title: trimmed }),
+        body: JSON.stringify({ title: trimmed, rhythm }),
       });
       if (!res.ok) throw new Error('failed');
       setTitle('');
+      setRhythm({ kind: 'NONE' });
       setOpen(false);
       setStatus('IDLE');
       onAdded();
@@ -337,13 +511,16 @@ function AddActivityControl({ goalId, onAdded }: { goalId: string; onAdded: () =
           Activity title
         </FieldLabel>
         <TextInput id="add-activity-title" value={title} onChange={(e) => setTitle(e.target.value)} placeholder="Check final numbers" maxLength={200} disabled={status === 'SAVING'} autoFocus />
+        <div style={{ marginTop: spacing.lg }}>
+          <RhythmPicker value={rhythm ?? { kind: 'NONE' }} onChange={setRhythm} idPrefix="add-activity" />
+        </div>
         {error && (
           <div role="alert" style={{ marginTop: spacing.sm }}>
             <FieldError>{error}</FieldError>
           </div>
         )}
         <div style={{ display: 'flex', gap: spacing.sm, marginTop: spacing.md }}>
-          <PrimaryButton type="submit" disabled={!trimmed} loading={status === 'SAVING'}>
+          <PrimaryButton type="submit" disabled={!trimmed || rhythm === null} loading={status === 'SAVING'}>
             Add activity
           </PrimaryButton>
           <SecondaryButton onClick={() => { setOpen(false); setError(null); }} disabled={status === 'SAVING'}>

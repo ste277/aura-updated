@@ -187,6 +187,37 @@ export async function applyMoveWrites(
   // Continuity: the source follows the commitment. Zero rows for a source-less plan.
   await client.query(`UPDATE "Capture" SET "plannedActivityId" = $1, "updatedAt" = now() WHERE "plannedActivityId" = $2 AND "userId" = $3`, [bId, a.id, userId]);
   await client.query(`UPDATE "GoalActivity" SET "plannedActivityId" = $1, "updatedAt" = now() WHERE "plannedActivityId" = $2 AND "userId" = $3`, [bId, a.id, userId]);
+  // Goals V2 G2.2.3 -- same continuity, for the SAME reason: GoalActivityExecution
+  // (apps/web/lib/goalActivityExecution.ts) is durable EXECUTION identity, while
+  // PlannedActivity is only current PLACEMENT identity (see this file's own header
+  // comment). Move changes where an execution is associated, never what it is --
+  // a pure pointer repoint. Nothing else about the row changes: id, goalActivityId,
+  // the completion*Snapshot fields, currentValue, and source are untouched (they
+  // aren't even referenced in this statement). Zero rows for a plan with no
+  // execution -- the common case today, since no production path creates one
+  // before completion (G2.2.2) -- this UPDATE is then simply a no-op, exactly like
+  // the Capture line above for a source-less plan. If B were ever already claimed
+  // by a different execution row (should be structurally impossible under correct
+  // Move semantics), plannedActivityId's own UNIQUE constraint rejects the write
+  // outright rather than silently overwriting/merging anything -- the same
+  // transaction this statement runs in then rolls back entirely (this function's
+  // caller wraps everything in BEGIN/COMMIT/ROLLBACK), never a partially-moved A
+  // or a partially-repointed GoalActivity left behind.
+  await client.query(`UPDATE "GoalActivityExecution" SET "plannedActivityId" = $1, "updatedAt" = now() WHERE "plannedActivityId" = $2 AND "userId" = $3`, [bId, a.id, userId]);
+  // Goals V2 Rhythm R1/R3 -- same continuity, for the SAME reason:
+  // GoalActivityOccurrence (apps/web/lib/db.ts's materializeGoalActivityRhythmOccurrence)
+  // is durable OCCURRENCE identity, while PlannedActivity is only current
+  // PLACEMENT identity. Move repoints which plan an occurrence is
+  // associated with; it never creates a new occurrence (R3's own hard
+  // invariant -- "no new occurrence on Move"). Zero rows for a plan with
+  // no occurrence -- every pre-R3 Move, and every Move of a finite (NONE)
+  // GoalActivity's plan, which never has an occurrence row at all -- this
+  // UPDATE is then simply a no-op, exactly like the two lines above for a
+  // source-less plan. "plannedActivityId"'s own UNIQUE constraint
+  // (migration 0042) rejects the write outright rather than silently
+  // double-claiming B, with the same whole-transaction-rollback guarantee
+  // the GoalActivityExecution line above already relies on.
+  await client.query(`UPDATE "GoalActivityOccurrence" SET "plannedActivityId" = $1 WHERE "plannedActivityId" = $2 AND "userId" = $3`, [bId, a.id, userId]);
 
   return { from: aMoved.rows[0], to: bRes.rows[0] };
 }

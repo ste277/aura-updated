@@ -266,8 +266,29 @@ check('No new migration directory exists for this fix (no schema change -- Plann
 // ============================================================
 
 const routeSource = fs.readFileSync('apps/web/app/api/plans/[planId]/log/route.ts', 'utf8');
-check('POST /api/plans/[planId]/log still parses no request body (no parseJsonObject/req.json() call)', !/parseJsonObject|req\.json\(\)/.test(routeSource));
-check('POST /api/plans/[planId]/log still calls logPlannedActivity with exactly (userId, planId) -- no third argument, no client-supplied timestamp', /logPlannedActivity\(session\.userId, params\.planId\)/.test(routeSource));
+// Goals V2 G2.2.2 legitimately added an OPTIONAL request body -- but only
+// for actualValue, a numeric completion MEASUREMENT (e.g. "18 minutes",
+// "12 pages"), never a timestamp. The original defect this suite guards
+// against was specifically a client-controlled completion INSTANT
+// corrupting historical solar-window/minute-of-day derivation
+// (derivePlanCompletionHistory, still fed exclusively by the server's own
+// `new Date()` read below, completely untouched by G2.2.2) -- not "any
+// body/any extra argument whatsoever". These two checks are narrowed to
+// their actual invariant: the body may exist, but it must never carry
+// anything time-shaped, and logPlannedActivity's own completionInstant must
+// still come only from a server-side clock read.
+check(
+  'POST /api/plans/[planId]/log may now parse a request body (Goals V2 G2.2.2), but it is used ONLY for actualValue -- never for a timestamp/completionInstant/loggedAt-shaped field',
+  /parseJsonObject/.test(routeSource) && /actualValue/.test(routeSource) && !/completionInstant|loggedAt|timestamp/i.test(routeSource)
+);
+check(
+  'POST /api/plans/[planId]/log calls logPlannedActivity with (userId, planId) plus, at most, an { actualValue } options object -- never a client-supplied timestamp/completionInstant argument',
+  /logPlannedActivity\(session\.userId, params\.planId, actualValue !== undefined \? \{ actualValue \} : undefined\)/.test(routeSource)
+);
+check(
+  'db.ts: logPlannedActivity\'s completionInstant is still exclusively `new Date()` -- a server-authoritative clock read, never derived from options/actualValue or any request field',
+  /const completionInstant = new Date\(\);/.test(dbSource) && !/completionInstant\s*=\s*options/.test(dbSource)
+);
 
 // ============================================================
 // No schema change.
