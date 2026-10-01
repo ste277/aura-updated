@@ -20,6 +20,7 @@ import { MAX_PLAN_DAY_INTENTS } from './planDayEntry';
 import { deriveGoalActivityState, type GoalActivityStatus, type PlannedActivityStatus } from './goals';
 import { deriveCaptureState, type CaptureStatus, type LinkedPlanStatus } from './captures';
 import { normalizeGoalActivityRhythm, computeGoalActivityRhythmEligibility } from './goalActivityRhythm';
+import { loadEligibleGoalDemand, excludeGoalDemandByActivityIds, type GoalDemandCandidate, type GoalDemandCandidatesDeps } from './goalDemandCandidates';
 
 export interface PlanDayBootstrap {
   timezone: string;
@@ -280,4 +281,73 @@ export async function resolveCaptureHandoff(deps: CaptureHandoffDeps, capturesPa
         }) === 'OPEN'
     )
     .map((capture) => ({ id: capture.id, title: capture.title }));
+}
+
+// ============================================================
+// Goals V2 Candidate A3.2 -- the automatic Goal-demand bootstrap seam
+// (this ticket's own section 3/10 of the A3 architecture audit): the
+// smallest server-side resolver turning A1's own ownership-scoped
+// `loadEligibleGoalDemand` into factual, deduplicated presentation
+// candidates for the Plan Day page. Mirrors `resolveGoalActivityHandoff`/
+// `resolveCaptureHandoff` above exactly (same session-resolution
+// convention, same DI-testable deps shape) -- the ONE deliberate
+// difference is that `LOAD_FAILED` is preserved all the way out of this
+// function (this ticket's own section 9/10: "do not convert LOAD_FAILED
+// to [] inside the resolver"), because A1 itself distinguishes "load
+// failed" from "genuinely zero eligible" and this is the first layer
+// with the authority to decide how that distinction should degrade --
+// the page boundary (page.tsx), not this resolver, makes that call.
+//
+// Recomputes NO Rhythm eligibility and queries NO Goal/Rhythm state of
+// its own (this ticket's own section 3) -- `loadEligibleGoalDemand` (A1)
+// is called verbatim, and the only additional step this function performs
+// is excluding GoalActivities already represented by the explicit/manual
+// Goal handoff, via `excludeGoalDemandByActivityIds` (A2) -- the SAME
+// pure set-difference helper A2 already established, reused rather than
+// reimplemented (this ticket's own section 7/8).
+// ============================================================
+
+export type AutomaticGoalDemandBootstrapResult = { status: 'OK'; suggestions: readonly GoalDemandCandidate[] } | { status: 'LOAD_FAILED' };
+
+export interface AutomaticGoalDemandBootstrapDeps extends GoalDemandCandidatesDeps {
+  getSessionToken: () => string | undefined;
+  verifySession: (token: string) => { userId: string } | null;
+}
+
+/**
+ * `planningLocalDate`/`timezone` are ALWAYS the same `bootstrap.planningDate`/
+ * `bootstrap.timezone` values `resolvePlanDayServerProps` already resolved
+ * for this exact request (this ticket's own section 5/6: no new date/
+ * timezone source, no `Date.now()`/browser clock) -- `null` (an
+ * unauthenticated/malformed bootstrap) simply means nothing can be
+ * resolved, matching `resolveGoalActivityHandoff`'s own identical
+ * "fails closed to an empty result, never guesses" convention for that
+ * exact case (distinct from a genuine A1 `LOAD_FAILED`).
+ *
+ * `excludeGoalActivityIds` must be the IDs of the explicit/manual Goal
+ * handoff's own SUCCESSFULLY ownership/eligibility-resolved items (i.e.
+ * `resolveGoalActivityHandoff`'s own return value, mapped to ids) --
+ * NEVER the raw, unvalidated `?activities=` query-string value (this
+ * ticket's own section 19: an invalid/not-owned/ineligible id that failed
+ * to resolve to a real manual GoalActivity must never suppress a valid
+ * automatic suggestion for a DIFFERENT GoalActivity that happens to share
+ * no relation to it beyond appearing in the same raw query string).
+ */
+export async function resolveAutomaticGoalDemand(
+  deps: AutomaticGoalDemandBootstrapDeps,
+  planningLocalDate: string | null,
+  timezone: string | null,
+  excludeGoalActivityIds: readonly string[]
+): Promise<AutomaticGoalDemandBootstrapResult> {
+  if (!planningLocalDate || !timezone) return { status: 'OK', suggestions: [] };
+
+  const token = deps.getSessionToken();
+  if (!token) return { status: 'OK', suggestions: [] };
+  const session = deps.verifySession(token);
+  if (!session) return { status: 'OK', suggestions: [] };
+
+  const result = await loadEligibleGoalDemand(deps, session.userId, planningLocalDate, timezone);
+  if (result.status === 'LOAD_FAILED') return { status: 'LOAD_FAILED' };
+
+  return { status: 'OK', suggestions: excludeGoalDemandByActivityIds(result.candidates, excludeGoalActivityIds) };
 }

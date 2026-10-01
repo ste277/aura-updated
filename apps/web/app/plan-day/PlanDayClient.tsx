@@ -44,6 +44,7 @@ import {
   type PlanDayEntryErrorPresentation,
 } from '../../lib/planDayEntry';
 import type { GoalActivityHandoffItem, CaptureHandoffItem } from '../../lib/planDayBootstrap';
+import type { GoalDemandCandidate } from '../../lib/goalDemandCandidates';
 
 /**
  * Day Constructor V1 -- PR F2. The user-reachable "Plan my day" entry
@@ -123,9 +124,28 @@ export interface PlanDayClientProps {
   goalActivities: readonly GoalActivityHandoffItem[];
   /** Quick Capture V1 PR B -- already ownership/eligibility-resolved server-side (`resolveCaptureHandoff`) from `?captures=`. Empty for an ordinary visit. */
   captures: readonly CaptureHandoffItem[];
+  /**
+   * Goals V2 Candidate A3.2 -- server-produced, presentation-only,
+   * immutable bootstrap input (`resolveAutomaticGoalDemand`,
+   * planDayBootstrap.ts): the factual set of recurring GoalActivities
+   * Aura COULD suggest for this planning date, already deduplicated
+   * against the explicit/manual Goal handoff above. Deliberately INERT in
+   * this ticket's own scope (A3 architecture audit's own section
+   * 11/12/17): never read by the `rows` initializer, never passed to
+   * `buildRequestedIntentsForSubmission`/`buildGoalActivityLinksForAccept`,
+   * never rendered -- consumed only by a later, separately-authorized
+   * ticket (A3.3), which is what turns an explicitly-included suggestion
+   * into a real row through the existing row pipeline. This prop exists
+   * so the data safely reaches the client boundary and nothing else.
+   */
+  autoGoalSuggestions: readonly GoalDemandCandidate[];
 }
 
-export function PlanDayClient({ timezone, planningDate, horizon, availabilityConfigured, goalActivities, captures }: PlanDayClientProps) {
+export function PlanDayClient({ timezone, planningDate, horizon, availabilityConfigured, goalActivities, captures, autoGoalSuggestions: _autoGoalSuggestions }: PlanDayClientProps) {
+  // `_autoGoalSuggestions` (Goals V2 Candidate A3.2) is deliberately
+  // unread here -- see its own prop doc comment above. Destructured only
+  // so TypeScript still proves every PlanDayClientProps field is a real,
+  // named prop this component accepts; A3.3 is what actually consumes it.
   const router = useRouter();
   const authenticated = !!timezone && !!planningDate && !!horizon;
   const [phase, setPhase] = useState<Phase>(() => (authenticated ? 'ENTRY' : 'REDIRECTING'));

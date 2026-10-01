@@ -2,7 +2,8 @@ import type { Metadata } from 'next';
 import { cookies } from 'next/headers';
 import { verifySessionToken, SESSION_COOKIE_NAME } from '../../lib/auth';
 import { getUserById, listGoalActivitiesWithLinkedPlanStatus, listCapturesWithLinkedPlanStatus, loadGoalActivityRhythmFacts } from '../../lib/db';
-import { resolvePlanDayServerProps, resolveGoalActivityHandoff, resolveCaptureHandoff } from '../../lib/planDayBootstrap';
+import { resolvePlanDayServerProps, resolveGoalActivityHandoff, resolveCaptureHandoff, resolveAutomaticGoalDemand } from '../../lib/planDayBootstrap';
+import { createRealGoalDemandCandidatesDeps } from '../../lib/goalDemandCandidates';
 import { parseHorizonSearchParam } from '../../lib/planningHorizon';
 import { PlanDayClient } from './PlanDayClient';
 
@@ -89,6 +90,30 @@ export default async function PlanDayPage({
     capturesParam
   );
 
+  // Goals V2 Candidate A3.2 -- automatic Goal-demand bootstrap (A3
+  // architecture audit's own section 3: server bootstrap, parallel to the
+  // manual handoff above). Runs AFTER `goalActivities` above has already
+  // resolved (never in parallel with it) -- this ticket's own section 22:
+  // automatic dedup depends on the explicit/manual handoff's own
+  // SUCCESSFULLY ownership-resolved ids, never the raw `activitiesParam`
+  // string (section 19), so this call is deliberately sequenced after it
+  // rather than forced into a Promise.all. LOAD_FAILED is preserved all
+  // the way out of `resolveAutomaticGoalDemand` and degraded to an empty
+  // suggestion list ONLY here, at the page boundary (this ticket's own
+  // section 10) -- never silently reinterpreted as "no eligible Goals"
+  // inside the resolver itself.
+  const automaticGoalDemand = await resolveAutomaticGoalDemand(
+    {
+      getSessionToken: () => cookies().get(SESSION_COOKIE_NAME)?.value,
+      verifySession: (token) => verifySessionToken(token),
+      ...createRealGoalDemandCandidatesDeps(),
+    },
+    bootstrap?.planningDate ?? null,
+    bootstrap?.timezone ?? null,
+    goalActivities.map((activity) => activity.id)
+  );
+  const autoGoalSuggestions = automaticGoalDemand.status === 'OK' ? automaticGoalDemand.suggestions : [];
+
   return (
     <PlanDayClient
       timezone={bootstrap?.timezone ?? null}
@@ -97,6 +122,7 @@ export default async function PlanDayPage({
       availabilityConfigured={bootstrap?.availabilityConfigured ?? null}
       goalActivities={goalActivities}
       captures={captures}
+      autoGoalSuggestions={autoGoalSuggestions}
     />
   );
 }
