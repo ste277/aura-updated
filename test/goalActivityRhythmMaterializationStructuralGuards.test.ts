@@ -57,8 +57,17 @@ for (const [label, relPath] of Object.entries(PRODUCTION_FILES)) {
 // presentation files (the other being GoalDetailClient.tsx, checked
 // below) -- narrowed to confirm it carries ONLY the one documented,
 // read-only boolean field, never a Rhythm-authoring one.
+//
+// Rhythm R4 (a later, separately-authorized ticket: Goal Detail
+// presentation) superseded that interim boolean field with the full
+// canonical GoalActivityRhythmView shape (this file's own single source of
+// truth -- every number inside it still comes from the one
+// computeGoalActivityRhythmEligibility call in app/api/goals/[goalId]/route.ts,
+// never a second implementation here). The real invariant narrows to: this
+// module defines the VIEW shape and its formatters, never the raw DB column
+// names, never the eligibility engine itself.
 const goalsPresentationSrc = stripComments(read('../apps/web/lib/goalsPresentation.ts'));
-check('goalsPresentation.ts references Rhythm ONLY via its own documented rhythmEligibleForAnotherOccurrence field -- no rhythmKind/targetPerWeek/eligibility-engine import', /rhythmEligibleForAnotherOccurrence/.test(goalsPresentationSrc) && !/rhythmKind|rhythmTargetPerWeek|computeGoalActivityRhythmEligibility/.test(goalsPresentationSrc));
+check('goalsPresentation.ts defines the canonical rhythm view shape (R4) -- no rhythmKind/targetPerWeek DB column names, no eligibility-engine import/call', /GoalActivityRhythmView/.test(goalsPresentationSrc) && !/rhythmKind|rhythmTargetPerWeek|computeGoalActivityRhythmEligibility/.test(goalsPresentationSrc));
 
 const askAuraFiles = fs.readdirSync(path.join(__dirname, '../apps/web/lib')).filter((f) => /askAura/i.test(f));
 check('at least one Ask Aura orchestrator file exists to check', askAuraFiles.length > 0);
@@ -158,7 +167,20 @@ check('materializeGoalActivityRhythmOccurrence does not reference day-accumulati
 // ============================================================
 const goalDetailSrc = read('../apps/web/app/goals/[goalId]/GoalDetailClient.tsx');
 check('GoalDetailClient.tsx never sends rhythmKind/rhythmTargetPerWeek/remainingOccurrences back to the server (client never authors Rhythm, this ticket\'s own section 20)', !/rhythmKind|rhythmTargetPerWeek|remainingOccurrences/.test(goalDetailSrc));
-check('GoalDetailClient.tsx gained no new completion-type selector/target field/unit field/frequency field (still no Rhythm configuration UI)', !/rhythmKind|targetPerWeek|N_PER_WEEK/.test(goalDetailSrc));
+// Rhythm R4 (a later, separately-authorized ticket: Goal Detail
+// presentation) legitimately added READ-ONLY display of the existing
+// policy -- frequency copy and `rhythm.kind === 'N_PER_WEEK'` branching are
+// now expected (this ticket's own section 9/12). What this check must
+// still prove, per R4's own section 32 ("No Rhythm editing UI yet... the
+// next product gap"), is that NO configuration/editing control was added:
+// no input/select tied to a rhythm field, and the raw, concatenated DB
+// column names (rhythmKind/rhythmTargetPerWeek, as opposed to the VIEW's
+// own dotted `rhythm.kind`/`rhythm.targetPerWeek` property access) never
+// appear at all.
+check(
+  'GoalDetailClient.tsx gained no Rhythm CONFIGURATION UI (R4 only reads/displays the existing policy, never edits it; still disallows the raw rhythmKind/rhythmTargetPerWeek DB column names and any input/select control for a rhythm field)',
+  !/rhythmKind|rhythmTargetPerWeek/.test(goalDetailSrc) && !/<select[^>]*rhythm/i.test(goalDetailSrc) && !/<input[^>]*rhythm/i.test(goalDetailSrc)
+);
 const planDayBootstrapSrc = read('../apps/web/lib/planDayBootstrap.ts');
 check('planDayBootstrap.ts\'s resolveGoalActivityHandoff re-derives eligibility server-side from persisted facts -- never trusts a client-supplied Rhythm/eligibility flag', /computeGoalActivityRhythmEligibility\(/.test(planDayBootstrapSrc) && !/activitiesParam.*rhythm|rhythm.*activitiesParam/i.test(stripComments(planDayBootstrapSrc)));
 

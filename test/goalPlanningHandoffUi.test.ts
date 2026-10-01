@@ -32,14 +32,23 @@ function main() {
   // Goals V2 Rhythm R3 (a later, separately-authorized ticket) legitimately
   // widened this gate: a COMPLETED activity is now ALSO selectable, but
   // ONLY when it is independently proven Rhythm-eligible for another
-  // occurrence (rhythmEligibleForAnotherOccurrence, re-derived server-side
-  // every time -- see goalActivityRhythmMaterializationStructuralGuards
-  // .test.ts). SUGGESTED remains unconditionally selectable on its own, and
-  // no other COMPLETED path (without that explicit Rhythm proof) is
-  // granted a checkbox -- narrowed to that exact invariant rather than the
-  // original "ONLY SUGGESTED, full stop".
+  // occurrence, re-derived server-side every time -- see
+  // goalActivityRhythmMaterializationStructuralGuards.test.ts. SUGGESTED
+  // remains unconditionally selectable on its own, and no other COMPLETED
+  // path (without that explicit Rhythm proof) is granted a checkbox --
+  // narrowed to that exact invariant rather than the original "ONLY
+  // SUGGESTED, full stop".
+  //
+  // Rhythm R4 (a still-further, separately-authorized ticket) then replaced
+  // R3's own interim rhythmEligibleForAnotherOccurrence flat flag with the
+  // canonical `rhythm` view shape (`rhythm.kind === 'N_PER_WEEK' &&
+  // rhythm.eligibleForAnotherOccurrence`) -- the exact same fact, read
+  // through the one canonical shape instead of a dedicated boolean field.
   // ============================================================
-  check('A/4. the checkbox is gated on derivedState === \'SUGGESTED\' (unconditionally), OR COMPLETED gated strictly on rhythmEligibleForAnotherOccurrence (R3)', /isSelectable = \(a: GoalActivityView\) => a\.derivedState === 'SUGGESTED' \|\| \(a\.derivedState === 'COMPLETED' && a\.rhythmEligibleForAnotherOccurrence\)/.test(source));
+  check(
+    'A/4. the checkbox is gated on derivedState === \'SUGGESTED\' (unconditionally), OR COMPLETED gated strictly on rhythm.eligibleForAnotherOccurrence for an N_PER_WEEK activity (R4)',
+    /isSelectable = \(a: GoalActivityView\) => a\.derivedState === 'SUGGESTED' \|\| \(a\.derivedState === 'COMPLETED' && a\.rhythm\.kind === 'N_PER_WEEK' && a\.rhythm\.eligibleForAnotherOccurrence\)/.test(source)
+  );
   check('B/C. PLANNED/COMPLETED never render a checkbox -- isSelectable is false for every state except SUGGESTED (single boolean gate, no PLANNED/COMPLETED branch grants it)', !/isSelectable[\s\S]{0,80}'PLANNED'/.test(source) && !/isSelectable[\s\S]{0,80}'COMPLETED'/.test(source));
   check('4. the checkbox itself is conditionally rendered only when isSelectable', /\{isSelectable && \(/.test(source));
 

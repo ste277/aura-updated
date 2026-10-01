@@ -70,16 +70,26 @@ check(
   /UPDATE "GoalActivityOccurrence"/.test(planMoveSrc) && !/computeGoalActivityRhythmEligibility|rhythmKind|rhythmTargetPerWeek/.test(planMoveSrc)
 );
 
+// Rhythm R4 (a still-further, separately-authorized ticket: Goal Detail
+// presentation) superseded R3's own interim rhythmEligibleForAnotherOccurrence
+// flat flag with the full canonical `rhythm` presentation shape (see
+// goalsPresentation.ts's own GoalActivityRhythmView doc comment). The real
+// invariant each of the two checks below still protects is unchanged: the
+// client/presentation layer reads the VIEW's own field names (`rhythm.kind`,
+// `rhythm.targetPerWeek`, etc.) and never the raw, concatenated DB column
+// names `rhythmKind`/`rhythmTargetPerWeek` -- and never computes a second,
+// independent eligibility implementation.
 const goalDetailClientSrc = read('../apps/web/app/goals/[goalId]/GoalDetailClient.tsx');
 check(
-  'GoalDetailClient.tsx references Rhythm ONLY via its one documented rhythmEligibleForAnotherOccurrence read (R3) -- never authors rhythmKind/rhythmTargetPerWeek',
-  /rhythmEligibleForAnotherOccurrence/.test(goalDetailClientSrc) && !/rhythmKind|rhythmTargetPerWeek/.test(goalDetailClientSrc)
+  'GoalDetailClient.tsx reads the canonical rhythm view shape (R4) -- never the raw rhythmKind/rhythmTargetPerWeek DB column names, never a second eligibility computation',
+  /\.rhythm\b/.test(goalDetailClientSrc) && !/rhythmKind|rhythmTargetPerWeek|computeGoalActivityRhythmEligibility/.test(goalDetailClientSrc)
 );
 
 const goalsPresentationSrc = read('../apps/web/lib/goalsPresentation.ts');
+const goalsPresentationSrcNoComments = stripComments(goalsPresentationSrc);
 check(
-  'goalsPresentation.ts references Rhythm ONLY via its one documented rhythmEligibleForAnotherOccurrence field (R3) -- no rhythmKind/targetPerWeek/eligibility-engine import',
-  /rhythmEligibleForAnotherOccurrence/.test(goalsPresentationSrc) && !/rhythmKind|rhythmTargetPerWeek|computeGoalActivityRhythmEligibility/.test(goalsPresentationSrc)
+  'goalsPresentation.ts defines the canonical rhythm view shape/formatters (R4) -- no rhythmKind/targetPerWeek DB column names, no eligibility-engine import/call in real code (doc-comment prose describing the single source of truth is excluded)',
+  /GoalActivityRhythmView/.test(goalsPresentationSrc) && !/rhythmKind|rhythmTargetPerWeek/.test(goalsPresentationSrc) && !/computeGoalActivityRhythmEligibility/.test(goalsPresentationSrcNoComments)
 );
 
 const planDayBootstrapSrc = read('../apps/web/lib/planDayBootstrap.ts');
@@ -129,13 +139,17 @@ check('addGoalActivity itself does not reference Rhythm (no production writer)',
 // materializeGoalActivityRhythmOccurrence -- NOT read-only, by design (it is
 // the sole production writer of GoalActivityOccurrence rows, proved exactly
 // once and exhaustively in goalActivityRhythmMaterializationStructuralGuards
-// .test.ts). The real invariant that still must hold is narrower than "only
-// one": db.ts's Rhythm-named functions are limited to exactly these two
-// named, intentionally-reviewed functions -- never a third, undocumented one.
+// .test.ts). Rhythm R4 (a still-further, separately-authorized ticket) then
+// added exactly one more intentionally-reviewed function,
+// loadGoalActivityRhythmFactsForActivities -- a batched, read-only sibling of
+// loadGoalActivityRhythmFacts (this ticket's own section 40 N+1 fix). The
+// real invariant that still must hold is narrower than "only two": db.ts's
+// Rhythm-named functions are limited to exactly these three named,
+// intentionally-reviewed functions -- never a fourth, undocumented one.
 check(
-  'db.ts defines ONLY the two allowed, intentionally-reviewed Rhythm functions (loadGoalActivityRhythmFacts [read-only] and materializeGoalActivityRhythmOccurrence [R3\'s sole occurrence writer]) -- no other function references Rhythm',
+  'db.ts defines ONLY the three allowed, intentionally-reviewed Rhythm functions (loadGoalActivityRhythmFacts [read-only], loadGoalActivityRhythmFactsForActivities [R4\'s batched read-only sibling], and materializeGoalActivityRhythmOccurrence [R3\'s sole occurrence writer]) -- no other function references Rhythm',
   [...new Set((dbSrc.match(/function \w*[Rr]hythm\w*/g) ?? []))].sort().join(',') ===
-    ['function loadGoalActivityRhythmFacts', 'function materializeGoalActivityRhythmOccurrence'].sort().join(',')
+    ['function loadGoalActivityRhythmFacts', 'function loadGoalActivityRhythmFactsForActivities', 'function materializeGoalActivityRhythmOccurrence'].sort().join(',')
 );
 check('loadGoalActivityRhythmFacts itself contains no INSERT/UPDATE/DELETE (read-only, this ticket\'s own section 23)', !/INSERT\s|UPDATE\s|DELETE\s/.test(functionBody(dbSrc, 'loadGoalActivityRhythmFacts')));
 

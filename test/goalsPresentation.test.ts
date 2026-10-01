@@ -18,6 +18,8 @@ import {
   formatGoalTargetDateLabel,
   formatGoalActivityCompletion,
   isValidCivilDateString,
+  goalHasOngoingRhythmActivity,
+  type GoalActivityRhythmView,
 } from '../apps/web/lib/goalsPresentation';
 import { GOAL_TEMPLATE_CATEGORIES, type GoalTemplateCategory } from '../apps/web/lib/goals';
 
@@ -49,12 +51,35 @@ check('M/17. COMPLETED -> "Completed"', presentGoalActivityStateLabel('COMPLETED
 check('DISMISSED -> "Dismissed" (human label, distinct from the raw enum casing/word)', presentGoalActivityStateLabel('DISMISSED') === 'Dismissed');
 
 // ============================================================
-// Progress copy (this ticket's own section 7/J)
+// Progress copy (this ticket's own section 7/J). `hasOngoingRhythmActivity:
+// false` on every fixture here -- Goals V2 Rhythm R4's own section 42 DB
+// test requirement: a finite-only Goal's progress presentation must stay
+// byte-identical to this pre-R4 behavior.
 // ============================================================
-check('J. "0 of 3 completed"', formatGoalProgressLabel({ total: 3, completed: 0 }) === '0 of 3 completed');
-check('J. "1 of 3 completed"', formatGoalProgressLabel({ total: 3, completed: 1 }) === '1 of 3 completed');
-check('J. "3 of 3 completed"', formatGoalProgressLabel({ total: 3, completed: 3 }) === '3 of 3 completed');
-check('J. zero activities reads as "No activities yet", never "0 of 0 completed"', formatGoalProgressLabel({ total: 0, completed: 0 }) === 'No activities yet');
+check('J. "0 of 3 completed"', formatGoalProgressLabel({ total: 3, completed: 0, hasOngoingRhythmActivity: false }) === '0 of 3 completed');
+check('J. "1 of 3 completed"', formatGoalProgressLabel({ total: 3, completed: 1, hasOngoingRhythmActivity: false }) === '1 of 3 completed');
+check('J. "3 of 3 completed"', formatGoalProgressLabel({ total: 3, completed: 3, hasOngoingRhythmActivity: false }) === '3 of 3 completed');
+check('J. zero activities reads as "No activities yet", never "0 of 0 completed"', formatGoalProgressLabel({ total: 0, completed: 0, hasOngoingRhythmActivity: false }) === 'No activities yet');
+
+// ============================================================
+// Goals V2 Rhythm R4 -- hasOngoingRhythmActivity suppresses the label
+// entirely (this ticket's own section 17-19): a Goal containing an
+// ongoing N_PER_WEEK activity cannot be honestly summarized as finite
+// "N of M completed".
+// ============================================================
+check('R4. hasOngoingRhythmActivity suppresses the progress label to null, regardless of total/completed', formatGoalProgressLabel({ total: 1, completed: 1, hasOngoingRhythmActivity: true }) === null);
+
+// ============================================================
+// Goals V2 Rhythm R4 -- 53. Goal-level progress audit: finite-only
+// unchanged, Rhythm-only never a misleading "1 of 1", mixed Goal never a
+// misleading universal N-of-M.
+// ============================================================
+const none: GoalActivityRhythmView = { kind: 'NONE' };
+const nPerWeek: GoalActivityRhythmView = { kind: 'N_PER_WEEK', targetPerWeek: 1, completedThisWeek: 1, committedThisWeek: 0, remainingThisWeek: 0, eligibleForAnotherOccurrence: false };
+check('53. finite-only Goal (every activity NONE): hasOngoingRhythmActivity false -- existing N-of-M progress unchanged', goalHasOngoingRhythmActivity([{ rhythm: none }, { rhythm: none }]) === false);
+check('53. Rhythm-only Goal (one N_PER_WEEK activity, just completed its only weekly session): hasOngoingRhythmActivity true -- never shows a misleading "1 of 1"', goalHasOngoingRhythmActivity([{ rhythm: nPerWeek }]) === true);
+check('53. mixed Goal (one finite NONE + one N_PER_WEEK): hasOngoingRhythmActivity true -- never a misleading universal N-of-M', goalHasOngoingRhythmActivity([{ rhythm: none }, { rhythm: nPerWeek }]) === true);
+check('53. zero activities: hasOngoingRhythmActivity false (vacuously -- nothing ongoing to misrepresent)', goalHasOngoingRhythmActivity([]) === false);
 
 // ============================================================
 // Civil-date display (this ticket's own section 13/G) -- must never

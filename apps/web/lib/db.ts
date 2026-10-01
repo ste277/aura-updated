@@ -2757,6 +2757,41 @@ export async function loadGoalActivityRhythmFacts(userId: string, goalActivityId
   }));
 }
 
+/**
+ * Goals V2 Rhythm R4 -- ONE batched query for every N_PER_WEEK GoalActivity
+ * on a single Goal Detail page, never one query per activity (this
+ * ticket's own section 40; same batching convention as
+ * loadGoalContextsForPlanIds above). Purely an N+1 fix: the per-row shaping
+ * is identical to loadGoalActivityRhythmFacts above (same localDate
+ * derivation, same deriveGoalActivityRhythmContribution mapping) -- this is
+ * NOT a second eligibility/counting implementation, just a batched way to
+ * produce the same facts for several activities in one round trip. A
+ * goalActivityId with zero occurrences simply has no entry in the returned
+ * Map (never an empty-array entry), matching loadGoalContextsForPlanIds'
+ * own "no entry means none" convention.
+ */
+export async function loadGoalActivityRhythmFactsForActivities(userId: string, goalActivityIds: readonly string[], timezone: string): Promise<Map<string, GoalActivityRhythmOccurrenceFact[]>> {
+  const factsByActivity = new Map<string, GoalActivityRhythmOccurrenceFact[]>();
+  if (goalActivityIds.length === 0) return factsByActivity;
+  const result = await pool.query(
+    `SELECT gao."goalActivityId", pa."plannedStartAt", pa.status
+     FROM "GoalActivityOccurrence" gao
+     JOIN "PlannedActivity" pa ON pa.id = gao."plannedActivityId"
+     WHERE gao."userId" = $1 AND gao."goalActivityId" = ANY($2::text[])`,
+    [userId, [...goalActivityIds]]
+  );
+  for (const row of result.rows) {
+    const fact: GoalActivityRhythmOccurrenceFact = {
+      localDate: getDatePartsInTimezone(timezone, new Date(row.plannedStartAt)).dateStr,
+      contribution: deriveGoalActivityRhythmContribution(row.status as PlannedActivityStatusForRhythm),
+    };
+    const existing = factsByActivity.get(row.goalActivityId);
+    if (existing) existing.push(fact);
+    else factsByActivity.set(row.goalActivityId, [fact]);
+  }
+  return factsByActivity;
+}
+
 export type MaterializeGoalActivityRhythmOccurrenceResult =
   | { ok: true; occurrenceId: string }
   | { ok: false; reason: 'NOT_FOUND' | 'NOT_RHYTHM_ELIGIBLE' | 'HAS_LIVE_COMMITMENT' | 'CAPACITY_EXHAUSTED' };

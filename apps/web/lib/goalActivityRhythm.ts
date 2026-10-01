@@ -238,6 +238,16 @@ export interface GoalActivityRhythmEligibilityResult {
    * occurrences to actually materialize in one planning session. R2 itself
    * makes no such decision. Never negative (section 23). */
   remainingOccurrences: number;
+  /** Rhythm R4 (a later, separately-authorized ticket: Goal Detail
+   * presentation) -- the exact COMPLETED/COMMITTED counts already computed
+   * internally below, exposed so a presentation caller can show factual
+   * weekly progress WITHOUT a second counting implementation (R4's own
+   * section 6 "Single Source of Truth" -- this remains the one place that
+   * counts). Purely additive to this result; the eligible/remainingOccurrences
+   * fields and the formula itself are completely unchanged. Always 0 for
+   * NONE. */
+  completedThisWeek: number;
+  committedThisWeek: number;
 }
 
 /**
@@ -257,7 +267,7 @@ export interface GoalActivityRhythmEligibilityResult {
  * completed.
  */
 export function computeGoalActivityRhythmEligibility(input: GoalActivityRhythmEligibilityInput): GoalActivityRhythmEligibilityResult {
-  if (input.rhythm.kind === 'NONE') return { eligible: false, remainingOccurrences: 0 };
+  if (input.rhythm.kind === 'NONE') return { eligible: false, remainingOccurrences: 0, completedThisWeek: 0, committedThisWeek: 0 };
 
   const weekStart = localCalendarWeekStart(input.planningLocalDate);
   const inWeek = input.occurrences.filter((o) => localCalendarWeekStart(o.localDate) === weekStart);
@@ -265,5 +275,5 @@ export function computeGoalActivityRhythmEligibility(input: GoalActivityRhythmEl
   const committed = inWeek.filter((o) => o.contribution === 'COMMITTED').length;
 
   const remaining = Math.max(0, (input.rhythm.targetPerWeek ?? 0) - completed - committed);
-  return { eligible: remaining > 0, remainingOccurrences: remaining };
+  return { eligible: remaining > 0, remainingOccurrences: remaining, completedThisWeek: completed, committedThisWeek: committed };
 }

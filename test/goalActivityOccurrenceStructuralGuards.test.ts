@@ -100,10 +100,23 @@ const dbSrc = read('../apps/web/lib/db.ts');
 // invariant narrows further: db.ts references GoalActivityOccurrence ONLY
 // inside these two named, intentionally-reviewed functions -- never a third,
 // undocumented one -- and the one INSERT lives only inside the R3 writer.
+//
+// Rhythm R4 (a still-further, separately-authorized ticket: Goal Detail
+// presentation) then added exactly one more intentionally-reviewed
+// function, loadGoalActivityRhythmFactsForActivities -- a batched,
+// read-only sibling of loadGoalActivityRhythmFacts (same read-only
+// contract, just one query across several activities instead of one --
+// this ticket's own section 40 N+1 fix). The real invariant narrows once
+// more: db.ts references GoalActivityOccurrence ONLY inside these three
+// named, intentionally-reviewed functions -- never a fourth, undocumented
+// one -- and the one INSERT still lives only inside the R3 writer.
 const dbSrcNoComments = stripComments(dbSrc);
-const allowedOccurrenceFnBodiesNoComments = stripComments(functionBody(dbSrc, 'loadGoalActivityRhythmFacts')) + stripComments(functionBody(dbSrc, 'materializeGoalActivityRhythmOccurrence'));
+const allowedOccurrenceFnBodiesNoComments =
+  stripComments(functionBody(dbSrc, 'loadGoalActivityRhythmFacts')) +
+  stripComments(functionBody(dbSrc, 'materializeGoalActivityRhythmOccurrence')) +
+  stripComments(functionBody(dbSrc, 'loadGoalActivityRhythmFactsForActivities'));
 check(
-  'db.ts references GoalActivityOccurrence ONLY inside the two allowed, intentionally-reviewed functions (loadGoalActivityRhythmFacts [read-only] and materializeGoalActivityRhythmOccurrence [R3\'s sole writer]) -- no third function in real code, no UPDATE/DELETE anywhere',
+  'db.ts references GoalActivityOccurrence ONLY inside the three allowed, intentionally-reviewed functions (loadGoalActivityRhythmFacts [read-only], loadGoalActivityRhythmFactsForActivities [R4\'s batched read-only sibling], and materializeGoalActivityRhythmOccurrence [R3\'s sole writer]) -- no fourth function in real code, no UPDATE/DELETE anywhere',
   (dbSrcNoComments.match(/GoalActivityOccurrence/g) ?? []).length === (allowedOccurrenceFnBodiesNoComments.match(/GoalActivityOccurrence/g) ?? []).length &&
     (dbSrcNoComments.match(/INSERT INTO "GoalActivityOccurrence"/g) ?? []).length === 1 &&
     !/UPDATE "GoalActivityOccurrence"|DELETE FROM "GoalActivityOccurrence"/.test(dbSrcNoComments)

@@ -3,7 +3,16 @@
 import React, { useEffect, useState } from 'react';
 import { colors, spacing, typography } from '../../../components/theme';
 import { PageHeader, SurfaceCard, PrimaryButton, SecondaryButton, TextButton, DestructiveButton, StatusBadge, EmptyState, FieldLabel, TextInput, FieldError } from '../../../components/ui';
-import { formatGoalActivityCompletion, formatGoalProgressLabel, formatGoalTargetDateLabel, presentGoalActivityStateLabel, type GoalActivityView, type GoalDetailView } from '../../../lib/goalsPresentation';
+import {
+  formatGoalActivityCompletion,
+  formatGoalActivityRhythmFrequencyLabel,
+  formatGoalActivityRhythmWeeklyProgressLabel,
+  formatGoalProgressLabel,
+  formatGoalTargetDateLabel,
+  presentGoalActivityRhythmAwareStateLabel,
+  type GoalActivityView,
+  type GoalDetailView,
+} from '../../../lib/goalsPresentation';
 
 /**
  * Goals -> Planning Integration V1 PR B -- Goal detail: "What does
@@ -125,7 +134,12 @@ function GoalDetailBody({ detail, onChanged }: { detail: GoalDetailView; onChang
   // (server-derived, this ticket's own section 37's "smallest Goal Detail
   // lifecycle adjustment necessary" -- a finite/NONE COMPLETED activity, or
   // any PLANNED activity, remains unselectable exactly as before R3).
-  const isSelectable = (a: GoalActivityView) => a.derivedState === 'SUGGESTED' || (a.derivedState === 'COMPLETED' && a.rhythmEligibleForAnotherOccurrence);
+  // Rhythm R4 reads this same fact through the canonical `rhythm` shape
+  // (`rhythm.eligibleForAnotherOccurrence`) instead of R3's own interim
+  // flat `rhythmEligibleForAnotherOccurrence` field -- identical logic, one
+  // canonical read model (see goalsPresentation.ts's own doc comment on
+  // GoalActivityView.rhythm).
+  const isSelectable = (a: GoalActivityView) => a.derivedState === 'SUGGESTED' || (a.derivedState === 'COMPLETED' && a.rhythm.kind === 'N_PER_WEEK' && a.rhythm.eligibleForAnotherOccurrence);
   const selectableIds = new Set(primaryActivities.filter(isSelectable).map((a) => a.id));
   const effectiveSelectedIds = Array.from(selectedIds).filter((id) => selectableIds.has(id));
 
@@ -152,16 +166,27 @@ function GoalDetailBody({ detail, onChanged }: { detail: GoalDetailView; onChang
     <div>
       <PageHeader title={goal.title} subtitle={goal.targetDate ? `Target ${formatGoalTargetDateLabel(goal.targetDate)}` : undefined} />
 
-      <div style={{ marginTop: spacing.lg }}>
-        <SurfaceCard>
-          <div style={{ ...typography.bodyStrong }}>{formatGoalProgressLabel(progress)}</div>
-          {progress.total > 0 && (
-            <div style={{ marginTop: spacing.sm, height: 6, borderRadius: 999, background: colors.borderSubtle, overflow: 'hidden' }} role="progressbar" aria-valuenow={progress.completed} aria-valuemin={0} aria-valuemax={progress.total} aria-label="Goal progress">
-              <div style={{ height: '100%', width: `${Math.round((progress.completed / progress.total) * 100)}%`, background: colors.positive, borderRadius: 999 }} />
-            </div>
-          )}
-        </SurfaceCard>
-      </div>
+      {/* Goals V2 Rhythm R4 -- this ticket's own section 17-19: a finite
+          "N of M completed" bar cannot honestly describe a Goal containing
+          an ongoing N_PER_WEEK activity (it could show "1 of 1 completed"
+          the moment a single ongoing session is logged, directly
+          contradicting the fact that another occurrence is still eligible
+          this week, or will be again next week). formatGoalProgressLabel
+          returns null for exactly that case (server-computed
+          hasOngoingRhythmActivity) -- the whole card, including the bar,
+          is hidden rather than shown with misleading numbers. */}
+      {formatGoalProgressLabel(progress) && (
+        <div style={{ marginTop: spacing.lg }}>
+          <SurfaceCard>
+            <div style={{ ...typography.bodyStrong }}>{formatGoalProgressLabel(progress)}</div>
+            {progress.total > 0 && (
+              <div style={{ marginTop: spacing.sm, height: 6, borderRadius: 999, background: colors.borderSubtle, overflow: 'hidden' }} role="progressbar" aria-valuenow={progress.completed} aria-valuemin={0} aria-valuemax={progress.total} aria-label="Goal progress">
+                <div style={{ height: '100%', width: `${Math.round((progress.completed / progress.total) * 100)}%`, background: colors.positive, borderRadius: 999 }} />
+              </div>
+            )}
+          </SurfaceCard>
+        </div>
+      )}
 
       <div style={{ marginTop: spacing.xxl }}>
         <h2 style={typography.sectionEyebrow}>Activities</h2>
@@ -235,8 +260,19 @@ function ActivityRow({
 }) {
   const [dismissing, setDismissing] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const stateLabel = presentGoalActivityStateLabel(activity.derivedState);
+  // Goals V2 Rhythm R4 -- Rhythm-aware: a permanent "Completed" badge is
+  // misleading for an N_PER_WEEK activity (this ticket's own section
+  // 14/15/23 -- it can become eligible again next week). NONE activities
+  // pass straight through to the original presentGoalActivityStateLabel
+  // unchanged (this ticket's own section 15 "preserve current derivedState
+  // labels exactly").
+  const stateLabel = presentGoalActivityRhythmAwareStateLabel(activity.derivedState, activity.rhythm);
   const isSelectable = onToggleSelect !== undefined;
+  // Goals V2 Rhythm R4 -- an ongoing activity that is still eligible for
+  // another occurrence this week should not read as "done and dimmed" the
+  // way a truly finite COMPLETED activity does (this ticket's own section
+  // 15 -- it remains actionable, not a closed-out row).
+  const isDimmed = activity.derivedState === 'COMPLETED' && !(activity.rhythm.kind === 'N_PER_WEEK' && activity.rhythm.eligibleForAnotherOccurrence);
   // Goals V2 G3.2 -- "what counts as doing this, and what happened" (this
   // ticket's own section 5 hierarchy: title primary, this secondary,
   // lifecycle state tertiary). Deliberately independent of derivedState --
@@ -244,6 +280,13 @@ function ActivityRow({
   // progress never infers/overrides lifecycle truth. null for DONE (no
   // line at all, this ticket's own section 6).
   const completionDetail = formatGoalActivityCompletion(activity.completionRequirement, activity.currentValue);
+  // Goals V2 Rhythm R4 -- frequency + this-week progress (this ticket's own
+  // section 4/9/10/12). null for NONE -- a finite activity's row is
+  // completely unaffected (this ticket's own section 42 DB test / section
+  // 4 "behaviorally and visually equivalent to the existing finite
+  // experience").
+  const rhythmFrequencyLabel = activity.rhythm.kind === 'N_PER_WEEK' ? formatGoalActivityRhythmFrequencyLabel(activity.rhythm.targetPerWeek) : null;
+  const rhythmWeeklyProgressLabel = formatGoalActivityRhythmWeeklyProgressLabel(activity.rhythm);
 
   const handleDismiss = async () => {
     if (dismissing) return;
@@ -260,7 +303,7 @@ function ActivityRow({
   };
 
   return (
-    <SurfaceCard style={activity.derivedState === 'COMPLETED' ? { opacity: 0.7 } : selected ? { borderColor: colors.accentBorder } : undefined}>
+    <SurfaceCard style={isDimmed ? { opacity: 0.7 } : selected ? { borderColor: colors.accentBorder } : undefined}>
       <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: spacing.md, flexWrap: 'wrap' }}>
         {/* Goals -> Planning Integration V1 PR C -- this ticket's own
             section 3/4: a real selection control now exists, answering
@@ -291,6 +334,15 @@ function ActivityRow({
           reuses the same typography.meta/textSecondary treatment the
           existing target-date line already uses elsewhere on this page. */}
       {completionDetail && <div style={{ ...typography.meta, color: colors.textSecondary, marginTop: 2 }}>{completionDetail}</div>}
+
+      {/* Goals V2 Rhythm R4 -- this ticket's own section 12/34: at most two
+          additional secondary lines (frequency, then this week's factual
+          progress), visually/semantically separate from completionDetail
+          above (section 34 -- "10 min" and "5 times a week" are different
+          dimensions, never merged into one sentence). Both null for NONE,
+          so a finite activity's row is unchanged. */}
+      {rhythmFrequencyLabel && <div style={{ ...typography.meta, color: colors.textSecondary, marginTop: 2 }}>{rhythmFrequencyLabel}</div>}
+      {rhythmWeeklyProgressLabel && <div style={{ ...typography.meta, color: colors.textSecondary, marginTop: 2 }}>{rhythmWeeklyProgressLabel}</div>}
 
       {error && (
         <div role="alert" style={{ marginTop: spacing.sm }}>
