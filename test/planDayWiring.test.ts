@@ -36,6 +36,13 @@ const planDayEntrySource: string = fs.readFileSync(path.join(__dirname, '../apps
 const planningHorizonSource: string = fs.readFileSync(path.join(__dirname, '../apps/web/lib/planningHorizon.ts'), 'utf8');
 const dayConstructorPreviewClientSource: string = fs.readFileSync(path.join(__dirname, '../apps/web/lib/dayConstructorPreviewClient.ts'), 'utf8');
 const planDayQuickPicksSource: string = fs.readFileSync(path.join(__dirname, '../apps/web/lib/planDayQuickPicks.ts'), 'utf8');
+// Goals V2 Candidate A3.2 -- Constructor/acceptance-boundary sources, read
+// fresh here (never assumed) to prove automatic Goal demand has not
+// leaked into any of these layers.
+const dayConstructorSource: string = fs.readFileSync(path.join(__dirname, '../apps/web/lib/dayConstructor.ts'), 'utf8');
+const dayConstructorOrchestratorSource: string = fs.readFileSync(path.join(__dirname, '../apps/web/lib/dayConstructorOrchestrator.ts'), 'utf8');
+const dayConstructorAcceptanceSource: string = fs.readFileSync(path.join(__dirname, '../apps/web/lib/dayConstructorAcceptance.ts'), 'utf8');
+const dayConstructorAcceptancePersistenceSource: string = fs.readFileSync(path.join(__dirname, '../apps/web/lib/dayConstructorAcceptancePersistence.ts'), 'utf8');
 
 function occurrences(haystack: string, needle: string): number {
   return haystack.split(needle).length - 1;
@@ -617,6 +624,46 @@ function main() {
   check('106. presentPlanDayPreviewFailure is still the ONLY source of PREVIEW_ERROR copy for a server-returned status (never a second, inline copy table in this file)', /presentPlanDayPreviewFailure\(result, horizon\)/.test(planDayClientSource));
   check('107. the component never reimplements sign-in/authentication logic of its own (only navigates to the existing \'/\' destination)', !/signIn\(|login\(|authenticate\(/.test(planDayClientSource));
   check('108. Estimated duration presentation (DURATION_FROM_GENERIC_FALLBACK -> "Estimated duration") is untouched by this ticket -- still sourced from dayPlanPreviewPresentation.ts, never reimplemented here', !/Estimated duration/.test(planDayClientSource));
+
+  // ============================================================
+  // Goals V2 Candidate A3.2 -- automatic Goal-demand bootstrap wiring
+  // (109-122). The A3 architecture audit's own section 11/12/13/14/17/
+  // 25: the prop must reach PlanDayClient inert, never seed `rows`, never
+  // alter the preview/accept request, and the Constructor/orchestrator/
+  // acceptance layers must remain completely untouched by this ticket.
+  // ============================================================
+  check('109. PlanDayClientProps declares the new autoGoalSuggestions prop', /autoGoalSuggestions: readonly GoalDemandCandidate\[\]/.test(planDayClientSource));
+  check('110. PlanDayClient destructures autoGoalSuggestions (renamed _autoGoalSuggestions, marking it deliberately unread in A3.2)', /autoGoalSuggestions: _autoGoalSuggestions \}: PlanDayClientProps/.test(planDayClientSource));
+  check(
+    '111. the `rows` useState initializer is byte-identical to before A3.2 -- autoGoalSuggestions never seeds a row',
+    /const \[rows, setRows\] = useState<PlanDayIntentRow\[\]>\(\(\) =>\s*goalActivities\.length \+ captures\.length > 0\s*\? \[\.\.\.goalActivities\.map\(createIntentRowFromGoalActivity\), \.\.\.captures\.map\(createIntentRowFromCapture\)\]\.slice\(0, MAX_PLAN_DAY_INTENTS\)\s*: \[createInitialIntentRow\(\)\]\s*\);/.test(
+      planDayClientSource
+    )
+  );
+  check('112. submitPreview\'s buildRequestedIntentsForSubmission call is byte-identical to before A3.2 (still exactly rows/timezone/planningDate, no 4th argument)', /buildRequestedIntentsForSubmission\(rows, timezone, planningDate\);/.test(planDayClientSource));
+  check(
+    '113. the accept-time goalActivityLinks/captureLinks wiring is byte-identical to before A3.2 (still derived from rows+proposedItems only)',
+    /goalActivityLinks=\{buildGoalActivityLinksForAccept\(rows, preview\.constructedDay\.proposedItems\)\}\s*captureLinks=\{buildCaptureLinksForAccept\(rows, preview\.constructedDay\.proposedItems\)\}/.test(planDayClientSource)
+  );
+  check(
+    '114. `_autoGoalSuggestions` is referenced only in its own destructure and the one explanatory comment immediately below it -- never inside rows/JSX/preview/accept wiring',
+    (planDayClientSource.match(/_autoGoalSuggestions/g) ?? []).length === 2
+  );
+  check('115. page.tsx passes autoGoalSuggestions={autoGoalSuggestions} to <PlanDayClient>', /autoGoalSuggestions=\{autoGoalSuggestions\}/.test(planDayPageSource));
+  check(
+    '116. page.tsx\'s dedup exclusion list is built from the ALREADY-RESOLVED goalActivities (never the raw activitiesParam query string -- this ticket\'s own section 19)',
+    /resolveAutomaticGoalDemand\(\s*\{[\s\S]{0,400}goalActivities\.map\(\(activity\) => activity\.id\)/.test(planDayPageSource) && !/resolveAutomaticGoalDemand\([\s\S]{0,600}activitiesParam/.test(planDayPageSource)
+  );
+  check(
+    '117. LOAD_FAILED is degraded to an empty suggestion list ONLY at the page boundary, via an explicit status check -- never inside the resolver itself',
+    /automaticGoalDemand\.status === 'OK' \? automaticGoalDemand\.suggestions : \[\]/.test(planDayPageSource)
+  );
+  check('118. planDayBootstrap.ts\'s resolveAutomaticGoalDemand calls the real A1 loadEligibleGoalDemand -- no second eligibility formula reimplemented here', /await loadEligibleGoalDemand\(deps, session\.userId, planningLocalDate, timezone\)/.test(planDayBootstrapSource));
+  check('119. resolveAutomaticGoalDemand reuses A2\'s own excludeGoalDemandByActivityIds for dedup -- never a second dedup implementation', /excludeGoalDemandByActivityIds\(result\.candidates, excludeGoalActivityIds\)/.test(planDayBootstrapSource));
+  check('120. the Constructor core (dayConstructor.ts) does not reference Goal demand (goalDemandCandidates/goalPlanningSourceAdapter/autoGoalSuggestions)', !/goalDemandCandidates|goalPlanningSourceAdapter|autoGoalSuggestions/i.test(dayConstructorSource));
+  check('121. the orchestrator (dayConstructorOrchestrator.ts) does not reference Goal demand', !/goalDemandCandidates|goalPlanningSourceAdapter|autoGoalSuggestions/i.test(dayConstructorOrchestratorSource));
+  check('122. acceptance (dayConstructorAcceptance.ts) does not yet decode goal-demand intent ids or reference the Goal planning-source adapter (Option 4/A3.4 not started)', !/goal-demand:|goalPlanningSourceAdapter|encodeGoalDemandIntentId/i.test(dayConstructorAcceptanceSource));
+  check('122b. acceptance persistence (dayConstructorAcceptancePersistence.ts) does not reference Goal demand/the planning-source adapter', !/goalDemandCandidates|goalPlanningSourceAdapter/i.test(dayConstructorAcceptancePersistenceSource));
 
   if (!allPassed) {
     console.error('\nSome Plan Day Wiring checks FAILED.');

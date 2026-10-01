@@ -113,6 +113,10 @@ jobs:
       # apps/web/lib/db.ts -- same apps/web/node_modules requirement.
       - name: Run Goal planning-source adapter test
         run: npx ts-node test/goalPlanningSourceAdapter.test.ts
+      # Goals V2 Candidate A3.2 -- resolveAutomaticGoalDemand (planDayBootstrap.ts)
+      # imports goalDemandCandidates.ts, same apps/web/node_modules requirement.
+      - name: Run Automatic Goal demand bootstrap test
+        run: npx ts-node test/automaticGoalDemandBootstrap.test.ts
       - name: Run Plan-with-Aura view logic test
         env:
           TS_NODE_COMPILER_OPTIONS: '{"jsx":"react"}'
@@ -290,3 +294,5 @@ jobs:
         run: npx ts-node test/dayConstructorAcceptancePersistenceDb.test.ts
       - name: Run Goal demand candidates DB test
         run: npx ts-node test/goalDemandCandidatesDb.test.ts
+      - name: Run Automatic Goal demand bootstrap DB test
+        run: npx ts-node test/automaticGoalDemandBootstrapDb.test.ts
