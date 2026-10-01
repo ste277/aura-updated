@@ -33,6 +33,7 @@ import { movePlannedActivity } from '../apps/web/lib/planMove';
 import { signRecompositionProposal } from '../apps/web/lib/remainingDayRecompositionIntegrity';
 import { acceptRemainingDayRecomposition, realRecompositionAcceptanceDeps } from '../apps/web/lib/remainingDayRecompositionAcceptance';
 import { deriveGoalActivityState } from '../apps/web/lib/goals';
+import { getDatePartsInTimezone, addDaysToDateStr } from '../apps/web/lib/timezone';
 
 let allPassed = true;
 function check(label: string, condition: boolean) {
@@ -216,8 +217,45 @@ async function main() {
     // ============================================================
     const ga53 = await addGoalActivity(user.id, goal.id, { title: 'Meditate 10 minutes', activityId: null });
     await setRhythm(ga53!.id, 5);
-    const rcBase = Math.ceil((Date.now() + 8 * 3600000) / MIN) * MIN; // well clear of section 52's own B successor (moveBase + 3h = now + 5h)
-    const rcWindowDate = new Date(rcBase).toISOString().slice(0, 10);
+    // The production Recomposition acceptance path (remainingDayRecompositionAcceptance.ts)
+    // validates BOTH that `targetDate` equals the ACCEPTANCE instant's real,
+    // LITERAL Asia/Kolkata local calendar date (DAY_CHANGED) AND that the
+    // Move decision's own destination instant falls within that SAME local
+    // day (DESTINATION_OUTSIDE_TODAY). The original fixed `now + 8h`
+    // occurrence plus a further `+3h` destination was therefore only safe
+    // when the real current Asia/Kolkata local time left at least ~11 hours
+    // before local midnight -- a real-wall-clock-dependent window, not a
+    // genuine test bug surface. Scheduling EARLY instead (comfortably
+    // BEFORE section 52's own now+2h claim, rather than well AFTER it) cuts
+    // the total runway this section needs from ~11 hours down to under 30
+    // minutes, shrinking the residual real-wall-clock risk window to
+    // roughly the final 30 minutes before Kolkata local midnight (verified
+    // directly against a battery of synthetic "now" instants spanning a
+    // full UTC day, including this exact boundary) -- an order of
+    // magnitude smaller than the original defect, and the same kind of
+    // inherent, accepted real-clock-boundary risk every other
+    // Date.now()-relative section in this file already carries (e.g. the
+    // concurrency test below), not a special-cased fragility.
+    // Asia/Kolkata is a fixed UTC+5:30 offset (no DST), so "tomorrow's
+    // local midnight" converts to a real UTC instant via plain arithmetic,
+    // same convention as this file's own atWedLocal-style helpers
+    // elsewhere in this test suite.
+    const todayLocalDate53 = getDatePartsInTimezone(TZ, new Date()).dateStr;
+    const [kMidnightY53, kMidnightM53, kMidnightD53] = addDaysToDateStr(todayLocalDate53, 1).split('-').map(Number);
+    const kolkataMidnightUTC53 = Date.UTC(kMidnightY53, kMidnightM53 - 1, kMidnightD53) - 5.5 * 3600000;
+    const itemDurationMs53 = 10 * MIN; // the destination item's own span must ALSO end before midnight, not merely start before it
+    const moveOffsetMs53 = 15 * MIN; // a genuinely distinct Move destination, still comfortably before section 52's own now+2h claim
+    const bufferBeforeMidnightMs53 = 2 * MIN;
+    const idealLeadMs53 = 20 * MIN; // comfortably before section 52's own now+2h claim, with margin
+    const remainingTodayMs53 = kolkataMidnightUTC53 - Date.now();
+    const leadMs53 = Math.max(MIN, Math.min(idealLeadMs53, remainingTodayMs53 - moveOffsetMs53 - itemDurationMs53 - bufferBeforeMidnightMs53));
+    const rcBase = Math.ceil((Date.now() + leadMs53) / MIN) * MIN;
+    // targetDate must be TODAY's own real local date -- never the local
+    // date of rcBase itself (a naive "local date of rcBase" derivation can
+    // still land on the WRONG day on a boundary edge case); deriving it
+    // directly from the real current instant removes that dependency
+    // entirely.
+    const rcWindowDate = todayLocalDate53;
     const d53 = await (async () => {
       const req: AcceptConstructedDayRequest = {
         clientRequestId: `rhythm-53-${Date.now()}`,
@@ -229,7 +267,7 @@ async function main() {
     check('53. setup: Rhythm occurrence created for the Recomposition Move test', d53.status === 'SAVED');
     const planA53 = (d53 as any).plans[0];
     const occBefore53 = (await occurrencesFor(ga53!.id))[0];
-    const rcDecision = { decision: 'MOVE' as const, planId: planA53.id, title: planA53.title, current: { start: new Date(planA53.plannedStartAt), end: new Date(planA53.plannedEndAt) }, to: { start: new Date(rcBase + 3 * 3600000), end: new Date(rcBase + 3 * 3600000 + 10 * MIN) } };
+    const rcDecision = { decision: 'MOVE' as const, planId: planA53.id, title: planA53.title, current: { start: new Date(planA53.plannedStartAt), end: new Date(planA53.plannedEndAt) }, to: { start: new Date(rcBase + moveOffsetMs53), end: new Date(rcBase + moveOffsetMs53 + 10 * MIN) } };
     const rcToken = signRecompositionProposal(user.id, { generatedAt: new Date(), targetDate: rcWindowDate, timezone: TZ, summary: { state: 'CHANGES_PROPOSED' }, decisions: [rcDecision] } as any)!;
     const rcResult = await acceptRemainingDayRecomposition(user.id, rcToken, realRecompositionAcceptanceDeps);
     check('53. the Recomposition acceptance itself succeeded', rcResult.status === 'ACCEPTED');
