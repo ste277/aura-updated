@@ -50,6 +50,7 @@
 import type { PreviewRequestIntentBody } from './dayConstructorPreviewClient';
 import { MAX_INTENTS_PER_REQUEST } from './dayConstructorPreviewRequest';
 import { excludeGoalDemandByActivityIds, type GoalDemandCandidate } from './goalDemandCandidates';
+import { encodeGoalDemandIntentId } from './goalDemandIntentId';
 
 // ============================================================
 // Intent identity (this ticket's own section 5) -- a deterministic,
@@ -77,13 +78,19 @@ import { excludeGoalDemandByActivityIds, type GoalDemandCandidate } from './goal
 // existing idempotency-key encoding (deriveAcceptanceIdempotencyKey)
 // is itself already length-prefixed specifically to tolerate colons
 // inside an intentId.
+//
+// Goals V2 Candidate A3.3 -- the implementation itself now lives in
+// goalDemandIntentId.ts, a zero-dependency sibling module, so
+// PlanDayClient.tsx (a 'use client' component) can import the SAME
+// canonical encoder without transitively pulling this file's own
+// server-only dayConstructorPreviewRequest.ts -> db.ts -> `pg` import
+// chain into the client bundle. Re-exported here so every existing
+// caller/import of `encodeGoalDemandIntentId` from this module keeps
+// working unchanged -- "do not duplicate the string format" (A3.3's own
+// section 6) means exactly one implementation, not one per file.
 // ============================================================
 
-const GOAL_DEMAND_INTENT_ID_PREFIX = 'goal-demand';
-
-export function encodeGoalDemandIntentId(planningLocalDate: string, goalActivityId: string): string {
-  return `${GOAL_DEMAND_INTENT_ID_PREFIX}:${planningLocalDate}:${goalActivityId}`;
-}
+export { encodeGoalDemandIntentId };
 
 // ============================================================
 // Input/output contracts (this ticket's own sections 3/4/14)
