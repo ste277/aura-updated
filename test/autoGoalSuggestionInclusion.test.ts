@@ -32,8 +32,17 @@ check('encodeGoalDemandIntentId: different GoalActivity -> different id', encode
 check('encodeGoalDemandIntentId: canonical format', encodeGoalDemandIntentId('2026-10-06', 'ga-1') === 'goal-demand:2026-10-06:ga-1');
 {
   const src = require('fs').readFileSync(require('path').join(__dirname, '../apps/web/lib/goalDemandIntentId.ts'), 'utf8');
-  check('goalDemandIntentId.ts has zero imports of any kind (client-bundle-safe)', !/^import /m.test(src));
+  // Goals V2 Candidate A3.4 -- this ticket's own section 4/5/23 added a
+  // strict decoder, which needs real calendar-date validity (never
+  // regex-shape-only) -- the ONE allowed import is
+  // isValidCalendarDateString (packages/panchang/src/localDate.ts),
+  // itself confirmed zero-import/framework-agnostic (re-verified
+  // directly in goalDemandIntentId.test.ts's own check 18c). The real
+  // invariant that still matters -- client-bundle-safety (no pg/db.ts/
+  // React/next) -- is narrowed accordingly, never dropped.
+  check('goalDemandIntentId.ts imports exactly one module, the pure zero-import date-validity helper (client-bundle-safe, this ticket\'s own A3.4 addition)', (src.match(/^import .*from '([^']+)';/gm) ?? []).length === 1 && /from '\.\.\/\.\.\/\.\.\/packages\/panchang\/src\/localDate'/.test(src));
   const srcNoComments = src.replace(/\/\*[\s\S]*?\*\//g, '').replace(/\/\/.*$/gm, '');
+  check('goalDemandIntentId.ts never imports pg/db.ts/React/next in real code', !/from '\.\/db'|from 'pg'|from 'react'|from 'next/i.test(srcNoComments));
   check('goalDemandIntentId.ts never calls Date.now()/new Date() in real code (no randomness/time dependency)', !/Date\.now\(\)|new Date\(\)/.test(srcNoComments));
 }
 
