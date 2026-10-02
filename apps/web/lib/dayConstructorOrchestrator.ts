@@ -66,6 +66,7 @@ import {
   type PlacementTimingFit,
 } from './dayConstructor';
 import type { BlockedInterval } from './dayCapacity';
+import { resolveDecisionFactsForIntent, type DecisionFactsByIntentId } from './decisionFacts';
 
 // ============================================================
 // Request contract (this ticket's own section 4). USER-LEVEL input --
@@ -144,6 +145,13 @@ export interface ConstructDayRequest {
   explicitStart?: Date;
   explicitEnd?: Date;
   intents: RequestedDayIntent[];
+  /** Decision Facts V1 -- OPTIONAL, generic, server-supplied facts keyed
+   * by the caller's own intent id (decisionFacts.ts). This file only
+   * looks them up; it never fetches, derives, or interprets them, and
+   * nothing here reads them for ordering/placement/eligibility. Never
+   * set from a client request body (the preview request parser builds
+   * this request field-by-field). */
+  decisionFactsByIntentId?: DecisionFactsByIntentId;
 }
 
 // ============================================================
@@ -841,8 +849,12 @@ export async function orchestrateConstructDay(request: ConstructDayRequest, deps
   const flexibleSearchMetaByIntentId: Record<string, { activityId?: string; title: string; durationMinutes: number }> = {};
 
   for (const requested of request.intents) {
-    const { dayIntent, warnings: intentWarnings } = resolveRequestedDayIntent(requested, request.targetDate, durationContext);
-    warnings.push(...intentWarnings);
+    const resolved = resolveRequestedDayIntent(requested, request.targetDate, durationContext);
+    warnings.push(...resolved.warnings);
+    // Decision Facts V1 -- attached AFTER resolution (never inside
+    // `resolveRequestedDayIntent`/`buildDayIntent`), inert metadata only.
+    const decisionFacts = resolveDecisionFactsForIntent(requested.id, request.decisionFactsByIntentId);
+    const dayIntent: DayIntent = decisionFacts ? { ...resolved.dayIntent, decisionFacts } : resolved.dayIntent;
     resolvedIntents.push({ requestedIntentId: requested.id, dayIntent });
 
     if (requested.flexibility === 'FIXED') {

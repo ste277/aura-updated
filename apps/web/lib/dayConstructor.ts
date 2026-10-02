@@ -97,10 +97,16 @@ import {
  * `mapTimingLabelToHomeStatus` (homeTimelineComposer.ts) produces, by
  * convention, never by import. A future orchestrator (PR C) is
  * responsible for collapsing a real `TimingCandidateLabel` (EXCELLENT/
- * VERY_GOOD/GOOD/USABLE -- CAUTION is never eligible, see
- * `runTimingSearch`'s own contract) into one of these four tiers before
+ * VERY_GOOD/GOOD/USABLE/CAUTION) into one of these four tiers before
  * building a `PlacementCandidate` -- this file never sees a raw
  * `TimingCandidateLabel`, a raw numeric score, or a raw `MuhurtaReason`.
+ * Correction (Constructor Decision Intelligence architecture audit,
+ * section 16): CAUTION candidates ARE produced by `runTimingSearch`
+ * (it excludes only on `FRICTION_WINDOW_BLOCKED`, never merely for
+ * scoring below zero) -- the earlier claim that "CAUTION is never
+ * eligible" was inaccurate. A CAUTION-tier candidate ranks worst in
+ * `compareCandidatesForPlacement` (`TIMING_FIT_RANK`, below) but is
+ * still placeable when it is the only feasible option for its intent.
  */
 export type PlacementTimingFit = 'BEST' | 'GOOD' | 'WORKABLE' | 'CAUTION';
 

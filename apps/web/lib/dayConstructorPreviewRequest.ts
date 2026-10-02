@@ -49,6 +49,14 @@ import type { User } from './db';
 // longer than what the accept endpoint will later store it under.
 // ============================================================
 
+import type { DecisionFactsByIntentId } from './decisionFacts';
+
+/** Decision Facts V1 -- a server-side, source-specific fact provider,
+ * injected at the route. Receives the already-parsed (never client-
+ * controlled) request and the authenticated user; returns generic facts
+ * keyed by intent id. This file knows nothing about any source. */
+export type DecisionFactsSource = (request: ConstructDayRequest) => Promise<DecisionFactsByIntentId>;
+
 export const MAX_INTENTS_PER_REQUEST = 12;
 export const MAX_TITLE_LENGTH = 200; // mirrors /api/plans's own `title` bound (plans/route.ts).
 export const MAX_ACTIVITY_ID_LENGTH = 200;
@@ -252,11 +260,30 @@ export interface DayConstructorPreviewHttpResult {
  * `timezone`/`now` are parameters here too, never read from `body` --
  * the ONLY two places this file ever reads a timezone or an instant.
  */
-export async function runDayConstructorPreview(body: unknown, timezone: string, now: Date, deps: DayConstructorOrchestratorDeps): Promise<DayConstructorPreviewHttpResult> {
+export async function runDayConstructorPreview(
+  body: unknown,
+  timezone: string,
+  now: Date,
+  deps: DayConstructorOrchestratorDeps,
+  decisionFactsSource?: DecisionFactsSource
+): Promise<DayConstructorPreviewHttpResult> {
   const parsed = parseConstructDayPreviewRequestBody(body, { timezone, now });
   if (!parsed.ok) return { httpStatus: 400, body: { error: parsed.error } };
 
-  const result = await orchestrateConstructDay(parsed.request, deps);
+  // Decision Facts V1 -- facts are inert metadata in V1 (nothing reads
+  // them for ordering/eligibility), so a provider failure must never
+  // fail an otherwise-valid preview: continue with no facts, exactly the
+  // behavior of a request that had no provider at all.
+  let decisionFactsByIntentId: DecisionFactsByIntentId | undefined;
+  if (decisionFactsSource) {
+    try {
+      decisionFactsByIntentId = await decisionFactsSource(parsed.request);
+    } catch (err) {
+      console.warn('day-constructor/preview: decision facts unavailable, continuing without', err);
+    }
+  }
+
+  const result = await orchestrateConstructDay(decisionFactsByIntentId ? { ...parsed.request, decisionFactsByIntentId } : parsed.request, deps);
   // Every branch below is a legitimate, already-typed domain outcome --
   // returned verbatim, at HTTP 200, never reinterpreted (this ticket's
   // own section 21). There is no "unexpected exception" branch here:
@@ -314,6 +341,10 @@ export interface DayConstructorPreviewBoundaryDeps {
   /** `createRealDayConstructorOrchestratorDeps` in production, passed by
    * reference (same signature: `(user, now) => DayConstructorOrchestratorDeps`). */
   createOrchestratorDeps: (user: User, now: Date) => DayConstructorOrchestratorDeps;
+  /** Decision Facts V1 -- OPTIONAL. Production wiring (route.ts) supplies
+   * the source-specific provider; omitting it is byte-identical to this
+   * ticket never having existed. */
+  loadDecisionFacts?: (user: User, request: ConstructDayRequest) => Promise<DecisionFactsByIntentId>;
 }
 
 /**
@@ -346,7 +377,8 @@ export async function handleDayConstructorPreviewRequest(deps: DayConstructorPre
 
   try {
     const orchestratorDeps = deps.createOrchestratorDeps(user, now);
-    const result = await runDayConstructorPreview(body, user.timezone, now, orchestratorDeps);
+    const decisionFactsSource: DecisionFactsSource | undefined = deps.loadDecisionFacts ? (request) => deps.loadDecisionFacts!(user, request) : undefined;
+    const result = await runDayConstructorPreview(body, user.timezone, now, orchestratorDeps, decisionFactsSource);
     // F1 trust correction: sign each proposed item for THIS user so acceptance can verify what it means.
     return { ...result, body: signPreviewResultBody(session.userId, result.body) };
   } catch (err) {

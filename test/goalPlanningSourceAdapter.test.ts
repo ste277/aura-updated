@@ -22,7 +22,15 @@ function stripComments(source: string): string {
 }
 
 function candidate(overrides: Partial<GoalDemandCandidate> & { goalActivityId: string }): GoalDemandCandidate {
-  return { goalId: 'goal-1', goalTitle: 'Get fit', title: 'Workout', activityId: null, remainingThisWeek: 2, ...overrides };
+  return {
+    goalId: 'goal-1',
+    goalTitle: 'Get fit',
+    title: 'Workout',
+    activityId: null,
+    remainingThisWeek: 2,
+    rhythm: { targetPerWeek: 2, completedThisWeek: 0, committedThisWeek: 0, remainingOccurrences: 2 },
+    ...overrides,
+  };
 }
 
 function input(overrides: Partial<GoalPlanningSourceInput> = {}): GoalPlanningSourceInput {

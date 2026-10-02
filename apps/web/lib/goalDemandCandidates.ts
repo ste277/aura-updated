@@ -37,6 +37,17 @@ import { loadCandidateGoalActivitiesForRhythmDemand, loadGoalActivityRhythmFacts
 // mirrors, needs either to decide eligibility or to seed a planning row.
 // ============================================================
 
+/** The canonical Rhythm state computeGoalActivityRhythmEligibility already
+ * produced for this candidate -- carried as-is, Goal-side. Translation to
+ * the generic decision-facts shape happens upstream of the Constructor
+ * stack, in goalDecisionFactsProvider.ts, never here. */
+export interface GoalDemandRhythmFacts {
+  targetPerWeek: number;
+  completedThisWeek: number;
+  committedThisWeek: number;
+  remainingOccurrences: number;
+}
+
 export interface GoalDemandCandidate {
   goalActivityId: string;
   goalId: string;
@@ -46,6 +57,11 @@ export interface GoalDemandCandidate {
   /** The exact remainingOccurrences computeGoalActivityRhythmEligibility
    * already computes -- never re-derived, never negative. */
   remainingThisWeek: number;
+  /** Factual Rhythm state only (no priority/urgency/order) -- exactly the
+   * values already computed for `remainingThisWeek` above, never
+   * re-derived. Every candidate returned here is already Rhythm-eligible
+   * (N_PER_WEEK, `eligible === true`), so this is always populated. */
+  rhythm: GoalDemandRhythmFacts;
 }
 
 /**
@@ -132,6 +148,12 @@ export async function loadEligibleGoalDemand(deps: GoalDemandCandidatesDeps, use
       title: row.title,
       activityId: row.activityId,
       remainingThisWeek: eligibility.remainingOccurrences,
+      rhythm: {
+        targetPerWeek: rhythm.targetPerWeek ?? 0,
+        completedThisWeek: eligibility.completedThisWeek,
+        committedThisWeek: eligibility.committedThisWeek,
+        remainingOccurrences: eligibility.remainingOccurrences,
+      },
     });
   }
 

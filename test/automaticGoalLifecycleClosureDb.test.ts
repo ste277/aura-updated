@@ -300,9 +300,10 @@ async function main() {
     await setRhythm(gaDecline!.id, 2);
     const declineIntentId = encodeGoalDemandIntentId('2026-10-06', gaDecline!.id);
     const declineRow = createIntentRowFromAutoGoalSuggestion({ title: 'Stretch', activityId: null, goalActivityId: gaDecline!.id }, declineIntentId);
-    const availableBeforeRemove = deriveAvailableAutoGoalSuggestions([{ goalActivityId: gaDecline!.id, goalId: goal.id, goalTitle: 'Reduce stress', title: 'Stretch', activityId: null, remainingThisWeek: 2 }], [declineRow]);
+    const declineRhythmFacts = { targetPerWeek: 2, completedThisWeek: 0, committedThisWeek: 0, remainingOccurrences: 2 };
+    const availableBeforeRemove = deriveAvailableAutoGoalSuggestions([{ goalActivityId: gaDecline!.id, goalId: goal.id, goalTitle: 'Reduce stress', title: 'Stretch', activityId: null, remainingThisWeek: 2, rhythm: declineRhythmFacts }], [declineRow]);
     check('18a. while included, the suggestion is unavailable', availableBeforeRemove.length === 0);
-    const availableAfterRemove = deriveAvailableAutoGoalSuggestions([{ goalActivityId: gaDecline!.id, goalId: goal.id, goalTitle: 'Reduce stress', title: 'Stretch', activityId: null, remainingThisWeek: 2 }], []); // row removed
+    const availableAfterRemove = deriveAvailableAutoGoalSuggestions([{ goalActivityId: gaDecline!.id, goalId: goal.id, goalTitle: 'Reduce stress', title: 'Stretch', activityId: null, remainingThisWeek: 2, rhythm: declineRhythmFacts }], []); // row removed
     check('18b. removing the row (simulated by omitting it) returns the suggestion to the available list', availableAfterRemove.some((s) => s.goalActivityId === gaDecline!.id));
     const declineState = await sql(
       `SELECT (SELECT count(*)::int FROM "GoalActivityOccurrence" WHERE "goalActivityId" = $1) AS occ, (SELECT count(*)::int FROM "GoalActivityExecution" WHERE "goalActivityId" = $1) AS exec`,
