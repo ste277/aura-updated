@@ -129,6 +129,10 @@ export async function computeOpportunityDecisionFacts(
       coverage: facts.coverage,
       durationMinutes,
       durationBasis: candidate.durationBasis,
+      startDateState: facts.startDateState,
+      afterStartEvaluatedDays: facts.afterStartEvaluatedDays,
+      afterStartViableDays: facts.afterStartViableDays,
+      afterStartUnknownDays: facts.afterStartUnknownDays,
     });
   }
   return result;

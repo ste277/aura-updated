@@ -65,6 +65,11 @@ export type OpportunityDurationBasis = 'RESOLVED' | 'GENERIC_FALLBACK';
 
 export type OpportunityCoverage = 'COMPLETE' | 'PARTIAL' | 'UNKNOWN';
 
+/** What is known about ONE civil day for ONE candidate. UNKNOWN is a
+ * different thing from KNOWN_INFEASIBLE: availability could not be
+ * established, so the day must never be read as "no opportunity". */
+export type OpportunityDayState = 'KNOWN_FEASIBLE' | 'KNOWN_INFEASIBLE' | 'UNKNOWN';
+
 /**
  * Supply facts: for ONE candidate with ONE duration, over an explicit
  * inclusive local civil-date horizon, how many days are known to offer a
@@ -89,6 +94,22 @@ export type OpportunityCoverage = 'COMPLETE' | 'PARTIAL' | 'UNKNOWN';
  * the period the horizon belongs to, so days that elapsed before the
  * planning date are never counted. Both dates are inclusive local civil
  * dates ('YYYY-MM-DD').
+ *
+ * The horizon's FIRST day is reported apart from the days after it, because
+ * a total cannot say whether a single viable day is the first day or a
+ * later one. `startDateState` is the state of `horizonStartDate` (for
+ * today it reflects only the time still remaining). `afterStart*` count the
+ * civil dates strictly after `horizonStartDate` through `horizonEndDate`;
+ * with the first day they partition the totals exactly:
+ *   evaluatedDays = 1 + afterStartEvaluatedDays
+ *   viableDays    = (startDateState is KNOWN_FEASIBLE ? 1 : 0) + afterStartViableDays
+ *   unknownDays   = (startDateState is UNKNOWN ? 1 : 0) + afterStartUnknownDays
+ * An empty set of later days is a KNOWN empty set (counts of zero), never
+ * unknown. `horizonStartDate` equals the preview's planning date whenever
+ * the horizon begins at it; a consumer that needs the planning date itself
+ * must compare the two dates rather than assume they are equal. Unknown
+ * later days are never converted to zero opportunity, and no count says
+ * what any state or count means.
  *
  * `durationBasis` is required and must be kept with `durationMinutes`: it
  * is what lets a later consumer tell a fact built on a real duration from
@@ -115,6 +136,10 @@ export interface OpportunityDecisionFacts {
   coverage: OpportunityCoverage;
   durationMinutes: number;
   durationBasis: OpportunityDurationBasis;
+  startDateState: OpportunityDayState;
+  afterStartEvaluatedDays: number;
+  afterStartViableDays: number;
+  afterStartUnknownDays: number;
 }
 
 export interface DecisionFacts {

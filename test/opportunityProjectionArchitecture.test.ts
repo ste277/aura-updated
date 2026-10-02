@@ -46,7 +46,7 @@ check('the engine contains no user-facing copy (no string literal contains white
 // ---- output contract: facts only ------------------------------------
 const factsBlock = src.slice(src.indexOf('export interface OpportunityFacts'), src.indexOf('export interface OpportunityDayResult'));
 const fields = Array.from(factsBlock.matchAll(/^\s{2}(\w+):/gm)).map((m) => m[1]).sort();
-check('OpportunityFacts has exactly the six factual fields', JSON.stringify(fields) === JSON.stringify(['coverage', 'evaluatedDays', 'horizonEndDate', 'horizonStartDate', 'unknownDays', 'viableDays']));
+check('OpportunityFacts has exactly the six original factual fields plus the four additive first-day/after-first-day fields (P0b)', JSON.stringify(fields) === JSON.stringify(['afterStartEvaluatedDays', 'afterStartUnknownDays', 'afterStartViableDays', 'coverage', 'evaluatedDays', 'horizonEndDate', 'horizonStartDate', 'startDateState', 'unknownDays', 'viableDays']));
 const inputBlock = src.slice(src.indexOf('export interface OpportunityProjectionInput'), src.indexOf('export type OpportunityCoverage'));
 const inputFields = Array.from(inputBlock.matchAll(/^\s{2}(\w+):/gm)).map((m) => m[1]).sort();
 check('the input carries no requirement count and no candidate/source identity', JSON.stringify(inputFields) === JSON.stringify(['availabilityByDate', 'blockers', 'durationMinutes', 'horizonEndDate', 'now', 'planningDate', 'timezone']));
