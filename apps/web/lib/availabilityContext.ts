@@ -126,7 +126,7 @@ export type AvailabilityResolution =
  * outer window to clip against yet, so `normalizeBlockedIntervals`
  * itself does not apply, per this ticket's own section 23 "do not
  * duplicate normalizeBlockedIntervals"). Never mutates its input. */
-function mergeUsableWindows(windows: readonly { start: Date; end: Date }[]): { start: Date; end: Date }[] {
+export function mergeUsableWindows(windows: readonly { start: Date; end: Date }[]): { start: Date; end: Date }[] {
   const sorted = [...windows].sort((a, b) => a.start.getTime() - b.start.getTime());
   const merged: { start: Date; end: Date }[] = [];
   for (const w of sorted) {
