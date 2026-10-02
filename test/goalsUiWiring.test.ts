@@ -213,6 +213,37 @@ function main() {
     /NOT the idempotency\s*\n?\s*\/\/ mechanism/.test(sources['Goals list client']) || /is NOT the idempotency/.test(sources['Goals list client'])
   );
 
+  // ============================================================
+  // Goals V2 Candidate B4 -- the three decomposition-observability events
+  // are genuinely wired, and structurally never carry Goal/activity text
+  // or clientRequestId (this ticket's own section 25, mandatory privacy
+  // proof -- not relying on code review alone).
+  // ============================================================
+  check('B4: GOAL_DECOMPOSITION_SHOWN is tracked', /trackEvent\('GOAL_DECOMPOSITION_SHOWN'/.test(goalsListClientCodeOnly));
+  check('B4: GOAL_DECOMPOSITION_CONFIRMED is tracked exactly once (only the genuine-success branch)', (goalsListClientCodeOnly.match(/trackEvent\('GOAL_DECOMPOSITION_CONFIRMED'/g) ?? []).length === 1);
+  check('B4: GOAL_DECOMPOSITION_CREATE_FAILED is tracked (both the non-ok-response and network-error branches)', (goalsListClientCodeOnly.match(/trackEvent\('GOAL_DECOMPOSITION_CREATE_FAILED'/g) ?? []).length === 2);
+  check(
+    'B4: GOAL_DECOMPOSITION_SHOWN/CONFIRMED build their metadata via the dedicated observability helpers, never an ad hoc inline object (which could accidentally carry title/text fields)',
+    /metadata:\s*\{\s*\.\.\.buildDecompositionShownMetadata/.test(goalsListClientCodeOnly) && /metadata:\s*\{\s*\.\.\.buildGoalDecompositionSummaryMetadata/.test(goalsListClientCodeOnly)
+  );
+  check(
+    'B4: no GOAL_DECOMPOSITION_* trackEvent call site passes `title`/`trimmedTitle`/a row `.title` as a metadata value (structural, not just code-review)',
+    !/trackEvent\('GOAL_DECOMPOSITION_[A-Z_]+',\s*\{[^}]*\btrimmedTitle\b/.test(goalsListClientCodeOnly) && !/trackEvent\('GOAL_DECOMPOSITION_[A-Z_]+',\s*\{[^}]*:\s*title\b/.test(goalsListClientCodeOnly)
+  );
+  check('B4: no GOAL_DECOMPOSITION_* trackEvent call site passes clientRequestId as a metadata value', !/trackEvent\('GOAL_DECOMPOSITION_[A-Z_]+'[\s\S]{0,400}?clientRequestId/.test(goalsListClientCodeOnly));
+  check('B4: "Refresh suggestions" deliberately fires no SHOWN event (documented, not merely absent by oversight)', /Deliberately no SHOWN event here/.test(sources['Goals list client']));
+  {
+    // Scoped strictly to each trackEvent(...) call's OWN metadata object
+    // (up to its first closing brace, which is sufficient since these
+    // metadata objects are single-level/un-nested) -- a broader,
+    // unscoped window would false-positive on the UNRELATED setError(...)
+    // call that legitimately reads data?.error a few lines later, outside
+    // the trackEvent call entirely.
+    const failedCalls = [...goalsListClientCodeOnly.matchAll(/trackEvent\('GOAL_DECOMPOSITION_CREATE_FAILED',\s*\{\s*metadata:\s*\{([^}]*)\}/g)];
+    check('B4: GOAL_DECOMPOSITION_CREATE_FAILED is called at least twice with a metadata object (both failure branches)', failedCalls.length === 2);
+    check('B4: neither GOAL_DECOMPOSITION_CREATE_FAILED call\'s OWN metadata object includes the raw response error message/body', failedCalls.every(([, metadataBody]) => !/data\?\.error|data\.error/.test(metadataBody)));
+  }
+
   if (!allPassed) {
     console.error('SOME GOALS UI WIRING CHECKS FAILED');
     process.exit(1);
