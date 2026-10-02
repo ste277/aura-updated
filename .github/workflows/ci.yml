@@ -172,6 +172,12 @@ jobs:
         env:
           TS_NODE_COMPILER_OPTIONS: '{"jsx":"react"}'
         run: npx ts-node test/goalActivityProposal.test.ts
+      # Goals V2 Candidate B3.1 -- goalCreateIdempotency.ts imports only
+      # the Node `crypto` builtin plus the zero-dependency
+      # goalCompletion.ts/goalActivityRhythm.ts -- needs no jsx, no
+      # apps/web/node_modules.
+      - name: Run Goal create idempotency test
+        run: npx ts-node test/goalCreateIdempotency.test.ts
   web-build:
     name: Next.js production build
     runs-on: ubuntu-latest
@@ -341,3 +347,5 @@ jobs:
         run: npx ts-node test/automaticGoalLifecycleClosureDb.test.ts
       - name: Run Goals reviewed-create DB test
         run: npx ts-node test/goalsReviewedCreateDb.test.ts
+      - name: Run Goals create idempotency DB test
+        run: npx ts-node test/goalsCreateIdempotencyDb.test.ts

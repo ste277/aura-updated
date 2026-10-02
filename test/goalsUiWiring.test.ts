@@ -193,6 +193,26 @@ function main() {
   check('W/31. GoalDetailClient has exactly one not-found branch (status === 404), no separate ownership-specific copy', (sources['Goal detail client'].match(/status === 404/g) ?? []).length === 1);
   check('W/31. no "belongs to" / "another user" / "not yours" copy rendered anywhere (real code, not doc comments)', !/belongs to|another user|not yours/i.test(goalDetailClientCodeOnly));
 
+  // ============================================================
+  // Goals V2 Candidate B3.1 -- the client-side clientRequestId lifecycle
+  // (this ticket's own section 24: one id per logical submission, never
+  // regenerated per retry, never claimed as the idempotency mechanism by
+  // the SUBMITTING guard). No rendering harness exists for this
+  // repository's React components -- proven structurally, same
+  // convention as every other check in this file.
+  // ============================================================
+  const goalsListClientCodeOnly = stripComments(sources['Goals list client']);
+  check(
+    'B3.1: clientRequestId is generated via exactly one useState lazy initializer calling crypto.randomUUID() (generated once per mount, not per submit)',
+    /const \[clientRequestId\] = useState<string>\(\(\) => crypto\.randomUUID\(\)\)/.test(goalsListClientCodeOnly)
+  );
+  check('B3.1: clientRequestId is never reassigned/regenerated inside handleSubmit (no second crypto.randomUUID() call anywhere in the file)', (goalsListClientCodeOnly.match(/crypto\.randomUUID\(\)/g) ?? []).length === 1);
+  check('B3.1: the submit request body includes clientRequestId', /clientRequestId,\s*\}\)/.test(goalsListClientCodeOnly) || /body:\s*JSON\.stringify\(\{[\s\S]*clientRequestId/.test(goalsListClientCodeOnly));
+  check(
+    'B3.1: the SUBMITTING double-click guard is explicitly documented as NOT the idempotency mechanism (never silently conflated with it)',
+    /NOT the idempotency\s*\n?\s*\/\/ mechanism/.test(sources['Goals list client']) || /is NOT the idempotency/.test(sources['Goals list client'])
+  );
+
   if (!allPassed) {
     console.error('SOME GOALS UI WIRING CHECKS FAILED');
     process.exit(1);

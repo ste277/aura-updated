@@ -1,13 +1,19 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getSessionFromRequest } from '../../../lib/session';
-import { listGoalsForUser, createGoalWithActivities } from '../../../lib/db';
+import { listGoalsForUser, createGoalWithActivities, getGoalForUser, listGoalActivitiesWithLinkedPlanStatus } from '../../../lib/db';
 import { parseJsonObject } from '../../../lib/request';
 import { isGoalTemplateCategory, isValidCivilDateString, resolveGoalTemplateActivities, classifyGoalCreateRequestMode } from '../../../lib/goals';
-import { validateGoalActivityRhythm, NONE_GOAL_ACTIVITY_RHYTHM, type GoalActivityRhythm } from '../../../lib/goalActivityRhythm';
-import { validateCompletionRequirement, type CompletionRequirement } from '../../../lib/goalCompletion';
+import { validateGoalActivityRhythm, normalizeGoalActivityRhythm, NONE_GOAL_ACTIVITY_RHYTHM, type GoalActivityRhythm } from '../../../lib/goalActivityRhythm';
+import { validateCompletionRequirement, normalizeGoalActivityCompletionRequirement, type CompletionRequirement } from '../../../lib/goalCompletion';
+import { deriveIdempotentGoalId, goalCreateRequestMatchesExisting } from '../../../lib/goalCreateIdempotency';
 import { getActivityProfileById } from '../../../../../packages/recommendation/src/personalizedTasks';
 
 const MAX_TITLE_LENGTH = 200;
+// Goals V2 Candidate B3.1 -- mirrors Day Constructor's own established
+// clientRequestId bound (dayConstructorAcceptancePersistence.ts's own
+// MAX_CLIENT_REQUEST_ID_LENGTH), same rationale: a generous, purely
+// defensive ceiling, never a product constraint.
+const MAX_CLIENT_REQUEST_ID_LENGTH = 200;
 // Goals V2 Candidate B3 -- a pure abuse/safety ceiling on the explicit
 // reviewed-activities array, never a UX guidance limit (the Candidate B
 // product principle is 2-4 core activities per Goal; B2's own review UX
@@ -185,6 +191,63 @@ export async function POST(req: NextRequest) {
     activitiesWithRhythm = activities.map((activity, index) => ({ ...activity, rhythm: activityRhythms ? activityRhythms[index] : NONE_GOAL_ACTIVITY_RHYTHM }));
   }
 
-  const { goal, activities: created } = await createGoalWithActivities({ userId: session.userId, title, targetDate, activities: activitiesWithRhythm });
-  return NextResponse.json({ goal, activities: created });
+  // Goals V2 Candidate B3.1 -- optional, additive (this ticket's own
+  // section 14 rollout decision): omitted entirely preserves every
+  // existing caller's exact current behavior (every test in this
+  // repository that calls this route directly, plus any hypothetical
+  // future caller that doesn't yet send one), including a fresh
+  // randomUUID() Goal id and zero idempotency protection. Only a client
+  // that explicitly supplies clientRequestId opts into protection -- the
+  // production B2 client (GoalsListClient.tsx) always does.
+  let clientRequestId: string | null = null;
+  if (body.clientRequestId !== undefined && body.clientRequestId !== null) {
+    if (typeof body.clientRequestId !== 'string' || !body.clientRequestId.trim() || body.clientRequestId.length > MAX_CLIENT_REQUEST_ID_LENGTH) {
+      return NextResponse.json({ error: 'clientRequestId must be a non-blank string.' }, { status: 400 });
+    }
+    clientRequestId = body.clientRequestId;
+  }
+
+  if (!clientRequestId) {
+    const { goal, activities: created } = await createGoalWithActivities({ userId: session.userId, title, targetDate, activities: activitiesWithRhythm });
+    return NextResponse.json({ goal, activities: created });
+  }
+
+  const idempotentGoalId = deriveIdempotentGoalId(session.userId, clientRequestId);
+  try {
+    const { goal, activities: created } = await createGoalWithActivities({ userId: session.userId, title, targetDate, activities: activitiesWithRhythm, id: idempotentGoalId });
+    return NextResponse.json({ goal, activities: created });
+  } catch (err) {
+    // This ticket's own sections 8/10/16/17 -- a concurrent OR earlier
+    // identical clientRequestId already won this exact deterministic id;
+    // Postgres's own primary-key uniqueness is what actually guarantees
+    // "exactly one Goal" under real concurrency (not an app-level
+    // check-then-insert, which would itself race). Re-fetch and decide
+    // replay vs. conflict from the real, already-committed state.
+    const pgError = err as { code?: string };
+    if (pgError.code !== '23505') throw err;
+
+    const existingGoal = await getGoalForUser(session.userId, idempotentGoalId);
+    if (!existingGoal) throw err; // genuinely unexpected (e.g. a real id collision) -- never swallowed
+
+    const existingActivityRows = await listGoalActivitiesWithLinkedPlanStatus(session.userId, idempotentGoalId);
+    const existingActivities = existingActivityRows.map((row) => ({
+      title: row.title,
+      activityId: row.activityId,
+      completionRequirement: normalizeGoalActivityCompletionRequirement({ completionKind: row.completionKind, completionTargetValue: row.completionTargetValue, completionUnit: row.completionUnit }),
+      rhythm: normalizeGoalActivityRhythm({ rhythmKind: row.rhythmKind, rhythmTargetPerWeek: row.rhythmTargetPerWeek }),
+    }));
+
+    // This ticket's own section 9/18 -- a materially different request
+    // reusing the same (userId, clientRequestId) fails closed: never a
+    // second Goal, never a silent mutation of the first.
+    if (!goalCreateRequestMatchesExisting({ title, targetDate, activities: activitiesWithRhythm }, { title: existingGoal.title, targetDate: existingGoal.targetDate, activities: existingActivities })) {
+      return NextResponse.json({ error: 'A different Goal-create request already used this clientRequestId.', code: 'IDEMPOTENCY_CONFLICT' }, { status: 409 });
+    }
+
+    // Genuine idempotent replay -- the exact same logical request,
+    // zero new write. Response shape is identical to a fresh creation
+    // (no "replayed" marker) -- the client treats both identically.
+    const replayedActivities = existingActivityRows.map(({ linkedPlanStatus, currentValue, ...activity }) => activity);
+    return NextResponse.json({ goal: existingGoal, activities: replayedActivities });
+  }
 }
