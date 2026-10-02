@@ -103,6 +103,13 @@ jobs:
       # only, same convention as the structural guards test above.
       - name: Run Goal demand provenance authorization structural guards test
         run: npx ts-node test/goalDemandProvenanceAuthorizationStructuralGuards.test.ts
+      # Goals V2 Candidate B1 -- apps/web/lib/goals.ts imports only
+      # packages/recommendation/src/personalizedTasks.ts (itself one
+      # type-only import, erased at compile time) and the zero-dependency
+      # apps/web/lib/goalCompletion.ts -- needs no apps/web/node_modules,
+      # same root-deps-only group as the structural guards tests above.
+      - name: Run Goal template category matching test
+        run: npx ts-node test/goalTemplateCategoryMatching.test.ts
       # test/savedPersonDb.test.ts, test/auraMomentsDb.test.ts,
       # test/auraUpdatesDb.test.ts, test/productEventsDb.test.ts, and
       # test/dayBuilderDb.test.ts are intentionally NOT run here -- they
