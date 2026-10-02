@@ -8,6 +8,7 @@ import {
   PrimaryButton,
   SecondaryButton,
   TextButton,
+  IconButton,
   EmptyState,
   SegmentedControl,
   ModalShell,
@@ -18,8 +19,23 @@ import {
   FieldError,
 } from '../../components/ui';
 import { GOAL_TEMPLATE_OPTIONS, formatGoalProgressLabel, formatGoalTargetDateLabel, isValidCivilDateString, type GoalSummary } from '../../lib/goalsPresentation';
-import { GOAL_TEMPLATES, GOAL_TEMPLATE_LIKELY_ONGOING, type GoalTemplateCategory } from '../../lib/goals';
+import { matchGoalTemplateCategory, type GoalTemplateCategory } from '../../lib/goals';
 import { RhythmPicker, type RhythmPickerValue } from '../../components/RhythmPicker';
+import {
+  createInitialProposalState,
+  reconcileProposalForTitleChange,
+  deriveEffectiveGoalTemplateCategory,
+  selectManualCategory,
+  useAutomaticSuggestion,
+  refreshProposalFromEffectiveCategory,
+  removeProposalRow,
+  renameProposalRow,
+  updateProposalRowRhythm,
+  addFreeformProposalRow,
+  isProposalReadyToSubmit,
+  buildReviewedActivitiesForSubmission,
+  type GoalActivityProposalState,
+} from '../../lib/goalActivityProposal';
 
 /**
  * Goals -> Planning Integration V1 PR B -- the primary "What am I working
@@ -211,38 +227,41 @@ function CreateGoalModal({ onClose }: { onClose: () => void }) {
 
   const [title, setTitle] = useState('');
   const [targetDate, setTargetDate] = useState(''); // "" | "YYYY-MM-DD"
-  const [templateCategory, setTemplateCategory] = useState<string>(''); // '' means "Start from scratch" (null)
-  // Goals V2 Rhythm R5 -- this ticket's own section 9/13: Rhythm belongs
-  // to GoalActivity, never a single Goal-level frequency, so this is one
-  // entry per template activity, in the same order as GOAL_TEMPLATES[cat]
-  // (array length always matches that template's own activity count).
-  // Defaults to Once (NONE) for every entry -- no unsupported preselected
-  // default (this ticket's own section 15).
-  const [activityRhythms, setActivityRhythms] = useState<ReadonlyArray<RhythmPickerValue | null>>([]);
+  // Goals V2 Candidate B2 (resumed) -- the transient activity-proposal
+  // review state (title->category matching, PRISTINE/USER_EDITED,
+  // AUTO/MANUAL category precedence) lives entirely in
+  // goalActivityProposal.ts's own pure state machine; this component only
+  // holds the one value and calls its pure transition functions.
+  const [proposal, setProposal] = useState<GoalActivityProposalState>(createInitialProposalState);
   const [status, setStatus] = useState<'IDLE' | 'SUBMITTING' | 'ERROR'>('IDLE');
   const [error, setError] = useState<string | null>(null);
 
-  const activeCategory = (templateCategory || null) as GoalTemplateCategory | null;
-  // This ticket's own section 10/11 classification -- PURELY advisory: it
-  // decides only whether this step shows the frequency question at all,
-  // never which N (section 15/34 -- FINISH_PROJECT's own activities stay
-  // NONE unless the user later opts in through Goal Detail's per-row edit
-  // affordance instead).
-  const isOngoingTemplate = activeCategory !== null && GOAL_TEMPLATE_LIKELY_ONGOING[activeCategory];
-  const templateActivities = activeCategory ? GOAL_TEMPLATES[activeCategory] : [];
-
-  const handleTemplateChange = (next: string) => {
-    setTemplateCategory(next);
-    const nextCategory = (next || null) as GoalTemplateCategory | null;
-    setActivityRhythms(nextCategory ? GOAL_TEMPLATES[nextCategory].map(() => ({ kind: 'NONE' })) : []);
-  };
+  // This ticket's own sections 20-22, "the title-change problem": while
+  // the proposal is still AUTO + PRISTINE, a title edit re-resolves the
+  // matching template (or clears to no proposal); a MANUAL choice or any
+  // USER_EDITED proposal is never touched by a title edit alone.
+  useEffect(() => {
+    setProposal((current) => reconcileProposalForTitleChange(current, title));
+  }, [title]);
 
   const trimmedTitle = title.trim();
-  // This ticket's own section 44 -- an ongoing template whose frequency
-  // question is showing must not silently submit with an unresolved
-  // Custom entry; every row must resolve to a real value first.
-  const rhythmsValid = !isOngoingTemplate || (activityRhythms.length === templateActivities.length && activityRhythms.every((v) => v !== null));
-  const canSubmit = trimmedTitle.length > 0 && trimmedTitle.length <= 200 && (targetDate === '' || isValidCivilDateString(targetDate)) && rhythmsValid;
+  const autoCategory = matchGoalTemplateCategory(title);
+  const effectiveCategory = deriveEffectiveGoalTemplateCategory(proposal, trimmedTitle);
+  const canOfferAutomaticSuggestion = proposal.isManualCategory && autoCategory !== null;
+  const canRefreshSuggestions = proposal.edited && effectiveCategory !== null;
+
+  const handleCategorySelectChange = (next: string) => {
+    const nextCategory = (next || null) as GoalTemplateCategory | null;
+    setProposal((current) => selectManualCategory(current, nextCategory));
+  };
+  const handleUseAutomaticSuggestion = () => setProposal(useAutomaticSuggestion(title));
+  const handleRefreshSuggestions = () => setProposal((current) => refreshProposalFromEffectiveCategory(current, title));
+  const handleRemoveRow = (localId: string) => setProposal((current) => removeProposalRow(current, localId));
+  const handleRenameRow = (localId: string, nextTitle: string) => setProposal((current) => renameProposalRow(current, localId, nextTitle));
+  const handleRowRhythmChange = (localId: string, nextRhythm: RhythmPickerValue | null) => setProposal((current) => updateProposalRowRhythm(current, localId, nextRhythm));
+  const handleAddFreeform = () => setProposal((current) => addFreeformProposalRow(current));
+
+  const canSubmit = trimmedTitle.length > 0 && trimmedTitle.length <= 200 && (targetDate === '' || isValidCivilDateString(targetDate)) && isProposalReadyToSubmit(proposal, 200);
 
   const handleSubmit = async (event: React.FormEvent) => {
     event.preventDefault();
@@ -256,12 +275,12 @@ function CreateGoalModal({ onClose }: { onClose: () => void }) {
         body: JSON.stringify({
           title: trimmedTitle,
           ...(targetDate ? { targetDate } : {}), // submitted verbatim as "YYYY-MM-DD" -- never a constructed JS Date/timestamp (this ticket's own section 13)
-          ...(templateCategory ? { templateCategory } : {}),
-          // Only sent for an ongoing template actually showing the
-          // question -- FINISH_PROJECT/"Start from scratch" never include
-          // this at all, so the server's own omitted-means-NONE default
-          // applies identically to before this ticket (section 42).
-          ...(isOngoingTemplate ? { activityRhythms } : {}),
+          // Goals V2 Candidate B3's explicit-review mode -- the reviewed
+          // proposal rows are the final, authoritative set (this ticket's
+          // own section 17: never templateCategory/activityRhythms, even
+          // for an untouched template proposal; always `activities[]`,
+          // including the empty array when every row was removed).
+          activities: buildReviewedActivitiesForSubmission(proposal.rows),
         }),
       });
       const data = await res.json().catch(() => null);
@@ -294,7 +313,7 @@ function CreateGoalModal({ onClose }: { onClose: () => void }) {
             value={title}
             onChange={(e) => setTitle(e.target.value)}
             maxLength={200}
-            placeholder="Finish investor deck"
+            placeholder="Get fitter"
             disabled={status === 'SUBMITTING'}
             hasError={trimmedTitle.length > 200}
           />
@@ -314,40 +333,83 @@ function CreateGoalModal({ onClose }: { onClose: () => void }) {
 
         <div style={{ marginTop: spacing.lg }}>
           <FieldLabel htmlFor="goal-template-select">Starting activities (optional)</FieldLabel>
-          <SelectInput id="goal-template-select" value={templateCategory} onChange={(e) => handleTemplateChange(e.target.value)} disabled={status === 'SUBMITTING'}>
+          <SelectInput id="goal-template-select" value={effectiveCategory ?? ''} onChange={(e) => handleCategorySelectChange(e.target.value)} disabled={status === 'SUBMITTING'}>
             {GOAL_TEMPLATE_OPTIONS.map((option) => (
               <option key={option.value ?? 'SCRATCH'} value={option.value ?? ''}>
                 {option.label}
               </option>
             ))}
           </SelectInput>
+          {/* This ticket's own section 26 -- the one explicit escape from
+              MANUAL mode back to AUTO (title-driven) matching. Shown only
+              when there is actually an automatic suggestion to return to. */}
+          {canOfferAutomaticSuggestion && (
+            <div style={{ marginTop: spacing.xs }}>
+              <TextButton onClick={handleUseAutomaticSuggestion} disabled={status === 'SUBMITTING'}>
+                Use Aura&apos;s suggestion
+              </TextButton>
+            </div>
+          )}
         </div>
 
-        {/* Goals V2 Rhythm R5 -- this ticket's own section 13/14: shown
-            ONLY for a template classified ongoing (never for FINISH_PROJECT
-            or "Start from scratch" -- no unnecessary question, this
-            ticket's own section 34/58). One compact RhythmPicker per
-            activity, reusing the exact same control Goal Detail's own Add
-            activity/edit affordance use (one mechanism, section 9) --
-            never a separate recurrence editor. */}
-        {isOngoingTemplate && (
-          <div style={{ marginTop: spacing.lg }}>
-            <div style={{ ...typography.bodyStrong, fontSize: 14 }}>How often would these help?</div>
-            <div style={{ display: 'flex', flexDirection: 'column', gap: spacing.md, marginTop: spacing.sm }}>
-              {templateActivities.map((templateActivity, index) => (
-                <div key={templateActivity.title}>
-                  <div style={{ ...typography.meta, color: colors.textSecondary, marginBottom: spacing.xs }}>{templateActivity.title}</div>
-                  <RhythmPicker
-                    value={activityRhythms[index] ?? { kind: 'NONE' }}
-                    onChange={(next) => setActivityRhythms((prev) => prev.map((v, i) => (i === index ? next : v)))}
-                    idPrefix={`create-goal-activity-${index}`}
-                    hideLabel
-                  />
-                </div>
-              ))}
-            </div>
+        {/* Goals V2 Candidate B2 (resumed) -- a transient, reviewable
+            proposal: Aura's suggestion once the Goal title (or an explicit
+            category choice) matches, never persisted until Create Goal
+            succeeds. This ticket's own section 27 -- "Suggested
+            activities" only while the rows are still untouched; once the
+            user edits anything, the label stops claiming to be Aura's
+            current recommendation. */}
+        <div style={{ marginTop: spacing.lg }}>
+          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: spacing.sm }}>
+            {proposal.rows.length > 0 && <div style={{ ...typography.bodyStrong, fontSize: 14 }}>{proposal.edited ? 'Activities' : 'Suggested activities'}</div>}
+            {canRefreshSuggestions && (
+              <TextButton onClick={handleRefreshSuggestions} disabled={status === 'SUBMITTING'}>
+                Refresh suggestions
+              </TextButton>
+            )}
           </div>
-        )}
+
+          <div style={{ display: 'flex', flexDirection: 'column', gap: spacing.md, marginTop: proposal.rows.length > 0 ? spacing.sm : 0 }}>
+            {proposal.rows.map((row) => (
+              <div key={row.localId} style={{ display: 'flex', gap: spacing.sm, alignItems: 'flex-start' }}>
+                <div style={{ flex: 1 }}>
+                  <FieldLabel htmlFor={`${row.localId}-title`} visuallyHidden>
+                    Activity title
+                  </FieldLabel>
+                  <TextInput
+                    id={`${row.localId}-title`}
+                    value={row.title}
+                    onChange={(e) => handleRenameRow(row.localId, e.target.value)}
+                    maxLength={200}
+                    disabled={status === 'SUBMITTING'}
+                    hasError={row.title.trim().length === 0 || row.title.trim().length > 200}
+                  />
+                  <div style={{ marginTop: spacing.xs }}>
+                    <RhythmPicker
+                      value={row.rhythm ?? { kind: 'NONE' }}
+                      onChange={(next) => handleRowRhythmChange(row.localId, next)}
+                      idPrefix={row.localId}
+                      hideLabel
+                    />
+                  </div>
+                </div>
+                <IconButton
+                  ariaLabel={`Remove ${row.title.trim() || 'activity'}`}
+                  onClick={status === 'SUBMITTING' ? undefined : () => handleRemoveRow(row.localId)}
+                  style={{ marginTop: 22, width: 36, height: 36 }}
+                >
+                  ✕
+                </IconButton>
+              </div>
+            ))}
+          </div>
+
+          <div style={{ marginTop: spacing.md }}>
+            <SecondaryButton onClick={handleAddFreeform} disabled={status === 'SUBMITTING'}>
+              + Add activity
+            </SecondaryButton>
+          </div>
+        </div>
 
         {error && (
           <div role="alert" style={{ marginTop: spacing.md }}>
