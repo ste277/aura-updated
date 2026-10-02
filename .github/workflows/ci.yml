@@ -221,6 +221,13 @@ jobs:
       # the Decision Facts V1 threading DB step).
       - name: Run recurrence period bounds test
         run: npx ts-node test/recurrencePeriodBounds.test.ts
+      # Opportunity Scarcity V1 -- O4: inert opportunity facts (pure: the real
+      # O1 + O2 composed through the generic enrichment and the preview
+      # handler with injected loaders) and its architecture guard.
+      - name: Run opportunity decision facts test
+        run: npx ts-node test/opportunityDecisionFacts.test.ts
+      - name: Run opportunity decision facts architecture test
+        run: npx ts-node test/opportunityDecisionFactsArchitecture.test.ts
   web-build:
     name: Next.js production build
     runs-on: ubuntu-latest
@@ -410,3 +417,8 @@ jobs:
       # query against a live database.
       - name: Run opportunity range adapter DB test
         run: npx ts-node test/opportunityRangeAdapterDb.test.ts
+      # Opportunity Scarcity V1 -- O4: the real chain (Rhythm facts -> period
+      # bounds -> range data -> projection -> decision facts) through the
+      # real preview boundary against a live database.
+      - name: Run opportunity decision facts DB test
+        run: npx ts-node test/opportunityDecisionFactsDb.test.ts
