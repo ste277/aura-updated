@@ -27,9 +27,19 @@
  * timezone, with counts that never carry over between weeks. Any other
  * period kind must be added as a new literal with its own documented
  * semantics, never folded into this one.
+ *
+ * `periodStartDate` / `periodEndDate` are the period's own extent as
+ * local civil dates ('YYYY-MM-DD', both INCLUSIVE -- the end is the
+ * period's last day, never the first day of the next period). They are
+ * calendar labels, not instants: they carry no timezone offset and never
+ * change length with a clock change. They are resolved by the provider,
+ * for the very period the counts below are taken over; this module only
+ * carries them and never computes them.
  */
 export interface RecurrenceDecisionFacts {
   period: 'LOCAL_CALENDAR_WEEK';
+  periodStartDate: string;
+  periodEndDate: string;
   targetPerPeriod: number;
   /** Occurrences already completed in the current period. */
   completedInPeriod: number;

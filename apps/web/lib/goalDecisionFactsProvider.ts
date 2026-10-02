@@ -35,6 +35,7 @@ import type { User } from './db';
 import type { ConstructDayRequest } from './dayConstructorOrchestrator';
 import type { DecisionFacts, DecisionFactsByIntentId } from './decisionFacts';
 import { encodeGoalDemandIntentId } from './goalDemandIntentId';
+import { localCalendarWeekBounds } from './goalActivityRhythm';
 import { loadEligibleGoalDemand, createRealGoalDemandCandidatesDeps, type GoalDemandCandidate, type GoalDemandCandidatesDeps } from './goalDemandCandidates';
 
 /** Pure translation of already-canonical Goal demand into generic facts,
@@ -45,12 +46,18 @@ export function translateGoalDemandToDecisionFacts(
   requestedIntentIds: ReadonlySet<string>
 ): Map<string, DecisionFacts> {
   const factsByIntentId = new Map<string, DecisionFacts>();
+  // The extent of the very week the candidates' counts were taken over:
+  // the Rhythm module's own helper applied to the same planning date it
+  // was given. Pure civil-date arithmetic -- no query, no clock.
+  const period = candidates.length === 0 ? undefined : localCalendarWeekBounds(planningLocalDate);
   for (const candidate of candidates) {
     const intentId = encodeGoalDemandIntentId(planningLocalDate, candidate.goalActivityId);
-    if (!requestedIntentIds.has(intentId)) continue;
+    if (!requestedIntentIds.has(intentId) || !period) continue;
     factsByIntentId.set(intentId, {
       recurrence: {
         period: 'LOCAL_CALENDAR_WEEK',
+        periodStartDate: period.startDate,
+        periodEndDate: period.endDate,
         targetPerPeriod: candidate.rhythm.targetPerWeek,
         completedInPeriod: candidate.rhythm.completedThisWeek,
         committedInPeriod: candidate.rhythm.committedThisWeek,
