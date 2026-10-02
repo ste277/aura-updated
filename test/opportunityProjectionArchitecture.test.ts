@@ -1,0 +1,75 @@
+/**
+ * Opportunity Scarcity V1 -- O1 architecture guard. Protects the
+ * boundary of apps/web/lib/opportunityProjection.ts by asserting
+ * forbidden imports/modules/behaviors, not identifier spelling alone:
+ * the engine stays pure, source-blind, policy-free and un-integrated.
+ */
+import fs from 'fs';
+import path from 'path';
+
+let allPassed = true;
+function check(label: string, condition: boolean) {
+  console.log(`${condition ? 'OK  ' : 'FAIL'} ${label}`);
+  if (!condition) allPassed = false;
+}
+
+const root = path.join(__dirname, '..');
+const read = (rel: string) => fs.readFileSync(path.join(root, rel), 'utf8');
+const stripComments = (s: string) => s.replace(/\/\*[\s\S]*?\*\//g, '').replace(/\/\/.*$/gm, '');
+
+const MODULE = 'apps/web/lib/opportunityProjection.ts';
+const src = read(MODULE);
+const code = stripComments(src);
+
+// ---- imports: only pure generic date/interval/type helpers -------------
+const importPaths = Array.from(src.matchAll(/^import[^;]*?from\s+'([^']+)';/gms)).map((m) => m[1]).sort();
+const ALLOWED = ['../../../packages/panchang/src/localDate', './dayCapacity', './dayIntent', './timezone'];
+check(`imports are exactly the allowed pure helpers (${ALLOWED.length})`, JSON.stringify(importPaths) === JSON.stringify(ALLOWED));
+const FORBIDDEN_IMPORT = /\.\/(db|goals|goalActivityRhythm|goalDemand\w*|goalDecision\w*|dayConstructor|dayConstructor\w+|decisionFacts|planDay\w*|session|auth|natalContext|myDayOrchestrator)'/;
+check('no import of db, Goal, Rhythm, Candidate A, the provider, the Constructor/orchestrator, acceptance/persistence, or DecisionFacts', !FORBIDDEN_IMPORT.test(src));
+check('no database/network/framework modules are imported (pg, next, react, fetch)', !/from '(pg|next|react)[^']*'|fetch\(/.test(code));
+
+// ---- purity -----------------------------------------------------------
+check('no clock: no Date.now(), no new Date() without an explicit argument, no performance.now', !/Date\.now\(|new Date\(\s*\)|performance\.now/.test(code));
+check('no randomness', !/Math\.random|crypto/.test(code));
+check('no async/await/Promise (synchronous)', !/\basync\b|\bawait\b|Promise/.test(code));
+check('no environment or process access', !/process\.|require\(/.test(code));
+check('no database access or writes', !/pool\.|beginTransaction|INSERT|UPDATE|DELETE|query\(/.test(code));
+check('no mutation of input collections (no .sort on a supplied array, no push into inputs)', !/blockers\.sort|windows\.sort|availabilityByDate\.set|availabilityByDate\.delete|blockers\.push/.test(code));
+
+// ---- source neutrality / policy-free vocabulary (comments included) ----
+const FORBIDDEN_WORDS = /goal|rhythm|template|goal-demand|candidate a\b|priority|urgen|pressure|score|rank|recommend|shortfall|impossible|behind|atRisk|lastChance|muhurta|timingFit|requiredCount|remainingInPeriod|targetPerPeriod|constructDay|orchestrate|compareBy|evaluateCandidate/i;
+check('the engine mentions no source, requirement, scoring, urgency, shortfall, timing-quality, or Constructor vocabulary anywhere', !FORBIDDEN_WORDS.test(src));
+const stringLiterals = Array.from(code.matchAll(/'([^'\\\n]*)'|"([^"\\\n]*)"/g)).map((m) => m[1] ?? m[2] ?? '');
+check('the engine contains no user-facing copy (no string literal contains whitespace)', stringLiterals.length > 0 && stringLiterals.every((l) => !/\s/.test(l)));
+
+// ---- output contract: facts only ------------------------------------
+const factsBlock = src.slice(src.indexOf('export interface OpportunityFacts'), src.indexOf('export interface OpportunityDayResult'));
+const fields = Array.from(factsBlock.matchAll(/^\s{2}(\w+):/gm)).map((m) => m[1]).sort();
+check('OpportunityFacts has exactly the six factual fields', JSON.stringify(fields) === JSON.stringify(['coverage', 'evaluatedDays', 'horizonEndDate', 'horizonStartDate', 'unknownDays', 'viableDays']));
+const inputBlock = src.slice(src.indexOf('export interface OpportunityProjectionInput'), src.indexOf('export type OpportunityCoverage'));
+const inputFields = Array.from(inputBlock.matchAll(/^\s{2}(\w+):/gm)).map((m) => m[1]).sort();
+check('the input carries no requirement count and no candidate/source identity', JSON.stringify(inputFields) === JSON.stringify(['availabilityByDate', 'blockers', 'durationMinutes', 'horizonEndDate', 'now', 'planningDate', 'timezone']));
+check('the three day states are structurally distinct literals', /'KNOWN_FEASIBLE' \| 'KNOWN_INFEASIBLE' \| 'UNKNOWN'/.test(src) && /kind: 'UNKNOWN'/.test(src) && /kind: 'KNOWN'/.test(src));
+
+// ---- no integration in O1 ----------------------------------------------
+const lib = path.join(root, 'apps/web/lib');
+const app = path.join(root, 'apps/web/app');
+function listTs(dir: string): string[] {
+  return fs.readdirSync(dir, { withFileTypes: true }).flatMap((e) => {
+    const p = path.join(dir, e.name);
+    if (e.isDirectory()) return e.name === 'node_modules' || e.name.startsWith('.') ? [] : listTs(p);
+    return /\.(ts|tsx)$/.test(e.name) ? [p] : [];
+  });
+}
+const referencing = [...listTs(lib), ...listTs(app)].filter((f) => !f.endsWith('opportunityProjection.ts') && /from '[^']*opportunityProjection'|projectOpportunityFacts|\bOpportunityFacts\b/.test(fs.readFileSync(f, 'utf8')));
+check('no production file imports or references the engine yet (no DecisionFacts, orchestrator, handler, route, or provider integration in O1)', referencing.length === 0);
+check('decisionFacts.ts is not extended with opportunity facts in O1', !/OpportunityFacts|opportunityProjection|viableDays|unknownDays/.test(read('apps/web/lib/decisionFacts.ts')));
+check('the orchestrator, preview handler and route are untouched by O1', ['apps/web/lib/dayConstructorOrchestrator.ts', 'apps/web/lib/dayConstructorPreviewRequest.ts', 'apps/web/app/api/day-constructor/preview/route.ts'].every((f) => !/opportunityProjection|projectOpportunityFacts|OpportunityFacts/.test(read(f))));
+check('no Constructor decision module references the engine', ['apps/web/lib/dayConstructor.ts', 'apps/web/lib/dayIntent.ts', 'apps/web/lib/dayCapacity.ts'].every((f) => !/opportunityProjection|projectOpportunityFacts/.test(read(f))));
+
+if (!allPassed) {
+  console.error('SOME OPPORTUNITY PROJECTION ARCHITECTURE CHECKS FAILED');
+  process.exit(1);
+}
+console.log('ALL OPPORTUNITY PROJECTION ARCHITECTURE CHECKS PASSED');
