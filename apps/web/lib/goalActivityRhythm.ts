@@ -153,6 +153,19 @@ export function localCalendarWeekStart(localDateStr: string): string {
   return addDaysToDateStr(localDateStr, -daysSinceMonday);
 }
 
+/** The inclusive civil-date bounds of the local calendar week containing
+ * `localDateStr`: the Monday from `localCalendarWeekStart` and the Sunday
+ * six civil days later (never the following Monday). This is the ONE
+ * statement of the weekly period's extent -- derived from the same
+ * `localCalendarWeekStart` that `computeGoalActivityRhythmEligibility`
+ * buckets occurrences with, so the bounds always describe exactly the
+ * period its completed/committed counts are taken over. Pure civil-date
+ * arithmetic: DST cannot change which seven dates a week contains. */
+export function localCalendarWeekBounds(localDateStr: string): { startDate: string; endDate: string } {
+  const startDate = localCalendarWeekStart(localDateStr);
+  return { startDate, endDate: addDaysToDateStr(startDate, 6) };
+}
+
 // ============================================================
 // Pure eligibility engine (this ticket's own sections 11-22). Accepts
 // FACTS, never queries the DB itself (section 11) and never reads

@@ -216,6 +216,11 @@ jobs:
         run: npx ts-node test/opportunityRangeAdapter.test.ts
       - name: Run opportunity range adapter architecture test
         run: npx ts-node test/opportunityRangeAdapterArchitecture.test.ts
+      # Opportunity Scarcity V1 -- O3: recurrence period bounds carried by
+      # the Decision Facts provider (pure; DB threading is gated above in
+      # the Decision Facts V1 threading DB step).
+      - name: Run recurrence period bounds test
+        run: npx ts-node test/recurrencePeriodBounds.test.ts
   web-build:
     name: Next.js production build
     runs-on: ubuntu-latest

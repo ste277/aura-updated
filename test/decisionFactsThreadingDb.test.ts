@@ -34,6 +34,7 @@ function check(label: string, condition: boolean) {
 }
 
 const TZ = 'Asia/Kolkata';
+const OTHER_TZ = 'America/Los_Angeles';
 
 async function sql(text: string, params: unknown[] = []): Promise<any[]> {
   const c = await beginTransaction();
@@ -56,7 +57,9 @@ const iso = (s: string) => new Date(s);
 
 async function main() {
   const user = await upsertUserByEmail({ email: 'test-decision-facts-v1@example.com', cityName: 'Chennai', latitude: 13.0827, longitude: 80.2707, timezone: TZ });
-  const other = await upsertUserByEmail({ email: 'test-decision-facts-v1-other@example.com', cityName: 'Chennai', latitude: 13.0827, longitude: 80.2707, timezone: TZ });
+  const other = await upsertUserByEmail({ email: 'test-decision-facts-v1-other@example.com', cityName: 'Chennai', latitude: 13.0827, longitude: 80.2707, timezone: OTHER_TZ });
+  // Authoritative timezone differs per user (O3 cross-user proof); pinned explicitly so a pre-existing row cannot keep a stale zone.
+  await sql(`UPDATE "User" SET timezone = $1 WHERE id = $2`, [OTHER_TZ, other.id]);
   for (const u of [user, other]) {
     await updateBirthProfile(u.id, { birthDate: '1990-06-15', birthTime: '08:30', birthCityName: 'Chennai', birthLatitude: 13.0827, birthLongitude: 80.2707, birthTimezone: TZ });
   }
@@ -72,17 +75,18 @@ async function main() {
   await cleanup();
 
   // The real production preview boundary, wired EXACTLY as the route wires it.
-  const previewRaw = async (now: Date, targetDate: string, intents: unknown[]) => {
+  const previewAs = async (userId: string, now: Date, body: Record<string, unknown>) => {
     const result = await handleDayConstructorPreviewRequest({
-      getSession: () => ({ userId: user.id }),
+      getSession: () => ({ userId }),
       getUser: (id) => getUserById(id),
-      getBody: async () => ({ targetDate, intents }),
+      getBody: async () => body,
       now: () => now,
       createOrchestratorDeps: createRealDayConstructorOrchestratorDeps,
       loadDecisionFacts: (u, request) => loadGoalDecisionFacts(u, request),
     });
     return result;
   };
+  const previewRaw = (now: Date, targetDate: string, intents: unknown[]) => previewAs(user.id, now, { targetDate, intents });
   const resolved = (result: { body: Record<string, unknown> }, id: string) => JSON.parse(JSON.stringify(result.body)).preview?.resolvedIntents?.find((r: any) => r.requestedIntentId === id);
   const fakeAcceptReq = (body: unknown): any => ({ cookies: { get: () => ({ value: token }) }, json: async () => body, headers: new Headers() });
   const accept = async (body: unknown) => (await acceptRoute(fakeAcceptReq(body))).json();
@@ -106,9 +110,10 @@ async function main() {
     const goalResolved = resolved(r1, goalIntentId);
     const elig1 = await loadEligibleGoalDemand(createRealGoalDemandCandidatesDeps(), user.id, DATE, TZ);
     const candidate1 = elig1.status === 'OK' ? elig1.candidates.find((c) => c.goalActivityId === ga!.id) : undefined;
-    const expected = candidate1 && { recurrence: { period: 'LOCAL_CALENDAR_WEEK', targetPerPeriod: candidate1.rhythm.targetPerWeek, completedInPeriod: candidate1.rhythm.completedThisWeek, committedInPeriod: candidate1.rhythm.committedThisWeek, remainingInPeriod: candidate1.rhythm.remainingOccurrences } };
+    const expected = candidate1 && { recurrence: { period: 'LOCAL_CALENDAR_WEEK', periodStartDate: '2026-10-05', periodEndDate: '2026-10-11', targetPerPeriod: candidate1.rhythm.targetPerWeek, completedInPeriod: candidate1.rhythm.completedThisWeek, committedInPeriod: candidate1.rhythm.committedThisWeek, remainingInPeriod: candidate1.rhythm.remainingOccurrences } };
     check('generic facts are present on the resolved intent', !!goalResolved?.dayIntent.decisionFacts?.recurrence);
     check('facts equal the canonical Candidate A1 Rhythm output, translated (target 3, 0 completed, 0 committed, 3 remaining)', JSON.stringify(goalResolved?.dayIntent.decisionFacts) === JSON.stringify(expected) && goalResolved?.dayIntent.decisionFacts?.recurrence?.targetPerPeriod === 3 && goalResolved?.dayIntent.decisionFacts?.recurrence?.remainingInPeriod === 3);
+    check('O3: the real provider carries the INCLUSIVE civil-date week bounds through the real preview path (2026-10-06 is a Tuesday -> Mon 2026-10-05 .. Sun 2026-10-11)', goalResolved?.dayIntent.decisionFacts?.recurrence?.periodStartDate === '2026-10-05' && goalResolved?.dayIntent.decisionFacts?.recurrence?.periodEndDate === '2026-10-11');
     check('the generic fact carries no Goal identity', !/goal/i.test(JSON.stringify(goalResolved?.dayIntent.decisionFacts)));
     check('a typed (non-Goal) intent in the same request carries no facts', resolved(r1, 'typed-1')?.dayIntent.decisionFacts === undefined);
 
@@ -130,6 +135,42 @@ async function main() {
     check('another user\'s GoalActivity id yields no facts (provider is scoped to the authenticated user)', resolved(r2, otherId)?.dayIntent.decisionFacts === undefined);
     check('MANUAL Goal handoff rows (plan-day-goal-<id>) carry no facts -- Decision Facts V1 covers automatic Goal demand only (classification B)', resolved(r2, manualId)?.dayIntent.decisionFacts === undefined);
     check('an automatic id encoded for a different planning date yields no facts', resolved(r2, wrongDateId)?.dayIntent.decisionFacts === undefined);
+
+    console.log('=== O3: PERIOD BOUNDS ARE SERVER-DERIVED FROM EACH USER\'S OWN TIMEZONE ===');
+    {
+      // Same instant for both users: 2026-10-11T20:00Z. UTC date = Sunday 10-11.
+      //   user  (Asia/Kolkata):      Monday 10-12 01:30 local -> week 10-12..10-18
+      //   other (America/Los_Angeles): Sunday 10-11 13:00 local -> week 10-05..10-11
+      const instant = iso('2026-10-11T20:00:00Z');
+      const kolkataId = encodeGoalDemandIntentId('2026-10-12', ga!.id);
+      const laId = encodeGoalDemandIntentId('2026-10-11', otherGa!.id);
+      // NO targetDate in either body: the planning date is derived server-side from the authenticated user's own timezone.
+      const rk = await previewAs(user.id, instant, { intents: [{ id: kolkataId, title: 'Morning cardio', flexibility: 'FLEXIBLE', activityId: 'workout' }] });
+      const rl = await previewAs(other.id, instant, { intents: [{ id: laId, title: 'Other cardio', flexibility: 'FLEXIBLE', activityId: 'workout' }] });
+      const fk = resolved(rk, kolkataId)?.dayIntent.decisionFacts?.recurrence;
+      const fl = resolved(rl, laId)?.dayIntent.decisionFacts?.recurrence;
+      check('positive offset: UTC Sunday is already Monday in Kolkata -> bounds 2026-10-12..2026-10-18 (not the UTC-date week)', fk?.periodStartDate === '2026-10-12' && fk?.periodEndDate === '2026-10-18');
+      check('negative offset: the same instant is still Sunday in Los Angeles -> bounds 2026-10-05..2026-10-11', fl?.periodStartDate === '2026-10-05' && fl?.periodEndDate === '2026-10-11');
+      check('cross-user: each user\'s bounds come from their OWN authoritative timezone, same instant, different weeks', !!fk && !!fl && fk.periodStartDate !== fl.periodStartDate);
+      check('period consistency: each planning date lies within its own bounds', !!fk && !!fl && fk.periodStartDate <= '2026-10-12' && '2026-10-12' <= fk.periodEndDate && fl.periodStartDate <= '2026-10-11' && '2026-10-11' <= fl.periodEndDate);
+      check('fact consistency: remaining = max(0, target - completed - committed) for both users', !!fk && !!fl && fk.remainingInPeriod === Math.max(0, fk.targetPerPeriod - fk.completedInPeriod - fk.committedInPeriod) && fl.remainingInPeriod === Math.max(0, fl.targetPerPeriod - fl.completedInPeriod - fl.committedInPeriod));
+      check('cross-user: a user\'s own targets are unaffected (Kolkata 3/week, Los Angeles 2/week)', fk?.targetPerPeriod === 3 && fl?.targetPerPeriod === 2);
+    }
+    {
+      // FORGED client values: bounds, counts, timezone and facts in the body are never authoritative.
+      const forgedFact = { recurrence: { period: 'LOCAL_CALENDAR_WEEK', periodStartDate: '1999-01-04', periodEndDate: '1999-01-10', targetPerPeriod: 99, completedInPeriod: 0, committedInPeriod: 0, remainingInPeriod: 99 } };
+      const rf = await previewAs(user.id, iso('2026-10-06T02:00:00Z'), {
+        targetDate: DATE,
+        timezone: 'Pacific/Kiritimati',
+        periodStartDate: '1999-01-04',
+        periodEndDate: '1999-01-10',
+        decisionFactsByIntentId: { [goalIntentId]: forgedFact },
+        decisionFacts: forgedFact,
+        intents: [{ ...goalIntent, decisionFacts: forgedFact, periodStartDate: '1999-01-04', periodEndDate: '1999-01-10' }],
+      });
+      const ff = resolved(rf, goalIntentId)?.dayIntent.decisionFacts?.recurrence;
+      check('forged client bounds/counts/timezone are ignored: facts are the server-derived 2026-10-05..2026-10-11, target 3', ff?.periodStartDate === '2026-10-05' && ff?.periodEndDate === '2026-10-11' && ff?.targetPerPeriod === 3 && ff?.remainingInPeriod === 3);
+    }
 
     console.log('=== NO PERSISTENCE BEFORE ACCEPTANCE ===');
     const pre = await sql(
@@ -160,6 +201,7 @@ async function main() {
     const nextId = encodeGoalDemandIntentId('2026-10-12', ga!.id);
     const r4 = await previewRaw(iso('2026-10-12T02:00:00Z'), '2026-10-12', [{ id: nextId, title: 'Morning cardio', flexibility: 'FLEXIBLE', activityId: 'workout' }]);
     const f4 = resolved(r4, nextId)?.dayIntent.decisionFacts?.recurrence;
+    check('O3: next week the bounds advance with the counts (2026-10-12..2026-10-18)', f4?.periodStartDate === '2026-10-12' && f4?.periodEndDate === '2026-10-18');
     check('next week the carried facts reset to the full target', f4?.targetPerPeriod === 3 && f4?.completedInPeriod === 0 && f4?.remainingInPeriod === 3);
 
     if (!allPassed) {

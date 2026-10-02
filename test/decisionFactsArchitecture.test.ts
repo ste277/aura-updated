@@ -61,7 +61,12 @@ check('preview request handler is source-blind (no goal/rhythm mention, no goal 
 check('provider reuses Candidate A1 read model verbatim (imports loadEligibleGoalDemand)', /import \{[^}]*loadEligibleGoalDemand[^}]*\} from '\.\/goalDemandCandidates';/.test(providerSrc));
 check('provider uses the ENCODER, never the decoder, and no ad hoc namespace parsing', /encodeGoalDemandIntentId\(/.test(stripComments(providerSrc)) && !/classifyGoalDemandIntentId|\.split\(['"]:['"]\)|startsWith\(['"]goal-demand/.test(stripComments(providerSrc)));
 check('provider never imports the provenance authorization layer', !/goalDemandProvenanceAuthorization/.test(providerSrc));
-check('provider contains no Rhythm arithmetic of its own', !/computeGoalActivityRhythmEligibility|Math\.max|localCalendarWeekStart/.test(stripComments(providerSrc)));
+check('provider contains no Rhythm arithmetic of its own (no eligibility call, no Math.max, no week-start or date arithmetic)', !/computeGoalActivityRhythmEligibility|Math\.max|localCalendarWeekStart|addDaysToDateStr|getWeekdayForDateStr|getUTCDay|setUTCDate|Date\.UTC|new Date\(/.test(stripComments(providerSrc)));
+check('O3: provider obtains the period bounds ONLY from the canonical Rhythm helper (import + single use)', /import \{ localCalendarWeekBounds \} from '\.\/goalActivityRhythm';/.test(providerSrc) && (stripComments(providerSrc).match(/localCalendarWeekBounds\(/g) ?? []).length === 1);
+check('O3: provider imports no opportunity (O1/O2) module and no range/availability module', !/opportunityProjection|opportunityRange|availabilityContext|dayCapacity|planBlockerLifecycle/.test(providerSrc));
+check('O3: the canonical week helper lives with the Rhythm week-start it is derived from', /export function localCalendarWeekBounds\(/.test(read('../apps/web/lib/goalActivityRhythm.ts')) && /const startDate = localCalendarWeekStart\(localDateStr\);/.test(read('../apps/web/lib/goalActivityRhythm.ts')));
+check('O3: decisionFacts.ts CARRIES the period bounds but calculates nothing (no date arithmetic, no helper, no Date)', /periodStartDate: string;/.test(decisionFactsSrc) && /periodEndDate: string;/.test(decisionFactsSrc) && !/addDays|getWeekday|getUTC|setUTC|Date\.|new Date|Math\.|localCalendar/.test(stripComments(decisionFactsSrc)));
+check('O3: no OpportunityFacts fields (viableDays/unknownDays/coverage) in the decision-facts path -- that is O4', !/viableDays|unknownDays|coverage|OpportunityFacts/.test(stripComments(decisionFactsSrc) + stripComments(providerSrc)));
 check('provider imports db.ts for the User TYPE only (no direct query)', /import type \{ User \} from '\.\/db';/.test(providerSrc) && !/from '\.\/db'/.test(providerSrc.replace("import type { User } from './db';", '')));
 
 check('route wires the source-specific provider into the generic loader seam', /loadGoalDecisionFacts/.test(previewRouteSrc) && /loadDecisionFacts:/.test(previewRouteSrc));
@@ -98,12 +103,15 @@ for (const [label, file] of Object.entries({
 const libDir = path.join(__dirname, '../apps/web/lib');
 const consumers = fs.readdirSync(libDir).filter((f) => f.endsWith('.ts') && /remainingInPeriod|completedInPeriod|committedInPeriod|targetPerPeriod/.test(fs.readFileSync(path.join(libDir, f), 'utf8')));
 check('only the generic type module and the source-specific provider reference the recurrence fact fields', consumers.sort().join(',') === 'decisionFacts.ts,goalDecisionFactsProvider.ts');
+const periodBoundConsumers = fs.readdirSync(libDir).filter((f) => f.endsWith('.ts') && /periodStartDate|periodEndDate/.test(fs.readFileSync(path.join(libDir, f), 'utf8')));
+check('O3: only the generic type module and the source-specific provider reference periodStartDate/periodEndDate -- no policy, precedence, placement, eligibility, acceptance or opportunity consumer', periodBoundConsumers.sort().join(',') === 'decisionFacts.ts,goalDecisionFactsProvider.ts');
+check('O3: no component/route/page reads the period bounds either', !/periodStartDate|periodEndDate/.test(fs.readdirSync(path.join(__dirname, '../apps/web/app'), { recursive: true }).filter((f) => typeof f === 'string' && /\.(ts|tsx)$/.test(f)).map((f) => fs.readFileSync(path.join(__dirname, '../apps/web/app', f as string), 'utf8')).join('\n')));
 check('no scarcity/wellbeing/score field exists anywhere in the decision-facts path', !/viableOpportunities|lastChance|lastViableWindow|weeklyWindowCount|wellbeing|priorityScore|urgencyScore/i.test(decisionFactsSrc + providerSrc));
 
 // ============================================================
 // PURE BEHAVIOR -- generic seam
 // ============================================================
-const sampleFacts: DecisionFacts = { recurrence: { period: 'LOCAL_CALENDAR_WEEK', targetPerPeriod: 3, completedInPeriod: 1, committedInPeriod: 0, remainingInPeriod: 2 } };
+const sampleFacts: DecisionFacts = { recurrence: { period: 'LOCAL_CALENDAR_WEEK', periodStartDate: '2026-10-05', periodEndDate: '2026-10-11', targetPerPeriod: 3, completedInPeriod: 1, committedInPeriod: 0, remainingInPeriod: 2 } };
 check('resolveDecisionFactsForIntent: returns the provider-associated facts', resolveDecisionFactsForIntent('a', new Map([['a', sampleFacts]])) === sampleFacts);
 check('resolveDecisionFactsForIntent: unknown id -> undefined', resolveDecisionFactsForIntent('zzz', new Map([['a', sampleFacts]])) === undefined);
 check('resolveDecisionFactsForIntent: absent map -> undefined (behavior identical to no provider)', resolveDecisionFactsForIntent('a', undefined) === undefined);
@@ -215,7 +223,7 @@ function requestFor(ids: string[], targetDate = '2026-10-06'): ConstructDayReque
   }
   {
     // TRUST: a client cannot supply facts through the request body.
-    const forged = { recurrence: { period: 'LOCAL_CALENDAR_WEEK', targetPerPeriod: 99, completedInPeriod: 0, committedInPeriod: 0, remainingInPeriod: 99 } };
+    const forged = { recurrence: { period: 'LOCAL_CALENDAR_WEEK', periodStartDate: '1999-01-04', periodEndDate: '1999-01-10', targetPerPeriod: 99, completedInPeriod: 0, committedInPeriod: 0, remainingInPeriod: 99 } };
     const result = await runDayConstructorPreview(body({ decisionFactsByIntentId: { i1: forged }, decisionFacts: forged }, { decisionFacts: forged }), 'UTC', NOW, orchestratorDeps);
     check('trust: forged decisionFacts in the request body (top-level or per-intent) are ignored entirely', resolvedFor(result, 'i1').dayIntent.decisionFacts === undefined);
   }
