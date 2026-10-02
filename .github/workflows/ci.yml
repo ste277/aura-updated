@@ -331,3 +331,5 @@ jobs:
         run: npx ts-node test/goalDemandProvenanceAuthorizationDb.test.ts
       - name: Run automatic Goal lifecycle closure DB test
         run: npx ts-node test/automaticGoalLifecycleClosureDb.test.ts
+      - name: Run Goals reviewed-create DB test
+        run: npx ts-node test/goalsReviewedCreateDb.test.ts

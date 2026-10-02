@@ -9,6 +9,7 @@
 
 import { findActivityIntent } from '../../../packages/recommendation/src/personalizedTasks';
 import type { CompletionRequirement } from './goalCompletion';
+import type { GoalActivityRhythm } from './goalActivityRhythm';
 
 // ============================================================
 // Persisted lifecycle (implementation design section 2/3) -- GoalActivity
@@ -314,6 +315,55 @@ export function matchGoalTemplateCategory(outcome: string): GoalTemplateCategory
     GOAL_TEMPLATE_CATEGORY_MATCH_PHRASES[category].some((phrase) => phraseMatchesNormalizedOutcome(normalized, phrase))
   );
   return matchedCategories.length === 1 ? matchedCategories[0] : null;
+}
+
+// ============================================================
+// Goals V2 Candidate B3 -- the explicit reviewed-activities Goal-create
+// contract. A B2 proposal-review UX (once built) submits the user's FINAL
+// approved activity set directly, rather than a template category plus a
+// Rhythm array that must match that category's complete, unfiltered
+// activity list. This is matching/shape ONLY -- the HTTP-layer parsing,
+// per-row validation (activityId catalog lookup, CompletionRequirement/
+// Rhythm validation) and persistence all stay in route.ts/db.ts, same
+// division of responsibility as everywhere else in this module.
+// ============================================================
+
+/** One activity row in an explicit reviewed-activities Goal-create
+ * request, already shape-checked but NOT yet validated (activityId/
+ * completionRequirement/rhythm validation happens in route.ts, which
+ * alone decides what an invalid value means for the whole request). */
+export interface ReviewedGoalActivityInput {
+  title: string;
+  activityId: string | null;
+  completionRequirement?: CompletionRequirement;
+  rhythm?: GoalActivityRhythm;
+}
+
+/**
+ * LEGACY_TEMPLATE: the request shape every shipped Goal-create client
+ * sends today -- `templateCategory` (optional) + `activityRhythms`
+ * (optional, must align with that category's COMPLETE activity list).
+ *
+ * EXPLICIT_REVIEW: the request carries its own final `activities` array
+ * -- the exact, already-reviewed set to persist verbatim (never
+ * re-expanded from `templateCategory`, which this mode ignores entirely
+ * if present -- this ticket's own section 6).
+ *
+ * AMBIGUOUS: the request carries BOTH `activities` and `activityRhythms`
+ * -- two competing activity definitions. Never silently prefer one; the
+ * caller must reject the whole request (this ticket's own section 31).
+ *
+ * Deliberately a pure classification of presence/absence only -- it does
+ * not itself validate `activities`' own contents (route.ts does that,
+ * since only it can decide what "invalid" means for an HTTP response).
+ */
+export type GoalCreateRequestMode = 'LEGACY_TEMPLATE' | 'EXPLICIT_REVIEW' | 'AMBIGUOUS';
+
+export function classifyGoalCreateRequestMode(body: { activities?: unknown; activityRhythms?: unknown }): GoalCreateRequestMode {
+  const hasActivities = body.activities !== undefined && body.activities !== null;
+  const hasActivityRhythms = body.activityRhythms !== undefined && body.activityRhythms !== null;
+  if (hasActivities && hasActivityRhythms) return 'AMBIGUOUS';
+  return hasActivities ? 'EXPLICIT_REVIEW' : 'LEGACY_TEMPLATE';
 }
 
 // ============================================================

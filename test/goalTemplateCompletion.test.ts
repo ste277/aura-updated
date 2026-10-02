@@ -191,7 +191,21 @@ function stripComments(source: string): string {
   const goalActivityBlock = goalActivityBlockMatch ? goalActivityBlockMatch[1] : '';
   check('39. GoalActivity model carries the three pre-existing completion columns and no new fourth one (completionSource/completionHistory/etc.)', /completionKind/.test(goalActivityBlock) && /completionTargetValue/.test(goalActivityBlock) && /completionUnit/.test(goalActivityBlock) && !/completionSource|completionHistory|completionScore/.test(goalActivityBlock));
   check('39. route.ts gained no new public API field for completion (server-owned template resolution, never client-supplied)', !/body\.completionRequirement|body\.targetValue|body\.completionUnit/.test(routeSrc));
-  check('39. GOAL_TEMPLATES itself carries no Rhythm/RRULE/day-frequency field (the file\'s own pre-existing, unrelated "no recurring Habit creation" prose about Habit linkage is excluded)', !/\bRhythm\b|\bRRULE\b|\bfrequency\b/i.test(goalsSrcNoComments));
+  // Goals V2 Candidate B3 (a later, separately-authorized ticket)
+  // legitimately introduces a REAL `rhythm` field elsewhere in goals.ts --
+  // on ReviewedGoalActivityInput, the explicit reviewed-Goal-create wire
+  // type, entirely independent of the static template taxonomy this check
+  // actually protects. So this check is scoped to exactly the two
+  // template-shape declarations it was always about (GoalTemplateActivityDefinition
+  // and GOAL_TEMPLATES itself), not the whole file -- narrower, not
+  // weaker: it still fails if either template declaration ever grows a
+  // Rhythm/RRULE/frequency field of its own.
+  const templateActivityDefinitionBlock = (goalsSrcNoComments.match(/interface GoalTemplateActivityDefinition \{[\s\S]*?\n\}/) ?? [''])[0];
+  const goalTemplatesConstBlock = (goalsSrcNoComments.match(/const GOAL_TEMPLATES[\s\S]*?\n\};/) ?? [''])[0];
+  check(
+    '39. GOAL_TEMPLATES itself carries no Rhythm/RRULE/day-frequency field (scoped to GoalTemplateActivityDefinition + GOAL_TEMPLATES\' own declarations -- Candidate B3\'s unrelated ReviewedGoalActivityInput.rhythm field elsewhere in the file is excluded)',
+    templateActivityDefinitionBlock.length > 0 && goalTemplatesConstBlock.length > 0 && !/\bRhythm\b|\bRRULE\b|\bfrequency\b/i.test(templateActivityDefinitionBlock) && !/\bRhythm\b|\bRRULE\b|\bfrequency\b/i.test(goalTemplatesConstBlock)
+  );
   check('39. GOAL_TEMPLATES contains no day-accumulation concept (dayBucket/dailyTarget/accumulat)', !/dayBucket|dailyTarget|accumulat/i.test(goalsSrcNoComments));
   check('39. GOAL_TEMPLATES contains no CHECKLIST kind', !/CHECKLIST/.test(goalsSrcNoComments));
   check('39. goals.ts contains no progress-write/history concept (executionHistory/weeklyTotal/allExecutions)', !/executionHistory|weeklyTotal|allExecutions/.test(goalsSrcNoComments));
