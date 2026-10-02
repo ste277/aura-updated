@@ -52,6 +52,7 @@
 
 import { normalizeBlockedIntervals, type BlockedInterval } from './dayCapacity';
 import { validateEstimatedDurationMinutes, type ConstructionWindow } from './dayIntent';
+import { mergeUsableWindows } from './availabilityContext';
 import { addDaysToDateStr, getDatePartsInTimezone } from './timezone';
 import { isValidCalendarDateString } from '../../../packages/panchang/src/localDate';
 
@@ -162,23 +163,6 @@ function isWellFormedInterval(interval: { start: unknown; end: unknown }): boole
   return isValidInstant(interval.start) && isValidInstant(interval.end) && interval.end.getTime() >= interval.start.getTime();
 }
 
-/** Sorts a COPY by start and merges overlapping or touching spans, so a
- * fit that spans two touching windows is seen as one contiguous span.
- * Never mutates its input. */
-function mergeIntervals(intervals: readonly OpportunityInterval[]): OpportunityInterval[] {
-  const sorted = intervals.map((interval) => ({ start: interval.start, end: interval.end })).sort((a, b) => a.start.getTime() - b.start.getTime());
-  const merged: OpportunityInterval[] = [];
-  for (const interval of sorted) {
-    const last = merged[merged.length - 1];
-    if (last && interval.start.getTime() <= last.end.getTime()) {
-      if (interval.end.getTime() > last.end.getTime()) last.end = interval.end;
-    } else {
-      merged.push(interval);
-    }
-  }
-  return merged;
-}
-
 /** True when some contiguous span of `window` not covered by a blocker is
  * at least `durationMs` long. Blocker clipping/merging reuses the
  * canonical `normalizeBlockedIntervals`. */
@@ -211,7 +195,7 @@ function evaluateDay(
   const clipAtNow = date === todayLocal;
 
   const usable: OpportunityInterval[] = [];
-  for (const window of mergeIntervals(availability.windows)) {
+  for (const window of mergeUsableWindows(availability.windows)) {
     if (clipAtNow) {
       if (window.end.getTime() <= now.getTime()) continue; // elapsed entirely
       usable.push({ start: window.start.getTime() < now.getTime() ? now : window.start, end: window.end });

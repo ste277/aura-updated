@@ -965,6 +965,26 @@ export async function listPlannedActivitiesForDay(userId: string, from: Date, to
   return result.rows;
 }
 
+/**
+ * Opportunity Scarcity V1 -- O2. Every non-cancelled Plan of this user whose
+ * interval OVERLAPS `[from, to)`, regardless of where it starts. Unlike
+ * `listPlannedActivitiesForDay` (which selects by `plannedStartAt` only, so a
+ * Plan that starts before `from` and ends inside the range is missed), this
+ * uses half-open interval overlap: `plannedStartAt < to AND plannedEndAt >
+ * from`. Same `status <> 'CANCELLED'` SQL filter; lifecycle (which statuses
+ * actually block) is applied by the caller via `isActivePlanBlocker`. READ-ONLY,
+ * scoped to `userId`, one query for any range length.
+ */
+export async function listPlannedActivitiesOverlappingRange(userId: string, from: Date, to: Date, executor: QueryExecutor = pool): Promise<PlannedActivity[]> {
+  const result = await executor.query(
+    `SELECT * FROM "PlannedActivity"
+     WHERE "userId" = $1 AND status <> 'CANCELLED' AND "plannedStartAt" < $3 AND "plannedEndAt" > $2
+     ORDER BY "plannedStartAt" ASC`,
+    [userId, from, to]
+  );
+  return result.rows;
+}
+
 /** Aura Reminders V1 (brief section 25) -- the AuraMoment counterpart to
  * listPlannedActivitiesForReminders above. Only ACTIVE, unexpired moments
  * (mirrors resolveAuraMomentByToken's own ACTIVE + expiry check) within the

@@ -210,6 +210,12 @@ jobs:
         run: npx ts-node test/opportunityProjection.test.ts
       - name: Run opportunity projection architecture test
         run: npx ts-node test/opportunityProjectionArchitecture.test.ts
+      # Opportunity Scarcity V1 -- O2: the generic range adapter (pure,
+      # injected fakes) and its architecture guard.
+      - name: Run opportunity range adapter test
+        run: npx ts-node test/opportunityRangeAdapter.test.ts
+      - name: Run opportunity range adapter architecture test
+        run: npx ts-node test/opportunityRangeAdapterArchitecture.test.ts
   web-build:
     name: Next.js production build
     runs-on: ubuntu-latest
@@ -395,3 +401,7 @@ jobs:
       # of which touch a 'use client' component type.
       - name: Run Decision Facts V1 threading DB test
         run: npx ts-node test/decisionFactsThreadingDb.test.ts
+      # Opportunity Scarcity V1 -- O2: real user-scoped wiring + the overlap
+      # query against a live database.
+      - name: Run opportunity range adapter DB test
+        run: npx ts-node test/opportunityRangeAdapterDb.test.ts

@@ -23,8 +23,8 @@ const code = stripComments(src);
 
 // ---- imports: only pure generic date/interval/type helpers -------------
 const importPaths = Array.from(src.matchAll(/^import[^;]*?from\s+'([^']+)';/gms)).map((m) => m[1]).sort();
-const ALLOWED = ['../../../packages/panchang/src/localDate', './dayCapacity', './dayIntent', './timezone'];
-check(`imports are exactly the allowed pure helpers (${ALLOWED.length})`, JSON.stringify(importPaths) === JSON.stringify(ALLOWED));
+const ALLOWED = ['../../../packages/panchang/src/localDate', './availabilityContext', './dayCapacity', './dayIntent', './timezone'];
+check(`imports are exactly the allowed pure helpers (${ALLOWED.length}; availabilityContext only for the shared canonical window merge)`, JSON.stringify(importPaths) === JSON.stringify(ALLOWED));
 const FORBIDDEN_IMPORT = /\.\/(db|goals|goalActivityRhythm|goalDemand\w*|goalDecision\w*|dayConstructor|dayConstructor\w+|decisionFacts|planDay\w*|session|auth|natalContext|myDayOrchestrator)'/;
 check('no import of db, Goal, Rhythm, Candidate A, the provider, the Constructor/orchestrator, acceptance/persistence, or DecisionFacts', !FORBIDDEN_IMPORT.test(src));
 check('no database/network/framework modules are imported (pg, next, react, fetch)', !/from '(pg|next|react)[^']*'|fetch\(/.test(code));
@@ -75,8 +75,15 @@ function listTs(dir: string): string[] {
     return /\.(ts|tsx)$/.test(e.name) ? [p] : [];
   });
 }
+// O2 (range adapter) is the one permitted reference: it may import the engine's TYPES and its
+// horizon-bound constant, but must never import or call the projection function itself.
+const ADAPTER = 'opportunityRangeAdapter.ts';
 const referencing = [...listTs(lib), ...listTs(app)].filter((f) => !f.endsWith('opportunityProjection.ts') && /from '[^']*opportunityProjection'|projectOpportunityFacts|\bOpportunityFacts\b/.test(fs.readFileSync(f, 'utf8')));
-check('no production file imports or references the engine yet (no DecisionFacts, orchestrator, handler, route, or provider integration in O1)', referencing.length === 0);
+check('the only production file that references the engine is the O2 range adapter', referencing.length === 1 && referencing[0].endsWith(ADAPTER));
+const adapterRef = /import \{([^}]*)\} from '\.\/opportunityProjection';/.exec(fs.readFileSync(path.join(lib, ADAPTER), 'utf8'));
+const adapterRefNames = adapterRef ? adapterRef[1].split(',').map((n) => n.trim()).filter(Boolean).sort() : [];
+check('the O2 adapter imports only the engine\'s MAX_PROJECTION_HORIZON_DAYS constant and DayAvailabilityInput type', JSON.stringify(adapterRefNames) === JSON.stringify(['MAX_PROJECTION_HORIZON_DAYS', 'type DayAvailabilityInput']));
+check('no production file calls projectOpportunityFacts (the engine is still not consumed by any product path)', !listTs(lib).concat(listTs(app)).some((f) => !f.endsWith('opportunityProjection.ts') && /projectOpportunityFacts/.test(fs.readFileSync(f, 'utf8'))));
 check('decisionFacts.ts is not extended with opportunity facts in O1', !/OpportunityFacts|opportunityProjection|viableDays|unknownDays/.test(read('apps/web/lib/decisionFacts.ts')));
 check('the orchestrator, preview handler and route are untouched by O1', ['apps/web/lib/dayConstructorOrchestrator.ts', 'apps/web/lib/dayConstructorPreviewRequest.ts', 'apps/web/app/api/day-constructor/preview/route.ts'].every((f) => !/opportunityProjection|projectOpportunityFacts|OpportunityFacts/.test(read(f))));
 check('no Constructor decision module references the engine', ['apps/web/lib/dayConstructor.ts', 'apps/web/lib/dayIntent.ts', 'apps/web/lib/dayCapacity.ts'].every((f) => !/opportunityProjection|projectOpportunityFacts/.test(read(f))));
