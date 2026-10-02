@@ -175,7 +175,13 @@ async function main() {
         candidate.title === 'Read 20 pages' &&
         candidate.activityId === 'reading' &&
         candidate.remainingThisWeek === 2 &&
-        Object.keys(candidate).sort().join(',') === 'activityId,goalActivityId,goalId,goalTitle,remainingThisWeek,title'
+        // Constructor Decision Intelligence V1 -- narrowed (not weakened)
+        // to admit the new generic `rhythm` decision-facts field
+        // (decisionFacts.ts), the only field added since this guard was
+        // first written. Still fails closed on any OTHER new key.
+        Object.keys(candidate).sort().join(',') === 'activityId,goalActivityId,goalId,goalTitle,remainingThisWeek,rhythm,title' &&
+        candidate.rhythm.targetPerWeek === 2 &&
+        candidate.rhythm.remainingOccurrences === 2
     );
   }
 
@@ -183,10 +189,11 @@ async function main() {
   // Duplicate identity / pure dedup helper (this ticket's own section 11)
   // ============================================================
   {
+    const rhythmFacts = { targetPerWeek: 1, completedThisWeek: 0, committedThisWeek: 0, remainingOccurrences: 1 };
     const candidates = [
-      { goalActivityId: 'ga-1', goalId: 'g', goalTitle: 'g', title: 't', activityId: null, remainingThisWeek: 1 },
-      { goalActivityId: 'ga-2', goalId: 'g', goalTitle: 'g', title: 't', activityId: null, remainingThisWeek: 1 },
-      { goalActivityId: 'ga-3', goalId: 'g', goalTitle: 'g', title: 't', activityId: null, remainingThisWeek: 1 },
+      { goalActivityId: 'ga-1', goalId: 'g', goalTitle: 'g', title: 't', activityId: null, remainingThisWeek: 1, rhythm: rhythmFacts },
+      { goalActivityId: 'ga-2', goalId: 'g', goalTitle: 'g', title: 't', activityId: null, remainingThisWeek: 1, rhythm: rhythmFacts },
+      { goalActivityId: 'ga-3', goalId: 'g', goalTitle: 'g', title: 't', activityId: null, remainingThisWeek: 1, rhythm: rhythmFacts },
     ];
     const byArray = excludeGoalDemandByActivityIds(candidates, ['ga-2']);
     check('15. excludeGoalDemandByActivityIds removes exactly the named ids (array input)', byArray.map((c) => c.goalActivityId).join(',') === 'ga-1,ga-3');

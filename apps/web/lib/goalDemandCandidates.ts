@@ -28,6 +28,7 @@
 
 import { computeGoalActivityRhythmEligibility, normalizeGoalActivityRhythm, type GoalActivityRhythmOccurrenceFact } from './goalActivityRhythm';
 import { loadCandidateGoalActivitiesForRhythmDemand, loadGoalActivityRhythmFactsForActivities, type CandidateGoalActivityForRhythmDemandRow } from './db';
+import type { RhythmDecisionFacts } from './decisionFacts';
 
 // ============================================================
 // Demand contract (this ticket's own section 5) -- the smallest shape
@@ -46,6 +47,15 @@ export interface GoalDemandCandidate {
   /** The exact remainingOccurrences computeGoalActivityRhythmEligibility
    * already computes -- never re-derived, never negative. */
   remainingThisWeek: number;
+  /** Constructor Decision Intelligence -- Decision Facts V1
+   * (decisionFacts.ts). The exact same `targetPerWeek`/`completedThisWeek`/
+   * `committedThisWeek`/`remainingOccurrences` already computed below for
+   * `remainingThisWeek`, carried as the generic, source-neutral shape a
+   * future Decision Policy layer (never this file) will read. Every
+   * candidate this function returns is already Rhythm-eligible
+   * (N_PER_WEEK, `eligible === true`), so this is always populated here
+   * -- never optional on a real candidate. */
+  rhythm: RhythmDecisionFacts;
 }
 
 /**
@@ -132,6 +142,12 @@ export async function loadEligibleGoalDemand(deps: GoalDemandCandidatesDeps, use
       title: row.title,
       activityId: row.activityId,
       remainingThisWeek: eligibility.remainingOccurrences,
+      rhythm: {
+        targetPerWeek: rhythm.targetPerWeek ?? 0,
+        completedThisWeek: eligibility.completedThisWeek,
+        committedThisWeek: eligibility.committedThisWeek,
+        remainingOccurrences: eligibility.remainingOccurrences,
+      },
     });
   }
 

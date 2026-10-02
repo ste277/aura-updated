@@ -35,6 +35,7 @@
 
 import { isValidCalendarDateString } from '../../../packages/panchang/src/localDate';
 import type { MuhurtaActivityFamily } from '../../../packages/muhurta/src/muhurtaEngine';
+import type { DecisionFacts } from './decisionFacts';
 
 // ============================================================
 // DayIntent
@@ -127,6 +128,16 @@ export interface DayIntent {
    * never re-derived from `title`/`id`, which carry no ordering meaning
    * of their own. */
   originalOrder: number;
+  /** Constructor Decision Intelligence -- Decision Facts V1
+   * (decisionFacts.ts). Attached by the orchestrator AFTER this file's
+   * own `buildDayIntent` runs (never by `buildDayIntent` itself, which
+   * stays completely unaware this field exists) for an intent whose
+   * source has generic decision facts to offer -- e.g. Rhythm facts for
+   * a recurring GoalActivity. Deliberately inert in V1: no comparator in
+   * this file reads it, and it must stay that way until a real Decision
+   * Policy layer is built (see this ticket's own section 8 for why a
+   * bare remainingOccurrences count is not yet deferral pressure). */
+  decisionFacts?: DecisionFacts;
 }
 
 /** Caller-supplied subset used to build a `DayIntent` -- every DEFAULTED/

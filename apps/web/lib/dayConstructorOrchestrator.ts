@@ -66,6 +66,17 @@ import {
   type PlacementTimingFit,
 } from './dayConstructor';
 import type { BlockedInterval } from './dayCapacity';
+import { resolveDecisionFactsForIntent, type RhythmDecisionFacts } from './decisionFacts';
+import { classifyGoalDemandIntentId } from './goalDemandIntentId';
+// Constructor Decision Intelligence -- Decision Facts V1. Used ONLY
+// inside `createRealDayConstructorOrchestratorDeps` below (the file's
+// own established convention for every other real dependency -- see
+// `listPlannedActivitiesForDay`/`runTimingSearch`/etc. imported above).
+// `orchestrateConstructDay`'s own core logic, and `dayConstructor.ts`
+// itself, never import this module and never call it directly -- they
+// only ever see the abstract `deps.loadGoalRhythmDecisionFacts` function
+// signature declared on `DayConstructorOrchestratorDeps` below.
+import { loadEligibleGoalDemand, createRealGoalDemandCandidatesDeps, type GoalDemandResult } from './goalDemandCandidates';
 
 // ============================================================
 // Request contract (this ticket's own section 4). USER-LEVEL input --
@@ -260,6 +271,19 @@ export interface DayConstructorOrchestratorDeps {
    * resolution decision of its own (that stays entirely inside the pure
    * `resolveAvailability`, never duplicated here). */
   loadAvailabilityConfiguration: () => Promise<AvailabilityConfiguration>;
+  /** Constructor Decision Intelligence -- Decision Facts V1
+   * (decisionFacts.ts). OPTIONAL and additive: every existing caller
+   * that omits it (every test fixture that pre-dates this ticket) keeps
+   * today's exact behavior, byte-for-byte -- no `decisionFacts` is ever
+   * attached to any `DayIntent`. Called EXACTLY ONCE per orchestration
+   * run (same convention as every other dependency above), never once
+   * per intent. Its own job is only to fetch the already-canonical
+   * eligible Goal demand for this exact planning date/timezone --
+   * `orchestrateConstructDay` is the one that decides WHICH resolved
+   * intents (by their own already-existing `goal-demand:` intent-id
+   * namespace, `goalDemandIntentId.ts`) actually receive a fact from it;
+   * this function makes no placement/selection decision of its own. */
+  loadGoalRhythmDecisionFacts?: (planningLocalDate: string, timezone: string) => Promise<GoalDemandResult>;
 }
 
 /**
@@ -317,6 +341,13 @@ export function createRealDayConstructorOrchestratorDeps(user: User, now: Date):
         periods: periods.map((row) => ({ weekday: row.weekday as AvailabilityConfiguration['periods'][number]['weekday'], startTime: row.startTime, endTime: row.endTime })),
       };
     },
+    // Constructor Decision Intelligence -- Decision Facts V1. Reuses
+    // Candidate A1's own read model VERBATIM (createRealGoalDemandCandidatesDeps/
+    // loadEligibleGoalDemand) -- no new query shape, no second Rhythm
+    // formula. Guarantees the facts attached here are always consistent
+    // with what Candidate A itself considers eligible for this exact
+    // (userId, planningLocalDate, timezone).
+    loadGoalRhythmDecisionFacts: (planningLocalDate, timezone) => loadEligibleGoalDemand(createRealGoalDemandCandidatesDeps(), user.id, planningLocalDate, timezone),
   };
 }
 
@@ -826,6 +857,41 @@ export async function orchestrateConstructDay(request: ConstructDayRequest, deps
     ...blockingPlanCandidates.filter((plan) => isActivePlanBlocker(plan, request.now)).map((plan) => ({ start: plan.start, end: plan.end, source: 'FIXED_PLAN' as const })),
   ];
 
+  // Constructor Decision Intelligence -- Decision Facts V1. Fetched
+  // EXACTLY ONCE per orchestration run, same convention as every other
+  // real-data fetch above -- never once per intent -- and only when at
+  // least one requested intent actually claims the reserved
+  // `goal-demand:` namespace (goalDemandIntentId.ts), so an ordinary
+  // planning request with no Goal-derived intent never pays for this
+  // fetch at all. This is read-only reuse of the SAME self-describing id
+  // format `authorizeGoalActivityLinks` already decodes for provenance
+  // at accept time -- attaching an inert fact here is not a new trust
+  // boundary (nothing here is a persistence/commitment decision), and
+  // the fact is NEVER attached by trusting anything the client sent:
+  // the GoalActivity id comes only from this already-validated id
+  // shape, and the fact VALUES are always re-fetched fresh from the
+  // canonical Rhythm engine, never round-tripped from the client.
+  const goalActivityIdsNeedingFacts = new Set<string>();
+  for (const requested of request.intents) {
+    const classified = classifyGoalDemandIntentId(requested.id);
+    if (classified.kind === 'VALID_GOAL_DEMAND') goalActivityIdsNeedingFacts.add(classified.goalActivityId);
+  }
+  const rhythmDecisionFactsByGoalActivityId = new Map<string, RhythmDecisionFacts>();
+  if (goalActivityIdsNeedingFacts.size > 0 && deps.loadGoalRhythmDecisionFacts) {
+    const goalDemandResult = await deps.loadGoalRhythmDecisionFacts(request.targetDate, request.timezone);
+    if (goalDemandResult.status === 'OK') {
+      for (const candidate of goalDemandResult.candidates) {
+        if (goalActivityIdsNeedingFacts.has(candidate.goalActivityId)) rhythmDecisionFactsByGoalActivityId.set(candidate.goalActivityId, candidate.rhythm);
+      }
+    }
+    // LOAD_FAILED: deliberately silent here, never a hard failure for
+    // the whole orchestration run -- these facts are inert decision
+    // metadata in V1 (nothing reads them), never a hard constraint, so
+    // a failure to fetch them must not block ordinary planning. A
+    // Goal-derived intent simply proceeds with no `decisionFacts`,
+    // identical to an intent whose source has none to offer.
+  }
+
   const warnings: ConstructDayWarning[] = [];
   const resolvedIntents: ResolvedIntentSummary[] = [];
   const candidatesByIntentId: Record<string, PlacementCandidate[]> = {};
@@ -841,8 +907,21 @@ export async function orchestrateConstructDay(request: ConstructDayRequest, deps
   const flexibleSearchMetaByIntentId: Record<string, { activityId?: string; title: string; durationMinutes: number }> = {};
 
   for (const requested of request.intents) {
-    const { dayIntent, warnings: intentWarnings } = resolveRequestedDayIntent(requested, request.targetDate, durationContext);
-    warnings.push(...intentWarnings);
+    const resolved = resolveRequestedDayIntent(requested, request.targetDate, durationContext);
+    warnings.push(...resolved.warnings);
+    // Constructor Decision Intelligence -- Decision Facts V1. Attached
+    // AFTER resolution, never inside `resolveRequestedDayIntent`/
+    // `buildDayIntent` themselves (dayIntent.ts's own doc comment: "never
+    // by `buildDayIntent` itself, which stays completely unaware this
+    // field exists"), via the one pure Decision Policy boundary
+    // (`resolveDecisionFactsForIntent`, decisionFacts.ts) -- this file's
+    // own job stops at fetching the real data; it makes no decision of
+    // its own about which intent gets a fact. `undefined` for every
+    // intent whose id is not a valid Goal-demand id, or whose
+    // GoalActivity did not come back from the fetch above -- both cases
+    // byte-identical to this field never having been introduced at all.
+    const decisionFacts = resolveDecisionFactsForIntent(requested.id, rhythmDecisionFactsByGoalActivityId);
+    const dayIntent: DayIntent = decisionFacts ? { ...resolved.dayIntent, decisionFacts } : resolved.dayIntent;
     resolvedIntents.push({ requestedIntentId: requested.id, dayIntent });
 
     if (requested.flexibility === 'FIXED') {
