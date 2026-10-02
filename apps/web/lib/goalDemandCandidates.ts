@@ -28,7 +28,6 @@
 
 import { computeGoalActivityRhythmEligibility, normalizeGoalActivityRhythm, type GoalActivityRhythmOccurrenceFact } from './goalActivityRhythm';
 import { loadCandidateGoalActivitiesForRhythmDemand, loadGoalActivityRhythmFactsForActivities, type CandidateGoalActivityForRhythmDemandRow } from './db';
-import type { RhythmDecisionFacts } from './decisionFacts';
 
 // ============================================================
 // Demand contract (this ticket's own section 5) -- the smallest shape
@@ -37,6 +36,17 @@ import type { RhythmDecisionFacts } from './decisionFacts';
 // already-traced manual "Plan with Aura" handoff this read model
 // mirrors, needs either to decide eligibility or to seed a planning row.
 // ============================================================
+
+/** The canonical Rhythm state computeGoalActivityRhythmEligibility already
+ * produced for this candidate -- carried as-is, Goal-side. Translation to
+ * the generic decision-facts shape happens upstream of the Constructor
+ * stack, in goalDecisionFactsProvider.ts, never here. */
+export interface GoalDemandRhythmFacts {
+  targetPerWeek: number;
+  completedThisWeek: number;
+  committedThisWeek: number;
+  remainingOccurrences: number;
+}
 
 export interface GoalDemandCandidate {
   goalActivityId: string;
@@ -47,15 +57,11 @@ export interface GoalDemandCandidate {
   /** The exact remainingOccurrences computeGoalActivityRhythmEligibility
    * already computes -- never re-derived, never negative. */
   remainingThisWeek: number;
-  /** Constructor Decision Intelligence -- Decision Facts V1
-   * (decisionFacts.ts). The exact same `targetPerWeek`/`completedThisWeek`/
-   * `committedThisWeek`/`remainingOccurrences` already computed below for
-   * `remainingThisWeek`, carried as the generic, source-neutral shape a
-   * future Decision Policy layer (never this file) will read. Every
-   * candidate this function returns is already Rhythm-eligible
-   * (N_PER_WEEK, `eligible === true`), so this is always populated here
-   * -- never optional on a real candidate. */
-  rhythm: RhythmDecisionFacts;
+  /** Factual Rhythm state only (no priority/urgency/order) -- exactly the
+   * values already computed for `remainingThisWeek` above, never
+   * re-derived. Every candidate returned here is already Rhythm-eligible
+   * (N_PER_WEEK, `eligible === true`), so this is always populated. */
+  rhythm: GoalDemandRhythmFacts;
 }
 
 /**

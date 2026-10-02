@@ -1,87 +1,60 @@
 /**
- * Constructor Decision Intelligence -- Decision Facts V1 (architecture-
- * foundation slice, per the architecture audit at main@4693891).
+ * Constructor Decision Intelligence -- Decision Facts V1.
  *
  * The one generic, source-neutral contract a candidate source may attach
- * to a `DayIntent` so a FUTURE Decision Policy layer can reason about it
- * -- never consumed by `dayConstructor.ts`'s own placement/precedence
- * logic in V1 (see that file's own callers for why: this ticket's own
- * section 8/21, "raw remainingOccurrences is not equivalent to deferral
- * pressure"). Carried purely as inert metadata for now.
+ * to a `DayIntent` so a FUTURE decision policy can reason about it.
+ * Never consumed by any placement/precedence/eligibility logic in V1 --
+ * carried purely as inert metadata.
  *
- * FACTS, NOT POLICY (this ticket's own section 5): every field here is a
- * plain, already-canonically-computed factual input. There is
- * deliberately no `priority`/`priorityScore`/`urgencyScore`/`rank`/
- * `weight`/`boost`/`penalty` field, and never will be on THIS type --
- * any such derived value belongs to a future Decision Policy layer that
- * CONSUMES these facts, never to the facts themselves.
+ * FACTS, NOT POLICY: every field is a plain, canonically-computed factual
+ * input. There is deliberately no priority/score/rank/weight/boost field
+ * on this type; any derived value belongs to a future policy layer that
+ * CONSUMES these facts.
  *
- * SOURCE-NEUTRAL (this ticket's own section 6): no `goalId`/
- * `goalActivityId`/`source`/`templateCategory` field exists here. A
- * future non-Goal source (a deadline task, a wellbeing engine, an MCP
- * connector) populates the exact same shape; nothing here can be read as
- * "this came from a Goal."
+ * SOURCE-NEUTRAL: this module has no imports at all and knows nothing
+ * about any candidate source, intent-id scheme, or storage. Source-
+ * specific code (upstream of the Constructor stack) is responsible for
+ * extracting facts and translating them into these shapes, keyed by the
+ * intent id it already knows.
  */
-
-import { classifyGoalDemandIntentId } from './goalDemandIntentId';
 
 /**
- * The four values `computeGoalActivityRhythmEligibility`
- * (goalActivityRhythm.ts) already computes for an eligible recurring
- * GoalActivity -- reused verbatim, never re-derived here. Despite the
- * name, this shape is not Goal-specific: it describes "how many times
- * per week must this recur, and where does this week's count currently
- * stand" for ANY source that has a weekly-recurrence concept. Goals are
- * simply the only source that has one today.
+ * A fixed-period recurrence fact: "this activity is meant to recur
+ * `targetPerPeriod` times per period, and here is where the current
+ * period's count stands." `period` is an explicit literal rather than an
+ * implied unit so the semantics are never silently reinterpreted:
+ * 'LOCAL_CALENDAR_WEEK' means a Monday-start week in the user's local
+ * timezone, with counts that never carry over between weeks. Any other
+ * period kind must be added as a new literal with its own documented
+ * semantics, never folded into this one.
  */
-export interface RhythmDecisionFacts {
-  targetPerWeek: number;
-  completedThisWeek: number;
-  committedThisWeek: number;
-  /** The exact `remainingOccurrences` the Rhythm engine computes --
-   * never negative, never re-derived. A bare count only: this ticket's
-   * own section 8 explicitly forbids treating it as deferral pressure by
-   * itself (it cannot distinguish "two remaining, many viable windows
-   * left" from "two remaining, this is the last viable window" -- see
-   * the architecture audit's own section 19/20). */
-  remainingOccurrences: number;
+export interface RecurrenceDecisionFacts {
+  period: 'LOCAL_CALENDAR_WEEK';
+  targetPerPeriod: number;
+  /** Occurrences already completed in the current period. */
+  completedInPeriod: number;
+  /** Occurrences currently scheduled (committed but not yet completed)
+   * in the current period. */
+  committedInPeriod: number;
+  /** Never negative. A bare count only: it cannot by itself distinguish
+   * "many viable opportunities remain" from "this is the last one", so a
+   * consumer must not treat it as deferral pressure. */
+  remainingInPeriod: number;
 }
 
-/**
- * The full generic fact set a `DayIntent` may carry. V1 defines exactly
- * one fact group (`rhythm`); future slices may add others (e.g. a
- * deadline-proximity fact, a wellbeing-scarcity fact) without touching
- * any existing field or any existing source's wiring.
- */
 export interface DecisionFacts {
-  rhythm?: RhythmDecisionFacts;
+  recurrence?: RecurrenceDecisionFacts;
 }
 
+/** Generic transport shape: facts already resolved by a source-specific
+ * provider, keyed by the caller's own intent id. */
+export type DecisionFactsByIntentId = ReadonlyMap<string, DecisionFacts>;
+
 /**
- * THE Decision Policy boundary for V1 (architecture audit section 34/43,
- * this ticket's own section 14) -- the one pure function standing
- * between a real-data fetch (the orchestrator's own job, never this
- * function's) and `dayConstructor.ts` (which never sees this function or
- * any Goal concept at all). Receives a normalized intent id plus
- * already-fetched factual metadata; returns generic decision-ready
- * facts, or `undefined` for an intent with none to offer. No DB, no
- * Goal-service calls, no ranking/placement decision, no LLM -- a plain,
- * synchronous lookup+decode, fully deterministic and directly testable
- * without any I/O.
- *
- * Deliberately narrow in V1: it only ever recognizes the one reserved
- * `goal-demand:` intent-id namespace (`goalDemandIntentId.ts`, read-only
- * reuse of the SAME format `authorizeGoalActivityLinks` already decodes
- * for provenance -- this is not a new trust boundary, and the facts
- * returned here are never treated as one: they are inert metadata,
- * never consulted by any placement/eligibility/acceptance decision). A
- * future source (a deadline task, a wellbeing engine) extends this
- * function with its own id-namespace branch, never a per-source
- * reimplementation of the policy boundary itself.
+ * Pure lookup -- the V1 policy seam. No decoding of ids, no I/O, no
+ * ranking; returns the facts a provider already associated with this
+ * intent id, or `undefined`.
  */
-export function resolveDecisionFactsForIntent(requestedIntentId: string, rhythmFactsByGoalActivityId: ReadonlyMap<string, RhythmDecisionFacts>): DecisionFacts | undefined {
-  const classified = classifyGoalDemandIntentId(requestedIntentId);
-  if (classified.kind !== 'VALID_GOAL_DEMAND') return undefined;
-  const rhythm = rhythmFactsByGoalActivityId.get(classified.goalActivityId);
-  return rhythm ? { rhythm } : undefined;
+export function resolveDecisionFactsForIntent(intentId: string, factsByIntentId: DecisionFactsByIntentId | undefined): DecisionFacts | undefined {
+  return factsByIntentId?.get(intentId);
 }

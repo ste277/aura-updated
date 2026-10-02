@@ -4,6 +4,7 @@ import { getUserById } from '../../../../lib/db';
 import { parseJsonObject } from '../../../../lib/request';
 import { createRealDayConstructorOrchestratorDeps } from '../../../../lib/dayConstructorOrchestrator';
 import { handleDayConstructorPreviewRequest } from '../../../../lib/dayConstructorPreviewRequest';
+import { loadGoalDecisionFacts } from '../../../../lib/goalDecisionFactsProvider';
 
 /**
  * Day Constructor V1 PR F1 -- the sole read boundary exposing
@@ -32,6 +33,7 @@ export async function POST(req: NextRequest) {
     getBody: () => parseJsonObject(req),
     now: () => new Date(),
     createOrchestratorDeps: createRealDayConstructorOrchestratorDeps,
+    loadDecisionFacts: (user, request) => loadGoalDecisionFacts(user, request),
   });
   return NextResponse.json(result.body, { status: result.httpStatus });
 }

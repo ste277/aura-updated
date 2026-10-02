@@ -198,6 +198,12 @@ jobs:
         env:
           TS_NODE_COMPILER_OPTIONS: '{"jsx":"react"}'
         run: npx ts-node test/goalsUiWiring.test.ts
+      # Constructor Decision Intelligence -- Decision Facts V1 architecture
+      # proof (pure): forbidden modules/imports in the Goal-blind
+      # orchestrator/decisionFacts/preview-handler, provider behavior,
+      # failure behavior, trust, and two-direction source neutrality.
+      - name: Run Decision Facts V1 architecture test
+        run: npx ts-node test/decisionFactsArchitecture.test.ts
   web-build:
     name: Next.js production build
     runs-on: ubuntu-latest
