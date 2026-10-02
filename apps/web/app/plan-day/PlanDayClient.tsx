@@ -26,7 +26,7 @@ import {
   createEmptyIntentRow,
   createInitialIntentRow,
   createIntentRowFromQuickPick,
-  createIntentRowFromGoalActivity,
+  createIntentRowFromGoalHandoffItem,
   createIntentRowFromCapture,
   createIntentRowFromAutoGoalSuggestion,
   deriveAvailableAutoGoalSuggestions,
@@ -159,7 +159,7 @@ export function PlanDayClient({ timezone, planningDate, horizon, availabilityCon
   // again after this initializer).
   const [rows, setRows] = useState<PlanDayIntentRow[]>(() =>
     goalActivities.length + captures.length > 0
-      ? [...goalActivities.map(createIntentRowFromGoalActivity), ...captures.map(createIntentRowFromCapture)].slice(0, MAX_PLAN_DAY_INTENTS)
+      ? [...goalActivities.map((item) => createIntentRowFromGoalHandoffItem(item, planningDate ? encodeGoalDemandIntentId(planningDate, item.id) : null)), ...captures.map(createIntentRowFromCapture)].slice(0, MAX_PLAN_DAY_INTENTS)
       : [createInitialIntentRow()]
   );
   // Plan My Day UX V2 PR U1 -- every row starts collapsed, including a

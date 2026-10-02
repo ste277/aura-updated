@@ -2,7 +2,7 @@ import type { Metadata } from 'next';
 import { cookies } from 'next/headers';
 import { verifySessionToken, SESSION_COOKIE_NAME } from '../../lib/auth';
 import { getUserById, listGoalActivitiesWithLinkedPlanStatus, listCapturesWithLinkedPlanStatus, loadGoalActivityRhythmFacts } from '../../lib/db';
-import { resolvePlanDayServerProps, resolveGoalActivityHandoff, resolveCaptureHandoff, resolveAutomaticGoalDemand } from '../../lib/planDayBootstrap';
+import { resolvePlanDayServerProps, resolveGoalActivityHandoff, resolveCaptureHandoff, resolveAutomaticGoalDemand, markCanonicalGoalDemandHandoff } from '../../lib/planDayBootstrap';
 import { createRealGoalDemandCandidatesDeps } from '../../lib/goalDemandCandidates';
 import { parseHorizonSearchParam } from '../../lib/planningHorizon';
 import { PlanDayClient } from './PlanDayClient';
@@ -113,6 +113,11 @@ export default async function PlanDayPage({
     goalActivities.map((activity) => activity.id)
   );
   const autoGoalSuggestions = automaticGoalDemand.status === 'OK' ? automaticGoalDemand.suggestions : [];
+  // O5 P0a -- a manual handoff item that the SAME eligible-demand load
+  // recognizes as canonical recurring demand is marked, so the client seeds
+  // it with the canonical intent identity (identical to an automatic
+  // inclusion). On LOAD_FAILED nothing is marked: legacy manual rows.
+  const handoffGoalActivities = markCanonicalGoalDemandHandoff(goalActivities, automaticGoalDemand.status === 'OK' ? automaticGoalDemand.manualCanonicalGoalActivityIds : []);
 
   return (
     <PlanDayClient
@@ -120,7 +125,7 @@ export default async function PlanDayPage({
       planningDate={bootstrap?.planningDate ?? null}
       horizon={bootstrap ? horizon : null}
       availabilityConfigured={bootstrap?.availabilityConfigured ?? null}
-      goalActivities={goalActivities}
+      goalActivities={handoffGoalActivities}
       captures={captures}
       autoGoalSuggestions={autoGoalSuggestions}
     />
