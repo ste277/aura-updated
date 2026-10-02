@@ -56,6 +56,21 @@ function check(label: string, condition: boolean) {
 }
 
 // ============================================================
+// classifyGoalCreateError branch coverage -- each of the 4 distinct
+// outcomes exercised with the exact expected category, not merely
+// "is a member of the bounded set" (review follow-up: the privacy check
+// above never confirmed the mapping itself is correct per-branch).
+// ============================================================
+{
+  check('classifyGoalCreateError: null status (thrown/network exception) -> NETWORK_ERROR', classifyGoalCreateError(null, null) === 'NETWORK_ERROR');
+  check('classifyGoalCreateError: 409 with IDEMPOTENCY_CONFLICT code -> IDEMPOTENCY_CONFLICT (checked before the 4xx/5xx range split)', classifyGoalCreateError(409, 'IDEMPOTENCY_CONFLICT') === 'IDEMPOTENCY_CONFLICT');
+  check('classifyGoalCreateError: 400 with no special code -> VALIDATION', classifyGoalCreateError(400, null) === 'VALIDATION');
+  check('classifyGoalCreateError: 499 (top of 4xx range) -> VALIDATION', classifyGoalCreateError(499, null) === 'VALIDATION');
+  check('classifyGoalCreateError: 500 -> SERVER_ERROR', classifyGoalCreateError(500, null) === 'SERVER_ERROR');
+  check('classifyGoalCreateError: 503 with an unrecognized code -> SERVER_ERROR (unknown codes never get special treatment)', classifyGoalCreateError(503, 'SOME_OTHER_CODE') === 'SERVER_ERROR');
+}
+
+// ============================================================
 // AUTO-ACCEPT test (section 26) -- "Get fitter" -> automatic proposal ->
 // no edits -> submit.
 // ============================================================
