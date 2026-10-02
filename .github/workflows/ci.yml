@@ -228,6 +228,14 @@ jobs:
         run: npx ts-node test/opportunityDecisionFacts.test.ts
       - name: Run opportunity decision facts architecture test
         run: npx ts-node test/opportunityDecisionFactsArchitecture.test.ts
+      # O5 prerequisite P0a -- manual Goal provenance parity: the manual and
+      # automatic entry paths share ONE canonical identity and receive
+      # identical facts (permanent source-path-privilege guard), plus its
+      # architecture guard.
+      - name: Run manual Goal provenance parity test
+        run: npx ts-node test/manualGoalProvenanceParity.test.ts
+      - name: Run manual Goal provenance parity architecture test
+        run: npx ts-node test/manualGoalProvenanceParityArchitecture.test.ts
   web-build:
     name: Next.js production build
     runs-on: ubuntu-latest
@@ -422,3 +430,8 @@ jobs:
       # real preview boundary against a live database.
       - name: Run opportunity decision facts DB test
         run: npx ts-node test/opportunityDecisionFactsDb.test.ts
+      # O5 prerequisite P0a -- the real manual/automatic parity lifecycle:
+      # identical facts, acceptance, idempotency, no duplicate occurrence in
+      # either order, cross-user and forged-input isolation.
+      - name: Run manual Goal provenance parity DB test
+        run: npx ts-node test/manualGoalProvenanceParityDb.test.ts

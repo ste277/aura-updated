@@ -128,6 +128,17 @@ export interface GoalActivityHandoffItem {
   id: string;
   title: string;
   activityId: string | null;
+  /**
+   * O5 P0a -- set ONLY by the server (`markCanonicalGoalDemandHandoff`
+   * below), never by a request: true when this handed-off GoalActivity is
+   * ALSO canonical recurring Goal demand under the existing eligibility
+   * read model (`loadEligibleGoalDemand`) for the planning date. It is a
+   * presentation-time fact telling the client to seed the row with the
+   * SAME canonical intent identity an automatic inclusion uses, so the
+   * existing server-side matching and acceptance authorization treat both
+   * entry paths identically. Absent/false keeps the legacy manual row.
+   */
+  canonicalDemand?: boolean;
 }
 
 export interface GoalActivityHandoffDeps {
@@ -307,7 +318,17 @@ export async function resolveCaptureHandoff(deps: CaptureHandoffDeps, capturesPa
 // reimplemented (this ticket's own section 7/8).
 // ============================================================
 
-export type AutomaticGoalDemandBootstrapResult = { status: 'OK'; suggestions: readonly GoalDemandCandidate[] } | { status: 'LOAD_FAILED' };
+export type AutomaticGoalDemandBootstrapResult =
+  | {
+      status: 'OK';
+      suggestions: readonly GoalDemandCandidate[];
+      /** O5 P0a -- the subset of `excludeGoalActivityIds` (the manual
+       * handoff's own resolved ids) that the SAME single eligible-demand
+       * load recognizes as canonical demand. No extra query: it is read
+       * from the candidates already loaded. */
+      manualCanonicalGoalActivityIds: readonly string[];
+    }
+  | { status: 'LOAD_FAILED' };
 
 export interface AutomaticGoalDemandBootstrapDeps extends GoalDemandCandidatesDeps {
   getSessionToken: () => string | undefined;
@@ -339,15 +360,33 @@ export async function resolveAutomaticGoalDemand(
   timezone: string | null,
   excludeGoalActivityIds: readonly string[]
 ): Promise<AutomaticGoalDemandBootstrapResult> {
-  if (!planningLocalDate || !timezone) return { status: 'OK', suggestions: [] };
+  if (!planningLocalDate || !timezone) return { status: 'OK', suggestions: [], manualCanonicalGoalActivityIds: [] };
 
   const token = deps.getSessionToken();
-  if (!token) return { status: 'OK', suggestions: [] };
+  if (!token) return { status: 'OK', suggestions: [], manualCanonicalGoalActivityIds: [] };
   const session = deps.verifySession(token);
-  if (!session) return { status: 'OK', suggestions: [] };
+  if (!session) return { status: 'OK', suggestions: [], manualCanonicalGoalActivityIds: [] };
 
   const result = await loadEligibleGoalDemand(deps, session.userId, planningLocalDate, timezone);
   if (result.status === 'LOAD_FAILED') return { status: 'LOAD_FAILED' };
 
-  return { status: 'OK', suggestions: excludeGoalDemandByActivityIds(result.candidates, excludeGoalActivityIds) };
+  const manualIds = new Set(excludeGoalActivityIds);
+  return {
+    status: 'OK',
+    suggestions: excludeGoalDemandByActivityIds(result.candidates, excludeGoalActivityIds),
+    manualCanonicalGoalActivityIds: result.candidates.filter((candidate) => manualIds.has(candidate.goalActivityId)).map((candidate) => candidate.goalActivityId),
+  };
+}
+
+/**
+ * O5 P0a -- pure server-side annotation of the manual handoff: an item is
+ * marked `canonicalDemand` iff its id is among the ids the eligible-demand
+ * read model itself recognized. Exact id equality only (never a title,
+ * label or similarity match); an id the read model did not return -- a
+ * finite activity, an ineligible one, an archived Goal's, or any id when
+ * the load failed -- is left exactly as the legacy manual item.
+ */
+export function markCanonicalGoalDemandHandoff(items: readonly GoalActivityHandoffItem[], canonicalGoalActivityIds: readonly string[]): GoalActivityHandoffItem[] {
+  const canonical = new Set(canonicalGoalActivityIds);
+  return items.map((item) => (canonical.has(item.id) ? { ...item, canonicalDemand: true } : item));
 }

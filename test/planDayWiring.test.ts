@@ -650,10 +650,10 @@ function main() {
   check('109. PlanDayClientProps declares the new autoGoalSuggestions prop', /autoGoalSuggestions: readonly GoalDemandCandidate\[\]/.test(planDayClientSource));
   check('110. PlanDayClient destructures autoGoalSuggestions under its own real name (no longer renamed/marked unread -- A3.3 is the ticket authorized to end A3.2\'s own temporary inertness)', /\bautoGoalSuggestions\b[\s\S]{0,5}\}: PlanDayClientProps/.test(planDayClientSource) && !/_autoGoalSuggestions/.test(planDayClientSource));
   check(
-    '111. the `rows` useState initializer is byte-identical to before A3.2 -- autoGoalSuggestions never seeds a row',
-    /const \[rows, setRows\] = useState<PlanDayIntentRow\[\]>\(\(\) =>\s*goalActivities\.length \+ captures\.length > 0\s*\? \[\.\.\.goalActivities\.map\(createIntentRowFromGoalActivity\), \.\.\.captures\.map\(createIntentRowFromCapture\)\]\.slice\(0, MAX_PLAN_DAY_INTENTS\)\s*: \[createInitialIntentRow\(\)\]\s*\);/.test(
+    '111. the `rows` useState initializer is exactly the O5 P0a shape: manual handoff items go through createIntentRowFromGoalHandoffItem with the canonical id derived from the server planningDate prop; captures are unchanged; the initializer never reads autoGoalSuggestions (a suggestion never seeds a row)',
+    /const \[rows, setRows\] = useState<PlanDayIntentRow\[\]>\(\(\) =>\s*goalActivities\.length \+ captures\.length > 0\s*\? \[\.\.\.goalActivities\.map\(\(item\) => createIntentRowFromGoalHandoffItem\(item, planningDate \? encodeGoalDemandIntentId\(planningDate, item\.id\) : null\)\), \.\.\.captures\.map\(createIntentRowFromCapture\)\]\.slice\(0, MAX_PLAN_DAY_INTENTS\)\s*: \[createInitialIntentRow\(\)\]\s*\);/.test(
       planDayClientSource
-    )
+    ) && !/useState<PlanDayIntentRow\[\]>\(\(\) =>[\s\S]{0,420}autoGoalSuggestions/.test(planDayClientSource)
   );
   check('112. submitPreview\'s buildRequestedIntentsForSubmission call is byte-identical to before A3.2 (still exactly rows/timezone/planningDate, no 4th argument)', /buildRequestedIntentsForSubmission\(rows, timezone, planningDate\);/.test(planDayClientSource));
   check(

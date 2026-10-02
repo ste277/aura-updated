@@ -95,8 +95,9 @@ check('T. links map each proposed intent id to its own GoalActivity even with id
 // ---- Structural (N/O/P/Q/R/S) ----
 const entrySrc = stripComments(read('../apps/web/lib/planDayEntry.ts'));
 const clientSrc = stripComments(read('../apps/web/app/plan-day/PlanDayClient.tsx'));
-check('N. useState initializer for rows uses only deterministic factories (no counter-backed createEmptyIntentRow)', /useState<PlanDayIntentRow\[\]>\(\(\) =>[\s\S]{0,200}createInitialIntentRow\(\)/.test(clientSrc) && !/useState<PlanDayIntentRow\[\]>\(\(\) =>[\s\S]{0,200}createEmptyIntentRow/.test(clientSrc));
+check('N. useState initializer for rows uses only deterministic factories (no counter-backed createEmptyIntentRow)', /useState<PlanDayIntentRow\[\]>\(\(\) =>[\s\S]{0,500}createInitialIntentRow\(\)/.test(clientSrc) && !/useState<PlanDayIntentRow\[\]>\(\(\) =>[\s\S]{0,500}createEmptyIntentRow/.test(clientSrc));
 check('N. createIntentRowFromGoalActivity never touches the counter', !/createIntentRowFromGoalActivity[\s\S]{0,400}createEmptyIntentRow/.test(entrySrc));
+check('N. createIntentRowFromGoalHandoffItem (O5 P0a) never touches the counter either', !/function createIntentRowFromGoalHandoffItem[\s\S]{0,700}createEmptyIntentRow/.test(entrySrc));
 check('N. no counter-backed factory is invoked inside a setRows updater', !/setRows\(\(current\) => \{[^}]*create(Empty|IntentRowFromQuickPick)/.test(clientSrc.replace(/\n/g, ' ')));
 check('O/Q/R/S. preview/DayIntent/constructor/timing files untouched by this change (do not mention plan-day row ids)', ['../apps/web/lib/dayIntent.ts', '../apps/web/lib/dayConstructor.ts', '../apps/web/lib/dayConstructorOrchestrator.ts', '../packages/recommendation/src/timingSearch.ts', '../apps/web/lib/dayConstructorPreviewRequest.ts'].every((f) => !/plan-day-(row|goal)|goalActivityId/.test(read(f))));
 check('P. goalActivityId still excluded from the preview request builder', !/goalActivityId/.test(entrySrc.slice(entrySrc.indexOf('export function buildRequestedIntentsForSubmission'), entrySrc.indexOf('export function buildGoalActivityLinksForAccept'))));

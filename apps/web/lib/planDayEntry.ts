@@ -188,6 +188,22 @@ export function createIntentRowFromGoalActivity(goalActivity: { id: string; titl
 }
 
 /**
+ * O5 P0a -- seeds a row from a manual Goal handoff item. A handoff item the
+ * SERVER marked `canonicalDemand` becomes EXACTLY the row an automatic
+ * inclusion would create (`createIntentRowFromAutoGoalSuggestion`), carrying
+ * the caller-supplied canonical intent id, so both entry paths reach preview
+ * with one identity. Any other item (finite, ineligible, load failure, no
+ * planning date) keeps the unmodified legacy manual row. This function
+ * computes no id and reads no eligibility itself.
+ */
+export function createIntentRowFromGoalHandoffItem(item: { id: string; title: string; activityId: string | null; canonicalDemand?: boolean }, canonicalIntentId: string | null): PlanDayIntentRow {
+  if (item.canonicalDemand === true && canonicalIntentId) {
+    return createIntentRowFromAutoGoalSuggestion({ title: item.title, activityId: item.activityId, goalActivityId: item.id }, canonicalIntentId);
+  }
+  return createIntentRowFromGoalActivity(item);
+}
+
+/**
  * Goals V2 Candidate A3.3 -- the SAME field mapping as
  * createIntentRowFromGoalActivity above (title/activityId/goalActivityId,
  * every other field at blankIntentRow's own FLEXIBLE/no-duration default
