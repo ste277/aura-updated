@@ -85,5 +85,44 @@ check('method must be native_share or copy_link', validateProductEvent('AURA_MOM
 const sanitized = validateProductEvent('MUHURTHAM_SEARCH_COMPLETED', { scope: 'SHARED', activityId: 'start-journey', resultCount: 2, durationMs: 500 });
 check('A fully valid event returns exactly the submitted allow-listed keys', sanitized.ok === true && sanitized.ok && Object.keys(sanitized.metadata).sort().join(',') === ['activityId', 'durationMs', 'resultCount', 'scope'].sort().join(','));
 
+// ============================================================
+// Goals V2 Candidate B4 -- privacy boundary (this ticket's own section
+// 25, mandatory). The validator must REJECT any attempt to smuggle a
+// Goal title, activity title, freeform text, or clientRequestId onto any
+// of the three new events -- none of these keys exist in their schemas
+// at all, so validateProductEvent's own "unknown key" rejection is the
+// structural proof, not merely a code-review claim.
+// ============================================================
+check('GOAL_DECOMPOSITION_SHOWN accepts its own valid shape', validateProductEvent('GOAL_DECOMPOSITION_SHOWN', { source: 'AUTO_MATCH', templateCategory: 'GET_FITTER', activityCount: 3 }).ok === true);
+check('GOAL_DECOMPOSITION_SHOWN rejects an unknown "title" key (a Goal title could never be smuggled through)', validateProductEvent('GOAL_DECOMPOSITION_SHOWN', { source: 'AUTO_MATCH', templateCategory: 'GET_FITTER', activityCount: 3, title: 'Get fitter' }).ok === false);
+check('GOAL_DECOMPOSITION_SHOWN rejects an unknown "activityTitle" key', validateProductEvent('GOAL_DECOMPOSITION_SHOWN', { source: 'AUTO_MATCH', templateCategory: 'GET_FITTER', activityCount: 1, activityTitle: 'Go for a run' }).ok === false);
+check('GOAL_DECOMPOSITION_SHOWN rejects an unknown "clientRequestId" key', validateProductEvent('GOAL_DECOMPOSITION_SHOWN', { source: 'AUTO_MATCH', templateCategory: 'GET_FITTER', activityCount: 1, clientRequestId: 'abc-123' }).ok === false);
+check('GOAL_DECOMPOSITION_SHOWN rejects source=SCRATCH/NO_MATCH (not in its own narrower enum -- only AUTO_MATCH/MANUAL_TEMPLATE are "shown")', validateProductEvent('GOAL_DECOMPOSITION_SHOWN', { source: 'NO_MATCH', templateCategory: 'GET_FITTER', activityCount: 0 }).ok === false);
+
+check(
+  'GOAL_DECOMPOSITION_CONFIRMED accepts its own valid shape',
+  validateProductEvent('GOAL_DECOMPOSITION_CONFIRMED', {
+    matchSource: 'AUTO_MATCH', templateCategory: 'GET_FITTER', initialActivityCount: 3, finalActivityCount: 3, templateBackedCount: 3, freeformCount: 0,
+    wasEdited: false, removedCount: 0, renamedCount: 0, addedCount: 0, rhythmChanged: false, manualOverrideUsed: false, scratchUsed: false, refreshUsed: false,
+  }).ok === true
+);
+check(
+  'GOAL_DECOMPOSITION_CONFIRMED rejects an unknown "title" key',
+  validateProductEvent('GOAL_DECOMPOSITION_CONFIRMED', { matchSource: 'NO_MATCH', initialActivityCount: 0, finalActivityCount: 1, templateBackedCount: 0, freeformCount: 1, wasEdited: true, removedCount: 0, renamedCount: 0, addedCount: 1, rhythmChanged: false, manualOverrideUsed: false, scratchUsed: false, refreshUsed: false, title: 'Learn Spanish' }).ok === false
+);
+check(
+  'GOAL_DECOMPOSITION_CONFIRMED rejects an unknown "activityTitles" key',
+  validateProductEvent('GOAL_DECOMPOSITION_CONFIRMED', { matchSource: 'SCRATCH', initialActivityCount: 0, finalActivityCount: 1, templateBackedCount: 0, freeformCount: 1, wasEdited: true, removedCount: 0, renamedCount: 0, addedCount: 1, rhythmChanged: false, manualOverrideUsed: true, scratchUsed: true, refreshUsed: false, activityTitles: ['Practice guitar'] }).ok === false
+);
+check(
+  'GOAL_DECOMPOSITION_CONFIRMED rejects an unknown "clientRequestId" key',
+  validateProductEvent('GOAL_DECOMPOSITION_CONFIRMED', { matchSource: 'AUTO_MATCH', templateCategory: 'MEDITATE_REGULARLY', initialActivityCount: 1, finalActivityCount: 1, templateBackedCount: 1, freeformCount: 0, wasEdited: false, removedCount: 0, renamedCount: 0, addedCount: 0, rhythmChanged: false, manualOverrideUsed: false, scratchUsed: false, refreshUsed: false, clientRequestId: 'abc-123' }).ok === false
+);
+check('GOAL_DECOMPOSITION_CONFIRMED rejects a completion/Rhythm VALUE field (e.g. a raw targetValue) -- only rhythmChanged, a boolean, is allowed', validateProductEvent('GOAL_DECOMPOSITION_CONFIRMED', { matchSource: 'NO_MATCH', initialActivityCount: 0, finalActivityCount: 0, templateBackedCount: 0, freeformCount: 0, wasEdited: false, removedCount: 0, renamedCount: 0, addedCount: 0, rhythmChanged: false, manualOverrideUsed: false, scratchUsed: false, refreshUsed: false, targetValue: 10 }).ok === false);
+
+check('GOAL_DECOMPOSITION_CREATE_FAILED accepts its own valid shape', validateProductEvent('GOAL_DECOMPOSITION_CREATE_FAILED', { errorCategory: 'IDEMPOTENCY_CONFLICT', matchSource: 'AUTO_MATCH' }).ok === true);
+check('GOAL_DECOMPOSITION_CREATE_FAILED rejects a raw error message string', validateProductEvent('GOAL_DECOMPOSITION_CREATE_FAILED', { errorCategory: 'SERVER_ERROR', matchSource: 'NO_MATCH', errorMessage: 'duplicate key value violates unique constraint' }).ok === false);
+check('GOAL_DECOMPOSITION_CREATE_FAILED rejects an unbounded errorCategory value', validateProductEvent('GOAL_DECOMPOSITION_CREATE_FAILED', { errorCategory: 'UNKNOWN_SQL_ERROR_CODE_23505', matchSource: 'NO_MATCH' }).ok === false);
+
 console.log(allPassed ? '\nALL PRODUCT EVENTS CHECKS PASSED' : '\nSOME PRODUCT EVENTS CHECKS FAILED');
 process.exit(allPassed ? 0 : 1);
