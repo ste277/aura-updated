@@ -98,6 +98,29 @@ check('non-empty, string result', typeof deriveIdempotentGoalId('user-1', 'req-1
     !goalCreateRequestMatchesExisting({ title: 'Get fitter', targetDate: null, activities: [{ title: 'B', activityId: null }, { title: 'A', activityId: null }] }, existing)
   );
 }
+{
+  // Release review B3.1 section 16 -- a completion UNIT mismatch, isolated
+  // from targetValue (the existing pure tests only exercised a
+  // targetValue mismatch; this is the comparator's own remaining
+  // material field, directly covered now).
+  const existing = { title: 'Drink water', targetDate: null, activities: [{ title: 'Drink water', activityId: null, completionRequirement: { kind: 'MEASURED_TARGET' as const, targetValue: 2, unit: 'litres' }, rhythm: { kind: 'NONE' as const } }] };
+  check(
+    'mismatch: same completion kind/targetValue, different unit',
+    !goalCreateRequestMatchesExisting({ title: 'Drink water', targetDate: null, activities: [{ title: 'Drink water', activityId: null, completionRequirement: { kind: 'MEASURED_TARGET', targetValue: 2, unit: 'glasses' } }] }, existing)
+  );
+}
+{
+  // Release review B3.1 section 19/32 -- duplicate-row multiplicity must
+  // be preserved, never collapsed by a Set-based comparison (the
+  // implementation uses a plain index-by-index array loop -- no Set
+  // anywhere -- confirmed directly by both halves of this check).
+  const dupRow = { title: 'A', activityId: null, completionRequirement: { kind: 'DONE' as const }, rhythm: { kind: 'NONE' as const } };
+  const existingDup = { title: 'Dup goal', targetDate: null, activities: [dupRow, dupRow] }; // [A, A]
+  const existingSingle = { title: 'Dup goal', targetDate: null, activities: [dupRow] }; // [A]
+  check('duplicate multiplicity: [A, A] does NOT match [A] (fewer rows than submitted)', !goalCreateRequestMatchesExisting({ title: 'Dup goal', targetDate: null, activities: [{ title: 'A', activityId: null }] }, existingDup));
+  check('duplicate multiplicity: [A] does NOT match [A, A] (more existing rows than submitted)', !goalCreateRequestMatchesExisting({ title: 'Dup goal', targetDate: null, activities: [{ title: 'A', activityId: null }, { title: 'A', activityId: null }] }, existingSingle));
+  check('duplicate multiplicity: [A, A] genuinely MATCHES [A, A] (duplicates preserved as equal, not destroyed)', goalCreateRequestMatchesExisting({ title: 'Dup goal', targetDate: null, activities: [{ title: 'A', activityId: null }, { title: 'A', activityId: null }] }, existingDup));
+}
 
 if (!allPassed) {
   console.error('SOME GOAL CREATE IDEMPOTENCY CHECKS FAILED');

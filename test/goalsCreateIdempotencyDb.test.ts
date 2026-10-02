@@ -93,6 +93,31 @@ async function main() {
     check('concurrent: exactly ONE GoalActivity set exists (no duplicate activities from the race)', (await activityCount(concResA.body.goal.id)) === 1);
 
     // ============================================================
+    // CONCURRENCY STRESS SANITY (section 30) -- several INDEPENDENT
+    // clientRequestIds, each submitted as its own concurrent pair, all
+    // racing together in the SAME Promise.all. Catches a class of bug
+    // sequential/single-pair testing cannot: accidental cross-request
+    // state sharing (e.g. a closure/module-level variable leaking
+    // between concurrent invocations of the same stateless route
+    // handler). Require exactly one Goal per logical id, never cross-
+    // contamination between the independent pairs.
+    // ============================================================
+    console.log('=== CONCURRENCY STRESS SANITY (multiple independent id pairs, raced together) ===');
+    const stressReqIds = ['client-req-stress-1', 'client-req-stress-2', 'client-req-stress-3', 'client-req-stress-4', 'client-req-stress-5'];
+    const stressBodies = stressReqIds.map((reqId, i) => ({ title: `Stress goal ${i}`, activities: [{ title: `Stress activity ${i}`, activityId: null }], clientRequestId: reqId }));
+    const stressResults = await Promise.all(stressBodies.flatMap((b) => [callCreateGoal(tokenA, b), callCreateGoal(tokenA, b)]));
+    check('stress: all 10 concurrent requests (5 pairs) succeeded', stressResults.every((r) => !!r.body?.goal?.id));
+    for (let i = 0; i < stressReqIds.length; i += 1) {
+      const [a, b] = [stressResults[i * 2], stressResults[i * 2 + 1]];
+      check(`stress: pair ${i} resolved to the identical Goal id`, a.body.goal.id === b.body.goal.id);
+      check(`stress: pair ${i} got its OWN title, never a sibling pair's`, a.body.goal.title === `Stress goal ${i}`);
+    }
+    const distinctStressGoalIds = new Set(stressResults.map((r) => r.body.goal.id));
+    check('stress: exactly 5 distinct Goal ids total (one per logical clientRequestId, never 10, never fewer)', distinctStressGoalIds.size === 5);
+    const stressGoalRows = await sql(`SELECT count(*)::int n FROM "Goal" WHERE "userId" = $1 AND title LIKE 'Stress goal %'`, [userA.id]);
+    check('stress: exactly 5 Goal rows actually persisted', stressGoalRows[0].n === 5);
+
+    // ============================================================
     // PAYLOAD MISMATCH (section 9/18) -- fails closed, never mutates
     // ============================================================
     console.log('=== PAYLOAD MISMATCH ===');
