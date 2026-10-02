@@ -87,6 +87,22 @@ jobs:
       # same root-deps-only group as the structural guards test above.
       - name: Run Automatic Goal suggestion inclusion test
         run: npx ts-node test/autoGoalSuggestionInclusion.test.ts
+      # Goals V2 Candidate A3.4 -- goalDemandIntentId.ts's own one real
+      # dependency (isValidCalendarDateString, packages/panchang/src/localDate.ts)
+      # is itself zero-import, so this test needs no apps/web/node_modules.
+      - name: Run Goal demand intent id test
+        run: npx ts-node test/goalDemandIntentId.test.ts
+      # Goals V2 Candidate A3.4 -- goalDemandProvenanceAuthorization.ts
+      # imports goalDemandIntentId.ts (zero-dependency) plus TYPE-ONLY
+      # imports from dayConstructorAcceptance.ts (fully erased at compile
+      # time, never actually resolved at runtime) -- needs no
+      # apps/web/node_modules either.
+      - name: Run Goal demand provenance authorization test
+        run: npx ts-node test/goalDemandProvenanceAuthorization.test.ts
+      # Goals V2 Candidate A3.4 -- reads source as plain text via `fs`/`path`
+      # only, same convention as the structural guards test above.
+      - name: Run Goal demand provenance authorization structural guards test
+        run: npx ts-node test/goalDemandProvenanceAuthorizationStructuralGuards.test.ts
       # test/savedPersonDb.test.ts, test/auraMomentsDb.test.ts,
       # test/auraUpdatesDb.test.ts, test/productEventsDb.test.ts, and
       # test/dayBuilderDb.test.ts are intentionally NOT run here -- they
@@ -304,3 +320,5 @@ jobs:
         run: npx ts-node test/goalDemandCandidatesDb.test.ts
       - name: Run Automatic Goal demand bootstrap DB test
         run: npx ts-node test/automaticGoalDemandBootstrapDb.test.ts
+      - name: Run Goal demand provenance authorization DB test
+        run: npx ts-node test/goalDemandProvenanceAuthorizationDb.test.ts

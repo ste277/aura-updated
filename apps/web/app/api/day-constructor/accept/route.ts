@@ -3,6 +3,7 @@ import { getSessionFromRequest } from '../../../../lib/session';
 import { parseJsonObject } from '../../../../lib/request';
 import { persistAcceptedConstructedDay, MAX_CLIENT_REQUEST_ID_LENGTH, MAX_INTENT_ID_LENGTH } from '../../../../lib/dayConstructorAcceptancePersistence';
 import { verifyAcceptanceItems } from '../../../../lib/dayConstructorPreviewIntegrity';
+import { authorizeGoalActivityLinks } from '../../../../lib/goalDemandProvenanceAuthorization';
 import type { AcceptConstructedDayRequest, AcceptedProposedItem } from '../../../../lib/dayConstructorAcceptance';
 import type { ConstructionWindowSource } from '../../../../lib/dayIntent';
 
@@ -136,14 +137,29 @@ export async function POST(req: NextRequest) {
   if (integrityDiagnostics.length > 0) {
     return NextResponse.json({ status: 'REJECTED', reason: 'INVALID_REQUEST', diagnostics: integrityDiagnostics });
   }
-  const goalActivityLinks = parseGoalActivityLinks(body.goalActivityLinks);
+  const rawGoalActivityLinks = parseGoalActivityLinks(body.goalActivityLinks);
   const captureLinks = parseCaptureLinks(body.captureLinks);
+
+  // Goals V2 Candidate A3.4 -- verified automatic Goal provenance. Called
+  // ONLY after the integrity gate above has already passed (never
+  // before -- this ticket's own section 3's non-negotiable trust order):
+  // `request.proposedItems` is, at this point, exactly the verified item
+  // set, and `request.constructionWindow.date` is the SAME planning date
+  // `verifyAcceptanceItems` already bound into every one of their
+  // signatures. A malformed/conflicting automatic Goal intent rejects the
+  // whole acceptance here, before persistence is ever reached, reusing
+  // the EXACT SAME REJECTED/diagnostics response shape persistence's own
+  // rejection path already returns below (this ticket's own section 21).
+  const authorization = authorizeGoalActivityLinks(request.proposedItems, request.constructionWindow.date, rawGoalActivityLinks);
+  if (authorization.status === 'REJECTED') {
+    return NextResponse.json({ status: 'REJECTED', reason: authorization.reason, diagnostics: authorization.diagnostics });
+  }
 
   // Authoritative clock -- read EXACTLY ONCE, at this outer boundary, then
   // threaded through everything downstream (this ticket's own section 14).
   const now = new Date();
 
-  const result = await persistAcceptedConstructedDay(session.userId, request, now, goalActivityLinks, captureLinks);
+  const result = await persistAcceptedConstructedDay(session.userId, request, now, authorization.goalActivityLinks, captureLinks);
 
   switch (result.status) {
     case 'SAVED':

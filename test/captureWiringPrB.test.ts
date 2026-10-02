@@ -37,7 +37,19 @@ check('proposedItems mapping never includes captureId (provenance is a sibling f
 const e1 = cap('../apps/web/lib/dayConstructorAcceptance.ts');
 check('AcceptConstructedDayRequest/E1 carry no Capture provenance', !/captureId|captureLinks/.test(e1));
 const route = cap('../apps/web/app/api/day-constructor/accept/route.ts');
-check('the route parses captureLinks separately from parseAcceptRequest and passes them as a sibling argument', /parseCaptureLinks\(body\.captureLinks\)/.test(route) && !/parseAcceptRequest[\s\S]{0,700}captureLinks/.test(route.slice(route.indexOf('function parseAcceptRequest'), route.indexOf('function parseSourceLinks'))) && /persistAcceptedConstructedDay\(session\.userId, request, now, goalActivityLinks, captureLinks\)/.test(route));
+// Goals V2 Candidate A3.4 -- the 4th argument's own literal name changed
+// from `goalActivityLinks` (the raw parsed sibling map) to
+// `authorization.goalActivityLinks` (the AUTHORIZED map A3.4's own
+// verified-provenance step produces) -- the real invariant this check
+// protects (captureLinks itself stays a raw, untouched, separately-parsed
+// sibling argument, never folded into AcceptConstructedDayRequest) is
+// unchanged and re-verified below.
+check(
+  'the route parses captureLinks separately from parseAcceptRequest and passes them as a sibling argument',
+  /parseCaptureLinks\(body\.captureLinks\)/.test(route) &&
+    !/parseAcceptRequest[\s\S]{0,700}captureLinks/.test(route.slice(route.indexOf('function parseAcceptRequest'), route.indexOf('function parseSourceLinks'))) &&
+    /persistAcceptedConstructedDay\(session\.userId, request, now, authorization\.goalActivityLinks, captureLinks\)/.test(route)
+);
 const persist = cap('../apps/web/lib/dayConstructorAcceptancePersistence.ts');
 check('the Capture link runs inside the acceptance write loop on the SAME client, after the plan insert', /createPlannedActivityWithClient\(client[\s\S]*?linkCaptureToPlannedActivity\(userId, captureId, plan\.id, client\)/.test(persist));
 check('a failed Capture link throws into the outer catch (whole transaction rolls back)', /if \(!captureLinked\) throw new Error\('CAPTURE_LINK_FAILED'\)/.test(persist));
