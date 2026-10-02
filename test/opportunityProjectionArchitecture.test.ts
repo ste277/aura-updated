@@ -75,17 +75,19 @@ function listTs(dir: string): string[] {
     return /\.(ts|tsx)$/.test(e.name) ? [p] : [];
   });
 }
-// O2 (range adapter) is the one permitted reference: it may import the engine's TYPES and its
-// horizon-bound constant, but must never import or call the projection function itself.
+// O2 (range adapter) may import only the engine's TYPES and its horizon-bound constant. O4 (the generic
+// opportunity enrichment) is the ONE designated caller of the projection function.
 const ADAPTER = 'opportunityRangeAdapter.ts';
+const ENRICHMENT = 'opportunityDecisionFacts.ts';
 const referencing = [...listTs(lib), ...listTs(app)].filter((f) => !f.endsWith('opportunityProjection.ts') && /from '[^']*opportunityProjection'|projectOpportunityFacts|\bOpportunityFacts\b/.test(fs.readFileSync(f, 'utf8')));
-check('the only production file that references the engine is the O2 range adapter', referencing.length === 1 && referencing[0].endsWith(ADAPTER));
+check('only the O2 range adapter (types/constant) and the O4 enrichment (the caller) reference the engine', JSON.stringify(referencing.map((f) => path.basename(f)).sort()) === JSON.stringify([ENRICHMENT, ADAPTER].sort()));
 const adapterRef = /import \{([^}]*)\} from '\.\/opportunityProjection';/.exec(fs.readFileSync(path.join(lib, ADAPTER), 'utf8'));
 const adapterRefNames = adapterRef ? adapterRef[1].split(',').map((n) => n.trim()).filter(Boolean).sort() : [];
 check('the O2 adapter imports only the engine\'s MAX_PROJECTION_HORIZON_DAYS constant and DayAvailabilityInput type', JSON.stringify(adapterRefNames) === JSON.stringify(['MAX_PROJECTION_HORIZON_DAYS', 'type DayAvailabilityInput']));
-check('no production file calls projectOpportunityFacts (the engine is still not consumed by any product path)', !listTs(lib).concat(listTs(app)).some((f) => !f.endsWith('opportunityProjection.ts') && /projectOpportunityFacts/.test(fs.readFileSync(f, 'utf8'))));
-check('decisionFacts.ts is not extended with opportunity facts in O1', !/OpportunityFacts|opportunityProjection|viableDays|unknownDays/.test(read('apps/web/lib/decisionFacts.ts')));
-check('the orchestrator, preview handler and route are untouched by O1', ['apps/web/lib/dayConstructorOrchestrator.ts', 'apps/web/lib/dayConstructorPreviewRequest.ts', 'apps/web/app/api/day-constructor/preview/route.ts'].every((f) => !/opportunityProjection|projectOpportunityFacts|OpportunityFacts/.test(read(f))));
+const callers = [...listTs(lib), ...listTs(app)].filter((f) => !f.endsWith('opportunityProjection.ts') && /projectOpportunityFacts/.test(fs.readFileSync(f, 'utf8')));
+check('exactly one production file calls projectOpportunityFacts: the generic O4 enrichment', JSON.stringify(callers.map((f) => path.basename(f))) === JSON.stringify([ENRICHMENT]));
+check('decisionFacts.ts carries the opportunity TYPE but never imports or calls the engine', !/opportunityProjection|projectOpportunityFacts/.test(read('apps/web/lib/decisionFacts.ts')) && !/^\s*import\s/m.test(read('apps/web/lib/decisionFacts.ts').replace(/\/\*[\s\S]*?\*\//g, '').replace(/\/\/.*$/gm, '')));
+check('the orchestrator, preview handler and route never reference the engine directly (the handler reaches it only through the enrichment)', ['apps/web/lib/dayConstructorOrchestrator.ts', 'apps/web/lib/dayConstructorPreviewRequest.ts', 'apps/web/app/api/day-constructor/preview/route.ts'].every((f) => !/opportunityProjection|projectOpportunityFacts|\bOpportunityFacts\b/.test(read(f))));
 check('no Constructor decision module references the engine', ['apps/web/lib/dayConstructor.ts', 'apps/web/lib/dayIntent.ts', 'apps/web/lib/dayCapacity.ts'].every((f) => !/opportunityProjection|projectOpportunityFacts/.test(read(f))));
 
 if (!allPassed) {

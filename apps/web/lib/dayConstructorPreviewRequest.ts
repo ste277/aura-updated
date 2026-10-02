@@ -26,6 +26,7 @@ import { getDatePartsInTimezone } from './timezone';
 import { MAX_INTENT_ID_LENGTH } from './dayConstructorAcceptancePersistence';
 import {
   orchestrateConstructDay,
+  type ConstructDayPreview,
   type ConstructDayRequest,
   type DayConstructorOrchestratorDeps,
   type RequestedDayIntent,
@@ -49,7 +50,9 @@ import type { User } from './db';
 // longer than what the accept endpoint will later store it under.
 // ============================================================
 
-import type { DecisionFactsByIntentId } from './decisionFacts';
+import type { DecisionFacts, DecisionFactsByIntentId } from './decisionFacts';
+import { computeOpportunityDecisionFacts, type OpportunityCandidateInput } from './opportunityDecisionFacts';
+import type { OpportunityRangeDeps } from './opportunityRangeAdapter';
 
 /** Decision Facts V1 -- a server-side, source-specific fact provider,
  * injected at the route. Receives the already-parsed (never client-
@@ -253,6 +256,40 @@ export interface DayConstructorPreviewHttpResult {
 }
 
 /**
+ * Opportunity Scarcity V1 O4 -- attaches inert opportunity facts to the
+ * resolved intents of an ALREADY-BUILT preview. It runs strictly AFTER
+ * `orchestrateConstructDay`, so the constructed day (ordering, placement,
+ * deferral) is exactly what it was without it; only
+ * `resolvedIntents[].dayIntent.decisionFacts` gains an `opportunity` entry.
+ *
+ * The inputs are the preview's own, server-resolved values: each intent's
+ * resolved duration, whether that duration came from the generic fallback
+ * (the preview's own `DURATION_FROM_GENERIC_FALLBACK` warning), and the
+ * facts a provider already attached. Nothing here comes from the request
+ * body. A failure of any kind is isolated by the caller.
+ */
+async function attachOpportunityFacts(preview: ConstructDayPreview, request: ConstructDayRequest, rangeDeps: OpportunityRangeDeps): Promise<ConstructDayPreview> {
+  const fallbackIntentIds = new Set(preview.warnings.filter((w) => w.code === 'DURATION_FROM_GENERIC_FALLBACK').map((w) => w.intentId));
+  const candidates: OpportunityCandidateInput[] = preview.resolvedIntents.map((resolved) => ({
+    intentId: resolved.requestedIntentId,
+    durationMinutes: resolved.dayIntent.estimatedDurationMinutes,
+    durationBasis: fallbackIntentIds.has(resolved.requestedIntentId) ? 'GENERIC_FALLBACK' : 'RESOLVED',
+    facts: resolved.dayIntent.decisionFacts,
+  }));
+  const opportunityByIntentId = await computeOpportunityDecisionFacts(candidates, { planningDate: request.targetDate, timezone: request.timezone, now: request.now }, rangeDeps);
+  if (opportunityByIntentId.size === 0) return preview;
+  return {
+    ...preview,
+    resolvedIntents: preview.resolvedIntents.map((resolved) => {
+      const opportunity = opportunityByIntentId.get(resolved.requestedIntentId);
+      if (!opportunity) return resolved;
+      const decisionFacts: DecisionFacts = { ...resolved.dayIntent.decisionFacts, opportunity };
+      return { ...resolved, dayIntent: { ...resolved.dayIntent, decisionFacts } };
+    }),
+  };
+}
+
+/**
  * Takes `deps` as an explicit parameter -- exactly like
  * `orchestrateConstructDay` itself -- so this function is directly
  * testable with an injected fake (no DB, no network) while production
@@ -265,7 +302,8 @@ export async function runDayConstructorPreview(
   timezone: string,
   now: Date,
   deps: DayConstructorOrchestratorDeps,
-  decisionFactsSource?: DecisionFactsSource
+  decisionFactsSource?: DecisionFactsSource,
+  opportunityRangeDeps?: OpportunityRangeDeps
 ): Promise<DayConstructorPreviewHttpResult> {
   const parsed = parseConstructDayPreviewRequestBody(body, { timezone, now });
   if (!parsed.ok) return { httpStatus: 400, body: { error: parsed.error } };
@@ -284,6 +322,18 @@ export async function runDayConstructorPreview(
   }
 
   const result = await orchestrateConstructDay(decisionFactsByIntentId ? { ...parsed.request, decisionFactsByIntentId } : parsed.request, deps);
+
+  // Opportunity Scarcity V1 O4 -- inert supply facts, attached AFTER the
+  // day is built (the constructed day is untouched). Like provider facts,
+  // a failure must never fail an otherwise-valid preview: continue with
+  // the preview as built, never with fabricated supply.
+  if (opportunityRangeDeps && result.status === 'READY') {
+    try {
+      return { httpStatus: 200, body: { status: 'READY', preview: await attachOpportunityFacts(result.preview, parsed.request, opportunityRangeDeps) } };
+    } catch (err) {
+      console.warn('day-constructor/preview: opportunity facts unavailable, continuing without', err);
+    }
+  }
   // Every branch below is a legitimate, already-typed domain outcome --
   // returned verbatim, at HTTP 200, never reinterpreted (this ticket's
   // own section 21). There is no "unexpected exception" branch here:
@@ -345,6 +395,10 @@ export interface DayConstructorPreviewBoundaryDeps {
    * the source-specific provider; omitting it is byte-identical to this
    * ticket never having existed. */
   loadDecisionFacts?: (user: User, request: ConstructDayRequest) => Promise<DecisionFactsByIntentId>;
+  /** Opportunity Scarcity V1 O4 -- OPTIONAL. Production wiring supplies
+   * the authenticated user's own read-only range loaders; omitting it is
+   * byte-identical to this ticket never having existed. */
+  createOpportunityRangeDeps?: (user: User) => OpportunityRangeDeps;
 }
 
 /**
@@ -378,7 +432,8 @@ export async function handleDayConstructorPreviewRequest(deps: DayConstructorPre
   try {
     const orchestratorDeps = deps.createOrchestratorDeps(user, now);
     const decisionFactsSource: DecisionFactsSource | undefined = deps.loadDecisionFacts ? (request) => deps.loadDecisionFacts!(user, request) : undefined;
-    const result = await runDayConstructorPreview(body, user.timezone, now, orchestratorDeps, decisionFactsSource);
+    const opportunityRangeDeps = deps.createOpportunityRangeDeps ? deps.createOpportunityRangeDeps(user) : undefined;
+    const result = await runDayConstructorPreview(body, user.timezone, now, orchestratorDeps, decisionFactsSource, opportunityRangeDeps);
     // F1 trust correction: sign each proposed item for THIS user so acceptance can verify what it means.
     return { ...result, body: signPreviewResultBody(session.userId, result.body) };
   } catch (err) {
