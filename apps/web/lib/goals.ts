@@ -238,6 +238,85 @@ export function resolveGoalTemplateActivities(category: GoalTemplateCategory): R
 }
 
 // ============================================================
+// Goals V2 Candidate B1 -- deterministic outcome text -> existing
+// GoalTemplateCategory matching. The smallest missing bridge between a
+// free-text Goal outcome ("I want to get fitter") and the already-shipped
+// GOAL_TEMPLATES table above. Matching ONLY -- never activity resolution
+// (resolveGoalTemplateActivities above still owns that, unchanged, once a
+// category is chosen), never persistence, never UI.
+//
+// Deliberately NOT findActivityIntent's own longest-alias-wins substring
+// semantics (personalizedTasks.ts): an activity-alias false positive just
+// mislabels one suggested task, but a Goal-category false positive would
+// silently decompose the wrong Goal into the wrong set of activities --
+// so this match is intentionally stricter (whole-phrase, word-boundary
+// matching only) and intentionally conservative (an ambiguous match
+// across more than one category returns null rather than guessing; a
+// false negative just falls back to the existing manual "Start from
+// scratch" flow, which is always the safe outcome).
+// ============================================================
+
+/**
+ * One small, explicit set of matching phrases per category -- a `satisfies
+ * Record<GoalTemplateCategory, ...>` contract (not a separate taxonomy)
+ * so that adding a new GoalTemplateCategory without adding its matching
+ * vocabulary here is a TypeScript compile error, never silent drift.
+ * Phrases only -- never GoalActivity titles, activityId, completion
+ * requirements, Rhythm, or durations, all of which stay owned entirely by
+ * GOAL_TEMPLATES above.
+ */
+export const GOAL_TEMPLATE_CATEGORY_MATCH_PHRASES = {
+  GET_FITTER: ['get fitter', 'get fit', 'improve fitness', 'improve my fitness', 'exercise regularly', 'work out regularly', 'workout regularly'],
+  MEDITATE_REGULARLY: ['meditate regularly', 'start meditating', 'meditate more', 'build a meditation habit'],
+  FINISH_PROJECT: ['finish my project', 'complete my project', 'finish a project', 'finish the project'],
+  STUDY_CONSISTENTLY: ['study consistently', 'study regularly', 'build a study habit'],
+} satisfies Record<GoalTemplateCategory, readonly string[]>;
+
+/** trim + lowercase + collapse whitespace + turn harmless punctuation into
+ * a word separator. Deliberately NOT stemming, fuzzy/edit-distance
+ * matching, embeddings, semantic similarity, scoring, locale-sensitive
+ * inference, or an LLM -- see this function's own callers for why. */
+function normalizeGoalOutcomeText(outcome: string): string {
+  return outcome
+    .toLowerCase()
+    .replace(/[^a-z0-9\s]/g, ' ')
+    .trim()
+    .replace(/\s+/g, ' ');
+}
+
+/** Whole-phrase, word-boundary matching only (never unrestricted substring
+ * containment) -- "get fitter" matches inside "my goal is to get fitter
+ * this year" but "get fitterish" (a longer, unrelated word) does not,
+ * because \b requires a real word boundary immediately after "fitter". */
+function phraseMatchesNormalizedOutcome(normalizedOutcome: string, phrase: string): boolean {
+  const escapedPhrase = phrase
+    .split(' ')
+    .map((word) => word.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'))
+    .join('\\s+');
+  return new RegExp(`\\b${escapedPhrase}\\b`).test(normalizedOutcome);
+}
+
+/**
+ * Goal outcome free text -> an existing GoalTemplateCategory, or null when
+ * no category matches confidently, OR more than one distinct category
+ * matches (a multi-intent outcome like "get fitter and study
+ * consistently" is never resolved by silently picking one). Receives
+ * ONLY the outcome text -- no Goal id, user id, target date, calendar
+ * context, history, Panchang, location, Rhythm, or completion state --
+ * so it is usable before any Goal exists. Never calls findActivityIntent:
+ * Goal-category classification and activity-catalog resolution are
+ * different responsibilities.
+ */
+export function matchGoalTemplateCategory(outcome: string): GoalTemplateCategory | null {
+  const normalized = normalizeGoalOutcomeText(outcome);
+  if (normalized.length === 0) return null;
+  const matchedCategories = GOAL_TEMPLATE_CATEGORIES.filter((category) =>
+    GOAL_TEMPLATE_CATEGORY_MATCH_PHRASES[category].some((phrase) => phraseMatchesNormalizedOutcome(normalized, phrase))
+  );
+  return matchedCategories.length === 1 ? matchedCategories[0] : null;
+}
+
+// ============================================================
 // Civil-date encoding for Goal.targetDate (implementation design section
 // 4) -- same convention as apps/web/app/api/daily-assistant/reflection/
 // route.ts's own getReflectionDate: a "YYYY-MM-DD" string is encoded as
