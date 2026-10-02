@@ -322,3 +322,5 @@ jobs:
         run: npx ts-node test/automaticGoalDemandBootstrapDb.test.ts
       - name: Run Goal demand provenance authorization DB test
         run: npx ts-node test/goalDemandProvenanceAuthorizationDb.test.ts
+      - name: Run automatic Goal lifecycle closure DB test
+        run: npx ts-node test/automaticGoalLifecycleClosureDb.test.ts
