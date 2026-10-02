@@ -178,6 +178,110 @@ jobs:
       # apps/web/node_modules.
       - name: Run Goal create idempotency test
         run: npx ts-node test/goalCreateIdempotency.test.ts
+      # Goals -> Planning Integration V1 PR A -- goals.ts and the goal
+      # creation wiring, unaffected by `pg`/`next` at module load, so no
+      # apps/web/node_modules needed (confirmed by running both locally
+      # with apps/web/node_modules removed).
+      - name: Run Goals domain test
+        run: npx ts-node test/goals.test.ts
+      - name: Run Goals wiring test
+        run: npx ts-node test/goalsWiring.test.ts
+      # Goals -> Planning Integration V1 PR B -- pure presentation
+      # formatting, same zero-dependency goals.ts chain as above.
+      - name: Run Goals presentation test
+        run: npx ts-node test/goalsPresentation.test.ts
+      # Goals -> Planning Integration V1 PR C -- the Goal -> Plan My Day
+      # handoff. planDayBootstrap.ts's own import chain reaches
+      # apps/web/lib/db.ts (via goalDemandCandidates.ts), same
+      # apps/web/node_modules requirement as the Goal demand
+      # candidates/bootstrap tests above; the UI/wiring suites read
+      # source as plain text only and need neither.
+      - name: Run Goal planning handoff test
+        run: npx ts-node test/goalPlanningHandoff.test.ts
+      - name: Run Goal planning handoff UI test
+        run: npx ts-node test/goalPlanningHandoffUi.test.ts
+      - name: Run Goal planning handoff wiring test
+        run: npx ts-node test/goalPlanningHandoffWiring.test.ts
+      # Goals V2 G2.1 -- Goal activity completion requirements
+      # (goalCompletion.ts), a zero-dependency module.
+      - name: Run Goal completion test
+        run: npx ts-node test/goalCompletion.test.ts
+      - name: Run Goal completion structural guards test
+        run: npx ts-node test/goalCompletionStructuralGuards.test.ts
+      # Goals V2 G2.2.1/G2.2.2/G2.2.3 -- GoalActivityExecution domain
+      # logic (goalActivityExecution.ts imports only the zero-dependency
+      # goalCompletion.ts); live-DB/completion/Move-continuity coverage
+      # for the same ticket runs in the day-constructor-acceptance-db-tests
+      # job below.
+      - name: Run Goal activity execution test
+        run: npx ts-node test/goalActivityExecution.test.ts
+      - name: Run Goal activity execution structural guards test
+        run: npx ts-node test/goalActivityExecutionStructuralGuards.test.ts
+      # Goals V2 Rhythm R1 -- GoalActivityOccurrence structural guards
+      # (reads source as plain text, same fs/path convention as the
+      # structural guards tests above); live persistence coverage for the
+      # same ticket runs in the day-constructor-acceptance-db-tests job.
+      - name: Run Goal activity occurrence structural guards test
+        run: npx ts-node test/goalActivityOccurrenceStructuralGuards.test.ts
+      # Goals V2 Rhythm R2 -- GoalActivityRhythm validation/eligibility
+      # domain logic (goalActivityRhythm.ts imports only
+      # availabilityContext.ts/timezone.ts, neither of which reaches `pg`).
+      - name: Run Goal activity rhythm test
+        run: npx ts-node test/goalActivityRhythm.test.ts
+      # Goals V2 Rhythm R3 -- occurrence materialization structural
+      # guards (plain-text source reads only).
+      - name: Run Goal activity rhythm materialization structural guards test
+        run: npx ts-node test/goalActivityRhythmMaterializationStructuralGuards.test.ts
+      # Goals V2 Rhythm R4 -- Goal Detail's weekly Rhythm presentation.
+      # The UI suite imports goalsPresentation.ts's formatters directly
+      # (itself zero-dependency); the structural guards suite reads
+      # source as plain text -- neither needs apps/web/node_modules.
+      - name: Run Goal activity rhythm Goal Detail structural guards test
+        run: npx ts-node test/goalActivityRhythmGoalDetailStructuralGuards.test.ts
+      - name: Run Goal activity rhythm Goal Detail UI test
+        run: npx ts-node test/goalActivityRhythmGoalDetailUi.test.ts
+      # Goals V2 Rhythm R5 -- minimum Rhythm setup UX structural guards
+      # (plain-text source reads only). test/goalActivityRhythmSetupUi.test.ts
+      # is intentionally NOT wired in here -- it asserts on a CreateGoalModal
+      # shape (isOngoingTemplate/GOAL_TEMPLATE_LIKELY_ONGOING) that the
+      # later Goals V2 Candidate B2/B3 activity-proposal review flow has
+      # since replaced; it currently fails 5 checks against the real
+      # GoalsListClient.tsx and needs a maintainer decision (update vs
+      # retire this suite), not a blind wire-in.
+      - name: Run Goal activity rhythm setup structural guards test
+        run: npx ts-node test/goalActivityRhythmSetupStructuralGuards.test.ts
+      # Goals V2 G3.1 -- Goal progress context threading onto the Daily
+      # Agenda/Home timeline (dailyAgenda.ts/homeTimelineComposer.ts import
+      # PlannedActivity/PlanGoalContext from db.ts as TYPES only, erased at
+      # compile time -- no apps/web/node_modules needed).
+      - name: Run Daily agenda Goal context test
+        run: npx ts-node test/dailyAgendaGoalContext.test.ts
+      - name: Run Goal context structural guards test
+        run: npx ts-node test/goalContextStructuralGuards.test.ts
+      # Goals V2 G3.2 -- Goal Detail completion presentation structural
+      # guards (plain-text source reads only).
+      - name: Run Goal Detail completion structural guards test
+        run: npx ts-node test/goalDetailCompletionStructuralGuards.test.ts
+      # Goals V2 G3.3 -- Right Now completion presentation, same
+      # zero-dependency goalActivityExecution.ts/goalsPresentation.ts
+      # chain as G2.1/G2.2 above.
+      - name: Run Right Now Goal context test
+        run: npx ts-node test/rightNowGoalContext.test.ts
+      # Goals V2 G3.4 -- template completion requirement inference
+      # (imports only the zero-dependency goals.ts/goalCompletion.ts/
+      # goalActivityExecution.ts).
+      - name: Run Goal template completion test
+        run: npx ts-node test/goalTemplateCompletion.test.ts
+      # Goals V2 G3.5 -- goal-aware Recomposition presentation. Requires
+      # RecompositionCard.tsx at runtime (`require`d directly, same
+      # renderToStaticMarkup convention as the Goal activity proposal test
+      # above) -- same jsx-enabled/apps-web-node_modules requirement.
+      # Live-DB coverage for the same ticket runs in the
+      # day-constructor-acceptance-db-tests job below.
+      - name: Run Goal-aware Recomposition presentation test
+        env:
+          TS_NODE_COMPILER_OPTIONS: '{"jsx":"react"}'
+        run: npx ts-node test/goalAwareRecompositionPresentation.test.ts
       # Goals V2 Candidate B4 -- goalDecompositionObservability.ts imports
       # goalActivityProposal.ts (a type-only RhythmPickerValue from the
       # 'use client' components/RhythmPicker.tsx), same jsx-enabled group
@@ -369,3 +473,38 @@ jobs:
         run: npx ts-node test/goalsReviewedCreateDb.test.ts
       - name: Run Goals create idempotency DB test
         run: npx ts-node test/goalsCreateIdempotencyDb.test.ts
+      # Goals -> Planning Integration V1 PR A/PR C -- live-database
+      # coverage for the original Goal creation/handoff flows.
+      - name: Run Goals DB test
+        run: npx ts-node test/goalsDb.test.ts
+      - name: Run Goal planning handoff DB test
+        run: npx ts-node test/goalPlanningHandoffDb.test.ts
+      # Goals V2 G2.2.1/G2.2.2/G2.2.3 -- GoalActivityExecution
+      # persistence, completion, and Move continuity.
+      - name: Run Goal activity execution DB test
+        run: npx ts-node test/goalActivityExecutionDb.test.ts
+      - name: Run Goal activity execution completion DB test
+        run: npx ts-node test/goalActivityExecutionCompletionDb.test.ts
+      - name: Run Goal activity execution Move continuity DB test
+        run: npx ts-node test/goalActivityExecutionMoveContinuityDb.test.ts
+      # Goals V2 Rhythm R1-R5 -- GoalActivityOccurrence/GoalActivityRhythm
+      # persistence, materialization, Goal Detail display, and setup.
+      - name: Run Goal activity occurrence DB test
+        run: npx ts-node test/goalActivityOccurrenceDb.test.ts
+      - name: Run Goal activity rhythm DB test
+        run: npx ts-node test/goalActivityRhythmDb.test.ts
+      - name: Run Goal activity rhythm materialization DB test
+        run: npx ts-node test/goalActivityRhythmMaterializationDb.test.ts
+      - name: Run Goal activity rhythm Goal Detail DB test
+        run: npx ts-node test/goalActivityRhythmGoalDetailDb.test.ts
+      - name: Run Goal activity rhythm setup DB test
+        run: npx ts-node test/goalActivityRhythmSetupDb.test.ts
+      # Goals V2 G3.1/G3.4/G3.5 -- Goal progress context, template
+      # completion, and goal-aware Recomposition, each against a real
+      # Postgres database.
+      - name: Run Goal context DB test
+        run: npx ts-node test/goalContextDb.test.ts
+      - name: Run Goal template completion DB test
+        run: npx ts-node test/goalTemplateCompletionDb.test.ts
+      - name: Run Goal-aware Recomposition presentation DB test
+        run: npx ts-node test/goalAwareRecompositionPresentationDb.test.ts
