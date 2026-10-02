@@ -14,6 +14,7 @@ import {
   GOAL_TEMPLATE_CATEGORIES,
   GOAL_TEMPLATES,
   resolveGoalTemplateActivities,
+  classifyGoalCreateRequestMode,
 } from '../apps/web/lib/goals';
 
 let allPassed = true;
@@ -87,6 +88,21 @@ check(
   resolveGoalTemplateActivities('FINISH_PROJECT').every((a) => a.activityId === null)
 );
 check('resolveGoalTemplateActivities preserves the exact static titles verbatim', resolveGoalTemplateActivities('MEDITATE_REGULARLY')[0].title === 'Meditate 10 minutes');
+
+// ============================================================
+// Goals V2 Candidate B3 -- classifyGoalCreateRequestMode. Pure
+// presence/absence classification only (route.ts owns validating
+// `activities`' own contents) -- see
+// test/goalsReviewedCreateDb.test.ts for the live-database proof of the
+// full explicit-review request/validation/persistence behavior.
+// ============================================================
+check('request mode: neither activities nor activityRhythms present -> LEGACY_TEMPLATE', classifyGoalCreateRequestMode({}) === 'LEGACY_TEMPLATE');
+check('request mode: activityRhythms present, activities absent -> LEGACY_TEMPLATE', classifyGoalCreateRequestMode({ activityRhythms: [{ kind: 'NONE' }] }) === 'LEGACY_TEMPLATE');
+check('request mode: activities present (non-empty), activityRhythms absent -> EXPLICIT_REVIEW', classifyGoalCreateRequestMode({ activities: [{ title: 'x' }] }) === 'EXPLICIT_REVIEW');
+check('request mode: activities explicitly [] (zero approved activities) -> still EXPLICIT_REVIEW, never treated as absent', classifyGoalCreateRequestMode({ activities: [] }) === 'EXPLICIT_REVIEW');
+check('request mode: activities present AND activityRhythms present -> AMBIGUOUS (never silently prefers one)', classifyGoalCreateRequestMode({ activities: [], activityRhythms: [] }) === 'AMBIGUOUS');
+check('request mode: activities explicitly null (same as absent) -> LEGACY_TEMPLATE', classifyGoalCreateRequestMode({ activities: null }) === 'LEGACY_TEMPLATE');
+check('request mode: activityRhythms explicitly null alongside present activities -> EXPLICIT_REVIEW, not AMBIGUOUS (null counts as absent)', classifyGoalCreateRequestMode({ activities: [], activityRhythms: null }) === 'EXPLICIT_REVIEW');
 
 if (!allPassed) {
   console.error('SOME GOALS DOMAIN CHECKS FAILED');
