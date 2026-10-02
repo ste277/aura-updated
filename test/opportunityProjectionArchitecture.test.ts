@@ -52,6 +52,19 @@ const inputFields = Array.from(inputBlock.matchAll(/^\s{2}(\w+):/gm)).map((m) =>
 check('the input carries no requirement count and no candidate/source identity', JSON.stringify(inputFields) === JSON.stringify(['availabilityByDate', 'blockers', 'durationMinutes', 'horizonEndDate', 'now', 'planningDate', 'timezone']));
 check('the three day states are structurally distinct literals', /'KNOWN_FEASIBLE' \| 'KNOWN_INFEASIBLE' \| 'UNKNOWN'/.test(src) && /kind: 'UNKNOWN'/.test(src) && /kind: 'KNOWN'/.test(src));
 
+// ---- corrected contract: timezone dialect and elapsed-day rule ----------
+const timezoneImport = /import \{([^}]*)\} from '\.\/timezone';/.exec(src);
+const timezoneNames = timezoneImport ? timezoneImport[1].split(',').map((n) => n.trim()).filter(Boolean).sort() : [];
+check('only the pure date helpers are imported from ./timezone (never the form-input validator isValidIanaTimezone)', JSON.stringify(timezoneNames) === JSON.stringify(['addDaysToDateStr', 'getDatePartsInTimezone']));
+check('timezone validity is decided by Intl resolution (the canonical helpers\' own contract), not a private stricter dialect', /new Intl\.DateTimeFormat\(/.test(code) && !/includes\('\/'\)|isValidIanaTimezone/.test(code));
+const evaluateDayBody = code.slice(code.indexOf('function evaluateDay('), code.indexOf('export function projectOpportunityFacts'));
+const elapsedAt = evaluateDayBody.indexOf('date < todayLocal');
+const unknownAt = evaluateDayBody.indexOf("availability.kind === 'UNKNOWN'");
+const windowsAt = evaluateDayBody.indexOf('availability.windows');
+check('the elapsed-day relation is decided BEFORE availability is inspected (nothing supplied can change an elapsed day)', elapsedAt > -1 && unknownAt > -1 && windowsAt > -1 && elapsedAt < unknownAt && elapsedAt < windowsAt);
+check('an elapsed day returns the known-infeasible state', /date < todayLocal\) return 'KNOWN_INFEASIBLE'/.test(evaluateDayBody));
+check('the public input contract is unchanged by the correction (no new input field)', JSON.stringify(inputFields) === JSON.stringify(['availabilityByDate', 'blockers', 'durationMinutes', 'horizonEndDate', 'now', 'planningDate', 'timezone']));
+
 // ---- no integration in O1 ----------------------------------------------
 const lib = path.join(root, 'apps/web/lib');
 const app = path.join(root, 'apps/web/app');

@@ -32,6 +32,15 @@
  * UNKNOWN, never infeasible; a day known to have no usable time is
  * KNOWN_INFEASIBLE, never unknown.
  *
+ * ELAPSED DAYS: a day earlier than the local date of `now` has no
+ * remaining opportunity. It is KNOWN_INFEASIBLE unconditionally -- never
+ * UNKNOWN, never feasible -- whatever availability or windows were
+ * supplied for it, because the local date label (not the supplied
+ * instants) decides whether a day has elapsed. It still counts toward
+ * `evaluatedDays` but toward neither `viableDays` nor `unknownDays`, so an
+ * elapsed day never adds uncertainty. The local date of `now` is clipped
+ * so only time after `now` counts; later days are evaluated in full.
+ *
  * CANDIDATE-LOCAL: one candidate at a time, against the supplied
  * blockers only. Two candidates that each fit the same single window
  * are each reported as viable for that day; this is feasibility for
@@ -43,7 +52,7 @@
 
 import { normalizeBlockedIntervals, type BlockedInterval } from './dayCapacity';
 import { validateEstimatedDurationMinutes, type ConstructionWindow } from './dayIntent';
-import { addDaysToDateStr, getDatePartsInTimezone, isValidIanaTimezone } from './timezone';
+import { addDaysToDateStr, getDatePartsInTimezone } from './timezone';
 import { isValidCalendarDateString } from '../../../packages/panchang/src/localDate';
 
 export type OpportunityDayState = 'KNOWN_FEASIBLE' | 'KNOWN_INFEASIBLE' | 'UNKNOWN';
@@ -127,6 +136,24 @@ export const MAX_PROJECTION_HORIZON_DAYS = 366;
 
 const MS_PER_MINUTE = 60000;
 
+/**
+ * Accepts exactly the timezone identifiers the canonical date helpers
+ * (`getDatePartsInTimezone`, `localDateTimeToUTC`) can resolve: anything
+ * `Intl.DateTimeFormat` accepts, including 'UTC' and 'Etc/UTC'. This is
+ * deliberately NOT `isValidIanaTimezone`, which is a user-input form
+ * validator that additionally requires an Area/Location shape; the
+ * planning stack itself only needs a zone it can resolve.
+ */
+function isSupportedTimezone(timezone: unknown): timezone is string {
+  if (typeof timezone !== 'string' || !timezone.trim()) return false;
+  try {
+    new Intl.DateTimeFormat('en-US', { timeZone: timezone });
+    return true;
+  } catch {
+    return false;
+  }
+}
+
 function isValidInstant(value: unknown): value is Date {
   return value instanceof Date && !Number.isNaN(value.getTime());
 }
@@ -169,14 +196,19 @@ function windowFitsDuration(window: OpportunityInterval, date: string, timezone:
 
 function evaluateDay(
   date: string,
+  todayLocal: string,
   availability: DayAvailabilityInput | undefined,
-  clipAtNow: boolean,
   now: Date,
   timezone: string,
   blockers: readonly BlockedInterval[],
   durationMs: number
 ): OpportunityDayState {
+  // The civil-date relation is decided FIRST, so nothing supplied for an
+  // elapsed day (missing availability, windows, blockers) can change its
+  // result.
+  if (date < todayLocal) return 'KNOWN_INFEASIBLE';
   if (!availability || availability.kind === 'UNKNOWN') return 'UNKNOWN';
+  const clipAtNow = date === todayLocal;
 
   const usable: OpportunityInterval[] = [];
   for (const window of mergeIntervals(availability.windows)) {
@@ -198,9 +230,9 @@ function evaluateDay(
  * Projects opportunity facts for one candidate over an inclusive civil-
  * date horizon. Deterministic for identical inputs; never mutates them.
  *
- * Days up to and including the local date of `now` have their windows
- * clipped so time already elapsed never counts; later days are not
- * clipped.
+ * Days before the local date of `now` are KNOWN_INFEASIBLE; the local
+ * date of `now` is clipped so elapsed time never counts; later days are
+ * not clipped.
  */
 export function projectOpportunityFacts(input: OpportunityProjectionInput): OpportunityProjectionResult {
   const { planningDate, horizonEndDate, durationMinutes, timezone, now, availabilityByDate, blockers } = input;
@@ -214,7 +246,7 @@ export function projectOpportunityFacts(input: OpportunityProjectionInput): Oppo
   } catch {
     return { status: 'INVALID_INPUT', code: 'INVALID_DURATION' };
   }
-  if (typeof timezone !== 'string' || !timezone.trim() || !isValidIanaTimezone(timezone)) return { status: 'INVALID_INPUT', code: 'INVALID_TIMEZONE' };
+  if (!isSupportedTimezone(timezone)) return { status: 'INVALID_INPUT', code: 'INVALID_TIMEZONE' };
   if (!isValidInstant(now)) return { status: 'INVALID_INPUT', code: 'INVALID_NOW' };
   if (!blockers.every(isWellFormedInterval)) return { status: 'INVALID_INPUT', code: 'MALFORMED_INTERVAL' };
 
@@ -235,7 +267,7 @@ export function projectOpportunityFacts(input: OpportunityProjectionInput): Oppo
   const durationMs = durationMinutes * MS_PER_MINUTE;
   const days: OpportunityDayResult[] = dates.map((date) => ({
     date,
-    state: evaluateDay(date, availabilityByDate.get(date), date <= todayLocal, now, timezone, blockers, durationMs),
+    state: evaluateDay(date, todayLocal, availabilityByDate.get(date), now, timezone, blockers, durationMs),
   }));
 
   const viableDays = days.filter((day) => day.state === 'KNOWN_FEASIBLE').length;

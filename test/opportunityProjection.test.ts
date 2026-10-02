@@ -10,7 +10,7 @@ import {
   type OpportunityProjectionResult,
 } from '../apps/web/lib/opportunityProjection';
 import type { BlockedInterval } from '../apps/web/lib/dayCapacity';
-import { localDateTimeToUTC } from '../apps/web/lib/timezone';
+import { localDateTimeToUTC, getDatePartsInTimezone } from '../apps/web/lib/timezone';
 
 let allPassed = true;
 function check(label: string, condition: boolean) {
@@ -303,6 +303,134 @@ const fit60 = (date: string) => known(win(date, '09:00', '10:00'));
     threw = true;
   }
   check('immutability: frozen (read-only) inputs are accepted without any mutation attempt', !threw);
+}
+
+// ============================================================
+// ELAPSED DAYS (correction): a day earlier than the local date of `now`
+// is KNOWN_INFEASIBLE unconditionally -- never UNKNOWN, never feasible.
+// now = 2026-10-10T12:00Z = 17:30 IST, so the local date is 2026-10-10.
+// ============================================================
+{
+  const NOW = iso('2026-10-10T12:00:00Z');
+  const one = (date: string, availability?: DayAvailabilityInput, blockers: BlockedInterval[] = []) =>
+    run({ now: NOW, planningDate: date, horizonEndDate: date, availabilityByDate: availability ? avail({ [date]: availability }) : new Map(), blockers });
+  const span = (a: string, b: string) => ({ start: iso(a), end: iso(b) });
+
+  const noAvail = one('2026-10-08');
+  check('past/no availability: KNOWN_INFEASIBLE (not UNKNOWN)', states(noAvail) === '2026-10-08:KNOWN_INFEASIBLE');
+  check('past/no availability: unknownDays does NOT increase; evaluatedDays still counts the day', facts(noAvail).unknownDays === 0 && facts(noAvail).viableDays === 0 && facts(noAvail).evaluatedDays === 1 && facts(noAvail).coverage === 'COMPLETE');
+  check('past/explicit UNKNOWN availability: also KNOWN_INFEASIBLE', states(one('2026-10-08', UNKNOWN)) === '2026-10-08:KNOWN_INFEASIBLE');
+  check('past/normal elapsed window: KNOWN_INFEASIBLE', states(one('2026-10-08', known(span('2026-10-08T09:00:00Z', '2026-10-08T10:00:00Z')))) === '2026-10-08:KNOWN_INFEASIBLE');
+  const futureLooking = one('2026-10-08', known(span('2026-10-11T09:00:00Z', '2026-10-11T10:00:00Z')));
+  check('past/future-looking window (date label 10-08, instants on 10-11): KNOWN_INFEASIBLE -- an inconsistent payload cannot resurrect a past day', states(futureLooking) === '2026-10-08:KNOWN_INFEASIBLE' && facts(futureLooking).viableDays === 0);
+  check('past/straddling window (instants straddle now): KNOWN_INFEASIBLE', states(one('2026-10-08', known(span('2026-10-10T11:00:00Z', '2026-10-10T13:00:00Z')))) === '2026-10-08:KNOWN_INFEASIBLE');
+  check('past: supplied windows/blockers cannot change an elapsed day (with and without a blocker -> same result)', states(one('2026-10-09', known(span('2026-10-12T03:00:00Z', '2026-10-12T05:00:00Z')), [blk('2026-10-12', '09:00', '10:00')])) === '2026-10-09:KNOWN_INFEASIBLE');
+
+  const allPast = run({ now: NOW, planningDate: '2026-10-05', horizonEndDate: '2026-10-08', availabilityByDate: avail({ '2026-10-06': fit60('2026-10-06') }) });
+  check('all-past horizon: evaluatedDays = 4, viableDays 0, unknownDays 0, coverage COMPLETE (zero remaining opportunities)', facts(allPast).evaluatedDays === 4 && facts(allPast).viableDays === 0 && facts(allPast).unknownDays === 0 && facts(allPast).coverage === 'COMPLETE');
+
+  // 3-day example: past, today unknown, tomorrow feasible
+  const example = run({ now: NOW, planningDate: '2026-10-09', horizonEndDate: '2026-10-11', availabilityByDate: avail({ '2026-10-10': UNKNOWN, '2026-10-11': fit60('2026-10-11') }) });
+  check('aggregation example: past + today unknown + tomorrow feasible -> evaluated 3, viable 1, unknown 1, known infeasible 1, PARTIAL',
+    states(example) === '2026-10-09:KNOWN_INFEASIBLE 2026-10-10:UNKNOWN 2026-10-11:KNOWN_FEASIBLE' &&
+      facts(example).evaluatedDays === 3 && facts(example).viableDays === 1 && facts(example).unknownDays === 1 && facts(example).evaluatedDays - facts(example).viableDays - facts(example).unknownDays === 1 && facts(example).coverage === 'PARTIAL');
+
+  // mixed horizon: each rule applied independently
+  const todayWindow = known(win('2026-10-10', '17:00', '19:00')); // 17:00-19:00 IST; now is 17:30 -> 90 minutes remain
+  const mixed = run({ now: NOW, planningDate: '2026-10-09', horizonEndDate: '2026-10-11', availabilityByDate: avail({ '2026-10-09': fit60('2026-10-09'), '2026-10-10': todayWindow, '2026-10-11': fit60('2026-10-11') }) });
+  check('mixed horizon: past (even with a fitting window) infeasible, today clipped-and-feasible, future feasible', states(mixed) === '2026-10-09:KNOWN_INFEASIBLE 2026-10-10:KNOWN_FEASIBLE 2026-10-11:KNOWN_FEASIBLE' && facts(mixed).viableDays === 2);
+  const mixedTight = run({ now: NOW, durationMinutes: 100, planningDate: '2026-10-09', horizonEndDate: '2026-10-11', availabilityByDate: avail({ '2026-10-09': known(win('2026-10-09', '09:00', '12:00')), '2026-10-10': todayWindow, '2026-10-11': known(win('2026-10-11', '09:00', '12:00')) }) });
+  check('mixed horizon: today is clipped (90 left < 100) while the future day is not (180 >= 100)', states(mixedTight) === '2026-10-09:KNOWN_INFEASIBLE 2026-10-10:KNOWN_INFEASIBLE 2026-10-11:KNOWN_FEASIBLE');
+
+  // coverage: elapsed days never create uncertainty by themselves
+  const pastPlusKnown = run({ now: NOW, planningDate: '2026-10-08', horizonEndDate: '2026-10-11', availabilityByDate: avail({ '2026-10-10': todayWindow, '2026-10-11': fit60('2026-10-11') }) });
+  check('coverage: elapsed days alongside fully known later days stay COMPLETE', facts(pastPlusKnown).coverage === 'COMPLETE' && facts(pastPlusKnown).unknownDays === 0);
+  const pastPlusUnknown = run({ now: NOW, planningDate: '2026-10-08', horizonEndDate: '2026-10-09', availabilityByDate: new Map() });
+  check('coverage: elapsed days with no later day in the horizon never produce UNKNOWN/PARTIAL', facts(pastPlusUnknown).coverage === 'COMPLETE' && facts(pastPlusUnknown).unknownDays === 0);
+  const lower = run({ now: NOW, planningDate: '2026-10-08', horizonEndDate: '2026-10-12', availabilityByDate: avail({ '2026-10-11': fit60('2026-10-11') }) }); // 08,09 past; 10 unknown (no entry); 11 feasible; 12 unknown
+  check('lower bound unchanged by elapsed days: viable 1, unknown 2 -> true viable within [1, 3]; the two elapsed days add nothing to either bound', facts(lower).viableDays === 1 && facts(lower).unknownDays === 2 && facts(lower).evaluatedDays === 5 && facts(lower).coverage === 'PARTIAL');
+}
+
+// ---- local-date boundary: classification uses localDate(now, supplied timezone), never the UTC date
+{
+  // Positive offset. now = 2026-10-09T20:00Z: UTC date is 10-09, but it is already 2026-10-10 01:30 in Kolkata.
+  const NOW = iso('2026-10-09T20:00:00Z');
+  const r = run({
+    now: NOW,
+    timezone: IST,
+    planningDate: '2026-10-09',
+    horizonEndDate: '2026-10-10',
+    availabilityByDate: avail({ '2026-10-09': known({ start: iso('2026-10-09T21:00:00Z'), end: iso('2026-10-09T22:00:00Z') }), '2026-10-10': known(win('2026-10-10', '09:00', '10:00', IST)) }),
+  });
+  check('positive offset (Kolkata): 10-09 is already elapsed locally although it is still the current UTC date -> KNOWN_INFEASIBLE; 10-10 is local today -> feasible', states(r) === '2026-10-09:KNOWN_INFEASIBLE 2026-10-10:KNOWN_FEASIBLE');
+  const sameInstantsUtc = run({
+    now: NOW,
+    timezone: 'UTC',
+    planningDate: '2026-10-09',
+    horizonEndDate: '2026-10-10',
+    availabilityByDate: avail({ '2026-10-09': known({ start: iso('2026-10-09T21:00:00Z'), end: iso('2026-10-09T22:00:00Z') }), '2026-10-10': known(win('2026-10-10', '09:00', '10:00', IST)) }),
+  });
+  check('positive offset (control): the same instants under timezone UTC treat 10-09 as today (clipped, still feasible) -- so classification really depends on the supplied zone', states(sameInstantsUtc) === '2026-10-09:KNOWN_FEASIBLE 2026-10-10:KNOWN_FEASIBLE');
+  // Negative offset. now = 2026-10-10T03:00Z: UTC date is 10-10, but it is still 2026-10-09 20:00 in Los Angeles.
+  const NOW_LA = iso('2026-10-10T03:00:00Z');
+  const la = run({
+    now: NOW_LA,
+    timezone: LA,
+    planningDate: '2026-10-09',
+    horizonEndDate: '2026-10-10',
+    availabilityByDate: avail({ '2026-10-09': known(win('2026-10-09', '21:00', '23:00', LA)), '2026-10-10': known(win('2026-10-10', '09:00', '10:00', LA)) }),
+  });
+  check('negative offset (Los Angeles): 10-09 is still local today although the UTC date is already 10-10 -> clipped, remaining evening window feasible; 10-10 is a future day', states(la) === '2026-10-09:KNOWN_FEASIBLE 2026-10-10:KNOWN_FEASIBLE');
+  const laElapsed = run({
+    now: NOW_LA,
+    timezone: LA,
+    planningDate: '2026-10-09',
+    horizonEndDate: '2026-10-09',
+    availabilityByDate: avail({ '2026-10-09': known(win('2026-10-09', '09:00', '10:00', LA)) }),
+  });
+  check('negative offset: today in Los Angeles with only a morning window (already elapsed) -> infeasible (clipping, not the elapsed-day rule)', states(laElapsed) === '2026-10-09:KNOWN_INFEASIBLE');
+}
+
+// ============================================================
+// TIMEZONE VALIDATION (correction): O1 accepts exactly what the
+// canonical date helpers accept -- not the form-input validator.
+// ============================================================
+{
+  const probe = (timezone: string) => run({ timezone, availabilityByDate: avail({ '2026-10-06': known({ start: iso('2026-10-06T09:00:00Z'), end: iso('2026-10-06T10:00:00Z') }) }) });
+  check('timezone UTC is accepted and evaluated', probe('UTC').status === 'OK' && facts(probe('UTC')).viableDays === 1);
+  check('timezone Etc/UTC is accepted and evaluated', probe('Etc/UTC').status === 'OK' && facts(probe('Etc/UTC')).viableDays === 1);
+  check('named zones Asia/Kolkata, America/New_York, Europe/London, America/Los_Angeles are accepted', [IST, NY, 'Europe/London', LA].every((tz) => probe(tz).status === 'OK'));
+  check('a genuinely invalid zone is a typed failure: Not/A_Real_Timezone', (probe('Not/A_Real_Timezone') as any).code === 'INVALID_TIMEZONE');
+  check('blank and whitespace-only zones are typed failures', (probe('') as any).code === 'INVALID_TIMEZONE' && (probe('   ') as any).code === 'INVALID_TIMEZONE');
+  const identifiers = ['UTC', 'Etc/UTC', 'GMT', 'Asia/Kolkata', 'America/New_York', 'Europe/London', 'Not/A_Real_Timezone', 'Mars/Olympus', '', 'India'];
+  const canonicalAccepts = (tz: string) => {
+    try {
+      getDatePartsInTimezone(tz, iso('2026-10-06T00:00:00Z'));
+      return true;
+    } catch {
+      return false;
+    }
+  };
+  check('consistency: O1 accepts a zone if and only if the canonical getDatePartsInTimezone can resolve it (no stricter private dialect)', identifiers.every((tz) => (probe(tz).status === 'OK') === canonicalAccepts(tz)));
+}
+{
+  // Process-timezone independence after the correction, including a UTC input and the elapsed-day rule.
+  const input = (timezone: string) => ({
+    now: iso('2026-10-10T12:00:00Z'),
+    timezone,
+    planningDate: '2026-10-08',
+    horizonEndDate: '2026-10-11',
+    availabilityByDate: avail({ '2026-10-08': known({ start: iso('2026-10-11T03:00:00Z'), end: iso('2026-10-11T04:00:00Z') }), '2026-10-10': known(win('2026-10-10', '17:00', '19:00')), '2026-10-11': UNKNOWN }),
+  });
+  const original = process.env.TZ;
+  const outputs: Record<string, string[]> = { UTC: [], [IST]: [], [NY]: [] };
+  for (const processTz of ['UTC', NY, IST, 'Pacific/Kiritimati']) {
+    process.env.TZ = processTz;
+    for (const supplied of Object.keys(outputs)) outputs[supplied].push(JSON.stringify(projectOpportunityFacts({ durationMinutes: 30, blockers: [], ...input(supplied) })));
+  }
+  if (original === undefined) delete process.env.TZ;
+  else process.env.TZ = original;
+  check('process timezone: for each supplied zone (UTC, Kolkata, New York), output is identical under process TZ UTC / New York / Kolkata / Kiritimati', Object.values(outputs).every((list) => list.every((o) => o === list[0])));
 }
 
 if (!allPassed) {
