@@ -13,6 +13,7 @@
 //      defense-in-depth: even a future mistake in an event's own schema
 //      cannot leak one of these fields.
 import { FULL_ACTIVITY_CATALOG } from '../../../packages/recommendation/src/personalizedTasks';
+import { GOAL_TEMPLATE_CATEGORIES } from './goals';
 import { createProductEvent } from './db';
 
 export type ProductEventName =
@@ -65,7 +66,10 @@ export type ProductEventName =
   | 'DAY_BUILDER_SLOT_SELECTED'
   | 'PERSONALIZATION_PROMPT_VIEWED'
   | 'PERSONALIZATION_PREFERENCES_SAVED'
-  | 'PERSONALIZATION_PREFERENCES_UPDATED';
+  | 'PERSONALIZATION_PREFERENCES_UPDATED'
+  | 'GOAL_DECOMPOSITION_SHOWN'
+  | 'GOAL_DECOMPOSITION_CONFIRMED'
+  | 'GOAL_DECOMPOSITION_CREATE_FAILED';
 
 export const PRODUCT_EVENT_NAMES: ProductEventName[] = [
   'AURA_HOME_VIEWED',
@@ -118,6 +122,9 @@ export const PRODUCT_EVENT_NAMES: ProductEventName[] = [
   'PERSONALIZATION_PROMPT_VIEWED',
   'PERSONALIZATION_PREFERENCES_SAVED',
   'PERSONALIZATION_PREFERENCES_UPDATED',
+  'GOAL_DECOMPOSITION_SHOWN',
+  'GOAL_DECOMPOSITION_CONFIRMED',
+  'GOAL_DECOMPOSITION_CREATE_FAILED',
 ];
 
 export function isProductEventName(value: string): value is ProductEventName {
@@ -238,6 +245,26 @@ export const CLIENT_TRACKED_EVENTS: ReadonlySet<ProductEventName> = new Set<Prod
   'PERSONALIZATION_PROMPT_VIEWED',
   'PERSONALIZATION_PREFERENCES_SAVED',
   'PERSONALIZATION_PREFERENCES_UPDATED',
+  // Goals V2 Candidate B4 -- all three are fired client-side from
+  // GoalsListClient.tsx's own CreateGoalModal. SHOWN/CREATE_FAILED have
+  // no server-side equivalent moment at all (same reasoning as every
+  // other CLIENT_TRACKED_EVENTS entry above). CONFIRMED is a deliberate
+  // departure from this codebase's usual "CREATED/COMPLETED fires
+  // server-side, at the moment of DB success" convention (e.g.
+  // AURA_MOMENT_CREATED, not listed here): the review-summary fields
+  // (wasEdited/removedCount/renamedCount/...) exist ONLY as client-side
+  // UI state and are never sent to the server (this ticket's own section
+  // 42 explicitly expects no POST /api/goals contract change) -- there is
+  // no server-side moment that could carry them. Fired exactly once per
+  // successful response, from the same branch that already navigates
+  // away on success -- structurally incapable of double-firing within one
+  // mount (a second handleSubmit call can only happen after an ERROR,
+  // never after this branch, which immediately navigates away) -- so a
+  // B3.1 idempotent replay the client happens to observe is still exactly
+  // one CONFIRMED event, never two (this ticket's own section 13).
+  'GOAL_DECOMPOSITION_SHOWN',
+  'GOAL_DECOMPOSITION_CONFIRMED',
+  'GOAL_DECOMPOSITION_CREATE_FAILED',
 ]);
 
 // Fields that must NEVER appear in ProductEvent.metadata, under any event,
@@ -355,6 +382,26 @@ const MY_DAY_DAY_PHASE_VALUES = new Set(['MORNING', 'MIDDAY', 'AFTERNOON', 'EVEN
 const myDayIntentionCategoryField: FieldSchema = { type: 'enum', values: MY_DAY_INTENTION_CATEGORY_VALUES };
 const myDayItemTypeField: FieldSchema = { type: 'enum', values: MY_DAY_ITEM_TYPE_VALUES };
 const myDayDayPhaseField: FieldSchema = { type: 'enum', values: MY_DAY_DAY_PHASE_VALUES };
+
+// Goals V2 Candidate B4 -- GOAL_DECOMPOSITION_SHOWN only ever fires for an
+// actual template-backed decomposition (AUTO_MATCH or an explicit manual
+// template choice); SCRATCH/NO_MATCH are never "shown" moments (brief
+// section 8). GOAL_MATCH_SOURCE_VALUES is the superset used by the
+// confirmation/failure events, which DO need to represent all four
+// outcomes (brief section 9: NO_MATCH visibility, captured only as part
+// of the eventual confirm/fail funnel, never its own keystroke-driven
+// event).
+const GOAL_DECOMPOSITION_SOURCE_VALUES = new Set(['AUTO_MATCH', 'MANUAL_TEMPLATE']);
+const GOAL_MATCH_SOURCE_VALUES = new Set(['AUTO_MATCH', 'MANUAL_TEMPLATE', 'SCRATCH', 'NO_MATCH']);
+// Reuses GoalTemplateCategory's own exact closed vocabulary (lib/goals.ts),
+// never a third copy.
+const GOAL_TEMPLATE_CATEGORY_VALUES = new Set<string>(GOAL_TEMPLATE_CATEGORIES);
+const GOAL_CREATE_ERROR_CATEGORY_VALUES = new Set(['VALIDATION', 'IDEMPOTENCY_CONFLICT', 'SERVER_ERROR', 'NETWORK_ERROR']);
+const goalTemplateCategoryField: FieldSchema = { type: 'enum', values: GOAL_TEMPLATE_CATEGORY_VALUES };
+// Mirrors POST /api/goals's own MAX_REVIEWED_ACTIVITIES bound (Candidate
+// B3) -- every count field here is a count of reviewed activities, so
+// the same ceiling applies.
+const goalActivityCountField: FieldSchema = { type: 'number', min: 0, max: 20 };
 
 const EVENT_METADATA_SCHEMAS: Record<ProductEventName, Record<string, FieldSchema>> = {
   AURA_HOME_VIEWED: {},
@@ -600,6 +647,38 @@ const EVENT_METADATA_SCHEMAS: Record<ProductEventName, Record<string, FieldSchem
   PERSONALIZATION_PREFERENCES_UPDATED: {
     priorityCount: { type: 'number', min: 0, max: 3 },
     hasPriorityPerson: { type: 'boolean' },
+  },
+  // Goals V2 Candidate B4 (brief section 3/4) -- bounded categorical/count
+  // data only, never a Goal title, activity title, freeform text, or
+  // clientRequestId (all already excluded by this file's own FieldSchema
+  // union having no free-text field type at all -- structurally
+  // impossible to pass even by mistake -- plus FORBIDDEN_METADATA_KEYS as
+  // defense-in-depth). templateCategory reuses GoalTemplateCategory's own
+  // exact closed vocabulary, not a third copy.
+  GOAL_DECOMPOSITION_SHOWN: {
+    source: { type: 'enum', values: GOAL_DECOMPOSITION_SOURCE_VALUES },
+    templateCategory: goalTemplateCategoryField,
+    activityCount: goalActivityCountField,
+  },
+  GOAL_DECOMPOSITION_CONFIRMED: {
+    matchSource: { type: 'enum', values: GOAL_MATCH_SOURCE_VALUES },
+    templateCategory: goalTemplateCategoryField,
+    initialActivityCount: goalActivityCountField,
+    finalActivityCount: goalActivityCountField,
+    templateBackedCount: goalActivityCountField,
+    freeformCount: goalActivityCountField,
+    wasEdited: { type: 'boolean' },
+    removedCount: goalActivityCountField,
+    renamedCount: goalActivityCountField,
+    addedCount: goalActivityCountField,
+    rhythmChanged: { type: 'boolean' },
+    manualOverrideUsed: { type: 'boolean' },
+    scratchUsed: { type: 'boolean' },
+    refreshUsed: { type: 'boolean' },
+  },
+  GOAL_DECOMPOSITION_CREATE_FAILED: {
+    errorCategory: { type: 'enum', values: GOAL_CREATE_ERROR_CATEGORY_VALUES },
+    matchSource: { type: 'enum', values: GOAL_MATCH_SOURCE_VALUES },
   },
 };
 

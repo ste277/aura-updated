@@ -178,6 +178,26 @@ jobs:
       # apps/web/node_modules.
       - name: Run Goal create idempotency test
         run: npx ts-node test/goalCreateIdempotency.test.ts
+      # Goals V2 Candidate B4 -- goalDecompositionObservability.ts imports
+      # goalActivityProposal.ts (a type-only RhythmPickerValue from the
+      # 'use client' components/RhythmPicker.tsx), same jsx-enabled group
+      # as the Goal activity proposal test above.
+      - name: Run Goal decomposition observability test
+        env:
+          TS_NODE_COMPILER_OPTIONS: '{"jsx":"react"}'
+        run: npx ts-node test/goalDecompositionObservability.test.ts
+      # Goals V2 Candidate B4 release review -- goalsUiWiring.test.ts (the
+      # structural proof that GoalsListClient.tsx/the Goals pages actually
+      # wire up every prior Goals ticket's requirements -- scope isolation,
+      # copy rules, B3.1 idempotency, B4 telemetry call sites, etc.) existed
+      # and passed locally throughout B2/B3.1/B4 but was never added as a
+      # CI step, so a future regression here would stay green. Same
+      # jsx-enabled group as the Goal activity proposal test above (it
+      # imports RhythmPicker.tsx-adjacent types transitively).
+      - name: Run Goals UI wiring test
+        env:
+          TS_NODE_COMPILER_OPTIONS: '{"jsx":"react"}'
+        run: npx ts-node test/goalsUiWiring.test.ts
   web-build:
     name: Next.js production build
     runs-on: ubuntu-latest

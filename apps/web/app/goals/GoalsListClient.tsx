@@ -36,6 +36,19 @@ import {
   buildReviewedActivitiesForSubmission,
   type GoalActivityProposalState,
 } from '../../lib/goalActivityProposal';
+import { trackEvent } from '../../lib/trackEvent';
+import {
+  createInitialObservabilityState,
+  recordNewBaseline,
+  recordRowRemoved,
+  recordRowRenamed,
+  recordFreeformRowAdded,
+  recordRhythmChanged,
+  buildDecompositionShownMetadata,
+  buildGoalDecompositionSummaryMetadata,
+  classifyGoalCreateError,
+  type GoalDecompositionObservabilityState,
+} from '../../lib/goalDecompositionObservability';
 
 /**
  * Goals -> Planning Integration V1 PR B -- the primary "What am I working
@@ -250,13 +263,41 @@ function CreateGoalModal({ onClose }: { onClose: () => void }) {
   // practical effect as an explicit reset -- there is no "next attempt"
   // to reuse it for.
   const [clientRequestId] = useState<string>(() => crypto.randomUUID());
+  // Goals V2 Candidate B4 -- transient, session-scoped telemetry
+  // bookkeeping maintained ALONGSIDE `proposal` (goalDecompositionObservability.ts's
+  // own doc comment covers the exact reset/sticky semantics). Never
+  // influences `proposal`/`canSubmit`/the submitted payload.
+  const [observability, setObservability] = useState<GoalDecompositionObservabilityState>(createInitialObservabilityState);
+  // Always-current ref so the title-change effect below can read the
+  // LATEST proposal without adding it to its own dependency array (which
+  // would make the effect re-run on every unrelated edit) -- a standard,
+  // safe React pattern; reassigning .current during render triggers
+  // nothing further.
+  const proposalRef = useRef(proposal);
+  proposalRef.current = proposal;
 
   // This ticket's own sections 20-22, "the title-change problem": while
   // the proposal is still AUTO + PRISTINE, a title edit re-resolves the
   // matching template (or clears to no proposal); a MANUAL choice or any
   // USER_EDITED proposal is never touched by a title edit alone.
   useEffect(() => {
-    setProposal((current) => reconcileProposalForTitleChange(current, title));
+    const current = proposalRef.current;
+    const next = reconcileProposalForTitleChange(current, title);
+    if (next === current) return; // nothing actually changed -- no redundant SHOWN/state update
+    setProposal(next);
+    // Goals V2 Candidate B4 -- SHOWN fires only for an actual
+    // template-backed proposal becoming visible (never for NO_MATCH/
+    // empty, this ticket's own section 8/9). A known, accepted, dev-only
+    // limitation: React Strict Mode's development-time effect
+    // double-invocation could in principle re-run this effect body twice
+    // for the same render; this never happens in a production build,
+    // where real telemetry is collected, so it is not guarded against
+    // further here.
+    if (next.rows.length > 0 && next.pristineAutoCategory) {
+      trackEvent('GOAL_DECOMPOSITION_SHOWN', { metadata: { ...buildDecompositionShownMetadata('AUTO_MATCH', next.pristineAutoCategory, next.rows.length) } });
+    }
+    setObservability((obs) => recordNewBaseline(obs, { activityCount: next.rows.length, isManualOverride: false, isScratch: false, isRefresh: false }));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [title]);
 
   const trimmedTitle = title.trim();
@@ -267,14 +308,45 @@ function CreateGoalModal({ onClose }: { onClose: () => void }) {
 
   const handleCategorySelectChange = (next: string) => {
     const nextCategory = (next || null) as GoalTemplateCategory | null;
-    setProposal((current) => selectManualCategory(current, nextCategory));
+    const nextState = selectManualCategory(proposal, nextCategory);
+    setProposal(nextState);
+    if (nextCategory) {
+      trackEvent('GOAL_DECOMPOSITION_SHOWN', { metadata: { ...buildDecompositionShownMetadata('MANUAL_TEMPLATE', nextCategory, nextState.rows.length) } });
+    }
+    setObservability((obs) => recordNewBaseline(obs, { activityCount: nextState.rows.length, isManualOverride: nextCategory !== null, isScratch: nextCategory === null, isRefresh: false }));
   };
-  const handleUseAutomaticSuggestion = () => setProposal(useAutomaticSuggestion(title));
-  const handleRefreshSuggestions = () => setProposal((current) => refreshProposalFromEffectiveCategory(current, title));
-  const handleRemoveRow = (localId: string) => setProposal((current) => removeProposalRow(current, localId));
-  const handleRenameRow = (localId: string, nextTitle: string) => setProposal((current) => renameProposalRow(current, localId, nextTitle));
-  const handleRowRhythmChange = (localId: string, nextRhythm: RhythmPickerValue | null) => setProposal((current) => updateProposalRowRhythm(current, localId, nextRhythm));
-  const handleAddFreeform = () => setProposal((current) => addFreeformProposalRow(current));
+  const handleUseAutomaticSuggestion = () => {
+    const nextState = useAutomaticSuggestion(title);
+    setProposal(nextState);
+    if (nextState.rows.length > 0 && nextState.pristineAutoCategory) {
+      trackEvent('GOAL_DECOMPOSITION_SHOWN', { metadata: { ...buildDecompositionShownMetadata('AUTO_MATCH', nextState.pristineAutoCategory, nextState.rows.length) } });
+    }
+    setObservability((obs) => recordNewBaseline(obs, { activityCount: nextState.rows.length, isManualOverride: false, isScratch: false, isRefresh: false }));
+  };
+  const handleRefreshSuggestions = () => {
+    const nextState = refreshProposalFromEffectiveCategory(proposal, title);
+    setProposal(nextState);
+    // Deliberately no SHOWN event here (this ticket's own section 31) --
+    // a refresh is represented purely via `refreshUsed` in the eventual
+    // confirmation summary, not a second "decomposition shown" signal.
+    setObservability((obs) => recordNewBaseline(obs, { activityCount: nextState.rows.length, isManualOverride: false, isScratch: false, isRefresh: true }));
+  };
+  const handleRemoveRow = (localId: string) => {
+    setProposal((current) => removeProposalRow(current, localId));
+    setObservability((obs) => recordRowRemoved(obs));
+  };
+  const handleRenameRow = (localId: string, nextTitle: string) => {
+    setProposal((current) => renameProposalRow(current, localId, nextTitle));
+    setObservability((obs) => recordRowRenamed(obs, localId));
+  };
+  const handleRowRhythmChange = (localId: string, nextRhythm: RhythmPickerValue | null) => {
+    setProposal((current) => updateProposalRowRhythm(current, localId, nextRhythm));
+    setObservability((obs) => recordRhythmChanged(obs));
+  };
+  const handleAddFreeform = () => {
+    setProposal((current) => addFreeformProposalRow(current));
+    setObservability((obs) => recordFreeformRowAdded(obs));
+  };
 
   const canSubmit = trimmedTitle.length > 0 && trimmedTitle.length <= 200 && (targetDate === '' || isValidCivilDateString(targetDate)) && isProposalReadyToSubmit(proposal, 200);
 
@@ -309,12 +381,27 @@ function CreateGoalModal({ onClose }: { onClose: () => void }) {
       });
       const data = await res.json().catch(() => null);
       if (!res.ok || !data?.goal?.id) {
+        // Goals V2 Candidate B4 -- a bounded error category only (this
+        // ticket's own section 18), never the raw error message/response
+        // body. matchSource/no activity counts needed for a failure.
+        trackEvent('GOAL_DECOMPOSITION_CREATE_FAILED', {
+          metadata: { errorCategory: classifyGoalCreateError(res.status, data?.code), matchSource: buildGoalDecompositionSummaryMetadata(proposal, observability).matchSource },
+        });
         setError(res.status >= 400 && res.status < 500 ? (data?.error ?? 'Please check your goal details.') : 'Something went wrong. Your details are still here -- try again.');
         setStatus('ERROR');
         return;
       }
+      // Goals V2 Candidate B4 -- fired exactly once, only on a genuinely
+      // successful response, from the SAME branch that immediately
+      // navigates away -- see this file's own CLIENT_TRACKED_EVENTS doc
+      // comment (productEvents.ts) for why this can never double-fire
+      // within one modal mount, including for a B3.1 idempotent replay.
+      trackEvent('GOAL_DECOMPOSITION_CONFIRMED', { metadata: { ...buildGoalDecompositionSummaryMetadata(proposal, observability) } });
       window.location.href = `/goals/${data.goal.id}`;
     } catch {
+      trackEvent('GOAL_DECOMPOSITION_CREATE_FAILED', {
+        metadata: { errorCategory: classifyGoalCreateError(null, null), matchSource: buildGoalDecompositionSummaryMetadata(proposal, observability).matchSource },
+      });
       setError('Something went wrong. Your details are still here -- try again.');
       setStatus('ERROR');
     }
