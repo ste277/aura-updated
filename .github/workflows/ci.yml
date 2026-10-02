@@ -164,6 +164,14 @@ jobs:
         env:
           TS_NODE_COMPILER_OPTIONS: '{"jsx":"react"}'
         run: npx ts-node test/homeDashboardLogic.test.ts
+      # Goals V2 Candidate B2 (resumed) -- goalActivityProposal.ts imports
+      # a type-only RhythmPickerValue from the 'use client'
+      # components/RhythmPicker.tsx, same jsx-enabled/apps-web-node_modules
+      # requirement as the Home dashboard logic test above.
+      - name: Run Goal activity proposal test
+        env:
+          TS_NODE_COMPILER_OPTIONS: '{"jsx":"react"}'
+        run: npx ts-node test/goalActivityProposal.test.ts
   web-build:
     name: Next.js production build
     runs-on: ubuntu-latest
