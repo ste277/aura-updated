@@ -369,3 +369,11 @@ jobs:
         run: npx ts-node test/goalsReviewedCreateDb.test.ts
       - name: Run Goals create idempotency DB test
         run: npx ts-node test/goalsCreateIdempotencyDb.test.ts
+      # Goals V2 Candidate B5 -- composed B1->B2->B3->B3.1->Candidate A->
+      # planning lifecycle closure. Needs the jsx-enabled compiler option
+      # because it imports goalActivityProposal.ts (same reason as the
+      # Goal activity proposal / Goal decomposition observability tests).
+      - name: Run Goal decomposition planning handoff DB test
+        env:
+          TS_NODE_COMPILER_OPTIONS: '{"jsx":"react"}'
+        run: npx ts-node test/goalDecompositionPlanningHandoffDb.test.ts
