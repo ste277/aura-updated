@@ -2526,10 +2526,20 @@ export async function createGoalWithActivities(input: {
   // rhythm entirely, which is every creation before this ticket and every
   // "Start from scratch" creation after it, is byte-identical to before).
   activities: ReadonlyArray<{ title: string; activityId: string | null; completionRequirement?: CompletionRequirement; rhythm?: GoalActivityRhythm }>;
+  // Goals V2 Candidate B3.1 -- an explicit, caller-derived id (e.g.
+  // deriveIdempotentGoalId's deterministic hash of (userId,
+  // clientRequestId), goalCreateIdempotency.ts) instead of a fresh
+  // randomUUID(). Omitted (every caller before this ticket) keeps
+  // today's exact random-id behavior unchanged. When supplied and a Goal
+  // with this id already exists, the INSERT below raises Postgres 23505
+  // (unique_violation) on the existing primary key -- the caller recovers
+  // by re-fetching, same "insert, let the DB's own constraint decide"
+  // pattern as logHabitCompletion's own clientRequestId handling above.
+  id?: string;
 }): Promise<{ goal: Goal; activities: GoalActivity[] }> {
   const client = await beginTransaction();
   try {
-    const goalId = randomUUID();
+    const goalId = input.id ?? randomUUID();
     const goalResult = await client.query(
       `INSERT INTO "Goal" (id, "userId", title, "targetDate") VALUES ($1, $2, $3, $4::date) RETURNING ${GOAL_COLUMNS}`,
       [goalId, input.userId, input.title, input.targetDate]

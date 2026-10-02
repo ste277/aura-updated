@@ -235,6 +235,21 @@ function CreateGoalModal({ onClose }: { onClose: () => void }) {
   const [proposal, setProposal] = useState<GoalActivityProposalState>(createInitialProposalState);
   const [status, setStatus] = useState<'IDLE' | 'SUBMITTING' | 'ERROR'>('IDLE');
   const [error, setError] = useState<string | null>(null);
+  // Goals V2 Candidate B3.1 -- one stable id for this entire logical
+  // Create Goal attempt (this ticket's own section 5). A lazy useState
+  // initializer runs exactly once per mount, so every submit/retry within
+  // THIS modal instance reuses the identical id (same primitive,
+  // crypto.randomUUID(), DayPlanPreviewController.tsx already uses for an
+  // analogous client-request id) -- never regenerated merely because the
+  // network request is retried. A genuinely new logical Create Goal
+  // action gets a fresh id for free: closing and reopening the modal
+  // unmounts this component (GoalsListView's own `{createOpen && ...}`
+  // conditional render) and the next open mounts a brand new instance
+  // with its own fresh initializer call. A successful submission
+  // navigates away (`window.location.href` below), which has the same
+  // practical effect as an explicit reset -- there is no "next attempt"
+  // to reuse it for.
+  const [clientRequestId] = useState<string>(() => crypto.randomUUID());
 
   // This ticket's own sections 20-22, "the title-change problem": while
   // the proposal is still AUTO + PRISTINE, a title edit re-resolves the
@@ -265,7 +280,12 @@ function CreateGoalModal({ onClose }: { onClose: () => void }) {
 
   const handleSubmit = async (event: React.FormEvent) => {
     event.preventDefault();
-    if (!canSubmit || status === 'SUBMITTING') return; // double-submission guard (this ticket's own section 14)
+    // UI-level double-click guard ONLY -- this is NOT the idempotency
+    // mechanism (Candidate B3.1's own section 24). It never fires for a
+    // genuine network-level retry (a fresh click after a dropped
+    // response, a second tab), which `clientRequestId` above is what
+    // actually protects against, server-side.
+    if (!canSubmit || status === 'SUBMITTING') return;
     setStatus('SUBMITTING');
     setError(null);
     try {
@@ -281,6 +301,10 @@ function CreateGoalModal({ onClose }: { onClose: () => void }) {
           // for an untouched template proposal; always `activities[]`,
           // including the empty array when every row was removed).
           activities: buildReviewedActivitiesForSubmission(proposal.rows),
+          // Goals V2 Candidate B3.1 -- lets the server deduplicate a
+          // network-level retry of this exact logical request (a lost
+          // response, a double-click despite the SUBMITTING guard below).
+          clientRequestId,
         }),
       });
       const data = await res.json().catch(() => null);
