@@ -103,6 +103,25 @@ export type OpportunityCoverage = 'COMPLETE' | 'PARTIAL' | 'UNKNOWN';
  *   PARTIAL  -- some, but not all, evaluated days are UNKNOWN.
  *   UNKNOWN  -- every evaluated day is UNKNOWN (this does not mean zero
  *               true opportunities).
+ *
+ * The same pass also reports the horizon's FIRST day separately from the
+ * days after it, because a total alone cannot say whether the one viable
+ * day is the first day or a later one:
+ *   startDateState        -- the day state of `horizonStartDate` itself
+ *                            (the input's `planningDate`). For today it
+ *                            reflects only the time remaining after `now`.
+ *   afterStartEvaluatedDays / afterStartViableDays / afterStartUnknownDays
+ *                         -- the same three counts over the civil dates
+ *                            strictly after `horizonStartDate` through
+ *                            `horizonEndDate`. An empty set (a one-day
+ *                            horizon) is a KNOWN empty set: all three are
+ *                            zero, never unknown.
+ * They partition the totals exactly:
+ *   evaluatedDays = 1 + afterStartEvaluatedDays
+ *   viableDays    = (startDateState === 'KNOWN_FEASIBLE' ? 1 : 0) + afterStartViableDays
+ *   unknownDays   = (startDateState === 'UNKNOWN' ? 1 : 0) + afterStartUnknownDays
+ * These are counts of civil days for ONE candidate; nothing here says what
+ * any count means.
  */
 export interface OpportunityFacts {
   horizonStartDate: string;
@@ -111,6 +130,10 @@ export interface OpportunityFacts {
   viableDays: number;
   unknownDays: number;
   coverage: OpportunityCoverage;
+  startDateState: OpportunityDayState;
+  afterStartEvaluatedDays: number;
+  afterStartViableDays: number;
+  afterStartUnknownDays: number;
 }
 
 export interface OpportunityDayResult {
@@ -254,13 +277,37 @@ export function projectOpportunityFacts(input: OpportunityProjectionInput): Oppo
     state: evaluateDay(date, todayLocal, availabilityByDate.get(date), now, timezone, blockers, durationMs),
   }));
 
-  const viableDays = days.filter((day) => day.state === 'KNOWN_FEASIBLE').length;
-  const unknownDays = days.filter((day) => day.state === 'UNKNOWN').length;
+  // ONE aggregation pass over the day results already produced above: the
+  // first day is counted apart from the days after it.
+  let viableDays = 0;
+  let unknownDays = 0;
+  let afterStartViableDays = 0;
+  let afterStartUnknownDays = 0;
+  days.forEach((day, index) => {
+    if (day.state === 'KNOWN_FEASIBLE') {
+      viableDays += 1;
+      if (index > 0) afterStartViableDays += 1;
+    } else if (day.state === 'UNKNOWN') {
+      unknownDays += 1;
+      if (index > 0) afterStartUnknownDays += 1;
+    }
+  });
   const coverage: OpportunityCoverage = unknownDays === 0 ? 'COMPLETE' : unknownDays === days.length ? 'UNKNOWN' : 'PARTIAL';
 
   return {
     status: 'OK',
-    facts: { horizonStartDate: planningDate, horizonEndDate, evaluatedDays: days.length, viableDays, unknownDays, coverage },
+    facts: {
+      horizonStartDate: planningDate,
+      horizonEndDate,
+      evaluatedDays: days.length,
+      viableDays,
+      unknownDays,
+      coverage,
+      startDateState: days[0].state,
+      afterStartEvaluatedDays: days.length - 1,
+      afterStartViableDays,
+      afterStartUnknownDays,
+    },
     days,
   };
 }

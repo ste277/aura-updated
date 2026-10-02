@@ -79,7 +79,7 @@ const compute = (cands: OpportunityCandidateInput[], ctx: { planningDate: string
     const out = await compute([cand('a', 30, WEEK)], { planningDate: '2026-10-05', timezone: 'UTC', now: MON }, deps);
     const f = out.get('a')!;
     check('COMPLETE: configured week, Mon-Fri 09-17, 30 min -> 7 evaluated, 5 viable, 0 unknown, COMPLETE', f.evaluatedDays === 7 && f.viableDays === 5 && f.unknownDays === 0 && f.coverage === 'COMPLETE');
-    check('contract: exactly the eight fact fields, horizon dates echoed as civil dates', JSON.stringify(Object.keys(f)) === JSON.stringify(['horizonStartDate', 'horizonEndDate', 'evaluatedDays', 'viableDays', 'unknownDays', 'coverage', 'durationMinutes', 'durationBasis']) && f.horizonStartDate === '2026-10-05' && f.horizonEndDate === '2026-10-11' && f.durationMinutes === 30 && f.durationBasis === 'RESOLVED');
+    check('contract: the eight original fact fields (unchanged order) then the four additive P0b fields, horizon dates echoed as civil dates', JSON.stringify(Object.keys(f)) === JSON.stringify(['horizonStartDate', 'horizonEndDate', 'evaluatedDays', 'viableDays', 'unknownDays', 'coverage', 'durationMinutes', 'durationBasis', 'startDateState', 'afterStartEvaluatedDays', 'afterStartViableDays', 'afterStartUnknownDays']) && f.horizonStartDate === '2026-10-05' && f.horizonEndDate === '2026-10-11' && f.durationMinutes === 30 && f.durationBasis === 'RESOLVED');
     check('one availability load and one plan query for one candidate', calls.config === 1 && calls.plans === 1);
   }
   {

@@ -73,7 +73,7 @@ const fit60 = (date: string) => known(win(date, '09:00', '10:00'));
   const r = run({ horizonEndDate: '2026-10-10', availabilityByDate: avail(a) });
   const f = facts(r);
   check('C. one viable day -> viableDays 1 (a plain count: no shortfall/at-risk concept exists)', f.viableDays === 1 && f.coverage === 'COMPLETE');
-  check('C. the output has no evaluative field', Object.keys(f).sort().join(',') === 'coverage,evaluatedDays,horizonEndDate,horizonStartDate,unknownDays,viableDays');
+  check('C. the output has no evaluative field: exactly the six original facts plus the four additive first-day/after-first-day facts (P0b)', Object.keys(f).sort().join(',') === 'afterStartEvaluatedDays,afterStartUnknownDays,afterStartViableDays,coverage,evaluatedDays,horizonEndDate,horizonStartDate,startDateState,unknownDays,viableDays');
 }
 
 // ============================================================

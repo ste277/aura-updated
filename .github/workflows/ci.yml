@@ -236,6 +236,13 @@ jobs:
         run: npx ts-node test/manualGoalProvenanceParity.test.ts
       - name: Run manual Goal provenance parity architecture test
         run: npx ts-node test/manualGoalProvenanceParityArchitecture.test.ts
+      # O5 prerequisite P0b -- opportunity fact quality: the horizon's first
+      # day reported apart from the days after it (exhaustive partition
+      # sweep, scenario matrix, DST, blockers) and its architecture guard.
+      - name: Run opportunity fact quality test
+        run: npx ts-node test/opportunityFactQuality.test.ts
+      - name: Run opportunity fact quality architecture test
+        run: npx ts-node test/opportunityFactQualityArchitecture.test.ts
   web-build:
     name: Next.js production build
     runs-on: ubuntu-latest
@@ -435,3 +442,7 @@ jobs:
       # either order, cross-user and forged-input isolation.
       - name: Run manual Goal provenance parity DB test
         run: npx ts-node test/manualGoalProvenanceParityDb.test.ts
+      # O5 prerequisite P0b -- the new first-day / after-first-day facts
+      # through the real chain (real data -> O2 -> O1 -> O4 -> preview).
+      - name: Run opportunity fact quality DB test
+        run: npx ts-node test/opportunityFactQualityDb.test.ts
