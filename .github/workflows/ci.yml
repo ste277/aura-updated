@@ -271,6 +271,10 @@ jobs:
       # canonical overlap loader on its transaction client (no race-free claim).
       - name: Run acceptance fresh-overlap architecture test
         run: npx ts-node test/dayConstructorAcceptanceFreshOverlapArchitecture.test.ts
+      # Schedule write consistency S2 -- the manual plan writer takes the shared
+      # per-user lock in a transaction (serialization only; no overlap check).
+      - name: Run manual writer serialization architecture test
+        run: npx ts-node test/scheduleWriteManualSerializationArchitecture.test.ts
   web-build:
     name: Next.js production build
     runs-on: ubuntu-latest
@@ -495,3 +499,7 @@ jobs:
       # authoritative overlap read (in-progress / overnight blockers).
       - name: Run acceptance fresh-overlap DB test
         run: npx ts-node test/dayConstructorAcceptanceFreshOverlapDb.test.ts
+      # Schedule write consistency S2 -- real-DB concurrency proof through the real
+      # POST /api/plans route (acceptance, Move and manual writers serialize).
+      - name: Run manual writer serialization DB test
+        run: npx ts-node test/scheduleWriteManualSerializationDb.test.ts

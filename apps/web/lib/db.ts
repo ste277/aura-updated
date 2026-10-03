@@ -1300,8 +1300,14 @@ export async function hasActivePushSubscription(userId: string): Promise<boolean
   return result.rows.length > 0;
 }
 
-export async function createPlannedActivity(input: CreatePlannedActivityInput): Promise<PlannedActivity> {
-  const existing = await pool.query(
+/**
+ * `executor` defaults to the pool (every existing caller is unchanged). The
+ * ordinary `POST /api/plans` writer passes its transaction client so the insert
+ * runs inside the same transaction that holds the per-user schedule lock; the
+ * soft-dedup SELECT then runs on that client too.
+ */
+export async function createPlannedActivity(input: CreatePlannedActivityInput, executor: QueryExecutor = pool): Promise<PlannedActivity> {
+  const existing = await executor.query(
     `SELECT *
      FROM "PlannedActivity"
      WHERE "userId" = $1
@@ -1316,7 +1322,7 @@ export async function createPlannedActivity(input: CreatePlannedActivityInput): 
   if (existing.rows.length > 0) return existing.rows[0];
 
   const id = randomUUID();
-  const result = await pool.query(
+  const result = await executor.query(
     `INSERT INTO "PlannedActivity"
        (id, "userId", title, "activityType", icon, "plannedStartAt", "plannedEndAt",
         "durationMinutes", "windowType", "windowLabel", "matchLabel", score,

@@ -82,7 +82,7 @@ check('the canonical overlap loader is shared by the range loader, the Construct
 
 // ---- no later-slice work ----
 const plansRoute = stripComments(read('apps/web/app/api/plans/route.ts'));
-check('NO S2: POST /api/plans is still unlocked and non-transactional (it still calls createPlannedActivity directly)', /createPlannedActivity\(\{/.test(plansRoute) && !/pg_advisory|beginTransaction|createPlannedActivityWithClient|lock_timeout/.test(plansRoute));
+check('updated deliberately by schedule-write S2 (this check previously pinned POST /api/plans as unlocked): the S1 acceptance read is unchanged, and createPlannedActivity itself still takes no lock -- the manual writer\'s serialization lives in the route\'s own transaction', !/pg_advisory/.test(functionBody(db, 'createPlannedActivity')) && /pg_advisory_xact_lock/.test(stripComments(read('apps/web/app/api/plans/route.ts'))));
 check('NO S2: createPlannedActivity (db.ts) takes no lock', !/pg_advisory/.test(functionBody(db, 'createPlannedActivity')));
 check('the lock sites are exactly the three existing ones (acceptance, Move, Recomposition acceptance) with the unchanged key; no helper was extracted', allLib.filter((x) => /pg_advisory_xact_lock/.test(x.src)).map((x) => x.f).sort().join() === 'dayConstructorAcceptancePersistence.ts,planMove.ts,remainingDayRecompositionAcceptance.ts' && !allLib.some((x) => /withUserScheduleLock|scheduleWriteLock|acquireScheduleLock/.test(x.src)));
 check('no lock timeout was introduced anywhere in production code', !allLib.some((x) => /lock_timeout/i.test(x.src)));
@@ -95,7 +95,7 @@ check('no policy vocabulary in the acceptance persistence or the acceptance vali
 const dbTest = read('test/dayConstructorAcceptanceFreshOverlapDb.test.ts');
 const FALSE_CLAIM = /race[- ]free|globally consistent|universal non-overlap|can never overlap|no overlapping plans can ever|global schedule consistency/i;
 check('the DB test makes no race-free / global-consistency / universal-non-overlap claim in any assertion label', !(dbTest.match(/check\(`?'?[^\n]*/g) ?? []).some((l) => FALSE_CLAIM.test(l)));
-check('the DB test records the known non-guarantee (an unlocked writer) explicitly as unfixed by this slice', /KNOWN, UNFIXED BY THIS SLICE/.test(dbTest) && /createPlannedActivity\(\{ userId: K\.id, title: 's1-unlocked-manual'/.test(dbTest));
+check('the DB test records the known limit (a writer that BYPASSES the lock) explicitly', /KNOWN LIMIT/.test(dbTest) && /createPlannedActivity\(\{ userId: K\.id, title: 's1-unlocked-manual'/.test(dbTest));
 check('the DB test covers the required cases: same-day in-progress, overnight, same-window control, left/right adjacent, ±1 ms, full-span, disjoint blocker, cross-user, multiple blockers/items, atomicity, claim rollback/retry/replay, Goal side effects, cross-midnight, DST, row volume, query count, lock order', ['A. SAME-DAY IN-PROGRESS', 'B. OVERNIGHT', 'C. control', 'ENDING EXACTLY', 'ONE ms after', 'EXACTLY at the window end', 'ONE ms before', 'FULL-SPAN', 'does NOT touch the accepted item', 'another USER', 'MULTIPLE blockers', 'MULTIPLE items', 'rolls back its idempotency claim', 'REPLAY', 'Goal-linked', 'CROSSING midnight', 'SPRING FORWARD', 'FALL BACK', '160 historical', 'ONE fresh-blocker query', 'AFTER the advisory lock'].every((m) => dbTest.includes(m) || dbTest.toLowerCase().includes(m.toLowerCase())));
 
 if (!allPassed) {
