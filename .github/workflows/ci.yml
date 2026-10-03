@@ -248,6 +248,11 @@ jobs:
       # absence of any path-specific bypass or client Goal-status claim.
       - name: Run Goal lifecycle authorization architecture test
         run: npx ts-node test/goalLifecycleAuthorizationArchitecture.test.ts
+      # O5 prerequisite P0c -- real overload decision fixture guard: pins the
+      # CURRENT decision ordering and proves no policy, score, source branch
+      # or fact consumption exists in any decision module.
+      - name: Run Constructor overload decision architecture test
+        run: npx ts-node test/dayConstructorOverloadDecisionArchitecture.test.ts
   web-build:
     name: Next.js production build
     runs-on: ubuntu-latest
@@ -456,3 +461,7 @@ jobs:
       # replay, mixed requests, controls, and a real concurrent-archive race).
       - name: Run Goal lifecycle archived-acceptance DB test
         run: npx ts-node test/goalLifecycleArchivedAcceptanceDb.test.ts
+      # O5 prerequisite P0c -- the behavioral anchor for future decision
+      # policy: a real-DB, real-pipeline overload contest (characterization).
+      - name: Run Constructor overload decision DB test
+        run: npx ts-node test/dayConstructorOverloadDecisionDb.test.ts
