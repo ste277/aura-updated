@@ -68,7 +68,7 @@ import {
 import type { BlockedInterval } from './dayCapacity';
 import { isActivePlanBlocker, type PlanBlockerStatus, type PlanBlockerCandidate } from './planBlockerLifecycle';
 import { resolveDecisionFactsForIntent, type DecisionFactsByIntentId } from './decisionFacts';
-import { attachPreparedDecisionFacts, prepareDecisionFactsFailOpen, type DecisionFactPreparer } from './decisionFactPreparation';
+import { attachPreparedDecisionFacts, prepareDecisionEvidence, prepareDecisionFactsFailOpen, type DecisionFactPreparer } from './decisionFactPreparation';
 
 // ============================================================
 // Request contract (this ticket's own section 4). USER-LEVEL input --
@@ -926,15 +926,20 @@ export async function orchestrateConstructDay(request: ConstructDayRequest, deps
   // not from the prepared facts), and attached to the preview metadata only
   // after construction. Preparing is not consuming: nothing in this file
   // reads a prepared fact.
+  const preparationIntents = resolvedIntents.map((resolved) => ({
+    intentId: resolved.requestedIntentId,
+    durationMinutes: resolved.dayIntent.estimatedDurationMinutes,
+    durationFromGenericFallback: fallbackDurationIntentIds.has(resolved.requestedIntentId),
+    facts: resolved.dayIntent.decisionFacts,
+  }));
   const preparedDecisionFacts = await prepareDecisionFactsFailOpen(deps.prepareDecisionFacts, {
-    intents: resolvedIntents.map((resolved) => ({
-      intentId: resolved.requestedIntentId,
-      durationMinutes: resolved.dayIntent.estimatedDurationMinutes,
-      durationFromGenericFallback: fallbackDurationIntentIds.has(resolved.requestedIntentId),
-      facts: resolved.dayIntent.decisionFacts,
-    })),
+    intents: preparationIntents,
     context: { planningDate: request.targetDate, timezone: request.timezone, now: request.now },
   });
+  // O5 P2a -- the immutable DecisionEvidence for every fact-bearing intent, built ONCE here from the facts as prepared. It
+  // is held for the future decision-policy stage and deliberately NOT passed to `constructDay`, the precedence comparator,
+  // placement, capacity or replenishment below: building evidence is not consuming it, and it is never rebuilt later.
+  const decisionEvidenceByIntentId = prepareDecisionEvidence(preparationIntents, preparedDecisionFacts);
 
   const intentsForConstructDay = resolvedIntents.map((r) => r.dayIntent);
 

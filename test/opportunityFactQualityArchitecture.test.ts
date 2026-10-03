@@ -90,7 +90,7 @@ check('the new facts add no database access, write, clock or randomness anywhere
 // ============================================================
 // Inert: nothing decides, accepts or persists on them
 // ============================================================
-check('the new facts are referenced only by O1 (produces), the facts type (carries) and O4 (copies) in production', JSON.stringify(filesMatching(NEW_FIELD_RE)) === JSON.stringify(['decisionFacts.ts', 'opportunityDecisionFacts.ts', 'opportunityProjection.ts']));
+check('the new facts are referenced only by O1 (produces), the facts type (carries), O4 (copies) and the P2a evidence copy (copies by value, interprets nothing) in production', JSON.stringify(filesMatching(NEW_FIELD_RE)) === JSON.stringify(['decisionEvidence.ts', 'decisionFacts.ts', 'opportunityDecisionFacts.ts', 'opportunityProjection.ts']));
 for (const [label, file] of Object.entries({
   'dayIntent.ts (including compareByOverloadPrecedence)': 'apps/web/lib/dayIntent.ts',
   'dayConstructor.ts (including compareCandidatesForPlacement and evaluateCandidate)': 'apps/web/lib/dayConstructor.ts',

@@ -102,9 +102,9 @@ for (const [label, file] of Object.entries({
 }
 const libDir = path.join(__dirname, '../apps/web/lib');
 const consumers = fs.readdirSync(libDir).filter((f) => f.endsWith('.ts') && /remainingInPeriod|completedInPeriod|committedInPeriod|targetPerPeriod/.test(fs.readFileSync(path.join(libDir, f), 'utf8')));
-check('only the generic type module and the source-specific provider reference the recurrence fact fields', consumers.sort().join(',') === 'decisionFacts.ts,goalDecisionFactsProvider.ts');
+check('only the generic type module, the generic P2a evidence copy (decisionEvidence.ts: copies the fields by value, interprets nothing) and the source-specific provider reference the recurrence fact fields', consumers.sort().join(',') === 'decisionEvidence.ts,decisionFacts.ts,goalDecisionFactsProvider.ts');
 const periodBoundConsumers = fs.readdirSync(libDir).filter((f) => f.endsWith('.ts') && /periodStartDate|periodEndDate/.test(fs.readFileSync(path.join(libDir, f), 'utf8')));
-check('O3/O4: only the generic type module, the source-specific provider and the generic opportunity enrichment (the horizon consumer) reference periodStartDate/periodEndDate -- no policy, precedence, placement, eligibility or acceptance consumer', periodBoundConsumers.sort().join(',') === 'decisionFacts.ts,goalDecisionFactsProvider.ts,opportunityDecisionFacts.ts');
+check('O3/O4/P2a: only the generic type module, the generic evidence copy, the source-specific provider and the generic opportunity enrichment (the horizon consumer) reference periodStartDate/periodEndDate -- no policy, precedence, placement, eligibility or acceptance consumer', periodBoundConsumers.sort().join(',') === 'decisionEvidence.ts,decisionFacts.ts,goalDecisionFactsProvider.ts,opportunityDecisionFacts.ts');
 check('O3: no component/route/page reads the period bounds either', !/periodStartDate|periodEndDate/.test(fs.readdirSync(path.join(__dirname, '../apps/web/app'), { recursive: true }).filter((f) => typeof f === 'string' && /\.(ts|tsx)$/.test(f)).map((f) => fs.readFileSync(path.join(__dirname, '../apps/web/app', f as string), 'utf8')).join('\n')));
 check('no scarcity/wellbeing/score field exists anywhere in the decision-facts path', !/viableOpportunities|lastChance|lastViableWindow|weeklyWindowCount|wellbeing|priorityScore|urgencyScore/i.test(decisionFactsSrc + providerSrc));
 
