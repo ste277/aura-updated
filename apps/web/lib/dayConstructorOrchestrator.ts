@@ -31,7 +31,7 @@
  */
 
 import type { User, HabitLogRow } from './db';
-import { listPlannedActivitiesForDay, listHabitLogs, listUserAvailabilityPeriods } from './db';
+import { listPlannedActivitiesOverlappingRange, listHabitLogs, listUserAvailabilityPeriods } from './db';
 import { resolveAvailability, normalizeUsableWindowsToConstructionWindow, type AvailabilityConfiguration } from './availabilityContext';
 import { listUserActivityPreferences, preferredDurationByActivityId, type UserActivityPreference } from './activityPreferences';
 import { deriveBehavioralProfile, activityDurationByActivityId } from './behavioralAffinity';
@@ -170,14 +170,16 @@ export interface ConstructDayRequest {
 export { isActivePlanBlocker, type PlanBlockerStatus, type PlanBlockerCandidate };
 
 export interface DayConstructorOrchestratorDeps {
-  /** Real Plan commitments for the target local day, in the minimal
-   * `PlanBlockerCandidate` shape `isActivePlanBlocker` (above) evaluates
-   * -- called EXACTLY ONCE per orchestration run (this ticket's own
-   * section 20), never once per intent. Lifecycle filtering
+  /** Real Plan commitments that OVERLAP `bounds` (the target local day
+   * together with the resolved construction window, see
+   * `resolveBlockerLoadBounds`), whichever civil date a plan started on, in
+   * the minimal `PlanBlockerCandidate` shape `isActivePlanBlocker` (above)
+   * evaluates -- called EXACTLY ONCE per orchestration run (this ticket's
+   * own section 20), never once per intent. Lifecycle filtering
    * (`isActivePlanBlocker`) is applied by `orchestrateConstructDay`
    * itself, AFTER this call returns -- this dependency's own job is
    * only to fetch the raw rows, never to decide which ones block. */
-  loadBlockingPlans: (dayBoundsUTC: { from: Date; to: Date }) => Promise<PlanBlockerCandidate[]>;
+  loadBlockingPlans: (bounds: { from: Date; to: Date }) => Promise<PlanBlockerCandidate[]>;
   /** The two duration-personalization maps `durationMinutesFor`
    * (dayBuilderOrchestrator.ts) already accepts -- fetched ONCE per
    * orchestration run, exactly like `buildIntentionalDaySuggestions`'s
@@ -217,9 +219,13 @@ export interface DayConstructorOrchestratorDeps {
  * Real production wiring. Reuses existing repository functions verbatim
  * -- no new DB query shape, no new engine call:
  *
- *   - `listPlannedActivitiesForDay` (db.ts) -- the EXACT SAME function
- *     Forward Planner's own orchestrator already uses as its own raw row
- *     source (forwardPlannerOrchestrator.ts). Its own SQL filter already
+ *   - `listPlannedActivitiesOverlappingRange` (db.ts) -- the ONE half-open
+ *     overlap definition (`start < to AND end > from`) the multi-day
+ *     scheduling-range loader already uses. It deliberately replaces
+ *     `listPlannedActivitiesForDay`, which selects by `plannedStartAt`
+ *     alone and therefore never loaded a plan that starts before the day
+ *     but runs into it (an overnight/multi-day plan), letting a new
+ *     activity be proposed inside an occupied interval. Its SQL filter
  *     excludes `CANCELLED`; `status` is passed straight through
  *     (verbatim, not re-derived) to `isActivePlanBlocker` (this file's
  *     own lifecycle adapter, pre-commit review fix), which is what
@@ -236,10 +242,25 @@ export interface DayConstructorOrchestratorDeps {
  *     -- the SAME two calls `buildIntentionalDaySuggestions` already
  *     makes to build its own `DailyAssistantContext`).
  */
+/**
+ * The half-open `[from, to)` range the blocker load must cover: the target
+ * local civil day AND the resolved construction window. They coincide for
+ * every ordinary window (a window lies inside its day); an explicit window
+ * that reaches past either end of the civil day extends the range so a plan
+ * overlapping the window is still loaded. Pure -- the loader never clips
+ * (`normalizeBlockedIntervals` in dayCapacity.ts owns clipping to the window).
+ */
+export function resolveBlockerLoadBounds(dayBounds: { from: Date; to: Date }, window: { start: Date; end: Date }): { from: Date; to: Date } {
+  return {
+    from: window.start.getTime() < dayBounds.from.getTime() ? window.start : dayBounds.from,
+    to: window.end.getTime() > dayBounds.to.getTime() ? window.end : dayBounds.to,
+  };
+}
+
 export function createRealDayConstructorOrchestratorDeps(user: User, now: Date): DayConstructorOrchestratorDeps {
   return {
-    loadBlockingPlans: async (dayBoundsUTC) => {
-      const plans = await listPlannedActivitiesForDay(user.id, dayBoundsUTC.from, dayBoundsUTC.to);
+    loadBlockingPlans: async (bounds) => {
+      const plans = await listPlannedActivitiesOverlappingRange(user.id, bounds.from, bounds.to);
       return plans.map((plan) => ({ start: new Date(plan.plannedStartAt), end: new Date(plan.plannedEndAt), status: plan.status }));
     },
     loadDurationContext: async () => {
@@ -761,7 +782,8 @@ export async function orchestrateConstructDay(request: ConstructDayRequest, deps
   // Real-data fetches -- EXACTLY ONCE each per orchestration run (this
   // ticket's own section 20), never once per intent.
   const dayBounds = localDayBoundsUTC(request.targetDate, request.timezone);
-  const [blockingPlanCandidates, durationContext] = await Promise.all([deps.loadBlockingPlans(dayBounds), deps.loadDurationContext()]);
+  const blockerBounds = resolveBlockerLoadBounds(dayBounds, window);
+  const [blockingPlanCandidates, durationContext] = await Promise.all([deps.loadBlockingPlans(blockerBounds), deps.loadDurationContext()]);
   // Lifecycle filtering happens HERE, in the orchestrator's own testable
   // core (this ticket's own section 6: "Keep this in the orchestrator
   // layer") -- `deps.loadBlockingPlans` only fetches raw rows;
