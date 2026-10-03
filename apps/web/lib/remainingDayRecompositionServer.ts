@@ -2,7 +2,7 @@
  * Remaining-Day Recomposition V1 PR F2 -- the server wiring around the pure service (remainingDayRecomposition.ts):
  * real read-only dependencies and the framework-independent request handler behind POST /api/day/recompose.
  *
- * READ-ONLY end to end: it only reads (`listPlannedActivitiesForDay`, `listPlanIdsWithActiveMoment`, the same
+ * READ-ONLY end to end: it only reads (`listPlannedActivitiesOverlappingRange`, `listPlanIdsWithActiveMoment`, the same
  * duration / availability / timing reads the Day Constructor already uses) and never writes. The client supplies
  * NOTHING that matters -- no plan list, no protection flags, no scheduling mode, no clock, no timezone: the server
  * derives all of it from the authenticated session, the stored user and PlannedActivity, and reads its own clock
@@ -18,7 +18,7 @@
  * what signRecompositionProposal signs (below) -- Goal data can therefore never affect stale-proposal/acceptance
  * validation, which reads only the signed token's own explicit fields.
  */
-import { listPlannedActivitiesForDay, listPlanIdsWithActiveMoment, type User, type PlanGoalContext } from './db';
+import { listPlannedActivitiesOverlappingRange, listPlanIdsWithActiveMoment, type User, type PlanGoalContext } from './db';
 import { createRealDayConstructorOrchestratorDeps } from './dayConstructorOrchestrator';
 import { resolveTzOffsetMinutes } from './timezone';
 import { buildPersonalMuhurtaContextForUser } from './natalContext';
@@ -32,7 +32,10 @@ export function createRealRecompositionDeps(user: User, now: Date): Recompositio
     loadDurationContext: base.loadDurationContext,
     searchTiming: base.searchTiming,
     loadAvailabilityConfiguration: base.loadAvailabilityConfiguration,
-    loadPlansForDay: (bounds) => listPlannedActivitiesForDay(user.id, bounds.from, bounds.to),
+    // Schedule write consistency S4 -- the proposal's plans AND blockers are every non-cancelled plan whose interval OVERLAPS
+    // the target civil day [from, to), whichever day it started on (canonical half-open loader, one query per run). The old
+    // start-scoped `listPlannedActivitiesForDay` never reached a plan that began before the day and was still running into it.
+    loadPlansForDay: (bounds) => listPlannedActivitiesOverlappingRange(user.id, bounds.from, bounds.to),
     loadPlanIdsWithActiveMoment: (planIds, at) => listPlanIdsWithActiveMoment(planIds, at),
     // The same CHECK the acceptance path uses (activityId when known, else the title).
     checkTiming: (request) => {
