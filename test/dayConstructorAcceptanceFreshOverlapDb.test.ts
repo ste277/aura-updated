@@ -363,7 +363,7 @@ async function main() {
     const zero = await accept(K, W(), [mid]);
     check('ZERO-LENGTH debt unchanged: acceptance\'s in-memory overlap treats a zero-length plan strictly inside an item as a conflict (same as before S1; not aligned with the Constructor\'s clipping here)', rejected(zero));
 
-    console.log('=== known NON-GUARANTEE of this slice (updated deliberately by the lock-participation slice) ===');
+    console.log('=== known LIMIT: a writer that bypasses the schedule lock is not serialized (the ordinary POST /api/plans route takes the lock since schedule-write S2; see scheduleWriteManualSerializationDb) ===');
     await clearPlans();
     afterRead = async () => {
       await createPlannedActivity({ userId: K.id, title: 's1-unlocked-manual', plannedStartAt: kAt(DATE, '11:00'), plannedEndAt: kAt(DATE, '12:00'), durationMinutes: 60, windowType: 'NEUTRAL' } as any);
@@ -371,7 +371,7 @@ async function main() {
     const knownRace = await accept(K, W(), [mid]);
     afterRead = undefined;
     const overlapping = (await sql(`SELECT count(*)::int n FROM "PlannedActivity" WHERE "userId" = $1 AND "plannedStartAt" < $3 AND "plannedEndAt" > $2`, [K.id, mid.start, mid.end]))[0].n as number;
-    check('KNOWN, UNFIXED BY THIS SLICE: a plan written by an UNLOCKED writer after acceptance\'s read and before its commit is not seen -- acceptance saves and both rows overlap (recorded as the lock-participation prerequisite, not claimed fixed)', knownRace.status === 'SAVED' && overlapping === 2);
+    check('KNOWN LIMIT: a plan written by a writer that BYPASSES the schedule lock (a direct createPlannedActivity call outside the serialized route) after acceptance\'s read and before its commit is not seen -- acceptance saves and both rows overlap; the ordinary manual route no longer behaves this way since S2, and this characterization is about the lock being the only protection', knownRace.status === 'SAVED' && overlapping === 2);
     await clearPlans();
 
     restore();

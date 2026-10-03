@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getSessionFromRequest } from '../../../lib/session';
 import { DIRECT_PLAN_SCHEDULING_MODE } from '../../../lib/plannedActivitySchedulingMode';
-import { createPlannedActivity, listPlannedActivities, getPlannedActivityForOwner, getGuestConversionRedemption, claimGuestConversionToken, fillGuestConversionRedemption, getPlanCreationClaim, claimPlanCreation, fillPlanCreationClaim } from '../../../lib/db';
+import { beginTransaction, createPlannedActivity, listPlannedActivities, getPlannedActivityForOwner, getGuestConversionRedemption, claimGuestConversionToken, fillGuestConversionRedemption, getPlanCreationClaim, claimPlanCreation, fillPlanCreationClaim } from '../../../lib/db';
 import { parseJsonObject } from '../../../lib/request';
 import { verifyGuestStateToken, hashGuestConversionToken } from '../../../lib/guestState';
 import { parseEventLocationSnapshot } from '../../../lib/plansRequest';
@@ -259,27 +259,43 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: eventLocationSnapshot.error }, { status: 400 });
   }
 
-  const plan = await createPlannedActivity({
-    userId: session.userId,
-    title,
-    activityType,
-    icon,
-    plannedStartAt,
-    plannedEndAt,
-    durationMinutes,
-    windowType,
-    windowLabel,
-    matchLabel,
-    score,
-    recommendation,
-    calendarUrl,
-    eventTimezone: eventLocationSnapshot.eventTimezone,
-    eventLocationName: eventLocationSnapshot.eventLocationName,
-    activityId: validatedActivityId,
-    // F1: a direct plan is an explicit exact-time choice made outside the Constructor's flexible-placement flow.
-    // Server constant, never read from the request body -- a client cannot grant recomposition permission.
-    schedulingMode: DIRECT_PLAN_SCHEDULING_MODE,
-  });
+  // Schedule write consistency S2 -- this ordinary/manual writer takes the SAME per-user, transaction-scoped advisory
+  // lock Constructor acceptance, Move and Recomposition acceptance take, and inserts inside that transaction, so a manual
+  // write and an Aura automatic write for one user cannot make their write decisions concurrently. The lock only
+  // SERIALIZES writers: no overlap check is added here, and an explicit manual overlap stays allowed. The lock identity is
+  // the authenticated session's user, never anything the request supplies; it is released automatically at COMMIT/ROLLBACK.
+  const client = await beginTransaction();
+  let plan: Awaited<ReturnType<typeof createPlannedActivity>>;
+  try {
+    await client.query('SELECT pg_advisory_xact_lock(hashtext($1))', [`day-constructor-accept:${session.userId}`]);
+    plan = await createPlannedActivity({
+      userId: session.userId,
+      title,
+      activityType,
+      icon,
+      plannedStartAt,
+      plannedEndAt,
+      durationMinutes,
+      windowType,
+      windowLabel,
+      matchLabel,
+      score,
+      recommendation,
+      calendarUrl,
+      eventTimezone: eventLocationSnapshot.eventTimezone,
+      eventLocationName: eventLocationSnapshot.eventLocationName,
+      activityId: validatedActivityId,
+      // F1: a direct plan is an explicit exact-time choice made outside the Constructor's flexible-placement flow.
+      // Server constant, never read from the request body -- a client cannot grant recomposition permission.
+      schedulingMode: DIRECT_PLAN_SCHEDULING_MODE,
+    }, client);
+    await client.query('COMMIT');
+  } catch (err) {
+    await client.query('ROLLBACK').catch(() => {});
+    throw err;
+  } finally {
+    client.release();
+  }
 
   if (guestConversionTokenHash) {
     await fillGuestConversionRedemption(guestConversionTokenHash, plan.id);
