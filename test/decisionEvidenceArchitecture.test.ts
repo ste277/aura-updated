@@ -82,7 +82,7 @@ const prodFiles = (() => {
 })();
 const mentions = (re: RegExp) => prodFiles.filter((x) => re.test(x.src)).map((x) => x.f).sort();
 check('SINGLE PREPARATION SITE: `buildDecisionEvidence(` is called in exactly one production place -- the preparation function', mentions(/buildDecisionEvidence\(/).join() === ['apps/web/lib/decisionEvidence.ts', 'apps/web/lib/decisionFactPreparation.ts'].join() && count(/buildDecisionEvidence\(/g, prep) === 1 && /buildDecisionEvidence\(facts\)/.test(prepareFn));
-check('ONLY THE PREPARATION STAGE KNOWS EVIDENCE: the only production files mentioning DecisionEvidence are the evidence module, the preparation module and the orchestrator that invokes the stage', mentions(/DecisionEvidence|decisionEvidence/).join() === ['apps/web/lib/dayConstructorOrchestrator.ts', 'apps/web/lib/decisionEvidence.ts', 'apps/web/lib/decisionFactPreparation.ts'].join());
+check('ONLY THE PREPARATION STAGE AND THE UNWIRED PRESSURE DERIVER KNOW EVIDENCE: the only production files mentioning DecisionEvidence are the evidence module, the preparation module, the orchestrator that invokes the stage, and the P2b pure pressure deriver (a type-only reader that nothing calls)', mentions(/DecisionEvidence|decisionEvidence/).join() === ['apps/web/lib/dayConstructorOrchestrator.ts', 'apps/web/lib/decisionEvidence.ts', 'apps/web/lib/decisionFactPreparation.ts', 'apps/web/lib/decisionPressure.ts'].join());
 const firstConstructAt = orch.indexOf('constructDay({');
 const preparedAt = orch.indexOf('await prepareDecisionFactsFailOpen(');
 const evidenceAt = orch.indexOf('prepareDecisionEvidence(preparationIntents, preparedDecisionFacts)');

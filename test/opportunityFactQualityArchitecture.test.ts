@@ -59,7 +59,7 @@ const NEW_FIELD_RE = /startDateState|afterStart(Evaluated|Viable|Unknown)Days/;
 // One semantic authority, one pass
 // ============================================================
 const project = functionBody(o1Code, 'projectOpportunityFacts');
-check('O1 stays the only place that classifies a day: the three day-state literals appear only in O1 and the facts TYPE module', JSON.stringify(filesMatching(/KNOWN_FEASIBLE|KNOWN_INFEASIBLE/)) === JSON.stringify(['decisionFacts.ts', 'opportunityProjection.ts']));
+check('O1 stays the only place that classifies a day: the day-state literals appear only in O1, the facts TYPE module and the unwired P2b pressure deriver (which only READS a day state from immutable evidence)', JSON.stringify(filesMatching(/KNOWN_FEASIBLE|KNOWN_INFEASIBLE/)) === JSON.stringify(['decisionFacts.ts', 'decisionPressure.ts', 'opportunityProjection.ts']));
 check('O1 evaluates each date exactly once (one evaluateDay call inside the single day map) -- no second projection or second date loop for the new facts', (project.match(/evaluateDay\(/g) ?? []).length === 1 && (project.match(/dates\.map\(/g) ?? []).length === 1);
 check('the totals AND the first-day/after-first-day counts come from ONE aggregation pass over the day results (no separate filter passes, no re-derivation)', (project.match(/days\.forEach\(/g) ?? []).length === 1 && !/days\.filter\(/.test(project) && /startDateState: days\[0\]\.state/.test(project));
 check('the later-day evaluated count is derived from the same day list (length - 1), never from a second horizon', /afterStartEvaluatedDays: days\.length - 1/.test(project));
@@ -90,7 +90,7 @@ check('the new facts add no database access, write, clock or randomness anywhere
 // ============================================================
 // Inert: nothing decides, accepts or persists on them
 // ============================================================
-check('the new facts are referenced only by O1 (produces), the facts type (carries), O4 (copies) and the P2a evidence copy (copies by value, interprets nothing) in production', JSON.stringify(filesMatching(NEW_FIELD_RE)) === JSON.stringify(['decisionEvidence.ts', 'decisionFacts.ts', 'opportunityDecisionFacts.ts', 'opportunityProjection.ts']));
+check('the new facts are referenced only by O1 (produces), the facts type (carries), O4 (copies), the P2a evidence copy (copies by value, interprets nothing) and the unwired P2b pressure deriver (reads immutable evidence) in production', JSON.stringify(filesMatching(NEW_FIELD_RE)) === JSON.stringify(['decisionEvidence.ts', 'decisionFacts.ts', 'decisionPressure.ts', 'opportunityDecisionFacts.ts', 'opportunityProjection.ts']));
 for (const [label, file] of Object.entries({
   'dayIntent.ts (including compareByOverloadPrecedence)': 'apps/web/lib/dayIntent.ts',
   'dayConstructor.ts (including compareCandidatesForPlacement and evaluateCandidate)': 'apps/web/lib/dayConstructor.ts',

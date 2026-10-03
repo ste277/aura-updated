@@ -266,6 +266,12 @@ jobs:
         run: npx ts-node test/decisionEvidence.test.ts
       - name: Run decision evidence architecture test
         run: npx ts-node test/decisionEvidenceArchitecture.test.ts
+      # Constructor Decision Intelligence O5 P2b -- pure Decision Pressure derivation:
+      # the semantic matrix and its architecture guard (unwired, evidence-only).
+      - name: Run decision pressure test
+        run: npx ts-node test/decisionPressure.test.ts
+      - name: Run decision pressure architecture test
+        run: npx ts-node test/decisionPressureArchitecture.test.ts
       # Constructor scheduling correctness -- the target-day blocker load
       # uses half-open OVERLAP semantics (a plan that starts before the day
       # but runs into it must block), through the one shared definition.
@@ -509,6 +515,10 @@ jobs:
       # once per fact-bearing candidate, adds no queries, and leaves the signed preview identical.
       - name: Run decision evidence DB test
         run: npx ts-node test/decisionEvidenceDb.test.ts
+      # Constructor Decision Intelligence O5 P2b -- real-DB proof that real evidence
+      # classifies correctly and identically for canonical manual and automatic entry.
+      - name: Run decision pressure DB test
+        run: npx ts-node test/decisionPressureDb.test.ts
       # Constructor scheduling correctness -- real-DB regression for the
       # overnight/multi-day overlapping plan blocker defect.
       - name: Run Constructor overlapping blocker DB test
