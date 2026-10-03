@@ -38,6 +38,7 @@ import {
   getPlannedActivityForOwner,
   getUserById,
   linkGoalActivityToPlannedActivity,
+  lockGoalParentLifecycleForPlanning,
   materializeGoalActivityRhythmOccurrence,
   linkCaptureToPlannedActivity,
   type PlannedActivity,
@@ -378,6 +379,33 @@ export async function persistAcceptedConstructedDay(
     if (decision.status === 'REJECTED') {
       await client.query('ROLLBACK');
       return { status: 'REJECTED', reason: decision.reason, diagnostics: decision.diagnostics };
+    }
+
+    // Goal LIFECYCLE authorization -- the ONE common boundary, run BEFORE
+    // any write below. Every way a Goal link can reach this point (an
+    // automatic or manual canonical id, a forged canonical id, a legacy
+    // `plan-day-goal-*` link) ends up as an entry in `goalActivityLinks`
+    // keyed by a write intent, so one batched, current-state, transaction-
+    // scoped check covers all of them. A Goal-derived write is allowed only
+    // while the parent Goal is ACTIVE (and owned); archiving revokes
+    // authority for NEW acceptance only and never touches existing plans,
+    // occurrences or history. The check takes a share lock on the parent
+    // Goal rows for the rest of this transaction, so a concurrent archive
+    // cannot slip between the check and the writes. A replay of an already-
+    // committed acceptance never reaches here (it returned above).
+    const linkedGoalActivityIds = [...new Set(decision.writeIntents.map((writeIntent) => goalActivityLinks.get(writeIntent.intentId)).filter((id): id is string => !!id))];
+    if (linkedGoalActivityIds.length > 0) {
+      const lifecycle = await lockGoalParentLifecycleForPlanning(userId, linkedGoalActivityIds, client);
+      const notActive: AcceptanceDiagnostic[] = decision.writeIntents
+        .filter((writeIntent) => {
+          const goalActivityId = goalActivityLinks.get(writeIntent.intentId);
+          return !!goalActivityId && lifecycle.owned.has(goalActivityId) && !lifecycle.active.has(goalActivityId);
+        })
+        .map((writeIntent) => ({ intentId: writeIntent.intentId, reason: 'INVALID_REQUEST' as const, detail: 'GOAL_NOT_ACTIVE' }));
+      if (notActive.length > 0) {
+        await client.query('ROLLBACK');
+        return { status: 'REJECTED', reason: 'INVALID_REQUEST', diagnostics: notActive };
+      }
     }
 
     const plans: PlannedActivity[] = [];
