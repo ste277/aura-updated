@@ -279,6 +279,10 @@ jobs:
       # blockers with the canonical half-open overlap loader over the civil day.
       - name: Run Recomposition proposal overlap architecture test
         run: npx ts-node test/remainingDayRecompositionProposalOverlapArchitecture.test.ts
+      # Scheduling read authority R2 -- Forward Planner loads persisted-plan conflicts
+      # with the canonical overlap loader over the requested range and candidate extent.
+      - name: Run Forward Planner overlap blocker architecture test
+        run: npx ts-node test/forwardPlannerOverlapBlockerArchitecture.test.ts
   web-build:
     name: Next.js production build
     runs-on: ubuntu-latest
@@ -511,3 +515,7 @@ jobs:
       # (explicit clock) that an overnight / prior-start plan blocks a Recomposition proposal.
       - name: Run Recomposition proposal overlap DB test
         run: npx ts-node test/remainingDayRecompositionProposalOverlapDb.test.ts
+      # Scheduling read authority R2 -- real-DB proof through the real
+      # buildForwardPlannerResult that a prior-start UPCOMING plan blocks a candidate.
+      - name: Run Forward Planner overlap blocker DB test
+        run: npx ts-node test/forwardPlannerOverlapBlockerDb.test.ts
