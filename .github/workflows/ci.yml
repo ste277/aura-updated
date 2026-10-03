@@ -243,6 +243,11 @@ jobs:
         run: npx ts-node test/opportunityFactQuality.test.ts
       - name: Run opportunity fact quality architecture test
         run: npx ts-node test/opportunityFactQualityArchitecture.test.ts
+      # Goal lifecycle authorization -- archived-Goal acceptance guard:
+      # the single common, batched, locking, current-state boundary and the
+      # absence of any path-specific bypass or client Goal-status claim.
+      - name: Run Goal lifecycle authorization architecture test
+        run: npx ts-node test/goalLifecycleAuthorizationArchitecture.test.ts
   web-build:
     name: Next.js production build
     runs-on: ubuntu-latest
@@ -446,3 +451,8 @@ jobs:
       # through the real chain (real data -> O2 -> O1 -> O4 -> preview).
       - name: Run opportunity fact quality DB test
         run: npx ts-node test/opportunityFactQualityDb.test.ts
+      # Goal lifecycle authorization -- archived-Goal acceptance guard against
+      # a live database (preview -> archive -> accept for every entry path,
+      # replay, mixed requests, controls, and a real concurrent-archive race).
+      - name: Run Goal lifecycle archived-acceptance DB test
+        run: npx ts-node test/goalLifecycleArchivedAcceptanceDb.test.ts

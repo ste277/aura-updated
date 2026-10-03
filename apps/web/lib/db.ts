@@ -3073,6 +3073,54 @@ export async function linkGoalActivityToPlannedActivity(
   return (result.rowCount ?? 0) === 1;
 }
 
+/**
+ * Goal LIFECYCLE authorization for planning acceptance.
+ *
+ * Archiving a Goal revokes its authority to produce NEW Goal-derived
+ * planning state. For the GoalActivities (owned by `userId`) in
+ * `goalActivityIds`, this returns which ones are owned and which of those
+ * have a parent Goal that is owned by the same user AND currently ACTIVE.
+ * `Goal.status` is the sole lifecycle authority (`archivedAt` is only the
+ * audit timestamp archiveGoal sets alongside it and nothing ever clears);
+ * ANY status other than exactly 'ACTIVE' is treated as not active.
+ *
+ * It runs on the caller's TRANSACTION client and takes a SHARE lock on the
+ * parent Goal rows (`FOR SHARE OF g`) that is held until that transaction
+ * ends. archiveGoal's UPDATE needs a conflicting row lock, so an archive
+ * that is in flight when the acceptance reads makes the acceptance WAIT and
+ * then see ARCHIVED, and an archive arriving after the read waits until the
+ * acceptance commits: the ACTIVE check and the Goal-provenance writes
+ * cannot be separated by a concurrent archive. One batched query for the
+ * whole request, never one per item. Read-only apart from the lock.
+ *
+ * Activities this user does not own (or that do not exist) are absent from
+ * `owned`; the existing ownership / existence checks at the write keep
+ * rejecting them exactly as before, so this adds no new failure shape for
+ * them.
+ */
+export async function lockGoalParentLifecycleForPlanning(
+  userId: string,
+  goalActivityIds: readonly string[],
+  client: PoolClient
+): Promise<{ owned: ReadonlySet<string>; active: ReadonlySet<string> }> {
+  const owned = new Set<string>();
+  const active = new Set<string>();
+  if (goalActivityIds.length === 0) return { owned, active };
+  const result = await client.query(
+    `SELECT ga.id AS "goalActivityId", g."userId" AS "goalUserId", g.status AS "goalStatus"
+     FROM "GoalActivity" ga
+     JOIN "Goal" g ON g.id = ga."goalId"
+     WHERE ga."userId" = $1 AND ga.id = ANY($2::text[])
+     FOR SHARE OF g`,
+    [userId, [...goalActivityIds]]
+  );
+  for (const row of result.rows) {
+    owned.add(row.goalActivityId);
+    if (row.goalUserId === userId && row.goalStatus === 'ACTIVE') active.add(row.goalActivityId);
+  }
+  return { owned, active };
+}
+
 // ============================================================
 // Quick Capture V1 PR A (migration 0036) -- see lib/captures.ts.
 // ============================================================
