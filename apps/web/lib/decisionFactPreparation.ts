@@ -34,6 +34,7 @@
  */
 
 import type { DecisionFacts } from './decisionFacts';
+import { buildDecisionEvidence, type DecisionEvidence, type DecisionEvidenceByIntentId } from './decisionEvidence';
 import { computeOpportunityDecisionFacts, type OpportunityCandidateInput, type OpportunityEnrichmentContext } from './opportunityDecisionFacts';
 import type { OpportunityRangeDeps } from './opportunityRangeAdapter';
 
@@ -101,6 +102,40 @@ export async function prepareDecisionFactsFailOpen(preparer: DecisionFactPrepare
     console.warn('day-constructor: decision facts preparation unavailable, continuing without', err);
     return NO_PREPARED_FACTS;
   }
+}
+
+/**
+ * O5 P2a -- builds the immutable `DecisionEvidence` for every fact-bearing
+ * intent, ONCE, at this preparation stage (after the authoritative durations
+ * exist and the facts are prepared, before the first `constructDay`). For each
+ * intent the evidence is built from the facts as prepared (the prepared facts
+ * when the preparer produced any, else the facts the intent already carried),
+ * so it reflects exactly what the preview will expose -- and is then OWNED:
+ * every value is copied and frozen (decisionEvidence.ts), so later changes to
+ * a provider's objects cannot reach it.
+ *
+ * PURE and SYNCHRONOUS: no I/O, no query, no write, no clock; an intent whose
+ * facts carry no evidence category gets no entry (absence stays absence).
+ * FAIL-OPEN like the rest of this stage: evidence that cannot be built for one
+ * intent is skipped (never fabricated, never a failed preview) and does not
+ * affect any other intent.
+ *
+ * Preparing evidence is not consuming it: nothing in the Constructor reads the
+ * result. It is held for the future decision-policy stage, never recomputed.
+ */
+export function prepareDecisionEvidence(intents: readonly PreparationIntentInput[], prepared: PreparedDecisionFacts): DecisionEvidenceByIntentId {
+  const evidenceByIntentId = new Map<string, DecisionEvidence>();
+  for (const intent of intents) {
+    const facts = prepared.get(intent.intentId) ?? intent.facts;
+    if (!facts) continue; // nothing carried, nothing prepared: no evidence, and no build is attempted
+    try {
+      const evidence = buildDecisionEvidence(facts);
+      if (evidence) evidenceByIntentId.set(intent.intentId, evidence);
+    } catch (err) {
+      console.warn('day-constructor: decision evidence unavailable for one intent, continuing without', err);
+    }
+  }
+  return evidenceByIntentId;
 }
 
 /**

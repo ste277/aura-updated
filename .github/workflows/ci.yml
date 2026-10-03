@@ -260,6 +260,12 @@ jobs:
         run: npx ts-node test/decisionFactPreparationArchitecture.test.ts
       - name: Run decision fact preparation behavior test
         run: npx ts-node test/decisionFactPreparation.test.ts
+      # Constructor Decision Intelligence O5 P2a -- immutable DecisionEvidence:
+      # behavior (frozen, by-value, built once, inert) and its architecture guard.
+      - name: Run decision evidence test
+        run: npx ts-node test/decisionEvidence.test.ts
+      - name: Run decision evidence architecture test
+        run: npx ts-node test/decisionEvidenceArchitecture.test.ts
       # Constructor scheduling correctness -- the target-day blocker load
       # uses half-open OVERLAP semantics (a plan that starts before the day
       # but runs into it must block), through the one shared definition.
@@ -499,6 +505,10 @@ jobs:
       # attached unchanged afterwards, inert, and load-bounded.
       - name: Run decision fact preparation DB test
         run: npx ts-node test/decisionFactPreparationDb.test.ts
+      # Constructor Decision Intelligence O5 P2a -- real-DB proof that evidence is built
+      # once per fact-bearing candidate, adds no queries, and leaves the signed preview identical.
+      - name: Run decision evidence DB test
+        run: npx ts-node test/decisionEvidenceDb.test.ts
       # Constructor scheduling correctness -- real-DB regression for the
       # overnight/multi-day overlapping plan blocker defect.
       - name: Run Constructor overlapping blocker DB test
