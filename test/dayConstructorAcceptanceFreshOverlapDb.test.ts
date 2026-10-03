@@ -201,6 +201,8 @@ async function main() {
       const items = [{ ...item('A', pv.P.start, pv.P.end), title: pv.title, activityId: pv.activityId }];
       const integrity = verifyAcceptanceItems(K.id, W() as any, items as any, new Map([['A', pv.token]]) as any);
       const a = await accept(K, W(), items);
+      const fmt = (d: Date) => `${d.toISOString()} (${d.toLocaleTimeString('en-GB', { timeZone: KOLKATA, hour: '2-digit', minute: '2-digit' })} IST)`;
+      console.log(`   [diag] ${label.slice(0, 2)} planning date ${DATE}; window ${fmt(W().start)} .. ${fmt(W().end)}; preview proposal ${fmt(pv.P.start)} .. ${fmt(pv.P.end)}; acceptance now ${fmt(NOW)}; late plan ${fmt(s)} .. ${fmt(e)}; result ${a.status}/${a.reason ?? '-'} details=${JSON.stringify(((a.res.diagnostics ?? []) as any[]).map((d) => d.detail ?? d.reason))}; proposalStart<=now: ${pv.P.start.getTime() <= NOW.getTime()}`);
       check(`${label}: the preview was valid (signed token verifies) and the proposal really overlaps the late plan`, integrity.length === 0 && pv.P.start.getTime() < e.getTime() && s.getTime() < pv.P.end.getTime());
       check(`${label}: acceptance is ${expectReject ? 'REJECTED as CONFLICT with zero new rows' : 'SAVED'}`, expectReject ? rejected(a) : saved(a));
     }
