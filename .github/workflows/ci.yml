@@ -267,6 +267,10 @@ jobs:
         run: npx ts-node test/dayConstructorBlockerOverlapArchitecture.test.ts
       - name: Run Constructor blocker overlap behavior test
         run: npx ts-node test/dayConstructorBlockerOverlap.test.ts
+      # Schedule write consistency S1 -- acceptance's fresh-blocker read uses the
+      # canonical overlap loader on its transaction client (no race-free claim).
+      - name: Run acceptance fresh-overlap architecture test
+        run: npx ts-node test/dayConstructorAcceptanceFreshOverlapArchitecture.test.ts
   web-build:
     name: Next.js production build
     runs-on: ubuntu-latest
@@ -487,3 +491,7 @@ jobs:
       # overnight/multi-day overlapping plan blocker defect.
       - name: Run Constructor overlapping blocker DB test
         run: npx ts-node test/dayConstructorOverlappingBlockerDb.test.ts
+      # Schedule write consistency S1 -- real-DB regression for acceptance's
+      # authoritative overlap read (in-progress / overnight blockers).
+      - name: Run acceptance fresh-overlap DB test
+        run: npx ts-node test/dayConstructorAcceptanceFreshOverlapDb.test.ts
