@@ -275,6 +275,10 @@ jobs:
       # per-user lock in a transaction (serialization only; no overlap check).
       - name: Run manual writer serialization architecture test
         run: npx ts-node test/scheduleWriteManualSerializationArchitecture.test.ts
+      # Schedule write consistency S4 -- the Recomposition proposal loads plans and
+      # blockers with the canonical half-open overlap loader over the civil day.
+      - name: Run Recomposition proposal overlap architecture test
+        run: npx ts-node test/remainingDayRecompositionProposalOverlapArchitecture.test.ts
   web-build:
     name: Next.js production build
     runs-on: ubuntu-latest
@@ -503,3 +507,7 @@ jobs:
       # POST /api/plans route (acceptance, Move and manual writers serialize).
       - name: Run manual writer serialization DB test
         run: npx ts-node test/scheduleWriteManualSerializationDb.test.ts
+      # Schedule write consistency S4 -- real-DB proof through the real proposal path
+      # (explicit clock) that an overnight / prior-start plan blocks a Recomposition proposal.
+      - name: Run Recomposition proposal overlap DB test
+        run: npx ts-node test/remainingDayRecompositionProposalOverlapDb.test.ts
