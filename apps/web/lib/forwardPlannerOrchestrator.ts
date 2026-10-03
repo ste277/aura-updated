@@ -15,8 +15,9 @@
  *     -> TimingCandidate[] (already globally score-ranked)
  *   selectOneCandidatePerLocalDate + isAboveForwardPlannerFloor    forwardPlanner.ts, pure
  *     -> at most one CAUTION-free candidate per local date
- *   listPlannedActivitiesForDay + filterConflictingCandidates      db.ts (unchanged) + forwardPlanner.ts (pure)
- *     -> candidates that don't overlap an existing UPCOMING Plan
+ *   listPlannedActivitiesOverlappingRange + filterConflictingCandidates   db.ts (unchanged) + forwardPlanner.ts (pure)
+ *     -> candidates that don't overlap an existing UPCOMING Plan (loaded by interval OVERLAP, so a plan that
+ *        started before the range and is still running into it blocks too)
  *   buildDailyPersonalFitForUser(user, noonOfThatDate) PER SURVIVING DATE   UNCHANGED, #105
  *     -> that date's own DailyActivityFit for the requested family
  *   rankForwardPlannerCandidates                                   forwardPlanner.ts, pure
@@ -41,7 +42,7 @@ import type { TimingCandidateLabel } from '../../../packages/recommendation/src/
 import type { PersonalRelevance, DailyPersonalFitRelevantTheme } from '../../../packages/personal-intelligence/src/context';
 import { buildDailyPersonalFitForUser } from './dailyGuidancePipeline';
 import { buildPersonalMuhurtaContextForUser } from './natalContext';
-import { listPlannedActivitiesForDay } from './db';
+import { listPlannedActivitiesOverlappingRange } from './db';
 import { localDayBoundsUTC } from './myDayOrchestrator';
 import { getDatePartsInTimezone, resolveTzOffsetMinutes } from './timezone';
 import {
@@ -139,6 +140,23 @@ function candidateLocalDate(startIso: string, timezone: string): string {
 }
 
 /**
+ * The half-open `[from, to)` range the persisted-plan blocker load must cover: the requested civil-date range AND the
+ * actual intervals of the candidates that will be conflict-filtered (the UTC instants the timing engine produced, never
+ * display strings). They coincide whenever every candidate lies inside the requested range -- which every candidate the
+ * current engine produces does -- and the load widens only when a candidate's own interval reaches past either end, so a
+ * plan overlapping only that part is still loaded. Pure; the loader never clips, `filterConflictingCandidates` decides.
+ */
+export function resolveForwardPlannerBlockerLoadBounds(requested: { from: Date; to: Date }, candidates: ReadonlyArray<{ start: string; end: string }>): { from: Date; to: Date } {
+  let from = requested.from.getTime();
+  let to = requested.to.getTime();
+  for (const candidate of candidates) {
+    from = Math.min(from, new Date(candidate.start).getTime());
+    to = Math.max(to, new Date(candidate.end).getTime());
+  }
+  return { from: new Date(from), to: new Date(to) };
+}
+
+/**
  * The single public entry point. `now` must be captured ONCE by the
  * caller (resolveRequestNow(req) at the API route boundary) and passed in
  * explicitly -- this function and everything it calls never reads
@@ -186,15 +204,20 @@ export async function buildForwardPlannerResult(user: User, now: Date, request: 
   const oneCandidatePerDate = selectOneCandidatePerLocalDate(findResponse.candidates, user.timezone);
   const aboveFloor = oneCandidatePerDate.filter((candidate) => isAboveForwardPlannerFloor(candidate.label));
 
-  // Plan-conflict filtering -- loaded once for the whole range, only
-  // UPCOMING Plans block a candidate (LOGGED is historical, CANCELLED
-  // already excluded at the query level by listPlannedActivitiesForDay
-  // itself).
-  const { from } = localDayBoundsUTC(range.startLocalDate, user.timezone);
-  const { to } = localDayBoundsUTC(range.endLocalDate, user.timezone);
-  const plans = await listPlannedActivitiesForDay(user.id, from, to);
-  const blockingIntervals: ForwardPlannerBlockingInterval[] = plans.filter((plan) => plan.status === 'UPCOMING').map((plan) => ({ start: plan.plannedStartAt, end: plan.plannedEndAt }));
-  const conflictFree = filterConflictingCandidates(aboveFloor, blockingIntervals);
+  // Plan-conflict filtering -- ONE overlap load for the whole request, only UPCOMING Plans block a candidate (LOGGED is
+  // historical here, CANCELLED/SKIPPED/MOVED never block). Scheduling read authority R2: the load is by interval OVERLAP over
+  // the union of the requested civil range and the candidates' own extent (see resolveForwardPlannerBlockerLoadBounds), so a
+  // plan that started before the range and is still running into it is no longer invisible. With no candidate left to
+  // filter there is nothing a plan could remove, so the query is skipped (the result is the same NO_SUITABLE_WINDOW).
+  let conflictFree = aboveFloor;
+  if (aboveFloor.length > 0) {
+    const { from } = localDayBoundsUTC(range.startLocalDate, user.timezone);
+    const { to } = localDayBoundsUTC(range.endLocalDate, user.timezone);
+    const loadBounds = resolveForwardPlannerBlockerLoadBounds({ from, to }, aboveFloor);
+    const plans = await listPlannedActivitiesOverlappingRange(user.id, loadBounds.from, loadBounds.to);
+    const blockingIntervals: ForwardPlannerBlockingInterval[] = plans.filter((plan) => plan.status === 'UPCOMING').map((plan) => ({ start: plan.plannedStartAt, end: plan.plannedEndAt }));
+    conflictFree = filterConflictingCandidates(aboveFloor, blockingIntervals);
+  }
 
   if (conflictFree.length === 0) return { status: 'NO_SUITABLE_WINDOW', range };
 
