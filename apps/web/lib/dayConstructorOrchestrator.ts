@@ -68,6 +68,7 @@ import {
 import type { BlockedInterval } from './dayCapacity';
 import { isActivePlanBlocker, type PlanBlockerStatus, type PlanBlockerCandidate } from './planBlockerLifecycle';
 import { resolveDecisionFactsForIntent, type DecisionFactsByIntentId } from './decisionFacts';
+import { attachPreparedDecisionFacts, prepareDecisionFactsFailOpen, type DecisionFactPreparer } from './decisionFactPreparation';
 
 // ============================================================
 // Request contract (this ticket's own section 4). USER-LEVEL input --
@@ -203,6 +204,13 @@ export interface DayConstructorOrchestratorDeps {
    * resolution decision of its own (that stays entirely inside the pure
    * `resolveAvailability`, never duplicated here). */
   loadAvailabilityConfiguration: () => Promise<AvailabilityConfiguration>;
+  /** Constructor Decision Intelligence O5 P1 -- OPTIONAL. Prepares trusted
+   * decision facts for the resolved intents BEFORE `constructDay` runs
+   * (decisionFactPreparation.ts). The orchestrator only coordinates it: it
+   * never reads a prepared fact, never passes one to `constructDay`, and
+   * treats any failure as "no prepared facts". Omitting it is byte-identical
+   * to this dependency never having existed. */
+  prepareDecisionFacts?: DecisionFactPreparer;
 }
 
 /**
@@ -782,10 +790,14 @@ export async function orchestrateConstructDay(request: ConstructDayRequest, deps
    * (`constructDay`'s own `DURATION_UNKNOWN` gate handles that, no
    * search ever ran for it to replenish). */
   const flexibleSearchMetaByIntentId: Record<string, { activityId?: string; title: string; durationMinutes: number }> = {};
+  /** O5 P1 -- intents whose duration came from the generic fallback, from
+   * the SAME resolution that produced the duration (never a second one). */
+  const fallbackDurationIntentIds = new Set<string>();
 
   for (const requested of request.intents) {
     const resolved = resolveRequestedDayIntent(requested, request.targetDate, durationContext);
     warnings.push(...resolved.warnings);
+    if (resolved.warnings.some((w) => w.code === 'DURATION_FROM_GENERIC_FALLBACK')) fallbackDurationIntentIds.add(requested.id);
     // Decision Facts V1 -- attached AFTER resolution (never inside
     // `resolveRequestedDayIntent`/`buildDayIntent`), inert metadata only.
     const decisionFacts = resolveDecisionFactsForIntent(requested.id, request.decisionFactsByIntentId);
@@ -884,6 +896,23 @@ export async function orchestrateConstructDay(request: ConstructDayRequest, deps
     // `dayIntent` a second time.
     flexibleSearchMetaByIntentId[dayIntent.id] = { activityId: dayIntent.activityId, title: requested.title, durationMinutes: dayIntent.estimatedDurationMinutes };
   }
+
+  // O5 P1 -- decision facts are PREPARED here: after every intent's
+  // authoritative duration is resolved, strictly BEFORE `constructDay`. They
+  // are prepared exactly once, kept outside the Constructor input below
+  // (`intentsForConstructDay` is built from the intents as resolved above,
+  // not from the prepared facts), and attached to the preview metadata only
+  // after construction. Preparing is not consuming: nothing in this file
+  // reads a prepared fact.
+  const preparedDecisionFacts = await prepareDecisionFactsFailOpen(deps.prepareDecisionFacts, {
+    intents: resolvedIntents.map((resolved) => ({
+      intentId: resolved.requestedIntentId,
+      durationMinutes: resolved.dayIntent.estimatedDurationMinutes,
+      durationFromGenericFallback: fallbackDurationIntentIds.has(resolved.requestedIntentId),
+      facts: resolved.dayIntent.decisionFacts,
+    })),
+    context: { planningDate: request.targetDate, timezone: request.timezone, now: request.now },
+  });
 
   const intentsForConstructDay = resolvedIntents.map((r) => r.dayIntent);
 
@@ -1015,7 +1044,7 @@ export async function orchestrateConstructDay(request: ConstructDayRequest, deps
       targetDate: request.targetDate,
       timezone: request.timezone,
       constructionWindow: window,
-      resolvedIntents,
+      resolvedIntents: attachPreparedDecisionFacts(resolvedIntents, preparedDecisionFacts),
       constructedDay: result.day,
       warnings,
     },

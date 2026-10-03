@@ -46,6 +46,8 @@ const decisionFactsCode = stripComments(decisionFacts);
 const handler = read('apps/web/lib/dayConstructorPreviewRequest.ts');
 const provider = read('apps/web/lib/goalDecisionFactsProvider.ts');
 const orchestrator = read('apps/web/lib/dayConstructorOrchestrator.ts');
+const preparation = read('apps/web/lib/decisionFactPreparation.ts');
+const preparationCode = stripComments(preparation);
 const dayConstructor = read('apps/web/lib/dayConstructor.ts');
 const dayIntent = read('apps/web/lib/dayIntent.ts');
 const dayCapacity = read('apps/web/lib/dayCapacity.ts');
@@ -75,9 +77,9 @@ const oppFields = oppBlock ? Array.from(oppBlock[1].matchAll(/^\s*(\w+)(\?)?:/gm
 check('OpportunityDecisionFacts has exactly the eight original factual fields (unchanged order) followed by the four additive P0b fields, none optional', JSON.stringify(oppFields) === JSON.stringify(['horizonStartDate', 'horizonEndDate', 'evaluatedDays', 'viableDays', 'unknownDays', 'coverage', 'durationMinutes', 'durationBasis', 'startDateState', 'afterStartEvaluatedDays', 'afterStartViableDays', 'afterStartUnknownDays']));
 check('durationBasis is REQUIRED on the fact and carries exactly RESOLVED | GENERIC_FALLBACK', /durationBasis: OpportunityDurationBasis;/.test(decisionFactsCode) && /type OpportunityDurationBasis = 'RESOLVED' \| 'GENERIC_FALLBACK';/.test(decisionFactsCode) && !/durationBasis\?/.test(decisionFactsCode));
 check('the enrichment always sets durationBasis from the candidate and never defaults it to RESOLVED', /durationBasis: candidate\.durationBasis/.test(enrichmentCode) && !/'RESOLVED'/.test(enrichmentCode));
-check('the preview handler derives durationBasis from the preview\'s own generic-fallback warning', /DURATION_FROM_GENERIC_FALLBACK/.test(functionBody(handler, 'attachOpportunityFacts')) && /'GENERIC_FALLBACK' : 'RESOLVED'/.test(functionBody(handler, 'attachOpportunityFacts')));
+check('durationBasis is derived from the SAME resolution that produced the duration: the orchestrator reads the resolution\'s own generic-fallback warning, and the preparation maps it to GENERIC_FALLBACK / RESOLVED (O5 P1: the derivation moved before the Constructor)', /resolved\.warnings\.some\(\(w\) => w\.code === 'DURATION_FROM_GENERIC_FALLBACK'\)/.test(orchestrator) && /durationFromGenericFallback \? 'GENERIC_FALLBACK' : 'RESOLVED'/.test(preparationCode));
 check('demand/supply separation: the opportunity fact repeats no requirement field', !/targetPerPeriod|completedInPeriod|committedInPeriod|remainingInPeriod/.test(oppBlock ? oppBlock[1] : 'x'));
-check('no shortfall, deficit, pressure, classification, scarcity, risk or last-chance field anywhere in the facts, the enrichment or the handler glue', !/shortfall|deficit|pressure|classif|scarc|atRisk|critical|impossible|lastChance|lastViable|urgen|priority|score|\brank|weight|boost|penalt/i.test(decisionFactsCode + enrichmentCode + functionBody(handler, 'attachOpportunityFacts')));
+check('no shortfall, deficit, pressure, classification, scarcity, risk or last-chance field anywhere in the facts, the enrichment or the preparation glue', !/shortfall|deficit|pressure|classif|scarc|atRisk|critical|impossible|lastChance|lastViable|urgen|priority|score|\brank|weight|boost|penalt/i.test(decisionFactsCode + enrichmentCode + preparationCode));
 check('DecisionFacts carries opportunity as one optional entry beside recurrence', /recurrence\?: RecurrenceDecisionFacts;\s*opportunity\?: OpportunityDecisionFacts;/.test(decisionFactsCode));
 check('decisionFacts.ts is still source-blind: no imports, no source/goal/rhythm vocabulary, no calculation', !/^\s*import\s/m.test(decisionFactsCode) && !/goal|rhythm|decode|classify|split\(/i.test(decisionFacts) && !/Math\.|new Date|Date\./.test(decisionFactsCode));
 check('the candidate-local overlap limitation is documented beside the contract', /CANDIDATE-LOCAL/.test(decisionFacts) && /allocation of shared capacity/.test(decisionFacts));
@@ -109,13 +111,17 @@ check('no schema field stores opportunity facts', !/viableDays|unknownDays|durat
 // Authority: server-derived only
 // ============================================================
 check('the request parser never reads opportunity, supply or period values from the body', !/opportunity|viableDays|unknownDays|coverage|durationBasis|periodStartDate|periodEndDate/i.test(functionBody(handler, 'parseConstructDayPreviewRequestBody')));
-const attach = functionBody(handler, 'attachOpportunityFacts');
-check('attachOpportunityFacts uses only the built preview and the server-parsed request (never the raw body)', !/\bbody\b/.test(attach) && /preview\.resolvedIntents/.test(attach) && /request\.targetDate/.test(attach) && /request\.timezone/.test(attach) && /request\.now/.test(attach));
-const orchestrateAt = handler.indexOf('await orchestrateConstructDay(');
-const attachAt = handler.indexOf('await attachOpportunityFacts(', orchestrateAt);
-check('enrichment runs strictly AFTER the day is constructed (the Constructor never receives opportunity facts)', orchestrateAt > 0 && attachAt > orchestrateAt);
-check('the orchestration call is given only provider facts, never opportunity facts', /orchestrateConstructDay\(decisionFactsByIntentId \? \{ \.\.\.parsed\.request, decisionFactsByIntentId \} : parsed\.request, deps\)/.test(handler));
-check('enrichment failure is isolated (try/catch, continue without facts)', /try \{[\s\S]*attachOpportunityFacts[\s\S]*\} catch \(err\) \{[\s\S]*continuing without/.test(handler));
+const attachFn = functionBody(preparation, 'attachPreparedDecisionFacts');
+check('attachment uses only the resolved intents and the prepared facts, matched by the server-owned requestedIntentId (never the raw body, never a title)', !/\bbody\b|\btitle\b/.test(attachFn) && /prepared\.get\(entry\.requestedIntentId\)/.test(attachFn));
+// O5 P1 -- the preparation moved BEFORE the Constructor. It is still never CONSUMED by it.
+const orchestrateCode = stripComments(orchestrator);
+const prepareAt = orchestrateCode.indexOf('await prepareDecisionFactsFailOpen(');
+const firstConstructAt = orchestrateCode.indexOf('constructDay({');
+check('O5 P1: facts are PREPARED strictly BEFORE the first constructDay call and after the intents were resolved (prepared is not consumed)', prepareAt > 0 && firstConstructAt > prepareAt && prepareAt > orchestrateCode.indexOf('resolveRequestedDayIntent(requested'));
+check('the Constructor input is built from the intents AS RESOLVED (provider facts only): the prepared facts never enter intentsForConstructDay', /const intentsForConstructDay = resolvedIntents\.map\(\(r\) => r\.dayIntent\);/.test(orchestrateCode) && (orchestrateCode.match(/preparedDecisionFacts/g) ?? []).length === 2);
+check('the prepared facts are attached once, after construction, from the same object (no second computation in the orchestrator or the handler)', /resolvedIntents: attachPreparedDecisionFacts\(resolvedIntents, preparedDecisionFacts\)/.test(orchestrateCode) && (orchestrateCode.match(/prepareDecisionFactsFailOpen\(/g) ?? []).length === 1 && !/computeOpportunityDecisionFacts|attachOpportunityFacts/.test(stripComments(handler)));
+check('the orchestration request is given only provider facts, never opportunity facts; the preview boundary only supplies the generic preparer', /orchestrateConstructDay\(decisionFactsByIntentId \? \{ \.\.\.parsed\.request, decisionFactsByIntentId \} : parsed\.request, orchestrationDeps\)/.test(handler) && /prepareDecisionFacts: createDecisionFactPreparer\(opportunityRangeDeps\)/.test(handler));
+check('preparation failure is isolated (try/catch, continue without facts) so construction never depends on it', /try \{[\s\S]*return await preparer\(input\);[\s\S]*\} catch \(err\) \{[\s\S]*continuing without/.test(preparationCode));
 check('the range deps are bound to the AUTHENTICATED user in the boundary (not from the request)', /createOpportunityRangeDeps \? deps\.createOpportunityRangeDeps\(user\)/.test(handler));
 check('the Goal provider produces no opportunity facts and never imports the enrichment, O1 or O2', !/opportunity/i.test(provider) && !/opportunityDecisionFacts|opportunityProjection|opportunityRange/.test(provider));
 check('the preview handler stays source-blind (no goal/rhythm vocabulary after O4)', !/goal|rhythm/i.test(handler));
@@ -134,7 +140,7 @@ function listTs(dir: string): string[] {
 }
 const all = [...listTs(lib), ...listTs(app)];
 const consumersOf = (needle: RegExp, ...excluding: string[]) => all.filter((f) => !excluding.some((x) => f.endsWith(x)) && needle.test(fs.readFileSync(f, 'utf8'))).map((f) => path.basename(f)).sort();
-check('the enrichment is invoked only by the preview handler', JSON.stringify(consumersOf(/from '[^']*opportunityDecisionFacts'/, 'opportunityDecisionFacts.ts')) === JSON.stringify(['dayConstructorPreviewRequest.ts']));
+check('the enrichment is invoked only by the generic fact-preparation module (O5 P1: it moved from the preview handler)', JSON.stringify(consumersOf(/from '[^']*opportunityDecisionFacts'/, 'opportunityDecisionFacts.ts')) === JSON.stringify(['decisionFactPreparation.ts']));
 check('no component, page or route other than the preview route wires the range loaders to a user', JSON.stringify(consumersOf(/createRealOpportunityRangeDeps/, 'opportunityRangeRealDeps.ts')) === JSON.stringify(['route.ts']));
 check('opportunity facts are never read by any component/page (no new user-facing surface)', !listTs(app).some((f) => /\.tsx$/.test(f) && /viableDays|unknownDays|durationBasis|OpportunityDecisionFacts/.test(fs.readFileSync(f, 'utf8'))));
 check('the only readers of viableDays/unknownDays outside the engine are the types module and the enrichment', JSON.stringify(consumersOf(/viableDays|unknownDays/, 'opportunityProjection.ts')) === JSON.stringify(['decisionFacts.ts', 'opportunityDecisionFacts.ts']));

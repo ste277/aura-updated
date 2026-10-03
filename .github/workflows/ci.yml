@@ -253,6 +253,13 @@ jobs:
       # or fact consumption exists in any decision module.
       - name: Run Constructor overload decision architecture test
         run: npx ts-node test/dayConstructorOverloadDecisionArchitecture.test.ts
+      # O5 P1 -- pre-Constructor decision fact preparation: facts are
+      # prepared once, before the Constructor, kept outside its input,
+      # attached unchanged afterwards, and never read by any decision module.
+      - name: Run decision fact preparation architecture test
+        run: npx ts-node test/decisionFactPreparationArchitecture.test.ts
+      - name: Run decision fact preparation behavior test
+        run: npx ts-node test/decisionFactPreparation.test.ts
   web-build:
     name: Next.js production build
     runs-on: ubuntu-latest
@@ -465,3 +472,7 @@ jobs:
       # policy: a real-DB, real-pipeline overload contest (characterization).
       - name: Run Constructor overload decision DB test
         run: npx ts-node test/dayConstructorOverloadDecisionDb.test.ts
+      # O5 P1 -- real-DB proof that facts are prepared before construction,
+      # attached unchanged afterwards, inert, and load-bounded.
+      - name: Run decision fact preparation DB test
+        run: npx ts-node test/decisionFactPreparationDb.test.ts

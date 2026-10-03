@@ -50,8 +50,8 @@ import type { User } from './db';
 // longer than what the accept endpoint will later store it under.
 // ============================================================
 
-import type { DecisionFacts, DecisionFactsByIntentId } from './decisionFacts';
-import { computeOpportunityDecisionFacts, type OpportunityCandidateInput } from './opportunityDecisionFacts';
+import type { DecisionFactsByIntentId } from './decisionFacts';
+import { createDecisionFactPreparer } from './decisionFactPreparation';
 import type { OpportunityRangeDeps } from './opportunityRangeAdapter';
 
 /** Decision Facts V1 -- a server-side, source-specific fact provider,
@@ -256,40 +256,6 @@ export interface DayConstructorPreviewHttpResult {
 }
 
 /**
- * Opportunity Scarcity V1 O4 -- attaches inert opportunity facts to the
- * resolved intents of an ALREADY-BUILT preview. It runs strictly AFTER
- * `orchestrateConstructDay`, so the constructed day (ordering, placement,
- * deferral) is exactly what it was without it; only
- * `resolvedIntents[].dayIntent.decisionFacts` gains an `opportunity` entry.
- *
- * The inputs are the preview's own, server-resolved values: each intent's
- * resolved duration, whether that duration came from the generic fallback
- * (the preview's own `DURATION_FROM_GENERIC_FALLBACK` warning), and the
- * facts a provider already attached. Nothing here comes from the request
- * body. A failure of any kind is isolated by the caller.
- */
-async function attachOpportunityFacts(preview: ConstructDayPreview, request: ConstructDayRequest, rangeDeps: OpportunityRangeDeps): Promise<ConstructDayPreview> {
-  const fallbackIntentIds = new Set(preview.warnings.filter((w) => w.code === 'DURATION_FROM_GENERIC_FALLBACK').map((w) => w.intentId));
-  const candidates: OpportunityCandidateInput[] = preview.resolvedIntents.map((resolved) => ({
-    intentId: resolved.requestedIntentId,
-    durationMinutes: resolved.dayIntent.estimatedDurationMinutes,
-    durationBasis: fallbackIntentIds.has(resolved.requestedIntentId) ? 'GENERIC_FALLBACK' : 'RESOLVED',
-    facts: resolved.dayIntent.decisionFacts,
-  }));
-  const opportunityByIntentId = await computeOpportunityDecisionFacts(candidates, { planningDate: request.targetDate, timezone: request.timezone, now: request.now }, rangeDeps);
-  if (opportunityByIntentId.size === 0) return preview;
-  return {
-    ...preview,
-    resolvedIntents: preview.resolvedIntents.map((resolved) => {
-      const opportunity = opportunityByIntentId.get(resolved.requestedIntentId);
-      if (!opportunity) return resolved;
-      const decisionFacts: DecisionFacts = { ...resolved.dayIntent.decisionFacts, opportunity };
-      return { ...resolved, dayIntent: { ...resolved.dayIntent, decisionFacts } };
-    }),
-  };
-}
-
-/**
  * Takes `deps` as an explicit parameter -- exactly like
  * `orchestrateConstructDay` itself -- so this function is directly
  * testable with an injected fake (no DB, no network) while production
@@ -321,19 +287,13 @@ export async function runDayConstructorPreview(
     }
   }
 
-  const result = await orchestrateConstructDay(decisionFactsByIntentId ? { ...parsed.request, decisionFactsByIntentId } : parsed.request, deps);
+  // O5 P1 -- opportunity facts are PREPARED inside the orchestration, after
+  // duration resolution and before the Constructor runs (see
+  // decisionFactPreparation.ts); this boundary only supplies the generic
+  // preparer. Preparing is fail-open there, and the facts are inert.
+  const orchestrationDeps = opportunityRangeDeps ? { ...deps, prepareDecisionFacts: createDecisionFactPreparer(opportunityRangeDeps) } : deps;
+  const result = await orchestrateConstructDay(decisionFactsByIntentId ? { ...parsed.request, decisionFactsByIntentId } : parsed.request, orchestrationDeps);
 
-  // Opportunity Scarcity V1 O4 -- inert supply facts, attached AFTER the
-  // day is built (the constructed day is untouched). Like provider facts,
-  // a failure must never fail an otherwise-valid preview: continue with
-  // the preview as built, never with fabricated supply.
-  if (opportunityRangeDeps && result.status === 'READY') {
-    try {
-      return { httpStatus: 200, body: { status: 'READY', preview: await attachOpportunityFacts(result.preview, parsed.request, opportunityRangeDeps) } };
-    } catch (err) {
-      console.warn('day-constructor/preview: opportunity facts unavailable, continuing without', err);
-    }
-  }
   // Every branch below is a legitimate, already-typed domain outcome --
   // returned verbatim, at HTTP 200, never reinterpreted (this ticket's
   // own section 21). There is no "unexpected exception" branch here:
