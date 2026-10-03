@@ -188,6 +188,12 @@ async function main() {
       const it = body.preview.constructedDay.proposedItems[0];
       return { P: { start: new Date(it.start), end: new Date(it.end) }, token: it.acceptanceToken, activityId: it.activityId, title: it.title, window: { start: new Date(body.preview.constructionWindow.start), end: new Date(body.preview.constructionWindow.end) } };
     };
+    // The real preview chooses WHERE inside the window the proposal lands (the timing engine ranks candidates, and that
+    // ranking is environment-dependent: it may be 10:30 on one machine and exactly the window start on another). These
+    // scenarios test blocker-overlap correctness, not stale-preview handling, so their clock is a fixed instant strictly
+    // BEFORE the construction window: any valid in-window proposal is then future work (start >= window start > clock) and can
+    // never be rejected as STALE_PREVIEW, whatever slot the engine picks.
+    const SCENARIO_NOW = kAt(DATE, '08:00');
     const lateScenarios: Array<[string, (P: { start: Date; end: Date }, w: { start: Date; end: Date }) => [Date, Date], boolean]> = [
       ['A. SAME-DAY IN-PROGRESS plan (starts 08:30, before the 09:00 window start, ends after the proposal)', (P, w) => [new Date(w.start.getTime() - 30 * MIN), new Date(P.end.getTime() + 15 * MIN)], true],
       ['B. OVERNIGHT plan (starts the previous evening 20:00, ends after the proposal)', (P) => [kAt(PREV, '20:00'), new Date(P.end.getTime() + 15 * MIN)], true],
@@ -195,14 +201,15 @@ async function main() {
     ];
     for (const [label, mkPlan, expectReject] of lateScenarios) {
       await clearPlans();
-      const pv = await preview(K, NOW, { start: kAt(DATE, '09:00'), end: kAt(DATE, '17:00') });
+      const pv = await preview(K, SCENARIO_NOW, { start: kAt(DATE, '09:00'), end: kAt(DATE, '17:00') });
       const [s, e] = mkPlan(pv.P, pv.window);
       await plan(K, s, e); // appears AFTER the preview was produced
       const items = [{ ...item('A', pv.P.start, pv.P.end), title: pv.title, activityId: pv.activityId }];
       const integrity = verifyAcceptanceItems(K.id, W() as any, items as any, new Map([['A', pv.token]]) as any);
-      const a = await accept(K, W(), items);
+      const a = await accept(K, W(), items, { now: SCENARIO_NOW });
       const fmt = (d: Date) => `${d.toISOString()} (${d.toLocaleTimeString('en-GB', { timeZone: KOLKATA, hour: '2-digit', minute: '2-digit' })} IST)`;
-      console.log(`   [diag] ${label.slice(0, 2)} planning date ${DATE}; window ${fmt(W().start)} .. ${fmt(W().end)}; preview proposal ${fmt(pv.P.start)} .. ${fmt(pv.P.end)}; acceptance now ${fmt(NOW)}; late plan ${fmt(s)} .. ${fmt(e)}; result ${a.status}/${a.reason ?? '-'} details=${JSON.stringify(((a.res.diagnostics ?? []) as any[]).map((d) => d.detail ?? d.reason))}; proposalStart<=now: ${pv.P.start.getTime() <= NOW.getTime()}`);
+      console.log(`   [diag] ${label.slice(0, 2)} planning date ${DATE}; window ${fmt(W().start)} .. ${fmt(W().end)}; preview proposal ${fmt(pv.P.start)} .. ${fmt(pv.P.end)}; acceptance now ${fmt(SCENARIO_NOW)}; late plan ${fmt(s)} .. ${fmt(e)}; result ${a.status}/${a.reason ?? '-'} details=${JSON.stringify(((a.res.diagnostics ?? []) as any[]).map((d) => d.detail ?? d.reason))}; proposalStart<=now: ${pv.P.start.getTime() <= SCENARIO_NOW.getTime()}`);
+      check(`${label}: determinism guard -- the scenario clock precedes the construction window, so the preview-chosen proposal (start ${fmt(pv.P.start)}) cannot be stale`, SCENARIO_NOW.getTime() < W().start.getTime() && pv.P.start.getTime() >= W().start.getTime());
       check(`${label}: the preview was valid (signed token verifies) and the proposal really overlaps the late plan`, integrity.length === 0 && pv.P.start.getTime() < e.getTime() && s.getTime() < pv.P.end.getTime());
       check(`${label}: acceptance is ${expectReject ? 'REJECTED as CONFLICT with zero new rows' : 'SAVED'}`, expectReject ? rejected(a) : saved(a));
     }
