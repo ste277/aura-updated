@@ -31,7 +31,7 @@
  */
 
 import type { User, HabitLogRow } from './db';
-import { listPlannedActivitiesForDay, listHabitLogs, listUserAvailabilityPeriods } from './db';
+import { listPlannedActivitiesOverlappingRange, listHabitLogs, listUserAvailabilityPeriods } from './db';
 import { resolveAvailability, normalizeUsableWindowsToConstructionWindow, type AvailabilityConfiguration } from './availabilityContext';
 import { listUserActivityPreferences, preferredDurationByActivityId, type UserActivityPreference } from './activityPreferences';
 import { deriveBehavioralProfile, activityDurationByActivityId } from './behavioralAffinity';
@@ -217,9 +217,11 @@ export interface DayConstructorOrchestratorDeps {
  * Real production wiring. Reuses existing repository functions verbatim
  * -- no new DB query shape, no new engine call:
  *
- *   - `listPlannedActivitiesForDay` (db.ts) -- the EXACT SAME function
- *     Forward Planner's own orchestrator already uses as its own raw row
- *     source (forwardPlannerOrchestrator.ts). Its own SQL filter already
+ *   - `listPlannedActivitiesOverlappingRange` (db.ts) -- every
+ *     non-cancelled Plan whose interval OVERLAPS the day bounds, so a Plan
+ *     that starts before the day but runs into it (overnight / multi-day)
+ *     still blocks. `listPlannedActivitiesForDay` selects by start time only
+ *     and would miss it. Its own SQL filter already
  *     excludes `CANCELLED`; `status` is passed straight through
  *     (verbatim, not re-derived) to `isActivePlanBlocker` (this file's
  *     own lifecycle adapter, pre-commit review fix), which is what
@@ -239,7 +241,7 @@ export interface DayConstructorOrchestratorDeps {
 export function createRealDayConstructorOrchestratorDeps(user: User, now: Date): DayConstructorOrchestratorDeps {
   return {
     loadBlockingPlans: async (dayBoundsUTC) => {
-      const plans = await listPlannedActivitiesForDay(user.id, dayBoundsUTC.from, dayBoundsUTC.to);
+      const plans = await listPlannedActivitiesOverlappingRange(user.id, dayBoundsUTC.from, dayBoundsUTC.to);
       return plans.map((plan) => ({ start: new Date(plan.plannedStartAt), end: new Date(plan.plannedEndAt), status: plan.status }));
     },
     loadDurationContext: async () => {

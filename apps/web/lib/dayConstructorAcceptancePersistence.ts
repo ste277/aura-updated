@@ -34,7 +34,7 @@ import {
   fillPlanCreationClaim,
   findPlanCreationClaimsByPrefix,
   createPlannedActivityWithClient,
-  listPlannedActivitiesForDay,
+  listPlannedActivitiesOverlappingRange,
   getPlannedActivityForOwner,
   getUserById,
   linkGoalActivityToPlannedActivity,
@@ -186,7 +186,8 @@ export type AcceptConstructedDayPersistenceResult =
 function createRealAcceptanceDeps(userId: string, client: PoolClient, timingContext: TimingSearchRequest['context']): AcceptanceDeps {
   return {
     loadFreshBlockers: async (bounds) => {
-      const plans = await listPlannedActivitiesForDay(userId, bounds.from, bounds.to, client);
+      // Overlap, not start-time: a Plan that began before the window but runs into it still blocks.
+      const plans = await listPlannedActivitiesOverlappingRange(userId, bounds.from, bounds.to, client);
       return plans.map((plan) => ({ start: new Date(plan.plannedStartAt), end: new Date(plan.plannedEndAt), status: plan.status }));
     },
     validateActivity: (activityId) => getActivityProfileById(activityId) !== undefined,

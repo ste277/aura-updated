@@ -476,3 +476,8 @@ jobs:
       # attached unchanged afterwards, inert, and load-bounded.
       - name: Run decision fact preparation DB test
         run: npx ts-node test/decisionFactPreparationDb.test.ts
+      # Constructor blockers must include Plans that START before the planning
+      # window but run into it (overnight / multi-day), in both the preview
+      # loader and the acceptance fresh-blocker guard.
+      - name: Run Constructor overlapping-blocker DB test
+        run: npx ts-node test/dayConstructorOverlappingBlockerDb.test.ts
