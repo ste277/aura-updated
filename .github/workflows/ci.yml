@@ -318,6 +318,13 @@ jobs:
         run: npx ts-node test/precedenceAnomalyRealPipeline.test.ts
       - name: Run scheduling Date mutator architecture test
         run: npx ts-node test/schedulingDateMutatorArchitecture.test.ts
+      # O5 P4b1 -- the immutable ConstructionBasis: the detached, deeply frozen scheduling authority of one baseline run (initial AND
+      # final candidate lists, blockers, FIXED authority, window), captured inside the orchestration with no second search,
+      # Constructor pass or clock read. Inert; consumed by nothing.
+      - name: Run construction basis test
+        run: npx ts-node test/constructionBasis.test.ts
+      - name: Run construction basis architecture test
+        run: npx ts-node test/constructionBasisArchitecture.test.ts
       # Constructor scheduling correctness -- the target-day blocker load
       # uses half-open OVERLAP semantics (a plan that starts before the day
       # but runs into it must block), through the one shared definition.

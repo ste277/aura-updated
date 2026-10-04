@@ -68,6 +68,7 @@ import {
 } from './dayConstructor';
 import type { BlockedInterval } from './dayCapacity';
 import { aggregateContentionTraces, type ContentionTrace } from './contentionTrace';
+import { assembleConstructionBasis, captureCandidateLists, type ConstructionBasisOutcome } from './constructionBasis';
 import { isActivePlanBlocker, type PlanBlockerStatus, type PlanBlockerCandidate } from './planBlockerLifecycle';
 import { resolveDecisionFactsForIntent, type DecisionFactsByIntentId } from './decisionFacts';
 import { attachPreparedDecisionFacts, prepareDecisionEvidence, prepareDecisionFactsFailOpen, type DecisionFactPreparer } from './decisionFactPreparation';
@@ -747,15 +748,26 @@ export async function orchestrateConstructDayWithTrace(request: ConstructDayRequ
 export async function orchestrateConstructDayWithDiagnostics(
   request: ConstructDayRequest,
   deps: DayConstructorOrchestratorDeps
-): Promise<{ result: OrchestrateConstructDayResult; contentionTrace: ContentionTrace; evidenceByIntentId: ReturnType<typeof prepareDecisionEvidence>; planningDate: string }> {
+): Promise<{ result: OrchestrateConstructDayResult; contentionTrace: ContentionTrace; evidenceByIntentId: ReturnType<typeof prepareDecisionEvidence>; planningDate: string; constructionBasis: ConstructionBasisOutcome }> {
   const handOff: EvidenceHandOff = {};
   const traced = await runTraced(request, deps, handOff);
-  return { result: traced.result, contentionTrace: traced.contentionTrace, evidenceByIntentId: handOff.byIntentId ?? new Map(), planningDate: request.targetDate };
+  return { result: traced.result, contentionTrace: traced.contentionTrace, evidenceByIntentId: handOff.byIntentId ?? new Map(), planningDate: request.targetDate, constructionBasis: handOff.constructionBasis ?? { status: 'UNAVAILABLE', reason: 'RUN_NOT_READY' } };
 }
 
 /** O5 P3b -- private, write-only: the orchestrator assigns the prepared evidence here once, after preparation and before construction. */
 interface EvidenceHandOff {
   byIntentId?: ReturnType<typeof prepareDecisionEvidence>;
+  /** O5 P4b1 -- the immutable construction basis, assembled once at the very end of a READY run (T4). Same write-only discipline; nothing in this file reads it. */
+  constructionBasis?: ConstructionBasisOutcome;
+}
+
+/** O5 P4b1 -- basis preparation is optional infrastructure: whatever it does, it can never make the baseline fail. */
+function optionalBasisStep<T>(step: () => T): T | undefined {
+  try {
+    return step();
+  } catch {
+    return undefined;
+  }
 }
 
 async function runTraced(request: ConstructDayRequest, deps: DayConstructorOrchestratorDeps, evidenceOut: EvidenceHandOff | undefined): Promise<{ result: OrchestrateConstructDayResult; contentionTrace: ContentionTrace }> {
@@ -968,6 +980,10 @@ async function runOrchestration(request: ConstructDayRequest, deps: DayConstruct
     flexibleSearchMetaByIntentId[dayIntent.id] = { activityId: dayIntent.activityId, title: requested.title, durationMinutes: dayIntent.estimatedDurationMinutes };
   }
 
+  // O5 P4b1 -- T1: the candidate lists exactly as the ORIGINAL timing searches left them, captured (owned copies) BEFORE any replenishment
+  // can replace a loser's list. Only when a diagnostics caller asked for the basis; no search is repeated to recover them.
+  const initialCandidateLists = evidenceOut ? optionalBasisStep(() => captureCandidateLists(request.intents.map((requested) => requested.id), candidatesByIntentId)) : undefined;
+
   // O5 P1 -- decision facts are PREPARED here: after every intent's
   // authoritative duration is resolved, strictly BEFORE `constructDay`. They
   // are prepared exactly once, kept outside the Constructor input below
@@ -1113,6 +1129,13 @@ async function runOrchestration(request: ConstructDayRequest, deps: DayConstruct
       today: request.targetDate,
     });
     if (result.status !== 'READY') return result;
+  }
+
+  // O5 P4b1 -- T3/T4: the terminal candidate lists are known; assemble the detached, frozen basis. It reads nothing back into construction,
+  // and a failure leaves the baseline result untouched (the outcome is simply UNAVAILABLE).
+  if (evidenceOut) {
+    evidenceOut.constructionBasis =
+      optionalBasisStep(() => assembleConstructionBasis({ planningDate: request.targetDate, window, intents: intentsForConstructDay, blockedIntervals, initialCandidates: initialCandidateLists, finalCandidatesByIntentId: candidatesByIntentId, fixedConstraintsByIntentId })) ?? { status: 'UNAVAILABLE', reason: 'ASSEMBLY_FAILED' };
   }
 
   return {
