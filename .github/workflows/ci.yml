@@ -474,6 +474,11 @@ jobs:
         env:
           TS_NODE_COMPILER_OPTIONS: '{"jsx":"react"}'
         run: npx ts-node test/goalDecompositionPlanningHandoffDb.test.ts
+      # CI reliability -- Goal-create idempotent replay ordering: the activity order is
+      # durable (strictly increasing createdAt) and the load is a total order, so an
+      # identical replay never conflicts under any query plan or physical row order.
+      - name: Run Goal create replay ordering DB test
+        run: npx ts-node test/goalCreateReplayOrderingDb.test.ts
       # Constructor Decision Intelligence -- Decision Facts V1 (architecture
       # foundation slice). No jsx needed: this test imports dayConstructor.ts/
       # dayConstructorOrchestrator.ts/goalDemandCandidates.ts directly, none
