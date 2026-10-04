@@ -311,6 +311,13 @@ jobs:
         run: npx ts-node test/promotionInput.test.ts
       - name: Run promotion input architecture test
         run: npx ts-node test/promotionInputArchitecture.test.ts
+      # O5 pre-P4b counterfactual safety prerequisites: (1) a stronger FLEXIBLE candidate that loses to a weaker FIXED
+      # owner through the real FIXED reservation is a PRECEDENCE_ANOMALY and never becomes a PromotionInput; (2) the
+      # audited scheduling path contains no Date mutator that could rewrite aliased baseline Dates in a future second pass.
+      - name: Run precedence anomaly real-pipeline test
+        run: npx ts-node test/precedenceAnomalyRealPipeline.test.ts
+      - name: Run scheduling Date mutator architecture test
+        run: npx ts-node test/schedulingDateMutatorArchitecture.test.ts
       # Constructor scheduling correctness -- the target-day blocker load
       # uses half-open OVERLAP semantics (a plan that starts before the day
       # but runs into it must block), through the one shared definition.
