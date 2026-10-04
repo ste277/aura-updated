@@ -325,6 +325,12 @@ jobs:
         run: npx ts-node test/constructionBasis.test.ts
       - name: Run construction basis architecture test
         run: npx ts-node test/constructionBasisArchitecture.test.ts
+      # O5 P4b1b -- the immutable BaselinePlacements: the baseline OUTCOME authority (the exact Proposed placements the same run chose),
+      # captured from the terminal result.day, validated against the same run's ConstructionBasis, separate from it. Inert; consumed by nothing.
+      - name: Run baseline placements test
+        run: npx ts-node test/baselinePlacements.test.ts
+      - name: Run baseline placements architecture test
+        run: npx ts-node test/baselinePlacementsArchitecture.test.ts
       # Constructor scheduling correctness -- the target-day blocker load
       # uses half-open OVERLAP semantics (a plan that starts before the day
       # but runs into it must block), through the one shared definition.
