@@ -272,6 +272,14 @@ jobs:
         run: npx ts-node test/decisionPressure.test.ts
       - name: Run decision pressure architecture test
         run: npx ts-node test/decisionPressureArchitecture.test.ts
+      # Constructor Decision Intelligence O5 P2c -- Decision Pressure AUTHORITY (the
+      # facts -> evidence -> pressure chain, exact reader allowlists, single derivation
+      # authority, inertness) and duration-source / catalog REACHABILITY through the real
+      # orchestrator. Evidence for P3 shadow only; says nothing about active policy.
+      - name: Run decision pressure authority test
+        run: npx ts-node test/decisionPressureAuthority.test.ts
+      - name: Run decision pressure catalog reachability test
+        run: npx ts-node test/decisionPressureCatalogReachability.test.ts
       # Constructor scheduling correctness -- the target-day blocker load
       # uses half-open OVERLAP semantics (a plan that starts before the day
       # but runs into it must block), through the one shared definition.
@@ -524,6 +532,11 @@ jobs:
       # classifies correctly and identically for canonical manual and automatic entry.
       - name: Run decision pressure DB test
         run: npx ts-node test/decisionPressureDb.test.ts
+      # Constructor Decision Intelligence O5 P2c -- real-DB proof of which duration sources
+      # (explicit, stored preference, behavioral, catalog default) actually reach RESOLVED
+      # evidence for canonical Goal demand, identically for manual and automatic entry.
+      - name: Run decision pressure reachability DB test
+        run: npx ts-node test/decisionPressureReachabilityDb.test.ts
       # Constructor scheduling correctness -- real-DB regression for the
       # overnight/multi-day overlapping plan blocker defect.
       - name: Run Constructor overlapping blocker DB test
