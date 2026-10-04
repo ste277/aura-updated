@@ -53,6 +53,8 @@ const OBS = 'apps/web/lib/shadowPressureObservation.ts';
 const ABOVE = 'apps/web/lib/abovePressurePrecedence.ts';
 const ORCH = 'apps/web/lib/dayConstructorOrchestrator.ts';
 const SHADOW_FILES = [ABOVE, EVAL, OBS];
+/** O5 P4a -- the two inert promotion-input modules REUSE the one comparator primitive (the helper) and the one diagnostics entry point; they do not read the shadow evaluator or boundary (pinned by promotionInputArchitecture.test.ts). */
+const PROMOTION_FILES = ['apps/web/lib/promotionInput.ts', 'apps/web/lib/promotionInputPreparation.ts'];
 
 const SHADOW_IDENT = /\b(evaluateShadowPressure|observeShadowPressure|ShadowPressure[A-Za-z]*|ShadowOwner[A-Za-z]*|ShadowLoser[A-Za-z]*|ShadowIncompleteReason|AbovePressureFacts|AbovePressureComparison|compareAbovePressure|projectAbovePressureFacts)\b|abovePressurePrecedence|shadowPressure(?:Evaluation|Observation)/;
 const SHADOW_WORD = /shadowPressure|abovePressure/i; // not a bare /shadow/: CSS box-shadow is everywhere in the UI
@@ -79,14 +81,14 @@ function audit(files: SrcFile[]): string[] {
   const get = (f: string) => files.find((x) => x.f === f);
   const notIn = (list: string[], allow: string[]) => list.filter((f) => !allow.includes(f));
   // P1 -- the shadow vocabulary exists only in its three modules
-  notIn(by(SHADOW_IDENT), SHADOW_FILES).forEach((f) => v.push(`P1:names-shadow-stage:${f}`));
-  notIn(by(SHADOW_WORD), SHADOW_FILES).forEach((f) => v.push(`P1:shadow-vocabulary:${f}`));
+  notIn(by(SHADOW_IDENT), [...SHADOW_FILES, ...PROMOTION_FILES]).forEach((f) => v.push(`P1:names-shadow-stage:${f}`));
+  notIn(by(SHADOW_WORD), [...SHADOW_FILES, ...PROMOTION_FILES]).forEach((f) => v.push(`P1:shadow-vocabulary:${f}`));
   // P2 -- importers: the helper by the evaluator and the boundary; the evaluator only by the boundary; the boundary by NOBODY (no production consumer)
-  notIn(by(/from '\.\/abovePressurePrecedence'/), [EVAL, OBS]).forEach((f) => v.push(`P2:imports-above-pressure-helper:${f}`));
+  notIn(by(/from '\.\/abovePressurePrecedence'/), [EVAL, OBS, ...PROMOTION_FILES]).forEach((f) => v.push(`P2:imports-above-pressure-helper:${f}`));
   notIn(by(/from '\.\/shadowPressureEvaluation'/), [OBS]).forEach((f) => v.push(`P2:imports-shadow-evaluator:${f}`));
   by(/from '\.\/shadowPressureObservation'/).forEach((f) => v.push(`P2:production-consumer-of-shadow-boundary:${f}`));
   notIn(by(/\bobserveShadowPressure\(/), [OBS]).forEach((f) => v.push(`P2:calls-shadow-boundary:${f}`));
-  notIn(by(/\borchestrateConstructDayWithDiagnostics\(/), [ORCH, OBS]).forEach((f) => v.push(`P2:calls-diagnostics-entry-point:${f}`));
+  notIn(by(/\borchestrateConstructDayWithDiagnostics\(/), [ORCH, OBS, PROMOTION_FILES[1]]).forEach((f) => v.push(`P2:calls-diagnostics-entry-point:${f}`));
   // P3 -- the evaluator
   const ev = get(EVAL);
   if (ev) {
@@ -138,10 +140,10 @@ const baseline = audit(real);
 check(`THE REAL PRODUCTION TREE HAS ZERO SHADOW-STAGE ARCHITECTURE VIOLATIONS (${real.length} production files scanned)${baseline.length ? ': ' + baseline.join(', ') : ''}`, baseline.length === 0);
 
 console.log('=== allowlists: producers, consumers, reachability ===');
-check('the shadow vocabulary exists in exactly three production files: the stronger-than-pressure helper, the pure evaluator and the diagnostics boundary', JSON.stringify(names(SHADOW_IDENT)) === JSON.stringify([...SHADOW_FILES].sort()));
+check('the shadow vocabulary exists in exactly five production files: the stronger-than-pressure helper, the pure evaluator, the diagnostics boundary and -- since O5 P4a, naming only the shared comparator primitive and its facts type -- the two promotion-input modules', JSON.stringify(names(SHADOW_IDENT)) === JSON.stringify([...SHADOW_FILES, ...PROMOTION_FILES].sort()) && PROMOTION_FILES.every((f) => !/evaluateShadowPressure|observeShadowPressure|ShadowPressure[A-Za-z]*|shadowPressure(?:Evaluation|Observation)/.test(src(f))));
 check('ZERO PRODUCTION CONSUMERS: nothing imports the diagnostics boundary and nothing calls `observeShadowPressure` -- it is not wired into the normal preview (there is no durable telemetry sink yet, so real shadow incidence is unknown)', names(/from '\.\/shadowPressureObservation'/).length === 0 && JSON.stringify(names(/\bobserveShadowPressure\(/)) === JSON.stringify([OBS]));
-check('the helper is imported only by the evaluator and the boundary; the evaluator only by the boundary', JSON.stringify(names(/from '\.\/abovePressurePrecedence'/)) === JSON.stringify([EVAL, OBS].sort()) && JSON.stringify(names(/from '\.\/shadowPressureEvaluation'/)) === JSON.stringify([OBS]));
-check('the orchestrator\'s diagnostics entry point is called by exactly one production module, the shadow boundary', JSON.stringify(names(/\borchestrateConstructDayWithDiagnostics\(/)) === JSON.stringify([ORCH, OBS].sort()));
+check('the helper is imported only by the evaluator, the boundary and (O5 P4a) the two promotion-input modules; the evaluator only by the boundary', JSON.stringify(names(/from '\.\/abovePressurePrecedence'/)) === JSON.stringify([EVAL, OBS, ...PROMOTION_FILES].sort()) && JSON.stringify(names(/from '\.\/shadowPressureEvaluation'/)) === JSON.stringify([OBS]));
+check('the orchestrator\'s diagnostics entry point is called by exactly two production modules, the shadow boundary and (O5 P4a) the promotion preparation boundary', JSON.stringify(names(/\borchestrateConstructDayWithDiagnostics\(/)) === JSON.stringify([ORCH, OBS, PROMOTION_FILES[1]].sort()));
 check('NOT A POLICY CONSUMER: no active comparator, Constructor, placement, capacity, replenishment, preview, signing, acceptance, persistence, Recomposition, Move, route, schema or migration mentions the shadow stage', NEVER_SHADOW.every((f) => !SHADOW_IDENT.test(src(f)) && !SHADOW_WORD.test(src(f))));
 const migrationSql = fs.readdirSync(path.join(root, 'apps/web/prisma/migrations'), { withFileTypes: true }).filter((e) => e.isDirectory()).map((e) => fs.readFileSync(path.join(root, 'apps/web/prisma/migrations', e.name, 'migration.sql'), 'utf8'));
 check('NO PERSISTENCE: the Prisma schema and all 43 migration directories mention no shadow stage; no migration was added', !/shadow/i.test(read('apps/web/prisma/schema.prisma')) && migrationSql.length === 43 && migrationSql.every((s) => !/shadowPressure|abovePressure/i.test(s)));
