@@ -37,6 +37,8 @@ import type { DecisionFacts, DecisionFactsByIntentId } from './decisionFacts';
 import { encodeGoalDemandIntentId } from './goalDemandIntentId';
 import { localCalendarWeekBounds } from './goalActivityRhythm';
 import { loadEligibleGoalDemand, createRealGoalDemandCandidatesDeps, type GoalDemandCandidate, type GoalDemandCandidatesDeps } from './goalDemandCandidates';
+import { buildGoalActivityRhythmFactsFromOccurrenceRows } from './db';
+import type { DecisionSchedulingContext } from './decisionSchedulingContext';
 
 /** Pure translation of already-canonical Goal demand into generic facts,
  * restricted to the intent ids actually present in the request. */
@@ -66,6 +68,22 @@ export function translateGoalDemandToDecisionFacts(
     });
   }
   return factsByIntentId;
+}
+
+/**
+ * O5 P2d -- the Rhythm demand dependencies answered from ONE coherent `DecisionSchedulingContext` instead of live reads, so
+ * the recurrence facts derive from the same database snapshot as the duration, availability and blocker inputs of the same
+ * evaluation. The eligibility, counting and week arithmetic remain `loadEligibleGoalDemand`'s own (this only supplies the
+ * rows); every call returns fresh objects.
+ */
+export function createGoalDemandDepsFromSchedulingContext(context: DecisionSchedulingContext): GoalDemandCandidatesDeps {
+  return {
+    loadCandidateGoalActivities: async () => context.recurrence.candidateRows.map((row) => ({ ...row })),
+    loadRhythmFacts: async (_userId, goalActivityIds, timezone) => {
+      const wanted = new Set(goalActivityIds);
+      return buildGoalActivityRhythmFactsFromOccurrenceRows(context.recurrence.occurrenceRows.filter((row) => wanted.has(row.goalActivityId)), timezone);
+    },
+  };
 }
 
 /**

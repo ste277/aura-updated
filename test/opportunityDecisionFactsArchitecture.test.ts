@@ -141,7 +141,8 @@ function listTs(dir: string): string[] {
 const all = [...listTs(lib), ...listTs(app)];
 const consumersOf = (needle: RegExp, ...excluding: string[]) => all.filter((f) => !excluding.some((x) => f.endsWith(x)) && needle.test(fs.readFileSync(f, 'utf8'))).map((f) => path.basename(f)).sort();
 check('the enrichment is invoked only by the generic fact-preparation module (O5 P1: it moved from the preview handler)', JSON.stringify(consumersOf(/from '[^']*opportunityDecisionFacts'/, 'opportunityDecisionFacts.ts')) === JSON.stringify(['decisionFactPreparation.ts']));
-check('no component, page or route other than the preview route wires the range loaders to a user', JSON.stringify(consumersOf(/createRealOpportunityRangeDeps/, 'opportunityRangeRealDeps.ts')) === JSON.stringify(['route.ts']));
+// O5 P2d: the preview route now supplies the coherent snapshot instead; the live range deps are wired by no production file.
+check('no component, page or route wires the LIVE range loaders to a user any more (the preview route binds the coherent scheduling snapshot instead)', JSON.stringify(consumersOf(/createRealOpportunityRangeDeps/, 'opportunityRangeRealDeps.ts')) === JSON.stringify([]));
 check('opportunity facts are never read by any component/page (no new user-facing surface)', !listTs(app).some((f) => /\.tsx$/.test(f) && /viableDays|unknownDays|durationBasis|OpportunityDecisionFacts/.test(fs.readFileSync(f, 'utf8'))));
 check('the only readers of viableDays/unknownDays outside the engine are the types module, the enrichment, the P2a evidence copy (copies by value, interprets nothing) and the unwired P2b pressure deriver (reads immutable evidence only)', JSON.stringify(consumersOf(/viableDays|unknownDays/, 'opportunityProjection.ts')) === JSON.stringify(['decisionEvidence.ts', 'decisionFacts.ts', 'decisionPressure.ts', 'opportunityDecisionFacts.ts']));
 

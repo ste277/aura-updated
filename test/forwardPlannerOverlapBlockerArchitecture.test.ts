@@ -51,7 +51,8 @@ check('LOADER: the orchestrator imports the canonical overlap loader `listPlanne
 check('NO START-SCOPED LOADER: no Forward Planner module (orchestrator, pure planner, route) references `listPlannedActivitiesForDay`', plannerFiles.every((p) => !/listPlannedActivitiesForDay/.test(p.src)));
 check('NO NEW SQL: no Forward Planner module contains SQL against PlannedActivity (no table reference, SELECT, INSERT, UPDATE, DELETE or BETWEEN)', plannerFiles.every((p) => !/"PlannedActivity"|\bSELECT\b|\bINSERT\b|\bUPDATE\b|\bDELETE\b|\bBETWEEN\b/.test(p.src)));
 check('the canonical overlap predicate is defined exactly once in db.ts and is half-open: `plannedStartAt < $3 AND plannedEndAt > $2`, user-scoped, CANCELLED excluded in SQL', count(/"plannedStartAt" < \$3 AND "plannedEndAt" > \$2/g, db) === 1 && /WHERE "userId" = \$1 AND status <> 'CANCELLED' AND "plannedStartAt" < \$3 AND "plannedEndAt" > \$2/.test(db));
-check('the overlap loader is unchanged in shape: `(userId, from, to, executor = pool)`', /export async function listPlannedActivitiesOverlappingRange\(userId: string, from: Date, to: Date, executor: QueryExecutor = pool\)/.test(db));
+// O5 P2d narrowed the executor TYPE to the read-only interface (a pool or transaction client still satisfies it); arity, default and semantics are unchanged.
+check('the overlap loader is unchanged in shape: `(userId, from, to, executor = pool)`', /export async function listPlannedActivitiesOverlappingRange\(userId: string, from: Date, to: Date, executor: (?:Read)?QueryExecutor = pool\)/.test(db));
 
 // ---- exactly one load, never per date / per candidate ----
 check('SINGLE LOAD: exactly one call to the overlap loader in the whole orchestrator', count(/listPlannedActivitiesOverlappingRange\(/g, orch) === 1);

@@ -299,6 +299,12 @@ jobs:
         run: npx ts-node test/shadowPressureEvaluation.test.ts
       - name: Run shadow pressure architecture test
         run: npx ts-node test/shadowPressureArchitecture.test.ts
+      # Constructor Decision Intelligence O5 P2d -- every database-derived decision-evidence input is read once, in
+      # one REPEATABLE READ transaction, into a detached deep-frozen context; CPU projection follows the transaction.
+      - name: Run decision scheduling context test
+        run: npx ts-node test/decisionSchedulingContext.test.ts
+      - name: Run decision scheduling context architecture test
+        run: npx ts-node test/decisionSchedulingContextArchitecture.test.ts
       # Constructor scheduling correctness -- the target-day blocker load
       # uses half-open OVERLAP semantics (a plan that starts before the day
       # but runs into it must block), through the one shared definition.
@@ -556,6 +562,10 @@ jobs:
       # evidence for canonical Goal demand, identically for manual and automatic entry.
       - name: Run decision pressure reachability DB test
         run: npx ts-node test/decisionPressureReachabilityDb.test.ts
+      # Constructor Decision Intelligence O5 P2d -- real-DB concurrency proof (explicit barriers, no sleeps) that
+      # the evidence inputs come from ONE REPEATABLE READ snapshot, where independent reads observed mixed states.
+      - name: Run decision scheduling snapshot DB test
+        run: npx ts-node test/decisionSchedulingSnapshotDb.test.ts
       # Constructor scheduling correctness -- real-DB regression for the
       # overnight/multi-day overlapping plan blocker defect.
       - name: Run Constructor overlapping blocker DB test

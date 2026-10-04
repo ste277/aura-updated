@@ -67,9 +67,11 @@ check('O3: provider imports no opportunity (O1/O2) module and no range/availabil
 check('O3: the canonical week helper lives with the Rhythm week-start it is derived from', /export function localCalendarWeekBounds\(/.test(read('../apps/web/lib/goalActivityRhythm.ts')) && /const startDate = localCalendarWeekStart\(localDateStr\);/.test(read('../apps/web/lib/goalActivityRhythm.ts')));
 check('O3: decisionFacts.ts CARRIES the period bounds but calculates nothing (no date arithmetic, no helper, no Date)', /periodStartDate: string;/.test(decisionFactsSrc) && /periodEndDate: string;/.test(decisionFactsSrc) && !/addDays|getWeekday|getUTC|setUTC|Date\.|new Date|Math\.|localCalendar/.test(stripComments(decisionFactsSrc)));
 check('O4: opportunity facts are the generic TYPE only in decisionFacts.ts; the Goal provider produces none and never learns coverage/viability', /viableDays: number;/.test(decisionFactsSrc) && !/viableDays|unknownDays|coverage|OpportunityDecisionFacts|opportunity/i.test(stripComments(providerSrc)));
-check('provider imports db.ts for the User TYPE only (no direct query)', /import type \{ User \} from '\.\/db';/.test(providerSrc) && !/from '\.\/db'/.test(providerSrc.replace("import type { User } from './db';", '')));
+// O5 P2d: the provider's context-backed dependencies map the snapshot's occurrence rows with the existing PURE builder (a value import from db.ts); the provider itself still issues no query.
+check('provider imports db.ts for the User TYPE and the one pure rhythm-facts row mapper only (no direct query)', /import type \{ User \} from '\.\/db';/.test(providerSrc) && /import \{ buildGoalActivityRhythmFactsFromOccurrenceRows \} from '\.\/db';/.test(providerSrc) && !/from '\.\/db'/.test(providerSrc.replace("import type { User } from './db';", '').replace("import { buildGoalActivityRhythmFactsFromOccurrenceRows } from './db';", '')) && !/\bpool\b|\.query\(/.test(providerSrc));
 
-check('route wires the source-specific provider into the generic loader seam', /loadGoalDecisionFacts/.test(previewRouteSrc) && /loadDecisionFacts:/.test(previewRouteSrc));
+// O5 P2d: the route wires the source-specific provider into the generic seam through the coherent snapshot (the facts are derived from the context, not from independent live reads).
+check('route wires the source-specific provider into the generic loader seam (through the coherent scheduling context)', /loadGoalDecisionFacts/.test(previewRouteSrc) && /loadDecisionFactsFromContext:/.test(previewRouteSrc) && /createGoalDemandDepsFromSchedulingContext/.test(previewRouteSrc));
 
 // ============================================================
 // INERTNESS -- no decision/acceptance/persistence consumer

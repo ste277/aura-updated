@@ -82,6 +82,15 @@ export type OpportunityRangeErrorCode = 'INVALID_DATE' | 'INVALID_RANGE' | 'RANG
 
 export type OpportunityRangeResult = { status: 'OK'; inputs: OpportunityRangeInputs } | { status: 'INVALID_INPUT'; code: OpportunityRangeErrorCode };
 
+/**
+ * O5 P2d -- the UTC bounds `loadOpportunityRangeInputs` asks its plan loader for, for an inclusive civil-date range: local
+ * start of the first date through local start of the day after the last date. Exported so a snapshot read can fetch EXACTLY
+ * the range the projection will later request, from one definition.
+ */
+export function computeOpportunityRangeBounds(startDate: string, endDate: string, timezone: string): { from: Date; to: Date } {
+  return { from: localDateTimeToUTC(startDate, '00:00', timezone), to: localDateTimeToUTC(addDaysToDateStr(endDate, 1), '00:00', timezone) };
+}
+
 type ValidatedRange = { ok: true; dates: string[]; bounds: { from: Date; to: Date } } | { ok: false; code: OpportunityRangeErrorCode };
 
 function validateRange(request: OpportunityRangeRequest): ValidatedRange {
@@ -105,7 +114,7 @@ function validateRange(request: OpportunityRangeRequest): ValidatedRange {
   return {
     ok: true,
     dates,
-    bounds: { from: localDateTimeToUTC(startDate, '00:00', timezone), to: localDateTimeToUTC(addDaysToDateStr(endDate, 1), '00:00', timezone) },
+    bounds: computeOpportunityRangeBounds(startDate, endDate, timezone),
   };
 }
 

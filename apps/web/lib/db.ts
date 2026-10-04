@@ -38,6 +38,58 @@ export async function beginTransaction(): Promise<PoolClient> {
   return client;
 }
 
+/**
+ * O5 P2d -- the NARROWEST thing a read needs from the database: a `query` that returns rows. A `Pool`, a `PoolClient` and
+ * the snapshot executor below all satisfy it structurally, which is how the SAME read function runs unchanged against the
+ * global pool (every existing caller) or inside one coherent snapshot (the decision scheduling context loader). It exposes
+ * no `release`, `connect`, `end`, transaction control or event API.
+ */
+export interface ReadQueryExecutor {
+  query(text: string, params?: unknown[]): Promise<{ rows: any[] }>;
+}
+
+/**
+ * O5 P2d -- runs `read` inside ONE PostgreSQL `REPEATABLE READ` transaction and returns whatever it returns.
+ *
+ * SNAPSHOT: PostgreSQL takes a REPEATABLE READ transaction's snapshot at its FIRST non-transaction-control statement (the
+ * first query `read` issues), not at `BEGIN`; every later statement in the transaction sees exactly the data committed
+ * before that first statement and never a concurrent commit.
+ *
+ * READ-ONLY BY CONSTRUCTION AT THE APPLICATION LEVEL: the executor handed to `read` accepts SELECT / WITH statements only
+ * (anything else throws before it reaches the driver), takes no lock beyond what a plain SELECT takes, and stops working
+ * the moment `read` settles -- the transaction client never escapes this function, so nothing can be queried against a
+ * finished snapshot or against a live transaction from outside. The transaction is committed (it wrote nothing) or rolled
+ * back on error, and the connection is always released. Nothing but database reads belongs inside `read`: no CPU-heavy
+ * projection, no timing search, no Constructor, no network call (the connection is held for the duration).
+ */
+export async function withRepeatableReadSnapshot<T>(read: (executor: ReadQueryExecutor) => Promise<T>): Promise<T> {
+  const client = await pool.connect();
+  let open = true;
+  try {
+    await client.query('BEGIN ISOLATION LEVEL REPEATABLE READ');
+    const executor: ReadQueryExecutor = {
+      query: (text, params) => {
+        if (!open) throw new Error('snapshot executor used after the snapshot ended');
+        if (!/^\s*(SELECT|WITH)\b/i.test(text) || /;\s*\S/.test(text)) throw new Error('the snapshot executor is read-only: a single SELECT / WITH statement only');
+        return client.query(text, params as unknown[] | undefined);
+      },
+    };
+    let result: T;
+    try {
+      result = await read(executor);
+    } finally {
+      open = false;
+    }
+    await client.query('COMMIT');
+    return result;
+  } catch (err) {
+    await client.query('ROLLBACK').catch(() => {});
+    throw err;
+  } finally {
+    client.release();
+  }
+}
+
 export interface User {
   id: string;
   email: string;
@@ -975,7 +1027,7 @@ export async function listPlannedActivitiesForDay(userId: string, from: Date, to
  * actually block) is applied by the caller via `isActivePlanBlocker`. READ-ONLY,
  * scoped to `userId`, one query for any range length.
  */
-export async function listPlannedActivitiesOverlappingRange(userId: string, from: Date, to: Date, executor: QueryExecutor = pool): Promise<PlannedActivity[]> {
+export async function listPlannedActivitiesOverlappingRange(userId: string, from: Date, to: Date, executor: ReadQueryExecutor = pool): Promise<PlannedActivity[]> {
   const result = await executor.query(
     `SELECT * FROM "PlannedActivity"
      WHERE "userId" = $1 AND status <> 'CANCELLED' AND "plannedStartAt" < $3 AND "plannedEndAt" > $2
@@ -1992,8 +2044,8 @@ export async function createHabitLog(input: {
   }
 }
 
-export async function listHabitLogs(userId: string): Promise<HabitLogRow[]> {
-  const result = await pool.query(
+export async function listHabitLogs(userId: string, executor: ReadQueryExecutor = pool): Promise<HabitLogRow[]> {
+  const result = await executor.query(
     `SELECT * FROM "HabitLog" WHERE "userId" = $1 ORDER BY "logTimestamp" DESC LIMIT 50`,
     [userId]
   );
@@ -2246,8 +2298,8 @@ export interface UserActivityPreferenceRow {
   updatedAt: Date;
 }
 
-export async function listUserActivityPreferenceRows(userId: string): Promise<UserActivityPreferenceRow[]> {
-  const result = await pool.query(
+export async function listUserActivityPreferenceRows(userId: string, executor: ReadQueryExecutor = pool): Promise<UserActivityPreferenceRow[]> {
+  const result = await executor.query(
     `SELECT id, "userId", "activityId", "preferredDurationMinutes", "createdAt", "updatedAt"
      FROM "UserActivityPreference"
      WHERE "userId" = $1
@@ -2309,8 +2361,8 @@ export interface UserAvailabilityPeriodRow {
   updatedAt: Date;
 }
 
-export async function listUserAvailabilityPeriods(userId: string): Promise<UserAvailabilityPeriodRow[]> {
-  const result = await pool.query(
+export async function listUserAvailabilityPeriods(userId: string, executor: ReadQueryExecutor = pool): Promise<UserAvailabilityPeriodRow[]> {
+  const result = await executor.query(
     `SELECT id, "userId", weekday, "startTime", "endTime", "createdAt", "updatedAt"
      FROM "UserAvailabilityPeriod"
      WHERE "userId" = $1
@@ -2318,6 +2370,13 @@ export async function listUserAvailabilityPeriods(userId: string): Promise<UserA
     [userId]
   );
   return result.rows;
+}
+
+/** O5 P2d -- the persisted "has this user configured availability" flag, readable through a snapshot executor so it is
+ * seen from the SAME snapshot as the availability periods it qualifies (the preview's `User` object is read earlier). */
+export async function readUserAvailabilityConfigured(userId: string, executor: ReadQueryExecutor = pool): Promise<boolean> {
+  const result = await executor.query('SELECT "availabilityConfigured" FROM "User" WHERE id = $1', [userId]);
+  return result.rows[0]?.availabilityConfigured === true;
 }
 
 /** No upsert/uniqueness constraint -- unlike `UserActivityPreference`
@@ -2867,17 +2926,33 @@ export async function loadGoalActivityRhythmFacts(userId: string, goalActivityId
  * Map (never an empty-array entry), matching loadGoalContextsForPlanIds'
  * own "no entry means none" convention.
  */
-export async function loadGoalActivityRhythmFactsForActivities(userId: string, goalActivityIds: readonly string[], timezone: string): Promise<Map<string, GoalActivityRhythmOccurrenceFact[]>> {
-  const factsByActivity = new Map<string, GoalActivityRhythmOccurrenceFact[]>();
-  if (goalActivityIds.length === 0) return factsByActivity;
-  const result = await pool.query(
+/** O5 P2d -- one occurrence's raw database row for the Rhythm facts: which GoalActivity, when its linked plan starts, and that
+ * plan's status. Detached scalars (the instant is returned as read; callers copy it). */
+export interface GoalActivityOccurrenceRow {
+  goalActivityId: string;
+  plannedStartAt: Date | string;
+  status: string;
+}
+
+/** The raw read behind `loadGoalActivityRhythmFactsForActivities` (the SQL, unchanged), separated so the SAME rows can be read
+ * through a snapshot executor and turned into facts later by the same pure mapping. */
+export async function listGoalActivityOccurrenceRowsForActivities(userId: string, goalActivityIds: readonly string[], executor: ReadQueryExecutor = pool): Promise<GoalActivityOccurrenceRow[]> {
+  if (goalActivityIds.length === 0) return [];
+  const result = await executor.query(
     `SELECT gao."goalActivityId", pa."plannedStartAt", pa.status
      FROM "GoalActivityOccurrence" gao
      JOIN "PlannedActivity" pa ON pa.id = gao."plannedActivityId"
      WHERE gao."userId" = $1 AND gao."goalActivityId" = ANY($2::text[])`,
     [userId, [...goalActivityIds]]
   );
-  for (const row of result.rows) {
+  return result.rows;
+}
+
+/** Pure: the per-activity Rhythm occurrence facts for already-read rows (the shaping `loadGoalActivityRhythmFactsForActivities`
+ * has always applied). A goalActivityId with no rows has no entry. */
+export function buildGoalActivityRhythmFactsFromOccurrenceRows(rows: readonly GoalActivityOccurrenceRow[], timezone: string): Map<string, GoalActivityRhythmOccurrenceFact[]> {
+  const factsByActivity = new Map<string, GoalActivityRhythmOccurrenceFact[]>();
+  for (const row of rows) {
     const fact: GoalActivityRhythmOccurrenceFact = {
       localDate: getDatePartsInTimezone(timezone, new Date(row.plannedStartAt)).dateStr,
       contribution: deriveGoalActivityRhythmContribution(row.status as PlannedActivityStatusForRhythm),
@@ -2887,6 +2962,10 @@ export async function loadGoalActivityRhythmFactsForActivities(userId: string, g
     else factsByActivity.set(row.goalActivityId, [fact]);
   }
   return factsByActivity;
+}
+
+export async function loadGoalActivityRhythmFactsForActivities(userId: string, goalActivityIds: readonly string[], timezone: string): Promise<Map<string, GoalActivityRhythmOccurrenceFact[]>> {
+  return buildGoalActivityRhythmFactsFromOccurrenceRows(await listGoalActivityOccurrenceRowsForActivities(userId, goalActivityIds), timezone);
 }
 
 // Goals V2 Candidate A1 -- the ownership-scoped discovery query for
@@ -2919,8 +2998,8 @@ export interface CandidateGoalActivityForRhythmDemandRow {
   rhythmTargetPerWeek: number | null;
 }
 
-export async function loadCandidateGoalActivitiesForRhythmDemand(userId: string): Promise<CandidateGoalActivityForRhythmDemandRow[]> {
-  const result = await pool.query(
+export async function loadCandidateGoalActivitiesForRhythmDemand(userId: string, executor: ReadQueryExecutor = pool): Promise<CandidateGoalActivityForRhythmDemandRow[]> {
+  const result = await executor.query(
     `SELECT ga.id AS "goalActivityId", ga."goalId", g.title AS "goalTitle", ga.title, ga."activityId",
             ga."rhythmKind", ga."rhythmTargetPerWeek"
      FROM "GoalActivity" ga
