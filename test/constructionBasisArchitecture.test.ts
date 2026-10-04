@@ -50,7 +50,10 @@ const ORCH = 'apps/web/lib/dayConstructorOrchestrator.ts';
 /** The only production files that may name the basis at all. */
 /** O5 P4b1b -- the baseline placements module names the basis TYPES only (it validates against the basis; it never writes it). */
 const PLACEMENTS_MOD = 'apps/web/lib/baselinePlacements.ts';
-const BASIS_NAMING_ALLOW = [MOD, ORCH, PLACEMENTS_MOD];
+/** O5 P4b2a -- the promotion contention authority validates its pairing against the basis (TYPES only), and the internal promotion boundary hands the SAME run's basis outcome to it (one pass-through, never read). */
+const CONTENTION_MOD = 'apps/web/lib/promotionContentionAuthority.ts';
+const PROMOTION_PREP = 'apps/web/lib/promotionInputPreparation.ts';
+const BASIS_NAMING_ALLOW = [MOD, ORCH, PLACEMENTS_MOD, CONTENTION_MOD, PROMOTION_PREP];
 const BASIS_IDENT = /\b(ConstructionBasis[A-Za-z]*|assembleConstructionBasis|captureCandidateLists|constructionBasis|optionalBasisStep|initialCandidateLists)\b|constructionBasis['"]/;
 const MOD_IMPORTS = [`import type { DayIntent, DayIntentFlexibility, DayIntentImportance, ConstructionWindow } from './dayIntent';`, `import type { FixedPlacementConstraint, PlacementCandidate, PlacementTimingFit } from './dayConstructor';`, `import type { BlockedInterval, BlockedIntervalSource } from './dayCapacity';`];
 const POLICY_VOCAB = /DecisionPressure|LAST_KNOWN|PromotionInput|PromotionOwner|DecisionFacts|decisionFacts|DecisionEvidence|decisionEvidence|GoalDecisionFacts|shadow|abovePressure|ContentionTrace|recurrence|opportunity|featureFlag|isFeatureEnabled|process\.env|\benv\b/i;
@@ -69,7 +72,7 @@ const NEVER_BASIS = [
   'apps/web/lib/homeRecomposition.ts', 'apps/web/lib/planMove.ts', 'apps/web/lib/homeMove.ts', 'apps/web/lib/dayPlanPreviewPresentation.ts', 'apps/web/lib/dayPlanAcceptancePresentation.ts', 'apps/web/lib/db.ts',
   'apps/web/lib/decisionFacts.ts', 'apps/web/lib/decisionEvidence.ts', 'apps/web/lib/decisionFactPreparation.ts', 'apps/web/lib/decisionPressure.ts', 'apps/web/lib/goalDecisionFactsProvider.ts',
   'apps/web/lib/decisionSchedulingContext.ts', 'apps/web/lib/decisionSchedulingContextLoader.ts', 'apps/web/lib/abovePressurePrecedence.ts', 'apps/web/lib/shadowPressureEvaluation.ts', 'apps/web/lib/shadowPressureObservation.ts',
-  'apps/web/lib/promotionInput.ts', 'apps/web/lib/promotionInputPreparation.ts', 'apps/web/lib/opportunityProjection.ts', 'apps/web/lib/opportunityDecisionFacts.ts',
+  'apps/web/lib/promotionInput.ts', 'apps/web/lib/opportunityProjection.ts', 'apps/web/lib/opportunityDecisionFacts.ts',
   'apps/web/app/api/day-constructor/preview/route.ts', 'apps/web/app/api/day-constructor/accept/route.ts', 'apps/web/app/api/day/recompose/route.ts', 'apps/web/app/api/plans/[planId]/move/route.ts', 'apps/web/app/api/plans/route.ts',
 ];
 /** The orchestrator's exact assembly call: every value is the baseline run's own (no clock, no re-resolution). */
@@ -83,7 +86,7 @@ function audit(files: SrcFile[]): string[] {
   const notIn = (list: string[], allow: string[]) => list.filter((f) => !allow.includes(f));
   // W1 -- confinement and consumers
   notIn(by(BASIS_IDENT), BASIS_NAMING_ALLOW).forEach((f) => v.push(`W1:names-the-basis:${f}`));
-  notIn(by(/from '\.\/constructionBasis'/), [ORCH, PLACEMENTS_MOD]).forEach((f) => v.push(`W1:imports-the-basis-module:${f}`));
+  notIn(by(/from '\.\/constructionBasis'/), [ORCH, PLACEMENTS_MOD, CONTENTION_MOD]).forEach((f) => v.push(`W1:imports-the-basis-module:${f}`));
   for (const f of NEVER_BASIS) { const x = get(f); if (x && /constructionBasis|ConstructionBasis/.test(x.src)) v.push(`W1:surface-names-the-basis:${f}`); }
   // W2 -- the module
   const m = get(MOD);
@@ -132,7 +135,9 @@ function audit(files: SrcFile[]): string[] {
     if (/asis/.test(normalAndTrace)) v.push(`W3:normal-or-trace-entry-names-the-basis:${ORCH}`);
   }
   // W4 -- nothing downstream reads the produced outcome
-  for (const f of ['apps/web/lib/shadowPressureObservation.ts', 'apps/web/lib/promotionInputPreparation.ts']) { const x = get(f); if (x && /constructionBasis/.test(x.src)) v.push(`W4:diagnostics-consumer-reads-the-basis:${f}`); }
+  for (const f of ['apps/web/lib/shadowPressureObservation.ts']) { const x = get(f); if (x && /constructionBasis/.test(x.src)) v.push(`W4:diagnostics-consumer-reads-the-basis:${f}`); }
+  // O5 P4b2a: the promotion boundary may only PASS the outcome through, as the one fixed argument of the contention authority hand-over.
+  { const x = get(PROMOTION_PREP); if (x && ((x.src.match(/\bconstructionBasis\b/g) ?? []).length !== 1 || !/contentionFor\(diagnostics\.contentionTrace, input, diagnostics\.constructionBasis, diagnostics\.baselinePlacements\)/.test(x.src))) v.push(`W4:diagnostics-consumer-reads-the-basis:${PROMOTION_PREP}`); }
   notIn(by(/\borchestrateConstructDayWithDiagnostics\(/), [ORCH, 'apps/web/lib/shadowPressureObservation.ts', 'apps/web/lib/promotionInputPreparation.ts']).forEach((f) => v.push(`W4:new-caller-of-the-diagnostics-entry-point:${f}`));
   return v;
 }
@@ -150,10 +155,10 @@ check(`THE REAL PRODUCTION TREE HAS ZERO CONSTRUCTION-BASIS ARCHITECTURE VIOLATI
 
 console.log('=== confinement, producer and zero consumers ===');
 const mod = src(MOD); const orch = src(ORCH);
-check('THE BASIS VOCABULARY EXISTS IN EXACTLY THREE PRODUCTION FILES: the pure module, the orchestrator that produces it and (O5 P4b1b, TYPES only) the baseline placements module that validates against it', JSON.stringify(names(BASIS_IDENT)) === JSON.stringify([...BASIS_NAMING_ALLOW].sort()) && JSON.stringify(names(/from '\.\/constructionBasis'/)) === JSON.stringify([ORCH, PLACEMENTS_MOD].sort()) && !/^import (?!type )[^\n]*from '\.\/constructionBasis'/m.test(src(PLACEMENTS_MOD)));
+check('THE BASIS VOCABULARY EXISTS IN EXACTLY FIVE PRODUCTION FILES: the pure module, the orchestrator that produces it, (TYPES only) the baseline placements module and the promotion contention authority that validate against it, and the internal promotion boundary that hands the same-run outcome to the latter', JSON.stringify(names(BASIS_IDENT)) === JSON.stringify([...BASIS_NAMING_ALLOW].sort()) && JSON.stringify(names(/from '\.\/constructionBasis'/)) === JSON.stringify([ORCH, PLACEMENTS_MOD, CONTENTION_MOD].sort()) && !/^import (?!type )[^\n]*from '\.\/constructionBasis'/m.test(src(PLACEMENTS_MOD) + src(CONTENTION_MOD)));
 check('PRODUCER: the basis is produced only INSIDE the orchestration run -- one T1 capture and one T4 assembly, both through the private hand-off that only a diagnostics caller creates; the normal `orchestrateConstructDay` and the trace entry never name it, so the preview path does no basis work', count(/captureCandidateLists\(/g, orch) === 1 && count(/assembleConstructionBasis\(/g, orch) === 1 && /evidenceOut \? optionalBasisStep/.test(orch) && /if \(evidenceOut\) \{\s*evidenceOut\.constructionBasis =/.test(orch) && /return runOrchestration\(request, deps, constructDay\);/.test(orch));
 check('NO CALLER CAN MANUFACTURE A BASIS: the hand-off is a module-private interface, the only constructors are the orchestrator\'s own calls, and `orchestrateConstructDayWithDiagnostics` takes only (request, deps) -- there is no parameter that could carry a basis in', /^interface EvidenceHandOff \{/m.test(orch) && !/export interface EvidenceHandOff/.test(orch) && /export async function orchestrateConstructDayWithDiagnostics\(\s*request: ConstructDayRequest,\s*deps: DayConstructorOrchestratorDeps\s*\): Promise</.test(orch));
-check('ZERO CONSUMERS: nothing reads the produced outcome -- the orchestrator only writes `evidenceOut.constructionBasis` and returns `handOff.constructionBasis`; the shadow and promotion boundaries (the two diagnostics callers) never mention it; no other production file names it', count(/\.constructionBasis\b/g, orch) === 3 && !/constructionBasis/.test(src('apps/web/lib/shadowPressureObservation.ts') + src('apps/web/lib/promotionInputPreparation.ts')) && JSON.stringify(names(/\borchestrateConstructDayWithDiagnostics\(/)) === JSON.stringify([ORCH, 'apps/web/lib/promotionInputPreparation.ts', 'apps/web/lib/shadowPressureObservation.ts']));
+check('ZERO CONSUMERS: nothing reads the produced outcome -- the orchestrator only writes `evidenceOut.constructionBasis` and returns `handOff.constructionBasis`; the shadow boundary never mentions it, and the promotion boundary only PASSES the same-run outcome to the contention authority (one `diagnostics.constructionBasis` argument, never read); no other production file names it', count(/\.constructionBasis\b/g, orch) === 3 && !/constructionBasis/.test(src('apps/web/lib/shadowPressureObservation.ts')) && count(/\bconstructionBasis\b/g, src(PROMOTION_PREP)) === 1 && /contentionFor\(diagnostics\.contentionTrace, input, diagnostics\.constructionBasis, diagnostics\.baselinePlacements\)/.test(src(PROMOTION_PREP)) && JSON.stringify(names(/\borchestrateConstructDayWithDiagnostics\(/)) === JSON.stringify([ORCH, 'apps/web/lib/promotionInputPreparation.ts', 'apps/web/lib/shadowPressureObservation.ts']));
 check('NO PUBLIC / SIGNED / PERSISTED EXPOSURE: the Constructor, comparator, capacity, preview request / client / integrity, acceptance, persistence, Recomposition, Move, every route, db.ts and every Decision Intelligence module are free of the basis vocabulary', NEVER_BASIS.every((f) => !/constructionBasis|ConstructionBasis/.test(src(f))));
 const migrationSql = fs.readdirSync(path.join(root, 'apps/web/prisma/migrations'), { withFileTypes: true }).filter((e) => e.isDirectory()).map((e) => fs.readFileSync(path.join(root, 'apps/web/prisma/migrations', e.name, 'migration.sql'), 'utf8'));
 check('NO PERSISTENCE, NO SCHEMA: the Prisma schema and all 43 migration directories mention no construction basis; no migration was added', !/constructionBasis/i.test(read('apps/web/prisma/schema.prisma')) && migrationSql.length === 43 && migrationSql.every((s) => !/constructionBasis/i.test(s)));

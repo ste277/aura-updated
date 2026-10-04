@@ -25,6 +25,11 @@
  * result is discarded. This is the internal boundary P4b (or a test) calls; until then nothing in production calls it. It is
  * not part of any route, preview body, signed contract, acceptance, persistence or user-facing surface.
  *
+ * CONTENTION AUTHORITY (O5 P4b2a). The same run's diagnostics also hold the P3a trace, the ConstructionBasis and the BaselinePlacements, so this is
+ * the one boundary where all of them coexist with the assembled inputs. For each input it projects, once and with an isolated failure path, a
+ * narrow typed PromotionContentionAuthority (the exact intervals the candidate attempted and lost to its authorized owners) and returns it as the
+ * index-aligned sibling `contention`. Existing `promotion` semantics are unchanged; no second orchestration; the raw trace goes no further.
+ *
  * FAIL CLOSED. If the run is not READY, or any pure stage throws, the Constructor result is returned exactly as normal and
  * the outcome is UNAVAILABLE with no inputs -- a partial or guessed input is never produced.
  *
@@ -36,15 +41,16 @@ import { orchestrateConstructDayWithDiagnostics, type ConstructDayRequest, type 
 import { deriveDecisionPressure, type DecisionPressure } from './decisionPressure';
 import { projectAbovePressureFacts, type AbovePressureFacts } from './abovePressurePrecedence';
 import { assemblePromotionInputs, type PromotionInput } from './promotionInput';
+import { projectContentionAuthority, type PromotionContentionOutcome } from './promotionContentionAuthority';
 
 export type PromotionInputOutcome =
   | { readonly status: 'PREPARED'; readonly inputs: readonly PromotionInput[] }
   | { readonly status: 'UNAVAILABLE'; readonly reason: 'RUN_NOT_READY' | 'PREPARATION_FAILED' };
 
-export async function preparePromotionInputs(request: ConstructDayRequest, deps: DayConstructorOrchestratorDeps): Promise<{ result: OrchestrateConstructDayResult; promotion: PromotionInputOutcome }> {
+export async function preparePromotionInputs(request: ConstructDayRequest, deps: DayConstructorOrchestratorDeps): Promise<{ result: OrchestrateConstructDayResult; promotion: PromotionInputOutcome; contention: readonly PromotionContentionOutcome[] }> {
   const diagnostics = await orchestrateConstructDayWithDiagnostics(request, deps);
   const result = diagnostics.result;
-  if (result.status !== 'READY') return { result, promotion: Object.freeze({ status: 'UNAVAILABLE', reason: 'RUN_NOT_READY' }) };
+  if (result.status !== 'READY') return { result, promotion: Object.freeze({ status: 'UNAVAILABLE', reason: 'RUN_NOT_READY' }), contention: NO_AUTHORITIES };
   try {
     const pressureByIntentId = new Map<string, DecisionPressure>();
     const precedenceFactsByIntentId = new Map<string, AbovePressureFacts>();
@@ -55,8 +61,21 @@ export async function preparePromotionInputs(request: ConstructDayRequest, deps:
       precedenceFactsByIntentId.set(id, projectAbovePressureFacts(resolved.dayIntent));
     }
     const inputs = assemblePromotionInputs({ finalDay: result.preview.constructedDay, contentionTrace: diagnostics.contentionTrace, pressureByIntentId, precedenceFactsByIntentId, planningDate: diagnostics.planningDate });
-    return { result, promotion: Object.freeze({ status: 'PREPARED', inputs }) };
+    // O5 P4b2a: ONE contention authority per input, from this SAME run's trace, basis and baseline placements. Its failure is isolated:
+    // it can only make that entry UNAVAILABLE -- never the inputs, never the Constructor result.
+    const contention = Object.freeze(inputs.map((input) => contentionFor(diagnostics.contentionTrace, input, diagnostics.constructionBasis, diagnostics.baselinePlacements)));
+    return { result, promotion: Object.freeze({ status: 'PREPARED', inputs }), contention };
   } catch {
-    return { result, promotion: Object.freeze({ status: 'UNAVAILABLE', reason: 'PREPARATION_FAILED' }) };
+    return { result, promotion: Object.freeze({ status: 'UNAVAILABLE', reason: 'PREPARATION_FAILED' }), contention: NO_AUTHORITIES };
+  }
+}
+
+const NO_AUTHORITIES: readonly PromotionContentionOutcome[] = Object.freeze([]);
+
+function contentionFor(...args: Parameters<typeof projectContentionAuthority>): PromotionContentionOutcome {
+  try {
+    return projectContentionAuthority(...args);
+  } catch {
+    return Object.freeze({ status: 'UNAVAILABLE', reason: 'CAPTURE_FAILED' });
   }
 }
