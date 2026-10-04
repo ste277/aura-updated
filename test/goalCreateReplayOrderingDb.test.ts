@@ -11,12 +11,15 @@
  * THE FIX UNDER TEST. Each activity is persisted with its own strictly increasing `createdAt` (creation order is now durable)
  * and the load is `ORDER BY "createdAt", id` (a total order, deterministic under any remaining tie).
  *
- * This suite does not depend on the timing luck that exposed the bug: it loads ballast so the planner picks the reversing
- * plan, deliberately perturbs the physical row order, builds exact-timestamp ties directly, and asserts the outcome that
- * must hold under ANY plan. Idempotency semantics are unchanged: an identical replay succeeds, a materially different or
+ * This suite does not depend on the timing luck that exposed the bug: it loads ballast so the planner tends to pick the
+ * reversing plan, rewrites rows, builds exact-timestamp ties directly, and asserts the PRODUCT outcome that must hold under
+ * ANY plan and ANY physical row layout. It deliberately asserts nothing about PostgreSQL storage mechanics: the physical
+ * (heap/ctid) order of rows is not an Aura invariant, and a tuple rewrite is not guaranteed to change it, so no check
+ * here depends on the rows having actually moved. Idempotency semantics are unchanged: an identical replay succeeds, a materially different or
  * reordered one is still a conflict. Requires DATABASE_URL (fresh, 43 migrations).
  */
-import { upsertUserByEmail, beginTransaction, listGoalActivitiesWithLinkedPlanStatus } from '../apps/web/lib/db';
+import { upsertUserByEmail, beginTransaction, listGoalActivitiesWithLinkedPlanStatus, addGoalActivity } from '../apps/web/lib/db';
+import { deriveIdempotentGoalId } from '../apps/web/lib/goalCreateIdempotency';
 import { createSessionToken } from '../apps/web/lib/auth';
 import { POST as createGoal } from '../apps/web/app/api/goals/route';
 import { randomUUID } from 'crypto';
@@ -100,19 +103,43 @@ async function main() {
       check(`[${label}] a REORDERED replay is still a conflict (order stays meaningful and fail-closed): 409 IDEMPOTENCY_CONFLICT`, reordered.status === 409 && reordered.body.code === 'IDEMPOTENCY_CONFLICT');
     }
 
-    console.log('=== order perturbation: reversing the PHYSICAL row order must not change the answer ===');
-    const pert = await scenario('perturbed', tokenU, [A('First', 'workout'), A('Second', null), A('Third', 'meditation'), A('Fourth', null)]);
-    const physical = async () => (await sql(`SELECT title FROM "GoalActivity" WHERE "goalId" = $1 ORDER BY ctid`, [pert.goalId])).map((r) => r.title).join('|');
-    const before = await physical();
-    for (const title of ['First', 'Second', 'Third', 'Fourth']) await sql(`UPDATE "GoalActivity" SET title = title WHERE "goalId" = $1 AND title = $2`, [pert.goalId, title]); // rewrites each tuple, moving it
+    console.log('=== rewriting the rows must not change the answer (physical order is NOT asserted) ===');
+    const pert = await scenario('rewritten', tokenU, [A('First', 'workout'), A('Second', null), A('Third', 'meditation'), A('Fourth', null)]);
+    // Best-effort tuple rewrites (each UPDATE writes a new tuple version). Whether this changes the heap order is up to
+    // PostgreSQL and is deliberately neither asserted nor looped on: the product contract is that the load order and the
+    // replay do not depend on physical layout at all, whatever the layout turned out to be.
     for (const title of ['Fourth', 'Third', 'Second', 'First']) await sql(`UPDATE "GoalActivity" SET title = title WHERE "goalId" = $1 AND title = $2`, [pert.goalId, title]);
-    const after = await physical();
-    console.log(`   [info] physical (ctid) order before the perturbation: ${before}; after: ${after}`);
-    check('the PHYSICAL order was changed by the perturbation (the test really moved the rows)', before !== after);
     const listedAfter = await listGoalActivitiesWithLinkedPlanStatus(U.id, pert.goalId);
-    check('after the perturbation the load still returns request order (it does not depend on physical order)', listedAfter.map((r) => r.title).join('|') === 'First|Second|Third|Fourth');
+    check('after the rewrites the authoritative load still returns request order (it is a function of createdAt, id -- not of physical layout)', listedAfter.map((r) => r.title).join('|') === 'First|Second|Third|Fourth');
     const replayAfter = await post(tokenU, pert.body);
-    check('after the perturbation the identical replay still succeeds', replayAfter.status === 200 && replayAfter.body.goal.id === pert.goalId);
+    check('after the rewrites the identical replay still succeeds (200, same Goal)', replayAfter.status === 200 && replayAfter.body.goal.id === pert.goalId);
+    const swappedAfter = await post(tokenU, { ...pert.body, activities: [pert.body.activities[1], pert.body.activities[0], pert.body.activities[2], pert.body.activities[3]] });
+    check('after the rewrites a reordered replay is still 409 IDEMPOTENCY_CONFLICT', swappedAfter.status === 409 && swappedAfter.body.code === 'IDEMPOTENCY_CONFLICT');
+
+    console.log('=== maximum reviewed size: 20 activities ===');
+    const twenty: Activity[] = Array.from({ length: 20 }, (_, i) => A(`Activity ${String(i).padStart(2, '0')}`, i % 3 === 0 ? 'workout' : i % 3 === 1 ? null : 'meditation', { ...(i % 4 === 0 ? { rhythm: { kind: 'N_PER_WEEK', targetPerWeek: 2 } } : {}), ...(i % 5 === 0 ? { completionRequirement: { kind: 'DURATION', targetValue: 15 } } : {}) }));
+    const big = await scenario('twenty', tokenU, twenty);
+    const bigRows = await sql(`SELECT title, "createdAt" FROM "GoalActivity" WHERE "goalId" = $1 ORDER BY "createdAt", id`, [big.goalId]);
+    const bigTimes = bigRows.map((r) => new Date(r.createdAt).getTime());
+    check('20 ACTIVITIES: created (200) and exactly 20 GoalActivity rows persisted', big.created.status === 200 && (await sql(`SELECT count(*)::int n FROM "GoalActivity" WHERE "goalId" = $1`, [big.goalId]))[0].n === 20);
+    check('20 ACTIVITIES: the persisted order is exactly the request order 0..19, and so is the authoritative load', names(bigRows) === twenty.map((a) => a.title).join('|') && (await listGoalActivitiesWithLinkedPlanStatus(U.id, big.goalId)).map((r) => r.title).join('|') === twenty.map((a) => a.title).join('|'));
+    check('20 ACTIVITIES: createdAt is strictly increasing in request order (20 distinct instants)', bigTimes.length === 20 && bigTimes.every((t, i) => i === 0 || t > bigTimes[i - 1]) && new Set(bigTimes).size === 20);
+    check('20 ACTIVITIES: the spread is exactly 19 ms (max - min), the documented bound (the last activity keeps the transaction instant, each earlier one is 1 ms before the next)', bigTimes[19] - bigTimes[0] === 19);
+    const txInstant = new Date((await sql(`SELECT "createdAt" FROM "Goal" WHERE id = $1`, [big.goalId]))[0].createdAt).getTime(); // the Goal is inserted in the same transaction with now()
+    check('20 ACTIVITIES: NO FUTURE TIMESTAMP -- no activity createdAt exceeds the creation transaction\'s own instant (the Goal row\'s now()), and the last activity equals it exactly', bigTimes.every((t) => t <= txInstant) && bigTimes[19] === txInstant);
+    // Deliberately NOT asserted: that every activity.createdAt >= Goal.createdAt. Early activities sit up to 19 ms BEFORE the Goal's
+    // createdAt by design, and nothing in production reads GoalActivity.createdAt for anything but the ORDER BY of the load.
+    const bigReplay = await post(tokenU, big.body);
+    check('20 ACTIVITIES: IDENTICAL REPLAY succeeds -- 200, the same Goal id, 20 activities, one Goal, still exactly 20 GoalActivity rows', bigReplay.status === 200 && bigReplay.body.goal.id === big.goalId && bigReplay.body.activities.length === 20 && (await sql(`SELECT count(*)::int n FROM "Goal" WHERE id = $1`, [big.goalId]))[0].n === 1 && (await sql(`SELECT count(*)::int n FROM "GoalActivity" WHERE "goalId" = $1`, [big.goalId]))[0].n === 20);
+    const bigSwapped = [...twenty]; [bigSwapped[7], bigSwapped[12]] = [bigSwapped[12], bigSwapped[7]];
+    const bigReordered = await post(tokenU, { ...big.body, activities: bigSwapped });
+    check('20 ACTIVITIES: a REORDERED replay (two activities swapped) is 409 IDEMPOTENCY_CONFLICT', bigReordered.status === 409 && bigReordered.body.code === 'IDEMPOTENCY_CONFLICT');
+    await addGoalActivity(U.id, big.goalId, { title: 'Later add', activityId: null });
+    const afterAdd = await listGoalActivitiesWithLinkedPlanStatus(U.id, big.goalId);
+    check('20 ACTIVITIES: an activity added LATER through the existing production path (addGoalActivity) sorts after all 20 originals', afterAdd.length === 21 && afterAdd[20].title === 'Later add' && afterAdd.slice(0, 20).map((r) => r.title).join('|') === twenty.map((a) => a.title).join('|'));
+    const goalsBefore21 = (await sql(`SELECT count(*)::int n FROM "Goal" WHERE "userId" = $1`, [U.id]))[0].n;
+    const tooMany = await post(tokenU, { title: 'Twenty-one', activities: [...twenty, A('One too many', null)], clientRequestId: randomUUID() });
+    check('MAXIMUM CONTRACT: 20 remains the API safety maximum -- a 21-activity request is rejected (400) with nothing written', tooMany.status === 400 && (await sql(`SELECT count(*)::int n FROM "Goal" WHERE "userId" = $1`, [U.id]))[0].n === goalsBefore21);
 
     console.log('=== duplicate-looking activities are not collapsed ===');
     const dup = await scenario('duplicates', tokenU, [A('Same', 'workout', { rhythm: { kind: 'N_PER_WEEK', targetPerWeek: 2 } }), A('Same', 'workout', { rhythm: { kind: 'N_PER_WEEK', targetPerWeek: 2 } }), A('Same', 'workout', { rhythm: { kind: 'N_PER_WEEK', targetPerWeek: 2 } })]);
@@ -160,6 +187,20 @@ async function main() {
     const orders = new Set<string>();
     for (let i = 0; i < 10; i += 1) orders.add((await listGoalActivitiesWithLinkedPlanStatus(U.id, 'gcro-tie-goal')).map((r) => r.id).join('|'));
     check('TOTAL ORDER: the load returns the tied rows ordered by id, identically on 10 reads, regardless of their physical (insertion) order', orders.size === 1 && [...orders][0] === 'gcro-tie-a|gcro-tie-b|gcro-tie-c');
+    // Deliberately NOT asserted: that id order reconstructs the original creation/request order of such rows. It cannot (the ids are
+    // random and the timestamps tie); `createdAt, id` only makes the retrieval of historical tied rows deterministic.
+
+    console.log('=== LEGACY DEBT (characterization only -- #201 does not repair historical rows) ===');
+    const legacyCrid = randomUUID();
+    const legacyGoalId = deriveIdempotentGoalId(U.id, legacyCrid);
+    await sql(`INSERT INTO "Goal"(id, "userId", title) VALUES ($1, $2, 'Legacy goal')`, [legacyGoalId, U.id]);
+    // a pre-#201-style Goal: two activities with EXACTLY the same createdAt, created in the order Zed-then-Alpha ... whose ids sort the other way
+    await sql(`INSERT INTO "GoalActivity"(id, "userId", "goalId", title, "createdAt") VALUES ('gcro-legacy-b', $1, $2, 'Zed', $3)`, [U.id, legacyGoalId, tieAt]);
+    await sql(`INSERT INTO "GoalActivity"(id, "userId", "goalId", title, "createdAt") VALUES ('gcro-legacy-a', $1, $2, 'Alpha', $3)`, [U.id, legacyGoalId, tieAt]);
+    const legacyBody = (order: string[]) => ({ title: 'Legacy goal', clientRequestId: legacyCrid, activities: order.map((t) => A(t, null)) });
+    const legacyOriginal = await post(tokenU, legacyBody(['Zed', 'Alpha']));
+    const legacyIdOrder = await post(tokenU, legacyBody(['Alpha', 'Zed']));
+    check('LEGACY DEBT: for a historical Goal with tied createdAt, the replay outcome is DETERMINISTIC (decided by id order), but it is not the original request order: replaying the original order (Zed, Alpha) gives a false 409, replaying id order (Alpha, Zed) gives 200', legacyOriginal.status === 409 && legacyOriginal.body.code === 'IDEMPOTENCY_CONFLICT' && legacyIdOrder.status === 200 && legacyIdOrder.body.goal.id === legacyGoalId);
 
     if (!allPassed) { console.error('SOME GOAL CREATE REPLAY ORDERING DB CHECKS FAILED'); process.exitCode = 1; return; }
     console.log('ALL GOAL CREATE REPLAY ORDERING DB CHECKS PASSED');
