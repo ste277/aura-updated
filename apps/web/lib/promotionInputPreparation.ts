@@ -8,6 +8,11 @@
  * pure assembler (promotionInput.ts). Nothing computed here can flow back into construction: the Constructor decided first,
  * from inputs that never included evidence, pressure, a trace or any promotion value.
  *
+ * OWNER PRESSURE (O5 P4a2). The pressure map holds EVERY resolved intent's derived pressure -- the candidate's and each
+ * potential owner's -- from the same run and the same immutable evidence, so a PromotionOwner's pressure and the candidate's
+ * belong to one evaluation. No second derivation path, no extra read, nothing caller-supplied. One intent id carries one
+ * pressure: a duplicate resolved id fails the whole preparation closed.
+ *
  * COHERENCE PROVENANCE. Pressure is derived here, from the evidence the orchestration itself prepared during THIS run
  * (`orchestrateConstructDayWithDiagnostics`' write-only hand-off) -- never accepted from a caller. When the run's
  * dependencies are the P2d snapshot-backed ones (the production preview binding), that evidence was built from the single
@@ -45,6 +50,7 @@ export async function preparePromotionInputs(request: ConstructDayRequest, deps:
     const precedenceFactsByIntentId = new Map<string, AbovePressureFacts>();
     for (const resolved of result.preview.resolvedIntents) {
       const id = resolved.requestedIntentId;
+      if (pressureByIntentId.has(id)) throw new Error('duplicate resolved intent id: one intent cannot carry two pressures'); // fail closed (caught below): never pick one
       pressureByIntentId.set(id, deriveDecisionPressure({ evidence: diagnostics.evidenceByIntentId.get(id), planningDate: diagnostics.planningDate, flexibility: resolved.dayIntent.flexibility }));
       precedenceFactsByIntentId.set(id, projectAbovePressureFacts(resolved.dayIntent));
     }

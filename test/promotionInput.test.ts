@@ -55,7 +55,8 @@ type FinalDay = PromotionInputAuthority['finalDay'];
 const finalDay = (proposed: string[], deferred: string[]) => ({ proposedItems: proposed.map((intentId) => ({ intentId })), deferredItems: deferred.map((intentId) => ({ intentId })) }) as unknown as FinalDay;
 const LKO: DecisionPressure = 'LAST_KNOWN_OPPORTUNITY';
 const authority = (o: { proposed: string[]; deferred: string[]; events?: ContentionEvent[]; pressure?: Record<string, DecisionPressure>; facts?: Record<string, AbovePressureFacts> }): PromotionInputAuthority => ({
-  finalDay: finalDay(o.proposed, o.deferred), contentionTrace: createContentionTrace(o.events ?? []), pressureByIntentId: new Map(Object.entries(o.pressure ?? {})), precedenceFactsByIntentId: new Map(Object.entries(o.facts ?? {})), planningDate: TODAY,
+  // O5 P4a2: every Proposed intent (a potential owner) carries its own pressure; unless a case states one it is NONE.
+  finalDay: finalDay(o.proposed, o.deferred), contentionTrace: createContentionTrace(o.events ?? []), pressureByIntentId: new Map(Object.entries({ ...Object.fromEntries(o.proposed.map((id) => [id, 'NONE' as DecisionPressure])), ...(o.pressure ?? {}) })), precedenceFactsByIntentId: new Map(Object.entries(o.facts ?? {})), planningDate: TODAY,
 });
 const ids = (inputs: readonly PromotionInput[]) => inputs.map((i) => i.candidateIntentId).join();
 const ownersOf = (inputs: readonly PromotionInput[], id: string) => inputs.find((i) => i.candidateIntentId === id)?.owners.map((o) => o.intentId).join();
@@ -114,17 +115,18 @@ console.log('=== several losers: 0..N inputs, independence, a shared owner is no
 console.log('=== P3b equivalence: an input exists IF AND ONLY IF P3b says PRESSURE_ELIGIBLE_AGAINST_ALL_FINAL_OWNERS (exhaustive matrix) ===');
 {
   const pressures: Array<DecisionPressure | undefined> = ['NONE', LKO, undefined];
+  const OWNER_PRESSURES: DecisionPressure[] = ['NONE', LKO]; // O5 P4a2: each owner's own pressure; existence must not depend on it
   const loserStates = ['DEFERRED', 'PROPOSED', 'ABSENT', 'DUPLICATE'] as const;
   const eventSets: ContentionEvent[][] = [[], [ev('B', 'A1')], [ev('B', 'A1'), ev('B', 'A2')], [ev('B', 'A2'), ev('B', 'A1', 3), ev('B', 'A1', 5)], [ev('B', 'GONE'), ev('B', 'A1')]];
   const ownerStates = ['PROPOSED', 'DEFERRED', 'ABSENT', 'DUPLICATE'] as const;
   const factChoices: Array<AbovePressureFacts | undefined> = [facts(H), facts(M), facts(L), facts(M, TODAY), facts(M, '2026-10-12'), undefined];
   let scenarios = 0; let eligibleCount = 0; let mismatch = ''; const pairsSeen = new Set<string>();
-  for (const pressure of pressures) for (const loserState of loserStates) for (const events of eventSets) for (const a1 of ownerStates) for (const a2 of ownerStates) for (const fb of factChoices) for (const f1 of factChoices) for (const f2 of factChoices) {
+  for (const pressure of pressures) for (const loserState of loserStates) for (const events of eventSets) for (const a1 of ownerStates) for (const a2 of ownerStates) for (const p1 of OWNER_PRESSURES) for (const p2 of OWNER_PRESSURES) for (const fb of factChoices) for (const f1 of factChoices) for (const f2 of factChoices) {
     const proposed: string[] = []; const deferred: string[] = [];
     const place = (id: string, state: string) => { if (state === 'PROPOSED' || state === 'DUPLICATE') proposed.push(id); if (state === 'DEFERRED') deferred.push(id); if (state === 'DUPLICATE') deferred.push(id); };
     place('B', loserState === 'DUPLICATE' ? 'DUPLICATE' : loserState === 'DEFERRED' ? 'DEFERRED' : loserState === 'PROPOSED' ? 'PROPOSED' : 'ABSENT');
     place('A1', a1); place('A2', a2);
-    const pressureMap: Record<string, DecisionPressure> = {}; if (pressure) pressureMap.B = pressure;
+    const pressureMap: Record<string, DecisionPressure> = { A1: p1, A2: p2 }; if (pressure) pressureMap.B = pressure;
     const factMap: Record<string, AbovePressureFacts> = {}; if (fb) factMap.B = fb; if (f1) factMap.A1 = f1; if (f2) factMap.A2 = f2;
     const auth = authority({ proposed, deferred, events, pressure: pressureMap, facts: factMap });
     const inputs = assemblePromotionInputs(auth);
@@ -134,12 +136,60 @@ console.log('=== P3b equivalence: an input exists IF AND ONLY IF P3b says PRESSU
     if (shadowEligible.length > 0) eligibleCount += 1;
     shadow.observations.forEach((o) => pairsSeen.add(o.classification));
     const sameIds = shadowEligible.map((o) => o.loserIntentId).join() === inputs.map((i) => i.candidateIntentId).join();
-    const sameOwners = shadowEligible.every((o) => o.owners.filter((w) => w.finalState === 'FINAL_PROPOSED').map((w) => w.ownerIntentId).join() === (ownersOf(inputs, o.loserIntentId) ?? '<none>'));
+    const sameOwners = shadowEligible.every((o) => o.owners.filter((w) => w.finalState === 'FINAL_PROPOSED').map((w) => w.ownerIntentId).join() === (ownersOf(inputs, o.loserIntentId) ?? '<none>')) && inputs.every((i) => i.owners.every((w) => w.pressure === auth.pressureByIntentId.get(w.intentId)));
     if (!(sameIds && sameOwners) && !mismatch) mismatch = JSON.stringify({ proposed, deferred, events: events.map((e) => `${e.loserIntentId}>${e.winnerIntentId}`), pressure, fb, f1, f2, inputs, shadow: shadow.observations.map((o) => `${o.loserIntentId}:${o.classification}`) });
   }
   console.log(`[info] ${scenarios} scenarios; ${eligibleCount} eligible; P3b classifications exercised: ${[...pairsSeen].sort().join(',')}`);
-  check(`EQUIVALENCE (${scenarios} exhaustive scenarios over pressure x loser final state x contention history x owner final states x precedence facts incl. missing): the set of candidates with an input equals the set P3b classifies PRESSURE_ELIGIBLE_AGAINST_ALL_FINAL_OWNERS, with the same final owners in the same order${mismatch ? ' -- first mismatch ' + mismatch : ''}`, mismatch === '' && eligibleCount > 0);
+  check(`EQUIVALENCE (${scenarios} exhaustive scenarios over pressure x loser final state x contention history x owner final states x each owner's own pressure x precedence facts incl. missing; owner pressure enriches the payload and never changes existence): the set of candidates with an input equals the set P3b classifies PRESSURE_ELIGIBLE_AGAINST_ALL_FINAL_OWNERS, with the same final owners in the same order${mismatch ? ' -- first mismatch ' + mismatch : ''}`, mismatch === '' && eligibleCount > 0);
   check('the matrix exercised every P3b non-eligible classification as well as eligibility (NOT_PRESSURED, NO_CONTENTION, NOT_FINAL_DEFERRED, NO_FINAL_CONTENTION_OWNER, BLOCKED_BY_STRONGER_OWNER, PRECEDENCE_ANOMALY, INCOMPLETE_INPUT), so every non-eligible class is proven to produce no input', ['NOT_PRESSURED', 'NO_CONTENTION', 'NOT_FINAL_DEFERRED', 'NO_FINAL_CONTENTION_OWNER', 'BLOCKED_BY_STRONGER_OWNER', 'PRESSURE_ELIGIBLE_AGAINST_ALL_FINAL_OWNERS', 'PRECEDENCE_ANOMALY', 'INCOMPLETE_INPUT'].every((c) => pairsSeen.has(c)));
+}
+
+console.log('=== O5 P4a2: owner pressure -- each owner carries its OWN categorical pressure; existence is unchanged ===');
+{
+  const two = { proposed: ['A1', 'A2'], deferred: ['B'], pressure: { B: LKO } as Record<string, DecisionPressure>, facts: { A1: facts(M), A2: facts(M), B: facts(M) } as Record<string, AbovePressureFacts> };
+  const owners = (inputs: readonly PromotionInput[]) => JSON.stringify(inputs[0]?.owners ?? []);
+  check('BASIC CONTROL: pressured candidate, owner pressure NONE -> the input exists and owner A carries pressure NONE', owners(assemblePromotionInputs(authority(base))) === JSON.stringify([{ intentId: 'A', pressure: 'NONE' }]));
+  const pressuredOwner = assemblePromotionInputs(authority({ ...base, pressure: { A: LKO, B: LKO } }));
+  check('PRESSURED OWNER CONTROL (closes the P4b0 discovery): the owner is ALSO LAST_KNOWN_OPPORTUNITY and everything above pressure ties -> the input STILL exists and the owner carries LAST_KNOWN_OPPORTUNITY (rejecting it is an active-policy rule for P4b, not an admission rule)', pressuredOwner.length === 1 && owners(pressuredOwner) === JSON.stringify([{ intentId: 'A', pressure: LKO }]));
+  const mixed = assemblePromotionInputs(authority({ ...two, pressure: { ...two.pressure, A1: 'NONE', A2: LKO }, events: [ev('B', 'A1'), ev('B', 'A2')] }));
+  check('MULTI-OWNER MIX: owners {A1 NONE, A2 LAST_KNOWN_OPPORTUNITY} are both retained, each with its own pressure, in trace order (nothing aggregated)', owners(mixed) === JSON.stringify([{ intentId: 'A1', pressure: 'NONE' }, { intentId: 'A2', pressure: LKO }]));
+  check('the owner pressure is the OWNER\'s, not the candidate\'s: a NONE owner of a LAST_KNOWN_OPPORTUNITY candidate is NONE, and reversing the owners\' pressures reverses the payload while the owner ORDER is unchanged', owners(assemblePromotionInputs(authority({ ...two, pressure: { ...two.pressure, A1: LKO, A2: 'NONE' }, events: [ev('B', 'A1'), ev('B', 'A2')] }))) === JSON.stringify([{ intentId: 'A1', pressure: LKO }, { intentId: 'A2', pressure: 'NONE' }]));
+  const allPressured = assemblePromotionInputs(authority({ ...two, pressure: { ...two.pressure, A1: LKO, A2: LKO }, events: [ev('B', 'A1'), ev('B', 'A2')] }));
+  check('ALL OWNERS PRESSURED: every owner is retained with LAST_KNOWN_OPPORTUNITY; the input is not suppressed', allPressured.length === 1 && allPressured[0].owners.length === 2 && allPressured[0].owners.every((w) => w.pressure === LKO));
+  check('STRONGER OWNER / ANOMALY are unchanged by owner pressure: no input whatever the owner\'s pressure', [LKO, 'NONE' as DecisionPressure].every((op) => assemblePromotionInputs(authority({ ...base, pressure: { A: op, B: LKO }, facts: { A: facts(H), B: facts(M) } })).length === 0 && assemblePromotionInputs(authority({ ...base, pressure: { A: op, B: LKO }, facts: { A: facts(L), B: facts(M) } })).length === 0));
+  check('HISTORICAL OWNER: a historical owner that is no longer final Proposed carries no payload at all -- it is absent, so its pressure is never read', (() => { const out = assemblePromotionInputs(authority({ proposed: ['A2'], deferred: ['B', 'A1'], events: [ev('B', 'A1', 0), ev('B', 'A2', 1)], pressure: { B: LKO, A2: 'NONE' }, facts: { A1: facts(H), A2: facts(M), B: facts(M) } })); return out.length === 1 && owners(out) === JSON.stringify([{ intentId: 'A2', pressure: 'NONE' }]); })());
+  check('REPEATED OWNER: one owner entry carrying exactly one pressure value however many events / rounds', owners(assemblePromotionInputs(authority({ ...base, pressure: { A: LKO, B: LKO }, events: [ev('B', 'A', 0, '10:00', '11:00'), ev('B', 'A', 1, '10:30', '11:30'), ev('B', 'A', 2)] }))) === JSON.stringify([{ intentId: 'A', pressure: LKO }]));
+  const partial = authority({ ...base });
+  const noOwnerPressure: PromotionInputAuthority = { ...partial, pressureByIntentId: new Map([['B', LKO]]) };
+  const shadowOfPartial = evaluateShadowPressure({ ...noOwnerPressure });
+  check('MISSING OWNER PRESSURE fails closed: with the candidate\'s pressure on record but no pressure for its final owner there is no input (never a partially authoritative owner) -- while the P3b oracle, which has no owner-pressure notion, still classifies the relationship eligible (this is an authority-completeness gate, not an eligibility change; the production boundary derives pressure for every resolved intent)', assemblePromotionInputs(noOwnerPressure).length === 0 && shadowOfPartial.observations.some((o) => o.classification === 'PRESSURE_ELIGIBLE_AGAINST_ALL_FINAL_OWNERS'));
+  check('a non-categorical owner value is never accepted either (an out-of-contract value is treated as missing)', assemblePromotionInputs({ ...partial, pressureByIntentId: new Map<string, DecisionPressure>([['B', LKO], ['A', 'HIGH' as unknown as DecisionPressure]]) }).length === 0);
+  check('ONE ENTRY, ONE PRESSURE: a pressure map holds exactly one value per intent id, so an owner can never resolve to two pressures within one assembly; duplicate ids in the final result fail closed (above)', new Map<string, DecisionPressure>([['A', 'NONE'], ['A', LKO]]).size === 1);
+  check('the candidate\'s own pressure is still encoded by existence only: the input has no candidate `pressure` field', !('pressure' in assemblePromotionInputs(authority(base))[0]));
+  check('OWNER ORDER IS UNCHANGED BY PRESSURE: owners follow first appearance in the trace for every combination of owner pressures', [['NONE', 'NONE'], ['NONE', LKO], [LKO, 'NONE'], [LKO, LKO]].every(([p1, p2]) => ownersOf(assemblePromotionInputs(authority({ ...two, pressure: { ...two.pressure, A1: p1 as DecisionPressure, A2: p2 as DecisionPressure }, events: [ev('B', 'A2'), ev('B', 'A1')] })), 'B') === 'A2,A1'));
+}
+
+console.log('=== VALID-ONLY matrix (normalised, internally consistent scheduling states only): eligibility identical to P3b, owner payload exact ===');
+{
+  // Only VALID states: every candidate has facts, one id per candidate, the loser is Deferred or Proposed, owners are Proposed or displaced (Deferred),
+  // the loser has a contention event with each historical owner, and every intent carries a categorical pressure.
+  const validFacts = [facts(H), facts(M), facts(L), facts(M, TODAY), facts(M, '2026-10-12'), facts(M, '2026-10-10'), facts(H, TODAY), facts(L, '2026-10-10')];
+  const eventSets: ContentionEvent[][] = [[ev('B', 'A1')], [ev('B', 'A1'), ev('B', 'A2')], [ev('B', 'A2'), ev('B', 'A1', 3), ev('B', 'A1', 5)], [ev('B', 'A1')]];
+  const PRS: DecisionPressure[] = ['NONE', LKO];
+  let n = 0; let eligible = 0; let bad = 0; let ownerPressureBad = 0;
+  for (const pb of PRS) for (const pa1 of PRS) for (const pa2 of PRS) for (const bs of ['D', 'P']) for (const events of eventSets) for (const s1 of ['P', 'D']) for (const s2 of ['P', 'D']) for (const fb of validFacts) for (const f1 of validFacts) for (const f2 of validFacts) {
+    const proposed: string[] = []; const deferred: string[] = [];
+    (bs === 'D' ? deferred : proposed).push('B'); (s1 === 'P' ? proposed : deferred).push('A1'); (s2 === 'P' ? proposed : deferred).push('A2');
+    const auth = authority({ proposed, deferred, events, pressure: { B: pb, A1: pa1, A2: pa2 }, facts: { B: fb, A1: f1, A2: f2 } });
+    const inputs = assemblePromotionInputs(auth);
+    const shadowEligible = evaluateShadowPressure({ ...auth }).observations.filter((o) => o.classification === 'PRESSURE_ELIGIBLE_AGAINST_ALL_FINAL_OWNERS');
+    n += 1; if (shadowEligible.length) eligible += 1;
+    const same = shadowEligible.map((o) => o.loserIntentId).join() === inputs.map((i) => i.candidateIntentId).join() && shadowEligible.every((o) => o.owners.filter((w) => w.finalState === 'FINAL_PROPOSED').map((w) => w.ownerIntentId).join() === ownersOf(inputs, o.loserIntentId));
+    if (!same) bad += 1;
+    if (!inputs.every((i) => i.owners.every((w) => w.pressure === auth.pressureByIntentId.get(w.intentId)))) ownerPressureBad += 1;
+  }
+  console.log(`[info] valid-only matrix: ${n} scenarios, ${eligible} eligible`);
+  check(`VALID-ONLY EQUIVALENCE (${n} valid scenarios = 2 candidate pressures x 4 owner-pressure combinations x 2 loser states x 4 contention histories x 4 owner states x 8^3 precedence facts): zero eligibility mismatches against P3b and every owner's payload pressure equals that owner's own pressure`, n === 131072 && eligible > 0 && bad === 0 && ownerPressureBad === 0);
 }
 
 console.log('=== ownership, immutability, determinism, purity ===');
@@ -151,7 +201,7 @@ console.log('=== ownership, immutability, determinism, purity ===');
   check('DEEP IMMUTABILITY: the collection, each input, the owner collection and each owner are frozen; writes at every depth throw', reachable(out).every((o) => Object.isFrozen(o)) && throwsTypeError(() => { (out as unknown as PromotionInput[]).push(out[0]); }) && throwsTypeError(() => { (out[0] as { candidateIntentId: string }).candidateIntentId = 'X'; }) && throwsTypeError(() => { (out[0].owners as unknown as unknown[]).push({}); }) && throwsTypeError(() => { (out[0].owners[0] as { intentId: string }).intentId = 'X'; }));
   const inputObjects = new Set<unknown>([...reachable(a.finalDay), ...reachable(a.contentionTrace), ...a.pressureByIntentId.keys(), ...reachable([...a.precedenceFactsByIntentId.values()])]);
   check('DETACHED: no object reachable from the output is shared with any input (no Constructor, trace or facts object is retained)', reachable(out).every((o) => !inputObjects.has(o)));
-  check('OUTPUT CONTENT: stable intent ids only -- the input keys are exactly candidateIntentId,owners and an owner has only intentId; no Date, Map, Set, function, pressure, importance, deadline, round, interval, count, reason, title or source', Object.keys(out[0]).sort().join() === 'candidateIntentId,owners' && Object.keys(out[0].owners[0]).join() === 'intentId' && reachable(out).every((o) => Array.isArray(o) || Object.getPrototypeOf(o) === Object.prototype) && !/Date|Map|Set|=>/.test(JSON.stringify(out)) && ['pressure', 'round', 'attempted', 'importance', 'deadline', 'count', 'title'].every((k) => !JSON.stringify(out).toLowerCase().includes(k)));
+  check('OUTPUT CONTENT: stable intent ids and each owner own categorical pressure only -- the input keys are exactly candidateIntentId,owners and an owner has only intentId,pressure (NONE | LAST_KNOWN_OPPORTUNITY); no candidate pressure copy, no Date, Map, Set, function, importance, deadline, round, interval, count, reason, title, evidence or source', Object.keys(out[0]).sort().join() === 'candidateIntentId,owners' && Object.keys(out[0].owners[0]).join() === 'intentId,pressure' && out.every((i) => i.owners.every((w) => w.pressure === 'NONE' || w.pressure === 'LAST_KNOWN_OPPORTUNITY')) && reachable(out).every((o) => Array.isArray(o) || Object.getPrototypeOf(o) === Object.prototype) && !/Date|Map|Set|=>/.test(JSON.stringify(out)) && ['round', 'attempted', 'importance', 'deadline', 'count', 'title', 'evidence', 'recurrence', 'opportunity', 'durationbasis'].every((k) => !JSON.stringify(out).toLowerCase().includes(k)));
   const again = assemblePromotionInputs(a);
   const firstObjects = new Set<unknown>(reachable(out));
   check('INDEPENDENT OWNERSHIP: two assemblies of the same authority share no object at any depth (no cached or shared owner / input record), so one consumer\'s reference can never be another\'s', JSON.stringify(out) === JSON.stringify(again) && reachable(again).every((o) => !firstObjects.has(o)));
@@ -259,15 +309,44 @@ const day = (r: any) => r.preview.constructedDay;
     check('GENERIC_FALLBACK (real): a candidate whose duration is the generic fallback has pressure NONE upstream -> zero PromotionInputs (P4a never inspects the duration basis)', fallback.inputs?.length === 0 && fallback.baselineSame && fallback.p3bAgrees);
   }
 
+  console.log('=== REAL pipeline (O5 P4a2): owner pressure comes from the same run\'s evidence, whatever the owner is ===');
+  {
+    const A = req('A', { originalOrder: 0 }); const B = req('B', { originalOrder: 1 });
+    const ownerPressures = (inputs: readonly PromotionInput[] | undefined, id: string) => JSON.stringify(inputs?.find((i) => i.candidateIntentId === id)?.owners ?? null);
+    const basic = await pipeline([A, B], ['B'], [SLOT, SLOT, []]);
+    check('BASIC (real): the pressured loser B vs an UNPRESSURED owner A -> the input exists and A carries pressure NONE', ownerPressures(basic.inputs, 'B') === JSON.stringify([{ intentId: 'A', pressure: 'NONE' }]) && basic.baselineSame && basic.p3bAgrees);
+    const bothPressured = await pipeline([A, B], ['A', 'B'], [SLOT, SLOT, []]);
+    check('PRESSURED OWNER (real; the P4b0 discovery): A and B are BOTH pressured (scarce Friday, resolved durations), tie on every dimension above pressure, B really loses to A -> the input STILL exists (eligibility unchanged, P3b agrees) and owner A carries LAST_KNOWN_OPPORTUNITY', ownerPressures(bothPressured.inputs, 'B') === JSON.stringify([{ intentId: 'A', pressure: 'LAST_KNOWN_OPPORTUNITY' }]) && bothPressured.baselineSame && bothPressured.p3bAgrees);
+    const A1 = req('A1', { durationMinutes: 30, originalOrder: 0 }); const A2 = req('A2', { durationMinutes: 30, originalOrder: 1 }); const B3 = req('B', { originalOrder: 2 });
+    const script = [[timing('11:00', '11:30')], [timing('11:30', '12:00')], [timing('11:15', '12:15')], []];
+    const mixed = await pipeline([A1, A2, B3], ['A1', 'B'], script);
+    check('MULTI-OWNER MIX (real): B really loses to TWO owners, one pressured (A1) and one not (A2) -> both retained in trace order with their own pressure', ownerPressures(mixed.inputs, 'B') === JSON.stringify([{ intentId: 'A1', pressure: 'LAST_KNOWN_OPPORTUNITY' }, { intentId: 'A2', pressure: 'NONE' }]) && mixed.baselineSame && mixed.p3bAgrees);
+    const allPressured = await pipeline([A1, A2, B3], ['A1', 'A2', 'B'], script);
+    check('ALL OWNERS PRESSURED (real): both owners are retained with LAST_KNOWN_OPPORTUNITY; the input is not suppressed', ownerPressures(allPressured.inputs, 'B') === JSON.stringify([{ intentId: 'A1', pressure: 'LAST_KNOWN_OPPORTUNITY' }, { intentId: 'A2', pressure: 'LAST_KNOWN_OPPORTUNITY' }]) && allPressured.p3bAgrees);
+    const strongerOwner = await pipeline([req('A', { importance: 'HIGH', originalOrder: 0 }), req('B', { importance: 'LOW', originalOrder: 1 })], ['A', 'B'], [SLOT, SLOT, []]);
+    check('STRONGER OWNER (real): a pressured HIGH owner still blocks -- no input whatever the owner\'s pressure', strongerOwner.inputs?.length === 0 && strongerOwner.p3bAgrees);
+    const fixedOwner = await pipeline([req('F', { flexibility: 'FIXED', fixedStart: at('11:00'), originalOrder: 0 } as Partial<RequestedDayIntent>), req('B', { originalOrder: 1 })], ['F', 'B'], [SLOT]);
+    check('FIXED OWNER (real): a FIXED owner never receives pressure upstream, so it carries NONE even when facts were supplied for it (no special P4a2 FIXED policy -- P4b rejects a FIXED owner separately)', ownerPressures(fixedOwner.inputs, 'B') === JSON.stringify([{ intentId: 'F', pressure: 'NONE' }]) && fixedOwner.baselineSame && fixedOwner.p3bAgrees);
+    const fallbackOwner = await pipeline([req('A', { originalOrder: 0, durationMinutes: undefined }), B], ['A', 'B'], [SLOT, SLOT, []]);
+    check('GENERIC_FALLBACK OWNER (real): an owner whose duration is the generic fallback has pressure NONE upstream and carries NONE', fallbackOwner.inputs?.length === 1 && ownerPressures(fallbackOwner.inputs, 'B') === JSON.stringify([{ intentId: 'A', pressure: 'NONE' }]) && fallbackOwner.p3bAgrees);
+    const dup = await preparePromotionInputs(request([req('A', { originalOrder: 0 }), req('A', { originalOrder: 1 }), B], ['B']), deps([SLOT, SLOT, []]).deps);
+    check('DUPLICATE RESOLVED ID fails closed: one intent id can never carry two pressures -- the preparation is UNAVAILABLE with NO inputs (never picks one)', dup.promotion.status === 'UNAVAILABLE' && !('inputs' in dup.promotion));
+  }
+
   console.log('=== source parity: automatic / manual / generic ===');
   {
-    const shapes: Array<[string, string]> = [['A', 'B'], ['goal-demand:2026-10-09:ga-1', 'goal-demand:2026-10-09:ga-2'], ['plan-day-goal-ga-1', 'plan-day-goal-ga-2'], ['typed-1', 'typed-2']];
+    const shapes: Array<[string, string]> = [['ow-1', 'lo-2'], ['goal-demand:2026-10-09:ga-1', 'goal-demand:2026-10-09:ga-2'], ['plan-day-goal-ga-1', 'plan-day-goal-ga-2'], ['typed-1', 'typed-2']];
     const runs: string[] = [];
     for (const [a, b] of shapes) {
       const r = await pipeline([req(a, { originalOrder: 0 }), req(b, { originalOrder: 1 })], [b], [SLOT, SLOT, []]);
       runs.push(JSON.stringify(r.inputs).split(JSON.stringify(a).slice(1, -1)).join('OWNER').split(JSON.stringify(b).slice(1, -1)).join('LOSER'));
     }
-    check('AUTO / MANUAL / GENERIC PARITY (real): equivalent scheduling authority yields the SAME PromotionInput whether the ids look like automatic Goal demand, a manual hand-off or a generic typed intent', runs.every((r) => r === runs[0]) && runs[0].includes('LOSER') && runs[0].includes('OWNER'));
+    const runsPressuredOwner: string[] = [];
+    for (const [a, b] of shapes) {
+      const r = await pipeline([req(a, { originalOrder: 0 }), req(b, { originalOrder: 1 })], [a, b], [SLOT, SLOT, []]);
+      runsPressuredOwner.push(JSON.stringify(r.inputs).split(JSON.stringify(a).slice(1, -1)).join('OWNER').split(JSON.stringify(b).slice(1, -1)).join('LOSER'));
+    }
+    check('AUTO / MANUAL / GENERIC PARITY (real): equivalent scheduling authority yields the SAME PromotionInput -- including the owners\' pressure, whether the owner is unpressured or pressured -- whether the ids look like automatic Goal demand, a manual hand-off or a generic typed intent', runs.every((r) => r === runs[0]) && runs[0].includes('LOSER') && runs[0].includes('OWNER') && runs[0].includes('"pressure":"NONE"') && runsPressuredOwner.every((r) => r === runsPressuredOwner[0]) && runsPressuredOwner[0].includes('"pressure":"LAST_KNOWN_OPPORTUNITY"'));
   }
 
   console.log('=== composed authority: P2d coherent context -> facts -> evidence -> pressure -> PromotionInput ===');
@@ -299,7 +378,7 @@ const day = (r: any) => r.preview.constructedDay;
       }
     };
     const s0 = await compose([]);
-    check('COHERENT AUTHORITY (S0): the facts come from the context, the duration (stored preference 60) and the availability / blocker adaptation come from the SAME context, and the resulting pressure yields exactly one PromotionInput (the later Friday candidate vs the first) -- with zero live range reads', s0.factsFromContext.size === 2 && s0.out.promotion.status === 'PREPARED' && (s0.out.promotion as { inputs: readonly PromotionInput[] }).inputs.length === 1 && s0.live.calls === 0);
+    check('COHERENT AUTHORITY (S0): the facts come from the context, the duration (stored preference 60) and the availability / blocker adaptation come from the SAME context, and the resulting pressure yields exactly one PromotionInput (the later Friday candidate vs the first) -- with zero live range reads', s0.factsFromContext.size === 2 && s0.out.promotion.status === 'PREPARED' && (s0.out.promotion as { inputs: readonly PromotionInput[] }).inputs.length === 1 && s0.live.calls === 0 && (s0.out.promotion as { inputs: readonly PromotionInput[] }).inputs[0].owners.every((w) => w.pressure === 'LAST_KNOWN_OPPORTUNITY'));
     const s1 = await compose([{ plannedStartAt: new Date(`${FRIDAY}T09:00:00Z`), plannedEndAt: new Date(`${FRIDAY}T17:00:00Z`), status: 'UPCOMING' }]);
     check('THE INPUT FOLLOWS THE CONTEXT: a context whose persisted plans commit the whole day (a different coherent state) makes the supply KNOWN_INFEASIBLE, pressure NONE, and the SAME Constructor scenario produces zero PromotionInputs -- pressure is never injected from outside', s1.out.promotion.status === 'PREPARED' && (s1.out.promotion as { inputs: readonly PromotionInput[] }).inputs.length === 0 && JSON.stringify(day(s1.out.result)) === JSON.stringify(day(s0.out.result)));
   }
