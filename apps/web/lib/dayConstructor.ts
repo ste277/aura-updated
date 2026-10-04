@@ -752,11 +752,19 @@ function placeOneIntent(
  *   5. Compute a second capacity snapshot against only the minutes
  *      actually placed (section 18).
  */
-export function constructDay(input: ConstructDayInput, contentionAttempts?: ContentionAttempt[]): ConstructDayResult {
-  // O5 P3a -- `contentionAttempts` is an OPTIONAL, write-only diagnostics sink (contentionTrace.ts). Omitted (every production
-  // caller that does not ask for a trace), nothing is collected and nothing about this function changes; supplied, it only
-  // receives the attempted-and-rejected intervals observed at the placement gate and is never read back by any decision.
-  const attempts = contentionAttempts;
+export function constructDay(input: ConstructDayInput): ConstructDayResult {
+  // O5 P3a -- the exported entry point takes the input and NOTHING ELSE: no observer, sink, callback or collector can be
+  // supplied by a caller, so no caller code can ever run inside placement. Tracing lives in the module-private core below.
+  return constructDayCore(input, undefined);
+}
+
+/**
+ * The construction itself. MODULE-PRIVATE: the optional `attempts` collector is created only by `constructDayWithTrace`
+ * (below) and is never reachable from any exported API. Observation is write-only and DETACHED: at the placement
+ * rejection a snapshot of plain strings and numbers is pushed (no Date, interval, candidate or Proposed object is shared),
+ * and nothing in this function ever reads the collector back.
+ */
+function constructDayCore(input: ConstructDayInput, attempts: ContentionAttempt[] | undefined): ConstructDayResult {
   const { intents, window, blockedIntervals, candidatesByIntentId, fixedConstraintsByIntentId, today } = input;
 
   const { totalMinutes: requestedMinutes } = sumConstructibleDurationMinutes(intents);
@@ -785,7 +793,16 @@ export function constructDay(input: ConstructDayInput, contentionAttempts?: Cont
     const onContention: ContentionObserver | undefined = attempts
       ? (attempted) => {
           const owners = placedIntervals.filter((placed) => intervalsOverlap(attempted.start, attempted.end, placed.start, placed.end));
-          if (owners.length > 0) attempts.push({ evaluationIndex, loserIntentId: intent.id, attempted, owners });
+          if (owners.length > 0) {
+            // DETACHED snapshot: strings and numbers only, copied here, before anything leaves this function.
+            attempts.push({
+              evaluationIndex,
+              loserIntentId: intent.id,
+              attemptedStart: attempted.start.toISOString(),
+              attemptedEnd: attempted.end.toISOString(),
+              owners: owners.map((owner) => ({ intentId: owner.intentId, start: owner.start.toISOString(), end: owner.end.toISOString() })),
+            });
+          }
         }
       : undefined;
     const outcome = placeOneIntent(intent, candidates, fixedConstraints, window, normalizedBlockers, placedIntervals, onContention);
@@ -837,7 +854,7 @@ export function constructDay(input: ConstructDayInput, contentionAttempts?: Cont
  * re-runs 1, 2, ...). Internal diagnostics: not part of any preview, signed or persisted contract.
  */
 export function constructDayWithTrace(input: ConstructDayInput, round: number = 0): { result: ConstructDayResult; trace: ContentionTrace } {
-  const attempts: ContentionAttempt[] = [];
-  const result = constructDay(input, attempts);
+  const attempts: ContentionAttempt[] = []; // private collector: created here, never exposed, never read by a decision
+  const result = constructDayCore(input, attempts);
   return { result, trace: attempts.length === 0 ? EMPTY_CONTENTION_TRACE : createContentionTrace(buildContentionEvents(round, attempts)) };
 }

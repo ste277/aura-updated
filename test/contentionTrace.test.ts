@@ -279,7 +279,7 @@ const READY = (r: any) => { if (r.status !== 'READY') throw new Error(`expected 
       input([mk('LOW')], { LOW: [cand('LOW', '10:00', '11:00')] }, { blockedIntervals: [block('10:00', '11:00')] }),
       input([mk('A', { minutes: 120 })], { A: [] }, { window: win('10:00', '10:00') }),
     ];
-    check('CONSTRUCTOR RESULT: for every shape (contest, equal importance reversed, multi-owner, FIXED, blocker, invalid window) `constructDayWithTrace().result`, `constructDay()` and `constructDay(input, sink)` are byte-identical', shapes.every((s) => { const sink: never[] = []; return JSON.stringify(constructDay(s)) === JSON.stringify(constructDayWithTrace(s).result) && JSON.stringify(constructDay(s)) === JSON.stringify(constructDay(s, sink as never)); }));
+    check('CONSTRUCTOR RESULT: for every shape (contest, equal importance reversed, multi-owner, FIXED, blocker, invalid window) `constructDayWithTrace(input).result` and `constructDay(input)` are byte-identical', shapes.every((s) => JSON.stringify(constructDay(s)) === JSON.stringify(constructDayWithTrace(s).result)));
     check('a failed construction (invalid window / no usable capacity) returns the shared empty trace', constructDayWithTrace(shapes[5]).trace === EMPTY_CONTENTION_TRACE && constructDayWithTrace(shapes[5]).result.status !== 'READY');
     const frozenInput = contest().build();
     const before = JSON.stringify(frozenInput);

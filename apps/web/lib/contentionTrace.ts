@@ -65,24 +65,32 @@ export interface ContentionTrace {
   readonly events: readonly ContentionEvent[];
 }
 
-/** One attempted-and-rejected interval together with EVERY Proposed owner whose interval overlaps it. */
+/**
+ * One attempted-and-rejected interval together with EVERY Proposed owner whose interval overlaps it, recorded as a
+ * fully DETACHED snapshot taken at the moment of observation: only strings and numbers (instants are ISO-8601 UTC
+ * strings, which order chronologically as strings). It holds no Date, interval, candidate, Proposed item or any other
+ * Constructor-owned object, so nothing a trace consumer does can reach Constructor state. Created only by the
+ * Constructor's own internal collector; no exported API accepts one.
+ */
 export interface ContentionAttempt {
   /** The loser's position in the Constructor's own evaluation order (the chronology of placement attempts). */
   readonly evaluationIndex: number;
   readonly loserIntentId: string;
-  readonly attempted: { readonly start: Date; readonly end: Date };
+  readonly attemptedStart: string;
+  readonly attemptedEnd: string;
   /** Overlapping Proposed intervals, in the order they were placed (construction chronology). Never empty. */
-  readonly owners: readonly { readonly intentId: string; readonly start: Date; readonly end: Date }[];
+  readonly owners: readonly { readonly intentId: string; readonly start: string; readonly end: string }[];
 }
 
 export const EMPTY_CONTENTION_TRACE: ContentionTrace = Object.freeze({ events: Object.freeze([] as ContentionEvent[]) });
-
-const iso = (instant: Date): string => instant.toISOString();
 
 /** The identity of an event: the same loser, owner, attempted interval, owner interval and round is ONE event. */
 export function contentionEventKey(event: ContentionEvent): string {
   return [event.round, event.loserIntentId, event.winnerIntentId, event.attemptedStart, event.attemptedEnd, event.winnerStart, event.winnerEnd].join('|');
 }
+
+/** ISO-8601 UTC instants of one format order chronologically as strings. */
+const compareInstants = (a: string, b: string): number => (a < b ? -1 : a > b ? 1 : 0);
 
 /**
  * Turns the attempts observed during ONE Constructor pass into immutable events, in a deterministic total order
@@ -95,8 +103,8 @@ export function buildContentionEvents(round: number, attempts: readonly Contenti
     .map((attempt, position) => ({ attempt, position }))
     .sort((a, b) =>
       a.attempt.evaluationIndex - b.attempt.evaluationIndex ||
-      a.attempt.attempted.start.getTime() - b.attempt.attempted.start.getTime() ||
-      a.attempt.attempted.end.getTime() - b.attempt.attempted.end.getTime() ||
+      compareInstants(a.attempt.attemptedStart, b.attempt.attemptedStart) ||
+      compareInstants(a.attempt.attemptedEnd, b.attempt.attemptedEnd) ||
       a.position - b.position
     );
   const events: ContentionEvent[] = [];
@@ -106,10 +114,10 @@ export function buildContentionEvents(round: number, attempts: readonly Contenti
       const event: ContentionEvent = Object.freeze({
         loserIntentId: attempt.loserIntentId,
         winnerIntentId: owner.intentId,
-        attemptedStart: iso(attempt.attempted.start),
-        attemptedEnd: iso(attempt.attempted.end),
-        winnerStart: iso(owner.start),
-        winnerEnd: iso(owner.end),
+        attemptedStart: attempt.attemptedStart,
+        attemptedEnd: attempt.attemptedEnd,
+        winnerStart: owner.start,
+        winnerEnd: owner.end,
         round,
       });
       const key = contentionEventKey(event);
@@ -119,17 +127,6 @@ export function buildContentionEvents(round: number, attempts: readonly Contenti
     }
   }
   return events;
-}
-
-/** The attempts observed during one Constructor pass, with that pass's round number (the orchestrator's accumulator element). */
-export interface ContentionPass {
-  readonly round: number;
-  readonly attempts: ContentionAttempt[];
-}
-
-/** Builds the accumulated trace from every pass, in the order the passes ran (round order). */
-export function buildContentionTraceFromPasses(passes: readonly ContentionPass[]): ContentionTrace {
-  return aggregateContentionTraces(passes.map((pass) => createContentionTrace(buildContentionEvents(pass.round, pass.attempts))));
 }
 
 export function createContentionTrace(events: readonly ContentionEvent[]): ContentionTrace {
