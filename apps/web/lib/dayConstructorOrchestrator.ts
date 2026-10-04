@@ -69,6 +69,7 @@ import {
 import type { BlockedInterval } from './dayCapacity';
 import { aggregateContentionTraces, type ContentionTrace } from './contentionTrace';
 import { assembleConstructionBasis, captureCandidateLists, type ConstructionBasisOutcome } from './constructionBasis';
+import { captureBaselinePlacements, type BaselinePlacementsOutcome } from './baselinePlacements';
 import { isActivePlanBlocker, type PlanBlockerStatus, type PlanBlockerCandidate } from './planBlockerLifecycle';
 import { resolveDecisionFactsForIntent, type DecisionFactsByIntentId } from './decisionFacts';
 import { attachPreparedDecisionFacts, prepareDecisionEvidence, prepareDecisionFactsFailOpen, type DecisionFactPreparer } from './decisionFactPreparation';
@@ -748,10 +749,10 @@ export async function orchestrateConstructDayWithTrace(request: ConstructDayRequ
 export async function orchestrateConstructDayWithDiagnostics(
   request: ConstructDayRequest,
   deps: DayConstructorOrchestratorDeps
-): Promise<{ result: OrchestrateConstructDayResult; contentionTrace: ContentionTrace; evidenceByIntentId: ReturnType<typeof prepareDecisionEvidence>; planningDate: string; constructionBasis: ConstructionBasisOutcome }> {
+): Promise<{ result: OrchestrateConstructDayResult; contentionTrace: ContentionTrace; evidenceByIntentId: ReturnType<typeof prepareDecisionEvidence>; planningDate: string; constructionBasis: ConstructionBasisOutcome; baselinePlacements: BaselinePlacementsOutcome }> {
   const handOff: EvidenceHandOff = {};
   const traced = await runTraced(request, deps, handOff);
-  return { result: traced.result, contentionTrace: traced.contentionTrace, evidenceByIntentId: handOff.byIntentId ?? new Map(), planningDate: request.targetDate, constructionBasis: handOff.constructionBasis ?? { status: 'UNAVAILABLE', reason: 'RUN_NOT_READY' } };
+  return { result: traced.result, contentionTrace: traced.contentionTrace, evidenceByIntentId: handOff.byIntentId ?? new Map(), planningDate: request.targetDate, constructionBasis: handOff.constructionBasis ?? { status: 'UNAVAILABLE', reason: 'RUN_NOT_READY' }, baselinePlacements: handOff.baselinePlacements ?? { status: 'UNAVAILABLE', reason: 'RUN_NOT_READY' } };
 }
 
 /** O5 P3b -- private, write-only: the orchestrator assigns the prepared evidence here once, after preparation and before construction. */
@@ -759,6 +760,8 @@ interface EvidenceHandOff {
   byIntentId?: ReturnType<typeof prepareDecisionEvidence>;
   /** O5 P4b1 -- the immutable construction basis, assembled once at the very end of a READY run (T4). Same write-only discipline; nothing in this file reads it. */
   constructionBasis?: ConstructionBasisOutcome;
+  /** O5 P4b1b -- the baseline Proposed placements of the SAME run, captured from the terminal `result.day` and validated against that run's basis. Same write-only discipline. */
+  baselinePlacements?: BaselinePlacementsOutcome;
 }
 
 /** O5 P4b1 -- basis preparation is optional infrastructure: whatever it does, it can never make the baseline fail. */
@@ -1136,6 +1139,8 @@ async function runOrchestration(request: ConstructDayRequest, deps: DayConstruct
   if (evidenceOut) {
     evidenceOut.constructionBasis =
       optionalBasisStep(() => assembleConstructionBasis({ planningDate: request.targetDate, window, intents: intentsForConstructDay, blockedIntervals, initialCandidates: initialCandidateLists, finalCandidatesByIntentId: candidatesByIntentId, fixedConstraintsByIntentId })) ?? { status: 'UNAVAILABLE', reason: 'ASSEMBLY_FAILED' };
+    // O5 P4b1b -- the baseline OUTCOME, from the same terminal `result.day` the basis was just assembled alongside; validated against that basis.
+    evidenceOut.baselinePlacements = optionalBasisStep(() => captureBaselinePlacements(result.day, evidenceOut.constructionBasis ?? { status: 'UNAVAILABLE', reason: 'ASSEMBLY_FAILED' })) ?? { status: 'UNAVAILABLE', reason: 'CAPTURE_FAILED' };
   }
 
   return {
