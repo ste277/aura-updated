@@ -77,6 +77,7 @@ import {
   type BlockedInterval,
   type CapacitySnapshot,
 } from './dayCapacity';
+import { buildContentionEvents, createContentionTrace, EMPTY_CONTENTION_TRACE, type ContentionAttempt, type ContentionTrace } from './contentionTrace';
 
 // ============================================================
 // PlacementCandidate -- the smallest normalized input the pure engine
@@ -554,6 +555,9 @@ export type ConstructDayResult =
 // Single-intent placement
 // ============================================================
 
+/** O5 P3a -- called, only when a trace was requested, with the exact interval whose rejection reason was `CONFLICTS_WITH_PROPOSED_ITEM` (never for a blocker, window, duration or structural rejection). Observation only: its return value is never read. */
+type ContentionObserver = (attempted: { start: Date; end: Date }) => void;
+
 interface PlaceOneIntentOutcome {
   proposed?: ProposedItem;
   deferred?: DeferredItem;
@@ -585,7 +589,7 @@ function summarizeRejections(diagnostics: readonly PlacementDiagnostic[]): Place
  * loses to the construction window or an existing/already-placed
  * interval is `OUTSIDE_CONSTRUCTION_WINDOW`/`FIXED_WINDOW_CONFLICT`.
  */
-function placeFixedIntent(intent: DayIntent, requiredMinutes: number, constraints: readonly FixedPlacementConstraint[], window: ConstructionWindow, normalizedBlockers: readonly BlockedInterval[], placedIntervals: readonly OwnedInterval[]): PlaceOneIntentOutcome {
+function placeFixedIntent(intent: DayIntent, requiredMinutes: number, constraints: readonly FixedPlacementConstraint[], window: ConstructionWindow, normalizedBlockers: readonly BlockedInterval[], placedIntervals: readonly OwnedInterval[], onContention?: ContentionObserver): PlaceOneIntentOutcome {
   if (constraints.length !== 1) {
     // Zero (missing) or more than one (ambiguous, "do not silently
     // select one" -- this ticket's own section 4) are both invalid.
@@ -604,6 +608,8 @@ function placeFixedIntent(intent: DayIntent, requiredMinutes: number, constraint
   }
 
   const evaluation = evaluateFixedConstraint(constraint, window, normalizedBlockers, placedIntervals);
+  // O5 P3a -- observation only: a FIXED target that is otherwise usable (inside the window, no external blocker) but overlaps a Proposed owner.
+  if (!evaluation.feasible && evaluation.reason === 'CONFLICTS_WITH_PROPOSED_ITEM') onContention?.({ start: constraint.start, end: constraint.end });
   if (evaluation.feasible) {
     const proposed: ProposedItem = {
       intentId: intent.id,
@@ -638,7 +644,8 @@ function placeOneIntent(
   fixedConstraints: readonly FixedPlacementConstraint[],
   window: ConstructionWindow,
   normalizedBlockers: readonly BlockedInterval[],
-  placedIntervals: readonly OwnedInterval[]
+  placedIntervals: readonly OwnedInterval[],
+  onContention?: ContentionObserver
 ): PlaceOneIntentOutcome {
   if (intent.estimatedDurationMinutes === undefined) {
     return { deferred: { intentId: intent.id, primaryReason: 'DURATION_UNKNOWN', diagnostics: [] } };
@@ -646,7 +653,7 @@ function placeOneIntent(
   const requiredMinutes = intent.estimatedDurationMinutes;
 
   if (intent.flexibility === 'FIXED') {
-    return placeFixedIntent(intent, requiredMinutes, fixedConstraints, window, normalizedBlockers, placedIntervals);
+    return placeFixedIntent(intent, requiredMinutes, fixedConstraints, window, normalizedBlockers, placedIntervals, onContention);
   }
 
   if (candidates.length === 0) {
@@ -665,6 +672,7 @@ function placeOneIntent(
       continue;
     }
     diagnostics.push({ candidateOrder: candidate.candidateOrder, reason: evaluation.reason });
+    if (evaluation.reason === 'CONFLICTS_WITH_PROPOSED_ITEM') onContention?.(evaluation.interval); // O5 P3a -- observation only
     if (evaluation.reason === 'CONFLICTS_WITH_PROPOSED_ITEM' && !firstConflictInterval) firstConflictInterval = evaluation.interval;
   }
 
@@ -744,7 +752,11 @@ function placeOneIntent(
  *   5. Compute a second capacity snapshot against only the minutes
  *      actually placed (section 18).
  */
-export function constructDay(input: ConstructDayInput): ConstructDayResult {
+export function constructDay(input: ConstructDayInput, contentionAttempts?: ContentionAttempt[]): ConstructDayResult {
+  // O5 P3a -- `contentionAttempts` is an OPTIONAL, write-only diagnostics sink (contentionTrace.ts). Omitted (every production
+  // caller that does not ask for a trace), nothing is collected and nothing about this function changes; supplied, it only
+  // receives the attempted-and-rejected intervals observed at the placement gate and is never read back by any decision.
+  const attempts = contentionAttempts;
   const { intents, window, blockedIntervals, candidatesByIntentId, fixedConstraintsByIntentId, today } = input;
 
   const { totalMinutes: requestedMinutes } = sumConstructibleDurationMinutes(intents);
@@ -766,10 +778,17 @@ export function constructDay(input: ConstructDayInput): ConstructDayResult {
   const outcomesByIntentId = new Map<string, PlaceOneIntentOutcome>();
   const placedIntervals: OwnedInterval[] = [];
 
-  for (const intent of evaluationOrder) {
+  for (const [evaluationIndex, intent] of evaluationOrder.entries()) {
     const candidates = candidatesByIntentId[intent.id] ?? [];
     const fixedConstraints = fixedConstraintsByIntentId[intent.id] ?? [];
-    const outcome = placeOneIntent(intent, candidates, fixedConstraints, window, normalizedBlockers, placedIntervals);
+    // O5 P3a -- present only when a trace was requested; evaluated only on an actual CONFLICTS_WITH_PROPOSED_ITEM rejection.
+    const onContention: ContentionObserver | undefined = attempts
+      ? (attempted) => {
+          const owners = placedIntervals.filter((placed) => intervalsOverlap(attempted.start, attempted.end, placed.start, placed.end));
+          if (owners.length > 0) attempts.push({ evaluationIndex, loserIntentId: intent.id, attempted, owners });
+        }
+      : undefined;
+    const outcome = placeOneIntent(intent, candidates, fixedConstraints, window, normalizedBlockers, placedIntervals, onContention);
     outcomesByIntentId.set(intent.id, outcome);
     if (outcome.proposed && outcome.placedInterval) {
       placedIntervals.push({ ...outcome.placedInterval, intentId: intent.id });
@@ -809,4 +828,16 @@ export function constructDay(input: ConstructDayInput): ConstructDayResult {
     proposedCapacity,
   };
   return { status: 'READY', day };
+}
+
+/**
+ * O5 P3a -- the same construction with its CONTENTION TRACE (contentionTrace.ts): which candidate's attempted interval
+ * was rejected because of an interval already owned by a Proposed candidate. `result` is exactly what `constructDay`
+ * returns for the same input; `round` only labels the events (0 for a first pass; the orchestrator numbers replenishment
+ * re-runs 1, 2, ...). Internal diagnostics: not part of any preview, signed or persisted contract.
+ */
+export function constructDayWithTrace(input: ConstructDayInput, round: number = 0): { result: ConstructDayResult; trace: ContentionTrace } {
+  const attempts: ContentionAttempt[] = [];
+  const result = constructDay(input, attempts);
+  return { result, trace: attempts.length === 0 ? EMPTY_CONTENTION_TRACE : createContentionTrace(buildContentionEvents(round, attempts)) };
 }

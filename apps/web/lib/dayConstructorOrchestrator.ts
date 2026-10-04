@@ -66,6 +66,7 @@ import {
   type PlacementTimingFit,
 } from './dayConstructor';
 import type { BlockedInterval } from './dayCapacity';
+import { buildContentionTraceFromPasses, type ContentionAttempt, type ContentionPass, type ContentionTrace } from './contentionTrace';
 import { isActivePlanBlocker, type PlanBlockerStatus, type PlanBlockerCandidate } from './planBlockerLifecycle';
 import { resolveDecisionFactsForIntent, type DecisionFactsByIntentId } from './decisionFacts';
 import { attachPreparedDecisionFacts, prepareDecisionEvidence, prepareDecisionFactsFailOpen, type DecisionFactPreparer } from './decisionFactPreparation';
@@ -722,6 +723,23 @@ export async function resolveAvailabilityAwareWindow(
 }
 
 export async function orchestrateConstructDay(request: ConstructDayRequest, deps: DayConstructorOrchestratorDeps): Promise<OrchestrateConstructDayResult> {
+  return runOrchestration(request, deps, undefined);
+}
+
+/**
+ * O5 P3a -- the same orchestration, additionally returning the CONTENTION TRACE (contentionTrace.ts) ACCUMULATED across
+ * every Constructor pass (the first pass is round 0, each replenishment re-run is the next round), so a later round that
+ * leaves a candidate with NO_CANDIDATES cannot erase the earlier proof that it lost an interval to a Proposed owner.
+ * `result` is exactly what `orchestrateConstructDay` returns for the same request and deps: same queries, same searches,
+ * same output. Internal diagnostics only -- no route, preview, signed contract, persistence or policy consumes it.
+ */
+export async function orchestrateConstructDayWithTrace(request: ConstructDayRequest, deps: DayConstructorOrchestratorDeps): Promise<{ result: OrchestrateConstructDayResult; contentionTrace: ContentionTrace }> {
+  const passes: ContentionPass[] = [];
+  const result = await runOrchestration(request, deps, passes);
+  return { result, contentionTrace: buildContentionTraceFromPasses(passes) };
+}
+
+async function runOrchestration(request: ConstructDayRequest, deps: DayConstructorOrchestratorDeps, contentionPasses: ContentionPass[] | undefined): Promise<OrchestrateConstructDayResult> {
   // Same defensive runtime checks `resolveConstructionWindow` itself
   // performs (below, untouched) -- duplicated here ONLY so a malformed
   // request fails before `deps.loadAvailabilityConfiguration`'s own I/O
@@ -1010,6 +1028,14 @@ export async function orchestrateConstructDay(request: ConstructDayRequest, deps
   //   bookkeeping is needed.
   // ============================================================
   const flexibleIntentCount = intentsForConstructDay.filter((i) => i.flexibility === 'FLEXIBLE').length;
+  // O5 P3a -- when a trace was requested, each Constructor pass gets its own write-only attempts list labelled with its
+  // round (0 first, then 1, 2, ... per replenishment re-run); otherwise `undefined` and nothing is collected.
+  const attemptsForPass = (round: number): ContentionAttempt[] | undefined => {
+    if (!contentionPasses) return undefined;
+    const attempts: ContentionAttempt[] = [];
+    contentionPasses.push({ round, attempts });
+    return attempts;
+  };
   let result: ConstructDayResult = constructDay({
     intents: intentsForConstructDay,
     window,
@@ -1017,7 +1043,7 @@ export async function orchestrateConstructDay(request: ConstructDayRequest, deps
     candidatesByIntentId,
     fixedConstraintsByIntentId,
     today: request.targetDate,
-  });
+  }, attemptsForPass(0));
   if (result.status !== 'READY') return result;
 
   let previouslyConflictedIds: Set<string> | undefined;
@@ -1061,7 +1087,7 @@ export async function orchestrateConstructDay(request: ConstructDayRequest, deps
       candidatesByIntentId,
       fixedConstraintsByIntentId,
       today: request.targetDate,
-    });
+    }, attemptsForPass(round + 1));
     if (result.status !== 'READY') return result;
   }
 
