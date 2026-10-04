@@ -331,6 +331,12 @@ jobs:
         run: npx ts-node test/baselinePlacements.test.ts
       - name: Run baseline placements architecture test
         run: npx ts-node test/baselinePlacementsArchitecture.test.ts
+      # O5 P4b2a -- the immutable PromotionContentionAuthority: the exact intervals a pressured Deferred candidate attempted and lost to the owners its
+      # PromotionInput authorizes, projected from the same run's P3a events (event authority, not candidate-list history). Inert; consumed by nothing.
+      - name: Run promotion contention authority test
+        run: npx ts-node test/promotionContentionAuthority.test.ts
+      - name: Run promotion contention authority architecture test
+        run: npx ts-node test/promotionContentionAuthorityArchitecture.test.ts
       # Constructor scheduling correctness -- the target-day blocker load
       # uses half-open OVERLAP semantics (a plan that starts before the day
       # but runs into it must block), through the one shared definition.
