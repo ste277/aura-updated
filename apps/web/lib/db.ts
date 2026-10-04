@@ -2573,13 +2573,19 @@ export async function createGoalWithActivities(input: {
     const goal: Goal = goalResult.rows[0];
 
     const activities: GoalActivity[] = [];
-    for (const activity of input.activities) {
+    for (const [index, activity] of input.activities.entries()) {
       const persistedCompletion = toPersistedCompletionRequirement(activity.completionRequirement ?? { kind: 'DONE' });
       const persistedRhythm = toPersistedGoalActivityRhythm(activity.rhythm ?? NONE_GOAL_ACTIVITY_RHYTHM);
+      // The request's activity order is meaningful (it is the order the user sees, and an idempotent replay is compared against
+      // it index by index). `now()` is the TRANSACTION start, identical for every row inserted here, and ids are random, so
+      // without this the order would not be recoverable: tied rows come back in whatever order the query plan happens to
+      // produce. Each activity therefore gets its own strictly increasing `createdAt` -- the last keeps the transaction
+      // instant, earlier ones sit 1 ms apart before it (at most 19 ms, MAX_REVIEWED_ACTIVITIES is 20) -- so `ORDER BY
+      // "createdAt"` IS the creation order. Nothing is ever placed in the future, so a later `addGoalActivity` still sorts after.
       const result = await client.query(
-        `INSERT INTO "GoalActivity" (id, "userId", "goalId", title, "activityId", "completionKind", "completionTargetValue", "completionUnit", "rhythmKind", "rhythmTargetPerWeek")
-         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10) RETURNING *`,
-        [randomUUID(), input.userId, goalId, activity.title, activity.activityId, persistedCompletion.completionKind, persistedCompletion.completionTargetValue, persistedCompletion.completionUnit, persistedRhythm.rhythmKind, persistedRhythm.rhythmTargetPerWeek]
+        `INSERT INTO "GoalActivity" (id, "userId", "goalId", title, "activityId", "completionKind", "completionTargetValue", "completionUnit", "rhythmKind", "rhythmTargetPerWeek", "createdAt")
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, now() - ($11::int * interval '1 millisecond')) RETURNING *`,
+        [randomUUID(), input.userId, goalId, activity.title, activity.activityId, persistedCompletion.completionKind, persistedCompletion.completionTargetValue, persistedCompletion.completionUnit, persistedRhythm.rhythmKind, persistedRhythm.rhythmTargetPerWeek, input.activities.length - 1 - index]
       );
       activities.push(result.rows[0]);
     }
@@ -2740,13 +2746,16 @@ export async function dismissGoalActivity(userId: string, goalId: string, goalAc
  * handled identically by deriveGoalActivityState).
  */
 export async function listGoalActivitiesWithLinkedPlanStatus(userId: string, goalId: string): Promise<GoalActivityWithLinkedPlanStatus[]> {
+  // TOTAL order: `createdAt` is creation order for every activity created through createGoalWithActivities (strictly increasing per
+  // activity), and `id` makes the order deterministic under any remaining tie (e.g. rows that predate that), instead of leaving
+  // tied rows in whatever order the query plan emits -- the idempotent Goal-create replay compares this list index by index.
   const result = await pool.query(
     `SELECT ga.*, pa.status AS "linkedPlanStatus", gae."currentValue"
      FROM "GoalActivity" ga
      LEFT JOIN "PlannedActivity" pa ON pa.id = ga."plannedActivityId"
      LEFT JOIN "GoalActivityExecution" gae ON gae."plannedActivityId" = ga."plannedActivityId"
      WHERE ga."userId" = $1 AND ga."goalId" = $2
-     ORDER BY ga."createdAt"`,
+     ORDER BY ga."createdAt", ga.id`,
     [userId, goalId]
   );
   return result.rows;
