@@ -53,6 +53,7 @@ import type { User } from './db';
 import type { DecisionFactsByIntentId } from './decisionFacts';
 import { createDecisionFactPreparer } from './decisionFactPreparation';
 import type { OpportunityRangeDeps } from './opportunityRangeAdapter';
+import { schedulingContextDurationContext, schedulingContextOpportunityRangeDeps, type DecisionSchedulingContext } from './decisionSchedulingContext';
 
 /** Decision Facts V1 -- a server-side, source-specific fact provider,
  * injected at the route. Receives the already-parsed (never client-
@@ -263,13 +264,25 @@ export interface DayConstructorPreviewHttpResult {
  * `timezone`/`now` are parameters here too, never read from `body` --
  * the ONLY two places this file ever reads a timezone or an instant.
  */
+/**
+ * O5 P2d -- how a preview obtains the decision evidence's database-derived inputs from ONE coherent snapshot. `loadContext`
+ * reads them all inside one REPEATABLE READ transaction (decisionSchedulingContextLoader.ts); `decisionFactsFromContext`
+ * derives the recurrence facts from that context only. When a binding is supplied it REPLACES the independent live
+ * providers (`decisionFactsSource`, `opportunityRangeDeps`) -- there is no mixing of the two.
+ */
+export interface DecisionSchedulingBinding {
+  loadContext: (request: ConstructDayRequest) => Promise<DecisionSchedulingContext>;
+  decisionFactsFromContext: (request: ConstructDayRequest, context: DecisionSchedulingContext) => Promise<DecisionFactsByIntentId>;
+}
+
 export async function runDayConstructorPreview(
   body: unknown,
   timezone: string,
   now: Date,
   deps: DayConstructorOrchestratorDeps,
   decisionFactsSource?: DecisionFactsSource,
-  opportunityRangeDeps?: OpportunityRangeDeps
+  opportunityRangeDeps?: OpportunityRangeDeps,
+  schedulingBinding?: DecisionSchedulingBinding
 ): Promise<DayConstructorPreviewHttpResult> {
   const parsed = parseConstructDayPreviewRequestBody(body, { timezone, now });
   if (!parsed.ok) return { httpStatus: 400, body: { error: parsed.error } };
@@ -279,19 +292,44 @@ export async function runDayConstructorPreview(
   // fail an otherwise-valid preview: continue with no facts, exactly the
   // behavior of a request that had no provider at all.
   let decisionFactsByIntentId: DecisionFactsByIntentId | undefined;
-  if (decisionFactsSource) {
+  // O5 P1 -- opportunity facts are PREPARED inside the orchestration, after
+  // duration resolution and before the Constructor runs (see
+  // decisionFactPreparation.ts); this boundary only supplies the generic
+  // preparer. Preparing is fail-open there, and the facts are inert.
+  let orchestrationDeps: DayConstructorOrchestratorDeps = opportunityRangeDeps ? { ...deps, prepareDecisionFacts: createDecisionFactPreparer(opportunityRangeDeps) } : deps;
+  if (schedulingBinding) {
+    // O5 P2d -- ONE coherent read of every database-derived evidence input (one REPEATABLE READ transaction, already ended
+    // when `loadContext` resolves). The recurrence facts, the duration resolution, the availability / blocker adaptation and
+    // the opportunity projection below read this context only. If it cannot be acquired there is NO decision evidence for
+    // this request: the independent live reads are never used as a substitute and their result never labelled authoritative
+    // (the Constructor keeps its own live duration / blocker inputs, exactly as a request with no evidence provider).
+    let context: DecisionSchedulingContext | undefined;
+    try {
+      context = await schedulingBinding.loadContext(parsed.request);
+    } catch (err) {
+      console.warn('day-constructor/preview: coherent scheduling context unavailable, continuing without decision evidence', err);
+    }
+    orchestrationDeps = deps;
+    if (context) {
+      const coherent = context;
+      try {
+        decisionFactsByIntentId = await schedulingBinding.decisionFactsFromContext(parsed.request, coherent);
+      } catch (err) {
+        console.warn('day-constructor/preview: decision facts unavailable, continuing without', err);
+      }
+      orchestrationDeps = {
+        ...deps,
+        loadDurationContext: async () => schedulingContextDurationContext(coherent, timezone, now),
+        prepareDecisionFacts: createDecisionFactPreparer(schedulingContextOpportunityRangeDeps(coherent)),
+      };
+    }
+  } else if (decisionFactsSource) {
     try {
       decisionFactsByIntentId = await decisionFactsSource(parsed.request);
     } catch (err) {
       console.warn('day-constructor/preview: decision facts unavailable, continuing without', err);
     }
   }
-
-  // O5 P1 -- opportunity facts are PREPARED inside the orchestration, after
-  // duration resolution and before the Constructor runs (see
-  // decisionFactPreparation.ts); this boundary only supplies the generic
-  // preparer. Preparing is fail-open there, and the facts are inert.
-  const orchestrationDeps = opportunityRangeDeps ? { ...deps, prepareDecisionFacts: createDecisionFactPreparer(opportunityRangeDeps) } : deps;
   const result = await orchestrateConstructDay(decisionFactsByIntentId ? { ...parsed.request, decisionFactsByIntentId } : parsed.request, orchestrationDeps);
 
   // Every branch below is a legitimate, already-typed domain outcome --
@@ -359,6 +397,10 @@ export interface DayConstructorPreviewBoundaryDeps {
    * the authenticated user's own read-only range loaders; omitting it is
    * byte-identical to this ticket never having existed. */
   createOpportunityRangeDeps?: (user: User) => OpportunityRangeDeps;
+  /** O5 P2d -- OPTIONAL, used together with `loadDecisionFactsFromContext`. Reads the decision evidence's database-derived
+   * inputs in ONE coherent snapshot. When both are supplied they REPLACE the independent live providers above. */
+  loadSchedulingContext?: (user: User, request: ConstructDayRequest) => Promise<DecisionSchedulingContext>;
+  loadDecisionFactsFromContext?: (user: User, request: ConstructDayRequest, context: DecisionSchedulingContext) => Promise<DecisionFactsByIntentId>;
 }
 
 /**
@@ -393,7 +435,11 @@ export async function handleDayConstructorPreviewRequest(deps: DayConstructorPre
     const orchestratorDeps = deps.createOrchestratorDeps(user, now);
     const decisionFactsSource: DecisionFactsSource | undefined = deps.loadDecisionFacts ? (request) => deps.loadDecisionFacts!(user, request) : undefined;
     const opportunityRangeDeps = deps.createOpportunityRangeDeps ? deps.createOpportunityRangeDeps(user) : undefined;
-    const result = await runDayConstructorPreview(body, user.timezone, now, orchestratorDeps, decisionFactsSource, opportunityRangeDeps);
+    const schedulingBinding: DecisionSchedulingBinding | undefined =
+      deps.loadSchedulingContext && deps.loadDecisionFactsFromContext
+        ? { loadContext: (request) => deps.loadSchedulingContext!(user, request), decisionFactsFromContext: (request, context) => deps.loadDecisionFactsFromContext!(user, request, context) }
+        : undefined;
+    const result = await runDayConstructorPreview(body, user.timezone, now, orchestratorDeps, decisionFactsSource, opportunityRangeDeps, schedulingBinding);
     // F1 trust correction: sign each proposed item for THIS user so acceptance can verify what it means.
     return { ...result, body: signPreviewResultBody(session.userId, result.body) };
   } catch (err) {

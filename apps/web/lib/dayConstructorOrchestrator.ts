@@ -33,8 +33,8 @@
 import type { User, HabitLogRow } from './db';
 import { listPlannedActivitiesOverlappingRange, listHabitLogs, listUserAvailabilityPeriods } from './db';
 import { resolveAvailability, normalizeUsableWindowsToConstructionWindow, type AvailabilityConfiguration } from './availabilityContext';
-import { listUserActivityPreferences, preferredDurationByActivityId, type UserActivityPreference } from './activityPreferences';
-import { deriveBehavioralProfile, activityDurationByActivityId } from './behavioralAffinity';
+import { listUserActivityPreferences, type UserActivityPreference } from './activityPreferences';
+import { buildDurationContext } from './durationContext';
 import { durationMinutesFor, GENERIC_DURATION_FALLBACK_MINUTES } from './dayBuilderOrchestrator';
 import { localDayBoundsUTC } from './myDayOrchestrator';
 import { resolveTzOffsetMinutes, getDatePartsInTimezone } from './timezone';
@@ -267,11 +267,7 @@ export function createRealDayConstructorOrchestratorDeps(user: User, now: Date):
     },
     loadDurationContext: async () => {
       const [preferences, habitLogs]: [UserActivityPreference[], HabitLogRow[]] = await Promise.all([listUserActivityPreferences(user.id), listHabitLogs(user.id)]);
-      const behavioralProfile = deriveBehavioralProfile(habitLogs, user.timezone, now);
-      return {
-        preferredDurationByActivityId: preferredDurationByActivityId(preferences),
-        behavioralDurationByActivityId: activityDurationByActivityId(behavioralProfile),
-      };
+      return buildDurationContext(preferences, habitLogs, user.timezone, now);
     },
     searchTiming: (request) => {
       const context: TimingSearchRequest['context'] = {

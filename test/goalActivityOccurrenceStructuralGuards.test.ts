@@ -114,9 +114,14 @@ const dbSrcNoComments = stripComments(dbSrc);
 const allowedOccurrenceFnBodiesNoComments =
   stripComments(functionBody(dbSrc, 'loadGoalActivityRhythmFacts')) +
   stripComments(functionBody(dbSrc, 'materializeGoalActivityRhythmOccurrence')) +
-  stripComments(functionBody(dbSrc, 'loadGoalActivityRhythmFactsForActivities'));
+  stripComments(functionBody(dbSrc, 'loadGoalActivityRhythmFactsForActivities')) +
+  // O5 P2d: the batched read's raw SELECT moved UNCHANGED into this read-only function so it can run on the snapshot executor.
+  stripComments(functionBody(dbSrc, 'listGoalActivityOccurrenceRowsForActivities')) +
+  // ... plus its row TYPE and the PURE row mapper (no query, no table reference besides the type name).
+  stripComments((dbSrc.match(/export interface GoalActivityOccurrenceRow \{[\s\S]*?\n\}/) ?? [''])[0]) +
+  stripComments(functionBody(dbSrc, 'buildGoalActivityRhythmFactsFromOccurrenceRows'));
 check(
-  'db.ts references GoalActivityOccurrence ONLY inside the three allowed, intentionally-reviewed functions (loadGoalActivityRhythmFacts [read-only], loadGoalActivityRhythmFactsForActivities [R4\'s batched read-only sibling], and materializeGoalActivityRhythmOccurrence [R3\'s sole writer]) -- no fourth function in real code, no UPDATE/DELETE anywhere',
+  'db.ts references GoalActivityOccurrence ONLY inside the allowed, intentionally-reviewed functions (loadGoalActivityRhythmFacts [read-only], loadGoalActivityRhythmFactsForActivities [R4\'s batched read-only sibling], listGoalActivityOccurrenceRowsForActivities [O5 P2d: that sibling\'s raw read-only SELECT, moved unchanged so it can run on the snapshot executor], and materializeGoalActivityRhythmOccurrence [R3\'s sole writer]) -- no fourth function in real code, no UPDATE/DELETE anywhere',
   (dbSrcNoComments.match(/GoalActivityOccurrence/g) ?? []).length === (allowedOccurrenceFnBodiesNoComments.match(/GoalActivityOccurrence/g) ?? []).length &&
     (dbSrcNoComments.match(/INSERT INTO "GoalActivityOccurrence"/g) ?? []).length === 1 &&
     !/UPDATE "GoalActivityOccurrence"|DELETE FROM "GoalActivityOccurrence"/.test(dbSrcNoComments)
