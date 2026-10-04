@@ -103,7 +103,7 @@ check('persistence still materializes occurrences through the existing gate and 
 // ============================================================
 // No policy was added
 // ============================================================
-check('no policy vocabulary exists anywhere in production: no decisionPressure, LAST_KNOWN_OPPORTUNITY or pressure type', filesMatching(/decisionPressure|DecisionPressure|LAST_KNOWN_OPPORTUNITY|overloadGate|shadowPolicy/i).length === 0);
+check('no policy vocabulary exists anywhere in production except the single P2b pure deriver module (decisionPressure.ts, unwired and source-neutral): no decisionPressure, LAST_KNOWN_OPPORTUNITY or pressure type, gate or shadow policy elsewhere', filesMatching(/decisionPressure|DecisionPressure|LAST_KNOWN_OPPORTUNITY|overloadGate|shadowPolicy/i).filter((f) => !/decisionPressure\.ts$/.test(f)).length === 0);
 check('the precedence comparator still reads no decision facts', !/decisionFacts|opportunity|recurrence/i.test(functionBody(read('apps/web/lib/dayIntent.ts'), 'compareByOverloadPrecedence')));
 check('the O1/O2/O4 modules and the facts type are untouched by this slice (no Goal, marker or manual vocabulary)', ['apps/web/lib/opportunityProjection.ts', 'apps/web/lib/opportunityRangeAdapter.ts', 'apps/web/lib/opportunityRangeRealDeps.ts', 'apps/web/lib/opportunityDecisionFacts.ts'].every((f) => !/goalActivity|plan-day-goal|canonicalDemand/i.test(read(f))));
 
