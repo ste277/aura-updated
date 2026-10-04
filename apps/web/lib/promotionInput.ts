@@ -27,8 +27,13 @@
  * recurrence and opportunity values, contention counts, rounds and attempted intervals are never inputs to eligibility.
  *
  * WHAT THE CONTRACT CARRIES (the minimum a bounded counterfactual pass needs, and nothing else): the loser's stable
- * Constructor intent id and the stable intent ids of its 1..N FINAL contention owners (deduplicated, never collapsed into
- * one winner, in order of first appearance in the trace). Existence of the input IS the encoding of "pressured, tied above
+ * Constructor intent id and, for each of its 1..N FINAL contention owners (deduplicated, never collapsed into one winner, in
+ * order of first appearance in the trace), the owner's stable intent id and its OWN categorical Decision Pressure (P4a2).
+ * Owner pressure ENRICHES the contract and does not change existence: an input still exists when an owner is itself
+ * pressured -- rejecting that is an ACTIVE-POLICY rule (P4b), not an admission rule, so the exhaustive P3b equivalence
+ * is unchanged. The only new gate is completeness: if any final owner has no categorical pressure on record the input is
+ * not emitted (fail closed; the production boundary derives pressure for every resolved intent, so this is a defensive
+ * guard against an incomplete authority, never a policy). Existence of the input IS the encoding of "pressured, tied above
  * pressure, finally Deferred after real contention" -- no redundant pressure field, no copied importance / deadline. A later
  * policy re-reads original order, durations and windows from the baseline authority it already holds by intent id; it does
  * not rediscover eligibility from raw facts. Historical owners that no longer hold a final Proposed slot are not carried.
@@ -53,9 +58,15 @@ import type { ContentionTrace } from './contentionTrace';
 import type { DecisionPressure } from './decisionPressure';
 import { compareAbovePressure, type AbovePressureFacts } from './abovePressurePrecedence';
 
-/** One FINAL contention owner of a promotion candidate: a stable Constructor intent id, nothing else. */
+/**
+ * One FINAL contention owner of a promotion candidate: its stable Constructor intent id and its OWN already-derived Decision
+ * Pressure (categorical: NONE | LAST_KNOWN_OPPORTUNITY), taken from the same pressure authority as the candidate's. Nothing
+ * else: no evidence, no facts, no summary of the owners' pressure. (O5 P4a2: a future promotion policy needs to know whether an
+ * owner is itself pressured -- two equally pressured candidates that tie above pressure still resolve by `originalOrder`.)
+ */
 export interface PromotionOwner {
   readonly intentId: string;
+  readonly pressure: DecisionPressure;
 }
 
 /**
@@ -74,7 +85,7 @@ export interface PromotionInputAuthority {
   readonly finalDay: Pick<ConstructedDay, 'proposedItems' | 'deferredItems'>;
   /** P3a's trace: the sole authority on whether candidate-vs-candidate contention occurred. */
   readonly contentionTrace: ContentionTrace;
-  /** ALREADY-DERIVED pressure per intent id. Raw facts and evidence are not accepted. */
+  /** ALREADY-DERIVED pressure per intent id -- the candidate's AND every final owner's, from the same evaluation. Raw facts and evidence are not accepted. */
   readonly pressureByIntentId: ReadonlyMap<string, DecisionPressure>;
   /** The normalised stronger-than-pressure facts per intent id. */
   readonly precedenceFactsByIntentId: ReadonlyMap<string, AbovePressureFacts>;
@@ -122,7 +133,10 @@ export function assemblePromotionInputs(authority: PromotionInputAuthority): rea
       return ownerFacts !== undefined && compareAbovePressure(candidateFacts, ownerFacts, authority.planningDate) === 'TIE';
     });
     if (!tiesEveryFinalOwner) continue;
-    inputs.push(Object.freeze({ candidateIntentId: candidateId, owners: Object.freeze(finalOwnerIds.map((ownerId) => Object.freeze({ intentId: ownerId }))) }));
+    // O5 P4a2 -- each owner's own pressure, from the same authority. A missing / non-categorical value is incomplete authority: no input (never a partially authoritative owner).
+    const ownerPressures = finalOwnerIds.map((ownerId) => authority.pressureByIntentId.get(ownerId));
+    if (ownerPressures.some((pressure) => pressure !== 'NONE' && pressure !== 'LAST_KNOWN_OPPORTUNITY')) continue;
+    inputs.push(Object.freeze({ candidateIntentId: candidateId, owners: Object.freeze(finalOwnerIds.map((ownerId, index) => Object.freeze({ intentId: ownerId, pressure: ownerPressures[index] as DecisionPressure }))) }));
   }
   return Object.freeze(inputs);
 }
