@@ -305,6 +305,12 @@ jobs:
         run: npx ts-node test/decisionSchedulingContext.test.ts
       - name: Run decision scheduling context architecture test
         run: npx ts-node test/decisionSchedulingContextArchitecture.test.ts
+      # Constructor Decision Intelligence O5 P4a -- the typed, immutable PromotionInput: permission for a pressured, finally
+      # Deferred candidate to enter a FUTURE promotion policy against its final contention owners. Inert; consumed by nothing.
+      - name: Run promotion input test
+        run: npx ts-node test/promotionInput.test.ts
+      - name: Run promotion input architecture test
+        run: npx ts-node test/promotionInputArchitecture.test.ts
       # Constructor scheduling correctness -- the target-day blocker load
       # uses half-open OVERLAP semantics (a plan that starts before the day
       # but runs into it must block), through the one shared definition.
