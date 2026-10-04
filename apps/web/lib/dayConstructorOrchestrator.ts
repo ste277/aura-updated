@@ -737,18 +737,44 @@ export async function orchestrateConstructDay(request: ConstructDayRequest, deps
  * contract, persistence or policy consumes it.
  */
 export async function orchestrateConstructDayWithTrace(request: ConstructDayRequest, deps: DayConstructorOrchestratorDeps): Promise<{ result: OrchestrateConstructDayResult; contentionTrace: ContentionTrace }> {
+  return runTraced(request, deps, undefined);
+}
+
+/**
+ * O5 P3b -- the diagnostics entry point for the inert SHADOW stage: the same traced orchestration plus the two inputs a
+ * shadow observation needs that otherwise stay internal -- the immutable per-intent evidence the P2a stage prepared (held
+ * for the future policy stage; never passed to the Constructor, never rebuilt here) and the planning date. Both are handed
+ * out AFTER the Constructor has decided, through a private write-only hand-off the orchestrator fills once; nothing
+ * computed from them can flow back into construction. `result` is exactly what `orchestrateConstructDay` returns for the
+ * same request and deps. Internal diagnostics only -- no route, preview, signed contract or persistence consumes it.
+ */
+export async function orchestrateConstructDayWithDiagnostics(
+  request: ConstructDayRequest,
+  deps: DayConstructorOrchestratorDeps
+): Promise<{ result: OrchestrateConstructDayResult; contentionTrace: ContentionTrace; evidenceByIntentId: ReturnType<typeof prepareDecisionEvidence>; planningDate: string }> {
+  const handOff: EvidenceHandOff = {};
+  const traced = await runTraced(request, deps, handOff);
+  return { result: traced.result, contentionTrace: traced.contentionTrace, evidenceByIntentId: handOff.byIntentId ?? new Map(), planningDate: request.targetDate };
+}
+
+/** O5 P3b -- private, write-only: the orchestrator assigns the prepared evidence here once, after preparation and before construction. */
+interface EvidenceHandOff {
+  byIntentId?: ReturnType<typeof prepareDecisionEvidence>;
+}
+
+async function runTraced(request: ConstructDayRequest, deps: DayConstructorOrchestratorDeps, evidenceOut: EvidenceHandOff | undefined): Promise<{ result: OrchestrateConstructDayResult; contentionTrace: ContentionTrace }> {
   const passTraces: ContentionTrace[] = [];
   const constructWithTrace = (input: ConstructDayInput): ConstructDayResult => {
     const traced = constructDayWithTrace(input, passTraces.length);
     passTraces.push(traced.trace);
     return traced.result;
   };
-  const result = await runOrchestration(request, deps, constructWithTrace);
+  const result = await runOrchestration(request, deps, constructWithTrace, evidenceOut);
   return { result, contentionTrace: aggregateContentionTraces(passTraces) };
 }
 
 /** `constructDay` here is the Constructor entry point to call (the legacy path passes the exported `constructDay` itself); the orchestrator never gives it anything but the plain input. */
-async function runOrchestration(request: ConstructDayRequest, deps: DayConstructorOrchestratorDeps, constructDay: (input: ConstructDayInput) => ConstructDayResult): Promise<OrchestrateConstructDayResult> {
+async function runOrchestration(request: ConstructDayRequest, deps: DayConstructorOrchestratorDeps, constructDay: (input: ConstructDayInput) => ConstructDayResult, evidenceOut?: EvidenceHandOff): Promise<OrchestrateConstructDayResult> {
   // Same defensive runtime checks `resolveConstructionWindow` itself
   // performs (below, untouched) -- duplicated here ONLY so a malformed
   // request fails before `deps.loadAvailabilityConfiguration`'s own I/O
@@ -967,6 +993,7 @@ async function runOrchestration(request: ConstructDayRequest, deps: DayConstruct
   // is held for the future decision-policy stage and deliberately NOT passed to `constructDay`, the precedence comparator,
   // placement, capacity or replenishment below: building evidence is not consuming it, and it is never rebuilt later.
   const decisionEvidenceByIntentId = prepareDecisionEvidence(preparationIntents, preparedDecisionFacts);
+  if (evidenceOut) evidenceOut.byIntentId = decisionEvidenceByIntentId; // O5 P3b -- write-only hand-off to the diagnostics entry point; read only after construction
 
   const intentsForConstructDay = resolvedIntents.map((r) => r.dayIntent);
 

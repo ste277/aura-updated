@@ -292,6 +292,13 @@ jobs:
       # frozen and independently owned from the Constructor result.
       - name: Run contention observer isolation test
         run: npx ts-node test/contentionObserverIsolation.test.ts
+      # Constructor Decision Intelligence O5 P3b -- the inert SHADOW PRESSURE stage: derived pressure + the
+      # P3a contention trace + the final result, classified per Deferred loser against the dimensions that
+      # already outrank pressure. Observation only; says nothing about who should win and authorizes no policy.
+      - name: Run shadow pressure evaluation test
+        run: npx ts-node test/shadowPressureEvaluation.test.ts
+      - name: Run shadow pressure architecture test
+        run: npx ts-node test/shadowPressureArchitecture.test.ts
       # Constructor scheduling correctness -- the target-day blocker load
       # uses half-open OVERLAP semantics (a plan that starts before the day
       # but runs into it must block), through the one shared definition.
