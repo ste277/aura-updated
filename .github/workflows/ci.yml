@@ -280,6 +280,18 @@ jobs:
         run: npx ts-node test/decisionPressureAuthority.test.ts
       - name: Run decision pressure catalog reachability test
         run: npx ts-node test/decisionPressureCatalogReachability.test.ts
+      # Constructor Decision Intelligence O5 P3a -- the inert CONTENTION TRACE: which candidate's
+      # attempted interval lost to an interval already owned by a Proposed candidate, accumulated
+      # across Constructor rounds. Behavior (pure Constructor + orchestrator) and architecture guard.
+      - name: Run contention trace test
+        run: npx ts-node test/contentionTrace.test.ts
+      - name: Run contention trace architecture test
+        run: npx ts-node test/contentionTraceArchitecture.test.ts
+      # O5 P3a observer isolation -- observation has no authority over construction: no caller
+      # observer / sink can be supplied to the Constructor, and a returned trace is detached,
+      # frozen and independently owned from the Constructor result.
+      - name: Run contention observer isolation test
+        run: npx ts-node test/contentionObserverIsolation.test.ts
       # Constructor scheduling correctness -- the target-day blocker load
       # uses half-open OVERLAP semantics (a plan that starts before the day
       # but runs into it must block), through the one shared definition.

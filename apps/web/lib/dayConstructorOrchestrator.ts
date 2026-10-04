@@ -57,6 +57,7 @@ import {
 } from './dayIntent';
 import {
   constructDay,
+  constructDayWithTrace,
   type ConstructDayInput,
   type ConstructDayResult,
   type ConstructedDay,
@@ -66,6 +67,7 @@ import {
   type PlacementTimingFit,
 } from './dayConstructor';
 import type { BlockedInterval } from './dayCapacity';
+import { aggregateContentionTraces, type ContentionTrace } from './contentionTrace';
 import { isActivePlanBlocker, type PlanBlockerStatus, type PlanBlockerCandidate } from './planBlockerLifecycle';
 import { resolveDecisionFactsForIntent, type DecisionFactsByIntentId } from './decisionFacts';
 import { attachPreparedDecisionFacts, prepareDecisionEvidence, prepareDecisionFactsFailOpen, type DecisionFactPreparer } from './decisionFactPreparation';
@@ -722,6 +724,31 @@ export async function resolveAvailabilityAwareWindow(
 }
 
 export async function orchestrateConstructDay(request: ConstructDayRequest, deps: DayConstructorOrchestratorDeps): Promise<OrchestrateConstructDayResult> {
+  return runOrchestration(request, deps, constructDay); // the legacy path: the exported `constructDay` itself, no observer, no trace
+}
+
+/**
+ * O5 P3a -- the same orchestration, additionally returning the CONTENTION TRACE (contentionTrace.ts) ACCUMULATED across
+ * every Constructor pass (the first pass is round 0, each replenishment re-run the next round), so a later round that
+ * leaves a candidate with NO_CANDIDATES cannot erase the earlier proof that it lost an interval to a Proposed owner.
+ * Each pass runs through `constructDayWithTrace`, whose observer is created INSIDE the Constructor; nothing a caller
+ * supplies is ever invoked from inside placement. `result` is exactly what `orchestrateConstructDay` returns for the same
+ * request and deps: same queries, same searches, same output. Internal diagnostics only -- no route, preview, signed
+ * contract, persistence or policy consumes it.
+ */
+export async function orchestrateConstructDayWithTrace(request: ConstructDayRequest, deps: DayConstructorOrchestratorDeps): Promise<{ result: OrchestrateConstructDayResult; contentionTrace: ContentionTrace }> {
+  const passTraces: ContentionTrace[] = [];
+  const constructWithTrace = (input: ConstructDayInput): ConstructDayResult => {
+    const traced = constructDayWithTrace(input, passTraces.length);
+    passTraces.push(traced.trace);
+    return traced.result;
+  };
+  const result = await runOrchestration(request, deps, constructWithTrace);
+  return { result, contentionTrace: aggregateContentionTraces(passTraces) };
+}
+
+/** `constructDay` here is the Constructor entry point to call (the legacy path passes the exported `constructDay` itself); the orchestrator never gives it anything but the plain input. */
+async function runOrchestration(request: ConstructDayRequest, deps: DayConstructorOrchestratorDeps, constructDay: (input: ConstructDayInput) => ConstructDayResult): Promise<OrchestrateConstructDayResult> {
   // Same defensive runtime checks `resolveConstructionWindow` itself
   // performs (below, untouched) -- duplicated here ONLY so a malformed
   // request fails before `deps.loadAvailabilityConfiguration`'s own I/O
