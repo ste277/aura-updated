@@ -133,6 +133,7 @@ const PROTECTED: Array<{ file: string; role: string }> = [
   { file: 'apps/web/lib/abovePressurePrecedence.ts', role: 'above-pressure comparison primitive' },
   { file: 'apps/web/lib/shadowPressureEvaluation.ts', role: 'P3b shadow evaluator' },
   { file: 'apps/web/lib/shadowPressureObservation.ts', role: 'P3b diagnostics boundary' },
+  { file: 'apps/web/lib/constructionBasis.ts', role: 'P4b1 immutable construction basis (owns every Date it holds)' },
   { file: 'apps/web/lib/promotionInput.ts', role: 'P4a promotion input assembler' },
   { file: 'apps/web/lib/promotionInputPreparation.ts', role: 'P4a promotion preparation boundary' },
 ];
