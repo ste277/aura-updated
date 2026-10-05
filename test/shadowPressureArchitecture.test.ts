@@ -148,7 +148,7 @@ check('NOT A POLICY CONSUMER: no active comparator, Constructor, placement, capa
 const migrationSql = fs.readdirSync(path.join(root, 'apps/web/prisma/migrations'), { withFileTypes: true }).filter((e) => e.isDirectory()).map((e) => fs.readFileSync(path.join(root, 'apps/web/prisma/migrations', e.name, 'migration.sql'), 'utf8'));
 check('NO PERSISTENCE: the Prisma schema and all 43 migration directories mention no shadow stage; no migration was added', !/shadow/i.test(read('apps/web/prisma/schema.prisma')) && migrationSql.length === 43 && migrationSql.every((s) => !/shadowPressure|abovePressure/i.test(s)));
 const comparatorFile = read('apps/web/lib/dayIntent.ts');
-check('ACTIVE COMPARATOR UNTOUCHED AND UNREAD: dayIntent.ts (the hashed precedence code) does not name the shadow stage, and the helper is the only shadow-stage caller of `compareByOverloadPrecedence`', !SHADOW_WORD.test(comparatorFile) && JSON.stringify(names(/compareByOverloadPrecedence\(/)) === JSON.stringify(['apps/web/lib/abovePressurePrecedence.ts', 'apps/web/lib/dayIntent.ts']));
+check('ACTIVE COMPARATOR UNTOUCHED AND UNREAD: dayIntent.ts (the hashed precedence code) does not name the shadow stage, and the helper is the only shadow-stage caller of `compareByOverloadPrecedence` (O5 P4b2: the pure local counterfactual generator also calls it, to reproduce the Constructor\'s neutral owner order -- it is not a shadow-stage module)', !SHADOW_WORD.test(comparatorFile) && JSON.stringify(names(/compareByOverloadPrecedence\(/)) === JSON.stringify(['apps/web/lib/abovePressurePrecedence.ts', 'apps/web/lib/dayIntent.ts', 'apps/web/lib/localCounterfactual.ts']));
 
 console.log('=== the evaluator: derived pressure + trace + final result, nothing else ===');
 const ev = src(EVAL);
