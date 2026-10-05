@@ -50,6 +50,8 @@ function productionFiles(): SrcFile[] {
 const LOCAL = 'apps/web/lib/localCounterfactual.ts';
 /** O5 P4b3 -- the pure acceptance predicate consumes the generator's OUTPUT TYPE only (`LocalCounterfactual`); it never calls or imports the generator as a value. Pinned by counterfactualAcceptanceArchitecture.test.ts. */
 const ACCEPTANCE = 'apps/web/lib/counterfactualAcceptance.ts';
+/** O5 P4b4 -- the same-run shadow composition: the ONLY caller of the generator (once per PromotionInput, from the run's own authorities). Nothing consumes the composition. */
+const SHADOW_POLICY = 'apps/web/lib/shadowPolicyObservation.ts';
 const CONSTRUCTOR = 'apps/web/lib/dayConstructor.ts';
 const INTENT = 'apps/web/lib/dayIntent.ts';
 const CAPACITY = 'apps/web/lib/dayCapacity.ts';
@@ -94,10 +96,10 @@ function audit(files: SrcFile[]): string[] {
   const by = (re: RegExp) => files.filter((x) => re.test(x.src)).map((x) => x.f);
   const notIn = (list: string[], allow: string[]) => list.filter((f) => !allow.includes(f));
   // L1 -- confinement and ZERO production consumers
-  notIn(by(VOCAB), [LOCAL, ACCEPTANCE]).forEach((f) => v.push(`L1:names-the-generator:${f}`));
-  notIn(by(/from '\.\/localCounterfactual'/), [ACCEPTANCE]).forEach((f) => v.push(`L1:production-consumer-of-the-generator:${f}`));
+  notIn(by(VOCAB), [LOCAL, ACCEPTANCE, SHADOW_POLICY]).forEach((f) => v.push(`L1:names-the-generator:${f}`));
+  notIn(by(/from '\.\/localCounterfactual'/), [ACCEPTANCE, SHADOW_POLICY]).forEach((f) => v.push(`L1:production-consumer-of-the-generator:${f}`));
   { const x = get(ACCEPTANCE); if (x && /^import (?!type )[^\n]*from '\.\/localCounterfactual'/m.test(x.src)) v.push(`L1:acceptance-imports-the-generator-as-a-value:${ACCEPTANCE}`); }
-  by(/\bgenerateLocalCounterfactual\(/).filter((f) => f !== LOCAL).forEach((f) => v.push(`L1:calls-the-generator:${f}`));
+  by(/\bgenerateLocalCounterfactual\(/).filter((f) => f !== LOCAL && f !== SHADOW_POLICY).forEach((f) => v.push(`L1:calls-the-generator:${f}`));
   for (const f of NEVER) { const x = get(f); if (x && (VOCAB.test(x.src) || /counterfactual/i.test(x.src))) v.push(`L1:surface-names-the-generator:${f}`); }
   const c = get(CONSTRUCTOR);
   if (c && JSON.stringify(Array.from(c.src.matchAll(/^export function (\w+)/gm)).map((x) => x[1])) !== JSON.stringify(['compareCandidatesForPlacement', 'constructDay', 'constructDayWithTrace'])) v.push(`L1:constructor-exports-changed:${CONSTRUCTOR}`);
@@ -194,7 +196,7 @@ const baseline = audit(real);
 check(`THE REAL PRODUCTION TREE HAS ZERO LOCAL-COUNTERFACTUAL ARCHITECTURE VIOLATIONS (${real.length} production files scanned)${baseline.length ? ': ' + baseline.join(', ') : ''}`, baseline.length === 0);
 
 console.log('=== zero consumers, confinement, untouched scheduling code ===');
-check('ZERO PRODUCTION CONSUMERS: the generator vocabulary exists in exactly TWO production files (itself and, as a TYPE-only import of its output, the O5 P4b3 acceptance predicate); nothing calls the generator and nothing else imports it -- tests only', JSON.stringify(names(VOCAB)) === JSON.stringify([LOCAL, ACCEPTANCE].sort()) && JSON.stringify(names(/from '\.\/localCounterfactual'/)) === JSON.stringify([ACCEPTANCE]) && !/^import (?!type )[^\n]*from '\.\/localCounterfactual'/m.test(src(ACCEPTANCE)) && JSON.stringify(names(/\bgenerateLocalCounterfactual\(/)) === JSON.stringify([LOCAL]));
+check('ZERO PRODUCTION CONSUMERS: the generator vocabulary exists in exactly THREE production files (itself, as a TYPE-only import of its output the O5 P4b3 acceptance predicate, and the O5 P4b4 same-run shadow composition, the only caller); nothing else calls or imports the generator and nothing consumes the composition -- tests only', JSON.stringify(names(VOCAB)) === JSON.stringify([LOCAL, ACCEPTANCE, SHADOW_POLICY].sort()) && JSON.stringify(names(/from '\.\/localCounterfactual'/)) === JSON.stringify([ACCEPTANCE, SHADOW_POLICY].sort()) && !/^import (?!type )[^\n]*from '\.\/localCounterfactual'/m.test(src(ACCEPTANCE)) && JSON.stringify(names(/\bgenerateLocalCounterfactual\(/)) === JSON.stringify([LOCAL, SHADOW_POLICY].sort()));
 check('NOT PUBLIC / SIGNED / PERSISTED / ACCEPTED: no preview, signing, acceptance, persistence, Recomposition, Move, presentation, route, scheduling-context, trace, basis, placements, input, contention, attempts or promotion-preparation module names the generator or the word counterfactual', NEVER.every((f) => !VOCAB.test(src(f)) && !/counterfactual/i.test(src(f))));
 const migrationSql = fs.readdirSync(path.join(root, 'apps/web/prisma/migrations'), { withFileTypes: true }).filter((e) => e.isDirectory()).map((e) => fs.readFileSync(path.join(root, 'apps/web/prisma/migrations', e.name, 'migration.sql'), 'utf8'));
 check('NO PERSISTENCE, NO SCHEMA: the Prisma schema and all 43 migration directories mention no counterfactual; no migration was added', !/counterfactual/i.test(read('apps/web/prisma/schema.prisma')) && migrationSql.length === 43 && migrationSql.every((s) => !/counterfactual/i.test(s)));

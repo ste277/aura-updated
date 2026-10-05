@@ -141,6 +141,7 @@ const PROTECTED: Array<{ file: string; role: string }> = [
   { file: 'apps/web/lib/schedulingAttemptAuthority.ts', role: 'P4b2b immutable scheduling attempt authority (owns every Date it holds)' },
   { file: 'apps/web/lib/localCounterfactual.ts', role: 'P4b2 pure local counterfactual generator (owns every Date it emits)' },
   { file: 'apps/web/lib/counterfactualAcceptance.ts', role: 'P4b3 pure counterfactual acceptance predicate (reads Dates, emits none)' },
+  { file: 'apps/web/lib/shadowPolicyObservation.ts', role: 'P4b4 same-run shadow policy composition (reads Dates, emits ISO strings only)' },
 ];
 /** The scheduling entry points whose value-import closure is checked for completeness. */
 const ENTRY_POINTS = ['apps/web/lib/dayConstructorOrchestrator.ts', 'apps/web/lib/dayConstructor.ts', 'apps/web/lib/promotionInputPreparation.ts', 'apps/web/lib/decisionSchedulingContextLoader.ts', 'apps/web/lib/shadowPressureObservation.ts'];

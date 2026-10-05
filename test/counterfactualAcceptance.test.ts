@@ -108,6 +108,25 @@ const OK: Plan = { p: { s: '10:30', fit: 'GOOD' }, relocated: { O: { s: '15:00',
     check('SIMPLE ACCEPT: P promoted, owner O relocated with the SAME timing fit, P ties O above pressure, nothing else changes -> ACCEPT (and only that: the decision carries no score, count or reason)', verdict(d) === 'ACCEPT' && Object.keys(d).join() === 'status');
     check('BETTER OWNER TIMING: O relocated from WORKABLE to BEST -> ACCEPT (the floor is "no worse", not "equal")', decide({ ...SIMPLE, baseline: [{ id: 'O', s: '10:00', fit: 'WORKABLE' }, SIMPLE.baseline[1]] }, { p: OK.p, relocated: { O: { s: '15:00', fit: 'BEST' } } }) === 'ACCEPT');
     check('WORSE OWNER TIMING: O relocated from GOOD to CAUTION (and to WORKABLE) -> REJECT OWNER_TIMING_DEGRADED; the relocated fit being UNKNOWN (undefined ranks worst) is also a degradation', decide(SIMPLE, { p: OK.p, relocated: { O: { s: '15:00', fit: 'CAUTION' } } }) === 'REJECT:OWNER_TIMING_DEGRADED' && decide(SIMPLE, { p: OK.p, relocated: { O: { s: '15:00', fit: 'WORKABLE' } } }) === 'REJECT:OWNER_TIMING_DEGRADED' && decide(SIMPLE, { p: OK.p, relocated: { O: { s: '15:00', fit: undefined } } }) === 'REJECT:OWNER_TIMING_DEGRADED');
+    {
+      // O5 P4b4 (committed #214 review debt): the TIMING-FLOOR GRID. The floor is decided by the fit RANK alone -- never by where the owner moves (earlier or later),
+      // never by candidateOrder (not an input; the comparator shell is a pinned constant). Baseline fit x relocated fit x relocation direction, every fit value.
+      const FITS = ['BEST', 'GOOD', 'WORKABLE', 'CAUTION', undefined] as const;
+      const rankOf = (f: string | undefined) => (f === undefined ? 4 : ['BEST', 'GOOD', 'WORKABLE', 'CAUTION'].indexOf(f));
+      const gridWorld = (direction: 'LATE_TO_EARLY' | 'EARLY_TO_LATE', baselineFit: Fit): { w: World; plan: (fit: Fit) => Plan } => ({
+        w: { intents: [{ id: 'O' }, { id: 'N' }, { id: 'P' }], baseline: [{ id: 'O', s: direction === 'LATE_TO_EARLY' ? '15:00' : '09:00', fit: baselineFit }, { id: 'N', s: '13:00', fit: 'BEST' }], owners: ['O'] },
+        plan: (fit) => (direction === 'LATE_TO_EARLY' ? { p: { s: '15:30', fit: 'GOOD' }, relocated: { O: { s: '09:00', fit } } } : { p: { s: '09:30', fit: 'GOOD' }, relocated: { O: { s: '15:00', fit } } }),
+      });
+      const cells: string[] = [];
+      for (const baselineFit of FITS) for (const relocatedFit of FITS) for (const direction of ['LATE_TO_EARLY', 'EARLY_TO_LATE'] as const) {
+        const { w, plan } = gridWorld(direction, baselineFit);
+        const want = baselineFit === undefined ? 'UNAVAILABLE:BASELINE_TIMING_UNKNOWN' : rankOf(relocatedFit) > rankOf(baselineFit) ? 'REJECT:OWNER_TIMING_DEGRADED' : 'ACCEPT';
+        if (decide(w, plan(relocatedFit)) !== want) cells.push(`${baselineFit}->${relocatedFit} ${direction}`);
+      }
+      check('TIMING-FLOOR GRID (committed): over every baseline fit x relocated fit (BEST, GOOD, WORKABLE, CAUTION, unknown) x earlier / later relocation (50 cells) same or better -> ACCEPT, worse (an unknown relocated fit ranks worst) -> REJECT OWNER_TIMING_DEGRADED, unknown baseline -> UNAVAILABLE BASELINE_TIMING_UNKNOWN' + (cells.length ? ` -- mismatches: ${cells.join('; ')}` : ''), cells.length === 0);
+      const same = (direction: 'LATE_TO_EARLY' | 'EARLY_TO_LATE') => { const { w, plan } = gridWorld(direction, 'GOOD'); return decide(w, plan('GOOD')); };
+      check('SAME-FIT START INDEPENDENCE (pinned): baseline GOOD @ 15:00 relocated to GOOD @ 09:00, and baseline GOOD @ 09:00 relocated to GOOD @ 15:00, never reject for timing -> ACCEPT both ways', same('LATE_TO_EARLY') === 'ACCEPT' && same('EARLY_TO_LATE') === 'ACCEPT');
+    }
     check('P\'S OWN FIT IS NOT A CONDITION: P promoted at CAUTION while O keeps GOOD -> ACCEPT (P is promoted for pressure, not for timing)', decide(SIMPLE, { p: { s: '10:30', fit: 'CAUTION' }, relocated: OK.relocated }) === 'ACCEPT');
     check('CRITICAL NONE FIXTURE: a displaced owner left UNPLACED -> REJECT OWNER_WOULD_BE_UNPLACED, whether the owner\'s pressure is NONE or LAST_KNOWN_OPPORTUNITY (NONE means "no established pressure", not "safe to defer")', decide({ ...SIMPLE, pressure: { O: 'NONE' } }, { p: OK.p, unplaced: ['O'] }) === 'REJECT:OWNER_WOULD_BE_UNPLACED' && decide({ ...SIMPLE, pressure: { O: 'LAST_KNOWN_OPPORTUNITY' } }, { p: OK.p, unplaced: ['O'] }) === 'REJECT:OWNER_WOULD_BE_UNPLACED');
     check('NONE RELOCATED SAME FIT -> ACCEPT: NONE does not block when the owner is still scheduled; PRESSURED RELOCATED SAME DAY -> ACCEPT: LAST_KNOWN_OPPORTUNITY is DAY-level (the current day stays the opportunity), so a same-day relocation is not owner loss and pressure alone never rejects', decide({ ...SIMPLE, pressure: { O: 'NONE' } }, OK) === 'ACCEPT' && decide({ ...SIMPLE, pressure: { O: 'LAST_KNOWN_OPPORTUNITY' } }, OK) === 'ACCEPT');

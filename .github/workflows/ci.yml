@@ -360,6 +360,13 @@ jobs:
         run: npx ts-node test/counterfactualAcceptance.test.ts
       - name: Run counterfactual acceptance architecture test
         run: npx ts-node test/counterfactualAcceptanceArchitecture.test.ts
+      # O5 P4b4 -- the SAME-RUN SHADOW POLICY COMPOSITION: ONE orchestration -> per PromotionInput the P4b2 generator -> the P4b3 predicate, as frozen diagnostic
+      # observations (GENERATION_UNAVAILABLE / ACCEPTANCE_UNAVAILABLE / REJECT / ACCEPT, exact source reasons). Same-run by construction (the seam takes only request +
+      # deps); decides nothing, changes nothing, wired nowhere. Also carries the committed P4b3 timing-floor grid. Inert; consumed by nothing.
+      - name: Run shadow policy observation test
+        run: npx ts-node test/shadowPolicyObservation.test.ts
+      - name: Run shadow policy observation architecture test
+        run: npx ts-node test/shadowPolicyObservationArchitecture.test.ts
       # Constructor scheduling correctness -- the target-day blocker load
       # uses half-open OVERLAP semantics (a plan that starts before the day
       # but runs into it must block), through the one shared definition.

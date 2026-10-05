@@ -58,7 +58,9 @@ const SEARCH = 'packages/recommendation/src/timingSearch.ts';
 const VOCAB = /\b(SchedulingAttempt[A-Za-z]*|projectSchedulingAttempts|normalizeSchedulingAttempts|schedulingAttempts)\b|schedulingAttemptAuthority['"]/;
 /** O5 P4b2 -- the pure local counterfactual generator consumes the run-level attempt outcome as a TYPE only. */
 const LOCAL = 'apps/web/lib/localCounterfactual.ts';
-const ALLOWED_NAMING = [ATT, MOD, PREP, LOCAL];
+/** O5 P4b4 -- the same-run shadow composition NAMES the run-level `schedulingAttempts` field it hands to the generator (identifier only; no import of this module). */
+const SHADOW_POLICY = 'apps/web/lib/shadowPolicyObservation.ts';
+const ALLOWED_NAMING = [ATT, MOD, PREP, LOCAL, SHADOW_POLICY];
 const ATT_IMPORTS = [`import type { PlacementTimingFit } from './dayConstructor';`, `import type { ContentionTrace } from './contentionTrace';`, `import type { ConstructionBasisOutcome } from './constructionBasis';`];
 const DB_VOCAB = /from '\.\/db'|\bpool\b|\.query\(|beginTransaction|withRepeatableReadSnapshot|prisma|INSERT|UPDATE|DELETE/;
 const CLOCK_VOCAB = /Date\.now|new Date\(\)|performance\.now|hrtime/;
@@ -193,7 +195,7 @@ const baseline = audit(real);
 check(`THE REAL PRODUCTION TREE HAS ZERO SCHEDULING-ATTEMPT-AUTHORITY ARCHITECTURE VIOLATIONS (${real.length} production files scanned)${baseline.length ? ': ' + baseline.join(', ') : ''}`, baseline.length === 0);
 
 console.log('=== confinement, producer, consumers ===');
-check('THE ATTEMPT VOCABULARY EXISTS IN EXACTLY FOUR PRODUCTION FILES: the pure module, the promotion contention view (which imports the shared normalization), the internal promotion boundary and (O5 P4b2, TYPE only) the pure local counterfactual generator; only those import it; the run-level projection is called only by the boundary, the normalization only by the module and the view', JSON.stringify(names(VOCAB)) === JSON.stringify([...ALLOWED_NAMING].sort()) && JSON.stringify(names(/from '\.\/schedulingAttemptAuthority'/)) === JSON.stringify([MOD, PREP, LOCAL].sort()) && JSON.stringify(names(/\bprojectSchedulingAttempts\(/)) === JSON.stringify([ATT, PREP].sort()) && JSON.stringify(names(/\bnormalizeSchedulingAttempts\(/)) === JSON.stringify([ATT, MOD].sort()));
+check('THE ATTEMPT VOCABULARY EXISTS IN EXACTLY FIVE PRODUCTION FILES: the pure module, the promotion contention view (which imports the shared normalization), the internal promotion boundary and (O5 P4b2, TYPE only) the pure local counterfactual generator and (O5 P4b4, the field NAME only, no import) the same-run shadow policy composition; only those import it; the run-level projection is called only by the boundary, the normalization only by the module and the view', JSON.stringify(names(VOCAB)) === JSON.stringify([...ALLOWED_NAMING].sort()) && JSON.stringify(names(/from '\.\/schedulingAttemptAuthority'/)) === JSON.stringify([MOD, PREP, LOCAL].sort()) && JSON.stringify(names(/\bprojectSchedulingAttempts\(/)) === JSON.stringify([ATT, PREP].sort()) && JSON.stringify(names(/\bnormalizeSchedulingAttempts\(/)) === JSON.stringify([ATT, MOD].sort()));
 check('NOT A SCHEDULING CONSUMER: no Constructor, comparator, capacity, trace, basis, placements, assembler, orchestrator, search, preview, signing, acceptance, persistence, Recomposition, Move, route or scheduling-context module mentions the attempt authority', NEVER.every((f) => !VOCAB.test(src(f))));
 const migrationSql = fs.readdirSync(path.join(root, 'apps/web/prisma/migrations'), { withFileTypes: true }).filter((e) => e.isDirectory()).map((e) => fs.readFileSync(path.join(root, 'apps/web/prisma/migrations', e.name, 'migration.sql'), 'utf8'));
 check('NO PERSISTENCE, NO SCHEMA: the Prisma schema and all 43 migration directories mention no scheduling attempt; no migration was added', !/schedulingAttempt/i.test(read('apps/web/prisma/schema.prisma')) && migrationSql.length === 43 && migrationSql.every((s) => !/schedulingAttempt/i.test(s)));
