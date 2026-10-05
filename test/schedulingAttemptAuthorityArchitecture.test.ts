@@ -56,7 +56,9 @@ const BASIS = 'apps/web/lib/constructionBasis.ts';
 const PLACEMENTS = 'apps/web/lib/baselinePlacements.ts';
 const SEARCH = 'packages/recommendation/src/timingSearch.ts';
 const VOCAB = /\b(SchedulingAttempt[A-Za-z]*|projectSchedulingAttempts|normalizeSchedulingAttempts|schedulingAttempts)\b|schedulingAttemptAuthority['"]/;
-const ALLOWED_NAMING = [ATT, MOD, PREP];
+/** O5 P4b2 -- the pure local counterfactual generator consumes the run-level attempt outcome as a TYPE only. */
+const LOCAL = 'apps/web/lib/localCounterfactual.ts';
+const ALLOWED_NAMING = [ATT, MOD, PREP, LOCAL];
 const ATT_IMPORTS = [`import type { PlacementTimingFit } from './dayConstructor';`, `import type { ContentionTrace } from './contentionTrace';`, `import type { ConstructionBasisOutcome } from './constructionBasis';`];
 const DB_VOCAB = /from '\.\/db'|\bpool\b|\.query\(|beginTransaction|withRepeatableReadSnapshot|prisma|INSERT|UPDATE|DELETE/;
 const CLOCK_VOCAB = /Date\.now|new Date\(\)|performance\.now|hrtime/;
@@ -88,7 +90,8 @@ function audit(files: SrcFile[]): string[] {
   const notIn = (list: string[], allow: string[]) => list.filter((f) => !allow.includes(f));
   // S1 -- confinement and consumers
   notIn(by(VOCAB), ALLOWED_NAMING).forEach((f) => v.push(`S1:names-the-attempt-authority:${f}`));
-  notIn(by(/from '\.\/schedulingAttemptAuthority'/), [MOD, PREP]).forEach((f) => v.push(`S1:imports-the-attempt-authority:${f}`));
+  notIn(by(/from '\.\/schedulingAttemptAuthority'/), [MOD, PREP, LOCAL]).forEach((f) => v.push(`S1:imports-the-attempt-authority:${f}`));
+  { const x = get(LOCAL); if (x && /^import (?!type )[^\n]*from '\.\/schedulingAttemptAuthority'/m.test(x.src)) v.push(`S1:generator-imports-the-attempt-authority-as-a-value:${LOCAL}`); }
   notIn(by(/\bprojectSchedulingAttempts\(/), [ATT, PREP]).forEach((f) => v.push(`S1:calls-the-run-level-projection:${f}`));
   notIn(by(/\bnormalizeSchedulingAttempts\(/), [ATT, MOD]).forEach((f) => v.push(`S1:calls-the-normalization:${f}`));
   for (const f of NEVER) { const x = get(f); if (x && VOCAB.test(x.src)) v.push(`S1:surface-names-the-attempt-authority:${f}`); }
@@ -190,7 +193,7 @@ const baseline = audit(real);
 check(`THE REAL PRODUCTION TREE HAS ZERO SCHEDULING-ATTEMPT-AUTHORITY ARCHITECTURE VIOLATIONS (${real.length} production files scanned)${baseline.length ? ': ' + baseline.join(', ') : ''}`, baseline.length === 0);
 
 console.log('=== confinement, producer, consumers ===');
-check('THE ATTEMPT VOCABULARY EXISTS IN EXACTLY THREE PRODUCTION FILES: the pure module, the promotion contention view (which imports the shared normalization) and the internal promotion boundary; only those import it; the run-level projection is called only by the boundary, the normalization only by the module and the view', JSON.stringify(names(VOCAB)) === JSON.stringify([...ALLOWED_NAMING].sort()) && JSON.stringify(names(/from '\.\/schedulingAttemptAuthority'/)) === JSON.stringify([MOD, PREP].sort()) && JSON.stringify(names(/\bprojectSchedulingAttempts\(/)) === JSON.stringify([ATT, PREP].sort()) && JSON.stringify(names(/\bnormalizeSchedulingAttempts\(/)) === JSON.stringify([ATT, MOD].sort()));
+check('THE ATTEMPT VOCABULARY EXISTS IN EXACTLY FOUR PRODUCTION FILES: the pure module, the promotion contention view (which imports the shared normalization), the internal promotion boundary and (O5 P4b2, TYPE only) the pure local counterfactual generator; only those import it; the run-level projection is called only by the boundary, the normalization only by the module and the view', JSON.stringify(names(VOCAB)) === JSON.stringify([...ALLOWED_NAMING].sort()) && JSON.stringify(names(/from '\.\/schedulingAttemptAuthority'/)) === JSON.stringify([MOD, PREP, LOCAL].sort()) && JSON.stringify(names(/\bprojectSchedulingAttempts\(/)) === JSON.stringify([ATT, PREP].sort()) && JSON.stringify(names(/\bnormalizeSchedulingAttempts\(/)) === JSON.stringify([ATT, MOD].sort()));
 check('NOT A SCHEDULING CONSUMER: no Constructor, comparator, capacity, trace, basis, placements, assembler, orchestrator, search, preview, signing, acceptance, persistence, Recomposition, Move, route or scheduling-context module mentions the attempt authority', NEVER.every((f) => !VOCAB.test(src(f))));
 const migrationSql = fs.readdirSync(path.join(root, 'apps/web/prisma/migrations'), { withFileTypes: true }).filter((e) => e.isDirectory()).map((e) => fs.readFileSync(path.join(root, 'apps/web/prisma/migrations', e.name, 'migration.sql'), 'utf8'));
 check('NO PERSISTENCE, NO SCHEMA: the Prisma schema and all 43 migration directories mention no scheduling attempt; no migration was added', !/schedulingAttempt/i.test(read('apps/web/prisma/schema.prisma')) && migrationSql.length === 43 && migrationSql.every((s) => !/schedulingAttempt/i.test(s)));

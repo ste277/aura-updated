@@ -47,6 +47,8 @@ function productionFiles(): SrcFile[] {
 
 const MOD = 'apps/web/lib/promotionContentionAuthority.ts';
 const ATT = 'apps/web/lib/schedulingAttemptAuthority.ts';
+/** O5 P4b2 -- the pure local counterfactual generator consumes the contention outcome as a TYPE only (it never projects one). */
+const LOCAL = 'apps/web/lib/localCounterfactual.ts';
 const PREP = 'apps/web/lib/promotionInputPreparation.ts';
 const ASM = 'apps/web/lib/promotionInput.ts';
 const ORCH = 'apps/web/lib/dayConstructorOrchestrator.ts';
@@ -90,8 +92,9 @@ function audit(files: SrcFile[]): string[] {
   const by = (re: RegExp) => files.filter((x) => re.test(x.src)).map((x) => x.f);
   const notIn = (list: string[], allow: string[]) => list.filter((f) => !allow.includes(f));
   // Z1 -- confinement, consumers, raw trace
-  notIn(by(IDENT), [MOD, PREP]).forEach((f) => v.push(`Z1:names-the-authority:${f}`));
-  notIn(by(/from '\.\/promotionContentionAuthority'/), [PREP]).forEach((f) => v.push(`Z1:imports-the-authority-module:${f}`));
+  notIn(by(IDENT), [MOD, PREP, LOCAL]).forEach((f) => v.push(`Z1:names-the-authority:${f}`));
+  notIn(by(/from '\.\/promotionContentionAuthority'/), [PREP, LOCAL]).forEach((f) => v.push(`Z1:imports-the-authority-module:${f}`));
+  { const x = get(LOCAL); if (x && /^import (?!type )[^\n]*from '\.\/promotionContentionAuthority'/m.test(x.src)) v.push(`Z1:generator-imports-the-authority-as-a-value:${LOCAL}`); }
   notIn(by(/\bprojectContentionAuthority\(/), [MOD, PREP]).forEach((f) => v.push(`Z1:calls-the-projection:${f}`));
   for (const f of NEVER) { const x = get(f); if (x && /PromotionContention|projectContentionAuthority|promotionContentionAuthority/.test(x.src)) v.push(`Z1:surface-names-the-authority:${f}`); }
   notIn(by(RAW_TRACE_IDENT), RAW_TRACE_READERS).forEach((f) => v.push(`Z2:raw-trace-reader-outside-the-boundary:${f}`));
@@ -177,12 +180,12 @@ const baseline = audit(real);
 check(`THE REAL PRODUCTION TREE HAS ZERO PROMOTION-CONTENTION-AUTHORITY ARCHITECTURE VIOLATIONS (${real.length} production files scanned)${baseline.length ? ': ' + baseline.join(', ') : ''}`, baseline.length === 0);
 
 console.log('=== confinement, producer, raw trace, zero scheduling consumers ===');
-check('THE AUTHORITY VOCABULARY EXISTS IN EXACTLY TWO PRODUCTION FILES: the pure module and the internal promotion boundary that produces it; only the boundary imports and calls it', JSON.stringify(names(IDENT)) === JSON.stringify([MOD, PREP].sort()) && JSON.stringify(names(/from '\.\/promotionContentionAuthority'/)) === JSON.stringify([PREP]) && JSON.stringify(names(/\bprojectContentionAuthority\(/)) === JSON.stringify([MOD, PREP].sort()));
+check('THE AUTHORITY VOCABULARY EXISTS IN EXACTLY THREE PRODUCTION FILES: the pure module, the internal promotion boundary that produces it and (O5 P4b2, a TYPE-only consumer) the pure local counterfactual generator; only the boundary calls it', JSON.stringify(names(IDENT)) === JSON.stringify([MOD, PREP, LOCAL].sort()) && JSON.stringify(names(/from '\.\/promotionContentionAuthority'/)) === JSON.stringify([PREP, LOCAL].sort()) && JSON.stringify(names(/\bprojectContentionAuthority\(/)) === JSON.stringify([MOD, PREP].sort()));
 check('RAW TRACE BOUNDARY: the raw P3a trace / event vocabulary appears only in the producers and the two pure P3b / P4a consumers, the promotion boundary and THIS module -- a future generator cannot import it; the module\'s output contract holds only strings-free typed attempts', JSON.stringify(names(RAW_TRACE_IDENT)) === JSON.stringify([...RAW_TRACE_READERS].sort()) && !/ContentionTrace|ContentionEvent/.test((src(MOD).match(/export interface PromotionContentionAuthority \{[\s\S]*?\n\}/) ?? [''])[0]));
 check('NOT A SCHEDULING CONSUMER: no Constructor, comparator, capacity, trace, basis, placements, assembler, orchestrator, search, preview, signing, acceptance, persistence, Recomposition, Move, route or scheduling-context module mentions the authority', NEVER.every((f) => !/PromotionContention|projectContentionAuthority|promotionContentionAuthority/.test(src(f))));
 const migrationSql = fs.readdirSync(path.join(root, 'apps/web/prisma/migrations'), { withFileTypes: true }).filter((e) => e.isDirectory()).map((e) => fs.readFileSync(path.join(root, 'apps/web/prisma/migrations', e.name, 'migration.sql'), 'utf8'));
 check('NO PERSISTENCE, NO SCHEMA: the Prisma schema and all 43 migration directories mention no contention authority; no migration was added', !/promotionContention/i.test(read('apps/web/prisma/schema.prisma')) && migrationSql.length === 43 && migrationSql.every((s) => !/promotionContention/i.test(s)));
-check('NO NEW EXTERNAL EXPOSURE: the authority is neither signed, serialized into a preview body nor returned by any route -- no production file other than the boundary and the module names it', names(/promotionContention|PromotionContention/i).length === 2);
+check('NO NEW EXTERNAL EXPOSURE: the authority is neither signed, serialized into a preview body nor returned by any route -- no production file other than the boundary, the module and the type-only generator names it', names(/promotionContention|PromotionContention/i).length === 3);
 
 console.log('=== the module is a minimal, pure, neutral projection ===');
 const mod = src(MOD);

@@ -344,6 +344,15 @@ jobs:
         run: npx ts-node test/schedulingAttemptAuthority.test.ts
       - name: Run scheduling attempt authority architecture test
         run: npx ts-node test/schedulingAttemptAuthorityArchitecture.test.ts
+      # O5 P4b2 -- the pure scope-isolated LOCAL COUNTERFACTUAL GENERATOR: one same-run promotion pair -> what mechanically happens if the candidate is tried in
+      # one of its real historical contention slots with every unrelated baseline placement pinned. Mechanical and neutral (no acceptance / safety policy -- P4b3).
+      # The gate-parity suite compares its minimal local gates with the REAL Constructor (test oracle only). Inert; consumed by nothing.
+      - name: Run local counterfactual test
+        run: npx ts-node test/localCounterfactual.test.ts
+      - name: Run local counterfactual gate parity test
+        run: npx ts-node test/localCounterfactualGateParity.test.ts
+      - name: Run local counterfactual architecture test
+        run: npx ts-node test/localCounterfactualArchitecture.test.ts
       # Constructor scheduling correctness -- the target-day blocker load
       # uses half-open OVERLAP semantics (a plan that starts before the day
       # but runs into it must block), through the one shared definition.

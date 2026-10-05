@@ -49,7 +49,9 @@ const ORCH = 'apps/web/lib/dayConstructorOrchestrator.ts';
 const CONTENTION_MOD = 'apps/web/lib/promotionContentionAuthority.ts';
 const PROMOTION_PREP = 'apps/web/lib/promotionInputPreparation.ts';
 const PROMOTION_PREP_NAMES = 5; // `baselinePlacements` in the boundary: type member + type index, run-level pass-through key + value, the one same-run hand-over
-const NAMING_ALLOW = [MOD, ORCH, CONTENTION_MOD, PROMOTION_PREP];
+/** O5 P4b2 -- the pure local counterfactual generator consumes the placements outcome as a TYPE only. */
+const LOCAL_MOD = 'apps/web/lib/localCounterfactual.ts';
+const NAMING_ALLOW = [MOD, ORCH, CONTENTION_MOD, PROMOTION_PREP, LOCAL_MOD];
 const IDENT = /\b(BaselinePlacement[A-Za-z]*|captureBaselinePlacements|baselinePlacements)\b|baselinePlacements['"]/;
 const MOD_IMPORTS = [`import type { ConstructedDay, PlacementTimingFit } from './dayConstructor';`, `import type { ConstructionBasis, ConstructionBasisOutcome } from './constructionBasis';`];
 const POLICY_VOCAB = /DecisionPressure|LAST_KNOWN|PromotionInput|PromotionOwner|DecisionFacts|decisionFacts|DecisionEvidence|decisionEvidence|GoalDecisionFacts|shadow|abovePressure|ContentionTrace|recurrence|opportunity|featureFlag|isFeatureEnabled|process\.env|\benv\b/i;
@@ -79,7 +81,7 @@ function audit(files: SrcFile[]): string[] {
   const notIn = (list: string[], allow: string[]) => list.filter((f) => !allow.includes(f));
   // Y1 -- confinement, separation, consumers
   notIn(by(IDENT), NAMING_ALLOW).forEach((f) => v.push(`Y1:names-the-placements:${f}`));
-  notIn(by(/from '\.\/baselinePlacements'/), [ORCH, CONTENTION_MOD]).forEach((f) => v.push(`Y1:imports-the-placements-module:${f}`));
+  notIn(by(/from '\.\/baselinePlacements'/), [ORCH, CONTENTION_MOD, LOCAL_MOD]).forEach((f) => v.push(`Y1:imports-the-placements-module:${f}`));
   for (const f of NEVER) { const x = get(f); if (x && /baselinePlacements|BaselinePlacement/.test(x.src)) v.push(`Y1:surface-names-the-placements:${f}`); }
   const b = get(BASIS);
   if (b && /proposedItems|placementSource|Proposed|baselinePlacement|BaselinePlacement/i.test(b.src)) v.push(`Y2:basis-absorbs-outcome-authority:${BASIS}`);
@@ -153,7 +155,7 @@ check(`THE REAL PRODUCTION TREE HAS ZERO BASELINE-PLACEMENTS ARCHITECTURE VIOLAT
 
 console.log('=== separation, producer and zero consumers ===');
 const mod = src(MOD); const orch = src(ORCH);
-check('THE PLACEMENTS VOCABULARY EXISTS IN EXACTLY FOUR PRODUCTION FILES: the pure module, the orchestrator that produces it, the promotion contention authority (TYPES only) and the internal promotion boundary that passes it through; only the orchestrator imports the module as a value', JSON.stringify(names(IDENT)) === JSON.stringify([...NAMING_ALLOW].sort()) && JSON.stringify(names(/from '\.\/baselinePlacements'/)) === JSON.stringify([ORCH, CONTENTION_MOD].sort()) && !/^import (?!type )[^\n]*from '\.\/baselinePlacements'/m.test(src(CONTENTION_MOD)));
+check('THE PLACEMENTS VOCABULARY EXISTS IN EXACTLY FIVE PRODUCTION FILES: the pure module, the orchestrator that produces it, the promotion contention authority and the local counterfactual generator (TYPES only) and the internal promotion boundary that passes it through; only the orchestrator imports the module as a value', JSON.stringify(names(IDENT)) === JSON.stringify([...NAMING_ALLOW].sort()) && JSON.stringify(names(/from '\.\/baselinePlacements'/)) === JSON.stringify([ORCH, CONTENTION_MOD, LOCAL_MOD].sort()) && !/^import (?!type )[^\n]*from '\.\/baselinePlacements'/m.test(src(CONTENTION_MOD) + src(LOCAL_MOD)));
 check('INPUT AUTHORITY AND OUTCOME AUTHORITY STAY SEPARATE: constructionBasis.ts names no placement, Proposed item or placement source, and the placements module imports only the basis TYPES (it never writes the basis)', !/proposedItems|placementSource|Proposed|baselinePlacement|BaselinePlacement/i.test(src(BASIS)) && !/^import (?!type )/m.test(mod));
 check('PRODUCER: the placements are captured only INSIDE the orchestration run -- one capture, from the terminal `result.day`, inside the same `if (evidenceOut)` T4 block that assembles the basis, AFTER the assembly and after the last Constructor pass, wrapped in `optionalBasisStep`; the normal and trace entry points never name it, so the preview path does no capture', orch.includes(CAPTURE_CALL) && count(/captureBaselinePlacements\(/g, orch) === 1 && orch.indexOf(CAPTURE_CALL) > orch.indexOf('evidenceOut.constructionBasis =') && orch.indexOf(CAPTURE_CALL) > orch.lastIndexOf('result = constructDay({') && /return runOrchestration\(request, deps, constructDay\);/.test(orch) && !flags(audit(real), 'Y4:normal-or-trace-entry-names-the-placements'));
 check('NO CALLER CAN BLESS A RESULT: the hand-off is module-private, the only call is the orchestrator\'s own, and `orchestrateConstructDayWithDiagnostics` takes only (request, deps)', /^interface EvidenceHandOff \{/m.test(orch) && !/export interface EvidenceHandOff/.test(orch) && /export async function orchestrateConstructDayWithDiagnostics\(\s*request: ConstructDayRequest,\s*deps: DayConstructorOrchestratorDeps\s*\): Promise</.test(orch));

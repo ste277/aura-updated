@@ -139,6 +139,7 @@ const PROTECTED: Array<{ file: string; role: string }> = [
   { file: 'apps/web/lib/promotionInputPreparation.ts', role: 'P4a promotion preparation boundary' },
   { file: 'apps/web/lib/promotionContentionAuthority.ts', role: 'P4b2a immutable promotion contention authority (owns every Date it holds)' },
   { file: 'apps/web/lib/schedulingAttemptAuthority.ts', role: 'P4b2b immutable scheduling attempt authority (owns every Date it holds)' },
+  { file: 'apps/web/lib/localCounterfactual.ts', role: 'P4b2 pure local counterfactual generator (owns every Date it emits)' },
 ];
 /** The scheduling entry points whose value-import closure is checked for completeness. */
 const ENTRY_POINTS = ['apps/web/lib/dayConstructorOrchestrator.ts', 'apps/web/lib/dayConstructor.ts', 'apps/web/lib/promotionInputPreparation.ts', 'apps/web/lib/decisionSchedulingContextLoader.ts', 'apps/web/lib/shadowPressureObservation.ts'];
