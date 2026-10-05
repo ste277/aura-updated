@@ -353,6 +353,13 @@ jobs:
         run: npx ts-node test/localCounterfactualGateParity.test.ts
       - name: Run local counterfactual architecture test
         run: npx ts-node test/localCounterfactualArchitecture.test.ts
+      # O5 P4b3 -- the pure COUNTERFACTUAL ACCEPTANCE PREDICATE: may Aura prefer the P4b2 mechanical counterfactual over the baseline under the V1 safety
+      # policy (FIXED / non-owner unchanged, tie recheck, owner loss, owner timing floor)? ACCEPT | REJECT | UNAVAILABLE for one immutable pair; no
+      # regeneration, no pressure read (NONE is never "safe"). Inert; consumed by nothing.
+      - name: Run counterfactual acceptance test
+        run: npx ts-node test/counterfactualAcceptance.test.ts
+      - name: Run counterfactual acceptance architecture test
+        run: npx ts-node test/counterfactualAcceptanceArchitecture.test.ts
       # Constructor scheduling correctness -- the target-day blocker load
       # uses half-open OVERLAP semantics (a plan that starts before the day
       # but runs into it must block), through the one shared definition.

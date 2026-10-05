@@ -54,7 +54,8 @@ const ABOVE = 'apps/web/lib/abovePressurePrecedence.ts';
 const ORCH = 'apps/web/lib/dayConstructorOrchestrator.ts';
 const SHADOW_FILES = [ABOVE, EVAL, OBS];
 /** O5 P4a -- the two inert promotion-input modules REUSE the one comparator primitive (the helper) and the one diagnostics entry point; they do not read the shadow evaluator or boundary (pinned by promotionInputArchitecture.test.ts). */
-const PROMOTION_FILES = ['apps/web/lib/promotionInput.ts', 'apps/web/lib/promotionInputPreparation.ts'];
+/** O5 P4b3: the pure acceptance predicate (third entry) reuses ONLY the shared comparator primitive and its facts type to re-check the above-pressure tie; it is not a shadow-stage module. */
+const PROMOTION_FILES = ['apps/web/lib/promotionInput.ts', 'apps/web/lib/promotionInputPreparation.ts', 'apps/web/lib/counterfactualAcceptance.ts'];
 
 const SHADOW_IDENT = /\b(evaluateShadowPressure|observeShadowPressure|ShadowPressure[A-Za-z]*|ShadowOwner[A-Za-z]*|ShadowLoser[A-Za-z]*|ShadowIncompleteReason|AbovePressureFacts|AbovePressureComparison|compareAbovePressure|projectAbovePressureFacts)\b|abovePressurePrecedence|shadowPressure(?:Evaluation|Observation)/;
 const SHADOW_WORD = /shadowPressure|abovePressure/i; // not a bare /shadow/: CSS box-shadow is everywhere in the UI

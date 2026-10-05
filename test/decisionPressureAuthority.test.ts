@@ -93,7 +93,8 @@ const PROMOTION_CONSUMERS = ['apps/web/lib/promotionInput.ts', 'apps/web/lib/pro
 const PRESSURE_CONSUMERS = [...SHADOW_CONSUMERS, ...PROMOTION_CONSUMERS];
 const PRESSURE_IDENT_ALLOW = [DERIVER, ...PRESSURE_CONSUMERS];
 /** The only production files containing the word at all: the deriver, and unrelated UI copy ("low-pressure practice"). */
-const PRESSURE_WORD_ALLOW = [DERIVER, 'packages/recommendation/src/actionCards.ts', ABOVE_PRESSURE, ...PRESSURE_CONSUMERS];
+/** O5 P4b3: the pure acceptance predicate names only the shared above-pressure comparator primitive (`compareAbovePressure` / `projectAbovePressureFacts`); it never reads a DecisionPressure value. */
+const PRESSURE_WORD_ALLOW = [DERIVER, 'packages/recommendation/src/actionCards.ts', ABOVE_PRESSURE, ...PRESSURE_CONSUMERS, 'apps/web/lib/counterfactualAcceptance.ts'];
 /** Importers of the deriver. NONE today: it is unwired. A future consumer is added here on purpose and is then held to the consumer rules. */
 const PRESSURE_IMPORTER_ALLOW: string[] = [...PRESSURE_CONSUMERS];
 
