@@ -20,6 +20,7 @@
  * Date caveat, stated honestly: `Object.freeze` does not stop a Date setter changing a Date's internal time. Safety is OWNERSHIP plus the
  * #208 no-Date-mutator guard. Product / architecture invariants only: no timing, randomness, heap layout or query plan.
  */
+import { rankedShuffle } from './fixtureSupport';
 import * as attemptModule from '../apps/web/lib/schedulingAttemptAuthority';
 import { projectSchedulingAttempts, normalizeSchedulingAttempts, type SchedulingAttempt, type SchedulingAttemptOutcome } from '../apps/web/lib/schedulingAttemptAuthority';
 import * as contentionModule from '../apps/web/lib/promotionContentionAuthority';
@@ -314,7 +315,7 @@ const runOf = (p: { run: PromotionRunAuthority }) => { if (p.run.status !== 'PRE
     const RUNS = 1100;
     for (let n = 0; n < RUNS; n += 1) {
       const k = 4 + Math.floor(rnd() * 3); const ids = ['A', 'B', 'C', 'D', 'E', 'F'].slice(0, k); const limit = 1 + Math.floor(rnd() * 2);
-      const pools: Record<string, PoolItem[]> = {}; ids.forEach((id) => { const sub = SLOTS.filter(() => rnd() < 0.65).map((slot) => ({ slot, label: LABELS[Math.floor(rnd() * 4)] } as PoolItem)); sub.sort((a, b) => LABELS.indexOf(a.label) - LABELS.indexOf(b.label) || rnd() - 0.5); pools[id] = sub; });
+      const pools: Record<string, PoolItem[]> = {}; ids.forEach((id) => { const sub = SLOTS.filter(() => rnd() < 0.65).map((slot) => ({ slot, label: LABELS[Math.floor(rnd() * 4)] } as PoolItem)); rankedShuffle(sub, rnd, (p) => LABELS.indexOf(p.label)); pools[id] = sub; });
       const fixed = rnd() < 0.2 ? ids[ids.length - 1] : undefined;
       const blockers = rnd() < 0.2 ? [{ start: at('12:30'), end: at('13:00'), status: 'UPCOMING' as const }] : [];
       const hist: History = {};

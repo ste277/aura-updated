@@ -367,6 +367,11 @@ jobs:
         run: npx ts-node test/shadowPolicyObservation.test.ts
       - name: Run shadow policy observation architecture test
         run: npx ts-node test/shadowPolicyObservationArchitecture.test.ts
+      # O5 P4b5 -- engine-independent seeded fixtures: the incidence sweeps no longer use a random sort comparator (whose order depended on the engine's sort
+      # algorithm, so Node 20 CI and a newer local Node generated different fixtures from the same seed). This narrow test proves the root cause and the fix
+      # and forbids the pattern; the incidence suites pin exact authoritative counts, so any engine difference fails here on Node 20.
+      - name: Run seeded fixture reproducibility test
+        run: npx ts-node test/seededFixtureReproducibility.test.ts
       # Constructor scheduling correctness -- the target-day blocker load
       # uses half-open OVERLAP semantics (a plan that starts before the day
       # but runs into it must block), through the one shared definition.

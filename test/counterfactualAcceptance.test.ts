@@ -23,6 +23,7 @@
  * pressure -> PromotionInput -> contention -> attempts -> P4b2 -> P4b3) for a real ACCEPT and a real REJECT, with baseline / signed-token parity. Part 5 is a
  * diagnostics-only incidence sweep over real generated counterfactuals (reported honestly, never used to tune the policy).
  */
+import { rankedShuffle } from './fixtureSupport';
 import { evaluateCounterfactualAcceptance, type CounterfactualAcceptance, type CounterfactualAcceptanceInput } from '../apps/web/lib/counterfactualAcceptance';
 import { generateLocalCounterfactual, type CounterfactualPlacement, type LocalCounterfactual } from '../apps/web/lib/localCounterfactual';
 import { compareAbovePressure, projectAbovePressureFacts } from '../apps/web/lib/abovePressurePrecedence';
@@ -285,13 +286,13 @@ const OK: Plan = { p: { s: '10:30', fit: 'GOOD' }, relocated: { O: { s: '15:00',
     for (let n = 0; n < 700; n += 1) {
       const k = 3 + Math.floor(rnd() * 4); const ids = ['A', 'B', 'C', 'D', 'E', 'F'].slice(0, k); const limit = 1 + Math.floor(rnd() * 3);
       const SLOTS = slotsUpTo(n % 2 === 0 ? 13 : 15);
-      const pools: Record<string, PoolItem[]> = {}; ids.forEach((id) => { const sub = SLOTS.filter(() => rnd() < 0.65).map((slot) => ({ slot, label: LABELS[Math.floor(rnd() * 4)] } as PoolItem)); sub.sort((a, b) => LABELS.indexOf(a.label) - LABELS.indexOf(b.label) || rnd() - 0.5); pools[id] = sub; });
+      const pools: Record<string, PoolItem[]> = {}; ids.forEach((id) => { const sub = SLOTS.filter(() => rnd() < 0.65).map((slot) => ({ slot, label: LABELS[Math.floor(rnd() * 4)] } as PoolItem)); rankedShuffle(sub, rnd, (p) => LABELS.indexOf(p.label)); pools[id] = sub; });
       if (n % 3 === 0) {
         const m = 1 + Math.floor(rnd() * 3); const bs = ['09:00', '11:00', '13:00'].slice(0, m); ids.length = 0; bs.forEach((_, i) => ids.push(['A', 'B', 'C'][i])); ids.push('P');
         const hh = (mins: number) => `${String(Math.floor(mins / 60)).padStart(2, '0')}:${String(mins % 60).padStart(2, '0')}`;
         const win = (s: number): [string, string] => [hh(s), hh(s + 60)];
         bs.forEach((b, i) => { const bm = Number(b.slice(0, 2)) * 60; const extra = SLOTS.filter(() => rnd() < 0.3).slice(0, 3).map((slot) => ({ slot, label: LABELS[Math.floor(rnd() * 4)] })); pools[ids[i]] = [{ slot: win(bm), label: 'EXCELLENT' as Label }, ...extra]; });
-        pools.P = bs.flatMap((b) => { const bm = Number(b.slice(0, 2)) * 60; return [bm + 30, bm, bm - 30].filter((x) => x >= 9 * 60 && x <= 15 * 60 && rnd() < 0.7).map((x) => ({ slot: win(x), label: LABELS[Math.floor(rnd() * 4)] })); }).sort((a, b) => LABELS.indexOf(a.label) - LABELS.indexOf(b.label) || rnd() - 0.5);
+        pools.P = rankedShuffle(bs.flatMap((b) => { const bm = Number(b.slice(0, 2)) * 60; return [bm + 30, bm, bm - 30].filter((x) => x >= 9 * 60 && x <= 15 * 60 && rnd() < 0.7).map((x) => ({ slot: win(x), label: LABELS[Math.floor(rnd() * 4)] })); }), rnd, (p) => LABELS.indexOf(p.label));
       }
       const intents = ids.map((id, i) => req(id, i));
       const { prepared, pairs } = await realRun(intents, ids, pools, limit);
@@ -312,6 +313,7 @@ const OK: Plan = { p: { s: '10:30', fit: 'GOOD' }, relocated: { O: { s: '15:00',
     }
     console.log(`     incidence: ${JSON.stringify(tally)} reasons: ${JSON.stringify(reasons)}`);
     check(`INCIDENCE (diagnostics only): of ${tally.generated} real P4b2 counterfactuals (${tally.runs} deterministic runs, ${tally.pairs} promotion pairs, ${tally.notGenerated} without an actionable slot), ACCEPT = ${tally.accept}; REJECT / UNAVAILABLE by reason: ${JSON.stringify(reasons)} -- reported as measured, never used to tune the policy`, tally.generated > 300 && tally.evaluated === tally.generated);
+    check('AUTHORITATIVE, ENGINE-INDEPENDENT INCIDENCE (O5 P4b5: seeded Fisher-Yates + a pure comparator replaced the random sort comparator): 700 runs, 452 pairs, 444 generated, 8 without an actionable slot; 23 ACCEPT + 372 OWNER_WOULD_BE_UNPLACED + 49 OWNER_TIMING_DEGRADED = 444; 0 UNAVAILABLE -- identical on every supported Node', tally.runs === 700 && tally.pairs === 452 && tally.generated === 444 && tally.notGenerated === 8 && tally.accept === 23 && reasons['REJECT:OWNER_WOULD_BE_UNPLACED'] === 372 && reasons['REJECT:OWNER_TIMING_DEGRADED'] === 49 && Object.keys(reasons).length === 3 && tally.unavailable === 0);
     check('REAL COUNTERFACTUALS ARE STRUCTURALLY TRUSTWORTHY: zero UNAVAILABLE decisions over every real generated counterfactual (P4b2 output always satisfies the structural contract P4b3 revalidates)', tally.unavailable === 0);
     check('the V1 policy is REACHABLE on real contracts: real ACCEPTs and real REJECTs both occur (and ACCEPT / REJECT are the only decisions)', tally.accept > 0 && Object.keys(reasons).some((r) => r.startsWith('REJECT')) && Object.keys(reasons).every((r) => r === 'ACCEPT' || r.startsWith('REJECT:')));
     check('every real decision is unchanged by flipping every owner pressure and by repetition (zero differences)', tally.pressureMismatch === 0 && tally.nonDeterministic === 0);

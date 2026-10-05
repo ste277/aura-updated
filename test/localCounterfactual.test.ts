@@ -13,6 +13,7 @@
  * Date caveat, stated honestly: `Object.freeze` does not stop a Date setter changing a Date's internal time. Safety is OWNERSHIP plus the #208
  * no-Date-mutator guard. Product / architecture invariants only: no timing, randomness, heap layout or query plan.
  */
+import { rankedShuffle } from './fixtureSupport';
 import { generateLocalCounterfactual, type LocalCounterfactual, type LocalCounterfactualAuthorities, type LocalCounterfactualOutcome, type CounterfactualPlacement } from '../apps/web/lib/localCounterfactual';
 import { compareCandidatesForPlacement, type PlacementCandidate, type PlacementTimingFit } from '../apps/web/lib/dayConstructor';
 import { compareByOverloadPrecedence } from '../apps/web/lib/dayIntent';
@@ -374,7 +375,7 @@ const SIMPLE: Spec = {
     for (let n = 0; n < RUNS; n += 1) {
       const k = 3 + Math.floor(rnd() * 4); const ids = ['A', 'B', 'C', 'D', 'E', 'F'].slice(0, k); const limit = 1 + Math.floor(rnd() * 3);
       const SLOTS = slotsUpTo(n % 2 === 0 ? 13 : 15);
-      const pools: Record<string, PoolItem[]> = {}; ids.forEach((id) => { const sub = SLOTS.filter(() => rnd() < 0.65).map((slot) => ({ slot, label: LABELS[Math.floor(rnd() * 4)] } as PoolItem)); sub.sort((a, b) => LABELS.indexOf(a.label) - LABELS.indexOf(b.label) || rnd() - 0.5); pools[id] = sub; });
+      const pools: Record<string, PoolItem[]> = {}; ids.forEach((id) => { const sub = SLOTS.filter(() => rnd() < 0.65).map((slot) => ({ slot, label: LABELS[Math.floor(rnd() * 4)] } as PoolItem)); rankedShuffle(sub, rnd, (p) => LABELS.indexOf(p.label)); pools[id] = sub; });
       if (n % 3 === 0) {
         // STRUCTURED runs: the owners each hold a distinct slot and have roomy alternatives; P's candidates all overlap the owners' slots, so P is Deferred after real contention.
         const m = 1 + Math.floor(rnd() * 3); const bases = ['09:00', '11:00', '13:00'].slice(0, m);
@@ -384,7 +385,7 @@ const SIMPLE: Spec = {
         const lab = (): Label => LABELS[Math.floor(rnd() * 4)];
         bases.forEach((b, i) => { const bm = Number(b.slice(0, 2)) * 60; const extra = SLOTS.filter(() => rnd() < 0.3).slice(0, 3).map((slot) => ({ slot, label: lab() })); pools[ids[i]] = [{ slot: win(bm), label: 'EXCELLENT' as Label }, ...extra]; });
         const pSlots = bases.flatMap((b) => { const bm = Number(b.slice(0, 2)) * 60; return [bm + 30, bm, bm - 30].filter((x) => x >= 9 * 60 && x <= 15 * 60 && rnd() < 0.7).map((x) => ({ slot: win(x), label: lab() })); });
-        pools.P = pSlots.sort((a, b) => LABELS.indexOf(a.label) - LABELS.indexOf(b.label) || rnd() - 0.5);
+        pools.P = rankedShuffle(pSlots, rnd, (p) => LABELS.indexOf(p.label));
       }
       const fixed = n % 3 === 0 ? undefined : (rnd() < 0.2 ? ids[ids.length - 1] : undefined);
       const blockers = rnd() < 0.2 ? [{ start: at('12:30'), end: at('13:00'), status: 'UPCOMING' as const }] : [];
