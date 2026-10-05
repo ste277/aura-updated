@@ -57,7 +57,9 @@ const CONTENTION_AUTH = 'apps/web/lib/promotionContentionAuthority.ts';
 const LOCAL = 'apps/web/lib/localCounterfactual.ts';
 const P4B_CONCEPT = /applyPromotion|promoteCandidate|PromotionPolicy|PromotionDecision|WinnerReplacement|GoalPromotionInput|AuraPromotionDecision|counterfactual|secondPass|SecondPass|shouldReplace|replaceOwner|displaceOwner|activePressurePolicy|PressurePolicy/i;
 const P4B_CONCEPT_NO_COUNTERFACTUAL = /applyPromotion|promoteCandidate|PromotionPolicy|PromotionDecision|WinnerReplacement|GoalPromotionInput|AuraPromotionDecision|secondPass|SecondPass|shouldReplace|replaceOwner|displaceOwner|activePressurePolicy|PressurePolicy/i;
-const PROMO_FILES = [ASM, PREP, CONTENTION_AUTH, LOCAL];
+/** O5 P4b3 -- the pure acceptance predicate consumes a PromotionInput (type only) for the authorized owner scope; it may ALSO name `counterfactual` (it judges one). Pinned by counterfactualAcceptanceArchitecture.test.ts. */
+const ACCEPTANCE = 'apps/web/lib/counterfactualAcceptance.ts';
+const PROMO_FILES = [ASM, PREP, CONTENTION_AUTH, LOCAL, ACCEPTANCE];
 const ORCH = 'apps/web/lib/dayConstructorOrchestrator.ts';
 const OBS = 'apps/web/lib/shadowPressureObservation.ts';
 const EVAL = 'apps/web/lib/shadowPressureEvaluation.ts';
@@ -104,12 +106,12 @@ function audit(files: SrcFile[]): string[] {
   // Q1 -- vocabulary confinement and zero production consumers
   notIn(by(PROMO_IDENT), PROMO_FILES).forEach((f) => v.push(`Q1:names-promotion-input:${f}`));
   notIn(by(PROMO_WORD), PROMO_FILES).forEach((f) => v.push(`Q1:promotion-input-vocabulary:${f}`));
-  notIn(by(/from '\.\/promotionInput'/), [PREP, CONTENTION_AUTH, LOCAL]).forEach((f) => v.push(`Q1:imports-the-assembler:${f}`));
+  notIn(by(/from '\.\/promotionInput'/), [PREP, CONTENTION_AUTH, LOCAL, ACCEPTANCE]).forEach((f) => v.push(`Q1:imports-the-assembler:${f}`));
   by(/from '\.\/promotionInputPreparation'/).forEach((f) => v.push(`Q1:production-consumer-of-promotion-boundary:${f}`));
   notIn(by(/\bpreparePromotionInputs\(/), [PREP]).forEach((f) => v.push(`Q1:calls-promotion-boundary:${f}`));
   notIn(by(/\bassemblePromotionInputs\(/), [ASM, PREP]).forEach((f) => v.push(`Q1:calls-assembler:${f}`));
   notIn(by(/\borchestrateConstructDayWithDiagnostics\(/), [ORCH, OBS, PREP]).forEach((f) => v.push(`Q1:calls-diagnostics-entry-point:${f}`));
-  files.filter((x) => (x.f === LOCAL ? P4B_CONCEPT_NO_COUNTERFACTUAL : P4B_CONCEPT).test(x.src)).map((x) => x.f).forEach((f) => v.push(`Q1:p4b-or-p5-concept:${f}`));
+  files.filter((x) => (x.f === LOCAL || x.f === ACCEPTANCE ? P4B_CONCEPT_NO_COUNTERFACTUAL : P4B_CONCEPT).test(x.src)).map((x) => x.f).forEach((f) => v.push(`Q1:p4b-or-p5-concept:${f}`));
   { const x = get(LOCAL); if (x && /^import (?!type )[^\n]*from '\.\/promotionInput'/m.test(x.src)) v.push(`Q1:generator-imports-the-assembler-as-a-value:${LOCAL}`); }
   // Q2 -- the pure assembler
   const a = get(ASM);
@@ -169,7 +171,7 @@ function audit(files: SrcFile[]): string[] {
   // Q5 -- the P3b shadow stage and the P4a assembler stay independent in BOTH directions; P4a reuses the one comparator helper
   const sh = [get(EVAL), get(OBS)];
   for (const x of sh) if (x && /promotion/i.test(x.src)) v.push(`Q5:shadow-stage-names-promotion:${x.f}`);
-  notIn(by(/from '\.\/abovePressurePrecedence'/), [EVAL, OBS, ASM, PREP]).forEach((f) => v.push(`Q5:imports-above-pressure-helper:${f}`));
+  notIn(by(/from '\.\/abovePressurePrecedence'/), [EVAL, OBS, ASM, PREP, ACCEPTANCE]).forEach((f) => v.push(`Q5:imports-above-pressure-helper:${f}`));
   notIn(by(/from '\.\/shadowPressureEvaluation'|from '\.\/shadowPressureObservation'/), [OBS]).forEach((f) => v.push(`Q5:imports-shadow-stage:${f}`));
   return v;
 }
@@ -188,15 +190,15 @@ check(`THE REAL PRODUCTION TREE HAS ZERO PROMOTION-INPUT ARCHITECTURE VIOLATIONS
 console.log('=== allowlists: producers, consumers, reachability ===');
 const asm = src(ASM);
 const prep = src(PREP);
-check('THE PROMOTION VOCABULARY EXISTS IN EXACTLY FOUR PRODUCTION FILES: the pure assembler, its internal preparation boundary and the two type-only consumers (O5 P4b2a the pure promotion contention authority, O5 P4b2 the pure local counterfactual generator)', JSON.stringify(names(PROMO_IDENT)) === JSON.stringify([...PROMO_FILES].sort()) && JSON.stringify(names(PROMO_WORD)) === JSON.stringify([...PROMO_FILES].sort()));
-check('ZERO ACTIVE CONSUMERS (P4b is not present): nothing imports the preparation boundary and nothing calls `preparePromotionInputs`; the assembler is imported and called only by the boundary', names(/from '\.\/promotionInputPreparation'/).length === 0 && JSON.stringify(names(/\bpreparePromotionInputs\(/)) === JSON.stringify([PREP]) && JSON.stringify(names(/from '\.\/promotionInput'/)) === JSON.stringify([PREP, CONTENTION_AUTH, LOCAL].sort()) && JSON.stringify(names(/\bassemblePromotionInputs\(/)) === JSON.stringify([ASM, PREP].sort()));
+check('THE PROMOTION VOCABULARY EXISTS IN EXACTLY FIVE PRODUCTION FILES: the pure assembler, its internal preparation boundary and the three type-only consumers (O5 P4b2a the pure promotion contention authority, O5 P4b2 the pure local counterfactual generator, O5 P4b3 the pure counterfactual acceptance predicate)', JSON.stringify(names(PROMO_IDENT)) === JSON.stringify([...PROMO_FILES].sort()) && JSON.stringify(names(PROMO_WORD)) === JSON.stringify([...PROMO_FILES].sort()));
+check('ZERO ACTIVE CONSUMERS (P4b is not present): nothing imports the preparation boundary and nothing calls `preparePromotionInputs`; the assembler is imported and called only by the boundary', names(/from '\.\/promotionInputPreparation'/).length === 0 && JSON.stringify(names(/\bpreparePromotionInputs\(/)) === JSON.stringify([PREP]) && JSON.stringify(names(/from '\.\/promotionInput'/)) === JSON.stringify([PREP, CONTENTION_AUTH, LOCAL, ACCEPTANCE].sort()) && JSON.stringify(names(/\bassemblePromotionInputs\(/)) === JSON.stringify([ASM, PREP].sort()));
 check('the orchestrator\'s diagnostics entry point is called by exactly the shadow boundary and the promotion boundary (each read-only, after construction)', JSON.stringify(names(/\borchestrateConstructDayWithDiagnostics\(/)) === JSON.stringify([ORCH, OBS, PREP].sort()));
-check('THE ONLY NEW TYPED BOUNDARY FOR PRESSURE PROMOTION ELIGIBILITY: the above-pressure helper is imported by the P3b stage and by the two P4a modules and nowhere else; the P3b stage never names promotion and P4a never imports the P3b stage', JSON.stringify(names(/from '\.\/abovePressurePrecedence'/)) === JSON.stringify([EVAL, OBS, ASM, PREP].sort()) && !/promotion/i.test(src(EVAL) + src(OBS)) && JSON.stringify(names(/from '\.\/shadowPressure(?:Evaluation|Observation)'/)) === JSON.stringify([OBS]));
+check('THE ONLY NEW TYPED BOUNDARY FOR PRESSURE PROMOTION ELIGIBILITY: the above-pressure helper is imported by the P3b stage, by the two P4a modules and (O5 P4b3, to RE-CHECK the tie through the same primitive) by the pure acceptance predicate, and nowhere else; the P3b stage never names promotion and P4a never imports the P3b stage', JSON.stringify(names(/from '\.\/abovePressurePrecedence'/)) === JSON.stringify([EVAL, OBS, ASM, PREP, ACCEPTANCE].sort()) && !/promotion/i.test(src(EVAL) + src(OBS)) && JSON.stringify(names(/from '\.\/shadowPressure(?:Evaluation|Observation)'/)) === JSON.stringify([OBS]));
 check('NOT A POLICY CONSUMER: no Constructor, comparator, placement, capacity, replenishment, preview, signing, acceptance, persistence, Recomposition, Move, route, scheduling context, P2 evidence / pressure code or P3 stage mentions a promotion input', NEVER_PROMO.every((f) => !PROMO_IDENT.test(src(f)) && !PROMO_WORD.test(src(f))));
 const migrationSql = fs.readdirSync(path.join(root, 'apps/web/prisma/migrations'), { withFileTypes: true }).filter((e) => e.isDirectory()).map((e) => fs.readFileSync(path.join(root, 'apps/web/prisma/migrations', e.name, 'migration.sql'), 'utf8'));
 check('NO PERSISTENCE, NO SCHEMA: the Prisma schema and all 43 migration directories mention no promotion input; no migration was added', !/promotionInput/i.test(read('apps/web/prisma/schema.prisma')) && migrationSql.length === 43 && migrationSql.every((s) => !/promotionInput/i.test(s)));
 check('NO PUBLIC CONTRACT: the preview request / client / integrity modules, the acceptance modules and every route carry no promotion vocabulary (no preview field, no signed token member, no client-supplied input)', ['apps/web/lib/dayConstructorPreviewRequest.ts', 'apps/web/lib/dayConstructorPreviewClient.ts', 'apps/web/lib/dayConstructorPreviewIntegrity.ts', 'apps/web/lib/dayConstructorAcceptance.ts', 'apps/web/lib/dayConstructorAcceptancePersistence.ts', 'apps/web/app/api/day-constructor/preview/route.ts', 'apps/web/app/api/day-constructor/accept/route.ts'].every((f) => !/promotion/i.test(src(f))));
-check('NO P4b / P5 CONCEPT: no production identifier for a promotion decision, policy, counterfactual, second pass, owner replacement or "would / should win" exists; the Constructor / comparator / placement code is untouched and unread', real.filter((x) => (x.f === LOCAL ? P4B_CONCEPT_NO_COUNTERFACTUAL : P4B_CONCEPT).test(x.src)).length === 0 && !/promotion|pressure/i.test(src('apps/web/lib/dayConstructor.ts') + src('apps/web/lib/dayIntent.ts').replace(/\/\/.*$/gm, '')));
+check('NO P4b / P5 CONCEPT: no production identifier for a promotion decision, policy, counterfactual, second pass, owner replacement or "would / should win" exists; the Constructor / comparator / placement code is untouched and unread', real.filter((x) => (x.f === LOCAL || x.f === ACCEPTANCE ? P4B_CONCEPT_NO_COUNTERFACTUAL : P4B_CONCEPT).test(x.src)).length === 0 && !/promotion|pressure/i.test(src('apps/web/lib/dayConstructor.ts') + src('apps/web/lib/dayIntent.ts').replace(/\/\/.*$/gm, '')));
 
 console.log('=== the assembler: reviewed typed authorities only, one comparator primitive, pure ===');
 check('IMPORTS: exactly four -- the Constructor result type, the P3a trace type, the pressure type, and the shared above-pressure primitive; no database, no evidence, no facts, no context, no P3b stage, no Constructor value', JSON.stringify(importLines(asm)) === JSON.stringify(ASM_IMPORTS));
