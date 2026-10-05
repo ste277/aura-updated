@@ -25,7 +25,6 @@ import { isValidCalendarDateString } from '../../../packages/panchang/src/localD
 import { getDatePartsInTimezone } from './timezone';
 import { MAX_INTENT_ID_LENGTH } from './dayConstructorAcceptancePersistence';
 import {
-  orchestrateConstructDay,
   type ConstructDayPreview,
   type ConstructDayRequest,
   type DayConstructorOrchestratorDeps,
@@ -33,6 +32,7 @@ import {
 } from './dayConstructorOrchestrator';
 import type { ConstructionWindowSource, DayIntentFlexibility, DayIntentImportance } from './dayIntent';
 import { signPreviewResultBody } from './dayConstructorPreviewIntegrity';
+import { orchestrateConstructDayWithShadowPolicy, type ShadowPolicyExecution } from './shadowPolicyExecution';
 import type { User } from './db';
 
 // ============================================================
@@ -282,7 +282,8 @@ export async function runDayConstructorPreview(
   deps: DayConstructorOrchestratorDeps,
   decisionFactsSource?: DecisionFactsSource,
   opportunityRangeDeps?: OpportunityRangeDeps,
-  schedulingBinding?: DecisionSchedulingBinding
+  schedulingBinding?: DecisionSchedulingBinding,
+  shadowPolicy?: ShadowPolicyExecution
 ): Promise<DayConstructorPreviewHttpResult> {
   const parsed = parseConstructDayPreviewRequestBody(body, { timezone, now });
   if (!parsed.ok) return { httpStatus: 400, body: { error: parsed.error } };
@@ -330,7 +331,9 @@ export async function runDayConstructorPreview(
       console.warn('day-constructor/preview: decision facts unavailable, continuing without', err);
     }
   }
-  const result = await orchestrateConstructDay(decisionFactsByIntentId ? { ...parsed.request, decisionFactsByIntentId } : parsed.request, orchestrationDeps);
+  // O5 P4b5 -- the ONE orchestration of this request. OFF (the default; `shadowPolicy` absent or OFF): the plain `orchestrateConstructDay` call, unchanged. SHADOW: the same
+  // single orchestration run through the diagnostic composition, whose baseline result is returned untouched (shadowPolicyExecution.ts). The mode is server-supplied only.
+  const result = await orchestrateConstructDayWithShadowPolicy(decisionFactsByIntentId ? { ...parsed.request, decisionFactsByIntentId } : parsed.request, orchestrationDeps, shadowPolicy);
 
   // Every branch below is a legitimate, already-typed domain outcome --
   // returned verbatim, at HTTP 200, never reinterpreted (this ticket's
@@ -401,6 +404,8 @@ export interface DayConstructorPreviewBoundaryDeps {
    * inputs in ONE coherent snapshot. When both are supplied they REPLACE the independent live providers above. */
   loadSchedulingContext?: (user: User, request: ConstructDayRequest) => Promise<DecisionSchedulingContext>;
   loadDecisionFactsFromContext?: (user: User, request: ConstructDayRequest, context: DecisionSchedulingContext) => Promise<DecisionFactsByIntentId>;
+  /** O5 P4b5 -- OPTIONAL, SERVER-SUPPLIED ONLY (never derived from the request body): the shadow policy execution settings. Omitted => OFF => byte-identical to before. */
+  shadowPolicy?: () => ShadowPolicyExecution;
 }
 
 /**
@@ -439,7 +444,7 @@ export async function handleDayConstructorPreviewRequest(deps: DayConstructorPre
       deps.loadSchedulingContext && deps.loadDecisionFactsFromContext
         ? { loadContext: (request) => deps.loadSchedulingContext!(user, request), decisionFactsFromContext: (request, context) => deps.loadDecisionFactsFromContext!(user, request, context) }
         : undefined;
-    const result = await runDayConstructorPreview(body, user.timezone, now, orchestratorDeps, decisionFactsSource, opportunityRangeDeps, schedulingBinding);
+    const result = await runDayConstructorPreview(body, user.timezone, now, orchestratorDeps, decisionFactsSource, opportunityRangeDeps, schedulingBinding, deps.shadowPolicy ? deps.shadowPolicy() : undefined);
     // F1 trust correction: sign each proposed item for THIS user so acceptance can verify what it means.
     return { ...result, body: signPreviewResultBody(session.userId, result.body) };
   } catch (err) {

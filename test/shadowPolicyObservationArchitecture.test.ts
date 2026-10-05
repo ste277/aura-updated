@@ -54,7 +54,9 @@ const INTENT = 'apps/web/lib/dayIntent.ts';
 const CAPACITY = 'apps/web/lib/dayCapacity.ts';
 const ORCH = 'apps/web/lib/dayConstructorOrchestrator.ts';
 const SEARCH = 'packages/recommendation/src/timingSearch.ts';
-const VOCAB = /\b(observeShadowPolicy|ShadowPolicy[A-Za-z]*)\b|shadowPolicyObservation['"]/;
+/** O5 P4b5 -- the server-controlled shadow EXECUTION boundary is the composition's only production consumer (it calls it instead of, never in addition to, the plain orchestration). */
+const EXEC = 'apps/web/lib/shadowPolicyExecution.ts';
+const VOCAB = /\b(observeShadowPolicy|ShadowPolicyObservation|ShadowPolicyRun|ShadowSlot|ShadowRelocatedOwner|ShadowCounterfactualSummary)\b|shadowPolicyObservation['"]/;
 const SHADOW_IMPORTS = [
   `import { preparePromotionInputs, type PromotionPair, type PromotionRunAuthority } from './promotionInputPreparation';`,
   `import type { ConstructDayRequest, DayConstructorOrchestratorDeps, OrchestrateConstructDayResult } from './dayConstructorOrchestrator';`,
@@ -92,9 +94,9 @@ function audit(files: SrcFile[]): string[] {
   const get = (f: string) => files.find((x) => x.f === f);
   const by = (re: RegExp) => files.filter((x) => re.test(x.src)).map((x) => x.f);
   // B1 -- confinement: ZERO production consumers, no surface names it
-  by(VOCAB).filter((f) => f !== SHADOW).forEach((f) => v.push(`B1:names-the-shadow-policy-composition:${f}`));
-  by(/from '\.\/shadowPolicyObservation'/).forEach((f) => v.push(`B1:production-consumer-of-the-composition:${f}`));
-  by(/\bobserveShadowPolicy\(/).filter((f) => f !== SHADOW).forEach((f) => v.push(`B1:calls-the-composition:${f}`));
+  by(VOCAB).filter((f) => f !== SHADOW && f !== EXEC).forEach((f) => v.push(`B1:names-the-shadow-policy-composition:${f}`));
+  by(/from '\.\/shadowPolicyObservation'/).filter((f) => f !== EXEC).forEach((f) => v.push(`B1:production-consumer-of-the-composition:${f}`));
+  by(/\bobserveShadowPolicy\(/).filter((f) => f !== SHADOW && f !== EXEC).forEach((f) => v.push(`B1:calls-the-composition:${f}`));
   for (const f of NEVER) { const x = get(f); if (x && VOCAB.test(x.src)) v.push(`B1:surface-names-the-composition:${f}`); }
   // B2 -- the generator / predicate have exactly ONE production caller each: this composition
   by(/\bgenerateLocalCounterfactual\(/).filter((f) => f !== GEN && f !== SHADOW).forEach((f) => v.push(`B2:another-generator-caller:${f}`));
@@ -176,7 +178,7 @@ const baseline = audit(real);
 check(`THE REAL PRODUCTION TREE HAS ZERO SHADOW-POLICY ARCHITECTURE VIOLATIONS (${real.length} production files scanned)${baseline.length ? ': ' + baseline.join(', ') : ''}`, baseline.length === 0);
 
 console.log('=== zero consumers, single callers, untouched upstream ===');
-check('ZERO PRODUCTION CONSUMERS: the composition vocabulary exists in exactly ONE production file (itself); nothing imports it and nothing calls it -- tests only (not on the Plan Day path, no route, preview body, signing, acceptance or persistence)', JSON.stringify(names(VOCAB)) === JSON.stringify([SHADOW]) && names(/from '\.\/shadowPolicyObservation'/).length === 0 && JSON.stringify(names(/\bobserveShadowPolicy\(/)) === JSON.stringify([SHADOW]));
+check('ONE PRODUCTION CONSUMER (O5 P4b5): the composition vocabulary exists in exactly TWO production files (itself and the server-controlled shadow execution boundary, its only importer and caller, which uses it INSTEAD of the plain orchestration -- pinned by shadowPolicyExecutionArchitecture.test.ts); nothing else imports or calls it, and the composition itself is unaware of modes, sinks and telemetry', JSON.stringify(names(VOCAB)) === JSON.stringify([SHADOW, EXEC].sort()) && JSON.stringify(names(/from '\.\/shadowPolicyObservation'/)) === JSON.stringify([EXEC]) && JSON.stringify(names(/\bobserveShadowPolicy\b/)) === JSON.stringify([SHADOW, EXEC].sort()) && !/ShadowPolicyMode|ShadowPolicySink|ShadowPolicyExecution|AURA_SHADOW_POLICY_MODE|monotonic|performance\.now|latency/i.test(src(SHADOW)));
 check('EXACTLY ONE CALLER EACH: the orchestration boundary is called only by itself and this composition; the generator only by itself and this composition; the predicate only by itself and this composition', JSON.stringify(names(/\bpreparePromotionInputs\(/)) === JSON.stringify([PREP, SHADOW].sort()) && JSON.stringify(names(/\bgenerateLocalCounterfactual\(/)) === JSON.stringify([GEN, SHADOW].sort()) && JSON.stringify(names(/\bevaluateCounterfactualAcceptance\(/)) === JSON.stringify([ACCEPT_MOD, SHADOW].sort()));
 check('NOT PUBLIC / SIGNED / PERSISTED / ACCEPTED: no preview, signing, acceptance, persistence, Recomposition, Move, presentation, route, scheduling-context, trace, basis, placements, input, contention, attempts, generator, predicate, preparation or orchestration module names the composition', NEVER.every((f) => !VOCAB.test(src(f))));
 const migrationSql = fs.readdirSync(path.join(root, 'apps/web/prisma/migrations'), { withFileTypes: true }).filter((e) => e.isDirectory()).map((e) => fs.readFileSync(path.join(root, 'apps/web/prisma/migrations', e.name, 'migration.sql'), 'utf8'));

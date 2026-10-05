@@ -367,6 +367,13 @@ jobs:
         run: npx ts-node test/shadowPolicyObservation.test.ts
       - name: Run shadow policy observation architecture test
         run: npx ts-node test/shadowPolicyObservationArchitecture.test.ts
+      # O5 P4b5 -- the SHADOW EXECUTION & OBSERVATION BOUNDARY: OFF by default, server-controlled (AURA_SHADOW_POLICY_MODE, exactly SHADOW), no ACTIVE. In SHADOW the Plan Day
+      # preview's ONE orchestration runs through the P4b4 composition instead of the plain call (never in addition); every shadow failure is isolated; only a minimal
+      # aggregate metrics record (closed categories and counts, no identifiers / text / instants / placements) leaves, through a one-way synchronous sink.
+      - name: Run shadow policy execution test
+        run: npx ts-node test/shadowPolicyExecution.test.ts
+      - name: Run shadow policy execution architecture test
+        run: npx ts-node test/shadowPolicyExecutionArchitecture.test.ts
       # O5 P4b5 -- engine-independent seeded fixtures: the incidence sweeps no longer use a random sort comparator (whose order depended on the engine's sort
       # algorithm, so Node 20 CI and a newer local Node generated different fixtures from the same seed). This narrow test proves the root cause and the fix
       # and forbids the pattern; the incidence suites pin exact authoritative counts, so any engine difference fails here on Node 20.
