@@ -337,6 +337,13 @@ jobs:
         run: npx ts-node test/promotionContentionAuthority.test.ts
       - name: Run promotion contention authority architecture test
         run: npx ts-node test/promotionContentionAuthorityArchitecture.test.ts
+      # O5 P4b2b -- the immutable SchedulingAttemptAuthority: P3a's attempt events (now carrying the attempting candidate's own descriptive timing fit)
+      # normalized once into typed attempts for P AND for the owners it may displace; typed promotion pairs; run-level basis / placements / attempts from one
+      # orchestration. Event authority, not candidate-list history. Inert; consumed by nothing.
+      - name: Run scheduling attempt authority test
+        run: npx ts-node test/schedulingAttemptAuthority.test.ts
+      - name: Run scheduling attempt authority architecture test
+        run: npx ts-node test/schedulingAttemptAuthorityArchitecture.test.ts
       # Constructor scheduling correctness -- the target-day blocker load
       # uses half-open OVERLAP semantics (a plan that starts before the day
       # but runs into it must block), through the one shared definition.

@@ -556,7 +556,7 @@ export type ConstructDayResult =
 // ============================================================
 
 /** O5 P3a -- called, only when a trace was requested, with the exact interval whose rejection reason was `CONFLICTS_WITH_PROPOSED_ITEM` (never for a blocker, window, duration or structural rejection). Observation only: its return value is never read. */
-type ContentionObserver = (attempted: { start: Date; end: Date }) => void;
+type ContentionObserver = (attempted: { start: Date; end: Date }, timingFit?: PlacementTimingFit) => void;
 
 interface PlaceOneIntentOutcome {
   proposed?: ProposedItem;
@@ -672,7 +672,7 @@ function placeOneIntent(
       continue;
     }
     diagnostics.push({ candidateOrder: candidate.candidateOrder, reason: evaluation.reason });
-    if (evaluation.reason === 'CONFLICTS_WITH_PROPOSED_ITEM') onContention?.(evaluation.interval); // O5 P3a -- observation only
+    if (evaluation.reason === 'CONFLICTS_WITH_PROPOSED_ITEM') onContention?.(evaluation.interval, candidate.timingFit); // O5 P3a -- observation only; O5 P4b2b: the candidate's own descriptive timing fit
     if (evaluation.reason === 'CONFLICTS_WITH_PROPOSED_ITEM' && !firstConflictInterval) firstConflictInterval = evaluation.interval;
   }
 
@@ -791,7 +791,7 @@ function constructDayCore(input: ConstructDayInput, attempts: ContentionAttempt[
     const fixedConstraints = fixedConstraintsByIntentId[intent.id] ?? [];
     // O5 P3a -- present only when a trace was requested; evaluated only on an actual CONFLICTS_WITH_PROPOSED_ITEM rejection.
     const onContention: ContentionObserver | undefined = attempts
-      ? (attempted) => {
+      ? (attempted, timingFit) => {
           const owners = placedIntervals.filter((placed) => intervalsOverlap(attempted.start, attempted.end, placed.start, placed.end));
           if (owners.length > 0) {
             // DETACHED snapshot: strings and numbers only, copied here, before anything leaves this function.
@@ -800,6 +800,7 @@ function constructDayCore(input: ConstructDayInput, attempts: ContentionAttempt[
               loserIntentId: intent.id,
               attemptedStart: attempted.start.toISOString(),
               attemptedEnd: attempted.end.toISOString(),
+              ...(timingFit === undefined ? {} : { timingFit }),
               owners: owners.map((owner) => ({ intentId: owner.intentId, start: owner.start.toISOString(), end: owner.end.toISOString() })),
             });
           }

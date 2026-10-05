@@ -43,7 +43,17 @@
  * temporal cost of deferral (decision evidence). This module imports neither and reads no recurrence, opportunity or
  * evidence. A later slice (P3b) combines the two observations in shadow; an eventual active policy (P4) would use a typed
  * promotion input. Neither is implemented here.
+ *
+ * DESCRIPTIVE TIMING FIT (O5 P4b2b). When the attempted interval came from a FLEXIBLE candidate, the event also carries that candidate's
+ * own `timingFit` (the exact existing `PlacementTimingFit`, read straight from the candidate at the rejection point -- never recomputed,
+ * inferred from the interval or joined from a candidate list). It describes the candidate that attempted the interval and nothing more:
+ * it ranks nothing here, changes no contention, event count, ownership or emission condition, no Constructor decision, promotion
+ * eligibility or pressure. It is absent when the candidate carries none and for a FIXED target (no candidate exists). The event identity
+ * (`contentionEventKey`) deliberately does not include it, so event counts are exactly what they were; when the same interval is offered
+ * twice by one loser in one pass the single event describes the first offering (the real timing search returns each start once).
  */
+
+import type { PlacementTimingFit } from './dayConstructor';
 
 export interface ContentionEvent {
   /** The candidate whose attempted interval was rejected because of the owner. */
@@ -58,6 +68,8 @@ export interface ContentionEvent {
   readonly winnerEnd: string;
   /** 0 for the first Constructor pass, then 1, 2, ... for each replenishment re-run. */
   readonly round: number;
+  /** The attempting candidate's own timing fit, exactly as it carried it (descriptive; absent when it had none or the target was FIXED). */
+  readonly timingFit?: PlacementTimingFit;
 }
 
 export interface ContentionTrace {
@@ -78,6 +90,8 @@ export interface ContentionAttempt {
   readonly loserIntentId: string;
   readonly attemptedStart: string;
   readonly attemptedEnd: string;
+  /** The attempting candidate's own timing fit (a plain string literal; absent when it had none or the target was FIXED). */
+  readonly timingFit?: PlacementTimingFit;
   /** Overlapping Proposed intervals, in the order they were placed (construction chronology). Never empty. */
   readonly owners: readonly { readonly intentId: string; readonly start: string; readonly end: string }[];
 }
@@ -119,6 +133,7 @@ export function buildContentionEvents(round: number, attempts: readonly Contenti
         winnerStart: owner.start,
         winnerEnd: owner.end,
         round,
+        ...(attempt.timingFit === undefined ? {} : { timingFit: attempt.timingFit }),
       });
       const key = contentionEventKey(event);
       if (seen.has(key)) continue;
