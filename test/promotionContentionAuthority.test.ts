@@ -23,7 +23,7 @@ import type { ConstructionBasis, ConstructionBasisOutcome } from '../apps/web/li
 import type { BaselinePlacementsOutcome } from '../apps/web/lib/baselinePlacements';
 import type { ContentionEvent, ContentionTrace } from '../apps/web/lib/contentionTrace';
 import { assemblePromotionInputs, type PromotionInput } from '../apps/web/lib/promotionInput';
-import { preparePromotionInputs } from '../apps/web/lib/promotionInputPreparation';
+import { preparePromotionInputs, type PromotionRunAuthority } from '../apps/web/lib/promotionInputPreparation';
 import { observeShadowPressure } from '../apps/web/lib/shadowPressureObservation';
 import { deriveDecisionPressure } from '../apps/web/lib/decisionPressure';
 import { projectAbovePressureFacts } from '../apps/web/lib/abovePressurePrecedence';
@@ -71,6 +71,7 @@ const mkDeps = (search: (r: any) => TimingCandidate[], calls: Calls = { search: 
     prepareDecisionFacts: createDecisionFactPreparer(rangeDeps),
   },
 });
+const contentionOf = (x: { run: PromotionRunAuthority }): readonly PromotionContentionOutcome[] => (x.run.status === 'PREPARED' ? x.run.promotions.map((pair) => pair.contention) : []);
 const ready = (o: PromotionContentionOutcome) => { if (o.status !== 'READY') throw new Error(`authority ${o.reason}`); return o.authority; };
 const reasonOf = (o: PromotionContentionOutcome) => (o.status === 'UNAVAILABLE' ? o.reason : 'READY');
 const attemptShape = (o: PromotionContentionOutcome) => ready(o).attempts.map((a) => `${a.ownerIntentId}@${hhmm(a.start)}-${hhmm(a.end)}`).join(' ');
@@ -96,16 +97,16 @@ const INTENTS = [req('O', 0), req('B', 1), req('P', 2)];
     check('P4a2: exactly one PromotionInput -- candidate P, owners O and B -- from the same real pipeline', JSON.stringify(input.owners.map((o) => o.intentId)) === '["O","B"]' && input.candidateIntentId === 'P' && prepared.promotion.status === 'PREPARED' && prepared.promotion.inputs.length === 1);
     const shadow = await observeShadowPressure(request(INTENTS, ['O', 'B', 'P']), mkDeps(limited(POOLS, 1)).deps);
     check('P3b (the diagnostic oracle) classifies P PRESSURE_ELIGIBLE_AGAINST_ALL_FINAL_OWNERS, in agreement with the promotion input', shadow.shadow.status === 'EVALUATED' && shadow.shadow.evaluation.observations.some((o) => o.loserIntentId === 'P' && o.classification === 'PRESSURE_ELIGIBLE_AGAINST_ALL_FINAL_OWNERS'));
-    check('THE BOUNDARY HANDS ONE AUTHORITY PER INPUT, in input order, from the SAME run', prepared.contention.length === 1 && ready(prepared.contention[0]).candidateIntentId === 'P');
-    check('BOTH historical P attempts are preserved, in the trace\'s own order: P@10:30-11:30 vs O and P@10:00-11:00 vs B', attemptShape(prepared.contention[0]) === 'O@10:30-11:30 B@10:00-11:00');
+    check('THE BOUNDARY HANDS ONE AUTHORITY PER INPUT, in input order, from the SAME run', contentionOf(prepared).length === 1 && ready(contentionOf(prepared)[0]).candidateIntentId === 'P');
+    check('BOTH historical P attempts are preserved, in the trace\'s own order: P@10:30-11:30 vs O and P@10:00-11:00 vs B', attemptShape(contentionOf(prepared)[0]) === 'O@10:30-11:30 B@10:00-11:00');
     const pInit = basis.initialCandidates.find((l) => l.intentId === 'P')!.candidates.map((c) => hhmm(c.start));
     const pFinal = basis.finalCandidates.find((l) => l.intentId === 'P')!.candidates.map((c) => hhmm(c.start));
-    check('MISSING-INTERMEDIATE PROOF: the 10:00 slot is NOT in P\'s initial candidates (10:30 only) and NOT in P\'s final candidates (empty), and IS in the authority -- the exact loss that blocked P4b2', JSON.stringify(pInit) === '["10:30"]' && pFinal.length === 0 && ready(prepared.contention[0]).attempts.some((a) => a.ownerIntentId === 'B' && hhmm(a.start) === '10:00' && hhmm(a.end) === '11:00'));
+    check('MISSING-INTERMEDIATE PROOF: the 10:00 slot is NOT in P\'s initial candidates (10:30 only) and NOT in P\'s final candidates (empty), and IS in the authority -- the exact loss that blocked P4b2', JSON.stringify(pInit) === '["10:30"]' && pFinal.length === 0 && ready(contentionOf(prepared)[0]).attempts.some((a) => a.ownerIntentId === 'B' && hhmm(a.start) === '10:00' && hhmm(a.end) === '11:00'));
     check('the authority does NOT replace the candidate lists: the basis still holds initial AND final lists (B\'s relocation slot 11:30 survives only in its INITIAL list)', basis.initialCandidates.find((l) => l.intentId === 'B')!.candidates.map((c) => hhmm(c.start)).join() === '11:30' && basis.finalCandidates.find((l) => l.intentId === 'B')!.candidates.map((c) => hhmm(c.start)).join() === '10:00');
-    check('CONTRACT SHAPE: exactly { candidateIntentId, attempts: [ { ownerIntentId, start, end } ] } -- no round, winner interval, pressure, importance, deadline, originalOrder, timing fit, candidate order, raw event or classification', JSON.stringify(Object.keys(ready(prepared.contention[0])).sort()) === '["attempts","candidateIntentId"]' && ready(prepared.contention[0]).attempts.every((a) => Object.keys(a).sort().join() === 'end,ownerIntentId,start') && !/round|winner|pressure|importance|deadline|originalOrder|timingFit|candidateOrder|classification/i.test(Object.keys(reachableObject(ready(prepared.contention[0]))).join()));
+    check('CONTRACT SHAPE: exactly { candidateIntentId, attempts: [ { ownerIntentId, start, end, timingFit? } ] } (timingFit = the own descriptive fit of the attempting candidate, O5 P4b2b) -- no round, winner interval, pressure, importance, deadline, originalOrder, candidate order, raw event or classification', JSON.stringify(Object.keys(ready(contentionOf(prepared)[0])).sort()) === '["attempts","candidateIntentId"]' && ready(contentionOf(prepared)[0]).attempts.every((a) => Object.keys(a).sort().join() === 'end,ownerIntentId,start,timingFit' && a.timingFit === 'GOOD') && !/round|winner|pressure|importance|deadline|originalOrder|candidateOrder|classification/i.test(Object.keys(reachableObject(ready(contentionOf(prepared)[0]))).join()));
     const direct = projectContentionAuthority(diag.contentionTrace, input, basisOutcome, placementsOutcome);
-    check('the pure projection over the diagnostics\' own trace, the same input and the same basis / placements equals what the boundary handed over', JSON.stringify(direct) === JSON.stringify(prepared.contention[0]));
-    check('P4a / P4a2 UNCHANGED: the boundary still returns the same `promotion` outcome shape (PREPARED, inputs only) -- the contention is a SEPARATE sibling', Object.keys(prepared.promotion).sort().join() === 'inputs,status' && Object.keys(prepared).sort().join() === 'contention,promotion,result');
+    check('the pure projection over the diagnostics\' own trace, the same input and the same basis / placements equals what the boundary handed over', JSON.stringify(direct) === JSON.stringify(contentionOf(prepared)[0]));
+    check('P4a / P4a2 UNCHANGED: the boundary still returns the same `promotion` outcome shape (PREPARED, inputs only) -- the pairs live in the separate run-level `run` sibling', Object.keys(prepared.promotion).sort().join() === 'inputs,status' && Object.keys(prepared).sort().join() === 'promotion,result,run');
   }
   function reachableObject(v: unknown): Record<string, true> { const keys: Record<string, true> = {}; const seen = new Set<unknown>(); const walk = (x: unknown) => { if (x !== null && typeof x === 'object' && !seen.has(x)) { seen.add(x); if (!(x instanceof Date)) for (const [k, c] of Object.entries(x as Record<string, unknown>)) { keys[k] = true; walk(c); } } }; walk(v); return keys; }
 
@@ -123,14 +124,14 @@ const INTENTS = [req('O', 0), req('B', 1), req('P', 2)];
     check('NO OWNER EXPANSION: with the PromotionInput authorizing only O, the real P-vs-B attempt (a placed basis intent, a real event) is NOT in the authority -- the trace cannot enlarge the owner scope', attemptShape(narrow) === 'O@10:30-11:30' && !ready(narrow).attempts.some((a) => a.ownerIntentId === 'B'));
     const unauthorizedOnly = traceOf([ev('P', 'B', '10:00', '11:00')]);
     check('an authorized owner with NO supporting event is an inconsistent pairing (never a quiet widening): INCONSISTENT_INPUT', reasonOf(projectContentionAuthority(unauthorizedOnly, input, basisOutcome, placementsOutcome)) === 'INCONSISTENT_INPUT');
-    check('MULTIPLE AUTHORIZED OWNERS: attempts are preserved against EACH authorized owner (O and B)', new Set(ready(prepared.contention[0]).attempts.map((a) => a.ownerIntentId)).size === 2);
+    check('MULTIPLE AUTHORIZED OWNERS: attempts are preserved against EACH authorized owner (O and B)', new Set(ready(contentionOf(prepared)[0]).attempts.map((a) => a.ownerIntentId)).size === 2);
   }
 
   console.log('=== duplicates and order ===');
   {
     const dupTrace = traceOf([ev('P', 'O', '10:30', '11:30', 0), ev('P', 'O', '10:30', '11:30', 1), ev('P', 'B', '10:00', '11:00', 1), ev('P', 'B', '10:00', '11:00', 2), ev('P', 'B', '10:30', '11:30', 2)]);
     const out = projectContentionAuthority(dupTrace, input, basisOutcome, placementsOutcome);
-    check('DEDUP (pinned): the same (owner, start, end) recorded in several rounds is ONE attempt -- the round is not part of the contract, so the repetition carries nothing a generator can use; first occurrence wins', attemptShape(out) === 'O@10:30-11:30 B@10:00-11:00 B@10:30-11:30');
+    check('DEDUP (pinned): the same (owner, start, end) recorded in several rounds is ONE attempt -- the round is not part of the contract, so the repetition carries nothing a generator can use; first occurrence wins', attemptShape(out) === 'O@10:30-11:30 B@10:30-11:30 B@10:00-11:00');
     check('DEDUP keeps DISTINCT owners over the same interval (P3a emits one event per overlapping owner): O@10:30-11:30 and B@10:30-11:30 would both survive', attemptShape(projectContentionAuthority(traceOf([ev('P', 'O', '10:30', '11:30'), ev('P', 'B', '10:30', '11:30')]), input, basisOutcome, placementsOutcome)) === 'O@10:30-11:30 B@10:30-11:30');
     check('ORDER: the trace\'s own order is preserved among surviving events (no policy ordering): reversing the source reverses the attempts', attemptShape(projectContentionAuthority(traceOf([ev('P', 'B', '10:00', '11:00'), ev('P', 'O', '10:30', '11:30')]), input, basisOutcome, placementsOutcome)) === 'B@10:00-11:00 O@10:30-11:30');
     check('DISTINCT attempted intervals against the SAME owner are all preserved (this is exactly the authority P4b2 proved missing)', attemptShape(projectContentionAuthority(traceOf([ev('P', 'O', '10:30', '11:30'), ev('P', 'O', '10:45', '11:45'), ev('P', 'B', '10:00', '11:00')]), input, basisOutcome, placementsOutcome)) === 'O@10:30-11:30 O@10:45-11:45 B@10:00-11:00');
@@ -169,7 +170,7 @@ const INTENTS = [req('O', 0), req('B', 1), req('P', 2)];
     check('INPUTS ARE NEVER MUTATED: the trace, the PromotionInput, the basis and the placements are byte-identical after repeated projection', (() => { const t = JSON.stringify(diag.contentionTrace); const i = JSON.stringify(input); const b = JSON.stringify(basisOutcome); const p = JSON.stringify(placementsOutcome); for (let k = 0; k < 5; k += 1) projectContentionAuthority(diag.contentionTrace, input, basisOutcome, placementsOutcome); return t === JSON.stringify(diag.contentionTrace) && i === JSON.stringify(input) && b === JSON.stringify(basisOutcome) && p === JSON.stringify(placementsOutcome); })());
     const realNow = Date.now; let nowCalls = 0; (Date as unknown as { now: () => number }).now = () => { nowCalls += 1; return realNow(); };
     try { projectContentionAuthority(diag.contentionTrace, input, basisOutcome, placementsOutcome); } finally { (Date as unknown as { now: () => number }).now = realNow; }
-    check('NO CLOCK and DETERMINISM: projection reads Date.now zero times and is byte-identical across repeats', nowCalls === 0 && Array.from({ length: 10 }, () => JSON.stringify(projectContentionAuthority(diag.contentionTrace, input, basisOutcome, placementsOutcome))).every((j) => j === JSON.stringify(prepared.contention[0])));
+    check('NO CLOCK and DETERMINISM: projection reads Date.now zero times and is byte-identical across repeats', nowCalls === 0 && Array.from({ length: 10 }, () => JSON.stringify(projectContentionAuthority(diag.contentionTrace, input, basisOutcome, placementsOutcome))).every((j) => j === JSON.stringify(contentionOf(prepared)[0])));
   }
 
   console.log('=== no policy: owner pressure never changes the captured intervals ===');
@@ -177,10 +178,10 @@ const INTENTS = [req('O', 0), req('B', 1), req('P', 2)];
     const flipped = (p: 'NONE' | 'LAST_KNOWN_OPPORTUNITY'): PromotionInput => ({ candidateIntentId: input.candidateIntentId, owners: input.owners.map((o) => ({ intentId: o.intentId, pressure: p })) });
     const none = JSON.stringify(projectContentionAuthority(diag.contentionTrace, flipped('NONE'), basisOutcome, placementsOutcome));
     const last = JSON.stringify(projectContentionAuthority(diag.contentionTrace, flipped('LAST_KNOWN_OPPORTUNITY'), basisOutcome, placementsOutcome));
-    check('SYNTHETIC: the same owner set with every owner NONE vs every owner LAST_KNOWN_OPPORTUNITY yields byte-identical authority', none === last && none === JSON.stringify(prepared.contention[0]));
+    check('SYNTHETIC: the same owner set with every owner NONE vs every owner LAST_KNOWN_OPPORTUNITY yields byte-identical authority', none === last && none === JSON.stringify(contentionOf(prepared)[0]));
     const onlyP = await preparePromotionInputs(request(INTENTS, ['P']), mkDeps(limited(POOLS, 1)).deps);
     const ownersNone = onlyP.promotion.status === 'PREPARED' ? onlyP.promotion.inputs[0].owners.map((o) => o.pressure).join() : '<unavailable>';
-    check('REAL PIPELINE: with only P pressured the owners are NONE; with all three pressured the owners are LAST_KNOWN_OPPORTUNITY -- and the authority intervals are byte-identical', ownersNone === 'NONE,NONE' && prepared.promotion.status === 'PREPARED' && prepared.promotion.inputs[0].owners.every((o) => o.pressure === 'LAST_KNOWN_OPPORTUNITY') && JSON.stringify(onlyP.contention) === JSON.stringify(prepared.contention));
+    check('REAL PIPELINE: with only P pressured the owners are NONE; with all three pressured the owners are LAST_KNOWN_OPPORTUNITY -- and the authority intervals are byte-identical', ownersNone === 'NONE,NONE' && prepared.promotion.status === 'PREPARED' && prepared.promotion.inputs[0].owners.every((o) => o.pressure === 'LAST_KNOWN_OPPORTUNITY') && JSON.stringify(contentionOf(onlyP)) === JSON.stringify(contentionOf(prepared)));
   }
 
   console.log('=== multiple promotion inputs: one separate authority each ===');
@@ -190,7 +191,7 @@ const INTENTS = [req('O', 0), req('B', 1), req('P', 2)];
     const pools = { O: [timing('11:00', '12:00')], P1: [timing('11:00', '12:00')], P2: [timing('11:00', '12:00'), timing('11:30', '12:30')] };
     const r = await preparePromotionInputs(request(intents, ['O', 'P1', 'P2']), mkDeps(limited(pools, 3)).deps);
     const inputs = r.promotion.status === 'PREPARED' ? r.promotion.inputs : [];
-    check('two PromotionInputs (P1, P2) produce two separate, input-aligned authorities, each ONLY its own loser\'s attempts against O (no joint authority, no cross-contamination)', inputs.map((i) => i.candidateIntentId).join() === 'P1,P2' && r.contention.length === 2 && ready(r.contention[0]).candidateIntentId === 'P1' && ready(r.contention[1]).candidateIntentId === 'P2' && attemptShape(r.contention[0]) === 'O@11:00-12:00' && attemptShape(r.contention[1]) === 'O@11:00-12:00 O@11:30-12:30');
+    check('two PromotionInputs (P1, P2) produce two separate, input-aligned authorities, each ONLY its own loser\'s attempts against O (no joint authority, no cross-contamination)', inputs.map((i) => i.candidateIntentId).join() === 'P1,P2' && contentionOf(r).length === 2 && ready(contentionOf(r)[0]).candidateIntentId === 'P1' && ready(contentionOf(r)[1]).candidateIntentId === 'P2' && attemptShape(contentionOf(r)[0]) === 'O@11:00-12:00' && attemptShape(contentionOf(r)[1]) === 'O@11:00-12:00 O@11:30-12:30');
   }
 
   console.log('=== same run, baseline untouched, normal path zero work, failure isolation ===');
@@ -211,12 +212,12 @@ const INTENTS = [req('O', 0), req('B', 1), req('P', 2)];
     try {
       const failing = await preparePromotionInputs(request(INTENTS, ['O', 'B', 'P']), mkDeps(limited(POOLS, 1)).deps);
       const normal = await orchestrateConstructDay(request(INTENTS, ['O', 'B', 'P']), mkDeps(limited(POOLS, 1)).deps);
-      check('FAILURE ISOLATION: a throwing projection makes ONLY that authority UNAVAILABLE / CAPTURE_FAILED -- the PromotionInput outcome is still PREPARED with the same input and the Constructor result is byte-identical to a normal run', failing.contention.length === 1 && reasonOf(failing.contention[0]) === 'CAPTURE_FAILED' && failing.promotion.status === 'PREPARED' && JSON.stringify(failing.promotion) === JSON.stringify(prepared.promotion) && JSON.stringify(failing.result) === JSON.stringify(normal));
+      check('FAILURE ISOLATION: a throwing projection makes ONLY that authority UNAVAILABLE / CAPTURE_FAILED -- the PromotionInput outcome is still PREPARED with the same input and the Constructor result is byte-identical to a normal run', contentionOf(failing).length === 1 && reasonOf(contentionOf(failing)[0]) === 'CAPTURE_FAILED' && failing.promotion.status === 'PREPARED' && JSON.stringify(failing.promotion) === JSON.stringify(prepared.promotion) && JSON.stringify(failing.result) === JSON.stringify(normal));
     } finally { (authorityModule as any).projectContentionAuthority = real; }
     const notReady = await preparePromotionInputs({ ...request(INTENTS, ['O', 'B', 'P']), timezone: '' }, mkDeps(limited(POOLS, 1)).deps);
-    check('a not-READY run yields no authorities (empty), exactly like no inputs', notReady.promotion.status === 'UNAVAILABLE' && notReady.contention.length === 0);
+    check('a not-READY run yields no authorities (empty), exactly like no inputs', notReady.promotion.status === 'UNAVAILABLE' && contentionOf(notReady).length === 0);
     const none = await preparePromotionInputs(request(INTENTS, []), mkDeps(limited(POOLS, 1)).deps);
-    check('no PromotionInput (nobody pressured) -> no authority is projected', none.promotion.status === 'PREPARED' && none.promotion.inputs.length === 0 && none.contention.length === 0);
+    check('no PromotionInput (nobody pressured) -> no authority is projected', none.promotion.status === 'PREPARED' && none.promotion.inputs.length === 0 && contentionOf(none).length === 0);
   }
 
   console.log('=== the Constructor is not touched or called ===');
@@ -254,7 +255,7 @@ const INTENTS = [req('O', 0), req('B', 1), req('P', 2)];
       const maxRound = Math.max(-1, ...diagnostics.contentionTrace.events.map((e) => e.round));
       run.promotion.inputs.forEach((promotion, index) => {
         tally.inputs += 1;
-        const outcome = run.contention[index];
+        const outcome = contentionOf(run)[index];
         if (!outcome || outcome.status !== 'READY') { tally.notReady += 1; return; }
         tally.authorities += 1;
         const ownerIds = new Set(promotion.owners.map((o) => o.intentId));

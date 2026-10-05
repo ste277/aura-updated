@@ -15,19 +15,26 @@
  *
  * SOURCE MAPPING (P3a `ContentionEvent` -> attempt, field for field): loserIntentId = the PromotionInput candidate; winnerIntentId = a
  * member of that PromotionInput's owner ids (and ONLY such); attemptedStart / attemptedEnd -> start / end, parsed exactly from the
- * trace's ISO-8601 strings (never reconstructed from a duration). Nothing else is carried: not the round (a P3a round-label debt stays
- * irrelevant), not the winner's interval (BaselinePlacements owns final owner placement), not pressure, importance, deadline,
- * originalOrder, timing fit, candidate order, the raw event or any classification. Field necessity: a counterfactual that tests "P at an
+ * trace's ISO-8601 strings (never reconstructed from a duration); timingFit (O5 P4b2b) = the attempting candidate's own descriptive fit,
+ * copied as P3a carried it. Nothing else is carried: not the round (a P3a round-label debt stays irrelevant), not the winner's interval
+ * (BaselinePlacements owns final owner placement), not pressure, importance, deadline, originalOrder, candidate order, the raw event or
+ * any classification.
+ *
+ * SINGLE SOURCE (O5 P4b2b). This contract is a scoped VIEW over the one shared normalization of the trace into scheduling attempts
+ * (`normalizeSchedulingAttempts`, schedulingAttemptAuthority.ts): there is no second semantic projection of the raw trace. A normalized
+ * slot over several authorized owners expands to one record per authorized owner, so every owner relationship is kept; a future
+ * consumer groups records by (start, end, timingFit) to see one slot with several owners. Order is the order of discovery, NEVER a ranking:
+ * P's slots are ranked only by `compareCandidatesForPlacement` over (timingFit, start). Field necessity: a counterfactual that tests "P at an
  * attempted slot, displacing the owner(s) it overlaps" needs exactly which owner stopped which interval, nothing historical beyond that.
  *
  * NO OWNER EXPANSION. The PromotionInput is the sole owner authority: events whose winner is not an authorized owner are dropped, so the
  * trace can never enlarge the movable scope; and every authorized owner must itself be supported by at least one real event (an owner
  * with no recorded contention against the candidate is an inconsistent pairing, not a quiet widening).
  *
- * DEDUPLICATION. The same (owner, start, end) recorded in several rounds is ONE attempt: the round is not part of the contract, so the
- * repetition carries no information a generator can use. First occurrence wins; distinct owners over the same interval stay distinct
- * (P3a emits one event per overlapping owner). ORDER is the trace's own chronological order (round, evaluation order, interval, owner
- * placement order) among the surviving events -- no policy ordering.
+ * DEDUPLICATION. The same (owner, start, end, timingFit) recorded in several rounds is ONE attempt: the round is not part of the contract,
+ * so the repetition carries no information a generator can use. Distinct owners over the same interval stay distinct (P3a emits one
+ * event per overlapping owner). ORDER is the order of discovery (slot by first appearance, then owner by first appearance) -- no policy
+ * ordering and not a ranking.
  *
  * SAME-RUN PAIRING. The orchestration diagnostics of ONE baseline run own the trace, the ConstructionBasis and the BaselinePlacements; the
  * internal promotion boundary derives the PromotionInput(s) from that same run and calls this module right there, once per input. There
@@ -45,7 +52,9 @@
  * the raw P3a trace; only the internal promotion-preparation boundary hands the trace to this module.
  */
 
+import type { PlacementTimingFit } from './dayConstructor';
 import type { ContentionTrace } from './contentionTrace';
+import { normalizeSchedulingAttempts } from './schedulingAttemptAuthority';
 import type { PromotionInput } from './promotionInput';
 import type { ConstructionBasisOutcome } from './constructionBasis';
 import type { BaselinePlacementsOutcome } from './baselinePlacements';
@@ -55,6 +64,8 @@ export interface PromotionContentionAttempt {
   /** The exact interval [start, end) the candidate attempted and lost to this owner, copied from P3a. */
   readonly start: Date;
   readonly end: Date;
+  /** The attempting candidate's own descriptive timing fit, exactly as P3a carried it (absent when it had none). */
+  readonly timingFit?: PlacementTimingFit;
 }
 
 export interface PromotionContentionAuthority {
@@ -87,17 +98,15 @@ export function projectContentionAuthority(trace: ContentionTrace, input: Promot
     if (ownerIds.length === 0 || new Set(ownerIds).size !== ownerIds.length) return unavailable('INCONSISTENT_INPUT');
     if (ownerIds.some((id) => id === candidateId || !intentIds.includes(id) || !placedIds.includes(id))) return unavailable('INCONSISTENT_INPUT');
 
-    const seen = new Set<string>();
+    // A scoped VIEW over the one shared normalization (the scheduling attempt authority's): P's slots, each against only the owners
+    // THIS PromotionInput authorizes. Same-slot owners expand to one record each; the trace can never enlarge the owner scope.
     const attempts: PromotionContentionAttempt[] = [];
-    for (const event of trace.events) {
-      if (event.loserIntentId !== candidateId || !ownerIds.includes(event.winnerIntentId)) continue;
-      const start = new Date(event.attemptedStart);
-      const end = new Date(event.attemptedEnd);
-      if (!Number.isFinite(start.getTime()) || !Number.isFinite(end.getTime()) || start.getTime() >= end.getTime()) return unavailable('CAPTURE_FAILED');
-      const key = `${event.winnerIntentId}|${start.getTime()}|${end.getTime()}`;
-      if (seen.has(key)) continue;
-      seen.add(key);
-      attempts.push(Object.freeze({ ownerIntentId: event.winnerIntentId, start: Object.freeze(start), end: Object.freeze(end) }));
+    for (const slot of normalizeSchedulingAttempts(trace)) {
+      if (slot.intentId !== candidateId) continue;
+      for (const owner of slot.conflictingOwnerIds) {
+        if (!ownerIds.includes(owner)) continue;
+        attempts.push(Object.freeze({ ownerIntentId: owner, start: Object.freeze(new Date(slot.start.getTime())), end: Object.freeze(new Date(slot.end.getTime())), ...(slot.timingFit === undefined ? {} : { timingFit: slot.timingFit }) }));
+      }
     }
     if (attempts.length === 0) return unavailable('NO_MATCHING_CONTENTION');
     if (ownerIds.some((id) => !attempts.some((attempt) => attempt.ownerIntentId === id))) return unavailable('INCONSISTENT_INPUT');

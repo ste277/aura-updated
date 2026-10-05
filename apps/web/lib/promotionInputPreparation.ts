@@ -25,10 +25,14 @@
  * result is discarded. This is the internal boundary P4b (or a test) calls; until then nothing in production calls it. It is
  * not part of any route, preview body, signed contract, acceptance, persistence or user-facing surface.
  *
- * CONTENTION AUTHORITY (O5 P4b2a). The same run's diagnostics also hold the P3a trace, the ConstructionBasis and the BaselinePlacements, so this is
- * the one boundary where all of them coexist with the assembled inputs. For each input it projects, once and with an isolated failure path, a
- * narrow typed PromotionContentionAuthority (the exact intervals the candidate attempted and lost to its authorized owners) and returns it as the
- * index-aligned sibling `contention`. Existing `promotion` semantics are unchanged; no second orchestration; the raw trace goes no further.
+ * SAME-RUN AUTHORITY (O5 P4b2a / P4b2b). The same run's diagnostics also hold the P3a trace, the ConstructionBasis and the BaselinePlacements, so
+ * this is the one boundary where all of them coexist with the assembled inputs. It hands ONE same-run structure to a future pure generator:
+ *   run { constructionBasis, baselinePlacements, schedulingAttempts, promotions: [ { input, contention } ] }
+ * The basis and placements are run-level and appear ONCE (a pass-through of the already-immutable outcomes -- no second producer). The
+ * scheduling attempts are the run-level typed projection of the trace. Each promotion is a TYPED PAIR built in one expression from its
+ * input: `contention` is projected from THAT input (isolated: its failure makes only that pair's contention UNAVAILABLE and never shifts
+ * another pair), so there is no positional trust between parallel arrays. Existing `promotion` semantics are unchanged; no second
+ * orchestration; the raw trace goes no further.
  *
  * FAIL CLOSED. If the run is not READY, or any pure stage throws, the Constructor result is returned exactly as normal and
  * the outcome is UNAVAILABLE with no inputs -- a partial or guessed input is never produced.
@@ -42,15 +46,34 @@ import { deriveDecisionPressure, type DecisionPressure } from './decisionPressur
 import { projectAbovePressureFacts, type AbovePressureFacts } from './abovePressurePrecedence';
 import { assemblePromotionInputs, type PromotionInput } from './promotionInput';
 import { projectContentionAuthority, type PromotionContentionOutcome } from './promotionContentionAuthority';
+import { projectSchedulingAttempts, type SchedulingAttemptOutcome } from './schedulingAttemptAuthority';
 
 export type PromotionInputOutcome =
   | { readonly status: 'PREPARED'; readonly inputs: readonly PromotionInput[] }
   | { readonly status: 'UNAVAILABLE'; readonly reason: 'RUN_NOT_READY' | 'PREPARATION_FAILED' };
 
-export async function preparePromotionInputs(request: ConstructDayRequest, deps: DayConstructorOrchestratorDeps): Promise<{ result: OrchestrateConstructDayResult; promotion: PromotionInputOutcome; contention: readonly PromotionContentionOutcome[] }> {
+type Diagnostics = Awaited<ReturnType<typeof orchestrateConstructDayWithDiagnostics>>;
+
+/** One PromotionInput and ITS OWN contention authority, paired where it is built (never by position). */
+export interface PromotionPair {
+  readonly input: PromotionInput;
+  readonly contention: PromotionContentionOutcome;
+}
+
+export type PromotionRunAuthority =
+  | {
+      readonly status: 'PREPARED';
+      readonly constructionBasis: Diagnostics['constructionBasis'];
+      readonly baselinePlacements: Diagnostics['baselinePlacements'];
+      readonly schedulingAttempts: SchedulingAttemptOutcome;
+      readonly promotions: readonly PromotionPair[];
+    }
+  | { readonly status: 'UNAVAILABLE'; readonly reason: 'RUN_NOT_READY' | 'PREPARATION_FAILED' };
+
+export async function preparePromotionInputs(request: ConstructDayRequest, deps: DayConstructorOrchestratorDeps): Promise<{ result: OrchestrateConstructDayResult; promotion: PromotionInputOutcome; run: PromotionRunAuthority }> {
   const diagnostics = await orchestrateConstructDayWithDiagnostics(request, deps);
   const result = diagnostics.result;
-  if (result.status !== 'READY') return { result, promotion: Object.freeze({ status: 'UNAVAILABLE', reason: 'RUN_NOT_READY' }), contention: NO_AUTHORITIES };
+  if (result.status !== 'READY') return { result, promotion: Object.freeze({ status: 'UNAVAILABLE', reason: 'RUN_NOT_READY' }), run: RUN_NOT_READY };
   try {
     const pressureByIntentId = new Map<string, DecisionPressure>();
     const precedenceFactsByIntentId = new Map<string, AbovePressureFacts>();
@@ -61,20 +84,31 @@ export async function preparePromotionInputs(request: ConstructDayRequest, deps:
       precedenceFactsByIntentId.set(id, projectAbovePressureFacts(resolved.dayIntent));
     }
     const inputs = assemblePromotionInputs({ finalDay: result.preview.constructedDay, contentionTrace: diagnostics.contentionTrace, pressureByIntentId, precedenceFactsByIntentId, planningDate: diagnostics.planningDate });
-    // O5 P4b2a: ONE contention authority per input, from this SAME run's trace, basis and baseline placements. Its failure is isolated:
-    // it can only make that entry UNAVAILABLE -- never the inputs, never the Constructor result.
-    const contention = Object.freeze(inputs.map((input) => contentionFor(diagnostics.contentionTrace, input, diagnostics.constructionBasis, diagnostics.baselinePlacements)));
-    return { result, promotion: Object.freeze({ status: 'PREPARED', inputs }), contention };
+    // O5 P4b2a / P4b2b: ONE typed pair per input, from this SAME run's trace, basis and baseline placements; the run-level scheduling attempts
+    // from the same trace. Each projection's failure is isolated: it can only make ITS OWN outcome UNAVAILABLE -- never the inputs, never the result.
+    const promotions = Object.freeze(inputs.map((input) => Object.freeze({ input, contention: contentionFor(diagnostics.contentionTrace, input, diagnostics.constructionBasis, diagnostics.baselinePlacements) })));
+    const schedulingAttempts = attemptsFor(diagnostics.contentionTrace, diagnostics.constructionBasis);
+    const run: PromotionRunAuthority = Object.freeze({ status: 'PREPARED', constructionBasis: diagnostics.constructionBasis, baselinePlacements: diagnostics.baselinePlacements, schedulingAttempts, promotions });
+    return { result, promotion: Object.freeze({ status: 'PREPARED', inputs }), run };
   } catch {
-    return { result, promotion: Object.freeze({ status: 'UNAVAILABLE', reason: 'PREPARATION_FAILED' }), contention: NO_AUTHORITIES };
+    return { result, promotion: Object.freeze({ status: 'UNAVAILABLE', reason: 'PREPARATION_FAILED' }), run: RUN_PREPARATION_FAILED };
   }
 }
 
-const NO_AUTHORITIES: readonly PromotionContentionOutcome[] = Object.freeze([]);
+const RUN_NOT_READY: PromotionRunAuthority = Object.freeze({ status: 'UNAVAILABLE', reason: 'RUN_NOT_READY' });
+const RUN_PREPARATION_FAILED: PromotionRunAuthority = Object.freeze({ status: 'UNAVAILABLE', reason: 'PREPARATION_FAILED' });
 
 function contentionFor(...args: Parameters<typeof projectContentionAuthority>): PromotionContentionOutcome {
   try {
     return projectContentionAuthority(...args);
+  } catch {
+    return Object.freeze({ status: 'UNAVAILABLE', reason: 'CAPTURE_FAILED' });
+  }
+}
+
+function attemptsFor(...args: Parameters<typeof projectSchedulingAttempts>): SchedulingAttemptOutcome {
+  try {
+    return projectSchedulingAttempts(...args);
   } catch {
     return Object.freeze({ status: 'UNAVAILABLE', reason: 'CAPTURE_FAILED' });
   }
