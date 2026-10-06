@@ -49,6 +49,8 @@ const ACC = 'apps/web/lib/counterfactualAcceptance.ts';
 const GEN = 'apps/web/lib/localCounterfactual.ts';
 /** O5 P4b4 -- the inert same-run shadow composition is the ONLY production consumer of the predicate (one call, at most, per READY generation; nothing consumes the composition). */
 const SHADOW_POLICY = 'apps/web/lib/shadowPolicyObservation.ts';
+/** O5 P4c3 -- the typed accepted-counterfactual authority is the ONLY production CALLER of the predicate (it mints the authority only when the predicate itself returns ACCEPT); the P4b4 composition keeps a TYPE-only import and calls the mint. */
+const ACCEPTED_MOD = 'apps/web/lib/acceptedCounterfactual.ts';
 const CONSTRUCTOR = 'apps/web/lib/dayConstructor.ts';
 const INTENT = 'apps/web/lib/dayIntent.ts';
 const CAPACITY = 'apps/web/lib/dayCapacity.ts';
@@ -98,9 +100,9 @@ function audit(files: SrcFile[]): string[] {
   const by = (re: RegExp) => files.filter((x) => re.test(x.src)).map((x) => x.f);
   const notIn = (list: string[], allow: string[]) => list.filter((f) => !allow.includes(f));
   // A1 -- confinement, vocabulary ownership, ZERO consumers
-  notIn(by(VOCAB), [ACC, SHADOW_POLICY]).forEach((f) => v.push(`A1:names-the-acceptance-predicate:${f}`));
-  by(/from '\.\/counterfactualAcceptance'/).filter((f) => f !== SHADOW_POLICY).forEach((f) => v.push(`A1:production-consumer-of-the-predicate:${f}`));
-  by(/\bevaluateCounterfactualAcceptance\(/).filter((f) => f !== ACC && f !== SHADOW_POLICY).forEach((f) => v.push(`A1:calls-the-predicate:${f}`));
+  notIn(by(VOCAB), [ACC, ACCEPTED_MOD, SHADOW_POLICY]).forEach((f) => v.push(`A1:names-the-acceptance-predicate:${f}`));
+  by(/from '\.\/counterfactualAcceptance'/).filter((f) => f !== SHADOW_POLICY && f !== ACCEPTED_MOD).forEach((f) => v.push(`A1:production-consumer-of-the-predicate:${f}`));
+  by(/\bevaluateCounterfactualAcceptance\(/).filter((f) => f !== ACC && f !== ACCEPTED_MOD).forEach((f) => v.push(`A1:calls-the-predicate:${f}`));
   notIn(by(OWNED_TERMS), [ACC]).forEach((f) => v.push(`A1:acceptance-vocabulary-leaked-backward:${f}`));
   for (const f of NEVER) { const x = get(f); if (x && VOCAB.test(x.src)) v.push(`A1:surface-names-the-predicate:${f}`); }
   // A2 -- the module
@@ -189,7 +191,7 @@ const baseline = audit(real);
 check(`THE REAL PRODUCTION TREE HAS ZERO ACCEPTANCE-PREDICATE ARCHITECTURE VIOLATIONS (${real.length} production files scanned)${baseline.length ? ': ' + baseline.join(', ') : ''}`, baseline.length === 0);
 
 console.log('=== ownership, zero consumers, untouched scheduling code ===');
-check('NO ACTIVE CONSUMERS: the predicate vocabulary exists in exactly TWO production files (itself and the inert O5 P4b4 same-run shadow composition, its only importer and caller); nothing else imports or calls it, and nothing consumes the composition -- no active, UI, API or persistence wiring', JSON.stringify(names(VOCAB)) === JSON.stringify([ACC, SHADOW_POLICY].sort()) && JSON.stringify(names(/from '\.\/counterfactualAcceptance'/)) === JSON.stringify([SHADOW_POLICY]) && JSON.stringify(names(/\bevaluateCounterfactualAcceptance\(/)) === JSON.stringify([ACC, SHADOW_POLICY].sort()));
+check('NO ACTIVE CONSUMERS: the predicate vocabulary exists in exactly THREE production files (itself, the O5 P4c3 typed accepted-counterfactual authority -- its only VALUE importer and CALLER -- and the inert O5 P4b4 same-run shadow composition, which imports only its TYPES); nothing else imports or calls it, and nothing consumes the composition -- no active, UI, API or persistence wiring', JSON.stringify(names(VOCAB)) === JSON.stringify([ACC, ACCEPTED_MOD, SHADOW_POLICY].sort()) && JSON.stringify(names(/from '\.\/counterfactualAcceptance'/)) === JSON.stringify([ACCEPTED_MOD, SHADOW_POLICY].sort()) && JSON.stringify(names(/\bevaluateCounterfactualAcceptance\(/)) === JSON.stringify([ACC, ACCEPTED_MOD].sort()) && !/^import (?!type )[^\n]*from '\.\/counterfactualAcceptance'/m.test(src(SHADOW_POLICY)));
 check('VOCABULARY OWNERSHIP: P4b3 is the FIRST and ONLY module that owns OWNER_WOULD_BE_UNPLACED, OWNER_TIMING_DEGRADED, FIXED_PLACEMENT_CHANGED, NON_OWNER_CHANGED, UNNECESSARY_OWNER_CHANGE, PRECEDENCE_NOT_TIE, NET_PROPOSED_LOSS and its unavailable reasons; none leaked backward into the generator, the promotion modules, the trace, P3 or any surface', JSON.stringify(names(OWNED_TERMS)) === JSON.stringify([ACC]));
 check('NOT PUBLIC / SIGNED / PERSISTED / ACCEPTED: no preview, signing, acceptance, persistence, Recomposition, Move, presentation, route, scheduling-context, trace, basis, placements, input, contention, attempts, generator, preparation or orchestration module names the predicate', NEVER.every((f) => !VOCAB.test(src(f))));
 const migrationSql = fs.readdirSync(path.join(root, 'apps/web/prisma/migrations'), { withFileTypes: true }).filter((e) => e.isDirectory()).map((e) => fs.readFileSync(path.join(root, 'apps/web/prisma/migrations', e.name, 'migration.sql'), 'utf8'));

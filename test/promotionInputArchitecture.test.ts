@@ -61,6 +61,8 @@ const P4B_CONCEPT_NO_COUNTERFACTUAL = /applyPromotion|promoteCandidate|Promotion
 const ACCEPTANCE = 'apps/web/lib/counterfactualAcceptance.ts';
 /** O5 P4b4 -- the same-run shadow policy composition: the ONLY production consumer of the preparation boundary (it runs ONE orchestration through it; nothing consumes the composition). */
 const SHADOW_POLICY = 'apps/web/lib/shadowPolicyObservation.ts';
+/** O5 P4c3 -- the typed accepted-counterfactual authority, the pure selector / materializability gate / active materializer: they legitimately name the (P4b2/P4b3) counterfactual, exactly like the other P4b modules; pinned by their own architecture guard. */
+const P4C3_ACTIVE = ['acceptedCounterfactual', 'activeSelector', 'activeMaterializability', 'activeResultMaterializer'].map((n) => `apps/web/lib/${n}.ts`);
 const PROMO_FILES = [ASM, PREP, CONTENTION_AUTH, LOCAL, ACCEPTANCE, SHADOW_POLICY];
 const ORCH = 'apps/web/lib/dayConstructorOrchestrator.ts';
 const OBS = 'apps/web/lib/shadowPressureObservation.ts';
@@ -113,7 +115,7 @@ function audit(files: SrcFile[]): string[] {
   notIn(by(/\bpreparePromotionInputs\(/), [PREP, SHADOW_POLICY]).forEach((f) => v.push(`Q1:calls-promotion-boundary:${f}`));
   notIn(by(/\bassemblePromotionInputs\(/), [ASM, PREP]).forEach((f) => v.push(`Q1:calls-assembler:${f}`));
   notIn(by(/\borchestrateConstructDayWithDiagnostics\(/), [ORCH, OBS, PREP]).forEach((f) => v.push(`Q1:calls-diagnostics-entry-point:${f}`));
-  files.filter((x) => (x.f === LOCAL || x.f === ACCEPTANCE || x.f === SHADOW_POLICY ? P4B_CONCEPT_NO_COUNTERFACTUAL : P4B_CONCEPT).test(x.src)).map((x) => x.f).forEach((f) => v.push(`Q1:p4b-or-p5-concept:${f}`));
+  files.filter((x) => (x.f === LOCAL || x.f === ACCEPTANCE || x.f === SHADOW_POLICY || P4C3_ACTIVE.includes(x.f) ? P4B_CONCEPT_NO_COUNTERFACTUAL : P4B_CONCEPT).test(x.src)).map((x) => x.f).forEach((f) => v.push(`Q1:p4b-or-p5-concept:${f}`));
   { const x = get(LOCAL); if (x && /^import (?!type )[^\n]*from '\.\/promotionInput'/m.test(x.src)) v.push(`Q1:generator-imports-the-assembler-as-a-value:${LOCAL}`); }
   // Q2 -- the pure assembler
   const a = get(ASM);
@@ -200,7 +202,7 @@ check('NOT A POLICY CONSUMER: no Constructor, comparator, placement, capacity, r
 const migrationSql = fs.readdirSync(path.join(root, 'apps/web/prisma/migrations'), { withFileTypes: true }).filter((e) => e.isDirectory()).map((e) => fs.readFileSync(path.join(root, 'apps/web/prisma/migrations', e.name, 'migration.sql'), 'utf8'));
 check('NO PERSISTENCE, NO SCHEMA: the Prisma schema and all 43 migration directories mention no promotion input; no migration was added', !/promotionInput/i.test(read('apps/web/prisma/schema.prisma')) && migrationSql.length === 43 && migrationSql.every((s) => !/promotionInput/i.test(s)));
 check('NO PUBLIC CONTRACT: the preview request / client / integrity modules, the acceptance modules and every route carry no promotion vocabulary (no preview field, no signed token member, no client-supplied input)', ['apps/web/lib/dayConstructorPreviewRequest.ts', 'apps/web/lib/dayConstructorPreviewClient.ts', 'apps/web/lib/dayConstructorPreviewIntegrity.ts', 'apps/web/lib/dayConstructorAcceptance.ts', 'apps/web/lib/dayConstructorAcceptancePersistence.ts', 'apps/web/app/api/day-constructor/preview/route.ts', 'apps/web/app/api/day-constructor/accept/route.ts'].every((f) => !/promotion/i.test(src(f))));
-check('NO P4b / P5 CONCEPT: no production identifier for a promotion decision, policy, counterfactual, second pass, owner replacement or "would / should win" exists; the Constructor / comparator / placement code is untouched and unread', real.filter((x) => (x.f === LOCAL || x.f === ACCEPTANCE || x.f === SHADOW_POLICY ? P4B_CONCEPT_NO_COUNTERFACTUAL : P4B_CONCEPT).test(x.src)).length === 0 && !/promotion|pressure/i.test(src('apps/web/lib/dayConstructor.ts') + src('apps/web/lib/dayIntent.ts').replace(/\/\/.*$/gm, '')));
+check('NO P4b / P5 CONCEPT: no production identifier for a promotion decision, policy, counterfactual, second pass, owner replacement or "would / should win" exists; the Constructor / comparator / placement code is untouched and unread', real.filter((x) => (x.f === LOCAL || x.f === ACCEPTANCE || x.f === SHADOW_POLICY || P4C3_ACTIVE.includes(x.f) ? P4B_CONCEPT_NO_COUNTERFACTUAL : P4B_CONCEPT).test(x.src)).length === 0 && !/promotion|pressure/i.test(src('apps/web/lib/dayConstructor.ts') + src('apps/web/lib/dayIntent.ts').replace(/\/\/.*$/gm, '')));
 
 console.log('=== the assembler: reviewed typed authorities only, one comparator primitive, pure ===');
 check('IMPORTS: exactly four -- the Constructor result type, the P3a trace type, the pressure type, and the shared above-pressure primitive; no database, no evidence, no facts, no context, no P3b stage, no Constructor value', JSON.stringify(importLines(asm)) === JSON.stringify(ASM_IMPORTS));

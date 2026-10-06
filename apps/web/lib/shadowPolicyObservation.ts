@@ -42,7 +42,8 @@
 import { preparePromotionInputs, type PromotionPair, type PromotionRunAuthority } from './promotionInputPreparation';
 import type { ConstructDayRequest, DayConstructorOrchestratorDeps, OrchestrateConstructDayResult } from './dayConstructorOrchestrator';
 import { generateLocalCounterfactual, type LocalCounterfactual, type LocalCounterfactualUnavailableReason } from './localCounterfactual';
-import { evaluateCounterfactualAcceptance, type CounterfactualAcceptanceUnavailableReason, type CounterfactualRejectionReason } from './counterfactualAcceptance';
+import type { CounterfactualAcceptanceUnavailableReason, CounterfactualRejectionReason } from './counterfactualAcceptance';
+import { mintAcceptedCounterfactual, recordAcceptedObservation } from './acceptedCounterfactual';
 import type { PlacementTimingFit } from './dayConstructor';
 
 /** A placement slot as scalars: ISO instants and the carried timing fit (absent for a FIXED placement). */
@@ -114,9 +115,14 @@ function observePair(run: PreparedRun, pair: PromotionPair): ShadowPolicyObserva
     const generated = generateLocalCounterfactual({ constructionBasis: run.constructionBasis, baselinePlacements: run.baselinePlacements, schedulingAttempts: run.schedulingAttempts, input: pair.input, contention: pair.contention });
     if (generated.status !== 'READY') return Object.freeze({ outcome: 'GENERATION_UNAVAILABLE', candidateIntentId, reason: generated.reason });
     stage = 'ACCEPTANCE';
-    const acceptance = evaluateCounterfactualAcceptance({ constructionBasis: run.constructionBasis, baselinePlacements: run.baselinePlacements, promotionInput: pair.input, counterfactual: generated.counterfactual });
+    // O5 P4c3: the predicate is evaluated INSIDE the typed-authority mint, over exactly this counterfactual and these same-run authorities; the brand exists only for an ACCEPT.
+    const { acceptance, accepted } = mintAcceptedCounterfactual({ constructionBasis: run.constructionBasis, baselinePlacements: run.baselinePlacements, promotionInput: pair.input, counterfactual: generated.counterfactual });
     const counterfactual = summarize(run, generated.counterfactual);
-    if (acceptance.status === 'ACCEPT') return Object.freeze({ outcome: 'ACCEPT', candidateIntentId, counterfactual });
+    if (acceptance.status === 'ACCEPT') {
+      const observation = Object.freeze({ outcome: 'ACCEPT', candidateIntentId, counterfactual } as const);
+      if (accepted) recordAcceptedObservation(observation, accepted);
+      return observation;
+    }
     if (acceptance.status === 'REJECT') return Object.freeze({ outcome: 'REJECT', candidateIntentId, reason: acceptance.reason, counterfactual });
     return Object.freeze({ outcome: 'ACCEPTANCE_UNAVAILABLE', candidateIntentId, reason: acceptance.reason, counterfactual });
   } catch {
