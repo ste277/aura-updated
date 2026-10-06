@@ -28,6 +28,7 @@
  *
  *   DATABASE_URL="postgresql://..." npx ts-node test/automaticGoalLifecycleClosureDb.test.ts
  */
+import { fixtureAnchorMonday, addCivilDays, realClockReferenceForFixture } from './lifecycleFixtureCalendar';
 import {
   upsertUserByEmail,
   updateBirthProfile,
@@ -60,6 +61,15 @@ function check(label: string, condition: boolean) {
 }
 
 const TZ = 'Asia/Kolkata';
+// The fixture week is ANCHORED to a Monday at least 28 days ahead of the run date (test/lifecycleFixtureCalendar.ts): production refuses past plans against the real
+// clocks, so a hard-coded calendar rots the day it becomes the present. Weekday structure (Monday-start Rhythm week) is identical on every run date.
+const ANCHOR_MONDAY = fixtureAnchorMonday(realClockReferenceForFixture(), TZ);
+const TUE = addCivilDays(ANCHOR_MONDAY, 1);
+const WED = addCivilDays(ANCHOR_MONDAY, 2);
+const THU = addCivilDays(ANCHOR_MONDAY, 3);
+const SUN = addCivilDays(ANCHOR_MONDAY, 6);
+const NEXT_MON = addCivilDays(ANCHOR_MONDAY, 7);
+const NEXT_TUE = addCivilDays(ANCHOR_MONDAY, 8);
 
 async function sql(text: string, params: unknown[] = []): Promise<any[]> {
   const c = await beginTransaction();
@@ -147,9 +157,9 @@ async function main() {
     const occ = (await sql(`SELECT count(*)::int n FROM "GoalActivityOccurrence" WHERE "goalActivityId" = $1`, [goalActivityId]))[0].n;
     const exec = (await sql(`SELECT count(*)::int n FROM "GoalActivityExecution" WHERE "goalActivityId" = $1`, [goalActivityId]))[0].n;
     const linkedPlans = (await sql(`SELECT count(*)::int n FROM "PlannedActivity" pa JOIN "GoalActivityOccurrence" gao ON gao."plannedActivityId" = pa.id WHERE gao."goalActivityId" = $1`, [goalActivityId]))[0].n;
-    const elig = await eligibility('2026-10-06');
+    const elig = await eligibility(TUE);
     const remaining = elig.status === 'OK' ? elig.candidates.find((c) => c.goalActivityId === goalActivityId)?.remainingThisWeek ?? null : 'LOAD_FAILED';
-    console.log(`  [EVIDENCE ${label}] occurrences=${occ} executions=${exec} linkedPlans=${linkedPlans} remainingThisWeek(2026-10-06)=${remaining}`);
+    console.log(`  [EVIDENCE ${label}] occurrences=${occ} executions=${exec} linkedPlans=${linkedPlans} remainingThisWeek(${TUE})=${remaining}`);
     return { occ, exec, linkedPlans };
   };
 
@@ -159,14 +169,14 @@ async function main() {
     await setRhythm(ga!.id, 3);
 
     console.log('=== PHASE 1: ELIGIBLE ===');
-    const phase1 = await eligibility('2026-10-06');
+    const phase1 = await eligibility(TUE);
     check('5a. canonical eligibility reports remainingThisWeek = 3 (0 completed, 0 committed, target 3)', phase1.status === 'OK' && phase1.candidates.find((c) => c.goalActivityId === ga!.id)?.remainingThisWeek === 3);
-    const discovery1 = await eligibility('2026-10-06');
+    const discovery1 = await eligibility(TUE);
     check('5b. automatic Goal-demand discovery returns the GoalActivity exactly once', discovery1.status === 'OK' && discovery1.candidates.filter((c) => c.goalActivityId === ga!.id).length === 1);
     await durableState('PHASE 1 INITIAL', ga!.id);
 
     console.log('=== PHASE 2: SURFACED (bootstrap) ===');
-    const suggestions2 = await autoSuggestions('2026-10-06', []);
+    const suggestions2 = await autoSuggestions(TUE, []);
     check('6a. Plan Day bootstrap surfaces the candidate for this user/date', suggestions2.status === 'OK' && suggestions2.suggestions.some((s) => s.goalActivityId === ga!.id));
     const s2 = suggestions2.status === 'OK' ? suggestions2.suggestions.find((s) => s.goalActivityId === ga!.id) : undefined;
     check(
@@ -177,8 +187,8 @@ async function main() {
     check('6c. bootstrap itself created zero PlannedActivity/GoalActivityOccurrence rows', (await durableState('PHASE 2 recheck', ga!.id)).occ === 0 && (await sql(`SELECT count(*)::int n FROM "PlannedActivity" WHERE "userId" = $1`, [user.id]))[0].n === 0);
 
     console.log('=== PHASE 3: EXPLICIT INCLUDE ===');
-    const intentId1 = encodeGoalDemandIntentId('2026-10-06', ga!.id);
-    check('7a. canonical intent identity format', intentId1 === `goal-demand:2026-10-06:${ga!.id}`);
+    const intentId1 = encodeGoalDemandIntentId(TUE, ga!.id);
+    check('7a. canonical intent identity format', intentId1 === `goal-demand:${TUE}:${ga!.id}`);
     const row1 = createIntentRowFromAutoGoalSuggestion({ title: s2!.title, activityId: s2!.activityId, goalActivityId: s2!.goalActivityId }, intentId1);
     check('7b. FLEXIBLE behavior preserved on the included row', row1.timeMode === 'FLEXIBLE');
     check('7c. goalActivityId carried by the client row', row1.goalActivityId === ga!.id);
@@ -188,13 +198,13 @@ async function main() {
 
     console.log('=== PHASE 4: PREVIEW / CONSTRUCTION ===');
     const rows1: PlanDayIntentRow[] = [row1];
-    const nowP1 = iso('2026-10-06T02:00:00Z'); // early local morning in Asia/Kolkata (07:30 IST) -- hours remain in "remaining today"
-    const pv1 = await preview(nowP1, '2026-10-06', rows1.map((r) => ({ id: r.id, title: r.title, flexibility: r.timeMode, activityId: r.activityId })));
+    const nowP1 = iso(`${TUE}T02:00:00Z`); // early local morning in Asia/Kolkata (07:30 IST) -- hours remain in "remaining today"
+    const pv1 = await preview(nowP1, TUE, rows1.map((r) => ({ id: r.id, title: r.title, flexibility: r.timeMode, activityId: r.activityId })));
     check('8a. the automatic intent reaches Preview and the Constructor proposes it', !!pv1 && pv1.constructedDay.proposedItems.some((item: { intentId: string }) => item.intentId === intentId1));
     const proposed1 = pv1!.constructedDay.proposedItems.find((item: { intentId: string }) => item.intentId === intentId1)!;
     check('8b. the proposed item is ordinary scheduling output -- no Goal field leaked onto it', !('goalActivityId' in proposed1) && !('goalTitle' in proposed1));
     const occBeforePreview = await durableState('PHASE 4 AFTER PREVIEW', ga!.id);
-    check('8c. Preview creates zero Goal occurrence writes and consumes zero capacity', occBeforePreview.occ === 0 && (await eligibility('2026-10-06')).status === 'OK' && (await eligibility('2026-10-06') as any).candidates.find((c: any) => c.goalActivityId === ga!.id)?.remainingThisWeek === 3);
+    check('8c. Preview creates zero Goal occurrence writes and consumes zero capacity', occBeforePreview.occ === 0 && (await eligibility(TUE)).status === 'OK' && (await eligibility(TUE) as any).candidates.find((c: any) => c.goalActivityId === ga!.id)?.remainingThisWeek === 3);
 
     console.log('=== PHASE 5/10: ACCEPT WITH SERVER-DERIVED PROVENANCE ===');
     // Section 10: deliberately call buildAcceptRequestBody WITHOUT any
@@ -203,7 +213,7 @@ async function main() {
     // this body shape whenever buildGoalActivityLinksForAccept returns
     // []). This proves acceptance actually exercises A3.4's own
     // server-derivation, not the old client-trust path.
-    const acceptBody1 = JSON.parse(JSON.stringify(buildAcceptRequestBody(pv1!, `a35-${Date.now()}-${n++}`)));
+    const acceptBody1 = JSON.parse(JSON.stringify(buildAcceptRequestBody(pv1!, `a35-fixed-${n++}`)));
     check('10a. the accept body genuinely carries no goalActivityLinks entry for this item', !acceptBody1.goalActivityLinks);
     const accepted1 = await accept(acceptBody1);
     check('9a. acceptance succeeds (verified signed automatic intent -> provenance authorization -> persistence)', accepted1.status === 'SAVED');
@@ -216,8 +226,8 @@ async function main() {
     check('10b. GoalActivity.plannedActivityId correctly reflects the SERVER-DERIVED (not client-supplied) association', gaRowAfterAccept.plannedActivityId === accepted1.plans[0].id);
 
     console.log('=== PHASE 6/11: POST-ACCEPT ELIGIBILITY / LIVE-UPCOMING ===');
-    check('11a. canonical Rhythm eligibility: remainingThisWeek = 2 (1 UPCOMING committed, target 3)', (await rhythmRemaining(ga!.id, 3, '2026-10-06')) === 2);
-    const discovery6 = await eligibility('2026-10-06');
+    check('11a. canonical Rhythm eligibility: remainingThisWeek = 2 (1 UPCOMING committed, target 3)', (await rhythmRemaining(ga!.id, 3, TUE)) === 2);
+    const discovery6 = await eligibility(TUE);
     check(
       '11b. existing one-live-occurrence semantics: the GoalActivity does NOT appear in automatic discovery while its current link is UPCOMING (A1\'s own structural exclusion) -- Rhythm capacity remaining is NOT the same as "surface another simultaneous suggestion"',
       discovery6.status === 'OK' && !discovery6.candidates.some((c) => c.goalActivityId === ga!.id)
@@ -238,22 +248,22 @@ async function main() {
     await durableState('PHASE 7 AFTER COMPLETE', ga!.id);
 
     console.log('=== PHASE 8/14: RECONSIDER ===');
-    const elig8 = await eligibility('2026-10-06');
+    const elig8 = await eligibility(TUE);
     check('14a. remainingThisWeek = 2 after first completion (1 completed, 0 committed, target 3)', elig8.status === 'OK' && elig8.candidates.find((c) => c.goalActivityId === ga!.id)?.remainingThisWeek === 2);
-    const discovery8 = await eligibility('2026-10-06');
+    const discovery8 = await eligibility(TUE);
     check('14b. CENTRAL CLOSURE INVARIANT: completion of one occurrence does NOT terminate the ongoing GoalActivity -- it becomes eligible again', discovery8.status === 'OK' && discovery8.candidates.some((c) => c.goalActivityId === ga!.id));
-    const suggestions8 = await autoSuggestions('2026-10-06', []);
+    const suggestions8 = await autoSuggestions(TUE, []);
     check('14c. Plan Day bootstrap can surface it again', suggestions8.status === 'OK' && suggestions8.suggestions.some((s) => s.goalActivityId === ga!.id));
 
     console.log('=== PHASE 15: SECOND OCCURRENCE IDENTITY (next planning date) ===');
-    const intentId2 = encodeGoalDemandIntentId('2026-10-07', ga!.id);
+    const intentId2 = encodeGoalDemandIntentId(WED, ga!.id);
     check('15a. second planning-date intent id differs from the first', intentId2 !== intentId1);
     check('15b. both map to the same GoalActivity definition (same goalActivityId component)', intentId1.endsWith(ga!.id) && intentId2.endsWith(ga!.id));
     const row2 = createIntentRowFromAutoGoalSuggestion({ title: 'Meditate 10 minutes', activityId: 'meditation', goalActivityId: ga!.id }, intentId2);
-    const nowP2 = iso('2026-10-06T20:00:00Z'); // late on the 6th local, planning for the 7th (Tomorrow) -- still no wall-clock dependency
-    const pv2 = await preview(nowP2, '2026-10-07', [{ id: row2.id, title: row2.title, flexibility: row2.timeMode, activityId: row2.activityId }]);
-    check('23a. Tomorrow (2026-10-07) preview succeeds using the supplied canonical planning date, never Date.now()', !!pv2 && pv2.constructedDay.proposedItems.some((item: { intentId: string }) => item.intentId === intentId2));
-    const acceptBody2 = JSON.parse(JSON.stringify(buildAcceptRequestBody(pv2!, `a35-${Date.now()}-${n++}`)));
+    const nowP2 = iso(`${TUE}T20:00:00Z`); // late on the 6th local, planning for the 7th (Tomorrow) -- still no wall-clock dependency
+    const pv2 = await preview(nowP2, WED, [{ id: row2.id, title: row2.title, flexibility: row2.timeMode, activityId: row2.activityId }]);
+    check('23a. Tomorrow (the next fixture day) preview succeeds using the supplied canonical planning date, never the wall clock', !!pv2 && pv2.constructedDay.proposedItems.some((item: { intentId: string }) => item.intentId === intentId2));
+    const acceptBody2 = JSON.parse(JSON.stringify(buildAcceptRequestBody(pv2!, `a35-fixed-${n++}`)));
     const accepted2 = await accept(acceptBody2);
     check('9e. second occurrence (Tomorrow) accepted successfully', accepted2.status === 'SAVED');
     const occCountAfter2 = (await sql(`SELECT count(*)::int n FROM "GoalActivityOccurrence" WHERE "goalActivityId" = $1`, [ga!.id]))[0].n;
@@ -262,34 +272,40 @@ async function main() {
     await durableState('PHASE 8 SECOND OCCURRENCE COMPLETE', ga!.id);
 
     console.log('=== PHASE 16: WEEKLY CAPACITY EXHAUSTION ===');
-    // A THIRD distinct day within the SAME Monday-start week (2026-10-05
-    // .. 2026-10-11) -- deliberately NOT 2026-10-07 again, which would
+    // A THIRD distinct day within the SAME Monday-start week (anchor Monday
+    // .. anchor Sunday) -- deliberately NOT the Wednesday again, which would
     // collide with Phase 15's own intentId for the identical
     // (planningLocalDate, goalActivityId) pair and conflate two separate
     // planning sessions under one identity.
-    const nowP3 = iso('2026-10-08T02:00:00Z');
-    const intentId3 = encodeGoalDemandIntentId('2026-10-08', ga!.id);
-    const pv3 = await preview(nowP3, '2026-10-08', [{ id: intentId3, title: 'Meditate 10 minutes', flexibility: 'FLEXIBLE', activityId: 'meditation' }]);
-    const acceptBody3 = JSON.parse(JSON.stringify(buildAcceptRequestBody(pv3!, `a35-${Date.now()}-${n++}`)));
+    const nowP3 = iso(`${THU}T02:00:00Z`);
+    const intentId3 = encodeGoalDemandIntentId(THU, ga!.id);
+    const pv3 = await preview(nowP3, THU, [{ id: intentId3, title: 'Meditate 10 minutes', flexibility: 'FLEXIBLE', activityId: 'meditation' }]);
+    const acceptBody3 = JSON.parse(JSON.stringify(buildAcceptRequestBody(pv3!, `a35-fixed-${n++}`)));
     const accepted3 = await accept(acceptBody3);
     check('9f. third occurrence (completing the week\'s full target of 3) accepted successfully', accepted3.status === 'SAVED');
     await logPlannedActivity(user.id, accepted3.plans[0].id);
-    check('16a. remainingThisWeek = 0 after all 3 target occurrences are completed', (await rhythmRemaining(ga!.id, 3, '2026-10-06')) === 0);
-    const discovery16 = await eligibility('2026-10-06');
+    check('16a. remainingThisWeek = 0 after all 3 target occurrences are completed', (await rhythmRemaining(ga!.id, 3, TUE)) === 0);
+    const discovery16 = await eligibility(TUE);
     check('16b. automatic Goal-demand discovery does NOT return the exhausted activity', discovery16.status === 'OK' && !discovery16.candidates.some((c) => c.goalActivityId === ga!.id));
-    const suggestions16 = await autoSuggestions('2026-10-06', []);
+    const suggestions16 = await autoSuggestions(TUE, []);
     check('16c. Plan Day bootstrap does NOT surface the exhausted activity', suggestions16.status === 'OK' && !suggestions16.suggestions.some((s) => s.goalActivityId === ga!.id));
     await durableState('PHASE CAPACITY EXHAUSTION', ga!.id);
 
     console.log('=== PHASE 17: NEXT-WEEK RESET ===');
-    // 2026-10-06/07 fall in the Monday-start week of 2026-10-05..10-11;
-    // 2026-10-12 is the following Monday -- a genuinely new Rhythm week,
+    // The fixture Tuesday / Wednesday / Thursday fall in the Monday-start week anchored at ANCHOR_MONDAY;
+    // the following Monday is a genuinely new Rhythm week,
     // reached purely by supplying a different planningLocalDate, never by
     // advancing any clock.
-    const elig17 = await loadEligibleGoalDemand(createRealGoalDemandCandidatesDeps(), user.id, '2026-10-12', TZ);
+    const elig17 = await loadEligibleGoalDemand(createRealGoalDemandCandidatesDeps(), user.id, NEXT_MON, TZ);
     check('17a. prior-week completions create no debt -- remainingThisWeek resets to the full target (3) next week', elig17.status === 'OK' && elig17.candidates.find((c) => c.goalActivityId === ga!.id)?.remainingThisWeek === 3);
-    const suggestions17 = await resolveAutomaticGoalDemand({ getSessionToken: () => 'tok', verifySession: () => ({ userId: user.id }), ...createRealGoalDemandCandidatesDeps() }, '2026-10-12', TZ, []);
+    const suggestions17 = await resolveAutomaticGoalDemand({ getSessionToken: () => 'tok', verifySession: () => ({ userId: user.id }), ...createRealGoalDemandCandidatesDeps() }, NEXT_MON, TZ, []);
     check('17b. automatic Goal-demand discovery can surface it again next week', suggestions17.status === 'OK' && suggestions17.suggestions.some((s) => s.goalActivityId === ga!.id));
+    // The week boundary, immediately BEFORE / AT / AFTER (the AT case is 17a / 17b above: the next Monday): the Sunday of the same Monday-start week is still the exhausted
+    // week; the Tuesday of the next week is a fresh week. The anchor guarantees these weekdays on every run date.
+    const eligSunday = await eligibility(SUN);
+    check('17c. BEFORE the boundary (the Sunday of the same Monday-start week) the target is still exhausted: remainingThisWeek = 0 and the activity is not surfaced', (await rhythmRemaining(ga!.id, 3, SUN)) === 0 && eligSunday.status === 'OK' && !eligSunday.candidates.some((c) => c.goalActivityId === ga!.id));
+    const eligNextTue = await eligibility(NEXT_TUE);
+    check('17d. AFTER the boundary (the Tuesday of the next week) the full target is available again', (await rhythmRemaining(ga!.id, 3, NEXT_TUE)) === 3 && eligNextTue.status === 'OK' && eligNextTue.candidates.find((c) => c.goalActivityId === ga!.id)?.remainingThisWeek === 3);
 
     // ============================================================
     // PHASE 18: DECLINE / REMOVE -- a fresh sibling GoalActivity so this
@@ -298,7 +314,7 @@ async function main() {
     console.log('=== PHASE 18: DECLINE / REMOVE PATH ===');
     const gaDecline = await addGoalActivity(user.id, goal.id, { title: 'Stretch', activityId: null });
     await setRhythm(gaDecline!.id, 2);
-    const declineIntentId = encodeGoalDemandIntentId('2026-10-06', gaDecline!.id);
+    const declineIntentId = encodeGoalDemandIntentId(TUE, gaDecline!.id);
     const declineRow = createIntentRowFromAutoGoalSuggestion({ title: 'Stretch', activityId: null, goalActivityId: gaDecline!.id }, declineIntentId);
     const declineRhythmFacts = { targetPerWeek: 2, completedThisWeek: 0, committedThisWeek: 0, remainingOccurrences: 2 };
     const availableBeforeRemove = deriveAvailableAutoGoalSuggestions([{ goalActivityId: gaDecline!.id, goalId: goal.id, goalTitle: 'Reduce stress', title: 'Stretch', activityId: null, remainingThisWeek: 2, rhythm: declineRhythmFacts }], [declineRow]);
@@ -319,14 +335,14 @@ async function main() {
     console.log('=== PHASE 19: PREVIEW WITHOUT ACCEPT ===');
     const gaNoAccept = await addGoalActivity(user.id, goal.id, { title: 'Journal', activityId: null });
     await setRhythm(gaNoAccept!.id, 2);
-    const noAcceptIntentId = encodeGoalDemandIntentId('2026-10-06', gaNoAccept!.id);
-    const pvNoAccept = await preview(nowP1, '2026-10-06', [{ id: noAcceptIntentId, title: 'Journal', flexibility: 'FLEXIBLE' }]);
+    const noAcceptIntentId = encodeGoalDemandIntentId(TUE, gaNoAccept!.id);
+    const pvNoAccept = await preview(nowP1, TUE, [{ id: noAcceptIntentId, title: 'Journal', flexibility: 'FLEXIBLE' }]);
     check('19 setup: preview succeeds', !!pvNoAccept);
     const stateBeforeNoAccept = await sql(
       `SELECT (SELECT count(*)::int FROM "GoalActivityOccurrence" WHERE "goalActivityId" = $1) AS occ, (SELECT count(*)::int FROM "GoalActivityExecution" WHERE "goalActivityId" = $1) AS exec, (SELECT count(*)::int FROM "PlannedActivity" WHERE "userId" = $2) AS plans`,
       [gaNoAccept!.id, user.id]
     );
-    const eligNoAccept = await eligibility('2026-10-06');
+    const eligNoAccept = await eligibility(TUE);
     check(
       '19a. user never accepting: zero GoalActivityOccurrence/GoalActivityExecution, no committed PlannedActivity, no weekly capacity consumed',
       stateBeforeNoAccept[0].occ === 0 && stateBeforeNoAccept[0].exec === 0 && eligNoAccept.status === 'OK' && eligNoAccept.candidates.find((c) => c.goalActivityId === gaNoAccept!.id)?.remainingThisWeek === 2
@@ -340,15 +356,15 @@ async function main() {
     await setRhythm(gaFail!.id, 2);
     const gaFailDecoy = await addGoalActivity(user.id, goal.id, { title: 'Decoy', activityId: null });
     await setRhythm(gaFailDecoy!.id, 2);
-    const failIntentId = encodeGoalDemandIntentId('2026-10-06', gaFail!.id);
-    const pvFail = await preview(nowP1, '2026-10-06', [{ id: failIntentId, title: 'Breathing exercise', flexibility: 'FLEXIBLE' }]);
+    const failIntentId = encodeGoalDemandIntentId(TUE, gaFail!.id);
+    const pvFail = await preview(nowP1, TUE, [{ id: failIntentId, title: 'Breathing exercise', flexibility: 'FLEXIBLE' }]);
     const conflictingLink: GoalActivityLink[] = [{ intentId: failIntentId, goalActivityId: gaFailDecoy!.id }];
-    const acceptBodyFail = JSON.parse(JSON.stringify(buildAcceptRequestBody(pvFail!, `a35-${Date.now()}-${n++}`, conflictingLink)));
+    const acceptBodyFail = JSON.parse(JSON.stringify(buildAcceptRequestBody(pvFail!, `a35-fixed-${n++}`, conflictingLink)));
     const acceptedFail = await accept(acceptBodyFail);
     check('20a. acceptance with a conflicting client GoalActivity link is rejected', acceptedFail.status === 'REJECTED');
     const stateAfterFail = await sql(`SELECT count(*)::int n FROM "GoalActivityOccurrence" WHERE "goalActivityId" = $1`, [gaFail!.id]);
     check('20b. zero Goal persistence from the rejected acceptance', stateAfterFail[0].n === 0);
-    const eligAfterFail = await eligibility('2026-10-06');
+    const eligAfterFail = await eligibility(TUE);
     check('20c. the original GoalActivity remains eligible -- failed acceptance did not consume recurring demand', eligAfterFail.status === 'OK' && eligAfterFail.candidates.find((c) => c.goalActivityId === gaFail!.id)?.remainingThisWeek === 2);
 
     // ============================================================
@@ -358,16 +374,16 @@ async function main() {
     const { goal: goal2 } = await createGoalWithActivities({ userId: user.id, title: 'Read more', targetDate: null, activities: [] });
     const ga2 = await addGoalActivity(user.id, goal2.id, { title: 'Read 20 pages', activityId: null });
     await setRhythm(ga2!.id, 2);
-    const multiElig = await eligibility('2026-10-06');
+    const multiElig = await eligibility(TUE);
     check('21a. both GoalActivities from different Goals are discoverable together', multiElig.status === 'OK' && multiElig.candidates.some((c) => c.goalActivityId === gaFail!.id) && multiElig.candidates.some((c) => c.goalActivityId === ga2!.id));
-    const ga2IntentId = encodeGoalDemandIntentId('2026-10-06', ga2!.id);
-    const pvGa2 = await preview(nowP1, '2026-10-06', [{ id: ga2IntentId, title: 'Read 20 pages', flexibility: 'FLEXIBLE' }]);
-    const acceptedGa2 = await accept(JSON.parse(JSON.stringify(buildAcceptRequestBody(pvGa2!, `a35-${Date.now()}-${n++}`))));
+    const ga2IntentId = encodeGoalDemandIntentId(TUE, ga2!.id);
+    const pvGa2 = await preview(nowP1, TUE, [{ id: ga2IntentId, title: 'Read 20 pages', flexibility: 'FLEXIBLE' }]);
+    const acceptedGa2 = await accept(JSON.parse(JSON.stringify(buildAcceptRequestBody(pvGa2!, `a35-fixed-${n++}`))));
     check('21b. accepting one GoalActivity succeeds independently', acceptedGa2.status === 'SAVED');
-    const eligAfterGa2 = await eligibility('2026-10-06');
+    const eligAfterGa2 = await eligibility(TUE);
     check(
       '21c. accepting ga2 consumed only its OWN Rhythm facts -- the other GoalActivity (gaFail) remains independently eligible at its own prior value',
-      (await rhythmRemaining(ga2!.id, 2, '2026-10-06')) === 1 && eligAfterGa2.status === 'OK' && eligAfterGa2.candidates.find((c) => c.goalActivityId === gaFail!.id)?.remainingThisWeek === 2
+      (await rhythmRemaining(ga2!.id, 2, TUE)) === 1 && eligAfterGa2.status === 'OK' && eligAfterGa2.candidates.find((c) => c.goalActivityId === gaFail!.id)?.remainingThisWeek === 2
     );
 
     // ============================================================
@@ -383,9 +399,9 @@ async function main() {
     check('22a. the manual Goal Detail -> Plan with Aura handoff still resolves the activity', manualHandoff.length === 1 && manualHandoff[0].id === gaManual!.id);
     const manualRow = createIntentRowFromGoalActivity({ id: gaManual!.id, title: gaManual!.title, activityId: gaManual!.activityId });
     check('22b. manual Goal row identity is unchanged (plan-day-goal-<id>)', manualRow.id === `plan-day-goal-${gaManual!.id}`);
-    const pvManual = await preview(nowP1, '2026-10-06', [{ id: manualRow.id, title: manualRow.title, flexibility: 'FLEXIBLE' }]);
+    const pvManual = await preview(nowP1, TUE, [{ id: manualRow.id, title: manualRow.title, flexibility: 'FLEXIBLE' }]);
     const manualLink: GoalActivityLink[] = [{ intentId: manualRow.id, goalActivityId: gaManual!.id }];
-    const acceptedManual = await accept(JSON.parse(JSON.stringify(buildAcceptRequestBody(pvManual!, `a35-${Date.now()}-${n++}`, manualLink))));
+    const acceptedManual = await accept(JSON.parse(JSON.stringify(buildAcceptRequestBody(pvManual!, `a35-fixed-${n++}`, manualLink))));
     check('22c. manual Goal acceptance still succeeds through its existing, unchanged path', acceptedManual.status === 'SAVED');
     const manualGaRow = (await listGoalActivitiesWithLinkedPlanStatus(user.id, goal.id)).find((r) => r.id === gaManual!.id)!;
     check('22d. manual Goal persistence behavior (legacy link, finite Rhythm NONE) is unchanged', manualGaRow.plannedActivityId === acceptedManual.plans[0].id);
@@ -395,7 +411,11 @@ async function main() {
     // ============================================================
     console.log('=== PHASE 24: MOVE/RECOMPOSITION CONTINUITY ===');
     const occBeforeMove = (await sql(`SELECT id FROM "GoalActivityOccurrence" WHERE "goalActivityId" = $1`, [ga2!.id]))[0];
-    const moved = await movePlannedActivity(user.id, acceptedGa2.plans[0].id, { newStartAt: iso('2026-10-06T12:00:00Z') });
+    // The destination is derived from the fixture's own state -- the first whole hour at least one hour after the user's LATEST plan -- never a hard-coded clock time:
+    // the timing search places plans at date-dependent times, so a fixed destination collides with another plan on some calendar dates.
+    const latestEnd = (await sql(`SELECT max("plannedEndAt") AS t FROM "PlannedActivity" WHERE "userId" = $1`, [user.id]))[0].t as Date;
+    const moveDestination = new Date(Math.ceil(latestEnd.getTime() / 3600000) * 3600000 + 3600000);
+    const moved = await movePlannedActivity(user.id, acceptedGa2.plans[0].id, { newStartAt: moveDestination });
     const occAfterMove = (await sql(`SELECT id, "plannedActivityId" FROM "GoalActivityOccurrence" WHERE "goalActivityId" = $1`, [ga2!.id]))[0];
     check('24a. the SAME occurrence id persists across the Move', occAfterMove.id === occBeforeMove.id);
     check('24b. the occurrence now points to the successor (moved) plan', occAfterMove.plannedActivityId === moved.to.id);
