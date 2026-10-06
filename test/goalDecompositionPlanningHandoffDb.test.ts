@@ -34,6 +34,7 @@
  *
  *   DATABASE_URL="postgresql://..." npx ts-node test/goalDecompositionPlanningHandoffDb.test.ts
  */
+import { fixtureAnchorMonday, addCivilDays, realClockReferenceForFixture } from './lifecycleFixtureCalendar';
 import { randomUUID } from 'crypto';
 import {
   upsertUserByEmail,
@@ -76,6 +77,13 @@ function check(label: string, condition: boolean) {
 }
 
 const TZ = 'Asia/Kolkata';
+// The fixture week is ANCHORED to a Monday at least 28 days ahead of the run date (test/lifecycleFixtureCalendar.ts): production refuses past plans against the real
+// clocks, so a hard-coded calendar rots the day it becomes the present (the same root cause as automaticGoalLifecycleClosureDb). Weekday structure is identical on every run date.
+const ANCHOR_MONDAY = fixtureAnchorMonday(realClockReferenceForFixture(), TZ);
+const TUE = addCivilDays(ANCHOR_MONDAY, 1);
+const WED = addCivilDays(ANCHOR_MONDAY, 2);
+const THU = addCivilDays(ANCHOR_MONDAY, 3);
+const NEXT_MON = addCivilDays(ANCHOR_MONDAY, 7);
 
 async function sql(text: string, params: unknown[] = []): Promise<any[]> {
   const c = await beginTransaction();
@@ -219,14 +227,14 @@ async function main() {
     check('idempotency conflict: 409 IDEMPOTENCY_CONFLICT for a mismatched replay', conflictResult.status === 409 && conflictResult.body?.code === 'IDEMPOTENCY_CONFLICT');
     const goalAfterConflict = (await sql(`SELECT title FROM "Goal" WHERE id = $1`, [goalId]))[0];
     check('idempotency conflict: the original Goal is unchanged', goalAfterConflict.title === 'Get fitter');
-    const eligAfterConflict = await eligibility('2026-10-06');
+    const eligAfterConflict = await eligibility(TUE);
     check(
       'idempotency conflict: Candidate A still only sees the original approved activities (never "Something else entirely")',
       eligAfterConflict.status === 'OK' && eligAfterConflict.candidates.some((c) => c.goalActivityId === cardioActivityId) && !eligAfterConflict.candidates.some((c) => c.title === 'Something else entirely')
     );
 
     console.log('=== CANDIDATE A: DISCOVERY + PROVENANCE ===');
-    const elig1 = await eligibility('2026-10-06');
+    const elig1 = await eligibility(TUE);
     const elig1Candidates = elig1.status === 'OK' ? elig1.candidates : [];
     check('Candidate A: the recurring reviewed GoalActivity is discovered eligible', elig1Candidates.some((c) => c.goalActivityId === cardioActivityId && c.remainingThisWeek === 3));
     const cardioCandidate = elig1Candidates.find((c) => c.goalActivityId === cardioActivityId);
@@ -237,7 +245,7 @@ async function main() {
     check('approved-vs-discarded: the removed "Strength training session" suggestion is never discovered (it was never persisted)', !elig1Candidates.some((c) => c.title === 'Strength training session'));
 
     console.log('=== AUTOMATIC BOOTSTRAP (no manual Goal Detail round-trip) ===');
-    const boot1 = await autoSuggestions('2026-10-06');
+    const boot1 = await autoSuggestions(TUE);
     check('bootstrap: the GoalActivity enters the planning candidate flow automatically', boot1.status === 'OK' && boot1.suggestions.some((s) => s.goalActivityId === cardioActivityId));
     check('bootstrap: discarded/removed template row never surfaces', !(boot1.status === 'OK' && boot1.suggestions.some((s) => s.title === 'Strength training session')));
 
@@ -249,14 +257,14 @@ async function main() {
     check('no-auto-commit: zero PlannedActivity/GoalActivityOccurrence/GoalActivityExecution exist merely from discovery+bootstrap', preAccept[0].plans === 0 && preAccept[0].occ === 0 && preAccept[0].exec === 0);
 
     console.log('=== PLANNING SURFACE: PREVIEW ===');
-    const intentId1 = encodeGoalDemandIntentId('2026-10-06', cardioActivityId);
+    const intentId1 = encodeGoalDemandIntentId(TUE, cardioActivityId);
     const row1 = createIntentRowFromAutoGoalSuggestion({ title: cardioCandidate!.title, activityId: cardioCandidate!.activityId, goalActivityId: cardioActivityId }, intentId1);
-    const nowP1 = iso('2026-10-06T02:00:00Z');
-    const pv1 = await preview(nowP1, '2026-10-06', [{ id: row1.id, title: row1.title, flexibility: row1.timeMode, activityId: row1.activityId }]);
+    const nowP1 = iso(`${TUE}T02:00:00Z`);
+    const pv1 = await preview(nowP1, TUE, [{ id: row1.id, title: row1.title, flexibility: row1.timeMode, activityId: row1.activityId }]);
     check('planning surface: the Goal-derived candidate is proposed by the real Constructor', !!pv1 && pv1.constructedDay.proposedItems.some((item: { intentId: string }) => item.intentId === intentId1));
 
     console.log('=== ACCEPTANCE ===');
-    const acceptBody1 = JSON.parse(JSON.stringify(buildAcceptRequestBody(pv1!, `b5-${Date.now()}-${n++}`)));
+    const acceptBody1 = JSON.parse(JSON.stringify(buildAcceptRequestBody(pv1!, `b5-fixed-${n++}`)));
     const accepted1 = await accept(acceptBody1);
     check('acceptance: succeeds via verified server-derived provenance', accepted1.status === 'SAVED');
     const postAccept = await sql(`SELECT count(*)::int n FROM "GoalActivityOccurrence" WHERE "goalActivityId" = $1`, [cardioActivityId]);
@@ -270,29 +278,29 @@ async function main() {
     check('completion: PlannedActivity transitions to LOGGED', planStatus.status === 'LOGGED');
 
     console.log('=== WEEKLY ACCOUNTING + RESURFACING ===');
-    const elig2 = await eligibility('2026-10-06');
+    const elig2 = await eligibility(TUE);
     check('weekly accounting: remainingThisWeek decreases 3 -> 2 after one completion', elig2.status === 'OK' && elig2.candidates.find((c) => c.goalActivityId === cardioActivityId)?.remainingThisWeek === 2);
     check('resurfacing: the activity is eligible again immediately (not terminated by completion)', elig2.status === 'OK' && elig2.candidates.some((c) => c.goalActivityId === cardioActivityId));
 
     console.log('=== WEEKLY EXHAUSTION (2 more cycles within the same week) ===');
-    for (const [targetDate, now] of [['2026-10-07', '2026-10-06T20:00:00Z'], ['2026-10-08', '2026-10-08T02:00:00Z']] as const) {
+    for (const [targetDate, now] of [[WED, `${TUE}T20:00:00Z`], [THU, `${THU}T02:00:00Z`]] as const) {
       const intentId = encodeGoalDemandIntentId(targetDate, cardioActivityId);
       const pv = await preview(iso(now), targetDate, [{ id: intentId, title: 'Morning cardio', flexibility: 'FLEXIBLE', activityId: cardioCandidate!.activityId }]);
-      const acceptBody = JSON.parse(JSON.stringify(buildAcceptRequestBody(pv!, `b5-${Date.now()}-${n++}`)));
+      const acceptBody = JSON.parse(JSON.stringify(buildAcceptRequestBody(pv!, `b5-fixed-${n++}`)));
       const accepted = await accept(acceptBody);
       check(`exhaustion cycle (${targetDate}): accepted`, accepted.status === 'SAVED');
       await logPlannedActivity(user.id, accepted.plans[0].id);
     }
-    check('exhaustion: canonical Rhythm eligibility remainingThisWeek = 0 after all 3 target occurrences are completed', (await rhythmRemaining(cardioActivityId, 3, '2026-10-06')) === 0);
-    const elig3 = await eligibility('2026-10-06');
+    check('exhaustion: canonical Rhythm eligibility remainingThisWeek = 0 after all 3 target occurrences are completed', (await rhythmRemaining(cardioActivityId, 3, TUE)) === 0);
+    const elig3 = await eligibility(TUE);
     check('exhaustion: discovery no longer surfaces the exhausted activity (A1\'s own zero-remaining structural exclusion)', elig3.status === 'OK' && !elig3.candidates.some((c) => c.goalActivityId === cardioActivityId));
-    const boot3 = await autoSuggestions('2026-10-06');
+    const boot3 = await autoSuggestions(TUE);
     check('exhaustion: automatic bootstrap no longer surfaces the exhausted activity', boot3.status === 'OK' && !boot3.suggestions.some((s) => s.goalActivityId === cardioActivityId));
 
     console.log('=== NEXT-WEEK RESET ===');
-    const elig4 = await eligibility('2026-10-12'); // following Monday-start week, no clock advance -- only the planning date argument changes
+    const elig4 = await eligibility(NEXT_MON); // following Monday-start week, no clock advance -- only the planning date argument changes
     check('next-week reset: remainingThisWeek resets to the full target (3) with no recurrence rows pre-generated', elig4.status === 'OK' && elig4.candidates.find((c) => c.goalActivityId === cardioActivityId)?.remainingThisWeek === 3);
-    const boot4 = await autoSuggestions('2026-10-12');
+    const boot4 = await autoSuggestions(NEXT_MON);
     check('next-week reset: automatic bootstrap can surface it again next week', boot4.status === 'OK' && boot4.suggestions.some((s) => s.goalActivityId === cardioActivityId));
 
     console.log('=== B4 OBSERVATIONAL INDEPENDENCE ===');
@@ -321,7 +329,7 @@ async function main() {
     const spanishCreate = await callCreateGoal(token, { title: 'Learn Spanish', activities: spanishActivities, clientRequestId: randomUUID() });
     check('B3: Learn Spanish Goal created with exactly one freeform GoalActivity', spanishCreate.body.activities.length === 1 && spanishCreate.body.activities[0].activityId === null);
     const spanishActivityId = spanishCreate.body.activities[0].id as string;
-    const eligSpanish = await eligibility('2026-10-06');
+    const eligSpanish = await eligibility(TUE);
     check('Candidate A: an eligible recurring FREEFORM GoalActivity participates in discovery exactly like a template-backed one', eligSpanish.status === 'OK' && eligSpanish.candidates.some((c) => c.goalActivityId === spanishActivityId && c.remainingThisWeek === 2 && c.activityId === null));
 
     // ============================================================
@@ -349,7 +357,7 @@ async function main() {
     // together, without interference.
     // ============================================================
     console.log('=== MULTIPLE GOALS ===');
-    const eligAll = await eligibility('2026-10-06');
+    const eligAll = await eligibility(TUE);
     const eligAllCandidates = eligAll.status === 'OK' ? eligAll.candidates : [];
     const distinctGoalIds = new Set(eligAllCandidates.map((c) => c.goalId));
     check('multiple goals: discovery surfaces eligible activities from more than one Goal at once, without interference', eligAll.status === 'OK' && distinctGoalIds.size >= 2 && eligAllCandidates.some((c) => c.goalActivityId === spanishActivityId));

@@ -16,6 +16,7 @@
  *
  *   DATABASE_URL="postgresql://..." npx ts-node test/decisionFactsThreadingDb.test.ts
  */
+import { fixtureAnchorMonday, addCivilDays, realClockReferenceForFixture } from './lifecycleFixtureCalendar';
 import { upsertUserByEmail, updateBirthProfile, createGoalWithActivities, addGoalActivity, beginTransaction, logPlannedActivity, getUserById } from '../apps/web/lib/db';
 import { createSessionToken } from '../apps/web/lib/auth';
 import { encodeGoalDemandIntentId } from '../apps/web/lib/goalDemandIntentId';
@@ -34,6 +35,16 @@ function check(label: string, condition: boolean) {
 }
 
 const TZ = 'Asia/Kolkata';
+// The fixture week is ANCHORED to a Monday at least 28 days ahead of the run date (test/lifecycleFixtureCalendar.ts): production refuses past plans against the real
+// clocks, so a hard-coded calendar rots the day it becomes the present (the same root cause as automaticGoalLifecycleClosureDb). The Monday-start week structure -- and the
+// Sunday-evening UTC instant that is already Monday in Kolkata but still Sunday in Los Angeles -- is identical on every run date.
+const MON = fixtureAnchorMonday(realClockReferenceForFixture(), TZ);
+const TUE = addCivilDays(MON, 1);
+const WED = addCivilDays(MON, 2);
+const THU = addCivilDays(MON, 3);
+const SUN = addCivilDays(MON, 6);
+const NEXT_MON = addCivilDays(MON, 7);
+const NEXT_SUN = addCivilDays(MON, 13);
 const OTHER_TZ = 'America/Los_Angeles';
 
 async function sql(text: string, params: unknown[] = []): Promise<any[]> {
@@ -99,21 +110,21 @@ async function main() {
     const otherGa = await addGoalActivity(other.id, otherGoal.id, { title: 'Other cardio', activityId: 'workout' });
     await setRhythm(otherGa!.id, 2);
 
-    const DATE = '2026-10-06';
+    const DATE = TUE;
     const goalIntentId = encodeGoalDemandIntentId(DATE, ga!.id);
     const goalIntent = { id: goalIntentId, title: 'Morning cardio', flexibility: 'FLEXIBLE', activityId: 'workout' };
     const typedIntent = { id: 'typed-1', title: 'Write report', flexibility: 'FLEXIBLE' };
 
     console.log('=== REAL PIPELINE: RHYTHM FACTS -> GENERIC DECISION FACTS ===');
-    const r1 = await previewRaw(iso('2026-10-06T02:00:00Z'), DATE, [goalIntent, typedIntent]);
+    const r1 = await previewRaw(iso(`${TUE}T02:00:00Z`), DATE, [goalIntent, typedIntent]);
     check('preview is READY through the real boundary with the real provider wired', (r1.body as any).status === 'READY');
     const goalResolved = resolved(r1, goalIntentId);
     const elig1 = await loadEligibleGoalDemand(createRealGoalDemandCandidatesDeps(), user.id, DATE, TZ);
     const candidate1 = elig1.status === 'OK' ? elig1.candidates.find((c) => c.goalActivityId === ga!.id) : undefined;
-    const expected = candidate1 && { recurrence: { period: 'LOCAL_CALENDAR_WEEK', periodStartDate: '2026-10-05', periodEndDate: '2026-10-11', targetPerPeriod: candidate1.rhythm.targetPerWeek, completedInPeriod: candidate1.rhythm.completedThisWeek, committedInPeriod: candidate1.rhythm.committedThisWeek, remainingInPeriod: candidate1.rhythm.remainingOccurrences } };
+    const expected = candidate1 && { recurrence: { period: 'LOCAL_CALENDAR_WEEK', periodStartDate: MON, periodEndDate: SUN, targetPerPeriod: candidate1.rhythm.targetPerWeek, completedInPeriod: candidate1.rhythm.completedThisWeek, committedInPeriod: candidate1.rhythm.committedThisWeek, remainingInPeriod: candidate1.rhythm.remainingOccurrences } };
     check('generic facts are present on the resolved intent', !!goalResolved?.dayIntent.decisionFacts?.recurrence);
     check('facts equal the canonical Candidate A1 Rhythm output, translated (target 3, 0 completed, 0 committed, 3 remaining)', JSON.stringify(goalResolved?.dayIntent.decisionFacts) === JSON.stringify(expected) && goalResolved?.dayIntent.decisionFacts?.recurrence?.targetPerPeriod === 3 && goalResolved?.dayIntent.decisionFacts?.recurrence?.remainingInPeriod === 3);
-    check('O3: the real provider carries the INCLUSIVE civil-date week bounds through the real preview path (2026-10-06 is a Tuesday -> Mon 2026-10-05 .. Sun 2026-10-11)', goalResolved?.dayIntent.decisionFacts?.recurrence?.periodStartDate === '2026-10-05' && goalResolved?.dayIntent.decisionFacts?.recurrence?.periodEndDate === '2026-10-11');
+    check('O3: the real provider carries the INCLUSIVE civil-date week bounds through the real preview path (Tuesday is a Tuesday -> Mon Monday .. Sun Sunday)', goalResolved?.dayIntent.decisionFacts?.recurrence?.periodStartDate === MON && goalResolved?.dayIntent.decisionFacts?.recurrence?.periodEndDate === SUN);
     check('the generic fact carries no Goal identity', !/goal/i.test(JSON.stringify(goalResolved?.dayIntent.decisionFacts)));
     check('a typed (non-Goal) intent in the same request carries no facts', resolved(r1, 'typed-1')?.dayIntent.decisionFacts === undefined);
 
@@ -126,8 +137,8 @@ async function main() {
     console.log('=== TRUST: FACTS ARE SERVER-DERIVED FOR THE AUTHENTICATED USER ONLY ===');
     const otherId = encodeGoalDemandIntentId(DATE, otherGa!.id);
     const manualId = `plan-day-goal-${ga!.id}`;
-    const wrongDateId = encodeGoalDemandIntentId('2026-10-07', ga!.id);
-    const r2 = await previewRaw(iso('2026-10-06T02:00:00Z'), DATE, [
+    const wrongDateId = encodeGoalDemandIntentId(WED, ga!.id);
+    const r2 = await previewRaw(iso(`${TUE}T02:00:00Z`), DATE, [
       { id: otherId, title: 'Other cardio', flexibility: 'FLEXIBLE', activityId: 'workout' },
       { id: manualId, title: 'Morning cardio (manual)', flexibility: 'FLEXIBLE', activityId: 'workout' },
       { id: wrongDateId, title: 'Morning cardio (wrong date id)', flexibility: 'FLEXIBLE', activityId: 'workout' },
@@ -138,28 +149,28 @@ async function main() {
 
     console.log('=== O3: PERIOD BOUNDS ARE SERVER-DERIVED FROM EACH USER\'S OWN TIMEZONE ===');
     {
-      // Same instant for both users: 2026-10-11T20:00Z. UTC date = Sunday 10-11.
+      // Same instant for both users: SundayT20:00Z. UTC date = Sunday 10-11.
       //   user  (Asia/Kolkata):      Monday 10-12 01:30 local -> week 10-12..10-18
       //   other (America/Los_Angeles): Sunday 10-11 13:00 local -> week 10-05..10-11
-      const instant = iso('2026-10-11T20:00:00Z');
-      const kolkataId = encodeGoalDemandIntentId('2026-10-12', ga!.id);
-      const laId = encodeGoalDemandIntentId('2026-10-11', otherGa!.id);
+      const instant = iso(`${SUN}T20:00:00Z`);
+      const kolkataId = encodeGoalDemandIntentId(NEXT_MON, ga!.id);
+      const laId = encodeGoalDemandIntentId(SUN, otherGa!.id);
       // NO targetDate in either body: the planning date is derived server-side from the authenticated user's own timezone.
       const rk = await previewAs(user.id, instant, { intents: [{ id: kolkataId, title: 'Morning cardio', flexibility: 'FLEXIBLE', activityId: 'workout' }] });
       const rl = await previewAs(other.id, instant, { intents: [{ id: laId, title: 'Other cardio', flexibility: 'FLEXIBLE', activityId: 'workout' }] });
       const fk = resolved(rk, kolkataId)?.dayIntent.decisionFacts?.recurrence;
       const fl = resolved(rl, laId)?.dayIntent.decisionFacts?.recurrence;
-      check('positive offset: UTC Sunday is already Monday in Kolkata -> bounds 2026-10-12..2026-10-18 (not the UTC-date week)', fk?.periodStartDate === '2026-10-12' && fk?.periodEndDate === '2026-10-18');
-      check('negative offset: the same instant is still Sunday in Los Angeles -> bounds 2026-10-05..2026-10-11', fl?.periodStartDate === '2026-10-05' && fl?.periodEndDate === '2026-10-11');
+      check('positive offset: UTC Sunday is already Monday in Kolkata -> bounds next Monday..next Sunday (not the UTC-date week)', fk?.periodStartDate === NEXT_MON && fk?.periodEndDate === NEXT_SUN);
+      check('negative offset: the same instant is still Sunday in Los Angeles -> bounds Monday..Sunday', fl?.periodStartDate === MON && fl?.periodEndDate === SUN);
       check('cross-user: each user\'s bounds come from their OWN authoritative timezone, same instant, different weeks', !!fk && !!fl && fk.periodStartDate !== fl.periodStartDate);
-      check('period consistency: each planning date lies within its own bounds', !!fk && !!fl && fk.periodStartDate <= '2026-10-12' && '2026-10-12' <= fk.periodEndDate && fl.periodStartDate <= '2026-10-11' && '2026-10-11' <= fl.periodEndDate);
+      check('period consistency: each planning date lies within its own bounds', !!fk && !!fl && fk.periodStartDate <= NEXT_MON && NEXT_MON <= fk.periodEndDate && fl.periodStartDate <= SUN && SUN <= fl.periodEndDate);
       check('fact consistency: remaining = max(0, target - completed - committed) for both users', !!fk && !!fl && fk.remainingInPeriod === Math.max(0, fk.targetPerPeriod - fk.completedInPeriod - fk.committedInPeriod) && fl.remainingInPeriod === Math.max(0, fl.targetPerPeriod - fl.completedInPeriod - fl.committedInPeriod));
       check('cross-user: a user\'s own targets are unaffected (Kolkata 3/week, Los Angeles 2/week)', fk?.targetPerPeriod === 3 && fl?.targetPerPeriod === 2);
     }
     {
       // FORGED client values: bounds, counts, timezone and facts in the body are never authoritative.
       const forgedFact = { recurrence: { period: 'LOCAL_CALENDAR_WEEK', periodStartDate: '1999-01-04', periodEndDate: '1999-01-10', targetPerPeriod: 99, completedInPeriod: 0, committedInPeriod: 0, remainingInPeriod: 99 } };
-      const rf = await previewAs(user.id, iso('2026-10-06T02:00:00Z'), {
+      const rf = await previewAs(user.id, iso(`${TUE}T02:00:00Z`), {
         targetDate: DATE,
         timezone: 'Pacific/Kiritimati',
         periodStartDate: '1999-01-04',
@@ -169,7 +180,7 @@ async function main() {
         intents: [{ ...goalIntent, decisionFacts: forgedFact, periodStartDate: '1999-01-04', periodEndDate: '1999-01-10' }],
       });
       const ff = resolved(rf, goalIntentId)?.dayIntent.decisionFacts?.recurrence;
-      check('forged client bounds/counts/timezone are ignored: facts are the server-derived 2026-10-05..2026-10-11, target 3', ff?.periodStartDate === '2026-10-05' && ff?.periodEndDate === '2026-10-11' && ff?.targetPerPeriod === 3 && ff?.remainingInPeriod === 3);
+      check('forged client bounds/counts/timezone are ignored: facts are the server-derived Monday..Sunday, target 3', ff?.periodStartDate === MON && ff?.periodEndDate === SUN && ff?.targetPerPeriod === 3 && ff?.remainingInPeriod === 3);
     }
 
     console.log('=== NO PERSISTENCE BEFORE ACCEPTANCE ===');
@@ -180,28 +191,28 @@ async function main() {
     check('zero PlannedActivity/GoalActivityOccurrence/GoalActivityExecution rows after fact resolution and previews', pre[0].plans === 0 && pre[0].occ === 0 && pre[0].exec === 0);
 
     console.log('=== WEEKLY EXHAUSTION: INELIGIBLE ACTIVITY IS NEVER OFFERED (ELIGIBILITY STAYS UPSTREAM) ===');
-    for (const [targetDate, nowStr] of [['2026-10-06', '2026-10-06T02:00:00Z'], ['2026-10-07', '2026-10-06T20:00:00Z'], ['2026-10-08', '2026-10-08T02:00:00Z']] as const) {
+    for (const [targetDate, nowStr] of [[TUE, `${TUE}T02:00:00Z`], [WED, `${TUE}T20:00:00Z`], [THU, `${THU}T02:00:00Z`]] as const) {
       const iid = encodeGoalDemandIntentId(targetDate, ga!.id);
       const pr = await previewRaw(iso(nowStr), targetDate, [{ id: iid, title: 'Morning cardio', flexibility: 'FLEXIBLE', activityId: 'workout' }]);
       const parsed = parsePreviewResponseBody(JSON.parse(JSON.stringify(pr.body)), pr.httpStatus);
-      if (targetDate === '2026-10-07') {
+      if (targetDate === WED) {
         const f = resolved(pr, iid)?.dayIntent.decisionFacts?.recurrence;
         check('after one completion the carried facts reflect canonical accounting (1 completed, 2 remaining)', f?.completedInPeriod === 1 && f?.remainingInPeriod === 2);
       }
-      const accepted = await accept(JSON.parse(JSON.stringify(buildAcceptRequestBody((parsed as any).preview, `df-${Date.now()}-${targetDate}`))));
+      const accepted = await accept(JSON.parse(JSON.stringify(buildAcceptRequestBody((parsed as any).preview, `df-fixed-${targetDate}`))));
       check(`exhaustion cycle (${targetDate}): accepted`, accepted.status === 'SAVED');
       await logPlannedActivity(user.id, accepted.plans[0].id);
     }
     const eligExhausted = await loadEligibleGoalDemand(createRealGoalDemandCandidatesDeps(), user.id, DATE, TZ);
     check('Candidate A no longer reports the exhausted activity eligible', eligExhausted.status === 'OK' && !eligExhausted.candidates.some((c) => c.goalActivityId === ga!.id));
-    const r3 = await previewRaw(iso('2026-10-08T03:00:00Z'), '2026-10-08', [{ id: encodeGoalDemandIntentId('2026-10-08', ga!.id), title: 'Morning cardio', flexibility: 'FLEXIBLE', activityId: 'workout' }]);
-    check('no facts are produced for the now-ineligible activity (the policy seam never receives it to suppress it)', resolved(r3, encodeGoalDemandIntentId('2026-10-08', ga!.id))?.dayIntent.decisionFacts === undefined);
+    const r3 = await previewRaw(iso(`${THU}T03:00:00Z`), THU, [{ id: encodeGoalDemandIntentId(THU, ga!.id), title: 'Morning cardio', flexibility: 'FLEXIBLE', activityId: 'workout' }]);
+    check('no facts are produced for the now-ineligible activity (the policy seam never receives it to suppress it)', resolved(r3, encodeGoalDemandIntentId(THU, ga!.id))?.dayIntent.decisionFacts === undefined);
 
     console.log('=== WEEK RESET (canonical Rhythm engine, no pre-generated rows) ===');
-    const nextId = encodeGoalDemandIntentId('2026-10-12', ga!.id);
-    const r4 = await previewRaw(iso('2026-10-12T02:00:00Z'), '2026-10-12', [{ id: nextId, title: 'Morning cardio', flexibility: 'FLEXIBLE', activityId: 'workout' }]);
+    const nextId = encodeGoalDemandIntentId(NEXT_MON, ga!.id);
+    const r4 = await previewRaw(iso(`${NEXT_MON}T02:00:00Z`), NEXT_MON, [{ id: nextId, title: 'Morning cardio', flexibility: 'FLEXIBLE', activityId: 'workout' }]);
     const f4 = resolved(r4, nextId)?.dayIntent.decisionFacts?.recurrence;
-    check('O3: next week the bounds advance with the counts (2026-10-12..2026-10-18)', f4?.periodStartDate === '2026-10-12' && f4?.periodEndDate === '2026-10-18');
+    check('O3: next week the bounds advance with the counts (next Monday..next Sunday)', f4?.periodStartDate === NEXT_MON && f4?.periodEndDate === NEXT_SUN);
     check('next week the carried facts reset to the full target', f4?.targetPerPeriod === 3 && f4?.completedInPeriod === 0 && f4?.remainingInPeriod === 3);
 
     if (!allPassed) {
