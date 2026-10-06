@@ -18,12 +18,15 @@
  * else, exactly the value SHADOW; anything else -- missing, empty, misspelled, any other word -- is OFF, failing closed). No request body, header, cookie or
  * query can select a mode: the preview request parser reads a fixed whitelist of fields and the mode never reaches it. There is no database lookup.
  *
- * FAIL-OPEN RELATIVE TO PLAN DAY. "Fail-open" here means: discard the shadow observation and its failure, preserve the baseline response -- it never means
- * the policy accepts. P4b4 contains its own failures (a pair or run-level failure becomes an observation / run outcome), so in practice the only thing
- * `observeShadowPolicy` can throw is the baseline orchestration's own error, which must surface exactly as `orchestrateConstructDay`'s would. If the
- * shadow composer nevertheless throws (a defect of its own contract), the boundary falls back to the unchanged baseline call -- the only path on which a
- * second orchestration can run, and one that cannot occur in a healthy run. Summarising and emitting the observation are isolated too: a failure of the
- * metric derivation, the timer or the sink is discarded.
+ * FAIL-OPEN RELATIVE TO PLAN DAY, AND NEVER A SECOND BASELINE RUN. "Fail-open" here means: discard the shadow observation and its failure, preserve the baseline
+ * response -- it never means the policy accepts. A shadow failure has exactly two phases, and the boundary tells them apart STRUCTURALLY, never by guessing:
+ *   PRE-BASELINE   the baseline orchestration itself failed (no result exists yet). That is not a shadow failure: the error surfaces exactly as
+ *                  `orchestrateConstructDay`'s would (same error object, same HTTP mapping upstream) and NOTHING is re-run merely because SHADOW is on.
+ *   POST-BASELINE  a result exists and a later shadow step failed. The composition hands the baseline result to this boundary the moment it exists
+ *                  (an output-only callback, strictly before any shadow work), so the boundary serves THAT result -- it never runs the Constructor or the
+ *                  preparation again. (P4b4 contains its own failures, so in practice this phase cannot even occur; the boundary is correct if it does.)
+ * Summarising and emitting the observation are isolated too: a failure of the metric derivation, the timer or the sink is discarded. The invariant, for every
+ * outcome of one preview request (OFF, every SHADOW outcome, every failure): the authoritative baseline orchestration runs AT MOST ONCE.
  *
  * SYNCHRONOUS, AWAITED, NO BACKGROUND WORK. The shadow composition is awaited inside the request. There is no fire-and-forget promise, no queue, no timer
  * and no timeout (the composition is bounded, pure CPU over at most MAX_INTENTS_PER_REQUEST intents; the sink is a synchronous function that returns
@@ -134,17 +137,17 @@ export function summarizeShadowPolicyRun(run: ShadowPolicyRun, latency: ShadowPo
  * metrics handed to the sink, every shadow-side failure discarded.
  */
 export async function orchestrateConstructDayWithShadowPolicy(request: ConstructDayRequest, deps: DayConstructorOrchestratorDeps, execution?: ShadowPolicyExecution): Promise<OrchestrateConstructDayResult> {
-  const baseline = () => orchestrateConstructDay(request, deps);
-  if (!execution || execution.mode !== 'SHADOW') return baseline();
+  if (!execution || execution.mode !== 'SHADOW') return orchestrateConstructDay(request, deps);
   const observe = execution.observe ?? observeShadowPolicy;
   const started = startTimer(execution);
+  let held: { readonly result: OrchestrateConstructDayResult } | undefined;
   let observed: Awaited<ReturnType<typeof observeShadowPolicy>>;
   try {
-    observed = await observe(request, deps);
-  } catch {
-    // The composer broke its own never-throw contract: discard the shadow side and serve the unchanged baseline. (A baseline failure rethrows here exactly as the plain call would.)
-    emit(execution, summarizeTechnicalFailure());
-    return baseline();
+    observed = await observe(request, deps, (result) => { held = { result }; });
+  } catch (error) {
+    if (!held) throw error; // PRE-BASELINE: the baseline orchestration itself failed -- surface it exactly as the plain call would; never re-run it
+    emit(execution, summarizeTechnicalFailure()); // POST-BASELINE: serve the baseline result that already exists
+    return held.result;
   }
   emitRun(execution, observed.shadowPolicy, started);
   return observed.result;

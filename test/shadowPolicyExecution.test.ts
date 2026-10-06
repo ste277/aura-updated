@@ -7,7 +7,8 @@
  *   Part 1  mode parsing: OFF is the default; exactly SHADOW selects SHADOW; unknown / ACTIVE / client input is OFF
  *   Part 2  OFF: zero shadow work (a throwing composer is never reached), byte-identical to pre-P4b5, no sink call
  *   Part 3  SHADOW parity: ACCEPT / REJECT / generation unavailable / acceptance unavailable / multi-promotion -> the same status, body and signature as OFF
- *   Part 4  failure isolation: composer throw, sink throw, timer throw, baseline failure -- Plan Day is unchanged
+ *   Part 4  failure isolation (pre- vs post-baseline): composer throw, sink throw, timer throw, baseline failure -- Plan Day is unchanged, the baseline is never re-run
+ *   Part 4b the absolute execution invariant: with a non-repeatable second-invocation sentinel, every outcome runs the baseline at most once
  *   Part 5  ONE orchestration: identical load / search counts for OFF and SHADOW (a table), one sink call, no background work
  *   Part 6  minimal observation: exact metrics schema, no identifier / text / instant / placement; response, headers and body never carry the shadow
  *   Part 7  latency evidence (informational) and the default server sink
@@ -172,8 +173,9 @@ const FRIDAY = '2026-10-09';
   {
     const plain = await run(SCENARIOS.multi, undefined);
     const rec = recorder();
-    const thrown = await run(SCENARIOS.multi, ON(rec.sink, { observe: async () => { throw new Error('composer defect'); } }));
-    check('SHADOW COMPOSER THROW: caught at the boundary; the status, body and signature equal OFF (the baseline is served); a generic TECHNICAL_FAILURE category -- with no error text -- is observed', same(thrown, plain) && rec.seen.length === 1 && rec.seen[0].run === 'TECHNICAL_FAILURE' && !/composer defect/.test(JSON.stringify(rec.seen)));
+    const cThrown = fresh();
+    const thrown = await run(SCENARIOS.multi, ON(rec.sink, { observe: async (req, d, cb) => { await observeShadowPolicy(req, d, cb); throw new Error('composer defect'); } }), cThrown);
+    check('POST-BASELINE SHADOW FAILURE (the composer throws after the baseline exists): the already-computed baseline is served -- status, body and signature equal OFF -- WITHOUT a rerun (one load, one set of searches); a generic TECHNICAL_FAILURE category with no error text is observed', same(thrown, plain) && rec.seen.length === 1 && rec.seen[0].run === 'TECHNICAL_FAILURE' && !/composer defect/.test(JSON.stringify(rec.seen)) && cThrown.blocking === 1 && cThrown.search === 9);
     let sinkCalls = 0;
     const sinkThrow = await run(SCENARIOS.multi, ON({ record: () => { sinkCalls += 1; throw new Error('sink down'); } }));
     check('SINK THROW: the baseline response is unchanged (the sink was reached once and its failure discarded)', same(sinkThrow, plain) && sinkCalls === 1);
@@ -185,14 +187,66 @@ const FRIDAY = '2026-10-09';
     const ticks = [0, 12]; const rec3 = recorder();
     await run(SCENARIOS.multi, ON(rec3.sink, { monotonicNow: () => ticks.shift() ?? 12 }));
     check('the latency bucket is a coarse category from the injected MONOTONIC source (observability only: the response is not a function of it)', rec3.seen[0].latency === 'LT_50_MS');
-    // The baseline orchestration itself failing: SHADOW surfaces exactly the plain failure.
-    const plainFail = await run(SCENARIOS.accept, undefined, fresh(), { failBlocking: true });
-    const shadowFail = await run(SCENARIOS.accept, ON(recorder().sink), fresh(), { failBlocking: true });
-    check('A BASELINE FAILURE is not a shadow failure: a database error inside the orchestration yields the SAME generic HTTP 500 body under SHADOW as under OFF (and nothing is observed as ACCEPT)', plainFail.httpStatus === 500 && same(plainFail, shadowFail));
-    const cOffFail = fresh(); await run(SCENARIOS.accept, undefined, cOffFail, { failBlocking: true });
-    const cShadowFail = fresh(); await run(SCENARIOS.accept, ON(recorder().sink), cShadowFail, { failBlocking: true });
-    console.log(`     failure-path load counts (documented): OFF blocking=${cOffFail.blocking}, SHADOW blocking=${cShadowFail.blocking} (the fallback re-runs the unchanged baseline once; a healthy run never takes this path)`);
-    check('the ONLY path with a second baseline run is the failure path of the composer (documented): a healthy SHADOW run performs the same single load as OFF', cOffFail.blocking === 1 && cShadowFail.blocking === 2);
+    // PRE-BASELINE failure: the baseline orchestration itself fails -> exactly the plain failure, and NO rerun merely because SHADOW is on.
+    const cOffFail = fresh(); const plainFail = await run(SCENARIOS.accept, undefined, cOffFail, { failBlocking: true });
+    const cShadowFail = fresh(); const recFail = recorder(); const shadowFail = await run(SCENARIOS.accept, ON(recFail.sink), cShadowFail, { failBlocking: true });
+    check('PRE-BASELINE FAILURE: a database error inside the baseline orchestration yields the SAME generic HTTP 500 status and body under SHADOW as under OFF, the orchestration ran exactly ONCE in both (no rerun because SHADOW is enabled), and nothing is observed as ACCEPT', plainFail.httpStatus === 500 && same(plainFail, shadowFail) && cOffFail.blocking === 1 && cShadowFail.blocking === 1 && recFail.seen.every((m) => m.accepted === 0));
+    const cEarly = fresh();
+    const early = await run(SCENARIOS.accept, ON(recorder().sink, { observe: async () => { throw new Error('threw before any baseline existed'); } }), cEarly);
+    check('a composer that throws BEFORE any baseline result exists is, structurally, a baseline failure: it surfaces as the plain failure (HTTP 500) and NOTHING is re-run (zero loads here: the stand-in never started one)', early.httpStatus === 500 && cEarly.blocking === 0 && cEarly.search === 0);
+  }
+
+  // ======================================================================
+  console.log('=== Part 4b: the ABSOLUTE EXECUTION INVARIANT -- the baseline runs AT MOST ONCE per request, whatever fails ===');
+  {
+    // A NON-REPEATABLE SENTINEL: every loader / search / fact preparation THROWS on its SECOND invocation. Any second baseline run would surface as that error.
+    const sentinelRun = async (sc: Scenario, execution: (() => ShadowPolicyExecution) | undefined, opts: { failFirstBlocking?: boolean } = {}) => {
+      const counters = fresh();
+      const base = mkDeps(sc.pools, sc.limit, fresh(), false); // its own counters: the wrappers below count the invocations that matter
+      const strict: DayConstructorOrchestratorDeps = {
+        ...base,
+        searchTiming: ((r: any) => { counters.search += 1; return (base.searchTiming as any)(r); }) as any,
+        loadBlockingPlans: async (...a: any[]) => { counters.blocking += 1; if (counters.blocking > 1) throw new Error('SECOND BASELINE RUN: blocking'); if (opts.failFirstBlocking) throw new Error('database unavailable'); return (base.loadBlockingPlans as any)(...a); },
+        loadDurationContext: async (...a: any[]) => { counters.duration += 1; if (counters.duration > 1) throw new Error('SECOND BASELINE RUN: duration'); return (base.loadDurationContext as any)(...a); },
+        loadAvailabilityConfiguration: async (...a: any[]) => { counters.availability += 1; if (counters.availability > 1) throw new Error('SECOND BASELINE RUN: availability'); return (base.loadAvailabilityConfiguration as any)(...a); },
+        prepareDecisionFacts: (async (...a: any[]) => { counters.facts += 1; if (counters.facts > 1) throw new Error('SECOND BASELINE RUN: facts'); return (base.prepareDecisionFacts as any)(...a); }) as any,
+      };
+      const logged: string[] = []; const realErr = console.error; console.error = (...a: unknown[]) => { logged.push(a.map(String).join(' ')); };
+      let out: DayConstructorPreviewHttpResult;
+      try { out = await handleDayConstructorPreviewRequest({ ...boundary(sc, execution), createOrchestratorDeps: () => strict }); } finally { console.error = realErr; }
+      return { out, counters, secondRun: logged.some((l) => /SECOND BASELINE RUN/.test(l)) || /SECOND BASELINE RUN/.test(JSON.stringify(out)) };
+    };
+    const sc = SCENARIOS.multi;
+    const reference = await sentinelRun(sc, undefined);
+    const cases: Array<[string, (() => ShadowPolicyExecution) | undefined, { failFirstBlocking?: boolean }?]> = [
+      ['OFF', undefined],
+      ['OFF (settings present)', () => ({ mode: 'OFF' })],
+      ['SHADOW healthy (ACCEPT + REJECT + ...)', ON(recorder().sink)],
+      ['SHADOW composer throws after the baseline', ON(recorder().sink, { observe: async (req, d, cb) => { await observeShadowPolicy(req, d, cb); throw new Error('composer defect'); } })],
+      ['SHADOW composer throws before any baseline', ON(recorder().sink, { observe: async () => { throw new Error('early'); } })],
+      ['SHADOW sink throws', ON({ record: () => { throw new Error('sink down'); } })],
+      ['SHADOW timer throws', ON(recorder().sink, { monotonicNow: () => { throw new Error('clock'); } })],
+      ['SHADOW hostile settings', () => ({ mode: 'SHADOW', get sink(): never { throw new Error('x'); } } as unknown as ShadowPolicyExecution)],
+    ];
+    for (const [name, execution] of cases) {
+      const r = await sentinelRun(sc, execution);
+      const okBaseline = name === 'SHADOW composer throws before any baseline' ? r.out.httpStatus === 500 : same(r.out, reference.out);
+      check(`INVARIANT (${name}): the baseline orchestration ran at most ONCE (blocking ${r.counters.blocking}, duration ${r.counters.duration}, facts ${r.counters.facts}); the second-invocation sentinel never fired; the response is ${name === 'SHADOW composer throws before any baseline' ? 'the plain failure (500)' : 'byte-identical to OFF'}`, r.counters.blocking <= 1 && r.counters.duration <= 1 && r.counters.availability <= 1 && r.counters.facts <= 1 && !r.secondRun && okBaseline);
+    }
+    for (const [name, execution] of [['OFF', undefined], ['SHADOW', ON(recorder().sink)]] as Array<[string, (() => ShadowPolicyExecution) | undefined]>) {
+      const r = await sentinelRun(sc, execution, { failFirstBlocking: true });
+      check(`INVARIANT (${name}, BASELINE FAILURE): the failing baseline ran exactly ONCE and no second invocation was attempted; status ${r.out.httpStatus} -- the same for OFF and SHADOW`, r.counters.blocking === 1 && !r.secondRun && r.out.httpStatus === 500);
+    }
+    const a = await sentinelRun(sc, undefined, { failFirstBlocking: true }); const b = await sentinelRun(sc, ON(recorder().sink), { failFirstBlocking: true });
+    check('a baseline failure maps to the IDENTICAL status and body under OFF and SHADOW', same(a.out, b.out));
+    for (const [key, label] of [['accept', 'ACCEPT'], ['loss', 'REJECT'], ['timing', 'REJECT (timing)'], ['none', 'no promotions']] as const) {
+      const r = await sentinelRun(SCENARIOS[key], ON(recorder().sink)); const o = await sentinelRun(SCENARIOS[key], undefined);
+      check(`INVARIANT (SHADOW ${label}): at most one baseline run and a response byte-identical to OFF`, r.counters.blocking === 1 && !r.secondRun && same(r.out, o.out));
+    }
+    for (const [label, patch] of [['generation unavailable', () => { LC.generateLocalCounterfactual = () => Object.freeze({ status: 'UNAVAILABLE', reason: 'NO_ACTIONABLE_PROMOTION_SLOT' }); }], ['acceptance unavailable', () => { LC.generateLocalCounterfactual = (a: any) => { const out = realGenerate(a); return out.status === 'READY' ? Object.freeze({ status: 'READY', counterfactual: Object.freeze({ ...out.counterfactual, candidateIntentId: 'ELSEWHERE' }) }) : out; }; }]] as Array<[string, () => void]>) {
+      patch();
+      try { const r = await sentinelRun(SCENARIOS.accept, ON(recorder().sink)); const o = await sentinelRun(SCENARIOS.accept, undefined); check(`INVARIANT (SHADOW ${label}): at most one baseline run and a response byte-identical to OFF`, r.counters.blocking === 1 && !r.secondRun && same(r.out, o.out)); } finally { restore(); }
+    }
   }
 
   // ======================================================================

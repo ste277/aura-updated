@@ -215,7 +215,22 @@ const noDates = (v: unknown): boolean => [...reachable(v)].every((o) => !(o inst
     const normal = await observeShadowPolicy(request(multiIntents, multiAll), mkDeps(multiPools, 2));
     check('SAME-RUN SENTINEL: loaders that THROW on any second call do not disturb the shadow composition (it used only the first run) -- the result and every observation equal the normal run', sentinelRun.result.status === 'READY' && calls.blocking === 1 && calls.duration <= 1 && JSON.stringify(sentinelRun.shadowPolicy) === JSON.stringify(normal.shadowPolicy) && JSON.stringify(sentinelRun.result) === JSON.stringify(normal.result));
     // The seam takes a request and dependencies and nothing else: there is no way to hand it a basis, placements, a PromotionInput or a counterfactual.
-    check('THE SEAM IS (request, deps) ONLY: `observeShadowPolicy` has two parameters, so no caller can supply the four P4b3 authorities independently', observeShadowPolicy.length === 2);
+    check('THE SEAM TAKES (request, deps) AND ONE OUTPUT-ONLY CALLBACK: `observeShadowPolicy` has no parameter through which a basis, placements, a PromotionInput or a counterfactual could be supplied (the optional third parameter only RECEIVES the baseline result)', observeShadowPolicy.length === 3);
+    // O5 P4b5: the baseline result is handed out the moment it exists, strictly before any shadow work, exactly once, and a failing callback cannot disturb the observation.
+    {
+      let handed = 0; let generatedAtHandOff = -1; let generated = 0; let handedResult: unknown;
+      LC.generateLocalCounterfactual = (a: any) => { generated += 1; return realGenerate(a); };
+      let withCallback: Awaited<ReturnType<typeof observeShadowPolicy>>;
+      try { withCallback = await observeShadowPolicy(request(acceptIntents, ['O', 'P']), mkDeps(acceptPools, 3), (r) => { handed += 1; generatedAtHandOff = generated; handedResult = r; }); } finally { restore(); }
+      const plainRun = await observeShadowPolicy(request(acceptIntents, ['O', 'P']), mkDeps(acceptPools, 3));
+      check('THE BASELINE HAND-OFF: the callback receives the baseline result exactly once, BEFORE any generation (no shadow work had run), and it is the very result the seam returns', handed === 1 && generatedAtHandOff === 0 && generated === 1 && handedResult === withCallback.result && JSON.stringify(withCallback.shadowPolicy) === JSON.stringify(plainRun.shadowPolicy) && JSON.stringify(withCallback.result) === JSON.stringify(plainRun.result));
+      const hostile = await observeShadowPolicy(request(acceptIntents, ['O', 'P']), mkDeps(acceptPools, 3), () => { throw new Error('callback broke'); });
+      check('a callback that throws is isolated: the result and every observation are unchanged', JSON.stringify(hostile) === JSON.stringify(plainRun));
+      const failing = fresh(); let called = 0;
+      let rejected = false;
+      try { await observeShadowPolicy(request(acceptIntents, ['O', 'P']), { ...mkDeps(acceptPools, 3, failing), loadBlockingPlans: async () => { failing.blocking += 1; throw new Error('database unavailable'); } }, () => { called += 1; }); } catch { rejected = true; }
+      check('PRE-BASELINE: when the baseline orchestration itself throws, the callback is NEVER called (no result existed) and the error surfaces', rejected && called === 0 && failing.blocking === 1);
+    }
   }
 
   // ======================================================================

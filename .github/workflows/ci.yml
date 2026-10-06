@@ -640,6 +640,10 @@ jobs:
       # the evidence inputs come from ONE REPEATABLE READ snapshot, where independent reads observed mixed states.
       - name: Run decision scheduling snapshot DB test
         run: npx ts-node test/decisionSchedulingSnapshotDb.test.ts
+      # Constructor Decision Intelligence O5 P4b5 -- real-DB OFF vs SHADOW parity through the PRODUCTION snapshot wiring: identical status, body, signatures, exact SQL statement
+      # sequence (no extra query, no second snapshot, no write, no transaction), snapshot loaded once, domain rows unchanged; the shadow executes over real pressure and contention.
+      - name: Run shadow policy execution DB test
+        run: npx ts-node test/shadowPolicyExecutionDb.test.ts
       # Constructor scheduling correctness -- real-DB regression for the
       # overnight/multi-day overlapping plan blocker defect.
       - name: Run Constructor overlapping blocker DB test
