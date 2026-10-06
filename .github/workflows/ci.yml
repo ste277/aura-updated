@@ -367,6 +367,18 @@ jobs:
         run: npx ts-node test/shadowPolicyObservation.test.ts
       - name: Run shadow policy observation architecture test
         run: npx ts-node test/shadowPolicyObservationArchitecture.test.ts
+      # O5 P4b5 -- the SHADOW EXECUTION & OBSERVATION BOUNDARY: OFF by default, server-controlled (AURA_SHADOW_POLICY_MODE, exactly SHADOW), no ACTIVE. In SHADOW the Plan Day
+      # preview's ONE orchestration runs through the P4b4 composition instead of the plain call (never in addition); every shadow failure is isolated; only a minimal
+      # aggregate metrics record (closed categories and counts, no identifiers / text / instants / placements) leaves, through a one-way synchronous sink.
+      - name: Run shadow policy execution test
+        run: npx ts-node test/shadowPolicyExecution.test.ts
+      - name: Run shadow policy execution architecture test
+        run: npx ts-node test/shadowPolicyExecutionArchitecture.test.ts
+      # O5 P4b5 -- engine-independent seeded fixtures: the incidence sweeps no longer use a random sort comparator (whose order depended on the engine's sort
+      # algorithm, so Node 20 CI and a newer local Node generated different fixtures from the same seed). This narrow test proves the root cause and the fix
+      # and forbids the pattern; the incidence suites pin exact authoritative counts, so any engine difference fails here on Node 20.
+      - name: Run seeded fixture reproducibility test
+        run: npx ts-node test/seededFixtureReproducibility.test.ts
       # Constructor scheduling correctness -- the target-day blocker load
       # uses half-open OVERLAP semantics (a plan that starts before the day
       # but runs into it must block), through the one shared definition.
@@ -633,6 +645,10 @@ jobs:
       # the evidence inputs come from ONE REPEATABLE READ snapshot, where independent reads observed mixed states.
       - name: Run decision scheduling snapshot DB test
         run: npx ts-node test/decisionSchedulingSnapshotDb.test.ts
+      # Constructor Decision Intelligence O5 P4b5 -- real-DB OFF vs SHADOW parity through the PRODUCTION snapshot wiring: identical status, body, signatures, exact SQL statement
+      # sequence (no extra query, no second snapshot, no write, no transaction), snapshot loaded once, domain rows unchanged; the shadow executes over real pressure and contention.
+      - name: Run shadow policy execution DB test
+        run: npx ts-node test/shadowPolicyExecutionDb.test.ts
       # Constructor scheduling correctness -- real-DB regression for the
       # overnight/multi-day overlapping plan blocker defect.
       - name: Run Constructor overlapping blocker DB test

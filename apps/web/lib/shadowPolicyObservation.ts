@@ -82,11 +82,18 @@ export type ShadowPolicyRun =
 type PreparedRun = Extract<PromotionRunAuthority, { status: 'PREPARED' }>;
 
 /**
- * The ONLY seam: one orchestration, then the shadow composition over THAT run. The Constructor result is returned exactly as the orchestration produced
+ * The ONLY seam: one orchestration, then the shadow composition over THAT run. (An optional OUTPUT-ONLY callback receives the baseline result the moment it exists.) The Constructor result is returned exactly as the orchestration produced
  * it; the shadow outcome can never alter, delay or abort it.
  */
-export async function observeShadowPolicy(request: ConstructDayRequest, deps: DayConstructorOrchestratorDeps): Promise<{ result: OrchestrateConstructDayResult; shadowPolicy: ShadowPolicyRun }> {
+export async function observeShadowPolicy(request: ConstructDayRequest, deps: DayConstructorOrchestratorDeps, onBaselineResult?: (result: OrchestrateConstructDayResult) => void): Promise<{ result: OrchestrateConstructDayResult; shadowPolicy: ShadowPolicyRun }> {
   const prepared = await preparePromotionInputs(request, deps);
+  // OUTPUT-ONLY hand-off (O5 P4b5): the instant the ONE baseline orchestration has produced its result -- strictly BEFORE any shadow work -- a caller that needs to
+  // survive a later shadow failure can hold it, so it never has to run the baseline again. It carries the baseline RESULT only: no authority goes in or out.
+  try {
+    onBaselineResult?.(prepared.result);
+  } catch {
+    // The hand-off failed: the shadow side continues; the caller simply does not hold the result.
+  }
   if (prepared.run.status !== 'PREPARED') return { result: prepared.result, shadowPolicy: Object.freeze({ status: 'UNAVAILABLE', reason: prepared.run.reason }) };
   try {
     return { result: prepared.result, shadowPolicy: compose(prepared.run) };

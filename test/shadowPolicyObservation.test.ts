@@ -13,6 +13,7 @@
  *   Part 6  purity: deeply frozen, scalar-only, detached, deterministic, no clock; Constructor / signed preview parity
  *   Part 7  diagnostics-only incidence over the real pipeline (reported, never used to tune anything)
  */
+import { rankedShuffle } from './fixtureSupport';
 import { observeShadowPolicy, type ShadowPolicyObservation, type ShadowPolicyRun } from '../apps/web/lib/shadowPolicyObservation';
 import { preparePromotionInputs } from '../apps/web/lib/promotionInputPreparation';
 import { orchestrateConstructDay, type ConstructDayRequest, type DayConstructorOrchestratorDeps, type RequestedDayIntent } from '../apps/web/lib/dayConstructorOrchestrator';
@@ -214,7 +215,22 @@ const noDates = (v: unknown): boolean => [...reachable(v)].every((o) => !(o inst
     const normal = await observeShadowPolicy(request(multiIntents, multiAll), mkDeps(multiPools, 2));
     check('SAME-RUN SENTINEL: loaders that THROW on any second call do not disturb the shadow composition (it used only the first run) -- the result and every observation equal the normal run', sentinelRun.result.status === 'READY' && calls.blocking === 1 && calls.duration <= 1 && JSON.stringify(sentinelRun.shadowPolicy) === JSON.stringify(normal.shadowPolicy) && JSON.stringify(sentinelRun.result) === JSON.stringify(normal.result));
     // The seam takes a request and dependencies and nothing else: there is no way to hand it a basis, placements, a PromotionInput or a counterfactual.
-    check('THE SEAM IS (request, deps) ONLY: `observeShadowPolicy` has two parameters, so no caller can supply the four P4b3 authorities independently', observeShadowPolicy.length === 2);
+    check('THE SEAM TAKES (request, deps) AND ONE OUTPUT-ONLY CALLBACK: `observeShadowPolicy` has no parameter through which a basis, placements, a PromotionInput or a counterfactual could be supplied (the optional third parameter only RECEIVES the baseline result)', observeShadowPolicy.length === 3);
+    // O5 P4b5: the baseline result is handed out the moment it exists, strictly before any shadow work, exactly once, and a failing callback cannot disturb the observation.
+    {
+      let handed = 0; let generatedAtHandOff = -1; let generated = 0; let handedResult: unknown;
+      LC.generateLocalCounterfactual = (a: any) => { generated += 1; return realGenerate(a); };
+      let withCallback: Awaited<ReturnType<typeof observeShadowPolicy>>;
+      try { withCallback = await observeShadowPolicy(request(acceptIntents, ['O', 'P']), mkDeps(acceptPools, 3), (r) => { handed += 1; generatedAtHandOff = generated; handedResult = r; }); } finally { restore(); }
+      const plainRun = await observeShadowPolicy(request(acceptIntents, ['O', 'P']), mkDeps(acceptPools, 3));
+      check('THE BASELINE HAND-OFF: the callback receives the baseline result exactly once, BEFORE any generation (no shadow work had run), and it is the very result the seam returns', handed === 1 && generatedAtHandOff === 0 && generated === 1 && handedResult === withCallback.result && JSON.stringify(withCallback.shadowPolicy) === JSON.stringify(plainRun.shadowPolicy) && JSON.stringify(withCallback.result) === JSON.stringify(plainRun.result));
+      const hostile = await observeShadowPolicy(request(acceptIntents, ['O', 'P']), mkDeps(acceptPools, 3), () => { throw new Error('callback broke'); });
+      check('a callback that throws is isolated: the result and every observation are unchanged', JSON.stringify(hostile) === JSON.stringify(plainRun));
+      const failing = fresh(); let called = 0;
+      let rejected = false;
+      try { await observeShadowPolicy(request(acceptIntents, ['O', 'P']), { ...mkDeps(acceptPools, 3, failing), loadBlockingPlans: async () => { failing.blocking += 1; throw new Error('database unavailable'); } }, () => { called += 1; }); } catch { rejected = true; }
+      check('PRE-BASELINE: when the baseline orchestration itself throws, the callback is NEVER called (no result existed) and the error surfaces', rejected && called === 0 && failing.blocking === 1);
+    }
   }
 
   // ======================================================================
@@ -245,13 +261,13 @@ const noDates = (v: unknown): boolean => [...reachable(v)].every((o) => !(o inst
     for (let n = 0; n < 700; n += 1) {
       const k = 3 + Math.floor(rnd() * 4); const ids = ['A', 'B', 'C', 'D', 'E', 'F'].slice(0, k); const limit = 1 + Math.floor(rnd() * 3);
       const SLOTS = slotsUpTo(n % 2 === 0 ? 13 : 15);
-      const pools: Record<string, PoolItem[]> = {}; ids.forEach((id) => { const sub = SLOTS.filter(() => rnd() < 0.65).map((slot) => ({ slot, label: LABELS[Math.floor(rnd() * 4)] } as PoolItem)); sub.sort((a, b) => LABELS.indexOf(a.label) - LABELS.indexOf(b.label) || rnd() - 0.5); pools[id] = sub; });
+      const pools: Record<string, PoolItem[]> = {}; ids.forEach((id) => { const sub = SLOTS.filter(() => rnd() < 0.65).map((slot) => ({ slot, label: LABELS[Math.floor(rnd() * 4)] } as PoolItem)); rankedShuffle(sub, rnd, (p) => LABELS.indexOf(p.label)); pools[id] = sub; });
       if (n % 3 === 0) {
         const m = 1 + Math.floor(rnd() * 3); const bs = ['09:00', '11:00', '13:00'].slice(0, m); ids.length = 0; bs.forEach((_, i) => ids.push(['A', 'B', 'C'][i])); ids.push('P');
         const hh = (mins: number) => `${String(Math.floor(mins / 60)).padStart(2, '0')}:${String(mins % 60).padStart(2, '0')}`;
         const win = (s: number): [string, string] => [hh(s), hh(s + 60)];
         bs.forEach((b, i) => { const bm = Number(b.slice(0, 2)) * 60; const extra = SLOTS.filter(() => rnd() < 0.3).slice(0, 3).map((slot) => ({ slot, label: LABELS[Math.floor(rnd() * 4)] })); pools[ids[i]] = [{ slot: win(bm), label: 'EXCELLENT' as Label }, ...extra]; });
-        pools.P = bs.flatMap((b) => { const bm = Number(b.slice(0, 2)) * 60; return [bm + 30, bm, bm - 30].filter((x) => x >= 9 * 60 && x <= 15 * 60 && rnd() < 0.7).map((x) => ({ slot: win(x), label: LABELS[Math.floor(rnd() * 4)] })); }).sort((a, b) => LABELS.indexOf(a.label) - LABELS.indexOf(b.label) || rnd() - 0.5);
+        pools.P = rankedShuffle(bs.flatMap((b) => { const bm = Number(b.slice(0, 2)) * 60; return [bm + 30, bm, bm - 30].filter((x) => x >= 9 * 60 && x <= 15 * 60 && rnd() < 0.7).map((x) => ({ slot: win(x), label: LABELS[Math.floor(rnd() * 4)] })); }), rnd, (p) => LABELS.indexOf(p.label));
       }
       const intents = ids.map((id, i) => req(id, i));
       const observed = await observeShadowPolicy(request(intents, ids), mkDeps(pools, limit));
@@ -272,6 +288,7 @@ const noDates = (v: unknown): boolean => [...reachable(v)].every((o) => !(o inst
     console.log(`     incidence: ${JSON.stringify(tally)} generationUnavailable: ${JSON.stringify(generationUnavailable)} reject: ${JSON.stringify(reject)} acceptanceUnavailable: ${JSON.stringify(acceptanceUnavailable)}`);
     const sum = tally.accept + Object.values(reject).reduce((a, b) => a + b, 0) + Object.values(acceptanceUnavailable).reduce((a, b) => a + b, 0);
     check(`INCIDENCE (diagnostics only): ${tally.runs} runs, ${tally.promotionInputs} PromotionInputs, ${tally.generationReady} generation READY, ACCEPT ${tally.accept}, REJECT ${JSON.stringify(reject)}, generation unavailable ${JSON.stringify(generationUnavailable)}, acceptance unavailable ${JSON.stringify(acceptanceUnavailable)} -- measured, never used to tune a policy`, tally.promotionInputs > 300 && sum === tally.generationReady && tally.promotionInputs === tally.generationReady + Object.values(generationUnavailable).reduce((a, b) => a + b, 0));
+    check('AUTHORITATIVE, ENGINE-INDEPENDENT INCIDENCE (O5 P4b5: the seeded fixture no longer uses a random sort comparator, so these exact counts hold on every supported Node): 700 runs, 452 PromotionInputs = 444 generation READY + 8 NO_ACTIONABLE_PROMOTION_SLOT; 444 = 23 ACCEPT + 372 OWNER_WOULD_BE_UNPLACED + 49 OWNER_TIMING_DEGRADED; 0 acceptance unavailable', tally.runs === 700 && tally.promotionInputs === 452 && tally.generationReady === 444 && JSON.stringify(generationUnavailable) === JSON.stringify({ NO_ACTIONABLE_PROMOTION_SLOT: 8 }) && tally.accept === 23 && reject.OWNER_WOULD_BE_UNPLACED === 372 && reject.OWNER_TIMING_DEGRADED === 49 && Object.keys(reject).length === 2 && Object.keys(acceptanceUnavailable).length === 0 && 23 + 372 + 49 === 444 && 444 + 8 === 452);
     check('every observation matches the plain orchestration it shadowed (zero result mismatches) and repeats byte-identically (zero non-determinism)', tally.resultMismatch === 0 && tally.nonDeterministic === 0);
   }
 
