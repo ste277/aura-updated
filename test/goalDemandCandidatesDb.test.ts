@@ -28,6 +28,7 @@ import { persistAcceptedConstructedDay } from '../apps/web/lib/dayConstructorAcc
 import type { AcceptConstructedDayRequest } from '../apps/web/lib/dayConstructorAcceptance';
 import { movePlannedActivity } from '../apps/web/lib/planMove';
 import { loadEligibleGoalDemand, createRealGoalDemandCandidatesDeps, type GoalDemandCandidatesDeps } from '../apps/web/lib/goalDemandCandidates';
+import { fixtureAnchorMonday, addCivilDays, realClockReferenceForFixture } from './lifecycleFixtureCalendar';
 
 let allPassed = true;
 function check(label: string, condition: boolean) {
@@ -36,6 +37,17 @@ function check(label: string, condition: boolean) {
 }
 
 const TZ = 'Asia/Kolkata';
+
+// CI reliability -- the fixture week is ANCHORED in the future (see test/lifecycleFixtureCalendar.ts), not hard-coded. `movePlannedActivity` requires a destination in the future
+// of the DATABASE clock (clock_timestamp()), so a calendar frozen at the day this test was written began failing on every run once that day passed. Production is right
+// to refuse a past destination; the weekday structure this fixture needs (a Monday-start Rhythm week, a Sunday before the boundary, the next Monday and Tuesday) is
+// identical on every run date, and the whole week is always in the future of the real clocks production consults.
+const ANCHOR_MONDAY = fixtureAnchorMonday(realClockReferenceForFixture(), TZ);
+const TUE = addCivilDays(ANCHOR_MONDAY, 1);
+const WED = addCivilDays(ANCHOR_MONDAY, 2);
+const SUN = addCivilDays(ANCHOR_MONDAY, 6);
+const NEXT_MON = addCivilDays(ANCHOR_MONDAY, 7);
+const NEXT_TUE = addCivilDays(ANCHOR_MONDAY, 8);
 
 async function sql(text: string, params: unknown[] = []): Promise<any[]> {
   const c = await beginTransaction();
@@ -71,6 +83,8 @@ async function main() {
     await sql(`UPDATE "GoalActivityOccurrence" SET "plannedActivityId" = NULL WHERE "userId" = ANY($1::text[])`, [[user.id, other.id]]);
     await sql(`UPDATE "PlannedActivity" SET "rescheduledFromPlanId" = NULL WHERE "userId" = ANY($1::text[])`, [[user.id, other.id]]);
     await sql(`DELETE FROM "PlannedActivity" WHERE "userId" = ANY($1::text[])`, [[user.id, other.id]]);
+    // The acceptance idempotency claims are keyed by the (now deterministic) clientRequestId; a rerun against the same upserted users must not replay a prior run's claims.
+    await sql(`DELETE FROM "PlanCreationIdempotency" WHERE "userId" = ANY($1::text[])`, [[user.id, other.id]]);
     await sql(`DELETE FROM "GoalActivity" WHERE "userId" = ANY($1::text[])`, [[user.id, other.id]]);
     await sql(`DELETE FROM "Goal" WHERE "userId" = ANY($1::text[])`, [[user.id, other.id]]);
   };
@@ -80,7 +94,7 @@ async function main() {
 
   async function makeOccurrenceFor(goalActivityId: string, intentId: string, startIso: string, endIso: string, windowDate: string) {
     const req: AcceptConstructedDayRequest = {
-      clientRequestId: `goal-demand-${intentId}-${Date.now()}`,
+      clientRequestId: `goal-demand-${ANCHOR_MONDAY}-${intentId}`,
       constructionWindow: window(windowDate, `${windowDate}T06:00:00Z`, `${windowDate}T20:00:00Z`),
       proposedItems: [{ intentId, title: 'Workout', placementSource: 'SELECTED_CANDIDATE', start: iso(startIso), end: iso(endIso) }],
     };
@@ -96,7 +110,7 @@ async function main() {
     // ============================================================
     const ga1 = await addGoalActivity(user.id, goal.id, { title: 'Workout', activityId: null });
     await setRhythm(ga1!.id, 3);
-    const r1 = await loadEligibleGoalDemand(realDeps, user.id, '2026-10-06', TZ);
+    const r1 = await loadEligibleGoalDemand(realDeps, user.id, TUE, TZ);
     check('1. a SUGGESTED N_PER_WEEK activity with no prior occurrences is returned', r1.status === 'OK' && r1.candidates.some((c) => c.goalActivityId === ga1!.id && c.remainingThisWeek === 3));
 
     // ============================================================
@@ -105,9 +119,9 @@ async function main() {
     // gate exactly -- never offered again while a commitment is live,
     // regardless of remaining numeric capacity).
     // ============================================================
-    const d2 = await makeOccurrenceFor(ga1!.id, 'intent-ga1-a', '2026-10-06T10:00:00Z', '2026-10-06T10:10:00Z', '2026-10-06');
+    const d2 = await makeOccurrenceFor(ga1!.id, 'intent-ga1-a', `${TUE}T10:00:00Z`, `${TUE}T10:10:00Z`, TUE);
     check('2. setup: first occurrence SAVED (now UPCOMING)', d2.status === 'SAVED');
-    const r2 = await loadEligibleGoalDemand(realDeps, user.id, '2026-10-06', TZ);
+    const r2 = await loadEligibleGoalDemand(realDeps, user.id, TUE, TZ);
     check('3. an activity with a live UPCOMING commitment is excluded entirely, even though numeric capacity (3-0-1=2) would otherwise be positive', r2.status === 'OK' && !r2.candidates.some((c) => c.goalActivityId === ga1!.id));
 
     // ============================================================
@@ -116,7 +130,7 @@ async function main() {
     // ============================================================
     const plan2 = (d2 as any).plans[0];
     await logPlannedActivity(user.id, plan2.id);
-    const r4 = await loadEligibleGoalDemand(realDeps, user.id, '2026-10-06', TZ);
+    const r4 = await loadEligibleGoalDemand(realDeps, user.id, TUE, TZ);
     const c4 = r4.status === 'OK' ? r4.candidates.find((c) => c.goalActivityId === ga1!.id) : undefined;
     check('4. after LOGGING the commitment, the activity is eligible again with remainingThisWeek reduced to 2 (3 - 1 completed)', !!c4 && c4.remainingThisWeek === 2);
 
@@ -125,9 +139,9 @@ async function main() {
     // ============================================================
     const ga5 = await addGoalActivity(user.id, goal.id, { title: 'Workout', activityId: null });
     await setRhythm(ga5!.id, 2);
-    const d5 = await makeOccurrenceFor(ga5!.id, 'intent-ga5', '2026-10-06T11:00:00Z', '2026-10-06T11:10:00Z', '2026-10-06');
+    const d5 = await makeOccurrenceFor(ga5!.id, 'intent-ga5', `${TUE}T11:00:00Z`, `${TUE}T11:10:00Z`, TUE);
     await skipPlannedActivity(user.id, (d5 as any).plans[0].id);
-    const r5 = await loadEligibleGoalDemand(realDeps, user.id, '2026-10-06', TZ);
+    const r5 = await loadEligibleGoalDemand(realDeps, user.id, TUE, TZ);
     const c5 = r5.status === 'OK' ? r5.candidates.find((c) => c.goalActivityId === ga5!.id) : undefined;
     check('5. a SKIPPED occurrence frees its capacity back to full (remainingThisWeek 2, not 1)', !!c5 && c5.remainingThisWeek === 2);
 
@@ -136,9 +150,9 @@ async function main() {
     // ============================================================
     const ga6 = await addGoalActivity(user.id, goal.id, { title: 'Workout', activityId: null });
     await setRhythm(ga6!.id, 2);
-    const d6 = await makeOccurrenceFor(ga6!.id, 'intent-ga6', '2026-10-06T12:00:00Z', '2026-10-06T12:10:00Z', '2026-10-06');
+    const d6 = await makeOccurrenceFor(ga6!.id, 'intent-ga6', `${TUE}T12:00:00Z`, `${TUE}T12:10:00Z`, TUE);
     await cancelPlannedActivity(user.id, (d6 as any).plans[0].id);
-    const r6 = await loadEligibleGoalDemand(realDeps, user.id, '2026-10-06', TZ);
+    const r6 = await loadEligibleGoalDemand(realDeps, user.id, TUE, TZ);
     const c6 = r6.status === 'OK' ? r6.candidates.find((c) => c.goalActivityId === ga6!.id) : undefined;
     check('6. a CANCELLED occurrence frees its capacity back to full (remainingThisWeek 2, not 1)', !!c6 && c6.remainingThisWeek === 2);
 
@@ -148,10 +162,10 @@ async function main() {
     // ============================================================
     const ga7 = await addGoalActivity(user.id, goal.id, { title: 'Workout', activityId: null });
     await setRhythm(ga7!.id, 2);
-    const d7 = await makeOccurrenceFor(ga7!.id, 'intent-ga7', '2026-10-06T13:00:00Z', '2026-10-06T13:10:00Z', '2026-10-06');
-    const moved7 = await movePlannedActivity(user.id, (d7 as any).plans[0].id, { newStartAt: iso('2026-10-06T15:00:00Z') });
+    const d7 = await makeOccurrenceFor(ga7!.id, 'intent-ga7', `${TUE}T13:00:00Z`, `${TUE}T13:10:00Z`, TUE);
+    const moved7 = await movePlannedActivity(user.id, (d7 as any).plans[0].id, { newStartAt: iso(`${TUE}T15:00:00Z`) });
     await logPlannedActivity(user.id, moved7.to.id);
-    const r7 = await loadEligibleGoalDemand(realDeps, user.id, '2026-10-06', TZ);
+    const r7 = await loadEligibleGoalDemand(realDeps, user.id, TUE, TZ);
     const c7 = r7.status === 'OK' ? r7.candidates.find((c) => c.goalActivityId === ga7!.id) : undefined;
     check('7. a Moved-then-Logged occurrence counts as exactly ONE completion (remainingThisWeek 1 of 2), never two', !!c7 && c7.remainingThisWeek === 1);
 
@@ -160,11 +174,11 @@ async function main() {
     // ============================================================
     const ga8 = await addGoalActivity(user.id, goal.id, { title: 'Workout', activityId: null });
     await setRhythm(ga8!.id, 1);
-    const d8 = await makeOccurrenceFor(ga8!.id, 'intent-ga8', '2026-10-06T14:00:00Z', '2026-10-06T14:10:00Z', '2026-10-06');
+    const d8 = await makeOccurrenceFor(ga8!.id, 'intent-ga8', `${TUE}T14:00:00Z`, `${TUE}T14:10:00Z`, TUE);
     await logPlannedActivity(user.id, (d8 as any).plans[0].id);
-    const r8sameWeek = await loadEligibleGoalDemand(realDeps, user.id, '2026-10-07', TZ);
+    const r8sameWeek = await loadEligibleGoalDemand(realDeps, user.id, WED, TZ);
     check('8a. same week as the completion: 1/week exhausted, excluded', r8sameWeek.status === 'OK' && !r8sameWeek.candidates.some((c) => c.goalActivityId === ga8!.id));
-    const r8nextWeek = await loadEligibleGoalDemand(realDeps, user.id, '2026-10-13', TZ); // Tuesday of the NEXT Monday-start week
+    const r8nextWeek = await loadEligibleGoalDemand(realDeps, user.id, NEXT_TUE, TZ); // Tuesday of the NEXT Monday-start week (anchor + 8 days)
     const c8next = r8nextWeek.status === 'OK' ? r8nextWeek.candidates.find((c) => c.goalActivityId === ga8!.id) : undefined;
     check('8b. a new week resets capacity -- eligible again with full remainingThisWeek 1, no debt carried', !!c8next && c8next.remainingThisWeek === 1);
 
@@ -173,12 +187,12 @@ async function main() {
     // ============================================================
     const ga9 = await addGoalActivity(user.id, goal.id, { title: 'Workout', activityId: null });
     await setRhythm(ga9!.id, 1);
-    // 2026-10-11 is a Sunday (the last day of the week containing 2026-10-06).
-    const d9 = await makeOccurrenceFor(ga9!.id, 'intent-ga9', '2026-10-11T14:00:00Z', '2026-10-11T14:10:00Z', '2026-10-11');
+    // SUN is the Sunday (the last day) of the anchored Monday-start week that contains TUE.
+    const d9 = await makeOccurrenceFor(ga9!.id, 'intent-ga9', `${SUN}T14:00:00Z`, `${SUN}T14:10:00Z`, SUN);
     await logPlannedActivity(user.id, (d9 as any).plans[0].id);
-    const r9sunday = await loadEligibleGoalDemand(realDeps, user.id, '2026-10-11', TZ);
+    const r9sunday = await loadEligibleGoalDemand(realDeps, user.id, SUN, TZ);
     check('9a. planning for Sunday itself: the Sunday completion exhausts THIS week -> excluded', r9sunday.status === 'OK' && !r9sunday.candidates.some((c) => c.goalActivityId === ga9!.id));
-    const r9monday = await loadEligibleGoalDemand(realDeps, user.id, '2026-10-12', TZ); // the next day, Monday, the NEW week
+    const r9monday = await loadEligibleGoalDemand(realDeps, user.id, NEXT_MON, TZ); // the next day, Monday, the NEW week
     const c9monday = r9monday.status === 'OK' ? r9monday.candidates.find((c) => c.goalActivityId === ga9!.id) : undefined;
     check('9b. planning for the very next day (Monday, crossing the week boundary): eligible again, full capacity', !!c9monday && c9monday.remainingThisWeek === 1);
 
@@ -192,9 +206,9 @@ async function main() {
     await setRhythm(ga10b!.id, 1);
     const ga10c = await addGoalActivity(user.id, goal2.id, { title: 'Read 20 pages (exhausted)', activityId: null });
     await setRhythm(ga10c!.id, 1);
-    const d10c = await makeOccurrenceFor(ga10c!.id, 'intent-ga10c', '2026-10-06T16:00:00Z', '2026-10-06T16:10:00Z', '2026-10-06');
+    const d10c = await makeOccurrenceFor(ga10c!.id, 'intent-ga10c', `${TUE}T16:00:00Z`, `${TUE}T16:10:00Z`, TUE);
     await logPlannedActivity(user.id, (d10c as any).plans[0].id);
-    const r10 = await loadEligibleGoalDemand(realDeps, user.id, '2026-10-06', TZ);
+    const r10 = await loadEligibleGoalDemand(realDeps, user.id, TUE, TZ);
     check(
       '10. multiple Goals -> eligible activities from BOTH Goals are returned together, ineligible one excluded, no cross-Goal grouping',
       r10.status === 'OK' && r10.candidates.some((c) => c.goalActivityId === ga10a!.id) && r10.candidates.some((c) => c.goalActivityId === ga10b!.id) && !r10.candidates.some((c) => c.goalActivityId === ga10c!.id)
@@ -207,7 +221,7 @@ async function main() {
     const ga11 = await addGoalActivity(user.id, archivedGoal.id, { title: 'Stretch', activityId: null });
     await setRhythm(ga11!.id, 3);
     await archiveGoal(user.id, archivedGoal.id);
-    const r11 = await loadEligibleGoalDemand(realDeps, user.id, '2026-10-06', TZ);
+    const r11 = await loadEligibleGoalDemand(realDeps, user.id, TUE, TZ);
     check('11. a GoalActivity belonging to an ARCHIVED Goal is excluded', r11.status === 'OK' && !r11.candidates.some((c) => c.goalActivityId === ga11!.id));
 
     // ============================================================
@@ -216,14 +230,14 @@ async function main() {
     const ga12 = await addGoalActivity(user.id, goal.id, { title: 'Yoga', activityId: null });
     await setRhythm(ga12!.id, 3);
     await sql(`UPDATE "GoalActivity" SET status = 'DISMISSED' WHERE id = $1`, [ga12!.id]);
-    const r12 = await loadEligibleGoalDemand(realDeps, user.id, '2026-10-06', TZ);
+    const r12 = await loadEligibleGoalDemand(realDeps, user.id, TUE, TZ);
     check('12. a DISMISSED GoalActivity is excluded', r12.status === 'OK' && !r12.candidates.some((c) => c.goalActivityId === ga12!.id));
 
     // ============================================================
     // 13. Rhythm NONE excluded
     // ============================================================
     const ga13 = await addGoalActivity(user.id, goal.id, { title: 'One-off errand', activityId: null }); // rhythmKind left NONE
-    const r13 = await loadEligibleGoalDemand(realDeps, user.id, '2026-10-06', TZ);
+    const r13 = await loadEligibleGoalDemand(realDeps, user.id, TUE, TZ);
     check('13. a Rhythm NONE (finite) GoalActivity is excluded from Goal-demand entirely', r13.status === 'OK' && !r13.candidates.some((c) => c.goalActivityId === ga13!.id));
 
     // ============================================================
@@ -231,8 +245,8 @@ async function main() {
     // ============================================================
     const otherGa = await addGoalActivity(other.id, otherGoal.id, { title: 'Other users workout', activityId: null });
     await setRhythm(otherGa!.id, 3);
-    const r14ForUser = await loadEligibleGoalDemand(realDeps, user.id, '2026-10-06', TZ);
-    const r14ForOther = await loadEligibleGoalDemand(realDeps, other.id, '2026-10-06', TZ);
+    const r14ForUser = await loadEligibleGoalDemand(realDeps, user.id, TUE, TZ);
+    const r14ForOther = await loadEligibleGoalDemand(realDeps, other.id, TUE, TZ);
     check('14a. User A never receives User B\'s GoalActivity', r14ForUser.status === 'OK' && !r14ForUser.candidates.some((c) => c.goalActivityId === otherGa!.id));
     check('14b. User B correctly receives their OWN GoalActivity', r14ForOther.status === 'OK' && r14ForOther.candidates.some((c) => c.goalActivityId === otherGa!.id));
 
@@ -240,7 +254,7 @@ async function main() {
     // 15. Zero eligible -> successful empty result (never LOAD_FAILED)
     // ============================================================
     const freshUser = await upsertUserByEmail({ email: 'test-goal-demand-candidates-fresh@example.com', cityName: 'Chennai', latitude: 13.0827, longitude: 80.2707, timezone: TZ });
-    const r15 = await loadEligibleGoalDemand(realDeps, freshUser.id, '2026-10-06', TZ);
+    const r15 = await loadEligibleGoalDemand(realDeps, freshUser.id, TUE, TZ);
     check('15. a user with zero GoalActivities at all gets a successful, empty result', r15.status === 'OK' && r15.candidates.length === 0);
 
     // ============================================================
@@ -253,9 +267,9 @@ async function main() {
               (SELECT count(*)::int FROM "GoalActivityExecution" WHERE "goalActivityId" IN (SELECT id FROM "GoalActivity" WHERE "userId" = $1)) AS exec`,
       [user.id]
     );
-    await loadEligibleGoalDemand(realDeps, user.id, '2026-10-06', TZ);
-    await loadEligibleGoalDemand(realDeps, user.id, '2026-10-06', TZ);
-    await loadEligibleGoalDemand(realDeps, user.id, '2026-10-06', TZ);
+    await loadEligibleGoalDemand(realDeps, user.id, TUE, TZ);
+    await loadEligibleGoalDemand(realDeps, user.id, TUE, TZ);
+    await loadEligibleGoalDemand(realDeps, user.id, TUE, TZ);
     const after16 = await sql(
       `SELECT (SELECT count(*)::int FROM "GoalActivityOccurrence" WHERE "userId" = $1) AS occ,
               (SELECT count(*)::int FROM "PlannedActivity" WHERE "userId" = $1) AS plan,
@@ -290,7 +304,7 @@ async function main() {
         return realDeps.loadRhythmFacts(userId, ids, timezone);
       },
     };
-    const r17 = await loadEligibleGoalDemand(countingDeps, user.id, '2026-10-06', TZ);
+    const r17 = await loadEligibleGoalDemand(countingDeps, user.id, TUE, TZ);
     check('17a. exactly ONE discovery query call for this whole request, independent of candidate count', discoveryCalls === 1);
     check('17b. exactly ONE batched facts query call for this whole request, independent of candidate count', factsCalls === 1);
     check('17c. every batch-created activity is present in that single result', r17.status === 'OK' && ga17extra.every((id) => r17.candidates.some((c) => c.goalActivityId === id)));
@@ -298,8 +312,8 @@ async function main() {
     // ============================================================
     // 18. Deterministic stable output across repeated calls
     // ============================================================
-    const rA = await loadEligibleGoalDemand(realDeps, user.id, '2026-10-06', TZ);
-    const rB = await loadEligibleGoalDemand(realDeps, user.id, '2026-10-06', TZ);
+    const rA = await loadEligibleGoalDemand(realDeps, user.id, TUE, TZ);
+    const rB = await loadEligibleGoalDemand(realDeps, user.id, TUE, TZ);
     const idsA = rA.status === 'OK' ? rA.candidates.map((c) => c.goalActivityId).join(',') : '';
     const idsB = rB.status === 'OK' ? rB.candidates.map((c) => c.goalActivityId).join(',') : '';
     check('18. repeated calls against unchanged state return candidates in the identical order', idsA.length > 0 && idsA === idsB);
@@ -311,7 +325,7 @@ async function main() {
     // ============================================================
     const ga19 = await addGoalActivity(user.id, goal.id, { title: 'Workout (live commitment)', activityId: null });
     await setRhythm(ga19!.id, 3);
-    await makeOccurrenceFor(ga19!.id, 'intent-ga19', '2026-10-06T17:00:00Z', '2026-10-06T17:10:00Z', '2026-10-06'); // left UPCOMING, never resolved.
+    await makeOccurrenceFor(ga19!.id, 'intent-ga19', `${TUE}T17:00:00Z`, `${TUE}T17:10:00Z`, TUE); // left UPCOMING, never resolved.
     const raw19 = await loadCandidateGoalActivitiesForRhythmDemand(user.id);
     check('19a. the raw discovery query never returns the DISMISSED activity from check 12', !raw19.some((r) => r.goalActivityId === ga12!.id));
     check('19b. the raw discovery query never returns the ARCHIVED-Goal activity from check 11', !raw19.some((r) => r.goalActivityId === ga11!.id));
