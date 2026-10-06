@@ -372,6 +372,11 @@ jobs:
       # but runs into it must block), through the one shared definition.
       - name: Run Constructor blocker overlap architecture test
         run: npx ts-node test/dayConstructorBlockerOverlapArchitecture.test.ts
+      # CI reliability -- the automatic Goal lifecycle DB fixture's calendar is ANCHORED to a future Monday (a hard-coded week rotted on 2026-10-06 when production's
+      # stale-preview / move-destination checks, which read the real clocks, began refusing its now-past days). This pure suite proves the anchor over every simulated
+      # run date and keeps the DB fixture free of hard-coded dates and uncontrolled clock reads.
+      - name: Run lifecycle fixture calendar test
+        run: npx ts-node test/lifecycleFixtureCalendar.test.ts
       - name: Run Constructor blocker overlap behavior test
         run: npx ts-node test/dayConstructorBlockerOverlap.test.ts
       # Schedule write consistency S1 -- acceptance's fresh-blocker read uses the
