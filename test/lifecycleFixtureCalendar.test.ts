@@ -4,7 +4,7 @@
  *   Part 1  civil-date arithmetic (leap day, month and year boundaries, weekdays)
  *   Part 2  `fixtureAnchorMonday` over EVERY simulated run date for five years x three times of day x four timezones: always a Monday, always 28..34 local
  *           days ahead, a pure function of the LOCAL civil date (instants either side of local midnight pick the right day), never mutating its input and repeating
- *   Part 3  the four anchored DB fixtures (automaticGoalLifecycleClosureDb, goalDecompositionPlanningHandoffDb, decisionFactsThreadingDb, goalDemandCandidatesDb -- one root cause) cannot silently regain a hard-coded calendar or an uncontrolled clock read
+ *   Part 3  the five anchored DB fixtures (automaticGoalLifecycleClosureDb, goalDecompositionPlanningHandoffDb, decisionFactsThreadingDb, goalDemandCandidatesDb, activeResultMaterializerDb -- one root cause) cannot silently regain a hard-coded calendar or an uncontrolled clock read
  */
 import fs from 'fs';
 import path from 'path';
@@ -74,7 +74,7 @@ const violations = (fixture: string, helper: string): string[] => {
   return out;
 };
 const count = (re: RegExp, s: string) => (s.match(re) ?? []).length;
-const FIXTURES = ['automaticGoalLifecycleClosureDb', 'goalDecompositionPlanningHandoffDb', 'decisionFactsThreadingDb', 'goalDemandCandidatesDb'];
+const FIXTURES = ['automaticGoalLifecycleClosureDb', 'goalDecompositionPlanningHandoffDb', 'decisionFactsThreadingDb', 'goalDemandCandidatesDb', 'activeResultMaterializerDb'];
 const helperSrc = fs.readFileSync(path.join(__dirname, 'lifecycleFixtureCalendar.ts'), 'utf8');
 const fixtureSources = FIXTURES.map((name) => fs.readFileSync(path.join(__dirname, `${name}.test.ts`), 'utf8'));
 for (const [i, name] of FIXTURES.entries()) check(`THE DB FIXTURE ${name}: no hard-coded calendar date, no \`Date.now()\` / no-argument \`new Date()\` / timer read, anchored through the helper, timezone pinned to Asia/Kolkata (never the host timezone)`, violations(fixtureSources[i], helperSrc).length === 0);
@@ -82,7 +82,7 @@ check('the helper holds the ONE approved wall-clock read', violations(fixtureSou
 const fixtureSrc = fixtureSources[0];
 check('MUTATION: a hard-coded date, a `Date.now()`, a no-argument `new Date()` in a fixture, a second clock read in the helper, an unpinned timezone and an unanchored fixture are each detected (for every guarded fixture)', FIXTURES.every((_, i) => { const f = fixtureSources[i]; return violations(`${f}\nconst d = iso('2026-10-06T02:00:00Z');`, helperSrc).includes('hard-coded calendar date') && violations(`${f}\nconst k = \`a-\${Date.now()}\`;`, helperSrc).includes('uncontrolled clock read in the fixture') && violations(`${f}\nconst now = new Date();`, helperSrc).includes('uncontrolled clock read in the fixture') && violations(f.replace("const TZ = 'Asia/Kolkata';", "const TZ = process.env.TZ ?? 'UTC';"), helperSrc).includes('timezone is not pinned') && violations(f.replace(/const (ANCHOR_MONDAY|MON) = fixtureAnchorMonday\(realClockReferenceForFixture\(\), TZ\);/, "const $1 = '2026-10-05';"), helperSrc).includes('fixture is not anchored through the calendar helper'); }) && violations(fixtureSrc, `${helperSrc}\nexport const x = () => Date.now();`).includes('helper reads the wall clock more than once'));
 const ci = fs.readFileSync(path.join(__dirname, '..', '.github', 'workflows', 'ci.yml'), 'utf8');
-check('REQUIRED CI: this suite runs in the pure job and the four anchored DB fixtures remain required DB-job steps', ci.includes('npx ts-node test/lifecycleFixtureCalendar.test.ts') && FIXTURES.every((name) => ci.includes(`npx ts-node test/${name}.test.ts`)));
+check('REQUIRED CI: this suite runs in the pure job and the five anchored DB fixtures remain required DB-job steps', ci.includes('npx ts-node test/lifecycleFixtureCalendar.test.ts') && FIXTURES.every((name) => ci.includes(`npx ts-node test/${name}.test.ts`)));
 
 if (!allPassed) { console.error('SOME LIFECYCLE FIXTURE CALENDAR CHECKS FAILED'); process.exit(1); }
 console.log('ALL LIFECYCLE FIXTURE CALENDAR CHECKS PASSED');
