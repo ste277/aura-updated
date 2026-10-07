@@ -97,18 +97,18 @@ export async function observeShadowPolicy(request: ConstructDayRequest, deps: Da
   }
   if (prepared.run.status !== 'PREPARED') return { result: prepared.result, shadowPolicy: Object.freeze({ status: 'UNAVAILABLE', reason: prepared.run.reason }) };
   try {
-    return { result: prepared.result, shadowPolicy: compose(prepared.run) };
+    return { result: prepared.result, shadowPolicy: compose(prepared.run, prepared.result) };
   } catch {
     return { result: prepared.result, shadowPolicy: Object.freeze({ status: 'UNAVAILABLE', reason: 'OBSERVATION_FAILED' }) };
   }
 }
 
-function compose(run: PreparedRun): ShadowPolicyRun {
-  return Object.freeze({ status: 'READY', observations: Object.freeze(run.promotions.map((pair) => observePair(run, pair))) });
+function compose(run: PreparedRun, baseline: OrchestrateConstructDayResult): ShadowPolicyRun {
+  return Object.freeze({ status: 'READY', observations: Object.freeze(run.promotions.map((pair) => observePair(run, pair, baseline))) });
 }
 
 /** One promotion, from its own typed pair and the run-level authorities: generation, then (only if READY) acceptance. Never throws. */
-function observePair(run: PreparedRun, pair: PromotionPair): ShadowPolicyObservation {
+function observePair(run: PreparedRun, pair: PromotionPair, baseline: OrchestrateConstructDayResult): ShadowPolicyObservation {
   const candidateIntentId = pair.input.candidateIntentId;
   let stage: 'GENERATION' | 'ACCEPTANCE' = 'GENERATION';
   try {
@@ -116,7 +116,8 @@ function observePair(run: PreparedRun, pair: PromotionPair): ShadowPolicyObserva
     if (generated.status !== 'READY') return Object.freeze({ outcome: 'GENERATION_UNAVAILABLE', candidateIntentId, reason: generated.reason });
     stage = 'ACCEPTANCE';
     // O5 P4c3: the predicate is evaluated INSIDE the typed-authority mint, over exactly this counterfactual and these same-run authorities; the brand exists only for an ACCEPT.
-    const { acceptance, accepted } = mintAcceptedCounterfactual({ constructionBasis: run.constructionBasis, baselinePlacements: run.baselinePlacements, promotionInput: pair.input, counterfactual: generated.counterfactual });
+    // O5 P4c4a: the mint also receives THIS run's baseline result (`prepared.result`) and binds it privately to the authority (same-run provenance of the baseline).
+    const { acceptance, accepted } = mintAcceptedCounterfactual({ constructionBasis: run.constructionBasis, baselinePlacements: run.baselinePlacements, promotionInput: pair.input, counterfactual: generated.counterfactual }, baseline);
     const counterfactual = summarize(run, generated.counterfactual);
     if (acceptance.status === 'ACCEPT') {
       const observation = Object.freeze({ outcome: 'ACCEPT', candidateIntentId, counterfactual } as const);
