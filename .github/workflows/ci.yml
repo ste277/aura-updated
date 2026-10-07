@@ -367,6 +367,13 @@ jobs:
         run: npx ts-node test/shadowPolicyObservation.test.ts
       - name: Run shadow policy observation architecture test
         run: npx ts-node test/shadowPolicyObservationArchitecture.test.ts
+      # O5 P4c3 -- the PURE ACTIVE RESULT MATERIALIZER (inert): the typed same-run accepted-counterfactual authority (minted only by a P4b3 ACCEPT), the V1
+      # selector (APPLY iff exactly one ACCEPT in a complete observation set), the materializability gate (P the only Deferred / conflict, else fail closed) and
+      # the materializer (the authoritative READY result from the baseline + basis + authority, no second Constructor). Nothing consumes it; no ACTIVE mode.
+      - name: Run active result materializer test
+        run: npx ts-node test/activeResultMaterializer.test.ts
+      - name: Run active result materializer architecture test
+        run: npx ts-node test/activeResultMaterializerArchitecture.test.ts
       # O5 P4b5 -- the SHADOW EXECUTION & OBSERVATION BOUNDARY: OFF by default, server-controlled (AURA_SHADOW_POLICY_MODE, exactly SHADOW), no ACTIVE. In SHADOW the Plan Day
       # preview's ONE orchestration runs through the P4b4 composition instead of the plain call (never in addition); every shadow failure is isolated; only a minimal
       # aggregate metrics record (closed categories and counts, no identifiers / text / instants / placements) leaves, through a one-way synchronous sink.
@@ -649,6 +656,11 @@ jobs:
       # sequence (no extra query, no second snapshot, no write, no transaction), snapshot loaded once, domain rows unchanged; the shadow executes over real pressure and contention.
       - name: Run shadow policy execution DB test
         run: npx ts-node test/shadowPolicyExecutionDb.test.ts
+      # O5 P4c3 -- the pure active result materializer over REAL Goal-occurrence data through the production preview boundary: a real P4b3 ACCEPT is selected and materialized,
+      # every materialized result satisfies the property oracle, the selector and materializer send zero SQL, the baseline response and domain rows are unchanged, and the
+      # signed result passes the existing acceptance validation. Inert: nothing consumes the materialized result.
+      - name: Run active result materializer DB test
+        run: npx ts-node test/activeResultMaterializerDb.test.ts
       # Constructor scheduling correctness -- real-DB regression for the
       # overnight/multi-day overlapping plan blocker defect.
       - name: Run Constructor overlapping blocker DB test
