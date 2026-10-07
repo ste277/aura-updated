@@ -51,11 +51,11 @@ const TZ = 'Asia/Kolkata';
 const ANCHOR_MONDAY = fixtureAnchorMonday(realClockReferenceForFixture(), TZ);
 const FRIDAY = addCivilDays(ANCHOR_MONDAY, 4);
 const EMAIL = 'test-p4c3-active-materializer@example.com';
-// ROOT CAUSE OF THE CI-vs-LOCAL DIVERGENCE (proved by flipping ONLY the server setting): `User.birthDate` is a timestamptz and `updateBirthProfile` is handed the bare string
-// '1990-06-15', which PostgreSQL resolves in the SERVER SESSION TimeZone. On a UTC server (CI) that is 1990-06-15T00:00Z (natal nakshatra Shatabhisha); on an Asia/Kolkata server
-// it is 1990-06-14T18:30Z (Dhanishta). The personal muhurta context feeds the REAL timing search, so the whole baseline -- and whether a promotion is ACCEPTed -- depended on the
-// database server's timezone. The fixture pins the exact instant, independent of the server setting.
-const BIRTH_INSTANT = '1990-06-15T00:00:00Z';
+// The CI-vs-LOCAL divergence this probe once had was `updateBirthProfile` handing PostgreSQL the bare string '1990-06-15', which the server resolved in its SESSION TimeZone (UTC in
+// CI -> natal nakshatra Shatabhisha; Asia/Kolkata locally -> Dhanishta), so the real timing search and whether a promotion was ACCEPTed depended on the database server's timezone.
+// Birth Data B2 fixed the writer at its source (it now stores the explicit UTC-midnight surrogate, see apps/web/lib/birthDate.ts), so the probe passes the plain CIVIL date like
+// every production caller and no longer needs to pin an instant itself. birthDateWritersDb.test.ts proves the invariance across database timezones.
+const BIRTH_CIVIL_DATE = '1990-06-15';
 
 async function sql(text: string, params: unknown[] = []): Promise<any[]> {
   const c = await beginTransaction();
@@ -77,7 +77,7 @@ async function capturing<T>(fn: () => Promise<T> | T): Promise<{ value: T; state
 
 async function main() {
   const u = await upsertUserByEmail({ email: EMAIL, cityName: 'Chennai', latitude: 13.0827, longitude: 80.2707, timezone: TZ });
-  await updateBirthProfile(u.id, { birthDate: BIRTH_INSTANT, birthTime: '08:30', birthCityName: 'Chennai', birthLatitude: 13.0827, birthLongitude: 80.2707, birthTimezone: TZ });
+  await updateBirthProfile(u.id, { birthDate: BIRTH_CIVIL_DATE, birthTime: '08:30', birthCityName: 'Chennai', birthLatitude: 13.0827, birthLongitude: 80.2707, birthTimezone: TZ });
   const cleanup = async () => {
     await sql(`UPDATE "GoalActivityOccurrence" SET "plannedActivityId" = NULL WHERE "userId" = $1`, [u.id]);
     await sql(`DELETE FROM "GoalActivityOccurrence" WHERE "userId" = $1`, [u.id]);

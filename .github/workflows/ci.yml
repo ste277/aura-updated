@@ -396,6 +396,10 @@ jobs:
       # run date and keeps the DB fixture free of hard-coded dates and uncontrolled clock reads.
       - name: Run lifecycle fixture calendar test
         run: npx ts-node test/lifecycleFixtureCalendar.test.ts
+      # Birth Data Correctness B2 -- the civil birth date is stored as an explicit UTC-midnight surrogate: the pure canonicalization, the three-writer guard and the
+      # read-only operator diagnostic's shape. (The DB timezone matrix runs in the Day Constructor acceptance DB job.)
+      - name: Run birth date canonicalization test
+        run: npx ts-node test/birthDateCanonicalization.test.ts
       - name: Run Constructor blocker overlap behavior test
         run: npx ts-node test/dayConstructorBlockerOverlap.test.ts
       # Schedule write consistency S1 -- acceptance's fresh-blocker read uses the
@@ -661,6 +665,10 @@ jobs:
       # signed result passes the existing acceptance validation. Inert: nothing consumes the materialized result.
       - name: Run active result materializer DB test
         run: npx ts-node test/activeResultMaterializerDb.test.ts
+      # Birth Data Correctness B2 -- the three birth-date writers are invariant to the PostgreSQL session TimeZone and the process TZ: stored surrogate, round trip, natal context,
+      # the REAL timing search / constructed day identical across 5 database timezones; UTC parity for every date 1900-2100; the read-only diagnostic. Synthetic users only.
+      - name: Run birth date writers DB test
+        run: npx ts-node test/birthDateWritersDb.test.ts
       # Constructor scheduling correctness -- real-DB regression for the
       # overnight/multi-day overlapping plan blocker defect.
       - name: Run Constructor overlapping blocker DB test

@@ -15,6 +15,7 @@ import {
   type GoalActivityRhythm,
 } from './goalActivityRhythm';
 import { getDatePartsInTimezone } from './timezone';
+import { canonicalizeCivilBirthDate } from './birthDate';
 import { toPersistedGoalActivityExecutionSnapshot, fromPersistedGoalActivityExecutionSnapshot, resolveCompletionActualValue } from './goalActivityExecution';
 
 // Sandbox-only substitute for @prisma/client (its engine binary can't be downloaded
@@ -180,7 +181,8 @@ export async function updateBirthProfile(
     `UPDATE "User" SET "birthDate" = $2, "birthTime" = $3, "birthCityName" = $4,
        "birthLatitude" = $5, "birthLongitude" = $6, "birthTimezone" = $7
      WHERE id = $1 RETURNING *`,
-    [userId, input.birthDate, input.birthTime, input.birthCityName, input.birthLatitude, input.birthLongitude, input.birthTimezone]
+    // B2: the civil date is stored as an EXPLICIT UTC-midnight surrogate (see birthDate.ts) -- never as a bare date string that PostgreSQL would resolve in its session TimeZone.
+    [userId, canonicalizeCivilBirthDate(input.birthDate), input.birthTime, input.birthCityName, input.birthLatitude, input.birthLongitude, input.birthTimezone]
   );
   return result.rows[0];
 }
@@ -246,7 +248,7 @@ export async function createSavedPerson(ownerUserId: string, input: SavedPersonI
       ownerUserId,
       input.name,
       input.relationshipType,
-      input.birthDate,
+      canonicalizeCivilBirthDate(input.birthDate), // B2: explicit UTC-midnight surrogate, never a bare date string
       input.birthTime,
       input.birthTimezone,
       input.birthCityName ?? null,
@@ -270,7 +272,7 @@ export async function updateSavedPerson(ownerUserId: string, personId: string, i
       ownerUserId,
       input.name,
       input.relationshipType,
-      input.birthDate,
+      canonicalizeCivilBirthDate(input.birthDate), // B2: explicit UTC-midnight surrogate, never a bare date string
       input.birthTime,
       input.birthTimezone,
       input.birthCityName ?? null,
