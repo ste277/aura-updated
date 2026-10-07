@@ -62,7 +62,7 @@ const ACCEPTANCE = 'apps/web/lib/counterfactualAcceptance.ts';
 /** O5 P4b4 -- the same-run shadow policy composition: the ONLY production consumer of the preparation boundary (it runs ONE orchestration through it; nothing consumes the composition). */
 const SHADOW_POLICY = 'apps/web/lib/shadowPolicyObservation.ts';
 /** O5 P4c3 -- the typed accepted-counterfactual authority, the pure selector / materializability gate / active materializer: they legitimately name the (P4b2/P4b3) counterfactual, exactly like the other P4b modules; pinned by their own architecture guard. */
-const P4C3_ACTIVE = ['acceptedCounterfactual', 'activeSelector', 'activeMaterializability', 'activeResultMaterializer', 'shadowEvidence', 'materializationInvariants'].map((n) => `apps/web/lib/${n}.ts`);
+const P4C3_ACTIVE = ['acceptedCounterfactual', 'activeSelector', 'activeMaterializability', 'activeResultMaterializer', 'shadowEvidence', 'materializationInvariants', 'shadowReviewDelta'].map((n) => `apps/web/lib/${n}.ts`);
 const PROMO_FILES = [ASM, PREP, CONTENTION_AUTH, LOCAL, ACCEPTANCE, SHADOW_POLICY];
 const ORCH = 'apps/web/lib/dayConstructorOrchestrator.ts';
 const OBS = 'apps/web/lib/shadowPressureObservation.ts';

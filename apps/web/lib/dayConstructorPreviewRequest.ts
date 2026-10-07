@@ -33,6 +33,7 @@ import {
 import type { ConstructionWindowSource, DayIntentFlexibility, DayIntentImportance } from './dayIntent';
 import { signPreviewResultBody } from './dayConstructorPreviewIntegrity';
 import { orchestrateConstructDayWithShadowPolicy, type ShadowPolicyExecution } from './shadowPolicyExecution';
+import type { ShadowReviewPayload } from './shadowReviewDelta';
 import type { User } from './db';
 
 // ============================================================
@@ -444,9 +445,21 @@ export async function handleDayConstructorPreviewRequest(deps: DayConstructorPre
       deps.loadSchedulingContext && deps.loadDecisionFactsFromContext
         ? { loadContext: (request) => deps.loadSchedulingContext!(user, request), decisionFactsFromContext: (request, context) => deps.loadDecisionFactsFromContext!(user, request, context) }
         : undefined;
-    const result = await runDayConstructorPreview(body, user.timezone, now, orchestratorDeps, decisionFactsSource, opportunityRangeDeps, schedulingBinding, deps.shadowPolicy ? deps.shadowPolicy() : undefined);
+    // O5 SHADOW ROLLOUT R3 -- the Preview-only manual review hand-off: an OUTPUT-ONLY closure receives whatever `shadowPolicyExecution.ts`
+    // hands back (nothing, unless the server's own `reviewEligible` AND the run's own evidence both say so -- see createServerShadowPolicyExecution
+    // and shadowEvidence.ts). This file never decides eligibility itself; it only wires the hand-off and, if present, attaches the minimal
+    // display payload to the body BEFORE signing, as a plain sibling field `shadowReview` that `signPreviewResultBody` passes through
+    // untouched (it only ever rewrites `preview.constructedDay.proposedItems`), so the review alternative carries no acceptance token.
+    // Delegated via the PROTOTYPE chain (never spread/Object.assign-copied): `sink` and every other settings accessor stay exactly as lazy
+    // as before (a hostile `get sink()` is still touched only once, at the one existing call site that reads it) -- only `onReview` is an
+    // own property of this new object.
+    let review: ShadowReviewPayload | undefined;
+    const shadowPolicy = deps.shadowPolicy ? deps.shadowPolicy() : undefined;
+    const executionWithReviewHandoff: ShadowPolicyExecution | undefined = shadowPolicy ? Object.assign(Object.create(shadowPolicy), { onReview: (r: ShadowReviewPayload) => { review = r; } }) : undefined;
+    const result = await runDayConstructorPreview(body, user.timezone, now, orchestratorDeps, decisionFactsSource, opportunityRangeDeps, schedulingBinding, executionWithReviewHandoff);
+    const bodyWithReview = review ? { ...result.body, shadowReview: review } : result.body;
     // F1 trust correction: sign each proposed item for THIS user so acceptance can verify what it means.
-    return { ...result, body: signPreviewResultBody(session.userId, result.body) };
+    return { ...result, body: signPreviewResultBody(session.userId, bodyWithReview) };
   } catch (err) {
     // Genuine infrastructure/unexpected failure -- never leaked to the
     // client (this ticket's own section 13), distinct from every typed

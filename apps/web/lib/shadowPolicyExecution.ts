@@ -52,6 +52,7 @@
 import { orchestrateConstructDay, type ConstructDayRequest, type DayConstructorOrchestratorDeps, type OrchestrateConstructDayResult } from './dayConstructorOrchestrator';
 import { observeShadowPolicy, type ShadowPolicyObservation, type ShadowPolicyRun } from './shadowPolicyObservation';
 import { bucketOfCount, deriveShadowEvidence, NOT_EVALUATED_EVIDENCE, type ShadowCountBucket, type ShadowEvidence, type ShadowEvidenceDeps } from './shadowEvidence';
+import { buildShadowReviewPayload, type ShadowReviewPayload } from './shadowReviewDelta';
 
 export type ShadowPolicyMode = 'OFF' | 'SHADOW';
 
@@ -110,6 +111,20 @@ export interface ShadowPolicyExecution {
   /** Test injection only: the evidence derivation (to exercise an observability failure) and its materializer (to exercise the invariant FAIL path). Production uses `deriveShadowEvidence`. */
   readonly deriveEvidence?: typeof deriveShadowEvidence;
   readonly evidenceDeps?: ShadowEvidenceDeps;
+  /**
+   * O5 SHADOW ROLLOUT R3 (production-used, NOT test-injection-only): whether this server's Vercel Environment is one where the
+   * Preview manual-review hand-off may run at all -- computed ONCE, server-side, from `VERCEL_ENV`, by `createServerShadowPolicyExecution`
+   * (see `isPreviewReviewEligibleEnvironment`). `false` in every real Production deployment, structurally, regardless of `onReview` or
+   * `AURA_SHADOW_POLICY_MODE`. A caller-supplied `true` has no effect on its own: `onReview` below is also required.
+   */
+  readonly reviewEligible?: boolean;
+  /**
+   * O5 SHADOW ROLLOUT R3: an OUTPUT-ONLY hand-off, invoked at most once per request, ONLY when `reviewEligible` is true AND the run's
+   * own evidence reaches selector=APPLY, gate=MATERIALIZABLE, materializer=READY, invariant=PASS -- the minimal display payload
+   * (`shadowReviewDelta.ts`), never the raw authority/result objects. The caller (the Preview response boundary) captures it to attach
+   * to the HTTP response; nothing here writes it anywhere.
+   */
+  readonly onReview?: (review: ShadowReviewPayload) => void;
 }
 
 /** The default server sink: one structured aggregate line per SHADOW request. Only ever invoked in SHADOW. */
@@ -119,9 +134,14 @@ export const serverLogShadowPolicySink: ShadowPolicySink = Object.freeze({
   },
 });
 
-/** The production execution settings: the mode from the server environment ONLY (OFF unless exactly SHADOW) and the default server sink. */
+/** The one server-controlled signal for R3: exactly Vercel's own `VERCEL_ENV !== 'production'` -- Production is excluded structurally and by exact value match (never by guessing what Production "usually" looks like); every other value (Preview, Development, or unset -- plain local `next dev`) is potentially eligible, a deliberate choice documented here: there is no narrower cohort control available (SHADOW ROLLOUT R1/R2), so the safer failure direction for an internal experiment harness is "excluded only from the one environment that matters." */
+export function isPreviewReviewEligibleEnvironment(raw: unknown): boolean {
+  return raw !== 'production';
+}
+
+/** The production execution settings: the mode from the server environment ONLY (OFF unless exactly SHADOW), the default server sink, and (R3) the server-only Preview-review eligibility signal. */
 export function createServerShadowPolicyExecution(): ShadowPolicyExecution {
-  return Object.freeze({ mode: parseShadowPolicyMode(process.env[SHADOW_POLICY_MODE_ENV]), sink: serverLogShadowPolicySink });
+  return Object.freeze({ mode: parseShadowPolicyMode(process.env[SHADOW_POLICY_MODE_ENV]), sink: serverLogShadowPolicySink, reviewEligible: isPreviewReviewEligibleEnvironment(process.env.VERCEL_ENV) });
 }
 
 function bucketOf(elapsedMs: number): ShadowPolicyLatencyBucket {
@@ -188,10 +208,23 @@ function startTimer(execution: ShadowPolicyExecution): number | undefined {
 /** The evidence derivation, isolated: any failure becomes a bounded technical-failure category and never propagates. */
 function evidenceFor(execution: ShadowPolicyExecution, baseline: OrchestrateConstructDayResult, run: ShadowPolicyRun): ShadowEvidence {
   try {
-    return (execution.deriveEvidence ?? deriveShadowEvidence)(baseline, run, execution.evidenceDeps);
+    const deps: ShadowEvidenceDeps = execution.reviewEligible && execution.onReview ? { ...execution.evidenceDeps, onReviewReady: reviewHandoff(execution.onReview) } : execution.evidenceDeps ?? {};
+    return (execution.deriveEvidence ?? deriveShadowEvidence)(baseline, run, deps);
   } catch {
     return Object.freeze({ ...NOT_EVALUATED_EVIDENCE, failure: 'EVIDENCE_FAILED' });
   }
+}
+
+/** O5 SHADOW ROLLOUT R3: turns the raw same-run hand-off (baseline + materialized result + authority) into the minimal display payload and forwards it -- isolated, so a build/forward failure can never affect the evidence outcome above it. */
+function reviewHandoff(onReview: (review: ShadowReviewPayload) => void): ShadowEvidenceDeps['onReviewReady'] {
+  return (handoff) => {
+    try {
+      const review = buildShadowReviewPayload(handoff.baselineResult, handoff.materializedResult, handoff.accepted);
+      if (review) onReview(review);
+    } catch {
+      // Isolated: a payload-build failure never reaches the evidence outcome and never throws.
+    }
+  };
 }
 
 function emitRun(execution: ShadowPolicyExecution, run: ShadowPolicyRun, started: number | undefined, baseline: OrchestrateConstructDayResult, baselineAt: number | undefined): void {

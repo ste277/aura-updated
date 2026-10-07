@@ -17,9 +17,11 @@ import {
 } from '../../components/ui';
 import { colors, spacing, radius } from '../../components/theme';
 import { DayPlanPreviewController } from '../../components/DayPlanPreviewController';
+import { formatIsoClockTime } from '../../lib/dayPlanPreviewPresentation';
 import type { ConstructDayPreview } from '../../lib/dayConstructorOrchestrator';
 import type { PersistedPlanSummary } from '../../lib/acceptConstructedDay';
 import { previewConstructedDay } from '../../lib/dayConstructorPreviewClient';
+import type { ShadowReviewPayload } from '../../lib/shadowReviewDelta';
 import type { PlanningHorizon } from '../../lib/planningHorizon';
 import { PLAN_DAY_QUICK_PICKS, quickPickIcon, type PlanDayQuickPick } from '../../lib/planDayQuickPicks';
 import {
@@ -146,6 +148,36 @@ export interface PlanDayClientProps {
   autoGoalSuggestions: readonly GoalDemandCandidate[];
 }
 
+/**
+ * O5 SHADOW ROLLOUT R3 -- the internal-only comparison panel. Rendered ONLY when the server already attached a
+ * `shadowReview` (never a client decision -- see `PlanDayClient`'s own `submitPreview`). Deliberately plain and
+ * clearly non-customer-facing (this ticket's own section 14): a labelled internal panel, the CHANGED placements
+ * only (never a full second day), and one plain-language sentence for why -- no technical vocabulary, no buttons,
+ * nothing persisted, nothing sent anywhere (section 15/17: "prefer less machinery").
+ */
+function ShadowReviewPanel({ review, timezone }: { review: ShadowReviewPayload; timezone: string }) {
+  const reasonCopy: Record<ShadowReviewPayload['reason'], string> = {
+    WOULD_OTHERWISE_BE_DEFERRED: 'This was the last known opportunity to fit this activity in the planning horizon.',
+  };
+  const time = (iso?: string) => (iso ? formatIsoClockTime(iso, timezone) : undefined);
+  return (
+    <SurfaceCard style={{ marginTop: spacing.lg, border: `1px dashed ${colors.borderSubtle}` }}>
+      <p style={{ margin: 0, fontSize: 11, fontWeight: 800, letterSpacing: 0.6, textTransform: 'uppercase', color: colors.textMuted }}>Shadow review — internal</p>
+      <div style={{ display: 'flex', flexDirection: 'column', gap: spacing.md, marginTop: spacing.md }}>
+        {review.changedItems.map((item) => (
+          <div key={item.intentId}>
+            <p style={{ margin: 0, fontSize: 11, fontWeight: 800, letterSpacing: 0.4, textTransform: 'uppercase', color: colors.textMuted }}>{item.kind === 'PROMOTED' ? 'Promoted' : 'Moved'}</p>
+            <p style={{ margin: 0, fontSize: 14, fontWeight: 750, color: colors.textPrimary }}>{item.title}</p>
+            <p style={{ margin: 0, fontSize: 12, color: colors.textMuted }}>Current plan: {item.baseline.status === 'DEFERRED' ? 'Not scheduled' : `${time(item.baseline.start)}–${time(item.baseline.end)}`}</p>
+            <p style={{ margin: 0, fontSize: 12, color: colors.textSecondary }}>Shadow: {time(item.alternative.start)}–{time(item.alternative.end)}</p>
+          </div>
+        ))}
+      </div>
+      <p style={{ margin: `${spacing.md}px 0 0`, fontSize: 12, color: colors.textMuted }}>Why Aura considered this: {reasonCopy[review.reason] ?? 'A scheduling trade-off was available.'}</p>
+    </SurfaceCard>
+  );
+}
+
 export function PlanDayClient({ timezone, planningDate, horizon, availabilityConfigured, goalActivities, captures, autoGoalSuggestions }: PlanDayClientProps) {
   const router = useRouter();
   const authenticated = !!timezone && !!planningDate && !!horizon;
@@ -190,6 +222,11 @@ export function PlanDayClient({ timezone, planningDate, horizon, availabilityCon
   // meaningful once `planRevealed` is true.
   const [addPickerExpanded, setAddPickerExpanded] = useState(false);
   const [preview, setPreview] = useState<ConstructDayPreview | null>(null);
+  // O5 SHADOW ROLLOUT R3 -- present ONLY when the server already decided this response is Preview-eligible AND the
+  // real evidence reached APPLY/MATERIALIZABLE/READY/PASS for THIS request (shadowPolicyExecution.ts/shadowEvidence.ts).
+  // Never set by anything client-side; a Production response never carries it, so this stays `undefined` there.
+  // Ephemeral: never persisted, cleared on discard/refresh exactly like `preview` itself.
+  const [shadowReview, setShadowReview] = useState<ShadowReviewPayload | undefined>(undefined);
   const [entryError, setEntryError] = useState<PlanDayEntryErrorPresentation | null>(null);
   // Planning Horizon V1 PR P2 -- true only when a Preview call returned
   // FUTURE_AVAILABILITY_REQUIRED despite bootstrap saying configured
@@ -369,6 +406,7 @@ export function PlanDayClient({ timezone, planningDate, horizon, availabilityCon
     const result = await previewConstructedDay(intents, planningDate);
     if (result.status === 'READY') {
       setPreview(result.preview);
+      setShadowReview(result.shadowReview);
       setPhase('PREVIEW');
     } else if (result.status === 'FUTURE_AVAILABILITY_REQUIRED') {
       // Stale-availability race (this ticket's own section 17) -- route
@@ -386,6 +424,7 @@ export function PlanDayClient({ timezone, planningDate, horizon, availabilityCon
     // Never saves, never calls acceptance (this ticket's own section 34)
     // -- rows are retained exactly as the user left them.
     setPreview(null);
+    setShadowReview(undefined);
     setPhase('ENTRY');
   }
 
@@ -448,14 +487,17 @@ export function PlanDayClient({ timezone, planningDate, horizon, availabilityCon
         )}
 
         {phase === 'PREVIEW' && preview ? (
-          <DayPlanPreviewController
-            preview={preview}
-            onDiscard={handleDiscard}
-            onSaved={handleSaved}
-            onRefreshRequested={handleRefreshRequested}
-            goalActivityLinks={buildGoalActivityLinksForAccept(rows, preview.constructedDay.proposedItems)}
-            captureLinks={buildCaptureLinksForAccept(rows, preview.constructedDay.proposedItems)}
-          />
+          <>
+            <DayPlanPreviewController
+              preview={preview}
+              onDiscard={handleDiscard}
+              onSaved={handleSaved}
+              onRefreshRequested={handleRefreshRequested}
+              goalActivityLinks={buildGoalActivityLinksForAccept(rows, preview.constructedDay.proposedItems)}
+              captureLinks={buildCaptureLinksForAccept(rows, preview.constructedDay.proposedItems)}
+            />
+            {shadowReview && timezone ? <ShadowReviewPanel review={shadowReview} timezone={timezone} /> : null}
+          </>
         ) : (
           <>
             <PageHeader title="Plan my day" subtitle={horizon === 'TOMORROW' ? 'What do you want to get done tomorrow?' : 'What do you want to get done today?'} />

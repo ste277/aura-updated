@@ -388,6 +388,18 @@ jobs:
         run: npx ts-node test/shadowEvidence.test.ts
       - name: Run shadow evidence architecture test
         run: npx ts-node test/shadowEvidenceArchitecture.test.ts
+      # O5 SHADOW ROLLOUT R3 -- the Preview-only manual review harness: an authorized internal tester can see, in the SAME request/response, what
+      # the real P4c1/P4c2a/P4c3/invariant pipeline WOULD have built, only when the server's own VERCEL_ENV says this is not Production AND the
+      # run reaches selector=APPLY/gate=MATERIALIZABLE/materializer=READY/invariant=PASS. Ephemeral (no storage), not independently acceptable
+      # (no token), never alters the baseline, never changes the aggregate log line.
+      - name: Run shadow review delta test
+        run: npx ts-node test/shadowReviewDelta.test.ts
+      - name: Run shadow review delta architecture test
+        run: npx ts-node test/shadowReviewDeltaArchitecture.test.ts
+      - name: Run shadow rollout R3 preview review test
+        run: npx ts-node test/shadowRolloutR3PreviewReview.test.ts
+      - name: Run shadow rollout R3 architecture test
+        run: npx ts-node test/shadowRolloutR3Architecture.test.ts
       # O5 P4b5 -- engine-independent seeded fixtures: the incidence sweeps no longer use a random sort comparator (whose order depended on the engine's sort
       # algorithm, so Node 20 CI and a newer local Node generated different fixtures from the same seed). This narrow test proves the root cause and the fix
       # and forbids the pattern; the incidence suites pin exact authoritative counts, so any engine difference fails here on Node 20.
@@ -672,6 +684,12 @@ jobs:
       # signed result passes the existing acceptance validation. Inert: nothing consumes the materialized result.
       - name: Run active result materializer DB test
         run: npx ts-node test/activeResultMaterializerDb.test.ts
+      # O5 SHADOW ROLLOUT R3 -- the Preview-only manual review harness over REAL Goal-occurrence data: the directed real ACCEPT reaches
+      # APPLY/MATERIALIZABLE/READY/PASS and the response carries a review payload with zero extra writes and the identical SQL sequence
+      # to the plain preview; Production (reviewEligible=false) on the SAME run carries no review field; the review alternative is
+      # rejected by the real route-level signature gate; normal baseline acceptance persists exactly as before.
+      - name: Run shadow rollout R3 preview review DB test
+        run: npx ts-node test/shadowRolloutR3PreviewReviewDb.test.ts
       # Birth Data Correctness B2 -- the three birth-date writers are invariant to the PostgreSQL session TimeZone and the process TZ: stored surrogate, round trip, natal context,
       # the REAL timing search / constructed day identical across 5 database timezones; UTC parity for every date 1900-2100; the read-only diagnostic. Synthetic users only.
       - name: Run birth date writers DB test
