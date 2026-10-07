@@ -106,7 +106,7 @@ check('persistence still materializes occurrences through the existing gate and 
 /** Repo-relative, forward-slash path (exemptions are EXACT paths, never basenames: no other `route.ts` can ride on them). */
 const repoPath = (f: string) => path.relative(root, f).split(path.sep).join('/');
 const POLICY_VOCABULARY_EXEMPT = new Set([
-  'decisionPressure', 'shadowPressureEvaluation', 'shadowPressureObservation', 'promotionInput', 'promotionInputPreparation', 'shadowPolicyObservation', 'shadowPolicyExecution', 'activeSelector',
+  'decisionPressure', 'shadowPressureEvaluation', 'shadowPressureObservation', 'promotionInput', 'promotionInputPreparation', 'shadowPolicyObservation', 'shadowPolicyExecution', 'activeSelector', 'shadowEvidence',
 ].map((name) => `apps/web/lib/${name}.ts`).concat(['apps/web/lib/dayConstructorPreviewRequest.ts', 'apps/web/app/api/day-constructor/preview/route.ts']));
 const policyVocabularyOffenders = (paths: string[]) => paths.filter((f) => !POLICY_VOCABULARY_EXEMPT.has(f));
 

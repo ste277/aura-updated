@@ -26,9 +26,11 @@ import { createIntentRowFromAutoGoalSuggestion, buildRequestedIntentsForSubmissi
 import { encodeGoalDemandIntentId } from '../apps/web/lib/goalDemandIntentId';
 import { loadDecisionSchedulingContext } from '../apps/web/lib/decisionSchedulingContextLoader';
 import { observeShadowPolicy } from '../apps/web/lib/shadowPolicyObservation';
+import type { ShadowPolicyMetrics } from '../apps/web/lib/shadowPolicyExecution';
 import { selectActiveCounterfactual } from '../apps/web/lib/activeSelector';
 import { materializeActiveResult } from '../apps/web/lib/activeResultMaterializer';
 import { evaluateMaterializability } from '../apps/web/lib/activeMaterializability';
+import { deriveShadowEvidence } from '../apps/web/lib/shadowEvidence';
 import { persistAcceptedConstructedDay } from '../apps/web/lib/dayConstructorAcceptancePersistence';
 import { authorizeGoalActivityLinks } from '../apps/web/lib/goalDemandProvenanceAuthorization';
 import { sortByOverloadPrecedence, type DayIntent } from '../apps/web/lib/dayIntent';
@@ -107,13 +109,13 @@ async function main() {
     const acceptanceNow = localDateTimeToUTC(FRIDAY, '08:30', TZ);
     const counts = async () => JSON.stringify((await sql(`SELECT (SELECT count(*)::int FROM "PlannedActivity" WHERE "userId" = $1) AS plans, (SELECT count(*)::int FROM "GoalActivityOccurrence" WHERE "userId" = $1) AS occ, (SELECT count(*)::int FROM "GoalActivity" WHERE "userId" = $1) AS ga, (SELECT count(*)::int FROM "HabitLog" WHERE "userId" = $1) AS logs`, [u.id]))[0]);
     type Observed = Awaited<ReturnType<typeof observeShadowPolicy>>;
-    interface Captured { observed?: Observed; request?: ConstructDayRequest }
+    interface Captured { observed?: Observed; request?: ConstructDayRequest; metrics?: ShadowPolicyMetrics[] }
     const boundary = (rows: PlanDayIntentRow[], captured?: Captured): DayConstructorPreviewBoundaryDeps => ({
       getSession: () => ({ userId: u.id }), getUser: (id) => getUserById(id), getBody: async () => ({ intents: buildRequestedIntentsForSubmission(rows, TZ, FRIDAY) }), now: () => now,
       createOrchestratorDeps: createRealDayConstructorOrchestratorDeps,
       loadSchedulingContext: (usr, request) => loadDecisionSchedulingContext({ userId: usr.id, planningDate: request.targetDate, timezone: request.timezone }),
       loadDecisionFactsFromContext: (usr, request, context) => loadGoalDecisionFacts(usr, request, createGoalDemandDepsFromSchedulingContext(context)),
-      ...(captured ? { shadowPolicy: () => ({ mode: 'SHADOW' as const, observe: async (request: ConstructDayRequest, deps: any, onBaseline?: (r: OrchestrateConstructDayResult) => void) => { captured.request = request; captured.observed = await observeShadowPolicy(request, deps, onBaseline); return captured.observed; } }) } : {}),
+      ...(captured ? { shadowPolicy: () => ({ mode: 'SHADOW' as const, sink: { record: (m: ShadowPolicyMetrics) => { captured.metrics = [...(captured.metrics ?? []), m]; } }, observe: async (request: ConstructDayRequest, deps: any, onBaseline?: (r: OrchestrateConstructDayResult) => void) => { captured.request = request; captured.observed = await observeShadowPolicy(request, deps, onBaseline); return captured.observed; } }) } : {}),
     });
 
     const rnd = seededRandom(20261009);
@@ -125,7 +127,8 @@ async function main() {
     for (let k = 0; k < EXTRA; k += 1) { const n = 2 + Math.floor(rnd() * 6); scenarios.push({ n, durations: Array.from({ length: n }, () => DURATIONS[Math.floor(rnd() * DURATIONS.length)]), pick: seededShuffle(baseRows.map((_, i) => i), rnd).slice(0, n) }); }
 
     const outcomes: Record<string, number> = {};
-    const tally = { runs: 0, ready: 0, evaluated: 0, withObservations: 0, accepts: 0, apply: 0, materialized: 0, unavailable: {} as Record<string, number>, noChange: {} as Record<string, number>, baselineIdentity: 0, violations: 0, nonZeroSqlPure: 0, bodyMismatch: 0, writes: 0 };
+    const tally = { runs: 0, ready: 0, evaluated: 0, withObservations: 0, accepts: 0, apply: 0, materialized: 0, unavailable: {} as Record<string, number>, noChange: {} as Record<string, number>, baselineIdentity: 0, violations: 0, nonZeroSqlPure: 0, bodyMismatch: 0, writes: 0, evidenceLines: 0, evidenceMismatch: 0, invariantNotPass: 0, technicalFailure: 0 };
+    const evidenceCounts: Record<string, number> = {};
     let firstViolation = '';
     for (const sc of scenarios) {
       const rows = (sc.pick ? sc.pick.map((i) => baseRows[i]) : baseRows.slice(0, sc.n)).map((row, i) => ({ ...row, durationMinutes: sc.durations[i] }));
@@ -154,6 +157,20 @@ async function main() {
       });
       if (piped.statements.length > 0) tally.nonZeroSqlPure += 1;
       const out = piped.value;
+      // O5 SHADOW EVIDENCE on real data: the emitted per-run evidence must agree with the test's own independent pipeline over the same run (no second computation, no disagreement)
+      {
+        const lines = captured.metrics ?? [];
+        const ev = lines.length === 1 ? lines[0].evidence : undefined;
+        if (!ev) { tally.evidenceMismatch += 1; } else {
+          tally.evidenceLines += 1;
+          const key = `${ev.selector}/${ev.gate}/${ev.materializer}/${ev.invariant}`;
+          evidenceCounts[key] = (evidenceCounts[key] ?? 0) + 1;
+          const applied = out.kind === 'ACTIVE' || 'applied' in out;
+          if ((ev.selector === 'APPLY') !== applied || (ev.materializer === 'READY') !== (out.kind === 'ACTIVE')) tally.evidenceMismatch += 1;
+          if (ev.materializer === 'READY' && ev.invariant !== 'PASS') tally.invariantNotPass += 1;
+          if (ev.failure !== 'NONE') tally.technicalFailure += 1;
+        }
+      }
       if (out.kind === 'BASELINE') {
         tally.baselineIdentity += 1;
         if ('applied' in out) tally.unavailable[out.reason] = (tally.unavailable[out.reason] ?? 0) + 1; else tally.noChange[out.reason] = (tally.noChange[out.reason] ?? 0) + 1;
@@ -170,11 +187,13 @@ async function main() {
     }
     console.log(`     real-data incidence: ${JSON.stringify(tally)}`);
     console.log(`     real-data observation outcomes: ${JSON.stringify(outcomes)}`);
+    console.log(`     real-data SHADOW evidence (selector/gate/materializer/invariant: runs): ${JSON.stringify(evidenceCounts)}`);
     if (firstViolation) console.log(`     first violation: ${firstViolation}`);
     check('every broad scenario ran the real preview boundary to a READY 200 with a captured same-run shadow observation (HTTP, snapshot, Goal facts and real orchestrator deps)', tally.ready === tally.runs && tally.runs === scenarios.length);
     check('PARITY: the preview body with the observation in the loop equals the plain preview body for every scenario (the active pieces consume the run, they do not change it)', tally.bodyMismatch === 0);
     check('NO WRITES: the domain row counts are unchanged by every run', tally.writes === 0);
     check('PURE ON REAL DATA: the selector and the materializer sent ZERO SQL statements in every scenario', tally.nonZeroSqlPure === 0);
+    check(`SHADOW EVIDENCE ON REAL DATA: exactly one evidence line per evaluated run (${tally.evidenceLines}), the emitted selector / materializer categories agree with the independent pipeline in every run, every READY materialization passes the invariant check, and no technical failure was recorded (mismatches ${tally.evidenceMismatch}, READY-but-not-PASS ${tally.invariantNotPass}, technical failures ${tally.technicalFailure})`, tally.evidenceLines === tally.evaluated && tally.evidenceMismatch === 0 && tally.invariantNotPass === 0 && tally.technicalFailure === 0);
     check(`the pipeline output is the BASELINE or exactly ONE materialized result in every evaluated scenario: ${tally.baselineIdentity} baseline + ${tally.materialized} materialized = ${tally.evaluated} evaluated`, tally.baselineIdentity + tally.materialized === tally.evaluated && tally.evaluated === tally.ready);
     check(`EVERY MATERIALIZED RESULT ON REAL DATA satisfies the property oracle (${tally.materialized} materialized, ${tally.violations} violations)`, tally.violations === 0);
 
@@ -242,6 +261,23 @@ async function main() {
       check('P4c2a: the materializability gate reports MATERIALIZABLE (the candidate is the sole Deferred item) and P4c3 returns READY', picked.gate?.status === 'MATERIALIZABLE' && picked.materialized?.status === 'READY');
       check('PURE ON THE DIRECTED RUN: the selector, the gate and the materializer sent ZERO SQL statements', selected.statements.length === 0);
       check('BASELINE UNCHANGED: the preview body with the observation in the loop equals the plain preview body, and the domain rows are unchanged by the selector / materializer', snap(plainDirected.body) === snap(shadowDirected.body) && (await counts()) === beforeCounts);
+      // O5 SHADOW EVIDENCE OBSERVABILITY on the real stack: the directed ACCEPT, run through the real SHADOW boundary (real snapshot, Goal facts, orchestrator, timing search), emits
+      // ONE aggregate evidence line whose funnel reaches READY / PASS internally while the externally returned result stays the baseline. Pure: no SQL of its own, no write.
+      {
+        const evidenceRun: Captured = {};
+        const countsBefore = await counts();
+        const withEvidence = await capturing(() => handleDayConstructorPreviewRequest(boundary(directed!.rows, evidenceRun)));
+        const countsAfter = await counts();
+        const plainRun = await capturing(() => handleDayConstructorPreviewRequest(boundary(directed!.rows)));
+        const line = evidenceRun.metrics?.[0];
+        console.log(`     directed SHADOW evidence line (real data): ${JSON.stringify(line)}`);
+        check('DIRECTED FUNNEL (real data, one aggregate line): positive pressure on at least one intent, the candidate lost real contention, one promotion input prepared and ONE real P4b3 ACCEPT', evidenceRun.metrics?.length === 1 && line!.run === 'READY' && line!.pressured !== 'ZERO' && line!.pressuredContested === 'ONE' && line!.observations === 1 && line!.generationReady === 1 && line!.accepted === 1);
+        check('DIRECTED EVIDENCE: selector APPLY -> gate MATERIALIZABLE -> materializer READY -> invariants PASS, no technical failure (the active pieces reached READY INTERNALLY on the real run)', JSON.stringify(line?.evidence) === JSON.stringify({ selector: 'APPLY', gate: 'MATERIALIZABLE', materializer: 'READY', invariant: 'PASS', failure: 'NONE' }));
+        check('EXTERNAL RESULT == BASELINE: the SHADOW response body equals the plain preview body byte for byte and still shows the candidate Deferred (the materialized day was discarded)', snap(withEvidence.value.body) === snap(plainRun.value.body) && snap(withEvidence.value.body).includes('NO_CANDIDATES'));
+        check('SAME-RUN COMPOSITION: re-deriving the evidence from the evidence run\'s OWN baseline result and OWN observation set (the very objects the boundary used) yields exactly the emitted categories, and its own selector APPLYs the same candidate as the earlier captured run', (() => { const o = evidenceRun.observed!; const sel = selectActiveCounterfactual(o.shadowPolicy); return sel.status === 'APPLY' && picked.selection.status === 'APPLY' && sel.candidateIntentId === picked.selection.candidateIntentId && JSON.stringify(deriveShadowEvidence(o.result, o.shadowPolicy)) === JSON.stringify(line!.evidence); })());
+        check('NO SQL OF ITS OWN AND NO WRITE: the SHADOW run with the evidence funnel sent the IDENTICAL SQL sequence as the plain run, and no Plan / GoalActivityOccurrence / GoalActivity / HabitLog row changed', JSON.stringify(withEvidence.statements) === JSON.stringify(plainRun.statements) && countsBefore === countsAfter && !withEvidence.statements.some((t) => /^(INSERT|UPDATE|DELETE)\b/i.test(t)));
+        check('LATENCY BUCKETS: the existing latency and the SHADOW-attributable overhead are both closed buckets', ['LT_50_MS', 'LT_250_MS', 'LT_1000_MS', 'GTE_1000_MS', 'UNKNOWN'].includes(line!.latency) && ['LT_50_MS', 'LT_250_MS', 'LT_1000_MS', 'GTE_1000_MS', 'UNKNOWN'].includes(line!.shadowOverheadLatency));
+      }
       // O5 P4c4a -- SAME-RUN BASELINE BINDING on the real stack: a second REAL run of the very same request produces a structurally identical baseline, which is still NOT this run's baseline.
       if (picked.accepted && secondRun.observed) {
         const crossRun = materializeActiveResult({ baselineResult: secondRun.observed.result, constructionBasis: picked.accepted.constructionBasis, accepted: picked.accepted });

@@ -381,6 +381,13 @@ jobs:
         run: npx ts-node test/shadowPolicyExecution.test.ts
       - name: Run shadow policy execution architecture test
         run: npx ts-node test/shadowPolicyExecutionArchitecture.test.ts
+      # O5 SHADOW EVIDENCE OBSERVABILITY -- per-run aggregate evidence in SHADOW only: positive pressure / real contention funnel counts (bucketed), and what the REAL
+      # P4c1 selector, P4c2a gate, P4c3 materializer and an invariant verifier WOULD have done on the same run (the materialized result is discarded; the baseline is
+      # returned). Bounded categories only, no identifiers, no ACTIVE, no second Constructor / search / query, no persistence.
+      - name: Run shadow evidence test
+        run: npx ts-node test/shadowEvidence.test.ts
+      - name: Run shadow evidence architecture test
+        run: npx ts-node test/shadowEvidenceArchitecture.test.ts
       # O5 P4b5 -- engine-independent seeded fixtures: the incidence sweeps no longer use a random sort comparator (whose order depended on the engine's sort
       # algorithm, so Node 20 CI and a newer local Node generated different fixtures from the same seed). This narrow test proves the root cause and the fix
       # and forbids the pattern; the incidence suites pin exact authoritative counts, so any engine difference fails here on Node 20.

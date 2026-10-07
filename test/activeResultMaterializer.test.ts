@@ -183,7 +183,7 @@ const clone = <T>(v: T): T => {
 
   // ======================================================================
   console.log('=== Part 2: the P4c1 V1 selector ===');
-  const readyRun = (observations: ShadowPolicyObservation[]): ShadowPolicyRun => ({ status: 'READY', observations } as ShadowPolicyRun);
+  const readyRun = (observations: ShadowPolicyObservation[]): ShadowPolicyRun => ({ status: 'READY', observations, funnel: { pressuredIntents: 0, pressuredContendedIntents: 0 } } as ShadowPolicyRun);
   {
     const sel = selectActiveCounterfactual(base1.shadowPolicy);
     check('ONE ACCEPT -> APPLY with that candidate, its typed authority and selectionReason LAST_KNOWN_OPPORTUNITY_RESCUED', sel.status === 'APPLY' && sel.candidateIntentId === 'P' && sel.acceptedCounterfactual === acc1 && sel.selectionReason === 'LAST_KNOWN_OPPORTUNITY_RESCUED' && Object.isFrozen(sel));
@@ -562,7 +562,7 @@ const clone = <T>(v: T): T => {
     const piped = pipe(observed);
     // order independence of the whole pipeline: a shuffled observation set selects the identical outcome
     for (let k = 0; k < 2; k += 1) {
-      const shuffled = { status: 'READY', observations: seededShuffle([...obs], rs) } as ShadowPolicyRun;
+      const shuffled = { status: 'READY', observations: seededShuffle([...obs], rs), funnel: { pressuredIntents: 0, pressuredContendedIntents: 0 } } as ShadowPolicyRun;
       const a = selectActiveCounterfactual(shuffled); const b = selectActiveCounterfactual(observed.shadowPolicy);
       if (a.status !== b.status || (a.status === 'APPLY' && b.status === 'APPLY' ? a.candidateIntentId !== b.candidateIntentId : (a as { reason?: string }).reason !== (b as { reason?: string }).reason)) stats.violations += 1;
     }

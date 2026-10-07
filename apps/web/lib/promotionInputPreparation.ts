@@ -60,6 +60,16 @@ export interface PromotionPair {
   readonly contention: PromotionContentionOutcome;
 }
 
+/**
+ * O5 SHADOW EVIDENCE: the run's funnel COUNTS (numbers only -- no identifier), counted from the SAME pressure map and the SAME P3a trace this run derived, never a second derivation:
+ *   pressuredIntents          resolved intents whose derived DecisionPressure is LAST_KNOWN_OPPORTUNITY (NONE is not positive)
+ *   pressuredContendedIntents those pressured intents that were the LOSER of at least one actual P3a contention event (real contention, never inferred from Deferred / capacity)
+ */
+export interface PromotionFunnelCounts {
+  readonly pressuredIntents: number;
+  readonly pressuredContendedIntents: number;
+}
+
 export type PromotionRunAuthority =
   | {
       readonly status: 'PREPARED';
@@ -67,6 +77,7 @@ export type PromotionRunAuthority =
       readonly baselinePlacements: Diagnostics['baselinePlacements'];
       readonly schedulingAttempts: SchedulingAttemptOutcome;
       readonly promotions: readonly PromotionPair[];
+      readonly funnel: PromotionFunnelCounts;
     }
   | { readonly status: 'UNAVAILABLE'; readonly reason: 'RUN_NOT_READY' | 'PREPARATION_FAILED' };
 
@@ -88,7 +99,10 @@ export async function preparePromotionInputs(request: ConstructDayRequest, deps:
     // from the same trace. Each projection's failure is isolated: it can only make ITS OWN outcome UNAVAILABLE -- never the inputs, never the result.
     const promotions = Object.freeze(inputs.map((input) => Object.freeze({ input, contention: contentionFor(diagnostics.contentionTrace, input, diagnostics.constructionBasis, diagnostics.baselinePlacements) })));
     const schedulingAttempts = attemptsFor(diagnostics.contentionTrace, diagnostics.constructionBasis);
-    const run: PromotionRunAuthority = Object.freeze({ status: 'PREPARED', constructionBasis: diagnostics.constructionBasis, baselinePlacements: diagnostics.baselinePlacements, schedulingAttempts, promotions });
+    const pressured = [...pressureByIntentId].filter(([, pressure]) => pressure === 'LAST_KNOWN_OPPORTUNITY').map(([id]) => id);
+    const losers = new Set(diagnostics.contentionTrace.events.map((event) => event.loserIntentId));
+    const funnel: PromotionFunnelCounts = Object.freeze({ pressuredIntents: pressured.length, pressuredContendedIntents: pressured.filter((id) => losers.has(id)).length });
+    const run: PromotionRunAuthority = Object.freeze({ status: 'PREPARED', constructionBasis: diagnostics.constructionBasis, baselinePlacements: diagnostics.baselinePlacements, schedulingAttempts, promotions, funnel });
     return { result, promotion: Object.freeze({ status: 'PREPARED', inputs }), run };
   } catch {
     return { result, promotion: Object.freeze({ status: 'UNAVAILABLE', reason: 'PREPARATION_FAILED' }), run: RUN_PREPARATION_FAILED };
