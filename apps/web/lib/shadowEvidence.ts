@@ -29,6 +29,7 @@ import { materializeActiveResult, type MaterializerUnavailableReason } from './a
 import { checkMaterializationInvariants, type MaterializationInvariantFailure } from './materializationInvariants';
 import type { OrchestrateConstructDayResult } from './dayConstructorOrchestrator';
 import type { ShadowPolicyRun } from './shadowPolicyObservation';
+import type { AcceptedCounterfactual } from './acceptedCounterfactual';
 
 /** A count reported as one of four values: a bounded dimension however large the count is. */
 export type ShadowCountBucket = 'ZERO' | 'ONE' | 'TWO' | 'THREE_PLUS';
@@ -59,6 +60,15 @@ export const NOT_EVALUATED_EVIDENCE: ShadowEvidence = Object.freeze({ selector: 
 /** Test injection only: the materializer (to exercise the invariant FAIL path without forging an authority). Production passes nothing. */
 export interface ShadowEvidenceDeps {
   readonly materialize?: typeof materializeActiveResult;
+  /**
+   * O5 SHADOW ROLLOUT R3 (production-used, Preview-only; see shadowPolicyExecution.ts's `reviewEligible`): an OUTPUT-ONLY hand-off,
+   * invoked at most once, the instant a READY materialization has ALSO passed every invariant (never on NOT_EVALUATED, a reject
+   * reason, a gate/materializer failure or an invariant FAIL) -- the SAME baseline, the SAME materialized result and the SAME
+   * accepted authority this one run produced, never reconstructed. It carries no bounded category back and never changes what
+   * `deriveShadowEvidence` returns: a failure here is isolated and cannot affect the evidence outcome. Omitted everywhere outside
+   * the Preview-eligible SHADOW boundary.
+   */
+  readonly onReviewReady?: (handoff: { readonly baselineResult: OrchestrateConstructDayResult; readonly materializedResult: OrchestrateConstructDayResult; readonly accepted: AcceptedCounterfactual }) => void;
 }
 
 function frozen(evidence: ShadowEvidence): ShadowEvidence {
@@ -96,8 +106,19 @@ export function deriveShadowEvidence(baselineResult: OrchestrateConstructDayResu
   const built = { ...gated, materializer: 'READY' as const };
 
   try {
-    return frozen({ ...built, invariant: checkMaterializationInvariants(baselineResult, materialized.result, selection.acceptedCounterfactual) });
+    const invariant = checkMaterializationInvariants(baselineResult, materialized.result, selection.acceptedCounterfactual);
+    if (invariant === 'PASS') notifyReviewReady(deps, baselineResult, materialized.result, selection.acceptedCounterfactual);
+    return frozen({ ...built, invariant });
   } catch {
     return frozen({ ...built, failure: 'INVARIANT_CHECK_FAILED' });
+  }
+}
+
+/** O5 SHADOW ROLLOUT R3: the hand-off call site, isolated -- a throwing (or absent) `onReviewReady` can never affect the evidence this function returns. */
+function notifyReviewReady(deps: ShadowEvidenceDeps, baselineResult: OrchestrateConstructDayResult, materializedResult: OrchestrateConstructDayResult, accepted: AcceptedCounterfactual): void {
+  try {
+    deps.onReviewReady?.({ baselineResult, materializedResult, accepted });
+  } catch {
+    // Isolated: a hand-off failure can never turn a PASS into anything else, and never escapes.
   }
 }

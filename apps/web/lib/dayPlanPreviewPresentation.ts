@@ -81,6 +81,13 @@ export function formatItemClockTime(date: Date, timezone: string): string {
   return date.toLocaleTimeString('en-US', { timeZone: timezone, hour: 'numeric', minute: '2-digit' });
 }
 
+/** O5 SHADOW ROLLOUT R3 -- the SAME formula, over an already-explicit ISO instant (shadowReviewDelta.ts's own
+ * `ShadowReviewSlot.start`/`.end`) rather than a `Date` the caller already holds. Exists so `PlanDayClient.tsx`
+ * (planDayWiring.test.ts's own guard: no `new Date(` of its own) never needs to parse an instant itself. */
+export function formatIsoClockTime(iso: string, timezone: string): string {
+  return formatItemClockTime(new Date(iso), timezone);
+}
+
 // ============================================================
 // Placement provenance (this ticket's own section 9/17/18) -- the
 // critical FIXED-vs-Aura-selected distinction, in plain language, never

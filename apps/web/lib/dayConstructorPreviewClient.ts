@@ -34,6 +34,7 @@
 
 import type { ConstructDayPreview } from './dayConstructorOrchestrator';
 import type { DayIntentImportance } from './dayIntent';
+import type { ShadowReviewPayload } from './shadowReviewDelta';
 
 // ============================================================
 // Request body (F1's own accepted shape, dayConstructorPreviewRequest.ts)
@@ -87,7 +88,7 @@ export interface PreviewRequestIntentBody {
 // ============================================================
 
 export type ConstructDayPreviewClientResult =
-  | { status: 'READY'; preview: ConstructDayPreview }
+  | { status: 'READY'; preview: ConstructDayPreview; shadowReview?: ShadowReviewPayload }
   | { status: 'NO_USABLE_CAPACITY' }
   | { status: 'INVALID_CONSTRUCTION_WINDOW' }
   | { status: 'TIMEZONE_MISSING' }
@@ -150,6 +151,23 @@ export function reviveConstructDayPreviewDates(raw: unknown): ConstructDayPrevie
   } as unknown as ConstructDayPreview;
 }
 
+/**
+ * O5 SHADOW ROLLOUT R3 -- the OPTIONAL, Preview-only `shadowReview` sibling field. Present ONLY when the server already
+ * decided this is eligible (never a client decision -- see shadowPolicyExecution.ts's `reviewEligible`); a Production
+ * response never carries it. Validated defensively and loosely: any malformed shape is simply omitted (`undefined`),
+ * never turning an otherwise-valid READY preview into `UNKNOWN_RESPONSE` -- this field is internal, informational,
+ * never required for the ordinary Plan My Day flow to work.
+ */
+function parseShadowReviewPayload(raw: unknown): ShadowReviewPayload | undefined {
+  if (!raw || typeof raw !== 'object') return undefined;
+  const { reason, changedItems } = raw as Record<string, unknown>;
+  if (typeof reason !== 'string' || !Array.isArray(changedItems)) return undefined;
+  const slot = (v: unknown): v is Record<string, unknown> => !!v && typeof v === 'object' && typeof (v as Record<string, unknown>).status === 'string';
+  const items = changedItems.filter((i): i is Record<string, unknown> => !!i && typeof i === 'object' && typeof (i as Record<string, unknown>).intentId === 'string' && typeof (i as Record<string, unknown>).title === 'string' && typeof (i as Record<string, unknown>).kind === 'string' && slot((i as Record<string, unknown>).baseline) && slot((i as Record<string, unknown>).alternative));
+  if (items.length !== changedItems.length) return undefined;
+  return { reason, changedItems: items } as unknown as ShadowReviewPayload;
+}
+
 /** Pure -- never throws, never touches the network. Exported directly so
  * response-shape handling is testable without mocking `fetch`. */
 export function parsePreviewResponseBody(body: unknown, httpStatus: number): ConstructDayPreviewClientResult {
@@ -165,7 +183,9 @@ export function parsePreviewResponseBody(body: unknown, httpStatus: number): Con
   switch (record.status) {
     case 'READY': {
       const preview = reviveConstructDayPreviewDates(record.preview);
-      return preview ? { status: 'READY', preview } : { status: 'UNKNOWN_RESPONSE' };
+      if (!preview) return { status: 'UNKNOWN_RESPONSE' };
+      const shadowReview = parseShadowReviewPayload(record.shadowReview);
+      return shadowReview ? { status: 'READY', preview, shadowReview } : { status: 'READY', preview };
     }
     case 'NO_USABLE_CAPACITY':
       return { status: 'NO_USABLE_CAPACITY' };
