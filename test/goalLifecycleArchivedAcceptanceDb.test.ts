@@ -42,6 +42,7 @@ import { encodeGoalDemandIntentId } from '../apps/web/lib/goalDemandIntentId';
 import { buildAcceptRequestBody } from '../apps/web/lib/acceptConstructedDay';
 import { POST as acceptRoute } from '../apps/web/app/api/day-constructor/accept/route';
 import { localDateTimeToUTC } from '../apps/web/lib/timezone';
+import { fixtureAnchorMonday, addCivilDays, realClockReferenceForFixture } from './lifecycleFixtureCalendar';
 
 let allPassed = true;
 function check(label: string, condition: boolean) {
@@ -49,7 +50,14 @@ function check(label: string, condition: boolean) {
   if (!condition) allPassed = false;
 }
 const TZ = 'Asia/Kolkata';
-const DATE = '2026-10-07'; // Wednesday
+// CI reliability -- the fixture week is ANCHORED in the future (test/lifecycleFixtureCalendar.ts), not hard-coded. The REAL accept route reads the wall clock for its stale-preview
+// check ("the proposed start has elapsed"), so a calendar frozen at the day this test was written began failing on every run once that day arrived -- on clean main, with no code change.
+// Production is right to refuse a past plan. Every date below is an offset from a Monday at least 28 local days ahead, so the Monday-start Rhythm week, the day before the planning
+// date and the Sunday that ends the week keep the same relationships on every run date.
+const ANCHOR_MONDAY = fixtureAnchorMonday(realClockReferenceForFixture(), TZ);
+const TUE = addCivilDays(ANCHOR_MONDAY, 1);
+const DATE = addCivilDays(ANCHOR_MONDAY, 2); // Wednesday
+const SUN = addCivilDays(ANCHOR_MONDAY, 6);
 const NOW = localDateTimeToUTC(DATE, '09:00', TZ);
 
 async function sql(text: string, params: unknown[] = []): Promise<any[]> {
@@ -78,6 +86,8 @@ async function main() {
   const cleanup = async () => {
     await sql(`UPDATE "GoalActivityOccurrence" SET "plannedActivityId" = NULL WHERE "userId" = ANY($1::text[])`, [ids]);
     await sql(`DELETE FROM "GoalActivityExecution" WHERE "userId" = ANY($1::text[])`, [ids]);
+    // Acceptance idempotency claims are keyed by the (now deterministic) clientRequestId; a rerun against the same upserted users must not replay a prior run's claims.
+    await sql(`DELETE FROM "PlanCreationIdempotency" WHERE "userId" = ANY($1::text[])`, [ids]);
     await sql(`DELETE FROM "PlannedActivity" WHERE "userId" = ANY($1::text[])`, [ids]);
     await sql(`DELETE FROM "GoalActivity" WHERE "userId" = ANY($1::text[])`, [ids]);
     await sql(`DELETE FROM "Goal" WHERE "userId" = ANY($1::text[])`, [ids]);
@@ -103,7 +113,7 @@ async function main() {
   const fakeReq = (userId: string, body: unknown): any => ({ cookies: { get: () => ({ value: createSessionToken(userId, 'ignored@example.com') }) }, json: async () => body, headers: new Headers() });
   const accept = async (userId: string, body: unknown) => (await acceptRoute(fakeReq(userId, body))).json();
   let n = 0;
-  const acceptBody = (preview: any, rows: PlanDayIntentRow[], clientRequestId = `lc-${Date.now()}-${n++}`) => JSON.parse(JSON.stringify(buildAcceptRequestBody(preview.preview, clientRequestId, buildGoalActivityLinksForAccept(rows, preview.preview.constructedDay.proposedItems))));
+  const acceptBody = (preview: any, rows: PlanDayIntentRow[], clientRequestId = `lc-${ANCHOR_MONDAY}-${n++}`) => JSON.parse(JSON.stringify(buildAcceptRequestBody(preview.preview, clientRequestId, buildGoalActivityLinksForAccept(rows, preview.preview.constructedDay.proposedItems))));
   const facts = (preview: any, id: string) => preview.preview?.resolvedIntents?.find((r: any) => r.requestedIntentId === id)?.dayIntent?.decisionFacts;
   const state = async (userId: string, goalActivityIds: string[] = []) => ({
     plans: (await sql(`SELECT count(*)::int n FROM "PlannedActivity" WHERE "userId" = $1`, [userId]))[0].n as number,
@@ -241,7 +251,7 @@ async function main() {
     console.log('=== existing rejections unchanged ===');
     const gE = await goalOf(A.id, 'Exhausted goal');
     const rE = await recurring(A.id, gE.id, 'Exhausted cardio', 1);
-    const donePlan = await createPlannedActivity({ userId: A.id, title: 'done', plannedStartAt: localDateTimeToUTC('2026-10-06', '08:00', TZ), plannedEndAt: localDateTimeToUTC('2026-10-06', '08:30', TZ), durationMinutes: 30, windowType: 'NEUTRAL' });
+    const donePlan = await createPlannedActivity({ userId: A.id, title: 'done', plannedStartAt: localDateTimeToUTC(TUE, '08:00', TZ), plannedEndAt: localDateTimeToUTC(TUE, '08:30', TZ), durationMinutes: 30, windowType: 'NEUTRAL' });
     await sql(`UPDATE "PlannedActivity" SET status = 'LOGGED' WHERE id = $1`, [donePlan.id]);
     await sql(`INSERT INTO "GoalActivityOccurrence"(id, "userId", "goalActivityId", "plannedActivityId") VALUES ('lc-occ-e', $1, $2, $3)`, [A.id, rE.id, donePlan.id]);
     await sql(`UPDATE "GoalActivity" SET "plannedActivityId" = $1 WHERE id = $2`, [donePlan.id, rE.id]);
