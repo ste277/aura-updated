@@ -39,12 +39,19 @@
  * writes ONE structured line per SHADOW request to the existing server log stream (there is no other server-side telemetry mechanism; the ProductEvent
  * table is user-scoped, database-backed and a closed taxonomy, so using it would add a write to the request path). No database table is added.
  *
+ * SHADOW EVIDENCE (O5). After the baseline exists and the existing latency has been read, the boundary also asks the pure `deriveShadowEvidence` what the REAL P4c1 selector,
+ * P4c2a gate, P4c3 materializer and the invariant verifier WOULD have done on this very run, and adds the answer to the same line as bounded categories (plus two count
+ * buckets: positively pressured intents, and those that lost real P3a contention). The materialized result it builds is discarded inside that function: the returned value is
+ * `observed.result`, the baseline, in every outcome. The derivation is SHADOW-only (OFF returns before any evidence reference), failure-isolated (a failure is the bounded
+ * category EVIDENCE_FAILED), one pass, pure (no query, search, Constructor run, clock or store of its own), and claims nothing about usefulness: it reports what happened.
+ *
  * A shadow ACCEPT has no operational effect: no substitution, no new preview, no signing change, no persistence, no recomposition, no notification, and
  * nothing in the HTTP response, headers or status. No learning, no acceptance-rate target, no policy feedback loop.
  */
 
 import { orchestrateConstructDay, type ConstructDayRequest, type DayConstructorOrchestratorDeps, type OrchestrateConstructDayResult } from './dayConstructorOrchestrator';
 import { observeShadowPolicy, type ShadowPolicyObservation, type ShadowPolicyRun } from './shadowPolicyObservation';
+import { bucketOfCount, deriveShadowEvidence, NOT_EVALUATED_EVIDENCE, type ShadowCountBucket, type ShadowEvidence, type ShadowEvidenceDeps } from './shadowEvidence';
 
 export type ShadowPolicyMode = 'OFF' | 'SHADOW';
 
@@ -73,6 +80,19 @@ export interface ShadowPolicyMetrics {
   readonly rejected: Readonly<Partial<Record<ReasonOf<'REJECT'>, number>>>;
   readonly acceptanceUnavailable: Readonly<Partial<Record<ReasonOf<'ACCEPTANCE_UNAVAILABLE'>, number>>>;
   readonly latency: ShadowPolicyLatencyBucket;
+  /**
+   * O5 SHADOW EVIDENCE (additive; bounded categories only). ELIGIBLE RUN = a SHADOW request whose baseline Constructor result is READY and whose promotion preparation
+   * PREPARED (run category READY): only those carry a funnel; every other run category is reported as itself with the zero / NOT_EVALUATED defaults.
+   *   pressured          bucketed count of resolved intents with POSITIVE DecisionPressure (LAST_KNOWN_OPPORTUNITY; NONE is not positive); a run counts as pressured iff this is not ZERO
+   *   pressuredContested bucketed count of those pressured intents that were the loser of at least one ACTUAL P3a contention event
+   * `observations` above is the number of PromotionInputs prepared (a run has promotion inputs iff it is not 0).
+   */
+  readonly pressured: ShadowCountBucket;
+  readonly pressuredContested: ShadowCountBucket;
+  /** What the REAL P4c1 selector, P4c2a gate, P4c3 materializer and the invariant check WOULD have done on this run (discarded; the baseline is served). */
+  readonly evidence: ShadowEvidence;
+  /** Time attributable to SHADOW itself: from the moment the baseline result existed to the end of the evidence derivation. Never includes the baseline orchestration. */
+  readonly shadowOverheadLatency: ShadowPolicyLatencyBucket;
 }
 
 /** One-way, synchronous, returns nothing: it cannot hold the request open and cannot feed anything back into scheduling. */
@@ -87,6 +107,9 @@ export interface ShadowPolicyExecution {
   readonly observe?: typeof observeShadowPolicy;
   /** Test injection only: a monotonic millisecond source, for the latency bucket (observability only). */
   readonly monotonicNow?: () => number;
+  /** Test injection only: the evidence derivation (to exercise an observability failure) and its materializer (to exercise the invariant FAIL path). Production uses `deriveShadowEvidence`. */
+  readonly deriveEvidence?: typeof deriveShadowEvidence;
+  readonly evidenceDeps?: ShadowEvidenceDeps;
 }
 
 /** The default server sink: one structured aggregate line per SHADOW request. Only ever invoked in SHADOW. */
@@ -114,8 +137,8 @@ function bump<K extends string>(counts: Partial<Record<K, number>>, key: K): voi
 }
 
 /** Derive the minimal metrics from a P4b4 run: outcomes and typed reasons only -- no identifier, summary, slot or instant is read. */
-export function summarizeShadowPolicyRun(run: ShadowPolicyRun, latency: ShadowPolicyLatencyBucket): ShadowPolicyMetrics {
-  if (run.status !== 'READY') return Object.freeze({ mode: 'SHADOW', run: run.reason, observations: 0, generationReady: 0, generationUnavailable: Object.freeze({}), accepted: 0, rejected: Object.freeze({}), acceptanceUnavailable: Object.freeze({}), latency });
+export function summarizeShadowPolicyRun(run: ShadowPolicyRun, latency: ShadowPolicyLatencyBucket, evidence: ShadowEvidence = NOT_EVALUATED_EVIDENCE, shadowOverheadLatency: ShadowPolicyLatencyBucket = 'UNKNOWN'): ShadowPolicyMetrics {
+  if (run.status !== 'READY') return Object.freeze({ mode: 'SHADOW', run: run.reason, observations: 0, generationReady: 0, generationUnavailable: Object.freeze({}), accepted: 0, rejected: Object.freeze({}), acceptanceUnavailable: Object.freeze({}), latency, pressured: 'ZERO', pressuredContested: 'ZERO', evidence, shadowOverheadLatency });
   const generationUnavailable: Partial<Record<ReasonOf<'GENERATION_UNAVAILABLE'>, number>> = {};
   const rejected: Partial<Record<ReasonOf<'REJECT'>, number>> = {};
   const acceptanceUnavailable: Partial<Record<ReasonOf<'ACCEPTANCE_UNAVAILABLE'>, number>> = {};
@@ -128,7 +151,7 @@ export function summarizeShadowPolicyRun(run: ShadowPolicyRun, latency: ShadowPo
     else if (observation.outcome === 'REJECT') bump(rejected, observation.reason);
     else bump(acceptanceUnavailable, observation.reason);
   }
-  return Object.freeze({ mode: 'SHADOW', run: 'READY', observations: run.observations.length, generationReady, generationUnavailable: Object.freeze(generationUnavailable), accepted, rejected: Object.freeze(rejected), acceptanceUnavailable: Object.freeze(acceptanceUnavailable), latency });
+  return Object.freeze({ mode: 'SHADOW', run: 'READY', observations: run.observations.length, generationReady, generationUnavailable: Object.freeze(generationUnavailable), accepted, rejected: Object.freeze(rejected), acceptanceUnavailable: Object.freeze(acceptanceUnavailable), latency, pressured: bucketOfCount(run.funnel.pressuredIntents), pressuredContested: bucketOfCount(run.funnel.pressuredContendedIntents), evidence, shadowOverheadLatency });
 }
 
 /**
@@ -141,16 +164,17 @@ export async function orchestrateConstructDayWithShadowPolicy(request: Construct
   const observe = execution.observe ?? observeShadowPolicy;
   const started = startTimer(execution);
   let held: { readonly result: OrchestrateConstructDayResult } | undefined;
+  let baselineAt: number | undefined;
   let observed: Awaited<ReturnType<typeof observeShadowPolicy>>;
   try {
-    observed = await observe(request, deps, (result) => { held = { result }; });
+    observed = await observe(request, deps, (result) => { held = { result }; baselineAt = startTimer(execution); });
   } catch (error) {
     if (!held) throw error; // PRE-BASELINE: the baseline orchestration itself failed -- surface it exactly as the plain call would; never re-run it
     emit(execution, summarizeTechnicalFailure()); // POST-BASELINE: serve the baseline result that already exists
     return held.result;
   }
-  emitRun(execution, observed.shadowPolicy, started);
-  return observed.result;
+  emitRun(execution, observed.shadowPolicy, started, observed.result, baselineAt);
+  return observed.result; // THE BASELINE, in every outcome: the evidence below only ever produces bounded categories, never a result
 }
 
 function startTimer(execution: ShadowPolicyExecution): number | undefined {
@@ -161,18 +185,36 @@ function startTimer(execution: ShadowPolicyExecution): number | undefined {
   }
 }
 
-function emitRun(execution: ShadowPolicyExecution, run: ShadowPolicyRun, started: number | undefined): void {
+/** The evidence derivation, isolated: any failure becomes a bounded technical-failure category and never propagates. */
+function evidenceFor(execution: ShadowPolicyExecution, baseline: OrchestrateConstructDayResult, run: ShadowPolicyRun): ShadowEvidence {
   try {
-    let latency: ShadowPolicyLatencyBucket = 'UNKNOWN';
-    if (started !== undefined) latency = bucketOf((execution.monotonicNow ?? (() => performance.now()))() - started);
-    emit(execution, summarizeShadowPolicyRun(run, latency));
+    return (execution.deriveEvidence ?? deriveShadowEvidence)(baseline, run, execution.evidenceDeps);
   } catch {
-    // The timer or the metric derivation failed: discard the observation, preserve the baseline.
+    return Object.freeze({ ...NOT_EVALUATED_EVIDENCE, failure: 'EVIDENCE_FAILED' });
+  }
+}
+
+function emitRun(execution: ShadowPolicyExecution, run: ShadowPolicyRun, started: number | undefined, baseline: OrchestrateConstructDayResult, baselineAt: number | undefined): void {
+  try {
+    const latency: ShadowPolicyLatencyBucket = started === undefined ? 'UNKNOWN' : elapsedBucket(execution, started); // the existing P4b5 latency: unchanged, measured before the evidence work
+    const evidence = evidenceFor(execution, baseline, run);
+    const shadowOverheadLatency: ShadowPolicyLatencyBucket = baselineAt === undefined ? 'UNKNOWN' : elapsedBucket(execution, baselineAt);
+    emit(execution, summarizeShadowPolicyRun(run, latency, evidence, shadowOverheadLatency));
+  } catch {
+    // The metric derivation failed: discard the observation, preserve the baseline.
+  }
+}
+
+function elapsedBucket(execution: ShadowPolicyExecution, since: number): ShadowPolicyLatencyBucket {
+  try {
+    return bucketOf((execution.monotonicNow ?? (() => performance.now()))() - since);
+  } catch {
+    return 'UNKNOWN';
   }
 }
 
 function summarizeTechnicalFailure(): ShadowPolicyMetrics {
-  return Object.freeze({ mode: 'SHADOW', run: 'TECHNICAL_FAILURE', observations: 0, generationReady: 0, generationUnavailable: Object.freeze({}), accepted: 0, rejected: Object.freeze({}), acceptanceUnavailable: Object.freeze({}), latency: 'UNKNOWN' });
+  return Object.freeze({ mode: 'SHADOW', run: 'TECHNICAL_FAILURE', observations: 0, generationReady: 0, generationUnavailable: Object.freeze({}), accepted: 0, rejected: Object.freeze({}), acceptanceUnavailable: Object.freeze({}), latency: 'UNKNOWN', pressured: 'ZERO', pressuredContested: 'ZERO', evidence: NOT_EVALUATED_EVIDENCE, shadowOverheadLatency: 'UNKNOWN' });
 }
 
 function emit(execution: ShadowPolicyExecution, metrics: ShadowPolicyMetrics): void {

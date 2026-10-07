@@ -56,6 +56,9 @@ const ASYNC_ENV_VOCAB = /\basync\b|\bawait\b|Promise|setTimeout|setInterval|cons
 const EXECUTION_VOCAB = /\bconstructDay\w*\(|orchestrate\w*\(|\bpreparePromotionInputs\b|\bgenerateLocalCounterfactual\b|\bevaluateCounterfactualAcceptance\b|\bobserveShadowPolicy\b|\bsearchTiming\b|runTimingSearch|excludedIntervals|replenish|\bcaptureBaselinePlacements\b|\bassembleConstructionBasis\b|\bprojectContentionAuthority\b|\bprojectSchedulingAttempts\b|\bevaluateLocalPlacementGate\b/i;
 const VALUE_VOCAB = /\bscore\b|utility|weight|boost|priorit|urgen|\bimportance\b|\bdeadline\b|originalOrder|\.pressure\b|DecisionPressure|DecisionFacts|decisionFacts|provenance|\bsource\b/i;
 const MUTATION = /\b(?:input|baseline|baselineResult|day|preview|basis|accepted|run|observation)\.[A-Za-z.]+\s*=[^=]|\bdelete \b|Object\.defineProperty|Object\.assign|\.splice\(|\.reverse\(|\.fill\(|\.unshift\(|\.shift\(|\.pop\(/;
+/** O5 SHADOW EVIDENCE: the pure SHADOW-only evidence derivation (the ONLY importer of the selector, the gate and the materializer; their results are discarded) and its pure invariant verifier. */
+const EVIDENCE = 'apps/web/lib/shadowEvidence.ts';
+const INVARIANTS = 'apps/web/lib/materializationInvariants.ts';
 const NEVER_NAME = [
   'apps/web/lib/dayConstructor.ts', 'apps/web/lib/dayIntent.ts', 'apps/web/lib/dayCapacity.ts', 'apps/web/lib/dayConstructorOrchestrator.ts', 'apps/web/lib/localCounterfactual.ts', counterfactualPath(), 'apps/web/lib/promotionInputPreparation.ts',
   'apps/web/lib/shadowPolicyExecution.ts', 'apps/web/lib/dayConstructorPreviewRequest.ts', 'apps/web/lib/dayConstructorPreviewIntegrity.ts', 'apps/web/lib/dayConstructorPreviewClient.ts', 'apps/web/lib/dayConstructorAcceptance.ts', 'apps/web/lib/dayConstructorAcceptancePersistence.ts',
@@ -75,19 +78,19 @@ function audit(files: SrcFile[]): string[] {
   const by = (re: RegExp) => files.filter((x) => re.test(x.src)).map((x) => x.f);
   const exportsOf = (src: string) => Array.from(src.matchAll(/^export (?:async )?(?:function|interface|type|const|class) (\w+)/gm)).map((x) => x[1]);
   // C1 -- confinement: only the pinned importers, only the pinned vocabulary, no surface names the modules
-  const allowedVocab = [...NEW_MODULES, SHADOW];
+  const allowedVocab = [...NEW_MODULES, SHADOW, EVIDENCE, INVARIANTS];
   by(VOCAB).filter((f) => !allowedVocab.includes(f)).forEach((f) => v.push(`C1:names-the-p4c3-vocabulary:${f}`));
-  by(/from '\.\/acceptedCounterfactual'/).filter((f) => ![SHADOW, SELECTOR, MAT].includes(f)).forEach((f) => v.push(`C1:imports-the-authority:${f}`));
-  by(/from '\.\/activeSelector'/).forEach((f) => v.push(`C1:imports-the-selector:${f}`));
-  by(/from '\.\/activeMaterializability'/).filter((f) => f !== MAT).forEach((f) => v.push(`C1:imports-the-gate:${f}`));
-  by(/from '\.\/activeResultMaterializer'/).forEach((f) => v.push(`C1:imports-the-materializer:${f}`));
+  by(/from '\.\/acceptedCounterfactual'/).filter((f) => ![SHADOW, SELECTOR, MAT, INVARIANTS].includes(f)).forEach((f) => v.push(`C1:imports-the-authority:${f}`));
+  by(/from '\.\/activeSelector'/).filter((f) => f !== EVIDENCE).forEach((f) => v.push(`C1:imports-the-selector:${f}`));
+  by(/from '\.\/activeMaterializability'/).filter((f) => f !== MAT && f !== EVIDENCE).forEach((f) => v.push(`C1:imports-the-gate:${f}`));
+  by(/from '\.\/activeResultMaterializer'/).filter((f) => f !== EVIDENCE).forEach((f) => v.push(`C1:imports-the-materializer:${f}`));
   by(/\bmintAcceptedCounterfactual\b/).filter((f) => f !== AUTH && f !== SHADOW).forEach((f) => v.push(`C1:names-the-mint:${f}`));
   by(/\bmintAcceptedCounterfactual\(/).filter((f) => f !== AUTH && f !== SHADOW).forEach((f) => v.push(`C1:calls-the-mint:${f}`));
   by(/\brecordAcceptedObservation\b/).filter((f) => f !== AUTH && f !== SHADOW).forEach((f) => v.push(`C1:names-the-observation-link:${f}`));
   by(/\bisAcceptedCounterfactual\b/).filter((f) => f !== AUTH && f !== MAT).forEach((f) => v.push(`C1:names-the-trust-check:${f}`));
   by(/\bacceptedCounterfactualOf\b/).filter((f) => f !== AUTH && f !== SELECTOR).forEach((f) => v.push(`C1:names-the-reader:${f}`));
-  by(/\bisBaselineOfAcceptedCounterfactual\b/).filter((f) => f !== AUTH && f !== MAT).forEach((f) => v.push(`C1:names-the-baseline-binding-check:${f}`));
-  by(/\bselectActiveCounterfactual\b|\bmaterializeActiveResult\b|\bevaluateMaterializability\b/).filter((f) => ![SELECTOR, MAT, GATE].includes(f)).forEach((f) => v.push(`C1:names-a-p4c3-entry-point:${f}`));
+  by(/\bisBaselineOfAcceptedCounterfactual\b/).filter((f) => f !== AUTH && f !== MAT && f !== INVARIANTS).forEach((f) => v.push(`C1:names-the-baseline-binding-check:${f}`));
+  by(/\bselectActiveCounterfactual\b|\bmaterializeActiveResult\b|\bevaluateMaterializability\b/).filter((f) => ![SELECTOR, MAT, GATE, EVIDENCE].includes(f)).forEach((f) => v.push(`C1:names-a-p4c3-entry-point:${f}`));
   for (const f of NEVER_NAME) { const x = get(f); if (x && VOCAB.test(x.src)) v.push(`C1:surface-names-the-p4c3-vocabulary:${f}`); }
   // no production file may forge the authority type by a cast, and the modules own the only `ActiveSelection` / `ActiveMaterialization` shapes
   by(/\bas (?:unknown as )?AcceptedCounterfactual\b|<AcceptedCounterfactual>/).filter((f) => f !== AUTH).forEach((f) => v.push(`C2:casts-to-the-authority-type:${f}`));
@@ -241,7 +244,7 @@ const baseline = audit(real);
 check(`THE REAL PRODUCTION TREE HAS ZERO P4c3 ARCHITECTURE VIOLATIONS (${real.length} production files scanned)${baseline.length ? ': ' + baseline.join(', ') : ''}`, baseline.length === 0);
 
 console.log('=== confinement, unforgeability, purity ===');
-check('CONFINED: the vocabulary of the four modules exists in exactly the four modules and the P4b4 composition; the authority is imported only by the composition, the selector and the materializer; nothing imports the selector or the materializer; only the materializer imports the gate', JSON.stringify(names(VOCAB)) === JSON.stringify([AUTH, SELECTOR, GATE, MAT, SHADOW].sort()) && JSON.stringify(names(/from '\.\/acceptedCounterfactual'/)) === JSON.stringify([SELECTOR, MAT, SHADOW].sort()) && names(/from '\.\/activeSelector'/).length === 0 && names(/from '\.\/activeResultMaterializer'/).length === 0 && JSON.stringify(names(/from '\.\/activeMaterializability'/)) === JSON.stringify([MAT]));
+check('CONFINED: the vocabulary of the four modules exists in exactly the four modules, the P4b4 composition and (O5 SHADOW EVIDENCE) the two pure SHADOW evidence modules; the authority is imported only by the composition, the selector, the materializer and the invariant verifier; only the SHADOW evidence derivation imports the selector and the materializer (their results are discarded, pinned by shadowEvidenceArchitecture.test.ts); only the materializer and the evidence derivation import the gate', JSON.stringify(names(VOCAB)) === JSON.stringify([AUTH, SELECTOR, GATE, MAT, SHADOW, EVIDENCE, INVARIANTS].sort()) && JSON.stringify(names(/from '\.\/acceptedCounterfactual'/)) === JSON.stringify([SELECTOR, MAT, SHADOW, INVARIANTS].sort()) && JSON.stringify(names(/from '\.\/activeSelector'/)) === JSON.stringify([EVIDENCE]) && JSON.stringify(names(/from '\.\/activeResultMaterializer'/)) === JSON.stringify([EVIDENCE]) && JSON.stringify(names(/from '\.\/activeMaterializability'/)) === JSON.stringify([MAT, EVIDENCE].sort()));
 check('NO SURFACE: no route, preview request, orchestrator, Constructor, comparator, capacity, generator, predicate, preparation, execution boundary, signing, acceptance, persistence, recomposition, presentation or database module names the vocabulary', NEVER_NAME.every((f) => !VOCAB.test(src(f))));
 check('UNFORGEABLE: a non-exported unique-symbol brand, a module-private WeakSet registry with ONE add site, a mint that CALLS the predicate exactly once before any brand and takes only the four P4b3 inputs (no accepted flag), and no other production file casts to the authority type', !flags(audit(real), 'C2:'));
 check('ONLY THE COMPOSITION MINTS: `mintAcceptedCounterfactual` and `recordAcceptedObservation` are named by the authority and the P4b4 composition only; the composition no longer imports or calls the predicate directly', JSON.stringify(names(/\bmintAcceptedCounterfactual\(/)) === JSON.stringify([AUTH, SHADOW].sort()) && JSON.stringify(names(/\brecordAcceptedObservation\b/)) === JSON.stringify([AUTH, SHADOW].sort()) && !flags(audit(real), 'C7:'));

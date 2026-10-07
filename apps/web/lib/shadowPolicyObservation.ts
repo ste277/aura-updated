@@ -39,7 +39,7 @@
  * orchestration's result, untouched. Pure over the run: no database, query, write, transaction, clock, randomness, logging, flag or environment.
  */
 
-import { preparePromotionInputs, type PromotionPair, type PromotionRunAuthority } from './promotionInputPreparation';
+import { preparePromotionInputs, type PromotionFunnelCounts, type PromotionPair, type PromotionRunAuthority } from './promotionInputPreparation';
 import type { ConstructDayRequest, DayConstructorOrchestratorDeps, OrchestrateConstructDayResult } from './dayConstructorOrchestrator';
 import { generateLocalCounterfactual, type LocalCounterfactual, type LocalCounterfactualUnavailableReason } from './localCounterfactual';
 import type { CounterfactualAcceptanceUnavailableReason, CounterfactualRejectionReason } from './counterfactualAcceptance';
@@ -77,7 +77,7 @@ export type ShadowPolicyObservation =
   | { readonly outcome: 'ACCEPT'; readonly candidateIntentId: string; readonly counterfactual: ShadowCounterfactualSummary };
 
 export type ShadowPolicyRun =
-  | { readonly status: 'READY'; readonly observations: readonly ShadowPolicyObservation[] }
+  | { readonly status: 'READY'; readonly observations: readonly ShadowPolicyObservation[]; readonly funnel: PromotionFunnelCounts }
   | { readonly status: 'UNAVAILABLE'; readonly reason: 'RUN_NOT_READY' | 'PREPARATION_FAILED' | 'OBSERVATION_FAILED' };
 
 type PreparedRun = Extract<PromotionRunAuthority, { status: 'PREPARED' }>;
@@ -104,7 +104,7 @@ export async function observeShadowPolicy(request: ConstructDayRequest, deps: Da
 }
 
 function compose(run: PreparedRun, baseline: OrchestrateConstructDayResult): ShadowPolicyRun {
-  return Object.freeze({ status: 'READY', observations: Object.freeze(run.promotions.map((pair) => observePair(run, pair, baseline))) });
+  return Object.freeze({ status: 'READY', observations: Object.freeze(run.promotions.map((pair) => observePair(run, pair, baseline))), funnel: run.funnel });
 }
 
 /** One promotion, from its own typed pair and the run-level authorities: generation, then (only if READY) acceptance. Never throws. */

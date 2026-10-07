@@ -102,7 +102,7 @@ const noDates = (v: unknown): boolean => [...reachable(v)].every((o) => !(o inst
     const o = run.shadowPolicy.status === 'READY' ? run.shadowPolicy.observations[0] : undefined;
     check('OWNER LOSS (real): P4b2 READY and P4b3 REJECT OWNER_WOULD_BE_UNPLACED, the exact source reason, with the summary of what would have happened (Y unplaced, O relocated)', o?.outcome === 'REJECT' && o.reason === 'OWNER_WOULD_BE_UNPLACED' && o.counterfactual.unplacedOwnerIds.join() === 'Y' && o.counterfactual.relocatedOwners.some((r) => r.intentId === 'O') && o.counterfactual.displacedOwnerIds.includes('Y'));
     const none = await observeShadowPolicy(request(lossIntents, ['P']), mkDeps(lossPools, 1));
-    check('NONE owners (only P pressured) observe the SAME owner-loss rejection (NONE is never safe to lose) -- byte-identical to the all-pressured observation', JSON.stringify(none.shadowPolicy) === JSON.stringify(run.shadowPolicy));
+    check('NONE owners (only P pressured) observe the SAME owner-loss rejection (NONE is never safe to lose) -- byte-identical to the all-pressured observation', JSON.stringify(none.shadowPolicy.status === 'READY' ? none.shadowPolicy.observations : none.shadowPolicy) === JSON.stringify(run.shadowPolicy.status === 'READY' ? run.shadowPolicy.observations : run.shadowPolicy)); // the OBSERVATIONS are identical; only the (O5) funnel counts differ, because fewer intents are pressured
   }
   {
     const run = await observeShadowPolicy(request(acceptIntents, ['O', 'P']), mkDeps(timingPools, 3));

@@ -124,6 +124,15 @@ async function main() {
     check(`WRITE AND TRANSACTION PARITY: zero write statements under both modes; the transaction-control statements are identical (${txControl(off.statements).length}: the baseline's own snapshot only); the domain row counts are unchanged by either run`, writes(off.statements).length === 0 && writes(shadow.statements).length === 0 && JSON.stringify(txControl(shadow.statements)) === JSON.stringify(txControl(off.statements)) && off.before === off.after && shadow.before === shadow.after && shadow.after === off.after);
     check('SNAPSHOT NOT RELOADED: the decision scheduling snapshot is loaded exactly once per request under OFF and under SHADOW', off.snapshotLoads === 1 && shadow.snapshotLoads === 1 && offDefault.snapshotLoads === 1);
 
+    {
+      // O5 SHADOW EVIDENCE -- informational latency evidence on the real stack (reported, never gated on a threshold): median wall time of the same real preview under OFF and under SHADOW (which now also derives the evidence)
+      const timeOf = async (mode?: DayConstructorPreviewBoundaryDeps['shadowPolicy']): Promise<number> => { const t0 = process.hrtime.bigint(); await runOnce(mode); return Number(process.hrtime.bigint() - t0) / 1e6; };
+      const offMs: number[] = []; const shadowMs: number[] = [];
+      for (let k = 0; k < 7; k += 1) { offMs.push(await timeOf()); shadowMs.push(await timeOf(SHADOW)); }
+      const median = (a: number[]) => [...a].sort((x, y) => x - y)[Math.floor(a.length / 2)];
+      console.log(`     informational latency (real stack, median of 7): OFF ${median(offMs).toFixed(1)} ms; SHADOW with evidence ${median(shadowMs).toFixed(1)} ms; difference ${(median(shadowMs) - median(offMs)).toFixed(1)} ms`);
+    }
+
     // ============================================================
     console.log('=== the default server settings with SHADOW from the environment, and failure parity on the real stack ===');
     process.env[SHADOW_POLICY_MODE_ENV] = 'SHADOW';
@@ -132,6 +141,7 @@ async function main() {
     try { envShadow = await runOnce(createServerShadowPolicyExecution); } finally { console.info = realInfo; }
     const logged = lines.length === 1 ? JSON.parse(lines[0]) : undefined;
     check('SERVER-ENVIRONMENT SHADOW (the production settings path): the response and the SQL sequence equal OFF, and exactly ONE aggregate log line was written with the minimal schema (no identifiers, no instants)', envShadow.body === off.body && JSON.stringify(envShadow.statements) === JSON.stringify(off.statements) && lines.length === 1 && logged?.event === 'DAY_CONSTRUCTOR_SHADOW_POLICY' && logged.mode === 'SHADOW' && !new RegExp(u.id).test(lines[0]) && !/\d{4}-\d{2}-\d{2}/.test(lines[0]));
+    check('O5 SHADOW EVIDENCE on the production settings path: the ONE aggregate line carries the bounded funnel and evidence categories (count buckets, selector / gate / materializer / invariant / failure, overhead bucket) and nothing else new -- still no identifier or instant, and the evidence work added no SQL (the sequence equals OFF above)', logged !== undefined && JSON.stringify(Object.keys(logged.evidence).sort()) === JSON.stringify(['failure', 'gate', 'invariant', 'materializer', 'selector']) && ['ZERO', 'ONE', 'TWO', 'THREE_PLUS'].includes(logged.pressured) && ['ZERO', 'ONE', 'TWO', 'THREE_PLUS'].includes(logged.pressuredContested) && logged.evidence.failure === 'NONE' && ['LT_50_MS', 'LT_250_MS', 'LT_1000_MS', 'GTE_1000_MS', 'UNKNOWN'].includes(logged.shadowOverheadLatency) && seen[0].evidence.failure === 'NONE');
     delete process.env[SHADOW_POLICY_MODE_ENV];
     const reOff = await runOnce(createServerShadowPolicyExecution);
     check('after the variable is unset again the very next request is OFF: identical to the first OFF run and no further log line', reOff.body === off.body && lines.length === 1);
