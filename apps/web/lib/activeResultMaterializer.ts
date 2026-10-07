@@ -20,12 +20,12 @@
  *                                                                                                                 item and sole conflict are the promoted candidate's own, which leave with it
  *
  * FAIL CLOSED. Anything missing, ambiguous or inconsistent is a typed UNAVAILABLE and the baseline stays authoritative: an authority that was not minted, a basis
- * from another run, an unready run, a failed materializability gate, a counterfactual that adds, drops or moves anything it should not (defense in depth over P4b3), a duration
+ * from another run, a baseline result that is not the exact baseline of the minting run (BASELINE_PROVENANCE_MISMATCH: no structural-equality fallback), an unready run, a failed materializability gate, a counterfactual that adds, drops or moves anything it should not (defense in depth over P4b3), a duration
  * mismatch, an overlap, a blocker or window violation, or a broken conservation property. It never throws. The output is detached (no shared Date or object) and deeply frozen;
  * the baseline result, the basis and the accepted authority are never mutated.
  */
 
-import { isAcceptedCounterfactual, type AcceptedCounterfactual, type AcceptedPlacement } from './acceptedCounterfactual';
+import { isAcceptedCounterfactual, isBaselineOfAcceptedCounterfactual, type AcceptedCounterfactual, type AcceptedPlacement } from './acceptedCounterfactual';
 import { evaluateMaterializability } from './activeMaterializability';
 import { sortByOverloadPrecedence, type ConstructionWindow, type DayIntent } from './dayIntent';
 import { computeCapacitySnapshot, type BlockedInterval } from './dayCapacity';
@@ -33,7 +33,7 @@ import type { ConstructionBasisOutcome } from './constructionBasis';
 import type { ConstructDayPreview, OrchestrateConstructDayResult } from './dayConstructorOrchestrator';
 import type { ProposedItem } from './dayConstructor';
 
-export type MaterializerUnavailableReason = 'RUN_NOT_READY' | 'INCONSISTENT_AUTHORITY' | 'DEFERRED_DIAGNOSTIC_UNRESOLVED' | 'MATERIALIZATION_FAILED';
+export type MaterializerUnavailableReason = 'RUN_NOT_READY' | 'INCONSISTENT_AUTHORITY' | 'BASELINE_PROVENANCE_MISMATCH' | 'DEFERRED_DIAGNOSTIC_UNRESOLVED' | 'MATERIALIZATION_FAILED';
 
 export interface ActiveMaterializationInput {
   readonly baselineResult: OrchestrateConstructDayResult;
@@ -88,6 +88,8 @@ export function materializeActiveResult(input: ActiveMaterializationInput): Acti
     const accepted = input.accepted;
     if (!isAcceptedCounterfactual(accepted)) return unavailable('INCONSISTENT_AUTHORITY');
     if (input.constructionBasis !== accepted.constructionBasis) return unavailable('INCONSISTENT_AUTHORITY');
+    // O5 P4c4a: the baseline result must be the EXACT baseline of the run that minted this authority (identity, never structure) -- checked before anything is read from it.
+    if (!isBaselineOfAcceptedCounterfactual(accepted, input.baselineResult)) return unavailable('BASELINE_PROVENANCE_MISMATCH');
     const baseline = input.baselineResult;
     if (baseline.status !== 'READY' || input.constructionBasis.status !== 'READY') return unavailable('RUN_NOT_READY');
     const basis = input.constructionBasis.basis;

@@ -226,7 +226,8 @@ async function main() {
       const regionOneEnd = localDateTimeToUTC(FRIDAY, '13:00', TZ).getTime();
       check('DIRECTED BASELINE: the owner is placed and the pressured candidate is the ONLY Deferred item (NO_CANDIDATES) -- real contention, nothing else to explain', day.proposedItems.length === 1 && day.proposedItems[0].intentId === idOf(ownerIntent) && day.deferredItems.length === 1 && day.deferredItems[0].intentId === idOf(candidateIntent) && day.deferredItems[0].primaryReason === 'NO_CANDIDATES');
       const plainDirected = await handleDayConstructorPreviewRequest(boundary(directed.rows));
-      const shadowDirected = await handleDayConstructorPreviewRequest(boundary(directed.rows, {}));
+      const secondRun: Captured = {};
+      const shadowDirected = await handleDayConstructorPreviewRequest(boundary(directed.rows, secondRun));
       const beforeCounts = await counts();
       const selected = await capturing(() => {
         const selection = selectActiveCounterfactual(observed.shadowPolicy);
@@ -241,6 +242,11 @@ async function main() {
       check('P4c2a: the materializability gate reports MATERIALIZABLE (the candidate is the sole Deferred item) and P4c3 returns READY', picked.gate?.status === 'MATERIALIZABLE' && picked.materialized?.status === 'READY');
       check('PURE ON THE DIRECTED RUN: the selector, the gate and the materializer sent ZERO SQL statements', selected.statements.length === 0);
       check('BASELINE UNCHANGED: the preview body with the observation in the loop equals the plain preview body, and the domain rows are unchanged by the selector / materializer', snap(plainDirected.body) === snap(shadowDirected.body) && (await counts()) === beforeCounts);
+      // O5 P4c4a -- SAME-RUN BASELINE BINDING on the real stack: a second REAL run of the very same request produces a structurally identical baseline, which is still NOT this run's baseline.
+      if (picked.accepted && secondRun.observed) {
+        const crossRun = materializeActiveResult({ baselineResult: secondRun.observed.result, constructionBasis: picked.accepted.constructionBasis, accepted: picked.accepted });
+        check('SAME-RUN BASELINE BINDING (real stack): this run\'s authority with a second real run\'s structurally identical baseline is BASELINE_PROVENANCE_MISMATCH (never READY), while its own baseline materializes', snap(secondRun.observed.result) === snap(observed.result) && crossRun.status === 'UNAVAILABLE' && crossRun.reason === 'BASELINE_PROVENANCE_MISMATCH' && picked.materialized?.status === 'READY');
+      }
       if (picked.accepted && picked.materialized?.status === 'READY') {
         const active = picked.materialized.result;
         const basis = picked.accepted.constructionBasis;

@@ -24,7 +24,7 @@ import type { OpportunityRangeDeps } from '../apps/web/lib/opportunityRangeAdapt
 import type { AvailabilityConfiguration } from '../apps/web/lib/availabilityContext';
 import type { TimingCandidate } from '../packages/recommendation/src/timingSearch';
 import type { PlanBlockerCandidate } from '../apps/web/lib/planBlockerLifecycle';
-import { isAcceptedCounterfactual, mintAcceptedCounterfactual, recordAcceptedObservation, acceptedCounterfactualOf, type AcceptedCounterfactual } from '../apps/web/lib/acceptedCounterfactual';
+import { isAcceptedCounterfactual, isBaselineOfAcceptedCounterfactual, mintAcceptedCounterfactual, recordAcceptedObservation, acceptedCounterfactualOf, type AcceptedCounterfactual } from '../apps/web/lib/acceptedCounterfactual';
 import { selectActiveCounterfactual } from '../apps/web/lib/activeSelector';
 import { evaluateMaterializability } from '../apps/web/lib/activeMaterializability';
 import { materializeActiveResult } from '../apps/web/lib/activeResultMaterializer';
@@ -147,28 +147,38 @@ const clone = <T>(v: T): T => {
     const run: any = prepared.run; const pair = run.promotions[0];
     const g = realGenerate({ constructionBasis: run.constructionBasis, baselinePlacements: run.baselinePlacements, schedulingAttempts: run.schedulingAttempts, input: pair.input, contention: pair.contention });
     const inputOf = (cf: unknown) => ({ constructionBasis: run.constructionBasis, baselinePlacements: run.baselinePlacements, promotionInput: pair.input, counterfactual: cf as any });
-    const real = mintAcceptedCounterfactual(inputOf(g.counterfactual));
+    const real = mintAcceptedCounterfactual(inputOf(g.counterfactual), prepared.result);
     check('mintAcceptedCounterfactual over the real authorities: the predicate ACCEPTs and the authority exists', real.acceptance.status === 'ACCEPT' && real.accepted !== undefined && isAcceptedCounterfactual(real.accepted) && Object.isFrozen(real));
     ACC.evaluateCounterfactualAcceptance = () => Object.freeze({ status: 'REJECT', reason: 'NET_PROPOSED_LOSS' });
     let rejected: ReturnType<typeof mintAcceptedCounterfactual>;
-    try { rejected = mintAcceptedCounterfactual(inputOf(g.counterfactual)); } finally { restore(); }
+    try { rejected = mintAcceptedCounterfactual(inputOf(g.counterfactual), prepared.result); } finally { restore(); }
     check('a predicate REJECT mints NOTHING (the brand is applied only when P4b3 itself returns ACCEPT)', rejected.acceptance.status === 'REJECT' && rejected.accepted === undefined);
     ACC.evaluateCounterfactualAcceptance = () => { throw new Error('boom'); };
     let thrown = false; let thrownOut: ReturnType<typeof mintAcceptedCounterfactual> | undefined;
-    try { thrownOut = mintAcceptedCounterfactual(inputOf(g.counterfactual)); } catch { thrown = true; } finally { restore(); }
+    try { thrownOut = mintAcceptedCounterfactual(inputOf(g.counterfactual), prepared.result); } catch { thrown = true; } finally { restore(); }
     check('a throwing predicate propagates exactly as before (the P4b4 composition isolates it per pair) and mints nothing', thrown && thrownOut === undefined);
-    const garbage = mintAcceptedCounterfactual({} as never);
+    const garbage = mintAcceptedCounterfactual({} as never, {} as never);
     check('garbage input: P4b3 answers UNAVAILABLE / EVALUATION_FAILED, nothing is minted, nothing throws', garbage.acceptance.status === 'UNAVAILABLE' && garbage.accepted === undefined);
     // a counterfactual with a non-finite instant: the ACCEPT stands but the snapshot cannot be built -> no authority (never a half-trusted one)
     ACC.evaluateCounterfactualAcceptance = () => Object.freeze({ status: 'ACCEPT' });
     let nan: ReturnType<typeof mintAcceptedCounterfactual>;
-    try { nan = mintAcceptedCounterfactual(inputOf({ ...g.counterfactual, promotedPlacement: { ...g.counterfactual.promotedPlacement, start: new Date(NaN) } })); } finally { restore(); }
+    try { nan = mintAcceptedCounterfactual(inputOf({ ...g.counterfactual, promotedPlacement: { ...g.counterfactual.promotedPlacement, start: new Date(NaN) } }), prepared.result); } finally { restore(); }
     check('an unrepresentable (non-finite) instant after an ACCEPT yields the acceptance WITHOUT an authority (consumers treat it as not accepted)', nan.acceptance.status === 'ACCEPT' && nan.accepted === undefined);
     const o1 = { outcome: 'ACCEPT', candidateIntentId: 'P' }; const o2 = { outcome: 'ACCEPT', candidateIntentId: 'Q' }; const o3 = { outcome: 'REJECT', candidateIntentId: 'P' };
     recordAcceptedObservation(o2, real.accepted!); recordAcceptedObservation(o3, real.accepted!); recordAcceptedObservation(o1, forgeries[0][1] as AcceptedCounterfactual);
     check('LINK RULES: an authority links only to an ACCEPT observation of the SAME candidate, and only a minted authority links', acceptedCounterfactualOf(o2) === undefined && acceptedCounterfactualOf(o3) === undefined && acceptedCounterfactualOf(o1) === undefined);
     recordAcceptedObservation(o1, real.accepted!);
     check('a legitimate link resolves to that exact authority', acceptedCounterfactualOf(o1) === real.accepted);
+    // O5 P4c4a -- the private baseline binding: only the minting run's exact baseline object, unmodified since the mint
+    check('BASELINE BINDING: the authority is bound to the exact baseline result object it was minted with, and only that object', isBaselineOfAcceptedCounterfactual(real.accepted, prepared.result) && !isBaselineOfAcceptedCounterfactual(real.accepted, clone(prepared.result)) && !isBaselineOfAcceptedCounterfactual(real.accepted, JSON.parse(JSON.stringify(prepared.result))) && !isBaselineOfAcceptedCounterfactual(real.accepted, { ...prepared.result }));
+    check('NOT A BASELINE: a non-object / null / undefined / forged authority never matches, and the question never throws', [undefined, null, 'x', 7, {}, []].every((b) => !isBaselineOfAcceptedCounterfactual(real.accepted, b)) && !isBaselineOfAcceptedCounterfactual({ ...real.accepted }, prepared.result) && !isBaselineOfAcceptedCounterfactual(undefined, prepared.result) && !isBaselineOfAcceptedCounterfactual(null, null));
+    ACC.evaluateCounterfactualAcceptance = () => Object.freeze({ status: 'ACCEPT' });
+    let unbound: ReturnType<typeof mintAcceptedCounterfactual>[];
+    try { unbound = [undefined, null, 'x' as unknown, 7 as unknown].map((b) => mintAcceptedCounterfactual(inputOf(g.counterfactual), b as never)); } finally { restore(); }
+    check('A MINT WITHOUT A BASELINE OBJECT MINTS NOTHING: the ACCEPT stands but no authority exists (fail closed)', unbound.every((m) => m.acceptance.status === 'ACCEPT' && m.accepted === undefined));
+    const mutated = clone(prepared.result) as ReadyResult;
+    const own = mintAcceptedCounterfactual(inputOf(g.counterfactual), mutated).accepted!;
+    check('IN-PLACE MODIFICATION: the genuine bound object, modified AFTER the mint, is no longer the run\'s baseline (the fingerprint taken at the mint differs)', isBaselineOfAcceptedCounterfactual(own, mutated) && (() => { mutated.preview.warnings = [...mutated.preview.warnings, 'tampered' as never]; return !isBaselineOfAcceptedCounterfactual(own, mutated); })());
   }
 
   // ======================================================================
@@ -354,14 +364,45 @@ const clone = <T>(v: T): T => {
     const other = await observe(acceptIntents, ['O', 'P'], acceptPools);
     const otherAcc = acceptedCounterfactualOf((other.shadowPolicy as unknown as { observations: ShadowPolicyObservation[] }).observations[0])!;
     check('OTHER-RUN BASIS: a basis from another (even identical-looking) run is not the authority\'s own -> INCONSISTENT_AUTHORITY', matStatus(mat(baseline, otherAcc.constructionBasis, acc1)) === 'INCONSISTENT_AUTHORITY' && matStatus(mat(other.result, otherAcc.constructionBasis, otherAcc)) === 'READY');
-    check('NOT READY: a non-READY baseline result -> RUN_NOT_READY', matStatus(mat({ status: 'TIMEZONE_MISSING' } as OrchestrateConstructDayResult, acc1!.constructionBasis, acc1)) === 'RUN_NOT_READY');
-    const lossAcc = undefined;
-    void lossAcc;
-    // a baseline result from a DIFFERENT fixture: the cross-checks (ids / items) catch it
+    // ---- O5 P4c4a: BASELINE PROVENANCE. The authority is bound to the exact baseline object of ITS run; every other baseline is rejected BEFORE anything is read from it.
+    const matReason = (m: ReturnType<typeof materializeActiveResult>) => (m.status === 'READY' ? 'READY' : m.reason);
+    check('A-AUTHORITY + A-BOUND-BASELINE (control): the legitimate same-run materialization is unchanged -> READY', matReason(mat(baseline, acc1!.constructionBasis, acc1)) === 'READY');
+    check('NOT READY: a non-READY foreign baseline result is not the run\'s baseline -> BASELINE_PROVENANCE_MISMATCH (a READY authority can only belong to a READY run)', matReason(mat({ status: 'TIMEZONE_MISSING' } as OrchestrateConstructDayResult, acc1!.constructionBasis, acc1)) === 'BASELINE_PROVENANCE_MISMATCH');
+    check('NOT AN OBJECT: undefined / null / a string / a number as the baseline -> BASELINE_PROVENANCE_MISMATCH, never a throw', [undefined, null, 'baseline', 42].every((b) => matReason(mat(b as never, acc1!.constructionBasis, acc1)) === 'BASELINE_PROVENANCE_MISMATCH'));
+    {
+      // THE P4c4 COUNTEREXAMPLE, permanent: run A's authority with run B's baseline, where B is an individually coherent run in a DIFFERENT world (a real blocker on the very slot A relocates the owner into, and a shorter window).
+      const blocker: PlanBlockerCandidate = { start: at('15:00'), end: at('16:00'), status: 'UPCOMING' };
+      const bRequest = { ...request(acceptIntents, ['O', 'P']), explicitEnd: at('16:30') } as ConstructDayRequest;
+      const runB = await observeShadowPolicy(bRequest, mkDeps(acceptPools, 3, { blockers: [blocker] }));
+      const bResult = runB.result as ReadyResult;
+      check(`RUN B IS COHERENT AND DIFFERENT: its own baseline is a READY day in a window ending 16:30 with the owner at 10:00 (${view(runB.result)}), and its own pipeline does not materialize (the blocker removes the owner's relocation slot)`, bResult.status === 'READY' && bResult.preview.constructionWindow.end.getTime() === TT('16:30') && view(runB.result) === 'O@10:00-11:00' && pipe(runB).kind === 'BASELINE');
+      const crossRun = mat(runB.result, acc1!.constructionBasis, acc1);
+      check(`A-AUTHORITY + B-BASELINE (the P4c4 counterexample: previously READY with the owner on B's blocker): now BASELINE_PROVENANCE_MISMATCH -- got ${matReason(crossRun)}`, crossRun.status === 'UNAVAILABLE' && crossRun.reason === 'BASELINE_PROVENANCE_MISMATCH');
+      const sameFacts = await observe(acceptIntents, ['O', 'P'], acceptPools);
+      const sameAcc = acceptedCounterfactualOf((sameFacts.shadowPolicy as unknown as { observations: ShadowPolicyObservation[] }).observations[0])!;
+      const unrelatedRun = await observe([req('A', 0), req('B', 1)], ['A', 'B'], { A: [item('09:00', '10:00')], B: [item('11:00', '12:00')] });
+      check('A-AUTHORITY + a COHERENT OTHER-RUN BASELINE that is STRUCTURALLY IDENTICAL to A\'s (a second run of the same request): rejected by PROVENANCE, not by content -> BASELINE_PROVENANCE_MISMATCH -- yet that second run materializes with its OWN authority', snap(sameFacts.result) === snap(baseline) && matReason(mat(sameFacts.result, acc1!.constructionBasis, acc1)) === 'BASELINE_PROVENANCE_MISMATCH' && matReason(mat(sameFacts.result, sameAcc.constructionBasis, sameAcc)) === 'READY');
+      check('A-AUTHORITY + a CLONED A-BASELINE (a structurally identical detached copy): structural equality cannot forge provenance -> BASELINE_PROVENANCE_MISMATCH', snap(clone(baseline)) === snap(baseline) && matReason(mat(clone(baseline), acc1!.constructionBasis, acc1)) === 'BASELINE_PROVENANCE_MISMATCH' && matReason(mat(JSON.parse(JSON.stringify(baseline)), acc1!.constructionBasis, acc1)) === 'BASELINE_PROVENANCE_MISMATCH' && matReason(mat({ ...baseline } as OrchestrateConstructDayResult, acc1!.constructionBasis, acc1)) === 'BASELINE_PROVENANCE_MISMATCH');
+      const modifiedCopy = clone(baseline) as ReadyResult;
+      modifiedCopy.preview.warnings = [...modifiedCopy.preview.warnings, 'x' as never];
+      check('A-AUTHORITY + a MODIFIED A-BASELINE COPY: BASELINE_PROVENANCE_MISMATCH', matReason(mat(modifiedCopy, acc1!.constructionBasis, acc1)) === 'BASELINE_PROVENANCE_MISMATCH');
+      // the genuine object modified IN PLACE after the run: use a fresh run so no other case is affected
+      const fresh = await observe(acceptIntents, ['O', 'P'], acceptPools);
+      const freshAcc = acceptedCounterfactualOf((fresh.shadowPolicy as unknown as { observations: ShadowPolicyObservation[] }).observations[0])!;
+      const before = matReason(mat(fresh.result, freshAcc.constructionBasis, freshAcc));
+      (fresh.result as ReadyResult).preview.constructedDay.proposedItems = [];
+      check('A-AUTHORITY + the GENUINE A-BASELINE MODIFIED IN PLACE after the run: BASELINE_PROVENANCE_MISMATCH (it was READY before the modification)', before === 'READY' && matReason(mat(fresh.result, freshAcc.constructionBasis, freshAcc)) === 'BASELINE_PROVENANCE_MISMATCH');
+      check('THE PROVENANCE CHECK COMES FIRST: with a foreign baseline the gate, the cross-checks and every later step are never reached (the reason is never DEFERRED_DIAGNOSTIC_UNRESOLVED / INCONSISTENT_AUTHORITY from the baseline\'s content)', matReason(mat(unrelatedRun.result, acc1!.constructionBasis, acc1)) === 'BASELINE_PROVENANCE_MISMATCH');
+    }
+    // the SEMANTIC cross-checks stay as defense in depth BEHIND the provenance: an authority bound to a (tampered) baseline reaches them
+    const prep = await preparePromotionInputs(request(acceptIntents, ['O', 'P']), mkDeps(acceptPools, 3));
+    const prun: any = prep.run; const ppair = prun.promotions[0];
+    const pgen = realGenerate({ constructionBasis: prun.constructionBasis, baselinePlacements: prun.baselinePlacements, schedulingAttempts: prun.schedulingAttempts, input: ppair.input, contention: ppair.contention });
+    const mintBound = (boundBaseline: unknown): AcceptedCounterfactual => mintAcceptedCounterfactual({ constructionBasis: prun.constructionBasis, baselinePlacements: prun.baselinePlacements, promotionInput: ppair.input, counterfactual: pgen.counterfactual }, boundBaseline as never).accepted!;
     const unrelated = await observe([req('A', 0), req('B', 1)], ['A', 'B'], { A: [item('09:00', '10:00')], B: [item('11:00', '12:00')] });
-    check('a baseline result of ANOTHER day (unrelated intents) -> INCONSISTENT_AUTHORITY', matStatus(mat(unrelated.result, acc1!.constructionBasis, acc1)) === 'INCONSISTENT_AUTHORITY');
-    // tampered baselines (mutable deep copies)
-    const t = (edit: (r: ReadyResult) => void): ReturnType<typeof materializeActiveResult> => { const c = clone(baseline) as ReadyResult; edit(c); return mat(c, acc1!.constructionBasis, acc1); };
+    check('a baseline result of ANOTHER day (unrelated intents), even if the authority were bound to it, fails the content cross-checks -> INCONSISTENT_AUTHORITY', matStatus(mat(unrelated.result, prun.constructionBasis, mintBound(unrelated.result))) === 'INCONSISTENT_AUTHORITY');
+    // tampered baselines (mutable deep copies the authority is bound to, so the PROVENANCE passes and the content checks run)
+    const t = (edit: (r: ReadyResult) => void): ReturnType<typeof materializeActiveResult> => { const c = clone(prep.result) as ReadyResult; edit(c); return mat(c, prun.constructionBasis, mintBound(c)); };
     check('baseline Deferred missing P -> INCONSISTENT_AUTHORITY', matStatus(t((r) => { r.preview.constructedDay.deferredItems = []; r.preview.constructedDay.conflicts = []; })) === 'INCONSISTENT_AUTHORITY');
     check('baseline P Deferred twice -> INCONSISTENT_AUTHORITY', matStatus(t((r) => { r.preview.constructedDay.deferredItems.push(clone(r.preview.constructedDay.deferredItems[0])); })) === 'INCONSISTENT_AUTHORITY');
     check('baseline carries another Deferred item -> DEFERRED_DIAGNOSTIC_UNRESOLVED', matStatus(t((r) => { r.preview.constructedDay.deferredItems.push({ ...clone(r.preview.constructedDay.deferredItems[0]), intentId: 'D' }); })) === 'DEFERRED_DIAGNOSTIC_UNRESOLVED');
@@ -374,7 +415,10 @@ const clone = <T>(v: T): T => {
     const nSel = selectActiveCounterfactual(nObserved.shadowPolicy);
     if (nSel.status !== 'APPLY') check('fixture with a non-owner is APPLY', false);
     else {
-      const tn = (edit: (r: ReadyResult) => void) => { const c = clone(nObserved.result) as ReadyResult; edit(c); return mat(c, nSel.acceptedCounterfactual.constructionBasis, nSel.acceptedCounterfactual); };
+      const nPrep = await preparePromotionInputs(request(intents, ['O', 'P']), mkDeps(pools, 3));
+      const nRun: any = nPrep.run; const nPair = nRun.promotions[0];
+      const nGen = realGenerate({ constructionBasis: nRun.constructionBasis, baselinePlacements: nRun.baselinePlacements, schedulingAttempts: nRun.schedulingAttempts, input: nPair.input, contention: nPair.contention });
+      const tn = (edit: (r: ReadyResult) => void) => { const c = clone(nPrep.result) as ReadyResult; edit(c); const bound = mintAcceptedCounterfactual({ constructionBasis: nRun.constructionBasis, baselinePlacements: nRun.baselinePlacements, promotionInput: nPair.input, counterfactual: nGen.counterfactual }, c).accepted!; return mat(c, nRun.constructionBasis, bound); };
       check('control: the untampered non-owner baseline materializes', matStatus(mat(nObserved.result, nSel.acceptedCounterfactual.constructionBasis, nSel.acceptedCounterfactual)) === 'READY');
       check('a non-owner whose baseline start differs from the counterfactual row (a moved non-owner) -> INCONSISTENT_AUTHORITY', matStatus(tn((r) => { const n = r.preview.constructedDay.proposedItems.find((i) => i.intentId === 'N')!; n.start = new Date(n.start.getTime() + 60000); })) === 'INCONSISTENT_AUTHORITY');
       check('a non-owner whose baseline timing fit differs -> INCONSISTENT_AUTHORITY', matStatus(tn((r) => { const n = r.preview.constructedDay.proposedItems.find((i) => i.intentId === 'N')!; n.timingFit = n.timingFit === 'BEST' ? 'CAUTION' : 'BEST'; })) === 'INCONSISTENT_AUTHORITY');
@@ -391,7 +435,7 @@ const clone = <T>(v: T): T => {
     const genuine = g.counterfactual;
     const forge = (edit: (cf: any) => any): AcceptedCounterfactual | undefined => {
       ACC.evaluateCounterfactualAcceptance = () => Object.freeze({ status: 'ACCEPT' });
-      try { return mintAcceptedCounterfactual({ constructionBasis: run.constructionBasis, baselinePlacements: run.baselinePlacements, promotionInput: pair.input, counterfactual: edit(clone(genuine)) }).accepted; } finally { restore(); }
+      try { return mintAcceptedCounterfactual({ constructionBasis: run.constructionBasis, baselinePlacements: run.baselinePlacements, promotionInput: pair.input, counterfactual: edit(clone(genuine)) }, prepared.result).accepted; } finally { restore(); }
     };
     const withPromoted = (cf: any, start: Date, end: Date) => ({ ...cf, promotedPlacement: { ...cf.promotedPlacement, start, end }, counterfactualPlacements: cf.counterfactualPlacements.map((p: any) => (p.intentId === cf.candidateIntentId ? { ...p, start, end } : p)) });
     const baseline = prepared.result;

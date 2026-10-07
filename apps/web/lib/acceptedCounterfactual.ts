@@ -7,8 +7,8 @@
  * against exactly these same-run authorities.
  *
  * HOW IT CANNOT BE FORGED.
- *   1. There is no parameter through which a caller can say "accepted": `mintAcceptedCounterfactual` takes the four P4b3 inputs and CALLS P4b3 itself;
- *      the brand is applied only when that call returns ACCEPT. (A caller cannot hand it an ACCEPT.)
+ *   1. There is no parameter through which a caller can say "accepted": `mintAcceptedCounterfactual` takes the four P4b3 inputs (plus the run's baseline result,
+ *      O5 P4c4a, which is bound, never trusted as a decision) and CALLS P4b3 itself; the brand is applied only when that call returns ACCEPT. (A caller cannot hand it an ACCEPT.)
  *   2. The type carries a unique-symbol brand that this module does not export, so no object literal or structural copy has the type.
  *   3. At runtime every brand is registered in a module-private WeakSet; `isAcceptedCounterfactual` (the only check consumers use) is false for any
  *      object this module did not mint, however it was cast.
@@ -22,12 +22,21 @@
  *
  * Observations are linked to their authority through a module-private WeakMap (`recordAcceptedObservation` / `acceptedCounterfactualOf`), so the P4b4
  * observation shape is unchanged. Pure: no database, clock, search, randomness, logging or environment; nothing here is consumed by production behavior.
+ *
+ * BASELINE BINDING (O5 P4c4a). The basis and the baseline placements are bound by identity, but a materializer is also handed the baseline CONSTRUCTED-DAY RESULT of the
+ * run, and nothing tied that result to the run: a coherent baseline from ANOTHER run (a different blocker / window world) could be combined with this authority and
+ * still materialize. The mint therefore also receives the exact baseline result object the SAME composition holds (`prepared.result`), and binds it PRIVATELY: a
+ * module-private WeakMap keyed by the authority holds the object itself and a canonical fingerprint of it taken at mint time. `isBaselineOfAcceptedCounterfactual` is the
+ * only way to ask the question and it is true ONLY for that very object, unmodified since the mint. There is deliberately no run id, nonce or token a caller could copy
+ * between artifacts; and NO structural equality fallback -- a structurally identical clone, or a modified copy, is a different object and is never the run's baseline.
+ * (The fingerprint additionally detects an in-place modification of the genuine object after the mint.) Nothing is recomputed: the check is two comparisons.
  */
 
 import { evaluateCounterfactualAcceptance, type CounterfactualAcceptance, type CounterfactualAcceptanceInput } from './counterfactualAcceptance';
 import type { ConstructionBasisOutcome } from './constructionBasis';
 import type { BaselinePlacementsOutcome } from './baselinePlacements';
 import type { PlacementTimingFit } from './dayConstructor';
+import type { OrchestrateConstructDayResult } from './dayConstructorOrchestrator';
 
 declare const ACCEPTED_BRAND: unique symbol;
 
@@ -63,6 +72,8 @@ export interface MintedAcceptance {
 
 const minted = new WeakSet<object>();
 const linkedAuthority = new WeakMap<object, AcceptedCounterfactual>();
+/** O5 P4c4a -- the PRIVATE same-run baseline binding: the exact baseline result object of the minting run, and its canonical fingerprint at mint time. Never exported. */
+const baselineBindings = new WeakMap<object, { readonly baseline: object; readonly fingerprint: string }>();
 
 function placementOf(p: { readonly intentId: string; readonly start: Date; readonly end: Date; readonly placementSource: AcceptedPlacementSource; readonly timingFit?: PlacementTimingFit }): AcceptedPlacement {
   const base = { intentId: p.intentId, startMs: p.start.getTime(), endMs: p.end.getTime(), placementSource: p.placementSource };
@@ -71,13 +82,17 @@ function placementOf(p: { readonly intentId: string; readonly start: Date; reado
 }
 
 /**
- * Evaluates P4b3 over the four same-run authorities and, ONLY if it returns ACCEPT, mints the typed authority for exactly that counterfactual. The
- * acceptance decision is returned unchanged for the caller (the shadow composition) to carry.
+ * Evaluates P4b3 over the four same-run authorities and, ONLY if it returns ACCEPT, mints the typed authority for exactly that counterfactual, privately bound to
+ * `baselineResult`: the baseline constructed-day result of THE SAME run (the composition passes its own `prepared.result`). The acceptance decision is returned
+ * unchanged for the caller (the shadow composition) to carry. A baseline that is not an object, or that cannot be fingerprinted, mints nothing (fail closed).
  */
-export function mintAcceptedCounterfactual(input: CounterfactualAcceptanceInput): MintedAcceptance {
+export function mintAcceptedCounterfactual(input: CounterfactualAcceptanceInput, baselineResult: OrchestrateConstructDayResult): MintedAcceptance {
   const acceptance = evaluateCounterfactualAcceptance(input);
   if (acceptance.status !== 'ACCEPT') return Object.freeze({ acceptance });
   try {
+    if (typeof baselineResult !== 'object' || baselineResult === null) return Object.freeze({ acceptance });
+    const fingerprint = JSON.stringify(baselineResult);
+    if (typeof fingerprint !== 'string') return Object.freeze({ acceptance });
     const cf = input.counterfactual;
     const accepted = Object.freeze({
       candidateIntentId: cf.candidateIntentId,
@@ -89,6 +104,7 @@ export function mintAcceptedCounterfactual(input: CounterfactualAcceptanceInput)
       placements: Object.freeze(cf.counterfactualPlacements.map(placementOf)),
     }) as unknown as AcceptedCounterfactual;
     minted.add(accepted);
+    baselineBindings.set(accepted, Object.freeze({ baseline: baselineResult, fingerprint }));
     return Object.freeze({ acceptance, accepted });
   } catch {
     return Object.freeze({ acceptance });
@@ -98,6 +114,20 @@ export function mintAcceptedCounterfactual(input: CounterfactualAcceptanceInput)
 /** The ONLY trust check: true exactly for objects this module minted. */
 export function isAcceptedCounterfactual(value: unknown): value is AcceptedCounterfactual {
   return typeof value === 'object' && value !== null && minted.has(value);
+}
+
+/**
+ * O5 P4c4a -- true ONLY if `baselineResult` is the very baseline object the minting run bound to `accepted`, unmodified since the mint. Identity, never structure: a clone
+ * or a modified copy is rejected; an authority this module did not mint has no binding and is rejected; it never throws.
+ */
+export function isBaselineOfAcceptedCounterfactual(accepted: unknown, baselineResult: unknown): boolean {
+  try {
+    if (!isAcceptedCounterfactual(accepted) || typeof baselineResult !== 'object' || baselineResult === null) return false;
+    const binding = baselineBindings.get(accepted);
+    return binding !== undefined && binding.baseline === baselineResult && JSON.stringify(baselineResult) === binding.fingerprint;
+  } catch {
+    return false;
+  }
 }
 
 /** Links one ACCEPT observation to its authority. Both must be what they claim: a valid minted authority and an ACCEPT observation for the same candidate. */
