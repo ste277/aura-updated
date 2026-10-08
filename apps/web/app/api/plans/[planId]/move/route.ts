@@ -10,6 +10,7 @@ const STATUS_BY_CODE: Record<MovePlanErrorCode, number> = {
   ALREADY_MOVED: 409,
   CONFLICT: 409,
   HAS_LINKED_MOMENT: 409,
+  CAPACITY_EXCEEDED: 409,
 };
 
 /**

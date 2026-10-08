@@ -224,11 +224,23 @@ export async function resolveGoalActivityHandoff(deps: GoalActivityHandoffDeps, 
       // N_PER_WEEK activity with remaining weekly capacity is admitted
       // too -- re-derived fresh, server-side, from THIS activity's own
       // persisted rhythmKind/rhythmTargetPerWeek and occurrence facts,
-      // never trusted from any client-supplied Rhythm field (this
-      // ticket's own section 20). A finite (NONE) COMPLETED activity, or
-      // any PLANNED/DISMISSED activity, is never admitted here -- the
-      // legacy SUGGESTED-only behavior for everything else is unchanged.
-      if (state !== 'COMPLETED' || !planningDate || !timezone || !deps.loadGoalActivityRhythmFacts) return false;
+      // never trusted from any client-supplied Rhythm field. A finite
+      // (NONE) COMPLETED activity, or any DISMISSED activity, is never
+      // admitted here -- the legacy SUGGESTED-only behavior for those is
+      // unchanged.
+      //
+      // Multi-Occurrence Rhythm PR 2 corrective fix -- PLANNED is now
+      // ALSO re-checked the same way as COMPLETED, for N_PER_WEEK only.
+      // `GoalActivity.plannedActivityId` now tracks "the most recently
+      // materialized occurrence," not "the one live commitment," so a
+      // GoalActivity can be PLANNED (its newest occurrence is UPCOMING)
+      // while still having weekly capacity for ANOTHER occurrence -- the
+      // automatic Plan My Day suggestion path (goalDemandCandidates.ts)
+      // already offers exactly this case; this manual hand-off path must
+      // agree with it, not silently disagree. A finite (NONE) PLANNED
+      // activity is still never admitted (rhythm.kind !== 'N_PER_WEEK'
+      // below refuses it, preserving the legacy finite behavior exactly).
+      if ((state !== 'COMPLETED' && state !== 'PLANNED') || !planningDate || !timezone || !deps.loadGoalActivityRhythmFacts) return false;
       const rhythm = normalizeGoalActivityRhythm({ rhythmKind: activity.rhythmKind ?? null, rhythmTargetPerWeek: activity.rhythmTargetPerWeek ?? null });
       if (rhythm.kind !== 'N_PER_WEEK') return false;
       const facts = await deps.loadGoalActivityRhythmFacts(session.userId, activity.id, timezone);

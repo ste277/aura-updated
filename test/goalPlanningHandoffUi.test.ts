@@ -46,8 +46,15 @@ function main() {
   // through the one canonical shape instead of a dedicated boolean field.
   // ============================================================
   check(
-    'A/4. the checkbox is gated on derivedState === \'SUGGESTED\' (unconditionally), OR COMPLETED gated strictly on rhythm.eligibleForAnotherOccurrence for an N_PER_WEEK activity (R4)',
-    /isSelectable = \(a: GoalActivityView\) => a\.derivedState === 'SUGGESTED' \|\| \(a\.derivedState === 'COMPLETED' && a\.rhythm\.kind === 'N_PER_WEEK' && a\.rhythm\.eligibleForAnotherOccurrence\)/.test(source)
+    // Multi-Occurrence Rhythm PR 2 corrective patch -- PLANNED is now
+    // ALSO gated the same way COMPLETED always was (strictly on
+    // rhythm.eligibleForAnotherOccurrence for an N_PER_WEEK activity),
+    // so the manual Goal Detail flow agrees with the automatic Plan My
+    // Day path when a PLANNED activity still has real remaining weekly
+    // capacity. A finite (NONE) PLANNED/COMPLETED activity is still
+    // never selectable (rhythm.kind === 'N_PER_WEEK' still required).
+    'A/4. the checkbox is gated on derivedState === \'SUGGESTED\' (unconditionally), OR COMPLETED/PLANNED gated strictly on rhythm.eligibleForAnotherOccurrence for an N_PER_WEEK activity (R4, extended by Multi-Occurrence Rhythm PR 2)',
+    /isSelectable = \(a: GoalActivityView\) => a\.derivedState === 'SUGGESTED' \|\| \(\(a\.derivedState === 'COMPLETED' \|\| a\.derivedState === 'PLANNED'\) && a\.rhythm\.kind === 'N_PER_WEEK' && a\.rhythm\.eligibleForAnotherOccurrence\)/.test(source)
   );
   check('B/C. PLANNED/COMPLETED never render a checkbox -- isSelectable is false for every state except SUGGESTED (single boolean gate, no PLANNED/COMPLETED branch grants it)', !/isSelectable[\s\S]{0,80}'PLANNED'/.test(source) && !/isSelectable[\s\S]{0,80}'COMPLETED'/.test(source));
   check('4. the checkbox itself is conditionally rendered only when isSelectable', /\{isSelectable && \(/.test(source));

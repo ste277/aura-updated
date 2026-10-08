@@ -70,9 +70,20 @@ for (const [label, relPath] of Object.entries(PRODUCTION_FILES)) {
 // ============================================================
 const planMoveSrc = read('../apps/web/lib/planMove.ts');
 const planMoveSrcNoComments = stripComments(planMoveSrc);
+// Multi-Occurrence Rhythm, Final Capacity Safety Gate -- planMove.ts now
+// ALSO reads GoalActivityOccurrence twice more, both inside
+// enforceDestinationWeekCapacity: one SELECT to find whether the plan
+// being moved is linked to an occurrence at all, and one more (joined
+// against PlannedActivity) to load every OTHER occurrence fact for that
+// GoalActivity when computing destination-week capacity -- still never
+// a write beyond the one documented repoint UPDATE.
 check(
-  'Move (planMove.ts) references GoalActivityOccurrence ONLY via its one documented repoint UPDATE (R3) -- never INSERT/DELETE, never a second reference in real code',
-  (planMoveSrcNoComments.match(/GoalActivityOccurrence/g) ?? []).length === 1 && /UPDATE "GoalActivityOccurrence"/.test(planMoveSrcNoComments) && !/INSERT INTO "GoalActivityOccurrence"|DELETE FROM "GoalActivityOccurrence"/.test(planMoveSrcNoComments)
+  'Move (planMove.ts) references GoalActivityOccurrence ONLY via its documented repoint UPDATE (R3) and the two capacity-check SELECTs (Final Capacity Safety Gate) -- never INSERT/DELETE, never a fourth/undocumented reference',
+  (planMoveSrcNoComments.match(/GoalActivityOccurrence/g) ?? []).length === 3 &&
+    /UPDATE "GoalActivityOccurrence"/.test(planMoveSrcNoComments) &&
+    /SELECT id, "goalActivityId" FROM "GoalActivityOccurrence"/.test(planMoveSrcNoComments) &&
+    /FROM "GoalActivityOccurrence" gao JOIN "PlannedActivity"/.test(planMoveSrcNoComments) &&
+    !/INSERT INTO "GoalActivityOccurrence"|DELETE FROM "GoalActivityOccurrence"/.test(planMoveSrcNoComments)
 );
 
 // ============================================================
@@ -110,6 +121,15 @@ const dbSrc = read('../apps/web/lib/db.ts');
 // more: db.ts references GoalActivityOccurrence ONLY inside these three
 // named, intentionally-reviewed functions -- never a fourth, undocumented
 // one -- and the one INSERT still lives only inside the R3 writer.
+//
+// Multi-Occurrence Rhythm PR 2's own corrective patch added exactly two
+// more intentionally-reviewed, READ-ONLY references: goalHasRetainedPlanLinkage
+// (an EXISTS subquery -- the authoritative occurrence ledger, not just
+// GoalActivity's own singular pointer, now gates Goal deletion) and
+// loadGoalContextsForPlanIds (a UNION branch resolving Goal context for
+// every occurrence's own Plan, not just the one the singular pointer
+// currently references). Neither adds a write; the one INSERT still
+// lives only inside the R3 writer.
 const dbSrcNoComments = stripComments(dbSrc);
 const allowedOccurrenceFnBodiesNoComments =
   stripComments(functionBody(dbSrc, 'loadGoalActivityRhythmFacts')) +
@@ -119,7 +139,10 @@ const allowedOccurrenceFnBodiesNoComments =
   stripComments(functionBody(dbSrc, 'listGoalActivityOccurrenceRowsForActivities')) +
   // ... plus its row TYPE and the PURE row mapper (no query, no table reference besides the type name).
   stripComments((dbSrc.match(/export interface GoalActivityOccurrenceRow \{[\s\S]*?\n\}/) ?? [''])[0]) +
-  stripComments(functionBody(dbSrc, 'buildGoalActivityRhythmFactsFromOccurrenceRows'));
+  stripComments(functionBody(dbSrc, 'buildGoalActivityRhythmFactsFromOccurrenceRows')) +
+  // Multi-Occurrence Rhythm PR 2 corrective patch -- both read-only, no write added.
+  stripComments(functionBody(dbSrc, 'goalHasRetainedPlanLinkage')) +
+  stripComments(functionBody(dbSrc, 'loadGoalContextsForPlanIds'));
 check(
   'db.ts references GoalActivityOccurrence ONLY inside the allowed, intentionally-reviewed functions (loadGoalActivityRhythmFacts [read-only], loadGoalActivityRhythmFactsForActivities [R4\'s batched read-only sibling], listGoalActivityOccurrenceRowsForActivities [O5 P2d: that sibling\'s raw read-only SELECT, moved unchanged so it can run on the snapshot executor], and materializeGoalActivityRhythmOccurrence [R3\'s sole writer]) -- no fourth function in real code, no UPDATE/DELETE anywhere',
   (dbSrcNoComments.match(/GoalActivityOccurrence/g) ?? []).length === (allowedOccurrenceFnBodiesNoComments.match(/GoalActivityOccurrence/g) ?? []).length &&

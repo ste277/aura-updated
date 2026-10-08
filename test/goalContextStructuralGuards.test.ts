@@ -29,7 +29,12 @@ const dbSrc = read('apps/web/lib/db.ts');
 const loaderBody = dbSrc.slice(dbSrc.indexOf('export async function loadGoalContextsForPlanIds'), dbSrc.indexOf('export async function loadGoalContextsForPlanIds') + 2500);
 check('loadGoalContextsForPlanIds exists and is the canonical batched loader', /export async function loadGoalContextsForPlanIds/.test(dbSrc));
 check('GoalActivity lookup uses plannedActivityId (the canonical current linkage, not a second concept)', /ga\."plannedActivityId" = ANY/.test(stripComments(loaderBody)));
-check('execution lookup uses plannedActivityId (never a "latest"/history join)', /gae\."plannedActivityId" = ga\."plannedActivityId"/.test(stripComments(loaderBody)));
+// Multi-Occurrence Rhythm PR 2 corrective patch -- the execution lookup now
+// joins against the UNION's own resolved `matched."plannedActivityId"`
+// (the plan id actually matched, from either the legacy singular link or
+// the occurrence ledger), never a second "latest"/history concept.
+check('execution lookup uses plannedActivityId (never a "latest"/history join)', /gae\."plannedActivityId" = matched\."plannedActivityId"/.test(stripComments(loaderBody)));
+check('the occurrence-ledger branch resolves through GoalActivityOccurrence.plannedActivityId, never a second counting formula', /gao\."plannedActivityId" = ANY/.test(stripComments(loaderBody)));
 check('completionRequirement in the loader uses the canonical G2.1 normalization helper, never a second implementation', /normalizeGoalActivityCompletionRequirement\(/.test(loaderBody));
 check('PlanGoalContext exposes no execution persistence internals (id/source/createdAt/updatedAt of the execution row)', (() => {
   const typeBlock = dbSrc.slice(dbSrc.indexOf('export interface PlanGoalContext'), dbSrc.indexOf('export interface PlanGoalContext') + 400);

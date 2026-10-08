@@ -228,9 +228,14 @@ async function main() {
     console.log('=== PHASE 6/11: POST-ACCEPT ELIGIBILITY / LIVE-UPCOMING ===');
     check('11a. canonical Rhythm eligibility: remainingThisWeek = 2 (1 UPCOMING committed, target 3)', (await rhythmRemaining(ga!.id, 3, TUE)) === 2);
     const discovery6 = await eligibility(TUE);
+    // Multi-Occurrence Rhythm PR 2: the former one-live-occurrence
+    // exclusion is removed -- a GoalActivity with a live UPCOMING link
+    // AND remaining weekly capacity now DOES appear in automatic
+    // discovery again, with remainingThisWeek correctly reduced (2 of 3).
+    const discoveredGa6 = discovery6.status === 'OK' ? discovery6.candidates.find((c) => c.goalActivityId === ga!.id) : undefined;
     check(
-      '11b. existing one-live-occurrence semantics: the GoalActivity does NOT appear in automatic discovery while its current link is UPCOMING (A1\'s own structural exclusion) -- Rhythm capacity remaining is NOT the same as "surface another simultaneous suggestion"',
-      discovery6.status === 'OK' && !discovery6.candidates.some((c) => c.goalActivityId === ga!.id)
+      "11b. Multi-Occurrence Rhythm PR 2: the GoalActivity DOES appear in automatic discovery while its current link is UPCOMING, now that weekly capacity (not a single live link) is the only gate -- remainingThisWeek correctly reflects the live commitment (2 of 3)",
+      !!discoveredGa6 && discoveredGa6.remainingThisWeek === 2
     );
     await durableState('PHASE 6 POST-ACCEPT', ga!.id);
 

@@ -59,9 +59,14 @@ const CONTEXT_NAMING_ALLOW = [CONTEXT, LOADER, PREVIEW, ROUTE, PROVIDER];
 const CONTEXT_IDENT = /DecisionSchedulingContext|decisionSchedulingContext|DecisionSchedulingBinding|schedulingContext|SchedulingContext|schedulingBinding/;
 /** The seven reads inside the snapshot, in order. Each is a function that already existed (or, for the occurrence rows and the availability flag, the SAME SQL split out) and takes the executor as its last argument. */
 const SNAPSHOT_READS = ['loadCandidateGoalActivitiesForRhythmDemand', 'listGoalActivityOccurrenceRowsForActivities', 'listUserActivityPreferenceRows', 'listHabitLogs', 'readUserAvailabilityConfigured', 'listUserAvailabilityPeriods', 'listPlannedActivitiesOverlappingRange'];
-/** SQL hashes of the read functions at the P3b baseline: relocating the reads must not change a statement. */
+/** SQL hashes of the read functions at the P3b baseline: relocating the reads must not change a statement.
+ * loadCandidateGoalActivitiesForRhythmDemand's pin was deliberately re-baselined by Multi-Occurrence Rhythm
+ * PR 2, which removes that query's single-live-plan exclusion (and its now-unused PlannedActivity join) --
+ * the SAME discovery query Plan My Day's own Goal-demand read model (goalDemandCandidates.ts) now also
+ * reads with that exclusion removed. This is the one query this PR intentionally changes; every other pin
+ * below is unmodified and still catches an accidental change the same as before. */
 const SQL_PINS: Record<string, string> = {
-  loadCandidateGoalActivitiesForRhythmDemand: '0903d372d2fc9c8c',
+  loadCandidateGoalActivitiesForRhythmDemand: '757784fc4ef4052f',
   listGoalActivityOccurrenceRowsForActivities: '15d09f004da4ef97',
   listUserActivityPreferenceRows: 'f38cabdfd8929bb5',
   listHabitLogs: '5dde9aca259966b5',
@@ -241,7 +246,7 @@ check('MUTATION: the context-backed Goal deps read the database -> detected', fl
 check('MUTATION: the context becomes mutable (no deep freeze) -> detected', flags(audit(mutateFile(real, CONTEXT, (s) => s.replace('return deepFreeze({', 'return ({'))), 'T4:context-is-not-deep-frozen', CONTEXT));
 check('MUTATION: the context carries pressure / evidence / a Constructor concept, or the Constructor / comparator / shadow / evidence modules start to know the context -> detected', flags(audit(mutateFile(real, CONTEXT, (s) => `${s}\nexport type P = DecisionPressure;`)), 'T4:context-names-policy-or-construction', CONTEXT) && ['apps/web/lib/dayConstructor.ts', 'apps/web/lib/dayIntent.ts', ORCH, 'apps/web/lib/decisionEvidence.ts', 'apps/web/lib/shadowPressureObservation.ts', 'apps/web/lib/decisionPressure.ts'].every((f) => flags(audit(mutateFile(real, f, (s) => `${s}\nconst probe = 'DecisionSchedulingContext';`)), 'T7:module-names-the-context', f)));
 check('MUTATION: a read function stops using the executor (back to the global pool) or its SQL changes -> detected', flags(audit(mutateFile(real, DB, (s) => s.replace('const result = await executor.query(\n    `SELECT * FROM "PlannedActivity"\n     WHERE "userId" = $1 AND status <> \'CANCELLED\' AND "plannedStartAt" < $3', 'const result = await pool.query(\n    `SELECT * FROM "PlannedActivity"\n     WHERE "userId" = $1 AND status <> \'CANCELLED\' AND "plannedStartAt" < $3'))), 'T2:read-not-executor-parameterized', DB) || sqlHash(rawDb.replace("status <> 'CANCELLED' AND \"plannedStartAt\" < $3", "status <> 'CANCELLED' AND \"plannedStartAt\" <= $3"), 'listPlannedActivitiesOverlappingRange') !== SQL_PINS.listPlannedActivitiesOverlappingRange);
-check('the SQL pin is sensitive: changing the overlap boundary or a lifecycle filter changes the hash', sqlHash(rawDb.replace("status <> 'CANCELLED' AND \"plannedStartAt\" < $3", "status <> 'CANCELLED' AND \"plannedStartAt\" <= $3"), 'listPlannedActivitiesOverlappingRange') !== SQL_PINS.listPlannedActivitiesOverlappingRange && sqlHash(rawDb.replace("pa.status IS DISTINCT FROM 'UPCOMING'", 'TRUE'), 'loadCandidateGoalActivitiesForRhythmDemand') !== SQL_PINS.loadCandidateGoalActivitiesForRhythmDemand);
+check('the SQL pin is sensitive: changing the overlap boundary or a lifecycle filter changes the hash', sqlHash(rawDb.replace("status <> 'CANCELLED' AND \"plannedStartAt\" < $3", "status <> 'CANCELLED' AND \"plannedStartAt\" <= $3"), 'listPlannedActivitiesOverlappingRange') !== SQL_PINS.listPlannedActivitiesOverlappingRange && sqlHash(rawDb.replace("AND ga.status != 'DISMISSED'", "AND TRUE"), 'loadCandidateGoalActivitiesForRhythmDemand') !== SQL_PINS.loadCandidateGoalActivitiesForRhythmDemand);
 check('the mutations were applied to in-memory copies only: the real tree still has zero violations afterwards', audit(real).length === 0);
 
 console.log('=== wiring and honest scope ===');

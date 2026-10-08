@@ -114,15 +114,20 @@ async function main() {
     check('1. a SUGGESTED N_PER_WEEK activity with no prior occurrences is returned', r1.status === 'OK' && r1.candidates.some((c) => c.goalActivityId === ga1!.id && c.remainingThisWeek === 3));
 
     // ============================================================
-    // 2/3. A live UPCOMING commitment structurally excludes the activity
-    // (mirrors materializeGoalActivityRhythmOccurrence's own HAS_LIVE_COMMITMENT
-    // gate exactly -- never offered again while a commitment is live,
-    // regardless of remaining numeric capacity).
+    // 2/3. Multi-Occurrence Rhythm PR 2 -- a live UPCOMING commitment no
+    // longer structurally excludes the activity by itself (the former
+    // HAS_LIVE_COMMITMENT/SQL exclusion is removed): with real numeric
+    // capacity still remaining (3 - 0 completed - 1 committed = 2), the
+    // activity is STILL returned, with remainingThisWeek correctly
+    // reduced to 2 -- this is the exact behavior Multi-Occurrence Rhythm
+    // exists to deliver (mirrors materializeGoalActivityRhythmOccurrence's
+    // own PR 2 gate exactly: weekly capacity is the only remaining check).
     // ============================================================
     const d2 = await makeOccurrenceFor(ga1!.id, 'intent-ga1-a', `${TUE}T10:00:00Z`, `${TUE}T10:10:00Z`, TUE);
     check('2. setup: first occurrence SAVED (now UPCOMING)', d2.status === 'SAVED');
     const r2 = await loadEligibleGoalDemand(realDeps, user.id, TUE, TZ);
-    check('3. an activity with a live UPCOMING commitment is excluded entirely, even though numeric capacity (3-0-1=2) would otherwise be positive', r2.status === 'OK' && !r2.candidates.some((c) => c.goalActivityId === ga1!.id));
+    const c2 = r2.status === 'OK' ? r2.candidates.find((c) => c.goalActivityId === ga1!.id) : undefined;
+    check('3. an activity with a live UPCOMING commitment and remaining numeric capacity (3-0-1=2) is still offered, with remainingThisWeek correctly reduced to 2', !!c2 && c2.remainingThisWeek === 2);
 
     // ============================================================
     // 4. LOGGED consumes completed capacity -- resolving the UPCOMING
@@ -320,8 +325,11 @@ async function main() {
 
     // ============================================================
     // 19. Raw discovery query, called directly -- proves the SQL filter
-    // itself (not just the composed loader) already excludes DISMISSED/
-    // ARCHIVED/non-N_PER_WEEK/UPCOMING at the query level.
+    // itself (not just the composed loader) still excludes DISMISSED/
+    // ARCHIVED/non-N_PER_WEEK at the query level. Multi-Occurrence Rhythm
+    // PR 2: a live UPCOMING commitment is NO LONGER excluded at this
+    // layer -- weekly capacity (computed one layer up, never duplicated
+    // in SQL) is the only remaining gate.
     // ============================================================
     const ga19 = await addGoalActivity(user.id, goal.id, { title: 'Workout (live commitment)', activityId: null });
     await setRhythm(ga19!.id, 3);
@@ -330,7 +338,7 @@ async function main() {
     check('19a. the raw discovery query never returns the DISMISSED activity from check 12', !raw19.some((r) => r.goalActivityId === ga12!.id));
     check('19b. the raw discovery query never returns the ARCHIVED-Goal activity from check 11', !raw19.some((r) => r.goalActivityId === ga11!.id));
     check('19c. the raw discovery query never returns the Rhythm NONE activity from check 13', !raw19.some((r) => r.goalActivityId === ga13!.id));
-    check('19d. the raw discovery query never returns an activity with a live UPCOMING commitment', !raw19.some((r) => r.goalActivityId === ga19!.id));
+    check('19d. the raw discovery query DOES return an activity with a live UPCOMING commitment (Multi-Occurrence Rhythm PR 2 -- capacity, not this query, now decides)', raw19.some((r) => r.goalActivityId === ga19!.id));
   } finally {
     await cleanup();
   }

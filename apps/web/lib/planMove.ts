@@ -21,6 +21,9 @@ import { beginTransaction, type PlannedActivity } from './db';
 import { isActivePlanBlocker } from './dayConstructorOrchestrator';
 import { parseSchedulingMode } from './plannedActivitySchedulingMode';
 import { buildGoogleCalendarUrl } from '../../../packages/recommendation/src/dailyAssistant';
+import { normalizeGoalActivityRhythm, deriveGoalActivityRhythmContribution, type GoalActivityRhythmOccurrenceFact, type PlannedActivityStatusForRhythm } from './goalActivityRhythm';
+import { evaluateNewOccurrenceEligibility } from './goalActivityOccurrenceCapacity';
+import { getDatePartsInTimezone } from './timezone';
 
 export type MovePlanErrorCode =
   | 'NOT_FOUND'
@@ -28,7 +31,8 @@ export type MovePlanErrorCode =
   | 'ALREADY_MOVED'
   | 'INVALID_DESTINATION'
   | 'CONFLICT'
-  | 'HAS_LINKED_MOMENT';
+  | 'HAS_LINKED_MOMENT'
+  | 'CAPACITY_EXCEEDED';
 
 export class MovePlanError extends Error {
   constructor(public readonly code: MovePlanErrorCode, message: string) {
@@ -147,6 +151,76 @@ export async function findBlockingPlanForRange(
 }
 
 /**
+ * Multi-Occurrence Rhythm -- CROSS-WEEK CAPACITY ENFORCEMENT, shared by
+ * BOTH Move paths (manual Move and Recomposition acceptance both call
+ * `applyMoveWrites`, below, which calls this FIRST, inside the SAME
+ * transaction and per-user advisory lock both callers already hold --
+ * there is exactly one enforcement point, not two independently
+ * maintained ones).
+ *
+ * A Move repoints an EXISTING occurrence's association; it never creates
+ * a new one (the hard "no new occurrence on Move" invariant, unchanged).
+ * But repointing to a new instant can move that occurrence into a
+ * DIFFERENT local calendar week -- and until this fix, nothing ever
+ * re-checked whether the DESTINATION week had room for it under the
+ * GoalActivity's own N_PER_WEEK target. This function closes that gap:
+ * if `a` (the plan being moved) is linked to an N_PER_WEEK GoalActivity
+ * via the occurrence ledger, the destination week's existing committed
+ * facts -- EXCLUDING this exact occurrence, which is leaving its old
+ * week, not adding a duplicate -- are loaded fresh (same transaction
+ * client, same read-your-own-writes guarantee every other capacity
+ * check in this codebase relies on) and checked through
+ * `evaluateNewOccurrenceEligibility` (PR 1's own pure capacity API --
+ * no new/duplicated formula). A move that would push the destination
+ * week over its target throws CAPACITY_EXCEEDED before any write runs,
+ * so the caller's own ROLLBACK leaves the original plan and occurrence
+ * completely unchanged (this function's caller wraps everything in its
+ * own transaction).
+ *
+ * A plan with no occurrence row (every finite/NONE-rhythm GoalActivity's
+ * plan, and every plan with no Goal link at all) is a pure no-op here --
+ * zero rows match, nothing is checked, nothing changes about its Move
+ * behavior. The weekly TARGET itself is never read as anything other
+ * than the GoalActivity's own persisted `rhythmTargetPerWeek` -- this
+ * function never changes it, only enforces it.
+ */
+async function enforceDestinationWeekCapacity(
+  client: { query: (text: string, params?: unknown[]) => Promise<{ rows: any[] }> },
+  userId: string,
+  a: PlannedActivity,
+  newStartAt: Date
+): Promise<void> {
+  const occRes = await client.query(`SELECT id, "goalActivityId" FROM "GoalActivityOccurrence" WHERE "plannedActivityId" = $1 AND "userId" = $2`, [a.id, userId]);
+  if (occRes.rows.length !== 1) return; // no occurrence linked -- NONE-rhythm / non-Goal plan, unaffected
+  const { id: occurrenceId, goalActivityId } = occRes.rows[0];
+
+  const gaRes = await client.query(`SELECT "rhythmKind", "rhythmTargetPerWeek" FROM "GoalActivity" WHERE id = $1 AND "userId" = $2`, [goalActivityId, userId]);
+  if (gaRes.rows.length === 0) return;
+  const rhythm = normalizeGoalActivityRhythm({ rhythmKind: gaRes.rows[0].rhythmKind, rhythmTargetPerWeek: gaRes.rows[0].rhythmTargetPerWeek });
+  if (rhythm.kind !== 'N_PER_WEEK') return; // finite Goal Activity -- Rhythm capacity is not a concept here
+
+  const userRes = await client.query(`SELECT timezone FROM "User" WHERE id = $1`, [userId]);
+  const timezone: string = userRes.rows[0].timezone;
+  const destinationLocalDate = getDatePartsInTimezone(timezone, newStartAt).dateStr;
+
+  // Every OTHER occurrence fact for this GoalActivity -- excluding the one being moved, which is leaving its
+  // current week, not contributing a duplicate to the destination week it hasn't joined yet.
+  const factsRes = await client.query(
+    `SELECT pa."plannedStartAt", pa.status FROM "GoalActivityOccurrence" gao JOIN "PlannedActivity" pa ON pa.id = gao."plannedActivityId" WHERE gao."goalActivityId" = $1 AND gao.id <> $2`,
+    [goalActivityId, occurrenceId]
+  );
+  const occurrences: GoalActivityRhythmOccurrenceFact[] = factsRes.rows.map((row) => ({
+    localDate: getDatePartsInTimezone(timezone, new Date(row.plannedStartAt)).dateStr,
+    contribution: deriveGoalActivityRhythmContribution(row.status as PlannedActivityStatusForRhythm),
+  }));
+
+  const eligibility = evaluateNewOccurrenceEligibility({ rhythm, planningLocalDate: destinationLocalDate, occurrences });
+  if (!eligibility.eligible) {
+    throw new MovePlanError('CAPACITY_EXCEEDED', 'Moving this would exceed the destination week\'s weekly target.');
+  }
+}
+
+/**
  * SHARED with recomposition acceptance (F3): the writes of ONE Move inside the caller's transaction -- successor B
  * inserted directly (never through createPlannedActivity, whose same-title/same-time dedupe could hand back someone
  * else's plan), A transitioned UPCOMING -> MOVED (conditional), and the source (Capture / GoalActivity) repointed to B.
@@ -162,6 +236,8 @@ export async function applyMoveWrites(
   newStartAt: Date,
   newEndAt: Date
 ): Promise<MovePlanResult> {
+  await enforceDestinationWeekCapacity(client, userId, a, newStartAt);
+
   const bId = randomUUID();
   const bRes = await client.query(
     `INSERT INTO "PlannedActivity"
