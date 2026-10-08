@@ -121,6 +121,15 @@ export interface PlanDayClientProps {
   planningDate: string | null;
   horizon: PlanningHorizon | null;
   availabilityConfigured: boolean | null;
+  /** Onboarding V1 PR 1 -- Location Trust Foundation. `false` (or `null`
+   * for an unauthenticated render) means this plan's timing was computed
+   * against a location the user has never explicitly confirmed -- shown
+   * as a nonblocking qualifier, never a blocker (this ticket's own
+   * explicit requirement). */
+  locationConfirmed: boolean | null;
+  /** The current (non-birth) city this plan's timing is computed
+   * against, so the qualifier can name it. */
+  cityName: string | null;
   /** Goals -> Planning Integration V1 PR C (this ticket's own section
    * 6/7/8) -- already ownership/eligibility-resolved server-side
    * (planDayBootstrap.ts's own `resolveGoalActivityHandoff`) from the
@@ -178,7 +187,7 @@ function ShadowReviewPanel({ review, timezone }: { review: ShadowReviewPayload; 
   );
 }
 
-export function PlanDayClient({ timezone, planningDate, horizon, availabilityConfigured, goalActivities, captures, autoGoalSuggestions }: PlanDayClientProps) {
+export function PlanDayClient({ timezone, planningDate, horizon, availabilityConfigured, locationConfirmed, cityName, goalActivities, captures, autoGoalSuggestions }: PlanDayClientProps) {
   const router = useRouter();
   const authenticated = !!timezone && !!planningDate && !!horizon;
   const [phase, setPhase] = useState<Phase>(() => (authenticated ? 'ENTRY' : 'REDIRECTING'));
@@ -501,6 +510,22 @@ export function PlanDayClient({ timezone, planningDate, horizon, availabilityCon
         ) : (
           <>
             <PageHeader title="Plan my day" subtitle={horizon === 'TOMORROW' ? 'What do you want to get done tomorrow?' : 'What do you want to get done today?'} />
+
+            {/* Onboarding V1 PR 1 -- Location Trust Foundation: a targeted,
+                low-key qualifier (distinct from the global disclosure
+                banner shown app-wide) naming exactly what this plan's
+                timing is based on when it has never been explicitly
+                confirmed. Nonblocking -- planning continues normally
+                either way; this never claims the unconfirmed location is
+                verified. */}
+            {locationConfirmed === false && cityName && (
+              <p style={{ margin: `${spacing.xs}px 0 0`, fontSize: 13, color: colors.textFaint }}>
+                Timing based on {cityName} (unconfirmed) ·{' '}
+                <TextButton onClick={() => { window.location.href = '/?tab=you'; }} color={colors.textFaint}>
+                  Confirm location
+                </TextButton>
+              </p>
+            )}
 
             <div style={{ marginTop: spacing.xl }}>
               <FieldLabel>When are you planning for?</FieldLabel>

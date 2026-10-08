@@ -40,6 +40,15 @@ export interface PlanDayBootstrap {
  */
 export interface PlanDayServerProps extends PlanDayBootstrap {
   availabilityConfigured: boolean;
+  /** Onboarding V1 PR 1 -- Location Trust Foundation. Resolved the SAME
+   * way `availabilityConfigured` above is: one level up, where `user` is
+   * already in scope, zero extra query. A plain boolean (never the raw
+   * timestamp/Date) -- the only thing the client needs is whether to
+   * show the "unconfirmed location" qualifier, never the exact instant. */
+  locationConfirmed: boolean;
+  /** The current (non-birth) city name this plan's timing is computed
+   * against -- surfaced so the qualifier, when shown, can name it. */
+  cityName: string;
 }
 
 /**
@@ -73,8 +82,18 @@ export interface PlanDayBootstrapDeps {
    * always carries it, but a test fixture supplying only `{ timezone }`
    * (P1's own established convention) must keep working unchanged; a
    * missing value is treated identically to `false` (see
-   * `resolvePlanDayServerProps` below), never a fabricated `true`. */
-  getUser: (userId: string) => Promise<{ timezone: string; availabilityConfigured?: boolean } | null>;
+   * `resolvePlanDayServerProps` below), never a fabricated `true`.
+   *
+   * Onboarding V1 PR 1 -- `locationConfirmedAt` and `cityName` are
+   * optional for the same reason: the real `User` row's own `cityName`
+   * column is NOT NULL, but an existing test fixture supplying only
+   * `{ timezone }` (P1's own established convention, same as
+   * `availabilityConfigured` above) must keep working unchanged. A
+   * missing `cityName` falls back to `''` in `resolvePlanDayServerProps`
+   * below, which simply never satisfies the qualifier's own truthy
+   * check (see PlanDayClient.tsx) -- fails closed to "no qualifier
+   * shown," never a fabricated city name. */
+  getUser: (userId: string) => Promise<{ timezone: string; availabilityConfigured?: boolean; cityName?: string; locationConfirmedAt?: Date | null } | null>;
   /** The authoritative server clock, read exactly once. */
   now: () => Date;
 }
@@ -105,7 +124,7 @@ export async function resolvePlanDayServerProps(deps: PlanDayBootstrapDeps, hori
   if (!user) return null;
 
   const bootstrap = resolvePlanDayBootstrap(user.timezone, deps.now(), horizon);
-  return { ...bootstrap, availabilityConfigured: user.availabilityConfigured === true };
+  return { ...bootstrap, availabilityConfigured: user.availabilityConfigured === true, locationConfirmed: user.locationConfirmedAt != null, cityName: user.cityName ?? '' };
 }
 
 // ============================================================

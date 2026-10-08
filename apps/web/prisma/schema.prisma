@@ -16,6 +16,21 @@ model User {
   timezone        String   @default("Asia/Kolkata") // IANA name, e.g. 'Asia/Kolkata', 'America/New_York'
   createdAt       DateTime @default(now()) @db.Timestamptz(3)
 
+  // Onboarding V1 PR 1 -- Location Trust Foundation. NULL means this
+  // (non-birth) location has never been explicitly confirmed by the user
+  // -- every new signup starts at a hardcoded default (DEFAULT_SIGNUP_LOCATION,
+  // db.ts), and that default must never be presented as verified. Set to
+  // the current instant ONLY by a successful, validated
+  // PATCH /api/users/location call (updateUserLocation, db.ts) -- never by
+  // signup, a read, a background job, or timezone auto-detection. Every
+  // existing row is NULL (this column's own default): inferring
+  // confirmation from the current cityName/latitude/longitude/timezone
+  // value would be indefensible, since "Chennai" (the default) is itself
+  // one of the app's own curated catalog cities, so a real user who
+  // deliberately chose Chennai is indistinguishable BY VALUE from a user
+  // who never touched Settings at all.
+  locationConfirmedAt DateTime? @db.Timestamptz(3)
+
   // Birth profile — nullable, since not every user will fill this in (Phase 2
   // birth-chart feature is optional on top of the core daily dial).
   birthDate       DateTime? @db.Timestamptz(3)

@@ -125,6 +125,8 @@ export default async function PlanDayPage({
       planningDate={bootstrap?.planningDate ?? null}
       horizon={bootstrap ? horizon : null}
       availabilityConfigured={bootstrap?.availabilityConfigured ?? null}
+      locationConfirmed={bootstrap?.locationConfirmed ?? null}
+      cityName={bootstrap?.cityName ?? null}
       goalActivities={handoffGoalActivities}
       captures={captures}
       autoGoalSuggestions={autoGoalSuggestions}
