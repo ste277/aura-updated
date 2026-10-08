@@ -83,9 +83,18 @@ check(
 // client-authored Rhythm data).
 // ============================================================
 const planMoveSrc = read('../apps/web/lib/planMove.ts');
+// Multi-Occurrence Rhythm, Final Capacity Safety Gate -- planMove.ts now
+// ALSO reads rhythmKind/rhythmTargetPerWeek and computes eligibility,
+// strictly to ENFORCE destination-week capacity on Move (never to
+// mutate a Rhythm policy, and never a second/duplicated formula --
+// it delegates to evaluateNewOccurrenceEligibility, PR 1's own pure
+// capacity API, exactly like every other capacity-check call site).
 check(
-  'planMove.ts references Rhythm ONLY via its one documented GoalActivityOccurrence repoint UPDATE (R3) -- no eligibility computation, no policy mutation',
-  /UPDATE "GoalActivityOccurrence"/.test(planMoveSrc) && !/computeGoalActivityRhythmEligibility|rhythmKind|rhythmTargetPerWeek/.test(planMoveSrc)
+  'planMove.ts references Rhythm ONLY via its documented GoalActivityOccurrence repoint UPDATE (R3) and the destination-capacity enforcement (Final Capacity Safety Gate), which delegates to evaluateNewOccurrenceEligibility -- never a duplicated formula, never a Rhythm policy WRITE',
+  /UPDATE "GoalActivityOccurrence"/.test(planMoveSrc) &&
+    /evaluateNewOccurrenceEligibility\(/.test(planMoveSrc) &&
+    !/computeGoalActivityRhythmEligibility\(/.test(planMoveSrc) &&
+    !/SET\s+"?rhythmKind"?|SET\s+"?rhythmTargetPerWeek"?/.test(planMoveSrc)
 );
 
 // Rhythm R4 (a still-further, separately-authorized ticket: Goal Detail

@@ -16,19 +16,23 @@
  *      agree with the automatic Plan My Day path: a PLANNED N_PER_WEEK
  *      GoalActivity with remaining weekly capacity is selectable;
  *      exhausted capacity is not; NONE-rhythm behavior is unchanged.
- *   D (audit, not a fix) -- moving an occurrence across a week boundary:
- *      does the source week correctly release its commitment, does the
- *      destination week correctly count it once (never twice), and --
- *      the invariant explicitly flagged as uncertain by the review --
- *      can the destination week's capacity be silently exceeded by a
- *      Move (which never re-checks Rhythm capacity)? Reported honestly
- *      either way; no scheduling redesign is attempted here.
+ *   D. moving an occurrence across a week boundary: the source week
+ *      correctly releases its commitment, the destination week correctly
+ *      counts it once (never twice) -- and the exact gap this scenario
+ *      originally found and reported (Move silently exceeding the
+ *      destination week's own capacity) is now closed by the FINAL
+ *      CAPACITY SAFETY GATE follow-up
+ *      (enforceDestinationWeekCapacity, apps/web/lib/planMove.ts): the
+ *      SAME move that used to silently overbook now correctly throws
+ *      CAPACITY_EXCEEDED, with zero partial mutation. See
+ *      test/multiOccurrenceRhythmMoveCapacityDb.test.ts for the full,
+ *      dedicated proof of that fix across scenarios A-H.
  *
  *   DATABASE_URL="postgresql://..." npx ts-node test/multiOccurrenceRhythmCorrectiveDb.test.ts
  */
 import { upsertUserByEmail, updateBirthProfile, createGoalWithActivities, addGoalActivity, deleteGoal, deletePlannedActivity, loadGoalContextsForPlanIds, listGoalActivitiesWithLinkedPlanStatus, beginTransaction } from '../apps/web/lib/db';
 import { createSessionToken } from '../apps/web/lib/auth';
-import { movePlannedActivity } from '../apps/web/lib/planMove';
+import { movePlannedActivity, MovePlanError } from '../apps/web/lib/planMove';
 import { persistAcceptedConstructedDay } from '../apps/web/lib/dayConstructorAcceptancePersistence';
 import { loadEligibleGoalDemand, createRealGoalDemandCandidatesDeps } from '../apps/web/lib/goalDemandCandidates';
 import { resolveGoalActivityHandoff } from '../apps/web/lib/planDayBootstrap';
@@ -219,19 +223,25 @@ async function main() {
     const destWeekBeforeMove = await loadEligibleGoalDemand(createRealGoalDemandCandidatesDeps(), user.id, destWeekDate, TZ);
     check('D. destination week: remainingThisWeek=0 before the Move (already exhausted by its own two occurrences)', destWeekBeforeMove.status === 'OK' && !destWeekBeforeMove.candidates.some((c) => c.goalActivityId === gaD!.id));
 
-    const moveResultD = await movePlannedActivity(user.id, planD.id, { newStartAt: new Date(destBase + 3 * 3600000) });
-    const sourceWeekAfter = await loadEligibleGoalDemand(createRealGoalDemandCandidatesDeps(), user.id, moveWindowDate, TZ);
-    check('D. source week: commitment correctly RELEASED after the Move (remainingThisWeek back to full, 2)', sourceWeekAfter.status === 'OK' && sourceWeekAfter.candidates.find((c) => c.goalActivityId === gaD!.id)?.remainingThisWeek === 2);
-    const destWeekAfterMove = await loadEligibleGoalDemand(createRealGoalDemandCandidatesDeps(), user.id, destWeekDate, TZ);
-    const destCandidateAfter = destWeekAfterMove.status === 'OK' ? destWeekAfterMove.candidates.find((c) => c.goalActivityId === gaD!.id) : undefined;
-    const destFacts = await sql(`SELECT count(*)::int n FROM "GoalActivityOccurrence" gao JOIN "PlannedActivity" pa ON pa.id = gao."plannedActivityId" WHERE gao."goalActivityId" = $1 AND pa.status = 'UPCOMING'`, [gaD!.id]);
-    check('D. no duplicate completion credit: exactly 3 UPCOMING occurrences exist in total (2 original destination-week + 1 moved-in), never 4', destFacts[0].n === 3);
-    if (destCandidateAfter === undefined) {
-      check('D. CRITICAL INVARIANT: destination-week capacity is NOT silently exceeded -- the moved-in occurrence correctly keeps the destination week excluded/at-capacity (3 UPCOMING against a target of 2, but the GoalActivity is NOT offered as if capacity remained)', true);
-      console.log('[D NOTE] destination week GoalActivity is excluded from candidates post-Move (consistent with exhausted capacity) -- but see raw count below for whether the WEEK ITSELF now holds more committed occurrences than its own target.');
+    // FINAL CAPACITY SAFETY GATE (separate follow-up ticket): this exact
+    // move -- into a destination week already at its own full capacity --
+    // is now correctly REJECTED by enforceDestinationWeekCapacity
+    // (apps/web/lib/planMove.ts), closing the gap this audit originally
+    // found and reported (Move used to silently exceed destination-week
+    // capacity; see test/multiOccurrenceRhythmMoveCapacityDb.test.ts for
+    // the full, dedicated proof of the fix across scenarios A-H).
+    let moveRejectedD: MovePlanError | null = null;
+    try {
+      await movePlannedActivity(user.id, planD.id, { newStartAt: new Date(destBase + 3 * 3600000) });
+    } catch (e) {
+      moveRejectedD = e as MovePlanError;
     }
-    console.log(`[D EVIDENCE] destination week remainingThisWeek after Move: ${destCandidateAfter ? destCandidateAfter.remainingThisWeek : 'EXCLUDED (undefined)'}; raw UPCOMING occurrence count for this GoalActivity: ${destFacts[0].n}; target: 2`);
-    check('D. CRITICAL INVARIANT CHECK: destination week now holds 3 committed/UPCOMING occurrences against a target of 2 -- capacity IS silently exceeded by Move (Move never re-checks Rhythm capacity at the destination); remainingThisWeek is correctly clamped to 0 (never negative) but the WEEK ITSELF now has one MORE live commitment than its target permits', destFacts[0].n === 3 && (destCandidateAfter === undefined || destCandidateAfter.remainingThisWeek === 0));
+    check('D. the Move into the already-full destination week is correctly REJECTED (CAPACITY_EXCEEDED) -- the gap this audit originally found is now closed', moveRejectedD instanceof MovePlanError && moveRejectedD.code === 'CAPACITY_EXCEEDED');
+    const sourceWeekAfter = await loadEligibleGoalDemand(createRealGoalDemandCandidatesDeps(), user.id, moveWindowDate, TZ);
+    check('D. the ORIGINAL plan and occurrence are unchanged: source week still shows remainingThisWeek=1 (never released, since the Move never happened)', sourceWeekAfter.status === 'OK' && sourceWeekAfter.candidates.find((c) => c.goalActivityId === gaD!.id)?.remainingThisWeek === 1);
+    const destFacts = await sql(`SELECT count(*)::int n FROM "GoalActivityOccurrence" gao JOIN "PlannedActivity" pa ON pa.id = gao."plannedActivityId" WHERE gao."goalActivityId" = $1 AND pa.status = 'UPCOMING'`, [gaD!.id]);
+    check('D. still exactly 3 UPCOMING occurrences in total for this GoalActivity (1 source + 2 destination) -- zero partial mutation from the rejected Move, never a 4th', destFacts[0].n === 3);
+    check('D. the SOURCE plan itself is still UPCOMING (never flipped to MOVED)', (await planStatus(planD.id)) === 'UPCOMING');
   } finally {
     await cleanup();
   }

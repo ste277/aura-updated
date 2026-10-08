@@ -70,9 +70,20 @@ for (const [label, relPath] of Object.entries(PRODUCTION_FILES)) {
 // ============================================================
 const planMoveSrc = read('../apps/web/lib/planMove.ts');
 const planMoveSrcNoComments = stripComments(planMoveSrc);
+// Multi-Occurrence Rhythm, Final Capacity Safety Gate -- planMove.ts now
+// ALSO reads GoalActivityOccurrence twice more, both inside
+// enforceDestinationWeekCapacity: one SELECT to find whether the plan
+// being moved is linked to an occurrence at all, and one more (joined
+// against PlannedActivity) to load every OTHER occurrence fact for that
+// GoalActivity when computing destination-week capacity -- still never
+// a write beyond the one documented repoint UPDATE.
 check(
-  'Move (planMove.ts) references GoalActivityOccurrence ONLY via its one documented repoint UPDATE (R3) -- never INSERT/DELETE, never a second reference in real code',
-  (planMoveSrcNoComments.match(/GoalActivityOccurrence/g) ?? []).length === 1 && /UPDATE "GoalActivityOccurrence"/.test(planMoveSrcNoComments) && !/INSERT INTO "GoalActivityOccurrence"|DELETE FROM "GoalActivityOccurrence"/.test(planMoveSrcNoComments)
+  'Move (planMove.ts) references GoalActivityOccurrence ONLY via its documented repoint UPDATE (R3) and the two capacity-check SELECTs (Final Capacity Safety Gate) -- never INSERT/DELETE, never a fourth/undocumented reference',
+  (planMoveSrcNoComments.match(/GoalActivityOccurrence/g) ?? []).length === 3 &&
+    /UPDATE "GoalActivityOccurrence"/.test(planMoveSrcNoComments) &&
+    /SELECT id, "goalActivityId" FROM "GoalActivityOccurrence"/.test(planMoveSrcNoComments) &&
+    /FROM "GoalActivityOccurrence" gao JOIN "PlannedActivity"/.test(planMoveSrcNoComments) &&
+    !/INSERT INTO "GoalActivityOccurrence"|DELETE FROM "GoalActivityOccurrence"/.test(planMoveSrcNoComments)
 );
 
 // ============================================================
