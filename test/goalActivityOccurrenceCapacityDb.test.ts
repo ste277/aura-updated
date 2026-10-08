@@ -167,11 +167,12 @@ async function main() {
 
     check('A. two distinct UPCOMING occurrences coexist for the same GoalActivity', fixAB.plan1.status === 'UPCOMING' && fixAB.plan2.status === 'UPCOMING' && fixAB.occ1.id !== fixAB.occ2.id);
     check('A. the schema/existing write paths tolerate this state (two occurrence rows under one GoalActivity, no constraint violation)', (await occurrencesFor(gaAB!.id)).length === 2);
+    // Superseded by Multi-Occurrence Rhythm PR 2, which explicitly wires
+    // multi-occurrence demand into this exact query (its own single-
+    // live-plan SQL exclusion removed) -- so this GoalActivity is now
+    // correctly INCLUDED here, matching PR 2's own intended behavior.
     const candidatesAB = await loadCandidateGoalActivitiesForRhythmDemand(user.id);
-    check(
-      'A. the EXISTING single-link candidate query (loadCandidateGoalActivitiesForRhythmDemand) still excludes this GoalActivity today, UNCHANGED by this PR -- confirms PR 1 has not touched or relaxed the current production gate; wiring multi-occurrence demand into that query is explicitly OUT of this PR\'s scope',
-      !candidatesAB.some((r) => r.goalActivityId === gaAB!.id)
-    );
+    check('A. the candidate query now includes this GoalActivity despite its two coexisting UPCOMING occurrences (Multi-Occurrence Rhythm PR 2)', candidatesAB.some((r) => r.goalActivityId === gaAB!.id));
     check('B. each occurrence has its own, distinct Plan link -- never shared', fixAB.occ1.plannedActivityId === fixAB.plan1.id && fixAB.occ2.plannedActivityId === fixAB.plan2.id && fixAB.plan1.id !== fixAB.plan2.id);
 
     // ============================================================

@@ -7,13 +7,13 @@ import { toPersistedCompletionRequirement, normalizeGoalActivityCompletionRequir
 import {
   deriveGoalActivityRhythmContribution,
   normalizeGoalActivityRhythm,
-  computeGoalActivityRhythmEligibility,
   toPersistedGoalActivityRhythm,
   NONE_GOAL_ACTIVITY_RHYTHM,
   type GoalActivityRhythmOccurrenceFact,
   type PlannedActivityStatusForRhythm,
   type GoalActivityRhythm,
 } from './goalActivityRhythm';
+import { evaluateNewOccurrenceEligibility } from './goalActivityOccurrenceCapacity';
 import { getDatePartsInTimezone } from './timezone';
 import { canonicalizeCivilBirthDate } from './birthDate';
 import { toPersistedGoalActivityExecutionSnapshot, fromPersistedGoalActivityExecutionSnapshot, resolveCompletionActualValue } from './goalActivityExecution';
@@ -2970,26 +2970,33 @@ export async function loadGoalActivityRhythmFactsForActivities(userId: string, g
   return buildGoalActivityRhythmFactsFromOccurrenceRows(await listGoalActivityOccurrenceRowsForActivities(userId, goalActivityIds), timezone);
 }
 
-// Goals V2 Candidate A1 -- the ownership-scoped discovery query for
-// "which of this user's N_PER_WEEK GoalActivities are structurally
-// eligible to be CONSIDERED for another occurrence." Mirrors
-// materializeGoalActivityRhythmOccurrence's own gate exactly (same file,
-// above): status != DISMISSED, rhythmKind = N_PER_WEEK, and the linked
-// plan (if any) is not UPCOMING (a live commitment is never offered
-// again -- HAS_LIVE_COMMITMENT there, excluded here by construction
-// rather than by a second, separately-maintained check). Weekly CAPACITY
-// is deliberately NOT evaluated in SQL -- that stays the authoritative,
-// already-tested computeGoalActivityRhythmEligibility (goalActivityRhythm.ts),
-// applied by the caller (goalDemandCandidates.ts) against a second,
-// batched facts query, never duplicated here as a second counting
-// formula. Scoped by "userId" on GoalActivity only (ga."userId" = $1) --
-// the same convention loadGoalContextsForPlanIds above already
-// established: a JOIN target is never independently re-scoped by userId,
-// the FK relationship plus the owning row's own filter is what already
-// prevents cross-user leakage throughout this file. ARCHIVED Goals and
-// Rhythm NONE/undefined activities are filtered in SQL, never pulled back
-// just to be discarded in application code (this ticket's own section
-// 4/14: filter as early as safely possible).
+// Goals V2 Multi-Occurrence Rhythm PR 2 -- the ownership-scoped discovery
+// query for "which of this user's N_PER_WEEK GoalActivities are
+// structurally eligible to be CONSIDERED for another occurrence."
+//
+// PR 2 removes the single-live-plan exclusion this query previously
+// applied (`pa.status IS DISTINCT FROM 'UPCOMING'`, joined off
+// GoalActivity's own singular `plannedActivityId`): a GoalActivity with
+// one already-UPCOMING occurrence is no longer excluded outright merely
+// for having one -- weekly CAPACITY (via the occurrence ledger, not this
+// singular pointer) is the only remaining gate, exactly as
+// materializeGoalActivityRhythmOccurrence (below) now also enforces.
+// Dropping that filter also removes its join target: the `PlannedActivity`
+// LEFT JOIN served no other purpose (no column from it is selected).
+//
+// Weekly CAPACITY is still deliberately NOT evaluated in SQL -- that
+// stays the authoritative, already-tested
+// evaluateNewOccurrenceEligibility/computeGoalActivityRhythmEligibility
+// (goalActivityOccurrenceCapacity.ts / goalActivityRhythm.ts), applied by
+// the caller (goalDemandCandidates.ts) against a second, batched facts
+// query, never duplicated here as a second counting formula. Scoped by
+// "userId" on GoalActivity only (ga."userId" = $1) -- the same convention
+// loadGoalContextsForPlanIds above already established: a JOIN target is
+// never independently re-scoped by userId, the FK relationship plus the
+// owning row's own filter is what already prevents cross-user leakage
+// throughout this file. ARCHIVED Goals and Rhythm NONE/undefined
+// activities are still filtered in SQL, never pulled back just to be
+// discarded in application code.
 export interface CandidateGoalActivityForRhythmDemandRow {
   goalActivityId: string;
   goalId: string;
@@ -3006,12 +3013,10 @@ export async function loadCandidateGoalActivitiesForRhythmDemand(userId: string,
             ga."rhythmKind", ga."rhythmTargetPerWeek"
      FROM "GoalActivity" ga
      JOIN "Goal" g ON g.id = ga."goalId"
-     LEFT JOIN "PlannedActivity" pa ON pa.id = ga."plannedActivityId"
      WHERE ga."userId" = $1
        AND g.status = 'ACTIVE'
        AND ga.status != 'DISMISSED'
        AND ga."rhythmKind" = 'N_PER_WEEK'
-       AND pa.status IS DISTINCT FROM 'UPCOMING'
      ORDER BY ga.id`,
     [userId]
   );
@@ -3020,28 +3025,38 @@ export async function loadCandidateGoalActivitiesForRhythmDemand(userId: string,
 
 export type MaterializeGoalActivityRhythmOccurrenceResult =
   | { ok: true; occurrenceId: string }
-  | { ok: false; reason: 'NOT_FOUND' | 'NOT_RHYTHM_ELIGIBLE' | 'HAS_LIVE_COMMITMENT' | 'CAPACITY_EXHAUSTED' };
+  | { ok: false; reason: 'NOT_FOUND' | 'NOT_RHYTHM_ELIGIBLE' | 'CAPACITY_EXHAUSTED' };
 
 /**
- * Goals V2 Rhythm R3 -- the one new atomic write this slice introduces:
- * "an N_PER_WEEK GoalActivity whose current linked plan is either absent
- * (first-ever occurrence) or no longer live (LOGGED/SKIPPED/CANCELLED --
- * never UPCOMING) still has weekly capacity, so link it to a NEWLY CREATED
- * PlannedActivity and record a new GoalActivityOccurrence." Called from
- * EXACTLY ONE place (dayConstructorAcceptancePersistence.ts's own write
- * loop), on the SAME `client` as the PlannedActivity insert that already
- * happened immediately before it, tried FIRST for every Goal-linked write
- * (a pure, side-effect-free read -- `NOT_RHYTHM_ELIGIBLE` -- for any
- * GoalActivity whose own rhythmKind isn't 'N_PER_WEEK'). The existing,
- * UNCHANGED `linkGoalActivityToPlannedActivity` is tried only as the
- * fallback for that exact `NOT_RHYTHM_ELIGIBLE` case, and alone still owns
- * every NONE/first-link/CANCELLED-or-SKIPPED-relink case exactly as before
- * R3 (this ticket's own section 4: the finite legacy path is untouched).
- * This ordering (Rhythm-aware tried first) is what lets ONE call correctly
- * cover a brand-new N_PER_WEEK GoalActivity's very FIRST occurrence too --
- * the legacy function alone would successfully link a NULL-plannedActivityId
+ * Goals V2 Rhythm R3, extended by Multi-Occurrence Rhythm PR 2 -- the one
+ * write this slice introduces: "an N_PER_WEEK GoalActivity with weekly
+ * capacity remaining links a NEWLY CREATED PlannedActivity and records a
+ * new GoalActivityOccurrence." Called from EXACTLY ONE place
+ * (dayConstructorAcceptancePersistence.ts's own write loop), on the SAME
+ * `client` as the PlannedActivity insert that already happened
+ * immediately before it, tried FIRST for every Goal-linked write (a pure,
+ * side-effect-free read -- `NOT_RHYTHM_ELIGIBLE` -- for any GoalActivity
+ * whose own rhythmKind isn't 'N_PER_WEEK'). The existing, UNCHANGED
+ * `linkGoalActivityToPlannedActivity` is tried only as the fallback for
+ * that exact `NOT_RHYTHM_ELIGIBLE` case, and alone still owns every
+ * NONE/first-link/CANCELLED-or-SKIPPED-relink case exactly as before R3
+ * (the finite legacy path is untouched). This ordering (Rhythm-aware
+ * tried first) is what lets ONE call correctly cover a brand-new
+ * N_PER_WEEK GoalActivity's very FIRST occurrence too -- the legacy
+ * function alone would successfully link a NULL-plannedActivityId
  * GoalActivity but would never create the occurrence row every N_PER_WEEK
  * link requires.
+ *
+ * PR 2 removes the single-live-commitment rejection (formerly
+ * HAS_LIVE_COMMITMENT, returned whenever the CURRENT linked plan was
+ * UPCOMING) for N_PER_WEEK activities: an already-UPCOMING occurrence no
+ * longer blocks a further one by itself. The ONLY remaining gate is
+ * weekly capacity, below, via `evaluateNewOccurrenceEligibility`
+ * (goalActivityOccurrenceCapacity.ts, PR 1's own pure capacity API, wired
+ * in here verbatim -- no new/duplicated arithmetic). NONE-rhythm
+ * activities are unaffected: they already return `NOT_RHYTHM_ELIGIBLE`
+ * one line earlier and never reach this gate either before or after this
+ * change.
  *
  * EVERY check here reads FRESH state on this same client, inside the
  * caller's own already-held per-user advisory lock
@@ -3050,23 +3065,23 @@ export type MaterializeGoalActivityRhythmOccurrenceResult =
  * safe without any new locking: the second request blocks on the SAME
  * lock key until the first's transaction fully commits or rolls back, then
  * re-reads this exact fresh state and correctly sees reduced (or
- * exhausted) capacity (this ticket's own section 22). A GENUINE RETRY of
- * the identical acceptance (same clientRequestId) never reaches this
- * function a second time at all -- it short-circuits at the EXISTING
- * PlanCreationIdempotency replay check, before the write loop even starts
- * (this ticket's own section 56 -- the existing mechanism is reused
+ * exhausted) capacity. A GENUINE RETRY of the identical acceptance (same
+ * clientRequestId) never reaches this function a second time at all -- it
+ * short-circuits at the EXISTING PlanCreationIdempotency replay check,
+ * before the write loop even starts (the existing mechanism is reused
  * verbatim, never duplicated).
  *
- * Deliberately refuses (HAS_LIVE_COMMITMENT) when the CURRENT linked plan
- * is UPCOMING: an already-live, not-yet-done commitment is not something
- * R3's planning UX offers to replace (this ticket's own section 27 -- a
- * GoalActivity with a live UPCOMING plan is never selectable in the first
- * place today, so this is defense-in-depth against a stale/malicious
- * client, never a path any current UI can reach).
- *
  * Creates the occurrence with no status, no windowKey, no Rhythm/
- * CompletionRequirement snapshot (this ticket's own section 15) -- R1's
- * own minimal shape, unextended.
+ * CompletionRequirement snapshot -- R1's own minimal shape, unextended.
+ *
+ * `GoalActivity.plannedActivityId` (still a singular, `@unique` column)
+ * is repointed to THIS newest occurrence's plan on every successful call
+ * -- "most recently materialized", never "the one live commitment" now
+ * that more than one occurrence can be live at once. Existing siblings'
+ * OWN `GoalActivityOccurrence.plannedActivityId` rows are never read or
+ * written by this repoint; each occurrence's link is independent and
+ * never overwritten by another occurrence's write (proved in PR 1's own
+ * DB suite, goalActivityOccurrenceCapacityDb.test.ts, scenarios C-E/H).
  */
 export async function materializeGoalActivityRhythmOccurrence(
   userId: string,
@@ -3077,9 +3092,8 @@ export async function materializeGoalActivityRhythmOccurrence(
   client: PoolClient
 ): Promise<MaterializeGoalActivityRhythmOccurrenceResult> {
   const gaRes = await client.query(
-    `SELECT ga.status, ga."rhythmKind", ga."rhythmTargetPerWeek", pa.status AS "linkedPlanStatus"
+    `SELECT ga.status, ga."rhythmKind", ga."rhythmTargetPerWeek"
      FROM "GoalActivity" ga
-     LEFT JOIN "PlannedActivity" pa ON pa.id = ga."plannedActivityId"
      WHERE ga.id = $1 AND ga."userId" = $2`,
     [goalActivityId, userId]
   );
@@ -3089,10 +3103,9 @@ export async function materializeGoalActivityRhythmOccurrence(
 
   const rhythm = normalizeGoalActivityRhythm({ rhythmKind: row.rhythmKind, rhythmTargetPerWeek: row.rhythmTargetPerWeek });
   if (rhythm.kind !== 'N_PER_WEEK') return { ok: false, reason: 'NOT_RHYTHM_ELIGIBLE' };
-  if (row.linkedPlanStatus === 'UPCOMING') return { ok: false, reason: 'HAS_LIVE_COMMITMENT' };
 
   const facts = await loadGoalActivityRhythmFacts(userId, goalActivityId, timezone, client);
-  const eligibility = computeGoalActivityRhythmEligibility({ rhythm, planningLocalDate, occurrences: facts });
+  const eligibility = evaluateNewOccurrenceEligibility({ rhythm, planningLocalDate, occurrences: facts });
   if (!eligibility.eligible) return { ok: false, reason: 'CAPACITY_EXHAUSTED' };
 
   const relinked = await client.query(

@@ -762,25 +762,39 @@ function AutoGoalSuggestionsSection({ suggestions, disabled, onAdd }: { suggesti
 }
 
 /**
- * Shows exactly two facts (this ticket's own section 3: activity title,
- * Goal context) and one action -- never `remainingThisWeek` (eligibility
- * data, not presentation pressure, this ticket's own explicit
- * instruction) and never a Rhythm/streak/urgency signal of any kind.
- * Reuses `SurfaceCard`/`SecondaryButton` (this screen's own existing
- * primitives, this ticket's own section 21: no new visual language) --
- * the same flexible `minWidth: 0` text-wrapping pattern `IntentRowCard`
- * already uses for its own title input, so a long activity or Goal title
- * wraps instead of overflowing at the existing mobile breakpoint (this
- * ticket's own section 23), and the Add button keeps a real accessible
- * name (never icon/color-only, this ticket's own section 22).
+ * Shows activity title, Goal context, and one action. Multi-Occurrence
+ * Rhythm PR 2 explicitly supersedes the prior "never remainingThisWeek"
+ * instruction this card followed: that earlier decision avoided showing
+ * eligibility data as presentation pressure, but this ticket's own
+ * section 4 explicitly asks for exactly this weekly copy ("1 of 5
+ * planned this week" / "4 sessions remaining"), distinguishing remaining
+ * capacity from completed progress -- so a GoalActivity suggested here
+ * after one occurrence is already planned reads honestly, rather than as
+ * if nothing had been scheduled yet. Still never a streak/urgency/score
+ * signal of any kind -- only the same factual completed/planned/
+ * remaining counts Goal Detail already shows. Reuses
+ * `SurfaceCard`/`SecondaryButton` (this screen's own existing
+ * primitives) -- the same flexible `minWidth: 0` text-wrapping pattern
+ * `IntentRowCard` already uses for its own title input, so a long
+ * activity or Goal title wraps instead of overflowing at the existing
+ * mobile breakpoint, and the Add button keeps a real accessible name
+ * (never icon/color-only).
  */
 function AutoGoalSuggestionCard({ suggestion, disabled, onAdd }: { suggestion: GoalDemandCandidate; disabled: boolean; onAdd: () => void }) {
+  const { targetPerWeek, completedThisWeek, committedThisWeek } = suggestion.rhythm;
+  const plannedThisWeek = completedThisWeek + committedThisWeek;
+  const weeklyProgressLabel = `${plannedThisWeek} of ${targetPerWeek} planned this week`;
+  const sessionWord = suggestion.remainingThisWeek === 1 ? 'session' : 'sessions';
+  const remainingLabel = `${suggestion.remainingThisWeek} ${sessionWord} remaining`;
   return (
     <SurfaceCard>
       <div style={{ display: 'flex', alignItems: 'center', gap: spacing.sm }}>
         <div style={{ flex: 1, minWidth: 0 }}>
           <p style={{ margin: 0, fontWeight: 700, overflowWrap: 'break-word' }}>{suggestion.title}</p>
           <p style={{ margin: 0, marginTop: 2, fontSize: 13, color: colors.textSecondary, overflowWrap: 'break-word' }}>For: {suggestion.goalTitle}</p>
+          <p style={{ margin: 0, marginTop: 2, fontSize: 13, color: colors.textSecondary }}>
+            {weeklyProgressLabel} · {remainingLabel}
+          </p>
         </div>
         <SecondaryButton onClick={onAdd} disabled={disabled} ariaLabel={`Add ${suggestion.title} (for ${suggestion.goalTitle}) to today's plan`}>
           Add

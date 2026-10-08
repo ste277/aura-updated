@@ -395,7 +395,37 @@ export async function persistAcceptedConstructedDay(
     // Goal rows for the rest of this transaction, so a concurrent archive
     // cannot slip between the check and the writes. A replay of an already-
     // committed acceptance never reaches here (it returned above).
-    const linkedGoalActivityIds = [...new Set(decision.writeIntents.map((writeIntent) => goalActivityLinks.get(writeIntent.intentId)).filter((id): id is string => !!id))];
+    // Multi-Occurrence Rhythm PR 2 -- an explicit, request-level guard that
+    // replaces protection the removed single-live-commitment rejection
+    // used to provide INCIDENTALLY: before PR 2, two write-intents in one
+    // request resolving to the SAME GoalActivity always failed the whole
+    // transaction anyway, because the second materialize call would see
+    // the first write's now-UPCOMING link and refuse (HAS_LIVE_COMMITMENT).
+    // Now that a GoalActivity CAN legitimately carry more than one live
+    // occurrence, that accidental protection is gone -- so this checks the
+    // SAME constraint directly: "one canonical Goal-demand row per draft"
+    // (never two distinct write-intents claiming the same GoalActivity in
+    // one accept request) is enforced here, explicitly, fail-closed,
+    // before any write in this loop runs. This is deliberately NOT a
+    // capacity decision -- even a GoalActivity with ample remaining
+    // capacity for two more occurrences still cannot accept two in the
+    // SAME request; a second occurrence is always a SEPARATE, later
+    // acceptance.
+    const rawGoalActivityIds = decision.writeIntents.map((writeIntent) => goalActivityLinks.get(writeIntent.intentId)).filter((id): id is string => !!id);
+    const duplicateGoalActivityIds = rawGoalActivityIds.filter((id, index) => rawGoalActivityIds.indexOf(id) !== index);
+    if (duplicateGoalActivityIds.length > 0) {
+      await client.query('ROLLBACK');
+      const duplicateSet = new Set(duplicateGoalActivityIds);
+      const diagnostics: AcceptanceDiagnostic[] = decision.writeIntents
+        .filter((writeIntent) => {
+          const goalActivityId = goalActivityLinks.get(writeIntent.intentId);
+          return !!goalActivityId && duplicateSet.has(goalActivityId);
+        })
+        .map((writeIntent) => ({ intentId: writeIntent.intentId, reason: 'INVALID_REQUEST' as const, detail: 'DUPLICATE_GOAL_ACTIVITY_LINK' }));
+      return { status: 'REJECTED', reason: 'INVALID_REQUEST', diagnostics };
+    }
+
+    const linkedGoalActivityIds = [...new Set(rawGoalActivityIds)];
     if (linkedGoalActivityIds.length > 0) {
       const lifecycle = await lockGoalParentLifecycleForPlanning(userId, linkedGoalActivityIds, client);
       const notActive: AcceptanceDiagnostic[] = decision.writeIntents

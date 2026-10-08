@@ -8,6 +8,7 @@ import {
   formatGoalActivityCompletion,
   formatGoalActivityRhythmFrequencyLabel,
   formatGoalActivityRhythmWeeklyProgressLabel,
+  formatGoalActivityRhythmRemainingCapacityLabel,
   formatGoalProgressLabel,
   formatGoalTargetDateLabel,
   presentGoalActivityRhythmAwareStateLabel,
@@ -288,6 +289,11 @@ function ActivityRow({
   // experience").
   const rhythmFrequencyLabel = activity.rhythm.kind === 'N_PER_WEEK' ? formatGoalActivityRhythmFrequencyLabel(activity.rhythm.targetPerWeek) : null;
   const rhythmWeeklyProgressLabel = formatGoalActivityRhythmWeeklyProgressLabel(activity.rhythm);
+  // Multi-Occurrence Rhythm PR 2 -- remaining weekly capacity, shown as
+  // its own line so a GoalActivity with more than one coexisting
+  // UPCOMING occurrence still communicates how much room is left, never
+  // merged into rhythmWeeklyProgressLabel's completed/planned sentence.
+  const rhythmRemainingCapacityLabel = formatGoalActivityRhythmRemainingCapacityLabel(activity.rhythm);
 
   const handleDismiss = async () => {
     if (dismissing) return;
@@ -336,14 +342,16 @@ function ActivityRow({
           existing target-date line already uses elsewhere on this page. */}
       {completionDetail && <div style={{ ...typography.meta, color: colors.textSecondary, marginTop: 2 }}>{completionDetail}</div>}
 
-      {/* Goals V2 Rhythm R4 -- this ticket's own section 12/34: at most two
-          additional secondary lines (frequency, then this week's factual
-          progress), visually/semantically separate from completionDetail
-          above (section 34 -- "10 min" and "5 times a week" are different
-          dimensions, never merged into one sentence). Both null for NONE,
-          so a finite activity's row is unchanged. */}
+      {/* Goals V2 Rhythm R4, extended by Multi-Occurrence Rhythm PR 2 --
+          up to three additional secondary lines (frequency, this week's
+          factual completed/planned progress, then remaining weekly
+          capacity), visually/semantically separate from completionDetail
+          above ("10 min" and "5 times a week" are different dimensions,
+          never merged into one sentence). All null for NONE, so a finite
+          activity's row is unchanged. */}
       {rhythmFrequencyLabel && <div style={{ ...typography.meta, color: colors.textSecondary, marginTop: 2 }}>{rhythmFrequencyLabel}</div>}
       {rhythmWeeklyProgressLabel && <div style={{ ...typography.meta, color: colors.textSecondary, marginTop: 2 }}>{rhythmWeeklyProgressLabel}</div>}
+      {rhythmRemainingCapacityLabel && <div style={{ ...typography.meta, color: colors.textSecondary, marginTop: 2 }}>{rhythmRemainingCapacityLabel}</div>}
 
       {error && (
         <div role="alert" style={{ marginTop: spacing.sm }}>

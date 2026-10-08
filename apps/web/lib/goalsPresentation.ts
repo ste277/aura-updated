@@ -225,6 +225,26 @@ export function formatGoalActivityRhythmWeeklyProgressLabel(rhythm: GoalActivity
 }
 
 // ============================================================
+// Multi-Occurrence Rhythm PR 2 -- remaining weekly capacity, as its own
+// line, DISTINCT from the completed/planned progress line above (never
+// merged into one sentence, same "different dimensions" discipline the
+// frequency/progress split already established). Exists so a GoalActivity
+// with more than one coexisting UPCOMING occurrence still communicates
+// how much weekly room is left, independent of which single occurrence
+// GoalActivity.plannedActivityId happens to currently point at. Returns
+// null when there is nothing left to say: NONE, or capacity already
+// exhausted (the existing presentGoalActivityRhythmAwareStateLabel below
+// already says "This week's target met" in that case -- this line would
+// only repeat it).
+// ============================================================
+
+export function formatGoalActivityRhythmRemainingCapacityLabel(rhythm: GoalActivityRhythmView): string | null {
+  if (rhythm.kind !== 'N_PER_WEEK' || rhythm.remainingThisWeek <= 0) return null;
+  const sessionWord = rhythm.remainingThisWeek === 1 ? 'session' : 'sessions';
+  return `${rhythm.remainingThisWeek} ${sessionWord} remaining this week`;
+}
+
+// ============================================================
 // Goals V2 Rhythm R4 -- ongoing-activity state label (this ticket's own
 // section 15/16). `presentGoalActivityStateLabel` above is left completely
 // unmodified (NONE activities must preserve current derivedState labels
