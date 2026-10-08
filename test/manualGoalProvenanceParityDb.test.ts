@@ -245,8 +245,13 @@ async function main() {
     check('provenance is correct: the occurrence points at R and the accepted plan; the GoalActivity link follows', occ.plannedActivityId === accepted.plans[0].id && gaRow.plannedActivityId === accepted.plans[0].id);
     const replay = await accept(A.id, { ...manualBody });
     check('idempotency: replaying the same acceptance returns the original plan and creates nothing new', replay.status === 'ALREADY_ACCEPTED' && (await counts(R.id)).occ === 1 && (await counts(R.id)).plans === 1);
+    // Multi-Occurrence Rhythm PR 2: R's target is 3 and only 1 occurrence
+    // is committed here -- real remaining capacity (2) exists, so R is
+    // now correctly STILL offered (the former "exclude while any
+    // occurrence is live" rule is gone; weekly capacity is the only gate).
     const autoAfter = await loadEligibleGoalDemand(createRealGoalDemandCandidatesDeps(), A.id, DATE, TZ);
-    check('automatic discovery no longer offers R while its occurrence is live (canonical eligibility prevents a second occurrence)', autoAfter.status === 'OK' && !autoAfter.candidates.some((c) => c.goalActivityId === R.id));
+    const candAfter = autoAfter.status === 'OK' ? autoAfter.candidates.find((c) => c.goalActivityId === R.id) : undefined;
+    check('automatic discovery STILL offers R while its occurrence is live, with capacity correctly reduced (remainingThisWeek=2) -- Multi-Occurrence Rhythm PR 2', !!candAfter && candAfter.remainingThisWeek === 2);
     const manualAgain = await resolveGoalActivityHandoff(
       { ...realBootstrapDeps(A.id), listGoalActivities: (uid, gid) => listGoalActivitiesWithLinkedPlanStatus(uid, gid), loadGoalActivityRhythmFacts: (uid, gaId, tz) => loadGoalActivityRhythmFacts(uid, gaId, tz) },
       g1.id,
@@ -254,7 +259,7 @@ async function main() {
       DATE,
       TZ
     );
-    check('...and the manual handoff no longer admits it either', manualAgain.length === 0);
+    check('...and the manual handoff (resolveGoalActivityHandoff) STILL admits it too -- Multi-Occurrence Rhythm PR 2 parity fix (PLANNED with remaining capacity is now admitted, matching automatic discovery)', manualAgain.length === 1 && manualAgain[0].id === R.id);
 
     // ------------------------------------------------------------------
     console.log('=== reverse order: automatic first, then a manual attempt ===');
@@ -266,7 +271,12 @@ async function main() {
     const pv2b = await previewAs(A.id, rowsToBody(forcedManual));
     const plansBefore = await userPlans(A.id);
     const acc2b = await accept(A.id, acceptBodyFor(pv2b, forcedManual));
-    check('a second acceptance for the same activity (here forced through the manual shape) is REFUSED by committed-eligibility: no duplicate occurrence, no duplicate plan, no orphan', acc2b.status !== 'SAVED' && (await counts(R2.id)).occ === 1 && (await counts(R2.id)).plans === 1 && (await userPlans(A.id)) === plansBefore);
+    // Multi-Occurrence Rhythm PR 2: R2's target is 3 and only 1 occurrence
+    // is committed -- real remaining capacity (2) exists, so a second,
+    // genuinely distinct acceptance (here forced through the manual
+    // shape) now SUCCEEDS, creating a second, independent occurrence --
+    // never a duplicate of the first, never an orphan.
+    check('a second acceptance for the same activity (here forced through the manual shape), with real remaining capacity, SUCCEEDS as a distinct second occurrence -- Multi-Occurrence Rhythm PR 2', acc2b.status === 'SAVED' && (await counts(R2.id)).occ === 2 && (await counts(R2.id)).plans === 2 && (await userPlans(A.id)) === plansBefore + 1);
 
     console.log('=== legacy finite manual path still works exactly as before ===');
     const pvF = await previewAs(A.id, rowsToBody([finiteRow]));

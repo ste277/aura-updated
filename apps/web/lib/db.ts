@@ -2689,10 +2689,35 @@ export async function archiveGoal(userId: string, goalId: string): Promise<Goal 
  * deletion -- Aura intentionally keeps no separate "ever scheduled"
  * record solely to block a later Goal deletion. See deleteGoal's own doc
  * comment for exactly what this protects against and what it does not.
+ *
+ * Multi-Occurrence Rhythm PR 2 corrective fix -- this guard originally
+ * read ONLY GoalActivity's own singular `plannedActivityId`, which was a
+ * correct proxy for "any retained linkage exists" back when at most one
+ * occurrence could ever be live at a time. Now that an N_PER_WEEK
+ * GoalActivity can carry several simultaneously-UPCOMING occurrences,
+ * that singular column tracks only the MOST RECENTLY materialized one --
+ * an older sibling occurrence can still retain a live Plan link (via its
+ * own `GoalActivityOccurrence.plannedActivityId`) even after the
+ * singular column has been nulled (e.g. the newest occurrence's Plan was
+ * hard-deleted). The authoritative occurrence ledger is therefore checked
+ * too: ANY `GoalActivityOccurrence` row under this Goal's activities that
+ * still references a real PlannedActivity also retains linkage, exactly
+ * like the legacy singular column always has. A NONE-rhythm GoalActivity
+ * never has an occurrence row (R1's own invariant, unchanged), so this
+ * addition is a pure no-op for the legacy finite path.
  */
 export async function goalHasRetainedPlanLinkage(userId: string, goalId: string, executor: Pool | PoolClient = pool): Promise<boolean> {
   const result = await executor.query(
-    `SELECT 1 FROM "GoalActivity" WHERE "userId" = $1 AND "goalId" = $2 AND "plannedActivityId" IS NOT NULL LIMIT 1`,
+    `SELECT 1 FROM "GoalActivity" ga
+     WHERE ga."userId" = $1 AND ga."goalId" = $2
+       AND (
+         ga."plannedActivityId" IS NOT NULL
+         OR EXISTS (
+           SELECT 1 FROM "GoalActivityOccurrence" gao
+           WHERE gao."goalActivityId" = ga.id AND gao."plannedActivityId" IS NOT NULL
+         )
+       )
+     LIMIT 1`,
     [userId, goalId]
   );
   return result.rows.length > 0;
@@ -2848,17 +2873,43 @@ export interface PlanGoalContext {
  * helper (normalizeGoalActivityCompletionRequirement) -- a legacy/never-set
  * GoalActivity therefore always reads as DONE here, exactly like every
  * other consumer of that helper.
+ *
+ * Multi-Occurrence Rhythm PR 2 corrective fix -- this previously matched
+ * ONLY `ga."plannedActivityId"` (the singular, "most recently
+ * materialized occurrence" column), so every sibling occurrence except
+ * the newest silently got no Goal context at all anywhere this function
+ * feeds (Home/My Day's daily agenda, Day Recompose, the Recomposition
+ * move card). The query is now a UNION of the legacy singular-link match
+ * (unchanged, still the only path for a NONE-rhythm/finite GoalActivity)
+ * with a second branch resolving through the authoritative occurrence
+ * ledger (`GoalActivityOccurrence.plannedActivityId`) -- so EVERY
+ * occurrence's own Plan resolves to the same, correct Goal context,
+ * independent of which single occurrence the singular column currently
+ * references. `UNION` (not `UNION ALL`) de-duplicates the common case
+ * where a plan is both an occurrence's own link AND currently the
+ * singular pointer -- each plan id still produces exactly one result row.
  */
 export async function loadGoalContextsForPlanIds(userId: string, planIds: readonly string[]): Promise<Map<string, PlanGoalContext>> {
   const contexts = new Map<string, PlanGoalContext>();
   if (planIds.length === 0) return contexts;
   const result = await pool.query(
-    `SELECT ga."plannedActivityId", ga.id AS "goalActivityId", ga."completionKind", ga."completionTargetValue", ga."completionUnit",
-            g.id AS "goalId", g.title AS "goalTitle", gae."currentValue"
-     FROM "GoalActivity" ga
-     JOIN "Goal" g ON g.id = ga."goalId"
-     LEFT JOIN "GoalActivityExecution" gae ON gae."plannedActivityId" = ga."plannedActivityId"
-     WHERE ga."userId" = $1 AND ga."plannedActivityId" = ANY($2::text[])`,
+    `SELECT matched."plannedActivityId", matched."goalActivityId", matched."completionKind", matched."completionTargetValue", matched."completionUnit",
+            matched."goalId", matched."goalTitle", gae."currentValue"
+     FROM (
+       SELECT ga."plannedActivityId" AS "plannedActivityId", ga.id AS "goalActivityId", ga."completionKind", ga."completionTargetValue", ga."completionUnit",
+              g.id AS "goalId", g.title AS "goalTitle"
+       FROM "GoalActivity" ga
+       JOIN "Goal" g ON g.id = ga."goalId"
+       WHERE ga."userId" = $1 AND ga."plannedActivityId" = ANY($2::text[])
+       UNION
+       SELECT gao."plannedActivityId" AS "plannedActivityId", ga.id AS "goalActivityId", ga."completionKind", ga."completionTargetValue", ga."completionUnit",
+              g.id AS "goalId", g.title AS "goalTitle"
+       FROM "GoalActivityOccurrence" gao
+       JOIN "GoalActivity" ga ON ga.id = gao."goalActivityId"
+       JOIN "Goal" g ON g.id = ga."goalId"
+       WHERE gao."userId" = $1 AND gao."plannedActivityId" = ANY($2::text[])
+     ) matched
+     LEFT JOIN "GoalActivityExecution" gae ON gae."plannedActivityId" = matched."plannedActivityId"`,
     [userId, [...planIds]]
   );
   for (const row of result.rows) {

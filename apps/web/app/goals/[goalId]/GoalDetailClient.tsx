@@ -132,16 +132,23 @@ function GoalDetailBody({ detail, onChanged }: { detail: GoalDetailView; onChang
   // /plan-day's own bootstrap).
   const [selectedIds, setSelectedIds] = useState<ReadonlySet<string>>(new Set());
   // Goals V2 Rhythm R3 -- selectable now means SUGGESTED (unchanged) OR a
-  // COMPLETED activity whose own Rhythm policy still has weekly capacity
-  // (server-derived, this ticket's own section 37's "smallest Goal Detail
-  // lifecycle adjustment necessary" -- a finite/NONE COMPLETED activity, or
-  // any PLANNED activity, remains unselectable exactly as before R3).
+  // COMPLETED or PLANNED activity whose own Rhythm policy still has
+  // weekly capacity (server-derived; a finite/NONE COMPLETED or PLANNED
+  // activity remains unselectable, same as always).
   // Rhythm R4 reads this same fact through the canonical `rhythm` shape
   // (`rhythm.eligibleForAnotherOccurrence`) instead of R3's own interim
   // flat `rhythmEligibleForAnotherOccurrence` field -- identical logic, one
   // canonical read model (see goalsPresentation.ts's own doc comment on
   // GoalActivityView.rhythm).
-  const isSelectable = (a: GoalActivityView) => a.derivedState === 'SUGGESTED' || (a.derivedState === 'COMPLETED' && a.rhythm.kind === 'N_PER_WEEK' && a.rhythm.eligibleForAnotherOccurrence);
+  //
+  // Multi-Occurrence Rhythm PR 2 corrective fix -- PLANNED is now also
+  // admitted (previously only COMPLETED was), matching
+  // resolveGoalActivityHandoff's own parity fix: GoalActivity.plannedActivityId
+  // now tracks "the most recently materialized occurrence," so a PLANNED
+  // row can still have real remaining weekly capacity for another
+  // occurrence, exactly like Plan My Day's automatic suggestions already
+  // allow.
+  const isSelectable = (a: GoalActivityView) => a.derivedState === 'SUGGESTED' || ((a.derivedState === 'COMPLETED' || a.derivedState === 'PLANNED') && a.rhythm.kind === 'N_PER_WEEK' && a.rhythm.eligibleForAnotherOccurrence);
   const selectableIds = new Set(primaryActivities.filter(isSelectable).map((a) => a.id));
   const effectiveSelectedIds = Array.from(selectedIds).filter((id) => selectableIds.has(id));
 

@@ -110,6 +110,15 @@ const dbSrc = read('../apps/web/lib/db.ts');
 // more: db.ts references GoalActivityOccurrence ONLY inside these three
 // named, intentionally-reviewed functions -- never a fourth, undocumented
 // one -- and the one INSERT still lives only inside the R3 writer.
+//
+// Multi-Occurrence Rhythm PR 2's own corrective patch added exactly two
+// more intentionally-reviewed, READ-ONLY references: goalHasRetainedPlanLinkage
+// (an EXISTS subquery -- the authoritative occurrence ledger, not just
+// GoalActivity's own singular pointer, now gates Goal deletion) and
+// loadGoalContextsForPlanIds (a UNION branch resolving Goal context for
+// every occurrence's own Plan, not just the one the singular pointer
+// currently references). Neither adds a write; the one INSERT still
+// lives only inside the R3 writer.
 const dbSrcNoComments = stripComments(dbSrc);
 const allowedOccurrenceFnBodiesNoComments =
   stripComments(functionBody(dbSrc, 'loadGoalActivityRhythmFacts')) +
@@ -119,7 +128,10 @@ const allowedOccurrenceFnBodiesNoComments =
   stripComments(functionBody(dbSrc, 'listGoalActivityOccurrenceRowsForActivities')) +
   // ... plus its row TYPE and the PURE row mapper (no query, no table reference besides the type name).
   stripComments((dbSrc.match(/export interface GoalActivityOccurrenceRow \{[\s\S]*?\n\}/) ?? [''])[0]) +
-  stripComments(functionBody(dbSrc, 'buildGoalActivityRhythmFactsFromOccurrenceRows'));
+  stripComments(functionBody(dbSrc, 'buildGoalActivityRhythmFactsFromOccurrenceRows')) +
+  // Multi-Occurrence Rhythm PR 2 corrective patch -- both read-only, no write added.
+  stripComments(functionBody(dbSrc, 'goalHasRetainedPlanLinkage')) +
+  stripComments(functionBody(dbSrc, 'loadGoalContextsForPlanIds'));
 check(
   'db.ts references GoalActivityOccurrence ONLY inside the allowed, intentionally-reviewed functions (loadGoalActivityRhythmFacts [read-only], loadGoalActivityRhythmFactsForActivities [R4\'s batched read-only sibling], listGoalActivityOccurrenceRowsForActivities [O5 P2d: that sibling\'s raw read-only SELECT, moved unchanged so it can run on the snapshot executor], and materializeGoalActivityRhythmOccurrence [R3\'s sole writer]) -- no fourth function in real code, no UPDATE/DELETE anywhere',
   (dbSrcNoComments.match(/GoalActivityOccurrence/g) ?? []).length === (allowedOccurrenceFnBodiesNoComments.match(/GoalActivityOccurrence/g) ?? []).length &&
