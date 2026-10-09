@@ -42,6 +42,7 @@ const journeySource = read('apps/web/components/OnboardingJourney.tsx');
 const journey = stripComments(journeySource);
 const pageSource = stripComments(read('apps/web/app/page.tsx'));
 const sessionRouteSource = stripComments(read('apps/web/app/api/auth/session/route.ts'));
+const onboardingRouteSource = stripComments(read('apps/web/app/api/users/onboarding/route.ts'));
 const dbSource = stripComments(read('apps/web/lib/db.ts'));
 
 // ============================================================
@@ -109,17 +110,27 @@ check('D5. Recommendation -> Home via Go to Home is wired to onExit in every bra
 check('D6. Recommendation -> Plan My Day is wired through, never a second navigation mechanism inside this file', !/window\.location|router\.push|history\.push/.test(journey));
 check('D7. page.tsx renders OnboardingJourney INSTEAD OF the normal tab UI, never alongside it (an early return, not a sibling render)', /if \(onboardingActive\) \{\s*return \(\s*<OnboardingJourney/.test(pageSource));
 check('D8. the onboarding decision is captured exactly once per page load via a ref guard -- a later session refetch can never re-trigger it', /onboardingDecidedRef\.current/.test(pageSource) && /if \(!onboardingDecidedRef\.current\)/.test(pageSource));
-check('D9. exiting onboarding only ever sets local state false -- never calls any navigation/reload that could loop back into it', /const handleExitOnboarding = useCallback\(\(\) => \{\s*setOnboardingActive\(false\);\s*\}, \[\]\);/.test(pageSource));
+check('D9. exiting onboarding sets local state false AND fires the resolution PATCH -- never a navigation/reload that could loop back into it', /const handleExitOnboarding = useCallback\(\(\) => \{\s*setOnboardingActive\(false\);\s*fetch\('\/api\/users\/onboarding', \{ method: 'PATCH' \}\)\.catch\(\(\) => \{\}\);\s*\}, \[\]\);/.test(pageSource) && !/window\.location|router\.push/.test(pageSource.slice(pageSource.indexOf('const handleExitOnboarding'), pageSource.indexOf('const handleExitOnboarding') + 400)));
 check('D10. Plan My Day from onboarding navigates to the EXISTING /plan-day route -- no new route introduced', /onPlanMyDay=\{\(\) => \{\s*handleExitOnboarding\(\);\s*window\.location\.href = '\/plan-day';/.test(pageSource));
+check('D11. Location step\'s own Skip is wired ONLY to setStep (never to handleExitOnboarding/onExit) -- advancing between steps never resolves onboarding, exactly the ticket\'s own explicit rule', !/onSkip=\{\(\) => \{\s*setStep\('RECOMMENDATION'\);[\s\S]{0,80}(onExit|handleExitOnboarding)/.test(journey));
 
 // ============================================================
-// First-run wiring in page.tsx and the session route (returning users
-// bypass Welcome; no second onboarding-state model).
+// First-Run Reliability Correction -- durable, check-not-consume
+// onboarding resolution (replaces the earlier VisitLog-based
+// isFirstSession signal). Returning users bypass Welcome; no second,
+// redundant onboarding-state model; VisitLog stays independent.
 // ============================================================
 
-check('isFirstSession is read from the session response and threaded through, never a second stored onboarding-state field', /sessionData\.isFirstSession === true/.test(pageSource));
-check('no NEW Prisma model/column was introduced for onboarding state (the signal is derived, not stored)', !/onboardingState|OnboardingState|welcomeShown|welcomeCompleted|welcomeDismissed/i.test(pageSource) && !/onboardingState|OnboardingState|welcomeShown|welcomeCompleted|welcomeDismissed/i.test(dbSource) && !/model\s+Onboarding/i.test(read('apps/web/prisma/schema.prisma')));
-check('GET /api/auth/session computes isFirstSession from recordVisit\'s own return value, in the SAME request as the user it attaches', /const \{ isFirstVisitEver \} = await recordVisit\(user\.id\);/.test(sessionRouteSource) && /isFirstSession: isFirstVisitEver/.test(sessionRouteSource));
+check('page.tsx reads the durable onboardingResolved field (never the old, removed isFirstSession signal)', /sessionData\.onboardingResolved === false/.test(pageSource) && !/isFirstSession/.test(pageSource));
+check('no SEPARATE client-only onboarding-state model was introduced beyond the one durable server field (no second stored flag name)', !/welcomeShown|welcomeCompleted|welcomeDismissed|onboardingState\b/i.test(pageSource) && !/welcomeShown|welcomeCompleted|welcomeDismissed|onboardingState\b/i.test(dbSource));
+check('exactly one new Prisma field backs onboarding state: onboardingResolvedAt (nullable, no second model)', /onboardingResolvedAt\s+DateTime\?/.test(read('apps/web/prisma/schema.prisma')) && !/model\s+Onboarding/i.test(read('apps/web/prisma/schema.prisma')));
+check('GET /api/auth/session reads onboardingResolved straight off the already-fetched user row -- zero extra query, never derived from recordVisit\'s own return value', /onboardingResolved: user\.onboardingResolvedAt != null/.test(sessionRouteSource) && !/isFirstVisitEver/.test(sessionRouteSource));
+check('recordVisit (VisitLog analytics) is still called every session check, but its result is never read/used for onboarding -- VisitLog and onboarding are structurally decoupled', /await recordVisit\(user\.id\);/.test(sessionRouteSource) && !/const \{[^}]*\} = await recordVisit/.test(sessionRouteSource));
+check('the resolution endpoint PATCH /api/users/onboarding exists, is authenticated via the session (never an arbitrary id from the request body), and calls markOnboardingResolved', fs.existsSync(path.join(__dirname, '..', 'apps/web/app/api/users/onboarding/route.ts')) && /getSessionFromRequest\(req\)/.test(onboardingRouteSource) && /markOnboardingResolved\(session\.userId\)/.test(onboardingRouteSource) && !/body\.userId|req\.json\(\).*userId/.test(onboardingRouteSource));
+check('the resolution endpoint returns the persisted resolution state (never a bare 200 with no body)', /onboardingResolved: user\.onboardingResolvedAt != null/.test(onboardingRouteSource));
+check('markOnboardingResolved is idempotent by construction: guarded by WHERE "onboardingResolvedAt" IS NULL, never unconditionally overwriting an existing timestamp', /WHERE id = \$1 AND "onboardingResolvedAt" IS NULL/.test(dbSource));
+check('recordVisit is concurrency-safe: wrapped in the SAME established per-user pg_advisory_xact_lock pattern already used elsewhere in this codebase (dayConstructorAcceptancePersistence.ts/planMove.ts)', /pg_advisory_xact_lock\(hashtext\(\$1\)\)', \[`visit-log:\$\{userId\}`\]/.test(dbSource));
+check('recordVisit no longer returns any onboarding-shaped value (void) -- a caller cannot accidentally re-couple VisitLog to onboarding eligibility', /export async function recordVisit\(userId: string\): Promise<void>/.test(dbSource));
 
 // ============================================================
 // Section 6 -- Home transition: no automatic persistence of any kind
@@ -129,7 +140,8 @@ check('GET /api/auth/session computes isFirstSession from recordVisit\'s own ret
 
 const FORBIDDEN_AUTO_PERSISTENCE = /createPlannedActivity|persistAcceptedConstructedDay|createGoalWithActivities|createHabitLog|insertHabitLog|constructDay\(|orchestrateConstructDay|derivedDecisionPressure|DecisionPressure/;
 check('OnboardingJourney.tsx never creates a Plan/Goal/HabitLog or triggers Constructor acceptance or Decision Pressure', !FORBIDDEN_AUTO_PERSISTENCE.test(journey));
-check('the session route (where isFirstSession is computed) never creates a Plan/Goal/HabitLog or triggers Constructor acceptance', !FORBIDDEN_AUTO_PERSISTENCE.test(sessionRouteSource));
+check('the session route (where onboardingResolved is read) never creates a Plan/Goal/HabitLog or triggers Constructor acceptance', !FORBIDDEN_AUTO_PERSISTENCE.test(sessionRouteSource));
+check('the onboarding resolution route never creates a Plan/Goal/HabitLog or triggers Constructor acceptance -- it touches only User.onboardingResolvedAt', !FORBIDDEN_AUTO_PERSISTENCE.test(onboardingRouteSource));
 
 // ============================================================
 // Mobile/accessibility basics (structural, not rendered).

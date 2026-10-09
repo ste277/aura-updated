@@ -46,10 +46,14 @@ const CONTAINER_MAX_WIDTH = 420;
 /**
  * Onboarding V1 PR 2 -- Welcome, Location Confirmation & First Useful
  * Recommendation. Renders INSTEAD OF the normal tab UI in page.tsx, only
- * for a user's very first-ever session (`isFirstSession`, computed
- * server-side from VisitLog -- see app/api/auth/session/route.ts). Every
- * step offers an explicit way to reach Home without completing the rest,
- * so this journey can never trap a user or block general app access.
+ * while the account's onboarding remains unresolved (`onboardingResolved`,
+ * a durable, check-not-consume server fact derived from
+ * `User.onboardingResolvedAt` -- see app/api/auth/session/route.ts and
+ * db.ts's own `markOnboardingResolved`; First-Run Reliability Correction
+ * deliberately decoupled this from VisitLog, which an earlier version
+ * used as a one-shot, consumable proxy). Every step offers an explicit
+ * way to reach Home without completing the rest, so this journey can
+ * never trap a user or block general app access.
  *
  * Reuses the EXISTING LocationPicker and PATCH /api/users/location
  * contract for every location change -- this file introduces no new

@@ -31,6 +31,17 @@ model User {
   // who never touched Settings at all.
   locationConfirmedAt DateTime? @db.Timestamptz(3)
 
+  // Onboarding V1 PR 2 -- First-Run Reliability Correction. NULL = the
+  // Welcome/Confirm Location/Recommendation journey has never been
+  // resolved. Stamped once, idempotently, only by markOnboardingResolved()
+  // (db.ts), reached only from the three true exit actions in the client
+  // (never from a session read, never from VisitLog, never merely by
+  // advancing between onboarding steps). Every row existing at migration
+  // 0045's own deploy time was backfilled resolved in that migration's own
+  // DML; every row inserted after starts NULL, same convention as
+  // locationConfirmedAt/availabilityConfigured above.
+  onboardingResolvedAt DateTime? @db.Timestamptz(3)
+
   // Birth profile — nullable, since not every user will fill this in (Phase 2
   // birth-chart feature is optional on top of the core daily dial).
   birthDate       DateTime? @db.Timestamptz(3)

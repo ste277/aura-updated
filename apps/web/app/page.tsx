@@ -128,13 +128,18 @@ export default function DashboardPage() {
   // Onboarding V1 PR 2 -- Welcome journey. `onboardingActive` decides
   // whether the Welcome/Confirm Location/Recommendation flow renders
   // instead of the normal tab UI. Seeded ONLY from the first resolved
-  // `GET /api/auth/session` response of this page load (`isFirstSession`,
-  // computed server-side from VisitLog -- see that route's own doc
-  // comment) via `onboardingDecidedRef`, so a later session refetch
-  // (plan logged, offline sync, 401 re-check) can never flip it back on
-  // after the user has moved past it. Exiting the journey (Skip, Go to
-  // Home, Plan my day) sets it false; it is never true again for the
-  // rest of this page load.
+  // `GET /api/auth/session` response of this page load (`onboardingResolved`,
+  // a durable server-side fact -- see that route's own doc comment) via
+  // `onboardingDecidedRef`. This guard is still required even though the
+  // underlying signal is now durable (First-Run Reliability Correction):
+  // without it, a LATER session refetch (plan logged, offline sync, 401
+  // re-check) landing before handleExitOnboarding's own PATCH call has
+  // finished persisting would see onboardingResolved still false and could
+  // yank the user back into Welcome mid-use -- exactly the "trap the
+  // user"/redirect-loop failure this guard exists to prevent. Exiting the
+  // journey (Skip, Go to Home, Plan my day) sets it false locally and
+  // fires that PATCH; it is never true again for the rest of this page
+  // load regardless of what a later session fetch reports.
   const [onboardingActive, setOnboardingActive] = useState(false);
   const onboardingDecidedRef = useRef(false);
   const [logEntries, setLogEntries] = useState<LoggedEntryItem[]>([]);
@@ -308,7 +313,7 @@ export default function DashboardPage() {
       // re-trigger the Welcome journey after this page's first decision.
       if (!onboardingDecidedRef.current) {
         onboardingDecidedRef.current = true;
-        setOnboardingActive(sessionData.isFirstSession === true);
+        setOnboardingActive(sessionData.onboardingResolved === false);
       }
 
       const [logsRes, habitsRes, plansRes] = await Promise.all([
@@ -1192,13 +1197,31 @@ export default function DashboardPage() {
     setActiveTab('you');
   }, []);
 
-  // Onboarding V1 PR 2 -- the journey's own exit: "Skip for now" (Welcome),
-  // "Skip" (Location step) and "Go to Home" (Recommendation step) all call
-  // this. Purely local UI state -- never persisted (see onboardingActive's
-  // own doc comment: the server-side isFirstSession signal already makes
-  // this correct again on the user's NEXT visit without a stored flag).
+  // Onboarding V1 PR 2 -- the journey's own TRUE exit points, exactly three:
+  // Welcome's "Skip for now", Recommendation's "Go to Home", and
+  // Recommendation's "Plan my day" (the last via the onPlanMyDay callback
+  // below, which also calls this). The Location step's OWN "Skip" is
+  // deliberately NOT wired here -- it only advances to the Recommendation
+  // step (OnboardingJourney.tsx's own onSkip={() => setStep('RECOMMENDATION')}),
+  // which is not itself an exit (First-Run Reliability Correction's own
+  // explicit rule: advancing between steps never resolves onboarding).
+  //
+  // First-Run Reliability Correction -- this is also the ONE place
+  // onboarding resolution is persisted: fires PATCH /api/users/onboarding
+  // best-effort (never awaited before letting the user proceed, same
+  // fire-and-forget convention as loadAuraUpdates/trackEvent elsewhere in
+  // this file) so a slow or failed request can never trap the user behind
+  // onboarding or delay reaching Home. A failed request is never reported
+  // as success to the user (there is no "saved!" UI here to lie in) and
+  // naturally retries itself: if it didn't persist, the user's NEXT visit
+  // still sees onboardingResolved false and will resolve it again the next
+  // time they exit -- no client-side retry queue needed. Local state
+  // (`setOnboardingActive(false)`) is never rolled back on failure, so the
+  // user is never yanked back into onboarding within this same page load
+  // regardless of the request's outcome.
   const handleExitOnboarding = useCallback(() => {
     setOnboardingActive(false);
+    fetch('/api/users/onboarding', { method: 'PATCH' }).catch(() => {});
   }, []);
 
   const handleTimingSearch = useCallback(async (request: {

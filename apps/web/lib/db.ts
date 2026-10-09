@@ -137,6 +137,12 @@ export interface User {
    * fixture that predates this column, and is treated identically to
    * `null` (never confirmed) everywhere this field is read. */
   locationConfirmedAt?: Date | null;
+  /** Onboarding V1 PR 2 -- First-Run Reliability Correction. `null` means
+   * the Welcome/Confirm Location/Recommendation journey has never been
+   * resolved -- see markOnboardingResolved's own doc comment for the one
+   * place this is ever stamped. Optional here for the same reason
+   * `locationConfirmedAt` is above. */
+  onboardingResolvedAt?: Date | null;
 }
 
 export interface CustomCity {
@@ -1852,35 +1858,68 @@ const DEFAULT_SIGNUP_LOCATION = {
 
 // Records at most one visit per user per calendar day — deliberately deduped so
 // repeated page loads/refreshes in a session don't inflate the retention numbers
-// this exists to measure.
+// this exists to measure. Pure analytics: deliberately carries no onboarding
+// signal and is never read by onboarding logic (see markOnboardingResolved
+// below for that durable, independent fact).
 //
-// Onboarding V1 PR 2 -- also reports whether this user had NO VisitLog row at
-// all before this call (checked BEFORE today's own row is written, so the
-// very call that writes a user's first-ever row is the one call that can see
-// "none yet"). This is GET /api/auth/session's first-run signal (see that
-// route): VisitLog has existed since migration 0002, essentially this app's
-// entire lifetime, and User rows are only ever created via the one
-// authentication path (getOrCreateUserForAuth), so "never had a VisitLog row"
-// reliably means "this is this account's very first session, on any device,
-// ever" -- never re-derived from locationConfirmedAt, city value, or the
-// presence/absence of Goals/Plans/CustomCities.
-export async function recordVisit(userId: string): Promise<{ isFirstVisitEver: boolean }> {
-  const anyRow = await pool.query(`SELECT 1 FROM "VisitLog" WHERE "userId" = $1 LIMIT 1`, [userId]);
-  const isFirstVisitEver = anyRow.rows.length === 0;
-
-  if (isFirstVisitEver) {
-    await pool.query(`INSERT INTO "VisitLog" (id, "userId") VALUES ($1, $2)`, [randomUUID(), userId]);
-    return { isFirstVisitEver: true };
+// Onboarding V1 PR 2 -- First-Run Reliability Correction: an earlier version
+// of this function also reported "no VisitLog row existed before this call"
+// as a first-visit proxy for onboarding. That coupling was removed after an
+// empirical concurrency test showed two simultaneous calls (e.g. two
+// browser tabs loading at once) would both see "no row yet" and both claim
+// first-visit -- a plain check-then-insert race, with no DB-level
+// uniqueness to prevent it. The SAME race could also duplicate a day's
+// VisitLog row, corrupting this function's own pre-existing retention
+// metric. Fixed here with a per-user advisory transaction lock -- the same
+// established `pg_advisory_xact_lock(hashtext($1))` pattern already used by
+// dayConstructorAcceptancePersistence.ts/remainingDayRecompositionAcceptance.ts/
+// planMove.ts (auto-released at COMMIT/ROLLBACK) -- which serializes
+// concurrent calls for the SAME user without any new schema.
+export async function recordVisit(userId: string): Promise<void> {
+  const client = await beginTransaction();
+  try {
+    await client.query('SELECT pg_advisory_xact_lock(hashtext($1))', [`visit-log:${userId}`]);
+    const existingToday = await client.query(
+      `SELECT 1 FROM "VisitLog" WHERE "userId" = $1 AND "visitedAt"::date = CURRENT_DATE LIMIT 1`,
+      [userId]
+    );
+    if (existingToday.rows.length === 0) {
+      await client.query(`INSERT INTO "VisitLog" (id, "userId") VALUES ($1, $2)`, [randomUUID(), userId]);
+    }
+    await client.query('COMMIT');
+  } catch (err) {
+    await client.query('ROLLBACK').catch(() => {});
+    throw err;
+  } finally {
+    client.release();
   }
+}
 
-  const existingToday = await pool.query(
-    `SELECT 1 FROM "VisitLog" WHERE "userId" = $1 AND "visitedAt"::date = CURRENT_DATE LIMIT 1`,
+/**
+ * Onboarding V1 PR 2 -- First-Run Reliability Correction: the ONE place
+ * `onboardingResolvedAt` is ever stamped. Reached only from the
+ * authenticated `PATCH /api/users/onboarding` endpoint, itself called only
+ * from the three true exit actions in the client (Skip Welcome, Go to
+ * Home, Plan My Day -- apps/web/app/page.tsx's own `handleExitOnboarding`)
+ * -- never from a session read, never from VisitLog/recordVisit, and never
+ * merely because an onboarding step was rendered or advanced.
+ *
+ * Idempotent and safe under concurrent/repeated calls: the `WHERE
+ * "onboardingResolvedAt" IS NULL` guard means a second call (a retry, a
+ * double-click, two tabs both exiting) is a no-op that changes nothing --
+ * the FIRST successful stamp wins and is never overwritten, so this never
+ * needs its own advisory lock. Always returns the user's current,
+ * authoritative row either way (already-resolved or freshly-resolved),
+ * matching the endpoint's own "return the persisted resolution state"
+ * contract.
+ */
+export async function markOnboardingResolved(userId: string): Promise<User | null> {
+  const updated = await pool.query(
+    `UPDATE "User" SET "onboardingResolvedAt" = now() WHERE id = $1 AND "onboardingResolvedAt" IS NULL RETURNING *`,
     [userId]
   );
-  if (existingToday.rows.length === 0) {
-    await pool.query(`INSERT INTO "VisitLog" (id, "userId") VALUES ($1, $2)`, [randomUUID(), userId]);
-  }
-  return { isFirstVisitEver: false };
+  if (updated.rows.length > 0) return updated.rows[0];
+  return getUserById(userId);
 }
 
 /** Per-day log counts for a given month, for the calendar view. Counts both fixed
