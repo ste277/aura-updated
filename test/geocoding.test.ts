@@ -131,6 +131,23 @@ async function main() {
     try { await searchPlaces('Kochi'); return false; } catch (e) { return e instanceof Error && /unreachable/.test(e.message); }
   })());
 
+  // Final Integration Validation -- the API key must never leak into a
+  // thrown error, even when the underlying fetch failure's own message
+  // would have embedded the full request URL (which carries the key as a
+  // query param). Simulates exactly that worst case: a fetch rejection
+  // whose own .message contains the real key.
+  global.fetch = (async () => {
+    throw new TypeError(`fetch failed: request to https://api.opencagedata.com/geocode/v1/json?key=${process.env.OPENCAGE_API_KEY}&q=Kochi failed`);
+  }) as typeof fetch;
+  check('14b. SECURITY: the API key never appears in a thrown error\'s own message, even when the underlying fetch error embedded the full request URL', await (async () => {
+    try {
+      await searchPlaces('Kochi');
+      return false;
+    } catch (e) {
+      return e instanceof Error && !e.message.includes(process.env.OPENCAGE_API_KEY!) && !/key=/.test(e.message);
+    }
+  })());
+
   mockFetchOnce({ ok: true, json: async () => ({ notResults: 'malformed' }) });
   check('15. a malformed (non-array results) provider response throws rather than crashing on .map', await (async () => {
     try { await searchPlaces('Kochi'); return false; } catch { return true; }

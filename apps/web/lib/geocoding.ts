@@ -95,8 +95,15 @@ async function callOpenCage(params: Record<string, string>): Promise<OpenCageRes
   let res: Response;
   try {
     res = await fetch(url.toString(), { signal: AbortSignal.timeout(8000) });
-  } catch (err) {
-    throw new Error(`Geocoding provider unreachable: ${err instanceof Error ? err.message : 'network error'}`);
+  } catch {
+    // Onboarding V1 PR 3 Final Integration Validation -- deliberately never
+    // forwards the underlying fetch/network error's own message here (some
+    // fetch implementations can embed the request URL -- which carries the
+    // API key as a query param -- inside that message or its stack). This
+    // thrown error (and the route handlers' own `console.error(..., err)`
+    // of it) can only ever contain this fixed string, never anything
+    // derived from the request itself.
+    throw new Error('Geocoding provider unreachable.');
   }
 
   if (!res.ok) {
