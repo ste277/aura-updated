@@ -80,7 +80,16 @@ check('B9. selecting a different city or submitting a custom location both flow 
 check('C1. nextShift is received as a prop (the real, already-computed engine value) -- never computed, never hardcoded inside this file', /nextShift: DailyEnergyInsight\['nextShift'\] \| undefined/.test(journey));
 check('C2. the displayed start time is the REAL nextShift.startTime, never a static example string', /\{nextShift\.startTime\}/.test(journey) && !/4:30\s*(AM|PM)|12:00\s*(AM|PM)/.test(journey));
 check('C3. no birth-detail concept anywhere in the recommendation logic', !/birthDate|birthTime|birthCityName|birthLatitude|birthLongitude|natal/i.test(journey));
-check('C4. no Goal concept anywhere in the recommendation logic', !/\bGoal\b|GoalActivity|goalId/.test(journeySource));
+check('C4. no Goal concept anywhere in the recommendation logic (RecommendationStep itself -- Onboarding V1 PR 4 added an optional Goal offer as later, separate, skippable steps AFTER this one, never inside it)', (() => {
+  const recStart = journeySource.indexOf('function RecommendationStep');
+  // RecommendationStep's own top-level closing brace (a bare "}" at column
+  // 0) -- NOT a later function's name, which would include the doc
+  // comment directly above it (itself legitimately describing the new
+  // Goal offer) inside the slice.
+  const closeIndex = journeySource.indexOf('\n}\n', recStart);
+  const recommendationSource = journeySource.slice(recStart, closeIndex === -1 ? undefined : closeIndex);
+  return !/\bGoal\b|GoalActivity|goalId/.test(recommendationSource);
+})());
 check('C5. no availability-configuration concept anywhere', !/availabilityConfigured|AvailabilityConfiguration/.test(journey));
 check('C6. an unconfirmed location NEVER reaches the real-nextShift branch -- the component returns the "confirm your location" fallback first', (() => {
   const recFnStart = journey.indexOf('function RecommendationStep');
