@@ -1,0 +1,30 @@
+-- Insights V1 PR 1 -- Move Timestamp Foundation: a single, additive
+-- timestamp answering exactly one question -- "at what instant did THIS
+-- PlannedActivity row's own status transition from UPCOMING to MOVED?"
+--
+-- NULL = no recorded move timestamp (either this row has never been
+-- moved, or it moved before this migration existed). Non-NULL = the
+-- exact instant that transition committed, stamped by the database's own
+-- now() inside the SAME conditional UPDATE that sets status = 'MOVED'
+-- (apps/web/lib/planMove.ts's applyMoveWrites -- the one shared write
+-- path both a manual Move and Remaining-Day Recomposition acceptance
+-- use) -- never a client-supplied value, never set during a Day
+-- Constructor/recomposition PREVIEW (neither preview path ever calls
+-- applyMoveWrites), and never re-stamped by a replayed/idempotent Move
+-- (movePlannedActivity's own ALREADY_MOVED/already-successful-replay
+-- short-circuit returns the existing row without re-running the UPDATE).
+--
+-- ADDITIVE ONLY, NO BACKFILL: every existing row -- including every
+-- already-MOVED row created before this migration -- gets NULL. This is
+-- deliberate: no reliable instant for a historical move exists anywhere
+-- in the database today (only the imprecise, shared "updatedAt" column,
+-- which this field intentionally does not try to reconstruct from).
+-- Fabricating a historical movedAt from updatedAt would misrepresent a
+-- precision this system never actually captured for those rows.
+--
+-- This field answers "when did this ONE row's move commit," never "how
+-- many times has this logical commitment been moved in total" -- that
+-- still requires walking the rescheduledFromPlanId chain backward,
+-- exactly as before this migration.
+
+ALTER TABLE "PlannedActivity" ADD COLUMN "movedAt" TIMESTAMPTZ(3);

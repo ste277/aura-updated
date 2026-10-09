@@ -670,6 +670,11 @@ export interface PlannedActivity {
   skippedAt?: Date | null;
   /** Set only on a Move successor: the (now MOVED) plan this one replaces. */
   rescheduledFromPlanId?: string | null;
+  /** Insights V1 PR 1 -- set only on THIS row, at the instant its own
+   * status transitions UPCOMING -> MOVED (planMove.ts's applyMoveWrites).
+   * NULL = never moved, or moved before this column existed (never
+   * backfilled). Never re-stamped by a replayed Move. */
+  movedAt?: Date | null;
   /** F1: the persisted scheduling constraint (see plannedActivitySchedulingMode.ts). null/absent = legacy/unknown = protected. */
   schedulingMode?: PlannedActivitySchedulingMode | null;
   habitLogId: string | null;
