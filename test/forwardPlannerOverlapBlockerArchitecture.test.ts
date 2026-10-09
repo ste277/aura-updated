@@ -95,8 +95,8 @@ const constructor = stripComments(read('apps/web/lib/dayConstructorOrchestrator.
 const acceptance = stripComments(read('apps/web/lib/remainingDayRecompositionAcceptance.ts'));
 check('RECOMPOSITION / CONSTRUCTOR UNCHANGED (structure): the proposal and the Constructor still load blockers with the canonical overlap loader; acceptance still takes the shared lock', /loadPlansForDay: \(bounds\) => listPlannedActivitiesOverlappingRange\(user\.id, bounds\.from, bounds\.to\),/.test(recomp) && /listPlannedActivitiesOverlappingRange\(user\.id, bounds\.from, bounds\.to\)/.test(constructor) && /pg_advisory_xact_lock\(hashtext\(\$1\)\)/.test(acceptance));
 check('the shared advisory lock is still taken at exactly the same four production sites (no new blocker-adding writer)', ['apps/web/lib/dayConstructorAcceptancePersistence.ts', 'apps/web/lib/planMove.ts', 'apps/web/lib/remainingDayRecompositionAcceptance.ts', 'apps/web/app/api/plans/route.ts'].every((f) => count(/pg_advisory_xact_lock\(hashtext\(\$1\)\)/g, stripComments(read(f))) === 1));
-const migrationDirs = fs.readdirSync(path.join(root, 'apps/web/prisma/migrations'), { withFileTypes: true }).filter((e) => e.isDirectory());
-check('NO SCHEMA CHANGE: 43 migration directories, no exclusion constraint', migrationDirs.length === 43 && !/EXCLUDE USING|btree_gist/i.test(read('apps/web/prisma/schema.prisma')));
+const migrationSql = fs.readdirSync(path.join(root, 'apps/web/prisma/migrations'), { withFileTypes: true }).filter((e) => e.isDirectory()).map((e) => fs.readFileSync(path.join(root, 'apps/web/prisma/migrations', e.name, 'migration.sql'), 'utf8'));
+check('NO SCHEMA CHANGE: no exclusion constraint in the Prisma schema or in any migration directory\'s own contents (count-independent -- holds regardless of how many unrelated migrations exist)', !/EXCLUDE USING|btree_gist/i.test(read('apps/web/prisma/schema.prisma')) && migrationSql.every((s) => !/EXCLUDE USING|btree_gist/i.test(s)));
 
 // ---- this slice's tests make no false claim ----
 const dbTest = read('test/forwardPlannerOverlapBlockerDb.test.ts');

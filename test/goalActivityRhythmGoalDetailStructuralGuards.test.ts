@@ -99,7 +99,7 @@ check('goalsPresentation.ts defines no streak/calendar/history formatter', !/str
 // No new migration -- this ticket's own section 16 ("presentation/read-
 // model work," no schema change).
 // ============================================================
-check('no new migration directory beyond 0043 (still exactly 43 -- R4 added no schema)', fs.readdirSync(path.join(__dirname, '../apps/web/prisma/migrations')).filter((d) => /^\d{4}_/.test(d)).length === 43);
+check('R4 added no schema: no migration directory beyond the already-known 0043 references rhythm vocabulary at all (count-independent -- holds regardless of how many unrelated migrations exist)', fs.readdirSync(path.join(__dirname, '../apps/web/prisma/migrations')).filter((d) => /^\d{4}_/.test(d) && d !== '0043_goal_activity_rhythm').every((d) => !/rhythmKind|rhythmTargetPerWeek|GoalActivityRhythm/i.test(fs.readFileSync(path.join(__dirname, '../apps/web/prisma/migrations', d, 'migration.sql'), 'utf8'))));
 
 // ============================================================
 // db.ts: the new batched loader is read-only (re-confirmed narrowly here;

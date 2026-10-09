@@ -186,7 +186,12 @@ function stripComments(source: string): string {
     /INSERT INTO "GoalActivity" \(id, "userId", "goalId", title, "activityId", "completionKind", "completionTargetValue", "completionUnit"/.test(dbSrc)
   );
   check('39. db.ts gained no new SQL UPDATE targeting existing GoalActivity completion columns (no backfill of historical rows)', !/UPDATE "GoalActivity" SET "completionKind"|UPDATE "GoalActivity" SET "completionTargetValue"/.test(dbSrc));
-  check('39. no new migration directory was added for G3.4 (still 41)', fs.readdirSync(path.join(__dirname, '..', 'apps', 'web', 'prisma', 'migrations')).filter((d) => /^\d{4}_/.test(d)).length === 43);
+  // No bare migration-directory-count guard here (removed -- it broke on
+  // every unrelated future migration by construction). The model-block
+  // check just below already proves the real, count-independent
+  // invariant directly, and a Prisma migration can only exist because
+  // schema.prisma changed first (enforced separately by the repo's own
+  // "Database migration validation" CI job).
   const goalActivityBlockMatch = schemaSrc.match(/model GoalActivity \{([\s\S]*?)\n\}/);
   const goalActivityBlock = goalActivityBlockMatch ? goalActivityBlockMatch[1] : '';
   check('39. GoalActivity model carries the three pre-existing completion columns and no new fourth one (completionSource/completionHistory/etc.)', /completionKind/.test(goalActivityBlock) && /completionTargetValue/.test(goalActivityBlock) && /completionUnit/.test(goalActivityBlock) && !/completionSource|completionHistory|completionScore/.test(goalActivityBlock));

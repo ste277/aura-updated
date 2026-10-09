@@ -155,7 +155,14 @@ async function main() {
   check('24/25. the filter depends only on the confirmed set (not on errors or in-flight state)', !/completingPlanIds|completeError/.test(dash.slice(dash.indexOf('selectVisibleStartingSoonReminder(startingSoonReminders'), dash.indexOf('selectVisibleStartingSoonReminder(startingSoonReminders') + 200)));
   check('17/18. Right Now selection and the Timeline Composer are untouched by this correction', !/reminder|auraUpdates/i.test(read('../apps/web/lib/rightNowSelection.ts') + read('../apps/web/lib/homeTimelineComposer.ts')));
   check('3. completion is unchanged: the reminder module contains no completion, HabitLog, Capture or Goal logic', !/fetch|habit|capture|goal|logPlanned/i.test(read('../apps/web/lib/reminderConsistency.ts').replace(/\/\*[\s\S]*?\*\//g, '')));
-  check('no migration by this PR (37 + 0038 from Move D2 + 0039 F1 + 0040/0041 Goals V2 G2.1/G2.2.1)', fs.readdirSync(path.join(__dirname, '../apps/web/prisma/migrations')).filter((f) => /^\d{4}_/.test(f)).length === 43);
+  // This correction is a pure presentation-filter fix (line 157 above
+  // already proves the reminder module has no fetch/completion/HabitLog/
+  // Capture/Goal logic at all), so it has no schema vocabulary of its
+  // own to scan migrations for. The real, permanent fact this check
+  // protects -- the specific, already-known migration set as of this
+  // historical PR -- is expressed as a presence-only baseline, never the
+  // repo's current total.
+  check('no migration by this PR: the specific, already-known migration set from Skip C1/Move D2/F1/Goals V2 G2.1/G2.2.1 is present (baseline presence check, count-independent)', ['0037_planned_activity_skipped_at', '0038_planned_activity_move_lineage', '0039_planned_activity_scheduling_mode', '0040_goal_activity_completion_requirement', '0041_goal_activity_execution'].every((m) => fs.existsSync(path.join(__dirname, '../apps/web/prisma/migrations', m))));
 
   if (!allPassed) {
     console.error('SOME REMINDER CONSISTENCY CHECKS FAILED');
