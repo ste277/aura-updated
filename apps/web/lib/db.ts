@@ -1853,14 +1853,34 @@ const DEFAULT_SIGNUP_LOCATION = {
 // Records at most one visit per user per calendar day — deliberately deduped so
 // repeated page loads/refreshes in a session don't inflate the retention numbers
 // this exists to measure.
-export async function recordVisit(userId: string): Promise<void> {
-  const existing = await pool.query(
+//
+// Onboarding V1 PR 2 -- also reports whether this user had NO VisitLog row at
+// all before this call (checked BEFORE today's own row is written, so the
+// very call that writes a user's first-ever row is the one call that can see
+// "none yet"). This is GET /api/auth/session's first-run signal (see that
+// route): VisitLog has existed since migration 0002, essentially this app's
+// entire lifetime, and User rows are only ever created via the one
+// authentication path (getOrCreateUserForAuth), so "never had a VisitLog row"
+// reliably means "this is this account's very first session, on any device,
+// ever" -- never re-derived from locationConfirmedAt, city value, or the
+// presence/absence of Goals/Plans/CustomCities.
+export async function recordVisit(userId: string): Promise<{ isFirstVisitEver: boolean }> {
+  const anyRow = await pool.query(`SELECT 1 FROM "VisitLog" WHERE "userId" = $1 LIMIT 1`, [userId]);
+  const isFirstVisitEver = anyRow.rows.length === 0;
+
+  if (isFirstVisitEver) {
+    await pool.query(`INSERT INTO "VisitLog" (id, "userId") VALUES ($1, $2)`, [randomUUID(), userId]);
+    return { isFirstVisitEver: true };
+  }
+
+  const existingToday = await pool.query(
     `SELECT 1 FROM "VisitLog" WHERE "userId" = $1 AND "visitedAt"::date = CURRENT_DATE LIMIT 1`,
     [userId]
   );
-  if (existing.rows.length > 0) return;
-
-  await pool.query(`INSERT INTO "VisitLog" (id, "userId") VALUES ($1, $2)`, [randomUUID(), userId]);
+  if (existingToday.rows.length === 0) {
+    await pool.query(`INSERT INTO "VisitLog" (id, "userId") VALUES ($1, $2)`, [randomUUID(), userId]);
+  }
+  return { isFirstVisitEver: false };
 }
 
 /** Per-day log counts for a given month, for the calendar view. Counts both fixed

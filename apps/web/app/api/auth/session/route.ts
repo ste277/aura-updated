@@ -12,7 +12,13 @@ export async function GET(req: NextRequest) {
   const user = await getUserById(session.userId);
   if (!user) return NextResponse.json({ user: null });
 
-  await recordVisit(user.id);
+  // Onboarding V1 PR 2 -- the one place `isFirstSession` is ever computed:
+  // whether this user had no VisitLog row before THIS call recorded one (see
+  // recordVisit's own doc comment). Returned alongside `user` so the client
+  // can decide, once per page load, whether to show the Welcome journey --
+  // never re-derived from locationConfirmedAt or the presence/absence of any
+  // other feature data.
+  const { isFirstVisitEver } = await recordVisit(user.id);
 
-  return NextResponse.json({ user });
+  return NextResponse.json({ user, isFirstSession: isFirstVisitEver });
 }

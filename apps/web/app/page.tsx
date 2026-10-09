@@ -36,6 +36,7 @@ import { CalendarViewSection, LoggedEntryItem } from '../components/CalendarView
 import { InsightsView } from '../components/InsightsView';
 import { WindowShiftToast } from '../components/WindowShiftToast';
 import { LocationTrustBanner } from '../components/LocationTrustBanner';
+import { OnboardingJourney } from '../components/OnboardingJourney';
 import { PlanWithAuraView } from '../components/PlanWithAuraView';
 import { YouView } from '../components/YouView';
 import { PanchangCalendarView } from '../components/PanchangCalendarView';
@@ -124,6 +125,18 @@ export default function DashboardPage() {
   // has to find the right row in themselves. Read only once on YouView's
   // initial mount (see YouView's own `initialOpenPanel` doc comment).
   const [youInitialPanel, setYouInitialPanel] = useState<'location' | undefined>(undefined);
+  // Onboarding V1 PR 2 -- Welcome journey. `onboardingActive` decides
+  // whether the Welcome/Confirm Location/Recommendation flow renders
+  // instead of the normal tab UI. Seeded ONLY from the first resolved
+  // `GET /api/auth/session` response of this page load (`isFirstSession`,
+  // computed server-side from VisitLog -- see that route's own doc
+  // comment) via `onboardingDecidedRef`, so a later session refetch
+  // (plan logged, offline sync, 401 re-check) can never flip it back on
+  // after the user has moved past it. Exiting the journey (Skip, Go to
+  // Home, Plan my day) sets it false; it is never true again for the
+  // rest of this page load.
+  const [onboardingActive, setOnboardingActive] = useState(false);
+  const onboardingDecidedRef = useRef(false);
   const [logEntries, setLogEntries] = useState<LoggedEntryItem[]>([]);
   const [, setHabits] = useState<any[]>([]);
   const [dailyBriefing, setDailyBriefing] = useState<DailyBriefing | null>(null);
@@ -288,6 +301,15 @@ export default function DashboardPage() {
       }
 
       setUser(sessionData.user);
+
+      // Onboarding V1 PR 2 -- captured exactly once per page load (see
+      // onboardingDecidedRef's own doc comment above); a later refetch
+      // (plan logged elsewhere, offline sync, 401 re-check) must never
+      // re-trigger the Welcome journey after this page's first decision.
+      if (!onboardingDecidedRef.current) {
+        onboardingDecidedRef.current = true;
+        setOnboardingActive(sessionData.isFirstSession === true);
+      }
 
       const [logsRes, habitsRes, plansRes] = await Promise.all([
         fetch('/api/habit-logs'),
@@ -1170,6 +1192,15 @@ export default function DashboardPage() {
     setActiveTab('you');
   }, []);
 
+  // Onboarding V1 PR 2 -- the journey's own exit: "Skip for now" (Welcome),
+  // "Skip" (Location step) and "Go to Home" (Recommendation step) all call
+  // this. Purely local UI state -- never persisted (see onboardingActive's
+  // own doc comment: the server-side isFirstSession signal already makes
+  // this correct again on the user's NEXT visit without a stored flag).
+  const handleExitOnboarding = useCallback(() => {
+    setOnboardingActive(false);
+  }, []);
+
   const handleTimingSearch = useCallback(async (request: {
     mode: TimingSearchMode;
     activityId?: string;
@@ -1324,6 +1355,32 @@ export default function DashboardPage() {
   }
 
   const userNameDisplay = formatDisplayName(user.email);
+
+  // Onboarding V1 PR 2 -- the Welcome journey renders INSTEAD OF the normal
+  // tab UI below, never alongside it, and never blocks it: every exit path
+  // (Skip, Go to Home, Plan my day) calls handleExitOnboarding, after which
+  // this condition is permanently false for the rest of this page load, and
+  // the exact same Home/tabs tree below renders as it always has.
+  if (onboardingActive) {
+    return (
+      <OnboardingJourney
+        userName={userNameDisplay}
+        cityName={user.cityName}
+        latitude={user.latitude}
+        longitude={user.longitude}
+        timezone={user.timezone}
+        locationConfirmed={user.locationConfirmedAt != null}
+        onLocationChanged={handleLocationChanged}
+        nextShift={mounted ? energyInsight.nextShift : undefined}
+        hasRealRecommendation={mounted && windows.length > 0}
+        onExit={handleExitOnboarding}
+        onPlanMyDay={() => {
+          handleExitOnboarding();
+          window.location.href = '/plan-day';
+        }}
+      />
+    );
+  }
 
   return (
     <main
