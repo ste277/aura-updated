@@ -13,7 +13,11 @@ interface CityOption {
 
 interface LocationPickerProps {
   currentCity: string;
-  onChanged: (city: CityOption) => void;
+  /** Onboarding V1 PR 1 -- Location Trust Foundation. Always carries the
+   * server's own `locationConfirmedAt` from the PATCH response (never
+   * guessed/assumed client-side), so the caller's local state reflects
+   * the real confirmation instant immediately, without a refetch. */
+  onChanged: (city: CityOption & { locationConfirmedAt: string | null }) => void;
 }
 
 const OTHER_VALUE = '__other__';
@@ -102,7 +106,8 @@ export function LocationPicker({ currentCity, onChanged }: LocationPickerProps) 
       });
 
       if (res.ok) {
-        onChanged(selectedCity);
+        const data = await res.json().catch(() => ({}));
+        onChanged({ ...selectedCity, locationConfirmedAt: typeof data.locationConfirmedAt === 'string' ? data.locationConfirmedAt : null });
       } else {
         // Tolerant of a non-JSON/empty error body, same as handleCustomSubmit's
         // existing failure handling below -- prefer the server's own message,
@@ -197,6 +202,7 @@ export function LocationPicker({ currentCity, onChanged }: LocationPickerProps) 
           latitude: data.latitude,
           longitude: data.longitude,
           timezone: data.timezone,
+          locationConfirmedAt: typeof data.locationConfirmedAt === 'string' ? data.locationConfirmedAt : null,
         };
 
         // Add to local custom cities list so it shows immediately in the dropdown

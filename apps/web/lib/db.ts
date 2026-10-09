@@ -127,6 +127,16 @@ export interface User {
    * `undefined` here only ever appears in a fixture that never set it,
    * and is treated identically to `false`. */
   availabilityConfigured?: boolean;
+  /** Onboarding V1 PR 1 -- Location Trust Foundation. `null` means this
+   * (current, non-birth) location has never been explicitly confirmed --
+   * see updateUserLocation's own doc comment for the one place this is
+   * ever stamped. Optional here (unlike every other required `User`
+   * field) for the same reason `availabilityConfigured` is above: a real
+   * database row always has a concrete `Date | null` (nullable column,
+   * no NOT NULL), so `undefined` only appears in an existing in-memory
+   * fixture that predates this column, and is treated identically to
+   * `null` (never confirmed) everywhere this field is read. */
+  locationConfirmedAt?: Date | null;
 }
 
 export interface CustomCity {
@@ -1776,6 +1786,12 @@ export async function upsertUserByEmail(input: {
   longitude: number;
   timezone: string;
 }): Promise<User> {
+  // Onboarding V1 PR 1 -- this INSERT never references "locationConfirmedAt",
+  // so it is left at its NULL column default for every new signup, even
+  // though `input.cityName`/etc. here are typically the hardcoded signup
+  // placeholder (DEFAULT_SIGNUP_LOCATION, below). Signup must never stamp
+  // a confirmation that didn't happen.
+  //
   // Emails are case-insensitive identities. Both auth flows lowercase before
   // hashing/looking up codes, so the user lookup must too — otherwise
   // Foo@x.com and foo@x.com become two accounts and the second login lands
@@ -1794,12 +1810,26 @@ export async function upsertUserByEmail(input: {
   return result.rows[0];
 }
 
+/**
+ * Onboarding V1 PR 1 -- the ONE place `locationConfirmedAt` is ever
+ * stamped: this function is reached only from a successful, already-
+ * validated `PATCH /api/users/location` call (both the curated-city and
+ * custom-location paths), never from signup (`upsertUserByEmail`, which
+ * never references this column, leaving it at its NULL default), a read,
+ * a background job, or timezone auto-detection. Stamped unconditionally
+ * on every call -- including a user re-confirming the SAME city/coordinates
+ * they already have, which must count as an explicit confirmation just as
+ * much as an actual change does (this ticket's own requirement: "a user
+ * explicitly confirming their existing city must be supported without
+ * requiring a change in coordinates"). A validation failure in the route
+ * never reaches this function at all, so it never stamps.
+ */
 export async function updateUserLocation(
   userId: string,
   location: { cityName: string; latitude: number; longitude: number; timezone: string }
 ): Promise<User> {
   const result = await pool.query(
-    `UPDATE "User" SET "cityName" = $2, latitude = $3, longitude = $4, timezone = $5
+    `UPDATE "User" SET "cityName" = $2, latitude = $3, longitude = $4, timezone = $5, "locationConfirmedAt" = now()
      WHERE id = $1 RETURNING *`,
     [userId, location.cityName, location.latitude, location.longitude, location.timezone]
   );

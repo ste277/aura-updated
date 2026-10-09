@@ -35,6 +35,7 @@ import { AskAuraView } from '../components/AskAuraView';
 import { CalendarViewSection, LoggedEntryItem } from '../components/CalendarViewSection';
 import { InsightsView } from '../components/InsightsView';
 import { WindowShiftToast } from '../components/WindowShiftToast';
+import { LocationTrustBanner } from '../components/LocationTrustBanner';
 import { PlanWithAuraView } from '../components/PlanWithAuraView';
 import { YouView } from '../components/YouView';
 import { PanchangCalendarView } from '../components/PanchangCalendarView';
@@ -66,6 +67,13 @@ interface SessionUser {
   latitude: number;
   longitude: number;
   timezone: string;
+  /** Onboarding V1 PR 1 -- Location Trust Foundation. An ISO timestamp
+   * string (as it arrives over JSON) or null -- never parsed into a
+   * `Date` here, since every consumer only ever needs "is this null or
+   * not" (see `locationConfirmed` derivations below), matching this
+   * client type's own existing convention of carrying wire-shaped
+   * values, not domain `Date` objects. */
+  locationConfirmedAt: string | null;
   remindersEnabled: boolean;
   reminderLeadMinutes: number;
   dayBuilderEnabled: boolean;
@@ -110,6 +118,12 @@ function isFrictionWindow(windowName: string): boolean {
 
 export default function DashboardPage() {
   const [user, setUser] = useState<SessionUser | null | undefined>(undefined);
+  // Onboarding V1 PR 1 -- Location Trust Foundation: lets the global
+  // disclosure banner's action land directly on the already-expanded
+  // Location & Time panel, instead of a collapsed You tab the user then
+  // has to find the right row in themselves. Read only once on YouView's
+  // initial mount (see YouView's own `initialOpenPanel` doc comment).
+  const [youInitialPanel, setYouInitialPanel] = useState<'location' | undefined>(undefined);
   const [logEntries, setLogEntries] = useState<LoggedEntryItem[]>([]);
   const [, setHabits] = useState<any[]>([]);
   const [dailyBriefing, setDailyBriefing] = useState<DailyBriefing | null>(null);
@@ -1141,10 +1155,20 @@ export default function DashboardPage() {
   // no location-change trigger at all -- My Day's agenda/story/reflection/
   // tomorrowPreview, and the daily-assistant briefing/insight/reflection
   // signals -- needed one.
-  const handleLocationChanged = useCallback(async (city: { cityName: string; latitude: number; longitude: number; timezone: string }) => {
+  const handleLocationChanged = useCallback(async (city: { cityName: string; latitude: number; longitude: number; timezone: string; locationConfirmedAt: string | null }) => {
     setUser((prev) => (prev ? { ...prev, ...city } : prev));
     await Promise.all([loadMyDay(), loadAssistantSignals()]);
   }, [loadMyDay, loadAssistantSignals]);
+
+  // Onboarding V1 PR 1 -- the global disclosure banner's one action:
+  // reuses the EXISTING Location & Time editing experience (YouView ->
+  // LocationPicker), never a new form. Setting activeTab directly (no
+  // window.location.href reload) keeps this a normal in-SPA navigation,
+  // same as every other setActiveTab call in this file.
+  const handleConfirmLocationFromBanner = useCallback(() => {
+    setYouInitialPanel('location');
+    setActiveTab('you');
+  }, []);
 
   const handleTimingSearch = useCallback(async (request: {
     mode: TimingSearchMode;
@@ -1317,6 +1341,17 @@ export default function DashboardPage() {
       {/* Real-Time Solar Phase Shift Toast Banner */}
       <WindowShiftToast activeWindowName={activeType} />
 
+      {/* Onboarding V1 PR 1 -- Location Trust Foundation: the ONE
+          centralized disclosure, visible on every tab (rendered once,
+          above all per-tab content), never a per-feature reimplementation. */}
+      <div style={{ width: '100%', maxWidth: 760 }}>
+        <LocationTrustBanner
+          locationConfirmed={user.locationConfirmedAt != null}
+          cityName={user.cityName}
+          onConfirmLocation={handleConfirmLocationFromBanner}
+        />
+      </div>
+
       {activeTab === 'chart' && (
         <header
           style={{
@@ -1475,6 +1510,8 @@ export default function DashboardPage() {
             email={user.email}
             cityName={user.cityName}
             timezone={user.timezone}
+            locationConfirmed={user.locationConfirmedAt != null}
+            initialOpenPanel={youInitialPanel}
             notificationPrefs={notificationPrefs}
             onNotificationPrefsChange={(next) => {
               setNotificationPrefs(next);
@@ -1546,6 +1583,7 @@ export default function DashboardPage() {
         {activeTab === 'muhurtham' && (
           <MuhurthamFinderView
             timingLocation={{ cityName: user.cityName, latitude: user.latitude, longitude: user.longitude, timezone: user.timezone }}
+            locationConfirmed={user.locationConfirmedAt != null}
             onBack={() => setActiveTab('explore')}
             onOpenPanchangCalendar={handleOpenPanchang}
             onViewFullPanchang={handleViewFullPanchang}

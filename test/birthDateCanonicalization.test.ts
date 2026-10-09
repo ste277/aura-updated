@@ -83,9 +83,9 @@ check('THE DIAGNOSTIC IS READ-ONLY AND AGGREGATE-ONLY: one SELECT ... UNION ALL 
 check('the diagnostic documents that non-midnight rows are evidence of shifted writes and that midnight rows are NOT certified correct, and that no automatic repair may be built from it', /EVIDENCE/.test(diagnostic) && /does NOT prove every row is right/.test(diagnostic) && /Do not repair rows from this output alone/.test(diagnostic) && /AT TIME ZONE 'UTC'/.test(diagnostic));
 
 // ---- Part 6
-const migrations = fs.readdirSync(path.join(root, 'apps/web/prisma/migrations'), { withFileTypes: true }).filter((e) => e.isDirectory()).length;
+const migrationDirNames = fs.readdirSync(path.join(root, 'apps/web/prisma/migrations'), { withFileTypes: true }).filter((e) => e.isDirectory()).map((e) => e.name);
 const ci = read('.github/workflows/ci.yml');
-check('NO SCHEMA, NO MIGRATION: still 43 migrations and no schema.prisma mention of the helper', migrations === 43 && !/canonicalizeCivilBirthDate/.test(read('apps/web/prisma/schema.prisma')));
+check('NO SCHEMA, NO MIGRATION: no migration directory\'s own contents mention the helper, and no schema.prisma mention either (count-independent -- holds regardless of how many unrelated migrations exist)', migrationDirNames.every((d) => !/canonicalizeCivilBirthDate/.test(fs.readFileSync(path.join(root, 'apps/web/prisma/migrations', d, 'migration.sql'), 'utf8'))) && !/canonicalizeCivilBirthDate/.test(read('apps/web/prisma/schema.prisma')));
 check('CI RUNS BOTH NEW SUITES: the pure canonicalization suite and the DB timezone-matrix suite', /npx ts-node test\/birthDateCanonicalization\.test\.ts/.test(ci) && /npx ts-node test\/birthDateWritersDb\.test\.ts/.test(ci));
 
 if (!allPassed) { console.error('SOME BIRTH DATE CANONICALIZATION CHECKS FAILED'); process.exit(1); }

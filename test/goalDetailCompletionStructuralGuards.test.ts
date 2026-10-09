@@ -64,8 +64,16 @@ check('HomeTimeline.tsx (ordinary Timeline rows) does not reference formatGoalAc
 check('dayConstructorOrchestrator.ts does not reference formatGoalActivityCompletion', !/formatGoalActivityCompletion/.test(read('../apps/web/lib/dayConstructorOrchestrator.ts')));
 check('planMove.ts does not reference formatGoalActivityCompletion', !/formatGoalActivityCompletion/.test(read('../apps/web/lib/planMove.ts')));
 
-const migrationDirs = fs.readdirSync(path.join(__dirname, '..', 'apps', 'web', 'prisma', 'migrations')).filter((d) => /^\d{4}_/.test(d));
-check('no new migration directory was added for G3.2 (still 41)', migrationDirs.length === 43);
+// No bare migration-directory-count guard here (the brittle, count-
+// dependent form this file used to have was removed -- it broke on every
+// unrelated future migration by construction). The schema check just
+// below already proves the real, count-independent invariant directly:
+// the exact Goal/GoalActivity model block contains no new field beyond
+// what G3.2 itself and the later, separately-authorized Rhythm R2 added
+// -- and since a Prisma migration can only exist because schema.prisma
+// changed first (enforced separately by the repo's own "Database
+// migration validation" CI job), this is sufficient without also
+// re-deriving it from a migration-directory total.
 // Goals V2 Rhythm R2 (a later, separately-authorized ticket) intentionally
 // added exactly two nullable columns (rhythmKind/rhythmTargetPerWeek) to
 // GoalActivity -- see test/goalActivityRhythmStructuralGuards.test.ts for

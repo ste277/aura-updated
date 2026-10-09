@@ -256,8 +256,8 @@ check('GATE: no imports, exactly-once P / unique ids / conflict subset are INCON
 check('MATERIALIZER: the pinned fail-closed order (authority -> same-run basis -> readiness -> gate -> cross-checks -> build -> conservation), one call each of the existing precedence sort and capacity function, empty Deferred / conflicts, candidateOrder never named, detached and frozen output, half-open overlap, duration / window / FIXED defenses', !flags(audit(real), 'C5:'));
 check('PURE: no database, clock, randomness, async, logging, environment, telemetry, ACTIVE flag, Constructor / orchestrator / search / P4b2 / P4b3 call, or input mutation in any of the four modules', !flags(audit(real), 'C6:'));
 
-const migrationSql = fs.readdirSync(path.join(root, 'apps/web/prisma/migrations'), { withFileTypes: true }).filter((e) => e.isDirectory());
-check('NO SCHEMA, NO MIGRATION: the Prisma schema mentions none of the vocabulary and the migration count is still 43', !VOCAB.test(read('apps/web/prisma/schema.prisma')) && migrationSql.length === 43);
+const migrationSql = fs.readdirSync(path.join(root, 'apps/web/prisma/migrations'), { withFileTypes: true }).filter((e) => e.isDirectory()).map((e) => fs.readFileSync(path.join(root, 'apps/web/prisma/migrations', e.name, 'migration.sql'), 'utf8'));
+check('NO SCHEMA, NO MIGRATION: the Prisma schema and every migration directory\'s own contents mention none of the vocabulary (count-independent -- holds regardless of how many unrelated migrations exist)', !VOCAB.test(read('apps/web/prisma/schema.prisma')) && migrationSql.every((s) => !VOCAB.test(s)));
 const ci = read('.github/workflows/ci.yml');
 check('CI RUNS THE NEW SUITES: the behavior suite and this architecture suite are steps of the pure job', /npx ts-node test\/activeResultMaterializer\.test\.ts/.test(ci) && /npx ts-node test\/activeResultMaterializerArchitecture\.test\.ts/.test(ci));
 const dateGuard = read('test/schedulingDateMutatorArchitecture.test.ts');

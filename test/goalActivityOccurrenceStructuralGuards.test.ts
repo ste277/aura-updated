@@ -187,7 +187,7 @@ check('migration 0042_goal_activity_occurrence exists and creates exactly the Go
 // invariant this check still protects -- that 0042 itself remains exactly
 // what R1 created -- is covered by the check above; this one is narrowed
 // to the current total only.
-check('no migration directory beyond 0042 was added BY R1 (43 total, including the later, unrelated Rhythm R2 0043)', fs.readdirSync(path.join(__dirname, '../apps/web/prisma/migrations')).filter((d) => /^\d{4}_/.test(d)).length === 43);
+check('R1 introduced GoalActivityOccurrence exactly once: no OTHER migration directory\'s own contents also reference it (count-independent -- holds regardless of how many unrelated migrations exist)', fs.readdirSync(path.join(__dirname, '../apps/web/prisma/migrations')).filter((d) => /^\d{4}_/.test(d) && d !== '0042_goal_activity_occurrence').every((d) => !/GoalActivityOccurrence/.test(fs.readFileSync(path.join(__dirname, '../apps/web/prisma/migrations', d, 'migration.sql'), 'utf8'))));
 
 // ============================================================
 // No status/windowKey column was added to the new model (this ticket's own

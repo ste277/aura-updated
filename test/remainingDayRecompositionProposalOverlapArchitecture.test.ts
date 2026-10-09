@@ -75,8 +75,8 @@ check('the shared advisory lock is still taken at exactly the same four producti
 })());
 
 // ---- schema ----
-const migrationDirs = fs.readdirSync(path.join(root, 'apps/web/prisma/migrations'), { withFileTypes: true }).filter((e) => e.isDirectory());
-check('NO SCHEMA CHANGE: 43 migration directories, no exclusion constraint, no new index declared for the proposal read', migrationDirs.length === 43 && !/EXCLUDE USING|btree_gist/i.test(read('apps/web/prisma/schema.prisma')));
+const migrationSql = fs.readdirSync(path.join(root, 'apps/web/prisma/migrations'), { withFileTypes: true }).filter((e) => e.isDirectory()).map((e) => fs.readFileSync(path.join(root, 'apps/web/prisma/migrations', e.name, 'migration.sql'), 'utf8'));
+check('NO SCHEMA CHANGE: no exclusion constraint or new index for the proposal read, in the Prisma schema or in any migration directory\'s own contents (count-independent)', !/EXCLUDE USING|btree_gist/i.test(read('apps/web/prisma/schema.prisma')) && migrationSql.every((s) => !/EXCLUDE USING|btree_gist/i.test(s)));
 
 // ---- this slice's tests make no false claim ----
 const dbTest = read('test/remainingDayRecompositionProposalOverlapDb.test.ts');
