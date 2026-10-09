@@ -36,6 +36,7 @@ import { CalendarViewSection, LoggedEntryItem } from '../components/CalendarView
 import { InsightsView } from '../components/InsightsView';
 import { WindowShiftToast } from '../components/WindowShiftToast';
 import { LocationTrustBanner } from '../components/LocationTrustBanner';
+import { OnboardingJourney } from '../components/OnboardingJourney';
 import { PlanWithAuraView } from '../components/PlanWithAuraView';
 import { YouView } from '../components/YouView';
 import { PanchangCalendarView } from '../components/PanchangCalendarView';
@@ -124,6 +125,23 @@ export default function DashboardPage() {
   // has to find the right row in themselves. Read only once on YouView's
   // initial mount (see YouView's own `initialOpenPanel` doc comment).
   const [youInitialPanel, setYouInitialPanel] = useState<'location' | undefined>(undefined);
+  // Onboarding V1 PR 2 -- Welcome journey. `onboardingActive` decides
+  // whether the Welcome/Confirm Location/Recommendation flow renders
+  // instead of the normal tab UI. Seeded ONLY from the first resolved
+  // `GET /api/auth/session` response of this page load (`onboardingResolved`,
+  // a durable server-side fact -- see that route's own doc comment) via
+  // `onboardingDecidedRef`. This guard is still required even though the
+  // underlying signal is now durable (First-Run Reliability Correction):
+  // without it, a LATER session refetch (plan logged, offline sync, 401
+  // re-check) landing before handleExitOnboarding's own PATCH call has
+  // finished persisting would see onboardingResolved still false and could
+  // yank the user back into Welcome mid-use -- exactly the "trap the
+  // user"/redirect-loop failure this guard exists to prevent. Exiting the
+  // journey (Skip, Go to Home, Plan my day) sets it false locally and
+  // fires that PATCH; it is never true again for the rest of this page
+  // load regardless of what a later session fetch reports.
+  const [onboardingActive, setOnboardingActive] = useState(false);
+  const onboardingDecidedRef = useRef(false);
   const [logEntries, setLogEntries] = useState<LoggedEntryItem[]>([]);
   const [, setHabits] = useState<any[]>([]);
   const [dailyBriefing, setDailyBriefing] = useState<DailyBriefing | null>(null);
@@ -288,6 +306,15 @@ export default function DashboardPage() {
       }
 
       setUser(sessionData.user);
+
+      // Onboarding V1 PR 2 -- captured exactly once per page load (see
+      // onboardingDecidedRef's own doc comment above); a later refetch
+      // (plan logged elsewhere, offline sync, 401 re-check) must never
+      // re-trigger the Welcome journey after this page's first decision.
+      if (!onboardingDecidedRef.current) {
+        onboardingDecidedRef.current = true;
+        setOnboardingActive(sessionData.onboardingResolved === false);
+      }
 
       const [logsRes, habitsRes, plansRes] = await Promise.all([
         fetch('/api/habit-logs'),
@@ -1170,6 +1197,33 @@ export default function DashboardPage() {
     setActiveTab('you');
   }, []);
 
+  // Onboarding V1 PR 2 -- the journey's own TRUE exit points, exactly three:
+  // Welcome's "Skip for now", Recommendation's "Go to Home", and
+  // Recommendation's "Plan my day" (the last via the onPlanMyDay callback
+  // below, which also calls this). The Location step's OWN "Skip" is
+  // deliberately NOT wired here -- it only advances to the Recommendation
+  // step (OnboardingJourney.tsx's own onSkip={() => setStep('RECOMMENDATION')}),
+  // which is not itself an exit (First-Run Reliability Correction's own
+  // explicit rule: advancing between steps never resolves onboarding).
+  //
+  // First-Run Reliability Correction -- this is also the ONE place
+  // onboarding resolution is persisted: fires PATCH /api/users/onboarding
+  // best-effort (never awaited before letting the user proceed, same
+  // fire-and-forget convention as loadAuraUpdates/trackEvent elsewhere in
+  // this file) so a slow or failed request can never trap the user behind
+  // onboarding or delay reaching Home. A failed request is never reported
+  // as success to the user (there is no "saved!" UI here to lie in) and
+  // naturally retries itself: if it didn't persist, the user's NEXT visit
+  // still sees onboardingResolved false and will resolve it again the next
+  // time they exit -- no client-side retry queue needed. Local state
+  // (`setOnboardingActive(false)`) is never rolled back on failure, so the
+  // user is never yanked back into onboarding within this same page load
+  // regardless of the request's outcome.
+  const handleExitOnboarding = useCallback(() => {
+    setOnboardingActive(false);
+    fetch('/api/users/onboarding', { method: 'PATCH' }).catch(() => {});
+  }, []);
+
   const handleTimingSearch = useCallback(async (request: {
     mode: TimingSearchMode;
     activityId?: string;
@@ -1324,6 +1378,32 @@ export default function DashboardPage() {
   }
 
   const userNameDisplay = formatDisplayName(user.email);
+
+  // Onboarding V1 PR 2 -- the Welcome journey renders INSTEAD OF the normal
+  // tab UI below, never alongside it, and never blocks it: every exit path
+  // (Skip, Go to Home, Plan my day) calls handleExitOnboarding, after which
+  // this condition is permanently false for the rest of this page load, and
+  // the exact same Home/tabs tree below renders as it always has.
+  if (onboardingActive) {
+    return (
+      <OnboardingJourney
+        userName={userNameDisplay}
+        cityName={user.cityName}
+        latitude={user.latitude}
+        longitude={user.longitude}
+        timezone={user.timezone}
+        locationConfirmed={user.locationConfirmedAt != null}
+        onLocationChanged={handleLocationChanged}
+        nextShift={mounted ? energyInsight.nextShift : undefined}
+        hasRealRecommendation={mounted && windows.length > 0}
+        onExit={handleExitOnboarding}
+        onPlanMyDay={() => {
+          handleExitOnboarding();
+          window.location.href = '/plan-day';
+        }}
+      />
+    );
+  }
 
   return (
     <main

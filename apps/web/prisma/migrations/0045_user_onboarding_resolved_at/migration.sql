@@ -1,0 +1,45 @@
+-- Onboarding V1 PR 2 -- First-Run Reliability Correction: a durable,
+-- check-not-consume signal answering exactly one question -- "has this
+-- account's onboarding journey (Welcome/Confirm Location/Recommendation)
+-- ever been resolved (reached an explicit exit: Skip Welcome, Go to Home,
+-- or Plan My Day)?" -- replacing the PREVIOUS design's VisitLog-existence
+-- proxy, which could be silently consumed by a non-Home entry point
+-- (GuestFindClient's own independent session check) or double-claimed by
+-- two concurrent session requests (two tabs).
+--
+-- NULL = never resolved (Welcome is still owed). Non-NULL = the instant
+-- onboarding was resolved. Stamped only by markOnboardingResolved()
+-- (apps/web/lib/db.ts), called only from the authenticated
+-- PATCH /api/users/onboarding endpoint, itself called only from the
+-- three true exit actions (apps/web/app/page.tsx's handleExitOnboarding)
+-- -- never from a session read, never from advancing between onboarding
+-- steps, never from VisitLog/recordVisit.
+--
+-- BACKFILL: every row that exists at the instant this migration runs is
+-- marked resolved (now()), in the same statement, once. This is a
+-- factual snapshot, not a clock comparison -- "did this User row already
+-- exist before this migration executed" is always exactly knowable for
+-- any database this migration runs against (a long-running production
+-- database or a freshly-provisioned one with zero existing rows), unlike
+-- a cutoff timestamp compared against request time, which the
+-- `locationConfirmedAt` migration (0044) deliberately avoided for a
+-- different, unrelated reason (there, a current location VALUE could not
+-- safely prove explicit confirmation; here, "this row already existed"
+-- is never ambiguous). The column has NO row-level default, so every
+-- User row inserted AFTER this migration completes (via the one
+-- production INSERT path, upsertUserByEmail/getOrCreateUserForAuth)
+-- starts NULL -- correctly unresolved, exactly like `locationConfirmedAt`
+-- and `availabilityConfigured` before it. The only deployment requirement
+-- this relies on is the standard one every additive migration in this
+-- repo already requires: the migration must finish applying before the
+-- code that reads/writes this column starts serving requests -- the same
+-- ordering this repo's own "Database migration validation" CI gate and
+-- `prisma migrate deploy` step already enforce as a merge prerequisite.
+--
+-- Does not touch "locationConfirmedAt", any coordinate column, or any
+-- Goal/Plan table -- this is the one and only statement besides the
+-- backfill.
+
+ALTER TABLE "User" ADD COLUMN "onboardingResolvedAt" TIMESTAMPTZ(3);
+
+UPDATE "User" SET "onboardingResolvedAt" = now() WHERE "onboardingResolvedAt" IS NULL;

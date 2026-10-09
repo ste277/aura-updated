@@ -73,7 +73,17 @@ check('idempotency claims stay outside the transaction (before it) and the claim
 check('SERVER AUTHORITY: the lock identity is the authenticated session user and nothing from the request body or query', /const session = getSessionFromRequest\(req\);/.test(post) && !/body/.test(post.slice(lockAt, lockAt + 160)) && !/searchParams|params\./.test(post.slice(lockAt, lockAt + 160)));
 const keyLiterals = production.flatMap((x) => Array.from(x.src.matchAll(/`(day-constructor-accept:\$\{[^}]+\})`/g)).map((m) => ({ f: x.f, key: m[1].replace(/session\.userId/, 'userId') })));
 check('NO NEW LOCK DOMAIN: every advisory-lock key in production code is the same `day-constructor-accept:${userId}` construction (acceptance, Move, Recomposition acceptance, and now the manual writer)', keyLiterals.length === 4 && new Set(keyLiterals.map((k) => k.key)).size === 1 && keyLiterals.map((k) => k.f).sort().join() === ['apps/web/app/api/plans/route.ts', 'apps/web/lib/dayConstructorAcceptancePersistence.ts', 'apps/web/lib/planMove.ts', 'apps/web/lib/remainingDayRecompositionAcceptance.ts'].sort().join());
-check('the lock SQL is byte-identical at all four sites (same primitive, no variant)', production.filter((x) => x.src.includes('pg_advisory_xact_lock(hashtext($1))')).length === 4);
+// Onboarding V1 PR 2 -- First-Run Reliability Correction added a FIFTH,
+// unrelated `pg_advisory_xact_lock(hashtext($1))` call (db.ts's own
+// recordVisit, keyed `visit-log:${userId}` -- VisitLog analytics
+// concurrency, never schedule-write serialization; already excluded from
+// line 74/75's own `day-constructor-accept:` key-scoped count above).
+// Scoped here to the same four schedule-write call sites line 75 already
+// names, rather than the bare SQL text, so this stays a true "byte-
+// identical AT THE FOUR SCHEDULE-WRITE SITES" check instead of breaking
+// on an unrelated lock elsewhere using the same general-purpose
+// primitive for a different key/purpose.
+check('the lock SQL is byte-identical at all four SCHEDULE-WRITE sites (same primitive, no variant)', production.filter((x) => ['apps/web/app/api/plans/route.ts', 'apps/web/lib/dayConstructorAcceptancePersistence.ts', 'apps/web/lib/planMove.ts', 'apps/web/lib/remainingDayRecompositionAcceptance.ts'].includes(x.f) && x.src.includes('pg_advisory_xact_lock(hashtext($1))')).length === 4);
 check('TRANSACTION-SCOPED ONLY: no session-level advisory lock, try-lock or manual unlock exists anywhere in production code', !production.some((x) => /pg_advisory_lock\(|pg_try_advisory|pg_advisory_unlock|pg_advisory_lock_shared/.test(x.src)));
 check('no NOWAIT, lock_timeout or statement_timeout was introduced (the lock waits under the existing timeout semantics)', !production.some((x) => /NOWAIT|lock_timeout|statement_timeout|SKIP LOCKED/i.test(x.src)));
 check('NO LOCK HELPER / RENAME in this slice: no extracted lock helper, and the key is not renamed', !production.some((x) => /withUserScheduleLock|scheduleWriteLock|acquireScheduleLock|schedule-write:/.test(x.src)));

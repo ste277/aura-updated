@@ -84,7 +84,18 @@ check('the canonical overlap loader is shared by the range loader, the Construct
 const plansRoute = stripComments(read('apps/web/app/api/plans/route.ts'));
 check('updated deliberately by schedule-write S2 (this check previously pinned POST /api/plans as unlocked): the S1 acceptance read is unchanged, and createPlannedActivity itself still takes no lock -- the manual writer\'s serialization lives in the route\'s own transaction', !/pg_advisory/.test(functionBody(db, 'createPlannedActivity')) && /pg_advisory_xact_lock/.test(stripComments(read('apps/web/app/api/plans/route.ts'))));
 check('NO S2: createPlannedActivity (db.ts) takes no lock', !/pg_advisory/.test(functionBody(db, 'createPlannedActivity')));
-check('the lock sites are exactly the three existing ones (acceptance, Move, Recomposition acceptance) with the unchanged key; no helper was extracted', allLib.filter((x) => /pg_advisory_xact_lock/.test(x.src)).map((x) => x.f).sort().join() === 'dayConstructorAcceptancePersistence.ts,planMove.ts,remainingDayRecompositionAcceptance.ts' && !allLib.some((x) => /withUserScheduleLock|scheduleWriteLock|acquireScheduleLock/.test(x.src)));
+// Onboarding V1 PR 2 -- First-Run Reliability Correction added a FOURTH
+// `pg_advisory_xact_lock` call site in this directory (db.ts's own
+// recordVisit), but with a deliberately DIFFERENT, unrelated lock key
+// (`visit-log:${userId}`, not `day-constructor-accept:${userId}`) for a
+// genuinely separate concern (VisitLog analytics concurrency, never
+// schedule-write serialization). Scoped to the shared KEY itself, not the
+// bare presence of the primitive, so this guard still protects its real
+// invariant -- the schedule-write lock's own call sites and shared key
+// are unchanged, no helper was extracted -- without being broken by an
+// unrelated lock elsewhere in the same directory using the same general-
+// purpose Postgres primitive for a different key/purpose.
+check('the schedule-write lock sites (sharing the "day-constructor-accept:" key) are exactly the three existing ones (acceptance, Move, Recomposition acceptance); no helper was extracted', allLib.filter((x) => /day-constructor-accept:/.test(x.src)).map((x) => x.f).sort().join() === 'dayConstructorAcceptancePersistence.ts,planMove.ts,remainingDayRecompositionAcceptance.ts' && !allLib.some((x) => /withUserScheduleLock|scheduleWriteLock|acquireScheduleLock/.test(x.src)));
 check('no lock timeout was introduced anywhere in production code', !allLib.some((x) => /lock_timeout/i.test(x.src)));
 check('Move and Recomposition acceptance are untouched in kind: they still use their own overlap-correct findBlockingPlanForRange', /findBlockingPlanForRange/.test(allLib.find((x) => x.f === 'planMove.ts')!.src) && /findBlockingPlanForRange/.test(allLib.find((x) => x.f === 'remainingDayRecompositionAcceptance.ts')!.src));
 check('no database exclusion constraint or schema change for plans: the schema has no exclusion/overlap construct', !/EXCLUDE USING|tstzrange|btree_gist/i.test(read('apps/web/prisma/schema.prisma')) && !fs.readdirSync(path.join(root, 'apps/web/prisma/migrations')).some((d) => d !== 'migration_lock.toml' && fs.existsSync(path.join(root, 'apps/web/prisma/migrations', d, 'migration.sql')) && /EXCLUDE USING|btree_gist/i.test(fs.readFileSync(path.join(root, 'apps/web/prisma/migrations', d, 'migration.sql'), 'utf8'))));
