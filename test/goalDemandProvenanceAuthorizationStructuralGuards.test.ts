@@ -104,8 +104,21 @@ check('47b. PlanDayClient.tsx\'s own accept-time goalActivityLinks/captureLinks 
 // CAPACITY_EXHAUSTED/ownership gates, and the legacy linkGoalActivityToPlannedActivity
 // fallback) -- this ticket changes WHICH goalActivityId is authoritative,
 // never whether it's still eligible to persist.
-// ============================================================
-check('48a. persistAcceptedConstructedDay still tries materializeGoalActivityRhythmOccurrence first for every Goal-linked write, unmodified', /const materialized = await materializeGoalActivityRhythmOccurrence\(userId, goalActivityId, plan\.id, request\.constructionWindow\.date, user\.timezone, client\);/.test(persistenceSrc));
+//
+// Insights V1 PR2 (Stable Scheduled-Week Attribution) deliberately
+// re-baselined 48a's own pinned call-site text: the call now also passes
+// `plan.plannedStartAt` (a 4th positional argument, between `plan.id` and
+// `request.constructionWindow.date`) so the new scheduled-week snapshot
+// (GoalActivityOccurrence.scheduledWeekStart/scheduledWeekTimezone,
+// migration 0047) is computed from this specific plan's own real
+// scheduled instant, never the Day Constructor batch's own
+// construction-window date (which is a same-day proxy, not this item's
+// own authoritative timestamp). The pin remains the FULL, exact
+// call-site text -- argument order, identifiers and all -- never
+// loosened to a bare function-name match: it still fails the instant the
+// call is removed, bypassed, reordered, or `plan.plannedStartAt` is
+// swapped for any other instant.
+check('48a. persistAcceptedConstructedDay still tries materializeGoalActivityRhythmOccurrence first for every Goal-linked write, now passing plan.plannedStartAt for the PR2 scheduled-week snapshot, otherwise unmodified', /const materialized = await materializeGoalActivityRhythmOccurrence\(userId, goalActivityId, plan\.id, plan\.plannedStartAt, request\.constructionWindow\.date, user\.timezone, client\);/.test(persistenceSrc));
 check('48b. the existing legacy linkGoalActivityToPlannedActivity fallback (finite/NONE Rhythm path) is still present, unmodified', /const linked = await linkGoalActivityToPlannedActivity\(userId, goalActivityId, plan\.id, client\);/.test(persistenceSrc));
 check('48c. the existing all-or-nothing GOAL_ACTIVITY_LINK_FAILED rollback contract is still present', occurrences(persistenceSrc, "throw new Error('GOAL_ACTIVITY_LINK_FAILED');") === 2);
 check('48d. the per-user advisory lock (concurrency protection) is still present, unmodified', /pg_advisory_xact_lock\(hashtext\(\$1\)\)/.test(persistenceSrc));
