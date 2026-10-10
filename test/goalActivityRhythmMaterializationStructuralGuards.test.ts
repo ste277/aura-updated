@@ -174,7 +174,21 @@ const rhythmModuleSrc = stripComments(read('../apps/web/lib/goalActivityRhythm.t
 check('goalActivityRhythm.ts (unmodified by R3) still defines no AURA_DECIDES', !/AURA_DECIDES/.test(rhythmModuleSrc));
 check('goalActivityRhythm.ts (unmodified by R3) still references no RRULE', !/RRULE/.test(rhythmModuleSrc));
 check('materializeGoalActivityRhythmOccurrence never loops/batches to create more than one occurrence per call (no for/while/map around the INSERT)', !/for\s*\(|while\s*\(|\.map\(/.test(materializeBody));
-check('materializeGoalActivityRhythmOccurrence never queries/creates a plan for a FUTURE week beyond planningLocalDate (no addDaysToDateStr/localCalendarWeekStart call of its own)', !/addDaysToDateStr|localCalendarWeekStart/.test(materializeBody));
+// Insights V1 PR2 (Stable Scheduled-Week Attribution) gave this function
+// its own FIRST legitimate, narrowly-scoped call to localCalendarWeekStart
+// -- deriving the new scheduledWeekStart snapshot from `plannedStartAt`
+// (the plan's own real scheduled instant), written once into the
+// INSERT, never used to decide WHERE/WHEN the occurrence is placed. The
+// check below is re-baselined, not weakened: it still fails if
+// addDaysToDateStr ever appears (unchanged, still forbidden outright),
+// if localCalendarWeekStart is called more than once, or if it is ever
+// called on anything OTHER than this exact
+// `getDatePartsInTimezone(timezone, plannedStartAt).dateStr` snapshot
+// expression -- in particular, calling it on `planningLocalDate` itself
+// (the ORIGINAL forbidden pattern this check exists to catch: silently
+// shifting ELIGIBILITY/placement into a different week than the one the
+// caller actually requested) still fails this check exactly as before.
+check('materializeGoalActivityRhythmOccurrence never queries/creates a plan for a FUTURE week beyond planningLocalDate (no addDaysToDateStr call; localCalendarWeekStart is called exactly once, only to derive the PR2 scheduledWeekStart snapshot from plannedStartAt -- never applied to planningLocalDate itself, which would silently shift eligibility/placement into a different week)', !/addDaysToDateStr/.test(materializeBody) && (materializeBody.match(/localCalendarWeekStart\(/g) ?? []).length === 1 && /localCalendarWeekStart\(getDatePartsInTimezone\(timezone, plannedStartAt\)\.dateStr\)/.test(materializeBody) && !/localCalendarWeekStart\(planningLocalDate\)/.test(materializeBody));
 check('the GoalActivityOccurrence schema still has no status column (R3 did not add one)', !/@@schema|status\s+String/.test((() => { const m = read('../apps/web/prisma/schema.prisma').match(/model GoalActivityOccurrence \{([\s\S]*?)\n\}/); return m ? m[1] : ''; })()));
 check('db.ts was not given a new windowKey column reference in real CODE (R1/R2\'s own omission preserved; doc-comment prose explaining the omission is excluded)', !/windowKey/.test(stripComments(dbSrc)));
 check('materializeGoalActivityRhythmOccurrence does not write GoalActivityExecution.currentValue or any partial-progress field', !/currentValue/.test(materializeBody));
