@@ -21,7 +21,7 @@ import { beginTransaction, type PlannedActivity } from './db';
 import { isActivePlanBlocker } from './dayConstructorOrchestrator';
 import { parseSchedulingMode } from './plannedActivitySchedulingMode';
 import { buildGoogleCalendarUrl } from '../../../packages/recommendation/src/dailyAssistant';
-import { normalizeGoalActivityRhythm, deriveGoalActivityRhythmContribution, type GoalActivityRhythmOccurrenceFact, type PlannedActivityStatusForRhythm } from './goalActivityRhythm';
+import { normalizeGoalActivityRhythm, deriveGoalActivityRhythmContribution, localCalendarWeekStart, resolveOccurrenceLocalDate, type GoalActivityRhythmOccurrenceFact, type PlannedActivityStatusForRhythm } from './goalActivityRhythm';
 import { evaluateNewOccurrenceEligibility } from './goalActivityOccurrenceCapacity';
 import { getDatePartsInTimezone } from './timezone';
 
@@ -183,34 +183,52 @@ export async function findBlockingPlanForRange(
  * behavior. The weekly TARGET itself is never read as anything other
  * than the GoalActivity's own persisted `rhythmTargetPerWeek` -- this
  * function never changes it, only enforces it.
+ *
+ * Insights V1 PR2 -- also returns the occurrence's owner's timezone
+ * whenever a linked occurrence genuinely exists (`{ occurrenceId,
+ * timezone }`), regardless of which branch below returns early after
+ * that point (GoalActivity not found, finite/NONE rhythm) -- so the
+ * caller (`applyMoveWrites`) can always correctly re-stamp that
+ * occurrence's scheduled-week snapshot to the destination, never leaving
+ * a stale snapshot behind after a genuine repoint. `null` means no
+ * occurrence is linked at all, the only case where no snapshot write is
+ * needed. The timezone fetch is therefore unconditional on "does an
+ * occurrence exist," not on "does N_PER_WEEK capacity enforcement
+ * apply" -- two different concerns that happen to share this one
+ * function, now kept correct independently of each other.
  */
 async function enforceDestinationWeekCapacity(
   client: { query: (text: string, params?: unknown[]) => Promise<{ rows: any[] }> },
   userId: string,
   a: PlannedActivity,
   newStartAt: Date
-): Promise<void> {
+): Promise<{ occurrenceId: string; timezone: string } | null> {
   const occRes = await client.query(`SELECT id, "goalActivityId" FROM "GoalActivityOccurrence" WHERE "plannedActivityId" = $1 AND "userId" = $2`, [a.id, userId]);
-  if (occRes.rows.length !== 1) return; // no occurrence linked -- NONE-rhythm / non-Goal plan, unaffected
+  if (occRes.rows.length !== 1) return null; // no occurrence linked -- NONE-rhythm / non-Goal plan, unaffected
   const { id: occurrenceId, goalActivityId } = occRes.rows[0];
-
-  const gaRes = await client.query(`SELECT "rhythmKind", "rhythmTargetPerWeek" FROM "GoalActivity" WHERE id = $1 AND "userId" = $2`, [goalActivityId, userId]);
-  if (gaRes.rows.length === 0) return;
-  const rhythm = normalizeGoalActivityRhythm({ rhythmKind: gaRes.rows[0].rhythmKind, rhythmTargetPerWeek: gaRes.rows[0].rhythmTargetPerWeek });
-  if (rhythm.kind !== 'N_PER_WEEK') return; // finite Goal Activity -- Rhythm capacity is not a concept here
 
   const userRes = await client.query(`SELECT timezone FROM "User" WHERE id = $1`, [userId]);
   const timezone: string = userRes.rows[0].timezone;
+
+  const gaRes = await client.query(`SELECT "rhythmKind", "rhythmTargetPerWeek" FROM "GoalActivity" WHERE id = $1 AND "userId" = $2`, [goalActivityId, userId]);
+  if (gaRes.rows.length === 0) return { occurrenceId, timezone };
+  const rhythm = normalizeGoalActivityRhythm({ rhythmKind: gaRes.rows[0].rhythmKind, rhythmTargetPerWeek: gaRes.rows[0].rhythmTargetPerWeek });
+  if (rhythm.kind !== 'N_PER_WEEK') return { occurrenceId, timezone }; // finite Goal Activity -- Rhythm capacity is not a concept here
+
   const destinationLocalDate = getDatePartsInTimezone(timezone, newStartAt).dateStr;
 
   // Every OTHER occurrence fact for this GoalActivity -- excluding the one being moved, which is leaving its
   // current week, not contributing a duplicate to the destination week it hasn't joined yet.
   const factsRes = await client.query(
-    `SELECT pa."plannedStartAt", pa.status FROM "GoalActivityOccurrence" gao JOIN "PlannedActivity" pa ON pa.id = gao."plannedActivityId" WHERE gao."goalActivityId" = $1 AND gao.id <> $2`,
+    `SELECT pa."plannedStartAt", pa.status, gao."scheduledWeekStart", gao."scheduledWeekTimezone" FROM "GoalActivityOccurrence" gao JOIN "PlannedActivity" pa ON pa.id = gao."plannedActivityId" WHERE gao."goalActivityId" = $1 AND gao.id <> $2`,
     [goalActivityId, occurrenceId]
   );
   const occurrences: GoalActivityRhythmOccurrenceFact[] = factsRes.rows.map((row) => ({
-    localDate: getDatePartsInTimezone(timezone, new Date(row.plannedStartAt)).dateStr,
+    localDate: resolveOccurrenceLocalDate(
+      { scheduledWeekStart: row.scheduledWeekStart, scheduledWeekTimezone: row.scheduledWeekTimezone },
+      new Date(row.plannedStartAt),
+      timezone
+    ),
     contribution: deriveGoalActivityRhythmContribution(row.status as PlannedActivityStatusForRhythm),
   }));
 
@@ -218,6 +236,7 @@ async function enforceDestinationWeekCapacity(
   if (!eligibility.eligible) {
     throw new MovePlanError('CAPACITY_EXCEEDED', 'Moving this would exceed the destination week\'s weekly target.');
   }
+  return { occurrenceId, timezone };
 }
 
 /**
@@ -236,7 +255,7 @@ export async function applyMoveWrites(
   newStartAt: Date,
   newEndAt: Date
 ): Promise<MovePlanResult> {
-  await enforceDestinationWeekCapacity(client, userId, a, newStartAt);
+  const occurrenceContext = await enforceDestinationWeekCapacity(client, userId, a, newStartAt);
 
   const bId = randomUUID();
   const bRes = await client.query(
@@ -299,7 +318,23 @@ export async function applyMoveWrites(
   // (migration 0042) rejects the write outright rather than silently
   // double-claiming B, with the same whole-transaction-rollback guarantee
   // the GoalActivityExecution line above already relies on.
-  await client.query(`UPDATE "GoalActivityOccurrence" SET "plannedActivityId" = $1 WHERE "plannedActivityId" = $2 AND "userId" = $3`, [bId, a.id, userId]);
+  //
+  // Insights V1 PR2 -- the scheduled-week snapshot is re-stamped in this
+  // SAME statement, atomically with the repoint, whenever a linked
+  // occurrence actually exists (`occurrenceContext` non-null, set by
+  // `enforceDestinationWeekCapacity` above, which already confirmed the
+  // occurrence and fetched this exact timezone). This is what correctly
+  // transfers attribution to the destination week on a cross-week Move,
+  // and leaves it unchanged (recomputed to the SAME value) on a
+  // same-week Move -- never a stale value left over from creation/an
+  // earlier Move. `null`/`null` for a plan with no linked occurrence is
+  // harmless: the WHERE clause already matches zero rows in that case.
+  const scheduledWeekStart = occurrenceContext ? localCalendarWeekStart(getDatePartsInTimezone(occurrenceContext.timezone, newStartAt).dateStr) : null;
+  const scheduledWeekTimezone = occurrenceContext ? occurrenceContext.timezone : null;
+  await client.query(
+    `UPDATE "GoalActivityOccurrence" SET "plannedActivityId" = $1, "scheduledWeekStart" = $2, "scheduledWeekTimezone" = $3 WHERE "plannedActivityId" = $4 AND "userId" = $5`,
+    [bId, scheduledWeekStart, scheduledWeekTimezone, a.id, userId]
+  );
 
   return { from: aMoved.rows[0], to: bRes.rows[0] };
 }

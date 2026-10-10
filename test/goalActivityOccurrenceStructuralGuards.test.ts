@@ -187,7 +187,17 @@ check('migration 0042_goal_activity_occurrence exists and creates exactly the Go
 // invariant this check still protects -- that 0042 itself remains exactly
 // what R1 created -- is covered by the check above; this one is narrowed
 // to the current total only.
-check('R1 introduced GoalActivityOccurrence exactly once: no OTHER migration directory\'s own contents also reference it (count-independent -- holds regardless of how many unrelated migrations exist)', fs.readdirSync(path.join(__dirname, '../apps/web/prisma/migrations')).filter((d) => /^\d{4}_/.test(d) && d !== '0042_goal_activity_occurrence').every((d) => !/GoalActivityOccurrence/.test(fs.readFileSync(path.join(__dirname, '../apps/web/prisma/migrations', d, 'migration.sql'), 'utf8'))));
+//
+// Insights V1 PR2 (Stable Scheduled-Week Attribution) added migration
+// 0047_goal_activity_occurrence_scheduled_week -- the first migration to
+// ALTER (not merely reference in prose) the GoalActivityOccurrence table
+// itself, adding the two nullable scheduledWeekStart/scheduledWeekTimezone
+// snapshot columns. This is a deliberate, intentional, reviewed schema
+// evolution of this exact table -- the real invariant this check protects
+// (0042 itself remains exactly what R1 created) is untouched; only the
+// EXCLUSION LIST is widened by one entry, the same pattern already
+// established above for 0043.
+check('R1 introduced GoalActivityOccurrence exactly once: no OTHER migration directory\'s own contents also reference it (count-independent -- holds regardless of how many unrelated migrations exist)', fs.readdirSync(path.join(__dirname, '../apps/web/prisma/migrations')).filter((d) => /^\d{4}_/.test(d) && d !== '0042_goal_activity_occurrence' && d !== '0047_goal_activity_occurrence_scheduled_week').every((d) => !/GoalActivityOccurrence/.test(fs.readFileSync(path.join(__dirname, '../apps/web/prisma/migrations', d, 'migration.sql'), 'utf8'))));
 
 // ============================================================
 // No status/windowKey column was added to the new model (this ticket's own

@@ -17,7 +17,7 @@
  */
 
 import { getWeekdayForDateStr } from './availabilityContext';
-import { addDaysToDateStr } from './timezone';
+import { addDaysToDateStr, getDatePartsInTimezone } from './timezone';
 
 // ============================================================
 // Canonical vocabulary (this ticket's own section 3/4) -- deliberately
@@ -164,6 +164,42 @@ export function localCalendarWeekStart(localDateStr: string): string {
 export function localCalendarWeekBounds(localDateStr: string): { startDate: string; endDate: string } {
   const startDate = localCalendarWeekStart(localDateStr);
   return { startDate, endDate: addDaysToDateStr(startDate, 6) };
+}
+
+/**
+ * Insights V1 PR2 -- resolves ONE occurrence's local date for Rhythm
+ * bucketing, preferring a written scheduled-week snapshot over live
+ * re-derivation from the CURRENT user timezone, so a later timezone
+ * change can never retroactively alter an already-snapshotted
+ * occurrence's weekly attribution (the architecture audit's own approved
+ * policy). `scheduledWeekStart` is already Monday-reduced
+ * (`localCalendarWeekStart`'s own output, written at snapshot time) --
+ * feeding it back through `localCalendarWeekStart` again inside
+ * `computeGoalActivityRhythmEligibility` is a safe no-op (that function
+ * is idempotent for an input that is already a Monday), so no second
+ * code path is needed there; this helper returns the SAME shape
+ * (`GoalActivityRhythmOccurrenceFact['localDate']`) either way.
+ *
+ * Both snapshot fields are always written together, in the same
+ * statement, by the two canonical writers
+ * (`materializeGoalActivityRhythmOccurrence`, `applyMoveWrites`) -- a row
+ * with exactly one of the two set is an impossible, corrupt state this
+ * function refuses to silently paper over by guessing or blending stored
+ * and derived values; it throws instead ("fail safely rather than
+ * silently combining").
+ */
+export function resolveOccurrenceLocalDate(
+  snapshot: { scheduledWeekStart: string | null; scheduledWeekTimezone: string | null },
+  plannedStartAt: Date,
+  liveTimezone: string
+): string {
+  const hasWeekStart = snapshot.scheduledWeekStart !== null && snapshot.scheduledWeekStart !== undefined;
+  const hasTimezone = snapshot.scheduledWeekTimezone !== null && snapshot.scheduledWeekTimezone !== undefined;
+  if (hasWeekStart && hasTimezone) return snapshot.scheduledWeekStart as string;
+  if (!hasWeekStart && !hasTimezone) return getDatePartsInTimezone(liveTimezone, plannedStartAt).dateStr;
+  throw new Error(
+    `GoalActivityOccurrence has a partially-populated scheduled-week snapshot (scheduledWeekStart=${String(snapshot.scheduledWeekStart)}, scheduledWeekTimezone=${String(snapshot.scheduledWeekTimezone)}) -- refusing to silently combine stored and live-derived attribution.`
+  );
 }
 
 // ============================================================

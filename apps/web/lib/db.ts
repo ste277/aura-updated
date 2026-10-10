@@ -9,6 +9,8 @@ import {
   normalizeGoalActivityRhythm,
   toPersistedGoalActivityRhythm,
   NONE_GOAL_ACTIVITY_RHYTHM,
+  localCalendarWeekStart,
+  resolveOccurrenceLocalDate,
   type GoalActivityRhythmOccurrenceFact,
   type PlannedActivityStatusForRhythm,
   type GoalActivityRhythm,
@@ -3048,14 +3050,18 @@ export async function loadGoalContextsForPlanIds(userId: string, planIds: readon
  */
 export async function loadGoalActivityRhythmFacts(userId: string, goalActivityId: string, timezone: string, executor: Pool | PoolClient = pool): Promise<GoalActivityRhythmOccurrenceFact[]> {
   const result = await executor.query(
-    `SELECT pa."plannedStartAt", pa.status
+    `SELECT pa."plannedStartAt", pa.status, gao."scheduledWeekStart", gao."scheduledWeekTimezone"
      FROM "GoalActivityOccurrence" gao
      JOIN "PlannedActivity" pa ON pa.id = gao."plannedActivityId"
      WHERE gao."userId" = $1 AND gao."goalActivityId" = $2`,
     [userId, goalActivityId]
   );
   return result.rows.map((row): GoalActivityRhythmOccurrenceFact => ({
-    localDate: getDatePartsInTimezone(timezone, new Date(row.plannedStartAt)).dateStr,
+    localDate: resolveOccurrenceLocalDate(
+      { scheduledWeekStart: row.scheduledWeekStart, scheduledWeekTimezone: row.scheduledWeekTimezone },
+      new Date(row.plannedStartAt),
+      timezone
+    ),
     contribution: deriveGoalActivityRhythmContribution(row.status as PlannedActivityStatusForRhythm),
   }));
 }
@@ -3079,6 +3085,9 @@ export interface GoalActivityOccurrenceRow {
   goalActivityId: string;
   plannedStartAt: Date | string;
   status: string;
+  /** Insights V1 PR2 -- the occurrence's own scheduled-week snapshot, if written (see resolveOccurrenceLocalDate). */
+  scheduledWeekStart: string | null;
+  scheduledWeekTimezone: string | null;
 }
 
 /** The raw read behind `loadGoalActivityRhythmFactsForActivities` (the SQL, unchanged), separated so the SAME rows can be read
@@ -3086,7 +3095,7 @@ export interface GoalActivityOccurrenceRow {
 export async function listGoalActivityOccurrenceRowsForActivities(userId: string, goalActivityIds: readonly string[], executor: ReadQueryExecutor = pool): Promise<GoalActivityOccurrenceRow[]> {
   if (goalActivityIds.length === 0) return [];
   const result = await executor.query(
-    `SELECT gao."goalActivityId", pa."plannedStartAt", pa.status
+    `SELECT gao."goalActivityId", pa."plannedStartAt", pa.status, gao."scheduledWeekStart", gao."scheduledWeekTimezone"
      FROM "GoalActivityOccurrence" gao
      JOIN "PlannedActivity" pa ON pa.id = gao."plannedActivityId"
      WHERE gao."userId" = $1 AND gao."goalActivityId" = ANY($2::text[])`,
@@ -3101,7 +3110,11 @@ export function buildGoalActivityRhythmFactsFromOccurrenceRows(rows: readonly Go
   const factsByActivity = new Map<string, GoalActivityRhythmOccurrenceFact[]>();
   for (const row of rows) {
     const fact: GoalActivityRhythmOccurrenceFact = {
-      localDate: getDatePartsInTimezone(timezone, new Date(row.plannedStartAt)).dateStr,
+      localDate: resolveOccurrenceLocalDate(
+        { scheduledWeekStart: row.scheduledWeekStart, scheduledWeekTimezone: row.scheduledWeekTimezone },
+        new Date(row.plannedStartAt),
+        timezone
+      ),
       contribution: deriveGoalActivityRhythmContribution(row.status as PlannedActivityStatusForRhythm),
     };
     const existing = factsByActivity.get(row.goalActivityId);
@@ -3232,6 +3245,7 @@ export async function materializeGoalActivityRhythmOccurrence(
   userId: string,
   goalActivityId: string,
   newPlannedActivityId: string,
+  plannedStartAt: Date,
   planningLocalDate: string,
   timezone: string,
   client: PoolClient
@@ -3261,9 +3275,16 @@ export async function materializeGoalActivityRhythmOccurrence(
   if ((relinked.rowCount ?? 0) !== 1) return { ok: false, reason: 'NOT_FOUND' };
 
   const occurrenceId = randomUUID();
+  // Insights V1 PR2 -- the scheduled-week snapshot is written atomically,
+  // in this SAME INSERT, from the exact `timezone`/`plannedStartAt` this
+  // call is already authoritative for -- never a separate statement, so
+  // there is no window where the occurrence exists without its snapshot.
+  // `localCalendarWeekStart` is the repository's one existing canonical
+  // week-start function (goalActivityRhythm.ts) -- no second algorithm.
+  const scheduledWeekStart = localCalendarWeekStart(getDatePartsInTimezone(timezone, plannedStartAt).dateStr);
   await client.query(
-    `INSERT INTO "GoalActivityOccurrence" (id, "userId", "goalActivityId", "plannedActivityId") VALUES ($1, $2, $3, $4)`,
-    [occurrenceId, userId, goalActivityId, newPlannedActivityId]
+    `INSERT INTO "GoalActivityOccurrence" (id, "userId", "goalActivityId", "plannedActivityId", "scheduledWeekStart", "scheduledWeekTimezone") VALUES ($1, $2, $3, $4, $5, $6)`,
+    [occurrenceId, userId, goalActivityId, newPlannedActivityId, scheduledWeekStart, timezone]
   );
   return { ok: true, occurrenceId };
 }

@@ -962,6 +962,29 @@ model GoalActivityOccurrence {
   plannedActivityId String?          @unique
   plannedActivity   PlannedActivity? @relation(fields: [plannedActivityId], references: [id], onDelete: SetNull)
 
+  // Insights V1 PR2 (migration 0047) -- a snapshot of which LOCAL calendar
+  // week this occurrence was scheduled for, frozen at the instant it was
+  // either created or last Moved -- never re-derived from the user's
+  // CURRENT timezone on every read (the live-derivation behavior every
+  // other field on this row still uses, and the exact mechanism that let
+  // a later timezone change silently reshuffle historical weekly credit
+  // before this field existed). `scheduledWeekStart` is the "YYYY-MM-DD"
+  // Monday of that week (localCalendarWeekStart's own canonical output,
+  // goalActivityRhythm.ts -- no second week algorithm);
+  // `scheduledWeekTimezone` is the IANA zone name used to compute it, kept
+  // alongside purely as audit/debugging context (the week key itself is
+  // `scheduledWeekStart` alone). ADDITIVE ONLY, NO BACKFILL: both are NULL
+  // for every occurrence created before this migration -- never
+  // fabricated after the fact (see migration 0047's own doc comment). The
+  // two fields are always written together, in the same statement, by
+  // the two canonical writers (materializeGoalActivityRhythmOccurrence,
+  // applyMoveWrites) -- a row with exactly one of the two set is an
+  // impossible, corrupt state; every reader (resolveOccurrenceLocalDate,
+  // goalActivityRhythm.ts) refuses to silently guess or blend stored and
+  // live-derived values for such a row, and throws instead.
+  scheduledWeekStart    String?
+  scheduledWeekTimezone String?
+
   createdAt         DateTime         @default(now()) @db.Timestamptz(3)
 
   @@index([userId, goalActivityId])

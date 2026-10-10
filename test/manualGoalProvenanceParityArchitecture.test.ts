@@ -98,7 +98,15 @@ check('DecisionFacts is still source-blind: zero imports and no Goal/Rhythm voca
 // ============================================================
 check('acceptance authorization still decodes only VERIFIED ids and still rejects mismatched client links, wrong planning dates and malformed ids', /AUTOMATIC_GOAL_PROVENANCE_MISMATCH/.test(authorization) && /AUTOMATIC_GOAL_PLANNING_DATE_MISMATCH/.test(authorization) && /MALFORMED_AUTOMATIC_GOAL_INTENT_ID/.test(authorization) && /classifyGoalDemandIntentId\(item\.intentId\)/.test(authorization));
 check('the accept route still authorizes through authorizeGoalActivityLinks and never classifies ids itself', /authorizeGoalActivityLinks\(request\.proposedItems, request\.constructionWindow\.date, rawGoalActivityLinks\)/.test(read('apps/web/app/api/day-constructor/accept/route.ts')) && !/classifyGoalDemandIntentId/.test(read('apps/web/app/api/day-constructor/accept/route.ts')));
-check('persistence still materializes occurrences through the existing gate and rolls back on a failed link', /materializeGoalActivityRhythmOccurrence\(userId, goalActivityId, plan\.id, request\.constructionWindow\.date, user\.timezone, client\)/.test(read('apps/web/lib/dayConstructorAcceptancePersistence.ts')) && /GOAL_ACTIVITY_LINK_FAILED/.test(read('apps/web/lib/dayConstructorAcceptancePersistence.ts')));
+// Insights V1 PR2 (Stable Scheduled-Week Attribution) deliberately
+// re-baselined this pin's own call-site text: the call now also passes
+// `plan.plannedStartAt` (a 4th positional argument, between `plan.id` and
+// `request.constructionWindow.date`) so the scheduled-week snapshot is
+// computed from this specific plan's own real scheduled instant, never
+// the Day Constructor batch's own construction-window date. Still a
+// full, exact call-site text match -- never loosened to a bare
+// function-name match.
+check('persistence still materializes occurrences through the existing gate and rolls back on a failed link', /materializeGoalActivityRhythmOccurrence\(userId, goalActivityId, plan\.id, plan\.plannedStartAt, request\.constructionWindow\.date, user\.timezone, client\)/.test(read('apps/web/lib/dayConstructorAcceptancePersistence.ts')) && /GOAL_ACTIVITY_LINK_FAILED/.test(read('apps/web/lib/dayConstructorAcceptancePersistence.ts')));
 
 // ============================================================
 // No policy was added

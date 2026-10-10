@@ -477,7 +477,7 @@ export async function persistAcceptedConstructedDay(
         // THIS client, inside THIS transaction's own per-user advisory
         // lock -- never trusting anything rendered to the client earlier
         // (this ticket's own section 21).
-        const materialized = await materializeGoalActivityRhythmOccurrence(userId, goalActivityId, plan.id, request.constructionWindow.date, user.timezone, client);
+        const materialized = await materializeGoalActivityRhythmOccurrence(userId, goalActivityId, plan.id, plan.plannedStartAt, request.constructionWindow.date, user.timezone, client);
         if (!materialized.ok && materialized.reason !== 'NOT_RHYTHM_ELIGIBLE') {
           // A genuine Rhythm-specific refusal (a live UPCOMING commitment
           // already exists, or weekly capacity is exhausted) -- never fall

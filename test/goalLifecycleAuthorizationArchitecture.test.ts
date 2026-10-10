@@ -105,7 +105,14 @@ check('GoalActivities the user does not own, or that do not exist, are not repor
 // ============================================================
 check('the ONLY production callers of the two Goal provenance writers (occurrence materialization and GoalActivity link) are the persistence write loop', JSON.stringify(filesMatching(/materializeGoalActivityRhythmOccurrence\(|linkGoalActivityToPlannedActivity\(/, 'db.ts')) === JSON.stringify(['dayConstructorAcceptancePersistence.ts']));
 check('GoalActivityOccurrence rows are inserted in exactly one production place (db.ts materialization)', JSON.stringify(filesMatching(/INSERT INTO "GoalActivityOccurrence"/)) === JSON.stringify(['db.ts']) && (dbCode.match(/INSERT INTO "GoalActivityOccurrence"/g) ?? []).length === 1);
-check('the existing Rhythm/DISMISSED/ownership/live-commitment gates are still in the write loop, untouched (ACTIVE is necessary, not sufficient)', /materializeGoalActivityRhythmOccurrence\(userId, goalActivityId, plan\.id, request\.constructionWindow\.date, user\.timezone, client\)/.test(persistFn) && /linkGoalActivityToPlannedActivity\(userId, goalActivityId, plan\.id, client\)/.test(persistFn) && (persistFn.match(/GOAL_ACTIVITY_LINK_FAILED/g) ?? []).length === 2);
+// Insights V1 PR2 (Stable Scheduled-Week Attribution) deliberately
+// re-baselined this pin's own call-site text: the call now also passes
+// `plan.plannedStartAt` (a 4th positional argument, between `plan.id` and
+// `request.constructionWindow.date`) so the scheduled-week snapshot is
+// computed from this specific plan's own real scheduled instant. Still a
+// full, exact call-site text match -- never loosened to a bare
+// function-name match.
+check('the existing Rhythm/DISMISSED/ownership/live-commitment gates are still in the write loop, untouched (ACTIVE is necessary, not sufficient)', /materializeGoalActivityRhythmOccurrence\(userId, goalActivityId, plan\.id, plan\.plannedStartAt, request\.constructionWindow\.date, user\.timezone, client\)/.test(persistFn) && /linkGoalActivityToPlannedActivity\(userId, goalActivityId, plan\.id, client\)/.test(persistFn) && (persistFn.match(/GOAL_ACTIVITY_LINK_FAILED/g) ?? []).length === 2);
 const move = stripComments(read('apps/web/lib/planMove.ts'));
 check('Move only REPOINTS existing Goal records (UPDATE ... WHERE plannedActivityId = old) and never creates Goal provenance: it neither inserts an occurrence nor calls either writer', !/INSERT INTO "GoalActivityOccurrence"|materializeGoalActivityRhythmOccurrence|linkGoalActivityToPlannedActivity/.test(move));
 check('Recomposition has no Goal provenance at all', !/GoalActivity|goalActivity/.test(stripComments(read('apps/web/lib/remainingDayRecomposition.ts'))) && !/GoalActivity|goalActivity/.test(stripComments(read('apps/web/lib/remainingDayRecompositionAcceptance.ts'))));
