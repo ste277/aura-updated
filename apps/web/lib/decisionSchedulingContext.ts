@@ -50,6 +50,9 @@ export interface SchedulingContextOccurrenceRow {
   readonly goalActivityId: string;
   readonly plannedStartAt: string;
   readonly status: string;
+  /** Insights V1 PR2 -- carried through unchanged from GoalActivityOccurrenceRow (see db.ts). */
+  readonly scheduledWeekStart: string | null;
+  readonly scheduledWeekTimezone: string | null;
 }
 
 export interface SchedulingContextRecurrence {
@@ -100,7 +103,7 @@ export function createDecisionSchedulingContext(parts: DecisionSchedulingContext
   return deepFreeze({
     recurrence: {
       candidateRows: parts.recurrence.candidateRows.map((row) => ({ goalActivityId: row.goalActivityId, goalId: row.goalId, goalTitle: row.goalTitle, title: row.title, activityId: row.activityId, rhythmKind: row.rhythmKind, rhythmTargetPerWeek: row.rhythmTargetPerWeek })),
-      occurrenceRows: parts.recurrence.occurrenceRows.map((row) => ({ goalActivityId: row.goalActivityId, plannedStartAt: iso(row.plannedStartAt), status: row.status })),
+      occurrenceRows: parts.recurrence.occurrenceRows.map((row) => ({ goalActivityId: row.goalActivityId, plannedStartAt: iso(row.plannedStartAt), status: row.status, scheduledWeekStart: row.scheduledWeekStart, scheduledWeekTimezone: row.scheduledWeekTimezone })),
     },
     durationSources: {
       preferenceRows: parts.durationSources.preferenceRows.map((row) => ({ activityId: row.activityId, preferredDurationMinutes: row.preferredDurationMinutes })),

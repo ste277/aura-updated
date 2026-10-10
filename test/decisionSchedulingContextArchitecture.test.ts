@@ -63,11 +63,16 @@ const SNAPSHOT_READS = ['loadCandidateGoalActivitiesForRhythmDemand', 'listGoalA
  * loadCandidateGoalActivitiesForRhythmDemand's pin was deliberately re-baselined by Multi-Occurrence Rhythm
  * PR 2, which removes that query's single-live-plan exclusion (and its now-unused PlannedActivity join) --
  * the SAME discovery query Plan My Day's own Goal-demand read model (goalDemandCandidates.ts) now also
- * reads with that exclusion removed. This is the one query this PR intentionally changes; every other pin
- * below is unmodified and still catches an accidental change the same as before. */
+ * reads with that exclusion removed.
+ * listGoalActivityOccurrenceRowsForActivities's pin was deliberately re-baselined by Insights V1 PR2
+ * (Stable Scheduled-Week Attribution), which adds gao."scheduledWeekStart"/gao."scheduledWeekTimezone" to
+ * this SELECT so the snapshot executor can read the new scheduled-week snapshot alongside the existing
+ * plannedStartAt/status columns -- the same two columns resolveOccurrenceLocalDate (goalActivityRhythm.ts)
+ * now prefers over live re-derivation. Every other pin below is unmodified and still catches an accidental
+ * change the same as before. */
 const SQL_PINS: Record<string, string> = {
   loadCandidateGoalActivitiesForRhythmDemand: '757784fc4ef4052f',
-  listGoalActivityOccurrenceRowsForActivities: '15d09f004da4ef97',
+  listGoalActivityOccurrenceRowsForActivities: '539f4196d72c884b',
   listUserActivityPreferenceRows: 'f38cabdfd8929bb5',
   listHabitLogs: '5dde9aca259966b5',
   listUserAvailabilityPeriods: '730c50d711a8d9dc',

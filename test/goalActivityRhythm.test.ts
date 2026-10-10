@@ -13,6 +13,7 @@ import {
   localCalendarWeekStart,
   deriveGoalActivityRhythmContribution,
   computeGoalActivityRhythmEligibility,
+  resolveOccurrenceLocalDate,
   type GoalActivityRhythmOccurrenceFact,
 } from '../apps/web/lib/goalActivityRhythm';
 import { getDatePartsInTimezone } from '../apps/web/lib/timezone';
@@ -147,6 +148,29 @@ check('20. planning for the VERY NEXT DAY (Monday, a new week) ignores the prior
   // timezone-sensitive end-to-end, not just at the date-string layer.
   const kolkataEligibility = computeGoalActivityRhythmEligibility({ rhythm: { kind: 'N_PER_WEEK', targetPerWeek: 1 }, planningLocalDate: kolkataLocal, occurrences: [fact(utcLocal, 'COMPLETED')] });
   check('36. a completion whose own local date falls in the OLD week does not satisfy a NEW week\'s target for a Kolkata user planning the new week', kolkataEligibility.eligible === true && kolkataEligibility.remainingOccurrences === 1);
+}
+
+// ============================================================
+// Insights V1 PR2 -- resolveOccurrenceLocalDate: prefers a written
+// scheduled-week snapshot over live re-derivation, and fails safely
+// (throws) rather than silently combining a partially-populated one.
+// ============================================================
+{
+  const plannedStartAt = new Date('2026-10-14T10:00:00Z'); // a Wednesday
+  const liveDerivedForUtc = getDatePartsInTimezone('UTC', plannedStartAt).dateStr; // '2026-10-14'
+
+  check('37. a fully-populated snapshot (both fields set) is preferred verbatim, even when it disagrees with what live derivation would produce', resolveOccurrenceLocalDate({ scheduledWeekStart: '2026-09-28', scheduledWeekTimezone: 'Asia/Kolkata' }, plannedStartAt, 'UTC') === '2026-09-28');
+  check('38. a fully-NULL snapshot (both fields null) falls back to exact live derivation under the CALLER-supplied (current) timezone', resolveOccurrenceLocalDate({ scheduledWeekStart: null, scheduledWeekTimezone: null }, plannedStartAt, 'UTC') === liveDerivedForUtc);
+  check('39. a partial snapshot (scheduledWeekStart set, scheduledWeekTimezone null) is refused -- throws, never silently falls back or blends', (() => {
+    try { resolveOccurrenceLocalDate({ scheduledWeekStart: '2026-09-28', scheduledWeekTimezone: null }, plannedStartAt, 'UTC'); return false; } catch { return true; }
+  })());
+  check('39. the OTHER partial direction (scheduledWeekTimezone set, scheduledWeekStart null) is refused identically', (() => {
+    try { resolveOccurrenceLocalDate({ scheduledWeekStart: null, scheduledWeekTimezone: 'Asia/Kolkata' }, plannedStartAt, 'UTC'); return false; } catch { return true; }
+  })());
+  check('40. a snapshot\'s own scheduledWeekStart, fed back through localCalendarWeekStart (exactly what computeGoalActivityRhythmEligibility does to every fact\'s localDate), is idempotent -- an already-Monday date reduces to itself', (() => {
+    const snapshotWeekStart = resolveOccurrenceLocalDate({ scheduledWeekStart: '2026-09-28', scheduledWeekTimezone: 'Asia/Kolkata' }, plannedStartAt, 'UTC');
+    return localCalendarWeekStart(snapshotWeekStart) === snapshotWeekStart && snapshotWeekStart === '2026-09-28';
+  })());
 }
 
 if (!allPassed) {
