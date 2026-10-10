@@ -373,7 +373,9 @@ model PlannedActivity {
   // Daily Experience V1 PR D2 (migration 0038) -- Move lineage. Set ONLY on a
   // successor created by movePlannedActivity: this plan exists because the
   // referenced plan (now status "MOVED") was moved. Unique: at most one
-  // successor per plan. Deliberately no forward pointer, movedAt or reason.
+  // successor per plan. Deliberately no forward pointer or reason -- only
+  // the backward lineage pointer below and (migration 0046) this row's own
+  // movedAt timestamp exist.
   // Remaining-Day Recomposition V1 PR F1 (migration 0039) -- the scheduling
   // CONSTRAINT of this committed occurrence. FIXED = its time is a commitment
   // (protected from Aura-driven recomposition); FLEXIBLE = Aura may PROPOSE
@@ -385,6 +387,21 @@ model PlannedActivity {
   rescheduledFromPlanId String? @unique
   rescheduledFrom       PlannedActivity? @relation("PlanMoveLineage", fields: [rescheduledFromPlanId], references: [id], onDelete: SetNull)
   rescheduledTo         PlannedActivity? @relation("PlanMoveLineage")
+  // Insights V1 PR 1 -- Move Timestamp Foundation (migration 0046). Set
+  // ONLY on THIS row, at the exact instant its OWN status transitions
+  // UPCOMING -> MOVED, inside the same conditional UPDATE that sets that
+  // status (apps/web/lib/planMove.ts's applyMoveWrites -- the one shared
+  // write path both a manual Move and Remaining-Day Recomposition
+  // acceptance use), using the database's own now(). A rolled-back
+  // transaction never leaves a stamp; an idempotent/replayed Move (which
+  // never re-runs that UPDATE) never re-stamps it. NULL means "no
+  // recorded move timestamp" -- either this row has never moved, or it
+  // moved before this column existed; historical rows are never
+  // backfilled (see migration 0046's own comment). Answers "when did
+  // THIS row's move commit," never "how many times has this logical
+  // commitment been moved" -- that still requires walking
+  // rescheduledFromPlanId backward, exactly as before this field existed.
+  movedAt         DateTime? @db.Timestamptz(3)
   habitLogId      String?
 
   // Event Location Plan Persistence V1 (migration 0028) -- an immutable

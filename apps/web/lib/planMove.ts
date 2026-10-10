@@ -253,8 +253,14 @@ export async function applyMoveWrites(
     ]
   );
 
+  // Insights V1 PR 1 -- movedAt is stamped in this SAME conditional UPDATE,
+  // using the database's own now(), so it is atomic with the status
+  // transition itself: a lost conditional update (below) throws and the
+  // caller rolls back the whole transaction, leaving no stamp; a replay
+  // that reaches the ALREADY_MOVED/already-successful short-circuit above
+  // never re-executes this statement, so it never re-stamps.
   const aMoved = await client.query(
-    `UPDATE "PlannedActivity" SET status = 'MOVED', "updatedAt" = now()
+    `UPDATE "PlannedActivity" SET status = 'MOVED', "movedAt" = now(), "updatedAt" = now()
      WHERE id = $1 AND "userId" = $2 AND status = 'UPCOMING' RETURNING *`,
     [a.id, userId]
   );
