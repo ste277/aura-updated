@@ -3125,6 +3125,35 @@ export async function listPlannedActivitiesForReporting(userId: string, from: Da
   return result.rows;
 }
 
+/** Insights V1 PR5 -- every row of this user's Move-chain graph: either a
+ * row that has itself been moved (status = 'MOVED', an interior/origin
+ * link) or a row that was PRODUCED by a move ("rescheduledFromPlanId" is
+ * set, a candidate chain terminal). Unbounded by date range -- a chain's
+ * own age is irrelevant to detecting it, only its CURRENT terminal's live
+ * status matters (apps/web/lib/improvementSignals.ts's own
+ * evaluateMoveChains, which reconstructs every chain in memory from this
+ * flat edge list, never a second query per chain/hop). By the
+ * `rescheduledFromPlanId` FK's own invariant (schema.prisma), any row
+ * this set's forward edges point to must itself have status 'MOVED' and
+ * therefore already be included here -- a reference that resolves to
+ * nothing missing from this set is exactly the "broken chain" case
+ * evaluateMoveChains treats as insufficient evidence, never guessed at. */
+export interface MoveChainLinkRow {
+  id: string;
+  status: PlannedActivity['status'];
+  rescheduledFromPlanId: string | null;
+  movedAt: Date | null;
+}
+
+export async function listMoveChainLinksForUser(userId: string): Promise<MoveChainLinkRow[]> {
+  const result = await pool.query(
+    `SELECT id, status, "rescheduledFromPlanId", "movedAt" FROM "PlannedActivity"
+     WHERE "userId" = $1 AND (status = 'MOVED' OR "rescheduledFromPlanId" IS NOT NULL)`,
+    [userId]
+  );
+  return result.rows;
+}
+
 // Goals V2 G3.1 -- read-only Goal context for the Home/DailyAgenda read
 // model (apps/web/lib/dailyAgenda.ts). Deliberately NOT
 // GoalActivityWithLinkedPlanStatus's shape: the client needs MEANING

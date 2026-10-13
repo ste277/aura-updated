@@ -10,6 +10,7 @@ import {
 import { getDatePartsInTimezone } from '../../../../lib/timezone';
 import { normalizeGoalActivityRhythm } from '../../../../lib/goalActivityRhythm';
 import { buildGoalSummary, summarizePlanningStatus, classifyPlanningStatus } from '../../../../lib/insightsReporting';
+import { computeImprovementSuggestions } from '../../../../lib/improvementSignalsComposition';
 
 const DEFAULT_RANGE_DAYS = 30;
 // Insights V1 PR4 -- a bound on the ITEM-level "awaiting confirmation"
@@ -90,6 +91,24 @@ export async function GET(req: NextRequest) {
     .slice(0, AWAITING_CONFIRMATION_ITEM_LIMIT)
     .map((plan) => ({ id: plan.id, title: plan.title, plannedStartAt: plan.plannedStartAt, plannedEndAt: plan.plannedEndAt }));
 
+  // ============================================================
+  // Insights V1 PR5 -- Evidence-Backed Improvement Prompts. Read-only,
+  // additive: no write, no second recommendation engine. The full
+  // composition (every signal's evidence + the live capacity/feasibility
+  // recheck) lives in improvementSignalsComposition.ts, exercised
+  // directly by its own real-DB test suite with the SAME `now` this route
+  // passes here -- see that file's own module doc comment and
+  // AURA_INSIGHTS_PR5_ARCHITECTURE_AUDIT.md for the full design.
+  // ============================================================
+  const suggestions = await computeImprovementSuggestions({
+    user,
+    now,
+    todayLocalDate,
+    awaitingConfirmationCount: planningStatus.awaitingConfirmation,
+    goalSummaries,
+    rows,
+  });
+
   return NextResponse.json({
     range: { from: from.toISOString(), to: to.toISOString() },
     goals: goalSummaries,
@@ -109,5 +128,13 @@ export async function GET(req: NextRequest) {
     limitations: from.getTime() < new Date(user.createdAt).getTime()
       ? ['Some of the requested range is before this account existed -- there is nothing to report for that period.']
       : [],
+    // Insights V1 PR5 -- additive field only; every existing field above
+    // is byte-for-byte unchanged from PR4. `null` (never an empty array)
+    // when a slot has nothing eligible to show -- a real empty state, not
+    // a fabricated placeholder.
+    suggestions: {
+      primary: suggestions.primary,
+      secondary: suggestions.secondary,
+    },
   });
 }

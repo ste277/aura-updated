@@ -38,6 +38,23 @@ export interface GoalReportingGoalView {
   activities: GoalReportingActivityView[];
   progress: { total: number; completed: number; hasOngoingRhythmActivity: boolean };
 }
+/**
+ * Insights V1 PR5 -- Evidence-Backed Improvement Prompts. Wire-shaped
+ * mirror of ImprovementSuggestion (lib/improvementSignals.ts) exactly as
+ * GET /api/insights/reporting now returns it under `suggestions`. No
+ * client-side re-derivation of eligibility -- every field here is
+ * already-decided server-side; this component only renders and (session-
+ * locally) dismisses.
+ */
+export interface SuggestionView {
+  id: string;
+  signal: 'AWAITING_CONFIRMATION' | 'PLANNING_OVERLOAD' | 'REPEATED_RESCHEDULING' | 'WEEKLY_GOAL_OPPORTUNITY';
+  message: string;
+  evidence: string;
+  cta: { label: string; action: 'OPEN_PLAN_REVIEW' | 'OPEN_GOAL'; goalId?: string };
+  subjectId: string;
+}
+
 export interface GoalReportingResponse {
   range: { from: string; to: string };
   goals: GoalReportingGoalView[];
@@ -56,6 +73,10 @@ export interface GoalReportingResponse {
     truncated: boolean;
   };
   limitations: string[];
+  /** Insights V1 PR5 -- `null` only when nothing is eligible to show
+   * (a real empty state); never an empty-array placeholder standing in
+   * for "still loading". */
+  suggestions?: { primary: SuggestionView | null; secondary: SuggestionView[] } | null;
 }
 
 /**
@@ -128,10 +149,28 @@ interface InsightsViewProps {
    * assistantInsight above (GET /api/insights/reporting). `null` renders
    * this section's own empty state -- never a fabricated zero. */
   goalReporting?: GoalReportingResponse | null;
+  /** Insights V1 PR5 -- the CTA destination for every suggestion whose
+   * action is 'OPEN_PLAN_REVIEW' (Signals 1, 2, 4): the existing Plan tab,
+   * where Reschedule/Log/Skip already exist for every relevant plan (the
+   * SAME destination page.tsx's own handleOpenPlan/onPlanMyDay already
+   * route to) -- never a new screen, never a deep link to one specific
+   * plan. 'OPEN_GOAL' (Signal 3) needs no callback: it links directly to
+   * the existing /goals/[goalId] route. */
+  onOpenPlanReview?: () => void;
 }
 
-export function InsightsView({ timezone, logEntries = [], assistantInsight, goalReporting }: InsightsViewProps) {
+export function InsightsView({ timezone, logEntries = [], assistantInsight, goalReporting, onOpenPlanReview }: InsightsViewProps) {
   const [activeSubTab, setActiveSubTab] = useState<'overview' | 'patterns' | 'trends' | 'streaks'>('overview');
+
+  // Insights V1 PR5 -- session-local dismissal ONLY (ticket section H: no
+  // DB write, no new persistence model). Plain component state -- cleared
+  // on remount/reload, never persisted across devices or visits, and
+  // never claimed to be. Keyed by `SuggestionView.id` (stable per
+  // underlying evidence), so a dismissed suggestion cannot reappear from
+  // an unrelated rerender of this component as long as its own id is
+  // unchanged.
+  const [dismissedSuggestionIds, setDismissedSuggestionIds] = useState<ReadonlySet<string>>(new Set());
+  const dismissSuggestion = (id: string) => setDismissedSuggestionIds((prev) => new Set(prev).add(id));
 
   // ---------------------------------------------------------------------------
   // ANALYTICS & INSIGHTS ENGINE
@@ -527,6 +566,21 @@ export function InsightsView({ timezone, logEntries = [], assistantInsight, goal
            * them). Renders nothing extra when goalReporting is absent
            * (still loading, or the fetch failed) -- no fabricated
            * placeholder numbers. */}
+          {/* Insights V1 PR5 -- "Aura suggests", placed ahead of PR4's own
+           * reporting section (the most immediately actionable thing a
+           * user can do, ahead of the detail they'd act ON). Renders
+           * nothing when there is no eligible suggestion at all, or when
+           * every eligible one has been dismissed this session -- a real
+           * empty state, never a fabricated placeholder. */}
+          {goalReporting?.suggestions && (
+            <AuraSuggestsSection
+              suggestions={goalReporting.suggestions}
+              dismissedIds={dismissedSuggestionIds}
+              onDismiss={dismissSuggestion}
+              onOpenPlanReview={onOpenPlanReview}
+            />
+          )}
+
           {goalReporting && <GoalPlanningReportingSection reporting={goalReporting} />}
 
           {assistantInsight && (
@@ -1083,6 +1137,95 @@ export function InsightsView({ timezone, logEntries = [], assistantInsight, goal
         </div>
       )}
     </div>
+  );
+}
+
+/**
+ * Insights V1 PR5 -- "Aura suggests". One compact section, never another
+ * dashboard card grid: the primary suggestion renders prominently, up to
+ * two secondary ones render as lightweight single lines below it (ticket
+ * section G/J). Every suggestion already carries its own evidence-backed,
+ * calm-toned copy (lib/improvementSignals.ts's own approved strings) --
+ * this component adds no new wording of its own beyond the CTA button
+ * label and the dismiss control. Dismissal is session-local only (this
+ * component's own `dismissedIds` state, owned by the parent
+ * InsightsView instance) -- reloading the page or revisiting later shows
+ * the suggestion again if it is still eligible, which this component
+ * never promises otherwise.
+ */
+function AuraSuggestsSection({
+  suggestions,
+  dismissedIds,
+  onDismiss,
+  onOpenPlanReview,
+}: {
+  suggestions: { primary: SuggestionView | null; secondary: SuggestionView[] };
+  dismissedIds: ReadonlySet<string>;
+  onDismiss: (id: string) => void;
+  onOpenPlanReview?: () => void;
+}) {
+  const visiblePrimary = suggestions.primary && !dismissedIds.has(suggestions.primary.id) ? suggestions.primary : null;
+  // A dismissed PRIMARY leaves its own slot empty rather than promoting a
+  // secondary into it -- promoting would silently change what "primary"
+  // meant mid-session from the same server response, never a re-ranking
+  // this component is allowed to perform on its own.
+  const visibleSecondary = suggestions.secondary.filter((s) => !dismissedIds.has(s.id));
+
+  if (!visiblePrimary && visibleSecondary.length === 0) return null;
+
+  const handleCta = (suggestion: SuggestionView) => {
+    if (suggestion.cta.action === 'OPEN_PLAN_REVIEW') onOpenPlanReview?.();
+    // OPEN_GOAL is rendered as a real <a href="/goals/...">  below --
+    // no click handler needed for it.
+  };
+
+  return (
+    <SurfaceCard accentColor={colors.info}>
+      <div style={typography.sectionEyebrow}>Aura Suggests</div>
+
+      {visiblePrimary && (
+        <div style={{ marginTop: spacing.sm, display: 'flex', flexDirection: 'column', gap: spacing.xs }}>
+          <div style={{ fontSize: 15, color: colors.textPrimary, lineHeight: 1.45 }}>{visiblePrimary.message}</div>
+          <div style={{ display: 'flex', alignItems: 'center', gap: spacing.md, marginTop: 2 }}>
+            {visiblePrimary.cta.action === 'OPEN_GOAL' && visiblePrimary.cta.goalId ? (
+              <a
+                href={`/goals/${visiblePrimary.cta.goalId}`}
+                style={{ fontSize: 13, fontWeight: 700, color: colors.info, textDecoration: 'none' }}
+              >
+                {visiblePrimary.cta.label} &rarr;
+              </a>
+            ) : (
+              <TextButton onClick={() => handleCta(visiblePrimary)} color={colors.info}>{visiblePrimary.cta.label}</TextButton>
+            )}
+            <TextButton onClick={() => onDismiss(visiblePrimary.id)} color={colors.textSecondary} ariaLabel="Dismiss this suggestion">
+              Dismiss
+            </TextButton>
+          </div>
+        </div>
+      )}
+
+      {visibleSecondary.length > 0 && (
+        <div style={{ marginTop: visiblePrimary ? spacing.md : spacing.sm, display: 'flex', flexDirection: 'column', gap: spacing.xs }}>
+          {visibleSecondary.map((suggestion) => (
+            <div key={suggestion.id} style={{ display: 'flex', alignItems: 'baseline', justifyContent: 'space-between', gap: spacing.sm }}>
+              <span style={{ fontSize: 13, color: colors.textSecondary, lineHeight: 1.4 }}>{suggestion.message}</span>
+              <div style={{ display: 'flex', alignItems: 'center', gap: spacing.sm, flexShrink: 0 }}>
+                {suggestion.cta.action === 'OPEN_GOAL' && suggestion.cta.goalId ? (
+                  <a href={`/goals/${suggestion.cta.goalId}`} style={{ fontSize: 12, fontWeight: 700, color: colors.info, textDecoration: 'none' }}>
+                    {suggestion.cta.label}
+                  </a>
+                ) : (
+                  <TextButton onClick={() => handleCta(suggestion)} color={colors.info} style={{ fontSize: 12 }}>{suggestion.cta.label}</TextButton>
+                )}
+                <TextButton onClick={() => onDismiss(suggestion.id)} color={colors.textSecondary} ariaLabel="Dismiss this suggestion" style={{ fontSize: 12 }}>
+                  &times;
+                </TextButton>
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
+    </SurfaceCard>
   );
 }
 
