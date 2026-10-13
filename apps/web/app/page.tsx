@@ -1588,7 +1588,13 @@ export default function DashboardPage() {
         )}
 
         {activeTab === 'insights' && (
-          <InsightsView timezone={user.timezone} logEntries={logEntries} assistantInsight={assistantInsight} goalReporting={goalReporting} />
+          <InsightsView
+            timezone={user.timezone}
+            logEntries={logEntries}
+            assistantInsight={assistantInsight}
+            goalReporting={goalReporting}
+            onOpenPlanReview={() => setActiveTab('plan')}
+          />
         )}
 
         {activeTab === 'you' && (
