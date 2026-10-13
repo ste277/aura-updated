@@ -153,6 +153,11 @@ export default function DashboardPage() {
   // buildPersonalMuhurtaContextForUser's own existing contract.
   const [personalContext, setPersonalContext] = useState<PersonalMuhurtaContext | undefined>(undefined);
   const [assistantInsight, setAssistantInsight] = useState<any>(null);
+  // Insights V1 PR4 -- Goal/planning reporting, fetched the SAME way as
+  // assistantInsight above (one GET, state set on success, logged (never
+  // thrown) on failure) -- InsightsView renders its own empty state when
+  // this stays null, same as it already does for a null assistantInsight.
+  const [goalReporting, setGoalReporting] = useState<any>(null);
   const [todayReflection, setTodayReflection] = useState<DailyReflectionState | null>(null);
   const [plannedActivities, setPlannedActivities] = useState<PlannedActivityState[]>([]);
   // Recipient Conversion V1 Hardening (brief section 8) -- an existing
@@ -373,10 +378,11 @@ export default function DashboardPage() {
   // handling, and state updates are unchanged; only the shape moved.
   const loadAssistantSignals = useCallback(async () => {
     try {
-      const [briefingRes, insightRes, reflectionRes] = await Promise.all([
+      const [briefingRes, insightRes, reflectionRes, goalReportingRes] = await Promise.all([
         fetch('/api/daily-assistant/briefing'),
         fetch('/api/daily-assistant/insights'),
         fetch('/api/daily-assistant/reflection'),
+        fetch('/api/insights/reporting'),
       ]);
 
       if (briefingRes.ok) {
@@ -385,6 +391,7 @@ export default function DashboardPage() {
         setPersonalContext(briefingData.personalContext);
       }
       if (insightRes.ok) setAssistantInsight(await insightRes.json());
+      if (goalReportingRes.ok) setGoalReporting(await goalReportingRes.json());
       if (reflectionRes.ok) {
         const reflection = await reflectionRes.json();
         setTodayReflection(reflection ? {
@@ -1581,7 +1588,7 @@ export default function DashboardPage() {
         )}
 
         {activeTab === 'insights' && (
-          <InsightsView timezone={user.timezone} logEntries={logEntries} assistantInsight={assistantInsight} />
+          <InsightsView timezone={user.timezone} logEntries={logEntries} assistantInsight={assistantInsight} goalReporting={goalReporting} />
         )}
 
         {activeTab === 'you' && (
