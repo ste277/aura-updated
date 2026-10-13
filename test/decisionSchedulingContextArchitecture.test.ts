@@ -72,7 +72,14 @@ const SNAPSHOT_READS = ['loadCandidateGoalActivitiesForRhythmDemand', 'listGoalA
  * change the same as before. */
 const SQL_PINS: Record<string, string> = {
   loadCandidateGoalActivitiesForRhythmDemand: '757784fc4ef4052f',
-  listGoalActivityOccurrenceRowsForActivities: '539f4196d72c884b',
+  // Insights V1 PR3 -- re-baselined, not weakened: listGoalActivityOccurrenceRowsForActivities's
+  // own SQL deliberately changed (JOIN -> LEFT JOIN on PlannedActivity, plus
+  // a new LEFT JOIN on GoalActivityExecution via goalActivityOccurrenceId)
+  // to let a Rhythm occurrence's durable completion evidence survive
+  // deletePlannedActivity's hard-delete of the underlying plan -- see
+  // AURA_INSIGHTS_PR3_EVIDENCE_CONTRACT.md. The hash is sensitive by
+  // construction (checked below); this is the new exact, reviewed baseline.
+  listGoalActivityOccurrenceRowsForActivities: '6aade0f30e21d16d',
   listUserActivityPreferenceRows: 'f38cabdfd8929bb5',
   listHabitLogs: '5dde9aca259966b5',
   listUserAvailabilityPeriods: '730c50d711a8d9dc',

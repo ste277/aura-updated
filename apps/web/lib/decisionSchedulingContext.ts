@@ -48,11 +48,18 @@ import { userActivityPreferencesFromRows } from './activityPreferences';
 
 export interface SchedulingContextOccurrenceRow {
   readonly goalActivityId: string;
-  readonly plannedStartAt: string;
-  readonly status: string;
+  /** Insights V1 PR3 -- null exactly when the occurrence's linked
+   * PlannedActivity has been hard-deleted (deletePlannedActivity); the
+   * LEFT JOIN behind GoalActivityOccurrenceRow (db.ts) can no longer
+   * resolve it. Carried through unchanged -- never fabricated here. */
+  readonly plannedStartAt: string | null;
+  readonly status: string | null;
   /** Insights V1 PR2 -- carried through unchanged from GoalActivityOccurrenceRow (see db.ts). */
   readonly scheduledWeekStart: string | null;
   readonly scheduledWeekTimezone: string | null;
+  /** Insights V1 PR3 -- carried through unchanged from GoalActivityOccurrenceRow (see db.ts) -- the durable
+   * completion fact that survives the plannedStartAt/status loss above. */
+  readonly hasCompletedExecution: boolean;
 }
 
 export interface SchedulingContextRecurrence {
@@ -89,6 +96,7 @@ export interface DecisionSchedulingContextParts {
 }
 
 const iso = (value: Date | string): string => new Date(value).toISOString();
+const isoOrNull = (value: Date | string | null): string | null => (value === null ? null : iso(value));
 
 function deepFreeze<T>(value: T): T {
   if (value !== null && typeof value === 'object' && !Object.isFrozen(value)) {
@@ -103,7 +111,7 @@ export function createDecisionSchedulingContext(parts: DecisionSchedulingContext
   return deepFreeze({
     recurrence: {
       candidateRows: parts.recurrence.candidateRows.map((row) => ({ goalActivityId: row.goalActivityId, goalId: row.goalId, goalTitle: row.goalTitle, title: row.title, activityId: row.activityId, rhythmKind: row.rhythmKind, rhythmTargetPerWeek: row.rhythmTargetPerWeek })),
-      occurrenceRows: parts.recurrence.occurrenceRows.map((row) => ({ goalActivityId: row.goalActivityId, plannedStartAt: iso(row.plannedStartAt), status: row.status, scheduledWeekStart: row.scheduledWeekStart, scheduledWeekTimezone: row.scheduledWeekTimezone })),
+      occurrenceRows: parts.recurrence.occurrenceRows.map((row) => ({ goalActivityId: row.goalActivityId, plannedStartAt: isoOrNull(row.plannedStartAt), status: row.status, scheduledWeekStart: row.scheduledWeekStart, scheduledWeekTimezone: row.scheduledWeekTimezone, hasCompletedExecution: row.hasCompletedExecution })),
     },
     durationSources: {
       preferenceRows: parts.durationSources.preferenceRows.map((row) => ({ activityId: row.activityId, preferredDurationMinutes: row.preferredDurationMinutes })),

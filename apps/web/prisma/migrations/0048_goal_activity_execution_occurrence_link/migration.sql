@@ -1,0 +1,51 @@
+-- Insights V1 PR3 -- Durable Goal Completion Evidence: a link from a
+-- GoalActivityExecution to the specific GoalActivityOccurrence it proves
+-- completion for, surviving deletePlannedActivity's hard-delete of the
+-- underlying PlannedActivity (unlike this table's existing
+-- plannedActivityId column, which that delete DOES clear via its own
+-- ON DELETE SET NULL).
+--
+-- WHY THIS EXISTS: a Rhythm (N_PER_WEEK) GoalActivity can have more than
+-- one live occurrence at once. logPlannedActivity previously resolved
+-- Goal linkage via GoalActivity.plannedActivityId -- a single pointer
+-- that materializeGoalActivityRhythmOccurrence repoints to "most recently
+-- materialized" every time a new sibling occurrence is created, never
+-- "the occurrence currently being completed". Completing an OLDER
+-- occurrence after a newer sibling already exists therefore wrote NO
+-- GoalActivityExecution row at all -- confirmed by live reproduction
+-- (AURA_INSIGHTS_PR3_EVIDENCE_CONTRACT.md). This migration's column
+-- alone does not fix that write-gating defect -- the corresponding
+-- application-code fix in logPlannedActivity (resolving the occurrence
+-- by its OWN plannedActivityId, never GoalActivity's shared pointer)
+-- ships in the same PR and is what actually populates this column
+-- correctly going forward.
+--
+-- NULLABLE, NO BACKFILL: NULL for every execution that predates this
+-- migration, and for every finite/NONE-rhythm execution (which has no
+-- occurrence row to point at at all) -- same "never fabricate a link
+-- that was never captured" precedent as migration 0046's movedAt and
+-- migration 0047's scheduledWeekStart/scheduledWeekTimezone. A
+-- pre-migration Rhythm completion whose plan has already been deleted
+-- cannot be retroactively linked back to its occurrence -- the evidence
+-- connecting them was never recorded and is not reconstructable.
+--
+-- UNIQUE: at most one execution per occurrence -- the same cardinality
+-- plannedActivityId already enforces for "at most one execution per
+-- live plan", now also enforced durably across that plan's deletion.
+-- This is a real, DB-level backstop against ever double-crediting one
+-- occurrence's completion, not merely an application-level convention.
+--
+-- ON DELETE SET NULL, never CASCADE: matches every other "soft identity"
+-- link already in this schema (GoalActivity.plannedActivityId,
+-- GoalActivityOccurrence.plannedActivityId, this table's own
+-- plannedActivityId immediately above) -- this FK alone must never be
+-- the mechanism that destroys a row of confirmed completion evidence.
+-- In practice a GoalActivityOccurrence row is only ever removed via its
+-- own GoalActivity being Cascade-deleted (Goal hard-delete), which
+-- already Cascade-deletes this very GoalActivityExecution row through
+-- its separate, pre-existing, unconditional goalActivityId foreign key
+-- at the very same moment -- SET NULL here is the correct, defensive
+-- choice for a link that should never independently cascade anything.
+
+ALTER TABLE "GoalActivityExecution"
+  ADD COLUMN "goalActivityOccurrenceId" TEXT UNIQUE REFERENCES "GoalActivityOccurrence"(id) ON DELETE SET NULL;

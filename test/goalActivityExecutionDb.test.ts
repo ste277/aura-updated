@@ -159,11 +159,39 @@ async function main() {
     check('6. a GoalActivity with zero GoalActivityExecution rows (the ordinary, pre-G2.2.1 case) remains fully queryable, no crash, no special-casing needed', rows.some((r) => r.id === secondGoalActivity!.id));
 
     // ============================================================
-    // FK behavior: goalActivityId CASCADEs; deleting the Goal removes the
-    // execution row too (confirmed via the SAME cascade the schema declares
-    // for Goal -> GoalActivity).
+    // Insights V1 PR3 -- deleteGoal's own application-level gate (db.ts's
+    // goalHasRetainedPlanLinkage) now ALSO blocks deletion while retained
+    // GoalActivityExecution evidence survives -- deliberately, so that an
+    // ordinary Goal cleanup never silently destroys confirmed achievement
+    // history (AURA_INSIGHTS_PR3_EVIDENCE_CONTRACT.md). This fixture's own
+    // execution row is exactly that kind of retained evidence, so
+    // deleteGoal must now refuse here, not succeed.
     // ============================================================
-    await deleteGoal(user.id, goal.id);
+    const gateResult = await deleteGoal(user.id, goal.id);
+    check('Insights V1 PR3: deleteGoal refuses while retained GoalActivityExecution evidence survives (HAS_HISTORY, not DELETED)', gateResult === 'HAS_HISTORY');
+    const stillThereCheck = await beginTransaction();
+    try {
+      const res = await stillThereCheck.query(`SELECT 1 FROM "GoalActivityExecution" WHERE id = $1`, [executionId]);
+      await stillThereCheck.query('COMMIT');
+      check('Insights V1 PR3: the execution row genuinely survives the refused deletion attempt', res.rows.length === 1);
+    } finally {
+      stillThereCheck.release();
+    }
+
+    // ============================================================
+    // FK behavior: goalActivityId CASCADEs; a Goal hard-delete at the
+    // SCHEMA level (bypassing deleteGoal's own application-level gate
+    // above, which is a separate, deliberate policy decision, not a
+    // schema constraint) still removes the execution row too (confirmed
+    // via the SAME cascade the schema declares for Goal -> GoalActivity).
+    // ============================================================
+    const rawDelete = await beginTransaction();
+    try {
+      await rawDelete.query(`DELETE FROM "Goal" WHERE id = $1`, [goal.id]);
+      await rawDelete.query('COMMIT');
+    } finally {
+      rawDelete.release();
+    }
     createdGoalIds.pop(); // already deleted
     const postDeleteCheck = await beginTransaction();
     try {

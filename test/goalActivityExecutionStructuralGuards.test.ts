@@ -88,7 +88,20 @@ check('G2.2.3: applyMoveWrites contains no DELETE FROM "GoalActivityExecution" -
 check('G2.2.3: movePlannedActivity\'s public input shape (MovePlanInput) still carries only newStartAt -- no new client-supplied executionId/goalActivityId/currentValue/completionRequirement field', /export interface MovePlanInput \{\s*newStartAt: Date;\s*\}/.test(planMoveSrc));
 check('homeCompletion.ts (Home/Right Now) does not reference GoalActivityExecution -- no UX change in G2.2.2/G2.2.3', !/GoalActivityExecution/.test(read('apps/web/lib/homeCompletion.ts')));
 check('dailyAgenda.ts does not reference GoalActivityExecution', !/GoalActivityExecution/.test(read('apps/web/lib/dailyAgenda.ts')));
-check('goals.ts (computeGoalProgress) does not reference GoalActivityExecution -- Goal progress stays activity-count-derived, unaffected by currentValue', !/GoalActivityExecution/.test(read('apps/web/lib/goals.ts')));
+// Insights V1 PR3 -- re-scoped from a whole-file string search to
+// computeGoalProgress's own function body: goals.ts as a WHOLE now
+// legitimately mentions GoalActivityExecution in prose (deriveGoalActivityState's
+// own doc comment, explaining its new "everCompleted" input, PR3's fix for
+// a plan hard-deleted after completion) and that reference is exactly as
+// intended -- deriveGoalActivityState consults a caller-supplied boolean,
+// never queries the table itself, and computeGoalProgress remains
+// completely untouched. This guard's real, still-enforced intent --
+// "Goal progress stays activity-count-derived, unaffected by
+// currentValue" -- is preserved by scoping it to the one function it was
+// always actually about.
+const goalsSrc = read('apps/web/lib/goals.ts');
+const computeGoalProgressBody = goalsSrc.slice(goalsSrc.indexOf('export function computeGoalProgress'), goalsSrc.indexOf('export type GoalTemplateCategory'));
+check('goals.ts computeGoalProgress does not reference GoalActivityExecution -- Goal progress stays activity-count-derived, unaffected by currentValue', !/GoalActivityExecution/.test(computeGoalProgressBody));
 check('goalsPresentation.ts does not reference GoalActivityExecution (no read-model exposure yet)', !/GoalActivityExecution/.test(read('apps/web/lib/goalsPresentation.ts')));
 check('app/api/goals/[goalId]/route.ts does not reference GoalActivityExecution', !/GoalActivityExecution/.test(read('apps/web/app/api/goals/[goalId]/route.ts')));
 check('dayConstructorOrchestrator.ts does not reference GoalActivityExecution', !/GoalActivityExecution/.test(read('apps/web/lib/dayConstructorOrchestrator.ts')));
