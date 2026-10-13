@@ -195,6 +195,46 @@ export function evaluateOverloadSignal(capacityResult: DayCapacityResult, commit
 // ============================================================
 
 /**
+ * PR5 final-review correction. Pure. A day's AGGREGATE remaining minutes
+ * (computeCapacitySnapshot's own `usableMinutes - requestedMinutes`) is
+ * NOT sufficient proof that `durationMinutes` can actually be placed --
+ * confirmed by direct reproduction: a day with three scattered
+ * commitments leaving 120 total free minutes, requesting 90, reports
+ * "feasible" by aggregate math even though the single largest contiguous
+ * free span is only 75 minutes and nothing would ever actually fit. This
+ * function finds that largest contiguous gap instead, so a claimed
+ * opportunity can always be substantiated by a real, single, unbroken
+ * span at least as long as the activity itself needs -- the minimum bar
+ * the ticket's own section 2 requires ("do not promise a scheduling
+ * opportunity unless the existing planning system can substantiate it").
+ * Deliberately does NOT reach for timing-search/muhurta equivalence
+ * (`runTimingSearch`) -- this signal's own copy ("there's room for
+ * another activity") claims structural capacity only, never an auspicious
+ * or specific time, so proving a genuine open span is the right-sized bar,
+ * not a full placement-engine simulation (which would itself be the
+ * "duplicated scheduling rule" this ticket's own Signal 2 section
+ * explicitly warns against).
+ *
+ * `normalizedBlockedIntervals` MUST already be dayCapacity.ts's own
+ * `normalizeBlockedIntervals(blockedIntervals, window)` output (clipped to
+ * the window, merged, sorted) -- this function does not re-normalize.
+ */
+export function hasContiguousFreeSlot(
+  window: { start: Date; end: Date },
+  normalizedBlockedIntervals: readonly { start: Date; end: Date }[],
+  durationMinutes: number
+): boolean {
+  let cursor = window.start.getTime();
+  let maxGapMinutes = 0;
+  for (const block of normalizedBlockedIntervals) {
+    maxGapMinutes = Math.max(maxGapMinutes, (block.start.getTime() - cursor) / 60000);
+    cursor = Math.max(cursor, block.end.getTime());
+  }
+  maxGapMinutes = Math.max(maxGapMinutes, (window.end.getTime() - cursor) / 60000);
+  return maxGapMinutes >= durationMinutes;
+}
+
+/**
  * Pure. `feasibleSlotFound` must already be the result of checking every
  * remaining day of the current local week (route.ts) -- this function
  * never claims a slot exists on its own authority, and never names which

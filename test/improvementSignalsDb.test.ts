@@ -240,6 +240,17 @@ async function main() {
     result = await computeFor(user, REF_NOW);
     check('10. no committed minutes today -- no OVERLOAD suggestion (no memory of scenario 8)', findSuggestion(result, 'planning-overload:today') === null);
 
+    // 10b. FINAL-REVIEW CORRECTION REGRESSION: a commitment with ZERO
+    // overlap with today's availability window (23:00-01:30 IST, while
+    // availability is 09:00-17:00) must NEVER inflate the overload ratio
+    // -- a confirmed false-positive this review closed. The configured
+    // window itself is entirely free; only an unrelated late-night
+    // commitment exists.
+    const outsideWindowPlan = await makePlan(user.id, 'Late Night Unrelated Plan', '2028-03-18T17:30:00Z', '2028-03-18T20:00:00Z'); // 23:00-01:30 IST next day, 150 min
+    result = await computeFor(user, REF_NOW);
+    check('10b. a commitment entirely outside the availability window never triggers OVERLOAD', findSuggestion(result, 'planning-overload:today') === null);
+    await cancelPlannedActivity(user.id, outsideWindowPlan.id);
+
     // ============================================================
     // SIGNAL 3 -- WEEKLY GOAL OPPORTUNITY (scenarios 11-14). Uses the
     // dedicated `goalUser` (see its own declaration above) -- isolated
@@ -274,6 +285,21 @@ async function main() {
     // currently-ACTIVE Goal this same request's own `goals` list would include.
     const activeGoalIdsAtScenario12 = new Set((await listGoalsForUser(goalUser.id, 'ACTIVE')).map((g) => g.id));
     check('25. OPEN_GOAL CTA names a real, currently-ACTIVE Goal', opportunitySuggestion?.cta.goalId !== undefined && activeGoalIdsAtScenario12.has(opportunitySuggestion.cta.goalId));
+
+    // 12b. FINAL-REVIEW CORRECTION REGRESSION: fragmented capacity. BOTH
+    // remaining days get ONE long busy block leaving two 40-minute free
+    // gaps each (80 min total free per day -- comfortably >= the 45-
+    // minute generic-fallback duration by AGGREGATE sum) but with every
+    // single gap individually SHORTER than 45 minutes, so no real
+    // contiguous slot exists anywhere. The pre-correction aggregate-only
+    // check would have reported this as feasible (45 <= 80); the
+    // corrected hasContiguousFreeSlot check must not.
+    const fragToday = await makePlan(goalUser.id, 'Fragmenting Block Today', '2028-03-18T05:10:00Z', '2028-03-18T10:50:00Z'); // 10:40-16:20 IST, leaves 10:00-10:40 and 16:20-17:00 free (40min each)
+    const fragTomorrow = await makePlan(goalUser.id, 'Fragmenting Block Tomorrow', '2028-03-19T04:10:00Z', '2028-03-19T10:50:00Z'); // 09:40-16:20 IST, leaves 09:00-09:40 and 16:20-17:00 free (40min each)
+    result = await computeFor(goalUser, REF_NOW);
+    check('12b. fragmented capacity (80min free/day, no single gap >= 45min) -- WEEKLY_GOAL_OPPORTUNITY correctly suppressed', findSuggestion(result, `weekly-goal-opportunity:${goalRhythm.id}`) === null);
+    await cancelPlannedActivity(goalUser.id, fragToday.id);
+    await cancelPlannedActivity(goalUser.id, fragTomorrow.id);
 
     // 13. Weekly Goal WITHOUT a feasible slot: fully book BOTH remaining
     // days (today 2028-03-18 and tomorrow 2028-03-19, the week's own

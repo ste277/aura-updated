@@ -30,7 +30,7 @@ import { localDayBoundsUTC } from './myDayOrchestrator';
 import type { GoalSummaryView } from './insightsReporting';
 import { createRealDayConstructorOrchestratorDeps, isActivePlanBlocker, type DayConstructorOrchestratorDeps } from './dayConstructorOrchestrator';
 import { resolveAvailability, normalizeUsableWindowsToConstructionWindow, mergeUsableWindows, type AvailabilityConfiguration } from './availabilityContext';
-import { computeCapacitySnapshot, type BlockedInterval } from './dayCapacity';
+import { computeCapacitySnapshot, normalizeBlockedIntervals, type BlockedInterval } from './dayCapacity';
 import type { ConstructionWindow } from './dayIntent';
 import { durationMinutesFor, GENERIC_DURATION_FALLBACK_MINUTES } from './dayBuilderOrchestrator';
 import {
@@ -39,6 +39,7 @@ import {
   evaluateOverloadSignal,
   evaluateGoalOpportunitySignal,
   evaluateAwaitingConfirmationSignal,
+  hasContiguousFreeSlot,
   rankAndSelectSuggestions,
   type ImprovementSuggestion,
   type RankedSuggestions,
@@ -71,18 +72,20 @@ export interface ComputeImprovementSuggestionsInput {
  * evaluate", never a fabricated zero-length window.
  *
  * `commitmentIntervals` is fetched over the date's FULL civil-day bounds
- * (localDayBoundsUTC), deliberately wider than the availability window
- * itself -- a commitment the user accepted OUTSIDE their own configured
- * hours (e.g. a 7pm plan when availability ends at 5pm) is real evidence
- * of competing demand on the day, not something Signal 2 should silently
- * drop just because it falls outside the window computeCapacitySnapshot
- * will separately clip TO for Signal 3's feasibility question. Signal 2
- * (evaluateOverloadSignal's caller, below) merges these intervals among
- * THEMSELVES only (mergeUsableWindows, never clipped to the window) before
- * summing, so overload is measured against total real commitment time,
- * not an artificially window-capped one; Signal 3 passes this same raw
- * list straight into computeCapacitySnapshot, which performs its own
- * window-clipping internally exactly as it always does. */
+ * (localDayBoundsUTC), wider than the availability window itself, so a
+ * commitment crossing the window's own boundary (starts inside, runs past
+ * the end) is fetched in full rather than silently truncated at the
+ * query layer. It is each SIGNAL's own job to decide which of these raw
+ * candidates are relevant to it: Signal 2 (below) keeps only commitments
+ * that actually OVERLAP the window -- one with zero overlap (e.g. a 10pm
+ * plan when availability ends at 5pm) has no relationship to the hours
+ * being measured and must never inflate the overload ratio (PR5 final-
+ * review correction -- see Signal 2's own comment for the confirmed
+ * false-positive this closes). Signal 3 passes this same raw list
+ * straight into computeCapacitySnapshot, which performs its own window-
+ * clipping internally exactly as it always does -- an out-of-window
+ * commitment is naturally irrelevant to a feasibility check within the
+ * window regardless. */
 async function resolveDayCapacityContext(
   dateStr: string,
   timezone: string,
@@ -135,13 +138,32 @@ export async function computeImprovementSuggestions(input: ComputeImprovementSug
   // trend from in the first place).
   const todayContext = await resolveDayCapacityContext(todayLocalDate, user.timezone, now, availabilityConfig, deps);
   if (todayContext) {
-    // Merge commitments among THEMSELVES only (never clipped to the
-    // availability window) -- see resolveDayCapacityContext's own doc
-    // comment for why: a commitment exceeding the configured window is
-    // exactly the overload this signal exists to catch, so it must not
-    // be silently truncated down to "fits perfectly" before the ratio is
-    // computed.
-    const mergedCommitments = mergeUsableWindows(todayContext.commitmentIntervals);
+    // PR5 final-review correction: a commitment that does not OVERLAP the
+    // availability window at all (e.g. a 10pm plan when availability ends
+    // at 5pm) must never contribute to the overload ratio -- it has no
+    // relationship to the configured hours this signal is measuring
+    // against, and counting its full duration regardless of placement was
+    // a real false-positive risk (a confirmed reproduction: a user with a
+    // completely FREE, fully-available window could still be told
+    // "OVERLOADED" purely from an unrelated evening commitment that never
+    // competed for any of that window's own time). A commitment that
+    // overlaps the window even partially (crosses its start/end boundary)
+    // is counted at its FULL raw duration, never clipped down to only the
+    // in-window portion -- that overrun past the boundary is itself real
+    // overload evidence, which window-clipping would have silently erased.
+    // `intervalsOverlap`'s own formula (dayCapacity.ts, reproduced here --
+    // this repository's established precedent over cross-importing a
+    // private helper): touching at an endpoint is NOT overlap.
+    const overlappingCommitments = todayContext.commitmentIntervals.filter(
+      (interval) =>
+        interval.start.getTime() < todayContext.window.end.getTime() &&
+        todayContext.window.start.getTime() < interval.end.getTime()
+    );
+    // Merge the surviving (window-relevant) commitments among THEMSELVES
+    // only -- never clipped to the window -- so a boundary-crossing
+    // commitment's full overrun still counts (see above), while two
+    // overlapping commitments are never double-counted.
+    const mergedCommitments = mergeUsableWindows(overlappingCommitments);
     const committedMinutesToday = sumIntervalMinutes(mergedCommitments);
     const todayCapacityResult = computeCapacitySnapshot(todayContext.window, todayContext.gapBlockers, committedMinutesToday);
     const overloadSuggestion = evaluateOverloadSignal(todayCapacityResult, committedMinutesToday);
@@ -180,12 +202,27 @@ export async function computeImprovementSuggestions(input: ComputeImprovementSug
         ? durationMinutesFor(activityCatalogId, durationContext.preferredDurationByActivityId, durationContext.behavioralDurationByActivityId)
         : GENERIC_DURATION_FALLBACK_MINUTES;
 
+      // PR5 final-review correction: aggregate remaining capacity (a plain
+      // utilization ratio) is NOT sufficient proof a slot exists -- a day
+      // with enough TOTAL free minutes, fragmented across several small
+      // gaps by existing commitments, can report "feasible" by that ratio
+      // alone while no single gap is actually long enough to hold the
+      // activity (confirmed by direct reproduction). computeCapacitySnapshot
+      // is still called first, for its own window-validation/NO_USABLE_
+      // CAPACITY fail-closed handling (cheap short-circuit before ever
+      // normalizing); hasContiguousFreeSlot then proves a REAL, single,
+      // unbroken span of at least `durationMinutes` exists within the
+      // window, net of every blocker -- the actual minimum bar for "the
+      // existing planning system could place this", not merely "the day
+      // isn't full".
       const feasibleSlotFound = remainingDates.some((dateStr) => {
         const dayContext = dayContextsByDate.get(dateStr);
         if (!dayContext) return false;
         const blockedForDay = [...dayContext.gapBlockers, ...dayContext.commitmentIntervals];
-        const result = computeCapacitySnapshot(dayContext.window, blockedForDay, durationMinutes);
-        return result.status === 'READY' && result.snapshot.utilization <= 1;
+        const aggregateResult = computeCapacitySnapshot(dayContext.window, blockedForDay, durationMinutes);
+        if (aggregateResult.status !== 'READY' || aggregateResult.snapshot.utilization > 1) return false;
+        const normalizedBlockers = normalizeBlockedIntervals(blockedForDay, dayContext.window);
+        return hasContiguousFreeSlot(dayContext.window, normalizedBlockers, durationMinutes);
       });
 
       const opportunitySuggestion = evaluateGoalOpportunitySignal({ goalId, feasibleSlotFound });
