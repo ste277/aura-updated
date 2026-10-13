@@ -853,6 +853,35 @@ model GoalActivityExecution {
   plannedActivityId String?         @unique
   plannedActivity   PlannedActivity? @relation(fields: [plannedActivityId], references: [id], onDelete: SetNull)
 
+  // Insights V1 PR3 (migration 0048) -- a DURABLE link to the specific
+  // GoalActivityOccurrence this execution proves completion for, set once
+  // at creation, NEVER cleared by deletePlannedActivity's hard-delete
+  // (unlike plannedActivityId above, which that delete DOES SetNull).
+  // This is what lets a Rhythm occurrence's completion evidence survive
+  // its own PlannedActivity being cleared from "Recently Completed" --
+  // the evidence remains reachable via this row's OWN id, not via the
+  // now-gone plan. NULL for every finite/NONE-rhythm execution (no
+  // occurrence row exists for those) -- same nullability precedent as
+  // plannedActivityId. UNIQUE so one occurrence can never be claimed by
+  // more than one execution record (mirrors plannedActivityId's own
+  // cardinality guarantee, now durable across plan deletion too -- the
+  // DB-level backstop against ever double-crediting one occurrence,
+  // independent of applicaton-level idempotency checks). SetNull on
+  // GoalActivityOccurrence deletion -- same convention as every other
+  // "soft identity" link in this schema (GoalActivity.plannedActivityId,
+  // GoalActivityOccurrence.plannedActivityId, plannedActivityId just
+  // above) -- never Cascade, so this FK alone can never be the mechanism
+  // that destroys a row of confirmed evidence. In practice a
+  // GoalActivityOccurrence is only ever removed via its own GoalActivity
+  // being Cascade-deleted (Goal deletion), which already Cascade-deletes
+  // this very GoalActivityExecution row through its OWN, separate,
+  // unconditional goalActivityId FK above at the exact same moment --
+  // SetNull here is simply the correct, defensive default for a link
+  // whose only live precedent in this schema is "never cascade a
+  // confirmed-evidence row away through this specific FK."
+  goalActivityOccurrenceId String?                @unique
+  goalActivityOccurrence   GoalActivityOccurrence? @relation(fields: [goalActivityOccurrenceId], references: [id], onDelete: SetNull)
+
   // Immutable snapshot of GoalActivity's CompletionRequirement (G2.1,
   // apps/web/lib/goalCompletion.ts) AT THE MOMENT this execution was
   // created -- "what counted as completion when this began?" NEVER
@@ -984,6 +1013,16 @@ model GoalActivityOccurrence {
   // live-derived values for such a row, and throws instead.
   scheduledWeekStart    String?
   scheduledWeekTimezone String?
+
+  // Insights V1 PR3 (migration 0048) -- Prisma's relation validator
+  // requires this opposite navigation field, since GoalActivityExecution
+  // now declares `@relation(fields: [goalActivityOccurrenceId], ...)`
+  // pointing here (same zero-DB-footprint convention as every other
+  // Prisma-only back-relation already documented elsewhere in this
+  // schema, e.g. GoalActivity.plannedActivity's own doc comment). At
+  // most one execution per occurrence (the FK's own @unique), so this is
+  // 0..1, unlike `occurrences`/`executions` on GoalActivity above.
+  execution         GoalActivityExecution?
 
   createdAt         DateTime         @default(now()) @db.Timestamptz(3)
 

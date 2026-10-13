@@ -181,7 +181,7 @@ export interface GoalActivityHandoffDeps {
     userId: string,
     goalId: string
   ) => Promise<
-    ReadonlyArray<{ id: string; title: string; activityId: string | null; status: string; plannedActivityId: string | null; linkedPlanStatus: string | null; rhythmKind?: string | null; rhythmTargetPerWeek?: number | null }>
+    ReadonlyArray<{ id: string; title: string; activityId: string | null; status: string; plannedActivityId: string | null; linkedPlanStatus: string | null; rhythmKind?: string | null; rhythmTargetPerWeek?: number | null; everCompleted?: boolean }>
   >;
   /** Rhythm R3 -- `loadGoalActivityRhythmFacts` (db.ts), passed by
    * reference; the SAME batched-per-activity read model R2 already
@@ -237,6 +237,7 @@ export async function resolveGoalActivityHandoff(deps: GoalActivityHandoffDeps, 
         status: activity.status as GoalActivityStatus,
         plannedActivityId: activity.plannedActivityId,
         linkedPlanStatus: activity.linkedPlanStatus as PlannedActivityStatus | null,
+        everCompleted: activity.everCompleted,
       });
       if (state === 'SUGGESTED') return true;
       // Rhythm R3's own primary behavioral requirement: a COMPLETED

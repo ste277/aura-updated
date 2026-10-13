@@ -5,12 +5,13 @@ import { validateCaptureTitle } from './captures';
 import { parseSchedulingMode, type PlannedActivitySchedulingMode } from './plannedActivitySchedulingMode';
 import { toPersistedCompletionRequirement, normalizeGoalActivityCompletionRequirement, type CompletionRequirement } from './goalCompletion';
 import {
-  deriveGoalActivityRhythmContribution,
   normalizeGoalActivityRhythm,
   toPersistedGoalActivityRhythm,
   NONE_GOAL_ACTIVITY_RHYTHM,
   localCalendarWeekStart,
   resolveOccurrenceLocalDate,
+  resolveOccurrenceLocalDateOrNull,
+  deriveGoalActivityRhythmContributionWithEvidence,
   type GoalActivityRhythmOccurrenceFact,
   type PlannedActivityStatusForRhythm,
   type GoalActivityRhythm,
@@ -1614,15 +1615,61 @@ export async function logPlannedActivity(userId: string, planId: string, options
     // re-entered), not dependent on the DB's unique constraint catching a
     // race.
     //
-    // The GoalActivity is resolved SERVER-SIDE from persisted linkage
-    // (GoalActivity.plannedActivityId = this plan's id) -- never trusted
-    // from any client-supplied id. A plan with no such linkage is an
-    // ordinary, non-Goal completion: entirely unaffected by anything below.
-    const goalActivityRes = await client.query(`SELECT * FROM "GoalActivity" WHERE "plannedActivityId" = $1 AND "userId" = $2`, [planId, userId]);
-    const goalActivity: GoalActivity | undefined = goalActivityRes.rows[0];
+    // The GoalActivity is resolved SERVER-SIDE from persisted linkage --
+    // never trusted from any client-supplied id. A plan with no such
+    // linkage is an ordinary, non-Goal completion: entirely unaffected by
+    // anything below.
+    //
+    // Insights V1 PR3 -- Durable Goal Completion Evidence: the OCCURRENCE
+    // lookup (GoalActivityOccurrence.plannedActivityId, unique per plan)
+    // is tried FIRST, and is the correct, authoritative resolution for a
+    // Rhythm (N_PER_WEEK) GoalActivity's occurrence. The legacy
+    // GoalActivity.plannedActivityId lookup is tried only as the fallback
+    // for a plan with no occurrence row at all -- the finite/NONE-rhythm
+    // case, where that single shared pointer IS reliable (a finite
+    // GoalActivity never has more than one live link at once, so it is
+    // never repointed out from under an in-flight completion the way a
+    // Rhythm GoalActivity's pointer already is, by design, whenever a
+    // sibling occurrence is materialized -- db.ts's own
+    // materializeGoalActivityRhythmOccurrence doc comment: "most recently
+    // materialized", never "the one being completed"). Resolving via the
+    // shared pointer ALONE, as this function did before PR3, silently
+    // wrote ZERO completion evidence for an older Rhythm occurrence
+    // completed after a newer sibling already existed -- confirmed by
+    // live reproduction (AURA_INSIGHTS_PR3_EVIDENCE_CONTRACT.md) -- this
+    // is the exact defect this two-step resolution fixes.
+    const occurrenceRes = await client.query(`SELECT id, "goalActivityId" FROM "GoalActivityOccurrence" WHERE "plannedActivityId" = $1 AND "userId" = $2`, [planId, userId]);
+    const occurrenceRow: { id: string; goalActivityId: string } | undefined = occurrenceRes.rows[0];
 
-    let executionWrite: { goalActivityId: string; existingExecutionId: string | null; requirement: CompletionRequirement; currentValue: number | null } | null = null;
+    let goalActivity: GoalActivity | undefined;
+    let occurrenceId: string | null = null;
+    if (occurrenceRow) {
+      const occurrenceGoalActivityRes = await client.query(`SELECT * FROM "GoalActivity" WHERE id = $1 AND "userId" = $2`, [occurrenceRow.goalActivityId, userId]);
+      goalActivity = occurrenceGoalActivityRes.rows[0];
+      occurrenceId = occurrenceRow.id;
+    } else {
+      const goalActivityRes = await client.query(`SELECT * FROM "GoalActivity" WHERE "plannedActivityId" = $1 AND "userId" = $2`, [planId, userId]);
+      goalActivity = goalActivityRes.rows[0];
+    }
+
+    let executionWrite: { goalActivityId: string; occurrenceId: string | null; existingExecutionId: string | null; requirement: CompletionRequirement; currentValue: number | null } | null = null;
     if (goalActivity) {
+      // Insights V1 PR3 -- serializes this completion's evidence write
+      // against a concurrent deleteGoal for the SAME user (db.ts's
+      // goalHasRetainedPlanLinkage/deleteGoal), closing the TOCTOU window
+      // where deleteGoal's retained-evidence check could pass BEFORE this
+      // transaction commits its new GoalActivityExecution row, and then
+      // cascade-delete it anyway. A NEW, distinct advisory-lock keyspace
+      // (never shared with day-constructor-accept's own per-user lock) --
+      // same established, already-precedented pattern as recordVisit's
+      // own `visit-log:${userId}` lock (db.ts), introduced independently
+      // rather than overloading an existing keyspace for an unrelated
+      // purpose. Acquired only once Goal linkage is already confirmed, so
+      // the overwhelming majority of Done-taps (non-Goal-linked plans)
+      // never acquire it at all -- zero added cost on the common path.
+      // Exactly one lock is ever acquired per transaction in either this
+      // function or deleteGoal, so no lock-ordering deadlock is possible.
+      await client.query('SELECT pg_advisory_xact_lock(hashtext($1))', [`goal-evidence:${userId}`]);
       // If an execution row already exists for THIS plan (not possible yet
       // via any production path in G2.2.2, since nothing creates one before
       // Done -- future partial-progress work will change that), its
@@ -1649,7 +1696,7 @@ export async function logPlannedActivity(userId: string, planId: string, options
       const actualValueResult = resolveCompletionActualValue(requirement, options?.actualValue);
       if (!actualValueResult.ok) throw new Error(actualValueResult.error);
 
-      executionWrite = { goalActivityId: goalActivity.id, existingExecutionId: existingExecution ? existingExecution.id : null, requirement, currentValue: actualValueResult.value };
+      executionWrite = { goalActivityId: goalActivity.id, occurrenceId, existingExecutionId: existingExecution ? existingExecution.id : null, requirement, currentValue: actualValueResult.value };
     } else if (options?.actualValue !== undefined && options?.actualValue !== null) {
       // A caller supplied actualValue for a plan that isn't linked to any
       // Goal activity -- there is nothing for it to apply to. Reject rather
@@ -1773,11 +1820,18 @@ export async function logPlannedActivity(userId: string, planId: string, options
         );
       } else {
         const persisted = toPersistedGoalActivityExecutionSnapshot({ completionRequirement: executionWrite.requirement, currentValue: executionWrite.currentValue });
+        // Insights V1 PR3 -- goalActivityOccurrenceId is the DURABLE link
+        // (never cleared by deletePlannedActivity's hard-delete, unlike
+        // plannedActivityId just beside it) back to the specific
+        // occurrence this execution proves completion for. NULL for a
+        // finite/NONE-rhythm completion (occurrenceId is null in that
+        // case, from the resolution above) -- same nullability shape as
+        // plannedActivityId's own optionality.
         await client.query(
           `INSERT INTO "GoalActivityExecution"
-             (id, "userId", "goalActivityId", "plannedActivityId", "completionKindSnapshot", "completionTargetValueSnapshot", "completionUnitSnapshot", "currentValue", "source")
-           VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)`,
-          [randomUUID(), userId, executionWrite.goalActivityId, planId, persisted.completionKindSnapshot, persisted.completionTargetValueSnapshot, persisted.completionUnitSnapshot, executionWrite.currentValue, 'AURA_PLANNED']
+             (id, "userId", "goalActivityId", "plannedActivityId", "goalActivityOccurrenceId", "completionKindSnapshot", "completionTargetValueSnapshot", "completionUnitSnapshot", "currentValue", "source")
+           VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)`,
+          [randomUUID(), userId, executionWrite.goalActivityId, planId, executionWrite.occurrenceId, persisted.completionKindSnapshot, persisted.completionTargetValueSnapshot, persisted.completionUnitSnapshot, executionWrite.currentValue, 'AURA_PLANNED']
         );
       }
     }
@@ -2656,8 +2710,21 @@ export interface GoalActivityWithLinkedPlanStatus extends GoalActivity {
   // resolve). NULL both when plannedActivityId is null and when no
   // execution row exists yet for the current link -- identical "nothing
   // recorded" meaning either way, same convention as linkedPlanStatus
-  // itself above.
+  // itself above. Insights V1 PR3 -- now resolved by a LATERAL subquery
+  // that falls back to the most recent HISTORICAL execution (by
+  // "goalActivityId", never by the now-possibly-NULL plannedActivityId
+  // alone) when the live link has been cleared by deletePlannedActivity
+  // -- see listGoalActivitiesWithLinkedPlanStatus's own doc comment.
   currentValue: number | null;
+  // Insights V1 PR3 -- true iff ANY GoalActivityExecution row exists for
+  // this GoalActivity, independent of whether its PlannedActivity link
+  // is still live. This is the durable half of "was this ever
+  // completed" that deriveGoalActivityState consults ONLY when
+  // plannedActivityId is null, to distinguish "never planned" from "was
+  // planned, completed, and its plan was later cleared from Recently
+  // Completed" -- the latter must still derive COMPLETED, not revert to
+  // SUGGESTED.
+  everCompleted: boolean;
 }
 
 // Explicit column list, "targetDate" cast to ::text -- see Goal's own
@@ -2801,6 +2868,21 @@ export async function archiveGoal(userId: string, goalId: string): Promise<Goal 
  * like the legacy singular column always has. A NONE-rhythm GoalActivity
  * never has an occurrence row (R1's own invariant, unchanged), so this
  * addition is a pure no-op for the legacy finite path.
+ *
+ * Insights V1 PR3 -- widened again, for a sibling reason to the
+ * Multi-Occurrence Rhythm fix above: retained PLAN linkage is not the
+ * only thing that must block deletion. A completed occurrence/finite
+ * activity whose Plan has ALREADY been hard-deleted (deletePlannedActivity)
+ * has no linkage left for the checks above to find, but still has real,
+ * durable completion evidence (GoalActivityExecution, surviving that
+ * delete via its own goalActivityId, which is never cleared by it) -- a
+ * Goal in exactly this state must remain undeletable too, or hard-
+ * deleting it would cascade away confirmed achievement history the user
+ * never asked to erase (AURA_INSIGHTS_PR3_ARCHITECTURE_AUDIT.md /
+ * AURA_INSIGHTS_PR3_EVIDENCE_CONTRACT.md). This is additive to the same
+ * existing 'HAS_HISTORY' response, not a new deletion mode -- a Goal
+ * with genuinely zero retained linkage AND zero completion evidence
+ * remains exactly as deletable as before this addition.
  */
 export async function goalHasRetainedPlanLinkage(userId: string, goalId: string, executor: Pool | PoolClient = pool): Promise<boolean> {
   const result = await executor.query(
@@ -2812,6 +2894,10 @@ export async function goalHasRetainedPlanLinkage(userId: string, goalId: string,
            SELECT 1 FROM "GoalActivityOccurrence" gao
            WHERE gao."goalActivityId" = ga.id AND gao."plannedActivityId" IS NOT NULL
          )
+         OR EXISTS (
+           SELECT 1 FROM "GoalActivityExecution" gae
+           WHERE gae."goalActivityId" = ga.id
+         )
        )
      LIMIT 1`,
     [userId, goalId]
@@ -2820,22 +2906,42 @@ export async function goalHasRetainedPlanLinkage(userId: string, goalId: string,
 }
 
 /**
- * Hard delete, gated on RETAINED PlannedActivity linkage, not durable
- * history (this PR's own delete-history semantics decision): a
- * GoalActivity whose plannedActivityId currently points at a real
- * PlannedActivity blocks deletion regardless of that Plan's status
- * (UPCOMING/LOGGED/CANCELLED all block equally) -- but this is a snapshot
- * of CURRENT linkage, not a permanent record. If that PlannedActivity is
- * later hard-deleted, its FK's own ON DELETE SET NULL clears the linkage
- * (unchanged, still the only mechanism -- no everPlannedAt column, no
- * separate association-history table), and the Goal becomes deletable
- * again. Row-locks the Goal first (FOR UPDATE, same convention as
- * logHabitCompletion above) so a concurrent acceptance linking a
- * GoalActivity under this Goal can't race past the linkage check.
+ * Hard delete, gated on RETAINED PlannedActivity linkage OR retained
+ * completion evidence (Insights V1 PR3 widened this from linkage-only --
+ * see goalHasRetainedPlanLinkage's own doc comment), not durable history
+ * as a permanent record in every other sense (this PR's own
+ * delete-history semantics decision): a GoalActivity whose
+ * plannedActivityId currently points at a real PlannedActivity blocks
+ * deletion regardless of that Plan's status (UPCOMING/LOGGED/CANCELLED
+ * all block equally) -- but this is a snapshot of CURRENT linkage, not a
+ * permanent record. If that PlannedActivity is later hard-deleted, its
+ * FK's own ON DELETE SET NULL clears the linkage (unchanged, still a
+ * mechanism that exists), and the Goal becomes deletable again --
+ * UNLESS confirmed completion evidence also survived that same delete
+ * (PR3's own addition), in which case it remains blocked. Row-locks the
+ * Goal first (FOR UPDATE, same convention as logHabitCompletion above)
+ * so a concurrent acceptance linking a GoalActivity under this Goal
+ * can't race past the linkage check.
+ *
+ * Insights V1 PR3 -- ALSO acquires the SAME `goal-evidence:${userId}`
+ * advisory transaction lock logPlannedActivity's Goal-linked completion
+ * branch takes (db.ts), for the entire duration of this transaction
+ * (held from here through the final DELETE/ROLLBACK, auto-released at
+ * COMMIT/ROLLBACK) -- closing the TOCTOU window where this function's
+ * own evidence check could read "none retained" microseconds before a
+ * concurrent Done commits new evidence under this exact Goal, which the
+ * subsequent DELETE would then cascade away anyway. Acquired
+ * unconditionally here (deletion is a rare, deliberate action, unlike
+ * the hot completion path, where the lock is acquired only once Goal
+ * linkage is already confirmed) so no Goal-linked Done for this user can
+ * commit while a deletion of one of their Goals is in flight, and vice
+ * versa. Exactly one lock is ever acquired per transaction in either
+ * function, so no lock-ordering deadlock is possible.
  */
 export async function deleteGoal(userId: string, goalId: string): Promise<'DELETED' | 'NOT_FOUND' | 'HAS_HISTORY'> {
   const client = await beginTransaction();
   try {
+    await client.query('SELECT pg_advisory_xact_lock(hashtext($1))', [`goal-evidence:${userId}`]);
     const goalRes = await client.query(`SELECT 1 FROM "Goal" WHERE id = $1 AND "userId" = $2 FOR UPDATE`, [goalId, userId]);
     if (goalRes.rows.length === 0) {
       await client.query('ROLLBACK');
@@ -2931,11 +3037,31 @@ export async function listGoalActivitiesWithLinkedPlanStatus(userId: string, goa
   // TOTAL order: `createdAt` is creation order for every activity created through createGoalWithActivities (strictly increasing per
   // activity), and `id` makes the order deterministic under any remaining tie (e.g. rows that predate that), instead of leaving
   // tied rows in whatever order the query plan emits -- the idempotent Goal-create replay compares this list index by index.
+  //
+  // Insights V1 PR3 -- the execution join is now a LATERAL subquery
+  // (never more than one row per GoalActivity, preserving this
+  // function's own flat, one-row-per-activity shape exactly) that
+  // prefers the execution tied to the CURRENT live "plannedActivityId"
+  // when one exists (byte-for-byte the same result the old plain
+  // "plannedActivityId = plannedActivityId" join already produced in
+  // that case), and falls back to the most recently created execution
+  // for this GoalActivity otherwise -- the case that matters once
+  // deletePlannedActivity has cleared the live link (ga."plannedActivityId"
+  // IS NULL afterward, so the old join's equality could never match
+  // again; matching on "goalActivityId" instead is what survives that
+  // deletion). "everCompleted" is true iff that subquery found any row
+  // at all, independent of which plan (if any) is currently linked.
   const result = await pool.query(
-    `SELECT ga.*, pa.status AS "linkedPlanStatus", gae."currentValue"
+    `SELECT ga.*, pa.status AS "linkedPlanStatus", gae."currentValue", (gae.id IS NOT NULL) AS "everCompleted"
      FROM "GoalActivity" ga
      LEFT JOIN "PlannedActivity" pa ON pa.id = ga."plannedActivityId"
-     LEFT JOIN "GoalActivityExecution" gae ON gae."plannedActivityId" = ga."plannedActivityId"
+     LEFT JOIN LATERAL (
+       SELECT e.id, e."currentValue"
+       FROM "GoalActivityExecution" e
+       WHERE e."goalActivityId" = ga.id
+       ORDER BY (e."plannedActivityId" IS NOT NULL AND e."plannedActivityId" = ga."plannedActivityId") DESC, e."createdAt" DESC
+       LIMIT 1
+     ) gae ON true
      WHERE ga."userId" = $1 AND ga."goalId" = $2
      ORDER BY ga."createdAt", ga.id`,
     [userId, goalId]
@@ -3050,20 +3176,27 @@ export async function loadGoalContextsForPlanIds(userId: string, planIds: readon
  */
 export async function loadGoalActivityRhythmFacts(userId: string, goalActivityId: string, timezone: string, executor: Pool | PoolClient = pool): Promise<GoalActivityRhythmOccurrenceFact[]> {
   const result = await executor.query(
-    `SELECT pa."plannedStartAt", pa.status, gao."scheduledWeekStart", gao."scheduledWeekTimezone"
+    `SELECT pa."plannedStartAt", pa.status, gao."scheduledWeekStart", gao."scheduledWeekTimezone", (gae.id IS NOT NULL) AS "hasCompletedExecution"
      FROM "GoalActivityOccurrence" gao
-     JOIN "PlannedActivity" pa ON pa.id = gao."plannedActivityId"
+     LEFT JOIN "PlannedActivity" pa ON pa.id = gao."plannedActivityId"
+     LEFT JOIN "GoalActivityExecution" gae ON gae."goalActivityOccurrenceId" = gao.id
      WHERE gao."userId" = $1 AND gao."goalActivityId" = $2`,
     [userId, goalActivityId]
   );
-  return result.rows.map((row): GoalActivityRhythmOccurrenceFact => ({
-    localDate: resolveOccurrenceLocalDate(
-      { scheduledWeekStart: row.scheduledWeekStart, scheduledWeekTimezone: row.scheduledWeekTimezone },
-      new Date(row.plannedStartAt),
-      timezone
-    ),
-    contribution: deriveGoalActivityRhythmContribution(row.status as PlannedActivityStatusForRhythm),
-  }));
+  return result.rows
+    .map((row): GoalActivityRhythmOccurrenceFact | null => {
+      const localDate = resolveOccurrenceLocalDateOrNull(
+        { scheduledWeekStart: row.scheduledWeekStart, scheduledWeekTimezone: row.scheduledWeekTimezone },
+        row.plannedStartAt ? new Date(row.plannedStartAt) : null,
+        timezone
+      );
+      if (localDate === null) return null; // unattributable: pre-PR2 legacy occurrence whose plan was later deleted -- never fabricate a week
+      return {
+        localDate,
+        contribution: deriveGoalActivityRhythmContributionWithEvidence(row.hasCompletedExecution, row.status as PlannedActivityStatusForRhythm | null),
+      };
+    })
+    .filter((fact): fact is GoalActivityRhythmOccurrenceFact => fact !== null);
 }
 
 /**
@@ -3080,24 +3213,35 @@ export async function loadGoalActivityRhythmFacts(userId: string, goalActivityId
  * own "no entry means none" convention.
  */
 /** O5 P2d -- one occurrence's raw database row for the Rhythm facts: which GoalActivity, when its linked plan starts, and that
- * plan's status. Detached scalars (the instant is returned as read; callers copy it). */
+ * plan's status. Detached scalars (the instant is returned as read; callers copy it).
+ * Insights V1 PR3 -- plannedStartAt/status are now nullable: the join to
+ * PlannedActivity is LEFT, not INNER, so an occurrence whose plan has
+ * been hard-deleted still produces a row (previously it would simply
+ * vanish from the result set). hasCompletedExecution is the durable,
+ * goalActivityOccurrenceId-linked completion fact (see
+ * buildGoalActivityRhythmFactsFromOccurrenceRows below). */
 export interface GoalActivityOccurrenceRow {
   goalActivityId: string;
-  plannedStartAt: Date | string;
-  status: string;
+  plannedStartAt: Date | string | null;
+  status: string | null;
   /** Insights V1 PR2 -- the occurrence's own scheduled-week snapshot, if written (see resolveOccurrenceLocalDate). */
   scheduledWeekStart: string | null;
   scheduledWeekTimezone: string | null;
+  hasCompletedExecution: boolean;
 }
 
-/** The raw read behind `loadGoalActivityRhythmFactsForActivities` (the SQL, unchanged), separated so the SAME rows can be read
- * through a snapshot executor and turned into facts later by the same pure mapping. */
+/** The raw read behind `loadGoalActivityRhythmFactsForActivities`, separated so the SAME rows can be read
+ * through a snapshot executor and turned into facts later by the same pure mapping.
+ * Insights V1 PR3 -- both joins widened to LEFT (PlannedActivity may be
+ * hard-deleted; the new GoalActivityExecution join supplies durable
+ * completion evidence that survives that deletion). */
 export async function listGoalActivityOccurrenceRowsForActivities(userId: string, goalActivityIds: readonly string[], executor: ReadQueryExecutor = pool): Promise<GoalActivityOccurrenceRow[]> {
   if (goalActivityIds.length === 0) return [];
   const result = await executor.query(
-    `SELECT gao."goalActivityId", pa."plannedStartAt", pa.status, gao."scheduledWeekStart", gao."scheduledWeekTimezone"
+    `SELECT gao."goalActivityId", pa."plannedStartAt", pa.status, gao."scheduledWeekStart", gao."scheduledWeekTimezone", (gae.id IS NOT NULL) AS "hasCompletedExecution"
      FROM "GoalActivityOccurrence" gao
-     JOIN "PlannedActivity" pa ON pa.id = gao."plannedActivityId"
+     LEFT JOIN "PlannedActivity" pa ON pa.id = gao."plannedActivityId"
+     LEFT JOIN "GoalActivityExecution" gae ON gae."goalActivityOccurrenceId" = gao.id
      WHERE gao."userId" = $1 AND gao."goalActivityId" = ANY($2::text[])`,
     [userId, [...goalActivityIds]]
   );
@@ -3105,17 +3249,24 @@ export async function listGoalActivityOccurrenceRowsForActivities(userId: string
 }
 
 /** Pure: the per-activity Rhythm occurrence facts for already-read rows (the shaping `loadGoalActivityRhythmFactsForActivities`
- * has always applied). A goalActivityId with no rows has no entry. */
+ * has always applied). A goalActivityId with no rows has no entry.
+ * Insights V1 PR3 -- an unattributable row (no scheduled-week snapshot
+ * and no live plan to derive from, a pre-PR2 legacy occurrence whose
+ * plan was later deleted) is silently excluded, same as
+ * loadGoalActivityRhythmFacts's own identical fallback -- never
+ * fabricated, never crashes the whole batch. */
 export function buildGoalActivityRhythmFactsFromOccurrenceRows(rows: readonly GoalActivityOccurrenceRow[], timezone: string): Map<string, GoalActivityRhythmOccurrenceFact[]> {
   const factsByActivity = new Map<string, GoalActivityRhythmOccurrenceFact[]>();
   for (const row of rows) {
+    const localDate = resolveOccurrenceLocalDateOrNull(
+      { scheduledWeekStart: row.scheduledWeekStart, scheduledWeekTimezone: row.scheduledWeekTimezone },
+      row.plannedStartAt ? new Date(row.plannedStartAt) : null,
+      timezone
+    );
+    if (localDate === null) continue;
     const fact: GoalActivityRhythmOccurrenceFact = {
-      localDate: resolveOccurrenceLocalDate(
-        { scheduledWeekStart: row.scheduledWeekStart, scheduledWeekTimezone: row.scheduledWeekTimezone },
-        new Date(row.plannedStartAt),
-        timezone
-      ),
-      contribution: deriveGoalActivityRhythmContribution(row.status as PlannedActivityStatusForRhythm),
+      localDate,
+      contribution: deriveGoalActivityRhythmContributionWithEvidence(row.hasCompletedExecution, row.status as PlannedActivityStatusForRhythm | null),
     };
     const existing = factsByActivity.get(row.goalActivityId);
     if (existing) existing.push(fact);

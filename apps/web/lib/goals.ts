@@ -41,6 +41,15 @@ export interface GoalActivityLifecycleInput {
    * plannedActivityId itself, so `null` here should be rare in practice
    * but is handled identically to "never linked"). */
   linkedPlanStatus: PlannedActivityStatus | null;
+  /** Insights V1 PR3 -- true iff a GoalActivityExecution row exists for
+   * this GoalActivity (db.ts's listGoalActivitiesWithLinkedPlanStatus,
+   * "everCompleted"), independent of whether plannedActivityId is still
+   * live. Consulted ONLY when plannedActivityId is null, to distinguish
+   * "never planned" (true SUGGESTED) from "was planned and completed,
+   * then its plan was cleared from Recently Completed" (must still
+   * derive COMPLETED). Optional/defaults to false so every pre-PR3
+   * caller that doesn't supply it is unaffected. */
+  everCompleted?: boolean;
 }
 
 /**
@@ -51,7 +60,14 @@ export interface GoalActivityLifecycleInput {
  */
 export function deriveGoalActivityState(input: GoalActivityLifecycleInput): DerivedGoalActivityState {
   if (input.status === 'DISMISSED') return 'DISMISSED';
-  if (!input.plannedActivityId || !input.linkedPlanStatus) return 'SUGGESTED';
+  if (!input.plannedActivityId || !input.linkedPlanStatus) {
+    // Insights V1 PR3 -- a cleared link (deletePlannedActivity's
+    // ON DELETE SET NULL) must not silently revert a genuinely confirmed
+    // completion back to "never planned". everCompleted is the durable
+    // evidence (GoalActivityExecution, keyed by goalActivityId, never
+    // cleared by that delete) that tells the two cases apart.
+    return input.everCompleted ? 'COMPLETED' : 'SUGGESTED';
+  }
   // available to plan again (replanning relinks the same row -- see db.ts).
   // A SKIPPED link is a deliberate non-execution: never PLANNED/COMPLETED.
   // A link still on a MOVED plan is malformed (Move repoints to the successor

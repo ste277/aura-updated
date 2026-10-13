@@ -21,7 +21,7 @@ import { beginTransaction, type PlannedActivity } from './db';
 import { isActivePlanBlocker } from './dayConstructorOrchestrator';
 import { parseSchedulingMode } from './plannedActivitySchedulingMode';
 import { buildGoogleCalendarUrl } from '../../../packages/recommendation/src/dailyAssistant';
-import { normalizeGoalActivityRhythm, deriveGoalActivityRhythmContribution, localCalendarWeekStart, resolveOccurrenceLocalDate, type GoalActivityRhythmOccurrenceFact, type PlannedActivityStatusForRhythm } from './goalActivityRhythm';
+import { normalizeGoalActivityRhythm, deriveGoalActivityRhythmContributionWithEvidence, localCalendarWeekStart, resolveOccurrenceLocalDateOrNull, type GoalActivityRhythmOccurrenceFact, type PlannedActivityStatusForRhythm } from './goalActivityRhythm';
 import { evaluateNewOccurrenceEligibility } from './goalActivityOccurrenceCapacity';
 import { getDatePartsInTimezone } from './timezone';
 
@@ -219,18 +219,33 @@ async function enforceDestinationWeekCapacity(
 
   // Every OTHER occurrence fact for this GoalActivity -- excluding the one being moved, which is leaving its
   // current week, not contributing a duplicate to the destination week it hasn't joined yet.
+  // Insights V1 PR3 -- LEFT JOIN on PlannedActivity (a sibling's plan may
+  // have been hard-deleted) plus a durable-evidence LEFT JOIN on
+  // GoalActivityExecution (via goalActivityOccurrenceId) so a deleted
+  // sibling's COMPLETED contribution still counts toward this capacity
+  // check -- same fix as db.ts's loadGoalActivityRhythmFacts.
   const factsRes = await client.query(
-    `SELECT pa."plannedStartAt", pa.status, gao."scheduledWeekStart", gao."scheduledWeekTimezone" FROM "GoalActivityOccurrence" gao JOIN "PlannedActivity" pa ON pa.id = gao."plannedActivityId" WHERE gao."goalActivityId" = $1 AND gao.id <> $2`,
+    `SELECT pa."plannedStartAt", pa.status, gao."scheduledWeekStart", gao."scheduledWeekTimezone", (gae.id IS NOT NULL) AS "hasCompletedExecution"
+     FROM "GoalActivityOccurrence" gao
+     LEFT JOIN "PlannedActivity" pa ON pa.id = gao."plannedActivityId"
+     LEFT JOIN "GoalActivityExecution" gae ON gae."goalActivityOccurrenceId" = gao.id
+     WHERE gao."goalActivityId" = $1 AND gao.id <> $2`,
     [goalActivityId, occurrenceId]
   );
-  const occurrences: GoalActivityRhythmOccurrenceFact[] = factsRes.rows.map((row) => ({
-    localDate: resolveOccurrenceLocalDate(
-      { scheduledWeekStart: row.scheduledWeekStart, scheduledWeekTimezone: row.scheduledWeekTimezone },
-      new Date(row.plannedStartAt),
-      timezone
-    ),
-    contribution: deriveGoalActivityRhythmContribution(row.status as PlannedActivityStatusForRhythm),
-  }));
+  const occurrences: GoalActivityRhythmOccurrenceFact[] = factsRes.rows
+    .map((row): GoalActivityRhythmOccurrenceFact | null => {
+      const localDate = resolveOccurrenceLocalDateOrNull(
+        { scheduledWeekStart: row.scheduledWeekStart, scheduledWeekTimezone: row.scheduledWeekTimezone },
+        row.plannedStartAt ? new Date(row.plannedStartAt) : null,
+        timezone
+      );
+      if (localDate === null) return null; // unattributable: pre-PR2 legacy occurrence whose plan was later deleted -- never fabricate a week
+      return {
+        localDate,
+        contribution: deriveGoalActivityRhythmContributionWithEvidence(row.hasCompletedExecution, row.status as PlannedActivityStatusForRhythm | null),
+      };
+    })
+    .filter((fact): fact is GoalActivityRhythmOccurrenceFact => fact !== null);
 
   const eligibility = evaluateNewOccurrenceEligibility({ rhythm, planningLocalDate: destinationLocalDate, occurrences });
   if (!eligibility.eligible) {

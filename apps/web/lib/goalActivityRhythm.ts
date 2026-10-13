@@ -202,6 +202,36 @@ export function resolveOccurrenceLocalDate(
   );
 }
 
+/**
+ * Insights V1 PR3 -- the deletion-tolerant variant: `plannedStartAt` is
+ * `null` exactly when the occurrence's linked PlannedActivity has been
+ * hard-deleted (deletePlannedActivity). When a real `plannedStartAt` is
+ * available, behavior is byte-for-byte identical to
+ * `resolveOccurrenceLocalDate` above (delegated to directly, including
+ * its own partial-snapshot throw-guard) -- this function changes nothing
+ * about the live, non-deleted case. When it is not: a fully-populated
+ * snapshot (PR2) is still sufficient and authoritative on its own,
+ * returned exactly as before; a fully-EMPTY snapshot with no live plan to
+ * derive from either (a pre-PR2 occurrence whose plan was deleted before
+ * PR3 shipped) has no way to safely attribute a week at all -- returns
+ * `null`, which every caller below treats as "exclude this occurrence
+ * from weekly facts", never fabricates a week for it.
+ */
+export function resolveOccurrenceLocalDateOrNull(
+  snapshot: { scheduledWeekStart: string | null; scheduledWeekTimezone: string | null },
+  plannedStartAt: Date | null,
+  liveTimezone: string
+): string | null {
+  if (plannedStartAt !== null) return resolveOccurrenceLocalDate(snapshot, plannedStartAt, liveTimezone);
+  const hasWeekStart = snapshot.scheduledWeekStart !== null && snapshot.scheduledWeekStart !== undefined;
+  const hasTimezone = snapshot.scheduledWeekTimezone !== null && snapshot.scheduledWeekTimezone !== undefined;
+  if (hasWeekStart && hasTimezone) return snapshot.scheduledWeekStart as string;
+  if (!hasWeekStart && !hasTimezone) return null;
+  throw new Error(
+    `GoalActivityOccurrence has a partially-populated scheduled-week snapshot and no live PlannedActivity to derive from either (scheduledWeekStart=${String(snapshot.scheduledWeekStart)}, scheduledWeekTimezone=${String(snapshot.scheduledWeekTimezone)}).`
+  );
+}
+
 // ============================================================
 // Pure eligibility engine (this ticket's own sections 11-22). Accepts
 // FACTS, never queries the DB itself (section 11) and never reads
@@ -265,6 +295,29 @@ export function deriveGoalActivityRhythmContribution(status: PlannedActivityStat
   if (status === 'LOGGED') return 'COMPLETED';
   if (status === 'UPCOMING') return 'COMMITTED';
   return 'NONE'; // CANCELLED, SKIPPED, MOVED
+}
+
+/**
+ * Insights V1 PR3 -- the deletion-tolerant variant, shared by every
+ * Rhythm read site (db.ts's loadGoalActivityRhythmFacts/
+ * buildGoalActivityRhythmFactsFromOccurrenceRows, planMove.ts's
+ * enforceDestinationWeekCapacity). COMPLETED is now determined by
+ * durable execution evidence FIRST (a GoalActivityExecution row linked
+ * via goalActivityOccurrenceId, never cleared by deletePlannedActivity's
+ * hard-delete of the underlying plan) -- falling back to
+ * `deriveGoalActivityRhythmContribution` on the live joined
+ * PlannedActivity status exactly as before ONLY when no such evidence
+ * exists, which is unchanged behavior for every still-live
+ * COMMITTED/NONE occurrence. An occurrence with neither live evidence
+ * nor a live plan to join to (both orphaned -- e.g. a hard-deleted
+ * CANCELLED plan, which was never completed) contributes NONE, the same
+ * outcome a live CANCELLED plan already produces today -- never
+ * silently becomes COMPLETED or crashes.
+ */
+export function deriveGoalActivityRhythmContributionWithEvidence(hasCompletedExecution: boolean, status: PlannedActivityStatusForRhythm | null): GoalActivityRhythmOccurrenceFact['contribution'] {
+  if (hasCompletedExecution) return 'COMPLETED';
+  if (status === null) return 'NONE';
+  return deriveGoalActivityRhythmContribution(status);
 }
 
 export interface GoalActivityRhythmEligibilityInput {

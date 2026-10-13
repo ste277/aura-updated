@@ -232,7 +232,14 @@ check('schema.prisma defines rhythmKind/rhythmTargetPerWeek on GoalActivity (the
 check('migration 0043_goal_activity_rhythm exists and adds exactly the two Rhythm columns, nothing else', fs.existsSync(path.join(__dirname, '../apps/web/prisma/migrations/0043_goal_activity_rhythm/migration.sql')) && (() => { const m = fs.readFileSync(path.join(__dirname, '../apps/web/prisma/migrations/0043_goal_activity_rhythm/migration.sql'), 'utf8'); const alters = (m.match(/^ALTER TABLE/gm) ?? []).length; return alters === 2 && /ADD COLUMN "rhythmKind" TEXT/.test(m) && /ADD COLUMN "rhythmTargetPerWeek" INTEGER/.test(m) && !/CREATE TABLE/.test(m); })());
 check('R2 introduced rhythmKind/rhythmTargetPerWeek exactly once, in 0043: no OTHER migration directory\'s own contents also reference them (count-independent -- holds regardless of how many unrelated migrations exist)', fs.readdirSync(path.join(__dirname, '../apps/web/prisma/migrations')).filter((d) => /^\d{4}_/.test(d) && d !== '0043_goal_activity_rhythm').every((d) => !/rhythmKind|rhythmTargetPerWeek/.test(fs.readFileSync(path.join(__dirname, '../apps/web/prisma/migrations', d, 'migration.sql'), 'utf8'))));
 check('GoalActivityOccurrence model (R1) was not modified by R2 -- still no status/windowKey column', (() => { const m = schemaSrc.match(/model GoalActivityOccurrence \{([\s\S]*?)\n\}/); const block = m ? m[1] : ''; return !/\bstatus\s+String/.test(block) && !/windowKey/i.test(block); })());
-check('GoalActivityExecution model gained no new column from R2', (() => { const m = schemaSrc.match(/model GoalActivityExecution \{([\s\S]*?)\n\}/); const block = m ? m[1] : ''; return !/rhythm/i.test(block); })());
+// Insights V1 PR3 added goalActivityOccurrenceId, whose own doc comment
+// legitimately explains its purpose in terms of a Rhythm occurrence (why
+// the durable link matters for N_PER_WEEK completions specifically) --
+// comment PROSE, not a Rhythm-shaped COLUMN. Re-scoped to comment-stripped
+// text, matching this file's own established stripComments convention
+// elsewhere, so the real invariant (no rhythmKind/rhythmTargetPerWeek-style
+// column ever added to this model) is still exactly what's checked.
+check('GoalActivityExecution model gained no new RHYTHM-shaped column from R2', (() => { const m = schemaSrc.match(/model GoalActivityExecution \{([\s\S]*?)\n\}/); const block = m ? stripComments(m[1]) : ''; return !/rhythm/i.test(block); })());
 
 // ============================================================
 // No separate GoalActivityRhythm entity was created (this ticket's own
