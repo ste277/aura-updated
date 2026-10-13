@@ -3069,6 +3069,62 @@ export async function listGoalActivitiesWithLinkedPlanStatus(userId: string, goa
   return result.rows;
 }
 
+/**
+ * Insights V1 PR4 -- the multi-Goal sibling of listGoalActivitiesWithLinkedPlanStatus
+ * above: byte-for-byte the SAME query (same LATERAL execution-evidence
+ * join, same linkedPlanStatus/everCompleted shape, same TOTAL order), only
+ * the WHERE clause is widened from one "goalId" to "goalId = ANY(...)" --
+ * so a cross-Goal reporting read (apps/web/lib/insightsReporting.ts) can
+ * fetch every GoalActivity for every one of a user's Goals in ONE round
+ * trip, never one query per Goal (the N+1 shape this function exists to
+ * avoid). No business rule is duplicated: this is the identical SELECT,
+ * just not goalId-scoped to a single row. Order is additionally stable
+ * across goalId first (so a caller grouping rows back by Goal can do so
+ * with a single linear pass, never a second sort).
+ */
+export async function listGoalActivitiesWithLinkedPlanStatusForGoals(userId: string, goalIds: readonly string[]): Promise<GoalActivityWithLinkedPlanStatus[]> {
+  if (goalIds.length === 0) return [];
+  const result = await pool.query(
+    `SELECT ga.*, pa.status AS "linkedPlanStatus", gae."currentValue", (gae.id IS NOT NULL) AS "everCompleted"
+     FROM "GoalActivity" ga
+     LEFT JOIN "PlannedActivity" pa ON pa.id = ga."plannedActivityId"
+     LEFT JOIN LATERAL (
+       SELECT e.id, e."currentValue"
+       FROM "GoalActivityExecution" e
+       WHERE e."goalActivityId" = ga.id
+       ORDER BY (e."plannedActivityId" IS NOT NULL AND e."plannedActivityId" = ga."plannedActivityId") DESC, e."createdAt" DESC
+       LIMIT 1
+     ) gae ON true
+     WHERE ga."userId" = $1 AND ga."goalId" = ANY($2::text[])
+     ORDER BY ga."goalId", ga."createdAt", ga.id`,
+    [userId, [...goalIds]]
+  );
+  return result.rows;
+}
+
+/**
+ * Insights V1 PR4 -- the one new reporting read this PR adds: every
+ * non-deleted PlannedActivity in a date range, EVERY status included
+ * (unlike listPlannedActivitiesForDay, which deliberately excludes
+ * CANCELLED for its own, unrelated display purpose -- reusing it here
+ * would silently drop the "explicit cancellations" reporting category).
+ * No status is filtered, no business rule is applied here at all --
+ * classification into CONFIRMED COMPLETED / SCHEDULED / SKIPPED /
+ * CANCELLED / RESCHEDULED / AWAITING CONFIRMATION happens entirely in the
+ * pure, DB-free classifyPlanningStatus (insightsReporting.ts), so this
+ * function has exactly one job: read the rows, ownership-scoped, range-
+ * bounded, nothing else. Read-only; no write, no side effect.
+ */
+export async function listPlannedActivitiesForReporting(userId: string, from: Date, to: Date): Promise<PlannedActivity[]> {
+  const result = await pool.query(
+    `SELECT * FROM "PlannedActivity"
+     WHERE "userId" = $1 AND "plannedStartAt" BETWEEN $2 AND $3
+     ORDER BY "plannedStartAt" ASC`,
+    [userId, from, to]
+  );
+  return result.rows;
+}
+
 // Goals V2 G3.1 -- read-only Goal context for the Home/DailyAgenda read
 // model (apps/web/lib/dailyAgenda.ts). Deliberately NOT
 // GoalActivityWithLinkedPlanStatus's shape: the client needs MEANING

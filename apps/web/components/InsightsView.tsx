@@ -6,9 +6,57 @@ import { toInsightsObservation, todayDateKey, lastNCalendarDateKeys, isInCalenda
 import { addDaysToDateStr } from '../lib/timezone';
 import { classifyInsightsWindow, insightsWindowWeight } from '../lib/insightsWindowAlignment';
 import { deriveInsightsEvidenceState } from '../lib/insightsEvidence';
+import {
+  formatGoalProgressLabel,
+  formatGoalActivityRhythmWeeklyProgressLabel,
+  formatGoalActivityRhythmRemainingCapacityLabel,
+  type GoalActivityRhythmView,
+} from '../lib/goalsPresentation';
+import type { DerivedGoalActivityState } from '../lib/goals';
 import { colors, spacing, typography, radius } from './theme';
 import { PageHeader, SegmentedControl, SurfaceCard, StatusBadge, TextButton, EmptyState } from './ui';
 import { LoggedEntryItem } from './CalendarViewSection';
+
+// ============================================================
+// Insights V1 PR4 -- Read-Only Goal and Planning Reporting. Wire-shaped
+// types mirroring GET /api/insights/reporting's own JSON response
+// exactly (never a client-side re-derivation of any count/status --
+// every number here is already-computed server-side, reusing the SAME
+// business rules Goal Detail itself uses, see insightsReporting.ts).
+// ============================================================
+export interface GoalReportingActivityView {
+  id: string;
+  title: string;
+  derivedState: DerivedGoalActivityState;
+  currentValue: number | null;
+  rhythm: GoalActivityRhythmView;
+}
+export interface GoalReportingGoalView {
+  id: string;
+  title: string;
+  kind: 'RHYTHM' | 'FINITE' | 'MIXED' | 'EMPTY';
+  activities: GoalReportingActivityView[];
+  progress: { total: number; completed: number; hasOngoingRhythmActivity: boolean };
+}
+export interface GoalReportingResponse {
+  range: { from: string; to: string };
+  goals: GoalReportingGoalView[];
+  planningStatus: {
+    confirmedCompleted: number;
+    scheduled: number;
+    skipped: number;
+    cancelled: number;
+    rescheduled: number;
+    awaitingConfirmation: number;
+    total: number;
+  };
+  awaitingConfirmation: {
+    count: number;
+    items: { id: string; title: string; plannedStartAt: string; plannedEndAt: string }[];
+    truncated: boolean;
+  };
+  limitations: string[];
+}
 
 /**
  * Insights Timezone Consistency V1 -- a calendar date's weekday, formatted
@@ -76,9 +124,13 @@ interface InsightsViewProps {
       averageScore: number | null;
     };
   } | null;
+  /** Insights V1 PR4 -- Goal/planning reporting, fetched the same way as
+   * assistantInsight above (GET /api/insights/reporting). `null` renders
+   * this section's own empty state -- never a fabricated zero. */
+  goalReporting?: GoalReportingResponse | null;
 }
 
-export function InsightsView({ timezone, logEntries = [], assistantInsight }: InsightsViewProps) {
+export function InsightsView({ timezone, logEntries = [], assistantInsight, goalReporting }: InsightsViewProps) {
   const [activeSubTab, setActiveSubTab] = useState<'overview' | 'patterns' | 'trends' | 'streaks'>('overview');
 
   // ---------------------------------------------------------------------------
@@ -467,6 +519,16 @@ export function InsightsView({ timezone, logEntries = [], assistantInsight }: In
       {/* ==================== TAB 1: OVERVIEW ==================== */}
       {activeSubTab === 'overview' && (
         <>
+          {/* Insights V1 PR4 -- Goal and planning reporting, placed FIRST
+           * in the existing Overview hierarchy (architecture audit's own
+           * suggested ordering: confirmed progress, Goals this week,
+           * planning patterns, awaiting confirmation -- ahead of the
+           * existing Alignment/This-Month cards below, never replacing
+           * them). Renders nothing extra when goalReporting is absent
+           * (still loading, or the fetch failed) -- no fabricated
+           * placeholder numbers. */}
+          {goalReporting && <GoalPlanningReportingSection reporting={goalReporting} />}
+
           {assistantInsight && (
             <SurfaceCard accentColor={colors.positive}>
               <div style={typography.sectionEyebrow}>Your Alignment</div>
@@ -1021,6 +1083,102 @@ export function InsightsView({ timezone, logEntries = [], assistantInsight }: In
         </div>
       )}
     </div>
+  );
+}
+
+/**
+ * Insights V1 PR4 -- the four-part Goal/planning reporting hierarchy
+ * (confirmed progress, Goals this week, planning patterns, awaiting
+ * confirmation), reusing the EXACT same presentation helpers Goal Detail
+ * already uses (formatGoalProgressLabel/formatGoalActivityRhythmWeeklyProgressLabel/
+ * formatGoalActivityRhythmRemainingCapacityLabel) -- no second label
+ * vocabulary, no score, no streak claim, no causal language. Every
+ * number is already-computed server-side (insightsReporting.ts); this
+ * component only arranges and labels it.
+ */
+function GoalPlanningReportingSection({ reporting }: { reporting: GoalReportingResponse }) {
+  const rhythmGoals = reporting.goals.filter((goal) => goal.activities.some((activity) => activity.rhythm.kind === 'N_PER_WEEK'));
+  const finiteGoals = reporting.goals.filter((goal) => goal.kind === 'FINITE' || goal.kind === 'MIXED');
+  const hasAnyGoals = reporting.goals.length > 0;
+
+  return (
+    <>
+      {/* 1. Confirmed progress */}
+      <SurfaceCard accentColor={colors.positive}>
+        <div style={typography.sectionEyebrow}>Confirmed Progress</div>
+        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: `${spacing.sm}px ${spacing.lg}px`, marginTop: spacing.sm }}>
+          <InlineStat value={reporting.planningStatus.confirmedCompleted} label="confirmed completed" color={colors.positive} />
+          <InlineStat value={reporting.goals.reduce((sum, g) => sum + g.progress.completed, 0)} label="Goal activities done" color={colors.info} />
+        </div>
+      </SurfaceCard>
+
+      {/* 2. Goals this week */}
+      <SurfaceCard padding={spacing.xl}>
+        <div style={typography.sectionEyebrow}>Goals This Week</div>
+        {!hasAnyGoals ? (
+          <EmptyState title="No active Goals yet." description="Set up a Goal to see its progress here." />
+        ) : (
+          <div style={{ display: 'flex', flexDirection: 'column', gap: spacing.md, marginTop: spacing.sm }}>
+            {rhythmGoals.map((goal) => (
+              <div key={goal.id}>
+                <div style={{ ...typography.bodyStrong, color: colors.textPrimary }}>{goal.title}</div>
+                {goal.activities.filter((a) => a.rhythm.kind === 'N_PER_WEEK').map((activity) => (
+                  <div key={activity.id} style={{ marginTop: spacing.xs }}>
+                    <div style={{ fontSize: 13, color: colors.textSecondary }}>{formatGoalActivityRhythmWeeklyProgressLabel(activity.rhythm)}</div>
+                    {formatGoalActivityRhythmRemainingCapacityLabel(activity.rhythm) && (
+                      <div style={{ ...typography.meta, marginTop: 2 }}>{formatGoalActivityRhythmRemainingCapacityLabel(activity.rhythm)}</div>
+                    )}
+                  </div>
+                ))}
+              </div>
+            ))}
+            {finiteGoals.map((goal) => {
+              const label = formatGoalProgressLabel(goal.progress);
+              return label ? (
+                <div key={goal.id} style={{ display: 'flex', justifyContent: 'space-between' }}>
+                  <span style={{ ...typography.bodyStrong, color: colors.textPrimary }}>{goal.title}</span>
+                  <span style={{ fontSize: 13, color: colors.textSecondary }}>{label}</span>
+                </div>
+              ) : null;
+            })}
+          </div>
+        )}
+      </SurfaceCard>
+
+      {/* 3. Planning patterns */}
+      <SurfaceCard padding={spacing.xl}>
+        <div style={typography.sectionEyebrow}>Planning Patterns</div>
+        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: `${spacing.sm}px ${spacing.lg}px`, marginTop: spacing.sm }}>
+          <InlineStat value={reporting.planningStatus.scheduled} label="scheduled" color={colors.info} />
+          <InlineStat value={reporting.planningStatus.rescheduled} label="rescheduled" color={colors.caution} />
+          <InlineStat value={reporting.planningStatus.skipped} label="explicitly skipped" color={colors.textSecondary} />
+          <InlineStat value={reporting.planningStatus.cancelled} label="cancelled" color={colors.textSecondary} />
+        </div>
+      </SurfaceCard>
+
+      {/* 4. Awaiting confirmation */}
+      <SurfaceCard accentColor={colors.caution} style={{ background: colors.cautionSoft }}>
+        <div style={typography.sectionEyebrow}>Awaiting Confirmation</div>
+        {reporting.awaitingConfirmation.count === 0 ? (
+          <div style={{ fontSize: 14, color: colors.textSecondary, marginTop: spacing.sm }}>Everything&rsquo;s confirmed.</div>
+        ) : (
+          <>
+            <div style={{ fontSize: 14, color: colors.textPrimary, marginTop: spacing.sm }}>
+              {reporting.awaitingConfirmation.count} past {reporting.awaitingConfirmation.count === 1 ? 'activity has' : 'activities have'} no recorded outcome.
+            </div>
+            <div style={{ ...typography.meta, marginTop: spacing.xs }}>
+              This isn&rsquo;t a judgment -- just activities Aura hasn&rsquo;t heard back about yet.
+            </div>
+          </>
+        )}
+      </SurfaceCard>
+
+      {reporting.limitations.length > 0 && (
+        <div style={{ ...typography.meta, color: colors.textSecondary, lineHeight: 1.5 }}>
+          {reporting.limitations.join(' ')}
+        </div>
+      )}
+    </>
   );
 }
 
