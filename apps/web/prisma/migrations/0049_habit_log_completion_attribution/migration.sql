@@ -34,7 +34,7 @@
 -- NULL as 'NON_GOAL'. Values are 'GOAL_LINKED' | 'NON_GOAL', enforced at
 -- the application layer (logPlannedActivity), not a DB CHECK constraint
 -- -- same convention as every other string-enum column in this schema
--- (status, logSource, rhythmKind, etc.), none of which use a DB-level
+-- (status, logSource, schedulingMode, etc.), none of which use a DB-level
 -- CHECK either.
 --
 -- scheduledStartAtSnapshot is PlannedActivity.plannedStartAt, read
