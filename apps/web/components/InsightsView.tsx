@@ -1312,6 +1312,7 @@ function GoalPlanningReportingSection({ reporting }: { reporting: GoalReportingR
   const rhythmGoals = reporting.goals.filter((goal) => goal.activities.some((activity) => activity.rhythm.kind === 'N_PER_WEEK'));
   const finiteGoals = reporting.goals.filter((goal) => goal.kind === 'FINITE' || goal.kind === 'MIXED');
   const hasAnyGoals = reporting.goals.length > 0;
+  const goalActivitiesWithProgress = reporting.goals.reduce((sum, g) => sum + g.progress.completed, 0);
 
   return (
     <>
@@ -1332,8 +1333,16 @@ function GoalPlanningReportingSection({ reporting }: { reporting: GoalReportingR
       <SurfaceCard accentColor={colors.positive}>
         <div style={typography.sectionEyebrow}>Confirmed Progress</div>
         <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: `${spacing.sm}px ${spacing.lg}px`, marginTop: spacing.sm }}>
-          <InlineStat value={reporting.planningStatus.confirmedCompleted} label="confirmed completions" color={colors.positive} />
-          <InlineStat value={reporting.goals.reduce((sum, g) => sum + g.progress.completed, 0)} label="Goal activities with progress" color={colors.info} />
+          <InlineStat
+            value={reporting.planningStatus.confirmedCompleted}
+            label={reporting.planningStatus.confirmedCompleted === 1 ? 'confirmed completion' : 'confirmed completions'}
+            color={colors.positive}
+          />
+          <InlineStat
+            value={goalActivitiesWithProgress}
+            label={goalActivitiesWithProgress === 1 ? 'Goal activity with progress' : 'Goal activities with progress'}
+            color={colors.info}
+          />
         </div>
         <div style={{ ...typography.meta, marginTop: spacing.sm }}>
           Completions counts every confirmed activity. Goal activities counts distinct Goal activities with at least one completion — doing the same one repeatedly still counts once here.
