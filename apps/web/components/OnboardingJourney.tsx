@@ -7,6 +7,7 @@ import { LocationPicker } from './LocationPicker';
 import { RhythmPicker, type RhythmPickerValue } from './RhythmPicker';
 import { DayPlanPreviewController } from './DayPlanPreviewController';
 import { findCity } from '../lib/cities';
+import { submitLocationConfirmation } from '../lib/locationConfirmation';
 import type { DailyEnergyInsight } from '../lib/scoreEngine';
 import type { ConstructDayPreview } from '../lib/dayConstructorOrchestrator';
 import type { GoalActivityLink } from '../lib/acceptConstructedDay';
@@ -120,33 +121,16 @@ export function OnboardingJourney({
   async function confirmSuggestedCity() {
     setConfirming(true);
     setConfirmError(null);
-    try {
-      const curated = findCity(cityName);
-      const res = await fetch('/api/users/location', {
-        method: 'PATCH',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(curated ? { cityName } : { custom: { cityName, latitude, longitude, timezone } }),
-      });
-      if (res.ok) {
-        const data = await res.json().catch(() => ({}));
-        onLocationChanged({
-          cityName,
-          latitude,
-          longitude,
-          timezone,
-          locationConfirmedAt: typeof data.locationConfirmedAt === 'string' ? data.locationConfirmedAt : null,
-        });
-        setLocationConfirmedLocal(true);
-        setStep('RECOMMENDATION');
-      } else {
-        const data = await res.json().catch(() => ({}));
-        setConfirmError(typeof data.error === 'string' && data.error ? data.error : 'Could not confirm location.');
-      }
-    } catch {
-      setConfirmError("Couldn't confirm location. Please try again.");
-    } finally {
-      setConfirming(false);
+    const curated = findCity(cityName);
+    const result = await submitLocationConfirmation(curated ? { cityName } : { custom: { cityName, latitude, longitude, timezone } });
+    if (result.ok) {
+      onLocationChanged({ cityName, latitude, longitude, timezone, locationConfirmedAt: result.locationConfirmedAt });
+      setLocationConfirmedLocal(true);
+      setStep('RECOMMENDATION');
+    } else {
+      setConfirmError(result.error);
     }
+    setConfirming(false);
   }
 
   return (
