@@ -146,6 +146,20 @@ export interface User {
    * place this is ever stamped. Optional here for the same reason
    * `locationConfirmedAt` is above. */
   onboardingResolvedAt?: Date | null;
+  /** Daily Rhythm V1 PR DR1 -- Preferences Foundation. Both null is the
+   * ONLY unconfigured state, the default for every row -- see
+   * setDailyRhythmPreferences/clearDailyRhythmPreferences below for the
+   * one place these are ever written, always together. Optional here for
+   * the same reason `availabilityConfigured`/`locationConfirmedAt` are
+   * above. NOT read by any scheduling/recommendation code in this PR. */
+  dailyRhythmWorkStart?: string | null;
+  dailyRhythmWorkEnd?: string | null;
+  /** Weekday set, 0=Sunday..6=Saturday (same convention as
+   * UserAvailabilityPeriod.weekday). Empty array by default; a real
+   * database row always has a concrete `number[]` (NOT NULL DEFAULT
+   * '{}'), so `undefined` here only appears in a fixture that predates
+   * this column and is treated identically to an empty array. */
+  dailyRhythmWorkDays?: number[];
 }
 
 export interface CustomCity {
@@ -2683,6 +2697,51 @@ export async function resetUserAvailabilityConfiguration(userId: string): Promis
   } finally {
     client.release();
   }
+}
+
+// ── Daily Rhythm V1 PR DR1 -- Preferences Foundation. Mirrors the
+// Availability functions directly above: a read, a write (always sets
+// workStart/workEnd/workDays together), and a clear (the only operation
+// that returns to the null/empty UNCONFIGURED state). Unlike availability,
+// there is no separate "configured" flag -- workStart/workEnd both null
+// IS unconfigured, by construction (see User.dailyRhythmWorkStart's own
+// schema doc comment), so there is nothing else to keep in sync. ────────
+
+export interface DailyRhythmPreferencesView {
+  workStart: string | null;
+  workEnd: string | null;
+  workDays: number[];
+}
+
+/** `null` only when the user itself doesn't exist -- a genuinely
+ * unconfigured user (both fields null, empty workDays) is a real, valid
+ * result, not an error. */
+export async function getDailyRhythmPreferences(userId: string): Promise<DailyRhythmPreferencesView | null> {
+  const result = await pool.query('SELECT "dailyRhythmWorkStart", "dailyRhythmWorkEnd", "dailyRhythmWorkDays" FROM "User" WHERE id = $1', [userId]);
+  const row = result.rows[0];
+  if (!row) return null;
+  return { workStart: row.dailyRhythmWorkStart ?? null, workEnd: row.dailyRhythmWorkEnd ?? null, workDays: row.dailyRhythmWorkDays ?? [] };
+}
+
+/** Always writes all three columns together -- the caller (the API route)
+ * has already run the submitted input through
+ * validateDailyRhythmPreferencesInput (dailyRhythmPreferences.ts) before
+ * this is called; this function performs no validation of its own, same
+ * convention as replaceUserAvailabilityConfiguration above. */
+export async function setDailyRhythmPreferences(userId: string, prefs: { workStart: string; workEnd: string; workDays: readonly number[] }): Promise<void> {
+  await pool.query(
+    `UPDATE "User" SET "dailyRhythmWorkStart" = $2, "dailyRhythmWorkEnd" = $3, "dailyRhythmWorkDays" = $4 WHERE id = $1`,
+    [userId, prefs.workStart, prefs.workEnd, Array.from(prefs.workDays)]
+  );
+}
+
+/** The ONLY operation that returns a user to the unconfigured state
+ * (both time fields null, workDays empty) -- deliberately a separate
+ * function from setDailyRhythmPreferences, same "clear is not just save
+ * with different values" precedent resetUserAvailabilityConfiguration
+ * establishes above. */
+export async function clearDailyRhythmPreferences(userId: string): Promise<void> {
+  await pool.query(`UPDATE "User" SET "dailyRhythmWorkStart" = NULL, "dailyRhythmWorkEnd" = NULL, "dailyRhythmWorkDays" = '{}' WHERE id = $1`, [userId]);
 }
 
 // ============================================================
