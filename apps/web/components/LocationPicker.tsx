@@ -27,6 +27,27 @@ interface GeocodeResultDto {
 
 interface LocationPickerProps {
   currentCity: string;
+  /** Location PR8 -- the user's current, already-persisted latitude/
+   * longitude/timezone (whatever is actually on their User row right
+   * now -- the real signup default or a prior confirmed/custom value,
+   * never a client-invented guess). Passed down so this component can
+   * offer a direct "Confirm {currentCity}" action that reuses these
+   * EXACT already-valid values, without requiring a fresh GPS fix,
+   * search, or a <select> value change (AURA_LOCATION_CONFIRMATION_AUDIT_V1.md
+   * finding: a controlled <select> never fires onChange when the user
+   * re-selects the option that's already current, so the existing
+   * curated dropdown alone could never reach this case). All three are
+   * optional and independently validated (isValidIanaTimezone +
+   * latitude/longitude range) before the action renders at all -- when
+   * any is missing/invalid, this component falls back to requiring an
+   * explicit selection exactly as it always has. OnboardingJourney's own
+   * call site deliberately omits these three (it already has its own
+   * equivalent "Confirm {cityName}" action outside this component, see
+   * OnboardingJourney.tsx's own onConfirmSuggested) -- omitting them is
+   * fully backward compatible, not a second code path to keep in sync. */
+  currentLatitude?: number | null;
+  currentLongitude?: number | null;
+  currentTimezone?: string | null;
   /** Onboarding V1 PR 1 -- Location Trust Foundation. Always carries the
    * server's own `locationConfirmedAt` from the PATCH response (never
    * guessed/assumed client-side), so the caller's local state reflects
@@ -70,7 +91,7 @@ type PendingSource = 'gps' | 'search';
  * the same PATCH /api/users/location; none of them reads or writes
  * birthCityName/birthLatitude/birthLongitude/birthTimezone.
  */
-export function LocationPicker({ currentCity, onChanged }: LocationPickerProps) {
+export function LocationPicker({ currentCity, currentLatitude, currentLongitude, currentTimezone, onChanged }: LocationPickerProps) {
   const [saving, setSaving] = useState(false);
   const [showCustomForm, setShowCustomForm] = useState(false);
   const [showAdvanced, setShowAdvanced] = useState(false);
@@ -97,6 +118,10 @@ export function LocationPicker({ currentCity, onChanged }: LocationPickerProps) 
   const [searchError, setSearchError] = useState<string | null>(null);
   const [searchResults, setSearchResults] = useState<GeocodeResultDto[]>([]);
   const searchDebounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  // ---- Location PR8: explicit "Confirm {currentCity}" action ----
+  const [confirmingCurrent, setConfirmingCurrent] = useState(false);
+  const [confirmCurrentError, setConfirmCurrentError] = useState<string | null>(null);
 
   // ---- Smart Location Selection: shared pending-confirmation state ----
   // A GPS fix or a clicked search result lands here -- NEVER auto-saved.
@@ -255,6 +280,73 @@ export function LocationPicker({ currentCity, onChanged }: LocationPickerProps) 
       setError("Couldn't confirm location. Please try again.");
     } finally {
       setConfirming(false);
+    }
+  }
+
+  // Location PR8 -- the explicit "Confirm {currentCity}" action's own
+  // readiness gate. Purely a presentation decision (whether to render the
+  // action at all): the SAME three range/format checks route.ts's own
+  // isValidCustomLocation already enforces server-side, applied here only
+  // to decide whether showing "Confirm {currentCity}" would be honest --
+  // the server is still the sole authority that actually accepts or
+  // rejects the PATCH below, never trusted/skipped because this passed.
+  const currentLocationReady =
+    currentCity.trim().length > 0 &&
+    typeof currentLatitude === 'number' && Number.isFinite(currentLatitude) &&
+    currentLatitude >= MIN_VALID_LATITUDE && currentLatitude <= MAX_VALID_LATITUDE &&
+    typeof currentLongitude === 'number' && Number.isFinite(currentLongitude) &&
+    currentLongitude >= MIN_VALID_LONGITUDE && currentLongitude <= MAX_VALID_LONGITUDE &&
+    typeof currentTimezone === 'string' && isValidIanaTimezone(currentTimezone);
+
+  // Location PR8 -- reuses the EXACT same request shape/endpoint
+  // confirmPendingResult above already uses for a GPS/search result (the
+  // "custom" branch of PATCH /api/users/location), now fed the caller's
+  // own already-persisted cityName/latitude/longitude/timezone instead of
+  // a freshly geocoded one. Never invents a value: currentLocationReady
+  // (checked again defensively here, not just at render time) must be
+  // true, and every field sent is one of the three validated props --
+  // nothing derived, guessed, or defaulted client-side. Idempotent by
+  // construction: the server's own updateUserLocation (db.ts) already
+  // unconditionally re-stamps locationConfirmedAt on a repeat call with
+  // the same city, so confirming twice is always safe. onChanged fires
+  // only from the res.ok branch -- a failure never marks this confirmed
+  // locally, and never touches whatever confirmed location already
+  // existed before this call (this function performs exactly one write
+  // attempt and nothing else).
+  async function confirmCurrentLocation() {
+    if (!currentLocationReady || confirmingCurrent) return;
+    setConfirmingCurrent(true);
+    setConfirmCurrentError(null);
+    try {
+      const res = await fetch('/api/users/location', {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          custom: {
+            cityName: currentCity,
+            latitude: currentLatitude,
+            longitude: currentLongitude,
+            timezone: currentTimezone,
+          },
+        }),
+      });
+      if (res.ok) {
+        const data = await res.json().catch(() => ({}));
+        onChanged({
+          cityName: currentCity,
+          latitude: currentLatitude as number,
+          longitude: currentLongitude as number,
+          timezone: currentTimezone as string,
+          locationConfirmedAt: typeof data.locationConfirmedAt === 'string' ? data.locationConfirmedAt : null,
+        });
+      } else {
+        const data = await res.json().catch(() => ({}));
+        setConfirmCurrentError(typeof data.error === 'string' && data.error ? data.error : 'Could not confirm location.');
+      }
+    } catch {
+      setConfirmCurrentError("Couldn't confirm location. Please try again.");
+    } finally {
+      setConfirmingCurrent(false);
     }
   }
 
@@ -691,6 +783,62 @@ export function LocationPicker({ currentCity, onChanged }: LocationPickerProps) 
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+      {/* Location PR8 -- the explicit confirmation action
+       * (AURA_LOCATION_CONFIRMATION_AUDIT_V1.md root cause #2): a direct
+       * way to confirm the city already shown as current, independent of
+       * the curated <select> below ever firing onChange. Rendered only
+       * when the caller supplied a fully valid current location --
+       * otherwise this section is simply absent and the existing
+       * GPS/search/advanced-options flow below is the only path, exactly
+       * as before this change. */}
+      {currentLocationReady && (
+        <div
+          style={{
+            display: 'flex',
+            flexDirection: 'column',
+            gap: 8,
+            padding: 12,
+            borderRadius: 10,
+            border: '1px solid var(--as-border)',
+            background: 'var(--as-surface-raised, rgba(255, 255, 255, 0.03))',
+          }}
+        >
+          <div>
+            <div style={{ fontSize: 11, fontWeight: 700, color: 'var(--as-text-muted)', textTransform: 'uppercase', letterSpacing: '0.04em' }}>
+              Current location
+            </div>
+            <div style={{ fontSize: 15, fontWeight: 700, color: 'var(--as-text)', marginTop: 2 }}>{currentCity}</div>
+            <div style={{ fontSize: 12, color: 'var(--as-text-muted)', marginTop: 2 }}>Timezone: {currentTimezone}</div>
+          </div>
+          <button
+            type="button"
+            onClick={confirmCurrentLocation}
+            disabled={confirmingCurrent}
+            aria-label={`Confirm ${currentCity} as your location`}
+            style={{
+              minHeight: 44,
+              padding: '9px 14px',
+              borderRadius: 8,
+              border: 'none',
+              fontSize: 13,
+              fontWeight: 700,
+              cursor: confirmingCurrent ? 'default' : 'pointer',
+              background: 'var(--as-abhijit-dim, #1f4d34)',
+              color: 'var(--as-abhijit, #4ade80)',
+              opacity: confirmingCurrent ? 0.7 : 1,
+            }}
+          >
+            {confirmingCurrent ? 'Confirming...' : `Confirm ${currentCity}`}
+          </button>
+          {confirmCurrentError && (
+            <div role="alert" style={{ color: 'var(--as-danger, var(--as-rahu))', fontSize: 11 }}>
+              {confirmCurrentError}
+            </div>
+          )}
+          <div style={{ fontSize: 11, color: 'var(--as-text-muted)' }}>Or choose another location below.</div>
+        </div>
+      )}
+
       <button
         type="button"
         onClick={requestCurrentLocation}

@@ -83,7 +83,14 @@ check('a confirm failure is rendered with role="alert" (screen-reader-friendly, 
 // ever calls PATCH.
 // ============================================================
 
-check('exactly ONE PATCH /api/users/location call site exists for the GPS/search path (confirmPendingResult) -- no second, parallel write path', (picker.match(/method: 'PATCH'/g) ?? []).length === 3); // curated select + custom form + confirmPendingResult, the three PRE-EXISTING+NEW save paths, all still funneling through the same endpoint
+// Location PR8 -- confirmCurrentLocation (the explicit "Confirm
+// {currentCity}" action, AURA_LOCATION_CONFIRMATION_AUDIT_V1.md root
+// cause #2) is a fourth, equally legitimate caller of the SAME PATCH
+// /api/users/location endpoint -- never a parallel/competing write path,
+// never a new persistence contract. The count below is intentionally
+// updated from 3 to 4 to recognize it; this guard still fails the moment
+// any FIFTH, truly accidental call site is introduced.
+check('exactly FOUR PATCH /api/users/location call sites exist (curated select, custom form, confirmPendingResult, confirmCurrentLocation) -- no fifth, accidental write path', (picker.match(/method: 'PATCH'/g) ?? []).length === 4);
 check('`pending` state is never persisted (no localStorage/sessionStorage) -- a refresh before confirming genuinely discards the unconfirmed candidate, it is not silently re-offered as if it were saved', !/localStorage|sessionStorage/.test(picker));
 
 // ============================================================

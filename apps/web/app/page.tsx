@@ -1646,6 +1646,8 @@ export default function DashboardPage() {
             email={user.email}
             cityName={user.cityName}
             timezone={user.timezone}
+            latitude={user.latitude}
+            longitude={user.longitude}
             locationConfirmed={user.locationConfirmedAt != null}
             initialOpenPanel={youInitialPanel}
             notificationPrefs={notificationPrefs}
