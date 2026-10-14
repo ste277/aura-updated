@@ -34,6 +34,21 @@ export interface ImprovementSuggestionCta {
    * present in this same response's own `goals` list), never a
    * fabricated/stale id. */
   goalId?: string;
+  /** Insights V1 PR7 (AURA_INSIGHTS_V1_PRODUCT_COMPLETION_AUDIT.md finding
+   * F-4) -- only present for action = 'OPEN_PLAN_REVIEW' when this
+   * suggestion is deterministically about exactly ONE real, already-
+   * existing PlannedActivity (REPEATED_RESCHEDULING's own live chain
+   * terminal; AWAITING_CONFIRMATION when there is exactly one unconfirmed
+   * plan). Never fabricated/guessed -- always an id the caller already
+   * resolved from real evidence. Mutually exclusive with `planFilter`. */
+  planId?: string;
+  /** Insights V1 PR7 -- only present for action = 'OPEN_PLAN_REVIEW' when
+   * this suggestion's evidence spans MORE than one PlannedActivity, so no
+   * single deterministic target exists (AWAITING_CONFIRMATION with 2+
+   * unconfirmed plans). The Plan tab opens its existing "My Plans" list
+   * pre-filtered to this criterion instead of pointing at one invented
+   * plan. Mutually exclusive with `planId`. */
+  planFilter?: 'AWAITING_CONFIRMATION';
 }
 
 export interface ImprovementSuggestion {
@@ -134,7 +149,10 @@ export function evaluateRepeatedReschedulingSignal(evaluation: MoveChainEvaluati
     signal: 'REPEATED_RESCHEDULING',
     message: 'This activity has been moved a few times. Would another time work better?',
     evidence: `move-chain-hop-count:${evaluation.hopCount}`,
-    cta: { label: 'Open Plan', action: 'OPEN_PLAN_REVIEW' },
+    // Insights V1 PR7 (finding F-4) -- the chain's own live terminal id,
+    // already established as this evaluation's one and only subject
+    // (terminalId, above) -- not a new lookup, not an invented id.
+    cta: { label: 'Open Plan', action: 'OPEN_PLAN_REVIEW', planId: evaluation.terminalId },
     subjectId: `plan:${evaluation.terminalId}`,
   };
 }
@@ -261,14 +279,29 @@ export function evaluateGoalOpportunitySignal(input: { goalId: string; feasibleS
 // verbatim. Never treats a missing outcome as a failure.
 // ============================================================
 
-export function evaluateAwaitingConfirmationSignal(awaitingConfirmationCount: number): ImprovementSuggestion | null {
+/**
+ * `soleUnconfirmedPlanId` -- the one real PlannedActivity id, when (and
+ * only when) `awaitingConfirmationCount === 1` (the caller already has
+ * this from the same already-fetched awaiting-confirmation item list used
+ * elsewhere in the response -- never a second query, never guessed).
+ * Insights V1 PR7 (finding F-4): with exactly one unconfirmed plan, the
+ * CTA points at that specific plan directly (`cta.planId`); with more than
+ * one, no single plan is the deterministic subject, so the CTA instead
+ * opens the Plan tab's existing "My Plans" list pre-filtered to
+ * AWAITING_CONFIRMATION (`cta.planFilter`) rather than inventing a target.
+ */
+export function evaluateAwaitingConfirmationSignal(awaitingConfirmationCount: number, soleUnconfirmedPlanId: string | null = null): ImprovementSuggestion | null {
   if (awaitingConfirmationCount < 1) return null;
+  const cta: ImprovementSuggestionCta =
+    awaitingConfirmationCount === 1 && soleUnconfirmedPlanId
+      ? { label: 'Review plan', action: 'OPEN_PLAN_REVIEW', planId: soleUnconfirmedPlanId }
+      : { label: 'Review plans', action: 'OPEN_PLAN_REVIEW', planFilter: 'AWAITING_CONFIRMATION' };
   return {
     id: 'awaiting-confirmation',
     signal: 'AWAITING_CONFIRMATION',
     message: 'Some past plans don’t have a recorded outcome yet.',
     evidence: `awaiting-confirmation-count:${awaitingConfirmationCount}`,
-    cta: { label: 'Review plans', action: 'OPEN_PLAN_REVIEW' },
+    cta,
     subjectId: 'awaiting-confirmation',
   };
 }

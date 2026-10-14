@@ -56,6 +56,14 @@ export interface ComputeImprovementSuggestionsInput {
   todayLocalDate: string;
   /** Signal 4's only input -- PR4's own already-computed planningStatus.awaitingConfirmation count. */
   awaitingConfirmationCount: number;
+  /** Insights V1 PR7 (finding F-4) -- the single awaiting-confirmation
+   * plan's id when `awaitingConfirmationCount === 1`, so Signal 4's CTA
+   * can point at it directly instead of a generic list. Always drawn from
+   * the caller's own already-fetched awaiting-confirmation item list
+   * (route.ts) -- never a second query. Omit/null when the count is 0 or
+   * 2+; evaluateAwaitingConfirmationSignal falls back to a filtered-list
+   * CTA in both of those cases. */
+  soleUnconfirmedPlanId?: string | null;
   /** Already-built per-Goal summaries (insightsReporting.ts's own buildGoalSummary, called once by the caller for the main response) -- reused verbatim for Signal 3's Rhythm-remaining-capacity half, never re-derived. */
   goalSummaries: readonly GoalSummaryView[];
   /** The flat GoalActivity rows the caller already fetched (listGoalActivitiesWithLinkedPlanStatusForGoals) -- reused only for each activity's own catalog activityId (duration resolution), never re-queried. */
@@ -107,11 +115,11 @@ async function resolveDayCapacityContext(
 }
 
 export async function computeImprovementSuggestions(input: ComputeImprovementSuggestionsInput): Promise<RankedSuggestions> {
-  const { user, now, todayLocalDate, awaitingConfirmationCount, goalSummaries, rows } = input;
+  const { user, now, todayLocalDate, awaitingConfirmationCount, soleUnconfirmedPlanId, goalSummaries, rows } = input;
   const candidateSuggestions: ImprovementSuggestion[] = [];
 
   // Signal 4 -- Awaiting Confirmation. Zero new evidence.
-  const awaitingSuggestion = evaluateAwaitingConfirmationSignal(awaitingConfirmationCount);
+  const awaitingSuggestion = evaluateAwaitingConfirmationSignal(awaitingConfirmationCount, soleUnconfirmedPlanId ?? null);
   if (awaitingSuggestion) candidateSuggestions.push(awaitingSuggestion);
 
   // Signal 1 -- Repeated Rescheduling. Unbounded by any reporting date

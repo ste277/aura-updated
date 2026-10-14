@@ -51,7 +51,15 @@ export interface SuggestionView {
   signal: 'AWAITING_CONFIRMATION' | 'PLANNING_OVERLOAD' | 'REPEATED_RESCHEDULING' | 'WEEKLY_GOAL_OPPORTUNITY';
   message: string;
   evidence: string;
-  cta: { label: string; action: 'OPEN_PLAN_REVIEW' | 'OPEN_GOAL'; goalId?: string };
+  cta: {
+    label: string;
+    action: 'OPEN_PLAN_REVIEW' | 'OPEN_GOAL';
+    goalId?: string;
+    /** Insights V1 PR7 -- mirrors ImprovementSuggestionCta.planId/planFilter
+     * (improvementSignals.ts) exactly; see onOpenPlanReview below. */
+    planId?: string;
+    planFilter?: 'AWAITING_CONFIRMATION';
+  };
   subjectId: string;
 }
 
@@ -149,17 +157,36 @@ interface InsightsViewProps {
    * assistantInsight above (GET /api/insights/reporting). `null` renders
    * this section's own empty state -- never a fabricated zero. */
   goalReporting?: GoalReportingResponse | null;
+  /** Insights V1 PR7 -- explicit fetch-lifecycle state for `goalReporting`
+   * (AURA_INSIGHTS_V1_PRODUCT_COMPLETION_AUDIT.md §19 scenario 20: the
+   * reporting block previously had no loading indicator at all, so it was
+   * reproducibly blank for 1-3+ seconds on every fresh navigation with
+   * nothing telling the user more was coming). 'loading' shows an
+   * accessible, honest loading state (never a fabricated 0); 'error' shows
+   * a real, visible error instead of staying silently blank forever;
+   * 'loaded' is the existing, unchanged behavior (goalReporting itself
+   * decides empty-vs-populated, as before). Defaults to 'loaded' so every
+   * existing caller/test that doesn't pass this prop keeps today's exact
+   * behavior. */
+  goalReportingStatus?: 'loading' | 'loaded' | 'error';
   /** Insights V1 PR5 -- the CTA destination for every suggestion whose
    * action is 'OPEN_PLAN_REVIEW' (Signals 1, 2, 4): the existing Plan tab,
    * where Reschedule/Log/Skip already exist for every relevant plan (the
    * SAME destination page.tsx's own handleOpenPlan/onPlanMyDay already
-   * route to) -- never a new screen, never a deep link to one specific
-   * plan. 'OPEN_GOAL' (Signal 3) needs no callback: it links directly to
-   * the existing /goals/[goalId] route. */
-  onOpenPlanReview?: () => void;
+   * route to). 'OPEN_GOAL' (Signal 3) needs no callback: it links directly
+   * to the existing /goals/[goalId] route.
+   *
+   * Insights V1 PR7 (finding F-4) -- now receives the clicked suggestion's
+   * own `cta` so the Plan tab can open the SPECIFIC plan the suggestion is
+   * about (`planId`) or a pre-filtered review list when more than one
+   * plan is the subject (`planFilter`), instead of always landing on the
+   * generic new-activity composer. The argument is optional (omitted for
+   * PLANNING_OVERLOAD, which is about the whole day, not one plan) --
+   * every existing caller that ignores its argument keeps working. */
+  onOpenPlanReview?: (target?: { planId?: string; planFilter?: 'AWAITING_CONFIRMATION' }) => void;
 }
 
-export function InsightsView({ timezone, logEntries = [], assistantInsight, goalReporting, onOpenPlanReview }: InsightsViewProps) {
+export function InsightsView({ timezone, logEntries = [], assistantInsight, goalReporting, goalReportingStatus = 'loaded', onOpenPlanReview }: InsightsViewProps) {
   const [activeSubTab, setActiveSubTab] = useState<'overview' | 'patterns' | 'trends' | 'streaks'>('overview');
 
   // Insights V1 PR5 -- session-local dismissal ONLY (ticket section H: no
@@ -572,7 +599,43 @@ export function InsightsView({ timezone, logEntries = [], assistantInsight, goal
            * nothing when there is no eligible suggestion at all, or when
            * every eligible one has been dismissed this session -- a real
            * empty state, never a fabricated placeholder. */}
-          {goalReporting?.suggestions && (
+          {/* Insights V1 PR7 -- an immediate, accessible loading state for
+           * this entire block (AURA_INSIGHTS_V1_PRODUCT_COMPLETION_AUDIT.md
+           * §19 scenario 20: previously nothing rendered here at all while
+           * the fetch was in flight, reproducibly for 1-3+ seconds on every
+           * fresh navigation, with no indication more content was coming).
+           * `role="status"`/`aria-live="polite"` so assistive tech
+           * announces it without stealing focus; a single compact card
+           * (not five separate skeletons) keeps layout shift small while
+           * still clearly NOT looking like real, populated data -- no
+           * number, no card chrome matching the real cards below. */}
+          {goalReportingStatus === 'loading' && (
+            <SurfaceCard role="status" ariaLive="polite">
+              <div style={{ display: 'flex', alignItems: 'center', gap: spacing.sm }}>
+                <StatusBadge label="Loading" tone="neutral" />
+                <span style={{ fontSize: 13, color: colors.textSecondary }}>Loading your Insights…</span>
+              </div>
+            </SurfaceCard>
+          )}
+
+          {/* A real, visible error instead of the previous silent
+           * console.error-only failure, which left this entire block
+           * permanently blank with no way for the user to tell "there's
+           * nothing to show" apart from "this is broken". No fabricated
+           * metric is ever substituted. */}
+          {goalReportingStatus === 'error' && (
+            <SurfaceCard accentColor={colors.danger} role="alert">
+              <div style={typography.sectionEyebrow}>Insights</div>
+              <div style={{ fontSize: 14, color: colors.textPrimary, marginTop: spacing.sm }}>
+                We couldn&rsquo;t load your Insights summary right now.
+              </div>
+              <div style={{ ...typography.meta, marginTop: spacing.xs }}>
+                Your other Insights below are unaffected. Try reloading in a moment.
+              </div>
+            </SurfaceCard>
+          )}
+
+          {goalReportingStatus === 'loaded' && goalReporting?.suggestions && (
             <AuraSuggestsSection
               suggestions={goalReporting.suggestions}
               dismissedIds={dismissedSuggestionIds}
@@ -581,7 +644,7 @@ export function InsightsView({ timezone, logEntries = [], assistantInsight, goal
             />
           )}
 
-          {goalReporting && <GoalPlanningReportingSection reporting={goalReporting} />}
+          {goalReportingStatus === 'loaded' && goalReporting && <GoalPlanningReportingSection reporting={goalReporting} />}
 
           {assistantInsight && (
             <SurfaceCard accentColor={colors.positive}>
@@ -1162,7 +1225,7 @@ function AuraSuggestsSection({
   suggestions: { primary: SuggestionView | null; secondary: SuggestionView[] };
   dismissedIds: ReadonlySet<string>;
   onDismiss: (id: string) => void;
-  onOpenPlanReview?: () => void;
+  onOpenPlanReview?: (target?: { planId?: string; planFilter?: 'AWAITING_CONFIRMATION' }) => void;
 }) {
   const visiblePrimary = suggestions.primary && !dismissedIds.has(suggestions.primary.id) ? suggestions.primary : null;
   // A dismissed PRIMARY leaves its own slot empty rather than promoting a
@@ -1174,7 +1237,13 @@ function AuraSuggestsSection({
   if (!visiblePrimary && visibleSecondary.length === 0) return null;
 
   const handleCta = (suggestion: SuggestionView) => {
-    if (suggestion.cta.action === 'OPEN_PLAN_REVIEW') onOpenPlanReview?.();
+    // Insights V1 PR7 (finding F-4) -- thread the suggestion's own
+    // planId/planFilter through so the Plan tab can open the specific
+    // plan (or a pre-filtered review list) this suggestion is about,
+    // instead of always landing on the generic new-activity composer.
+    if (suggestion.cta.action === 'OPEN_PLAN_REVIEW') {
+      onOpenPlanReview?.({ planId: suggestion.cta.planId, planFilter: suggestion.cta.planFilter });
+    }
     // OPEN_GOAL is rendered as a real <a href="/goals/...">  below --
     // no click handler needed for it.
   };
@@ -1243,15 +1312,40 @@ function GoalPlanningReportingSection({ reporting }: { reporting: GoalReportingR
   const rhythmGoals = reporting.goals.filter((goal) => goal.activities.some((activity) => activity.rhythm.kind === 'N_PER_WEEK'));
   const finiteGoals = reporting.goals.filter((goal) => goal.kind === 'FINITE' || goal.kind === 'MIXED');
   const hasAnyGoals = reporting.goals.length > 0;
+  const goalActivitiesWithProgress = reporting.goals.reduce((sum, g) => sum + g.progress.completed, 0);
 
   return (
     <>
-      {/* 1. Confirmed progress */}
+      {/* 1. Confirmed progress
+       *
+       * Insights V1 PR7 (finding F-1) -- these two numbers count
+       * DIFFERENT units and were previously both bare-labeled "done"/
+       * "completed" with no way to tell them apart: `confirmedCompleted`
+       * is every confirmed completion EVENT (a rhythm activity done 5
+       * times contributes 5), while `goals.reduce(...completed)` counts
+       * DISTINCT Goal activities that have reached a completed state at
+       * least once (that same 5x-completed rhythm activity still
+       * contributes exactly 1 -- see computeGoalProgress/goals.ts, not
+       * changed by this fix). Relabeled to name the actual unit each one
+       * counts, plus one plain-language line making the distinction
+       * explicit -- the underlying calculations themselves are
+       * unchanged. */}
       <SurfaceCard accentColor={colors.positive}>
         <div style={typography.sectionEyebrow}>Confirmed Progress</div>
         <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: `${spacing.sm}px ${spacing.lg}px`, marginTop: spacing.sm }}>
-          <InlineStat value={reporting.planningStatus.confirmedCompleted} label="confirmed completed" color={colors.positive} />
-          <InlineStat value={reporting.goals.reduce((sum, g) => sum + g.progress.completed, 0)} label="Goal activities done" color={colors.info} />
+          <InlineStat
+            value={reporting.planningStatus.confirmedCompleted}
+            label={reporting.planningStatus.confirmedCompleted === 1 ? 'confirmed completion' : 'confirmed completions'}
+            color={colors.positive}
+          />
+          <InlineStat
+            value={goalActivitiesWithProgress}
+            label={goalActivitiesWithProgress === 1 ? 'Goal activity with progress' : 'Goal activities with progress'}
+            color={colors.info}
+          />
+        </div>
+        <div style={{ ...typography.meta, marginTop: spacing.sm }}>
+          Completions counts every confirmed activity. Goal activities counts distinct Goal activities with at least one completion — doing the same one repeatedly still counts once here.
         </div>
       </SurfaceCard>
 

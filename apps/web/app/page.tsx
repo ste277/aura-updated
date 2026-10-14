@@ -158,6 +158,23 @@ export default function DashboardPage() {
   // thrown) on failure) -- InsightsView renders its own empty state when
   // this stays null, same as it already does for a null assistantInsight.
   const [goalReporting, setGoalReporting] = useState<any>(null);
+  // Insights V1 PR7 -- explicit fetch-lifecycle state for goalReporting
+  // (AURA_INSIGHTS_V1_PRODUCT_COMPLETION_AUDIT.md §19 scenario 20), so
+  // InsightsView can show an honest loading/error state instead of
+  // silently staying blank. 'loading' until the first fetch below
+  // resolves one way or the other.
+  const [goalReportingStatus, setGoalReportingStatus] = useState<'loading' | 'loaded' | 'error'>('loading');
+  // Insights V1 PR7 (finding F-4) -- the "Review plans"/"Open Plan"/
+  // "Review today's plan" CTAs now thread the clicked suggestion's own
+  // plan identity through to the Plan tab (planFocusId for a single
+  // deterministic plan, planFocusFilter for a pre-filtered review list)
+  // instead of always landing on the generic new-activity composer.
+  // planFocusKey mirrors momentsFocusKey's own established pattern: an
+  // incrementing counter so PlanWithAuraView's effect re-fires even when
+  // the SAME plan/filter is requested twice in a row.
+  const [planFocusKey, setPlanFocusKey] = useState(0);
+  const [planFocusId, setPlanFocusId] = useState<string | null>(null);
+  const [planFocusFilter, setPlanFocusFilter] = useState<'AWAITING_CONFIRMATION' | null>(null);
   const [todayReflection, setTodayReflection] = useState<DailyReflectionState | null>(null);
   const [plannedActivities, setPlannedActivities] = useState<PlannedActivityState[]>([]);
   // Recipient Conversion V1 Hardening (brief section 8) -- an existing
@@ -391,7 +408,17 @@ export default function DashboardPage() {
         setPersonalContext(briefingData.personalContext);
       }
       if (insightRes.ok) setAssistantInsight(await insightRes.json());
-      if (goalReportingRes.ok) setGoalReporting(await goalReportingRes.json());
+      if (goalReportingRes.ok) {
+        setGoalReporting(await goalReportingRes.json());
+        setGoalReportingStatus('loaded');
+      } else {
+        // loadAssistantSignals can also run again later (e.g. a manual
+        // refresh) after an earlier successful load -- a transient
+        // refetch failure must not tear down already-displayed data back
+        // into a blank error state, only the FIRST load (still 'loading')
+        // surfaces as 'error'. Same reasoning in the catch block below.
+        setGoalReportingStatus((prev) => (prev === 'loaded' ? prev : 'error'));
+      }
       if (reflectionRes.ok) {
         const reflection = await reflectionRes.json();
         setTodayReflection(reflection ? {
@@ -401,6 +428,7 @@ export default function DashboardPage() {
       }
     } catch (err) {
       console.error('Failed to load daily assistant signals:', err);
+      setGoalReportingStatus((prev) => (prev === 'loaded' ? prev : 'error'));
     }
   }, []);
 
@@ -1584,6 +1612,9 @@ export default function DashboardPage() {
             focusMomentsKey={momentsFocusKey}
             focusMomentToken={momentsFocusToken}
             onMomentSeen={loadAuraUpdates}
+            focusPlansKey={planFocusKey}
+            focusPlanId={planFocusId}
+            focusPlansFilter={planFocusFilter}
           />
         )}
 
@@ -1593,7 +1624,19 @@ export default function DashboardPage() {
             logEntries={logEntries}
             assistantInsight={assistantInsight}
             goalReporting={goalReporting}
-            onOpenPlanReview={() => setActiveTab('plan')}
+            goalReportingStatus={goalReportingStatus}
+            onOpenPlanReview={(target) => {
+              // Insights V1 PR7 (finding F-4) -- carry the clicked
+              // suggestion's own plan identity (if any) into the Plan tab
+              // instead of always landing on the generic composer.
+              // planFocusKey increments every click so the destination
+              // effect re-fires even when the SAME plan is requested twice
+              // in a row (same pattern momentsFocusKey already uses).
+              setPlanFocusId(target?.planId ?? null);
+              setPlanFocusFilter(target?.planFilter ?? null);
+              setPlanFocusKey((key) => key + 1);
+              setActiveTab('plan');
+            }}
           />
         )}
 
