@@ -6,6 +6,7 @@ import {
   listGoalActivitiesWithLinkedPlanStatusForGoals,
   loadGoalActivityRhythmFactsForActivities,
   listPlannedActivitiesForReporting,
+  countDeletedNonGoalCompletionsInRange,
 } from '../../../../lib/db';
 import { getDatePartsInTimezone } from '../../../../lib/timezone';
 import { normalizeGoalActivityRhythm } from '../../../../lib/goalActivityRhythm';
@@ -83,7 +84,27 @@ export async function GET(req: NextRequest) {
   // classifyPlanningStatus/summarizePlanningStatus (insightsReporting.ts).
   // ============================================================
   const plans = await listPlannedActivitiesForReporting(session.userId, from, to);
-  const planningStatus = summarizePlanningStatus(plans, now);
+  const livePlanningStatus = summarizePlanningStatus(plans, now);
+
+  // ============================================================
+  // Insights V1 PR6 -- Durable Completion Attribution. The live-Plan path
+  // above (`livePlanningStatus`) remains fully authoritative and
+  // untouched -- this adds ONLY the recovered count of confirmed,
+  // non-Goal-linked completions whose originating Plan has since been
+  // hard-deleted (countDeletedNonGoalCompletionsInRange, db.ts -- see its
+  // own doc comment for the full deduplication/attribution contract).
+  // `confirmedCompleted` keeps its EXACT existing PR4 meaning --
+  // "confirmed completions, attributed by scheduled date, within the
+  // requested range" -- now simply more complete. `total` is incremented
+  // by the same amount, preserving the existing invariant that every
+  // PlanningStatusSummary bucket sums to `total`.
+  // ============================================================
+  const deletedNonGoalCompletionCount = await countDeletedNonGoalCompletionsInRange(session.userId, from, to);
+  const planningStatus = {
+    ...livePlanningStatus,
+    confirmedCompleted: livePlanningStatus.confirmedCompleted + deletedNonGoalCompletionCount,
+    total: livePlanningStatus.total + deletedNonGoalCompletionCount,
+  };
 
   const awaitingConfirmationItems = plans
     .filter((plan) => classifyPlanningStatus(plan, now) === 'AWAITING_CONFIRMATION')

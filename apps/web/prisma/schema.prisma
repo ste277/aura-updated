@@ -321,7 +321,53 @@ model HabitLog {
   // it lives only in migration 0032's raw SQL, not represented here.
   clientRequestId String?
 
+  // Insights V1 PR6 -- Durable Completion Attribution (migration 0049).
+  // Four columns, always written TOGETHER (or not at all) by
+  // logPlannedActivity, at the exact same moment this row is created --
+  // never backfilled for any pre-existing row (see migration 0049's own
+  // comment for the full rationale, matching the established
+  // movedAt/scheduledWeekStart precedent of "additive only, no
+  // backfill"). Exist so a completion's scheduled-date and Goal
+  // attribution survive deletePlannedActivity's hard-delete of the
+  // originating PlannedActivity row -- see AURA_INSIGHTS_PR6_
+  // COMPLETION_EVIDENCE_DECISION.md for the full design.
+  //
+  // Deliberately PLAIN values, never live-cascading FKs to
+  // PlannedActivity or GoalActivityExecution: both referenced rows must
+  // remain identifiable here even after they are themselves deleted, the
+  // same "not a foreign key" precedent activityId above already
+  // establishes for a different reason (a static catalog that isn't a
+  // Prisma model) -- here the reason is the opposite: the referenced
+  // rows ARE Prisma models, but this column must survive their deletion
+  // with its value intact, which no onDelete action (SetNull or
+  // Cascade) would allow.
+  originatingPlannedActivityId String?
+  // plan.plannedStartAt, read inside logPlannedActivity's own
+  // transaction at the moment of completion -- the plan's own CURRENT,
+  // post-Move, committed schedule (Move creates a new successor row with
+  // its own plannedStartAt; this always snapshots whichever row is
+  // actually being completed). NEVER re-derived from logTimestamp,
+  // createdAt, updatedAt, or the user's current timezone at read time.
+  scheduledStartAtSnapshot DateTime? @db.Timestamptz(3)
+  // Explicit three-state classification: 'GOAL_LINKED' | 'NON_GOAL'.
+  // NULL means UNKNOWN_LEGACY (a row written before this feature
+  // existed) -- a real, distinct, deliberately excluded third state,
+  // NEVER silently treated as 'NON_GOAL'. Every reader of this column
+  // MUST handle NULL as its own case.
+  completionAttribution String?
+  // Set ONLY when completionAttribution = 'GOAL_LINKED' -- a stable
+  // pointer to the exact GoalActivityExecution row this same completion
+  // produced, eliminating any need to correlate HabitLog and
+  // GoalActivityExecution by title/timestamp proximity (which this
+  // design explicitly never does). Plain value for the same
+  // survive-deletion reason as originatingPlannedActivityId above.
+  originatingGoalActivityExecutionId String?
+
   @@index([userId, logTimestamp])
+  // Insights V1 PR6 -- covers the reporting fallback's own exact access
+  // pattern (userId + attribution + range-bounded scheduled date) in a
+  // single index.
+  @@index([userId, completionAttribution, scheduledStartAtSnapshot])
 }
 
 enum PlannedActivitySchedulingMode {
