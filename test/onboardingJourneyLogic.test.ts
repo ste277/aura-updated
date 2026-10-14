@@ -44,6 +44,7 @@ const pageSource = stripComments(read('apps/web/app/page.tsx'));
 const sessionRouteSource = stripComments(read('apps/web/app/api/auth/session/route.ts'));
 const onboardingRouteSource = stripComments(read('apps/web/app/api/users/onboarding/route.ts'));
 const dbSource = stripComments(read('apps/web/lib/db.ts'));
+const locationConfirmationSource = stripComments(read('apps/web/lib/locationConfirmation.ts'));
 
 // ============================================================
 // Architecture boundaries -- reuse, no duplicate state/persistence.
@@ -57,16 +58,29 @@ check('never imports a second Prisma/db/pool module (no duplicate persistence pa
 // B. Location confirmation.
 // ============================================================
 
-check('B1. confirmSuggestedCity is the ONE explicit "confirm the suggested city" action, calling PATCH /api/users/location', /async function confirmSuggestedCity\(\)/.test(journey) && /fetch\('\/api\/users\/location', \{\s*method: 'PATCH'/.test(journey));
+// Location PR9 -- confirmSuggestedCity no longer calls fetch/PATCH inline.
+// It now delegates to the SAME shared submitLocationConfirmation helper
+// LocationPicker.tsx's own confirmCurrentLocation uses (lib/locationConfirmation.ts),
+// so onboarding and Settings share one implementation of "how to confirm a
+// location" instead of two independently-maintained copies. B1/B4/B5 below
+// are rewritten against that shape; B1b anchors the literal PATCH fetch to
+// the one shared helper file so no caller can silently reintroduce a second
+// inline implementation.
+check('B1. confirmSuggestedCity is the ONE explicit "confirm the suggested city" action -- it submits via the SAME shared helper LocationPicker\'s own confirmCurrentLocation uses, not its own inline fetch', /async function confirmSuggestedCity\(\)/.test(journey) && /import \{ submitLocationConfirmation \} from '\.\.\/lib\/locationConfirmation'/.test(journey) && /await submitLocationConfirmation\(/.test(journey) && !/fetch\('\/api\/users\/location'/.test(journey));
+check('B1b. the shared helper (lib/locationConfirmation.ts) is the one place that actually calls fetch PATCH /api/users/location', /fetch\('\/api\/users\/location', \{\s*method: 'PATCH'/.test(locationConfirmationSource));
 check('B2. the confirm action branches curated-vs-custom via the SAME findCity helper LocationPicker itself uses (no second validation path)', /import \{ findCity \} from '\.\.\/lib\/cities'/.test(journey) && /findCity\(cityName\)/.test(journey));
-check('B3. no component-mount effect ever calls confirmSuggestedCity or PATCH /api/users/location (no automatic confirmation)', !/useEffect\([^)]*\{[\s\S]*?(confirmSuggestedCity|PATCH)/.test(journey));
-check('B4. confirmSuggestedCity is wrapped in try/catch/finally -- a network failure sets an error and always clears the loading state', /try \{[\s\S]*?confirmSuggestedCity[\s\S]*?\}/s.test('function confirmSuggestedCity') || (/async function confirmSuggestedCity\(\) \{[\s\S]*?try \{[\s\S]*?\} catch \{[\s\S]*?setConfirmError[\s\S]*?\} finally \{[\s\S]*?setConfirming\(false\)/.test(journey)));
-check('B5. confirmSuggestedCity never calls onLocationChanged/advances the step from inside its catch block (failure never claims confirmation)', (() => {
+check('B3. no component-mount effect ever calls confirmSuggestedCity or the shared confirmation helper (no automatic confirmation)', !/useEffect\([^)]*\{[\s\S]*?(confirmSuggestedCity|submitLocationConfirmation)/.test(journey));
+check('B4. confirmSuggestedCity always clears the loading state after the shared helper resolves, whether it succeeded or failed (setConfirming(false) is unconditional, not gated inside either branch -- the shared helper itself already never throws, so no try/finally is needed to guarantee this)', (() => {
   const start = journey.indexOf('async function confirmSuggestedCity');
   const body = journey.slice(start, journey.indexOf('\n  }\n', start));
-  const catchMatch = body.match(/\} catch \{([\s\S]*?)\} finally/);
-  const catchBlock = catchMatch ? catchMatch[1] : '';
-  return !/onLocationChanged|setStep/.test(catchBlock);
+  return /await submitLocationConfirmation\(/.test(body) && /\}\s*else\s*\{[\s\S]*?setConfirmError\(result\.error\);[\s\S]*?\}\s*setConfirming\(false\);/.test(body);
+})());
+check('B5. confirmSuggestedCity never calls onLocationChanged/advances the step when the shared helper reports failure (failure never claims confirmation)', (() => {
+  const start = journey.indexOf('async function confirmSuggestedCity');
+  const body = journey.slice(start, journey.indexOf('\n  }\n', start));
+  const elseMatch = body.match(/\}\s*else\s*\{([\s\S]*?)\}\s*setConfirming\(false\);/);
+  const elseBlock = elseMatch ? elseMatch[1] : '';
+  return elseBlock.length > 0 && !/onLocationChanged|setStep/.test(elseBlock);
 })());
 check('B6. the confirm button is disabled only while confirming (never permanently) -- retry stays available after a failure', /disabled=\{confirming\}/.test(journey) && !/disabled=\{confirmError/.test(journey));
 check('B7. a confirmation error is rendered with role="alert" (screen-reader-friendly)', /role="alert"[\s\S]*?confirmError/.test(journey) || /confirmError[\s\S]{0,80}role="alert"/.test(journey));

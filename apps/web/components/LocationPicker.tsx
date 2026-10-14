@@ -3,6 +3,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { CITY_OPTIONS, parseCoordinate, formatCoordinateDirectional, MIN_VALID_LATITUDE, MAX_VALID_LATITUDE, MIN_VALID_LONGITUDE, MAX_VALID_LONGITUDE } from '../lib/cities';
 import { isValidIanaTimezone, searchTimezones, TimezoneOption } from '../lib/timezone';
+import { submitLocationConfirmation } from '../lib/locationConfirmation';
 
 interface CityOption {
   cityName: string;
@@ -41,10 +42,16 @@ interface LocationPickerProps {
    * latitude/longitude range) before the action renders at all -- when
    * any is missing/invalid, this component falls back to requiring an
    * explicit selection exactly as it always has. OnboardingJourney's own
-   * call site deliberately omits these three (it already has its own
-   * equivalent "Confirm {cityName}" action outside this component, see
-   * OnboardingJourney.tsx's own onConfirmSuggested) -- omitting them is
-   * fully backward compatible, not a second code path to keep in sync. */
+   * call site deliberately omits these three -- it already has its own
+   * equivalent "Confirm {cityName}" action outside this component (see
+   * OnboardingJourney.tsx's own confirmSuggestedCity/onConfirmSuggested),
+   * so rendering a second "Confirm" card inside its embedded LocationPicker
+   * would just duplicate the UI on the same screen. Omitting them is fully
+   * backward compatible. Location PR9 -- that UI duplication is a
+   * presentation choice only, not an implementation one: confirmSuggestedCity
+   * and this file's own confirmCurrentLocation now both submit through the
+   * ONE shared lib/locationConfirmation.ts helper, so there is exactly one
+   * implementation of "confirm this location" to keep in sync, not two. */
   currentLatitude?: number | null;
   currentLongitude?: number | null;
   currentTimezone?: string | null;
@@ -317,37 +324,26 @@ export function LocationPicker({ currentCity, currentLatitude, currentLongitude,
     if (!currentLocationReady || confirmingCurrent) return;
     setConfirmingCurrent(true);
     setConfirmCurrentError(null);
-    try {
-      const res = await fetch('/api/users/location', {
-        method: 'PATCH',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          custom: {
-            cityName: currentCity,
-            latitude: currentLatitude,
-            longitude: currentLongitude,
-            timezone: currentTimezone,
-          },
-        }),
+    const result = await submitLocationConfirmation({
+      custom: {
+        cityName: currentCity,
+        latitude: currentLatitude,
+        longitude: currentLongitude,
+        timezone: currentTimezone,
+      },
+    });
+    if (result.ok) {
+      onChanged({
+        cityName: currentCity,
+        latitude: currentLatitude as number,
+        longitude: currentLongitude as number,
+        timezone: currentTimezone as string,
+        locationConfirmedAt: result.locationConfirmedAt,
       });
-      if (res.ok) {
-        const data = await res.json().catch(() => ({}));
-        onChanged({
-          cityName: currentCity,
-          latitude: currentLatitude as number,
-          longitude: currentLongitude as number,
-          timezone: currentTimezone as string,
-          locationConfirmedAt: typeof data.locationConfirmedAt === 'string' ? data.locationConfirmedAt : null,
-        });
-      } else {
-        const data = await res.json().catch(() => ({}));
-        setConfirmCurrentError(typeof data.error === 'string' && data.error ? data.error : 'Could not confirm location.');
-      }
-    } catch {
-      setConfirmCurrentError("Couldn't confirm location. Please try again.");
-    } finally {
-      setConfirmingCurrent(false);
+    } else {
+      setConfirmCurrentError(result.error);
     }
+    setConfirmingCurrent(false);
   }
 
   // Combine static options with saved custom cities (deduped by city name)

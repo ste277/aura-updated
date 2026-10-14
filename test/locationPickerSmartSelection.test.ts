@@ -87,10 +87,23 @@ check('a confirm failure is rendered with role="alert" (screen-reader-friendly, 
 // {currentCity}" action, AURA_LOCATION_CONFIRMATION_AUDIT_V1.md root
 // cause #2) is a fourth, equally legitimate caller of the SAME PATCH
 // /api/users/location endpoint -- never a parallel/competing write path,
-// never a new persistence contract. The count below is intentionally
-// updated from 3 to 4 to recognize it; this guard still fails the moment
-// any FIFTH, truly accidental call site is introduced.
-check('exactly FOUR PATCH /api/users/location call sites exist (curated select, custom form, confirmPendingResult, confirmCurrentLocation) -- no fifth, accidental write path', (picker.match(/method: 'PATCH'/g) ?? []).length === 4);
+// never a new persistence contract.
+//
+// Location PR9 -- confirmCurrentLocation's own inline fetch/PATCH was
+// extracted into lib/locationConfirmation.ts's submitLocationConfirmation
+// (shared with OnboardingJourney.tsx's confirmSuggestedCity), so this
+// file's own inline `method: 'PATCH'` count drops back to THREE (curated
+// select, custom form, confirmPendingResult); confirmCurrentLocation is
+// re-verified separately below as a caller of the shared helper instead.
+// This guard still fails the moment any accidental FOURTH inline call
+// site is introduced.
+check('exactly THREE inline PATCH /api/users/location call sites remain in this file (curated select, custom form, confirmPendingResult) -- confirmCurrentLocation now delegates to the shared helper instead of a fourth inline call', (picker.match(/method: 'PATCH'/g) ?? []).length === 3);
+check('confirmCurrentLocation calls the shared submitLocationConfirmation helper, not its own inline fetch (Location PR9 -- one implementation, not a second)', (() => {
+  const start = picker.indexOf('async function confirmCurrentLocation');
+  const body = picker.slice(start, picker.indexOf('\n  }\n', start));
+  return /submitLocationConfirmation\(/.test(body) && !/fetch\(/.test(body);
+})());
+check('LocationPicker.tsx imports submitLocationConfirmation from the shared lib/locationConfirmation module', /import \{ submitLocationConfirmation \} from '\.\.\/lib\/locationConfirmation'/.test(picker));
 check('`pending` state is never persisted (no localStorage/sessionStorage) -- a refresh before confirming genuinely discards the unconfirmed candidate, it is not silently re-offered as if it were saved', !/localStorage|sessionStorage/.test(picker));
 
 // ============================================================
