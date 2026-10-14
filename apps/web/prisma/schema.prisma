@@ -80,6 +80,30 @@ model User {
   // false -- no backfill ever sets this true.
   availabilityConfigured Boolean @default(false)
 
+  // Daily Rhythm V1 PR DR1 -- Preferences Foundation (see
+  // AURA_DAILY_RHYTHM_V1_ARCHITECTURE_AUDIT.md section 4, Option A).
+  // dailyRhythmWorkStart/dailyRhythmWorkEnd are "HH:mm" 24h civil strings,
+  // resolved against User.timezone exactly like UserAvailabilityPeriod's
+  // own startTime/endTime (no timezone of their own). BOTH NULL is the
+  // ONLY unconfigured state and the default for every existing and new
+  // row -- no backfill, no default work hours ever written without an
+  // explicit user save (this ticket's own "do not store default work
+  // hours without user confirmation"). The two fields are always written
+  // and cleared TOGETHER (see setDailyRhythmPreferences/
+  // clearDailyRhythmPreferences, db.ts) -- one set and one null is an
+  // impossible state no reader should need to handle. dailyRhythmWorkDays
+  // is a weekday set (0=Sunday..6=Saturday, same convention as
+  // UserAvailabilityPeriod.weekday), empty by default; an empty set is a
+  // valid, deliberate "no day is currently a work day" state, never an
+  // error. THESE FIELDS ARE READ BY NOTHING YET in this PR -- no
+  // scheduling/recommendation code references them (day constructor,
+  // Find a Time, Home, and Goals are all untouched) -- they exist purely
+  // as persisted user preference, wired up to real scheduling logic only
+  // in a later, separately-authorized PR.
+  dailyRhythmWorkStart String?
+  dailyRhythmWorkEnd   String?
+  dailyRhythmWorkDays  Int[]    @default([])
+
   habitLogs       HabitLog[]
   visitLogs       VisitLog[]
   habits          Habit[]

@@ -7,6 +7,7 @@ import { ReminderSettings } from './ReminderSettings';
 import { DayBuilderSettings } from './DayBuilderSettings';
 import { ActivityDurationPreferences } from './ActivityDurationPreferences';
 import { AvailabilitySettings } from './AvailabilitySettings';
+import { DailyRhythmSettings } from './DailyRhythmSettings';
 import type { NotificationPrefs } from '../lib/windowNotifications';
 import * as theme from './theme';
 import { colors, spacing, typography, radius } from './theme';
@@ -240,6 +241,15 @@ export function YouView({
       <div>
         <SectionHeader label="Availability" />
         <AvailabilitySettings />
+      </div>
+
+      {/* Daily Rhythm V1 PR DR1 -- a self-contained panel (owns its own
+       * GET/PUT/DELETE), same pattern as Availability directly above.
+       * Deliberately placed inline in the existing Planning section, not
+       * a new navigation section. */}
+      <div>
+        <SectionHeader label="Daily Rhythm" />
+        <DailyRhythmSettings />
       </div>
 
       <div style={{ scrollMarginTop: 18 }}>
