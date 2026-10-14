@@ -17,6 +17,12 @@ interface YouViewProps {
   email: string;
   cityName: string;
   timezone: string;
+  /** Location PR8 -- the same already-persisted coordinates `cityName`/
+   * `timezone` above come from, threaded down to LocationPicker so it can
+   * offer a direct "Confirm {cityName}" action. See LocationPicker's own
+   * prop doc comment for why these are optional/independently validated. */
+  latitude?: number | null;
+  longitude?: number | null;
   /** Onboarding V1 PR 1 -- Location Trust Foundation. `false` means this
    * location has never been explicitly confirmed -- surfaced as a plain
    * "Not yet confirmed" qualifier on the existing Location & Time row,
@@ -67,6 +73,8 @@ export function YouView({
   email,
   cityName,
   timezone,
+  latitude,
+  longitude,
   locationConfirmed,
   initialOpenPanel,
   notificationPrefs,
@@ -168,7 +176,13 @@ export function YouView({
               <div style={{ color: colors.textSecondary, fontSize: 12, lineHeight: 1.45, marginBottom: 10 }}>
                 Your selected location determines Panchang windows, calendar feed timing, and daily suggestions.
               </div>
-              <LocationPicker currentCity={cityName} onChanged={onLocationChanged} />
+              <LocationPicker
+                currentCity={cityName}
+                currentLatitude={latitude}
+                currentLongitude={longitude}
+                currentTimezone={timezone}
+                onChanged={onLocationChanged}
+              />
             </div>
           )}
           <SettingsRow icon="📅" title="Calendar & Sync" detail="Aura plans + Panchang windows" expanded={openSettingsPanel === 'calendar'} onClick={() => toggleSettingsPanel('calendar')} />
