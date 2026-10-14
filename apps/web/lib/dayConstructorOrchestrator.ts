@@ -31,8 +31,9 @@
  */
 
 import type { User, HabitLogRow } from './db';
-import { listPlannedActivitiesOverlappingRange, listHabitLogs, listUserAvailabilityPeriods } from './db';
+import { listPlannedActivitiesOverlappingRange, listHabitLogs, listUserAvailabilityPeriods, getDailyWorkPreferences } from './db';
 import { resolveAvailability, normalizeUsableWindowsToConstructionWindow, type AvailabilityConfiguration } from './availabilityContext';
+import { applyDailyRhythmPreference, explainDailyRhythmPlacement, type DailyRhythmPreferencesInput } from './dailyRhythmScheduling';
 import { listUserActivityPreferences, type UserActivityPreference } from './activityPreferences';
 import { buildDurationContext } from './durationContext';
 import { durationMinutesFor, GENERIC_DURATION_FALLBACK_MINUTES } from './dayBuilderOrchestrator';
@@ -210,6 +211,25 @@ export interface DayConstructorOrchestratorDeps {
    * resolution decision of its own (that stays entirely inside the pure
    * `resolveAvailability`, never duplicated here). */
   loadAvailabilityConfiguration: () => Promise<AvailabilityConfiguration>;
+  /** Daily Rhythm V1 PR DR2 -- the user's saved work-hours preference
+   * (DR1's own `User.dailyRhythmWork{Start,End,Days}`), in the exact
+   * shape `applyDailyRhythmPreference`/`explainDailyRhythmPlacement`
+   * (dailyRhythmScheduling.ts) consume. Called EXACTLY ONCE per
+   * orchestration run, same convention as `loadAvailabilityConfiguration`
+   * above -- this dependency's own job is only to fetch the raw
+   * preference, never to decide workday/overlap/classification (that
+   * stays entirely inside the pure dailyRhythmScheduling.ts, never
+   * duplicated here). A user who never configured Daily Rhythm (DR1's
+   * own both-null convention) resolves to `{workStart: null, workEnd:
+   * null, workDays: []}`, which `isDailyRhythmConfigured` treats as "no
+   * preference" -- zero behavior change for any such user. OPTIONAL
+   * (same convention as `prepareDecisionFacts` below): omitting it is
+   * byte-identical to the user never having configured Daily Rhythm, so
+   * an existing caller that builds its own `DayConstructorOrchestratorDeps`
+   * without this field (e.g. Remaining-Day Recomposition's own adapter,
+   * remainingDayRecomposition.ts) keeps compiling and behaving exactly
+   * as before DR2 -- this ticket's own explicit scope boundary. */
+  loadDailyRhythmPreferences?: () => Promise<DailyRhythmPreferencesInput>;
   /** Constructor Decision Intelligence O5 P1 -- OPTIONAL. Prepares trusted
    * decision facts for the resolved intents BEFORE `constructDay` runs
    * (decisionFactPreparation.ts). The orchestrator only coordinates it: it
@@ -288,6 +308,10 @@ export function createRealDayConstructorOrchestratorDeps(user: User, now: Date):
         configured: user.availabilityConfigured === true,
         periods: periods.map((row) => ({ weekday: row.weekday as AvailabilityConfiguration['periods'][number]['weekday'], startTime: row.startTime, endTime: row.endTime })),
       };
+    },
+    loadDailyRhythmPreferences: async () => {
+      const prefs = await getDailyWorkPreferences(user.id);
+      return prefs ? { workStart: prefs.workStart, workEnd: prefs.workEnd, workDays: prefs.workDays } : { workStart: null, workEnd: null, workDays: [] };
     },
   };
 }
@@ -468,7 +492,20 @@ function resolveRequestedDayIntent(
 // failures. A warning never turns a valid proposal into an error.
 // ============================================================
 
-export type ConstructDayWarningCode = 'ACTIVITY_RESOLVED_TO_COARSE_FAMILY' | 'DURATION_FROM_GENERIC_FALLBACK' | 'NO_TIMING_CANDIDATES_FOUND';
+/** Daily Rhythm V1 PR DR2 -- three new codes, appended (never replacing
+ * or renumbering an existing one). Generated once, AFTER construction
+ * (including every replenishment round) has fully settled, from each
+ * FLEXIBLE `ProposedItem`'s own final placed start/end -- never
+ * speculatively from a candidate that wasn't actually chosen, and never
+ * for a FIXED placement (see explainDailyRhythmPlacement's own doc
+ * comment). */
+export type ConstructDayWarningCode =
+  | 'ACTIVITY_RESOLVED_TO_COARSE_FAMILY'
+  | 'DURATION_FROM_GENERIC_FALLBACK'
+  | 'NO_TIMING_CANDIDATES_FOUND'
+  | 'DAILY_RHYTHM_PERSONAL_OUTSIDE_WORK_HOURS'
+  | 'DAILY_RHYTHM_PERSONAL_DURING_WORK_HOURS_FALLBACK'
+  | 'DAILY_RHYTHM_FLEXIBLE_BREAK_DURING_WORK_HOURS';
 
 export interface ConstructDayWarning {
   /** The REQUESTED intent's own caller-supplied id (never the internal
@@ -847,7 +884,11 @@ async function runOrchestration(request: ConstructDayRequest, deps: DayConstruct
   // ticket's own section 20), never once per intent.
   const dayBounds = localDayBoundsUTC(request.targetDate, request.timezone);
   const blockerBounds = resolveBlockerLoadBounds(dayBounds, window);
-  const [blockingPlanCandidates, durationContext] = await Promise.all([deps.loadBlockingPlans(blockerBounds), deps.loadDurationContext()]);
+  const [blockingPlanCandidates, durationContext, dailyRhythmPrefs] = await Promise.all([
+    deps.loadBlockingPlans(blockerBounds),
+    deps.loadDurationContext(),
+    deps.loadDailyRhythmPreferences ? deps.loadDailyRhythmPreferences() : Promise.resolve<DailyRhythmPreferencesInput>({ workStart: null, workEnd: null, workDays: [] }),
+  ]);
   // Lifecycle filtering happens HERE, in the orchestrator's own testable
   // core (this ticket's own section 6: "Keep this in the orchestrator
   // layer") -- `deps.loadBlockingPlans` only fetches raw rows;
@@ -969,7 +1010,18 @@ async function runOrchestration(request: ConstructDayRequest, deps: DayConstruct
       return { status: 'TIMING_SEARCH_FAILED', requestedIntentId: requested.id, reason: err instanceof Error ? err.message : String(err) };
     }
 
-    const normalized = searchResult.candidates
+    // Daily Rhythm V1 PR DR2 -- applied to the ALREADY-ranked candidate
+    // list `deps.searchTiming` just returned, strictly before
+    // normalization: a pure filter-with-fallback, never a re-score,
+    // never touching `constructDay`'s own [timingFit, start,
+    // candidateOrder] ranking (dayConstructor.ts remains untouched). See
+    // dailyRhythmScheduling.ts's own doc comment for the full contract.
+    const dailyRhythmFilteredCandidates = applyDailyRhythmPreference(searchResult.candidates, dayIntent.activityId, {
+      targetDate: request.targetDate,
+      timezone: request.timezone,
+      prefs: dailyRhythmPrefs,
+    });
+    const normalized = dailyRhythmFilteredCandidates
       .map((candidate, index) => normalizeCandidate(dayIntent.id, candidate, index))
       .filter((candidate): candidate is PlacementCandidate => candidate !== null);
     candidatesByIntentId[dayIntent.id] = normalized;
@@ -1118,7 +1170,17 @@ async function runOrchestration(request: ConstructDayRequest, deps: DayConstruct
       } catch (err) {
         return { status: 'TIMING_SEARCH_FAILED', requestedIntentId: intentId, reason: err instanceof Error ? err.message : String(err) };
       }
-      candidatesByIntentId[intentId] = replenishedResult.candidates
+      // Daily Rhythm V1 PR DR2 -- the SAME filter-with-fallback applied to
+      // the primary loop above, re-run independently on this round's own
+      // freshly-searched candidates (never cached from the first round),
+      // so a personal activity that lost its outside-work slot to a
+      // same-run sibling still gets a fresh outside-first attempt here.
+      const dailyRhythmFilteredReplenished = applyDailyRhythmPreference(replenishedResult.candidates, meta.activityId, {
+        targetDate: request.targetDate,
+        timezone: request.timezone,
+        prefs: dailyRhythmPrefs,
+      });
+      candidatesByIntentId[intentId] = dailyRhythmFilteredReplenished
         .map((candidate, index) => normalizeCandidate(intentId, candidate, index))
         .filter((candidate): candidate is PlacementCandidate => candidate !== null);
     }
@@ -1141,6 +1203,23 @@ async function runOrchestration(request: ConstructDayRequest, deps: DayConstruct
       optionalBasisStep(() => assembleConstructionBasis({ planningDate: request.targetDate, window, intents: intentsForConstructDay, blockedIntervals, initialCandidates: initialCandidateLists, finalCandidatesByIntentId: candidatesByIntentId, fixedConstraintsByIntentId })) ?? { status: 'UNAVAILABLE', reason: 'ASSEMBLY_FAILED' };
     // O5 P4b1b -- the baseline OUTCOME, from the same terminal `result.day` the basis was just assembled alongside; validated against that basis.
     evidenceOut.baselinePlacements = optionalBasisStep(() => captureBaselinePlacements(result.day, evidenceOut.constructionBasis ?? { status: 'UNAVAILABLE', reason: 'ASSEMBLY_FAILED' })) ?? { status: 'UNAVAILABLE', reason: 'CAPTURE_FAILED' };
+  }
+
+  // Daily Rhythm V1 PR DR2 -- explanations are derived from the FINAL,
+  // settled placement only (after every replenishment round), never
+  // speculatively during the per-intent search loop above (where the
+  // eventual winning candidate isn't known yet). A FIXED placement
+  // (`placementSource === 'FIXED_CONSTRAINT'`) never gets one -- a
+  // user-selected time is never second-guessed with Aura's own
+  // preference reasoning (this ticket's own "user-selected fixed times
+  // are never silently moved", which includes never implying they
+  // could/should have been).
+  for (const item of result.day.proposedItems) {
+    if (item.placementSource !== 'SELECTED_CANDIDATE') continue;
+    const explanation = explainDailyRhythmPlacement(item.activityId, item.start, item.end, { targetDate: request.targetDate, timezone: request.timezone, prefs: dailyRhythmPrefs });
+    if (explanation === 'PERSONAL_OUTSIDE_WORK_HOURS') warnings.push({ intentId: item.intentId, code: 'DAILY_RHYTHM_PERSONAL_OUTSIDE_WORK_HOURS' });
+    else if (explanation === 'PERSONAL_DURING_WORK_HOURS_FALLBACK') warnings.push({ intentId: item.intentId, code: 'DAILY_RHYTHM_PERSONAL_DURING_WORK_HOURS_FALLBACK' });
+    else if (explanation === 'FLEXIBLE_BREAK_DURING_WORK_HOURS') warnings.push({ intentId: item.intentId, code: 'DAILY_RHYTHM_FLEXIBLE_BREAK_DURING_WORK_HOURS' });
   }
 
   return {
