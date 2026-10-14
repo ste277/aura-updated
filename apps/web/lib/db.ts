@@ -1585,8 +1585,12 @@ export async function logPlannedActivity(userId: string, planId: string, options
       // include "activityId" (previously omitted), so a second/idempotent
       // completion request returns the SAME persisted identity as the
       // first, rather than silently reporting it as undefined.
+      // Insights V1 PR6 -- widened to also include the four attribution
+      // columns, so an idempotent retry returns the SAME complete row
+      // shape as a first-time completion, never a narrower one.
       const existingLog = await client.query(
-        `SELECT id, "userId", "activityTitle", "activityId", "activeWindow", "logTimestamp", "logMinuteOfDay", "durationMinutes", notes, "logSource", "activitySignificance"
+        `SELECT id, "userId", "activityTitle", "activityId", "activeWindow", "logTimestamp", "logMinuteOfDay", "durationMinutes", notes, "logSource", "activitySignificance",
+           "originatingPlannedActivityId", "scheduledStartAtSnapshot", "completionAttribution", "originatingGoalActivityExecutionId"
          FROM "HabitLog"
          WHERE id = $1 AND "userId" = $2`,
         [plan.habitLogId, userId]
@@ -1706,6 +1710,26 @@ export async function logPlannedActivity(userId: string, planId: string, options
       throw new Error('actualValue was supplied, but this plan is not linked to a Goal activity.');
     }
 
+    // Insights V1 PR6 -- Durable Completion Attribution. `executionWrite`
+    // is now fully resolved (set whenever `goalActivity` was truthy above;
+    // every path that leaves it unset without throwing corresponds to a
+    // genuinely non-Goal-linked plan) -- the invariant this depends on:
+    // there is no code path above that reaches this point with
+    // `goalActivity` truthy and `executionWrite` still null, since the
+    // only way out of the `if (goalActivity)` block besides setting
+    // `executionWrite` is a thrown error (which rolls back the whole
+    // transaction, writing nothing). Pre-generating the execution id here
+    // -- BEFORE the HabitLog insert below -- mirrors the exact
+    // `habitLogId = randomUUID()` precedent two lines down: both ids must
+    // be known before the HabitLog row is written, so the row can carry a
+    // stable, durable pointer to its own Goal-execution evidence from the
+    // moment of creation, never correlated after the fact by title/
+    // timestamp proximity. Reuses the EXISTING execution's own id
+    // unchanged on an idempotent re-log (never generates a second id for
+    // the same execution).
+    const goalActivityExecutionId = executionWrite ? executionWrite.existingExecutionId ?? randomUUID() : null;
+    const completionAttribution: 'GOAL_LINKED' | 'NON_GOAL' = executionWrite ? 'GOAL_LINKED' : 'NON_GOAL';
+
     // Plan Completion Historical Integrity V1 -- widened from the old
     // `SELECT timezone` to also fetch latitude/longitude, the two
     // additional Timing Location fields needed to resolve the ACTUAL
@@ -1761,12 +1785,22 @@ export async function logPlannedActivity(userId: string, planId: string, options
     // destroyed; C3's existing evaluateHabitLogAuraFit already handles that
     // drift gracefully (UNKNOWN_ACTIVITY_ID -> ineligible) without any
     // change to this function.
+    // Insights V1 PR6 -- the four durable attribution columns are written
+    // in this SAME INSERT, never a second statement: `plan.plannedStartAt`
+    // is the row this function already holds `FOR UPDATE` from step 1,
+    // read here (never re-queried), so it is necessarily the plan's own
+    // CURRENT, post-any-prior-Move, committed schedule -- exactly "the
+    // final accepted schedule at completion" (AURA_INSIGHTS_PR6_
+    // COMPLETION_EVIDENCE_DECISION.md section 7). Never substitutes
+    // logTimestamp/completionInstant for this value.
     const habitLogRes = await client.query(
       `INSERT INTO "HabitLog"
          (id, "userId", "activityTitle", "activityId", "activeWindow", "logMinuteOfDay",
-          "logTimestamp", "durationMinutes", notes, "logSource", "activitySignificance")
-       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, 'AURA_PLANNED', 'MEDIUM')
-       RETURNING id, "userId", "activityTitle", "activityId", "activeWindow", "logTimestamp", "logMinuteOfDay", "durationMinutes", notes, "logSource", "activitySignificance"`,
+          "logTimestamp", "durationMinutes", notes, "logSource", "activitySignificance",
+          "originatingPlannedActivityId", "scheduledStartAtSnapshot", "completionAttribution", "originatingGoalActivityExecutionId")
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, 'AURA_PLANNED', 'MEDIUM', $10, $11, $12, $13)
+       RETURNING id, "userId", "activityTitle", "activityId", "activeWindow", "logTimestamp", "logMinuteOfDay", "durationMinutes", notes, "logSource", "activitySignificance",
+         "originatingPlannedActivityId", "scheduledStartAtSnapshot", "completionAttribution", "originatingGoalActivityExecutionId"`,
       [
         habitLogId,
         userId,
@@ -1777,6 +1811,10 @@ export async function logPlannedActivity(userId: string, planId: string, options
         logTimestamp,
         plan.durationMinutes,
         notes,
+        planId,
+        plan.plannedStartAt,
+        completionAttribution,
+        goalActivityExecutionId,
       ]
     );
 
@@ -1827,11 +1865,16 @@ export async function logPlannedActivity(userId: string, planId: string, options
         // finite/NONE-rhythm completion (occurrenceId is null in that
         // case, from the resolution above) -- same nullability shape as
         // plannedActivityId's own optionality.
+        // Insights V1 PR6 -- uses the SAME id already written onto
+        // HabitLog.originatingGoalActivityExecutionId above (never a
+        // second, independently-generated id), so the two rows this one
+        // completion produces are durably, exactly cross-referenced from
+        // the moment of creation.
         await client.query(
           `INSERT INTO "GoalActivityExecution"
              (id, "userId", "goalActivityId", "plannedActivityId", "goalActivityOccurrenceId", "completionKindSnapshot", "completionTargetValueSnapshot", "completionUnitSnapshot", "currentValue", "source")
            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)`,
-          [randomUUID(), userId, executionWrite.goalActivityId, planId, executionWrite.occurrenceId, persisted.completionKindSnapshot, persisted.completionTargetValueSnapshot, persisted.completionUnitSnapshot, executionWrite.currentValue, 'AURA_PLANNED']
+          [goalActivityExecutionId, userId, executionWrite.goalActivityId, planId, executionWrite.occurrenceId, persisted.completionKindSnapshot, persisted.completionTargetValueSnapshot, persisted.completionUnitSnapshot, executionWrite.currentValue, 'AURA_PLANNED']
         );
       }
     }
@@ -3123,6 +3166,68 @@ export async function listPlannedActivitiesForReporting(userId: string, from: Da
     [userId, from, to]
   );
   return result.rows;
+}
+
+/**
+ * Insights V1 PR6 -- Durable Completion Attribution: the count of
+ * confirmed, non-Goal-linked completions whose ORIGINATING PlannedActivity
+ * has since been hard-deleted, attributable to the same scheduled-date
+ * range `listPlannedActivitiesForReporting` above already uses (never
+ * `logTimestamp`/`createdAt`, which record completion time, a materially
+ * different fact -- AURA_INSIGHTS_PR6_COMPLETION_EVIDENCE_DECISION.md
+ * section 7). A pure, additive fallback: the live-Plan path above remains
+ * fully authoritative and untouched; this only recovers evidence that
+ * would otherwise silently vanish from `confirmedCompleted` the moment a
+ * completed, non-Goal-linked Plan is cleared from "Recently Completed".
+ *
+ * Every condition below is required, matching the PR6 ticket's own exact
+ * specification -- never relaxed, never inferred from title/activityId/
+ * timestamp proximity:
+ *   - `"userId" = $1`                        -- ownership.
+ *   - `"logSource" = 'AURA_PLANNED'`          -- only a completion that
+ *     originated from completing a Plan (never a manual/do-now/custom-
+ *     habit log, which never sets the four PR6 columns at all).
+ *   - `"completionAttribution" = 'NON_GOAL'`  -- excludes 'GOAL_LINKED'
+ *     (already durably represented via GoalActivityExecution, PR3 -- see
+ *     the decision doc's own "do not double-count" contract) AND excludes
+ *     NULL/UNKNOWN_LEGACY (a row written before this feature existed,
+ *     whose attribution is permanently unknown -- NEVER silently treated
+ *     as NON_GOAL).
+ *   - `"originatingPlannedActivityId" IS NOT NULL` / `"scheduledStartAtSnapshot" IS NOT NULL`
+ *     -- defensive: both are always set together with a non-NULL
+ *     `completionAttribution` by the one canonical writer
+ *     (logPlannedActivity), so this should never actually filter
+ *     anything out in practice; kept as an explicit guard rather than an
+ *     assumption.
+ *   - `"scheduledStartAtSnapshot" BETWEEN $2 AND $3` -- the exact same
+ *     two range parameters the live-Plan query receives.
+ *   - `NOT EXISTS (... "habitLogId" = hl.id)` -- the deduplication
+ *     contract: a HabitLog whose originating Plan is STILL LIVE is
+ *     already counted via the live-Plan path above; this clause is what
+ *     prevents it from ever being counted twice. Uses the HabitLog's own
+ *     stable id for this existence check, never title/date matching.
+ *
+ * Covered by the composite index on (userId, completionAttribution,
+ * scheduledStartAtSnapshot) and the partial index on
+ * PlannedActivity.habitLogId, both added by migration 0049 -- one bounded,
+ * indexed query, no N+1. Read-only; no write, no side effect.
+ */
+export async function countDeletedNonGoalCompletionsInRange(userId: string, from: Date, to: Date): Promise<number> {
+  const result = await pool.query(
+    `SELECT count(*)::int AS count
+     FROM "HabitLog" hl
+     WHERE hl."userId" = $1
+       AND hl."logSource" = 'AURA_PLANNED'
+       AND hl."completionAttribution" = 'NON_GOAL'
+       AND hl."originatingPlannedActivityId" IS NOT NULL
+       AND hl."scheduledStartAtSnapshot" IS NOT NULL
+       AND hl."scheduledStartAtSnapshot" BETWEEN $2 AND $3
+       AND NOT EXISTS (
+         SELECT 1 FROM "PlannedActivity" pa WHERE pa."habitLogId" = hl.id
+       )`,
+    [userId, from, to]
+  );
+  return result.rows[0]?.count ?? 0;
 }
 
 /** Insights V1 PR5 -- every row of this user's Move-chain graph: either a
