@@ -3157,11 +3157,39 @@ export async function listGoalActivitiesWithLinkedPlanStatusForGoals(userId: str
  * pure, DB-free classifyPlanningStatus (insightsReporting.ts), so this
  * function has exactly one job: read the rows, ownership-scoped, range-
  * bounded, nothing else. Read-only; no write, no side effect.
+ *
+ * Insights V1 PR7 -- Move consistency correction (AURA_INSIGHTS_V1_PRODUCT_
+ * COMPLETION_AUDIT.md finding F-3). The range bound below used to be
+ * `"plannedStartAt" BETWEEN $2 AND $3` for every row, including a MOVED
+ * row -- but a MOVED row's OWN plannedStartAt is the stale, ORIGINAL
+ * schedule it was moved away FROM, not when the Move itself happened.
+ * Since a live, actionable Move-chain terminal is (by construction)
+ * scheduled in the future, its own source row's original plannedStartAt
+ * is very often ALSO in the future, so the old filter silently excluded
+ * the exact Move events PR5's REPEATED_RESCHEDULING signal was telling
+ * the user about in the same response -- a confirmed, reproduced
+ * self-contradiction ("0 rescheduled" next to "this activity has been
+ * moved a few times").
+ *
+ * The fix: a MOVED row is now attributed by the actual Move timestamp
+ * (`movedAt`) when one is recorded, falling back to its own
+ * `plannedStartAt` only for a legacy row moved before migration 0046
+ * introduced that column (`movedAt IS NULL`) -- never fabricated, never
+ * guessed, the exact same "no backfill" discipline every PR1-6 migration
+ * in this schema already established. Every non-MOVED row's own
+ * attribution is completely unchanged (the CASE below evaluates to NULL
+ * for any other status, so COALESCE falls straight through to
+ * "plannedStartAt", byte-identical to the original query). A MOVED row's
+ * successor is a separate row with its own status and its own
+ * independent membership in this same range -- this change does not
+ * touch how the successor is counted, so a single Move operation still
+ * contributes exactly one RESCHEDULED fact, never two.
  */
 export async function listPlannedActivitiesForReporting(userId: string, from: Date, to: Date): Promise<PlannedActivity[]> {
   const result = await pool.query(
     `SELECT * FROM "PlannedActivity"
-     WHERE "userId" = $1 AND "plannedStartAt" BETWEEN $2 AND $3
+     WHERE "userId" = $1
+       AND COALESCE(CASE WHEN status = 'MOVED' THEN "movedAt" END, "plannedStartAt") BETWEEN $2 AND $3
      ORDER BY "plannedStartAt" ASC`,
     [userId, from, to]
   );

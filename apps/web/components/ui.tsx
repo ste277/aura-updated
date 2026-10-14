@@ -73,6 +73,8 @@ export function SurfaceCard({
   accentColor,
   padding = spacing.lg,
   style,
+  role,
+  ariaLive,
 }: {
   children: React.ReactNode;
   elevated?: boolean;
@@ -81,6 +83,12 @@ export function SurfaceCard({
   accentColor?: string;
   padding?: number;
   style?: React.CSSProperties;
+  /** Insights V1 PR7 -- optional ARIA role (e.g. "status"/"alert") for a
+   * card that itself communicates a loading/error state to assistive
+   * tech, forwarded straight to the underlying div. Omitted by every
+   * existing caller, so this has no effect on them. */
+  role?: string;
+  ariaLive?: 'polite' | 'assertive' | 'off';
 }) {
   const base: React.CSSProperties = elevated
     ? {
@@ -96,7 +104,11 @@ export function SurfaceCard({
         borderRadius: radius.lg,
         padding,
       };
-  return <div style={{ ...base, ...style }}>{children}</div>;
+  return (
+    <div style={{ ...base, ...style }} role={role} aria-live={ariaLive}>
+      {children}
+    </div>
+  );
 }
 
 // ============================================================

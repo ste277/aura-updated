@@ -106,9 +106,10 @@ export async function GET(req: NextRequest) {
     total: livePlanningStatus.total + deletedNonGoalCompletionCount,
   };
 
-  const awaitingConfirmationItems = plans
+  const awaitingConfirmationPlans = plans
     .filter((plan) => classifyPlanningStatus(plan, now) === 'AWAITING_CONFIRMATION')
-    .sort((a, b) => new Date(b.plannedStartAt).getTime() - new Date(a.plannedStartAt).getTime())
+    .sort((a, b) => new Date(b.plannedStartAt).getTime() - new Date(a.plannedStartAt).getTime());
+  const awaitingConfirmationItems = awaitingConfirmationPlans
     .slice(0, AWAITING_CONFIRMATION_ITEM_LIMIT)
     .map((plan) => ({ id: plan.id, title: plan.title, plannedStartAt: plan.plannedStartAt, plannedEndAt: plan.plannedEndAt }));
 
@@ -126,6 +127,11 @@ export async function GET(req: NextRequest) {
     now,
     todayLocalDate,
     awaitingConfirmationCount: planningStatus.awaitingConfirmation,
+    // Insights V1 PR7 (finding F-4) -- the one real plan id Signal 4's CTA
+    // can point at directly when there is exactly one unconfirmed plan;
+    // reuses the SAME already-sorted, already-fetched list above (never a
+    // second query, never an id picked arbitrarily from a larger set).
+    soleUnconfirmedPlanId: awaitingConfirmationPlans.length === 1 ? awaitingConfirmationPlans[0].id : null,
     goalSummaries,
     rows,
   });

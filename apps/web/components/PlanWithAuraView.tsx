@@ -10,7 +10,7 @@ import { RELATIONSHIP_ICON, SavedPersonRow } from './PeopleView';
 import { SharedMomentsView } from './SharedMomentsView';
 import * as theme from './theme';
 import { colors, spacing, typography } from './theme';
-import { PageHeader, SegmentedControl, SecondaryButton, EmptyState } from './ui';
+import { PageHeader, SegmentedControl, SecondaryButton, EmptyState, TextButton } from './ui';
 import type { TimingCandidate, TimingCandidateLabel, TimingSearchDateRange, TimingSearchMode, TimingSearchResponse, TimingTimePreference } from '../../../packages/recommendation/src/timingSearch';
 import type { MuhurtaReason } from '../../../packages/muhurta/src/activityOntology';
 import { formatMuhurtaReason } from '../../../packages/muhurta/src/muhurtaReasonFormat';
@@ -39,6 +39,7 @@ import {
   mapPlanRow,
   isActionableUpcomingPlan,
   isCompletedPlan,
+  isAwaitingConfirmationPlan,
   findCandidateKey,
   planPayloadFromCandidate,
   getTodayForTimezone,
@@ -104,6 +105,24 @@ interface PlanWithAuraViewProps {
    * moment's alternatives when arriving via a "Find another time" deep
    * link (Home's card, or the old Shared Moments entry under You). */
   focusMomentToken?: string;
+  /** Insights V1 PR7 (finding F-4) -- an Insights suggestion's "Review
+   * plans"/"Open Plan" CTA jump, mirroring focusMomentsKey's own
+   * established pattern: an incrementing counter so the destination
+   * effect re-fires even when the SAME plan/filter is requested twice in
+   * a row. Only meaningful together with focusPlanId/focusPlansFilter. */
+  focusPlansKey?: number;
+  /** A specific, real PlannedActivity id to expand (e.g. a Move chain's
+   * live terminal, or the one unconfirmed plan when there is exactly
+   * one). If the id no longer matches any loaded plan (deleted, or
+   * resolved and moved to a different list between the suggestion being
+   * shown and clicked), nothing matches and nothing expands -- the user
+   * still safely lands on "My Plans" with its real current contents,
+   * never a crash or a fabricated row. */
+  focusPlanId?: string | null;
+  /** Pre-filters the "Upcoming Plans" list to this criterion when more
+   * than one plan is the suggestion's subject (so no single `focusPlanId`
+   * exists) -- currently only 'AWAITING_CONFIRMATION' is defined. */
+  focusPlansFilter?: 'AWAITING_CONFIRMATION' | null;
 }
 
 // Product Structure V2 (brief section 8): "Suggested" leads with everyday
@@ -301,7 +320,7 @@ export async function saveUpcomingPlanFromCandidate(candidate: TimingCandidate, 
   return mapPlanRow(await res.json());
 }
 
-export function PlanWithAuraView({ onTimingSearch, onViewDay, onPlanLogged, timezone, initialActivity, initialActivityKey, initialHorizon, onOpenPeople, focusMomentsKey, onMomentSeen, focusMomentToken }: PlanWithAuraViewProps) {
+export function PlanWithAuraView({ onTimingSearch, onViewDay, onPlanLogged, timezone, initialActivity, initialActivityKey, initialHorizon, onOpenPeople, focusMomentsKey, onMomentSeen, focusMomentToken, focusPlansKey, focusPlanId, focusPlansFilter }: PlanWithAuraViewProps) {
   const [planMode, setPlanMode] = useState<TimingSearchMode>('FIND');
   const [taskTitle, setTaskTitle] = useState('');
   const [, setIsCustomTask] = useState(false);
@@ -353,6 +372,11 @@ export function PlanWithAuraView({ onTimingSearch, onViewDay, onPlanLogged, time
   const [compareError, setCompareError] = useState('');
   const [isComparing, setIsComparing] = useState(false);
   const [showAllPlans, setShowAllPlans] = useState(false);
+  // Insights V1 PR7 (finding F-4) -- when an Insights suggestion's
+  // subject is more than one unconfirmed plan, the CTA pre-filters this
+  // list to that criterion instead of pointing at an invented single
+  // plan. null = no filter, the existing unfiltered "Upcoming Plans".
+  const [plansFilter, setPlansFilter] = useState<'AWAITING_CONFIRMATION' | null>(null);
   const [showMoreActivities, setShowMoreActivities] = useState(false);
   const [savedPlans, setSavedPlans] = useState<UpcomingPlan[]>([]);
   const [expandedPlanId, setExpandedPlanId] = useState<string | null>(null);
@@ -386,6 +410,7 @@ export function PlanWithAuraView({ onTimingSearch, onViewDay, onPlanLogged, time
     setFindResult(null);
     setError('');
     setShowAllPlans(false);
+    setPlansFilter(null);
     setShowMoreActivities(false);
     setExpandedPlanId(null);
     setReschedulingPlanId(null);
@@ -451,12 +476,37 @@ export function PlanWithAuraView({ onTimingSearch, onViewDay, onPlanLogged, time
     });
   }, [focusMomentsKey]);
 
+  // Insights V1 PR7 (finding F-4) -- an Insights suggestion CTA jump:
+  // reveal "My Plans" (the exact same reveal handleMyPlansClick already
+  // performs, never the new-activity composer), optionally expand one
+  // specific plan, optionally pre-filter the list, then scroll it into
+  // view. A stale/deleted focusPlanId simply matches no row below --
+  // safe, no crash, the user still lands on their real current plans.
+  useEffect(() => {
+    if (!focusPlansKey) return;
+    setShowAllPlans(true);
+    setPlansFilter(focusPlansFilter ?? null);
+    setExpandedPlanId(focusPlanId ?? null);
+    requestAnimationFrame(() => {
+      plansSectionRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [focusPlansKey]);
+
   const selectedHorizon = HORIZONS.find((item) => item.value === horizon) ?? HORIZONS[0];
   const selectedDuration = DURATIONS.find((item) => item.value === durationMinutes) ?? DURATIONS[2];
   const horizonHelper = useMemo(() => getHorizonHelper(horizon, timezone), [horizon, timezone]);
   const upcomingPlans = useMemo(() => savedPlans.filter(isActionableUpcomingPlan), [savedPlans]);
   const completedPlans = useMemo(() => savedPlans.filter(isCompletedPlan), [savedPlans]);
-  const visibleUpcomingPlans = showAllPlans ? upcomingPlans : upcomingPlans.slice(0, 3);
+  // Insights V1 PR7 (finding F-4) -- plansFilter narrows the SAME already-
+  // loaded upcomingPlans list client-side (isAwaitingConfirmationPlan
+  // mirrors classifyPlanningStatus's own AWAITING_CONFIRMATION rule
+  // exactly); never a second fetch, never a second eligibility rule.
+  const filteredUpcomingPlans = useMemo(
+    () => (plansFilter === 'AWAITING_CONFIRMATION' ? upcomingPlans.filter(isAwaitingConfirmationPlan) : upcomingPlans),
+    [upcomingPlans, plansFilter]
+  );
+  const visibleUpcomingPlans = showAllPlans ? filteredUpcomingPlans : filteredUpcomingPlans.slice(0, 3);
   const visibleCompletedPlans = showAllPlans ? completedPlans.slice(0, 5) : [];
   const canSubmit = Boolean(taskTitle.trim()) && (horizon !== 'CUSTOM' || Boolean(customStartDate && customEndDate && customEndDate >= customStartDate));
 
@@ -528,6 +578,7 @@ export function PlanWithAuraView({ onTimingSearch, onViewDay, onPlanLogged, time
     setCustomEndDate('');
     setFindResult(null);
     setShowAllPlans(false);
+    setPlansFilter(null);
     setExpandedPlanId(null);
     setReschedulingPlanId(plan.status === 'UPCOMING' ? plan.id : null);
     setSavingOpportunityKey(null);
@@ -825,6 +876,10 @@ export function PlanWithAuraView({ onTimingSearch, onViewDay, onPlanLogged, time
 
   const handleMyPlansClick = () => {
     setShowAllPlans(true);
+    // A manual "My Plans" click always shows the real, full list -- a
+    // filter left over from an earlier Insights CTA jump must not
+    // silently persist past the user's own explicit navigation.
+    setPlansFilter(null);
     requestAnimationFrame(() => {
       plansSectionRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' });
     });
@@ -1270,6 +1325,16 @@ export function PlanWithAuraView({ onTimingSearch, onViewDay, onPlanLogged, time
           actionLabel={showAllPlans ? 'Show less' : 'View all'}
           onAction={() => setShowAllPlans((value) => !value)}
         />
+        {/* Insights V1 PR7 (finding F-4) -- a visible, dismissible banner
+         * when an Insights suggestion pre-filtered this list, so it's
+         * never silently/invisibly narrower than "Upcoming Plans" implies.
+         * Clearing it shows the real, full list -- never a dead end. */}
+        {plansFilter === 'AWAITING_CONFIRMATION' && (
+          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: spacing.sm, ...typography.meta }}>
+            <span>Showing plans awaiting confirmation</span>
+            <TextButton onClick={() => setPlansFilter(null)} color={colors.textSecondary}>Show all</TextButton>
+          </div>
+        )}
         {visibleUpcomingPlans.length > 0 ? visibleUpcomingPlans.map((plan) => (
           <UpcomingPlan
             key={plan.id}
@@ -1284,7 +1349,13 @@ export function PlanWithAuraView({ onTimingSearch, onViewDay, onPlanLogged, time
             onCancelRemove={() => setConfirmingRemovePlanId(null)}
             onConfirmRemove={() => handleCancelPlan(plan)}
           />
-        )) : (
+        )) : plansFilter === 'AWAITING_CONFIRMATION' ? (
+          <EmptyState
+            title="Nothing awaiting confirmation."
+            description="Everything's confirmed, or the plan this suggestion pointed at has since been resolved."
+            action={<SecondaryButton onClick={() => setPlansFilter(null)}>Show all plans</SecondaryButton>}
+          />
+        ) : (
           <EmptyState
             title="Nothing planned yet."
             description="Choose an activity above and tap Find My Best Time to create one."

@@ -22,6 +22,14 @@
  * merits, so a reschedule chain of any length contributes exactly one
  * RESCHEDULED fact per hop plus whatever its CURRENT terminal row's own
  * status contributes -- never a duplicate "commitment".
+ *
+ * Insights V1 PR7 -- a RESCHEDULED row is attributed to the range by its
+ * actual Move timestamp (db.ts's listPlannedActivitiesForReporting now
+ * reads "movedAt" for a MOVED row, falling back to "plannedStartAt" only
+ * when movedAt was never recorded), not by its own stale original
+ * schedule -- see that function's own doc comment for why. This module's
+ * own classifyPlanningStatus is unaffected: it still just reads
+ * plan.status, unaware of which timestamp selected the row.
  */
 
 import type {

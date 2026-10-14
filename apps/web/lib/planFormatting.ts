@@ -217,6 +217,19 @@ export function mapPersistedPlanStatus(status: PersistedPlanStatus | null | unde
 export const isActionableUpcomingPlan = (plan: { status?: PersistedPlanStatus }): boolean => (plan.status ?? 'UPCOMING') === 'UPCOMING';
 export const isCompletedPlan = (plan: { status?: PersistedPlanStatus }): boolean => plan.status === 'LOGGED';
 
+/**
+ * Insights V1 PR7 -- presentation-only filter for the "Review plans" CTA's
+ * filtered list (AURA_INSIGHTS_V1_PRODUCT_COMPLETION_AUDIT.md finding
+ * F-4): an UPCOMING plan whose own window has already elapsed, mirroring
+ * classifyPlanningStatus's AWAITING_CONFIRMATION branch
+ * (insightsReporting.ts) exactly -- the server-side definition is the
+ * source of truth; this just re-applies the identical, already-fetched
+ * `plannedEndAt` fact to the client's own already-loaded plan list, never
+ * a second eligibility rule.
+ */
+export const isAwaitingConfirmationPlan = (plan: { status?: PersistedPlanStatus; plannedEndAt: string }): boolean =>
+  isActionableUpcomingPlan(plan) && new Date(plan.plannedEndAt).getTime() < Date.now();
+
 export function mapPlanRow(row: PlanApiRow, fallbackTimezone?: string): UpcomingPlan {
   const start = new Date(row.plannedStartAt);
   const end = new Date(row.plannedEndAt);
