@@ -148,7 +148,7 @@ export interface User {
   onboardingResolvedAt?: Date | null;
   /** Daily Rhythm V1 PR DR1 -- Preferences Foundation. Both null is the
    * ONLY unconfigured state, the default for every row -- see
-   * setDailyRhythmPreferences/clearDailyRhythmPreferences below for the
+   * setDailyWorkPreferences/clearDailyWorkPreferences below for the
    * one place these are ever written, always together. Optional here for
    * the same reason `availabilityConfigured`/`locationConfirmedAt` are
    * above. NOT read by any scheduling/recommendation code in this PR. */
@@ -2716,7 +2716,7 @@ export interface DailyRhythmPreferencesView {
 /** `null` only when the user itself doesn't exist -- a genuinely
  * unconfigured user (both fields null, empty workDays) is a real, valid
  * result, not an error. */
-export async function getDailyRhythmPreferences(userId: string): Promise<DailyRhythmPreferencesView | null> {
+export async function getDailyWorkPreferences(userId: string): Promise<DailyRhythmPreferencesView | null> {
   const result = await pool.query('SELECT "dailyRhythmWorkStart", "dailyRhythmWorkEnd", "dailyRhythmWorkDays" FROM "User" WHERE id = $1', [userId]);
   const row = result.rows[0];
   if (!row) return null;
@@ -2728,7 +2728,7 @@ export async function getDailyRhythmPreferences(userId: string): Promise<DailyRh
  * validateDailyRhythmPreferencesInput (dailyRhythmPreferences.ts) before
  * this is called; this function performs no validation of its own, same
  * convention as replaceUserAvailabilityConfiguration above. */
-export async function setDailyRhythmPreferences(userId: string, prefs: { workStart: string; workEnd: string; workDays: readonly number[] }): Promise<void> {
+export async function setDailyWorkPreferences(userId: string, prefs: { workStart: string; workEnd: string; workDays: readonly number[] }): Promise<void> {
   await pool.query(
     `UPDATE "User" SET "dailyRhythmWorkStart" = $2, "dailyRhythmWorkEnd" = $3, "dailyRhythmWorkDays" = $4 WHERE id = $1`,
     [userId, prefs.workStart, prefs.workEnd, Array.from(prefs.workDays)]
@@ -2737,10 +2737,10 @@ export async function setDailyRhythmPreferences(userId: string, prefs: { workSta
 
 /** The ONLY operation that returns a user to the unconfigured state
  * (both time fields null, workDays empty) -- deliberately a separate
- * function from setDailyRhythmPreferences, same "clear is not just save
+ * function from setDailyWorkPreferences, same "clear is not just save
  * with different values" precedent resetUserAvailabilityConfiguration
  * establishes above. */
-export async function clearDailyRhythmPreferences(userId: string): Promise<void> {
+export async function clearDailyWorkPreferences(userId: string): Promise<void> {
   await pool.query(`UPDATE "User" SET "dailyRhythmWorkStart" = NULL, "dailyRhythmWorkEnd" = NULL, "dailyRhythmWorkDays" = '{}' WHERE id = $1`, [userId]);
 }
 

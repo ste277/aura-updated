@@ -82,8 +82,8 @@ function main() {
   // db.ts: write and clear are distinct, write always sets all three
   // fields together (no partial-write path).
   // ============================================================
-  check('12. setDailyRhythmPreferences always writes all three columns in one statement', /UPDATE "User" SET "dailyRhythmWorkStart" = \$2, "dailyRhythmWorkEnd" = \$3, "dailyRhythmWorkDays" = \$4 WHERE id = \$1/.test(dbSource));
-  check('13. clearDailyRhythmPreferences is a distinct function from setDailyRhythmPreferences, resetting all three to the unconfigured state', /UPDATE "User" SET "dailyRhythmWorkStart" = NULL, "dailyRhythmWorkEnd" = NULL, "dailyRhythmWorkDays" = '\{\}' WHERE id = \$1/.test(dbSource));
+  check('12. setDailyWorkPreferences always writes all three columns in one statement', /UPDATE "User" SET "dailyRhythmWorkStart" = \$2, "dailyRhythmWorkEnd" = \$3, "dailyRhythmWorkDays" = \$4 WHERE id = \$1/.test(dbSource));
+  check('13. clearDailyWorkPreferences is a distinct function from setDailyWorkPreferences, resetting all three to the unconfigured state', /UPDATE "User" SET "dailyRhythmWorkStart" = NULL, "dailyRhythmWorkEnd" = NULL, "dailyRhythmWorkDays" = '\{\}' WHERE id = \$1/.test(dbSource));
 
   // ============================================================
   // CRITICAL: no scheduling/recommendation surface reads these new

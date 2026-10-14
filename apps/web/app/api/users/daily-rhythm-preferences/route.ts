@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getSessionFromRequest } from '../../../../lib/session';
 import { parseJsonObject } from '../../../../lib/request';
-import { getUserById, getDailyRhythmPreferences, setDailyRhythmPreferences, clearDailyRhythmPreferences } from '../../../../lib/db';
+import { getUserById, getDailyWorkPreferences, setDailyWorkPreferences, clearDailyWorkPreferences } from '../../../../lib/db';
 import { validateDailyRhythmPreferencesInput } from '../../../../lib/dailyRhythmPreferences';
 
 /**
@@ -34,7 +34,7 @@ export async function GET(req: NextRequest) {
   const user = await getUserById(session.userId);
   if (!user) return NextResponse.json({ error: 'User not found.' }, { status: 404 });
 
-  const prefs = await getDailyRhythmPreferences(session.userId);
+  const prefs = await getDailyWorkPreferences(session.userId);
   if (!prefs) return NextResponse.json({ error: 'User not found.' }, { status: 404 });
 
   return NextResponse.json({
@@ -64,7 +64,7 @@ export async function PUT(req: NextRequest) {
     return NextResponse.json({ error: err instanceof Error ? err.message : 'Invalid daily rhythm preferences.' }, { status: 400 });
   }
 
-  await setDailyRhythmPreferences(session.userId, validated);
+  await setDailyWorkPreferences(session.userId, validated);
   return NextResponse.json({ configured: true, workStart: validated.workStart, workEnd: validated.workEnd, workDays: validated.workDays });
 }
 
@@ -72,6 +72,6 @@ export async function DELETE(req: NextRequest) {
   const session = getSessionFromRequest(req);
   if (!session) return NextResponse.json({ error: 'Not authenticated.' }, { status: 401 });
 
-  await clearDailyRhythmPreferences(session.userId);
+  await clearDailyWorkPreferences(session.userId);
   return NextResponse.json({ configured: false, workStart: null, workEnd: null, workDays: [] });
 }
