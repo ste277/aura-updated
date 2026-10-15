@@ -228,12 +228,22 @@ export function presentWarnings(warnings: readonly ConstructDayWarning[], resolv
     // window is astrologically favorable (that claim belongs solely to
     // the existing Panchang/Muhurta-derived text elsewhere in this
     // file, untouched by DR2).
+    // Daily Rhythm V1 PR DR3 -- wording locked to this ticket's own
+    // exact phrasing (section 3). The fallback text deliberately says
+    // "was found" (past tense, scoped to the search actually run), never
+    // "was available" / "exists" -- DR3's own explicit instruction: "Do
+    // not claim that an outside-work option was unavailable unless the
+    // bounded search has sufficient evidence to support that statement."
+    // This text is generated only from explainDailyRhythmPlacement's own
+    // result (dailyRhythmScheduling.ts), which is itself derived from
+    // the exact candidate batch DR3's own expanded search returned --
+    // never a claim about candidates the search never examined.
     if (warning.code === 'DAILY_RHYTHM_PERSONAL_OUTSIDE_WORK_HOURS') {
-      presentations.push({ intentId: warning.intentId, text: 'Fits your preferred personal time' });
+      presentations.push({ intentId: warning.intentId, text: 'Fits your preferred personal time.' });
       continue;
     }
     if (warning.code === 'DAILY_RHYTHM_PERSONAL_DURING_WORK_HOURS_FALLBACK') {
-      presentations.push({ intentId: warning.intentId, text: 'Scheduled during your working hours -- no outside-work time was available today' });
+      presentations.push({ intentId: warning.intentId, text: 'No suitable time outside your working hours was found.' });
       continue;
     }
     if (warning.code === 'DAILY_RHYTHM_FLEXIBLE_BREAK_DURING_WORK_HOURS') {

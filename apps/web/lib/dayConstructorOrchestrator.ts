@@ -33,7 +33,7 @@
 import type { User, HabitLogRow } from './db';
 import { listPlannedActivitiesOverlappingRange, listHabitLogs, listUserAvailabilityPeriods, getDailyWorkPreferences } from './db';
 import { resolveAvailability, normalizeUsableWindowsToConstructionWindow, type AvailabilityConfiguration } from './availabilityContext';
-import { applyDailyRhythmPreference, explainDailyRhythmPlacement, type DailyRhythmPreferencesInput } from './dailyRhythmScheduling';
+import { applyDailyRhythmPreference, explainDailyRhythmPlacement, resolveDailyRhythmSearchLimit, type DailyRhythmPreferencesInput } from './dailyRhythmScheduling';
 import { listUserActivityPreferences, type UserActivityPreference } from './activityPreferences';
 import { buildDurationContext } from './durationContext';
 import { durationMinutesFor, GENERIC_DURATION_FALLBACK_MINUTES } from './dayBuilderOrchestrator';
@@ -995,9 +995,17 @@ async function runOrchestration(request: ConstructDayRequest, deps: DayConstruct
     // already-proposed item -- answered in the completion report, not
     // silently addressed here).
     const excludedIntervals = blockedIntervals.map((blocker) => ({ start: blocker.start, end: blocker.end }));
+    // Daily Rhythm V1 PR DR3 -- widens the search's own `limit` ONLY when
+    // this exact intent's own candidates would later be filtered by
+    // applyDailyRhythmPreference (the identical gate, reused verbatim --
+    // see resolveDailyRhythmSearchLimit's own doc comment for why this
+    // costs nothing extra for every other intent/user). `undefined`
+    // leaves `limit` unset entirely, preserving the engine's own default
+    // (3) byte-for-byte.
+    const dailyRhythmSearchLimit = resolveDailyRhythmSearchLimit(dayIntent.activityId, { targetDate: request.targetDate, timezone: request.timezone, prefs: dailyRhythmPrefs });
     const searchRequest: Omit<TimingSearchRequest, 'context'> = dayIntent.activityId
-      ? { mode: 'FIND', activityId: dayIntent.activityId, durationMinutes: dayIntent.estimatedDurationMinutes, dateRange: { start: request.targetDate, end: request.targetDate }, searchWindow, excludedIntervals }
-      : { mode: 'FIND', taskTitle: requested.title, durationMinutes: dayIntent.estimatedDurationMinutes, dateRange: { start: request.targetDate, end: request.targetDate }, searchWindow, excludedIntervals };
+      ? { mode: 'FIND', activityId: dayIntent.activityId, durationMinutes: dayIntent.estimatedDurationMinutes, dateRange: { start: request.targetDate, end: request.targetDate }, searchWindow, excludedIntervals, ...(dailyRhythmSearchLimit !== undefined ? { limit: dailyRhythmSearchLimit } : {}) }
+      : { mode: 'FIND', taskTitle: requested.title, durationMinutes: dayIntent.estimatedDurationMinutes, dateRange: { start: request.targetDate, end: request.targetDate }, searchWindow, excludedIntervals, ...(dailyRhythmSearchLimit !== undefined ? { limit: dailyRhythmSearchLimit } : {}) };
 
     let searchResult: { candidates: TimingCandidate[] };
     try {
@@ -1160,9 +1168,14 @@ async function runOrchestration(request: ConstructDayRequest, deps: DayConstruct
       const meta = flexibleSearchMetaByIntentId[intentId];
       if (!meta || meta.durationMinutes === undefined) continue; // Structurally unreachable (only ever set for FLEXIBLE intents that already had a resolved duration), defensive only.
       const searchWindow = { start: window.start, end: window.end };
+      // Daily Rhythm V1 PR DR3 -- the SAME conditional limit widening as
+      // the primary loop above, re-resolved per replenishment round
+      // (meta.activityId never changes between rounds for the same
+      // intent, so this is a cheap, pure re-check, not a second policy).
+      const dailyRhythmSearchLimit = resolveDailyRhythmSearchLimit(meta.activityId, { targetDate: request.targetDate, timezone: request.timezone, prefs: dailyRhythmPrefs });
       const searchRequest: Omit<TimingSearchRequest, 'context'> = meta.activityId
-        ? { mode: 'FIND', activityId: meta.activityId, durationMinutes: meta.durationMinutes, dateRange: { start: request.targetDate, end: request.targetDate }, searchWindow, excludedIntervals }
-        : { mode: 'FIND', taskTitle: meta.title, durationMinutes: meta.durationMinutes, dateRange: { start: request.targetDate, end: request.targetDate }, searchWindow, excludedIntervals };
+        ? { mode: 'FIND', activityId: meta.activityId, durationMinutes: meta.durationMinutes, dateRange: { start: request.targetDate, end: request.targetDate }, searchWindow, excludedIntervals, ...(dailyRhythmSearchLimit !== undefined ? { limit: dailyRhythmSearchLimit } : {}) }
+        : { mode: 'FIND', taskTitle: meta.title, durationMinutes: meta.durationMinutes, dateRange: { start: request.targetDate, end: request.targetDate }, searchWindow, excludedIntervals, ...(dailyRhythmSearchLimit !== undefined ? { limit: dailyRhythmSearchLimit } : {}) };
 
       let replenishedResult: { candidates: TimingCandidate[] };
       try {
