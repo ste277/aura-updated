@@ -14,7 +14,8 @@ import { getActionCards, ActionCard } from '../../../packages/recommendation/src
 import { findActivityIntent } from '../../../packages/recommendation/src/personalizedTasks';
 import type { PersonalMuhurtaContext } from '../../../packages/recommendation/src/auraFitEngine';
 import type { DailyBriefing, PlanningHorizon } from '../../../packages/recommendation/src/dailyAssistant';
-import type { TimingSearchDateRange, TimingSearchMode, TimingSearchResponse, TimingTimePreference } from '../../../packages/recommendation/src/timingSearch';
+import type { TimingSearchDateRange, TimingSearchMode, TimingTimePreference } from '../../../packages/recommendation/src/timingSearch';
+import type { TimingSearchResponseWithDailyRhythm } from '../lib/timingSearchDailyRhythm';
 import type { AuraUpdatesResponse } from '../lib/auraUpdates';
 import type { AuraReminder } from '../lib/auraReminders';
 import type { DailyAgenda, DailyAgendaItem } from '../lib/dailyAgenda';
@@ -1273,7 +1274,7 @@ export default function DashboardPage() {
     candidateStart?: string;
     checkNearbyWindowMinutes?: number;
     candidateStarts?: string[];
-  }): Promise<TimingSearchResponse> => {
+  }): Promise<TimingSearchResponseWithDailyRhythm> => {
     const res = await fetch('/api/timing-search', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },

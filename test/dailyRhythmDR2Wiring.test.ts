@@ -35,10 +35,17 @@ function main() {
   check('2. dayConstructor.ts never references dailyRhythm/DailyRhythm -- the pure placement engine is untouched', !/dailyRhythm|DailyRhythm/.test(dayConstructorSrc));
 
   // ============================================================
-  // Find a Time (PlanWithAuraView.tsx) is untouched.
+  // Find a Time (PlanWithAuraView.tsx) was untouched as of DR2 -- as of
+  // Daily Rhythm V1 PR DR4-B it is now INTENTIONALLY Daily-Rhythm-aware
+  // (the whole point of that later, separately-approved ticket), so this
+  // check no longer asserts total silence; it instead confirms the only
+  // reference is the real, deliberate `dailyRhythmNote(s)` coupling DR4-B
+  // introduced, never a stray/accidental one, and that this file still
+  // never imports dayConstructorOrchestrator.ts (no engine merge, DR4-B's
+  // own explicit constraint -- also covered by dailyRhythmDR4BWiring.test.ts).
   // ============================================================
   const planWithAuraSrc = read('apps/web/components/PlanWithAuraView.tsx');
-  check('3. PlanWithAuraView.tsx (Find a Time) never references dailyRhythm/DailyRhythm', !/dailyRhythm|DailyRhythm/.test(planWithAuraSrc));
+  check('3. PlanWithAuraView.tsx\'s only Daily Rhythm reference is the DR4-B dailyRhythmNote(s) coupling, never a stray dailyRhythmWork/other reference', /dailyRhythmNote/.test(planWithAuraSrc) && !/dailyRhythmWork/.test(planWithAuraSrc) && !/dayConstructorOrchestrator/.test(planWithAuraSrc));
 
   // ============================================================
   // Location confirmation is untouched.

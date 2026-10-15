@@ -4,9 +4,11 @@ import { getUserById } from '../../../lib/db';
 import { parseJsonObject } from '../../../lib/request';
 import { resolveTzOffsetMinutes } from '../../../lib/timezone';
 import { buildPersonalMuhurtaContextForUser } from '../../../lib/natalContext';
-import { handleTimingSearchBody } from '../../../lib/timingSearchRequest';
+import { buildTimingSearchRequest } from '../../../lib/timingSearchRequest';
 import { DailyAssistantContext } from '../../../../../packages/recommendation/src/dailyAssistant';
 import { recordProductEvent } from '../../../lib/productEvents';
+import { runTimingSearchWithDailyRhythm } from '../../../lib/timingSearchDailyRhythm';
+import type { DailyRhythmPreferencesInput } from '../../../lib/dailyRhythmScheduling';
 
 /**
  * The Timing Search API: a thin HTTP wrapper around runTimingSearch() (the
@@ -59,18 +61,38 @@ export async function POST(req: NextRequest) {
   };
 
   const startedAt = Date.now();
-  const outcome = handleTimingSearchBody(body, context);
-  if (!outcome.ok) return NextResponse.json({ error: outcome.error }, { status: outcome.status });
+  const validated = buildTimingSearchRequest(body, context);
+  if (!validated.ok) return NextResponse.json({ error: validated.error }, { status: validated.status });
+
+  // Daily Rhythm V1 PR DR4-B -- Find a Time integration. All real logic
+  // (widen the search limit before runTimingSearch for an applicable FIND
+  // request, soft-prefer/annotate its output afterward) lives in the pure,
+  // directly-testable runTimingSearchWithDailyRhythm (lib/
+  // timingSearchDailyRhythm.ts) -- this route stays a thin wrapper, same
+  // convention timingSearchRequest.ts's own module doc comment already
+  // establishes. runTimingSearch itself, its request/response shape, and
+  // every other call path through it (Day Constructor, the legacy
+  // slot-task route) are completely untouched.
+  //
+  // Same defaulting getDailyWorkPreferences (db.ts) itself applies --
+  // inlined here since this route already has the full user row loaded,
+  // with no need for a second query for the same three columns.
+  const dailyRhythmPrefs: DailyRhythmPreferencesInput = {
+    workStart: user.dailyRhythmWorkStart ?? null,
+    workEnd: user.dailyRhythmWorkEnd ?? null,
+    workDays: user.dailyRhythmWorkDays ?? [],
+  };
+  const result = runTimingSearchWithDailyRhythm(validated.request, user.timezone, dailyRhythmPrefs);
 
   void recordProductEvent({
     eventName: 'PLAN_SEARCH_COMPLETED',
     userId: session.userId,
     metadata: {
-      mode: outcome.result.mode,
-      resultCount: outcome.result.candidates.length,
+      mode: result.mode,
+      resultCount: result.candidates.length,
       durationMs: Date.now() - startedAt,
     },
   });
 
-  return NextResponse.json(outcome.result);
+  return NextResponse.json(result);
 }
