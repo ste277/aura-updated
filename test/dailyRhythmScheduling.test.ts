@@ -1,5 +1,5 @@
 /**
- * Daily Rhythm V1 PR DR2 -- pure unit suite for dailyRhythmScheduling.ts.
+ * Daily Rhythm V1 PR DR2/DR3 -- pure unit suite for dailyRhythmScheduling.ts.
  * No DB, no network -- every function under test is pure (explicit
  * date/timezone/preference inputs only), same convention as
  * availabilityContext.test.ts.
@@ -13,6 +13,8 @@ import {
   resolveWorkWindowInstants,
   applyDailyRhythmPreference,
   explainDailyRhythmPlacement,
+  resolveDailyRhythmSearchLimit,
+  DAILY_RHYTHM_EXPANDED_SEARCH_LIMIT,
   type DailyRhythmPreferencesInput,
 } from '../apps/web/lib/dailyRhythmScheduling';
 import { FULL_ACTIVITY_CATALOG, type ActivityCategory } from '../packages/recommendation/src/personalizedTasks';
@@ -202,6 +204,49 @@ function main() {
     check('unconfigured -> null', explainDailyRhythmPlacement('workout', insideStart, insideEnd, { targetDate: MONDAY, timezone: TZ, prefs: UNCONFIGURED }) === null);
     check('non-workday -> null', explainDailyRhythmPlacement('workout', insideStart, insideEnd, { targetDate: SATURDAY, timezone: TZ, prefs: CONFIGURED }) === null);
     check('unknown activity -> null', explainDailyRhythmPlacement(undefined, insideStart, insideEnd, { targetDate: MONDAY, timezone: TZ, prefs: CONFIGURED }) === null);
+  }
+
+  // ============================================================
+  // Daily Rhythm V1 PR DR3 -- resolveDailyRhythmSearchLimit. Scenarios
+  // 8/9/10/11/14 from DR3's own required test list: work activities,
+  // flexible breaks, weekends, missing/cleared preferences never widen
+  // the search; the widened value itself stays a small, bounded
+  // constant, not "all".
+  // ============================================================
+  {
+    check(
+      'DAILY_RHYTHM_EXPANDED_SEARCH_LIMIT is a small, fixed, bounded constant (greater than the engine default of 3, nowhere near "unbounded")',
+      DAILY_RHYTHM_EXPANDED_SEARCH_LIMIT > 3 && DAILY_RHYTHM_EXPANDED_SEARCH_LIMIT <= 20
+    );
+    check(
+      '14. PERSONAL activity, configured workday, Daily Rhythm configured -> search limit widened to exactly DAILY_RHYTHM_EXPANDED_SEARCH_LIMIT',
+      resolveDailyRhythmSearchLimit('workout', { targetDate: MONDAY, timezone: TZ, prefs: CONFIGURED }) === DAILY_RHYTHM_EXPANDED_SEARCH_LIMIT
+    );
+    check(
+      '8. a WORK activity never gets a widened search, even when Daily Rhythm is configured on a workday',
+      resolveDailyRhythmSearchLimit('task-1', { targetDate: MONDAY, timezone: TZ, prefs: CONFIGURED }) === undefined
+    );
+    check(
+      '9. a FLEXIBLE_BREAK activity never gets a widened search',
+      resolveDailyRhythmSearchLimit('tea-break', { targetDate: MONDAY, timezone: TZ, prefs: CONFIGURED }) === undefined
+    );
+    check(
+      '10. a non-workday (Saturday) never gets a widened search, even for a PERSONAL activity',
+      resolveDailyRhythmSearchLimit('workout', { targetDate: SATURDAY, timezone: TZ, prefs: CONFIGURED }) === undefined
+    );
+    check(
+      '11. unconfigured preferences never get a widened search',
+      resolveDailyRhythmSearchLimit('workout', { targetDate: MONDAY, timezone: TZ, prefs: UNCONFIGURED }) === undefined
+    );
+    check(
+      'an unknown/unresolvable activity never gets a widened search',
+      resolveDailyRhythmSearchLimit(undefined, { targetDate: MONDAY, timezone: TZ, prefs: CONFIGURED }) === undefined
+    );
+    // The four paired scenarios above (8/9/10/11, plus the unknown-
+    // activity case) already demonstrate resolveDailyRhythmSearchLimit
+    // returns undefined in EXACTLY the same conditions applyDailyRhythmPreference
+    // is a pass-through no-op -- both call the same isDailyRhythmApplicable
+    // gate internally, so this is structural, not coincidental.
   }
 
   if (!allPassed) {

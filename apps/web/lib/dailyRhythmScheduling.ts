@@ -190,48 +190,151 @@ export interface DailyRhythmFilterContext {
 }
 
 /**
+ * The ONE shared gate both `applyDailyRhythmPreference` (filtering) and
+ * `resolveDailyRhythmSearchLimit` (DR3's own search-breadth decision,
+ * below) consult -- Daily Rhythm configured, a configured workday, and
+ * the activity classifies as PERSONAL. Extracted so the two can never
+ * drift: whatever decides "this intent's search is worth widening"
+ * (DR3) is exactly the same test as "this intent's candidates are worth
+ * filtering" (DR2) -- there would be no point widening a search that
+ * the filter is about to ignore anyway (WORK/FLEXIBLE_BREAK/unknown,
+ * non-workday, unconfigured), and no point filtering narrowly when the
+ * search was never widened for an applicable one.
+ */
+function isDailyRhythmApplicable(activityId: string | undefined, context: DailyRhythmFilterContext): boolean {
+  if (!isDailyRhythmConfigured(context.prefs)) return false;
+  if (!isConfiguredWorkday(context.targetDate, context.prefs.workDays)) return false;
+  return classifyActivityForDailyRhythm(activityId) === 'PERSONAL';
+}
+
+/**
  * Filters (never re-scores, never reorders by anything but presence/
  * absence) a `TimingCandidate[]` already ranked by the existing
  * Panchang/Muhurta-driven engine, applying the Daily Rhythm soft
  * preference:
  *
- *  - Unconfigured, or `activityId` doesn't resolve to a classification,
- *    or the target date isn't a configured workday, or the activity is
- *    WORK/FLEXIBLE_BREAK (both already "eligible during working hours"
- *    by definition, nothing to deprioritize away from) -> returns
- *    `candidates` completely unchanged, by reference-equal array
- *    identity where practical. This is the exact no-op DR2 requires for
- *    "no work preferences", "non-workday", "flexible break during
- *    work", and "work activity during work".
- *  - PERSONAL, on a configured workday, with Daily Rhythm configured:
- *    partitions `candidates` into those whose full `[start,end)` span
- *    does NOT overlap the resolved work window ("outside") vs. those
- *    that do ("inside"). If `outside` is non-empty, returns ONLY
- *    `outside` (in its original relative order, i.e. the existing
- *    engine's own ranking among just that subset) -- constructDay then
- *    ranks and places exclusively among preferred candidates. If
- *    `outside` is empty (no suitable outside-work candidate exists in
- *    THIS batch), returns the ORIGINAL, full, unfiltered `candidates` --
- *    the deprioritization naturally yields to the existing in-work
- *    option rather than deferring the intent outright. Because this
- *    function is called again, independently, on every replenishment
- *    round's own freshly-searched candidates (dayConstructorOrchestrator.ts's
- *    own Dynamic Candidate Replenishment V1 loop), a personal activity
- *    that loses its first-choice outside-work slot to a same-run
- *    sibling still gets a fresh outside-first attempt on the next round,
- *    falling back to in-work only once outside-work options are
- *    genuinely exhausted for that round -- never a silent, one-shot hard
- *    exclusion.
+ *  - Not `isDailyRhythmApplicable` (unconfigured, non-workday, or the
+ *    activity is WORK/FLEXIBLE_BREAK/unknown -- all already "eligible
+ *    during working hours" by definition, nothing to deprioritize away
+ *    from) -> returns `candidates` completely unchanged, by reference-
+ *    equal array identity where practical. This is the exact no-op DR2
+ *    requires for "no work preferences", "non-workday", "flexible break
+ *    during work", and "work activity during work".
+ *  - Applicable: partitions `candidates` into those whose full
+ *    `[start,end)` span does NOT overlap the resolved work window
+ *    ("outside") vs. those that do ("inside"). If `outside` is non-
+ *    empty, returns ONLY `outside` (in its original relative order,
+ *    i.e. the existing engine's own ranking among just that subset) --
+ *    constructDay then ranks and places exclusively among preferred
+ *    candidates. If `outside` is empty (no suitable outside-work
+ *    candidate exists in THIS batch -- DR3's own expanded search,
+ *    see below, makes this batch meaningfully larger than DR2's
+ *    original top-3-only pool), returns the ORIGINAL, full, unfiltered
+ *    `candidates` -- the deprioritization naturally yields to the
+ *    existing in-work option rather than deferring the intent outright.
+ *    Because this function is called again, independently, on every
+ *    replenishment round's own freshly-searched candidates
+ *    (dayConstructorOrchestrator.ts's own Dynamic Candidate
+ *    Replenishment V1 loop), a personal activity that loses its first-
+ *    choice outside-work slot to a same-run sibling still gets a fresh
+ *    outside-first attempt on the next round, falling back to in-work
+ *    only once outside-work options are genuinely exhausted for that
+ *    round -- never a silent, one-shot hard exclusion.
  */
 export function applyDailyRhythmPreference(candidates: readonly TimingCandidate[], activityId: string | undefined, context: DailyRhythmFilterContext): TimingCandidate[] {
-  if (!isDailyRhythmConfigured(context.prefs)) return [...candidates];
-  if (!isConfiguredWorkday(context.targetDate, context.prefs.workDays)) return [...candidates];
-  const behavior = classifyActivityForDailyRhythm(activityId);
-  if (behavior !== 'PERSONAL') return [...candidates];
+  if (!isDailyRhythmApplicable(activityId, context)) return [...candidates];
 
-  const workWindow = resolveWorkWindowInstants(context.targetDate, context.timezone, context.prefs.workStart, context.prefs.workEnd);
+  // isDailyRhythmApplicable already confirmed isDailyRhythmConfigured
+  // (both fields non-null) -- the non-null assertions below restate
+  // that fact for the type checker, not a new runtime assumption.
+  const workWindow = resolveWorkWindowInstants(context.targetDate, context.timezone, context.prefs.workStart!, context.prefs.workEnd!);
   const outside = candidates.filter((candidate) => !overlapsWorkWindow(new Date(candidate.start), new Date(candidate.end), workWindow));
   return outside.length > 0 ? outside : [...candidates];
+}
+
+// ============================================================
+// Candidate coverage (DR3 section 1). DR2's own filter above can only
+// prefer what the upstream timing search actually returns -- and that
+// search's own DEFAULT_FIND_LIMIT (packages/recommendation/src/
+// timingSearch.ts) is 3, diversified by score with only a 90-minute
+// minimum clock-time spacing (dailyAssistant.ts's own
+// selectDiversePlanningOptions), never explicit morning/afternoon/
+// evening coverage. On a day whose astrologically-strongest, 90-min-
+// apart windows all happen to fall inside work hours, a genuinely
+// workable (if lower-scored) outside-work candidate deeper in the full
+// day's search space never reaches the filter above at all (confirmed
+// in DR2's own merge-gate review).
+//
+// CHOSEN APPROACH -- conditionally request a LARGER `limit` on
+// `runTimingSearch`'s own existing FIND request, only when
+// `isDailyRhythmApplicable` (the exact same gate the filter itself
+// uses) -- never globally, never for every search. This is cheap: the
+// expensive step, `evaluateTimingCandidate` (real Panchang/Muhurta
+// scoring), already runs for EVERY valid start-minute across the whole
+// remaining day regardless of `limit` (timingSearch.ts's own `runFind` --
+// `limit` is consulted ONLY in `selectDiversePlanningOptions`/the final
+// `.slice(0, limit)`, both pure, cheap, in-memory array operations over
+// results that were computed either way). Requesting a larger `limit`
+// therefore adds no new astrological computation and no second search
+// call -- it only asks the SAME, single, already-planned computation to
+// return more of what it already found.
+//
+// REJECTED ALTERNATIVES (documented per this ticket's own "if multiple
+// approaches are possible, document the tradeoffs" instruction):
+//   - Always increase the default limit for every search, regardless of
+//     Daily Rhythm: correct but wasteful -- pays the (small) extra
+//     diversification/slice cost for every user, including the common
+//     case of no Daily Rhythm preference at all. Rejected: this
+//     ticket's own "avoid unnecessary computation for users without
+//     Daily Rhythm preferences" and "prefer a bounded, preference-aware
+//     search over globally increasing candidate limits".
+//   - Retry with an escalating limit only after a first, default-limit
+//     search turns out all-inside-work-hours: WORSE than requesting the
+//     larger limit up front, because `runFind` is a pure, synchronous,
+//     uncached function -- a second call re-runs the ENTIRE day-long
+//     per-minute scoring loop from scratch, roughly doubling real CPU
+//     work for exactly the scenario this ticket exists to help, for no
+//     benefit (the first call's own scoring work is simply discarded).
+//     Rejected on both performance and simplicity grounds.
+//   - A dedicated time-diversified search mode (explicit morning/
+//     afternoon/evening buckets): would mean a materially different
+//     selection algorithm living alongside (or replacing)
+//     `selectDiversePlanningOptions` -- edges into "a new planning
+//     engine" territory, explicitly out of scope for both DR2 and DR3.
+//     Rejected.
+//   - An unbounded/whole-day limit: directly contradicts this ticket's
+//     own "avoid unbounded candidate searches". Rejected.
+//
+// LIMIT VALUE -- 12, a small, fixed constant (not "all"): `CANDIDATE_
+// SEARCH_STEP_MINUTES` is 15 and `selectDiversePlanningOptions` enforces
+// a 90-minute minimum spacing between picks, so a typical ~16-hour
+// searchable remaining day (e.g. 6am-10pm) has at most roughly 10-11
+// genuinely time-distinct slots to begin with -- 12 comfortably covers
+// that ceiling without approaching "unbounded," and leaves meaningful
+// headroom over DR2's original 3 for the diversification algorithm to
+// actually reach a differently-timed, lower-scored candidate instead of
+// stopping after a cluster of top-scoring in-work ones.
+// ============================================================
+
+/** A small, fixed constant -- see the module-level comment above for the
+ * full rationale. Exported so tests can assert against the real value
+ * rather than a hardcoded duplicate. */
+export const DAILY_RHYTHM_EXPANDED_SEARCH_LIMIT = 12;
+
+/**
+ * `undefined` means "do not override `TimingSearchRequest.limit` at
+ * all" -- the caller must leave the field unset, preserving the
+ * engine's own `DEFAULT_FIND_LIMIT` (3) byte-for-byte for every case
+ * DR3 does not apply to (this is what keeps "maintain existing
+ * behavior when Daily Rhythm is unconfigured" and "avoid unnecessary
+ * computation" true by construction, not by a second code path).
+ * Returns `DAILY_RHYTHM_EXPANDED_SEARCH_LIMIT` only when
+ * `isDailyRhythmApplicable` -- the identical gate `applyDailyRhythmPreference`
+ * itself uses, so the search is only ever widened when the filter could
+ * actually make use of the extra candidates.
+ */
+export function resolveDailyRhythmSearchLimit(activityId: string | undefined, context: DailyRhythmFilterContext): number | undefined {
+  return isDailyRhythmApplicable(activityId, context) ? DAILY_RHYTHM_EXPANDED_SEARCH_LIMIT : undefined;
 }
 
 // ============================================================
