@@ -11,7 +11,8 @@ import { SharedMomentsView } from './SharedMomentsView';
 import * as theme from './theme';
 import { colors, spacing, typography } from './theme';
 import { PageHeader, SegmentedControl, SecondaryButton, EmptyState, TextButton } from './ui';
-import type { TimingCandidate, TimingCandidateLabel, TimingSearchDateRange, TimingSearchMode, TimingSearchResponse, TimingTimePreference } from '../../../packages/recommendation/src/timingSearch';
+import type { TimingCandidate, TimingCandidateLabel, TimingSearchDateRange, TimingSearchMode, TimingTimePreference } from '../../../packages/recommendation/src/timingSearch';
+import type { TimingSearchResponseWithDailyRhythm } from '../lib/timingSearchDailyRhythm';
 import type { MuhurtaReason } from '../../../packages/muhurta/src/activityOntology';
 import { formatMuhurtaReason } from '../../../packages/muhurta/src/muhurtaReasonFormat';
 import { localDateTimeToUTC } from '../lib/timezone';
@@ -77,7 +78,7 @@ interface PlanWithAuraViewProps {
     candidateStart?: string;
     checkNearbyWindowMinutes?: number;
     candidateStarts?: string[];
-  }) => Promise<TimingSearchResponse>;
+  }) => Promise<TimingSearchResponseWithDailyRhythm>;
   onViewDay?: () => void;
   onPlanLogged?: () => void;
   timezone?: string;
@@ -329,7 +330,7 @@ export function PlanWithAuraView({ onTimingSearch, onViewDay, onPlanLogged, time
   const [timePreference, setTimePreference] = useState<TimePreference>('AFTERNOON');
   const [customStartDate, setCustomStartDate] = useState('');
   const [customEndDate, setCustomEndDate] = useState('');
-  const [findResult, setFindResult] = useState<TimingSearchResponse | null>(null);
+  const [findResult, setFindResult] = useState<TimingSearchResponseWithDailyRhythm | null>(null);
   const [error, setError] = useState('');
   const [isLoading, setIsLoading] = useState(false);
   const [isListening, setIsListening] = useState(false);
@@ -357,7 +358,7 @@ export function PlanWithAuraView({ onTimingSearch, onViewDay, onPlanLogged, time
   const [checkDate, setCheckDate] = useState('');
   const [checkStartTime, setCheckStartTime] = useState('');
   const [checkDurationMinutes, setCheckDurationMinutes] = useState(60);
-  const [checkResult, setCheckResult] = useState<TimingSearchResponse | null>(null);
+  const [checkResult, setCheckResult] = useState<TimingSearchResponseWithDailyRhythm | null>(null);
   const [checkError, setCheckError] = useState('');
   const [isChecking, setIsChecking] = useState(false);
 
@@ -368,7 +369,7 @@ export function PlanWithAuraView({ onTimingSearch, onViewDay, onPlanLogged, time
   const [compareAStartTime, setCompareAStartTime] = useState('');
   const [compareBDate, setCompareBDate] = useState('');
   const [compareBStartTime, setCompareBStartTime] = useState('');
-  const [compareResult, setCompareResult] = useState<TimingSearchResponse | null>(null);
+  const [compareResult, setCompareResult] = useState<TimingSearchResponseWithDailyRhythm | null>(null);
   const [compareError, setCompareError] = useState('');
   const [isComparing, setIsComparing] = useState(false);
   const [showAllPlans, setShowAllPlans] = useState(false);
@@ -1085,6 +1086,7 @@ export function PlanWithAuraView({ onTimingSearch, onViewDay, onPlanLogged, time
               onShareMoment={resolvedActivityDefinition ? () => handleShareSavedMoment(findCandidateKey(findResult.candidates[0]), 'PERSONAL', resolvedActivityDefinition.id) : undefined}
               isSharingMoment={sharingMomentKey === findCandidateKey(findResult.candidates[0])}
               shareFeedback={momentShareFeedback?.key === findCandidateKey(findResult.candidates[0]) ? momentShareFeedback.text : null}
+              dailyRhythmNote={findResult.dailyRhythmNotes?.[findResult.candidates[0].start]}
             />
           )}
           {findResult.candidates.length > 1 && (
@@ -1106,6 +1108,7 @@ export function PlanWithAuraView({ onTimingSearch, onViewDay, onPlanLogged, time
                   onShareMoment={resolvedActivityDefinition ? () => handleShareSavedMoment(findCandidateKey(candidate), 'PERSONAL', resolvedActivityDefinition.id) : undefined}
                   isSharingMoment={sharingMomentKey === findCandidateKey(candidate)}
                   shareFeedback={momentShareFeedback?.key === findCandidateKey(candidate) ? momentShareFeedback.text : null}
+                  dailyRhythmNote={findResult.dailyRhythmNotes?.[candidate.start]}
                 />
               ))}
             </>
@@ -1202,6 +1205,7 @@ export function PlanWithAuraView({ onTimingSearch, onViewDay, onPlanLogged, time
                 isSaving={savingOpportunityKey === findCandidateKey(checkResult.requestedCandidate)}
                 isPlanned={plannedOpportunityKeys.has(findCandidateKey(checkResult.requestedCandidate))}
                 onPlan={() => saveOpportunity(findCandidateKey(checkResult.requestedCandidate!), planPayloadFromCandidate(checkResult.requestedCandidate!, checkDurationMinutes), resolveActivitySelection(checkTaskTitle).activityId)}
+                dailyRhythmNote={checkResult.dailyRhythmNotes?.[checkResult.requestedCandidate.start]}
               />
               {checkResult.betterNearby && (
                 <>
@@ -1300,6 +1304,7 @@ export function PlanWithAuraView({ onTimingSearch, onViewDay, onPlanLogged, time
                 isSaving={savingOpportunityKey === findCandidateKey(compareResult.candidates[0])}
                 isPlanned={plannedOpportunityKeys.has(findCandidateKey(compareResult.candidates[0]))}
                 onPlan={() => saveOpportunity(findCandidateKey(compareResult.candidates[0]), planPayloadFromCandidate(compareResult.candidates[0], compareDurationMinutes), resolveActivitySelection(compareTaskTitle).activityId)}
+                dailyRhythmNote={compareResult.dailyRhythmNotes?.[compareResult.candidates[0].start]}
               />
               <SectionHeader label="Compared With" />
               {compareResult.candidates.slice(1).map((candidate) => (
@@ -1312,6 +1317,7 @@ export function PlanWithAuraView({ onTimingSearch, onViewDay, onPlanLogged, time
                   isSaving={savingOpportunityKey === findCandidateKey(candidate)}
                   isPlanned={plannedOpportunityKeys.has(findCandidateKey(candidate))}
                   onPlan={() => saveOpportunity(findCandidateKey(candidate), planPayloadFromCandidate(candidate, compareDurationMinutes), resolveActivitySelection(compareTaskTitle).activityId)}
+                  dailyRhythmNote={compareResult.dailyRhythmNotes?.[candidate.start]}
                 />
               ))}
             </section>
@@ -1750,6 +1756,7 @@ function TimingResultCard({
   onShareMoment,
   isSharingMoment,
   shareFeedback,
+  dailyRhythmNote,
 }: {
   kicker: string;
   candidate: TimingCandidate;
@@ -1768,6 +1775,11 @@ function TimingResultCard({
   onShareMoment?: () => void;
   isSharingMoment?: boolean;
   shareFeedback?: string | null;
+  /** Daily Rhythm V1 PR DR4-B -- the response's own `dailyRhythmNotes[candidate.start]`,
+   * looked up by the caller. Absent whenever Daily Rhythm has nothing to
+   * say about this specific candidate (unconfigured, non-workday, a WORK
+   * activity, etc.) -- never invented here. */
+  dailyRhythmNote?: string;
 }) {
   const [showAllReasons, setShowAllReasons] = useState(false);
   const start = new Date(candidate.start);
@@ -1786,6 +1798,19 @@ function TimingResultCard({
           <h2 style={{ margin: '7px 0 0', color: '#f8fafc', fontSize: 18 }}>{activityTitle}</h2>
           <div style={{ color: '#dbe7f4', fontSize: 14, marginTop: 5 }}>{candidate.metadata.dateLabel} · {timeRange}</div>
           <div style={{ color: labelColor, fontSize: 12, marginTop: 7, fontWeight: 800 }}>{RESULT_LABEL_TEXT[candidate.label]} · {durationLabel(durationMinutes)}</div>
+          {/* Daily Rhythm V1 PR DR4-B -- its own line, bold, the same
+              brighter-than-caption text color and ✦ glyph DR4-A already
+              established for this exact "personal-fit guidance, kept
+              separate from timing-quality labels" distinction in Plan My
+              Day -- never the labelColor above (that's the astrological
+              timing-quality signal) and never folded into "Why this
+              works" (that list is astrological reasons only). */}
+          {dailyRhythmNote && (
+            <div style={{ color: '#dbe7f4', fontSize: 12, marginTop: 7, fontWeight: 800 }}>
+              <span aria-hidden="true">✦ </span>
+              {dailyRhythmNote}
+            </div>
+          )}
         </div>
         <div style={{ width: 58, height: 58, borderRadius: 29, border: `1px solid ${labelColor}99`, background: `${labelColor}14`, display: 'flex', alignItems: 'center', justifyContent: 'center', flexDirection: 'column' }}>
           <span style={{ color: '#f8fafc', fontSize: 19, fontWeight: 900 }}>{candidate.score.toFixed(1)}</span>

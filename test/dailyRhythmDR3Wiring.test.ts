@@ -53,12 +53,13 @@ function main() {
   check('4b. dailyAssistant.ts (selectDiversePlanningOptions, the diversification algorithm) never references dailyRhythm/DailyRhythm -- unmodified', !/dailyRhythm|DailyRhythm/.test(dailyAssistantSrc));
 
   // ============================================================
-  // Find a Time / manual overrides (DR3 section 2, "manual override ->
-  // never silently changed") remain entirely untouched -- same guard as
-  // DR2's own wiring test, re-verified for DR3.
+  // Find a Time was untouched as of DR3 -- as of Daily Rhythm V1 PR
+  // DR4-B it is now intentionally Daily-Rhythm-aware (see
+  // dailyRhythmDR2Wiring.test.ts's own check 3 for the updated, non-blank
+  // assertion and its rationale). Manual overrides (DR3 section 2,
+  // "manual override -> never silently changed") remain untouched either
+  // way, verified below via planMove.ts.
   // ============================================================
-  const planWithAuraSrc = read('apps/web/components/PlanWithAuraView.tsx');
-  check('5. PlanWithAuraView.tsx (Find a Time) never references dailyRhythm/DailyRhythm', !/dailyRhythm|DailyRhythm/.test(planWithAuraSrc));
   const planMoveSrc = read('apps/web/lib/planMove.ts');
   check('5b. planMove.ts (the manual-override domain function) never references dailyRhythm/DailyRhythm -- a manual Move is never second-guessed by Daily Rhythm', !/dailyRhythm|DailyRhythm/.test(planMoveSrc));
 

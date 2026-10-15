@@ -240,7 +240,14 @@ export interface TimingSearchResponse {
   betterNearby?: TimingCandidate;
 }
 
-const DEFAULT_FIND_LIMIT = 3;
+/** Exported so an `apps/web/` caller that conditionally requests a wider
+ * `limit` than the default, then needs to re-slice its own result back
+ * down to the real client-requested count, can fall back to the SAME
+ * default this file's own runFind() uses, rather than duplicating the
+ * literal 3 as a second magic number that could silently drift from this
+ * one. No behavior change -- the value and every existing use of it
+ * below are untouched. */
+export const DEFAULT_FIND_LIMIT = 3;
 const DEFAULT_CHECK_NEARBY_WINDOW_MINUTES = 180;
 const CANDIDATE_SEARCH_STEP_MINUTES = 15;
 /** Range length (inclusive day count) at which FIND switches from

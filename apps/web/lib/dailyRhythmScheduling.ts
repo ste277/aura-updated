@@ -172,7 +172,13 @@ export function resolveWorkWindowInstants(targetDateStr: string, timezone: strin
  * between the candidate's full duration and the working window"), never
  * just its start instant -- a candidate that only STARTS before work
  * hours but runs into them is still correctly treated as overlapping. */
-function overlapsWorkWindow(candidateStart: Date, candidateEnd: Date, workWindow: { start: Date; end: Date }): boolean {
+/** Exported (Daily Rhythm V1 PR DR4-B) so timingSearchDailyRhythm.ts's own
+ * per-candidate adapter -- which must resolve a work window independently
+ * for EACH candidate's own date, since Find a Time's FIND mode can search
+ * across multiple days, unlike Day Constructor's single `targetDate` --
+ * can reuse this exact half-open overlap check rather than reimplementing
+ * it. No behavior change: the formula itself is untouched. */
+export function overlapsWorkWindow(candidateStart: Date, candidateEnd: Date, workWindow: { start: Date; end: Date }): boolean {
   return candidateStart.getTime() < workWindow.end.getTime() && workWindow.start.getTime() < candidateEnd.getTime();
 }
 
