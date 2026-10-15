@@ -194,8 +194,37 @@ const noCandidateWarning: ConstructDayWarning[] = [{ intentId: 'e', code: 'NO_TI
 check('27. NO_TIMING_CANDIDATES_FOUND is suppressed entirely (already covered by the deferred explanation)', presentWarnings(noCandidateWarning, []).length === 0);
 check('28. no warning presentation text equals a raw warning code', presentWarnings([...coarseWarning, ...durationWarning], resolvedWithFamily).every((w) => w.text !== 'ACTIVITY_RESOLVED_TO_COARSE_FAMILY' && w.text !== 'DURATION_FROM_GENERIC_FALLBACK'));
 check('28b. groupWarningsByIntentId groups multiple warnings under the same intentId', (() => {
-  const grouped = groupWarningsByIntentId([{ intentId: 'x', text: 'A' }, { intentId: 'x', text: 'B' }, { intentId: 'y', text: 'C' }]);
+  const grouped = groupWarningsByIntentId([
+    { intentId: 'x', text: 'A', kind: 'GENERAL' },
+    { intentId: 'x', text: 'B', kind: 'GENERAL' },
+    { intentId: 'y', text: 'C', kind: 'GENERAL' },
+  ]);
   return grouped.x.length === 2 && grouped.y.length === 1;
+})());
+
+// ============================================================
+// DR4-A -- `kind` tagging. The visual-distinction improvement is
+// presentation-only in DayPlanPreview.tsx (no component-test
+// infrastructure exists in this repo, verified separately via the
+// browser preview tool), but the TAGGING itself -- which kind each
+// warning code maps to -- is a pure function of `presentWarnings`,
+// fully testable here.
+// ============================================================
+
+const dailyRhythmOutsideWarning: ConstructDayWarning[] = [{ intentId: 'h', code: 'DAILY_RHYTHM_PERSONAL_OUTSIDE_WORK_HOURS' }];
+const dailyRhythmFallbackWarning: ConstructDayWarning[] = [{ intentId: 'h', code: 'DAILY_RHYTHM_PERSONAL_DURING_WORK_HOURS_FALLBACK' }];
+const dailyRhythmBreakWarning: ConstructDayWarning[] = [{ intentId: 'h', code: 'DAILY_RHYTHM_FLEXIBLE_BREAK_DURING_WORK_HOURS' }];
+
+check('43. DAILY_RHYTHM_PERSONAL_OUTSIDE_WORK_HOURS presents with kind DAILY_RHYTHM', presentWarnings(dailyRhythmOutsideWarning, [])[0]?.kind === 'DAILY_RHYTHM');
+check('43b. DAILY_RHYTHM_PERSONAL_DURING_WORK_HOURS_FALLBACK presents with kind DAILY_RHYTHM', presentWarnings(dailyRhythmFallbackWarning, [])[0]?.kind === 'DAILY_RHYTHM');
+check('43c. DAILY_RHYTHM_FLEXIBLE_BREAK_DURING_WORK_HOURS presents with kind DAILY_RHYTHM', presentWarnings(dailyRhythmBreakWarning, [])[0]?.kind === 'DAILY_RHYTHM');
+check('44. ACTIVITY_RESOLVED_TO_COARSE_FAMILY presents with kind GENERAL (never DAILY_RHYTHM)', presentWarnings(coarseWarning, resolvedWithFamily)[0]?.kind === 'GENERAL');
+check('44b. DURATION_FROM_GENERIC_FALLBACK presents with kind GENERAL (never DAILY_RHYTHM)', presentWarnings(durationWarning, [])[0]?.kind === 'GENERAL');
+check('45. a Daily Rhythm explanation and a duration caveat on the SAME intent are tagged distinctly once grouped', (() => {
+  const mixed = presentWarnings([...dailyRhythmOutsideWarning, { intentId: 'h', code: 'DURATION_FROM_GENERIC_FALLBACK' }], []);
+  const grouped = groupWarningsByIntentId(mixed);
+  const kinds = grouped.h?.map((w) => w.kind).sort();
+  return kinds?.length === 2 && kinds[0] === 'DAILY_RHYTHM' && kinds[1] === 'GENERAL';
 })());
 
 // ============================================================

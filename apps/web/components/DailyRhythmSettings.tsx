@@ -147,7 +147,7 @@ export function DailyRhythmSettings() {
   return (
     <SurfaceCard>
       <p style={{ ...typography.body, marginTop: 0, marginBottom: spacing.xs, color: colors.textSecondary }}>
-        When are you usually working? Aura doesn&rsquo;t use this to plan yet -- it&rsquo;s saved for later.
+        Your working hours help Aura suggest better times for personal activities when you use Plan My Day.
       </p>
       {load.kind === 'READY' && <p style={{ fontSize: 12, color: colors.textFaint, marginTop: 0, marginBottom: spacing.md }}>Times use your timezone: {load.timezone}</p>}
       {load.kind === 'ERROR' && <FieldError>{load.message}</FieldError>}
