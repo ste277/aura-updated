@@ -73,7 +73,14 @@ check('no user-facing copy in the core (no string literal containing whitespace)
 check('planBlockerLifecycle.ts has no imports (pure) and no I/O or clock', importSpecs(life).length === 0 && !/pool\.|fetch\(|Date\.now|new Date\(\s*\)/.test(stripComments(life)));
 const orch = read('apps/web/lib/dayConstructorOrchestrator.ts');
 check('the orchestrator re-exports the lifecycle unchanged (existing importers unaffected) and no longer defines it', /export \{ isActivePlanBlocker, type PlanBlockerStatus, type PlanBlockerCandidate \};/.test(orch) && !/export function isActivePlanBlocker/.test(orch) && /export function isActivePlanBlocker/.test(life));
-check('the orchestrator remains Goal/Rhythm-blind after the extraction', !/goal|rhythm/i.test(orch));
+// Daily Rhythm V1 PR DR2 -- the negative lookbehind on the "rhythm"
+// alternative excludes the unrelated, independently-named "Daily Rhythm"
+// feature (work-hours scheduling preference), both as a code identifier
+// and as doc-comment prose ("Daily Rhythm V1 PR DR2") -- this check's own
+// GOAL-domain intent (paired "Goal/Rhythm-blind") is about Goal Activity
+// Rhythm leaking in, never about this unrelated feature. "goal" is left
+// unscoped since DR2 introduces no "goal" reference here at all.
+check('the orchestrator remains Goal/Rhythm-blind after the extraction', !/goal/i.test(orch) && !/(?<!Daily)(?<!daily)(?<!DAILY_)(?<!Daily )(?<!daily )rhythm/i.test(orch));
 
 // ---- no production consumer / no integration ----------------------------
 function listTs(dir: string): string[] {

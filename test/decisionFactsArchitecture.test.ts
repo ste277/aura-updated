@@ -43,7 +43,20 @@ const dayCapacitySrc = read('../apps/web/lib/dayCapacity.ts');
 // STRUCTURE -- forbidden modules/imports, not just words
 // ============================================================
 check('orchestrator is Goal-blind (no "goal" anywhere, comments included)', !/goal/i.test(orchestratorSrc));
-check('orchestrator is Rhythm-blind (no "rhythm" anywhere, comments included)', !/rhythm/i.test(orchestratorSrc));
+// Daily Rhythm V1 PR DR2 -- the negative lookbehind excludes the
+// unrelated, independently-named "Daily Rhythm" feature (work-hours
+// scheduling preference -- DailyRhythmPreferencesInput, dailyRhythmScheduling,
+// loadDailyRhythmPreferences, DAILY_RHYTHM_* warning codes, and the "Daily
+// Rhythm V1 PR DR2" doc-comment prose), which this file's own Goal-blind/
+// Rhythm-blind pair (this check and the one immediately above) was never
+// about -- see the import-forbidding check right below, which names
+// exactly what this guard actually protects: goalActivityRhythm (Goal
+// Activity Rhythm, an entirely different, Goal-domain feature) never
+// leaking into the orchestrator. The /i flag already makes the "Daily"/
+// "daily" lookbehind case-insensitive, so no separate lowercase
+// alternative is needed. A genuine Goal-domain "rhythm" mention (e.g.
+// "GoalActivityRhythm", bare "rhythmKind") is still caught.
+check('orchestrator is Rhythm-blind of the GOAL domain (no Goal Activity Rhythm leakage; the unrelated Daily Rhythm feature is expected)', !/(?<!Daily )(?<!Daily)(?<!DAILY_)rhythm/i.test(orchestratorSrc));
 check('orchestrator imports no goal-demand module (goalDemandIntentId/goalDemandCandidates/goalDemandProvenanceAuthorization/goalActivityRhythm)', !/from '\.\/(goalDemand|goalActivityRhythm|goals|goalDecision)/.test(orchestratorSrc));
 check('orchestrator imports decisionFacts.ts only for the generic lookup/type', /import \{ resolveDecisionFactsForIntent, type DecisionFactsByIntentId \} from '\.\/decisionFacts';/.test(orchestratorSrc));
 check('orchestrator has exactly one deps-bound fact acquisition: none (no loader dependency, no DB call for facts)', !/loadGoal|loadDecisionFacts|loadRhythm/.test(orchestratorSrc));
