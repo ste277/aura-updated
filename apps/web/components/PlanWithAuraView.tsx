@@ -1077,6 +1077,7 @@ export function PlanWithAuraView({ onTimingSearch, onViewDay, onPlanLogged, time
               candidate={findResult.candidates[0]}
               activityTitle={findResult.candidates[0].metadata.activityType}
               durationMinutes={durationMinutes}
+              timezone={timezone || 'UTC'}
               isSaving={savingOpportunityKey === findCandidateKey(findResult.candidates[0])}
               isPlanned={plannedOpportunityKeys.has(findCandidateKey(findResult.candidates[0]))}
               onPlan={() => saveOpportunity(findCandidateKey(findResult.candidates[0]), planPayloadFromCandidate(findResult.candidates[0], durationMinutes), resolvedActivityDefinition?.id)}
@@ -1099,6 +1100,7 @@ export function PlanWithAuraView({ onTimingSearch, onViewDay, onPlanLogged, time
                   candidate={candidate}
                   activityTitle={candidate.metadata.activityType}
                   durationMinutes={durationMinutes}
+                  timezone={timezone || 'UTC'}
                   isSaving={savingOpportunityKey === findCandidateKey(candidate)}
                   isPlanned={plannedOpportunityKeys.has(findCandidateKey(candidate))}
                   onPlan={() => saveOpportunity(findCandidateKey(candidate), planPayloadFromCandidate(candidate, durationMinutes), resolvedActivityDefinition?.id)}
@@ -1131,6 +1133,7 @@ export function PlanWithAuraView({ onTimingSearch, onViewDay, onPlanLogged, time
                 activityTitle={resolvedActivityDefinition ? FULL_ACTIVITY_CATALOG.find((a) => a.id === resolvedActivityDefinition.id)?.title ?? taskTitle : taskTitle}
                 candidate={candidate}
                 durationMinutes={durationMinutes}
+                timezone={timezone || 'UTC'}
                 isMomentSaving={momentSavingKey === key}
                 isMomentSaved={momentSavedKeys.has(key)}
                 onMakeMoment={() => resolvedActivityDefinition && handleMakeMoment(key, { activityId: resolvedActivityDefinition.id, start: candidate.start, end: candidate.end, ratingLabel: candidate.rating, savedPersonId: selectedPersonId })}
@@ -1202,6 +1205,7 @@ export function PlanWithAuraView({ onTimingSearch, onViewDay, onPlanLogged, time
                 candidate={checkResult.requestedCandidate}
                 activityTitle={checkResult.requestedCandidate.metadata.activityType}
                 durationMinutes={checkDurationMinutes}
+                timezone={timezone || 'UTC'}
                 isSaving={savingOpportunityKey === findCandidateKey(checkResult.requestedCandidate)}
                 isPlanned={plannedOpportunityKeys.has(findCandidateKey(checkResult.requestedCandidate))}
                 onPlan={() => saveOpportunity(findCandidateKey(checkResult.requestedCandidate!), planPayloadFromCandidate(checkResult.requestedCandidate!, checkDurationMinutes), resolveActivitySelection(checkTaskTitle).activityId)}
@@ -1215,6 +1219,7 @@ export function PlanWithAuraView({ onTimingSearch, onViewDay, onPlanLogged, time
                     candidate={checkResult.betterNearby}
                     activityTitle={checkResult.betterNearby.metadata.activityType}
                     durationMinutes={checkDurationMinutes}
+                    timezone={timezone || 'UTC'}
                     planCtaLabel="Use better time"
                     isSaving={savingOpportunityKey === findCandidateKey(checkResult.betterNearby)}
                     isPlanned={plannedOpportunityKeys.has(findCandidateKey(checkResult.betterNearby))}
@@ -1301,6 +1306,7 @@ export function PlanWithAuraView({ onTimingSearch, onViewDay, onPlanLogged, time
                 candidate={compareResult.candidates[0]}
                 activityTitle={compareResult.candidates[0].metadata.activityType}
                 durationMinutes={compareDurationMinutes}
+                timezone={timezone || 'UTC'}
                 isSaving={savingOpportunityKey === findCandidateKey(compareResult.candidates[0])}
                 isPlanned={plannedOpportunityKeys.has(findCandidateKey(compareResult.candidates[0]))}
                 onPlan={() => saveOpportunity(findCandidateKey(compareResult.candidates[0]), planPayloadFromCandidate(compareResult.candidates[0], compareDurationMinutes), resolveActivitySelection(compareTaskTitle).activityId)}
@@ -1314,6 +1320,7 @@ export function PlanWithAuraView({ onTimingSearch, onViewDay, onPlanLogged, time
                   candidate={candidate}
                   activityTitle={candidate.metadata.activityType}
                   durationMinutes={compareDurationMinutes}
+                  timezone={timezone || 'UTC'}
                   isSaving={savingOpportunityKey === findCandidateKey(candidate)}
                   isPlanned={plannedOpportunityKeys.has(findCandidateKey(candidate))}
                   onPlan={() => saveOpportunity(findCandidateKey(candidate), planPayloadFromCandidate(candidate, compareDurationMinutes), resolveActivitySelection(compareTaskTitle).activityId)}
@@ -1746,6 +1753,7 @@ function TimingResultCard({
   candidate,
   activityTitle,
   durationMinutes,
+  timezone,
   planCtaLabel = 'Use this time',
   isSaving,
   isPlanned,
@@ -1762,6 +1770,18 @@ function TimingResultCard({
   candidate: TimingCandidate;
   activityTitle: string;
   durationMinutes: number;
+  /** DR4-B.1 -- the real IANA timezone the candidate's own `start`/`end`
+   * instants should be DISPLAYED in. Every caller already resolves this
+   * from PlanWithAuraView's own `timezone` prop (the authenticated user's
+   * real timezone, apps/web/app/page.tsx's `timezone={user.timezone}`)
+   * via the same `timezone || 'UTC'` fallback this file already uses
+   * elsewhere (e.g. `localDateTimeToUTC(checkDate, checkStartTime,
+   * timezone || 'UTC')`) -- never a second, different fallback
+   * convention. Previously this card formatted with no `timeZone` at
+   * all, so `toLocaleTimeString` silently used the BROWSER's own local
+   * timezone -- correct only by coincidence when it happened to match
+   * the user's configured one. */
+  timezone: string;
   planCtaLabel?: string;
   isSaving?: boolean;
   isPlanned?: boolean;
@@ -1784,7 +1804,7 @@ function TimingResultCard({
   const [showAllReasons, setShowAllReasons] = useState(false);
   const start = new Date(candidate.start);
   const end = new Date(candidate.end);
-  const timeOpts: Intl.DateTimeFormatOptions = { hour: 'numeric', minute: '2-digit' };
+  const timeOpts: Intl.DateTimeFormatOptions = { hour: 'numeric', minute: '2-digit', timeZone: timezone };
   const timeRange = `${start.toLocaleTimeString('en-US', timeOpts)} - ${end.toLocaleTimeString('en-US', timeOpts)}`;
   const topReasons = candidate.reasons.slice(0, 3);
   const hasMoreReasons = candidate.reasons.length > topReasons.length;
@@ -1904,6 +1924,7 @@ function EverydaySharedResultCard({
   activityTitle,
   candidate,
   durationMinutes,
+  timezone,
   onMakeMoment,
   isMomentSaving,
   isMomentSaved,
@@ -1915,6 +1936,10 @@ function EverydaySharedResultCard({
   activityTitle: string;
   candidate: EverydaySharedCandidate;
   durationMinutes: number;
+  /** DR4-B.1 -- see TimingResultCard's own `timezone` doc comment above;
+   * same real-IANA-timezone contract, same `timezone || 'UTC'` fallback
+   * at the call site. */
+  timezone: string;
   onMakeMoment: () => void;
   isMomentSaving?: boolean;
   isMomentSaved?: boolean;
@@ -1925,9 +1950,9 @@ function EverydaySharedResultCard({
 }) {
   const start = new Date(candidate.start);
   const end = new Date(candidate.end);
-  const timeOpts: Intl.DateTimeFormatOptions = { hour: 'numeric', minute: '2-digit' };
+  const timeOpts: Intl.DateTimeFormatOptions = { hour: 'numeric', minute: '2-digit', timeZone: timezone };
   const timeRange = `${start.toLocaleTimeString('en-US', timeOpts)} - ${end.toLocaleTimeString('en-US', timeOpts)}`;
-  const dateLabel = start.toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric' });
+  const dateLabel = start.toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric', timeZone: timezone });
 
   return (
     <article style={{ ...panelStyle, padding: 15 }}>
