@@ -188,9 +188,23 @@ export function presentDeferralReason(reason: PlacementDeferralReason, flexibili
 // event (this ticket's own explicit instruction).
 // ============================================================
 
+/**
+ * DR4-A -- `kind` exists so a renderer can visually distinguish a Daily
+ * Rhythm personal-fit explanation from every other kind of warning text
+ * (a duration estimate, an activity-interpretation note) WITHOUT the
+ * renderer re-deriving that distinction from a raw warning code itself
+ * (this file's own module doc comment: presentation decisions belong
+ * here, not in JSX). `'DAILY_RHYTHM'` covers exactly the three
+ * DAILY_RHYTHM_* codes below; every other presented warning is
+ * `'GENERAL'`. Purely a presentation tag -- does not change which
+ * warnings are produced, their text, or their ordering.
+ */
+export type WarningPresentationKind = 'DAILY_RHYTHM' | 'GENERAL';
+
 export interface WarningPresentation {
   intentId: string;
   text: string;
+  kind: WarningPresentationKind;
 }
 
 function humanizeActivityFamily(family: MuhurtaActivityFamily): string {
@@ -216,11 +230,11 @@ export function presentWarnings(warnings: readonly ConstructDayWarning[], resolv
     if (warning.code === 'NO_TIMING_CANDIDATES_FOUND') continue;
     if (warning.code === 'ACTIVITY_RESOLVED_TO_COARSE_FAMILY') {
       const family = familyByIntentId.get(warning.intentId);
-      if (family) presentations.push({ intentId: warning.intentId, text: `Aura interpreted this as ${humanizeActivityFamily(family)}` });
+      if (family) presentations.push({ intentId: warning.intentId, text: `Aura interpreted this as ${humanizeActivityFamily(family)}`, kind: 'GENERAL' });
       continue;
     }
     if (warning.code === 'DURATION_FROM_GENERIC_FALLBACK') {
-      presentations.push({ intentId: warning.intentId, text: 'Estimated duration' });
+      presentations.push({ intentId: warning.intentId, text: 'Estimated duration', kind: 'GENERAL' });
       continue;
     }
     // Daily Rhythm V1 PR DR2 -- plain, non-technical copy only; never
@@ -239,27 +253,29 @@ export function presentWarnings(warnings: readonly ConstructDayWarning[], resolv
     // the exact candidate batch DR3's own expanded search returned --
     // never a claim about candidates the search never examined.
     if (warning.code === 'DAILY_RHYTHM_PERSONAL_OUTSIDE_WORK_HOURS') {
-      presentations.push({ intentId: warning.intentId, text: 'Fits your preferred personal time.' });
+      presentations.push({ intentId: warning.intentId, text: 'Fits your preferred personal time.', kind: 'DAILY_RHYTHM' });
       continue;
     }
     if (warning.code === 'DAILY_RHYTHM_PERSONAL_DURING_WORK_HOURS_FALLBACK') {
-      presentations.push({ intentId: warning.intentId, text: 'No suitable time outside your working hours was found.' });
+      presentations.push({ intentId: warning.intentId, text: 'No suitable time outside your working hours was found.', kind: 'DAILY_RHYTHM' });
       continue;
     }
     if (warning.code === 'DAILY_RHYTHM_FLEXIBLE_BREAK_DURING_WORK_HOURS') {
-      presentations.push({ intentId: warning.intentId, text: 'Short break that fits into your workday' });
+      presentations.push({ intentId: warning.intentId, text: 'Short break that fits into your workday', kind: 'DAILY_RHYTHM' });
       continue;
     }
   }
   return presentations;
 }
 
-/** Groups warning text by `intentId` so a row can look up its own
- * warnings by a single map lookup instead of filtering the full list. */
-export function groupWarningsByIntentId(presentations: readonly WarningPresentation[]): Record<string, string[]> {
-  const grouped: Record<string, string[]> = {};
+/** Groups whole warning presentations (text AND kind, DR4-A) by
+ * `intentId` so a row can look up its own warnings by a single map
+ * lookup instead of filtering the full list, and still tell a
+ * `'DAILY_RHYTHM'` explanation apart from a `'GENERAL'` one once grouped. */
+export function groupWarningsByIntentId(presentations: readonly WarningPresentation[]): Record<string, WarningPresentation[]> {
+  const grouped: Record<string, WarningPresentation[]> = {};
   for (const presentation of presentations) {
-    (grouped[presentation.intentId] ??= []).push(presentation.text);
+    (grouped[presentation.intentId] ??= []).push(presentation);
   }
   return grouped;
 }
