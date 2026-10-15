@@ -25,7 +25,16 @@ function stripComments(source: string): string {
   return source.replace(/\/\*[\s\S]*?\*\//g, '').replace(/\/\/.*$/gm, '');
 }
 
-const RHYTHM_PATTERN = /Rhythm|rhythmKind|rhythmTargetPerWeek|computeGoalActivityRhythmEligibility|loadGoalActivityRhythmFacts|materializeGoalActivityRhythmOccurrence/;
+// Daily Rhythm V1 PR DR2 -- the negative lookbehind excludes the
+// unrelated, independently-named "Daily Rhythm" feature (work-hours
+// scheduling preference), both as a code identifier (no space:
+// DailyRhythmPreferencesInput, dailyRhythmScheduling, DAILY_RHYTHM_*) and
+// as doc-comment prose ("Daily Rhythm V1 PR DR2", with a space -- this
+// file's own PRODUCTION_FILES loop below checks raw, unstripped content).
+// Goal Activity Rhythm (this file's own subject) never appears as
+// "Daily"/"daily"/"DAILY_" immediately before "Rhythm", so a genuine leak
+// (e.g. "GoalActivityRhythm", bare "rhythmKind") is still caught.
+const RHYTHM_PATTERN = /(?<!Daily)(?<!daily)(?<!DAILY_)(?<!Daily )(?<!daily )Rhythm|rhythmKind|rhythmTargetPerWeek|computeGoalActivityRhythmEligibility|loadGoalActivityRhythmFacts|materializeGoalActivityRhythmOccurrence/;
 
 // ============================================================
 // Zero Rhythm reference in the Constructor, Recomposition decision

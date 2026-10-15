@@ -28,7 +28,21 @@ function stripComments(source: string): string {
   return source.replace(/\/\*[\s\S]*?\*\//g, '').replace(/\/\/.*$/gm, '');
 }
 
-const RHYTHM_PATTERN = /Rhythm|rhythmKind|rhythmTargetPerWeek|computeGoalActivityRhythmEligibility|loadGoalActivityRhythmFacts/;
+// Daily Rhythm V1 PR DR2 -- the negative lookbehind excludes the
+// unrelated, independently-named "Daily Rhythm" feature (work-hours
+// scheduling preference), both as a code identifier (DailyRhythmPreferencesInput,
+// dailyRhythmScheduling, loadDailyRhythmPreferences, DAILY_RHYTHM_* warning
+// codes -- no space) and as prose in doc comments ("Daily Rhythm V1 PR
+// DR2" -- a space between the two words, since the PRODUCTION_FILES loop
+// below checks raw, unstripped file content). Goal Activity Rhythm (this
+// file's own subject -- weekly-frequency cadence) never appears as
+// "Daily"/"daily"/"DAILY_" immediately before "Rhythm" in any real
+// identifier or comment, so this narrows the pattern without weakening
+// its actual protective intent: a genuine new Goal-Rhythm leak into any
+// of these files would still be caught (e.g. "GoalActivityRhythm",
+// "rhythmKind" bare, or any other "Rhythm" not immediately preceded by
+// the Daily Rhythm feature's own naming prefix).
+const RHYTHM_PATTERN = /(?<!Daily)(?<!daily)(?<!DAILY_)(?<!Daily )(?<!daily )Rhythm|rhythmKind|rhythmTargetPerWeek|computeGoalActivityRhythmEligibility|loadGoalActivityRhythmFacts/;
 
 const PRODUCTION_FILES: Record<string, string> = {
   'Constructor core (dayConstructor.ts)': '../apps/web/lib/dayConstructor.ts',

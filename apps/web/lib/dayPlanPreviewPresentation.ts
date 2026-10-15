@@ -223,6 +223,23 @@ export function presentWarnings(warnings: readonly ConstructDayWarning[], resolv
       presentations.push({ intentId: warning.intentId, text: 'Estimated duration' });
       continue;
     }
+    // Daily Rhythm V1 PR DR2 -- plain, non-technical copy only; never
+    // exposes internal scoring/ranking terminology, never claims a
+    // window is astrologically favorable (that claim belongs solely to
+    // the existing Panchang/Muhurta-derived text elsewhere in this
+    // file, untouched by DR2).
+    if (warning.code === 'DAILY_RHYTHM_PERSONAL_OUTSIDE_WORK_HOURS') {
+      presentations.push({ intentId: warning.intentId, text: 'Fits your preferred personal time' });
+      continue;
+    }
+    if (warning.code === 'DAILY_RHYTHM_PERSONAL_DURING_WORK_HOURS_FALLBACK') {
+      presentations.push({ intentId: warning.intentId, text: 'Scheduled during your working hours -- no outside-work time was available today' });
+      continue;
+    }
+    if (warning.code === 'DAILY_RHYTHM_FLEXIBLE_BREAK_DURING_WORK_HOURS') {
+      presentations.push({ intentId: warning.intentId, text: 'Short break that fits into your workday' });
+      continue;
+    }
   }
   return presentations;
 }
