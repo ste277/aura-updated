@@ -94,7 +94,14 @@ check('handleCompleteRightNow/handleSkipRightNow call sites are unchanged (same 
 check('the Move trigger call site is unchanged', /movePickerFor === moveablePlanIdNow \? closeMovePicker\(\) : openMovePicker\(moveablePlanIdNow\)/.test(src));
 check('the "Why?" control is untouched -- still gated on spotlightExplanation, still calls the same handleToggleExpand, never replaced by Goal context', /\{spotlightExplanation && spotlightExplanation\.length > 0 && \(/.test(src) && /handleToggleExpand\(spotlightItem\.id\)/.test(src));
 
-check('HomeTimeline.tsx (ordinary Timeline rows) does not reference goalContext -- the Right Now spotlight is the only G3.3 consumer', !/goalContext/.test(fs.readFileSync('apps/web/components/HomeTimeline.tsx', 'utf8')));
+// Goal Continuity on Home V1 (DR4-C, a later, separately-authorized
+// ticket) intentionally made HomeTimeline.tsx's own TimelineRow a SECOND
+// consumer of goalContext (every ordinary row, not just the Right Now
+// spotlight) -- see test/homeTimelineGoalContext.test.ts for DR4-C's own
+// guards. Narrowed (not removed): the formatter this file's own section
+// above (lines 85-89) established, formatGoalActivityCompletion, remains
+// Right-Now-exclusive -- HomeTimeline.tsx never imports/calls it.
+check('HomeTimeline.tsx never imports/calls formatGoalActivityCompletion -- the Right Now spotlight remains the only surface rendering completion-progress detail (goal IDENTITY on an ordinary row is DR4-C\'s own, separate, more minimal addition)', !/formatGoalActivityCompletion/.test(fs.readFileSync('apps/web/components/HomeTimeline.tsx', 'utf8')));
 check('GoalDetailClient.tsx was not touched by G3.3 (still only its own G3.2 completionDetail usage, never spotlightGoalContext/spotlightCompletionDetail)', !/spotlightGoalContext|spotlightCompletionDetail/.test(fs.readFileSync('apps/web/app/goals/[goalId]/GoalDetailClient.tsx', 'utf8')));
 check('dayConstructorOrchestrator.ts does not reference goalContext/formatGoalActivityCompletion', !/goalContext|formatGoalActivityCompletion/.test(fs.readFileSync('apps/web/lib/dayConstructorOrchestrator.ts', 'utf8')));
 // Goals V2 G3.5 (a later, separately-authorized ticket) intentionally made

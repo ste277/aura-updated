@@ -57,11 +57,17 @@ check('homeTimelineComposer.ts remains pure -- no DB/fetch call added', !/pool\.
 // RecompositionCard.tsx a consumer of Goal IDENTITY ONLY (via its own
 // goalTitle field, never execution/completion internals) -- see
 // test/goalAwareRecompositionPresentation.test.ts for G3.5's own guards.
-// Every OTHER surface this section covers remains untouched and is still
-// asserted here.
+// Goal Continuity on Home V1 (DR4-C, a later, separately-authorized
+// ticket) intentionally made HomeTimeline.tsx's own TimelineRow a THIRD
+// consumer -- see test/homeTimelineGoalContext.test.ts for DR4-C's own
+// guards. This check is narrowed (not removed) to confirm that new
+// consumption is exactly as restrained as RecompositionCard.tsx's own:
+// Goal IDENTITY only (goalContext.goal.title), never an execution/
+// progress internal. Every OTHER surface this section covers remains
+// untouched and is still asserted here.
 // ============================================================
 check('GoalDetailClient.tsx does not render goalContext (currentValue exposure is API-only in G3.1)', !/goalContext/.test(read('apps/web/app/goals/[goalId]/GoalDetailClient.tsx')));
-check('HomeTimeline.tsx (ordinary Timeline rows) does not reference goalContext -- the Right Now spotlight is G3.3\'s only consumer, never every row', !/goalContext/.test(read('apps/web/components/HomeTimeline.tsx')));
+check('HomeTimeline.tsx\'s own goalContext consumption is Goal IDENTITY only (goalContext.goal.title) -- no execution id/source/snapshot/currentValue/completionRequirement ever reaches it, same restraint RecompositionCard.tsx already established', /goalContext\.goal\.title/.test(read('apps/web/components/HomeTimeline.tsx')) && !/executionId|\.source\b|completionKindSnapshot|completionTargetValueSnapshot|completionUnitSnapshot|completionRequirement|currentValue/.test(read('apps/web/components/HomeTimeline.tsx')));
 check('RecompositionCard.tsx consumes Goal IDENTITY only (its own goalTitle field) -- no execution id/source/snapshot/currentValue/completionRequirement ever reaches it', !/executionId|\.source\b|completionKindSnapshot|completionTargetValueSnapshot|completionUnitSnapshot|completionRequirement|currentValue/.test(read('apps/web/components/RecompositionCard.tsx')));
 
 // ============================================================
