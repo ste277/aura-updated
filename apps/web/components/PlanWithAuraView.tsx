@@ -1762,7 +1762,12 @@ function UpcomingPlan({
             <div style={{ minWidth: 0 }}>
               <div style={{ color: '#f8fafc', fontSize: 16, fontWeight: 900, lineHeight: 1.25 }}>
                 {plan.title}
-                {(plan.match === 'Best Match' || isLogged) && <span style={{ color: '#4ade80', fontSize: 13, marginLeft: 6 }}>✓</span>}
+                {/* DR4-E3 -- the checkmark is a COMPLETION indicator and
+                 * must never fire on recommendation quality alone (the
+                 * DR4-E audit's own finding: a Best Match rating used to
+                 * draw this checkmark on an activity nobody had done yet).
+                 * isLogged only. */}
+                {isLogged && <span style={{ color: '#4ade80', fontSize: 13, marginLeft: 6 }}>✓</span>}
               </div>
               <div style={{ color: isLogged ? '#a7f3d0' : '#4ade80', fontSize: 14, fontWeight: 850, marginTop: 4 }}>{plan.time}</div>
               {/* Event Location Plan Persistence V1 (brief section 19):
@@ -1796,13 +1801,17 @@ function UpcomingPlan({
           <div style={{ color: '#aab7d2', fontSize: 12.5, marginTop: 8 }}>{plan.when} · {plan.duration} · {plan.window}</div>
 
           <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginTop: 9 }}>
+            {/* DR4-E3 -- a match badge is recommendation quality, Logged is
+             * completion; the two are never the same indicator, and a plan
+             * with no genuine matchLabel (plan.match undefined) shows
+             * neither badge, never a fabricated one. */}
             {isLogged ? (
               <span style={planMatchBadgeStyle}>Logged{plan.loggedAt ? ` ${plan.loggedAt}` : ''}</span>
             ) : plan.match === 'Best Match' ? (
               <span style={planMatchBadgeStyle}>{plan.match}</span>
-            ) : (
+            ) : plan.match === 'Good Match' ? (
               <span style={{ color: '#76e7a5', fontSize: 12, fontWeight: 800 }}>{plan.match}</span>
-            )}
+            ) : null}
             <span style={{ marginLeft: 'auto', color: '#aab7d2', fontSize: 22, lineHeight: 1, transform: expanded ? 'rotate(90deg)' : 'none', transition: 'transform 140ms ease' }}>›</span>
           </div>
         </div>
