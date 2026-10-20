@@ -256,6 +256,21 @@ function TimelineRow({
   const hasExplanation = explanationLines.length > 0;
   const label = lifecycleLabel(item);
   const panelId = `home-timeline-why-${item.id}`;
+  // Goal Continuity on Home V1 (DR4-C) -- pure passthrough render of
+  // metadata.goalContext, which homeTimelineComposer.ts's own
+  // projectAgendaItem already attaches to EVERY agenda item regardless of
+  // status (never re-derived or re-queried here; see that function's own
+  // "Goals V2 G3.1 -- pure passthrough" comment). The data has always
+  // reached this row, for completed items too -- it was simply never
+  // rendered here before, the Right Now spotlight's own goalContext
+  // display (HomeDashboard.tsx) being the only consumer, and that
+  // spotlight structurally excludes completed/missed/skipped/moved items
+  // (rightNowSelection.ts's own isResolved()). This is the fix: a
+  // completed goal-linked activity keeps its "why it mattered" context
+  // visible in the one place every item -- planned or completed -- is
+  // always listed.
+  const goalContext = item.metadata?.goalContext;
+  const isCompleted = item.metadata?.agendaStatus === 'COMPLETED';
 
   return (
     <div
@@ -317,6 +332,15 @@ function TimelineRow({
           </TextButton>
         )}
       </div>
+      {/* Goal Continuity on Home V1 (DR4-C) -- secondary to the title and
+          status above (own row, caption-sized, muted), present for every
+          lifecycle state that carries a real goalContext, including
+          COMPLETED -- never fabricated when no association exists. */}
+      {goalContext && (
+        <div style={{ paddingLeft: 24 + spacing.md, marginTop: 2, ...typography.caption, color: colors.textMuted }}>
+          {isCompleted ? `Completed · Supports ${goalContext.goal.title}` : `Supports ${goalContext.goal.title}`}
+        </div>
+      )}
       {recovery && <div style={{ paddingLeft: 24 + spacing.md, marginTop: spacing.xs }}>{recovery}</div>}
       {isOpportunity && (
         <div style={{ paddingLeft: 24 + spacing.md, marginTop: spacing.sm }}>
