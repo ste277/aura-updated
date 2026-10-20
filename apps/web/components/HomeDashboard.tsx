@@ -262,11 +262,18 @@ function greeting() {
   return 'Good Morning';
 }
 
-function formatUpdateDateTime(iso: string) {
+/** DR4-B.2 -- `timezone` is the effective IANA timezone the caller already
+ * resolved (HomeDashboard's own `effectiveTimezone`, same `timezone ??
+ * FALLBACK_HOME_TZ` convention this component already established --
+ * never a second, different fallback). `iso` is an absolute instant
+ * (Moment.eventStartAt); previously this formatted it with no `timeZone`
+ * at all, so both the day label and the time label silently used the
+ * BROWSER's own local timezone instead of the user's configured one. */
+function formatUpdateDateTime(iso: string, timezone: string) {
   const date = new Date(iso);
   return {
-    day: date.toLocaleDateString('en-US', { weekday: 'long', month: 'short', day: 'numeric' }),
-    time: date.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' }),
+    day: date.toLocaleDateString('en-US', { weekday: 'long', month: 'short', day: 'numeric', timeZone: timezone }),
+    time: date.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit', timeZone: timezone }),
   };
 }
 
@@ -1225,7 +1232,7 @@ export function HomeDashboard({
           <div style={{ marginTop: spacing.xl, paddingTop: spacing.lg, borderTop: `1px solid ${colors.borderSubtle}` }}>
             {nextThing.kind === 'MOMENT_UPDATE' && (() => {
               const update = nextThing.update;
-              const { day, time } = formatUpdateDateTime(update.eventStartAt);
+              const { day, time } = formatUpdateDateTime(update.eventStartAt, effectiveTimezone);
               const isAccepted = update.type === 'MOMENT_ACCEPTED';
               return (
                 <div>
@@ -1249,7 +1256,7 @@ export function HomeDashboard({
                 </div>
               );
             })()}
-            {nextThing.kind === 'STARTING_SOON' && <StartingSoonCard reminder={nextThing.reminder} onOpen={onOpenReminder} />}
+            {nextThing.kind === 'STARTING_SOON' && <StartingSoonCard reminder={nextThing.reminder} onOpen={onOpenReminder} timezone={effectiveTimezone} />}
           </div>
         )}
       </SurfaceCard>
@@ -1466,10 +1473,18 @@ function AuraInsightIcon() {
   );
 }
 
-function StartingSoonCard({ reminder, onOpen }: { reminder: AuraReminder; onOpen?: (reminder: AuraReminder) => void }) {
+/** DR4-B.2 -- `timezone` is the caller's own already-resolved
+ * `effectiveTimezone` (HomeDashboard's `timezone ?? FALLBACK_HOME_TZ`),
+ * same convention `formatUpdateDateTime` above now uses, never a second,
+ * different fallback. `reminder.startAt`/`.endAt` are absolute instants;
+ * previously formatted with no `timeZone`, so this card silently used
+ * the BROWSER's own local timezone instead of the user's configured one
+ * -- the exact bug class DR4-B.1 already fixed in Find a Time. */
+function StartingSoonCard({ reminder, onOpen, timezone }: { reminder: AuraReminder; onOpen?: (reminder: AuraReminder) => void; timezone: string }) {
   const start = new Date(reminder.startAt);
   const end = new Date(reminder.endAt);
-  const timeRange = `${start.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' })} – ${end.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' })}`;
+  const timeOpts: Intl.DateTimeFormatOptions = { hour: 'numeric', minute: '2-digit', timeZone: timezone };
+  const timeRange = `${start.toLocaleTimeString('en-US', timeOpts)} – ${end.toLocaleTimeString('en-US', timeOpts)}`;
   const participantLine = reminder.participantDisplayName
     ? reminder.momentResponseState === 'ACCEPTED'
       ? `${reminder.participantDisplayName} confirmed`
