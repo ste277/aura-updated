@@ -99,7 +99,6 @@ interface HomeDashboardProps {
     activityId?: string
   ) => Promise<'confirmed' | 'pending'>;
   onSubmitReflection?: (outputLevel: 'LOW' | 'MODERATE' | 'PEAK_FLOW', followedGuidance: boolean) => Promise<void>;
-  onNextShiftClick?: () => void;
   onPlanClick?: (activity?: string) => void;
   /** Day Constructor V1 -- PR F2. Navigates to the dedicated `/plan-day`
    * entry experience (this ticket's own section 6) -- distinct from
@@ -341,7 +340,6 @@ export function HomeDashboard({
   personalContext,
   onLogActivity,
   onSubmitReflection,
-  onNextShiftClick,
   onPlanClick,
   onPlanDay,
   onInsightsClick,
@@ -615,6 +613,21 @@ export function HomeDashboard({
 
   // `origin` only chooses where focus lands afterwards (Right Now region vs the resolved Timeline row); the lifecycle path is identical.
   const focusTimelineRow = (planId: string) => setTimeout(() => (document.querySelector<HTMLElement>(`[data-timeline-item-id="plan:${planId}"]`) ?? document.querySelector<HTMLElement>('[data-home-timeline-region]'))?.focus(), 0);
+
+  // Full-Day Timeline Navigation V1 (DR4-D) -- "View full day timeline" used
+  // to navigate to the unrelated Panchang-window TimelineView tab (Timeline.tsx),
+  // which has no relation to the user's actual planned/completed activities or
+  // their goal context. The REAL full-day timeline is HomeTimeline below --
+  // already rendered on this same screen -- so no navigation is needed at all:
+  // scroll it into view and focus it, same data-home-timeline-region target and
+  // smooth-scroll convention already used elsewhere (PlanWithAuraView.tsx's own
+  // section refs). preventScroll on focus avoids a second, competing scroll
+  // jump on top of the smooth one scrollIntoView already started.
+  const handleViewFullDayTimeline = () => {
+    const timelineRegion = document.querySelector<HTMLElement>('[data-home-timeline-region]');
+    timelineRegion?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    timelineRegion?.focus({ preventScroll: true });
+  };
   const handleCompleteRightNow = async (planId: string, origin: 'RIGHT_NOW' | 'TIMELINE' = 'RIGHT_NOW') => {
     // planId is captured at click time; every state change below is keyed by it,
     // never by whichever plan Right Now shows when the response arrives. The
@@ -1207,7 +1220,7 @@ export function HomeDashboard({
             )
           )}
           <div style={{ display: 'flex', gap: spacing.lg, marginTop: spacing.md }}>
-            <TextButton onClick={onNextShiftClick}>View full day timeline →</TextButton>
+            <TextButton onClick={handleViewFullDayTimeline}>View full day timeline →</TextButton>
             {onPanchangClick && <TextButton onClick={onPanchangClick} color={colors.traditional}>Explore →</TextButton>}
           </div>
           {/* Pre-PR review §40 fix: BestForYouSection used to own this CTA
