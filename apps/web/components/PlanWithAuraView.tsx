@@ -409,6 +409,16 @@ export function PlanWithAuraView({ onTimingSearch, onViewDay, onPlanLogged, time
   // from plansSectionRef (Upcoming Plans), so an Insights "awaiting
   // confirmation" deep link lands on the right section.
   const missedSectionRef = useRef<HTMLElement | null>(null);
+  // DR4-E2 -- an Insights suggestion naming exactly ONE awaiting-confirmation
+  // plan targets it by focusPlanId alone (no focusPlansFilter -- see the
+  // focusPlansKey effect's own doc comment: planFilter is only set "when
+  // the subject is MORE than one unconfirmed plan"). Whether that one plan
+  // is missed can only be known by looking it up in the loaded savedPlans,
+  // which may not have arrived yet on a fresh mount (the GET /api/plans
+  // fetch is async) -- these two refs let the resolution effect below wait
+  // for data instead of guessing from a stale/empty missedPlans.
+  const pendingFocusRef = useRef<{ planId: string | null; isAwaitingConfirmation: boolean } | null>(null);
+  const plansLoadedRef = useRef(false);
 
   useEffect(() => {
     // initialHorizon (e.g. Tomorrow Preview's TOMORROW handoff) must apply
@@ -447,6 +457,12 @@ export function PlanWithAuraView({ onTimingSearch, onViewDay, onPlanLogged, time
         setSavedPlans(Array.isArray(rows) ? rows.map((row: PlanApiRow) => mapPlanRow(row, timezone)) : []);
       } catch {
         if (!cancelled) setSavedPlans([]);
+      } finally {
+        // DR4-E2 -- see plansLoadedRef's own doc comment: the Insights
+        // focus-jump effect needs to know plans have at least been
+        // attempted once (success or failure) before it can correctly
+        // decide Upcoming vs. Missed for a focusPlanId-only target.
+        if (!cancelled) plansLoadedRef.current = true;
       }
     };
 
@@ -495,23 +511,22 @@ export function PlanWithAuraView({ onTimingSearch, onViewDay, onPlanLogged, time
   // Insights V1 PR7 (finding F-4) -- an Insights suggestion CTA jump:
   // reveal "My Plans" (the exact same reveal handleMyPlansClick already
   // performs, never the new-activity composer), optionally expand one
-  // specific plan, optionally pre-filter the list, then scroll it into
-  // view. A stale/deleted focusPlanId simply matches no row below --
-  // safe, no crash, the user still lands on their real current plans.
+  // specific plan, optionally pre-filter the list. A stale/deleted
+  // focusPlanId simply matches no row below -- safe, no crash, the user
+  // still lands on their real current plans. DR4-E2: this only CAPTURES
+  // the request (plansFilter/expandedPlanId, plus what's needed to resolve
+  // Upcoming vs. Missed) -- the actual section-targeting/scroll is a
+  // separate effect below, after missedPlans exists, because a single-plan
+  // suggestion (the common case: "subject is exactly one unconfirmed plan")
+  // sets focusPlanId ALONE, no focusPlansFilter (see this same comment
+  // historically -- planFilter is used only when "more than one" plan is
+  // the subject), and whether THAT plan is missed can only be known by
+  // looking it up in savedPlans, which has not necessarily loaded yet.
   useEffect(() => {
     if (!focusPlansKey) return;
-    const isAwaitingConfirmation = focusPlansFilter === 'AWAITING_CONFIRMATION';
-    // DR4-E2 -- "awaiting confirmation" is exactly the Missed collection
-    // now: land on and expand the Missed section instead of Upcoming (which
-    // no longer has anything matching this filter to show). Any other/no
-    // filter keeps the original Upcoming Plans destination unchanged.
-    setShowAllPlans(!isAwaitingConfirmation);
-    setShowAllMissed(isAwaitingConfirmation);
     setPlansFilter(focusPlansFilter ?? null);
     setExpandedPlanId(focusPlanId ?? null);
-    requestAnimationFrame(() => {
-      (isAwaitingConfirmation ? missedSectionRef : plansSectionRef).current?.scrollIntoView({ behavior: 'smooth', block: 'start' });
-    });
+    pendingFocusRef.current = { planId: focusPlanId ?? null, isAwaitingConfirmation: focusPlansFilter === 'AWAITING_CONFIRMATION' };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [focusPlansKey]);
 
@@ -548,6 +563,32 @@ export function PlanWithAuraView({ onTimingSearch, onViewDay, onPlanLogged, time
         .sort((a, b) => new Date(b.plannedEndAt).getTime() - new Date(a.plannedEndAt).getTime()),
     [savedPlans]
   );
+  // DR4-E2 -- resolves and performs the Insights focus-jump the effect
+  // above captured, once it's actually possible to tell Upcoming from
+  // Missed. A filter-based request (focusPlansFilter === 'AWAITING_CONFIRMATION')
+  // resolves immediately -- it needs no data lookup. A single-plan request
+  // (focusPlanId alone) waits for plansLoadedRef so a plan that's actually
+  // missed is never misrouted to Upcoming just because savedPlans hadn't
+  // loaded yet on a fresh mount (the bug this replaces: that fresh-mount
+  // race previously left the page unscrolled, or scrolled to the wrong
+  // section, for the single-missed-plan Insights suggestion -- confirmed
+  // live). Runs again whenever missedPlans changes (i.e., whenever
+  // savedPlans loads/reloads) but is a no-op once pendingFocusRef is
+  // cleared, so it never re-scrolls on an unrelated later plan mutation.
+  useEffect(() => {
+    const pending = pendingFocusRef.current;
+    if (!pending) return;
+    if (!pending.isAwaitingConfirmation && pending.planId && !plansLoadedRef.current) return;
+    pendingFocusRef.current = null;
+    const isAwaitingConfirmation = pending.isAwaitingConfirmation || (pending.planId ? missedPlans.some((p) => p.id === pending.planId) : false);
+    setShowAllPlans(!isAwaitingConfirmation);
+    setShowAllMissed(isAwaitingConfirmation);
+    requestAnimationFrame(() => {
+      requestAnimationFrame(() => {
+        (isAwaitingConfirmation ? missedSectionRef : plansSectionRef).current?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+      });
+    });
+  }, [focusPlansKey, missedPlans]);
   const completedPlans = useMemo(() => savedPlans.filter(isCompletedPlan), [savedPlans]);
   // DR4-E2 -- Upcoming Plans is now ALWAYS upcomingOrCurrentPlans (missed
   // plans have their own section below and no longer pass through this
