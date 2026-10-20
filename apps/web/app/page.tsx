@@ -1528,7 +1528,6 @@ export default function DashboardPage() {
             todayReflection={todayReflection}
             onLogActivity={handleLogActivity}
             onSubmitReflection={handleSubmitReflection}
-            onNextShiftClick={() => setActiveTab('timeline')}
             onPlanClick={handleOpenPlan}
             onPlanDay={() => { window.location.href = '/plan-day'; }}
             onInsightsClick={() => setActiveTab('insights')}

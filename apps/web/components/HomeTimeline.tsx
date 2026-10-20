@@ -137,7 +137,12 @@ export function HomeTimeline({
 
   if (items.length === 0 && pendingActivities.length === 0) {
     return (
-      <section>
+      // Full-Day Timeline Navigation V1 (DR4-D) -- carries the same
+      // data-home-timeline-region + tabIndex target as the non-empty
+      // branch below, so "View full day timeline" still has something to
+      // scroll/focus on an empty day: the existing empty state itself,
+      // never a fabricated list or an unrelated screen.
+      <section data-home-timeline-region tabIndex={-1} style={{ outline: 'none' }}>
         <SectionHeader label="Your Day" right={addSomethingAction} />
         {quickCaptureSlot}
         <EmptyState
