@@ -38,7 +38,11 @@ const src = strip(read('../apps/web/lib/planFormatting.ts'));
 check("20. the mapper has no `=== 'LOGGED' ? 'LOGGED' : 'UPCOMING'` collapse and uses an exhaustive never check", !/=== 'LOGGED' \? 'LOGGED' : 'UPCOMING'/.test(src) && /const unreachable: never = status/.test(src));
 check('10. presentation: only UPCOMING is actionable, only LOGGED is completed; CANCELLED/SKIPPED are neither', isActionableUpcomingPlan({ status: 'UPCOMING' }) && isActionableUpcomingPlan({}) && !isActionableUpcomingPlan({ status: 'SKIPPED' }) && !isActionableUpcomingPlan({ status: 'CANCELLED' }) && !isActionableUpcomingPlan({ status: 'LOGGED' }) && isCompletedPlan({ status: 'LOGGED' }) && !isCompletedPlan({ status: 'SKIPPED' }) && !isCompletedPlan({ status: 'CANCELLED' }));
 const view = strip(read('../apps/web/components/PlanWithAuraView.tsx'));
-check('10/11. the Plan tab lists come from the presentation predicates (correctness does not rely on a pre-mapper filter)', /savedPlans\.filter\(isActionableUpcomingPlan\)/.test(view) && /savedPlans\.filter\(isCompletedPlan\)/.test(view) && !/plan\.status !== 'LOGGED'\)/.test(view) && !/row\.status !== 'SKIPPED'/.test(view));
+// DR4-E1 (Time-Aware Upcoming Plans) renamed the Plan tab's upcoming
+// predicate to isUpcomingOrCurrentPlan (status + time, built on the
+// unchanged isActionableUpcomingPlan -- see check 10 above, which still
+// pins isActionableUpcomingPlan itself unchanged).
+check('10/11. the Plan tab lists come from the presentation predicates (correctness does not rely on a pre-mapper filter)', /savedPlans\s*\n?\s*\.filter\(\(plan\) => isUpcomingOrCurrentPlan\(plan\)\)/.test(view) && /savedPlans\.filter\(isCompletedPlan\)/.test(view) && !/plan\.status !== 'LOGGED'\)/.test(view) && !/row\.status !== 'SKIPPED'/.test(view));
 check('24. handleLogPlan refuses LOGGED/CANCELLED/SKIPPED/MOVED rows', /handleLogPlan[\s\S]{0,200}plan\.status === 'LOGGED' \|\| plan\.status === 'CANCELLED' \|\| plan\.status === 'SKIPPED' \|\| plan\.status === 'MOVED'\) return/.test(view));
 
 async function main() {
