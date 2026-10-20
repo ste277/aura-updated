@@ -27,7 +27,7 @@ interface AskAuraCard {
   [key: string]: unknown;
 }
 interface AskAuraAction {
-  type: 'PLAN_THIS' | 'CREATE_MOMENT' | 'OPEN_PLAN' | 'OPEN_TIMELINE' | 'OPEN_PANCHANG' | 'OPEN_MUHURTHAM' | 'SCHEDULE_FORWARD_PLAN';
+  type: 'PLAN_THIS' | 'CREATE_MOMENT' | 'OPEN_PLAN' | 'OPEN_TIMELINE' | 'OPEN_HOME_TIMELINE' | 'OPEN_PANCHANG' | 'OPEN_MUHURTHAM' | 'SCHEDULE_FORWARD_PLAN';
   label: string;
   planPayload?: Record<string, unknown>;
   momentPayload?: { activityId: string; startAt: string; endAt: string; savedPersonId?: string };
@@ -61,6 +61,11 @@ interface AskAuraProps {
   onQuickPromptClick?: (promptText: string) => void;
   onPlanLogged?: () => void;
   onViewTimeline?: () => void;
+  /** TODAY_GUIDANCE's OPEN_HOME_TIMELINE -- distinct from onViewTimeline
+   * (OPEN_TIMELINE's Panchang arc dial): this "See all activities" is about
+   * the user's own prioritized plan for today, so it routes to the real
+   * Home timeline instead. */
+  onViewHomeDay?: () => void;
   /** brief section 26 -- OPEN_PLAN/OPEN_MUHURTHAM navigation actions reuse
    * the exact same callbacks Home/Explore already use (page.tsx's
    * handleOpenPlan / handleOpenMuhurthamWithActivity), never a new
@@ -82,6 +87,7 @@ export function AskAuraView({
   onQuickPromptClick,
   onPlanLogged,
   onViewTimeline,
+  onViewHomeDay,
   onOpenPlan,
   onOpenPanchang,
   onOpenMuhurthamWithActivity,
@@ -160,6 +166,7 @@ export function AskAuraView({
 
   const runAction = async (action: AskAuraAction, key: string) => {
     if (action.type === 'OPEN_TIMELINE') return onViewTimeline?.();
+    if (action.type === 'OPEN_HOME_TIMELINE') return onViewHomeDay?.();
     if (action.type === 'OPEN_PANCHANG') return onOpenPanchang?.();
     if (action.type === 'OPEN_MUHURTHAM') return onOpenMuhurthamWithActivity?.(action.activityId ?? '');
     if (action.type === 'OPEN_PLAN') return onOpenPlan?.(activityTitleFor(action.activityId));
