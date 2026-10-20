@@ -38,9 +38,9 @@ import {
   minutesFromDuration,
   windowTypeFromLabel,
   mapPlanRow,
-  isActionableUpcomingPlan,
+  isUpcomingOrCurrentPlan,
+  isMissedPlan,
   isCompletedPlan,
-  isAwaitingConfirmationPlan,
   findCandidateKey,
   planPayloadFromCandidate,
   getTodayForTimezone,
@@ -497,17 +497,57 @@ export function PlanWithAuraView({ onTimingSearch, onViewDay, onPlanLogged, time
   const selectedHorizon = HORIZONS.find((item) => item.value === horizon) ?? HORIZONS[0];
   const selectedDuration = DURATIONS.find((item) => item.value === durationMinutes) ?? DURATIONS[2];
   const horizonHelper = useMemo(() => getHorizonHelper(horizon, timezone), [horizon, timezone]);
-  const upcomingPlans = useMemo(() => savedPlans.filter(isActionableUpcomingPlan), [savedPlans]);
-  const completedPlans = useMemo(() => savedPlans.filter(isCompletedPlan), [savedPlans]);
-  // Insights V1 PR7 (finding F-4) -- plansFilter narrows the SAME already-
-  // loaded upcomingPlans list client-side (isAwaitingConfirmationPlan
-  // mirrors classifyPlanningStatus's own AWAITING_CONFIRMATION rule
-  // exactly); never a second fetch, never a second eligibility rule.
-  const filteredUpcomingPlans = useMemo(
-    () => (plansFilter === 'AWAITING_CONFIRMATION' ? upcomingPlans.filter(isAwaitingConfirmationPlan) : upcomingPlans),
-    [upcomingPlans, plansFilter]
+  // DR4-E1 (Time-Aware Upcoming Plans) -- the DR4-E audit's Defect 1: status
+  // alone (the old isActionableUpcomingPlan-only filter) never excluded a
+  // plan whose scheduled window had already elapsed, so a plan from 11 days
+  // ago sat here indefinitely. isUpcomingOrCurrentPlan adds the same
+  // time-aware MISSED check Home's own agenda already uses (dailyAgenda.ts's
+  // timeBasedStatus, via planFormatting.ts's derivedPlanLifecycle) -- not a
+  // new classification. Explicitly sorted start-ASC on the client rather
+  // than trusting the API's own ordering verbatim (that ordering is
+  // Defect 2 and is deliberately left untouched server-side -- GET /api/plans
+  // has other consumers, see DR4-E1's own PR notes -- so this view must not
+  // depend on it beyond "contains the right rows").
+  const upcomingOrCurrentPlans = useMemo(
+    () =>
+      savedPlans
+        .filter((plan) => isUpcomingOrCurrentPlan(plan))
+        .sort((a, b) => new Date(a.plannedStartAt).getTime() - new Date(b.plannedStartAt).getTime()),
+    [savedPlans]
   );
-  const visibleUpcomingPlans = showAllPlans ? filteredUpcomingPlans : filteredUpcomingPlans.slice(0, 3);
+  // DR4-E1 -- persisted UPCOMING whose scheduled end has elapsed. No longer
+  // part of the default "Upcoming Plans" view or its 3-slot limit (that's
+  // the fix), but still reachable via "View all" below, most-recently-missed
+  // first, through the exact same card -- DR4-E2 owns giving this its own
+  // section/actions/labeling; this PR is classification and ordering only.
+  const missedPlans = useMemo(
+    () =>
+      savedPlans
+        .filter((plan) => isMissedPlan(plan))
+        .sort((a, b) => new Date(b.plannedEndAt).getTime() - new Date(a.plannedEndAt).getTime()),
+    [savedPlans]
+  );
+  const completedPlans = useMemo(() => savedPlans.filter(isCompletedPlan), [savedPlans]);
+  // Insights V1 PR7 (finding F-4) -- plansFilter narrows to exactly the
+  // awaiting-confirmation/missed subset, now read directly from the
+  // already-split missedPlans (identical condition to the old
+  // upcomingPlans.filter(isAwaitingConfirmationPlan) -- see isMissedPlan's
+  // own doc comment) rather than re-filtering a second time.
+  const filteredUpcomingPlans = useMemo(
+    () => (plansFilter === 'AWAITING_CONFIRMATION' ? missedPlans : upcomingOrCurrentPlans),
+    [upcomingOrCurrentPlans, missedPlans, plansFilter]
+  );
+  // DR4-E1 -- the 3-slot default limit now applies only to genuinely
+  // upcoming/current plans (Defect 2's fix: missed plans can no longer
+  // occupy a slot here at all). "View all" still reaches every missed plan
+  // too, appended after (never displacing upcoming/current ones) -- the
+  // existing View all/history access path stays intact, nothing becomes
+  // unreachable, with no new section added (DR4-E2's own scope).
+  const visibleUpcomingPlans = useMemo(() => {
+    if (!showAllPlans) return filteredUpcomingPlans.slice(0, 3);
+    if (plansFilter === 'AWAITING_CONFIRMATION') return filteredUpcomingPlans;
+    return [...filteredUpcomingPlans, ...missedPlans];
+  }, [showAllPlans, filteredUpcomingPlans, missedPlans, plansFilter]);
   const visibleCompletedPlans = showAllPlans ? completedPlans.slice(0, 5) : [];
   const canSubmit = Boolean(taskTitle.trim()) && (horizon !== 'CUSTOM' || Boolean(customStartDate && customEndDate && customEndDate >= customStartDate));
 

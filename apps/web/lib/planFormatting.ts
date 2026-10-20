@@ -1,6 +1,15 @@
 import { buildGoogleCalendarUrl } from '../../../packages/recommendation/src/dailyAssistant';
 import { summarizeReasonsPlainly } from '../../../packages/muhurta/src/muhurtaPlainLanguage';
 import type { TimingCandidate, TimingCandidateLabel } from '../../../packages/recommendation/src/timingSearch';
+// DR4-E1 -- Time-Aware Upcoming Plans. timeBasedStatus is the SAME function
+// Home's own agenda (dailyAgenda.ts's planToAgendaItem) already uses to
+// derive MISSED/CURRENT/STARTING_SOON for an UPCOMING plan -- reused here
+// verbatim rather than defining a second classification. A plain value
+// import, not `db.ts` itself: dailyAgenda.ts only imports PlannedActivity
+// etc. as types, so nothing server-only (pg, the pool) enters this client
+// module's bundle -- homeMissedRecovery.ts, already bundled into the client
+// via HomeDashboard.tsx, imports this exact function the same way.
+import { timeBasedStatus } from './dailyAgenda';
 
 /**
  * Pure plan display/formatting logic shared by PlanWithAuraView.tsx and its
@@ -213,9 +222,52 @@ export function mapPersistedPlanStatus(status: PersistedPlanStatus | null | unde
 
 /** Plan-tab presentation (the mapper above never decides this): only an
  * UPCOMING plan is actionable work; only LOGGED shows as completed.
- * CANCELLED/SKIPPED/MOVED have no representation on this surface. */
+ * CANCELLED/SKIPPED/MOVED have no representation on this surface. Status-only
+ * on purpose -- `isUpcomingOrCurrentPlan`/`isMissedPlan` below narrow this
+ * further by time; this function itself stays the plain "not terminal" check
+ * both of them (and isAwaitingConfirmationPlan) are built on. */
 export const isActionableUpcomingPlan = (plan: { status?: PersistedPlanStatus }): boolean => (plan.status ?? 'UPCOMING') === 'UPCOMING';
 export const isCompletedPlan = (plan: { status?: PersistedPlanStatus }): boolean => plan.status === 'LOGGED';
+
+/**
+ * DR4-E1 (Time-Aware Upcoming Plans) -- the lifecycle an UPCOMING plan
+ * actually has right now, reusing dailyAgenda.ts's `timeBasedStatus` exactly
+ * (never a second definition): a terminal persisted status (LOGGED/
+ * CANCELLED/SKIPPED/MOVED) always wins over time, mirroring
+ * `planToAgendaItem`'s own precedence; only while status is still UPCOMING
+ * is the lifecycle time-derived (UPCOMING/STARTING_SOON/CURRENT/MISSED).
+ * MISSED is never persisted -- this is computed fresh on every call, from
+ * the caller's own `now`, exactly like Home's agenda.
+ */
+export function derivedPlanLifecycle(
+  plan: { status?: PersistedPlanStatus; plannedStartAt: string; plannedEndAt: string },
+  now: Date = new Date()
+): PersistedPlanStatus | 'STARTING_SOON' | 'CURRENT' | 'MISSED' {
+  const status = mapPersistedPlanStatus(plan.status);
+  if (status !== 'UPCOMING') return status;
+  // timeBasedStatus's declared return type is dailyAgenda.ts's full
+  // DailyAgendaItemStatus (it's shared with Moments, which also use
+  // COMPLETED/WAITING/CONFIRMED) -- but its OWN body only ever returns
+  // 'MISSED' | 'CURRENT' | 'STARTING_SOON' | 'UPCOMING'. Narrowed here
+  // rather than widening this function's own return type to a union
+  // callers of a PLAN's lifecycle would never actually see.
+  return timeBasedStatus(new Date(plan.plannedStartAt), new Date(plan.plannedEndAt), now) as 'UPCOMING' | 'STARTING_SOON' | 'CURRENT' | 'MISSED';
+}
+
+/**
+ * DR4-E1 -- the Plan tab's "Upcoming Plans" default collection: persisted
+ * UPCOMING whose derived lifecycle has NOT elapsed (UPCOMING/STARTING_SOON/
+ * CURRENT). This is what fixes the DR4-E audit's reported bug: an activity
+ * scheduled for a past date, never logged/skipped/cancelled/moved, no
+ * longer counts as "upcoming" here even though its persisted status is
+ * still UPCOMING (see isActionableUpcomingPlan's own doc comment -- that
+ * status-only check is unchanged and still correct for what IT answers;
+ * this is a narrower, time-aware question for a different surface).
+ */
+export const isUpcomingOrCurrentPlan = (
+  plan: { status?: PersistedPlanStatus; plannedStartAt: string; plannedEndAt: string },
+  now: Date = new Date()
+): boolean => isActionableUpcomingPlan(plan) && derivedPlanLifecycle(plan, now) !== 'MISSED';
 
 /**
  * Insights V1 PR7 -- presentation-only filter for the "Review plans" CTA's
@@ -225,10 +277,28 @@ export const isCompletedPlan = (plan: { status?: PersistedPlanStatus }): boolean
  * (insightsReporting.ts) exactly -- the server-side definition is the
  * source of truth; this just re-applies the identical, already-fetched
  * `plannedEndAt` fact to the client's own already-loaded plan list, never
- * a second eligibility rule.
+ * a second eligibility rule. DR4-E1: now expressed through
+ * `derivedPlanLifecycle` (same MISSED boundary, `now` now an explicit,
+ * optional, testable parameter) rather than a second raw date comparison
+ * -- the condition itself is unchanged (`plannedEndAt` strictly before
+ * `now`), so every existing caller's behavior is unchanged.
  */
-export const isAwaitingConfirmationPlan = (plan: { status?: PersistedPlanStatus; plannedEndAt: string }): boolean =>
-  isActionableUpcomingPlan(plan) && new Date(plan.plannedEndAt).getTime() < Date.now();
+export const isAwaitingConfirmationPlan = (
+  plan: { status?: PersistedPlanStatus; plannedStartAt: string; plannedEndAt: string },
+  now: Date = new Date()
+): boolean => derivedPlanLifecycle(plan, now) === 'MISSED';
+
+/**
+ * DR4-E1 -- the Plan tab's "Missed" collection, under the ticket's own
+ * vocabulary for this audit: persisted UPCOMING whose scheduled end has
+ * elapsed. Identical condition to `isAwaitingConfirmationPlan` above (same
+ * underlying fact, two product-surface names for it) -- re-exported rather
+ * than duplicating the check a third time. DR4-E1 scope is classification/
+ * ordering only: these plans are still reachable (via "View all" in
+ * PlanWithAuraView.tsx), just no longer displayed or counted as "upcoming."
+ * DR4-E2 will give this collection its own presentation.
+ */
+export const isMissedPlan = isAwaitingConfirmationPlan;
 
 export function mapPlanRow(row: PlanApiRow, fallbackTimezone?: string): UpcomingPlan {
   const start = new Date(row.plannedStartAt);
