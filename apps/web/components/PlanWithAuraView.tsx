@@ -252,7 +252,10 @@ type SpeechRecognitionConstructor = new () => {
   stop: () => void;
 };
 
-type PlanActionState = 'LOGGING' | 'CANCELLING';
+// DR4-E2 -- SKIPPING added for the Missed Activities card's Skip action
+// (reuses the existing skipPlannedActivity workflow, same busy-state
+// convention as LOGGING/CANCELLING -- no new mutation, no new status).
+type PlanActionState = 'LOGGING' | 'CANCELLING' | 'SKIPPING';
 
 function recommendedPreference(taskTitle: string): TimePreference {
   const title = taskTitle.toLowerCase();
@@ -373,10 +376,18 @@ export function PlanWithAuraView({ onTimingSearch, onViewDay, onPlanLogged, time
   const [compareError, setCompareError] = useState('');
   const [isComparing, setIsComparing] = useState(false);
   const [showAllPlans, setShowAllPlans] = useState(false);
+  // DR4-E2 -- the Missed Activities section's own independent expansion
+  // control (2-item default, same pattern as showAllPlans' 3-item default
+  // for Upcoming). Deliberately a second, separate flag rather than
+  // overloading showAllPlans -- "View all upcoming" and "View all missed"
+  // must work independently (collapsing one never affects the other).
+  const [showAllMissed, setShowAllMissed] = useState(false);
   // Insights V1 PR7 (finding F-4) -- when an Insights suggestion's
   // subject is more than one unconfirmed plan, the CTA pre-filters this
   // list to that criterion instead of pointing at an invented single
-  // plan. null = no filter, the existing unfiltered "Upcoming Plans".
+  // plan. null = no filter. DR4-E2: "awaiting confirmation" plans are
+  // exactly the Missed collection, so this now drives the Missed section
+  // (not Upcoming, which no longer has any missed items to filter to).
   const [plansFilter, setPlansFilter] = useState<'AWAITING_CONFIRMATION' | null>(null);
   const [showMoreActivities, setShowMoreActivities] = useState(false);
   const [savedPlans, setSavedPlans] = useState<UpcomingPlan[]>([]);
@@ -394,6 +405,20 @@ export function PlanWithAuraView({ onTimingSearch, onViewDay, onPlanLogged, time
   // duplicating the same real-world event.
   const [plannedActivityIdByKey, setPlannedActivityIdByKey] = useState<Record<string, string>>({});
   const plansSectionRef = useRef<HTMLElement | null>(null);
+  // DR4-E2 -- the Missed Activities section's own scroll target, separate
+  // from plansSectionRef (Upcoming Plans), so an Insights "awaiting
+  // confirmation" deep link lands on the right section.
+  const missedSectionRef = useRef<HTMLElement | null>(null);
+  // DR4-E2 -- an Insights suggestion naming exactly ONE awaiting-confirmation
+  // plan targets it by focusPlanId alone (no focusPlansFilter -- see the
+  // focusPlansKey effect's own doc comment: planFilter is only set "when
+  // the subject is MORE than one unconfirmed plan"). Whether that one plan
+  // is missed can only be known by looking it up in the loaded savedPlans,
+  // which may not have arrived yet on a fresh mount (the GET /api/plans
+  // fetch is async) -- these two refs let the resolution effect below wait
+  // for data instead of guessing from a stale/empty missedPlans.
+  const pendingFocusRef = useRef<{ planId: string | null; isAwaitingConfirmation: boolean } | null>(null);
+  const plansLoadedRef = useRef(false);
 
   useEffect(() => {
     // initialHorizon (e.g. Tomorrow Preview's TOMORROW handoff) must apply
@@ -432,6 +457,12 @@ export function PlanWithAuraView({ onTimingSearch, onViewDay, onPlanLogged, time
         setSavedPlans(Array.isArray(rows) ? rows.map((row: PlanApiRow) => mapPlanRow(row, timezone)) : []);
       } catch {
         if (!cancelled) setSavedPlans([]);
+      } finally {
+        // DR4-E2 -- see plansLoadedRef's own doc comment: the Insights
+        // focus-jump effect needs to know plans have at least been
+        // attempted once (success or failure) before it can correctly
+        // decide Upcoming vs. Missed for a focusPlanId-only target.
+        if (!cancelled) plansLoadedRef.current = true;
       }
     };
 
@@ -480,17 +511,22 @@ export function PlanWithAuraView({ onTimingSearch, onViewDay, onPlanLogged, time
   // Insights V1 PR7 (finding F-4) -- an Insights suggestion CTA jump:
   // reveal "My Plans" (the exact same reveal handleMyPlansClick already
   // performs, never the new-activity composer), optionally expand one
-  // specific plan, optionally pre-filter the list, then scroll it into
-  // view. A stale/deleted focusPlanId simply matches no row below --
-  // safe, no crash, the user still lands on their real current plans.
+  // specific plan, optionally pre-filter the list. A stale/deleted
+  // focusPlanId simply matches no row below -- safe, no crash, the user
+  // still lands on their real current plans. DR4-E2: this only CAPTURES
+  // the request (plansFilter/expandedPlanId, plus what's needed to resolve
+  // Upcoming vs. Missed) -- the actual section-targeting/scroll is a
+  // separate effect below, after missedPlans exists, because a single-plan
+  // suggestion (the common case: "subject is exactly one unconfirmed plan")
+  // sets focusPlanId ALONE, no focusPlansFilter (see this same comment
+  // historically -- planFilter is used only when "more than one" plan is
+  // the subject), and whether THAT plan is missed can only be known by
+  // looking it up in savedPlans, which has not necessarily loaded yet.
   useEffect(() => {
     if (!focusPlansKey) return;
-    setShowAllPlans(true);
     setPlansFilter(focusPlansFilter ?? null);
     setExpandedPlanId(focusPlanId ?? null);
-    requestAnimationFrame(() => {
-      plansSectionRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' });
-    });
+    pendingFocusRef.current = { planId: focusPlanId ?? null, isAwaitingConfirmation: focusPlansFilter === 'AWAITING_CONFIRMATION' };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [focusPlansKey]);
 
@@ -527,27 +563,48 @@ export function PlanWithAuraView({ onTimingSearch, onViewDay, onPlanLogged, time
         .sort((a, b) => new Date(b.plannedEndAt).getTime() - new Date(a.plannedEndAt).getTime()),
     [savedPlans]
   );
+  // DR4-E2 -- resolves and performs the Insights focus-jump the effect
+  // above captured, once it's actually possible to tell Upcoming from
+  // Missed. A filter-based request (focusPlansFilter === 'AWAITING_CONFIRMATION')
+  // resolves immediately -- it needs no data lookup. A single-plan request
+  // (focusPlanId alone) waits for plansLoadedRef so a plan that's actually
+  // missed is never misrouted to Upcoming just because savedPlans hadn't
+  // loaded yet on a fresh mount (the bug this replaces: that fresh-mount
+  // race previously left the page unscrolled, or scrolled to the wrong
+  // section, for the single-missed-plan Insights suggestion -- confirmed
+  // live). Runs again whenever missedPlans changes (i.e., whenever
+  // savedPlans loads/reloads) but is a no-op once pendingFocusRef is
+  // cleared, so it never re-scrolls on an unrelated later plan mutation.
+  useEffect(() => {
+    const pending = pendingFocusRef.current;
+    if (!pending) return;
+    if (!pending.isAwaitingConfirmation && pending.planId && !plansLoadedRef.current) return;
+    pendingFocusRef.current = null;
+    const isAwaitingConfirmation = pending.isAwaitingConfirmation || (pending.planId ? missedPlans.some((p) => p.id === pending.planId) : false);
+    setShowAllPlans(!isAwaitingConfirmation);
+    setShowAllMissed(isAwaitingConfirmation);
+    requestAnimationFrame(() => {
+      requestAnimationFrame(() => {
+        (isAwaitingConfirmation ? missedSectionRef : plansSectionRef).current?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+      });
+    });
+  }, [focusPlansKey, missedPlans]);
   const completedPlans = useMemo(() => savedPlans.filter(isCompletedPlan), [savedPlans]);
-  // Insights V1 PR7 (finding F-4) -- plansFilter narrows to exactly the
-  // awaiting-confirmation/missed subset, now read directly from the
-  // already-split missedPlans (identical condition to the old
-  // upcomingPlans.filter(isAwaitingConfirmationPlan) -- see isMissedPlan's
-  // own doc comment) rather than re-filtering a second time.
-  const filteredUpcomingPlans = useMemo(
-    () => (plansFilter === 'AWAITING_CONFIRMATION' ? missedPlans : upcomingOrCurrentPlans),
-    [upcomingOrCurrentPlans, missedPlans, plansFilter]
-  );
-  // DR4-E1 -- the 3-slot default limit now applies only to genuinely
-  // upcoming/current plans (Defect 2's fix: missed plans can no longer
-  // occupy a slot here at all). "View all" still reaches every missed plan
-  // too, appended after (never displacing upcoming/current ones) -- the
-  // existing View all/history access path stays intact, nothing becomes
-  // unreachable, with no new section added (DR4-E2's own scope).
-  const visibleUpcomingPlans = useMemo(() => {
-    if (!showAllPlans) return filteredUpcomingPlans.slice(0, 3);
-    if (plansFilter === 'AWAITING_CONFIRMATION') return filteredUpcomingPlans;
-    return [...filteredUpcomingPlans, ...missedPlans];
-  }, [showAllPlans, filteredUpcomingPlans, missedPlans, plansFilter]);
+  // DR4-E2 -- Upcoming Plans is now ALWAYS upcomingOrCurrentPlans (missed
+  // plans have their own section below and no longer pass through this
+  // one at all, filtered or not) -- the 3-slot default limit applies only
+  // to genuinely upcoming/current plans, unconditionally.
+  const visibleUpcomingPlans = showAllPlans ? upcomingOrCurrentPlans : upcomingOrCurrentPlans.slice(0, 3);
+  // DR4-E2 (Missed Activity Presentation) -- its own independent 2-item
+  // default / "View all missed activities" expansion, entirely separate
+  // from Upcoming's own showAllPlans (section 6: "avoid adding a third
+  // global expansion state" -- these are the two, each scoped to its own
+  // collection, never a combined one). plansFilter === 'AWAITING_CONFIRMATION'
+  // (Insights V1 PR7's own existing filter -- now that Missed has its own
+  // section, "awaiting confirmation" IS the Missed collection) forces the
+  // full list open, same as showAllMissed, so the Insights deep link still
+  // shows everything it promised.
+  const visibleMissedPlans = showAllMissed || plansFilter === 'AWAITING_CONFIRMATION' ? missedPlans : missedPlans.slice(0, 2);
   const visibleCompletedPlans = showAllPlans ? completedPlans.slice(0, 5) : [];
   const canSubmit = Boolean(taskTitle.trim()) && (horizon !== 'CUSTOM' || Boolean(customStartDate && customEndDate && customEndDate >= customStartDate));
 
@@ -681,6 +738,38 @@ export function PlanWithAuraView({ onTimingSearch, onViewDay, onPlanLogged, time
       triggerHaptic('success');
     } catch (err) {
       console.error('Failed to remove plan:', err);
+    } finally {
+      setPlanActionStates((states) => {
+        const next = { ...states };
+        delete next[plan.id];
+        return next;
+      });
+    }
+  };
+
+  // DR4-E2 -- Skip is the Missed Activities card's primary dismissal action
+  // (never Cancel -- that stays reachable only through the existing
+  // UpcomingPlan card's own flow, unchanged). Reuses the existing
+  // POST /api/plans/[planId]/skip route verbatim (skipPlannedActivity,
+  // already shipped for Home's own Missed Recovery) -- no new mutation, no
+  // new status. The server's returned plan (status SKIPPED) naturally drops
+  // out of missedPlans on the next render via isMissedPlan/derivedPlanLifecycle
+  // (a SKIPPED persisted status is terminal, never MISSED) -- no separate
+  // "remove from missed" bookkeeping needed.
+  const handleSkipPlan = async (plan: UpcomingPlan) => {
+    if (planActionStates[plan.id]) return;
+    setPlanActionStates((states) => ({ ...states, [plan.id]: 'SKIPPING' }));
+    try {
+      const res = await fetch(`/api/plans/${plan.id}/skip`, { method: 'POST' });
+      if (!res.ok) throw new Error('Unable to skip plan.');
+      const result = await res.json();
+      const updated = mapPlanRow(result.plan, timezone);
+      setSavedPlans((plans) => plans.map((item) => item.id === plan.id ? updated : item));
+      onPlanLogged?.();
+      triggerHaptic('success');
+    } catch {
+      setError('Unable to skip this activity. Please check your connection and try again.');
+      triggerHaptic('warning');
     } finally {
       setPlanActionStates((states) => {
         const next = { ...states };
@@ -1378,16 +1467,6 @@ export function PlanWithAuraView({ onTimingSearch, onViewDay, onPlanLogged, time
           actionLabel={showAllPlans ? 'Show less' : 'View all'}
           onAction={() => setShowAllPlans((value) => !value)}
         />
-        {/* Insights V1 PR7 (finding F-4) -- a visible, dismissible banner
-         * when an Insights suggestion pre-filtered this list, so it's
-         * never silently/invisibly narrower than "Upcoming Plans" implies.
-         * Clearing it shows the real, full list -- never a dead end. */}
-        {plansFilter === 'AWAITING_CONFIRMATION' && (
-          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: spacing.sm, ...typography.meta }}>
-            <span>Showing plans awaiting confirmation</span>
-            <TextButton onClick={() => setPlansFilter(null)} color={colors.textSecondary}>Show all</TextButton>
-          </div>
-        )}
         {visibleUpcomingPlans.length > 0 ? visibleUpcomingPlans.map((plan) => (
           <UpcomingPlan
             key={plan.id}
@@ -1402,13 +1481,7 @@ export function PlanWithAuraView({ onTimingSearch, onViewDay, onPlanLogged, time
             onCancelRemove={() => setConfirmingRemovePlanId(null)}
             onConfirmRemove={() => handleCancelPlan(plan)}
           />
-        )) : plansFilter === 'AWAITING_CONFIRMATION' ? (
-          <EmptyState
-            title="Nothing awaiting confirmation."
-            description="Everything's confirmed, or the plan this suggestion pointed at has since been resolved."
-            action={<SecondaryButton onClick={() => setPlansFilter(null)}>Show all plans</SecondaryButton>}
-          />
-        ) : (
+        )) : (
           <EmptyState
             title="Nothing planned yet."
             description="Choose an activity above and tap Find My Best Time to create one."
@@ -1418,6 +1491,47 @@ export function PlanWithAuraView({ onTimingSearch, onViewDay, onPlanLogged, time
           />
         )}
       </section>
+
+      {/* DR4-E2 (Missed Activity Presentation) -- a compact, clearly-labeled
+       * group immediately after Upcoming Plans for persisted-UPCOMING plans
+       * whose scheduled end has elapsed (the missedPlans collection DR4-E1
+       * already derives and sorts most-recently-missed-first). Section 2:
+       * no section at all when there are none -- never a redundant empty
+       * card -- except while an Insights "awaiting confirmation" deep link
+       * is active, which keeps its own existing empty state/escape hatch. */}
+      {(missedPlans.length > 0 || plansFilter === 'AWAITING_CONFIRMATION') && (
+        <section ref={missedSectionRef} style={{ display: 'flex', flexDirection: 'column', gap: 10, scrollMarginTop: 18 }}>
+          <SectionHeader
+            label="Missed Activities"
+            actionLabel={missedPlans.length > 2 ? (showAllMissed ? 'Show less' : 'View all missed activities') : undefined}
+            onAction={() => setShowAllMissed((value) => !value)}
+          />
+          {/* Insights V1 PR7 (finding F-4) -- unchanged banner, now scoped to
+           * the Missed section it actually describes. */}
+          {plansFilter === 'AWAITING_CONFIRMATION' && (
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: spacing.sm, ...typography.meta }}>
+              <span>Showing plans awaiting confirmation</span>
+              <TextButton onClick={() => setPlansFilter(null)} color={colors.textSecondary}>Show all</TextButton>
+            </div>
+          )}
+          {visibleMissedPlans.length > 0 ? visibleMissedPlans.map((plan) => (
+            <MissedActivityCard
+              key={plan.id}
+              plan={plan}
+              actionState={planActionStates[plan.id]}
+              onLog={() => handleLogPlan(plan)}
+              onReschedule={() => handleReschedulePlan(plan)}
+              onSkip={() => handleSkipPlan(plan)}
+            />
+          )) : (
+            <EmptyState
+              title="Nothing awaiting confirmation."
+              description="Everything's confirmed, or the plan this suggestion pointed at has since been resolved."
+              action={<SecondaryButton onClick={() => setPlansFilter(null)}>Show all plans</SecondaryButton>}
+            />
+          )}
+        </section>
+      )}
 
       {showAllPlans && visibleCompletedPlans.length > 0 && (
         <section style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
@@ -1722,6 +1836,76 @@ function UpcomingPlan({
           </div>
         </div>
       )}
+    </article>
+  );
+}
+
+/**
+ * DR4-E2 (Missed Activity Presentation) -- the Missed Activities card.
+ * Deliberately a separate, smaller component rather than a conditional
+ * branch bolted onto UpcomingPlan: the content and action set are different
+ * enough (no expand/collapse -- actions are always visible, matching
+ * "compact group" / "keep actions discoverable without overcrowding") that
+ * reusing the same component would mean threading a `variant` flag through
+ * most of its branches. Still built from the exact same style constants
+ * (panelStyle / planSecondaryActionStyle / PlanGlyph) for visual consistency
+ * -- "reuse Aura's existing card design, spacing, typography" (brief
+ * section 4), never a new visual language.
+ *
+ * No checkmark, no match-quality badge, no generic "Aura saved this..."
+ * reassurance caption -- all would either imply completion/upcoming-ness or
+ * obscure the Missed state (brief sections 4/5). The Missed label uses
+ * colors.caution, the SAME neutral "needs attention" amber HomeTimeline.tsx
+ * already uses for its own WAITING status -- not a new color vocabulary.
+ * plan.when/plan.time are read verbatim from mapPlanRow's existing,
+ * already-timezone-correct formatting (brief section 7: no new lifecycle
+ * calculation, no new date math here).
+ */
+function MissedActivityCard({
+  plan,
+  actionState,
+  onLog,
+  onReschedule,
+  onSkip,
+}: {
+  plan: UpcomingPlan;
+  actionState?: PlanActionState;
+  onLog: () => void;
+  onReschedule: () => void;
+  onSkip: () => void;
+}) {
+  const isBusy = Boolean(actionState);
+  return (
+    <article style={{ ...panelStyle, padding: 16 }}>
+      <div style={{ display: 'flex', alignItems: 'flex-start', gap: 14 }}>
+        <div style={{ width: 52, height: 52, flexShrink: 0, borderRadius: 26, background: `${plan.accent}18`, border: `1px solid ${plan.accent}44`, color: plan.accent, display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 24, opacity: 0.72 }}>
+          <PlanGlyph type={plan.icon} color={plan.accent} />
+        </div>
+        <div style={{ minWidth: 0, flex: 1 }}>
+          <div style={{ color: '#f8fafc', fontSize: 16, fontWeight: 900, lineHeight: 1.25 }}>{plan.title}</div>
+          {/* The Missed label leads and is the ONLY lifecycle/quality badge
+           * on this card -- more prominent than recommendation quality by
+           * simply never showing a match badge here at all (brief section 5). */}
+          <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginTop: 5, flexWrap: 'wrap' }}>
+            <span style={missedBadgeStyle}>Missed</span>
+            <span style={{ color: '#aab7d2', fontSize: 13, fontWeight: 700 }}>{plan.when} · {plan.time}</span>
+          </div>
+          {plan.eventLocationName && (
+            <div style={{ color: '#94a3b8', fontSize: 12, marginTop: 4 }}>📍 {plan.eventLocationName}</div>
+          )}
+          <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8, marginTop: 11 }}>
+            <button type="button" onClick={onLog} disabled={isBusy} style={{ ...planSecondaryActionStyle, opacity: isBusy ? 0.55 : 1, cursor: isBusy ? 'default' : 'pointer' }}>
+              {actionState === 'LOGGING' ? 'Logging...' : 'Log activity'}
+            </button>
+            <button type="button" onClick={onReschedule} disabled={isBusy} style={{ ...planSecondaryActionStyle, opacity: isBusy ? 0.55 : 1, cursor: isBusy ? 'default' : 'pointer' }}>
+              Reschedule
+            </button>
+            <button type="button" onClick={onSkip} disabled={isBusy} style={{ ...planSecondaryActionStyle, opacity: isBusy ? 0.55 : 1, cursor: isBusy ? 'default' : 'pointer' }}>
+              {actionState === 'SKIPPING' ? 'Skipping...' : 'Skip'}
+            </button>
+          </div>
+        </div>
+      </div>
     </article>
   );
 }
@@ -2146,6 +2330,21 @@ const planMatchBadgeStyle: React.CSSProperties = {
   color: '#4ade80',
   border: '1px solid rgba(74, 222, 128, 0.3)',
   background: 'rgba(74, 222, 128, 0.1)',
+  borderRadius: 7,
+  padding: '3px 8px',
+  fontSize: 11,
+  fontWeight: 850,
+};
+
+// DR4-E2 -- same chip shape as planMatchBadgeStyle (reused dimensions/
+// radius/weight, never a new badge language), colors.caution instead of
+// the completion green -- the same neutral "needs attention" amber
+// HomeTimeline.tsx's own WAITING status already uses.
+const missedBadgeStyle: React.CSSProperties = {
+  display: 'inline-block',
+  color: colors.caution,
+  border: `1px solid ${colors.caution}4d`,
+  background: `${colors.caution}1a`,
   borderRadius: 7,
   padding: '3px 8px',
   fontSize: 11,
