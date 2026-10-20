@@ -205,6 +205,11 @@ export default function DashboardPage() {
   // Plan and focuses this token instead.
   const [momentsFocusToken, setMomentsFocusToken] = useState<string | undefined>(undefined);
   const [momentsFocusKey, setMomentsFocusKey] = useState(0);
+  // Cross-tab timeline handoff -- Ask Aura's TODAY_GUIDANCE "See all
+  // activities" and Plan with Aura's "View my day" both navigate to Home
+  // and bump this key so HomeDashboard scrolls/focuses its real timeline
+  // region once mounted (mirrors momentsFocusKey's own pattern).
+  const [homeTimelineFocusKey, setHomeTimelineFocusKey] = useState(0);
   // Product Structure V2 (brief section 28): Plan -> People -> Plan return
   // flow. One small piece of local state, not a global navigation
   // framework -- People's own onBack just reads it.
@@ -1529,6 +1534,7 @@ export default function DashboardPage() {
             onLogActivity={handleLogActivity}
             onSubmitReflection={handleSubmitReflection}
             onNextShiftClick={() => setActiveTab('timeline')}
+            focusTimelineKey={homeTimelineFocusKey}
             onPlanClick={handleOpenPlan}
             onPlanDay={() => { window.location.href = '/plan-day'; }}
             onInsightsClick={() => setActiveTab('insights')}
@@ -1594,6 +1600,7 @@ export default function DashboardPage() {
             cityName={user.cityName}
             onPlanLogged={handlePlanLogged}
             onViewTimeline={() => setActiveTab('timeline')}
+            onViewHomeDay={() => { setHomeTimelineFocusKey(Date.now()); setActiveTab('home'); }}
             onOpenPlan={handleOpenPlan}
             onOpenPanchang={handleOpenPanchang}
             onOpenMuhurthamWithActivity={handleOpenMuhurthamWithActivity}
@@ -1603,7 +1610,7 @@ export default function DashboardPage() {
         {activeTab === 'plan' && (
           <PlanWithAuraView
             onTimingSearch={handleTimingSearch}
-            onViewDay={() => setActiveTab('timeline')}
+            onViewDay={() => { setHomeTimelineFocusKey(Date.now()); setActiveTab('home'); }}
             onPlanLogged={handlePlanLogged}
             timezone={user.timezone}
             initialActivity={planPrefill?.activity}

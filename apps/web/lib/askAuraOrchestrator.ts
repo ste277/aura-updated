@@ -53,7 +53,13 @@ export interface AskAuraCard {
   [key: string]: unknown;
 }
 
-export type AskAuraActionType = 'PLAN_THIS' | 'CREATE_MOMENT' | 'OPEN_PLAN' | 'OPEN_TIMELINE' | 'OPEN_PANCHANG' | 'OPEN_MUHURTHAM' | 'SCHEDULE_FORWARD_PLAN';
+// OPEN_TIMELINE opens the Panchang/solar-window arc dial (Timeline.tsx) --
+// correct for GOOD_RIGHT_NOW's own window-based activity-discovery cards
+// below, but wrong for TODAY_GUIDANCE's "See all activities" (that action
+// is about the user's own planned/prioritized day, not window discovery),
+// so TODAY_GUIDANCE uses the distinct OPEN_HOME_TIMELINE instead, which
+// AskAuraView routes to the real Home timeline.
+export type AskAuraActionType = 'PLAN_THIS' | 'CREATE_MOMENT' | 'OPEN_PLAN' | 'OPEN_TIMELINE' | 'OPEN_HOME_TIMELINE' | 'OPEN_PANCHANG' | 'OPEN_MUHURTHAM' | 'SCHEDULE_FORWARD_PLAN';
 
 export interface AskAuraAction {
   type: AskAuraActionType;
@@ -1080,7 +1086,10 @@ async function handleTodayGuidance(parsed: ParsedAskAuraRequest, deps: AskAuraOr
     intent: 'TODAY_GUIDANCE',
     message: "Here's what I'd prioritize today:",
     cards: [{ type: 'ACTIVITY_OPTIONS', options }],
-    actions: [{ type: 'OPEN_TIMELINE', label: 'See all activities' }],
+    // These options are the user's own prioritized plan for today (guidance.
+    // recommendations/selectedActivities above), not window-based activity
+    // discovery -- OPEN_HOME_TIMELINE, not OPEN_TIMELINE's Panchang dial.
+    actions: [{ type: 'OPEN_HOME_TIMELINE', label: 'See all activities' }],
     context: { ...parsed, activityId: topActivityId ?? parsed.activityId },
   };
 }

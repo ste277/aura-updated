@@ -100,6 +100,12 @@ interface HomeDashboardProps {
   ) => Promise<'confirmed' | 'pending'>;
   onSubmitReflection?: (outputLevel: 'LOW' | 'MODERATE' | 'PEAK_FLOW', followedGuidance: boolean) => Promise<void>;
   onNextShiftClick?: () => void;
+  /** Cross-tab handoff (DR4-D follow-up) -- Ask Aura's "See all activities"
+   * (TODAY_GUIDANCE) and Plan with Aura's "View my day" both navigate to
+   * the Home tab first, then bump this key to scroll/focus the real
+   * HomeTimeline region once it has mounted, mirroring PlanWithAuraView's
+   * own focusMomentsKey/focusPlansKey convention. */
+  focusTimelineKey?: number;
   onPlanClick?: (activity?: string) => void;
   /** Day Constructor V1 -- PR F2. Navigates to the dedicated `/plan-day`
    * entry experience (this ticket's own section 6) -- distinct from
@@ -342,6 +348,7 @@ export function HomeDashboard({
   onLogActivity,
   onSubmitReflection,
   onNextShiftClick,
+  focusTimelineKey,
   onPlanClick,
   onPlanDay,
   onInsightsClick,
@@ -405,6 +412,18 @@ export function HomeDashboard({
   }, [captureConfirmed]);
   const [planningOpportunityId, setPlanningOpportunityId] = useState<string | null>(null);
   const [opportunityError, setOpportunityError] = useState('');
+
+  // Cross-tab handoff target for focusTimelineKey above -- same
+  // requestAnimationFrame + scrollIntoView convention PlanWithAuraView's
+  // own focusMomentsKey/focusPlansKey effects already use.
+  useEffect(() => {
+    if (!focusTimelineKey) return;
+    requestAnimationFrame(() => {
+      const timelineRegion = document.querySelector<HTMLElement>('[data-home-timeline-region]');
+      timelineRegion?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+      timelineRegion?.focus({ preventScroll: true });
+    });
+  }, [focusTimelineKey]);
 
   useEffect(() => {
     setReflectionSaved(Boolean(todayReflection));
