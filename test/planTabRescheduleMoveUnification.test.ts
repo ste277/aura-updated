@@ -62,7 +62,12 @@ const reschedulePlanFn = reschedulePlanFnMatch ? reschedulePlanFnMatch[0] : '';
 check('handleReschedulePlan makes no network call of its own (abandoning the flow before picking a time changes nothing server-side)', !/fetch\(/.test(reschedulePlanFn));
 check('handleReschedulePlan only enters reschedule mode for an UPCOMING plan (terminal plans never attempt Move client-side)', /setReschedulingPlanId\(plan\.status === 'UPCOMING' \? plan\.id : null\)/.test(reschedulePlanFn));
 check('handleReschedulePlan locks all three composer modes\' own duration state to the original plan\'s duration (Move always inherits the ORIGINAL duration, never a freshly-searched one)', /setDurationMinutes\(minutesFromDuration\(plan\.duration\)\)/.test(reschedulePlanFn) && /setCheckDurationMinutes\(minutesFromDuration\(plan\.duration\)\)/.test(reschedulePlanFn) && /setCompareDurationMinutes\(minutesFromDuration\(plan\.duration\)\)/.test(reschedulePlanFn));
-check('the "How long?" selector is disabled in all three composer modes while a reschedule is in progress', (source.match(/disabled=\{Boolean\(reschedulingPlanId\)\}/g) || []).length === 3);
+// DR4-F2A also locks the FIND/CHECK/COMPARE mode switcher itself with this
+// same disabled={...} expression (a 4th, legitimate occurrence -- see
+// AURA_DR4_F2_TIMING_CHOICE_UX_AUDIT.md section 5 and durationDisplayCorrection.test.ts),
+// so this count is scoped to the 3 duration selectors specifically via
+// their own selectedValue={...}.
+check('the "How long?" selector is disabled in all three composer modes while a reschedule is in progress', (source.match(/selectedValue=\{(durationMinutes|checkDurationMinutes|compareDurationMinutes)\}[\s\S]{0,120}?disabled=\{Boolean\(reschedulingPlanId\)\}/g) || []).length === 3);
 
 // ============================================================
 // DB-backed route-level proof -- exercises the EXACT request shape the
