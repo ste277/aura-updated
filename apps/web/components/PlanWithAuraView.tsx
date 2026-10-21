@@ -174,13 +174,27 @@ const HORIZONS: Array<{ value: PlanningHorizon; label: string }> = [
   { value: 'CUSTOM', label: 'Pick dates' },
 ];
 
-const DURATIONS = [
+export const DURATIONS = [
   { value: 15, label: '15 min', helper: 'Quick reset' },
   { value: 30, label: '30 min', helper: 'Short block' },
   { value: 60, label: '60 min', helper: 'You can adjust later' },
   { value: 90, label: '90 min', helper: 'Deep session' },
   { value: 120, label: '2h', helper: 'Long block' },
 ];
+
+// DR4-F2C -- a rescheduled plan's own durationMinutes (always what Move
+// actually persists, never whatever this selector shows) is frequently NOT
+// one of the 5 presets above (e.g. 45, 75 minutes). A native <select>
+// whose value matches none of its <option>s falls back to displaying its
+// FIRST option -- so the locked selector was silently showing "15 min" for
+// a 45-minute plan, even though the correct value was already selected
+// internally and Move was already persisting it correctly. This appends a
+// single non-duplicate, non-rounded option representing the actual
+// duration only when it isn't already one of the presets -- DURATIONS
+// itself, and every other caller of it, is untouched.
+export function durationSelectOptions(minutes: number): Array<{ value: number; label: string }> {
+  return DURATIONS.some((option) => option.value === minutes) ? DURATIONS : [...DURATIONS, { value: minutes, label: durationLabel(minutes) }];
+}
 
 const TIME_PREFERENCES: Array<{ value: TimePreference; label: string; icon: string; accent: string }> = [
   { value: 'ANYTIME', label: 'Anytime', icon: '∞', accent: '#a855f7' },
@@ -1223,7 +1237,7 @@ export function PlanWithAuraView({ onTimingSearch, onViewDay, onPlanLogged, time
           // what will actually be saved, rather than letting the user
           // pick a duration Move would silently ignore.
           helper={reschedulingPlanId ? 'Kept from the original plan while rescheduling' : selectedDuration.helper}
-          options={DURATIONS}
+          options={durationSelectOptions(durationMinutes)}
           selectedValue={durationMinutes}
           onChange={(value) => setDurationMinutes(Number(value))}
           disabled={Boolean(reschedulingPlanId)}
@@ -1375,7 +1389,7 @@ export function PlanWithAuraView({ onTimingSearch, onViewDay, onPlanLogged, time
             label="How long?"
             value={DURATIONS.find((item) => item.value === checkDurationMinutes)?.label ?? `${checkDurationMinutes} min`}
             helper={reschedulingPlanId ? 'Kept from the original plan while rescheduling' : 'Duration to check'}
-            options={DURATIONS}
+            options={durationSelectOptions(checkDurationMinutes)}
             selectedValue={checkDurationMinutes}
             onChange={(value) => { setCheckDurationMinutes(Number(value)); setCheckResult(null); }}
             disabled={Boolean(reschedulingPlanId)}
@@ -1449,7 +1463,7 @@ export function PlanWithAuraView({ onTimingSearch, onViewDay, onPlanLogged, time
             label="How long?"
             value={DURATIONS.find((item) => item.value === compareDurationMinutes)?.label ?? `${compareDurationMinutes} min`}
             helper={reschedulingPlanId ? 'Kept from the original plan while rescheduling' : 'Duration for both options'}
-            options={DURATIONS}
+            options={durationSelectOptions(compareDurationMinutes)}
             selectedValue={compareDurationMinutes}
             onChange={(value) => { setCompareDurationMinutes(Number(value)); setCompareResult(null); }}
             disabled={Boolean(reschedulingPlanId)}
