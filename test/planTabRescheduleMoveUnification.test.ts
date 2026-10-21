@@ -66,8 +66,11 @@ check('handleReschedulePlan locks all three composer modes\' own duration state 
 // same disabled={...} expression (a 4th, legitimate occurrence -- see
 // AURA_DR4_F2_TIMING_CHOICE_UX_AUDIT.md section 5 and durationDisplayCorrection.test.ts),
 // so this count is scoped to the 3 duration selectors specifically via
-// their own selectedValue={...}.
-check('the "How long?" selector is disabled in all three composer modes while a reschedule is in progress', (source.match(/selectedValue=\{(durationMinutes|checkDurationMinutes|compareDurationMinutes)\}[\s\S]{0,120}?disabled=\{Boolean\(reschedulingPlanId\)\}/g) || []).length === 3);
+// their own selectedValue={...}. Window widened 120 -> 150: DR4-F2B's
+// blocking-fix added setCheckResult(null)/bumpRequestGeneration() calls
+// inside checkDurationMinutes' own onChange, legitimately pushing its
+// onChange->disabled gap past the old 120-char bound.
+check('the "How long?" selector is disabled in all three composer modes while a reschedule is in progress', (source.match(/selectedValue=\{(durationMinutes|checkDurationMinutes|compareDurationMinutes)\}[\s\S]{0,150}?disabled=\{Boolean\(reschedulingPlanId\)\}/g) || []).length === 3);
 
 // ============================================================
 // DB-backed route-level proof -- exercises the EXACT request shape the

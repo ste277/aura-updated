@@ -69,8 +69,17 @@ check('findCandidateKey differs for every distinct candidate in this result set 
 
 const source = fs.readFileSync(require.resolve('../apps/web/components/PlanWithAuraView.tsx'), 'utf8');
 const stripped = source.replace(/\/\/.*$/gm, '').replace(/\s+/g, ' ');
-check('Structural: the Best Match card\'s onPlan is built from findResult.candidates[0] specifically', /onPlan=\{\(\) => saveOpportunity\(findCandidateKey\(findResult\.candidates\[0\]\), planPayloadFromCandidate\(findResult\.candidates\[0\], durationMinutes\)/.test(stripped));
-check('Structural: every "Other Good Option" card\'s onPlan is built from ITS OWN `candidate` (the current .map iteration item), never a hardcoded index', /findResult\.candidates\.slice\(1\)\.map\(\(candidate\) =>/.test(stripped) && /onPlan=\{\(\) => saveOpportunity\(findCandidateKey\(candidate\), planPayloadFromCandidate\(candidate, durationMinutes\)/.test(stripped));
+// DR4-F2B blocking-fix note: onPlan for both cards below now goes through
+// handleUseFoundCandidate(candidate) rather than calling saveOpportunity
+// directly -- the extra indirection is the Section-3/4 save-boundary guard
+// (re-confirms the candidate is still one of the CURRENT findResult's own
+// candidates before ever calling saveOpportunity) -- but which CANDIDATE
+// each card passes in is exactly what these two checks are about, and
+// that is unchanged: candidates[0] specifically for Best Match, the own
+// .map iteration item (never a hardcoded index) for every Other Good
+// Option.
+check('Structural: the Best Match card\'s onPlan is built from findResult.candidates[0] specifically', /onPlan=\{\(\) => handleUseFoundCandidate\(findResult\.candidates\[0\]\)\}/.test(stripped));
+check('Structural: every "Other Good Option" card\'s onPlan is built from ITS OWN `candidate` (the current .map iteration item), never a hardcoded index', /findResult\.candidates\.slice\(1\)\.map\(\(candidate\) =>/.test(stripped) && /onPlan=\{\(\) => handleUseFoundCandidate\(candidate\)\}/.test(stripped));
 
 // ============================================================
 // 11/12/13. FIND re-run, search-date change, and candidate-detail

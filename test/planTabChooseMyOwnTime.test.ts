@@ -83,25 +83,34 @@ check('1. handleReschedulePlan prefills checkStartTime using getMinuteOfDayInTim
 check('4. handleReschedulePlan clears any previous checkResult/checkError -- a stale assessment (from a prior reschedule, or a plain stand-alone check) can never bleed into a new reschedule', /setCheckResult\(null\)/.test(reschedulePlanFn) && /setCheckError\(''\)/.test(reschedulePlanFn));
 
 // ============================================================
-// 4. Assessment freshness -- the stale-response guard added to
-// handleFindTime/handleCheckTime: a request captures reschedulingPlanId
-// BEFORE awaiting and only commits its result if that value still matches
-// the ref's CURRENT value when the response arrives.
+// 4. Assessment freshness -- DR4-F2B blocking-fix: the ORIGINAL guard
+// (comparing only reschedulingPlanId before/after a request) was proven
+// insufficient by live reproduction -- it caught a changed reschedule
+// TARGET but not a changed date/time/duration/title/mode, letting a
+// stale response silently overwrite a cleared result. Replaced with a
+// single monotonic requestGenerationRef counter: every relevant input
+// change (and every new request) bumps it, and a request only commits
+// its result if its OWN captured generation still equals the ref's
+// current value when the response arrives -- an identity check, so it
+// also catches an input that changed and then changed BACK.
 // ============================================================
 
 const findTimeFn = sliceFn('const handleFindTime = async () => {', 'const handleMakeMoment = async (key: string');
 const checkTimeFn = sliceFn('const handleCheckTime = async () => {', 'const handleCompareTimes = async () => {');
-check('4. handleFindTime captures reschedulingPlanId before its request and only applies the result if it still matches reschedulingPlanIdRef.current -- a response for an abandoned/changed reschedule target is dropped, never shown', /const requestedForReschedulingPlanId = reschedulingPlanId;/.test(findTimeFn) && /requestedForReschedulingPlanId !== reschedulingPlanIdRef\.current/.test(findTimeFn));
-check('4. handleCheckTime has the SAME staleness guard', /const requestedForReschedulingPlanId = reschedulingPlanId;/.test(checkTimeFn) && /requestedForReschedulingPlanId !== reschedulingPlanIdRef\.current/.test(checkTimeFn));
-check('the staleness guard ref is kept in sync with reschedulingPlanId via its own effect, so a response arriving after the user moved to a DIFFERENT reschedule target (or abandoned) always compares against the truly current value', /const reschedulingPlanIdRef = useRef\(reschedulingPlanId\);/.test(stripped) && /useEffect\(\(\) => \{ reschedulingPlanIdRef\.current = reschedulingPlanId; \}, \[reschedulingPlanId\]\);/.test(stripped));
+check('4. handleFindTime bumps the request-generation counter at call time, captures its own generation, and only applies the result if the ref\'s current value still matches -- a response for an abandoned/changed request is dropped, never shown', /bumpRequestGeneration\(\);/.test(findTimeFn) && /const myRequestGeneration = requestGenerationRef\.current;/.test(findTimeFn) && /myRequestGeneration !== requestGenerationRef\.current/.test(findTimeFn));
+check('4. handleCheckTime has the SAME generation guard', /bumpRequestGeneration\(\);/.test(checkTimeFn) && /const myRequestGeneration = requestGenerationRef\.current;/.test(checkTimeFn) && /myRequestGeneration !== requestGenerationRef\.current/.test(checkTimeFn));
+check('the request-generation counter is a single ref bumped by every relevant input change (date/time/duration/title/target/mode), so a response arriving after ANY of those changes always compares against a truly current value -- identity-based, not value-based, so it also catches a value that changed and then changed back', /const requestGenerationRef = useRef\(0\);/.test(stripped) && /const bumpRequestGeneration = \(\) => \{ requestGenerationRef\.current \+= 1; \};/.test(stripped));
 
 // ============================================================
 // 5. FIND <-> manual-time transitions never reset reschedule context --
-// switching RESCHEDULE_MODES' value only ever calls setPlanMode (same
-// onChange as before), never reschedulingPlanId/title/duration.
+// switching RESCHEDULE_MODES' value still only ever calls setPlanMode
+// (reschedulingPlanId/title/duration untouched); DR4-F2B's blocking-fix
+// additionally bumps the request-generation counter on every mode
+// change, since a FIND/CHECK response belonging to the mode just left
+// must never land once the user has switched away from it.
 // ============================================================
 
-check('5. the mode switcher\'s onChange is still exactly setPlanMode -- switching between Find a Better Time and Choose My Own Time cannot touch reschedulingPlanId, title or duration', /onChange=\{setPlanMode\}/.test(stripped));
+check('5. the mode switcher\'s onChange still calls setPlanMode (and ONLY also bumps the request-generation counter) -- switching between Find a Better Time and Choose My Own Time cannot touch reschedulingPlanId, title or duration', /onChange=\{\(mode\) => \{ bumpRequestGeneration\(\); setPlanMode\(mode\); \}\}/.test(stripped));
 
 // ============================================================
 // The CHECK block now shows its own reschedule banner (FIND already had
