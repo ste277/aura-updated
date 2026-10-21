@@ -726,6 +726,14 @@ export function PlanWithAuraView({ onTimingSearch, onViewDay, onPlanLogged, time
   };
 
   const handleReschedulePlan = (plan: UpcomingPlan) => {
+    // DR4-F2A -- a reschedule always starts on FIND, regardless of which
+    // mode tab happened to be active when "Reschedule" was tapped (Upcoming
+    // Plans/Missed Activities render outside the FIND/CHECK/COMPARE blocks,
+    // so this could previously be reached from any of the three). FIND is
+    // the only mode whose title/duration prefill is reschedule-aware; the
+    // mode switcher is locked immediately below for as long as the
+    // reschedule stays in progress.
+    setPlanMode('FIND');
     setTaskTitle(plan.title);
     setIsCustomTask(true);
     // DR4-F1 -- synced across all three composer modes (not just FIND's own
@@ -1110,13 +1118,25 @@ export function PlanWithAuraView({ onTimingSearch, onViewDay, onPlanLogged, time
         }
       />
 
+      {/* DR4-F2A -- switching to Check a Time/Compare mid-reschedule previously
+       * left the user on an unrelated, stale result from an earlier search
+       * (the composer's own title/duration locking only ever covered FIND;
+       * CHECK/COMPARE have no reschedule-aware prefill, DR4-F2B's job). Move
+       * itself was never at risk (it only ever reads the locked duration
+       * and the ORIGINAL plan id, never anything typed here), but the
+       * confusion was real -- see AURA_DR4_F2_TIMING_CHOICE_UX_AUDIT.md
+       * section 5. Until DR4-F2B gives CHECK/COMPARE their own reschedule
+       * context, the simplest safe fix is to never let a reschedule reach
+       * them: handleReschedulePlan always forces FIND mode, and the mode
+       * switcher itself is locked for the duration of the reschedule. */}
       <SegmentedControl
         options={PLAN_MODES.map((mode) => ({ value: mode.value, label: mode.label }))}
         value={planMode}
         onChange={setPlanMode}
+        disabled={Boolean(reschedulingPlanId)}
       />
       <div style={{ ...typography.meta, marginTop: -8 }}>
-        {PLAN_MODES.find((mode) => mode.value === planMode)?.helper}
+        {reschedulingPlanId ? 'Switch modes after finishing this reschedule' : PLAN_MODES.find((mode) => mode.value === planMode)?.helper}
       </div>
 
       {planMode === 'FIND' && (

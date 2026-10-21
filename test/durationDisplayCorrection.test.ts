@@ -54,7 +54,14 @@ check('durationSelectOptions never mutates the shared DURATIONS array itself (no
 // while rewiring `options`.
 // ============================================================
 
-const durationPanelsCount = (stripped.match(/disabled=\{Boolean\(reschedulingPlanId\)\}/g) || []).length;
+// DR4-F2A also locks the FIND/CHECK/COMPARE mode switcher itself while
+// rescheduling (a 4th, legitimate use of this same disabled={...}
+// expression -- see durationDisplayCorrection.test.ts's own DR4-F2A note
+// below), so this count is scoped to the 3 duration selectors specifically
+// (each one's own `options={durationSelectOptions(...)}` immediately
+// precedes its `disabled={...}`) rather than counting every occurrence in
+// the file.
+const durationPanelsCount = (stripped.match(/options=\{durationSelectOptions\([a-zA-Z]+\)\}[\s\S]{0,200}?disabled=\{Boolean\(reschedulingPlanId\)\}/g) || []).length;
 check('6. all three "How long?" selectors (FIND/CHECK/COMPARE) are still disabled exactly while reschedulingPlanId is set -- unchanged by this fix', durationPanelsCount === 3);
 check('6b. all three selectors now source their options from durationSelectOptions(...), not the raw DURATIONS constant directly', /options=\{durationSelectOptions\(durationMinutes\)\}/.test(stripped) && /options=\{durationSelectOptions\(checkDurationMinutes\)\}/.test(stripped) && /options=\{durationSelectOptions\(compareDurationMinutes\)\}/.test(stripped));
 check('7. the "When?" (horizon) selector is untouched -- still sources its options from the unmodified HORIZONS constant, never durationSelectOptions', /options=\{HORIZONS\}/.test(stripped) && !/options=\{durationSelectOptions\(horizon/.test(stripped));

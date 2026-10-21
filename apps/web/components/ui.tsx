@@ -555,10 +555,12 @@ export function SegmentedControl<T extends string>({
   options,
   value,
   onChange,
+  disabled,
 }: {
   options: { value: T; label: React.ReactNode }[];
   value: T;
   onChange: (value: T) => void;
+  disabled?: boolean;
 }) {
   return (
     <div
@@ -580,17 +582,19 @@ export function SegmentedControl<T extends string>({
             type="button"
             role="tab"
             aria-selected={active}
-            onClick={() => onChange(option.value)}
+            disabled={disabled}
+            onClick={() => { if (!disabled) onChange(option.value); }}
             style={{
               flex: 1,
               minHeight: 38,
               borderRadius: radius.sm,
               border: 'none',
               background: active ? colors.surfaceSelected : 'transparent',
-              color: active ? colors.positive : colors.textMuted,
+              color: disabled ? colors.textMuted : active ? colors.positive : colors.textMuted,
+              opacity: disabled && !active ? 0.5 : 1,
               fontSize: 13,
               fontWeight: active ? 850 : 700,
-              cursor: 'pointer',
+              cursor: disabled ? 'default' : 'pointer',
               whiteSpace: 'nowrap',
               padding: '0 8px',
             }}
