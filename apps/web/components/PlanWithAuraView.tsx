@@ -15,7 +15,7 @@ import type { TimingCandidate, TimingCandidateLabel, TimingSearchDateRange, Timi
 import type { TimingSearchResponseWithDailyRhythm } from '../lib/timingSearchDailyRhythm';
 import type { MuhurtaReason } from '../../../packages/muhurta/src/activityOntology';
 import { formatMuhurtaReason } from '../../../packages/muhurta/src/muhurtaReasonFormat';
-import { localDateTimeToUTC } from '../lib/timezone';
+import { localDateTimeToUTC, getDatePartsInTimezone, getMinuteOfDayInTimezone } from '../lib/timezone';
 import { triggerHaptic } from '../lib/haptics';
 import { trackEvent } from '../lib/trackEvent';
 // Event Location Plan Persistence V1 closeout: pure plan display/formatting
@@ -215,6 +215,20 @@ const PLAN_MODES: Array<{ value: TimingSearchMode; label: string; helper: string
   { value: 'COMPARE', label: 'Compare', helper: 'Which option is better?' },
 ];
 
+// DR4-F2B -- while rescheduling, the mode switcher offers exactly these two
+// reschedule-framed choices instead of the normal three: FIND and CHECK are
+// both reschedule-aware (prefilled, duration-locked, Move-backed); COMPARE
+// stays out of scope for this ticket (AURA_DR4_F2_TIMING_CHOICE_UX_AUDIT.md
+// section 9 / the DR4-F2B brief section 3) and is simply never offered as
+// an option here, rather than left reachable-but-stale as it briefly was
+// before DR4-F2A's own fix. Same underlying TimingSearchMode values as
+// PLAN_MODES -- only the presented label set (and the exclusion of
+// COMPARE) differs.
+export const RESCHEDULE_MODES: Array<{ value: 'FIND' | 'CHECK'; label: string; helper: string }> = [
+  { value: 'FIND', label: 'Find a Better Time', helper: 'Choose from Aura’s recommended timings.' },
+  { value: 'CHECK', label: 'Choose My Own Time', helper: 'Pick your own date and time and see Aura’s assessment.' },
+];
+
 /** TimingCandidateLabel -> friendly copy (section 11). Do not invent a second
  * fit classification -- this is purely a display mapping of the engine's own
  * label values. */
@@ -407,6 +421,16 @@ export function PlanWithAuraView({ onTimingSearch, onViewDay, onPlanLogged, time
   const [savedPlans, setSavedPlans] = useState<UpcomingPlan[]>([]);
   const [expandedPlanId, setExpandedPlanId] = useState<string | null>(null);
   const [reschedulingPlanId, setReschedulingPlanId] = useState<string | null>(null);
+  // DR4-F2B -- always holds the LATEST reschedulingPlanId, readable from
+  // inside an in-flight handleFindTime/handleCheckTime closure after an
+  // await (the closure's own `reschedulingPlanId` is frozen at whatever it
+  // was when the request started). Used only to DROP a response that
+  // arrives after the user has moved on to a different reschedule target
+  // (or none) -- never to redirect it anywhere, and never touched by
+  // ordinary mode switching within the SAME reschedule, which must keep
+  // showing its own already-fetched results.
+  const reschedulingPlanIdRef = useRef(reschedulingPlanId);
+  useEffect(() => { reschedulingPlanIdRef.current = reschedulingPlanId; }, [reschedulingPlanId]);
   const [confirmingRemovePlanId, setConfirmingRemovePlanId] = useState<string | null>(null);
   const [savingOpportunityKey, setSavingOpportunityKey] = useState<string | null>(null);
   const [planActionStates, setPlanActionStates] = useState<Record<string, PlanActionState>>({});
@@ -730,9 +754,9 @@ export function PlanWithAuraView({ onTimingSearch, onViewDay, onPlanLogged, time
     // mode tab happened to be active when "Reschedule" was tapped (Upcoming
     // Plans/Missed Activities render outside the FIND/CHECK/COMPARE blocks,
     // so this could previously be reached from any of the three). FIND is
-    // the only mode whose title/duration prefill is reschedule-aware; the
-    // mode switcher is locked immediately below for as long as the
-    // reschedule stays in progress.
+    // the only mode whose title/duration prefill was reschedule-aware
+    // before DR4-F2B; the reschedule-scoped mode switcher rendered below
+    // now also offers CHECK ("Choose My Own Time"), prefilled the same way.
     setPlanMode('FIND');
     setTaskTitle(plan.title);
     setIsCustomTask(true);
@@ -751,6 +775,24 @@ export function PlanWithAuraView({ onTimingSearch, onViewDay, onPlanLogged, time
     setCustomStartDate('');
     setCustomEndDate('');
     setFindResult(null);
+    // DR4-F2B -- "Choose My Own Time" prefills the original plan's own
+    // date/time (in the composer's own display timezone, the same
+    // convention homeMove.ts's defaultMoveSelection already uses), so a
+    // user who just wants to nudge the time slightly isn't starting from a
+    // blank form. Only the DISPLAY is prefilled -- Move itself inherits
+    // duration/title/metadata from the original row regardless of what's
+    // shown here, exactly as it already does for FIND. checkResult/
+    // checkError are cleared so a PREVIOUS reschedule's (or a plain
+    // stand-alone check's) now-irrelevant result/error can never bleed
+    // into this one.
+    setCheckTaskTitle(plan.title);
+    const planStart = new Date(plan.plannedStartAt);
+    const tz = timezone || 'UTC';
+    setCheckDate(getDatePartsInTimezone(tz, planStart).dateStr);
+    const minuteOfDay = getMinuteOfDayInTimezone(tz, planStart);
+    setCheckStartTime(`${String(Math.floor(minuteOfDay / 60)).padStart(2, '0')}:${String(minuteOfDay % 60).padStart(2, '0')}`);
+    setCheckResult(null);
+    setCheckError('');
     setShowAllPlans(false);
     setPlansFilter(null);
     setExpandedPlanId(null);
@@ -859,6 +901,12 @@ export function PlanWithAuraView({ onTimingSearch, onViewDay, onPlanLogged, time
     if (!canSubmit) return;
     setIsLoading(true);
     setError('');
+    // DR4-F2B -- captured BEFORE the request, compared against the ref's
+    // then-current value after it resolves: if the user has since moved on
+    // to a different reschedule (or none, or a different one), this
+    // response is stale for whatever is on screen now and must be dropped
+    // rather than silently applied to the wrong context.
+    const requestedForReschedulingPlanId = reschedulingPlanId;
     try {
       const selection = resolveActivitySelection(taskTitle);
       // Product Structure V2 (brief section 12): a person is selected AND
@@ -883,6 +931,7 @@ export function PlanWithAuraView({ onTimingSearch, onViewDay, onPlanLogged, time
         });
         const data = await res.json();
         if (!res.ok) throw new Error(data?.error || 'Unable to find a shared time.');
+        if (requestedForReschedulingPlanId !== reschedulingPlanIdRef.current) return;
         setSharedFindResult(data.candidates as EverydaySharedCandidate[]);
         setFindResult(null);
       } else {
@@ -896,6 +945,7 @@ export function PlanWithAuraView({ onTimingSearch, onViewDay, onPlanLogged, time
           timePreference: toTimingPreference(timePreference),
           limit: 3,
         });
+        if (requestedForReschedulingPlanId !== reschedulingPlanIdRef.current) return;
         setFindResult(next);
         setSharedFindResult(null);
       }
@@ -904,6 +954,7 @@ export function PlanWithAuraView({ onTimingSearch, onViewDay, onPlanLogged, time
       setMomentSavedKeys(new Set());
       triggerHaptic('success');
     } catch {
+      if (requestedForReschedulingPlanId !== reschedulingPlanIdRef.current) return;
       setError('Aura could not find a time for this request. Try a shorter duration or a wider date range.');
     } finally {
       setIsLoading(false);
@@ -991,6 +1042,11 @@ export function PlanWithAuraView({ onTimingSearch, onViewDay, onPlanLogged, time
     if (!checkTaskTitle.trim() || !checkDate || !checkStartTime) return;
     setIsChecking(true);
     setCheckError('');
+    // DR4-F2B -- same staleness guard as handleFindTime: a Check-a-Time
+    // request fired while rescheduling plan A must never populate the
+    // screen if the user has since moved on to plan B (or out of
+    // rescheduling entirely) before the response arrives.
+    const requestedForReschedulingPlanId = reschedulingPlanId;
     try {
       const selection = resolveActivitySelection(checkTaskTitle);
       const candidateStart = localDateTimeToUTC(checkDate, checkStartTime, timezone || 'UTC').toISOString();
@@ -1000,11 +1056,13 @@ export function PlanWithAuraView({ onTimingSearch, onViewDay, onPlanLogged, time
         durationMinutes: checkDurationMinutes,
         candidateStart,
       });
+      if (requestedForReschedulingPlanId !== reschedulingPlanIdRef.current) return;
       setCheckResult(next);
       setSavingOpportunityKey(null);
       setPlannedOpportunityKeys(new Set());
       triggerHaptic('success');
     } catch {
+      if (requestedForReschedulingPlanId !== reschedulingPlanIdRef.current) return;
       setCheckError('Aura could not check that time. Double check the date and time and try again.');
     } finally {
       setIsChecking(false);
@@ -1118,25 +1176,26 @@ export function PlanWithAuraView({ onTimingSearch, onViewDay, onPlanLogged, time
         }
       />
 
-      {/* DR4-F2A -- switching to Check a Time/Compare mid-reschedule previously
-       * left the user on an unrelated, stale result from an earlier search
-       * (the composer's own title/duration locking only ever covered FIND;
-       * CHECK/COMPARE have no reschedule-aware prefill, DR4-F2B's job). Move
-       * itself was never at risk (it only ever reads the locked duration
-       * and the ORIGINAL plan id, never anything typed here), but the
-       * confusion was real -- see AURA_DR4_F2_TIMING_CHOICE_UX_AUDIT.md
-       * section 5. Until DR4-F2B gives CHECK/COMPARE their own reschedule
-       * context, the simplest safe fix is to never let a reschedule reach
-       * them: handleReschedulePlan always forces FIND mode, and the mode
-       * switcher itself is locked for the duration of the reschedule. */}
+      {/* DR4-F2A found switching to Check a Time/Compare mid-reschedule left
+       * the user on an unrelated, stale result from an earlier search (the
+       * composer's own title/duration locking only ever covered FIND), and
+       * fixed it by locking the mode switcher to FIND alone for the
+       * duration of a reschedule. DR4-F2B gives CHECK its own
+       * reschedule-aware prefill (handleReschedulePlan, above) and Move
+       * never cared what's typed in CHECK's own fields either way (it only
+       * ever reads the locked duration and the ORIGINAL plan id) -- so the
+       * switcher can now safely offer CHECK as a second, genuine choice.
+       * COMPARE stays excluded (AURA_DR4_F2_TIMING_CHOICE_UX_AUDIT.md
+       * section 9 / DR4-F2B brief section 3: "COMPARE does not need to
+       * become reschedule-aware in this PR") -- simply never one of the
+       * two options offered here, not merely left disabled. */}
       <SegmentedControl
-        options={PLAN_MODES.map((mode) => ({ value: mode.value, label: mode.label }))}
+        options={reschedulingPlanId ? RESCHEDULE_MODES.map((mode) => ({ value: mode.value, label: mode.label })) : PLAN_MODES.map((mode) => ({ value: mode.value, label: mode.label }))}
         value={planMode}
         onChange={setPlanMode}
-        disabled={Boolean(reschedulingPlanId)}
       />
       <div style={{ ...typography.meta, marginTop: -8 }}>
-        {reschedulingPlanId ? 'Switch modes after finishing this reschedule' : PLAN_MODES.find((mode) => mode.value === planMode)?.helper}
+        {reschedulingPlanId ? RESCHEDULE_MODES.find((mode) => mode.value === planMode)?.helper : PLAN_MODES.find((mode) => mode.value === planMode)?.helper}
       </div>
 
       {planMode === 'FIND' && (
@@ -1381,6 +1440,16 @@ export function PlanWithAuraView({ onTimingSearch, onViewDay, onPlanLogged, time
         <>
           <section style={panelStyle}>
             <SectionTitle number={1} label="Activity" />
+            {reschedulingPlanId && (
+              <div style={rescheduleNoticeStyle}>
+                {/* DR4-F2B -- the date/time below are prefilled from the
+                 * original plan (handleReschedulePlan); saving moves it
+                 * there via the same Move FIND's own "Use this time"
+                 * already uses. Its title and any goal link stay the same
+                 * regardless of what's typed above. */}
+                Rescheduling this plan. Date and time are prefilled from the original — saving will move it there. Its title and any goal link stay the same.
+              </div>
+            )}
             <div style={inputShellStyle}>
               <span style={{ fontSize: 21, color: '#7dd3fc' }}>✦</span>
               <input

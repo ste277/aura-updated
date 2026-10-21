@@ -14,6 +14,7 @@
     "test/planWithAuraViewLogic.test.ts",
     "test/durationDisplayCorrection.test.ts",
     "test/planTabRecommendationChoiceRescheduleContext.test.ts",
+    "test/planTabChooseMyOwnTime.test.ts",
     "test/panchangCalendarLogic.test.ts",
     "test/muhurthamFinderViewLogic.test.ts",
     "test/homeDashboardGoodRightNow.test.ts",

@@ -101,16 +101,19 @@ const reschedulePlanFn = (stripped.match(/const handleReschedulePlan = \(plan: U
 check('14. handleReschedulePlan (entering reschedule mode) still makes no network call of its own -- abandoning before picking a time changes nothing server-side', !/fetch\(/.test(reschedulePlanFn));
 
 // ============================================================
-// 15. FIND/CHECK/COMPARE transition boundary -- the actual DR4-F2A fix.
+// 15. FIND/CHECK/COMPARE transition boundary -- the DR4-F2A fix, since
+// superseded by DR4-F2B (test/planTabChooseMyOwnTime.test.ts's own check
+// 15b'/15d' pin the NEW behavior: CHECK is reschedule-aware now, so it no
+// longer needs to be locked out -- only COMPARE remains excluded). Kept
+// here, unmodified in spirit, as 15a/15c/15e, which still hold exactly as
+// DR4-F2A left them.
 // ============================================================
 
-check('15a. handleReschedulePlan now forces FIND mode as its very first action, regardless of which tab was active when "Reschedule" was tapped', /const handleReschedulePlan = \(plan: UpcomingPlan\) => \{ setPlanMode\('FIND'\);/.test(stripped));
-check('15b. the mode switcher (SegmentedControl) is now locked for exactly as long as a reschedule is in progress', /<SegmentedControl options=\{PLAN_MODES\.map[\s\S]{0,200}?disabled=\{Boolean\(reschedulingPlanId\)\}/.test(stripped));
+check('15a. handleReschedulePlan still forces FIND mode as its very first action, regardless of which tab was active when "Reschedule" was tapped', /const handleReschedulePlan = \(plan: UpcomingPlan\) => \{ setPlanMode\('FIND'\);/.test(stripped));
 const uiSource = fs.readFileSync(require.resolve('../apps/web/components/ui.tsx'), 'utf8');
 const uiStripped = uiSource.replace(/\/\/.*$/gm, '').replace(/\s+/g, ' ');
-check('15c. SegmentedControl\'s own onClick is a genuine no-op while disabled (not just a visually-disabled button that still fires onChange)', /onClick=\{\(\) => \{ if \(!disabled\) onChange\(option\.value\); \}\}/.test(uiStripped));
-check('15d. the helper text under the mode switcher explains the lock instead of showing a mode-specific helper that no longer applies', /reschedulingPlanId \? 'Switch modes after finishing this reschedule' : PLAN_MODES\.find/.test(stripped));
-check('15e. this is a complete block, not a partial/silent one: locking never routes through handleSavePlan, handleReschedulePlanViaMove or any fetch -- it only ever prevents setPlanMode from firing', !/disabled=\{Boolean\(reschedulingPlanId\)\}[\s\S]{0,100}(fetch\(|handleSavePlan|handleReschedulePlanViaMove)/.test(stripped));
+check('15c. SegmentedControl\'s own optional `disabled` prop (added for DR4-F2A, no longer used by the mode switcher after DR4-F2B, but still present and backward compatible) is still a genuine no-op guard, not just a visual style, for any future/other caller', /onClick=\{\(\) => \{ if \(!disabled\) onChange\(option\.value\); \}\}/.test(uiStripped) && /disabled\?: boolean/.test(uiStripped));
+check('15e. DR4-F2A\'s duration locks (unrelated to the mode switcher) are untouched: disabled={Boolean(reschedulingPlanId)} still never routes through handleSavePlan, handleReschedulePlanViaMove or any fetch -- it only ever prevents a setter from firing', !/disabled=\{Boolean\(reschedulingPlanId\)\}[\s\S]{0,100}(fetch\(|handleSavePlan|handleReschedulePlanViaMove)/.test(stripped));
 
 check('SegmentedControl\'s new `disabled` prop is optional and backward compatible -- every OTHER existing caller (ExploreModeToggle, InsightsView, MuhurthamFinderView, RhythmPicker, GoalsListClient, PlanDayClient) omits it and keeps working exactly as before', /disabled\?: boolean/.test(uiStripped));
 
