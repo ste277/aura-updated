@@ -136,7 +136,13 @@ function main() {
   check('12. Skipping reuses POST /api/plans/[planId]/skip verbatim (the existing skipPlannedActivity route), not a new endpoint', /fetch\(`\/api\/plans\/\$\{plan\.id\}\/skip`, \{ method: 'POST' \}\)/.test(strip(read('../apps/web/components/PlanWithAuraView.tsx'))));
   check('12. A skipped plan (status SKIPPED) naturally drops out of the missed collection the same way', !isMissedPlan({ status: 'SKIPPED', plannedStartAt: iso(istToUtc(2026, 10, 9, 7, 0)), plannedEndAt: iso(istToUtc(2026, 10, 9, 7, 20)) }, NOW));
   check('12. handleSkipPlan introduces no new status and no goal/HabitLog field -- it only threads the server\'s own returned plan through the existing mapPlanRow', /const handleSkipPlan = async[\s\S]{0,600}mapPlanRow\(result\.plan, timezone\)/.test(stripped) && !/handleSkipPlan[\s\S]{0,800}(goalId|GoalActivity|HabitLog)/.test(stripped));
-  check('13. Rescheduling a missed activity reuses the existing handleReschedulePlan unchanged (same save-new + DELETE-old flow, no Move, no rescheduledFromPlanId)', /onReschedule=\{\(\) => handleReschedulePlan\(plan\)\}/.test(missedCallSite) && !/rescheduledFromPlanId/.test(stripped) && !/movePlannedActivity|\/move`/.test(stripped));
+  // AURA DR4-F1 superseded this check's original scope pin (at DR4-E2 time,
+  // reschedule was still the old save-new + DELETE-old flow with no Move/
+  // lineage). DR4-F1 deliberately moved the Plan tab's reschedule flow onto
+  // the same Move contract Home uses -- the call SITE on the Missed card is
+  // still the SAME entry point (handleReschedulePlan, unchanged by DR4-F1's
+  // own structural check), it just now leads to Move under the hood.
+  check('13. Rescheduling a missed activity reuses the SAME handleReschedulePlan call site the Upcoming card itself uses (DR4-F1: that shared flow now goes through Move, same entry point either way)', /onReschedule=\{\(\) => handleReschedulePlan\(plan\)\}/.test(missedCallSite) && /\/move`/.test(stripped));
 
   // ============================================================
   // 14/15/16/17/18. Visual treatment -- structural, on the card itself

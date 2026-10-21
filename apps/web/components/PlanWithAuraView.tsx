@@ -608,7 +608,62 @@ export function PlanWithAuraView({ onTimingSearch, onViewDay, onPlanLogged, time
   const visibleCompletedPlans = showAllPlans ? completedPlans.slice(0, 5) : [];
   const canSubmit = Boolean(taskTitle.trim()) && (horizon !== 'CUSTOM' || Boolean(customStartDate && customEndDate && customEndDate >= customStartDate));
 
+  // DR4-F1 -- rescheduling an EXISTING plan now goes through the same
+  // POST /api/plans/{id}/move contract Home's own Move already uses
+  // (lib/planMove.ts's movePlannedActivity/applyMoveWrites), instead of
+  // the old create-a-new-plan + fire-and-forget-DELETE-the-old-one
+  // sequence. Move is one atomic transaction, server-side: it inherits
+  // title/activityType/icon/durationMinutes/activityId/schedulingMode
+  // verbatim from the ORIGINAL row (never from this search's own
+  // candidate), and -- in the SAME transaction -- repoints
+  // GoalActivity/GoalActivityOccurrence/GoalActivityExecution/Capture to
+  // the replacement and stamps rescheduledFromPlanId. None of that needs
+  // any client-side logic; this function only needs to send the chosen
+  // instant. See AURA_DR4_F_RESCHEDULING_AUDIT.md for the full audit this
+  // fixes (goal association silently lost; activity title silently
+  // renamed via the search's own catalog match).
+  const handleReschedulePlanViaMove = async (replacedPlanId: string, newStartAt: string): Promise<UpcomingPlan> => {
+    const res = await fetch(`/api/plans/${replacedPlanId}/move`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ newStartAt }),
+    });
+    if (!res.ok) {
+      const body = await res.json().catch(() => null);
+      throw new Error((body && typeof body.error === 'string' && body.error) || 'Unable to reschedule this activity.');
+    }
+    const body = await res.json();
+    const saved = mapPlanRow(body.plan, timezone);
+    setSavedPlans((plans) => [
+      saved,
+      ...plans.filter((item) => item.id !== saved.id && item.id !== replacedPlanId),
+    ]);
+    setExpandedPlanId(saved.id);
+    setReschedulingPlanId(null);
+    setShowAllPlans(true);
+    onPlanLogged?.();
+    triggerHaptic('success');
+    trackEvent('PLAN_RESULT_SELECTED', { metadata: { mode: planMode } });
+    return saved;
+  };
+
   const handleSavePlan = async (plan: UpcomingPlan, activityId?: string | null): Promise<UpcomingPlan> => {
+    const replacedPlanId = reschedulingPlanId;
+    if (replacedPlanId) {
+      try {
+        return await handleReschedulePlanViaMove(replacedPlanId, plan.plannedStartAt);
+      } catch (err) {
+        // Deliberately does NOT clear reschedulingPlanId -- same as the
+        // pre-existing catch below, a failed save leaves the user still
+        // "in reschedule mode" so they can pick a different candidate and
+        // retry, rather than having to tap Reschedule again. The Move
+        // transaction itself guarantees the original is untouched on any
+        // failure (lib/planMove.ts), so there is nothing to roll back here.
+        setError(err instanceof Error && err.message ? err.message : 'Unable to reschedule this activity. Please check your connection and try again.');
+        triggerHaptic('warning');
+        throw err instanceof Error ? err : new Error('Unable to reschedule plan.');
+      }
+    }
     try {
       const res = await fetch('/api/plans', {
         method: 'POST',
@@ -638,18 +693,8 @@ export function PlanWithAuraView({ onTimingSearch, onViewDay, onPlanLogged, time
       if (!res.ok) throw new Error('Unable to save plan.');
       const row = await res.json();
       const saved = mapPlanRow(row, timezone);
-      const replacedPlanId = reschedulingPlanId;
-      if (replacedPlanId && replacedPlanId !== saved.id) {
-        fetch(`/api/plans/${replacedPlanId}`, { method: 'DELETE' }).catch((err) => {
-          console.warn('Could not cancel previous rescheduled plan:', err);
-        });
-      }
-      setSavedPlans((plans) => [
-        saved,
-        ...plans.filter((item) => item.id !== saved.id && item.id !== replacedPlanId),
-      ]);
+      setSavedPlans((plans) => [saved, ...plans.filter((item) => item.id !== saved.id)]);
       setExpandedPlanId(saved.id);
-      setReschedulingPlanId(null);
       setShowAllPlans(true);
       onPlanLogged?.();
       triggerHaptic('success');
@@ -669,7 +714,16 @@ export function PlanWithAuraView({ onTimingSearch, onViewDay, onPlanLogged, time
   const handleReschedulePlan = (plan: UpcomingPlan) => {
     setTaskTitle(plan.title);
     setIsCustomTask(true);
+    // DR4-F1 -- synced across all three composer modes (not just FIND's own
+    // durationMinutes) because the "How long?" selector is locked to this
+    // value for the duration of a reschedule (Move always inherits the
+    // ORIGINAL plan's own durationMinutes, never whatever this search
+    // picks -- see handleReschedulePlanViaMove). Switching to Check/Compare
+    // mid-reschedule must show the same, correct, locked duration, not
+    // whatever those modes' own fields were last left at.
     setDurationMinutes(minutesFromDuration(plan.duration));
+    setCheckDurationMinutes(minutesFromDuration(plan.duration));
+    setCompareDurationMinutes(minutesFromDuration(plan.duration));
     setTimePreference(recommendedPreference(plan.title));
     setHorizon('SEVEN_DAYS');
     setCustomStartDate('');
@@ -1057,7 +1111,11 @@ export function PlanWithAuraView({ onTimingSearch, onViewDay, onPlanLogged, time
         <SectionTitle number={1} label="What do you want to do?" />
         {reschedulingPlanId && (
           <div style={rescheduleNoticeStyle}>
-            Rescheduling this plan. Saving a new best moment will replace the current upcoming plan.
+            {/* DR4-F1 -- now accurate: choosing a time below moves this
+             * plan (via the same Move Home already uses) rather than
+             * replacing it with an unrelated new one. Its title and any
+             * goal link are kept. */}
+            Rescheduling this plan. Choosing a time below will move it there — its title and any goal link stay the same.
           </div>
         )}
         <div style={inputShellStyle}>
@@ -1157,10 +1215,18 @@ export function PlanWithAuraView({ onTimingSearch, onViewDay, onPlanLogged, time
           icon="🕒"
           label="How long?"
           value={selectedDuration.label}
-          helper={selectedDuration.helper}
+          // DR4-F1 -- while rescheduling an existing plan, duration is
+          // locked to the original's own (Move always inherits
+          // durationMinutes from the plan being moved, never from this
+          // search -- see handleReschedulePlanViaMove's own doc comment).
+          // Locking the selector keeps what's shown here honest about
+          // what will actually be saved, rather than letting the user
+          // pick a duration Move would silently ignore.
+          helper={reschedulingPlanId ? 'Kept from the original plan while rescheduling' : selectedDuration.helper}
           options={DURATIONS}
           selectedValue={durationMinutes}
           onChange={(value) => setDurationMinutes(Number(value))}
+          disabled={Boolean(reschedulingPlanId)}
         />
       </div>
 
@@ -1308,10 +1374,11 @@ export function PlanWithAuraView({ onTimingSearch, onViewDay, onPlanLogged, time
             icon="🕒"
             label="How long?"
             value={DURATIONS.find((item) => item.value === checkDurationMinutes)?.label ?? `${checkDurationMinutes} min`}
-            helper="Duration to check"
+            helper={reschedulingPlanId ? 'Kept from the original plan while rescheduling' : 'Duration to check'}
             options={DURATIONS}
             selectedValue={checkDurationMinutes}
             onChange={(value) => { setCheckDurationMinutes(Number(value)); setCheckResult(null); }}
+            disabled={Boolean(reschedulingPlanId)}
           />
 
           <section style={panelStyle}>
@@ -1381,10 +1448,11 @@ export function PlanWithAuraView({ onTimingSearch, onViewDay, onPlanLogged, time
             icon="🕒"
             label="How long?"
             value={DURATIONS.find((item) => item.value === compareDurationMinutes)?.label ?? `${compareDurationMinutes} min`}
-            helper="Duration for both options"
+            helper={reschedulingPlanId ? 'Kept from the original plan while rescheduling' : 'Duration for both options'}
             options={DURATIONS}
             selectedValue={compareDurationMinutes}
             onChange={(value) => { setCompareDurationMinutes(Number(value)); setCompareResult(null); }}
+            disabled={Boolean(reschedulingPlanId)}
           />
 
           <section style={panelStyle}>
@@ -1640,6 +1708,7 @@ function SelectPanel({
   options,
   selectedValue,
   onChange,
+  disabled,
 }: {
   number: number;
   icon: string;
@@ -1649,6 +1718,7 @@ function SelectPanel({
   options: Array<{ value: string | number; label: string }>;
   selectedValue: string | number;
   onChange: (value: string | number) => void;
+  disabled?: boolean;
 }) {
   return (
     <section style={{ ...panelStyle, padding: 14, minWidth: 0 }}>
@@ -1657,6 +1727,7 @@ function SelectPanel({
         <select
           value={selectedValue}
           onChange={(event) => onChange(event.target.value)}
+          disabled={disabled}
           style={{
             width: '100%',
             minHeight: 51,
@@ -1664,11 +1735,13 @@ function SelectPanel({
             border: '1px solid rgba(96, 165, 250, 0.25)',
             borderRadius: 10,
             background: 'rgba(2, 6, 23, 0.62)',
-            color: '#f8fafc',
+            color: disabled ? '#7a8699' : '#f8fafc',
             fontSize: 17,
             fontWeight: 850,
             padding: '0 36px 0 13px',
             outline: 'none',
+            opacity: disabled ? 0.7 : 1,
+            cursor: disabled ? 'default' : undefined,
           }}
         >
           {options.map((option) => (

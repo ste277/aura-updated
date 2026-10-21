@@ -104,7 +104,15 @@ check('33. Plan-tab list query excludes MOVED (like CANCELLED/SKIPPED)', /status
 check("35-38. UPCOMING-keyed readers are untouched and naturally exclude MOVED / include the successor: reminders, calendar feed, forward planner, guidance", /listPlannedActivitiesForReminders[\s\S]{0,400}status = 'UPCOMING'/.test(db) && /plan\.status !== 'UPCOMING'\) return false/.test(strip(read('../apps/web/app/api/calendar/feed/route.ts'))) && /plans\.filter\(\(plan\) => plan\.status === 'UPCOMING'\)/.test(strip(read('../apps/web/lib/forwardPlannerOrchestrator.ts'))) && /plan\.status !== 'UPCOMING'\) return false/.test(strip(read('../apps/web/lib/dailyGuidanceCandidates.ts'))) && /\.filter\(\(plan\) => plan\.status === 'UPCOMING'/.test(strip(read('../apps/web/lib/auraReminders.ts'))));
 check('19. the generic source-link helpers are exactly as on main: replaceable over CANCELLED or SKIPPED only, and MOVED is NOT a replaceable predecessor (fail closed)', (db.match(/status IN \('CANCELLED', 'SKIPPED'\)/g) ?? []).length === 2 && !/AND status IN \('CANCELLED', 'SKIPPED', 'MOVED'\)/.test(db) && (db.match(/AND status IN \(/g) ?? []).length >= 2);
 const comp = strip(read('../apps/web/components/PlanWithAuraView.tsx')) + strip(read('../apps/web/components/HomeDashboard.tsx'));
-check("33/72. scope: the Plan tab never calls the move endpoint and its existing reschedule workflow (save new + DELETE old) is untouched (Home Move is D3's separate executor entry)", !/\/move\b/.test(strip(read('../apps/web/components/PlanWithAuraView.tsx'))) && /fetch\(`\/api\/plans\/\$\{replacedPlanId\}`, \{ method: 'DELETE' \}\)/.test(strip(read('../apps/web/components/PlanWithAuraView.tsx'))));
+// AURA DR4-F1 superseded this test's original D2/D3-era scope pin (the Plan
+// tab's reschedule flow was deliberately left as save-new+DELETE-old while
+// Move shipped for Home only). DR4-F1's own mandate is exactly to extend
+// Move's scope to the Plan tab's reschedule flow, so the assertion below
+// pins the NEW contract instead: the Plan tab's reschedule path now calls
+// the SAME move endpoint Home uses, and the old save-new+DELETE-old
+// sequence for reschedule is gone (the unrelated Cancel action's own DELETE
+// on plan.id, matched by a different variable name, is untouched).
+check("33/72. DR4-F1: the Plan tab's reschedule flow now calls the SAME move endpoint Home uses, and no longer does save-new + DELETE-old for reschedule", /fetch\(`\/api\/plans\/\$\{replacedPlanId\}\/move`/.test(strip(read('../apps/web/components/PlanWithAuraView.tsx'))) && !/fetch\(`\/api\/plans\/\$\{replacedPlanId\}`, \{ method: 'DELETE' \}\)/.test(strip(read('../apps/web/components/PlanWithAuraView.tsx'))));
 check("72. Home's confirmed-outcome type grew only by the confirmed MOVED fact (D3): COMPLETED | SKIPPED | MOVED", /export type ExecutionOutcome = 'COMPLETED' \| 'SKIPPED' \| 'MOVED';/.test(strip(read('../apps/web/lib/homeCompletion.ts'))));
 
 if (!allPassed) { console.error('SOME MOVE CHECKS FAILED'); process.exit(1); }
