@@ -15,7 +15,7 @@ import type { TimingCandidate, TimingCandidateLabel, TimingSearchDateRange, Timi
 import type { TimingSearchResponseWithDailyRhythm } from '../lib/timingSearchDailyRhythm';
 import type { MuhurtaReason } from '../../../packages/muhurta/src/activityOntology';
 import { formatMuhurtaReason } from '../../../packages/muhurta/src/muhurtaReasonFormat';
-import { localDateTimeToUTC } from '../lib/timezone';
+import { localDateTimeToUTC, getDatePartsInTimezone, getMinuteOfDayInTimezone } from '../lib/timezone';
 import { triggerHaptic } from '../lib/haptics';
 import { trackEvent } from '../lib/trackEvent';
 // Event Location Plan Persistence V1 closeout: pure plan display/formatting
@@ -215,6 +215,20 @@ const PLAN_MODES: Array<{ value: TimingSearchMode; label: string; helper: string
   { value: 'COMPARE', label: 'Compare', helper: 'Which option is better?' },
 ];
 
+// DR4-F2B -- while rescheduling, the mode switcher offers exactly these two
+// reschedule-framed choices instead of the normal three: FIND and CHECK are
+// both reschedule-aware (prefilled, duration-locked, Move-backed); COMPARE
+// stays out of scope for this ticket (AURA_DR4_F2_TIMING_CHOICE_UX_AUDIT.md
+// section 9 / the DR4-F2B brief section 3) and is simply never offered as
+// an option here, rather than left reachable-but-stale as it briefly was
+// before DR4-F2A's own fix. Same underlying TimingSearchMode values as
+// PLAN_MODES -- only the presented label set (and the exclusion of
+// COMPARE) differs.
+export const RESCHEDULE_MODES: Array<{ value: 'FIND' | 'CHECK'; label: string; helper: string }> = [
+  { value: 'FIND', label: 'Find a Better Time', helper: 'Choose from Aura’s recommended timings.' },
+  { value: 'CHECK', label: 'Choose My Own Time', helper: 'Pick your own date and time and see Aura’s assessment.' },
+];
+
 /** TimingCandidateLabel -> friendly copy (section 11). Do not invent a second
  * fit classification -- this is purely a display mapping of the engine's own
  * label values. */
@@ -407,6 +421,27 @@ export function PlanWithAuraView({ onTimingSearch, onViewDay, onPlanLogged, time
   const [savedPlans, setSavedPlans] = useState<UpcomingPlan[]>([]);
   const [expandedPlanId, setExpandedPlanId] = useState<string | null>(null);
   const [reschedulingPlanId, setReschedulingPlanId] = useState<string | null>(null);
+  // DR4-F2B blocking-fix -- a single monotonic counter is the one source of
+  // truth for "is this response still relevant". The original DR4-F2B
+  // guard only compared reschedulingPlanId before/after a request, which
+  // caught a changed RESCHEDULE TARGET but not a changed DATE, TIME,
+  // DURATION, TITLE or MODE -- a user who edited any of those while a
+  // Check-a-Time (or Find-a-Time) request was still in flight could have
+  // the now-irrelevant response silently repopulate the result card (and,
+  // if "Use this time" was then clicked, silently Move to the STALE
+  // instant instead of whatever the form currently showed -- reproduced
+  // live and confirmed via a 200 Move response during the DR4-F2B Final
+  // Review). bumpRequestGeneration() is called from every input whose
+  // change should invalidate an in-flight request (see each call site's
+  // own comment) and once more, unconditionally, at the very start of
+  // handleFindTime/handleCheckTime themselves, so even re-running the
+  // IDENTICAL search invalidates whatever request came before it. A
+  // response is applied ONLY if the generation it captured at request
+  // time still strictly equals requestGenerationRef.current when it
+  // resolves -- never by comparing input VALUES (which could
+  // coincidentally return to what they were and falsely look "unchanged").
+  const requestGenerationRef = useRef(0);
+  const bumpRequestGeneration = () => { requestGenerationRef.current += 1; };
   const [confirmingRemovePlanId, setConfirmingRemovePlanId] = useState<string | null>(null);
   const [savingOpportunityKey, setSavingOpportunityKey] = useState<string | null>(null);
   const [planActionStates, setPlanActionStates] = useState<Record<string, PlanActionState>>({});
@@ -454,6 +489,7 @@ export function PlanWithAuraView({ onTimingSearch, onViewDay, onPlanLogged, time
     setShowMoreActivities(false);
     setExpandedPlanId(null);
     setReschedulingPlanId(null);
+    bumpRequestGeneration();
     setSavingOpportunityKey(null);
     setPlanActionStates({});
     setPlannedOpportunityKeys(new Set());
@@ -654,6 +690,7 @@ export function PlanWithAuraView({ onTimingSearch, onViewDay, onPlanLogged, time
     ]);
     setExpandedPlanId(saved.id);
     setReschedulingPlanId(null);
+    bumpRequestGeneration();
     setShowAllPlans(true);
     onPlanLogged?.();
     triggerHaptic('success');
@@ -730,9 +767,9 @@ export function PlanWithAuraView({ onTimingSearch, onViewDay, onPlanLogged, time
     // mode tab happened to be active when "Reschedule" was tapped (Upcoming
     // Plans/Missed Activities render outside the FIND/CHECK/COMPARE blocks,
     // so this could previously be reached from any of the three). FIND is
-    // the only mode whose title/duration prefill is reschedule-aware; the
-    // mode switcher is locked immediately below for as long as the
-    // reschedule stays in progress.
+    // the only mode whose title/duration prefill was reschedule-aware
+    // before DR4-F2B; the reschedule-scoped mode switcher rendered below
+    // now also offers CHECK ("Choose My Own Time"), prefilled the same way.
     setPlanMode('FIND');
     setTaskTitle(plan.title);
     setIsCustomTask(true);
@@ -751,10 +788,33 @@ export function PlanWithAuraView({ onTimingSearch, onViewDay, onPlanLogged, time
     setCustomStartDate('');
     setCustomEndDate('');
     setFindResult(null);
+    // DR4-F2B -- "Choose My Own Time" prefills the original plan's own
+    // date/time (in the composer's own display timezone, the same
+    // convention homeMove.ts's defaultMoveSelection already uses), so a
+    // user who just wants to nudge the time slightly isn't starting from a
+    // blank form. Only the DISPLAY is prefilled -- Move itself inherits
+    // duration/title/metadata from the original row regardless of what's
+    // shown here, exactly as it already does for FIND. checkResult/
+    // checkError are cleared so a PREVIOUS reschedule's (or a plain
+    // stand-alone check's) now-irrelevant result/error can never bleed
+    // into this one.
+    setCheckTaskTitle(plan.title);
+    const planStart = new Date(plan.plannedStartAt);
+    const tz = timezone || 'UTC';
+    setCheckDate(getDatePartsInTimezone(tz, planStart).dateStr);
+    const minuteOfDay = getMinuteOfDayInTimezone(tz, planStart);
+    setCheckStartTime(`${String(Math.floor(minuteOfDay / 60)).padStart(2, '0')}:${String(minuteOfDay % 60).padStart(2, '0')}`);
+    setCheckResult(null);
+    setCheckError('');
     setShowAllPlans(false);
     setPlansFilter(null);
     setExpandedPlanId(null);
     setReschedulingPlanId(plan.status === 'UPCOMING' ? plan.id : null);
+    // DR4-F2B blocking-fix -- starting (or re-starting, for a DIFFERENT
+    // plan) a reschedule invalidates any FIND/CHECK request still in
+    // flight for whatever was on screen before, so its response can never
+    // land on the new target.
+    bumpRequestGeneration();
     setSavingOpportunityKey(null);
     setPlannedOpportunityKeys(new Set());
     triggerHaptic('light');
@@ -859,6 +919,16 @@ export function PlanWithAuraView({ onTimingSearch, onViewDay, onPlanLogged, time
     if (!canSubmit) return;
     setIsLoading(true);
     setError('');
+    // DR4-F2B blocking-fix -- bumped unconditionally so THIS request's own
+    // generation is always strictly newer than whatever came before it
+    // (including an identical re-run of the same search: "a newer
+    // assessment request" invalidates an older one even with unchanged
+    // inputs). Captured immediately after the bump; the response is
+    // applied only if nothing -- not task title, horizon, custom dates,
+    // duration, time preference, person selection, mode, or reschedule
+    // target -- has bumped the generation again before it resolves.
+    bumpRequestGeneration();
+    const myRequestGeneration = requestGenerationRef.current;
     try {
       const selection = resolveActivitySelection(taskTitle);
       // Product Structure V2 (brief section 12): a person is selected AND
@@ -883,6 +953,7 @@ export function PlanWithAuraView({ onTimingSearch, onViewDay, onPlanLogged, time
         });
         const data = await res.json();
         if (!res.ok) throw new Error(data?.error || 'Unable to find a shared time.');
+        if (myRequestGeneration !== requestGenerationRef.current) return;
         setSharedFindResult(data.candidates as EverydaySharedCandidate[]);
         setFindResult(null);
       } else {
@@ -896,6 +967,7 @@ export function PlanWithAuraView({ onTimingSearch, onViewDay, onPlanLogged, time
           timePreference: toTimingPreference(timePreference),
           limit: 3,
         });
+        if (myRequestGeneration !== requestGenerationRef.current) return;
         setFindResult(next);
         setSharedFindResult(null);
       }
@@ -904,6 +976,7 @@ export function PlanWithAuraView({ onTimingSearch, onViewDay, onPlanLogged, time
       setMomentSavedKeys(new Set());
       triggerHaptic('success');
     } catch {
+      if (myRequestGeneration !== requestGenerationRef.current) return;
       setError('Aura could not find a time for this request. Try a shorter duration or a wider date range.');
     } finally {
       setIsLoading(false);
@@ -991,6 +1064,17 @@ export function PlanWithAuraView({ onTimingSearch, onViewDay, onPlanLogged, time
     if (!checkTaskTitle.trim() || !checkDate || !checkStartTime) return;
     setIsChecking(true);
     setCheckError('');
+    // DR4-F2B blocking-fix -- same generation guard as handleFindTime (see
+    // its own comment). The ORIGINAL DR4-F2B guard here only compared
+    // reschedulingPlanId, which missed the actual reported defect: editing
+    // checkDate/checkStartTime/checkDurationMinutes/checkTaskTitle while
+    // THIS SAME request was still in flight let its stale response
+    // silently repopulate checkResult for the NEW (not what was checked)
+    // inputs -- confirmed live, including a successful Move to the stale
+    // date while the form showed a different one. Every one of those
+    // inputs' own onChange now also calls bumpRequestGeneration().
+    bumpRequestGeneration();
+    const myRequestGeneration = requestGenerationRef.current;
     try {
       const selection = resolveActivitySelection(checkTaskTitle);
       const candidateStart = localDateTimeToUTC(checkDate, checkStartTime, timezone || 'UTC').toISOString();
@@ -1000,11 +1084,13 @@ export function PlanWithAuraView({ onTimingSearch, onViewDay, onPlanLogged, time
         durationMinutes: checkDurationMinutes,
         candidateStart,
       });
+      if (myRequestGeneration !== requestGenerationRef.current) return;
       setCheckResult(next);
       setSavingOpportunityKey(null);
       setPlannedOpportunityKeys(new Set());
       triggerHaptic('success');
     } catch {
+      if (myRequestGeneration !== requestGenerationRef.current) return;
       setCheckError('Aura could not check that time. Double check the date and time and try again.');
     } finally {
       setIsChecking(false);
@@ -1070,6 +1156,7 @@ export function PlanWithAuraView({ onTimingSearch, onViewDay, onPlanLogged, time
       setIsCustomTask(true);
       setTimePreference(recommendedPreference(transcript));
       setFindResult(null);
+      bumpRequestGeneration();
     };
     recognition.onerror = () => {
       setError('Aura could not hear that clearly. Try typing the activity.');
@@ -1106,6 +1193,54 @@ export function PlanWithAuraView({ onTimingSearch, onViewDay, onPlanLogged, time
     }
   };
 
+  // DR4-F2B blocking-fix -- an INDEPENDENT guard at the SAVE boundary
+  // itself, not just at the fetch-response boundary (the fix brief's own
+  // section 3: "Do not rely solely on hiding stale assessment cards").
+  // handleCheckTime's generation guard already ensures checkResult can
+  // never be SET to a stale value once the user changes an input -- this
+  // additionally recomputes, at the moment "Use this time" is actually
+  // clicked, the exact instant checkDate/checkStartTime currently
+  // represent, and refuses to save a requestedCandidate whose own .start
+  // doesn't match it precisely. Two independent layers (never set stale +
+  // never save mismatched) so Move can never be invoked for anything
+  // other than the CURRENTLY confirmed destination. betterNearby is
+  // intentionally NOT held to this same exact-match check -- it is, by
+  // design, a genuinely different instant than checkDate/checkStartTime --
+  // but is equally protected by handleCheckTime's generation guard, which
+  // is what determines whether checkResult (and therefore betterNearby)
+  // exists at all.
+  const handleUseCheckedRequestedTime = () => {
+    const candidate = checkResult?.requestedCandidate;
+    if (!candidate) return;
+    const expectedStart = localDateTimeToUTC(checkDate, checkStartTime, timezone || 'UTC').toISOString();
+    if (candidate.start !== expectedStart) {
+      setCheckResult(null);
+      setCheckError('This assessment no longer matches the selected date and time. Check this time again before saving.');
+      return;
+    }
+    void saveOpportunity(findCandidateKey(candidate), planPayloadFromCandidate(candidate, checkDurationMinutes), resolveActivitySelection(checkTaskTitle).activityId);
+  };
+
+  // DR4-F2B blocking-fix -- FIND's equivalent save-boundary guard (section
+  // 4). FIND has no user-typed "expected instant" to recompute against the
+  // way CHECK does -- its candidates ARE the search results -- so instead
+  // this independently re-confirms, at the moment "Use this time" is
+  // clicked, that the candidate being saved is still one of the CURRENT
+  // findResult's own candidates. Combined with handleFindTime's generation
+  // guard (which already guarantees findResult can never be SET to a stale
+  // response) and the existing setFindResult(null) calls on every relevant
+  // input change, this closes the same loop as CHECK's guard without
+  // introducing any new timing calculation.
+  const handleUseFoundCandidate = (candidate: TimingCandidate) => {
+    const stillCurrent = findResult?.candidates.some((entry) => entry.start === candidate.start && entry.end === candidate.end) ?? false;
+    if (!stillCurrent) {
+      setFindResult(null);
+      setError('This result no longer matches your current search. Find a time again before saving.');
+      return;
+    }
+    void saveOpportunity(findCandidateKey(candidate), planPayloadFromCandidate(candidate, durationMinutes), resolvedActivityDefinition?.id);
+  };
+
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 17, paddingBottom: 24, fontFamily: 'sans-serif', color: '#f8fafc' }}>
       <PageHeader
@@ -1118,25 +1253,32 @@ export function PlanWithAuraView({ onTimingSearch, onViewDay, onPlanLogged, time
         }
       />
 
-      {/* DR4-F2A -- switching to Check a Time/Compare mid-reschedule previously
-       * left the user on an unrelated, stale result from an earlier search
-       * (the composer's own title/duration locking only ever covered FIND;
-       * CHECK/COMPARE have no reschedule-aware prefill, DR4-F2B's job). Move
-       * itself was never at risk (it only ever reads the locked duration
-       * and the ORIGINAL plan id, never anything typed here), but the
-       * confusion was real -- see AURA_DR4_F2_TIMING_CHOICE_UX_AUDIT.md
-       * section 5. Until DR4-F2B gives CHECK/COMPARE their own reschedule
-       * context, the simplest safe fix is to never let a reschedule reach
-       * them: handleReschedulePlan always forces FIND mode, and the mode
-       * switcher itself is locked for the duration of the reschedule. */}
+      {/* DR4-F2A found switching to Check a Time/Compare mid-reschedule left
+       * the user on an unrelated, stale result from an earlier search (the
+       * composer's own title/duration locking only ever covered FIND), and
+       * fixed it by locking the mode switcher to FIND alone for the
+       * duration of a reschedule. DR4-F2B gives CHECK its own
+       * reschedule-aware prefill (handleReschedulePlan, above) and Move
+       * never cared what's typed in CHECK's own fields either way (it only
+       * ever reads the locked duration and the ORIGINAL plan id) -- so the
+       * switcher can now safely offer CHECK as a second, genuine choice.
+       * COMPARE stays excluded (AURA_DR4_F2_TIMING_CHOICE_UX_AUDIT.md
+       * section 9 / DR4-F2B brief section 3: "COMPARE does not need to
+       * become reschedule-aware in this PR") -- simply never one of the
+       * two options offered here, not merely left disabled. */}
       <SegmentedControl
-        options={PLAN_MODES.map((mode) => ({ value: mode.value, label: mode.label }))}
+        options={reschedulingPlanId ? RESCHEDULE_MODES.map((mode) => ({ value: mode.value, label: mode.label })) : PLAN_MODES.map((mode) => ({ value: mode.value, label: mode.label }))}
         value={planMode}
-        onChange={setPlanMode}
-        disabled={Boolean(reschedulingPlanId)}
+        onChange={(mode) => {
+          // DR4-F2B blocking-fix -- a mode change invalidates any
+          // in-flight FIND/CHECK request: its response, whichever mode it
+          // belonged to, must not land once the user has moved elsewhere.
+          bumpRequestGeneration();
+          setPlanMode(mode);
+        }}
       />
       <div style={{ ...typography.meta, marginTop: -8 }}>
-        {reschedulingPlanId ? 'Switch modes after finishing this reschedule' : PLAN_MODES.find((mode) => mode.value === planMode)?.helper}
+        {reschedulingPlanId ? RESCHEDULE_MODES.find((mode) => mode.value === planMode)?.helper : PLAN_MODES.find((mode) => mode.value === planMode)?.helper}
       </div>
 
       {planMode === 'FIND' && (
@@ -1160,6 +1302,7 @@ export function PlanWithAuraView({ onTimingSearch, onViewDay, onPlanLogged, time
               setTaskTitle(event.target.value);
               setIsCustomTask(true);
               setFindResult(null);
+              bumpRequestGeneration();
             }}
             placeholder="e.g. Workout, Deep work, Study, Date night..."
             style={inputStyle}
@@ -1190,6 +1333,7 @@ export function PlanWithAuraView({ onTimingSearch, onViewDay, onPlanLogged, time
                 if (task.defaultDurationMinutes) setDurationMinutes(task.defaultDurationMinutes);
                 setTimePreference(recommendedPreference(task.title));
                 setFindResult(null);
+                bumpRequestGeneration();
               }}
             />
           ))}
@@ -1211,14 +1355,14 @@ export function PlanWithAuraView({ onTimingSearch, onViewDay, onPlanLogged, time
         <section style={panelStyle}>
           <div style={{ color: '#aab7d2', fontSize: 13 }}>Who&apos;s this with?</div>
           <div style={{ display: 'flex', flexWrap: 'wrap', gap: 9, marginTop: 12 }}>
-            <PersonPickerChip label="Just me" active={!selectedPersonId} onClick={() => { setSelectedPersonId(''); setFindResult(null); setSharedFindResult(null); }} />
+            <PersonPickerChip label="Just me" active={!selectedPersonId} onClick={() => { setSelectedPersonId(''); setFindResult(null); setSharedFindResult(null); bumpRequestGeneration(); }} />
             {loadingPeople && savedPeople === null && <span style={{ fontSize: 12, color: '#94a3b8', alignSelf: 'center' }}>Loading…</span>}
             {savedPeople?.map((person) => (
               <PersonPickerChip
                 key={person.id}
                 label={`${RELATIONSHIP_ICON[person.relationshipType]} ${person.name}`}
                 active={selectedPersonId === person.id}
-                onClick={() => { setSelectedPersonId(person.id); setFindResult(null); setSharedFindResult(null); }}
+                onClick={() => { setSelectedPersonId(person.id); setFindResult(null); setSharedFindResult(null); bumpRequestGeneration(); }}
               />
             ))}
             <button type="button" onClick={onOpenPeople} style={moreChipStyle}>
@@ -1242,7 +1386,7 @@ export function PlanWithAuraView({ onTimingSearch, onViewDay, onPlanLogged, time
           helper={horizonHelper}
           options={HORIZONS}
           selectedValue={horizon}
-          onChange={(value) => setHorizon(value as PlanningHorizon)}
+          onChange={(value) => { setHorizon(value as PlanningHorizon); bumpRequestGeneration(); }}
         />
         <SelectPanel
           number={3}
@@ -1259,7 +1403,7 @@ export function PlanWithAuraView({ onTimingSearch, onViewDay, onPlanLogged, time
           helper={reschedulingPlanId ? 'Kept from the original plan while rescheduling' : selectedDuration.helper}
           options={durationSelectOptions(durationMinutes)}
           selectedValue={durationMinutes}
-          onChange={(value) => setDurationMinutes(Number(value))}
+          onChange={(value) => { setDurationMinutes(Number(value)); bumpRequestGeneration(); }}
           disabled={Boolean(reschedulingPlanId)}
         />
       </div>
@@ -1268,11 +1412,11 @@ export function PlanWithAuraView({ onTimingSearch, onViewDay, onPlanLogged, time
         <div style={{ ...panelStyle, display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10 }}>
           <label style={dateLabelStyle}>
             Start
-            <input type="date" value={customStartDate} onChange={(event) => setCustomStartDate(event.target.value)} style={dateInputStyle} />
+            <input type="date" value={customStartDate} onChange={(event) => { setCustomStartDate(event.target.value); bumpRequestGeneration(); }} style={dateInputStyle} />
           </label>
           <label style={dateLabelStyle}>
             End
-            <input type="date" value={customEndDate} min={customStartDate || undefined} onChange={(event) => setCustomEndDate(event.target.value)} style={dateInputStyle} />
+            <input type="date" value={customEndDate} min={customStartDate || undefined} onChange={(event) => { setCustomEndDate(event.target.value); bumpRequestGeneration(); }} style={dateInputStyle} />
           </label>
         </div>
       )}
@@ -1282,7 +1426,7 @@ export function PlanWithAuraView({ onTimingSearch, onViewDay, onPlanLogged, time
         <div style={{ fontSize: 13, color: '#b6c2d1', marginTop: 10 }}>When would you like to do this?</div>
         <div style={{ display: 'grid', gridTemplateColumns: 'repeat(5, minmax(0, 1fr))', gap: 8, marginTop: 14 }}>
           {TIME_PREFERENCES.map((item) => (
-            <TimeTile key={item.value} item={item} active={timePreference === item.value} onClick={() => setTimePreference(item.value)} />
+            <TimeTile key={item.value} item={item} active={timePreference === item.value} onClick={() => { setTimePreference(item.value); bumpRequestGeneration(); }} />
           ))}
         </div>
         <button type="button" disabled={!canSubmit || isLoading} onClick={handleFindTime} style={{ ...ctaStyle, opacity: canSubmit ? 1 : 0.55 }}>
@@ -1309,7 +1453,7 @@ export function PlanWithAuraView({ onTimingSearch, onViewDay, onPlanLogged, time
               timezone={timezone || 'UTC'}
               isSaving={savingOpportunityKey === findCandidateKey(findResult.candidates[0])}
               isPlanned={plannedOpportunityKeys.has(findCandidateKey(findResult.candidates[0]))}
-              onPlan={() => saveOpportunity(findCandidateKey(findResult.candidates[0]), planPayloadFromCandidate(findResult.candidates[0], durationMinutes), resolvedActivityDefinition?.id)}
+              onPlan={() => handleUseFoundCandidate(findResult.candidates[0])}
               onMakeMoment={resolvedActivityDefinition?.experience.momentEligible ? () => handleMakeMoment(findCandidateKey(findResult.candidates[0]), { activityId: resolvedActivityDefinition.id, start: findResult.candidates[0].start, end: findResult.candidates[0].end, ratingLabel: findResult.candidates[0].label }) : undefined}
               isMomentSaving={momentSavingKey === findCandidateKey(findResult.candidates[0])}
               isMomentSaved={momentSavedKeys.has(findCandidateKey(findResult.candidates[0]))}
@@ -1332,7 +1476,7 @@ export function PlanWithAuraView({ onTimingSearch, onViewDay, onPlanLogged, time
                   timezone={timezone || 'UTC'}
                   isSaving={savingOpportunityKey === findCandidateKey(candidate)}
                   isPlanned={plannedOpportunityKeys.has(findCandidateKey(candidate))}
-                  onPlan={() => saveOpportunity(findCandidateKey(candidate), planPayloadFromCandidate(candidate, durationMinutes), resolvedActivityDefinition?.id)}
+                  onPlan={() => handleUseFoundCandidate(candidate)}
                   onMakeMoment={resolvedActivityDefinition?.experience.momentEligible ? () => handleMakeMoment(findCandidateKey(candidate), { activityId: resolvedActivityDefinition.id, start: candidate.start, end: candidate.end, ratingLabel: candidate.label }) : undefined}
                   isMomentSaving={momentSavingKey === findCandidateKey(candidate)}
                   isMomentSaved={momentSavedKeys.has(findCandidateKey(candidate))}
@@ -1381,11 +1525,21 @@ export function PlanWithAuraView({ onTimingSearch, onViewDay, onPlanLogged, time
         <>
           <section style={panelStyle}>
             <SectionTitle number={1} label="Activity" />
+            {reschedulingPlanId && (
+              <div style={rescheduleNoticeStyle}>
+                {/* DR4-F2B -- the date/time below are prefilled from the
+                 * original plan (handleReschedulePlan); saving moves it
+                 * there via the same Move FIND's own "Use this time"
+                 * already uses. Its title and any goal link stay the same
+                 * regardless of what's typed above. */}
+                Rescheduling this plan. Date and time are prefilled from the original — saving will move it there. Its title and any goal link stay the same.
+              </div>
+            )}
             <div style={inputShellStyle}>
               <span style={{ fontSize: 21, color: '#7dd3fc' }}>✦</span>
               <input
                 value={checkTaskTitle}
-                onChange={(event) => { setCheckTaskTitle(event.target.value); setCheckResult(null); }}
+                onChange={(event) => { setCheckTaskTitle(event.target.value); setCheckResult(null); bumpRequestGeneration(); }}
                 placeholder="e.g. Important meeting"
                 style={inputStyle}
               />
@@ -1395,11 +1549,16 @@ export function PlanWithAuraView({ onTimingSearch, onViewDay, onPlanLogged, time
           <div style={{ ...panelStyle, display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10 }}>
             <label style={dateLabelStyle}>
               Date
-              <input type="date" value={checkDate} onChange={(event) => { setCheckDate(event.target.value); setCheckResult(null); }} style={dateInputStyle} />
+              {/* DR4-F2B blocking-fix -- setCheckResult(null) alone only
+               * hides a stale card; it does NOT stop an already-in-flight
+               * request for the OLD date from later reapplying itself.
+               * bumpRequestGeneration() is what actually invalidates it
+               * (see handleCheckTime's own guard). */}
+              <input type="date" value={checkDate} onChange={(event) => { setCheckDate(event.target.value); setCheckResult(null); bumpRequestGeneration(); }} style={dateInputStyle} />
             </label>
             <label style={dateLabelStyle}>
               Start time
-              <input type="time" value={checkStartTime} onChange={(event) => { setCheckStartTime(event.target.value); setCheckResult(null); }} style={dateInputStyle} />
+              <input type="time" value={checkStartTime} onChange={(event) => { setCheckStartTime(event.target.value); setCheckResult(null); bumpRequestGeneration(); }} style={dateInputStyle} />
             </label>
           </div>
 
@@ -1411,7 +1570,7 @@ export function PlanWithAuraView({ onTimingSearch, onViewDay, onPlanLogged, time
             helper={reschedulingPlanId ? 'Kept from the original plan while rescheduling' : 'Duration to check'}
             options={durationSelectOptions(checkDurationMinutes)}
             selectedValue={checkDurationMinutes}
-            onChange={(value) => { setCheckDurationMinutes(Number(value)); setCheckResult(null); }}
+            onChange={(value) => { setCheckDurationMinutes(Number(value)); setCheckResult(null); bumpRequestGeneration(); }}
             disabled={Boolean(reschedulingPlanId)}
           />
 
@@ -1438,7 +1597,7 @@ export function PlanWithAuraView({ onTimingSearch, onViewDay, onPlanLogged, time
                 timezone={timezone || 'UTC'}
                 isSaving={savingOpportunityKey === findCandidateKey(checkResult.requestedCandidate)}
                 isPlanned={plannedOpportunityKeys.has(findCandidateKey(checkResult.requestedCandidate))}
-                onPlan={() => saveOpportunity(findCandidateKey(checkResult.requestedCandidate!), planPayloadFromCandidate(checkResult.requestedCandidate!, checkDurationMinutes), resolveActivitySelection(checkTaskTitle).activityId)}
+                onPlan={handleUseCheckedRequestedTime}
                 dailyRhythmNote={checkResult.dailyRhythmNotes?.[checkResult.requestedCandidate.start]}
               />
               {checkResult.betterNearby && (

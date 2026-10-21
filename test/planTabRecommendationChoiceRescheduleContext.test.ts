@@ -69,8 +69,17 @@ check('findCandidateKey differs for every distinct candidate in this result set 
 
 const source = fs.readFileSync(require.resolve('../apps/web/components/PlanWithAuraView.tsx'), 'utf8');
 const stripped = source.replace(/\/\/.*$/gm, '').replace(/\s+/g, ' ');
-check('Structural: the Best Match card\'s onPlan is built from findResult.candidates[0] specifically', /onPlan=\{\(\) => saveOpportunity\(findCandidateKey\(findResult\.candidates\[0\]\), planPayloadFromCandidate\(findResult\.candidates\[0\], durationMinutes\)/.test(stripped));
-check('Structural: every "Other Good Option" card\'s onPlan is built from ITS OWN `candidate` (the current .map iteration item), never a hardcoded index', /findResult\.candidates\.slice\(1\)\.map\(\(candidate\) =>/.test(stripped) && /onPlan=\{\(\) => saveOpportunity\(findCandidateKey\(candidate\), planPayloadFromCandidate\(candidate, durationMinutes\)/.test(stripped));
+// DR4-F2B blocking-fix note: onPlan for both cards below now goes through
+// handleUseFoundCandidate(candidate) rather than calling saveOpportunity
+// directly -- the extra indirection is the Section-3/4 save-boundary guard
+// (re-confirms the candidate is still one of the CURRENT findResult's own
+// candidates before ever calling saveOpportunity) -- but which CANDIDATE
+// each card passes in is exactly what these two checks are about, and
+// that is unchanged: candidates[0] specifically for Best Match, the own
+// .map iteration item (never a hardcoded index) for every Other Good
+// Option.
+check('Structural: the Best Match card\'s onPlan is built from findResult.candidates[0] specifically', /onPlan=\{\(\) => handleUseFoundCandidate\(findResult\.candidates\[0\]\)\}/.test(stripped));
+check('Structural: every "Other Good Option" card\'s onPlan is built from ITS OWN `candidate` (the current .map iteration item), never a hardcoded index', /findResult\.candidates\.slice\(1\)\.map\(\(candidate\) =>/.test(stripped) && /onPlan=\{\(\) => handleUseFoundCandidate\(candidate\)\}/.test(stripped));
 
 // ============================================================
 // 11/12/13. FIND re-run, search-date change, and candidate-detail
@@ -101,16 +110,19 @@ const reschedulePlanFn = (stripped.match(/const handleReschedulePlan = \(plan: U
 check('14. handleReschedulePlan (entering reschedule mode) still makes no network call of its own -- abandoning before picking a time changes nothing server-side', !/fetch\(/.test(reschedulePlanFn));
 
 // ============================================================
-// 15. FIND/CHECK/COMPARE transition boundary -- the actual DR4-F2A fix.
+// 15. FIND/CHECK/COMPARE transition boundary -- the DR4-F2A fix, since
+// superseded by DR4-F2B (test/planTabChooseMyOwnTime.test.ts's own check
+// 15b'/15d' pin the NEW behavior: CHECK is reschedule-aware now, so it no
+// longer needs to be locked out -- only COMPARE remains excluded). Kept
+// here, unmodified in spirit, as 15a/15c/15e, which still hold exactly as
+// DR4-F2A left them.
 // ============================================================
 
-check('15a. handleReschedulePlan now forces FIND mode as its very first action, regardless of which tab was active when "Reschedule" was tapped', /const handleReschedulePlan = \(plan: UpcomingPlan\) => \{ setPlanMode\('FIND'\);/.test(stripped));
-check('15b. the mode switcher (SegmentedControl) is now locked for exactly as long as a reschedule is in progress', /<SegmentedControl options=\{PLAN_MODES\.map[\s\S]{0,200}?disabled=\{Boolean\(reschedulingPlanId\)\}/.test(stripped));
+check('15a. handleReschedulePlan still forces FIND mode as its very first action, regardless of which tab was active when "Reschedule" was tapped', /const handleReschedulePlan = \(plan: UpcomingPlan\) => \{ setPlanMode\('FIND'\);/.test(stripped));
 const uiSource = fs.readFileSync(require.resolve('../apps/web/components/ui.tsx'), 'utf8');
 const uiStripped = uiSource.replace(/\/\/.*$/gm, '').replace(/\s+/g, ' ');
-check('15c. SegmentedControl\'s own onClick is a genuine no-op while disabled (not just a visually-disabled button that still fires onChange)', /onClick=\{\(\) => \{ if \(!disabled\) onChange\(option\.value\); \}\}/.test(uiStripped));
-check('15d. the helper text under the mode switcher explains the lock instead of showing a mode-specific helper that no longer applies', /reschedulingPlanId \? 'Switch modes after finishing this reschedule' : PLAN_MODES\.find/.test(stripped));
-check('15e. this is a complete block, not a partial/silent one: locking never routes through handleSavePlan, handleReschedulePlanViaMove or any fetch -- it only ever prevents setPlanMode from firing', !/disabled=\{Boolean\(reschedulingPlanId\)\}[\s\S]{0,100}(fetch\(|handleSavePlan|handleReschedulePlanViaMove)/.test(stripped));
+check('15c. SegmentedControl\'s own optional `disabled` prop (added for DR4-F2A, no longer used by the mode switcher after DR4-F2B, but still present and backward compatible) is still a genuine no-op guard, not just a visual style, for any future/other caller', /onClick=\{\(\) => \{ if \(!disabled\) onChange\(option\.value\); \}\}/.test(uiStripped) && /disabled\?: boolean/.test(uiStripped));
+check('15e. DR4-F2A\'s duration locks (unrelated to the mode switcher) are untouched: disabled={Boolean(reschedulingPlanId)} still never routes through handleSavePlan, handleReschedulePlanViaMove or any fetch -- it only ever prevents a setter from firing', !/disabled=\{Boolean\(reschedulingPlanId\)\}[\s\S]{0,100}(fetch\(|handleSavePlan|handleReschedulePlanViaMove)/.test(stripped));
 
 check('SegmentedControl\'s new `disabled` prop is optional and backward compatible -- every OTHER existing caller (ExploreModeToggle, InsightsView, MuhurthamFinderView, RhythmPicker, GoalsListClient, PlanDayClient) omits it and keeps working exactly as before', /disabled\?: boolean/.test(uiStripped));
 
