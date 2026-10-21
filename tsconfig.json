@@ -12,6 +12,7 @@
   "include": ["packages/**/*.ts", "test/**/*.ts"],
   "exclude": [
     "test/planWithAuraViewLogic.test.ts",
+    "test/durationDisplayCorrection.test.ts",
     "test/panchangCalendarLogic.test.ts",
     "test/muhurthamFinderViewLogic.test.ts",
     "test/homeDashboardGoodRightNow.test.ts",
