@@ -46,13 +46,23 @@ export type UpcomingPlan = {
   duration: string;
   time: string;
   window: string;
-  match: 'Best Match' | 'Good Match';
+  // DR4-E3 -- optional on purpose: a genuine timing-engine classification
+  // (planPayloadFromCandidate, always one of these two) is truthful and
+  // stays required there; a PERSISTED plan's matchLabel (mapPlanRow) may be
+  // null/missing (e.g. manually-created or Day Builder plans never ran
+  // through Find-a-Time) -- absent here means "no badge", never a
+  // fabricated default. See mapPlanRow's own doc comment.
+  match?: 'Best Match' | 'Good Match';
   note: string;
   accent: string;
   when: string;
   plannedStartAt: string;
   plannedEndAt: string;
-  details: string;
+  // DR4-E3 -- optional: a persisted plan with no saved recommendation text
+  // (mapPlanRow) renders no paragraph at all rather than a fabricated
+  // generic caption. A freshly-computed candidate (planPayloadFromCandidate)
+  // always has real text and stays required there.
+  details?: string;
   score?: number;
   googleCalendarUrl?: string;
   source?: 'Aura';
@@ -317,10 +327,23 @@ export function mapPlanRow(row: PlanApiRow, fallbackTimezone?: string): Upcoming
     duration: `${row.durationMinutes ?? 60} min`,
     time: formatPlanTimeRange(start, end, eventTimezone ?? fallbackTimezone),
     window: row.windowLabel || row.windowType || 'Neutral Flow',
-    match: row.matchLabel === 'Good Match' ? 'Good Match' : 'Best Match',
+    // DR4-E3 -- the DR4-E audit's own finding: this previously defaulted
+    // ANY non-'Good Match' value (null, missing, or an unrecognized string)
+    // to 'Best Match', fabricating a rating for plans that were never
+    // actually classified (manually-created plans, Day Builder adds).
+    // Explicit values are preserved verbatim; everything else is undefined
+    // (no badge), never silently upgraded.
+    match: row.matchLabel === 'Best Match' ? 'Best Match' : row.matchLabel === 'Good Match' ? 'Good Match' : undefined,
     note: status === 'LOGGED' ? 'Logged' : row.matchLabel || 'Good match',
     accent: planAccentForTitle(title),
-    details: row.recommendation || 'Aura saved this as one of your planned moments.',
+    // DR4-E3 -- the DR4-E audit's other finding: this generic reassurance
+    // caption previously filled in for EVERY plan with no saved
+    // recommendation text, reading as personalized guidance when it was
+    // pure filler. A genuine recommendation.details (search-and-save
+    // flows) is preserved verbatim; everything else renders no paragraph
+    // at all (UpcomingPlan/MissedActivityCard already skip the <p> when
+    // details is falsy).
+    details: row.recommendation || undefined,
     score: typeof row.score === 'number' ? row.score : undefined,
     googleCalendarUrl: row.calendarUrl || undefined,
     source: 'Aura',

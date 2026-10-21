@@ -136,7 +136,12 @@ check('21/22. An "alternate window" candidate persists the identical Event Locat
 // ============================================================
 
 const sharedWithLocationPayload = planPayloadFromCandidate(kochiInstant, 60, 'Anu', kochiLocation);
-check('29a. sharedWithName and eventLocation persist independently: details mentions Anu', sharedWithLocationPayload.details.includes('Anu'));
+// DR4-E3 made UpcomingPlan.details optional (a persisted plan may have no
+// saved recommendation text); planPayloadFromCandidate itself is unchanged
+// and still always produces a real string here -- non-null assertion, not
+// a behavior change (same convention test/planWithAuraViewLogic.test.ts
+// already uses for this same function's output).
+check('29a. sharedWithName and eventLocation persist independently: details mentions Anu', sharedWithLocationPayload.details!.includes('Anu'));
 check('29b. sharedWithName and eventLocation persist independently: eventLocationName is still Kochi', sharedWithLocationPayload.eventLocationName === 'Kochi');
 
 // ============================================================
