@@ -1,29 +1,32 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getSessionFromRequest } from '../../../../lib/session';
 import { getUserById } from '../../../../lib/db';
-import { getDatePartsInTimezone } from '../../../../lib/timezone';
+import { getDatePartsInTimezone, addDaysToDateStr } from '../../../../lib/timezone';
+import { isValidCalendarDateString } from '../../../../../../packages/panchang/src/localDate';
 import { generateAstroDailyBriefing } from '../../../../lib/dailyAstroBriefing';
 
 /**
- * AURA DB2 -- Personalized Daily Briefing API.
+ * AURA DB2/DB3 -- Personalized Daily Briefing API.
  *
  * Consumes the merged DB1 engine (apps/web/lib/dailyAstroBriefing.ts)
  * UNCHANGED: this route resolves the authenticated user's own birth
- * profile + configured timezone + "today" (in that timezone), then calls
+ * profile + configured timezone + the requested local date, then calls
  * generateAstroDailyBriefing() once and returns its result as-is. It
  * never recomputes, re-interprets, or duplicates any part of the Gochar
  * calculation -- see dailyAstroBriefing.ts's own header comment for why
- * that engine is pure/deterministic and this route is its only new
- * caller.
+ * that engine is pure/deterministic and this route is its only caller.
  *
- * `?date=` is deliberately NOT exposed yet (DB2's own ticket: "Keep the
- * API design compatible with a future ?date= parameter for DB3, but do
- * not add an unnecessary second endpoint... do not add it unless
- * needed" -- Home only ever needs today's briefing; DB3 owns the
- * Insights "yesterday" surface). `resolveTargetLocalDate` below is kept
- * as its own small function specifically so DB3 can extend it (e.g. an
- * optional, strictly-validated, bounded `searchParams.get('date')`
- * override) without restructuring this route.
+ * DB3 -- historical-date support: an optional `?date=YYYY-MM-DD` query
+ * param (same ONE endpoint, per DB3's own ticket: "Do not create a
+ * separate historical API"). Omitted -- the exact DB2 behavior,
+ * unchanged, backward-compatible -- resolves to the user's own current
+ * local date. Supplied -- strictly validated (exact "YYYY-MM-DD" shape,
+ * calendrically real date) and bounded to
+ * [today - MAX_HISTORICAL_DAYS_BACK, today] in the user's OWN configured
+ * timezone (never the server's) -- generous enough for Insights V1's
+ * only real need (yesterday) while staying a documented, bounded range
+ * rather than an open-ended historical/future browser, per the ticket's
+ * own explicit ask.
  */
 
 export const dynamic = 'force-dynamic';
@@ -38,6 +41,12 @@ const NO_STORE_HEADERS = {
   'Cache-Control': 'private, no-store, max-age=0',
 } as const;
 
+/** How far back `?date=` may reach, in days before the user's own
+ * "today". Documented, bounded, generous for yesterday's briefing
+ * (Insights V1's only real need) without becoming an open-ended
+ * historical browser. */
+const MAX_HISTORICAL_DAYS_BACK = 7;
+
 function formatUTCDateString(dateInput: Date | string): string {
   if (typeof dateInput === 'string') return dateInput.split('T')[0];
   const year = dateInput.getUTCFullYear();
@@ -46,8 +55,26 @@ function formatUTCDateString(dateInput: Date | string): string {
   return `${year}-${month}-${day}`;
 }
 
-function resolveTargetLocalDate(timezone: string): string {
+function resolveTodayLocalDate(timezone: string): string {
   return getDatePartsInTimezone(timezone, new Date()).dateStr;
+}
+
+type DateResolution = { status: 'OK'; localDate: string } | { status: 'INVALID_DATE' } | { status: 'DATE_OUT_OF_RANGE'; minDate: string; maxDate: string };
+
+/**
+ * Resolves the requested `?date=` (or, absent, "today") against the
+ * user's OWN timezone -- never the server's. Lexicographic comparison on
+ * "YYYY-MM-DD" strings is exact for calendar-date ordering (zero-padded,
+ * fixed-width), so no Date-object arithmetic is needed for the range
+ * check itself.
+ */
+function resolveRequestedLocalDate(rawDate: string | null, timezone: string): DateResolution {
+  const today = resolveTodayLocalDate(timezone);
+  if (!rawDate) return { status: 'OK', localDate: today };
+  if (!isValidCalendarDateString(rawDate)) return { status: 'INVALID_DATE' };
+  const minDate = addDaysToDateStr(today, -MAX_HISTORICAL_DAYS_BACK);
+  if (rawDate < minDate || rawDate > today) return { status: 'DATE_OUT_OF_RANGE', minDate, maxDate: today };
+  return { status: 'OK', localDate: rawDate };
 }
 
 export async function GET(req: NextRequest) {
@@ -67,7 +94,17 @@ export async function GET(req: NextRequest) {
       return NextResponse.json({ status: 'AUTH_REQUIRED', error: 'User not found.' }, { status: 404, headers: NO_STORE_HEADERS });
     }
 
-    const localDate = resolveTargetLocalDate(user.timezone);
+    const dateResolution = resolveRequestedLocalDate(req.nextUrl.searchParams.get('date'), user.timezone);
+    if (dateResolution.status === 'INVALID_DATE') {
+      return NextResponse.json({ status: 'INVALID_INPUT', reason: 'INVALID_LOCAL_DATE' }, { status: 400, headers: NO_STORE_HEADERS });
+    }
+    if (dateResolution.status === 'DATE_OUT_OF_RANGE') {
+      return NextResponse.json(
+        { status: 'INVALID_INPUT', reason: 'DATE_OUT_OF_RANGE', minDate: dateResolution.minDate, maxDate: dateResolution.maxDate },
+        { status: 400, headers: NO_STORE_HEADERS }
+      );
+    }
+    const localDate = dateResolution.localDate;
 
     const result = generateAstroDailyBriefing({
       birthDate: user.birthDate ? formatUTCDateString(user.birthDate) : null,
@@ -91,13 +128,13 @@ export async function GET(req: NextRequest) {
       return NextResponse.json({ status: 'UNAVAILABLE', reason: result.reason }, { headers: NO_STORE_HEADERS });
     }
 
-    // INVALID_INPUT and CALCULATION_FAILED both indicate the engine could
-    // not produce an interpretation for otherwise-valid input -- in THIS
-    // route (no client-suppliable date/timezone yet), INVALID_INPUT
-    // should be unreachable in practice (localDate/timezone are both
-    // server-resolved from already-validated user data), so either case
-    // is treated the same: a genuine, typed "unavailable right now"
-    // condition, distinct from an incomplete profile.
+    // The engine's own INVALID_INPUT/CALCULATION_FAILED statuses should be
+    // unreachable here specifically -- `localDate` has already passed this
+    // route's own strict validation/range check above (resolveRequestedLocalDate),
+    // and `timezone` is always the already-valid, server-stored user.timezone,
+    // never client-suppliable -- so either case is treated the same: a
+    // genuine, typed "unavailable right now" condition, distinct from an
+    // incomplete profile.
     return NextResponse.json(
       { status: 'CALCULATION_UNAVAILABLE', reason: result.reason },
       { status: 503, headers: NO_STORE_HEADERS }

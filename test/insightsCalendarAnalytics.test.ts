@@ -194,7 +194,18 @@ check('InsightsView.tsx declares a `timezone` prop on InsightsViewProps', /timez
 const viewSourceNoComments = viewSource.replace(/\/\*[\s\S]*?\*\//g, '').replace(/\/\/.*$/gm, '');
 check('InsightsView.tsx no longer reads .getFullYear()/.getMonth()/.getDate()/.getHours() on a log/now Date for classification (only the UTC-anchored, timezone-independent formatWeekdayLabel helper remains, which explicitly forces timeZone: \'UTC\')', !/\.get(FullYear|Month|Date|Hours)\(\)/.test(viewSourceNoComments.replace(/function formatWeekdayLabel[\s\S]*?\n\}/, '')));
 check('InsightsView.tsx contains no raw 24*60*60*1000 millisecond-arithmetic date stepping', !/24\s*\*\s*60\s*\*\s*60\s*\*\s*1000/.test(viewSource));
-check('page.tsx renders InsightsView with an explicit timezone prop sourced from user.timezone', /<InsightsView\s+timezone=\{user\.timezone\}/.test(fs.readFileSync('apps/web/app/page.tsx', 'utf8')));
+// DB3 added userId/onOpenBirthProfile props ahead of the existing
+// timezone prop (purely additive -- see test/insightsDailyBriefingStructural.test.ts's
+// own check 9) -- this check is scoped to "timezone={user.timezone}
+// appears somewhere within the <InsightsView ...> opening tag", not to
+// prop ordering, which this check was never actually about.
+{
+  const pageSrc = fs.readFileSync('apps/web/app/page.tsx', 'utf8');
+  const tagStart = pageSrc.indexOf('<InsightsView');
+  const tagEnd = pageSrc.indexOf('/>', tagStart) > -1 ? pageSrc.indexOf('>', pageSrc.indexOf('onOpenPlanReview', tagStart)) : -1;
+  const insightsViewTag = tagStart >= 0 ? pageSrc.slice(tagStart, tagEnd > tagStart ? tagEnd : tagStart + 2000) : '';
+  check('page.tsx renders InsightsView with an explicit timezone prop sourced from user.timezone', /timezone=\{user\.timezone\}/.test(insightsViewTag));
+}
 
 console.log(allPassed ? '\nALL INSIGHTS CALENDAR ANALYTICS CHECKS PASSED' : '\nSOME INSIGHTS CALENDAR ANALYTICS CHECKS FAILED');
 process.exit(allPassed ? 0 : 1);

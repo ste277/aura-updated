@@ -1629,6 +1629,8 @@ export default function DashboardPage() {
 
         {activeTab === 'insights' && (
           <InsightsView
+            userId={user?.id}
+            onOpenBirthProfile={() => setActiveTab('chart')}
             timezone={user.timezone}
             logEntries={logEntries}
             assistantInsight={assistantInsight}
