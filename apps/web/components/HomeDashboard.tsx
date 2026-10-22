@@ -44,11 +44,20 @@ import type { PlannedActivity } from '../lib/db';
 import { RecompositionCard } from './RecompositionCard';
 import { createRecompositionStore, initialRecompositionState, shouldOfferRecomposition, withConfirmedMoves, withMovedSources, type ConfirmedMove, type RecompositionStore } from '../lib/homeRecomposition';
 import { formatGoalActivityCompletion } from '../lib/goalActivityExecution';
+import { DailyBriefingCard } from './DailyBriefingCard';
 
 /** Matches page.tsx's own FALLBACK_TZ -- defensive only, page.tsx always supplies a real value today. */
 const FALLBACK_HOME_TZ = 'Asia/Kolkata';
 
 interface HomeDashboardProps {
+  /** AURA DB2 -- namespaces the Personalized Daily Briefing's own
+   * per-user "already shown expanded today" localStorage key (see
+   * DailyBriefingCard.tsx / lib/dailyBriefingViewState.ts) so switching
+   * users on the same browser can never read or clobber another user's
+   * state. Optional/undefined simply defers that card's fetch until the
+   * real id is known (matching this file's own existing `user?.id`
+   * reset convention elsewhere in page.tsx). */
+  userId?: string;
   userName: string;
   energyScore: number;
   themeText: string;
@@ -334,6 +343,7 @@ export function selectGoodRightNowCards(
 }
 
 export function HomeDashboard({
+  userId,
   userName,
   energyScore,
   themeText,
@@ -1074,6 +1084,16 @@ export function HomeDashboard({
           </IconButton>
         }
       />
+
+      {/* ============================================================
+       * PERSONALIZED DAILY BRIEFING (AURA DB2) -- explains the day's
+       * overall traditional astrological themes. Distinct from Right Now
+       * below (which remains the sole source of immediate timing/
+       * activity recommendations) -- this card never names a "best time"
+       * of its own, only traditional theme/career/finance/focus/caution
+       * framing, read verbatim from the DB1 engine's response.
+       * ============================================================ */}
+      <DailyBriefingCard userId={userId} timezone={effectiveTimezone} onOpenBirthProfile={onOpenBirthProfile} onPlanClick={onPlanClick} />
 
       {/* ============================================================
        * RIGHT NOW
