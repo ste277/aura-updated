@@ -52,6 +52,7 @@ function formatLocalDateLabel(dateStr: string): string {
 
 export function DailyBriefingCard({
   userId,
+  timezone,
   onOpenBirthProfile,
   onPlanClick,
 }: {
@@ -60,6 +61,20 @@ export function DailyBriefingCard({
    * anywhere, never used to request another user's data (the API route
    * itself is strictly session-scoped regardless of any prop here). */
   userId?: string;
+  /** DB2 review fix: the viewer's OWN current configured timezone
+   * (HomeDashboard's existing `effectiveTimezone`) -- included ONLY as a
+   * fetch-effect dependency, never sent to the API (the route resolves
+   * "today" server-side from the session's own user row, same as
+   * before). Without this, changing timezone mid-session (Location &
+   * Time settings -> handleLocationChanged in page.tsx, the SAME trigger
+   * that already refreshes My Day's own agenda/story/reflection and the
+   * daily-assistant briefing/insight signals for exactly this reason)
+   * left this card showing a stale, wrong-timezone briefing until an
+   * unrelated remount or manual retry -- confirmed during DB2's
+   * independent final review. Reusing the EXISTING effectiveTimezone the
+   * rest of Home already recomputes reactively on every user.timezone
+   * change needs no new state/fetch of its own. */
+  timezone?: string;
   onOpenBirthProfile?: () => void;
   onPlanClick?: (activity?: string) => void;
 }) {
@@ -104,7 +119,7 @@ export function DailyBriefingCard({
       cancelled = true;
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [userId, retryKey]);
+  }, [userId, timezone, retryKey]);
 
   // DB2 brief section 4 (merge-critical): "Do not mark a briefing as
   // viewed merely because Home mounted or an API request started. Only

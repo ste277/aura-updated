@@ -1093,7 +1093,7 @@ export function HomeDashboard({
        * of its own, only traditional theme/career/finance/focus/caution
        * framing, read verbatim from the DB1 engine's response.
        * ============================================================ */}
-      <DailyBriefingCard userId={userId} onOpenBirthProfile={onOpenBirthProfile} onPlanClick={onPlanClick} />
+      <DailyBriefingCard userId={userId} timezone={effectiveTimezone} onOpenBirthProfile={onOpenBirthProfile} onPlanClick={onPlanClick} />
 
       {/* ============================================================
        * RIGHT NOW

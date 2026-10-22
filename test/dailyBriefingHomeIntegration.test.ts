@@ -65,9 +65,10 @@ check('4. a failed/error fetch result NEVER reaches the persistence effect (that
 
 check('5. the incomplete-profile CTA uses the exact copy specified in the brief', /Add your birth details to see your personalized daily briefing\./.test(cardSource));
 check('5. the incomplete-profile CTA links through the EXISTING onOpenBirthProfile prop (no duplicate onboarding flow invented)', /onOpenBirthProfile && \(/.test(cardSource) && /onClick=\{onOpenBirthProfile\}/.test(cardSource));
-check('5. a retry affordance exists for the error state, implemented by bumping a retryKey that the fetch effect depends on (re-fires the SAME fetch, not a different code path)', /setRetryKey\(\(k\) => k \+ 1\)/.test(cardSource) && /\[userId, retryKey\]/.test(cardSource));
+check('5. a retry affordance exists for the error state, implemented by bumping a retryKey that the fetch effect depends on (re-fires the SAME fetch, not a different code path)', /setRetryKey\(\(k\) => k \+ 1\)/.test(cardSource) && /\[userId, timezone, retryKey\]/.test(cardSource));
 check('5. the loading state uses role="status" + ariaLive="polite" (announced to screen readers, not a silent layout shift)', /role="status" ariaLive="polite"/.test(cardSource));
 check('5. the error state uses role="alert"', /role="alert"/.test(cardSource));
+check('5. the fetch effect declares `cancelled` FRESH inside its own body on every invocation (never a module/component-level shared flag) -- the exact closure shape test/dailyBriefingCardLifecycle.test.ts\'s deferred-promise suite independently verified is race-safe', /let cancelled = false;/.test(cardSource) && /if \(cancelled\) return;/.test(cardSource) && /cancelled = true;/.test(cardSource));
 
 // ============================================================
 // 6. Contextual Home -> Plan action reuses the existing contract
@@ -75,7 +76,20 @@ check('5. the error state uses role="alert"', /role="alert"/.test(cardSource));
 
 check('6. DailyBriefingCard\'s onPlanClick prop has the exact existing handleOpenPlan/onPlanClick signature (activity?: string) => void -- no new navigation contract', /onPlanClick\?:\s*\(activity\?:\s*string\)\s*=>\s*void;/.test(cardSource));
 check('6. the contextual action calls onPlanClick with a plain activity string ("Focused work"), never constructs a plan or candidate itself', /onPlanClick\('Focused work'\)/.test(cardSource) && !/createPlannedActivity|saveUpcomingPlanFromCandidate/.test(cardSource));
-check('6. HomeDashboard passes its OWN existing onPlanClick prop straight through to DailyBriefingCard (not a new, second handler)', /<DailyBriefingCard userId=\{userId\} onOpenBirthProfile=\{onOpenBirthProfile\} onPlanClick=\{onPlanClick\}/.test(homeSource));
+check('6. HomeDashboard passes its OWN existing onPlanClick prop straight through to DailyBriefingCard (not a new, second handler)', /<DailyBriefingCard userId=\{userId\} timezone=\{effectiveTimezone\} onOpenBirthProfile=\{onOpenBirthProfile\} onPlanClick=\{onPlanClick\}/.test(homeSource));
+
+// ============================================================
+// 9. DB2 review fix -- a mid-session timezone change must invalidate the
+// fetch, not leave a stale briefing on screen (confirmed missing, then
+// fixed, during independent final review: handleLocationChanged in
+// page.tsx already refreshes My Day's agenda/story/reflection and the
+// daily-assistant briefing/insight signals for exactly this reason --
+// DailyBriefingCard's own fetch effect needed the same trigger).
+// ============================================================
+
+check('9. DailyBriefingCard accepts a timezone prop', /timezone\?:\s*string;/.test(cardSource));
+check('9. the fetch effect depends on timezone (not just userId/retryKey) -- a timezone change re-fires the SAME fetch, invalidating the old one via the existing cancelled-flag cleanup', /\[userId, timezone, retryKey\]/.test(cardSource));
+check('9. HomeDashboard threads its OWN existing effectiveTimezone (the same value the rest of Home already recomputes reactively on every user.timezone change) -- no new timezone state invented', /timezone=\{effectiveTimezone\}/.test(homeStripped));
 
 // ============================================================
 // 7. page.tsx wiring
