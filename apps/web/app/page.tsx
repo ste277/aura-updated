@@ -1520,6 +1520,7 @@ export default function DashboardPage() {
       <div style={{ width: '100%', maxWidth: 760 }}>
         {activeTab === 'home' && (
           <HomeDashboard
+            userId={user?.id}
             userName={userNameDisplay}
             energyScore={energyInsight.score}
             themeText={energyInsight.themeText}
