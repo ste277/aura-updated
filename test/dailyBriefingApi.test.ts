@@ -11,9 +11,13 @@ function check(label: string, condition: boolean) {
   if (!condition) allPassed = false;
 }
 
+// DB3 extended the route to read req.nextUrl.searchParams (for ?date=) --
+// this mock must supply one even when this file never itself passes a
+// date, exactly like a real NextRequest always does.
 const req = (tok: string | null): any => ({
   cookies: { get: (n: string) => (tok && n === 'as_session' ? { value: tok } : undefined) },
   headers: new Headers(),
+  nextUrl: new URL('http://localhost/api/daily-briefing/today'),
 });
 
 async function sql(t: string, p: unknown[] = []): Promise<any[]> {

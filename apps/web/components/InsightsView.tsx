@@ -16,6 +16,7 @@ import type { DerivedGoalActivityState } from '../lib/goals';
 import { colors, spacing, typography, radius } from './theme';
 import { PageHeader, SegmentedControl, SurfaceCard, StatusBadge, TextButton, EmptyState } from './ui';
 import { LoggedEntryItem } from './CalendarViewSection';
+import { InsightsDailyBriefingSection } from './InsightsDailyBriefingSection';
 
 // ============================================================
 // Insights V1 PR4 -- Read-Only Goal and Planning Reporting. Wire-shaped
@@ -113,6 +114,14 @@ function formatWeekdayLabel(dateKey: string, style: 'narrow' | 'short'): string 
 export type { LoggedEntryItem };
 
 interface InsightsViewProps {
+  /** AURA DB3 -- the SAME per-user identity DB2's Home card already uses
+   * (HomeDashboard.tsx's own `userId`), threaded here only so a future
+   * per-user view-state key could reuse it if ever needed; the
+   * Personalized Daily Briefing section itself needs no persistence
+   * (Insights, unlike Home, has no "first visit of the day" expand/
+   * compact state to track). */
+  userId?: string;
+  onOpenBirthProfile?: () => void;
   /** Insights Timezone Consistency V1 -- the owner's current Timing
    * Location IANA timezone (`user.timezone`), the sole timezone source for
    * every calendar-day/daypart calculation in this component (This Month,
@@ -186,7 +195,7 @@ interface InsightsViewProps {
   onOpenPlanReview?: (target?: { planId?: string; planFilter?: 'AWAITING_CONFIRMATION' }) => void;
 }
 
-export function InsightsView({ timezone, logEntries = [], assistantInsight, goalReporting, goalReportingStatus = 'loaded', onOpenPlanReview }: InsightsViewProps) {
+export function InsightsView({ userId, onOpenBirthProfile, timezone, logEntries = [], assistantInsight, goalReporting, goalReportingStatus = 'loaded', onOpenPlanReview }: InsightsViewProps) {
   const [activeSubTab, setActiveSubTab] = useState<'overview' | 'patterns' | 'trends' | 'streaks'>('overview');
 
   // Insights V1 PR5 -- session-local dismissal ONLY (ticket section H: no
@@ -609,6 +618,16 @@ export function InsightsView({ timezone, logEntries = [], assistantInsight, goal
            * (not five separate skeletons) keeps layout shift small while
            * still clearly NOT looking like real, populated data -- no
            * number, no card chrome matching the real cards below. */}
+          {/* AURA DB3 -- the Personalized Daily Briefing, placed FIRST in
+           * Overview (ahead of PR4's own Goal/planning reporting and
+           * PR5's "Aura suggests" below), matching this exact section's
+           * own established "newest addition goes first, never replaces
+           * what's below" precedent. Entirely self-contained (its own
+           * fetch/loading/error/unavailable states) -- renders its own
+           * card regardless of goalReportingStatus, never blocked by or
+           * blocking the existing Goal/suggestion loading below. */}
+          <InsightsDailyBriefingSection userId={userId} timezone={timezone} onOpenBirthProfile={onOpenBirthProfile} />
+
           {goalReportingStatus === 'loading' && (
             <SurfaceCard role="status" ariaLive="polite">
               <div style={{ display: 'flex', alignItems: 'center', gap: spacing.sm }}>
