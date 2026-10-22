@@ -28,6 +28,13 @@ import type { AstroDailyBriefing, GocharEvidenceRef } from '../lib/dailyAstroBri
  * (alongside userId/timezone/retryKey), since a date-selection change is
  * exactly the same class of "identity that invalidates an in-flight
  * request" as a user or timezone change already was.
+ *
+ * DB4 -- two fixes from DB3's own independent review: (1) Daily Theme's
+ * "Why this guidance?" now includes the Tara Bala evidence its own text
+ * always cites (see selectSectionEvidence()'s doc comment); (2) the
+ * Today/Yesterday control's `role="tablist"` is no longer duplicated --
+ * it lives on SegmentedControl's own element now (via its new `ariaLabel`
+ * prop), not on a second wrapping div.
  */
 
 type FetchState =
@@ -61,6 +68,41 @@ const OUTPUT_LEVEL_LABEL: Record<ReflectionSummary['outputLevel'], string> = {
 function resolveYesterdayLocalDate(timezone: string): string {
   const today = getDatePartsInTimezone(timezone, new Date()).dateStr;
   return addDaysToDateStr(today, -1);
+}
+
+/**
+ * DB4 -- Daily Theme evidence completeness (fixing a gap DB3's own
+ * independent review found: dailyAstroBriefing.ts's composeDailyTheme()
+ * UNCONDITIONALLY appends a Tara Bala sentence to the Daily Theme text
+ * ("It also falls on your ... Tara ..."), but DB3's evidence filter only
+ * ever matched `category === 'DAILY_THEME'`, so that claim had no
+ * corresponding entry in the "Why this guidance?" expansion.
+ *
+ * This is a small, deterministic mapping -- not "show every evidence
+ * entry": Daily Theme's prose is read, by construction, from
+ * dailyAstroBriefing.ts's own composeDailyTheme(), which:
+ *   - ALWAYS cites Tara Bala (the `tara` sentence is unconditional) --
+ *     so the TARA_BALA evidence entry is always folded in here.
+ *   - NEVER cites Chandra Bala by name -- composeDailyTheme() doesn't even
+ *     take chandraBala as a parameter. Folding CHANDRA_BALA evidence in
+ *     here too would both (a) attach an explanation to a claim the text
+ *     never actually makes, and (b) duplicate the Moon's own per-graha
+ *     DAILY_THEME entry already included (same house, same favorability,
+ *     just phrased as "Chandra Bala" instead of "Moon is transiting
+ *     House N..."). So CHANDRA_BALA is deliberately excluded here. If a
+ *     future DB1 change makes Daily Theme's prose reference Chandra Bala
+ *     too, this mapping should be revisited alongside that change --
+ *     this function does not reconstruct or infer an association DB1
+ *     itself doesn't assert.
+ *
+ * Every other section's evidence is untouched (exact `category` match,
+ * same as before).
+ */
+export function selectSectionEvidence(evidence: GocharEvidenceRef[], category: GocharEvidenceRef['category']): GocharEvidenceRef[] {
+  if (category === 'DAILY_THEME') {
+    return evidence.filter((e) => e.category === 'DAILY_THEME' || e.category === 'TARA_BALA');
+  }
+  return evidence.filter((e) => e.category === category);
 }
 
 function formatLocalDateLabel(dateStr: string): string {
@@ -145,16 +187,15 @@ export function InsightsDailyBriefingSection({
     <div style={{ display: 'flex', flexDirection: 'column', gap: spacing.md }}>
       <SectionHeader label="Personalized Daily Briefing" color={colors.traditional} />
 
-      <div role="tablist" aria-label="Select which day's briefing to view">
-        <SegmentedControl
-          options={[
-            { value: 'TODAY', label: 'Today' },
-            { value: 'YESTERDAY', label: 'Yesterday' },
-          ]}
-          value={selectedDate}
-          onChange={setSelectedDate}
-        />
-      </div>
+      <SegmentedControl
+        ariaLabel="Select which day's briefing to view"
+        options={[
+          { value: 'TODAY', label: 'Today' },
+          { value: 'YESTERDAY', label: 'Yesterday' },
+        ]}
+        value={selectedDate}
+        onChange={setSelectedDate}
+      />
 
       {state.status === 'loading' && (
         <SurfaceCard role="status" ariaLive="polite" style={{ minHeight: 92 }}>
@@ -242,8 +283,10 @@ function BriefingSection({
   // (e.g. "Jupiter is transiting House 11 from your natal Moon,
   // traditionally a supportive placement.") -- never a raw object, never
   // invented. Rule version shown once, factually, not as a claim of
-  // certainty.
-  const relevant = evidence.filter((e) => e.category === category);
+  // certainty. DB4: Daily Theme additionally folds in the Tara Bala
+  // evidence its own text always cites -- see selectSectionEvidence()'s
+  // own doc comment for the full, deterministic rationale.
+  const relevant = selectSectionEvidence(evidence, category);
   return (
     <div style={{ marginBottom: last ? 0 : spacing.md }}>
       <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: spacing.sm }}>

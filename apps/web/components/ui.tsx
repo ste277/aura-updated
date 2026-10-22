@@ -556,15 +556,24 @@ export function SegmentedControl<T extends string>({
   value,
   onChange,
   disabled,
+  ariaLabel,
 }: {
   options: { value: T; label: React.ReactNode }[];
   value: T;
   onChange: (value: T) => void;
   disabled?: boolean;
+  /** Optional accessible name for this control's own `role="tablist"` element.
+   * A caller that needs a label should pass it here rather than wrapping this
+   * component in a second element with its own `role="tablist"` -- this
+   * component already owns that role, and nesting two tablists is invalid
+   * ARIA structure (DB4: fixes exactly that defect in the Insights Daily
+   * Briefing Today/Yesterday control, found by DB3's independent review). */
+  ariaLabel?: string;
 }) {
   return (
     <div
       role="tablist"
+      aria-label={ariaLabel}
       style={{
         display: 'flex',
         gap: 2,

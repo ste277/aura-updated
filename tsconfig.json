@@ -20,7 +20,8 @@
     "test/muhurthamFinderViewLogic.test.ts",
     "test/homeDashboardGoodRightNow.test.ts",
     "test/nextMomentSurface.test.ts",
-    "test/pendingActivityReloadVisibility.test.ts"
+    "test/pendingActivityReloadVisibility.test.ts",
+    "test/dailyBriefingEvidenceCompleteness.test.ts"
   ]
 }
 
