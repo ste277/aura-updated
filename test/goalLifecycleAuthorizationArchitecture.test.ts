@@ -9,14 +9,28 @@
  *   - the check is batched, current-state, transaction-scoped and takes a
  *     share lock (so a concurrent archive cannot slip between check and write)
  *   - there is no path-specific bypass and no client-asserted Goal status
- *   - the new Goal-provenance creators are exactly the two existing ones,
- *     reached only from the persistence write loop
+ *   - EVERY production caller of the two Goal-provenance writers -- not
+ *     just one pinned file -- carries its own lockGoalParentLifecycleForPlanning
+ *     call before it writes, so a future unguarded caller still fails this
+ *     file even though the caller SET is no longer a single-file pin
  *   - archiving touches only the Goal row (existing plans/history untouched)
  *     and nothing reactivates a Goal
  *
+ * HPG2 P0 fix (archived-Goal bypass via direct Plan-tab Goal linking):
+ * apps/web/app/api/plans/route.ts is now a SECOND, legitimate production
+ * caller of linkGoalActivityToPlannedActivity, alongside the persistence
+ * write loop. It is legitimate specifically BECAUSE it now also calls
+ * lockGoalParentLifecycleForPlanning on the same transaction client before
+ * its own link write (proven below) -- the invariant this file protects was
+ * never "exactly one caller", it was "no caller writes Goal provenance
+ * without the lifecycle guard"; a second caller is fine exactly as long as
+ * it upholds that, and fails loudly here the moment it doesn't.
+ *
  * Structural checks are partly spelling-based by nature; the live-database
  * suite (goalLifecycleArchivedAcceptanceDb.test.ts) proves the same
- * properties by execution, including a real concurrent-archive race.
+ * properties by execution, including a real concurrent-archive race. The
+ * route's own direct-plan-creation path has its own parallel live-DB proof
+ * in planGoalActivityArchivedLifecycleDb.test.ts.
  */
 import fs from 'fs';
 import path from 'path';
@@ -101,9 +115,45 @@ check('it is scoped to the authenticated user and writes nothing', /ga\."userId"
 check('GoalActivities the user does not own, or that do not exist, are not reported as owned (their existing fail-closed rejection is unchanged, and nothing is ever treated as active by default)', /owned\.add\(row\.goalActivityId\)/.test(lifecycleFn) && /if \(row\.goalUserId === userId/.test(lifecycleFn));
 
 // ============================================================
-// Goal provenance has exactly the existing creators, behind the write loop
+// Goal provenance has exactly the existing creators, every one of them
+// protected by the SAME lifecycle guard (HPG2 P0 fix -- this is no longer
+// "exactly one file", because the direct-plan-creation route legitimately
+// gained its own protected call site; what the architecture guarantees now
+// is "every caller carries the guard", which a bare file-count can't prove
+// and a NEW unguarded caller still can't slip past).
 // ============================================================
-check('the ONLY production callers of the two Goal provenance writers (occurrence materialization and GoalActivity link) are the persistence write loop', JSON.stringify(filesMatching(/materializeGoalActivityRhythmOccurrence\(|linkGoalActivityToPlannedActivity\(/, 'db.ts')) === JSON.stringify(['dayConstructorAcceptancePersistence.ts']));
+const provenanceWriterCallerPaths = all.filter(
+  (f) => !f.endsWith('db.ts') && /materializeGoalActivityRhythmOccurrence\(|linkGoalActivityToPlannedActivity\(/.test(stripComments(fs.readFileSync(f, 'utf8')))
+);
+const provenanceWriterCallerNames = provenanceWriterCallerPaths.map((f) => path.basename(f)).sort();
+check(
+  'the production callers of the two Goal provenance writers are exactly the persistence write loop and the HPG2 direct-plan-creation route -- a third, unlisted caller fails this check even if it is individually well-guarded',
+  JSON.stringify(provenanceWriterCallerNames) === JSON.stringify(['dayConstructorAcceptancePersistence.ts', 'route.ts'])
+);
+for (const filePath of provenanceWriterCallerPaths) {
+  const relPath = path.relative(root, filePath);
+  const source = stripComments(fs.readFileSync(filePath, 'utf8'));
+  const lockAt = source.indexOf('lockGoalParentLifecycleForPlanning(');
+  const writerIndices = ['materializeGoalActivityRhythmOccurrence(', 'linkGoalActivityToPlannedActivity('].map((needle) => source.indexOf(needle)).filter((idx) => idx >= 0);
+  const firstWriterAt = Math.min(...writerIndices);
+  check(`${relPath}: calls lockGoalParentLifecycleForPlanning(...) BEFORE writing any Goal provenance -- a future caller that skips or reorders the lifecycle guard fails this check`, lockAt >= 0 && lockAt < firstWriterAt);
+}
+// HPG2's own call site, pinned exactly (same discipline as the persistence
+// write loop's own pin below): same transaction client, checked before the
+// link write, gated only by "a goalActivityId was supplied" -- no flag or
+// path condition can switch it off, and an unowned GoalActivity (absent
+// from `owned`) is untouched by this guard, falling through to the
+// existing fail-closed ownership rejection at the link call exactly as
+// before this fix.
+const plansRouteSource = stripComments(fs.readFileSync(path.join(app, 'api/plans/route.ts'), 'utf8'));
+check(
+  "apps/web/app/api/plans/route.ts: the lifecycle guard runs on the SAME transaction client as the link write, gated only by goalActivityId being present, and rejects with GOAL_NOT_ACTIVE exactly when the GoalActivity is owned but its parent Goal isn't active",
+  /if \(goalActivityId\) \{\s*const lifecycle = await lockGoalParentLifecycleForPlanning\(session\.userId, \[goalActivityId\], client\);\s*if \(lifecycle\.owned\.has\(goalActivityId\) && !lifecycle\.active\.has\(goalActivityId\)\) \{\s*throw new Error\('GOAL_NOT_ACTIVE'\);\s*\}/.test(plansRouteSource)
+);
+check(
+  "apps/web/app/api/plans/route.ts: a GOAL_NOT_ACTIVE rejection maps to a typed 400, not an unhandled 500",
+  /err\.message === 'GOAL_NOT_ACTIVE'[\s\S]{0,120}status: 400/.test(plansRouteSource)
+);
 check('GoalActivityOccurrence rows are inserted in exactly one production place (db.ts materialization)', JSON.stringify(filesMatching(/INSERT INTO "GoalActivityOccurrence"/)) === JSON.stringify(['db.ts']) && (dbCode.match(/INSERT INTO "GoalActivityOccurrence"/g) ?? []).length === 1);
 // Insights V1 PR2 (Stable Scheduled-Week Attribution) deliberately
 // re-baselined this pin's own call-site text: the call now also passes

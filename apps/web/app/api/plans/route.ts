@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getSessionFromRequest } from '../../../lib/session';
 import { DIRECT_PLAN_SCHEDULING_MODE } from '../../../lib/plannedActivitySchedulingMode';
-import { beginTransaction, createPlannedActivity, listPlannedActivities, getPlannedActivityForOwner, getGuestConversionRedemption, claimGuestConversionToken, fillGuestConversionRedemption, getPlanCreationClaim, claimPlanCreation, fillPlanCreationClaim } from '../../../lib/db';
+import { beginTransaction, createPlannedActivity, listPlannedActivities, getPlannedActivityForOwner, getGuestConversionRedemption, claimGuestConversionToken, fillGuestConversionRedemption, getPlanCreationClaim, claimPlanCreation, fillPlanCreationClaim, linkGoalActivityToPlannedActivity, lockGoalParentLifecycleForPlanning } from '../../../lib/db';
 import { parseJsonObject } from '../../../lib/request';
 import { verifyGuestStateToken, hashGuestConversionToken } from '../../../lib/guestState';
 import { parseEventLocationSnapshot } from '../../../lib/plansRequest';
@@ -232,6 +232,20 @@ export async function POST(req: NextRequest) {
     validatedActivityId = activity.id;
   }
 
+  // HPG2 -- goalActivityId is UNTRUSTED client input, optional, and a
+  // COMPLETELY SEPARATE identity space from activityId above: activityId
+  // is a static, non-user-scoped catalog entry (packages/recommendation/
+  // src/personalizedTasks.ts, no ownership concept at all); goalActivityId
+  // is a real, per-user-owned "GoalActivity" database row. The two are
+  // never interchangeable and this route never treats one as the other.
+  // Only a well-formed string is accepted here -- the actual
+  // existence/ownership/eligibility check happens atomically, inside the
+  // transaction below, via the SAME linkGoalActivityToPlannedActivity this
+  // app's Day Constructor acceptance path already relies on (db.ts) --
+  // never a separate pre-check (that would be a TOCTOU race) and never by
+  // matching this request's own `title` against any GoalActivity's title.
+  const goalActivityId = typeof body?.goalActivityId === 'string' && body.goalActivityId.trim() ? body.goalActivityId.trim() : null;
+
   if (!title || title.length > 200) return NextResponse.json({ error: 'A title of up to 200 characters is required.' }, { status: 400 });
   if (!plannedStartAt || !plannedEndAt || plannedEndAt <= plannedStartAt) {
     return NextResponse.json({ error: 'Valid plannedStartAt and plannedEndAt values are required.' }, { status: 400 });
@@ -289,9 +303,54 @@ export async function POST(req: NextRequest) {
       // Server constant, never read from the request body -- a client cannot grant recomposition permission.
       schedulingMode: DIRECT_PLAN_SCHEDULING_MODE,
     }, client);
+    // HPG2 -- same transaction, same client, immediately after the Plan
+    // insert that just happened: the exact pattern Day Constructor
+    // acceptance already uses (dayConstructorAcceptancePersistence.ts).
+    // linkGoalActivityToPlannedActivity itself enforces ownership
+    // (userId), non-DISMISSED, and the established eligibility rule
+    // (currently unlinked, or linked only to a CANCELLED/SKIPPED plan) --
+    // one atomic conditional UPDATE, no separate check-then-act. `false`
+    // means the id doesn't exist, isn't this user's, is DISMISSED, or
+    // already retains a live link to a DIFFERENT plan -- this fails the
+    // WHOLE request closed (no orphan, unlinked PlannedActivity silently
+    // created instead of the Goal-linked one the caller explicitly asked
+    // for) rather than silently degrading to an ordinary plan.
+    //
+    // Deliberately NOT wired to materializeGoalActivityRhythmOccurrence
+    // (db.ts) here: that Rhythm-aware path is unreachable today (no
+    // production GoalActivity has rhythmKind set yet -- HPG0 audit,
+    // confirmed again during HPG2), and wiring it prematurely would pull
+    // Rhythm-specific mechanics into what HPG2 scopes as plain Goal
+    // association for ordinary plan creation. Revisit this call site
+    // alongside whichever ticket first ships a Rhythm-creating UI.
+    if (goalActivityId) {
+      // HPG2 P0 fix -- Goal LIFECYCLE authorization, the same boundary Day
+      // Constructor acceptance already enforces (dayConstructorAcceptancePersistence.ts,
+      // lockGoalParentLifecycleForPlanning's own doc comment, db.ts): archiving
+      // a Goal revokes its authority to produce NEW Goal-derived planning
+      // state, so this must be checked -- on the SAME transaction client,
+      // taking the SAME `FOR SHARE OF g` lock -- before the link write below,
+      // not just left to linkGoalActivityToPlannedActivity's own WHERE clause
+      // (which only ever looks at the GoalActivity row, never its parent
+      // Goal). A GoalActivity this user doesn't own is simply absent from
+      // `owned` -- unaffected, falls through to the existing fail-closed
+      // ownership rejection at the link call below, exactly as before.
+      const lifecycle = await lockGoalParentLifecycleForPlanning(session.userId, [goalActivityId], client);
+      if (lifecycle.owned.has(goalActivityId) && !lifecycle.active.has(goalActivityId)) {
+        throw new Error('GOAL_NOT_ACTIVE');
+      }
+      const linked = await linkGoalActivityToPlannedActivity(session.userId, goalActivityId, plan.id, client);
+      if (!linked) throw new Error('GOAL_ACTIVITY_LINK_FAILED');
+    }
     await client.query('COMMIT');
   } catch (err) {
     await client.query('ROLLBACK').catch(() => {});
+    if (err instanceof Error && err.message === 'GOAL_NOT_ACTIVE') {
+      return NextResponse.json({ error: 'That goal is no longer active, so a new plan cannot be linked to it.' }, { status: 400 });
+    }
+    if (err instanceof Error && err.message === 'GOAL_ACTIVITY_LINK_FAILED') {
+      return NextResponse.json({ error: 'That goal activity is not available to link right now.' }, { status: 400 });
+    }
     throw err;
   } finally {
     client.release();
