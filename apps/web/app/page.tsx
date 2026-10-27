@@ -183,7 +183,14 @@ export default function DashboardPage() {
   // intent, e.g. "Date Night") lands directly in Plan with it prefilled,
   // via the exact same mechanism handleOpenPlan() already uses for every
   // other "jump into Plan with this activity" entry point in the app.
-  const [planPrefill, setPlanPrefill] = useState<{ activity: string; key: number; horizon?: PlanningHorizon } | null>(() => {
+  // HPG1 -- activityId is optional and ONLY ever set by a caller that
+  // already has a genuine, non-title-derived catalog identity in hand
+  // (e.g. a Good Right Now card's own ActionCard.activityId, or Ask
+  // Aura's own resolved action.activityId) -- never backfilled here by
+  // matching `activity`'s text. The `?activity=` URL entry point below has
+  // no such id available, so it correctly stays title-only, exactly as
+  // before this field was added.
+  const [planPrefill, setPlanPrefill] = useState<{ activity: string; activityId?: string; key: number; horizon?: PlanningHorizon } | null>(() => {
     if (typeof window === 'undefined') return null;
     const requested = new URLSearchParams(window.location.search).get('activity');
     return requested?.trim() ? { activity: requested.trim(), key: Date.now() } : null;
@@ -1342,10 +1349,14 @@ export default function DashboardPage() {
     loadGuidance();
   }, [loadMyDay, loadGuidance]);
 
-  const handleOpenPlan = useCallback((activity?: string) => {
+  // HPG1 -- activityId is optional; pass it only when the caller already
+  // resolved a genuine catalog id (never derive one here from `activity`'s
+  // text). Every existing caller that doesn't have one keeps working
+  // exactly as before -- the title-only path is entirely unchanged.
+  const handleOpenPlan = useCallback((activity?: string, activityId?: string) => {
     const cleanActivity = activity?.trim();
     if (cleanActivity) {
-      setPlanPrefill({ activity: cleanActivity, key: Date.now() });
+      setPlanPrefill({ activity: cleanActivity, activityId, key: Date.now() });
     }
     setActiveTab('plan');
   }, []);
@@ -1615,6 +1626,7 @@ export default function DashboardPage() {
             onPlanLogged={handlePlanLogged}
             timezone={user.timezone}
             initialActivity={planPrefill?.activity}
+            initialActivityId={planPrefill?.activityId}
             initialActivityKey={planPrefill?.key}
             initialHorizon={planPrefill?.horizon}
             onOpenPeople={() => { setPeopleReturnTo('plan'); setActiveTab('people'); }}

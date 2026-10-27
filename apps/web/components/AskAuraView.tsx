@@ -70,7 +70,10 @@ interface AskAuraProps {
    * the exact same callbacks Home/Explore already use (page.tsx's
    * handleOpenPlan / handleOpenMuhurthamWithActivity), never a new
    * navigation mechanism. */
-  onOpenPlan?: (activityTitle?: string) => void;
+  // HPG1 -- activityId is optional; passed only when the orchestrator's
+  // own OPEN_PLAN action already carries a resolved action.activityId.
+  // Never re-derived from the reconstructed title text.
+  onOpenPlan?: (activityTitle?: string, activityId?: string) => void;
   onOpenPanchang?: () => void;
   onOpenMuhurthamWithActivity?: (activityId: string) => void;
 }
@@ -169,7 +172,7 @@ export function AskAuraView({
     if (action.type === 'OPEN_HOME_TIMELINE') return onViewHomeDay?.();
     if (action.type === 'OPEN_PANCHANG') return onOpenPanchang?.();
     if (action.type === 'OPEN_MUHURTHAM') return onOpenMuhurthamWithActivity?.(action.activityId ?? '');
-    if (action.type === 'OPEN_PLAN') return onOpenPlan?.(activityTitleFor(action.activityId));
+    if (action.type === 'OPEN_PLAN') return onOpenPlan?.(activityTitleFor(action.activityId), action.activityId);
 
     trackEvent('ASK_AURA_RESULT_ACTION', { metadata: { action: action.type } });
     setActionState((prev) => ({ ...prev, [key]: 'saving' }));

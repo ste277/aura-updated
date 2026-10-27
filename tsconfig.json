@@ -21,7 +21,8 @@
     "test/homeDashboardGoodRightNow.test.ts",
     "test/nextMomentSurface.test.ts",
     "test/pendingActivityReloadVisibility.test.ts",
-    "test/dailyBriefingEvidenceCompleteness.test.ts"
+    "test/dailyBriefingEvidenceCompleteness.test.ts",
+    "test/planHomeHandoffActivityIdentity.test.ts"
   ]
 }
 

@@ -84,6 +84,16 @@ interface PlanWithAuraViewProps {
   timezone?: string;
   initialActivity?: string | null;
   initialActivityKey?: number;
+  /** HPG1 -- a stable, already-resolved catalog activity id to prefer over
+   * re-deriving identity from `initialActivity`'s title text. Only ever
+   * set by a caller that genuinely already has one (e.g. a Good Right Now
+   * card's own `ActionCard.activityId`, or Ask Aura's own resolved
+   * `action.activityId`) -- never backfilled by matching titles. Validated
+   * against FULL_ACTIVITY_CATALOG on arrival (see the prefill effect
+   * below); a missing, stale, malformed, or otherwise unrecognized id is
+   * silently ignored and this falls back to the exact title-only behavior
+   * that existed before this field was added. */
+  initialActivityId?: string | null;
   /** Daily Reflection & Tomorrow Preview V1 (brief section 5) -- the
    * "Plan tomorrow" handoff from a Tomorrow Preview suggestion preselects
    * both the activity AND this horizon, so the search itself still runs
@@ -269,6 +279,33 @@ export function resolveActivitySelection(rawTitle: string): { activityId?: strin
   return known ? { activityId: known.id } : { taskTitle: trimmed };
 }
 
+/**
+ * HPG1 -- resolves the Home -> Plan handoff's own `initialActivity` /
+ * `initialActivityId` pair into what the prefill effect should apply.
+ *
+ * `activityId` is trusted directly (an exact `.id` lookup against
+ * FULL_ACTIVITY_CATALOG, the same static, non-user-scoped catalog
+ * `resolveActivitySelection` itself reads) -- it is NEVER derived by
+ * matching `rawTitle`'s text, so two catalog entries that happen to share
+ * a title can never cross-resolve as long as the caller passed the
+ * correct id. A missing, empty, malformed, stale, or otherwise
+ * unrecognized id (anything `FULL_ACTIVITY_CATALOG.find` doesn't match)
+ * is silently ignored -- this falls through to the exact title-only
+ * resolution that already existed before `activityId` was introduced,
+ * never a thrown error or a blocked handoff.
+ *
+ * When the id resolves, the returned `taskTitle` is the catalog entry's
+ * OWN title (not whatever string the caller happened to send) so every
+ * later resolveActivitySelection(taskTitle) call keeps agreeing with it.
+ */
+export function resolvePrefillActivity(rawTitle: string, activityId?: string | null): { taskTitle: string; isCustomTask: boolean; activityId?: string } {
+  const trimmedTitle = rawTitle.trim();
+  const matched = activityId ? FULL_ACTIVITY_CATALOG.find((activity) => activity.id === activityId) : undefined;
+  const taskTitle = matched?.title ?? trimmedTitle;
+  const isCustomTask = matched === undefined && !TASKS.some((task) => task.title.toLowerCase() === taskTitle.toLowerCase());
+  return { taskTitle, isCustomTask, activityId: matched?.id };
+}
+
 type SpeechRecognitionConstructor = new () => {
   continuous: boolean;
   interimResults: boolean;
@@ -352,10 +389,17 @@ export async function saveUpcomingPlanFromCandidate(candidate: TimingCandidate, 
   return mapPlanRow(await res.json());
 }
 
-export function PlanWithAuraView({ onTimingSearch, onViewDay, onPlanLogged, timezone, initialActivity, initialActivityKey, initialHorizon, onOpenPeople, focusMomentsKey, onMomentSeen, focusMomentToken, focusPlansKey, focusPlanId, focusPlansFilter }: PlanWithAuraViewProps) {
+export function PlanWithAuraView({ onTimingSearch, onViewDay, onPlanLogged, timezone, initialActivity, initialActivityKey, initialActivityId, initialHorizon, onOpenPeople, focusMomentsKey, onMomentSeen, focusMomentToken, focusPlansKey, focusPlanId, focusPlansFilter }: PlanWithAuraViewProps) {
   const [planMode, setPlanMode] = useState<TimingSearchMode>('FIND');
   const [taskTitle, setTaskTitle] = useState('');
   const [, setIsCustomTask] = useState(false);
+  // HPG1 -- the caller-confirmed activityId for the CURRENT taskTitle, if
+  // any. Set only from a validated initialActivityId (prefill effect
+  // below) or left unset; cleared the instant taskTitle changes through
+  // any OTHER path (typing, voice, a chip, or starting a reschedule) so a
+  // stale id can never outlive the title it was resolved for, and two
+  // catalog entries that happen to share a title can never cross-resolve.
+  const [prefillActivityId, setPrefillActivityId] = useState<string | undefined>(undefined);
   const [horizon, setHorizon] = useState<PlanningHorizon>('TODAY');
   const [durationMinutes, setDurationMinutes] = useState(30);
   const [timePreference, setTimePreference] = useState<TimePreference>('AFTERNOON');
@@ -478,10 +522,13 @@ export function PlanWithAuraView({ onTimingSearch, onViewDay, onPlanLogged, time
     const nextActivity = initialActivity?.trim();
     if (!nextActivity) return;
 
-    const knownTask = TASKS.some((task) => task.title.toLowerCase() === nextActivity.toLowerCase());
-    setTaskTitle(nextActivity);
-    setIsCustomTask(!knownTask);
-    setTimePreference(recommendedPreference(nextActivity));
+    // HPG1 -- see resolvePrefillActivity's own doc comment: activityId is
+    // trusted directly when it resolves, never inferred from title text.
+    const resolved = resolvePrefillActivity(nextActivity, initialActivityId);
+    setTaskTitle(resolved.taskTitle);
+    setIsCustomTask(resolved.isCustomTask);
+    setPrefillActivityId(resolved.activityId);
+    setTimePreference(recommendedPreference(resolved.taskTitle));
     setFindResult(null);
     setError('');
     setShowAllPlans(false);
@@ -494,7 +541,7 @@ export function PlanWithAuraView({ onTimingSearch, onViewDay, onPlanLogged, time
     setPlanActionStates({});
     setPlannedOpportunityKeys(new Set());
     if (typeof window !== 'undefined') window.scrollTo({ top: 0, behavior: 'smooth' });
-  }, [initialActivity, initialActivityKey, initialHorizon]);
+  }, [initialActivity, initialActivityKey, initialActivityId, initialHorizon]);
 
   useEffect(() => {
     let cancelled = false;
@@ -531,14 +578,26 @@ export function PlanWithAuraView({ onTimingSearch, onViewDay, onPlanLogged, time
       .slice(0, showMoreActivities ? 14 : 5);
   }, [taskTitle, showMoreActivities]);
 
+  // HPG1 -- prefers a caller-confirmed identity (prefillActivityId, already
+  // validated against the catalog in the prefill effect above) over a
+  // fresh title match for the CURRENT taskTitle, exactly once per use site
+  // -- never introduces a new title-matching inference of its own. Used
+  // everywhere FIND mode resolves "what activity is this" so a caller-
+  // supplied id and a pasted/typed title can never silently disagree, even
+  // if two catalog entries happened to share a title.
+  const resolveCurrentActivitySelection = (): { activityId?: string; taskTitle?: string } =>
+    // Same mutually-exclusive {activityId} XOR {taskTitle} shape
+    // resolveActivitySelection itself always returns -- never both at once.
+    prefillActivityId ? { activityId: prefillActivityId } : resolveActivitySelection(taskTitle);
+
   // The exact same resolution handleFindTime's own selection will use
   // (resolveActivitySelection, not the looser alias matcher) -- the person
   // picker must only appear when the search is actually about to resolve
   // to this specific catalog activity.
   const resolvedActivityDefinition = useMemo(() => {
-    const selection = resolveActivitySelection(taskTitle);
+    const selection = prefillActivityId ? { activityId: prefillActivityId } : resolveActivitySelection(taskTitle);
     return selection.activityId ? getActivityDefinition(selection.activityId) : undefined;
-  }, [taskTitle]);
+  }, [taskTitle, prefillActivityId]);
   const showPersonPicker = planMode === 'FIND' && resolvedActivityDefinition?.socialMode !== undefined && resolvedActivityDefinition.socialMode !== 'SOLO';
 
   useEffect(() => {
@@ -773,6 +832,10 @@ export function PlanWithAuraView({ onTimingSearch, onViewDay, onPlanLogged, time
     setPlanMode('FIND');
     setTaskTitle(plan.title);
     setIsCustomTask(true);
+    // HPG1 -- Move always inherits the ORIGINAL plan's own activityId
+    // server-side (see handleReschedulePlanViaMove's own comment below),
+    // never whatever this search resolves, so no prefill id applies here.
+    setPrefillActivityId(undefined);
     // DR4-F1 -- synced across all three composer modes (not just FIND's own
     // durationMinutes) because the "How long?" selector is locked to this
     // value for the duration of a reschedule (Move always inherits the
@@ -930,7 +993,7 @@ export function PlanWithAuraView({ onTimingSearch, onViewDay, onPlanLogged, time
     bumpRequestGeneration();
     const myRequestGeneration = requestGenerationRef.current;
     try {
-      const selection = resolveActivitySelection(taskTitle);
+      const selection = resolveCurrentActivitySelection();
       // Product Structure V2 (brief section 12): a person is selected AND
       // resolves to a known catalog activity -> everyday SHARED timing,
       // never findSharedMuhurthams (see everydayTimingFit.ts's own doc
@@ -1154,6 +1217,7 @@ export function PlanWithAuraView({ onTimingSearch, onViewDay, onPlanLogged, time
       if (!transcript) return;
       setTaskTitle(transcript);
       setIsCustomTask(true);
+      setPrefillActivityId(undefined); // HPG1 -- free-text voice input, never a validated id
       setTimePreference(recommendedPreference(transcript));
       setFindResult(null);
       bumpRequestGeneration();
@@ -1301,6 +1365,7 @@ export function PlanWithAuraView({ onTimingSearch, onViewDay, onPlanLogged, time
             onChange={(event) => {
               setTaskTitle(event.target.value);
               setIsCustomTask(true);
+              setPrefillActivityId(undefined); // HPG1 -- free-text typing, never a validated id
               setFindResult(null);
               bumpRequestGeneration();
             }}
@@ -1330,6 +1395,12 @@ export function PlanWithAuraView({ onTimingSearch, onViewDay, onPlanLogged, time
               onClick={() => {
                 setTaskTitle(task.title);
                 setIsCustomTask(false);
+                // HPG1 -- chips carry no id of their own (TaskSuggestion has
+                // none); resolveActivitySelection's own exact-title match
+                // against FULL_ACTIVITY_CATALOG already resolves these
+                // correctly today (titles are deliberately kept identical),
+                // so this just defers to that existing, unchanged path.
+                setPrefillActivityId(undefined);
                 if (task.defaultDurationMinutes) setDurationMinutes(task.defaultDurationMinutes);
                 setTimePreference(recommendedPreference(task.title));
                 setFindResult(null);
