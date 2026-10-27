@@ -400,6 +400,22 @@ export function PlanWithAuraView({ onTimingSearch, onViewDay, onPlanLogged, time
   // stale id can never outlive the title it was resolved for, and two
   // catalog entries that happen to share a title can never cross-resolve.
   const [prefillActivityId, setPrefillActivityId] = useState<string | undefined>(undefined);
+  // HPG2 -- explicit Goal-activity linkage for the plan ABOUT TO BE
+  // CREATED. A SEPARATE identity space from prefillActivityId above
+  // (catalog activity vs. a real, per-user GoalActivity database row --
+  // never interchangeable, never inferred from title). Set ONLY by an
+  // explicit selection in the "Link to a Goal" picker below; cleared the
+  // instant taskTitle changes through any OTHER path, exactly mirroring
+  // prefillActivityId's own discipline, so a stale Goal link can never
+  // outlive the title/selection it was made for.
+  const [showGoalLinker, setShowGoalLinker] = useState(false);
+  const [goalOptions, setGoalOptions] = useState<{ id: string; title: string }[] | null>(null);
+  const [loadingGoals, setLoadingGoals] = useState(false);
+  const [selectedGoalId, setSelectedGoalId] = useState('');
+  const [goalActivityOptions, setGoalActivityOptions] = useState<{ id: string; title: string; activityId: string | null }[] | null>(null);
+  const [loadingGoalActivities, setLoadingGoalActivities] = useState(false);
+  const [selectedGoalActivityId, setSelectedGoalActivityId] = useState<string | undefined>(undefined);
+  const [selectedGoalActivityTitle, setSelectedGoalActivityTitle] = useState<string | undefined>(undefined);
   const [horizon, setHorizon] = useState<PlanningHorizon>('TODAY');
   const [durationMinutes, setDurationMinutes] = useState(30);
   const [timePreference, setTimePreference] = useState<TimePreference>('AFTERNOON');
@@ -528,6 +544,11 @@ export function PlanWithAuraView({ onTimingSearch, onViewDay, onPlanLogged, time
     setTaskTitle(resolved.taskTitle);
     setIsCustomTask(resolved.isCustomTask);
     setPrefillActivityId(resolved.activityId);
+    // HPG2 -- a Home/Ask Aura handoff never carries a Goal selection of
+    // its own (that identity space is scoped to this file's explicit
+    // picker only); clears defensively so a prior selection can never
+    // survive onto a newly-handed-off activity.
+    clearGoalActivitySelection();
     setTimePreference(recommendedPreference(resolved.taskTitle));
     setFindResult(null);
     setError('');
@@ -609,6 +630,79 @@ export function PlanWithAuraView({ onTimingSearch, onViewDay, onPlanLogged, time
       .catch(() => setSavedPeople([]))
       .finally(() => setLoadingPeople(false));
   }, [showPersonPicker, savedPeople, loadingPeople]);
+
+  // HPG2 -- lazy: only fetched once the user actually opens "Link to a
+  // Goal" (never on every Plan mount, the common non-Goal case stays at
+  // zero extra cost). Reuses the EXISTING GET /api/goals list endpoint
+  // unmodified.
+  useEffect(() => {
+    if (!showGoalLinker || goalOptions !== null || loadingGoals) return;
+    setLoadingGoals(true);
+    fetch('/api/goals')
+      .then((res) => (res.ok ? res.json() : Promise.reject(new Error('Unable to load goals.'))))
+      .then((data: { id: string; title: string }[]) => setGoalOptions(Array.isArray(data) ? data.map((g) => ({ id: g.id, title: g.title })) : []))
+      .catch(() => setGoalOptions([]))
+      .finally(() => setLoadingGoals(false));
+  }, [showGoalLinker, goalOptions, loadingGoals]);
+
+  // HPG2 -- reuses the EXISTING GET /api/goals/:goalId detail endpoint
+  // unmodified, including its own already-correct derivedState
+  // computation (deriveGoalActivityState, lib/goals.ts) -- filtered here
+  // to exactly the activities linkGoalActivityToPlannedActivity (db.ts)
+  // would itself accept (SUGGESTED = currently unlinked, or linked only to
+  // a CANCELLED/SKIPPED plan), so this picker never offers a selection the
+  // server-side save would then reject. A stale/now-ineligible selection
+  // is still safely rejected server-side regardless (never trusted from
+  // this read alone) -- see POST /api/plans's own goalActivityId handling.
+  useEffect(() => {
+    if (!selectedGoalId) {
+      setGoalActivityOptions(null);
+      return;
+    }
+    let cancelled = false;
+    setLoadingGoalActivities(true);
+    setGoalActivityOptions(null);
+    fetch(`/api/goals/${selectedGoalId}`)
+      .then((res) => (res.ok ? res.json() : Promise.reject(new Error('Unable to load this goal.'))))
+      .then((data: { activities: { id: string; title: string; activityId: string | null; derivedState: string }[] }) => {
+        if (cancelled) return;
+        const eligible = (data.activities ?? []).filter((a) => a.derivedState === 'SUGGESTED').map((a) => ({ id: a.id, title: a.title, activityId: a.activityId }));
+        setGoalActivityOptions(eligible);
+      })
+      .catch(() => {
+        if (!cancelled) setGoalActivityOptions([]);
+      })
+      .finally(() => {
+        if (!cancelled) setLoadingGoalActivities(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [selectedGoalId]);
+
+  // HPG2 -- explicit selection only, never inferred from taskTitle's text.
+  // Adopts the GoalActivity's OWN canonical title (same discipline as
+  // resolvePrefillActivity, HPG1) and, when that GoalActivity also carries
+  // its own catalog activityId, threads it into prefillActivityId too --
+  // a GoalActivity CAN optionally have a catalog identity alongside its
+  // Goal identity; the two are independent and this is the one place both
+  // are known at once, so both are preserved together.
+  const selectGoalActivity = (activity: { id: string; title: string; activityId: string | null }) => {
+    setTaskTitle(activity.title);
+    setIsCustomTask(false);
+    setPrefillActivityId(activity.activityId ?? undefined);
+    setSelectedGoalActivityId(activity.id);
+    setSelectedGoalActivityTitle(activity.title);
+    setTimePreference(recommendedPreference(activity.title));
+    setFindResult(null);
+    setError('');
+    bumpRequestGeneration();
+  };
+
+  const clearGoalActivitySelection = () => {
+    setSelectedGoalActivityId(undefined);
+    setSelectedGoalActivityTitle(undefined);
+  };
 
   useEffect(() => {
     if (!focusMomentsKey) return;
@@ -798,6 +892,13 @@ export function PlanWithAuraView({ onTimingSearch, onViewDay, onPlanLogged, time
           // creation), or null for a free-text/no-match search. No
           // resolution happens here; the server validates.
           activityId: activityId ?? null,
+          // HPG2 -- only ever set via this view's own explicit "Link to a
+          // Goal" picker (selectGoalActivity), never inferred from
+          // `plan.title`'s text. The server independently validates
+          // ownership/eligibility and fails the WHOLE save closed if it no
+          // longer holds (see POST /api/plans's own handling) -- this is
+          // advisory intent, not a trusted fact.
+          goalActivityId: selectedGoalActivityId ?? null,
         }),
       });
       if (!res.ok) throw new Error('Unable to save plan.');
@@ -806,6 +907,10 @@ export function PlanWithAuraView({ onTimingSearch, onViewDay, onPlanLogged, time
       setSavedPlans((plans) => [saved, ...plans.filter((item) => item.id !== saved.id)]);
       setExpandedPlanId(saved.id);
       setShowAllPlans(true);
+      // HPG2 -- the Goal-linking intent was just consumed by this specific
+      // save; clear it so a subsequent, unrelated search/save in the same
+      // Plan session never silently reuses it.
+      clearGoalActivitySelection();
       onPlanLogged?.();
       triggerHaptic('success');
       trackEvent('PLAN_RESULT_SELECTED', { metadata: { mode: planMode } });
@@ -836,6 +941,10 @@ export function PlanWithAuraView({ onTimingSearch, onViewDay, onPlanLogged, time
     // server-side (see handleReschedulePlanViaMove's own comment below),
     // never whatever this search resolves, so no prefill id applies here.
     setPrefillActivityId(undefined);
+    // HPG2 -- likewise, Move inherits the original plan's existing Goal
+    // linkage server-side (applyMoveWrites, lib/planMove.ts) -- a
+    // reschedule search never creates a NEW Goal link of its own.
+    clearGoalActivitySelection();
     // DR4-F1 -- synced across all three composer modes (not just FIND's own
     // durationMinutes) because the "How long?" selector is locked to this
     // value for the duration of a reschedule (Move always inherits the
@@ -1218,6 +1327,7 @@ export function PlanWithAuraView({ onTimingSearch, onViewDay, onPlanLogged, time
       setTaskTitle(transcript);
       setIsCustomTask(true);
       setPrefillActivityId(undefined); // HPG1 -- free-text voice input, never a validated id
+      clearGoalActivitySelection(); // HPG2 -- same reasoning
       setTimePreference(recommendedPreference(transcript));
       setFindResult(null);
       bumpRequestGeneration();
@@ -1366,6 +1476,7 @@ export function PlanWithAuraView({ onTimingSearch, onViewDay, onPlanLogged, time
               setTaskTitle(event.target.value);
               setIsCustomTask(true);
               setPrefillActivityId(undefined); // HPG1 -- free-text typing, never a validated id
+              clearGoalActivitySelection(); // HPG2 -- same reasoning
               setFindResult(null);
               bumpRequestGeneration();
             }}
@@ -1401,6 +1512,7 @@ export function PlanWithAuraView({ onTimingSearch, onViewDay, onPlanLogged, time
                 // correctly today (titles are deliberately kept identical),
                 // so this just defers to that existing, unchanged path.
                 setPrefillActivityId(undefined);
+                clearGoalActivitySelection(); // HPG2 -- a chip pick is not an explicit Goal selection
                 if (task.defaultDurationMinutes) setDurationMinutes(task.defaultDurationMinutes);
                 setTimePreference(recommendedPreference(task.title));
                 setFindResult(null);
@@ -1420,6 +1532,74 @@ export function PlanWithAuraView({ onTimingSearch, onViewDay, onPlanLogged, time
             {showMoreActivities ? 'Show less' : '••• More'}
           </button>
         </div>
+      </section>
+
+      {/* HPG2 -- explicit Goal-activity linkage. Selection only, never
+          inferred from taskTitle's text (see selectGoalActivity's own doc
+          comment). Reuses the EXISTING GET /api/goals and
+          GET /api/goals/:goalId endpoints unmodified; the actual link is
+          persisted server-side, inside POST /api/plans's own transaction,
+          by the SAME linkGoalActivityToPlannedActivity Day Constructor
+          acceptance already relies on. */}
+      <section style={panelStyle}>
+        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 9 }}>
+          <div style={{ color: '#aab7d2', fontSize: 13 }}>Goal</div>
+          {selectedGoalActivityId ? (
+            <button
+              type="button"
+              onClick={() => {
+                clearGoalActivitySelection();
+                setSelectedGoalId('');
+              }}
+              style={{ ...moreChipStyle, borderColor: 'rgba(248, 113, 113, 0.4)', color: '#f87171' }}
+            >
+              Unlink
+            </button>
+          ) : (
+            !showGoalLinker && (
+              <button type="button" onClick={() => setShowGoalLinker(true)} style={moreChipStyle}>
+                + Link to a Goal
+              </button>
+            )
+          )}
+        </div>
+
+        {selectedGoalActivityId && selectedGoalActivityTitle && (
+          <p style={{ fontSize: 12, color: '#4ade80', marginTop: 10, lineHeight: 1.5 }}>
+            Linked to &ldquo;{selectedGoalActivityTitle}&rdquo; -- completing this plan will count toward that goal.
+          </p>
+        )}
+
+        {showGoalLinker && !selectedGoalActivityId && (
+          <>
+            {loadingGoals && <span style={{ fontSize: 12, color: '#94a3b8' }}>Loading your goals…</span>}
+            {goalOptions && goalOptions.length === 0 && (
+              <p style={{ fontSize: 12, color: '#94a3b8', marginTop: 10, lineHeight: 1.5 }}>You don&apos;t have any active goals yet.</p>
+            )}
+            {goalOptions && goalOptions.length > 0 && (
+              <div style={{ display: 'flex', flexWrap: 'wrap', gap: 9, marginTop: 12 }}>
+                {goalOptions.map((goal) => (
+                  <PersonPickerChip key={goal.id} label={goal.title} active={selectedGoalId === goal.id} onClick={() => setSelectedGoalId(goal.id)} />
+                ))}
+              </div>
+            )}
+            {selectedGoalId && (
+              <div style={{ marginTop: 12 }}>
+                {loadingGoalActivities && <span style={{ fontSize: 12, color: '#94a3b8' }}>Loading activities…</span>}
+                {goalActivityOptions && goalActivityOptions.length === 0 && (
+                  <p style={{ fontSize: 12, color: '#94a3b8', lineHeight: 1.5 }}>No activities under this goal are available to link right now.</p>
+                )}
+                {goalActivityOptions && goalActivityOptions.length > 0 && (
+                  <div style={{ display: 'flex', flexWrap: 'wrap', gap: 9 }}>
+                    {goalActivityOptions.map((activity) => (
+                      <PersonPickerChip key={activity.id} label={activity.title} active={false} onClick={() => selectGoalActivity(activity)} />
+                    ))}
+                  </div>
+                )}
+              </div>
+            )}
+          </>
+        )}
       </section>
 
       {showPersonPicker && (

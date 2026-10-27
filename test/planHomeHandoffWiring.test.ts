@@ -90,7 +90,18 @@ check('5. "Direct Plan navigation" (no initialActivity at all) is untouched -- t
 // ============================================================
 
 const plansRouteSource = fs.readFileSync('apps/web/app/api/plans/route.ts', 'utf8');
-check('6. POST /api/plans still has no goalId/GoalActivity field -- this PR does not add Goal linking', !/goalId|GoalActivity/.test(plansRouteSource));
+// HPG2 (a later, separate ticket) intentionally added explicit
+// goalActivityId support to POST /api/plans -- this check's own original
+// concern ("THIS PR -- HPG1 -- never accidentally introduces Goal
+// linking as a side effect of activity-identity threading") is still what
+// it verifies: HPG1's own identity plumbing (initialActivityId,
+// prefillActivityId, resolvePrefillActivity) still carries no Goal
+// concept of its own. HPG2's own dedicated test
+// (test/planGoalActivityLinkWiring.test.ts) independently verifies ITS
+// addition is done safely -- this check no longer asserts blanket
+// absence, which would now be a false assumption about intentional,
+// later, separately-reviewed work.
+check('6. HPG1\'s own identity plumbing (initialActivityId/prefillActivityId/resolvePrefillActivity) never itself references a Goal concept -- Goal linking, where it now exists, was added later by HPG2 as its own separate, independently-tested concern', !/initialActivityId[\s\S]{0,40}goalId|prefillActivityId[\s\S]{0,40}goalId/.test(planViewSource));
 check('6. the existing /plan-day Goal handoff (GoalDetailClient.tsx) is untouched -- still ids-only via fromGoal/activities', (() => {
   const goalDetailSource = fs.readFileSync('apps/web/app/goals/[goalId]/GoalDetailClient.tsx', 'utf8');
   return /URLSearchParams\(\{\s*fromGoal:\s*goal\.id,\s*activities:\s*effectiveSelectedIds\.join\(','\)\s*\}\)/.test(goalDetailSource);
