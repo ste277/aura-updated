@@ -37,7 +37,10 @@ export interface TimelineViewProps {
     // Good Right Now / Log Activity Failure State Correctness V1 -- see
     // HomeDashboard.tsx's own copy of this comment.
   ) => Promise<'confirmed' | 'pending'>;
-  onPlanActivity?: (activityTitle: string) => void;
+  // HPG1 -- activityId is optional; passed only when the caller (an
+  // ActionCard from getActionCards/getActivityDiscoveryCards) already has
+  // a genuine, resolved catalog id. Never inferred from the title text.
+  onPlanActivity?: (activityTitle: string, activityId?: string) => void;
   onAskAuraClick?: () => void;
 }
 
@@ -516,7 +519,7 @@ export function TimelineView({
                   {onPlanActivity && !isAlreadyLogged && (
                     <button
                       type="button"
-                      onClick={() => onPlanActivity(card.title)}
+                      onClick={() => onPlanActivity(card.title, card.activityId)}
                       style={{ background: 'rgba(56, 189, 248, 0.1)', color: '#7dd3fc', border: '1px solid rgba(56, 189, 248, 0.42)', borderRadius: 10, padding: '8px 14px', fontSize: 12, fontWeight: 850, cursor: 'pointer', fontFamily: 'sans-serif' }}
                     >
                       Plan
@@ -870,7 +873,7 @@ export function TimelineView({
                       <span style={{ color: '#dbe7f4', fontSize: 10 }}>{card.icon} {card.title}</span>
                       <span style={{ display: 'flex', gap: 5, flexShrink: 0 }}>
                         {onPlanActivity && (
-                          <button type="button" onClick={(e) => { e.stopPropagation(); onPlanActivity(card.title); }} style={{ background: 'rgba(56, 189, 248, 0.1)', border: '1px solid rgba(56, 189, 248, 0.28)', color: '#7dd3fc', borderRadius: 7, fontSize: 9, padding: '3px 6px' }}>
+                          <button type="button" onClick={(e) => { e.stopPropagation(); onPlanActivity(card.title, card.activityId); }} style={{ background: 'rgba(56, 189, 248, 0.1)', border: '1px solid rgba(56, 189, 248, 0.28)', color: '#7dd3fc', borderRadius: 7, fontSize: 9, padding: '3px 6px' }}>
                             Plan
                           </button>
                         )}

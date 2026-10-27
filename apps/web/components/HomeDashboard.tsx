@@ -115,7 +115,10 @@ interface HomeDashboardProps {
    * HomeTimeline region once it has mounted, mirroring PlanWithAuraView's
    * own focusMomentsKey/focusPlansKey convention. */
   focusTimelineKey?: number;
-  onPlanClick?: (activity?: string) => void;
+  /** HPG1 -- activityId is optional; passed only when the caller (e.g. a
+   * Good Right Now card) already has a genuine, resolved catalog id. Never
+   * inferred from `activity`'s text. */
+  onPlanClick?: (activity?: string, activityId?: string) => void;
   /** Day Constructor V1 -- PR F2. Navigates to the dedicated `/plan-day`
    * entry experience (this ticket's own section 6) -- distinct from
    * `onPlanClick` (Ask Aura, single-activity search/check) and Day
@@ -1566,7 +1569,7 @@ function GoodRightNowCard({
   card: ActionCard;
   activeWindowName: string;
   onLogActivity?: HomeDashboardProps['onLogActivity'];
-  onPlanClick?: (activity?: string) => void;
+  onPlanClick?: (activity?: string, activityId?: string) => void;
   onLogged?: (title: string) => void;
   logEntries?: LoggedEntryItem[];
 }) {
@@ -1655,7 +1658,7 @@ function GoodRightNowCard({
       <span style={{ marginTop: 4, color: '#94a3b8', fontSize: 10.5, lineHeight: 1.35, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', width: '100%' }}>{card.description}</span>
       <div style={{ marginTop: 'auto', paddingTop: 8, width: '100%' }}>
         {action === 'PLAN' ? (
-          <button type="button" onClick={() => onPlanClick?.(planTitle)} style={goodRightNowActionButtonStyle} aria-label={`Plan ${planTitle}`}>
+          <button type="button" onClick={() => onPlanClick?.(planTitle, card.activityId)} style={goodRightNowActionButtonStyle} aria-label={`Plan ${planTitle}`}>
             Plan
           </button>
         ) : showDurationPicker ? (
