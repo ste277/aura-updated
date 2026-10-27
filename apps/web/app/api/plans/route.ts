@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getSessionFromRequest } from '../../../lib/session';
 import { DIRECT_PLAN_SCHEDULING_MODE } from '../../../lib/plannedActivitySchedulingMode';
-import { beginTransaction, createPlannedActivity, listPlannedActivities, getPlannedActivityForOwner, getGuestConversionRedemption, claimGuestConversionToken, fillGuestConversionRedemption, getPlanCreationClaim, claimPlanCreation, fillPlanCreationClaim, linkGoalActivityToPlannedActivity } from '../../../lib/db';
+import { beginTransaction, createPlannedActivity, listPlannedActivities, getPlannedActivityForOwner, getGuestConversionRedemption, claimGuestConversionToken, fillGuestConversionRedemption, getPlanCreationClaim, claimPlanCreation, fillPlanCreationClaim, linkGoalActivityToPlannedActivity, lockGoalParentLifecycleForPlanning } from '../../../lib/db';
 import { parseJsonObject } from '../../../lib/request';
 import { verifyGuestStateToken, hashGuestConversionToken } from '../../../lib/guestState';
 import { parseEventLocationSnapshot } from '../../../lib/plansRequest';
@@ -324,12 +324,30 @@ export async function POST(req: NextRequest) {
     // association for ordinary plan creation. Revisit this call site
     // alongside whichever ticket first ships a Rhythm-creating UI.
     if (goalActivityId) {
+      // HPG2 P0 fix -- Goal LIFECYCLE authorization, the same boundary Day
+      // Constructor acceptance already enforces (dayConstructorAcceptancePersistence.ts,
+      // lockGoalParentLifecycleForPlanning's own doc comment, db.ts): archiving
+      // a Goal revokes its authority to produce NEW Goal-derived planning
+      // state, so this must be checked -- on the SAME transaction client,
+      // taking the SAME `FOR SHARE OF g` lock -- before the link write below,
+      // not just left to linkGoalActivityToPlannedActivity's own WHERE clause
+      // (which only ever looks at the GoalActivity row, never its parent
+      // Goal). A GoalActivity this user doesn't own is simply absent from
+      // `owned` -- unaffected, falls through to the existing fail-closed
+      // ownership rejection at the link call below, exactly as before.
+      const lifecycle = await lockGoalParentLifecycleForPlanning(session.userId, [goalActivityId], client);
+      if (lifecycle.owned.has(goalActivityId) && !lifecycle.active.has(goalActivityId)) {
+        throw new Error('GOAL_NOT_ACTIVE');
+      }
       const linked = await linkGoalActivityToPlannedActivity(session.userId, goalActivityId, plan.id, client);
       if (!linked) throw new Error('GOAL_ACTIVITY_LINK_FAILED');
     }
     await client.query('COMMIT');
   } catch (err) {
     await client.query('ROLLBACK').catch(() => {});
+    if (err instanceof Error && err.message === 'GOAL_NOT_ACTIVE') {
+      return NextResponse.json({ error: 'That goal is no longer active, so a new plan cannot be linked to it.' }, { status: 400 });
+    }
     if (err instanceof Error && err.message === 'GOAL_ACTIVITY_LINK_FAILED') {
       return NextResponse.json({ error: 'That goal activity is not available to link right now.' }, { status: 400 });
     }
