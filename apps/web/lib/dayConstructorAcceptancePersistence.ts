@@ -34,10 +34,11 @@ import {
   fillPlanCreationClaim,
   findPlanCreationClaimsByPrefix,
   createPlannedActivityWithClient,
-  listPlannedActivitiesForDay,
+  listPlannedActivitiesOverlappingRange,
   getPlannedActivityForOwner,
   getUserById,
   linkGoalActivityToPlannedActivity,
+  lockGoalParentLifecycleForPlanning,
   materializeGoalActivityRhythmOccurrence,
   linkCaptureToPlannedActivity,
   type PlannedActivity,
@@ -57,6 +58,7 @@ import {
   type AcceptedPlanWrite,
 } from './dayConstructorAcceptance';
 import { schedulingModeFromPlacementSource } from './plannedActivitySchedulingMode';
+import { SchedulingEligibilityError, materializeFailureToSchedulingEligibilityError, goalActivityNotAvailableError, type SchedulingEligibilityErrorCode } from './schedulingEligibilityError';
 
 // ============================================================
 // Idempotency key derivation (this ticket's own section 3/5). Length-
@@ -165,7 +167,15 @@ export type AcceptConstructedDayPersistenceResult =
   | { status: 'ALREADY_ACCEPTED'; plans: PlannedActivity[] }
   | { status: 'REJECTED'; reason: AcceptanceRejectionReason; diagnostics: AcceptanceDiagnostic[] }
   | { status: 'IDEMPOTENCY_CONFLICT' }
-  | { status: 'SAVE_FAILED' };
+  // HPG3-A3a -- `code` is OPTIONAL and additive: every pre-A3a caller
+  // narrowing only on `status === 'SAVE_FAILED'` is unaffected. Present
+  // only for a known, typed SchedulingEligibilityError (daily/weekly
+  // capacity, unresolved legacy attribution, or the pre-A3a generic
+  // "not available to link" bucket); absent for every other failure
+  // (AMBIGUOUS_SOURCE_LINK, CAPTURE_LINK_FAILED, a genuine DB error),
+  // which keeps returning the exact same bare `{ status: 'SAVE_FAILED' }`
+  // as before this ticket.
+  | { status: 'SAVE_FAILED'; code?: SchedulingEligibilityErrorCode };
 
 // ============================================================
 // Real AcceptanceDeps wiring (this ticket's own section 11/12/13/32).
@@ -185,7 +195,9 @@ export type AcceptConstructedDayPersistenceResult =
 function createRealAcceptanceDeps(userId: string, client: PoolClient, timingContext: TimingSearchRequest['context']): AcceptanceDeps {
   return {
     loadFreshBlockers: async (bounds) => {
-      const plans = await listPlannedActivitiesForDay(userId, bounds.from, bounds.to, client);
+      // Half-open OVERLAP read (the canonical definition shared with the Constructor and the range loader), on the
+      // acceptance transaction's own client: a plan that started before the signed window but runs into it must block.
+      const plans = await listPlannedActivitiesOverlappingRange(userId, bounds.from, bounds.to, client);
       return plans.map((plan) => ({ start: new Date(plan.plannedStartAt), end: new Date(plan.plannedEndAt), status: plan.status }));
     },
     validateActivity: (activityId) => getActivityProfileById(activityId) !== undefined,
@@ -380,6 +392,63 @@ export async function persistAcceptedConstructedDay(
       return { status: 'REJECTED', reason: decision.reason, diagnostics: decision.diagnostics };
     }
 
+    // Goal LIFECYCLE authorization -- the ONE common boundary, run BEFORE
+    // any write below. Every way a Goal link can reach this point (an
+    // automatic or manual canonical id, a forged canonical id, a legacy
+    // `plan-day-goal-*` link) ends up as an entry in `goalActivityLinks`
+    // keyed by a write intent, so one batched, current-state, transaction-
+    // scoped check covers all of them. A Goal-derived write is allowed only
+    // while the parent Goal is ACTIVE (and owned); archiving revokes
+    // authority for NEW acceptance only and never touches existing plans,
+    // occurrences or history. The check takes a share lock on the parent
+    // Goal rows for the rest of this transaction, so a concurrent archive
+    // cannot slip between the check and the writes. A replay of an already-
+    // committed acceptance never reaches here (it returned above).
+    // Multi-Occurrence Rhythm PR 2 -- an explicit, request-level guard that
+    // replaces protection the removed single-live-commitment rejection
+    // used to provide INCIDENTALLY: before PR 2, two write-intents in one
+    // request resolving to the SAME GoalActivity always failed the whole
+    // transaction anyway, because the second materialize call would see
+    // the first write's now-UPCOMING link and refuse (HAS_LIVE_COMMITMENT).
+    // Now that a GoalActivity CAN legitimately carry more than one live
+    // occurrence, that accidental protection is gone -- so this checks the
+    // SAME constraint directly: "one canonical Goal-demand row per draft"
+    // (never two distinct write-intents claiming the same GoalActivity in
+    // one accept request) is enforced here, explicitly, fail-closed,
+    // before any write in this loop runs. This is deliberately NOT a
+    // capacity decision -- even a GoalActivity with ample remaining
+    // capacity for two more occurrences still cannot accept two in the
+    // SAME request; a second occurrence is always a SEPARATE, later
+    // acceptance.
+    const rawGoalActivityIds = decision.writeIntents.map((writeIntent) => goalActivityLinks.get(writeIntent.intentId)).filter((id): id is string => !!id);
+    const duplicateGoalActivityIds = rawGoalActivityIds.filter((id, index) => rawGoalActivityIds.indexOf(id) !== index);
+    if (duplicateGoalActivityIds.length > 0) {
+      await client.query('ROLLBACK');
+      const duplicateSet = new Set(duplicateGoalActivityIds);
+      const diagnostics: AcceptanceDiagnostic[] = decision.writeIntents
+        .filter((writeIntent) => {
+          const goalActivityId = goalActivityLinks.get(writeIntent.intentId);
+          return !!goalActivityId && duplicateSet.has(goalActivityId);
+        })
+        .map((writeIntent) => ({ intentId: writeIntent.intentId, reason: 'INVALID_REQUEST' as const, detail: 'DUPLICATE_GOAL_ACTIVITY_LINK' }));
+      return { status: 'REJECTED', reason: 'INVALID_REQUEST', diagnostics };
+    }
+
+    const linkedGoalActivityIds = [...new Set(rawGoalActivityIds)];
+    if (linkedGoalActivityIds.length > 0) {
+      const lifecycle = await lockGoalParentLifecycleForPlanning(userId, linkedGoalActivityIds, client);
+      const notActive: AcceptanceDiagnostic[] = decision.writeIntents
+        .filter((writeIntent) => {
+          const goalActivityId = goalActivityLinks.get(writeIntent.intentId);
+          return !!goalActivityId && lifecycle.owned.has(goalActivityId) && !lifecycle.active.has(goalActivityId);
+        })
+        .map((writeIntent) => ({ intentId: writeIntent.intentId, reason: 'INVALID_REQUEST' as const, detail: 'GOAL_NOT_ACTIVE' }));
+      if (notActive.length > 0) {
+        await client.query('ROLLBACK');
+        return { status: 'REJECTED', reason: 'INVALID_REQUEST', diagnostics: notActive };
+      }
+    }
+
     const plans: PlannedActivity[] = [];
     for (const writeIntent of decision.writeIntents) {
       const plan = await createPlannedActivityWithClient(client, toCreatePlannedActivityInput(userId, writeIntent));
@@ -417,19 +486,24 @@ export async function persistAcceptedConstructedDay(
         // THIS client, inside THIS transaction's own per-user advisory
         // lock -- never trusting anything rendered to the client earlier
         // (this ticket's own section 21).
-        const materialized = await materializeGoalActivityRhythmOccurrence(userId, goalActivityId, plan.id, request.constructionWindow.date, user.timezone, client);
+        const materialized = await materializeGoalActivityRhythmOccurrence(userId, goalActivityId, plan.id, plan.plannedStartAt, request.constructionWindow.date, user.timezone, client);
         if (!materialized.ok && materialized.reason !== 'NOT_RHYTHM_ELIGIBLE') {
           // A genuine Rhythm-specific refusal (a live UPCOMING commitment
-          // already exists, or weekly capacity is exhausted) -- never fall
-          // through to the legacy link below, which would refuse for the
-          // exact same underlying reason anyway. Same all-or-nothing
+          // already exists, weekly capacity is exhausted, HPG3-A2's daily
+          // cap is already met, or an unresolved legacy daily-attribution
+          // conflict) -- never fall through to the legacy link below,
+          // which would refuse for the exact same underlying reason
+          // anyway. Same all-or-nothing
           // contract as every other link failure in this loop: throwing
           // here is caught by this function's own outer try/catch, which
           // ROLLBACKs the WHOLE transaction (this Plan insert included)
           // and returns SAVE_FAILED -- no orphan PlannedActivity, no
           // occurrence created without a successful link, no partial
           // acceptance (this PR's own section 26/31, preserved unchanged).
-          throw new Error('GOAL_ACTIVITY_LINK_FAILED');
+          // HPG3-A3a -- a typed, specific SchedulingEligibilityError
+          // instead of a flat 'GOAL_ACTIVITY_LINK_FAILED' string, caught
+          // below and surfaced as a distinguishable SAVE_FAILED code.
+          throw materializeFailureToSchedulingEligibilityError(materialized.reason);
         }
         if (!materialized.ok) {
           // NOT_RHYTHM_ELIGIBLE -- this GoalActivity is finite (NONE) or
@@ -443,7 +517,7 @@ export async function persistAcceptedConstructedDay(
             // exist, is not owned by this user, is DISMISSED, or already
             // retains a live (UPCOMING/LOGGED) linkage to a DIFFERENT Plan
             // -- never silently continue. Same rollback contract as above.
-            throw new Error('GOAL_ACTIVITY_LINK_FAILED');
+            throw goalActivityNotAvailableError();
           }
         }
       }
@@ -453,8 +527,15 @@ export async function persistAcceptedConstructedDay(
 
     await client.query('COMMIT');
     return { status: 'SAVED', plans };
-  } catch {
+  } catch (err) {
     await client.query('ROLLBACK').catch(() => {});
+    // HPG3-A3a -- a known, typed scheduling-eligibility refusal carries
+    // its code through; every other failure (AMBIGUOUS_SOURCE_LINK,
+    // CAPTURE_LINK_FAILED, a genuine DB error) keeps the exact same bare
+    // SAVE_FAILED this function always returned, never leaking details.
+    if (err instanceof SchedulingEligibilityError) {
+      return { status: 'SAVE_FAILED', code: err.code };
+    }
     return { status: 'SAVE_FAILED' };
   } finally {
     client.release();

@@ -86,6 +86,9 @@
  * repeatedly logged.
  */
 import type { HabitLogRow } from './db';
+
+/** O5 P2d -- the only habit-log fields behavioral derivation reads, so a detached snapshot copy can be derived from without a full row. */
+export type BehavioralHabitLog = Pick<HabitLogRow, 'activityId' | 'logTimestamp' | 'durationMinutes'>;
 import { classifyDayPart, toInsightsObservation, InsightsDayPart } from './insightsTimezone';
 import { getActivityProfileById } from '../../../packages/recommendation/src/personalizedTasks';
 import { familyForActivityProfile } from '../../../packages/recommendation/src/auraFitEngine';
@@ -302,7 +305,7 @@ interface EligibleObservation {
  * "continue despite caution" action tied to that label, so it must not be
  * read as stronger evidence of intent than any other MANUAL entry.
  */
-function resolveEligibleObservations(habitLogs: readonly HabitLogRow[]): EligibleObservation[] {
+function resolveEligibleObservations(habitLogs: readonly BehavioralHabitLog[]): EligibleObservation[] {
   const eligible: EligibleObservation[] = [];
   for (const log of habitLogs) {
     if (!log.activityId) continue; // MISSING_ACTIVITY_ID
@@ -456,7 +459,7 @@ function deriveActivityDurations(eligible: readonly EligibleObservation[]): Beha
  * function already computed -- never a second HabitLog read, never a
  * second recency filter.
  */
-export function deriveBehavioralProfile(habitLogs: readonly HabitLogRow[], timezone: string, now: Date): BehavioralProfileContext {
+export function deriveBehavioralProfile(habitLogs: readonly BehavioralHabitLog[], timezone: string, now: Date): BehavioralProfileContext {
   const cutoff = now.getTime() - BEHAVIORAL_AFFINITY_RECENCY_DAYS * MS_PER_DAY;
   const eligible = resolveEligibleObservations(habitLogs).filter((o) => o.instant.getTime() >= cutoff);
 

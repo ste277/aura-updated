@@ -93,7 +93,11 @@ check('planPayloadFromCandidate rescales the 0-10 score back to the existing /10
 // cards/details) is now plain language via the shared summarizeReasonsPlainly()
 // helper, never formatMuhurtaReason's raw per-reason Panchang prose.
 check('planPayloadFromCandidate\'s details match the shared plain-language projection of the candidate\'s reasons', planPayload.details === summarizeReasonsPlainly(sampleCandidateA.reasons));
-check('planPayloadFromCandidate\'s details never name a raw Panchang term (Rohini/Shukla Panchami/Nakshatra/Tithi)', !/rohini|shukla panchami|nakshatra|tithi/i.test(planPayload.details));
+// DR4-E3 made UpcomingPlan.details optional (a persisted plan may have no
+// saved recommendation text); planPayloadFromCandidate itself is unchanged
+// and still always produces a real string here, same as googleCalendarUrl
+// below -- non-null assertion, not a behavior change.
+check('planPayloadFromCandidate\'s details never name a raw Panchang term (Rohini/Shukla Panchami/Nakshatra/Tithi)', !/rohini|shukla panchami|nakshatra|tithi/i.test(planPayload.details!));
 check('planPayloadFromCandidate always produces a googleCalendarUrl', typeof planPayload.googleCalendarUrl === 'string' && planPayload.googleCalendarUrl!.includes('calendar.google.com'));
 
 // ============================================================

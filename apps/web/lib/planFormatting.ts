@@ -1,6 +1,15 @@
 import { buildGoogleCalendarUrl } from '../../../packages/recommendation/src/dailyAssistant';
 import { summarizeReasonsPlainly } from '../../../packages/muhurta/src/muhurtaPlainLanguage';
 import type { TimingCandidate, TimingCandidateLabel } from '../../../packages/recommendation/src/timingSearch';
+// DR4-E1 -- Time-Aware Upcoming Plans. timeBasedStatus is the SAME function
+// Home's own agenda (dailyAgenda.ts's planToAgendaItem) already uses to
+// derive MISSED/CURRENT/STARTING_SOON for an UPCOMING plan -- reused here
+// verbatim rather than defining a second classification. A plain value
+// import, not `db.ts` itself: dailyAgenda.ts only imports PlannedActivity
+// etc. as types, so nothing server-only (pg, the pool) enters this client
+// module's bundle -- homeMissedRecovery.ts, already bundled into the client
+// via HomeDashboard.tsx, imports this exact function the same way.
+import { timeBasedStatus } from './dailyAgenda';
 
 /**
  * Pure plan display/formatting logic shared by PlanWithAuraView.tsx and its
@@ -37,13 +46,23 @@ export type UpcomingPlan = {
   duration: string;
   time: string;
   window: string;
-  match: 'Best Match' | 'Good Match';
+  // DR4-E3 -- optional on purpose: a genuine timing-engine classification
+  // (planPayloadFromCandidate, always one of these two) is truthful and
+  // stays required there; a PERSISTED plan's matchLabel (mapPlanRow) may be
+  // null/missing (e.g. manually-created or Day Builder plans never ran
+  // through Find-a-Time) -- absent here means "no badge", never a
+  // fabricated default. See mapPlanRow's own doc comment.
+  match?: 'Best Match' | 'Good Match';
   note: string;
   accent: string;
   when: string;
   plannedStartAt: string;
   plannedEndAt: string;
-  details: string;
+  // DR4-E3 -- optional: a persisted plan with no saved recommendation text
+  // (mapPlanRow) renders no paragraph at all rather than a fabricated
+  // generic caption. A freshly-computed candidate (planPayloadFromCandidate)
+  // always has real text and stays required there.
+  details?: string;
   score?: number;
   googleCalendarUrl?: string;
   source?: 'Aura';
@@ -213,9 +232,83 @@ export function mapPersistedPlanStatus(status: PersistedPlanStatus | null | unde
 
 /** Plan-tab presentation (the mapper above never decides this): only an
  * UPCOMING plan is actionable work; only LOGGED shows as completed.
- * CANCELLED/SKIPPED/MOVED have no representation on this surface. */
+ * CANCELLED/SKIPPED/MOVED have no representation on this surface. Status-only
+ * on purpose -- `isUpcomingOrCurrentPlan`/`isMissedPlan` below narrow this
+ * further by time; this function itself stays the plain "not terminal" check
+ * both of them (and isAwaitingConfirmationPlan) are built on. */
 export const isActionableUpcomingPlan = (plan: { status?: PersistedPlanStatus }): boolean => (plan.status ?? 'UPCOMING') === 'UPCOMING';
 export const isCompletedPlan = (plan: { status?: PersistedPlanStatus }): boolean => plan.status === 'LOGGED';
+
+/**
+ * DR4-E1 (Time-Aware Upcoming Plans) -- the lifecycle an UPCOMING plan
+ * actually has right now, reusing dailyAgenda.ts's `timeBasedStatus` exactly
+ * (never a second definition): a terminal persisted status (LOGGED/
+ * CANCELLED/SKIPPED/MOVED) always wins over time, mirroring
+ * `planToAgendaItem`'s own precedence; only while status is still UPCOMING
+ * is the lifecycle time-derived (UPCOMING/STARTING_SOON/CURRENT/MISSED).
+ * MISSED is never persisted -- this is computed fresh on every call, from
+ * the caller's own `now`, exactly like Home's agenda.
+ */
+export function derivedPlanLifecycle(
+  plan: { status?: PersistedPlanStatus; plannedStartAt: string; plannedEndAt: string },
+  now: Date = new Date()
+): PersistedPlanStatus | 'STARTING_SOON' | 'CURRENT' | 'MISSED' {
+  const status = mapPersistedPlanStatus(plan.status);
+  if (status !== 'UPCOMING') return status;
+  // timeBasedStatus's declared return type is dailyAgenda.ts's full
+  // DailyAgendaItemStatus (it's shared with Moments, which also use
+  // COMPLETED/WAITING/CONFIRMED) -- but its OWN body only ever returns
+  // 'MISSED' | 'CURRENT' | 'STARTING_SOON' | 'UPCOMING'. Narrowed here
+  // rather than widening this function's own return type to a union
+  // callers of a PLAN's lifecycle would never actually see.
+  return timeBasedStatus(new Date(plan.plannedStartAt), new Date(plan.plannedEndAt), now) as 'UPCOMING' | 'STARTING_SOON' | 'CURRENT' | 'MISSED';
+}
+
+/**
+ * DR4-E1 -- the Plan tab's "Upcoming Plans" default collection: persisted
+ * UPCOMING whose derived lifecycle has NOT elapsed (UPCOMING/STARTING_SOON/
+ * CURRENT). This is what fixes the DR4-E audit's reported bug: an activity
+ * scheduled for a past date, never logged/skipped/cancelled/moved, no
+ * longer counts as "upcoming" here even though its persisted status is
+ * still UPCOMING (see isActionableUpcomingPlan's own doc comment -- that
+ * status-only check is unchanged and still correct for what IT answers;
+ * this is a narrower, time-aware question for a different surface).
+ */
+export const isUpcomingOrCurrentPlan = (
+  plan: { status?: PersistedPlanStatus; plannedStartAt: string; plannedEndAt: string },
+  now: Date = new Date()
+): boolean => isActionableUpcomingPlan(plan) && derivedPlanLifecycle(plan, now) !== 'MISSED';
+
+/**
+ * Insights V1 PR7 -- presentation-only filter for the "Review plans" CTA's
+ * filtered list (AURA_INSIGHTS_V1_PRODUCT_COMPLETION_AUDIT.md finding
+ * F-4): an UPCOMING plan whose own window has already elapsed, mirroring
+ * classifyPlanningStatus's AWAITING_CONFIRMATION branch
+ * (insightsReporting.ts) exactly -- the server-side definition is the
+ * source of truth; this just re-applies the identical, already-fetched
+ * `plannedEndAt` fact to the client's own already-loaded plan list, never
+ * a second eligibility rule. DR4-E1: now expressed through
+ * `derivedPlanLifecycle` (same MISSED boundary, `now` now an explicit,
+ * optional, testable parameter) rather than a second raw date comparison
+ * -- the condition itself is unchanged (`plannedEndAt` strictly before
+ * `now`), so every existing caller's behavior is unchanged.
+ */
+export const isAwaitingConfirmationPlan = (
+  plan: { status?: PersistedPlanStatus; plannedStartAt: string; plannedEndAt: string },
+  now: Date = new Date()
+): boolean => derivedPlanLifecycle(plan, now) === 'MISSED';
+
+/**
+ * DR4-E1 -- the Plan tab's "Missed" collection, under the ticket's own
+ * vocabulary for this audit: persisted UPCOMING whose scheduled end has
+ * elapsed. Identical condition to `isAwaitingConfirmationPlan` above (same
+ * underlying fact, two product-surface names for it) -- re-exported rather
+ * than duplicating the check a third time. DR4-E1 scope is classification/
+ * ordering only: these plans are still reachable (via "View all" in
+ * PlanWithAuraView.tsx), just no longer displayed or counted as "upcoming."
+ * DR4-E2 will give this collection its own presentation.
+ */
+export const isMissedPlan = isAwaitingConfirmationPlan;
 
 export function mapPlanRow(row: PlanApiRow, fallbackTimezone?: string): UpcomingPlan {
   const start = new Date(row.plannedStartAt);
@@ -234,10 +327,23 @@ export function mapPlanRow(row: PlanApiRow, fallbackTimezone?: string): Upcoming
     duration: `${row.durationMinutes ?? 60} min`,
     time: formatPlanTimeRange(start, end, eventTimezone ?? fallbackTimezone),
     window: row.windowLabel || row.windowType || 'Neutral Flow',
-    match: row.matchLabel === 'Good Match' ? 'Good Match' : 'Best Match',
+    // DR4-E3 -- the DR4-E audit's own finding: this previously defaulted
+    // ANY non-'Good Match' value (null, missing, or an unrecognized string)
+    // to 'Best Match', fabricating a rating for plans that were never
+    // actually classified (manually-created plans, Day Builder adds).
+    // Explicit values are preserved verbatim; everything else is undefined
+    // (no badge), never silently upgraded.
+    match: row.matchLabel === 'Best Match' ? 'Best Match' : row.matchLabel === 'Good Match' ? 'Good Match' : undefined,
     note: status === 'LOGGED' ? 'Logged' : row.matchLabel || 'Good match',
     accent: planAccentForTitle(title),
-    details: row.recommendation || 'Aura saved this as one of your planned moments.',
+    // DR4-E3 -- the DR4-E audit's other finding: this generic reassurance
+    // caption previously filled in for EVERY plan with no saved
+    // recommendation text, reading as personalized guidance when it was
+    // pure filler. A genuine recommendation.details (search-and-save
+    // flows) is preserved verbatim; everything else renders no paragraph
+    // at all (UpcomingPlan/MissedActivityCard already skip the <p> when
+    // details is falsy).
+    details: row.recommendation || undefined,
     score: typeof row.score === 'number' ? row.score : undefined,
     googleCalendarUrl: row.calendarUrl || undefined,
     source: 'Aura',

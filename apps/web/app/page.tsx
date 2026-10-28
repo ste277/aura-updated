@@ -14,7 +14,8 @@ import { getActionCards, ActionCard } from '../../../packages/recommendation/src
 import { findActivityIntent } from '../../../packages/recommendation/src/personalizedTasks';
 import type { PersonalMuhurtaContext } from '../../../packages/recommendation/src/auraFitEngine';
 import type { DailyBriefing, PlanningHorizon } from '../../../packages/recommendation/src/dailyAssistant';
-import type { TimingSearchDateRange, TimingSearchMode, TimingSearchResponse, TimingTimePreference } from '../../../packages/recommendation/src/timingSearch';
+import type { TimingSearchDateRange, TimingSearchMode, TimingTimePreference } from '../../../packages/recommendation/src/timingSearch';
+import type { TimingSearchResponseWithDailyRhythm } from '../lib/timingSearchDailyRhythm';
 import type { AuraUpdatesResponse } from '../lib/auraUpdates';
 import type { AuraReminder } from '../lib/auraReminders';
 import type { DailyAgenda, DailyAgendaItem } from '../lib/dailyAgenda';
@@ -35,6 +36,8 @@ import { AskAuraView } from '../components/AskAuraView';
 import { CalendarViewSection, LoggedEntryItem } from '../components/CalendarViewSection';
 import { InsightsView } from '../components/InsightsView';
 import { WindowShiftToast } from '../components/WindowShiftToast';
+import { LocationTrustBanner } from '../components/LocationTrustBanner';
+import { OnboardingJourney } from '../components/OnboardingJourney';
 import { PlanWithAuraView } from '../components/PlanWithAuraView';
 import { YouView } from '../components/YouView';
 import { PanchangCalendarView } from '../components/PanchangCalendarView';
@@ -66,6 +69,13 @@ interface SessionUser {
   latitude: number;
   longitude: number;
   timezone: string;
+  /** Onboarding V1 PR 1 -- Location Trust Foundation. An ISO timestamp
+   * string (as it arrives over JSON) or null -- never parsed into a
+   * `Date` here, since every consumer only ever needs "is this null or
+   * not" (see `locationConfirmed` derivations below), matching this
+   * client type's own existing convention of carrying wire-shaped
+   * values, not domain `Date` objects. */
+  locationConfirmedAt: string | null;
   remindersEnabled: boolean;
   reminderLeadMinutes: number;
   dayBuilderEnabled: boolean;
@@ -110,6 +120,29 @@ function isFrictionWindow(windowName: string): boolean {
 
 export default function DashboardPage() {
   const [user, setUser] = useState<SessionUser | null | undefined>(undefined);
+  // Onboarding V1 PR 1 -- Location Trust Foundation: lets the global
+  // disclosure banner's action land directly on the already-expanded
+  // Location & Time panel, instead of a collapsed You tab the user then
+  // has to find the right row in themselves. Read only once on YouView's
+  // initial mount (see YouView's own `initialOpenPanel` doc comment).
+  const [youInitialPanel, setYouInitialPanel] = useState<'location' | undefined>(undefined);
+  // Onboarding V1 PR 2 -- Welcome journey. `onboardingActive` decides
+  // whether the Welcome/Confirm Location/Recommendation flow renders
+  // instead of the normal tab UI. Seeded ONLY from the first resolved
+  // `GET /api/auth/session` response of this page load (`onboardingResolved`,
+  // a durable server-side fact -- see that route's own doc comment) via
+  // `onboardingDecidedRef`. This guard is still required even though the
+  // underlying signal is now durable (First-Run Reliability Correction):
+  // without it, a LATER session refetch (plan logged, offline sync, 401
+  // re-check) landing before handleExitOnboarding's own PATCH call has
+  // finished persisting would see onboardingResolved still false and could
+  // yank the user back into Welcome mid-use -- exactly the "trap the
+  // user"/redirect-loop failure this guard exists to prevent. Exiting the
+  // journey (Skip, Go to Home, Plan my day) sets it false locally and
+  // fires that PATCH; it is never true again for the rest of this page
+  // load regardless of what a later session fetch reports.
+  const [onboardingActive, setOnboardingActive] = useState(false);
+  const onboardingDecidedRef = useRef(false);
   const [logEntries, setLogEntries] = useState<LoggedEntryItem[]>([]);
   const [, setHabits] = useState<any[]>([]);
   const [dailyBriefing, setDailyBriefing] = useState<DailyBriefing | null>(null);
@@ -121,6 +154,28 @@ export default function DashboardPage() {
   // buildPersonalMuhurtaContextForUser's own existing contract.
   const [personalContext, setPersonalContext] = useState<PersonalMuhurtaContext | undefined>(undefined);
   const [assistantInsight, setAssistantInsight] = useState<any>(null);
+  // Insights V1 PR4 -- Goal/planning reporting, fetched the SAME way as
+  // assistantInsight above (one GET, state set on success, logged (never
+  // thrown) on failure) -- InsightsView renders its own empty state when
+  // this stays null, same as it already does for a null assistantInsight.
+  const [goalReporting, setGoalReporting] = useState<any>(null);
+  // Insights V1 PR7 -- explicit fetch-lifecycle state for goalReporting
+  // (AURA_INSIGHTS_V1_PRODUCT_COMPLETION_AUDIT.md §19 scenario 20), so
+  // InsightsView can show an honest loading/error state instead of
+  // silently staying blank. 'loading' until the first fetch below
+  // resolves one way or the other.
+  const [goalReportingStatus, setGoalReportingStatus] = useState<'loading' | 'loaded' | 'error'>('loading');
+  // Insights V1 PR7 (finding F-4) -- the "Review plans"/"Open Plan"/
+  // "Review today's plan" CTAs now thread the clicked suggestion's own
+  // plan identity through to the Plan tab (planFocusId for a single
+  // deterministic plan, planFocusFilter for a pre-filtered review list)
+  // instead of always landing on the generic new-activity composer.
+  // planFocusKey mirrors momentsFocusKey's own established pattern: an
+  // incrementing counter so PlanWithAuraView's effect re-fires even when
+  // the SAME plan/filter is requested twice in a row.
+  const [planFocusKey, setPlanFocusKey] = useState(0);
+  const [planFocusId, setPlanFocusId] = useState<string | null>(null);
+  const [planFocusFilter, setPlanFocusFilter] = useState<'AWAITING_CONFIRMATION' | null>(null);
   const [todayReflection, setTodayReflection] = useState<DailyReflectionState | null>(null);
   const [plannedActivities, setPlannedActivities] = useState<PlannedActivityState[]>([]);
   // Recipient Conversion V1 Hardening (brief section 8) -- an existing
@@ -128,7 +183,14 @@ export default function DashboardPage() {
   // intent, e.g. "Date Night") lands directly in Plan with it prefilled,
   // via the exact same mechanism handleOpenPlan() already uses for every
   // other "jump into Plan with this activity" entry point in the app.
-  const [planPrefill, setPlanPrefill] = useState<{ activity: string; key: number; horizon?: PlanningHorizon } | null>(() => {
+  // HPG1 -- activityId is optional and ONLY ever set by a caller that
+  // already has a genuine, non-title-derived catalog identity in hand
+  // (e.g. a Good Right Now card's own ActionCard.activityId, or Ask
+  // Aura's own resolved action.activityId) -- never backfilled here by
+  // matching `activity`'s text. The `?activity=` URL entry point below has
+  // no such id available, so it correctly stays title-only, exactly as
+  // before this field was added.
+  const [planPrefill, setPlanPrefill] = useState<{ activity: string; activityId?: string; key: number; horizon?: PlanningHorizon } | null>(() => {
     if (typeof window === 'undefined') return null;
     const requested = new URLSearchParams(window.location.search).get('activity');
     return requested?.trim() ? { activity: requested.trim(), key: Date.now() } : null;
@@ -150,6 +212,11 @@ export default function DashboardPage() {
   // Plan and focuses this token instead.
   const [momentsFocusToken, setMomentsFocusToken] = useState<string | undefined>(undefined);
   const [momentsFocusKey, setMomentsFocusKey] = useState(0);
+  // Cross-tab timeline handoff -- Ask Aura's TODAY_GUIDANCE "See all
+  // activities" and Plan with Aura's "View my day" both navigate to Home
+  // and bump this key so HomeDashboard scrolls/focuses its real timeline
+  // region once mounted (mirrors momentsFocusKey's own pattern).
+  const [homeTimelineFocusKey, setHomeTimelineFocusKey] = useState(0);
   // Product Structure V2 (brief section 28): Plan -> People -> Plan return
   // flow. One small piece of local state, not a global navigation
   // framework -- People's own onBack just reads it.
@@ -275,6 +342,15 @@ export default function DashboardPage() {
 
       setUser(sessionData.user);
 
+      // Onboarding V1 PR 2 -- captured exactly once per page load (see
+      // onboardingDecidedRef's own doc comment above); a later refetch
+      // (plan logged elsewhere, offline sync, 401 re-check) must never
+      // re-trigger the Welcome journey after this page's first decision.
+      if (!onboardingDecidedRef.current) {
+        onboardingDecidedRef.current = true;
+        setOnboardingActive(sessionData.onboardingResolved === false);
+      }
+
       const [logsRes, habitsRes, plansRes] = await Promise.all([
         fetch('/api/habit-logs'),
         fetch('/api/habits'),
@@ -332,10 +408,11 @@ export default function DashboardPage() {
   // handling, and state updates are unchanged; only the shape moved.
   const loadAssistantSignals = useCallback(async () => {
     try {
-      const [briefingRes, insightRes, reflectionRes] = await Promise.all([
+      const [briefingRes, insightRes, reflectionRes, goalReportingRes] = await Promise.all([
         fetch('/api/daily-assistant/briefing'),
         fetch('/api/daily-assistant/insights'),
         fetch('/api/daily-assistant/reflection'),
+        fetch('/api/insights/reporting'),
       ]);
 
       if (briefingRes.ok) {
@@ -344,6 +421,17 @@ export default function DashboardPage() {
         setPersonalContext(briefingData.personalContext);
       }
       if (insightRes.ok) setAssistantInsight(await insightRes.json());
+      if (goalReportingRes.ok) {
+        setGoalReporting(await goalReportingRes.json());
+        setGoalReportingStatus('loaded');
+      } else {
+        // loadAssistantSignals can also run again later (e.g. a manual
+        // refresh) after an earlier successful load -- a transient
+        // refetch failure must not tear down already-displayed data back
+        // into a blank error state, only the FIRST load (still 'loading')
+        // surfaces as 'error'. Same reasoning in the catch block below.
+        setGoalReportingStatus((prev) => (prev === 'loaded' ? prev : 'error'));
+      }
       if (reflectionRes.ok) {
         const reflection = await reflectionRes.json();
         setTodayReflection(reflection ? {
@@ -353,6 +441,7 @@ export default function DashboardPage() {
       }
     } catch (err) {
       console.error('Failed to load daily assistant signals:', err);
+      setGoalReportingStatus((prev) => (prev === 'loaded' ? prev : 'error'));
     }
   }, []);
 
@@ -1141,10 +1230,47 @@ export default function DashboardPage() {
   // no location-change trigger at all -- My Day's agenda/story/reflection/
   // tomorrowPreview, and the daily-assistant briefing/insight/reflection
   // signals -- needed one.
-  const handleLocationChanged = useCallback(async (city: { cityName: string; latitude: number; longitude: number; timezone: string }) => {
+  const handleLocationChanged = useCallback(async (city: { cityName: string; latitude: number; longitude: number; timezone: string; locationConfirmedAt: string | null }) => {
     setUser((prev) => (prev ? { ...prev, ...city } : prev));
     await Promise.all([loadMyDay(), loadAssistantSignals()]);
   }, [loadMyDay, loadAssistantSignals]);
+
+  // Onboarding V1 PR 1 -- the global disclosure banner's one action:
+  // reuses the EXISTING Location & Time editing experience (YouView ->
+  // LocationPicker), never a new form. Setting activeTab directly (no
+  // window.location.href reload) keeps this a normal in-SPA navigation,
+  // same as every other setActiveTab call in this file.
+  const handleConfirmLocationFromBanner = useCallback(() => {
+    setYouInitialPanel('location');
+    setActiveTab('you');
+  }, []);
+
+  // Onboarding V1 PR 2 -- the journey's own TRUE exit points, exactly three:
+  // Welcome's "Skip for now", Recommendation's "Go to Home", and
+  // Recommendation's "Plan my day" (the last via the onPlanMyDay callback
+  // below, which also calls this). The Location step's OWN "Skip" is
+  // deliberately NOT wired here -- it only advances to the Recommendation
+  // step (OnboardingJourney.tsx's own onSkip={() => setStep('RECOMMENDATION')}),
+  // which is not itself an exit (First-Run Reliability Correction's own
+  // explicit rule: advancing between steps never resolves onboarding).
+  //
+  // First-Run Reliability Correction -- this is also the ONE place
+  // onboarding resolution is persisted: fires PATCH /api/users/onboarding
+  // best-effort (never awaited before letting the user proceed, same
+  // fire-and-forget convention as loadAuraUpdates/trackEvent elsewhere in
+  // this file) so a slow or failed request can never trap the user behind
+  // onboarding or delay reaching Home. A failed request is never reported
+  // as success to the user (there is no "saved!" UI here to lie in) and
+  // naturally retries itself: if it didn't persist, the user's NEXT visit
+  // still sees onboardingResolved false and will resolve it again the next
+  // time they exit -- no client-side retry queue needed. Local state
+  // (`setOnboardingActive(false)`) is never rolled back on failure, so the
+  // user is never yanked back into onboarding within this same page load
+  // regardless of the request's outcome.
+  const handleExitOnboarding = useCallback(() => {
+    setOnboardingActive(false);
+    fetch('/api/users/onboarding', { method: 'PATCH' }).catch(() => {});
+  }, []);
 
   const handleTimingSearch = useCallback(async (request: {
     mode: TimingSearchMode;
@@ -1160,7 +1286,7 @@ export default function DashboardPage() {
     candidateStart?: string;
     checkNearbyWindowMinutes?: number;
     candidateStarts?: string[];
-  }): Promise<TimingSearchResponse> => {
+  }): Promise<TimingSearchResponseWithDailyRhythm> => {
     const res = await fetch('/api/timing-search', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
@@ -1223,10 +1349,14 @@ export default function DashboardPage() {
     loadGuidance();
   }, [loadMyDay, loadGuidance]);
 
-  const handleOpenPlan = useCallback((activity?: string) => {
+  // HPG1 -- activityId is optional; pass it only when the caller already
+  // resolved a genuine catalog id (never derive one here from `activity`'s
+  // text). Every existing caller that doesn't have one keeps working
+  // exactly as before -- the title-only path is entirely unchanged.
+  const handleOpenPlan = useCallback((activity?: string, activityId?: string) => {
     const cleanActivity = activity?.trim();
     if (cleanActivity) {
-      setPlanPrefill({ activity: cleanActivity, key: Date.now() });
+      setPlanPrefill({ activity: cleanActivity, activityId, key: Date.now() });
     }
     setActiveTab('plan');
   }, []);
@@ -1301,6 +1431,32 @@ export default function DashboardPage() {
 
   const userNameDisplay = formatDisplayName(user.email);
 
+  // Onboarding V1 PR 2 -- the Welcome journey renders INSTEAD OF the normal
+  // tab UI below, never alongside it, and never blocks it: every exit path
+  // (Skip, Go to Home, Plan my day) calls handleExitOnboarding, after which
+  // this condition is permanently false for the rest of this page load, and
+  // the exact same Home/tabs tree below renders as it always has.
+  if (onboardingActive) {
+    return (
+      <OnboardingJourney
+        userName={userNameDisplay}
+        cityName={user.cityName}
+        latitude={user.latitude}
+        longitude={user.longitude}
+        timezone={user.timezone}
+        locationConfirmed={user.locationConfirmedAt != null}
+        onLocationChanged={handleLocationChanged}
+        nextShift={mounted ? energyInsight.nextShift : undefined}
+        hasRealRecommendation={mounted && windows.length > 0}
+        onExit={handleExitOnboarding}
+        onPlanMyDay={() => {
+          handleExitOnboarding();
+          window.location.href = '/plan-day';
+        }}
+      />
+    );
+  }
+
   return (
     <main
       style={{
@@ -1316,6 +1472,17 @@ export default function DashboardPage() {
     >
       {/* Real-Time Solar Phase Shift Toast Banner */}
       <WindowShiftToast activeWindowName={activeType} />
+
+      {/* Onboarding V1 PR 1 -- Location Trust Foundation: the ONE
+          centralized disclosure, visible on every tab (rendered once,
+          above all per-tab content), never a per-feature reimplementation. */}
+      <div style={{ width: '100%', maxWidth: 760 }}>
+        <LocationTrustBanner
+          locationConfirmed={user.locationConfirmedAt != null}
+          cityName={user.cityName}
+          onConfirmLocation={handleConfirmLocationFromBanner}
+        />
+      </div>
 
       {activeTab === 'chart' && (
         <header
@@ -1364,6 +1531,7 @@ export default function DashboardPage() {
       <div style={{ width: '100%', maxWidth: 760 }}>
         {activeTab === 'home' && (
           <HomeDashboard
+            userId={user?.id}
             userName={userNameDisplay}
             energyScore={energyInsight.score}
             themeText={energyInsight.themeText}
@@ -1378,6 +1546,7 @@ export default function DashboardPage() {
             onLogActivity={handleLogActivity}
             onSubmitReflection={handleSubmitReflection}
             onNextShiftClick={() => setActiveTab('timeline')}
+            focusTimelineKey={homeTimelineFocusKey}
             onPlanClick={handleOpenPlan}
             onPlanDay={() => { window.location.href = '/plan-day'; }}
             onInsightsClick={() => setActiveTab('insights')}
@@ -1443,6 +1612,7 @@ export default function DashboardPage() {
             cityName={user.cityName}
             onPlanLogged={handlePlanLogged}
             onViewTimeline={() => setActiveTab('timeline')}
+            onViewHomeDay={() => { setHomeTimelineFocusKey(Date.now()); setActiveTab('home'); }}
             onOpenPlan={handleOpenPlan}
             onOpenPanchang={handleOpenPanchang}
             onOpenMuhurthamWithActivity={handleOpenMuhurthamWithActivity}
@@ -1452,21 +1622,45 @@ export default function DashboardPage() {
         {activeTab === 'plan' && (
           <PlanWithAuraView
             onTimingSearch={handleTimingSearch}
-            onViewDay={() => setActiveTab('timeline')}
+            onViewDay={() => { setHomeTimelineFocusKey(Date.now()); setActiveTab('home'); }}
             onPlanLogged={handlePlanLogged}
             timezone={user.timezone}
             initialActivity={planPrefill?.activity}
+            initialActivityId={planPrefill?.activityId}
             initialActivityKey={planPrefill?.key}
             initialHorizon={planPrefill?.horizon}
             onOpenPeople={() => { setPeopleReturnTo('plan'); setActiveTab('people'); }}
             focusMomentsKey={momentsFocusKey}
             focusMomentToken={momentsFocusToken}
             onMomentSeen={loadAuraUpdates}
+            focusPlansKey={planFocusKey}
+            focusPlanId={planFocusId}
+            focusPlansFilter={planFocusFilter}
           />
         )}
 
         {activeTab === 'insights' && (
-          <InsightsView timezone={user.timezone} logEntries={logEntries} assistantInsight={assistantInsight} />
+          <InsightsView
+            userId={user?.id}
+            onOpenBirthProfile={() => setActiveTab('chart')}
+            timezone={user.timezone}
+            logEntries={logEntries}
+            assistantInsight={assistantInsight}
+            goalReporting={goalReporting}
+            goalReportingStatus={goalReportingStatus}
+            onOpenPlanReview={(target) => {
+              // Insights V1 PR7 (finding F-4) -- carry the clicked
+              // suggestion's own plan identity (if any) into the Plan tab
+              // instead of always landing on the generic composer.
+              // planFocusKey increments every click so the destination
+              // effect re-fires even when the SAME plan is requested twice
+              // in a row (same pattern momentsFocusKey already uses).
+              setPlanFocusId(target?.planId ?? null);
+              setPlanFocusFilter(target?.planFilter ?? null);
+              setPlanFocusKey((key) => key + 1);
+              setActiveTab('plan');
+            }}
+          />
         )}
 
         {activeTab === 'you' && (
@@ -1475,6 +1669,10 @@ export default function DashboardPage() {
             email={user.email}
             cityName={user.cityName}
             timezone={user.timezone}
+            latitude={user.latitude}
+            longitude={user.longitude}
+            locationConfirmed={user.locationConfirmedAt != null}
+            initialOpenPanel={youInitialPanel}
             notificationPrefs={notificationPrefs}
             onNotificationPrefsChange={(next) => {
               setNotificationPrefs(next);
@@ -1546,6 +1744,7 @@ export default function DashboardPage() {
         {activeTab === 'muhurtham' && (
           <MuhurthamFinderView
             timingLocation={{ cityName: user.cityName, latitude: user.latitude, longitude: user.longitude, timezone: user.timezone }}
+            locationConfirmed={user.locationConfirmedAt != null}
             onBack={() => setActiveTab('explore')}
             onOpenPanchangCalendar={handleOpenPanchang}
             onViewFullPanchang={handleViewFullPanchang}

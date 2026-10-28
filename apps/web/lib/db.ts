@@ -5,16 +5,27 @@ import { validateCaptureTitle } from './captures';
 import { parseSchedulingMode, type PlannedActivitySchedulingMode } from './plannedActivitySchedulingMode';
 import { toPersistedCompletionRequirement, normalizeGoalActivityCompletionRequirement, type CompletionRequirement } from './goalCompletion';
 import {
-  deriveGoalActivityRhythmContribution,
   normalizeGoalActivityRhythm,
-  computeGoalActivityRhythmEligibility,
   toPersistedGoalActivityRhythm,
   NONE_GOAL_ACTIVITY_RHYTHM,
+  localCalendarWeekStart,
+  resolveOccurrenceLocalDate,
+  resolveOccurrenceLocalDateOrNull,
+  deriveGoalActivityRhythmContributionWithEvidence,
   type GoalActivityRhythmOccurrenceFact,
   type PlannedActivityStatusForRhythm,
   type GoalActivityRhythm,
 } from './goalActivityRhythm';
+import { evaluateNewOccurrenceEligibility } from './goalActivityOccurrenceCapacity';
+import {
+  normalizeGoalActivityDailyFrequency,
+  isGoalActivityDailyFrequencyEnforceable,
+  resolveOccurrenceLocalDay,
+  resolveOccurrenceLocalDayOrNull,
+  type PersistedGoalActivityDailyFrequency,
+} from './goalActivityDailyFrequency';
 import { getDatePartsInTimezone } from './timezone';
+import { canonicalizeCivilBirthDate } from './birthDate';
 import { toPersistedGoalActivityExecutionSnapshot, fromPersistedGoalActivityExecutionSnapshot, resolveCompletionActualValue } from './goalActivityExecution';
 
 // Sandbox-only substitute for @prisma/client (its engine binary can't be downloaded
@@ -36,6 +47,58 @@ export async function beginTransaction(): Promise<PoolClient> {
   const client = await pool.connect();
   await client.query('BEGIN');
   return client;
+}
+
+/**
+ * O5 P2d -- the NARROWEST thing a read needs from the database: a `query` that returns rows. A `Pool`, a `PoolClient` and
+ * the snapshot executor below all satisfy it structurally, which is how the SAME read function runs unchanged against the
+ * global pool (every existing caller) or inside one coherent snapshot (the decision scheduling context loader). It exposes
+ * no `release`, `connect`, `end`, transaction control or event API.
+ */
+export interface ReadQueryExecutor {
+  query(text: string, params?: unknown[]): Promise<{ rows: any[] }>;
+}
+
+/**
+ * O5 P2d -- runs `read` inside ONE PostgreSQL `REPEATABLE READ` transaction and returns whatever it returns.
+ *
+ * SNAPSHOT: PostgreSQL takes a REPEATABLE READ transaction's snapshot at its FIRST non-transaction-control statement (the
+ * first query `read` issues), not at `BEGIN`; every later statement in the transaction sees exactly the data committed
+ * before that first statement and never a concurrent commit.
+ *
+ * READ-ONLY BY CONSTRUCTION AT THE APPLICATION LEVEL: the executor handed to `read` accepts SELECT / WITH statements only
+ * (anything else throws before it reaches the driver), takes no lock beyond what a plain SELECT takes, and stops working
+ * the moment `read` settles -- the transaction client never escapes this function, so nothing can be queried against a
+ * finished snapshot or against a live transaction from outside. The transaction is committed (it wrote nothing) or rolled
+ * back on error, and the connection is always released. Nothing but database reads belongs inside `read`: no CPU-heavy
+ * projection, no timing search, no Constructor, no network call (the connection is held for the duration).
+ */
+export async function withRepeatableReadSnapshot<T>(read: (executor: ReadQueryExecutor) => Promise<T>): Promise<T> {
+  const client = await pool.connect();
+  let open = true;
+  try {
+    await client.query('BEGIN ISOLATION LEVEL REPEATABLE READ');
+    const executor: ReadQueryExecutor = {
+      query: (text, params) => {
+        if (!open) throw new Error('snapshot executor used after the snapshot ended');
+        if (!/^\s*(SELECT|WITH)\b/i.test(text) || /;\s*\S/.test(text)) throw new Error('the snapshot executor is read-only: a single SELECT / WITH statement only');
+        return client.query(text, params as unknown[] | undefined);
+      },
+    };
+    let result: T;
+    try {
+      result = await read(executor);
+    } finally {
+      open = false;
+    }
+    await client.query('COMMIT');
+    return result;
+  } catch (err) {
+    await client.query('ROLLBACK').catch(() => {});
+    throw err;
+  } finally {
+    client.release();
+  }
 }
 
 export interface User {
@@ -74,6 +137,36 @@ export interface User {
    * `undefined` here only ever appears in a fixture that never set it,
    * and is treated identically to `false`. */
   availabilityConfigured?: boolean;
+  /** Onboarding V1 PR 1 -- Location Trust Foundation. `null` means this
+   * (current, non-birth) location has never been explicitly confirmed --
+   * see updateUserLocation's own doc comment for the one place this is
+   * ever stamped. Optional here (unlike every other required `User`
+   * field) for the same reason `availabilityConfigured` is above: a real
+   * database row always has a concrete `Date | null` (nullable column,
+   * no NOT NULL), so `undefined` only appears in an existing in-memory
+   * fixture that predates this column, and is treated identically to
+   * `null` (never confirmed) everywhere this field is read. */
+  locationConfirmedAt?: Date | null;
+  /** Onboarding V1 PR 2 -- First-Run Reliability Correction. `null` means
+   * the Welcome/Confirm Location/Recommendation journey has never been
+   * resolved -- see markOnboardingResolved's own doc comment for the one
+   * place this is ever stamped. Optional here for the same reason
+   * `locationConfirmedAt` is above. */
+  onboardingResolvedAt?: Date | null;
+  /** Daily Rhythm V1 PR DR1 -- Preferences Foundation. Both null is the
+   * ONLY unconfigured state, the default for every row -- see
+   * setDailyWorkPreferences/clearDailyWorkPreferences below for the
+   * one place these are ever written, always together. Optional here for
+   * the same reason `availabilityConfigured`/`locationConfirmedAt` are
+   * above. NOT read by any scheduling/recommendation code in this PR. */
+  dailyRhythmWorkStart?: string | null;
+  dailyRhythmWorkEnd?: string | null;
+  /** Weekday set, 0=Sunday..6=Saturday (same convention as
+   * UserAvailabilityPeriod.weekday). Empty array by default; a real
+   * database row always has a concrete `number[]` (NOT NULL DEFAULT
+   * '{}'), so `undefined` here only appears in a fixture that predates
+   * this column and is treated identically to an empty array. */
+  dailyRhythmWorkDays?: number[];
 }
 
 export interface CustomCity {
@@ -128,7 +221,8 @@ export async function updateBirthProfile(
     `UPDATE "User" SET "birthDate" = $2, "birthTime" = $3, "birthCityName" = $4,
        "birthLatitude" = $5, "birthLongitude" = $6, "birthTimezone" = $7
      WHERE id = $1 RETURNING *`,
-    [userId, input.birthDate, input.birthTime, input.birthCityName, input.birthLatitude, input.birthLongitude, input.birthTimezone]
+    // B2: the civil date is stored as an EXPLICIT UTC-midnight surrogate (see birthDate.ts) -- never as a bare date string that PostgreSQL would resolve in its session TimeZone.
+    [userId, canonicalizeCivilBirthDate(input.birthDate), input.birthTime, input.birthCityName, input.birthLatitude, input.birthLongitude, input.birthTimezone]
   );
   return result.rows[0];
 }
@@ -194,7 +288,7 @@ export async function createSavedPerson(ownerUserId: string, input: SavedPersonI
       ownerUserId,
       input.name,
       input.relationshipType,
-      input.birthDate,
+      canonicalizeCivilBirthDate(input.birthDate), // B2: explicit UTC-midnight surrogate, never a bare date string
       input.birthTime,
       input.birthTimezone,
       input.birthCityName ?? null,
@@ -218,7 +312,7 @@ export async function updateSavedPerson(ownerUserId: string, personId: string, i
       ownerUserId,
       input.name,
       input.relationshipType,
-      input.birthDate,
+      canonicalizeCivilBirthDate(input.birthDate), // B2: explicit UTC-midnight surrogate, never a bare date string
       input.birthTime,
       input.birthTimezone,
       input.birthCityName ?? null,
@@ -600,6 +694,11 @@ export interface PlannedActivity {
   skippedAt?: Date | null;
   /** Set only on a Move successor: the (now MOVED) plan this one replaces. */
   rescheduledFromPlanId?: string | null;
+  /** Insights V1 PR 1 -- set only on THIS row, at the instant its own
+   * status transitions UPCOMING -> MOVED (planMove.ts's applyMoveWrites).
+   * NULL = never moved, or moved before this column existed (never
+   * backfilled). Never re-stamped by a replayed Move. */
+  movedAt?: Date | null;
   /** F1: the persisted scheduling constraint (see plannedActivitySchedulingMode.ts). null/absent = legacy/unknown = protected. */
   schedulingMode?: PlannedActivitySchedulingMode | null;
   habitLogId: string | null;
@@ -965,6 +1064,26 @@ export async function listPlannedActivitiesForDay(userId: string, from: Date, to
   return result.rows;
 }
 
+/**
+ * Opportunity Scarcity V1 -- O2. Every non-cancelled Plan of this user whose
+ * interval OVERLAPS `[from, to)`, regardless of where it starts. Unlike
+ * `listPlannedActivitiesForDay` (which selects by `plannedStartAt` only, so a
+ * Plan that starts before `from` and ends inside the range is missed), this
+ * uses half-open interval overlap: `plannedStartAt < to AND plannedEndAt >
+ * from`. Same `status <> 'CANCELLED'` SQL filter; lifecycle (which statuses
+ * actually block) is applied by the caller via `isActivePlanBlocker`. READ-ONLY,
+ * scoped to `userId`, one query for any range length.
+ */
+export async function listPlannedActivitiesOverlappingRange(userId: string, from: Date, to: Date, executor: ReadQueryExecutor = pool): Promise<PlannedActivity[]> {
+  const result = await executor.query(
+    `SELECT * FROM "PlannedActivity"
+     WHERE "userId" = $1 AND status <> 'CANCELLED' AND "plannedStartAt" < $3 AND "plannedEndAt" > $2
+     ORDER BY "plannedStartAt" ASC`,
+    [userId, from, to]
+  );
+  return result.rows;
+}
+
 /** Aura Reminders V1 (brief section 25) -- the AuraMoment counterpart to
  * listPlannedActivitiesForReminders above. Only ACTIVE, unexpired moments
  * (mirrors resolveAuraMomentByToken's own ACTIVE + expiry check) within the
@@ -1280,8 +1399,14 @@ export async function hasActivePushSubscription(userId: string): Promise<boolean
   return result.rows.length > 0;
 }
 
-export async function createPlannedActivity(input: CreatePlannedActivityInput): Promise<PlannedActivity> {
-  const existing = await pool.query(
+/**
+ * `executor` defaults to the pool (every existing caller is unchanged). The
+ * ordinary `POST /api/plans` writer passes its transaction client so the insert
+ * runs inside the same transaction that holds the per-user schedule lock; the
+ * soft-dedup SELECT then runs on that client too.
+ */
+export async function createPlannedActivity(input: CreatePlannedActivityInput, executor: QueryExecutor = pool): Promise<PlannedActivity> {
+  const existing = await executor.query(
     `SELECT *
      FROM "PlannedActivity"
      WHERE "userId" = $1
@@ -1296,7 +1421,7 @@ export async function createPlannedActivity(input: CreatePlannedActivityInput): 
   if (existing.rows.length > 0) return existing.rows[0];
 
   const id = randomUUID();
-  const result = await pool.query(
+  const result = await executor.query(
     `INSERT INTO "PlannedActivity"
        (id, "userId", title, "activityType", icon, "plannedStartAt", "plannedEndAt",
         "durationMinutes", "windowType", "windowLabel", "matchLabel", score,
@@ -1481,8 +1606,12 @@ export async function logPlannedActivity(userId: string, planId: string, options
       // include "activityId" (previously omitted), so a second/idempotent
       // completion request returns the SAME persisted identity as the
       // first, rather than silently reporting it as undefined.
+      // Insights V1 PR6 -- widened to also include the four attribution
+      // columns, so an idempotent retry returns the SAME complete row
+      // shape as a first-time completion, never a narrower one.
       const existingLog = await client.query(
-        `SELECT id, "userId", "activityTitle", "activityId", "activeWindow", "logTimestamp", "logMinuteOfDay", "durationMinutes", notes, "logSource", "activitySignificance"
+        `SELECT id, "userId", "activityTitle", "activityId", "activeWindow", "logTimestamp", "logMinuteOfDay", "durationMinutes", notes, "logSource", "activitySignificance",
+           "originatingPlannedActivityId", "scheduledStartAtSnapshot", "completionAttribution", "originatingGoalActivityExecutionId"
          FROM "HabitLog"
          WHERE id = $1 AND "userId" = $2`,
         [plan.habitLogId, userId]
@@ -1511,15 +1640,61 @@ export async function logPlannedActivity(userId: string, planId: string, options
     // re-entered), not dependent on the DB's unique constraint catching a
     // race.
     //
-    // The GoalActivity is resolved SERVER-SIDE from persisted linkage
-    // (GoalActivity.plannedActivityId = this plan's id) -- never trusted
-    // from any client-supplied id. A plan with no such linkage is an
-    // ordinary, non-Goal completion: entirely unaffected by anything below.
-    const goalActivityRes = await client.query(`SELECT * FROM "GoalActivity" WHERE "plannedActivityId" = $1 AND "userId" = $2`, [planId, userId]);
-    const goalActivity: GoalActivity | undefined = goalActivityRes.rows[0];
+    // The GoalActivity is resolved SERVER-SIDE from persisted linkage --
+    // never trusted from any client-supplied id. A plan with no such
+    // linkage is an ordinary, non-Goal completion: entirely unaffected by
+    // anything below.
+    //
+    // Insights V1 PR3 -- Durable Goal Completion Evidence: the OCCURRENCE
+    // lookup (GoalActivityOccurrence.plannedActivityId, unique per plan)
+    // is tried FIRST, and is the correct, authoritative resolution for a
+    // Rhythm (N_PER_WEEK) GoalActivity's occurrence. The legacy
+    // GoalActivity.plannedActivityId lookup is tried only as the fallback
+    // for a plan with no occurrence row at all -- the finite/NONE-rhythm
+    // case, where that single shared pointer IS reliable (a finite
+    // GoalActivity never has more than one live link at once, so it is
+    // never repointed out from under an in-flight completion the way a
+    // Rhythm GoalActivity's pointer already is, by design, whenever a
+    // sibling occurrence is materialized -- db.ts's own
+    // materializeGoalActivityRhythmOccurrence doc comment: "most recently
+    // materialized", never "the one being completed"). Resolving via the
+    // shared pointer ALONE, as this function did before PR3, silently
+    // wrote ZERO completion evidence for an older Rhythm occurrence
+    // completed after a newer sibling already existed -- confirmed by
+    // live reproduction (AURA_INSIGHTS_PR3_EVIDENCE_CONTRACT.md) -- this
+    // is the exact defect this two-step resolution fixes.
+    const occurrenceRes = await client.query(`SELECT id, "goalActivityId" FROM "GoalActivityOccurrence" WHERE "plannedActivityId" = $1 AND "userId" = $2`, [planId, userId]);
+    const occurrenceRow: { id: string; goalActivityId: string } | undefined = occurrenceRes.rows[0];
 
-    let executionWrite: { goalActivityId: string; existingExecutionId: string | null; requirement: CompletionRequirement; currentValue: number | null } | null = null;
+    let goalActivity: GoalActivity | undefined;
+    let occurrenceId: string | null = null;
+    if (occurrenceRow) {
+      const occurrenceGoalActivityRes = await client.query(`SELECT * FROM "GoalActivity" WHERE id = $1 AND "userId" = $2`, [occurrenceRow.goalActivityId, userId]);
+      goalActivity = occurrenceGoalActivityRes.rows[0];
+      occurrenceId = occurrenceRow.id;
+    } else {
+      const goalActivityRes = await client.query(`SELECT * FROM "GoalActivity" WHERE "plannedActivityId" = $1 AND "userId" = $2`, [planId, userId]);
+      goalActivity = goalActivityRes.rows[0];
+    }
+
+    let executionWrite: { goalActivityId: string; occurrenceId: string | null; existingExecutionId: string | null; requirement: CompletionRequirement; currentValue: number | null } | null = null;
     if (goalActivity) {
+      // Insights V1 PR3 -- serializes this completion's evidence write
+      // against a concurrent deleteGoal for the SAME user (db.ts's
+      // goalHasRetainedPlanLinkage/deleteGoal), closing the TOCTOU window
+      // where deleteGoal's retained-evidence check could pass BEFORE this
+      // transaction commits its new GoalActivityExecution row, and then
+      // cascade-delete it anyway. A NEW, distinct advisory-lock keyspace
+      // (never shared with day-constructor-accept's own per-user lock) --
+      // same established, already-precedented pattern as recordVisit's
+      // own `visit-log:${userId}` lock (db.ts), introduced independently
+      // rather than overloading an existing keyspace for an unrelated
+      // purpose. Acquired only once Goal linkage is already confirmed, so
+      // the overwhelming majority of Done-taps (non-Goal-linked plans)
+      // never acquire it at all -- zero added cost on the common path.
+      // Exactly one lock is ever acquired per transaction in either this
+      // function or deleteGoal, so no lock-ordering deadlock is possible.
+      await client.query('SELECT pg_advisory_xact_lock(hashtext($1))', [`goal-evidence:${userId}`]);
       // If an execution row already exists for THIS plan (not possible yet
       // via any production path in G2.2.2, since nothing creates one before
       // Done -- future partial-progress work will change that), its
@@ -1546,7 +1721,7 @@ export async function logPlannedActivity(userId: string, planId: string, options
       const actualValueResult = resolveCompletionActualValue(requirement, options?.actualValue);
       if (!actualValueResult.ok) throw new Error(actualValueResult.error);
 
-      executionWrite = { goalActivityId: goalActivity.id, existingExecutionId: existingExecution ? existingExecution.id : null, requirement, currentValue: actualValueResult.value };
+      executionWrite = { goalActivityId: goalActivity.id, occurrenceId, existingExecutionId: existingExecution ? existingExecution.id : null, requirement, currentValue: actualValueResult.value };
     } else if (options?.actualValue !== undefined && options?.actualValue !== null) {
       // A caller supplied actualValue for a plan that isn't linked to any
       // Goal activity -- there is nothing for it to apply to. Reject rather
@@ -1555,6 +1730,26 @@ export async function logPlannedActivity(userId: string, planId: string, options
       // a DONE-kind Goal activity.
       throw new Error('actualValue was supplied, but this plan is not linked to a Goal activity.');
     }
+
+    // Insights V1 PR6 -- Durable Completion Attribution. `executionWrite`
+    // is now fully resolved (set whenever `goalActivity` was truthy above;
+    // every path that leaves it unset without throwing corresponds to a
+    // genuinely non-Goal-linked plan) -- the invariant this depends on:
+    // there is no code path above that reaches this point with
+    // `goalActivity` truthy and `executionWrite` still null, since the
+    // only way out of the `if (goalActivity)` block besides setting
+    // `executionWrite` is a thrown error (which rolls back the whole
+    // transaction, writing nothing). Pre-generating the execution id here
+    // -- BEFORE the HabitLog insert below -- mirrors the exact
+    // `habitLogId = randomUUID()` precedent two lines down: both ids must
+    // be known before the HabitLog row is written, so the row can carry a
+    // stable, durable pointer to its own Goal-execution evidence from the
+    // moment of creation, never correlated after the fact by title/
+    // timestamp proximity. Reuses the EXISTING execution's own id
+    // unchanged on an idempotent re-log (never generates a second id for
+    // the same execution).
+    const goalActivityExecutionId = executionWrite ? executionWrite.existingExecutionId ?? randomUUID() : null;
+    const completionAttribution: 'GOAL_LINKED' | 'NON_GOAL' = executionWrite ? 'GOAL_LINKED' : 'NON_GOAL';
 
     // Plan Completion Historical Integrity V1 -- widened from the old
     // `SELECT timezone` to also fetch latitude/longitude, the two
@@ -1611,12 +1806,22 @@ export async function logPlannedActivity(userId: string, planId: string, options
     // destroyed; C3's existing evaluateHabitLogAuraFit already handles that
     // drift gracefully (UNKNOWN_ACTIVITY_ID -> ineligible) without any
     // change to this function.
+    // Insights V1 PR6 -- the four durable attribution columns are written
+    // in this SAME INSERT, never a second statement: `plan.plannedStartAt`
+    // is the row this function already holds `FOR UPDATE` from step 1,
+    // read here (never re-queried), so it is necessarily the plan's own
+    // CURRENT, post-any-prior-Move, committed schedule -- exactly "the
+    // final accepted schedule at completion" (AURA_INSIGHTS_PR6_
+    // COMPLETION_EVIDENCE_DECISION.md section 7). Never substitutes
+    // logTimestamp/completionInstant for this value.
     const habitLogRes = await client.query(
       `INSERT INTO "HabitLog"
          (id, "userId", "activityTitle", "activityId", "activeWindow", "logMinuteOfDay",
-          "logTimestamp", "durationMinutes", notes, "logSource", "activitySignificance")
-       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, 'AURA_PLANNED', 'MEDIUM')
-       RETURNING id, "userId", "activityTitle", "activityId", "activeWindow", "logTimestamp", "logMinuteOfDay", "durationMinutes", notes, "logSource", "activitySignificance"`,
+          "logTimestamp", "durationMinutes", notes, "logSource", "activitySignificance",
+          "originatingPlannedActivityId", "scheduledStartAtSnapshot", "completionAttribution", "originatingGoalActivityExecutionId")
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, 'AURA_PLANNED', 'MEDIUM', $10, $11, $12, $13)
+       RETURNING id, "userId", "activityTitle", "activityId", "activeWindow", "logTimestamp", "logMinuteOfDay", "durationMinutes", notes, "logSource", "activitySignificance",
+         "originatingPlannedActivityId", "scheduledStartAtSnapshot", "completionAttribution", "originatingGoalActivityExecutionId"`,
       [
         habitLogId,
         userId,
@@ -1627,6 +1832,10 @@ export async function logPlannedActivity(userId: string, planId: string, options
         logTimestamp,
         plan.durationMinutes,
         notes,
+        planId,
+        plan.plannedStartAt,
+        completionAttribution,
+        goalActivityExecutionId,
       ]
     );
 
@@ -1670,11 +1879,23 @@ export async function logPlannedActivity(userId: string, planId: string, options
         );
       } else {
         const persisted = toPersistedGoalActivityExecutionSnapshot({ completionRequirement: executionWrite.requirement, currentValue: executionWrite.currentValue });
+        // Insights V1 PR3 -- goalActivityOccurrenceId is the DURABLE link
+        // (never cleared by deletePlannedActivity's hard-delete, unlike
+        // plannedActivityId just beside it) back to the specific
+        // occurrence this execution proves completion for. NULL for a
+        // finite/NONE-rhythm completion (occurrenceId is null in that
+        // case, from the resolution above) -- same nullability shape as
+        // plannedActivityId's own optionality.
+        // Insights V1 PR6 -- uses the SAME id already written onto
+        // HabitLog.originatingGoalActivityExecutionId above (never a
+        // second, independently-generated id), so the two rows this one
+        // completion produces are durably, exactly cross-referenced from
+        // the moment of creation.
         await client.query(
           `INSERT INTO "GoalActivityExecution"
-             (id, "userId", "goalActivityId", "plannedActivityId", "completionKindSnapshot", "completionTargetValueSnapshot", "completionUnitSnapshot", "currentValue", "source")
-           VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)`,
-          [randomUUID(), userId, executionWrite.goalActivityId, planId, persisted.completionKindSnapshot, persisted.completionTargetValueSnapshot, persisted.completionUnitSnapshot, executionWrite.currentValue, 'AURA_PLANNED']
+             (id, "userId", "goalActivityId", "plannedActivityId", "goalActivityOccurrenceId", "completionKindSnapshot", "completionTargetValueSnapshot", "completionUnitSnapshot", "currentValue", "source")
+           VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)`,
+          [goalActivityExecutionId, userId, executionWrite.goalActivityId, planId, executionWrite.occurrenceId, persisted.completionKindSnapshot, persisted.completionTargetValueSnapshot, persisted.completionUnitSnapshot, executionWrite.currentValue, 'AURA_PLANNED']
         );
       }
     }
@@ -1696,6 +1917,12 @@ export async function upsertUserByEmail(input: {
   longitude: number;
   timezone: string;
 }): Promise<User> {
+  // Onboarding V1 PR 1 -- this INSERT never references "locationConfirmedAt",
+  // so it is left at its NULL column default for every new signup, even
+  // though `input.cityName`/etc. here are typically the hardcoded signup
+  // placeholder (DEFAULT_SIGNUP_LOCATION, below). Signup must never stamp
+  // a confirmation that didn't happen.
+  //
   // Emails are case-insensitive identities. Both auth flows lowercase before
   // hashing/looking up codes, so the user lookup must too — otherwise
   // Foo@x.com and foo@x.com become two accounts and the second login lands
@@ -1714,12 +1941,26 @@ export async function upsertUserByEmail(input: {
   return result.rows[0];
 }
 
+/**
+ * Onboarding V1 PR 1 -- the ONE place `locationConfirmedAt` is ever
+ * stamped: this function is reached only from a successful, already-
+ * validated `PATCH /api/users/location` call (both the curated-city and
+ * custom-location paths), never from signup (`upsertUserByEmail`, which
+ * never references this column, leaving it at its NULL default), a read,
+ * a background job, or timezone auto-detection. Stamped unconditionally
+ * on every call -- including a user re-confirming the SAME city/coordinates
+ * they already have, which must count as an explicit confirmation just as
+ * much as an actual change does (this ticket's own requirement: "a user
+ * explicitly confirming their existing city must be supported without
+ * requiring a change in coordinates"). A validation failure in the route
+ * never reaches this function at all, so it never stamps.
+ */
 export async function updateUserLocation(
   userId: string,
   location: { cityName: string; latitude: number; longitude: number; timezone: string }
 ): Promise<User> {
   const result = await pool.query(
-    `UPDATE "User" SET "cityName" = $2, latitude = $3, longitude = $4, timezone = $5
+    `UPDATE "User" SET "cityName" = $2, latitude = $3, longitude = $4, timezone = $5, "locationConfirmedAt" = now()
      WHERE id = $1 RETURNING *`,
     [userId, location.cityName, location.latitude, location.longitude, location.timezone]
   );
@@ -1742,15 +1983,68 @@ const DEFAULT_SIGNUP_LOCATION = {
 
 // Records at most one visit per user per calendar day — deliberately deduped so
 // repeated page loads/refreshes in a session don't inflate the retention numbers
-// this exists to measure.
+// this exists to measure. Pure analytics: deliberately carries no onboarding
+// signal and is never read by onboarding logic (see markOnboardingResolved
+// below for that durable, independent fact).
+//
+// Onboarding V1 PR 2 -- First-Run Reliability Correction: an earlier version
+// of this function also reported "no VisitLog row existed before this call"
+// as a first-visit proxy for onboarding. That coupling was removed after an
+// empirical concurrency test showed two simultaneous calls (e.g. two
+// browser tabs loading at once) would both see "no row yet" and both claim
+// first-visit -- a plain check-then-insert race, with no DB-level
+// uniqueness to prevent it. The SAME race could also duplicate a day's
+// VisitLog row, corrupting this function's own pre-existing retention
+// metric. Fixed here with a per-user advisory transaction lock -- the same
+// established `pg_advisory_xact_lock(hashtext($1))` pattern already used by
+// dayConstructorAcceptancePersistence.ts/remainingDayRecompositionAcceptance.ts/
+// planMove.ts (auto-released at COMMIT/ROLLBACK) -- which serializes
+// concurrent calls for the SAME user without any new schema.
 export async function recordVisit(userId: string): Promise<void> {
-  const existing = await pool.query(
-    `SELECT 1 FROM "VisitLog" WHERE "userId" = $1 AND "visitedAt"::date = CURRENT_DATE LIMIT 1`,
+  const client = await beginTransaction();
+  try {
+    await client.query('SELECT pg_advisory_xact_lock(hashtext($1))', [`visit-log:${userId}`]);
+    const existingToday = await client.query(
+      `SELECT 1 FROM "VisitLog" WHERE "userId" = $1 AND "visitedAt"::date = CURRENT_DATE LIMIT 1`,
+      [userId]
+    );
+    if (existingToday.rows.length === 0) {
+      await client.query(`INSERT INTO "VisitLog" (id, "userId") VALUES ($1, $2)`, [randomUUID(), userId]);
+    }
+    await client.query('COMMIT');
+  } catch (err) {
+    await client.query('ROLLBACK').catch(() => {});
+    throw err;
+  } finally {
+    client.release();
+  }
+}
+
+/**
+ * Onboarding V1 PR 2 -- First-Run Reliability Correction: the ONE place
+ * `onboardingResolvedAt` is ever stamped. Reached only from the
+ * authenticated `PATCH /api/users/onboarding` endpoint, itself called only
+ * from the three true exit actions in the client (Skip Welcome, Go to
+ * Home, Plan My Day -- apps/web/app/page.tsx's own `handleExitOnboarding`)
+ * -- never from a session read, never from VisitLog/recordVisit, and never
+ * merely because an onboarding step was rendered or advanced.
+ *
+ * Idempotent and safe under concurrent/repeated calls: the `WHERE
+ * "onboardingResolvedAt" IS NULL` guard means a second call (a retry, a
+ * double-click, two tabs both exiting) is a no-op that changes nothing --
+ * the FIRST successful stamp wins and is never overwritten, so this never
+ * needs its own advisory lock. Always returns the user's current,
+ * authoritative row either way (already-resolved or freshly-resolved),
+ * matching the endpoint's own "return the persisted resolution state"
+ * contract.
+ */
+export async function markOnboardingResolved(userId: string): Promise<User | null> {
+  const updated = await pool.query(
+    `UPDATE "User" SET "onboardingResolvedAt" = now() WHERE id = $1 AND "onboardingResolvedAt" IS NULL RETURNING *`,
     [userId]
   );
-  if (existing.rows.length > 0) return;
-
-  await pool.query(`INSERT INTO "VisitLog" (id, "userId") VALUES ($1, $2)`, [randomUUID(), userId]);
+  if (updated.rows.length > 0) return updated.rows[0];
+  return getUserById(userId);
 }
 
 /** Per-day log counts for a given month, for the calendar view. Counts both fixed
@@ -1966,8 +2260,8 @@ export async function createHabitLog(input: {
   }
 }
 
-export async function listHabitLogs(userId: string): Promise<HabitLogRow[]> {
-  const result = await pool.query(
+export async function listHabitLogs(userId: string, executor: ReadQueryExecutor = pool): Promise<HabitLogRow[]> {
+  const result = await executor.query(
     `SELECT * FROM "HabitLog" WHERE "userId" = $1 ORDER BY "logTimestamp" DESC LIMIT 50`,
     [userId]
   );
@@ -2220,8 +2514,8 @@ export interface UserActivityPreferenceRow {
   updatedAt: Date;
 }
 
-export async function listUserActivityPreferenceRows(userId: string): Promise<UserActivityPreferenceRow[]> {
-  const result = await pool.query(
+export async function listUserActivityPreferenceRows(userId: string, executor: ReadQueryExecutor = pool): Promise<UserActivityPreferenceRow[]> {
+  const result = await executor.query(
     `SELECT id, "userId", "activityId", "preferredDurationMinutes", "createdAt", "updatedAt"
      FROM "UserActivityPreference"
      WHERE "userId" = $1
@@ -2283,8 +2577,8 @@ export interface UserAvailabilityPeriodRow {
   updatedAt: Date;
 }
 
-export async function listUserAvailabilityPeriods(userId: string): Promise<UserAvailabilityPeriodRow[]> {
-  const result = await pool.query(
+export async function listUserAvailabilityPeriods(userId: string, executor: ReadQueryExecutor = pool): Promise<UserAvailabilityPeriodRow[]> {
+  const result = await executor.query(
     `SELECT id, "userId", weekday, "startTime", "endTime", "createdAt", "updatedAt"
      FROM "UserAvailabilityPeriod"
      WHERE "userId" = $1
@@ -2292,6 +2586,13 @@ export async function listUserAvailabilityPeriods(userId: string): Promise<UserA
     [userId]
   );
   return result.rows;
+}
+
+/** O5 P2d -- the persisted "has this user configured availability" flag, readable through a snapshot executor so it is
+ * seen from the SAME snapshot as the availability periods it qualifies (the preview's `User` object is read earlier). */
+export async function readUserAvailabilityConfigured(userId: string, executor: ReadQueryExecutor = pool): Promise<boolean> {
+  const result = await executor.query('SELECT "availabilityConfigured" FROM "User" WHERE id = $1', [userId]);
+  return result.rows[0]?.availabilityConfigured === true;
 }
 
 /** No upsert/uniqueness constraint -- unlike `UserActivityPreference`
@@ -2405,6 +2706,51 @@ export async function resetUserAvailabilityConfiguration(userId: string): Promis
   }
 }
 
+// ── Daily Rhythm V1 PR DR1 -- Preferences Foundation. Mirrors the
+// Availability functions directly above: a read, a write (always sets
+// workStart/workEnd/workDays together), and a clear (the only operation
+// that returns to the null/empty UNCONFIGURED state). Unlike availability,
+// there is no separate "configured" flag -- workStart/workEnd both null
+// IS unconfigured, by construction (see User.dailyRhythmWorkStart's own
+// schema doc comment), so there is nothing else to keep in sync. ────────
+
+export interface DailyRhythmPreferencesView {
+  workStart: string | null;
+  workEnd: string | null;
+  workDays: number[];
+}
+
+/** `null` only when the user itself doesn't exist -- a genuinely
+ * unconfigured user (both fields null, empty workDays) is a real, valid
+ * result, not an error. */
+export async function getDailyWorkPreferences(userId: string): Promise<DailyRhythmPreferencesView | null> {
+  const result = await pool.query('SELECT "dailyRhythmWorkStart", "dailyRhythmWorkEnd", "dailyRhythmWorkDays" FROM "User" WHERE id = $1', [userId]);
+  const row = result.rows[0];
+  if (!row) return null;
+  return { workStart: row.dailyRhythmWorkStart ?? null, workEnd: row.dailyRhythmWorkEnd ?? null, workDays: row.dailyRhythmWorkDays ?? [] };
+}
+
+/** Always writes all three columns together -- the caller (the API route)
+ * has already run the submitted input through
+ * validateDailyRhythmPreferencesInput (dailyRhythmPreferences.ts) before
+ * this is called; this function performs no validation of its own, same
+ * convention as replaceUserAvailabilityConfiguration above. */
+export async function setDailyWorkPreferences(userId: string, prefs: { workStart: string; workEnd: string; workDays: readonly number[] }): Promise<void> {
+  await pool.query(
+    `UPDATE "User" SET "dailyRhythmWorkStart" = $2, "dailyRhythmWorkEnd" = $3, "dailyRhythmWorkDays" = $4 WHERE id = $1`,
+    [userId, prefs.workStart, prefs.workEnd, Array.from(prefs.workDays)]
+  );
+}
+
+/** The ONLY operation that returns a user to the unconfigured state
+ * (both time fields null, workDays empty) -- deliberately a separate
+ * function from setDailyWorkPreferences, same "clear is not just save
+ * with different values" precedent resetUserAvailabilityConfiguration
+ * establishes above. */
+export async function clearDailyWorkPreferences(userId: string): Promise<void> {
+  await pool.query(`UPDATE "User" SET "dailyRhythmWorkStart" = NULL, "dailyRhythmWorkEnd" = NULL, "dailyRhythmWorkDays" = '{}' WHERE id = $1`, [userId]);
+}
+
 // ============================================================
 // Goals -> Planning Integration V1 PR A (migration 0035, apps/web/lib/
 // goals.ts for the pure domain logic this persistence layer wraps). Like
@@ -2473,8 +2819,21 @@ export interface GoalActivityWithLinkedPlanStatus extends GoalActivity {
   // resolve). NULL both when plannedActivityId is null and when no
   // execution row exists yet for the current link -- identical "nothing
   // recorded" meaning either way, same convention as linkedPlanStatus
-  // itself above.
+  // itself above. Insights V1 PR3 -- now resolved by a LATERAL subquery
+  // that falls back to the most recent HISTORICAL execution (by
+  // "goalActivityId", never by the now-possibly-NULL plannedActivityId
+  // alone) when the live link has been cleared by deletePlannedActivity
+  // -- see listGoalActivitiesWithLinkedPlanStatus's own doc comment.
   currentValue: number | null;
+  // Insights V1 PR3 -- true iff ANY GoalActivityExecution row exists for
+  // this GoalActivity, independent of whether its PlannedActivity link
+  // is still live. This is the durable half of "was this ever
+  // completed" that deriveGoalActivityState consults ONLY when
+  // plannedActivityId is null, to distinguish "never planned" from "was
+  // planned, completed, and its plan was later cleared from Recently
+  // Completed" -- the latter must still derive COMPLETED, not revert to
+  // SUGGESTED.
+  everCompleted: boolean;
 }
 
 // Explicit column list, "targetDate" cast to ::text -- see Goal's own
@@ -2547,13 +2906,19 @@ export async function createGoalWithActivities(input: {
     const goal: Goal = goalResult.rows[0];
 
     const activities: GoalActivity[] = [];
-    for (const activity of input.activities) {
+    for (const [index, activity] of input.activities.entries()) {
       const persistedCompletion = toPersistedCompletionRequirement(activity.completionRequirement ?? { kind: 'DONE' });
       const persistedRhythm = toPersistedGoalActivityRhythm(activity.rhythm ?? NONE_GOAL_ACTIVITY_RHYTHM);
+      // The request's activity order is meaningful (it is the order the user sees, and an idempotent replay is compared against
+      // it index by index). `now()` is the TRANSACTION start, identical for every row inserted here, and ids are random, so
+      // without this the order would not be recoverable: tied rows come back in whatever order the query plan happens to
+      // produce. Each activity therefore gets its own strictly increasing `createdAt` -- the last keeps the transaction
+      // instant, earlier ones sit 1 ms apart before it (at most 19 ms, MAX_REVIEWED_ACTIVITIES is 20) -- so `ORDER BY
+      // "createdAt"` IS the creation order. Nothing is ever placed in the future, so a later `addGoalActivity` still sorts after.
       const result = await client.query(
-        `INSERT INTO "GoalActivity" (id, "userId", "goalId", title, "activityId", "completionKind", "completionTargetValue", "completionUnit", "rhythmKind", "rhythmTargetPerWeek")
-         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10) RETURNING *`,
-        [randomUUID(), input.userId, goalId, activity.title, activity.activityId, persistedCompletion.completionKind, persistedCompletion.completionTargetValue, persistedCompletion.completionUnit, persistedRhythm.rhythmKind, persistedRhythm.rhythmTargetPerWeek]
+        `INSERT INTO "GoalActivity" (id, "userId", "goalId", title, "activityId", "completionKind", "completionTargetValue", "completionUnit", "rhythmKind", "rhythmTargetPerWeek", "createdAt")
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, now() - ($11::int * interval '1 millisecond')) RETURNING *`,
+        [randomUUID(), input.userId, goalId, activity.title, activity.activityId, persistedCompletion.completionKind, persistedCompletion.completionTargetValue, persistedCompletion.completionUnit, persistedRhythm.rhythmKind, persistedRhythm.rhythmTargetPerWeek, input.activities.length - 1 - index]
       );
       activities.push(result.rows[0]);
     }
@@ -2596,32 +2961,96 @@ export async function archiveGoal(userId: string, goalId: string): Promise<Goal 
  * deletion -- Aura intentionally keeps no separate "ever scheduled"
  * record solely to block a later Goal deletion. See deleteGoal's own doc
  * comment for exactly what this protects against and what it does not.
+ *
+ * Multi-Occurrence Rhythm PR 2 corrective fix -- this guard originally
+ * read ONLY GoalActivity's own singular `plannedActivityId`, which was a
+ * correct proxy for "any retained linkage exists" back when at most one
+ * occurrence could ever be live at a time. Now that an N_PER_WEEK
+ * GoalActivity can carry several simultaneously-UPCOMING occurrences,
+ * that singular column tracks only the MOST RECENTLY materialized one --
+ * an older sibling occurrence can still retain a live Plan link (via its
+ * own `GoalActivityOccurrence.plannedActivityId`) even after the
+ * singular column has been nulled (e.g. the newest occurrence's Plan was
+ * hard-deleted). The authoritative occurrence ledger is therefore checked
+ * too: ANY `GoalActivityOccurrence` row under this Goal's activities that
+ * still references a real PlannedActivity also retains linkage, exactly
+ * like the legacy singular column always has. A NONE-rhythm GoalActivity
+ * never has an occurrence row (R1's own invariant, unchanged), so this
+ * addition is a pure no-op for the legacy finite path.
+ *
+ * Insights V1 PR3 -- widened again, for a sibling reason to the
+ * Multi-Occurrence Rhythm fix above: retained PLAN linkage is not the
+ * only thing that must block deletion. A completed occurrence/finite
+ * activity whose Plan has ALREADY been hard-deleted (deletePlannedActivity)
+ * has no linkage left for the checks above to find, but still has real,
+ * durable completion evidence (GoalActivityExecution, surviving that
+ * delete via its own goalActivityId, which is never cleared by it) -- a
+ * Goal in exactly this state must remain undeletable too, or hard-
+ * deleting it would cascade away confirmed achievement history the user
+ * never asked to erase (AURA_INSIGHTS_PR3_ARCHITECTURE_AUDIT.md /
+ * AURA_INSIGHTS_PR3_EVIDENCE_CONTRACT.md). This is additive to the same
+ * existing 'HAS_HISTORY' response, not a new deletion mode -- a Goal
+ * with genuinely zero retained linkage AND zero completion evidence
+ * remains exactly as deletable as before this addition.
  */
 export async function goalHasRetainedPlanLinkage(userId: string, goalId: string, executor: Pool | PoolClient = pool): Promise<boolean> {
   const result = await executor.query(
-    `SELECT 1 FROM "GoalActivity" WHERE "userId" = $1 AND "goalId" = $2 AND "plannedActivityId" IS NOT NULL LIMIT 1`,
+    `SELECT 1 FROM "GoalActivity" ga
+     WHERE ga."userId" = $1 AND ga."goalId" = $2
+       AND (
+         ga."plannedActivityId" IS NOT NULL
+         OR EXISTS (
+           SELECT 1 FROM "GoalActivityOccurrence" gao
+           WHERE gao."goalActivityId" = ga.id AND gao."plannedActivityId" IS NOT NULL
+         )
+         OR EXISTS (
+           SELECT 1 FROM "GoalActivityExecution" gae
+           WHERE gae."goalActivityId" = ga.id
+         )
+       )
+     LIMIT 1`,
     [userId, goalId]
   );
   return result.rows.length > 0;
 }
 
 /**
- * Hard delete, gated on RETAINED PlannedActivity linkage, not durable
- * history (this PR's own delete-history semantics decision): a
- * GoalActivity whose plannedActivityId currently points at a real
- * PlannedActivity blocks deletion regardless of that Plan's status
- * (UPCOMING/LOGGED/CANCELLED all block equally) -- but this is a snapshot
- * of CURRENT linkage, not a permanent record. If that PlannedActivity is
- * later hard-deleted, its FK's own ON DELETE SET NULL clears the linkage
- * (unchanged, still the only mechanism -- no everPlannedAt column, no
- * separate association-history table), and the Goal becomes deletable
- * again. Row-locks the Goal first (FOR UPDATE, same convention as
- * logHabitCompletion above) so a concurrent acceptance linking a
- * GoalActivity under this Goal can't race past the linkage check.
+ * Hard delete, gated on RETAINED PlannedActivity linkage OR retained
+ * completion evidence (Insights V1 PR3 widened this from linkage-only --
+ * see goalHasRetainedPlanLinkage's own doc comment), not durable history
+ * as a permanent record in every other sense (this PR's own
+ * delete-history semantics decision): a GoalActivity whose
+ * plannedActivityId currently points at a real PlannedActivity blocks
+ * deletion regardless of that Plan's status (UPCOMING/LOGGED/CANCELLED
+ * all block equally) -- but this is a snapshot of CURRENT linkage, not a
+ * permanent record. If that PlannedActivity is later hard-deleted, its
+ * FK's own ON DELETE SET NULL clears the linkage (unchanged, still a
+ * mechanism that exists), and the Goal becomes deletable again --
+ * UNLESS confirmed completion evidence also survived that same delete
+ * (PR3's own addition), in which case it remains blocked. Row-locks the
+ * Goal first (FOR UPDATE, same convention as logHabitCompletion above)
+ * so a concurrent acceptance linking a GoalActivity under this Goal
+ * can't race past the linkage check.
+ *
+ * Insights V1 PR3 -- ALSO acquires the SAME `goal-evidence:${userId}`
+ * advisory transaction lock logPlannedActivity's Goal-linked completion
+ * branch takes (db.ts), for the entire duration of this transaction
+ * (held from here through the final DELETE/ROLLBACK, auto-released at
+ * COMMIT/ROLLBACK) -- closing the TOCTOU window where this function's
+ * own evidence check could read "none retained" microseconds before a
+ * concurrent Done commits new evidence under this exact Goal, which the
+ * subsequent DELETE would then cascade away anyway. Acquired
+ * unconditionally here (deletion is a rare, deliberate action, unlike
+ * the hot completion path, where the lock is acquired only once Goal
+ * linkage is already confirmed) so no Goal-linked Done for this user can
+ * commit while a deletion of one of their Goals is in flight, and vice
+ * versa. Exactly one lock is ever acquired per transaction in either
+ * function, so no lock-ordering deadlock is possible.
  */
 export async function deleteGoal(userId: string, goalId: string): Promise<'DELETED' | 'NOT_FOUND' | 'HAS_HISTORY'> {
   const client = await beginTransaction();
   try {
+    await client.query('SELECT pg_advisory_xact_lock(hashtext($1))', [`goal-evidence:${userId}`]);
     const goalRes = await client.query(`SELECT 1 FROM "Goal" WHERE id = $1 AND "userId" = $2 FOR UPDATE`, [goalId, userId]);
     if (goalRes.rows.length === 0) {
       await client.query('ROLLBACK');
@@ -2714,14 +3143,212 @@ export async function dismissGoalActivity(userId: string, goalId: string, goalAc
  * handled identically by deriveGoalActivityState).
  */
 export async function listGoalActivitiesWithLinkedPlanStatus(userId: string, goalId: string): Promise<GoalActivityWithLinkedPlanStatus[]> {
+  // TOTAL order: `createdAt` is creation order for every activity created through createGoalWithActivities (strictly increasing per
+  // activity), and `id` makes the order deterministic under any remaining tie (e.g. rows that predate that), instead of leaving
+  // tied rows in whatever order the query plan emits -- the idempotent Goal-create replay compares this list index by index.
+  //
+  // Insights V1 PR3 -- the execution join is now a LATERAL subquery
+  // (never more than one row per GoalActivity, preserving this
+  // function's own flat, one-row-per-activity shape exactly) that
+  // prefers the execution tied to the CURRENT live "plannedActivityId"
+  // when one exists (byte-for-byte the same result the old plain
+  // "plannedActivityId = plannedActivityId" join already produced in
+  // that case), and falls back to the most recently created execution
+  // for this GoalActivity otherwise -- the case that matters once
+  // deletePlannedActivity has cleared the live link (ga."plannedActivityId"
+  // IS NULL afterward, so the old join's equality could never match
+  // again; matching on "goalActivityId" instead is what survives that
+  // deletion). "everCompleted" is true iff that subquery found any row
+  // at all, independent of which plan (if any) is currently linked.
   const result = await pool.query(
-    `SELECT ga.*, pa.status AS "linkedPlanStatus", gae."currentValue"
+    `SELECT ga.*, pa.status AS "linkedPlanStatus", gae."currentValue", (gae.id IS NOT NULL) AS "everCompleted"
      FROM "GoalActivity" ga
      LEFT JOIN "PlannedActivity" pa ON pa.id = ga."plannedActivityId"
-     LEFT JOIN "GoalActivityExecution" gae ON gae."plannedActivityId" = ga."plannedActivityId"
+     LEFT JOIN LATERAL (
+       SELECT e.id, e."currentValue"
+       FROM "GoalActivityExecution" e
+       WHERE e."goalActivityId" = ga.id
+       ORDER BY (e."plannedActivityId" IS NOT NULL AND e."plannedActivityId" = ga."plannedActivityId") DESC, e."createdAt" DESC
+       LIMIT 1
+     ) gae ON true
      WHERE ga."userId" = $1 AND ga."goalId" = $2
-     ORDER BY ga."createdAt"`,
+     ORDER BY ga."createdAt", ga.id`,
     [userId, goalId]
+  );
+  return result.rows;
+}
+
+/**
+ * Insights V1 PR4 -- the multi-Goal sibling of listGoalActivitiesWithLinkedPlanStatus
+ * above: byte-for-byte the SAME query (same LATERAL execution-evidence
+ * join, same linkedPlanStatus/everCompleted shape, same TOTAL order), only
+ * the WHERE clause is widened from one "goalId" to "goalId = ANY(...)" --
+ * so a cross-Goal reporting read (apps/web/lib/insightsReporting.ts) can
+ * fetch every GoalActivity for every one of a user's Goals in ONE round
+ * trip, never one query per Goal (the N+1 shape this function exists to
+ * avoid). No business rule is duplicated: this is the identical SELECT,
+ * just not goalId-scoped to a single row. Order is additionally stable
+ * across goalId first (so a caller grouping rows back by Goal can do so
+ * with a single linear pass, never a second sort).
+ */
+export async function listGoalActivitiesWithLinkedPlanStatusForGoals(userId: string, goalIds: readonly string[]): Promise<GoalActivityWithLinkedPlanStatus[]> {
+  if (goalIds.length === 0) return [];
+  const result = await pool.query(
+    `SELECT ga.*, pa.status AS "linkedPlanStatus", gae."currentValue", (gae.id IS NOT NULL) AS "everCompleted"
+     FROM "GoalActivity" ga
+     LEFT JOIN "PlannedActivity" pa ON pa.id = ga."plannedActivityId"
+     LEFT JOIN LATERAL (
+       SELECT e.id, e."currentValue"
+       FROM "GoalActivityExecution" e
+       WHERE e."goalActivityId" = ga.id
+       ORDER BY (e."plannedActivityId" IS NOT NULL AND e."plannedActivityId" = ga."plannedActivityId") DESC, e."createdAt" DESC
+       LIMIT 1
+     ) gae ON true
+     WHERE ga."userId" = $1 AND ga."goalId" = ANY($2::text[])
+     ORDER BY ga."goalId", ga."createdAt", ga.id`,
+    [userId, [...goalIds]]
+  );
+  return result.rows;
+}
+
+/**
+ * Insights V1 PR4 -- the one new reporting read this PR adds: every
+ * non-deleted PlannedActivity in a date range, EVERY status included
+ * (unlike listPlannedActivitiesForDay, which deliberately excludes
+ * CANCELLED for its own, unrelated display purpose -- reusing it here
+ * would silently drop the "explicit cancellations" reporting category).
+ * No status is filtered, no business rule is applied here at all --
+ * classification into CONFIRMED COMPLETED / SCHEDULED / SKIPPED /
+ * CANCELLED / RESCHEDULED / AWAITING CONFIRMATION happens entirely in the
+ * pure, DB-free classifyPlanningStatus (insightsReporting.ts), so this
+ * function has exactly one job: read the rows, ownership-scoped, range-
+ * bounded, nothing else. Read-only; no write, no side effect.
+ *
+ * Insights V1 PR7 -- Move consistency correction (AURA_INSIGHTS_V1_PRODUCT_
+ * COMPLETION_AUDIT.md finding F-3). The range bound below used to be
+ * `"plannedStartAt" BETWEEN $2 AND $3` for every row, including a MOVED
+ * row -- but a MOVED row's OWN plannedStartAt is the stale, ORIGINAL
+ * schedule it was moved away FROM, not when the Move itself happened.
+ * Since a live, actionable Move-chain terminal is (by construction)
+ * scheduled in the future, its own source row's original plannedStartAt
+ * is very often ALSO in the future, so the old filter silently excluded
+ * the exact Move events PR5's REPEATED_RESCHEDULING signal was telling
+ * the user about in the same response -- a confirmed, reproduced
+ * self-contradiction ("0 rescheduled" next to "this activity has been
+ * moved a few times").
+ *
+ * The fix: a MOVED row is now attributed by the actual Move timestamp
+ * (`movedAt`) when one is recorded, falling back to its own
+ * `plannedStartAt` only for a legacy row moved before migration 0046
+ * introduced that column (`movedAt IS NULL`) -- never fabricated, never
+ * guessed, the exact same "no backfill" discipline every PR1-6 migration
+ * in this schema already established. Every non-MOVED row's own
+ * attribution is completely unchanged (the CASE below evaluates to NULL
+ * for any other status, so COALESCE falls straight through to
+ * "plannedStartAt", byte-identical to the original query). A MOVED row's
+ * successor is a separate row with its own status and its own
+ * independent membership in this same range -- this change does not
+ * touch how the successor is counted, so a single Move operation still
+ * contributes exactly one RESCHEDULED fact, never two.
+ */
+export async function listPlannedActivitiesForReporting(userId: string, from: Date, to: Date): Promise<PlannedActivity[]> {
+  const result = await pool.query(
+    `SELECT * FROM "PlannedActivity"
+     WHERE "userId" = $1
+       AND COALESCE(CASE WHEN status = 'MOVED' THEN "movedAt" END, "plannedStartAt") BETWEEN $2 AND $3
+     ORDER BY "plannedStartAt" ASC`,
+    [userId, from, to]
+  );
+  return result.rows;
+}
+
+/**
+ * Insights V1 PR6 -- Durable Completion Attribution: the count of
+ * confirmed, non-Goal-linked completions whose ORIGINATING PlannedActivity
+ * has since been hard-deleted, attributable to the same scheduled-date
+ * range `listPlannedActivitiesForReporting` above already uses (never
+ * `logTimestamp`/`createdAt`, which record completion time, a materially
+ * different fact -- AURA_INSIGHTS_PR6_COMPLETION_EVIDENCE_DECISION.md
+ * section 7). A pure, additive fallback: the live-Plan path above remains
+ * fully authoritative and untouched; this only recovers evidence that
+ * would otherwise silently vanish from `confirmedCompleted` the moment a
+ * completed, non-Goal-linked Plan is cleared from "Recently Completed".
+ *
+ * Every condition below is required, matching the PR6 ticket's own exact
+ * specification -- never relaxed, never inferred from title/activityId/
+ * timestamp proximity:
+ *   - `"userId" = $1`                        -- ownership.
+ *   - `"logSource" = 'AURA_PLANNED'`          -- only a completion that
+ *     originated from completing a Plan (never a manual/do-now/custom-
+ *     habit log, which never sets the four PR6 columns at all).
+ *   - `"completionAttribution" = 'NON_GOAL'`  -- excludes 'GOAL_LINKED'
+ *     (already durably represented via GoalActivityExecution, PR3 -- see
+ *     the decision doc's own "do not double-count" contract) AND excludes
+ *     NULL/UNKNOWN_LEGACY (a row written before this feature existed,
+ *     whose attribution is permanently unknown -- NEVER silently treated
+ *     as NON_GOAL).
+ *   - `"originatingPlannedActivityId" IS NOT NULL` / `"scheduledStartAtSnapshot" IS NOT NULL`
+ *     -- defensive: both are always set together with a non-NULL
+ *     `completionAttribution` by the one canonical writer
+ *     (logPlannedActivity), so this should never actually filter
+ *     anything out in practice; kept as an explicit guard rather than an
+ *     assumption.
+ *   - `"scheduledStartAtSnapshot" BETWEEN $2 AND $3` -- the exact same
+ *     two range parameters the live-Plan query receives.
+ *   - `NOT EXISTS (... "habitLogId" = hl.id)` -- the deduplication
+ *     contract: a HabitLog whose originating Plan is STILL LIVE is
+ *     already counted via the live-Plan path above; this clause is what
+ *     prevents it from ever being counted twice. Uses the HabitLog's own
+ *     stable id for this existence check, never title/date matching.
+ *
+ * Covered by the composite index on (userId, completionAttribution,
+ * scheduledStartAtSnapshot) and the partial index on
+ * PlannedActivity.habitLogId, both added by migration 0049 -- one bounded,
+ * indexed query, no N+1. Read-only; no write, no side effect.
+ */
+export async function countDeletedNonGoalCompletionsInRange(userId: string, from: Date, to: Date): Promise<number> {
+  const result = await pool.query(
+    `SELECT count(*)::int AS count
+     FROM "HabitLog" hl
+     WHERE hl."userId" = $1
+       AND hl."logSource" = 'AURA_PLANNED'
+       AND hl."completionAttribution" = 'NON_GOAL'
+       AND hl."originatingPlannedActivityId" IS NOT NULL
+       AND hl."scheduledStartAtSnapshot" IS NOT NULL
+       AND hl."scheduledStartAtSnapshot" BETWEEN $2 AND $3
+       AND NOT EXISTS (
+         SELECT 1 FROM "PlannedActivity" pa WHERE pa."habitLogId" = hl.id
+       )`,
+    [userId, from, to]
+  );
+  return result.rows[0]?.count ?? 0;
+}
+
+/** Insights V1 PR5 -- every row of this user's Move-chain graph: either a
+ * row that has itself been moved (status = 'MOVED', an interior/origin
+ * link) or a row that was PRODUCED by a move ("rescheduledFromPlanId" is
+ * set, a candidate chain terminal). Unbounded by date range -- a chain's
+ * own age is irrelevant to detecting it, only its CURRENT terminal's live
+ * status matters (apps/web/lib/improvementSignals.ts's own
+ * evaluateMoveChains, which reconstructs every chain in memory from this
+ * flat edge list, never a second query per chain/hop). By the
+ * `rescheduledFromPlanId` FK's own invariant (schema.prisma), any row
+ * this set's forward edges point to must itself have status 'MOVED' and
+ * therefore already be included here -- a reference that resolves to
+ * nothing missing from this set is exactly the "broken chain" case
+ * evaluateMoveChains treats as insufficient evidence, never guessed at. */
+export interface MoveChainLinkRow {
+  id: string;
+  status: PlannedActivity['status'];
+  rescheduledFromPlanId: string | null;
+  movedAt: Date | null;
+}
+
+export async function listMoveChainLinksForUser(userId: string): Promise<MoveChainLinkRow[]> {
+  const result = await pool.query(
+    `SELECT id, status, "rescheduledFromPlanId", "movedAt" FROM "PlannedActivity"
+     WHERE "userId" = $1 AND (status = 'MOVED' OR "rescheduledFromPlanId" IS NOT NULL)`,
+    [userId]
   );
   return result.rows;
 }
@@ -2752,17 +3379,43 @@ export interface PlanGoalContext {
  * helper (normalizeGoalActivityCompletionRequirement) -- a legacy/never-set
  * GoalActivity therefore always reads as DONE here, exactly like every
  * other consumer of that helper.
+ *
+ * Multi-Occurrence Rhythm PR 2 corrective fix -- this previously matched
+ * ONLY `ga."plannedActivityId"` (the singular, "most recently
+ * materialized occurrence" column), so every sibling occurrence except
+ * the newest silently got no Goal context at all anywhere this function
+ * feeds (Home/My Day's daily agenda, Day Recompose, the Recomposition
+ * move card). The query is now a UNION of the legacy singular-link match
+ * (unchanged, still the only path for a NONE-rhythm/finite GoalActivity)
+ * with a second branch resolving through the authoritative occurrence
+ * ledger (`GoalActivityOccurrence.plannedActivityId`) -- so EVERY
+ * occurrence's own Plan resolves to the same, correct Goal context,
+ * independent of which single occurrence the singular column currently
+ * references. `UNION` (not `UNION ALL`) de-duplicates the common case
+ * where a plan is both an occurrence's own link AND currently the
+ * singular pointer -- each plan id still produces exactly one result row.
  */
 export async function loadGoalContextsForPlanIds(userId: string, planIds: readonly string[]): Promise<Map<string, PlanGoalContext>> {
   const contexts = new Map<string, PlanGoalContext>();
   if (planIds.length === 0) return contexts;
   const result = await pool.query(
-    `SELECT ga."plannedActivityId", ga.id AS "goalActivityId", ga."completionKind", ga."completionTargetValue", ga."completionUnit",
-            g.id AS "goalId", g.title AS "goalTitle", gae."currentValue"
-     FROM "GoalActivity" ga
-     JOIN "Goal" g ON g.id = ga."goalId"
-     LEFT JOIN "GoalActivityExecution" gae ON gae."plannedActivityId" = ga."plannedActivityId"
-     WHERE ga."userId" = $1 AND ga."plannedActivityId" = ANY($2::text[])`,
+    `SELECT matched."plannedActivityId", matched."goalActivityId", matched."completionKind", matched."completionTargetValue", matched."completionUnit",
+            matched."goalId", matched."goalTitle", gae."currentValue"
+     FROM (
+       SELECT ga."plannedActivityId" AS "plannedActivityId", ga.id AS "goalActivityId", ga."completionKind", ga."completionTargetValue", ga."completionUnit",
+              g.id AS "goalId", g.title AS "goalTitle"
+       FROM "GoalActivity" ga
+       JOIN "Goal" g ON g.id = ga."goalId"
+       WHERE ga."userId" = $1 AND ga."plannedActivityId" = ANY($2::text[])
+       UNION
+       SELECT gao."plannedActivityId" AS "plannedActivityId", ga.id AS "goalActivityId", ga."completionKind", ga."completionTargetValue", ga."completionUnit",
+              g.id AS "goalId", g.title AS "goalTitle"
+       FROM "GoalActivityOccurrence" gao
+       JOIN "GoalActivity" ga ON ga.id = gao."goalActivityId"
+       JOIN "Goal" g ON g.id = ga."goalId"
+       WHERE gao."userId" = $1 AND gao."plannedActivityId" = ANY($2::text[])
+     ) matched
+     LEFT JOIN "GoalActivityExecution" gae ON gae."plannedActivityId" = matched."plannedActivityId"`,
     [userId, [...planIds]]
   );
   for (const row of result.rows) {
@@ -2807,16 +3460,27 @@ export async function loadGoalContextsForPlanIds(userId: string, planIds: readon
  */
 export async function loadGoalActivityRhythmFacts(userId: string, goalActivityId: string, timezone: string, executor: Pool | PoolClient = pool): Promise<GoalActivityRhythmOccurrenceFact[]> {
   const result = await executor.query(
-    `SELECT pa."plannedStartAt", pa.status
+    `SELECT pa."plannedStartAt", pa.status, gao."scheduledWeekStart", gao."scheduledWeekTimezone", (gae.id IS NOT NULL) AS "hasCompletedExecution"
      FROM "GoalActivityOccurrence" gao
-     JOIN "PlannedActivity" pa ON pa.id = gao."plannedActivityId"
+     LEFT JOIN "PlannedActivity" pa ON pa.id = gao."plannedActivityId"
+     LEFT JOIN "GoalActivityExecution" gae ON gae."goalActivityOccurrenceId" = gao.id
      WHERE gao."userId" = $1 AND gao."goalActivityId" = $2`,
     [userId, goalActivityId]
   );
-  return result.rows.map((row): GoalActivityRhythmOccurrenceFact => ({
-    localDate: getDatePartsInTimezone(timezone, new Date(row.plannedStartAt)).dateStr,
-    contribution: deriveGoalActivityRhythmContribution(row.status as PlannedActivityStatusForRhythm),
-  }));
+  return result.rows
+    .map((row): GoalActivityRhythmOccurrenceFact | null => {
+      const localDate = resolveOccurrenceLocalDateOrNull(
+        { scheduledWeekStart: row.scheduledWeekStart, scheduledWeekTimezone: row.scheduledWeekTimezone },
+        row.plannedStartAt ? new Date(row.plannedStartAt) : null,
+        timezone
+      );
+      if (localDate === null) return null; // unattributable: pre-PR2 legacy occurrence whose plan was later deleted -- never fabricate a week
+      return {
+        localDate,
+        contribution: deriveGoalActivityRhythmContributionWithEvidence(row.hasCompletedExecution, row.status as PlannedActivityStatusForRhythm | null),
+      };
+    })
+    .filter((fact): fact is GoalActivityRhythmOccurrenceFact => fact !== null);
 }
 
 /**
@@ -2832,20 +3496,61 @@ export async function loadGoalActivityRhythmFacts(userId: string, goalActivityId
  * Map (never an empty-array entry), matching loadGoalContextsForPlanIds'
  * own "no entry means none" convention.
  */
-export async function loadGoalActivityRhythmFactsForActivities(userId: string, goalActivityIds: readonly string[], timezone: string): Promise<Map<string, GoalActivityRhythmOccurrenceFact[]>> {
-  const factsByActivity = new Map<string, GoalActivityRhythmOccurrenceFact[]>();
-  if (goalActivityIds.length === 0) return factsByActivity;
-  const result = await pool.query(
-    `SELECT gao."goalActivityId", pa."plannedStartAt", pa.status
+/** O5 P2d -- one occurrence's raw database row for the Rhythm facts: which GoalActivity, when its linked plan starts, and that
+ * plan's status. Detached scalars (the instant is returned as read; callers copy it).
+ * Insights V1 PR3 -- plannedStartAt/status are now nullable: the join to
+ * PlannedActivity is LEFT, not INNER, so an occurrence whose plan has
+ * been hard-deleted still produces a row (previously it would simply
+ * vanish from the result set). hasCompletedExecution is the durable,
+ * goalActivityOccurrenceId-linked completion fact (see
+ * buildGoalActivityRhythmFactsFromOccurrenceRows below). */
+export interface GoalActivityOccurrenceRow {
+  goalActivityId: string;
+  plannedStartAt: Date | string | null;
+  status: string | null;
+  /** Insights V1 PR2 -- the occurrence's own scheduled-week snapshot, if written (see resolveOccurrenceLocalDate). */
+  scheduledWeekStart: string | null;
+  scheduledWeekTimezone: string | null;
+  hasCompletedExecution: boolean;
+}
+
+/** The raw read behind `loadGoalActivityRhythmFactsForActivities`, separated so the SAME rows can be read
+ * through a snapshot executor and turned into facts later by the same pure mapping.
+ * Insights V1 PR3 -- both joins widened to LEFT (PlannedActivity may be
+ * hard-deleted; the new GoalActivityExecution join supplies durable
+ * completion evidence that survives that deletion). */
+export async function listGoalActivityOccurrenceRowsForActivities(userId: string, goalActivityIds: readonly string[], executor: ReadQueryExecutor = pool): Promise<GoalActivityOccurrenceRow[]> {
+  if (goalActivityIds.length === 0) return [];
+  const result = await executor.query(
+    `SELECT gao."goalActivityId", pa."plannedStartAt", pa.status, gao."scheduledWeekStart", gao."scheduledWeekTimezone", (gae.id IS NOT NULL) AS "hasCompletedExecution"
      FROM "GoalActivityOccurrence" gao
-     JOIN "PlannedActivity" pa ON pa.id = gao."plannedActivityId"
+     LEFT JOIN "PlannedActivity" pa ON pa.id = gao."plannedActivityId"
+     LEFT JOIN "GoalActivityExecution" gae ON gae."goalActivityOccurrenceId" = gao.id
      WHERE gao."userId" = $1 AND gao."goalActivityId" = ANY($2::text[])`,
     [userId, [...goalActivityIds]]
   );
-  for (const row of result.rows) {
+  return result.rows;
+}
+
+/** Pure: the per-activity Rhythm occurrence facts for already-read rows (the shaping `loadGoalActivityRhythmFactsForActivities`
+ * has always applied). A goalActivityId with no rows has no entry.
+ * Insights V1 PR3 -- an unattributable row (no scheduled-week snapshot
+ * and no live plan to derive from, a pre-PR2 legacy occurrence whose
+ * plan was later deleted) is silently excluded, same as
+ * loadGoalActivityRhythmFacts's own identical fallback -- never
+ * fabricated, never crashes the whole batch. */
+export function buildGoalActivityRhythmFactsFromOccurrenceRows(rows: readonly GoalActivityOccurrenceRow[], timezone: string): Map<string, GoalActivityRhythmOccurrenceFact[]> {
+  const factsByActivity = new Map<string, GoalActivityRhythmOccurrenceFact[]>();
+  for (const row of rows) {
+    const localDate = resolveOccurrenceLocalDateOrNull(
+      { scheduledWeekStart: row.scheduledWeekStart, scheduledWeekTimezone: row.scheduledWeekTimezone },
+      row.plannedStartAt ? new Date(row.plannedStartAt) : null,
+      timezone
+    );
+    if (localDate === null) continue;
     const fact: GoalActivityRhythmOccurrenceFact = {
-      localDate: getDatePartsInTimezone(timezone, new Date(row.plannedStartAt)).dateStr,
-      contribution: deriveGoalActivityRhythmContribution(row.status as PlannedActivityStatusForRhythm),
+      localDate,
+      contribution: deriveGoalActivityRhythmContributionWithEvidence(row.hasCompletedExecution, row.status as PlannedActivityStatusForRhythm | null),
     };
     const existing = factsByActivity.get(row.goalActivityId);
     if (existing) existing.push(fact);
@@ -2854,26 +3559,37 @@ export async function loadGoalActivityRhythmFactsForActivities(userId: string, g
   return factsByActivity;
 }
 
-// Goals V2 Candidate A1 -- the ownership-scoped discovery query for
-// "which of this user's N_PER_WEEK GoalActivities are structurally
-// eligible to be CONSIDERED for another occurrence." Mirrors
-// materializeGoalActivityRhythmOccurrence's own gate exactly (same file,
-// above): status != DISMISSED, rhythmKind = N_PER_WEEK, and the linked
-// plan (if any) is not UPCOMING (a live commitment is never offered
-// again -- HAS_LIVE_COMMITMENT there, excluded here by construction
-// rather than by a second, separately-maintained check). Weekly CAPACITY
-// is deliberately NOT evaluated in SQL -- that stays the authoritative,
-// already-tested computeGoalActivityRhythmEligibility (goalActivityRhythm.ts),
-// applied by the caller (goalDemandCandidates.ts) against a second,
-// batched facts query, never duplicated here as a second counting
-// formula. Scoped by "userId" on GoalActivity only (ga."userId" = $1) --
-// the same convention loadGoalContextsForPlanIds above already
-// established: a JOIN target is never independently re-scoped by userId,
-// the FK relationship plus the owning row's own filter is what already
-// prevents cross-user leakage throughout this file. ARCHIVED Goals and
-// Rhythm NONE/undefined activities are filtered in SQL, never pulled back
-// just to be discarded in application code (this ticket's own section
-// 4/14: filter as early as safely possible).
+export async function loadGoalActivityRhythmFactsForActivities(userId: string, goalActivityIds: readonly string[], timezone: string): Promise<Map<string, GoalActivityRhythmOccurrenceFact[]>> {
+  return buildGoalActivityRhythmFactsFromOccurrenceRows(await listGoalActivityOccurrenceRowsForActivities(userId, goalActivityIds), timezone);
+}
+
+// Goals V2 Multi-Occurrence Rhythm PR 2 -- the ownership-scoped discovery
+// query for "which of this user's N_PER_WEEK GoalActivities are
+// structurally eligible to be CONSIDERED for another occurrence."
+//
+// PR 2 removes the single-live-plan exclusion this query previously
+// applied (`pa.status IS DISTINCT FROM 'UPCOMING'`, joined off
+// GoalActivity's own singular `plannedActivityId`): a GoalActivity with
+// one already-UPCOMING occurrence is no longer excluded outright merely
+// for having one -- weekly CAPACITY (via the occurrence ledger, not this
+// singular pointer) is the only remaining gate, exactly as
+// materializeGoalActivityRhythmOccurrence (below) now also enforces.
+// Dropping that filter also removes its join target: the `PlannedActivity`
+// LEFT JOIN served no other purpose (no column from it is selected).
+//
+// Weekly CAPACITY is still deliberately NOT evaluated in SQL -- that
+// stays the authoritative, already-tested
+// evaluateNewOccurrenceEligibility/computeGoalActivityRhythmEligibility
+// (goalActivityOccurrenceCapacity.ts / goalActivityRhythm.ts), applied by
+// the caller (goalDemandCandidates.ts) against a second, batched facts
+// query, never duplicated here as a second counting formula. Scoped by
+// "userId" on GoalActivity only (ga."userId" = $1) -- the same convention
+// loadGoalContextsForPlanIds above already established: a JOIN target is
+// never independently re-scoped by userId, the FK relationship plus the
+// owning row's own filter is what already prevents cross-user leakage
+// throughout this file. ARCHIVED Goals and Rhythm NONE/undefined
+// activities are still filtered in SQL, never pulled back just to be
+// discarded in application code.
 export interface CandidateGoalActivityForRhythmDemandRow {
   goalActivityId: string;
   goalId: string;
@@ -2884,48 +3600,167 @@ export interface CandidateGoalActivityForRhythmDemandRow {
   rhythmTargetPerWeek: number | null;
 }
 
-export async function loadCandidateGoalActivitiesForRhythmDemand(userId: string): Promise<CandidateGoalActivityForRhythmDemandRow[]> {
-  const result = await pool.query(
+export async function loadCandidateGoalActivitiesForRhythmDemand(userId: string, executor: ReadQueryExecutor = pool): Promise<CandidateGoalActivityForRhythmDemandRow[]> {
+  const result = await executor.query(
     `SELECT ga.id AS "goalActivityId", ga."goalId", g.title AS "goalTitle", ga.title, ga."activityId",
             ga."rhythmKind", ga."rhythmTargetPerWeek"
      FROM "GoalActivity" ga
      JOIN "Goal" g ON g.id = ga."goalId"
-     LEFT JOIN "PlannedActivity" pa ON pa.id = ga."plannedActivityId"
      WHERE ga."userId" = $1
        AND g.status = 'ACTIVE'
        AND ga.status != 'DISMISSED'
        AND ga."rhythmKind" = 'N_PER_WEEK'
-       AND pa.status IS DISTINCT FROM 'UPCOMING'
      ORDER BY ga.id`,
     [userId]
   );
   return result.rows;
 }
 
-export type MaterializeGoalActivityRhythmOccurrenceResult =
-  | { ok: true; occurrenceId: string }
-  | { ok: false; reason: 'NOT_FOUND' | 'NOT_RHYTHM_ELIGIBLE' | 'HAS_LIVE_COMMITMENT' | 'CAPACITY_EXHAUSTED' };
+export type DailyOccurrenceEligibilityResult =
+  | { status: 'ELIGIBLE' }
+  | { status: 'OCCUPIED'; blockingOccurrenceId: string }
+  // A recoverable, per-check conflict -- never a permanent judgment and
+  // never persisted. See this function's own doc comment for exactly when
+  // this occurs and how it resolves.
+  | { status: 'UNRESOLVED'; unresolvedOccurrenceId: string };
 
 /**
- * Goals V2 Rhythm R3 -- the one new atomic write this slice introduces:
- * "an N_PER_WEEK GoalActivity whose current linked plan is either absent
- * (first-ever occurrence) or no longer live (LOGGED/SKIPPED/CANCELLED --
- * never UPCOMING) still has weekly capacity, so link it to a NEWLY CREATED
- * PlannedActivity and record a new GoalActivityOccurrence." Called from
- * EXACTLY ONE place (dayConstructorAcceptancePersistence.ts's own write
- * loop), on the SAME `client` as the PlannedActivity insert that already
- * happened immediately before it, tried FIRST for every Goal-linked write
- * (a pure, side-effect-free read -- `NOT_RHYTHM_ELIGIBLE` -- for any
- * GoalActivity whose own rhythmKind isn't 'N_PER_WEEK'). The existing,
- * UNCHANGED `linkGoalActivityToPlannedActivity` is tried only as the
- * fallback for that exact `NOT_RHYTHM_ELIGIBLE` case, and alone still owns
- * every NONE/first-link/CANCELLED-or-SKIPPED-relink case exactly as before
- * R3 (this ticket's own section 4: the finite legacy path is untouched).
- * This ordering (Rhythm-aware tried first) is what lets ONE call correctly
- * cover a brand-new N_PER_WEEK GoalActivity's very FIRST occurrence too --
- * the legacy function alone would successfully link a NULL-plannedActivityId
+ * HPG3-A2 -- the shared transactional answer to "does this GoalActivity
+ * already have a LIVE occurrence on `candidateLocalDate`?" Always called on
+ * the caller's own transaction client, inside the caller's own already-held
+ * per-user advisory lock -- takes no lock of its own beyond `FOR SHARE OF
+ * pa` on the live-plan read below (the lock domain itself is what makes two
+ * concurrent requests for the same user safe, exactly as
+ * materializeGoalActivityRhythmOccurrence's own doc comment already
+ * explains for weekly capacity).
+ *
+ * TWO separate queries, not one LEFT JOIN: `FOR SHARE OF pa` is rejected by
+ * Postgres on the nullable side of an outer join ("FOR SHARE cannot be
+ * applied to the nullable side of an outer join"), so live occurrences
+ * (INNER JOIN, lockable) and hard-deleted occurrences (no PlannedActivity
+ * row left to lock) are read separately.
+ *
+ * LIVE occurrences (status UPCOMING or LOGGED -- this is also what makes a
+ * derived-MISSED item consume the day's allowance: MISSED is never a
+ * persisted status, only an UPCOMING row whose window has elapsed, so it is
+ * already included here with no special case): each row's day is
+ * `resolveOccurrenceLocalDay` (snapshot wins when present, live-derived
+ * only when absent -- see that function's own doc comment). CANCELLED and
+ * SKIPPED plans are excluded by the query itself and never block.
+ *
+ * HARD-DELETED occurrences (`plannedActivityId IS NULL`): a row with NO
+ * GoalActivityExecution was a hard-deleted CANCELLED plan (the only other
+ * status `deletePlannedActivity` permits) -- never blocks, same as a live
+ * CANCELLED one. A row WITH an execution was a real, completed occurrence
+ * whose own PlannedActivity the user later cleared from "Recently
+ * Completed" -- it still blocks whichever day it happened on. If that day
+ * is recoverable (the snapshot survives hard-deletion untouched), it blocks
+ * exactly that day, same as any live row. If the day is NOT recoverable
+ * (pre-A2 legacy row, no snapshot, plan long gone) this function does NOT
+ * guess: it does not treat the day as free (that could silently admit a
+ * real duplicate) and it does not treat EVERY candidate day as permanently
+ * occupied either (that would block all future scheduling over one
+ * unrecoverable historical fact) -- it returns `UNRESOLVED` instead, a
+ * typed, per-check, non-persisted result. UNRESOLVED only wins when no
+ * OTHER row definitively resolves `candidateLocalDate` as `OCCUPIED` first
+ * (a definitive conflict is always reported over an unrelated ambiguity).
+ * It resolves itself automatically, with no backfill and no migration,
+ * the moment that specific row's own `scheduledLocalDate` becomes known --
+ * which can only happen via a future, separately-scoped reconciliation
+ * tool, since this function itself never fabricates one. In production
+ * today this is a theoretical safety net, not an active condition: no
+ * occurrence created before this slice's own snapshot-writing change ever
+ * reaches a real user's GoalActivity (prior HPG3 audits found zero
+ * production GoalActivity with rhythmKind ever set).
+ *
+ * `excludeOccurrenceId` lets a Move exclude the very occurrence it is
+ * repositioning from its own capacity check (planMove.ts).
+ */
+export async function checkDailyOccurrenceEligibility(
+  userId: string,
+  goalActivityId: string,
+  candidateLocalDate: string,
+  timezone: string,
+  excludeOccurrenceId: string | null,
+  client: PoolClient
+): Promise<DailyOccurrenceEligibilityResult> {
+  const liveRes = await client.query(
+    `SELECT gao.id, gao."scheduledLocalDate", gao."scheduledLocalTimezone", pa."plannedStartAt"
+     FROM "GoalActivityOccurrence" gao
+     JOIN "PlannedActivity" pa ON pa.id = gao."plannedActivityId"
+     WHERE gao."goalActivityId" = $1 AND gao."userId" = $2 AND pa.status IN ('UPCOMING', 'LOGGED')
+     FOR SHARE OF pa`,
+    [goalActivityId, userId]
+  );
+  for (const row of liveRes.rows) {
+    if (excludeOccurrenceId && row.id === excludeOccurrenceId) continue;
+    const day = resolveOccurrenceLocalDay(
+      { scheduledLocalDate: row.scheduledLocalDate, scheduledLocalTimezone: row.scheduledLocalTimezone },
+      new Date(row.plannedStartAt),
+      timezone
+    );
+    if (day === candidateLocalDate) return { status: 'OCCUPIED', blockingOccurrenceId: row.id };
+  }
+
+  const deletedRes = await client.query(
+    `SELECT gao.id, gao."scheduledLocalDate", gao."scheduledLocalTimezone", (gae.id IS NOT NULL) AS "hasExecution"
+     FROM "GoalActivityOccurrence" gao
+     LEFT JOIN "GoalActivityExecution" gae ON gae."goalActivityOccurrenceId" = gao.id
+     WHERE gao."goalActivityId" = $1 AND gao."userId" = $2 AND gao."plannedActivityId" IS NULL`,
+    [goalActivityId, userId]
+  );
+  let unresolvedOccurrenceId: string | null = null;
+  for (const row of deletedRes.rows) {
+    if (excludeOccurrenceId && row.id === excludeOccurrenceId) continue;
+    if (!row.hasExecution) continue;
+    const day = resolveOccurrenceLocalDayOrNull({ scheduledLocalDate: row.scheduledLocalDate, scheduledLocalTimezone: row.scheduledLocalTimezone }, null, timezone);
+    if (day === null) {
+      if (unresolvedOccurrenceId === null) unresolvedOccurrenceId = row.id;
+      continue;
+    }
+    if (day === candidateLocalDate) return { status: 'OCCUPIED', blockingOccurrenceId: row.id };
+  }
+
+  if (unresolvedOccurrenceId !== null) return { status: 'UNRESOLVED', unresolvedOccurrenceId };
+  return { status: 'ELIGIBLE' };
+}
+
+export type MaterializeGoalActivityRhythmOccurrenceResult =
+  | { ok: true; occurrenceId: string }
+  | { ok: false; reason: 'NOT_FOUND' | 'NOT_RHYTHM_ELIGIBLE' | 'CAPACITY_EXHAUSTED' | 'DAILY_CAPACITY_EXHAUSTED' | 'DAILY_ATTRIBUTION_UNRESOLVED' };
+
+/**
+ * Goals V2 Rhythm R3, extended by Multi-Occurrence Rhythm PR 2 and HPG3-A2
+ * -- the one write this slice introduces: "an N_PER_WEEK GoalActivity with
+ * weekly (and, as of A2, daily) capacity remaining links a NEWLY CREATED
+ * PlannedActivity and records a new GoalActivityOccurrence." Called from
+ * exactly TWO places -- dayConstructorAcceptancePersistence.ts's own write
+ * loop (the original, R3-era caller) and POST /api/plans
+ * (apps/web/app/api/plans/route.ts, added by HPG3-A2) -- each on its OWN
+ * transaction client, as the PlannedActivity insert that already happened
+ * immediately before it, tried FIRST for every Goal-linked write (a pure,
+ * side-effect-free read -- `NOT_RHYTHM_ELIGIBLE` -- for any GoalActivity
+ * whose own rhythmKind isn't 'N_PER_WEEK'). The existing, UNCHANGED
+ * `linkGoalActivityToPlannedActivity` is tried only as the fallback for
+ * that exact `NOT_RHYTHM_ELIGIBLE` case, and alone still owns every
+ * NONE/first-link/CANCELLED-or-SKIPPED-relink case exactly as before R3
+ * (the finite legacy path is untouched). This ordering (Rhythm-aware
+ * tried first) is what lets ONE call correctly cover a brand-new
+ * N_PER_WEEK GoalActivity's very FIRST occurrence too -- the legacy
+ * function alone would successfully link a NULL-plannedActivityId
  * GoalActivity but would never create the occurrence row every N_PER_WEEK
  * link requires.
+ *
+ * PR 2 removes the single-live-commitment rejection (formerly
+ * HAS_LIVE_COMMITMENT, returned whenever the CURRENT linked plan was
+ * UPCOMING) for N_PER_WEEK activities: an already-UPCOMING occurrence no
+ * longer blocks a further one by itself. The ONLY remaining gate is
+ * weekly capacity, below, via `evaluateNewOccurrenceEligibility`
+ * (goalActivityOccurrenceCapacity.ts, PR 1's own pure capacity API, wired
+ * in here verbatim -- no new/duplicated arithmetic). NONE-rhythm
+ * activities are unaffected: they already return `NOT_RHYTHM_ELIGIBLE`
+ * one line earlier and never reach this gate either before or after this
+ * change.
  *
  * EVERY check here reads FRESH state on this same client, inside the
  * caller's own already-held per-user advisory lock
@@ -2934,36 +3769,36 @@ export type MaterializeGoalActivityRhythmOccurrenceResult =
  * safe without any new locking: the second request blocks on the SAME
  * lock key until the first's transaction fully commits or rolls back, then
  * re-reads this exact fresh state and correctly sees reduced (or
- * exhausted) capacity (this ticket's own section 22). A GENUINE RETRY of
- * the identical acceptance (same clientRequestId) never reaches this
- * function a second time at all -- it short-circuits at the EXISTING
- * PlanCreationIdempotency replay check, before the write loop even starts
- * (this ticket's own section 56 -- the existing mechanism is reused
+ * exhausted) capacity. A GENUINE RETRY of the identical acceptance (same
+ * clientRequestId) never reaches this function a second time at all -- it
+ * short-circuits at the EXISTING PlanCreationIdempotency replay check,
+ * before the write loop even starts (the existing mechanism is reused
  * verbatim, never duplicated).
  *
- * Deliberately refuses (HAS_LIVE_COMMITMENT) when the CURRENT linked plan
- * is UPCOMING: an already-live, not-yet-done commitment is not something
- * R3's planning UX offers to replace (this ticket's own section 27 -- a
- * GoalActivity with a live UPCOMING plan is never selectable in the first
- * place today, so this is defense-in-depth against a stale/malicious
- * client, never a path any current UI can reach).
- *
  * Creates the occurrence with no status, no windowKey, no Rhythm/
- * CompletionRequirement snapshot (this ticket's own section 15) -- R1's
- * own minimal shape, unextended.
+ * CompletionRequirement snapshot -- R1's own minimal shape, unextended.
+ *
+ * `GoalActivity.plannedActivityId` (still a singular, `@unique` column)
+ * is repointed to THIS newest occurrence's plan on every successful call
+ * -- "most recently materialized", never "the one live commitment" now
+ * that more than one occurrence can be live at once. Existing siblings'
+ * OWN `GoalActivityOccurrence.plannedActivityId` rows are never read or
+ * written by this repoint; each occurrence's link is independent and
+ * never overwritten by another occurrence's write (proved in PR 1's own
+ * DB suite, goalActivityOccurrenceCapacityDb.test.ts, scenarios C-E/H).
  */
 export async function materializeGoalActivityRhythmOccurrence(
   userId: string,
   goalActivityId: string,
   newPlannedActivityId: string,
+  plannedStartAt: Date,
   planningLocalDate: string,
   timezone: string,
   client: PoolClient
 ): Promise<MaterializeGoalActivityRhythmOccurrenceResult> {
   const gaRes = await client.query(
-    `SELECT ga.status, ga."rhythmKind", ga."rhythmTargetPerWeek", pa.status AS "linkedPlanStatus"
+    `SELECT ga.status, ga."rhythmKind", ga."rhythmTargetPerWeek", ga."dailyFrequencyKind", ga."dailyFrequencyLimit"
      FROM "GoalActivity" ga
-     LEFT JOIN "PlannedActivity" pa ON pa.id = ga."plannedActivityId"
      WHERE ga.id = $1 AND ga."userId" = $2`,
     [goalActivityId, userId]
   );
@@ -2973,11 +3808,29 @@ export async function materializeGoalActivityRhythmOccurrence(
 
   const rhythm = normalizeGoalActivityRhythm({ rhythmKind: row.rhythmKind, rhythmTargetPerWeek: row.rhythmTargetPerWeek });
   if (rhythm.kind !== 'N_PER_WEEK') return { ok: false, reason: 'NOT_RHYTHM_ELIGIBLE' };
-  if (row.linkedPlanStatus === 'UPCOMING') return { ok: false, reason: 'HAS_LIVE_COMMITMENT' };
 
   const facts = await loadGoalActivityRhythmFacts(userId, goalActivityId, timezone, client);
-  const eligibility = computeGoalActivityRhythmEligibility({ rhythm, planningLocalDate, occurrences: facts });
+  const eligibility = evaluateNewOccurrenceEligibility({ rhythm, planningLocalDate, occurrences: facts });
   if (!eligibility.eligible) return { ok: false, reason: 'CAPACITY_EXHAUSTED' };
+
+  // HPG3-A2 -- daily cap, ORTHOGONAL to and checked AFTER the weekly gate
+  // above (never replacing it -- a GoalActivity can be constrained on both
+  // axes at once). Uses the A1 normalization/enforceability helpers
+  // directly rather than re-deriving policy meaning here (CUSTOM stays
+  // reserved -- isGoalActivityDailyFrequencyEnforceable is what keeps it
+  // from ever being silently treated as ONCE_PER_DAY or MULTIPLE_PER_DAY).
+  // Checked against `planningLocalDate` -- the SAME candidate day source
+  // the weekly check immediately above already uses, never a day
+  // re-derived from plannedStartAt here (that is reserved for the
+  // snapshot written below, exactly the same planningLocalDate/plannedStartAt
+  // split this function already establishes for the week snapshot).
+  const persistedDailyFrequency: PersistedGoalActivityDailyFrequency = { dailyFrequencyKind: row.dailyFrequencyKind, dailyFrequencyLimit: row.dailyFrequencyLimit };
+  const dailyFrequency = normalizeGoalActivityDailyFrequency(persistedDailyFrequency);
+  if (isGoalActivityDailyFrequencyEnforceable(dailyFrequency.kind) && dailyFrequency.kind === 'ONCE_PER_DAY') {
+    const dailyEligibility = await checkDailyOccurrenceEligibility(userId, goalActivityId, planningLocalDate, timezone, null, client);
+    if (dailyEligibility.status === 'OCCUPIED') return { ok: false, reason: 'DAILY_CAPACITY_EXHAUSTED' };
+    if (dailyEligibility.status === 'UNRESOLVED') return { ok: false, reason: 'DAILY_ATTRIBUTION_UNRESOLVED' };
+  }
 
   const relinked = await client.query(
     `UPDATE "GoalActivity" SET "plannedActivityId" = $1, "updatedAt" = now()
@@ -2987,9 +3840,23 @@ export async function materializeGoalActivityRhythmOccurrence(
   if ((relinked.rowCount ?? 0) !== 1) return { ok: false, reason: 'NOT_FOUND' };
 
   const occurrenceId = randomUUID();
+  // Insights V1 PR2 -- the scheduled-week snapshot is written atomically,
+  // in this SAME INSERT, from the exact `timezone`/`plannedStartAt` this
+  // call is already authoritative for -- never a separate statement, so
+  // there is no window where the occurrence exists without its snapshot.
+  // `localCalendarWeekStart` is the repository's one existing canonical
+  // week-start function (goalActivityRhythm.ts) -- no second algorithm.
+  const scheduledWeekStart = localCalendarWeekStart(getDatePartsInTimezone(timezone, plannedStartAt).dateStr);
+  // HPG3-A2 -- the scheduled-DAY snapshot, same atomicity/source discipline
+  // as the week snapshot immediately above: written in this SAME INSERT,
+  // from the SAME `timezone`/`plannedStartAt` -- never a separate
+  // statement, never derived from planningLocalDate (that distinction is
+  // deliberate -- see the daily-cap check above, which DOES use
+  // planningLocalDate, for why the two sources are kept separate).
+  const scheduledLocalDate = getDatePartsInTimezone(timezone, plannedStartAt).dateStr;
   await client.query(
-    `INSERT INTO "GoalActivityOccurrence" (id, "userId", "goalActivityId", "plannedActivityId") VALUES ($1, $2, $3, $4)`,
-    [occurrenceId, userId, goalActivityId, newPlannedActivityId]
+    `INSERT INTO "GoalActivityOccurrence" (id, "userId", "goalActivityId", "plannedActivityId", "scheduledWeekStart", "scheduledWeekTimezone", "scheduledLocalDate", "scheduledLocalTimezone") VALUES ($1, $2, $3, $4, $5, $6, $7, $8)`,
+    [occurrenceId, userId, goalActivityId, newPlannedActivityId, scheduledWeekStart, timezone, scheduledLocalDate, timezone]
   );
   return { ok: true, occurrenceId };
 }
@@ -3051,6 +3918,54 @@ export async function linkGoalActivityToPlannedActivity(
     [plannedActivityId, goalActivityId, userId]
   );
   return (result.rowCount ?? 0) === 1;
+}
+
+/**
+ * Goal LIFECYCLE authorization for planning acceptance.
+ *
+ * Archiving a Goal revokes its authority to produce NEW Goal-derived
+ * planning state. For the GoalActivities (owned by `userId`) in
+ * `goalActivityIds`, this returns which ones are owned and which of those
+ * have a parent Goal that is owned by the same user AND currently ACTIVE.
+ * `Goal.status` is the sole lifecycle authority (`archivedAt` is only the
+ * audit timestamp archiveGoal sets alongside it and nothing ever clears);
+ * ANY status other than exactly 'ACTIVE' is treated as not active.
+ *
+ * It runs on the caller's TRANSACTION client and takes a SHARE lock on the
+ * parent Goal rows (`FOR SHARE OF g`) that is held until that transaction
+ * ends. archiveGoal's UPDATE needs a conflicting row lock, so an archive
+ * that is in flight when the acceptance reads makes the acceptance WAIT and
+ * then see ARCHIVED, and an archive arriving after the read waits until the
+ * acceptance commits: the ACTIVE check and the Goal-provenance writes
+ * cannot be separated by a concurrent archive. One batched query for the
+ * whole request, never one per item. Read-only apart from the lock.
+ *
+ * Activities this user does not own (or that do not exist) are absent from
+ * `owned`; the existing ownership / existence checks at the write keep
+ * rejecting them exactly as before, so this adds no new failure shape for
+ * them.
+ */
+export async function lockGoalParentLifecycleForPlanning(
+  userId: string,
+  goalActivityIds: readonly string[],
+  client: PoolClient
+): Promise<{ owned: ReadonlySet<string>; active: ReadonlySet<string> }> {
+  const owned = new Set<string>();
+  const active = new Set<string>();
+  if (goalActivityIds.length === 0) return { owned, active };
+  const result = await client.query(
+    `SELECT ga.id AS "goalActivityId", g."userId" AS "goalUserId", g.status AS "goalStatus"
+     FROM "GoalActivity" ga
+     JOIN "Goal" g ON g.id = ga."goalId"
+     WHERE ga."userId" = $1 AND ga.id = ANY($2::text[])
+     FOR SHARE OF g`,
+    [userId, [...goalActivityIds]]
+  );
+  for (const row of result.rows) {
+    owned.add(row.goalActivityId);
+    if (row.goalUserId === userId && row.goalStatus === 'ACTIVE') active.add(row.goalActivityId);
+  }
+  return { owned, active };
 }
 
 // ============================================================

@@ -17,10 +17,15 @@
  * database backstop against a forked successor.
  */
 import { randomUUID } from 'crypto';
-import { beginTransaction, type PlannedActivity } from './db';
+import type { PoolClient } from 'pg';
+import { beginTransaction, checkDailyOccurrenceEligibility, type PlannedActivity } from './db';
 import { isActivePlanBlocker } from './dayConstructorOrchestrator';
 import { parseSchedulingMode } from './plannedActivitySchedulingMode';
 import { buildGoogleCalendarUrl } from '../../../packages/recommendation/src/dailyAssistant';
+import { normalizeGoalActivityRhythm, deriveGoalActivityRhythmContributionWithEvidence, localCalendarWeekStart, resolveOccurrenceLocalDateOrNull, type GoalActivityRhythmOccurrenceFact, type PlannedActivityStatusForRhythm } from './goalActivityRhythm';
+import { evaluateNewOccurrenceEligibility } from './goalActivityOccurrenceCapacity';
+import { normalizeGoalActivityDailyFrequency, isGoalActivityDailyFrequencyEnforceable, type PersistedGoalActivityDailyFrequency } from './goalActivityDailyFrequency';
+import { getDatePartsInTimezone } from './timezone';
 
 export type MovePlanErrorCode =
   | 'NOT_FOUND'
@@ -28,7 +33,18 @@ export type MovePlanErrorCode =
   | 'ALREADY_MOVED'
   | 'INVALID_DESTINATION'
   | 'CONFLICT'
-  | 'HAS_LINKED_MOMENT';
+  | 'HAS_LINKED_MOMENT'
+  | 'CAPACITY_EXCEEDED'
+  // HPG3-A2 -- distinct from CAPACITY_EXCEEDED (weekly Rhythm target) so a
+  // caller can tell the two apart: the destination LOCAL DAY already has
+  // another live occurrence of this ONCE_PER_DAY GoalActivity.
+  | 'DAILY_CAPACITY_EXCEEDED'
+  // A pre-A2 legacy occurrence with no recoverable scheduled-day snapshot
+  // makes the destination day's eligibility impossible to confirm safely --
+  // see db.ts's checkDailyOccurrenceEligibility for exactly when this
+  // occurs and how it resolves. Never silently treated as free or as
+  // permanently blocked.
+  | 'DAILY_ATTRIBUTION_UNRESOLVED';
 
 export class MovePlanError extends Error {
   constructor(public readonly code: MovePlanErrorCode, message: string) {
@@ -147,6 +163,133 @@ export async function findBlockingPlanForRange(
 }
 
 /**
+ * Multi-Occurrence Rhythm -- CROSS-WEEK CAPACITY ENFORCEMENT, shared by
+ * BOTH Move paths (manual Move and Recomposition acceptance both call
+ * `applyMoveWrites`, below, which calls this FIRST, inside the SAME
+ * transaction and per-user advisory lock both callers already hold --
+ * there is exactly one enforcement point, not two independently
+ * maintained ones).
+ *
+ * A Move repoints an EXISTING occurrence's association; it never creates
+ * a new one (the hard "no new occurrence on Move" invariant, unchanged).
+ * But repointing to a new instant can move that occurrence into a
+ * DIFFERENT local calendar week -- and until this fix, nothing ever
+ * re-checked whether the DESTINATION week had room for it under the
+ * GoalActivity's own N_PER_WEEK target. This function closes that gap:
+ * if `a` (the plan being moved) is linked to an N_PER_WEEK GoalActivity
+ * via the occurrence ledger, the destination week's existing committed
+ * facts -- EXCLUDING this exact occurrence, which is leaving its old
+ * week, not adding a duplicate -- are loaded fresh (same transaction
+ * client, same read-your-own-writes guarantee every other capacity
+ * check in this codebase relies on) and checked through
+ * `evaluateNewOccurrenceEligibility` (PR 1's own pure capacity API --
+ * no new/duplicated formula). A move that would push the destination
+ * week over its target throws CAPACITY_EXCEEDED before any write runs,
+ * so the caller's own ROLLBACK leaves the original plan and occurrence
+ * completely unchanged (this function's caller wraps everything in its
+ * own transaction).
+ *
+ * A plan with no occurrence row (every finite/NONE-rhythm GoalActivity's
+ * plan, and every plan with no Goal link at all) is a pure no-op here --
+ * zero rows match, nothing is checked, nothing changes about its Move
+ * behavior. The weekly TARGET itself is never read as anything other
+ * than the GoalActivity's own persisted `rhythmTargetPerWeek` -- this
+ * function never changes it, only enforces it.
+ *
+ * Insights V1 PR2 -- also returns the occurrence's owner's timezone
+ * whenever a linked occurrence genuinely exists (`{ occurrenceId,
+ * timezone }`), regardless of which branch below returns early after
+ * that point (GoalActivity not found, finite/NONE rhythm) -- so the
+ * caller (`applyMoveWrites`) can always correctly re-stamp that
+ * occurrence's scheduled-week snapshot to the destination, never leaving
+ * a stale snapshot behind after a genuine repoint. `null` means no
+ * occurrence is linked at all, the only case where no snapshot write is
+ * needed. The timezone fetch is therefore unconditional on "does an
+ * occurrence exist," not on "does N_PER_WEEK capacity enforcement
+ * apply" -- two different concerns that happen to share this one
+ * function, now kept correct independently of each other.
+ */
+async function enforceDestinationWeekCapacity(
+  client: { query: (text: string, params?: unknown[]) => Promise<{ rows: any[] }> },
+  userId: string,
+  a: PlannedActivity,
+  newStartAt: Date
+): Promise<{ occurrenceId: string; timezone: string } | null> {
+  const occRes = await client.query(`SELECT id, "goalActivityId" FROM "GoalActivityOccurrence" WHERE "plannedActivityId" = $1 AND "userId" = $2`, [a.id, userId]);
+  if (occRes.rows.length !== 1) return null; // no occurrence linked -- NONE-rhythm / non-Goal plan, unaffected
+  const { id: occurrenceId, goalActivityId } = occRes.rows[0];
+
+  const userRes = await client.query(`SELECT timezone FROM "User" WHERE id = $1`, [userId]);
+  const timezone: string = userRes.rows[0].timezone;
+
+  const gaRes = await client.query(`SELECT "rhythmKind", "rhythmTargetPerWeek", "dailyFrequencyKind", "dailyFrequencyLimit" FROM "GoalActivity" WHERE id = $1 AND "userId" = $2`, [goalActivityId, userId]);
+  if (gaRes.rows.length === 0) return { occurrenceId, timezone };
+  const rhythm = normalizeGoalActivityRhythm({ rhythmKind: gaRes.rows[0].rhythmKind, rhythmTargetPerWeek: gaRes.rows[0].rhythmTargetPerWeek });
+  if (rhythm.kind !== 'N_PER_WEEK') return { occurrenceId, timezone }; // finite Goal Activity -- Rhythm capacity is not a concept here
+
+  const destinationLocalDate = getDatePartsInTimezone(timezone, newStartAt).dateStr;
+
+  // Every OTHER occurrence fact for this GoalActivity -- excluding the one being moved, which is leaving its
+  // current week, not contributing a duplicate to the destination week it hasn't joined yet.
+  // Insights V1 PR3 -- LEFT JOIN on PlannedActivity (a sibling's plan may
+  // have been hard-deleted) plus a durable-evidence LEFT JOIN on
+  // GoalActivityExecution (via goalActivityOccurrenceId) so a deleted
+  // sibling's COMPLETED contribution still counts toward this capacity
+  // check -- same fix as db.ts's loadGoalActivityRhythmFacts.
+  const factsRes = await client.query(
+    `SELECT pa."plannedStartAt", pa.status, gao."scheduledWeekStart", gao."scheduledWeekTimezone", (gae.id IS NOT NULL) AS "hasCompletedExecution"
+     FROM "GoalActivityOccurrence" gao
+     LEFT JOIN "PlannedActivity" pa ON pa.id = gao."plannedActivityId"
+     LEFT JOIN "GoalActivityExecution" gae ON gae."goalActivityOccurrenceId" = gao.id
+     WHERE gao."goalActivityId" = $1 AND gao.id <> $2`,
+    [goalActivityId, occurrenceId]
+  );
+  const occurrences: GoalActivityRhythmOccurrenceFact[] = factsRes.rows
+    .map((row): GoalActivityRhythmOccurrenceFact | null => {
+      const localDate = resolveOccurrenceLocalDateOrNull(
+        { scheduledWeekStart: row.scheduledWeekStart, scheduledWeekTimezone: row.scheduledWeekTimezone },
+        row.plannedStartAt ? new Date(row.plannedStartAt) : null,
+        timezone
+      );
+      if (localDate === null) return null; // unattributable: pre-PR2 legacy occurrence whose plan was later deleted -- never fabricate a week
+      return {
+        localDate,
+        contribution: deriveGoalActivityRhythmContributionWithEvidence(row.hasCompletedExecution, row.status as PlannedActivityStatusForRhythm | null),
+      };
+    })
+    .filter((fact): fact is GoalActivityRhythmOccurrenceFact => fact !== null);
+
+  const eligibility = evaluateNewOccurrenceEligibility({ rhythm, planningLocalDate: destinationLocalDate, occurrences });
+  if (!eligibility.eligible) {
+    throw new MovePlanError('CAPACITY_EXCEEDED', 'Moving this would exceed the destination week\'s weekly target.');
+  }
+
+  // HPG3-A2 -- the SAME destination re-validation discipline as the weekly
+  // check immediately above, for the DAY: excludes `occurrenceId` itself
+  // (this occurrence is leaving its old day, not adding a duplicate to the
+  // destination), reusing the shared, already-reviewed
+  // checkDailyOccurrenceEligibility (db.ts) rather than a second formula.
+  // `client` here is intentionally the narrower, decoupled query interface
+  // this file already uses throughout -- it is always a real PoolClient at
+  // runtime (movePlannedActivity/remainingDayRecompositionAcceptance.ts
+  // both pass beginTransaction()'s own client), so this cast introduces no
+  // actual type unsafety, only a deliberately narrower local signature.
+  const persistedDailyFrequency: PersistedGoalActivityDailyFrequency = { dailyFrequencyKind: gaRes.rows[0].dailyFrequencyKind, dailyFrequencyLimit: gaRes.rows[0].dailyFrequencyLimit };
+  const dailyFrequency = normalizeGoalActivityDailyFrequency(persistedDailyFrequency);
+  if (isGoalActivityDailyFrequencyEnforceable(dailyFrequency.kind) && dailyFrequency.kind === 'ONCE_PER_DAY') {
+    const dailyEligibility = await checkDailyOccurrenceEligibility(userId, goalActivityId, destinationLocalDate, timezone, occurrenceId, client as unknown as PoolClient);
+    if (dailyEligibility.status === 'OCCUPIED') {
+      throw new MovePlanError('DAILY_CAPACITY_EXCEEDED', 'That destination day already has another occurrence of this activity.');
+    }
+    if (dailyEligibility.status === 'UNRESOLVED') {
+      throw new MovePlanError('DAILY_ATTRIBUTION_UNRESOLVED', 'Cannot confirm the destination day is free for this activity.');
+    }
+  }
+
+  return { occurrenceId, timezone };
+}
+
+/**
  * SHARED with recomposition acceptance (F3): the writes of ONE Move inside the caller's transaction -- successor B
  * inserted directly (never through createPlannedActivity, whose same-title/same-time dedupe could hand back someone
  * else's plan), A transitioned UPCOMING -> MOVED (conditional), and the source (Capture / GoalActivity) repointed to B.
@@ -162,6 +305,8 @@ export async function applyMoveWrites(
   newStartAt: Date,
   newEndAt: Date
 ): Promise<MovePlanResult> {
+  const occurrenceContext = await enforceDestinationWeekCapacity(client, userId, a, newStartAt);
+
   const bId = randomUUID();
   const bRes = await client.query(
     `INSERT INTO "PlannedActivity"
@@ -177,8 +322,14 @@ export async function applyMoveWrites(
     ]
   );
 
+  // Insights V1 PR 1 -- movedAt is stamped in this SAME conditional UPDATE,
+  // using the database's own now(), so it is atomic with the status
+  // transition itself: a lost conditional update (below) throws and the
+  // caller rolls back the whole transaction, leaving no stamp; a replay
+  // that reaches the ALREADY_MOVED/already-successful short-circuit above
+  // never re-executes this statement, so it never re-stamps.
   const aMoved = await client.query(
-    `UPDATE "PlannedActivity" SET status = 'MOVED', "updatedAt" = now()
+    `UPDATE "PlannedActivity" SET status = 'MOVED', "movedAt" = now(), "updatedAt" = now()
      WHERE id = $1 AND "userId" = $2 AND status = 'UPCOMING' RETURNING *`,
     [a.id, userId]
   );
@@ -217,7 +368,32 @@ export async function applyMoveWrites(
   // (migration 0042) rejects the write outright rather than silently
   // double-claiming B, with the same whole-transaction-rollback guarantee
   // the GoalActivityExecution line above already relies on.
-  await client.query(`UPDATE "GoalActivityOccurrence" SET "plannedActivityId" = $1 WHERE "plannedActivityId" = $2 AND "userId" = $3`, [bId, a.id, userId]);
+  //
+  // Insights V1 PR2 -- the scheduled-week snapshot is re-stamped in this
+  // SAME statement, atomically with the repoint, whenever a linked
+  // occurrence actually exists (`occurrenceContext` non-null, set by
+  // `enforceDestinationWeekCapacity` above, which already confirmed the
+  // occurrence and fetched this exact timezone). This is what correctly
+  // transfers attribution to the destination week on a cross-week Move,
+  // and leaves it unchanged (recomputed to the SAME value) on a
+  // same-week Move -- never a stale value left over from creation/an
+  // earlier Move. `null`/`null` for a plan with no linked occurrence is
+  // harmless: the WHERE clause already matches zero rows in that case.
+  const scheduledWeekStart = occurrenceContext ? localCalendarWeekStart(getDatePartsInTimezone(occurrenceContext.timezone, newStartAt).dateStr) : null;
+  const scheduledWeekTimezone = occurrenceContext ? occurrenceContext.timezone : null;
+  // HPG3-A2 -- the scheduled-DAY snapshot is re-stamped in this SAME
+  // statement, atomically with the week snapshot and the repoint
+  // immediately above -- never a separate statement, so there is no window
+  // where the week and day snapshots could diverge. This is what correctly
+  // transfers the day's occupied slot to the destination on a Move across
+  // midnight, and frees the source day in the same instant (the SAME row,
+  // not a new one -- "no new occurrence on Move" is unchanged).
+  const scheduledLocalDate = occurrenceContext ? getDatePartsInTimezone(occurrenceContext.timezone, newStartAt).dateStr : null;
+  const scheduledLocalTimezone = occurrenceContext ? occurrenceContext.timezone : null;
+  await client.query(
+    `UPDATE "GoalActivityOccurrence" SET "plannedActivityId" = $1, "scheduledWeekStart" = $2, "scheduledWeekTimezone" = $3, "scheduledLocalDate" = $4, "scheduledLocalTimezone" = $5 WHERE "plannedActivityId" = $6 AND "userId" = $7`,
+    [bId, scheduledWeekStart, scheduledWeekTimezone, scheduledLocalDate, scheduledLocalTimezone, a.id, userId]
+  );
 
   return { from: aMoved.rows[0], to: bRes.rows[0] };
 }

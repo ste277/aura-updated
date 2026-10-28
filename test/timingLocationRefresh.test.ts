@@ -71,7 +71,12 @@ check('page.tsx wires YouView to handleLocationChanged via onLocationChanged', /
 // loadAssistantSignals with an unsaved location). Checked per-handler: the
 // function's "if (res.ok) { ... } else { ... }" split must have onChanged
 // only on the success side, never the failure side.
-const onChangedCalls = [...locationPickerSource.matchAll(/onChanged\((selectedCity|newCity)\);/g)];
+//
+// Onboarding V1 PR 1 -- handleSelectChange's call now forwards the
+// server's own locationConfirmedAt via an inline object literal rather
+// than the bare selectedCity reference; handleCustomSubmit's call is
+// unchanged.
+const onChangedCalls = [...locationPickerSource.matchAll(/onChanged\((newCity|\{ \.\.\.selectedCity, locationConfirmedAt:[^}]*\})\);/g)];
 check('LocationPicker calls onChanged exactly twice (curated select + custom submit)', onChangedCalls.length === 2);
 
 function checkOnChangedGuardedByResOk(functionName: string, functionBody: string) {

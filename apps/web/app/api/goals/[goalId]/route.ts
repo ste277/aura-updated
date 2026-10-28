@@ -3,7 +3,8 @@ import { getSessionFromRequest } from '../../../../lib/session';
 import { getGoalForUser, listGoalActivitiesWithLinkedPlanStatus, deleteGoal, getUserById, loadGoalActivityRhythmFactsForActivities } from '../../../../lib/db';
 import { deriveGoalActivityState, computeGoalProgress } from '../../../../lib/goals';
 import { normalizeGoalActivityCompletionRequirement } from '../../../../lib/goalCompletion';
-import { normalizeGoalActivityRhythm, computeGoalActivityRhythmEligibility } from '../../../../lib/goalActivityRhythm';
+import { normalizeGoalActivityRhythm } from '../../../../lib/goalActivityRhythm';
+import { evaluateNewOccurrenceEligibility } from '../../../../lib/goalActivityOccurrenceCapacity';
 import { getDatePartsInTimezone } from '../../../../lib/timezone';
 import { goalHasOngoingRhythmActivity, type GoalActivityRhythmView } from '../../../../lib/goalsPresentation';
 
@@ -51,7 +52,7 @@ export async function GET(req: NextRequest, { params }: { params: { goalId: stri
     let rhythm: GoalActivityRhythmView = { kind: 'NONE' };
     if (rhythmPolicy.kind === 'N_PER_WEEK' && todayLocalDate) {
       const facts = factsByActivityId.get(row.id) ?? [];
-      const eligibility = computeGoalActivityRhythmEligibility({ rhythm: rhythmPolicy, planningLocalDate: todayLocalDate, occurrences: facts });
+      const eligibility = evaluateNewOccurrenceEligibility({ rhythm: rhythmPolicy, planningLocalDate: todayLocalDate, occurrences: facts });
       rhythm = {
         kind: 'N_PER_WEEK',
         targetPerWeek: rhythmPolicy.targetPerWeek ?? 0,
@@ -69,7 +70,7 @@ export async function GET(req: NextRequest, { params }: { params: { goalId: stri
       // spread exposes it automatically. No execution id/source/snapshot
       // columns/timestamps are ever selected into `row` in the first place.
       ...row,
-      derivedState: deriveGoalActivityState({ status: row.status, plannedActivityId: row.plannedActivityId, linkedPlanStatus: row.linkedPlanStatus }),
+      derivedState: deriveGoalActivityState({ status: row.status, plannedActivityId: row.plannedActivityId, linkedPlanStatus: row.linkedPlanStatus, everCompleted: row.everCompleted }),
       // Goals V2 G2.1 -- additive: the canonical requirement (null persisted
       // fields, from any legacy row or an activity created without one,
       // normalizes to DONE). Not consumed by any UI yet.

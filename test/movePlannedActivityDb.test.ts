@@ -11,7 +11,7 @@ import {
   type PlannedActivity,
 } from '../apps/web/lib/db';
 import { createSessionToken } from '../apps/web/lib/auth';
-import { movePlannedActivity, MovePlanError, type MovePlanErrorCode } from '../apps/web/lib/planMove';
+import { movePlannedActivity, MovePlanError, type MovePlanErrorCode, type MovePlanResult } from '../apps/web/lib/planMove';
 import { persistAcceptedConstructedDay } from '../apps/web/lib/dayConstructorAcceptancePersistence';
 import type { AcceptConstructedDayRequest, AcceptedProposedItem } from '../apps/web/lib/dayConstructorAcceptance';
 import { deriveCaptureState } from '../apps/web/lib/captures';
@@ -68,9 +68,14 @@ async function main() {
     await sql(`UPDATE "PlannedActivity" SET "windowType" = 'ABHIJIT' WHERE id = $1`, [a1.id]);
     const d1 = dst();
     const h0 = await habitCount();
+    const beforeMove1 = await sql(`SELECT clock_timestamp() AS now`);
     const r1 = track(await move(a1.id, d1));
+    const afterMove1 = await sql(`SELECT clock_timestamp() AS now`);
     const A1 = await row(a1.id); const B1 = await row(r1.to.id);
     check('46/6. future UPCOMING A moves: returns { from, to }; A is MOVED and B is UPCOMING', r1.from.status === 'MOVED' && r1.to.status === 'UPCOMING' && A1.status === 'MOVED' && B1.status === 'UPCOMING');
+    check('Insights PR1-1. a successful Move stamps A.movedAt, within the transaction\'s own real clock window, never a client value', A1.movedAt !== null && new Date(A1.movedAt).getTime() >= new Date(beforeMove1[0].now).getTime() && new Date(A1.movedAt).getTime() <= new Date(afterMove1[0].now).getTime());
+    check('Insights PR1-2. the NEW successor B is not itself "moved" -- B.movedAt stays null until/unless B is later moved', B1.movedAt === null);
+    check('Insights PR1-3. movedAt is stamped only on the row whose OWN status transitioned -- A.movedAt is non-null, B.movedAt (a freshly created UPCOMING row) is null', A1.movedAt !== null && B1.movedAt === null);
     check('2/9. lineage: B.rescheduledFromPlanId = A.id, B is a NEW row, A has no pointer of its own', B1.rescheduledFromPlanId === a1.id && B1.id !== a1.id && A1.rescheduledFromPlanId === null);
     check('8/50. duration is preserved exactly: B.durationMinutes = 45 and end = start + 45 min', B1.durationMinutes === 45 && new Date(B1.plannedStartAt).getTime() === d1 && new Date(B1.plannedEndAt).getTime() === d1 + 45 * MIN);
     check('9. B copies title, activityType, icon, activityId, eventTimezone, eventLocationName', B1.title === A1.title && B1.activityType === 'call' && B1.icon === '📞' && B1.activityId === 'phone-call' && B1.eventTimezone === 'America/Los_Angeles' && B1.eventLocationName === 'San Francisco');
@@ -100,12 +105,15 @@ async function main() {
       const code = await codeOf(() => move(p.id, dst()));
       const after = await row(p.id);
       check(`7/48. ${label} -> Move is rejected (INVALID_STATE), nothing changes and no successor exists`, code === 'INVALID_STATE' && after.status === before.status && (await successors(p.id)).length === 0);
+      check(`Insights PR1-4. ${label} -> rejected Move leaves movedAt untouched (null, same as before)`, before.movedAt === null && after.movedAt === null);
     }
     check('48. LOGGED rejection leaves loggedAt, habitLogId and the HabitLog intact', (await row(lg.id)).habitLogId !== null && (await habitCount()) === h0 + 1);
 
     // ---- 21/28/48 MOVED idempotency ----
+    const movedAtBeforeReplay = (await row(a1.id)).movedAt;
     const same = await move(a1.id, d1);
     check('21/28. retry of an already-successful Move (MOVED A, same destination) returns the SAME A and B, no new plan', same.to.id === r1.to.id && same.from.status === 'MOVED' && (await successors(a1.id)).length === 1);
+    check('Insights PR1-9. an idempotent replay returns the SAME movedAt it already had -- never re-stamped to a later instant', same.from.movedAt != null && movedAtBeforeReplay != null && new Date(same.from.movedAt).getTime() === new Date(movedAtBeforeReplay).getTime() && new Date((await row(a1.id)).movedAt).getTime() === new Date(movedAtBeforeReplay).getTime());
     check('21/48. MOVED with a DIFFERENT destination is rejected (ALREADY_MOVED) and creates no C', (await codeOf(() => move(a1.id, dst()))) === 'ALREADY_MOVED' && (await successors(a1.id)).length === 1);
 
     // ---- 49 destination validation ----
@@ -114,7 +122,9 @@ async function main() {
     const cases: Array<[string, Date]> = [['invalid instant', new Date('nope')], ['past', new Date(minute(now) - 5 * MIN)], ['now boundary (whole minute at/before now)', new Date(minute(now))], ['non-whole-minute', new Date(minute(now) + 90 * MIN + 1000)], ['same start as A', new Date(s2)]];
     for (const [label, d] of cases) {
       const code = await codeOf(() => move(a2.id, d));
-      check(`49. destination "${label}" -> INVALID_DESTINATION, A untouched, no successor`, code === 'INVALID_DESTINATION' && (await row(a2.id)).status === 'UPCOMING' && (await successors(a2.id)).length === 0);
+      const after = await row(a2.id);
+      check(`49. destination "${label}" -> INVALID_DESTINATION, A untouched, no successor`, code === 'INVALID_DESTINATION' && after.status === 'UPCOMING' && (await successors(a2.id)).length === 0);
+      check(`Insights PR1-5. destination "${label}" -> rejected before any write; movedAt stays null`, after.movedAt === null);
     }
     const okNear = track(await move(a2.id, minute(Date.now()) + 2 * MIN + HOUR * 0 + 5 * DAY));
     check('49. a valid future destination succeeds', okNear.to.status === 'UPCOMING');
@@ -125,6 +135,7 @@ async function main() {
     const blocker = await mk('Blocker', blockStart, 60);
     const srcBefore = await row(aC.id);
     check('17/53. destination overlapping another UPCOMING plan -> CONFLICT, A unchanged, no B', (await codeOf(() => move(aC.id, blockStart + 30 * MIN))) === 'CONFLICT' && (await row(aC.id)).status === 'UPCOMING' && (await successors(aC.id)).length === 0 && (await row(aC.id)).updatedAt.getTime() === srcBefore.updatedAt.getTime());
+    check('Insights PR1-6. a CONFLICT rejection (thrown before applyMoveWrites is ever called) leaves movedAt null', srcBefore.movedAt === null && (await row(aC.id)).movedAt === null);
     const touching = await codeOf(async () => track(await move(aC.id, blockStart + 60 * MIN)));
     check('17. intervals are [start, end): a destination that merely TOUCHES a blocker (starts exactly at its end) is allowed', touching === 'OK');
     const sSelf = src(); const aSelf = await mk('Self overlap', sSelf, 60);
@@ -156,6 +167,7 @@ async function main() {
     const r8 = track(await move(p8, dst()));
     const gRow = (await listGoalActivitiesWithLinkedPlanStatus(A.id, goal.goal.id)).find((r) => r.id === ga!.id)!;
     check('14/32. GoalActivity now points at B and derives PLANNED (never SUGGESTED)', gRow.plannedActivityId === r8.to.id && deriveGoalActivityState({ status: gRow.status, plannedActivityId: gRow.plannedActivityId, linkedPlanStatus: gRow.linkedPlanStatus }) === 'PLANNED');
+    check('Insights PR1-12. a Goal-linked Move stamps movedAt on the original (now MOVED) row exactly like any other Move -- Goal continuity is untouched by this change', (await row(p8)).movedAt !== null && (await row(r8.to.id)).movedAt === null);
     const noSrc = await mk('Direct plan', src());
     const linkedRows = await sql(`SELECT (SELECT count(*) FROM "Capture" WHERE "plannedActivityId" = $1)::int AS c, (SELECT count(*) FROM "GoalActivity" WHERE "plannedActivityId" = $1)::int AS g`, [noSrc.id]);
     const rNo = track(await move(noSrc.id, dst()));
@@ -167,9 +179,15 @@ async function main() {
     const d9 = await save(request('2026-12-13', [item('2026-12-13', 'ch1', 'Chain capture', 10)]), '2026-12-13', new Map([['ch1', capC.id]]));
     const pa = d9.plans[0].id as string;
     const rB = track(await move(pa, dst()));
+    await new Promise((resolve) => setTimeout(resolve, 10)); // ensure B's own move commits at a distinguishably later clock_timestamp() than A's
     const rC = track(await move(rB.to.id, dst()));
     const cRow = (await getCaptureWithLinkedPlanStatus(A.id, capC.id))!;
     check('43. chain A -> B -> C: A MOVED, B MOVED, C UPCOMING with C.rescheduledFromPlanId = B and B.rescheduledFromPlanId = A', (await row(pa)).status === 'MOVED' && (await row(rB.to.id)).status === 'MOVED' && rC.to.status === 'UPCOMING' && rC.to.rescheduledFromPlanId === rB.to.id && rB.to.rescheduledFromPlanId === pa);
+    {
+      const paRow = await row(pa); const rBRow = await row(rB.to.id); const rCRow = await row(rC.to.id);
+      check('Insights PR1-10. repeated Move preserves a correct, DISTINCT movedAt for EACH row that itself transitioned: A.movedAt (its own first move) is strictly earlier than B.movedAt (its own later move)', paRow.movedAt !== null && rBRow.movedAt !== null && new Date(paRow.movedAt).getTime() < new Date(rBRow.movedAt).getTime());
+      check('Insights PR1-11. the chain\'s final row C (UPCOMING, never itself moved) has movedAt null', rCRow.movedAt === null);
+    }
     check('43. the Capture points only at C', cRow.plannedActivityId === rC.to.id && (await sql(`SELECT count(*)::int AS n FROM "Capture" WHERE "plannedActivityId" IN ($1, $2)`, [pa, rB.to.id]))[0].n === 0);
     const hBefore = await habitCount();
     const done = await logPlannedActivity(A.id, rC.to.id);
@@ -197,7 +215,9 @@ async function main() {
     await sql(`DROP TRIGGER move_test_fail_trg ON "Capture"`); await sql(`DROP FUNCTION move_test_fail()`);
     const capRb = (await getCaptureWithLinkedPlanStatus(A.id, capR.id))!;
     check('20/52. a forced source-repoint failure rolls EVERYTHING back: A stays UPCOMING, no B, the Capture still points at A, no HabitLog', forced === 'OTHER' && (await row(pr)).status === 'UPCOMING' && (await successors(pr)).length === 0 && capRb.plannedActivityId === pr && capRb.linkedPlanStatus === 'UPCOMING');
+    check('Insights PR1-7. the forced failure happens AFTER the status/movedAt UPDATE already ran (Capture repoint is a later statement in applyMoveWrites) -- the ROLLBACK proves movedAt is NOT left stamped on a plan that is still UPCOMING, the clearest possible proof a failed transaction leaves no timestamp', (await row(pr)).movedAt === null);
     check('20/52. after the failure the same Move can be retried successfully', (await codeOf(async () => track(await move(pr, dst())))) === 'OK');
+    check('Insights PR1-8. the retried, now-successful Move stamps movedAt on the retry (not on the earlier, rolled-back attempt)', (await row(pr)).movedAt !== null);
 
     // ---- 57 ownership ----
     const mine = await mk('Ownership', src());
@@ -214,6 +234,34 @@ async function main() {
     const day = await listPlannedActivitiesForDay(A.id, nearFrom, nearTo);
     const agenda = buildDailyAgenda({ now: new Date(), localDate: '2026-01-01', timezone: TZ, plans: day, moments: [], momentIdsWithSuccessor: new Set(), habitLogs: [] });
     check('29. a real DB day read: MOVED originals derive MOVED and are not counted as planned; successors derive normally', agenda.items.every((i) => i.status !== 'MISSED') && agenda.plannedCount === agenda.items.filter((i) => i.status !== 'MOVED' && i.status !== 'SKIPPED' && i.type !== 'COMPLETED_ACTIVITY').length);
+
+    // ---- Insights PR1-13..15: historical MOVED rows with a NULL movedAt
+    // (simulating a row that moved before this migration existed) read and
+    // behave correctly everywhere -- no crash, no fabricated timestamp.
+    const histSrc = src(); const hist = await mk('Historical move', histSrc, 60);
+    const histMoved = track(await move(hist.id, dst()));
+    await sql(`UPDATE "PlannedActivity" SET "movedAt" = NULL WHERE id = $1`, [hist.id]);
+    const histRow = await row(hist.id);
+    check('Insights PR1-13. a historical MOVED row with movedAt forced NULL still reads correctly via the real DB query (no crash, status/lineage intact)', histRow.status === 'MOVED' && histRow.movedAt === null && histRow.rescheduledFromPlanId === null);
+    const histDay = await listPlannedActivitiesForDay(A.id, new Date(histSrc - DAY), new Date(histSrc + DAY));
+    const histAgenda = buildDailyAgenda({ now: new Date(), localDate: '2026-01-01', timezone: TZ, plans: histDay, moments: [], momentIdsWithSuccessor: new Set(), habitLogs: [] });
+    check('Insights PR1-14. the real daily-agenda read path never fabricates a movedAt for a historical NULL row -- it is simply absent from the returned row, agenda building does not throw', histAgenda !== undefined && histDay.find((p) => p.id === hist.id)?.movedAt === null);
+    const histReplay = await move(hist.id, new Date(histMoved.to.plannedStartAt));
+    check('Insights PR1-15. idempotent replay still works correctly for a historical NULL-movedAt row -- replay logic keys off status/rescheduledFromPlanId, never movedAt, so a missing timestamp never breaks replay', histReplay.to.id === histMoved.to.id && (await row(hist.id)).movedAt === null);
+
+    // ---- Insights PR1-16: concurrent Move does not create contradictory
+    // timestamps. Two near-simultaneous calls at the SAME destination for
+    // the SAME plan -- serialized by the per-user advisory lock -- must
+    // agree on exactly one movedAt, never two different stamps.
+    const concSrc = src(); const conc = await mk('Concurrent move subject', concSrc, 60);
+    const concDst = dst();
+    const [concA, concB] = await Promise.allSettled([move(conc.id, concDst), move(conc.id, concDst)]);
+    const concSuccessors = await successors(conc.id);
+    for (const s of concSuccessors) planIds.push(s.id);
+    const concResults = [concA, concB].filter((r): r is PromiseFulfilledResult<MovePlanResult> => r.status === 'fulfilled').map((r) => r.value);
+    const concRow = await row(conc.id);
+    check('Insights PR1-16. concurrent Move calls on the same plan+destination never produce two successors or two disagreeing timestamps', concSuccessors.length === 1 && concResults.every((r) => r.to.id === concSuccessors[0].id) && new Set(concResults.map((r) => (r.from.movedAt ? new Date(r.from.movedAt).getTime() : null))).size === 1);
+    check('Insights PR1-17. the single agreed movedAt is a real, non-null timestamp', concRow.movedAt !== null);
   } finally {
     await sql(`UPDATE "Capture" SET "plannedActivityId" = NULL WHERE "userId" = $1`, [A.id]).catch(() => {});
     await sql(`DELETE FROM "AuraMoment" WHERE "ownerUserId" = $1`, [A.id]).catch(() => {});

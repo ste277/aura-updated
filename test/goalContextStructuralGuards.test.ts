@@ -29,7 +29,12 @@ const dbSrc = read('apps/web/lib/db.ts');
 const loaderBody = dbSrc.slice(dbSrc.indexOf('export async function loadGoalContextsForPlanIds'), dbSrc.indexOf('export async function loadGoalContextsForPlanIds') + 2500);
 check('loadGoalContextsForPlanIds exists and is the canonical batched loader', /export async function loadGoalContextsForPlanIds/.test(dbSrc));
 check('GoalActivity lookup uses plannedActivityId (the canonical current linkage, not a second concept)', /ga\."plannedActivityId" = ANY/.test(stripComments(loaderBody)));
-check('execution lookup uses plannedActivityId (never a "latest"/history join)', /gae\."plannedActivityId" = ga\."plannedActivityId"/.test(stripComments(loaderBody)));
+// Multi-Occurrence Rhythm PR 2 corrective patch -- the execution lookup now
+// joins against the UNION's own resolved `matched."plannedActivityId"`
+// (the plan id actually matched, from either the legacy singular link or
+// the occurrence ledger), never a second "latest"/history concept.
+check('execution lookup uses plannedActivityId (never a "latest"/history join)', /gae\."plannedActivityId" = matched\."plannedActivityId"/.test(stripComments(loaderBody)));
+check('the occurrence-ledger branch resolves through GoalActivityOccurrence.plannedActivityId, never a second counting formula', /gao\."plannedActivityId" = ANY/.test(stripComments(loaderBody)));
 check('completionRequirement in the loader uses the canonical G2.1 normalization helper, never a second implementation', /normalizeGoalActivityCompletionRequirement\(/.test(loaderBody));
 check('PlanGoalContext exposes no execution persistence internals (id/source/createdAt/updatedAt of the execution row)', (() => {
   const typeBlock = dbSrc.slice(dbSrc.indexOf('export interface PlanGoalContext'), dbSrc.indexOf('export interface PlanGoalContext') + 400);
@@ -52,11 +57,17 @@ check('homeTimelineComposer.ts remains pure -- no DB/fetch call added', !/pool\.
 // RecompositionCard.tsx a consumer of Goal IDENTITY ONLY (via its own
 // goalTitle field, never execution/completion internals) -- see
 // test/goalAwareRecompositionPresentation.test.ts for G3.5's own guards.
-// Every OTHER surface this section covers remains untouched and is still
-// asserted here.
+// Goal Continuity on Home V1 (DR4-C, a later, separately-authorized
+// ticket) intentionally made HomeTimeline.tsx's own TimelineRow a THIRD
+// consumer -- see test/homeTimelineGoalContext.test.ts for DR4-C's own
+// guards. This check is narrowed (not removed) to confirm that new
+// consumption is exactly as restrained as RecompositionCard.tsx's own:
+// Goal IDENTITY only (goalContext.goal.title), never an execution/
+// progress internal. Every OTHER surface this section covers remains
+// untouched and is still asserted here.
 // ============================================================
 check('GoalDetailClient.tsx does not render goalContext (currentValue exposure is API-only in G3.1)', !/goalContext/.test(read('apps/web/app/goals/[goalId]/GoalDetailClient.tsx')));
-check('HomeTimeline.tsx (ordinary Timeline rows) does not reference goalContext -- the Right Now spotlight is G3.3\'s only consumer, never every row', !/goalContext/.test(read('apps/web/components/HomeTimeline.tsx')));
+check('HomeTimeline.tsx\'s own goalContext consumption is Goal IDENTITY only (goalContext.goal.title) -- no execution id/source/snapshot/currentValue/completionRequirement ever reaches it, same restraint RecompositionCard.tsx already established', /goalContext\.goal\.title/.test(read('apps/web/components/HomeTimeline.tsx')) && !/executionId|\.source\b|completionKindSnapshot|completionTargetValueSnapshot|completionUnitSnapshot|completionRequirement|currentValue/.test(read('apps/web/components/HomeTimeline.tsx')));
 check('RecompositionCard.tsx consumes Goal IDENTITY only (its own goalTitle field) -- no execution id/source/snapshot/currentValue/completionRequirement ever reaches it', !/executionId|\.source\b|completionKindSnapshot|completionTargetValueSnapshot|completionUnitSnapshot|completionRequirement|currentValue/.test(read('apps/web/components/RecompositionCard.tsx')));
 
 // ============================================================
@@ -70,7 +81,7 @@ check('planMove.ts does not reference goalContext/PlanGoalContext (Move continui
 // No schema/migration change
 // ============================================================
 const migrationDirs = fs.readdirSync(path.join(__dirname, '..', 'apps', 'web', 'prisma', 'migrations')).filter((d) => /^\d{4}_/.test(d));
-check('no new migration directory was added for G3.1 (still 41, the G2.2.3 count)', migrationDirs.length === 43);
+check('no migration directory was added for G3.1 (PlanGoalContext/goalContext is a pure read-model slice over existing tables, no new table -- count-independent: holds regardless of how many unrelated migrations exist)', !migrationDirs.some((d) => /goalContext|planGoalContext/i.test(d)));
 check('schema.prisma was not touched (GoalActivityExecution model has no new field beyond what G2.2.1 already defined)', (() => {
   const schema = stripComments(read('apps/web/prisma/schema.prisma'));
   const match = schema.match(/model GoalActivityExecution \{([\s\S]*?)\n\}/);

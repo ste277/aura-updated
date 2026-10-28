@@ -28,7 +28,21 @@ function stripComments(source: string): string {
   return source.replace(/\/\*[\s\S]*?\*\//g, '').replace(/\/\/.*$/gm, '');
 }
 
-const RHYTHM_PATTERN = /Rhythm|rhythmKind|rhythmTargetPerWeek|computeGoalActivityRhythmEligibility|loadGoalActivityRhythmFacts/;
+// Daily Rhythm V1 PR DR2 -- the negative lookbehind excludes the
+// unrelated, independently-named "Daily Rhythm" feature (work-hours
+// scheduling preference), both as a code identifier (DailyRhythmPreferencesInput,
+// dailyRhythmScheduling, loadDailyRhythmPreferences, DAILY_RHYTHM_* warning
+// codes -- no space) and as prose in doc comments ("Daily Rhythm V1 PR
+// DR2" -- a space between the two words, since the PRODUCTION_FILES loop
+// below checks raw, unstripped file content). Goal Activity Rhythm (this
+// file's own subject -- weekly-frequency cadence) never appears as
+// "Daily"/"daily"/"DAILY_" immediately before "Rhythm" in any real
+// identifier or comment, so this narrows the pattern without weakening
+// its actual protective intent: a genuine new Goal-Rhythm leak into any
+// of these files would still be caught (e.g. "GoalActivityRhythm",
+// "rhythmKind" bare, or any other "Rhythm" not immediately preceded by
+// the Daily Rhythm feature's own naming prefix).
+const RHYTHM_PATTERN = /(?<!Daily)(?<!daily)(?<!DAILY_)(?<!Daily )(?<!daily )Rhythm|rhythmKind|rhythmTargetPerWeek|computeGoalActivityRhythmEligibility|loadGoalActivityRhythmFacts/;
 
 const PRODUCTION_FILES: Record<string, string> = {
   'Constructor core (dayConstructor.ts)': '../apps/web/lib/dayConstructor.ts',
@@ -83,9 +97,18 @@ check(
 // client-authored Rhythm data).
 // ============================================================
 const planMoveSrc = read('../apps/web/lib/planMove.ts');
+// Multi-Occurrence Rhythm, Final Capacity Safety Gate -- planMove.ts now
+// ALSO reads rhythmKind/rhythmTargetPerWeek and computes eligibility,
+// strictly to ENFORCE destination-week capacity on Move (never to
+// mutate a Rhythm policy, and never a second/duplicated formula --
+// it delegates to evaluateNewOccurrenceEligibility, PR 1's own pure
+// capacity API, exactly like every other capacity-check call site).
 check(
-  'planMove.ts references Rhythm ONLY via its one documented GoalActivityOccurrence repoint UPDATE (R3) -- no eligibility computation, no policy mutation',
-  /UPDATE "GoalActivityOccurrence"/.test(planMoveSrc) && !/computeGoalActivityRhythmEligibility|rhythmKind|rhythmTargetPerWeek/.test(planMoveSrc)
+  'planMove.ts references Rhythm ONLY via its documented GoalActivityOccurrence repoint UPDATE (R3) and the destination-capacity enforcement (Final Capacity Safety Gate), which delegates to evaluateNewOccurrenceEligibility -- never a duplicated formula, never a Rhythm policy WRITE',
+  /UPDATE "GoalActivityOccurrence"/.test(planMoveSrc) &&
+    /evaluateNewOccurrenceEligibility\(/.test(planMoveSrc) &&
+    !/computeGoalActivityRhythmEligibility\(/.test(planMoveSrc) &&
+    !/SET\s+"?rhythmKind"?|SET\s+"?rhythmTargetPerWeek"?/.test(planMoveSrc)
 );
 
 // Rhythm R4 (a still-further, separately-authorized ticket: Goal Detail
@@ -196,9 +219,9 @@ check(
 // exactly these five named, intentionally-reviewed functions -- never a
 // sixth, undocumented one.
 check(
-  'db.ts defines ONLY the five allowed, intentionally-reviewed Rhythm functions (loadGoalActivityRhythmFacts [read-only], loadGoalActivityRhythmFactsForActivities [R4\'s batched read-only sibling], materializeGoalActivityRhythmOccurrence [R3\'s sole occurrence writer], setGoalActivityRhythm [R5\'s sole existing-activity policy writer], and loadCandidateGoalActivitiesForRhythmDemand [Candidate A1\'s read-only discovery query]) -- no other function references Rhythm',
+  'db.ts defines ONLY the six allowed, intentionally-reviewed Rhythm functions (O5 P2d added the PURE row mapper buildGoalActivityRhythmFactsFromOccurrenceRows, no query; loadGoalActivityRhythmFacts [read-only], loadGoalActivityRhythmFactsForActivities [R4\'s batched read-only sibling], materializeGoalActivityRhythmOccurrence [R3\'s sole occurrence writer], setGoalActivityRhythm [R5\'s sole existing-activity policy writer], and loadCandidateGoalActivitiesForRhythmDemand [Candidate A1\'s read-only discovery query]) -- no other function references Rhythm',
   [...new Set((dbSrc.match(/function \w*[Rr]hythm\w*/g) ?? []))].sort().join(',') ===
-    ['function loadGoalActivityRhythmFacts', 'function loadGoalActivityRhythmFactsForActivities', 'function materializeGoalActivityRhythmOccurrence', 'function setGoalActivityRhythm', 'function loadCandidateGoalActivitiesForRhythmDemand'].sort().join(',')
+    ['function buildGoalActivityRhythmFactsFromOccurrenceRows', 'function loadGoalActivityRhythmFacts', 'function loadGoalActivityRhythmFactsForActivities', 'function materializeGoalActivityRhythmOccurrence', 'function setGoalActivityRhythm', 'function loadCandidateGoalActivitiesForRhythmDemand'].sort().join(',')
 );
 check('loadCandidateGoalActivitiesForRhythmDemand itself contains no INSERT/UPDATE/DELETE (read-only, this ticket\'s own section 15)', !/INSERT\s|UPDATE\s|DELETE\s/.test(functionBody(dbSrc, 'loadCandidateGoalActivitiesForRhythmDemand')));
 check('loadGoalActivityRhythmFacts itself contains no INSERT/UPDATE/DELETE (read-only, this ticket\'s own section 23)', !/INSERT\s|UPDATE\s|DELETE\s/.test(functionBody(dbSrc, 'loadGoalActivityRhythmFacts')));
@@ -221,9 +244,16 @@ check('goalActivityRhythm.ts never creates a GoalActivityOccurrence row (no INSE
 const schemaSrc = read('../apps/web/prisma/schema.prisma');
 check('schema.prisma defines rhythmKind/rhythmTargetPerWeek on GoalActivity (the one allowed schema reference)', /rhythmKind\s+String\?/.test(schemaSrc) && /rhythmTargetPerWeek\s+Int\?/.test(schemaSrc));
 check('migration 0043_goal_activity_rhythm exists and adds exactly the two Rhythm columns, nothing else', fs.existsSync(path.join(__dirname, '../apps/web/prisma/migrations/0043_goal_activity_rhythm/migration.sql')) && (() => { const m = fs.readFileSync(path.join(__dirname, '../apps/web/prisma/migrations/0043_goal_activity_rhythm/migration.sql'), 'utf8'); const alters = (m.match(/^ALTER TABLE/gm) ?? []).length; return alters === 2 && /ADD COLUMN "rhythmKind" TEXT/.test(m) && /ADD COLUMN "rhythmTargetPerWeek" INTEGER/.test(m) && !/CREATE TABLE/.test(m); })());
-check('no new migration directory was added beyond 0043 (still exactly 43)', fs.readdirSync(path.join(__dirname, '../apps/web/prisma/migrations')).filter((d) => /^\d{4}_/.test(d)).length === 43);
+check('R2 introduced rhythmKind/rhythmTargetPerWeek exactly once, in 0043: no OTHER migration directory\'s own contents also reference them (count-independent -- holds regardless of how many unrelated migrations exist)', fs.readdirSync(path.join(__dirname, '../apps/web/prisma/migrations')).filter((d) => /^\d{4}_/.test(d) && d !== '0043_goal_activity_rhythm').every((d) => !/rhythmKind|rhythmTargetPerWeek/.test(fs.readFileSync(path.join(__dirname, '../apps/web/prisma/migrations', d, 'migration.sql'), 'utf8'))));
 check('GoalActivityOccurrence model (R1) was not modified by R2 -- still no status/windowKey column', (() => { const m = schemaSrc.match(/model GoalActivityOccurrence \{([\s\S]*?)\n\}/); const block = m ? m[1] : ''; return !/\bstatus\s+String/.test(block) && !/windowKey/i.test(block); })());
-check('GoalActivityExecution model gained no new column from R2', (() => { const m = schemaSrc.match(/model GoalActivityExecution \{([\s\S]*?)\n\}/); const block = m ? m[1] : ''; return !/rhythm/i.test(block); })());
+// Insights V1 PR3 added goalActivityOccurrenceId, whose own doc comment
+// legitimately explains its purpose in terms of a Rhythm occurrence (why
+// the durable link matters for N_PER_WEEK completions specifically) --
+// comment PROSE, not a Rhythm-shaped COLUMN. Re-scoped to comment-stripped
+// text, matching this file's own established stripComments convention
+// elsewhere, so the real invariant (no rhythmKind/rhythmTargetPerWeek-style
+// column ever added to this model) is still exactly what's checked.
+check('GoalActivityExecution model gained no new RHYTHM-shaped column from R2', (() => { const m = schemaSrc.match(/model GoalActivityExecution \{([\s\S]*?)\n\}/); const block = m ? stripComments(m[1]) : ''; return !/rhythm/i.test(block); })());
 
 // ============================================================
 // No separate GoalActivityRhythm entity was created (this ticket's own

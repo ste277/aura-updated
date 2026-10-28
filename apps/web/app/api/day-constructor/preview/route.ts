@@ -4,6 +4,9 @@ import { getUserById } from '../../../../lib/db';
 import { parseJsonObject } from '../../../../lib/request';
 import { createRealDayConstructorOrchestratorDeps } from '../../../../lib/dayConstructorOrchestrator';
 import { handleDayConstructorPreviewRequest } from '../../../../lib/dayConstructorPreviewRequest';
+import { loadGoalDecisionFacts, createGoalDemandDepsFromSchedulingContext } from '../../../../lib/goalDecisionFactsProvider';
+import { loadDecisionSchedulingContext } from '../../../../lib/decisionSchedulingContextLoader';
+import { createServerShadowPolicyExecution } from '../../../../lib/shadowPolicyExecution';
 
 /**
  * Day Constructor V1 PR F1 -- the sole read boundary exposing
@@ -32,6 +35,12 @@ export async function POST(req: NextRequest) {
     getBody: () => parseJsonObject(req),
     now: () => new Date(),
     createOrchestratorDeps: createRealDayConstructorOrchestratorDeps,
+    // O5 P2d -- every database-derived input of the decision evidence is read ONCE, in one REPEATABLE READ snapshot; the
+    // independent live providers (loadDecisionFacts / createOpportunityRangeDeps) are deliberately NOT wired here.
+    loadSchedulingContext: (user, request) => loadDecisionSchedulingContext({ userId: user.id, planningDate: request.targetDate, timezone: request.timezone }),
+    loadDecisionFactsFromContext: (user, request, context) => loadGoalDecisionFacts(user, request, createGoalDemandDepsFromSchedulingContext(context)),
+    // O5 P4b5 -- the server-controlled shadow policy mode (OFF unless AURA_SHADOW_POLICY_MODE is exactly SHADOW). Never request-controlled.
+    shadowPolicy: createServerShadowPolicyExecution,
   });
   return NextResponse.json(result.body, { status: result.httpStatus });
 }

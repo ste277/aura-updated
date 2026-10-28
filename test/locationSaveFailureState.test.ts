@@ -132,7 +132,11 @@ check(
 // confirmed-save boundary must survive this fix untouched).
 // ============================================================
 
-check('handleSelectChange calls onChanged only inside its try block\'s res.ok branch', /if \(res\.ok\) \{[\s\S]*?onChanged\(selectedCity\);/.test(curated?.tryBlock ?? ''));
+// Onboarding V1 PR 1 -- handleSelectChange now parses the response body
+// (to forward the server's own locationConfirmedAt, Location Trust
+// Foundation) before calling onChanged, still exclusively inside the
+// SAME res.ok branch -- never in catch/finally (checks 7/9/11 below).
+check('handleSelectChange calls onChanged only inside its try block\'s res.ok branch', /if \(res\.ok\) \{[\s\S]*?onChanged\(\{ \.\.\.selectedCity, locationConfirmedAt:/.test(curated?.tryBlock ?? ''));
 check('handleCustomSubmit calls onChanged only inside its try block\'s res.ok branch', /if \(res\.ok\) \{[\s\S]*?onChanged\(newCity\);/.test(custom?.tryBlock ?? ''));
 check('handleSelectChange\'s catch block never calls onChanged', !/onChanged\(/.test(curated?.catchBlock ?? ''));
 check('handleCustomSubmit\'s catch block never calls onChanged', !/onChanged\(/.test(custom?.catchBlock ?? ''));

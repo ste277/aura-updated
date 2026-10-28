@@ -12,11 +12,17 @@
   "include": ["packages/**/*.ts", "test/**/*.ts"],
   "exclude": [
     "test/planWithAuraViewLogic.test.ts",
+    "test/durationDisplayCorrection.test.ts",
+    "test/planTabRecommendationChoiceRescheduleContext.test.ts",
+    "test/planTabChooseMyOwnTime.test.ts",
+    "test/dr4f2bAsyncRaceConditions.test.ts",
     "test/panchangCalendarLogic.test.ts",
     "test/muhurthamFinderViewLogic.test.ts",
     "test/homeDashboardGoodRightNow.test.ts",
     "test/nextMomentSurface.test.ts",
-    "test/pendingActivityReloadVisibility.test.ts"
+    "test/pendingActivityReloadVisibility.test.ts",
+    "test/dailyBriefingEvidenceCompleteness.test.ts",
+    "test/planHomeHandoffActivityIdentity.test.ts"
   ]
 }
 

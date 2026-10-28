@@ -40,6 +40,15 @@ export interface PlanDayBootstrap {
  */
 export interface PlanDayServerProps extends PlanDayBootstrap {
   availabilityConfigured: boolean;
+  /** Onboarding V1 PR 1 -- Location Trust Foundation. Resolved the SAME
+   * way `availabilityConfigured` above is: one level up, where `user` is
+   * already in scope, zero extra query. A plain boolean (never the raw
+   * timestamp/Date) -- the only thing the client needs is whether to
+   * show the "unconfirmed location" qualifier, never the exact instant. */
+  locationConfirmed: boolean;
+  /** The current (non-birth) city name this plan's timing is computed
+   * against -- surfaced so the qualifier, when shown, can name it. */
+  cityName: string;
 }
 
 /**
@@ -73,8 +82,18 @@ export interface PlanDayBootstrapDeps {
    * always carries it, but a test fixture supplying only `{ timezone }`
    * (P1's own established convention) must keep working unchanged; a
    * missing value is treated identically to `false` (see
-   * `resolvePlanDayServerProps` below), never a fabricated `true`. */
-  getUser: (userId: string) => Promise<{ timezone: string; availabilityConfigured?: boolean } | null>;
+   * `resolvePlanDayServerProps` below), never a fabricated `true`.
+   *
+   * Onboarding V1 PR 1 -- `locationConfirmedAt` and `cityName` are
+   * optional for the same reason: the real `User` row's own `cityName`
+   * column is NOT NULL, but an existing test fixture supplying only
+   * `{ timezone }` (P1's own established convention, same as
+   * `availabilityConfigured` above) must keep working unchanged. A
+   * missing `cityName` falls back to `''` in `resolvePlanDayServerProps`
+   * below, which simply never satisfies the qualifier's own truthy
+   * check (see PlanDayClient.tsx) -- fails closed to "no qualifier
+   * shown," never a fabricated city name. */
+  getUser: (userId: string) => Promise<{ timezone: string; availabilityConfigured?: boolean; cityName?: string; locationConfirmedAt?: Date | null } | null>;
   /** The authoritative server clock, read exactly once. */
   now: () => Date;
 }
@@ -105,7 +124,7 @@ export async function resolvePlanDayServerProps(deps: PlanDayBootstrapDeps, hori
   if (!user) return null;
 
   const bootstrap = resolvePlanDayBootstrap(user.timezone, deps.now(), horizon);
-  return { ...bootstrap, availabilityConfigured: user.availabilityConfigured === true };
+  return { ...bootstrap, availabilityConfigured: user.availabilityConfigured === true, locationConfirmed: user.locationConfirmedAt != null, cityName: user.cityName ?? '' };
 }
 
 // ============================================================
@@ -128,6 +147,17 @@ export interface GoalActivityHandoffItem {
   id: string;
   title: string;
   activityId: string | null;
+  /**
+   * O5 P0a -- set ONLY by the server (`markCanonicalGoalDemandHandoff`
+   * below), never by a request: true when this handed-off GoalActivity is
+   * ALSO canonical recurring Goal demand under the existing eligibility
+   * read model (`loadEligibleGoalDemand`) for the planning date. It is a
+   * presentation-time fact telling the client to seed the row with the
+   * SAME canonical intent identity an automatic inclusion uses, so the
+   * existing server-side matching and acceptance authorization treat both
+   * entry paths identically. Absent/false keeps the legacy manual row.
+   */
+  canonicalDemand?: boolean;
 }
 
 export interface GoalActivityHandoffDeps {
@@ -151,7 +181,7 @@ export interface GoalActivityHandoffDeps {
     userId: string,
     goalId: string
   ) => Promise<
-    ReadonlyArray<{ id: string; title: string; activityId: string | null; status: string; plannedActivityId: string | null; linkedPlanStatus: string | null; rhythmKind?: string | null; rhythmTargetPerWeek?: number | null }>
+    ReadonlyArray<{ id: string; title: string; activityId: string | null; status: string; plannedActivityId: string | null; linkedPlanStatus: string | null; rhythmKind?: string | null; rhythmTargetPerWeek?: number | null; everCompleted?: boolean }>
   >;
   /** Rhythm R3 -- `loadGoalActivityRhythmFacts` (db.ts), passed by
    * reference; the SAME batched-per-activity read model R2 already
@@ -207,17 +237,30 @@ export async function resolveGoalActivityHandoff(deps: GoalActivityHandoffDeps, 
         status: activity.status as GoalActivityStatus,
         plannedActivityId: activity.plannedActivityId,
         linkedPlanStatus: activity.linkedPlanStatus as PlannedActivityStatus | null,
+        everCompleted: activity.everCompleted,
       });
       if (state === 'SUGGESTED') return true;
       // Rhythm R3's own primary behavioral requirement: a COMPLETED
       // N_PER_WEEK activity with remaining weekly capacity is admitted
       // too -- re-derived fresh, server-side, from THIS activity's own
       // persisted rhythmKind/rhythmTargetPerWeek and occurrence facts,
-      // never trusted from any client-supplied Rhythm field (this
-      // ticket's own section 20). A finite (NONE) COMPLETED activity, or
-      // any PLANNED/DISMISSED activity, is never admitted here -- the
-      // legacy SUGGESTED-only behavior for everything else is unchanged.
-      if (state !== 'COMPLETED' || !planningDate || !timezone || !deps.loadGoalActivityRhythmFacts) return false;
+      // never trusted from any client-supplied Rhythm field. A finite
+      // (NONE) COMPLETED activity, or any DISMISSED activity, is never
+      // admitted here -- the legacy SUGGESTED-only behavior for those is
+      // unchanged.
+      //
+      // Multi-Occurrence Rhythm PR 2 corrective fix -- PLANNED is now
+      // ALSO re-checked the same way as COMPLETED, for N_PER_WEEK only.
+      // `GoalActivity.plannedActivityId` now tracks "the most recently
+      // materialized occurrence," not "the one live commitment," so a
+      // GoalActivity can be PLANNED (its newest occurrence is UPCOMING)
+      // while still having weekly capacity for ANOTHER occurrence -- the
+      // automatic Plan My Day suggestion path (goalDemandCandidates.ts)
+      // already offers exactly this case; this manual hand-off path must
+      // agree with it, not silently disagree. A finite (NONE) PLANNED
+      // activity is still never admitted (rhythm.kind !== 'N_PER_WEEK'
+      // below refuses it, preserving the legacy finite behavior exactly).
+      if ((state !== 'COMPLETED' && state !== 'PLANNED') || !planningDate || !timezone || !deps.loadGoalActivityRhythmFacts) return false;
       const rhythm = normalizeGoalActivityRhythm({ rhythmKind: activity.rhythmKind ?? null, rhythmTargetPerWeek: activity.rhythmTargetPerWeek ?? null });
       if (rhythm.kind !== 'N_PER_WEEK') return false;
       const facts = await deps.loadGoalActivityRhythmFacts(session.userId, activity.id, timezone);
@@ -307,7 +350,17 @@ export async function resolveCaptureHandoff(deps: CaptureHandoffDeps, capturesPa
 // reimplemented (this ticket's own section 7/8).
 // ============================================================
 
-export type AutomaticGoalDemandBootstrapResult = { status: 'OK'; suggestions: readonly GoalDemandCandidate[] } | { status: 'LOAD_FAILED' };
+export type AutomaticGoalDemandBootstrapResult =
+  | {
+      status: 'OK';
+      suggestions: readonly GoalDemandCandidate[];
+      /** O5 P0a -- the subset of `excludeGoalActivityIds` (the manual
+       * handoff's own resolved ids) that the SAME single eligible-demand
+       * load recognizes as canonical demand. No extra query: it is read
+       * from the candidates already loaded. */
+      manualCanonicalGoalActivityIds: readonly string[];
+    }
+  | { status: 'LOAD_FAILED' };
 
 export interface AutomaticGoalDemandBootstrapDeps extends GoalDemandCandidatesDeps {
   getSessionToken: () => string | undefined;
@@ -339,15 +392,33 @@ export async function resolveAutomaticGoalDemand(
   timezone: string | null,
   excludeGoalActivityIds: readonly string[]
 ): Promise<AutomaticGoalDemandBootstrapResult> {
-  if (!planningLocalDate || !timezone) return { status: 'OK', suggestions: [] };
+  if (!planningLocalDate || !timezone) return { status: 'OK', suggestions: [], manualCanonicalGoalActivityIds: [] };
 
   const token = deps.getSessionToken();
-  if (!token) return { status: 'OK', suggestions: [] };
+  if (!token) return { status: 'OK', suggestions: [], manualCanonicalGoalActivityIds: [] };
   const session = deps.verifySession(token);
-  if (!session) return { status: 'OK', suggestions: [] };
+  if (!session) return { status: 'OK', suggestions: [], manualCanonicalGoalActivityIds: [] };
 
   const result = await loadEligibleGoalDemand(deps, session.userId, planningLocalDate, timezone);
   if (result.status === 'LOAD_FAILED') return { status: 'LOAD_FAILED' };
 
-  return { status: 'OK', suggestions: excludeGoalDemandByActivityIds(result.candidates, excludeGoalActivityIds) };
+  const manualIds = new Set(excludeGoalActivityIds);
+  return {
+    status: 'OK',
+    suggestions: excludeGoalDemandByActivityIds(result.candidates, excludeGoalActivityIds),
+    manualCanonicalGoalActivityIds: result.candidates.filter((candidate) => manualIds.has(candidate.goalActivityId)).map((candidate) => candidate.goalActivityId),
+  };
+}
+
+/**
+ * O5 P0a -- pure server-side annotation of the manual handoff: an item is
+ * marked `canonicalDemand` iff its id is among the ids the eligible-demand
+ * read model itself recognized. Exact id equality only (never a title,
+ * label or similarity match); an id the read model did not return -- a
+ * finite activity, an ineligible one, an archived Goal's, or any id when
+ * the load failed -- is left exactly as the legacy manual item.
+ */
+export function markCanonicalGoalDemandHandoff(items: readonly GoalActivityHandoffItem[], canonicalGoalActivityIds: readonly string[]): GoalActivityHandoffItem[] {
+  const canonical = new Set(canonicalGoalActivityIds);
+  return items.map((item) => (canonical.has(item.id) ? { ...item, canonicalDemand: true } : item));
 }

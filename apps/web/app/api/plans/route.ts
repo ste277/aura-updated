@@ -1,11 +1,13 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getSessionFromRequest } from '../../../lib/session';
 import { DIRECT_PLAN_SCHEDULING_MODE } from '../../../lib/plannedActivitySchedulingMode';
-import { createPlannedActivity, listPlannedActivities, getPlannedActivityForOwner, getGuestConversionRedemption, claimGuestConversionToken, fillGuestConversionRedemption, getPlanCreationClaim, claimPlanCreation, fillPlanCreationClaim } from '../../../lib/db';
+import { beginTransaction, createPlannedActivity, listPlannedActivities, getPlannedActivityForOwner, getGuestConversionRedemption, claimGuestConversionToken, fillGuestConversionRedemption, getPlanCreationClaim, claimPlanCreation, fillPlanCreationClaim, linkGoalActivityToPlannedActivity, lockGoalParentLifecycleForPlanning, materializeGoalActivityRhythmOccurrence, getUserById } from '../../../lib/db';
 import { parseJsonObject } from '../../../lib/request';
 import { verifyGuestStateToken, hashGuestConversionToken } from '../../../lib/guestState';
 import { parseEventLocationSnapshot } from '../../../lib/plansRequest';
 import { getActivityProfileById } from '../../../../../packages/recommendation/src/personalizedTasks';
+import { getDatePartsInTimezone } from '../../../lib/timezone';
+import { SchedulingEligibilityError, SCHEDULING_ELIGIBILITY_STATUS_BY_CODE, materializeFailureToSchedulingEligibilityError, goalActivityNotAvailableError, goalNotActiveError } from '../../../lib/schedulingEligibilityError';
 
 const MIN_PLAN_DURATION_MINUTES = 15;
 const MAX_PLAN_DURATION_MINUTES = 360;
@@ -232,6 +234,20 @@ export async function POST(req: NextRequest) {
     validatedActivityId = activity.id;
   }
 
+  // HPG2 -- goalActivityId is UNTRUSTED client input, optional, and a
+  // COMPLETELY SEPARATE identity space from activityId above: activityId
+  // is a static, non-user-scoped catalog entry (packages/recommendation/
+  // src/personalizedTasks.ts, no ownership concept at all); goalActivityId
+  // is a real, per-user-owned "GoalActivity" database row. The two are
+  // never interchangeable and this route never treats one as the other.
+  // Only a well-formed string is accepted here -- the actual
+  // existence/ownership/eligibility check happens atomically, inside the
+  // transaction below, via the SAME linkGoalActivityToPlannedActivity this
+  // app's Day Constructor acceptance path already relies on (db.ts) --
+  // never a separate pre-check (that would be a TOCTOU race) and never by
+  // matching this request's own `title` against any GoalActivity's title.
+  const goalActivityId = typeof body?.goalActivityId === 'string' && body.goalActivityId.trim() ? body.goalActivityId.trim() : null;
+
   if (!title || title.length > 200) return NextResponse.json({ error: 'A title of up to 200 characters is required.' }, { status: 400 });
   if (!plannedStartAt || !plannedEndAt || plannedEndAt <= plannedStartAt) {
     return NextResponse.json({ error: 'Valid plannedStartAt and plannedEndAt values are required.' }, { status: 400 });
@@ -259,27 +275,133 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: eventLocationSnapshot.error }, { status: 400 });
   }
 
-  const plan = await createPlannedActivity({
-    userId: session.userId,
-    title,
-    activityType,
-    icon,
-    plannedStartAt,
-    plannedEndAt,
-    durationMinutes,
-    windowType,
-    windowLabel,
-    matchLabel,
-    score,
-    recommendation,
-    calendarUrl,
-    eventTimezone: eventLocationSnapshot.eventTimezone,
-    eventLocationName: eventLocationSnapshot.eventLocationName,
-    activityId: validatedActivityId,
-    // F1: a direct plan is an explicit exact-time choice made outside the Constructor's flexible-placement flow.
-    // Server constant, never read from the request body -- a client cannot grant recomposition permission.
-    schedulingMode: DIRECT_PLAN_SCHEDULING_MODE,
-  });
+  // HPG3-A2 -- cheap, pre-transaction gathering (same discipline as every
+  // other validation above): a goalActivityId write may need to route
+  // through materializeGoalActivityRhythmOccurrence, which requires the
+  // owning user's timezone to derive the candidate local day. Only fetched
+  // when actually needed -- the common, non-Goal-linked path is
+  // unaffected. Same null-check precedent as persistAcceptedConstructedDay
+  // (dayConstructorAcceptancePersistence.ts) for the identical lookup.
+  const user = goalActivityId ? await getUserById(session.userId) : null;
+  if (goalActivityId && !user) {
+    return NextResponse.json({ error: 'Could not resolve the authenticated user.' }, { status: 500 });
+  }
+
+  // Schedule write consistency S2 -- this ordinary/manual writer takes the SAME per-user, transaction-scoped advisory
+  // lock Constructor acceptance, Move and Recomposition acceptance take, and inserts inside that transaction, so a manual
+  // write and an Aura automatic write for one user cannot make their write decisions concurrently. The lock only
+  // SERIALIZES writers: no overlap check is added here, and an explicit manual overlap stays allowed. The lock identity is
+  // the authenticated session's user, never anything the request supplies; it is released automatically at COMMIT/ROLLBACK.
+  const client = await beginTransaction();
+  let plan: Awaited<ReturnType<typeof createPlannedActivity>>;
+  try {
+    await client.query('SELECT pg_advisory_xact_lock(hashtext($1))', [`day-constructor-accept:${session.userId}`]);
+    plan = await createPlannedActivity({
+      userId: session.userId,
+      title,
+      activityType,
+      icon,
+      plannedStartAt,
+      plannedEndAt,
+      durationMinutes,
+      windowType,
+      windowLabel,
+      matchLabel,
+      score,
+      recommendation,
+      calendarUrl,
+      eventTimezone: eventLocationSnapshot.eventTimezone,
+      eventLocationName: eventLocationSnapshot.eventLocationName,
+      activityId: validatedActivityId,
+      // F1: a direct plan is an explicit exact-time choice made outside the Constructor's flexible-placement flow.
+      // Server constant, never read from the request body -- a client cannot grant recomposition permission.
+      schedulingMode: DIRECT_PLAN_SCHEDULING_MODE,
+    }, client);
+    // HPG2 -- same transaction, same client, immediately after the Plan
+    // insert that just happened: the exact pattern Day Constructor
+    // acceptance already uses (dayConstructorAcceptancePersistence.ts).
+    if (goalActivityId) {
+      // HPG2 P0 fix -- Goal LIFECYCLE authorization, the same boundary Day
+      // Constructor acceptance already enforces (dayConstructorAcceptancePersistence.ts,
+      // lockGoalParentLifecycleForPlanning's own doc comment, db.ts): archiving
+      // a Goal revokes its authority to produce NEW Goal-derived planning
+      // state, so this must be checked -- on the SAME transaction client,
+      // taking the SAME `FOR SHARE OF g` lock -- before the link write below,
+      // not just left to linkGoalActivityToPlannedActivity's own WHERE clause
+      // (which only ever looks at the GoalActivity row, never its parent
+      // Goal). A GoalActivity this user doesn't own is simply absent from
+      // `owned` -- unaffected, falls through to the existing fail-closed
+      // ownership rejection at the link call below, exactly as before.
+      const lifecycle = await lockGoalParentLifecycleForPlanning(session.userId, [goalActivityId], client);
+      if (lifecycle.owned.has(goalActivityId) && !lifecycle.active.has(goalActivityId)) {
+        throw goalNotActiveError();
+      }
+      // HPG3-A2 -- tried FIRST, the EXACT SAME ordering pattern
+      // dayConstructorAcceptancePersistence.ts's own write loop already
+      // established: a pure, side-effect-free read (`NOT_RHYTHM_ELIGIBLE`)
+      // for any GoalActivity whose rhythmKind isn't N_PER_WEEK -- the
+      // common, finite case, where this falls straight through to the
+      // EXISTING, UNMODIFIED linkGoalActivityToPlannedActivity below,
+      // which alone still owns every NONE/first-link/CANCELLED-or-
+      // SKIPPED-relink case exactly as before A2 (the finite "once ever"
+      // legacy path, and its completion/progress contract, are untouched
+      // -- this is what keeps a finite GoalActivity finite, never
+      // silently made indefinitely repeatable). For an N_PER_WEEK
+      // GoalActivity this is also what applies the new daily cap (when
+      // its own dailyFrequencyKind resolves to ONCE_PER_DAY) alongside
+      // the existing weekly one -- both gates live inside this one
+      // function, never duplicated here.
+      const planningLocalDate = getDatePartsInTimezone(user!.timezone, plannedStartAt).dateStr;
+      const materialized = await materializeGoalActivityRhythmOccurrence(session.userId, goalActivityId, plan.id, plannedStartAt, planningLocalDate, user!.timezone, client);
+      if (!materialized.ok && materialized.reason !== 'NOT_RHYTHM_ELIGIBLE') {
+        // A genuine Rhythm-specific refusal (live UPCOMING commitment,
+        // weekly capacity exhausted, daily cap already met, or an
+        // unresolved legacy attribution conflict) -- never fall through
+        // to the legacy link below, which would refuse for the exact same
+        // underlying reason anyway. Same all-or-nothing contract as every
+        // other link failure in this route: the outer catch below ROLLBACKs
+        // the whole transaction (this Plan insert included).
+        // HPG3-A3a -- a typed, specific SchedulingEligibilityError instead
+        // of a flat 'GOAL_ACTIVITY_LINK_FAILED' string, so the caller can
+        // finally tell daily/weekly/legacy-attribution refusals apart.
+        throw materializeFailureToSchedulingEligibilityError(materialized.reason);
+      }
+      if (!materialized.ok) {
+        // NOT_RHYTHM_ELIGIBLE -- finite (NONE) or no Rhythm policy at all.
+        // linkGoalActivityToPlannedActivity itself enforces ownership
+        // (userId), non-DISMISSED, and the established eligibility rule
+        // (currently unlinked, or linked only to a CANCELLED/SKIPPED
+        // plan) -- one atomic conditional UPDATE, no separate
+        // check-then-act. `false` means the id doesn't exist, isn't this
+        // user's, is DISMISSED, or already retains a live link to a
+        // DIFFERENT plan -- fails the WHOLE request closed (no orphan,
+        // unlinked PlannedActivity silently created instead of the
+        // Goal-linked one the caller explicitly asked for).
+        const linked = await linkGoalActivityToPlannedActivity(session.userId, goalActivityId, plan.id, client);
+        if (!linked) throw goalActivityNotAvailableError();
+      }
+    }
+    await client.query('COMMIT');
+  } catch (err) {
+    await client.query('ROLLBACK').catch(() => {});
+    // HPG3-A3a -- one typed branch instead of two message-string
+    // comparisons; GOAL_NOT_ACTIVE and GOAL_ACTIVITY_NOT_AVAILABLE keep
+    // their exact pre-A3a message/status (400), while CAPACITY_EXCEEDED/
+    // DAILY_CAPACITY_EXCEEDED/DAILY_ATTRIBUTION_UNRESOLVED -- previously
+    // indistinguishable from each other or from the generic case -- now
+    // surface as genuine scheduling conflicts (409), matching Move's own
+    // established convention for these same three codes.
+    if (err instanceof SchedulingEligibilityError) {
+      return NextResponse.json({ error: err.message, code: err.code }, { status: SCHEDULING_ELIGIBILITY_STATUS_BY_CODE[err.code] });
+    }
+    // Schedule write consistency S2 -- an unclassified error always
+    // propagates (never silently swallowed into an unintended response);
+    // this is the general "Plan creation failure" bucket and it is
+    // UNCHANGED by HPG3-A3a.
+    throw err;
+  } finally {
+    client.release();
+  }
 
   if (guestConversionTokenHash) {
     await fillGuestConversionRedemption(guestConversionTokenHash, plan.id);

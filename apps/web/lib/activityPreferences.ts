@@ -96,7 +96,12 @@ export function validatePreferredDurationMinutes(preferredDurationMinutes: numbe
  * only -- carries no product significance).
  */
 export async function listUserActivityPreferences(userId: string): Promise<UserActivityPreference[]> {
-  const rows = await listUserActivityPreferenceRows(userId);
+  return userActivityPreferencesFromRows(await listUserActivityPreferenceRows(userId));
+}
+
+/** O5 P2d -- the pure shaping `listUserActivityPreferences` applies to already-read rows (retired catalog ids omitted), so the
+ * same rows read through a snapshot executor are interpreted identically. */
+export function userActivityPreferencesFromRows(rows: readonly { activityId: string; preferredDurationMinutes: number }[]): UserActivityPreference[] {
   return rows
     .filter((row) => getActivityProfileById(row.activityId) !== undefined)
     .map((row) => ({ activityId: row.activityId, preferredDurationMinutes: row.preferredDurationMinutes }));

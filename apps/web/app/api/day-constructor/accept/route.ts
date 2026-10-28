@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { getSessionFromRequest } from '../../../../lib/session';
 import { parseJsonObject } from '../../../../lib/request';
 import { persistAcceptedConstructedDay, MAX_CLIENT_REQUEST_ID_LENGTH, MAX_INTENT_ID_LENGTH } from '../../../../lib/dayConstructorAcceptancePersistence';
+import { SCHEDULING_ELIGIBILITY_STATUS_BY_CODE } from '../../../../lib/schedulingEligibilityError';
 import { verifyAcceptanceItems } from '../../../../lib/dayConstructorPreviewIntegrity';
 import { authorizeGoalActivityLinks } from '../../../../lib/goalDemandProvenanceAuthorization';
 import type { AcceptConstructedDayRequest, AcceptedProposedItem } from '../../../../lib/dayConstructorAcceptance';
@@ -172,7 +173,13 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ status: 'IDEMPOTENCY_CONFLICT' });
     case 'SAVE_FAILED':
       // Never leak internals (stack traces, query text) -- this ticket's
-      // own section 16.
+      // own section 16. HPG3-A3a -- a known, typed scheduling-eligibility
+      // code gets its own specific status (409 for a genuine capacity/
+      // attribution conflict, 400 for the generic "not available to
+      // link"); anything else keeps the original, unqualified 500.
+      if (result.code) {
+        return NextResponse.json({ status: 'SAVE_FAILED', code: result.code }, { status: SCHEDULING_ELIGIBILITY_STATUS_BY_CODE[result.code] });
+      }
       return NextResponse.json({ status: 'SAVE_FAILED' }, { status: 500 });
   }
 }

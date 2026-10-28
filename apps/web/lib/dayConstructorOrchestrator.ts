@@ -31,10 +31,11 @@
  */
 
 import type { User, HabitLogRow } from './db';
-import { listPlannedActivitiesForDay, listHabitLogs, listUserAvailabilityPeriods } from './db';
+import { listPlannedActivitiesOverlappingRange, listHabitLogs, listUserAvailabilityPeriods, getDailyWorkPreferences } from './db';
 import { resolveAvailability, normalizeUsableWindowsToConstructionWindow, type AvailabilityConfiguration } from './availabilityContext';
-import { listUserActivityPreferences, preferredDurationByActivityId, type UserActivityPreference } from './activityPreferences';
-import { deriveBehavioralProfile, activityDurationByActivityId } from './behavioralAffinity';
+import { applyDailyRhythmPreference, explainDailyRhythmPlacement, resolveDailyRhythmSearchLimit, type DailyRhythmPreferencesInput } from './dailyRhythmScheduling';
+import { listUserActivityPreferences, type UserActivityPreference } from './activityPreferences';
+import { buildDurationContext } from './durationContext';
 import { durationMinutesFor, GENERIC_DURATION_FALLBACK_MINUTES } from './dayBuilderOrchestrator';
 import { localDayBoundsUTC } from './myDayOrchestrator';
 import { resolveTzOffsetMinutes, getDatePartsInTimezone } from './timezone';
@@ -57,6 +58,7 @@ import {
 } from './dayIntent';
 import {
   constructDay,
+  constructDayWithTrace,
   type ConstructDayInput,
   type ConstructDayResult,
   type ConstructedDay,
@@ -66,6 +68,12 @@ import {
   type PlacementTimingFit,
 } from './dayConstructor';
 import type { BlockedInterval } from './dayCapacity';
+import { aggregateContentionTraces, type ContentionTrace } from './contentionTrace';
+import { assembleConstructionBasis, captureCandidateLists, type ConstructionBasisOutcome } from './constructionBasis';
+import { captureBaselinePlacements, type BaselinePlacementsOutcome } from './baselinePlacements';
+import { isActivePlanBlocker, type PlanBlockerStatus, type PlanBlockerCandidate } from './planBlockerLifecycle';
+import { resolveDecisionFactsForIntent, type DecisionFactsByIntentId } from './decisionFacts';
+import { attachPreparedDecisionFacts, prepareDecisionEvidence, prepareDecisionFactsFailOpen, type DecisionFactPreparer } from './decisionFactPreparation';
 
 // ============================================================
 // Request contract (this ticket's own section 4). USER-LEVEL input --
@@ -144,6 +152,13 @@ export interface ConstructDayRequest {
   explicitStart?: Date;
   explicitEnd?: Date;
   intents: RequestedDayIntent[];
+  /** Decision Facts V1 -- OPTIONAL, generic, server-supplied facts keyed
+   * by the caller's own intent id (decisionFacts.ts). This file only
+   * looks them up; it never fetches, derives, or interprets them, and
+   * nothing here reads them for ordering/placement/eligibility. Never
+   * set from a client request body (the preview request parser builds
+   * this request field-by-field). */
+  decisionFactsByIntentId?: DecisionFactsByIntentId;
 }
 
 // ============================================================
@@ -154,86 +169,22 @@ export interface ConstructDayRequest {
 // deterministic fakes with no DB/network involved.
 // ============================================================
 
-/**
- * The persisted status of a real `PlannedActivity` row (db.ts) --
- * exactly the three real DB-column values, reproduced here rather than
- * imported so this file's own lifecycle adapter has a self-contained,
- * directly-testable input shape independent of the full `PlannedActivity`
- * interface (which carries many fields irrelevant to blocking, e.g.
- * `recommendation`/`score`/`calendarUrl`).
- */
-export type PlanBlockerStatus = 'UPCOMING' | 'LOGGED' | 'CANCELLED' | 'SKIPPED' | 'MOVED';
-
-/** The minimal shape `isActivePlanBlocker` needs to decide whether one
- * Plan blocks time -- deliberately NOT the full `PlannedActivity`
- * interface. */
-export interface PlanBlockerCandidate {
-  start: Date;
-  end: Date;
-  status: PlanBlockerStatus;
-}
-
-/**
- * PlannedActivity + reference instant -> blocking or non-blocking (this
- * ticket's own section 6 adapter; kept in the orchestrator layer, never
- * added to PR A/B, never a new schema field, never a new general
- * lifecycle framework). Reproduces -- never imports, since
- * `dailyAgenda.ts`'s own `timeBasedStatus` is a private, unexported
- * helper, and PR A already established the precedent of reproducing a
- * tiny formula rather than cross-importing across module boundaries --
- * the EXACT distinguishing fact that file's own doc comment states
- * verbatim: "a Plan whose window has elapsed is NOT automatically
- * 'completed' -- completion is decided exclusively by
- * plan.status === 'LOGGED'... An elapsed, unlogged Plan is 'MISSED'."
- *
- *   - `'CANCELLED'` never blocks. Already excluded by
- *     `listPlannedActivitiesForDay`'s own SQL filter in production
- *     (`status <> 'CANCELLED'`); re-checked here defensively for any
- *     other caller of this function.
- *   - `'SKIPPED'` never blocks (terminal, nothing occupied the slot).
- *   - `'MOVED'` never blocks (superseded; its successor blocks instead).
- *   - `'LOGGED'` ALWAYS blocks, regardless of the reference instant.
- *     `dailyAgenda.ts`'s own rule --
- *     `plan.status === 'LOGGED' ? 'COMPLETED' : timeBasedStatus(...)` --
- *     never runs the elapsed-time check for a LOGGED row at all: real
- *     historical execution occupies its own time slot exactly as
- *     immutably as a future commitment does (this ticket's own section
- *     4's option A -- confirmed correct by re-reading the actual
- *     lifecycle code, not assumed).
- *   - `'UPCOMING'` blocks ONLY while it has not yet elapsed relative to
- *     `referenceInstant` (`end >= referenceInstant`) -- the exact
- *     complement of `dailyAgenda.ts`'s own `endAt < now -> 'MISSED'`
- *     rule. A derived-MISSED row (committed to, never logged, already
- *     elapsed) represents a slot nothing actually occupies, and must
- *     not block a new proposal (this ticket's own section 5, verbatim:
- *     "an old persisted UPCOMING row must NOT automatically become a
- *     blocker ... merely because storage still says UPCOMING").
- *
- * `referenceInstant` is always the orchestration request's own explicit
- * `now` (§7: "no hidden new Date()") -- for `REMAINING_TODAY` this is
- * the same instant the window itself starts from; for `EXPLICIT_RANGE`
- * it is the SAME field, reused for lifecycle purposes only (the window's
- * own bounds still come from `explicitStart`/`explicitEnd` verbatim).
- */
-export function isActivePlanBlocker(plan: PlanBlockerCandidate, referenceInstant: Date): boolean {
-  if (plan.status === 'CANCELLED') return false;
-  // SKIPPED: the user decided not to do it -- the slot is free (unlike LOGGED, nothing occupied it).
-  if (plan.status === 'SKIPPED') return false;
-  // MOVED: the commitment lives on in its successor, which blocks in its own right.
-  if (plan.status === 'MOVED') return false;
-  if (plan.status === 'LOGGED') return true;
-  return plan.end.getTime() >= referenceInstant.getTime();
-}
+// The plan-blocker lifecycle (PlanBlockerStatus, PlanBlockerCandidate,
+// isActivePlanBlocker) lives in planBlockerLifecycle.ts and is re-exported
+// here unchanged, so every existing importer of this module is unaffected.
+export { isActivePlanBlocker, type PlanBlockerStatus, type PlanBlockerCandidate };
 
 export interface DayConstructorOrchestratorDeps {
-  /** Real Plan commitments for the target local day, in the minimal
-   * `PlanBlockerCandidate` shape `isActivePlanBlocker` (above) evaluates
-   * -- called EXACTLY ONCE per orchestration run (this ticket's own
-   * section 20), never once per intent. Lifecycle filtering
+  /** Real Plan commitments that OVERLAP `bounds` (the target local day
+   * together with the resolved construction window, see
+   * `resolveBlockerLoadBounds`), whichever civil date a plan started on, in
+   * the minimal `PlanBlockerCandidate` shape `isActivePlanBlocker` (above)
+   * evaluates -- called EXACTLY ONCE per orchestration run (this ticket's
+   * own section 20), never once per intent. Lifecycle filtering
    * (`isActivePlanBlocker`) is applied by `orchestrateConstructDay`
    * itself, AFTER this call returns -- this dependency's own job is
    * only to fetch the raw rows, never to decide which ones block. */
-  loadBlockingPlans: (dayBoundsUTC: { from: Date; to: Date }) => Promise<PlanBlockerCandidate[]>;
+  loadBlockingPlans: (bounds: { from: Date; to: Date }) => Promise<PlanBlockerCandidate[]>;
   /** The two duration-personalization maps `durationMinutesFor`
    * (dayBuilderOrchestrator.ts) already accepts -- fetched ONCE per
    * orchestration run, exactly like `buildIntentionalDaySuggestions`'s
@@ -260,15 +211,45 @@ export interface DayConstructorOrchestratorDeps {
    * resolution decision of its own (that stays entirely inside the pure
    * `resolveAvailability`, never duplicated here). */
   loadAvailabilityConfiguration: () => Promise<AvailabilityConfiguration>;
+  /** Daily Rhythm V1 PR DR2 -- the user's saved work-hours preference
+   * (DR1's own `User.dailyRhythmWork{Start,End,Days}`), in the exact
+   * shape `applyDailyRhythmPreference`/`explainDailyRhythmPlacement`
+   * (dailyRhythmScheduling.ts) consume. Called EXACTLY ONCE per
+   * orchestration run, same convention as `loadAvailabilityConfiguration`
+   * above -- this dependency's own job is only to fetch the raw
+   * preference, never to decide workday/overlap/classification (that
+   * stays entirely inside the pure dailyRhythmScheduling.ts, never
+   * duplicated here). A user who never configured Daily Rhythm (DR1's
+   * own both-null convention) resolves to `{workStart: null, workEnd:
+   * null, workDays: []}`, which `isDailyRhythmConfigured` treats as "no
+   * preference" -- zero behavior change for any such user. OPTIONAL
+   * (same convention as `prepareDecisionFacts` below): omitting it is
+   * byte-identical to the user never having configured Daily Rhythm, so
+   * an existing caller that builds its own `DayConstructorOrchestratorDeps`
+   * without this field (e.g. Remaining-Day Recomposition's own adapter,
+   * remainingDayRecomposition.ts) keeps compiling and behaving exactly
+   * as before DR2 -- this ticket's own explicit scope boundary. */
+  loadDailyRhythmPreferences?: () => Promise<DailyRhythmPreferencesInput>;
+  /** Constructor Decision Intelligence O5 P1 -- OPTIONAL. Prepares trusted
+   * decision facts for the resolved intents BEFORE `constructDay` runs
+   * (decisionFactPreparation.ts). The orchestrator only coordinates it: it
+   * never reads a prepared fact, never passes one to `constructDay`, and
+   * treats any failure as "no prepared facts". Omitting it is byte-identical
+   * to this dependency never having existed. */
+  prepareDecisionFacts?: DecisionFactPreparer;
 }
 
 /**
  * Real production wiring. Reuses existing repository functions verbatim
  * -- no new DB query shape, no new engine call:
  *
- *   - `listPlannedActivitiesForDay` (db.ts) -- the EXACT SAME function
- *     Forward Planner's own orchestrator already uses as its own raw row
- *     source (forwardPlannerOrchestrator.ts). Its own SQL filter already
+ *   - `listPlannedActivitiesOverlappingRange` (db.ts) -- the ONE half-open
+ *     overlap definition (`start < to AND end > from`) the multi-day
+ *     scheduling-range loader already uses. It deliberately replaces
+ *     `listPlannedActivitiesForDay`, which selects by `plannedStartAt`
+ *     alone and therefore never loaded a plan that starts before the day
+ *     but runs into it (an overnight/multi-day plan), letting a new
+ *     activity be proposed inside an occupied interval. Its SQL filter
  *     excludes `CANCELLED`; `status` is passed straight through
  *     (verbatim, not re-derived) to `isActivePlanBlocker` (this file's
  *     own lifecycle adapter, pre-commit review fix), which is what
@@ -285,19 +266,30 @@ export interface DayConstructorOrchestratorDeps {
  *     -- the SAME two calls `buildIntentionalDaySuggestions` already
  *     makes to build its own `DailyAssistantContext`).
  */
+/**
+ * The half-open `[from, to)` range the blocker load must cover: the target
+ * local civil day AND the resolved construction window. They coincide for
+ * every ordinary window (a window lies inside its day); an explicit window
+ * that reaches past either end of the civil day extends the range so a plan
+ * overlapping the window is still loaded. Pure -- the loader never clips
+ * (`normalizeBlockedIntervals` in dayCapacity.ts owns clipping to the window).
+ */
+export function resolveBlockerLoadBounds(dayBounds: { from: Date; to: Date }, window: { start: Date; end: Date }): { from: Date; to: Date } {
+  return {
+    from: window.start.getTime() < dayBounds.from.getTime() ? window.start : dayBounds.from,
+    to: window.end.getTime() > dayBounds.to.getTime() ? window.end : dayBounds.to,
+  };
+}
+
 export function createRealDayConstructorOrchestratorDeps(user: User, now: Date): DayConstructorOrchestratorDeps {
   return {
-    loadBlockingPlans: async (dayBoundsUTC) => {
-      const plans = await listPlannedActivitiesForDay(user.id, dayBoundsUTC.from, dayBoundsUTC.to);
+    loadBlockingPlans: async (bounds) => {
+      const plans = await listPlannedActivitiesOverlappingRange(user.id, bounds.from, bounds.to);
       return plans.map((plan) => ({ start: new Date(plan.plannedStartAt), end: new Date(plan.plannedEndAt), status: plan.status }));
     },
     loadDurationContext: async () => {
       const [preferences, habitLogs]: [UserActivityPreference[], HabitLogRow[]] = await Promise.all([listUserActivityPreferences(user.id), listHabitLogs(user.id)]);
-      const behavioralProfile = deriveBehavioralProfile(habitLogs, user.timezone, now);
-      return {
-        preferredDurationByActivityId: preferredDurationByActivityId(preferences),
-        behavioralDurationByActivityId: activityDurationByActivityId(behavioralProfile),
-      };
+      return buildDurationContext(preferences, habitLogs, user.timezone, now);
     },
     searchTiming: (request) => {
       const context: TimingSearchRequest['context'] = {
@@ -316,6 +308,10 @@ export function createRealDayConstructorOrchestratorDeps(user: User, now: Date):
         configured: user.availabilityConfigured === true,
         periods: periods.map((row) => ({ weekday: row.weekday as AvailabilityConfiguration['periods'][number]['weekday'], startTime: row.startTime, endTime: row.endTime })),
       };
+    },
+    loadDailyRhythmPreferences: async () => {
+      const prefs = await getDailyWorkPreferences(user.id);
+      return prefs ? { workStart: prefs.workStart, workEnd: prefs.workEnd, workDays: prefs.workDays } : { workStart: null, workEnd: null, workDays: [] };
     },
   };
 }
@@ -496,7 +492,20 @@ function resolveRequestedDayIntent(
 // failures. A warning never turns a valid proposal into an error.
 // ============================================================
 
-export type ConstructDayWarningCode = 'ACTIVITY_RESOLVED_TO_COARSE_FAMILY' | 'DURATION_FROM_GENERIC_FALLBACK' | 'NO_TIMING_CANDIDATES_FOUND';
+/** Daily Rhythm V1 PR DR2 -- three new codes, appended (never replacing
+ * or renumbering an existing one). Generated once, AFTER construction
+ * (including every replenishment round) has fully settled, from each
+ * FLEXIBLE `ProposedItem`'s own final placed start/end -- never
+ * speculatively from a candidate that wasn't actually chosen, and never
+ * for a FIXED placement (see explainDailyRhythmPlacement's own doc
+ * comment). */
+export type ConstructDayWarningCode =
+  | 'ACTIVITY_RESOLVED_TO_COARSE_FAMILY'
+  | 'DURATION_FROM_GENERIC_FALLBACK'
+  | 'NO_TIMING_CANDIDATES_FOUND'
+  | 'DAILY_RHYTHM_PERSONAL_OUTSIDE_WORK_HOURS'
+  | 'DAILY_RHYTHM_PERSONAL_DURING_WORK_HOURS_FALLBACK'
+  | 'DAILY_RHYTHM_FLEXIBLE_BREAK_DURING_WORK_HOURS';
 
 export interface ConstructDayWarning {
   /** The REQUESTED intent's own caller-supplied id (never the internal
@@ -750,6 +759,70 @@ export async function resolveAvailabilityAwareWindow(
 }
 
 export async function orchestrateConstructDay(request: ConstructDayRequest, deps: DayConstructorOrchestratorDeps): Promise<OrchestrateConstructDayResult> {
+  return runOrchestration(request, deps, constructDay); // the legacy path: the exported `constructDay` itself, no observer, no trace
+}
+
+/**
+ * O5 P3a -- the same orchestration, additionally returning the CONTENTION TRACE (contentionTrace.ts) ACCUMULATED across
+ * every Constructor pass (the first pass is round 0, each replenishment re-run the next round), so a later round that
+ * leaves a candidate with NO_CANDIDATES cannot erase the earlier proof that it lost an interval to a Proposed owner.
+ * Each pass runs through `constructDayWithTrace`, whose observer is created INSIDE the Constructor; nothing a caller
+ * supplies is ever invoked from inside placement. `result` is exactly what `orchestrateConstructDay` returns for the same
+ * request and deps: same queries, same searches, same output. Internal diagnostics only -- no route, preview, signed
+ * contract, persistence or policy consumes it.
+ */
+export async function orchestrateConstructDayWithTrace(request: ConstructDayRequest, deps: DayConstructorOrchestratorDeps): Promise<{ result: OrchestrateConstructDayResult; contentionTrace: ContentionTrace }> {
+  return runTraced(request, deps, undefined);
+}
+
+/**
+ * O5 P3b -- the diagnostics entry point for the inert SHADOW stage: the same traced orchestration plus the two inputs a
+ * shadow observation needs that otherwise stay internal -- the immutable per-intent evidence the P2a stage prepared (held
+ * for the future policy stage; never passed to the Constructor, never rebuilt here) and the planning date. Both are handed
+ * out AFTER the Constructor has decided, through a private write-only hand-off the orchestrator fills once; nothing
+ * computed from them can flow back into construction. `result` is exactly what `orchestrateConstructDay` returns for the
+ * same request and deps. Internal diagnostics only -- no route, preview, signed contract or persistence consumes it.
+ */
+export async function orchestrateConstructDayWithDiagnostics(
+  request: ConstructDayRequest,
+  deps: DayConstructorOrchestratorDeps
+): Promise<{ result: OrchestrateConstructDayResult; contentionTrace: ContentionTrace; evidenceByIntentId: ReturnType<typeof prepareDecisionEvidence>; planningDate: string; constructionBasis: ConstructionBasisOutcome; baselinePlacements: BaselinePlacementsOutcome }> {
+  const handOff: EvidenceHandOff = {};
+  const traced = await runTraced(request, deps, handOff);
+  return { result: traced.result, contentionTrace: traced.contentionTrace, evidenceByIntentId: handOff.byIntentId ?? new Map(), planningDate: request.targetDate, constructionBasis: handOff.constructionBasis ?? { status: 'UNAVAILABLE', reason: 'RUN_NOT_READY' }, baselinePlacements: handOff.baselinePlacements ?? { status: 'UNAVAILABLE', reason: 'RUN_NOT_READY' } };
+}
+
+/** O5 P3b -- private, write-only: the orchestrator assigns the prepared evidence here once, after preparation and before construction. */
+interface EvidenceHandOff {
+  byIntentId?: ReturnType<typeof prepareDecisionEvidence>;
+  /** O5 P4b1 -- the immutable construction basis, assembled once at the very end of a READY run (T4). Same write-only discipline; nothing in this file reads it. */
+  constructionBasis?: ConstructionBasisOutcome;
+  /** O5 P4b1b -- the baseline Proposed placements of the SAME run, captured from the terminal `result.day` and validated against that run's basis. Same write-only discipline. */
+  baselinePlacements?: BaselinePlacementsOutcome;
+}
+
+/** O5 P4b1 -- basis preparation is optional infrastructure: whatever it does, it can never make the baseline fail. */
+function optionalBasisStep<T>(step: () => T): T | undefined {
+  try {
+    return step();
+  } catch {
+    return undefined;
+  }
+}
+
+async function runTraced(request: ConstructDayRequest, deps: DayConstructorOrchestratorDeps, evidenceOut: EvidenceHandOff | undefined): Promise<{ result: OrchestrateConstructDayResult; contentionTrace: ContentionTrace }> {
+  const passTraces: ContentionTrace[] = [];
+  const constructWithTrace = (input: ConstructDayInput): ConstructDayResult => {
+    const traced = constructDayWithTrace(input, passTraces.length);
+    passTraces.push(traced.trace);
+    return traced.result;
+  };
+  const result = await runOrchestration(request, deps, constructWithTrace, evidenceOut);
+  return { result, contentionTrace: aggregateContentionTraces(passTraces) };
+}
+
+/** `constructDay` here is the Constructor entry point to call (the legacy path passes the exported `constructDay` itself); the orchestrator never gives it anything but the plain input. */
+async function runOrchestration(request: ConstructDayRequest, deps: DayConstructorOrchestratorDeps, constructDay: (input: ConstructDayInput) => ConstructDayResult, evidenceOut?: EvidenceHandOff): Promise<OrchestrateConstructDayResult> {
   // Same defensive runtime checks `resolveConstructionWindow` itself
   // performs (below, untouched) -- duplicated here ONLY so a malformed
   // request fails before `deps.loadAvailabilityConfiguration`'s own I/O
@@ -810,7 +883,12 @@ export async function orchestrateConstructDay(request: ConstructDayRequest, deps
   // Real-data fetches -- EXACTLY ONCE each per orchestration run (this
   // ticket's own section 20), never once per intent.
   const dayBounds = localDayBoundsUTC(request.targetDate, request.timezone);
-  const [blockingPlanCandidates, durationContext] = await Promise.all([deps.loadBlockingPlans(dayBounds), deps.loadDurationContext()]);
+  const blockerBounds = resolveBlockerLoadBounds(dayBounds, window);
+  const [blockingPlanCandidates, durationContext, dailyRhythmPrefs] = await Promise.all([
+    deps.loadBlockingPlans(blockerBounds),
+    deps.loadDurationContext(),
+    deps.loadDailyRhythmPreferences ? deps.loadDailyRhythmPreferences() : Promise.resolve<DailyRhythmPreferencesInput>({ workStart: null, workEnd: null, workDays: [] }),
+  ]);
   // Lifecycle filtering happens HERE, in the orchestrator's own testable
   // core (this ticket's own section 6: "Keep this in the orchestrator
   // layer") -- `deps.loadBlockingPlans` only fetches raw rows;
@@ -839,10 +917,18 @@ export async function orchestrateConstructDay(request: ConstructDayRequest, deps
    * (`constructDay`'s own `DURATION_UNKNOWN` gate handles that, no
    * search ever ran for it to replenish). */
   const flexibleSearchMetaByIntentId: Record<string, { activityId?: string; title: string; durationMinutes: number }> = {};
+  /** O5 P1 -- intents whose duration came from the generic fallback, from
+   * the SAME resolution that produced the duration (never a second one). */
+  const fallbackDurationIntentIds = new Set<string>();
 
   for (const requested of request.intents) {
-    const { dayIntent, warnings: intentWarnings } = resolveRequestedDayIntent(requested, request.targetDate, durationContext);
-    warnings.push(...intentWarnings);
+    const resolved = resolveRequestedDayIntent(requested, request.targetDate, durationContext);
+    warnings.push(...resolved.warnings);
+    if (resolved.warnings.some((w) => w.code === 'DURATION_FROM_GENERIC_FALLBACK')) fallbackDurationIntentIds.add(requested.id);
+    // Decision Facts V1 -- attached AFTER resolution (never inside
+    // `resolveRequestedDayIntent`/`buildDayIntent`), inert metadata only.
+    const decisionFacts = resolveDecisionFactsForIntent(requested.id, request.decisionFactsByIntentId);
+    const dayIntent: DayIntent = decisionFacts ? { ...resolved.dayIntent, decisionFacts } : resolved.dayIntent;
     resolvedIntents.push({ requestedIntentId: requested.id, dayIntent });
 
     if (requested.flexibility === 'FIXED') {
@@ -909,9 +995,17 @@ export async function orchestrateConstructDay(request: ConstructDayRequest, deps
     // already-proposed item -- answered in the completion report, not
     // silently addressed here).
     const excludedIntervals = blockedIntervals.map((blocker) => ({ start: blocker.start, end: blocker.end }));
+    // Daily Rhythm V1 PR DR3 -- widens the search's own `limit` ONLY when
+    // this exact intent's own candidates would later be filtered by
+    // applyDailyRhythmPreference (the identical gate, reused verbatim --
+    // see resolveDailyRhythmSearchLimit's own doc comment for why this
+    // costs nothing extra for every other intent/user). `undefined`
+    // leaves `limit` unset entirely, preserving the engine's own default
+    // (3) byte-for-byte.
+    const dailyRhythmSearchLimit = resolveDailyRhythmSearchLimit(dayIntent.activityId, { targetDate: request.targetDate, timezone: request.timezone, prefs: dailyRhythmPrefs });
     const searchRequest: Omit<TimingSearchRequest, 'context'> = dayIntent.activityId
-      ? { mode: 'FIND', activityId: dayIntent.activityId, durationMinutes: dayIntent.estimatedDurationMinutes, dateRange: { start: request.targetDate, end: request.targetDate }, searchWindow, excludedIntervals }
-      : { mode: 'FIND', taskTitle: requested.title, durationMinutes: dayIntent.estimatedDurationMinutes, dateRange: { start: request.targetDate, end: request.targetDate }, searchWindow, excludedIntervals };
+      ? { mode: 'FIND', activityId: dayIntent.activityId, durationMinutes: dayIntent.estimatedDurationMinutes, dateRange: { start: request.targetDate, end: request.targetDate }, searchWindow, excludedIntervals, ...(dailyRhythmSearchLimit !== undefined ? { limit: dailyRhythmSearchLimit } : {}) }
+      : { mode: 'FIND', taskTitle: requested.title, durationMinutes: dayIntent.estimatedDurationMinutes, dateRange: { start: request.targetDate, end: request.targetDate }, searchWindow, excludedIntervals, ...(dailyRhythmSearchLimit !== undefined ? { limit: dailyRhythmSearchLimit } : {}) };
 
     let searchResult: { candidates: TimingCandidate[] };
     try {
@@ -924,7 +1018,18 @@ export async function orchestrateConstructDay(request: ConstructDayRequest, deps
       return { status: 'TIMING_SEARCH_FAILED', requestedIntentId: requested.id, reason: err instanceof Error ? err.message : String(err) };
     }
 
-    const normalized = searchResult.candidates
+    // Daily Rhythm V1 PR DR2 -- applied to the ALREADY-ranked candidate
+    // list `deps.searchTiming` just returned, strictly before
+    // normalization: a pure filter-with-fallback, never a re-score,
+    // never touching `constructDay`'s own [timingFit, start,
+    // candidateOrder] ranking (dayConstructor.ts remains untouched). See
+    // dailyRhythmScheduling.ts's own doc comment for the full contract.
+    const dailyRhythmFilteredCandidates = applyDailyRhythmPreference(searchResult.candidates, dayIntent.activityId, {
+      targetDate: request.targetDate,
+      timezone: request.timezone,
+      prefs: dailyRhythmPrefs,
+    });
+    const normalized = dailyRhythmFilteredCandidates
       .map((candidate, index) => normalizeCandidate(dayIntent.id, candidate, index))
       .filter((candidate): candidate is PlacementCandidate => candidate !== null);
     candidatesByIntentId[dayIntent.id] = normalized;
@@ -937,6 +1042,33 @@ export async function orchestrateConstructDay(request: ConstructDayRequest, deps
     // `dayIntent` a second time.
     flexibleSearchMetaByIntentId[dayIntent.id] = { activityId: dayIntent.activityId, title: requested.title, durationMinutes: dayIntent.estimatedDurationMinutes };
   }
+
+  // O5 P4b1 -- T1: the candidate lists exactly as the ORIGINAL timing searches left them, captured (owned copies) BEFORE any replenishment
+  // can replace a loser's list. Only when a diagnostics caller asked for the basis; no search is repeated to recover them.
+  const initialCandidateLists = evidenceOut ? optionalBasisStep(() => captureCandidateLists(request.intents.map((requested) => requested.id), candidatesByIntentId)) : undefined;
+
+  // O5 P1 -- decision facts are PREPARED here: after every intent's
+  // authoritative duration is resolved, strictly BEFORE `constructDay`. They
+  // are prepared exactly once, kept outside the Constructor input below
+  // (`intentsForConstructDay` is built from the intents as resolved above,
+  // not from the prepared facts), and attached to the preview metadata only
+  // after construction. Preparing is not consuming: nothing in this file
+  // reads a prepared fact.
+  const preparationIntents = resolvedIntents.map((resolved) => ({
+    intentId: resolved.requestedIntentId,
+    durationMinutes: resolved.dayIntent.estimatedDurationMinutes,
+    durationFromGenericFallback: fallbackDurationIntentIds.has(resolved.requestedIntentId),
+    facts: resolved.dayIntent.decisionFacts,
+  }));
+  const preparedDecisionFacts = await prepareDecisionFactsFailOpen(deps.prepareDecisionFacts, {
+    intents: preparationIntents,
+    context: { planningDate: request.targetDate, timezone: request.timezone, now: request.now },
+  });
+  // O5 P2a -- the immutable DecisionEvidence for every fact-bearing intent, built ONCE here from the facts as prepared. It
+  // is held for the future decision-policy stage and deliberately NOT passed to `constructDay`, the precedence comparator,
+  // placement, capacity or replenishment below: building evidence is not consuming it, and it is never rebuilt later.
+  const decisionEvidenceByIntentId = prepareDecisionEvidence(preparationIntents, preparedDecisionFacts);
+  if (evidenceOut) evidenceOut.byIntentId = decisionEvidenceByIntentId; // O5 P3b -- write-only hand-off to the diagnostics entry point; read only after construction
 
   const intentsForConstructDay = resolvedIntents.map((r) => r.dayIntent);
 
@@ -1036,9 +1168,14 @@ export async function orchestrateConstructDay(request: ConstructDayRequest, deps
       const meta = flexibleSearchMetaByIntentId[intentId];
       if (!meta || meta.durationMinutes === undefined) continue; // Structurally unreachable (only ever set for FLEXIBLE intents that already had a resolved duration), defensive only.
       const searchWindow = { start: window.start, end: window.end };
+      // Daily Rhythm V1 PR DR3 -- the SAME conditional limit widening as
+      // the primary loop above, re-resolved per replenishment round
+      // (meta.activityId never changes between rounds for the same
+      // intent, so this is a cheap, pure re-check, not a second policy).
+      const dailyRhythmSearchLimit = resolveDailyRhythmSearchLimit(meta.activityId, { targetDate: request.targetDate, timezone: request.timezone, prefs: dailyRhythmPrefs });
       const searchRequest: Omit<TimingSearchRequest, 'context'> = meta.activityId
-        ? { mode: 'FIND', activityId: meta.activityId, durationMinutes: meta.durationMinutes, dateRange: { start: request.targetDate, end: request.targetDate }, searchWindow, excludedIntervals }
-        : { mode: 'FIND', taskTitle: meta.title, durationMinutes: meta.durationMinutes, dateRange: { start: request.targetDate, end: request.targetDate }, searchWindow, excludedIntervals };
+        ? { mode: 'FIND', activityId: meta.activityId, durationMinutes: meta.durationMinutes, dateRange: { start: request.targetDate, end: request.targetDate }, searchWindow, excludedIntervals, ...(dailyRhythmSearchLimit !== undefined ? { limit: dailyRhythmSearchLimit } : {}) }
+        : { mode: 'FIND', taskTitle: meta.title, durationMinutes: meta.durationMinutes, dateRange: { start: request.targetDate, end: request.targetDate }, searchWindow, excludedIntervals, ...(dailyRhythmSearchLimit !== undefined ? { limit: dailyRhythmSearchLimit } : {}) };
 
       let replenishedResult: { candidates: TimingCandidate[] };
       try {
@@ -1046,7 +1183,17 @@ export async function orchestrateConstructDay(request: ConstructDayRequest, deps
       } catch (err) {
         return { status: 'TIMING_SEARCH_FAILED', requestedIntentId: intentId, reason: err instanceof Error ? err.message : String(err) };
       }
-      candidatesByIntentId[intentId] = replenishedResult.candidates
+      // Daily Rhythm V1 PR DR2 -- the SAME filter-with-fallback applied to
+      // the primary loop above, re-run independently on this round's own
+      // freshly-searched candidates (never cached from the first round),
+      // so a personal activity that lost its outside-work slot to a
+      // same-run sibling still gets a fresh outside-first attempt here.
+      const dailyRhythmFilteredReplenished = applyDailyRhythmPreference(replenishedResult.candidates, meta.activityId, {
+        targetDate: request.targetDate,
+        timezone: request.timezone,
+        prefs: dailyRhythmPrefs,
+      });
+      candidatesByIntentId[intentId] = dailyRhythmFilteredReplenished
         .map((candidate, index) => normalizeCandidate(intentId, candidate, index))
         .filter((candidate): candidate is PlacementCandidate => candidate !== null);
     }
@@ -1062,13 +1209,39 @@ export async function orchestrateConstructDay(request: ConstructDayRequest, deps
     if (result.status !== 'READY') return result;
   }
 
+  // O5 P4b1 -- T3/T4: the terminal candidate lists are known; assemble the detached, frozen basis. It reads nothing back into construction,
+  // and a failure leaves the baseline result untouched (the outcome is simply UNAVAILABLE).
+  if (evidenceOut) {
+    evidenceOut.constructionBasis =
+      optionalBasisStep(() => assembleConstructionBasis({ planningDate: request.targetDate, window, intents: intentsForConstructDay, blockedIntervals, initialCandidates: initialCandidateLists, finalCandidatesByIntentId: candidatesByIntentId, fixedConstraintsByIntentId })) ?? { status: 'UNAVAILABLE', reason: 'ASSEMBLY_FAILED' };
+    // O5 P4b1b -- the baseline OUTCOME, from the same terminal `result.day` the basis was just assembled alongside; validated against that basis.
+    evidenceOut.baselinePlacements = optionalBasisStep(() => captureBaselinePlacements(result.day, evidenceOut.constructionBasis ?? { status: 'UNAVAILABLE', reason: 'ASSEMBLY_FAILED' })) ?? { status: 'UNAVAILABLE', reason: 'CAPTURE_FAILED' };
+  }
+
+  // Daily Rhythm V1 PR DR2 -- explanations are derived from the FINAL,
+  // settled placement only (after every replenishment round), never
+  // speculatively during the per-intent search loop above (where the
+  // eventual winning candidate isn't known yet). A FIXED placement
+  // (`placementSource === 'FIXED_CONSTRAINT'`) never gets one -- a
+  // user-selected time is never second-guessed with Aura's own
+  // preference reasoning (this ticket's own "user-selected fixed times
+  // are never silently moved", which includes never implying they
+  // could/should have been).
+  for (const item of result.day.proposedItems) {
+    if (item.placementSource !== 'SELECTED_CANDIDATE') continue;
+    const explanation = explainDailyRhythmPlacement(item.activityId, item.start, item.end, { targetDate: request.targetDate, timezone: request.timezone, prefs: dailyRhythmPrefs });
+    if (explanation === 'PERSONAL_OUTSIDE_WORK_HOURS') warnings.push({ intentId: item.intentId, code: 'DAILY_RHYTHM_PERSONAL_OUTSIDE_WORK_HOURS' });
+    else if (explanation === 'PERSONAL_DURING_WORK_HOURS_FALLBACK') warnings.push({ intentId: item.intentId, code: 'DAILY_RHYTHM_PERSONAL_DURING_WORK_HOURS_FALLBACK' });
+    else if (explanation === 'FLEXIBLE_BREAK_DURING_WORK_HOURS') warnings.push({ intentId: item.intentId, code: 'DAILY_RHYTHM_FLEXIBLE_BREAK_DURING_WORK_HOURS' });
+  }
+
   return {
     status: 'READY',
     preview: {
       targetDate: request.targetDate,
       timezone: request.timezone,
       constructionWindow: window,
-      resolvedIntents,
+      resolvedIntents: attachPreparedDecisionFacts(resolvedIntents, preparedDecisionFacts),
       constructedDay: result.day,
       warnings,
     },

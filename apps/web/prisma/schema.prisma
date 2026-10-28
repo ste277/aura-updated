@@ -16,6 +16,32 @@ model User {
   timezone        String   @default("Asia/Kolkata") // IANA name, e.g. 'Asia/Kolkata', 'America/New_York'
   createdAt       DateTime @default(now()) @db.Timestamptz(3)
 
+  // Onboarding V1 PR 1 -- Location Trust Foundation. NULL means this
+  // (non-birth) location has never been explicitly confirmed by the user
+  // -- every new signup starts at a hardcoded default (DEFAULT_SIGNUP_LOCATION,
+  // db.ts), and that default must never be presented as verified. Set to
+  // the current instant ONLY by a successful, validated
+  // PATCH /api/users/location call (updateUserLocation, db.ts) -- never by
+  // signup, a read, a background job, or timezone auto-detection. Every
+  // existing row is NULL (this column's own default): inferring
+  // confirmation from the current cityName/latitude/longitude/timezone
+  // value would be indefensible, since "Chennai" (the default) is itself
+  // one of the app's own curated catalog cities, so a real user who
+  // deliberately chose Chennai is indistinguishable BY VALUE from a user
+  // who never touched Settings at all.
+  locationConfirmedAt DateTime? @db.Timestamptz(3)
+
+  // Onboarding V1 PR 2 -- First-Run Reliability Correction. NULL = the
+  // Welcome/Confirm Location/Recommendation journey has never been
+  // resolved. Stamped once, idempotently, only by markOnboardingResolved()
+  // (db.ts), reached only from the three true exit actions in the client
+  // (never from a session read, never from VisitLog, never merely by
+  // advancing between onboarding steps). Every row existing at migration
+  // 0045's own deploy time was backfilled resolved in that migration's own
+  // DML; every row inserted after starts NULL, same convention as
+  // locationConfirmedAt/availabilityConfigured above.
+  onboardingResolvedAt DateTime? @db.Timestamptz(3)
+
   // Birth profile — nullable, since not every user will fill this in (Phase 2
   // birth-chart feature is optional on top of the core daily dial).
   birthDate       DateTime? @db.Timestamptz(3)
@@ -53,6 +79,30 @@ model User {
   // real, deliberate CONFIGURED state). Every existing user defaults to
   // false -- no backfill ever sets this true.
   availabilityConfigured Boolean @default(false)
+
+  // Daily Rhythm V1 PR DR1 -- Preferences Foundation (see
+  // AURA_DAILY_RHYTHM_V1_ARCHITECTURE_AUDIT.md section 4, Option A).
+  // dailyRhythmWorkStart/dailyRhythmWorkEnd are "HH:mm" 24h civil strings,
+  // resolved against User.timezone exactly like UserAvailabilityPeriod's
+  // own startTime/endTime (no timezone of their own). BOTH NULL is the
+  // ONLY unconfigured state and the default for every existing and new
+  // row -- no backfill, no default work hours ever written without an
+  // explicit user save (this ticket's own "do not store default work
+  // hours without user confirmation"). The two fields are always written
+  // and cleared TOGETHER (see setDailyRhythmPreferences/
+  // clearDailyRhythmPreferences, db.ts) -- one set and one null is an
+  // impossible state no reader should need to handle. dailyRhythmWorkDays
+  // is a weekday set (0=Sunday..6=Saturday, same convention as
+  // UserAvailabilityPeriod.weekday), empty by default; an empty set is a
+  // valid, deliberate "no day is currently a work day" state, never an
+  // error. THESE FIELDS ARE READ BY NOTHING YET in this PR -- no
+  // scheduling/recommendation code references them (day constructor,
+  // Find a Time, Home, and Goals are all untouched) -- they exist purely
+  // as persisted user preference, wired up to real scheduling logic only
+  // in a later, separately-authorized PR.
+  dailyRhythmWorkStart String?
+  dailyRhythmWorkEnd   String?
+  dailyRhythmWorkDays  Int[]    @default([])
 
   habitLogs       HabitLog[]
   visitLogs       VisitLog[]
@@ -295,7 +345,53 @@ model HabitLog {
   // it lives only in migration 0032's raw SQL, not represented here.
   clientRequestId String?
 
+  // Insights V1 PR6 -- Durable Completion Attribution (migration 0049).
+  // Four columns, always written TOGETHER (or not at all) by
+  // logPlannedActivity, at the exact same moment this row is created --
+  // never backfilled for any pre-existing row (see migration 0049's own
+  // comment for the full rationale, matching the established
+  // movedAt/scheduledWeekStart precedent of "additive only, no
+  // backfill"). Exist so a completion's scheduled-date and Goal
+  // attribution survive deletePlannedActivity's hard-delete of the
+  // originating PlannedActivity row -- see AURA_INSIGHTS_PR6_
+  // COMPLETION_EVIDENCE_DECISION.md for the full design.
+  //
+  // Deliberately PLAIN values, never live-cascading FKs to
+  // PlannedActivity or GoalActivityExecution: both referenced rows must
+  // remain identifiable here even after they are themselves deleted, the
+  // same "not a foreign key" precedent activityId above already
+  // establishes for a different reason (a static catalog that isn't a
+  // Prisma model) -- here the reason is the opposite: the referenced
+  // rows ARE Prisma models, but this column must survive their deletion
+  // with its value intact, which no onDelete action (SetNull or
+  // Cascade) would allow.
+  originatingPlannedActivityId String?
+  // plan.plannedStartAt, read inside logPlannedActivity's own
+  // transaction at the moment of completion -- the plan's own CURRENT,
+  // post-Move, committed schedule (Move creates a new successor row with
+  // its own plannedStartAt; this always snapshots whichever row is
+  // actually being completed). NEVER re-derived from logTimestamp,
+  // createdAt, updatedAt, or the user's current timezone at read time.
+  scheduledStartAtSnapshot DateTime? @db.Timestamptz(3)
+  // Explicit three-state classification: 'GOAL_LINKED' | 'NON_GOAL'.
+  // NULL means UNKNOWN_LEGACY (a row written before this feature
+  // existed) -- a real, distinct, deliberately excluded third state,
+  // NEVER silently treated as 'NON_GOAL'. Every reader of this column
+  // MUST handle NULL as its own case.
+  completionAttribution String?
+  // Set ONLY when completionAttribution = 'GOAL_LINKED' -- a stable
+  // pointer to the exact GoalActivityExecution row this same completion
+  // produced, eliminating any need to correlate HabitLog and
+  // GoalActivityExecution by title/timestamp proximity (which this
+  // design explicitly never does). Plain value for the same
+  // survive-deletion reason as originatingPlannedActivityId above.
+  originatingGoalActivityExecutionId String?
+
   @@index([userId, logTimestamp])
+  // Insights V1 PR6 -- covers the reporting fallback's own exact access
+  // pattern (userId + attribution + range-bounded scheduled date) in a
+  // single index.
+  @@index([userId, completionAttribution, scheduledStartAtSnapshot])
 }
 
 enum PlannedActivitySchedulingMode {
@@ -347,7 +443,9 @@ model PlannedActivity {
   // Daily Experience V1 PR D2 (migration 0038) -- Move lineage. Set ONLY on a
   // successor created by movePlannedActivity: this plan exists because the
   // referenced plan (now status "MOVED") was moved. Unique: at most one
-  // successor per plan. Deliberately no forward pointer, movedAt or reason.
+  // successor per plan. Deliberately no forward pointer or reason -- only
+  // the backward lineage pointer below and (migration 0046) this row's own
+  // movedAt timestamp exist.
   // Remaining-Day Recomposition V1 PR F1 (migration 0039) -- the scheduling
   // CONSTRAINT of this committed occurrence. FIXED = its time is a commitment
   // (protected from Aura-driven recomposition); FLEXIBLE = Aura may PROPOSE
@@ -359,6 +457,21 @@ model PlannedActivity {
   rescheduledFromPlanId String? @unique
   rescheduledFrom       PlannedActivity? @relation("PlanMoveLineage", fields: [rescheduledFromPlanId], references: [id], onDelete: SetNull)
   rescheduledTo         PlannedActivity? @relation("PlanMoveLineage")
+  // Insights V1 PR 1 -- Move Timestamp Foundation (migration 0046). Set
+  // ONLY on THIS row, at the exact instant its OWN status transitions
+  // UPCOMING -> MOVED, inside the same conditional UPDATE that sets that
+  // status (apps/web/lib/planMove.ts's applyMoveWrites -- the one shared
+  // write path both a manual Move and Remaining-Day Recomposition
+  // acceptance use), using the database's own now(). A rolled-back
+  // transaction never leaves a stamp; an idempotent/replayed Move (which
+  // never re-runs that UPDATE) never re-stamps it. NULL means "no
+  // recorded move timestamp" -- either this row has never moved, or it
+  // moved before this column existed; historical rows are never
+  // backfilled (see migration 0046's own comment). Answers "when did
+  // THIS row's move commit," never "how many times has this logical
+  // commitment been moved" -- that still requires walking
+  // rescheduledFromPlanId backward, exactly as before this field existed.
+  movedAt         DateTime? @db.Timestamptz(3)
   habitLogId      String?
 
   // Event Location Plan Persistence V1 (migration 0028) -- an immutable
@@ -746,6 +859,31 @@ model GoalActivity {
   // persistence.
   rhythmTargetPerWeek   Int?
 
+  // HPG3-A1 -- "how many LIVE occurrences of this GoalActivity may exist on
+  // the SAME local calendar day?" (apps/web/lib/goalActivityDailyFrequency.ts),
+  // orthogonal to rhythmKind/rhythmTargetPerWeek above (which answer "how
+  // many occurrences per WEEK, with no day-bucket concept at all" -- see
+  // that module's own doc comment for why N_PER_WEEK capacity alone does
+  // NOT imply same-day clustering is intended). Two independent nullable
+  // columns, no default, no backfill -- the EXACT same convention
+  // completionKind/rhythmKind already established: dailyFrequencyKind =
+  // NULL means "never specified" and is ALWAYS normalized to canonical
+  // ONCE_PER_DAY (normalizeGoalActivityDailyFrequency) -- every existing/
+  // legacy row keeps meaning exactly "at most one live occurrence per local
+  // day" (this slice's own default) without any migration. A1 is
+  // schema/domain-only: no production read or write path consults these
+  // columns yet (mirrors G2.1's, R1's and R2's own identical "model before
+  // writes" discipline, each confirmed in this codebase's own history to
+  // outlive a single ticket -- a LATER ticket is expected to wire reads
+  // and writes here, not this one).
+  dailyFrequencyKind  String?
+  // Only meaningful when dailyFrequencyKind = 'CUSTOM' (reserved, not yet
+  // an enforced policy -- see that module's own doc comment); NULL for
+  // every other kind. INTEGER, same convention as rhythmTargetPerWeek:
+  // validateGoalActivityDailyFrequency rejects any fractional/zero/
+  // negative value before it ever reaches persistence.
+  dailyFrequencyLimit Int?
+
   createdAt         DateTime         @default(now()) @db.Timestamptz(3)
   updatedAt         DateTime         @updatedAt @db.Timestamptz(3)
 
@@ -809,6 +947,35 @@ model GoalActivityExecution {
   // execution record at a time.
   plannedActivityId String?         @unique
   plannedActivity   PlannedActivity? @relation(fields: [plannedActivityId], references: [id], onDelete: SetNull)
+
+  // Insights V1 PR3 (migration 0048) -- a DURABLE link to the specific
+  // GoalActivityOccurrence this execution proves completion for, set once
+  // at creation, NEVER cleared by deletePlannedActivity's hard-delete
+  // (unlike plannedActivityId above, which that delete DOES SetNull).
+  // This is what lets a Rhythm occurrence's completion evidence survive
+  // its own PlannedActivity being cleared from "Recently Completed" --
+  // the evidence remains reachable via this row's OWN id, not via the
+  // now-gone plan. NULL for every finite/NONE-rhythm execution (no
+  // occurrence row exists for those) -- same nullability precedent as
+  // plannedActivityId. UNIQUE so one occurrence can never be claimed by
+  // more than one execution record (mirrors plannedActivityId's own
+  // cardinality guarantee, now durable across plan deletion too -- the
+  // DB-level backstop against ever double-crediting one occurrence,
+  // independent of applicaton-level idempotency checks). SetNull on
+  // GoalActivityOccurrence deletion -- same convention as every other
+  // "soft identity" link in this schema (GoalActivity.plannedActivityId,
+  // GoalActivityOccurrence.plannedActivityId, plannedActivityId just
+  // above) -- never Cascade, so this FK alone can never be the mechanism
+  // that destroys a row of confirmed evidence. In practice a
+  // GoalActivityOccurrence is only ever removed via its own GoalActivity
+  // being Cascade-deleted (Goal deletion), which already Cascade-deletes
+  // this very GoalActivityExecution row through its OWN, separate,
+  // unconditional goalActivityId FK above at the exact same moment --
+  // SetNull here is simply the correct, defensive default for a link
+  // whose only live precedent in this schema is "never cascade a
+  // confirmed-evidence row away through this specific FK."
+  goalActivityOccurrenceId String?                @unique
+  goalActivityOccurrence   GoalActivityOccurrence? @relation(fields: [goalActivityOccurrenceId], references: [id], onDelete: SetNull)
 
   // Immutable snapshot of GoalActivity's CompletionRequirement (G2.1,
   // apps/web/lib/goalCompletion.ts) AT THE MOMENT this execution was
@@ -918,6 +1085,65 @@ model GoalActivityOccurrence {
   // doc comment) -- never written as non-null by any R1 production path.
   plannedActivityId String?          @unique
   plannedActivity   PlannedActivity? @relation(fields: [plannedActivityId], references: [id], onDelete: SetNull)
+
+  // Insights V1 PR2 (migration 0047) -- a snapshot of which LOCAL calendar
+  // week this occurrence was scheduled for, frozen at the instant it was
+  // either created or last Moved -- never re-derived from the user's
+  // CURRENT timezone on every read (the live-derivation behavior every
+  // other field on this row still uses, and the exact mechanism that let
+  // a later timezone change silently reshuffle historical weekly credit
+  // before this field existed). `scheduledWeekStart` is the "YYYY-MM-DD"
+  // Monday of that week (localCalendarWeekStart's own canonical output,
+  // goalActivityRhythm.ts -- no second week algorithm);
+  // `scheduledWeekTimezone` is the IANA zone name used to compute it, kept
+  // alongside purely as audit/debugging context (the week key itself is
+  // `scheduledWeekStart` alone). ADDITIVE ONLY, NO BACKFILL: both are NULL
+  // for every occurrence created before this migration -- never
+  // fabricated after the fact (see migration 0047's own doc comment). The
+  // two fields are always written together, in the same statement, by
+  // the two canonical writers (materializeGoalActivityRhythmOccurrence,
+  // applyMoveWrites) -- a row with exactly one of the two set is an
+  // impossible, corrupt state; every reader (resolveOccurrenceLocalDate,
+  // goalActivityRhythm.ts) refuses to silently guess or blend stored and
+  // live-derived values for such a row, and throws instead.
+  scheduledWeekStart    String?
+  scheduledWeekTimezone String?
+
+  // HPG3-A1 -- the SAME frozen-snapshot discipline as scheduledWeekStart/
+  // scheduledWeekTimezone immediately above, for the DAY this occurrence
+  // was scheduled for rather than the week: `scheduledLocalDate` is the
+  // "YYYY-MM-DD" local calendar date (getDatePartsInTimezone's own
+  // canonical output, apps/web/lib/timezone.ts -- no second day
+  // algorithm), frozen at the instant this row was created or last Moved,
+  // never re-derived from the user's CURRENT timezone on every read, for
+  // the identical reason scheduledWeekStart exists (a later timezone
+  // change must never silently reshuffle historical daily attribution).
+  // `scheduledLocalTimezone` is the IANA zone name used to compute it,
+  // kept alongside purely as audit/debugging context, same convention as
+  // scheduledWeekTimezone. ADDITIVE ONLY, NO BACKFILL: both are NULL for
+  // every occurrence that exists before this migration AND for every
+  // occurrence this slice itself creates (A1 is schema/domain-only -- see
+  // this model's own GoalActivity.dailyFrequencyKind sibling comment for
+  // why no production writer touches these columns yet). The two fields
+  // are intended to always be written together, in the same statement, by
+  // whichever LATER ticket wires them (mirroring materializeGoalActivityRhythmOccurrence/
+  // applyMoveWrites' own existing discipline for the week pair) -- a row
+  // with exactly one of the two set is an impossible, corrupt state, and
+  // any future reader of this pair must refuse to silently guess or blend
+  // stored and live-derived values for such a row, exactly as
+  // resolveOccurrenceLocalDate already does for the week pair.
+  scheduledLocalDate     String?
+  scheduledLocalTimezone String?
+
+  // Insights V1 PR3 (migration 0048) -- Prisma's relation validator
+  // requires this opposite navigation field, since GoalActivityExecution
+  // now declares `@relation(fields: [goalActivityOccurrenceId], ...)`
+  // pointing here (same zero-DB-footprint convention as every other
+  // Prisma-only back-relation already documented elsewhere in this
+  // schema, e.g. GoalActivity.plannedActivity's own doc comment). At
+  // most one execution per occurrence (the FK's own @unique), so this is
+  // 0..1, unlike `occurrences`/`executions` on GoalActivity above.
+  execution         GoalActivityExecution?
 
   createdAt         DateTime         @default(now()) @db.Timestamptz(3)
 

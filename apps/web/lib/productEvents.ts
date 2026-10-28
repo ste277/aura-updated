@@ -344,7 +344,7 @@ const ASK_HORIZON_VALUES = new Set([
   'NEXT_7_DAYS', 'NEXT_MONTH', 'CUSTOM_DATE', 'UNSPECIFIED',
 ]);
 const ASK_TIME_PREFERENCE_VALUES = new Set(['ANY', 'MORNING', 'AFTERNOON', 'EVENING', 'NIGHT']);
-const ASK_RESULT_ACTION_VALUES = new Set(['PLAN_THIS', 'CREATE_MOMENT', 'OPEN_PLAN', 'OPEN_TIMELINE', 'OPEN_PANCHANG', 'OPEN_MUHURTHAM', 'SCHEDULE_FORWARD_PLAN']);
+const ASK_RESULT_ACTION_VALUES = new Set(['PLAN_THIS', 'CREATE_MOMENT', 'OPEN_PLAN', 'OPEN_TIMELINE', 'OPEN_HOME_TIMELINE', 'OPEN_PANCHANG', 'OPEN_MUHURTHAM', 'SCHEDULE_FORWARD_PLAN']);
 // Recipient Conversion V1 (brief section 22/23) -- GUEST_HORIZON_VALUES is
 // the exact guest-facing horizon subset lib/guestTimingSearchRequest.ts
 // validates against (not the full PlanningHorizon set, which also has

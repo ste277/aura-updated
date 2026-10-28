@@ -107,10 +107,10 @@ async function main() {
   const schema = read('../apps/web/prisma/schema.prisma');
   check('F. prisma/schema.prisma does not reference ActionPhase/actionPhase', !/ActionPhase|actionPhase/.test(schema));
   const migrationDirs = fs.readdirSync(path.join(__dirname, '../apps/web/prisma/migrations')).filter((d) => /^\d{4}_/.test(d));
-  // Goals V2 G2.1/G2.2.1 added migrations 0040/0041 (completion requirement
-  // + execution record, unrelated to ActionPhase) -- bumped from 39, same
-  // convention as every other hardcoded migration-count guard in this repo.
-  check('F. migration count remains 41 -- no new Lunar/ActionPhase migration', migrationDirs.length === 43);
+  // No bare migration-directory-count guard here (removed -- it broke on
+  // every unrelated future migration by construction, e.g. Goals V2
+  // G2.1/G2.2.1's own unrelated 0040/0041). The content-based check just
+  // below already proves the real, count-independent invariant directly.
   const migrationsMention = migrationDirs.some((d) => /ActionPhase|actionPhase/.test(read(`../apps/web/prisma/migrations/${d}/migration.sql`)));
   check('F. no migration.sql references ActionPhase/actionPhase', !migrationsMention);
 
@@ -149,6 +149,14 @@ async function main() {
   // literal path string so this explanatory comment/allowlist entry does not itself trip THAT test's own separate
   // substring guard (which greps the whole tree for its own module name).
   const l1DomainTestFile = ['test/', 'lunar', 'Tithi', 'Context', '.test.ts'].join('');
+  // Onboarding V1 PR 1's own migration-guard-remediation regression suite
+  // (test/migrationGuardRegression.test.ts) lists this file's own path,
+  // 'actionPhase.test.ts', as a plain string literal inside an array of
+  // the 45 test files whose historical migration-count guards it
+  // corrected -- an incidental substring match on this test's own file
+  // name, not a real reference to the ActionPhase concept. Allowed
+  // explicitly, same reasoning as l1DomainTestFile above.
+  const migrationGuardRegressionTestFile = ['test/', 'migrationGuardRegression', '.test.ts'].join('');
   // Lunar Intelligence V1 L3 is the deliberate, later consumer of ActionPhase (packages/muhurta/src/lunarFamilyRules.ts,
   // and its own test/integration coverage) -- allowed explicitly, as an intentional consequence of L3's own wiring,
   // not scope creep in this L2 test.
@@ -177,7 +185,7 @@ async function main() {
   // by L5, still supplied a concrete value only via Muhurtham Finder's own
   // existing constant -- no new consumer, no new file beyond this one.
   const l61ConsumerFiles = ['packages/recommendation/src/dailyAssistant.ts'];
-  const ALLOWED = new Set([...REQUIRED, l1DomainTestFile, ...l3ConsumerFiles, ...l4ConsumerFiles, ...l5ConsumerFiles, ...l61ConsumerFiles]);
+  const ALLOWED = new Set([...REQUIRED, l1DomainTestFile, migrationGuardRegressionTestFile, ...l3ConsumerFiles, ...l4ConsumerFiles, ...l5ConsumerFiles, ...l61ConsumerFiles]);
   const unexpected = grepOut.filter((f: string) => !ALLOWED.has(f));
   check('F. repo-wide, only the four L2 files (plus this test, L1\'s incidental regex-literal match, and Lunar Intelligence L3/L4/L5/L6.1\'s deliberate consumer files) reference ActionPhase/actionPhase: ' + (unexpected.length ? 'unexpected: ' + unexpected.join(', ') : 'none unexpected'), unexpected.length === 0);
   check('F. all four expected production/test files DO reference it (the wiring actually exists)', REQUIRED.every((f) => grepOut.includes(f)));

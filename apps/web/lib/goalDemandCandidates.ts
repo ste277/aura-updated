@@ -4,29 +4,29 @@
  * Answers exactly one question, for one user and one planning date:
  * "which recurring GoalActivities are currently eligible to be
  * CONSIDERED for planning?" This file never plans anything, never
- * writes anything, and is not called from anywhere in the real planning
- * pipeline yet (dayConstructorOrchestrator.ts, PlanDayClient.tsx, Home,
- * Recomposition are all untouched by this ticket) -- it establishes the
- * authoritative demand source only, for a later, separately-authorized
- * integration ticket to consume.
+ * writes anything.
  *
- * ELIGIBILITY REUSE (this ticket's own section 3): the ONLY authority
- * for completed/committed/remaining/eligible/week-boundary math is
- * computeGoalActivityRhythmEligibility (goalActivityRhythm.ts) -- the
- * exact same function Goal Detail (R2-R5) and
+ * ELIGIBILITY REUSE: the ONLY authority for completed/committed/
+ * remaining/eligible/week-boundary math is
+ * evaluateNewOccurrenceEligibility (goalActivityOccurrenceCapacity.ts,
+ * Multi-Occurrence Rhythm PR 1's own pure capacity API) -- a direct,
+ * unmodified delegation to computeGoalActivityRhythmEligibility
+ * (goalActivityRhythm.ts), the exact same formula Goal Detail and
  * materializeGoalActivityRhythmOccurrence (db.ts, the acceptance-time
  * write gate) already use. This file reproduces no formula of its own.
  *
  * STRUCTURAL GATE REUSE: the discovery query itself
  * (loadCandidateGoalActivitiesForRhythmDemand, db.ts) mirrors
  * materializeGoalActivityRhythmOccurrence's own non-capacity checks
- * (status != DISMISSED, rhythmKind = N_PER_WEEK, linked plan not
- * UPCOMING) in SQL, so this file's own job is narrowed to the one check
- * that function does NOT do in SQL: weekly capacity, via the batched
- * facts query + the authoritative eligibility function.
+ * (status != DISMISSED, rhythmKind = N_PER_WEEK) in SQL -- as of
+ * Multi-Occurrence Rhythm PR 2, neither function excludes a GoalActivity
+ * merely for having an already-UPCOMING occurrence; weekly capacity
+ * (via this file's own batched facts query + the authoritative
+ * eligibility function) is the only remaining gate on either side.
  */
 
-import { computeGoalActivityRhythmEligibility, normalizeGoalActivityRhythm, type GoalActivityRhythmOccurrenceFact } from './goalActivityRhythm';
+import { normalizeGoalActivityRhythm, type GoalActivityRhythmOccurrenceFact } from './goalActivityRhythm';
+import { evaluateNewOccurrenceEligibility } from './goalActivityOccurrenceCapacity';
 import { loadCandidateGoalActivitiesForRhythmDemand, loadGoalActivityRhythmFactsForActivities, type CandidateGoalActivityForRhythmDemandRow } from './db';
 
 // ============================================================
@@ -37,6 +37,17 @@ import { loadCandidateGoalActivitiesForRhythmDemand, loadGoalActivityRhythmFacts
 // mirrors, needs either to decide eligibility or to seed a planning row.
 // ============================================================
 
+/** The canonical Rhythm state computeGoalActivityRhythmEligibility already
+ * produced for this candidate -- carried as-is, Goal-side. Translation to
+ * the generic decision-facts shape happens upstream of the Constructor
+ * stack, in goalDecisionFactsProvider.ts, never here. */
+export interface GoalDemandRhythmFacts {
+  targetPerWeek: number;
+  completedThisWeek: number;
+  committedThisWeek: number;
+  remainingOccurrences: number;
+}
+
 export interface GoalDemandCandidate {
   goalActivityId: string;
   goalId: string;
@@ -46,6 +57,11 @@ export interface GoalDemandCandidate {
   /** The exact remainingOccurrences computeGoalActivityRhythmEligibility
    * already computes -- never re-derived, never negative. */
   remainingThisWeek: number;
+  /** Factual Rhythm state only (no priority/urgency/order) -- exactly the
+   * values already computed for `remainingThisWeek` above, never
+   * re-derived. Every candidate returned here is already Rhythm-eligible
+   * (N_PER_WEEK, `eligible === true`), so this is always populated. */
+  rhythm: GoalDemandRhythmFacts;
 }
 
 /**
@@ -122,7 +138,7 @@ export async function loadEligibleGoalDemand(deps: GoalDemandCandidatesDeps, use
     if (rhythm.kind !== 'N_PER_WEEK') continue;
 
     const facts = factsByActivity.get(row.goalActivityId) ?? [];
-    const eligibility = computeGoalActivityRhythmEligibility({ rhythm, planningLocalDate, occurrences: facts });
+    const eligibility = evaluateNewOccurrenceEligibility({ rhythm, planningLocalDate, occurrences: facts });
     if (!eligibility.eligible) continue;
 
     candidates.push({
@@ -132,6 +148,12 @@ export async function loadEligibleGoalDemand(deps: GoalDemandCandidatesDeps, use
       title: row.title,
       activityId: row.activityId,
       remainingThisWeek: eligibility.remainingOccurrences,
+      rhythm: {
+        targetPerWeek: rhythm.targetPerWeek ?? 0,
+        completedThisWeek: eligibility.completedThisWeek,
+        committedThisWeek: eligibility.committedThisWeek,
+        remainingOccurrences: eligibility.remainingOccurrences,
+      },
     });
   }
 

@@ -17,16 +17,18 @@ import {
 } from '../../components/ui';
 import { colors, spacing, radius } from '../../components/theme';
 import { DayPlanPreviewController } from '../../components/DayPlanPreviewController';
+import { formatIsoClockTime } from '../../lib/dayPlanPreviewPresentation';
 import type { ConstructDayPreview } from '../../lib/dayConstructorOrchestrator';
 import type { PersistedPlanSummary } from '../../lib/acceptConstructedDay';
 import { previewConstructedDay } from '../../lib/dayConstructorPreviewClient';
+import type { ShadowReviewPayload } from '../../lib/shadowReviewDelta';
 import type { PlanningHorizon } from '../../lib/planningHorizon';
 import { PLAN_DAY_QUICK_PICKS, quickPickIcon, type PlanDayQuickPick } from '../../lib/planDayQuickPicks';
 import {
   createEmptyIntentRow,
   createInitialIntentRow,
   createIntentRowFromQuickPick,
-  createIntentRowFromGoalActivity,
+  createIntentRowFromGoalHandoffItem,
   createIntentRowFromCapture,
   createIntentRowFromAutoGoalSuggestion,
   deriveAvailableAutoGoalSuggestions,
@@ -119,6 +121,15 @@ export interface PlanDayClientProps {
   planningDate: string | null;
   horizon: PlanningHorizon | null;
   availabilityConfigured: boolean | null;
+  /** Onboarding V1 PR 1 -- Location Trust Foundation. `false` (or `null`
+   * for an unauthenticated render) means this plan's timing was computed
+   * against a location the user has never explicitly confirmed -- shown
+   * as a nonblocking qualifier, never a blocker (this ticket's own
+   * explicit requirement). */
+  locationConfirmed: boolean | null;
+  /** The current (non-birth) city this plan's timing is computed
+   * against, so the qualifier can name it. */
+  cityName: string | null;
   /** Goals -> Planning Integration V1 PR C (this ticket's own section
    * 6/7/8) -- already ownership/eligibility-resolved server-side
    * (planDayBootstrap.ts's own `resolveGoalActivityHandoff`) from the
@@ -146,7 +157,37 @@ export interface PlanDayClientProps {
   autoGoalSuggestions: readonly GoalDemandCandidate[];
 }
 
-export function PlanDayClient({ timezone, planningDate, horizon, availabilityConfigured, goalActivities, captures, autoGoalSuggestions }: PlanDayClientProps) {
+/**
+ * O5 SHADOW ROLLOUT R3 -- the internal-only comparison panel. Rendered ONLY when the server already attached a
+ * `shadowReview` (never a client decision -- see `PlanDayClient`'s own `submitPreview`). Deliberately plain and
+ * clearly non-customer-facing (this ticket's own section 14): a labelled internal panel, the CHANGED placements
+ * only (never a full second day), and one plain-language sentence for why -- no technical vocabulary, no buttons,
+ * nothing persisted, nothing sent anywhere (section 15/17: "prefer less machinery").
+ */
+function ShadowReviewPanel({ review, timezone }: { review: ShadowReviewPayload; timezone: string }) {
+  const reasonCopy: Record<ShadowReviewPayload['reason'], string> = {
+    WOULD_OTHERWISE_BE_DEFERRED: 'This was the last known opportunity to fit this activity in the planning horizon.',
+  };
+  const time = (iso?: string) => (iso ? formatIsoClockTime(iso, timezone) : undefined);
+  return (
+    <SurfaceCard style={{ marginTop: spacing.lg, border: `1px dashed ${colors.borderSubtle}` }}>
+      <p style={{ margin: 0, fontSize: 11, fontWeight: 800, letterSpacing: 0.6, textTransform: 'uppercase', color: colors.textMuted }}>Shadow review — internal</p>
+      <div style={{ display: 'flex', flexDirection: 'column', gap: spacing.md, marginTop: spacing.md }}>
+        {review.changedItems.map((item) => (
+          <div key={item.intentId}>
+            <p style={{ margin: 0, fontSize: 11, fontWeight: 800, letterSpacing: 0.4, textTransform: 'uppercase', color: colors.textMuted }}>{item.kind === 'PROMOTED' ? 'Promoted' : 'Moved'}</p>
+            <p style={{ margin: 0, fontSize: 14, fontWeight: 750, color: colors.textPrimary }}>{item.title}</p>
+            <p style={{ margin: 0, fontSize: 12, color: colors.textMuted }}>Current plan: {item.baseline.status === 'DEFERRED' ? 'Not scheduled' : `${time(item.baseline.start)}–${time(item.baseline.end)}`}</p>
+            <p style={{ margin: 0, fontSize: 12, color: colors.textSecondary }}>Shadow: {time(item.alternative.start)}–{time(item.alternative.end)}</p>
+          </div>
+        ))}
+      </div>
+      <p style={{ margin: `${spacing.md}px 0 0`, fontSize: 12, color: colors.textMuted }}>Why Aura considered this: {reasonCopy[review.reason] ?? 'A scheduling trade-off was available.'}</p>
+    </SurfaceCard>
+  );
+}
+
+export function PlanDayClient({ timezone, planningDate, horizon, availabilityConfigured, locationConfirmed, cityName, goalActivities, captures, autoGoalSuggestions }: PlanDayClientProps) {
   const router = useRouter();
   const authenticated = !!timezone && !!planningDate && !!horizon;
   const [phase, setPhase] = useState<Phase>(() => (authenticated ? 'ENTRY' : 'REDIRECTING'));
@@ -159,7 +200,7 @@ export function PlanDayClient({ timezone, planningDate, horizon, availabilityCon
   // again after this initializer).
   const [rows, setRows] = useState<PlanDayIntentRow[]>(() =>
     goalActivities.length + captures.length > 0
-      ? [...goalActivities.map(createIntentRowFromGoalActivity), ...captures.map(createIntentRowFromCapture)].slice(0, MAX_PLAN_DAY_INTENTS)
+      ? [...goalActivities.map((item) => createIntentRowFromGoalHandoffItem(item, planningDate ? encodeGoalDemandIntentId(planningDate, item.id) : null)), ...captures.map(createIntentRowFromCapture)].slice(0, MAX_PLAN_DAY_INTENTS)
       : [createInitialIntentRow()]
   );
   // Plan My Day UX V2 PR U1 -- every row starts collapsed, including a
@@ -190,6 +231,11 @@ export function PlanDayClient({ timezone, planningDate, horizon, availabilityCon
   // meaningful once `planRevealed` is true.
   const [addPickerExpanded, setAddPickerExpanded] = useState(false);
   const [preview, setPreview] = useState<ConstructDayPreview | null>(null);
+  // O5 SHADOW ROLLOUT R3 -- present ONLY when the server already decided this response is Preview-eligible AND the
+  // real evidence reached APPLY/MATERIALIZABLE/READY/PASS for THIS request (shadowPolicyExecution.ts/shadowEvidence.ts).
+  // Never set by anything client-side; a Production response never carries it, so this stays `undefined` there.
+  // Ephemeral: never persisted, cleared on discard/refresh exactly like `preview` itself.
+  const [shadowReview, setShadowReview] = useState<ShadowReviewPayload | undefined>(undefined);
   const [entryError, setEntryError] = useState<PlanDayEntryErrorPresentation | null>(null);
   // Planning Horizon V1 PR P2 -- true only when a Preview call returned
   // FUTURE_AVAILABILITY_REQUIRED despite bootstrap saying configured
@@ -369,6 +415,7 @@ export function PlanDayClient({ timezone, planningDate, horizon, availabilityCon
     const result = await previewConstructedDay(intents, planningDate);
     if (result.status === 'READY') {
       setPreview(result.preview);
+      setShadowReview(result.shadowReview);
       setPhase('PREVIEW');
     } else if (result.status === 'FUTURE_AVAILABILITY_REQUIRED') {
       // Stale-availability race (this ticket's own section 17) -- route
@@ -386,6 +433,7 @@ export function PlanDayClient({ timezone, planningDate, horizon, availabilityCon
     // Never saves, never calls acceptance (this ticket's own section 34)
     // -- rows are retained exactly as the user left them.
     setPreview(null);
+    setShadowReview(undefined);
     setPhase('ENTRY');
   }
 
@@ -448,17 +496,36 @@ export function PlanDayClient({ timezone, planningDate, horizon, availabilityCon
         )}
 
         {phase === 'PREVIEW' && preview ? (
-          <DayPlanPreviewController
-            preview={preview}
-            onDiscard={handleDiscard}
-            onSaved={handleSaved}
-            onRefreshRequested={handleRefreshRequested}
-            goalActivityLinks={buildGoalActivityLinksForAccept(rows, preview.constructedDay.proposedItems)}
-            captureLinks={buildCaptureLinksForAccept(rows, preview.constructedDay.proposedItems)}
-          />
+          <>
+            <DayPlanPreviewController
+              preview={preview}
+              onDiscard={handleDiscard}
+              onSaved={handleSaved}
+              onRefreshRequested={handleRefreshRequested}
+              goalActivityLinks={buildGoalActivityLinksForAccept(rows, preview.constructedDay.proposedItems)}
+              captureLinks={buildCaptureLinksForAccept(rows, preview.constructedDay.proposedItems)}
+            />
+            {shadowReview && timezone ? <ShadowReviewPanel review={shadowReview} timezone={timezone} /> : null}
+          </>
         ) : (
           <>
             <PageHeader title="Plan my day" subtitle={horizon === 'TOMORROW' ? 'What do you want to get done tomorrow?' : 'What do you want to get done today?'} />
+
+            {/* Onboarding V1 PR 1 -- Location Trust Foundation: a targeted,
+                low-key qualifier (distinct from the global disclosure
+                banner shown app-wide) naming exactly what this plan's
+                timing is based on when it has never been explicitly
+                confirmed. Nonblocking -- planning continues normally
+                either way; this never claims the unconfirmed location is
+                verified. */}
+            {locationConfirmed === false && cityName && (
+              <p style={{ margin: `${spacing.xs}px 0 0`, fontSize: 13, color: colors.textFaint }}>
+                Timing based on {cityName} (unconfirmed) ·{' '}
+                <TextButton onClick={() => { window.location.href = '/?tab=you'; }} color={colors.textFaint}>
+                  Confirm location
+                </TextButton>
+              </p>
+            )}
 
             <div style={{ marginTop: spacing.xl }}>
               <FieldLabel>When are you planning for?</FieldLabel>
@@ -720,25 +787,39 @@ function AutoGoalSuggestionsSection({ suggestions, disabled, onAdd }: { suggesti
 }
 
 /**
- * Shows exactly two facts (this ticket's own section 3: activity title,
- * Goal context) and one action -- never `remainingThisWeek` (eligibility
- * data, not presentation pressure, this ticket's own explicit
- * instruction) and never a Rhythm/streak/urgency signal of any kind.
- * Reuses `SurfaceCard`/`SecondaryButton` (this screen's own existing
- * primitives, this ticket's own section 21: no new visual language) --
- * the same flexible `minWidth: 0` text-wrapping pattern `IntentRowCard`
- * already uses for its own title input, so a long activity or Goal title
- * wraps instead of overflowing at the existing mobile breakpoint (this
- * ticket's own section 23), and the Add button keeps a real accessible
- * name (never icon/color-only, this ticket's own section 22).
+ * Shows activity title, Goal context, and one action. Multi-Occurrence
+ * Rhythm PR 2 explicitly supersedes the prior "never remainingThisWeek"
+ * instruction this card followed: that earlier decision avoided showing
+ * eligibility data as presentation pressure, but this ticket's own
+ * section 4 explicitly asks for exactly this weekly copy ("1 of 5
+ * planned this week" / "4 sessions remaining"), distinguishing remaining
+ * capacity from completed progress -- so a GoalActivity suggested here
+ * after one occurrence is already planned reads honestly, rather than as
+ * if nothing had been scheduled yet. Still never a streak/urgency/score
+ * signal of any kind -- only the same factual completed/planned/
+ * remaining counts Goal Detail already shows. Reuses
+ * `SurfaceCard`/`SecondaryButton` (this screen's own existing
+ * primitives) -- the same flexible `minWidth: 0` text-wrapping pattern
+ * `IntentRowCard` already uses for its own title input, so a long
+ * activity or Goal title wraps instead of overflowing at the existing
+ * mobile breakpoint, and the Add button keeps a real accessible name
+ * (never icon/color-only).
  */
 function AutoGoalSuggestionCard({ suggestion, disabled, onAdd }: { suggestion: GoalDemandCandidate; disabled: boolean; onAdd: () => void }) {
+  const { targetPerWeek, completedThisWeek, committedThisWeek } = suggestion.rhythm;
+  const plannedThisWeek = completedThisWeek + committedThisWeek;
+  const weeklyProgressLabel = `${plannedThisWeek} of ${targetPerWeek} planned this week`;
+  const sessionWord = suggestion.remainingThisWeek === 1 ? 'session' : 'sessions';
+  const remainingLabel = `${suggestion.remainingThisWeek} ${sessionWord} remaining`;
   return (
     <SurfaceCard>
       <div style={{ display: 'flex', alignItems: 'center', gap: spacing.sm }}>
         <div style={{ flex: 1, minWidth: 0 }}>
           <p style={{ margin: 0, fontWeight: 700, overflowWrap: 'break-word' }}>{suggestion.title}</p>
           <p style={{ margin: 0, marginTop: 2, fontSize: 13, color: colors.textSecondary, overflowWrap: 'break-word' }}>For: {suggestion.goalTitle}</p>
+          <p style={{ margin: 0, marginTop: 2, fontSize: 13, color: colors.textSecondary }}>
+            {weeklyProgressLabel} · {remainingLabel}
+          </p>
         </div>
         <SecondaryButton onClick={onAdd} disabled={disabled} ariaLabel={`Add ${suggestion.title} (for ${suggestion.goalTitle}) to today's plan`}>
           Add

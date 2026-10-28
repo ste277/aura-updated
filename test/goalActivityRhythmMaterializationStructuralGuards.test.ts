@@ -25,7 +25,16 @@ function stripComments(source: string): string {
   return source.replace(/\/\*[\s\S]*?\*\//g, '').replace(/\/\/.*$/gm, '');
 }
 
-const RHYTHM_PATTERN = /Rhythm|rhythmKind|rhythmTargetPerWeek|computeGoalActivityRhythmEligibility|loadGoalActivityRhythmFacts|materializeGoalActivityRhythmOccurrence/;
+// Daily Rhythm V1 PR DR2 -- the negative lookbehind excludes the
+// unrelated, independently-named "Daily Rhythm" feature (work-hours
+// scheduling preference), both as a code identifier (no space:
+// DailyRhythmPreferencesInput, dailyRhythmScheduling, DAILY_RHYTHM_*) and
+// as doc-comment prose ("Daily Rhythm V1 PR DR2", with a space -- this
+// file's own PRODUCTION_FILES loop below checks raw, unstripped content).
+// Goal Activity Rhythm (this file's own subject) never appears as
+// "Daily"/"daily"/"DAILY_" immediately before "Rhythm", so a genuine leak
+// (e.g. "GoalActivityRhythm", bare "rhythmKind") is still caught.
+const RHYTHM_PATTERN = /(?<!Daily)(?<!daily)(?<!DAILY_)(?<!Daily )(?<!daily )Rhythm|rhythmKind|rhythmTargetPerWeek|computeGoalActivityRhythmEligibility|loadGoalActivityRhythmFacts|materializeGoalActivityRhythmOccurrence/;
 
 // ============================================================
 // Zero Rhythm reference in the Constructor, Recomposition decision
@@ -105,7 +114,7 @@ function functionBody(source: string, name: string): string {
 const materializeBody = functionBody(dbSrc, 'materializeGoalActivityRhythmOccurrence');
 check('materializeGoalActivityRhythmOccurrence introduces no ordinal/windowKey/occurrenceKey concept of its own', !/ordinal|windowKey|occurrenceKey/i.test(stripComments(materializeBody)));
 check('materializeGoalActivityRhythmOccurrence creates at most ONE occurrence per call (exactly one INSERT INTO GoalActivityOccurrence)', (materializeBody.match(/INSERT INTO "GoalActivityOccurrence"/g) ?? []).length === 1);
-check('materializeGoalActivityRhythmOccurrence delegates eligibility entirely to the pure R2 engine (calls computeGoalActivityRhythmEligibility, never reimplements the formula)', /computeGoalActivityRhythmEligibility\(/.test(materializeBody) && !/\.targetPerWeek\s*-\s*/.test(materializeBody));
+check('materializeGoalActivityRhythmOccurrence delegates eligibility entirely to the pure engine (Multi-Occurrence Rhythm PR 2: calls evaluateNewOccurrenceEligibility, PR 1\'s own unmodified delegation to computeGoalActivityRhythmEligibility -- never reimplements the formula)', /evaluateNewOccurrenceEligibility\(/.test(materializeBody) && !/\.targetPerWeek\s*-\s*/.test(materializeBody));
 check('materializeGoalActivityRhythmOccurrence sets no occurrence status and no Rhythm/CompletionRequirement snapshot on the occurrence row (this ticket\'s own section 15)', !/"status"|completionKindSnapshot|rhythmKindSnapshot/.test(materializeBody));
 check('logPlannedActivity itself does not call materializeGoalActivityRhythmOccurrence', !/materializeGoalActivityRhythmOccurrence/.test(functionBody(dbSrc, 'logPlannedActivity')));
 check('skipPlannedActivity itself does not call materializeGoalActivityRhythmOccurrence', !/materializeGoalActivityRhythmOccurrence/.test(functionBody(dbSrc, 'skipPlannedActivity')));
@@ -114,13 +123,31 @@ check('addGoalActivity itself does not call materializeGoalActivityRhythmOccurre
 
 // ============================================================
 // materializeGoalActivityRhythmOccurrence is called from EXACTLY ONE
-// production call site.
+// production call site WITHIN apps/web/lib. HPG3-A2 added a SECOND,
+// legitimate caller outside this directory (apps/web/app/api/plans/route.ts
+// -- proven by its own dedicated checks in test/planGoalActivityLinkWiring.test.ts,
+// including that it is correctly ordered AFTER the Goal lifecycle guard and
+// that a genuine Rhythm refusal never falls through to the legacy link).
+// This check's own scope was always apps/web/lib specifically (R3's own
+// original caller lives there) -- it still correctly holds unchanged, and
+// still fails loudly if a THIRD, unreviewed caller ever appears inside lib/.
 // ============================================================
 const acceptancePersistenceSrc = read('../apps/web/lib/dayConstructorAcceptancePersistence.ts');
 check('materializeGoalActivityRhythmOccurrence is called from dayConstructorAcceptancePersistence.ts', /materializeGoalActivityRhythmOccurrence\(/.test(acceptancePersistenceSrc));
 const allProductionLibFiles = fs.readdirSync(path.join(__dirname, '../apps/web/lib')).filter((f) => f.endsWith('.ts'));
 const callSites = allProductionLibFiles.filter((f) => /materializeGoalActivityRhythmOccurrence\(/.test(stripComments(read(`../apps/web/lib/${f}`))) && f !== 'db.ts');
-check('materializeGoalActivityRhythmOccurrence has EXACTLY ONE production call site (dayConstructorAcceptancePersistence.ts)', callSites.length === 1 && callSites[0] === 'dayConstructorAcceptancePersistence.ts');
+check('materializeGoalActivityRhythmOccurrence has EXACTLY ONE production call site WITHIN apps/web/lib (dayConstructorAcceptancePersistence.ts) -- the HPG3-A2 route.ts caller lives outside this directory and is proven separately', callSites.length === 1 && callSites[0] === 'dayConstructorAcceptancePersistence.ts');
+check('the route.ts caller HPG3-A2 adds is the only production call site outside apps/web/lib', (() => {
+  function listTs(dir: string): string[] {
+    return fs.readdirSync(dir, { withFileTypes: true }).flatMap((e) => {
+      const p = path.join(dir, e.name);
+      if (e.isDirectory()) return e.name === 'node_modules' || e.name.startsWith('.') ? [] : listTs(p);
+      return /\.(ts|tsx)$/.test(e.name) ? [p] : [];
+    });
+  }
+  const outsideLib = listTs(path.join(__dirname, '../apps/web/app')).filter((f) => /materializeGoalActivityRhythmOccurrence\(/.test(stripComments(fs.readFileSync(f, 'utf8'))));
+  return outsideLib.length === 1 && outsideLib[0].endsWith('app/api/plans/route.ts');
+})());
 
 // ============================================================
 // evaluateAcceptance (E1) itself is untouched -- Rhythm enters only in
@@ -174,7 +201,21 @@ const rhythmModuleSrc = stripComments(read('../apps/web/lib/goalActivityRhythm.t
 check('goalActivityRhythm.ts (unmodified by R3) still defines no AURA_DECIDES', !/AURA_DECIDES/.test(rhythmModuleSrc));
 check('goalActivityRhythm.ts (unmodified by R3) still references no RRULE', !/RRULE/.test(rhythmModuleSrc));
 check('materializeGoalActivityRhythmOccurrence never loops/batches to create more than one occurrence per call (no for/while/map around the INSERT)', !/for\s*\(|while\s*\(|\.map\(/.test(materializeBody));
-check('materializeGoalActivityRhythmOccurrence never queries/creates a plan for a FUTURE week beyond planningLocalDate (no addDaysToDateStr/localCalendarWeekStart call of its own)', !/addDaysToDateStr|localCalendarWeekStart/.test(materializeBody));
+// Insights V1 PR2 (Stable Scheduled-Week Attribution) gave this function
+// its own FIRST legitimate, narrowly-scoped call to localCalendarWeekStart
+// -- deriving the new scheduledWeekStart snapshot from `plannedStartAt`
+// (the plan's own real scheduled instant), written once into the
+// INSERT, never used to decide WHERE/WHEN the occurrence is placed. The
+// check below is re-baselined, not weakened: it still fails if
+// addDaysToDateStr ever appears (unchanged, still forbidden outright),
+// if localCalendarWeekStart is called more than once, or if it is ever
+// called on anything OTHER than this exact
+// `getDatePartsInTimezone(timezone, plannedStartAt).dateStr` snapshot
+// expression -- in particular, calling it on `planningLocalDate` itself
+// (the ORIGINAL forbidden pattern this check exists to catch: silently
+// shifting ELIGIBILITY/placement into a different week than the one the
+// caller actually requested) still fails this check exactly as before.
+check('materializeGoalActivityRhythmOccurrence never queries/creates a plan for a FUTURE week beyond planningLocalDate (no addDaysToDateStr call; localCalendarWeekStart is called exactly once, only to derive the PR2 scheduledWeekStart snapshot from plannedStartAt -- never applied to planningLocalDate itself, which would silently shift eligibility/placement into a different week)', !/addDaysToDateStr/.test(materializeBody) && (materializeBody.match(/localCalendarWeekStart\(/g) ?? []).length === 1 && /localCalendarWeekStart\(getDatePartsInTimezone\(timezone, plannedStartAt\)\.dateStr\)/.test(materializeBody) && !/localCalendarWeekStart\(planningLocalDate\)/.test(materializeBody));
 check('the GoalActivityOccurrence schema still has no status column (R3 did not add one)', !/@@schema|status\s+String/.test((() => { const m = read('../apps/web/prisma/schema.prisma').match(/model GoalActivityOccurrence \{([\s\S]*?)\n\}/); return m ? m[1] : ''; })()));
 check('db.ts was not given a new windowKey column reference in real CODE (R1/R2\'s own omission preserved; doc-comment prose explaining the omission is excluded)', !/windowKey/.test(stripComments(dbSrc)));
 check('materializeGoalActivityRhythmOccurrence does not write GoalActivityExecution.currentValue or any partial-progress field', !/currentValue/.test(materializeBody));

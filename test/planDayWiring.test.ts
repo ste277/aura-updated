@@ -650,10 +650,10 @@ function main() {
   check('109. PlanDayClientProps declares the new autoGoalSuggestions prop', /autoGoalSuggestions: readonly GoalDemandCandidate\[\]/.test(planDayClientSource));
   check('110. PlanDayClient destructures autoGoalSuggestions under its own real name (no longer renamed/marked unread -- A3.3 is the ticket authorized to end A3.2\'s own temporary inertness)', /\bautoGoalSuggestions\b[\s\S]{0,5}\}: PlanDayClientProps/.test(planDayClientSource) && !/_autoGoalSuggestions/.test(planDayClientSource));
   check(
-    '111. the `rows` useState initializer is byte-identical to before A3.2 -- autoGoalSuggestions never seeds a row',
-    /const \[rows, setRows\] = useState<PlanDayIntentRow\[\]>\(\(\) =>\s*goalActivities\.length \+ captures\.length > 0\s*\? \[\.\.\.goalActivities\.map\(createIntentRowFromGoalActivity\), \.\.\.captures\.map\(createIntentRowFromCapture\)\]\.slice\(0, MAX_PLAN_DAY_INTENTS\)\s*: \[createInitialIntentRow\(\)\]\s*\);/.test(
+    '111. the `rows` useState initializer is exactly the O5 P0a shape: manual handoff items go through createIntentRowFromGoalHandoffItem with the canonical id derived from the server planningDate prop; captures are unchanged; the initializer never reads autoGoalSuggestions (a suggestion never seeds a row)',
+    /const \[rows, setRows\] = useState<PlanDayIntentRow\[\]>\(\(\) =>\s*goalActivities\.length \+ captures\.length > 0\s*\? \[\.\.\.goalActivities\.map\(\(item\) => createIntentRowFromGoalHandoffItem\(item, planningDate \? encodeGoalDemandIntentId\(planningDate, item\.id\) : null\)\), \.\.\.captures\.map\(createIntentRowFromCapture\)\]\.slice\(0, MAX_PLAN_DAY_INTENTS\)\s*: \[createInitialIntentRow\(\)\]\s*\);/.test(
       planDayClientSource
-    )
+    ) && !/useState<PlanDayIntentRow\[\]>\(\(\) =>[\s\S]{0,420}autoGoalSuggestions/.test(planDayClientSource)
   );
   check('112. submitPreview\'s buildRequestedIntentsForSubmission call is byte-identical to before A3.2 (still exactly rows/timezone/planningDate, no 4th argument)', /buildRequestedIntentsForSubmission\(rows, timezone, planningDate\);/.test(planDayClientSource));
   check(
@@ -701,7 +701,12 @@ function main() {
       return !!match && !/fetch\(|axios|await /.test(match[0]);
     })()
   );
-  check('128. the suggestion card never renders remainingThisWeek (eligibility data, not presentation pressure -- this ticket\'s own explicit section 3 instruction)', !/suggestion\.remainingThisWeek/.test(planDayClientSource));
+  // 128 (superseded by Multi-Occurrence Rhythm PR 2's own explicit section
+  // 4 instruction): the suggestion card now DOES render remainingThisWeek,
+  // deliberately distinguished from completed/planned progress -- a
+  // GoalActivity suggested here after one occurrence is already planned
+  // must read honestly, not as if nothing had been scheduled yet.
+  check('128. the suggestion card renders remainingThisWeek, distinct from (never merged into) the completed/planned weekly progress text (Multi-Occurrence Rhythm PR 2)', /suggestion\.remainingThisWeek/.test(planDayClientSource) && /plannedThisWeek = completedThisWeek \+ committedThisWeek/.test(planDayClientSource));
   {
     // Bounded to the AutoGoalSuggestionCard function's own BODY (not an
     // unbounded to-end-of-file search, which would false-positive on
@@ -714,7 +719,7 @@ function main() {
     check('129. the suggestion card never renders a score/priority/streak/urgency string literal', !!cardBodyMatch && !/remaining this week|streak|urgent|priority:/i.test(cardBodyNoComments));
     check('132. no fixed-width style is applied to the suggestion card (responsive, this ticket\'s own section 23 -- only the shared flexible minWidth:0 pattern IntentRowCard already uses)', !!cardBodyMatch && !/\bwidth:\s*\d/.test(cardBodyNoComments));
   }
-  check('130. AutoGoalSuggestionCard shows exactly the activity title and "For: <Goal title>" -- no additional Goal metadata rendered', /\{suggestion\.title\}/.test(planDayClientSource) && /For: \{suggestion\.goalTitle\}/.test(planDayClientSource));
+  check('130. AutoGoalSuggestionCard shows the activity title, "For: <Goal title>", and (as of Multi-Occurrence Rhythm PR 2) its weekly planned/remaining copy -- no OTHER Goal metadata rendered', /\{suggestion\.title\}/.test(planDayClientSource) && /For: \{suggestion\.goalTitle\}/.test(planDayClientSource) && /weeklyProgressLabel\} · \{remainingLabel\}/.test(planDayClientSource));
   check('131. the Add control carries a real, descriptive accessible name (never icon/color-only) -- this ticket\'s own section 22', /ariaLabel=\{`Add \$\{suggestion\.title\}/.test(planDayClientSource));
   check('133. goalTitle is read only inside the two new presentation components -- never inside buildRequestedIntentsForSubmission/PreviewRequestIntentBody-adjacent code (this ticket\'s own section 9: presentation metadata never enters the Constructor-facing request)', !/buildRequestedIntentsForSubmission\([\s\S]{0,200}goalTitle/.test(planDayClientSource));
   check('134. goalTitle never appears in planDayEntry.ts at all (the generic row/intent pipeline stays completely unaware of it)', !/goalTitle/.test(planDayEntrySource));

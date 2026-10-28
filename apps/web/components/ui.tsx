@@ -73,6 +73,8 @@ export function SurfaceCard({
   accentColor,
   padding = spacing.lg,
   style,
+  role,
+  ariaLive,
 }: {
   children: React.ReactNode;
   elevated?: boolean;
@@ -81,6 +83,12 @@ export function SurfaceCard({
   accentColor?: string;
   padding?: number;
   style?: React.CSSProperties;
+  /** Insights V1 PR7 -- optional ARIA role (e.g. "status"/"alert") for a
+   * card that itself communicates a loading/error state to assistive
+   * tech, forwarded straight to the underlying div. Omitted by every
+   * existing caller, so this has no effect on them. */
+  role?: string;
+  ariaLive?: 'polite' | 'assertive' | 'off';
 }) {
   const base: React.CSSProperties = elevated
     ? {
@@ -96,7 +104,11 @@ export function SurfaceCard({
         borderRadius: radius.lg,
         padding,
       };
-  return <div style={{ ...base, ...style }}>{children}</div>;
+  return (
+    <div style={{ ...base, ...style }} role={role} aria-live={ariaLive}>
+      {children}
+    </div>
+  );
 }
 
 // ============================================================
@@ -543,14 +555,25 @@ export function SegmentedControl<T extends string>({
   options,
   value,
   onChange,
+  disabled,
+  ariaLabel,
 }: {
   options: { value: T; label: React.ReactNode }[];
   value: T;
   onChange: (value: T) => void;
+  disabled?: boolean;
+  /** Optional accessible name for this control's own `role="tablist"` element.
+   * A caller that needs a label should pass it here rather than wrapping this
+   * component in a second element with its own `role="tablist"` -- this
+   * component already owns that role, and nesting two tablists is invalid
+   * ARIA structure (DB4: fixes exactly that defect in the Insights Daily
+   * Briefing Today/Yesterday control, found by DB3's independent review). */
+  ariaLabel?: string;
 }) {
   return (
     <div
       role="tablist"
+      aria-label={ariaLabel}
       style={{
         display: 'flex',
         gap: 2,
@@ -568,17 +591,19 @@ export function SegmentedControl<T extends string>({
             type="button"
             role="tab"
             aria-selected={active}
-            onClick={() => onChange(option.value)}
+            disabled={disabled}
+            onClick={() => { if (!disabled) onChange(option.value); }}
             style={{
               flex: 1,
               minHeight: 38,
               borderRadius: radius.sm,
               border: 'none',
               background: active ? colors.surfaceSelected : 'transparent',
-              color: active ? colors.positive : colors.textMuted,
+              color: disabled ? colors.textMuted : active ? colors.positive : colors.textMuted,
+              opacity: disabled && !active ? 0.5 : 1,
               fontSize: 13,
               fontWeight: active ? 850 : 700,
-              cursor: 'pointer',
+              cursor: disabled ? 'default' : 'pointer',
               whiteSpace: 'nowrap',
               padding: '0 8px',
             }}

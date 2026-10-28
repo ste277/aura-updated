@@ -1,0 +1,59 @@
+-- Insights V1 PR2 -- Stable Scheduled-Week Attribution: a snapshot of
+-- which LOCAL calendar week a GoalActivityOccurrence was scheduled for,
+-- frozen at the instant it is either created or last Moved -- answering
+-- exactly one question: "under the timezone in effect at that moment,
+-- which Monday-starting week did this occurrence's own plannedStartAt
+-- fall in?"
+--
+-- NULL/NULL = no snapshot recorded (either this row predates this
+-- migration, or -- structurally impossible by construction, since both
+-- canonical writers always set both fields together in one statement --
+-- a corrupt partial write). Both non-NULL = the snapshot is authoritative
+-- and MUST be preferred over live re-derivation by every reader.
+--
+-- `scheduledWeekStart`: the "YYYY-MM-DD" Monday of that week, computed by
+-- the repository's one existing canonical week-start function
+-- (localCalendarWeekStart, apps/web/lib/goalActivityRhythm.ts) -- never a
+-- second, independently-drifting week algorithm. A plain String column
+-- (not a native DATE) deliberately, to avoid any Prisma/driver civil-date
+-- reinterpretation at the ORM boundary -- the exact same precision
+-- concern this app's own Goal.targetDate doc comment already reasons
+-- about for a civil (not instant) date value.
+--
+-- `scheduledWeekTimezone`: the IANA zone name used to compute the above
+-- (e.g. "Asia/Kolkata"), kept purely as audit/debugging context -- the
+-- week KEY itself is `scheduledWeekStart` alone; no reader needs this
+-- field to bucket an occurrence correctly.
+--
+-- Written by exactly two call sites, in the same statement as the write
+-- that creates or repoints the occurrence (never a separate statement,
+-- never eventually-consistent):
+--   - materializeGoalActivityRhythmOccurrence (apps/web/lib/db.ts) --
+--     occurrence creation, inside the existing Day Constructor acceptance
+--     transaction/advisory lock.
+--   - applyMoveWrites's GoalActivityOccurrence repoint UPDATE
+--     (apps/web/lib/planMove.ts) -- every Move of a linked occurrence
+--     (same-week or cross-week alike), inside the existing per-user
+--     advisory lock both Move callers already hold.
+--
+-- Explicitly NEVER written by: logPlannedActivity (Done), skipPlannedActivity,
+-- cancelPlannedActivity, or updateUserLocation (the User.timezone writer)
+-- -- preserving this migration's whole purpose: a later timezone change
+-- must never retroactively rewrite an already-snapshotted historical
+-- week, and completion logged in a later week must never move an
+-- occurrence's attribution away from the week it was actually scheduled
+-- for (the architecture audit's own approved policy, restated here for
+-- traceability).
+--
+-- ADDITIVE ONLY, NO BACKFILL: every existing row -- including every
+-- already-materialized or already-Moved occurrence created before this
+-- migration -- gets NULL/NULL. No reliable original timezone exists
+-- anywhere in the database for a historical row (User.timezone is
+-- overwritten in place with no history table), so fabricating one here
+-- would misrepresent a precision this system never actually captured.
+-- Every reader preserves today's exact live-derivation behavior (and its
+-- already-documented timezone-drift limitation) for any row whose
+-- snapshot is NULL.
+
+ALTER TABLE "GoalActivityOccurrence" ADD COLUMN "scheduledWeekStart" TEXT;
+ALTER TABLE "GoalActivityOccurrence" ADD COLUMN "scheduledWeekTimezone" TEXT;

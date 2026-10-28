@@ -178,106 +178,59 @@ jobs:
       # apps/web/node_modules.
       - name: Run Goal create idempotency test
         run: npx ts-node test/goalCreateIdempotency.test.ts
-      # Goals -> Planning Integration V1 PR A -- goals.ts and the goal
-      # creation wiring, unaffected by `pg`/`next` at module load, so no
-      # apps/web/node_modules needed (confirmed by running both locally
-      # with apps/web/node_modules removed).
+      # PR #181 reconciliation -- 22 previously-unexecuted, non-DB Goals
+      # test files, wired in at this job's existing Goals-domain insertion
+      # point. Each is zero-dependency or jsx-enabled per the same
+      # conventions already established above; see each file's own header
+      # comment for its exact import chain.
       - name: Run Goals domain test
         run: npx ts-node test/goals.test.ts
       - name: Run Goals wiring test
         run: npx ts-node test/goalsWiring.test.ts
-      # Goals -> Planning Integration V1 PR B -- pure presentation
-      # formatting, same zero-dependency goals.ts chain as above.
       - name: Run Goals presentation test
         run: npx ts-node test/goalsPresentation.test.ts
-      # Goals -> Planning Integration V1 PR C -- the Goal -> Plan My Day
-      # handoff. planDayBootstrap.ts's own import chain reaches
-      # apps/web/lib/db.ts (via goalDemandCandidates.ts), same
-      # apps/web/node_modules requirement as the Goal demand
-      # candidates/bootstrap tests above; the UI/wiring suites read
-      # source as plain text only and need neither.
       - name: Run Goal planning handoff test
         run: npx ts-node test/goalPlanningHandoff.test.ts
       - name: Run Goal planning handoff UI test
         run: npx ts-node test/goalPlanningHandoffUi.test.ts
       - name: Run Goal planning handoff wiring test
         run: npx ts-node test/goalPlanningHandoffWiring.test.ts
-      # Goals V2 G2.1 -- Goal activity completion requirements
-      # (goalCompletion.ts), a zero-dependency module.
       - name: Run Goal completion test
         run: npx ts-node test/goalCompletion.test.ts
       - name: Run Goal completion structural guards test
         run: npx ts-node test/goalCompletionStructuralGuards.test.ts
-      # Goals V2 G2.2.1/G2.2.2/G2.2.3 -- GoalActivityExecution domain
-      # logic (goalActivityExecution.ts imports only the zero-dependency
-      # goalCompletion.ts); live-DB/completion/Move-continuity coverage
-      # for the same ticket runs in the day-constructor-acceptance-db-tests
-      # job below.
       - name: Run Goal activity execution test
         run: npx ts-node test/goalActivityExecution.test.ts
       - name: Run Goal activity execution structural guards test
         run: npx ts-node test/goalActivityExecutionStructuralGuards.test.ts
-      # Goals V2 Rhythm R1 -- GoalActivityOccurrence structural guards
-      # (reads source as plain text, same fs/path convention as the
-      # structural guards tests above); live persistence coverage for the
-      # same ticket runs in the day-constructor-acceptance-db-tests job.
       - name: Run Goal activity occurrence structural guards test
         run: npx ts-node test/goalActivityOccurrenceStructuralGuards.test.ts
-      # Goals V2 Rhythm R2 -- GoalActivityRhythm validation/eligibility
-      # domain logic (goalActivityRhythm.ts imports only
-      # availabilityContext.ts/timezone.ts, neither of which reaches `pg`).
       - name: Run Goal activity rhythm test
         run: npx ts-node test/goalActivityRhythm.test.ts
-      # Goals V2 Rhythm R3 -- occurrence materialization structural
-      # guards (plain-text source reads only).
       - name: Run Goal activity rhythm materialization structural guards test
         run: npx ts-node test/goalActivityRhythmMaterializationStructuralGuards.test.ts
-      # Goals V2 Rhythm R4 -- Goal Detail's weekly Rhythm presentation.
-      # The UI suite imports goalsPresentation.ts's formatters directly
-      # (itself zero-dependency); the structural guards suite reads
-      # source as plain text -- neither needs apps/web/node_modules.
       - name: Run Goal activity rhythm Goal Detail structural guards test
         run: npx ts-node test/goalActivityRhythmGoalDetailStructuralGuards.test.ts
       - name: Run Goal activity rhythm Goal Detail UI test
         run: npx ts-node test/goalActivityRhythmGoalDetailUi.test.ts
-      # Goals V2 Rhythm R5 -- minimum Rhythm setup UX structural guards
-      # (plain-text source reads only). test/goalActivityRhythmSetupUi.test.ts
-      # is intentionally NOT wired in here -- it asserts on a CreateGoalModal
-      # shape (isOngoingTemplate/GOAL_TEMPLATE_LIKELY_ONGOING) that the
-      # later Goals V2 Candidate B2/B3 activity-proposal review flow has
-      # since replaced; it currently fails 5 checks against the real
-      # GoalsListClient.tsx and needs a maintainer decision (update vs
-      # retire this suite), not a blind wire-in.
+      # test/goalActivityRhythmSetupUi.test.ts is intentionally NOT wired in
+      # here -- it asserts on a CreateGoalModal shape (isOngoingTemplate/
+      # GOAL_TEMPLATE_LIKELY_ONGOING) that the later Goals V2 Candidate B2/B3
+      # activity-proposal review flow has since replaced; it currently fails
+      # 5 checks against the real GoalsListClient.tsx and needs a maintainer
+      # decision (update vs retire this suite), not a blind wire-in.
       - name: Run Goal activity rhythm setup structural guards test
         run: npx ts-node test/goalActivityRhythmSetupStructuralGuards.test.ts
-      # Goals V2 G3.1 -- Goal progress context threading onto the Daily
-      # Agenda/Home timeline (dailyAgenda.ts/homeTimelineComposer.ts import
-      # PlannedActivity/PlanGoalContext from db.ts as TYPES only, erased at
-      # compile time -- no apps/web/node_modules needed).
       - name: Run Daily agenda Goal context test
         run: npx ts-node test/dailyAgendaGoalContext.test.ts
       - name: Run Goal context structural guards test
         run: npx ts-node test/goalContextStructuralGuards.test.ts
-      # Goals V2 G3.2 -- Goal Detail completion presentation structural
-      # guards (plain-text source reads only).
       - name: Run Goal Detail completion structural guards test
         run: npx ts-node test/goalDetailCompletionStructuralGuards.test.ts
-      # Goals V2 G3.3 -- Right Now completion presentation, same
-      # zero-dependency goalActivityExecution.ts/goalsPresentation.ts
-      # chain as G2.1/G2.2 above.
       - name: Run Right Now Goal context test
         run: npx ts-node test/rightNowGoalContext.test.ts
-      # Goals V2 G3.4 -- template completion requirement inference
-      # (imports only the zero-dependency goals.ts/goalCompletion.ts/
-      # goalActivityExecution.ts).
       - name: Run Goal template completion test
         run: npx ts-node test/goalTemplateCompletion.test.ts
-      # Goals V2 G3.5 -- goal-aware Recomposition presentation. Requires
-      # RecompositionCard.tsx at runtime (`require`d directly, same
-      # renderToStaticMarkup convention as the Goal activity proposal test
-      # above) -- same jsx-enabled/apps-web-node_modules requirement.
-      # Live-DB coverage for the same ticket runs in the
-      # day-constructor-acceptance-db-tests job below.
       - name: Run Goal-aware Recomposition presentation test
         env:
           TS_NODE_COMPILER_OPTIONS: '{"jsx":"react"}'
@@ -302,6 +255,245 @@ jobs:
         env:
           TS_NODE_COMPILER_OPTIONS: '{"jsx":"react"}'
         run: npx ts-node test/goalsUiWiring.test.ts
+      # Constructor Decision Intelligence -- Decision Facts V1 architecture
+      # proof (pure): forbidden modules/imports in the Goal-blind
+      # orchestrator/decisionFacts/preview-handler, provider behavior,
+      # failure behavior, trust, and two-direction source neutrality.
+      - name: Run Decision Facts V1 architecture test
+        run: npx ts-node test/decisionFactsArchitecture.test.ts
+      # Opportunity Scarcity V1 -- O1: the pure generic opportunity
+      # projection engine (no DB, no jsx) and its architecture guard.
+      - name: Run opportunity projection test
+        run: npx ts-node test/opportunityProjection.test.ts
+      - name: Run opportunity projection architecture test
+        run: npx ts-node test/opportunityProjectionArchitecture.test.ts
+      # Opportunity Scarcity V1 -- O2: the generic range adapter (pure,
+      # injected fakes) and its architecture guard.
+      - name: Run opportunity range adapter test
+        run: npx ts-node test/opportunityRangeAdapter.test.ts
+      - name: Run opportunity range adapter architecture test
+        run: npx ts-node test/opportunityRangeAdapterArchitecture.test.ts
+      # Opportunity Scarcity V1 -- O3: recurrence period bounds carried by
+      # the Decision Facts provider (pure; DB threading is gated above in
+      # the Decision Facts V1 threading DB step).
+      - name: Run recurrence period bounds test
+        run: npx ts-node test/recurrencePeriodBounds.test.ts
+      # Opportunity Scarcity V1 -- O4: inert opportunity facts (pure: the real
+      # O1 + O2 composed through the generic enrichment and the preview
+      # handler with injected loaders) and its architecture guard.
+      - name: Run opportunity decision facts test
+        run: npx ts-node test/opportunityDecisionFacts.test.ts
+      - name: Run opportunity decision facts architecture test
+        run: npx ts-node test/opportunityDecisionFactsArchitecture.test.ts
+      # O5 prerequisite P0a -- manual Goal provenance parity: the manual and
+      # automatic entry paths share ONE canonical identity and receive
+      # identical facts (permanent source-path-privilege guard), plus its
+      # architecture guard.
+      - name: Run manual Goal provenance parity test
+        run: npx ts-node test/manualGoalProvenanceParity.test.ts
+      - name: Run manual Goal provenance parity architecture test
+        run: npx ts-node test/manualGoalProvenanceParityArchitecture.test.ts
+      # O5 prerequisite P0b -- opportunity fact quality: the horizon's first
+      # day reported apart from the days after it (exhaustive partition
+      # sweep, scenario matrix, DST, blockers) and its architecture guard.
+      - name: Run opportunity fact quality test
+        run: npx ts-node test/opportunityFactQuality.test.ts
+      - name: Run opportunity fact quality architecture test
+        run: npx ts-node test/opportunityFactQualityArchitecture.test.ts
+      # Goal lifecycle authorization -- archived-Goal acceptance guard:
+      # the single common, batched, locking, current-state boundary and the
+      # absence of any path-specific bypass or client Goal-status claim.
+      - name: Run Goal lifecycle authorization architecture test
+        run: npx ts-node test/goalLifecycleAuthorizationArchitecture.test.ts
+      # O5 prerequisite P0c -- real overload decision fixture guard: pins the
+      # CURRENT decision ordering and proves no policy, score, source branch
+      # or fact consumption exists in any decision module.
+      - name: Run Constructor overload decision architecture test
+        run: npx ts-node test/dayConstructorOverloadDecisionArchitecture.test.ts
+      # O5 P1 -- pre-Constructor decision fact preparation: facts are
+      # prepared once, before the Constructor, kept outside its input,
+      # attached unchanged afterwards, and never read by any decision module.
+      - name: Run decision fact preparation architecture test
+        run: npx ts-node test/decisionFactPreparationArchitecture.test.ts
+      - name: Run decision fact preparation behavior test
+        run: npx ts-node test/decisionFactPreparation.test.ts
+      # Constructor Decision Intelligence O5 P2a -- immutable DecisionEvidence:
+      # behavior (frozen, by-value, built once, inert) and its architecture guard.
+      - name: Run decision evidence test
+        run: npx ts-node test/decisionEvidence.test.ts
+      - name: Run decision evidence architecture test
+        run: npx ts-node test/decisionEvidenceArchitecture.test.ts
+      # Constructor Decision Intelligence O5 P2b -- pure Decision Pressure derivation:
+      # the semantic matrix and its architecture guard (unwired, evidence-only).
+      - name: Run decision pressure test
+        run: npx ts-node test/decisionPressure.test.ts
+      - name: Run decision pressure architecture test
+        run: npx ts-node test/decisionPressureArchitecture.test.ts
+      # Constructor Decision Intelligence O5 P2c -- Decision Pressure AUTHORITY (the
+      # facts -> evidence -> pressure chain, exact reader allowlists, single derivation
+      # authority, inertness) and duration-source / catalog REACHABILITY through the real
+      # orchestrator. Evidence for P3 shadow only; says nothing about active policy.
+      - name: Run decision pressure authority test
+        run: npx ts-node test/decisionPressureAuthority.test.ts
+      - name: Run decision pressure catalog reachability test
+        run: npx ts-node test/decisionPressureCatalogReachability.test.ts
+      # Constructor Decision Intelligence O5 P3a -- the inert CONTENTION TRACE: which candidate's
+      # attempted interval lost to an interval already owned by a Proposed candidate, accumulated
+      # across Constructor rounds. Behavior (pure Constructor + orchestrator) and architecture guard.
+      - name: Run contention trace test
+        run: npx ts-node test/contentionTrace.test.ts
+      - name: Run contention trace architecture test
+        run: npx ts-node test/contentionTraceArchitecture.test.ts
+      # O5 P3a observer isolation -- observation has no authority over construction: no caller
+      # observer / sink can be supplied to the Constructor, and a returned trace is detached,
+      # frozen and independently owned from the Constructor result.
+      - name: Run contention observer isolation test
+        run: npx ts-node test/contentionObserverIsolation.test.ts
+      # Constructor Decision Intelligence O5 P3b -- the inert SHADOW PRESSURE stage: derived pressure + the
+      # P3a contention trace + the final result, classified per Deferred loser against the dimensions that
+      # already outrank pressure. Observation only; says nothing about who should win and authorizes no policy.
+      - name: Run shadow pressure evaluation test
+        run: npx ts-node test/shadowPressureEvaluation.test.ts
+      - name: Run shadow pressure architecture test
+        run: npx ts-node test/shadowPressureArchitecture.test.ts
+      # Constructor Decision Intelligence O5 P2d -- every database-derived decision-evidence input is read once, in
+      # one REPEATABLE READ transaction, into a detached deep-frozen context; CPU projection follows the transaction.
+      - name: Run decision scheduling context test
+        run: npx ts-node test/decisionSchedulingContext.test.ts
+      - name: Run decision scheduling context architecture test
+        run: npx ts-node test/decisionSchedulingContextArchitecture.test.ts
+      # Constructor Decision Intelligence O5 P4a -- the typed, immutable PromotionInput: permission for a pressured, finally
+      # Deferred candidate to enter a FUTURE promotion policy against its final contention owners. Inert; consumed by nothing.
+      - name: Run promotion input test
+        run: npx ts-node test/promotionInput.test.ts
+      - name: Run promotion input architecture test
+        run: npx ts-node test/promotionInputArchitecture.test.ts
+      # O5 pre-P4b counterfactual safety prerequisites: (1) a stronger FLEXIBLE candidate that loses to a weaker FIXED
+      # owner through the real FIXED reservation is a PRECEDENCE_ANOMALY and never becomes a PromotionInput; (2) the
+      # audited scheduling path contains no Date mutator that could rewrite aliased baseline Dates in a future second pass.
+      - name: Run precedence anomaly real-pipeline test
+        run: npx ts-node test/precedenceAnomalyRealPipeline.test.ts
+      - name: Run scheduling Date mutator architecture test
+        run: npx ts-node test/schedulingDateMutatorArchitecture.test.ts
+      # O5 P4b1 -- the immutable ConstructionBasis: the detached, deeply frozen scheduling authority of one baseline run (initial AND
+      # final candidate lists, blockers, FIXED authority, window), captured inside the orchestration with no second search,
+      # Constructor pass or clock read. Inert; consumed by nothing.
+      - name: Run construction basis test
+        run: npx ts-node test/constructionBasis.test.ts
+      - name: Run construction basis architecture test
+        run: npx ts-node test/constructionBasisArchitecture.test.ts
+      # O5 P4b1b -- the immutable BaselinePlacements: the baseline OUTCOME authority (the exact Proposed placements the same run chose),
+      # captured from the terminal result.day, validated against the same run's ConstructionBasis, separate from it. Inert; consumed by nothing.
+      - name: Run baseline placements test
+        run: npx ts-node test/baselinePlacements.test.ts
+      - name: Run baseline placements architecture test
+        run: npx ts-node test/baselinePlacementsArchitecture.test.ts
+      # O5 P4b2a -- the immutable PromotionContentionAuthority: the exact intervals a pressured Deferred candidate attempted and lost to the owners its
+      # PromotionInput authorizes, projected from the same run's P3a events (event authority, not candidate-list history). Inert; consumed by nothing.
+      - name: Run promotion contention authority test
+        run: npx ts-node test/promotionContentionAuthority.test.ts
+      - name: Run promotion contention authority architecture test
+        run: npx ts-node test/promotionContentionAuthorityArchitecture.test.ts
+      # O5 P4b2b -- the immutable SchedulingAttemptAuthority: P3a's attempt events (now carrying the attempting candidate's own descriptive timing fit)
+      # normalized once into typed attempts for P AND for the owners it may displace; typed promotion pairs; run-level basis / placements / attempts from one
+      # orchestration. Event authority, not candidate-list history. Inert; consumed by nothing.
+      - name: Run scheduling attempt authority test
+        run: npx ts-node test/schedulingAttemptAuthority.test.ts
+      - name: Run scheduling attempt authority architecture test
+        run: npx ts-node test/schedulingAttemptAuthorityArchitecture.test.ts
+      # O5 P4b2 -- the pure scope-isolated LOCAL COUNTERFACTUAL GENERATOR: one same-run promotion pair -> what mechanically happens if the candidate is tried in
+      # one of its real historical contention slots with every unrelated baseline placement pinned. Mechanical and neutral (no acceptance / safety policy -- P4b3).
+      # The gate-parity suite compares its minimal local gates with the REAL Constructor (test oracle only). Inert; consumed by nothing.
+      - name: Run local counterfactual test
+        run: npx ts-node test/localCounterfactual.test.ts
+      - name: Run local counterfactual gate parity test
+        run: npx ts-node test/localCounterfactualGateParity.test.ts
+      - name: Run local counterfactual architecture test
+        run: npx ts-node test/localCounterfactualArchitecture.test.ts
+      # O5 P4b3 -- the pure COUNTERFACTUAL ACCEPTANCE PREDICATE: may Aura prefer the P4b2 mechanical counterfactual over the baseline under the V1 safety
+      # policy (FIXED / non-owner unchanged, tie recheck, owner loss, owner timing floor)? ACCEPT | REJECT | UNAVAILABLE for one immutable pair; no
+      # regeneration, no pressure read (NONE is never "safe"). Inert; consumed by nothing.
+      - name: Run counterfactual acceptance test
+        run: npx ts-node test/counterfactualAcceptance.test.ts
+      - name: Run counterfactual acceptance architecture test
+        run: npx ts-node test/counterfactualAcceptanceArchitecture.test.ts
+      # O5 P4b4 -- the SAME-RUN SHADOW POLICY COMPOSITION: ONE orchestration -> per PromotionInput the P4b2 generator -> the P4b3 predicate, as frozen diagnostic
+      # observations (GENERATION_UNAVAILABLE / ACCEPTANCE_UNAVAILABLE / REJECT / ACCEPT, exact source reasons). Same-run by construction (the seam takes only request +
+      # deps); decides nothing, changes nothing, wired nowhere. Also carries the committed P4b3 timing-floor grid. Inert; consumed by nothing.
+      - name: Run shadow policy observation test
+        run: npx ts-node test/shadowPolicyObservation.test.ts
+      - name: Run shadow policy observation architecture test
+        run: npx ts-node test/shadowPolicyObservationArchitecture.test.ts
+      # O5 P4c3 -- the PURE ACTIVE RESULT MATERIALIZER (inert): the typed same-run accepted-counterfactual authority (minted only by a P4b3 ACCEPT), the V1
+      # selector (APPLY iff exactly one ACCEPT in a complete observation set), the materializability gate (P the only Deferred / conflict, else fail closed) and
+      # the materializer (the authoritative READY result from the baseline + basis + authority, no second Constructor). Nothing consumes it; no ACTIVE mode.
+      - name: Run active result materializer test
+        run: npx ts-node test/activeResultMaterializer.test.ts
+      - name: Run active result materializer architecture test
+        run: npx ts-node test/activeResultMaterializerArchitecture.test.ts
+      # O5 P4b5 -- the SHADOW EXECUTION & OBSERVATION BOUNDARY: OFF by default, server-controlled (AURA_SHADOW_POLICY_MODE, exactly SHADOW), no ACTIVE. In SHADOW the Plan Day
+      # preview's ONE orchestration runs through the P4b4 composition instead of the plain call (never in addition); every shadow failure is isolated; only a minimal
+      # aggregate metrics record (closed categories and counts, no identifiers / text / instants / placements) leaves, through a one-way synchronous sink.
+      - name: Run shadow policy execution test
+        run: npx ts-node test/shadowPolicyExecution.test.ts
+      - name: Run shadow policy execution architecture test
+        run: npx ts-node test/shadowPolicyExecutionArchitecture.test.ts
+      # O5 SHADOW EVIDENCE OBSERVABILITY -- per-run aggregate evidence in SHADOW only: positive pressure / real contention funnel counts (bucketed), and what the REAL
+      # P4c1 selector, P4c2a gate, P4c3 materializer and an invariant verifier WOULD have done on the same run (the materialized result is discarded; the baseline is
+      # returned). Bounded categories only, no identifiers, no ACTIVE, no second Constructor / search / query, no persistence.
+      - name: Run shadow evidence test
+        run: npx ts-node test/shadowEvidence.test.ts
+      - name: Run shadow evidence architecture test
+        run: npx ts-node test/shadowEvidenceArchitecture.test.ts
+      # O5 SHADOW ROLLOUT R3 -- the Preview-only manual review harness: an authorized internal tester can see, in the SAME request/response, what
+      # the real P4c1/P4c2a/P4c3/invariant pipeline WOULD have built, only when the server's own VERCEL_ENV says this is not Production AND the
+      # run reaches selector=APPLY/gate=MATERIALIZABLE/materializer=READY/invariant=PASS. Ephemeral (no storage), not independently acceptable
+      # (no token), never alters the baseline, never changes the aggregate log line.
+      - name: Run shadow review delta test
+        run: npx ts-node test/shadowReviewDelta.test.ts
+      - name: Run shadow review delta architecture test
+        run: npx ts-node test/shadowReviewDeltaArchitecture.test.ts
+      - name: Run shadow rollout R3 preview review test
+        run: npx ts-node test/shadowRolloutR3PreviewReview.test.ts
+      - name: Run shadow rollout R3 architecture test
+        run: npx ts-node test/shadowRolloutR3Architecture.test.ts
+      # O5 P4b5 -- engine-independent seeded fixtures: the incidence sweeps no longer use a random sort comparator (whose order depended on the engine's sort
+      # algorithm, so Node 20 CI and a newer local Node generated different fixtures from the same seed). This narrow test proves the root cause and the fix
+      # and forbids the pattern; the incidence suites pin exact authoritative counts, so any engine difference fails here on Node 20.
+      - name: Run seeded fixture reproducibility test
+        run: npx ts-node test/seededFixtureReproducibility.test.ts
+      # Constructor scheduling correctness -- the target-day blocker load
+      # uses half-open OVERLAP semantics (a plan that starts before the day
+      # but runs into it must block), through the one shared definition.
+      - name: Run Constructor blocker overlap architecture test
+        run: npx ts-node test/dayConstructorBlockerOverlapArchitecture.test.ts
+      # CI reliability -- the automatic Goal lifecycle DB fixture's calendar is ANCHORED to a future Monday (a hard-coded week rotted on 2026-10-06 when production's
+      # stale-preview / move-destination checks, which read the real clocks, began refusing its now-past days). This pure suite proves the anchor over every simulated
+      # run date and keeps the DB fixture free of hard-coded dates and uncontrolled clock reads.
+      - name: Run lifecycle fixture calendar test
+        run: npx ts-node test/lifecycleFixtureCalendar.test.ts
+      # Birth Data Correctness B2 -- the civil birth date is stored as an explicit UTC-midnight surrogate: the pure canonicalization, the three-writer guard and the
+      # read-only operator diagnostic's shape. (The DB timezone matrix runs in the Day Constructor acceptance DB job.)
+      - name: Run birth date canonicalization test
+        run: npx ts-node test/birthDateCanonicalization.test.ts
+      - name: Run Constructor blocker overlap behavior test
+        run: npx ts-node test/dayConstructorBlockerOverlap.test.ts
+      # Schedule write consistency S1 -- acceptance's fresh-blocker read uses the
+      # canonical overlap loader on its transaction client (no race-free claim).
+      - name: Run acceptance fresh-overlap architecture test
+        run: npx ts-node test/dayConstructorAcceptanceFreshOverlapArchitecture.test.ts
+      # Schedule write consistency S2 -- the manual plan writer takes the shared
+      # per-user lock in a transaction (serialization only; no overlap check).
+      - name: Run manual writer serialization architecture test
+        run: npx ts-node test/scheduleWriteManualSerializationArchitecture.test.ts
+      # Schedule write consistency S4 -- the Recomposition proposal loads plans and
+      # blockers with the canonical half-open overlap loader over the civil day.
+      - name: Run Recomposition proposal overlap architecture test
+        run: npx ts-node test/remainingDayRecompositionProposalOverlapArchitecture.test.ts
+      # Scheduling read authority R2 -- Forward Planner loads persisted-plan conflicts
+      # with the canonical overlap loader over the requested range and candidate extent.
+      - name: Run Forward Planner overlap blocker architecture test
+        run: npx ts-node test/forwardPlannerOverlapBlockerArchitecture.test.ts
   web-build:
     name: Next.js production build
     runs-on: ubuntu-latest
@@ -473,22 +665,19 @@ jobs:
         run: npx ts-node test/goalsReviewedCreateDb.test.ts
       - name: Run Goals create idempotency DB test
         run: npx ts-node test/goalsCreateIdempotencyDb.test.ts
-      # Goals -> Planning Integration V1 PR A/PR C -- live-database
-      # coverage for the original Goal creation/handoff flows.
+      # PR #181 reconciliation -- 13 previously-unexecuted, live-Postgres
+      # Goals test files, reusing this job's existing Postgres service and
+      # migration-deploy step rather than a new dedicated job.
       - name: Run Goals DB test
         run: npx ts-node test/goalsDb.test.ts
       - name: Run Goal planning handoff DB test
         run: npx ts-node test/goalPlanningHandoffDb.test.ts
-      # Goals V2 G2.2.1/G2.2.2/G2.2.3 -- GoalActivityExecution
-      # persistence, completion, and Move continuity.
       - name: Run Goal activity execution DB test
         run: npx ts-node test/goalActivityExecutionDb.test.ts
       - name: Run Goal activity execution completion DB test
         run: npx ts-node test/goalActivityExecutionCompletionDb.test.ts
       - name: Run Goal activity execution Move continuity DB test
         run: npx ts-node test/goalActivityExecutionMoveContinuityDb.test.ts
-      # Goals V2 Rhythm R1-R5 -- GoalActivityOccurrence/GoalActivityRhythm
-      # persistence, materialization, Goal Detail display, and setup.
       - name: Run Goal activity occurrence DB test
         run: npx ts-node test/goalActivityOccurrenceDb.test.ts
       - name: Run Goal activity rhythm DB test
@@ -499,12 +688,115 @@ jobs:
         run: npx ts-node test/goalActivityRhythmGoalDetailDb.test.ts
       - name: Run Goal activity rhythm setup DB test
         run: npx ts-node test/goalActivityRhythmSetupDb.test.ts
-      # Goals V2 G3.1/G3.4/G3.5 -- Goal progress context, template
-      # completion, and goal-aware Recomposition, each against a real
-      # Postgres database.
       - name: Run Goal context DB test
         run: npx ts-node test/goalContextDb.test.ts
       - name: Run Goal template completion DB test
         run: npx ts-node test/goalTemplateCompletionDb.test.ts
       - name: Run Goal-aware Recomposition presentation DB test
         run: npx ts-node test/goalAwareRecompositionPresentationDb.test.ts
+      # Goals V2 Candidate B5 -- composed B1->B2->B3->B3.1->Candidate A->
+      # planning lifecycle closure. Needs the jsx-enabled compiler option
+      # because it imports goalActivityProposal.ts (same reason as the
+      # Goal activity proposal / Goal decomposition observability tests).
+      - name: Run Goal decomposition planning handoff DB test
+        env:
+          TS_NODE_COMPILER_OPTIONS: '{"jsx":"react"}'
+        run: npx ts-node test/goalDecompositionPlanningHandoffDb.test.ts
+      # CI reliability -- Goal-create idempotent replay ordering: the activity order is
+      # durable (strictly increasing createdAt) and the load is a total order, so an
+      # identical replay never conflicts under any query plan or physical row order.
+      - name: Run Goal create replay ordering DB test
+        run: npx ts-node test/goalCreateReplayOrderingDb.test.ts
+      # Constructor Decision Intelligence -- Decision Facts V1 (architecture
+      # foundation slice). No jsx needed: this test imports dayConstructor.ts/
+      # dayConstructorOrchestrator.ts/goalDemandCandidates.ts directly, none
+      # of which touch a 'use client' component type.
+      - name: Run Decision Facts V1 threading DB test
+        run: npx ts-node test/decisionFactsThreadingDb.test.ts
+      # Opportunity Scarcity V1 -- O2: real user-scoped wiring + the overlap
+      # query against a live database.
+      - name: Run opportunity range adapter DB test
+        run: npx ts-node test/opportunityRangeAdapterDb.test.ts
+      # Opportunity Scarcity V1 -- O4: the real chain (Rhythm facts -> period
+      # bounds -> range data -> projection -> decision facts) through the
+      # real preview boundary against a live database.
+      - name: Run opportunity decision facts DB test
+        run: npx ts-node test/opportunityDecisionFactsDb.test.ts
+      # O5 prerequisite P0a -- the real manual/automatic parity lifecycle:
+      # identical facts, acceptance, idempotency, no duplicate occurrence in
+      # either order, cross-user and forged-input isolation.
+      - name: Run manual Goal provenance parity DB test
+        run: npx ts-node test/manualGoalProvenanceParityDb.test.ts
+      # O5 prerequisite P0b -- the new first-day / after-first-day facts
+      # through the real chain (real data -> O2 -> O1 -> O4 -> preview).
+      - name: Run opportunity fact quality DB test
+        run: npx ts-node test/opportunityFactQualityDb.test.ts
+      # Goal lifecycle authorization -- archived-Goal acceptance guard against
+      # a live database (preview -> archive -> accept for every entry path,
+      # replay, mixed requests, controls, and a real concurrent-archive race).
+      - name: Run Goal lifecycle archived-acceptance DB test
+        run: npx ts-node test/goalLifecycleArchivedAcceptanceDb.test.ts
+      # O5 prerequisite P0c -- the behavioral anchor for future decision
+      # policy: a real-DB, real-pipeline overload contest (characterization).
+      - name: Run Constructor overload decision DB test
+        run: npx ts-node test/dayConstructorOverloadDecisionDb.test.ts
+      # O5 P1 -- real-DB proof that facts are prepared before construction,
+      # attached unchanged afterwards, inert, and load-bounded.
+      - name: Run decision fact preparation DB test
+        run: npx ts-node test/decisionFactPreparationDb.test.ts
+      # Constructor Decision Intelligence O5 P2a -- real-DB proof that evidence is built
+      # once per fact-bearing candidate, adds no queries, and leaves the signed preview identical.
+      - name: Run decision evidence DB test
+        run: npx ts-node test/decisionEvidenceDb.test.ts
+      # Constructor Decision Intelligence O5 P2b -- real-DB proof that real evidence
+      # classifies correctly and identically for canonical manual and automatic entry.
+      - name: Run decision pressure DB test
+        run: npx ts-node test/decisionPressureDb.test.ts
+      # Constructor Decision Intelligence O5 P2c -- real-DB proof of which duration sources
+      # (explicit, stored preference, behavioral, catalog default) actually reach RESOLVED
+      # evidence for canonical Goal demand, identically for manual and automatic entry.
+      - name: Run decision pressure reachability DB test
+        run: npx ts-node test/decisionPressureReachabilityDb.test.ts
+      # Constructor Decision Intelligence O5 P2d -- real-DB concurrency proof (explicit barriers, no sleeps) that
+      # the evidence inputs come from ONE REPEATABLE READ snapshot, where independent reads observed mixed states.
+      - name: Run decision scheduling snapshot DB test
+        run: npx ts-node test/decisionSchedulingSnapshotDb.test.ts
+      # Constructor Decision Intelligence O5 P4b5 -- real-DB OFF vs SHADOW parity through the PRODUCTION snapshot wiring: identical status, body, signatures, exact SQL statement
+      # sequence (no extra query, no second snapshot, no write, no transaction), snapshot loaded once, domain rows unchanged; the shadow executes over real pressure and contention.
+      - name: Run shadow policy execution DB test
+        run: npx ts-node test/shadowPolicyExecutionDb.test.ts
+      # O5 P4c3 -- the pure active result materializer over REAL Goal-occurrence data through the production preview boundary: a real P4b3 ACCEPT is selected and materialized,
+      # every materialized result satisfies the property oracle, the selector and materializer send zero SQL, the baseline response and domain rows are unchanged, and the
+      # signed result passes the existing acceptance validation. Inert: nothing consumes the materialized result.
+      - name: Run active result materializer DB test
+        run: npx ts-node test/activeResultMaterializerDb.test.ts
+      # O5 SHADOW ROLLOUT R3 -- the Preview-only manual review harness over REAL Goal-occurrence data: the directed real ACCEPT reaches
+      # APPLY/MATERIALIZABLE/READY/PASS and the response carries a review payload with zero extra writes and the identical SQL sequence
+      # to the plain preview; Production (reviewEligible=false) on the SAME run carries no review field; the review alternative is
+      # rejected by the real route-level signature gate; normal baseline acceptance persists exactly as before.
+      - name: Run shadow rollout R3 preview review DB test
+        run: npx ts-node test/shadowRolloutR3PreviewReviewDb.test.ts
+      # Birth Data Correctness B2 -- the three birth-date writers are invariant to the PostgreSQL session TimeZone and the process TZ: stored surrogate, round trip, natal context,
+      # the REAL timing search / constructed day identical across 5 database timezones; UTC parity for every date 1900-2100; the read-only diagnostic. Synthetic users only.
+      - name: Run birth date writers DB test
+        run: npx ts-node test/birthDateWritersDb.test.ts
+      # Constructor scheduling correctness -- real-DB regression for the
+      # overnight/multi-day overlapping plan blocker defect.
+      - name: Run Constructor overlapping blocker DB test
+        run: npx ts-node test/dayConstructorOverlappingBlockerDb.test.ts
+      # Schedule write consistency S1 -- real-DB regression for acceptance's
+      # authoritative overlap read (in-progress / overnight blockers).
+      - name: Run acceptance fresh-overlap DB test
+        run: npx ts-node test/dayConstructorAcceptanceFreshOverlapDb.test.ts
+      # Schedule write consistency S2 -- real-DB concurrency proof through the real
+      # POST /api/plans route (acceptance, Move and manual writers serialize).
+      - name: Run manual writer serialization DB test
+        run: npx ts-node test/scheduleWriteManualSerializationDb.test.ts
+      # Schedule write consistency S4 -- real-DB proof through the real proposal path
+      # (explicit clock) that an overnight / prior-start plan blocks a Recomposition proposal.
+      - name: Run Recomposition proposal overlap DB test
+        run: npx ts-node test/remainingDayRecompositionProposalOverlapDb.test.ts
+      # Scheduling read authority R2 -- real-DB proof through the real
+      # buildForwardPlannerResult that a prior-start UPCOMING plan blocks a candidate.
+      - name: Run Forward Planner overlap blocker DB test
+        run: npx ts-node test/forwardPlannerOverlapBlockerDb.test.ts

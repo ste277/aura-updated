@@ -31,7 +31,7 @@ const migSql = migration.split('\n').filter((l) => !l.trim().startsWith('--')).j
 check('migration creates only the Capture table + index', /CREATE TABLE "Capture"/.test(migSql) && (migSql.match(/CREATE TABLE/g) ?? []).length === 1 && !/ALTER TABLE/.test(migSql));
 check('migration FKs: User ON DELETE CASCADE, PlannedActivity ON DELETE SET NULL, plannedActivityId UNIQUE', /"userId" TEXT NOT NULL REFERENCES "User"\(id\) ON DELETE CASCADE/.test(migSql) && /"plannedActivityId" TEXT UNIQUE REFERENCES "PlannedActivity"\(id\) ON DELETE SET NULL/.test(migSql));
 check('migration index is (userId, status, createdAt)', /CREATE INDEX "Capture_userId_status_createdAt_idx" ON "Capture"\("userId", status, "createdAt"\)/.test(migSql));
-check('migration count is exactly 38 (0037 Skip C1 + 0038 Move D2 + 0039 scheduling mode F1 + 0040/0041 Goals V2 G2.1/G2.2.1)', fs.readdirSync(path.join(__dirname, '../apps/web/prisma/migrations')).filter((f) => /^\d{4}_/.test(f)).length === 43);
+check('0036_captures is the ONLY migration that ever creates/alters the Capture table (code only, stripped of comments to avoid false positives from unrelated doc-comment prose -- count-independent)', fs.readdirSync(path.join(__dirname, '../apps/web/prisma/migrations')).filter((f) => /^\d{4}_/.test(f) && f !== '0036_captures').every((f) => !/"Capture"/.test(fs.readFileSync(path.join(__dirname, '../apps/web/prisma/migrations', f, 'migration.sql'), 'utf8').replace(/--.*$/gm, ''))));
 const goalActivityBlock = (schema.match(/model GoalActivity \{[\s\S]*?\n\}/) ?? [''])[0];
 check('GoalActivity and Habit blocks do not mention Capture', !/Capture/.test(goalActivityBlock) && !/Capture/.test((schema.match(/model Habit \{[\s\S]*?\n\}/) ?? [''])[0]));
 

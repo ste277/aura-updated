@@ -160,7 +160,7 @@ export type RemainingDayRecompositionResult =
   | { status: 'TIMING_FAILED'; reason: string };
 
 export interface RecompositionDeps extends Omit<DayConstructorOrchestratorDeps, 'loadBlockingPlans'> {
-  /** Every plan of the local day EXCEPT cancelled ones (`listPlannedActivitiesForDay`): read once per run. */
+  /** Every non-cancelled plan whose interval OVERLAPS the local day `[from, to)` -- including one that started before the day and is still running into it (`listPlannedActivitiesOverlappingRange`): read once per run. It feeds both classification and the Constructor's blockers. */
   loadPlansForDay: (bounds: { from: Date; to: Date }) => Promise<PlannedActivity[]>;
   /** Ids (among those given) that have an ACTIVE, unexpired AuraMoment linked -- the existing Move restriction. */
   loadPlanIdsWithActiveMoment: (planIds: string[], now: Date) => Promise<ReadonlySet<string>>;

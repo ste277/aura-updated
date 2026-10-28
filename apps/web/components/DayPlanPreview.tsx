@@ -18,6 +18,7 @@ import {
   flexibilityForIntentId,
   classifyProposalSummary,
   presentDeferredProvenance,
+  type WarningPresentation,
 } from '../lib/dayPlanPreviewPresentation';
 import { formatActivityDuration } from '../lib/activityDuration';
 import { hasSubmittableProposal, type DayPlanAcceptanceUiState } from '../lib/dayPlanAcceptancePresentation';
@@ -109,7 +110,7 @@ export function DayPlanPreview({ preview, onContinue, onDiscard, actionState, on
         {summaryState === 'HAS_ITEMS' && (
           <div style={{ display: 'flex', flexDirection: 'column', gap: spacing.sm }}>
             {sortedProposed.map((item) => (
-              <ProposedItemRow key={item.intentId} item={item} timezone={timezone} warningTexts={warningsByIntentId[item.intentId] ?? []} />
+              <ProposedItemRow key={item.intentId} item={item} timezone={timezone} warnings={warningsByIntentId[item.intentId] ?? []} />
             ))}
           </div>
         )}
@@ -127,7 +128,7 @@ export function DayPlanPreview({ preview, onContinue, onDiscard, actionState, on
                 title={titleForIntentId(resolvedIntents, item.intentId)}
                 flexibility={flexibilityForIntentId(resolvedIntents, item.intentId)}
                 provenanceTexts={presentDeferredProvenance(resolvedIntents, item.intentId, targetDate)}
-                warningTexts={warningsByIntentId[item.intentId] ?? []}
+                warnings={warningsByIntentId[item.intentId] ?? []}
               />
             ))}
           </div>
@@ -178,9 +179,17 @@ export function DayPlanPreview({ preview, onContinue, onDiscard, actionState, on
   );
 }
 
-function ProposedItemRow({ item, timezone, warningTexts }: { item: ProposedItem; timezone: string; warningTexts: string[] }) {
+function ProposedItemRow({ item, timezone, warnings }: { item: ProposedItem; timezone: string; warnings: WarningPresentation[] }) {
   const durationMinutes = Math.round((item.end.getTime() - item.start.getTime()) / 60000);
   const timingFit = item.placementSource === 'SELECTED_CANDIDATE' && item.timingFit ? presentTimingFit(item.timingFit) : null;
+  // DR4-A -- Daily Rhythm's personal-fit explanation gets its own line,
+  // separate from the timing-quality badge and every other warning
+  // (duration estimates, activity-interpretation notes), so a user can
+  // tell "why Aura picked THIS time for your schedule" apart from an
+  // unrelated caveat. Same `typography.caption` size as before -- only
+  // the color/weight/placement change, no new badge.
+  const generalTexts = warnings.filter((w) => w.kind === 'GENERAL').map((w) => w.text);
+  const dailyRhythmTexts = warnings.filter((w) => w.kind === 'DAILY_RHYTHM').map((w) => w.text);
 
   return (
     <SurfaceCard>
@@ -194,21 +203,35 @@ function ProposedItemRow({ item, timezone, warningTexts }: { item: ProposedItem;
           <div style={{ ...typography.caption, marginTop: 2 }}>{formatActivityDuration({ durationMinutes })}</div>
         </div>
       </div>
-      {(timingFit || warningTexts.length > 0) && (
+      {(timingFit || generalTexts.length > 0) && (
         <div style={{ display: 'flex', alignItems: 'center', gap: spacing.sm, flexWrap: 'wrap', marginTop: spacing.sm }}>
           {timingFit && <StatusBadge label={timingFit.label} tone={timingFit.tone as StatusTone} />}
-          {warningTexts.map((text, index) => (
+          {generalTexts.map((text, index) => (
             <span key={index} style={{ ...typography.caption, color: colors.textMuted }}>
               {text}
             </span>
           ))}
         </div>
       )}
+      {dailyRhythmTexts.map((text, index) => (
+        <div key={index} style={{ ...typography.caption, color: colors.textSecondary, fontWeight: 700, marginTop: spacing.xs }}>
+          <span aria-hidden="true">✦ </span>
+          {text}
+        </div>
+      ))}
     </SurfaceCard>
   );
 }
 
-function DeferredItemRow({ item, title, flexibility, provenanceTexts, warningTexts }: { item: DeferredItem; title: string; flexibility: DayIntentFlexibility; provenanceTexts: string[]; warningTexts: string[] }) {
+function DeferredItemRow({ item, title, flexibility, provenanceTexts, warnings }: { item: DeferredItem; title: string; flexibility: DayIntentFlexibility; provenanceTexts: string[]; warnings: WarningPresentation[] }) {
+  // DR4-A -- same GENERAL/DAILY_RHYTHM split as ProposedItemRow, for
+  // consistency; in practice a deferred (never-placed) item never carries
+  // a DAILY_RHYTHM-kind warning today (explainDailyRhythmPlacement is
+  // only ever evaluated for a settled, placed item), but this row stays
+  // correct rather than assuming that will always hold.
+  const generalTexts = warnings.filter((w) => w.kind === 'GENERAL').map((w) => w.text);
+  const dailyRhythmTexts = warnings.filter((w) => w.kind === 'DAILY_RHYTHM').map((w) => w.text);
+
   return (
     <SurfaceCard style={{ opacity: 0.8 }}>
       <div style={{ display: 'flex', alignItems: 'flex-start', gap: spacing.md }}>
@@ -224,8 +247,14 @@ function DeferredItemRow({ item, title, flexibility, provenanceTexts, warningTex
               exists on ProposedItemRow nowhere in this file. */}
           {provenanceTexts.length > 0 && <div style={{ ...typography.caption, color: colors.textMuted, marginTop: 2 }}>{provenanceTexts.join(' · ')}</div>}
           <div style={{ ...typography.meta, marginTop: spacing.xs }}>{presentDeferralReason(item.primaryReason, flexibility)}</div>
-          {warningTexts.map((text, index) => (
+          {generalTexts.map((text, index) => (
             <div key={index} style={{ ...typography.caption, color: colors.textMuted, marginTop: 2 }}>
+              {text}
+            </div>
+          ))}
+          {dailyRhythmTexts.map((text, index) => (
+            <div key={index} style={{ ...typography.caption, color: colors.textSecondary, fontWeight: 700, marginTop: 2 }}>
+              <span aria-hidden="true">✦ </span>
               {text}
             </div>
           ))}

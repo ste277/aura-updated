@@ -44,11 +44,20 @@ import type { PlannedActivity } from '../lib/db';
 import { RecompositionCard } from './RecompositionCard';
 import { createRecompositionStore, initialRecompositionState, shouldOfferRecomposition, withConfirmedMoves, withMovedSources, type ConfirmedMove, type RecompositionStore } from '../lib/homeRecomposition';
 import { formatGoalActivityCompletion } from '../lib/goalActivityExecution';
+import { DailyBriefingCard } from './DailyBriefingCard';
 
 /** Matches page.tsx's own FALLBACK_TZ -- defensive only, page.tsx always supplies a real value today. */
 const FALLBACK_HOME_TZ = 'Asia/Kolkata';
 
 interface HomeDashboardProps {
+  /** AURA DB2 -- namespaces the Personalized Daily Briefing's own
+   * per-user "already shown expanded today" localStorage key (see
+   * DailyBriefingCard.tsx / lib/dailyBriefingViewState.ts) so switching
+   * users on the same browser can never read or clobber another user's
+   * state. Optional/undefined simply defers that card's fetch until the
+   * real id is known (matching this file's own existing `user?.id`
+   * reset convention elsewhere in page.tsx). */
+  userId?: string;
   userName: string;
   energyScore: number;
   themeText: string;
@@ -100,7 +109,16 @@ interface HomeDashboardProps {
   ) => Promise<'confirmed' | 'pending'>;
   onSubmitReflection?: (outputLevel: 'LOW' | 'MODERATE' | 'PEAK_FLOW', followedGuidance: boolean) => Promise<void>;
   onNextShiftClick?: () => void;
-  onPlanClick?: (activity?: string) => void;
+  /** Cross-tab handoff (DR4-D follow-up) -- Ask Aura's "See all activities"
+   * (TODAY_GUIDANCE) and Plan with Aura's "View my day" both navigate to
+   * the Home tab first, then bump this key to scroll/focus the real
+   * HomeTimeline region once it has mounted, mirroring PlanWithAuraView's
+   * own focusMomentsKey/focusPlansKey convention. */
+  focusTimelineKey?: number;
+  /** HPG1 -- activityId is optional; passed only when the caller (e.g. a
+   * Good Right Now card) already has a genuine, resolved catalog id. Never
+   * inferred from `activity`'s text. */
+  onPlanClick?: (activity?: string, activityId?: string) => void;
   /** Day Constructor V1 -- PR F2. Navigates to the dedicated `/plan-day`
    * entry experience (this ticket's own section 6) -- distinct from
    * `onPlanClick` (Ask Aura, single-activity search/check) and Day
@@ -262,11 +280,18 @@ function greeting() {
   return 'Good Morning';
 }
 
-function formatUpdateDateTime(iso: string) {
+/** DR4-B.2 -- `timezone` is the effective IANA timezone the caller already
+ * resolved (HomeDashboard's own `effectiveTimezone`, same `timezone ??
+ * FALLBACK_HOME_TZ` convention this component already established --
+ * never a second, different fallback). `iso` is an absolute instant
+ * (Moment.eventStartAt); previously this formatted it with no `timeZone`
+ * at all, so both the day label and the time label silently used the
+ * BROWSER's own local timezone instead of the user's configured one. */
+function formatUpdateDateTime(iso: string, timezone: string) {
   const date = new Date(iso);
   return {
-    day: date.toLocaleDateString('en-US', { weekday: 'long', month: 'short', day: 'numeric' }),
-    time: date.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' }),
+    day: date.toLocaleDateString('en-US', { weekday: 'long', month: 'short', day: 'numeric', timeZone: timezone }),
+    time: date.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit', timeZone: timezone }),
   };
 }
 
@@ -321,6 +346,7 @@ export function selectGoodRightNowCards(
 }
 
 export function HomeDashboard({
+  userId,
   userName,
   energyScore,
   themeText,
@@ -335,6 +361,7 @@ export function HomeDashboard({
   onLogActivity,
   onSubmitReflection,
   onNextShiftClick,
+  focusTimelineKey,
   onPlanClick,
   onPlanDay,
   onInsightsClick,
@@ -398,6 +425,18 @@ export function HomeDashboard({
   }, [captureConfirmed]);
   const [planningOpportunityId, setPlanningOpportunityId] = useState<string | null>(null);
   const [opportunityError, setOpportunityError] = useState('');
+
+  // Cross-tab handoff target for focusTimelineKey above -- same
+  // requestAnimationFrame + scrollIntoView convention PlanWithAuraView's
+  // own focusMomentsKey/focusPlansKey effects already use.
+  useEffect(() => {
+    if (!focusTimelineKey) return;
+    requestAnimationFrame(() => {
+      const timelineRegion = document.querySelector<HTMLElement>('[data-home-timeline-region]');
+      timelineRegion?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+      timelineRegion?.focus({ preventScroll: true });
+    });
+  }, [focusTimelineKey]);
 
   useEffect(() => {
     setReflectionSaved(Boolean(todayReflection));
@@ -1050,6 +1089,16 @@ export function HomeDashboard({
       />
 
       {/* ============================================================
+       * PERSONALIZED DAILY BRIEFING (AURA DB2) -- explains the day's
+       * overall traditional astrological themes. Distinct from Right Now
+       * below (which remains the sole source of immediate timing/
+       * activity recommendations) -- this card never names a "best time"
+       * of its own, only traditional theme/career/finance/focus/caution
+       * framing, read verbatim from the DB1 engine's response.
+       * ============================================================ */}
+      <DailyBriefingCard userId={userId} timezone={effectiveTimezone} onOpenBirthProfile={onOpenBirthProfile} onPlanClick={onPlanClick} />
+
+      {/* ============================================================
        * RIGHT NOW
        * ============================================================ */}
       <SurfaceCard elevated accentColor={tone.color} padding={spacing.xxl}>
@@ -1225,7 +1274,7 @@ export function HomeDashboard({
           <div style={{ marginTop: spacing.xl, paddingTop: spacing.lg, borderTop: `1px solid ${colors.borderSubtle}` }}>
             {nextThing.kind === 'MOMENT_UPDATE' && (() => {
               const update = nextThing.update;
-              const { day, time } = formatUpdateDateTime(update.eventStartAt);
+              const { day, time } = formatUpdateDateTime(update.eventStartAt, effectiveTimezone);
               const isAccepted = update.type === 'MOMENT_ACCEPTED';
               return (
                 <div>
@@ -1249,7 +1298,7 @@ export function HomeDashboard({
                 </div>
               );
             })()}
-            {nextThing.kind === 'STARTING_SOON' && <StartingSoonCard reminder={nextThing.reminder} onOpen={onOpenReminder} />}
+            {nextThing.kind === 'STARTING_SOON' && <StartingSoonCard reminder={nextThing.reminder} onOpen={onOpenReminder} timezone={effectiveTimezone} />}
           </div>
         )}
       </SurfaceCard>
@@ -1466,10 +1515,18 @@ function AuraInsightIcon() {
   );
 }
 
-function StartingSoonCard({ reminder, onOpen }: { reminder: AuraReminder; onOpen?: (reminder: AuraReminder) => void }) {
+/** DR4-B.2 -- `timezone` is the caller's own already-resolved
+ * `effectiveTimezone` (HomeDashboard's `timezone ?? FALLBACK_HOME_TZ`),
+ * same convention `formatUpdateDateTime` above now uses, never a second,
+ * different fallback. `reminder.startAt`/`.endAt` are absolute instants;
+ * previously formatted with no `timeZone`, so this card silently used
+ * the BROWSER's own local timezone instead of the user's configured one
+ * -- the exact bug class DR4-B.1 already fixed in Find a Time. */
+function StartingSoonCard({ reminder, onOpen, timezone }: { reminder: AuraReminder; onOpen?: (reminder: AuraReminder) => void; timezone: string }) {
   const start = new Date(reminder.startAt);
   const end = new Date(reminder.endAt);
-  const timeRange = `${start.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' })} – ${end.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' })}`;
+  const timeOpts: Intl.DateTimeFormatOptions = { hour: 'numeric', minute: '2-digit', timeZone: timezone };
+  const timeRange = `${start.toLocaleTimeString('en-US', timeOpts)} – ${end.toLocaleTimeString('en-US', timeOpts)}`;
   const participantLine = reminder.participantDisplayName
     ? reminder.momentResponseState === 'ACCEPTED'
       ? `${reminder.participantDisplayName} confirmed`
@@ -1512,7 +1569,7 @@ function GoodRightNowCard({
   card: ActionCard;
   activeWindowName: string;
   onLogActivity?: HomeDashboardProps['onLogActivity'];
-  onPlanClick?: (activity?: string) => void;
+  onPlanClick?: (activity?: string, activityId?: string) => void;
   onLogged?: (title: string) => void;
   logEntries?: LoggedEntryItem[];
 }) {
@@ -1601,7 +1658,7 @@ function GoodRightNowCard({
       <span style={{ marginTop: 4, color: '#94a3b8', fontSize: 10.5, lineHeight: 1.35, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', width: '100%' }}>{card.description}</span>
       <div style={{ marginTop: 'auto', paddingTop: 8, width: '100%' }}>
         {action === 'PLAN' ? (
-          <button type="button" onClick={() => onPlanClick?.(planTitle)} style={goodRightNowActionButtonStyle} aria-label={`Plan ${planTitle}`}>
+          <button type="button" onClick={() => onPlanClick?.(planTitle, card.activityId)} style={goodRightNowActionButtonStyle} aria-label={`Plan ${planTitle}`}>
             Plan
           </button>
         ) : showDurationPicker ? (

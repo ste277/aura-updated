@@ -158,7 +158,7 @@ async function main() {
   check('no history/aggregate concept (executionHistory/weeklyTotal/allExecutions) anywhere in the Recomposition presentation stack', !/executionHistory|weeklyTotal|allExecutions/.test(srv + libSrc + cardSrc));
   check('no streak/score/gamification copy anywhere in the Recomposition presentation stack', !/\bstreak\b|gamif/i.test(srv + libSrc + cardSrc));
   check('no guilt/motivation copy was introduced ("keeps you on track"/"don\'t lose progress"/"stay committed"/"at risk")', !/keeps you on track|don't lose progress|stay committed|goal at risk/i.test(cardSrc + libSrc));
-  check('schema/migrations untouched: still 41 migrations', fs.readdirSync(path.join(__dirname, '..', 'apps', 'web', 'prisma', 'migrations')).filter((d) => /^\d{4}_/.test(d)).length === 43);
+  check('schema/migrations untouched by G3.5: no migration directory name mentions Goal-aware Recomposition\'s own vocabulary (count-independent -- holds regardless of how many unrelated migrations exist)', !fs.readdirSync(path.join(__dirname, '..', 'apps', 'web', 'prisma', 'migrations')).filter((d) => /^\d{4}_/.test(d)).some((d) => /recompos|goalAwareRecomposition/i.test(d)));
 
   if (!allPassed) {
     console.error('SOME GOAL-AWARE RECOMPOSITION PRESENTATION CHECKS FAILED');

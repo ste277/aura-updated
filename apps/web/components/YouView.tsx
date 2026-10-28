@@ -7,6 +7,7 @@ import { ReminderSettings } from './ReminderSettings';
 import { DayBuilderSettings } from './DayBuilderSettings';
 import { ActivityDurationPreferences } from './ActivityDurationPreferences';
 import { AvailabilitySettings } from './AvailabilitySettings';
+import { DailyRhythmSettings } from './DailyRhythmSettings';
 import type { NotificationPrefs } from '../lib/windowNotifications';
 import * as theme from './theme';
 import { colors, spacing, typography, radius } from './theme';
@@ -17,6 +18,22 @@ interface YouViewProps {
   email: string;
   cityName: string;
   timezone: string;
+  /** Location PR8 -- the same already-persisted coordinates `cityName`/
+   * `timezone` above come from, threaded down to LocationPicker so it can
+   * offer a direct "Confirm {cityName}" action. See LocationPicker's own
+   * prop doc comment for why these are optional/independently validated. */
+  latitude?: number | null;
+  longitude?: number | null;
+  /** Onboarding V1 PR 1 -- Location Trust Foundation. `false` means this
+   * location has never been explicitly confirmed -- surfaced as a plain
+   * "Not yet confirmed" qualifier on the existing Location & Time row,
+   * never a blocker, never implying the opposite. */
+  locationConfirmed: boolean;
+  /** Lets a caller (the global location-trust disclosure banner) open
+   * this view with the Location & Time panel already expanded, instead
+   * of landing on a collapsed settings list the user then has to find
+   * the right row in themselves. Read only on initial mount. */
+  initialOpenPanel?: 'location';
   notificationPrefs: NotificationPrefs;
   onNotificationPrefsChange: (next: NotificationPrefs) => void;
   /** Aura Reminders V1 (brief section 14/15). */
@@ -36,7 +53,7 @@ interface YouViewProps {
       dayBuilderPriorityPersonIds: string[];
     }>
   ) => void;
-  onLocationChanged: (city: { cityName: string; latitude: number; longitude: number; timezone: string }) => void;
+  onLocationChanged: (city: { cityName: string; latitude: number; longitude: number; timezone: string; locationConfirmedAt: string | null }) => void;
   onOpenHome: () => void;
   onOpenChart: () => void;
   onOpenActivityLog: () => void;
@@ -57,6 +74,10 @@ export function YouView({
   email,
   cityName,
   timezone,
+  latitude,
+  longitude,
+  locationConfirmed,
+  initialOpenPanel,
   notificationPrefs,
   onNotificationPrefsChange,
   remindersEnabled,
@@ -77,7 +98,7 @@ export function YouView({
 }: YouViewProps) {
   const [openSettingsPanel, setOpenSettingsPanel] = useState<
     'location' | 'calendar' | 'checkIn' | 'help' | 'about' | null
-  >(null);
+  >(initialOpenPanel ?? null);
   const [calendarCopyState, setCalendarCopyState] = useState<'idle' | 'copied' | 'failed'>('idle');
   const calendarFeedUrl = useMemo(() => {
     if (typeof window === 'undefined') return '/api/calendar/feed';
@@ -150,13 +171,19 @@ export function YouView({
       <div>
         <SectionHeader label="Planning" />
         <SurfaceCard padding={0} style={{ overflow: 'hidden' }}>
-          <SettingsRow icon="📍" title="Location & Time" detail={`${cityName} · ${timezone}`} expanded={openSettingsPanel === 'location'} onClick={() => toggleSettingsPanel('location')} />
+          <SettingsRow icon="📍" title="Location & Time" detail={locationConfirmed ? `${cityName} · ${timezone}` : `${cityName} · ${timezone} · Not yet confirmed`} expanded={openSettingsPanel === 'location'} onClick={() => toggleSettingsPanel('location')} />
           {openSettingsPanel === 'location' && (
             <div style={settingsPanelStyle}>
               <div style={{ color: colors.textSecondary, fontSize: 12, lineHeight: 1.45, marginBottom: 10 }}>
                 Your selected location determines Panchang windows, calendar feed timing, and daily suggestions.
               </div>
-              <LocationPicker currentCity={cityName} onChanged={onLocationChanged} />
+              <LocationPicker
+                currentCity={cityName}
+                currentLatitude={latitude}
+                currentLongitude={longitude}
+                currentTimezone={timezone}
+                onChanged={onLocationChanged}
+              />
             </div>
           )}
           <SettingsRow icon="📅" title="Calendar & Sync" detail="Aura plans + Panchang windows" expanded={openSettingsPanel === 'calendar'} onClick={() => toggleSettingsPanel('calendar')} />
@@ -214,6 +241,15 @@ export function YouView({
       <div>
         <SectionHeader label="Availability" />
         <AvailabilitySettings />
+      </div>
+
+      {/* Daily Rhythm V1 PR DR1 -- a self-contained panel (owns its own
+       * GET/PUT/DELETE), same pattern as Availability directly above.
+       * Deliberately placed inline in the existing Planning section, not
+       * a new navigation section. */}
+      <div>
+        <SectionHeader label="Daily Rhythm" />
+        <DailyRhythmSettings />
       </div>
 
       <div style={{ scrollMarginTop: 18 }}>

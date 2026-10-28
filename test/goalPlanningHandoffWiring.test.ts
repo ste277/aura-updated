@@ -104,7 +104,10 @@ function main() {
   const loopMatch = persistenceSource.match(/for \(const writeIntent of decision\.writeIntents\) \{[\s\S]*?\n    \}\n/);
   check('26. linkGoalActivityToPlannedActivity is called INSIDE the existing writeIntents loop (same transaction), not after COMMIT', loopMatch !== null && loopMatch[0].includes('linkGoalActivityToPlannedActivity(userId, goalActivityId, plan.id, client)'));
   check('26. the linkage call passes the SAME `client` the PlannedActivity insert itself used, never a fresh pool query', loopMatch !== null && /linkGoalActivityToPlannedActivity\([^)]*,\s*client\)/.test(loopMatch[0]));
-  check('27. a failed linkage throws (causing the existing outer catch/ROLLBACK to fire), never silently continues', loopMatch !== null && /if \(!linked\) \{[\s\S]*?throw new Error/.test(loopMatch[0]));
+  // HPG3-A3a -- the flat `new Error(...)` throw is now the typed
+  // goalActivityNotAvailableError() (apps/web/lib/schedulingEligibilityError.ts);
+  // still a throw, still fires the same outer catch/ROLLBACK.
+  check('27. a failed linkage throws (causing the existing outer catch/ROLLBACK to fire), never silently continues', loopMatch !== null && /if \(!linked\) \{[\s\S]*?throw /.test(loopMatch[0]));
 
   // ============================================================
   // No second Goal-linking code path anywhere (no separate route, no
@@ -134,7 +137,7 @@ function main() {
   // Goals V2 G2.2.1 added migration 0041_goal_activity_execution -- another
   // real, expected new Goal-domain migration (not a handoff/goal-link
   // migration, and not added by this PR), added to the known-good list.
-  check('39. 0035_goals is present and no handoff/goal-link migration was added by PR C', migrationDirs.includes('0035_goals') && !migrationDirs.some((d) => /handoff|goal.?link|goalactivity.?link/i.test(d)) && migrationDirs.filter((d) => d > '0035_goals').every((d) => d === '0036_captures' || d === '0037_planned_activity_skipped_at' || d === '0038_planned_activity_move_lineage' || d === '0039_planned_activity_scheduling_mode' || d === '0040_goal_activity_completion_requirement' || d === '0041_goal_activity_execution' || d === '0042_goal_activity_occurrence' || d === '0043_goal_activity_rhythm'));
+  check('39. 0035_goals is present and no handoff/goal-link migration was added by PR C (count-independent -- holds regardless of how many unrelated migrations exist)', migrationDirs.includes('0035_goals') && !migrationDirs.some((d) => /handoff|goal.?link|goalactivity.?link/i.test(d)));
   check('36. no Habit/HabitLog mention anywhere in the new handoff files', !/\bHabit\b/.test(read('../apps/web/lib/planDayBootstrap.ts')) && !/\bHabit\b/.test(planDayClientSource));
   const allHandoffSource = [read('../apps/web/lib/planDayEntry.ts'), read('../apps/web/lib/planDayBootstrap.ts'), read('../apps/web/lib/acceptConstructedDay.ts'), read('../apps/web/lib/dayConstructorAcceptancePersistence.ts'), read('../apps/web/lib/db.ts')].join('\n');
   check('34. no Capture/InboxItem/Intention/generic-Task model or import exists anywhere in the touched files', !/\bInboxItem\b|\bCaptureItem\b/.test(allHandoffSource));

@@ -1,0 +1,28 @@
+-- Onboarding V1 PR 1 -- Location Trust Foundation: a single, additive signal
+-- answering exactly one question -- "has this user ever taken an explicit,
+-- deliberate action confirming their current (non-birth) location?" -- so
+-- the app can stop silently presenting an unconfirmed default location
+-- (every new signup starts at a hardcoded Chennai placeholder,
+-- apps/web/lib/db.ts's DEFAULT_SIGNUP_LOCATION) as if it were verified.
+--
+-- NULL = never explicitly confirmed. Non-NULL = the exact instant of the
+-- most recent explicit confirmation (set only by a successful, validated
+-- PATCH /api/users/location call -- never by signup, a read, a background
+-- job, or timezone auto-detection; see apps/web/lib/db.ts's
+-- updateUserLocation).
+--
+-- ADDITIVE ONLY, NO BACKFILL: every existing row gets NULL (the column's
+-- own default) -- a true no-op data migration, zero UPDATE statements.
+-- This is deliberate, not an oversight: "Chennai" is itself one of the
+-- app's own curated catalog cities (apps/web/lib/cities.ts), so a real
+-- user who deliberately selected Chennai would produce the exact same
+-- cityName/latitude/longitude/timezone tuple as a user who never touched
+-- Settings at all -- these two cases are NOT distinguishable by value,
+-- only by provenance, and no provenance signal survives for existing rows
+-- today. Inferring confirmation from the current location value (Chennai
+-- or otherwise) would silently treat some existing users as verified
+-- without defensible evidence -- exactly what this column exists to stop
+-- doing. No existing coordinate/cityName/timezone value is touched by
+-- this migration.
+
+ALTER TABLE "User" ADD COLUMN "locationConfirmedAt" TIMESTAMPTZ(3);

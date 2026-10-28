@@ -25,13 +25,15 @@ import { isValidCalendarDateString } from '../../../packages/panchang/src/localD
 import { getDatePartsInTimezone } from './timezone';
 import { MAX_INTENT_ID_LENGTH } from './dayConstructorAcceptancePersistence';
 import {
-  orchestrateConstructDay,
+  type ConstructDayPreview,
   type ConstructDayRequest,
   type DayConstructorOrchestratorDeps,
   type RequestedDayIntent,
 } from './dayConstructorOrchestrator';
 import type { ConstructionWindowSource, DayIntentFlexibility, DayIntentImportance } from './dayIntent';
 import { signPreviewResultBody } from './dayConstructorPreviewIntegrity';
+import { orchestrateConstructDayWithShadowPolicy, type ShadowPolicyExecution } from './shadowPolicyExecution';
+import type { ShadowReviewPayload } from './shadowReviewDelta';
 import type { User } from './db';
 
 // ============================================================
@@ -48,6 +50,17 @@ import type { User } from './db';
 // so an intent id accepted at preview time is, by construction, never
 // longer than what the accept endpoint will later store it under.
 // ============================================================
+
+import type { DecisionFactsByIntentId } from './decisionFacts';
+import { createDecisionFactPreparer } from './decisionFactPreparation';
+import type { OpportunityRangeDeps } from './opportunityRangeAdapter';
+import { schedulingContextDurationContext, schedulingContextOpportunityRangeDeps, type DecisionSchedulingContext } from './decisionSchedulingContext';
+
+/** Decision Facts V1 -- a server-side, source-specific fact provider,
+ * injected at the route. Receives the already-parsed (never client-
+ * controlled) request and the authenticated user; returns generic facts
+ * keyed by intent id. This file knows nothing about any source. */
+export type DecisionFactsSource = (request: ConstructDayRequest) => Promise<DecisionFactsByIntentId>;
 
 export const MAX_INTENTS_PER_REQUEST = 12;
 export const MAX_TITLE_LENGTH = 200; // mirrors /api/plans's own `title` bound (plans/route.ts).
@@ -252,11 +265,77 @@ export interface DayConstructorPreviewHttpResult {
  * `timezone`/`now` are parameters here too, never read from `body` --
  * the ONLY two places this file ever reads a timezone or an instant.
  */
-export async function runDayConstructorPreview(body: unknown, timezone: string, now: Date, deps: DayConstructorOrchestratorDeps): Promise<DayConstructorPreviewHttpResult> {
+/**
+ * O5 P2d -- how a preview obtains the decision evidence's database-derived inputs from ONE coherent snapshot. `loadContext`
+ * reads them all inside one REPEATABLE READ transaction (decisionSchedulingContextLoader.ts); `decisionFactsFromContext`
+ * derives the recurrence facts from that context only. When a binding is supplied it REPLACES the independent live
+ * providers (`decisionFactsSource`, `opportunityRangeDeps`) -- there is no mixing of the two.
+ */
+export interface DecisionSchedulingBinding {
+  loadContext: (request: ConstructDayRequest) => Promise<DecisionSchedulingContext>;
+  decisionFactsFromContext: (request: ConstructDayRequest, context: DecisionSchedulingContext) => Promise<DecisionFactsByIntentId>;
+}
+
+export async function runDayConstructorPreview(
+  body: unknown,
+  timezone: string,
+  now: Date,
+  deps: DayConstructorOrchestratorDeps,
+  decisionFactsSource?: DecisionFactsSource,
+  opportunityRangeDeps?: OpportunityRangeDeps,
+  schedulingBinding?: DecisionSchedulingBinding,
+  shadowPolicy?: ShadowPolicyExecution
+): Promise<DayConstructorPreviewHttpResult> {
   const parsed = parseConstructDayPreviewRequestBody(body, { timezone, now });
   if (!parsed.ok) return { httpStatus: 400, body: { error: parsed.error } };
 
-  const result = await orchestrateConstructDay(parsed.request, deps);
+  // Decision Facts V1 -- facts are inert metadata in V1 (nothing reads
+  // them for ordering/eligibility), so a provider failure must never
+  // fail an otherwise-valid preview: continue with no facts, exactly the
+  // behavior of a request that had no provider at all.
+  let decisionFactsByIntentId: DecisionFactsByIntentId | undefined;
+  // O5 P1 -- opportunity facts are PREPARED inside the orchestration, after
+  // duration resolution and before the Constructor runs (see
+  // decisionFactPreparation.ts); this boundary only supplies the generic
+  // preparer. Preparing is fail-open there, and the facts are inert.
+  let orchestrationDeps: DayConstructorOrchestratorDeps = opportunityRangeDeps ? { ...deps, prepareDecisionFacts: createDecisionFactPreparer(opportunityRangeDeps) } : deps;
+  if (schedulingBinding) {
+    // O5 P2d -- ONE coherent read of every database-derived evidence input (one REPEATABLE READ transaction, already ended
+    // when `loadContext` resolves). The recurrence facts, the duration resolution, the availability / blocker adaptation and
+    // the opportunity projection below read this context only. If it cannot be acquired there is NO decision evidence for
+    // this request: the independent live reads are never used as a substitute and their result never labelled authoritative
+    // (the Constructor keeps its own live duration / blocker inputs, exactly as a request with no evidence provider).
+    let context: DecisionSchedulingContext | undefined;
+    try {
+      context = await schedulingBinding.loadContext(parsed.request);
+    } catch (err) {
+      console.warn('day-constructor/preview: coherent scheduling context unavailable, continuing without decision evidence', err);
+    }
+    orchestrationDeps = deps;
+    if (context) {
+      const coherent = context;
+      try {
+        decisionFactsByIntentId = await schedulingBinding.decisionFactsFromContext(parsed.request, coherent);
+      } catch (err) {
+        console.warn('day-constructor/preview: decision facts unavailable, continuing without', err);
+      }
+      orchestrationDeps = {
+        ...deps,
+        loadDurationContext: async () => schedulingContextDurationContext(coherent, timezone, now),
+        prepareDecisionFacts: createDecisionFactPreparer(schedulingContextOpportunityRangeDeps(coherent)),
+      };
+    }
+  } else if (decisionFactsSource) {
+    try {
+      decisionFactsByIntentId = await decisionFactsSource(parsed.request);
+    } catch (err) {
+      console.warn('day-constructor/preview: decision facts unavailable, continuing without', err);
+    }
+  }
+  // O5 P4b5 -- the ONE orchestration of this request. OFF (the default; `shadowPolicy` absent or OFF): the plain `orchestrateConstructDay` call, unchanged. SHADOW: the same
+  // single orchestration run through the diagnostic composition, whose baseline result is returned untouched (shadowPolicyExecution.ts). The mode is server-supplied only.
+  const result = await orchestrateConstructDayWithShadowPolicy(decisionFactsByIntentId ? { ...parsed.request, decisionFactsByIntentId } : parsed.request, orchestrationDeps, shadowPolicy);
+
   // Every branch below is a legitimate, already-typed domain outcome --
   // returned verbatim, at HTTP 200, never reinterpreted (this ticket's
   // own section 21). There is no "unexpected exception" branch here:
@@ -314,6 +393,20 @@ export interface DayConstructorPreviewBoundaryDeps {
   /** `createRealDayConstructorOrchestratorDeps` in production, passed by
    * reference (same signature: `(user, now) => DayConstructorOrchestratorDeps`). */
   createOrchestratorDeps: (user: User, now: Date) => DayConstructorOrchestratorDeps;
+  /** Decision Facts V1 -- OPTIONAL. Production wiring (route.ts) supplies
+   * the source-specific provider; omitting it is byte-identical to this
+   * ticket never having existed. */
+  loadDecisionFacts?: (user: User, request: ConstructDayRequest) => Promise<DecisionFactsByIntentId>;
+  /** Opportunity Scarcity V1 O4 -- OPTIONAL. Production wiring supplies
+   * the authenticated user's own read-only range loaders; omitting it is
+   * byte-identical to this ticket never having existed. */
+  createOpportunityRangeDeps?: (user: User) => OpportunityRangeDeps;
+  /** O5 P2d -- OPTIONAL, used together with `loadDecisionFactsFromContext`. Reads the decision evidence's database-derived
+   * inputs in ONE coherent snapshot. When both are supplied they REPLACE the independent live providers above. */
+  loadSchedulingContext?: (user: User, request: ConstructDayRequest) => Promise<DecisionSchedulingContext>;
+  loadDecisionFactsFromContext?: (user: User, request: ConstructDayRequest, context: DecisionSchedulingContext) => Promise<DecisionFactsByIntentId>;
+  /** O5 P4b5 -- OPTIONAL, SERVER-SUPPLIED ONLY (never derived from the request body): the shadow policy execution settings. Omitted => OFF => byte-identical to before. */
+  shadowPolicy?: () => ShadowPolicyExecution;
 }
 
 /**
@@ -346,9 +439,27 @@ export async function handleDayConstructorPreviewRequest(deps: DayConstructorPre
 
   try {
     const orchestratorDeps = deps.createOrchestratorDeps(user, now);
-    const result = await runDayConstructorPreview(body, user.timezone, now, orchestratorDeps);
+    const decisionFactsSource: DecisionFactsSource | undefined = deps.loadDecisionFacts ? (request) => deps.loadDecisionFacts!(user, request) : undefined;
+    const opportunityRangeDeps = deps.createOpportunityRangeDeps ? deps.createOpportunityRangeDeps(user) : undefined;
+    const schedulingBinding: DecisionSchedulingBinding | undefined =
+      deps.loadSchedulingContext && deps.loadDecisionFactsFromContext
+        ? { loadContext: (request) => deps.loadSchedulingContext!(user, request), decisionFactsFromContext: (request, context) => deps.loadDecisionFactsFromContext!(user, request, context) }
+        : undefined;
+    // O5 SHADOW ROLLOUT R3 -- the Preview-only manual review hand-off: an OUTPUT-ONLY closure receives whatever `shadowPolicyExecution.ts`
+    // hands back (nothing, unless the server's own `reviewEligible` AND the run's own evidence both say so -- see createServerShadowPolicyExecution
+    // and shadowEvidence.ts). This file never decides eligibility itself; it only wires the hand-off and, if present, attaches the minimal
+    // display payload to the body BEFORE signing, as a plain sibling field `shadowReview` that `signPreviewResultBody` passes through
+    // untouched (it only ever rewrites `preview.constructedDay.proposedItems`), so the review alternative carries no acceptance token.
+    // Delegated via the PROTOTYPE chain (never spread/Object.assign-copied): `sink` and every other settings accessor stay exactly as lazy
+    // as before (a hostile `get sink()` is still touched only once, at the one existing call site that reads it) -- only `onReview` is an
+    // own property of this new object.
+    let review: ShadowReviewPayload | undefined;
+    const shadowPolicy = deps.shadowPolicy ? deps.shadowPolicy() : undefined;
+    const executionWithReviewHandoff: ShadowPolicyExecution | undefined = shadowPolicy ? Object.assign(Object.create(shadowPolicy), { onReview: (r: ShadowReviewPayload) => { review = r; } }) : undefined;
+    const result = await runDayConstructorPreview(body, user.timezone, now, orchestratorDeps, decisionFactsSource, opportunityRangeDeps, schedulingBinding, executionWithReviewHandoff);
+    const bodyWithReview = review ? { ...result.body, shadowReview: review } : result.body;
     // F1 trust correction: sign each proposed item for THIS user so acceptance can verify what it means.
-    return { ...result, body: signPreviewResultBody(session.userId, result.body) };
+    return { ...result, body: signPreviewResultBody(session.userId, bodyWithReview) };
   } catch (err) {
     // Genuine infrastructure/unexpected failure -- never leaked to the
     // client (this ticket's own section 13), distinct from every typed

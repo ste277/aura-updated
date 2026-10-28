@@ -35,6 +35,7 @@
 
 import { isValidCalendarDateString } from '../../../packages/panchang/src/localDate';
 import type { MuhurtaActivityFamily } from '../../../packages/muhurta/src/muhurtaEngine';
+import type { DecisionFacts } from './decisionFacts';
 
 // ============================================================
 // DayIntent
@@ -127,6 +128,13 @@ export interface DayIntent {
    * never re-derived from `title`/`id`, which carry no ordering meaning
    * of their own. */
   originalOrder: number;
+  /** Decision Facts V1 (decisionFacts.ts). Attached by the orchestrator
+   * AFTER `buildDayIntent` runs (which stays unaware this field exists)
+   * from generic, server-supplied facts keyed by intent id. Optional,
+   * ephemeral (never persisted), and deliberately inert in V1: no
+   * comparator reads it, and it must stay that way until a real decision
+   * policy is built. */
+  decisionFacts?: DecisionFacts;
 }
 
 /** Caller-supplied subset used to build a `DayIntent` -- every DEFAULTED/

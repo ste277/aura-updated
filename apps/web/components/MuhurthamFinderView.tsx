@@ -32,6 +32,12 @@ export interface MuhurthamTimingLocation {
 
 interface MuhurthamFinderViewProps {
   timingLocation: MuhurthamTimingLocation;
+  /** Onboarding V1 PR 1 -- Location Trust Foundation. `false`/omitted
+   * means `timingLocation` has never been explicitly confirmed by the
+   * user -- appends a plain "(unconfirmed)" qualifier next to the
+   * existing "Using your Timing Location" text below, never a blocker,
+   * never implying the location IS verified. */
+  locationConfirmed?: boolean;
   onBack: () => void;
   onOpenPanchangCalendar: () => void;
   /** Jump the existing Panchang Calendar to a specific date (brief section
@@ -180,7 +186,7 @@ function formatClockTime(iso: string, timezone: string): string {
   return new Date(iso).toLocaleTimeString('en-US', { timeZone: timezone, hour: 'numeric', minute: '2-digit' });
 }
 
-export function MuhurthamFinderView({ timingLocation, onBack, onOpenPanchangCalendar, onViewFullPanchang, onPlanLogged, onOpenBirthProfile, onOpenPeople, initialActivityId, initialActivityIdKey }: MuhurthamFinderViewProps) {
+export function MuhurthamFinderView({ timingLocation, locationConfirmed, onBack, onOpenPanchangCalendar, onViewFullPanchang, onPlanLogged, onOpenBirthProfile, onOpenPeople, initialActivityId, initialActivityIdKey }: MuhurthamFinderViewProps) {
   // Event Location Search V1: `eventLocation` is the CURRENT picker
   // selection (null = "use my Timing Location") -- it only ever affects the
   // NEXT search. `resultEventLocation` is a SNAPSHOT of whatever
@@ -596,7 +602,14 @@ export function MuhurthamFinderView({ timingLocation, onBack, onOpenPanchangCale
         {!showEventLocationPicker ? (
           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 10, marginTop: 10 }}>
             <span style={{ fontSize: 13, color: '#dbe7f4' }}>
-              {eventLocation ? eventLocation.cityName : <>Using your Timing Location: {timingLocation.cityName}</>}
+              {eventLocation ? (
+                eventLocation.cityName
+              ) : (
+                <>
+                  Using your Timing Location: {timingLocation.cityName}
+                  {locationConfirmed === false ? ' (unconfirmed)' : ''}
+                </>
+              )}
             </span>
             <button type="button" onClick={() => setShowEventLocationPicker(true)} style={{ ...linkButtonStyle, fontSize: 12, flexShrink: 0 }}>
               {eventLocation ? 'Change' : 'Choose another location'}
