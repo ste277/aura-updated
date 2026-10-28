@@ -3,9 +3,10 @@
 --
 -- "GoalActivity".dailyFrequencyKind/dailyFrequencyLimit: "how many LIVE
 -- occurrences of this GoalActivity may exist on the SAME local calendar
--- day?" -- orthogonal to the existing rhythmKind/rhythmTargetPerWeek pair
--- (migration 0043), which answers a WEEKLY question with no day-bucket
--- concept at all. Same convention as that pair and as
+-- day?" -- orthogonal to the existing weekly cadence fields (migration
+-- 0043), which answer a WEEKLY question with no day-bucket concept at
+-- all; existing weekly cadence fields remain unchanged. Same convention
+-- as that weekly pair and as
 -- completionKind/completionTargetValue/completionUnit (migration 0040):
 -- independently nullable, no default, no backfill. NULL means "never
 -- specified" and is ALWAYS normalized to canonical ONCE_PER_DAY
