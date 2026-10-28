@@ -80,10 +80,20 @@ check('planMove.ts does not reference formatGoalActivityCompletion', !/formatGoa
 // R2's own guards. Narrowed here to what it still protects: no OTHER
 // day-scoped/frequency/recurrence/Rhythm addition anywhere in the Goals
 // model block (no RRULE, no separate Rhythm entity, no third column).
-check('schema.prisma was not touched by G3.2 beyond what G3.2 itself added (still no localDate/dayBucket/frequency/recurrence, and the only Rhythm reference is R2\'s own two documented columns)', (() => {
+check('schema.prisma was not touched by G3.2 beyond what G3.2 itself added (still no localDate/dayBucket/frequency/recurrence, and the only Rhythm/frequency references are R2\'s and HPG3-A1\'s own documented columns)', (() => {
   const schema = stripComments(read('../apps/web/prisma/schema.prisma'));
   const goalsBlock = schema.slice(schema.indexOf('model Goal '), schema.indexOf('model Capture'));
-  const withoutKnownRhythmColumns = goalsBlock.replace(/rhythmKind\s+String\?/g, '').replace(/rhythmTargetPerWeek\s+Int\?/g, '');
+  // PR #181 reconciliation -- HPG3-A1 (migration 0051) legitimately,
+  // separately-reviewed, added dailyFrequencyKind/dailyFrequencyLimit to
+  // GoalActivity (apps/web/lib/goalActivityDailyFrequency.ts); stripped
+  // here the same way R2's own rhythmKind/rhythmTargetPerWeek already are,
+  // so this check still catches any OTHER/unexpected frequency/recurrence
+  // addition without tripping on this known, intentional one.
+  const withoutKnownRhythmColumns = goalsBlock
+    .replace(/rhythmKind\s+String\?/g, '')
+    .replace(/rhythmTargetPerWeek\s+Int\?/g, '')
+    .replace(/dailyFrequencyKind\s+String\?/g, '')
+    .replace(/dailyFrequencyLimit\s+Int\?/g, '');
   return !/dayBucket|frequency|recurrence|Rhythm/i.test(withoutKnownRhythmColumns);
 })());
 
