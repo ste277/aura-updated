@@ -7,6 +7,7 @@ import { verifyGuestStateToken, hashGuestConversionToken } from '../../../lib/gu
 import { parseEventLocationSnapshot } from '../../../lib/plansRequest';
 import { getActivityProfileById } from '../../../../../packages/recommendation/src/personalizedTasks';
 import { getDatePartsInTimezone } from '../../../lib/timezone';
+import { SchedulingEligibilityError, SCHEDULING_ELIGIBILITY_STATUS_BY_CODE, materializeFailureToSchedulingEligibilityError, goalActivityNotAvailableError, goalNotActiveError } from '../../../lib/schedulingEligibilityError';
 
 const MIN_PLAN_DURATION_MINUTES = 15;
 const MAX_PLAN_DURATION_MINUTES = 360;
@@ -333,7 +334,7 @@ export async function POST(req: NextRequest) {
       // ownership rejection at the link call below, exactly as before.
       const lifecycle = await lockGoalParentLifecycleForPlanning(session.userId, [goalActivityId], client);
       if (lifecycle.owned.has(goalActivityId) && !lifecycle.active.has(goalActivityId)) {
-        throw new Error('GOAL_NOT_ACTIVE');
+        throw goalNotActiveError();
       }
       // HPG3-A2 -- tried FIRST, the EXACT SAME ordering pattern
       // dayConstructorAcceptancePersistence.ts's own write loop already
@@ -360,7 +361,10 @@ export async function POST(req: NextRequest) {
         // underlying reason anyway. Same all-or-nothing contract as every
         // other link failure in this route: the outer catch below ROLLBACKs
         // the whole transaction (this Plan insert included).
-        throw new Error('GOAL_ACTIVITY_LINK_FAILED');
+        // HPG3-A3a -- a typed, specific SchedulingEligibilityError instead
+        // of a flat 'GOAL_ACTIVITY_LINK_FAILED' string, so the caller can
+        // finally tell daily/weekly/legacy-attribution refusals apart.
+        throw materializeFailureToSchedulingEligibilityError(materialized.reason);
       }
       if (!materialized.ok) {
         // NOT_RHYTHM_ELIGIBLE -- finite (NONE) or no Rhythm policy at all.
@@ -374,18 +378,26 @@ export async function POST(req: NextRequest) {
         // unlinked PlannedActivity silently created instead of the
         // Goal-linked one the caller explicitly asked for).
         const linked = await linkGoalActivityToPlannedActivity(session.userId, goalActivityId, plan.id, client);
-        if (!linked) throw new Error('GOAL_ACTIVITY_LINK_FAILED');
+        if (!linked) throw goalActivityNotAvailableError();
       }
     }
     await client.query('COMMIT');
   } catch (err) {
     await client.query('ROLLBACK').catch(() => {});
-    if (err instanceof Error && err.message === 'GOAL_NOT_ACTIVE') {
-      return NextResponse.json({ error: 'That goal is no longer active, so a new plan cannot be linked to it.' }, { status: 400 });
+    // HPG3-A3a -- one typed branch instead of two message-string
+    // comparisons; GOAL_NOT_ACTIVE and GOAL_ACTIVITY_NOT_AVAILABLE keep
+    // their exact pre-A3a message/status (400), while CAPACITY_EXCEEDED/
+    // DAILY_CAPACITY_EXCEEDED/DAILY_ATTRIBUTION_UNRESOLVED -- previously
+    // indistinguishable from each other or from the generic case -- now
+    // surface as genuine scheduling conflicts (409), matching Move's own
+    // established convention for these same three codes.
+    if (err instanceof SchedulingEligibilityError) {
+      return NextResponse.json({ error: err.message, code: err.code }, { status: SCHEDULING_ELIGIBILITY_STATUS_BY_CODE[err.code] });
     }
-    if (err instanceof Error && err.message === 'GOAL_ACTIVITY_LINK_FAILED') {
-      return NextResponse.json({ error: 'That goal activity is not available to link right now.' }, { status: 400 });
-    }
+    // Schedule write consistency S2 -- an unclassified error always
+    // propagates (never silently swallowed into an unintended response);
+    // this is the general "Plan creation failure" bucket and it is
+    // UNCHANGED by HPG3-A3a.
     throw err;
   } finally {
     client.release();

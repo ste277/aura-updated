@@ -69,8 +69,14 @@ check('5. no new API route file was added under apps/web/app/api/goals for this 
 check('6. the route imports the EXISTING, unmodified linkGoalActivityToPlannedActivity (db.ts) -- no parallel linking logic introduced', /linkGoalActivityToPlannedActivity/.test(plansRouteSource));
 check('6. goalActivityId is parsed as untrusted client input, independent of activityId\'s own catalog validation', /const goalActivityId = typeof body\?\.goalActivityId === 'string'/.test(plansRouteSource));
 check('6. the link happens inside the SAME transaction/client as the PlannedActivity insert (no separate check-then-act)', /const linked = await linkGoalActivityToPlannedActivity\(session\.userId, goalActivityId, plan\.id, client\);/.test(plansRouteSource));
-check('6. a failed link throws and the transaction is rolled back -- no orphan, silently-unlinked PlannedActivity is created instead of the one the caller explicitly asked for', /if \(!linked\) throw new Error\('GOAL_ACTIVITY_LINK_FAILED'\);/.test(plansRouteSource));
-check('6. the rollback path returns a typed 400, not an unhandled 500', /err\.message === 'GOAL_ACTIVITY_LINK_FAILED'[\s\S]{0,120}status: 400/.test(plansRouteSource));
+check('6. a failed link throws and the transaction is rolled back -- no orphan, silently-unlinked PlannedActivity is created instead of the one the caller explicitly asked for', /if \(!linked\) throw goalActivityNotAvailableError\(\);/.test(plansRouteSource));
+// HPG3-A3a -- the flat message-string comparison + hardcoded 400 is now a
+// single typed SchedulingEligibilityError branch whose status is looked
+// up per-code (apps/web/lib/schedulingEligibilityError.ts); the GOAL_NOT_ACTIVE
+// and GOAL_ACTIVITY_NOT_AVAILABLE codes this check's own scenario produces
+// still resolve to 400, unchanged -- see schedulingEligibilityErrorContractDb.test.ts
+// for the live-DB proof of the exact status/message per code.
+check('6. the rollback path returns a typed error via SCHEDULING_ELIGIBILITY_STATUS_BY_CODE, not an unhandled 500', /if \(err instanceof SchedulingEligibilityError\) \{[\s\S]{0,200}status: SCHEDULING_ELIGIBILITY_STATUS_BY_CODE\[err\.code\][\s\S]{0,50}\}/.test(plansRouteSource));
 
 // ============================================================
 // 7. Explicit exclusions respected.
@@ -89,7 +95,11 @@ check('7. linkGoalActivityToPlannedActivity itself (db.ts) is UNMODIFIED by HPG2
 // AFTER the HPG2 lifecycle guard and BEFORE the legacy fallback, never
 // bypassing either.
 check('7. the route imports and calls materializeGoalActivityRhythmOccurrence, tried BEFORE the legacy link, exactly as dayConstructorAcceptancePersistence.ts already does', /import \{[^}]*materializeGoalActivityRhythmOccurrence/.test(plansRouteSource) && /const materialized = await materializeGoalActivityRhythmOccurrence\(session\.userId, goalActivityId, plan\.id, plannedStartAt, planningLocalDate, user!\.timezone, client\);/.test(plansRouteSource));
-check('7. a genuine Rhythm-specific refusal (anything other than NOT_RHYTHM_ELIGIBLE) never falls through to the legacy link -- it fails the request closed', /if \(!materialized\.ok && materialized\.reason !== 'NOT_RHYTHM_ELIGIBLE'\) \{[\s\S]{0,700}throw new Error\('GOAL_ACTIVITY_LINK_FAILED'\);/.test(plansRouteSource));
+// HPG3-A3a -- the flat 'GOAL_ACTIVITY_LINK_FAILED' throw is now a typed
+// SchedulingEligibilityError carrying the SPECIFIC materialize reason
+// (daily/weekly capacity, unresolved legacy attribution) -- still thrown,
+// still fails the request closed, never a weaker/silent fallthrough.
+check('7. a genuine Rhythm-specific refusal (anything other than NOT_RHYTHM_ELIGIBLE) never falls through to the legacy link -- it fails the request closed', /if \(!materialized\.ok && materialized\.reason !== 'NOT_RHYTHM_ELIGIBLE'\) \{[\s\S]{0,800}throw materializeFailureToSchedulingEligibilityError\(materialized\.reason\);/.test(plansRouteSource));
 check('7. the legacy link is reached ONLY for NOT_RHYTHM_ELIGIBLE -- the finite/once-ever path (checks 69-73) is otherwise completely untouched', /if \(!materialized\.ok\) \{[\s\S]{0,850}const linked = await linkGoalActivityToPlannedActivity\(session\.userId, goalActivityId, plan\.id, client\);/.test(plansRouteSource));
 check('7. the lifecycle guard (HPG2 P0) still runs BEFORE materialize -- its own position is unchanged', plansRouteSource.indexOf('lockGoalParentLifecycleForPlanning(session.userId, [goalActivityId], client)') < plansRouteSource.indexOf('materializeGoalActivityRhythmOccurrence(session.userId'));
 // Migration count tracks the repository's real history, not a number

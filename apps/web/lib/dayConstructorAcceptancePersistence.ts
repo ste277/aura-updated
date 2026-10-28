@@ -58,6 +58,7 @@ import {
   type AcceptedPlanWrite,
 } from './dayConstructorAcceptance';
 import { schedulingModeFromPlacementSource } from './plannedActivitySchedulingMode';
+import { SchedulingEligibilityError, materializeFailureToSchedulingEligibilityError, goalActivityNotAvailableError, type SchedulingEligibilityErrorCode } from './schedulingEligibilityError';
 
 // ============================================================
 // Idempotency key derivation (this ticket's own section 3/5). Length-
@@ -166,7 +167,15 @@ export type AcceptConstructedDayPersistenceResult =
   | { status: 'ALREADY_ACCEPTED'; plans: PlannedActivity[] }
   | { status: 'REJECTED'; reason: AcceptanceRejectionReason; diagnostics: AcceptanceDiagnostic[] }
   | { status: 'IDEMPOTENCY_CONFLICT' }
-  | { status: 'SAVE_FAILED' };
+  // HPG3-A3a -- `code` is OPTIONAL and additive: every pre-A3a caller
+  // narrowing only on `status === 'SAVE_FAILED'` is unaffected. Present
+  // only for a known, typed SchedulingEligibilityError (daily/weekly
+  // capacity, unresolved legacy attribution, or the pre-A3a generic
+  // "not available to link" bucket); absent for every other failure
+  // (AMBIGUOUS_SOURCE_LINK, CAPTURE_LINK_FAILED, a genuine DB error),
+  // which keeps returning the exact same bare `{ status: 'SAVE_FAILED' }`
+  // as before this ticket.
+  | { status: 'SAVE_FAILED'; code?: SchedulingEligibilityErrorCode };
 
 // ============================================================
 // Real AcceptanceDeps wiring (this ticket's own section 11/12/13/32).
@@ -491,7 +500,10 @@ export async function persistAcceptedConstructedDay(
           // and returns SAVE_FAILED -- no orphan PlannedActivity, no
           // occurrence created without a successful link, no partial
           // acceptance (this PR's own section 26/31, preserved unchanged).
-          throw new Error('GOAL_ACTIVITY_LINK_FAILED');
+          // HPG3-A3a -- a typed, specific SchedulingEligibilityError
+          // instead of a flat 'GOAL_ACTIVITY_LINK_FAILED' string, caught
+          // below and surfaced as a distinguishable SAVE_FAILED code.
+          throw materializeFailureToSchedulingEligibilityError(materialized.reason);
         }
         if (!materialized.ok) {
           // NOT_RHYTHM_ELIGIBLE -- this GoalActivity is finite (NONE) or
@@ -505,7 +517,7 @@ export async function persistAcceptedConstructedDay(
             // exist, is not owned by this user, is DISMISSED, or already
             // retains a live (UPCOMING/LOGGED) linkage to a DIFFERENT Plan
             // -- never silently continue. Same rollback contract as above.
-            throw new Error('GOAL_ACTIVITY_LINK_FAILED');
+            throw goalActivityNotAvailableError();
           }
         }
       }
@@ -515,8 +527,15 @@ export async function persistAcceptedConstructedDay(
 
     await client.query('COMMIT');
     return { status: 'SAVED', plans };
-  } catch {
+  } catch (err) {
     await client.query('ROLLBACK').catch(() => {});
+    // HPG3-A3a -- a known, typed scheduling-eligibility refusal carries
+    // its code through; every other failure (AMBIGUOUS_SOURCE_LINK,
+    // CAPTURE_LINK_FAILED, a genuine DB error) keeps the exact same bare
+    // SAVE_FAILED this function always returned, never leaking details.
+    if (err instanceof SchedulingEligibilityError) {
+      return { status: 'SAVE_FAILED', code: err.code };
+    }
     return { status: 'SAVE_FAILED' };
   } finally {
     client.release();

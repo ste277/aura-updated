@@ -99,7 +99,11 @@ async function main() {
     const res1 = await plansRoute(req(tok, { ...plan('Strength training', 0), goalActivityId: ga.id }));
     check('1. first same-day creation SAVES', res1.status === 200);
     const res2 = await plansRoute(req(tok, { ...plan('Strength training', 2 * HOUR), goalActivityId: ga.id }));
-    check('1. second same-day creation REJECTED (daily cap)', res2.status === 400);
+    // HPG3-A3a -- daily/weekly capacity and unresolved-attribution
+    // rejections now return 409 (a genuine scheduling conflict, Move's
+    // own established convention), not 400. See
+    // schedulingEligibilityErrorContractDb.test.ts for the full contract.
+    check('1. second same-day creation REJECTED (daily cap)', res2.status === 409);
     const occRows = await sql(`SELECT count(*)::int AS n FROM "GoalActivityOccurrence" WHERE "goalActivityId" = $1`, [ga.id]);
     check('1. exactly ONE occurrence row exists (no orphan from the rejected second attempt)', occRows[0].n === 1);
     await wipe(email, user.id);
@@ -127,11 +131,11 @@ async function main() {
     const res1 = await plansRoute(req(tok, { ...plan('Strength training', 0), goalActivityId: ga.id }));
     check('3. occurrence 1 of 2 (day 1) SAVES', res1.status === 200);
     const resSameDay = await plansRoute(req(tok, { ...plan('Strength training', 3 * HOUR), goalActivityId: ga.id }));
-    check('3. a SAME-DAY second attempt is rejected by the DAILY cap, even though weekly capacity remains (1 of 2 used)', resSameDay.status === 400);
+    check('3. a SAME-DAY second attempt is rejected by the DAILY cap, even though weekly capacity remains (1 of 2 used)', resSameDay.status === 409);
     const res2 = await plansRoute(req(tok, { ...plan('Strength training', DAY), goalActivityId: ga.id }));
     check('3. occurrence 2 of 2 (day 2, different day) SAVES -- weekly capacity still correctly tracked', res2.status === 200);
     const res3 = await plansRoute(req(tok, { ...plan('Strength training', 2 * DAY), goalActivityId: ga.id }));
-    check('3. a THIRD attempt (day 3, a different day, weekly capacity now exhausted) is rejected by the WEEKLY cap', res3.status === 400);
+    check('3. a THIRD attempt (day 3, a different day, weekly capacity now exhausted) is rejected by the WEEKLY cap', res3.status === 409);
     await wipe(email, user.id);
   }
 
@@ -145,7 +149,7 @@ async function main() {
     const res2 = await plansRoute(req(tok, { ...plan('Drink water', 2 * HOUR), goalActivityId: ga.id }));
     check('4. a SAME-DAY second occurrence SAVES (MULTIPLE_PER_DAY bypasses the daily cap)', res2.status === 200);
     const res3 = await plansRoute(req(tok, { ...plan('Drink water', 4 * HOUR), goalActivityId: ga.id }));
-    check('4. a THIRD same-day attempt is rejected -- weekly capacity (2/week) still applies independently of the daily bypass', res3.status === 400);
+    check('4. a THIRD same-day attempt is rejected -- weekly capacity (2/week) still applies independently of the daily bypass', res3.status === 409);
     await wipe(email, user.id);
   }
 
@@ -245,7 +249,7 @@ async function main() {
     const res1 = await plansRoute(req(tok, { ...plan('Strength training', 0), goalActivityId: ga.id }));
     const p1 = await res1.json();
     const resBlocked = await plansRoute(req(tok, { ...plan('Strength training', 2 * HOUR), goalActivityId: ga.id }));
-    check('10. a same-day second attempt is blocked while the first is still UPCOMING', resBlocked.status === 400);
+    check('10. a same-day second attempt is blocked while the first is still UPCOMING', resBlocked.status === 409);
     await cancelPlannedActivity(user.id, p1.id);
     const resAfterCancel = await plansRoute(req(tok, { ...plan('Strength training', 4 * HOUR), goalActivityId: ga.id }));
     check('10. after cancelling the first, a new same-day occurrence SUCCEEDS (cancelled never blocks)', resAfterCancel.status === 200);
@@ -261,7 +265,7 @@ async function main() {
     const p1 = await res1.json();
     await logPlannedActivity(user.id, p1.id);
     const resAfterLog = await plansRoute(req(tok, { ...plan('Strength training', 4 * HOUR), goalActivityId: ga.id }));
-    check('11. a same-day second attempt is STILL blocked once the first is LOGGED (completed, not just upcoming)', resAfterLog.status === 400);
+    check('11. a same-day second attempt is STILL blocked once the first is LOGGED (completed, not just upcoming)', resAfterLog.status === 409);
     await wipe(email, user.id);
   }
 
@@ -279,7 +283,7 @@ async function main() {
     const occRow = (await sql(`SELECT "scheduledLocalDate", "plannedActivityId" FROM "GoalActivityOccurrence" WHERE "goalActivityId" = $1`, [ga.id]))[0];
     check('12. the occurrence row survives with plannedActivityId cleared but scheduledLocalDate INTACT', occRow.plannedActivityId === null && occRow.scheduledLocalDate === isoDateOf(0));
     const resAfterDelete = await plansRoute(req(tok, { ...plan('Strength training', 4 * HOUR), goalActivityId: ga.id }));
-    check('12. a same-day second attempt is STILL blocked after hard-deletion -- the snapshot alone is sufficient, no execution-row ambiguity needed', resAfterDelete.status === 400);
+    check('12. a same-day second attempt is STILL blocked after hard-deletion -- the snapshot alone is sufficient, no execution-row ambiguity needed', resAfterDelete.status === 409);
     await wipe(email, user.id);
   }
 
@@ -303,7 +307,7 @@ async function main() {
     })();
     check('12b. the daily check returns UNRESOLVED for an UNRELATED future day, never silently ELIGIBLE (an unattributable historical completion is not proof any given day is free)', eligibility.status === 'UNRESOLVED');
     const resAttempt = await plansRoute(req(tok, { ...plan('Strength training', 2 * DAY), goalActivityId: ga.id }));
-    check('12b. a creation attempt on an unrelated future day is REJECTED (fail-closed on the unresolved conflict), never silently allowed', resAttempt.status === 400);
+    check('12b. a creation attempt on an unrelated future day is REJECTED (fail-closed on the unresolved conflict), never silently allowed', resAttempt.status === 409);
     await wipe(email, user.id);
   }
 
@@ -369,7 +373,7 @@ async function main() {
     const planCountBefore = (await sql(`SELECT count(*)::int AS n FROM "PlannedActivity" WHERE "userId" = $1`, [user.id]))[0].n;
     const occCountBefore = (await sql(`SELECT count(*)::int AS n FROM "GoalActivityOccurrence" WHERE "userId" = $1`, [user.id]))[0].n;
     const resRejected = await plansRoute(req(tok, { ...plan('Strength training', 1 * HOUR), goalActivityId: ga.id }));
-    check('16. the same-day second attempt is rejected', resRejected.status === 400);
+    check('16. the same-day second attempt is rejected', resRejected.status === 409);
     const planCountAfter = (await sql(`SELECT count(*)::int AS n FROM "PlannedActivity" WHERE "userId" = $1`, [user.id]))[0].n;
     const occCountAfter = (await sql(`SELECT count(*)::int AS n FROM "GoalActivityOccurrence" WHERE "userId" = $1`, [user.id]))[0].n;
     check('16. no orphan PlannedActivity row was committed by the rejected attempt', planCountAfter === planCountBefore);

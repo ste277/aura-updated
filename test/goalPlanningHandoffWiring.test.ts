@@ -104,7 +104,10 @@ function main() {
   const loopMatch = persistenceSource.match(/for \(const writeIntent of decision\.writeIntents\) \{[\s\S]*?\n    \}\n/);
   check('26. linkGoalActivityToPlannedActivity is called INSIDE the existing writeIntents loop (same transaction), not after COMMIT', loopMatch !== null && loopMatch[0].includes('linkGoalActivityToPlannedActivity(userId, goalActivityId, plan.id, client)'));
   check('26. the linkage call passes the SAME `client` the PlannedActivity insert itself used, never a fresh pool query', loopMatch !== null && /linkGoalActivityToPlannedActivity\([^)]*,\s*client\)/.test(loopMatch[0]));
-  check('27. a failed linkage throws (causing the existing outer catch/ROLLBACK to fire), never silently continues', loopMatch !== null && /if \(!linked\) \{[\s\S]*?throw new Error/.test(loopMatch[0]));
+  // HPG3-A3a -- the flat `new Error(...)` throw is now the typed
+  // goalActivityNotAvailableError() (apps/web/lib/schedulingEligibilityError.ts);
+  // still a throw, still fires the same outer catch/ROLLBACK.
+  check('27. a failed linkage throws (causing the existing outer catch/ROLLBACK to fire), never silently continues', loopMatch !== null && /if \(!linked\) \{[\s\S]*?throw /.test(loopMatch[0]));
 
   // ============================================================
   // No second Goal-linking code path anywhere (no separate route, no

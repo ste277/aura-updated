@@ -73,6 +73,7 @@ const route = stripComments(routeSrc);
 const post = functionBody(route, 'POST');
 const get = functionBody(route, 'GET');
 const db = stripComments(read('apps/web/lib/db.ts'));
+const schedulingEligibilityErrorSrc = stripComments(read('apps/web/lib/schedulingEligibilityError.ts'));
 const production = [...listTs(path.join(root, 'apps/web/lib')), ...listTs(path.join(root, 'apps/web/app'))].map((f) => ({ f: path.relative(root, f), src: stripComments(fs.readFileSync(f, 'utf8')) }));
 
 const lockCall = /await client\.query\('SELECT pg_advisory_xact_lock\(hashtext\(\$1\)\)', \[`day-constructor-accept:\$\{session\.userId\}`\]\);/;
@@ -90,7 +91,13 @@ const lockCall = /await client\.query\('SELECT pg_advisory_xact_lock\(hashtext\(
 // skip rollback". These helpers test THAT, by control flow, not by
 // source-text proximity, so they still fail hard on the five concrete
 // regressions named below.
-const TRANSACTION_SCOPED_REJECTIONS = ['GOAL_NOT_ACTIVE', 'GOAL_ACTIVITY_LINK_FAILED'] as const;
+// HPG3-A3a -- the two flat 'GOAL_NOT_ACTIVE'/'GOAL_ACTIVITY_LINK_FAILED'
+// message-string rejections are now a single typed `instanceof
+// SchedulingEligibilityError` branch whose status comes from that
+// module's OWN closed SCHEDULING_ELIGIBILITY_STATUS_BY_CODE map (apps/web/lib/schedulingEligibilityError.ts)
+// -- this is the NEW closed allowlist, still exactly five named business
+// rules, never an arbitrary/undeclared one.
+const SCHEDULING_ELIGIBILITY_CODES = ['GOAL_NOT_ACTIVE', 'CAPACITY_EXCEEDED', 'DAILY_CAPACITY_EXCEEDED', 'DAILY_ATTRIBUTION_UNRESOLVED', 'GOAL_ACTIVITY_NOT_AVAILABLE'] as const;
 
 /** Brace-depth-walks from the first `{` AFTER `marker` to its match. */
 function braceBlock(source: string, marker: string): string {
@@ -123,13 +130,24 @@ function rollbackPrecedesEveryExit(catchBlock: string): boolean {
   return exits.length > 0 && exits.every((i) => i > rollbackAt);
 }
 
-/** True iff the ONLY typed 400s returned from inside the catch block match
- *  the closed TRANSACTION_SCOPED_REJECTIONS allowlist -- a new, undeclared
- *  business-rule branch fails this rather than silently being permitted. */
-function catchOnlyReturnsAllowlistedRejections(catchBlock: string): boolean {
-  const named = [...catchBlock.matchAll(/err\.message === '([A-Z_]+)'/g)].map((m) => m[1]);
-  if (named.length === 0) return false;
-  return named.every((name) => (TRANSACTION_SCOPED_REJECTIONS as readonly string[]).includes(name));
+/** True iff the ONLY typed rejection returned from inside the catch block
+ *  is the single `instanceof SchedulingEligibilityError` branch, whose
+ *  response status is looked up from that module's OWN closed
+ *  SCHEDULING_ELIGIBILITY_STATUS_BY_CODE map (never a literal status
+ *  hardcoded here) -- a new, undeclared business-rule branch (a second
+ *  `instanceof` check, or a literal `status:` number inside the catch
+ *  block outside this one lookup) fails this rather than silently being
+ *  permitted. The closed set itself is verified separately, against the
+ *  shared module's own source. */
+function catchOnlyReturnsAllowlistedRejections(catchBlock: string, schedulingEligibilityErrorSrc: string): boolean {
+  const instanceofCount = (catchBlock.match(/err instanceof SchedulingEligibilityError/g) ?? []).length;
+  if (instanceofCount !== 1) return false;
+  if (!/status: SCHEDULING_ELIGIBILITY_STATUS_BY_CODE\[err\.code\]/.test(catchBlock)) return false;
+  // No OTHER literal numeric status inside the catch block besides this one lookup.
+  const literalStatuses = [...catchBlock.matchAll(/status:\s*\d+/g)];
+  if (literalStatuses.length > 0) return false;
+  const codeKeys = [...schedulingEligibilityErrorSrc.matchAll(/^\s*([A-Z_]+):\s*\d+,?$/gm)].map((m) => m[1]);
+  return codeKeys.length === SCHEDULING_ELIGIBILITY_CODES.length && SCHEDULING_ELIGIBILITY_CODES.every((c) => codeKeys.includes(c));
 }
 
 /** True iff the catch block's last statement (ignoring the closing brace)
@@ -179,7 +197,7 @@ function allNonTransactionScopedChecksPrecedeBeginTransaction(post: string, catc
 const catchBlock = braceBlock(post, '} catch (err) {');
 check('TRANSACTION: the plan insert runs inside a transaction (one beginTransaction in POST, COMMIT on success, a rollback-first catch block, release in finally)', count(/await beginTransaction\(\)/g, post) === 1 && /await client\.query\('COMMIT'\);/.test(post) && rollbackIsFirstInCatch(catchBlock) && /finally \{\s*client\.release\(\);/.test(post));
 check('ROLLBACK ALWAYS PRECEDES EVERY EXIT FROM THE CATCH BLOCK: no return or re-throw -- typed or not -- can happen before the transaction is rolled back', rollbackPrecedesEveryExit(catchBlock));
-check('THE CATCH BLOCK ONLY EVER TYPES THE CLOSED SET OF TRANSACTION-SCOPED BUSINESS-RULE REJECTIONS (GOAL_NOT_ACTIVE, GOAL_ACTIVITY_LINK_FAILED) -- a new, undeclared 400 branch here fails this check rather than being silently permitted', catchOnlyReturnsAllowlistedRejections(catchBlock));
+check('THE CATCH BLOCK ONLY EVER TYPES THE CLOSED SET OF TRANSACTION-SCOPED BUSINESS-RULE REJECTIONS (now a single typed SchedulingEligibilityError branch over its own closed 5-code map) -- a new, undeclared status branch here fails this check rather than being silently permitted', catchOnlyReturnsAllowlistedRejections(catchBlock, schedulingEligibilityErrorSrc));
 check('AN UNCLASSIFIED ERROR ALWAYS PROPAGATES: the catch block\'s last statement is `throw err;` -- nothing is ever silently swallowed into an unintended response', catchEndsWithRethrow(catchBlock));
 check('NO SUCCESS CAN FOLLOW A FAILED TRANSACTION: the success response is reachable only AFTER the whole try/catch/finally, never from inside the catch block itself', successResponseIsOutsideTryCatchFinally(post));
 check('SHARED LOCK: POST takes the per-user transaction-scoped advisory lock exactly once, with the unchanged key `day-constructor-accept:${userId}`', lockCall.test(post) && count(/pg_advisory_xact_lock/g, post) === 1);
@@ -213,19 +231,16 @@ function POST(req) {
     if (goalActivityId) {
       const lifecycle = await lockGoalParentLifecycleForPlanning(session.userId, [goalActivityId], client);
       if (lifecycle.owned.has(goalActivityId) && !lifecycle.active.has(goalActivityId)) {
-        throw new Error('GOAL_NOT_ACTIVE');
+        throw goalNotActiveError();
       }
       const linked = await linkGoalActivityToPlannedActivity(session.userId, goalActivityId, plan.id, client);
-      if (!linked) throw new Error('GOAL_ACTIVITY_LINK_FAILED');
+      if (!linked) throw goalActivityNotAvailableError();
     }
     await client.query('COMMIT');
   } catch (err) {
     await client.query('ROLLBACK').catch(() => {});
-    if (err instanceof Error && err.message === 'GOAL_NOT_ACTIVE') {
-      return NextResponse.json({ error: 'not active' }, { status: 400 });
-    }
-    if (err instanceof Error && err.message === 'GOAL_ACTIVITY_LINK_FAILED') {
-      return NextResponse.json({ error: 'link failed' }, { status: 400 });
+    if (err instanceof SchedulingEligibilityError) {
+      return NextResponse.json({ error: err.message, code: err.code }, { status: SCHEDULING_ELIGIBILITY_STATUS_BY_CODE[err.code] });
     }
     throw err;
   } finally {
@@ -235,7 +250,7 @@ function POST(req) {
 }`;
 check('MUTATION BASELINE: the good snippet itself passes every revised check (the checks aren\'t simply always-false)', (() => {
   const c = braceBlock(GOOD_SNIPPET, '} catch (err) {');
-  return rollbackIsFirstInCatch(c) && rollbackPrecedesEveryExit(c) && catchOnlyReturnsAllowlistedRejections(c) && catchEndsWithRethrow(c) && successResponseIsOutsideTryCatchFinally(GOOD_SNIPPET) && allNonTransactionScopedChecksPrecedeBeginTransaction(GOOD_SNIPPET, c);
+  return rollbackIsFirstInCatch(c) && rollbackPrecedesEveryExit(c) && catchOnlyReturnsAllowlistedRejections(c, schedulingEligibilityErrorSrc) && catchEndsWithRethrow(c) && successResponseIsOutsideTryCatchFinally(GOOD_SNIPPET) && allNonTransactionScopedChecksPrecedeBeginTransaction(GOOD_SNIPPET, c);
 })());
 
 const AUTH_AFTER_TX_SNIPPET = `
