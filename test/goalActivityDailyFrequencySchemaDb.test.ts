@@ -1,12 +1,18 @@
-// HPG3-A1 -- live-database proof that migration 0051 is additive-only and
-// genuinely inert: every EXISTING production writer continues to leave the
-// four new columns NULL, the columns round-trip through raw SQL exactly as
-// the schema declares (nullable, no default), and the pure
-// normalize/validate functions handle a real NULL row exactly like the
-// pure unit tests already prove for synthetic input.
+// HPG3-A1, updated by HPG3-A2 -- live-database proof that migration 0051
+// is additive-only (columns round-trip through raw SQL exactly as the
+// schema declares: nullable, no default), that a freshly created
+// GoalActivity's own columns start NULL/un-backfilled (section 2), and
+// that the pure normalize/validate functions handle a real NULL row
+// exactly like the pure unit tests already prove for synthetic input
+// (section 4, legacy rows). Section 3 now proves the OPPOSITE of A1's own
+// original claim for the Rhythm materialization writer specifically: A2
+// wires it to WRITE the day snapshot, not leave it NULL -- this section is
+// the live-database complement to the structural guard proving that
+// wiring is scoped to exactly the reviewed A2 call sites.
 // Run with: DATABASE_URL="postgresql://..." npx ts-node test/goalActivityDailyFrequencySchemaDb.test.ts
 import { upsertUserByEmail, createGoalWithActivities, beginTransaction, materializeGoalActivityRhythmOccurrence, createPlannedActivity } from '../apps/web/lib/db';
 import { normalizeGoalActivityDailyFrequency } from '../apps/web/lib/goalActivityDailyFrequency';
+import { getDatePartsInTimezone } from '../apps/web/lib/timezone';
 
 let allPassed = true;
 function check(label: string, condition: boolean) {
@@ -50,9 +56,9 @@ async function main() {
   check('2. a freshly created GoalActivity has dailyFrequencyLimit = NULL', gaRow.dailyFrequencyLimit === null);
   check('2. normalizeGoalActivityDailyFrequency on this REAL row normalizes to ONCE_PER_DAY, exactly like the pure unit tests predict', normalizeGoalActivityDailyFrequency({ dailyFrequencyKind: gaRow.dailyFrequencyKind, dailyFrequencyLimit: gaRow.dailyFrequencyLimit }).kind === 'ONCE_PER_DAY');
 
-  // ---- 3. Existing GoalActivityOccurrence writer (materializeGoalActivityRhythmOccurrence, unmodified by this slice) leaves both new columns NULL ----
+  // ---- 3. materializeGoalActivityRhythmOccurrence, extended by HPG3-A2: now DOES write the day snapshot ----
   // Set rhythmKind directly (createGoalWithActivities' own activities input has no Rhythm field in R2) so the existing,
-  // untouched Rhythm materialization path has something to act on.
+  // Rhythm materialization path has something to act on.
   await sql(`UPDATE "GoalActivity" SET "rhythmKind" = 'N_PER_WEEK', "rhythmTargetPerWeek" = 3 WHERE id = $1`, [ga.id]);
   const start = new Date(Date.now() + 24 * 3600_000);
   const end = new Date(start.getTime() + 30 * 60_000);
@@ -61,11 +67,12 @@ async function main() {
   const materialized = await materializeGoalActivityRhythmOccurrence(user.id, ga.id, plan.id, start, '2026-10-29', 'Asia/Kolkata', client);
   await client.query('COMMIT');
   client.release();
-  check('3. setup: the existing, unmodified Rhythm materialization path succeeds', materialized.ok === true);
+  check('3. setup: the Rhythm materialization path succeeds', materialized.ok === true);
   if (materialized.ok) {
     const occRow = (await sql(`SELECT "scheduledLocalDate", "scheduledLocalTimezone", "scheduledWeekStart" FROM "GoalActivityOccurrence" WHERE id = $1`, [materialized.occurrenceId]))[0];
-    check('3. the occurrence this EXISTING writer created has scheduledLocalDate = NULL (this slice wires no writer)', occRow.scheduledLocalDate === null);
-    check('3. ...and scheduledLocalTimezone = NULL', occRow.scheduledLocalTimezone === null);
+    const expectedLocalDate = getDatePartsInTimezone('Asia/Kolkata', start).dateStr;
+    check('3. HPG3-A2 -- the occurrence this writer created now HAS a scheduledLocalDate, matching the plan\'s own local day', occRow.scheduledLocalDate === expectedLocalDate);
+    check('3. ...and scheduledLocalTimezone matches the timezone the call was made with', occRow.scheduledLocalTimezone === 'Asia/Kolkata');
     check('3. the existing scheduledWeekStart pair is UNAFFECTED and still populated exactly as before this migration', occRow.scheduledWeekStart === '2026-10-26' || typeof occRow.scheduledWeekStart === 'string');
   }
 

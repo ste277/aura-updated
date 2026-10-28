@@ -480,9 +480,11 @@ export async function persistAcceptedConstructedDay(
         const materialized = await materializeGoalActivityRhythmOccurrence(userId, goalActivityId, plan.id, plan.plannedStartAt, request.constructionWindow.date, user.timezone, client);
         if (!materialized.ok && materialized.reason !== 'NOT_RHYTHM_ELIGIBLE') {
           // A genuine Rhythm-specific refusal (a live UPCOMING commitment
-          // already exists, or weekly capacity is exhausted) -- never fall
-          // through to the legacy link below, which would refuse for the
-          // exact same underlying reason anyway. Same all-or-nothing
+          // already exists, weekly capacity is exhausted, HPG3-A2's daily
+          // cap is already met, or an unresolved legacy daily-attribution
+          // conflict) -- never fall through to the legacy link below,
+          // which would refuse for the exact same underlying reason
+          // anyway. Same all-or-nothing
           // contract as every other link failure in this loop: throwing
           // here is caught by this function's own outer try/catch, which
           // ROLLBACKs the WHOLE transaction (this Plan insert included)

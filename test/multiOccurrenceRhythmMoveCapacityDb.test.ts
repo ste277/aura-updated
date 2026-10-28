@@ -96,6 +96,15 @@ async function main() {
     const { goal } = await createGoalWithActivities({ userId: user.id, title: `${GOAL_TITLE_PREFIX}${tag}`, targetDate: null, activities: [] });
     createdGoalIds.push(goal.id);
     const ga = (await addGoalActivity(user.id, goal.id, { title: 'Strength training', activityId: null, rhythm: { kind: 'N_PER_WEEK', targetPerWeek } }))!;
+    // HPG3-A2 -- this suite exists to isolate WEEKLY capacity alone (several
+    // scenarios deliberately stack more than one occurrence on the SAME
+    // local day, on purpose, to stay within one week while proving weekly
+    // behavior). The new daily cap defaults to ONCE_PER_DAY and would
+    // otherwise confound every such scenario with an unrelated daily
+    // rejection -- MULTIPLE_PER_DAY keeps this fixture's own, pre-existing
+    // intent (weekly capacity ONLY) completely unconfounded by the new,
+    // orthogonal daily dimension this ticket adds.
+    await sql(`UPDATE "GoalActivity" SET "dailyFrequencyKind" = 'MULTIPLE_PER_DAY' WHERE id = $1`, [ga.id]);
     return { goal, ga };
   }
   async function accept(ga: { id: string }, startMs: number, intentId: string, durationMin = 20, goalActivityIdOverride?: string) {

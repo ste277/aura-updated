@@ -24,7 +24,9 @@ function main() {
   // ============================================================
   const migrationsDir = path.join(__dirname, '..', 'apps/web/prisma/migrations');
   const migrationDirs = fs.readdirSync(migrationsDir).filter((d) => /^\d{4}_/.test(d));
-  check('1. migration count remains 50 -- DR2 required no schema change', migrationDirs.length === 50);
+  // 51, not 50 -- HPG3-A1 (migration 0051) landed on main after DR2 was
+  // authored; this count tracks the repository's real history.
+  check('1. migration count remains 51 -- DR2 required no schema change', migrationDirs.length === 51);
   check('1b. no migration directory references Daily Rhythm (DR1\'s own 0050 is the only, pre-existing one)', migrationDirs.filter((d) => /daily_rhythm/i.test(d)).length === 1 && migrationDirs.includes('0050_user_daily_rhythm_preferences'));
 
   // ============================================================

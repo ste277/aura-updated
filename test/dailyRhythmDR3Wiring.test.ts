@@ -26,7 +26,9 @@ function main() {
   // ============================================================
   const migrationsDir = path.join(__dirname, '..', 'apps/web/prisma/migrations');
   const migrationDirs = fs.readdirSync(migrationsDir).filter((d) => /^\d{4}_/.test(d));
-  check('1. migration count remains 50 -- DR3 required no schema change', migrationDirs.length === 50);
+  // 51, not 50 -- HPG3-A1 (migration 0051) landed on main after DR3 was
+  // authored; this count tracks the repository's real history.
+  check('1. migration count remains 51 -- DR3 required no schema change', migrationDirs.length === 51);
 
   // ============================================================
   // dayConstructor.ts (the pure placement engine) and the astrology

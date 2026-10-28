@@ -82,6 +82,17 @@ async function main() {
     const { goal } = await createGoalWithActivities({ userId: user.id, title: 'Meditate regularly (R2 fixture)', targetDate: null, activities: [] });
     createdGoalIds.push(goal.id);
     const goalActivity = await addGoalActivity(user.id, goal.id, { title: 'Meditate 10 minutes', activityId: null });
+    // HPG3-A2 -- this fixture deliberately stacks FOUR same-local-day
+    // occurrences (LOGGED/UPCOMING/SKIPPED/CANCELLED, all on the same
+    // synthetic Wednesday) to isolate the fact-loader's own WEEKLY
+    // counting logic, independent of any daily constraint. MULTIPLE_PER_DAY
+    // keeps the new, orthogonal daily cap (default ONCE_PER_DAY) from
+    // confounding this pre-existing, weekly-only intent -- in particular,
+    // the later Move of planUpcoming (section 15/21) would otherwise be
+    // rejected by the new daily check whenever "now" genuinely falls on
+    // this fixture's own synthetic Wednesday (e.g. the test literally runs
+    // on a Wednesday), since planLogged already occupies that same day.
+    await sql(`UPDATE "GoalActivity" SET "dailyFrequencyKind" = 'MULTIPLE_PER_DAY' WHERE id = $1`, [goalActivity!.id]);
     const freshRow = (await sql(`SELECT "rhythmKind", "rhythmTargetPerWeek" FROM "GoalActivity" WHERE id = $1`, [goalActivity!.id]))[0];
     check('37. a freshly-created GoalActivity has rhythmKind/rhythmTargetPerWeek NULL (no production writer sets them)', freshRow.rhythmKind === null && freshRow.rhythmTargetPerWeek === null);
     check('37. that NULL row normalizes to canonical NONE', normalizeGoalActivityRhythm({ rhythmKind: freshRow.rhythmKind, rhythmTargetPerWeek: freshRow.rhythmTargetPerWeek }).kind === 'NONE');

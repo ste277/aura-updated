@@ -10,14 +10,14 @@
  * a Rhythm policy, and vice versa -- a GoalActivity may legitimately carry
  * both at once.
  *
- * A1 establishes the pure policy representation only. No DB access here
- * (same convention as goalActivityRhythm.ts/goalCompletion.ts). No
- * production write path creates/updates a daily-frequency policy yet, no
- * production read path consults eligibility yet, and nothing here reads or
- * writes a GoalActivityOccurrence row -- this module does not decide
- * whether a NEW occurrence may be created; it only defines what the policy
- * values mean, exactly the scope migration 0051's own doc comment
- * describes. A LATER ticket (HPG3-A2) wires enforcement.
+ * A1 established the pure policy representation only -- no DB access, no
+ * production writer/reader wired. HPG3-A2 wires actual enforcement (db.ts's
+ * checkDailyOccurrenceEligibility/materializeGoalActivityRhythmOccurrence)
+ * but still keeps THIS module itself pure (same convention as
+ * goalActivityRhythm.ts/goalCompletion.ts): the day-resolution functions
+ * added below are plain string/Date arithmetic, mirroring
+ * goalActivityRhythm.ts's own resolveOccurrenceLocalDate(OrNull) byte-for-
+ * byte in shape -- this module still never queries a database itself.
  */
 
 // Reuses this repository's EXISTING canonical validators for the
@@ -26,9 +26,11 @@
 // rejects a syntactically-shaped but calendrically-invalid date (e.g.
 // "2026-02-30"); isValidIanaTimezone (apps/web/lib/timezone.ts) is the
 // same canonical timezone validator every other user-facing timezone
-// field in this codebase already shares.
+// field in this codebase already shares. getDatePartsInTimezone (timezone.ts)
+// is the same canonical live-derivation primitive scheduledWeekStart's own
+// resolveOccurrenceLocalDate already uses -- no second algorithm there either.
 import { isValidCivilDateString } from './goals';
-import { isValidIanaTimezone } from './timezone';
+import { isValidIanaTimezone, getDatePartsInTimezone } from './timezone';
 
 // ============================================================
 // Canonical vocabulary. ONCE_PER_DAY and MULTIPLE_PER_DAY are the two
@@ -225,4 +227,60 @@ export function validateScheduledLocalDatePair(input: { localDate: unknown; time
   // try/catch above is what defeats TypeScript's own narrowing here, not
   // a genuine type uncertainty.
   return { ok: true, localDate: input.localDate as string, timezone: input.timezone };
+}
+
+// ============================================================
+// HPG3-A2 -- day resolution. Byte-for-byte the SAME shape as
+// goalActivityRhythm.ts's own resolveOccurrenceLocalDate(OrNull) for the
+// WEEK snapshot, mirrored here for the DAY snapshot: the frozen snapshot
+// ALWAYS wins when present (never re-derived from the live plan even if
+// one still exists -- this is what makes a later timezone change, or a
+// Move that hasn't happened yet, unable to silently reshuffle historical
+// daily attribution); live derivation from plannedStartAt is used ONLY
+// when no snapshot exists at all. A partially-populated snapshot is an
+// impossible, corrupt state and is never silently guessed at -- it throws,
+// exactly like the week-snapshot sibling.
+// ============================================================
+
+export interface ScheduledLocalDaySnapshot {
+  scheduledLocalDate: string | null;
+  scheduledLocalTimezone: string | null;
+}
+
+/**
+ * `plannedStartAt` required (a live plan exists). Snapshot wins when
+ * present; falls back to live-deriving from `plannedStartAt` via
+ * `liveTimezone` only when the snapshot is entirely absent.
+ */
+export function resolveOccurrenceLocalDay(snapshot: ScheduledLocalDaySnapshot, plannedStartAt: Date, liveTimezone: string): string {
+  const hasDate = snapshot.scheduledLocalDate !== null && snapshot.scheduledLocalDate !== undefined;
+  const hasTimezone = snapshot.scheduledLocalTimezone !== null && snapshot.scheduledLocalTimezone !== undefined;
+  if (hasDate && hasTimezone) return snapshot.scheduledLocalDate as string;
+  if (!hasDate && !hasTimezone) return getDatePartsInTimezone(liveTimezone, plannedStartAt).dateStr;
+  throw new Error(
+    `GoalActivityOccurrence has a partially-populated scheduled-day snapshot (scheduledLocalDate=${String(snapshot.scheduledLocalDate)}, scheduledLocalTimezone=${String(snapshot.scheduledLocalTimezone)}) -- refusing to silently combine stored and live-derived attribution.`
+  );
+}
+
+/**
+ * The deletion-tolerant variant: `plannedStartAt` is `null` exactly when
+ * the occurrence's linked PlannedActivity has been hard-deleted. With a
+ * real `plannedStartAt`, behavior is identical to `resolveOccurrenceLocalDay`
+ * above (snapshot still wins when present). Without one, only the snapshot
+ * can answer -- returns `null` ("unattributable, never fabricated") when
+ * neither the plan nor the snapshot is available. This `null` is NOT, by
+ * itself, a verdict on eligibility -- see db.ts's own checkDailyOccurrenceEligibility
+ * for how an unattributable row is handled (never silently "free", never
+ * silently "blocks every future day forever" -- a typed, recoverable
+ * conflict instead).
+ */
+export function resolveOccurrenceLocalDayOrNull(snapshot: ScheduledLocalDaySnapshot, plannedStartAt: Date | null, liveTimezone: string): string | null {
+  if (plannedStartAt !== null) return resolveOccurrenceLocalDay(snapshot, plannedStartAt, liveTimezone);
+  const hasDate = snapshot.scheduledLocalDate !== null && snapshot.scheduledLocalDate !== undefined;
+  const hasTimezone = snapshot.scheduledLocalTimezone !== null && snapshot.scheduledLocalTimezone !== undefined;
+  if (hasDate && hasTimezone) return snapshot.scheduledLocalDate as string;
+  if (!hasDate && !hasTimezone) return null;
+  throw new Error(
+    `GoalActivityOccurrence has a partially-populated scheduled-day snapshot and no live PlannedActivity to derive from either (scheduledLocalDate=${String(snapshot.scheduledLocalDate)}, scheduledLocalTimezone=${String(snapshot.scheduledLocalTimezone)}).`
+  );
 }

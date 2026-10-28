@@ -17,12 +17,14 @@
  * database backstop against a forked successor.
  */
 import { randomUUID } from 'crypto';
-import { beginTransaction, type PlannedActivity } from './db';
+import type { PoolClient } from 'pg';
+import { beginTransaction, checkDailyOccurrenceEligibility, type PlannedActivity } from './db';
 import { isActivePlanBlocker } from './dayConstructorOrchestrator';
 import { parseSchedulingMode } from './plannedActivitySchedulingMode';
 import { buildGoogleCalendarUrl } from '../../../packages/recommendation/src/dailyAssistant';
 import { normalizeGoalActivityRhythm, deriveGoalActivityRhythmContributionWithEvidence, localCalendarWeekStart, resolveOccurrenceLocalDateOrNull, type GoalActivityRhythmOccurrenceFact, type PlannedActivityStatusForRhythm } from './goalActivityRhythm';
 import { evaluateNewOccurrenceEligibility } from './goalActivityOccurrenceCapacity';
+import { normalizeGoalActivityDailyFrequency, isGoalActivityDailyFrequencyEnforceable, type PersistedGoalActivityDailyFrequency } from './goalActivityDailyFrequency';
 import { getDatePartsInTimezone } from './timezone';
 
 export type MovePlanErrorCode =
@@ -32,7 +34,17 @@ export type MovePlanErrorCode =
   | 'INVALID_DESTINATION'
   | 'CONFLICT'
   | 'HAS_LINKED_MOMENT'
-  | 'CAPACITY_EXCEEDED';
+  | 'CAPACITY_EXCEEDED'
+  // HPG3-A2 -- distinct from CAPACITY_EXCEEDED (weekly Rhythm target) so a
+  // caller can tell the two apart: the destination LOCAL DAY already has
+  // another live occurrence of this ONCE_PER_DAY GoalActivity.
+  | 'DAILY_CAPACITY_EXCEEDED'
+  // A pre-A2 legacy occurrence with no recoverable scheduled-day snapshot
+  // makes the destination day's eligibility impossible to confirm safely --
+  // see db.ts's checkDailyOccurrenceEligibility for exactly when this
+  // occurs and how it resolves. Never silently treated as free or as
+  // permanently blocked.
+  | 'DAILY_ATTRIBUTION_UNRESOLVED';
 
 export class MovePlanError extends Error {
   constructor(public readonly code: MovePlanErrorCode, message: string) {
@@ -210,7 +222,7 @@ async function enforceDestinationWeekCapacity(
   const userRes = await client.query(`SELECT timezone FROM "User" WHERE id = $1`, [userId]);
   const timezone: string = userRes.rows[0].timezone;
 
-  const gaRes = await client.query(`SELECT "rhythmKind", "rhythmTargetPerWeek" FROM "GoalActivity" WHERE id = $1 AND "userId" = $2`, [goalActivityId, userId]);
+  const gaRes = await client.query(`SELECT "rhythmKind", "rhythmTargetPerWeek", "dailyFrequencyKind", "dailyFrequencyLimit" FROM "GoalActivity" WHERE id = $1 AND "userId" = $2`, [goalActivityId, userId]);
   if (gaRes.rows.length === 0) return { occurrenceId, timezone };
   const rhythm = normalizeGoalActivityRhythm({ rhythmKind: gaRes.rows[0].rhythmKind, rhythmTargetPerWeek: gaRes.rows[0].rhythmTargetPerWeek });
   if (rhythm.kind !== 'N_PER_WEEK') return { occurrenceId, timezone }; // finite Goal Activity -- Rhythm capacity is not a concept here
@@ -251,6 +263,29 @@ async function enforceDestinationWeekCapacity(
   if (!eligibility.eligible) {
     throw new MovePlanError('CAPACITY_EXCEEDED', 'Moving this would exceed the destination week\'s weekly target.');
   }
+
+  // HPG3-A2 -- the SAME destination re-validation discipline as the weekly
+  // check immediately above, for the DAY: excludes `occurrenceId` itself
+  // (this occurrence is leaving its old day, not adding a duplicate to the
+  // destination), reusing the shared, already-reviewed
+  // checkDailyOccurrenceEligibility (db.ts) rather than a second formula.
+  // `client` here is intentionally the narrower, decoupled query interface
+  // this file already uses throughout -- it is always a real PoolClient at
+  // runtime (movePlannedActivity/remainingDayRecompositionAcceptance.ts
+  // both pass beginTransaction()'s own client), so this cast introduces no
+  // actual type unsafety, only a deliberately narrower local signature.
+  const persistedDailyFrequency: PersistedGoalActivityDailyFrequency = { dailyFrequencyKind: gaRes.rows[0].dailyFrequencyKind, dailyFrequencyLimit: gaRes.rows[0].dailyFrequencyLimit };
+  const dailyFrequency = normalizeGoalActivityDailyFrequency(persistedDailyFrequency);
+  if (isGoalActivityDailyFrequencyEnforceable(dailyFrequency.kind) && dailyFrequency.kind === 'ONCE_PER_DAY') {
+    const dailyEligibility = await checkDailyOccurrenceEligibility(userId, goalActivityId, destinationLocalDate, timezone, occurrenceId, client as unknown as PoolClient);
+    if (dailyEligibility.status === 'OCCUPIED') {
+      throw new MovePlanError('DAILY_CAPACITY_EXCEEDED', 'That destination day already has another occurrence of this activity.');
+    }
+    if (dailyEligibility.status === 'UNRESOLVED') {
+      throw new MovePlanError('DAILY_ATTRIBUTION_UNRESOLVED', 'Cannot confirm the destination day is free for this activity.');
+    }
+  }
+
   return { occurrenceId, timezone };
 }
 
@@ -346,9 +381,18 @@ export async function applyMoveWrites(
   // harmless: the WHERE clause already matches zero rows in that case.
   const scheduledWeekStart = occurrenceContext ? localCalendarWeekStart(getDatePartsInTimezone(occurrenceContext.timezone, newStartAt).dateStr) : null;
   const scheduledWeekTimezone = occurrenceContext ? occurrenceContext.timezone : null;
+  // HPG3-A2 -- the scheduled-DAY snapshot is re-stamped in this SAME
+  // statement, atomically with the week snapshot and the repoint
+  // immediately above -- never a separate statement, so there is no window
+  // where the week and day snapshots could diverge. This is what correctly
+  // transfers the day's occupied slot to the destination on a Move across
+  // midnight, and frees the source day in the same instant (the SAME row,
+  // not a new one -- "no new occurrence on Move" is unchanged).
+  const scheduledLocalDate = occurrenceContext ? getDatePartsInTimezone(occurrenceContext.timezone, newStartAt).dateStr : null;
+  const scheduledLocalTimezone = occurrenceContext ? occurrenceContext.timezone : null;
   await client.query(
-    `UPDATE "GoalActivityOccurrence" SET "plannedActivityId" = $1, "scheduledWeekStart" = $2, "scheduledWeekTimezone" = $3 WHERE "plannedActivityId" = $4 AND "userId" = $5`,
-    [bId, scheduledWeekStart, scheduledWeekTimezone, a.id, userId]
+    `UPDATE "GoalActivityOccurrence" SET "plannedActivityId" = $1, "scheduledWeekStart" = $2, "scheduledWeekTimezone" = $3, "scheduledLocalDate" = $4, "scheduledLocalTimezone" = $5 WHERE "plannedActivityId" = $6 AND "userId" = $7`,
+    [bId, scheduledWeekStart, scheduledWeekTimezone, scheduledLocalDate, scheduledLocalTimezone, a.id, userId]
   );
 
   return { from: aMoved.rows[0], to: bRes.rows[0] };

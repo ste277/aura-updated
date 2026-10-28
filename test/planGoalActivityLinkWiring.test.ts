@@ -77,8 +77,25 @@ check('6. the rollback path returns a typed 400, not an unhandled 500', /err\.me
 // ============================================================
 
 check('7. linkGoalActivityToPlannedActivity itself (db.ts) is UNMODIFIED by HPG2 -- still the exact ownership/eligibility WHERE clause Day Constructor already relies on', /WHERE id = \$2\s*\n\s*AND "userId" = \$3\s*\n\s*AND status != 'DISMISSED'\s*\n\s*AND \(\s*\n\s*"plannedActivityId" IS NULL\s*\n\s*OR "plannedActivityId" IN \(\s*\n\s*SELECT id FROM "PlannedActivity" WHERE "userId" = \$3 AND status IN \('CANCELLED', 'SKIPPED'\)/.test(dbSource));
-check('7. materializeGoalActivityRhythmOccurrence (Rhythm-specific path) is NOT imported/called in POST /api/plans -- deliberately out of scope (zero production GoalActivity has rhythmKind set today; a comment documents why, but it is never invoked)', !/materializeGoalActivityRhythmOccurrence\(/.test(plansRouteSource) && !/import \{[^}]*materializeGoalActivityRhythmOccurrence/.test(plansRouteSource));
-check('7. no new Prisma migration directory was added for this PR', fs.readdirSync('apps/web/prisma/migrations').filter((d) => /^\d/.test(d)).length === 50);
+// HPG3-A2 -- materializeGoalActivityRhythmOccurrence (Rhythm-specific path)
+// is now wired into POST /api/plans, mirroring the EXACT ordering
+// dayConstructorAcceptancePersistence.ts's own write loop already
+// established: tried first, the existing linkGoalActivityToPlannedActivity
+// used only as the NOT_RHYTHM_ELIGIBLE fallback. This check's original
+// concern ("never silently pulls Rhythm mechanics into HPG2's own, simpler
+// Goal association") is still what it verifies -- the finite/once-ever
+// path (checks 69-73 above) is completely unmodified; this only proves
+// the daily-eligibility-aware path HPG3-A2 adds is correctly ordered
+// AFTER the HPG2 lifecycle guard and BEFORE the legacy fallback, never
+// bypassing either.
+check('7. the route imports and calls materializeGoalActivityRhythmOccurrence, tried BEFORE the legacy link, exactly as dayConstructorAcceptancePersistence.ts already does', /import \{[^}]*materializeGoalActivityRhythmOccurrence/.test(plansRouteSource) && /const materialized = await materializeGoalActivityRhythmOccurrence\(session\.userId, goalActivityId, plan\.id, plannedStartAt, planningLocalDate, user!\.timezone, client\);/.test(plansRouteSource));
+check('7. a genuine Rhythm-specific refusal (anything other than NOT_RHYTHM_ELIGIBLE) never falls through to the legacy link -- it fails the request closed', /if \(!materialized\.ok && materialized\.reason !== 'NOT_RHYTHM_ELIGIBLE'\) \{[\s\S]{0,700}throw new Error\('GOAL_ACTIVITY_LINK_FAILED'\);/.test(plansRouteSource));
+check('7. the legacy link is reached ONLY for NOT_RHYTHM_ELIGIBLE -- the finite/once-ever path (checks 69-73) is otherwise completely untouched', /if \(!materialized\.ok\) \{[\s\S]{0,850}const linked = await linkGoalActivityToPlannedActivity\(session\.userId, goalActivityId, plan\.id, client\);/.test(plansRouteSource));
+check('7. the lifecycle guard (HPG2 P0) still runs BEFORE materialize -- its own position is unchanged', plansRouteSource.indexOf('lockGoalParentLifecycleForPlanning(session.userId, [goalActivityId], client)') < plansRouteSource.indexOf('materializeGoalActivityRhythmOccurrence(session.userId'));
+// Migration count tracks the repository's real history, not a number
+// frozen at HPG2's own authoring time -- HPG3-A1 (migration 0051) already
+// landed on main before this ticket began; A2 itself adds none.
+check('7. no new Prisma migration directory was added by THIS PR (51, matching HPG3-A1\'s own already-merged baseline)', fs.readdirSync('apps/web/prisma/migrations').filter((d) => /^\d/.test(d)).length === 51);
 check('7. PlannedActivity itself still carries no goalActivityId column (schema.prisma\'s own "stays completely unaware of acquisition source" house rule, unmodified)', !/goalActivityId\s+String\?/.test(fs.readFileSync('apps/web/prisma/schema.prisma', 'utf8')));
 
 if (!allPassed) { console.error('SOME HPG2 WIRING CHECKS FAILED'); process.exit(1); }
