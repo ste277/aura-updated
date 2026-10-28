@@ -18,6 +18,7 @@ import { formatMuhurtaReason } from '../../../packages/muhurta/src/muhurtaReason
 import { localDateTimeToUTC, getDatePartsInTimezone, getMinuteOfDayInTimezone } from '../lib/timezone';
 import { triggerHaptic } from '../lib/haptics';
 import { trackEvent } from '../lib/trackEvent';
+import { isKnownSchedulingEligibilityCode, presentSchedulingEligibilityError, type SchedulingEligibilityPresentation } from '../lib/schedulingEligibilityPresentation';
 // Event Location Plan Persistence V1 closeout: pure plan display/formatting
 // logic moved to a plain .ts module so it can be unit-tested under this
 // repo's normal (non-JSX) test runner -- see planFormatting.ts's own doc
@@ -389,6 +390,18 @@ export async function saveUpcomingPlanFromCandidate(candidate: TimingCandidate, 
   return mapPlanRow(await res.json());
 }
 
+/** HPG3-A3b -- carries an optional, untrusted-until-validated `code` string
+ * alongside a human-readable message, so a catch block can distinguish "a
+ * known scheduling-eligibility code" from "an ordinary save/move failure"
+ * without re-reading the response body it was built from. Never thrown
+ * for anything this file hasn't itself read off a real response. */
+class PlanActionError extends Error {
+  constructor(message: string, public readonly code?: string) {
+    super(message);
+    this.name = 'PlanActionError';
+  }
+}
+
 export function PlanWithAuraView({ onTimingSearch, onViewDay, onPlanLogged, timezone, initialActivity, initialActivityKey, initialActivityId, initialHorizon, onOpenPeople, focusMomentsKey, onMomentSeen, focusMomentToken, focusPlansKey, focusPlanId, focusPlansFilter }: PlanWithAuraViewProps) {
   const [planMode, setPlanMode] = useState<TimingSearchMode>('FIND');
   const [taskTitle, setTaskTitle] = useState('');
@@ -423,6 +436,16 @@ export function PlanWithAuraView({ onTimingSearch, onViewDay, onPlanLogged, time
   const [customEndDate, setCustomEndDate] = useState('');
   const [findResult, setFindResult] = useState<TimingSearchResponseWithDailyRhythm | null>(null);
   const [error, setError] = useState('');
+  // HPG3-A3b -- a SEPARATE state from `error` above, deliberately: a known
+  // scheduling-eligibility code (from POST /api/plans or the reschedule-
+  // via-Move route, both below) gets this dedicated, richer banner
+  // (headline + non-technical detail + a severity-gated recovery action);
+  // every OTHER failure in this view (search, voice input, an unrecognized
+  // save/move failure) keeps using the plain `error` string exactly as
+  // before. The two are mutually exclusive by construction -- whichever
+  // catch block runs sets exactly one of them and clears the other, so
+  // the view never renders two overlapping failure banners for one event.
+  const [schedulingConflict, setSchedulingConflict] = useState<SchedulingEligibilityPresentation | null>(null);
   const [isLoading, setIsLoading] = useState(false);
   const [isListening, setIsListening] = useState(false);
 
@@ -552,6 +575,7 @@ export function PlanWithAuraView({ onTimingSearch, onViewDay, onPlanLogged, time
     setTimePreference(recommendedPreference(resolved.taskTitle));
     setFindResult(null);
     setError('');
+    setSchedulingConflict(null);
     setShowAllPlans(false);
     setPlansFilter(null);
     setShowMoreActivities(false);
@@ -696,6 +720,7 @@ export function PlanWithAuraView({ onTimingSearch, onViewDay, onPlanLogged, time
     setTimePreference(recommendedPreference(activity.title));
     setFindResult(null);
     setError('');
+    setSchedulingConflict(null);
     bumpRequestGeneration();
   };
 
@@ -833,7 +858,14 @@ export function PlanWithAuraView({ onTimingSearch, onViewDay, onPlanLogged, time
     });
     if (!res.ok) {
       const body = await res.json().catch(() => null);
-      throw new Error((body && typeof body.error === 'string' && body.error) || 'Unable to reschedule this activity.');
+      // HPG3-A3b -- Move's own route (apps/web/app/api/plans/[planId]/move/route.ts)
+      // already returns `{error, code}`; 3 of its codes (CAPACITY_EXCEEDED,
+      // DAILY_CAPACITY_EXCEEDED, DAILY_ATTRIBUTION_UNRESOLVED) are the EXACT
+      // same strings schedulingEligibilityError.ts reuses, so the SAME typed
+      // presentation applies here too -- carried through as a PlanActionError
+      // rather than a plain Error so the catch below can distinguish it
+      // without re-parsing the response body a second time.
+      throw new PlanActionError((body && typeof body.error === 'string' && body.error) || 'Unable to reschedule this activity.', typeof body?.code === 'string' ? body.code : undefined);
     }
     const body = await res.json();
     const saved = mapPlanRow(body.plan, timezone);
@@ -863,7 +895,19 @@ export function PlanWithAuraView({ onTimingSearch, onViewDay, onPlanLogged, time
         // retry, rather than having to tap Reschedule again. The Move
         // transaction itself guarantees the original is untouched on any
         // failure (lib/planMove.ts), so there is nothing to roll back here.
-        setError(err instanceof Error && err.message ? err.message : 'Unable to reschedule this activity. Please check your connection and try again.');
+        //
+        // HPG3-A3b -- a known scheduling-eligibility code (the 3 Move and
+        // schedulingEligibilityError.ts genuinely share) gets the SAME
+        // typed banner as a failed NEW-plan save below, for consistent
+        // treatment of the same underlying conflict regardless of which
+        // action triggered it. Every other Move failure (NOT_FOUND,
+        // CONFLICT, HAS_LINKED_MOMENT, etc.) keeps showing Move's own
+        // existing message text via the plain `error` state, unchanged.
+        if (err instanceof PlanActionError && isKnownSchedulingEligibilityCode(err.code)) {
+          setSchedulingConflict(presentSchedulingEligibilityError(err.code));
+        } else {
+          setError(err instanceof Error && err.message ? err.message : 'Unable to reschedule this activity. Please check your connection and try again.');
+        }
         triggerHaptic('warning');
         throw err instanceof Error ? err : new Error('Unable to reschedule plan.');
       }
@@ -901,7 +945,17 @@ export function PlanWithAuraView({ onTimingSearch, onViewDay, onPlanLogged, time
           goalActivityId: selectedGoalActivityId ?? null,
         }),
       });
-      if (!res.ok) throw new Error('Unable to save plan.');
+      if (!res.ok) {
+        // HPG3-A3b -- POST /api/plans already returns `{error, code}` for
+        // every rejection (schedulingEligibilityError.ts, HPG3-A3a); this
+        // was previously discarded entirely (the body was never even
+        // read), so EVERY failure -- including the pre-A3a "goal no
+        // longer active"/"not available to link" cases -- showed the
+        // exact same generic text. Reading it now is a strict
+        // improvement, not a changed success flow.
+        const body = await res.json().catch(() => null);
+        throw new PlanActionError((body && typeof body.error === 'string' && body.error) || 'Unable to save plan.', typeof body?.code === 'string' ? body.code : undefined);
+      }
       const row = await res.json();
       const saved = mapPlanRow(row, timezone);
       setSavedPlans((plans) => [saved, ...plans.filter((item) => item.id !== saved.id)]);
@@ -915,12 +969,22 @@ export function PlanWithAuraView({ onTimingSearch, onViewDay, onPlanLogged, time
       triggerHaptic('success');
       trackEvent('PLAN_RESULT_SELECTED', { metadata: { mode: planMode } });
       return saved;
-    } catch {
+    } catch (err) {
       // The plan was NOT actually persisted -- do not add it to savedPlans
       // (that previously faked a success the server never confirmed, so the
       // plan silently vanished on the next page load/GET /api/plans). Surface
-      // a real error instead, using this view's existing `error` state.
-      setError('Unable to save this plan. Please check your connection and try again.');
+      // a real error instead.
+      //
+      // HPG3-A3b -- a known scheduling-eligibility code gets the dedicated
+      // `schedulingConflict` banner (headline + non-technical detail +, for
+      // a genuine conflict, a real "View your plans" action); every other
+      // failure (a network error, an unrecognized/codeless rejection) keeps
+      // the exact same generic `error` text as before this ticket.
+      if (err instanceof PlanActionError && isKnownSchedulingEligibilityCode(err.code)) {
+        setSchedulingConflict(presentSchedulingEligibilityError(err.code));
+      } else {
+        setError('Unable to save this plan. Please check your connection and try again.');
+      }
       triggerHaptic('warning');
       throw new Error('Unable to save plan.');
     }
@@ -1091,6 +1155,7 @@ export function PlanWithAuraView({ onTimingSearch, onViewDay, onPlanLogged, time
     if (!canSubmit) return;
     setIsLoading(true);
     setError('');
+    setSchedulingConflict(null);
     // DR4-F2B blocking-fix -- bumped unconditionally so THIS request's own
     // generation is always strictly newer than whatever came before it
     // (including an identical re-run of the same search: "a newer
@@ -1319,6 +1384,7 @@ export function PlanWithAuraView({ onTimingSearch, onViewDay, onPlanLogged, time
     recognition.interimResults = false;
     recognition.lang = 'en-US';
     setError('');
+    setSchedulingConflict(null);
     setIsListening(true);
 
     recognition.onresult = (event) => {
@@ -1686,7 +1752,33 @@ export function PlanWithAuraView({ onTimingSearch, onViewDay, onPlanLogged, time
         <div style={{ color: '#dbe7f4', fontSize: 12, textAlign: 'center', marginTop: 13 }}>
           🛡 Aura finds options using today&apos;s Panchang + your patterns
         </div>
-        {error && <div style={{ color: '#fb6b6b', fontSize: 12, marginTop: 10, lineHeight: 1.35 }}>{error}</div>}
+        {error && <div role="alert" style={{ color: '#fb6b6b', fontSize: 12, marginTop: 10, lineHeight: 1.35 }}>{error}</div>}
+        {/* HPG3-A3b -- the dedicated scheduling-eligibility banner (never
+            rendered at the same time as the generic `error` div above --
+            see the `schedulingConflict`/`error` state's own doc comment
+            for why they're mutually exclusive). "View your plans" is
+            offered ONLY for a genuine conflict (severity === 'conflict':
+            CAPACITY_EXCEEDED/DAILY_CAPACITY_EXCEEDED/DAILY_ATTRIBUTION_UNRESOLVED)
+            -- never for the two 'blocked' codes, which have no "existing
+            session" concept at all. It reuses `handleMyPlansClick`
+            UNCHANGED (the same real, already-wired action the "My Plans"
+            tab button already calls) rather than fabricating any new
+            navigation or claiming to jump to the specific conflicting
+            session, which no existing route can safely resolve (see this
+            ticket's delivery report). */}
+        {schedulingConflict && (
+          <div role="alert" style={{ marginTop: 10, padding: 12, borderRadius: 10, border: '1px solid rgba(251,107,107,0.35)', background: 'rgba(251,107,107,0.08)' }}>
+            <div style={{ color: '#fb6b6b', fontSize: 13, fontWeight: 700 }}>{schedulingConflict.headline}</div>
+            <div style={{ color: '#dbe7f4', fontSize: 12, marginTop: 4, lineHeight: 1.4 }}>{schedulingConflict.detail}</div>
+            {schedulingConflict.severity === 'conflict' && (
+              <div style={{ marginTop: 10 }}>
+                <SecondaryButton onClick={handleMyPlansClick} style={{ minHeight: 36 }}>
+                  View your plans
+                </SecondaryButton>
+              </div>
+            )}
+          </div>
+        )}
       </section>
 
       {findResult && (

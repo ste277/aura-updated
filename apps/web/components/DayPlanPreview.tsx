@@ -136,7 +136,12 @@ export function DayPlanPreview({ preview, onContinue, onDiscard, actionState, on
       )}
 
       {actionState && (actionState.kind === 'STALE' || actionState.kind === 'FAILED') && (
-        <p style={{ ...typography.body, color: actionState.kind === 'STALE' ? colors.caution : colors.danger, marginTop: spacing.lg }}>{actionState.message}</p>
+        // HPG3-A3b -- `role="alert"` for a genuine failure, `role="status"`
+        // for STALE's "review again" prompt (not itself a failure), same
+        // role/tone split this codebase already uses elsewhere (e.g.
+        // RecompositionCard.tsx, DailyBriefingCard.tsx) -- never a new
+        // convention.
+        <p role={actionState.kind === 'FAILED' ? 'alert' : 'status'} style={{ ...typography.body, color: actionState.kind === 'STALE' ? colors.caution : colors.danger, marginTop: spacing.lg }}>{actionState.message}</p>
       )}
 
       <div style={{ display: 'flex', justifyContent: 'flex-end', gap: spacing.md, marginTop: spacing.xxl }}>
@@ -173,7 +178,18 @@ export function DayPlanPreview({ preview, onContinue, onDiscard, actionState, on
         )}
         {actionState?.kind === 'SAVED' && <StatusBadge label="✓ Your day is planned" tone="positive" />}
         {actionState?.kind === 'STALE' && onReviewAgain && <SecondaryButton onClick={onReviewAgain}>Review again</SecondaryButton>}
-        {actionState?.kind === 'FAILED' && onRetry && <PrimaryButton onClick={onRetry}>Try again</PrimaryButton>}
+        {/* HPG3-A3b -- a known scheduling-eligibility `code` means retrying
+            this EXACT reviewed proposal under the SAME clientRequestId
+            cannot succeed (the conflict is against something that already
+            exists elsewhere, or a check that still cannot be resolved
+            safely): offering "Try again" there would be exactly the
+            misleading/auto-retry affordance this ticket's own sections 4/6
+            forbid. "Discard" (rendered unconditionally above whenever
+            summaryState === 'HAS_ITEMS') remains the real recovery path --
+            editing or removing the offending row before resubmitting. A
+            codeless FAILED (a transient/network-adjacent failure) keeps
+            "Try again" exactly as before this ticket. */}
+        {actionState?.kind === 'FAILED' && !actionState.code && onRetry && <PrimaryButton onClick={onRetry}>Try again</PrimaryButton>}
       </div>
     </div>
   );

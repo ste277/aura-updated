@@ -109,6 +109,25 @@ check('8. REJECTED classifies as STALE, carrying human-readable copy', (() => {
 })());
 check('9. IDEMPOTENCY_CONFLICT classifies as STALE (fail closed, this ticket\'s own section 15), never as an ordinary conflict', classifyAcceptanceUiState({ status: 'IDEMPOTENCY_CONFLICT' }).kind === 'STALE');
 check('10. SAVE_FAILED classifies as FAILED (retryable)', classifyAcceptanceUiState({ status: 'SAVE_FAILED' }).kind === 'FAILED');
+check('10b. HPG3-A3b -- a codeless SAVE_FAILED keeps the EXACT pre-A3b generic message and carries no code', (() => {
+  const s = classifyAcceptanceUiState({ status: 'SAVE_FAILED' });
+  return s.kind === 'FAILED' && s.message === "We couldn't save your plan. Try again." && (s as { code?: unknown }).code === undefined;
+})());
+check('10c. HPG3-A3b -- a known SAVE_FAILED code (DAILY_CAPACITY_EXCEEDED) classifies as FAILED, carries the code, and uses distinct, non-generic copy', (() => {
+  const s = classifyAcceptanceUiState({ status: 'SAVE_FAILED', code: 'DAILY_CAPACITY_EXCEEDED' });
+  return s.kind === 'FAILED' && (s as { code?: string }).code === 'DAILY_CAPACITY_EXCEEDED' && s.message !== "We couldn't save your plan. Try again." && s.message.length > 0;
+})());
+check('10d. HPG3-A3b -- every known SchedulingEligibilityErrorCode produces a distinct, non-generic FAILED message and carries its own code', (() => {
+  const codes = ['GOAL_NOT_ACTIVE', 'CAPACITY_EXCEEDED', 'DAILY_CAPACITY_EXCEEDED', 'DAILY_ATTRIBUTION_UNRESOLVED', 'GOAL_ACTIVITY_NOT_AVAILABLE'] as const;
+  return codes.every((code) => {
+    const s = classifyAcceptanceUiState({ status: 'SAVE_FAILED', code });
+    return s.kind === 'FAILED' && (s as { code?: string }).code === code && s.message !== "We couldn't save your plan. Try again." && s.message.length > 0;
+  });
+})());
+check('10e. HPG3-A3b -- the weekly-capacity message never implies a different TIME would resolve it (this ticket\'s own section 3)', (() => {
+  const s = classifyAcceptanceUiState({ status: 'SAVE_FAILED', code: 'CAPACITY_EXCEEDED' });
+  return s.kind === 'FAILED' && !/try a different time/i.test(s.message) && /week/i.test(s.message);
+})());
 check('11. NETWORK_ERROR classifies as FAILED (retryable)', classifyAcceptanceUiState({ status: 'NETWORK_ERROR' }).kind === 'FAILED');
 check('12. UNKNOWN_RESPONSE classifies as FAILED (generic failure, this ticket\'s own section 10)', classifyAcceptanceUiState({ status: 'UNKNOWN_RESPONSE' }).kind === 'FAILED');
 check('13. every real AcceptConstructedDayClientResult status is handled (no silent fallthrough)', (() => {
