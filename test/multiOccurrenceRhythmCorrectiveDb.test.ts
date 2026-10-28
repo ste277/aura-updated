@@ -93,6 +93,12 @@ async function main() {
     const { goal: goalA } = await createGoalWithActivities({ userId: user.id, title: `${GOAL_TITLE_PREFIX}A`, targetDate: null, activities: [] });
     createdGoalIds.push(goalA.id);
     const gaA = await addGoalActivity(user.id, goalA.id, { title: 'Strength training', activityId: null, rhythm: { kind: 'N_PER_WEEK', targetPerWeek: 5 } });
+    // HPG3-A2 -- this suite isolates WEEKLY capacity specifically (several
+    // scenarios stack more than one occurrence on the same local day on
+    // purpose). MULTIPLE_PER_DAY keeps the new, orthogonal daily cap
+    // (default ONCE_PER_DAY) from confounding these pre-existing,
+    // weekly-only assertions.
+    await sql(`UPDATE "GoalActivity" SET "dailyFrequencyKind" = 'MULTIPLE_PER_DAY' WHERE id = $1`, [gaA!.id]);
     const reqA1: AcceptConstructedDayRequest = { clientRequestId: `pr2c-a1-${Date.now()}`, constructionWindow: window('2026-10-06', '2026-10-06T06:00:00Z', '2026-10-06T20:00:00Z'), proposedItems: [item('intent-a1', '2026-10-06T09:00:00Z', '2026-10-06T09:30:00Z')] };
     const reqA2: AcceptConstructedDayRequest = { clientRequestId: `pr2c-a2-${Date.now()}`, constructionWindow: window('2026-10-07', '2026-10-07T06:00:00Z', '2026-10-07T20:00:00Z'), proposedItems: [item('intent-a2', '2026-10-07T09:00:00Z', '2026-10-07T09:30:00Z')] };
     const dA1 = await persistAcceptedConstructedDay(user.id, reqA1, iso('2026-10-06T08:00:00Z'), new Map([['intent-a1', gaA!.id]]));
@@ -131,6 +137,7 @@ async function main() {
     const { goal: goalB } = await createGoalWithActivities({ userId: user.id, title: `${GOAL_TITLE_PREFIX}B`, targetDate: null, activities: [] });
     createdGoalIds.push(goalB.id);
     const gaB = await addGoalActivity(user.id, goalB.id, { title: 'Strength training', activityId: null, rhythm: { kind: 'N_PER_WEEK', targetPerWeek: 5 } });
+    await sql(`UPDATE "GoalActivity" SET "dailyFrequencyKind" = 'MULTIPLE_PER_DAY' WHERE id = $1`, [gaB!.id]);
     const reqB1: AcceptConstructedDayRequest = { clientRequestId: `pr2c-b1-${Date.now()}`, constructionWindow: window('2026-10-06', '2026-10-06T06:00:00Z', '2026-10-06T20:00:00Z'), proposedItems: [item('intent-b1', '2026-10-06T11:00:00Z', '2026-10-06T11:30:00Z')] };
     const reqB2: AcceptConstructedDayRequest = { clientRequestId: `pr2c-b2-${Date.now()}`, constructionWindow: window('2026-10-07', '2026-10-07T06:00:00Z', '2026-10-07T20:00:00Z'), proposedItems: [item('intent-b2', '2026-10-07T11:00:00Z', '2026-10-07T11:30:00Z')] };
     const dB1 = await persistAcceptedConstructedDay(user.id, reqB1, iso('2026-10-06T08:00:00Z'), new Map([['intent-b1', gaB!.id]]));
@@ -159,6 +166,7 @@ async function main() {
     const { goal: goalC } = await createGoalWithActivities({ userId: user.id, title: `${GOAL_TITLE_PREFIX}C`, targetDate: null, activities: [] });
     createdGoalIds.push(goalC.id);
     const gaC = await addGoalActivity(user.id, goalC.id, { title: 'Strength training', activityId: null, rhythm: { kind: 'N_PER_WEEK', targetPerWeek: 5 } });
+    await sql(`UPDATE "GoalActivity" SET "dailyFrequencyKind" = 'MULTIPLE_PER_DAY' WHERE id = $1`, [gaC!.id]);
     const reqC1: AcceptConstructedDayRequest = { clientRequestId: `pr2c-c1-${Date.now()}`, constructionWindow: window('2026-10-06', '2026-10-06T06:00:00Z', '2026-10-06T20:00:00Z'), proposedItems: [item('intent-c1', '2026-10-06T12:00:00Z', '2026-10-06T12:30:00Z')] };
     const dC1 = await persistAcceptedConstructedDay(user.id, reqC1, iso('2026-10-06T08:00:00Z'), new Map([['intent-c1', gaC!.id]]));
     check('C setup: 1 of 5 committed', dC1.status === 'SAVED');
@@ -202,6 +210,7 @@ async function main() {
     const { goal: goalD } = await createGoalWithActivities({ userId: user.id, title: `${GOAL_TITLE_PREFIX}D`, targetDate: null, activities: [] });
     createdGoalIds.push(goalD.id);
     const gaD = await addGoalActivity(user.id, goalD.id, { title: 'Strength training', activityId: null, rhythm: { kind: 'N_PER_WEEK', targetPerWeek: 2 } });
+    await sql(`UPDATE "GoalActivity" SET "dailyFrequencyKind" = 'MULTIPLE_PER_DAY' WHERE id = $1`, [gaD!.id]);
     const moveBase = Math.ceil((Date.now() + 2 * 3600000) / MIN) * MIN;
     const moveWindowDate = new Date(moveBase).toISOString().slice(0, 10);
     const reqD: AcceptConstructedDayRequest = { clientRequestId: `pr2c-d-${Date.now()}`, constructionWindow: window(moveWindowDate, new Date(moveBase - 3600000).toISOString(), new Date(moveBase + 24 * 3600000).toISOString()), proposedItems: [{ intentId: 'intent-d', title: 'Strength training', placementSource: 'SELECTED_CANDIDATE' as const, start: new Date(moveBase), end: new Date(moveBase + 30 * MIN) }] };

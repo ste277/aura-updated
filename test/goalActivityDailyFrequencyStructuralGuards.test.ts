@@ -1,13 +1,20 @@
 /**
- * HPG3-A1 -- architecture guard (pure, no DB). Proves that the four new
- * columns (migration 0051) and the pure domain module
- * (goalActivityDailyFrequency.ts) are genuinely inert in this slice: no
- * production scheduling writer reads or writes them, and the module itself
- * is imported only by its own test files. A LATER ticket (HPG3-A2) is
- * expected to change these facts -- this guard exists so that change is
- * deliberate, not accidental, mirroring the "model before writes"
- * structural guards this codebase already uses for GoalActivityExecution
- * (G2.2.1) and GoalActivityOccurrence (R1).
+ * HPG3-A1, updated by HPG3-A2 -- architecture guard (pure, no DB).
+ *
+ * A1 proved the four new columns (migration 0051) and the pure domain
+ * module (goalActivityDailyFrequency.ts) were genuinely INERT: no
+ * production scheduling writer read or wrote them, and the module itself
+ * was imported only by its own test files -- with this file's own header
+ * explicitly noting "A LATER ticket (HPG3-A2) is expected to change these
+ * facts." A2 is that ticket. This file now proves the OPPOSITE, equally
+ * precise claim: the new columns and module are referenced ONLY inside
+ * the exact, reviewed call sites A2 introduces (db.ts's
+ * checkDailyOccurrenceEligibility/materializeGoalActivityRhythmOccurrence,
+ * and planMove.ts's destination-day re-validation/re-stamp) -- never
+ * anywhere else, and never by route.ts or dayConstructorAcceptancePersistence.ts
+ * directly (both call into db.ts's own functions instead, never touching
+ * the new columns or module themselves). This is still a "model become
+ * writes, but ONLY the reviewed ones" guard, not a weakened one.
  */
 import fs from 'fs';
 import path from 'path';
@@ -29,27 +36,27 @@ function listTs(dir: string): string[] {
 const production = [...listTs(path.join(root, 'apps/web/lib')), ...listTs(path.join(root, 'apps/web/app')), ...listTs(path.join(root, 'apps/web/components'))].map((f) => ({ f: path.relative(root, f), src: stripComments(fs.readFileSync(f, 'utf8')) }));
 
 // ============================================================
-// 1. The four new DB columns are never referenced in any production SQL
-// string, anywhere -- not the module that defines them, not a writer, not
-// a reader.
+// 1. The four columns are referenced ONLY inside the two files HPG3-A2
+// legitimately extends (db.ts, planMove.ts) -- nowhere else.
 // ============================================================
 const NEW_COLUMN_NAMES = ['dailyFrequencyKind', 'dailyFrequencyLimit', 'scheduledLocalDate', 'scheduledLocalTimezone'];
+const EXPECTED_COLUMN_REFERENCING_FILES = ['apps/web/lib/db.ts', 'apps/web/lib/planMove.ts'];
 for (const column of NEW_COLUMN_NAMES) {
   const referencingFiles = production.filter((x) => x.src.includes(`"${column}"`)).map((x) => x.f);
-  check(`1. "${column}" does not appear in any production SQL string (no writer, no reader)`, referencingFiles.length === 0);
+  check(`1. "${column}" appears ONLY in ${EXPECTED_COLUMN_REFERENCING_FILES.join(', ')} -- no other production file references it`, referencingFiles.length > 0 && referencingFiles.every((f) => EXPECTED_COLUMN_REFERENCING_FILES.includes(f)));
 }
 
 // ============================================================
-// 2. The confirmed, existing scheduling writers from the HPG3 audit are
-// completely untouched: their own source text does not mention any of the
-// four new columns, the new module, or its exported names.
+// 2. The confirmed scheduling writers that do NOT touch the new columns or
+// module DIRECTLY (they call into db.ts's own functions instead) stay
+// exactly that way -- route.ts, dayConstructorAcceptancePersistence.ts and
+// remainingDayRecompositionAcceptance.ts never reference a new column name
+// or the new module's exports in their own source text.
 // ============================================================
-const CONFIRMED_SCHEDULING_WRITERS = [
+const INDIRECT_CALLERS = [
   'apps/web/app/api/plans/route.ts',
   'apps/web/lib/dayConstructorAcceptancePersistence.ts',
-  'apps/web/lib/planMove.ts',
   'apps/web/lib/remainingDayRecompositionAcceptance.ts',
-  'apps/web/lib/db.ts',
 ];
 const NEW_MODULE_EXPORTS = [
   'goalActivityDailyFrequency',
@@ -58,47 +65,51 @@ const NEW_MODULE_EXPORTS = [
   'toPersistedGoalActivityDailyFrequency',
   'isGoalActivityDailyFrequencyEnforceable',
   'validateScheduledLocalDatePair',
+  'resolveOccurrenceLocalDay',
 ];
-for (const writerPath of CONFIRMED_SCHEDULING_WRITERS) {
-  const file = production.find((x) => x.f === writerPath);
-  if (!file) throw new Error(`expected production file not found: ${writerPath}`);
+for (const callerPath of INDIRECT_CALLERS) {
+  const file = production.find((x) => x.f === callerPath);
+  if (!file) throw new Error(`expected production file not found: ${callerPath}`);
   const mentionsNewColumn = NEW_COLUMN_NAMES.some((c) => file.src.includes(c));
   const mentionsNewModule = NEW_MODULE_EXPORTS.some((n) => file.src.includes(n));
-  check(`2. ${writerPath}: does not mention any new column name or the new module's exports`, !mentionsNewColumn && !mentionsNewModule);
+  check(`2. ${callerPath}: calls into db.ts's own functions only -- never mentions a new column name or the new module's exports directly`, !mentionsNewColumn && !mentionsNewModule);
 }
+// db.ts and planMove.ts, by contrast, ARE expected to reference the new
+// module's exports directly -- proven, not just permitted, so a future
+// accidental removal of this wiring fails loudly.
+check('2. db.ts DOES reference the new module\'s normalize/enforceability helpers (the reviewed A2 integration)', /normalizeGoalActivityDailyFrequency|isGoalActivityDailyFrequencyEnforceable/.test(production.find((x) => x.f === 'apps/web/lib/db.ts')!.src));
+check('2. planMove.ts DOES reference the new module\'s normalize/enforceability helpers (the reviewed A2 destination-day re-validation)', /normalizeGoalActivityDailyFrequency|isGoalActivityDailyFrequencyEnforceable/.test(production.find((x) => x.f === 'apps/web/lib/planMove.ts')!.src));
 
 // ============================================================
-// 3. The new pure module itself is imported only by its own test files --
-// zero production importers.
+// 3. The new pure module is imported ONLY by db.ts and planMove.ts (plus
+// its own test files, which this production-only scan never sees).
 // ============================================================
 const importers = production.filter((x) => /from ['"].*goalActivityDailyFrequency['"]/.test(x.src)).map((x) => x.f);
-check('3. apps/web/lib/goalActivityDailyFrequency.ts has ZERO production importers (schema/domain-only, same discipline as G2.1/R1 before their own wiring tickets)', importers.length === 0);
+check('3. apps/web/lib/goalActivityDailyFrequency.ts has EXACTLY the two reviewed A2 production importers (db.ts, planMove.ts) -- no other file imports it', importers.length === 2 && importers.includes('apps/web/lib/db.ts') && importers.includes('apps/web/lib/planMove.ts'));
 
 // ============================================================
-// 4. The module itself makes no DB call, consistent with its own doc
-// comment ("No DB access here").
+// 4. The module itself still makes no DB call, consistent with its own
+// doc comment ("No DB access here") -- unaffected by A2.
 // ============================================================
 const moduleSrc = stripComments(fs.readFileSync(path.join(root, 'apps/web/lib/goalActivityDailyFrequency.ts'), 'utf8'));
 check('4. goalActivityDailyFrequency.ts contains no SQL, no pool/client reference -- pure domain logic only', !/\bpool\.|\bclient\.|SELECT |INSERT |UPDATE |DELETE /.test(moduleSrc));
 
 // ============================================================
-// 5. The migration itself is additive only: no DROP, no NOT NULL, no
-// DEFAULT, no new constraint, touching only the two expected tables.
+// 5. Migration 0051 itself is unchanged by A2: still additive only, no
+// DROP, no NOT NULL, no DEFAULT, no new constraint, touching only the two
+// expected tables. A2 adds no new migration of its own.
 // ============================================================
 const migrationSqlRaw = fs.readFileSync(path.join(root, 'apps/web/prisma/migrations/0051_goal_activity_daily_frequency_foundation/migration.sql'), 'utf8');
-// Strip SQL `--` line comments (this migration's own prose explains "no
-// default, no backfill" in English, which would otherwise false-positive
-// against the DEFAULT check below) -- only the executable statements are
-// checked.
 const migrationSql = migrationSqlRaw.replace(/--.*$/gm, '');
 check('5. the migration contains no DROP of any kind', !/DROP /i.test(migrationSql));
 check('5. the migration adds no NOT NULL constraint', !/NOT NULL/i.test(migrationSql));
 check('5. the migration sets no DEFAULT value', !/DEFAULT/i.test(migrationSql));
 check('5. the migration adds no UNIQUE constraint or index', !/UNIQUE|CREATE INDEX/i.test(migrationSql));
 check('5. the migration touches only GoalActivity and GoalActivityOccurrence', /ALTER TABLE "GoalActivity"/.test(migrationSql) && /ALTER TABLE "GoalActivityOccurrence"/.test(migrationSql) && (migrationSql.match(/ALTER TABLE/g) ?? []).length === 2);
+check('5. no SECOND migration directory was added for the new columns (A2 needed no schema change)', fs.readdirSync(path.join(root, 'apps/web/prisma/migrations')).filter((d) => /^\d/.test(d)).length === 51);
 
 if (!allPassed) {
-  console.error('SOME HPG3-A1 STRUCTURAL GUARD CHECKS FAILED');
+  console.error('SOME HPG3-A1/A2 STRUCTURAL GUARD CHECKS FAILED');
   process.exit(1);
 }
-console.log('ALL HPG3-A1 STRUCTURAL GUARD CHECKS PASSED');
+console.log('ALL HPG3-A1/A2 STRUCTURAL GUARD CHECKS PASSED');

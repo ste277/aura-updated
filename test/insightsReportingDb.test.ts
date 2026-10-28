@@ -87,6 +87,12 @@ async function main() {
     createdGoalIds.push(goal1.id);
     const ga1 = await addGoalActivity(user.id, goal1.id, { title: 'Workout', activityId: null });
     await setRhythm(ga1!.id, 3);
+    // HPG3-A2 -- scenarios 1/3/4 below deliberately materialize occurrences
+    // of ga1 on OVERLAPPING/SAME calendar days (2027-09-21 appears twice)
+    // to isolate WEEKLY reporting aggregation from any daily concept; opt
+    // out of the new default ONCE_PER_DAY cap so this fixture keeps testing
+    // exactly what it always tested.
+    await sql(`UPDATE "GoalActivity" SET "dailyFrequencyKind" = 'MULTIPLE_PER_DAY' WHERE id = $1`, [ga1!.id]);
     const d1 = await persistAcceptedConstructedDay(user.id, { clientRequestId: `g1-${Date.now()}`, constructionWindow: window('2027-09-21', '2027-09-21T09:00:00Z', '2027-09-21T17:00:00Z'), proposedItems: [item({ intentId: 'g1', start: iso('2027-09-21T10:00:00Z'), end: iso('2027-09-21T10:30:00Z') })] }, iso('2027-09-21T08:00:00Z'), new Map([['g1', ga1!.id]]));
     const p1 = d1.status === 'SAVED' ? d1.plans[0] : null;
     await logPlannedActivity(user.id, p1!.id);

@@ -168,7 +168,9 @@ check('16. the goal line uses caption-sized, muted typography (typography.captio
 // ============================================================
 const migrationDirs = fs.readdirSync('apps/web/prisma/migrations').filter((d) => /^\d{4}_/.test(d));
 check('17. no migration directory was added for DR4-C (count-independent: holds regardless of how many unrelated migrations exist)', !migrationDirs.some((d) => /goalContinuity|homeTimelineGoal/i.test(d)));
-check('17. expected migration count is still exactly 50', migrationDirs.length === 50);
+// 51, not 50 -- HPG3-A1 (migration 0051) landed on main after this file was
+// authored; this count tracks the repository's real history.
+check('17. expected migration count is still exactly 51', migrationDirs.length === 51);
 
 // ============================================================
 // 18. homeTimelineComposer.ts / dailyAgenda.ts / db.ts were not modified by

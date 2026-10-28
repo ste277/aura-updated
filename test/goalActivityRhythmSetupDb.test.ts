@@ -242,6 +242,11 @@ async function main() {
       createdGoalIds.push(goalId);
       const added = await callAddActivity(tokenA, goalId, { title: 'Meditate 10 minutes', rhythm: { kind: 'N_PER_WEEK', targetPerWeek: 3 } });
       const gaId = added.body.id;
+      // HPG3-A2 -- this scenario deliberately materializes O1 and O2 on the
+      // SAME calendar day to isolate WEEKLY capacity/replan semantics from
+      // any daily concept; opt out of the new default ONCE_PER_DAY cap so
+      // it keeps testing exactly what it always tested.
+      await sql(`UPDATE "GoalActivity" SET "dailyFrequencyKind" = 'MULTIPLE_PER_DAY' WHERE id = $1`, [gaId]);
 
       const r1 = await makeOccurrenceFor(userA.id, gaId, 'p53a', '2026-09-23T10:00:00Z', '2026-09-23T10:10:00Z', '2026-09-23');
       check('53. O1/P1 materializes', r1.status === 'SAVED');
@@ -273,6 +278,8 @@ async function main() {
       createdGoalIds.push(goalId);
       const added = await callAddActivity(tokenA, goalId, { title: 'Meditate 10 minutes', rhythm: { kind: 'N_PER_WEEK', targetPerWeek: 2 } });
       const gaId = added.body.id;
+      // HPG3-A2 -- same same-day isolation as scenario 53 above.
+      await sql(`UPDATE "GoalActivity" SET "dailyFrequencyKind" = 'MULTIPLE_PER_DAY' WHERE id = $1`, [gaId]);
 
       const r1 = await makeOccurrenceFor(userA.id, gaId, 'p54a', '2026-09-24T10:00:00Z', '2026-09-24T10:10:00Z', '2026-09-24');
       if (r1.status === 'SAVED') { createdPlanIds.push(r1.plans[0].id); await sql(`UPDATE "PlannedActivity" SET status = 'LOGGED', "loggedAt" = now() WHERE id = $1`, [r1.plans[0].id]); }
@@ -315,6 +322,8 @@ async function main() {
       createdGoalIds.push(goalId);
       const added = await callAddActivity(tokenA, goalId, { title: 'Meditate 10 minutes', rhythm: { kind: 'N_PER_WEEK', targetPerWeek: 3 } });
       const gaId = added.body.id;
+      // HPG3-A2 -- same same-day isolation as scenario 53/54 above.
+      await sql(`UPDATE "GoalActivity" SET "dailyFrequencyKind" = 'MULTIPLE_PER_DAY' WHERE id = $1`, [gaId]);
 
       // 2 completed + 1 upcoming, all in the REAL current local week.
       // makeOccurrenceFor's own `now` is fixed at T05:00:00Z on the given

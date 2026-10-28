@@ -143,6 +143,12 @@ async function main() {
     await setRhythm(R.id, 3);
     const R2 = (await addGoalActivity(A.id, g1.id, { title: 'Strength', activityId: 'workout' }))!;
     await setRhythm(R2.id, 3);
+    // HPG3-A2 -- the "reverse order" scenario below deliberately accepts a
+    // SECOND occurrence of R2 on the SAME fixed DATE to isolate weekly
+    // multi-occurrence capacity/parity from any daily concept; opt out of
+    // the new default ONCE_PER_DAY cap so it keeps testing exactly what it
+    // always tested.
+    await sql(`UPDATE "GoalActivity" SET "dailyFrequencyKind" = 'MULTIPLE_PER_DAY' WHERE id = $1`, [R2.id]);
     const F = (await addGoalActivity(A.id, g1.id, { title: 'One-off finite task', activityId: null }))!;
     const E = (await addGoalActivity(A.id, g1.id, { title: 'Exhausted this week', activityId: 'workout' }))!;
     await setRhythm(E.id, 1);

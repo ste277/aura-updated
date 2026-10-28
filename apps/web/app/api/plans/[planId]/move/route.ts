@@ -11,6 +11,10 @@ const STATUS_BY_CODE: Record<MovePlanErrorCode, number> = {
   CONFLICT: 409,
   HAS_LINKED_MOMENT: 409,
   CAPACITY_EXCEEDED: 409,
+  // HPG3-A2 -- same 409 family as CAPACITY_EXCEEDED: a conflict with
+  // existing state, not a malformed request.
+  DAILY_CAPACITY_EXCEEDED: 409,
+  DAILY_ATTRIBUTION_UNRESOLVED: 409,
 };
 
 /**

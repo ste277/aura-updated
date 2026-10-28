@@ -17,6 +17,13 @@ import {
   type GoalActivityRhythm,
 } from './goalActivityRhythm';
 import { evaluateNewOccurrenceEligibility } from './goalActivityOccurrenceCapacity';
+import {
+  normalizeGoalActivityDailyFrequency,
+  isGoalActivityDailyFrequencyEnforceable,
+  resolveOccurrenceLocalDay,
+  resolveOccurrenceLocalDayOrNull,
+  type PersistedGoalActivityDailyFrequency,
+} from './goalActivityDailyFrequency';
 import { getDatePartsInTimezone } from './timezone';
 import { canonicalizeCivilBirthDate } from './birthDate';
 import { toPersistedGoalActivityExecutionSnapshot, fromPersistedGoalActivityExecutionSnapshot, resolveCompletionActualValue } from './goalActivityExecution';
@@ -3609,17 +3616,128 @@ export async function loadCandidateGoalActivitiesForRhythmDemand(userId: string,
   return result.rows;
 }
 
-export type MaterializeGoalActivityRhythmOccurrenceResult =
-  | { ok: true; occurrenceId: string }
-  | { ok: false; reason: 'NOT_FOUND' | 'NOT_RHYTHM_ELIGIBLE' | 'CAPACITY_EXHAUSTED' };
+export type DailyOccurrenceEligibilityResult =
+  | { status: 'ELIGIBLE' }
+  | { status: 'OCCUPIED'; blockingOccurrenceId: string }
+  // A recoverable, per-check conflict -- never a permanent judgment and
+  // never persisted. See this function's own doc comment for exactly when
+  // this occurs and how it resolves.
+  | { status: 'UNRESOLVED'; unresolvedOccurrenceId: string };
 
 /**
- * Goals V2 Rhythm R3, extended by Multi-Occurrence Rhythm PR 2 -- the one
- * write this slice introduces: "an N_PER_WEEK GoalActivity with weekly
- * capacity remaining links a NEWLY CREATED PlannedActivity and records a
- * new GoalActivityOccurrence." Called from EXACTLY ONE place
- * (dayConstructorAcceptancePersistence.ts's own write loop), on the SAME
- * `client` as the PlannedActivity insert that already happened
+ * HPG3-A2 -- the shared transactional answer to "does this GoalActivity
+ * already have a LIVE occurrence on `candidateLocalDate`?" Always called on
+ * the caller's own transaction client, inside the caller's own already-held
+ * per-user advisory lock -- takes no lock of its own beyond `FOR SHARE OF
+ * pa` on the live-plan read below (the lock domain itself is what makes two
+ * concurrent requests for the same user safe, exactly as
+ * materializeGoalActivityRhythmOccurrence's own doc comment already
+ * explains for weekly capacity).
+ *
+ * TWO separate queries, not one LEFT JOIN: `FOR SHARE OF pa` is rejected by
+ * Postgres on the nullable side of an outer join ("FOR SHARE cannot be
+ * applied to the nullable side of an outer join"), so live occurrences
+ * (INNER JOIN, lockable) and hard-deleted occurrences (no PlannedActivity
+ * row left to lock) are read separately.
+ *
+ * LIVE occurrences (status UPCOMING or LOGGED -- this is also what makes a
+ * derived-MISSED item consume the day's allowance: MISSED is never a
+ * persisted status, only an UPCOMING row whose window has elapsed, so it is
+ * already included here with no special case): each row's day is
+ * `resolveOccurrenceLocalDay` (snapshot wins when present, live-derived
+ * only when absent -- see that function's own doc comment). CANCELLED and
+ * SKIPPED plans are excluded by the query itself and never block.
+ *
+ * HARD-DELETED occurrences (`plannedActivityId IS NULL`): a row with NO
+ * GoalActivityExecution was a hard-deleted CANCELLED plan (the only other
+ * status `deletePlannedActivity` permits) -- never blocks, same as a live
+ * CANCELLED one. A row WITH an execution was a real, completed occurrence
+ * whose own PlannedActivity the user later cleared from "Recently
+ * Completed" -- it still blocks whichever day it happened on. If that day
+ * is recoverable (the snapshot survives hard-deletion untouched), it blocks
+ * exactly that day, same as any live row. If the day is NOT recoverable
+ * (pre-A2 legacy row, no snapshot, plan long gone) this function does NOT
+ * guess: it does not treat the day as free (that could silently admit a
+ * real duplicate) and it does not treat EVERY candidate day as permanently
+ * occupied either (that would block all future scheduling over one
+ * unrecoverable historical fact) -- it returns `UNRESOLVED` instead, a
+ * typed, per-check, non-persisted result. UNRESOLVED only wins when no
+ * OTHER row definitively resolves `candidateLocalDate` as `OCCUPIED` first
+ * (a definitive conflict is always reported over an unrelated ambiguity).
+ * It resolves itself automatically, with no backfill and no migration,
+ * the moment that specific row's own `scheduledLocalDate` becomes known --
+ * which can only happen via a future, separately-scoped reconciliation
+ * tool, since this function itself never fabricates one. In production
+ * today this is a theoretical safety net, not an active condition: no
+ * occurrence created before this slice's own snapshot-writing change ever
+ * reaches a real user's GoalActivity (prior HPG3 audits found zero
+ * production GoalActivity with rhythmKind ever set).
+ *
+ * `excludeOccurrenceId` lets a Move exclude the very occurrence it is
+ * repositioning from its own capacity check (planMove.ts).
+ */
+export async function checkDailyOccurrenceEligibility(
+  userId: string,
+  goalActivityId: string,
+  candidateLocalDate: string,
+  timezone: string,
+  excludeOccurrenceId: string | null,
+  client: PoolClient
+): Promise<DailyOccurrenceEligibilityResult> {
+  const liveRes = await client.query(
+    `SELECT gao.id, gao."scheduledLocalDate", gao."scheduledLocalTimezone", pa."plannedStartAt"
+     FROM "GoalActivityOccurrence" gao
+     JOIN "PlannedActivity" pa ON pa.id = gao."plannedActivityId"
+     WHERE gao."goalActivityId" = $1 AND gao."userId" = $2 AND pa.status IN ('UPCOMING', 'LOGGED')
+     FOR SHARE OF pa`,
+    [goalActivityId, userId]
+  );
+  for (const row of liveRes.rows) {
+    if (excludeOccurrenceId && row.id === excludeOccurrenceId) continue;
+    const day = resolveOccurrenceLocalDay(
+      { scheduledLocalDate: row.scheduledLocalDate, scheduledLocalTimezone: row.scheduledLocalTimezone },
+      new Date(row.plannedStartAt),
+      timezone
+    );
+    if (day === candidateLocalDate) return { status: 'OCCUPIED', blockingOccurrenceId: row.id };
+  }
+
+  const deletedRes = await client.query(
+    `SELECT gao.id, gao."scheduledLocalDate", gao."scheduledLocalTimezone", (gae.id IS NOT NULL) AS "hasExecution"
+     FROM "GoalActivityOccurrence" gao
+     LEFT JOIN "GoalActivityExecution" gae ON gae."goalActivityOccurrenceId" = gao.id
+     WHERE gao."goalActivityId" = $1 AND gao."userId" = $2 AND gao."plannedActivityId" IS NULL`,
+    [goalActivityId, userId]
+  );
+  let unresolvedOccurrenceId: string | null = null;
+  for (const row of deletedRes.rows) {
+    if (excludeOccurrenceId && row.id === excludeOccurrenceId) continue;
+    if (!row.hasExecution) continue;
+    const day = resolveOccurrenceLocalDayOrNull({ scheduledLocalDate: row.scheduledLocalDate, scheduledLocalTimezone: row.scheduledLocalTimezone }, null, timezone);
+    if (day === null) {
+      if (unresolvedOccurrenceId === null) unresolvedOccurrenceId = row.id;
+      continue;
+    }
+    if (day === candidateLocalDate) return { status: 'OCCUPIED', blockingOccurrenceId: row.id };
+  }
+
+  if (unresolvedOccurrenceId !== null) return { status: 'UNRESOLVED', unresolvedOccurrenceId };
+  return { status: 'ELIGIBLE' };
+}
+
+export type MaterializeGoalActivityRhythmOccurrenceResult =
+  | { ok: true; occurrenceId: string }
+  | { ok: false; reason: 'NOT_FOUND' | 'NOT_RHYTHM_ELIGIBLE' | 'CAPACITY_EXHAUSTED' | 'DAILY_CAPACITY_EXHAUSTED' | 'DAILY_ATTRIBUTION_UNRESOLVED' };
+
+/**
+ * Goals V2 Rhythm R3, extended by Multi-Occurrence Rhythm PR 2 and HPG3-A2
+ * -- the one write this slice introduces: "an N_PER_WEEK GoalActivity with
+ * weekly (and, as of A2, daily) capacity remaining links a NEWLY CREATED
+ * PlannedActivity and records a new GoalActivityOccurrence." Called from
+ * exactly TWO places -- dayConstructorAcceptancePersistence.ts's own write
+ * loop (the original, R3-era caller) and POST /api/plans
+ * (apps/web/app/api/plans/route.ts, added by HPG3-A2) -- each on its OWN
+ * transaction client, as the PlannedActivity insert that already happened
  * immediately before it, tried FIRST for every Goal-linked write (a pure,
  * side-effect-free read -- `NOT_RHYTHM_ELIGIBLE` -- for any GoalActivity
  * whose own rhythmKind isn't 'N_PER_WEEK'). The existing, UNCHANGED
@@ -3679,7 +3797,7 @@ export async function materializeGoalActivityRhythmOccurrence(
   client: PoolClient
 ): Promise<MaterializeGoalActivityRhythmOccurrenceResult> {
   const gaRes = await client.query(
-    `SELECT ga.status, ga."rhythmKind", ga."rhythmTargetPerWeek"
+    `SELECT ga.status, ga."rhythmKind", ga."rhythmTargetPerWeek", ga."dailyFrequencyKind", ga."dailyFrequencyLimit"
      FROM "GoalActivity" ga
      WHERE ga.id = $1 AND ga."userId" = $2`,
     [goalActivityId, userId]
@@ -3694,6 +3812,25 @@ export async function materializeGoalActivityRhythmOccurrence(
   const facts = await loadGoalActivityRhythmFacts(userId, goalActivityId, timezone, client);
   const eligibility = evaluateNewOccurrenceEligibility({ rhythm, planningLocalDate, occurrences: facts });
   if (!eligibility.eligible) return { ok: false, reason: 'CAPACITY_EXHAUSTED' };
+
+  // HPG3-A2 -- daily cap, ORTHOGONAL to and checked AFTER the weekly gate
+  // above (never replacing it -- a GoalActivity can be constrained on both
+  // axes at once). Uses the A1 normalization/enforceability helpers
+  // directly rather than re-deriving policy meaning here (CUSTOM stays
+  // reserved -- isGoalActivityDailyFrequencyEnforceable is what keeps it
+  // from ever being silently treated as ONCE_PER_DAY or MULTIPLE_PER_DAY).
+  // Checked against `planningLocalDate` -- the SAME candidate day source
+  // the weekly check immediately above already uses, never a day
+  // re-derived from plannedStartAt here (that is reserved for the
+  // snapshot written below, exactly the same planningLocalDate/plannedStartAt
+  // split this function already establishes for the week snapshot).
+  const persistedDailyFrequency: PersistedGoalActivityDailyFrequency = { dailyFrequencyKind: row.dailyFrequencyKind, dailyFrequencyLimit: row.dailyFrequencyLimit };
+  const dailyFrequency = normalizeGoalActivityDailyFrequency(persistedDailyFrequency);
+  if (isGoalActivityDailyFrequencyEnforceable(dailyFrequency.kind) && dailyFrequency.kind === 'ONCE_PER_DAY') {
+    const dailyEligibility = await checkDailyOccurrenceEligibility(userId, goalActivityId, planningLocalDate, timezone, null, client);
+    if (dailyEligibility.status === 'OCCUPIED') return { ok: false, reason: 'DAILY_CAPACITY_EXHAUSTED' };
+    if (dailyEligibility.status === 'UNRESOLVED') return { ok: false, reason: 'DAILY_ATTRIBUTION_UNRESOLVED' };
+  }
 
   const relinked = await client.query(
     `UPDATE "GoalActivity" SET "plannedActivityId" = $1, "updatedAt" = now()
@@ -3710,9 +3847,16 @@ export async function materializeGoalActivityRhythmOccurrence(
   // `localCalendarWeekStart` is the repository's one existing canonical
   // week-start function (goalActivityRhythm.ts) -- no second algorithm.
   const scheduledWeekStart = localCalendarWeekStart(getDatePartsInTimezone(timezone, plannedStartAt).dateStr);
+  // HPG3-A2 -- the scheduled-DAY snapshot, same atomicity/source discipline
+  // as the week snapshot immediately above: written in this SAME INSERT,
+  // from the SAME `timezone`/`plannedStartAt` -- never a separate
+  // statement, never derived from planningLocalDate (that distinction is
+  // deliberate -- see the daily-cap check above, which DOES use
+  // planningLocalDate, for why the two sources are kept separate).
+  const scheduledLocalDate = getDatePartsInTimezone(timezone, plannedStartAt).dateStr;
   await client.query(
-    `INSERT INTO "GoalActivityOccurrence" (id, "userId", "goalActivityId", "plannedActivityId", "scheduledWeekStart", "scheduledWeekTimezone") VALUES ($1, $2, $3, $4, $5, $6)`,
-    [occurrenceId, userId, goalActivityId, newPlannedActivityId, scheduledWeekStart, timezone]
+    `INSERT INTO "GoalActivityOccurrence" (id, "userId", "goalActivityId", "plannedActivityId", "scheduledWeekStart", "scheduledWeekTimezone", "scheduledLocalDate", "scheduledLocalTimezone") VALUES ($1, $2, $3, $4, $5, $6, $7, $8)`,
+    [occurrenceId, userId, goalActivityId, newPlannedActivityId, scheduledWeekStart, timezone, scheduledLocalDate, timezone]
   );
   return { ok: true, occurrenceId };
 }

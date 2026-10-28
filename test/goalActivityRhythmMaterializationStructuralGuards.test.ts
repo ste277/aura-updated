@@ -123,13 +123,31 @@ check('addGoalActivity itself does not call materializeGoalActivityRhythmOccurre
 
 // ============================================================
 // materializeGoalActivityRhythmOccurrence is called from EXACTLY ONE
-// production call site.
+// production call site WITHIN apps/web/lib. HPG3-A2 added a SECOND,
+// legitimate caller outside this directory (apps/web/app/api/plans/route.ts
+// -- proven by its own dedicated checks in test/planGoalActivityLinkWiring.test.ts,
+// including that it is correctly ordered AFTER the Goal lifecycle guard and
+// that a genuine Rhythm refusal never falls through to the legacy link).
+// This check's own scope was always apps/web/lib specifically (R3's own
+// original caller lives there) -- it still correctly holds unchanged, and
+// still fails loudly if a THIRD, unreviewed caller ever appears inside lib/.
 // ============================================================
 const acceptancePersistenceSrc = read('../apps/web/lib/dayConstructorAcceptancePersistence.ts');
 check('materializeGoalActivityRhythmOccurrence is called from dayConstructorAcceptancePersistence.ts', /materializeGoalActivityRhythmOccurrence\(/.test(acceptancePersistenceSrc));
 const allProductionLibFiles = fs.readdirSync(path.join(__dirname, '../apps/web/lib')).filter((f) => f.endsWith('.ts'));
 const callSites = allProductionLibFiles.filter((f) => /materializeGoalActivityRhythmOccurrence\(/.test(stripComments(read(`../apps/web/lib/${f}`))) && f !== 'db.ts');
-check('materializeGoalActivityRhythmOccurrence has EXACTLY ONE production call site (dayConstructorAcceptancePersistence.ts)', callSites.length === 1 && callSites[0] === 'dayConstructorAcceptancePersistence.ts');
+check('materializeGoalActivityRhythmOccurrence has EXACTLY ONE production call site WITHIN apps/web/lib (dayConstructorAcceptancePersistence.ts) -- the HPG3-A2 route.ts caller lives outside this directory and is proven separately', callSites.length === 1 && callSites[0] === 'dayConstructorAcceptancePersistence.ts');
+check('the route.ts caller HPG3-A2 adds is the only production call site outside apps/web/lib', (() => {
+  function listTs(dir: string): string[] {
+    return fs.readdirSync(dir, { withFileTypes: true }).flatMap((e) => {
+      const p = path.join(dir, e.name);
+      if (e.isDirectory()) return e.name === 'node_modules' || e.name.startsWith('.') ? [] : listTs(p);
+      return /\.(ts|tsx)$/.test(e.name) ? [p] : [];
+    });
+  }
+  const outsideLib = listTs(path.join(__dirname, '../apps/web/app')).filter((f) => /materializeGoalActivityRhythmOccurrence\(/.test(stripComments(fs.readFileSync(f, 'utf8'))));
+  return outsideLib.length === 1 && outsideLib[0].endsWith('app/api/plans/route.ts');
+})());
 
 // ============================================================
 // evaluateAcceptance (E1) itself is untouched -- Rhythm enters only in

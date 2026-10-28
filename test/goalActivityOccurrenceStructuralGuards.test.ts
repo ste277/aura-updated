@@ -161,9 +161,13 @@ const allowedOccurrenceFnBodiesNoComments =
   // the fix for the write-gating defect where an older Rhythm occurrence
   // completed after a newer sibling was materialized silently produced no
   // GoalActivityExecution row at all. A single SELECT, never a write.
-  stripComments(functionBody(dbSrc, 'logPlannedActivity'));
+  stripComments(functionBody(dbSrc, 'logPlannedActivity')) +
+  // HPG3-A2 -- checkDailyOccurrenceEligibility, the shared daily-capacity
+  // read materializeGoalActivityRhythmOccurrence (already allowed above)
+  // and planMove.ts's own daily check both call. Two SELECTs, no write.
+  stripComments(functionBody(dbSrc, 'checkDailyOccurrenceEligibility'));
 check(
-  'db.ts references GoalActivityOccurrence ONLY inside the allowed, intentionally-reviewed functions (loadGoalActivityRhythmFacts [read-only], loadGoalActivityRhythmFactsForActivities [R4\'s batched read-only sibling], listGoalActivityOccurrenceRowsForActivities [O5 P2d: that sibling\'s raw read-only SELECT, moved unchanged so it can run on the snapshot executor], materializeGoalActivityRhythmOccurrence [R3\'s sole writer], and logPlannedActivity [Insights V1 PR3\'s corrected, occurrence-keyed completion lookup]) -- no additional, undocumented function in real code, no UPDATE/DELETE anywhere',
+  'db.ts references GoalActivityOccurrence ONLY inside the allowed, intentionally-reviewed functions (loadGoalActivityRhythmFacts [read-only], loadGoalActivityRhythmFactsForActivities [R4\'s batched read-only sibling], listGoalActivityOccurrenceRowsForActivities [O5 P2d: that sibling\'s raw read-only SELECT, moved unchanged so it can run on the snapshot executor], materializeGoalActivityRhythmOccurrence [R3\'s sole writer], logPlannedActivity [Insights V1 PR3\'s corrected, occurrence-keyed completion lookup], and checkDailyOccurrenceEligibility [HPG3-A2\'s shared daily-capacity read]) -- no additional, undocumented function in real code, no UPDATE/DELETE anywhere',
   (dbSrcNoComments.match(/GoalActivityOccurrence/g) ?? []).length === (allowedOccurrenceFnBodiesNoComments.match(/GoalActivityOccurrence/g) ?? []).length &&
     (dbSrcNoComments.match(/INSERT INTO "GoalActivityOccurrence"/g) ?? []).length === 1 &&
     !/UPDATE "GoalActivityOccurrence"|DELETE FROM "GoalActivityOccurrence"/.test(dbSrcNoComments)

@@ -151,6 +151,9 @@ async function main() {
     // 6. Concurrent Move attempts (mirrors the existing capacity-safety scenario).
     // ============================================================
     const { ga: gaF } = await makeGoalActivity('F', 2);
+    // HPG3-A2 -- same same-day-stacking isolation as scenario M's gaM above:
+    // dF1/dF2 are deliberately 2 hours apart on the SAME local day.
+    await sql(`UPDATE "GoalActivity" SET "dailyFrequencyKind" = 'MULTIPLE_PER_DAY' WHERE id = $1`, [gaF.id]);
     const dF1 = await accept(gaF, slot('F', 0, 0), 'intent-f1');
     const dF2 = await accept(gaF, slot('F', 0, 2), 'intent-f2');
     const planF1 = (dF1 as any).plans[0];
@@ -269,6 +272,13 @@ async function main() {
     // snapshot-aware path for a realistic mixed scenario.
     // ============================================================
     const { ga: gaM } = await makeGoalActivity('M', 3);
+    // HPG3-A2 -- this scenario deliberately stacks two occurrences of gaM on
+    // the SAME local day (slot('M', 0, 0) and slot('M', 0, 2) are only 2
+    // hours apart) to isolate WEEKLY capacity totals from any daily concept.
+    // A2's new default ONCE_PER_DAY cap would otherwise reject the second
+    // same-day accept(); opt this GoalActivity out of the daily cap so this
+    // scenario keeps testing exactly what it always tested.
+    await sql(`UPDATE "GoalActivity" SET "dailyFrequencyKind" = 'MULTIPLE_PER_DAY' WHERE id = $1`, [gaM.id]);
     const dM1 = await accept(gaM, slot('M', 0, 0), 'intent-m1');
     const dM2 = await accept(gaM, slot('M', 0, 2), 'intent-m2');
     const planM1 = (dM1 as any).plans[0];

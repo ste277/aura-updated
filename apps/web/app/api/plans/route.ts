@@ -1,11 +1,12 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getSessionFromRequest } from '../../../lib/session';
 import { DIRECT_PLAN_SCHEDULING_MODE } from '../../../lib/plannedActivitySchedulingMode';
-import { beginTransaction, createPlannedActivity, listPlannedActivities, getPlannedActivityForOwner, getGuestConversionRedemption, claimGuestConversionToken, fillGuestConversionRedemption, getPlanCreationClaim, claimPlanCreation, fillPlanCreationClaim, linkGoalActivityToPlannedActivity, lockGoalParentLifecycleForPlanning } from '../../../lib/db';
+import { beginTransaction, createPlannedActivity, listPlannedActivities, getPlannedActivityForOwner, getGuestConversionRedemption, claimGuestConversionToken, fillGuestConversionRedemption, getPlanCreationClaim, claimPlanCreation, fillPlanCreationClaim, linkGoalActivityToPlannedActivity, lockGoalParentLifecycleForPlanning, materializeGoalActivityRhythmOccurrence, getUserById } from '../../../lib/db';
 import { parseJsonObject } from '../../../lib/request';
 import { verifyGuestStateToken, hashGuestConversionToken } from '../../../lib/guestState';
 import { parseEventLocationSnapshot } from '../../../lib/plansRequest';
 import { getActivityProfileById } from '../../../../../packages/recommendation/src/personalizedTasks';
+import { getDatePartsInTimezone } from '../../../lib/timezone';
 
 const MIN_PLAN_DURATION_MINUTES = 15;
 const MAX_PLAN_DURATION_MINUTES = 360;
@@ -273,6 +274,18 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: eventLocationSnapshot.error }, { status: 400 });
   }
 
+  // HPG3-A2 -- cheap, pre-transaction gathering (same discipline as every
+  // other validation above): a goalActivityId write may need to route
+  // through materializeGoalActivityRhythmOccurrence, which requires the
+  // owning user's timezone to derive the candidate local day. Only fetched
+  // when actually needed -- the common, non-Goal-linked path is
+  // unaffected. Same null-check precedent as persistAcceptedConstructedDay
+  // (dayConstructorAcceptancePersistence.ts) for the identical lookup.
+  const user = goalActivityId ? await getUserById(session.userId) : null;
+  if (goalActivityId && !user) {
+    return NextResponse.json({ error: 'Could not resolve the authenticated user.' }, { status: 500 });
+  }
+
   // Schedule write consistency S2 -- this ordinary/manual writer takes the SAME per-user, transaction-scoped advisory
   // lock Constructor acceptance, Move and Recomposition acceptance take, and inserts inside that transaction, so a manual
   // write and an Aura automatic write for one user cannot make their write decisions concurrently. The lock only
@@ -306,23 +319,6 @@ export async function POST(req: NextRequest) {
     // HPG2 -- same transaction, same client, immediately after the Plan
     // insert that just happened: the exact pattern Day Constructor
     // acceptance already uses (dayConstructorAcceptancePersistence.ts).
-    // linkGoalActivityToPlannedActivity itself enforces ownership
-    // (userId), non-DISMISSED, and the established eligibility rule
-    // (currently unlinked, or linked only to a CANCELLED/SKIPPED plan) --
-    // one atomic conditional UPDATE, no separate check-then-act. `false`
-    // means the id doesn't exist, isn't this user's, is DISMISSED, or
-    // already retains a live link to a DIFFERENT plan -- this fails the
-    // WHOLE request closed (no orphan, unlinked PlannedActivity silently
-    // created instead of the Goal-linked one the caller explicitly asked
-    // for) rather than silently degrading to an ordinary plan.
-    //
-    // Deliberately NOT wired to materializeGoalActivityRhythmOccurrence
-    // (db.ts) here: that Rhythm-aware path is unreachable today (no
-    // production GoalActivity has rhythmKind set yet -- HPG0 audit,
-    // confirmed again during HPG2), and wiring it prematurely would pull
-    // Rhythm-specific mechanics into what HPG2 scopes as plain Goal
-    // association for ordinary plan creation. Revisit this call site
-    // alongside whichever ticket first ships a Rhythm-creating UI.
     if (goalActivityId) {
       // HPG2 P0 fix -- Goal LIFECYCLE authorization, the same boundary Day
       // Constructor acceptance already enforces (dayConstructorAcceptancePersistence.ts,
@@ -339,8 +335,47 @@ export async function POST(req: NextRequest) {
       if (lifecycle.owned.has(goalActivityId) && !lifecycle.active.has(goalActivityId)) {
         throw new Error('GOAL_NOT_ACTIVE');
       }
-      const linked = await linkGoalActivityToPlannedActivity(session.userId, goalActivityId, plan.id, client);
-      if (!linked) throw new Error('GOAL_ACTIVITY_LINK_FAILED');
+      // HPG3-A2 -- tried FIRST, the EXACT SAME ordering pattern
+      // dayConstructorAcceptancePersistence.ts's own write loop already
+      // established: a pure, side-effect-free read (`NOT_RHYTHM_ELIGIBLE`)
+      // for any GoalActivity whose rhythmKind isn't N_PER_WEEK -- the
+      // common, finite case, where this falls straight through to the
+      // EXISTING, UNMODIFIED linkGoalActivityToPlannedActivity below,
+      // which alone still owns every NONE/first-link/CANCELLED-or-
+      // SKIPPED-relink case exactly as before A2 (the finite "once ever"
+      // legacy path, and its completion/progress contract, are untouched
+      // -- this is what keeps a finite GoalActivity finite, never
+      // silently made indefinitely repeatable). For an N_PER_WEEK
+      // GoalActivity this is also what applies the new daily cap (when
+      // its own dailyFrequencyKind resolves to ONCE_PER_DAY) alongside
+      // the existing weekly one -- both gates live inside this one
+      // function, never duplicated here.
+      const planningLocalDate = getDatePartsInTimezone(user!.timezone, plannedStartAt).dateStr;
+      const materialized = await materializeGoalActivityRhythmOccurrence(session.userId, goalActivityId, plan.id, plannedStartAt, planningLocalDate, user!.timezone, client);
+      if (!materialized.ok && materialized.reason !== 'NOT_RHYTHM_ELIGIBLE') {
+        // A genuine Rhythm-specific refusal (live UPCOMING commitment,
+        // weekly capacity exhausted, daily cap already met, or an
+        // unresolved legacy attribution conflict) -- never fall through
+        // to the legacy link below, which would refuse for the exact same
+        // underlying reason anyway. Same all-or-nothing contract as every
+        // other link failure in this route: the outer catch below ROLLBACKs
+        // the whole transaction (this Plan insert included).
+        throw new Error('GOAL_ACTIVITY_LINK_FAILED');
+      }
+      if (!materialized.ok) {
+        // NOT_RHYTHM_ELIGIBLE -- finite (NONE) or no Rhythm policy at all.
+        // linkGoalActivityToPlannedActivity itself enforces ownership
+        // (userId), non-DISMISSED, and the established eligibility rule
+        // (currently unlinked, or linked only to a CANCELLED/SKIPPED
+        // plan) -- one atomic conditional UPDATE, no separate
+        // check-then-act. `false` means the id doesn't exist, isn't this
+        // user's, is DISMISSED, or already retains a live link to a
+        // DIFFERENT plan -- fails the WHOLE request closed (no orphan,
+        // unlinked PlannedActivity silently created instead of the
+        // Goal-linked one the caller explicitly asked for).
+        const linked = await linkGoalActivityToPlannedActivity(session.userId, goalActivityId, plan.id, client);
+        if (!linked) throw new Error('GOAL_ACTIVITY_LINK_FAILED');
+      }
     }
     await client.query('COMMIT');
   } catch (err) {
