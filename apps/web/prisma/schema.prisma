@@ -859,6 +859,31 @@ model GoalActivity {
   // persistence.
   rhythmTargetPerWeek   Int?
 
+  // HPG3-A1 -- "how many LIVE occurrences of this GoalActivity may exist on
+  // the SAME local calendar day?" (apps/web/lib/goalActivityDailyFrequency.ts),
+  // orthogonal to rhythmKind/rhythmTargetPerWeek above (which answer "how
+  // many occurrences per WEEK, with no day-bucket concept at all" -- see
+  // that module's own doc comment for why N_PER_WEEK capacity alone does
+  // NOT imply same-day clustering is intended). Two independent nullable
+  // columns, no default, no backfill -- the EXACT same convention
+  // completionKind/rhythmKind already established: dailyFrequencyKind =
+  // NULL means "never specified" and is ALWAYS normalized to canonical
+  // ONCE_PER_DAY (normalizeGoalActivityDailyFrequency) -- every existing/
+  // legacy row keeps meaning exactly "at most one live occurrence per local
+  // day" (this slice's own default) without any migration. A1 is
+  // schema/domain-only: no production read or write path consults these
+  // columns yet (mirrors G2.1's, R1's and R2's own identical "model before
+  // writes" discipline, each confirmed in this codebase's own history to
+  // outlive a single ticket -- a LATER ticket is expected to wire reads
+  // and writes here, not this one).
+  dailyFrequencyKind  String?
+  // Only meaningful when dailyFrequencyKind = 'CUSTOM' (reserved, not yet
+  // an enforced policy -- see that module's own doc comment); NULL for
+  // every other kind. INTEGER, same convention as rhythmTargetPerWeek:
+  // validateGoalActivityDailyFrequency rejects any fractional/zero/
+  // negative value before it ever reaches persistence.
+  dailyFrequencyLimit Int?
+
   createdAt         DateTime         @default(now()) @db.Timestamptz(3)
   updatedAt         DateTime         @updatedAt @db.Timestamptz(3)
 
@@ -1083,6 +1108,32 @@ model GoalActivityOccurrence {
   // live-derived values for such a row, and throws instead.
   scheduledWeekStart    String?
   scheduledWeekTimezone String?
+
+  // HPG3-A1 -- the SAME frozen-snapshot discipline as scheduledWeekStart/
+  // scheduledWeekTimezone immediately above, for the DAY this occurrence
+  // was scheduled for rather than the week: `scheduledLocalDate` is the
+  // "YYYY-MM-DD" local calendar date (getDatePartsInTimezone's own
+  // canonical output, apps/web/lib/timezone.ts -- no second day
+  // algorithm), frozen at the instant this row was created or last Moved,
+  // never re-derived from the user's CURRENT timezone on every read, for
+  // the identical reason scheduledWeekStart exists (a later timezone
+  // change must never silently reshuffle historical daily attribution).
+  // `scheduledLocalTimezone` is the IANA zone name used to compute it,
+  // kept alongside purely as audit/debugging context, same convention as
+  // scheduledWeekTimezone. ADDITIVE ONLY, NO BACKFILL: both are NULL for
+  // every occurrence that exists before this migration AND for every
+  // occurrence this slice itself creates (A1 is schema/domain-only -- see
+  // this model's own GoalActivity.dailyFrequencyKind sibling comment for
+  // why no production writer touches these columns yet). The two fields
+  // are intended to always be written together, in the same statement, by
+  // whichever LATER ticket wires them (mirroring materializeGoalActivityRhythmOccurrence/
+  // applyMoveWrites' own existing discipline for the week pair) -- a row
+  // with exactly one of the two set is an impossible, corrupt state, and
+  // any future reader of this pair must refuse to silently guess or blend
+  // stored and live-derived values for such a row, exactly as
+  // resolveOccurrenceLocalDate already does for the week pair.
+  scheduledLocalDate     String?
+  scheduledLocalTimezone String?
 
   // Insights V1 PR3 (migration 0048) -- Prisma's relation validator
   // requires this opposite navigation field, since GoalActivityExecution
