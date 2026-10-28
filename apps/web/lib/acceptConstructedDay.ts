@@ -16,6 +16,7 @@
 
 import type { ConstructDayPreview } from './dayConstructorOrchestrator';
 import type { AcceptanceRejectionReason, AcceptanceDiagnostic } from './dayConstructorAcceptance';
+import type { SchedulingEligibilityErrorCode } from './schedulingEligibilityError';
 
 // ============================================================
 // Request body (this ticket's own section 5/6/24) -- exactly the E2
@@ -102,11 +103,18 @@ export type AcceptConstructedDayClientResult =
   | { status: 'ALREADY_ACCEPTED'; plans: PersistedPlanSummary[] }
   | { status: 'REJECTED'; reason: AcceptanceRejectionReason; diagnostics: AcceptanceDiagnostic[] }
   | { status: 'IDEMPOTENCY_CONFLICT' }
-  | { status: 'SAVE_FAILED' }
+  // HPG3-A3a -- `code` is optional and additive, same contract as the
+  // server's own AcceptConstructedDayPersistenceResult (see that type's
+  // own comment, dayConstructorAcceptancePersistence.ts). This file's
+  // presentation layer (dayPlanAcceptancePresentation.ts) deliberately
+  // does not branch on it -- no UI redesign in this ticket.
+  | { status: 'SAVE_FAILED'; code?: SchedulingEligibilityErrorCode }
   | { status: 'NETWORK_ERROR' }
   | { status: 'UNKNOWN_RESPONSE' };
 
 const KNOWN_REJECTION_REASONS = new Set<AcceptanceRejectionReason>(['INVALID_REQUEST', 'STALE_PREVIEW', 'INVALID_ACTIVITY', 'CONFLICT', 'TIMING_CHECK_FAILED']);
+// HPG3-A3a -- same validate-don't-trust discipline as KNOWN_REJECTION_REASONS above.
+const KNOWN_SCHEDULING_ELIGIBILITY_CODES = new Set<SchedulingEligibilityErrorCode>(['GOAL_NOT_ACTIVE', 'CAPACITY_EXCEEDED', 'DAILY_CAPACITY_EXCEEDED', 'DAILY_ATTRIBUTION_UNRESOLVED', 'GOAL_ACTIVITY_NOT_AVAILABLE']);
 
 /** Pure -- never throws, never touches the network. Exported directly so
  * response-shape handling is testable without mocking `fetch`. */
@@ -124,6 +132,9 @@ export function parseAcceptResponseBody(body: unknown): AcceptConstructedDayClie
     case 'IDEMPOTENCY_CONFLICT':
       return { status: 'IDEMPOTENCY_CONFLICT' };
     case 'SAVE_FAILED':
+      if (typeof record.code === 'string' && KNOWN_SCHEDULING_ELIGIBILITY_CODES.has(record.code as SchedulingEligibilityErrorCode)) {
+        return { status: 'SAVE_FAILED', code: record.code as SchedulingEligibilityErrorCode };
+      }
       return { status: 'SAVE_FAILED' };
     default:
       return { status: 'UNKNOWN_RESPONSE' };

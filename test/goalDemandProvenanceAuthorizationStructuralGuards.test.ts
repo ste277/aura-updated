@@ -120,7 +120,11 @@ check('47b. PlanDayClient.tsx\'s own accept-time goalActivityLinks/captureLinks 
 // swapped for any other instant.
 check('48a. persistAcceptedConstructedDay still tries materializeGoalActivityRhythmOccurrence first for every Goal-linked write, now passing plan.plannedStartAt for the PR2 scheduled-week snapshot, otherwise unmodified', /const materialized = await materializeGoalActivityRhythmOccurrence\(userId, goalActivityId, plan\.id, plan\.plannedStartAt, request\.constructionWindow\.date, user\.timezone, client\);/.test(persistenceSrc));
 check('48b. the existing legacy linkGoalActivityToPlannedActivity fallback (finite/NONE Rhythm path) is still present, unmodified', /const linked = await linkGoalActivityToPlannedActivity\(userId, goalActivityId, plan\.id, client\);/.test(persistenceSrc));
-check('48c. the existing all-or-nothing GOAL_ACTIVITY_LINK_FAILED rollback contract is still present', occurrences(persistenceSrc, "throw new Error('GOAL_ACTIVITY_LINK_FAILED');") === 2);
+// HPG3-A3a -- the two flat 'GOAL_ACTIVITY_LINK_FAILED' throws are now
+// typed SchedulingEligibilityError throws (one per materialize-reason /
+// legacy-link-failure site, same two call sites, same all-or-nothing
+// rollback contract -- see apps/web/lib/schedulingEligibilityError.ts).
+check('48c. the existing all-or-nothing rollback contract is still present (now via typed SchedulingEligibilityError throws, same two sites)', occurrences(persistenceSrc, 'throw materializeFailureToSchedulingEligibilityError(materialized.reason);') === 1 && occurrences(persistenceSrc, 'throw goalActivityNotAvailableError();') === 1);
 check('48d. the per-user advisory lock (concurrency protection) is still present, unmodified', /pg_advisory_xact_lock\(hashtext\(\$1\)\)/.test(persistenceSrc));
 
 // ============================================================

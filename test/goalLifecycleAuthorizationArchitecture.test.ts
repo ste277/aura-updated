@@ -147,12 +147,18 @@ for (const filePath of provenanceWriterCallerPaths) {
 // before this fix.
 const plansRouteSource = stripComments(fs.readFileSync(path.join(app, 'api/plans/route.ts'), 'utf8'));
 check(
+  // HPG3-A3a -- the flat 'GOAL_NOT_ACTIVE' Error is now the typed
+  // goalNotActiveError() (apps/web/lib/schedulingEligibilityError.ts),
+  // same code value, same call site, same gating condition.
   "apps/web/app/api/plans/route.ts: the lifecycle guard runs on the SAME transaction client as the link write, gated only by goalActivityId being present, and rejects with GOAL_NOT_ACTIVE exactly when the GoalActivity is owned but its parent Goal isn't active",
-  /if \(goalActivityId\) \{\s*const lifecycle = await lockGoalParentLifecycleForPlanning\(session\.userId, \[goalActivityId\], client\);\s*if \(lifecycle\.owned\.has\(goalActivityId\) && !lifecycle\.active\.has\(goalActivityId\)\) \{\s*throw new Error\('GOAL_NOT_ACTIVE'\);\s*\}/.test(plansRouteSource)
+  /if \(goalActivityId\) \{\s*const lifecycle = await lockGoalParentLifecycleForPlanning\(session\.userId, \[goalActivityId\], client\);\s*if \(lifecycle\.owned\.has\(goalActivityId\) && !lifecycle\.active\.has\(goalActivityId\)\) \{\s*throw goalNotActiveError\(\);\s*\}/.test(plansRouteSource)
 );
 check(
+  // HPG3-A3a -- the message-string comparison + hardcoded 400 is now a
+  // typed SchedulingEligibilityError branch with a per-code status
+  // lookup; GOAL_NOT_ACTIVE itself still resolves to 400, unchanged.
   "apps/web/app/api/plans/route.ts: a GOAL_NOT_ACTIVE rejection maps to a typed 400, not an unhandled 500",
-  /err\.message === 'GOAL_NOT_ACTIVE'[\s\S]{0,120}status: 400/.test(plansRouteSource)
+  /if \(err instanceof SchedulingEligibilityError\) \{[\s\S]{0,200}status: SCHEDULING_ELIGIBILITY_STATUS_BY_CODE\[err\.code\][\s\S]{0,50}\}/.test(plansRouteSource) && /GOAL_NOT_ACTIVE: 400/.test(fs.readFileSync(path.join(lib, 'schedulingEligibilityError.ts'), 'utf8'))
 );
 check('GoalActivityOccurrence rows are inserted in exactly one production place (db.ts materialization)', JSON.stringify(filesMatching(/INSERT INTO "GoalActivityOccurrence"/)) === JSON.stringify(['db.ts']) && (dbCode.match(/INSERT INTO "GoalActivityOccurrence"/g) ?? []).length === 1);
 // Insights V1 PR2 (Stable Scheduled-Week Attribution) deliberately
@@ -162,7 +168,9 @@ check('GoalActivityOccurrence rows are inserted in exactly one production place 
 // computed from this specific plan's own real scheduled instant. Still a
 // full, exact call-site text match -- never loosened to a bare
 // function-name match.
-check('the existing Rhythm/DISMISSED/ownership/live-commitment gates are still in the write loop, untouched (ACTIVE is necessary, not sufficient)', /materializeGoalActivityRhythmOccurrence\(userId, goalActivityId, plan\.id, plan\.plannedStartAt, request\.constructionWindow\.date, user\.timezone, client\)/.test(persistFn) && /linkGoalActivityToPlannedActivity\(userId, goalActivityId, plan\.id, client\)/.test(persistFn) && (persistFn.match(/GOAL_ACTIVITY_LINK_FAILED/g) ?? []).length === 2);
+// HPG3-A3a -- the two flat 'GOAL_ACTIVITY_LINK_FAILED' throws are now
+// typed SchedulingEligibilityError throws, same two call sites.
+check('the existing Rhythm/DISMISSED/ownership/live-commitment gates are still in the write loop, untouched (ACTIVE is necessary, not sufficient)', /materializeGoalActivityRhythmOccurrence\(userId, goalActivityId, plan\.id, plan\.plannedStartAt, request\.constructionWindow\.date, user\.timezone, client\)/.test(persistFn) && /linkGoalActivityToPlannedActivity\(userId, goalActivityId, plan\.id, client\)/.test(persistFn) && /throw materializeFailureToSchedulingEligibilityError\(materialized\.reason\);/.test(persistFn) && /throw goalActivityNotAvailableError\(\);/.test(persistFn));
 const move = stripComments(read('apps/web/lib/planMove.ts'));
 check('Move only REPOINTS existing Goal records (UPDATE ... WHERE plannedActivityId = old) and never creates Goal provenance: it neither inserts an occurrence nor calls either writer', !/INSERT INTO "GoalActivityOccurrence"|materializeGoalActivityRhythmOccurrence|linkGoalActivityToPlannedActivity/.test(move));
 check('Recomposition has no Goal provenance at all', !/GoalActivity|goalActivity/.test(stripComments(read('apps/web/lib/remainingDayRecomposition.ts'))) && !/GoalActivity|goalActivity/.test(stripComments(read('apps/web/lib/remainingDayRecompositionAcceptance.ts'))));
