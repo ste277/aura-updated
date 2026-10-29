@@ -943,25 +943,34 @@ export function HomeDashboard({
     skipAllMissedRunningRef.current = true;
     setSkipAllMissedBusy(true);
     setSkipAllMissedNotice(null);
-    const outcomes = await collectSkipAllOutcomes(
-      eligible,
-      (planId) => planExecutor.current.isBusy(planId),
-      async (planId) => {
-        setSkippingPlanIds((current) => new Set(current).add(planId));
-        const result = await planExecutor.current.skip(planId);
-        setSkippingPlanIds((current) => {
-          const next = new Set(current);
-          next.delete(planId);
-          return next;
-        });
-        if (result === 'SKIPPED') {
-          setExecutionFacts((current) => new Map(current).set(planId, 'SKIPPED'));
-        }
-        return result;
-      },
-    );
-    skipAllMissedRunningRef.current = false;
-    setSkipAllMissedBusy(false);
+    // HPG4-3 -- explicit cleanup: the guard must release even if the skip
+    // implementation unexpectedly throws (previously relied only on
+    // planExecutor.current.skip() being guaranteed never to throw -- an
+    // implicit, not explicit, guarantee). Mirrors the per-item try/finally
+    // the Plan tab's own handler already uses.
+    let outcomes: string[];
+    try {
+      outcomes = await collectSkipAllOutcomes(
+        eligible,
+        (planId) => planExecutor.current.isBusy(planId),
+        async (planId) => {
+          setSkippingPlanIds((current) => new Set(current).add(planId));
+          const result = await planExecutor.current.skip(planId);
+          setSkippingPlanIds((current) => {
+            const next = new Set(current);
+            next.delete(planId);
+            return next;
+          });
+          if (result === 'SKIPPED') {
+            setExecutionFacts((current) => new Map(current).set(planId, 'SKIPPED'));
+          }
+          return result;
+        },
+      );
+    } finally {
+      skipAllMissedRunningRef.current = false;
+      setSkipAllMissedBusy(false);
+    }
     const { succeeded, failed } = summarizeSkipAllOutcome(outcomes);
     setSkipAllMissedNotice({ succeeded, failed });
     if (succeeded > 0) {
@@ -1437,7 +1446,11 @@ export function HomeDashboard({
             {skipAllMissedBusy ? 'Skipping…' : 'Skip all missed'}
           </TextButton>
           {skipAllMissedNotice && (
-            <span role="status" style={{ ...typography.caption, color: colors.textMuted }}>
+            // HPG4-3 -- role="alert" only for the genuine all-failed
+            // outcome (zero successes, matching DayPlanPreview.tsx's own
+            // alert-vs-status convention); success and partial-success
+            // stay role="status", unchanged.
+            <span role={skipAllMissedNotice.succeeded === 0 ? 'alert' : 'status'} style={{ ...typography.caption, color: colors.textMuted }}>
               {skipAllMissedNotice.failed === 0
                 ? `Skipped ${skipAllMissedNotice.succeeded} missed ${skipAllMissedNotice.succeeded === 1 ? 'activity' : 'activities'}.`
                 : skipAllMissedNotice.succeeded === 0

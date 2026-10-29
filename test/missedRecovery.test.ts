@@ -278,8 +278,8 @@ async function main() {
     /summarizeSkipAllOutcome\(outcomes\)/.test(skipAllBlock) && !/succeeded \+= 1|failed \+= 1|let succeeded|let failed/.test(skipAllBlock)
   );
   check(
-    '64. the busy guard is released unconditionally right after the batch\'s own await resolves, on EVERY exit path (success or failure) -- never left permanently stuck, and a later call after a prior batch finished is allowed to proceed',
-    /\);\s*skipAllMissedRunningRef\.current = false;\s*setSkipAllMissedBusy\(false\);/.test(skipAllBlock)
+    '64. HPG4-3 -- the busy guard is released from an explicit finally block wrapping the batch\'s own await, so it is released even if collectSkipAllOutcomes unexpectedly throws (not only on the ordinary success path as before) -- never left permanently stuck, and a later call after a prior batch finished is allowed to proceed',
+    /\}\s*finally\s*\{\s*skipAllMissedRunningRef\.current = false;\s*setSkipAllMissedBusy\(false\);\s*\}/.test(skipAllBlock)
   );
   check(
     '65. handleSkipAllMissed\'s own outcomes array is built by calling the REAL exported collectSkipAllOutcomes (not a reimplemented loop) -- the exact second half of the gap an independent review found: corrupting Home\'s collection, not the tally, still passed every check in this file until this line existed to prove the handler has no parallel collection path',
@@ -305,6 +305,45 @@ async function main() {
   check('67. collectSkipAllOutcomes runs strictly sequentially (each item\'s skipOne fully resolves before the next one starts), never in parallel', order.join() === 'start:x,end:x,start:y,end:y,start:z,end:z');
   const composedOutcomes = await collectSkipAllOutcomes(['p', 'q', 'r', 's'], (id) => id === 'q', async (id) => (id === 's' ? 'FAILED' : 'SKIPPED'));
   check('68. collectSkipAllOutcomes composed with the REAL summarizeSkipAllOutcome on a mixed batch (one busy, one failed, two succeeded) produces the correct end-to-end counts -- the genuine production pipeline, not two isolated unit tests of its two halves', (() => { const { succeeded, failed } = summarizeSkipAllOutcome(composedOutcomes); return succeeded === 2 && failed === 2; })());
+
+  // ============================================================
+  // HPG4-3. Home guard cleanup -- handleSkipAllMissed previously cleared
+  // its busy ref/state unconditionally right after the batch's own await,
+  // relying only on the implicit (not explicit) guarantee that
+  // planExecutor.current.skip() never throws. Two-part proof, mirroring
+  // this file's own established convention for caller-side gaps: (a) the
+  // real collectSkipAllOutcomes genuinely propagates an unexpected skipOne
+  // throw rather than swallowing it, so (b) check 64 above's structural
+  // proof that the real handler now wraps that call in an explicit
+  // finally is actually load-bearing, not decorative.
+  // ============================================================
+  let rejected = false;
+  try {
+    await collectSkipAllOutcomes(['m'], () => false, async () => { throw new Error('transport exploded'); });
+  } catch {
+    rejected = true;
+  }
+  check('HPG4-3. collectSkipAllOutcomes genuinely propagates an unexpected skipOne throw rather than swallowing it -- the precondition that makes the handler\'s explicit try/finally (check 64) load-bearing', rejected);
+
+  // ============================================================
+  // HPG4-3. Accessibility: the bulk-skip outcome notice must use
+  // role="alert" only for the genuine all-failed case (zero successes),
+  // matching DayPlanPreview.tsx's own alert-vs-status convention --
+  // previously unconditionally role="status" even when every attempt
+  // failed.
+  // ============================================================
+  const noticeBlockHome = dashSrc.slice(dashSrc.indexOf('missedSkipEligibleCount >= 2'), dashSrc.indexOf('missedSkipEligibleCount >= 2') + 1300);
+  check(
+    'HPG4-3. Home: the outcome notice\'s role is conditional on succeeded === 0 (alert for all-failed, status otherwise) -- the exact literal expression, not a reimplementation',
+    /role=\{skipAllMissedNotice\.succeeded === 0 \? 'alert' : 'status'\}/.test(noticeBlockHome)
+  );
+  check(
+    'HPG4-3. Home: the existing success/partial-success/all-failed message text is byte-unchanged by the accessibility fix',
+    /Skipped \$\{skipAllMissedNotice\.succeeded\} missed \$\{skipAllMissedNotice\.succeeded === 1 \? 'activity' : 'activities'\}\./.test(noticeBlockHome) &&
+      /Couldn't skip those\. Try again\./.test(noticeBlockHome) &&
+      /Skipped \$\{skipAllMissedNotice\.succeeded\} of \$\{skipAllMissedNotice\.succeeded \+ skipAllMissedNotice\.failed\}\./.test(noticeBlockHome)
+  );
+  check('HPG4-3. Home: no confirmation dialog was added alongside the accessibility or guard-cleanup fixes', !/ModalShell|window\.confirm|confirm\(/i.test(noticeBlockHome) && !/ModalShell|window\.confirm|confirm\(/i.test(skipAllBlock));
 
   console.log(allPassed ? '\nALL MISSED RECOVERY CHECKS PASSED' : '\nSOME MISSED RECOVERY CHECKS FAILED');
   process.exit(allPassed ? 0 : 1);
