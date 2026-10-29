@@ -1,0 +1,11 @@
+6ca8278ccca353a10b5e4d2beb0ad3df32c0d3323d4c42063786b4a755c06071  /opt/homebrew/Cellar/gettext/1.0/lib/libintl.8.dylib
+775aad8f9ab3cc7f8440109f3761a8130415d93e54c07013217b891d2bf54888  /opt/homebrew/Cellar/krb5/1.22.2_2/lib/libcom_err.3.0.dylib
+4c3db81f0ddb2f718c59234e00e11553619dd43a1ed44463951021c086c85f0c  /opt/homebrew/Cellar/krb5/1.22.2_2/lib/libgssapi_krb5.2.2.dylib
+013c1b35460362984207bfeb6f0f5c5d9bf4f1182ce07a8e974645be8df5dd16  /opt/homebrew/Cellar/krb5/1.22.2_2/lib/libk5crypto.3.1.dylib
+43ccf54244b6eea96dec1e3f685cbf5426ccd01528022ba9467f48105c9fe7f3  /opt/homebrew/Cellar/krb5/1.22.2_2/lib/libkrb5.3.3.dylib
+70d0febc3ebbe022f8dff4cfda47288815c1733461f6069347b8f5858f9eb634  /opt/homebrew/Cellar/krb5/1.22.2_2/lib/libkrb5support.1.1.dylib
+cf354769aff4fefb6d2691d1fb6c29da31f1426363444586a6fa7934fbeffaeb  /opt/homebrew/Cellar/openssl@3/3.6.3/lib/libcrypto.3.dylib
+2eed8515d898ee02502019821ca2ae922eec4b44046d99596b5c3a49074afbac  /opt/homebrew/Cellar/openssl@3/3.6.3/lib/libssl.3.dylib
+e78541607d31dee69a55beaaace4d3862dfc44cd15ad7caffc281e3808ee7b2b  /opt/homebrew/Cellar/postgresql@16/16.14/bin/psql
+c0e17e448215c2a8f60baf3e4d509e3f8f47535b54aab4542ff1733bb5c61c22  /opt/homebrew/Cellar/postgresql@16/16.14/lib/libpq.5.dylib
+0d291e55cfd00f109a2d16c8f0700a8352c4e233d4c83ca8e856218e0888cc03  /opt/homebrew/Cellar/readline/8.3.6/lib/libreadline.8.3.dylib

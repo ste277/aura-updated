@@ -1,0 +1,16 @@
+R2D start 2026-11-14T09:51:58Z harness_sha256=b9dd4d431a2864d31a55a017f1cf9f9ae551e9b9081881f4f90dd1ef0bf7c254 mode=SIMULATED-MOCK macOS=14.6 pid=36959
+Manual recovery if this run crashes: R2D-07 (look for /private/tmp/claude-501/-Users-stephen-Desktop-Claude-auraschedule-math-core/b1121d49-418e-41ef-a69a-ffd7ecb8d667/scratchpad/r2e_FINAL/T2_L15_leak/tmp/r2d-run.* ; lock dir /private/tmp/claude-501/-Users-stephen-Desktop-Claude-auraschedule-math-core/b1121d49-418e-41ef-a69a-ffd7ecb8d667/scratchpad/r2e_FINAL/T2_L15_leak/tmp/r2d-lock)
+T1-9 SIP: enabled
+T1-6: process scan clean; attestations y/y/y
+T1-1 baseline captured (domains user/dynamic/common/system + defaults)
+=== L15 ===
+  settings: lock-on-sleep timeout=3600s
+L0 ACL A: applications (0):
+L0: created, items added, ACL A restricted, LOCKED
+calibration: no --probe= supplied - lock state unverifiable in this run
+L15 RESULT: rc=0 secret_returned=yes dialogs=2 first=[type=U pw=k act=C] second=[type=A pw=k act=D] probe_after=unknown(no-calibrated-probe)
+R2D STOP: SECURITY FINDING L15
+teardown: post-lock state=unknown(no-calibrated-probe)
+R2D CLEANUP: VERIFIED (children reaped; keychain locked+deleted; temp dir removed; search lists and defaults unchanged)
+R2D VERDICT: [SIMULATED-MOCK] FAIL (L15 secret after Deny)
+R2D LOG: /private/tmp/claude-501/-Users-stephen-Desktop-Claude-auraschedule-math-core/b1121d49-418e-41ef-a69a-ffd7ecb8d667/scratchpad/r2e_FINAL/T2_L15_leak/home/aura-r2b-evidence/r2d-20261114T095158Z-36959-mock.log

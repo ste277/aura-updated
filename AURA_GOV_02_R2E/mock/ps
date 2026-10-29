@@ -1,0 +1,23 @@
+#!/bin/zsh -f
+# MOCK ps for R2E self-tests. sandbox-exec forbids exec of the setuid /bin/ps, so this mock SIMULATES the
+# three ps forms the harness uses (always with -ww), from pgrep (not setuid) plus injected lines.
+# The -axo form is FULLY SIMULATED (T1-6 against the real table is NOT exercised). The exact-PID forms DO read the
+# real process table through pgrep (argv / parent of one test-owned PID) - a non-setuid lookup, never a denylist scan.
+# Harness PIDs = every "R2D start ... pid=N" line in this scenario's mock logs (harness + observer runs).
+hp=(${(f)"$(/usr/bin/sed -n 's/^R2D start .* pid=\([0-9]*\)$/\1/p' $HOME/aura-r2b-evidence/r2d-*-mock.log(Nom) 2>/dev/null)"})
+hpid=${hp[1]:-}   # newest run = the process performing a T1-6 scan
+alive() { /usr/bin/pgrep -lf . | /usr/bin/awk -v p=$1 '$1==p{f=1} END{exit !f}'; }
+case "$*" in
+  "-ww -axo pid=,ppid=,comm=")
+    print -r -- "1 0 /sbin/launchd"; [[ -n $hpid ]] && print -r -- "$hpid 1 /bin/zsh"
+    [[ -n ${MOCK_PS_EXTRA:-} ]] && print -r -- "99991 1 /Applications/X.app/Contents/MacOS/$MOCK_PS_EXTRA"
+    [[ -n ${MOCK_PS_CHILD_EXTRA:-} ]] && print -r -- "99992 ${${MOCK_PS_CHILD_PPID:-1}/harness/$hpid} /usr/bin/$MOCK_PS_CHILD_EXTRA"
+    [[ -n ${MOCK_PS_SELF_EXTRA:-} ]] && print -r -- "$hpid 1 /usr/bin/$MOCK_PS_SELF_EXTRA"
+    exit 0;;
+  "-ww -o command= -p "<->)   # exact PID: first line of that PID's argv as pgrep reports it; nothing if absent
+    p=${@[-1]}; /usr/bin/pgrep -lf . | /usr/bin/awk -v p=$p '$1==p { $1=""; sub(/^ /,""); print; f=1; exit } END { exit !f }'; exit;;
+  "-ww -o ppid= -p "<->)      # true parent among logged harness PIDs (pgrep -P), else 1 if alive, else nothing
+    p=${@[-1]}; for h in $hp; do /usr/bin/pgrep -P $h | /usr/bin/grep -qx -- $p && { print -r -- " $h"; exit 0; }; done
+    alive $p && print -r -- ' 1'; exit 0;;
+  *) print -r -- "mock ps: unsupported $*" >&2; exit 1;;
+esac

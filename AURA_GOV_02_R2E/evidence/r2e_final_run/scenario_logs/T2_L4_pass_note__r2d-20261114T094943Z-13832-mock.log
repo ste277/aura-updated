@@ -1,0 +1,29 @@
+R2D start 2026-11-14T09:49:43Z harness_sha256=b9dd4d431a2864d31a55a017f1cf9f9ae551e9b9081881f4f90dd1ef0bf7c254 mode=SIMULATED-MOCK macOS=14.6 pid=13832
+Manual recovery if this run crashes: R2D-07 (look for /private/tmp/claude-501/-Users-stephen-Desktop-Claude-auraschedule-math-core/b1121d49-418e-41ef-a69a-ffd7ecb8d667/scratchpad/r2e_FINAL/T2_L4_pass_note/tmp/r2d-run.* ; lock dir /private/tmp/claude-501/-Users-stephen-Desktop-Claude-auraschedule-math-core/b1121d49-418e-41ef-a69a-ffd7ecb8d667/scratchpad/r2e_FINAL/T2_L4_pass_note/tmp/r2d-lock)
+T1-9 SIP: enabled
+T1-6: process scan clean; attestations y/y/y
+T1-1 baseline captured (domains user/dynamic/common/system + defaults)
+=== G1 ===
+  settings: lock-on-sleep timeout=3600s
+L0 ACL A: applications (0):
+L0: created, items added, ACL A restricted, LOCKED
+calibration: probe=attr locked_sig=rc=36:60a485741003 unlocked_sig=rc=0:f8fbe8bc1962
+L1 candidate=info locked_sig=rc=0:63f5b320bae7 unlocked_sig=rc=0:63f5b320bae7 dialogs_locked=n dialogs_unlocked=n qualifies=no
+L1 candidate=attr locked_sig=rc=36:60a485741003 unlocked_sig=rc=0:f8fbe8bc1962 dialogs_locked=n dialogs_unlocked=n qualifies=yes
+L1 candidate=dump locked_sig=rc=36:d28335588730 unlocked_sig=rc=0:4b1957264b72 dialogs_locked=n dialogs_unlocked=n qualifies=yes
+calibration: probe=attr locked_sig=rc=36:60a485741003 unlocked_sig=rc=0:f8fbe8bc1962
+L1 RESULT: PASS probe=attr (pass --probe=attr to later invocations; idle-timer criterion evaluated in L8)
+L2 probe_before=locked
+L2 RESULT: rc=128 secret_returned=no type=U pw=k act=C probe_after=locked
+L3 RESULT: rc=0 secret_in_output=no dialogs=1 type=U pw=k act=C probe_after=locked
+L4 baseline mdat (controlled unlock)=20261114094943Z
+L4 state_before_write=locked
+L4 RESULT: overwrite_rc=128 [type=U pw=k act=C] delete_rc=128 [type=U pw=k act=C] mdat_before=20261114094943Z mdat_after=20261114094943Z item_present_rc=0
+L4 NOTE: write/delete refused (rc!=0) and mdat unchanged at its 1-second resolution; mdat equality alone is NOT proof of no modification (value not re-read, to avoid an extra item dialog)
+L5 RESULT a: rc=128 secret_returned=no ; b: rc=128 secret_returned=no (pids 16060 16061)
+L5 OWNER dialogs=2 distinguishable=n type=U pw=k act=C probe_after=locked
+G1 ACL A after (controlled unlock): applications (0):
+G1 group teardown: keychain deleted
+R2D CLEANUP: VERIFIED (children reaped; keychain locked+deleted; temp dir removed; search lists and defaults unchanged)
+R2D VERDICT: [SIMULATED-MOCK] COMPLETED G1: G1 RECORDED (characterization; see RESULT lines); 
+R2D LOG: /private/tmp/claude-501/-Users-stephen-Desktop-Claude-auraschedule-math-core/b1121d49-418e-41ef-a69a-ffd7ecb8d667/scratchpad/r2e_FINAL/T2_L4_pass_note/home/aura-r2b-evidence/r2d-20261114T094943Z-13832-mock.log

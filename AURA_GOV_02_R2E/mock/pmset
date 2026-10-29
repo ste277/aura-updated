@@ -1,0 +1,5 @@
+#!/bin/zsh -f
+# MOCK pmset for R2E self-tests (pmset -g log simulator). Never calls the real tool.
+[[ ${MOCK_SLEEP:-0} == 1 ]] && print -r -- "$(date '+%Y-%m-%d %H:%M:%S') +0530 Sleep               	Entering Sleep state due to 'Software Sleep'"
+[[ ${MOCK_SLEEP_LOCKS:-0} == 1 ]] && for f in ${R2D_MOCK_DIR:?}/state/*/locked(N); do print 1 > $f; done
+exit 0

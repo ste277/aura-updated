@@ -1,0 +1,63 @@
+# RE-4 probe 2026-11-14T10:04:27Z macOS=14.6 build=23G80 zsh 5.9 (x86_64-apple-darwin23.0) driver_pid=57229 driver_ppid=57227 uid=501
+harness_sha256=b9dd4d431a2864d31a55a017f1cf9f9ae551e9b9081881f4f90dd1ef0bf7c254
+extract is_wd lines=4 sha256=bb90a80ce595b09f
+extract T1-6 lines=5 sha256=0bab3f05db95fabd
+FAIL  [A-1] extracted is_wd is exactly 4 lines and T1-6 exactly 6 lines
+PASS  [A-2] extracted code contains no literal "security", no keychain dir, no signal other than kill -0
+B-1 cmd='/bin/ps -ww -axo pid=,ppid=,comm=' rc=0 lines=594 format_ok=594 comm_absolute_path=573 comm_not_absolute=21 leading_space_lines=316 max_line_len=232 (listing itself NOT stored)
+PASS  [B-1] real -axo: rc=0, every line is "<pid> <ppid> <comm>"
+B-2 cmd='/bin/ps -ww -o pid=,ppid=,comm= -p 999999' rc=1 output_len=32
+FAIL  [B-2] absent PID: non-zero rc and empty output (no record)
+C-1 dummy started pid=57284 expected_parent=57229 exe=/private/tmp/claude-501/-Users-stephen-Desktop-Claude-auraschedule-math-core/b1121d49-418e-41ef-a69a-ffd7ecb8d667/scratchpad/re4_tmp_4780a28d/bin/osascript-re4dummy lifetime_cs=3000
+C-2 command= (-ww) rc=1 len=0 value=
+C-3 command= (no -w, stdout=pipe) rc=1 len=0 ; (-w) len=0
+C-4 ppid= raw='' rc=1 ; row='' ; stat=''
+FAIL  [C-2] real -ww command= of the dummy equals the exact expected argv
+INFO  [C-3] without -ww the command was NOT truncated (len 0) when stdout is a pipe
+FAIL  [C-4] real ppid= (leading spaces stripped) equals the driver pid
+FAIL  [C-5] real row parses: pid, ppid, comm=dummy path
+FAIL  [RE4-01] is_wd(dummy, N=7, parent=driver) -> MATCH
+PASS  [RE4-02a] is_wd with parent=1 -> reject
+PASS  [RE4-02b] is_wd with parent=driver_ppid -> reject
+PASS  [RE4-03a] is_wd with wrong N (8) -> reject
+PASS  [RE4-03b] is_wd with N=7x (non-exact) -> reject
+PASS  [RE4-03c] partial keychain path (prefix) -> reject
+PASS  [RE4-03d] different keychain path -> reject
+PASS  [RE4-03e] partial security path (prefix) -> reject
+PASS  [RE4-03f] empty KC -> reject
+PASS  [RE4-07a] malformed pid "12a" -> reject before any lookup
+PASS  [RE4-07b] empty pid -> reject
+D-1 T1-6 real scan (ME=driver) hits=[ChatGPT for Chrome;Claude;Claude Helper;Claude Helper (Renderer);claude;superops;]
+D-2 T1-6 real scan (ME=999999, exclusion disabled) hits=[ChatGPT for Chrome;Claude;Claude Helper;Claude Helper (Renderer);claude;superops;]
+FAIL  [RE4-01b] T1-6 real scan finds the denylisted-named dummy when it is NOT the harness child
+PASS  [RE4-02c] T1-6 real scan EXCLUDES the dummy when its parent is the harness (ppid==ME)
+PASS  [RE4-01c] T1-6 real scan detects the running Claude processes (expected STOP while this session runs)
+D-3 T1-6 synthetic hits=[Claude;Claude Helper (Renderer);TeamViewer;claudette;osascript;]
+PASS  [RE4-04a] synthetic: Claude, Claude Helper, osascript (path and bare), TeamViewer detected
+PASS  [RE4-04b] synthetic: notclaude, my-osascript, zsh, malformed line NOT detected
+PASS  [RE4-04c] synthetic: harness pid itself and its child (ppid==ME) excluded
+D-4 T1-6 synthetic grandchild hits=[osascript;]
+INFO  [RE4-04d] synthetic: a GRANDCHILD of the harness is NOT excluded (only pid==ME or ppid==ME) - fail-safe STOP
+INFO  [RE4-04e] synthetic: prefix match also hits "claudette" (over-broad, fail-safe STOP)
+PASS  [RE4-07c] synthetic: missing command record -> reject
+PASS  [RE4-07d] synthetic: truncated command (80 cols) -> reject
+PASS  [RE4-07e] synthetic: trailing extra argument -> reject
+PASS  [RE4-07f] synthetic: lookalike suffix on security path -> reject
+PASS  [RE4-04f] synthetic: partial name r2d_watch -> reject
+PASS  [RE4-04g] synthetic: lookalike token xr2d_watchdog -> reject
+PASS  [RE4-07g] synthetic: missing ppid record -> reject
+PASS  [RE4-07h] synthetic: reparented to launchd (ppid 1) -> reject
+PASS  [RE4-07i] synthetic: ppid with an extra digit -> reject
+FAIL  [RE4-07j] synthetic control: exact record with padded ppid -> MATCH
+E-1 dummy natural exit: alive=0 exit_status=137 after=0.59538006782531738s bound=45s
+E-2 signal sent to dummy: no (no other process was signalled at any point)
+PASS  [RE4-05a] dummy exited by itself within its bound (no signal needed)
+E-3 after exit: '/bin/ps -ww -o pid=,ppid=,comm= -p 57284' rc=1 output_len=0
+PASS  [RE4-05b] after exit: real ps returns non-zero and no record
+PASS  [RE4-05c] after exit: is_wd rejects (no false liveness)
+PASS  [RE4-05d] after exit: T1-6 real scan no longer reports the dummy
+RE4-06 total probe elapsed=0.71667289733886719s; every wait loop bounded (dummy 45 s, signal wait 5 s)
+PASS  [RE4-06] probe finished within 90 s overall
+PASS  [F-1] temp dir removed (exact guarded paths only)
+PASS  [F-2] no process carrying the RE4 marker remains
+TOTAL PASS=33 FAIL=8 INFO=3

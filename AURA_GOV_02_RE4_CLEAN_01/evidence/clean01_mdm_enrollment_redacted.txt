@@ -1,0 +1,5 @@
+# cmd: /usr/bin/profiles status -type enrollment  (2026-11-14T11:10:32Z); MDM server path redacted
+Enrolled via DEP: No
+MDM enrollment: Yes (User Approved)
+MDM server: https://usmdm.superops.ai/<redacted>
+# rc=0

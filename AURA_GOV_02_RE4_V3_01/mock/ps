@@ -1,0 +1,65 @@
+#!/bin/zsh -f
+# MOCK ps for R2E self-tests (FIX01: ucomm + comm tables with fault injection).
+# The -axo forms are FULLY SIMULATED (the real table is never scanned here). The exact-PID forms query only the
+# CHILDREN OF KNOWN TEST PROCESSES (logged harness PIDs and the runner, R2D_MOCK_RUNNER_PID) via `pgrep -P`; no
+# whole-table listing is produced and no unrelated process's argv is returned. Liveness uses kill -0 (no signal).
+# Harness PIDs = every "R2D start ... pid=N" line in this scenario's mock logs (harness + observer runs).
+zmodload zsh/zselect
+hp=(${(f)"$(/usr/bin/sed -n 's/^R2D start .* pid=\([0-9]*\)$/\1/p' $HOME/aura-r2b-evidence/r2d-*-mock.log(Nom) </dev/null 2>/dev/null)"})
+hpid=${hp[1]:-}   # newest run = the process performing a T1-6 scan
+alive() { kill -0 $1 2>/dev/null; }
+parents=(${hp} ${R2D_MOCK_RUNNER_PID:-}); parents=(${(M)parents:#<->})
+# row <pid> <ppid> <exec path> [ucomm override] [comm override]  -> one line of the selected column
+row() { local u=${4:-${${3:t}[1,16]}} c=${5:-$3}
+  # real ucomm is space-padded to 16 characters
+  if [[ $COL == ucomm ]]; then print -r -- "$(printf '%5s %5s %-16s' $1 $2 "$u")"; else print -r -- "$(printf '%5s %5s' $1 $2) $c"; fi; }
+table() {
+  row 1 0 /sbin/launchd
+  [[ ${MOCK_PS_BLANKLINE:-0} == 1 ]] && print -r -- ''     # blank row in the MIDDLE of the output
+  if [[ -n $hpid && ${MOCK_PS_PARTIAL:-0} != 1 ]]; then
+    if [[ -n ${MOCK_PS_SELF_EXTRA:-} ]]; then row $hpid 1 /usr/bin/$MOCK_PS_SELF_EXTRA; else row $hpid 1 /bin/zsh; fi; fi
+  [[ -n ${MOCK_PS_EXTRA:-} ]] && row 99991 1 "/Applications/X.app/Contents/MacOS/$MOCK_PS_EXTRA"
+  [[ -n ${MOCK_PS_CHILD_EXTRA:-} ]] && row 99992 ${${MOCK_PS_CHILD_PPID:-1}/harness/$hpid} /usr/bin/$MOCK_PS_CHILD_EXTRA
+  # argv[0] spoof: executable (kernel ucomm) is denylisted, argv[0]/comm claims a benign name
+  [[ -n ${MOCK_PS_SPOOF_COMM:-} ]] && row 99993 1 /usr/bin/benign-tool "$MOCK_PS_SPOOF_COMM" /usr/bin/benign-tool
+  # inverse: comm (argv[0]) is denylisted, kernel name benign -> still STOP (conservative)
+  [[ -n ${MOCK_PS_COMM_ONLY:-} ]] && row 99994 1 /bin/zsh zsh "/x/$MOCK_PS_COMM_ONLY"
+  # misleading: names that merely CONTAIN a denylisted word, or a path component naming one
+  [[ ${MOCK_PS_MISLEAD:-0} == 1 ]] && { row 99995 1 /usr/bin/notes-about-claude; row 99996 1 /Applications/Claude.app/Contents/MacOS/updater-helper; row 99997 1 /usr/bin/myosascript; }
+  [[ ${MOCK_PS_MULTI:-0} == 1 ]] && { row 99981 1 /x/TeamViewer; row 99982 1 /x/AnyDesk; row 99983 1 /usr/bin/osascript; row 99984 1 /usr/bin/osascript; }
+  [[ ${MOCK_PS_GRANDCHILD:-0} == 1 ]] && { row 99971 $hpid /usr/bin/osascript-child; row 99972 99971 /usr/bin/osascript-grand; }
+  [[ ${MOCK_PS_DISAGREE:-0} == 1 ]] && { if [[ $COL == ucomm ]]; then row 99961 $hpid /usr/bin/osascript-race; else row 99961 1 /usr/bin/osascript-race; fi; }
+  [[ ${MOCK_PS_MALFORMED:-0} == 1 ]] && print -r -- 'this is not a ps row'
+  [[ ${MOCK_PS_MISSINGCOL:-0} == 1 ]] && print -r -- '77777     1'
+  [[ ${MOCK_PS_BADPID:-0} == 1 ]] && print -r -- '  12a     1 /usr/bin/x'
+  [[ ${MOCK_PS_BADPPID:-0} == 1 ]] && print -r -- '77778    -1 /usr/bin/x'
+  [[ ${MOCK_PS_DUPPID:-0} == 1 ]] && { row 77779 1 /usr/bin/a; row 77779 1 /usr/bin/b; }
+  [[ -n ${MOCK_PS_LATE_FROM:-} ]] && (( NCALL >= MOCK_PS_LATE_FROM )) && row 99951 1 "/Applications/X.app/Contents/MacOS/${MOCK_PS_LATE_EXTRA:-TeamViewer}"
+  [[ ${MOCK_PS_NOLAUNCHD:-0} == 1 ]] && return 0
+  return 0; }
+case "$*" in
+  "-ww -axo pid=,ppid=,ucomm="|"-ww -axo pid=,ppid=,comm=")
+    COL=${${3##*,}%=}; print -r -- "$COL" >> ${R2D_MOCK_DIR:-/dev/null}/ps_cols.log
+    CF=${R2D_MOCK_DIR:-/nonexistent}/ps_axo_calls; NCALL=$(( $(cat $CF 2>/dev/null || print 0) + 1 )); print -r -- $NCALL > $CF 2>/dev/null   # per-call counter (synthetic state changes)
+    hang() { print -r -- $$ > ${R2D_MOCK_DIR:-/nonexistent}/hang.pid 2>/dev/null; zselect -t $(( ${MOCK_PS_HANG_S:-30} * 100 )); }   # builtin, no child; never signalled
+    [[ ${MOCK_PS_HANG:-} == (1|$COL) ]] && hang
+    [[ -n ${MOCK_PS_HANG_FROM:-} ]] && (( NCALL >= MOCK_PS_HANG_FROM )) && hang
+    [[ ${MOCK_PS_PARTIAL_HANG:-0} == 1 ]] && { print -rn -- '    1     0 /sbin/la'; hang; }   # stall MID-LINE
+    [[ -n ${MOCK_PS_LATE_RC_FROM:-} ]] && (( NCALL >= MOCK_PS_LATE_RC_FROM )) && { table; exit 3; }
+    [[ ${MOCK_PS_EMPTY:-} == (1|$COL) ]] && exit 0
+    out=$(table); [[ ${MOCK_PS_NOLAUNCHD:-0} == 1 ]] && out=$(print -r -- "$out" | /usr/bin/sed '1d')
+    if [[ ${MOCK_PS_TRUNC:-} == (1|$COL) ]]; then print -r -- "$out" | /usr/bin/head -1; exit 0; fi
+    if [[ ${MOCK_PS_SPOOF_SENTINEL:-0} == 1 ]]; then   # a name containing a newline followed by a fake sentinel, then more rows
+      print -r -- "$out"; print -r -- '99988     1 /x/evil'; print -r -- '__R2D_PS_RC=0'; print -r -- '__R2D_PS_RC_0000000000000000=0'; print -r -- '99987     1 /x/TeamViewer'
+    elif [[ ${MOCK_PS_NO_NEWLINE:-0} == 1 ]]; then print -rn -- "$out"
+    else print -r -- "$out"; fi
+    [[ -n ${MOCK_PS_RC:-} && ${MOCK_PS_RC_COL:-$COL} == $COL ]] && exit $MOCK_PS_RC
+    exit 0;;
+  "-ww -o command= -p "<->)   # exact PID: first line of that PID's argv as pgrep reports it; nothing if absent
+    p=${@[-1]}; (( ${#parents} )) || exit 1
+    /usr/bin/pgrep -lf -P ${(j:,:)parents} | /usr/bin/awk -v p=$p '$1==p { $1=""; sub(/^ /,""); print; f=1; exit } END { exit !f }'; exit;;
+  "-ww -o ppid= -p "<->)      # true parent among logged harness PIDs (pgrep -P), else 1 if alive, else nothing
+    p=${@[-1]}; for h in $hp; do /usr/bin/pgrep -P $h | /usr/bin/grep -qx -- $p && { print -r -- " $h"; exit 0; }; done
+    alive $p && print -r -- ' 1'; exit 0;;
+  *) print -r -- "mock ps: unsupported $*" >&2; exit 1;;
+esac

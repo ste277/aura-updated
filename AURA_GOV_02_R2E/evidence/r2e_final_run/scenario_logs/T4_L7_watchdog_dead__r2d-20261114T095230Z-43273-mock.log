@@ -1,0 +1,13 @@
+R2D start 2026-11-14T09:52:30Z harness_sha256=b9dd4d431a2864d31a55a017f1cf9f9ae551e9b9081881f4f90dd1ef0bf7c254 mode=SIMULATED-MOCK macOS=14.6 pid=43273
+Manual recovery if this run crashes: R2D-07 (look for /private/tmp/claude-501/-Users-stephen-Desktop-Claude-auraschedule-math-core/b1121d49-418e-41ef-a69a-ffd7ecb8d667/scratchpad/r2e_FINAL/T4_L7_watchdog_dead/tmp/r2d-run.* ; lock dir /private/tmp/claude-501/-Users-stephen-Desktop-Claude-auraschedule-math-core/b1121d49-418e-41ef-a69a-ffd7ecb8d667/scratchpad/r2e_FINAL/T4_L7_watchdog_dead/tmp/r2d-lock)
+T1-9 SIP: enabled
+T1-6: process scan clean; attestations y/y/y
+T1-1 baseline captured (domains user/dynamic/common/system + defaults)
+=== L7 ===
+  settings: lock-on-sleep timeout=3600s
+L0 ACL A: applications (0):
+L0: created, items added, ACL A restricted, LOCKED
+calibration: probe=attr locked_sig=rc=36:60a485741003 unlocked_sig=rc=0:ca22a6d93ee0
+watchdog armed pid=43869 N=12
+L7 READY harness_pid=43273 watchdog_pid=43869 keychain=/private/tmp/claude-501/-Users-stephen-Desktop-Claude-auraschedule-math-core/b1121d49-418e-41ef-a69a-ffd7ecb8d667/scratchpad/r2e_FINAL/T4_L7_watchdog_dead/tmp/r2d-run.fm1q9gIT/r2d.keychain-db
+L7 OBSERVER ARGS: --observe=/private/tmp/claude-501/-Users-stephen-Desktop-Claude-auraschedule-math-core/b1121d49-418e-41ef-a69a-ffd7ecb8d667/scratchpad/r2e_FINAL/T4_L7_watchdog_dead/tmp/r2d-run.fm1q9gIT/r2d.keychain-db,43869,43273,12,attr,rc=36:60a485741003,rc=0:ca22a6d93ee0,SIMULATED-MOCK

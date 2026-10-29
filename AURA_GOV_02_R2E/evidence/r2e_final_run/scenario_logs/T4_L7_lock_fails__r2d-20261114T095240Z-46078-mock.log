@@ -1,0 +1,11 @@
+R2D start 2026-11-14T09:52:40Z harness_sha256=b9dd4d431a2864d31a55a017f1cf9f9ae551e9b9081881f4f90dd1ef0bf7c254 mode=SIMULATED-MOCK macOS=14.6 pid=46078
+Manual recovery if this run crashes: R2D-07 (look for /private/tmp/claude-501/-Users-stephen-Desktop-Claude-auraschedule-math-core/b1121d49-418e-41ef-a69a-ffd7ecb8d667/scratchpad/r2e_FINAL/T4_L7_lock_fails/tmp/r2d-run.* ; lock dir /private/tmp/claude-501/-Users-stephen-Desktop-Claude-auraschedule-math-core/b1121d49-418e-41ef-a69a-ffd7ecb8d667/scratchpad/r2e_FINAL/T4_L7_lock_fails/tmp/r2d-lock)
+L7-OBS watchdog_alive=yes pid=46063 parent=45475 argv=exact; waiting up to 60s for harness pid 45475 to disappear (owner: kill -9 45475)
+L7-OBS harness_gone_at=1794649960.3203079700
+L7-OBS t+5 probe=rc=0:f9b8c1563181 state=unlocked
+L7-OBS t+N+10 probe=rc=0:f9b8c1563181 state=unlocked
+L7-OBS watchdog_gone_by_deadline=yes
+L7 RESULT: L7 FAIL (still unlocked after watchdog deadline) residual_t+5=unlocked. Post-L7 cleanup = R2D-07 manual recovery.
+R2D CLEANUP: VERIFIED (observer: performed no keychain lock/delete; nothing of its own to clean)
+R2D VERDICT: [SIMULATED-MOCK] L7 FAIL (still unlocked after watchdog deadline)
+R2D LOG: /private/tmp/claude-501/-Users-stephen-Desktop-Claude-auraschedule-math-core/b1121d49-418e-41ef-a69a-ffd7ecb8d667/scratchpad/r2e_FINAL/T4_L7_lock_fails/home/aura-r2b-evidence/r2d-20261114T095240Z-46078-mock.log

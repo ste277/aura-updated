@@ -1,0 +1,244 @@
+ts	worktree	event	detail
+2026-11-14T16:39:56	BASELINE	OK	free=Allocated:
+2026-11-14T16:39:57	day-constructor-v1-pr-d	STOP	ignored entries differ: 
+2026-11-14T16:40:09	day-constructor-v1-pr-d	CHECK_OK	branch=feat/day-constructor-v1-pr-d head=b0f40019b93413bdb3a1d79747191c06d2b28964
+2026-11-14T16:40:09	day-constructor-v1-pr-e1	CHECK_OK	branch=feat/day-constructor-v1-pr-e1 head=2952c3199bc30af1a51ce9d3fe6d5a0c2013a1e7
+2026-11-14T16:40:10	day-constructor-v1-pr-e2	CHECK_OK	branch=feat/day-constructor-v1-pr-e2 head=f812a1fca0974cba59e8e1c79a18abf069a215fd
+2026-11-14T16:40:10	day-constructor-v1-pr-e3	CHECK_OK	branch=feat/day-constructor-v1-pr-e3 head=26b2dc2b7842d34354d6d7ccddc51a8dcab5f508
+2026-11-14T16:40:11	location-pr8-reliable-confirmation	CHECK_OK	branch=worktree-location-pr8-reliable-confirmation head=bed9ed75d794426cd7a23ea1cbf134c401c4bc5a
+2026-11-14T16:40:13	insights-v1-pr6-durable-completion-attribution	CHECK_OK	branch=worktree-insights-v1-pr6-durable-completion-attribution head=75a7aab1bc9d6aeeefe592a7e735c3e87eb0e74e
+2026-11-14T16:40:13	insights-v1-pr4-goal-planning-reporting	CHECK_OK	branch=worktree-insights-v1-pr4-goal-planning-reporting head=1782188e269142203d6eef162fe62bfd632f0e41
+2026-11-14T16:40:14	goal-planning-handoff-v1	CHECK_OK	branch=feat/goal-planning-handoff-v1 head=a7868874d233ec62d8e9cffb7203b475fe1da2ce
+2026-11-14T16:40:14	insights-v1-pr5-evidence-backed-suggestions	CHECK_OK	branch=worktree-insights-v1-pr5-evidence-backed-suggestions head=30b1bc063656da32ebbdc505f3589630a8540029
+2026-11-14T16:40:15	complete-from-home	CHECK_OK	branch=feat/complete-from-home-v1 head=dd00a5afaf5818b9a3903f0fccff024c814afd32
+2026-11-14T16:40:15	home-recomposition	CHECK_OK	branch=feat/home-recomposition-experience head=f2acf63fb0bd386679cc591a0e9179152ecdac7e
+2026-11-14T16:40:16	home-move	CHECK_OK	branch=feat/home-move-v1 head=7d7fad766321d63ff6659918cd040604ff6cbded
+2026-11-14T16:40:16	day-driven-right-now	CHECK_OK	branch=feat/day-driven-right-now-v1 head=a1d47a0565b6f18cb2b926a6b03e81d0c17d23cf
+2026-11-14T16:40:17	missed-recovery	CHECK_OK	branch=feat/missed-recovery-v1 head=d6613f5dd6cecff1b3e253233d9a32cc88bd7fae
+2026-11-14T16:40:17	plan-day-row-identity	CHECK_OK	branch=fix/plan-day-row-identity-hydration head=30ad4a53e375e732e46c45a187e7cd833b226808
+2026-11-14T16:40:18	plan-my-day-ux-v2-u2	CHECK_OK	branch=feat/plan-my-day-ux-v2-u2 head=89941cb4cf311ef8ef2ed0302893ef01b1798f91
+2026-11-14T16:40:18	home-quick-capture	CHECK_OK	branch=feat/home-quick-capture-v1 head=329b6d003d300e295edeb01c17a2f7549365080c
+2026-11-14T16:40:19	quick-capture-planning	CHECK_OK	branch=feat/quick-capture-planning-v1 head=5b33c972ac8b7b7355c76344637559b55b0aa1f5
+2026-11-14T16:40:19	day-constructor-v1-pr-f2	CHECK_OK	branch=feat/day-constructor-v1-pr-f2 head=0903ed7db277c11f46c4fa91bf2ade1864dd7bc1
+2026-11-14T16:40:20	move-domain	CHECK_OK	branch=feat/move-domain-v1 head=018dde01f254979026b1f7e62082b92c87baf562
+2026-11-14T16:40:20	scheduling-mode	CHECK_OK	branch=feat/planned-activity-scheduling-mode head=e0d267a4679d44fb2ad052264739685f76667e8b
+2026-11-14T16:40:21	recomposition-acceptance	CHECK_OK	branch=feat/remaining-day-recomposition-acceptance head=ef05dbe000bc3930e6fa743f80625456f8f0f290
+2026-11-14T16:40:21	skip-domain	CHECK_OK	branch=feat/skip-domain-v1 head=c26c33021b9cc54088f819dd24f6d574b70ef7eb
+2026-11-14T16:40:22	recomposition-proposal	CHECK_OK	branch=feat/remaining-day-recomposition-proposal head=49dd115bc4dbf9f2536a64c688a554ca00a52c52
+2026-11-14T16:40:22	quick-capture-domain	CHECK_OK	branch=feat/quick-capture-domain-v1 head=e2c7c74737dec57437e932261a5441c3ffa463c8
+2026-11-14T16:40:23	availability-context-v1-h1	CHECK_OK	branch=feat/availability-context-v1-h1 head=039301ea0b6cbd2dfd191c6fba9d75b1cb1dc260
+2026-11-14T16:40:23	day-constructor-v1-pr-f1	CHECK_OK	branch=feat/day-constructor-v1-pr-f1 head=bcd2d0a08323e9d9d7318cb261bfbc7a5b1ff40a
+2026-11-14T16:40:24	planning-horizon-v1-p1	CHECK_OK	branch=feat/planning-horizon-v1-p1 head=4c56744b09181b38bc1aec3fc42afb60a4f3abc3
+2026-11-14T16:40:24	fix-home-plan-add-actions	CHECK_OK	branch=fix/home-plan-add-actions head=e85f1576eeaed3628cea59737f20de65930520e1
+2026-11-14T16:40:25	availability-context-v1-h2	CHECK_OK	branch=feat/availability-context-v1-h2 head=f2262bd304f0c2abb1fb4f4940efaa88e3825d1d
+2026-11-14T16:40:25	intent-priority-deadline-capture	CHECK_OK	branch=feat/intent-priority-deadline-capture head=8c2be6d650e0076a0554a60ccf48945b25d333b2
+2026-11-14T16:40:26	fix-day-constructor-fixed-reservation	CHECK_OK	branch=fix/day-constructor-fixed-reservation head=581caf48e70c954163cb0ff818f961de49f48ede
+2026-11-14T16:40:26	fix-natural-intent-duration-fallback	CHECK_OK	branch=fix/natural-intent-duration-fallback head=63d612a6c1fc6d19b4b6aebf42d18f2be08f1f5f
+2026-11-14T16:40:27	day-constructor-v1-pr-c	CHECK_OK	branch=feat/day-constructor-v1-pr-c head=23b3aa3d57f696f54ef28e70ac3693b8fc2718c7
+2026-11-14T16:40:27	day-constructor-v1-pr-b	CHECK_OK	branch=feat/day-constructor-v1-pr-b head=8394b1459c7a97ce845192fedf9f69d0bd33df6a
+2026-11-14T16:40:28	day-constructor-v1-pr-a	CHECK_OK	branch=feat/day-constructor-v1-pr-a head=464c0404dd14c1a995547ad832f63ef2813baffc
+2026-11-14T16:40:28	home-ia-v2-followups	CHECK_OK	branch=fix/home-ia-v2-followups head=f77c1784c813200546b6bf88450d72b9166f5c32
+2026-11-14T16:40:29	planning-horizon-v1-p2	CHECK_OK	branch=feat/planning-horizon-v1-p2 head=5a1e7baf8249f950a07d31b8994b8de499f0203d
+2026-11-14T16:40:29	plan-my-day-ux-v2-u1	CHECK_OK	branch=feat/plan-my-day-ux-v2-u1 head=2c698f6ed1d8728e2f831a4c9cdf9880ebe59388
+2026-11-14T16:40:30	home-skip	CHECK_OK	branch=feat/home-skip-v1 head=4b228dff493a623ce9a4bbe01ddaff872249cd18
+2026-11-14T16:40:43	day-constructor-v1-pr-d	CHECK_OK	branch=feat/day-constructor-v1-pr-d head=b0f40019b93413bdb3a1d79747191c06d2b28964
+2026-11-14T16:40:43	day-constructor-v1-pr-d	UNLINK	node_modules -> /Users/stephen/Desktop/Claude/auraschedule-math-core/node_modules (resolved /Users/stephen/Desktop/Claude/auraschedule-math-core/node_modules)
+2026-11-14T16:40:44	day-constructor-v1-pr-d	UNLINK	apps/web/node_modules -> /Users/stephen/Desktop/Claude/auraschedule-math-core/apps/web/node_modules (resolved /Users/stephen/Desktop/Claude/auraschedule-math-core/apps/web/node_modules)
+2026-11-14T16:41:18	day-constructor-v1-pr-d	POSTVERIFY_OK	absent, unregistered, branch feat/day-constructor-v1-pr-d @b0f40019b934 kept, shared targets + main = baseline
+2026-11-14T16:41:18	day-constructor-v1-pr-d	DEVIATION	RETIRED log line not written: free_bytes parsed wrong diskutil field (tooling bug, after all post-checks passed). Fixed; outcome re-verified by POSTVERIFY.
+2026-11-14T16:41:25	day-constructor-v1-pr-e1	CHECK_OK	branch=feat/day-constructor-v1-pr-e1 head=2952c3199bc30af1a51ce9d3fe6d5a0c2013a1e7
+2026-11-14T16:41:25	day-constructor-v1-pr-e1	UNLINK	node_modules -> /Users/stephen/Desktop/Claude/auraschedule-math-core/node_modules (resolved /Users/stephen/Desktop/Claude/auraschedule-math-core/node_modules)
+2026-11-14T16:41:25	day-constructor-v1-pr-e1	UNLINK	apps/web/node_modules -> /Users/stephen/Desktop/Claude/auraschedule-math-core/apps/web/node_modules (resolved /Users/stephen/Desktop/Claude/auraschedule-math-core/apps/web/node_modules)
+2026-11-14T16:41:26	day-constructor-v1-pr-e1	RETIRED	branch feat/day-constructor-v1-pr-e1 @2952c3199bc3 kept; free_before=24951832576 free_after=24962195456 delta=10362880
+2026-11-14T16:41:27	day-constructor-v1-pr-e1	POSTVERIFY_OK	absent, unregistered, branch feat/day-constructor-v1-pr-e1 @2952c3199bc3 kept, shared targets + main = baseline
+2026-11-14T16:41:27	day-constructor-v1-pr-e2	CHECK_OK	branch=feat/day-constructor-v1-pr-e2 head=f812a1fca0974cba59e8e1c79a18abf069a215fd
+2026-11-14T16:41:27	day-constructor-v1-pr-e2	UNLINK	node_modules -> /Users/stephen/Desktop/Claude/auraschedule-math-core/node_modules (resolved /Users/stephen/Desktop/Claude/auraschedule-math-core/node_modules)
+2026-11-14T16:41:27	day-constructor-v1-pr-e2	UNLINK	apps/web/node_modules -> /Users/stephen/Desktop/Claude/auraschedule-math-core/apps/web/node_modules (resolved /Users/stephen/Desktop/Claude/auraschedule-math-core/apps/web/node_modules)
+2026-11-14T16:41:29	day-constructor-v1-pr-e2	RETIRED	branch feat/day-constructor-v1-pr-e2 @f812a1fca097 kept; free_before=24962191360 free_after=24972627968 delta=10436608
+2026-11-14T16:41:29	day-constructor-v1-pr-e2	POSTVERIFY_OK	absent, unregistered, branch feat/day-constructor-v1-pr-e2 @f812a1fca097 kept, shared targets + main = baseline
+2026-11-14T16:41:29	day-constructor-v1-pr-e3	CHECK_OK	branch=feat/day-constructor-v1-pr-e3 head=26b2dc2b7842d34354d6d7ccddc51a8dcab5f508
+2026-11-14T16:41:30	day-constructor-v1-pr-e3	UNLINK	node_modules -> /Users/stephen/Desktop/Claude/auraschedule-math-core/node_modules (resolved /Users/stephen/Desktop/Claude/auraschedule-math-core/node_modules)
+2026-11-14T16:41:30	day-constructor-v1-pr-e3	UNLINK	apps/web/node_modules -> /Users/stephen/Desktop/Claude/auraschedule-math-core/apps/web/node_modules (resolved /Users/stephen/Desktop/Claude/auraschedule-math-core/apps/web/node_modules)
+2026-11-14T16:41:31	day-constructor-v1-pr-e3	RETIRED	branch feat/day-constructor-v1-pr-e3 @26b2dc2b7842 kept; free_before=24972607488 free_after=24982913024 delta=10305536
+2026-11-14T16:41:31	day-constructor-v1-pr-e3	POSTVERIFY_OK	absent, unregistered, branch feat/day-constructor-v1-pr-e3 @26b2dc2b7842 kept, shared targets + main = baseline
+2026-11-14T16:41:52	CHECKPOINT:StageA	FAIL	registered=117 admin=116 retired=1
+2026-11-14T16:42:03	CHECKPOINT:StageA	PASS	registered=117 admin=116 retired=4
+2026-11-14T16:42:12	location-pr8-reliable-confirmation	CHECK_OK	branch=worktree-location-pr8-reliable-confirmation head=bed9ed75d794426cd7a23ea1cbf134c401c4bc5a
+2026-11-14T16:42:15	location-pr8-reliable-confirmation	RETIRED	branch worktree-location-pr8-reliable-confirmation @bed9ed75d794 kept; free_before=24970059776 free_after=25538330624 delta=568270848
+2026-11-14T16:42:15	location-pr8-reliable-confirmation	POSTVERIFY_OK	absent, unregistered, branch worktree-location-pr8-reliable-confirmation @bed9ed75d794 kept, shared targets + main = baseline
+2026-11-14T16:42:17	CHECKPOINT:StageB	PASS	registered=116 admin=115 retired=5
+2026-11-14T16:42:31	insights-v1-pr6-durable-completion-attribution	CHECK_OK	branch=worktree-insights-v1-pr6-durable-completion-attribution head=75a7aab1bc9d6aeeefe592a7e735c3e87eb0e74e
+2026-11-14T16:42:34	insights-v1-pr6-durable-completion-attribution	RETIRED	branch worktree-insights-v1-pr6-durable-completion-attribution @75a7aab1bc9d kept; free_before=25549406208 free_after=26350952448 delta=801546240
+2026-11-14T16:42:34	insights-v1-pr6-durable-completion-attribution	POSTVERIFY_OK	absent, unregistered, branch worktree-insights-v1-pr6-durable-completion-attribution @75a7aab1bc9d kept, shared targets + main = baseline
+2026-11-14T16:42:35	insights-v1-pr4-goal-planning-reporting	CHECK_OK	branch=worktree-insights-v1-pr4-goal-planning-reporting head=1782188e269142203d6eef162fe62bfd632f0e41
+2026-11-14T16:42:35	insights-v1-pr4-goal-planning-reporting	UNLINK	node_modules -> /Users/stephen/Desktop/Claude/auraschedule-math-core/node_modules (resolved /Users/stephen/Desktop/Claude/auraschedule-math-core/node_modules)
+2026-11-14T16:42:35	insights-v1-pr4-goal-planning-reporting	UNLINK	apps/web/node_modules -> /Users/stephen/Desktop/Claude/auraschedule-math-core/apps/web/node_modules (resolved /Users/stephen/Desktop/Claude/auraschedule-math-core/apps/web/node_modules)
+2026-11-14T16:42:37	insights-v1-pr4-goal-planning-reporting	RETIRED	branch worktree-insights-v1-pr4-goal-planning-reporting @1782188e2691 kept; free_before=26334167040 free_after=26671767552 delta=337600512
+2026-11-14T16:42:37	insights-v1-pr4-goal-planning-reporting	POSTVERIFY_OK	absent, unregistered, branch worktree-insights-v1-pr4-goal-planning-reporting @1782188e2691 kept, shared targets + main = baseline
+2026-11-14T16:42:38	goal-planning-handoff-v1	CHECK_OK	branch=feat/goal-planning-handoff-v1 head=a7868874d233ec62d8e9cffb7203b475fe1da2ce
+2026-11-14T16:42:38	goal-planning-handoff-v1	UNLINK	node_modules -> ../../../node_modules (resolved /Users/stephen/Desktop/Claude/auraschedule-math-core/node_modules)
+2026-11-14T16:42:38	goal-planning-handoff-v1	UNLINK	apps/web/node_modules -> /Users/stephen/Desktop/Claude/auraschedule-math-core/apps/web/node_modules (resolved /Users/stephen/Desktop/Claude/auraschedule-math-core/apps/web/node_modules)
+2026-11-14T16:42:39	goal-planning-handoff-v1	RETIRED	branch feat/goal-planning-handoff-v1 @a7868874d233 kept; free_before=26671767552 free_after=26987864064 delta=316096512
+2026-11-14T16:42:40	goal-planning-handoff-v1	POSTVERIFY_OK	absent, unregistered, branch feat/goal-planning-handoff-v1 @a7868874d233 kept, shared targets + main = baseline
+2026-11-14T16:42:40	insights-v1-pr5-evidence-backed-suggestions	CHECK_OK	branch=worktree-insights-v1-pr5-evidence-backed-suggestions head=30b1bc063656da32ebbdc505f3589630a8540029
+2026-11-14T16:42:40	insights-v1-pr5-evidence-backed-suggestions	UNLINK	node_modules -> /Users/stephen/Desktop/Claude/auraschedule-math-core/node_modules (resolved /Users/stephen/Desktop/Claude/auraschedule-math-core/node_modules)
+2026-11-14T16:42:40	insights-v1-pr5-evidence-backed-suggestions	UNLINK	apps/web/node_modules -> /Users/stephen/Desktop/Claude/auraschedule-math-core/apps/web/node_modules (resolved /Users/stephen/Desktop/Claude/auraschedule-math-core/apps/web/node_modules)
+2026-11-14T16:42:42	insights-v1-pr5-evidence-backed-suggestions	RETIRED	branch worktree-insights-v1-pr5-evidence-backed-suggestions @30b1bc063656 kept; free_before=26987864064 free_after=27318226944 delta=330362880
+2026-11-14T16:42:42	insights-v1-pr5-evidence-backed-suggestions	POSTVERIFY_OK	absent, unregistered, branch worktree-insights-v1-pr5-evidence-backed-suggestions @30b1bc063656 kept, shared targets + main = baseline
+2026-11-14T16:42:43	complete-from-home	CHECK_OK	branch=feat/complete-from-home-v1 head=dd00a5afaf5818b9a3903f0fccff024c814afd32
+2026-11-14T16:42:43	complete-from-home	UNLINK	node_modules -> /Users/stephen/Desktop/Claude/auraschedule-math-core/node_modules (resolved /Users/stephen/Desktop/Claude/auraschedule-math-core/node_modules)
+2026-11-14T16:42:43	complete-from-home	UNLINK	apps/web/node_modules -> /Users/stephen/Desktop/Claude/auraschedule-math-core/apps/web/node_modules (resolved /Users/stephen/Desktop/Claude/auraschedule-math-core/apps/web/node_modules)
+2026-11-14T16:42:44	complete-from-home	RETIRED	branch feat/complete-from-home-v1 @dd00a5afaf58 kept; free_before=27318226944 free_after=27622776832 delta=304549888
+2026-11-14T16:42:45	complete-from-home	POSTVERIFY_OK	absent, unregistered, branch feat/complete-from-home-v1 @dd00a5afaf58 kept, shared targets + main = baseline
+2026-11-14T16:42:45	home-recomposition	CHECK_OK	branch=feat/home-recomposition-experience head=f2acf63fb0bd386679cc591a0e9179152ecdac7e
+2026-11-14T16:42:45	home-recomposition	UNLINK	node_modules -> ../../../node_modules (resolved /Users/stephen/Desktop/Claude/auraschedule-math-core/node_modules)
+2026-11-14T16:42:45	home-recomposition	UNLINK	apps/web/node_modules -> ../../../../../apps/web/node_modules (resolved /Users/stephen/Desktop/Claude/auraschedule-math-core/apps/web/node_modules)
+2026-11-14T16:42:47	home-recomposition	RETIRED	branch feat/home-recomposition-experience @f2acf63fb0bd kept; free_before=27622776832 free_after=27919388672 delta=296611840
+2026-11-14T16:42:47	home-recomposition	POSTVERIFY_OK	absent, unregistered, branch feat/home-recomposition-experience @f2acf63fb0bd kept, shared targets + main = baseline
+2026-11-14T16:42:48	home-move	CHECK_OK	branch=feat/home-move-v1 head=7d7fad766321d63ff6659918cd040604ff6cbded
+2026-11-14T16:42:48	home-move	UNLINK	node_modules -> ../../../node_modules (resolved /Users/stephen/Desktop/Claude/auraschedule-math-core/node_modules)
+2026-11-14T16:42:48	home-move	UNLINK	apps/web/node_modules -> ../../../../../apps/web/node_modules (resolved /Users/stephen/Desktop/Claude/auraschedule-math-core/apps/web/node_modules)
+2026-11-14T16:42:50	home-move	RETIRED	branch feat/home-move-v1 @7d7fad766321 kept; free_before=27919392768 free_after=28214476800 delta=295084032
+2026-11-14T16:42:50	home-move	POSTVERIFY_OK	absent, unregistered, branch feat/home-move-v1 @7d7fad766321 kept, shared targets + main = baseline
+2026-11-14T16:42:50	day-driven-right-now	CHECK_OK	branch=feat/day-driven-right-now-v1 head=a1d47a0565b6f18cb2b926a6b03e81d0c17d23cf
+2026-11-14T16:42:50	day-driven-right-now	UNLINK	node_modules -> /Users/stephen/Desktop/Claude/auraschedule-math-core/node_modules (resolved /Users/stephen/Desktop/Claude/auraschedule-math-core/node_modules)
+2026-11-14T16:42:51	day-driven-right-now	UNLINK	apps/web/node_modules -> /Users/stephen/Desktop/Claude/auraschedule-math-core/apps/web/node_modules (resolved /Users/stephen/Desktop/Claude/auraschedule-math-core/apps/web/node_modules)
+2026-11-14T16:42:52	day-driven-right-now	RETIRED	branch feat/day-driven-right-now-v1 @a1d47a0565b6 kept; free_before=28214480896 free_after=28500865024 delta=286384128
+2026-11-14T16:42:52	day-driven-right-now	POSTVERIFY_OK	absent, unregistered, branch feat/day-driven-right-now-v1 @a1d47a0565b6 kept, shared targets + main = baseline
+2026-11-14T16:42:53	missed-recovery	CHECK_OK	branch=feat/missed-recovery-v1 head=d6613f5dd6cecff1b3e253233d9a32cc88bd7fae
+2026-11-14T16:42:53	missed-recovery	UNLINK	node_modules -> ../../../node_modules (resolved /Users/stephen/Desktop/Claude/auraschedule-math-core/node_modules)
+2026-11-14T16:42:53	missed-recovery	UNLINK	apps/web/node_modules -> ../../../../../apps/web/node_modules (resolved /Users/stephen/Desktop/Claude/auraschedule-math-core/apps/web/node_modules)
+2026-11-14T16:42:55	missed-recovery	RETIRED	branch feat/missed-recovery-v1 @d6613f5dd6ce kept; free_before=28500865024 free_after=28771651584 delta=270786560
+2026-11-14T16:42:55	missed-recovery	POSTVERIFY_OK	absent, unregistered, branch feat/missed-recovery-v1 @d6613f5dd6ce kept, shared targets + main = baseline
+2026-11-14T16:42:55	plan-day-row-identity	CHECK_OK	branch=fix/plan-day-row-identity-hydration head=30ad4a53e375e732e46c45a187e7cd833b226808
+2026-11-14T16:42:55	plan-day-row-identity	UNLINK	node_modules -> /Users/stephen/Desktop/Claude/auraschedule-math-core/node_modules (resolved /Users/stephen/Desktop/Claude/auraschedule-math-core/node_modules)
+2026-11-14T16:42:55	plan-day-row-identity	UNLINK	apps/web/node_modules -> /Users/stephen/Desktop/Claude/auraschedule-math-core/apps/web/node_modules (resolved /Users/stephen/Desktop/Claude/auraschedule-math-core/apps/web/node_modules)
+2026-11-14T16:42:57	plan-day-row-identity	RETIRED	branch fix/plan-day-row-identity-hydration @30ad4a53e375 kept; free_before=28771651584 free_after=29036224512 delta=264572928
+2026-11-14T16:42:57	plan-day-row-identity	POSTVERIFY_OK	absent, unregistered, branch fix/plan-day-row-identity-hydration @30ad4a53e375 kept, shared targets + main = baseline
+2026-11-14T16:42:58	plan-my-day-ux-v2-u2	CHECK_OK	branch=feat/plan-my-day-ux-v2-u2 head=89941cb4cf311ef8ef2ed0302893ef01b1798f91
+2026-11-14T16:42:58	plan-my-day-ux-v2-u2	UNLINK	node_modules -> /Users/stephen/Desktop/Claude/auraschedule-math-core/node_modules (resolved /Users/stephen/Desktop/Claude/auraschedule-math-core/node_modules)
+2026-11-14T16:42:58	plan-my-day-ux-v2-u2	UNLINK	apps/web/node_modules -> /Users/stephen/Desktop/Claude/auraschedule-math-core/apps/web/node_modules (resolved /Users/stephen/Desktop/Claude/auraschedule-math-core/apps/web/node_modules)
+2026-11-14T16:43:00	plan-my-day-ux-v2-u2	RETIRED	branch feat/plan-my-day-ux-v2-u2 @89941cb4cf31 kept; free_before=29036224512 free_after=29331693568 delta=295469056
+2026-11-14T16:43:00	plan-my-day-ux-v2-u2	POSTVERIFY_OK	absent, unregistered, branch feat/plan-my-day-ux-v2-u2 @89941cb4cf31 kept, shared targets + main = baseline
+2026-11-14T16:43:00	home-quick-capture	CHECK_OK	branch=feat/home-quick-capture-v1 head=329b6d003d300e295edeb01c17a2f7549365080c
+2026-11-14T16:43:00	home-quick-capture	UNLINK	node_modules -> /Users/stephen/Desktop/Claude/auraschedule-math-core/node_modules (resolved /Users/stephen/Desktop/Claude/auraschedule-math-core/node_modules)
+2026-11-14T16:43:01	home-quick-capture	UNLINK	apps/web/node_modules -> /Users/stephen/Desktop/Claude/auraschedule-math-core/apps/web/node_modules (resolved /Users/stephen/Desktop/Claude/auraschedule-math-core/apps/web/node_modules)
+2026-11-14T16:43:02	home-quick-capture	RETIRED	branch feat/home-quick-capture-v1 @329b6d003d30 kept; free_before=29331693568 free_after=29581905920 delta=250212352
+2026-11-14T16:43:02	home-quick-capture	POSTVERIFY_OK	absent, unregistered, branch feat/home-quick-capture-v1 @329b6d003d30 kept, shared targets + main = baseline
+2026-11-14T16:43:03	quick-capture-planning	CHECK_OK	branch=feat/quick-capture-planning-v1 head=5b33c972ac8b7b7355c76344637559b55b0aa1f5
+2026-11-14T16:43:03	quick-capture-planning	UNLINK	node_modules -> /Users/stephen/Desktop/Claude/auraschedule-math-core/node_modules (resolved /Users/stephen/Desktop/Claude/auraschedule-math-core/node_modules)
+2026-11-14T16:43:03	quick-capture-planning	UNLINK	apps/web/node_modules -> /Users/stephen/Desktop/Claude/auraschedule-math-core/apps/web/node_modules (resolved /Users/stephen/Desktop/Claude/auraschedule-math-core/apps/web/node_modules)
+2026-11-14T16:43:05	quick-capture-planning	RETIRED	branch feat/quick-capture-planning-v1 @5b33c972ac8b kept; free_before=29581901824 free_after=29831450624 delta=249548800
+2026-11-14T16:43:05	quick-capture-planning	POSTVERIFY_OK	absent, unregistered, branch feat/quick-capture-planning-v1 @5b33c972ac8b kept, shared targets + main = baseline
+2026-11-14T16:43:05	day-constructor-v1-pr-f2	CHECK_OK	branch=feat/day-constructor-v1-pr-f2 head=0903ed7db277c11f46c4fa91bf2ade1864dd7bc1
+2026-11-14T16:43:05	day-constructor-v1-pr-f2	UNLINK	node_modules -> /Users/stephen/Desktop/Claude/auraschedule-math-core/node_modules (resolved /Users/stephen/Desktop/Claude/auraschedule-math-core/node_modules)
+2026-11-14T16:43:05	day-constructor-v1-pr-f2	UNLINK	apps/web/node_modules -> /Users/stephen/Desktop/Claude/auraschedule-math-core/apps/web/node_modules (resolved /Users/stephen/Desktop/Claude/auraschedule-math-core/apps/web/node_modules)
+2026-11-14T16:43:07	day-constructor-v1-pr-f2	RETIRED	branch feat/day-constructor-v1-pr-f2 @0903ed7db277 kept; free_before=29831450624 free_after=30057877504 delta=226426880
+2026-11-14T16:43:07	day-constructor-v1-pr-f2	POSTVERIFY_OK	absent, unregistered, branch feat/day-constructor-v1-pr-f2 @0903ed7db277 kept, shared targets + main = baseline
+2026-11-14T16:43:08	move-domain	CHECK_OK	branch=feat/move-domain-v1 head=018dde01f254979026b1f7e62082b92c87baf562
+2026-11-14T16:43:08	move-domain	UNLINK	node_modules -> ../../../node_modules (resolved /Users/stephen/Desktop/Claude/auraschedule-math-core/node_modules)
+2026-11-14T16:43:08	move-domain	UNLINK	apps/web/node_modules -> ../../../../../apps/web/node_modules (resolved /Users/stephen/Desktop/Claude/auraschedule-math-core/apps/web/node_modules)
+2026-11-14T16:43:09	move-domain	RETIRED	branch feat/move-domain-v1 @018dde01f254 kept; free_before=30057877504 free_after=30142808064 delta=84930560
+2026-11-14T16:43:10	move-domain	POSTVERIFY_OK	absent, unregistered, branch feat/move-domain-v1 @018dde01f254 kept, shared targets + main = baseline
+2026-11-14T16:43:10	scheduling-mode	CHECK_OK	branch=feat/planned-activity-scheduling-mode head=e0d267a4679d44fb2ad052264739685f76667e8b
+2026-11-14T16:43:10	scheduling-mode	UNLINK	node_modules -> ../../../node_modules (resolved /Users/stephen/Desktop/Claude/auraschedule-math-core/node_modules)
+2026-11-14T16:43:10	scheduling-mode	UNLINK	apps/web/node_modules -> ../../../../../apps/web/node_modules (resolved /Users/stephen/Desktop/Claude/auraschedule-math-core/apps/web/node_modules)
+2026-11-14T16:43:12	scheduling-mode	RETIRED	branch feat/planned-activity-scheduling-mode @e0d267a4679d kept; free_before=30142808064 free_after=30389694464 delta=246886400
+2026-11-14T16:43:12	scheduling-mode	POSTVERIFY_OK	absent, unregistered, branch feat/planned-activity-scheduling-mode @e0d267a4679d kept, shared targets + main = baseline
+2026-11-14T16:43:13	recomposition-acceptance	CHECK_OK	branch=feat/remaining-day-recomposition-acceptance head=ef05dbe000bc3930e6fa743f80625456f8f0f290
+2026-11-14T16:43:13	recomposition-acceptance	UNLINK	node_modules -> ../../../node_modules (resolved /Users/stephen/Desktop/Claude/auraschedule-math-core/node_modules)
+2026-11-14T16:43:13	recomposition-acceptance	UNLINK	apps/web/node_modules -> ../../../../../apps/web/node_modules (resolved /Users/stephen/Desktop/Claude/auraschedule-math-core/apps/web/node_modules)
+2026-11-14T16:43:14	recomposition-acceptance	RETIRED	branch feat/remaining-day-recomposition-acceptance @ef05dbe000bc kept; free_before=30389362688 free_after=30575300608 delta=185937920
+2026-11-14T16:43:15	recomposition-acceptance	POSTVERIFY_OK	absent, unregistered, branch feat/remaining-day-recomposition-acceptance @ef05dbe000bc kept, shared targets + main = baseline
+2026-11-14T16:43:15	skip-domain	CHECK_OK	branch=feat/skip-domain-v1 head=c26c33021b9cc54088f819dd24f6d574b70ef7eb
+2026-11-14T16:43:15	skip-domain	UNLINK	node_modules -> ../../../node_modules (resolved /Users/stephen/Desktop/Claude/auraschedule-math-core/node_modules)
+2026-11-14T16:43:15	skip-domain	UNLINK	apps/web/node_modules -> ../../../../../apps/web/node_modules (resolved /Users/stephen/Desktop/Claude/auraschedule-math-core/apps/web/node_modules)
+2026-11-14T16:43:17	skip-domain	RETIRED	branch feat/skip-domain-v1 @c26c33021b9c kept; free_before=30575300608 free_after=30754545664 delta=179245056
+2026-11-14T16:43:17	skip-domain	POSTVERIFY_OK	absent, unregistered, branch feat/skip-domain-v1 @c26c33021b9c kept, shared targets + main = baseline
+2026-11-14T16:43:17	recomposition-proposal	CHECK_OK	branch=feat/remaining-day-recomposition-proposal head=49dd115bc4dbf9f2536a64c688a554ca00a52c52
+2026-11-14T16:43:18	recomposition-proposal	UNLINK	node_modules -> ../../../node_modules (resolved /Users/stephen/Desktop/Claude/auraschedule-math-core/node_modules)
+2026-11-14T16:43:18	recomposition-proposal	UNLINK	apps/web/node_modules -> ../../../../../apps/web/node_modules (resolved /Users/stephen/Desktop/Claude/auraschedule-math-core/apps/web/node_modules)
+2026-11-14T16:43:19	recomposition-proposal	RETIRED	branch feat/remaining-day-recomposition-proposal @49dd115bc4db kept; free_before=30754545664 free_after=30926630912 delta=172085248
+2026-11-14T16:43:19	recomposition-proposal	POSTVERIFY_OK	absent, unregistered, branch feat/remaining-day-recomposition-proposal @49dd115bc4db kept, shared targets + main = baseline
+2026-11-14T16:43:20	quick-capture-domain	CHECK_OK	branch=feat/quick-capture-domain-v1 head=e2c7c74737dec57437e932261a5441c3ffa463c8
+2026-11-14T16:43:20	quick-capture-domain	UNLINK	node_modules -> /Users/stephen/Desktop/Claude/auraschedule-math-core/node_modules (resolved /Users/stephen/Desktop/Claude/auraschedule-math-core/node_modules)
+2026-11-14T16:43:20	quick-capture-domain	UNLINK	apps/web/node_modules -> /Users/stephen/Desktop/Claude/auraschedule-math-core/apps/web/node_modules (resolved /Users/stephen/Desktop/Claude/auraschedule-math-core/apps/web/node_modules)
+2026-11-14T16:43:22	quick-capture-domain	RETIRED	branch feat/quick-capture-domain-v1 @e2c7c74737de kept; free_before=30926618624 free_after=31145656320 delta=219037696
+2026-11-14T16:43:22	quick-capture-domain	POSTVERIFY_OK	absent, unregistered, branch feat/quick-capture-domain-v1 @e2c7c74737de kept, shared targets + main = baseline
+2026-11-14T16:43:23	availability-context-v1-h1	CHECK_OK	branch=feat/availability-context-v1-h1 head=039301ea0b6cbd2dfd191c6fba9d75b1cb1dc260
+2026-11-14T16:43:23	availability-context-v1-h1	UNLINK	node_modules -> /Users/stephen/Desktop/Claude/auraschedule-math-core/node_modules (resolved /Users/stephen/Desktop/Claude/auraschedule-math-core/node_modules)
+2026-11-14T16:43:23	availability-context-v1-h1	UNLINK	apps/web/node_modules -> /Users/stephen/Desktop/Claude/auraschedule-math-core/apps/web/node_modules (resolved /Users/stephen/Desktop/Claude/auraschedule-math-core/apps/web/node_modules)
+2026-11-14T16:43:24	availability-context-v1-h1	RETIRED	branch feat/availability-context-v1-h1 @039301ea0b6c kept; free_before=31145656320 free_after=31309029376 delta=163373056
+2026-11-14T16:43:25	availability-context-v1-h1	POSTVERIFY_OK	absent, unregistered, branch feat/availability-context-v1-h1 @039301ea0b6c kept, shared targets + main = baseline
+2026-11-14T16:43:25	day-constructor-v1-pr-f1	CHECK_OK	branch=feat/day-constructor-v1-pr-f1 head=bcd2d0a08323e9d9d7318cb261bfbc7a5b1ff40a
+2026-11-14T16:43:25	day-constructor-v1-pr-f1	UNLINK	node_modules -> /Users/stephen/Desktop/Claude/auraschedule-math-core/node_modules (resolved /Users/stephen/Desktop/Claude/auraschedule-math-core/node_modules)
+2026-11-14T16:43:25	day-constructor-v1-pr-f1	UNLINK	apps/web/node_modules -> /Users/stephen/Desktop/Claude/auraschedule-math-core/apps/web/node_modules (resolved /Users/stephen/Desktop/Claude/auraschedule-math-core/apps/web/node_modules)
+2026-11-14T16:43:27	day-constructor-v1-pr-f1	RETIRED	branch feat/day-constructor-v1-pr-f1 @bcd2d0a08323 kept; free_before=31309025280 free_after=31470653440 delta=161628160
+2026-11-14T16:43:27	day-constructor-v1-pr-f1	POSTVERIFY_OK	absent, unregistered, branch feat/day-constructor-v1-pr-f1 @bcd2d0a08323 kept, shared targets + main = baseline
+2026-11-14T16:43:27	planning-horizon-v1-p1	CHECK_OK	branch=feat/planning-horizon-v1-p1 head=4c56744b09181b38bc1aec3fc42afb60a4f3abc3
+2026-11-14T16:43:28	planning-horizon-v1-p1	UNLINK	node_modules -> /Users/stephen/Desktop/Claude/auraschedule-math-core/node_modules (resolved /Users/stephen/Desktop/Claude/auraschedule-math-core/node_modules)
+2026-11-14T16:43:28	planning-horizon-v1-p1	UNLINK	apps/web/node_modules -> /Users/stephen/Desktop/Claude/auraschedule-math-core/apps/web/node_modules (resolved /Users/stephen/Desktop/Claude/auraschedule-math-core/apps/web/node_modules)
+2026-11-14T16:43:29	planning-horizon-v1-p1	RETIRED	branch feat/planning-horizon-v1-p1 @4c56744b0918 kept; free_before=31470653440 free_after=31630241792 delta=159588352
+2026-11-14T16:43:29	planning-horizon-v1-p1	POSTVERIFY_OK	absent, unregistered, branch feat/planning-horizon-v1-p1 @4c56744b0918 kept, shared targets + main = baseline
+2026-11-14T16:43:30	fix-home-plan-add-actions	CHECK_OK	branch=fix/home-plan-add-actions head=e85f1576eeaed3628cea59737f20de65930520e1
+2026-11-14T16:43:30	fix-home-plan-add-actions	UNLINK	node_modules -> /Users/stephen/Desktop/Claude/auraschedule-math-core/node_modules (resolved /Users/stephen/Desktop/Claude/auraschedule-math-core/node_modules)
+2026-11-14T16:43:30	fix-home-plan-add-actions	UNLINK	apps/web/node_modules -> /Users/stephen/Desktop/Claude/auraschedule-math-core/apps/web/node_modules (resolved /Users/stephen/Desktop/Claude/auraschedule-math-core/apps/web/node_modules)
+2026-11-14T16:43:32	fix-home-plan-add-actions	RETIRED	branch fix/home-plan-add-actions @e85f1576eeae kept; free_before=31630225408 free_after=31789871104 delta=159645696
+2026-11-14T16:43:32	fix-home-plan-add-actions	POSTVERIFY_OK	absent, unregistered, branch fix/home-plan-add-actions @e85f1576eeae kept, shared targets + main = baseline
+2026-11-14T16:43:32	availability-context-v1-h2	CHECK_OK	branch=feat/availability-context-v1-h2 head=f2262bd304f0c2abb1fb4f4940efaa88e3825d1d
+2026-11-14T16:43:32	availability-context-v1-h2	UNLINK	node_modules -> /Users/stephen/Desktop/Claude/auraschedule-math-core/node_modules (resolved /Users/stephen/Desktop/Claude/auraschedule-math-core/node_modules)
+2026-11-14T16:43:32	availability-context-v1-h2	UNLINK	apps/web/node_modules -> /Users/stephen/Desktop/Claude/auraschedule-math-core/apps/web/node_modules (resolved /Users/stephen/Desktop/Claude/auraschedule-math-core/apps/web/node_modules)
+2026-11-14T16:43:34	availability-context-v1-h2	RETIRED	branch feat/availability-context-v1-h2 @f2262bd304f0 kept; free_before=31789871104 free_after=31949381632 delta=159510528
+2026-11-14T16:43:34	availability-context-v1-h2	POSTVERIFY_OK	absent, unregistered, branch feat/availability-context-v1-h2 @f2262bd304f0 kept, shared targets + main = baseline
+2026-11-14T16:43:35	intent-priority-deadline-capture	CHECK_OK	branch=feat/intent-priority-deadline-capture head=8c2be6d650e0076a0554a60ccf48945b25d333b2
+2026-11-14T16:43:35	intent-priority-deadline-capture	UNLINK	node_modules -> /Users/stephen/Desktop/Claude/auraschedule-math-core/node_modules (resolved /Users/stephen/Desktop/Claude/auraschedule-math-core/node_modules)
+2026-11-14T16:43:35	intent-priority-deadline-capture	UNLINK	apps/web/node_modules -> /Users/stephen/Desktop/Claude/auraschedule-math-core/apps/web/node_modules (resolved /Users/stephen/Desktop/Claude/auraschedule-math-core/apps/web/node_modules)
+2026-11-14T16:43:36	intent-priority-deadline-capture	RETIRED	branch feat/intent-priority-deadline-capture @8c2be6d650e0 kept; free_before=31949381632 free_after=32106967040 delta=157585408
+2026-11-14T16:43:36	intent-priority-deadline-capture	POSTVERIFY_OK	absent, unregistered, branch feat/intent-priority-deadline-capture @8c2be6d650e0 kept, shared targets + main = baseline
+2026-11-14T16:43:37	fix-day-constructor-fixed-reservation	CHECK_OK	branch=fix/day-constructor-fixed-reservation head=581caf48e70c954163cb0ff818f961de49f48ede
+2026-11-14T16:43:37	fix-day-constructor-fixed-reservation	UNLINK	node_modules -> /Users/stephen/Desktop/Claude/auraschedule-math-core/node_modules (resolved /Users/stephen/Desktop/Claude/auraschedule-math-core/node_modules)
+2026-11-14T16:43:37	fix-day-constructor-fixed-reservation	UNLINK	apps/web/node_modules -> /Users/stephen/Desktop/Claude/auraschedule-math-core/apps/web/node_modules (resolved /Users/stephen/Desktop/Claude/auraschedule-math-core/apps/web/node_modules)
+2026-11-14T16:43:39	fix-day-constructor-fixed-reservation	RETIRED	branch fix/day-constructor-fixed-reservation @581caf48e70c kept; free_before=32106967040 free_after=32218710016 delta=111742976
+2026-11-14T16:43:39	fix-day-constructor-fixed-reservation	POSTVERIFY_OK	absent, unregistered, branch fix/day-constructor-fixed-reservation @581caf48e70c kept, shared targets + main = baseline
+2026-11-14T16:43:39	fix-natural-intent-duration-fallback	CHECK_OK	branch=fix/natural-intent-duration-fallback head=63d612a6c1fc6d19b4b6aebf42d18f2be08f1f5f
+2026-11-14T16:43:39	fix-natural-intent-duration-fallback	UNLINK	node_modules -> /Users/stephen/Desktop/Claude/auraschedule-math-core/node_modules (resolved /Users/stephen/Desktop/Claude/auraschedule-math-core/node_modules)
+2026-11-14T16:43:40	fix-natural-intent-duration-fallback	UNLINK	apps/web/node_modules -> /Users/stephen/Desktop/Claude/auraschedule-math-core/apps/web/node_modules (resolved /Users/stephen/Desktop/Claude/auraschedule-math-core/apps/web/node_modules)
+2026-11-14T16:43:41	fix-natural-intent-duration-fallback	RETIRED	branch fix/natural-intent-duration-fallback @63d612a6c1fc kept; free_before=32218710016 free_after=32375873536 delta=157163520
+2026-11-14T16:43:41	fix-natural-intent-duration-fallback	POSTVERIFY_OK	absent, unregistered, branch fix/natural-intent-duration-fallback @63d612a6c1fc kept, shared targets + main = baseline
+2026-11-14T16:43:42	day-constructor-v1-pr-c	CHECK_OK	branch=feat/day-constructor-v1-pr-c head=23b3aa3d57f696f54ef28e70ac3693b8fc2718c7
+2026-11-14T16:43:42	day-constructor-v1-pr-c	UNLINK	node_modules -> /Users/stephen/Desktop/Claude/auraschedule-math-core/node_modules (resolved /Users/stephen/Desktop/Claude/auraschedule-math-core/node_modules)
+2026-11-14T16:43:42	day-constructor-v1-pr-c	UNLINK	apps/web/node_modules -> /Users/stephen/Desktop/Claude/auraschedule-math-core/apps/web/node_modules (resolved /Users/stephen/Desktop/Claude/auraschedule-math-core/apps/web/node_modules)
+2026-11-14T16:43:43	day-constructor-v1-pr-c	RETIRED	branch feat/day-constructor-v1-pr-c @23b3aa3d57f6 kept; free_before=32375873536 free_after=32523788288 delta=147914752
+2026-11-14T16:43:44	day-constructor-v1-pr-c	POSTVERIFY_OK	absent, unregistered, branch feat/day-constructor-v1-pr-c @23b3aa3d57f6 kept, shared targets + main = baseline
+2026-11-14T16:43:44	day-constructor-v1-pr-b	CHECK_OK	branch=feat/day-constructor-v1-pr-b head=8394b1459c7a97ce845192fedf9f69d0bd33df6a
+2026-11-14T16:43:44	day-constructor-v1-pr-b	UNLINK	node_modules -> /Users/stephen/Desktop/Claude/auraschedule-math-core/node_modules (resolved /Users/stephen/Desktop/Claude/auraschedule-math-core/node_modules)
+2026-11-14T16:43:44	day-constructor-v1-pr-b	UNLINK	apps/web/node_modules -> /Users/stephen/Desktop/Claude/auraschedule-math-core/apps/web/node_modules (resolved /Users/stephen/Desktop/Claude/auraschedule-math-core/apps/web/node_modules)
+2026-11-14T16:43:46	day-constructor-v1-pr-b	RETIRED	branch feat/day-constructor-v1-pr-b @8394b1459c7a kept; free_before=32523788288 free_after=32671436800 delta=147648512
+2026-11-14T16:43:46	day-constructor-v1-pr-b	POSTVERIFY_OK	absent, unregistered, branch feat/day-constructor-v1-pr-b @8394b1459c7a kept, shared targets + main = baseline
+2026-11-14T16:43:46	day-constructor-v1-pr-a	CHECK_OK	branch=feat/day-constructor-v1-pr-a head=464c0404dd14c1a995547ad832f63ef2813baffc
+2026-11-14T16:43:47	day-constructor-v1-pr-a	UNLINK	node_modules -> /Users/stephen/Desktop/Claude/auraschedule-math-core/node_modules (resolved /Users/stephen/Desktop/Claude/auraschedule-math-core/node_modules)
+2026-11-14T16:43:47	day-constructor-v1-pr-a	UNLINK	apps/web/node_modules -> /Users/stephen/Desktop/Claude/auraschedule-math-core/apps/web/node_modules (resolved /Users/stephen/Desktop/Claude/auraschedule-math-core/apps/web/node_modules)
+2026-11-14T16:43:48	day-constructor-v1-pr-a	RETIRED	branch feat/day-constructor-v1-pr-a @464c0404dd14 kept; free_before=32671436800 free_after=32819036160 delta=147599360
+2026-11-14T16:43:48	day-constructor-v1-pr-a	POSTVERIFY_OK	absent, unregistered, branch feat/day-constructor-v1-pr-a @464c0404dd14 kept, shared targets + main = baseline
+2026-11-14T16:43:49	home-ia-v2-followups	CHECK_OK	branch=fix/home-ia-v2-followups head=f77c1784c813200546b6bf88450d72b9166f5c32
+2026-11-14T16:43:49	home-ia-v2-followups	UNLINK	node_modules -> /Users/stephen/Desktop/Claude/auraschedule-math-core/node_modules (resolved /Users/stephen/Desktop/Claude/auraschedule-math-core/node_modules)
+2026-11-14T16:43:49	home-ia-v2-followups	UNLINK	apps/web/node_modules -> /Users/stephen/Desktop/Claude/auraschedule-math-core/apps/web/node_modules (resolved /Users/stephen/Desktop/Claude/auraschedule-math-core/apps/web/node_modules)
+2026-11-14T16:43:51	home-ia-v2-followups	RETIRED	branch fix/home-ia-v2-followups @f77c1784c813 kept; free_before=32819036160 free_after=32966434816 delta=147398656
+2026-11-14T16:43:51	home-ia-v2-followups	POSTVERIFY_OK	absent, unregistered, branch fix/home-ia-v2-followups @f77c1784c813 kept, shared targets + main = baseline
+2026-11-14T16:43:51	planning-horizon-v1-p2	CHECK_OK	branch=feat/planning-horizon-v1-p2 head=5a1e7baf8249f950a07d31b8994b8de499f0203d
+2026-11-14T16:43:51	planning-horizon-v1-p2	UNLINK	node_modules -> /Users/stephen/Desktop/Claude/auraschedule-math-core/node_modules (resolved /Users/stephen/Desktop/Claude/auraschedule-math-core/node_modules)
+2026-11-14T16:43:51	planning-horizon-v1-p2	UNLINK	apps/web/node_modules -> /Users/stephen/Desktop/Claude/auraschedule-math-core/apps/web/node_modules (resolved /Users/stephen/Desktop/Claude/auraschedule-math-core/apps/web/node_modules)
+2026-11-14T16:43:53	planning-horizon-v1-p2	RETIRED	branch feat/planning-horizon-v1-p2 @5a1e7baf8249 kept; free_before=32997457920 free_after=33116782592 delta=119324672
+2026-11-14T16:43:53	planning-horizon-v1-p2	POSTVERIFY_OK	absent, unregistered, branch feat/planning-horizon-v1-p2 @5a1e7baf8249 kept, shared targets + main = baseline
+2026-11-14T16:43:53	plan-my-day-ux-v2-u1	CHECK_OK	branch=feat/plan-my-day-ux-v2-u1 head=2c698f6ed1d8728e2f831a4c9cdf9880ebe59388
+2026-11-14T16:43:54	plan-my-day-ux-v2-u1	UNLINK	node_modules -> /Users/stephen/Desktop/Claude/auraschedule-math-core/node_modules (resolved /Users/stephen/Desktop/Claude/auraschedule-math-core/node_modules)
+2026-11-14T16:43:54	plan-my-day-ux-v2-u1	UNLINK	apps/web/node_modules -> /Users/stephen/Desktop/Claude/auraschedule-math-core/apps/web/node_modules (resolved /Users/stephen/Desktop/Claude/auraschedule-math-core/apps/web/node_modules)
+2026-11-14T16:43:55	plan-my-day-ux-v2-u1	RETIRED	branch feat/plan-my-day-ux-v2-u1 @2c698f6ed1d8 kept; free_before=33116782592 free_after=33215221760 delta=98439168
+2026-11-14T16:43:56	plan-my-day-ux-v2-u1	POSTVERIFY_OK	absent, unregistered, branch feat/plan-my-day-ux-v2-u1 @2c698f6ed1d8 kept, shared targets + main = baseline
+2026-11-14T16:43:56	home-skip	CHECK_OK	branch=feat/home-skip-v1 head=4b228dff493a623ce9a4bbe01ddaff872249cd18
+2026-11-14T16:43:56	home-skip	UNLINK	node_modules -> ../../../node_modules (resolved /Users/stephen/Desktop/Claude/auraschedule-math-core/node_modules)
+2026-11-14T16:43:56	home-skip	UNLINK	apps/web/node_modules -> ../../../../../apps/web/node_modules (resolved /Users/stephen/Desktop/Claude/auraschedule-math-core/apps/web/node_modules)
+2026-11-14T16:43:58	home-skip	RETIRED	branch feat/home-skip-v1 @4b228dff493a kept; free_before=33215221760 free_after=33300451328 delta=85229568
+2026-11-14T16:43:58	home-skip	POSTVERIFY_OK	absent, unregistered, branch feat/home-skip-v1 @4b228dff493a kept, shared targets + main = baseline
+2026-11-14T16:44:13	CHECKPOINT:FINAL	FAIL	registered=81 admin=80 retired=1
+2026-11-14T16:44:23	CHECKPOINT:FINAL	PASS	registered=81 admin=80 retired=40

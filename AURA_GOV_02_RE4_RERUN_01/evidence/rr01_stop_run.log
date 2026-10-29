@@ -1,0 +1,17 @@
+# RR01 STOP-leg probe 2026-11-14T10:58:45Z macOS=14.6 build=23G80 driver_pid=68569 uid=501
+probe_sha256=9a6b809f8586f004dde190cba2266959a2e7f961309260ef7be40c6b217f0cb9
+harness_v2_sha256=4b7e48900fb09b2b9bddda6e2306f284233178e59b5ebc2fd247fd32b2510d95 expected=4b7e48900fb09b2b9bddda6e2306f284233178e59b5ebc2fd247fd32b2510d95
+extract: lines=48 sha256=730c09f022d9f5a0f0b15bdd60c0e5d3d06b14a2f6b0efbe0c222834c7df6b20
+before total_rows=473
+before denylisted_name_rows=19
+private temp dir created mode=700
+scan process (stands for the harness) pid=68594 parent=68569 ; SCANMIN=20 SCANTO=10s TD=private-0700
+R2D STOP: T1-6: UI-automation / remote-control process running: comm:ChatGPT for Chrome;comm:Claude;comm:Claude Helper;comm:Claude Helper (Renderer);comm:claude;comm:superops;ucomm:ChatGPT for Chro;ucomm:Claude;ucomm:Claude Helper;ucomm:Claude Helper (R;ucomm:claude;ucomm:superops
+VERDICT: STOPPED
+stop() called -> exit 2 (harness would now run teardown with KC/SL0/WDPID/PIDS empty)
+STOP-leg subshell exit status=2 (2 = stop() called; 0 = continued past T1-6; 99 = protected function reached)
+scan temp files left in private dir: none
+private temp dir removed (exact guarded path)
+after total_rows=473
+after denylisted_name_rows=19
+state: denylisted process set (pid+name) IDENTICAL before and after

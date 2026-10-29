@@ -1,0 +1,8 @@
+AURA disk monitor (read-only)
+  time:                2026-11-14T16:57:33+0530
+  free space:          33183518720 B = 33.18 GB = 30.90 GiB   [diskutil apfs list: container disk3 Capacity Not Allocated]
+  df -k / available:   33183576064 B = 33.18 GB = 30.90 GiB
+  .claude/worktrees:   25743560704 B = 25.74 GB = 23.98 GiB
+  git worktrees:       81 registered (incl. main checkout)
+  proposed category:   NORMAL (>= 25 GB): normal development; no cleanup required
+  note: thresholds are proposed guidance; any cleanup needs a fresh inventory and a separate approved ticket.

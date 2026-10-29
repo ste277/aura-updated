@@ -1,0 +1,41 @@
+S-1 '/bin/ps -ww -axo pid=,ppid=,ucomm=' rc=0 lines=605 ; '/bin/ps -ww -axo pid=,ppid=,comm=' rc=0 lines=605
+S-2 ucomm max_len=16 ; pids in both tables=603 ; basename(comm)[1,16] != ucomm for 387 ; comm basenames longer than 16 chars: 210
+S-3 denylist-prefix matches (lowercased NAMES only; count per column):
+   1   ucomm: ChatGPT for Chro
+   1   ucomm: Claude          
+   8   ucomm: Claude Helper   
+   2   ucomm: Claude Helper (R
+   6   ucomm: claude          
+   2   ucomm: superops        
+   1   comm-basename: ChatGPT for Chrome
+   1   comm-basename: Claude
+   8   comm-basename: Claude Helper
+   2   comm-basename: Claude Helper (Renderer)
+   6   comm-basename: claude
+   2   comm-basename: superops
+S-4 matches only in comm=0 ; only in ucomm=0
+S-5 superops processes (pid ppid user ucomm exec-path):
+  pid=16883 ppid=1 user=stephen ucomm=superops         comm=/Library/superopsrmm/bin/superops
+    lsof txt (first): /Library/superopsrmm/bin/superops
+  pid=510 ppid=1 user=root ucomm=superops         comm=/Library/superopsrmm/bin/superops
+    lsof txt (first): <unavailable: lsof rc=0 (other-user process needs root)>
+S-6 exec path (from comm, i.e. argv[0]; verified as an existing file): /Library/superopsrmm/bin/superops
+    Executable=/Library/superopsrmm/bin/superops
+    Identifier=superops
+    Format=Mach-O thin (arm64)
+    CodeDirectory v=20500 size=240596 flags=0x10000(runtime) hashes=7513+2 location=embedded
+    Authority=Developer ID Application: Superops Inc. (4SPX8Y4YUX)
+    Authority=Developer ID Certification Authority
+    Authority=Apple Root CA
+    Timestamp=15 Oct 2026 at 10:25:18 PM
+    TeamIdentifier=4SPX8Y4YUX
+    Runtime Version=26.5.0
+    codesign --verify rc: 0
+    spctl assess: /Library/superopsrmm/bin/superops: rejected
+    owner=root group=wheel mode=-rwxr-xr-x
+S-7 launchd job definitions mentioning superops (labels and Program only; arguments NOT printed):
+  /Library/LaunchDaemons/com.superopsrmm.UpgradeScheduler.plist label=com.superopsrmm.UpgradeScheduler Program=/Library/LaunchDaemons/com.superopsrmm.UpgradeScheduler.plist: Could not extract value, error: No value at that key path or invalid key path: Program ProgramArguments[0]=/Library/superopsrmm/bin/updmgr RunAtLoad=true KeepAlive=/Library/LaunchDaemons/com.superopsrmm.UpgradeScheduler.plist: Could not extract value, error: No value at that key path or invalid key path: KeepAlive
+  /Library/LaunchDaemons/com.superopsrmm.rmm.plist label=com.superopsrmm.rmm Program=/Library/LaunchDaemons/com.superopsrmm.rmm.plist: Could not extract value, error: No value at that key path or invalid key path: Program ProgramArguments[0]=/Library/superopsrmm/bin/superops RunAtLoad=true KeepAlive=true
+  /Library/LaunchDaemons/com.superopsrmm.updatemgr.plist label=com.superopsrmm.updatemgr Program=/Library/LaunchDaemons/com.superopsrmm.updatemgr.plist: Could not extract value, error: No value at that key path or invalid key path: Program ProgramArguments[0]=/Library/superopsrmm/bin/updmgr RunAtLoad=true KeepAlive=/Library/LaunchDaemons/com.superopsrmm.updatemgr.plist: Could not extract value, error: No value at that key path or invalid key path: KeepAlive
+  /Library/LaunchAgents/com.superopsrmm.systemtray.plist label=com.superopsrmm.systemtray.plist Program=/Library/LaunchAgents/com.superopsrmm.systemtray.plist: Could not extract value, error: No value at that key path or invalid key path: Program ProgramArguments[0]=/Library/superopsrmm/bin/superops RunAtLoad=true KeepAlive=false
+S-8 done (no process signalled, nothing modified)
