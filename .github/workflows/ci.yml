@@ -820,3 +820,20 @@ jobs:
       # buildForwardPlannerResult that a prior-start UPCOMING plan blocks a candidate.
       - name: Run Forward Planner overlap blocker DB test
         run: npx ts-node test/forwardPlannerOverlapBlockerDb.test.ts
+      # HPG3-A4b CI coverage reconciliation -- these 4 suites already pass
+      # against main but were never wired into CI; reusing this job's
+      # existing Postgres service/migration-deploy step, same as the PR
+      # #181 reconciliation block above.
+      - name: Run scheduling eligibility error contract DB test
+        run: npx ts-node test/schedulingEligibilityErrorContractDb.test.ts
+      - name: Run Goal activity daily occurrence eligibility DB test
+        run: npx ts-node test/goalActivityDailyOccurrenceEligibilityDb.test.ts
+      - name: Run multi-occurrence Rhythm Move capacity DB test
+        run: npx ts-node test/multiOccurrenceRhythmMoveCapacityDb.test.ts
+      - name: Run Home Move DB test
+        run: npx ts-node test/homeMoveDb.test.ts
+      # HPG3-A4b -- live-DB proof that Recomposition acceptance preserves a
+      # genuine scheduling-eligibility conflict's typed code rather than
+      # collapsing it into a bare, codeless SAVE_FAILED.
+      - name: Run Recomposition error propagation DB test
+        run: npx ts-node test/remainingDayRecompositionErrorPropagationDb.test.ts

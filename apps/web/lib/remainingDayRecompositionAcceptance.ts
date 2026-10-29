@@ -68,7 +68,7 @@ import {
   type ConstructDayRequest,
   type DayConstructorOrchestratorDeps,
 } from './dayConstructorOrchestrator';
-import { findBlockingPlanForRange, applyMoveWrites } from './planMove';
+import { findBlockingPlanForRange, applyMoveWrites, MovePlanError, type MovePlanErrorCode } from './planMove';
 import { hasFlexibleScheduling } from './plannedActivitySchedulingMode';
 import { localDayBoundsUTC } from './myDayOrchestrator';
 import { getDatePartsInTimezone } from './timezone';
@@ -101,13 +101,30 @@ export interface AcceptedRecompositionMove {
   successor: PlannedActivity;
 }
 
+// HPG3-A4b -- the same 3 scheduling-eligibility codes applyMoveWrites's own
+// enforceDestinationWeekCapacity (planMove.ts) already throws for manual
+// Move and for Day Constructor acceptance's materializeFailureToSchedulingEligibilityError
+// mapping -- F3 calls the identical applyMoveWrites, so it can throw the
+// identical MovePlanError codes. Narrowed to the 3 genuine scheduling
+// conflicts (never INVALID_STATE/NOT_FOUND/etc, which are not eligibility
+// refusals and keep the bare, codeless SAVE_FAILED below).
+export type RecompositionConflictCode = Extract<MovePlanErrorCode, 'CAPACITY_EXCEEDED' | 'DAILY_CAPACITY_EXCEEDED' | 'DAILY_ATTRIBUTION_UNRESOLVED'>;
+const RECOMPOSITION_CONFLICT_CODES = new Set<MovePlanErrorCode>(['CAPACITY_EXCEEDED', 'DAILY_CAPACITY_EXCEEDED', 'DAILY_ATTRIBUTION_UNRESOLVED']);
+
 export type AcceptRecompositionResult =
   | { status: 'ACCEPTED' | 'ALREADY_ACCEPTED'; targetDate: string; moves: AcceptedRecompositionMove[] }
   /** The token cannot be trusted (missing, tampered, wrong purpose/version/user, malformed). */
   | { status: 'INVALID_TOKEN' }
   /** The token is genuine but the world no longer matches it: request a fresh proposal. Nothing was written. */
   | { status: 'STALE'; reason: RecompositionStaleReason; planId?: string }
-  | { status: 'SAVE_FAILED' };
+  // HPG3-A4b -- additive only: every existing caller that narrows on
+  // `status === 'SAVE_FAILED'` without reading `code` is unaffected. Present
+  // only for a known scheduling-eligibility conflict (see
+  // RecompositionConflictCode above); every other failure (a lost
+  // conditional update, an unexpected DB error, etc.) keeps returning the
+  // exact same bare `{ status: 'SAVE_FAILED' }` this function always did --
+  // never an internal message or stack trace.
+  | { status: 'SAVE_FAILED'; code?: RecompositionConflictCode };
 
 type TransactionClient = { query: (text: string, params?: unknown[]) => Promise<{ rows: any[] }> };
 
@@ -263,6 +280,16 @@ export async function acceptRemainingDayRecomposition(userId: string, proposalTo
     return finish({ status: 'ACCEPTED', targetDate: proposal.targetDate, moves: accepted }, true);
   } catch (err) {
     await client.query('ROLLBACK').catch(() => {});
+    // HPG3-A4b -- a known, typed scheduling-eligibility conflict thrown by
+    // applyMoveWrites carries its code through (never its message -- no
+    // internal detail leaked); this is an ANTICIPATED rejection, not an
+    // unexpected failure, so unlike the generic branch below it is not
+    // logged as an error. Every other MovePlanError (INVALID_STATE from a
+    // lost conditional update, etc.) and every non-MovePlanError failure
+    // keeps the exact same bare SAVE_FAILED this function always returned.
+    if (err instanceof MovePlanError && RECOMPOSITION_CONFLICT_CODES.has(err.code)) {
+      return { status: 'SAVE_FAILED', code: err.code as RecompositionConflictCode };
+    }
     console.error('day/recompose/accept: unexpected failure', err instanceof Error ? err.message : err);
     return { status: 'SAVE_FAILED' };
   } finally {
