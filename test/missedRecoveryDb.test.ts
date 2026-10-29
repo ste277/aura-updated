@@ -197,6 +197,38 @@ async function main() {
     const ex = createPlanExecutor(homeFetch());
     const [r1, r2, r3] = await Promise.all([ex.complete(burstPlan.id), ex.skip(burstPlan.id), ex.move(burstPlan.id, dest().toISOString())]);
     check('20/61. Done + Skip + Move from one Home session for the same elapsed plan: one lifecycle request, the others BUSY, one terminal state', routeCalls.length === 1 && [r1, r2, (r3 as any).status].filter((x) => x === 'BUSY').length === 2 && ['LOGGED', 'SKIPPED', 'MOVED'].includes((await row(burstPlan.id)).status));
+
+    // ---- HPG4-2. "Skip all missed": a sequential bulk-skip over real
+    // Goal-linked missed plans, through the SAME executor/route this file's
+    // own single-item checks already use -- no new endpoint, one request
+    // per eligible id. Proves correct Goal state/capacity after the batch,
+    // and that a concurrently-resolved item (another device skipped it
+    // first) is handled idempotently rather than erroring the batch. ----
+    const gaBulk1 = await addGoalActivity(U.id, goal.goal.id, { title: 'Goal bulk 1', activityId: null });
+    const gaBulk2 = await addGoalActivity(U.id, goal.goal.id, { title: 'Goal bulk 2', activityId: null });
+    const gaBulk3 = await addGoalActivity(U.id, goal.goal.id, { title: 'Goal bulk 3 (concurrently resolved)', activityId: null });
+    const bulkPlan1 = await acceptElapsed({ goal: gaBulk1!.id }, 'Goal bulk 1');
+    const bulkPlan2 = await acceptElapsed({ goal: gaBulk2!.id }, 'Goal bulk 2');
+    const bulkPlan3 = await acceptElapsed({ goal: gaBulk3!.id }, 'Goal bulk 3');
+    // Simulates another device resolving plan 3 BEFORE this session's batch
+    // reaches it -- the server's own idempotent, status-conditional UPDATE
+    // is what the bulk feature relies on, not a client-side lock.
+    await createPlanExecutor(homeFetch()).skip(bulkPlan3);
+    const hBulk = await habits();
+    const ex2 = createPlanExecutor(homeFetch());
+    const bulkResults: string[] = [];
+    for (const id of [bulkPlan1, bulkPlan2, bulkPlan3]) bulkResults.push(await ex2.skip(id));
+    check(
+      '65. "Skip all missed" batch: every eligible plan reaches SKIPPED (including the one already resolved by another device, via the idempotent skip -- never an error that would abort the remaining items), and every linked GoalActivity returns to SUGGESTED, zero new HabitLogs',
+      bulkResults.every((r) => r === 'SKIPPED') &&
+        (await row(bulkPlan1)).status === 'SKIPPED' &&
+        (await row(bulkPlan2)).status === 'SKIPPED' &&
+        (await row(bulkPlan3)).status === 'SKIPPED' &&
+        (await gaState(gaBulk1!.id)).state === 'SUGGESTED' &&
+        (await gaState(gaBulk2!.id)).state === 'SUGGESTED' &&
+        (await gaState(gaBulk3!.id)).state === 'SUGGESTED' &&
+        (await habits()) === hBulk
+    );
   } finally {
     await sql(`UPDATE "Capture" SET "plannedActivityId" = NULL WHERE "userId" = $1`, [U.id]).catch(() => {});
     await sql(`UPDATE "GoalActivity" SET "plannedActivityId" = NULL WHERE "userId" = $1`, [U.id]).catch(() => {});

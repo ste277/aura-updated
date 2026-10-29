@@ -38,7 +38,7 @@ import { HomeQuickCapture } from './HomeQuickCapture';
 import { createPlanExecutor, completablePlanId, skippablePlanId, moveablePlanId, overlayExecutionFacts, agendaWithoutResolvedNext, visibleCompletionError, type CompletionError, type ExecutionOutcome } from '../lib/homeCompletion';
 import { selectVisibleStartingSoonReminder } from '../lib/reminderConsistency';
 import { createSuccessorFocusController, successorOnAgendaDay, type SuccessorFocusController } from '../lib/homeSuccessorFocus';
-import { missedRecoveryPlanId, overlayElapsedMissed } from '../lib/homeMissedRecovery';
+import { missedRecoveryPlanId, overlayElapsedMissed, missedSkipEligiblePlanIds } from '../lib/homeMissedRecovery';
 import { applyConfirmedSuccessors, hideMovedTimelineItems, defaultMoveSelection, resolveMoveDestination, moveDestinationMessage, moveFailureMessage, formatMoveTime, type MoveSelection } from '../lib/homeMove';
 import type { PlannedActivity } from '../lib/db';
 import { RecompositionCard } from './RecompositionCard';
@@ -503,6 +503,13 @@ export function HomeDashboard({
   const [skippingPlanIds, setSkippingPlanIds] = useState<ReadonlySet<string>>(new Set());
   const [completeError, setCompleteError] = useState<CompletionError | null>(null);
   const [skipError, setSkipError] = useState<CompletionError | null>(null);
+  // HPG4-2 -- "Skip all missed": a synchronous ref (mirroring the executor's
+  // own inFlight-Set idiom, and recomposition's acceptInFlight boolean)
+  // guards against a same-tick double click that React state alone could
+  // not catch; the paired state value only drives the button's own label.
+  const skipAllMissedRunningRef = useRef(false);
+  const [skipAllMissedBusy, setSkipAllMissedBusy] = useState(false);
+  const [skipAllMissedNotice, setSkipAllMissedNotice] = useState<{ succeeded: number; failed: number } | null>(null);
   // Daily Experience V1 PR D3 -- Move. A confirmed Move is recorded as A -> MOVED in the
   // same execution-fact map (so Right Now, the reminder filter and the next-item filter
   // treat A as resolved) PLUS the confirmed successor B, so the day is right even if
@@ -909,6 +916,66 @@ export function HomeDashboard({
   // is intentionally left to myDayAgenda's own null vs. real-empty-array
   // shape, matching every other My Day slice's existing convention.
   const isTimelineEmpty = homeTimeline.length === 0;
+
+  // HPG4-2 -- "Skip all missed": a deliberate, user-triggered action distinct
+  // from any automatic/recomposition-style recovery (Missed Recovery's own
+  // module keeps none of that, by design). This value is for the button's
+  // VISIBILITY only -- it is recomputed on every render as the clock/ fact
+  // map tick, same as every other missed-row check on this page; the actual
+  // set a click acts on is always recomputed fresh inside the handler
+  // itself, never read from this value, so a stale render can never cause a
+  // stale skip.
+  const missedSkipEligibleCount = missedSkipEligiblePlanIds(homeTimeline, new Date(), executionFacts).length;
+  // Sequential, one request at a time -- simpler error attribution than a
+  // parallel batch, and this reuses the EXISTING single-item Skip mechanism
+  // (planExecutor.skip, the same inFlight guard, the same executionFacts
+  // map) for every item: no second endpoint, no second lifecycle path.
+  // A second click while one run is already going is rejected synchronously
+  // (the ref, checked before any state write or await) -- never two
+  // overlapping runs. Confirmed-fact writes only happen after the executor
+  // reports SKIPPED, exactly the no-optimistic-write discipline every other
+  // Home execution handler already follows; Done is never called here.
+  const handleSkipAllMissed = async () => {
+    if (skipAllMissedRunningRef.current) return;
+    if (recompositionStore.isAccepting()) return; // a batch acceptance is in flight: no conflicting per-plan mutation
+    const eligible = missedSkipEligiblePlanIds(homeTimeline, new Date(), executionFacts);
+    if (eligible.length < 2) return;
+    skipAllMissedRunningRef.current = true;
+    setSkipAllMissedBusy(true);
+    setSkipAllMissedNotice(null);
+    let succeeded = 0;
+    let failed = 0;
+    for (const planId of eligible) {
+      if (planExecutor.current.isBusy(planId)) {
+        failed += 1;
+        continue;
+      }
+      setSkippingPlanIds((current) => new Set(current).add(planId));
+      const result = await planExecutor.current.skip(planId);
+      setSkippingPlanIds((current) => {
+        const next = new Set(current);
+        next.delete(planId);
+        return next;
+      });
+      if (result !== 'SKIPPED') {
+        failed += 1;
+        continue;
+      }
+      succeeded += 1;
+      setExecutionFacts((current) => new Map(current).set(planId, 'SKIPPED'));
+    }
+    skipAllMissedRunningRef.current = false;
+    setSkipAllMissedBusy(false);
+    setSkipAllMissedNotice({ succeeded, failed });
+    if (succeeded > 0) {
+      recompositionStore.invalidate();
+      try {
+        await onPlanCompleted?.();
+      } catch {
+        // last valid Home stays
+      }
+    }
+  };
 
   // Remaining-Day Recomposition V1 PR F4 -- entry visibility is a PRESENTATION heuristic only (today, something still
   // upcoming, nothing conflicting running); whether anything can actually change is F2's call, never Home's.
@@ -1361,6 +1428,28 @@ export function HomeDashboard({
       {/* ============================================================
        * YOUR DAY
        * ============================================================ */}
+      {missedSkipEligibleCount >= 2 && (
+        <div style={{ display: 'flex', alignItems: 'center', gap: spacing.sm, flexWrap: 'wrap', marginBottom: spacing.sm }}>
+          <TextButton
+            onClick={() => void handleSkipAllMissed()}
+            disabled={skipAllMissedBusy}
+            ariaLabel="Skip all missed activities"
+            color={colors.textSecondary}
+            style={{ minHeight: 44, padding: '0 8px' }}
+          >
+            {skipAllMissedBusy ? 'Skipping…' : 'Skip all missed'}
+          </TextButton>
+          {skipAllMissedNotice && (
+            <span role="status" style={{ ...typography.caption, color: colors.textMuted }}>
+              {skipAllMissedNotice.failed === 0
+                ? `Skipped ${skipAllMissedNotice.succeeded} missed ${skipAllMissedNotice.succeeded === 1 ? 'activity' : 'activities'}.`
+                : skipAllMissedNotice.succeeded === 0
+                  ? "Couldn't skip those. Try again."
+                  : `Skipped ${skipAllMissedNotice.succeeded} of ${skipAllMissedNotice.succeeded + skipAllMissedNotice.failed}.`}
+            </span>
+          )}
+        </div>
+      )}
       <HomeTimeline
         items={homeTimeline}
         timezone={effectiveTimezone}

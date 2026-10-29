@@ -187,6 +187,23 @@ function main() {
   check('Scope: planFormatting.ts is untouched by DR4-E2 (same exported classification surface DR4-E1 shipped)', /export function derivedPlanLifecycle/.test(read('../apps/web/lib/planFormatting.ts')) && /export const isUpcomingOrCurrentPlan/.test(read('../apps/web/lib/planFormatting.ts')) && /export const isMissedPlan = isAwaitingConfirmationPlan/.test(read('../apps/web/lib/planFormatting.ts')));
   check('Scope: no migration-shaped change -- no new status literal written to the database anywhere in this file', !/SET status = 'MISSED'|status: 'MISSED'/.test(stripped));
 
+  // ============================================================
+  // HPG4-2. "Skip all missed" on the Plan tab -- a parallel, independent
+  // implementation (this surface already has its own separate per-item
+  // Skip mechanism, handleSkipPlan/planActionStates, not unified with
+  // Home's). Eligibility reuses isMissedPlan/missedPlans; orchestration
+  // reuses the EXACT existing skip fetch literal, once per eligible plan.
+  // ============================================================
+  const skipAllBlock = stripped.slice(stripped.indexOf('const handleSkipAllMissed'), stripped.indexOf('const handleFindTime'));
+  check('HPG4-2. the eligible set is recomputed fresh from savedPlans/isMissedPlan at click time, never read from the missedPlans memo (which only recomputes when savedPlans itself changes, and could otherwise go stale purely from the clock advancing)', /savedPlans\.filter\(\(plan\) => isMissedPlan\(plan\)\)/.test(skipAllBlock) && !/missedPlans\.filter|visibleMissedPlans\.filter/.test(skipAllBlock));
+  check('HPG4-2. the bulk action calls the EXACT same POST /api/plans/[id]/skip route handleSkipPlan uses -- no new endpoint, no second mutation', (skipAllBlock.match(/fetch\(`\/api\/plans\/\$\{plan\.id\}\/skip`, \{ method: 'POST' \}\)/g) ?? []).length === 1);
+  check('HPG4-2. a second run cannot start while one is active: a synchronous ref is checked before any state write or await, same idiom as Home\'s own guard', /if \(skipAllMissedRunningRef\.current\) return;/.test(skipAllBlock) && /skipAllMissedRunningRef\.current = true;/.test(skipAllBlock));
+  check('HPG4-2. each item is tracked through the EXISTING planActionStates busy map (the same one MissedActivityCard\'s actionState prop already reads) -- not a new busy-tracking mechanism', /setPlanActionStates\(\(states\) => \(\{ \.\.\.states, \[plan\.id\]: 'SKIPPING' \}\)\)/.test(skipAllBlock));
+  check('HPG4-2. success/failure are counted independently per item (partial success is representable), never a single all-or-nothing boolean', /succeeded \+= 1/.test(skipAllBlock) && /failed \+= 1/.test(skipAllBlock) && /succeeded: number; failed: number/.test(stripped));
+  check('HPG4-2. no goal-related identifier appears in the new bulk-skip code either (same discipline as check 20 for the single-item path)', !/(goalId|GoalActivity|goalProgress)/i.test(skipAllBlock));
+  check('HPG4-2. the bulk action is offered only once 2+ activities are missed (missedPlans.length >= 2), independent of the 2-item default VISIBLE slice', /missedPlans\.length >= 2/.test(stripped));
+  check('HPG4-2. no confirmation dialog or new screen was introduced for this action (no ModalShell/confirm/window.confirm anywhere in the new block)', !/ModalShell|window\.confirm|confirm\(/i.test(skipAllBlock));
+
   console.log(allPassed ? '\nALL MISSED ACTIVITY PRESENTATION CHECKS PASSED' : '\nSOME MISSED ACTIVITY PRESENTATION CHECKS FAILED');
   process.exit(allPassed ? 0 : 1);
 }
