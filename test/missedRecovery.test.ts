@@ -9,7 +9,7 @@ import fs from 'fs';
 import path from 'path';
 import { createPlanExecutor, overlayExecutionFacts, agendaWithoutResolvedNext, type ExecutionOutcome } from '../apps/web/lib/homeCompletion';
 import { applyConfirmedSuccessors, hideMovedTimelineItems } from '../apps/web/lib/homeMove';
-import { missedRecoveryPlanId, isMissedPlanItem, overlayElapsedMissed, MISSED_RECOVERY_ACTIONS, missedSkipEligiblePlanIds, summarizeSkipAllOutcome } from '../apps/web/lib/homeMissedRecovery';
+import { missedRecoveryPlanId, isMissedPlanItem, overlayElapsedMissed, MISSED_RECOVERY_ACTIONS, missedSkipEligiblePlanIds, summarizeSkipAllOutcome, collectSkipAllOutcomes } from '../apps/web/lib/homeMissedRecovery';
 import { selectVisibleStartingSoonReminder } from '../apps/web/lib/reminderConsistency';
 import { buildDailyAgenda } from '../apps/web/lib/dailyAgenda';
 import { buildHomeTimeline } from '../apps/web/lib/homeTimelineComposer';
@@ -215,13 +215,24 @@ async function main() {
   // directly-unit-tested summarizeSkipAllOutcome the real handler calls --
   // so a regression in the shared tally function fails check 62 below AND
   // every check in this block, not just one in isolation.
+  //
+  // CI/functional hardening (follow-up) -- this helper ALSO used to
+  // reimplement its own per-item collection loop (`for (const id of
+  // planIds) outcomes.push(await ex.skip(id))`), which is the exact second
+  // instance of the anti-pattern: an independent review demonstrated that
+  // hardcoding Home's real collection loop to always push 'SKIPPED'
+  // (ignoring the real per-item result) caused ZERO failures across every
+  // check in this file, because none of them ran the real collection logic
+  // either -- only this reimplemented copy. It now calls the SAME exported
+  // collectSkipAllOutcomes the real handler calls, with the real executor's
+  // own isBusy as the busy check -- so a caller-side collection regression
+  // in Home's production handler now fails here too, not just in isolation.
   const runSkipAll = async (planIds: string[], responder: (planId: string) => Response | Promise<Response>) => {
     const calls: string[] = [];
     const ex = createPlanExecutor((async (input: any) => { calls.push(String(input)); const id = String(input).split('/')[3]; return responder(id); }) as typeof fetch);
-    const outcomes: string[] = [];
-    for (const id of planIds) outcomes.push(await ex.skip(id));
+    const outcomes = await collectSkipAllOutcomes(planIds, (id) => ex.isBusy(id), (id) => ex.skip(id));
     const { succeeded, failed } = summarizeSkipAllOutcome(outcomes);
-    return { calls, succeeded, failed };
+    return { calls, succeeded, failed, outcomes };
   };
   const skipOk = (id: string) => json({ plan: { id, status: 'SKIPPED' } });
   const allOk = await runSkipAll(['m', 'n'], skipOk);
@@ -267,9 +278,33 @@ async function main() {
     /summarizeSkipAllOutcome\(outcomes\)/.test(skipAllBlock) && !/succeeded \+= 1|failed \+= 1|let succeeded|let failed/.test(skipAllBlock)
   );
   check(
-    '64. the busy guard is released unconditionally after the batch loop, on EVERY exit path (success or failure) -- never left permanently stuck, and a later call after a prior batch finished is allowed to proceed',
-    /\}\s*skipAllMissedRunningRef\.current = false;\s*setSkipAllMissedBusy\(false\);/.test(skipAllBlock)
+    '64. the busy guard is released unconditionally right after the batch\'s own await resolves, on EVERY exit path (success or failure) -- never left permanently stuck, and a later call after a prior batch finished is allowed to proceed',
+    /\);\s*skipAllMissedRunningRef\.current = false;\s*setSkipAllMissedBusy\(false\);/.test(skipAllBlock)
   );
+  check(
+    '65. handleSkipAllMissed\'s own outcomes array is built by calling the REAL exported collectSkipAllOutcomes (not a reimplemented loop) -- the exact second half of the gap an independent review found: corrupting Home\'s collection, not the tally, still passed every check in this file until this line existed to prove the handler has no parallel collection path',
+    /outcomes = await collectSkipAllOutcomes\(/.test(skipAllBlock) && !/const outcomes: string\[\] = \[\];\s*for \(/.test(skipAllBlock)
+  );
+  check(
+    '69. the per-item skip callback returns the ACTUAL executor result variable, never a hardcoded success literal -- unit-testing collectSkipAllOutcomes in isolation (checks 66-68 above) cannot catch a caller that hands it a callback claiming success regardless of the real outcome; this is the precise caller-side wiring bug an independent review\'s own Control B demonstrated slips past every test that only exercises collectSkipAllOutcomes/summarizeSkipAllOutcome directly',
+    /return result;\s*\},\s*\);/.test(skipAllBlock) && !/return '(SKIPPED|FAILED)';/.test(skipAllBlock)
+  );
+
+  // ============================================================
+  // HPG4-2 CI/functional hardening (follow-up) -- collectSkipAllOutcomes
+  // itself: real per-item collection, now that runSkipAll above calls it
+  // instead of reimplementing the loop. These exercise the same function
+  // Home's production handler calls, with a mocked skip transport, proving
+  // the collection logic is correct independent of any particular caller.
+  // ============================================================
+  const busyCalls: string[] = [];
+  const busyOutcomes = await collectSkipAllOutcomes(['m', 'n', 'o'], (id) => id === 'n', async (id) => { busyCalls.push(id); return 'SKIPPED'; });
+  check('66. an item already busy (e.g. a concurrent individual Skip/Done/Move in flight on it) is collected as BUSY and never attempted -- the real skip transport is called for every OTHER item only', JSON.stringify(busyOutcomes) === JSON.stringify(['SKIPPED', 'BUSY', 'SKIPPED']) && busyCalls.join() === 'm,o');
+  const order: string[] = [];
+  await collectSkipAllOutcomes(['x', 'y', 'z'], () => false, async (id) => { order.push(`start:${id}`); await Promise.resolve(); order.push(`end:${id}`); return 'SKIPPED'; });
+  check('67. collectSkipAllOutcomes runs strictly sequentially (each item\'s skipOne fully resolves before the next one starts), never in parallel', order.join() === 'start:x,end:x,start:y,end:y,start:z,end:z');
+  const composedOutcomes = await collectSkipAllOutcomes(['p', 'q', 'r', 's'], (id) => id === 'q', async (id) => (id === 's' ? 'FAILED' : 'SKIPPED'));
+  check('68. collectSkipAllOutcomes composed with the REAL summarizeSkipAllOutcome on a mixed batch (one busy, one failed, two succeeded) produces the correct end-to-end counts -- the genuine production pipeline, not two isolated unit tests of its two halves', (() => { const { succeeded, failed } = summarizeSkipAllOutcome(composedOutcomes); return succeeded === 2 && failed === 2; })());
 
   console.log(allPassed ? '\nALL MISSED RECOVERY CHECKS PASSED' : '\nSOME MISSED RECOVERY CHECKS FAILED');
   process.exit(allPassed ? 0 : 1);

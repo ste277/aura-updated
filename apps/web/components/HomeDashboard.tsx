@@ -38,7 +38,7 @@ import { HomeQuickCapture } from './HomeQuickCapture';
 import { createPlanExecutor, completablePlanId, skippablePlanId, moveablePlanId, overlayExecutionFacts, agendaWithoutResolvedNext, visibleCompletionError, type CompletionError, type ExecutionOutcome } from '../lib/homeCompletion';
 import { selectVisibleStartingSoonReminder } from '../lib/reminderConsistency';
 import { createSuccessorFocusController, successorOnAgendaDay, type SuccessorFocusController } from '../lib/homeSuccessorFocus';
-import { missedRecoveryPlanId, overlayElapsedMissed, missedSkipEligiblePlanIds, summarizeSkipAllOutcome } from '../lib/homeMissedRecovery';
+import { missedRecoveryPlanId, overlayElapsedMissed, missedSkipEligiblePlanIds, summarizeSkipAllOutcome, collectSkipAllOutcomes } from '../lib/homeMissedRecovery';
 import { applyConfirmedSuccessors, hideMovedTimelineItems, defaultMoveSelection, resolveMoveDestination, moveDestinationMessage, moveFailureMessage, formatMoveTime, type MoveSelection } from '../lib/homeMove';
 import type { PlannedActivity } from '../lib/db';
 import { RecompositionCard } from './RecompositionCard';
@@ -943,24 +943,23 @@ export function HomeDashboard({
     skipAllMissedRunningRef.current = true;
     setSkipAllMissedBusy(true);
     setSkipAllMissedNotice(null);
-    const outcomes: string[] = [];
-    for (const planId of eligible) {
-      if (planExecutor.current.isBusy(planId)) {
-        outcomes.push('BUSY');
-        continue;
-      }
-      setSkippingPlanIds((current) => new Set(current).add(planId));
-      const result = await planExecutor.current.skip(planId);
-      setSkippingPlanIds((current) => {
-        const next = new Set(current);
-        next.delete(planId);
-        return next;
-      });
-      outcomes.push(result);
-      if (result === 'SKIPPED') {
-        setExecutionFacts((current) => new Map(current).set(planId, 'SKIPPED'));
-      }
-    }
+    const outcomes = await collectSkipAllOutcomes(
+      eligible,
+      (planId) => planExecutor.current.isBusy(planId),
+      async (planId) => {
+        setSkippingPlanIds((current) => new Set(current).add(planId));
+        const result = await planExecutor.current.skip(planId);
+        setSkippingPlanIds((current) => {
+          const next = new Set(current);
+          next.delete(planId);
+          return next;
+        });
+        if (result === 'SKIPPED') {
+          setExecutionFacts((current) => new Map(current).set(planId, 'SKIPPED'));
+        }
+        return result;
+      },
+    );
     skipAllMissedRunningRef.current = false;
     setSkipAllMissedBusy(false);
     const { succeeded, failed } = summarizeSkipAllOutcome(outcomes);

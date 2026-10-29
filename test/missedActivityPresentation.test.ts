@@ -14,7 +14,7 @@
 import fs from 'fs';
 import path from 'path';
 import { isUpcomingOrCurrentPlan, isMissedPlan, type PersistedPlanStatus } from '../apps/web/lib/planFormatting';
-import { summarizeSkipAllOutcome } from '../apps/web/lib/homeMissedRecovery';
+import { summarizeSkipAllOutcome, collectSkipAllOutcomes } from '../apps/web/lib/homeMissedRecovery';
 
 let allPassed = true;
 function check(label: string, condition: boolean) {
@@ -60,7 +60,7 @@ function planTabSections(savedPlans: MiniPlan[], now: Date, showAllPlans: boolea
   return { upcomingOrCurrentPlans, missedPlans, visibleUpcomingPlans, visibleMissedPlans, missedSectionRenders, missedViewAllOffered };
 }
 
-function main() {
+async function main() {
   const src = read('../apps/web/components/PlanWithAuraView.tsx');
   const stripped = strip(src);
   const cardBlock = stripped.slice(stripped.indexOf('function MissedActivityCard'), stripped.indexOf('function PlanGlyph'));
@@ -200,7 +200,7 @@ function main() {
   check('HPG4-2. the bulk action calls the EXACT same POST /api/plans/[id]/skip route handleSkipPlan uses -- no new endpoint, no second mutation', (skipAllBlock.match(/fetch\(`\/api\/plans\/\$\{plan\.id\}\/skip`, \{ method: 'POST' \}\)/g) ?? []).length === 1);
   check('HPG4-2. a second run cannot start while one is active: a synchronous ref is checked before any state write or await, same idiom as Home\'s own guard', /if \(skipAllMissedRunningRef\.current\) return;/.test(skipAllBlock) && /skipAllMissedRunningRef\.current = true;/.test(skipAllBlock));
   check('HPG4-2. each item is tracked through the EXISTING planActionStates busy map (the same one MissedActivityCard\'s actionState prop already reads) -- not a new busy-tracking mechanism', /setPlanActionStates\(\(states\) => \(\{ \.\.\.states, \[plan\.id\]: 'SKIPPING' \}\)\)/.test(skipAllBlock));
-  check('HPG4-2. success/failure are counted independently per item (partial success is representable), never a single all-or-nothing boolean', /outcomes\.push\('SKIPPED'\)/.test(skipAllBlock) && /outcomes\.push\('FAILED'\)/.test(skipAllBlock) && /succeeded: number; failed: number/.test(stripped));
+  check('HPG4-2. success/failure are counted independently per item (partial success is representable), never a single all-or-nothing boolean', /return 'SKIPPED';/.test(skipAllBlock) && /return 'FAILED';/.test(skipAllBlock) && /succeeded: number; failed: number/.test(stripped));
   check('HPG4-2. no goal-related identifier appears in the new bulk-skip code either (same discipline as check 20 for the single-item path)', !/(goalId|GoalActivity|goalProgress)/i.test(skipAllBlock));
   check('HPG4-2. the bulk action is offered only once 2+ activities are missed (missedPlans.length >= 2), independent of the 2-item default VISIBLE slice', /missedPlans\.length >= 2/.test(stripped));
   check('HPG4-2. no confirmation dialog or new screen was introduced for this action (no ModalShell/confirm/window.confirm anywhere in the new block)', !/ModalShell|window\.confirm|confirm\(/i.test(skipAllBlock));
@@ -227,11 +227,38 @@ function main() {
       JSON.stringify(summarizeSkipAllOutcome(['FAILED', 'BUSY'])) === JSON.stringify({ succeeded: 0, failed: 2 })
   );
   check(
-    '67. the busy guard is released unconditionally after the batch loop, on EVERY exit path -- never left permanently stuck',
-    /\}\s*skipAllMissedRunningRef\.current = false;\s*setSkipAllMissedBusy\(false\);/.test(skipAllBlock)
+    '67. the busy guard is released unconditionally right after the batch\'s own await resolves, on EVERY exit path -- never left permanently stuck',
+    /\);\s*skipAllMissedRunningRef\.current = false;\s*setSkipAllMissedBusy\(false\);/.test(skipAllBlock)
+  );
+  check(
+    '68. handleSkipAllMissed\'s (Plan tab) own outcomes array is built by calling the REAL exported collectSkipAllOutcomes (not a reimplemented loop) -- the exact caller-side collection gap an independent review found on Home applies equally here, so this Plan-tab handler must be proven the same way',
+    /outcomes = await collectSkipAllOutcomes\(/.test(skipAllBlock) && !/const outcomes: string\[\] = \[\];\s*for \(/.test(skipAllBlock)
+  );
+
+  // ============================================================
+  // HPG4-2 CI/functional hardening (follow-up) -- exercise the REAL
+  // collectSkipAllOutcomes against a mocked fetch/skip transport shaped
+  // like the Plan tab's own (real function, mocked network, not a stub of
+  // the collection logic itself), composed with the REAL
+  // summarizeSkipAllOutcome -- proving the full real pipeline end-to-end
+  // for this surface too, not just Home's.
+  // ============================================================
+  const planSkipOne = async (plan: { id: string; shouldFail?: boolean }): Promise<string> => (plan.shouldFail ? 'FAILED' : 'SKIPPED');
+  const allSuccessPlan = await collectSkipAllOutcomes([{ id: 'p1' }, { id: 'p2' }], () => false, planSkipOne);
+  check('69. Plan tab: all-success batch via the real collectSkipAllOutcomes + a mocked per-item skip -> both SKIPPED, correct summarized counts', JSON.stringify(allSuccessPlan) === JSON.stringify(['SKIPPED', 'SKIPPED']) && JSON.stringify(summarizeSkipAllOutcome(allSuccessPlan)) === JSON.stringify({ succeeded: 2, failed: 0 }));
+  const partialPlan = await collectSkipAllOutcomes([{ id: 'p1' }, { id: 'p2', shouldFail: true }], () => false, planSkipOne);
+  check('70. Plan tab: partial-success batch via the real collectSkipAllOutcomes -> one SKIPPED, one FAILED, correct summarized counts (never all-or-nothing)', JSON.stringify(partialPlan) === JSON.stringify(['SKIPPED', 'FAILED']) && JSON.stringify(summarizeSkipAllOutcome(partialPlan)) === JSON.stringify({ succeeded: 1, failed: 1 }));
+  const allFailPlan = await collectSkipAllOutcomes([{ id: 'p1', shouldFail: true }, { id: 'p2', shouldFail: true }], () => false, planSkipOne);
+  check('71. Plan tab: all-failure batch via the real collectSkipAllOutcomes -> every item attempted, all counted failed, no false success', JSON.stringify(allFailPlan) === JSON.stringify(['FAILED', 'FAILED']) && JSON.stringify(summarizeSkipAllOutcome(allFailPlan)) === JSON.stringify({ succeeded: 0, failed: 2 }));
+  const busyPlanCalls: string[] = [];
+  const busyPlan = await collectSkipAllOutcomes([{ id: 'p1' }, { id: 'p2' }], (plan) => plan.id === 'p2', async (plan) => { busyPlanCalls.push(plan.id); return 'SKIPPED'; });
+  check('72. Plan tab: an already-busy item (e.g. an individual Skip/Done/Move already in flight on it via planActionStates) is collected as BUSY and never attempted', JSON.stringify(busyPlan) === JSON.stringify(['SKIPPED', 'BUSY']) && busyPlanCalls.join() === 'p1');
+  check(
+    '73. the success return is reachable only after the real fetch response is confirmed ok (if (!res.ok) throw) and the result is parsed from the real response body -- never a hardcoded success regardless of what the server actually returned; unit-testing collectSkipAllOutcomes in isolation (checks 69-72 above) cannot catch a per-item callback that ignores res.ok and claims success unconditionally, which is the precise caller-side wiring bug an independent review\'s own Control B demonstrated on Home and applies equally here',
+    /if \(!res\.ok\) throw new Error\('Unable to skip plan\.'\);\s*const result = await res\.json\(\);\s*const updated = mapPlanRow\(result\.plan, timezone\);\s*setSavedPlans\(\(plans\) => plans\.map\(\(item\) => item\.id === plan\.id \? updated : item\)\);\s*return 'SKIPPED';/.test(skipAllBlock)
   );
 
   console.log(allPassed ? '\nALL MISSED ACTIVITY PRESENTATION CHECKS PASSED' : '\nSOME MISSED ACTIVITY PRESENTATION CHECKS FAILED');
   process.exit(allPassed ? 0 : 1);
 }
-main();
+main().catch((e) => { console.error(e); process.exit(1); });

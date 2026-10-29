@@ -71,6 +71,38 @@ export function missedSkipEligiblePlanIds(timeline: readonly HomeTimelineItem[],
 }
 
 /**
+ * HPG4-2 CI/functional hardening (follow-up) -- the ONLY place "Skip all
+ * missed"'s per-item COLLECTION loop is implemented, extracted out of both
+ * Home's and the Plan tab's handleSkipAllMissed loop bodies so the exact
+ * production sequencing (synchronous isBusy check -> else await the real
+ * skip operation, in order, one item at a time) is itself directly callable
+ * by a test with a mocked `skipOne`, instead of only being provable by
+ * reading source text. `items` may be plan ids (Home) or plan rows (Plan
+ * tab) -- this function only ever passes each item through to the two
+ * callbacks the caller supplies, so it carries no knowledge of what an item
+ * actually is, of React state, or of the real skip transport. `skipOne` is
+ * responsible for any per-item busy-state bookkeeping and for performing the
+ * real, existing single-item skip call; this function's only job is the
+ * sequential iteration and outcome collection, unchanged from what each
+ * handler's own loop already did.
+ */
+export async function collectSkipAllOutcomes<T>(
+  items: readonly T[],
+  isBusy: (item: T) => boolean,
+  skipOne: (item: T) => Promise<string>,
+): Promise<string[]> {
+  const outcomes: string[] = [];
+  for (const item of items) {
+    if (isBusy(item)) {
+      outcomes.push('BUSY');
+      continue;
+    }
+    outcomes.push(await skipOne(item));
+  }
+  return outcomes;
+}
+
+/**
  * HPG4-2 CI/functional hardening -- the ONLY place "Skip all missed"'s
  * succeeded/failed tally is computed, extracted out of handleSkipAllMissed's
  * loop body so it has a single, directly-testable implementation instead of
