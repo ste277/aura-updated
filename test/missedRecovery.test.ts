@@ -9,7 +9,7 @@ import fs from 'fs';
 import path from 'path';
 import { createPlanExecutor, overlayExecutionFacts, agendaWithoutResolvedNext, type ExecutionOutcome } from '../apps/web/lib/homeCompletion';
 import { applyConfirmedSuccessors, hideMovedTimelineItems } from '../apps/web/lib/homeMove';
-import { missedRecoveryPlanId, isMissedPlanItem, overlayElapsedMissed, MISSED_RECOVERY_ACTIONS } from '../apps/web/lib/homeMissedRecovery';
+import { missedRecoveryPlanId, isMissedPlanItem, overlayElapsedMissed, MISSED_RECOVERY_ACTIONS, missedSkipEligiblePlanIds } from '../apps/web/lib/homeMissedRecovery';
 import { selectVisibleStartingSoonReminder } from '../apps/web/lib/reminderConsistency';
 import { buildDailyAgenda } from '../apps/web/lib/dailyAgenda';
 import { buildHomeTimeline } from '../apps/web/lib/homeTimelineComposer';
@@ -185,6 +185,58 @@ async function main() {
   check('51/52/53/54/55. no automatic recovery, recomposition, Timing Search, Constructor, Day Review or analytics in the recovery path', !/timingSearch|Constructor|recompos|DayReview|analytics|missedRate|streak|bulk/i.test(lib + block.replace(/ \|\| recompositionAccepting/g, '')));  // F4: the ONLY recomposition reference allowed here is the disabled-while-a-batch-is-saving guard
   check('81. no new plan route / lifecycle endpoint: the plan routes remain log, move, skip', fs.readdirSync(path.join(__dirname, '../apps/web/app/api/plans/[planId]')).filter((d) => d !== 'route.ts').sort().join() === 'log,move,skip');
   check('56. the recovery helper is small and pure: it imports only the agenda derivation and Home id helpers, no DB', /from '\.\/dailyAgenda'/.test(read('../apps/web/lib/homeMissedRecovery.ts')) && !/from '\.\/db'|from 'pg'/.test(read('../apps/web/lib/homeMissedRecovery.ts')));
+
+  // ============================================================
+  // HPG4-2. "Skip all missed": eligibility (missedSkipEligiblePlanIds) and
+  // client-side orchestration. No new eligibility rule -- every check below
+  // proves the bulk set is EXACTLY what missedRecoveryPlanId already
+  // derives per item, just collected; no new endpoint -- orchestration
+  // reuses the same createPlanExecutor().skip stub harness this file
+  // already uses for the single-item case.
+  // ============================================================
+  check('HPG4-2. zero missed plans -> zero eligible ids (the bulk action does not render)', missedSkipEligiblePlanIds(home([plan('f', 'F', at('15:00'), at('16:00'))], now).timeline, now, new Map()).length === 0);
+  check('HPG4-2. exactly one missed plan -> exactly one eligible id (the >=2 button-visibility gate is a separate UI decision on this same list, not a different eligibility rule)', missedSkipEligiblePlanIds(home([M], now).timeline, now, new Map()).length === 1);
+  check('HPG4-2. two missed plans -> both eligible, in the Timeline\'s own existing chronological order, deduplicated', missedSkipEligiblePlanIds(home([M, M2], now).timeline, now, new Map()).join() === 'm,n');
+  check('HPG4-2. no DONE / SKIPPED / future / CANCELLED activity is ever included -- excluded by missedRecoveryPlanId itself, not a second filter here', (() => {
+    const mixed = home([M, M2, plan('done', 'D', at('09:00'), at('10:00'), 'LOGGED'), plan('skipped', 'S', at('09:00'), at('10:00'), 'SKIPPED'), plan('future', 'FU', at('15:00'), at('16:00')), plan('cancelled', 'C', at('09:00'), at('10:00'), 'CANCELLED')], now);
+    return missedSkipEligiblePlanIds(mixed.timeline, now, new Map()).join() === 'm,n';
+  })());
+  check('HPG4-2. a concurrently-resolved activity (a confirmed outcome already recorded for it) is excluded even though its stale agenda still says MISSED -- a mid-batch race with another device is never re-targeted', missedSkipEligiblePlanIds(home([M, M2], now).timeline, now, new Map([['m', 'SKIPPED']])).join() === 'n');
+  check('HPG4-2. the eligible set is a pure function of the arguments given, recomputed fresh each call -- never a cached/stale snapshot: the SAME timeline with an updated confirmed-outcomes map yields a different, smaller result', (() => {
+    const t = home([M, M2], now).timeline;
+    return missedSkipEligiblePlanIds(t, now, new Map()).join() === 'm,n' && missedSkipEligiblePlanIds(t, now, new Map([['m', 'SKIPPED']])).join() === 'n';
+  })());
+
+  const runSkipAll = async (planIds: string[], responder: (planId: string) => Response | Promise<Response>) => {
+    const calls: string[] = [];
+    const ex = createPlanExecutor((async (input: any) => { calls.push(String(input)); const id = String(input).split('/')[3]; return responder(id); }) as typeof fetch);
+    let succeeded = 0, failed = 0;
+    for (const id of planIds) {
+      const r = await ex.skip(id);
+      if (r === 'SKIPPED') succeeded += 1;
+      else failed += 1;
+    }
+    return { calls, succeeded, failed };
+  };
+  const skipOk = (id: string) => json({ plan: { id, status: 'SKIPPED' } });
+  const allOk = await runSkipAll(['m', 'n'], skipOk);
+  check('HPG4-2. all-success batch: exactly one POST /skip per eligible id, both SKIPPED, zero failures', allOk.calls.length === 2 && allOk.calls.every((u) => u.endsWith('/skip')) && allOk.succeeded === 2 && allOk.failed === 0);
+  const partial = await runSkipAll(['m', 'n'], (id) => (id === 'm' ? skipOk(id) : json({ error: 'x' }, 500)));
+  check('HPG4-2. partial-success batch: each item attempted independently; succeeded/failed counted per item, never all-or-nothing', partial.calls.length === 2 && partial.succeeded === 1 && partial.failed === 1);
+  const allFail = await runSkipAll(['m', 'n'], () => json({ error: 'x' }, 500));
+  check('HPG4-2. all-failure batch: every item still attempted, all counted failed, no false success ever claimed', allFail.calls.length === 2 && allFail.succeeded === 0 && allFail.failed === 2);
+  const malformed = await runSkipAll(['m', 'n'], () => new Response('not json', { status: 200 }));
+  check('HPG4-2. missing/invalid response body: FAILED for both, never a false success -- same existing single-item contract, unchanged', malformed.succeeded === 0 && malformed.failed === 2);
+  const retryAfterPartial = await runSkipAll(missedSkipEligiblePlanIds(home([M, M2], now).timeline, now, new Map([['m', 'SKIPPED']])), skipOk);
+  check('HPG4-2. retry after partial success re-derives eligibility fresh (only the still-unresolved item), never replays the original stale id list', retryAfterPartial.calls.length === 1 && retryAfterPartial.calls[0].includes('/n/') && retryAfterPartial.succeeded === 1);
+
+  const dashSrc = strip(read('../apps/web/components/HomeDashboard.tsx'));
+  const skipAllBlock = dashSrc.slice(dashSrc.indexOf('const handleSkipAllMissed'), dashSrc.indexOf('const handleSkipAllMissed') + 2200);
+  check('HPG4-2. duplicate-submission protection is a synchronous ref checked before any state write or await (same idiom as recomposition\'s own acceptInFlight / the executor\'s own inFlight Set) -- never React state alone, which cannot catch a same-tick double click', /if \(skipAllMissedRunningRef\.current\) return;/.test(skipAllBlock) && /skipAllMissedRunningRef\.current = true;/.test(skipAllBlock));
+  check('HPG4-2. no DONE mutation is possible from this path: the handler calls planExecutor.current.skip, never .complete, anywhere in its body', /planExecutor\.current\.skip\(planId\)/.test(skipAllBlock) && !/planExecutor\.current\.complete\(/.test(skipAllBlock));
+  check('HPG4-2. the button only appears at 2+ eligible (missedSkipEligibleCount >= 2) and disables itself while busy -- the exact same skippingPlanIds busy set individual rows already read, not a new mechanism', /missedSkipEligibleCount >= 2/.test(dashSrc) && /disabled=\{skipAllMissedBusy\}/.test(dashSrc) && /setSkippingPlanIds\(\(current\) => new Set\(current\)\.add\(planId\)\)/.test(skipAllBlock));
+  check('HPG4-2. the confirmed-fact write happens only AFTER a SKIPPED result (no optimistic write), matching every other Home execution handler\'s discipline', /if \(result !== 'SKIPPED'\) \{[\s\S]{0,80}continue;\s*\}\s*succeeded \+= 1;\s*setExecutionFacts/.test(skipAllBlock));
+  check('HPG4-2. "Skip all missed" never appears inside the per-row renderMissedRecovery block (it is a page-level action, not a third per-row control) -- the banned-automation guard above (check 185) already proves the per-row module stays free of it', !/missedSkipEligible|handleSkipAllMissed|skipAllMissedRunningRef/.test(block));
 
   console.log(allPassed ? '\nALL MISSED RECOVERY CHECKS PASSED' : '\nSOME MISSED RECOVERY CHECKS FAILED');
   process.exit(allPassed ? 0 : 1);

@@ -46,6 +46,31 @@ export function missedRecoveryPlanId(item: HomeTimelineItem, now: Date, confirme
 }
 
 /**
+ * HPG4-2 -- every plan id a "Skip all missed" action on Home may target,
+ * computed fresh from the given timeline/clock/confirmed-outcomes -- the
+ * caller must pass a freshly-read `now` at the moment of the user's click,
+ * never a value captured earlier and held across renders. No new
+ * eligibility rule: this is exactly the same per-item check
+ * missedRecoveryPlanId already performs (derived-MISSED, unresolved), just
+ * collected and deduplicated in the timeline's own existing chronological
+ * order. A plan already LOGGED, SKIPPED or MOVED, or one that is not yet
+ * MISSED, is never included -- not by a second check here, but because
+ * missedRecoveryPlanId itself already excludes it.
+ */
+export function missedSkipEligiblePlanIds(timeline: readonly HomeTimelineItem[], now: Date, confirmedOutcomes: { has(planId: string): boolean }): string[] {
+  const ids: string[] = [];
+  const seen = new Set<string>();
+  for (const item of timeline) {
+    const planId = missedRecoveryPlanId(item, now, confirmedOutcomes);
+    if (planId !== null && !seen.has(planId)) {
+      seen.add(planId);
+      ids.push(planId);
+    }
+  }
+  return ids;
+}
+
+/**
  * Brings the composed timeline's presentation in line with the live clock: a plan whose end
  * elapsed while Home stayed mounted (the agenda was built earlier) reads as MISSED, exactly as a
  * fresh agenda would say. Only re-labels; never changes ordering and never persists anything.

@@ -528,6 +528,14 @@ export function PlanWithAuraView({ onTimingSearch, onViewDay, onPlanLogged, time
   const [confirmingRemovePlanId, setConfirmingRemovePlanId] = useState<string | null>(null);
   const [savingOpportunityKey, setSavingOpportunityKey] = useState<string | null>(null);
   const [planActionStates, setPlanActionStates] = useState<Record<string, PlanActionState>>({});
+  // HPG4-2 -- "Skip all missed", a parallel implementation to Home's own
+  // (deliberately not unified -- this surface already has its own separate
+  // per-item Skip mechanism, handleSkipPlan). The ref is a synchronous
+  // same-tick double-click guard, same idiom as the executor's own
+  // inFlight Set elsewhere in this codebase.
+  const skipAllMissedRunningRef = useRef(false);
+  const [skipAllMissedBusy, setSkipAllMissedBusy] = useState(false);
+  const [skipAllMissedNotice, setSkipAllMissedNotice] = useState<{ succeeded: number; failed: number } | null>(null);
   const [plannedOpportunityKeys, setPlannedOpportunityKeys] = useState<Set<string>>(() => new Set());
   // Aura Reminders V1 dedup linkage (brief section 7): the real saved
   // PlannedActivity id for each candidate key that's already been "Plan
@@ -1149,6 +1157,51 @@ export function PlanWithAuraView({ onTimingSearch, onViewDay, onPlanLogged, time
         return next;
       });
     }
+  };
+
+  // HPG4-2 -- "Skip all missed", calling the exact same per-item skip route
+  // handleSkipPlan already uses, once per eligible plan, sequentially (no
+  // new endpoint, no second lifecycle path). Eligibility is recomputed
+  // fresh here from the live savedPlans/isMissedPlan at the moment of the
+  // click -- never from the missedPlans memo, which only recomputes when
+  // savedPlans changes and could otherwise show a plan as eligible after
+  // the clock alone has already moved it past the missed boundary.
+  const handleSkipAllMissed = async () => {
+    if (skipAllMissedRunningRef.current) return;
+    const eligible = savedPlans.filter((plan) => isMissedPlan(plan));
+    if (eligible.length < 2) return;
+    skipAllMissedRunningRef.current = true;
+    setSkipAllMissedBusy(true);
+    setSkipAllMissedNotice(null);
+    let succeeded = 0;
+    let failed = 0;
+    for (const plan of eligible) {
+      if (planActionStates[plan.id]) {
+        failed += 1;
+        continue;
+      }
+      setPlanActionStates((states) => ({ ...states, [plan.id]: 'SKIPPING' }));
+      try {
+        const res = await fetch(`/api/plans/${plan.id}/skip`, { method: 'POST' });
+        if (!res.ok) throw new Error('Unable to skip plan.');
+        const result = await res.json();
+        const updated = mapPlanRow(result.plan, timezone);
+        setSavedPlans((plans) => plans.map((item) => item.id === plan.id ? updated : item));
+        succeeded += 1;
+      } catch {
+        failed += 1;
+      } finally {
+        setPlanActionStates((states) => {
+          const next = { ...states };
+          delete next[plan.id];
+          return next;
+        });
+      }
+    }
+    skipAllMissedRunningRef.current = false;
+    setSkipAllMissedBusy(false);
+    setSkipAllMissedNotice({ succeeded, failed });
+    if (succeeded > 0) onPlanLogged?.();
   };
 
   const handleFindTime = async () => {
@@ -2110,6 +2163,28 @@ export function PlanWithAuraView({ onTimingSearch, onViewDay, onPlanLogged, time
             actionLabel={missedPlans.length > 2 ? (showAllMissed ? 'Show less' : 'View all missed activities') : undefined}
             onAction={() => setShowAllMissed((value) => !value)}
           />
+          {missedPlans.length >= 2 && (
+            <div style={{ display: 'flex', alignItems: 'center', gap: spacing.sm, flexWrap: 'wrap' }}>
+              <TextButton
+                onClick={() => void handleSkipAllMissed()}
+                disabled={skipAllMissedBusy}
+                ariaLabel="Skip all missed activities"
+                color={colors.textSecondary}
+                style={{ minHeight: 44, padding: '0 8px' }}
+              >
+                {skipAllMissedBusy ? 'Skipping…' : 'Skip all missed'}
+              </TextButton>
+              {skipAllMissedNotice && (
+                <span role="status" style={{ ...typography.meta, color: colors.textMuted }}>
+                  {skipAllMissedNotice.failed === 0
+                    ? `Skipped ${skipAllMissedNotice.succeeded} missed ${skipAllMissedNotice.succeeded === 1 ? 'activity' : 'activities'}.`
+                    : skipAllMissedNotice.succeeded === 0
+                      ? "Couldn't skip those. Try again."
+                      : `Skipped ${skipAllMissedNotice.succeeded} of ${skipAllMissedNotice.succeeded + skipAllMissedNotice.failed}.`}
+                </span>
+              )}
+            </div>
+          )}
           {/* Insights V1 PR7 (finding F-4) -- unchanged banner, now scoped to
            * the Missed section it actually describes. */}
           {plansFilter === 'AWAITING_CONFIRMATION' && (
