@@ -235,6 +235,14 @@ jobs:
         env:
           TS_NODE_COMPILER_OPTIONS: '{"jsx":"react"}'
         run: npx ts-node test/goalAwareRecompositionPresentation.test.ts
+      # HPG3-A3b final review correction -- the 2 non-DB presentation
+      # suites this ticket itself added were never wired in; both import
+      # only type-only declarations from .tsx-adjacent modules (erased at
+      # compile time), so neither needs the jsx TS_NODE_COMPILER_OPTIONS.
+      - name: Run Day Plan acceptance presentation test
+        run: npx ts-node test/dayPlanAcceptancePresentation.test.ts
+      - name: Run Scheduling eligibility presentation test
+        run: npx ts-node test/schedulingEligibilityPresentation.test.ts
       # Goals V2 Candidate B4 -- goalDecompositionObservability.ts imports
       # goalActivityProposal.ts (a type-only RhythmPickerValue from the
       # 'use client' components/RhythmPicker.tsx), same jsx-enabled group
@@ -694,6 +702,12 @@ jobs:
         run: npx ts-node test/goalTemplateCompletionDb.test.ts
       - name: Run Goal-aware Recomposition presentation DB test
         run: npx ts-node test/goalAwareRecompositionPresentationDb.test.ts
+      # HPG3-A3b final review correction -- the live-DB presentation suite
+      # this ticket itself added was never wired in; reuses this job's
+      # existing Postgres service/migration-deploy step, same as the PR
+      # #181 reconciliation block above.
+      - name: Run Scheduling eligibility UI presentation DB test
+        run: npx ts-node test/schedulingEligibilityUiPresentationDb.test.ts
       # Goals V2 Candidate B5 -- composed B1->B2->B3->B3.1->Candidate A->
       # planning lifecycle closure. Needs the jsx-enabled compiler option
       # because it imports goalActivityProposal.ts (same reason as the
