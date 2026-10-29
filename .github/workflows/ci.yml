@@ -164,6 +164,13 @@ jobs:
         env:
           TS_NODE_COMPILER_OPTIONS: '{"jsx":"react"}'
         run: npx ts-node test/homeDashboardLogic.test.ts
+      # HPG4-1 -- homeRecomposition.test.ts renders RecompositionCard.tsx via
+      # renderToStaticMarkup, same jsx-enabled/apps-web-node_modules
+      # requirement as the Home dashboard logic test above; no live DB.
+      - name: Run Home recomposition test
+        env:
+          TS_NODE_COMPILER_OPTIONS: '{"jsx":"react"}'
+        run: npx ts-node test/homeRecomposition.test.ts
       # Goals V2 Candidate B2 (resumed) -- goalActivityProposal.ts imports
       # a type-only RhythmPickerValue from the 'use client'
       # components/RhythmPicker.tsx, same jsx-enabled/apps-web-node_modules
