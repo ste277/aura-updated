@@ -2,6 +2,7 @@ import React from 'react';
 import { colors, spacing, typography } from './theme';
 import { SurfaceCard, PrimaryButton, SecondaryButton, TextButton } from './ui';
 import { keepSummary, noChangesText, presentMove, unresolvedText, type RecompositionUnresolvedRow, type RecompositionState, type RecompositionView } from '../lib/homeRecomposition';
+import { presentSchedulingEligibilityError } from '../lib/schedulingEligibilityPresentation';
 
 /**
  * Remaining-Day Recomposition V1 PR F4 -- the inline proposal card. PRESENTATIONAL ONLY: it fetches nothing, holds no
@@ -161,6 +162,8 @@ function renderView(
 
   // CHANGES_PROPOSED: the only state that can be accepted.
   const notice = state.phase === 'PROPOSAL' ? state.notice : null;
+  // HPG4-1 -- additive, optional; undefined for a codeless/unrelated SAVE_FAILED.
+  const noticeCode = state.phase === 'PROPOSAL' ? state.noticeCode : undefined;
   return (
     <>
       <ul style={{ margin: 0, padding: 0, listStyle: 'none', display: 'flex', flexDirection: 'column', gap: spacing.sm }}>
@@ -195,7 +198,10 @@ function renderView(
         </p>
       ) : notice === 'SAVE_FAILED' ? (
         <p role="alert" style={{ ...typography.bodyStrong, color: colors.danger }}>
-          Couldn&apos;t save. Nothing was changed. Try again.
+          {/* HPG4-1 -- a known scheduling-conflict code gets its exact shared,
+              non-technical explanation; a codeless/unrelated failure keeps
+              the original generic message, byte-for-byte. */}
+          {noticeCode ? presentSchedulingEligibilityError(noticeCode).detail : "Couldn't save. Nothing was changed. Try again."}
         </p>
       ) : notice === 'UNCONFIRMED' ? (
         <p role="alert" style={{ ...typography.bodyStrong, color: colors.caution }}>

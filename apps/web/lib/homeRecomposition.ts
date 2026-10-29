@@ -16,6 +16,7 @@
  */
 import type { PlannedActivity } from './db';
 import { getDatePartsInTimezone } from './timezone';
+import type { SchedulingEligibilityErrorCode } from './schedulingEligibilityError';
 
 // ---------------------------------------------------------------------------
 // Parsed shapes (own types on purpose: nothing from the scheduling domain leaks into Home)
@@ -135,9 +136,20 @@ export type AcceptOutcome =
   | { kind: 'COMMITTED'; alreadyAccepted: boolean; moves: ConfirmedMove[] }
   | { kind: 'STALE' }
   | { kind: 'INVALID_TOKEN' }
-  | { kind: 'SAVE_FAILED' }
+  /** HPG4-1 -- `code` is optional and additive, same validate-don't-trust
+   * contract as acceptConstructedDay.ts's own SAVE_FAILED: only one of the
+   * three scheduling-conflict codes the accept route can actually produce
+   * is ever carried through; anything else collapses to the codeless,
+   * pre-existing generic case. */
+  | { kind: 'SAVE_FAILED'; code?: SchedulingEligibilityErrorCode }
   /** No trustworthy answer (transport failure, 401, unparseable body, a "success" whose mapping is unusable): the commit status is UNKNOWN, never assumed to be a failure. */
   | { kind: 'UNKNOWN' };
+
+// HPG4-1 -- the only three codes `/api/day/recompose/accept` can actually
+// produce (apps/web/app/api/day/recompose/accept/route.ts); narrower than
+// acceptConstructedDay.ts's 5-code allowlist on purpose, since this route
+// never emits GOAL_NOT_ACTIVE/GOAL_ACTIVITY_NOT_AVAILABLE.
+const KNOWN_RECOMPOSITION_CONFLICT_CODES = new Set<SchedulingEligibilityErrorCode>(['CAPACITY_EXCEEDED', 'DAILY_CAPACITY_EXCEEDED', 'DAILY_ATTRIBUTION_UNRESOLVED']);
 
 /**
  * `expectedSourceIds` are the plan ids of the proposal's MOVE rows; a success whose mapping does not match them is
@@ -149,7 +161,13 @@ export function parseAcceptResponse(httpOk: boolean, body: unknown, expectedSour
   if (!httpOk) {
     if (status === 'STALE') return { kind: 'STALE' };
     if (status === 'INVALID_TOKEN') return { kind: 'INVALID_TOKEN' };
-    if (status === 'SAVE_FAILED') return { kind: 'SAVE_FAILED' };
+    if (status === 'SAVE_FAILED') {
+      // HPG4-1 -- validate, never trust an arbitrary server-provided string.
+      if (typeof body.code === 'string' && KNOWN_RECOMPOSITION_CONFLICT_CODES.has(body.code as SchedulingEligibilityErrorCode)) {
+        return { kind: 'SAVE_FAILED', code: body.code as SchedulingEligibilityErrorCode };
+      }
+      return { kind: 'SAVE_FAILED' };
+    }
     return { kind: 'UNKNOWN' };
   }
   if ((status !== 'ACCEPTED' && status !== 'ALREADY_ACCEPTED') || !Array.isArray(body.moves) || body.moves.length === 0) return { kind: 'UNKNOWN' };
@@ -204,7 +222,12 @@ export type RecompositionState = { generation: number } & (
   /** `updated`: a batch was just accepted -- the card shows "Your day is updated." until closed. */
   | { phase: 'IDLE'; updated: boolean }
   | { phase: 'LOADING' }
-  | { phase: 'PROPOSAL'; view: RecompositionView; notice: RecompositionNotice }
+  /** HPG4-1 -- `noticeCode` is optional and additive, set only alongside
+   * `notice === 'SAVE_FAILED'` when the server's response carried one of
+   * the three known scheduling-conflict codes; `notice` itself is never
+   * widened, so every pre-existing `notice === 'SAVE_FAILED'`/`'UNCONFIRMED'`
+   * check keeps working unchanged. */
+  | { phase: 'PROPOSAL'; view: RecompositionView; notice: RecompositionNotice; noticeCode?: SchedulingEligibilityErrorCode }
   | { phase: 'ACCEPTING'; view: RecompositionView; reconciling: boolean }
   | { phase: 'STALE' }
   | { phase: 'ERROR'; error: RecompositionErrorKind }
@@ -216,7 +239,7 @@ export type RecompositionAction =
   | { type: 'ACCEPT_STARTED' }
   | { type: 'ACCEPT_RECONCILING'; generation: number }
   | { type: 'ACCEPT_SUCCEEDED'; generation: number }
-  | { type: 'ACCEPT_SAVE_FAILED'; generation: number }
+  | { type: 'ACCEPT_SAVE_FAILED'; generation: number; code?: SchedulingEligibilityErrorCode }
   | { type: 'ACCEPT_UNCONFIRMED'; generation: number }
   | { type: 'ACCEPT_STALE'; generation: number }
   | { type: 'ACCEPT_INVALID'; generation: number }
@@ -248,10 +271,13 @@ export function recompositionReducer(state: RecompositionState, action: Recompos
     case 'ACCEPT_SUCCEEDED':
       return action.generation === state.generation && state.phase === 'ACCEPTING' ? idle(state.generation, true) : state;
     case 'ACCEPT_SAVE_FAILED':
-    case 'ACCEPT_UNCONFIRMED':
-      return action.generation === state.generation && state.phase === 'ACCEPTING'
-        ? { generation: state.generation, phase: 'PROPOSAL', view: state.view, notice: action.type === 'ACCEPT_SAVE_FAILED' ? 'SAVE_FAILED' : 'UNCONFIRMED' }
-        : state;
+    case 'ACCEPT_UNCONFIRMED': {
+      if (action.generation !== state.generation || state.phase !== 'ACCEPTING') return state;
+      const notice: RecompositionNotice = action.type === 'ACCEPT_SAVE_FAILED' ? 'SAVE_FAILED' : 'UNCONFIRMED';
+      // HPG4-1 -- only ACCEPT_SAVE_FAILED ever carries a code; UNCONFIRMED never sets noticeCode.
+      const noticeCode = action.type === 'ACCEPT_SAVE_FAILED' ? action.code : undefined;
+      return { generation: state.generation, phase: 'PROPOSAL', view: state.view, notice, ...(noticeCode ? { noticeCode } : {}) };
+    }
     case 'ACCEPT_STALE':
       return action.generation === state.generation && state.phase === 'ACCEPTING' ? { generation: state.generation, phase: 'STALE' } : state;
     case 'ACCEPT_INVALID':
@@ -383,7 +409,7 @@ export function createRecompositionStore(deps: RecompositionStoreDeps): Recompos
         await reconcile();
         dispatch({ type: 'ACCEPT_UNCONFIRMED', generation });
       } else if (outcome.kind === 'SAVE_FAILED') {
-        dispatch({ type: 'ACCEPT_SAVE_FAILED', generation });
+        dispatch({ type: 'ACCEPT_SAVE_FAILED', generation, code: outcome.code });
       } else if (outcome.kind === 'STALE') {
         dispatch({ type: 'ACCEPT_STALE', generation });
         await reconcile();
