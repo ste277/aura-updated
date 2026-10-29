@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { getSessionFromRequest } from '../../../../../lib/session';
 import { parseJsonObject } from '../../../../../lib/request';
 import { acceptRemainingDayRecomposition } from '../../../../../lib/remainingDayRecompositionAcceptance';
+import { SCHEDULING_ELIGIBILITY_STATUS_BY_CODE } from '../../../../../lib/schedulingEligibilityError';
 
 /**
  * Remaining-Day Recomposition V1 PR F3 -- explicit, atomic acceptance of ONE server-signed proposal.
@@ -11,7 +12,8 @@ import { acceptRemainingDayRecomposition } from '../../../../../lib/remainingDay
  *   200 ACCEPTED / ALREADY_ACCEPTED   the whole proposal is (now) applied; response carries source -> successor mappings
  *   400 INVALID_TOKEN                 the token cannot be trusted (generic failure)
  *   409 STALE                         genuine token, world changed -> `reason`; nothing was written, ask for a fresh proposal
- *   401 unauthenticated, 500 SAVE_FAILED (rolled back; no internals leaked)
+ *   409 SAVE_FAILED (`code` present)  a genuine scheduling-eligibility conflict (HPG3-A4b) -- same 3 codes Move already uses
+ *   401 unauthenticated, 500 SAVE_FAILED (no `code`; rolled back; no internals leaked)
  */
 export async function POST(req: NextRequest) {
   const session = getSessionFromRequest(req);
@@ -27,6 +29,13 @@ export async function POST(req: NextRequest) {
     case 'STALE':
       return NextResponse.json(result, { status: 409 });
     case 'SAVE_FAILED':
+      // HPG3-A4b -- a known, typed scheduling-eligibility conflict (the
+      // same 3 codes Move's own route already maps this way) gets the
+      // genuine-conflict 409; anything else keeps the original,
+      // unqualified 500. Never leaks internals either way.
+      if (result.code) {
+        return NextResponse.json(result, { status: SCHEDULING_ELIGIBILITY_STATUS_BY_CODE[result.code] });
+      }
       return NextResponse.json(result, { status: 500 });
   }
 }
