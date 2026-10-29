@@ -8,6 +8,7 @@ import fs from 'fs';
 import path from 'path';
 import { createPlanExecutor, moveablePlanId, skippablePlanId, completablePlanId, overlayExecutionFacts, agendaWithoutResolvedNext, planIdFromTimelineItem, type ExecutionOutcome } from '../apps/web/lib/homeCompletion';
 import { defaultMoveSelection, DEFAULT_MOVE_SEARCH_STEPS, resolveMoveDestination, moveDayDate, parseMoveResponse, moveFailureMessage, moveDestinationMessage, applyConfirmedSuccessors, hideMovedTimelineItems, formatMoveTime } from '../apps/web/lib/homeMove';
+import { presentSchedulingEligibilityError } from '../apps/web/lib/schedulingEligibilityPresentation';
 import { refreshAfterHomeCompletion, type HomeRefreshDeps } from '../apps/web/lib/homeRefresh';
 import { selectVisibleStartingSoonReminder } from '../apps/web/lib/reminderConsistency';
 import { deriveNextMeaningfulThing } from '../apps/web/lib/nextMeaningfulThing';
@@ -159,12 +160,32 @@ async function main() {
     ['200 empty object', () => json({})],
   ];
   for (const [label, impl] of bad) check(`18. malformed success (${label}) is FAILED, never a confirmed move`, (await createPlanExecutor(rec(impl)).move('a', at('15:30').toISOString())).status === 'FAILED');
-  const codes: Array<[string, number, string]> = [['CONFLICT', 409, 'CONFLICT'], ['HAS_LINKED_MOMENT', 409, 'HAS_LINKED_MOMENT'], ['INVALID_STATE', 409, 'INVALID_STATE'], ['ALREADY_MOVED', 409, 'ALREADY_MOVED'], ['INVALID_DESTINATION', 400, 'INVALID_DESTINATION']];
+  const codes: Array<[string, number, string]> = [['CONFLICT', 409, 'CONFLICT'], ['HAS_LINKED_MOMENT', 409, 'HAS_LINKED_MOMENT'], ['INVALID_STATE', 409, 'INVALID_STATE'], ['ALREADY_MOVED', 409, 'ALREADY_MOVED'], ['INVALID_DESTINATION', 400, 'INVALID_DESTINATION'], ['CAPACITY_EXCEEDED', 409, 'CAPACITY_EXCEEDED'], ['DAILY_CAPACITY_EXCEEDED', 409, 'DAILY_CAPACITY_EXCEEDED'], ['DAILY_ATTRIBUTION_UNRESOLVED', 409, 'DAILY_ATTRIBUTION_UNRESOLVED']];
   for (const [code, status, expected] of codes) check(`13/14/15. server ${status} ${code} keeps its identity for truthful feedback`, (await createPlanExecutor(rec(() => json({ error: 'x', code }, status))).move('a', at('15:30').toISOString())).status === expected);
   check('27. a 401 on the Move POST is FAILED (no confirmed fact, no session side effect), like Done/Skip', (await createPlanExecutor(rec(() => json({ error: 'Not authenticated.' }, 401))).move('a', at('15:30').toISOString())).status === 'FAILED');
   check('45. 404, 500, an unknown 4xx code and a network error are all FAILED', (await createPlanExecutor(rec(() => json({ code: 'NOT_FOUND' }, 404))).move('a', 'x')).status === 'FAILED' && (await createPlanExecutor(rec(() => json({}, 500))).move('a', 'x')).status === 'FAILED' && (await createPlanExecutor(rec(() => json({ code: 'WEIRD' }, 409))).move('a', 'x')).status === 'FAILED' && (await createPlanExecutor(rec(() => Promise.reject(new TypeError('x')))).move('a', 'x')).status === 'FAILED');
-  check('13/14/15. every failure code has concise, actionable copy', ['CONFLICT', 'HAS_LINKED_MOMENT', 'INVALID_STATE', 'ALREADY_MOVED', 'INVALID_DESTINATION', 'FAILED'].every((c) => moveFailureMessage(c as any).length > 0) && /conflicts with another plan\. Choose another time\./.test(moveFailureMessage('CONFLICT')) && /shared/i.test(moveFailureMessage('HAS_LINKED_MOMENT')));
+  check('13/14/15. every failure code has concise, actionable copy', ['CONFLICT', 'HAS_LINKED_MOMENT', 'INVALID_STATE', 'ALREADY_MOVED', 'INVALID_DESTINATION', 'CAPACITY_EXCEEDED', 'DAILY_CAPACITY_EXCEEDED', 'DAILY_ATTRIBUTION_UNRESOLVED', 'FAILED'].every((c) => moveFailureMessage(c as any).length > 0) && /conflicts with another plan\. Choose another time\./.test(moveFailureMessage('CONFLICT')) && /shared/i.test(moveFailureMessage('HAS_LINKED_MOMENT')));
   check('parseMoveResponse is pure: a 2xx with the right shape parses, an error status never parses as success', parseMoveResponse('a', true, moveBody('a', 'b', at('15:30'), at('16:30'))).status === 'MOVED' && parseMoveResponse('a', false, moveBody('a', 'b', at('15:30'), at('16:30'))).status === 'FAILED');
+
+  // ---------- HPG3-A4a. Home quick-Move reuses A3b's shared scheduling-eligibility copy ----------
+  // Before this ticket, CAPACITY_EXCEEDED/DAILY_CAPACITY_EXCEEDED/DAILY_ATTRIBUTION_UNRESOLVED
+  // were absent from KNOWN_CODES, so every one of them fell into the generic
+  // 'FAILED' bucket ("Couldn't move that. Try again.") despite Move's own
+  // route already returning the real code. The checks above (in `codes`)
+  // already prove classification identity is preserved; these checks prove
+  // the MESSAGE for each is the real shared copy, not a second, parallel set
+  // of strings, and that it is never collapsed into another code's message.
+  check('HPG3-A4a. weekly capacity (CAPACITY_EXCEEDED) reuses the shared module\'s exact weekly message, verbatim', moveFailureMessage('CAPACITY_EXCEEDED') === presentSchedulingEligibilityError('CAPACITY_EXCEEDED').detail);
+  check('HPG3-A4a. daily capacity (DAILY_CAPACITY_EXCEEDED) reuses the shared module\'s exact daily message, verbatim', moveFailureMessage('DAILY_CAPACITY_EXCEEDED') === presentSchedulingEligibilityError('DAILY_CAPACITY_EXCEEDED').detail);
+  check('HPG3-A4a. unresolved legacy attribution (DAILY_ATTRIBUTION_UNRESOLVED) reuses the shared module\'s exact message, verbatim', moveFailureMessage('DAILY_ATTRIBUTION_UNRESOLVED') === presentSchedulingEligibilityError('DAILY_ATTRIBUTION_UNRESOLVED').detail);
+  check('HPG3-A4a. weekly, daily and unresolved-attribution messages are all mutually distinct (never collapsed into one generic conflict message)', new Set([moveFailureMessage('CAPACITY_EXCEEDED'), moveFailureMessage('DAILY_CAPACITY_EXCEEDED'), moveFailureMessage('DAILY_ATTRIBUTION_UNRESOLVED'), moveFailureMessage('FAILED')]).size === 4);
+  check('HPG3-A4a. unresolved attribution is specifically distinguishable from ordinary daily-capacity exhaustion (not presented as the same kind of conflict)', /can.?t.*confirm/i.test(moveFailureMessage('DAILY_ATTRIBUTION_UNRESOLVED')) && !/can.?t.*confirm/i.test(moveFailureMessage('DAILY_CAPACITY_EXCEEDED')));
+  check('HPG3-A4a. weekly capacity\'s message explicitly rules out "a different time" helping (the conflict is week-wide, not time-of-day-specific)', /a different time won.?t change that/i.test(moveFailureMessage('CAPACITY_EXCEEDED')));
+  check('HPG3-A4a. daily capacity\'s message asks for a different day, never implying the SAME day could work on a plain retry', /choose a different day/i.test(moveFailureMessage('DAILY_CAPACITY_EXCEEDED')));
+  check('HPG3-A4a. all 3 codes classify to their OWN status, never falling through to the generic FAILED bucket', (await createPlanExecutor(rec(() => json({ error: 'x', code: 'CAPACITY_EXCEEDED' }, 409))).move('a', at('15:30').toISOString())).status === 'CAPACITY_EXCEEDED' && (await createPlanExecutor(rec(() => json({ error: 'x', code: 'DAILY_CAPACITY_EXCEEDED' }, 409))).move('a', at('15:30').toISOString())).status === 'DAILY_CAPACITY_EXCEEDED' && (await createPlanExecutor(rec(() => json({ error: 'x', code: 'DAILY_ATTRIBUTION_UNRESOLVED' }, 409))).move('a', at('15:30').toISOString())).status === 'DAILY_ATTRIBUTION_UNRESOLVED');
+  check('HPG3-A4a. an unrelated, pre-existing known code (CONFLICT) keeps its exact pre-existing message, unchanged by this ticket', moveFailureMessage('CONFLICT') === 'That time conflicts with another plan. Choose another time.');
+  check('HPG3-A4a. an unknown/unrecognized code still retains the existing safe generic fallback (no new per-code message fabricated for it)', (await createPlanExecutor(rec(() => json({ code: 'SOME_UNKNOWN_CODE' }, 409))).move('a', at('15:30').toISOString())).status === 'FAILED' && moveFailureMessage('FAILED') === "Couldn't move that. Try again.");
+  check('HPG3-A4a. successful Move presentation is unaffected: a real MOVED outcome still requires the same from/plan shape as before this ticket', (await createPlanExecutor(rec(() => json(moveBody('a', 'b', at('15:30'), at('16:30'))))).move('a', at('15:30').toISOString())).status === 'MOVED');
 
   // ---------- 16/17. one shared guard for Done, Skip and Move ----------
   const gate: { release: () => void } = { release: () => {} };
@@ -259,7 +280,20 @@ async function main() {
   check('36/37. timezone conversion goes through the canonical STRICT resolver (resolveLocalDateTime/getDatePartsInTimezone/addDaysToDateStr) and no new timezone math exists', /from '\.\/timezone'/.test(helper) && /resolveLocalDateTime\(moveDayDate/.test(helper) && !/Intl\.DateTimeFormat|getTimezoneOffset|toLocaleString\('en-US', \{ timeZone/.test(helper.replace(/toLocaleTimeString\('en-US', \{ timeZone: timezone/g, '')) && !/localDateTimeToUTC/.test(helper));
   check('39/40. Home Move knows nothing about sources, Captures, Goals, HabitLogs or timestamps of plans', !/capture|goalActivity|habit|linkCapture|completedAt|loggedAt|skippedAt/i.test(helper + handler));
   check('3. no new API route and no other write path: the only endpoint referenced is /api/plans/<id>/move; no DELETE + create, no POST /api/plans', /\/api\/plans\/\$\{encodeURIComponent\(planId\)\}\/move/.test(exec) && !/api\/plans['"`]/.test(helper) && !fs.existsSync(path.join(__dirname, '../apps/web/app/api/home')));
-  check('42. the Plan-tab reschedule workflow is untouched (D3 is Home only)', /fetch\(`\/api\/plans\/\$\{replacedPlanId\}`, \{ method: 'DELETE' \}\)/.test(strip(read('../apps/web/components/PlanWithAuraView.tsx'))));
+  // HPG3-A4a -- this check originally pinned D3-era create+delete as the
+  // Plan-tab's OWN reschedule mechanism, proving it was separate from
+  // Home's new D3 Move feature. DR4-F1 (see AURA_DR4_F_RESCHEDULING_AUDIT.md)
+  // intentionally replaced that create+delete sequence with the SAME shared
+  // Move endpoint Home already used -- an independently-reviewed, later
+  // product change, not a regression of D3 or this ticket. The stale
+  // literal-DELETE pattern it pinned no longer exists anywhere (confirmed:
+  // the sole remaining `/api/plans/${plan.id}` DELETE in this file is
+  // handleCancelPlan, an unrelated Cancel/Remove feature, never passed
+  // replacedPlanId). The equivalent CURRENT invariant -- no second, parallel
+  // reschedule implementation exists; Plan-tab reuses the identical shared
+  // Move endpoint, never a duplicate -- is what this now proves.
+  const planTabSource = strip(read('../apps/web/components/PlanWithAuraView.tsx'));
+  check('42. the Plan-tab reschedule workflow reuses the SAME shared Move endpoint Home uses (DR4-F1), with no surviving create+delete reschedule path and no second/duplicate reschedule implementation', /fetch\(`\/api\/plans\/\$\{replacedPlanId\}\/move`, \{/.test(planTabSource) && !/fetch\(`\/api\/plans\/\$\{replacedPlanId\}`, \{ method: 'DELETE' \}\)/.test(planTabSource));
   // 43/62. Home Move reuses the existing /api/plans/<id>/move endpoint
   // (line 261 above already proves no new route/write path exists), so
   // it has no schema vocabulary of its own to scan migrations for. The
