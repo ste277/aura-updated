@@ -274,7 +274,16 @@ check('migration 0042_goal_activity_occurrence exists and creates exactly the Go
 // GoalActivityOccurrence(id) (plus prose explaining why), the second
 // migration (after 0047) to legitimately reference this table without
 // being the one that created it. Same pattern, widened by one more entry.
-check('R1 introduced GoalActivityOccurrence exactly once: no OTHER migration directory\'s own contents also reference it (count-independent -- holds regardless of how many unrelated migrations exist)', fs.readdirSync(path.join(__dirname, '../apps/web/prisma/migrations')).filter((d) => /^\d{4}_/.test(d) && d !== '0042_goal_activity_occurrence' && d !== '0047_goal_activity_occurrence_scheduled_week' && d !== '0048_goal_activity_execution_occurrence_link').every((d) => !/GoalActivityOccurrence/.test(fs.readFileSync(path.join(__dirname, '../apps/web/prisma/migrations', d, 'migration.sql'), 'utf8'))));
+//
+// HPG3-A1 added migration 0051_goal_activity_daily_frequency_foundation --
+// its own doc comment explains it ALTERs GoalActivityOccurrence a second
+// time (adding the scheduledLocalDate/scheduledLocalTimezone snapshot
+// columns, the same frozen-snapshot discipline as 0047's scheduledWeekStart/
+// scheduledWeekTimezone), alongside adding dailyFrequencyKind/
+// dailyFrequencyLimit to GoalActivity. A deliberate, intentional, reviewed
+// schema evolution of this exact table -- same pattern, widened by one
+// more entry (PR #181 reconciliation).
+check('R1 introduced GoalActivityOccurrence exactly once: no OTHER migration directory\'s own contents also reference it (count-independent -- holds regardless of how many unrelated migrations exist)', fs.readdirSync(path.join(__dirname, '../apps/web/prisma/migrations')).filter((d) => /^\d{4}_/.test(d) && d !== '0042_goal_activity_occurrence' && d !== '0047_goal_activity_occurrence_scheduled_week' && d !== '0048_goal_activity_execution_occurrence_link' && d !== '0051_goal_activity_daily_frequency_foundation').every((d) => !/GoalActivityOccurrence/.test(fs.readFileSync(path.join(__dirname, '../apps/web/prisma/migrations', d, 'migration.sql'), 'utf8'))));
 
 // ============================================================
 // No status/windowKey column was added to the new model (this ticket's own

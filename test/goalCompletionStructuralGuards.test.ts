@@ -39,7 +39,21 @@ check('GoalActivity model DOES carry all three completion-requirement columns', 
 // Taxonomy: CHECKLIST/recurrence never entered G2.1
 // ============================================================
 check('schema.prisma contains no CHECKLIST reference anywhere (deferred, not part of G2.1)', !/CHECKLIST/.test(schema));
-check('GoalActivity model has no recurrence/frequency field (deferred, not part of G2.1)', !/frequency|recurrence|recurring/i.test(goalActivityBlock));
+// PR #181 reconciliation -- this check originally scanned the WHOLE
+// GoalActivity model block, which HPG3-A1 (migration 0051) legitimately,
+// separately-reviewed, added dailyFrequencyKind/dailyFrequencyLimit to
+// (apps/web/lib/goalActivityDailyFrequency.ts), tripping the
+// frequency/recurrence regex on an intentional, unrelated later change.
+// Narrowed to the completion-requirement span (completionKind through
+// completionUnit) this check actually cares about -- still catches a real
+// unintended change to THAT span, no longer trips on HPG3-A1's or Rhythm
+// R2's own, separately-guarded fields elsewhere in the same model.
+const completionRequirementSpan = (() => {
+  const match = goalActivityBlock.match(/completionKind\s*String\?[\s\S]*?completionUnit\s*String\?/);
+  if (!match) throw new Error('completion-requirement span (completionKind..completionUnit) not found in GoalActivity model');
+  return match[0];
+})();
+check('GoalActivity model\'s completion-requirement span (completionKind..completionUnit) has no recurrence/frequency field (deferred, not part of G2.1; HPG3-A1\'s dailyFrequencyKind/dailyFrequencyLimit and Rhythm R2\'s rhythmKind/rhythmTargetPerWeek are separate, later, separately-reviewed additions elsewhere in the model)', !/frequency|recurrence|recurring/i.test(completionRequirementSpan));
 
 const goalCompletionPath = path.join(__dirname, '..', 'apps', 'web', 'lib', 'goalCompletion.ts');
 const goalCompletionSrc = fs.readFileSync(goalCompletionPath, 'utf8');
