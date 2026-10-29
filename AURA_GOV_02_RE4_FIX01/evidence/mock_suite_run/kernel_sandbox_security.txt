@@ -1,0 +1,3 @@
+Timestamp               Ty Process[PID:TID]
+2026-11-14 16:18:03.594 E  kernel[0:3ec397] (Sandbox) Sandbox: zsh(53077) deny(1) process-exec* /private/tmp/claude-501/-Users-stephen-Desktop-Claude-auraschedule-math-core/b1121d49-418e-41ef-a69a-ffd7ecb8d667/scratchpad/fx_full4/kctl/bin/security
+2026-11-14 16:18:06.616 Df log[53079:3ec3cc] [com.apple.log:] log run noninteractively, parent: 72047 (zsh), args: '/usr/bin/log' 'show' '--start' '2026-11-14 16:12:43' '--style' 'compact' '--predicate' 'eventMessage CONTAINS "Sandbox" AND (eventMessage CONTAINS "/usr/bin/security" OR eventMessage CONTAINS "com.appl

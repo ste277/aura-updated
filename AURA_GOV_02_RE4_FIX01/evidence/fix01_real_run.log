@@ -1,0 +1,37 @@
+# FIX01 real probe 2026-11-14T10:48:16Z macOS=14.6 build=23G80 driver_pid=53168 uid=501
+probe_sha256=c427df77364795eb3d1889f0b0e15de0adb4670d0e77ee1ae064d54d43e81ad0
+harness_v2_sha256=4b7e48900fb09b2b9bddda6e2306f284233178e59b5ebc2fd247fd32b2510d95
+extract v2 scanner lines=37 sha256=68d3e8507df793c2
+PASS  [A-1] extracted scanner block present (DENYT, ps_read, ps_parse, deny_hit, t16_scan)
+PASS  [A-2] extracted block contains no "security", no Keychains path, no pkill/killall
+R-1 real scan: SCAN=DETECTED rows=474 why='' hits=[comm:ChatGPT for Chrome;comm:Claude;comm:Claude Helper;comm:Claude Helper (Renderer);comm:claude;comm:superops;ucomm:ChatGPT for Chro;ucomm:Claude;ucomm:Claude Helper;ucomm:Claude Helper (R;ucomm:claude;ucomm:superops]
+PASS  [R-1a] real scan completes with a validated table (not UNKNOWN)
+PASS  [R-1b] real scan DETECTS the running prohibited apps (Claude) -> STOP
+PASS  [R-1c] both identity sources contribute on the real table (ucomm: and comm: hits)
+R-2 dummy pid=53197 ppid=53168 exe=/bin/zsh argv0=/fix01/osascript-fix01dummy : comm='/fix01/osascript-fix01dummy' ucomm='zsh' command='/fix01/osascript-fix01dummy -f -c zmodload zsh/zselect; zselect -t 2500 fix01_dummy FIX01-MARKER'
+PASS  [R-2a] dummy alive with the exact expected argv and parent = driver
+PASS  [R-2b] REAL: comm reports the caller-chosen argv[0]
+PASS  [R-2c] REAL: ucomm reports the kernel name of the executed file (zsh), NOT argv[0]
+R-2 scan with ME=1 (dummy not a child of ME): SCAN=DETECTED hits=[comm:ChatGPT for Chrome;comm:Claude Helper;comm:Claude Helper (Renderer);comm:claude;comm:osascript-fix01dummy;ucomm:ChatGPT for Chro;ucomm:Claude Helper;ucomm:Claude Helper (R;ucomm:claude]
+PASS  [R-2d] v2 scan reports the spoofed argv[0] via comm (conservative STOP on a denylisted argv[0])
+PASS  [R-2e] v2 scan does NOT attribute the dummy to ucomm (its real executable is zsh)
+PASS  [R-2f] v2 scan excludes the dummy when it is the scanning process child (ppid==ME in both reads)
+R-3a PSB=/usr/bin/false: SCAN=UNKNOWN why='ucomm read: ps exit status 1'
+PASS  [R-3a] real command failure (exit 1) -> UNKNOWN
+R-3b PSB=<nonexistent>: SCAN=UNKNOWN why='ucomm read: ps exit status 127'
+PASS  [R-3b] missing scanner binary (exec failure) -> UNKNOWN
+R-3c PSB=/usr/bin/true (rc 0, no output): SCAN=UNKNOWN why='ucomm read: empty output'
+PASS  [R-3c] successful exit with EMPTY output -> UNKNOWN (never CLEAN)
+R-3d SCANMIN=1000000: SCAN=UNKNOWN why='ucomm read: implausible row count 478 (< 1000000)'
+PASS  [R-3d] real table below the plausibility floor -> UNKNOWN
+R-3e ME=<pid not in table>: SCAN=UNKNOWN why='ucomm read: own pid 4000000 row missing'
+PASS  [R-3e] own pid absent from the real table -> UNKNOWN
+PASS  [R-3f] no scan temp file left after any read
+E dummy exit: alive_after_bound=0 exit_status=1 after=25.084756851196289s signal_sent=no (no other process signalled)
+PASS  [E-1] dummy exited naturally with the zselect timeout status (1), no signal sent
+PASS  [E-2] after exit: ps rc=1 and no record
+PASS  [E-3] after exit: v2 scan (validated, ME=1) no longer reports the dummy
+PASS  [F-1] temp dir removed (exact guarded path)
+PASS  [F-2] no process carrying the FIX01 marker remains (pgrep rc=1 exactly)
+elapsed=25.583812952041626s
+TOTAL PASS=22 FAIL=0 INFO=0

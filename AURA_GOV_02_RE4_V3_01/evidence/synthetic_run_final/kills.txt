@@ -1,0 +1,3 @@
+2026-11-14T17:20:06Z [T6_fifo_old_pattern_hangs] kill -9 test-owned pid 77071 (timeout 2s)
+2026-11-14T17:20:12Z [T6_run_bound] kill -9 test-owned pid 78179 (timeout 4s)
+2026-11-14T17:20:12Z [T6_run_bound] kill -9 test-owned pid 78988 (T6 cleanup)

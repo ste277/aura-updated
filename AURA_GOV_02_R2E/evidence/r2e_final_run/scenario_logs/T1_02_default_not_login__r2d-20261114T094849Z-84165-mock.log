@@ -1,0 +1,9 @@
+R2D start 2026-11-14T09:48:49Z harness_sha256=b9dd4d431a2864d31a55a017f1cf9f9ae551e9b9081881f4f90dd1ef0bf7c254 mode=SIMULATED-MOCK macOS=14.6 pid=84165
+Manual recovery if this run crashes: R2D-07 (look for /private/tmp/claude-501/-Users-stephen-Desktop-Claude-auraschedule-math-core/b1121d49-418e-41ef-a69a-ffd7ecb8d667/scratchpad/r2e_FINAL/T1_02_default_not_login/tmp/r2d-run.* ; lock dir /private/tmp/claude-501/-Users-stephen-Desktop-Claude-auraschedule-math-core/b1121d49-418e-41ef-a69a-ffd7ecb8d667/scratchpad/r2e_FINAL/T1_02_default_not_login/tmp/r2d-lock)
+T1-9 SIP: enabled
+T1-6: process scan clean; attestations y/y/y
+T1-1 baseline captured (domains user/dynamic/common/system + defaults)
+R2D STOP: T1-1: default user keychain is not login
+R2D CLEANUP: VERIFIED (children reaped; keychain locked+deleted; temp dir removed; search lists and defaults unchanged)
+R2D VERDICT: [SIMULATED-MOCK] STOPPED
+R2D LOG: /private/tmp/claude-501/-Users-stephen-Desktop-Claude-auraschedule-math-core/b1121d49-418e-41ef-a69a-ffd7ecb8d667/scratchpad/r2e_FINAL/T1_02_default_not_login/home/aura-r2b-evidence/r2d-20261114T094849Z-84165-mock.log

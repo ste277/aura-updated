@@ -1,0 +1,484 @@
+worktree /Users/stephen/Desktop/Claude/auraschedule-math-core
+HEAD f35d35ab6ed4568f58f766ce0122a3a1b471b4dc
+branch refs/heads/main
+
+worktree /Users/stephen/Desktop/Claude/auraschedule-math-core/.claude/worktrees/agent-a006b62991d1ae614
+HEAD a80f5f78738ae2ded985d8fe274cf087bbbc3744
+detached
+
+worktree /Users/stephen/Desktop/Claude/auraschedule-math-core/.claude/worktrees/agent-a0384b6ad2ebe7561
+HEAD f33a4ede189c3514d9962e546a13bb2769df7cf6
+branch refs/heads/pce3b-review
+
+worktree /Users/stephen/Desktop/Claude/auraschedule-math-core/.claude/worktrees/agent-a04e5092b79501756
+HEAD a80f5f78738ae2ded985d8fe274cf087bbbc3744
+detached
+
+worktree /Users/stephen/Desktop/Claude/auraschedule-math-core/.claude/worktrees/agent-a067218245eb13f09
+HEAD 4f24adfcc8cb389dda4c54f63fd541d2b2c3184c
+branch refs/heads/pr292
+
+worktree /Users/stephen/Desktop/Claude/auraschedule-math-core/.claude/worktrees/agent-a105eba84b6abaafe
+HEAD cafcd2649bad6e61c23369255767b8f823570fef
+branch refs/heads/worktree-agent-a105eba84b6abaafe
+
+worktree /Users/stephen/Desktop/Claude/auraschedule-math-core/.claude/worktrees/agent-a10f348b64eda1613
+HEAD ce25aec87885dc9ddb565c41948a0a43a122754c
+detached
+
+worktree /Users/stephen/Desktop/Claude/auraschedule-math-core/.claude/worktrees/agent-a247217c134fc1a58
+HEAD f0e58f98a1d53b410fc295cfef2b983d5eb859f7
+branch refs/heads/fix/pa-3c-c1b-01-solar-unavailable
+
+worktree /Users/stephen/Desktop/Claude/auraschedule-math-core/.claude/worktrees/agent-a249b9de5474dedf2
+HEAD 1ab7816fe81976596914b8dcc0e950c56c25a211
+detached
+
+worktree /Users/stephen/Desktop/Claude/auraschedule-math-core/.claude/worktrees/agent-a2504743153531791
+HEAD a80f5f78738ae2ded985d8fe274cf087bbbc3744
+branch refs/heads/panch-overlap-01-i1
+
+worktree /Users/stephen/Desktop/Claude/auraschedule-math-core/.claude/worktrees/agent-a2ee4c5094ce6fe6e
+HEAD 25e08720a64ddaa8bc771788699358255ded5928
+detached
+
+worktree /Users/stephen/Desktop/Claude/auraschedule-math-core/.claude/worktrees/agent-a333e380b5f9de634
+HEAD dddf5bd97e987a2c739203cdbd8aab3451dce5de
+branch refs/heads/pa3b-review
+
+worktree /Users/stephen/Desktop/Claude/auraschedule-math-core/.claude/worktrees/agent-a3d4e4b640ee7f45d
+HEAD a80f5f78738ae2ded985d8fe274cf087bbbc3744
+branch refs/heads/panch-overlap-01-i1
+
+worktree /Users/stephen/Desktop/Claude/auraschedule-math-core/.claude/worktrees/agent-a44595b74c3791ac1
+HEAD 0e2928c287e9197452d9d11b710d9255d4e717d7
+branch refs/heads/worktree-agent-a44595b74c3791ac1
+
+worktree /Users/stephen/Desktop/Claude/auraschedule-math-core/.claude/worktrees/agent-a44feb3ce854cc4cb
+HEAD 75fa28a85abcf6b189276a48d0b400f4c6e96c11
+detached
+
+worktree /Users/stephen/Desktop/Claude/auraschedule-math-core/.claude/worktrees/agent-a47d4ac3e1fe83f6b
+HEAD 32c87e240a8c9c288296ab70aaa086a2fa075bff
+branch refs/heads/home-rhythm-01-a1-f1
+
+worktree /Users/stephen/Desktop/Claude/auraschedule-math-core/.claude/worktrees/agent-a4b2c666db4dcbec1
+HEAD 24ee304e3d9eeb881f17b21e5533c3b1e0782493
+branch refs/heads/home-rhythm-01-i1
+
+worktree /Users/stephen/Desktop/Claude/auraschedule-math-core/.claude/worktrees/agent-a5ed3753c43e9ef17
+HEAD dcb4cc934805d150cb874ba92b69b7833b04fa98
+detached
+
+worktree /Users/stephen/Desktop/Claude/auraschedule-math-core/.claude/worktrees/agent-a5f0d857578d03c24
+HEAD 9f1eda5c21b44a28df5440ee2a147294229dd491
+branch refs/heads/review-pr289-9f1eda5
+
+worktree /Users/stephen/Desktop/Claude/auraschedule-math-core/.claude/worktrees/agent-a5f26c19c490862f6
+HEAD 32c87e240a8c9c288296ab70aaa086a2fa075bff
+detached
+
+worktree /Users/stephen/Desktop/Claude/auraschedule-math-core/.claude/worktrees/agent-a6d98d55041986ead
+HEAD a39c2828040307422c0024f09c4b5e125fa4e8cb
+branch refs/heads/worktree-agent-a6d98d55041986ead
+
+worktree /Users/stephen/Desktop/Claude/auraschedule-math-core/.claude/worktrees/agent-a7665c302d4391a84
+HEAD 87d5574c53a5f6669a930f430a716d4855014dbe
+branch refs/heads/fix/pa-3c-c1b-03-daily-assistant-availability
+
+worktree /Users/stephen/Desktop/Claude/auraschedule-math-core/.claude/worktrees/agent-a7a5f4de137862e18
+HEAD b2c54d80e30e284f26e03a9241499300980d9f08
+detached
+
+worktree /Users/stephen/Desktop/Claude/auraschedule-math-core/.claude/worktrees/agent-a7c6e9a71a95c6d1d
+HEAD 24ee304e3d9eeb881f17b21e5533c3b1e0782493
+detached
+
+worktree /Users/stephen/Desktop/Claude/auraschedule-math-core/.claude/worktrees/agent-a7cc17647a7c83c91
+HEAD 29652b3faa40ff1410d36bf2b037c569839057dc
+detached
+
+worktree /Users/stephen/Desktop/Claude/auraschedule-math-core/.claude/worktrees/agent-a87560791b632a466
+HEAD 8e6f4867654519287e976b5f7b20436a258f13cc
+branch refs/heads/local-f1-work
+
+worktree /Users/stephen/Desktop/Claude/auraschedule-math-core/.claude/worktrees/agent-a8ba1128b15658d87
+HEAD 30119c00ad7bea01771c28d1f5339f8499b481d4
+detached
+
+worktree /Users/stephen/Desktop/Claude/auraschedule-math-core/.claude/worktrees/agent-a8dae20d793f9f535
+HEAD f0811b3adf2c60abcf681ff3960160173930f3af
+branch refs/heads/worktree-agent-a8dae20d793f9f535
+
+worktree /Users/stephen/Desktop/Claude/auraschedule-math-core/.claude/worktrees/agent-a983f52632084b8a3
+HEAD 1e8e8c26db6b1cedde04b8e14af49e56cbda6afc
+branch refs/heads/pa3b-r3-review
+
+worktree /Users/stephen/Desktop/Claude/auraschedule-math-core/.claude/worktrees/agent-a99039d149f38068e
+HEAD 53c9666fffee7fbc4cadf914f51a5bf6b121c1c5
+branch refs/heads/pr-292-review
+
+worktree /Users/stephen/Desktop/Claude/auraschedule-math-core/.claude/worktrees/agent-a9b0602724330b7da
+HEAD 65e433bb83102b9189e50ddcef0971826a5b63cc
+branch refs/heads/pa3c-c1a-typed-solar-errors
+
+worktree /Users/stephen/Desktop/Claude/auraschedule-math-core/.claude/worktrees/agent-a9f0bbd977f739beb
+HEAD 0650b16b5e15db29c40dbc7325456637117959d2
+branch refs/heads/fix/pa-3c-c1c-01-timing-search-solar-unavailable
+
+worktree /Users/stephen/Desktop/Claude/auraschedule-math-core/.claude/worktrees/agent-aa06e4ff8b8a13172
+HEAD 69f347d83903888d2e8455e040ba6ff54070ae64
+branch refs/heads/pa2a-review
+
+worktree /Users/stephen/Desktop/Claude/auraschedule-math-core/.claude/worktrees/agent-aaff681e077ec160d
+HEAD b7dae36ff183f3fca84a73862b988221ac5c3c27
+branch refs/heads/fix/pa-3c-c1b-02-muhurtham-eligibility
+
+worktree /Users/stephen/Desktop/Claude/auraschedule-math-core/.claude/worktrees/agent-abfd397d0a37fcc48
+HEAD 24ee304e3d9eeb881f17b21e5533c3b1e0782493
+branch refs/heads/home-rhythm-01-i1
+
+worktree /Users/stephen/Desktop/Claude/auraschedule-math-core/.claude/worktrees/agent-ac87582eb39dd6693
+HEAD c5512aaeeb6ee6f43913ac39bf734bbc11c067e4
+branch refs/heads/pa2c-review
+
+worktree /Users/stephen/Desktop/Claude/auraschedule-math-core/.claude/worktrees/agent-aca4ff78e40016d28
+HEAD 0e2928c287e9197452d9d11b710d9255d4e717d7
+branch refs/heads/worktree-agent-aca4ff78e40016d28
+
+worktree /Users/stephen/Desktop/Claude/auraschedule-math-core/.claude/worktrees/agent-ad7ce679f002208d6
+HEAD 9a487a93f9380df0ad4d33df731871a67aa2036e
+branch refs/heads/worktree-agent-ad7ce679f002208d6
+
+worktree /Users/stephen/Desktop/Claude/auraschedule-math-core/.claude/worktrees/agent-ad808d093ca483968
+HEAD 1688828b69b51c1897eab3c22f865746e4b196f1
+branch refs/heads/pce3e-review
+
+worktree /Users/stephen/Desktop/Claude/auraschedule-math-core/.claude/worktrees/agent-ad848f6743fe3750e
+HEAD 1d3e19f49418fbafd79277396eee381731d7e46a
+branch refs/heads/pce2a-review
+
+worktree /Users/stephen/Desktop/Claude/auraschedule-math-core/.claude/worktrees/agent-ade58a6877c49bc76
+HEAD a0dab918e380597973834d4784176f4c22a6f726
+detached
+
+worktree /Users/stephen/Desktop/Claude/auraschedule-math-core/.claude/worktrees/agent-ae0a83fbd21ffa424
+HEAD f5565520c76f7e72e8d2a8655ee656336bcc46d6
+detached
+
+worktree /Users/stephen/Desktop/Claude/auraschedule-math-core/.claude/worktrees/agent-ae2254aaf1300ecb1
+HEAD 5b07e6aaa9c2a3a7cb60703868a6213a4fc0e35c
+branch refs/heads/pce4a-final-review
+
+worktree /Users/stephen/Desktop/Claude/auraschedule-math-core/.claude/worktrees/agent-ae381e0952b6958e2
+HEAD 17181218d975609812a867e35b9e5590cb22fc51
+branch refs/heads/pce4a-review
+
+worktree /Users/stephen/Desktop/Claude/auraschedule-math-core/.claude/worktrees/agent-aed5764de511986b3
+HEAD 32c87e240a8c9c288296ab70aaa086a2fa075bff
+branch refs/heads/home-rhythm-01-a1-f1
+
+worktree /Users/stephen/Desktop/Claude/auraschedule-math-core/.claude/worktrees/agent-aef69a94f416506e4
+HEAD 24ee304e3d9eeb881f17b21e5533c3b1e0782493
+branch refs/heads/home-rhythm-01-i1
+
+worktree /Users/stephen/Desktop/Claude/auraschedule-math-core/.claude/worktrees/agent-af18d3f1036dfac25
+HEAD 65e433bb83102b9189e50ddcef0971826a5b63cc
+branch refs/heads/pr-310-review
+
+worktree /Users/stephen/Desktop/Claude/auraschedule-math-core/.claude/worktrees/agent-af3501821865bc75a
+HEAD 24ee304e3d9eeb881f17b21e5533c3b1e0782493
+branch refs/heads/home-rhythm-01-i1
+
+worktree /Users/stephen/Desktop/Claude/auraschedule-math-core/.claude/worktrees/agent-afbaea6d097e013fb
+HEAD 38bc9d80175df240b9f5ae2afe64f4a36560ff6d
+detached
+
+worktree /Users/stephen/Desktop/Claude/auraschedule-math-core/.claude/worktrees/agitated-swanson-bb3539
+HEAD b7c35d563562346a0322cab830e98eca0a69e01e
+branch refs/heads/worktree-daily-rhythm-dr4f2b-choose-my-own-time
+
+worktree /Users/stephen/Desktop/Claude/auraschedule-math-core/.claude/worktrees/amazing-sanderson-11618a
+HEAD dc6055cf8f434f305b664e28568816182d05827b
+branch refs/heads/claude/kind-austin-3ddf6d
+
+worktree /Users/stephen/Desktop/Claude/auraschedule-math-core/.claude/worktrees/aura-mcp-02-i1-5-b
+HEAD 63edaf8ce2809d99c1e0c7618803d56f574b09d3
+branch refs/heads/feature/aura-mcp-02-i1-5-b-node24
+
+worktree /Users/stephen/Desktop/Claude/auraschedule-math-core/.claude/worktrees/aura-palm-01-i1
+HEAD 0c8d0d65ae9e30b2d4f925a16aaffdd9e9127fe9
+branch refs/heads/feature/aura-palm-01-i1
+
+worktree /Users/stephen/Desktop/Claude/auraschedule-math-core/.claude/worktrees/availability-context-v1-h1
+HEAD 039301ea0b6cbd2dfd191c6fba9d75b1cb1dc260
+branch refs/heads/feat/availability-context-v1-h1
+
+worktree /Users/stephen/Desktop/Claude/auraschedule-math-core/.claude/worktrees/availability-context-v1-h2
+HEAD f2262bd304f0c2abb1fb4f4940efaa88e3825d1d
+branch refs/heads/feat/availability-context-v1-h2
+
+worktree /Users/stephen/Desktop/Claude/auraschedule-math-core/.claude/worktrees/complete-from-home
+HEAD dd00a5afaf5818b9a3903f0fccff024c814afd32
+branch refs/heads/feat/complete-from-home-v1
+
+worktree /Users/stephen/Desktop/Claude/auraschedule-math-core/.claude/worktrees/daily-briefing-db1-gochar-engine
+HEAD 0239bedbd4cd9cebdd7158020ec4a1e5f4c64336
+branch refs/heads/worktree-daily-briefing-db1-gochar-engine
+
+worktree /Users/stephen/Desktop/Claude/auraschedule-math-core/.claude/worktrees/daily-briefing-db2-api-home
+HEAD 619b0f0fd7b31d3e1388068b828de9fc0dcb9623
+branch refs/heads/worktree-daily-briefing-db2-api-home
+
+worktree /Users/stephen/Desktop/Claude/auraschedule-math-core/.claude/worktrees/daily-briefing-db3-insights
+HEAD b15ea9db5e362d948d6a161f6d03fdfd9cc8ceea
+branch refs/heads/worktree-daily-briefing-db3-insights
+
+worktree /Users/stephen/Desktop/Claude/auraschedule-math-core/.claude/worktrees/daily-briefing-db4-polish
+HEAD 4d6ea082eb17767f5fb6ce05d022f6f76de13e2c
+branch refs/heads/worktree-daily-briefing-db4-polish
+
+worktree /Users/stephen/Desktop/Claude/auraschedule-math-core/.claude/worktrees/daily-rhythm-dr1-preferences-foundation
+HEAD bd11610064dd3b91faa057b6243cb5adcb24e876
+branch refs/heads/worktree-daily-rhythm-dr1-preferences-foundation
+
+worktree /Users/stephen/Desktop/Claude/auraschedule-math-core/.claude/worktrees/daily-rhythm-dr2-work-aware-scheduling
+HEAD fc7f9fabbc9f295c07c16cd2899c79104e2d038b
+branch refs/heads/worktree-daily-rhythm-dr2-work-aware-scheduling
+
+worktree /Users/stephen/Desktop/Claude/auraschedule-math-core/.claude/worktrees/daily-rhythm-dr3-candidate-coverage
+HEAD 718a0c54537a7065a4dc230e97404a2de5d47a5a
+branch refs/heads/worktree-daily-rhythm-dr3-candidate-coverage
+
+worktree /Users/stephen/Desktop/Claude/auraschedule-math-core/.claude/worktrees/daily-rhythm-dr4a-settings-explanation-clarity
+HEAD c7cb4bd79e5505d648fff7b403cc06e4a521db25
+branch refs/heads/worktree-daily-rhythm-dr4a-settings-explanation-clarity
+
+worktree /Users/stephen/Desktop/Claude/auraschedule-math-core/.claude/worktrees/daily-rhythm-dr4b-find-a-time-integration
+HEAD 8169e97136e20dc45c2544d1d399d1e83c546456
+branch refs/heads/worktree-daily-rhythm-dr4b-find-a-time-integration
+
+worktree /Users/stephen/Desktop/Claude/auraschedule-math-core/.claude/worktrees/daily-rhythm-dr4b1-timezone-display-fix
+HEAD d44528507ef47fb962de1bc5f107c1925d1e3849
+branch refs/heads/worktree-daily-rhythm-dr4b1-timezone-display-fix
+
+worktree /Users/stephen/Desktop/Claude/auraschedule-math-core/.claude/worktrees/daily-rhythm-dr4b2-home-timezone-fix
+HEAD e25b1c20d7e8e21ce68d6871423f057a8b8d433b
+branch refs/heads/worktree-daily-rhythm-dr4b2-home-timezone-fix
+
+worktree /Users/stephen/Desktop/Claude/auraschedule-math-core/.claude/worktrees/daily-rhythm-dr4c-goal-continuity-home
+HEAD 3d22b0fc87bc7af98f0889ed9d711e0f9c4c2524
+branch refs/heads/worktree-daily-rhythm-dr4c-goal-continuity-home
+
+worktree /Users/stephen/Desktop/Claude/auraschedule-math-core/.claude/worktrees/daily-rhythm-dr4d-full-day-timeline-nav
+HEAD 0da56e91b576d1303c99e02bc772363ad6eee345
+branch refs/heads/worktree-daily-rhythm-dr4d-full-day-timeline-nav
+
+worktree /Users/stephen/Desktop/Claude/auraschedule-math-core/.claude/worktrees/day-constructor-v1-pr-a
+HEAD 464c0404dd14c1a995547ad832f63ef2813baffc
+branch refs/heads/feat/day-constructor-v1-pr-a
+
+worktree /Users/stephen/Desktop/Claude/auraschedule-math-core/.claude/worktrees/day-constructor-v1-pr-b
+HEAD 8394b1459c7a97ce845192fedf9f69d0bd33df6a
+branch refs/heads/feat/day-constructor-v1-pr-b
+
+worktree /Users/stephen/Desktop/Claude/auraschedule-math-core/.claude/worktrees/day-constructor-v1-pr-c
+HEAD 23b3aa3d57f696f54ef28e70ac3693b8fc2718c7
+branch refs/heads/feat/day-constructor-v1-pr-c
+
+worktree /Users/stephen/Desktop/Claude/auraschedule-math-core/.claude/worktrees/day-constructor-v1-pr-d
+HEAD b0f40019b93413bdb3a1d79747191c06d2b28964
+branch refs/heads/feat/day-constructor-v1-pr-d
+
+worktree /Users/stephen/Desktop/Claude/auraschedule-math-core/.claude/worktrees/day-constructor-v1-pr-e1
+HEAD 2952c3199bc30af1a51ce9d3fe6d5a0c2013a1e7
+branch refs/heads/feat/day-constructor-v1-pr-e1
+
+worktree /Users/stephen/Desktop/Claude/auraschedule-math-core/.claude/worktrees/day-constructor-v1-pr-e2
+HEAD f812a1fca0974cba59e8e1c79a18abf069a215fd
+branch refs/heads/feat/day-constructor-v1-pr-e2
+
+worktree /Users/stephen/Desktop/Claude/auraschedule-math-core/.claude/worktrees/day-constructor-v1-pr-e3
+HEAD 26b2dc2b7842d34354d6d7ccddc51a8dcab5f508
+branch refs/heads/feat/day-constructor-v1-pr-e3
+
+worktree /Users/stephen/Desktop/Claude/auraschedule-math-core/.claude/worktrees/day-constructor-v1-pr-f1
+HEAD bcd2d0a08323e9d9d7318cb261bfbc7a5b1ff40a
+branch refs/heads/feat/day-constructor-v1-pr-f1
+
+worktree /Users/stephen/Desktop/Claude/auraschedule-math-core/.claude/worktrees/day-constructor-v1-pr-f2
+HEAD 0903ed7db277c11f46c4fa91bf2ade1864dd7bc1
+branch refs/heads/feat/day-constructor-v1-pr-f2
+
+worktree /Users/stephen/Desktop/Claude/auraschedule-math-core/.claude/worktrees/day-driven-right-now
+HEAD a1d47a0565b6f18cb2b926a6b03e81d0c17d23cf
+branch refs/heads/feat/day-driven-right-now-v1
+
+worktree /Users/stephen/Desktop/Claude/auraschedule-math-core/.claude/worktrees/dr4d-m1-preflight-readonly
+HEAD 553f3b5952bd6eb4d556591db6837affb83a72f0
+branch refs/heads/worktree-dr4d-m1-preflight-readonly
+
+worktree /Users/stephen/Desktop/Claude/auraschedule-math-core/.claude/worktrees/fix-day-constructor-fixed-reservation
+HEAD 581caf48e70c954163cb0ff818f961de49f48ede
+branch refs/heads/fix/day-constructor-fixed-reservation
+
+worktree /Users/stephen/Desktop/Claude/auraschedule-math-core/.claude/worktrees/fix-home-plan-add-actions
+HEAD e85f1576eeaed3628cea59737f20de65930520e1
+branch refs/heads/fix/home-plan-add-actions
+
+worktree /Users/stephen/Desktop/Claude/auraschedule-math-core/.claude/worktrees/fix-natural-intent-duration-fallback
+HEAD 63d612a6c1fc6d19b4b6aebf42d18f2be08f1f5f
+branch refs/heads/fix/natural-intent-duration-fallback
+
+worktree /Users/stephen/Desktop/Claude/auraschedule-math-core/.claude/worktrees/goal-planning-handoff-v1
+HEAD a7868874d233ec62d8e9cffb7203b475fe1da2ce
+branch refs/heads/feat/goal-planning-handoff-v1
+
+worktree /Users/stephen/Desktop/Claude/auraschedule-math-core/.claude/worktrees/gov02-i0c-pr1
+HEAD 7f8dad2755576979ab70d2e068cdb361cbaec7ef
+branch refs/heads/gov02/i0c-pr1-db-runtime-override
+
+worktree /Users/stephen/Desktop/Claude/auraschedule-math-core/.claude/worktrees/home-ia-v2-followups
+HEAD f77c1784c813200546b6bf88450d72b9166f5c32
+branch refs/heads/fix/home-ia-v2-followups
+
+worktree /Users/stephen/Desktop/Claude/auraschedule-math-core/.claude/worktrees/home-move
+HEAD 7d7fad766321d63ff6659918cd040604ff6cbded
+branch refs/heads/feat/home-move-v1
+
+worktree /Users/stephen/Desktop/Claude/auraschedule-math-core/.claude/worktrees/home-quick-capture
+HEAD 329b6d003d300e295edeb01c17a2f7549365080c
+branch refs/heads/feat/home-quick-capture-v1
+
+worktree /Users/stephen/Desktop/Claude/auraschedule-math-core/.claude/worktrees/home-recomposition
+HEAD f2acf63fb0bd386679cc591a0e9179152ecdac7e
+branch refs/heads/feat/home-recomposition-experience
+
+worktree /Users/stephen/Desktop/Claude/auraschedule-math-core/.claude/worktrees/home-skip
+HEAD 4b228dff493a623ce9a4bbe01ddaff872249cd18
+branch refs/heads/feat/home-skip-v1
+
+worktree /Users/stephen/Desktop/Claude/auraschedule-math-core/.claude/worktrees/hpg0-audit
+HEAD a6402467e420d51a889cda8249f21be67178e278
+branch refs/heads/worktree-hpg0-audit
+
+worktree /Users/stephen/Desktop/Claude/auraschedule-math-core/.claude/worktrees/hpg1-activity-identity
+HEAD b7fbe3998d0304bb2027cd2c0aa8d7a5164f3822
+branch refs/heads/worktree-hpg1-activity-identity
+
+worktree /Users/stephen/Desktop/Claude/auraschedule-math-core/.claude/worktrees/hpg2-goal-linked-plans
+HEAD 9d6b77dfad46c7fa4c0cc25742a4866d1f68bc90
+branch refs/heads/feature/aura-mobile-01-m1
+
+worktree /Users/stephen/Desktop/Claude/auraschedule-math-core/.claude/worktrees/insights-v1-pr4-goal-planning-reporting
+HEAD 1782188e269142203d6eef162fe62bfd632f0e41
+branch refs/heads/worktree-insights-v1-pr4-goal-planning-reporting
+
+worktree /Users/stephen/Desktop/Claude/auraschedule-math-core/.claude/worktrees/insights-v1-pr5-evidence-backed-suggestions
+HEAD 30b1bc063656da32ebbdc505f3589630a8540029
+branch refs/heads/worktree-insights-v1-pr5-evidence-backed-suggestions
+
+worktree /Users/stephen/Desktop/Claude/auraschedule-math-core/.claude/worktrees/insights-v1-pr6-durable-completion-attribution
+HEAD 75a7aab1bc9d6aeeefe592a7e735c3e87eb0e74e
+branch refs/heads/worktree-insights-v1-pr6-durable-completion-attribution
+
+worktree /Users/stephen/Desktop/Claude/auraschedule-math-core/.claude/worktrees/insights-v1-pr7-product-completion-corrections
+HEAD 65c865f3a8ee300b626fd966517d583aeb294a51
+branch refs/heads/worktree-insights-v1-pr7-product-completion-corrections
+
+worktree /Users/stephen/Desktop/Claude/auraschedule-math-core/.claude/worktrees/intent-priority-deadline-capture
+HEAD 8c2be6d650e0076a0554a60ccf48945b25d333b2
+branch refs/heads/feat/intent-priority-deadline-capture
+
+worktree /Users/stephen/Desktop/Claude/auraschedule-math-core/.claude/worktrees/location-pr8-reliable-confirmation
+HEAD bed9ed75d794426cd7a23ea1cbf134c401c4bc5a
+branch refs/heads/worktree-location-pr8-reliable-confirmation
+
+worktree /Users/stephen/Desktop/Claude/auraschedule-math-core/.claude/worktrees/location-pr9-unified-onboarding-confirmation
+HEAD 00405a5291c13d4eb50d84c089efa6f763980a40
+branch refs/heads/worktree-location-pr9-unified-onboarding-confirmation
+
+worktree /Users/stephen/Desktop/Claude/auraschedule-math-core/.claude/worktrees/loving-bardeen-cfbf42
+HEAD dc6055cf8f434f305b664e28568816182d05827b
+branch refs/heads/claude/loving-bardeen-cfbf42
+
+worktree /Users/stephen/Desktop/Claude/auraschedule-math-core/.claude/worktrees/missed-recovery
+HEAD d6613f5dd6cecff1b3e253233d9a32cc88bd7fae
+branch refs/heads/feat/missed-recovery-v1
+
+worktree /Users/stephen/Desktop/Claude/auraschedule-math-core/.claude/worktrees/move-domain
+HEAD 018dde01f254979026b1f7e62082b92c87baf562
+branch refs/heads/feat/move-domain-v1
+
+worktree /Users/stephen/Desktop/Claude/auraschedule-math-core/.claude/worktrees/objective-albattani-f959a3
+HEAD 79c819579bbb21be62a1949ba4353c69b84b1921
+branch refs/heads/claude/amazing-sanderson-11618a
+
+worktree /Users/stephen/Desktop/Claude/auraschedule-math-core/.claude/worktrees/objective-raman-6bdc56
+HEAD cda16546cff7b32e08d296e0768e56790b8d604e
+branch refs/heads/claude/objective-raman-6bdc56
+
+worktree /Users/stephen/Desktop/Claude/auraschedule-math-core/.claude/worktrees/palm-g4a-scan
+HEAD 1741a95a3bc5c364f71a743442a8e31557756c33
+branch refs/heads/research/palm-g4a-scan-prototype
+
+worktree /Users/stephen/Desktop/Claude/auraschedule-math-core/.claude/worktrees/palm-p1-verify
+HEAD aa565470ae7c4c74f2870d92ae70989be7134ec6
+detached
+
+worktree /Users/stephen/Desktop/Claude/auraschedule-math-core/.claude/worktrees/plan-day-row-identity
+HEAD 30ad4a53e375e732e46c45a187e7cd833b226808
+branch refs/heads/fix/plan-day-row-identity-hydration
+
+worktree /Users/stephen/Desktop/Claude/auraschedule-math-core/.claude/worktrees/plan-my-day-review
+HEAD e96c94acc1ac63cf59fc98b20c07d3382c86530d
+detached
+
+worktree /Users/stephen/Desktop/Claude/auraschedule-math-core/.claude/worktrees/plan-my-day-ux-v2-u1
+HEAD 2c698f6ed1d8728e2f831a4c9cdf9880ebe59388
+branch refs/heads/feat/plan-my-day-ux-v2-u1
+
+worktree /Users/stephen/Desktop/Claude/auraschedule-math-core/.claude/worktrees/plan-my-day-ux-v2-u2
+HEAD 89941cb4cf311ef8ef2ed0302893ef01b1798f91
+branch refs/heads/feat/plan-my-day-ux-v2-u2
+
+worktree /Users/stephen/Desktop/Claude/auraschedule-math-core/.claude/worktrees/planning-horizon-v1-p1
+HEAD 4c56744b09181b38bc1aec3fc42afb60a4f3abc3
+branch refs/heads/feat/planning-horizon-v1-p1
+
+worktree /Users/stephen/Desktop/Claude/auraschedule-math-core/.claude/worktrees/planning-horizon-v1-p2
+HEAD 5a1e7baf8249f950a07d31b8994b8de499f0203d
+branch refs/heads/feat/planning-horizon-v1-p2
+
+worktree /Users/stephen/Desktop/Claude/auraschedule-math-core/.claude/worktrees/quick-capture-domain
+HEAD e2c7c74737dec57437e932261a5441c3ffa463c8
+branch refs/heads/feat/quick-capture-domain-v1
+
+worktree /Users/stephen/Desktop/Claude/auraschedule-math-core/.claude/worktrees/quick-capture-planning
+HEAD 5b33c972ac8b7b7355c76344637559b55b0aa1f5
+branch refs/heads/feat/quick-capture-planning-v1
+
+worktree /Users/stephen/Desktop/Claude/auraschedule-math-core/.claude/worktrees/recomposition-acceptance
+HEAD ef05dbe000bc3930e6fa743f80625456f8f0f290
+branch refs/heads/feat/remaining-day-recomposition-acceptance
+
+worktree /Users/stephen/Desktop/Claude/auraschedule-math-core/.claude/worktrees/recomposition-proposal
+HEAD 49dd115bc4dbf9f2536a64c688a554ca00a52c52
+branch refs/heads/feat/remaining-day-recomposition-proposal
+
+worktree /Users/stephen/Desktop/Claude/auraschedule-math-core/.claude/worktrees/scheduling-mode
+HEAD e0d267a4679d44fb2ad052264739685f76667e8b
+branch refs/heads/feat/planned-activity-scheduling-mode
+
+worktree /Users/stephen/Desktop/Claude/auraschedule-math-core/.claude/worktrees/skip-domain
+HEAD c26c33021b9cc54088f819dd24f6d574b70ef7eb
+branch refs/heads/feat/skip-domain-v1
+
+worktree /Users/stephen/Desktop/Claude/auraschedule-math-core/.claude/worktrees/vigilant-robinson-e14d9c
+HEAD 0ec678b5cb6178274b15168ef2ccff616194cdbd
+branch refs/heads/claude/priceless-shamir-470731
+
+worktree /Users/stephen/Desktop/Claude/auraschedule-math-core/.claude/worktrees/vigilant-spence-87b096
+HEAD 0fffa2b9ac7fef2592a6c58631de8228b132ba23
+branch refs/heads/claude/vigilant-spence-87b096
+

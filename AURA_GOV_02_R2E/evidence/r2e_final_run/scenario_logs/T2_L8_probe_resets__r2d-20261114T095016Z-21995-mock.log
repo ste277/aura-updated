@@ -1,0 +1,18 @@
+R2D start 2026-11-14T09:50:16Z harness_sha256=b9dd4d431a2864d31a55a017f1cf9f9ae551e9b9081881f4f90dd1ef0bf7c254 mode=SIMULATED-MOCK macOS=14.6 pid=21995
+Manual recovery if this run crashes: R2D-07 (look for /private/tmp/claude-501/-Users-stephen-Desktop-Claude-auraschedule-math-core/b1121d49-418e-41ef-a69a-ffd7ecb8d667/scratchpad/r2e_FINAL/T2_L8_probe_resets/tmp/r2d-run.* ; lock dir /private/tmp/claude-501/-Users-stephen-Desktop-Claude-auraschedule-math-core/b1121d49-418e-41ef-a69a-ffd7ecb8d667/scratchpad/r2e_FINAL/T2_L8_probe_resets/tmp/r2d-lock)
+T1-9 SIP: enabled
+T1-6: process scan clean; attestations y/y/y
+T1-1 baseline captured (domains user/dynamic/common/system + defaults)
+=== L8 ===
+  settings: lock-on-sleep timeout=3600s
+L0 ACL A: applications (0):
+L0: created, items added, ACL A restricted, LOCKED
+calibration: probe=attr locked_sig=rc=36:60a485741003 unlocked_sig=rc=0:d627bc64a670
+  settings: lock-on-sleep timeout=8s
+L8a (no probe while idle) state_at_T+2=locked
+L8b (one probe at T/2=unlocked) state_at_T+2=unlocked
+L8 RESULT: timeout_relock=locked probe_resets_idle_timer=yes
+L8 group teardown: keychain deleted
+R2D CLEANUP: VERIFIED (children reaped; keychain locked+deleted; temp dir removed; search lists and defaults unchanged)
+R2D VERDICT: [SIMULATED-MOCK] COMPLETED L8: L8 PARTIAL (timeout relock PASS; probe RESETS idle timer - L1 idle criterion FAIL); 
+R2D LOG: /private/tmp/claude-501/-Users-stephen-Desktop-Claude-auraschedule-math-core/b1121d49-418e-41ef-a69a-ffd7ecb8d667/scratchpad/r2e_FINAL/T2_L8_probe_resets/home/aura-r2b-evidence/r2d-20261114T095016Z-21995-mock.log

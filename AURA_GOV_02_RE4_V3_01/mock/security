@@ -1,0 +1,87 @@
+#!/bin/zsh -f
+# MOCK security for R2E self-tests. Never calls the real /usr/bin/security. State under $R2D_MOCK_DIR/state.
+emulate -L zsh; zmodload zsh/datetime
+M=${R2D_MOCK_DIR:?}; ST=$M/state; mkdir -p $ST
+print -r -- "$(date +%H:%M:%S) $*" >> $M/calls.log          # argv only (never stdin)
+case $1 in create-keychain|unlock-keychain|set-keychain-settings|show-keychain-info|dump-keychain|find-generic-password|delete-generic-password|-i)
+  print -r -- "$1 gate=${R2D_MOCK_GATE:-none} ps_calls=$(cat $M/ps_axo_calls 2>/dev/null || print 0) w=$([[ " $* " == *" -w "* ]] && print 1 || print 0)" >> $M/gate_seq.log;; esac   # dialog-capable op + the gate (scan id) it ran under
+kst() { print -r -- "$ST/$(print -r -- $1 | tr '/' '_')"; }
+now() { print -r -- ${EPOCHSECONDS}; }
+get() { local f=$(kst $KC)/$1; [[ -f $f ]] && cat $f || print -r -- "$2"; }
+put() { print -r -- "$2" > $(kst $KC)/$1; }
+autolock() { [[ ${MOCK_NO_AUTOLOCK:-0} == 1 ]] && return; local t=$(get timeout 300) la=$(get last 0); [[ ${MOCK_EARLY_LOCK:-0} == 1 ]] && (( t = t / 4 )); if [[ $(get locked 1) == 0 && $t != 0 ]] && (( $(now) - la > t )); then put locked 1; fi; }
+touchk() { put last $(now); }
+acl_block() { # $1 item svc
+  local tr=$(get acl_$1 0)
+  [[ $1 == R2D-A && ${MOCK_ACL_A_OPEN:-0} == 1 ]] && tr=1
+  [[ $1 == R2D-C && ${MOCK_ACL_C_HIDE:-0} == 1 ]] && tr=0
+  print -r -- "keychain: \"$KC\""; print -r -- 'class: "genp"'; print -r -- 'attributes:'
+  print -r -- '    "acct"<blob>="r2dacct"'; print -r -- "    \"svce\"<blob>=\"$1\""; print -r -- "    \"mdat\"<timedate>=0x00  \"$(get mdat_$1 20261114000000Z)\""
+  print -r -- 'access: 3 entries'
+  print -r -- '    entry 0:'; print -r -- '        authorizations (1): encrypt'; print -r -- "        description: $1"; print -r -- '        applications: <null>'
+  print -r -- '    entry 1:'; print -r -- '        authorizations (6): decrypt derive export_clear export_wrapped mac sign'; print -r -- "        description: $1"
+  if [[ $tr == 0 ]]; then print -r -- '        applications (0):'; else print -r -- '        applications (1):'; print -r -- '                requirement: identifier "com.apple.security" and anchor apple'; fi
+  print -r -- '    entry 2:'; print -r -- '        authorizations (1): change_acl'; print -r -- "        description: $1"; print -r -- '        applications (0):'
+}
+items() { ls $(kst $KC) 2>/dev/null | sed -n 's/^val_//p'; }
+cmd=$1; shift
+case $cmd in
+  list-keychains) d=$2; print -r -- '    "/Users/x/Library/Keychains/login.keychain-db"'
+    [[ $d == user && ${MOCK_SL_INJECT:-0} == 1 && -f $M/lastkc ]] && print -r -- "    \"$(cat $M/lastkc)\""; exit 0;;
+  default-keychain) [[ ${MOCK_DEFAULT_OTHER:-0} == 1 ]] && print -r -- '    "/Users/x/other.keychain-db"' || print -r -- '    "/Users/x/Library/Keychains/login.keychain-db"'; exit 0;;
+  -i) IFS= read -r line; set -- ${(z)line}; sub=$1; shift
+      [[ $sub == add-generic-password ]] || exit 1
+      U=0 S='' T='-' V='' KC=''; while (( $# )); do case $1 in -U) U=1;; -a) shift;; -s) shift; S=$1;; -l) shift;; -T) shift; T=${(Q)1};; -w) shift; V=$1;; *) KC=$1;; esac; shift; done
+      [[ -n $V ]] && print -r -- "$V" >> $M/secrets.seen   # every value received, accepted or not (leak detector input)
+      [[ -d $(kst $KC) ]] || exit 50; autolock
+      if [[ $(get locked 1) == 1 && ${MOCK_SILENT_WRITE:-0} == 1 ]]; then put mdat_$S 20991231235959Z; exit 128; fi   # refused rc, but item changed
+      if [[ $(get locked 1) == 1 && ${MOCK_LOCKED_WRITE_OK:-0} != 1 && ${MOCK_LOCKED_OVERWRITE_OK:-0} != 1 ]]; then sleep 0.1; exit 128; fi
+      [[ $U == 0 && -f $(kst $KC)/val_$S ]] && exit 45
+      put val_$S "$V"; put mdat_$S "$(date -u +%Y%m%d%H%M%SZ)"   # 1-second resolution, like real mdat
+      if [[ $T == '' ]]; then put acl_$S 0; else put acl_$S 1; fi; touchk; exit 0;;
+esac
+KC=${@[-1]}; [[ $KC == */r2d.keychain-db ]] || { print -r -- "mock: refused non-r2d keychain arg" >&2; exit 99; }
+case $cmd in
+  create-keychain) mkdir -p $(kst $KC); : > $KC; put locked 0; put timeout 300; put los 1; touchk; print -r -- $KC > $M/lastkc; exit 0;;
+  set-keychain-settings) l=0 t=0; while (( $# > 1 )); do case $1 in -l) l=1;; -t) shift; t=$1;; esac; shift; done; [[ ${MOCK_SETTINGS_IGNORE_L:-0} == 1 ]] && l=0; put los $l; put timeout $t; exit 0;;
+  show-keychain-info) [[ -d $(kst $KC) ]] || exit 50; autolock; l=$(get los 0) t=$(get timeout 0)
+     s=''; [[ $l == 1 ]] && s='lock-on-sleep '; [[ $t == 0 ]] && s+='no-timeout' || s+="timeout=${t}s"
+     if [[ ${MOCK_INFO_LOCKSIG:-0} == 1 && $(get locked 1) == 1 ]]; then print -r -- "Keychain \"$KC\" $s"; exit 36; fi
+     print -r -- "Keychain \"$KC\" $s"; exit 0;;
+  unlock-keychain) [[ -d $(kst $KC) ]] || exit 50
+     if [[ ${MOCK_UNLOCK_FAIL_FIRST:-0} == 1 && ! -f $M/unlockfailed ]]; then : > $M/unlockfailed; exit 51; fi
+     [[ ${MOCK_UNLOCK_ALWAYS_FAIL:-0} == 1 ]] && exit 51
+     put locked 0; touchk; exit 0;;
+  lock-keychain) [[ -d $(kst $KC) ]] || exit 50; [[ -f $M/lock_noop ]] && exit 0; put locked 1; exit 0;;
+  delete-keychain) rm -rf $(kst $KC); rm -f $KC; exit 0;;
+  delete-generic-password) autolock; S=''; while (( $# > 1 )); do [[ $1 == -s ]] && { shift; S=$1; }; shift; done
+     if [[ $(get locked 1) == 1 && ${MOCK_LOCKED_WRITE_OK:-0} != 1 ]]; then sleep 0.1; exit 128; fi
+     rm -f $(kst $KC)/val_$S $(kst $KC)/mdat_$S $(kst $KC)/acl_$S; exit 0;;
+  find-generic-password) autolock; S='' W=0; while (( $# > 1 )); do case $1 in -s) shift; S=$1;; -w) W=1;; esac; shift; done
+     [[ -f $(kst $KC)/val_$S ]] || exit 44
+     L=$(get locked 1); tr=$(get acl_$S 0); [[ $S == R2D-A && ${MOCK_ACL_A_OPEN:-0} == 1 ]] && tr=1
+     if (( W )); then
+       if [[ $L == 1 ]]; then n=$(( $(cat $M/lockedreads 2>/dev/null || print 0) + 1 )); print -r -- $n > $M/lockedreads
+         [[ ${MOCK_LEAK_LOCKED:-0} == 1 && $n -ge ${MOCK_LEAK_FROM:-1} ]] && { cat $(kst $KC)/val_$S; exit 0; }
+         [[ ${MOCK_READ_UNLOCKS:-0} == 1 ]] && put locked 0
+         sleep 0.2; exit 128; fi
+       touchk
+       if [[ $tr == 1 || ${MOCK_ALLOW:-0} == 1 ]]; then cat $(kst $KC)/val_$S; [[ ${MOCK_ALWAYS:-0} == 1 ]] && put acl_$S 1; exit 0; fi
+       [[ ${MOCK_ALWAYS:-0} == 1 ]] && { put acl_$S 1; cat $(kst $KC)/val_$S; exit 0; }
+       sleep 0.2; exit 128
+     fi
+     [[ ${MOCK_PROBE_RESETS:-0} == 1 ]] && touchk
+     if [[ $L == 1 && ${MOCK_ATTR_LOCKSIG:-1} == 1 ]]; then print -r -- 'mock: keychain locked'; exit 36; fi
+     print -r -- "keychain: \"$KC\""; print -r -- "    \"svce\"<blob>=\"$S\""; [[ ${MOCK_ATTR_NO_MDAT:-0} == 1 ]] || print -r -- "    \"mdat\"<timedate>=0x00  \"$(get mdat_$S x)\""; exit 0;;
+  dump-keychain) autolock; A=0 Dd=0; while (( $# > 1 )); do case $1 in -a) A=1;; -d) Dd=1;; esac; shift; done
+     L=$(get locked 1)
+     if (( A )); then for i in $(items); do acl_block $i; [[ $i == R2D-A && ${MOCK_DUP_A:-0} == 1 ]] && acl_block $i; done; exit 0; fi
+     if (( Dd )); then
+       [[ $L == 1 && ${MOCK_LEAK_DUMP:-0} != 1 ]] && { sleep 0.2; for i in $(items); do print -r -- "    \"svce\"<blob>=\"$i\""; done; exit 0; }
+       for i in $(items); do print -r -- "    \"svce\"<blob>=\"$i\""; print -r -- 'data:'; cat $(kst $KC)/val_$i; print; done; exit 0
+     fi
+     [[ ${MOCK_PROBE_RESETS:-0} == 1 ]] && touchk
+     [[ $L == 1 && ${MOCK_DUMP_LOCKSIG:-1} == 1 ]] && { print -r -- 'mock dump: locked'; exit 36; }
+     for i in $(items); do print -r -- "    \"svce\"<blob>=\"$i\""; done; exit 0;;
+  *) print -r -- "mock: unsupported $cmd" >&2; exit 98;;
+esac

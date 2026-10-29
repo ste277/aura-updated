@@ -1,0 +1,17 @@
+R2D start 2026-11-14T09:51:48Z harness_sha256=b9dd4d431a2864d31a55a017f1cf9f9ae551e9b9081881f4f90dd1ef0bf7c254 mode=SIMULATED-MOCK macOS=14.6 pid=30645
+Manual recovery if this run crashes: R2D-07 (look for /private/tmp/claude-501/-Users-stephen-Desktop-Claude-auraschedule-math-core/b1121d49-418e-41ef-a69a-ffd7ecb8d667/scratchpad/r2e_FINAL/T2_L10_fail/tmp/r2d-run.* ; lock dir /private/tmp/claude-501/-Users-stephen-Desktop-Claude-auraschedule-math-core/b1121d49-418e-41ef-a69a-ffd7ecb8d667/scratchpad/r2e_FINAL/T2_L10_fail/tmp/r2d-lock)
+T1-9 SIP: enabled
+T1-6: process scan clean; attestations y/y/y
+T1-1 baseline captured (domains user/dynamic/common/system + defaults)
+=== L10 ===
+  settings: lock-on-sleep timeout=3600s
+L0 ACL A: applications (0):
+L0: created, items added, ACL A restricted, LOCKED
+calibration: probe=attr locked_sig=rc=36:60a485741003 unlocked_sig=rc=0:932dd604aa91
+L10 step1: rc=0 secret_returned=yes type=A pw=k act=W ACL=applications (1): | requirement: identifier "com.apple.security" and anchor apple
+L10 RESULT: step2 rc=0 secret_returned=yes dialog=n ; step3(locked) rc=0 secret_returned=yes type=U pw=k act=C
+R2D STOP: SECURITY FINDING L10
+teardown: post-lock state=unknown(rc=0:60a485741003)
+R2D CLEANUP: VERIFIED (children reaped; keychain locked+deleted; temp dir removed; search lists and defaults unchanged)
+R2D VERDICT: [SIMULATED-MOCK] FAIL (L10 lock does not contain Always Allow)
+R2D LOG: /private/tmp/claude-501/-Users-stephen-Desktop-Claude-auraschedule-math-core/b1121d49-418e-41ef-a69a-ffd7ecb8d667/scratchpad/r2e_FINAL/T2_L10_fail/home/aura-r2b-evidence/r2d-20261114T095148Z-30645-mock.log

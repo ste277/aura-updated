@@ -1,0 +1,170 @@
+11c11
+< PROF="(version 1)(allow default)(deny process-exec (literal \"/usr/bin/security\"))(deny mach-lookup (global-name \"com.apple.SecurityServer\") (global-name \"com.apple.securityd\") (global-name \"com.apple.securityd.xpc\"))(deny file-read* file-write* (subpath \"$REALKC\"))"
+---
+> PROF="(version 1)(allow default)(deny process-exec (literal \"/usr/bin/security\"))(deny process-exec (literal \"/bin/ps\"))(deny mach-lookup (global-name \"com.apple.SecurityServer\") (global-name \"com.apple.securityd\") (global-name \"com.apple.securityd.xpc\"))(deny file-read* file-write* (subpath \"$REALKC\"))"
+27,28c27,29
+<   local a; a=$(/usr/bin/pgrep -lf . | /usr/bin/awk -v p=$1 '$1==p{print; exit}'); [[ -n $a ]] || return 1
+<   if /usr/bin/pgrep -P $$ | /usr/bin/grep -qx -- $1; then [[ $a == *(R2D locked-keychain prototype harness|r2e_decoy|r2d_watchdog)* ]]; return; fi
+---
+>   local a pp; a=$(/bin/ps -ww -o command= -p $1 2>/dev/null); [[ -n $a ]] || return 1     # exact-PID query only (no table listing)
+>   pp=$(/bin/ps -o ppid= -p $1 2>/dev/null); pp=${pp//[[:space:]]/}
+>   if [[ $pp == $$ ]]; then [[ $a == *(R2D locked-keychain prototype harness|r2e_decoy|r2d_watchdog)* ]]; return; fi
+44c45
+< base_env() { REPLY_ENV=(HOME=$HM TMPDIR=$TT/ TERM=dumb R2D_MOCK_DIR=$M R2D_MOCK_ANSWERS=$SD/ans $ENVS); }
+---
+> base_env() { REPLY_ENV=(HOME=$HM TMPDIR=$TT/ TERM=dumb R2D_MOCK_DIR=$M R2D_MOCK_ANSWERS=$SD/ans R2D_MOCK_RUNNER_PID=$$ $ENVS); }
+75c76,77
+< kern_hit() { grep -qE -e 'deny\([0-9]+\) process-exec[*]? /usr/bin/security$' -e 'deny\([0-9]+\) mach-lookup com\.apple\.(SecurityServer|securityd)' -e "deny\([0-9]+\) file-[a-z*-]+ ${REALKC}(/|$)" "$@"; }
+---
+> FOREIGN='(identityservice)'   # system daemons seen denied by THEIR OWN sandboxes (not ours); everything else counts (fail-closed)
+> kern_hit() { grep -E -e 'deny\([0-9]+\) process-exec[*]? /usr/bin/security$' -e 'deny\([0-9]+\) mach-lookup com\.apple\.(SecurityServer|securityd)' -e "deny\([0-9]+\) file-[a-z*-]+ ${REALKC}(/|$)" "$@" | grep -vE "Sandbox: ${FOREIGN}\([0-9]+\) deny" | grep -q .; }
+100a103,105
+>   chk 'kernel: a SYSTEM daemon denied by its OWN sandbox (identityservice) is NOT attributed to this run' eval '! kl "kernel[0:1] (Sandbox) Sandbox: identityservice(659) deny(1) mach-lookup com.apple.securityd.systemkeychain"'
+>   chk 'kernel: our zsh denied the same lookup IS classified' kl 'kernel[0:1] (Sandbox) Sandbox: zsh(42) deny(1) mach-lookup com.apple.securityd.systemkeychain'
+>   chk 'kernel: an UNLISTED process name (e.g. ls) is classified - attribution fails closed' kl 'kernel[0:1] (Sandbox) Sandbox: ls(42) deny(1) mach-lookup com.apple.SecurityServer'
+352c357
+< pcmd() { /usr/bin/pgrep -lf . | /usr/bin/awk -v p=$1 '$1==p { $1=""; sub(/^ /,""); print; exit }'; }   # exact PID argv (no setuid ps)
+---
+> pcmd() { /bin/ps -ww -o command= -p $1 2>/dev/null; }   # exact PID argv (no setuid ps)
+373a379
+>   chk 'V3R-4: both observer probes were gated by fresh scans in the observer process' eval '[[ $(grep -c "^T1-6 gate op=find-generic-password scan=[0-9]* result=CLEAN" $OLOG) -ge 2 ]]'
+549,550c555,556
+< scen T7_ps_timeout; answers $ANS_PRE; ENVS=(MOCK_PS_HANG=1 R2D_SCAN_TO=2); T0=$EPOCHREALTIME; run --test=G1; TD7=$(( EPOCHREALTIME - T0 ))
+<   chk 'hung ps -> UNKNOWN (exit status 124) -> STOP' eval 'L "R2D STOP: T1-6: process scan UNKNOWN (ucomm read: ps exit status 124)"'
+---
+> scen T7_ps_timeout; answers $ANS_PRE; ENVS=(MOCK_PS_HANG=1 MOCK_PS_HANG_S=4 R2D_SCAN_TO=2); T0=$EPOCHREALTIME; run --test=G1; TD7=$(( EPOCHREALTIME - T0 ))
+>   chk 'hung ps -> UNKNOWN (timeout, no signal) -> STOP' eval 'L "R2D STOP: T1-6: process scan UNKNOWN (ucomm read: timeout after 2s (no signal sent))"'
+552,553c558,562
+<   chk 'hung mock ps was killed (no process running this mock ps remains)' eval '! /usr/bin/pgrep -f -- "$M/ps -ww -axo" >/dev/null'
+<   chk 'never CLEAN' eval 'nL "process scan CLEAN" && calls_none'; chk 'no scan temp file left' eval '[[ -z $(print -l $TT/r2d-scan.*(N)) ]]'; generic
+---
+>   chk 'diagnostics record the timeout (rc=none timeout=yes valid=no)' L 'col=ucomm rc=none rows=0 pid1=no own=no dup=0 malformed=0 timeout=yes valid=no'
+>   HP=$(<$M/hang.pid 2>/dev/null)
+>   chk 'NO signal: the hung mock ps (pid from its own hang.pid) is still running right after the harness exited' eval '[[ $HP == <-> ]] && kill -0 $HP 2>/dev/null && [[ $(/bin/ps -ww -o command= -p $HP) == *"$M/ps -ww -axo"* ]]'
+>   chk 'the abandoned read ends by itself (no signal from the harness) within 15 s' eval 'for i in {1..150}; do kill -0 $HP 2>/dev/null || break; sleep 0.1; done; ! kill -0 $HP 2>/dev/null'
+>   chk 'never CLEAN' eval 'nL "process scan CLEAN" && calls_none'; generic
+572,573c581,582
+< scen T7_static_no_pipeline   # STATIC: the scan has no pipeline and no error masking
+<   blk=$(awk '/^# T1-6 process scan \(FIX01/{f=1} f{print} f&&/^esac$/{exit}' $H)
+---
+> scen T7_static_no_pipeline   # STATIC (v3): no pipeline, no error masking, no temp file, no signal in the scanner block
+>   blk=$(awk '/^# T1-6 process scan \(v3/{f=1} /^# ---------------- observer mode/{exit} f{print}' $H)   # scanner + gate definitions only
+576,577c585,588
+<   chk 'ps exit status is captured (wait $p; PSRC=$?)' eval '[[ $blk == *"wait \$p; PSRC=\$?"* ]]'
+<   chk 'UNKNOWN is the default and the case has no CLEAN fall-through' eval '[[ $blk == *"SCAN=UNKNOWN"* && $blk == *"*) VERDICT="* ]]'
+---
+>   chk 'no kill/pkill/killall and no mktemp/temp-file path in the scanner block' eval '! print -r -- "$blk" | grep -vE "^ *#" | grep -qE "kill|mktemp|r2d-scan|TMPDIR|\\\$TD"'
+>   chk 'capture is a disowned coprocess with a per-read nonce sentinel and a sysread whole-read deadline' eval '[[ $blk == *"coproc {"* && $blk == *"\"\${tag}\$?\""* && $blk == *"[[ \${jobstates[\$j]} == *:\$cpid=* ]] && { disown %\$j"* && $blk == *"exec {fd}<&p"* && $blk == *"tag=\"__R2D_PS_RC_\${nonce}=\""* && $blk == *"sysread -t \$rem -i \$fd"* && $blk == *"r2d_nonce()"* ]]'
+>   chk 'UNKNOWN is the default; DETECTED and UNKNOWN both stop' eval '[[ $blk == *"SCAN=UNKNOWN"* && $blk == *"DETECTED) "*stop* && $blk == *"*) "*stop* ]]'
+> 
+579a591,695
+> # ---------- 8. V3-01: structural diagnostics, logging failure, fresh-scan gate, isolation ----------
+> diagl() { grep -E '^T1-6 (diag|gate) ' $LOGF; }
+> if want 'T8*'; then
+> scen T8_diag_clean; answers $ANS_PRE n; run --test=L14 --probe=attr
+>   chk 'read 1 diagnostics (ucomm): rc=0 rows=2 pid1 own dup=0 malformed=0 timeout=no valid=yes' L 'T1-6 diag scan=1 read=1 col=ucomm rc=0 rows=2 pid1=yes own=yes dup=0 malformed=0 timeout=no valid=yes'
+>   chk 'read 2 diagnostics (comm) present' L 'T1-6 diag scan=1 read=2 col=comm rc=0 rows=2 pid1=yes own=yes dup=0 malformed=0 timeout=no valid=yes'
+>   chk 'final classification with scanner pid and exclusion counts' eval 'grep -qE "^T1-6 diag scan=1 result=CLEAN hits=0 scanner_pid=[0-9]+ excluded_self=1 excluded_children=0 why=none$" $LOGF'
+>   chk 'diagnostic lines are names-free key=value only (no paths, no arguments)' eval '! diagl | grep -vE "^T1-6 (diag scan=[0-9]+ (read=[12] col=(ucomm|comm) rc=(-?[0-9]+|none) rows=[0-9]+ pid1=(yes|no) own=(yes|no) dup=[0-9]+ malformed=[0-9]+ timeout=(yes|no) valid=(yes|no)|result=(CLEAN|DETECTED|UNKNOWN) hits=[0-9]+ scanner_pid=[0-9]+ excluded_self=[01] excluded_children=[0-9]+ why=(none|(ucomm|comm) read: [a-z0-9 ()<.]+|diagnostic log write failed))|gate op=(create-keychain|unlock-keychain|set-keychain-settings|show-keychain-info|dump-keychain|find-generic-password|delete-generic-password|add-generic-password) scan=[0-9]+ result=(CLEAN|DETECTED|UNKNOWN))$" | grep -q .'
+>   chk 'the why= field never carries a path or name on CLEAN' eval '! diagl | grep "^T1-6 diag scan=[0-9]* result=CLEAN" | grep -qv "why=none"'
+>   chk 'run completes (rc=0)' eval '[[ $RC == 0 ]]'; generic
+> scen T8_diag_unknown_rc; answers $ANS_PRE; ENVS=(MOCK_PS_RC=1); run --test=G1
+>   chk 'diagnostics: rc=1 valid=no, then result=UNKNOWN with reason' eval 'L "T1-6 diag scan=1 read=1 col=ucomm rc=1 rows=2" && L "valid=no" && grep -qE "^T1-6 diag scan=1 result=UNKNOWN hits=0 scanner_pid=[0-9]+ excluded_self=0 excluded_children=0 why=ucomm read: ps exit status 1$" $LOGF'
+>   chk 'second read never attempted after a failed first read' eval 'nL "read=2"'; chk 'STOP, zero keychain calls' calls_none; generic
+> scen T8_diag_counts; answers $ANS_PRE; ENVS=(MOCK_PS_MALFORMED=1 MOCK_PS_DUPPID=1); run --test=G1
+>   chk 'diagnostics count malformed and duplicate rows' L 'dup=1 malformed=1 timeout=no valid=no'
+>   chk 'UNKNOWN reason names the first structural failure' L 'why=ucomm read: malformed row(s) 1'; chk 'STOP, zero keychain calls' calls_none; generic
+> scen T8_overflow; answers $ANS_PRE; ENVS=(MOCK_PS_EXTRA=Safari R2D_SCAN_MAX=2); run --test=G1
+>   chk 'bounded memory: output above SCANMAX rows -> UNKNOWN' L 'process scan UNKNOWN (ucomm read: output exceeds 2 rows)'; chk 'STOP, zero keychain calls' calls_none; generic
+> scen T8_midline_stall; answers $ANS_PRE; ENVS=(MOCK_PS_PARTIAL_HANG=1 MOCK_PS_HANG_S=4 R2D_SCAN_TO=2); T0=$EPOCHREALTIME; run --test=G1; TD8=$(( EPOCHREALTIME - T0 ))
+>   chk 'ps stalls MID-LINE -> whole-read deadline still fires -> UNKNOWN timeout' L 'process scan UNKNOWN (ucomm read: timeout after 2s (no signal sent))'
+>   chk 'bounded: run ends inside 20 s' eval '(( TD8 < 20 ))'; HP=$(<$M/hang.pid 2>/dev/null)
+>   chk 'stalled mock not signalled (alive after exit) and ends by itself' eval '[[ $HP == <-> ]] && kill -0 $HP 2>/dev/null && { for i in {1..150}; do kill -0 $HP 2>/dev/null || break; sleep 0.1; done; ! kill -0 $HP 2>/dev/null; }'
+>   chk 'STOP, zero keychain calls' calls_none; generic
+> scen T8_spoof_sentinel; answers $ANS_PRE; ENVS=(MOCK_PS_SPOOF_SENTINEL=1); run --test=G1
+>   chk 'name with embedded newline + fake sentinels (fixed and guessed-nonce forms) -> rows malformed -> UNKNOWN, never CLEAN' eval 'L "process scan UNKNOWN (ucomm read: malformed row(s) 2)" && nL "process scan CLEAN"'
+>   chk 'later rows were not silently dropped (row count includes the TeamViewer row after the fake sentinels)' L 'rows=4 '
+>   chk 'STOP, zero keychain calls' calls_none; generic
+> scen T8_no_trailing_newline; answers $ANS_PRE; ENVS=(MOCK_PS_NO_NEWLINE=1); run --test=G1
+>   chk 'output without a final newline -> sentinel not on its own line -> no status -> UNKNOWN' L 'process scan UNKNOWN (ucomm read: no exit status (partial or aborted output))'
+>   chk 'diagnostics show rc=none' L 'col=ucomm rc=none'; chk 'STOP, zero keychain calls' calls_none; generic
+> scen T8_gate_timeout; answers $ANS_PRE; ENVS=(MOCK_PS_HANG_FROM=13 MOCK_PS_HANG_S=4 R2D_SCAN_TO=2); run --test=L14
+>   chk 'timeout inside the unlock gate -> UNKNOWN -> unlock blocked' eval 'L "R2D STOP: T1-6 gate unlock-keychain: process scan UNKNOWN (ucomm read: timeout after 2s (no signal sent))" && ! calls_has unlock-keychain'
+>   HP=$(<$M/hang.pid 2>/dev/null); chk 'gate-timeout mock not signalled; ends by itself' eval '[[ $HP == <-> ]] && { for i in {1..150}; do kill -0 $HP 2>/dev/null || break; sleep 0.1; done; ! kill -0 $HP 2>/dev/null; }'
+>   chk 'teardown deleted the keychain' calls_has delete-keychain; chk 'no residue' no_residue; generic
+> scen T8_logfail_result; answers $ANS_PRE; ENVS=(R2D_TEST_LOGFAIL_FROM=3); run --test=G1
+>   chk 'failure writing the RESULT diagnostic -> UNKNOWN -> STOP' eval 'L "R2D STOP: T1-6: process scan UNKNOWN (diagnostic log write failed)" && nL "process scan CLEAN" && calls_none'; generic
+> scen T8_logfail_gateline; answers $ANS_PRE; ENVS=(R2D_TEST_LOGFAIL_FROM=7); run --test=L14
+>   chk 'failure writing the GATE diagnostic -> create blocked' eval 'L "R2D STOP: T1-6 gate create-keychain: process scan UNKNOWN (diagnostic log write failed)" && ! calls_has create-keychain'; generic
+> scen T8_numeric_override; answers $ANS_PRE; ENVS=('R2D_SCAN_TO=a[1]'); run --test=G1
+>   chk 'non-numeric mock override refused before any scan or call (no arithmetic evaluation of env text)' eval '[[ $RC == 1 ]] && grep -q "non-numeric mock override refused" $SD/out && calls_none && [[ ! -s $M/ps_cols.log ]]'
+> scen T8_superops_present; answers $ANS_PRE; ENVS=(MOCK_PS_EXTRA=superops); run --test=G1
+>   chk 'SuperOps present -> DETECTED via kernel name and argv[0] (existing T1-6 refusal preserved)' L 'R2D STOP: T1-6: UI-automation / remote-control process running: comm:superops;ucomm:superops'
+>   chk 'result line records DETECTED with 2 hits' L 'T1-6 diag scan=1 result=DETECTED hits=2 '; chk 'STOP, zero keychain calls' calls_none; generic
+> scen T8_logfail_preflight; answers $ANS_PRE; ENVS=(R2D_TEST_LOGFAIL_FROM=1); run --test=G1
+>   chk 'diagnostic write failure -> UNKNOWN -> STOP (fail closed)' L 'R2D STOP: T1-6: process scan UNKNOWN (diagnostic log write failed) - not treated as clean'
+>   chk 'never CLEAN, zero keychain calls' eval 'nL "process scan CLEAN" && calls_none'; generic
+> scen T8_logfail_gate; answers $ANS_PRE; ENVS=(R2D_TEST_LOGFAIL_FROM=4); run --test=L14
+>   chk 'diagnostic failure inside the create gate -> protected op blocked' L 'R2D STOP: T1-6 gate create-keychain: process scan UNKNOWN (diagnostic log write failed)'
+>   chk 'create-keychain never reached the (mock) security tool' eval '! calls_has create-keychain'; chk 'no residue' no_residue; generic
+> scen T8_clean_then_detected_create; answers $ANS_PRE; ENVS=(MOCK_PS_LATE_FROM=3); run --test=L14
+>   chk 'preflight CLEAN, then a fresh scan before create finds TeamViewer -> blocked' eval 'L "T1-6: process scan CLEAN" && L "R2D STOP: T1-6 gate create-keychain: UI-automation / remote-control process running: comm:TeamViewer;ucomm:TeamViewer"'
+>   chk 'verdict names the gate' L 'STOPPED (T1-6 gate create-keychain DETECTED)'
+>   chk 'create-keychain never reached the (mock) security tool' eval '! calls_has create-keychain'; generic
+> scen T8_clean_then_detected_unlock; answers $ANS_PRE; ENVS=(MOCK_PS_LATE_FROM=13); run --test=L14
+>   chk 'create allowed by its own fresh CLEAN; the later unlock gate sees DETECTED -> blocked' eval 'L "T1-6 gate op=create-keychain scan=2 result=CLEAN" && L "R2D STOP: T1-6 gate unlock-keychain: UI-automation"'
+>   chk 'earlier CLEAN not reused: create reached security, unlock did not' eval 'calls_has create-keychain && ! calls_has unlock-keychain'
+>   chk 'teardown still deleted the keychain' calls_has delete-keychain; chk 'no residue' no_residue; generic
+> scen T8_clean_then_unknown_unlock; answers $ANS_PRE; ENVS=(MOCK_PS_LATE_RC_FROM=13); run --test=L14
+>   chk 'later scan UNKNOWN -> unlock blocked' eval 'L "R2D STOP: T1-6 gate unlock-keychain: process scan UNKNOWN (ucomm read: ps exit status 3)" && ! calls_has unlock-keychain'
+>   chk 'verdict names the gate' L 'STOPPED (T1-6 gate unlock-keychain UNKNOWN)'; chk 'no residue' no_residue; generic
+> scen T8_repeated_fresh_G1; answers $ANS_G1; run --test=G1 --probe=attr
+>   chk 'G1 completes (rc=0)' eval '[[ $RC == 0 ]]'
+>   NG=$(grep -c '^T1-6 gate op=' $LOGF); NQ=$(wc -l < $M/gate_seq.log | tr -d ' ')
+>   chk "every dialog-capable op reached security under its own gate: gate lines=$NG = gated calls=$NQ (>= 40)" eval '(( NG == NQ && NG >= 40 ))'
+>   chk 'no dialog-capable call without a gate id (gate=none never appears)' eval '! grep -q " gate=none " $M/gate_seq.log'
+>   chk 'every call used a DIFFERENT fresh gate (no reuse of an earlier CLEAN)' eval '[[ $(awk "{print \$2}" $M/gate_seq.log | sort | uniq -d | wc -l | tr -d " ") == 0 ]]'
+>   chk 'each call ran after its gate scan (ps call counter >= 2 x gate scan id)' eval 'awk "{split(\$2,a,\"=\"); split(\$3,b,\"=\"); if (b[2]+0 < 2*a[2]) bad=1} END{exit bad}" $M/gate_seq.log'
+>   chk 'all 8 dialog-capable op types are gated in G1 (create/unlock/settings/info/dump/find/delete/add)' eval '[[ $(grep -oE "^T1-6 gate op=[a-z-]+" $LOGF | sort -u | wc -l | tr -d " ") == 8 ]]'
+>   chk 'error paths gated: locked overwrite (add, rc!=0) and locked delete in L4 each had a gate' eval '[[ $(grep -c "^T1-6 gate op=add-generic-password" $LOGF) == 2 && $(grep -c "^T1-6 gate op=delete-generic-password" $LOGF) == 1 ]]'
+>   chk 'L5: exactly two secret reads (-w) tagged with two ADJACENT gate ids (gates back-to-back, no scan while a reader ran)' eval 'awk "/^find-generic-password .* w=1/{split(\$2,a,\"=\"); g[++n]=a[2]+0} END{ if (n<2) exit 1; for (i=1;i<n;i++) if ((g[i+1]-g[i])==1 || (g[i]-g[i+1])==1) ok=1; exit !ok }" $M/gate_seq.log && grep -q "^T1-6 gate op=find-generic-password" $LOGF'
+>   generic
+> scen T8_alt_path_L13; answers $ANS_PRE; run --test=L13
+>   chk 'L13 direct wrong-passphrase unlock (error path) is gated; every dialog-capable call gated' eval '[[ $(grep -c "^T1-6 gate op=unlock-keychain" $LOGF) -ge 2 && $(grep -c "^T1-6 gate op=" $LOGF) == $(wc -l < $M/gate_seq.log | tr -d " ") ]]'; generic
+> scen T8_alt_path_L14_L6; answers $ANS_PRE n A k D n U k C; run --test=L14,L6 --probe=attr
+>   chk 'multi-group run: every dialog-capable call across groups gated' eval '[[ $(grep -c "^T1-6 gate op=" $LOGF) == $(wc -l < $M/gate_seq.log | tr -d " ") ]]'; generic
+> scen T8_v3r4_bypass_attempt; answers $ANS_PRE; ENVS=(R2D_TEST_SUBSHELL_OP=1); run --test=L14
+>   chk 'dialog-capable op attempted from a subshell is refused and recorded (not performed)' eval 'grep -q "^R2D GATE-REFUSED op=find-generic-password" $LOGF && ! grep -q "^find-generic-password " $M/gate_seq.log'
+>   chk 'the parent notices at its next gate and STOPs the run' eval 'L "R2D STOP: V3R-4: a dialog-capable op was attempted outside the harness process - run stopped" && L "STOPPED (gate bypass attempt detected)"'
+>   chk 'no unlock happened after the bypass attempt' eval '! calls_has unlock-keychain'; chk 'no residue' no_residue; generic
+> scen T8_v3r4_bypass_bg; answers $ANS_PRE; ENVS=(R2D_TEST_SUBSHELL_OP=bg); run --test=L14
+>   chk 'background ( ) & form: dialog-capable op refused (not performed) and the run STOPs' eval 'grep -q "^R2D GATE-REFUSED op=find-generic-password" $LOGF && ! grep -q "^find-generic-password " $M/gate_seq.log && L "STOPPED (gate bypass attempt detected)"'; chk 'no residue' no_residue; generic
+> scen T8_v3r4_bypass_pipe; answers $ANS_PRE; ENVS=(R2D_TEST_SUBSHELL_OP=pipe); run --test=L14
+>   chk 'pipeline form: dialog-capable op refused (not performed) and the run STOPs' eval 'grep -q "^R2D GATE-REFUSED op=find-generic-password" $LOGF && ! grep -q "^find-generic-password " $M/gate_seq.log && L "STOPPED (gate bypass attempt detected)"'; chk 'no residue' no_residue; generic
+> scen T8_nonce_samples   # in-suite version of the nonce check (runner side; reads /dev/urandom only)
+>   NZ=$(/bin/zsh -f -c 'emulate -L zsh; zmodload zsh/system; export LC_ALL=C; eval "$(awk "/^r2d_nonce\\(\\) \\{/{f=1} f{print} f&&/builtin print -r -- \\\$\\{\\(L\\)out\\}; \\}\$/{exit}" $1)"; typeset -A seen; integer bad=0 dup=0; for i in {1..500}; do n=$(r2d_nonce); [[ $n =~ "^[0-9a-f]{16}\$" ]] || (( bad++ )); [[ -n ${seen[$n]-} ]] && (( dup++ )); seen[$n]=1; done; print -r -- "$bad $dup"' x $H)
+>   chk "500 harness nonces: all 16-hex, none repeated (malformed/dup = $NZ)" eval '[[ $NZ == "0 0" ]]'
+> scen T8_v3r4_detected_mid_run; answers $ANS_G1; ENVS=(MOCK_PS_LATE_FROM=21); run --test=G1 --probe=attr
+>   chk 'state turns DETECTED mid-run -> the next dialog-capable op (whatever it is) is blocked' eval 'grep -qE "^R2D STOP: T1-6 gate (create-keychain|unlock-keychain|set-keychain-settings|show-keychain-info|dump-keychain|find-generic-password|delete-generic-password|add-generic-password): UI-automation" $LOGF'
+>   BL=$(grep -oE "^T1-6 gate op=[a-z-]+ scan=[0-9]+ result=DETECTED" $LOGF | sed "s/.*scan=\([0-9]*\).*/\1/")
+>   chk "blocked op (gate scan $BL) never reached security; earlier ops did" eval '[[ -n $BL ]] && ! grep -q " gate=$BL " $M/gate_seq.log && [[ -s $M/gate_seq.log ]]'
+>   chk 'teardown deleted the keychain' calls_has delete-keychain; chk 'no residue' no_residue; generic
+> scen T8_static_choke_point   # STATIC: the gate cannot be bypassed by another entry point or by error handling
+>   chk 'every reference to SEC (comments stripped) is one of the 7 audited lines: 2 assignments, sec_kc non-dialog call, secx, sec_global, is_wd compare, watchdog arg' eval '[[ $(sed "s/[[:space:]]#.*$//" $H | grep -vE "^ *#" | grep -cE "\\\$\\{?SEC\\}?([^A-Za-z_]|$)|(^|[^A-Za-z_])SEC=") == 7 ]]'
+>   chk 'no backtick command substitution and no eval of SEC anywhere in the harness' eval '! grep -vE "^ *#" $H | grep -q "\`" && ! grep -qE "eval.*SEC" $H'
+>   chk 'sec_kc routes every dialog-capable op through main_only + t16_gate + secx' eval 'grep -qF "if dlgop \"\$1\"; then main_only \"\$1\" || exit 86; t16_gate \"\$1\"; secx" $H'
+>   chk 'dialog-capable inventory is exactly the 7 sec_kc ops (+ sec_i add)' eval 'grep -qF "dlgop() { case \$1 in create-keychain|unlock-keychain|set-keychain-settings|show-keychain-info|dump-keychain|find-generic-password|delete-generic-password) return 0;; esac; return 1; }" $H && grep -qF "main_only add-generic-password || exit 86; t16_gate add-generic-password" $H'
+>   chk 'sec_kc and sec_cap gate in the main shell before invoking secx' eval '[[ $(grep -cE "main_only \"\\\$1\" \|\| exit 86; t16_gate" $H) == 2 ]]'
+>   chk 'sec_bg_pair: main_only, then two gates back-to-back, then the readers' eval 'grep -qF "t16_gate find-generic-password; ga=\$SCANID; t16_gate find-generic-password; gb=\$SCANID" $H && awk "/^sec_bg_pair\\(\\)/{f=1} f&&/main_only find-generic-password \\|\\| exit 86/{m=1} f&&/t16_gate find-generic-password; ga=/{if(m) ok=1} f&&/BGB=/{exit} END{exit !ok}" $H'
+>   chk 'no keychain helper captured in a subshell except the mock-only bypass hook' eval '[[ $(grep -nE "\\\$\\((sec_kc|sec_i|probe|readA|acl_of|mdat|pstate)" $H | grep -vcE "R2D_TEST_SUBSHELL_OP|^[0-9]+:    1\) : \"\\\$\(sec_kc find-generic-password -a r2dacct -s R2D-A 2>/dev/null\)\";;\$") == 0 ]]'
+>   chk 'sec_i and sec_global cannot create or unlock (allow-lists)' eval 'grep -q "\[\[ \$1 == add-generic-password" $H && grep -q "list-keychains -d.|.default-keychain -d" $H'
+>   chk 'no create/unlock inside a command substitution' eval '! grep -nE "\\\$\\((sec_kc (create|unlock)|unlock_ctl|create )" $H | grep -q .'
+>   chk 'the gate refuses to run outside the harness process and stops (exit) on DETECTED/UNKNOWN' eval 'grep -q "sysparams\[pid\] == \$ME \]\] || {" $H && awk "/^t16_decide\\(\\)/{f=1} f{print} f&&/esac; }/{exit}" $H | grep -c stop | grep -qx 2'
+>   chk 'mock isolation: profile denies exec of real /bin/ps and /usr/bin/security' eval '[[ $PROF == *"(deny process-exec (literal \"/bin/ps\"))"* && $PROF == *"(deny process-exec (literal \"/usr/bin/security\"))"* ]]'
+> fi
+> 
+584c700,701
+<   chk 'no r2d_watchdog process references this work dir' eval '! /usr/bin/pgrep -lf r2d_watchdog | grep -qF -- $W'
+---
+>   wl=''; for p in ${=OWNED}; do [[ $(/bin/ps -ww -o command= -p $p 2>/dev/null) == *r2d_watchdog*"$W/"* ]] && wl+=" $p"; done
+>   chk 'no recorded watchdog of this work dir still running (exact-PID checks of recorded PIDs only)' eval '[[ -z $wl ]]'

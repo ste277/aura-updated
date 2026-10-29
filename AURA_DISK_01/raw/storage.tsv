@@ -1,0 +1,122 @@
+name	total_kb	gitdir_kb	node_modules_real_kb	next_build_kb	other_ignored_kb	untracked_kb	source_kb	nm_symlinks
+MAIN	1324712	710912	50172	529364	2952	13320	17992	
+agent-a006b62991d1ae614	303172	0	65104	219160	0	0	18908	
+agent-a0384b6ad2ebe7561	83600	0	65104	0	0	0	18496	
+agent-a04e5092b79501756	303164	0	65104	219152	0	0	18908	
+agent-a067218245eb13f09	83548	0	65104	0	0	0	18444	
+agent-a105eba84b6abaafe	18216	0	0	0	0	0	18216	
+agent-a10f348b64eda1613	343880	0	0	325124	0	0	18756	
+agent-a247217c134fc1a58	217552	0	260	198636	0	0	18656	
+agent-a249b9de5474dedf2	83432	0	65104	0	0	0	18328	
+agent-a2504743153531791	303360	0	65104	219160	188	0	18908	
+agent-a2ee4c5094ce6fe6e	18040	0	0	0	0	0	18040	
+agent-a333e380b5f9de634	83680	0	65104	0	0	0	18576	
+agent-a3d4e4b640ee7f45d	302996	0	65104	219004	0	0	18888	
+agent-a44595b74c3791ac1	17744	0	0	0	0	0	17744	
+agent-a44feb3ce854cc4cb	302640	0	65104	218696	0	0	18840	
+agent-a47d4ac3e1fe83f6b	302644	0	65104	218696	0	0	18844	
+agent-a4b2c666db4dcbec1	237320	0	0	218528	0	0	18792	
+agent-a5ed3753c43e9ef17	302996	0	65104	219004	0	0	18888	
+agent-a5f0d857578d03c24	246476	0	65104	162948	0	0	18424	
+agent-a5f26c19c490862f6	302644	0	65104	218696	0	0	18844	
+agent-a6d98d55041986ead	305704	0	65104	221944	0	0	18656	
+agent-a7665c302d4391a84	204696	0	260	185724	0	0	18712	
+agent-a7a5f4de137862e18	277300	0	50172	209228	140	0	17760	
+agent-a7c6e9a71a95c6d1d	302584	0	65104	218660	0	0	18820	
+agent-a7cc17647a7c83c91	465236	0	65104	381340	0	0	18792	
+agent-a87560791b632a466	303080	0	65104	219084	0	0	18892	
+agent-a8ba1128b15658d87	276304	0	50172	208376	140	0	17616	
+agent-a8dae20d793f9f535	83700	0	65104	0	0	0	18596	
+agent-a983f52632084b8a3	83688	0	65104	0	0	0	18584	
+agent-a99039d149f38068e	18444	0	0	0	0	0	18444	
+agent-a9b0602724330b7da	305212	0	65104	221480	0	0	18628	
+agent-a9f0bbd977f739beb	301988	0	65104	218148	0	0	18736	
+agent-aa06e4ff8b8a13172	83648	0	65104	0	0	0	18544	
+agent-aaff681e077ec160d	213856	0	260	194912	0	0	18684	
+agent-abfd397d0a37fcc48	403572	0	0	384816	0	0	18756	
+agent-ac87582eb39dd6693	83664	0	65104	0	0	0	18560	
+agent-aca4ff78e40016d28	17744	0	0	0	0	0	17744	
+agent-ad7ce679f002208d6	19060	0	0	0	0	0	19060	
+agent-ad808d093ca483968	18544	0	0	0	0	0	18544	
+agent-ad848f6743fe3750e	83568	0	65104	0	0	0	18464	
+agent-ade58a6877c49bc76	84172	0	65104	0	148	0	18920	
+agent-ae0a83fbd21ffa424	83204	0	65104	0	0	0	18100	
+agent-ae2254aaf1300ecb1	83596	0	65104	0	0	0	18492	
+agent-ae381e0952b6958e2	83584	0	65104	0	0	0	18480	
+agent-aed5764de511986b3	302640	0	65104	218696	0	0	18840	
+agent-aef69a94f416506e4	237224	0	0	218452	0	0	18772	node_modules->/Users/stephen/Desktop/Claude/auraschedule-math-core/.claude/worktrees/hpg2-goal-linked-plans/node_modules;
+agent-af18d3f1036dfac25	305212	0	65104	221480	0	0	18628	
+agent-af3501821865bc75a	302584	0	65104	218660	0	0	18820	
+agent-afbaea6d097e013fb	279976	0	50172	212084	140	0	17580	
+agitated-swanson-bb3539	826364	0	419156	389848	196	44	17120	
+amazing-sanderson-11618a	423996	0	418216	0	0	0	5780	
+aura-mcp-02-i1-5-b	397436	0	135048	241860	572	0	19956	
+aura-palm-01-i1	533496	0	117884	395016	728	0	19868	
+availability-context-v1-h1	158588	0	0	148564	148	0	9876	apps/web/node_modules->/Users/stephen/Desktop/Claude/auraschedule-math-core/apps/web/node_modules;node_modules->/Users/stephen/Desktop/Claude/auraschedule-math-core/node_modules;
+availability-context-v1-h2	154956	0	0	144852	148	0	9956	apps/web/node_modules->/Users/stephen/Desktop/Claude/auraschedule-math-core/apps/web/node_modules;node_modules->/Users/stephen/Desktop/Claude/auraschedule-math-core/node_modules;
+complete-from-home	296328	0	0	285536	0	0	10792	apps/web/node_modules->/Users/stephen/Desktop/Claude/auraschedule-math-core/apps/web/node_modules;node_modules->/Users/stephen/Desktop/Claude/auraschedule-math-core/node_modules;
+daily-briefing-db1-gochar-engine	647592	0	419156	211028	196	0	17212	
+daily-briefing-db2-api-home	789792	0	419156	353192	164	0	17280	
+daily-briefing-db3-insights	785752	0	419156	349096	164	0	17336	
+daily-briefing-db4-polish	788632	0	419156	351912	204	0	17360	
+daily-rhythm-dr1-preferences-foundation	785676	0	419156	349664	168	4	16684	
+daily-rhythm-dr2-work-aware-scheduling	437608	0	50172	370508	168	8	16752	
+daily-rhythm-dr3-candidate-coverage	819664	0	419156	383512	168	32	16796	
+daily-rhythm-dr4a-settings-explanation-clarity	810424	0	419156	374296	168	4	16800	
+daily-rhythm-dr4b-find-a-time-integration	777976	0	419156	341772	168	4	16876	
+daily-rhythm-dr4b1-timezone-display-fix	781320	0	419156	345100	168	4	16892	
+daily-rhythm-dr4b2-home-timezone-fix	763908	0	419156	327668	168	4	16912	
+daily-rhythm-dr4c-goal-continuity-home	406952	0	50172	339676	168	4	16932	
+daily-rhythm-dr4d-full-day-timeline-nav	391052	0	50172	323752	184	4	16940	
+day-constructor-v1-pr-a	143272	0	0	134076	0	0	9196	apps/web/node_modules->/Users/stephen/Desktop/Claude/auraschedule-math-core/apps/web/node_modules;node_modules->/Users/stephen/Desktop/Claude/auraschedule-math-core/node_modules;
+day-constructor-v1-pr-b	143364	0	0	134080	0	0	9284	apps/web/node_modules->/Users/stephen/Desktop/Claude/auraschedule-math-core/apps/web/node_modules;node_modules->/Users/stephen/Desktop/Claude/auraschedule-math-core/node_modules;
+day-constructor-v1-pr-c	143584	0	0	134076	140	0	9368	apps/web/node_modules->/Users/stephen/Desktop/Claude/auraschedule-math-core/apps/web/node_modules;node_modules->/Users/stephen/Desktop/Claude/auraschedule-math-core/node_modules;
+day-constructor-v1-pr-d	9544	0	0	0	132	0	9412	apps/web/node_modules->/Users/stephen/Desktop/Claude/auraschedule-math-core/apps/web/node_modules;node_modules->/Users/stephen/Desktop/Claude/auraschedule-math-core/node_modules;
+day-constructor-v1-pr-e1	9596	0	0	0	132	0	9464	apps/web/node_modules->/Users/stephen/Desktop/Claude/auraschedule-math-core/apps/web/node_modules;node_modules->/Users/stephen/Desktop/Claude/auraschedule-math-core/node_modules;
+day-constructor-v1-pr-e2	9672	0	0	0	132	0	9540	apps/web/node_modules->/Users/stephen/Desktop/Claude/auraschedule-math-core/apps/web/node_modules;node_modules->/Users/stephen/Desktop/Claude/auraschedule-math-core/node_modules;
+day-constructor-v1-pr-e3	9736	0	0	0	132	0	9604	apps/web/node_modules->/Users/stephen/Desktop/Claude/auraschedule-math-core/apps/web/node_modules;node_modules->/Users/stephen/Desktop/Claude/auraschedule-math-core/node_modules;
+day-constructor-v1-pr-f1	156920	0	0	147116	148	0	9656	apps/web/node_modules->/Users/stephen/Desktop/Claude/auraschedule-math-core/apps/web/node_modules;node_modules->/Users/stephen/Desktop/Claude/auraschedule-math-core/node_modules;
+day-constructor-v1-pr-f2	220240	0	0	210340	148	0	9752	apps/web/node_modules->/Users/stephen/Desktop/Claude/auraschedule-math-core/apps/web/node_modules;node_modules->/Users/stephen/Desktop/Claude/auraschedule-math-core/node_modules;
+day-driven-right-now	278668	0	0	267956	0	0	10712	apps/web/node_modules->/Users/stephen/Desktop/Claude/auraschedule-math-core/apps/web/node_modules;node_modules->/Users/stephen/Desktop/Claude/auraschedule-math-core/node_modules;
+dr4d-m1-preflight-readonly	303816	0	65104	219648	152	4	18908	
+fix-day-constructor-fixed-reservation	152572	0	0	142656	148	0	9768	apps/web/node_modules->/Users/stephen/Desktop/Claude/auraschedule-math-core/apps/web/node_modules;node_modules->/Users/stephen/Desktop/Claude/auraschedule-math-core/node_modules;
+fix-home-plan-add-actions	154988	0	0	144868	148	0	9972	apps/web/node_modules->/Users/stephen/Desktop/Claude/auraschedule-math-core/apps/web/node_modules;node_modules->/Users/stephen/Desktop/Claude/auraschedule-math-core/node_modules;
+fix-natural-intent-duration-fallback	152572	0	0	142648	148	0	9776	apps/web/node_modules->/Users/stephen/Desktop/Claude/auraschedule-math-core/apps/web/node_modules;node_modules->/Users/stephen/Desktop/Claude/auraschedule-math-core/node_modules;
+goal-planning-handoff-v1	319928	0	0	309420	0	0	10508	apps/web/node_modules->/Users/stephen/Desktop/Claude/auraschedule-math-core/apps/web/node_modules;node_modules->../../../node_modules;
+gov02-i0c-pr1	19952	0	0	0	0	0	19952	
+home-ia-v2-followups	143156	0	0	134028	0	0	9128	apps/web/node_modules->/Users/stephen/Desktop/Claude/auraschedule-math-core/apps/web/node_modules;node_modules->/Users/stephen/Desktop/Claude/auraschedule-math-core/node_modules;
+home-move	287064	0	0	275784	152	0	11128	apps/web/node_modules->../../../../../apps/web/node_modules;node_modules->../../../node_modules;
+home-quick-capture	243292	0	0	232612	0	0	10680	apps/web/node_modules->/Users/stephen/Desktop/Claude/auraschedule-math-core/apps/web/node_modules;node_modules->/Users/stephen/Desktop/Claude/auraschedule-math-core/node_modules;
+home-recomposition	288576	0	0	276980	0	0	11596	apps/web/node_modules->../../../../../apps/web/node_modules;node_modules->../../../node_modules;
+home-skip	82636	0	0	71568	160	0	10908	apps/web/node_modules->../../../../../apps/web/node_modules;node_modules->../../../node_modules;
+hpg0-audit	200128	0	50172	132540	0	56	17360	
+hpg1-activity-identity	391276	0	50172	323552	164	0	17388	
+hpg2-goal-linked-plans	1246644	0	439716	738936	38164	9892	19936	
+insights-v1-pr4-goal-planning-reporting	328820	0	0	312216	184	0	16420	apps/web/node_modules->/Users/stephen/Desktop/Claude/auraschedule-math-core/apps/web/node_modules;node_modules->/Users/stephen/Desktop/Claude/auraschedule-math-core/node_modules;apps/web/.env.local->/Users/stephen/Desktop/Claude/auraschedule-math-core/apps/web/.env.local;
+insights-v1-pr5-evidence-backed-suggestions	311968	0	0	295328	148	0	16492	apps/web/node_modules->/Users/stephen/Desktop/Claude/auraschedule-math-core/apps/web/node_modules;node_modules->/Users/stephen/Desktop/Claude/auraschedule-math-core/node_modules;apps/web/.env.local->/Users/stephen/Desktop/Claude/auraschedule-math-core/apps/web/.env.local;
+insights-v1-pr6-durable-completion-attribution	774664	0	419132	338988	0	0	16544	apps/web/.env.local->/Users/stephen/Desktop/Claude/auraschedule-math-core/apps/web/.env.local;
+insights-v1-pr7-product-completion-corrections	566652	0	419132	130788	148	0	16584	
+intent-priority-deadline-capture	152996	0	0	143048	148	0	9800	apps/web/node_modules->/Users/stephen/Desktop/Claude/auraschedule-math-core/apps/web/node_modules;node_modules->/Users/stephen/Desktop/Claude/auraschedule-math-core/node_modules;
+location-pr8-reliable-confirmation	548088	0	419132	112196	148	0	16612	
+location-pr9-unified-onboarding-confirmation	832856	0	419132	396900	168	28	16628	
+loving-bardeen-cfbf42	69280	0	0	63500	0	0	5780	apps/web/node_modules->/Users/stephen/Desktop/Claude/auraschedule-math-core/apps/web/node_modules;node_modules->/Users/stephen/Desktop/Claude/auraschedule-math-core/node_modules;apps/web/.env.local->/Users/stephen/Desktop/Claude/auraschedule-math-core/apps/web/.env.local;
+missed-recovery	263308	0	0	251944	160	0	11204	apps/web/node_modules->../../../../../apps/web/node_modules;node_modules->../../../node_modules;
+move-domain	179744	0	0	168580	156	0	11008	apps/web/node_modules->../../../../../apps/web/node_modules;node_modules->../../../node_modules;
+objective-albattani-f959a3	5112	0	0	0	4	0	5108	
+objective-raman-6bdc56	5004	0	0	0	0	0	5004	
+palm-g4a-scan	115228	0	43244	0	51096	95276	-74388	
+palm-p1-verify	84640	0	65104	0	0	0	19536	
+plan-day-row-identity	257308	0	0	246652	136	0	10520	apps/web/node_modules->/Users/stephen/Desktop/Claude/auraschedule-math-core/apps/web/node_modules;node_modules->/Users/stephen/Desktop/Claude/auraschedule-math-core/node_modules;
+plan-my-day-review	88012	0	0	77948	0	0	10064	apps/web/node_modules->/Users/stephen/Desktop/Claude/auraschedule-math-core/apps/web/node_modules;node_modules->/Users/stephen/Desktop/Claude/auraschedule-math-core/node_modules;
+plan-my-day-ux-v2-u1	96912	0	0	86712	136	0	10064	apps/web/node_modules->/Users/stephen/Desktop/Claude/auraschedule-math-core/apps/web/node_modules;node_modules->/Users/stephen/Desktop/Claude/auraschedule-math-core/node_modules;
+plan-my-day-ux-v2-u2	247000	0	0	236764	152	0	10084	apps/web/node_modules->/Users/stephen/Desktop/Claude/auraschedule-math-core/apps/web/node_modules;node_modules->/Users/stephen/Desktop/Claude/auraschedule-math-core/node_modules;
+planning-horizon-v1-p1	155032	0	0	144888	148	0	9996	apps/web/node_modules->/Users/stephen/Desktop/Claude/auraschedule-math-core/apps/web/node_modules;node_modules->/Users/stephen/Desktop/Claude/auraschedule-math-core/node_modules;
+planning-horizon-v1-p2	115904	0	0	105724	148	0	10032	apps/web/node_modules->/Users/stephen/Desktop/Claude/auraschedule-math-core/apps/web/node_modules;node_modules->/Users/stephen/Desktop/Claude/auraschedule-math-core/node_modules;
+quick-capture-domain	162992	0	0	152404	0	0	10588	apps/web/node_modules->/Users/stephen/Desktop/Claude/auraschedule-math-core/apps/web/node_modules;node_modules->/Users/stephen/Desktop/Claude/auraschedule-math-core/node_modules;
+quick-capture-planning	242616	0	0	231956	0	0	10660	apps/web/node_modules->/Users/stephen/Desktop/Claude/auraschedule-math-core/apps/web/node_modules;node_modules->/Users/stephen/Desktop/Claude/auraschedule-math-core/node_modules;
+recomposition-acceptance	178144	0	0	166492	160	0	11492	apps/web/node_modules->../../../../../apps/web/node_modules;node_modules->../../../node_modules;
+recomposition-proposal	167016	0	0	155484	140	0	11392	apps/web/node_modules->../../../../../apps/web/node_modules;node_modules->../../../node_modules;
+scheduling-mode	179348	0	0	167888	156	0	11304	apps/web/node_modules->../../../../../apps/web/node_modules;node_modules->../../../node_modules;
+skip-domain	174084	0	0	163044	184	0	10856	apps/web/node_modules->../../../../../apps/web/node_modules;node_modules->../../../node_modules;
+vigilant-robinson-e14d9c	501340	0	418608	71680	644	0	10408	
+vigilant-spence-87b096	63636	0	50172	0	0	0	13464	

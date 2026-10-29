@@ -1,0 +1,3 @@
+5a6,7
+> case $1 in create-keychain|unlock-keychain|set-keychain-settings|show-keychain-info|dump-keychain|find-generic-password|delete-generic-password|-i)
+>   print -r -- "$1 gate=${R2D_MOCK_GATE:-none} ps_calls=$(cat $M/ps_axo_calls 2>/dev/null || print 0) w=$([[ " $* " == *" -w "* ]] && print 1 || print 0)" >> $M/gate_seq.log;; esac   # dialog-capable op + the gate (scan id) it ran under

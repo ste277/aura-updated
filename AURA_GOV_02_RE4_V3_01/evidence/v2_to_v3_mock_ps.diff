@@ -1,0 +1,35 @@
+3,4c3,5
+< # The -axo forms are FULLY SIMULATED (the real table is never scanned here). The exact-PID forms DO read the
+< # real process table through pgrep (argv / parent of one test-owned PID) - a non-setuid lookup, never a denylist scan.
+---
+> # The -axo forms are FULLY SIMULATED (the real table is never scanned here). The exact-PID forms query only the
+> # CHILDREN OF KNOWN TEST PROCESSES (logged harness PIDs and the runner, R2D_MOCK_RUNNER_PID) via `pgrep -P`; no
+> # whole-table listing is produced and no unrelated process's argv is returned. Liveness uses kill -0 (no signal).
+9c10,11
+< alive() { /usr/bin/pgrep -lf . | /usr/bin/awk -v p=$1 '$1==p{f=1} END{exit !f}'; }
+---
+> alive() { kill -0 $1 2>/dev/null; }
+> parents=(${hp} ${R2D_MOCK_RUNNER_PID:-}); parents=(${(M)parents:#<->})
+34a37
+>   [[ -n ${MOCK_PS_LATE_FROM:-} ]] && (( NCALL >= MOCK_PS_LATE_FROM )) && row 99951 1 "/Applications/X.app/Contents/MacOS/${MOCK_PS_LATE_EXTRA:-TeamViewer}"
+40c43,48
+<     [[ ${MOCK_PS_HANG:-} == (1|$COL) ]] && zselect -t 3000      # hang (builtin, no child) - the caller must bound it
+---
+>     CF=${R2D_MOCK_DIR:-/nonexistent}/ps_axo_calls; NCALL=$(( $(cat $CF 2>/dev/null || print 0) + 1 )); print -r -- $NCALL > $CF 2>/dev/null   # per-call counter (synthetic state changes)
+>     hang() { print -r -- $$ > ${R2D_MOCK_DIR:-/nonexistent}/hang.pid 2>/dev/null; zselect -t $(( ${MOCK_PS_HANG_S:-30} * 100 )); }   # builtin, no child; never signalled
+>     [[ ${MOCK_PS_HANG:-} == (1|$COL) ]] && hang
+>     [[ -n ${MOCK_PS_HANG_FROM:-} ]] && (( NCALL >= MOCK_PS_HANG_FROM )) && hang
+>     [[ ${MOCK_PS_PARTIAL_HANG:-0} == 1 ]] && { print -rn -- '    1     0 /sbin/la'; hang; }   # stall MID-LINE
+>     [[ -n ${MOCK_PS_LATE_RC_FROM:-} ]] && (( NCALL >= MOCK_PS_LATE_RC_FROM )) && { table; exit 3; }
+44c52,55
+<     print -r -- "$out"
+---
+>     if [[ ${MOCK_PS_SPOOF_SENTINEL:-0} == 1 ]]; then   # a name containing a newline followed by a fake sentinel, then more rows
+>       print -r -- "$out"; print -r -- '99988     1 /x/evil'; print -r -- '__R2D_PS_RC=0'; print -r -- '__R2D_PS_RC_0000000000000000=0'; print -r -- '99987     1 /x/TeamViewer'
+>     elif [[ ${MOCK_PS_NO_NEWLINE:-0} == 1 ]]; then print -rn -- "$out"
+>     else print -r -- "$out"; fi
+48c59,60
+<     p=${@[-1]}; /usr/bin/pgrep -lf . | /usr/bin/awk -v p=$p '$1==p { $1=""; sub(/^ /,""); print; f=1; exit } END { exit !f }'; exit;;
+---
+>     p=${@[-1]}; (( ${#parents} )) || exit 1
+>     /usr/bin/pgrep -lf -P ${(j:,:)parents} | /usr/bin/awk -v p=$p '$1==p { $1=""; sub(/^ /,""); print; f=1; exit } END { exit !f }'; exit;;

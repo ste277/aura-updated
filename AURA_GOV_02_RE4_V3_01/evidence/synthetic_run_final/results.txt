@@ -1,0 +1,1105 @@
+# R2E self-test run 2026-11-14T17:15:04Z  filter=''  macOS=14.6  zsh 5.9 (x86_64-apple-darwin23.0)
+# MODE: SIMULATED-MOCK only (intended; the KERNEL_tripwire lines at the end carry the evidence)
+# profile: (version 1)(allow default)(deny process-exec (literal "/usr/bin/security"))(deny process-exec (literal "/bin/ps"))(deny mach-lookup (global-name "com.apple.SecurityServer") (global-name "com.apple.securityd") (global-name "com.apple.securityd.xpc"))(deny file-read* file-write* (subpath "/Users/stephen/Library/Keychains"))
+# sha256 5197b041e6652de4f1593d24513b65ac1e338d2a964b84f8273801c73bef6681  r2d_prototype.zsh
+# sha256 5443c1b4180c5dae75af0ecbeb9fbd637f657b9b12027d1098a375f1b08b1159  tests/r2e_selftest.zsh
+# sha256 6bf99bbd53570ba28d5854111276fdb9b9fc34400c374915842fb5007e8fd902  mock/security
+# sha256 e5bf9bdc65fc92c4afd64ee1dce47e5fbc698ad1c762963f3d43bc4ee45ebf9a  mock/ps
+# sha256 6218a34394b5e220e0ae6e581ac15ad852df8dde739e9d3932e748b1d4d4cdd2  mock/pmset
+# sha256 004b99bae32bd2013f26a9ebeebbb48864ca47b595e5b59579438e5088af111f  mock/csrutil
+PASS  [T0_tripwire] sandbox-exec deny-exec profile blocks a denied literal path (rc!=0, did not run)
+PASS  [T0_tripwire] profile used for all runs denies /usr/bin/security literally
+PASS  [T0_tripwire] text: zsh exec denial of /usr/bin/security is detected
+PASS  [T0_tripwire] text: sandbox-exec execvp denial of security is detected
+PASS  [T0_tripwire] text: env exec denial of security is detected
+PASS  [T0_tripwire] text: blocked setuid /bin/ps is NOT classified as a security denial
+PASS  [T0_tripwire] text: unrelated permission error is NOT classified
+PASS  [T0_tripwire] text: a path merely containing security- is NOT classified
+PASS  [T0_tripwire] text: path-first order "/x/security-notes: Operation not permitted" is NOT classified
+PASS  [T0_tripwire] text: path-first order "/usr/bin/security: Operation not permitted" IS classified
+PASS  [T0_tripwire] kernel: deny(1) process-exec* /usr/bin/security is detected
+PASS  [T0_tripwire] kernel: deny of /bin/ps is NOT classified
+PASS  [T0_tripwire] kernel: denied mach-lookup to SecurityServer IS classified
+PASS  [T0_tripwire] kernel: denied mach-lookup to securityd.xpc IS classified
+PASS  [T0_tripwire] kernel: denied read of the real Keychains dir IS classified
+PASS  [T0_tripwire] kernel: a SYSTEM daemon denied by its OWN sandbox (identityservice) is NOT attributed to this run
+PASS  [T0_tripwire] kernel: our zsh denied the same lookup IS classified
+PASS  [T0_tripwire] kernel: an UNLISTED process name (e.g. ls) is classified - attribution fails closed
+PASS  [T0_tripwire] kernel: denied mach-lookup to an unrelated service is NOT classified
+PASS  [T0_tripwire] kernel: file-read of /usr/bin/security (not exec) is NOT classified
+PASS  [T0_tripwire] missing stdout evidence fails safe (trip_clean false)
+PASS  [T0_tripwire] live: denied dummy did not run even with stderr suppressed (text layer sees nothing)
+PASS  [T0_tripwire] live: kernel layer catches the stderr-suppressed denial (dummy path, mapped)
+PASS  [T0_tripwire] profile also denies securityd mach-lookup and the real Keychains dir (string check)
+PASS  [T0_tripwire] full profile is valid (sandbox-exec runs /usr/bin/true)
+PASS  [T0_tripwire] subpath file-read deny works (dummy dir, same rule form)
+PASS  [T0_tripwire] harness has no literal security path outside the REAL-mode assignment
+PASS  [T1_00_positive_G1] G1 completes (rc=0)
+PASS  [T1_00_positive_G1] mode recorded as MOCK
+PASS  [T1_00_positive_G1] T1-9 SIP enabled logged
+PASS  [T1_00_positive_G1] T1-6 scan + attestations logged
+PASS  [T1_00_positive_G1] T1-1 baseline captured
+PASS  [T1_00_positive_G1] T1-2 ACL A restricted with identity line
+PASS  [T1_00_positive_G1] settings verified exactly
+PASS  [T1_00_positive_G1] L1 selects attr probe (simulated)
+PASS  [T1_00_positive_G1] L1 rejects info probe (no state difference)
+PASS  [T1_00_positive_G1] G1 ACL A unchanged after group
+PASS  [T1_00_positive_G1] cleanup VERIFIED
+PASS  [T1_00_positive_G1] verdict labelled SIMULATED-MOCK
+PASS  [T1_00_positive_G1] no residue (run dir + lock dir removed)
+PASS  [T1_00_positive_G1] set-keychain-settings always passed -l and -t
+PASS  [T1_00_positive_G1] tripwire: no denied exec of real security (stderr text layer)
+PASS  [T1_00_positive_G1] no synthetic secret value in log, stdout or mock argv log
+PASS  [T1_00_positive_G1] every keychain-targeting call carries the guarded r2d path (T1-8)
+PASS  [T1_00_positive_G1] log records exactly one CLEANUP line (idempotent teardown)
+PASS  [T1_00_positive_G1] log records the VERDICT line
+PASS  [T1_01_searchlist_inject] STOP when target appears in a search list
+PASS  [T1_01_searchlist_inject] cleanup UNVERIFIED (global state differs; no automatic correction)
+PASS  [T1_01_searchlist_inject] no search-list write attempted
+PASS  [T1_01_searchlist_inject] tripwire: no denied exec of real security (stderr text layer)
+PASS  [T1_01_searchlist_inject] no synthetic secret value in log, stdout or mock argv log
+PASS  [T1_01_searchlist_inject] every keychain-targeting call carries the guarded r2d path (T1-8)
+PASS  [T1_01_searchlist_inject] log records exactly one CLEANUP line (idempotent teardown)
+PASS  [T1_01_searchlist_inject] log records the VERDICT line
+PASS  [T1_02_default_not_login] STOP when default user keychain is not login
+PASS  [T1_02_default_not_login] no create-keychain issued
+PASS  [T1_02_default_not_login] only read-only global queries issued
+PASS  [T1_02_default_not_login] no residue
+PASS  [T1_02_default_not_login] tripwire: no denied exec of real security (stderr text layer)
+PASS  [T1_02_default_not_login] no synthetic secret value in log, stdout or mock argv log
+PASS  [T1_02_default_not_login] every keychain-targeting call carries the guarded r2d path (T1-8)
+PASS  [T1_02_default_not_login] log records exactly one CLEANUP line (idempotent teardown)
+PASS  [T1_02_default_not_login] log records the VERDICT line
+PASS  [T1_03_acl_A_open] STOP when item A ACL is not applications (0)
+PASS  [T1_03_acl_A_open] keychain deleted on STOP
+PASS  [T1_03_acl_A_open] no residue
+PASS  [T1_03_acl_A_open] tripwire: no denied exec of real security (stderr text layer)
+PASS  [T1_03_acl_A_open] no synthetic secret value in log, stdout or mock argv log
+PASS  [T1_03_acl_A_open] every keychain-targeting call carries the guarded r2d path (T1-8)
+PASS  [T1_03_acl_A_open] log records exactly one CLEANUP line (idempotent teardown)
+PASS  [T1_03_acl_A_open] log records the VERDICT line
+PASS  [T1_04_acl_A_duplicate] duplicate A records classified OPEN(duplicate) -> STOP
+PASS  [T1_04_acl_A_duplicate] tripwire: no denied exec of real security (stderr text layer)
+PASS  [T1_04_acl_A_duplicate] no synthetic secret value in log, stdout or mock argv log
+PASS  [T1_04_acl_A_duplicate] every keychain-targeting call carries the guarded r2d path (T1-8)
+PASS  [T1_04_acl_A_duplicate] log records exactly one CLEANUP line (idempotent teardown)
+PASS  [T1_04_acl_A_duplicate] log records the VERDICT line
+PASS  [T1_05_path_guard_empty] T1-8 refuses keychain call with empty path
+PASS  [T1_05_path_guard_empty] no create-keychain reached mock
+PASS  [T1_05_path_guard_empty] no residue
+PASS  [T1_05_path_guard_empty] tripwire: no denied exec of real security (stderr text layer)
+PASS  [T1_05_path_guard_empty] no synthetic secret value in log, stdout or mock argv log
+PASS  [T1_05_path_guard_empty] every keychain-targeting call carries the guarded r2d path (T1-8)
+PASS  [T1_05_path_guard_empty] log records exactly one CLEANUP line (idempotent teardown)
+PASS  [T1_05_path_guard_empty] log records the VERDICT line
+PASS  [T1_06_sip_disabled] STOP on SIP disabled
+PASS  [T1_06_sip_disabled] zero security calls
+PASS  [T1_06_sip_disabled] no residue
+PASS  [T1_06_sip_disabled] tripwire: no denied exec of real security (stderr text layer)
+PASS  [T1_06_sip_disabled] no synthetic secret value in log, stdout or mock argv log
+PASS  [T1_06_sip_disabled] every keychain-targeting call carries the guarded r2d path (T1-8)
+PASS  [T1_06_sip_disabled] log records exactly one CLEANUP line (idempotent teardown)
+PASS  [T1_06_sip_disabled] log records the VERDICT line
+PASS  [T1_07_sip_custom] STOP on SIP Custom Configuration
+PASS  [T1_07_sip_custom] zero security calls
+PASS  [T1_07_sip_custom] tripwire: no denied exec of real security (stderr text layer)
+PASS  [T1_07_sip_custom] no synthetic secret value in log, stdout or mock argv log
+PASS  [T1_07_sip_custom] every keychain-targeting call carries the guarded r2d path (T1-8)
+PASS  [T1_07_sip_custom] log records exactly one CLEANUP line (idempotent teardown)
+PASS  [T1_07_sip_custom] log records the VERDICT line
+PASS  [T1_08_proc_teamviewer] STOP on denylisted process
+PASS  [T1_08_proc_teamviewer] zero security calls
+PASS  [T1_08_proc_teamviewer] tripwire: no denied exec of real security (stderr text layer)
+PASS  [T1_08_proc_teamviewer] no synthetic secret value in log, stdout or mock argv log
+PASS  [T1_08_proc_teamviewer] every keychain-targeting call carries the guarded r2d path (T1-8)
+PASS  [T1_08_proc_teamviewer] log records exactly one CLEANUP line (idempotent teardown)
+PASS  [T1_08_proc_teamviewer] log records the VERDICT line
+PASS  [T1_09_proc_space_name] STOP on denylisted name containing spaces
+PASS  [T1_09_proc_space_name] zero security calls
+PASS  [T1_09_proc_space_name] tripwire: no denied exec of real security (stderr text layer)
+PASS  [T1_09_proc_space_name] no synthetic secret value in log, stdout or mock argv log
+PASS  [T1_09_proc_space_name] every keychain-targeting call carries the guarded r2d path (T1-8)
+PASS  [T1_09_proc_space_name] log records exactly one CLEANUP line (idempotent teardown)
+PASS  [T1_09_proc_space_name] log records the VERDICT line
+PASS  [T1_10_proc_self_excluded] harness PID itself excluded from scan
+PASS  [T1_10_proc_self_excluded] tripwire: no denied exec of real security (stderr text layer)
+PASS  [T1_10_proc_self_excluded] no synthetic secret value in log, stdout or mock argv log
+PASS  [T1_10_proc_self_excluded] every keychain-targeting call carries the guarded r2d path (T1-8)
+PASS  [T1_10_proc_self_excluded] log records exactly one CLEANUP line (idempotent teardown)
+PASS  [T1_10_proc_self_excluded] log records the VERDICT line
+PASS  [T1_11_proc_child_excluded] direct child of harness excluded from scan
+PASS  [T1_11_proc_child_excluded] tripwire: no denied exec of real security (stderr text layer)
+PASS  [T1_11_proc_child_excluded] no synthetic secret value in log, stdout or mock argv log
+PASS  [T1_11_proc_child_excluded] every keychain-targeting call carries the guarded r2d path (T1-8)
+PASS  [T1_11_proc_child_excluded] log records exactly one CLEANUP line (idempotent teardown)
+PASS  [T1_11_proc_child_excluded] log records the VERDICT line
+PASS  [T1_12_proc_unrelated_osascript] unrelated osascript detected
+PASS  [T1_12_proc_unrelated_osascript] zero security calls
+PASS  [T1_12_proc_unrelated_osascript] tripwire: no denied exec of real security (stderr text layer)
+PASS  [T1_12_proc_unrelated_osascript] no synthetic secret value in log, stdout or mock argv log
+PASS  [T1_12_proc_unrelated_osascript] every keychain-targeting call carries the guarded r2d path (T1-8)
+PASS  [T1_12_proc_unrelated_osascript] log records exactly one CLEANUP line (idempotent teardown)
+PASS  [T1_12_proc_unrelated_osascript] log records the VERDICT line
+PASS  [T1_13_attest_no_1] attestation 'n' at question 1 -> STOP
+PASS  [T1_13_attest_no_1] zero security calls
+PASS  [T1_13_attest_no_1] tripwire: no denied exec of real security (stderr text layer)
+PASS  [T1_13_attest_no_1] no synthetic secret value in log, stdout or mock argv log
+PASS  [T1_13_attest_no_1] every keychain-targeting call carries the guarded r2d path (T1-8)
+PASS  [T1_13_attest_no_1] log records exactly one CLEANUP line (idempotent teardown)
+PASS  [T1_13_attest_no_1] log records the VERDICT line
+PASS  [T1_13_attest_no_2] attestation 'n' at question 2 -> STOP
+PASS  [T1_13_attest_no_2] zero security calls
+PASS  [T1_13_attest_no_2] tripwire: no denied exec of real security (stderr text layer)
+PASS  [T1_13_attest_no_2] no synthetic secret value in log, stdout or mock argv log
+PASS  [T1_13_attest_no_2] every keychain-targeting call carries the guarded r2d path (T1-8)
+PASS  [T1_13_attest_no_2] log records exactly one CLEANUP line (idempotent teardown)
+PASS  [T1_13_attest_no_2] log records the VERDICT line
+PASS  [T1_13_attest_no_3] attestation 'n' at question 3 -> STOP
+PASS  [T1_13_attest_no_3] zero security calls
+PASS  [T1_13_attest_no_3] tripwire: no denied exec of real security (stderr text layer)
+PASS  [T1_13_attest_no_3] no synthetic secret value in log, stdout or mock argv log
+PASS  [T1_13_attest_no_3] every keychain-targeting call carries the guarded r2d path (T1-8)
+PASS  [T1_13_attest_no_3] log records exactly one CLEANUP line (idempotent teardown)
+PASS  [T1_13_attest_no_3] log records the VERDICT line
+PASS  [T1_14_eof] EOF at first prompt -> STOP, not confirmation
+PASS  [T1_14_eof] zero security calls
+PASS  [T1_14_eof] tripwire: no denied exec of real security (stderr text layer)
+PASS  [T1_14_eof] no synthetic secret value in log, stdout or mock argv log
+PASS  [T1_14_eof] every keychain-targeting call carries the guarded r2d path (T1-8)
+PASS  [T1_14_eof] log records exactly one CLEANUP line (idempotent teardown)
+PASS  [T1_14_eof] log records the VERDICT line
+PASS  [T1_15_invalid_1] invalid input [zzqq9] -> STOP INVALID
+PASS  [T1_15_invalid_1] invalid value not logged
+PASS  [T1_15_invalid_1] zero security calls
+PASS  [T1_15_invalid_1] tripwire: no denied exec of real security (stderr text layer)
+PASS  [T1_15_invalid_1] no synthetic secret value in log, stdout or mock argv log
+PASS  [T1_15_invalid_1] every keychain-targeting call carries the guarded r2d path (T1-8)
+PASS  [T1_15_invalid_1] log records exactly one CLEANUP line (idempotent teardown)
+PASS  [T1_15_invalid_1] log records the VERDICT line
+PASS  [T1_15_invalid_2] invalid input [\ y] -> STOP INVALID
+PASS  [T1_15_invalid_2] invalid value not logged
+PASS  [T1_15_invalid_2] zero security calls
+PASS  [T1_15_invalid_2] tripwire: no denied exec of real security (stderr text layer)
+PASS  [T1_15_invalid_2] no synthetic secret value in log, stdout or mock argv log
+PASS  [T1_15_invalid_2] every keychain-targeting call carries the guarded r2d path (T1-8)
+PASS  [T1_15_invalid_2] log records exactly one CLEANUP line (idempotent teardown)
+PASS  [T1_15_invalid_2] log records the VERDICT line
+PASS  [T1_15_invalid_3] invalid input [y\ ] -> STOP INVALID
+PASS  [T1_15_invalid_3] invalid value not logged
+PASS  [T1_15_invalid_3] zero security calls
+PASS  [T1_15_invalid_3] tripwire: no denied exec of real security (stderr text layer)
+PASS  [T1_15_invalid_3] no synthetic secret value in log, stdout or mock argv log
+PASS  [T1_15_invalid_3] every keychain-targeting call carries the guarded r2d path (T1-8)
+PASS  [T1_15_invalid_3] log records exactly one CLEANUP line (idempotent teardown)
+PASS  [T1_15_invalid_3] log records the VERDICT line
+PASS  [T1_15_invalid_4] invalid input [''] -> STOP INVALID
+PASS  [T1_15_invalid_4] invalid value not logged
+PASS  [T1_15_invalid_4] zero security calls
+PASS  [T1_15_invalid_4] tripwire: no denied exec of real security (stderr text layer)
+PASS  [T1_15_invalid_4] no synthetic secret value in log, stdout or mock argv log
+PASS  [T1_15_invalid_4] every keychain-targeting call carries the guarded r2d path (T1-8)
+PASS  [T1_15_invalid_4] log records exactly one CLEANUP line (idempotent teardown)
+PASS  [T1_15_invalid_4] log records the VERDICT line
+PASS  [T1_15_invalid_5] invalid input [Y] -> STOP INVALID
+PASS  [T1_15_invalid_5] invalid value not logged
+PASS  [T1_15_invalid_5] zero security calls
+PASS  [T1_15_invalid_5] tripwire: no denied exec of real security (stderr text layer)
+PASS  [T1_15_invalid_5] no synthetic secret value in log, stdout or mock argv log
+PASS  [T1_15_invalid_5] every keychain-targeting call carries the guarded r2d path (T1-8)
+PASS  [T1_15_invalid_5] log records exactly one CLEANUP line (idempotent teardown)
+PASS  [T1_15_invalid_5] log records the VERDICT line
+PASS  [T1_15_invalid_6] invalid input [yy] -> STOP INVALID
+PASS  [T1_15_invalid_6] invalid value not logged
+PASS  [T1_15_invalid_6] zero security calls
+PASS  [T1_15_invalid_6] tripwire: no denied exec of real security (stderr text layer)
+PASS  [T1_15_invalid_6] no synthetic secret value in log, stdout or mock argv log
+PASS  [T1_15_invalid_6] every keychain-targeting call carries the guarded r2d path (T1-8)
+PASS  [T1_15_invalid_6] log records exactly one CLEANUP line (idempotent teardown)
+PASS  [T1_15_invalid_6] log records the VERDICT line
+PASS  [T1_16_lock_held] STOP when lock dir held
+PASS  [T1_16_lock_held] foreign lock dir not removed
+PASS  [T1_16_lock_held] zero security calls
+PASS  [T1_16_lock_held] tripwire: no denied exec of real security (stderr text layer)
+PASS  [T1_16_lock_held] no synthetic secret value in log, stdout or mock argv log
+PASS  [T1_16_lock_held] every keychain-targeting call carries the guarded r2d path (T1-8)
+PASS  [T1_16_lock_held] log records exactly one CLEANUP line (idempotent teardown)
+PASS  [T1_16_lock_held] log records the VERDICT line
+PASS  [T1_17_unknown_test] unknown test id -> STOP before preflight
+PASS  [T1_17_unknown_test] zero security calls
+PASS  [T1_17_unknown_test] tripwire: no denied exec of real security (stderr text layer)
+PASS  [T1_17_unknown_test] no synthetic secret value in log, stdout or mock argv log
+PASS  [T1_17_unknown_test] every keychain-targeting call carries the guarded r2d path (T1-8)
+PASS  [T1_17_unknown_test] log records exactly one CLEANUP line (idempotent teardown)
+PASS  [T1_17_unknown_test] log records the VERDICT line
+PASS  [T1_18_no_test] no --test -> STOP
+PASS  [T1_18_no_test] zero security calls
+PASS  [T1_19_unknown_arg] unknown argument -> exit 1
+PASS  [T1_19_unknown_arg] zero security calls
+PASS  [T1_20_unpinned_static] REAL-mode R2D_* refusal precedes the T1-4 UNPINNED stop
+PASS  [T1_20_unpinned_static] T1-4 UNPINNED stop precedes observer mode and every preflight security call
+PASS  [T1_21_mockdir_is_usrbin] R2D_MOCK_DIR=/usr/bin refused (mock security would be the real binary)
+PASS  [T1_21_mockdir_is_usrbin] R2D_MOCK_DIR=/usr//bin refused
+PASS  [T1_21_mockdir_is_usrbin] R2D_MOCK_DIR=/usr/bin/../bin refused
+PASS  [T1_21_mockdir_is_usrbin] R2D_MOCK_DIR=/usr/bin/ refused
+PASS  [T1_21_mockdir_is_usrbin] mock dir m_link (symlinked tool / foreign binary / symlinked dir) refused
+PASS  [T1_21_mockdir_is_usrbin] mock dir m_copy (symlinked tool / foreign binary / symlinked dir) refused
+PASS  [T1_21_mockdir_is_usrbin] mock dir m_dirlink (symlinked tool / foreign binary / symlinked dir) refused
+PASS  [T1_21_mockdir_is_usrbin] no mock call log from any refused variant
+PASS  [T1_25_args_ids] refused: --test=, (STOP, zero security calls)
+PASS  [T1_25_args_ids] refused: --test=G1, (STOP, zero security calls)
+PASS  [T1_25_args_ids] refused: --test=g1 (STOP, zero security calls)
+PASS  [T1_25_args_ids] refused: --test=G1,,L7 (STOP, zero security calls)
+PASS  [T1_25_args_ids] refused: --test=G1,G1 (STOP, zero security calls)
+PASS  [T1_25_args_ids] refused before logging: --test=G1 --test=L7
+PASS  [T1_25_args_ids] refused before logging: --probe=attr --probe=info --test=G1
+PASS  [T1_25_args_ids] refused before logging: --test=G1 --observe=x
+PASS  [T1_24_real_env_refusal_static] REAL branch refuses any R2D_* parameter
+PASS  [T1_24_real_env_refusal_static] REAL branch clears the answers-file variable before use
+PASS  [T1_22_settings_replaced] settings string verified exactly (lock-on-sleep missing -> STOP)
+PASS  [T1_22_settings_replaced] no residue
+PASS  [T1_22_settings_replaced] tripwire: no denied exec of real security (stderr text layer)
+PASS  [T1_22_settings_replaced] no synthetic secret value in log, stdout or mock argv log
+PASS  [T1_22_settings_replaced] every keychain-targeting call carries the guarded r2d path (T1-8)
+PASS  [T1_22_settings_replaced] log records exactly one CLEANUP line (idempotent teardown)
+PASS  [T1_22_settings_replaced] log records the VERDICT line
+PASS  [T1_23_unlock_fails] unlock failure -> STOP, keychain stays locked and is deleted
+PASS  [T1_23_unlock_fails] no residue
+PASS  [T1_23_unlock_fails] tripwire: no denied exec of real security (stderr text layer)
+PASS  [T1_23_unlock_fails] no synthetic secret value in log, stdout or mock argv log
+PASS  [T1_23_unlock_fails] every keychain-targeting call carries the guarded r2d path (T1-8)
+PASS  [T1_23_unlock_fails] log records exactly one CLEANUP line (idempotent teardown)
+PASS  [T1_23_unlock_fails] log records the VERDICT line
+PASS  [T2_G1_probe_flag] calibration at creation with --probe=attr
+PASS  [T2_G1_probe_flag] L2 records locked state after Cancel
+PASS  [T2_G1_probe_flag] cleanup VERIFIED
+PASS  [T2_G1_probe_flag] tripwire: no denied exec of real security (stderr text layer)
+PASS  [T2_G1_probe_flag] no synthetic secret value in log, stdout or mock argv log
+PASS  [T2_G1_probe_flag] every keychain-targeting call carries the guarded r2d path (T1-8)
+PASS  [T2_G1_probe_flag] log records exactly one CLEANUP line (idempotent teardown)
+PASS  [T2_G1_probe_flag] log records the VERDICT line
+PASS  [T2_L1_none] L1 INCONCLUSIVE when no probe distinguishes
+PASS  [T2_L1_none] state reported unknown (never by-construction)
+PASS  [T2_L1_none] tripwire: no denied exec of real security (stderr text layer)
+PASS  [T2_L1_none] no synthetic secret value in log, stdout or mock argv log
+PASS  [T2_L1_none] every keychain-targeting call carries the guarded r2d path (T1-8)
+PASS  [T2_L1_none] log records exactly one CLEANUP line (idempotent teardown)
+PASS  [T2_L1_none] log records the VERDICT line
+PASS  [T2_L1_dialog] L1 candidate disqualified when owner reports a dialog
+PASS  [T2_L1_dialog] L1 picks dump instead
+PASS  [T2_L1_dialog] tripwire: no denied exec of real security (stderr text layer)
+PASS  [T2_L1_dialog] no synthetic secret value in log, stdout or mock argv log
+PASS  [T2_L1_dialog] every keychain-targeting call carries the guarded r2d path (T1-8)
+PASS  [T2_L1_dialog] log records exactly one CLEANUP line (idempotent teardown)
+PASS  [T2_L1_dialog] log records the VERDICT line
+PASS  [T2_L2_leak] L2 FAIL when secret returned while locked
+PASS  [T2_L2_leak] no secret in log
+PASS  [T2_L2_leak] no residue
+PASS  [T2_L2_leak] tripwire: no denied exec of real security (stderr text layer)
+PASS  [T2_L2_leak] no synthetic secret value in log, stdout or mock argv log
+PASS  [T2_L2_leak] every keychain-targeting call carries the guarded r2d path (T1-8)
+PASS  [T2_L2_leak] log records exactly one CLEANUP line (idempotent teardown)
+PASS  [T2_L2_leak] log records the VERDICT line
+PASS  [T2_L2_unlocked_after_cancel] probe disagreement (unlocked after Cancel) -> FAIL STOP
+PASS  [T2_L2_unlocked_after_cancel] tripwire: no denied exec of real security (stderr text layer)
+PASS  [T2_L2_unlocked_after_cancel] no synthetic secret value in log, stdout or mock argv log
+PASS  [T2_L2_unlocked_after_cancel] every keychain-targeting call carries the guarded r2d path (T1-8)
+PASS  [T2_L2_unlocked_after_cancel] log records exactly one CLEANUP line (idempotent teardown)
+PASS  [T2_L2_unlocked_after_cancel] log records the VERDICT line
+PASS  [T2_L2_login_pw] login-password dialog -> STOP
+PASS  [T2_L2_login_pw] no residue
+PASS  [T2_L2_login_pw] tripwire: no denied exec of real security (stderr text layer)
+PASS  [T2_L2_login_pw] no synthetic secret value in log, stdout or mock argv log
+PASS  [T2_L2_login_pw] every keychain-targeting call carries the guarded r2d path (T1-8)
+PASS  [T2_L2_login_pw] log records exactly one CLEANUP line (idempotent teardown)
+PASS  [T2_L2_login_pw] log records the VERDICT line
+PASS  [T2_L2_other_dialog] unexpected dialog type O -> STOP
+PASS  [T2_L2_other_dialog] tripwire: no denied exec of real security (stderr text layer)
+PASS  [T2_L2_other_dialog] no synthetic secret value in log, stdout or mock argv log
+PASS  [T2_L2_other_dialog] every keychain-targeting call carries the guarded r2d path (T1-8)
+PASS  [T2_L2_other_dialog] log records exactly one CLEANUP line (idempotent teardown)
+PASS  [T2_L2_other_dialog] log records the VERDICT line
+PASS  [T2_L3_leak] L3 FAIL when dump discloses while locked
+PASS  [T2_L3_leak] no secret in log
+PASS  [T2_L3_leak] tripwire: no denied exec of real security (stderr text layer)
+PASS  [T2_L3_leak] no synthetic secret value in log, stdout or mock argv log
+PASS  [T2_L3_leak] every keychain-targeting call carries the guarded r2d path (T1-8)
+PASS  [T2_L3_leak] log records exactly one CLEANUP line (idempotent teardown)
+PASS  [T2_L3_leak] log records the VERDICT line
+PASS  [T2_L4_write] L4 FAIL when write/delete succeed while locked (overwrite rc=0 caught first)
+PASS  [T2_L4_write] tripwire: no denied exec of real security (stderr text layer)
+PASS  [T2_L4_write] no synthetic secret value in log, stdout or mock argv log
+PASS  [T2_L4_write] every keychain-targeting call carries the guarded r2d path (T1-8)
+PASS  [T2_L4_write] log records exactly one CLEANUP line (idempotent teardown)
+PASS  [T2_L4_write] log records the VERDICT line
+PASS  [T2_L4_overwrite_only] L4 FAIL when only the overwrite is accepted while locked
+PASS  [T2_L4_overwrite_only] tripwire: no denied exec of real security (stderr text layer)
+PASS  [T2_L4_overwrite_only] no synthetic secret value in log, stdout or mock argv log
+PASS  [T2_L4_overwrite_only] every keychain-targeting call carries the guarded r2d path (T1-8)
+PASS  [T2_L4_overwrite_only] log records exactly one CLEANUP line (idempotent teardown)
+PASS  [T2_L4_overwrite_only] log records the VERDICT line
+PASS  [T2_L4_silent_write] L4 FAIL when write reports refusal but mdat changed
+PASS  [T2_L4_silent_write] tripwire: no denied exec of real security (stderr text layer)
+PASS  [T2_L4_silent_write] no synthetic secret value in log, stdout or mock argv log
+PASS  [T2_L4_silent_write] every keychain-targeting call carries the guarded r2d path (T1-8)
+PASS  [T2_L4_silent_write] log records exactly one CLEANUP line (idempotent teardown)
+PASS  [T2_L4_silent_write] log records the VERDICT line
+PASS  [T2_L4_no_baseline] L4 INCONCLUSIVE (not PASS) when no baseline mdat is readable
+PASS  [T2_L4_no_baseline] tripwire: no denied exec of real security (stderr text layer)
+PASS  [T2_L4_no_baseline] no synthetic secret value in log, stdout or mock argv log
+PASS  [T2_L4_no_baseline] every keychain-targeting call carries the guarded r2d path (T1-8)
+PASS  [T2_L4_no_baseline] log records exactly one CLEANUP line (idempotent teardown)
+PASS  [T2_L4_no_baseline] log records the VERDICT line
+PASS  [T2_L4_pass_note] L4 normal path: locked before write, no FAIL, and the mdat-not-proof note is logged
+PASS  [T2_L4_pass_note] tripwire: no denied exec of real security (stderr text layer)
+PASS  [T2_L4_pass_note] no synthetic secret value in log, stdout or mock argv log
+PASS  [T2_L4_pass_note] every keychain-targeting call carries the guarded r2d path (T1-8)
+PASS  [T2_L4_pass_note] log records exactly one CLEANUP line (idempotent teardown)
+PASS  [T2_L4_pass_note] log records the VERDICT line
+PASS  [T2_L5_leak] L2 passes then L5 FAIL on concurrent leak
+PASS  [T2_L5_leak] concurrent reader temp files removed
+PASS  [T2_L5_leak] tripwire: no denied exec of real security (stderr text layer)
+PASS  [T2_L5_leak] no synthetic secret value in log, stdout or mock argv log
+PASS  [T2_L5_leak] every keychain-targeting call carries the guarded r2d path (T1-8)
+PASS  [T2_L5_leak] log records exactly one CLEANUP line (idempotent teardown)
+PASS  [T2_L5_leak] log records the VERDICT line
+PASS  [T2_L6_normal] L6 characterization recorded
+PASS  [T2_L6_normal] L6 verdict RECORDED (characterization)
+PASS  [T2_L6_normal] tripwire: no denied exec of real security (stderr text layer)
+PASS  [T2_L6_normal] no synthetic secret value in log, stdout or mock argv log
+PASS  [T2_L6_normal] every keychain-targeting call carries the guarded r2d path (T1-8)
+PASS  [T2_L6_normal] log records exactly one CLEANUP line (idempotent teardown)
+PASS  [T2_L6_normal] log records the VERDICT line
+PASS  [T2_L6_allow_without_click] L6a FAIL when secret returned though owner Denied
+PASS  [T2_L6_allow_without_click] tripwire: no denied exec of real security (stderr text layer)
+PASS  [T2_L6_allow_without_click] no synthetic secret value in log, stdout or mock argv log
+PASS  [T2_L6_allow_without_click] every keychain-targeting call carries the guarded r2d path (T1-8)
+PASS  [T2_L6_allow_without_click] log records exactly one CLEANUP line (idempotent teardown)
+PASS  [T2_L6_allow_without_click] log records the VERDICT line
+PASS  [T2_L8_pass] L8 PASS (timeout relock; probe does not reset idle timer)
+PASS  [T2_L8_pass] tripwire: no denied exec of real security (stderr text layer)
+PASS  [T2_L8_pass] no synthetic secret value in log, stdout or mock argv log
+PASS  [T2_L8_pass] every keychain-targeting call carries the guarded r2d path (T1-8)
+PASS  [T2_L8_pass] log records exactly one CLEANUP line (idempotent teardown)
+PASS  [T2_L8_pass] log records the VERDICT line
+PASS  [T2_L8_probe_resets] L8 detects a probe that resets the idle timer
+PASS  [T2_L8_probe_resets] tripwire: no denied exec of real security (stderr text layer)
+PASS  [T2_L8_probe_resets] no synthetic secret value in log, stdout or mock argv log
+PASS  [T2_L8_probe_resets] every keychain-targeting call carries the guarded r2d path (T1-8)
+PASS  [T2_L8_probe_resets] log records exactly one CLEANUP line (idempotent teardown)
+PASS  [T2_L8_probe_resets] log records the VERDICT line
+PASS  [T2_L8_early_lock] L8 relock before T/2 -> INCONCLUSIVE (probe reset not measurable), never PASS
+PASS  [T2_L8_early_lock] tripwire: no denied exec of real security (stderr text layer)
+PASS  [T2_L8_early_lock] no synthetic secret value in log, stdout or mock argv log
+PASS  [T2_L8_early_lock] every keychain-targeting call carries the guarded r2d path (T1-8)
+PASS  [T2_L8_early_lock] log records exactly one CLEANUP line (idempotent teardown)
+PASS  [T2_L8_early_lock] log records the VERDICT line
+PASS  [T2_L8_noprobe] L8 INCONCLUSIVE without calibrated probe
+PASS  [T2_L8_noprobe] tripwire: no denied exec of real security (stderr text layer)
+PASS  [T2_L8_noprobe] no synthetic secret value in log, stdout or mock argv log
+PASS  [T2_L8_noprobe] every keychain-targeting call carries the guarded r2d path (T1-8)
+PASS  [T2_L8_noprobe] log records exactly one CLEANUP line (idempotent teardown)
+PASS  [T2_L8_noprobe] log records the VERDICT line
+PASS  [T2_L8_no_autolock] L8 FAIL when timeout does not relock
+PASS  [T2_L8_no_autolock] tripwire: no denied exec of real security (stderr text layer)
+PASS  [T2_L8_no_autolock] no synthetic secret value in log, stdout or mock argv log
+PASS  [T2_L8_no_autolock] every keychain-targeting call carries the guarded r2d path (T1-8)
+PASS  [T2_L8_no_autolock] log records exactly one CLEANUP line (idempotent teardown)
+PASS  [T2_L8_no_autolock] log records the VERDICT line
+PASS  [T2_L9_pass] L9 PASS when sleep evidenced and locked
+PASS  [T2_L9_pass] tripwire: no denied exec of real security (stderr text layer)
+PASS  [T2_L9_pass] no synthetic secret value in log, stdout or mock argv log
+PASS  [T2_L9_pass] every keychain-targeting call carries the guarded r2d path (T1-8)
+PASS  [T2_L9_pass] log records exactly one CLEANUP line (idempotent teardown)
+PASS  [T2_L9_pass] log records the VERDICT line
+PASS  [T2_L9_fail] L9 FAIL when unlocked after sleep
+PASS  [T2_L9_fail] tripwire: no denied exec of real security (stderr text layer)
+PASS  [T2_L9_fail] no synthetic secret value in log, stdout or mock argv log
+PASS  [T2_L9_fail] every keychain-targeting call carries the guarded r2d path (T1-8)
+PASS  [T2_L9_fail] log records exactly one CLEANUP line (idempotent teardown)
+PASS  [T2_L9_fail] log records the VERDICT line
+PASS  [T2_L9_nosleep] L9 INCONCLUSIVE when no sleep evidenced
+PASS  [T2_L9_nosleep] tripwire: no denied exec of real security (stderr text layer)
+PASS  [T2_L9_nosleep] no synthetic secret value in log, stdout or mock argv log
+PASS  [T2_L9_nosleep] every keychain-targeting call carries the guarded r2d path (T1-8)
+PASS  [T2_L9_nosleep] log records exactly one CLEANUP line (idempotent teardown)
+PASS  [T2_L9_nosleep] log records the VERDICT line
+PASS  [T2_L9_enter_text] L9 Enter prompt rejects typed text
+PASS  [T2_L9_enter_text] tripwire: no denied exec of real security (stderr text layer)
+PASS  [T2_L9_enter_text] no synthetic secret value in log, stdout or mock argv log
+PASS  [T2_L9_enter_text] every keychain-targeting call carries the guarded r2d path (T1-8)
+PASS  [T2_L9_enter_text] log records exactly one CLEANUP line (idempotent teardown)
+PASS  [T2_L9_enter_text] log records the VERDICT line
+PASS  [T2_L10_pass] L10 ACL becomes (1) com.apple.security after Always Allow
+PASS  [T2_L10_pass] L10 PASS (simulated)
+PASS  [T2_L10_pass] tripwire: no denied exec of real security (stderr text layer)
+PASS  [T2_L10_pass] no synthetic secret value in log, stdout or mock argv log
+PASS  [T2_L10_pass] every keychain-targeting call carries the guarded r2d path (T1-8)
+PASS  [T2_L10_pass] log records exactly one CLEANUP line (idempotent teardown)
+PASS  [T2_L10_pass] log records the VERDICT line
+PASS  [T2_L10_fail] L10 FAIL when trusted read returns secret while locked
+PASS  [T2_L10_fail] no secret in log
+PASS  [T2_L10_fail] tripwire: no denied exec of real security (stderr text layer)
+PASS  [T2_L10_fail] no synthetic secret value in log, stdout or mock argv log
+PASS  [T2_L10_fail] every keychain-targeting call carries the guarded r2d path (T1-8)
+PASS  [T2_L10_fail] log records exactly one CLEANUP line (idempotent teardown)
+PASS  [T2_L10_fail] log records the VERDICT line
+PASS  [T2_L10_not_granted] L10 INCONCLUSIVE when Always Allow not granted
+PASS  [T2_L10_not_granted] tripwire: no denied exec of real security (stderr text layer)
+PASS  [T2_L10_not_granted] no synthetic secret value in log, stdout or mock argv log
+PASS  [T2_L10_not_granted] every keychain-targeting call carries the guarded r2d path (T1-8)
+PASS  [T2_L10_not_granted] log records exactly one CLEANUP line (idempotent teardown)
+PASS  [T2_L10_not_granted] log records the VERDICT line
+PASS  [T2_L10_reattest_no] L10 STOP when automation-off not re-attested
+PASS  [T2_L10_reattest_no] no keychain created
+PASS  [T2_L10_reattest_no] tripwire: no denied exec of real security (stderr text layer)
+PASS  [T2_L10_reattest_no] no synthetic secret value in log, stdout or mock argv log
+PASS  [T2_L10_reattest_no] every keychain-targeting call carries the guarded r2d path (T1-8)
+PASS  [T2_L10_reattest_no] log records exactly one CLEANUP line (idempotent teardown)
+PASS  [T2_L10_reattest_no] log records the VERDICT line
+PASS  [T2_L11_pass] L11 detector flags B and C with identity
+PASS  [T2_L11_pass] L11 RECORDED (no FAIL)
+PASS  [T2_L11_pass] tripwire: no denied exec of real security (stderr text layer)
+PASS  [T2_L11_pass] no synthetic secret value in log, stdout or mock argv log
+PASS  [T2_L11_pass] every keychain-targeting call carries the guarded r2d path (T1-8)
+PASS  [T2_L11_pass] log records exactly one CLEANUP line (idempotent teardown)
+PASS  [T2_L11_pass] log records the VERDICT line
+PASS  [T2_L11_miss] L11 FAIL when detector misses C
+PASS  [T2_L11_miss] tripwire: no denied exec of real security (stderr text layer)
+PASS  [T2_L11_miss] no synthetic secret value in log, stdout or mock argv log
+PASS  [T2_L11_miss] every keychain-targeting call carries the guarded r2d path (T1-8)
+PASS  [T2_L11_miss] log records exactly one CLEANUP line (idempotent teardown)
+PASS  [T2_L11_miss] log records the VERDICT line
+PASS  [T2_L13_pass] L13 wrong passphrase rejected, correct accepted
+PASS  [T2_L13_pass] tripwire: no denied exec of real security (stderr text layer)
+PASS  [T2_L13_pass] no synthetic secret value in log, stdout or mock argv log
+PASS  [T2_L13_pass] every keychain-targeting call carries the guarded r2d path (T1-8)
+PASS  [T2_L13_pass] log records exactly one CLEANUP line (idempotent teardown)
+PASS  [T2_L13_pass] log records the VERDICT line
+PASS  [T2_L13_fail] L13 FAIL if wrong passphrase accepted
+PASS  [T2_L13_fail] tripwire: no denied exec of real security (stderr text layer)
+PASS  [T2_L13_fail] no synthetic secret value in log, stdout or mock argv log
+PASS  [T2_L13_fail] every keychain-targeting call carries the guarded r2d path (T1-8)
+PASS  [T2_L13_fail] log records exactly one CLEANUP line (idempotent teardown)
+PASS  [T2_L13_fail] log records the VERDICT line
+PASS  [T2_L14] L14 recorded
+PASS  [T2_L14] tripwire: no denied exec of real security (stderr text layer)
+PASS  [T2_L14] no synthetic secret value in log, stdout or mock argv log
+PASS  [T2_L14] every keychain-targeting call carries the guarded r2d path (T1-8)
+PASS  [T2_L14] log records exactly one CLEANUP line (idempotent teardown)
+PASS  [T2_L14] log records the VERDICT line
+PASS  [T2_L15] L15 records two dialogs in sequence
+PASS  [T2_L15] tripwire: no denied exec of real security (stderr text layer)
+PASS  [T2_L15] no synthetic secret value in log, stdout or mock argv log
+PASS  [T2_L15] every keychain-targeting call carries the guarded r2d path (T1-8)
+PASS  [T2_L15] log records exactly one CLEANUP line (idempotent teardown)
+PASS  [T2_L15] log records the VERDICT line
+PASS  [T2_L15_leak] L15 FAIL on secret after Deny
+PASS  [T2_L15_leak] tripwire: no denied exec of real security (stderr text layer)
+PASS  [T2_L15_leak] no synthetic secret value in log, stdout or mock argv log
+PASS  [T2_L15_leak] every keychain-targeting call carries the guarded r2d path (T1-8)
+PASS  [T2_L15_leak] log records exactly one CLEANUP line (idempotent teardown)
+PASS  [T2_L15_leak] log records the VERDICT line
+PASS  [T2_multi] multi-group run: per-group teardown + combined verdict
+PASS  [T2_multi] no residue
+PASS  [T2_multi] tripwire: no denied exec of real security (stderr text layer)
+PASS  [T2_multi] no synthetic secret value in log, stdout or mock argv log
+PASS  [T2_multi] every keychain-targeting call carries the guarded r2d path (T1-8)
+PASS  [T2_multi] log records exactly one CLEANUP line (idempotent teardown)
+PASS  [T2_multi] log records the VERDICT line
+PASS  [T3_signal_INT] INT: harness pid in log matches launched pid
+PASS  [T3_signal_INT] INT: trap logged interruption
+PASS  [T3_signal_INT] INT: verdict STOPPED (interrupted)
+PASS  [T3_signal_INT] INT: cleanup VERIFIED (keychain locked+deleted)
+PASS  [T3_signal_INT] INT: no residue
+PASS  [T3_signal_INT] tripwire: no denied exec of real security (stderr text layer)
+PASS  [T3_signal_INT] no synthetic secret value in log, stdout or mock argv log
+PASS  [T3_signal_INT] every keychain-targeting call carries the guarded r2d path (T1-8)
+PASS  [T3_signal_INT] log records exactly one CLEANUP line (idempotent teardown)
+PASS  [T3_signal_INT] log records the VERDICT line
+PASS  [T3_signal_TERM] TERM: harness pid in log matches launched pid
+PASS  [T3_signal_TERM] TERM: trap logged interruption
+PASS  [T3_signal_TERM] TERM: verdict STOPPED (interrupted)
+PASS  [T3_signal_TERM] TERM: cleanup VERIFIED (keychain locked+deleted)
+PASS  [T3_signal_TERM] TERM: no residue
+PASS  [T3_signal_TERM] tripwire: no denied exec of real security (stderr text layer)
+PASS  [T3_signal_TERM] no synthetic secret value in log, stdout or mock argv log
+PASS  [T3_signal_TERM] every keychain-targeting call carries the guarded r2d path (T1-8)
+PASS  [T3_signal_TERM] log records exactly one CLEANUP line (idempotent teardown)
+PASS  [T3_signal_TERM] log records the VERDICT line
+PASS  [T3_signal_HUP] HUP: harness pid in log matches launched pid
+PASS  [T3_signal_HUP] HUP: trap logged interruption
+PASS  [T3_signal_HUP] HUP: verdict STOPPED (interrupted)
+PASS  [T3_signal_HUP] HUP: cleanup VERIFIED (keychain locked+deleted)
+PASS  [T3_signal_HUP] HUP: no residue
+PASS  [T3_signal_HUP] tripwire: no denied exec of real security (stderr text layer)
+PASS  [T3_signal_HUP] no synthetic secret value in log, stdout or mock argv log
+PASS  [T3_signal_HUP] every keychain-targeting call carries the guarded r2d path (T1-8)
+PASS  [T3_signal_HUP] log records exactly one CLEANUP line (idempotent teardown)
+PASS  [T3_signal_HUP] log records the VERDICT line
+PASS  [T4_L7_pass] watchdog: exact PID argv ends "r2d_watchdog 12 <run keychain> <mock security>"
+PASS  [T4_L7_pass] watchdog parent is the harness pid
+PASS  [T4_L7_pass] observer confirmed watchdog alive (exact pid + argv + parent) before kill
+PASS  [T4_L7_pass] observer finished within its bound
+PASS  [T4_L7_pass] observer saw unlocked residual at t+5 (N=12 > 5)
+PASS  [T4_L7_pass] observer saw locked at t+N+10 -> L7 PASS (simulated)
+PASS  [T4_L7_pass] V3R-4: both observer probes were gated by fresh scans in the observer process
+PASS  [T4_L7_pass] watchdog exited after firing
+PASS  [T4_L7_pass] observer did not lock/delete the keychain (no delete-keychain in argv log)
+PASS  [T4_L7_pass] crash residue present as expected (run dir + lock dir)
+PASS  [T4_L7_pass] observer log: one CLEANUP line, no secret
+PASS  [T4_L7_pass] L16POST reports the crash residue
+PASS  [T4_L7_pass] R2D-07 manual recovery (mock toolchain, explicit paths) succeeds
+PASS  [T4_L7_pass] after manual recovery L16POST reports zero residue
+PASS  [T4_L7_pass] no residue
+PASS  [T4_L7_watchdog_dead] killed watchdog is gone (reaped by harness)
+PASS  [T4_L7_watchdog_dead] observer exits within bound (no hang)
+PASS  [T4_L7_watchdog_dead] observer INCONCLUSIVE when watchdog not alive
+PASS  [T4_L7_watchdog_dead] observer STOP left the harness keychain in place
+PASS  [T4_L7_watchdog_dead] recovered
+PASS  [T4_L7_watchdog_dead] recovered: no residue
+PASS  [T4_L7_decoy] decoy has the identical argv tail
+PASS  [T4_L7_decoy] decoy with identical argv but wrong parent -> INCONCLUSIVE (not PASS)
+PASS  [T4_L7_decoy] real watchdog pid but wrong N in args -> argv mismatch -> INCONCLUSIVE
+PASS  [T4_L7_decoy] harness pid not alive at observer start -> INCONCLUSIVE (residual timing unknown)
+PASS  [T4_L7_decoy] recovered
+PASS  [T4_L7_decoy] recovered: no residue
+PASS  [T4_L7_obs_wait_bound] observer gives up after its wait bound when the harness is never killed (exits <= 15s)
+PASS  [T4_L7_obs_wait_bound] bounded wait -> INCONCLUSIVE, never PASS
+PASS  [T4_L7_obs_wait_bound] recovered
+PASS  [T4_L7_obs_wait_bound] recovered: no residue
+PASS  [T4_L7_lock_fails] L7 FAIL when still unlocked after the watchdog deadline
+PASS  [T4_L7_lock_fails] recovered
+PASS  [T4_L7_lock_fails] recovered: no residue
+PASS  [T4_teardown_cancels_watchdog] TERM -> trap teardown; CLEANUP VERIFIED
+PASS  [T4_teardown_cancels_watchdog] teardown cancelled the TERM-ignoring watchdog (exact pid/argv/parent, KILL)
+PASS  [T4_teardown_cancels_watchdog] teardown deleted the keychain
+PASS  [T4_teardown_cancels_watchdog] no residue
+PASS  [T4_teardown_cancels_watchdog] tripwire: no denied exec of real security (stderr text layer)
+PASS  [T4_teardown_cancels_watchdog] no synthetic secret value in log, stdout or mock argv log
+PASS  [T4_teardown_cancels_watchdog] every keychain-targeting call carries the guarded r2d path (T1-8)
+PASS  [T4_teardown_cancels_watchdog] log records exactly one CLEANUP line (idempotent teardown)
+PASS  [T4_teardown_cancels_watchdog] log records the VERDICT line
+PASS  [T4_L7_noprobe] L7 requires a calibrated probe -> INCONCLUSIVE STOP with verified cleanup
+PASS  [T4_L7_noprobe] no watchdog armed
+PASS  [T4_L7_noprobe] no residue
+PASS  [T4_L7_noprobe] tripwire: no denied exec of real security (stderr text layer)
+PASS  [T4_L7_noprobe] no synthetic secret value in log, stdout or mock argv log
+PASS  [T4_L7_noprobe] every keychain-targeting call carries the guarded r2d path (T1-8)
+PASS  [T4_L7_noprobe] log records exactly one CLEANUP line (idempotent teardown)
+PASS  [T4_L7_noprobe] log records the VERDICT line
+PASS  [T4_observer_badpath] observer T1-8 guard refuses non-r2d path
+PASS  [T4_observer_badpath] zero security calls
+PASS  [T4_observer_badargs] observer refuses malformed arguments
+PASS  [T4_observer_badargs] zero security calls
+PASS  [T4_observer_badargs] observer refuses the old 7-field form (mode field required)
+PASS  [T4_observer_badargs] zero security calls
+PASS  [T4_observer_pathguard] path guard refuses r2d-run.AAAAAAAA/../x/r2d.keychain-db
+PASS  [T4_observer_pathguard] path guard refuses r2d-run.short/r2d.keychain-db
+PASS  [T4_observer_pathguard] path guard refuses r2d-run.AAAAAAAA/sub/r2d.keychain-db
+PASS  [T4_observer_pathguard] path guard refuses r2d-run.AAAA*AAA/r2d.keychain-db
+PASS  [T4_observer_pathguard] path guard refuses /tmp/r2d-run.AAAAAAAA/r2d.keychain-db
+PASS  [T4_observer_mode_mismatch] observer refuses evidence from a different mode (harness=REAL vs observer=SIMULATED-MOCK)
+PASS  [T4_observer_mode_mismatch] recovered
+PASS  [T4_observer_mode_mismatch] recovered: no residue
+PASS  [T4_L7_early_relock] relocked before the watchdog deadline -> INCONCLUSIVE, not PASS
+PASS  [T4_L7_early_relock] recovered
+PASS  [T4_L7_early_relock] recovered: no residue
+PASS  [T6_fifo_old_pattern_hangs] precondition: answers path is a FIFO
+PASS  [T6_fifo_old_pattern_hangs] old pattern (write-only open, no reader) blocks: detected by the bound, killed by exact pid
+PASS  [T6_fifo_reader_dies_early] runner opened and wrote the FIFO without blocking (O_RDWR)
+PASS  [T6_fifo_reader_dies_early] early-exiting harness ends within bound with rc=1 (unknown argument)
+PASS  [T6_fifo_reader_dies_early] FIFO removed after the scenario
+PASS  [T6_fifo_stale] precondition: stale FIFO present
+PASS  [T6_fifo_stale] stale FIFO replaced by a regular answers file
+PASS  [T6_fifo_stale] run completes (rc=0) - no hang on the stale path
+PASS  [T6_fifo_stale] tripwire: no denied exec of real security (stderr text layer)
+PASS  [T6_fifo_stale] no synthetic secret value in log, stdout or mock argv log
+PASS  [T6_fifo_stale] every keychain-targeting call carries the guarded r2d path (T1-8)
+PASS  [T6_fifo_stale] log records exactly one CLEANUP line (idempotent teardown)
+PASS  [T6_fifo_stale] log records the VERDICT line
+PASS  [T6_run_bound] non-returning run is cut at the bound (RC=124) and the kill is recorded with its pid
+PASS  [T6_run_bound] recovered
+PASS  [T6_run_bound] no residue
+PASS  [T5_bootstrap] correct hash executes and reports the real exit status (rc=7, not MISMATCH)
+PASS  [T5_bootstrap] one-byte change -> HASH MISMATCH, not executed
+PASS  [T5_bootstrap] trailing newlines preserved (hash matches shasum of file)
+PASS  [T5_bootstrap] NUL byte rejected even with a matching hash
+PASS  [T5_bootstrap] CR byte rejected even with a matching hash
+PASS  [T5_bootstrap] file replaced after read: the verified in-memory content runs (v1), not the replacement
+PASS  [T5_bootstrap] control: PERL5OPT injection DOES forge shasum output without env -i
+PASS  [T5_bootstrap] bootstrap with PERL5OPT/PERL5LIB exported still detects the tampered file (env -i)
+PASS  [T5_bootstrap] a print() function changes the hashed bytes; builtin print is immune
+PASS  [T5_bootstrap] zsh -f with temp HOME: .zshenv/.zshrc not sourced, print stays builtin
+PASS  [T5_bootstrap] control: without -f the dummy .zshenv IS sourced
+PASS  [T5_bootstrap_harness] harness via bootstrap: logged harness_sha256 equals file sha256
+PASS  [T5_bootstrap_harness] bootstrap reports harness rc=0
+PASS  [T5_bootstrap_harness] tripwire: no denied exec of real security (stderr text layer)
+PASS  [T5_bootstrap_harness] no synthetic secret value in log, stdout or mock argv log
+PASS  [T5_bootstrap_harness] every keychain-targeting call carries the guarded r2d path (T1-8)
+PASS  [T5_bootstrap_harness] log records exactly one CLEANUP line (idempotent teardown)
+PASS  [T5_bootstrap_harness] log records the VERDICT line
+PASS  [T5_bootstrap_harness_rc2] harness STOP via bootstrap reported as rc=2 (not HASH MISMATCH)
+PASS  [T7_ps_rc_nonzero] UNKNOWN -> STOP: ucomm read: ps exit status 1
+PASS  [T7_ps_rc_nonzero] never CLEAN, never reaches attestations or keychain calls
+PASS  [T7_ps_rc_nonzero] verdict records the UNKNOWN stop
+PASS  [T7_ps_rc_nonzero] no scan temp file left
+PASS  [T7_ps_rc_nonzero] no residue
+PASS  [T7_ps_rc_nonzero] tripwire: no denied exec of real security (stderr text layer)
+PASS  [T7_ps_rc_nonzero] no synthetic secret value in log, stdout or mock argv log
+PASS  [T7_ps_rc_nonzero] every keychain-targeting call carries the guarded r2d path (T1-8)
+PASS  [T7_ps_rc_nonzero] log records exactly one CLEANUP line (idempotent teardown)
+PASS  [T7_ps_rc_nonzero] log records the VERDICT line
+PASS  [T7_ps_rc_comm_only] UNKNOWN -> STOP: comm read: ps exit status 3
+PASS  [T7_ps_rc_comm_only] never CLEAN, never reaches attestations or keychain calls
+PASS  [T7_ps_rc_comm_only] verdict records the UNKNOWN stop
+PASS  [T7_ps_rc_comm_only] no scan temp file left
+PASS  [T7_ps_rc_comm_only] no residue
+PASS  [T7_ps_rc_comm_only] tripwire: no denied exec of real security (stderr text layer)
+PASS  [T7_ps_rc_comm_only] no synthetic secret value in log, stdout or mock argv log
+PASS  [T7_ps_rc_comm_only] every keychain-targeting call carries the guarded r2d path (T1-8)
+PASS  [T7_ps_rc_comm_only] log records exactly one CLEANUP line (idempotent teardown)
+PASS  [T7_ps_rc_comm_only] log records the VERDICT line
+PASS  [T7_ps_empty] UNKNOWN -> STOP: ucomm read: empty output
+PASS  [T7_ps_empty] never CLEAN, never reaches attestations or keychain calls
+PASS  [T7_ps_empty] verdict records the UNKNOWN stop
+PASS  [T7_ps_empty] no scan temp file left
+PASS  [T7_ps_empty] no residue
+PASS  [T7_ps_empty] tripwire: no denied exec of real security (stderr text layer)
+PASS  [T7_ps_empty] no synthetic secret value in log, stdout or mock argv log
+PASS  [T7_ps_empty] every keychain-targeting call carries the guarded r2d path (T1-8)
+PASS  [T7_ps_empty] log records exactly one CLEANUP line (idempotent teardown)
+PASS  [T7_ps_empty] log records the VERDICT line
+PASS  [T7_ps_empty_comm] UNKNOWN -> STOP: comm read: empty output
+PASS  [T7_ps_empty_comm] never CLEAN, never reaches attestations or keychain calls
+PASS  [T7_ps_empty_comm] verdict records the UNKNOWN stop
+PASS  [T7_ps_empty_comm] no scan temp file left
+PASS  [T7_ps_empty_comm] no residue
+PASS  [T7_ps_empty_comm] tripwire: no denied exec of real security (stderr text layer)
+PASS  [T7_ps_empty_comm] no synthetic secret value in log, stdout or mock argv log
+PASS  [T7_ps_empty_comm] every keychain-targeting call carries the guarded r2d path (T1-8)
+PASS  [T7_ps_empty_comm] log records exactly one CLEANUP line (idempotent teardown)
+PASS  [T7_ps_empty_comm] log records the VERDICT line
+PASS  [T7_ps_malformed] UNKNOWN -> STOP: malformed row
+PASS  [T7_ps_malformed] never CLEAN, never reaches attestations or keychain calls
+PASS  [T7_ps_malformed] verdict records the UNKNOWN stop
+PASS  [T7_ps_malformed] no scan temp file left
+PASS  [T7_ps_malformed] no residue
+PASS  [T7_ps_malformed] tripwire: no denied exec of real security (stderr text layer)
+PASS  [T7_ps_malformed] no synthetic secret value in log, stdout or mock argv log
+PASS  [T7_ps_malformed] every keychain-targeting call carries the guarded r2d path (T1-8)
+PASS  [T7_ps_malformed] log records exactly one CLEANUP line (idempotent teardown)
+PASS  [T7_ps_malformed] log records the VERDICT line
+PASS  [T7_ps_blank_line] UNKNOWN -> STOP: malformed row
+PASS  [T7_ps_blank_line] never CLEAN, never reaches attestations or keychain calls
+PASS  [T7_ps_blank_line] verdict records the UNKNOWN stop
+PASS  [T7_ps_blank_line] no scan temp file left
+PASS  [T7_ps_blank_line] no residue
+PASS  [T7_ps_blank_line] tripwire: no denied exec of real security (stderr text layer)
+PASS  [T7_ps_blank_line] no synthetic secret value in log, stdout or mock argv log
+PASS  [T7_ps_blank_line] every keychain-targeting call carries the guarded r2d path (T1-8)
+PASS  [T7_ps_blank_line] log records exactly one CLEANUP line (idempotent teardown)
+PASS  [T7_ps_blank_line] log records the VERDICT line
+PASS  [T7_ps_partial_rows] UNKNOWN -> STOP: implausible row count 1
+PASS  [T7_ps_partial_rows] never CLEAN, never reaches attestations or keychain calls
+PASS  [T7_ps_partial_rows] verdict records the UNKNOWN stop
+PASS  [T7_ps_partial_rows] no scan temp file left
+PASS  [T7_ps_partial_rows] no residue
+PASS  [T7_ps_partial_rows] tripwire: no denied exec of real security (stderr text layer)
+PASS  [T7_ps_partial_rows] no synthetic secret value in log, stdout or mock argv log
+PASS  [T7_ps_partial_rows] every keychain-targeting call carries the guarded r2d path (T1-8)
+PASS  [T7_ps_partial_rows] log records exactly one CLEANUP line (idempotent teardown)
+PASS  [T7_ps_partial_rows] log records the VERDICT line
+PASS  [T7_ps_partial_comm] UNKNOWN -> STOP: comm read: implausible row count 1
+PASS  [T7_ps_partial_comm] never CLEAN, never reaches attestations or keychain calls
+PASS  [T7_ps_partial_comm] verdict records the UNKNOWN stop
+PASS  [T7_ps_partial_comm] no scan temp file left
+PASS  [T7_ps_partial_comm] no residue
+PASS  [T7_ps_partial_comm] tripwire: no denied exec of real security (stderr text layer)
+PASS  [T7_ps_partial_comm] no synthetic secret value in log, stdout or mock argv log
+PASS  [T7_ps_partial_comm] every keychain-targeting call carries the guarded r2d path (T1-8)
+PASS  [T7_ps_partial_comm] log records exactly one CLEANUP line (idempotent teardown)
+PASS  [T7_ps_partial_comm] log records the VERDICT line
+PASS  [T7_ps_output_then_fail] UNKNOWN -> STOP: ucomm read: ps exit status 1
+PASS  [T7_ps_output_then_fail] never CLEAN, never reaches attestations or keychain calls
+PASS  [T7_ps_output_then_fail] verdict records the UNKNOWN stop
+PASS  [T7_ps_output_then_fail] no scan temp file left
+PASS  [T7_ps_output_then_fail] no residue
+PASS  [T7_ps_output_then_fail] tripwire: no denied exec of real security (stderr text layer)
+PASS  [T7_ps_output_then_fail] no synthetic secret value in log, stdout or mock argv log
+PASS  [T7_ps_output_then_fail] every keychain-targeting call carries the guarded r2d path (T1-8)
+PASS  [T7_ps_output_then_fail] log records exactly one CLEANUP line (idempotent teardown)
+PASS  [T7_ps_output_then_fail] log records the VERDICT line
+PASS  [T7_ps_missing_column] UNKNOWN -> STOP: malformed row
+PASS  [T7_ps_missing_column] never CLEAN, never reaches attestations or keychain calls
+PASS  [T7_ps_missing_column] verdict records the UNKNOWN stop
+PASS  [T7_ps_missing_column] no scan temp file left
+PASS  [T7_ps_missing_column] no residue
+PASS  [T7_ps_missing_column] tripwire: no denied exec of real security (stderr text layer)
+PASS  [T7_ps_missing_column] no synthetic secret value in log, stdout or mock argv log
+PASS  [T7_ps_missing_column] every keychain-targeting call carries the guarded r2d path (T1-8)
+PASS  [T7_ps_missing_column] log records exactly one CLEANUP line (idempotent teardown)
+PASS  [T7_ps_missing_column] log records the VERDICT line
+PASS  [T7_ps_bad_pid] UNKNOWN -> STOP: malformed row
+PASS  [T7_ps_bad_pid] never CLEAN, never reaches attestations or keychain calls
+PASS  [T7_ps_bad_pid] verdict records the UNKNOWN stop
+PASS  [T7_ps_bad_pid] no scan temp file left
+PASS  [T7_ps_bad_pid] no residue
+PASS  [T7_ps_bad_pid] tripwire: no denied exec of real security (stderr text layer)
+PASS  [T7_ps_bad_pid] no synthetic secret value in log, stdout or mock argv log
+PASS  [T7_ps_bad_pid] every keychain-targeting call carries the guarded r2d path (T1-8)
+PASS  [T7_ps_bad_pid] log records exactly one CLEANUP line (idempotent teardown)
+PASS  [T7_ps_bad_pid] log records the VERDICT line
+PASS  [T7_ps_bad_ppid] UNKNOWN -> STOP: malformed row
+PASS  [T7_ps_bad_ppid] never CLEAN, never reaches attestations or keychain calls
+PASS  [T7_ps_bad_ppid] verdict records the UNKNOWN stop
+PASS  [T7_ps_bad_ppid] no scan temp file left
+PASS  [T7_ps_bad_ppid] no residue
+PASS  [T7_ps_bad_ppid] tripwire: no denied exec of real security (stderr text layer)
+PASS  [T7_ps_bad_ppid] no synthetic secret value in log, stdout or mock argv log
+PASS  [T7_ps_bad_ppid] every keychain-targeting call carries the guarded r2d path (T1-8)
+PASS  [T7_ps_bad_ppid] log records exactly one CLEANUP line (idempotent teardown)
+PASS  [T7_ps_bad_ppid] log records the VERDICT line
+PASS  [T7_ps_duplicate_pid] UNKNOWN -> STOP: duplicate pid
+PASS  [T7_ps_duplicate_pid] never CLEAN, never reaches attestations or keychain calls
+PASS  [T7_ps_duplicate_pid] verdict records the UNKNOWN stop
+PASS  [T7_ps_duplicate_pid] no scan temp file left
+PASS  [T7_ps_duplicate_pid] no residue
+PASS  [T7_ps_duplicate_pid] tripwire: no denied exec of real security (stderr text layer)
+PASS  [T7_ps_duplicate_pid] no synthetic secret value in log, stdout or mock argv log
+PASS  [T7_ps_duplicate_pid] every keychain-targeting call carries the guarded r2d path (T1-8)
+PASS  [T7_ps_duplicate_pid] log records exactly one CLEANUP line (idempotent teardown)
+PASS  [T7_ps_duplicate_pid] log records the VERDICT line
+PASS  [T7_ps_no_launchd] UNKNOWN -> STOP: pid 1 (launchd) row missing
+PASS  [T7_ps_no_launchd] never CLEAN, never reaches attestations or keychain calls
+PASS  [T7_ps_no_launchd] verdict records the UNKNOWN stop
+PASS  [T7_ps_no_launchd] no scan temp file left
+PASS  [T7_ps_no_launchd] no residue
+PASS  [T7_ps_no_launchd] tripwire: no denied exec of real security (stderr text layer)
+PASS  [T7_ps_no_launchd] no synthetic secret value in log, stdout or mock argv log
+PASS  [T7_ps_no_launchd] every keychain-targeting call carries the guarded r2d path (T1-8)
+PASS  [T7_ps_no_launchd] log records exactly one CLEANUP line (idempotent teardown)
+PASS  [T7_ps_no_launchd] log records the VERDICT line
+PASS  [T7_ps_own_row_missing] UNKNOWN -> STOP: own pid
+PASS  [T7_ps_own_row_missing] never CLEAN, never reaches attestations or keychain calls
+PASS  [T7_ps_own_row_missing] verdict records the UNKNOWN stop
+PASS  [T7_ps_own_row_missing] no scan temp file left
+PASS  [T7_ps_own_row_missing] no residue
+PASS  [T7_ps_own_row_missing] tripwire: no denied exec of real security (stderr text layer)
+PASS  [T7_ps_own_row_missing] no synthetic secret value in log, stdout or mock argv log
+PASS  [T7_ps_own_row_missing] every keychain-targeting call carries the guarded r2d path (T1-8)
+PASS  [T7_ps_own_row_missing] log records exactly one CLEANUP line (idempotent teardown)
+PASS  [T7_ps_own_row_missing] log records the VERDICT line
+PASS  [T7_ps_implausible_count] UNKNOWN -> STOP: implausible row count
+PASS  [T7_ps_implausible_count] never CLEAN, never reaches attestations or keychain calls
+PASS  [T7_ps_implausible_count] verdict records the UNKNOWN stop
+PASS  [T7_ps_implausible_count] no scan temp file left
+PASS  [T7_ps_implausible_count] no residue
+PASS  [T7_ps_implausible_count] tripwire: no denied exec of real security (stderr text layer)
+PASS  [T7_ps_implausible_count] no synthetic secret value in log, stdout or mock argv log
+PASS  [T7_ps_implausible_count] every keychain-targeting call carries the guarded r2d path (T1-8)
+PASS  [T7_ps_implausible_count] log records exactly one CLEANUP line (idempotent teardown)
+PASS  [T7_ps_implausible_count] log records the VERDICT line
+PASS  [T7_ps_timeout] hung ps -> UNKNOWN (timeout, no signal) -> STOP
+PASS  [T7_ps_timeout] bounded: whole run ends well inside 20 s with a 2 s scan bound
+PASS  [T7_ps_timeout] diagnostics record the timeout (rc=none timeout=yes valid=no)
+PASS  [T7_ps_timeout] NO signal: the hung mock ps (pid from its own hang.pid) is still running right after the harness exited
+PASS  [T7_ps_timeout] the abandoned read ends by itself (no signal from the harness) within 15 s
+PASS  [T7_ps_timeout] never CLEAN
+PASS  [T7_ps_timeout] tripwire: no denied exec of real security (stderr text layer)
+PASS  [T7_ps_timeout] no synthetic secret value in log, stdout or mock argv log
+PASS  [T7_ps_timeout] every keychain-targeting call carries the guarded r2d path (T1-8)
+PASS  [T7_ps_timeout] log records exactly one CLEANUP line (idempotent teardown)
+PASS  [T7_ps_timeout] log records the VERDICT line
+PASS  [T7_known_prohibited] DETECTED -> STOP: ucomm:TeamViewer
+PASS  [T7_known_prohibited] no keychain call after DETECTED
+PASS  [T7_known_prohibited] no residue
+PASS  [T7_known_prohibited] tripwire: no denied exec of real security (stderr text layer)
+PASS  [T7_known_prohibited] no synthetic secret value in log, stdout or mock argv log
+PASS  [T7_known_prohibited] every keychain-targeting call carries the guarded r2d path (T1-8)
+PASS  [T7_known_prohibited] log records exactly one CLEANUP line (idempotent teardown)
+PASS  [T7_known_prohibited] log records the VERDICT line
+PASS  [T7_comm_spoofed_benign] DETECTED -> STOP: ucomm:osascript
+PASS  [T7_comm_spoofed_benign] no keychain call after DETECTED
+PASS  [T7_comm_spoofed_benign] no residue
+PASS  [T7_comm_spoofed_benign] tripwire: no denied exec of real security (stderr text layer)
+PASS  [T7_comm_spoofed_benign] no synthetic secret value in log, stdout or mock argv log
+PASS  [T7_comm_spoofed_benign] every keychain-targeting call carries the guarded r2d path (T1-8)
+PASS  [T7_comm_spoofed_benign] log records exactly one CLEANUP line (idempotent teardown)
+PASS  [T7_comm_spoofed_benign] log records the VERDICT line
+PASS  [T7_comm_spoofed_benign] spoofed argv[0] (benign-tool) is not what triggered: kernel name did
+PASS  [T7_comm_only_denylisted] DETECTED -> STOP: comm:osascript-fake
+PASS  [T7_comm_only_denylisted] no keychain call after DETECTED
+PASS  [T7_comm_only_denylisted] no residue
+PASS  [T7_comm_only_denylisted] tripwire: no denied exec of real security (stderr text layer)
+PASS  [T7_comm_only_denylisted] no synthetic secret value in log, stdout or mock argv log
+PASS  [T7_comm_only_denylisted] every keychain-targeting call carries the guarded r2d path (T1-8)
+PASS  [T7_comm_only_denylisted] log records exactly one CLEANUP line (idempotent teardown)
+PASS  [T7_comm_only_denylisted] log records the VERDICT line
+PASS  [T7_multiple_matches] DETECTED -> STOP: ucomm:AnyDesk;ucomm:TeamViewer
+PASS  [T7_multiple_matches] no keychain call after DETECTED
+PASS  [T7_multiple_matches] no residue
+PASS  [T7_multiple_matches] tripwire: no denied exec of real security (stderr text layer)
+PASS  [T7_multiple_matches] no synthetic secret value in log, stdout or mock argv log
+PASS  [T7_multiple_matches] every keychain-targeting call carries the guarded r2d path (T1-8)
+PASS  [T7_multiple_matches] log records exactly one CLEANUP line (idempotent teardown)
+PASS  [T7_multiple_matches] log records the VERDICT line
+PASS  [T7_multiple_matches] all matching processes reported (osascript once, deduplicated)
+PASS  [T7_grandchild_detected] DETECTED -> STOP: osascript-grand
+PASS  [T7_grandchild_detected] no keychain call after DETECTED
+PASS  [T7_grandchild_detected] no residue
+PASS  [T7_grandchild_detected] tripwire: no denied exec of real security (stderr text layer)
+PASS  [T7_grandchild_detected] no synthetic secret value in log, stdout or mock argv log
+PASS  [T7_grandchild_detected] every keychain-targeting call carries the guarded r2d path (T1-8)
+PASS  [T7_grandchild_detected] log records exactly one CLEANUP line (idempotent teardown)
+PASS  [T7_grandchild_detected] log records the VERDICT line
+PASS  [T7_grandchild_detected] direct child of the harness is excluded, grandchild is NOT
+PASS  [T7_parent_disagreement] DETECTED -> STOP: osascript-race
+PASS  [T7_parent_disagreement] no keychain call after DETECTED
+PASS  [T7_parent_disagreement] no residue
+PASS  [T7_parent_disagreement] tripwire: no denied exec of real security (stderr text layer)
+PASS  [T7_parent_disagreement] no synthetic secret value in log, stdout or mock argv log
+PASS  [T7_parent_disagreement] every keychain-targeting call carries the guarded r2d path (T1-8)
+PASS  [T7_parent_disagreement] log records exactly one CLEANUP line (idempotent teardown)
+PASS  [T7_parent_disagreement] log records the VERDICT line
+PASS  [T7_parent_disagreement] reads disagree on the parent -> not excluded (conservative)
+PASS  [T7_ucomm_truncation] DETECTED -> STOP: ucomm:Keyboard Maestro
+PASS  [T7_ucomm_truncation] no keychain call after DETECTED
+PASS  [T7_ucomm_truncation] no residue
+PASS  [T7_ucomm_truncation] tripwire: no denied exec of real security (stderr text layer)
+PASS  [T7_ucomm_truncation] no synthetic secret value in log, stdout or mock argv log
+PASS  [T7_ucomm_truncation] every keychain-targeting call carries the guarded r2d path (T1-8)
+PASS  [T7_ucomm_truncation] log records exactly one CLEANUP line (idempotent teardown)
+PASS  [T7_ucomm_truncation] log records the VERDICT line
+PASS  [T7_misleading_names] names merely containing a denylisted word (notes-about-claude, myosascript) or a denylisted APP DIRECTORY are not DETECTED
+PASS  [T7_misleading_names] run proceeds past T1-6 (rc=0)
+PASS  [T7_misleading_names] tripwire: no denied exec of real security (stderr text layer)
+PASS  [T7_misleading_names] no synthetic secret value in log, stdout or mock argv log
+PASS  [T7_misleading_names] every keychain-targeting call carries the guarded r2d path (T1-8)
+PASS  [T7_misleading_names] log records exactly one CLEANUP line (idempotent teardown)
+PASS  [T7_misleading_names] log records the VERDICT line
+PASS  [T7_clean_fixture] genuine clean fixture (benign app + the harness own osascript child) -> CLEAN
+PASS  [T7_clean_fixture] both columns were read (ucomm then comm)
+PASS  [T7_clean_fixture] clean run continues to attestations and completes (rc=0)
+PASS  [T7_clean_fixture] tripwire: no denied exec of real security (stderr text layer)
+PASS  [T7_clean_fixture] no synthetic secret value in log, stdout or mock argv log
+PASS  [T7_clean_fixture] every keychain-targeting call carries the guarded r2d path (T1-8)
+PASS  [T7_clean_fixture] log records exactly one CLEANUP line (idempotent teardown)
+PASS  [T7_clean_fixture] log records the VERDICT line
+PASS  [T7_static_no_pipeline] T1-6 block found
+PASS  [T7_static_no_pipeline] no pipe, no "|| true", no "|| :" anywhere in the T1-6 block
+PASS  [T7_static_no_pipeline] no kill/pkill/killall and no mktemp/temp-file path in the scanner block
+PASS  [T7_static_no_pipeline] capture is a disowned coprocess with a per-read nonce sentinel and a sysread whole-read deadline
+PASS  [T7_static_no_pipeline] UNKNOWN is the default; DETECTED and UNKNOWN both stop
+PASS  [T8_diag_clean] read 1 diagnostics (ucomm): rc=0 rows=2 pid1 own dup=0 malformed=0 timeout=no valid=yes
+PASS  [T8_diag_clean] read 2 diagnostics (comm) present
+PASS  [T8_diag_clean] final classification with scanner pid and exclusion counts
+PASS  [T8_diag_clean] diagnostic lines are names-free key=value only (no paths, no arguments)
+PASS  [T8_diag_clean] the why= field never carries a path or name on CLEAN
+PASS  [T8_diag_clean] run completes (rc=0)
+PASS  [T8_diag_clean] tripwire: no denied exec of real security (stderr text layer)
+PASS  [T8_diag_clean] no synthetic secret value in log, stdout or mock argv log
+PASS  [T8_diag_clean] every keychain-targeting call carries the guarded r2d path (T1-8)
+PASS  [T8_diag_clean] log records exactly one CLEANUP line (idempotent teardown)
+PASS  [T8_diag_clean] log records the VERDICT line
+PASS  [T8_diag_unknown_rc] diagnostics: rc=1 valid=no, then result=UNKNOWN with reason
+PASS  [T8_diag_unknown_rc] second read never attempted after a failed first read
+PASS  [T8_diag_unknown_rc] STOP, zero keychain calls
+PASS  [T8_diag_unknown_rc] tripwire: no denied exec of real security (stderr text layer)
+PASS  [T8_diag_unknown_rc] no synthetic secret value in log, stdout or mock argv log
+PASS  [T8_diag_unknown_rc] every keychain-targeting call carries the guarded r2d path (T1-8)
+PASS  [T8_diag_unknown_rc] log records exactly one CLEANUP line (idempotent teardown)
+PASS  [T8_diag_unknown_rc] log records the VERDICT line
+PASS  [T8_diag_counts] diagnostics count malformed and duplicate rows
+PASS  [T8_diag_counts] UNKNOWN reason names the first structural failure
+PASS  [T8_diag_counts] STOP, zero keychain calls
+PASS  [T8_diag_counts] tripwire: no denied exec of real security (stderr text layer)
+PASS  [T8_diag_counts] no synthetic secret value in log, stdout or mock argv log
+PASS  [T8_diag_counts] every keychain-targeting call carries the guarded r2d path (T1-8)
+PASS  [T8_diag_counts] log records exactly one CLEANUP line (idempotent teardown)
+PASS  [T8_diag_counts] log records the VERDICT line
+PASS  [T8_overflow] bounded memory: output above SCANMAX rows -> UNKNOWN
+PASS  [T8_overflow] STOP, zero keychain calls
+PASS  [T8_overflow] tripwire: no denied exec of real security (stderr text layer)
+PASS  [T8_overflow] no synthetic secret value in log, stdout or mock argv log
+PASS  [T8_overflow] every keychain-targeting call carries the guarded r2d path (T1-8)
+PASS  [T8_overflow] log records exactly one CLEANUP line (idempotent teardown)
+PASS  [T8_overflow] log records the VERDICT line
+PASS  [T8_midline_stall] ps stalls MID-LINE -> whole-read deadline still fires -> UNKNOWN timeout
+PASS  [T8_midline_stall] bounded: run ends inside 20 s
+PASS  [T8_midline_stall] stalled mock not signalled (alive after exit) and ends by itself
+PASS  [T8_midline_stall] STOP, zero keychain calls
+PASS  [T8_midline_stall] tripwire: no denied exec of real security (stderr text layer)
+PASS  [T8_midline_stall] no synthetic secret value in log, stdout or mock argv log
+PASS  [T8_midline_stall] every keychain-targeting call carries the guarded r2d path (T1-8)
+PASS  [T8_midline_stall] log records exactly one CLEANUP line (idempotent teardown)
+PASS  [T8_midline_stall] log records the VERDICT line
+PASS  [T8_spoof_sentinel] name with embedded newline + fake sentinels (fixed and guessed-nonce forms) -> rows malformed -> UNKNOWN, never CLEAN
+PASS  [T8_spoof_sentinel] later rows were not silently dropped (row count includes the TeamViewer row after the fake sentinels)
+PASS  [T8_spoof_sentinel] STOP, zero keychain calls
+PASS  [T8_spoof_sentinel] tripwire: no denied exec of real security (stderr text layer)
+PASS  [T8_spoof_sentinel] no synthetic secret value in log, stdout or mock argv log
+PASS  [T8_spoof_sentinel] every keychain-targeting call carries the guarded r2d path (T1-8)
+PASS  [T8_spoof_sentinel] log records exactly one CLEANUP line (idempotent teardown)
+PASS  [T8_spoof_sentinel] log records the VERDICT line
+PASS  [T8_no_trailing_newline] output without a final newline -> sentinel not on its own line -> no status -> UNKNOWN
+PASS  [T8_no_trailing_newline] diagnostics show rc=none
+PASS  [T8_no_trailing_newline] STOP, zero keychain calls
+PASS  [T8_no_trailing_newline] tripwire: no denied exec of real security (stderr text layer)
+PASS  [T8_no_trailing_newline] no synthetic secret value in log, stdout or mock argv log
+PASS  [T8_no_trailing_newline] every keychain-targeting call carries the guarded r2d path (T1-8)
+PASS  [T8_no_trailing_newline] log records exactly one CLEANUP line (idempotent teardown)
+PASS  [T8_no_trailing_newline] log records the VERDICT line
+PASS  [T8_gate_timeout] timeout inside the unlock gate -> UNKNOWN -> unlock blocked
+PASS  [T8_gate_timeout] gate-timeout mock not signalled; ends by itself
+PASS  [T8_gate_timeout] teardown deleted the keychain
+PASS  [T8_gate_timeout] no residue
+PASS  [T8_gate_timeout] tripwire: no denied exec of real security (stderr text layer)
+PASS  [T8_gate_timeout] no synthetic secret value in log, stdout or mock argv log
+PASS  [T8_gate_timeout] every keychain-targeting call carries the guarded r2d path (T1-8)
+PASS  [T8_gate_timeout] log records exactly one CLEANUP line (idempotent teardown)
+PASS  [T8_gate_timeout] log records the VERDICT line
+PASS  [T8_logfail_result] failure writing the RESULT diagnostic -> UNKNOWN -> STOP
+PASS  [T8_logfail_result] tripwire: no denied exec of real security (stderr text layer)
+PASS  [T8_logfail_result] no synthetic secret value in log, stdout or mock argv log
+PASS  [T8_logfail_result] every keychain-targeting call carries the guarded r2d path (T1-8)
+PASS  [T8_logfail_result] log records exactly one CLEANUP line (idempotent teardown)
+PASS  [T8_logfail_result] log records the VERDICT line
+PASS  [T8_logfail_gateline] failure writing the GATE diagnostic -> create blocked
+PASS  [T8_logfail_gateline] tripwire: no denied exec of real security (stderr text layer)
+PASS  [T8_logfail_gateline] no synthetic secret value in log, stdout or mock argv log
+PASS  [T8_logfail_gateline] every keychain-targeting call carries the guarded r2d path (T1-8)
+PASS  [T8_logfail_gateline] log records exactly one CLEANUP line (idempotent teardown)
+PASS  [T8_logfail_gateline] log records the VERDICT line
+PASS  [T8_numeric_override] non-numeric mock override refused before any scan or call (no arithmetic evaluation of env text)
+PASS  [T8_superops_present] SuperOps present -> DETECTED via kernel name and argv[0] (existing T1-6 refusal preserved)
+PASS  [T8_superops_present] result line records DETECTED with 2 hits
+PASS  [T8_superops_present] STOP, zero keychain calls
+PASS  [T8_superops_present] tripwire: no denied exec of real security (stderr text layer)
+PASS  [T8_superops_present] no synthetic secret value in log, stdout or mock argv log
+PASS  [T8_superops_present] every keychain-targeting call carries the guarded r2d path (T1-8)
+PASS  [T8_superops_present] log records exactly one CLEANUP line (idempotent teardown)
+PASS  [T8_superops_present] log records the VERDICT line
+PASS  [T8_logfail_preflight] diagnostic write failure -> UNKNOWN -> STOP (fail closed)
+PASS  [T8_logfail_preflight] never CLEAN, zero keychain calls
+PASS  [T8_logfail_preflight] tripwire: no denied exec of real security (stderr text layer)
+PASS  [T8_logfail_preflight] no synthetic secret value in log, stdout or mock argv log
+PASS  [T8_logfail_preflight] every keychain-targeting call carries the guarded r2d path (T1-8)
+PASS  [T8_logfail_preflight] log records exactly one CLEANUP line (idempotent teardown)
+PASS  [T8_logfail_preflight] log records the VERDICT line
+PASS  [T8_logfail_gate] diagnostic failure inside the create gate -> protected op blocked
+PASS  [T8_logfail_gate] create-keychain never reached the (mock) security tool
+PASS  [T8_logfail_gate] no residue
+PASS  [T8_logfail_gate] tripwire: no denied exec of real security (stderr text layer)
+PASS  [T8_logfail_gate] no synthetic secret value in log, stdout or mock argv log
+PASS  [T8_logfail_gate] every keychain-targeting call carries the guarded r2d path (T1-8)
+PASS  [T8_logfail_gate] log records exactly one CLEANUP line (idempotent teardown)
+PASS  [T8_logfail_gate] log records the VERDICT line
+PASS  [T8_clean_then_detected_create] preflight CLEAN, then a fresh scan before create finds TeamViewer -> blocked
+PASS  [T8_clean_then_detected_create] verdict names the gate
+PASS  [T8_clean_then_detected_create] create-keychain never reached the (mock) security tool
+PASS  [T8_clean_then_detected_create] tripwire: no denied exec of real security (stderr text layer)
+PASS  [T8_clean_then_detected_create] no synthetic secret value in log, stdout or mock argv log
+PASS  [T8_clean_then_detected_create] every keychain-targeting call carries the guarded r2d path (T1-8)
+PASS  [T8_clean_then_detected_create] log records exactly one CLEANUP line (idempotent teardown)
+PASS  [T8_clean_then_detected_create] log records the VERDICT line
+PASS  [T8_clean_then_detected_unlock] create allowed by its own fresh CLEAN; the later unlock gate sees DETECTED -> blocked
+PASS  [T8_clean_then_detected_unlock] earlier CLEAN not reused: create reached security, unlock did not
+PASS  [T8_clean_then_detected_unlock] teardown still deleted the keychain
+PASS  [T8_clean_then_detected_unlock] no residue
+PASS  [T8_clean_then_detected_unlock] tripwire: no denied exec of real security (stderr text layer)
+PASS  [T8_clean_then_detected_unlock] no synthetic secret value in log, stdout or mock argv log
+PASS  [T8_clean_then_detected_unlock] every keychain-targeting call carries the guarded r2d path (T1-8)
+PASS  [T8_clean_then_detected_unlock] log records exactly one CLEANUP line (idempotent teardown)
+PASS  [T8_clean_then_detected_unlock] log records the VERDICT line
+PASS  [T8_clean_then_unknown_unlock] later scan UNKNOWN -> unlock blocked
+PASS  [T8_clean_then_unknown_unlock] verdict names the gate
+PASS  [T8_clean_then_unknown_unlock] no residue
+PASS  [T8_clean_then_unknown_unlock] tripwire: no denied exec of real security (stderr text layer)
+PASS  [T8_clean_then_unknown_unlock] no synthetic secret value in log, stdout or mock argv log
+PASS  [T8_clean_then_unknown_unlock] every keychain-targeting call carries the guarded r2d path (T1-8)
+PASS  [T8_clean_then_unknown_unlock] log records exactly one CLEANUP line (idempotent teardown)
+PASS  [T8_clean_then_unknown_unlock] log records the VERDICT line
+PASS  [T8_repeated_fresh_G1] G1 completes (rc=0)
+PASS  [T8_repeated_fresh_G1] every dialog-capable op reached security under its own gate: gate lines=54 = gated calls=54 (>= 40)
+PASS  [T8_repeated_fresh_G1] no dialog-capable call without a gate id (gate=none never appears)
+PASS  [T8_repeated_fresh_G1] every call used a DIFFERENT fresh gate (no reuse of an earlier CLEAN)
+PASS  [T8_repeated_fresh_G1] each call ran after its gate scan (ps call counter >= 2 x gate scan id)
+PASS  [T8_repeated_fresh_G1] all 8 dialog-capable op types are gated in G1 (create/unlock/settings/info/dump/find/delete/add)
+PASS  [T8_repeated_fresh_G1] error paths gated: locked overwrite (add, rc!=0) and locked delete in L4 each had a gate
+PASS  [T8_repeated_fresh_G1] L5: exactly two secret reads (-w) tagged with two ADJACENT gate ids (gates back-to-back, no scan while a reader ran)
+PASS  [T8_repeated_fresh_G1] tripwire: no denied exec of real security (stderr text layer)
+PASS  [T8_repeated_fresh_G1] no synthetic secret value in log, stdout or mock argv log
+PASS  [T8_repeated_fresh_G1] every keychain-targeting call carries the guarded r2d path (T1-8)
+PASS  [T8_repeated_fresh_G1] log records exactly one CLEANUP line (idempotent teardown)
+PASS  [T8_repeated_fresh_G1] log records the VERDICT line
+PASS  [T8_alt_path_L13] L13 direct wrong-passphrase unlock (error path) is gated; every dialog-capable call gated
+PASS  [T8_alt_path_L13] tripwire: no denied exec of real security (stderr text layer)
+PASS  [T8_alt_path_L13] no synthetic secret value in log, stdout or mock argv log
+PASS  [T8_alt_path_L13] every keychain-targeting call carries the guarded r2d path (T1-8)
+PASS  [T8_alt_path_L13] log records exactly one CLEANUP line (idempotent teardown)
+PASS  [T8_alt_path_L13] log records the VERDICT line
+PASS  [T8_alt_path_L14_L6] multi-group run: every dialog-capable call across groups gated
+PASS  [T8_alt_path_L14_L6] tripwire: no denied exec of real security (stderr text layer)
+PASS  [T8_alt_path_L14_L6] no synthetic secret value in log, stdout or mock argv log
+PASS  [T8_alt_path_L14_L6] every keychain-targeting call carries the guarded r2d path (T1-8)
+PASS  [T8_alt_path_L14_L6] log records exactly one CLEANUP line (idempotent teardown)
+PASS  [T8_alt_path_L14_L6] log records the VERDICT line
+PASS  [T8_v3r4_bypass_attempt] dialog-capable op attempted from a subshell is refused and recorded (not performed)
+PASS  [T8_v3r4_bypass_attempt] the parent notices at its next gate and STOPs the run
+PASS  [T8_v3r4_bypass_attempt] no unlock happened after the bypass attempt
+PASS  [T8_v3r4_bypass_attempt] no residue
+PASS  [T8_v3r4_bypass_attempt] tripwire: no denied exec of real security (stderr text layer)
+PASS  [T8_v3r4_bypass_attempt] no synthetic secret value in log, stdout or mock argv log
+PASS  [T8_v3r4_bypass_attempt] every keychain-targeting call carries the guarded r2d path (T1-8)
+PASS  [T8_v3r4_bypass_attempt] log records exactly one CLEANUP line (idempotent teardown)
+PASS  [T8_v3r4_bypass_attempt] log records the VERDICT line
+PASS  [T8_v3r4_bypass_bg] background ( ) & form: dialog-capable op refused (not performed) and the run STOPs
+PASS  [T8_v3r4_bypass_bg] no residue
+PASS  [T8_v3r4_bypass_bg] tripwire: no denied exec of real security (stderr text layer)
+PASS  [T8_v3r4_bypass_bg] no synthetic secret value in log, stdout or mock argv log
+PASS  [T8_v3r4_bypass_bg] every keychain-targeting call carries the guarded r2d path (T1-8)
+PASS  [T8_v3r4_bypass_bg] log records exactly one CLEANUP line (idempotent teardown)
+PASS  [T8_v3r4_bypass_bg] log records the VERDICT line
+PASS  [T8_v3r4_bypass_pipe] pipeline form: dialog-capable op refused (not performed) and the run STOPs
+PASS  [T8_v3r4_bypass_pipe] no residue
+PASS  [T8_v3r4_bypass_pipe] tripwire: no denied exec of real security (stderr text layer)
+PASS  [T8_v3r4_bypass_pipe] no synthetic secret value in log, stdout or mock argv log
+PASS  [T8_v3r4_bypass_pipe] every keychain-targeting call carries the guarded r2d path (T1-8)
+PASS  [T8_v3r4_bypass_pipe] log records exactly one CLEANUP line (idempotent teardown)
+PASS  [T8_v3r4_bypass_pipe] log records the VERDICT line
+PASS  [T8_nonce_samples] 500 harness nonces: all 16-hex, none repeated (malformed/dup = 0 0)
+PASS  [T8_v3r4_detected_mid_run] state turns DETECTED mid-run -> the next dialog-capable op (whatever it is) is blocked
+PASS  [T8_v3r4_detected_mid_run] blocked op (gate scan 11) never reached security; earlier ops did
+PASS  [T8_v3r4_detected_mid_run] teardown deleted the keychain
+PASS  [T8_v3r4_detected_mid_run] no residue
+PASS  [T8_v3r4_detected_mid_run] tripwire: no denied exec of real security (stderr text layer)
+PASS  [T8_v3r4_detected_mid_run] no synthetic secret value in log, stdout or mock argv log
+PASS  [T8_v3r4_detected_mid_run] every keychain-targeting call carries the guarded r2d path (T1-8)
+PASS  [T8_v3r4_detected_mid_run] log records exactly one CLEANUP line (idempotent teardown)
+PASS  [T8_v3r4_detected_mid_run] log records the VERDICT line
+PASS  [T8_static_choke_point] every reference to SEC (comments stripped) is one of the 7 audited lines: 2 assignments, sec_kc non-dialog call, secx, sec_global, is_wd compare, watchdog arg
+PASS  [T8_static_choke_point] no backtick command substitution and no eval of SEC anywhere in the harness
+PASS  [T8_static_choke_point] sec_kc routes every dialog-capable op through main_only + t16_gate + secx
+PASS  [T8_static_choke_point] dialog-capable inventory is exactly the 7 sec_kc ops (+ sec_i add)
+PASS  [T8_static_choke_point] sec_kc and sec_cap gate in the main shell before invoking secx
+PASS  [T8_static_choke_point] sec_bg_pair: main_only, then two gates back-to-back, then the readers
+PASS  [T8_static_choke_point] no keychain helper captured in a subshell except the mock-only bypass hook
+PASS  [T8_static_choke_point] sec_i and sec_global cannot create or unlock (allow-lists)
+PASS  [T8_static_choke_point] no create/unlock inside a command substitution
+PASS  [T8_static_choke_point] the gate refuses to run outside the harness process and stops (exit) on DETECTED/UNKNOWN
+PASS  [T8_static_choke_point] mock isolation: profile denies exec of real /bin/ps and /usr/bin/security
+PASS  [FINAL_cleanup] no test-owned process (harness/observer/watchdog/decoy/writer) still alive
+PASS  [FINAL_cleanup] no recorded watchdog of this work dir still running (exact-PID checks of recorded PIDs only)
+PASS  [FINAL_cleanup] no named pipe left anywhere in the work dir
+PASS  [FINAL_cleanup] no r2d-run.* directory left in any scenario TMPDIR
+PASS  [FINAL_cleanup] no r2d-lock directory left in any scenario TMPDIR
+PASS  [FINAL_cleanup] no r2d-scan.* temp file left in any scenario TMPDIR
+PASS  [FINAL_cleanup] no simulated keychain (mock state or keychain file) left
+PASS  [FINAL_cleanup] no synthetic secret value in any log, stdout or argv log across all scenarios
+kills recorded: 3
+PASS  [KERNEL_tripwire] kernel log query succeeded (rc=0, header line present)
+PASS  [KERNEL_tripwire] positive control: a stderr-suppressed dummy denial inside the run window is visible
+PASS  [KERNEL_tripwire] zero sandbox denials of security exec, securityd mach-lookup or real Keychains access during the whole run window
+kernel window start (local): 2026-11-14 22:45:04 ; matched lines: 2
+ELAPSED_S=364
+TOTAL PASS=1092 FAIL=0

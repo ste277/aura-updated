@@ -1,0 +1,6 @@
+|   APFS Container Reference:     disk3
+|   Size (Capacity Ceiling):      245107195904 B (245.1 GB)
+|   Capacity In Use By Volumes:   220207366144 B (220.2 GB) (89.8% used)
+|   Capacity Not Allocated:       24899829760 B (24.9 GB) (10.2% free)
+Filesystem     1024-blocks      Used Available Capacity iused     ifree %iused  Mounted on
+/dev/disk3s1s1   239362496  12945180  24316228    35%  404475 243162280    0%   /

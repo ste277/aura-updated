@@ -1,0 +1,3 @@
+#!/bin/zsh -f
+# MOCK csrutil for R2E self-tests (csrutil status simulator). Never calls the real tool.
+print -r -- "${MOCK_SIP_LINE:-System Integrity Protection status: enabled.}"
