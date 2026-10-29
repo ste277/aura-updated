@@ -507,6 +507,10 @@ async function main() {
     ['invalid', render(st('ERROR', { error: 'INVALID_TOKEN' }))],
     ['stale', render(st('STALE'))],
     ['updated', render(st('IDLE', { updated: true }))],
+    // HPG4-1 -- appended, never inserted, so every pre-existing allMarkups[n] index above stays stable.
+    ['proposal+SAVE_FAILED+CAPACITY_EXCEEDED', render(st('PROPOSAL', { view: proposal, notice: 'SAVE_FAILED', noticeCode: 'CAPACITY_EXCEEDED' }))],
+    ['proposal+SAVE_FAILED+DAILY_CAPACITY_EXCEEDED', render(st('PROPOSAL', { view: proposal, notice: 'SAVE_FAILED', noticeCode: 'DAILY_CAPACITY_EXCEEDED' }))],
+    ['proposal+SAVE_FAILED+DAILY_ATTRIBUTION_UNRESOLVED', render(st('PROPOSAL', { view: proposal, notice: 'SAVE_FAILED', noticeCode: 'DAILY_ATTRIBUTION_UNRESOLVED' }))],
   ];
   const noChangesWithKeepsMarkup = allMarkups[7][1];
   const noChangesZeroMarkup = render(st('PROPOSAL', { view: { kind: 'NO_CHANGES', keepCount: 0 }, notice: null }));
@@ -538,13 +542,91 @@ async function main() {
   check('36. reduced motion: the card introduces no animation or transition', !/animation|transition|@keyframes/i.test(strip(read('../apps/web/components/RecompositionCard.tsx'))));
   check('7. an idle, quiet state renders nothing (no persistent clutter)', render(initialRecompositionState) === '');
 
+  // ============================ HPG4-1: Recomposition conflict messaging ============================
+  // Reuses apps/web/lib/acceptConstructedDay.ts's own validate-don't-trust allowlist convention: a known
+  // scheduling-conflict code is parsed and carried through; anything unknown/missing/malformed collapses to
+  // the pre-existing, byte-unchanged codeless SAVE_FAILED.
+  {
+    const KNOWN = ['CAPACITY_EXCEEDED', 'DAILY_CAPACITY_EXCEEDED', 'DAILY_ATTRIBUTION_UNRESOLVED'] as const;
+
+    // ---- parser: each known code threads through; everything else falls back codeless ----
+    check(
+      'HPG4-1. parseAcceptResponse carries each of the 3 known scheduling-conflict codes through on SAVE_FAILED',
+      KNOWN.every((code) => { const r = parseAcceptResponse(false, { status: 'SAVE_FAILED', code }, expected); return r.kind === 'SAVE_FAILED' && 'code' in r && r.code === code; })
+    );
+    check(
+      'HPG4-1. an unrecognized code, a missing code, and a non-string code all fall back to the exact pre-existing codeless SAVE_FAILED (never trusted blindly)',
+      [
+        parseAcceptResponse(false, { status: 'SAVE_FAILED', code: 'GOAL_NOT_ACTIVE' }, expected), // a real SchedulingEligibilityErrorCode this route can never actually produce
+        parseAcceptResponse(false, { status: 'SAVE_FAILED', code: 'NOT_A_REAL_CODE' }, expected),
+        parseAcceptResponse(false, { status: 'SAVE_FAILED' }, expected),
+        parseAcceptResponse(false, { status: 'SAVE_FAILED', code: 42 }, expected),
+        parseAcceptResponse(false, { status: 'SAVE_FAILED', code: null }, expected),
+      ].every((r) => r.kind === 'SAVE_FAILED' && !('code' in r && r.code !== undefined))
+    );
+
+    // ---- reducer: the code survives ACCEPT_SAVE_FAILED into noticeCode; UNCONFIRMED never sets it ----
+    check(
+      'HPG4-1. the reducer carries a validated code from ACCEPT_SAVE_FAILED into PROPOSAL.noticeCode',
+      KNOWN.every((code) => { const n = R(accepting, { type: 'ACCEPT_SAVE_FAILED', generation: g, code }); return n.phase === 'PROPOSAL' && n.notice === 'SAVE_FAILED' && (n as { noticeCode?: string }).noticeCode === code; })
+    );
+    check(
+      'HPG4-1. ACCEPT_SAVE_FAILED with no code, and ACCEPT_UNCONFIRMED (which never carries one), both leave noticeCode unset',
+      (() => {
+        const noCode = R(accepting, { type: 'ACCEPT_SAVE_FAILED', generation: g });
+        const unconfirmed = R(accepting, { type: 'ACCEPT_UNCONFIRMED', generation: g });
+        return noCode.phase === 'PROPOSAL' && !('noticeCode' in noCode) && unconfirmed.phase === 'PROPOSAL' && !('noticeCode' in unconfirmed);
+      })()
+    );
+
+    // ---- presentation: each known code renders its own distinct, shared, non-technical explanation ----
+    const [capacityMarkup, dailyCapacityMarkup, attributionMarkup] = [allMarkups[15][1], allMarkups[16][1], allMarkups[17][1]];
+    check(
+      'HPG4-1. CAPACITY_EXCEEDED shows the shared weekly-capacity explanation (not the generic fallback)',
+      capacityMarkup.includes('already reached its scheduled limit for the week') && !capacityMarkup.includes("Couldn&#x27;t save. Nothing was changed. Try again.")
+    );
+    check(
+      'HPG4-1. DAILY_CAPACITY_EXCEEDED shows the shared daily-capacity explanation (not the generic fallback)',
+      dailyCapacityMarkup.includes('already has a session scheduled for that day') && !dailyCapacityMarkup.includes("Couldn&#x27;t save. Nothing was changed. Try again.")
+    );
+    check(
+      'HPG4-1. DAILY_ATTRIBUTION_UNRESOLVED shows its own distinct unresolved-attribution explanation, never collapsed into the daily-capacity wording',
+      attributionMarkup.includes('safely confirm whether this activity was already scheduled') && !attributionMarkup.includes('already has a session scheduled for that day') && !attributionMarkup.includes("Couldn&#x27;t save. Nothing was changed. Try again.")
+    );
+    check(
+      'HPG4-1. the three conflict explanations are mutually distinct, and distinct from the generic fallback',
+      new Set([capacityMarkup, dailyCapacityMarkup, attributionMarkup, allMarkups[2][1]].map((m) => visibleText(m))).size === 4
+    );
+    check(
+      'HPG4-1. a codeless/unrelated SAVE_FAILED still renders the exact original generic message, byte-for-byte unchanged',
+      allMarkups[2][1].includes("Couldn&#x27;t save. Nothing was changed. Try again.")
+    );
+    check(
+      'HPG4-1. no raw scheduling-eligibility enum code ever appears in any rendering (same discipline as check 48)',
+      [capacityMarkup, dailyCapacityMarkup, attributionMarkup].every((m) => !/CAPACITY_EXCEEDED|DAILY_CAPACITY_EXCEEDED|DAILY_ATTRIBUTION_UNRESOLVED|GOAL_NOT_ACTIVE|GOAL_ACTIVITY_NOT_AVAILABLE/.test(m))
+    );
+    check(
+      'HPG4-1. success and UNCONFIRMED presentation are untouched by this change',
+      allMarkups[14][1].includes('Your day is updated.') && allMarkups[3][1].includes("We couldn&#x27;t confirm whether the new arrangement was saved.")
+    );
+    check(
+      'HPG4-1. every known-code failure still keeps role="alert" and a real, enabled Accept/Not now pair -- same recovery actions as the generic case, never a dead end',
+      [capacityMarkup, dailyCapacityMarkup, attributionMarkup].every((m) => m.includes('role="alert"') && m.includes('Accept new arrangement') && m.includes('Not now') && !/<button[^>]*disabled[^>]*>Accept new arrangement/.test(m))
+    );
+  }
+
   // ============================ structural: wiring, trust boundary, no scheduling ============================
   const lib = strip(read('../apps/web/lib/homeRecomposition.ts'));
   const card = strip(read('../apps/web/components/RecompositionCard.tsx'));
   const dash = strip(read('../apps/web/components/HomeDashboard.tsx'));
   const imports = (src: string) => [...src.matchAll(/^import[^;]*?from\s+'([^']+)'/gm)].map((m) => m[1]);
   const FORBIDDEN_IMPORTS = /dayConstructor|dayIntent|dayCapacity|timingSearch|placement|collision|muhurta|plannedActivitySchedulingMode|planMove|remainingDayRecomposition|recommendation|panchang|orchestrator/i;
-  check('42. Home recomposition modules import nothing from the scheduling domain (Constructor, Timing Search, placement/collision, scheduling-mode authority, F2/F3 internals)', imports(lib).concat(imports(card)).every((i) => !FORBIDDEN_IMPORTS.test(i)) && imports(lib).sort().join() === "./db,./timezone");
+  // HPG4-1 -- lib now also imports a TYPE ONLY from ./schedulingEligibilityError (SchedulingEligibilityErrorCode),
+  // the same shared, already-reviewed error-CODE contract Move/Day Constructor/Home quick-Move all reuse for
+  // presentation. It is not part of the scheduling domain FORBIDDEN_IMPORTS guards against above (Constructor,
+  // Timing Search, placement/collision, scheduling-mode authority, F2/F3 internals) -- confirmed by the first half
+  // of this same check, which still passes unchanged.
+  check('42. Home recomposition modules import nothing from the scheduling domain (Constructor, Timing Search, placement/collision, scheduling-mode authority, F2/F3 internals)', imports(lib).concat(imports(card)).every((i) => !FORBIDDEN_IMPORTS.test(i)) && imports(lib).sort().join() === "./db,./schedulingEligibilityError,./timezone");
   check('42. ...and contain no scheduling vocabulary or logic', !/orchestrate|constructDay|runTimingSearch|compareCandidates|findBlockingPlan|isFlexible|hasFlexibleScheduling|collision/i.test(lib + card));
   check('43. trust boundary: the ONLY request body the client can build is { proposalToken }; it never references moves/times/plan ids/scheduling mode in a request', (lib.match(/\bbody: JSON\.stringify/g) ?? []).length === 1 && (lib.match(/JSON\.stringify\(/g) ?? []).length === 1 && /body: JSON\.stringify\(\{ proposalToken: view\.proposalToken \}\)/.test(lib));
   check('2/43. the only endpoints touched are the two existing routes (no new route)', [...lib.matchAll(/'(\/api\/[^']+)'/g)].map((m) => m[1]).sort().join() === '/api/day/recompose,/api/day/recompose/accept' && !fs.existsSync(path.join(__dirname, '../apps/web/app/api/day/recompose/preview')));
