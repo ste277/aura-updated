@@ -15,6 +15,8 @@
 import type { AcceptanceRejectionReason } from './dayConstructorAcceptance';
 import type { AcceptConstructedDayClientResult } from './acceptConstructedDay';
 import type { ConstructDayPreview } from './dayConstructorOrchestrator';
+import type { SchedulingEligibilityErrorCode } from './schedulingEligibilityError';
+import { isKnownSchedulingEligibilityCode, presentSchedulingEligibilityError } from './schedulingEligibilityPresentation';
 
 // ============================================================
 // Rejection-reason copy (this ticket's own section 14) -- never a raw
@@ -53,7 +55,14 @@ export type DayPlanAcceptanceUiState =
   | { kind: 'SAVING' }
   | { kind: 'SAVED' }
   | { kind: 'STALE'; message: string }
-  | { kind: 'FAILED'; message: string };
+  // HPG3-A3b -- `code` is OPTIONAL and additive: every pre-A3b caller
+  // narrowing only on `kind === 'FAILED'` and reading `.message` is
+  // unaffected. Present only for a known SAVE_FAILED `code` (daily/weekly
+  // capacity, unresolved legacy attribution, or the two pre-A3a "blocked"
+  // codes); absent for every other FAILED cause (a codeless SAVE_FAILED,
+  // NETWORK_ERROR, UNKNOWN_RESPONSE), which keeps the exact same bare
+  // `{ kind: 'FAILED', message }` shape as before this ticket.
+  | { kind: 'FAILED'; message: string; code?: SchedulingEligibilityErrorCode };
 
 export function classifyAcceptanceUiState(result: AcceptConstructedDayClientResult): DayPlanAcceptanceUiState {
   switch (result.status) {
@@ -68,6 +77,16 @@ export function classifyAcceptanceUiState(result: AcceptConstructedDayClientResu
     case 'IDEMPOTENCY_CONFLICT':
       return { kind: 'STALE', message: "We couldn't confirm this saved plan safely. Please refresh the plan and review it again." };
     case 'SAVE_FAILED':
+      // HPG3-A3b -- the one place this presentation layer now DOES branch
+      // on `result.code` (acceptConstructedDay.ts's own doc comment,
+      // written at A3a time, said "not in this ticket" -- this is that
+      // ticket). A codeless SAVE_FAILED (AMBIGUOUS_SOURCE_LINK,
+      // CAPTURE_LINK_FAILED, a genuine DB error) keeps the exact pre-A3b
+      // generic message, unchanged.
+      if (isKnownSchedulingEligibilityCode(result.code)) {
+        const presentation = presentSchedulingEligibilityError(result.code);
+        return { kind: 'FAILED', message: presentation.detail, code: presentation.code };
+      }
       return { kind: 'FAILED', message: "We couldn't save your plan. Try again." };
     case 'NETWORK_ERROR':
       return { kind: 'FAILED', message: "We couldn't reach Aura. Check your connection and try again." };

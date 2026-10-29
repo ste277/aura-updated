@@ -314,9 +314,35 @@ async function main() {
     const unknownCode = parseAcceptResponseBody({ status: 'SAVE_FAILED', code: 'NOT_A_REAL_CODE' });
     check('5c. parseAcceptResponseBody: an unrecognized code is dropped, never trusted blindly', unknownCode.status === 'SAVE_FAILED' && (unknownCode as any).code === undefined);
 
+    // HPG3-A3b -- classifyAcceptanceUiState now intentionally DOES
+    // differentiate by code (schedulingEligibilityPresentation.ts). The
+    // old 5d assumed it never would ("no UI redesign") -- that assumption
+    // is no longer valid and is replaced below by the actual intended
+    // contract: a codeless failure keeps its exact pre-A3b generic
+    // message (still proven here), while every known code gets its own
+    // distinct, non-technical presentation, with unresolved attribution
+    // kept distinguishable from ordinary daily capacity, and no known
+    // code ever exposing the ordinary retry affordance (DayPlanPreview.tsx
+    // renders "Try again" only when `actionState.kind === 'FAILED' &&
+    // !actionState.code` -- so the presence/absence of `code` on the
+    // classified state IS the retry-suppression signal this check proves).
     const stateNoCode = classifyAcceptanceUiState(plain);
+    check("5d. classifyAcceptanceUiState: a codeless SAVE_FAILED keeps the exact pre-A3b generic message and safe fallback (no code -> ordinary retry stays available)", stateNoCode.kind === 'FAILED' && (stateNoCode as any).code === undefined && (stateNoCode as any).message === "We couldn't save your plan. Try again.");
+
     const stateWithCode = classifyAcceptanceUiState(withCode);
-    check('5d. classifyAcceptanceUiState: SAVE_FAILED with or without a code renders the IDENTICAL UI state/message (no UI redesign)', JSON.stringify(stateNoCode) === JSON.stringify(stateWithCode) && stateNoCode.kind === 'FAILED' && (stateNoCode as any).message === "We couldn't save your plan. Try again.");
+    const stateDailyCapacity = classifyAcceptanceUiState(parseAcceptResponseBody({ status: 'SAVE_FAILED', code: 'DAILY_CAPACITY_EXCEEDED' }));
+    const stateWeeklyCapacity = classifyAcceptanceUiState(parseAcceptResponseBody({ status: 'SAVE_FAILED', code: 'CAPACITY_EXCEEDED' }));
+    const stateUnresolved = classifyAcceptanceUiState(parseAcceptResponseBody({ status: 'SAVE_FAILED', code: 'DAILY_ATTRIBUTION_UNRESOLVED' }));
+    const stateGoalNotActive = classifyAcceptanceUiState(parseAcceptResponseBody({ status: 'SAVE_FAILED', code: 'GOAL_NOT_ACTIVE' }));
+    const stateGoalActivityNotAvailable = classifyAcceptanceUiState(parseAcceptResponseBody({ status: 'SAVE_FAILED', code: 'GOAL_ACTIVITY_NOT_AVAILABLE' }));
+    const knownCodeStates = [stateWithCode, stateDailyCapacity, stateWeeklyCapacity, stateUnresolved, stateGoalNotActive, stateGoalActivityNotAvailable];
+    check('5e. every known scheduling-eligibility code classifies to kind FAILED with that SAME code carried through (never dropped, never swapped)', stateWithCode.kind === 'FAILED' && (stateWithCode as any).code === 'DAILY_CAPACITY_EXCEEDED' && stateDailyCapacity.kind === 'FAILED' && (stateDailyCapacity as any).code === 'DAILY_CAPACITY_EXCEEDED' && stateWeeklyCapacity.kind === 'FAILED' && (stateWeeklyCapacity as any).code === 'CAPACITY_EXCEEDED' && stateUnresolved.kind === 'FAILED' && (stateUnresolved as any).code === 'DAILY_ATTRIBUTION_UNRESOLVED' && stateGoalNotActive.kind === 'FAILED' && (stateGoalNotActive as any).code === 'GOAL_NOT_ACTIVE' && stateGoalActivityNotAvailable.kind === 'FAILED' && (stateGoalActivityNotAvailable as any).code === 'GOAL_ACTIVITY_NOT_AVAILABLE');
+    check('5f. all 5 known-code messages are mutually distinct from each other AND from the codeless generic message (genuinely differentiated, not just "has a code")', new Set([...knownCodeStates.map((s) => (s as any).message), (stateNoCode as any).message]).size === 6);
+    check("5g. DAILY_ATTRIBUTION_UNRESOLVED's message is specifically distinguishable from DAILY_CAPACITY_EXCEEDED's -- never presented as an ordinary daily-capacity conflict", (stateUnresolved as any).message !== (stateDailyCapacity as any).message && /can.t.*confirm/i.test((stateUnresolved as any).message) && !/can.t.*confirm/i.test((stateDailyCapacity as any).message));
+    check('5h. none of the 5 known codes ever classify to a codeless state -- every known code keeps `code` set, which is exactly what suppresses the ordinary "Try again" affordance in DayPlanPreview.tsx (no known scheduling conflict ever offers an ineffective retry)', knownCodeStates.every((s) => s.kind === 'FAILED' && (s as any).code !== undefined));
+
+    const unknownCodeState = classifyAcceptanceUiState(unknownCode);
+    check('5i. an unrecognized/unknown code still falls through to the exact same safe codeless fallback as a bare SAVE_FAILED (never crashes, never fabricates a code-specific message for an untrusted code)', JSON.stringify(unknownCodeState) === JSON.stringify(stateNoCode));
   }
 
   if (!allPassed) { console.error('SOME SCHEDULING ELIGIBILITY ERROR CONTRACT CHECKS FAILED'); process.exit(1); }

@@ -105,9 +105,10 @@ export type AcceptConstructedDayClientResult =
   | { status: 'IDEMPOTENCY_CONFLICT' }
   // HPG3-A3a -- `code` is optional and additive, same contract as the
   // server's own AcceptConstructedDayPersistenceResult (see that type's
-  // own comment, dayConstructorAcceptancePersistence.ts). This file's
-  // presentation layer (dayPlanAcceptancePresentation.ts) deliberately
-  // does not branch on it -- no UI redesign in this ticket.
+  // own comment, dayConstructorAcceptancePersistence.ts). HPG3-A3b is the
+  // ticket that actually consumes it: dayPlanAcceptancePresentation.ts's
+  // `classifyAcceptanceUiState` now branches on it to produce distinct,
+  // non-technical copy per known code.
   | { status: 'SAVE_FAILED'; code?: SchedulingEligibilityErrorCode }
   | { status: 'NETWORK_ERROR' }
   | { status: 'UNKNOWN_RESPONSE' };
