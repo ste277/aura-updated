@@ -99,7 +99,15 @@ check('goalsPresentation.ts defines no streak/calendar/history formatter', !/str
 // No new migration -- this ticket's own section 16 ("presentation/read-
 // model work," no schema change).
 // ============================================================
-check('R4 added no schema: no migration directory beyond the already-known 0043 references rhythm vocabulary at all (count-independent -- holds regardless of how many unrelated migrations exist)', fs.readdirSync(path.join(__dirname, '../apps/web/prisma/migrations')).filter((d) => /^\d{4}_/.test(d) && d !== '0043_goal_activity_rhythm').every((d) => !/rhythmKind|rhythmTargetPerWeek|GoalActivityRhythm/i.test(fs.readFileSync(path.join(__dirname, '../apps/web/prisma/migrations', d, 'migration.sql'), 'utf8'))));
+// PR #181 reconciliation -- the original bare-substring match
+// (/rhythmKind|rhythmTargetPerWeek|GoalActivityRhythm/i) also matched the
+// term inside migration 0048's own PROSE COMMENT (it explains that
+// materializeGoalActivityRhythmOccurrence repoints a reference -- a
+// function name, not a schema change), producing a false failure. Scoped
+// to actual schema-changing SQL statements only, so comment prose using
+// similar terminology no longer trips it, but a real, unexpected schema
+// change still would.
+check('R4 added no schema: no migration directory beyond the already-known 0043 adds a real rhythm column/table (count-independent -- holds regardless of how many unrelated migrations exist; scoped to actual DDL, not comment prose)', fs.readdirSync(path.join(__dirname, '../apps/web/prisma/migrations')).filter((d) => /^\d{4}_/.test(d) && d !== '0043_goal_activity_rhythm').every((d) => !/ADD COLUMN "rhythmKind"|ADD COLUMN "rhythmTargetPerWeek"|CREATE TABLE "GoalActivityRhythm"/.test(fs.readFileSync(path.join(__dirname, '../apps/web/prisma/migrations', d, 'migration.sql'), 'utf8'))));
 
 // ============================================================
 // db.ts: the new batched loader is read-only (re-confirmed narrowly here;

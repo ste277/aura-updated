@@ -178,6 +178,63 @@ jobs:
       # apps/web/node_modules.
       - name: Run Goal create idempotency test
         run: npx ts-node test/goalCreateIdempotency.test.ts
+      # PR #181 reconciliation -- 22 previously-unexecuted, non-DB Goals
+      # test files, wired in at this job's existing Goals-domain insertion
+      # point. Each is zero-dependency or jsx-enabled per the same
+      # conventions already established above; see each file's own header
+      # comment for its exact import chain.
+      - name: Run Goals domain test
+        run: npx ts-node test/goals.test.ts
+      - name: Run Goals wiring test
+        run: npx ts-node test/goalsWiring.test.ts
+      - name: Run Goals presentation test
+        run: npx ts-node test/goalsPresentation.test.ts
+      - name: Run Goal planning handoff test
+        run: npx ts-node test/goalPlanningHandoff.test.ts
+      - name: Run Goal planning handoff UI test
+        run: npx ts-node test/goalPlanningHandoffUi.test.ts
+      - name: Run Goal planning handoff wiring test
+        run: npx ts-node test/goalPlanningHandoffWiring.test.ts
+      - name: Run Goal completion test
+        run: npx ts-node test/goalCompletion.test.ts
+      - name: Run Goal completion structural guards test
+        run: npx ts-node test/goalCompletionStructuralGuards.test.ts
+      - name: Run Goal activity execution test
+        run: npx ts-node test/goalActivityExecution.test.ts
+      - name: Run Goal activity execution structural guards test
+        run: npx ts-node test/goalActivityExecutionStructuralGuards.test.ts
+      - name: Run Goal activity occurrence structural guards test
+        run: npx ts-node test/goalActivityOccurrenceStructuralGuards.test.ts
+      - name: Run Goal activity rhythm test
+        run: npx ts-node test/goalActivityRhythm.test.ts
+      - name: Run Goal activity rhythm materialization structural guards test
+        run: npx ts-node test/goalActivityRhythmMaterializationStructuralGuards.test.ts
+      - name: Run Goal activity rhythm Goal Detail structural guards test
+        run: npx ts-node test/goalActivityRhythmGoalDetailStructuralGuards.test.ts
+      - name: Run Goal activity rhythm Goal Detail UI test
+        run: npx ts-node test/goalActivityRhythmGoalDetailUi.test.ts
+      # test/goalActivityRhythmSetupUi.test.ts is intentionally NOT wired in
+      # here -- it asserts on a CreateGoalModal shape (isOngoingTemplate/
+      # GOAL_TEMPLATE_LIKELY_ONGOING) that the later Goals V2 Candidate B2/B3
+      # activity-proposal review flow has since replaced; it currently fails
+      # 5 checks against the real GoalsListClient.tsx and needs a maintainer
+      # decision (update vs retire this suite), not a blind wire-in.
+      - name: Run Goal activity rhythm setup structural guards test
+        run: npx ts-node test/goalActivityRhythmSetupStructuralGuards.test.ts
+      - name: Run Daily agenda Goal context test
+        run: npx ts-node test/dailyAgendaGoalContext.test.ts
+      - name: Run Goal context structural guards test
+        run: npx ts-node test/goalContextStructuralGuards.test.ts
+      - name: Run Goal Detail completion structural guards test
+        run: npx ts-node test/goalDetailCompletionStructuralGuards.test.ts
+      - name: Run Right Now Goal context test
+        run: npx ts-node test/rightNowGoalContext.test.ts
+      - name: Run Goal template completion test
+        run: npx ts-node test/goalTemplateCompletion.test.ts
+      - name: Run Goal-aware Recomposition presentation test
+        env:
+          TS_NODE_COMPILER_OPTIONS: '{"jsx":"react"}'
+        run: npx ts-node test/goalAwareRecompositionPresentation.test.ts
       # Goals V2 Candidate B4 -- goalDecompositionObservability.ts imports
       # goalActivityProposal.ts (a type-only RhythmPickerValue from the
       # 'use client' components/RhythmPicker.tsx), same jsx-enabled group
@@ -608,6 +665,35 @@ jobs:
         run: npx ts-node test/goalsReviewedCreateDb.test.ts
       - name: Run Goals create idempotency DB test
         run: npx ts-node test/goalsCreateIdempotencyDb.test.ts
+      # PR #181 reconciliation -- 13 previously-unexecuted, live-Postgres
+      # Goals test files, reusing this job's existing Postgres service and
+      # migration-deploy step rather than a new dedicated job.
+      - name: Run Goals DB test
+        run: npx ts-node test/goalsDb.test.ts
+      - name: Run Goal planning handoff DB test
+        run: npx ts-node test/goalPlanningHandoffDb.test.ts
+      - name: Run Goal activity execution DB test
+        run: npx ts-node test/goalActivityExecutionDb.test.ts
+      - name: Run Goal activity execution completion DB test
+        run: npx ts-node test/goalActivityExecutionCompletionDb.test.ts
+      - name: Run Goal activity execution Move continuity DB test
+        run: npx ts-node test/goalActivityExecutionMoveContinuityDb.test.ts
+      - name: Run Goal activity occurrence DB test
+        run: npx ts-node test/goalActivityOccurrenceDb.test.ts
+      - name: Run Goal activity rhythm DB test
+        run: npx ts-node test/goalActivityRhythmDb.test.ts
+      - name: Run Goal activity rhythm materialization DB test
+        run: npx ts-node test/goalActivityRhythmMaterializationDb.test.ts
+      - name: Run Goal activity rhythm Goal Detail DB test
+        run: npx ts-node test/goalActivityRhythmGoalDetailDb.test.ts
+      - name: Run Goal activity rhythm setup DB test
+        run: npx ts-node test/goalActivityRhythmSetupDb.test.ts
+      - name: Run Goal context DB test
+        run: npx ts-node test/goalContextDb.test.ts
+      - name: Run Goal template completion DB test
+        run: npx ts-node test/goalTemplateCompletionDb.test.ts
+      - name: Run Goal-aware Recomposition presentation DB test
+        run: npx ts-node test/goalAwareRecompositionPresentationDb.test.ts
       # Goals V2 Candidate B5 -- composed B1->B2->B3->B3.1->Candidate A->
       # planning lifecycle closure. Needs the jsx-enabled compiler option
       # because it imports goalActivityProposal.ts (same reason as the
