@@ -243,6 +243,12 @@ jobs:
         run: npx ts-node test/dayPlanAcceptancePresentation.test.ts
       - name: Run Scheduling eligibility presentation test
         run: npx ts-node test/schedulingEligibilityPresentation.test.ts
+      # HPG3-A4a -- homeMove.test.ts (pure/injectable, no .tsx import, reads
+      # HomeDashboard.tsx/HomeTimeline.tsx/PlanWithAuraView.tsx as plain text
+      # for its own structural checks rather than importing them) was never
+      # wired into CI; this ticket's own new checks live inside it.
+      - name: Run Home Move test
+        run: npx ts-node test/homeMove.test.ts
       # Goals V2 Candidate B4 -- goalDecompositionObservability.ts imports
       # goalActivityProposal.ts (a type-only RhythmPickerValue from the
       # 'use client' components/RhythmPicker.tsx), same jsx-enabled group

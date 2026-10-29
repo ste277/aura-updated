@@ -10,6 +10,7 @@
 import { planToAgendaItem, type DailyAgenda, type DailyAgendaItem } from './dailyAgenda';
 import type { PlannedActivity } from './db';
 import type { HomeTimelineItem } from './homeTimelineTypes';
+import { presentSchedulingEligibilityError } from './schedulingEligibilityPresentation';
 import { addDaysToDateStr, getDatePartsInTimezone, getMinuteOfDayInTimezone, resolveLocalDateTime } from './timezone';
 
 // ---------------------------------------------------------------------------
@@ -115,11 +116,25 @@ export function formatMoveTime(newStartAt: string, timezone: string): string {
 // Response handling
 // ---------------------------------------------------------------------------
 
-export type MoveFailureCode = 'CONFLICT' | 'HAS_LINKED_MOMENT' | 'INVALID_STATE' | 'ALREADY_MOVED' | 'INVALID_DESTINATION' | 'FAILED';
+export type MoveFailureCode =
+  | 'CONFLICT'
+  | 'HAS_LINKED_MOMENT'
+  | 'INVALID_STATE'
+  | 'ALREADY_MOVED'
+  | 'INVALID_DESTINATION'
+  // HPG3-A4a -- the 3 scheduling-eligibility codes movePlannedActivity's own
+  // applyMoveWrites (planMove.ts) already throws, identical strings to the
+  // ones schedulingEligibilityError.ts reuses. Previously absent from
+  // KNOWN_CODES, so every one of these fell into the generic FAILED bucket
+  // below even though the server already told Home exactly what happened.
+  | 'CAPACITY_EXCEEDED'
+  | 'DAILY_CAPACITY_EXCEEDED'
+  | 'DAILY_ATTRIBUTION_UNRESOLVED'
+  | 'FAILED';
 
 export type MoveOutcome = { status: 'MOVED'; successor: PlannedActivity } | { status: MoveFailureCode };
 
-const KNOWN_CODES = new Set<string>(['CONFLICT', 'HAS_LINKED_MOMENT', 'INVALID_STATE', 'ALREADY_MOVED', 'INVALID_DESTINATION']);
+const KNOWN_CODES = new Set<string>(['CONFLICT', 'HAS_LINKED_MOMENT', 'INVALID_STATE', 'ALREADY_MOVED', 'INVALID_DESTINATION', 'CAPACITY_EXCEEDED', 'DAILY_CAPACITY_EXCEEDED', 'DAILY_ATTRIBUTION_UNRESOLVED']);
 
 /**
  * A success is ONLY a 2xx whose body truthfully reports the original as MOVED
@@ -151,6 +166,19 @@ export function moveFailureMessage(code: MoveFailureCode): string {
       return 'This plan was just changed. Updating your day…';
     case 'INVALID_DESTINATION':
       return 'Choose a time later than now.';
+    // HPG3-A4a -- reuse schedulingEligibilityPresentation.ts's own copy
+    // verbatim, the SAME strings Plan-with-Aura's reschedule-via-Move
+    // banner already shows for these same 3 codes (HPG3-A3b), rather than
+    // a second, separately-maintained set of messages. Weekly and daily
+    // capacity, and unresolved legacy attribution, each keep their own
+    // distinct wording -- never collapsed into one generic conflict
+    // message, and never implying a plain retry (a different time, or
+    // trying again unchanged) would resolve a capacity/attribution
+    // conflict that is unrelated to the time just picked.
+    case 'CAPACITY_EXCEEDED':
+    case 'DAILY_CAPACITY_EXCEEDED':
+    case 'DAILY_ATTRIBUTION_UNRESOLVED':
+      return presentSchedulingEligibilityError(code).detail;
     case 'FAILED':
       return "Couldn't move that. Try again.";
   }
