@@ -38,7 +38,7 @@ import { HomeQuickCapture } from './HomeQuickCapture';
 import { createPlanExecutor, completablePlanId, skippablePlanId, moveablePlanId, overlayExecutionFacts, agendaWithoutResolvedNext, visibleCompletionError, type CompletionError, type ExecutionOutcome } from '../lib/homeCompletion';
 import { selectVisibleStartingSoonReminder } from '../lib/reminderConsistency';
 import { createSuccessorFocusController, successorOnAgendaDay, type SuccessorFocusController } from '../lib/homeSuccessorFocus';
-import { missedRecoveryPlanId, overlayElapsedMissed, missedSkipEligiblePlanIds } from '../lib/homeMissedRecovery';
+import { missedRecoveryPlanId, overlayElapsedMissed, missedSkipEligiblePlanIds, summarizeSkipAllOutcome } from '../lib/homeMissedRecovery';
 import { applyConfirmedSuccessors, hideMovedTimelineItems, defaultMoveSelection, resolveMoveDestination, moveDestinationMessage, moveFailureMessage, formatMoveTime, type MoveSelection } from '../lib/homeMove';
 import type { PlannedActivity } from '../lib/db';
 import { RecompositionCard } from './RecompositionCard';
@@ -943,11 +943,10 @@ export function HomeDashboard({
     skipAllMissedRunningRef.current = true;
     setSkipAllMissedBusy(true);
     setSkipAllMissedNotice(null);
-    let succeeded = 0;
-    let failed = 0;
+    const outcomes: string[] = [];
     for (const planId of eligible) {
       if (planExecutor.current.isBusy(planId)) {
-        failed += 1;
+        outcomes.push('BUSY');
         continue;
       }
       setSkippingPlanIds((current) => new Set(current).add(planId));
@@ -957,15 +956,14 @@ export function HomeDashboard({
         next.delete(planId);
         return next;
       });
-      if (result !== 'SKIPPED') {
-        failed += 1;
-        continue;
+      outcomes.push(result);
+      if (result === 'SKIPPED') {
+        setExecutionFacts((current) => new Map(current).set(planId, 'SKIPPED'));
       }
-      succeeded += 1;
-      setExecutionFacts((current) => new Map(current).set(planId, 'SKIPPED'));
     }
     skipAllMissedRunningRef.current = false;
     setSkipAllMissedBusy(false);
+    const { succeeded, failed } = summarizeSkipAllOutcome(outcomes);
     setSkipAllMissedNotice({ succeeded, failed });
     if (succeeded > 0) {
       recompositionStore.invalidate();

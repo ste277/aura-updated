@@ -14,6 +14,7 @@
 import fs from 'fs';
 import path from 'path';
 import { isUpcomingOrCurrentPlan, isMissedPlan, type PersistedPlanStatus } from '../apps/web/lib/planFormatting';
+import { summarizeSkipAllOutcome } from '../apps/web/lib/homeMissedRecovery';
 
 let allPassed = true;
 function check(label: string, condition: boolean) {
@@ -199,10 +200,36 @@ function main() {
   check('HPG4-2. the bulk action calls the EXACT same POST /api/plans/[id]/skip route handleSkipPlan uses -- no new endpoint, no second mutation', (skipAllBlock.match(/fetch\(`\/api\/plans\/\$\{plan\.id\}\/skip`, \{ method: 'POST' \}\)/g) ?? []).length === 1);
   check('HPG4-2. a second run cannot start while one is active: a synchronous ref is checked before any state write or await, same idiom as Home\'s own guard', /if \(skipAllMissedRunningRef\.current\) return;/.test(skipAllBlock) && /skipAllMissedRunningRef\.current = true;/.test(skipAllBlock));
   check('HPG4-2. each item is tracked through the EXISTING planActionStates busy map (the same one MissedActivityCard\'s actionState prop already reads) -- not a new busy-tracking mechanism', /setPlanActionStates\(\(states\) => \(\{ \.\.\.states, \[plan\.id\]: 'SKIPPING' \}\)\)/.test(skipAllBlock));
-  check('HPG4-2. success/failure are counted independently per item (partial success is representable), never a single all-or-nothing boolean', /succeeded \+= 1/.test(skipAllBlock) && /failed \+= 1/.test(skipAllBlock) && /succeeded: number; failed: number/.test(stripped));
+  check('HPG4-2. success/failure are counted independently per item (partial success is representable), never a single all-or-nothing boolean', /outcomes\.push\('SKIPPED'\)/.test(skipAllBlock) && /outcomes\.push\('FAILED'\)/.test(skipAllBlock) && /succeeded: number; failed: number/.test(stripped));
   check('HPG4-2. no goal-related identifier appears in the new bulk-skip code either (same discipline as check 20 for the single-item path)', !/(goalId|GoalActivity|goalProgress)/i.test(skipAllBlock));
   check('HPG4-2. the bulk action is offered only once 2+ activities are missed (missedPlans.length >= 2), independent of the 2-item default VISIBLE slice', /missedPlans\.length >= 2/.test(stripped));
   check('HPG4-2. no confirmation dialog or new screen was introduced for this action (no ModalShell/confirm/window.confirm anywhere in the new block)', !/ModalShell|window\.confirm|confirm\(/i.test(skipAllBlock));
+
+  // ============================================================
+  // HPG4-2 CI/functional hardening -- same gap, same fix, on the Plan
+  // surface's own independent handler: it now delegates its tally to the
+  // SAME exported, directly-unit-tested summarizeSkipAllOutcome Home's
+  // handler calls (sharing only this trivial, generic counting arithmetic
+  // -- Plan's own eligibility derivation and its own fetch/skip transport
+  // stay fully independent of Home's, unchanged). A regression in that
+  // shared function is caught directly by missedRecovery.test.ts's checks
+  // 62-63; this check proves THIS handler has no OTHER, competing place it
+  // could recompute succeeded/failed.
+  // ============================================================
+  check(
+    '65. handleSkipAllMissed (Plan tab) delegates its ENTIRE tally to summarizeSkipAllOutcome -- no manual succeeded/failed +=\' arithmetic survives anywhere in the handler body',
+    /summarizeSkipAllOutcome\(outcomes\)/.test(skipAllBlock) && !/succeeded \+= 1|failed \+= 1|let succeeded|let failed/.test(skipAllBlock)
+  );
+  check(
+    '66. summarizeSkipAllOutcome, called directly with this surface\'s own outcome vocabulary (\'SKIPPED\'/\'FAILED\'/\'BUSY\'), produces the correct tally for an all-success, a partial, and an all-failed batch',
+    JSON.stringify(summarizeSkipAllOutcome(['SKIPPED', 'SKIPPED'])) === JSON.stringify({ succeeded: 2, failed: 0 }) &&
+      JSON.stringify(summarizeSkipAllOutcome(['SKIPPED', 'FAILED'])) === JSON.stringify({ succeeded: 1, failed: 1 }) &&
+      JSON.stringify(summarizeSkipAllOutcome(['FAILED', 'BUSY'])) === JSON.stringify({ succeeded: 0, failed: 2 })
+  );
+  check(
+    '67. the busy guard is released unconditionally after the batch loop, on EVERY exit path -- never left permanently stuck',
+    /\}\s*skipAllMissedRunningRef\.current = false;\s*setSkipAllMissedBusy\(false\);/.test(skipAllBlock)
+  );
 
   console.log(allPassed ? '\nALL MISSED ACTIVITY PRESENTATION CHECKS PASSED' : '\nSOME MISSED ACTIVITY PRESENTATION CHECKS FAILED');
   process.exit(allPassed ? 0 : 1);

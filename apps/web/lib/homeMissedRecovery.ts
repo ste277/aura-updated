@@ -71,6 +71,26 @@ export function missedSkipEligiblePlanIds(timeline: readonly HomeTimelineItem[],
 }
 
 /**
+ * HPG4-2 CI/functional hardening -- the ONLY place "Skip all missed"'s
+ * succeeded/failed tally is computed, extracted out of handleSkipAllMissed's
+ * loop body so it has a single, directly-testable implementation instead of
+ * inline `+= 1` arithmetic a test could only ever confirm by matching source
+ * text. Each outcome is the per-item executor result ('SKIPPED' on success;
+ * anything else -- 'FAILED', 'BUSY', or an already-busy item the loop never
+ * even attempted -- counts as failed). Pure: no side effects, no knowledge
+ * of the timeline/executor itself.
+ */
+export function summarizeSkipAllOutcome(outcomes: readonly string[]): { succeeded: number; failed: number } {
+  let succeeded = 0;
+  let failed = 0;
+  for (const outcome of outcomes) {
+    if (outcome === 'SKIPPED') succeeded += 1;
+    else failed += 1;
+  }
+  return { succeeded, failed };
+}
+
+/**
  * Brings the composed timeline's presentation in line with the live clock: a plan whose end
  * elapsed while Home stayed mounted (the agenda was built earlier) reads as MISSED, exactly as a
  * fresh agenda would say. Only re-labels; never changes ordering and never persists anything.

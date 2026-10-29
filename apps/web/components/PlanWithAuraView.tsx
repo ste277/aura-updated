@@ -48,6 +48,11 @@ import {
   addDays,
   formatShortDate,
 } from '../lib/planFormatting';
+// HPG4-2 CI/functional hardening -- reuses Home's own generic, timeline-
+// agnostic succeeded/failed tally helper (pure string-outcome counting only;
+// Plan's own eligibility derivation and its own fetch/skip transport stay
+// fully independent of Home's, unchanged from the original HPG4-2 PR).
+import { summarizeSkipAllOutcome } from '../lib/homeMissedRecovery';
 
 export type { PlanEventLocation };
 export { RESULT_LABEL_TEXT, findCandidateKey, planPayloadFromCandidate };
@@ -1173,11 +1178,10 @@ export function PlanWithAuraView({ onTimingSearch, onViewDay, onPlanLogged, time
     skipAllMissedRunningRef.current = true;
     setSkipAllMissedBusy(true);
     setSkipAllMissedNotice(null);
-    let succeeded = 0;
-    let failed = 0;
+    const outcomes: string[] = [];
     for (const plan of eligible) {
       if (planActionStates[plan.id]) {
-        failed += 1;
+        outcomes.push('BUSY');
         continue;
       }
       setPlanActionStates((states) => ({ ...states, [plan.id]: 'SKIPPING' }));
@@ -1187,9 +1191,9 @@ export function PlanWithAuraView({ onTimingSearch, onViewDay, onPlanLogged, time
         const result = await res.json();
         const updated = mapPlanRow(result.plan, timezone);
         setSavedPlans((plans) => plans.map((item) => item.id === plan.id ? updated : item));
-        succeeded += 1;
+        outcomes.push('SKIPPED');
       } catch {
-        failed += 1;
+        outcomes.push('FAILED');
       } finally {
         setPlanActionStates((states) => {
           const next = { ...states };
@@ -1200,6 +1204,7 @@ export function PlanWithAuraView({ onTimingSearch, onViewDay, onPlanLogged, time
     }
     skipAllMissedRunningRef.current = false;
     setSkipAllMissedBusy(false);
+    const { succeeded, failed } = summarizeSkipAllOutcome(outcomes);
     setSkipAllMissedNotice({ succeeded, failed });
     if (succeeded > 0) onPlanLogged?.();
   };
