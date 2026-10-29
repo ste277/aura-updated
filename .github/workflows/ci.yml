@@ -256,6 +256,20 @@ jobs:
       # wired into CI; this ticket's own new checks live inside it.
       - name: Run Home Move test
         run: npx ts-node test/homeMove.test.ts
+      # HPG4-2 CI coverage reconciliation -- these 4 suites already pass
+      # against main but were never wired into CI; none import a .tsx
+      # module at runtime (homeSkip/missedRecovery/skipPlannedActivity read
+      # HomeDashboard.tsx/PlanWithAuraView.tsx as plain text for their own
+      # structural checks, same convention as homeMove.test.ts above), so
+      # none need the jsx TS_NODE_COMPILER_OPTIONS.
+      - name: Run Home Skip test
+        run: npx ts-node test/homeSkip.test.ts
+      - name: Run Missed activity presentation test
+        run: npx ts-node test/missedActivityPresentation.test.ts
+      - name: Run Missed recovery test
+        run: npx ts-node test/missedRecovery.test.ts
+      - name: Run Skip planned activity test
+        run: npx ts-node test/skipPlannedActivity.test.ts
       # Goals V2 Candidate B4 -- goalDecompositionObservability.ts imports
       # goalActivityProposal.ts (a type-only RhythmPickerValue from the
       # 'use client' components/RhythmPicker.tsx), same jsx-enabled group
@@ -839,6 +853,16 @@ jobs:
         run: npx ts-node test/multiOccurrenceRhythmMoveCapacityDb.test.ts
       - name: Run Home Move DB test
         run: npx ts-node test/homeMoveDb.test.ts
+      # HPG4-2 CI coverage reconciliation -- these 3 DB-backed suites
+      # already pass against main but were never wired into CI; reusing
+      # this job's existing Postgres service/migration-deploy step, same
+      # convention as the HPG3-A4b block above.
+      - name: Run Home Skip DB test
+        run: npx ts-node test/homeSkipDb.test.ts
+      - name: Run Missed recovery DB test
+        run: npx ts-node test/missedRecoveryDb.test.ts
+      - name: Run Skip planned activity DB test
+        run: npx ts-node test/skipPlannedActivityDb.test.ts
       # HPG3-A4b -- live-DB proof that Recomposition acceptance preserves a
       # genuine scheduling-eligibility conflict's typed code rather than
       # collapsing it into a bare, codeless SAVE_FAILED.

@@ -48,6 +48,11 @@ import {
   addDays,
   formatShortDate,
 } from '../lib/planFormatting';
+// HPG4-2 CI/functional hardening -- reuses Home's own generic, timeline-
+// agnostic succeeded/failed tally helper (pure string-outcome counting only;
+// Plan's own eligibility derivation and its own fetch/skip transport stay
+// fully independent of Home's, unchanged from the original HPG4-2 PR).
+import { summarizeSkipAllOutcome, collectSkipAllOutcomes } from '../lib/homeMissedRecovery';
 
 export type { PlanEventLocation };
 export { RESULT_LABEL_TEXT, findCandidateKey, planPayloadFromCandidate };
@@ -1173,33 +1178,32 @@ export function PlanWithAuraView({ onTimingSearch, onViewDay, onPlanLogged, time
     skipAllMissedRunningRef.current = true;
     setSkipAllMissedBusy(true);
     setSkipAllMissedNotice(null);
-    let succeeded = 0;
-    let failed = 0;
-    for (const plan of eligible) {
-      if (planActionStates[plan.id]) {
-        failed += 1;
-        continue;
-      }
-      setPlanActionStates((states) => ({ ...states, [plan.id]: 'SKIPPING' }));
-      try {
-        const res = await fetch(`/api/plans/${plan.id}/skip`, { method: 'POST' });
-        if (!res.ok) throw new Error('Unable to skip plan.');
-        const result = await res.json();
-        const updated = mapPlanRow(result.plan, timezone);
-        setSavedPlans((plans) => plans.map((item) => item.id === plan.id ? updated : item));
-        succeeded += 1;
-      } catch {
-        failed += 1;
-      } finally {
-        setPlanActionStates((states) => {
-          const next = { ...states };
-          delete next[plan.id];
-          return next;
-        });
-      }
-    }
+    const outcomes = await collectSkipAllOutcomes(
+      eligible,
+      (plan) => Boolean(planActionStates[plan.id]),
+      async (plan) => {
+        setPlanActionStates((states) => ({ ...states, [plan.id]: 'SKIPPING' }));
+        try {
+          const res = await fetch(`/api/plans/${plan.id}/skip`, { method: 'POST' });
+          if (!res.ok) throw new Error('Unable to skip plan.');
+          const result = await res.json();
+          const updated = mapPlanRow(result.plan, timezone);
+          setSavedPlans((plans) => plans.map((item) => item.id === plan.id ? updated : item));
+          return 'SKIPPED';
+        } catch {
+          return 'FAILED';
+        } finally {
+          setPlanActionStates((states) => {
+            const next = { ...states };
+            delete next[plan.id];
+            return next;
+          });
+        }
+      },
+    );
     skipAllMissedRunningRef.current = false;
     setSkipAllMissedBusy(false);
+    const { succeeded, failed } = summarizeSkipAllOutcome(outcomes);
     setSkipAllMissedNotice({ succeeded, failed });
     if (succeeded > 0) onPlanLogged?.();
   };

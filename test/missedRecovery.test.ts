@@ -9,7 +9,7 @@ import fs from 'fs';
 import path from 'path';
 import { createPlanExecutor, overlayExecutionFacts, agendaWithoutResolvedNext, type ExecutionOutcome } from '../apps/web/lib/homeCompletion';
 import { applyConfirmedSuccessors, hideMovedTimelineItems } from '../apps/web/lib/homeMove';
-import { missedRecoveryPlanId, isMissedPlanItem, overlayElapsedMissed, MISSED_RECOVERY_ACTIONS, missedSkipEligiblePlanIds } from '../apps/web/lib/homeMissedRecovery';
+import { missedRecoveryPlanId, isMissedPlanItem, overlayElapsedMissed, MISSED_RECOVERY_ACTIONS, missedSkipEligiblePlanIds, summarizeSkipAllOutcome, collectSkipAllOutcomes } from '../apps/web/lib/homeMissedRecovery';
 import { selectVisibleStartingSoonReminder } from '../apps/web/lib/reminderConsistency';
 import { buildDailyAgenda } from '../apps/web/lib/dailyAgenda';
 import { buildHomeTimeline } from '../apps/web/lib/homeTimelineComposer';
@@ -207,16 +207,32 @@ async function main() {
     return missedSkipEligiblePlanIds(t, now, new Map()).join() === 'm,n' && missedSkipEligiblePlanIds(t, now, new Map([['m', 'SKIPPED']])).join() === 'n';
   })());
 
+  // HPG4-2 CI/functional hardening -- this helper used to reimplement its
+  // own succeeded/failed tally inline (the exact root cause an independent
+  // review demonstrated: corrupting ONLY handleSkipAllMissed's real tally
+  // left every check below green, since none of them ran the counting logic
+  // the production handler actually ships). It now calls the SAME exported,
+  // directly-unit-tested summarizeSkipAllOutcome the real handler calls --
+  // so a regression in the shared tally function fails check 62 below AND
+  // every check in this block, not just one in isolation.
+  //
+  // CI/functional hardening (follow-up) -- this helper ALSO used to
+  // reimplement its own per-item collection loop (`for (const id of
+  // planIds) outcomes.push(await ex.skip(id))`), which is the exact second
+  // instance of the anti-pattern: an independent review demonstrated that
+  // hardcoding Home's real collection loop to always push 'SKIPPED'
+  // (ignoring the real per-item result) caused ZERO failures across every
+  // check in this file, because none of them ran the real collection logic
+  // either -- only this reimplemented copy. It now calls the SAME exported
+  // collectSkipAllOutcomes the real handler calls, with the real executor's
+  // own isBusy as the busy check -- so a caller-side collection regression
+  // in Home's production handler now fails here too, not just in isolation.
   const runSkipAll = async (planIds: string[], responder: (planId: string) => Response | Promise<Response>) => {
     const calls: string[] = [];
     const ex = createPlanExecutor((async (input: any) => { calls.push(String(input)); const id = String(input).split('/')[3]; return responder(id); }) as typeof fetch);
-    let succeeded = 0, failed = 0;
-    for (const id of planIds) {
-      const r = await ex.skip(id);
-      if (r === 'SKIPPED') succeeded += 1;
-      else failed += 1;
-    }
-    return { calls, succeeded, failed };
+    const outcomes = await collectSkipAllOutcomes(planIds, (id) => ex.isBusy(id), (id) => ex.skip(id));
+    const { succeeded, failed } = summarizeSkipAllOutcome(outcomes);
+    return { calls, succeeded, failed, outcomes };
   };
   const skipOk = (id: string) => json({ plan: { id, status: 'SKIPPED' } });
   const allOk = await runSkipAll(['m', 'n'], skipOk);
@@ -235,8 +251,60 @@ async function main() {
   check('HPG4-2. duplicate-submission protection is a synchronous ref checked before any state write or await (same idiom as recomposition\'s own acceptInFlight / the executor\'s own inFlight Set) -- never React state alone, which cannot catch a same-tick double click', /if \(skipAllMissedRunningRef\.current\) return;/.test(skipAllBlock) && /skipAllMissedRunningRef\.current = true;/.test(skipAllBlock));
   check('HPG4-2. no DONE mutation is possible from this path: the handler calls planExecutor.current.skip, never .complete, anywhere in its body', /planExecutor\.current\.skip\(planId\)/.test(skipAllBlock) && !/planExecutor\.current\.complete\(/.test(skipAllBlock));
   check('HPG4-2. the button only appears at 2+ eligible (missedSkipEligibleCount >= 2) and disables itself while busy -- the exact same skippingPlanIds busy set individual rows already read, not a new mechanism', /missedSkipEligibleCount >= 2/.test(dashSrc) && /disabled=\{skipAllMissedBusy\}/.test(dashSrc) && /setSkippingPlanIds\(\(current\) => new Set\(current\)\.add\(planId\)\)/.test(skipAllBlock));
-  check('HPG4-2. the confirmed-fact write happens only AFTER a SKIPPED result (no optimistic write), matching every other Home execution handler\'s discipline', /if \(result !== 'SKIPPED'\) \{[\s\S]{0,80}continue;\s*\}\s*succeeded \+= 1;\s*setExecutionFacts/.test(skipAllBlock));
+  check('HPG4-2. the confirmed-fact write happens only AFTER a SKIPPED result (no optimistic write), matching every other Home execution handler\'s discipline', /if \(result === 'SKIPPED'\) \{\s*setExecutionFacts/.test(skipAllBlock));
   check('HPG4-2. "Skip all missed" never appears inside the per-row renderMissedRecovery block (it is a page-level action, not a third per-row control) -- the banned-automation guard above (check 185) already proves the per-row module stays free of it', !/missedSkipEligible|handleSkipAllMissed|skipAllMissedRunningRef/.test(block));
+
+  // ============================================================
+  // HPG4-2 CI/functional hardening -- closes the demonstrated gap: the
+  // independent review corrupted ONLY the real handler's tally (forced it
+  // to always report all-succeeded) and found every existing check above
+  // still passed, because none of them exercised the actual counting logic
+  // the production handler runs -- they either asserted on source text
+  // containing "succeeded += 1" (proving the token exists, not that it
+  // executes correctly) or reimplemented their own counting in runSkipAll.
+  // handleSkipAllMissed now delegates its tally to the exported
+  // summarizeSkipAllOutcome below, directly unit-tested here with no stub
+  // in between; check 63 then proves the real handler has no OTHER, parallel
+  // place it could recompute succeeded/failed -- so corrupting the shared
+  // function corrupts production behavior, by construction, not by
+  // assumption.
+  // ============================================================
+  check('62. summarizeSkipAllOutcome: all-SKIPPED -> all succeeded, zero failed', JSON.stringify(summarizeSkipAllOutcome(['SKIPPED', 'SKIPPED'])) === JSON.stringify({ succeeded: 2, failed: 0 }));
+  check('62. summarizeSkipAllOutcome: a mix of SKIPPED/FAILED/BUSY -> only SKIPPED counts toward succeeded', JSON.stringify(summarizeSkipAllOutcome(['SKIPPED', 'FAILED', 'BUSY', 'SKIPPED'])) === JSON.stringify({ succeeded: 2, failed: 2 }));
+  check('62. summarizeSkipAllOutcome: all-failed (no SKIPPED anywhere) -> zero succeeded', JSON.stringify(summarizeSkipAllOutcome(['FAILED', 'FAILED'])) === JSON.stringify({ succeeded: 0, failed: 2 }));
+  check('62. summarizeSkipAllOutcome: an empty outcome list -> zero/zero, never a divide-by-zero or NaN', JSON.stringify(summarizeSkipAllOutcome([])) === JSON.stringify({ succeeded: 0, failed: 0 }));
+  check(
+    '63. handleSkipAllMissed delegates its ENTIRE tally to summarizeSkipAllOutcome -- no manual succeeded/failed +=\' arithmetic survives anywhere in the handler body (the exact pattern that let a counting regression slip past every other check in this file until now)',
+    /summarizeSkipAllOutcome\(outcomes\)/.test(skipAllBlock) && !/succeeded \+= 1|failed \+= 1|let succeeded|let failed/.test(skipAllBlock)
+  );
+  check(
+    '64. the busy guard is released unconditionally right after the batch\'s own await resolves, on EVERY exit path (success or failure) -- never left permanently stuck, and a later call after a prior batch finished is allowed to proceed',
+    /\);\s*skipAllMissedRunningRef\.current = false;\s*setSkipAllMissedBusy\(false\);/.test(skipAllBlock)
+  );
+  check(
+    '65. handleSkipAllMissed\'s own outcomes array is built by calling the REAL exported collectSkipAllOutcomes (not a reimplemented loop) -- the exact second half of the gap an independent review found: corrupting Home\'s collection, not the tally, still passed every check in this file until this line existed to prove the handler has no parallel collection path',
+    /outcomes = await collectSkipAllOutcomes\(/.test(skipAllBlock) && !/const outcomes: string\[\] = \[\];\s*for \(/.test(skipAllBlock)
+  );
+  check(
+    '69. the per-item skip callback returns the ACTUAL executor result variable, never a hardcoded success literal -- unit-testing collectSkipAllOutcomes in isolation (checks 66-68 above) cannot catch a caller that hands it a callback claiming success regardless of the real outcome; this is the precise caller-side wiring bug an independent review\'s own Control B demonstrated slips past every test that only exercises collectSkipAllOutcomes/summarizeSkipAllOutcome directly',
+    /return result;\s*\},\s*\);/.test(skipAllBlock) && !/return '(SKIPPED|FAILED)';/.test(skipAllBlock)
+  );
+
+  // ============================================================
+  // HPG4-2 CI/functional hardening (follow-up) -- collectSkipAllOutcomes
+  // itself: real per-item collection, now that runSkipAll above calls it
+  // instead of reimplementing the loop. These exercise the same function
+  // Home's production handler calls, with a mocked skip transport, proving
+  // the collection logic is correct independent of any particular caller.
+  // ============================================================
+  const busyCalls: string[] = [];
+  const busyOutcomes = await collectSkipAllOutcomes(['m', 'n', 'o'], (id) => id === 'n', async (id) => { busyCalls.push(id); return 'SKIPPED'; });
+  check('66. an item already busy (e.g. a concurrent individual Skip/Done/Move in flight on it) is collected as BUSY and never attempted -- the real skip transport is called for every OTHER item only', JSON.stringify(busyOutcomes) === JSON.stringify(['SKIPPED', 'BUSY', 'SKIPPED']) && busyCalls.join() === 'm,o');
+  const order: string[] = [];
+  await collectSkipAllOutcomes(['x', 'y', 'z'], () => false, async (id) => { order.push(`start:${id}`); await Promise.resolve(); order.push(`end:${id}`); return 'SKIPPED'; });
+  check('67. collectSkipAllOutcomes runs strictly sequentially (each item\'s skipOne fully resolves before the next one starts), never in parallel', order.join() === 'start:x,end:x,start:y,end:y,start:z,end:z');
+  const composedOutcomes = await collectSkipAllOutcomes(['p', 'q', 'r', 's'], (id) => id === 'q', async (id) => (id === 's' ? 'FAILED' : 'SKIPPED'));
+  check('68. collectSkipAllOutcomes composed with the REAL summarizeSkipAllOutcome on a mixed batch (one busy, one failed, two succeeded) produces the correct end-to-end counts -- the genuine production pipeline, not two isolated unit tests of its two halves', (() => { const { succeeded, failed } = summarizeSkipAllOutcome(composedOutcomes); return succeeded === 2 && failed === 2; })());
 
   console.log(allPassed ? '\nALL MISSED RECOVERY CHECKS PASSED' : '\nSOME MISSED RECOVERY CHECKS FAILED');
   process.exit(allPassed ? 0 : 1);
