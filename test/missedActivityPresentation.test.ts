@@ -258,6 +258,73 @@ async function main() {
     /if \(!res\.ok\) throw new Error\('Unable to skip plan\.'\);\s*const result = await res\.json\(\);\s*const updated = mapPlanRow\(result\.plan, timezone\);\s*setSavedPlans\(\(plans\) => plans\.map\(\(item\) => item\.id === plan\.id \? updated : item\)\);\s*return 'SKIPPED';/.test(skipAllBlock)
   );
 
+  // ============================================================
+  // HPG4-3. Plan-tab "Skip all missed" button visibility staleness fix.
+  // Prior to this, missedPlans was a useMemo keyed ONLY on [savedPlans];
+  // since isMissedPlan's underlying MISSED check is time-dependent, the
+  // button's visibility (gated on missedPlans.length >= 2) could go stale
+  // purely from the clock advancing, with no savedPlans change at all.
+  // ============================================================
+  check(
+    'HPG4-3. missedPlans now recomputes on the same ticking clock value Home already drives its own eligibility from (currentMinuteOfDay), not only when savedPlans itself changes',
+    /const missedPlans = useMemo\(\s*\(\) =>\s*savedPlans\s*\.filter\(\(plan\) => isMissedPlan\(plan\)\)[\s\S]{0,200}\[savedPlans, currentMinuteOfDay\]/.test(stripped)
+  );
+  check(
+    'HPG4-3. no second clock/polling mechanism was introduced -- useCurrentMinuteOfDay (the exact hook Home already uses, 30s interval) is imported and called exactly once, and no new setInterval/setTimeout was added to this file',
+    (stripped.match(/useCurrentMinuteOfDay\(/g) ?? []).length === 1 && !/setInterval\(|setTimeout\(/.test(stripped)
+  );
+  check(
+    'HPG4-3. no second definition of MISSED: the visibility fix still filters with the unchanged, already-existing isMissedPlan -- no new/duplicated time-comparison logic',
+    /\.filter\(\(plan\) => isMissedPlan\(plan\)\)/.test(stripped) && (stripped.match(/isMissedPlan\(/g) ?? []).length >= 2
+  );
+  // Escape clause (ticket step 5): this repo has no DOM/render harness, so
+  // "the button's visibility updates when the clock ticks without a
+  // savedPlans mutation" cannot be driven through an actual re-render.
+  // Strongest practical alternative: prove directly, against the REAL
+  // exported isMissedPlan, that the SAME plan/savedPlans input classifies
+  // differently as only the `now` argument advances past its scheduled
+  // end -- the exact underlying fact the memo's new dependency now reacts
+  // to. (isMissedPlan's own exhaustive classification coverage already
+  // lives in this file's checks 1-19 and in timeAwareUpcomingPlans.test.ts;
+  // this is the time-advancement-without-data-mutation angle specifically.)
+  const tickPlan = plan('tick', iso(istToUtc(2026, 10, 20, 17, 0)), iso(istToUtc(2026, 10, 20, 17, 30)));
+  const justBeforeEnd = istToUtc(2026, 10, 20, 17, 30);
+  const justAfterEnd = istToUtc(2026, 10, 20, 17, 31);
+  check(
+    'HPG4-3. eligibility changes purely from the clock advancing, with the identical plan/savedPlans input: not missed just before its scheduled end, missed one tick later -- the exact scenario a stale savedPlans-only memo would miss',
+    !isMissedPlan(tickPlan, justBeforeEnd) && isMissedPlan(tickPlan, justAfterEnd)
+  );
+  const loggedAtSameWindow = plan('tick-done', iso(istToUtc(2026, 10, 20, 17, 0)), iso(istToUtc(2026, 10, 20, 17, 30)), 'LOGGED');
+  const skippedAtSameWindow = plan('tick-skip', iso(istToUtc(2026, 10, 20, 17, 0)), iso(istToUtc(2026, 10, 20, 17, 30)), 'SKIPPED');
+  check(
+    'HPG4-3. a DONE or SKIPPED activity never becomes eligible at any tick, including the exact instant an equivalent UPCOMING activity would transition to MISSED -- terminal status always wins over time, at every `now` the ticking clock could produce',
+    !isMissedPlan(loggedAtSameWindow, justBeforeEnd) && !isMissedPlan(loggedAtSameWindow, justAfterEnd) &&
+      !isMissedPlan(skippedAtSameWindow, justBeforeEnd) && !isMissedPlan(skippedAtSameWindow, justAfterEnd)
+  );
+
+  // ============================================================
+  // HPG4-3. Accessibility: the bulk-skip outcome notice must use
+  // role="alert" only for the genuine all-failed case (zero successes),
+  // matching DayPlanPreview.tsx's own alert-vs-status convention --
+  // previously both surfaces unconditionally used role="status" even when
+  // every attempt failed.
+  // ============================================================
+  const noticeBlockPlan = stripped.slice(stripped.indexOf('missedPlans.length >= 2'), stripped.indexOf('missedPlans.length >= 2') + 1300);
+  check(
+    'HPG4-3. Plan tab: the outcome notice\'s role is conditional on succeeded === 0 (alert for all-failed, status otherwise) -- the exact literal expression, not a reimplementation',
+    /role=\{skipAllMissedNotice\.succeeded === 0 \? 'alert' : 'status'\}/.test(noticeBlockPlan)
+  );
+  check(
+    'HPG4-3. Plan tab: the existing success/partial-success/all-failed message text is byte-unchanged by the accessibility fix',
+    /Skipped \$\{skipAllMissedNotice\.succeeded\} missed \$\{skipAllMissedNotice\.succeeded === 1 \? 'activity' : 'activities'\}\./.test(noticeBlockPlan) &&
+      /Couldn't skip those\. Try again\./.test(noticeBlockPlan) &&
+      /Skipped \$\{skipAllMissedNotice\.succeeded\} of \$\{skipAllMissedNotice\.succeeded \+ skipAllMissedNotice\.failed\}\./.test(noticeBlockPlan)
+  );
+  check(
+    'HPG4-3. Plan tab: no confirmation dialog was added alongside the accessibility fix',
+    !/ModalShell|window\.confirm|confirm\(/i.test(noticeBlockPlan)
+  );
+
   console.log(allPassed ? '\nALL MISSED ACTIVITY PRESENTATION CHECKS PASSED' : '\nSOME MISSED ACTIVITY PRESENTATION CHECKS FAILED');
   process.exit(allPassed ? 0 : 1);
 }

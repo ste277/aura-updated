@@ -16,6 +16,7 @@ import type { TimingSearchResponseWithDailyRhythm } from '../lib/timingSearchDai
 import type { MuhurtaReason } from '../../../packages/muhurta/src/activityOntology';
 import { formatMuhurtaReason } from '../../../packages/muhurta/src/muhurtaReasonFormat';
 import { localDateTimeToUTC, getDatePartsInTimezone, getMinuteOfDayInTimezone } from '../lib/timezone';
+import { useCurrentMinuteOfDay } from '../lib/useCurrentMinuteOfDay';
 import { triggerHaptic } from '../lib/haptics';
 import { trackEvent } from '../lib/trackEvent';
 import { isKnownSchedulingEligibilityCode, presentSchedulingEligibilityError, type SchedulingEligibilityPresentation } from '../lib/schedulingEligibilityPresentation';
@@ -792,17 +793,30 @@ export function PlanWithAuraView({ onTimingSearch, onViewDay, onPlanLogged, time
         .sort((a, b) => new Date(a.plannedStartAt).getTime() - new Date(b.plannedStartAt).getTime()),
     [savedPlans]
   );
+  // HPG4-3 -- the same per-user, 30s-ticking clock Home already drives its
+  // own MISSED/eligibility recomputation from (useCurrentMinuteOfDay), so
+  // missedPlans below stays fresh when an activity becomes MISSED purely
+  // from time advancing, not only when savedPlans itself changes. Reused,
+  // not reimplemented -- no second clock mechanism, no polling tighter than
+  // what Home already uses.
+  const currentMinuteOfDay = useCurrentMinuteOfDay(timezone || 'UTC');
   // DR4-E1 -- persisted UPCOMING whose scheduled end has elapsed. No longer
   // part of the default "Upcoming Plans" view or its 3-slot limit (that's
   // the fix), but still reachable via "View all" below, most-recently-missed
   // first, through the exact same card -- DR4-E2 owns giving this its own
   // section/actions/labeling; this PR is classification and ordering only.
+  // HPG4-3 -- currentMinuteOfDay added to deps (isMissedPlan's underlying
+  // MISSED check is time-dependent; this memo must recompute on the tick,
+  // not only when savedPlans changes), so every consumer of missedPlans --
+  // the "Skip all missed" visibility gate, the "View all missed" count, the
+  // section-visibility check, and the focus-jump effect below -- all stay
+  // consistent with the same single, already-existing MISSED definition.
   const missedPlans = useMemo(
     () =>
       savedPlans
         .filter((plan) => isMissedPlan(plan))
         .sort((a, b) => new Date(b.plannedEndAt).getTime() - new Date(a.plannedEndAt).getTime()),
-    [savedPlans]
+    [savedPlans, currentMinuteOfDay]
   );
   // DR4-E2 -- resolves and performs the Insights focus-jump the effect
   // above captured, once it's actually possible to tell Upcoming from
@@ -2179,7 +2193,11 @@ export function PlanWithAuraView({ onTimingSearch, onViewDay, onPlanLogged, time
                 {skipAllMissedBusy ? 'Skipping…' : 'Skip all missed'}
               </TextButton>
               {skipAllMissedNotice && (
-                <span role="status" style={{ ...typography.meta, color: colors.textMuted }}>
+                // HPG4-3 -- role="alert" only for the genuine all-failed
+                // outcome (zero successes, matching DayPlanPreview.tsx's
+                // own alert-vs-status convention); success and
+                // partial-success stay role="status", unchanged.
+                <span role={skipAllMissedNotice.succeeded === 0 ? 'alert' : 'status'} style={{ ...typography.meta, color: colors.textMuted }}>
                   {skipAllMissedNotice.failed === 0
                     ? `Skipped ${skipAllMissedNotice.succeeded} missed ${skipAllMissedNotice.succeeded === 1 ? 'activity' : 'activities'}.`
                     : skipAllMissedNotice.succeeded === 0
