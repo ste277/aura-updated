@@ -5,7 +5,7 @@
 | HPG1 | Preserve activity identity in Home → Plan | Merged ([PR #263](https://github.com/ste277/aura-updated/pull/263)) |
 | HPG2 | Goal-linked plan creation from the main Plan tab | Merged ([PR #264](https://github.com/ste277/aura-updated/pull/264)) |
 | HPG3 | Scheduling eligibility correctness and consistency | **Complete** — see breakdown below |
-| HPG4 | Missed/reschedule experience | Scope under discovery — not started |
+| HPG4 | Missed/reschedule experience | **Complete** — see breakdown below |
 
 ## HPG3 — Scheduling eligibility correctness and consistency (complete)
 
@@ -90,11 +90,76 @@ regression suites (the ones its own six sub-tickets added or depended on — e.g
 wired and passing. This tracker does not claim, and should not be read as claiming, that CI now executes all
 repository tests — it does not.
 
-## HPG4 — Missed/reschedule experience (scope under discovery)
+## HPG4 — Missed/reschedule experience (complete)
 
 HPG4 is deliberately a separate concern from HPG3: HPG3 made the *enforcement and presentation of scheduling
 conflicts* correct and consistent; HPG4 is about what happens when a user **misses** a planned activity, needs
-to **recover** from it, or **reschedules** across time — a different part of the product. HPG4 implementation
-has **not started**. Its scope is being discovered and proposed via a dedicated read-only investigation (see
-that report for the current missed/reschedule behavior matrix, verified gaps, and a proposed PR sequence). This
-tracker will be updated again once that proposal is reviewed and a first HPG4 ticket is actually opened.
+to **recover** from it, or **reschedules** across time. Discovery found the core missed-activity feature
+(detection, per-item Skip/Move/Done, Goal-state reversion) already shipped pre-HPG4; HPG4 itself closed three
+specific, evidence-based gaps on top of that foundation — delivered as three independently reviewed sub-tickets,
+each merged after its own implementation PR and independent GO review:
+
+| Sub-ticket | Title | PR | Merged | Merge commit |
+| --- | --- | --- | --- | --- |
+| HPG4-1 | Recomposition Conflict Messaging | [#272](https://github.com/ste277/aura-updated/pull/272) | 2026-10-29 | `9236f632180e4a04fd10ff879677ed064e5af663` |
+| — | Recomposition CI Coverage (follow-up) | [#273](https://github.com/ste277/aura-updated/pull/273) | 2026-10-29 | `f35d35ab6ed4568f58f766ce0122a3a1b471b4dc` |
+| HPG4-2 | Bulk Skip Missed Activities | [#274](https://github.com/ste277/aura-updated/pull/274) | 2026-10-29 | `0e2928c287e9197452d9d11b710d9255d4e717d7` |
+| — | CI & Functional Regression Hardening (follow-up) | [#275](https://github.com/ste277/aura-updated/pull/275) | 2026-10-29 | `5aecabb66518f7ff819e0c0ed232a086ec2a9adb` |
+| HPG4-3 | Home & Plan Missed-Recovery Consistency | [#276](https://github.com/ste277/aura-updated/pull/276) | 2026-10-30 | `29fcc25723a8d6ecf4faf8274617896ffe6d0e26` |
+
+Each of the 5 PRs above was independently reviewed by a fresh reviewer agent before merge and received an
+explicit **GO** verdict (PR #275 required two review rounds: an initial NO-GO over a since-resolved CI
+flake plus a demonstrated caller-side test-coverage gap, a follow-up implementation pass, then a second
+independent review that returned GO).
+
+### Verified guarantees (confirmed against merged `main`, not just claimed by each PR)
+
+- **Recomposition conflict messaging.** `apps/web/app/api/day/recompose/accept/route.ts` maps the three known
+  scheduling-conflict codes to HTTP 409 via the shared `SCHEDULING_ELIGIBILITY_STATUS_BY_CODE` map; `apps/web/components/RecompositionCard.tsx`
+  (via `apps/web/lib/homeRecomposition.ts`) now calls `presentSchedulingEligibilityError()` for a known code and
+  falls back to the original generic message otherwise — closing the exact gap HPG3's own closure tracker flagged
+  above ("Recomposition — typed at the API layer, generic at the UI layer"). Traced the reducer's state
+  transitions directly: a fresh `PROPOSAL`/notice state is always built as a new object literal with no
+  `noticeCode` carried over from a prior failed attempt — no stale conflict code can leak into a later, unrelated
+  proposal.
+- **Bulk skip.** `apps/web/lib/homeMissedRecovery.ts`'s `collectSkipAllOutcomes`/`summarizeSkipAllOutcome` are
+  the single shared implementation both `apps/web/components/HomeDashboard.tsx` and
+  `apps/web/components/PlanWithAuraView.tsx` call — sequential execution (`for...of`/`await`, never `Promise.all`),
+  reusing the existing single-item skip mechanism on each surface (no new endpoint), correct all-success/partial/
+  all-failed counting, and no optimistic status write before the underlying skip call resolves. Both surfaces
+  gate the "Skip all missed" action at ≥2 eligible items and recompute eligibility fresh at click time.
+- **Consistency.** Plan tab's missed-activity visibility now depends on a ticking clock value (`useCurrentMinuteOfDay`)
+  in addition to `savedPlans`, so eligibility visibly refreshes as time advances, not only on a data mutation —
+  mirroring the mechanism Home already used for its own visibility. DONE/SKIPPED plans remain structurally
+  excluded: `isMissedPlan` (`derivedPlanLifecycle`) returns a terminal persisted status immediately, before ever
+  reaching the time-based MISSED check — traced directly, not assumed. Both surfaces' outcome notice now uses
+  `role="alert"` only for a genuine all-failed result and `role="status"` otherwise, matching the established
+  `DayPlanPreview.tsx` convention. Home's bulk-skip handler wraps its collection call in an explicit `try/finally`,
+  confirmed to release the busy guard even on an unexpected thrown exception, not only on the normal path.
+
+### Remaining items (not yet resolved — do not treat as closed)
+
+- P2: `test/multiOccurrenceRhythmMoveCapacityDb.test.ts`'s "Recomp" check has a demonstrated, bounded,
+  midnight-sensitive (Asia/Kolkata) failure window. Original failure: CI run `40926594114`, attempt 1, failing
+  assertion `Recomp. the SAME enforcement point is reached via Recomposition acceptance: a same-week self-move
+  (not exceeding capacity) SUCCEEDS through applyMoveWrites, proving one shared check, not two` — independently
+  traced to ~23:41 IST, 19 minutes before local midnight, squarely inside the test's own documented danger
+  window. The rerun of the identical commit passed after the day boundary had rolled over in IST. Accepted as a
+  pre-existing, documented residual risk (not introduced or fixed by HPG4); a separate deterministic-clock
+  stabilization is still needed. Do not disable or weaken this test to force green.
+- P3: the Plan-tab callback's structural regression-test assertion (added in PR #275) matches a long,
+  near-verbatim source-text sequence — a future, harmless refactor near those lines will likely need to update
+  this regex. Future test-maintenance improvement, not a defect today.
+- P3: no DOM-level/component-render test exists anywhere in this codebase for either "Skip all missed" surface.
+  Current coverage is pure-function behavioral tests (real `collectSkipAllOutcomes`/`summarizeSkipAllOutcome`/
+  `isMissedPlan` calls) plus structural source-text checks on the real production callbacks plus DB-level
+  integration tests — never an actual simulated click through the real `onClick` binding. Future
+  test-infrastructure improvement.
+- P3: PR #276 adds a genuinely new, second `useCurrentMinuteOfDay` interval instance scoped to the Plan tab's own
+  mount lifecycle (Home's own instance was not already reaching Plan tab before this PR) — a real, if cheap and
+  bounded-by-lifecycle, net-new timer, not merely "reusing an already-running one." Accepted as bounded polling.
+- P3: `summarizeSkipAllOutcome([])` (zero attempted, zero succeeded, zero failed) would evaluate the
+  `succeeded === 0` role condition as true and render `role="alert"` for a case where nothing actually failed.
+  Currently unreachable in practice: both production call sites (Home and Plan) early-return before ever invoking
+  the collection path when fewer than 2 items are eligible. Not expanded into a defensive UI change as part of
+  HPG4 closure.
