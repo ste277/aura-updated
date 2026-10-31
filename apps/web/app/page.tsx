@@ -1545,7 +1545,7 @@ export default function DashboardPage() {
             todayReflection={todayReflection}
             onLogActivity={handleLogActivity}
             onSubmitReflection={handleSubmitReflection}
-            onNextShiftClick={() => setActiveTab('timeline')}
+            onNextShiftClick={() => setHomeTimelineFocusKey(Date.now())}
             focusTimelineKey={homeTimelineFocusKey}
             onPlanClick={handleOpenPlan}
             onPlanDay={() => { window.location.href = '/plan-day'; }}
