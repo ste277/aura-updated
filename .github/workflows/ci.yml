@@ -846,6 +846,12 @@ jobs:
       # authoritative overlap read (in-progress / overnight blockers).
       - name: Run acceptance fresh-overlap DB test
         run: npx ts-node test/dayConstructorAcceptanceFreshOverlapDb.test.ts
+      # Plan My Day -- single-item time editing backend: real-DB regression for the
+      # new /api/day-constructor/preview-item re-signing endpoint (signature binding,
+      # tampering/unauthorized-user rejection, zero persistence, sibling isolation,
+      # and acceptance-time-only scheduling safeguards).
+      - name: Run Day Constructor preview-item DB test
+        run: npx ts-node test/dayConstructorPreviewItemDb.test.ts
       # Schedule write consistency S2 -- real-DB concurrency proof through the real
       # POST /api/plans route (acceptance, Move and manual writers serialize).
       - name: Run manual writer serialization DB test
