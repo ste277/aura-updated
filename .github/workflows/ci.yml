@@ -110,6 +110,16 @@ jobs:
       # same root-deps-only group as the structural guards tests above.
       - name: Run Goal template category matching test
         run: npx ts-node test/goalTemplateCategoryMatching.test.ts
+      # Home Recommendations: Daily Rhythm Alignment -- this test calls only
+      # dailyRhythmPrefsFromUser/applyDailyRhythmPreference directly (pure
+      # functions, explicit inputs); db.ts is loaded transitively via
+      # dailyGuidanceCandidates.ts's own import but its Pool is never
+      # connected/queried here (confirmed: this file runs with no
+      # DATABASE_URL set at all). Needs no apps/web/node_modules (no
+      # 'next'/'.tsx' import anywhere in this chain) -- same root-deps-only
+      # group as the tests above.
+      - name: Run Daily Guidance Daily Rhythm alignment test
+        run: npx ts-node test/dailyGuidanceDailyRhythmAlignment.test.ts
       # test/savedPersonDb.test.ts, test/auraMomentsDb.test.ts,
       # test/auraUpdatesDb.test.ts, test/productEventsDb.test.ts, and
       # test/dayBuilderDb.test.ts are intentionally NOT run here -- they
@@ -875,3 +885,12 @@ jobs:
       # collapsing it into a bare, codeless SAVE_FAILED.
       - name: Run Recomposition error propagation DB test
         run: npx ts-node test/remainingDayRecompositionErrorPropagationDb.test.ts
+      # Home Recommendations: Daily Rhythm Alignment -- this suite already
+      # existed and already passes against main but was never wired into
+      # CI (same pre-existing gap class as the HPG4-2 block above); reusing
+      # this job's existing Postgres service/migration-deploy step. Proves,
+      # against a real Day Builder suggestion, that Daily Rhythm preference
+      # filtering is genuinely wired into the live recommendation pipeline
+      # end-to-end, including the display/commit-consistency guarantee.
+      - name: Run Daily Guidance orchestrator DB test
+        run: npx ts-node test/dailyGuidanceOrchestratorDb.test.ts
