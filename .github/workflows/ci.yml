@@ -534,6 +534,10 @@ jobs:
       # canonical overlap loader on its transaction client (no race-free claim).
       - name: Run acceptance fresh-overlap architecture test
         run: npx ts-node test/dayConstructorAcceptanceFreshOverlapArchitecture.test.ts
+      # Preview-item signing integrity -- the HMAC sign/verify module and its
+      # closed, explicit set of approved server-only callers. No live DB.
+      - name: Run day constructor preview integrity test
+        run: npx ts-node test/dayConstructorPreviewIntegrity.test.ts
       # Schedule write consistency S2 -- the manual plan writer takes the shared
       # per-user lock in a transaction (serialization only; no overlap check).
       - name: Run manual writer serialization architecture test
@@ -705,6 +709,10 @@ jobs:
         run: npx prisma migrate deploy
       - name: Run Day Constructor acceptance persistence DB tests
         run: npx ts-node test/dayConstructorAcceptancePersistenceDb.test.ts
+      # Preview-item signing integrity (live DB) -- real preview generation,
+      # signing, verification and acceptance through the real accept route.
+      - name: Run day constructor preview integrity DB test
+        run: npx ts-node test/dayConstructorPreviewIntegrityDb.test.ts
       - name: Run Goal demand candidates DB test
         run: npx ts-node test/goalDemandCandidatesDb.test.ts
       - name: Run Automatic Goal demand bootstrap DB test
