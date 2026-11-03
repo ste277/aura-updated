@@ -75,10 +75,27 @@ const emptyBranchSectionAttrs = emptyBranchMatch?.[1] ?? '';
 check('4. the empty-state timeline region carries the focus-region marker', /data-home-timeline-region/.test(emptyBranchSectionAttrs));
 check('4. the empty-state timeline region is focusable (tabIndex={-1}), matching the populated branch', /tabIndex=\{-1\}/.test(emptyBranchSectionAttrs));
 
-const populatedBranchMatch = homeTimelineSource.match(/return \(\s*<section([^>]*)>\s*<SectionHeader label="Your Day"/);
-check('4. the populated branch\'s opening <section> tag (the pre-existing one) was located', populatedBranchMatch !== null);
+// Locate the populated branch's <section> tag by its unique content anchor
+// (`background: colors.surfaceSubtle` exists ONLY in the populated branch's
+// wrapper div) rather than by occurrence order in the source: an earlier
+// version of this check used `/return \(\s*<section([^>]*)>\s*<SectionHeader
+// label="Your Day"/` with no `g` flag, which matches the FIRST such
+// occurrence in source order -- the EMPTY-state branch, since both branches
+// open with the identical `<section ...><SectionHeader label="Your Day" />`
+// sequence. That bug silently re-verified the empty branch twice instead of
+// independently verifying the populated one. Anchoring on content that is
+// structurally guaranteed to appear only inside the populated branch (not on
+// source-order position, which is incidental) fixes this without relying on
+// the empty-branch check (lines above) or the exactly-two-markers count
+// check (line 70) to cover it by elimination.
+const populatedAnchorIndex = homeTimelineSource.indexOf('background: colors.surfaceSubtle');
+check('4. located the populated branch\'s unique content anchor (background: colors.surfaceSubtle, only present in that branch)', populatedAnchorIndex !== -1);
+const sectionOpenMatches = [...homeTimelineSource.matchAll(/<section([^>]*)>/g)];
+const populatedBranchMatch = sectionOpenMatches.filter((m) => m.index! < populatedAnchorIndex).pop();
+check('4. the populated branch\'s opening <section> tag (the nearest one preceding its unique content anchor) was located, independently of the empty-state branch\'s match above', populatedBranchMatch !== undefined);
 const populatedBranchSectionAttrs = populatedBranchMatch?.[1] ?? '';
 check('4. the populated timeline region still carries the focus-region marker (unchanged)', /data-home-timeline-region/.test(populatedBranchSectionAttrs));
+check('4. the populated timeline region is focusable (tabIndex={-1}), matching the empty-state branch', /tabIndex=\{-1\}/.test(populatedBranchSectionAttrs));
 
 // ============================================================
 // 5. Repeated focus requests remain supported: the update function uses
