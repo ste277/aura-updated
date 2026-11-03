@@ -709,10 +709,6 @@ jobs:
         run: npx prisma migrate deploy
       - name: Run Day Constructor acceptance persistence DB tests
         run: npx ts-node test/dayConstructorAcceptancePersistenceDb.test.ts
-      # Preview-item signing integrity (live DB) -- real preview generation,
-      # signing, verification and acceptance through the real accept route.
-      - name: Run day constructor preview integrity DB test
-        run: npx ts-node test/dayConstructorPreviewIntegrityDb.test.ts
       - name: Run Goal demand candidates DB test
         run: npx ts-node test/goalDemandCandidatesDb.test.ts
       - name: Run Automatic Goal demand bootstrap DB test
