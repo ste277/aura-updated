@@ -29,9 +29,25 @@ import { buildPersonalMuhurtaContextForUser } from './natalContext';
 import { getActivityProfileById } from '../../../packages/recommendation/src/personalizedTasks';
 import { familyForActivityProfile } from '../../../packages/recommendation/src/auraFitEngine';
 import { runTimingSearch } from '../../../packages/recommendation/src/timingSearch';
+import { applyDailyRhythmPreference, type DailyRhythmPreferencesInput } from './dailyRhythmScheduling';
 import type { User, PlannedActivity } from './db';
 import type { DailyAgenda } from './dailyAgenda';
 import type { ConcreteGuidanceCandidate } from './dailyGuidanceTypes';
+
+/** The user's saved Daily Rhythm work-hours preference, in the exact
+ * shape `applyDailyRhythmPreference` (dailyRhythmScheduling.ts) consumes
+ * -- read directly off the already-in-hand `User` row (DR1's own
+ * `dailyRhythmWork{Start,End,Days}` fields), never a second DB query. A
+ * user who never configured Daily Rhythm resolves to `{workStart: null,
+ * workEnd: null, workDays: []}`, which `isDailyRhythmConfigured` treats
+ * as "no preference" -- zero behavior change for any such user, the
+ * identical convention `dayConstructorOrchestrator.ts`'s own
+ * `loadDailyRhythmPreferences` already established. Exported so tests can
+ * exercise this exact mapping directly, including an incomplete/malformed
+ * in-memory `User` shape, without needing a live DB row. */
+export function dailyRhythmPrefsFromUser(user: User): DailyRhythmPreferencesInput {
+  return { workStart: user.dailyRhythmWorkStart ?? null, workEnd: user.dailyRhythmWorkEnd ?? null, workDays: user.dailyRhythmWorkDays ?? [] };
+}
 
 /**
  * Today's Plans, filtered to exactly the ones eligible to enter the
@@ -167,11 +183,38 @@ export async function resolveDayBuilderCandidates(
 ): Promise<ConcreteGuidanceCandidate[]> {
   const suggestions = await buildIntentionalDaySuggestions({ user, agenda: discovery.agenda, minuteOfDay: discovery.minuteOfDay, now, preferredDurationByActivityId, behavioralDurationByActivityId });
 
+  // Home Recommendations: Daily Rhythm Alignment -- a SOLO suggestion is
+  // not yet committed to any specific instant (unlike a PLAN candidate,
+  // which is an explicit user commitment and is never second-guessed
+  // here -- see collectPlanCandidates, untouched). Applying the SAME
+  // soft-preference filter-with-fallback `dayConstructorOrchestrator.ts`
+  // already uses for Day Constructor -- never a second classification
+  // system -- reorders `timingCandidates` so a PERSONAL activity's
+  // outside-work window becomes rank 1 (`timingCandidates[0]`) when one
+  // exists in this batch, falling back to the original, unfiltered set
+  // otherwise. `targetDate`/`dailyRhythmPrefs` are resolved once per call
+  // (not per suggestion) since every suggestion in one request shares the
+  // same user/day. Applied BEFORE selectOneCandidatePerFamily/
+  // buildWindowRankingContexts consume `timingCandidates`, so the exact
+  // same reordered array is what both same-family ranking and the final
+  // displayed/committed instant derive from -- there is no separate
+  // selection step that could pick a different candidate for display
+  // than what `handlePlanOpportunity`'s commit (`candidateStart: item.start`)
+  // re-verifies, by construction, not by a second consistency check.
+  const targetDate = getDatePartsInTimezone(user.timezone, now).dateStr;
+  const dailyRhythmPrefs = dailyRhythmPrefsFromUser(user);
+
   const candidates: ConcreteGuidanceCandidate[] = [];
   for (const suggestion of suggestions) {
     if (suggestion.candidate.kind !== 'SOLO') continue; // SHARED excluded from V1, see this function's own doc comment
     const profile = getActivityProfileById(suggestion.activityId);
     if (!profile) continue;
+
+    const timingCandidates = applyDailyRhythmPreference(suggestion.candidate.candidates, suggestion.activityId, {
+      targetDate,
+      timezone: user.timezone,
+      prefs: dailyRhythmPrefs,
+    });
 
     candidates.push({
       source: 'DAY_BUILDER_INTENTION',
@@ -180,7 +223,7 @@ export async function resolveDayBuilderCandidates(
       title: suggestion.label,
       activityFamily: familyForActivityProfile(profile),
       durationMinutes: suggestion.durationMinutes,
-      timingCandidates: suggestion.candidate.candidates,
+      timingCandidates,
     });
   }
   return candidates;
