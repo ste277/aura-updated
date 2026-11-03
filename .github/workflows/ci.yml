@@ -270,6 +270,13 @@ jobs:
         run: npx ts-node test/missedRecovery.test.ts
       - name: Run Skip planned activity test
         run: npx ts-node test/skipPlannedActivity.test.ts
+      # Daily Rhythm Home Timeline Navigation Fix -- reads page.tsx/
+      # HomeDashboard.tsx/HomeTimeline.tsx as plain text for its own
+      # structural checks (same convention as the Home tests above), so it
+      # needs no jsx TS_NODE_COMPILER_OPTIONS; this suite already passes
+      # against main but was never wired into CI.
+      - name: Run Full-day timeline navigation test
+        run: npx ts-node test/fullDayTimelineNavigation.test.ts
       # Goals V2 Candidate B4 -- goalDecompositionObservability.ts imports
       # goalActivityProposal.ts (a type-only RhythmPickerValue from the
       # 'use client' components/RhythmPicker.tsx), same jsx-enabled group

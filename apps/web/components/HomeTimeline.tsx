@@ -137,7 +137,7 @@ export function HomeTimeline({
 
   if (items.length === 0 && pendingActivities.length === 0) {
     return (
-      <section>
+      <section data-home-timeline-region tabIndex={-1} style={{ outline: 'none' }}>
         <SectionHeader label="Your Day" right={addSomethingAction} />
         {quickCaptureSlot}
         <EmptyState
