@@ -538,6 +538,23 @@ jobs:
       # closed, explicit set of approved server-only callers. No live DB.
       - name: Run day constructor preview integrity test
         run: npx ts-node test/dayConstructorPreviewIntegrity.test.ts
+      # Plan My Day -- single-item time editing (UI). Pure client/
+      # preview-state logic plus structural wiring checks against the real
+      # components; no live DB (the backend endpoint's own DB suite is
+      # dayConstructorPreviewItemDb.test.ts, unmodified by this ticket).
+      - name: Run day constructor preview item client test
+        run: npx ts-node test/dayConstructorPreviewItemClient.test.ts
+      - name: Run day plan preview item editing test
+        run: npx ts-node test/dayPlanPreviewItemEditing.test.ts
+      - name: Run day plan preview item editing wiring test
+        run: npx ts-node test/dayPlanPreviewItemEditingWiring.test.ts
+      # PR #281 P0 fix -- Preview Lifecycle and Async Race. Real async/
+      # lifecycle behavior (deferred promises, controlled resolution
+      # order) against a faithful mirror of the Escape/generation-guard/
+      # mounted-guard control flow -- see this file's own header comment
+      # for why a mirror, not a mounted React tree (no jsdom in this repo).
+      - name: Run day plan preview item lifecycle race condition test
+        run: npx ts-node test/dayPlanPreviewItemLifecycleRaceConditions.test.ts
       # Schedule write consistency S2 -- the manual plan writer takes the shared
       # per-user lock in a transaction (serialization only; no overlap check).
       - name: Run manual writer serialization architecture test

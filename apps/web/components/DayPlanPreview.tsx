@@ -66,9 +66,19 @@ export interface DayPlanPreviewProps {
    * one (this ticket's own section 13/20: "must NOT automatically
    * reconstruct and save another day"). */
   onReviewAgain?: () => void;
+  /** Plan My Day -- single-item time editing. OPTIONAL and additive,
+   * same convention as `actionState`/`onRetry`/`onReviewAgain` above:
+   * omitted, every `ProposedItemRow` renders its time exactly as before
+   * this ticket (a plain, non-interactive time). Present, the time
+   * becomes a tappable affordance that hands the owning controller the
+   * exact `ProposedItem` to edit -- this component never opens the edit
+   * UI itself, never calls the preview-item endpoint, and never mutates
+   * `preview` (unchanged from this file's own "PROPOSE + EXPLAIN only"
+   * doc comment above). */
+  onEditItem?: (item: ProposedItem) => void;
 }
 
-export function DayPlanPreview({ preview, onContinue, onDiscard, actionState, onRetry, onReviewAgain }: DayPlanPreviewProps) {
+export function DayPlanPreview({ preview, onContinue, onDiscard, actionState, onRetry, onReviewAgain, onEditItem }: DayPlanPreviewProps) {
   const { targetDate, timezone, resolvedIntents, constructedDay, warnings } = preview;
   const capacity = presentCapacityState(constructedDay.requestedCapacity.capacityState);
   const summaryState = classifyProposalSummary(preview);
@@ -110,7 +120,7 @@ export function DayPlanPreview({ preview, onContinue, onDiscard, actionState, on
         {summaryState === 'HAS_ITEMS' && (
           <div style={{ display: 'flex', flexDirection: 'column', gap: spacing.sm }}>
             {sortedProposed.map((item) => (
-              <ProposedItemRow key={item.intentId} item={item} timezone={timezone} warnings={warningsByIntentId[item.intentId] ?? []} />
+              <ProposedItemRow key={item.intentId} item={item} timezone={timezone} warnings={warningsByIntentId[item.intentId] ?? []} onEditItem={onEditItem} />
             ))}
           </div>
         )}
@@ -195,7 +205,7 @@ export function DayPlanPreview({ preview, onContinue, onDiscard, actionState, on
   );
 }
 
-function ProposedItemRow({ item, timezone, warnings }: { item: ProposedItem; timezone: string; warnings: WarningPresentation[] }) {
+function ProposedItemRow({ item, timezone, warnings, onEditItem }: { item: ProposedItem; timezone: string; warnings: WarningPresentation[]; onEditItem?: (item: ProposedItem) => void }) {
   const durationMinutes = Math.round((item.end.getTime() - item.start.getTime()) / 60000);
   const timingFit = item.placementSource === 'SELECTED_CANDIDATE' && item.timingFit ? presentTimingFit(item.timingFit) : null;
   // DR4-A -- Daily Rhythm's personal-fit explanation gets its own line,
@@ -215,7 +225,18 @@ function ProposedItemRow({ item, timezone, warnings }: { item: ProposedItem; tim
           <div style={{ ...typography.meta, marginTop: spacing.xs }}>{presentPlacementSource(item.placementSource)}</div>
         </div>
         <div style={{ textAlign: 'right', flexShrink: 0 }}>
-          <div style={{ ...typography.bodyStrong }}>{formatItemClockTime(item.start, timezone)}</div>
+          {onEditItem ? (
+            <button
+              type="button"
+              onClick={() => onEditItem(item)}
+              aria-label={`Change the time for ${item.title}, currently ${formatItemClockTime(item.start, timezone)}`}
+              style={{ ...typography.bodyStrong, background: 'none', border: 'none', padding: 0, color: 'inherit', cursor: 'pointer', textDecoration: 'underline', textDecorationStyle: 'dotted', textDecorationColor: colors.textMuted }}
+            >
+              {formatItemClockTime(item.start, timezone)}
+            </button>
+          ) : (
+            <div style={{ ...typography.bodyStrong }}>{formatItemClockTime(item.start, timezone)}</div>
+          )}
           <div style={{ ...typography.caption, marginTop: 2 }}>{formatActivityDuration({ durationMinutes })}</div>
         </div>
       </div>

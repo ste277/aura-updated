@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import {
   PageHeader,
@@ -244,6 +244,40 @@ export function PlanDayClient({ timezone, planningDate, horizon, availabilityCon
   // `horizon` itself changes (below) so switching back to Today never
   // leaves a stale Tomorrow-only block in place.
   const [availabilityRequiredStale, setAvailabilityRequiredStale] = useState(false);
+  // P0 fix -- PR #281: Preview Lifecycle and Async Race. This is the
+  // ONE monotonic counter for "which version of `preview` is currently
+  // live" -- bumped (via `replacePreview` below) on every transition that
+  // replaces `preview` wholesale: Discard, Review again/Regenerate, and a
+  // successful single-item edit. `DayPlanPreviewController` reads this
+  // ref's `.current` (never a value it was handed at some past render) to
+  // tell whether an async preview-item response it is about to apply has
+  // been superseded by one of those other transitions since the request
+  // started -- the defense-in-depth layer this ticket requires
+  // independent of the Escape-key dismissal fix
+  // (EditProposedItemTimeModal.tsx). Reuses the exact
+  // `requestGenerationRef`/`bumpRequestGeneration()` shape already shipped
+  // for the SAME class of problem in PlanWithAuraView.tsx.
+  const previewGenerationRef = useRef(0);
+  // Mirrors PlanWithAuraView.tsx's own mount-tracking convention for this
+  // exact class of problem -- a defensive extra layer so a stale response
+  // that resolves after this entire component has unmounted (e.g. a real
+  // navigation away mid-save) can never call a state setter on it, even
+  // though React 18 no longer warns for this on its own.
+  const mountedRef = useRef(true);
+  useEffect(() => {
+    mountedRef.current = true;
+    return () => { mountedRef.current = false; };
+  }, []);
+  // The ONLY way `preview` is ever replaced (never `setPreview` directly)
+  // -- keeps the generation bump inseparable from the state change it
+  // guards, so no future call site can accidentally replace `preview`
+  // without invalidating whatever async request was in flight against the
+  // old one.
+  function replacePreview(nextPreview: ConstructDayPreview | null) {
+    if (!mountedRef.current) return;
+    previewGenerationRef.current += 1;
+    setPreview(nextPreview);
+  }
 
   useEffect(() => {
     if (phase === 'REDIRECTING') window.location.href = '/';
@@ -414,7 +448,7 @@ export function PlanDayClient({ timezone, planningDate, horizon, availabilityCon
     }
     const result = await previewConstructedDay(intents, planningDate);
     if (result.status === 'READY') {
-      setPreview(result.preview);
+      replacePreview(result.preview);
       setShadowReview(result.shadowReview);
       setPhase('PREVIEW');
     } else if (result.status === 'FUTURE_AVAILABILITY_REQUIRED') {
@@ -432,7 +466,7 @@ export function PlanDayClient({ timezone, planningDate, horizon, availabilityCon
   function handleDiscard() {
     // Never saves, never calls acceptance (this ticket's own section 34)
     // -- rows are retained exactly as the user left them.
-    setPreview(null);
+    replacePreview(null);
     setShadowReview(undefined);
     setPhase('ENTRY');
   }
@@ -504,6 +538,8 @@ export function PlanDayClient({ timezone, planningDate, horizon, availabilityCon
               onRefreshRequested={handleRefreshRequested}
               goalActivityLinks={buildGoalActivityLinksForAccept(rows, preview.constructedDay.proposedItems)}
               captureLinks={buildCaptureLinksForAccept(rows, preview.constructedDay.proposedItems)}
+              onPreviewReplaced={replacePreview}
+              previewGenerationRef={previewGenerationRef}
             />
             {shadowReview && timezone ? <ShadowReviewPanel review={shadowReview} timezone={timezone} /> : null}
           </>
