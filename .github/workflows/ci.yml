@@ -534,6 +534,10 @@ jobs:
       # canonical overlap loader on its transaction client (no race-free claim).
       - name: Run acceptance fresh-overlap architecture test
         run: npx ts-node test/dayConstructorAcceptanceFreshOverlapArchitecture.test.ts
+      # Preview-item signing integrity -- the HMAC sign/verify module and its
+      # closed, explicit set of approved server-only callers. No live DB.
+      - name: Run day constructor preview integrity test
+        run: npx ts-node test/dayConstructorPreviewIntegrity.test.ts
       # Schedule write consistency S2 -- the manual plan writer takes the shared
       # per-user lock in a transaction (serialization only; no overlap check).
       - name: Run manual writer serialization architecture test
@@ -846,6 +850,12 @@ jobs:
       # authoritative overlap read (in-progress / overnight blockers).
       - name: Run acceptance fresh-overlap DB test
         run: npx ts-node test/dayConstructorAcceptanceFreshOverlapDb.test.ts
+      # Plan My Day -- single-item time editing backend: real-DB regression for the
+      # new /api/day-constructor/preview-item re-signing endpoint (signature binding,
+      # tampering/unauthorized-user rejection, zero persistence, sibling isolation,
+      # and acceptance-time-only scheduling safeguards).
+      - name: Run Day Constructor preview-item DB test
+        run: npx ts-node test/dayConstructorPreviewItemDb.test.ts
       # Schedule write consistency S2 -- real-DB concurrency proof through the real
       # POST /api/plans route (acceptance, Move and manual writers serialize).
       - name: Run manual writer serialization DB test
