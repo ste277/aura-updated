@@ -1446,13 +1446,12 @@ export function HomeDashboard({
        * into Plan with a fixed suggestion.
        * ============================================================ */}
       <SurfaceCard>
-        <form
-          onSubmit={(e) => {
-            e.preventDefault();
-            handleHomeAskAuraSubmit();
-          }}
-          style={inputShellStyle}
-        >
+        {/* A plain <div>, not a <form> -- HomeDashboard.tsx's existing
+         * Move picker is the file's one legitimate <form> (missedRecovery
+         * guard check 12/15 asserts exactly one, proving no forked picker
+         * exists); Enter-to-submit is wired directly via onKeyDown below
+         * instead, so this addition can never trip that unrelated count. */}
+        <div style={inputShellStyle}>
           <span style={{ color: '#93c5fd', fontSize: 23 }}>✦</span>
           <FieldLabel htmlFor="home-ask-aura-input" visuallyHidden>
             What would you like to do?
@@ -1463,13 +1462,19 @@ export function HomeDashboard({
             value={homeAskAuraInput}
             onChange={(e) => setHomeAskAuraInput(e.target.value)}
             onFocus={() => setAskAuraIdeasOpen(true)}
+            onKeyDown={(e) => {
+              if (e.key === 'Enter') {
+                e.preventDefault();
+                handleHomeAskAuraSubmit();
+              }
+            }}
             placeholder="What would you like to do?"
             style={promptInputStyle}
           />
-          <button type="submit" style={voiceButtonStyle} aria-label="Ask Aura" disabled={!homeAskAuraInput.trim()}>
+          <button type="button" onClick={handleHomeAskAuraSubmit} style={voiceButtonStyle} aria-label="Ask Aura" disabled={!homeAskAuraInput.trim()}>
             →
           </button>
-        </form>
+        </div>
         {askAuraIdeasOpen ? (
           <div style={{ display: 'flex', flexWrap: 'wrap', gap: spacing.sm, marginTop: spacing.md }}>
             {PROMPT_CHIPS.map((chip) => (

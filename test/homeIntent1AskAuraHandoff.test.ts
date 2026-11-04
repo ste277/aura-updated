@@ -55,22 +55,26 @@ function main() {
 
   // ============================================================
   // 3/4. Enter submits non-empty text; the submit button performs the
-  // identical action. [STRUCTURAL] -- both are wired through ONE native
-  // <form onSubmit>, which is itself a standard, browser-guaranteed
-  // behavior (Enter in a text input submits its form; a type="submit"
-  // button submits the same form) -- not something a non-DOM test can
-  // meaningfully re-prove. What CAN and must be verified is that both
-  // paths funnel into the SAME handler rather than two independently
-  // wired call sites that could drift apart.
+  // IDENTICAL action. [STRUCTURAL] -- deliberately NOT wrapped in a
+  // <form> (HomeDashboard.tsx's existing missedRecovery guard asserts
+  // exactly one legitimate <form> exists in this file, the Move picker;
+  // see HomeDashboard.tsx's own comment at this block). Both paths
+  // instead call the exact SAME handleHomeAskAuraSubmit function --
+  // verified here by confirming it's the ONLY call site referenced by
+  // both the input's onKeyDown('Enter') handler and the button's onClick,
+  // never two independently wired, driftable handlers.
   // ============================================================
   {
     const home = read('apps/web/components/HomeDashboard.tsx');
-    const submitCallIndex = home.indexOf('handleHomeAskAuraSubmit();');
-    const formStart = submitCallIndex >= 0 ? home.lastIndexOf('<form', submitCallIndex) : -1;
-    const formEnd = home.indexOf('</form>', formStart);
-    const formBlock = formStart >= 0 && formEnd > formStart ? home.slice(formStart, formEnd) : '';
-    check('3/4a. [STRUCTURAL] a <form> wraps the input and its submit button, submitting via handleHomeAskAuraSubmit (single call site for both Enter and the button)', formBlock.includes('onSubmit') && formBlock.includes('handleHomeAskAuraSubmit();') && formBlock.includes('style={inputShellStyle}'));
-    check('3/4b. [STRUCTURAL] the submit button inside that form is type="submit" (so it submits the SAME form, not a second handler)', /type="submit"/.test(formBlock));
+    const inputStart = home.indexOf('id="home-ask-aura-input"');
+    const buttonEnd = home.indexOf('aria-label="Ask Aura"', inputStart);
+    const block = inputStart >= 0 && buttonEnd > inputStart ? home.slice(inputStart, buttonEnd + 40) : '';
+    const callSiteCount = (block.match(/handleHomeAskAuraSubmit/g) ?? []).length;
+    check(
+      "3/4a. [STRUCTURAL] the input's onKeyDown('Enter') calls handleHomeAskAuraSubmit",
+      /onKeyDown=\{\(e\) => \{\s*if \(e\.key === 'Enter'\) \{\s*e\.preventDefault\(\);\s*handleHomeAskAuraSubmit\(\);/.test(block)
+    );
+    check('3/4b. [STRUCTURAL] the submit button onClick calls the SAME handleHomeAskAuraSubmit (not a second, independently wired handler)', /onClick=\{handleHomeAskAuraSubmit\}/.test(block) && callSiteCount === 2);
   }
 
   // ============================================================
