@@ -149,6 +149,10 @@ jobs:
       # the Aura Moment/product events tests above.
       - name: Run Goal demand candidates test
         run: npx ts-node test/goalDemandCandidates.test.ts
+      # HGR1 -- homeGoalRhythmSuggestions.ts imports goalDemandCandidates.ts
+      # and planDayBootstrap.ts, same apps/web/node_modules requirement.
+      - name: Run Home Goal Rhythm suggestions test
+        run: npx ts-node test/homeGoalRhythmSuggestions.test.ts
       # Goals V2 Candidate A2 -- goalPlanningSourceAdapter.ts imports
       # dayConstructorPreviewRequest.ts, which transitively imports
       # apps/web/lib/db.ts -- same apps/web/node_modules requirement.

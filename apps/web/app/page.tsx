@@ -28,6 +28,8 @@ import { readOfflineHabitQueue, toPendingLoggedEntry, mergeConfirmedLogEntries, 
 import { refreshAfterHomeCompletion } from '../lib/homeRefresh';
 import { selectTodaysPendingActivities } from '../lib/myDayPendingOverlay';
 import type { GuidanceUiState } from '../lib/bestForYouViewModel';
+import type { GoalDemandResult } from '../lib/goalDemandCandidates';
+import { mapGoalDemandToHomeRhythmSuggestions, type HomeGoalRhythmSuggestion } from '../lib/homeGoalRhythmSuggestions';
 
 // UI Modules
 import { HomeDashboard } from '../components/HomeDashboard';
@@ -206,6 +208,10 @@ export default function DashboardPage() {
   // highly personalized, so a stale prior user's recommendations must
   // never render attributed to a different logged-in user.
   const [guidance, setGuidance] = useState<GuidanceUiState>({ status: 'loading' });
+  // HGR1 -- Home Goal-Rhythm Integration. Same best-effort, reset-on-user-
+  // change fetch discipline as `guidance` above (a stale prior user's
+  // Rhythm suggestions must never render attributed to a different user).
+  const [goalRhythmSuggestions, setGoalRhythmSuggestions] = useState<readonly HomeGoalRhythmSuggestion[]>([]);
   // Product Structure V2 -- "Your Moments" now lives inside Plan (brief
   // section 19), so any entry point that used to jump to the standalone
   // Shared Moments tab (Home's actionable card, You's row) now jumps into
@@ -481,6 +487,33 @@ export default function DashboardPage() {
     if (!user) return;
     loadGuidance();
   }, [user?.id, loadGuidance]);
+
+  // HGR1 -- GET /api/daily-assistant/goal-rhythm, same pure-wiring fetch
+  // calling loadEligibleGoalDemand verbatim. LOAD_FAILED/network failure
+  // both degrade to an empty list (best-effort, matching this file's own
+  // loadAssistantSignals/loadAuraUpdates convention) rather than any
+  // retry/global error UI -- Home already renders fine with zero Rhythm
+  // suggestions.
+  const loadGoalRhythmSuggestions = useCallback(async () => {
+    try {
+      const res = await fetch('/api/daily-assistant/goal-rhythm');
+      if (!res.ok) {
+        setGoalRhythmSuggestions([]);
+        return;
+      }
+      const result: GoalDemandResult = await res.json();
+      setGoalRhythmSuggestions(result.status === 'OK' ? mapGoalDemandToHomeRhythmSuggestions(result.candidates) : []);
+    } catch (err) {
+      console.error('Failed to load goal rhythm suggestions:', err);
+      setGoalRhythmSuggestions([]);
+    }
+  }, []);
+
+  useEffect(() => {
+    setGoalRhythmSuggestions([]);
+    if (!user) return;
+    loadGoalRhythmSuggestions();
+  }, [user?.id, loadGoalRhythmSuggestions]);
 
   // Aura Updates V1 -- ordinary fetch on the same lifecycle as the other
   // Home data above, no polling faster than the app's existing refresh
@@ -1575,6 +1608,7 @@ export default function DashboardPage() {
             onMyDayChanged={handleMyDayOrGuidanceChanged}
             onPlanCompleted={handleHomePlanCompleted}
             guidance={guidance}
+            goalRhythmSuggestions={goalRhythmSuggestions}
             onOpenBirthProfile={() => setActiveTab('chart')}
             onOpenAgendaItem={handleOpenAgendaItem}
             onPlanTomorrow={handlePlanTomorrow}
