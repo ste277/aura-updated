@@ -46,7 +46,7 @@ import { createRecompositionStore, initialRecompositionState, shouldOfferRecompo
 import { formatGoalActivityCompletion } from '../lib/goalActivityExecution';
 import { DailyBriefingCard } from './DailyBriefingCard';
 import { GoalRhythmSuggestionsCard } from './GoalRhythmSuggestionsCard';
-import type { HomeGoalRhythmSuggestion } from '../lib/homeGoalRhythmSuggestions';
+import { excludeGoalRhythmSuggestionsDuplicatingActivities, type HomeGoalRhythmSuggestion } from '../lib/homeGoalRhythmSuggestions';
 
 /** Matches page.tsx's own FALLBACK_TZ -- defensive only, page.tsx always supplies a real value today. */
 const FALLBACK_HOME_TZ = 'Asia/Kolkata';
@@ -488,6 +488,20 @@ export function HomeDashboard({
 
   const guidanceState: GuidanceUiState = guidance ?? { status: 'loading' };
   const readyGuidance = guidanceState.status === 'READY' ? guidanceState : null;
+
+  // HGR2 section 6 -- duplicate avoidance against the existing "Best For
+  // You" guidance feed, by the SAME ActivityProfile-catalog activityId
+  // SelectedActivityMetadata already carries (never title-text matching).
+  // Recomputes only when the set of activityIds Home's guidance feed is
+  // actually showing right now changes, not on every guidance re-render.
+  const guidanceActivityIds = useMemo(
+    () => new Set(readyGuidance ? Object.values(readyGuidance.selectedActivities).map((metadata) => metadata.activityId) : []),
+    [readyGuidance]
+  );
+  const dedupedGoalRhythmSuggestions = useMemo(
+    () => excludeGoalRhythmSuggestionsDuplicatingActivities(goalRhythmSuggestions ?? [], guidanceActivityIds),
+    [goalRhythmSuggestions, guidanceActivityIds]
+  );
 
   // Home UI V2 -- the canonical timeline projection. Every input here is
   // already fetched/computed elsewhere (page.tsx); this useMemo performs
@@ -1482,8 +1496,8 @@ export function HomeDashboard({
           )}
         </div>
       )}
-      {goalRhythmSuggestions && goalRhythmSuggestions.length > 0 && (
-        <GoalRhythmSuggestionsCard suggestions={goalRhythmSuggestions} dismissedIds={dismissedGoalRhythmIds} onDismiss={handleDismissGoalRhythmSuggestion} />
+      {dedupedGoalRhythmSuggestions.length > 0 && (
+        <GoalRhythmSuggestionsCard suggestions={dedupedGoalRhythmSuggestions} dismissedIds={dismissedGoalRhythmIds} onDismiss={handleDismissGoalRhythmSuggestion} />
       )}
       <HomeTimeline
         items={homeTimeline}
