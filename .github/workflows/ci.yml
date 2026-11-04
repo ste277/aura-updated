@@ -161,6 +161,13 @@ jobs:
       # homeAskAuraHandoff.ts only, no new dependency).
       - name: Run Home Ask Aura handoff test
         run: npx ts-node test/homeIntent1AskAuraHandoff.test.ts
+      # HOME-INTENT-1 P2-4 -- real component-level lifecycle tests (jsdom
+      # + react-dom/client, see test/jsdomReactHarness.ts's own doc
+      # comment for why this needs its own tsconfig with `"jsx": "react"`
+      # rather than the plain `npx ts-node test/<file>.test.ts` every
+      # other step above uses).
+      - name: Run Home Ask Aura handoff component lifecycle test
+        run: npx ts-node --project tsconfig.jsdom-tests.json test/homeIntent1AskAuraHandoffComponent.test.ts
       # Goals V2 Candidate A2 -- goalPlanningSourceAdapter.ts imports
       # dayConstructorPreviewRequest.ts, which transitively imports
       # apps/web/lib/db.ts -- same apps/web/node_modules requirement.

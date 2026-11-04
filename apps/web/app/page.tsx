@@ -220,6 +220,13 @@ export default function DashboardPage() {
   // ensures two consecutive, even textually identical, requests are both
   // honored, mirroring planPrefill/planFocusKey's own established pattern.
   const [pendingAskAuraHandoff, setPendingAskAuraHandoff] = useState<AskAuraHandoffRequest | null>(null);
+  // HOME-INTENT-1 P2-1 -- a monotonic counter, not Date.now(), stamps each
+  // handoff's `key`. Date.now() has only millisecond resolution and is not
+  // structurally guaranteed unique between two calls; a ref-based counter
+  // guarantees every submission within this mounted page instance gets a
+  // genuinely distinct key, so two consecutive, even textually identical,
+  // requests are never coalesced or dropped as "the same one".
+  const askAuraHandoffKeyRef = useRef(0);
   // Product Structure V2 -- "Your Moments" now lives inside Plan (brief
   // section 19), so any entry point that used to jump to the standalone
   // Shared Moments tab (Home's actionable card, You's row) now jumps into
@@ -1408,7 +1415,8 @@ export default function DashboardPage() {
   // classification of its own -- it only stamps a one-shot handoff key
   // and navigates, mirroring handleOpenPlan's own navigation-only role.
   const handleHomeAskAuraSubmit = useCallback((text: string) => {
-    setPendingAskAuraHandoff(createAskAuraHandoff(text));
+    askAuraHandoffKeyRef.current += 1;
+    setPendingAskAuraHandoff(createAskAuraHandoff(text, () => askAuraHandoffKeyRef.current));
     setActiveTab('ask');
   }, []);
 

@@ -230,15 +230,18 @@ function main() {
   // 15. Existing Ask Aura error handling remains functional for a
   // handed-off request. [STRUCTURAL]: confirm the pre-existing catch
   // branch (the UNKNOWN/"hit a snag" fallback message) is unchanged
-  // except for the added mountedRef guard -- handleSend's error path is
-  // identical regardless of whether it was triggered by a manual type or
-  // a Home handoff, since both call the exact same function.
+  // except for the guard, which P2-3 strengthened from a bare
+  // mountedRef.current check to isCurrent() (mountedRef.current AND the
+  // request-generation check) -- handleSend's error path is identical
+  // regardless of whether it was triggered by a manual type or a Home
+  // handoff, since both call the exact same function.
   // ============================================================
   {
     const askAuraView = read('apps/web/components/AskAuraView.tsx');
     check(
-      '15. [STRUCTURAL] the existing error fallback message is unchanged, now additionally guarded by mountedRef (not removed/altered)',
-      /if \(mountedRef\.current\) \{\s*setMessages\(\(prev\) => \[\s*\.\.\.prev,\s*\{ sender: 'aura', response: \{ intent: 'UNKNOWN', message: 'Sorry, I hit a snag\. Please try again\.' \} \},\s*\]\);\s*\}/.test(askAuraView)
+      '15. [STRUCTURAL] the existing error fallback message is unchanged, now guarded by isCurrent() (mountedRef AND request-generation, not removed/weakened)',
+      /if \(isCurrent\(\)\) \{\s*setMessages\(\(prev\) => \[\s*\.\.\.prev,\s*\{ sender: 'aura', response: \{ intent: 'UNKNOWN', message: 'Sorry, I hit a snag\. Please try again\.' \} \},\s*\]\);\s*\}/.test(askAuraView)
+        && /const isCurrent = \(\) => isResponseCurrent\(requestGeneration, requestGenerationRef\.current, mountedRef\.current\);/.test(askAuraView)
     );
   }
 
@@ -275,6 +278,23 @@ function main() {
     check(
       '17. [STRUCTURAL] the "Ideas" PROMPT_CHIPS still call onPlanClick?.(chip) directly and unchanged, as the separate explicit Plan-navigation path',
       /PROMPT_CHIPS\.map\(\(chip\) => \(\s*<ActivityChip key=\{chip\} label=\{chip\} onClick=\{\(\) => onPlanClick\?\.\(chip\)\} \/>/.test(home)
+    );
+  }
+
+  // ============================================================
+  // 18. [STRUCTURAL] page.tsx's handleHomeAskAuraSubmit itself -- not
+  // exported, so this is the only way to bind a regression test to its
+  // exact body -- stamps a monotonic key, creates a handoff, and
+  // navigates to 'ask'. It must NEVER unconditionally navigate to
+  // 'plan': that was precisely the old decorative button's defining bug,
+  // and HOME-INTENT-1's independent review found no test caught a
+  // reversion to it (negative control A). This check closes that gap.
+  // ============================================================
+  {
+    const page = read('apps/web/app/page.tsx');
+    check(
+      "18. [STRUCTURAL] handleHomeAskAuraSubmit creates a handoff and navigates to 'ask' -- never an unconditional 'plan' redirect",
+      /const handleHomeAskAuraSubmit = useCallback\(\(text: string\) => \{\s*askAuraHandoffKeyRef\.current \+= 1;\s*setPendingAskAuraHandoff\(createAskAuraHandoff\(text, \(\) => askAuraHandoffKeyRef\.current\)\);\s*setActiveTab\('ask'\);\s*\}, \[\]\);/.test(page)
     );
   }
 }

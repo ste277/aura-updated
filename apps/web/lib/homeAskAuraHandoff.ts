@@ -23,11 +23,18 @@ export function resolveHomeAskAuraSubmission(rawInput: string): { readonly shoul
   return trimmed.length > 0 ? { shouldSubmit: true, text: trimmed } : { shouldSubmit: false, text: '' };
 }
 
-/** Builds a one-shot handoff payload. `key` is a fresh timestamp on every
- * call (mirrors page.tsx's own existing planPrefill/planFocusKey
- * convention) so two consecutive, even textually identical, requests are
- * still distinct handoffs -- never coalesced or ignored as "the same
- * one". `now` is injectable for deterministic testing. */
+/** Builds a one-shot handoff payload. `key` must be a value guaranteed
+ * distinct across consecutive calls so two consecutive, even textually
+ * identical, requests are still handled as distinct handoffs -- never
+ * coalesced or ignored as "the same one". HOME-INTENT-1 P2-1: in
+ * production, page.tsx always supplies its own monotonic `useRef`
+ * counter (see handleHomeAskAuraSubmit) rather than relying on this
+ * function's own default -- Date.now() has only millisecond resolution
+ * and is not structurally guaranteed unique between two calls, so it
+ * remains here only as a harmless fallback for callers/tests that don't
+ * care about key semantics; the real UI never exercises it. `now` stays
+ * injectable so a counter (production) or a fixed sequence (tests) can
+ * both be supplied deterministically. */
 export function createAskAuraHandoff(text: string, now: () => number = Date.now): AskAuraHandoffRequest {
   return { text, key: now() };
 }
@@ -43,4 +50,18 @@ export function createAskAuraHandoff(text: string, now: () => number = Date.now)
 export function shouldConsumeAskAuraHandoff(pending: AskAuraHandoffRequest | null | undefined, lastConsumedKey: number | null): boolean {
   if (!pending) return false;
   return pending.key !== lastConsumedKey;
+}
+
+/** HOME-INTENT-1 P2-3 -- the entire request-generation/order decision
+ * AskAuraView's handleSend applies before every post-await setState call,
+ * extracted here (exactly like shouldConsumeAskAuraHandoff above) so it
+ * can be unit-tested directly rather than only traced through a closure.
+ * A response is current -- safe to apply -- only if the component that
+ * started it is still mounted AND no newer request has started since
+ * (i.e. the generation captured when this specific request began still
+ * matches the live counter). mountedRef alone answers "has this
+ * component fully unmounted"; it says nothing about request ORDER within
+ * one still-mounted instance, which is what `currentGeneration` adds. */
+export function isResponseCurrent(requestGeneration: number, currentGeneration: number, mounted: boolean): boolean {
+  return mounted && requestGeneration === currentGeneration;
 }
