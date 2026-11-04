@@ -548,6 +548,13 @@ jobs:
         run: npx ts-node test/dayPlanPreviewItemEditing.test.ts
       - name: Run day plan preview item editing wiring test
         run: npx ts-node test/dayPlanPreviewItemEditingWiring.test.ts
+      # PR #281 P0 fix -- Preview Lifecycle and Async Race. Real async/
+      # lifecycle behavior (deferred promises, controlled resolution
+      # order) against a faithful mirror of the Escape/generation-guard/
+      # mounted-guard control flow -- see this file's own header comment
+      # for why a mirror, not a mounted React tree (no jsdom in this repo).
+      - name: Run day plan preview item lifecycle race condition test
+        run: npx ts-node test/dayPlanPreviewItemLifecycleRaceConditions.test.ts
       # Schedule write consistency S2 -- the manual plan writer takes the shared
       # per-user lock in a transaction (serialization only; no overlap check).
       - name: Run manual writer serialization architecture test

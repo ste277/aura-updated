@@ -78,9 +78,23 @@ export interface DayPlanPreviewControllerProps {
    * from the parent's. Omitted, the time-editing UI simply never renders
    * (the "tap time" affordance itself is gated on this prop, see below). */
   onPreviewReplaced?: (nextPreview: ConstructDayPreview) => void;
+  /** P0 fix -- Preview Lifecycle and Async Race. A monotonic counter owned
+   * by `PlanDayClient.tsx` (the actual owner of `preview` state), bumped
+   * on EVERY preview-replacing transition: Discard (-> null), Review
+   * again/Regenerate (-> a fresh preview), and a successful item-time edit
+   * itself. Reading `.current` at apply-time (never a snapshotted number)
+   * is what lets this controller detect that the preview it captured this
+   * generation against, when the edit STARTED, has since been superseded
+   * by one of those other transitions -- even though the modal's own
+   * dismissal is now correctly guarded (EditProposedItemTimeModal.tsx),
+   * per this ticket's own "do not rely on the modal-dismissal fix alone."
+   * Reuses the exact `requestGenerationRef`/`bumpRequestGeneration()`
+   * shape already shipped for the SAME class of problem in
+   * PlanWithAuraView.tsx -- not a new invention. */
+  previewGenerationRef?: React.RefObject<number>;
 }
 
-export function DayPlanPreviewController({ preview, onDiscard, onSaved, onRefreshRequested, goalActivityLinks, captureLinks, onPreviewReplaced }: DayPlanPreviewControllerProps) {
+export function DayPlanPreviewController({ preview, onDiscard, onSaved, onRefreshRequested, goalActivityLinks, captureLinks, onPreviewReplaced, previewGenerationRef }: DayPlanPreviewControllerProps) {
   const [actionState, setActionState] = useState<DayPlanAcceptanceUiState>({ kind: 'IDLE' });
   // Plan My Day -- single-item time editing. At most ONE item is ever
   // being edited at a time (the modal is exclusive -- this ticket's own
@@ -89,7 +103,15 @@ export function DayPlanPreviewController({ preview, onDiscard, onSaved, onRefres
   // ProposedItemRow's own time are all behind it and unreachable while
   // `editingItem` is set, so no second edit or acceptance submission can
   // ever start concurrently with this one).
-  const [editingItem, setEditingItem] = useState<ProposedItem | null>(null);
+  //
+  // P0 fix -- the generation this edit's request was captured against
+  // (`previewGenerationRef.current` AT THE MOMENT the modal opens) travels
+  // alongside the item being edited, so `onApply` below can tell whether
+  // the preview has since been replaced out from under this in-flight
+  // request -- without that pairing, `onApply`'s own closure would only
+  // ever see the `preview`/generation values from the render that created
+  // it, which is exactly the stale-closure bug this ticket fixes.
+  const [editing, setEditing] = useState<{ item: ProposedItem; generation: number } | null>(null);
   // Preview IDENTITY, not object reference (pre-commit review hardening --
   // see dayPlanAcceptancePresentation.ts's own doc comment on
   // `computePreviewIdentityKey` for the full rationale/field selection).
@@ -151,18 +173,37 @@ export function DayPlanPreviewController({ preview, onDiscard, onSaved, onRefres
         actionState={actionState}
         onRetry={submit}
         onReviewAgain={onRefreshRequested}
-        onEditItem={editingAllowed ? setEditingItem : undefined}
+        onEditItem={editingAllowed ? (item) => setEditing({ item, generation: previewGenerationRef?.current ?? 0 }) : undefined}
       />
-      {editingItem && onPreviewReplaced && (
+      {editing && onPreviewReplaced && (
         <EditProposedItemTimeModal
-          item={editingItem}
+          item={editing.item}
           window={preview.constructionWindow}
           timezone={preview.timezone}
           onApply={(updatedItem: UpdatedPreviewItem) => {
+            setEditing(null);
+            // P0 fix -- discard silently (never surface an error; the
+            // user already moved on from this specific edit) if ANYTHING
+            // has replaced the preview since this edit's request started:
+            // Discard (-> null), Review again/Regenerate (-> a fresh
+            // preview), or another edit's own apply. Checked against the
+            // LIVE ref, not a value this closure captured, which is
+            // exactly what makes this guard immune to the stale-closure
+            // problem (this closure itself, and the `preview` it closes
+            // over, can be arbitrarily stale by the time this fires --
+            // that's the whole bug this fix closes).
+            if (!previewGenerationRef || previewGenerationRef.current !== editing.generation) return;
+            // Generation unchanged implies `preview` (this closure's own
+            // capture) is still the SAME object PlanDayClient currently
+            // holds -- nothing that would have changed it could happen
+            // without also bumping the generation (every setPreview call
+            // in PlanDayClient is paired with a bump). So the targeted
+            // item is still exactly where this edit found it;
+            // applyUpdatedProposedItem's own defensive intentId lookup
+            // covers the (should-never-happen) alternative.
             onPreviewReplaced(applyUpdatedProposedItem(preview, updatedItem));
-            setEditingItem(null);
           }}
-          onClose={() => setEditingItem(null)}
+          onClose={() => setEditing(null)}
         />
       )}
     </>

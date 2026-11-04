@@ -96,6 +96,43 @@ function main() {
   }
 
   // ============================================================
+  // applyUpdatedProposedItem -- sibling ISOLATION, strengthened for the
+  // PR #281 P0 fix (section 5). Check 6 above already proves reference
+  // equality for the untouched sibling; that alone would NOT catch a bug
+  // that mutated the sibling's own fields in place while happening to
+  // keep the same object reference. These checks inspect the sibling's
+  // actual field VALUES after the call, which would catch either failure
+  // mode. (22-23)
+  // ============================================================
+  {
+    const itemA = proposedItem({ intentId: 'a', title: 'Investor deck', start: iso('2026-09-16T14:00:00Z'), end: iso('2026-09-16T15:00:00Z') });
+    const itemB = proposedItem({ intentId: 'b', title: 'Workout', start: iso('2026-09-16T17:00:00Z'), end: iso('2026-09-16T17:30:00Z') });
+    const itemBSnapshot = { title: itemB.title, start: itemB.start.getTime(), end: itemB.end.getTime(), placementSource: itemB.placementSource };
+    const original = preview([itemA, itemB]);
+    applyUpdatedProposedItem(original, updatedItem({ intentId: 'a', title: 'Investor deck -- retitled', start: iso('2026-09-16T18:00:00Z'), end: iso('2026-09-16T19:00:00Z') }));
+    check(
+      '22. an unrelated sibling\'s own fields are byte-identical after the call (catches an IN-PLACE mutation even if reference equality coincidentally held)',
+      itemB.title === itemBSnapshot.title && itemB.start.getTime() === itemBSnapshot.start && itemB.end.getTime() === itemBSnapshot.end && itemB.placementSource === itemBSnapshot.placementSource
+    );
+  }
+  {
+    // Replacing a sibling with a wholesale NEW object that merely LOOKS the
+    // same (different reference, identical-looking content) must also be
+    // caught -- this is the counterpart check 6 already covers via `===`,
+    // restated explicitly here as the positive half of the pairing this
+    // ticket's section 5 asks for.
+    const itemA = proposedItem({ intentId: 'a', start: iso('2026-09-16T14:00:00Z'), end: iso('2026-09-16T15:00:00Z') });
+    const itemB = proposedItem({ intentId: 'b', title: 'Workout', start: iso('2026-09-16T17:00:00Z'), end: iso('2026-09-16T17:30:00Z') });
+    const original = preview([itemA, itemB]);
+    const next = applyUpdatedProposedItem(original, updatedItem({ intentId: 'a' }));
+    const rebuiltLookalike = proposedItem({ intentId: 'b', title: 'Workout', start: iso('2026-09-16T17:00:00Z'), end: iso('2026-09-16T17:30:00Z') });
+    check(
+      '23. an unrelated sibling is the exact SAME object, not merely a same-looking replacement (a wholesale rebuild, even value-identical, would fail this)',
+      next.constructedDay.proposedItems[1] === itemB && next.constructedDay.proposedItems[1] !== rebuiltLookalike
+    );
+  }
+
+  // ============================================================
   // presentPreviewItemUpdateFailure (12-19)
   // ============================================================
   check('12. UPDATED has no failure copy', presentPreviewItemUpdateFailure({ status: 'UPDATED', item: updatedItem({ intentId: 'a' }) }) === null);

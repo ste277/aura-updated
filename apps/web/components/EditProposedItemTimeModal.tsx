@@ -36,6 +36,11 @@ export interface EditProposedItemTimeModalProps {
   onClose: () => void;
 }
 
+// Stable identity (never recreated per render) for the Escape-while-saving
+// no-op below -- a fresh closure each render would needlessly re-subscribe
+// useModalA11y's keydown effect (its deps include `onClose`).
+function NOOP() {}
+
 function minuteOfDayToTimeInputValue(minuteOfDay: number): string {
   const hour = Math.floor(minuteOfDay / 60) % 24;
   const minute = minuteOfDay % 60;
@@ -50,7 +55,21 @@ export function EditProposedItemTimeModal({ item, window, timezone, onApply, onC
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  useModalA11y({ isOpen: true, onClose, dialogRef, initialFocusRef: dateInputRef });
+  // P0 fix -- Escape must respect the SAME `saving` guard every other
+  // dismissal path already has (ModalShell's own onClose={saving ?
+  // undefined : onClose} above, and the Cancel button's disabled={saving}
+  // below). Previously this passed the raw, unconditional `onClose` --
+  // useModalA11y's own Escape handler (ui.tsx) called it regardless of an
+  // in-flight save, closing the modal (and re-enabling Discard/Review
+  // again) while the preview-item request was still pending. Fixed
+  // locally here, not inside useModalA11y/ModalShell themselves: the
+  // other two callers of useModalA11y (GoalsListClient.tsx,
+  // PastActivityModal.tsx) have no comparable in-flight-request window a
+  // shared primitive change would need to account for, so this stays this
+  // modal's own concern. See also the preview-generation guard in
+  // DayPlanPreviewController.tsx/PlanDayClient.tsx, which independently
+  // protects the same window even if a dismissal path were ever missed.
+  useModalA11y({ isOpen: true, onClose: saving ? NOOP : onClose, dialogRef, initialFocusRef: dateInputRef });
 
   const originalToken = readAcceptanceToken(item);
 
