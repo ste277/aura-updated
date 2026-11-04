@@ -45,6 +45,8 @@ import { RecompositionCard } from './RecompositionCard';
 import { createRecompositionStore, initialRecompositionState, shouldOfferRecomposition, withConfirmedMoves, withMovedSources, type ConfirmedMove, type RecompositionStore } from '../lib/homeRecomposition';
 import { formatGoalActivityCompletion } from '../lib/goalActivityExecution';
 import { DailyBriefingCard } from './DailyBriefingCard';
+import { GoalRhythmSuggestionsCard } from './GoalRhythmSuggestionsCard';
+import type { HomeGoalRhythmSuggestion } from '../lib/homeGoalRhythmSuggestions';
 
 /** Matches page.tsx's own FALLBACK_TZ -- defensive only, page.tsx always supplies a real value today. */
 const FALLBACK_HOME_TZ = 'Asia/Kolkata';
@@ -167,6 +169,13 @@ interface HomeDashboardProps {
   dayBuilderPrioritiesPromptDismissed?: boolean;
   onDayBuilderPrefsChange?: (next: Partial<{ dayBuilderPriorities: string[]; dayBuilderPrioritiesPromptDismissed: boolean }>) => void;
   guidance?: GuidanceUiState;
+  /** HGR1 -- Home Goal-Rhythm Integration. Already-eligible, already-mapped
+   * weekly Rhythm demand (homeGoalRhythmSuggestions.ts's own presentation
+   * projection of goalDemandCandidates.ts's `loadEligibleGoalDemand` --
+   * the SAME read model Plan My Day's own automatic bootstrap consumes).
+   * Undefined/omitted simply renders nothing, matching every other
+   * optional Home data slice's own convention. */
+  goalRhythmSuggestions?: readonly HomeGoalRhythmSuggestion[];
   onOpenBirthProfile?: () => void;
   /** Home Plan/Add Actions fix -- "+ Add something"'s own fallback when
    * Day Builder has nothing to show (NIGHT phase / no agenda yet, see
@@ -392,6 +401,7 @@ export function HomeDashboard({
   dayBuilderPrioritiesPromptDismissed,
   onDayBuilderPrefsChange,
   guidance,
+  goalRhythmSuggestions,
   onOpenBirthProfile,
   onTimingSearch,
   assistantInsight,
@@ -564,6 +574,18 @@ export function HomeDashboard({
   useEffect(() => {
     recompositionStore.reset();
   }, [recompositionStore, agendaLocalDate]);
+  // HGR1 -- a "Not now" dismissal is a purely local, non-destructive,
+  // SESSION-scoped choice (never persisted, never an API call, never
+  // touching the weekly target) -- resets on a local-day rollover, the
+  // SAME lifecycle the recomposition proposal above already uses, so a
+  // suggestion dismissed yesterday is never silently hidden forever.
+  const [dismissedGoalRhythmIds, setDismissedGoalRhythmIds] = useState<ReadonlySet<string>>(new Set());
+  useEffect(() => {
+    setDismissedGoalRhythmIds(new Set());
+  }, [agendaLocalDate]);
+  const handleDismissGoalRhythmSuggestion = (goalActivityId: string) => {
+    setDismissedGoalRhythmIds((current) => new Set(current).add(goalActivityId));
+  };
   const recompositionAccepting = recomposition.phase === 'ACCEPTING';
   // Focus follows the card's own transitions (never a successor, never a scroll jump): the heading when a proposal/status
   // appears or changes, the success status after a batch acceptance -- but ONLY while focus is still owned by the
@@ -1459,6 +1481,9 @@ export function HomeDashboard({
             </span>
           )}
         </div>
+      )}
+      {goalRhythmSuggestions && goalRhythmSuggestions.length > 0 && (
+        <GoalRhythmSuggestionsCard suggestions={goalRhythmSuggestions} dismissedIds={dismissedGoalRhythmIds} onDismiss={handleDismissGoalRhythmSuggestion} />
       )}
       <HomeTimeline
         items={homeTimeline}

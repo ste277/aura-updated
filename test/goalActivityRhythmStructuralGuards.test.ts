@@ -44,10 +44,15 @@ function stripComments(source: string): string {
 // the Daily Rhythm feature's own naming prefix).
 const RHYTHM_PATTERN = /(?<!Daily)(?<!daily)(?<!DAILY_)(?<!Daily )(?<!daily )Rhythm|rhythmKind|rhythmTargetPerWeek|computeGoalActivityRhythmEligibility|loadGoalActivityRhythmFacts/;
 
+// HGR1 -- Home Goal-Rhythm Integration is the explicitly-authorized
+// exception to this R2-era guard: HomeDashboard.tsx now legitimately
+// surfaces Rhythm demand (homeGoalRhythmSuggestions.ts's own presentation
+// projection of the unmodified goalDemandCandidates.ts read model), so
+// 'Home (HomeDashboard.tsx)' is deliberately removed from the list below.
+// Every OTHER file here is untouched by HGR1 and still correctly guarded.
 const PRODUCTION_FILES: Record<string, string> = {
   'Constructor core (dayConstructor.ts)': '../apps/web/lib/dayConstructor.ts',
   'Constructor orchestrator (dayConstructorOrchestrator.ts)': '../apps/web/lib/dayConstructorOrchestrator.ts',
-  'Home (HomeDashboard.tsx)': '../apps/web/components/HomeDashboard.tsx',
   'Timeline (HomeTimeline.tsx)': '../apps/web/components/HomeTimeline.tsx',
   'DailyAgenda (dailyAgenda.ts)': '../apps/web/lib/dailyAgenda.ts',
   'MyDay orchestrator (myDayOrchestrator.ts)': '../apps/web/lib/myDayOrchestrator.ts',

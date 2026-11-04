@@ -115,7 +115,15 @@ check('planMove.ts does not reference formatGoalActivityCompletion', !/formatGoa
 
 const migrationDirs = fs.readdirSync('apps/web/prisma/migrations').filter((d) => /^\d{4}_/.test(d));
 check('no migration directory was added for G3.3 (HomeDashboard.tsx\'s Right Now spotlight reuses the existing formatGoalActivityCompletion formatter over existing tables, no new persisted concept -- count-independent: holds regardless of how many unrelated migrations exist)', !migrationDirs.some((d) => /rightNow|goalSpotlight/i.test(d)));
-check('no Rhythm/recurrence concept anywhere in HomeDashboard.tsx', !/\bRhythm\b|\bRRULE\b/.test(src));
+// HGR1 -- Home Goal-Rhythm Integration is the explicitly-authorized
+// exception to this G3.3-era guard (which predates it and assumed
+// HomeDashboard.tsx would never reference Rhythm at all): the weekly
+// N_PER_WEEK Rhythm demand card is a deliberate, separate, later
+// addition, not a G3.3 regression. RRULE/custom-interval recurrence is
+// still genuinely absent (HGR1 only ever consumes the EXISTING
+// N_PER_WEEK read model, never introduces a new recurrence grammar), so
+// that half of this guard remains in force.
+check('no RRULE/custom-interval recurrence concept anywhere in HomeDashboard.tsx', !/\bRRULE\b/.test(src));
 check('no day-scoped progress concept (dayBucket/dailyTarget) anywhere in HomeDashboard.tsx', !/dayBucket|dailyTarget/.test(src));
 check('no history/aggregate concept (executionHistory/weeklyTotal/allExecutions) anywhere in HomeDashboard.tsx', !/executionHistory|weeklyTotal|allExecutions/.test(src));
 
