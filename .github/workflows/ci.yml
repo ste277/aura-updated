@@ -153,6 +153,10 @@ jobs:
       # and planDayBootstrap.ts, same apps/web/node_modules requirement.
       - name: Run Home Goal Rhythm suggestions test
         run: npx ts-node test/homeGoalRhythmSuggestions.test.ts
+      # HGR2 -- same apps/web/node_modules requirement (imports
+      # homeGoalRhythmSuggestions.ts only, no new dependency).
+      - name: Run Home Goal Rhythm prioritization and overflow test
+        run: npx ts-node test/homeGoalRhythmSuggestionsPrioritization.test.ts
       # Goals V2 Candidate A2 -- goalPlanningSourceAdapter.ts imports
       # dayConstructorPreviewRequest.ts, which transitively imports
       # apps/web/lib/db.ts -- same apps/web/node_modules requirement.
