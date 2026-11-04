@@ -504,6 +504,7 @@ export function PlanDayClient({ timezone, planningDate, horizon, availabilityCon
               onRefreshRequested={handleRefreshRequested}
               goalActivityLinks={buildGoalActivityLinksForAccept(rows, preview.constructedDay.proposedItems)}
               captureLinks={buildCaptureLinksForAccept(rows, preview.constructedDay.proposedItems)}
+              onPreviewReplaced={setPreview}
             />
             {shadowReview && timezone ? <ShadowReviewPanel review={shadowReview} timezone={timezone} /> : null}
           </>

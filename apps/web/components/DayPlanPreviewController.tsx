@@ -2,9 +2,13 @@
 
 import React, { useRef, useState } from 'react';
 import type { ConstructDayPreview } from '../lib/dayConstructorOrchestrator';
+import type { ProposedItem } from '../lib/dayConstructor';
 import { acceptConstructedDay, type PersistedPlanSummary, type GoalActivityLink, type CaptureLink } from '../lib/acceptConstructedDay';
 import { classifyAcceptanceUiState, resolveClientRequestId, computePreviewIdentityKey, shouldSubmitAcceptance, hasSubmittableProposal, type ClientRequestIdCache, type DayPlanAcceptanceUiState } from '../lib/dayPlanAcceptancePresentation';
+import { applyUpdatedProposedItem } from '../lib/dayPlanPreviewItemEditing';
+import type { UpdatedPreviewItem } from '../lib/dayConstructorPreviewItemClient';
 import { DayPlanPreview } from './DayPlanPreview';
+import { EditProposedItemTimeModal } from './EditProposedItemTimeModal';
 
 /**
  * Day Constructor V1 -- PR E3. The OWNING controller for a reviewed
@@ -63,10 +67,29 @@ export interface DayPlanPreviewControllerProps {
   goalActivityLinks?: readonly GoalActivityLink[];
   /** Quick Capture V1 PR B -- same opaque pass-through, for Capture provenance. */
   captureLinks?: readonly CaptureLink[];
+  /** Plan My Day -- single-item time editing. This controller's own
+   * network-call/state-ownership boundary (this file's own doc comment
+   * above) extends to the preview-item re-sign call, but NOT to `preview`
+   * itself -- `preview` is owned by whichever experience actually holds
+   * the `useState` (today, PlanDayClient.tsx). When a re-sign succeeds,
+   * this controller computes the replacement preview
+   * (`applyUpdatedProposedItem`) and hands it up through this callback
+   * rather than holding its own shadow copy of `preview` that could drift
+   * from the parent's. Omitted, the time-editing UI simply never renders
+   * (the "tap time" affordance itself is gated on this prop, see below). */
+  onPreviewReplaced?: (nextPreview: ConstructDayPreview) => void;
 }
 
-export function DayPlanPreviewController({ preview, onDiscard, onSaved, onRefreshRequested, goalActivityLinks, captureLinks }: DayPlanPreviewControllerProps) {
+export function DayPlanPreviewController({ preview, onDiscard, onSaved, onRefreshRequested, goalActivityLinks, captureLinks, onPreviewReplaced }: DayPlanPreviewControllerProps) {
   const [actionState, setActionState] = useState<DayPlanAcceptanceUiState>({ kind: 'IDLE' });
+  // Plan My Day -- single-item time editing. At most ONE item is ever
+  // being edited at a time (the modal is exclusive -- this ticket's own
+  // section 6 "handle multiple edits safely" is satisfied by the modal's
+  // own full-screen overlay: Discard/Continue/Review-again/every other
+  // ProposedItemRow's own time are all behind it and unreachable while
+  // `editingItem` is set, so no second edit or acceptance submission can
+  // ever start concurrently with this one).
+  const [editingItem, setEditingItem] = useState<ProposedItem | null>(null);
   // Preview IDENTITY, not object reference (pre-commit review hardening --
   // see dayPlanAcceptancePresentation.ts's own doc comment on
   // `computePreviewIdentityKey` for the full rationale/field selection).
@@ -107,14 +130,41 @@ export function DayPlanPreviewController({ preview, onDiscard, onSaved, onRefres
     }
   };
 
+  // Plan My Day -- single-item time editing. Never offered while a save
+  // is in flight or already complete (this ticket's own section 8,
+  // "preserve existing controls" -- mutating a proposed item's time after
+  // SAVING has started, or after SAVED, would be meaningless and
+  // confusing: SAVING's request is already in flight against the OLD
+  // items, and SAVED has nothing left to edit). STALE/FAILED are
+  // deliberately NOT blocked here -- editing the conflicting item's own
+  // time is itself a targeted way to resolve exactly that state, and
+  // doing so naturally resets `actionState` back to IDLE via the
+  // identity-key check above, the same way "Review again" already does.
+  const editingAllowed = onPreviewReplaced && actionState.kind !== 'SAVING' && actionState.kind !== 'SAVED';
+
   return (
-    <DayPlanPreview
-      preview={preview}
-      onContinue={submit}
-      onDiscard={onDiscard}
-      actionState={actionState}
-      onRetry={submit}
-      onReviewAgain={onRefreshRequested}
-    />
+    <>
+      <DayPlanPreview
+        preview={preview}
+        onContinue={submit}
+        onDiscard={onDiscard}
+        actionState={actionState}
+        onRetry={submit}
+        onReviewAgain={onRefreshRequested}
+        onEditItem={editingAllowed ? setEditingItem : undefined}
+      />
+      {editingItem && onPreviewReplaced && (
+        <EditProposedItemTimeModal
+          item={editingItem}
+          window={preview.constructionWindow}
+          timezone={preview.timezone}
+          onApply={(updatedItem: UpdatedPreviewItem) => {
+            onPreviewReplaced(applyUpdatedProposedItem(preview, updatedItem));
+            setEditingItem(null);
+          }}
+          onClose={() => setEditingItem(null)}
+        />
+      )}
+    </>
   );
 }
