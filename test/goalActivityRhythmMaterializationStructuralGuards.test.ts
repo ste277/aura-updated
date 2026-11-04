@@ -47,7 +47,9 @@ const PRODUCTION_FILES: Record<string, string> = {
   'Recomposition decision engine (remainingDayRecomposition.ts)': '../apps/web/lib/remainingDayRecomposition.ts',
   'Recomposition server wiring (remainingDayRecompositionServer.ts)': '../apps/web/lib/remainingDayRecompositionServer.ts',
   'Recomposition integrity (remainingDayRecompositionIntegrity.ts)': '../apps/web/lib/remainingDayRecompositionIntegrity.ts',
-  'Home (HomeDashboard.tsx)': '../apps/web/components/HomeDashboard.tsx',
+  // HGR1 -- Home Goal-Rhythm Integration is the explicitly-authorized
+  // exception to this R3-era guard; see goalActivityRhythmStructuralGuards.test.ts's
+  // own identical note. 'Home (HomeDashboard.tsx)' deliberately removed.
   'Timeline (HomeTimeline.tsx)': '../apps/web/components/HomeTimeline.tsx',
   'DailyAgenda (dailyAgenda.ts)': '../apps/web/lib/dailyAgenda.ts',
   'MyDay orchestrator (myDayOrchestrator.ts)': '../apps/web/lib/myDayOrchestrator.ts',
