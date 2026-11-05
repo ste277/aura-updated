@@ -1,5 +1,7 @@
 /**
- * HGR3-B / HGR3-BH -- Secure Weekly Rhythm Proposal Acceptance, hardened.
+ * HGR3-B / HGR3-BH / HGR3-C1 -- Secure Weekly Rhythm Proposal Acceptance,
+ * hardened, with a fresh client-generated acceptance identity per
+ * explicit confirmation.
  *
  * Converts a user-confirmed subset of HGR3-A's read-only weekly proposals
  * (goalRhythmWeeklyProposal.ts, explicitly `committable: false`) into real
@@ -205,6 +207,109 @@
  * already-committed success -- the same "each item attempted
  * independently, never all-or-nothing" discipline this codebase already
  * established elsewhere (collectSkipAllOutcomes, homeMissedRecovery.ts).
+ *
+ * HGR3-C1 -- FRESH ACCEPTANCE IDENTITY (fixes HGR3-C-R1, the one open
+ * problem HGR3-BH's own F-1 fix deliberately left unresolved: see
+ * `reconcileExistingAcceptance`'s own header comment, "retrying the exact
+ * original slot can never silently un-cancel it"). THE PROBLEM: once a
+ * session is cancelled, the EXISTING weekly-proposal engine
+ * (goalRhythmWeeklyProposal.ts's own `occupiedLocalDates`) can re-propose
+ * the byte-identical date+time -- a CANCELLED row contributes `NONE`, so
+ * nothing excludes it -- and EXPLICITLY APPROVING that fresh proposal
+ * derived, under the original `(goalActivityId, localDate, start, end)`-
+ * only key, the EXACT SAME `clientRequestId` as the original, dead
+ * acceptance. HGR3-BH's own F-1 fix correctly refuses to resurrect that
+ * dead claim (`COMMITMENT_NO_LONGER_LIVE`) -- but gave the user no way to
+ * ever re-book that exact slot, since a purely CONTENT-derived identity
+ * cannot distinguish "a stale retry of an old decision" from "a genuinely
+ * new, explicitly-approved decision for the same nominal slot" -- by
+ * construction, both produce an identical key.
+ *
+ * THE FIX, reusing an ALREADY-SHIPPED convention rather than inventing one
+ * (per the HGR3-C0 audit's own Option-A recommendation): `/api/plans`
+ * (apps/web/app/api/plans/route.ts) already accepts an OPTIONAL,
+ * CLIENT-GENERATED `clientRequestId` for exactly this purpose -- its own
+ * doc comment states plainly that such an id "carries no claim of prior
+ * entitlement, it only deduplicates THIS authenticated user's own repeated
+ * request... ownership is already guaranteed by session.userId." This
+ * file adopts the SAME convention (never modifying that route or its own
+ * table use): the caller now supplies one `acceptanceId` string per
+ * explicit "Accept all" confirmation -- minted ONCE per confirmation,
+ * reused only for retries/double-clicks/timeouts of THAT SAME
+ * confirmation, minted FRESH for a later, genuinely new confirmation
+ * (including a deliberate re-booking of a just-cancelled slot). This
+ * string is folded directly into `buildWeeklySessionClientRequestId`'s
+ * own derivation (now `hgr3b:<acceptanceId>:<goalActivityId>:<localDate>:
+ * <start>:<end>`), so a fresh acceptanceId naturally produces a fresh
+ * day-constructor idempotency key with NO code change anywhere
+ * downstream: the EXISTING `deriveAcceptanceIdempotencyKey`/
+ * `PlanCreationIdempotency`/`reconcileExistingAcceptance` machinery
+ * continues to work exactly as HGR3-BH shipped it, now simply keyed on a
+ * longer, caller-scoped clientRequestId string.
+ *
+ * WHY A CLIENT-GENERATED ID DOES NOT WEAKEN ANYTHING: authorization never
+ * depended on the id's own trustworthiness in the first place --
+ * `PlanCreationIdempotency` is keyed by `(userId, clientRequestId)`, so
+ * the id can never be used to read or act on another user's state, and
+ * every real decision (ownership, weekly/daily capacity, availability,
+ * conflict detection, signing/verification) is independently re-derived
+ * server-side downstream exactly as before, regardless of what identity
+ * string reached it. A fresh/arbitrary acceptanceId is therefore
+ * STRUCTURALLY INCAPABLE of bypassing any of those checks -- it can only
+ * ever cause the server to attempt a genuinely FRESH, fully-revalidated
+ * placement, never skip revalidation.
+ *
+ * PAYLOAD BINDING (the one genuinely NEW check this file adds, since the
+ * identity-derivation change alone does not on its own satisfy "the same
+ * acceptance identity must not authorize different selections"): see
+ * `detectAcceptanceIdentityConflict` below. A SEPARATE, simple key
+ * namespace (`hgr3b-bind:...`, deliberately NOT the day-constructor's own
+ * `deriveAcceptanceIdempotencyKey` format, which length-prefixes its inner
+ * clientRequestId and so cannot be searched by a plain substring prefix)
+ * is written into the SAME, already-generic `PlanCreationIdempotency`
+ * table `/api/plans`'s own clientRequestId convention already shares it
+ * with -- never a new table, never a schema change. This binds
+ * `(acceptanceId, goalActivityId, localDate)` to the FIRST approved
+ * `start`/`end` seen for that combination; a later request reusing the
+ * same acceptanceId+activity+date with a DIFFERENT approved time is
+ * rejected (`ACCEPTANCE_IDENTITY_CONFLICT`) before any preview/persist
+ * call, rather than silently treated as either a replay or an independent
+ * fresh session. A later request reusing the same acceptanceId for a
+ * DIFFERENT GoalActivity entirely is rejected the same way (this
+ * endpoint's own request shape scopes one acceptanceId to one
+ * GoalActivity's batch, so any other GoalActivity appearing under it is
+ * necessarily a reused/stale id, never a legitimate second activity).
+ * Multiple SESSIONS within one legitimate batch (same acceptanceId, same
+ * GoalActivity, DIFFERENT dates) are correctly NOT flagged: the binding
+ * key is scoped per local date, so sibling sessions never collide.
+ *
+ * THE BINDING IS WRITTEN ONLY ON GENUINE SUCCESS (`ACCEPTED`/
+ * `ALREADY_ACCEPTED`), NEVER EAGERLY ON EVERY ATTEMPT -- see
+ * `acceptOneSession`'s own header comment for the real Availability
+ * Context test case that caught an earlier, eager-binding draft of this
+ * check as a regression: an identity that has not yet produced a real
+ * commitment must stay free for a corrected retry (a different, still-
+ * valid time) under the SAME acceptanceId, mirroring `/api/plans`'s own
+ * existing "orphaned, unfilled claim falls through to a fresh attempt"
+ * precedent. Only an identity that HAS already produced a real
+ * commitment is protected from being silently reinterpreted for
+ * different content.
+ *
+ * ACCEPTED LIMITATION, DOCUMENTED RATHER THAN HIDDEN: the binding
+ * check-then-claim above is a best-effort, NON-ATOMIC courtesy check (a
+ * read followed by a separate write, not one guarded transaction) -- a
+ * sufficiently tight race between two requests carrying DIFFERENT
+ * acceptanceIds for the identical slot could, in principle, both pass it.
+ * This is deliberately acceptable: real safety for that exact scenario
+ * already comes from the EXISTING, atomic per-user advisory lock and
+ * FIXED-placement conflict detection inside `deps.persist` itself (per
+ * this ticket's own Section 7 expectation -- "one succeeds, the other
+ * correctly fails on a genuine conflict... via its normal capacity/
+ * conflict logic, not via idempotency"), which this file in no way
+ * weakens or bypasses. The binding check exists only to give an HONEST,
+ * early, non-leaking rejection for the common, non-adversarial case (a
+ * stale or buggy client resending mismatched content under one id), not
+ * to be the system's only line of defense against a genuine race.
  */
 
 import { getDatePartsInTimezone } from './timezone';
@@ -219,7 +324,7 @@ import { persistAcceptedConstructedDay, deriveAcceptanceIdempotencyKey, type Acc
 import { resolveAvailability, type AvailabilityConfiguration } from './availabilityContext';
 import type { AcceptConstructedDayRequest, AcceptedProposedItem } from './dayConstructorAcceptance';
 import type { ConstructionWindow } from './dayIntent';
-import { getPlanCreationClaim, getPlannedActivityForOwner, type PlanCreationClaim, type PlannedActivity, type User } from './db';
+import { getPlanCreationClaim, getPlannedActivityForOwner, findPlanCreationClaimsByPrefix, claimPlanCreation, type PlanCreationClaim, type PlannedActivity, type User } from './db';
 
 /** Mirrors HGR3-A's own MAX_WEEKLY_RHYTHM_PROPOSALS -- a batch can never
  * legitimately contain more sessions than could ever have been proposed
@@ -234,18 +339,68 @@ const MIN_DURATION_MINUTES = 1;
 
 const CLIENT_REQUEST_ID_PREFIX = 'hgr3b';
 
+/** A SEPARATE key namespace from CLIENT_REQUEST_ID_PREFIX (see this file's
+ * own "HGR3-C1 -- FRESH ACCEPTANCE IDENTITY" header section for why):
+ * never passed through `deriveAcceptanceIdempotencyKey`, so it can be
+ * searched with a plain `findPlanCreationClaimsByPrefix` substring
+ * prefix -- the day-constructor key format's own length-prefix makes that
+ * impossible for CLIENT_REQUEST_ID_PREFIX keys. */
+const ACCEPTANCE_BINDING_PREFIX = 'hgr3b-bind';
+
+/** Mirrors `/api/plans`'s own `MAX_CLIENT_REQUEST_ID_LENGTH` bound
+ * (apps/web/app/api/plans/route.ts) -- never a new, looser rule for a
+ * client-generated identity string. */
+export const MAX_ACCEPTANCE_ID_LENGTH = 200;
+
 /** Deterministic, per (user-scoped by the idempotency table itself, never
- * baked into this string), per-GoalActivity, per-local-date, per-EXACT-
- * approved-instant. See this module's own header comment ("WHY THIS KEY
- * CAN NEVER MISCLASSIFY...") for the full collision analysis -- including
- * exactly `start`/`end` (not a normalized/rounded form of them) is
- * deliberate: this file's own input validation (see
- * `validateSelectionShape` below) already rejects anything that is not a
- * well-formed, exact ISO instant pair before this function is ever
- * called, so two calls for the SAME intended session always supply
- * byte-identical strings. */
-export function buildWeeklySessionClientRequestId(goalActivityId: string, localDate: string, start: string, end: string): string {
-  return `${CLIENT_REQUEST_ID_PREFIX}:${goalActivityId}:${localDate}:${start}:${end}`;
+ * baked into this string), per-acceptanceId, per-GoalActivity,
+ * per-local-date, per-EXACT-approved-instant (HGR3-C1 -- `acceptanceId`
+ * is the new component; everything else is unchanged from HGR3-B/BH). See
+ * this module's own header comment ("WHY THIS KEY CAN NEVER
+ * MISCLASSIFY...") for the full collision analysis -- including exactly
+ * `start`/`end` (not a normalized/rounded form of them) is deliberate:
+ * this file's own input validation (see `validateSelectionShape` below)
+ * already rejects anything that is not a well-formed, exact ISO instant
+ * pair before this function is ever called, so two calls for the SAME
+ * intended session always supply byte-identical strings. Folding
+ * `acceptanceId` in here (rather than tracking it as a separate
+ * dimension) is what makes a FRESH acceptanceId produce a FRESH
+ * day-constructor idempotency key automatically, with zero change to
+ * `deriveAcceptanceIdempotencyKey`/`reconcileExistingAcceptance`/
+ * `persistAcceptedConstructedDay` -- the real fix for HGR3-C-R1. */
+export function buildWeeklySessionClientRequestId(acceptanceId: string, goalActivityId: string, localDate: string, start: string, end: string): string {
+  return `${CLIENT_REQUEST_ID_PREFIX}:${acceptanceId}:${goalActivityId}:${localDate}:${start}:${end}`;
+}
+
+/** HGR3-C1 -- the exact-content binding key for one (acceptanceId,
+ * GoalActivity, local date) slot: see `detectAcceptanceIdentityConflict`.
+ * Exported for direct unit testing, matching this file's own convention
+ * for every other pure key-derivation helper. */
+export function buildAcceptanceBindingKey(acceptanceId: string, goalActivityId: string, localDate: string, start: string, end: string): string {
+  return `${ACCEPTANCE_BINDING_PREFIX}:${acceptanceId}:${goalActivityId}:${localDate}:${start}:${end}`;
+}
+
+/** HGR3-C1 -- every binding key for one (acceptanceId, GoalActivity, local
+ * date) slot shares exactly this prefix, regardless of which start/end
+ * was bound to it. */
+export function buildAcceptanceBindingSlotPrefix(acceptanceId: string, goalActivityId: string, localDate: string): string {
+  return `${ACCEPTANCE_BINDING_PREFIX}:${acceptanceId}:${goalActivityId}:${localDate}:`;
+}
+
+/** HGR3-C1 -- every binding key for one (acceptanceId, GoalActivity) pair
+ * shares exactly this prefix, regardless of local date/start/end --
+ * broader than `buildAcceptanceBindingSlotPrefix`, used only to detect a
+ * DIFFERENT GoalActivity reusing the same acceptanceId (see
+ * `detectAcceptanceIdentityConflict`). */
+export function buildAcceptanceBindingActivityPrefix(acceptanceId: string, goalActivityId: string): string {
+  return `${ACCEPTANCE_BINDING_PREFIX}:${acceptanceId}:${goalActivityId}:`;
+}
+
+/** HGR3-C1 -- every binding key for one acceptanceId, across every
+ * GoalActivity/date/time it has ever been used for, shares exactly this
+ * prefix. */
+export function buildAcceptanceBindingScopePrefix(acceptanceId: string): string {
+  return `${ACCEPTANCE_BINDING_PREFIX}:${acceptanceId}:`;
 }
 
 export interface WeeklyAcceptanceSelection {
@@ -304,6 +459,15 @@ export interface WeeklyAcceptanceDeps extends GoalDemandCandidatesDeps {
   /** `getPlannedActivityForOwner` in production (HGR3-BH) -- resolves the
    * real, already-userId-scoped Plan a filled claim points at. */
   getPlannedActivityForOwner: typeof getPlannedActivityForOwner;
+  /** `findPlanCreationClaimsByPrefix` in production (HGR3-C1) -- the
+   * read-only payload-binding conflict check; see
+   * `detectAcceptanceIdentityConflict`. */
+  findPlanCreationClaimsByPrefix: typeof findPlanCreationClaimsByPrefix;
+  /** `claimPlanCreation` in production (HGR3-C1) -- claims the SEPARATE
+   * `hgr3b-bind:...` binding key (never the day-constructor acceptance
+   * key itself) so a LATER request can detect a payload-binding conflict
+   * against it. */
+  claimPlanCreation: typeof claimPlanCreation;
   /** The real `AvailabilityConfiguration` read (HGR3-BH) -- the SAME
    * shape/semantics `createRealDayConstructorOrchestratorDeps`'s own
    * `loadAvailabilityConfiguration` closure already builds for the
@@ -359,6 +523,14 @@ function toIso(value: Date): string {
 type SessionFailureReason =
   | 'NOT_ELIGIBLE'
   | 'OUTSIDE_CURRENT_WEEK'
+  /** HGR3-C1 -- the caller reused `acceptanceId` for a GoalActivity, local
+   * date, start or end that disagrees with an earlier request under that
+   * SAME acceptanceId (see `detectAcceptanceIdentityConflict`). Never
+   * fires for legitimate sibling sessions within one batch (same
+   * acceptanceId+GoalActivity, different dates) or for a genuine retry
+   * (identical content) -- only for a changed commitment-defining input
+   * under a reused identity. */
+  | 'ACCEPTANCE_IDENTITY_CONFLICT'
   /** HGR3-BH -- `start`/`end` are not both valid ISO instants, `start` is
    * not strictly before `end`, or the resulting duration is not a sane
    * positive integer number of minutes. */
@@ -571,11 +743,82 @@ async function violatesConfiguredAvailability(deps: WeeklyAcceptanceDeps, localD
   return !resolution.usableWindows.some((w) => approved.start.getTime() >= w.start.getTime() && approved.end.getTime() <= w.end.getTime());
 }
 
-/** One session, start to finish. Never throws on an ordinary domain
- * outcome -- only a genuine infrastructure failure inside `deps.persist`/
- * `deps.runPreview` themselves propagates, exactly like every other
- * caller of these two functions in this codebase. */
-async function acceptOneSession(deps: WeeklyAcceptanceDeps, userId: string, selection: WeeklyAcceptanceSelection, planningLocalDate: string): Promise<WeeklySessionAcceptanceOutcome> {
+/** HGR3-C1 -- read-only payload-binding conflict check: true when
+ * `acceptanceId` has ALREADY been used (by an earlier request, including
+ * an earlier session in a batch processed sequentially before this one)
+ * for either a DIFFERENT GoalActivity, or the SAME GoalActivity+localDate
+ * but a DIFFERENT approved start/end, than the candidate key supplied
+ * now. Never flags: a genuine retry (identical candidate key already
+ * bound), or a legitimate sibling session in the same batch (same
+ * acceptanceId+GoalActivity, a DIFFERENT localDate -- a disjoint slot
+ * prefix). One query (the broad, acceptanceId-scoped prefix) answers
+ * both the cross-activity and the same-slot-different-time cases without
+ * a second round trip. See this file's own "HGR3-C1" header section for
+ * why this is a best-effort courtesy check, not the system's atomic
+ * safety boundary. */
+async function detectAcceptanceIdentityConflict(deps: WeeklyAcceptanceDeps, userId: string, acceptanceId: string, goalActivityId: string, localDate: string, bindingKey: string): Promise<boolean> {
+  const scoped = await deps.findPlanCreationClaimsByPrefix(userId, buildAcceptanceBindingScopePrefix(acceptanceId));
+  if (scoped.length === 0) return false;
+  const activityPrefix = buildAcceptanceBindingActivityPrefix(acceptanceId, goalActivityId);
+  for (const claim of scoped) {
+    if (!claim.clientRequestId.startsWith(activityPrefix)) return true; // a DIFFERENT GoalActivity already claimed this acceptanceId.
+  }
+  const slotPrefix = buildAcceptanceBindingSlotPrefix(acceptanceId, goalActivityId, localDate);
+  return scoped.some((claim) => claim.clientRequestId.startsWith(slotPrefix) && claim.clientRequestId !== bindingKey);
+}
+
+/** HGR3-C1 -- the public entry point for one session: runs the read-only
+ * payload-binding conflict check FIRST (before any other work, so an
+ * identity already bound to different content never reaches shape/
+ * eligibility/preview work at all), then delegates to
+ * `acceptOneSessionCore` for everything else, then -- ONLY if the core
+ * genuinely reports `ACCEPTED`/`ALREADY_ACCEPTED` -- claims the binding
+ * key so a LATER request under this SAME acceptanceId with DIFFERENT
+ * content can be correctly flagged as a conflict against it.
+ *
+ * WHY BINDING ONLY HAPPENS ON GENUINE SUCCESS, NEVER EAGERLY: an earlier
+ * version of this file claimed the binding unconditionally, before
+ * knowing the outcome -- this was caught by this file's own pre-existing
+ * Availability Context test (two calls, same acceptanceId+GoalActivity+
+ * localDate, deliberately DIFFERENT times -- one outside a configured
+ * window, one genuinely inside it): the FIRST call (rejected
+ * OUTSIDE_AVAILABILITY) would eagerly bind its own attempted time, so
+ * the SECOND, genuinely-fine call -- a normal correction, not a replay
+ * or an abuse attempt -- was wrongly flagged as a payload-binding
+ * conflict and never even reached the real pipeline. Binding only on
+ * real success mirrors `/api/plans`'s own existing precedent exactly
+ * (apps/web/app/api/plans/route.ts's own `awaitPlanCreationFill`/orphaned
+ * -claim comment: "an orphaned claim from a genuinely failed prior
+ * attempt... falls through and creates a fresh Plan rather than blocking
+ * the user's save forever") -- an identity that has not yet produced a
+ * real commitment leaves the slot free for a corrected retry under the
+ * SAME acceptanceId; only an identity that HAS already produced one is
+ * protected from being silently reinterpreted for different content. */
+async function acceptOneSession(deps: WeeklyAcceptanceDeps, userId: string, acceptanceId: string, selection: WeeklyAcceptanceSelection, planningLocalDate: string): Promise<WeeklySessionAcceptanceOutcome> {
+  const { goalActivityId, localDate } = selection;
+  const bindingKey = buildAcceptanceBindingKey(acceptanceId, goalActivityId, localDate, selection.start, selection.end);
+
+  if (await detectAcceptanceIdentityConflict(deps, userId, acceptanceId, goalActivityId, localDate, bindingKey)) {
+    return { goalActivityId, localDate, outcome: 'FAILED', reason: 'ACCEPTANCE_IDENTITY_CONFLICT' satisfies SessionFailureReason };
+  }
+
+  const outcome = await acceptOneSessionCore(deps, userId, acceptanceId, selection, planningLocalDate);
+  if (outcome.outcome === 'ACCEPTED' || outcome.outcome === 'ALREADY_ACCEPTED') {
+    // `ON CONFLICT DO NOTHING` makes this safe to call on every genuine
+    // retry of the identical content too (idempotent no-op, never an
+    // error) -- it only ever newly writes the FIRST time this exact
+    // identity+content combination succeeds.
+    await deps.claimPlanCreation(userId, bindingKey);
+  }
+  return outcome;
+}
+
+/** One session, start to finish, everything AFTER the payload-binding
+ * conflict check. Never throws on an ordinary domain outcome -- only a
+ * genuine infrastructure failure inside `deps.persist`/`deps.runPreview`
+ * themselves propagates, exactly like every other caller of these two
+ * functions in this codebase. */
+async function acceptOneSessionCore(deps: WeeklyAcceptanceDeps, userId: string, acceptanceId: string, selection: WeeklyAcceptanceSelection, planningLocalDate: string): Promise<WeeklySessionAcceptanceOutcome> {
   const { goalActivityId, localDate } = selection;
 
   // Step 1 (HGR3-BH) -- pure input-shape validation, always first: a
@@ -589,7 +832,7 @@ async function acceptOneSession(deps: WeeklyAcceptanceDeps, userId: string, sele
     return { goalActivityId, localDate, outcome: 'FAILED', reason: 'OUTSIDE_CURRENT_WEEK' satisfies SessionFailureReason };
   }
 
-  const clientRequestId = buildWeeklySessionClientRequestId(goalActivityId, localDate, selection.start, selection.end);
+  const clientRequestId = buildWeeklySessionClientRequestId(acceptanceId, goalActivityId, localDate, selection.start, selection.end);
   const now = deps.now();
 
   // Step 2 -- fresh, authoritative ownership + eligibility. Never the
@@ -786,12 +1029,21 @@ async function acceptOneSession(deps: WeeklyAcceptanceDeps, userId: string, sele
  * real throughput and stays far simpler to reason about). Each session is
  * revalidated and accepted independently; a later session's failure never
  * undoes an earlier session's real success.
+ *
+ * `acceptanceId` (HGR3-C1) -- ONE client-generated string per explicit
+ * "Accept all" confirmation, threaded into every session's own
+ * `clientRequestId`/binding key below. See this file's own "HGR3-C1 --
+ * FRESH ACCEPTANCE IDENTITY" header section for the full design and why
+ * this is what lets a user re-book an identical, previously-cancelled
+ * slot: a FRESH acceptanceId for a NEW confirmation produces entirely
+ * fresh keys, independent of whatever identity an earlier, now-cancelled
+ * confirmation used.
  */
-export async function acceptWeeklyRhythmSessions(deps: WeeklyAcceptanceDeps, userId: string, planningLocalDate: string, selections: readonly WeeklyAcceptanceSelection[]): Promise<WeeklyAcceptanceSummary> {
+export async function acceptWeeklyRhythmSessions(deps: WeeklyAcceptanceDeps, userId: string, acceptanceId: string, planningLocalDate: string, selections: readonly WeeklyAcceptanceSelection[]): Promise<WeeklyAcceptanceSummary> {
   const bounded = selections.slice(0, MAX_WEEKLY_ACCEPTANCE_SESSIONS);
   const sessions: WeeklySessionAcceptanceOutcome[] = [];
   for (const selection of bounded) {
-    sessions.push(await acceptOneSession(deps, userId, selection, planningLocalDate));
+    sessions.push(await acceptOneSession(deps, userId, acceptanceId, selection, planningLocalDate));
   }
 
   // Recomputed fresh, once per distinct GoalActivity touched by this

@@ -33,6 +33,7 @@ import * as path from 'path';
 import {
   acceptWeeklyRhythmSessions,
   buildWeeklySessionClientRequestId,
+  buildAcceptanceBindingKey,
   buildExplicitRangeWindow,
   MAX_WEEKLY_ACCEPTANCE_SESSIONS,
   type WeeklyAcceptanceDeps,
@@ -61,6 +62,14 @@ const USER_ID = 'user-1';
 const GOAL_ACTIVITY_ID = 'ga-1';
 const NOW = new Date('2026-11-04T04:00:00.000Z'); // Wed 2026-11-04 09:30 IST
 const PLANNING_LOCAL_DATE = '2026-11-04';
+/** HGR3-C1 -- the default acceptanceId every pre-existing (HGR3-B/BH)
+ * test in this file uses: those tests are about the ORCHESTRATION logic
+ * around one fixed identity, not about the identity scheme itself, so
+ * they all share one constant exactly as they implicitly did before this
+ * dimension existed. The dedicated HGR3-C1 section below mints its own
+ * acceptanceIds explicitly, by name, to make the fresh-vs-reused
+ * distinction legible. */
+const ACCEPTANCE_ID = 'acc-default';
 
 function row(target: number): CandidateGoalActivityForRhythmDemandRow {
   return { goalActivityId: GOAL_ACTIVITY_ID, goalId: 'goal-1', goalTitle: 'Get fit', title: 'Run', activityId: 'running', rhythmKind: 'N_PER_WEEK', rhythmTargetPerWeek: target };
@@ -105,6 +114,14 @@ interface FakeEnv {
   plansById: Map<string, PlannedActivity>;
   getPlanCreationClaimCallCount: { n: number };
   availability: { current: AvailabilityConfiguration };
+  /** HGR3-C1 -- in-memory stand-in for the real `PlanCreationIdempotency`
+   * rows the `hgr3b-bind:...` payload-binding keys would occupy. A
+   * SEPARATE map from `claimsByKey` above (which only ever holds
+   * day-constructor `deriveAcceptanceIdempotencyKey`-derived keys),
+   * mirroring that these are two independent key namespaces sharing one
+   * real table in production. */
+  bindingClaimsByKey: Map<string, PlanCreationClaim>;
+  findPlanCreationClaimsByPrefixCallCount: { n: number };
 }
 
 function buildFakeEnv(targetPerWeek: number, initialFacts: readonly GoalActivityRhythmOccurrenceFact[] = []): FakeEnv {
@@ -118,6 +135,8 @@ function buildFakeEnv(targetPerWeek: number, initialFacts: readonly GoalActivity
   const plansById = new Map<string, PlannedActivity>();
   const getPlanCreationClaimCallCount = { n: 0 };
   const availability = { current: UNCONFIGURED_AVAILABILITY };
+  const bindingClaimsByKey = new Map<string, PlanCreationClaim>();
+  const findPlanCreationClaimsByPrefixCallCount = { n: 0 };
 
   const goalDemandDeps: GoalDemandCandidatesDeps = {
     loadCandidateGoalActivities: async () => {
@@ -180,6 +199,23 @@ function buildFakeEnv(targetPerWeek: number, initialFacts: readonly GoalActivity
 
   const getPlannedActivityForOwner = (async (_userId: string, planId: string): Promise<PlannedActivity | null> => plansById.get(planId) ?? null) as unknown as typeof import('../apps/web/lib/db').getPlannedActivityForOwner;
 
+  // HGR3-C1 -- a SEPARATE fake pair, backing the `hgr3b-bind:...` payload-
+  // binding namespace only (never the day-constructor `claimsByKey` map
+  // above): `claimPlanCreation`'s real INSERT-ON-CONFLICT-DO-NOTHING
+  // semantics (returns true only the first time a given key is claimed),
+  // and `findPlanCreationClaimsByPrefix`'s real plain-substring prefix
+  // search.
+  const claimPlanCreationFake = (async (userId: string, clientRequestId: string): Promise<boolean> => {
+    if (bindingClaimsByKey.has(clientRequestId)) return false;
+    bindingClaimsByKey.set(clientRequestId, { userId, clientRequestId, plannedActivityId: null, createdAt: new Date() });
+    return true;
+  }) as unknown as typeof import('../apps/web/lib/db').claimPlanCreation;
+
+  const findPlanCreationClaimsByPrefix = (async (_userId: string, prefix: string): Promise<PlanCreationClaim[]> => {
+    findPlanCreationClaimsByPrefixCallCount.n += 1;
+    return [...bindingClaimsByKey.values()].filter((c) => c.clientRequestId.startsWith(prefix));
+  }) as unknown as typeof import('../apps/web/lib/db').findPlanCreationClaimsByPrefix;
+
   const deps: WeeklyAcceptanceDeps = {
     ...goalDemandDeps,
     user: FAKE_USER,
@@ -188,15 +224,17 @@ function buildFakeEnv(targetPerWeek: number, initialFacts: readonly GoalActivity
     persist,
     getPlanCreationClaim,
     getPlannedActivityForOwner,
+    findPlanCreationClaimsByPrefix,
+    claimPlanCreation: claimPlanCreationFake,
     loadAvailabilityConfiguration: async () => availability.current,
     createOrchestratorDeps: (() => ({})) as never,
   };
 
-  return { deps, previewCalls, persistCalls, persistResultByClientRequestId, previewFailureByDate, factsRef, loadCandidateCallCount, claimsByKey, plansById, getPlanCreationClaimCallCount, availability };
+  return { deps, previewCalls, persistCalls, persistResultByClientRequestId, previewFailureByDate, factsRef, loadCandidateCallCount, claimsByKey, plansById, getPlanCreationClaimCallCount, availability, bindingClaimsByKey, findPlanCreationClaimsByPrefixCallCount };
 }
 
-async function accept(env: FakeEnv, selections: readonly WeeklyAcceptanceSelection[]) {
-  return acceptWeeklyRhythmSessions(env.deps, USER_ID, PLANNING_LOCAL_DATE, selections);
+async function accept(env: FakeEnv, selections: readonly WeeklyAcceptanceSelection[], acceptanceId: string = ACCEPTANCE_ID) {
+  return acceptWeeklyRhythmSessions(env.deps, USER_ID, acceptanceId, PLANNING_LOCAL_DATE, selections);
 }
 
 function asFailed(outcome: WeeklySessionAcceptanceOutcome): { reason: string } {
@@ -366,15 +404,16 @@ async function main() {
     check('F-1: a retry whose claimed Plan is now LOGGED (genuinely completed) still correctly resolves ALREADY_ACCEPTED -- LOGGED counts as a live, real outcome, not a dead record', retryAfterLog.sessions[0].outcome === 'ALREADY_ACCEPTED' && (retryAfterLog.sessions[0] as { plannedActivityId: string }).plannedActivityId === firstPlanId);
   }
 
-  // ---------- 11. a DIFFERENT approved time for the same (activity, date) is NEVER misclassified as a replay ----------
+  // ---------- 11. a DIFFERENT approved time for the same (activity, date), approved under its OWN DISTINCT acceptanceId (HGR3-C1: two genuinely separate confirmations), is NEVER misclassified as a replay ----------
   {
     const env = buildFakeEnv(5, []);
     const original = session('2026-11-05'); // 18:00-18:30 IST
     const different = { goalActivityId: GOAL_ACTIVITY_ID, localDate: '2026-11-05', start: '2026-11-05T14:30:00.000Z', end: '2026-11-05T15:00:00.000Z' }; // 20:00-20:30 IST -- a genuinely different intended session
-    const first = await accept(env, [original]);
+    const first = await accept(env, [original], 'acc-11a');
     check('11. the first (original-time) session is accepted', first.sessions[0].outcome === 'ACCEPTED');
-    const second = await accept(env, [different]);
-    check('11. a DIFFERENT approved time for the SAME activity/date derives a DIFFERENT clientRequestId and is genuinely attempted fresh, never short-circuited as a replay of the first', second.sessions[0].outcome === 'ACCEPTED' && env.previewCalls.length === 2 && env.persistCalls.length === 2);
+    // HGR3-C1: a genuinely separate confirmation for a different time mints its OWN acceptanceId -- reusing the first's would now be correctly rejected as a payload-binding conflict (see the dedicated HGR3-C1 section below), which is the NEW, more precise behavior this ticket adds.
+    const second = await accept(env, [different], 'acc-11b');
+    check('11. a DIFFERENT approved time for the SAME activity/date, under its OWN acceptanceId, derives a DIFFERENT clientRequestId and is genuinely attempted fresh, never short-circuited as a replay of the first', second.sessions[0].outcome === 'ACCEPTED' && env.previewCalls.length === 2 && env.persistCalls.length === 2);
     check('11. the two sessions produced two REAL, distinct plannedActivityIds -- never collapsed into one', (first.sessions[0] as { plannedActivityId: string }).plannedActivityId !== (second.sessions[0] as { plannedActivityId: string }).plannedActivityId);
   }
 
@@ -411,7 +450,7 @@ async function main() {
   {
     const env = buildFakeEnv(2, [fact('2026-11-02', 'COMPLETED'), fact('2026-11-03', 'COMPLETED')]); // Monday+Tuesday of PLANNING_LOCAL_DATE's own week (2026-11-02..11-08) -- target 2, fully met.
     const s = session('2026-11-05');
-    env.persistResultByClientRequestId.set(buildWeeklySessionClientRequestId(GOAL_ACTIVITY_ID, '2026-11-05', s.start, s.end), { status: 'SAVE_FAILED', code: 'CAPACITY_EXCEEDED' });
+    env.persistResultByClientRequestId.set(buildWeeklySessionClientRequestId(ACCEPTANCE_ID, GOAL_ACTIVITY_ID, '2026-11-05', s.start, s.end), { status: 'SAVE_FAILED', code: 'CAPACITY_EXCEEDED' });
     const summary = await accept(env, [s]);
     check('6. a fully-satisfied weekly target, caught by the real write-time capacity check (CAPACITY_EXHAUSTED), is reported NOT_ELIGIBLE -- never a raw internal error code leaked', summary.sessions[0].outcome === 'FAILED' && asFailed(summary.sessions[0]).reason === 'NOT_ELIGIBLE');
     check('6. the session still genuinely reached preview+persist (eligibility is NOT pre-gated on the displayed remaining count alone)', env.previewCalls.length === 1 && env.persistCalls.length === 1);
@@ -450,7 +489,7 @@ async function main() {
   {
     const env = buildFakeEnv(5, []);
     const s2 = session('2026-11-06');
-    env.persistResultByClientRequestId.set(buildWeeklySessionClientRequestId(GOAL_ACTIVITY_ID, '2026-11-06', s2.start, s2.end), { status: 'REJECTED', reason: 'CONFLICT', diagnostics: [] });
+    env.persistResultByClientRequestId.set(buildWeeklySessionClientRequestId(ACCEPTANCE_ID, GOAL_ACTIVITY_ID, '2026-11-06', s2.start, s2.end), { status: 'REJECTED', reason: 'CONFLICT', diagnostics: [] });
     const summary = await accept(env, [session('2026-11-04'), s2, session('2026-11-08')]);
     check('12/13. session 2 of 3 fails while 1 and 3 succeed -- an honest, accurate partial-success count, never "all 3 accepted"', summary.acceptedCount === 2 && summary.failedCount === 1 && summary.requestedCount === 3);
     check('12. the response never claims all sessions succeeded when one did not', !(summary.acceptedCount === summary.requestedCount));
@@ -489,8 +528,8 @@ async function main() {
     const env = buildFakeEnv(2, [fact('2026-11-02', 'COMPLETED')]); // target 2, 1 already done -> 1 remaining at batch start
     const s1 = session('2026-11-04');
     const s2 = session('2026-11-06');
-    const secondClientRequestId = buildWeeklySessionClientRequestId(GOAL_ACTIVITY_ID, '2026-11-06', s2.start, s2.end);
-    const firstClientRequestId = buildWeeklySessionClientRequestId(GOAL_ACTIVITY_ID, '2026-11-04', s1.start, s1.end);
+    const secondClientRequestId = buildWeeklySessionClientRequestId(ACCEPTANCE_ID, GOAL_ACTIVITY_ID, '2026-11-06', s2.start, s2.end);
+    const firstClientRequestId = buildWeeklySessionClientRequestId(ACCEPTANCE_ID, GOAL_ACTIVITY_ID, '2026-11-04', s1.start, s1.end);
     const originalPersist = env.deps.persist;
     env.deps.persist = (async (userId, request, ...rest) => {
       if (request.clientRequestId === firstClientRequestId) {
@@ -541,10 +580,113 @@ async function main() {
   // ---------- buildWeeklySessionClientRequestId determinism and identity scope ----------
   {
     const s = session('2026-11-04');
-    check('buildWeeklySessionClientRequestId is deterministic for the same (goalActivityId, localDate, start, end)', buildWeeklySessionClientRequestId('a', '2026-11-04', s.start, s.end) === buildWeeklySessionClientRequestId('a', '2026-11-04', s.start, s.end));
-    check('buildWeeklySessionClientRequestId differs for a different localDate', buildWeeklySessionClientRequestId('a', '2026-11-04', s.start, s.end) !== buildWeeklySessionClientRequestId('a', '2026-11-05', s.start, s.end));
-    check('buildWeeklySessionClientRequestId differs for a different goalActivityId', buildWeeklySessionClientRequestId('a', '2026-11-04', s.start, s.end) !== buildWeeklySessionClientRequestId('b', '2026-11-04', s.start, s.end));
-    check('buildWeeklySessionClientRequestId differs for a different approved start/end, even for the SAME (goalActivityId, localDate) -- this is the key fix preventing a different intended session from ever being misclassified as a replay', buildWeeklySessionClientRequestId('a', '2026-11-04', s.start, s.end) !== buildWeeklySessionClientRequestId('a', '2026-11-04', '2026-11-04T14:30:00.000Z', '2026-11-04T15:00:00.000Z'));
+    check('buildWeeklySessionClientRequestId is deterministic for the same (acceptanceId, goalActivityId, localDate, start, end)', buildWeeklySessionClientRequestId('acc', 'a', '2026-11-04', s.start, s.end) === buildWeeklySessionClientRequestId('acc', 'a', '2026-11-04', s.start, s.end));
+    check('buildWeeklySessionClientRequestId differs for a different localDate', buildWeeklySessionClientRequestId('acc', 'a', '2026-11-04', s.start, s.end) !== buildWeeklySessionClientRequestId('acc', 'a', '2026-11-05', s.start, s.end));
+    check('buildWeeklySessionClientRequestId differs for a different goalActivityId', buildWeeklySessionClientRequestId('acc', 'a', '2026-11-04', s.start, s.end) !== buildWeeklySessionClientRequestId('acc', 'b', '2026-11-04', s.start, s.end));
+    check('buildWeeklySessionClientRequestId differs for a different approved start/end, even for the SAME (acceptanceId, goalActivityId, localDate) -- this is the key fix preventing a different intended session from ever being misclassified as a replay', buildWeeklySessionClientRequestId('acc', 'a', '2026-11-04', s.start, s.end) !== buildWeeklySessionClientRequestId('acc', 'a', '2026-11-04', '2026-11-04T14:30:00.000Z', '2026-11-04T15:00:00.000Z'));
+    check('HGR3-C1: buildWeeklySessionClientRequestId differs for a different acceptanceId, even for the IDENTICAL (goalActivityId, localDate, start, end) -- this is what lets a fresh confirmation re-book an identical, previously-cancelled slot', buildWeeklySessionClientRequestId('acc-1', 'a', '2026-11-04', s.start, s.end) !== buildWeeklySessionClientRequestId('acc-2', 'a', '2026-11-04', s.start, s.end));
+  }
+
+  // ============================================================
+  // HGR3-C1 -- FRESH ACCEPTANCE IDENTITY (the fix for HGR3-C-R1)
+  // ============================================================
+
+  // ---------- the core fix: a FRESH acceptanceId lets a user re-book a slot they previously cancelled, without resurrecting the dead original ----------
+  {
+    const env = buildFakeEnv(5, []);
+    const s = session('2026-11-05');
+
+    const first = await accept(env, [s], 'acc-A');
+    check('HGR3-C1 precondition: the first acceptance (identity A) genuinely succeeds', first.sessions[0].outcome === 'ACCEPTED');
+    const originalPlanId = (first.sessions[0] as { plannedActivityId: string }).plannedActivityId;
+
+    // Simulate the real cancelPlannedActivity's own effect: status only, times untouched (exactly like the existing F-1 test above).
+    const cancelled = env.plansById.get(originalPlanId)!;
+    env.plansById.set(originalPlanId, { ...cancelled, status: 'CANCELLED' });
+
+    const staleRetry = await accept(env, [s], 'acc-A');
+    check('HGR3-C1: retrying the SAME (stale) identity A after cancellation still correctly fails COMMITMENT_NO_LONGER_LIVE -- HGR3-BH\'s own F-1 protection is completely unweakened by this change', staleRetry.sessions[0].outcome === 'FAILED' && asFailed(staleRetry.sessions[0]).reason === 'COMMITMENT_NO_LONGER_LIVE');
+
+    // The real HGR3-A engine would now re-propose this byte-identical slot (cancellation contributes NONE) -- the user explicitly approves it again, under a FRESH identity.
+    const freshBooking = await accept(env, [s], 'acc-B');
+    check('HGR3-C1: the SAME nominal slot, explicitly re-approved under a FRESH acceptanceId B, is genuinely accepted -- a real, NEW live commitment is created', freshBooking.sessions[0].outcome === 'ACCEPTED');
+    const newPlanId = (freshBooking.sessions[0] as { plannedActivityId: string }).plannedActivityId;
+    check('HGR3-C1: the new commitment is a GENUINELY DIFFERENT real Plan, never the resurrected original', newPlanId !== originalPlanId);
+    check('HGR3-C1: the cancelled original remains cancelled, completely untouched by the new booking', env.plansById.get(originalPlanId)!.status === 'CANCELLED');
+
+    const retryB = await accept(env, [s], 'acc-B');
+    check('HGR3-C1: retrying the NEW identity B now correctly resolves ALREADY_ACCEPTED, pointing at the NEW live commitment -- never the old dead one', retryB.sessions[0].outcome === 'ALREADY_ACCEPTED' && (retryB.sessions[0] as { plannedActivityId: string }).plannedActivityId === newPlanId);
+  }
+
+  // ---------- payload binding: reusing the SAME acceptanceId with a CHANGED time for the same nominal slot is rejected, never silently split into two sessions or misreported as a replay ----------
+  {
+    const env = buildFakeEnv(5, []);
+    const original = session('2026-11-05'); // 18:00-18:30 IST
+    const changed = { goalActivityId: GOAL_ACTIVITY_ID, localDate: '2026-11-05', start: '2026-11-05T14:30:00.000Z', end: '2026-11-05T15:00:00.000Z' }; // 20:00-20:30 IST -- same slot, different time
+
+    const first = await accept(env, [original], 'acc-X');
+    check('HGR3-C1 payload-binding precondition: the first request under identity X succeeds', first.sessions[0].outcome === 'ACCEPTED');
+
+    const reused = await accept(env, [changed], 'acc-X');
+    check('HGR3-C1: reusing the SAME acceptanceId X for a DIFFERENT approved time on the same (goalActivityId, localDate) is rejected ACCEPTANCE_IDENTITY_CONFLICT', reused.sessions[0].outcome === 'FAILED' && asFailed(reused.sessions[0]).reason === 'ACCEPTANCE_IDENTITY_CONFLICT');
+    check('HGR3-C1: the rejected conflict never reached preview or persist', env.previewCalls.length === 1 && env.persistCalls.length === 1);
+
+    // An identical retry of the ORIGINAL content under the SAME identity X must still work normally (not itself mistaken for a conflict).
+    const retryOriginal = await accept(env, [original], 'acc-X');
+    check('HGR3-C1: retrying the ORIGINAL, unchanged content under the SAME identity X is still correctly ALREADY_ACCEPTED, not a conflict', retryOriginal.sessions[0].outcome === 'ALREADY_ACCEPTED');
+  }
+
+  // ---------- payload binding: reusing the SAME acceptanceId for a DIFFERENT GoalActivity is rejected ----------
+  {
+    const env = buildFakeEnv(5, []);
+    const forActivityA = session('2026-11-05');
+    const forActivityB = { goalActivityId: 'ga-2', localDate: '2026-11-05', start: '2026-11-05T12:30:00.000Z', end: '2026-11-05T13:00:00.000Z' };
+
+    const first = await accept(env, [forActivityA], 'acc-Y');
+    check('HGR3-C1 cross-activity precondition: the first request under identity Y succeeds', first.sessions[0].outcome === 'ACCEPTED');
+
+    const reused = await accept(env, [forActivityB], 'acc-Y');
+    check('HGR3-C1: reusing the SAME acceptanceId Y for a DIFFERENT GoalActivity is rejected ACCEPTANCE_IDENTITY_CONFLICT, never silently processed as an independent fresh session', reused.sessions[0].outcome === 'FAILED' && asFailed(reused.sessions[0]).reason === 'ACCEPTANCE_IDENTITY_CONFLICT');
+  }
+
+  // ---------- legitimate siblings within one batch (same acceptanceId, same GoalActivity, DIFFERENT dates) are NEVER flagged as a payload-binding conflict ----------
+  {
+    const env = buildFakeEnv(5, []);
+    const summary = await accept(env, [session('2026-11-04'), session('2026-11-06'), session('2026-11-08')], 'acc-batch');
+    check('HGR3-C1: three sibling sessions sharing one acceptanceId (the normal "Accept all" batch shape) are ALL genuinely accepted -- no false payload-binding conflict between legitimate siblings', summary.acceptedCount === 3 && summary.sessions.every((s) => s.outcome === 'ACCEPTED'));
+
+    const retryBatch = await accept(env, [session('2026-11-04'), session('2026-11-06'), session('2026-11-08')], 'acc-batch');
+    check('HGR3-C1: retrying the identical full batch under the SAME acceptanceId resolves all three ALREADY_ACCEPTED, never a false conflict', retryBatch.alreadyAcceptedCount === 3);
+  }
+
+  // ---------- cross-user isolation: an identical acceptanceId string used by a DIFFERENT user never collides ----------
+  {
+    const env = buildFakeEnv(5, []);
+    const s = session('2026-11-05');
+    const first = await accept(env, [s], 'acc-shared-string');
+    check('HGR3-C1 cross-user precondition: user-1\'s request under this id succeeds', first.sessions[0].outcome === 'ACCEPTED');
+
+    // A second, independent user, same literal acceptanceId string, same GoalDemandCandidatesDeps shape -- a SEPARATE FakeEnv (its own, empty claim/plan maps), mirroring how the real `(userId, clientRequestId)` table scopes every row by userId: this user's maps hold no trace of the other's claims regardless of the shared id string. (Note: the fake derives plannedActivityId deterministically from clientRequestId for simplicity, so two envs sharing an id+content produce the SAME string id -- a harmless fake artifact, never a real property; the REAL table's actual primary keys are always fresh per INSERT regardless. The property under test is that the SECOND call still gets a genuine ACCEPTED, never a false ALREADY_ACCEPTED/conflict leaked from the first user's own, separate state.)
+    const envOtherUser = buildFakeEnv(5, []);
+    const second = await accept(envOtherUser, [s], 'acc-shared-string');
+    check('HGR3-C1: the IDENTICAL acceptanceId string used by a DIFFERENT user is fully independent -- a fresh acceptance, never ALREADY_ACCEPTED, never any cross-user leakage', second.sessions[0].outcome === 'ACCEPTED');
+  }
+
+  // ---------- buildAcceptanceBindingKey/claimPlanCreation determinism (pure helper + fake-DI check) ----------
+  {
+    const env = buildFakeEnv(5, []);
+    const s = session('2026-11-05');
+    await accept(env, [s], 'acc-bind-check');
+    const expectedKey = buildAcceptanceBindingKey('acc-bind-check', GOAL_ACTIVITY_ID, '2026-11-05', s.start, s.end);
+    check('HGR3-C1: a successful acceptance claims the expected hgr3b-bind:... binding key, in the SAME generic PlanCreationIdempotency-shaped store /api/plans already uses -- never a new table', env.bindingClaimsByKey.has(expectedKey));
+  }
+
+  // ---------- [STRUCTURAL] HGR3-C1 payload-binding reuses the existing, generic idempotency table/functions -- never a new table or signing format ----------
+  {
+    const root = path.resolve(__dirname, '..');
+    const src = fs.readFileSync(path.join(root, 'apps/web/lib/goalRhythmWeeklyAcceptance.ts'), 'utf8');
+    check('HGR3-C1 [STRUCTURAL]: the payload-binding check reuses the real, unmodified findPlanCreationClaimsByPrefix/claimPlanCreation -- never a second idempotency-table shape of its own', /findPlanCreationClaimsByPrefix/.test(src) && /claimPlanCreation/.test(src) && !/CREATE TABLE/i.test(src));
+    check('HGR3-C1 [STRUCTURAL]: no new signing primitive or format is introduced for the acceptance identity -- it is a plain string folded into the EXISTING clientRequestId derivation, never a token', !/sign.*[Aa]cceptance[Ii]d|[Aa]cceptance[Ii]d.*[Ss]ign/.test(src));
   }
 
   // ---------- HGR3-BH P2-1: EXPLICIT_RANGE window boundary assertions ----------

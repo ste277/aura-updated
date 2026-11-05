@@ -7,13 +7,14 @@ import { getDatePartsInTimezone } from '../../../../../lib/timezone';
 import { createRealDayConstructorOrchestratorDeps } from '../../../../../lib/dayConstructorOrchestrator';
 import { handleDayConstructorPreviewRequest } from '../../../../../lib/dayConstructorPreviewRequest';
 import { persistAcceptedConstructedDay } from '../../../../../lib/dayConstructorAcceptancePersistence';
-import { getPlanCreationClaim, getPlannedActivityForOwner } from '../../../../../lib/db';
+import { getPlanCreationClaim, getPlannedActivityForOwner, findPlanCreationClaimsByPrefix, claimPlanCreation } from '../../../../../lib/db';
 import { createRealGoalDemandCandidatesDeps } from '../../../../../lib/goalDemandCandidates';
 import type { AvailabilityConfiguration } from '../../../../../lib/availabilityContext';
 import { isValidCalendarDateString } from '../../../../../../../packages/panchang/src/localDate';
 import {
   acceptWeeklyRhythmSessions,
   MAX_WEEKLY_ACCEPTANCE_SESSIONS,
+  MAX_ACCEPTANCE_ID_LENGTH,
   type WeeklyAcceptanceDeps,
   type WeeklyAcceptanceSelection,
 } from '../../../../../lib/goalRhythmWeeklyAcceptance';
@@ -22,7 +23,7 @@ const MAX_GOAL_ACTIVITY_ID_LENGTH = 100;
 const MAX_ISO_INSTANT_LENGTH = 40;
 
 /**
- * HGR3-B / HGR3-BH -- POST /api/daily-assistant/goal-rhythm/weekly-accept.
+ * HGR3-B / HGR3-BH / HGR3-C1 -- POST /api/daily-assistant/goal-rhythm/weekly-accept.
  *
  * The explicit "Accept all" action: the ONLY write boundary this feature
  * introduces. Nested under the existing goal-rhythm route family (matches
@@ -30,7 +31,8 @@ const MAX_ISO_INSTANT_LENGTH = 40;
  * (input validation, retry reconciliation, Availability Context
  * enforcement, fresh eligibility revalidation, EXPLICIT_RANGE
  * construction pinned to the approved exact time, the verify -> authorize
- * -> persist acceptance sequence, partial-success reporting) lives in
+ * -> persist acceptance sequence, partial-success reporting,
+ * payload-binding conflict detection) lives in
  * goalRhythmWeeklyAcceptance.ts, reused verbatim.
  *
  * HGR3-BH -- `sessions` now carries each session's own approved `start`/
@@ -46,6 +48,21 @@ const MAX_ISO_INSTANT_LENGTH = 40;
  * request (it must be -- that is the whole point of this hardening), but
  * is never trusted as already schedulable: it is re-validated, re-signed
  * and re-verified through the real pipeline before anything is persisted.
+ *
+ * HGR3-C1 -- `acceptanceId` is a new, REQUIRED, client-generated string
+ * (no existing caller to stay compatible with: this endpoint has zero
+ * production callers today, per the HGR3-C0 audit's own finding, so a
+ * required field is the smallest honest contract rather than an
+ * optional one silently falling back to the old, content-only identity).
+ * The caller mints ONE value per explicit "Accept all" press, reusing it
+ * for retries/double-clicks/timeouts of that SAME press, minting a FRESH
+ * one for a later, separate confirmation -- including a deliberate
+ * re-booking of a slot the user previously cancelled. See
+ * goalRhythmWeeklyAcceptance.ts's own "HGR3-C1 -- FRESH ACCEPTANCE
+ * IDENTITY" header section for the full design and why a client-
+ * generated id weakens nothing (ownership/capacity/availability/signing
+ * are all independently re-verified downstream regardless of what
+ * identity string reaches them).
  *
  * No write occurs anywhere in this codebase merely from generating or
  * displaying a weekly proposal (goalRhythmWeeklyProposal.ts stays
@@ -66,6 +83,17 @@ export async function POST(req: NextRequest) {
   const goalActivityId = body.goalActivityId;
   if (typeof goalActivityId !== 'string' || !goalActivityId || goalActivityId.length > MAX_GOAL_ACTIVITY_ID_LENGTH) {
     return NextResponse.json({ error: 'A valid goalActivityId is required.' }, { status: 400 });
+  }
+
+  // HGR3-C1 -- a REQUIRED, client-generated identity for this one explicit
+  // confirmation. See this route's own header comment and
+  // goalRhythmWeeklyAcceptance.ts's "HGR3-C1" section for why this is
+  // required (no existing caller to preserve compatibility with) and why
+  // a client-supplied string needs no signature verification here --
+  // ownership is scoped by session.userId, never by this string.
+  const acceptanceId = body.acceptanceId;
+  if (typeof acceptanceId !== 'string' || !acceptanceId.trim() || acceptanceId.length > MAX_ACCEPTANCE_ID_LENGTH) {
+    return NextResponse.json({ error: `A valid acceptanceId (1-${MAX_ACCEPTANCE_ID_LENGTH} characters) is required.` }, { status: 400 });
   }
 
   if (!Array.isArray(body.sessions) || body.sessions.length === 0 || body.sessions.length > MAX_WEEKLY_ACCEPTANCE_SESSIONS) {
@@ -100,6 +128,8 @@ export async function POST(req: NextRequest) {
     persist: persistAcceptedConstructedDay,
     getPlanCreationClaim,
     getPlannedActivityForOwner,
+    findPlanCreationClaimsByPrefix,
+    claimPlanCreation,
     loadAvailabilityConfiguration: async () => {
       const periods = await listUserAvailabilityPeriods(user.id);
       return {
@@ -118,7 +148,7 @@ export async function POST(req: NextRequest) {
     // would be the wrong fix.
   };
 
-  const summary = await acceptWeeklyRhythmSessions(deps, session.userId, planningLocalDate, selections);
+  const summary = await acceptWeeklyRhythmSessions(deps, session.userId, acceptanceId.trim(), planningLocalDate, selections);
   return NextResponse.json({
     requestedCount: summary.requestedCount,
     acceptedCount: summary.acceptedCount,
