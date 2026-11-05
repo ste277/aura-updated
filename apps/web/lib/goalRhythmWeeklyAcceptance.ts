@@ -391,7 +391,16 @@ type SessionFailureReason =
   | 'PREVIEW_FAILED'
   | 'ACCEPTANCE_REJECTED'
   | 'IDEMPOTENCY_CONFLICT'
-  | 'SAVE_FAILED';
+  | 'SAVE_FAILED'
+  /** F-1 (independent review correction) -- the reconciliation lookup
+   * found a claim whose time matches the approved selection exactly, but
+   * whose real persisted Plan is no longer live (CANCELLED or MOVED
+   * away via the existing, unrelated cancel/move flows). See
+   * `reconcileExistingAcceptance`'s own header comment for the full
+   * reasoning on why this can never safely fall through to a fresh
+   * attempt instead -- the user must approve a genuinely different
+   * time to re-book, rather than retrying this exact slot. */
+  | 'COMMITMENT_NO_LONGER_LIVE';
 
 /** Exported for direct boundary testing (HGR3-BH P2-1) -- a test can
  * compare this function's own output against `localDayBoundsUTC`'s
@@ -435,12 +444,61 @@ function validateSelectionShape(selection: WeeklyAcceptanceSelection, timezone: 
   return { ok: true, value: { start, end, durationMinutes: rawMinutes } };
 }
 
-/** HGR3-BH -- the read-only reconciliation lookup. Returns the real,
- * already-committed outcome when a FILLED claim already exists for this
- * EXACT session identity, or `null` when there is nothing to reconcile
- * (genuinely fresh, or an unfilled/absent claim -- either way the normal
- * preview+persist path is the correct next step, unchanged). Never
- * writes anything; never calls preview or persist. */
+/** HGR3-BH (independent-review finding F-1 correction) -- the SAME
+ * live/dead grouping `goalActivityRhythm.ts`'s own
+ * `deriveGoalActivityRhythmContribution` already established for exactly
+ * this status set (`LOGGED`/`UPCOMING` -> a real, standing fact;
+ * `CANCELLED`/`SKIPPED`/`MOVED` -> "never read as a fact at all", per
+ * that function's own header comment on the MOVED case) -- reused here
+ * rather than inventing a second definition of "live". `LOGGED` counts
+ * as live for reconciliation purposes even though the session is no
+ * longer upcoming: it is still the real, completed outcome of exactly
+ * the approved instant, so a retry correctly recognizes it rather than
+ * attempting to re-place an already-done session. */
+function isLivePlannedActivityStatus(status: PlannedActivity['status']): boolean {
+  return status === 'UPCOMING' || status === 'LOGGED';
+}
+
+/** HGR3-BH -- the read-only reconciliation lookup. Returns a terminal
+ * outcome (`ALREADY_ACCEPTED` or, since F-1, a `FAILED`
+ * `COMMITMENT_NO_LONGER_LIVE`) when a FILLED claim already exists for
+ * this EXACT session identity, or `null` only when there is genuinely
+ * NOTHING stored under this identity yet -- in that `null` case alone,
+ * the normal preview+persist path is the correct next step, unchanged,
+ * and is itself fully authoritative (a fresh FIXED-placement attempt
+ * independently re-validates ownership, weekly/daily capacity,
+ * availability and conflicts before ever persisting). Never writes
+ * anything; never calls preview or persist.
+ *
+ * F-1 (independent review of this same PR): the ORIGINAL version of this
+ * function checked only that the claimed Plan's own start/end still
+ * matched the approved instant -- never its `status`. Both
+ * `cancelPlannedActivity` (db.ts) and the existing Move flow
+ * (`applyMoveWrites`, planMove.ts) update ONLY `status` on the old row
+ * (`CANCELLED`/`MOVED` respectively) and never touch
+ * `plannedStartAt`/`plannedEndAt` -- so a retry after either of those
+ * existing, unrelated, legitimate flows would find a time-matching but
+ * DEAD row and misreport `ALREADY_ACCEPTED` against it, even though zero
+ * live commitment exists at that instant.
+ *
+ * A first attempt at this fix simply returned `null` for a dead-but-
+ * matching claim, intending the caller to fall through to a fresh
+ * preview+persist attempt. A real DB-backed test caught this as
+ * insufficient: `clientRequestId` is deterministic from content alone
+ * (see `buildWeeklySessionClientRequestId`), never a fresh one-time
+ * action token, so that fresh attempt reaches
+ * `persistAcceptedConstructedDay` with the IDENTICAL clientRequestId as
+ * the original acceptance. That function's own, separate, GLOBAL replay
+ * classification (`plansMatchAcceptedItem`) compares only
+ * title/start/end/activityId -- never status -- so it independently
+ * re-discovers the same filled-but-dead claim, finds its content still
+ * matches, and returns `ALREADY_ACCEPTED` again, reproducing F-1 by a
+ * different route. Weakening `plansMatchAcceptedItem` itself to also
+ * check status would fix this adapter but weaken replay semantics for
+ * EVERY other caller of that shared function -- explicitly out of
+ * bounds. The correct, adapter-local fix is therefore the ticket's own
+ * anticipated fallback: a clear, honest `FAILED` result (see below),
+ * never a silent retry that is structurally guaranteed to collide. */
 async function reconcileExistingAcceptance(
   deps: WeeklyAcceptanceDeps,
   userId: string,
@@ -455,6 +513,44 @@ async function reconcileExistingAcceptance(
   if (!claim || !claim.plannedActivityId) return null;
   const plan: PlannedActivity | null = await deps.getPlannedActivityForOwner(userId, claim.plannedActivityId);
   if (!plan) return null;
+  // F-1 -- a matching-but-dead row must never be reported as the current
+  // calendar commitment.
+  //
+  // THIS CANNOT SAFELY FALL THROUGH TO A FRESH PREVIEW+PERSIST ATTEMPT
+  // (an earlier version of this fix tried exactly that, and a real
+  // DB-backed test caught it immediately): `clientRequestId` here is
+  // DETERMINISTIC from content alone (goalActivityId+localDate+start+end
+  // -- see `buildWeeklySessionClientRequestId`), never a fresh one-time
+  // action token, so a second attempt for the identical session would
+  // reach `persistAcceptedConstructedDay` with the EXACT SAME
+  // clientRequestId as the original, dead-ending acceptance. That
+  // function's OWN, separate, GLOBAL replay classification
+  // (`plansMatchAcceptedItem`, dayConstructorAcceptancePersistence.ts)
+  // compares only title/start/end/activityId -- never status -- so it
+  // would independently re-discover the SAME filled-but-dead claim,
+  // find its content still matches, and return `ALREADY_ACCEPTED`
+  // again, pointing at the identical dead row, before this file's own
+  // code ever ran a second time. Reaching that path again can only
+  // reproduce F-1 by a different route or (if content somehow no
+  // longer matched) return a raw `IDEMPOTENCY_CONFLICT` -- never a
+  // genuine fresh success. Modifying `plansMatchAcceptedItem` itself to
+  // add a status check would fix this adapter but weaken that
+  // function's replay semantics for EVERY other caller -- explicitly
+  // forbidden (this ticket's own "do not weaken existing idempotency
+  // conflict semantics globally").
+  //
+  // The only safe adapter-local answer is the ticket's own explicitly
+  // offered fallback: a clear, honest failure requiring a genuinely NEW
+  // user action. In practice that means approving a DIFFERENT time --
+  // this adapter's own identity scheme already treats a different time
+  // as a different, independently-keyed session (see
+  // `buildWeeklySessionClientRequestId`'s own "WHY THIS KEY CAN NEVER
+  // MISCLASSIFY..." header section), so retrying the exact original
+  // slot can never silently "un-cancel" it, but choosing a new time for
+  // the same activity/date works normally, with its own fresh key.
+  if (!isLivePlannedActivityStatus(plan.status)) {
+    return { goalActivityId, localDate, outcome: 'FAILED', reason: 'COMMITMENT_NO_LONGER_LIVE' satisfies SessionFailureReason };
+  }
   // Defense in depth (this file's own explicit discipline, see "RETRY
   // RECONCILIATION" above) -- never trust a filled claim's own existence
   // alone; confirm the real, persisted Plan actually carries the EXACT

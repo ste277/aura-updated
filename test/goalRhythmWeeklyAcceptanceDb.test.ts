@@ -25,7 +25,8 @@
  *
  *   DATABASE_URL="postgresql://..." npx ts-node test/goalRhythmWeeklyAcceptanceDb.test.ts
  */
-import { upsertUserByEmail, updateBirthProfile, createGoalWithActivities, addGoalActivity, beginTransaction } from '../apps/web/lib/db';
+import { upsertUserByEmail, updateBirthProfile, createGoalWithActivities, addGoalActivity, beginTransaction, cancelPlannedActivity } from '../apps/web/lib/db';
+import { movePlannedActivity } from '../apps/web/lib/planMove';
 import { createSessionToken } from '../apps/web/lib/auth';
 import { getDatePartsInTimezone } from '../apps/web/lib/timezone';
 import { localCalendarWeekBounds } from '../apps/web/lib/goalActivityRhythm';
@@ -176,6 +177,124 @@ async function main() {
     check('[STRUCTURAL-adjacent] a request with more than MAX_WEEKLY_ACCEPTANCE_SESSIONS entries is rejected 400 before any session is attempted', tooMany.status === 400);
     const dupe = await weeklyAcceptRoute(fakeReq(A.tok, { goalActivityId: activity.id, sessions: [approved, approved] }));
     check('a request with a duplicate (localDate, start, end) entry is rejected 400 before any session is attempted', dupe.status === 400 && (await plansOf(A.U.id)).length === 1);
+
+    // ---------- F-1 (independent review of this same PR): a reconciliation
+    // claim must never resolve ALREADY_ACCEPTED against a DEAD (cancelled
+    // or moved-away) commitment -- each sub-scenario uses its own isolated
+    // GoalActivity (target 1 or 2, chosen so the expected capacity outcome
+    // at each step is unambiguous) so none of these interact with each
+    // other's weekly demand or with the row-count assertions above.
+    //
+    // The corrected behavior is a clean FAILED (COMMITMENT_NO_LONGER_LIVE),
+    // never a silent fresh retry: `clientRequestId` is deterministic from
+    // content alone, so falling through would reach
+    // `persistAcceptedConstructedDay` with the IDENTICAL key as the dead
+    // claim, and that function's own separate, global, content-only replay
+    // classification would independently rediscover the same dead row and
+    // reproduce ALREADY_ACCEPTED by a different route -- see
+    // `reconcileExistingAcceptance`'s own header comment in
+    // goalRhythmWeeklyAcceptance.ts for the full reasoning. ----------
+    {
+      // -- Scenario 2: accept -> cancel (the real, existing, unmodified
+      // cancelPlannedActivity) -> retry the IDENTICAL original request. --
+      const { goal: goalF1a } = await createGoalWithActivities({ userId: A.U.id, title: 'Meditate (F-1a fixture)', targetDate: null, activities: [] });
+      const activityF1a = await addGoalActivity(A.U.id, goalF1a.id, { title: 'Meditate', activityId: 'deep-work', rhythm: { kind: 'N_PER_WEEK', targetPerWeek: 1 } });
+      if (!activityF1a) throw new Error('fixture setup failed: addGoalActivity (activityF1a) returned null');
+      const slotA = { localDate: futureDate, start: `${futureDate}T09:00:00.000Z`, end: `${futureDate}T09:30:00.000Z` };
+      const acceptedA = await accept(A.tok, activityF1a.id, [slotA]);
+      check('F-1 scenario 2 precondition: the session to be cancelled was genuinely accepted first', acceptedA.status === 200 && acceptedA.body.sessions[0].outcome === 'ACCEPTED');
+      const cancelledPlanId = acceptedA.body.sessions[0].plannedActivityId;
+      await cancelPlannedActivity(A.U.id, cancelledPlanId);
+      const cancelledRow = (await sql(`SELECT status, "plannedStartAt", "plannedEndAt" FROM "PlannedActivity" WHERE id = $1`, [cancelledPlanId]))[0];
+      check('F-1 scenario 2 precondition: cancelPlannedActivity updates ONLY status -- plannedStartAt/plannedEndAt are left untouched (the exact mechanism the independent review found)', cancelledRow.status === 'CANCELLED' && new Date(cancelledRow.plannedStartAt).getTime() === new Date(slotA.start).getTime());
+      const retryA = await accept(A.tok, activityF1a.id, [slotA]);
+      check('F-1 scenario 2: a retry of an accept request whose commitment has since been CANCELLED never returns ALREADY_ACCEPTED against the dead record', retryA.body.sessions[0].outcome !== 'ALREADY_ACCEPTED');
+      check('F-1 scenario 2: it is reported as a clean, specific failure (COMMITMENT_NO_LONGER_LIVE) -- never silently recreated, and the real preview+accept route genuinely returns it', retryA.status === 200 && retryA.body.sessions[0].outcome === 'FAILED' && retryA.body.sessions[0].reason === 'COMMITMENT_NO_LONGER_LIVE');
+      const plansForF1a = await plansOf(A.U.id);
+      check('F-1 scenario 2/8/9: exactly one row exists for this activity afterward (the CANCELLED original) -- the retry created no second row, never a duplicate of or replacement for the dead one', plansForF1a.filter((p: any) => p.activityId === 'deep-work' && p.id === cancelledPlanId).length === 1);
+
+      // -- Scenario 3: accept -> move away (the real, existing,
+      // unmodified move flow) -> retry the ORIGINAL (now-vacated) time. --
+      const { goal: goalF1b } = await createGoalWithActivities({ userId: A.U.id, title: 'Meditate (F-1b fixture)', targetDate: null, activities: [] });
+      const activityF1b = await addGoalActivity(A.U.id, goalF1b.id, { title: 'Meditate', activityId: 'deep-work', rhythm: { kind: 'N_PER_WEEK', targetPerWeek: 2 } });
+      if (!activityF1b) throw new Error('fixture setup failed: addGoalActivity (activityF1b) returned null');
+      const slotB = { localDate: futureDate, start: `${futureDate}T10:00:00.000Z`, end: `${futureDate}T10:30:00.000Z` };
+      const acceptedB = await accept(A.tok, activityF1b.id, [slotB]);
+      check('F-1 scenario 3 precondition: the session to be moved was genuinely accepted first', acceptedB.status === 200 && acceptedB.body.sessions[0].outcome === 'ACCEPTED');
+      const movedAwayPlanId = acceptedB.body.sessions[0].plannedActivityId;
+      const moveResultB = await movePlannedActivity(A.U.id, movedAwayPlanId, { newStartAt: new Date(`${futureDate}T11:00:00.000Z`) });
+      const movedAwayRow = (await sql(`SELECT status, "plannedStartAt" FROM "PlannedActivity" WHERE id = $1`, [movedAwayPlanId]))[0];
+      check('F-1 scenario 3 precondition: the move flow updates the OLD row\'s status to MOVED and leaves its OLD plannedStartAt untouched (the exact mechanism the independent review found)', movedAwayRow.status === 'MOVED' && new Date(movedAwayRow.plannedStartAt).getTime() === new Date(slotB.start).getTime());
+      const retryOriginalB = await accept(A.tok, activityF1b.id, [slotB]);
+      check('F-1 scenario 3: a retry of the ORIGINAL (pre-move) time never returns ALREADY_ACCEPTED against the stale, moved-away record', retryOriginalB.body.sessions[0].outcome !== 'ALREADY_ACCEPTED');
+      check('F-1 scenario 3: it is reported as a clean, specific failure (COMMITMENT_NO_LONGER_LIVE) rather than referencing the stale moved-away record', retryOriginalB.status === 200 && retryOriginalB.body.sessions[0].outcome === 'FAILED' && retryOriginalB.body.sessions[0].reason === 'COMMITMENT_NO_LONGER_LIVE');
+      check('F-1 scenario 3/9: no additional row was created by the retry -- only the original (now MOVED) row and its real live successor (created by the move itself, not by the retry) exist', (await plansOf(A.U.id)).filter((p: any) => p.activityId === 'deep-work' && [movedAwayPlanId, moveResultB.to.id].includes(p.id)).length === 2);
+
+      // -- Scenario 4: accept -> move -> request the NEW (moved-to) time
+      // through weekly-accept -- must not misattribute/inherit the OLD
+      // commitment's identity. --
+      const { goal: goalF1c } = await createGoalWithActivities({ userId: A.U.id, title: 'Meditate (F-1c fixture)', targetDate: null, activities: [] });
+      const activityF1c = await addGoalActivity(A.U.id, goalF1c.id, { title: 'Meditate', activityId: 'deep-work', rhythm: { kind: 'N_PER_WEEK', targetPerWeek: 1 } });
+      if (!activityF1c) throw new Error('fixture setup failed: addGoalActivity (activityF1c) returned null');
+      const slotC = { localDate: futureDate, start: `${futureDate}T12:00:00.000Z`, end: `${futureDate}T12:30:00.000Z` };
+      const acceptedC = await accept(A.tok, activityF1c.id, [slotC]);
+      check('F-1 scenario 4 precondition: the session to be moved was genuinely accepted first', acceptedC.status === 200 && acceptedC.body.sessions[0].outcome === 'ACCEPTED');
+      const originalCPlanId = acceptedC.body.sessions[0].plannedActivityId;
+      const movedC = await movePlannedActivity(A.U.id, originalCPlanId, { newStartAt: new Date(`${futureDate}T13:00:00.000Z`) });
+      const retryNewTimeC = await accept(A.tok, activityF1c.id, [{ localDate: futureDate, start: `${futureDate}T13:00:00.000Z`, end: `${futureDate}T13:30:00.000Z` }]);
+      check('F-1 scenario 4: a request for the NEW (moved-to) time is never reported ALREADY_ACCEPTED against the OLD commitment\'s identity (there is no stored claim at all for this exact request, since it was never submitted through weekly-accept -- the move flow is a separate write path)', retryNewTimeC.body.sessions[0].outcome !== 'ALREADY_ACCEPTED' || retryNewTimeC.body.sessions[0].plannedActivityId !== originalCPlanId);
+      // The requested time is IDENTICAL to the real live successor's own
+      // time, so the real preview pipeline's own conflict detection
+      // (checking for an overlapping ACTIVE PlannedActivity) fires before
+      // ever reaching the write-time capacity check -- TIME_NO_LONGER_AVAILABLE,
+      // not NOT_ELIGIBLE (confirmed directly: both would independently
+      // reject this request; conflict is simply the FIRST gate reached).
+      check('F-1 scenario 4: it is independently, correctly rejected -- the exact requested time is already occupied by the real live successor plan, detected by the real conflict check before any write is attempted -- never silently treated as a duplicate-free success', retryNewTimeC.status === 200 && retryNewTimeC.body.sessions[0].outcome === 'FAILED' && retryNewTimeC.body.sessions[0].reason === 'TIME_NO_LONGER_AVAILABLE');
+      check('F-1 scenario 4: no second Plan was created for this activity -- only the original (now MOVED) row and its real live successor exist', (await plansOf(A.U.id)).filter((p: any) => p.activityId === 'deep-work' && [originalCPlanId, movedC.to.id].includes(p.id)).length === 2);
+
+      // -- Scenario 5: a partial-batch acceptance where ONE of the
+      // original successes is cancelled, then the WHOLE batch is retried
+      // -- truthful, independent per-session results, never a blanket
+      // outcome. The cancellation frees exactly one unit of weekly
+      // capacity, which the batch's OWN never-before-attempted third
+      // session (never s1 itself, which is now a clean failure) goes on
+      // to legitimately consume.
+      //
+      // Each session is on its OWN distinct calendar day (matching this
+      // file's own established convention elsewhere): a freshly-created
+      // GoalActivity defaults to dailyFrequencyKind=ONCE_PER_DAY (no write
+      // path yet exists to opt out of it), so putting more than one
+      // session for the SAME activity on the SAME day would hit that
+      // unrelated daily cap first and never exercise the weekly-capacity
+      // scenario this block actually targets. --
+      if (futureDatesThisWeek.length < 3) {
+        console.log('SKIP  F-1 scenario 5 -- fewer than 3 distinct future dates remain in the current local week on this run date (needs 3 to stay clear of the default once-per-day cap); covered deterministically every run by goalRhythmWeeklyAcceptance.test.ts\'s own pure-level F-1 checks regardless');
+      } else {
+        const { goal: goalF1d } = await createGoalWithActivities({ userId: A.U.id, title: 'Meditate (F-1d fixture)', targetDate: null, activities: [] });
+        const activityF1d = await addGoalActivity(A.U.id, goalF1d.id, { title: 'Meditate', activityId: 'deep-work', rhythm: { kind: 'N_PER_WEEK', targetPerWeek: 2 } });
+        if (!activityF1d) throw new Error('fixture setup failed: addGoalActivity (activityF1d) returned null');
+        // A distinct time-of-day (17:00-17:30Z), never the fixed
+        // 12:30-13:00Z `approvedSession` already occupies on
+        // `futureDatesThisWeek[0]`/[1] elsewhere in this file -- reusing
+        // that exact instant here would collide with an unrelated
+        // activity's own already-live Plan and fail TIME_NO_LONGER_AVAILABLE
+        // before ever reaching the weekly-capacity gate this scenario
+        // actually targets.
+        const s1 = { localDate: futureDatesThisWeek[0], start: `${futureDatesThisWeek[0]}T17:00:00.000Z`, end: `${futureDatesThisWeek[0]}T17:30:00.000Z` };
+        const s2 = { localDate: futureDatesThisWeek[1], start: `${futureDatesThisWeek[1]}T17:00:00.000Z`, end: `${futureDatesThisWeek[1]}T17:30:00.000Z` };
+        const s3 = { localDate: futureDatesThisWeek[2], start: `${futureDatesThisWeek[2]}T17:00:00.000Z`, end: `${futureDatesThisWeek[2]}T17:30:00.000Z` };
+        const firstBatch = await accept(A.tok, activityF1d.id, [s1, s2, s3]);
+        check('F-1 scenario 5 precondition: with target 2, exactly the first two sessions in the batch succeed and the third genuinely fails on capacity -- never all three', firstBatch.status === 200 && firstBatch.body.acceptedCount === 2 && firstBatch.body.failedCount === 1 && firstBatch.body.sessions[0].outcome === 'ACCEPTED' && firstBatch.body.sessions[1].outcome === 'ACCEPTED' && firstBatch.body.sessions[2].outcome === 'FAILED');
+        const s1PlanId = firstBatch.body.sessions[0].plannedActivityId;
+        const s2PlanId = firstBatch.body.sessions[1].plannedActivityId;
+        await cancelPlannedActivity(A.U.id, s1PlanId);
+        const retryBatch = await accept(A.tok, activityF1d.id, [s1, s2, s3]);
+        check('F-1 scenario 5: s1 (cancelled since the original batch) is reported as a clean, specific failure (COMMITMENT_NO_LONGER_LIVE) -- never ALREADY_ACCEPTED against the dead record, and never silently recreated', retryBatch.body.sessions[0].outcome === 'FAILED' && retryBatch.body.sessions[0].reason === 'COMMITMENT_NO_LONGER_LIVE');
+        check('F-1 scenario 5: s2 (still genuinely live, untouched) correctly and deterministically resolves ALREADY_ACCEPTED with its real original identity', retryBatch.body.sessions[1].outcome === 'ALREADY_ACCEPTED' && retryBatch.body.sessions[1].plannedActivityId === s2PlanId);
+        check('F-1 scenario 5: s3 (never accepted the first time) is now independently, genuinely accepted -- the capacity s1\'s own cancellation freed is correctly available to a DIFFERENT, never-before-attempted session, never reused to silently resurrect s1 itself', retryBatch.body.sessions[2].outcome === 'ACCEPTED' && retryBatch.body.sessions[2].plannedActivityId !== s1PlanId && retryBatch.body.sessions[2].plannedActivityId !== s2PlanId);
+        check('F-1 scenario 5/9: the retry created exactly ONE new row (for s3) -- s1 stays CANCELLED with no replacement, s2 is completely untouched', (await plansOf(A.U.id)).filter((p: any) => p.activityId === 'deep-work' && [s1PlanId, s2PlanId, retryBatch.body.sessions[2].plannedActivityId].includes(p.id)).length === 3);
+      }
+    }
   } finally {
     console.log(allPassed ? '\nALL GOAL RHYTHM WEEKLY ACCEPTANCE DB CHECKS PASSED' : '\nSOME GOAL RHYTHM WEEKLY ACCEPTANCE DB CHECKS FAILED');
   }

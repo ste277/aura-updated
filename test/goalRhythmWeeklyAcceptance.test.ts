@@ -163,7 +163,10 @@ function buildFakeEnv(targetPerWeek: number, initialFacts: readonly GoalActivity
     const configured = persistResultByClientRequestId.get(request.clientRequestId);
     if (configured) return configured;
     const item = request.proposedItems[0];
-    const plan = { id: `plan-${request.clientRequestId}`, plannedStartAt: item.start, plannedEndAt: item.end } as PlannedActivity;
+    // `status: 'UPCOMING'` -- a freshly-persisted Plan is always live;
+    // F-1's own tests mutate `plansById` directly afterward to simulate
+    // the real `cancelPlannedActivity`/move flows' effect on this field.
+    const plan = { id: `plan-${request.clientRequestId}`, plannedStartAt: item.start, plannedEndAt: item.end, status: 'UPCOMING' } as PlannedActivity;
     plansById.set(plan.id, plan);
     const key = deriveAcceptanceIdempotencyKey(request.clientRequestId, item.intentId);
     claimsByKey.set(key, { userId, clientRequestId: key, plannedActivityId: plan.id, createdAt: new Date() });
@@ -295,6 +298,72 @@ async function main() {
     const firstOk = first.sessions[0] as { plannedActivityId: string; start: string; end: string };
     const retryOk = retry.sessions[0] as { plannedActivityId: string; start: string; end: string };
     check('10. the replay response carries the SAME real plannedActivityId/start/end as the original acceptance', retryOk.plannedActivityId === firstOk.plannedActivityId && retryOk.start === firstOk.start && retryOk.end === firstOk.end);
+  }
+
+  // ---------- F-1 (independent review of this same PR): a reconciliation
+  // claim must never resolve ALREADY_ACCEPTED against a DEAD (cancelled
+  // or moved-away) commitment. The ORIGINAL version of this check only
+  // confirmed the claimed Plan's start/end still matched the approved
+  // selection; it never checked `status` -- so a retry after the real,
+  // unmodified `cancelPlannedActivity`/move flows (which update ONLY
+  // `status`, never the stored times) would misreport ALREADY_ACCEPTED
+  // against a dead row, even though zero live commitment exists.
+  //
+  // The corrected behavior is a clean FAILED (COMMITMENT_NO_LONGER_LIVE),
+  // never a silent fresh retry: `clientRequestId` is deterministic from
+  // content alone, so a fresh attempt would reach
+  // `persistAcceptedConstructedDay` with the IDENTICAL key as the dead
+  // claim, and that function's own separate, global replay
+  // classification (content-only, never status-aware) would
+  // independently rediscover the same dead row and reproduce
+  // ALREADY_ACCEPTED by a different route -- see
+  // `reconcileExistingAcceptance`'s own header comment. ----------
+  {
+    const env = buildFakeEnv(5, []);
+    const s = session('2026-11-05');
+    const first = await accept(env, [s]);
+    check('F-1 precondition: the first acceptance genuinely succeeds', first.sessions[0].outcome === 'ACCEPTED');
+    const firstPlanId = (first.sessions[0] as { plannedActivityId: string }).plannedActivityId;
+    // Simulate the real cancelPlannedActivity's own effect: status only, plannedStartAt/plannedEndAt untouched.
+    const cancelledPlan = env.plansById.get(firstPlanId)!;
+    env.plansById.set(firstPlanId, { ...cancelledPlan, status: 'CANCELLED' });
+    const persistCallsBeforeRetry = env.persistCalls.length;
+    const retryAfterCancel = await accept(env, [s]);
+    check('F-1: a retry whose claimed Plan is now CANCELLED never returns ALREADY_ACCEPTED against it', retryAfterCancel.sessions[0].outcome !== 'ALREADY_ACCEPTED');
+    check('F-1: it is reported as a clean, specific failure (COMMITMENT_NO_LONGER_LIVE) -- never silently recreated, and never leaking a raw IDEMPOTENCY_CONFLICT/internal code instead', retryAfterCancel.sessions[0].outcome === 'FAILED' && asFailed(retryAfterCancel.sessions[0]).reason === 'COMMITMENT_NO_LONGER_LIVE');
+    check('F-1: the dead-claim detection short-circuits before ever reaching preview or persist again -- it never attempts (and is never tempted to retry) the doomed-to-collide fresh call', env.persistCalls.length === persistCallsBeforeRetry);
+  }
+
+  {
+    const env = buildFakeEnv(5, []);
+    const s = session('2026-11-05');
+    const first = await accept(env, [s]);
+    const firstPlanId = (first.sessions[0] as { plannedActivityId: string }).plannedActivityId;
+    // Simulate the real move flow's own effect on the OLD row: status only, OLD times left untouched.
+    const movedPlan = env.plansById.get(firstPlanId)!;
+    env.plansById.set(firstPlanId, { ...movedPlan, status: 'MOVED' });
+    const persistCallsBeforeRetry = env.persistCalls.length;
+    const retryAfterMove = await accept(env, [s]);
+    check('F-1: a retry whose claimed Plan is now MOVED (the old, pre-move row, its times untouched) never returns ALREADY_ACCEPTED against it', retryAfterMove.sessions[0].outcome !== 'ALREADY_ACCEPTED');
+    check('F-1: it is reported as a clean, specific failure (COMMITMENT_NO_LONGER_LIVE) rather than referencing the stale moved-away record', retryAfterMove.sessions[0].outcome === 'FAILED' && asFailed(retryAfterMove.sessions[0]).reason === 'COMMITMENT_NO_LONGER_LIVE');
+    check('F-1: no additional preview/persist call was ever attempted for the moved-away retry', env.persistCalls.length === persistCallsBeforeRetry);
+  }
+
+  {
+    // LOGGED (a genuinely completed session) still counts as LIVE for
+    // reconciliation purposes -- the SAME `LOGGED -> COMPLETED` grouping
+    // goalActivityRhythm.ts's own deriveGoalActivityRhythmContribution
+    // already established for this exact status set; a retry correctly
+    // recognizes an already-done session rather than attempting to
+    // re-place (and thus duplicate) it.
+    const env = buildFakeEnv(5, []);
+    const s = session('2026-11-05');
+    const first = await accept(env, [s]);
+    const firstPlanId = (first.sessions[0] as { plannedActivityId: string }).plannedActivityId;
+    const loggedPlan = env.plansById.get(firstPlanId)!;
+    env.plansById.set(firstPlanId, { ...loggedPlan, status: 'LOGGED' });
+    const retryAfterLog = await accept(env, [s]);
+    check('F-1: a retry whose claimed Plan is now LOGGED (genuinely completed) still correctly resolves ALREADY_ACCEPTED -- LOGGED counts as a live, real outcome, not a dead record', retryAfterLog.sessions[0].outcome === 'ALREADY_ACCEPTED' && (retryAfterLog.sessions[0] as { plannedActivityId: string }).plannedActivityId === firstPlanId);
   }
 
   // ---------- 11. a DIFFERENT approved time for the same (activity, date) is NEVER misclassified as a replay ----------
