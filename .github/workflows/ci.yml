@@ -181,6 +181,12 @@ jobs:
       # all already-required by other steps in this same job).
       - name: Run Goal Rhythm weekly acceptance test
         run: npx ts-node test/goalRhythmWeeklyAcceptance.test.ts
+      # HGR3-C2 -- same apps/web/node_modules requirement (imports
+      # goalRhythmWeeklyProposal.ts/goalRhythmWeeklyAcceptance.ts's own
+      # exported types plus the existing, shared muhurtaReasonFormat.ts
+      # formatter -- no new dependency).
+      - name: Run Weekly plan review client test
+        run: npx ts-node test/weeklyPlanReviewClient.test.ts
       # Goals V2 Candidate A2 -- goalPlanningSourceAdapter.ts imports
       # dayConstructorPreviewRequest.ts, which transitively imports
       # apps/web/lib/db.ts -- same apps/web/node_modules requirement.
@@ -765,6 +771,12 @@ jobs:
       # rows through the real, unmodified preview+accept pipeline).
       - name: Run Goal Rhythm weekly acceptance DB test
         run: npx ts-node test/goalRhythmWeeklyAcceptanceDb.test.ts
+      # HGR3-C2 -- proves the CLIENT-SIDE weeklyPlanReviewClient.ts pure
+      # functions genuinely compose with the real weekly-proposal/
+      # weekly-accept route handlers end to end, including the full
+      # HGR3-C-R1 cancel/rebook journey, against a real database.
+      - name: Run Weekly plan review client DB test
+        run: npx ts-node test/weeklyPlanReviewClientDb.test.ts
       - name: Run Automatic Goal demand bootstrap DB test
         run: npx ts-node test/automaticGoalDemandBootstrapDb.test.ts
       - name: Run Goal demand provenance authorization DB test

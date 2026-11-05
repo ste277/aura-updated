@@ -2,8 +2,10 @@
 
 import React, { useState } from 'react';
 import { colors, spacing, typography } from './theme';
-import { SectionHeader, SurfaceCard, TextButton, PrimaryButton } from './ui';
+import { SectionHeader, SurfaceCard, TextButton, PrimaryButton, SecondaryButton } from './ui';
 import { computeGoalRhythmHomeView, type HomeGoalRhythmSuggestion } from '../lib/homeGoalRhythmSuggestions';
+import { shouldOfferWeeklyReview } from '../lib/weeklyPlanReviewClient';
+import { WeeklyPlanReviewModal } from './WeeklyPlanReviewModal';
 
 /**
  * HGR1 -- Home Goal-Rhythm Integration.
@@ -50,20 +52,35 @@ import { computeGoalRhythmHomeView, type HomeGoalRhythmSuggestion } from '../lib
  * targets an already-missed, already-scheduled plan) -- deliberately
  * deferred, not built here; see this PR's own delivery report for the
  * exact product decision needed.
+ *
+ * HGR3-C2 -- for a GoalActivity with MORE than one remaining session this
+ * week (`shouldOfferWeeklyReview`, weeklyPlanReviewClient.ts), the single
+ * "Plan it" action above is replaced by a primary "Plan remaining N" (opens
+ * `WeeklyPlanReviewModal`, the new weekly review/accept flow) and a
+ * secondary "Just today" that preserves the EXACT pre-existing
+ * `navigateToPlanDay` behavior and identity, byte-for-byte unchanged. With
+ * exactly ONE remaining session, this card deliberately keeps the
+ * single-action "Plan it" exactly as it already was -- a one-row weekly
+ * review would be barely distinguishable from today's single-day flow and
+ * would only add a tap, not remove one.
  */
 export function GoalRhythmSuggestionsCard({
   suggestions,
   dismissedIds,
   onDismiss,
+  timezone,
 }: {
   suggestions: readonly HomeGoalRhythmSuggestion[];
   dismissedIds: ReadonlySet<string>;
   onDismiss: (goalActivityId: string) => void;
+  timezone: string;
 }) {
   const [expanded, setExpanded] = useState(false);
+  const [reviewingGoalActivityId, setReviewingGoalActivityId] = useState<string | null>(null);
   const { visible, overflow } = computeGoalRhythmHomeView(suggestions, dismissedIds);
   if (visible.length === 0) return null;
   const shown = expanded ? [...visible, ...overflow] : visible;
+  const reviewingSuggestion = shown.find((s) => s.goalActivityId === reviewingGoalActivityId) ?? suggestions.find((s) => s.goalActivityId === reviewingGoalActivityId);
 
   return (
     <div style={{ marginBottom: spacing.lg }}>
@@ -77,19 +94,28 @@ export function GoalRhythmSuggestionsCard({
             const params = new URLSearchParams({ fromGoal: suggestion.planHandoff.fromGoal, activities: suggestion.planHandoff.activities });
             window.location.href = `/plan-day?${params.toString()}`;
           };
+          const offerWeeklyReview = shouldOfferWeeklyReview(suggestion.remainingThisWeek);
           return (
             <SurfaceCard key={suggestion.goalActivityId} padding={spacing.md}>
-              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: spacing.sm }}>
+              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: spacing.sm, flexWrap: 'wrap' }}>
                 <div>
                   <div style={{ ...typography.bodyStrong, color: colors.textPrimary }}>{suggestion.title}</div>
                   <div style={{ ...typography.caption, color: colors.textSecondary, marginTop: 2 }}>{suggestion.progressLabel}</div>
                 </div>
-                <div style={{ display: 'flex', alignItems: 'center', gap: spacing.sm, flexShrink: 0 }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: spacing.sm, flexShrink: 0, flexWrap: 'wrap' }}>
                   <TextButton onClick={() => onDismiss(suggestion.goalActivityId)} style={{ minHeight: 44, padding: '0 8px' }}>
                     Not now
                   </TextButton>
-                  <PrimaryButton onClick={navigateToPlanDay} style={{ minHeight: 44, padding: '0 14px' }}>
-                    Plan it
+                  {offerWeeklyReview && (
+                    <SecondaryButton onClick={navigateToPlanDay} style={{ minHeight: 44 }}>
+                      Just today
+                    </SecondaryButton>
+                  )}
+                  <PrimaryButton
+                    onClick={offerWeeklyReview ? () => setReviewingGoalActivityId(suggestion.goalActivityId) : navigateToPlanDay}
+                    style={{ minHeight: 44, padding: '0 14px' }}
+                  >
+                    {offerWeeklyReview ? `Plan remaining ${suggestion.remainingThisWeek}` : 'Plan it'}
                   </PrimaryButton>
                 </div>
               </div>
@@ -105,6 +131,14 @@ export function GoalRhythmSuggestionsCard({
         >
           {expanded ? 'Show less' : `View all (+${overflow.length} more)`}
         </TextButton>
+      )}
+      {reviewingSuggestion && (
+        <WeeklyPlanReviewModal
+          goalActivityId={reviewingSuggestion.goalActivityId}
+          activityTitleFallback={reviewingSuggestion.title}
+          timezone={timezone}
+          onClose={() => setReviewingGoalActivityId(null)}
+        />
       )}
     </div>
   );
