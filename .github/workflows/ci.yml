@@ -168,6 +168,12 @@ jobs:
       # other step above uses).
       - name: Run Home Ask Aura handoff component lifecycle test
         run: npx ts-node --project tsconfig.jsdom-tests.json test/homeIntent1AskAuraHandoffComponent.test.ts
+      # HGR3-A -- same apps/web/node_modules requirement (imports
+      # goalRhythmWeeklyProposal.ts, which itself only imports
+      # goalDemandCandidates.ts/goalActivityRhythm.ts/dayBuilderOrchestrator.ts/
+      # timezone.ts, no new dependency).
+      - name: Run Goal Rhythm weekly proposal test
+        run: npx ts-node test/goalRhythmWeeklyProposal.test.ts
       # Goals V2 Candidate A2 -- goalPlanningSourceAdapter.ts imports
       # dayConstructorPreviewRequest.ts, which transitively imports
       # apps/web/lib/db.ts -- same apps/web/node_modules requirement.
