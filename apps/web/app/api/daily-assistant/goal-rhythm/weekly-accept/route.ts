@@ -1,13 +1,15 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getSessionFromRequest } from '../../../../../lib/session';
-import { getUserById } from '../../../../../lib/db';
+import { getUserById, listUserAvailabilityPeriods } from '../../../../../lib/db';
 import { parseJsonObject } from '../../../../../lib/request';
 import { resolveRequestNow } from '../../../../../lib/testTimeOverride';
 import { getDatePartsInTimezone } from '../../../../../lib/timezone';
 import { createRealDayConstructorOrchestratorDeps } from '../../../../../lib/dayConstructorOrchestrator';
 import { handleDayConstructorPreviewRequest } from '../../../../../lib/dayConstructorPreviewRequest';
 import { persistAcceptedConstructedDay } from '../../../../../lib/dayConstructorAcceptancePersistence';
+import { getPlanCreationClaim, getPlannedActivityForOwner } from '../../../../../lib/db';
 import { createRealGoalDemandCandidatesDeps } from '../../../../../lib/goalDemandCandidates';
+import type { AvailabilityConfiguration } from '../../../../../lib/availabilityContext';
 import { isValidCalendarDateString } from '../../../../../../../packages/panchang/src/localDate';
 import {
   acceptWeeklyRhythmSessions,
@@ -17,22 +19,33 @@ import {
 } from '../../../../../lib/goalRhythmWeeklyAcceptance';
 
 const MAX_GOAL_ACTIVITY_ID_LENGTH = 100;
+const MAX_ISO_INSTANT_LENGTH = 40;
 
 /**
- * HGR3-B -- POST /api/daily-assistant/goal-rhythm/weekly-accept.
+ * HGR3-B / HGR3-BH -- POST /api/daily-assistant/goal-rhythm/weekly-accept.
  *
  * The explicit "Accept all" action: the ONLY write boundary this feature
  * introduces. Nested under the existing goal-rhythm route family (matches
  * HGR1/HGR3-A's own convention). Pure wiring -- every real decision
- * (fresh eligibility revalidation, EXPLICIT_RANGE construction, the
- * verify -> authorize -> persist acceptance sequence, partial-success
- * reporting) lives in goalRhythmWeeklyAcceptance.ts, reused verbatim.
+ * (input validation, retry reconciliation, Availability Context
+ * enforcement, fresh eligibility revalidation, EXPLICIT_RANGE
+ * construction pinned to the approved exact time, the verify -> authorize
+ * -> persist acceptance sequence, partial-success reporting) lives in
+ * goalRhythmWeeklyAcceptance.ts, reused verbatim.
  *
- * `goalActivityId`/`localDates` identify EXISTING GoalActivity sessions
- * the user is confirming; nothing about eligibility, remaining count,
- * ranking, or a specific clock time is ever read from the request body --
- * all of it is recomputed/re-derived server-side, scoped to
- * `session.userId`, exactly like HGR3-A's own route.
+ * HGR3-BH -- `sessions` now carries each session's own approved `start`/
+ * `end` (the exact instant HGR3-A proposed and the user reviewed), not
+ * merely a bare date: see goalRhythmWeeklyAcceptance.ts's own "EXACT-TIME
+ * PRESERVATION" header section for why a specific time is committed
+ * exactly or the session fails closed, never silently re-placed.
+ * `goalActivityId`/`sessions` identify EXISTING GoalActivity sessions the
+ * user is confirming; nothing about eligibility, remaining count, or
+ * ranking is ever read from the request body -- all of it is
+ * recomputed/re-derived server-side, scoped to `session.userId`, exactly
+ * like HGR3-A's own route. The approved time itself IS read from the
+ * request (it must be -- that is the whole point of this hardening), but
+ * is never trusted as already schedulable: it is re-validated, re-signed
+ * and re-verified through the real pipeline before anything is persisted.
  *
  * No write occurs anywhere in this codebase merely from generating or
  * displaying a weekly proposal (goalRhythmWeeklyProposal.ts stays
@@ -55,24 +68,29 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: 'A valid goalActivityId is required.' }, { status: 400 });
   }
 
-  if (!Array.isArray(body.localDates) || body.localDates.length === 0 || body.localDates.length > MAX_WEEKLY_ACCEPTANCE_SESSIONS) {
-    return NextResponse.json({ error: `localDates must be a non-empty array of at most ${MAX_WEEKLY_ACCEPTANCE_SESSIONS} YYYY-MM-DD dates.` }, { status: 400 });
+  if (!Array.isArray(body.sessions) || body.sessions.length === 0 || body.sessions.length > MAX_WEEKLY_ACCEPTANCE_SESSIONS) {
+    return NextResponse.json({ error: `sessions must be a non-empty array of at most ${MAX_WEEKLY_ACCEPTANCE_SESSIONS} entries.` }, { status: 400 });
   }
-  const localDates: string[] = [];
-  for (const raw of body.localDates) {
-    if (typeof raw !== 'string' || !isValidCalendarDateString(raw)) {
-      return NextResponse.json({ error: 'Every entry in localDates must be a valid YYYY-MM-DD calendar date.' }, { status: 400 });
+  const selections: WeeklyAcceptanceSelection[] = [];
+  for (const raw of body.sessions) {
+    if (!raw || typeof raw !== 'object') {
+      return NextResponse.json({ error: 'Every entry in sessions must be an object with localDate, start and end.' }, { status: 400 });
     }
-    localDates.push(raw);
+    const { localDate, start, end } = raw as Record<string, unknown>;
+    if (typeof localDate !== 'string' || !isValidCalendarDateString(localDate)) {
+      return NextResponse.json({ error: 'Every session.localDate must be a valid YYYY-MM-DD calendar date.' }, { status: 400 });
+    }
+    if (typeof start !== 'string' || !start || start.length > MAX_ISO_INSTANT_LENGTH || typeof end !== 'string' || !end || end.length > MAX_ISO_INSTANT_LENGTH) {
+      return NextResponse.json({ error: 'Every session.start/end must be a real ISO 8601 date-time string.' }, { status: 400 });
+    }
+    selections.push({ goalActivityId, localDate, start, end });
   }
-  if (new Set(localDates).size !== localDates.length) {
-    return NextResponse.json({ error: 'localDates must not contain duplicate dates.' }, { status: 400 });
+  if (new Set(selections.map((s) => `${s.localDate}|${s.start}|${s.end}`)).size !== selections.length) {
+    return NextResponse.json({ error: 'sessions must not contain duplicate (localDate, start, end) entries.' }, { status: 400 });
   }
 
   const now = resolveRequestNow(req);
   const planningLocalDate = getDatePartsInTimezone(user.timezone, now).dateStr;
-
-  const selections: WeeklyAcceptanceSelection[] = localDates.map((localDate) => ({ goalActivityId, localDate }));
 
   const deps: WeeklyAcceptanceDeps = {
     ...createRealGoalDemandCandidatesDeps(),
@@ -80,6 +98,15 @@ export async function POST(req: NextRequest) {
     now: () => now,
     runPreview: handleDayConstructorPreviewRequest,
     persist: persistAcceptedConstructedDay,
+    getPlanCreationClaim,
+    getPlannedActivityForOwner,
+    loadAvailabilityConfiguration: async () => {
+      const periods = await listUserAvailabilityPeriods(user.id);
+      return {
+        configured: user.availabilityConfigured === true,
+        periods: periods.map((row) => ({ weekday: row.weekday as AvailabilityConfiguration['periods'][number]['weekday'], startTime: row.startTime, endTime: row.endTime })),
+      };
+    },
     createOrchestratorDeps: createRealDayConstructorOrchestratorDeps,
     // Deliberately no shadowPolicy, loadSchedulingContext or
     // loadDecisionFactsFromContext: all three are optional, presentation-
