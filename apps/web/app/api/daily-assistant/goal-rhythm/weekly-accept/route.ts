@@ -6,8 +6,6 @@ import { resolveRequestNow } from '../../../../../lib/testTimeOverride';
 import { getDatePartsInTimezone } from '../../../../../lib/timezone';
 import { createRealDayConstructorOrchestratorDeps } from '../../../../../lib/dayConstructorOrchestrator';
 import { handleDayConstructorPreviewRequest } from '../../../../../lib/dayConstructorPreviewRequest';
-import { loadGoalDecisionFacts, createGoalDemandDepsFromSchedulingContext } from '../../../../../lib/goalDecisionFactsProvider';
-import { loadDecisionSchedulingContext } from '../../../../../lib/decisionSchedulingContextLoader';
 import { persistAcceptedConstructedDay } from '../../../../../lib/dayConstructorAcceptancePersistence';
 import { createRealGoalDemandCandidatesDeps } from '../../../../../lib/goalDemandCandidates';
 import { isValidCalendarDateString } from '../../../../../../../packages/panchang/src/localDate';
@@ -83,17 +81,14 @@ export async function POST(req: NextRequest) {
     runPreview: handleDayConstructorPreviewRequest,
     persist: persistAcceptedConstructedDay,
     createOrchestratorDeps: createRealDayConstructorOrchestratorDeps,
-    // O5 P2d -- the SAME coherent, one-snapshot scheduling-context wiring
-    // the real Day Constructor preview route uses (dayConstructorOrchestrator.ts's
-    // own established production convention) -- never a second, independent
-    // Goal-decision-facts provider.
-    loadSchedulingContext: (u, request) => loadDecisionSchedulingContext({ userId: u.id, planningDate: request.targetDate, timezone: request.timezone }),
-    loadDecisionFactsFromContext: (u, request, context) => loadGoalDecisionFacts(u, request, createGoalDemandDepsFromSchedulingContext(context)),
-    // Deliberately no shadowPolicy: an optional, server-controlled
-    // diagnostic concern the real preview route also treats as
-    // omittable-by-default -- see goalRhythmWeeklyAcceptance.ts's own
+    // Deliberately no shadowPolicy, loadSchedulingContext or
+    // loadDecisionFactsFromContext: all three are optional, presentation-
+    // only enrichments the real multi-intent preview route adds for its
+    // own review screen, never something placement/capacity/duration
+    // correctness depends on -- see goalRhythmWeeklyAcceptance.ts's own
     // comment on WeeklyAcceptanceDeps for why this adapter has no real
-    // use for it.
+    // use for any of them, and why extending either guard's allowlist
+    // would be the wrong fix.
   };
 
   const summary = await acceptWeeklyRhythmSessions(deps, session.userId, planningLocalDate, selections);
