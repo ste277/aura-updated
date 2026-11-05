@@ -1,5 +1,7 @@
 /**
- * HGR3-B / HGR3-BH -- Secure Weekly Rhythm Proposal Acceptance, hardened.
+ * HGR3-B / HGR3-BH / HGR3-C1 -- Secure Weekly Rhythm Proposal Acceptance,
+ * hardened, with a fresh client-generated acceptance identity per
+ * explicit confirmation.
  *
  * Live-database proof of the CRITICAL gates the pure orchestration suite
  * (goalRhythmWeeklyAcceptance.test.ts) cannot exercise: real
@@ -89,8 +91,18 @@ async function main() {
   const plansOf = async (userId: string) => sql(`SELECT id, title, "plannedStartAt", "plannedEndAt", "activityId" FROM "PlannedActivity" WHERE "userId" = $1 ORDER BY "plannedStartAt"`, [userId]);
   const occurrencesOf = async (goalActivityId: string) => sql(`SELECT id, "plannedActivityId" FROM "GoalActivityOccurrence" WHERE "goalActivityId" = $1`, [goalActivityId]);
 
-  const accept = async (tok: string, goalActivityId: string, sessions: { localDate: string; start: string; end: string }[]) => {
-    const res = await weeklyAcceptRoute(fakeReq(tok, { goalActivityId, sessions }));
+  // HGR3-C1 -- every real caller now mints ONE client-generated
+  // `acceptanceId` per explicit "Accept all" confirmation; `'db-test-
+  // default'` is the shared identity every PRE-EXISTING (HGR3-B/BH)
+  // scenario in this file implicitly used before this dimension existed
+  // -- those scenarios are about the acceptance PIPELINE, not the
+  // identity scheme itself, so they keep one constant id throughout
+  // (matching real retry/idempotency usage: the SAME confirmation,
+  // resubmitted). The dedicated HGR3-C1 section below mints its own
+  // explicit, distinct ids by name.
+  const DEFAULT_ACCEPTANCE_ID = 'db-test-default';
+  const accept = async (tok: string, goalActivityId: string, sessions: { localDate: string; start: string; end: string }[], acceptanceId: string = DEFAULT_ACCEPTANCE_ID) => {
+    const res = await weeklyAcceptRoute(fakeReq(tok, { goalActivityId, acceptanceId, sessions }));
     return { status: res.status, body: await res.json() };
   };
 
@@ -128,7 +140,11 @@ async function main() {
       if (!activity2) throw new Error('fixture setup failed: addGoalActivity (activity2) returned null');
       // Request the EXACT same instant as the first activity's own
       // already-committed Plan -- a real, genuine scheduling conflict.
-      const conflicting = await accept(A.tok, activity2.id, [approved]);
+      // A DISTINCT acceptanceId (this is a different GoalActivity, a
+      // genuinely separate confirmation -- reusing DEFAULT_ACCEPTANCE_ID
+      // here would trip HGR3-C1's own cross-activity payload-binding
+      // check before ever reaching the real conflict this test targets).
+      const conflicting = await accept(A.tok, activity2.id, [approved], 'acc-cross-activity-conflict');
       check('HGR3-BH P1-1: a FIXED instant that collides with an existing real commitment is rejected (TIME_NO_LONGER_AVAILABLE), never silently placed at a different, available time instead', conflicting.status === 200 && conflicting.body.failedCount === 1 && conflicting.body.sessions[0].reason === 'TIME_NO_LONGER_AVAILABLE');
       check('HGR3-BH P1-1: the rejected conflicting request created no Plan at all for the second activity', (await plansOf(A.U.id)).length === 1);
     }
@@ -140,16 +156,23 @@ async function main() {
     check('HGR3-BH P1-2: the replay response carries the SAME real committed start/end', retry.body.sessions[0].start === first.body.sessions[0].start && retry.body.sessions[0].end === first.body.sessions[0].end);
     check('9/10. the retry created NO duplicate PlannedActivity row', (await plansOf(A.U.id)).length === 1);
 
-    // ---------- a second, genuinely DIFFERENT approved time for the SAME activity/date is never misclassified as a replay ----------
+    // ---------- a second, genuinely DIFFERENT approved time for the SAME activity/date, approved as its OWN genuinely new confirmation (HGR3-C1: its own distinct acceptanceId), is never misclassified as a replay ----------
     {
       const differentTime = { localDate: futureDate, start: `${futureDate}T14:30:00.000Z`, end: `${futureDate}T15:00:00.000Z` }; // 20:00-20:30 IST, a different instant than the one already committed
-      const differentAttempt = await accept(A.tok, activity.id, [differentTime]);
+      // A fresh, distinct acceptanceId: this represents a genuinely NEW
+      // explicit confirmation for a different time, not a resubmission
+      // of the original one -- reusing DEFAULT_ACCEPTANCE_ID here would
+      // now be correctly rejected ACCEPTANCE_IDENTITY_CONFLICT by
+      // HGR3-C1's own payload-binding check (covered separately below);
+      // this test is specifically about the REAL downstream capacity
+      // check, which a fresh id reaches unobstructed.
+      const differentAttempt = await accept(A.tok, activity.id, [differentTime], 'acc-different-time-fresh-confirmation');
       // This is expected to fail -- the weekly target (1) is already
       // fully met by the first real acceptance -- but it must be
       // attempted as its OWN, genuinely new session (reaching the real
       // capacity check), never silently short-circuited as if it were a
       // replay of the original, differently-timed acceptance.
-      check('a DIFFERENT approved time for the same activity/date is never misclassified as a replay of the original -- it is independently revalidated and correctly rejected by the real, authoritative capacity check (NOT_ELIGIBLE), not silently treated as ALREADY_ACCEPTED for the WRONG time', differentAttempt.status === 200 && differentAttempt.body.sessions[0].outcome === 'FAILED' && differentAttempt.body.sessions[0].reason === 'NOT_ELIGIBLE');
+      check('a DIFFERENT approved time for the same activity/date, under its own fresh acceptanceId, is never misclassified as a replay of the original -- it is independently revalidated and correctly rejected by the real, authoritative capacity check (NOT_ELIGIBLE), not silently treated as ALREADY_ACCEPTED for the WRONG time', differentAttempt.status === 200 && differentAttempt.body.sessions[0].outcome === 'FAILED' && differentAttempt.body.sessions[0].reason === 'NOT_ELIGIBLE');
       check('the mis-time attempt created no second Plan', (await plansOf(A.U.id)).length === 1);
     }
 
@@ -169,14 +192,25 @@ async function main() {
     check('5/18. the cross-user attempt created no Plan for either user', (await plansOf(B.U.id)).length === 0);
 
     // ---------- malformed request ----------
-    const badDate = await weeklyAcceptRoute(fakeReq(A.tok, { goalActivityId: activity.id, sessions: [{ localDate: 'not-a-date', start: approved.start, end: approved.end }] }));
+    // Every body below carries a well-formed acceptanceId so the 400
+    // observed is genuinely about the field each check actually targets
+    // -- never a false-positive from HGR3-C1's own now-required field.
+    const badDate = await weeklyAcceptRoute(fakeReq(A.tok, { goalActivityId: activity.id, acceptanceId: 'acc-malformed', sessions: [{ localDate: 'not-a-date', start: approved.start, end: approved.end }] }));
     check('13. a malformed localDate is rejected 400, never reaches eligibility/preview/persist', badDate.status === 400);
-    const badTime = await weeklyAcceptRoute(fakeReq(A.tok, { goalActivityId: activity.id, sessions: [{ localDate: futureDate, start: 123, end: approved.end }] }));
+    const badTime = await weeklyAcceptRoute(fakeReq(A.tok, { goalActivityId: activity.id, acceptanceId: 'acc-malformed', sessions: [{ localDate: futureDate, start: 123, end: approved.end }] }));
     check('HGR3-BH: a non-string start is rejected 400', badTime.status === 400);
-    const tooMany = await weeklyAcceptRoute(fakeReq(A.tok, { goalActivityId: activity.id, sessions: [approved, approvedSession(futureDate), approvedSession(futureDate), approvedSession(futureDate)] }));
+    const tooMany = await weeklyAcceptRoute(fakeReq(A.tok, { goalActivityId: activity.id, acceptanceId: 'acc-malformed', sessions: [approved, approvedSession(futureDate), approvedSession(futureDate), approvedSession(futureDate)] }));
     check('[STRUCTURAL-adjacent] a request with more than MAX_WEEKLY_ACCEPTANCE_SESSIONS entries is rejected 400 before any session is attempted', tooMany.status === 400);
-    const dupe = await weeklyAcceptRoute(fakeReq(A.tok, { goalActivityId: activity.id, sessions: [approved, approved] }));
+    const dupe = await weeklyAcceptRoute(fakeReq(A.tok, { goalActivityId: activity.id, acceptanceId: 'acc-malformed', sessions: [approved, approved] }));
     check('a request with a duplicate (localDate, start, end) entry is rejected 400 before any session is attempted', dupe.status === 400 && (await plansOf(A.U.id)).length === 1);
+
+    // ---------- HGR3-C1: a missing/empty/oversized acceptanceId is itself rejected 400, before any session is attempted ----------
+    const missingAcceptanceId = await weeklyAcceptRoute(fakeReq(A.tok, { goalActivityId: activity.id, sessions: [approvedSession(futureDate)] }));
+    check('HGR3-C1: a request with NO acceptanceId at all is rejected 400 -- it is a required field, not an optional fallback to the old content-only identity', missingAcceptanceId.status === 400);
+    const emptyAcceptanceId = await weeklyAcceptRoute(fakeReq(A.tok, { goalActivityId: activity.id, acceptanceId: '   ', sessions: [approvedSession(futureDate)] }));
+    check('HGR3-C1: a whitespace-only acceptanceId is rejected 400', emptyAcceptanceId.status === 400);
+    const oversizedAcceptanceId = await weeklyAcceptRoute(fakeReq(A.tok, { goalActivityId: activity.id, acceptanceId: 'x'.repeat(500), sessions: [approvedSession(futureDate)] }));
+    check('HGR3-C1: an oversized acceptanceId (over the bounded length) is rejected 400', oversizedAcceptanceId.status === 400);
 
     // ---------- F-1 (independent review of this same PR): a reconciliation
     // claim must never resolve ALREADY_ACCEPTED against a DEAD (cancelled
@@ -201,13 +235,18 @@ async function main() {
       const activityF1a = await addGoalActivity(A.U.id, goalF1a.id, { title: 'Meditate', activityId: 'deep-work', rhythm: { kind: 'N_PER_WEEK', targetPerWeek: 1 } });
       if (!activityF1a) throw new Error('fixture setup failed: addGoalActivity (activityF1a) returned null');
       const slotA = { localDate: futureDate, start: `${futureDate}T09:00:00.000Z`, end: `${futureDate}T09:30:00.000Z` };
-      const acceptedA = await accept(A.tok, activityF1a.id, [slotA]);
+      const acceptedA = await accept(A.tok, activityF1a.id, [slotA], 'acc-f1a');
       check('F-1 scenario 2 precondition: the session to be cancelled was genuinely accepted first', acceptedA.status === 200 && acceptedA.body.sessions[0].outcome === 'ACCEPTED');
       const cancelledPlanId = acceptedA.body.sessions[0].plannedActivityId;
       await cancelPlannedActivity(A.U.id, cancelledPlanId);
       const cancelledRow = (await sql(`SELECT status, "plannedStartAt", "plannedEndAt" FROM "PlannedActivity" WHERE id = $1`, [cancelledPlanId]))[0];
       check('F-1 scenario 2 precondition: cancelPlannedActivity updates ONLY status -- plannedStartAt/plannedEndAt are left untouched (the exact mechanism the independent review found)', cancelledRow.status === 'CANCELLED' && new Date(cancelledRow.plannedStartAt).getTime() === new Date(slotA.start).getTime());
-      const retryA = await accept(A.tok, activityF1a.id, [slotA]);
+      // Retrying the SAME acceptanceId ('acc-f1a') -- a genuine retry of
+      // the exact original request, never a fresh confirmation -- is
+      // the scenario this check targets: HGR3-BH's own F-1 protection
+      // must still fire even with HGR3-C1's identity scheme layered on
+      // top.
+      const retryA = await accept(A.tok, activityF1a.id, [slotA], 'acc-f1a');
       check('F-1 scenario 2: a retry of an accept request whose commitment has since been CANCELLED never returns ALREADY_ACCEPTED against the dead record', retryA.body.sessions[0].outcome !== 'ALREADY_ACCEPTED');
       check('F-1 scenario 2: it is reported as a clean, specific failure (COMMITMENT_NO_LONGER_LIVE) -- never silently recreated, and the real preview+accept route genuinely returns it', retryA.status === 200 && retryA.body.sessions[0].outcome === 'FAILED' && retryA.body.sessions[0].reason === 'COMMITMENT_NO_LONGER_LIVE');
       const plansForF1a = await plansOf(A.U.id);
@@ -219,13 +258,14 @@ async function main() {
       const activityF1b = await addGoalActivity(A.U.id, goalF1b.id, { title: 'Meditate', activityId: 'deep-work', rhythm: { kind: 'N_PER_WEEK', targetPerWeek: 2 } });
       if (!activityF1b) throw new Error('fixture setup failed: addGoalActivity (activityF1b) returned null');
       const slotB = { localDate: futureDate, start: `${futureDate}T10:00:00.000Z`, end: `${futureDate}T10:30:00.000Z` };
-      const acceptedB = await accept(A.tok, activityF1b.id, [slotB]);
+      const acceptedB = await accept(A.tok, activityF1b.id, [slotB], 'acc-f1b');
       check('F-1 scenario 3 precondition: the session to be moved was genuinely accepted first', acceptedB.status === 200 && acceptedB.body.sessions[0].outcome === 'ACCEPTED');
       const movedAwayPlanId = acceptedB.body.sessions[0].plannedActivityId;
       const moveResultB = await movePlannedActivity(A.U.id, movedAwayPlanId, { newStartAt: new Date(`${futureDate}T11:00:00.000Z`) });
       const movedAwayRow = (await sql(`SELECT status, "plannedStartAt" FROM "PlannedActivity" WHERE id = $1`, [movedAwayPlanId]))[0];
       check('F-1 scenario 3 precondition: the move flow updates the OLD row\'s status to MOVED and leaves its OLD plannedStartAt untouched (the exact mechanism the independent review found)', movedAwayRow.status === 'MOVED' && new Date(movedAwayRow.plannedStartAt).getTime() === new Date(slotB.start).getTime());
-      const retryOriginalB = await accept(A.tok, activityF1b.id, [slotB]);
+      // SAME acceptanceId ('acc-f1b') -- a genuine retry of the original (pre-move) request.
+      const retryOriginalB = await accept(A.tok, activityF1b.id, [slotB], 'acc-f1b');
       check('F-1 scenario 3: a retry of the ORIGINAL (pre-move) time never returns ALREADY_ACCEPTED against the stale, moved-away record', retryOriginalB.body.sessions[0].outcome !== 'ALREADY_ACCEPTED');
       check('F-1 scenario 3: it is reported as a clean, specific failure (COMMITMENT_NO_LONGER_LIVE) rather than referencing the stale moved-away record', retryOriginalB.status === 200 && retryOriginalB.body.sessions[0].outcome === 'FAILED' && retryOriginalB.body.sessions[0].reason === 'COMMITMENT_NO_LONGER_LIVE');
       check('F-1 scenario 3/9: no additional row was created by the retry -- only the original (now MOVED) row and its real live successor (created by the move itself, not by the retry) exist', (await plansOf(A.U.id)).filter((p: any) => p.activityId === 'deep-work' && [movedAwayPlanId, moveResultB.to.id].includes(p.id)).length === 2);
@@ -237,11 +277,18 @@ async function main() {
       const activityF1c = await addGoalActivity(A.U.id, goalF1c.id, { title: 'Meditate', activityId: 'deep-work', rhythm: { kind: 'N_PER_WEEK', targetPerWeek: 1 } });
       if (!activityF1c) throw new Error('fixture setup failed: addGoalActivity (activityF1c) returned null');
       const slotC = { localDate: futureDate, start: `${futureDate}T12:00:00.000Z`, end: `${futureDate}T12:30:00.000Z` };
-      const acceptedC = await accept(A.tok, activityF1c.id, [slotC]);
+      const acceptedC = await accept(A.tok, activityF1c.id, [slotC], 'acc-f1c');
       check('F-1 scenario 4 precondition: the session to be moved was genuinely accepted first', acceptedC.status === 200 && acceptedC.body.sessions[0].outcome === 'ACCEPTED');
       const originalCPlanId = acceptedC.body.sessions[0].plannedActivityId;
       const movedC = await movePlannedActivity(A.U.id, originalCPlanId, { newStartAt: new Date(`${futureDate}T13:00:00.000Z`) });
-      const retryNewTimeC = await accept(A.tok, activityF1c.id, [{ localDate: futureDate, start: `${futureDate}T13:00:00.000Z`, end: `${futureDate}T13:30:00.000Z` }]);
+      // A FRESH, distinct acceptanceId: requesting the NEW (moved-to)
+      // time is a genuinely new confirmation, never a resubmission of
+      // the original 'acc-f1c' request -- reusing it here would now be
+      // correctly rejected ACCEPTANCE_IDENTITY_CONFLICT by HGR3-C1's own
+      // payload-binding check (same activity+date, different time),
+      // which is NOT what this specific scenario targets (it targets
+      // the real downstream conflict-detection path instead).
+      const retryNewTimeC = await accept(A.tok, activityF1c.id, [{ localDate: futureDate, start: `${futureDate}T13:00:00.000Z`, end: `${futureDate}T13:30:00.000Z` }], 'acc-f1c-newtime');
       check('F-1 scenario 4: a request for the NEW (moved-to) time is never reported ALREADY_ACCEPTED against the OLD commitment\'s identity (there is no stored claim at all for this exact request, since it was never submitted through weekly-accept -- the move flow is a separate write path)', retryNewTimeC.body.sessions[0].outcome !== 'ALREADY_ACCEPTED' || retryNewTimeC.body.sessions[0].plannedActivityId !== originalCPlanId);
       // The requested time is IDENTICAL to the real live successor's own
       // time, so the real preview pipeline's own conflict detection
@@ -283,17 +330,90 @@ async function main() {
         const s1 = { localDate: futureDatesThisWeek[0], start: `${futureDatesThisWeek[0]}T17:00:00.000Z`, end: `${futureDatesThisWeek[0]}T17:30:00.000Z` };
         const s2 = { localDate: futureDatesThisWeek[1], start: `${futureDatesThisWeek[1]}T17:00:00.000Z`, end: `${futureDatesThisWeek[1]}T17:30:00.000Z` };
         const s3 = { localDate: futureDatesThisWeek[2], start: `${futureDatesThisWeek[2]}T17:00:00.000Z`, end: `${futureDatesThisWeek[2]}T17:30:00.000Z` };
-        const firstBatch = await accept(A.tok, activityF1d.id, [s1, s2, s3]);
+        // ONE acceptanceId for the whole batch ('acc-f1d'), exactly as a
+        // real "Accept all" press would mint -- reused unchanged for the
+        // retry below, since this is the SAME confirmation resubmitted,
+        // not a new one.
+        const firstBatch = await accept(A.tok, activityF1d.id, [s1, s2, s3], 'acc-f1d');
         check('F-1 scenario 5 precondition: with target 2, exactly the first two sessions in the batch succeed and the third genuinely fails on capacity -- never all three', firstBatch.status === 200 && firstBatch.body.acceptedCount === 2 && firstBatch.body.failedCount === 1 && firstBatch.body.sessions[0].outcome === 'ACCEPTED' && firstBatch.body.sessions[1].outcome === 'ACCEPTED' && firstBatch.body.sessions[2].outcome === 'FAILED');
         const s1PlanId = firstBatch.body.sessions[0].plannedActivityId;
         const s2PlanId = firstBatch.body.sessions[1].plannedActivityId;
         await cancelPlannedActivity(A.U.id, s1PlanId);
-        const retryBatch = await accept(A.tok, activityF1d.id, [s1, s2, s3]);
+        const retryBatch = await accept(A.tok, activityF1d.id, [s1, s2, s3], 'acc-f1d');
         check('F-1 scenario 5: s1 (cancelled since the original batch) is reported as a clean, specific failure (COMMITMENT_NO_LONGER_LIVE) -- never ALREADY_ACCEPTED against the dead record, and never silently recreated', retryBatch.body.sessions[0].outcome === 'FAILED' && retryBatch.body.sessions[0].reason === 'COMMITMENT_NO_LONGER_LIVE');
         check('F-1 scenario 5: s2 (still genuinely live, untouched) correctly and deterministically resolves ALREADY_ACCEPTED with its real original identity', retryBatch.body.sessions[1].outcome === 'ALREADY_ACCEPTED' && retryBatch.body.sessions[1].plannedActivityId === s2PlanId);
         check('F-1 scenario 5: s3 (never accepted the first time) is now independently, genuinely accepted -- the capacity s1\'s own cancellation freed is correctly available to a DIFFERENT, never-before-attempted session, never reused to silently resurrect s1 itself', retryBatch.body.sessions[2].outcome === 'ACCEPTED' && retryBatch.body.sessions[2].plannedActivityId !== s1PlanId && retryBatch.body.sessions[2].plannedActivityId !== s2PlanId);
         check('F-1 scenario 5/9: the retry created exactly ONE new row (for s3) -- s1 stays CANCELLED with no replacement, s2 is completely untouched', (await plansOf(A.U.id)).filter((p: any) => p.activityId === 'deep-work' && [s1PlanId, s2PlanId, retryBatch.body.sessions[2].plannedActivityId].includes(p.id)).length === 3);
       }
+    }
+
+    // ============================================================
+    // HGR3-C1 -- FRESH ACCEPTANCE IDENTITY (fixes HGR3-C-R1), against a
+    // real database, through the real route handler. The exact 10-step
+    // lifecycle this ticket's own review named as the core proof.
+    // ============================================================
+    {
+      const { goal: goalC1 } = await createGoalWithActivities({ userId: A.U.id, title: 'Run (HGR3-C1 rebooking fixture)', targetDate: null, activities: [] });
+      const activityC1 = await addGoalActivity(A.U.id, goalC1.id, { title: 'Run', activityId: 'workout', rhythm: { kind: 'N_PER_WEEK', targetPerWeek: 1 } });
+      if (!activityC1) throw new Error('fixture setup failed: addGoalActivity (activityC1) returned null');
+      const slot = { localDate: futureDate, start: `${futureDate}T16:00:00.000Z`, end: `${futureDate}T16:30:00.000Z` };
+
+      // 1. Accept using acceptance identity A.
+      const step1 = await accept(A.tok, activityC1.id, [slot], 'acc-rebook-A');
+      check('HGR3-C1 step 1: accept using identity A genuinely succeeds', step1.status === 200 && step1.body.sessions[0].outcome === 'ACCEPTED');
+      const planIdA = step1.body.sessions[0].plannedActivityId;
+
+      // 2. Cancel the commitment (the real, existing, unmodified cancelPlannedActivity).
+      await cancelPlannedActivity(A.U.id, planIdA);
+      const cancelledRowC1 = (await sql(`SELECT status FROM "PlannedActivity" WHERE id = $1`, [planIdA]))[0];
+      check('HGR3-C1 step 2: the commitment is genuinely cancelled', cancelledRowC1.status === 'CANCELLED');
+
+      // 3/4. Retry identity A -- must fail COMMITMENT_NO_LONGER_LIVE, never resurrect the dead original.
+      const plansForC1BeforeStep3 = await occurrencesOf(activityC1.id);
+      const step3 = await accept(A.tok, activityC1.id, [slot], 'acc-rebook-A');
+      check('HGR3-C1 steps 3/4: retrying the STALE identity A after cancellation fails FAILED/COMMITMENT_NO_LONGER_LIVE -- never ALREADY_ACCEPTED against the dead original', step3.status === 200 && step3.body.sessions[0].outcome === 'FAILED' && step3.body.sessions[0].reason === 'COMMITMENT_NO_LONGER_LIVE');
+      // Scoped by this fixture's OWN GoalActivityOccurrence rows (never a
+      // bare activityId filter -- 'workout' is a shared catalog id
+      // reused by other, unrelated fixtures throughout this file).
+      check('HGR3-C1 steps 3/4: the stale retry created no new occurrence/row for THIS GoalActivity', (await occurrencesOf(activityC1.id)).length === plansForC1BeforeStep3.length);
+
+      // 5. A fresh weekly proposal would re-propose this byte-identical slot (cancellation contributes NONE to occupiedLocalDates) -- not re-run here (goalRhythmWeeklyProposal.ts is covered by its own test file), but the real consequence -- the slot remains genuinely eligible -- is what step 6 below actually proves.
+
+      // 6/7. Explicitly accept using NEW identity B -- must create a genuinely NEW live commitment.
+      const step6 = await accept(A.tok, activityC1.id, [slot], 'acc-rebook-B');
+      check('HGR3-C1 steps 6/7: explicitly re-approving the IDENTICAL slot under a FRESH identity B is genuinely accepted -- a real, new live commitment is created', step6.status === 200 && step6.body.sessions[0].outcome === 'ACCEPTED');
+      const planIdB = step6.body.sessions[0].plannedActivityId;
+      check('HGR3-C1 step 7: the new commitment is a GENUINELY DIFFERENT real row, never the resurrected original', planIdB !== planIdA);
+
+      // 8. The cancelled original remains cancelled, untouched by the new booking.
+      const originalAfterRebook = (await sql(`SELECT status FROM "PlannedActivity" WHERE id = $1`, [planIdA]))[0];
+      check('HGR3-C1 step 8: the cancelled original remains CANCELLED, completely untouched by the new booking', originalAfterRebook.status === 'CANCELLED');
+
+      // 9/10. Retry identity B -- must now resolve ALREADY_ACCEPTED, pointing at the NEW live commitment.
+      const step9 = await accept(A.tok, activityC1.id, [slot], 'acc-rebook-B');
+      check('HGR3-C1 steps 9/10: retrying the NEW identity B resolves ALREADY_ACCEPTED, pointing at the NEW live commitment -- never the old dead one', step9.status === 200 && step9.body.sessions[0].outcome === 'ALREADY_ACCEPTED' && step9.body.sessions[0].plannedActivityId === planIdB);
+      check('HGR3-C1 steps 9/10: exactly two real rows exist for this activity in total -- the cancelled original and the one genuinely new rebooking, never a third', (await plansOf(A.U.id)).filter((p: any) => p.activityId === 'workout' && [planIdA, planIdB].includes(p.id)).length === 2);
+    }
+
+    // ---------- HGR3-C1: payload-binding conflict, against a real database ----------
+    {
+      const { goal: goalBind } = await createGoalWithActivities({ userId: A.U.id, title: 'Run (HGR3-C1 payload-binding fixture)', targetDate: null, activities: [] });
+      const activityBind = await addGoalActivity(A.U.id, goalBind.id, { title: 'Run', activityId: 'workout', rhythm: { kind: 'N_PER_WEEK', targetPerWeek: 2 } });
+      if (!activityBind) throw new Error('fixture setup failed: addGoalActivity (activityBind) returned null');
+      // IST local midnight is 18:30Z the PREVIOUS UTC day -- a UTC time
+      // at/after 18:30 on `futureDate` itself resolves to the NEXT IST
+      // calendar date (TIME_DATE_MISMATCH), so both slots below stay
+      // safely before that boundary, and both avoid every other UTC
+      // time already occupied elsewhere in this file for `futureDate`.
+      const slot1 = { localDate: futureDate, start: `${futureDate}T05:00:00.000Z`, end: `${futureDate}T05:30:00.000Z` };
+      const slot2 = { localDate: futureDate, start: `${futureDate}T06:00:00.000Z`, end: `${futureDate}T06:30:00.000Z` }; // same activity/date, a DIFFERENT time
+
+      const firstBind = await accept(A.tok, activityBind.id, [slot1], 'acc-bind-conflict');
+      check('HGR3-C1 payload-binding precondition: the first request under identity X succeeds', firstBind.status === 200 && firstBind.body.sessions[0].outcome === 'ACCEPTED');
+
+      const reusedBind = await accept(A.tok, activityBind.id, [slot2], 'acc-bind-conflict');
+      check('HGR3-C1: reusing the SAME acceptanceId for a DIFFERENT approved time on the same (goalActivityId, localDate), against a real database, is rejected ACCEPTANCE_IDENTITY_CONFLICT -- never silently processed as an independent fresh session, and never misreported as a replay', reusedBind.status === 200 && reusedBind.body.sessions[0].outcome === 'FAILED' && reusedBind.body.sessions[0].reason === 'ACCEPTANCE_IDENTITY_CONFLICT');
+      check('HGR3-C1: the rejected conflict created no second real row', (await plansOf(A.U.id)).filter((p: any) => p.activityId === 'workout' && new Date(p.plannedStartAt).getTime() === new Date(slot2.start).getTime()).length === 0);
     }
   } finally {
     console.log(allPassed ? '\nALL GOAL RHYTHM WEEKLY ACCEPTANCE DB CHECKS PASSED' : '\nSOME GOAL RHYTHM WEEKLY ACCEPTANCE DB CHECKS FAILED');
