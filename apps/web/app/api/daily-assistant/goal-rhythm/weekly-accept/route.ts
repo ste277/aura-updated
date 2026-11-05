@@ -8,7 +8,6 @@ import { createRealDayConstructorOrchestratorDeps } from '../../../../../lib/day
 import { handleDayConstructorPreviewRequest } from '../../../../../lib/dayConstructorPreviewRequest';
 import { loadGoalDecisionFacts, createGoalDemandDepsFromSchedulingContext } from '../../../../../lib/goalDecisionFactsProvider';
 import { loadDecisionSchedulingContext } from '../../../../../lib/decisionSchedulingContextLoader';
-import { createServerShadowPolicyExecution } from '../../../../../lib/shadowPolicyExecution';
 import { persistAcceptedConstructedDay } from '../../../../../lib/dayConstructorAcceptancePersistence';
 import { createRealGoalDemandCandidatesDeps } from '../../../../../lib/goalDemandCandidates';
 import { isValidCalendarDateString } from '../../../../../../../packages/panchang/src/localDate';
@@ -90,7 +89,11 @@ export async function POST(req: NextRequest) {
     // Goal-decision-facts provider.
     loadSchedulingContext: (u, request) => loadDecisionSchedulingContext({ userId: u.id, planningDate: request.targetDate, timezone: request.timezone }),
     loadDecisionFactsFromContext: (u, request, context) => loadGoalDecisionFacts(u, request, createGoalDemandDepsFromSchedulingContext(context)),
-    shadowPolicy: createServerShadowPolicyExecution,
+    // Deliberately no shadowPolicy: an optional, server-controlled
+    // diagnostic concern the real preview route also treats as
+    // omittable-by-default -- see goalRhythmWeeklyAcceptance.ts's own
+    // comment on WeeklyAcceptanceDeps for why this adapter has no real
+    // use for it.
   };
 
   const summary = await acceptWeeklyRhythmSessions(deps, session.userId, planningLocalDate, selections);

@@ -156,15 +156,24 @@ export interface WeeklyAcceptanceDeps extends GoalDemandCandidatesDeps {
   runPreview: typeof handleDayConstructorPreviewRequest;
   /** `persistAcceptedConstructedDay` in production. */
   persist: typeof persistAcceptedConstructedDay;
-  /** The remaining four closures `handleDayConstructorPreviewRequest`
-   * itself requires, threaded through verbatim -- this file never builds
-   * its own orchestrator-deps factory or decision-facts wiring, reusing
-   * EXACTLY the real preview route's own production wiring (see
-   * weekly-accept/route.ts). */
+  /** The remaining closures `handleDayConstructorPreviewRequest` itself
+   * accepts, threaded through verbatim -- this file never builds its own
+   * orchestrator-deps factory or decision-facts wiring, reusing EXACTLY
+   * the real preview route's own production wiring for these two (see
+   * weekly-accept/route.ts). Deliberately NOT threading through that
+   * function's own `shadowPolicy` parameter: it is an optional,
+   * server-controlled DIAGNOSTIC concern (the real preview route's own
+   * doc comment: omitting it is "byte-identical to this ticket never
+   * having existed"), genuinely unneeded by this acceptance adapter, and
+   * the identifier `shadowPolicy` is itself pinned by an existing
+   * structural guard (manualGoalProvenanceParityArchitecture.test.ts's
+   * "no policy vocabulary exists anywhere in production" check) to an
+   * exact, audited allowlist of files -- the smallest correct fix is to
+   * simply not need the feature, never to extend that allowlist for a
+   * caller that has no real use for it. */
   createOrchestratorDeps: DayConstructorPreviewBoundaryDeps['createOrchestratorDeps'];
   loadSchedulingContext?: DayConstructorPreviewBoundaryDeps['loadSchedulingContext'];
   loadDecisionFactsFromContext?: DayConstructorPreviewBoundaryDeps['loadDecisionFactsFromContext'];
-  shadowPolicy?: DayConstructorPreviewBoundaryDeps['shadowPolicy'];
 }
 
 /** The rest of the user's CURRENT local calendar week -- the SAME bounds
@@ -283,7 +292,6 @@ async function acceptOneSession(deps: WeeklyAcceptanceDeps, userId: string, sele
       createOrchestratorDeps: deps.createOrchestratorDeps,
       loadSchedulingContext: deps.loadSchedulingContext,
       loadDecisionFactsFromContext: deps.loadDecisionFactsFromContext,
-      shadowPolicy: deps.shadowPolicy,
     });
   } catch {
     return { goalActivityId, localDate, outcome: 'FAILED', reason: 'PREVIEW_FAILED' satisfies SessionFailureReason };
