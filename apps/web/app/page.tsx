@@ -30,6 +30,7 @@ import { selectTodaysPendingActivities } from '../lib/myDayPendingOverlay';
 import type { GuidanceUiState } from '../lib/bestForYouViewModel';
 import type { GoalDemandResult } from '../lib/goalDemandCandidates';
 import { mapGoalDemandToHomeRhythmSuggestions, type HomeGoalRhythmSuggestion } from '../lib/homeGoalRhythmSuggestions';
+import { createAskAuraHandoff, type AskAuraHandoffRequest } from '../lib/homeAskAuraHandoff';
 
 // UI Modules
 import { HomeDashboard } from '../components/HomeDashboard';
@@ -212,6 +213,20 @@ export default function DashboardPage() {
   // change fetch discipline as `guidance` above (a stale prior user's
   // Rhythm suggestions must never render attributed to a different user).
   const [goalRhythmSuggestions, setGoalRhythmSuggestions] = useState<readonly HomeGoalRhythmSuggestion[]>([]);
+  // HOME-INTENT-1 -- Home's own "What would you like to do?" input hands a
+  // free-text request off into the existing Ask Aura tab/pipeline exactly
+  // once (see homeAskAuraHandoff.ts). `null` once consumed by AskAuraView
+  // (its own callback clears this); a fresh `key` on every submission
+  // ensures two consecutive, even textually identical, requests are both
+  // honored, mirroring planPrefill/planFocusKey's own established pattern.
+  const [pendingAskAuraHandoff, setPendingAskAuraHandoff] = useState<AskAuraHandoffRequest | null>(null);
+  // HOME-INTENT-1 P2-1 -- a monotonic counter, not Date.now(), stamps each
+  // handoff's `key`. Date.now() has only millisecond resolution and is not
+  // structurally guaranteed unique between two calls; a ref-based counter
+  // guarantees every submission within this mounted page instance gets a
+  // genuinely distinct key, so two consecutive, even textually identical,
+  // requests are never coalesced or dropped as "the same one".
+  const askAuraHandoffKeyRef = useRef(0);
   // Product Structure V2 -- "Your Moments" now lives inside Plan (brief
   // section 19), so any entry point that used to jump to the standalone
   // Shared Moments tab (Home's actionable card, You's row) now jumps into
@@ -1394,6 +1409,21 @@ export default function DashboardPage() {
     setActiveTab('plan');
   }, []);
 
+  // HOME-INTENT-1 -- Home's new input only ever calls this with
+  // already-validated (resolveHomeAskAuraSubmission), non-empty,
+  // exactly-as-typed text; this function itself does no parsing/
+  // classification of its own -- it only stamps a one-shot handoff key
+  // and navigates, mirroring handleOpenPlan's own navigation-only role.
+  const handleHomeAskAuraSubmit = useCallback((text: string) => {
+    askAuraHandoffKeyRef.current += 1;
+    setPendingAskAuraHandoff(createAskAuraHandoff(text, () => askAuraHandoffKeyRef.current));
+    setActiveTab('ask');
+  }, []);
+
+  const handleAskAuraHandoffConsumed = useCallback(() => {
+    setPendingAskAuraHandoff(null);
+  }, []);
+
   // Daily Reflection & Tomorrow Preview V1 (brief section 5) -- "Plan
   // tomorrow" (generic, or from a "Make room for..." suggestion) never
   // creates a Plan directly. It routes into the exact same Plan/Timing
@@ -1581,6 +1611,7 @@ export default function DashboardPage() {
             onNextShiftClick={() => setHomeTimelineFocusKey(Date.now())}
             focusTimelineKey={homeTimelineFocusKey}
             onPlanClick={handleOpenPlan}
+            onAskAuraSubmit={handleHomeAskAuraSubmit}
             onPlanDay={() => { window.location.href = '/plan-day'; }}
             onInsightsClick={() => setActiveTab('insights')}
             onNotificationsClick={handleOpenUpdates}
@@ -1650,6 +1681,8 @@ export default function DashboardPage() {
             onOpenPlan={handleOpenPlan}
             onOpenPanchang={handleOpenPanchang}
             onOpenMuhurthamWithActivity={handleOpenMuhurthamWithActivity}
+            pendingHandoffRequest={pendingAskAuraHandoff}
+            onHandoffConsumed={handleAskAuraHandoffConsumed}
           />
         )}
 

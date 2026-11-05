@@ -136,19 +136,23 @@ function main() {
 
   // ============================================================
   // 7. Collapse behavior -- the card's own expand/collapse slicing
-  // (expanded ? [...visible, ...overflow] : visible). No jsdom/
-  // testing-library in this repo (confirmed below), so this is a
-  // structural assertion on the real component source, not a rendered
-  // interaction -- explicitly labeled, not presented as DOM coverage.
+  // (expanded ? [...visible, ...overflow] : visible). This suite
+  // predates HOME-INTENT-1 P2-4, which later added jsdom to the repo
+  // (test/jsdomReactHarness.ts) for a DIFFERENT component
+  // (AskAuraView.tsx) -- this file was not retrofitted to use it, so
+  // this remains a structural assertion on the real component source,
+  // not a rendered interaction -- explicitly labeled, not presented as
+  // DOM coverage. (Earlier this checked that jsdom didn't exist in the
+  // repo at all; that premise is no longer true and isn't the point of
+  // this check, so it's no longer asserted here.)
   // ============================================================
   {
-    const hasNoJsdom = !fs.existsSync(path.join(__dirname, '..', 'node_modules', 'jsdom')) && !fs.existsSync(path.join(__dirname, '..', 'apps', 'web', 'node_modules', 'jsdom'));
     const cardSource = fs.readFileSync(path.join(__dirname, '..', 'apps/web/components/GoalRhythmSuggestionsCard.tsx'), 'utf8');
     const hasExpandToggle = /setExpanded\(\(current\)\s*=>\s*!current\)/.test(cardSource);
     const hasCollapsedSlice = /expanded\s*\?\s*\[\.\.\.visible,\s*\.\.\.overflow\]\s*:\s*visible/.test(cardSource);
     check(
-      '7. [STRUCTURAL -- no jsdom in this repo] the card toggles a real expand/collapse state and slices visible+overflow vs visible-only, matching "View all"/"Show less"',
-      hasNoJsdom && hasExpandToggle && hasCollapsedSlice
+      '7. [STRUCTURAL] the card toggles a real expand/collapse state and slices visible+overflow vs visible-only, matching "View all"/"Show less"',
+      hasExpandToggle && hasCollapsedSlice
     );
   }
 

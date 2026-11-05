@@ -8,6 +8,7 @@ import { FULL_ACTIVITY_CATALOG } from '../../../packages/recommendation/src/pers
 import { saveUpcomingPlanFromCandidate } from './PlanWithAuraView';
 import { RESULT_LABEL_TEXT } from '../lib/planFormatting';
 import type { TimingCandidateLabel, TimingSearchResponse } from '../../../packages/recommendation/src/timingSearch';
+import { shouldConsumeAskAuraHandoff, isResponseCurrent, type AskAuraHandoffRequest } from '../lib/homeAskAuraHandoff';
 
 /**
  * Ask Aura Orchestration V1 -- this view no longer parses intent or streams
@@ -76,6 +77,15 @@ interface AskAuraProps {
   onOpenPlan?: (activityTitle?: string, activityId?: string) => void;
   onOpenPanchang?: () => void;
   onOpenMuhurthamWithActivity?: (activityId: string) => void;
+  // HOME-INTENT-1 -- Home's own "What would you like to do?" entry point
+  // hands a free-text request off into this exact existing pipeline
+  // (never a second classifier/chat UI/API call site). `pendingHandoffRequest`
+  // is a one-shot, key-stamped payload (see homeAskAuraHandoff.ts); the
+  // effect below consumes it by calling the SAME handleSend() a manually
+  // typed request already uses, then immediately reports consumption so
+  // page.tsx clears its own pending state.
+  pendingHandoffRequest?: AskAuraHandoffRequest | null;
+  onHandoffConsumed?: () => void;
 }
 
 function activityTitleFor(activityId?: string): string | undefined {
@@ -94,11 +104,44 @@ export function AskAuraView({
   onOpenPlan,
   onOpenPanchang,
   onOpenMuhurthamWithActivity,
+  pendingHandoffRequest,
+  onHandoffConsumed,
 }: AskAuraProps) {
   const [input, setInput] = useState('');
   const [loading, setLoading] = useState(false);
   const [actionState, setActionState] = useState<Record<string, 'saving' | 'done' | 'error'>>({});
   const chatEndRef = useRef<HTMLDivElement | null>(null);
+  // HOME-INTENT-1 -- this surface had no request-generation/staleness
+  // guard at all before (handleSend's own `loading` check already
+  // prevents two requests from being in flight at once, but nothing
+  // stopped a late-resolving response from writing into component state
+  // AFTER this component had unmounted). mountedRef is the minimal
+  // version of this session's established guard pattern, added here
+  // specifically because the new auto-submit handoff below is the first
+  // caller that can trigger a request right as a tab switch is in
+  // flight.
+  const mountedRef = useRef(true);
+  useEffect(() => {
+    mountedRef.current = true;
+    return () => {
+      mountedRef.current = false;
+    };
+  }, []);
+  // HOME-INTENT-1 -- the one-shot guard itself: records the last handoff
+  // `key` this component instance has already consumed. A ref, not
+  // state, so a rerender (or React 18 strict-mode double-invoke of the
+  // effect below) can never cause a second consumption of the same key.
+  const lastConsumedHandoffKeyRef = useRef<number | null>(null);
+  // HOME-INTENT-1 P2-3 -- a monotonic generation counter guarding every
+  // post-await setState in handleSend below. mountedRef (above) only
+  // protects against writes after a FULL unmount; it says nothing about
+  // the order two in-flight requests resolve in. If an older request's
+  // response somehow resolved after a newer one's, this stops the older,
+  // now-stale response from overwriting the newer response's messages/
+  // loading state. Each call to handleSend captures the ref's value at
+  // its own start; a response is only applied if that captured value is
+  // still the CURRENT generation when the response arrives.
+  const requestGenerationRef = useRef(0);
   const [messages, setMessages] = useState<Message[]>([]);
   const [greeting] = useState(`Hi ${userName} — I can help you decide what to do now, when to plan something, or what your day looks like.`);
   const [previousContext, setPreviousContext] = useState<Record<string, unknown> | undefined>(undefined);
@@ -143,6 +186,11 @@ export function AskAuraView({
     const query = (textToSend ?? input).trim();
     if (!query || loading) return;
 
+    // HOME-INTENT-1 P2-3 -- this call's own generation, captured before
+    // the first await; see requestGenerationRef's declaration above.
+    const requestGeneration = ++requestGenerationRef.current;
+    const isCurrent = () => isResponseCurrent(requestGeneration, requestGenerationRef.current, mountedRef.current);
+
     setMessages((prev) => [...prev, { sender: 'user', text: query }]);
     setInput('');
     setLoading(true);
@@ -153,19 +201,51 @@ export function AskAuraView({
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ prompt: query, activeWindow, previousContext }),
       });
+      // HOME-INTENT-1 -- guard every state update after an await against
+      // this component having unmounted in the meantime (e.g. the user
+      // navigated away right as a handed-off request was in flight), AND
+      // against a newer request having since superseded this one.
+      if (!isCurrent()) return;
       if (!res.ok) throw new Error('Ask Aura request failed.');
       const data: AskAuraResponse = await res.json();
+      if (!isCurrent()) return;
       setMessages((prev) => [...prev, { sender: 'aura', response: data }]);
       setPreviousContext(data.context);
     } catch {
-      setMessages((prev) => [
-        ...prev,
-        { sender: 'aura', response: { intent: 'UNKNOWN', message: 'Sorry, I hit a snag. Please try again.' } },
-      ]);
+      if (isCurrent()) {
+        setMessages((prev) => [
+          ...prev,
+          { sender: 'aura', response: { intent: 'UNKNOWN', message: 'Sorry, I hit a snag. Please try again.' } },
+        ]);
+      }
     } finally {
-      setLoading(false);
+      if (isCurrent()) setLoading(false);
     }
   };
+
+  // HOME-INTENT-1 -- consumes a Home-originated handoff exactly once by
+  // calling the SAME handleSend() a manually typed request already uses.
+  // No second fetch/classifier call site exists anywhere in this file.
+  //
+  // P2-2 -- only mark the handoff consumed (update the ref, tell page.tsx
+  // to clear it) once handleSend can actually ACCEPT it. handleSend's own
+  // `if (!query || loading) return` would otherwise let this effect mark
+  // a handoff "consumed forever" the instant a manual request happens to
+  // already be in flight, silently dropping it with no retry and no
+  // feedback. Returning early here WITHOUT touching the ref/callback
+  // keeps the handoff pending -- `loading` is in this effect's own deps,
+  // so the moment the in-flight request finishes and `loading` flips back
+  // to false, this effect re-evaluates against the SAME still-unconsumed
+  // handoff and processes it then. A one-time, state-driven retry, never
+  // a timer loop.
+  useEffect(() => {
+    if (!shouldConsumeAskAuraHandoff(pendingHandoffRequest, lastConsumedHandoffKeyRef.current)) return;
+    if (loading) return;
+    lastConsumedHandoffKeyRef.current = pendingHandoffRequest!.key;
+    onHandoffConsumed?.();
+    handleSend(pendingHandoffRequest!.text);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [pendingHandoffRequest, loading]);
 
   const runAction = async (action: AskAuraAction, key: string) => {
     if (action.type === 'OPEN_TIMELINE') return onViewTimeline?.();

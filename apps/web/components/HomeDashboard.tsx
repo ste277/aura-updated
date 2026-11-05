@@ -13,6 +13,7 @@ import type { AuraReminder } from '../lib/auraReminders';
 import { formatReminderTiming } from '../lib/auraReminders';
 import { triggerHaptic } from '../lib/haptics';
 import { trackEvent } from '../lib/trackEvent';
+import { resolveHomeAskAuraSubmission } from '../lib/homeAskAuraHandoff';
 import * as theme from './theme';
 import { colors, spacing, typography } from './theme';
 import { PageHeader, SectionHeader, SurfaceCard, StatusBadge, IconButton, SecondaryButton, TextButton, PrimaryButton, ActivityChip, FieldLabel, TextInput, SelectInput } from './ui';
@@ -121,6 +122,12 @@ interface HomeDashboardProps {
    * Good Right Now card) already has a genuine, resolved catalog id. Never
    * inferred from `activity`'s text. */
   onPlanClick?: (activity?: string, activityId?: string) => void;
+  /** HOME-INTENT-1 -- the real text entered into the "What would you like
+   * to do?" input, once non-empty and submitted. Distinct from
+   * `onPlanClick`: this hands free text off into the existing Ask Aura
+   * tab/pipeline (page.tsx owns the actual navigation + one-shot handoff
+   * state), never straight into Plan. */
+  onAskAuraSubmit?: (text: string) => void;
   /** Day Constructor V1 -- PR F2. Navigates to the dedicated `/plan-day`
    * entry experience (this ticket's own section 6) -- distinct from
    * `onPlanClick` (Ask Aura, single-activity search/check) and Day
@@ -372,6 +379,7 @@ export function HomeDashboard({
   onNextShiftClick,
   focusTimelineKey,
   onPlanClick,
+  onAskAuraSubmit,
   onPlanDay,
   onInsightsClick,
   onNotificationsClick,
@@ -410,6 +418,17 @@ export function HomeDashboard({
   const effectiveTimezone = timezone ?? FALLBACK_HOME_TZ;
 
   const [askAuraIdeasOpen, setAskAuraIdeasOpen] = useState(false);
+  // HOME-INTENT-1 -- the real, controlled value of the "What would you
+  // like to do?" input. Cleared the instant a submission is accepted so
+  // a rapid repeated Enter/click reads an already-empty, non-submittable
+  // value on any second firing within the same render.
+  const [homeAskAuraInput, setHomeAskAuraInput] = useState('');
+  const handleHomeAskAuraSubmit = () => {
+    const { shouldSubmit, text } = resolveHomeAskAuraSubmission(homeAskAuraInput);
+    if (!shouldSubmit) return;
+    setHomeAskAuraInput('');
+    onAskAuraSubmit?.(text);
+  };
   const [reflectionSaved, setReflectionSaved] = useState(Boolean(todayReflection));
   const [isEditingReflection, setIsEditingReflection] = useState(false);
   const [isSavingReflection, setIsSavingReflection] = useState(false);
@@ -1413,15 +1432,46 @@ export function HomeDashboard({
       </SurfaceCard>
 
       {/* ============================================================
-       * ASK AURA -- placement only, routing/engine unchanged
+       * ASK AURA -- HOME-INTENT-1. Previously a decorative pair of
+       * buttons that both unconditionally navigated to Plan regardless
+       * of anything "typed" (there was no input to type into). Now a
+       * real, accessible text input: non-empty submit hands the exact
+       * typed text off into the existing Ask Aura tab/pipeline (never a
+       * second classifier/chat UI), empty submit is a pure no-op (no
+       * navigation at all -- this is the one deliberate behavior change
+       * from the old button, which always navigated). The arrow button
+       * is repurposed from its old, functionally-identical no-op into
+       * this input's own submit action; the "Ideas" chips below remain
+       * the separate, already-explicit, unchanged way to jump straight
+       * into Plan with a fixed suggestion.
        * ============================================================ */}
       <SurfaceCard>
+        {/* A plain <div>, not a <form> -- HomeDashboard.tsx's existing
+         * Move picker is the file's one legitimate <form> (missedRecovery
+         * guard check 12/15 asserts exactly one, proving no forked picker
+         * exists); Enter-to-submit is wired directly via onKeyDown below
+         * instead, so this addition can never trip that unrelated count. */}
         <div style={inputShellStyle}>
           <span style={{ color: '#93c5fd', fontSize: 23 }}>✦</span>
-          <button type="button" onClick={() => onPlanClick?.()} onFocus={() => setAskAuraIdeasOpen(true)} style={promptButtonStyle}>
-            Ask Aura anything...
-          </button>
-          <button type="button" onClick={() => onPlanClick?.()} style={voiceButtonStyle} aria-label="Find a time">
+          <FieldLabel htmlFor="home-ask-aura-input" visuallyHidden>
+            What would you like to do?
+          </FieldLabel>
+          <TextInput
+            id="home-ask-aura-input"
+            type="text"
+            value={homeAskAuraInput}
+            onChange={(e) => setHomeAskAuraInput(e.target.value)}
+            onFocus={() => setAskAuraIdeasOpen(true)}
+            onKeyDown={(e) => {
+              if (e.key === 'Enter') {
+                e.preventDefault();
+                handleHomeAskAuraSubmit();
+              }
+            }}
+            placeholder="What would you like to do?"
+            style={promptInputStyle}
+          />
+          <button type="button" onClick={handleHomeAskAuraSubmit} style={voiceButtonStyle} aria-label="Ask Aura" disabled={!homeAskAuraInput.trim()}>
             →
           </button>
         </div>
@@ -1864,13 +1914,15 @@ const inputShellStyle: React.CSSProperties = {
   boxSizing: 'border-box',
 };
 
-const promptButtonStyle: React.CSSProperties = {
+// HOME-INTENT-1 -- was `promptButtonStyle`, for the old decorative
+// `<button>`; renamed now that it styles a real `<input>` sitting
+// borderless/transparent inside `inputShellStyle`'s own pill shell.
+const promptInputStyle: React.CSSProperties = {
   border: 'none',
   background: 'transparent',
   color: '#94a3b8',
   fontSize: 16,
   textAlign: 'left',
-  cursor: 'pointer',
   padding: 0,
 };
 
