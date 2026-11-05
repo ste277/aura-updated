@@ -211,7 +211,7 @@ import { getDatePartsInTimezone } from './timezone';
 import { localCalendarWeekBounds, normalizeGoalActivityRhythm } from './goalActivityRhythm';
 import { localDayBoundsUTC } from './myDayOrchestrator';
 import { loadEligibleGoalDemand, type GoalDemandCandidatesDeps, type GoalDemandCandidate } from './goalDemandCandidates';
-import { buildGoalPlanningSourceIntents, encodeGoalDemandIntentId } from './goalPlanningSourceAdapter';
+import { buildGoalPlanningSourceIntents } from './goalPlanningSourceAdapter';
 import { handleDayConstructorPreviewRequest, type DayConstructorPreviewBoundaryDeps, type DayConstructorPreviewHttpResult } from './dayConstructorPreviewRequest';
 import { verifyAcceptanceItems } from './dayConstructorPreviewIntegrity';
 import { authorizeGoalActivityLinks } from './goalDemandProvenanceAuthorization';
@@ -493,28 +493,10 @@ async function acceptOneSession(deps: WeeklyAcceptanceDeps, userId: string, sele
     return { goalActivityId, localDate, outcome: 'FAILED', reason: 'OUTSIDE_CURRENT_WEEK' satisfies SessionFailureReason };
   }
 
-  // Step 2 (HGR3-BH) -- the reconciliation short-circuit, BEFORE any
-  // preview is generated. See this file's own "RETRY RECONCILIATION"
-  // header section for exactly why this ordering matters.
-  const intentId = encodeGoalDemandIntentId(localDate, goalActivityId);
   const clientRequestId = buildWeeklySessionClientRequestId(goalActivityId, localDate, selection.start, selection.end);
-  const reconciled = await reconcileExistingAcceptance(deps, userId, goalActivityId, localDate, intentId, clientRequestId, approved);
-  if (reconciled) return reconciled;
-
-  // Step 3 (HGR3-BH) -- only a genuinely new request reaches here; an
-  // already-accepted session's own committed time having since elapsed in
-  // wall-clock terms is irrelevant to it (handled by Step 2 above).
   const now = deps.now();
-  if (approved.start.getTime() <= now.getTime()) {
-    return { goalActivityId, localDate, outcome: 'FAILED', reason: 'TIME_ALREADY_ELAPSED' satisfies SessionFailureReason };
-  }
 
-  // Step 4 (HGR3-BH) -- adapter-level Availability Context enforcement.
-  if (await violatesConfiguredAvailability(deps, localDate, deps.user.timezone, now, approved)) {
-    return { goalActivityId, localDate, outcome: 'FAILED', reason: 'OUTSIDE_AVAILABILITY' satisfies SessionFailureReason };
-  }
-
-  // Step 5 -- fresh, authoritative ownership + eligibility. Never the
+  // Step 2 -- fresh, authoritative ownership + eligibility. Never the
   // HGR3-A response the client is confirming from; this call happens
   // now, inside THIS acceptance, independently.
   const demand = await loadEligibleGoalDemand(deps, userId, planningLocalDate, deps.user.timezone);
@@ -556,17 +538,52 @@ async function acceptOneSession(deps: WeeklyAcceptanceDeps, userId: string, sele
     candidate = { goalActivityId: row.goalActivityId, goalId: row.goalId, goalTitle: row.goalTitle, title: row.title, activityId: row.activityId, remainingThisWeek: 0, rhythm: { targetPerWeek: rhythm.targetPerWeek ?? 0, completedThisWeek: 0, committedThisWeek: 0, remainingOccurrences: 0 } };
   }
 
-  // Step 6 -- the SAME pure mapping the existing automatic Goal-demand
+  // Step 3 -- the SAME pure mapping the existing automatic Goal-demand
   // flow already uses, never a second, hand-rolled intent builder. This
   // file only overrides the flexibility/time fields on the ONE intent it
   // gets back (HGR3-BH -- see "EXACT-TIME PRESERVATION" above); title,
   // activityId, intentId and the Goal-provenance link are all exactly
-  // what the shared mapping already produced.
+  // what the shared mapping already produced. Critically (HGR3-BH), this
+  // is also the ONE place this file ever learns the real `intentId` --
+  // it never calls `encodeGoalDemandIntentId` itself (that encoder's own
+  // caller set is a separate, hardcoded architecture guard --
+  // `manualGoalProvenanceParityArchitecture.test.ts`'s "the encoder is
+  // called only by the three known producers/matchers" -- this adapter
+  // has no legitimate reason to become a fourth; reusing
+  // `buildGoalPlanningSourceIntents`'s own already-derived id, exactly
+  // like reusing its intent-shape, is the correct amount of trust in the
+  // existing mapping, not a workaround).
   const sourceResult = buildGoalPlanningSourceIntents({ candidates: [candidate], planningLocalDate: localDate, manualGoalActivityIds: [] });
   if (sourceResult.status !== 'OK' || sourceResult.intents.length !== 1) {
     return { goalActivityId, localDate, outcome: 'FAILED', reason: 'PREVIEW_FAILED' satisfies SessionFailureReason };
   }
   const [genericIntent] = sourceResult.intents;
+  const rawGoalActivityLinks = sourceResult.goalActivityLinks;
+
+  // Step 4 (HGR3-BH) -- the reconciliation short-circuit, BEFORE any
+  // preview is generated, using the REAL intentId Step 3 just derived.
+  // See this file's own "RETRY RECONCILIATION" header section for
+  // exactly why this ordering matters. Deliberately runs AFTER Step 2's
+  // ownership resolution (never before it) so an already-accepted
+  // session whose weekly demand the SAME acceptance fully consumed is
+  // still correctly reached via Step 2's own raw-rows fallback, rather
+  // than this file guessing ownership itself; deliberately runs BEFORE
+  // the elapsed-time/availability checks below so a genuine replay is
+  // never newly rejected merely because wall-clock time or the user's
+  // availability settings have since moved on.
+  const reconciled = await reconcileExistingAcceptance(deps, userId, goalActivityId, localDate, genericIntent.id, clientRequestId, approved);
+  if (reconciled) return reconciled;
+
+  // Step 5 (HGR3-BH) -- only a genuinely new request reaches here.
+  if (approved.start.getTime() <= now.getTime()) {
+    return { goalActivityId, localDate, outcome: 'FAILED', reason: 'TIME_ALREADY_ELAPSED' satisfies SessionFailureReason };
+  }
+
+  // Step 6 (HGR3-BH) -- adapter-level Availability Context enforcement.
+  if (await violatesConfiguredAvailability(deps, localDate, deps.user.timezone, now, approved)) {
+    return { goalActivityId, localDate, outcome: 'FAILED', reason: 'OUTSIDE_AVAILABILITY' satisfies SessionFailureReason };
+  }
+
   // `fixedStart` is sent as a real ISO STRING, never a `Date` instance:
   // this adapter calls `handleDayConstructorPreviewRequest` in-process
   // (never over real HTTP/JSON), but that function's own request parser
@@ -576,7 +593,6 @@ async function acceptOneSession(deps: WeeklyAcceptanceDeps, userId: string, sele
   // (`dayConstructorPreviewClient.ts`'s own `previewConstructedDay`)
   // already `JSON.stringify`s its own `Date` fields before sending.
   const intent = { ...genericIntent, flexibility: 'FIXED' as const, fixedStart: toIso(approved.start), durationMinutes: approved.durationMinutes };
-  const rawGoalActivityLinks = sourceResult.goalActivityLinks;
 
   // Step 7 -- the real, unmodified preview pipeline, with a hand-built
   // EXPLICIT_RANGE window scoped to exactly this one date (never the

@@ -361,17 +361,20 @@ async function main() {
   // ---------- 9/10 regression: retrying an ALREADY-ACCEPTED session whose
   // weekly target is now fully met (by that SAME prior acceptance) must
   // still resolve ALREADY_ACCEPTED -- NOT a fresh NOT_ELIGIBLE. The
-  // reconciliation short-circuit (Step 2) runs BEFORE eligibility, so this
-  // is now structurally guaranteed rather than merely tested. ----------
+  // reconciliation short-circuit runs AFTER ownership resolution (which
+  // always re-runs, cheap and read-only, even for a replay) but BEFORE
+  // any preview/persist call -- so the session's own prior commitment can
+  // never collide with a fresh placement attempt against itself. ----------
   {
     const env = buildFakeEnv(1, []);
     const s = session('2026-11-04');
     const first = await accept(env, [s]);
     check('9/10 regression precondition: the first acceptance succeeds, fully consuming target 1', first.sessions[0].outcome === 'ACCEPTED');
-    const callsAfterFirst = env.loadCandidateCallCount.n; // one per-session eligibility read (Step 5) + one batch-final recompute
+    const previewCallsAfterFirst = env.previewCalls.length;
+    const persistCallsAfterFirst = env.persistCalls.length;
     const summary = await accept(env, [s]);
     check('9/10 regression: a retry of an already-accepted session is reported ALREADY_ACCEPTED even when the weekly target it consumed is now fully met, never misreported as a fresh NOT_ELIGIBLE rejection', summary.sessions[0].outcome === 'ALREADY_ACCEPTED');
-    check('9/10 regression: the retry never reached loadEligibleGoalDemand for a PER-SESSION eligibility read -- only the batch\'s own always-recomputed final summary (+1), proving the reconciliation short-circuit resolved the session itself before Step 5 ever ran', env.loadCandidateCallCount.n === callsAfterFirst + 1);
+    check('9/10 regression: the retry never reached preview or persist again -- the reconciliation short-circuit resolved the session before either call, which is what actually prevents it from colliding with its own prior commitment (ownership resolution itself always re-runs, cheap and read-only, regardless)', env.previewCalls.length === previewCallsAfterFirst && env.persistCalls.length === persistCallsAfterFirst);
   }
 
   // ---------- 12/13. partial success ----------
