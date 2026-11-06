@@ -47,10 +47,11 @@
  * 'CURATED_METHODOLOGY' / 'ESTABLISHED' confidence by inheritance, not
  * re-audited).
  *
- * As of this PR, INTENT_RULE_PACKS has ONE real entry: GRIHA_PRAVESH,
- * populated from multi-source web research (see its MuhurtaRuleSource
- * entries below for the specific references and what was cross-checked).
- * ENGAGEMENT was researched with equal rigor and deliberately NOT
+ * As of PCE-2A, INTENT_RULE_PACKS has TWO real entries: GRIHA_PRAVESH and
+ * MARRIAGE (added by Marriage Muhurtham Foundation V1 / EXP1-C), each
+ * populated from multi-source web research (see each entry's own
+ * MuhurtaRuleSource list for the specific references and what was
+ * cross-checked). ENGAGEMENT was researched with equal rigor and deliberately NOT
  * populated -- every "engagement-specific" ruleset found either (a)
  * originated from a site that self-identifies as AI-generated content
  * (a domain literally branded "KundliGPT"), or (b) explicitly described
@@ -261,6 +262,43 @@ export interface MuhurtaRulePack {
 }
 
 export type MuhurtaSupportLevel = 'SUPPORTED' | 'PARTIAL' | 'NOT_YET_SUPPORTED';
+
+/**
+ * PCE-2A: the trust-contract tier a resolved MuhurtaRulePack actually
+ * qualifies for, independent of MuhurtaSupportLevel (which gates Finder
+ * ELIGIBILITY, not traditional completeness).
+ *
+ * - TRADITIONALLY_VALIDATED: occasion-specific rules with sufficient,
+ *   independently verified traditional completeness for the declared
+ *   convention. Reserved -- no rule pack in this codebase qualifies yet
+ *   (deriveTraditionalCoverageLevel() below has no path that returns this;
+ *   assigning it would require a separately-approved, explicit allowlist
+ *   once a specific occasion's traditional requirements, e.g. Marriage's
+ *   Lagna Shuddhi gap, are actually closed and re-audited).
+ * - OCCASION_SPECIFIC: a dedicated, intent-specific rule pack exists
+ *   (coverage.tithi AND coverage.nakshatra both IMPLEMENTED), but complete
+ *   traditional validation has not been established.
+ * - GENERAL_PANCHANGAM: the resolved pack is a reused family-level base
+ *   (REUSABLE_BASE_RULE) or has no traditional data at all (MISSING) --
+ *   shared, generic Panchangam suitability only.
+ */
+export type MuhurtaTraditionalCoverageLevel = 'TRADITIONALLY_VALIDATED' | 'OCCASION_SPECIFIC' | 'GENERAL_PANCHANGAM';
+
+/**
+ * Derives the trust-contract tier from the ACTUAL resolved rule pack (never
+ * from the requested intent/activity id alone) -- so a fallback can never be
+ * silently reported as occasion-specific, and a rule pack with real
+ * citations is never promoted to TRADITIONALLY_VALIDATED on citation
+ * presence alone (PCE-2A's own explicit constraint: a MuhurtaRuleSource
+ * entry is provenance, not a completeness proof). Pass the SAME pack
+ * resolveMuhurtaRulePack() just produced for this classification -- never a
+ * separately re-resolved one -- so this can never drift from the pack that
+ * actually scored the candidate.
+ */
+export function deriveTraditionalCoverageLevel(pack: MuhurtaRulePack): MuhurtaTraditionalCoverageLevel {
+  const bothDedicated = pack.coverage.tithi === 'IMPLEMENTED' && pack.coverage.nakshatra === 'IMPLEMENTED';
+  return bothDedicated ? 'OCCASION_SPECIFIC' : 'GENERAL_PANCHANGAM';
+}
 
 /**
  * Which legacy MuhurtaActivityFamily's RULES entry each newer MuhurtaFamily

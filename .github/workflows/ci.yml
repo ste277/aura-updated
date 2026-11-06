@@ -51,6 +51,16 @@ jobs:
         run: npx ts-node test/muhurthamSearchApi.test.ts
       - name: Run Muhurta rule packs test
         run: npx ts-node test/muhurtaRulePacks.test.ts
+      - name: Run Muhurta traditional coverage test (PCE-2A)
+        run: npx ts-node test/muhurtaTraditionalCoverage.test.ts
+      - name: Run Marriage Muhurtham foundation test
+        run: npx ts-node test/marriageMuhurthamFoundation.test.ts
+      - name: Run Marriage required eligibility test
+        run: npx ts-node test/marriageRequiredEligibility.test.ts
+      - name: Run Marriage candidate discovery hardening test
+        run: npx ts-node test/marriageCandidateDiscoveryHardening.test.ts
+      - name: Run Ask Aura Marriage routing test
+        run: npx ts-node test/askAuraMarriageRouting.test.ts
       - name: Run Personal Muhurtham test
         run: npx ts-node test/personalMuhurtham.test.ts
       - name: Run SavedPerson request validation test
