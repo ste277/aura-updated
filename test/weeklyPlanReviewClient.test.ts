@@ -31,6 +31,9 @@ import {
   buildAdjustmentFindRequestBody,
   buildAdjustmentCheckRequestBody,
   draftFromAdjustmentCandidate,
+  siblingLocalDatesExcluding,
+  hasDateCollision,
+  hasDuplicateActiveLocalDates,
   type WeeklyReviewSessionDraft,
 } from '../apps/web/lib/weeklyPlanReviewClient';
 import type { WeeklyRhythmProposalItem } from '../apps/web/lib/goalRhythmWeeklyProposal';
@@ -127,24 +130,63 @@ async function main() {
     draft({ localDate: '2026-11-11', start: '2026-11-11T02:00:00.000Z', end: '2026-11-11T02:30:00.000Z' }),
     draft({ localDate: '2026-11-12', start: '2026-11-12T03:00:00.000Z', end: '2026-11-12T03:30:00.000Z' }),
   ];
+  const submittedOriginal = selectSessionsPendingSubmission(original);
   const resultSummary = summary([
     { goalActivityId: 'ga1', localDate: '2026-11-10', outcome: 'ACCEPTED', plannedActivityId: 'plan-1', start: '2026-11-10T01:30:00.000Z', end: '2026-11-10T02:00:00.000Z' },
     { goalActivityId: 'ga1', localDate: '2026-11-11', outcome: 'ALREADY_ACCEPTED', plannedActivityId: 'plan-2', start: '2026-11-11T02:00:00.000Z', end: '2026-11-11T02:30:00.000Z' },
     { goalActivityId: 'ga1', localDate: '2026-11-12', outcome: 'FAILED', reason: 'TIME_NO_LONGER_AVAILABLE' },
   ]);
-  const applied = applyAcceptanceSummaryToDrafts(original, resultSummary);
+  const applied = applyAcceptanceSummaryToDrafts(original, submittedOriginal, resultSummary);
   check('5. a real ACCEPTED outcome is matched by exact (localDate,start,end), never by array position', applied[0].outcome === 'ACCEPTED' && applied[0].plannedActivityId === 'plan-1');
   check('5. a real ALREADY_ACCEPTED outcome is matched the same way', applied[1].outcome === 'ALREADY_ACCEPTED' && applied[1].plannedActivityId === 'plan-2');
-  check('5. a FAILED outcome (no start/end in the response) is matched by localDate alone', applied[2].outcome === 'FAILED' && applied[2].failureReason === 'TIME_NO_LONGER_AVAILABLE');
-  const unmatched = applyAcceptanceSummaryToDrafts([draft({ localDate: 'never-submitted' })], summary([]));
+  check('5. a FAILED outcome (no start/end in the response) is matched via the request\'s OWN same-order copy of that session\'s key, not localDate alone', applied[2].outcome === 'FAILED' && applied[2].failureReason === 'TIME_NO_LONGER_AVAILABLE');
+  const unmatched = applyAcceptanceSummaryToDrafts([draft({ localDate: 'never-submitted' })], [], summary([]));
   check('5. a draft with no matching outcome in the summary is left completely unchanged', unmatched[0].outcome === 'PENDING');
   check(
     '5. [negative-control-equivalent] a SUCCESS for a DIFFERENT exact instant on the same date never overwrites an unrelated draft',
     applyAcceptanceSummaryToDrafts(
       [draft({ localDate: '2026-11-10', start: '2026-11-10T09:00:00.000Z', end: '2026-11-10T09:30:00.000Z' })],
+      [{ localDate: '2026-11-10', start: '2026-11-10T01:30:00.000Z', end: '2026-11-10T02:00:00.000Z' }],
       summary([{ goalActivityId: 'ga1', localDate: '2026-11-10', outcome: 'ACCEPTED', plannedActivityId: 'plan-x', start: '2026-11-10T01:30:00.000Z', end: '2026-11-10T02:00:00.000Z' }])
     )[0].outcome === 'PENDING'
   );
+
+  // ---- 5b. applyAcceptanceSummaryToDrafts -- same-date collision reconciliation (HGR3-C2 remediation, P2) ----
+  // Two drafts sharing a localDate but distinct start/end -- the request's
+  // own positional copy of each session's key is what makes this
+  // unambiguous, even though the backend's FAILED outcome itself carries
+  // no start/end.
+  const sameDateDrafts = [
+    draft({ localDate: '2026-11-15', start: '2026-11-15T01:00:00.000Z', end: '2026-11-15T01:30:00.000Z' }),
+    draft({ localDate: '2026-11-15', start: '2026-11-15T09:00:00.000Z', end: '2026-11-15T09:30:00.000Z' }),
+  ];
+  const sameDateSubmitted = selectSessionsPendingSubmission(sameDateDrafts);
+  const bothFailedSummary = summary([
+    { goalActivityId: 'ga1', localDate: '2026-11-15', outcome: 'FAILED', reason: 'TIME_NO_LONGER_AVAILABLE' },
+    { goalActivityId: 'ga1', localDate: '2026-11-15', outcome: 'FAILED', reason: 'OUTSIDE_AVAILABILITY' },
+  ]);
+  const bothFailedApplied = applyAcceptanceSummaryToDrafts(sameDateDrafts, sameDateSubmitted, bothFailedSummary);
+  check('5b. two same-date FAILURES remain individually attributable -- the first keeps its own reason, never the second\'s', bothFailedApplied[0].outcome === 'FAILED' && bothFailedApplied[0].failureReason === 'TIME_NO_LONGER_AVAILABLE');
+  check('5b. ...and the second keeps ITS own reason, never the first\'s', bothFailedApplied[1].outcome === 'FAILED' && bothFailedApplied[1].failureReason === 'OUTSIDE_AVAILABILITY');
+
+  const mixedSameDateSummary = summary([
+    { goalActivityId: 'ga1', localDate: '2026-11-15', outcome: 'ACCEPTED', plannedActivityId: 'plan-same-date', start: '2026-11-15T01:00:00.000Z', end: '2026-11-15T01:30:00.000Z' },
+    { goalActivityId: 'ga1', localDate: '2026-11-15', outcome: 'FAILED', reason: 'TIME_NO_LONGER_AVAILABLE' },
+  ]);
+  const mixedSameDateApplied = applyAcceptanceSummaryToDrafts(sameDateDrafts, sameDateSubmitted, mixedSameDateSummary);
+  check('5b. a partial success sharing a date with a failure reconciles the success correctly', mixedSameDateApplied[0].outcome === 'ACCEPTED' && mixedSameDateApplied[0].plannedActivityId === 'plan-same-date');
+  check('5b. ...and the failure correctly, on the OTHER draft, never the successful one\'s reason', mixedSameDateApplied[1].outcome === 'FAILED' && mixedSameDateApplied[1].failureReason === 'TIME_NO_LONGER_AVAILABLE');
+
+  // ---- 5c. same-date collision detection (HGR3-C2 remediation, P1) ----
+  const collisionDrafts = [draft({ localDate: '2026-11-10' }), draft({ localDate: '2026-11-11' }), draft({ localDate: '2026-11-12' })];
+  check('5c. siblingLocalDatesExcluding excludes only the given index', JSON.stringify(siblingLocalDatesExcluding(collisionDrafts, 1)) === JSON.stringify(['2026-11-10', '2026-11-12']));
+  check('5c. hasDateCollision is true when the candidate date matches a sibling', hasDateCollision('2026-11-10', siblingLocalDatesExcluding(collisionDrafts, 1)) === true);
+  check('5c. hasDateCollision is false for a genuinely free date', hasDateCollision('2026-11-20', siblingLocalDatesExcluding(collisionDrafts, 1)) === false);
+  check('5c. hasDateCollision is false for a draft\'s OWN current date once excluded (adjusting onto its own unchanged date is never a false collision)', hasDateCollision('2026-11-11', siblingLocalDatesExcluding(collisionDrafts, 1)) === false);
+  check('5c. hasDuplicateActiveLocalDates is false for an all-distinct batch', hasDuplicateActiveLocalDates(collisionDrafts) === false);
+  check('5c. hasDuplicateActiveLocalDates is true once two active drafts share a date', hasDuplicateActiveLocalDates([draft({ localDate: '2026-11-10' }), draft({ localDate: '2026-11-10' })]) === true);
+  check('5c. a removed sibling (simply absent from the array, never merely flagged) cannot cause a false collision', hasDateCollision('2026-11-10', siblingLocalDatesExcluding([draft({ localDate: '2026-11-11' }), draft({ localDate: '2026-11-12' })], 0)) === false);
+  check('5c. collision detection includes LOCKED siblings (an already-ACCEPTED date is just as real a collision as a pending one)', hasDateCollision('2026-11-10', siblingLocalDatesExcluding([draft({ localDate: '2026-11-10', outcome: 'ACCEPTED', plannedActivityId: 'p' }), draft({ localDate: '2026-11-20' })], 1)) === true);
 
   // ---- 6. summarizeSessionReasons (real formatMuhurtaReason, real factor labels) ----
   const reasons = summarizeSessionReasons([reason('TITHI', 'TITHI_SUPPORTIVE', 'Panchami'), reason('NAKSHATRA', 'NAKSHATRA_SUPPORTIVE', 'Hasta'), reason('YOGA', 'YOGA_SUPPORTIVE', 'Siddha'), reason('KARANA', 'KARANA_SUPPORTIVE', 'Bava')]);

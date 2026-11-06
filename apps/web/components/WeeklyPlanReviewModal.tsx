@@ -19,6 +19,9 @@ import {
   fetchAdjustmentAlternatives,
   fetchAdjustmentCheck,
   draftFromAdjustmentCandidate,
+  siblingLocalDatesExcluding,
+  hasDateCollision,
+  hasDuplicateActiveLocalDates,
   type WeeklyReviewSessionDraft,
 } from '../lib/weeklyPlanReviewClient';
 
@@ -77,7 +80,7 @@ type LoadState =
   | { phase: 'EMPTY' }
   | { phase: 'READY'; activityTitle: string; remainingThisWeek: number; weeklyTarget: number; shortfall: boolean; activityId: string | null; durationMinutes: number };
 
-type SubmitBanner = { kind: 'NETWORK_ERROR' } | { kind: 'HTTP_ERROR'; httpStatus: number } | null;
+type SubmitBanner = { kind: 'NETWORK_ERROR' } | { kind: 'HTTP_ERROR'; httpStatus: number } | { kind: 'DATE_COLLISION' } | null;
 
 export function WeeklyPlanReviewModal({ goalActivityId, activityTitleFallback, timezone, onClose }: WeeklyPlanReviewModalProps) {
   const dialogRef = useRef<HTMLDivElement | null>(null);
@@ -149,12 +152,20 @@ export function WeeklyPlanReviewModal({ goalActivityId, activityTitleFallback, t
     if (state.phase !== 'READY' || submitting) return;
     const pending = selectSessionsPendingSubmission(drafts);
     if (pending.length === 0) return;
+    // Defense in depth (HGR3-C2 remediation, P1): the Adjust flow's own
+    // same-date guard below should make this unreachable, but "Accept
+    // all" revalidates the complete active batch directly rather than
+    // merely trusting that gate was never bypassed.
+    if (hasDuplicateActiveLocalDates(drafts)) {
+      setSubmitBanner({ kind: 'DATE_COLLISION' });
+      return;
+    }
     setSubmitting(true);
     setSubmitBanner(null);
     const result = await submitWeeklyAcceptance(goalActivityId, acceptanceId, pending);
     setSubmitting(false);
     if (result.status === 'OK') {
-      setDrafts((current) => applyAcceptanceSummaryToDrafts(current, result.summary));
+      setDrafts((current) => applyAcceptanceSummaryToDrafts(current, pending, result.summary));
       return;
     }
     if (result.status === 'NETWORK_ERROR') {
@@ -171,6 +182,9 @@ export function WeeklyPlanReviewModal({ goalActivityId, activityTitleFallback, t
 
   const pendingCount = drafts.filter((d) => !isSessionLocked(d.outcome)).length;
   const acceptedCount = drafts.filter((d) => isSessionLocked(d.outcome)).length;
+  // Defense in depth (HGR3-C2 remediation, P1) -- see handleAcceptAll's
+  // own revalidation of the same condition at submit time.
+  const dateCollision = hasDuplicateActiveLocalDates(drafts);
 
   return (
     <ModalShell
@@ -229,6 +243,7 @@ export function WeeklyPlanReviewModal({ goalActivityId, activityTitleFallback, t
                 onToggleAdjust={() => setAdjustingIndex((current) => (current === index ? null : index))}
                 onCancelAdjust={() => setAdjustingIndex(null)}
                 onApplyAdjustment={(updated) => applyAdjustedDraft(index, updated)}
+                siblingLocalDates={siblingLocalDatesExcluding(drafts, index)}
                 activityId={state.activityId}
                 activityTitleFallback={activityTitleFallback}
                 durationMinutes={draft.durationMinutes}
@@ -240,6 +255,9 @@ export function WeeklyPlanReviewModal({ goalActivityId, activityTitleFallback, t
             <FieldError>Couldn&rsquo;t reach Aura to confirm these sessions. Your selections are unchanged -- try again.</FieldError>
           )}
           {submitBanner?.kind === 'HTTP_ERROR' && <FieldError>Aura couldn&rsquo;t confirm these sessions just now. Try again.</FieldError>}
+          {(submitBanner?.kind === 'DATE_COLLISION' || dateCollision) && (
+            <FieldError>Two sessions in this batch are on the same date. Adjust or remove one before accepting.</FieldError>
+          )}
 
           {acceptedCount > 0 && pendingCount === 0 && (
             <div style={{ ...typography.caption, color: colors.positive, marginTop: spacing.md }}>
@@ -257,7 +275,7 @@ export function WeeklyPlanReviewModal({ goalActivityId, activityTitleFallback, t
               {pendingCount === 0 && acceptedCount > 0 ? 'Done' : 'Cancel'}
             </SecondaryButton>
             {pendingCount > 0 && (
-              <PrimaryButton onClick={handleAcceptAll} disabled={submitting || pendingCount === 0} style={{ minHeight: 44 }}>
+              <PrimaryButton onClick={handleAcceptAll} disabled={submitting || pendingCount === 0 || dateCollision} style={{ minHeight: 44 }}>
                 {submitting ? 'Confirming…' : `Accept all ${pendingCount}`}
               </PrimaryButton>
             )}
@@ -281,6 +299,7 @@ function SessionRow({
   onToggleAdjust,
   onCancelAdjust,
   onApplyAdjustment,
+  siblingLocalDates,
   activityId,
   activityTitleFallback,
   durationMinutes,
@@ -293,6 +312,7 @@ function SessionRow({
   onToggleAdjust: () => void;
   onCancelAdjust: () => void;
   onApplyAdjustment: (updated: WeeklyReviewSessionDraft) => void;
+  siblingLocalDates: readonly string[];
   activityId: string | null;
   activityTitleFallback: string;
   durationMinutes: number;
@@ -339,6 +359,7 @@ function SessionRow({
           activityId={activityId}
           activityTitleFallback={activityTitleFallback}
           durationMinutes={durationMinutes}
+          siblingLocalDates={siblingLocalDates}
           onCancel={onCancelAdjust}
           onApply={onApplyAdjustment}
         />
@@ -366,6 +387,7 @@ function SessionAdjuster({
   activityId,
   activityTitleFallback,
   durationMinutes,
+  siblingLocalDates,
   onCancel,
   onApply,
 }: {
@@ -374,6 +396,7 @@ function SessionAdjuster({
   activityId: string | null;
   activityTitleFallback: string;
   durationMinutes: number;
+  siblingLocalDates: readonly string[];
   onCancel: () => void;
   onApply: (updated: WeeklyReviewSessionDraft) => void;
 }) {
@@ -422,8 +445,17 @@ function SessionAdjuster({
     setCandidate(alternative);
   }
 
+  // HGR3-C2 remediation (P1) -- checked against the chosen `date` as soon
+  // as it's picked, not only at the moment of applying: this is a purely
+  // client-side gate (never touches `detectAcceptanceIdentityConflict` or
+  // any other backend identity logic) that stops a colliding adjustment
+  // from ever being committed to the draft list in the first place, so
+  // the backend's own payload-binding check never has a reason to
+  // misfire against an untouched sibling.
+  const dateCollides = hasDateCollision(date, siblingLocalDates);
+
   function handleUseThisTime() {
-    if (!candidate) return;
+    if (!candidate || dateCollides) return;
     onApply(draftFromAdjustmentCandidate(draft, candidate, date));
   }
 
@@ -440,6 +472,7 @@ function SessionAdjuster({
         </div>
       </div>
       <FieldHint>Aura checks this time&rsquo;s fit -- nothing is confirmed until you accept the whole batch.</FieldHint>
+      {dateCollides && <FieldError>Another session in this batch is already on this date.</FieldError>}
       {error && <FieldError>{error}</FieldError>}
 
       {candidate && (
@@ -455,15 +488,15 @@ function SessionAdjuster({
         <TextButton onClick={onCancel} disabled={checking} style={{ minHeight: 44, padding: '0 8px' }}>
           Cancel
         </TextButton>
-        <SecondaryButton onClick={handleFindAnother} disabled={checking || !date}>
+        <SecondaryButton onClick={handleFindAnother} disabled={checking || !date || dateCollides}>
           Find another time
         </SecondaryButton>
         {!candidate ? (
-          <SecondaryButton onClick={handleCheck} disabled={checking || !date || !time}>
+          <SecondaryButton onClick={handleCheck} disabled={checking || !date || !time || dateCollides}>
             {checking ? 'Checking…' : 'Check this time'}
           </SecondaryButton>
         ) : (
-          <PrimaryButton onClick={handleUseThisTime} disabled={checking}>
+          <PrimaryButton onClick={handleUseThisTime} disabled={checking || dateCollides}>
             Use this time
           </PrimaryButton>
         )}

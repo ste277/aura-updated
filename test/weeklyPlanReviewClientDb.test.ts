@@ -116,7 +116,7 @@ async function main() {
     const acceptResultA = await submitAcceptance(acceptanceIdA, pendingA);
     check('2. the real weekly-accept endpoint, parsed through this UI\'s own real response parser, reports a genuine ACCEPTED outcome', acceptResultA.status === 'OK' && acceptResultA.summary.acceptedCount === pendingA.length);
     if (acceptResultA.status !== 'OK') throw new Error('fixture precondition failed: initial acceptance did not succeed');
-    const draftsAfterA = applyAcceptanceSummaryToDrafts(drafts1, acceptResultA.summary);
+    const draftsAfterA = applyAcceptanceSummaryToDrafts(drafts1, pendingA, acceptResultA.summary);
     check('2. applyAcceptanceSummaryToDrafts correctly locks the accepted session in the UI\'s own state', draftsAfterA.every((d) => isSessionLocked(d.outcome)));
     const plansAfterA = await plansOf();
     check('2. a REAL PlannedActivity row was created in the database by this exact UI-driven request', plansAfterA.length === 1 && plansAfterA[0].status === 'UPCOMING');
@@ -133,7 +133,7 @@ async function main() {
     const staleRetry = await submitAcceptance(acceptanceIdA, pendingA);
     check('4. [HGR3-C-R1] a stale retry of the original acceptanceId correctly fails -- never silently "re-accepted" against the cancelled row', staleRetry.status === 'OK' && staleRetry.summary.acceptedCount === 0 && staleRetry.summary.alreadyAcceptedCount === 0 && staleRetry.summary.failedCount === 1);
     if (staleRetry.status === 'OK') {
-      const draftsAfterStaleRetry = applyAcceptanceSummaryToDrafts(drafts1, staleRetry.summary);
+      const draftsAfterStaleRetry = applyAcceptanceSummaryToDrafts(drafts1, pendingA, staleRetry.summary);
       check('4. the UI\'s own reconciliation correctly surfaces this as a FAILED draft (COMMITMENT_NO_LONGER_LIVE), never a false ACCEPTED/ALREADY_ACCEPTED', draftsAfterStaleRetry[0].outcome === 'FAILED' && draftsAfterStaleRetry[0].failureReason === 'COMMITMENT_NO_LONGER_LIVE');
     }
     const plansAfterStaleRetry = await plansOf();
@@ -152,7 +152,7 @@ async function main() {
     const acceptResultB = await submitAcceptance(acceptanceIdB, pendingB);
     check('6. [HGR3-C-R1] the fresh, explicitly-approved re-booking succeeds -- the user CAN rebook the identical slot with a new confirmation', acceptResultB.status === 'OK' && acceptResultB.summary.acceptedCount === pendingB.length);
     if (acceptResultB.status !== 'OK') throw new Error('fixture precondition failed: rebooking did not succeed');
-    const draftsAfterB = applyAcceptanceSummaryToDrafts(drafts2, acceptResultB.summary);
+    const draftsAfterB = applyAcceptanceSummaryToDrafts(drafts2, pendingB, acceptResultB.summary);
     const newAcceptedDraft = draftsAfterB.find((d) => d.outcome === 'ACCEPTED');
     const plansAfterB = await plansOf();
     check('6. a GENUINELY NEW live row now exists, with a DIFFERENT id than the original cancelled row', plansAfterB.length === 2 && !!newAcceptedDraft && newAcceptedDraft.plannedActivityId !== originalPlanId);
@@ -162,11 +162,59 @@ async function main() {
     const retryB = await submitAcceptance(acceptanceIdB, pendingB);
     check('7. retrying the NEW identity resolves ALREADY_ACCEPTED, pointing at the real new row -- never a duplicate', retryB.status === 'OK' && retryB.summary.alreadyAcceptedCount === pendingB.length && retryB.summary.acceptedCount === 0);
     if (retryB.status === 'OK') {
-      const draftsAfterRetryB = applyAcceptanceSummaryToDrafts(drafts2, retryB.summary);
+      const draftsAfterRetryB = applyAcceptanceSummaryToDrafts(drafts2, pendingB, retryB.summary);
       check('7. the UI\'s own reconciliation correctly re-locks the session with the SAME real plannedActivityId as before', isSessionLocked(draftsAfterRetryB[0].outcome) && draftsAfterRetryB[0].plannedActivityId === newAcceptedDraft!.plannedActivityId);
     }
     const plansAfterRetryB = await plansOf();
     check('7. retrying the new identity created ZERO additional rows (still exactly 2 total)', plansAfterRetryB.length === 2);
+
+    // ---------- 8. [HGR3-C2 remediation] a same-date-different-time submission (what the pre-fix Adjust flow could construct) reconciles correctly ----------
+    // A SEPARATE GoalActivity (its own independent weekly capacity) with
+    // target 2/week, so a genuine 2-suitable-day proposal is available.
+    // This test deliberately submits two sessions sharing one localDate --
+    // the exact shape the independent review's live repro produced against
+    // the real backend -- to prove the UI's OWN reconciliation (section 2
+    // of this file's remediation) correctly attributes the real success
+    // and the real ACCEPTANCE_IDENTITY_CONFLICT failure without
+    // misattributing either, using the REAL route/backend response, not a
+    // fabricated one. The P1 fix (SessionAdjuster's own collision guard,
+    // WeeklyPlanReviewModal.tsx) prevents a real user from ever
+    // constructing this request through the shipped UI going forward; this
+    // test proves the reconciliation logic is independently correct as
+    // defense in depth, regardless of that UI gate.
+    const activity2 = await addGoalActivity(user.id, goal.id, { title: 'Meditate', activityId: 'meditation', rhythm: { kind: 'N_PER_WEEK', targetPerWeek: 2 } });
+    if (!activity2) throw new Error('fixture setup failed: second addGoalActivity returned null');
+    const proposal3Res = await weeklyProposalRoute(fakeReq(tok, { goalActivityId: activity2.id }));
+    const proposal3 = parseWeeklyProposalResponseBody(await proposal3Res.json(), proposal3Res.status);
+    check('8. setup: a real proposal for the second GoalActivity returns at least one suitable session', proposal3.status === 'OK' && proposal3.proposals.length >= 1);
+    if (proposal3.status === 'OK' && proposal3.proposals.length >= 1) {
+      const first = proposal3.proposals[0];
+      // A second, genuinely valid instant on the SAME local date as
+      // `first` (the backend's own validateSelectionShape rejects a
+      // start whose OWN local date disagrees with the claimed localDate
+      // as TIME_DATE_MISMATCH, so this must be a real same-day instant,
+      // not borrowed from a different day's proposal) -- a few hours
+      // later, same duration, exactly the shape an Adjust-onto-a-
+      // sibling's-date would have produced pre-fix.
+      const secondStart = new Date(new Date(first.start).getTime() + 4 * 3600000);
+      const secondEnd = new Date(secondStart.getTime() + first.durationMinutes * 60000);
+      const secondStillSameDay = getDatePartsInTimezone(TZ, secondStart).dateStr === first.localDate;
+      check('8. setup: the constructed second instant genuinely falls on the SAME local date as the first (a real, valid same-date pair)', secondStillSameDay);
+      if (secondStillSameDay) {
+        const secondOnFirstDate = { localDate: first.localDate, start: secondStart.toISOString(), end: secondEnd.toISOString() };
+        const sameDateSessions = [{ localDate: first.localDate, start: first.start, end: first.end }, secondOnFirstDate];
+        const acceptanceIdC = randomUUID();
+        const res2 = await weeklyAcceptRoute(fakeReq(tok, buildWeeklyAcceptanceRequestBody(activity2.id, acceptanceIdC, sameDateSessions)));
+        const sameDateResult = parseWeeklyAcceptanceResponseBody(await res2.json(), res2.status);
+        check('8. the real backend reproduces the live repro exactly: one of the two same-date sessions succeeds, the other is rejected -- never both silently failing or both silently succeeding', sameDateResult.status === 'OK' && sameDateResult.summary.acceptedCount === 1 && sameDateResult.summary.failedCount === 1);
+        if (sameDateResult.status === 'OK') {
+          const draftsForSameDate = buildSessionDraftsFromProposal([first, { ...first, start: secondOnFirstDate.start, end: secondOnFirstDate.end }]);
+          const reconciled = applyAcceptanceSummaryToDrafts(draftsForSameDate, sameDateSessions, sameDateResult.summary);
+          check('8. the UI\'s own reconciliation correctly attributes the REAL success to the matching (localDate,start,end) draft, not the other same-date one', reconciled[0].outcome === 'ACCEPTED' && !!reconciled[0].plannedActivityId);
+          check('8. ...and correctly attributes the REAL failure reason to the OTHER draft, never misattributing either way', reconciled[1].outcome === 'FAILED' && reconciled[1].failureReason === 'ACCEPTANCE_IDENTITY_CONFLICT');
+        }
+      }
+    }
   } finally {
     console.log(allPassed ? '\nALL WEEKLY PLAN REVIEW CLIENT DB CHECKS PASSED' : '\nSOME WEEKLY PLAN REVIEW CLIENT DB CHECKS FAILED');
     if (!allPassed) process.exit(1);

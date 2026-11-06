@@ -136,35 +136,89 @@ export function selectSessionsPendingSubmission(drafts: readonly WeeklyReviewSes
 
 /**
  * Applies a real `WeeklyAcceptanceSummary` back onto the drafts that
- * produced the submitted request. A success (`ACCEPTED`/`ALREADY_ACCEPTED`)
- * is matched by the exact (localDate, start, end) triple the request
- * itself carried -- never by array position -- so a success can never be
- * mismatched onto the wrong draft. The backend's own closed
- * `WeeklySessionAcceptanceOutcome` union does not carry the attempted
- * start/end back on a `FAILED` outcome (goalRhythmWeeklyAcceptance.ts's own
- * response shape, deliberately non-leaking), so a failure is matched by
- * `localDate` alone instead -- unambiguous in practice, since a batch for
- * one GoalActivity never legitimately contains two sessions on the same
- * date (HGR3-A's own same-day exclusion). A draft with no matching outcome
- * at all is left completely unchanged (should not happen for a well-formed
- * request, but never silently assumed successful either way).
+ * produced the submitted request. `submittedSessions` is the EXACT array
+ * passed to `submitWeeklyAcceptance` for this call (i.e. the
+ * `selectSessionsPendingSubmission` output) -- `summary.sessions` is
+ * guaranteed by the server to correspond to it one-for-one, in the same
+ * order (`acceptWeeklyRhythmSessions`, goalRhythmWeeklyAcceptance.ts,
+ * processes `selections` with a single sequential loop and pushes
+ * outcomes in that same order; the route returns `summary.sessions`
+ * verbatim, never reordered or filtered). This function uses that
+ * guarantee ONLY to recover each outcome's own full, unambiguous
+ * `(localDate, start, end)` key -- the backend's closed
+ * `WeeklySessionAcceptanceOutcome` union does not carry start/end back on
+ * a `FAILED` outcome (goalRhythmWeeklyAcceptance.ts's own response shape,
+ * deliberately non-leaking), so the REQUEST's own copy of that session's
+ * key is used instead. Every draft is still matched by this full,
+ * exact-content key -- never by array position against the draft list
+ * itself (a removed/reordered draft list is handled correctly either
+ * way). This makes two sessions that happen to share a `localDate`
+ * individually attributable by their distinct `start`/`end`, for BOTH
+ * successes and failures -- not merely for successes as before. A draft
+ * with no matching outcome at all (not part of this submission, e.g.
+ * already locked) is left completely unchanged.
  */
-export function applyAcceptanceSummaryToDrafts(drafts: readonly WeeklyReviewSessionDraft[], summary: WeeklyAcceptanceSummary): WeeklyReviewSessionDraft[] {
-  const successByKey = new Map<string, WeeklySessionAcceptanceOutcome>();
-  const failureReasonByDate = new Map<string, string>();
-  for (const session of summary.sessions) {
-    if (session.outcome === 'FAILED') failureReasonByDate.set(session.localDate, session.reason);
-    else successByKey.set(`${session.localDate}|${session.start}|${session.end}`, session);
-  }
-  return drafts.map((draft) => {
-    const success = successByKey.get(`${draft.localDate}|${draft.start}|${draft.end}`);
-    if (success && (success.outcome === 'ACCEPTED' || success.outcome === 'ALREADY_ACCEPTED')) {
-      return { ...draft, outcome: success.outcome, plannedActivityId: success.plannedActivityId, start: success.start, end: success.end, failureReason: undefined };
-    }
-    const failureReason = failureReasonByDate.get(draft.localDate);
-    if (failureReason) return { ...draft, outcome: 'FAILED', failureReason };
-    return draft;
+export function applyAcceptanceSummaryToDrafts(
+  drafts: readonly WeeklyReviewSessionDraft[],
+  submittedSessions: readonly { localDate: string; start: string; end: string }[],
+  summary: WeeklyAcceptanceSummary
+): WeeklyReviewSessionDraft[] {
+  const outcomeByKey = new Map<string, WeeklySessionAcceptanceOutcome>();
+  summary.sessions.forEach((outcome, index) => {
+    const submitted = submittedSessions[index];
+    if (!submitted) return; // defensive only -- the server-guaranteed 1:1 ordering means this should never happen.
+    outcomeByKey.set(`${submitted.localDate}|${submitted.start}|${submitted.end}`, outcome);
   });
+  return drafts.map((draft) => {
+    const outcome = outcomeByKey.get(`${draft.localDate}|${draft.start}|${draft.end}`);
+    if (!outcome) return draft;
+    if (outcome.outcome === 'ACCEPTED' || outcome.outcome === 'ALREADY_ACCEPTED') {
+      return { ...draft, outcome: outcome.outcome, plannedActivityId: outcome.plannedActivityId, start: outcome.start, end: outcome.end, failureReason: undefined };
+    }
+    return { ...draft, outcome: 'FAILED', failureReason: outcome.reason };
+  });
+}
+
+// ============================================================
+// Same-date collision prevention (HGR3-C2 remediation, P1) -- this modal
+// only ever submits sessions for ONE GoalActivity (this component's own
+// header comment), so the uniqueness scope below is implicitly already
+// that single GoalActivity; no separate GoalActivity dimension is needed
+// in these helpers. A removed draft is spliced out of the drafts array
+// entirely by the caller (never merely flagged), so it can never
+// participate in a collision check -- these functions only ever see
+// what's currently active.
+// ============================================================
+
+/** The current `localDate` of every OTHER draft in the batch (by array
+ * position, excluding `excludeIndex` itself) -- including locked
+ * (already-confirmed) ones, since a newly adjusted/pending session
+ * sharing a date with an already-ACCEPTED sibling would trip the exact
+ * same backend payload-binding conflict as two pending siblings would. */
+export function siblingLocalDatesExcluding(drafts: readonly WeeklyReviewSessionDraft[], excludeIndex: number): string[] {
+  return drafts.filter((_, i) => i !== excludeIndex).map((d) => d.localDate);
+}
+
+/** Whether `candidateLocalDate` collides with any of `siblingLocalDates`. */
+export function hasDateCollision(candidateLocalDate: string, siblingLocalDates: readonly string[]): boolean {
+  return siblingLocalDates.includes(candidateLocalDate);
+}
+
+/** Defense-in-depth, pre-submission: true if the ACTIVE batch (whatever is
+ * currently in `drafts` -- a removed session is never present here at
+ * all) contains two or more entries sharing the same `localDate`. Should
+ * never be true in practice -- the Adjust flow's own `hasDateCollision`
+ * check prevents this at the point of creation, and the original Aura
+ * proposal never contains same-date duplicates to begin with (HGR3-A's
+ * own same-day exclusion) -- but "Accept all" revalidates this directly
+ * rather than merely trusting the Adjust-time gate was never bypassed. */
+export function hasDuplicateActiveLocalDates(drafts: readonly WeeklyReviewSessionDraft[]): boolean {
+  const seen = new Set<string>();
+  for (const draft of drafts) {
+    if (seen.has(draft.localDate)) return true;
+    seen.add(draft.localDate);
+  }
+  return false;
 }
 
 // ============================================================
