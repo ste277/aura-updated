@@ -486,10 +486,14 @@ const ACTIVITY_METADATA: Record<string, ActivityMetadataInput> = {
   // not a UI-level check -- see test/marriageMuhurthamFoundation.test.ts
   // and test/marriageRequiredEligibility.test.ts. This covers the
   // Panchang-element and period/combustion layers only -- Lagna Shuddhi
-  // and Navamsha Shuddhi are not implemented (no Ascendant/house-cusp
-  // calculation exists), and the Chaturmas default is GENERAL-scope only
-  // (not Tamil/Vaishnava). Not a claim of complete traditional Marriage
-  // Muhurtham support.
+  // and Navamsha Shuddhi are not implemented as eligibility rules here.
+  // The Ascendant/Lagna point itself IS calculated elsewhere
+  // (packages/lagna's calculateNatalAscendant, EXP1-D1), just not yet
+  // consumed by any rule in this pack; no house-cusp system or Navamsha
+  // calculation exists anywhere in this engine (packages/lagna's own
+  // README lists both as explicit non-goals). The Chaturmas default is
+  // GENERAL-scope only (not Tamil/Vaishnava). Not a claim of complete
+  // traditional Marriage Muhurtham support.
   marriage: {
     family: 'RELATIONSHIP',
     intent: 'MARRIAGE',

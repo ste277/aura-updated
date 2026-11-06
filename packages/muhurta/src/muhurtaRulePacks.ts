@@ -403,8 +403,13 @@ const GRIHA_PRAVESH_SOURCES: MuhurtaRuleSource[] = [
  * pack resolves to SUPPORTED (see computeMuhurtaSupportLevel) and Marriage
  * is live in Muhurtham Finder today. This covers Panchang-element and
  * period/combustion exclusions only -- Lagna Shuddhi and Navamsha Shuddhi
- * are not implemented anywhere in this engine (no Ascendant/house-cusp
- * calculation exists), and regional-tradition coverage remains limited
+ * are not implemented as Marriage eligibility rules here. The
+ * Ascendant/Lagna point itself IS calculated elsewhere (packages/lagna's
+ * calculateNatalAscendant, EXP1-D1) but is not yet consumed by any rule in
+ * this pack; no house-cusp system or Navamsha calculation exists anywhere
+ * in this engine (packages/lagna's own README lists both as explicit
+ * non-goals), so Navamsha Shuddhi specifically has no underlying
+ * calculation to draw on yet. Regional-tradition coverage remains limited
  * (the Chaturmas default below is GENERAL-scope, not Tamil/Vaishnava --
  * see its own note). This is NOT a claim of complete traditional Marriage
  * Muhurtham support.
@@ -636,10 +641,15 @@ export function resolveMuhurtaRulePack(classification: MuhurtaClassification): M
  * this is the canonical mechanism, not a UI-level check. Marriage's
  * dedicated Tithi/Nakshatra/Yoga/Karana data plus these period/combustion
  * exclusions cover the Panchang-element layer; Lagna Shuddhi and Navamsha
- * Shuddhi are not implemented (no Ascendant/house-cusp calculation exists
- * in this engine), and the Chaturmas default is GENERAL-scope only (not
- * Tamil/Vaishnava) -- see MARRIAGE's own periodRules note. Not a claim of
- * complete traditional Marriage Muhurtham support.
+ * Shuddhi are not implemented as eligibility rules here. The Ascendant/
+ * Lagna point itself IS calculated elsewhere (packages/lagna's
+ * calculateNatalAscendant, EXP1-D1), just not yet consumed by any rule in
+ * this pack; no house-cusp system or Navamsha calculation exists anywhere
+ * in this engine (packages/lagna's own README lists both as explicit
+ * non-goals), so Navamsha Shuddhi specifically has no underlying
+ * calculation to draw on yet. The Chaturmas default is GENERAL-scope only
+ * (not Tamil/Vaishnava) -- see MARRIAGE's own periodRules note. Not a
+ * claim of complete traditional Marriage Muhurtham support.
  */
 export function computeMuhurtaSupportLevel(classification: MuhurtaClassification, pack: MuhurtaRulePack): MuhurtaSupportLevel {
   const tithiOk = pack.coverage.tithi !== 'MISSING';
