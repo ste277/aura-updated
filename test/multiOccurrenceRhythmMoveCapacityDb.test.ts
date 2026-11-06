@@ -90,7 +90,11 @@ async function main() {
   function slot(scenario: string, week: 0 | 1, subHour: number): number {
     return base + week * WEEK_MS + SCENARIO_HOURS[scenario] * HOUR + subHour * HOUR;
   }
-  function dateOf(ms: number): string { return new Date(ms).toISOString().slice(0, 10); }
+  // Must be the Asia/Kolkata LOCAL calendar date, matching every production
+  // week-bucketing path (localCalendarWeekStart etc.) -- a naive UTC slice
+  // disagrees with IST for ~5.5h/day and, when that disagreement straddles
+  // a Monday, buckets the query into the wrong calendar week entirely.
+  function dateOf(ms: number): string { return getDatePartsInTimezone(TZ, new Date(ms)).dateStr; }
 
   async function makeGoalActivity(tag: string, targetPerWeek: number) {
     const { goal } = await createGoalWithActivities({ userId: user.id, title: `${GOAL_TITLE_PREFIX}${tag}`, targetDate: null, activities: [] });
