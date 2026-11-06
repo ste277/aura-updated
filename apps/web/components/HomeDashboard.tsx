@@ -1547,7 +1547,7 @@ export function HomeDashboard({
         </div>
       )}
       {dedupedGoalRhythmSuggestions.length > 0 && (
-        <GoalRhythmSuggestionsCard suggestions={dedupedGoalRhythmSuggestions} dismissedIds={dismissedGoalRhythmIds} onDismiss={handleDismissGoalRhythmSuggestion} />
+        <GoalRhythmSuggestionsCard suggestions={dedupedGoalRhythmSuggestions} dismissedIds={dismissedGoalRhythmIds} onDismiss={handleDismissGoalRhythmSuggestion} timezone={effectiveTimezone} />
       )}
       <HomeTimeline
         items={homeTimeline}
