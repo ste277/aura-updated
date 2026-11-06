@@ -47,10 +47,26 @@ function check(label: string, condition: boolean) {
 
 const TZ = 'Asia/Kolkata';
 
+// HGR3-C2 remediation -- a FROZEN "now", threaded into every route call
+// in this file via the repo's own existing, production-safe
+// x-e2e-now/E2E_TIME_OVERRIDE_ENABLED test-time-override mechanism
+// (testTimeOverride.ts, already honored unconditionally by both routes
+// under test -- not a new mechanism). A real weekly-proposal call can
+// legitimately return a same-day candidate only seconds in the future (a
+// genuine, CORRECT TIME_ALREADY_ELAPSED rejection at acceptance time is
+// not a backend bug); without this, ordinary CI latency between the
+// propose and accept calls below can intermittently let that window
+// elapse -- reproduced directly: a real run observed a proposed start of
+// 06:44:00.000Z accepted at 06:44:45.936Z, 46 seconds later, correctly
+// rejected. Freezing "now" removes this real-wall-clock race entirely,
+// rather than merely hoping each run completes fast enough. Set once
+// below, before any route call.
+let frozenNowIso = '';
+
 const fakeReq = (cookie: string | undefined, body: unknown): any => ({
   cookies: { get: (n: string) => (cookie !== undefined && n === 'as_session' ? { value: cookie } : undefined) },
   json: async () => body,
-  headers: new Headers(),
+  headers: new Headers(frozenNowIso ? { 'x-e2e-now': frozenNowIso } : {}),
 });
 
 async function sql(text: string, params: unknown[] = []): Promise<any[]> {
@@ -68,7 +84,15 @@ async function sql(text: string, params: unknown[] = []): Promise<any[]> {
 }
 
 async function main() {
+  process.env.E2E_TIME_OVERRIDE_ENABLED = 'true';
   const now = new Date();
+  // Same real calendar day as `now` (a 10-minute buffer never crosses a
+  // local-day boundary except in the same already-accepted, documented
+  // near-midnight risk window every other real-wall-clock-relative
+  // section of this test suite already carries) -- so this stays
+  // consistent with `planningLocalDate`/`weekBounds` below, which remain
+  // derived from the real, un-frozen `now`.
+  frozenNowIso = new Date(now.getTime() + 10 * 60000).toISOString();
   const planningLocalDate = getDatePartsInTimezone(TZ, now).dateStr;
   const weekBounds = localCalendarWeekBounds(planningLocalDate);
   const futureDatesThisWeek: string[] = [];
@@ -169,24 +193,32 @@ async function main() {
     check('7. retrying the new identity created ZERO additional rows (still exactly 2 total)', plansAfterRetryB.length === 2);
 
     // ---------- 8. [HGR3-C2 remediation] a same-date-different-time submission (what the pre-fix Adjust flow could construct) reconciles correctly ----------
-    // A SEPARATE GoalActivity (its own independent weekly capacity) with
-    // target 2/week, so a genuine 2-suitable-day proposal is available.
-    // This test deliberately submits two sessions sharing one localDate --
-    // the exact shape the independent review's live repro produced against
+    // A completely SEPARATE, freshly-seeded user and GoalActivity --
+    // deliberately isolated from `user`'s own sections 1-7 above, whose
+    // real bookings could otherwise coincide with whatever instant the
+    // real proposal engine picks here and produce a genuine, unrelated
+    // TIME_NO_LONGER_AVAILABLE conflict instead of the specific same-date
+    // payload-binding scenario this section exists to exercise. This test
+    // deliberately submits two sessions sharing one localDate -- the
+    // exact shape the independent review's live repro produced against
     // the real backend -- to prove the UI's OWN reconciliation (section 2
     // of this file's remediation) correctly attributes the real success
-    // and the real ACCEPTANCE_IDENTITY_CONFLICT failure without
-    // misattributing either, using the REAL route/backend response, not a
-    // fabricated one. The P1 fix (SessionAdjuster's own collision guard,
-    // WeeklyPlanReviewModal.tsx) prevents a real user from ever
-    // constructing this request through the shipped UI going forward; this
-    // test proves the reconciliation logic is independently correct as
-    // defense in depth, regardless of that UI gate.
-    const activity2 = await addGoalActivity(user.id, goal.id, { title: 'Meditate', activityId: 'meditation', rhythm: { kind: 'N_PER_WEEK', targetPerWeek: 2 } });
+    // and the real failure without misattributing either, using the REAL
+    // route/backend response, not a fabricated one. The P1 fix
+    // (SessionAdjuster's own collision guard, WeeklyPlanReviewModal.tsx)
+    // prevents a real user from ever constructing this request through
+    // the shipped UI going forward; this test proves the reconciliation
+    // logic is independently correct as defense in depth, regardless of
+    // that UI gate.
+    const user2 = await upsertUserByEmail({ email: `hgr3c2-weekly-review-client-samedate-${Date.now()}@example.com`, cityName: 'Chennai', latitude: 13.0827, longitude: 80.2707, timezone: TZ });
+    await updateBirthProfile(user2.id, { birthDate: '1990-06-15', birthTime: '08:30', birthCityName: 'Chennai', birthLatitude: 13.0827, birthLongitude: 80.2707, birthTimezone: TZ });
+    const tok2 = createSessionToken(user2.id, user2.email);
+    const { goal: goal2 } = await createGoalWithActivities({ userId: user2.id, title: 'Mindfulness (HGR3-C2 same-date fixture)', targetDate: null, activities: [] });
+    const activity2 = await addGoalActivity(user2.id, goal2.id, { title: 'Meditate', activityId: 'meditation', rhythm: { kind: 'N_PER_WEEK', targetPerWeek: 2 } });
     if (!activity2) throw new Error('fixture setup failed: second addGoalActivity returned null');
-    const proposal3Res = await weeklyProposalRoute(fakeReq(tok, { goalActivityId: activity2.id }));
+    const proposal3Res = await weeklyProposalRoute(fakeReq(tok2, { goalActivityId: activity2.id }));
     const proposal3 = parseWeeklyProposalResponseBody(await proposal3Res.json(), proposal3Res.status);
-    check('8. setup: a real proposal for the second GoalActivity returns at least one suitable session', proposal3.status === 'OK' && proposal3.proposals.length >= 1);
+    check('8. setup: a real proposal for the isolated second user/GoalActivity returns at least one suitable session', proposal3.status === 'OK' && proposal3.proposals.length >= 1);
     if (proposal3.status === 'OK' && proposal3.proposals.length >= 1) {
       const first = proposal3.proposals[0];
       // A second, genuinely valid instant on the SAME local date as
@@ -202,16 +234,17 @@ async function main() {
       check('8. setup: the constructed second instant genuinely falls on the SAME local date as the first (a real, valid same-date pair)', secondStillSameDay);
       if (secondStillSameDay) {
         const secondOnFirstDate = { localDate: first.localDate, start: secondStart.toISOString(), end: secondEnd.toISOString() };
-        const sameDateSessions = [{ localDate: first.localDate, start: first.start, end: first.end }, secondOnFirstDate];
+        const firstSubmitted = { localDate: first.localDate, start: first.start, end: first.end };
+        const sameDateSessions = [firstSubmitted, secondOnFirstDate];
         const acceptanceIdC = randomUUID();
-        const res2 = await weeklyAcceptRoute(fakeReq(tok, buildWeeklyAcceptanceRequestBody(activity2.id, acceptanceIdC, sameDateSessions)));
+        const res2 = await weeklyAcceptRoute(fakeReq(tok2, buildWeeklyAcceptanceRequestBody(activity2.id, acceptanceIdC, sameDateSessions)));
         const sameDateResult = parseWeeklyAcceptanceResponseBody(await res2.json(), res2.status);
-        check('8. the real backend reproduces the live repro exactly: one of the two same-date sessions succeeds, the other is rejected -- never both silently failing or both silently succeeding', sameDateResult.status === 'OK' && sameDateResult.summary.acceptedCount === 1 && sameDateResult.summary.failedCount === 1);
+        check('8. the real backend, with these two same-date sessions genuinely isolated from any other booking, reproduces the live repro exactly: the first-processed session succeeds, the second is rejected as a payload-binding conflict -- never both silently failing or both silently succeeding', sameDateResult.status === 'OK' && sameDateResult.summary.acceptedCount === 1 && sameDateResult.summary.failedCount === 1 && sameDateResult.summary.sessions[0]?.outcome === 'ACCEPTED' && sameDateResult.summary.sessions[1]?.outcome === 'FAILED' && (sameDateResult.summary.sessions[1] as any)?.reason === 'ACCEPTANCE_IDENTITY_CONFLICT');
         if (sameDateResult.status === 'OK') {
           const draftsForSameDate = buildSessionDraftsFromProposal([first, { ...first, start: secondOnFirstDate.start, end: secondOnFirstDate.end }]);
           const reconciled = applyAcceptanceSummaryToDrafts(draftsForSameDate, sameDateSessions, sameDateResult.summary);
           check('8. the UI\'s own reconciliation correctly attributes the REAL success to the matching (localDate,start,end) draft, not the other same-date one', reconciled[0].outcome === 'ACCEPTED' && !!reconciled[0].plannedActivityId);
-          check('8. ...and correctly attributes the REAL failure reason to the OTHER draft, never misattributing either way', reconciled[1].outcome === 'FAILED' && reconciled[1].failureReason === 'ACCEPTANCE_IDENTITY_CONFLICT');
+          check('8. ...and correctly attributes the REAL ACCEPTANCE_IDENTITY_CONFLICT failure to the OTHER draft, never misattributing either way', reconciled[1].outcome === 'FAILED' && reconciled[1].failureReason === 'ACCEPTANCE_IDENTITY_CONFLICT');
         }
       }
     }
