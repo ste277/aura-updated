@@ -7,6 +7,7 @@ import type { TimingCandidate, TimingTimePreference } from '../../../packages/re
 import { FULL_ACTIVITY_CATALOG } from '../../../packages/recommendation/src/personalizedTasks';
 import { getActivityDefinition } from '../../../packages/recommendation/src/activityDefinitions';
 import { formatMuhurtaReason } from '../../../packages/muhurta/src/muhurtaReasonFormat';
+import { traditionalCoverageExplanation } from '../lib/muhurthamTraditionalCoverageText';
 import { saveUpcomingPlanFromCandidate } from './PlanWithAuraView';
 import { ExploreModeToggle } from './ExploreModeToggle';
 import { getDatePartsInTimezone, isValidIanaTimezone, searchTimezones, TimezoneOption } from '../lib/timezone';
@@ -644,6 +645,7 @@ export function MuhurthamFinderView({ timingLocation, locationConfirmed, onBack,
       {scope === 'GENERAL' && result && (
         <>
           {resultEventLocation && <EventLocationResultBanner location={resultEventLocation} />}
+          <TraditionalCoverageBanner coverage={result.activity.traditionalCoverage} />
           {visibleDates.length === 0 ? (
             <section style={cardStyle}>
               <div style={{ fontSize: 14, fontWeight: 800 }}>No strongly favorable dates were found in this range.</div>
@@ -719,6 +721,7 @@ export function MuhurthamFinderView({ timingLocation, locationConfirmed, onBack,
       {scope === 'PERSONAL' && personalOk && (
         <>
           {resultEventLocation && <EventLocationResultBanner location={resultEventLocation} />}
+          <TraditionalCoverageBanner coverage={personalOk.activity.traditionalCoverage} />
           {personalVisible.length === 0 ? (
             <section style={cardStyle}>
               <div style={{ fontSize: 14, fontWeight: 800 }}>No strongly favorable dates were found in this range.</div>
@@ -807,6 +810,7 @@ export function MuhurthamFinderView({ timingLocation, locationConfirmed, onBack,
       {scope === 'SHARED' && sharedOk && (
         <>
           {resultEventLocation && <EventLocationResultBanner location={resultEventLocation} />}
+          <TraditionalCoverageBanner coverage={sharedOk.activity.traditionalCoverage} />
           {sharedVisible.length === 0 ? (
             <section style={cardStyle}>
               <div style={{ fontSize: 14, fontWeight: 800 }}>No strongly favorable dates were found in this range.</div>
@@ -1405,6 +1409,21 @@ function EventLocationResultBanner({ location }: { location: CityOption }) {
       <div style={{ fontSize: 12, fontWeight: 800, color: '#dbe7f4' }}>
         📍 Event location: {location.cityName} ({formatCoordinateDirectional(location.latitude, 'lat')}, {formatCoordinateDirectional(location.longitude, 'lng')})
       </div>
+    </div>
+  );
+}
+
+/** PCE-2A: one small, non-badge explanation of which traditional rule data
+ * produced the current results -- never per-date (the tier is the same for
+ * every date in a result, see muhurthamFinder.ts's own doc comment), so
+ * this renders once per search, next to the other result-level banners. No
+ * warning styling (same neutral palette as EventLocationResultBanner
+ * above) -- a GENERAL_PANCHANGAM result is a normal, expected outcome for
+ * 5 of today's 7 supported occasions, not a degraded state. */
+function TraditionalCoverageBanner({ coverage }: { coverage: MuhurthamSearchResult['activity']['traditionalCoverage'] }) {
+  return (
+    <div style={{ ...cardStyle, padding: '10px 14px' }}>
+      <div style={{ fontSize: 12, color: '#94a3b8', lineHeight: 1.5 }}>{traditionalCoverageExplanation(coverage)}</div>
     </div>
   );
 }

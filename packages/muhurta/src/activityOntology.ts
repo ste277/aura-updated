@@ -75,9 +75,14 @@ export type MuhurtaIntent =
   // PROJECT_START (too generic to carry Marriage-specific Panchanga rules --
   // see muhurtaRulePacks.ts's MARRIAGE rule pack). The activity this intent
   // is assigned to (packages/recommendation/src/activityDefinitions.ts's
-  // `marriage`) remains gated out of Muhurtham Finder until its rule pack's
-  // requiresPeriodExclusion/requiresPlanetaryCombustion needs are met --
-  // see computeMuhurtaSupportLevel() in muhurtaRulePacks.ts.
+  // `marriage`) is SUPPORTED and live in Muhurtham Finder today -- its rule
+  // pack's requiresPeriodExclusion/requiresPlanetaryCombustion needs were
+  // met by EXP1-C (periodRules/combustionRules are populated) -- see
+  // computeMuhurtaSupportLevel() in muhurtaRulePacks.ts. PCE-2A: its
+  // traditional-coverage tier is OCCASION_SPECIFIC, not
+  // TRADITIONALLY_VALIDATED -- see deriveTraditionalCoverageLevel() there
+  // for what's still outstanding (e.g. Lagna Shuddhi is not an eligibility
+  // rule here).
   | 'MARRIAGE'
   // HOME
   | 'GRIHA_PRAVESH'

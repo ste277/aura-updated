@@ -114,8 +114,8 @@ import { getPanchangForDate, PanchangWindowSpan } from '../../panchang/src/panch
 import { isInauspiciousCommencementWindow } from '../../panchang/src/windows';
 import { getDatePartsInTimezone, isValidCalendarDateString, localDateTimeToUTC } from '../../panchang/src/localDate';
 import { FULL_ACTIVITY_CATALOG } from './personalizedTasks';
-import { ACTIVITY_DEFINITIONS, ActivityDefinition } from './activityDefinitions';
-import { computeMuhurtaSupportLevel, resolveMuhurtaRulePack, isAuthoritativeAvoidNakshatra, isAuthoritativeAvoidTithi, isAuthoritativeAvoidYoga, isAuthoritativeAvoidKarana, AURA_MUHURTA_METHODOLOGY_ID } from '../../muhurta/src/muhurtaRulePacks';
+import { ACTIVITY_DEFINITIONS, ActivityDefinition, getActivityDefinition } from './activityDefinitions';
+import { computeMuhurtaSupportLevel, resolveMuhurtaRulePack, isAuthoritativeAvoidNakshatra, isAuthoritativeAvoidTithi, isAuthoritativeAvoidYoga, isAuthoritativeAvoidKarana, AURA_MUHURTA_METHODOLOGY_ID, deriveTraditionalCoverageLevel, MuhurtaTraditionalCoverageLevel } from '../../muhurta/src/muhurtaRulePacks';
 import { evaluatePersonalMuhurtaFit, AURA_PERSONAL_FIT_METHODOLOGY_ID, PersonalMuhurtaContext } from './auraFitEngine';
 import { getTaraBala } from '../../vedic/src/natalChart';
 import { findNextTransition, getNakshatra, getTithi, getYoga, getKarana } from '../../vedic/src/panchangElements';
@@ -136,12 +136,19 @@ import type { ActionPhase } from '../../muhurta/src/actionPhase';
  *   - its resolved MuhurtaRulePack reaches SUPPORTED (not PARTIAL/
  *     NOT_YET_SUPPORTED) -- see muhurtaRulePacks.ts's computeMuhurtaSupportLevel
  *     for exactly what that requires (stricter for CEREMONIAL activities).
- * A PARTIAL activity (today: Engagement, Griha Pravesh -- both CEREMONIAL
- * with incomplete Tithi/Nakshatra coverage) is automatically excluded here,
+ * A PARTIAL activity (today: Engagement only -- CEREMONIAL with incomplete,
+ * non-dedicated Tithi/Nakshatra coverage; Griha Pravesh reached SUPPORTED
+ * once its own INTENT_RULE_PACKS entry was added and is excluded from this
+ * list for a different reason entirely) is automatically excluded here,
  * per brief section 10's "PARTIAL activities may be hidden from normal
  * Finder results for now" -- computed from the SAME rule-pack data the
  * completion report's coverage matrix is built from, so this list can never
- * silently drift from that audit.
+ * silently drift from that audit. PCE-2A: being SUPPORTED here (eligibility)
+ * is a separate question from an activity's MuhurtaTraditionalCoverageLevel
+ * (traditional completeness) -- see deriveTraditionalCoverageLevel() in
+ * muhurtaRulePacks.ts; Marriage and Griha Pravesh are both SUPPORTED AND
+ * OCCASION_SPECIFIC, while the other five SUPPORTED activities are
+ * GENERAL_PANCHANGAM (generic family-fallback data, not occasion-specific).
  */
 function isMuhurthamEligible(definition: ActivityDefinition): boolean {
   if (definition.status === 'AMBIGUOUS') return false;
@@ -155,6 +162,24 @@ export type SupportedMuhurthamActivityId = string;
 
 export function isSupportedMuhurthamActivity(activityId: string): boolean {
   return SUPPORTED_MUHURTHAM_ACTIVITY_IDS.includes(activityId);
+}
+
+/**
+ * PCE-2A: resolves an ActivityProfile (the FULL_ACTIVITY_CATALOG shape every
+ * Finder entry point looks activities up as) to its trust-contract tier, via
+ * the SAME ActivityDefinition.muhurta classification isMuhurthamEligible()
+ * above and profileFromActivity() already use (getActivityDefinition()) --
+ * never a second, independent lookup. Every caller here already only ever
+ * passes an isSupportedMuhurthamActivity() id, so the classification always
+ * resolves in practice -- but if it somehow didn't (unknown/unmapped
+ * activity), this defaults to GENERAL_PANCHANGAM, never a higher tier,
+ * per the explicit "missing or unknown metadata must never default to the
+ * highest trust tier" requirement.
+ */
+function traditionalCoverageForActivity(activity: { id: string }): MuhurtaTraditionalCoverageLevel {
+  const classification = getActivityDefinition(activity.id)?.muhurta;
+  if (!classification) return 'GENERAL_PANCHANGAM';
+  return deriveTraditionalCoverageLevel(resolveMuhurtaRulePack(classification));
 }
 
 export type MuhurthamRating = 'EXCELLENT' | 'STRONG' | 'FAVORABLE' | 'ACCEPTABLE';
@@ -243,7 +268,11 @@ export interface MuhurthamDateCandidate {
 }
 
 export interface MuhurthamSearchResult {
-  activity: { id: string; title: string; icon: string };
+  /** PCE-2A: traditionalCoverage is derived from the ACTUAL resolved
+   * MuhurtaRulePack (deriveTraditionalCoverageLevel(), muhurtaRulePacks.ts),
+   * never from activityId alone -- see resolveMuhurthamSearchParams(). One
+   * value per result, consistent across every entry in `dates` below. */
+  activity: { id: string; title: string; icon: string; traditionalCoverage: MuhurtaTraditionalCoverageLevel };
   dateRange: MuhurthamDateRange;
   dates: MuhurthamDateCandidate[];
   evaluatedDateCount: number;
@@ -1071,8 +1100,19 @@ function resolveMuhurthamSearchParams(request: MuhurthamSearchRequest, callerNam
     throw new Error(`${callerName}: dateRange must be a valid { start, end } with end on or after start.`);
   }
 
+  // PCE-2A: derived from the same ActivityDefinition.muhurta -> rule-pack
+  // resolution path the engine's own eligibility/scoring already uses
+  // (traditionalCoverageForActivity() -> getActivityDefinition() ->
+  // resolveMuhurtaRulePack(), muhurtaRulePacks.ts), never a hand-maintained
+  // id-based guess. One resolution per request, reused by every
+  // MuhurthamSearchResult.activity below -- see "Required behavior:
+  // coverage classification must remain consistent across candidate
+  // results" in the PCE-2A ticket.
+  const traditionalCoverage = traditionalCoverageForActivity(activity);
+
   return {
     activity,
+    traditionalCoverage,
     durationMinutes: Math.min(360, Math.max(15, Math.round(request.durationMinutes ?? DEFAULT_DURATION_MINUTES))),
     limit: Math.max(1, Math.min(MAX_LIMIT, Math.round(request.limit ?? DEFAULT_LIMIT))),
     preference: request.timePreference ?? 'ANY',
@@ -1102,7 +1142,7 @@ function resolveMuhurthamSearchParams(request: MuhurthamSearchRequest, callerNam
  * intentionally-fixed bug; see the Personal Muhurtham completion report.)
  */
 export function findMuhurthams(request: MuhurthamSearchRequest): MuhurthamSearchResult {
-  const { activity, durationMinutes, limit, preference, dateStrs } = resolveMuhurthamSearchParams(request, 'findMuhurthams');
+  const { activity, traditionalCoverage, durationMinutes, limit, preference, dateStrs } = resolveMuhurthamSearchParams(request, 'findMuhurthams');
   const generalContext: DailyAssistantContext = { ...request.context, personalContext: undefined };
   const profile = profileFromActivity(activity);
 
@@ -1144,7 +1184,7 @@ export function findMuhurthams(request: MuhurthamSearchRequest): MuhurthamSearch
     .sort((a, b) => a.date.localeCompare(b.date));
 
   return {
-    activity: { id: activity.id, title: activity.title, icon: activity.icon },
+    activity: { id: activity.id, title: activity.title, icon: activity.icon, traditionalCoverage },
     dateRange: request.dateRange,
     dates: ranked,
     evaluatedDateCount: dateStrs.length,
@@ -1287,7 +1327,11 @@ export interface MuhurthamPersonalDateCandidate {
 export interface MuhurthamPersonalSearchResult {
   scope: 'PERSONAL';
   status: 'OK';
-  activity: { id: string; title: string; icon: string };
+  /** PCE-2A: traditionalCoverage is derived from the ACTUAL resolved
+   * MuhurtaRulePack (deriveTraditionalCoverageLevel(), muhurtaRulePacks.ts),
+   * never from activityId alone -- see resolveMuhurthamSearchParams(). One
+   * value per result, consistent across every entry in `dates` below. */
+  activity: { id: string; title: string; icon: string; traditionalCoverage: MuhurtaTraditionalCoverageLevel };
   dateRange: MuhurthamDateRange;
   dates: MuhurthamPersonalDateCandidate[];
   evaluatedDateCount: number;
@@ -1321,7 +1365,7 @@ function taraBalaFactor(personalContext: PersonalMuhurtaContext, at: Date): Pers
  * ignores.
  */
 export function findPersonalMuhurthams(request: MuhurthamSearchRequest): MuhurthamPersonalSearchOutcome {
-  const { activity, durationMinutes, limit, preference, dateStrs } = resolveMuhurthamSearchParams(request, 'findPersonalMuhurthams');
+  const { activity, traditionalCoverage, durationMinutes, limit, preference, dateStrs } = resolveMuhurthamSearchParams(request, 'findPersonalMuhurthams');
 
   const personalContext = request.context.personalContext;
   if (!personalContext || personalContext.natalNakshatraIndex === undefined) {
@@ -1381,7 +1425,7 @@ export function findPersonalMuhurthams(request: MuhurthamSearchRequest): Muhurth
   return {
     scope: 'PERSONAL',
     status: 'OK',
-    activity: { id: activity.id, title: activity.title, icon: activity.icon },
+    activity: { id: activity.id, title: activity.title, icon: activity.icon, traditionalCoverage },
     dateRange: request.dateRange,
     dates: ranked,
     evaluatedDateCount: dateStrs.length,
@@ -1594,7 +1638,11 @@ export interface MuhurthamSharedDateCandidate {
 export interface MuhurthamSharedSearchResult {
   scope: 'SHARED';
   status: 'OK';
-  activity: { id: string; title: string; icon: string };
+  /** PCE-2A: traditionalCoverage is derived from the ACTUAL resolved
+   * MuhurtaRulePack (deriveTraditionalCoverageLevel(), muhurtaRulePacks.ts),
+   * never from activityId alone -- see resolveMuhurthamSearchParams(). One
+   * value per result, consistent across every entry in `dates` below. */
+  activity: { id: string; title: string; icon: string; traditionalCoverage: MuhurtaTraditionalCoverageLevel };
   dateRange: MuhurthamDateRange;
   /** Brief section 17: id + display name only -- never the SavedPerson's
    * birth date/time/timezone/coordinates. The UI already knows which person
@@ -1630,7 +1678,7 @@ export type MuhurthamSharedSearchOutcome = MuhurthamSharedSearchResult | Muhurth
  * invoked).
  */
 export function findSharedMuhurthams(request: MuhurthamSearchRequest): MuhurthamSharedSearchOutcome {
-  const { activity, durationMinutes, limit, preference, dateStrs } = resolveMuhurthamSearchParams(request, 'findSharedMuhurthams');
+  const { activity, traditionalCoverage, durationMinutes, limit, preference, dateStrs } = resolveMuhurthamSearchParams(request, 'findSharedMuhurthams');
 
   const userContext = request.context.personalContext;
   if (!userContext || userContext.natalNakshatraIndex === undefined) {
@@ -1707,7 +1755,7 @@ export function findSharedMuhurthams(request: MuhurthamSearchRequest): Muhurtham
   return {
     scope: 'SHARED',
     status: 'OK',
-    activity: { id: activity.id, title: activity.title, icon: activity.icon },
+    activity: { id: activity.id, title: activity.title, icon: activity.icon, traditionalCoverage },
     dateRange: request.dateRange,
     savedPerson: { id: partner.savedPersonId, name: partner.name },
     dates: ranked,
@@ -1771,7 +1819,11 @@ export interface MuhurthamCandidateCheckRequest {
 export interface MuhurthamCandidateCheckResult {
   scope: 'GENERAL' | 'PERSONAL' | 'SHARED';
   status: 'OK';
-  activity: { id: string; title: string; icon: string };
+  /** PCE-2A: traditionalCoverage is derived from the ACTUAL resolved
+   * MuhurtaRulePack (deriveTraditionalCoverageLevel(), muhurtaRulePacks.ts),
+   * never from activityId alone -- see resolveMuhurthamSearchParams(). One
+   * value per result, consistent across every entry in `dates` below. */
+  activity: { id: string; title: string; icon: string; traditionalCoverage: MuhurtaTraditionalCoverageLevel };
   eligible: boolean;
   rating: MuhurthamRating | SharedMuhurthamRating;
   score: number;
@@ -1816,6 +1868,11 @@ export function evaluateMuhurthamCandidateAt(request: MuhurthamCandidateCheckReq
   const durationMinutes = Math.min(360, Math.max(15, Math.round(request.durationMinutes ?? DEFAULT_DURATION_MINUTES)));
   const { start, context } = request;
 
+  // PCE-2A: same derivation resolveMuhurthamSearchParams() uses for the
+  // search entry points -- resolved from the same activity.muhurta
+  // classification, never re-derived by a different path.
+  const traditionalCoverage = traditionalCoverageForActivity(activity);
+
   // Same panchangWindows evaluateMuhurthamCandidate() needs for every scope
   // (the section-7 friction/overlap safety check) -- resolved for `start`'s
   // OWN local calendar date in the Event/Timing Location's timezone (never
@@ -1837,7 +1894,7 @@ export function evaluateMuhurthamCandidateAt(request: MuhurthamCandidateCheckReq
     return {
       scope: request.scope,
       status: 'OK',
-      activity: { id: activity.id, title: activity.title, icon: activity.icon },
+      activity: { id: activity.id, title: activity.title, icon: activity.icon, traditionalCoverage },
       eligible,
       rating: rateMuhurtham(canonical.score, hasCautionOrConflict),
       score: canonical.score,
