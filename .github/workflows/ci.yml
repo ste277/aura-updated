@@ -53,6 +53,8 @@ jobs:
         run: npx ts-node test/muhurtaRulePacks.test.ts
       - name: Run Muhurta traditional coverage test (PCE-2A)
         run: npx ts-node test/muhurtaTraditionalCoverage.test.ts
+      - name: Run PCE-3B independent reference validation (strict checks fail CI; observational findings are report-only, printed to this step's own log, and never fail it -- see the test file's own doc comment)
+        run: npx ts-node test/pce3bIndependentReferenceValidation.test.ts
       - name: Run Marriage Muhurtham foundation test
         run: npx ts-node test/marriageMuhurthamFoundation.test.ts
       - name: Run Marriage required eligibility test

@@ -491,7 +491,12 @@ const MARRIAGE_SOURCES: MuhurtaRuleSource[] = [
  * overrides are optional -- Griha Pravesh has none (its own Yoga/Karana
  * coverage stays at the generic/global level only); Marriage supplies both.
  */
-const INTENT_RULE_PACKS: Partial<Record<MuhurtaIntent, { tithi: MuhurtaFactorRuleSet<RegExp>; nakshatra: MuhurtaFactorRuleSet<string>; yoga?: MuhurtaFactorRuleSet<string>; karana?: MuhurtaFactorRuleSet<string>; requiresPeriodExclusion?: boolean; requiresPlanetaryCombustion?: boolean; periodRules?: { kharmasRashiIndices: number[]; chaturmas: boolean; adhikaMasa: boolean }; combustionRules?: CombustibleGraha[]; sources: MuhurtaRuleSource[]; confidence: MuhurtaRuleConfidence; scope: MuhurtaRuleScope; lastReviewed: string; reasonNote: string; note: string }>> = {
+// Exported (PCE-3B) solely so test/pce3bIndependentReferenceValidation.test.ts
+// can read the real, already-defined avoid-Yoga/avoid-Tithi lists when
+// comparing against independently published reference examples -- no
+// production caller consumes this export; resolveMuhurtaRulePack() below
+// remains the only production read path.
+export const INTENT_RULE_PACKS: Partial<Record<MuhurtaIntent, { tithi: MuhurtaFactorRuleSet<RegExp>; nakshatra: MuhurtaFactorRuleSet<string>; yoga?: MuhurtaFactorRuleSet<string>; karana?: MuhurtaFactorRuleSet<string>; requiresPeriodExclusion?: boolean; requiresPlanetaryCombustion?: boolean; periodRules?: { kharmasRashiIndices: number[]; chaturmas: boolean; adhikaMasa: boolean }; combustionRules?: CombustibleGraha[]; sources: MuhurtaRuleSource[]; confidence: MuhurtaRuleConfidence; scope: MuhurtaRuleScope; lastReviewed: string; reasonNote: string; note: string }>> = {
   GRIHA_PRAVESH: {
     tithi: {
       favorable: [/Dvitiya/, /Tritiya/, /Panchami/, /Dashami/, /Ekadashi/, /Trayodashi/],
