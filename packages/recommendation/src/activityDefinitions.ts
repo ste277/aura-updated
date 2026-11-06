@@ -474,25 +474,33 @@ const ACTIVITY_METADATA: Record<string, ActivityMetadataInput> = {
     notes: 'Has its own dedicated (IMPLEMENTED) Tithi/Nakshatra rule pack -- see GRIHA_PRAVESH in muhurtaRulePacks.ts, sourced from multi-source web research (August 2026) -- rather than a borrowed family base (HOME has no generic MuhurtaRulePack base). Resolves to SUPPORTED and is exposed in Muhurtham Finder.',
     immediateAction: 'PLAN',
   },
-  // Marriage Muhurtham Foundation V1 (PR A): has its own dedicated
-  // (IMPLEMENTED) Tithi/Nakshatra/Yoga/Karana rule pack -- see MARRIAGE in
-  // muhurtaRulePacks.ts, sourced independently from Griha Pravesh. Despite
-  // that dedicated coverage, computeMuhurtaSupportLevel() still resolves
-  // this to PARTIAL (not SUPPORTED) because the pack declares
-  // requiresPeriodExclusion/requiresPlanetaryCombustion, and neither
-  // whole-month exclusion (Chaturmas/Kharmas/Adhika Masa) nor planetary
-  // combustion (Guru/Shukra Asta) eligibility exists anywhere in this
-  // engine yet -- that is PR B's job. Marriage is therefore intentionally
-  // NOT exposed in Muhurtham Finder (SUPPORTED_MUHURTHAM_ACTIVITY_IDS) by
-  // this same canonical mechanism, not a UI-level check -- see
-  // test/marriageMuhurthamFoundation.test.ts's own gating regression.
+  // Marriage Muhurtham Foundation V1 (PR A) + Required Eligibility V1
+  // (PR B): has its own dedicated (IMPLEMENTED) Tithi/Nakshatra/Yoga/Karana
+  // rule pack -- see MARRIAGE in muhurtaRulePacks.ts, sourced independently
+  // from Griha Pravesh -- plus whole-month/period exclusion
+  // (Chaturmas/Kharmas/Adhika Masa) and planetary-combustion (Guru/Shukra
+  // Asta) eligibility (periodRules/combustionRules on that same rule
+  // pack). EXP1-C update: computeMuhurtaSupportLevel() now resolves this
+  // to SUPPORTED, and Marriage IS exposed in Muhurtham Finder
+  // (SUPPORTED_MUHURTHAM_ACTIVITY_IDS) by this same canonical mechanism,
+  // not a UI-level check -- see test/marriageMuhurthamFoundation.test.ts
+  // and test/marriageRequiredEligibility.test.ts. This covers the
+  // Panchang-element and period/combustion layers only -- Lagna Shuddhi
+  // and Navamsha Shuddhi are not implemented as eligibility rules here.
+  // The Ascendant/Lagna point itself IS calculated elsewhere
+  // (packages/lagna's calculateNatalAscendant, EXP1-D1), just not yet
+  // consumed by any rule in this pack; no house-cusp system or Navamsha
+  // calculation exists anywhere in this engine (packages/lagna's own
+  // README lists both as explicit non-goals). The Chaturmas default is
+  // GENERAL-scope only (not Tamil/Vaishnava). Not a claim of complete
+  // traditional Marriage Muhurtham support.
   marriage: {
     family: 'RELATIONSHIP',
     intent: 'MARRIAGE',
     evaluationDepth: 'CEREMONIAL',
     timingSensitivity: { start: 'HIGH', duration: 'MEDIUM', end: 'LOW' },
     socialMode: 'PAIR',
-    notes: 'Has its own dedicated (IMPLEMENTED) Tithi/Nakshatra/Yoga/Karana rule pack (see MARRIAGE in muhurtaRulePacks.ts), but remains PARTIAL/hidden from Muhurtham Finder until whole-month/period exclusion and planetary-combustion (Guru/Shukra Asta) eligibility are added -- see requiresPeriodExclusion/requiresPlanetaryCombustion on that rule pack and computeMuhurtaSupportLevel(). Deliberately not yet reachable via Ask Aura free-text routing either -- see personalizedTasks.ts\'s catalog entry for why its aliases list is empty in this PR.',
+    notes: 'Has its own dedicated (IMPLEMENTED) Tithi/Nakshatra/Yoga/Karana rule pack plus period-exclusion and planetary-combustion coverage (see MARRIAGE in muhurtaRulePacks.ts) and resolves to SUPPORTED -- it is live in Muhurtham Finder today, not hidden. Lagna Shuddhi and Navamsha Shuddhi are not yet implemented, and regional-tradition coverage (e.g. Tamil/Vaishnava Chaturmas variants) remains limited; see requiresPeriodExclusion/requiresPlanetaryCombustion on that rule pack and computeMuhurtaSupportLevel(). Now reachable via Ask Aura free-text routing -- see personalizedTasks.ts\'s catalog entry, whose aliases list is populated.',
     immediateAction: 'PLAN',
   },
 
