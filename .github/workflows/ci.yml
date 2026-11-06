@@ -53,6 +53,8 @@ jobs:
         run: npx ts-node test/muhurtaRulePacks.test.ts
       - name: Run Muhurta traditional coverage test (PCE-2A)
         run: npx ts-node test/muhurtaTraditionalCoverage.test.ts
+      - name: Run Lahiri ayanamsa epoch-fix regression test (PCE-4A)
+        run: npx ts-node test/pce4aLahiriAyanamsaEpochFix.test.ts
       - name: Run Marriage Muhurtham foundation test
         run: npx ts-node test/marriageMuhurthamFoundation.test.ts
       - name: Run Marriage required eligibility test

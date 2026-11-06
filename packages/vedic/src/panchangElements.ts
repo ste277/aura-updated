@@ -46,10 +46,26 @@ export function getVara(weekday: number): string {
   return VARA_NAMES[((weekday % 7) + 7) % 7];
 }
 
-/** Lahiri Ayanamsa approximation in degrees */
+/**
+ * Lahiri Ayanamsa approximation in degrees (linear fit: 23.85 deg at the
+ * J2000.0 epoch, +1.4 deg/century -- a mean approximation without nutation,
+ * accurate to within ~30 arcsec of the true Chitrapaksha value per
+ * independent reference tables, e.g. Jagannath Hora's Swiss-Ephemeris-based
+ * historical ayanamsa tables).
+ *
+ * `AstroTime.ut` (astronomy-engine) is ALREADY "days since the J2000.0
+ * epoch" (see astronomy-engine's own AstroTime constructor: `this.ut =
+ * (date.getTime() - J2000.getTime()) / MillisPerDay`) -- so it must be used
+ * directly as the century argument, not re-based against 51544.5 (the
+ * Modified Julian Date OF the J2000.0 epoch itself). A prior version of
+ * this function double-subtracted that epoch, producing a constant ~1.98
+ * degree error at every date (1.4 * 51544.5/36525 degrees) -- see AURA
+ * PCE-3B-FIX1 / PCE-4A and issue #297 for the full investigation and
+ * independent-reference validation.
+ */
 export function lahiriAyanamsa(date: Date): number {
   const astroTime = new AstroTime(date);
-  const t = (astroTime.ut - 51544.5) / 36525;
+  const t = astroTime.ut / 36525;
   return 23.85 + 1.4 * t;
 }
 
