@@ -201,6 +201,32 @@ export interface MuhurthamPanchangSummary {
   karana: string;
 }
 
+/**
+ * UX0-FIX1 -- the display-only Panchang summary shown alongside a search
+ * result MUST describe the Tithi/Nakshatra/Yoga/Karana actually in effect
+ * at the recommended window's own start instant, never the day-level
+ * getPanchangForDate() default (local noon, documented on
+ * GetPanchangForDateParams.referenceInstant -- correct for a genuine
+ * whole-day summary like the Panchang Calendar, wrong for a time-specific
+ * recommendation). `windows` (the favorable/caution period spans
+ * findBestWindowsForDate() needs) is pure solar-ephemeris arithmetic with
+ * no dependency on referenceInstant, so re-deriving only `panchanga` here
+ * -- via a second, cheap getPanchangForDate() call pinned to the real
+ * instant -- changes nothing about candidate discovery, scoring or
+ * ranking (all already instant-correct via evaluateMuhurta() ->
+ * getPanchangaSnapshot(), confirmed unaffected by this fix). This is
+ * display-data correction only. */
+export function panchangSummaryAt(localDate: string, latitude: number, longitude: number, timezone: string, instant: Date): MuhurthamPanchangSummary {
+  const atInstant = getPanchangForDate({ localDate, latitude, longitude, timezone, referenceInstant: instant });
+  return {
+    vara: atInstant.panchanga.vara,
+    tithi: atInstant.panchanga.tithi.name,
+    nakshatra: atInstant.panchanga.nakshatra.name,
+    yoga: atInstant.panchanga.yoga.name,
+    karana: atInstant.panchanga.karana.name,
+  };
+}
+
 export interface MuhurthamDateCandidate {
   date: string;
   rating: MuhurthamRating;
@@ -1104,13 +1130,11 @@ export function findMuhurthams(request: MuhurthamSearchRequest): MuhurthamSearch
       alternateWindows: evaluated.alternates.map(toWindowCandidate),
       reasons: supportReasons,
       cautions: cautionReasons,
-      panchangSummary: {
-        vara: panchangDay.panchanga.vara,
-        tithi: panchangDay.panchanga.tithi.name,
-        nakshatra: panchangDay.panchanga.nakshatra.name,
-        yoga: panchangDay.panchanga.yoga.name,
-        karana: panchangDay.panchanga.karana.name,
-      },
+      // UX0-FIX1 -- the displayed Panchang must describe the BEST WINDOW's
+      // own start instant, not getPanchangForDate()'s day-level noon
+      // default (panchangDay.panchanga, still used above only for its
+      // referenceInstant-independent `windows`).
+      panchangSummary: panchangSummaryAt(dateStr, request.context.latitude, request.context.longitude, request.context.timezone, new Date(evaluated.best.start)),
     });
   }
 
@@ -1343,13 +1367,9 @@ export function findPersonalMuhurthams(request: MuhurthamSearchRequest): Muhurth
       reasons: supportReasons,
       cautions: cautionReasons,
       personalFactors: { taraBala: taraBalaFactor(personalContext, bestStart) },
-      panchangSummary: {
-        vara: panchangDay.panchanga.vara,
-        tithi: panchangDay.panchanga.tithi.name,
-        nakshatra: panchangDay.panchanga.nakshatra.name,
-        yoga: panchangDay.panchanga.yoga.name,
-        karana: panchangDay.panchanga.karana.name,
-      },
+      // UX0-FIX1 -- see panchangSummaryAt()'s own doc comment; bestStart is
+      // already the real best-window instant computed above for Tara Bala.
+      panchangSummary: panchangSummaryAt(dateStr, request.context.latitude, request.context.longitude, request.context.timezone, bestStart),
     });
   }
 
@@ -1673,13 +1693,9 @@ export function findSharedMuhurthams(request: MuhurthamSearchRequest): Muhurtham
       alternateWindows: evaluated.alternates.map(toWindowCandidate),
       reasons: supportReasons,
       cautions: cautionReasons,
-      panchangSummary: {
-        vara: panchangDay.panchanga.vara,
-        tithi: panchangDay.panchanga.tithi.name,
-        nakshatra: panchangDay.panchanga.nakshatra.name,
-        yoga: panchangDay.panchanga.yoga.name,
-        karana: panchangDay.panchanga.karana.name,
-      },
+      // UX0-FIX1 -- see panchangSummaryAt()'s own doc comment; bestStart is
+      // already the real best-window instant computed above for Tara Bala.
+      panchangSummary: panchangSummaryAt(dateStr, request.context.latitude, request.context.longitude, request.context.timezone, bestStart),
     });
   }
 
@@ -1806,7 +1822,14 @@ export function evaluateMuhurthamCandidateAt(request: MuhurthamCandidateCheckReq
   // "today"), the exact same getPanchangForDate() call the search functions
   // make once per scanned date, here made once for the requested instant.
   const localDateStr = getDatePartsInTimezone(context.timezone, start).dateStr;
-  const panchangDay = getPanchangForDate({ localDate: localDateStr, latitude: context.latitude, longitude: context.longitude, timezone: context.timezone });
+  // UX0-FIX1 -- `start` is this function's own requested instant; pass it
+  // as referenceInstant so `panchangDay.panchanga` (used below only for
+  // the display panchangSummary) describes the Tithi/Nakshatra/Yoga/Karana
+  // actually in effect AT `start`, not getPanchangForDate()'s day-level
+  // noon default. `panchangDay.windows` (used for the section-7 friction/
+  // overlap safety check) is unaffected either way -- pure solar-ephemeris
+  // arithmetic, independent of referenceInstant.
+  const panchangDay = getPanchangForDate({ localDate: localDateStr, latitude: context.latitude, longitude: context.longitude, timezone: context.timezone, referenceInstant: start });
 
   const buildResult = (eligible: boolean, canonical: TimingCandidate, extra: Partial<MuhurthamCandidateCheckResult> = {}): MuhurthamCandidateCheckResult => {
     const cautionReasons = canonical.reasons.filter((r) => r.polarity === 'CAUTION' || r.polarity === 'BLOCK');

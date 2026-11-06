@@ -45,6 +45,8 @@ jobs:
         run: npx ts-node test/activityCatalogEveryday.test.ts
       - name: Run Muhurtham Finder test
         run: npx ts-node test/muhurthamFinder.test.ts
+      - name: Run Panchang reference-instant regression test
+        run: npx ts-node test/panchangReferenceInstantRegression.test.ts
       - name: Run Muhurtham search API validation test
         run: npx ts-node test/muhurthamSearchApi.test.ts
       - name: Run Muhurta rule packs test
