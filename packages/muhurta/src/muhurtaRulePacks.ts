@@ -397,9 +397,17 @@ const GRIHA_PRAVESH_SOURCES: MuhurtaRuleSource[] = [
  * and Guru/Shukra Asta (Jupiter/Venus planetary combustion) among the most
  * strongly and consistently attested Marriage-specific rules -- several
  * sourced to classical texts (Muhurta Chintamani, Dharmasindhu) by name,
- * with no disagreement across sources. Neither mechanism exists anywhere in
- * this engine yet (PR B's job) -- until it does, this pack cannot honestly
- * claim SUPPORTED for a ceremonial result (see computeMuhurtaSupportLevel).
+ * with no disagreement across sources. EXP1-C update: both mechanisms now
+ * exist (periodRules/combustionRules below, backed by
+ * spanOverlapsProhibitedPeriod/spanOverlapsPlanetaryCombustion), so this
+ * pack resolves to SUPPORTED (see computeMuhurtaSupportLevel) and Marriage
+ * is live in Muhurtham Finder today. This covers Panchang-element and
+ * period/combustion exclusions only -- Lagna Shuddhi and Navamsha Shuddhi
+ * are not implemented anywhere in this engine (no Ascendant/house-cusp
+ * calculation exists), and regional-tradition coverage remains limited
+ * (the Chaturmas default below is GENERAL-scope, not Tamil/Vaishnava --
+ * see its own note). This is NOT a claim of complete traditional Marriage
+ * Muhurtham support.
  */
 const MARRIAGE_SOURCES: MuhurtaRuleSource[] = [
   {
@@ -621,11 +629,17 @@ export function resolveMuhurtaRulePack(classification: MuhurtaClassification): M
  * gate: an intent whose own rule pack declares requiresPeriodExclusion or
  * requiresPlanetaryCombustion (Marriage does; Griha Pravesh does not) also
  * needs the corresponding coverage.periodExclusion/planetaryCombustion to
- * reach IMPLEMENTED before it can be SUPPORTED -- both are MISSING for
- * every intent today (PR B's job), so Marriage resolves to PARTIAL despite
- * having genuinely dedicated Tithi/Nakshatra/Yoga/Karana data, and stays
- * excluded from SUPPORTED_MUHURTHAM_ACTIVITY_IDS / Muhurtham Finder --
- * this is the canonical mechanism keeping it gated, not a UI-level check.
+ * reach IMPLEMENTED before it can be SUPPORTED. EXP1-C update: both are
+ * now IMPLEMENTED for Marriage (periodRules/combustionRules are populated
+ * on its rule pack below), so Marriage resolves to SUPPORTED and IS
+ * exposed via SUPPORTED_MUHURTHAM_ACTIVITY_IDS / Muhurtham Finder today --
+ * this is the canonical mechanism, not a UI-level check. Marriage's
+ * dedicated Tithi/Nakshatra/Yoga/Karana data plus these period/combustion
+ * exclusions cover the Panchang-element layer; Lagna Shuddhi and Navamsha
+ * Shuddhi are not implemented (no Ascendant/house-cusp calculation exists
+ * in this engine), and the Chaturmas default is GENERAL-scope only (not
+ * Tamil/Vaishnava) -- see MARRIAGE's own periodRules note. Not a claim of
+ * complete traditional Marriage Muhurtham support.
  */
 export function computeMuhurtaSupportLevel(classification: MuhurtaClassification, pack: MuhurtaRulePack): MuhurtaSupportLevel {
   const tithiOk = pack.coverage.tithi !== 'MISSING';
