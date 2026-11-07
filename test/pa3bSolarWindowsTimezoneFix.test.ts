@@ -15,7 +15,7 @@
  */
 import { localDateTimeToUTC, getDatePartsInTimezone } from '../packages/panchang/src/localDate';
 import { getDailySolarWindows } from '../packages/astronomy/src/solarWindows';
-import { formatLocalICSDate, computeUserLocalNoon } from '../apps/web/app/api/calendar/feed/route';
+import { formatLocalICSDate, computeUserLocalNoon } from '../apps/web/lib/calendarFeedIcs';
 import { execFileSync } from 'child_process';
 import * as path from 'path';
 
@@ -142,7 +142,8 @@ check(
 
 // ============================================================
 // F. Calendar-feed caller compatibility -- exercises the REAL production
-//    formatLocalICSDate() (imported from route.ts, not reimplemented here)
+//    formatLocalICSDate() (imported from apps/web/lib/calendarFeedIcs.ts,
+//    the same module route.ts's GET handler itself calls -- not reimplemented here)
 //    against a Date anchored via localDateTimeToUTC. This is a genuine
 //    behavioral assertion, not a tautology: it fails if formatLocalICSDate
 //    ever regresses to reading server-local getters (.getDate()/.getHours())
@@ -177,11 +178,12 @@ check(
 // ============================================================
 function kiritimatiNoonUnder(tz: string): { localDate: string; noonIso: string; reExtractedDate: string } {
   // Calls the REAL production computeUserLocalNoon() (exported from
-  // route.ts) rather than reimplementing its pattern, so this regression
+  // apps/web/lib/calendarFeedIcs.ts, imported unchanged by route.ts's GET
+  // handler) rather than reimplementing its pattern, so this regression
   // actually exercises the production code PA-3B-R2 changed.
   const script = `
     const { getDatePartsInTimezone } = require('${path.join(__dirname, '..', 'packages', 'panchang', 'src', 'localDate')}');
-    const { computeUserLocalNoon } = require('${path.join(__dirname, '..', 'apps', 'web', 'app', 'api', 'calendar', 'feed', 'route')}');
+    const { computeUserLocalNoon } = require('${path.join(__dirname, '..', 'apps', 'web', 'lib', 'calendarFeedIcs')}');
     const timezone = 'Pacific/Kiritimati';
     const now = new Date('2026-06-15T20:00:00Z');
     const localDate = getDatePartsInTimezone(timezone, now);
