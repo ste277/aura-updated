@@ -32,13 +32,24 @@ export interface DailySolarWindows {
  * `TZ=Asia/Calcutta`). `tzOffsetMinutes` is unchanged and still feeds only
  * the astronomical ephemeris calculation below (computeSolarEphemeris's
  * own contract, not touched by this fix).
+ *
+ * AURA PA-3B-R2: `ianaTimezone` is now a REQUIRED parameter (no default).
+ * The only production caller (apps/web/app/api/calendar/feed/route.ts)
+ * already supplies it explicitly alongside a consistent `tzOffsetMinutes`
+ * for the same target location, so removing the previous
+ * `'Asia/Kolkata'` default is a no-op for every current caller -- but a
+ * default here was a latent footgun: a future caller could pass a
+ * non-India `tzOffsetMinutes` while omitting `ianaTimezone`, silently
+ * getting Kolkata-interpreted calendar-day components combined with a
+ * mismatched ephemeris offset. Requiring the argument makes that mismatch
+ * a compile-time error instead of a silent runtime one.
  */
 export function getDailySolarWindows(
   date: Date,
   latitude: number,
   longitude: number,
-  tzOffsetMinutes: number = 330,
-  ianaTimezone: string = 'Asia/Kolkata'
+  tzOffsetMinutes: number,
+  ianaTimezone: string
 ): DailySolarWindows {
   const { year, month, day, weekday: dayOfWeek } = getDatePartsInTimezone(ianaTimezone, date);
 

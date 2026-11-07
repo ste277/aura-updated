@@ -1,8 +1,24 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getSessionFromRequest } from '../../../../lib/session';
 import { getUserById, listPlannedActivities } from '../../../../lib/db';
-import { getDatePartsInTimezone, getSecondOfDayInTimezone, resolveTzOffsetMinutes } from '../../../../lib/timezone';
+import { getDatePartsInTimezone, getSecondOfDayInTimezone, localDateTimeToUTC, resolveTzOffsetMinutes } from '../../../../lib/timezone';
 import { getDailySolarWindows } from '../../../../../../packages/astronomy/src/solarWindows';
+
+/**
+ * AURA PA-3B-R2: anchors a user's intended local calendar date to noon as
+ * an absolute UTC instant via `localDateTimeToUTC()` -- NOT a server-local
+ * `new Date(year, month-1, day, 12, 0, 0)` constructor (PA-3B-R1 finding
+ * F3). That constructor interprets its arguments in the SERVER process's
+ * own timezone, not `timezone` (the target location's); the resulting
+ * instant could therefore re-extract to a DIFFERENT calendar day in
+ * `timezone` than `localDate` itself (confirmed: Pacific/Kiritimati,
+ * server TZ=UTC, intended day 2026-06-16 re-extracted as 2026-06-17).
+ * Exported so test/pa3bSolarWindowsTimezoneFix.test.ts can exercise this
+ * exact production function rather than a parallel reimplementation.
+ */
+export function computeUserLocalNoon(localDate: { dateStr: string }, timezone: string): Date {
+  return localDateTimeToUTC(localDate.dateStr, '12:00', timezone);
+}
 
 /**
  * AURA PA-3B: formats a Date's wall-clock fields AS SEEN IN `ianaTimezone`
@@ -15,7 +31,7 @@ import { getDailySolarWindows } from '../../../../../../packages/astronomy/src/s
  * used the identical (wrong) interpretation; fixing one side without this
  * would have broken the other.
  */
-function formatLocalICSDate(d: Date, ianaTimezone: string): string {
+export function formatLocalICSDate(d: Date, ianaTimezone: string): string {
   const pad = (n: number) => String(n).padStart(2, '0');
   const { year, month, day } = getDatePartsInTimezone(ianaTimezone, d);
   const secondOfDay = getSecondOfDayInTimezone(ianaTimezone, d);
@@ -56,7 +72,7 @@ export async function GET(req: NextRequest) {
   const timezone = user.timezone || 'Asia/Kolkata';
   const tzOffsetMinutes = resolveTzOffsetMinutes(timezone, now);
   const localDate = getDatePartsInTimezone(timezone, now);
-  const userLocalNoon = new Date(localDate.year, localDate.month - 1, localDate.day, 12, 0, 0);
+  const userLocalNoon = computeUserLocalNoon(localDate, timezone);
 
   const windows = getDailySolarWindows(userLocalNoon, lat, lng, tzOffsetMinutes, timezone);
   const plans = await listPlannedActivities(session.userId);

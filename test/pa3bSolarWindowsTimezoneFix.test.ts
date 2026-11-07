@@ -13,8 +13,9 @@
  * localDateTimeToUTC itself before being hardcoded here (see the PA-3B
  * implementation report for that independent cross-check).
  */
-import { localDateTimeToUTC } from '../packages/panchang/src/localDate';
+import { localDateTimeToUTC, getDatePartsInTimezone } from '../packages/panchang/src/localDate';
 import { getDailySolarWindows } from '../packages/astronomy/src/solarWindows';
+import { formatLocalICSDate, computeUserLocalNoon } from '../apps/web/app/api/calendar/feed/route';
 import { execFileSync } from 'child_process';
 import * as path from 'path';
 
@@ -140,15 +141,91 @@ check(
 }
 
 // ============================================================
-// F. Calendar-feed caller compatibility -- formatLocalICSDate's companion
-//    fix (apps/web/app/api/calendar/feed/route.ts) is verified by this
-//    same local-clock-time-preservation property: since it now formats in
-//    the real target timezone (not server-local), and getDailySolarWindows
-//    now anchors the UTC instant correctly in that same timezone, the two
-//    sides stay round-trip-consistent for every server TZ -- not merely
-//    the one that happened to match the target offset.
+// F. Calendar-feed caller compatibility -- exercises the REAL production
+//    formatLocalICSDate() (imported from route.ts, not reimplemented here)
+//    against a Date anchored via localDateTimeToUTC. This is a genuine
+//    behavioral assertion, not a tautology: it fails if formatLocalICSDate
+//    ever regresses to reading server-local getters (.getDate()/.getHours())
+//    instead of the target-timezone-aware Intl path, because the fixture
+//    below uses a target timezone (Asia/Kathmandu, +05:45) that disagrees
+//    with every plausible CI/server TZ at this specific instant.
 // ============================================================
-check('(F) Covered structurally by C+E: correct absolute instant + correct target-TZ read-back together replace the previous accidental same-wrong-TZ cancellation', true);
+{
+  // 2026-06-21 06:00 Asia/Kathmandu -> 2026-06-21T00:15:00.000Z (section A's
+  // own independently-verified fixture, reused here as the anchor instant).
+  const anchor = localDateTimeToUTC('2026-06-21', '06:00', 'Asia/Kathmandu');
+  const formatted = formatLocalICSDate(anchor, 'Asia/Kathmandu');
+  check(
+    `(F) formatLocalICSDate reads back the correct target-TZ wall-clock time (expected 20260621T060000, got ${formatted})`,
+    formatted === '20260621T060000'
+  );
+}
+
+// ============================================================
+// G. AURA PA-3B-R2: mandatory wrong-day regression -- Pacific/Kiritimati
+//    (UTC+14, the earliest-dated inhabited timezone on Earth). Confirmed
+//    defect: with the calendar-feed route's PRE-R2 server-local
+//    `new Date(year, month-1, day, 12, 0, 0)` noon anchor, a user at
+//    Kiritimati with `now = 2026-06-15T20:00:00Z` (intended local date
+//    2026-06-16) got re-extracted as 2026-06-17 under server TZ=UTC -- a
+//    full calendar day wrong, feeding the WRONG day's solar-window
+//    calculation into getDailySolarWindows. Fixed by anchoring via
+//    localDateTimeToUTC(dateStr, '12:00', timezone) instead -- the same
+//    pattern this file's own section A already establishes as correct.
+//    Spawned across 3 process TZs (not a single live process) for the
+//    same ICU-caching reason section C spawns child processes.
+// ============================================================
+function kiritimatiNoonUnder(tz: string): { localDate: string; noonIso: string; reExtractedDate: string } {
+  // Calls the REAL production computeUserLocalNoon() (exported from
+  // route.ts) rather than reimplementing its pattern, so this regression
+  // actually exercises the production code PA-3B-R2 changed.
+  const script = `
+    const { getDatePartsInTimezone } = require('${path.join(__dirname, '..', 'packages', 'panchang', 'src', 'localDate')}');
+    const { computeUserLocalNoon } = require('${path.join(__dirname, '..', 'apps', 'web', 'app', 'api', 'calendar', 'feed', 'route')}');
+    const timezone = 'Pacific/Kiritimati';
+    const now = new Date('2026-06-15T20:00:00Z');
+    const localDate = getDatePartsInTimezone(timezone, now);
+    const userLocalNoon = computeUserLocalNoon(localDate, timezone);
+    const reExtracted = getDatePartsInTimezone(timezone, userLocalNoon);
+    console.log(JSON.stringify({ localDate: localDate.dateStr, noonIso: userLocalNoon.toISOString(), reExtractedDate: reExtracted.dateStr }));
+  `;
+  const out = execFileSync('npx', ['ts-node', '-e', script], {
+    encoding: 'utf-8',
+    env: { ...process.env, TZ: tz },
+  });
+  return JSON.parse(out.trim());
+}
+
+for (const tz of ['UTC', 'Asia/Kolkata', 'America/New_York']) {
+  const result = kiritimatiNoonUnder(tz);
+  check(
+    `(G) Kiritimati day preservation under TZ=${tz}: intended date ${result.localDate} stays ${result.localDate} (got noon=${result.noonIso}, re-extracted=${result.reExtractedDate})`,
+    result.localDate === '2026-06-16' && result.reExtractedDate === '2026-06-16'
+  );
+  check(
+    `(G) Kiritimati noon anchor under TZ=${tz} is the independently-expected UTC instant (2026-06-15T22:00:00.000Z)`,
+    result.noonIso === '2026-06-15T22:00:00.000Z'
+  );
+}
+
+// ============================================================
+// H. Additional date-boundary fixtures -- independently verified via a
+//    standalone Intl `timeZoneName: 'longOffset'` extraction (a conversion
+//    path with zero code in common with localDateTimeToUTC itself) before
+//    being hardcoded here, exactly like section A's own fixtures.
+// ============================================================
+check(
+  'Pacific/Pago_Pago (UTC-11, no DST): 2026-06-21 06:00 -> 2026-06-21T17:00:00.000Z',
+  localDateTimeToUTC('2026-06-21', '06:00', 'Pacific/Pago_Pago').toISOString() === '2026-06-21T17:00:00.000Z'
+);
+check(
+  'Australia/Adelaide summer/ACDT (UTC+10:30): 2026-01-15 06:00 -> 2026-01-14T19:30:00.000Z',
+  localDateTimeToUTC('2026-01-15', '06:00', 'Australia/Adelaide').toISOString() === '2026-01-14T19:30:00.000Z'
+);
+check(
+  'Australia/Adelaide winter/ACST (UTC+9:30): 2026-07-15 06:00 -> 2026-07-14T20:30:00.000Z',
+  localDateTimeToUTC('2026-07-15', '06:00', 'Australia/Adelaide').toISOString() === '2026-07-14T20:30:00.000Z'
+);
 
 console.log(`\n${passed} passed, ${failed} failed.`);
 if (failed > 0) {
