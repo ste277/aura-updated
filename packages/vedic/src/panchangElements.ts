@@ -3,8 +3,6 @@ import {
   AstroTime,
   Ecliptic,
   GeoVector,
-  MoonPhase,
-  SearchMoonPhase,
 } from 'astronomy-engine';
 
 export const NAKSHATRA_NAMES = [
@@ -160,35 +158,48 @@ export function getKarana(date: Date): { index: number; name: string } {
 
 /**
  * Finds exact next transition date.
- * TITHI uses SearchMoonPhase on the Moon-Sun elongation angle (the same
- * quantity getTithi() derives its index from -- ayanamsha subtracts equally
- * from both bodies' sidereal longitudes, so the *difference* between them,
- * and therefore every tithi boundary, is ayanamsha-invariant; SearchMoonPhase
- * finds the same physical instant using tropical longitudes directly, which
- * is both simpler and avoids relying on a sidereal degree target).
+ * TITHI and KARANA both search the Moon-Sun SIDEREAL elongation angle (the
+ * same `diff` quantity getTithi()/getKarana() derive their index from --
+ * ayanamsha subtracts equally from both bodies' sidereal longitudes, so the
+ * *difference* between them, and therefore every tithi/karana boundary, is
+ * ayanamsha-invariant), via the same targeted-binary-search technique as
+ * YOGA/NAKSHATRA below -- TITHI stepped to the next 12° boundary, KARANA
+ * (a half-Tithi) to the next 6° boundary.
  * NAKSHATRA uses targeted binary search over Moon sidereal longitude.
- * KARANA reuses the exact same Moon-Sun elongation quantity as TITHI (a
- * Karana is a half-Tithi -- getKarana() derives its index from the identical
- * `diff` this function's TITHI branch searches on, just partitioned into 6°
- * steps instead of 12°), so it reuses SearchMoonPhase the same way, stepped
- * to the next 6° boundary.
  * YOGA searches a DIFFERENT quantity -- (moonDeg + sunDeg) % 360, not the
- * Moon-Sun difference SearchMoonPhase measures -- so it cannot reuse
- * SearchMoonPhase; it uses the same targeted-binary-search technique as
- * NAKSHATRA instead, tracking the sidereal sum rather than the Moon's own
- * longitude.
+ * Moon-Sun difference TITHI/KARANA measure -- tracking the sidereal sum
+ * rather than the Moon's own longitude.
  *
- * (SearchMoonPhase replaced a prior SearchRelativeLongitude(Body.Moon, ...)
- * call here that threw unconditionally -- astronomy-engine's
- * SearchRelativeLongitude only supports planets relative to the Sun, not the
- * Moon. This was a latent bug: findNextTransition(date, 'TITHI') has never
- * successfully returned a value. It went unnoticed because its only caller,
- * /api/panchang/today, feeds a component (TodayOverview) that isn't mounted
- * anywhere in the app today. Fixed here since getPanchangForDate() needs a
- * working Tithi transition search, and per the brief's "fix if an existing
- * bug is found" allowance -- see the completion report for detail. No
- * ayanamsha/methodology change: getTithi()'s own value calculation is
- * untouched, only the previously-broken transition *search* is fixed.)
+ * (AURA PA-2C: TITHI/KARANA previously used astronomy-engine's
+ * MoonPhase()/SearchMoonPhase(), which internally call
+ * GeoVector(..., false) -- aberration correction OFF -- while
+ * getTithi()/getKarana() (via getSiderealLongitude()) use
+ * GeoVector(..., true) -- aberration ON, the standard "apparent geocentric
+ * position" convention used by real-world ephemeris/almanac calculation
+ * (e.g. Swiss Ephemeris's documented default output; its SEFLG_NOABERR/
+ * SEFLG_ASTROMETRIC flags are the explicit, non-default opt-OUT of
+ * aberration). That mismatch produced a reproducible ~20.8 arcsecond gap
+ * in the Moon-Sun elongation itself, converting to a ~39-46 second
+ * transition-instant discrepancy against getTithi()/getKarana()'s own
+ * ground truth, and a demonstrated interval-safety gap in
+ * valuesTouchedByInterval() below -- see AURA PA-2B for the full
+ * investigation and PA-2C for the correction and independent-reference
+ * evidence. Corrected to the same aberration-true elongation search
+ * already used by YOGA/NAKSHATRA, matching getTithi()/getKarana() exactly
+ * -- no ayanamsha/methodology change, only the transition *search*
+ * algorithm.)
+ *
+ * (Historical note, predating PA-2C: SearchMoonPhase itself had replaced a
+ * prior SearchRelativeLongitude(Body.Moon, ...) call here that threw
+ * unconditionally -- astronomy-engine's SearchRelativeLongitude only
+ * supports planets relative to the Sun, not the Moon. That was a latent
+ * bug: findNextTransition(date, 'TITHI') had never successfully returned a
+ * value, unnoticed because its only caller, /api/panchang/today, feeds a
+ * component (TodayOverview) that isn't mounted anywhere in the app. Fixed
+ * at the time since getPanchangForDate() needs a working Tithi transition
+ * search -- see the completion report for detail. The aberration mismatch
+ * above was a separate, independent defect introduced by that same fix,
+ * not present in the original always-throwing code.)
  *
  * Marriage Muhurtham Foundation V1: YOGA/KARANA support was added so
  * spanOverlapsAuthoritativeEventAvoid() (packages/recommendation/src/
@@ -200,24 +211,53 @@ export function getKarana(date: Date): { index: number; name: string } {
  * Tithi/Nakshatra) -- that remains explicitly deferred to a later PR.
  */
 export function findNextTransition(date: Date, targetType: 'TITHI' | 'NAKSHATRA' | 'YOGA' | 'KARANA'): Date {
-  const astroTime = new AstroTime(date);
+  if (targetType === 'TITHI' || targetType === 'KARANA') {
+    // AURA PA-2C: Tithi/Karana transition search, by Moon-Sun sidereal
+    // elongation -- NOT astronomy-engine's MoonPhase()/SearchMoonPhase(),
+    // which compute geocentric ecliptic longitude via GeoVector(..., false)
+    // (aberration correction OFF). getTithi()/getKarana() (and every other
+    // value function in this file) use getSiderealLongitude(), which calls
+    // GeoVector(..., true) (aberration ON) -- the standard convention for
+    // "apparent geocentric position" in almanac-style calculation (e.g.
+    // Swiss Ephemeris's documented default output, which requires the
+    // explicit SEFLG_NOABERR/SEFLG_ASTROMETRIC flag to turn aberration
+    // off). The ~20.8 arcsecond gap between these two conventions in the
+    // Moon-Sun elongation itself converts to a reproducible ~39-46 second
+    // transition-instant discrepancy against the value functions' own
+    // ground truth -- see AURA PA-2B for the full investigation. Corrected
+    // here to the same aberration-true elongation search already used by
+    // the YOGA/NAKSHATRA branches below, rather than reusing MoonPhase.
+    const currentDiff = ((getSiderealLongitude(Body.Moon, date) - getSiderealLongitude(Body.Sun, date)) + 360) % 360;
+    const span = targetType === 'TITHI' ? 12 : 6;
+    const targetIndex = Math.floor(currentDiff / span) + 1;
+    const targetDeg = (targetIndex * span) % 360;
 
-  if (targetType === 'TITHI') {
-    const currentPhase = MoonPhase(date);
-    const targetPhase = (Math.floor(currentPhase / 12) + 1) * 12 % 360;
-    // A tithi is 19-26 hours long; 2 days is a safe search bound with margin.
-    const res = SearchMoonPhase(targetPhase, astroTime, 2);
-    if (!res) throw new Error(`findNextTransition: no TITHI transition found within 2 days of ${date.toISOString()}.`);
-    return res.date;
-  }
+    // Elongation advances at ~(13.2 - 0.985) = ~12.2 deg/day. A Tithi (12
+    // degree span) transitions within ~24h max; a Karana (6 degree span,
+    // a half-Tithi) within ~13h max. Search windows match the original
+    // SearchMoonPhase bounds (2 days / 1 day respectively) for the same
+    // safety margin.
+    let low = date.getTime();
+    let high = date.getTime() + (targetType === 'TITHI' ? 2 : 1) * 24 * 3600 * 1000;
 
-  if (targetType === 'KARANA') {
-    const currentPhase = MoonPhase(date);
-    const targetPhase = (Math.floor(currentPhase / 6) + 1) * 6 % 360;
-    // A Karana is a half-Tithi, roughly 9.5-13 hours; 1 day is a safe search bound with margin.
-    const res = SearchMoonPhase(targetPhase, astroTime, 1);
-    if (!res) throw new Error(`findNextTransition: no KARANA transition found within 1 day of ${date.toISOString()}.`);
-    return res.date;
+    for (let i = 0; i < 24; i++) {
+      const mid = Math.floor((low + high) / 2);
+      const midDiff = ((getSiderealLongitude(Body.Moon, new Date(mid)) - getSiderealLongitude(Body.Sun, new Date(mid))) + 360) % 360;
+
+      let diff = midDiff - currentDiff;
+      if (diff < 0) diff += 360;
+
+      const targetDiff = targetDeg - currentDiff;
+      const normTargetDiff = targetDiff < 0 ? targetDiff + 360 : targetDiff;
+
+      if (diff >= normTargetDiff) {
+        high = mid;
+      } else {
+        low = mid;
+      }
+    }
+
+    return new Date(Math.floor((low + high) / 2));
   }
 
   if (targetType === 'YOGA') {

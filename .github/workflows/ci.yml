@@ -31,6 +31,8 @@ jobs:
         run: npx ts-node test/muhurtaReasons.test.ts
       - name: Run muhurta test
         run: npx ts-node test/muhurta.test.ts
+      - name: Run PA-2C Tithi/Karana aberration fix test
+        run: npx ts-node test/pa2cTithiKaranaAberrationFix.test.ts
       - name: Run timing search test
         run: npx ts-node test/timingSearch.test.ts
       - name: Run timing search API validation test
