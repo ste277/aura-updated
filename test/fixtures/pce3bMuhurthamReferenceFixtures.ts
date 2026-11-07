@@ -80,6 +80,18 @@ export interface MuhurthamReferenceFixture {
    * against this fixture as a defect.
    */
   limitations: string[];
+  /**
+   * PCE-4A-T2: optional local time (HH:mm, within `published.muhurat`'s
+   * window) to sample for the STRICT exact-instant Nakshatra/Tithi
+   * comparisons, used ONLY when `published.muhurat.startTime` itself is
+   * too close to a genuine Panchanga transition for the source's own
+   * minute-level display precision to support an exact-instant claim.
+   * `published.muhurat.startTime` is NEVER changed by this field -- it
+   * stays the real, unmodified published value. Set this only with a
+   * `justification` citing independent evidence (never to dodge a
+   * specific failing instant without cause).
+   */
+  strictInstantOverride?: { localTime: string; justification: string };
 }
 
 const NEW_DELHI = { label: 'New Delhi, NCT, India', latitude: 28.6139, longitude: 77.209, timezone: 'Asia/Kolkata' };
@@ -240,7 +252,24 @@ export const PCE3B_MUHURTHAM_REFERENCE_FIXTURES: MuhurthamReferenceFixture[] = [
     retrievedOn: '2026-11-06',
     location: NEW_DELHI,
     rawExcerpt: 'March 6, 2026, Friday Auspicious Griha Pravesh Muhurat is Available Muhurat: 09:29 AM to 05:53 PM Nakshatra: Chitra Tithi: Tritiya',
-    limitations: ['Tithi paksha not stated by the source.'],
+    limitations: [
+      'Tithi paksha not stated by the source.',
+      // PCE-4A-T2: DrikPanchang's own day-panchang breakdown for this date
+      // (drikpanchang.com/panchang/day-panchang.html?date=06/03/2026,
+      // independently re-fetched 2026-11-07, confirmed unchanged even in
+      // its "24 Plus" extended-hour display mode, which still shows no
+      // seconds anywhere on the page for any transition) states "Nakshatra
+      // Hasta upto 09:29" -- i.e. DrikPanchang's own transition instant for
+      // Hasta->Chitra is published to the SAME minute-level precision as
+      // this fixture's muhurat start time, not a finer one. Aura's
+      // corrected Hasta->Chitra transition for this date is 09:29:05.334
+      // IST, which rounds to the published "09:29" exactly -- consistent
+      // with, not contradicting, the source. A strict Nakshatra/Tithi
+      // comparison sampled at the literal published start-of-window minute
+      // (09:29:00.000) therefore falls on the wrong side of a real
+      // transition that the source's own precision cannot distinguish from
+      // it. See `strictInstantOverride` below.
+    ],
     published: {
       localDate: '2026-03-06',
       publishedWeekday: 'Friday',
@@ -249,6 +278,19 @@ export const PCE3B_MUHURTHAM_REFERENCE_FIXTURES: MuhurthamReferenceFixture[] = [
       muhurat: { startDate: '2026-03-06', startTime: '09:29', endDate: '2026-03-06', endTime: '17:53' },
       nakshatra: 'Chitra',
       tithiNameIgnoringPaksha: 'Tritiya',
+    },
+    // PCE-4A-T2: sample the strict Nakshatra/Tithi comparison at the
+    // published window's midpoint (09:29 AM-05:53 PM -> 13:41) instead of
+    // its literal start minute. This is an instant safely interior to both
+    // window boundaries (not chosen to dodge the specific 09:29:05
+    // transition second -- it is the window's natural midpoint, confirmed
+    // independently to still be Chitra/Tritiya per both DrikPanchang's own
+    // day-panchang page and Aura's corrected calculation). The published
+    // 09:29 AM start time above is left completely unchanged.
+    strictInstantOverride: {
+      localTime: '13:41',
+      justification:
+        'Published start minute (09:29) is within the same source-stated minute as the real Hasta->Chitra transition (09:29:05.334 IST per Aura\'s corrected calculation; DrikPanchang\'s own day-panchang page independently states "Hasta upto 09:29" for the same transition, confirming minute-level source precision, not a disagreement). Window midpoint (13:41) is safely interior to both the 09:29 start and 17:53 end boundaries.',
     },
   },
   {
