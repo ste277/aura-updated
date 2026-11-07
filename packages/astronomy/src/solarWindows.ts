@@ -1,5 +1,5 @@
 import { computeSolarEphemeris } from './ephemeris';
-import { getDatePartsInTimezone, localDateTimeToUTC } from '../../panchang/src/localDate';
+import { getDatePartsInTimezone, localDateTimeToUTC, resolveTzOffsetMinutes } from '../../panchang/src/localDate';
 
 export interface SolarWindow {
   start: Date;
@@ -29,9 +29,11 @@ export interface DailySolarWindows {
  * timezone -- the same (date, location) could therefore resolve to a
  * genuinely different absolute UTC instant depending on process `TZ` (a
  * confirmed ~330-minute discrepancy for New Delhi under `TZ=UTC` vs.
- * `TZ=Asia/Calcutta`). `tzOffsetMinutes` is unchanged and still feeds only
- * the astronomical ephemeris calculation below (computeSolarEphemeris's
- * own contract, not touched by this fix).
+ * `TZ=Asia/Calcutta`). At the time of this fix `tzOffsetMinutes` was an
+ * external parameter feeding only the astronomical ephemeris calculation
+ * below (computeSolarEphemeris's own contract, not touched by this fix);
+ * see the later AURA PA-3B-R4 comment below for why it stopped being a
+ * parameter at all.
  *
  * AURA PA-3B-R2: `ianaTimezone` is now a REQUIRED parameter (no default).
  * The only production caller (apps/web/app/api/calendar/feed/route.ts)
@@ -43,15 +45,63 @@ export interface DailySolarWindows {
  * getting Kolkata-interpreted calendar-day components combined with a
  * mismatched ephemeris offset. Requiring the argument makes that mismatch
  * a compile-time error instead of a silent runtime one.
+ *
+ * AURA PA-3B-R4 (TZ-F1-01): `tzOffsetMinutes` is no longer a parameter at
+ * all. The route handler used to sample it at HTTP *request* time
+ * (`resolveTzOffsetMinutes(timezone, now)`) while this function's `date`
+ * argument anchors a different instant (the target day's local noon) --
+ * on a DST-transition day those two instants can straddle the transition,
+ * so the offset fed to computeSolarEphemeris() was wrong by exactly the
+ * DST delta for every one of the 7 returned events. Tracing
+ * `tzOffsetMinutes`'s only use (computeSolarEphemeris's internal
+ * `toLocalMinutes`) showed it exists purely to re-express already-computed
+ * UTC-minute astronomical quantities as "minutes since local civil
+ * midnight" -- a quantity this function immediately re-pairs with
+ * `ianaTimezone` anyway (via `localMinutesToDate` below) to build the
+ * actual returned `Date`s. So the offset was always informationally
+ * redundant with `ianaTimezone`: there is no case where the *correct*
+ * value of `tzOffsetMinutes` for this target day differs from what
+ * `ianaTimezone` itself implies.
+ *
+ * The one real question (ticket's own: "do not assume one offset
+ * represents every event on a DST-transition day") is WHICH instant to
+ * resolve that offset at, since sunrise, sunset, Brahma Muhurtham, Abhijit
+ * Muhurtham, and the three eighth-of-daylight windows (Rahu Kalam / Gulika
+ * / Yama) are all genuinely different instants. This derives the offset at
+ * the target day's own local noon (`localDateTimeToUTC(dateStr, '12:00',
+ * ianaTimezone)`) -- chosen, and independently verified in
+ * test/pa3bSolarWindowsTimezoneFix.test.ts across all 4 mandated DST
+ * transition dates (America/New_York spring-forward/fall-back,
+ * Australia/Adelaide spring-forward/fall-back), to equal the offset at the
+ * actual sunrise, sunset, Brahma-start, and solar-noon instants on every
+ * one of those dates: real DST transitions occur in the small hours
+ * (01:00-03:00 local) and every one of the 7 solar-window events falls
+ * between pre-dawn and dusk, so a transition can only separate "request
+ * time" from "the target day" (TZ-F1-01's actual defect) -- never separate
+ * the events of a single target day from one another. This is checked, not
+ * assumed: if a future change to the event set or supported latitudes ever
+ * violated it, the dedicated equality assertions in that test file would
+ * fail.
+ *
+ * This is not a novel pattern: `resolveTzOffsetMinutes(timezone,
+ * localDateTimeToUTC(dateStr, '12:00', timezone))` is the EXACT convention
+ * packages/panchang/src/panchangDay.ts (the primary Panchangam production
+ * path, see its own "DST-correct offset for this specific calendar date"
+ * comment) and packages/recommendation/src/ceremonialPeriods.ts's
+ * `sunriseInstantFor` already use for this identical purpose. This fix
+ * brings getDailySolarWindows() into line with that already-reviewed,
+ * already-trusted convention rather than inventing a new one.
  */
 export function getDailySolarWindows(
   date: Date,
   latitude: number,
   longitude: number,
-  tzOffsetMinutes: number,
   ianaTimezone: string
 ): DailySolarWindows {
   const { year, month, day, weekday: dayOfWeek } = getDatePartsInTimezone(ianaTimezone, date);
+  const dateStr = `${year}-${String(month).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
+
+  const tzOffsetMinutes = resolveTzOffsetMinutes(ianaTimezone, localDateTimeToUTC(dateStr, '12:00', ianaTimezone));
 
   const ephemeris = computeSolarEphemeris({
     year,
@@ -61,8 +111,6 @@ export function getDailySolarWindows(
     longitude,
     tzOffsetMinutes,
   });
-
-  const dateStr = `${year}-${String(month).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
 
   // Helper: convert total local minutes from midnight (for this calendar
   // day, in ianaTimezone) into the correct absolute UTC instant -- see the

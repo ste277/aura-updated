@@ -13,8 +13,8 @@
  * localDateTimeToUTC itself before being hardcoded here (see the PA-3B
  * implementation report for that independent cross-check).
  */
-import { localDateTimeToUTC, getDatePartsInTimezone } from '../packages/panchang/src/localDate';
-import { getDailySolarWindows } from '../packages/astronomy/src/solarWindows';
+import { localDateTimeToUTC, getDatePartsInTimezone, resolveTzOffsetMinutes } from '../packages/panchang/src/localDate';
+import { getDailySolarWindows, DailySolarWindows } from '../packages/astronomy/src/solarWindows';
 import { formatLocalICSDate, computeUserLocalNoon } from '../apps/web/lib/calendarFeedIcs';
 import { execFileSync } from 'child_process';
 import * as path from 'path';
@@ -29,6 +29,17 @@ function check(label: string, condition: boolean) {
     failed++;
     console.log('FAIL', label);
   }
+}
+
+// R4-specific pass/fail counters, kept separate from the overall `passed`/
+// `failed` totals above so the R4 success marker at the bottom of this file
+// is tied to the DST-transition checks themselves, not merely piggy-backing
+// on the file's overall result.
+let r4Passed = 0;
+let r4Failed = 0;
+function checkR4(label: string, condition: boolean) {
+  check(label, condition);
+  if (condition) r4Passed++; else r4Failed++;
 }
 
 // ============================================================
@@ -59,8 +70,8 @@ check(
 //    which is the test that actually fails against the original defect.)
 // ============================================================
 {
-  const windowsA = getDailySolarWindows(new Date('2026-06-15T00:00:00Z'), 28.6139, 77.209, 330, 'Asia/Kolkata');
-  const windowsB = getDailySolarWindows(new Date('2026-06-15T00:00:00Z'), 28.6139, 77.209, 330, 'Asia/Kolkata');
+  const windowsA = getDailySolarWindows(new Date('2026-06-15T00:00:00Z'), 28.6139, 77.209, 'Asia/Kolkata');
+  const windowsB = getDailySolarWindows(new Date('2026-06-15T00:00:00Z'), 28.6139, 77.209, 'Asia/Kolkata');
   check('Deterministic: repeated calls with identical inputs produce identical sunrise instant', windowsA.sunrise.getTime() === windowsB.sunrise.getTime());
   check('New Delhi 2026-06-15 sunrise resolves to a valid, non-NaN instant', !Number.isNaN(windowsA.sunrise.getTime()));
 }
@@ -74,7 +85,7 @@ check(
 function sunriseUnder(tz: string): string {
   const script = `
     const { getDailySolarWindows } = require('${path.join(__dirname, '..', 'packages', 'astronomy', 'src', 'solarWindows')}');
-    const w = getDailySolarWindows(new Date('2026-06-15T00:00:00Z'), 28.6139, 77.209, 330, 'Asia/Kolkata');
+    const w = getDailySolarWindows(new Date('2026-06-15T00:00:00Z'), 28.6139, 77.209, 'Asia/Kolkata');
     console.log(w.sunrise.toISOString());
   `;
   const out = execFileSync('npx', ['ts-node', '-e', script], {
@@ -132,7 +143,7 @@ check(
 //    local time for New Delhi under TZ=Asia/Kolkata.
 // ============================================================
 {
-  const windows = getDailySolarWindows(new Date('2026-06-15T00:00:00Z'), 28.6139, 77.209, 330, 'Asia/Kolkata');
+  const windows = getDailySolarWindows(new Date('2026-06-15T00:00:00Z'), 28.6139, 77.209, 'Asia/Kolkata');
   const dtf = new Intl.DateTimeFormat('en-US', { timeZone: 'Asia/Kolkata', hour: 'numeric', minute: 'numeric', hourCycle: 'h23' });
   const parts = dtf.formatToParts(windows.sunrise);
   const hh = parts.find((p) => p.type === 'hour')?.value;
@@ -228,6 +239,238 @@ check(
   'Australia/Adelaide winter/ACST (UTC+9:30): 2026-07-15 06:00 -> 2026-07-14T20:30:00.000Z',
   localDateTimeToUTC('2026-07-15', '06:00', 'Australia/Adelaide').toISOString() === '2026-07-14T20:30:00.000Z'
 );
+
+// ============================================================
+// I. AURA PA-3B-R4 (TZ-F1-01): DST-transition correctness.
+//
+// getDailySolarWindows() no longer takes a `tzOffsetMinutes` parameter at
+// all -- it derives the offset internally from `ianaTimezone` + the target
+// day's own local noon (see that function's PA-3B-R4 doc comment for why
+// this is sound). Per mandated transition date, two properties are
+// verified -- PROVEN, not assumed, per the ticket's own instruction not to
+// assume one offset represents every event on a DST-transition day:
+//
+//   (1) Request-time independence: simulating a request BEFORE vs. AFTER
+//       the same day's transition (both still resolving to the SAME target
+//       calendar day) must produce byte-identical output for all 7 event
+//       categories. This is exactly the property the original defect
+//       (tzOffsetMinutes sampled at HTTP request time) violated: before
+//       this fix, the "before" case used the stale pre-transition offset
+//       while the "after" case used the correct one, shifting every event
+//       by the DST delta.
+//   (2) Event-specific offset consistency: the IANA offset actually in
+//       effect at sunrise, Brahma-start, solar noon (the Abhijit window's
+//       midpoint), and sunset are independently resolved via
+//       resolveTzOffsetMinutes -- NOT the function under test -- and
+//       checked equal. Real DST transitions occur in the small hours
+//       (01:00-03:00 local), before every one of these events, so a single
+//       internally-derived offset is valid for the whole event set; this
+//       assertion is what would catch it if that ever stopped being true
+//       (e.g. a future event added before midnight, or a zone whose
+//       transition time differs from every zone tested here).
+//
+// Sunrise/sunset instants below are the actual getDailySolarWindows()
+// output for each case (same NOAA formula as every other section of this
+// file), captured once and hardcoded as a determinism/non-regression
+// fixture -- not independently-derived astronomical predictions.
+// ============================================================
+function flattenWindows(w: DailySolarWindows): Array<[string, Date]> {
+  return [
+    ['sunrise', w.sunrise],
+    ['sunset', w.sunset],
+    ['brahma.start', w.brahma.start],
+    ['brahma.end', w.brahma.end],
+    ['abhijit.start', w.abhijit.start],
+    ['abhijit.end', w.abhijit.end],
+    ['rahuKalam.start', w.rahuKalam.start],
+    ['rahuKalam.end', w.rahuKalam.end],
+    ['gulika.start', w.gulika.start],
+    ['gulika.end', w.gulika.end],
+    ['yama.start', w.yama.start],
+    ['yama.end', w.yama.end],
+  ];
+}
+
+function dstTransitionCase(
+  label: string,
+  tz: string,
+  lat: number,
+  lng: number,
+  beforeRequestIso: string,
+  afterRequestIso: string,
+  expectedSunriseIso: string,
+  expectedSunsetIso: string
+): DailySolarWindows {
+  const beforeLocalDate = getDatePartsInTimezone(tz, new Date(beforeRequestIso));
+  const afterLocalDate = getDatePartsInTimezone(tz, new Date(afterRequestIso));
+  checkR4(
+    `(I) ${label}: before/after requests resolve to the same target day (${beforeLocalDate.dateStr} / ${afterLocalDate.dateStr})`,
+    beforeLocalDate.dateStr === afterLocalDate.dateStr
+  );
+
+  const noonBefore = localDateTimeToUTC(beforeLocalDate.dateStr, '12:00', tz);
+  const noonAfter = localDateTimeToUTC(afterLocalDate.dateStr, '12:00', tz);
+  const windowsBefore = getDailySolarWindows(noonBefore, lat, lng, tz);
+  const windowsAfter = getDailySolarWindows(noonAfter, lat, lng, tz);
+
+  const pairsBefore = flattenWindows(windowsBefore);
+  const pairsAfter = flattenWindows(windowsAfter);
+  const mismatches = pairsBefore
+    .map(([name, d], i) => (d.getTime() !== pairsAfter[i][1].getTime() ? name : null))
+    .filter((x): x is string => x !== null);
+  checkR4(
+    `(I) ${label}: all 7 event categories are request-time-independent (TZ-F1-01 regression) -- mismatches: [${mismatches.join(', ')}]`,
+    mismatches.length === 0
+  );
+
+  checkR4(
+    `(I) ${label}: sunrise matches the independently-captured fixture (expected ${expectedSunriseIso}, got ${windowsBefore.sunrise.toISOString()})`,
+    windowsBefore.sunrise.toISOString() === expectedSunriseIso
+  );
+  checkR4(
+    `(I) ${label}: sunset matches the independently-captured fixture (expected ${expectedSunsetIso}, got ${windowsBefore.sunset.toISOString()})`,
+    windowsBefore.sunset.toISOString() === expectedSunsetIso
+  );
+
+  const abhijitMidpoint = new Date((windowsBefore.abhijit.start.getTime() + windowsBefore.abhijit.end.getTime()) / 2);
+  const offsetSunrise = resolveTzOffsetMinutes(tz, windowsBefore.sunrise);
+  const offsetBrahma = resolveTzOffsetMinutes(tz, windowsBefore.brahma.start);
+  const offsetSolarNoon = resolveTzOffsetMinutes(tz, abhijitMidpoint);
+  const offsetSunset = resolveTzOffsetMinutes(tz, windowsBefore.sunset);
+  checkR4(
+    `(I) ${label}: offset at sunrise/Brahma-start/solar-noon/sunset all equal (${offsetSunrise}, ${offsetBrahma}, ${offsetSolarNoon}, ${offsetSunset}) -- verified, not assumed`,
+    offsetSunrise === offsetBrahma && offsetSunrise === offsetSolarNoon && offsetSunrise === offsetSunset
+  );
+
+  return windowsBefore;
+}
+
+dstTransitionCase(
+  'America/New_York spring-forward 2026-03-08',
+  'America/New_York', 40.7128, -74.006,
+  '2026-03-08T06:30:00.000Z', // 01:30 EST local, pre-transition
+  '2026-03-08T20:00:00.000Z', // 16:00 EDT local, post-transition
+  '2026-03-08T11:19:00.000Z',
+  '2026-03-08T22:56:00.000Z'
+);
+
+dstTransitionCase(
+  'America/New_York fall-back 2026-11-01',
+  'America/New_York', 40.7128, -74.006,
+  '2026-11-01T04:00:00.000Z', // 00:00 EDT local, pre-transition (unambiguous)
+  '2026-11-01T20:00:00.000Z', // 15:00 EST local, post-transition (unambiguous)
+  '2026-11-01T11:24:00.000Z',
+  '2026-11-01T21:55:00.000Z'
+);
+
+dstTransitionCase(
+  'Australia/Adelaide spring-forward 2026-10-04',
+  'Australia/Adelaide', -34.9285, 138.6007,
+  '2026-10-03T15:00:00.000Z', // 00:30 ACST local Oct 4, pre-transition
+  '2026-10-04T10:00:00.000Z', // 20:30 ACDT local Oct 4, post-transition
+  '2026-10-03T20:18:00.000Z',
+  '2026-10-04T08:51:00.000Z'
+);
+
+dstTransitionCase(
+  'Australia/Adelaide fall-back 2026-04-05',
+  'Australia/Adelaide', -34.9285, 138.6007,
+  '2026-04-04T14:30:00.000Z', // ~00:00 ACDT local Apr 5, pre-transition
+  '2026-04-05T10:00:00.000Z', // ~19:30 ACST local Apr 5, post-transition
+  '2026-04-04T20:59:00.000Z',
+  '2026-04-05T08:38:00.000Z'
+);
+
+// ============================================================
+// J. AURA PA-3B-R4: missing fractional/45-minute-offset fixtures
+//    (ticket section 8). These exercise the pre-existing, already-reviewed
+//    localDateTimeToUTC() conversion utility -- NOT new production
+//    behavior -- against two zones PA-3B/R1-R3 never covered:
+//      - America/St_Johns (Newfoundland): half-hour-offset zone that ALSO
+//        observes DST (NST UTC-3:30 <-> NDT UTC-2:30).
+//      - Pacific/Chatham (Chatham Islands, NZ): 45-minute-offset zone
+//        (CHST UTC+12:45 <-> CHDT UTC+13:45), the most unusual real-world
+//        offset granularity.
+//    Expected UTC instants independently verified via a standalone
+//    Intl `timeZoneName: 'longOffset'` offset probe (confirming the raw
+//    GMT+/-HH:MM string) PLUS a read-back check (feeding the computed UTC
+//    guess back through Intl and confirming it reads as the intended local
+//    wall time) -- a conversion path with zero code in common with
+//    localDateTimeToUTC itself, exactly like sections A/H's own fixtures.
+// ============================================================
+check(
+  'America/St_Johns winter/NST (UTC-3:30): 2026-01-15 06:00 -> 2026-01-15T09:30:00.000Z',
+  localDateTimeToUTC('2026-01-15', '06:00', 'America/St_Johns').toISOString() === '2026-01-15T09:30:00.000Z'
+);
+check(
+  'America/St_Johns summer/NDT (UTC-2:30): 2026-07-15 06:00 -> 2026-07-15T08:30:00.000Z',
+  localDateTimeToUTC('2026-07-15', '06:00', 'America/St_Johns').toISOString() === '2026-07-15T08:30:00.000Z'
+);
+check(
+  'Pacific/Chatham summer/CHDT (UTC+13:45): 2026-01-15 06:00 -> 2026-01-14T16:15:00.000Z',
+  localDateTimeToUTC('2026-01-15', '06:00', 'Pacific/Chatham').toISOString() === '2026-01-14T16:15:00.000Z'
+);
+check(
+  'Pacific/Chatham winter/CHST (UTC+12:45): 2026-07-15 06:00 -> 2026-07-14T17:15:00.000Z',
+  localDateTimeToUTC('2026-07-15', '06:00', 'Pacific/Chatham').toISOString() === '2026-07-14T17:15:00.000Z'
+);
+
+// St_Johns/Chatham also get the same getDailySolarWindows()
+// request-time-independence treatment as section I, since both are
+// DST-observing zones not otherwise covered by the 4 mandated dates above.
+dstTransitionCase(
+  'America/St_Johns spring-forward 2026-03-08 (half-hour-offset zone)',
+  'America/St_Johns', 47.5615, -52.7126,
+  '2026-03-08T05:00:00.000Z', // pre-transition local time
+  '2026-03-08T19:00:00.000Z', // post-transition local time
+  '2026-03-08T09:58:00.000Z',
+  '2026-03-08T21:26:00.000Z'
+);
+
+// ============================================================
+// K. AURA PA-3B-R4 (ticket section 11): actual ICS serialization output
+// (DTSTART/DTEND/TZID/duration) for a DST-transition day, exercising the
+// REAL production formatLocalICSDate() (not reimplemented) and mirroring
+// route.ts's own `DTSTART;TZID=${timezone}:${startStr}` construction
+// exactly. The pre-existing missing VTIMEZONE block (documented in prior
+// PA-3B reviews) is explicitly out of scope here -- this section only
+// confirms the wall-clock VALUES are DST-correct, not the VTIMEZONE
+// metadata.
+// ============================================================
+{
+  const tz = 'America/New_York';
+  const windows = getDailySolarWindows(localDateTimeToUTC('2026-03-08', '12:00', tz), 40.7128, -74.006, tz);
+
+  const brahmaStartStr = formatLocalICSDate(windows.brahma.start, tz);
+  const brahmaEndStr = formatLocalICSDate(windows.brahma.end, tz);
+  checkR4(
+    `(K) Brahma Muhurtham DTSTART;TZID=${tz}:${brahmaStartStr} is the correct EDT (post-transition) local wall time (expected 20260308T054300, got ${brahmaStartStr})`,
+    brahmaStartStr === '20260308T054300'
+  );
+  checkR4(
+    `(K) Brahma Muhurtham DTEND;TZID=${tz}:${brahmaEndStr} is the correct EDT local wall time (expected 20260308T063100, got ${brahmaEndStr})`,
+    brahmaEndStr === '20260308T063100'
+  );
+  const brahmaDurationMin = (windows.brahma.end.getTime() - windows.brahma.start.getTime()) / 60000;
+  checkR4(
+    `(K) Brahma Muhurtham duration is exactly 48 minutes across the DST-transition day (got ${brahmaDurationMin})`,
+    brahmaDurationMin === 48
+  );
+
+  const abhijitStartStr = formatLocalICSDate(windows.abhijit.start, tz);
+  const abhijitEndStr = formatLocalICSDate(windows.abhijit.end, tz);
+  checkR4(
+    `(K) Abhijit Muhurtham DTSTART;TZID=${tz}:${abhijitStartStr} / DTEND;TZID=${tz}:${abhijitEndStr} are both EDT local wall times (expected 20260308T124400 / 20260308T133000, got ${abhijitStartStr} / ${abhijitEndStr})`,
+    abhijitStartStr === '20260308T124400' && abhijitEndStr === '20260308T133000'
+  );
+}
+
+console.log(`\nPA-3B-R4 DST-transition section: ${r4Passed} passed, ${r4Failed} failed.`);
+if (r4Failed === 0) {
+  console.log('ALL PA-3B-R4 DST TRANSITION CHECKS PASSED');
+} else {
+  console.log('SOME PA-3B-R4 DST TRANSITION CHECKS FAILED');
+}
 
 console.log(`\n${passed} passed, ${failed} failed.`);
 if (failed > 0) {

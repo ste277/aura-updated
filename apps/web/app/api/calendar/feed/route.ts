@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getSessionFromRequest } from '../../../../lib/session';
 import { getUserById, listPlannedActivities } from '../../../../lib/db';
-import { getDatePartsInTimezone, resolveTzOffsetMinutes } from '../../../../lib/timezone';
+import { getDatePartsInTimezone } from '../../../../lib/timezone';
 import { computeUserLocalNoon, formatLocalICSDate } from '../../../../lib/calendarFeedIcs';
 import { getDailySolarWindows } from '../../../../../../packages/astronomy/src/solarWindows';
 
@@ -33,11 +33,10 @@ export async function GET(req: NextRequest) {
   const lat = user.latitude ?? 13.0827;
   const lng = user.longitude ?? 80.2707;
   const timezone = user.timezone || 'Asia/Kolkata';
-  const tzOffsetMinutes = resolveTzOffsetMinutes(timezone, now);
   const localDate = getDatePartsInTimezone(timezone, now);
   const userLocalNoon = computeUserLocalNoon(localDate, timezone);
 
-  const windows = getDailySolarWindows(userLocalNoon, lat, lng, tzOffsetMinutes, timezone);
+  const windows = getDailySolarWindows(userLocalNoon, lat, lng, timezone);
   const plans = await listPlannedActivities(session.userId);
   const upcomingPlans = plans.filter((plan) => {
     if (plan.status !== 'UPCOMING') return false;
