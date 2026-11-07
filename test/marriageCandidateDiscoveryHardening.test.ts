@@ -100,7 +100,47 @@ check('start-journey (REUSABLE_BASE_RULE) has yogaAuthoritative MISSING', journe
   const journeyMinutes = karanaOrYogaMinutesFor(journeyProfile);
 
   check('Marriage receives at least one Karana-transition-derived candidate on 2026-03-02 (New York) that Tithi/Nakshatra alone would not produce', marriageMinutes.length > grihaMinutes.length);
-  check('Griha Pravesh (no Karana/Yoga coverage) candidate minutes are UNCHANGED from start-journey (REUSABLE_BASE_RULE, also no Karana/Yoga coverage) -- same Tithi/Nakshatra-only walk', JSON.stringify([...grihaMinutes].sort((a, b) => a - b)) === JSON.stringify([...journeyMinutes].sort((a, b) => a - b)));
+
+  // AURA PA-2C-R2 (replaces a stale equality premise this PR's astronomical
+  // correction legitimately exposed -- see PA-2C-R1's independent review,
+  // classification B: STALE TEST PREMISE):
+  //
+  // Griha Pravesh has coverage.tithi === 'IMPLEMENTED' -- a genuine,
+  // dedicated, authoritative avoid-Tithi list (isAuthoritativeAvoidTithi()
+  // in muhurtaRulePacks.ts gates hard-exclusion-worthy Tithi data on exactly
+  // this coverage flag). start-journey (REUSABLE_BASE_RULE) is *never*
+  // authoritative for Tithi or Nakshatra (confirmed: its coverage.tithi AND
+  // coverage.nakshatra both resolve REUSABLE_BASE_RULE, never IMPLEMENTED),
+  // so isAuthoritativeAvoidTithi/isAuthoritativeAvoidNakshatra are
+  // structurally always false for its pack, for any Tithi/Nakshatra name.
+  //
+  // Both profiles walk the IDENTICAL set of real NAKSHATRA/TITHI transition
+  // instants that day (neither has karanaAuthoritative/yogaAuthoritative
+  // IMPLEMENTED, so collectPanchangaTransitionCandidateMinutes()'s own
+  // `kinds` array is the same ['NAKSHATRA','TITHI'] for both -- see the
+  // coverage-gating checks above), and that function's own
+  // addMinute(ceilMinuteOfDay(instant)) call is UNCONDITIONAL -- it runs
+  // regardless of which pack is asking. The ONLY way a profile gains an
+  // EXTRA minute beyond that shared base is the separately-gated
+  // `latestValidStartMinute` addition, which fires only when an authoritative
+  // avoid-Tithi/avoid-Nakshatra rule actually matches at that transition --
+  // structurally impossible for start-journey, genuinely possible for Griha
+  // Pravesh. This makes `journeyMinutes subset-of grihaMinutes` a PROVEN
+  // structural guarantee, not an observed coincidence -- unlike the old
+  // equality assertion, which merely happened to hold under the previous,
+  // ~40-second-offset Tithi sampling instant and was never a real contract.
+  check('A/D (coverage-aware + deterministic): start-journey\'s candidate minutes are a SUBSET of Griha Pravesh\'s on repeated, deterministic execution -- proven by construction (both walk identical Tithi/Nakshatra transitions; only Griha\'s authoritative avoid-Tithi/Nakshatra gate can ever add an extra minute)', (() => {
+    const grihaMinutesAgain = karanaOrYogaMinutesFor(grihaProfile);
+    const sameOnRerun = JSON.stringify([...grihaMinutesAgain].sort((a, b) => a - b)) === JSON.stringify([...grihaMinutes].sort((a, b) => a - b));
+    const subset = journeyMinutes.every((m) => grihaMinutes.includes(m));
+    return sameOnRerun && subset;
+  })());
+
+  check('B (non-authoritative comparison): start-journey never acquires Griha Pravesh\'s authoritative avoid-Tithi/Nakshatra exclusion merely by sharing the same underlying astronomical transitions -- its own coverage can never be authoritative for either factor', journeyPack.coverage.tithi !== 'IMPLEMENTED' && journeyPack.coverage.nakshatra !== 'IMPLEMENTED');
+
+  const extraGrihaMinutes = grihaMinutes.filter((m) => !journeyMinutes.includes(m));
+  check('C (coverage-aware exclusion, not a fixture-pinned timestamp): Griha Pravesh genuinely has at least one extra candidate minute beyond start-journey\'s on this date, and the mechanism producing it is Griha\'s own authoritative, data-driven avoid-Tithi/Nakshatra coverage gate (coverage.tithi === IMPLEMENTED with a real, non-empty avoid list) -- not an incidental equal count', extraGrihaMinutes.length > 0 && grihaPack.coverage.tithi === 'IMPLEMENTED' && grihaPack.tithi.avoid.length > 0);
+
   check('Engagement (no Karana/Yoga coverage) candidate minutes also match the Tithi/Nakshatra-only walk', JSON.stringify([...engagementMinutes].sort((a, b) => a - b)) === JSON.stringify([...journeyMinutes].sort((a, b) => a - b)));
 }
 
