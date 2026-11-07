@@ -61,6 +61,12 @@ jobs:
         run: npx ts-node test/marriageMuhurthamFoundation.test.ts
       - name: Run Marriage required eligibility test
         run: npx ts-node test/marriageRequiredEligibility.test.ts
+      - name: Run Griha Pravesh required eligibility test (PCE-3E)
+        run: npx ts-node test/grihaPraveshRequiredEligibility.test.ts
+      - name: Run ceremonial Muhurtham eligibility test
+        run: npx ts-node test/ceremonialMuhurthamEligibility.test.ts
+      - name: Run inauspicious period precedence test
+        run: npx ts-node test/inauspiciousPeriodPrecedence.test.ts
       - name: Run Marriage candidate discovery hardening test
         run: npx ts-node test/marriageCandidateDiscoveryHardening.test.ts
       - name: Run Ask Aura Marriage routing test

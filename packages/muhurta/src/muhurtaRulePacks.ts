@@ -393,6 +393,13 @@ const GRIHA_PRAVESH_SOURCES: MuhurtaRuleSource[] = [
     citation: 'http://sarastrology.blogspot.com/2019/11/muhurta-for-grah-parvesh.html',
     notes: 'Avoid Shukla paksha 1/4/9/14 and Krishna Pratipada/Chaturthi/Ashtami/Navami/Dwadashi/Chaturdashi; general muhurta guidance avoids 4th/6th/8th/12th/14th and full/new moon. Favorable nakshatras: Rohini, Mrigashira, Pushya, Uttara Phalguni, Hasta, Chitra, Swati, Anuradha, Uttara Ashadha, Shravana, Dhanishta, Shatabhisha, Uttara Bhadrapada, Revati. Does not cite a named classical text.',
   },
+  {
+    id: 'adhika-masa-policy',
+    title: 'Griha Pravesh (housewarming) avoidance during Adhika Masa -- AURA PCE-3C/PCE-3D/PCE-3E policy sourcing',
+    sourceType: 'TRADITIONAL_REFERENCE',
+    citation: 'https://hindupad.com/things-prohibited-in-adhika-maasa/ and https://www.drikpanchang.com/calendars/hindu/months/purushottam/hindu-calendar-adhik-maas.html',
+    notes: 'Both sources independently state housewarming/Grihapravesham ceremonies are avoided during Adhika Masa (Hindupad: "...inaugurations of new home and House warming ceremony... are to be avoided"; DrikPanchang: "...housewarming ceremonies... are avoided during Adhik Maas"). Both use advisory, not absolute-prohibition, language. Neither independently verified against a primary Sanskrit text -- DrikPanchang\'s own Dharma Sindhu attribution on that page covers a separate list (Upakarma/Mundana/Upanayana/etc.) that does not itself name housewarming. Tier C (contemporary interpretive authorities) per the PCE-3C/PCE-3D research methodology, not Tier A. Does not distinguish Apoorva/Sapoorva/Dwandwah categories -- applied uniformly as an explicit Aura product-policy choice (PCE-3E decision D2), not a traditional finding of universal applicability. Hard-exclusion treatment (D1) is likewise Aura\'s own conservative scheduling policy, consistent with Marriage\'s existing Adhika Masa precedent, not a claim of scriptural mandate.',
+  },
 ];
 
 /**
@@ -506,12 +513,29 @@ export const INTENT_RULE_PACKS: Partial<Record<MuhurtaIntent, { tithi: MuhurtaFa
       favorable: ['Rohini', 'Mrigashira', 'Uttara Phalguni', 'Chitra', 'Anuradha', 'Uttara Ashadha', 'Revati'],
       avoid: ['Ashlesha', 'Jyeshtha', 'Mula'],
     },
+    requiresPeriodExclusion: true,
+    // AURA PCE-3E: Adhika Masa hard exclusion only -- NOT Kharmas or
+    // Chaturmas (neither is sourced for Griha Pravesh; see
+    // GRIHA_PRAVESH_SOURCES below). Tier C evidence only (contemporary
+    // guidance, no independently verified primary-text passage) --
+    // see PCE-3C/PCE-3D's research findings. Applied uniformly across
+    // Apoorva/Sapoorva/Dwandwah as an explicit Aura scheduling-policy
+    // choice (D2), not a claim that all three categories are equally
+    // established in the sources consulted. This does NOT make Griha
+    // Pravesh traditionally complete and does NOT promote its trust
+    // tier -- deriveTraditionalCoverageLevel() depends only on
+    // coverage.tithi/nakshatra, both unchanged here.
+    periodRules: {
+      kharmasRashiIndices: [],
+      chaturmas: false,
+      adhikaMasa: true,
+    },
     sources: GRIHA_PRAVESH_SOURCES,
     confidence: 'CURATED',
     scope: 'GENERAL',
-    lastReviewed: '2026-08-22',
+    lastReviewed: '2026-11-07',
     reasonNote: 'supports a smooth home entry',
-    note: 'Genuine intent-specific Tithi/Nakshatra data for Griha Pravesh, corroborated across multiple independent contemporary Vedic-astrology reference sources (see GRIHA_PRAVESH_SOURCES) -- not a family base reuse.',
+    note: 'Genuine intent-specific Tithi/Nakshatra data for Griha Pravesh, corroborated across multiple independent contemporary Vedic-astrology reference sources (see GRIHA_PRAVESH_SOURCES) -- not a family base reuse. periodRules.adhikaMasa (PCE-3E) follows Aura\'s own conservative scheduling policy, informed by Tier C contemporary traditional guidance (no primary-text citation independently verified) -- see GRIHA_PRAVESH_SOURCES\' adhika-masa-policy entry.',
   },
   // ENGAGEMENT: deliberately absent. See this module's doc comment for the
   // research trail and why no source cleared the confidence bar.

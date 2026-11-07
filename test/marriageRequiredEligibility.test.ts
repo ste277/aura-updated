@@ -224,7 +224,12 @@ check('38. Finder still derives its dropdown entirely from SUPPORTED_MUHURTHAM_A
 // ============================================================
 
 const grihaPack = resolveMuhurtaRulePack(grihaDef.muhurta);
-check('39. Griha Pravesh remains unchanged: still SUPPORTED, no periodRules/combustionRules leaked onto it', computeMuhurtaSupportLevel(grihaDef.muhurta, grihaPack) === 'SUPPORTED' && grihaPack.periodRules === undefined && grihaPack.combustionRules === undefined);
+// AURA PCE-3E: Griha Pravesh now intentionally carries its OWN
+// Adhika-Masa-only periodRules (never Marriage's Kharmas/Chaturmas, and
+// never combustionRules) -- this assertion protects that Marriage's own
+// combustion rules and Kharmas/Chaturmas period rules never leak onto
+// Griha Pravesh, not that Griha Pravesh has zero period rules at all.
+check('39. Griha Pravesh remains SUPPORTED and has its own Adhika-Masa-only periodRules (no Kharmas/Chaturmas, no combustionRules leaked from Marriage)', computeMuhurtaSupportLevel(grihaDef.muhurta, grihaPack) === 'SUPPORTED' && grihaPack.periodRules?.adhikaMasa === true && grihaPack.periodRules?.chaturmas === false && grihaPack.periodRules?.kharmasRashiIndices.length === 0 && grihaPack.combustionRules === undefined);
 const engagementPack = resolveMuhurtaRulePack(engagementDef.muhurta);
 check('40. Engagement remains PARTIAL/reusable-base, unaffected', computeMuhurtaSupportLevel(engagementDef.muhurta, engagementPack) === 'PARTIAL' && engagementPack.coverage.periodExclusion === 'MISSING');
 for (const id of ['start-journey', 'financial-decision', 'business-start', 'property-purchase', 'new-beginning']) {
