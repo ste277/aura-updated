@@ -169,7 +169,12 @@ const neutralDiscovery = getActivityDiscoveryCards('Neutral Flow', 50);
 check('Discovery cards expose fit labels', neutralDiscovery.every((card) => Boolean(card.fit)));
 check('Discovery is catalog-backed for dating in Neutral Flow', neutralDiscovery.some((card) => card.activityId === 'dating'));
 check('Discovery uses nuanced fit labels', new Set(neutralDiscovery.map((card) => card.fit)).size > 1);
-const abhijitDiscovery = getActivityDiscoveryCards('Abhijit Muhurtham', 50);
+// AURA PA-2A: `date` passed explicitly (this file's own fixed fixture,
+// already used above for the ABHIJIT/RAHU_KALAM evaluateMuhurta() checks)
+// -- getActivityDiscoveryCards()'s 4th parameter otherwise silently
+// defaults to `new Date()`, making this assertion's result depend on
+// real wall-clock time at whenever the test happens to run.
+const abhijitDiscovery = getActivityDiscoveryCards('Abhijit Muhurtham', 50, undefined, date);
 check('Muhurta fit favors stronger starts during Abhijit', abhijitDiscovery.some((card) => card.activityId === 'start-journey' && (card.fit === 'BEST' || card.fit === 'GOOD')));
 check('Tea break is not best fit during Abhijit', !abhijitDiscovery.some((card) => card.activityId === 'tea-break' && card.fit === 'BEST'));
 
