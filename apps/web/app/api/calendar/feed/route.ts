@@ -1,20 +1,29 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getSessionFromRequest } from '../../../../lib/session';
 import { getUserById, listPlannedActivities } from '../../../../lib/db';
-import { getDatePartsInTimezone, resolveTzOffsetMinutes } from '../../../../lib/timezone';
+import { getDatePartsInTimezone, getSecondOfDayInTimezone, resolveTzOffsetMinutes } from '../../../../lib/timezone';
 import { getDailySolarWindows } from '../../../../../../packages/astronomy/src/solarWindows';
 
-/** Formats a Date object into local YYYYMMDDTHHMMSS format without conversion */
-function formatLocalICSDate(d: Date): string {
+/**
+ * AURA PA-3B: formats a Date's wall-clock fields AS SEEN IN `ianaTimezone`
+ * (the real target-location zone, via Intl -- not the server process's own
+ * `TZ`). Paired with `getDailySolarWindows`'s now-corrected UTC instants
+ * (see that function's own PA-3B doc comment) so the visible local time in
+ * the resulting `DTSTART;TZID=...`/`DTEND;TZID=...` lines below is still
+ * correct -- previously both sides of this round-trip used server-local
+ * `Date` getters/constructors and happened to cancel out only because they
+ * used the identical (wrong) interpretation; fixing one side without this
+ * would have broken the other.
+ */
+function formatLocalICSDate(d: Date, ianaTimezone: string): string {
   const pad = (n: number) => String(n).padStart(2, '0');
-  const year = d.getFullYear();
-  const month = pad(d.getMonth() + 1);
-  const day = pad(d.getDate());
-  const hours = pad(d.getHours());
-  const mins = pad(d.getMinutes());
-  const secs = pad(d.getSeconds());
+  const { year, month, day } = getDatePartsInTimezone(ianaTimezone, d);
+  const secondOfDay = getSecondOfDayInTimezone(ianaTimezone, d);
+  const hours = Math.floor(secondOfDay / 3600);
+  const mins = Math.floor((secondOfDay % 3600) / 60);
+  const secs = secondOfDay % 60;
 
-  return `${year}${month}${day}T${hours}${mins}${secs}`;
+  return `${year}${pad(month)}${pad(day)}T${pad(hours)}${pad(mins)}${pad(secs)}`;
 }
 
 function formatUTCICSDate(d: Date): string {
@@ -49,7 +58,7 @@ export async function GET(req: NextRequest) {
   const localDate = getDatePartsInTimezone(timezone, now);
   const userLocalNoon = new Date(localDate.year, localDate.month - 1, localDate.day, 12, 0, 0);
 
-  const windows = getDailySolarWindows(userLocalNoon, lat, lng, tzOffsetMinutes);
+  const windows = getDailySolarWindows(userLocalNoon, lat, lng, tzOffsetMinutes, timezone);
   const plans = await listPlannedActivities(session.userId);
   const upcomingPlans = plans.filter((plan) => {
     if (plan.status !== 'UPCOMING') return false;
@@ -76,9 +85,9 @@ export async function GET(req: NextRequest) {
   ];
 
   for (const event of events) {
-    const startStr = formatLocalICSDate(event.start);
-    const endStr = formatLocalICSDate(event.end);
-    const stampStr = formatLocalICSDate(now);
+    const startStr = formatLocalICSDate(event.start, timezone);
+    const endStr = formatLocalICSDate(event.end, timezone);
+    const stampStr = formatLocalICSDate(now, timezone);
 
     icsContent.push(
       'BEGIN:VEVENT',

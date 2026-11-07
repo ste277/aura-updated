@@ -1,4 +1,5 @@
 import { computeSolarEphemeris } from './ephemeris';
+import { getDatePartsInTimezone, localDateTimeToUTC } from '../../panchang/src/localDate';
 
 export interface SolarWindow {
   start: Date;
@@ -15,15 +16,31 @@ export interface DailySolarWindows {
   yama: SolarWindow;
 }
 
+/**
+ * AURA PA-3B: `date`'s calendar day and every returned `Date`'s UTC instant
+ * are both resolved in `ianaTimezone` -- the target location's real IANA
+ * zone, not the server process's own `TZ` -- via the same
+ * `getDatePartsInTimezone`/`localDateTimeToUTC` utilities the primary
+ * Panchangam path (packages/panchang/src/panchangDay.ts,
+ * packages/recommendation/src/ceremonialPeriods.ts) already uses as their
+ * single source of truth for this exact conversion. Previously this
+ * function built every returned `Date` via `new Date(year, month-1, day,
+ * hours, mins, 0)`, which is interpreted in the server's own local
+ * timezone -- the same (date, location) could therefore resolve to a
+ * genuinely different absolute UTC instant depending on process `TZ` (a
+ * confirmed ~330-minute discrepancy for New Delhi under `TZ=UTC` vs.
+ * `TZ=Asia/Calcutta`). `tzOffsetMinutes` is unchanged and still feeds only
+ * the astronomical ephemeris calculation below (computeSolarEphemeris's
+ * own contract, not touched by this fix).
+ */
 export function getDailySolarWindows(
   date: Date,
   latitude: number,
   longitude: number,
-  tzOffsetMinutes: number = 330
+  tzOffsetMinutes: number = 330,
+  ianaTimezone: string = 'Asia/Kolkata'
 ): DailySolarWindows {
-  const year = date.getFullYear();
-  const month = date.getMonth() + 1;
-  const day = date.getDate();
+  const { year, month, day, weekday: dayOfWeek } = getDatePartsInTimezone(ianaTimezone, date);
 
   const ephemeris = computeSolarEphemeris({
     year,
@@ -34,12 +51,17 @@ export function getDailySolarWindows(
     tzOffsetMinutes,
   });
 
-  // Helper: Convert total local minutes from midnight into a clean Date object matching local time
+  const dateStr = `${year}-${String(month).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
+
+  // Helper: convert total local minutes from midnight (for this calendar
+  // day, in ianaTimezone) into the correct absolute UTC instant -- see the
+  // function-level doc comment above.
   const localMinutesToDate = (totalMinutes: number) => {
     const wrapped = ((Math.round(totalMinutes) % 1440) + 1440) % 1440;
     const hours = Math.floor(wrapped / 60);
     const mins = wrapped % 60;
-    return new Date(year, month - 1, day, hours, mins, 0);
+    const timeStr = `${String(hours).padStart(2, '0')}:${String(mins).padStart(2, '0')}`;
+    return localDateTimeToUTC(dateStr, timeStr, ianaTimezone);
   };
 
   const sunrise = localMinutesToDate(ephemeris.sunriseMinutes);
@@ -47,7 +69,6 @@ export function getDailySolarWindows(
   const daylightMinutes = ephemeris.daylightMinutes;
 
   const eighthSegment = daylightMinutes / 8;
-  const dayOfWeek = date.getDay(); // 0 = Sunday ... 6 = Saturday
 
   // Fixed 0-based segment offsets (0 = 1st segment, 7 = 8th segment)
   const rahuOffsets = [7, 1, 6, 4, 5, 3, 2];   // Sun(7), Mon(1), Tue(6), Wed(4), Thu(5), Fri(3), Sat(2)
