@@ -80,8 +80,18 @@ console.log(`${PCE3B_MUHURTHAM_REFERENCE_FIXTURES.length} fixtures loaded, all D
   assertStrict(`${f.id}: Tithi name matches published ignoring paksha (${f.published.tithiNameIgnoringPaksha})`, bareTithiName(aura.tithi) === f.published.tithiNameIgnoringPaksha);
 }
 {
+  // PCE-4A-T2: this fixture's published start minute (09:29) sits within
+  // the same source-stated minute as the real Hasta->Chitra transition
+  // (09:29:05.334 IST under the corrected ayanamsa) -- see the fixture's
+  // own `strictInstantOverride.justification` for the independent evidence
+  // (DrikPanchang's own day-panchang page separately states "Hasta upto
+  // 09:29" for this same transition, confirming minute-level source
+  // precision, not a disagreement). Sample at the override instant
+  // (window midpoint) when present; `published.muhurat.startTime` itself
+  // is never altered.
   const f = fixture('GRIHA_PRAVESH-FAV-2026-03-06');
-  const t = localDateTimeToUTC(f.published.muhurat!.startDate, f.published.muhurat!.startTime, f.location.timezone);
+  const sampleTime = f.strictInstantOverride?.localTime ?? f.published.muhurat!.startTime;
+  const t = localDateTimeToUTC(f.published.muhurat!.startDate, sampleTime, f.location.timezone);
   const aura = { tithi: getTithi(t).name, nakshatra: getNakshatra(t).name };
   assertStrict(`${f.id}: Nakshatra matches published (${f.published.nakshatra})`, aura.nakshatra === f.published.nakshatra);
   assertStrict(`${f.id}: Tithi name matches published ignoring paksha (${f.published.tithiNameIgnoringPaksha})`, bareTithiName(aura.tithi) === f.published.tithiNameIgnoringPaksha);

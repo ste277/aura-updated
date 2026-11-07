@@ -239,7 +239,30 @@ const overlapDate20min = findMuhurthams({
   context: chennaiContext,
 });
 check('A 20-min window at Abhijit\'s own start, which sits inside the Gulika overlap even though it stays clear of Rahu Kalam, is NOT selected as the best window', overlapDate20min.dates.length === 0 || overlapDate20min.dates[0].bestWindow.start !== '2026-09-02T06:14:00.000Z');
-check('Muhurtham Finder instead falls back to a genuinely clean window (Brahma, no Rahu/Gulika/Yama overlap) for this date', overlapDate20min.dates.length === 1 && overlapDate20min.dates[0].bestWindow.start === '2026-09-01T22:51:00.000Z');
+// Re-scoped under the corrected Lahiri ayanamsa (AURA PCE-4A-T1, issue
+// #297): this assertion originally required the Brahma window
+// (2026-09-01T22:51:00Z) to be the OVERALL best window for the day --
+// true only because the day's generic NEUTRAL window (2026-09-01T18:30Z)
+// happened to carry an unfavorable Nakshatra under the pre-fix ayanamsa.
+// Post-fix, that NEUTRAL window's Nakshatra is genuinely Ashwini
+// (favorable), so it legitimately outranks Brahma for the day overall --
+// an expected downstream consequence of the correction, not a defect.
+// The assertion this test actually exists to protect (per its own
+// comment above: interval-overlap against BOTH Rahu Kalam and Gulika,
+// not mere Abhijit window-membership, drives exclusion) is untouched:
+// the Brahma window must still exist, unexcluded, with no Rahu/Yama
+// caution reason -- checked directly below against its own window,
+// never against which window ranks #1 for the unrelated reason of a
+// different window's Nakshatra score.
+const brahmaWindow = overlapDate20min.dates[0]?.alternateWindows?.find((w) => w.metadata.windowType === 'BRAHMA')
+  ?? (overlapDate20min.dates[0]?.bestWindow.metadata.windowType === 'BRAHMA' ? overlapDate20min.dates[0].bestWindow : undefined);
+check(
+  'Muhurtham Finder still surfaces a genuinely clean Brahma window (no Rahu/Gulika/Yama overlap) for this date',
+  overlapDate20min.dates.length === 1
+    && brahmaWindow !== undefined
+    && brahmaWindow.start === '2026-09-01T22:51:00.000Z'
+    && !brahmaWindow.reasons.some((r) => r.code === 'RAHU_CAUTION' || r.code === 'YAMA_CAUTION')
+);
 
 // ============================================================
 // RANGE / TIMEZONE
@@ -391,10 +414,18 @@ check('START_SENSITIVITY_WEIGHT keeps the full-duration score dominant (< 50%)',
 // ============================================================
 
 {
-  // Known-good real fixture (same one PR E's friction-boundary work used):
-  // 2026-06-12 New York, Marriage, RAHU_KALAM.endMinute -- a genuinely
-  // eligible, favorably-scored ABHIJIT instant.
-  const eligibleStart = new Date('2026-06-12T16:55:00.000Z');
+  // Known-good real fixture, re-picked under the corrected Lahiri
+  // ayanamsa (AURA PCE-4A-T1, issue #297): the original 2026-06-12 New
+  // York instant is no longer eligible post-fix -- it genuinely falls
+  // inside the real Adhika Masa window (May 17 - June 15, 2026,
+  // independently corroborated against DrikPanchang during PCE-4A's own
+  // validation), which Marriage's requiresPeriodExclusion rule correctly
+  // now rejects (this is the fix working as intended, not a defect).
+  // 2026-06-20 New York is the new fixture: a genuinely eligible,
+  // favorably-scored (8.9, VERY_GOOD) full 60-minute ABHIJIT window,
+  // found via a repository-wide scan of ABHIJIT windows for score >= 7.0
+  // eligible Marriage candidates safely outside the Adhika Masa window.
+  const eligibleStart = new Date('2026-06-20T16:27:00.000Z');
   const eligible = evaluateMuhurthamCandidateAt({ activityId: 'marriage', start: eligibleStart, durationMinutes: 60, scope: 'GENERAL', context: newYorkContext });
   check('evaluateMuhurthamCandidateAt: a real eligible instant returns eligible=true', eligible.status === 'OK' && eligible.eligible === true);
   check('evaluateMuhurthamCandidateAt: the eligible instant is not a low/CAUTION score', eligible.status === 'OK' && eligible.score >= 7.0);
@@ -405,7 +436,7 @@ check('START_SENSITIVITY_WEIGHT keeps the full-duration score dominant (< 50%)',
   // itself reports for that exact same date/instant -- i.e. this is
   // genuinely reusing the SAME start-sensitivity-blended canonical
   // evaluation, not a second, cheaper approximation.
-  const searchResult = findMuhurthams({ activityId: 'marriage', dateRange: { start: '2026-06-12', end: '2026-06-12' }, timePreference: 'ANY', durationMinutes: 60, limit: 5, context: newYorkContext });
+  const searchResult = findMuhurthams({ activityId: 'marriage', dateRange: { start: '2026-06-20', end: '2026-06-20' }, timePreference: 'ANY', durationMinutes: 60, limit: 5, context: newYorkContext });
   check('evaluateMuhurthamCandidateAt score is byte-identical to findMuhurthams()\'s own bestWindow score for the same date/instant', eligible.status === 'OK' && searchResult.dates[0] && eligible.score === searchResult.dates[0].score);
 
   // Duration overlap: a 90-minute candidate must be evaluated as the full

@@ -256,11 +256,21 @@ async function main() {
     const thirty = await firstDateEntry('Find a wedding muhurtham for 30 minutes.');
 
     check('No explicit duration: parsed.durationMinutes is undefined', noDuration.parsedDuration === undefined);
-    check('No explicit duration: canonical Muhurtham default (60 min) window returned', Boolean(noDuration.first) && noDuration.first!.startLabel === '12:53 PM' && noDuration.first!.endLabel === '1:53 PM');
+    // Re-pinned under the corrected Lahiri ayanamsa (AURA PCE-4A-T1, issue
+    // #297): the original 2026-06-01-anchored "12:53 PM" fixture is a
+    // real, re-ranked engine call across a multi-day default search --
+    // the best-scoring date/window for each duration genuinely shifted
+    // (and, for the 30-minute case, even which calendar date wins changed,
+    // since a narrower window surfaces a different top-scoring day). Each
+    // value below was independently re-derived by running this exact
+    // scenario against the corrected engine (not invented), and each
+    // still pins an EXACT clock-time label pair, preserving the same
+    // precision the original assertions had.
+    check('No explicit duration: canonical Muhurtham default (60 min) window returned', Boolean(noDuration.first) && noDuration.first!.startLabel === '12:27 PM' && noDuration.first!.endLabel === '1:27 PM');
     check('"90 minute" explicit duration: parsed as 90', ninety.parsedDuration === 90);
-    check('"90 minute" explicit duration: returned window is exactly 90 minutes (12:53 PM - 2:23 PM), not the 60-min default', Boolean(ninety.first) && ninety.first!.startLabel === '12:53 PM' && ninety.first!.endLabel === '2:23 PM');
+    check('"90 minute" explicit duration: returned window is exactly 90 minutes (11:57 AM - 1:27 PM), not the 60-min default', Boolean(ninety.first) && ninety.first!.startLabel === '11:57 AM' && ninety.first!.endLabel === '1:27 PM');
     check('"for 30 minutes" explicit duration: parsed as 30', thirty.parsedDuration === 30);
-    check('"for 30 minutes" explicit duration: returned window is exactly 30 minutes (12:53 PM - 1:23 PM)', Boolean(thirty.first) && thirty.first!.startLabel === '12:53 PM' && thirty.first!.endLabel === '1:23 PM');
+    check('"for 30 minutes" explicit duration: returned window is exactly 30 minutes (12:26 PM - 12:56 PM)', Boolean(thirty.first) && thirty.first!.startLabel === '12:26 PM' && thirty.first!.endLabel === '12:56 PM');
   }
 
   // ============================================================

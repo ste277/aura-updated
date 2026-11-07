@@ -151,7 +151,15 @@ function isCleanMarriageInstant(d: Date): boolean {
     && !isAuthoritativeAvoidKarana(marriagePack, getKarana(d).name);
 }
 function findCleanWindowBefore(transition: Date, lengthMs: number): [Date, Date] {
-  for (let backMinutes = 20; backMinutes <= 20 * 60; backMinutes += 5) {
+  // PCE-4A: widened from 20*60 (20h) to 10*24*60 (10d). The Lahiri-ayanamsa
+  // epoch-offset fix (see panchangElements.ts's lahiriAyanamsa()) shifted
+  // which real transition findRealTransitionInto() lands on near
+  // SEARCH_START, and with 4 simultaneously-active authoritative factors
+  // (Tithi/Nakshatra/Yoga/Karana), a 20-hour backward search is not always
+  // enough to find a point where all 4 happen to be clear at once -- this
+  // widens the search window only, never the clean-instant predicate
+  // itself (isCleanMarriageInstant is unchanged).
+  for (let backMinutes = 20; backMinutes <= 10 * 24 * 60; backMinutes += 5) {
     const end = new Date(transition.getTime() - backMinutes * 60_000);
     const start = new Date(end.getTime() - lengthMs);
     if (isCleanMarriageInstant(start) && isCleanMarriageInstant(end)) return [start, end];
