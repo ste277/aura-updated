@@ -102,17 +102,27 @@ function groundTruthAt(localDate: string, instant: Date) {
 
 // ============================================================
 // 4. Yoga within-day transition.
-//    2026-12-14: Vyaghapata -> Harshana at 2026-12-14T00:12:22Z
-//    (05:42:22 IST).
+//    2026-12-14: Vyaghapata -> Harshana at 2026-12-14T07:32:33Z
+//    (13:02:33 IST). Re-located under the corrected Lahiri ayanamsa
+//    (AURA PCE-4A-T1, issue #297) -- the original 00:12:22Z instant was
+//    found under the PRE-FIX ayanamsa and the real transition has moved
+//    ~7.3h later. Independently corroborated: multiple third-party
+//    Panchang sources (drikpanchang.com, bgsiyer.com, via WebSearch)
+//    agree Vyaghata hands over to Harshana at ~1:04 PM IST on this date
+//    -- within a minute of this file's own independently-computed
+//    13:02:33 IST instant. "noon IST" no longer works as the "after"
+//    sample (noon now falls BEFORE this later transition), so "after"
+//    moved to 6pm IST, comfortably clear of the transition in both
+//    directions (before: 2am IST, ~11h margin; after: 6pm IST, ~5h margin).
 // ============================================================
 
 {
   const localDate = '2026-12-14';
   const before = new Date('2026-12-14T02:00:00+05:30'); // 2:00 AM IST
-  const after = new Date('2026-12-14T12:00:00+05:30'); // noon IST
+  const after = new Date('2026-12-14T18:00:00+05:30'); // 6:00 PM IST
   const truthBefore = groundTruthAt(localDate, before);
   const truthAfter = groundTruthAt(localDate, after);
-  check('4. [YOGA] fixture sanity: 2am and noon IST Dec 14 2026 genuinely disagree on Yoga', truthBefore.yoga.name !== truthAfter.yoga.name);
+  check('4. [YOGA] fixture sanity: 2am and 6pm IST Dec 14 2026 genuinely disagree on Yoga', truthBefore.yoga.name !== truthAfter.yoga.name);
 
   const outcomeBefore = evaluateMuhurthamCandidateAt({ scope: 'GENERAL', activityId: 'start-journey', start: before, durationMinutes: 60, context: chennaiContext });
   const outcomeAfter = evaluateMuhurthamCandidateAt({ scope: 'GENERAL', activityId: 'start-journey', start: after, durationMinutes: 60, context: chennaiContext });
@@ -149,20 +159,28 @@ function groundTruthAt(localDate: string, instant: Date) {
 // ============================================================
 // 6. findMuhurthams() -- the day-scan GENERAL search entry point --
 //    also respects its OWN best window's real start instant, not noon.
-//    2026-12-06: best window lands at local midnight (2026-12-05T18:30Z),
-//    which is Swati -- noon that day is a DIFFERENT Nakshatra (Vishakha).
+//    2026-12-07: best window lands at 2026-12-07T10:18:00Z (15:48 IST),
+//    which is Anuradha -- noon that day is a DIFFERENT Nakshatra
+//    (Vishakha). Re-located under the corrected Lahiri ayanamsa (AURA
+//    PCE-4A-T1, issue #297) -- the original 2026-12-06 date's best
+//    window no longer disagrees with its own noon value post-fix.
+//    Independently corroborated: two third-party Panchang sources
+//    (samvat.in, prokerala.com, via WebSearch) agree the Vishakha ->
+//    Anuradha transition falls at 15:48 IST on 2026-12-07 -- an exact
+//    match, to the minute, with this file's own independently-computed
+//    best-window instant.
 // ============================================================
 
 {
-  const result = findMuhurthams({ activityId: 'start-journey', dateRange: { start: '2026-12-06', end: '2026-12-06' }, context: chennaiContext });
-  const dec6 = result.dates.find((d) => d.date === '2026-12-06');
-  if (!dec6) {
-    check('6. findMuhurthams returns a 2026-12-06 candidate (setup)', false);
+  const result = findMuhurthams({ activityId: 'start-journey', dateRange: { start: '2026-12-07', end: '2026-12-07' }, context: chennaiContext });
+  const dec7 = result.dates.find((d) => d.date === '2026-12-07');
+  if (!dec7) {
+    check('6. findMuhurthams returns a 2026-12-07 candidate (setup)', false);
   } else {
-    const truth = groundTruthAt('2026-12-06', new Date(dec6.bestWindow.start));
-    const noonOnly = getPanchangForDate({ localDate: '2026-12-06', ...CHENNAI }).panchanga.nakshatra.name;
-    check('6. fixture sanity: the best window instant and local noon genuinely disagree on Nakshatra for 2026-12-06', truth.nakshatra.name !== noonOnly);
-    check('6. [day-scan] findMuhurthams.panchangSummary matches the BEST WINDOW\'s own instant, not the noon default', dec6.panchangSummary.nakshatra === truth.nakshatra.name);
+    const truth = groundTruthAt('2026-12-07', new Date(dec7.bestWindow.start));
+    const noonOnly = getPanchangForDate({ localDate: '2026-12-07', ...CHENNAI }).panchanga.nakshatra.name;
+    check('6. fixture sanity: the best window instant and local noon genuinely disagree on Nakshatra for 2026-12-07', truth.nakshatra.name !== noonOnly);
+    check('6. [day-scan] findMuhurthams.panchangSummary matches the BEST WINDOW\'s own instant, not the noon default', dec7.panchangSummary.nakshatra === truth.nakshatra.name);
   }
 }
 

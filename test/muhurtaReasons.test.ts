@@ -20,9 +20,20 @@ function check(label: string, condition: boolean) {
 
 // Dates picked (via a small offline search over getPanchangaSnapshot) so the
 // nakshatra on that day is, respectively, in DEEP_WORK's preferred and avoid
-// lists -- deterministic, not flaky.
-const supportiveNakshatraDate = new Date('2026-07-29T06:45:00.000Z'); // Shravana
-const unfavorableNakshatraDate = new Date('2026-08-09T06:45:00.000Z'); // Ardra
+// lists -- deterministic, not flaky. Re-picked under the corrected Lahiri
+// ayanamsa (AURA PCE-4A-T1, issue #297): the original 2026-07-29/2026-08-09
+// dates were selected under the PRE-FIX ayanamsa and no longer land in
+// Shravana/Ardra post-correction. Independently cross-checked against two
+// third-party Panchang sources (not derived from Aura's own output):
+// Shravana on 2026-08-26, lasting from before 06:45 UTC until ~00:47-00:48
+// IST on 08-27 (shubhpanchang.com, samvat.in -- both agree, both well clear
+// of our 06:45 UTC sample, forward margin ~12.5h); Ardra on 2026-09-06,
+// lasting until ~19:52 IST = ~14:22 UTC (shubhpanchang.com, samvat.in,
+// kundligpt.com -- three independent sources agree within a minute of each
+// other, and within a minute of Aura's own independently-computed 14:21:58
+// UTC transition instant), forward margin from our 06:45 UTC sample ~7.6h.
+const supportiveNakshatraDate = new Date('2026-08-26T06:45:00.000Z'); // Shravana
+const unfavorableNakshatraDate = new Date('2026-09-06T06:45:00.000Z'); // Ardra
 
 // --- 1. Supportive Nakshatra produces a structured SUPPORT reason ---
 const supportiveEval = evaluateMuhurta({ taskTitle: 'Deep Work', date: supportiveNakshatraDate, windowType: 'NEUTRAL', family: 'DEEP_WORK' });

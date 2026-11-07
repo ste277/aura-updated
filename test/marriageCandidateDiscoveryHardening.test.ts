@@ -128,34 +128,57 @@ for (const durationMinutes of [15, 30, 60]) {
 }
 
 // ============================================================
-// 5. YOGA REGRESSION -- 2026-03-06 Chennai, 60 minutes. Audit finding:
-// Ganda -> Vriddhi around minute 7, missing a ~4-hour eligible stretch.
+// 5. YOGA REGRESSION -- 2026-02-26 Chennai, 60 minutes. Audit finding:
+// a Yoga transition minute discovery recovers a window the plain solar-
+// slot grid alone would miss. Re-picked under the corrected Lahiri
+// ayanamsa (AURA PCE-4A-T1, issue #297): the original 2026-03-06 fixture
+// is unaffected by the correction itself, but to keep these three related
+// fixtures on dates with a uniformly-verified rationale, all three were
+// re-located together via a repository-wide scan of
+// collectPanchangaTransitionCandidateMinutes() output, confirming the
+// BEST window's own start minute is literally one of the transition-
+// discovered minutes (not merely "some result exists") -- directly
+// proving the mechanism this test protects is exercised, not just a
+// result returned for an unrelated reason.
 // ============================================================
 
 {
-  const result = searchOneDay('marriage', '2026-03-06', chennai, 60);
-  check('2026-03-06 Chennai 60min: Finder discovers the eligible window (Ganda->Vriddhi recovery)', result.dates.length > 0);
+  const result = searchOneDay('marriage', '2026-02-26', chennai, 60);
+  check('2026-02-26 Chennai 60min: Finder discovers the eligible window (Yoga-transition recovery)', result.dates.length > 0);
 }
 
 // ============================================================
-// 6. YOGA FALSE-ZERO REGRESSION -- 2026-05-25 Chennai, all three durations.
-// Audit finding: Vajra -> Siddhi, production returned zero results.
+// 6. YOGA FALSE-ZERO REGRESSION -- 2026-04-20 Chennai, all three durations.
+// Re-picked under the corrected Lahiri ayanamsa (AURA PCE-4A-T1, issue
+// #297): the original 2026-05-25 date now genuinely falls inside the
+// real Adhika Masa window (May 17 - June 15, 2026, independently
+// corroborated against DrikPanchang during PCE-4A's own validation),
+// which Marriage's requiresPeriodExclusion rule correctly now rejects
+// for the ENTIRE day regardless of Yoga -- this is the fix working as
+// intended, not a defect, so it can no longer serve as a Yoga-specific
+// control. 2026-04-20 is confirmed (via the same transition-minute scan
+// as test 5 above) to be genuinely transition-driven at all three
+// durations (15/30/60min), outside the Adhika Masa window.
 // ============================================================
 
 for (const durationMinutes of [15, 30, 60]) {
-  const result = searchOneDay('marriage', '2026-05-25', chennai, durationMinutes);
-  check(`2026-05-25 Chennai ${durationMinutes}min: no longer a false-zero result (Vajra->Siddhi recovery)`, result.dates.length > 0);
+  const result = searchOneDay('marriage', '2026-04-20', chennai, durationMinutes);
+  check(`2026-04-20 Chennai ${durationMinutes}min: no longer a false-zero result (Yoga-transition recovery)`, result.dates.length > 0);
 }
 
 // ============================================================
-// 7. SECOND YOGA CONTROL -- 2026-05-17 Chennai, Atiganda -> Sukarma.
-// Independently observed in the audit; prevents this implementation from
-// being accidentally tuned only to the Vajra/Ganda cases above.
+// 7. SECOND YOGA CONTROL -- 2026-12-05 Chennai, all three durations.
+// Independently distinct date from test 6's fixture; prevents this
+// implementation from being accidentally tuned only to one case. Also
+// re-picked under the corrected Lahiri ayanamsa (AURA PCE-4A-T1, issue
+// #297) for the same reason as test 6 -- the original 2026-05-17 date
+// is inside the real Adhika Masa window. Confirmed transition-driven at
+// all three durations, outside the Adhika Masa window.
 // ============================================================
 
 for (const durationMinutes of [15, 30, 60]) {
-  const result = searchOneDay('marriage', '2026-05-17', chennai, durationMinutes);
-  check(`2026-05-17 Chennai ${durationMinutes}min: Atiganda->Sukarma recovery produces a result`, result.dates.length > 0);
+  const result = searchOneDay('marriage', '2026-12-05', chennai, durationMinutes);
+  check(`2026-12-05 Chennai ${durationMinutes}min: second control produces a result (Yoga-transition recovery)`, result.dates.length > 0);
 }
 
 // ============================================================
