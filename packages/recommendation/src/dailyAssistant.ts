@@ -384,6 +384,39 @@ export function recommendTaskSlot(
   return buildTaskRecommendation(cleanTitle, profile, 'NEXT_BEST', best, best.startMinute, safeDuration, context, windows);
 }
 
+/** PA-3C-C1C-01: additive result shape for recommendTaskSlot()/
+ * findOptimalTaskTimes(), same convention buildDailyBriefingResult()
+ * already established for buildDailyBriefing() -- the underlying function
+ * keeps throwing SolarNoEventError unchanged (so any existing caller that
+ * hasn't migrated sees identical behavior); this wrapper is the one place
+ * that catches it and expresses it as data instead, for callers (the
+ * slot-task API route) that want to represent "could not determine solar
+ * timing" without crashing. TaskSlotRecommendation's own fixed enums
+ * (activityFit/windowQuality/recommendationState) all have pre-existing
+ * NEUTRAL-ish members with real, unrelated meanings -- reusing any of them
+ * for "unavailable" would be exactly the fabrication this milestone exists
+ * to remove, which is why this is a sibling result wrapper, not a change
+ * to TaskSlotRecommendation itself. */
+export type TaskSlotRecommendationResult =
+  | { status: 'OK'; recommendation: TaskSlotRecommendation }
+  | { status: 'UNAVAILABLE'; reason: 'SOLAR_NO_EVENT'; solarCondition: 'POLAR_DAY' | 'POLAR_NIGHT' };
+
+export function recommendTaskSlotResult(
+  taskTitle: string,
+  context: DailyAssistantContext,
+  durationMinutes = 30,
+  requestedStartMinute?: number
+): TaskSlotRecommendationResult {
+  try {
+    return { status: 'OK', recommendation: recommendTaskSlot(taskTitle, context, durationMinutes, requestedStartMinute) };
+  } catch (err) {
+    if (err instanceof SolarNoEventError) {
+      return { status: 'UNAVAILABLE', reason: 'SOLAR_NO_EVENT', solarCondition: err.condition };
+    }
+    throw err;
+  }
+}
+
 export function findOptimalTaskTimes(
   taskTitle: string,
   context: DailyAssistantContext,
@@ -402,10 +435,32 @@ export function findOptimalTaskTimes(
   const fallbackDayOffset = searchOffsets[0] ?? (horizon === 'TOMORROW' ? 1 : 0);
   const options: ScoredPlanningOption[] = [];
   const currentMinute = current.getUTCHours() * 60 + current.getUTCMinutes();
+  // PA-3C-C1C-01: a legitimate solar no-event condition on ONE day within a
+  // multi-day horizon must not discard the other, genuinely usable days --
+  // skip just that day (contributing zero options from it, never a
+  // fabricated one) and track it. If EVERY day in the horizon is
+  // unavailable, this function still throws SolarNoEventError at the end
+  // (preserving its existing contract for any caller not yet updated for
+  // the new result wrapper below) rather than silently returning an
+  // all-or-nothing recommendation computed from a day that cannot be
+  // evaluated. SolarInputValidationError/SolarComputationError are never
+  // caught -- those remain real, propagating bugs.
+  let unavailableDayCount = 0;
+  let lastUnavailableCondition: 'POLAR_DAY' | 'POLAR_NIGHT' = 'POLAR_DAY';
   for (const day of searchOffsets) {
     const dayContext = contextForDayOffset(context, day);
     const localDay = localDateForContext(dayContext);
-    const windows = computeAssistantWindows(dayContext);
+    let windows;
+    try {
+      windows = computeAssistantWindows(dayContext);
+    } catch (err) {
+      if (err instanceof SolarNoEventError) {
+        unavailableDayCount++;
+        lastUnavailableCondition = err.condition;
+        continue;
+      }
+      throw err;
+    }
     const candidates = buildSlotCandidates(windows);
     const dayStart = day === 0 ? currentMinute : 0;
     const maxStart = 1440 - safeDuration;
@@ -437,9 +492,61 @@ export function findOptimalTaskTimes(
   const ranked = selectedScored
     .map(({ dayOffset: _dayOffset, rawScore: _rawScore, startMinute: _startMinute, ...option }) => option);
   const bestScored = [...selectedScored].sort((a, b) => b.rawScore - a.rawScore)[0];
+  // PA-3C-C1C-01: if every attempted day was a legitimate no-event (not
+  // merely "no option scored above threshold"), there is no real day left
+  // to build a fallback/base recommendation from -- re-throw rather than
+  // calling recommendTaskSlot() against a day already proven unavailable
+  // (fallbackDayOffset/bestScored.dayOffset could otherwise coincide with
+  // one). This is this function's one throwing path for the new
+  // findOptimalTaskTimesResult() wrapper (below) to catch; any existing
+  // caller not yet updated keeps seeing the exact same thrown error type
+  // it already had to handle (or not) before this PR.
+  if (searchOffsets.length > 0 && unavailableDayCount === searchOffsets.length) {
+    throw new SolarNoEventError(lastUnavailableCondition, 'No sunrise/sunset for any day in the requested planning horizon.');
+  }
+  // fallbackDayOffset is simply the first requested day -- it was never
+  // proven usable the way bestScored.dayOffset below is (that only exists
+  // once that day's own windows already computed successfully), so this
+  // call can still legitimately hit the same no-event condition even when
+  // NOT every day in the horizon failed (e.g. day 0 is unavailable but a
+  // later day merely scored below threshold). recommendTaskSlot() already
+  // throws SolarNoEventError in that case -- intentionally left
+  // unguarded here so it propagates with the same single-throwing-path
+  // contract the rest of this function preserves.
   if (!bestScored) return { ...recommendTaskSlot(cleanTitle, contextForDayOffset(context, fallbackDayOffset), safeDuration), planningOptions: [] };
+  // bestScored.dayOffset only ever points at a day whose windows already
+  // computed successfully above (unavailable days never reach `options`),
+  // so this call cannot reintroduce the no-event condition.
   const base = recommendTaskSlot(cleanTitle, contextForDayOffset(context, bestScored.dayOffset), safeDuration, bestScored.startMinute);
   return { ...base, planningOptions: ranked };
+}
+
+/** PA-3C-C1C-01: additive wrapper around findOptimalTaskTimes(), same
+ * convention as recommendTaskSlotResult() above -- the underlying
+ * function's own internal per-day handling already preserves every day
+ * that CAN be computed; this only catches the terminal SolarNoEventError
+ * it still throws when literally no day in the requested horizon could be
+ * evaluated. */
+export function findOptimalTaskTimesResult(
+  taskTitle: string,
+  context: DailyAssistantContext,
+  durationMinutes = 30,
+  horizon: PlanningHorizon = 'TODAY',
+  customStartDate?: string,
+  customEndDate?: string,
+  timePreference: TimePreference = 'ANYTIME'
+): TaskSlotRecommendationResult {
+  try {
+    return {
+      status: 'OK',
+      recommendation: findOptimalTaskTimes(taskTitle, context, durationMinutes, horizon, customStartDate, customEndDate, timePreference),
+    };
+  } catch (err) {
+    if (err instanceof SolarNoEventError) {
+      return { status: 'UNAVAILABLE', reason: 'SOLAR_NO_EVENT', solarCondition: err.condition };
+    }
+    throw err;
+  }
 }
 
 /**

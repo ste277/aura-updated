@@ -21,6 +21,7 @@
 import type { SolarWindowType } from '../../panchang/src/windows';
 import type { MuhurtaReason } from '../../muhurta/src/activityOntology';
 import type { ActionPhase } from '../../muhurta/src/actionPhase';
+import { SolarNoEventError } from '../../astronomy/src/errors';
 import {
   DailyAssistantContext,
   PlanningHorizon,
@@ -227,10 +228,24 @@ export interface TimingCandidate {
   };
 }
 
+/** PA-3C-C1C-01: the reason a requested/candidate instant's solar-window
+ * classification could not be computed -- NEVER folded into "no candidates
+ * matched" or any existing score/quality field. Mirrors the SAME
+ * SolarNoEventError{condition} this whole milestone's other consumers
+ * (habit-logs, ceremonialPeriods, buildDailyBriefingResult, ...) already
+ * key off of. Reusable by FIND/CHECK/COMPARE's own `unavailable` field. */
+export interface TimingSearchUnavailable {
+  reason: 'SOLAR_NO_EVENT';
+  solarCondition?: 'POLAR_DAY' | 'POLAR_NIGHT';
+}
+
 export interface TimingSearchResponse {
   mode: TimingSearchMode;
   /** FIND: ranked top-`limit` candidates. CHECK: exactly [requestedCandidate].
-   * COMPARE: every supplied candidateStarts, evaluated and ranked. */
+   * COMPARE: every supplied candidateStarts, evaluated and ranked. Never
+   * contains a fabricated/synthetic candidate -- a day/instant whose solar
+   * window could not be computed is simply absent from this array, not
+   * replaced by a guessed one. */
   candidates: TimingCandidate[];
   /** CHECK only -- explicit, unambiguous alias for candidates[0] so "the
    * original candidate must always remain clearly identified" holds even if
@@ -238,6 +253,25 @@ export interface TimingSearchResponse {
   requestedCandidate?: TimingCandidate;
   /** CHECK only -- present only when a strictly better nearby slot exists. */
   betterNearby?: TimingCandidate;
+  /** PA-3C-C1C-01, additive -- FIND: count of day-offsets within the search
+   * range whose solar-window computation legitimately could not complete
+   * (a real polar no-event condition for this location/date), always
+   * present (even 0) so a caller can distinguish "searched N days, M were
+   * unavailable" from a silent gap. COMPARE: count of supplied
+   * candidateStarts that could not be evaluated for the same reason.
+   * Absent for CHECK (CHECK has exactly one requested instant -- see
+   * `unavailable` below instead). Never increments for
+   * SolarInputValidationError/SolarComputationError -- those remain real,
+   * propagating bugs, not a legitimate unavailable count. */
+  unavailableDayCount?: number;
+  /** PA-3C-C1C-01, additive -- set only when NO candidate anywhere in this
+   * response could be evaluated because of a legitimate solar no-event
+   * condition (FIND: every day-offset in range; CHECK: the one requested
+   * instant; COMPARE: every supplied candidateStarts) -- never set merely
+   * because ordinary filters/constraints left zero matches. `candidates`
+   * is `[]` whenever this is set. Not an error: the request was valid, the
+   * location/date combination simply has no sunrise/sunset. */
+  unavailable?: TimingSearchUnavailable;
 }
 
 /** Exported so an `apps/web/` caller that conditionally requests a wider
@@ -464,6 +498,18 @@ function runFind(request: TimingSearchRequest): TimingSearchResponse {
   })();
 
   const ranked: RankedTimingCandidate[] = [];
+  // PA-3C-C1C-01: a legitimate solar no-event condition for a given
+  // dayOffset's location/date must not crash the whole multi-day search.
+  // evaluateTimingCandidate() recomputes computeAssistantWindows() fresh on
+  // every call (no per-day cache -- unchanged, out of this ticket's scope),
+  // so once a day's FIRST candidate throws SolarNoEventError, every later
+  // minute in that SAME day would throw identically; `break` out of the
+  // minute loop immediately rather than retrying up to ~90 more times for a
+  // day already known to be unavailable (security/performance: this file is
+  // reachable from an unauthenticated route, guest/timing-search/route.ts).
+  // SolarInputValidationError/SolarComputationError are never caught here --
+  // those are real bugs/bad input, not a legitimate "could not evaluate".
+  let unavailableDayCount = 0;
   for (const dayOffset of dayOffsets) {
     const dayContext = dayContextForOffset(request.context, dayOffset);
     const dayStart = dayOffset === 0 ? currentMinute : 0;
@@ -495,10 +541,27 @@ function runFind(request: TimingSearchRequest): TimingSearchResponse {
       // `start`, so a candidate that only STARTS in usable time but would
       // run into an excluded interval is still correctly excluded.
       if (request.excludedIntervals?.some((excluded) => candidateStartMs < excluded.end.getTime() && excluded.start.getTime() < candidateEndMs)) continue;
-      const candidate = evaluateTimingCandidate({ profile, start, durationMinutes: safeDuration, context: request.context });
+      let candidate;
+      try {
+        candidate = evaluateTimingCandidate({ profile, start, durationMinutes: safeDuration, context: request.context });
+      } catch (err) {
+        if (err instanceof SolarNoEventError) {
+          unavailableDayCount++;
+          break;
+        }
+        throw err;
+      }
       if (candidate.conflicts?.some((conflict) => conflict.type === 'FRICTION_WINDOW_BLOCKED')) continue;
       ranked.push(toRanked(candidate, startMinute, candidate.auraFitScore ?? candidate.muhurtaScore * 5 + 55));
     }
+  }
+
+  // Only a FULLY no-event search range is reported as `unavailable` -- a
+  // mixed range (some days usable, some not) returns its real candidates
+  // from the usable days plus the honest count, never silently dropping to
+  // an unexplained empty FIND result.
+  if (unavailableDayCount > 0 && unavailableDayCount === dayOffsets.length) {
+    return { mode: 'FIND', candidates: [], unavailableDayCount, unavailable: { reason: 'SOLAR_NO_EVENT' } };
   }
 
   const diversified = dayOffsets.length >= MULTI_DAY_DIVERSITY_THRESHOLD_DAYS
@@ -509,7 +572,7 @@ function runFind(request: TimingSearchRequest): TimingSearchResponse {
     .slice(0, limit)
     .map(stripRankingFields);
 
-  return { mode: 'FIND', candidates: finalCandidates };
+  return { mode: 'FIND', candidates: finalCandidates, unavailableDayCount };
 }
 
 /**
@@ -549,7 +612,24 @@ function runCheck(request: TimingSearchRequest): TimingSearchResponse {
   if (!request.candidateStart) throw new Error('CHECK mode requires candidateStart.');
   const profile = resolveTaskProfile(request);
   const start = new Date(request.candidateStart);
-  const requested = evaluateTimingCandidate({ profile, start, durationMinutes: request.durationMinutes, context: request.context });
+  // PA-3C-C1C-01: CHECK has exactly ONE requested instant -- if its own
+  // solar-window computation legitimately cannot be completed (a real
+  // polar no-event condition), there is no fallback candidate to check
+  // instead, so this reports `unavailable` immediately rather than
+  // crashing. Every nearby-scan minute below shares the SAME calendar day
+  // (nearbyCheckMinutes clamps to [0, 1440-duration]), so it would fail
+  // identically -- skip it entirely rather than attempting work already
+  // known to fail. SolarInputValidationError/SolarComputationError are
+  // never caught -- those remain real, propagating bugs.
+  let requested: TimingCandidate;
+  try {
+    requested = evaluateTimingCandidate({ profile, start, durationMinutes: request.durationMinutes, context: request.context });
+  } catch (err) {
+    if (err instanceof SolarNoEventError) {
+      return { mode: 'CHECK', candidates: [], unavailable: { reason: 'SOLAR_NO_EVENT', solarCondition: err.condition } };
+    }
+    throw err;
+  }
 
   const nearbyWindow = request.checkNearbyWindowMinutes ?? DEFAULT_CHECK_NEARBY_WINDOW_MINUTES;
   let betterNearby: TimingCandidate | undefined;
@@ -558,7 +638,13 @@ function runCheck(request: TimingSearchRequest): TimingSearchResponse {
     let best: TimingCandidate | undefined;
     for (const minute of minutes) {
       const candidateStart = localInstantForMinute(dayContext, minute);
-      const candidate = evaluateTimingCandidate({ profile, start: candidateStart, durationMinutes: request.durationMinutes, context: request.context });
+      let candidate: TimingCandidate;
+      try {
+        candidate = evaluateTimingCandidate({ profile, start: candidateStart, durationMinutes: request.durationMinutes, context: request.context });
+      } catch (err) {
+        if (err instanceof SolarNoEventError) break;
+        throw err;
+      }
       if (!best || candidate.score > best.score) best = candidate;
     }
     // "Strictly better" -- a half-point (out of 10) margin so a same-quality
@@ -594,9 +680,30 @@ export function nearbyCheckInstants(
 function runCompare(request: TimingSearchRequest): TimingSearchResponse {
   const starts = request.candidateStarts ?? [];
   const profile = resolveTaskProfile(request);
-  const evaluated = starts.map((iso) => evaluateTimingCandidate({ profile, start: new Date(iso), durationMinutes: request.durationMinutes, context: request.context }));
+  // PA-3C-C1C-01: each supplied candidateStart can fall on a different
+  // calendar date/location-relative day -- a legitimate solar no-event
+  // condition on ONE of them must not discard the whole comparison. Skip
+  // just that candidate (never caller-known, so never silently reordered
+  // or fabricated) and track it; propagate anything else (invalid
+  // input/unexpected computation failure) unchanged.
+  let unavailableDayCount = 0;
+  const evaluated: TimingCandidate[] = [];
+  for (const iso of starts) {
+    try {
+      evaluated.push(evaluateTimingCandidate({ profile, start: new Date(iso), durationMinutes: request.durationMinutes, context: request.context }));
+    } catch (err) {
+      if (err instanceof SolarNoEventError) {
+        unavailableDayCount++;
+        continue;
+      }
+      throw err;
+    }
+  }
+  if (starts.length > 0 && unavailableDayCount === starts.length) {
+    return { mode: 'COMPARE', candidates: [], unavailableDayCount, unavailable: { reason: 'SOLAR_NO_EVENT' } };
+  }
   const ranked = [...evaluated].sort((a, b) => b.score - a.score);
-  return { mode: 'COMPARE', candidates: ranked };
+  return { mode: 'COMPARE', candidates: ranked, unavailableDayCount };
 }
 
 export function runTimingSearch(request: TimingSearchRequest): TimingSearchResponse {

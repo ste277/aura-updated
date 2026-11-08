@@ -615,9 +615,22 @@ async function handleTimingCheck(parsed: ParsedAskAuraRequest, deps: AskAuraOrch
     context: deps.context,
   };
   const result = runTimingSearch(request);
-  const requested = result.requestedCandidate!;
   const activity = FULL_ACTIVITY_CATALOG.find((a) => a.id === parsed.activityId);
   const activityTitle = activity?.title ?? parsed.taskTitle ?? 'this';
+
+  // PA-3C-C1C-01: a legitimate solar no-event condition for this instant's
+  // location/date means requestedCandidate is absent -- the pre-existing
+  // `!` assertion below would otherwise crash reading `.label` off
+  // `undefined`. Never presented as a favorable OR unfavorable answer
+  // (both would be fabricated); never silently treated as "I'd hold off".
+  if (result.unavailable) {
+    return {
+      intent: 'TIMING_CHECK',
+      message: `Timing recommendations are unavailable for this date and location because the required solar timing could not be determined${activityTitle !== 'this' ? ` for ${activityTitle}` : ''}.`,
+      context: { ...parsed, activityId: activity?.id ?? parsed.activityId, taskTitle: activity ? undefined : parsed.taskTitle },
+    };
+  }
+  const requested = result.requestedCandidate!;
 
   const canGo = requested.label !== 'CAUTION';
   const message = canGo ? 'You can.' : "I'd hold off for now.";
@@ -712,7 +725,11 @@ async function handleEverydaySharedTimingCheck(
   // below, not baked into this baseline).
   const generalContext: DailyAssistantContext = { ...deps.context, personalContext: undefined };
 
-  const evaluateSharedAt = (startIso: string) => {
+  // PA-3C-C1C-01: a legitimate solar no-event condition for this instant's
+  // location/date means `generalResult.requestedCandidate` is absent --
+  // returns `null` rather than letting the pre-existing `!` assertion
+  // crash reading fields off `undefined` inside evaluateEverydaySharedCandidate.
+  const evaluateSharedAt = (startIso: string): ReturnType<typeof evaluateEverydaySharedCandidate> | null => {
     const generalResult = runTimingSearch({
       mode: 'CHECK',
       activityId: activity.id,
@@ -720,6 +737,7 @@ async function handleEverydaySharedTimingCheck(
       candidateStart: startIso,
       context: generalContext,
     });
+    if (generalResult.unavailable) return null;
     return evaluateEverydaySharedCandidate({
       profile,
       generalCandidate: generalResult.requestedCandidate!,
@@ -730,10 +748,24 @@ async function handleEverydaySharedTimingCheck(
   };
 
   const requested = evaluateSharedAt(candidateStart);
+  // Every nearby-scan instant below shares the SAME calendar day as
+  // candidateStart (nearbyCheckInstants, like runCheck's own nearby scan,
+  // never crosses a day boundary) -- if the main requested instant's solar
+  // window can't be computed, none of them can either, so this returns the
+  // honest unavailable message immediately rather than attempting (and
+  // discarding) identical failures in the loop below.
+  if (!requested) {
+    return {
+      intent: 'TIMING_CHECK',
+      message: `Timing recommendations are unavailable for this date and location because the required solar timing could not be determined for ${activityTitle}.`,
+      context: { ...parsed, activityId: activity.id, taskTitle: undefined },
+    };
+  }
 
   let betterNearby: ReturnType<typeof evaluateSharedAt> | undefined;
   for (const nearbyIso of nearbyCheckInstants(candidateStart, durationMinutes, deps.context)) {
     const candidate = evaluateSharedAt(nearbyIso);
+    if (!candidate) continue;
     if (!betterNearby || candidate.sharedScore > betterNearby.sharedScore) betterNearby = candidate;
   }
   // Same "strictly better" half-point margin runCheck() itself uses.
@@ -748,7 +780,7 @@ async function handleEverydaySharedTimingCheck(
   // Reasons stay general/base-only (never a fabricated owner-/partner-
   // specific reason string) -- the SAME convention findEverydaySharedTiming
   // already established (brief section 19: "preserve that convention").
-  const toSharedTimingCandidate = (shared: ReturnType<typeof evaluateSharedAt>): TimingCandidate => ({
+  const toSharedTimingCandidate = (shared: NonNullable<ReturnType<typeof evaluateSharedAt>>): TimingCandidate => ({
     ...shared.generalCandidate,
     score: shared.sharedScore,
     label: labelForRawScore(shared.sharedScore * 10),
@@ -992,9 +1024,18 @@ async function handleTimingFind(parsed: ParsedAskAuraRequest, deps: AskAuraOrche
       };
     }
     const best = outcome.candidates[0];
+    // PA-3C-C1C-01: an empty pool caused by every day in range being a
+    // legitimate solar no-event must not be presented as "no strong
+    // shared time found" -- that denies the real reason outright.
+    const sharedMessage =
+      outcome.unavailable
+        ? `Timing recommendations are unavailable for this date and location because the required solar timing could not be determined for ${activityTitle}.`
+        : best
+          ? `Best for you both: ${formatClock(best.generalCandidate.start, deps.context.timezone)}.`
+          : "I couldn't find a strong shared time in that range.";
     return {
       intent: 'TIMING_FIND',
-      message: best ? `Best for you both: ${formatClock(best.generalCandidate.start, deps.context.timezone)}.` : "I couldn't find a strong shared time in that range.",
+      message: sharedMessage,
       cards: [
         {
           type: 'TIMING_RESULT',
@@ -1025,9 +1066,21 @@ async function handleTimingFind(parsed: ParsedAskAuraRequest, deps: AskAuraOrche
   const result = runTimingSearch(request);
   const best = result.candidates[0];
 
+  // PA-3C-C1C-01: `result.unavailable` means a legitimate solar no-event
+  // condition prevented evaluating ANY day in the requested range -- this
+  // is NOT the same as "searched and found nothing strong" (the pre-
+  // existing fallback message below), which would mislead the caller into
+  // thinking a real search concluded there's no good time, rather than
+  // that the computation itself could not complete.
+  const message = result.unavailable
+    ? `Timing recommendations are unavailable for this date and location because the required solar timing could not be determined${activityTitle !== 'this' ? ` for ${activityTitle}` : ''}.`
+    : best
+      ? `I'd choose ${formatClock(best.start, deps.context.timezone)}.`
+      : "I couldn't find a strong time in that range.";
+
   return {
     intent: 'TIMING_FIND',
-    message: best ? `I'd choose ${formatClock(best.start, deps.context.timezone)}.` : "I couldn't find a strong time in that range.",
+    message,
     cards: best
       ? [{ type: 'TIMING_RESULT', activityTitle, best: candidateCard(best, deps.context.timezone), others: result.candidates.slice(1).map((c) => candidateCard(c, deps.context.timezone)) }]
       : [],

@@ -92,7 +92,22 @@ export interface EverydaySharedFitRequest {
 }
 
 export type EverydaySharedFitOutcome =
-  | { status: 'OK'; candidates: EverydaySharedCandidate[] }
+  | {
+      status: 'OK';
+      candidates: EverydaySharedCandidate[];
+      /** PA-3C-C1C-01, additive -- propagated from the underlying
+       * runTimingSearch() FIND pool: count of day-offsets in the search
+       * range whose solar-window computation legitimately could not
+       * complete. Always present (0 when none). An empty `candidates`
+       * array caused SOLELY by this (never by ordinary "nothing scored
+       * well") must not be presented as "no strong shared time found". */
+      unavailableDayCount: number;
+      /** PA-3C-C1C-01, additive -- true only when EVERY day in the search
+       * range was a legitimate solar no-event (propagated from
+       * runTimingSearch()'s own `unavailable`, same strict semantics).
+       * Mirrors `unavailable` on `TimingSearchResponse` exactly. */
+      unavailable: boolean;
+    }
   | { status: 'UNSUPPORTED_ACTIVITY' };
 
 /**
@@ -196,5 +211,5 @@ export function findEverydaySharedTiming(request: EverydaySharedFitRequest): Eve
   );
 
   const ranked = shared.sort((a, b) => b.sharedScore - a.sharedScore).slice(0, limit);
-  return { status: 'OK', candidates: ranked };
+  return { status: 'OK', candidates: ranked, unavailableDayCount: pool.unavailableDayCount ?? 0, unavailable: Boolean(pool.unavailable) };
 }

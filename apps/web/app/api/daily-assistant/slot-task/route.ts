@@ -3,7 +3,7 @@ import { getSessionFromRequest } from '../../../../lib/session';
 import { getUserById, User } from '../../../../lib/db';
 import { parseJsonObject } from '../../../../lib/request';
 import { localDateTimeToUTC, resolveTzOffsetMinutes } from '../../../../lib/timezone';
-import { findOptimalTaskTimes, recommendTaskSlot, PlanningHorizon, TimePreference } from '../../../../../../packages/recommendation/src/dailyAssistant';
+import { findOptimalTaskTimesResult, recommendTaskSlotResult, PlanningHorizon, TimePreference } from '../../../../../../packages/recommendation/src/dailyAssistant';
 import { PersonalMuhurtaContext } from '../../../../../../packages/recommendation/src/auraFitEngine';
 import { getNatalChart } from '../../../../../../packages/vedic/src/natalChart';
 import { getNakshatra } from '../../../../../../packages/vedic/src/panchangElements';
@@ -150,9 +150,24 @@ export async function POST(req: NextRequest) {
     tzOffsetMinutes: resolveTzOffsetMinutes(user.timezone, now),
     personalContext: buildPersonalMuhurtaContext(user),
   };
-  const recommendation = horizon === 'NOW'
-    ? recommendTaskSlot(taskTitle, assistantContext, durationMinutes, requestedStartMinute)
-    : findOptimalTaskTimes(taskTitle, assistantContext, durationMinutes, horizon, customStartDate, customEndDate, timePreference);
+  // PA-3C-C1C-01: a legitimate solar no-event condition for this location/
+  // date is a real, reachable outcome at this route's own accepted ±66.5°
+  // latitude bound (confirmed independently against the real merged
+  // ephemeris, not assumed) -- *Result() returns a typed, non-throwing
+  // outcome instead of crashing. 'UNAVAILABLE' is a normal, expected
+  // response (200, same convention daily-assistant/briefing's own route
+  // already uses for the identical condition), never a fabricated
+  // favorable/neutral recommendation.
+  const result = horizon === 'NOW'
+    ? recommendTaskSlotResult(taskTitle, assistantContext, durationMinutes, requestedStartMinute)
+    : findOptimalTaskTimesResult(taskTitle, assistantContext, durationMinutes, horizon, customStartDate, customEndDate, timePreference);
 
-  return NextResponse.json(recommendation);
+  if (result.status === 'UNAVAILABLE') {
+    return NextResponse.json(
+      { status: 'UNAVAILABLE', reason: result.reason, solarCondition: result.solarCondition },
+      { headers: { 'Cache-Control': 'private, no-store, max-age=0' } }
+    );
+  }
+
+  return NextResponse.json({ status: 'OK', ...result.recommendation });
 }
