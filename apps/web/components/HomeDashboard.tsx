@@ -1230,7 +1230,15 @@ export function HomeDashboard({
   };
 
   return (
-    <div style={{ display: 'flex', flexDirection: 'column', gap: spacing.xxl, paddingBottom: spacing.xxl, fontFamily: 'sans-serif', color: colors.textPrimary }}>
+    <div style={{ display: 'flex', flexDirection: 'column', gap: spacing.xl, paddingBottom: spacing.xxl, fontFamily: 'sans-serif', color: colors.textPrimary }}>
+      {/* HOME-RHYTHM-01-I1-C -- gap trimmed from spacing.xxl (24) to
+       * spacing.xl (20) between every top-level Home section. No
+       * breakpoint exists in this codebase (confirmed during D1: zero
+       * @media queries under apps/web), so this is a small, universal
+       * tightening rather than a mobile-only rule -- it reduces the
+       * vertical budget consumed before a user reaches Right Now's
+       * actionable content on a narrow viewport without visibly harming
+       * desktop, where the same 4px-per-gap reduction is imperceptible. */}
       <PageHeader
         title={<>{greeting()}, {userName}! 👋</>}
         subtitle={todayLabel()}
@@ -1264,7 +1272,12 @@ export function HomeDashboard({
       {/* ============================================================
        * RIGHT NOW
        * ============================================================ */}
-      <SurfaceCard elevated accentColor={tone.color} padding={spacing.xxl}>
+      {/* HOME-RHYTHM-01-I1-C -- padding trimmed xxl(24)->xl(20); this card
+       * is the single tallest above-the-fold element on mobile (FlowRing +
+       * headline + pill + timing line + description), so its own padding
+       * is the highest-leverage, lowest-risk trim available without
+       * touching the FlowRing/typography/content it wraps. */}
+      <SurfaceCard elevated accentColor={tone.color} padding={spacing.xl}>
         <div style={{ display: 'grid', gridTemplateColumns: '128px minmax(0, 1fr)', gap: spacing.xl, alignItems: 'center' }}>
           <FlowRing score={energyScore} color={tone.color} />
           <div style={{ minWidth: 0 }}>
@@ -1281,6 +1294,51 @@ export function HomeDashboard({
           <span style={{ color: tone.color, display: 'inline-block', marginLeft: spacing.sm }}>{remainingText}</span>
         </div>
         <p style={{ margin: '11px 0 0', color: colors.textFaint, fontSize: 15, lineHeight: 1.42 }}>{tone.description}</p>
+        {/* HOME-RHYTHM-01-I1-A -- dailyBriefing.nextAction/greenLight are
+         * fetched (via loadAssistantSignals' existing stale-request-guarded
+         * fetch, same object already read above for currentWindowLabel/
+         * currentTimeRange) but were never rendered anywhere in the app.
+         * Two distinct concepts, kept visually and semantically separate
+         * per their actual source (dailyAssistant.ts buildDailyBriefing()):
+         * nextAction is a plain timing-state instruction string (never a
+         * scheduled commitment, no activityId exists for it -- informational
+         * only, no action control); greenLight is the peak/active window's
+         * action-card recommendation (title+description+windowType) -- a
+         * favorable-timing suggestion, not a commitment, so its optional
+         * "Plan this" control reuses the exact same title-only,
+         * no-activityId precedent DailyBriefingCard's own "Find time for
+         * focused work" button already uses (onPlanClick('Focused work'))
+         * rather than inventing an identifier greenLight doesn't carry.
+         * Strictly additive single lines, not a new card -- avoids
+         * duplicating goodRightNow[0]/spotlightItem's own, separately
+         * sourced (selectGoodRightNowCards) recommendation+CTA below. Gated
+         * on dailyBriefingStatus === 'available' so a loading/error/
+         * unavailable/stale state (already enforced by the existing
+         * isLatestBriefingRequest() guard in page.tsx) never shows this --
+         * never a fabricated favorable value for any other state. */}
+        {dailyBriefingStatus === 'available' && dailyBriefing && (
+          <div style={{ marginTop: spacing.sm }}>
+            {dailyBriefing.nextAction && (
+              <p style={{ margin: 0, color: colors.textSecondary, fontSize: 13, lineHeight: 1.4 }}>
+                <span style={{ color: colors.textPrimary, fontWeight: 800 }}>Next: </span>
+                {dailyBriefing.nextAction}
+              </p>
+            )}
+            {dailyBriefing.greenLight?.title && (
+              <div style={{ marginTop: 4, display: 'flex', alignItems: 'baseline', gap: spacing.sm, flexWrap: 'wrap' }}>
+                <p style={{ margin: 0, color: colors.textFaint, fontSize: 12, lineHeight: 1.4, fontStyle: 'italic' }}>
+                  Favorable for: {dailyBriefing.greenLight.title}
+                  {dailyBriefing.greenLight.description ? ` — ${dailyBriefing.greenLight.description}` : ''}
+                </p>
+                {onPlanClick && (
+                  <TextButton onClick={() => onPlanClick(dailyBriefing.greenLight.title)} style={{ fontSize: 12 }}>
+                    Plan this →
+                  </TextButton>
+                )}
+              </div>
+            )}
+          </div>
+        )}
         {dailyBriefingStatus === 'unavailable' && (
           // PA-3C-C1B-03: honest, non-fabricating disclosure for a
           // legitimate solar no-event condition -- the Right Now card

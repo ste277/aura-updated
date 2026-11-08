@@ -49,7 +49,12 @@ function markerColor(item: HomeTimelineItem): string {
   if (item.kind === 'OPPORTUNITY') return colors.textMuted;
   if (item.metadata?.agendaStatus === 'COMPLETED') return colors.positive;
   if (item.metadata?.agendaStatus === 'MISSED' || item.metadata?.agendaStatus === 'SKIPPED' || item.metadata?.agendaStatus === 'MOVED') return colors.textMuted;
-  if (item.metadata?.isCurrent) return colors.info;
+  // HOME-RHYTHM-01-I1-B -- the current item is already the Right Now
+  // hero's own spotlight above (HomeDashboard.tsx); this marker's shape
+  // (●) still says "this is the current one", but it no longer competes
+  // visually with that spotlight via an accent color, same reasoning as
+  // emphasized/isCurrent below.
+  if (item.metadata?.isCurrent) return colors.textMuted;
   if (item.metadata?.agendaStatus === 'WAITING') return colors.caution;
   return colors.textMuted;
 }
@@ -252,7 +257,16 @@ function TimelineRow({
 }) {
   const isOpportunity = item.kind === 'OPPORTUNITY';
   const subdued = item.metadata?.agendaStatus === 'COMPLETED' || item.metadata?.agendaStatus === 'MISSED' || item.metadata?.agendaStatus === 'SKIPPED' || item.metadata?.agendaStatus === 'MOVED';
-  const emphasized = item.metadata?.isCurrent === true || isNext;
+  // HOME-RHYTHM-01-I1-B -- D1 found the current item duplicated, with EXTRA
+  // visual weight (bold title + accent marker color), what the Right Now
+  // hero above already spotlights in full. `isCurrent` no longer earns the
+  // bold title treatment here -- it renders with the same secondary
+  // typography as any other row, still clearly marked by its own glyph
+  // (markerFor/markerColor above), so the information isn't removed, only
+  // no longer competing with the actual primary recommendation above.
+  // `isNext` (a distinct, not-yet-shown-elsewhere upcoming item) is
+  // unaffected and keeps its emphasis exactly as before.
+  const emphasized = isNext;
   const hasExplanation = explanationLines.length > 0;
   const label = lifecycleLabel(item);
   const panelId = `home-timeline-why-${item.id}`;

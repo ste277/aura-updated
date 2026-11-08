@@ -43,15 +43,21 @@ export function LocationTrustBanner({
         background: colors.surfaceSubtle,
         border: `1px solid ${colors.borderSubtle}`,
         borderRadius: radius.lg,
-        padding: spacing.lg,
-        marginBottom: spacing.md,
+        // HOME-RHYTHM-01-I1-C -- padding/margin trimmed (lg->md, md->sm):
+        // this banner only renders for an unconfirmed location (unchanged,
+        // see the early return above), but when it does, it sits above
+        // Home's own Right Now content on every visit until confirmed, so
+        // its own vertical footprint is part of the above-the-fold budget.
+        // Still the exact same copy/action, just tighter spacing.
+        padding: spacing.md,
+        marginBottom: spacing.sm,
       }}
     >
       <div style={{ ...typography.bodyStrong }}>Showing times for {cityName}.</div>
       <p style={{ ...typography.caption, color: colors.textFaint, marginTop: 4, lineHeight: 1.4 }}>
         Confirm your location for accurate guidance.
       </p>
-      <div style={{ marginTop: spacing.md }}>
+      <div style={{ marginTop: spacing.sm }}>
         <PrimaryButton onClick={onConfirmLocation}>Confirm location</PrimaryButton>
       </div>
     </section>
