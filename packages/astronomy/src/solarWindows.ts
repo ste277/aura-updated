@@ -1,4 +1,5 @@
 import { computeSolarEphemeris } from './ephemeris';
+import { assertValidDateInput } from './validation';
 import { getDatePartsInTimezone, localDateTimeToUTC, resolveTzOffsetMinutes } from '../../panchang/src/localDate';
 
 export interface SolarWindow {
@@ -98,6 +99,12 @@ export function getDailySolarWindows(
   longitude: number,
   ianaTimezone: string
 ): DailySolarWindows {
+  // PA-3C-C1A: reject an Invalid Date here, before it reaches
+  // getDatePartsInTimezone's Intl.DateTimeFormat call -- confirmed
+  // (PA-3C-A3) that an Invalid Date otherwise throws an unrelated-looking
+  // RangeError several calls downstream rather than a typed solar error.
+  assertValidDateInput(date);
+
   const { year, month, day, weekday: dayOfWeek } = getDatePartsInTimezone(ianaTimezone, date);
   const dateStr = `${year}-${String(month).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
 

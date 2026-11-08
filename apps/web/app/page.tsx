@@ -1,7 +1,7 @@
 'use client';
 
 import React, { useEffect, useMemo, useState, useCallback, useRef } from 'react';
-import { computeSolarEphemeris } from '../../../packages/astronomy/src/ephemeris';
+import { computeSolarEphemeris, isSolarError } from '../../../packages/astronomy/src/ephemeris';
 import {
   computePanchangWindows,
   getActiveWindow,
@@ -930,17 +930,31 @@ export default function DashboardPage() {
   );
 
   // Date-memoized Solar Ephemeris Calculation
+  //
+  // PA-3C-C1A: a legitimate polar no-event condition (or invalid stored
+  // location data) must not crash the Home render tree -- confirmed
+  // (PA-3C-A3) there is no error boundary anywhere under apps/web, so an
+  // uncaught throw here previously took down the entire page. Only the
+  // typed solar errors are swallowed (returning null, which every
+  // downstream consumer of `solar` already treats as "no windows today" --
+  // see `windows` below); any other error still propagates, so an
+  // unrelated bug is not silently hidden.
   const solar = useMemo(() => {
     if (!user || !mounted || !todayParts) return null;
     const tzOffsetMinutes = resolveTzOffsetMinutes(user.timezone, new Date());
-    return computeSolarEphemeris({
-      year: todayParts.year,
-      month: todayParts.month,
-      day: todayParts.day,
-      latitude: user.latitude,
-      longitude: user.longitude,
-      tzOffsetMinutes,
-    });
+    try {
+      return computeSolarEphemeris({
+        year: todayParts.year,
+        month: todayParts.month,
+        day: todayParts.day,
+        latitude: user.latitude,
+        longitude: user.longitude,
+        tzOffsetMinutes,
+      });
+    } catch (err) {
+      if (isSolarError(err)) return null;
+      throw err;
+    }
   }, [user?.latitude, user?.longitude, user?.timezone, todayDateStr, mounted]);
 
   const weekday = (todayParts?.weekday ?? 0) as WeekdayIndex;

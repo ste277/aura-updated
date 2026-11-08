@@ -3,6 +3,7 @@ import { getSessionFromRequest } from '../../../lib/session';
 import { getUserById } from '../../../lib/db';
 import { getPanchangForDate } from '../../../../../packages/panchang/src/panchangDay';
 import { isValidCalendarDateString } from '../../../../../packages/panchang/src/localDate';
+import { solarErrorResponse } from '../../../lib/solarErrorResponse';
 
 /**
  * GET /api/panchang?date=YYYY-MM-DD
@@ -36,6 +37,13 @@ export async function GET(req: NextRequest) {
     });
     return NextResponse.json(panchangDay);
   } catch (err) {
-    return NextResponse.json({ error: err instanceof Error ? err.message : 'Unable to compute Panchang for that date.' }, { status: 400 });
+    // PA-3C-C1A: no longer leaks the raw internal Error.message to the
+    // client (confirmed pre-existing leak) -- a legitimate no-event
+    // condition now gets its own structured code/status, distinct from
+    // malformed input, instead of both being reported identically as a
+    // generic 400 with whatever string the thrown error happened to carry.
+    const solarResponse = solarErrorResponse(err);
+    if (solarResponse) return solarResponse;
+    return NextResponse.json({ error: 'Unable to compute Panchang for that date.' }, { status: 500 });
   }
 }

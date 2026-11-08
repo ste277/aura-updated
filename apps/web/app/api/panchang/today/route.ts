@@ -3,6 +3,7 @@ import { getSessionFromRequest } from '../../../../lib/session';
 import { getUserById } from '../../../../lib/db';
 import { getPanchangForDate } from '../../../../../../packages/panchang/src/panchangDay';
 import { getDatePartsInTimezone } from '../../../../../../packages/panchang/src/localDate';
+import { solarErrorResponse } from '../../../../lib/solarErrorResponse';
 
 /**
  * Resolves the user's current LOCAL date and delegates to
@@ -34,13 +35,27 @@ export async function GET(req: NextRequest) {
   const longitude = user.longitude ?? 80.2707;
   const today = getDatePartsInTimezone(timezone, now);
 
-  const panchangDay = getPanchangForDate({
-    localDate: today.dateStr,
-    latitude,
-    longitude,
-    timezone,
-    referenceInstant: now,
-  });
+  // PA-3C-C1A: a legitimate polar no-event condition (or invalid stored
+  // location) must not crash this route -- confirmed (PA-3C-A3) it had
+  // zero exception handling. Full non-solar-only partial payload support
+  // (returning Tithi/Nakshatra/Yoga/Karana even when the solar windows
+  // can't be computed) remains B2 scope -- getPanchangForDate computes the
+  // solar data before those sidereal elements, so it throws before any of
+  // them are available to return here.
+  let panchangDay;
+  try {
+    panchangDay = getPanchangForDate({
+      localDate: today.dateStr,
+      latitude,
+      longitude,
+      timezone,
+      referenceInstant: now,
+    });
+  } catch (err) {
+    const solarResponse = solarErrorResponse(err);
+    if (solarResponse) return solarResponse;
+    return NextResponse.json({ error: "Unable to compute today's Panchang." }, { status: 500 });
+  }
 
   const { tithi, nakshatra, yoga, karana } = panchangDay.panchanga;
   return NextResponse.json({

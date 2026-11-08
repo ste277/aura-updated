@@ -31,6 +31,7 @@ import { evaluateMuhurthamCandidateAt, isSupportedMuhurthamActivity, MuhurthamCa
 import { formatMuhurtaReason } from '../../../packages/muhurta/src/muhurtaReasonFormat';
 import { summarizeReasonsPlainly } from '../../../packages/muhurta/src/muhurtaPlainLanguage';
 import { getPanchangForDate } from '../../../packages/panchang/src/panchangDay';
+import { isSolarError } from '../../../packages/astronomy/src/ephemeris';
 import { localDateTimeToUTC } from '../../../packages/panchang/src/localDate';
 import { natalContextFromBirthDetails } from './natalContext';
 import { listSavedPeople, SavedPerson, User } from './db';
@@ -1275,7 +1276,24 @@ async function handleTimingCompare(parsed: ParsedAskAuraRequest, deps: AskAuraOr
 
 function handlePanchangQuery(parsed: ParsedAskAuraRequest, deps: AskAuraOrchestratorDeps): AskAuraResponse {
   const dateRange = resolveHorizonToDateRange(parsed.horizonPhrase, parsed.customDate, deps.context);
-  const day = getPanchangForDate({ localDate: dateRange.start, latitude: deps.context.latitude, longitude: deps.context.longitude, timezone: deps.context.timezone });
+  // PA-3C-C1A: a legitimate polar no-event condition must not crash the
+  // whole Ask Aura request (confirmed, PA-3C-A3: zero exception handling
+  // anywhere in this route). Invalid input / unexpected computation
+  // failures are NOT caught here -- only the typed no-event condition gets
+  // this honest, specific message; anything else still propagates.
+  let day;
+  try {
+    day = getPanchangForDate({ localDate: dateRange.start, latitude: deps.context.latitude, longitude: deps.context.longitude, timezone: deps.context.timezone });
+  } catch (err) {
+    if (isSolarError(err) && err.code === 'SOLAR_NO_EVENT') {
+      return {
+        intent: 'PANCHANG_QUERY',
+        message: "Sunrise/sunset-based timing isn't available for that location on that date -- it's a period of continuous daylight or darkness there.",
+        context: parsed,
+      };
+    }
+    throw err;
+  }
   const field: AskPanchangField = parsed.panchangField ?? 'FULL';
 
   if (field === 'FULL') {

@@ -13,7 +13,8 @@ import { buildDailyReflection, DailyReflection } from './dailyReflection';
 import { buildTomorrowPreview, TomorrowPreview } from './tomorrowPreview';
 import { buildDailyPriorityCoverage, UserPriorityGroup } from './dayBuilder';
 import type { AuraMoment } from './db';
-import { getPanchangForDate } from '../../../packages/panchang/src/panchangDay';
+import { getPanchangForDate, PanchangDay } from '../../../packages/panchang/src/panchangDay';
+import { isSolarError } from '../../../packages/astronomy/src/ephemeris';
 
 /**
  * My Day V1 -- the I/O orchestrator behind GET /api/my-day (brief section
@@ -158,15 +159,27 @@ async function buildTomorrowPreviewForNextDay(user: User, localDate: string, now
     habitLogs,
   });
 
+  // PA-3C-C1A: narrowed from a bare `catch {}` that previously swallowed
+  // ANY error from both getPanchangForDate() and buildTomorrowPreview()
+  // together. Inspected buildTomorrowPreview() directly (tomorrowPreview.ts)
+  // -- it only consumes the already-resolved PanchangDay/DailyAgenda via
+  // getGoodForDayCategories() and plain string formatting, with no
+  // dependency of its own on the solar computation, so it is called
+  // OUTSIDE this catch and any error it raises now propagates instead of
+  // being silently relabeled as "no highlights."
+  let panchangDay: PanchangDay | null = null;
   try {
-    const panchangDay = getPanchangForDate({
+    panchangDay = getPanchangForDate({
       localDate: tomorrowDate,
       latitude: user.latitude,
       longitude: user.longitude,
       timezone: user.timezone,
     });
-    return buildTomorrowPreview(tomorrowAgenda, panchangDay);
-  } catch {
+  } catch (err) {
+    if (!isSolarError(err)) throw err;
+  }
+  if (!panchangDay) {
     return { date: tomorrowAgenda.localDate, timezone: tomorrowAgenda.timezone, agenda: tomorrowAgenda, goodForCategories: [], headline: 'Looking ahead to tomorrow', narrative: tomorrowAgenda.items.length > 0 ? `${tomorrowAgenda.items.length} thing${tomorrowAgenda.items.length === 1 ? '' : 's'} already on tomorrow's calendar.` : 'Nothing is on the calendar yet.' };
   }
+  return buildTomorrowPreview(tomorrowAgenda, panchangDay);
 }
