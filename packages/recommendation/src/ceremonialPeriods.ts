@@ -26,7 +26,7 @@ import {
   KARKA_RASHI_INDEX,
   VRISHCHIKA_RASHI_INDEX,
 } from '../../vedic/src/lunarCalendar';
-import { computeSolarEphemeris, formatMinutes } from '../../astronomy/src/ephemeris';
+import { computeSolarEphemeris, formatMinutes, SolarNoEventError } from '../../astronomy/src/ephemeris';
 import { getDatePartsInTimezone, localDateTimeToUTC, resolveTzOffsetMinutes } from '../../panchang/src/localDate';
 import { resolveMuhurtaRulePack } from '../../muhurta/src/muhurtaRulePacks';
 import type { MuhurtaClassification } from '../../muhurta/src/activityOntology';
@@ -39,10 +39,37 @@ export interface CeremonialLocation {
 
 export type PeriodExclusionReasonCode = 'CHATURMAS' | 'KHARMAS' | 'ADHIKA_MASA';
 
-export interface PeriodEligibilityResult {
-  eligible: boolean;
-  reason?: PeriodExclusionReasonCode;
-}
+/** PA-3C-C1B-02: the only sub-rule that can currently become UNAVAILABLE is
+ * Chaturmas (the only one with a solar-ephemeris dependency, via
+ * sunriseInstantFor). Kharmas/Adhika Masa are purely sidereal and can never
+ * produce this value -- kept as its own type (not folded into
+ * PeriodExclusionReasonCode) so a reader can tell at the type level that an
+ * UNAVAILABLE result was never an evaluated exclusion. */
+export type PeriodUnavailableReasonCode = 'CHATURMAS_UNAVAILABLE';
+
+/**
+ * PA-3C-C1B-02: three-state result, additive over the pre-existing
+ * `{eligible: boolean; reason?: PeriodExclusionReasonCode}` shape.
+ *
+ * Deliberately keeps `eligible` a real `boolean` (never `null`) for ALL
+ * three states -- `UNAVAILABLE` sets `eligible: false`, not `eligible:
+ * null`. This is a conscious deviation from the ticket's own illustrative
+ * `eligible: null` shape: `test/marriageRequiredEligibility.test.ts` has
+ * three pre-existing assertions (`typeof X.eligible === 'boolean'`) that a
+ * `null` value would break, and more importantly, ANY not-yet-audited
+ * caller that narrowly does `if (!result.eligible)` (exactly what
+ * muhurthamFinder.ts's one call site already did before this change) keeps
+ * failing CLOSED (excludes the candidate) rather than needing to be
+ * rewritten to handle a third falsy-adjacent value. `status` is the single
+ * source of truth for which of the three states this is; `eligible` is a
+ * backward-compatible boolean projection of it (true only for ELIGIBLE).
+ */
+export type PeriodEligibilityStatus = 'ELIGIBLE' | 'INELIGIBLE' | 'UNAVAILABLE';
+
+export type PeriodEligibilityResult =
+  | { status: 'ELIGIBLE'; eligible: true; reason?: undefined }
+  | { status: 'INELIGIBLE'; eligible: false; reason: PeriodExclusionReasonCode }
+  | { status: 'UNAVAILABLE'; eligible: false; reason: PeriodUnavailableReasonCode };
 
 function addOneDay(dateStr: string): string {
   const [y, m, d] = dateStr.split('-').map(Number);
@@ -135,19 +162,19 @@ function intervalsOverlap(aStart: number, aEnd: number, bStart: number, bEnd: nu
  */
 export function spanOverlapsProhibitedPeriod(start: Date, end: Date, classification: MuhurtaClassification, location: CeremonialLocation): PeriodEligibilityResult {
   const pack = resolveMuhurtaRulePack(classification);
-  if (pack.coverage.periodExclusion !== 'IMPLEMENTED' || !pack.periodRules) return { eligible: true };
+  if (pack.coverage.periodExclusion !== 'IMPLEMENTED' || !pack.periodRules) return { status: 'ELIGIBLE', eligible: true };
   const { periodRules } = pack;
 
   if (periodRules.kharmasRashiIndices.length > 0) {
     const startRashi = sunRashiIndex(start);
-    if (periodRules.kharmasRashiIndices.includes(startRashi)) return { eligible: false, reason: 'KHARMAS' };
+    if (periodRules.kharmasRashiIndices.includes(startRashi)) return { status: 'INELIGIBLE', eligible: false, reason: 'KHARMAS' };
     // A candidate span (<=360 min) is far shorter than a Rashi transit
     // (~30 days), so at most one Sankranti can ever fall inside it --
     // check whether that one, if any, crosses INTO a prohibited Rashi.
     try {
       const next = findNextSankranti(start);
       if (next.instant.getTime() < end.getTime() && periodRules.kharmasRashiIndices.includes(next.rashiIndex)) {
-        return { eligible: false, reason: 'KHARMAS' };
+        return { status: 'INELIGIBLE', eligible: false, reason: 'KHARMAS' };
       }
     } catch {
       // No Sankranti within the search bound -- nothing to flag.
@@ -156,19 +183,34 @@ export function spanOverlapsProhibitedPeriod(start: Date, end: Date, classificat
 
   if (periodRules.adhikaMasa) {
     const startMonth = classifySynodicMonthContaining(start);
-    if (startMonth.classification === 'ADHIKA') return { eligible: false, reason: 'ADHIKA_MASA' };
+    if (startMonth.classification === 'ADHIKA') return { status: 'INELIGIBLE', eligible: false, reason: 'ADHIKA_MASA' };
     if (end.getTime() > startMonth.end.getTime()) {
       const nextMonth = classifySynodicMonthContaining(new Date(startMonth.end.getTime() + 1000));
-      if (nextMonth.classification === 'ADHIKA') return { eligible: false, reason: 'ADHIKA_MASA' };
+      if (nextMonth.classification === 'ADHIKA') return { status: 'INELIGIBLE', eligible: false, reason: 'ADHIKA_MASA' };
     }
   }
 
   if (periodRules.chaturmas) {
-    const window = findChaturmasWindow(start, location);
+    // PA-3C-C1B-02: findChaturmasWindow -> resolveSunriseOwningInstant ->
+    // sunriseInstantFor -> computeSolarEphemeris can throw SolarNoEventError
+    // for a legitimate polar no-event location/date. Catch ONLY that typed
+    // error -- SolarInputValidationError/SolarComputationError are real
+    // bugs/bad input, not a legitimate "could not evaluate" condition, and
+    // must keep propagating uncaught so they get fixed rather than silently
+    // producing a plausible-looking UNAVAILABLE result.
+    let window: ChaturmasWindow;
+    try {
+      window = findChaturmasWindow(start, location);
+    } catch (err) {
+      if (err instanceof SolarNoEventError) {
+        return { status: 'UNAVAILABLE', eligible: false, reason: 'CHATURMAS_UNAVAILABLE' };
+      }
+      throw err;
+    }
     if (intervalsOverlap(start.getTime(), end.getTime(), window.start.getTime(), window.end.getTime())) {
-      return { eligible: false, reason: 'CHATURMAS' };
+      return { status: 'INELIGIBLE', eligible: false, reason: 'CHATURMAS' };
     }
   }
 
-  return { eligible: true };
+  return { status: 'ELIGIBLE', eligible: true };
 }

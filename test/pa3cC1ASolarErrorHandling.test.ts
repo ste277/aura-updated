@@ -262,12 +262,16 @@ function readSource(relPath: string): string {
   check('C1A-08 Calendar feed: catches SolarNoEventError around getDailySolarWindows', /err instanceof SolarNoEventError/.test(src));
 }
 
-// ---- Negative check: confirm C1A-06/C1A-07 were correctly left untouched,
+// ---- Negative check: confirm C1A-07 was correctly left untouched,
 // documented as blocked rather than worked around with a fabricated result.
+// (C1A-06's own PeriodEligibilityResult blocker was deliberately RESOLVED by
+// PA-3C-C1B-02 -- see test/pa3cC1B02MuhurthamEligibility.test.ts for the
+// positive coverage of the three-state contract that replaced this negative
+// check's old "still blocked" assertion.)
 
 {
   const src = readSource('packages/recommendation/src/ceremonialPeriods.ts');
-  check('C1A-06 Muhurtham/Chaturmas: PeriodEligibilityResult NOT modified to add an "unevaluated" variant (confirmed blocker left as-is, not worked around)', /export interface PeriodEligibilityResult \{\s*\n\s*eligible: boolean;\s*\n\s*reason\?: PeriodExclusionReasonCode;\s*\n\}/.test(src));
+  check('C1B-02 Muhurtham/Chaturmas: PeriodEligibilityResult now has an explicit UNAVAILABLE status distinct from ELIGIBLE/INELIGIBLE', /status: 'UNAVAILABLE'/.test(src) && /status: 'ELIGIBLE'/.test(src) && /status: 'INELIGIBLE'/.test(src));
 }
 {
   const src = readSource('packages/recommendation/src/dailyAssistant.ts');

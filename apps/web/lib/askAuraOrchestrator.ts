@@ -894,6 +894,14 @@ function buildMuhurthamCheckResponse(
   if (outcome.status === 'SAVED_PERSON_PROFILE_INCOMPLETE') {
     return { intent: 'TIMING_CHECK', message: 'Add complete birth details for this person to get a shared answer.', context: parsed };
   }
+  // PA-3C-C1B-02: a legitimate solar no-event condition for this
+  // location/date -- never present this as a confirmed eligible OR
+  // ineligible answer (both would be fabricated), and never fall through
+  // to the unconditional `outcome.eligible`/`outcome.window`/
+  // `outcome.activity` reads below, none of which exist on this status.
+  if (outcome.status === 'UNAVAILABLE') {
+    return { intent: 'TIMING_CHECK', message: `Eligibility could not be determined for this time${eventLocation ? ` in ${eventLocation.cityName}` : ''} -- sunrise/sunset timing is unavailable at this location on this date.`, context: parsed };
+  }
 
   const locationSuffix = eventLocation ? ` in ${eventLocation.cityName}` : '';
   const message = outcome.eligible ? `This is a strong time for ${activityTitle}${locationSuffix}.` : `I'd avoid this time for ${activityTitle}${locationSuffix}.`;

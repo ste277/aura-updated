@@ -109,7 +109,7 @@
 
 import { DailyAssistantContext, SlotCandidate, TaskProfile, buildSlotCandidates, computeAssistantWindows, isTimingSensitiveActivity, matchesTimePreference, profileFromActivity } from './dailyAssistant';
 import { evaluateTimingCandidate, TimingCandidate, TimingCandidateLabel, TimingTimePreference } from './timingSearch';
-import { formatMinutes } from '../../astronomy/src/ephemeris';
+import { formatMinutes, SolarNoEventError } from '../../astronomy/src/ephemeris';
 import { getPanchangForDate, PanchangWindowSpan } from '../../panchang/src/panchangDay';
 import { isInauspiciousCommencementWindow } from '../../panchang/src/windows';
 import { getDatePartsInTimezone, isValidCalendarDateString, localDateTimeToUTC } from '../../panchang/src/localDate';
@@ -121,6 +121,7 @@ import { getTaraBala } from '../../vedic/src/natalChart';
 import { findNextTransition, getNakshatra, getTithi, getYoga, getKarana } from '../../vedic/src/panchangElements';
 import { isCombust, findNextCombustionTransition } from '../../vedic/src/planetaryCombustion';
 import { spanOverlapsProhibitedPeriod } from './ceremonialPeriods';
+import type { PeriodUnavailableReasonCode } from './ceremonialPeriods';
 import type { MuhurtaClassification, MuhurtaReason } from '../../muhurta/src/activityOntology';
 import type { ActionPhase } from '../../muhurta/src/actionPhase';
 
@@ -276,6 +277,14 @@ export interface MuhurthamSearchResult {
   dateRange: MuhurthamDateRange;
   dates: MuhurthamDateCandidate[];
   evaluatedDateCount: number;
+  /** PA-3C-C1B-02: additive, backward-compatible -- the count of
+   * `evaluatedDateCount` dates excluded because a required eligibility
+   * check (currently only Chaturmas) could not be determined for that
+   * date, as distinct from a date excluded for an ordinary evaluated
+   * reason (friction, an avoid-event overlap, ineligible, below score
+   * threshold). A caller that ignores this field sees exactly the same
+   * `dates`/`evaluatedDateCount` behavior as before this field existed. */
+  unavailableDateCount: number;
 }
 
 const DEFAULT_DURATION_MINUTES = 60;
@@ -619,7 +628,14 @@ function evaluateMuhurthamCandidate(
    * findPersonalMuhurthams()/findSharedMuhurthams() -- see each call site's
    * own "MUHURTHAM FINDER WORKFLOW -> START" comment. */
   actionPhase?: ActionPhase
-): TimingCandidate | null {
+  /** PA-3C-C1B-02: 'UNAVAILABLE' means the required ceremonial-period
+   * eligibility (currently only Chaturmas, the sole solar-ephemeris-
+   * dependent sub-rule) could not be determined for this candidate's
+   * location/date -- distinct from `null` (hard-excluded: friction-
+   * blocked, an avoid-event overlap, or a genuinely evaluated ineligible
+   * result). Callers must not treat 'UNAVAILABLE' as either a verified
+   * eligible candidate or a confirmed-ineligible one. */
+): TimingCandidate | null | 'UNAVAILABLE' {
   // Inauspicious Period Precedence Fix V1: unified with Timing Search's own
   // commencement-sensitivity signal (isTimingSensitiveActivity, muhurta
   // classification-based) rather than the legacy `profile.significance`
@@ -644,7 +660,16 @@ function evaluateMuhurthamCandidate(
   // against the FULL requested-duration span, using the Event Location
   // context (never the owner's Timing Location read independently; this
   // `context` IS the effective search location, already resolved upstream).
-  if (classification && !spanOverlapsProhibitedPeriod(new Date(candidate.start), new Date(candidate.end), classification, { latitude: context.latitude, longitude: context.longitude, timezone: context.timezone }).eligible) return null;
+  if (classification) {
+    const periodEligibility = spanOverlapsProhibitedPeriod(new Date(candidate.start), new Date(candidate.end), classification, { latitude: context.latitude, longitude: context.longitude, timezone: context.timezone });
+    // PA-3C-C1B-02: UNAVAILABLE (Chaturmas's sunrise-owning-instant lookup
+    // hit a legitimate polar no-event condition) must be reported distinctly
+    // -- never silently folded into the ordinary "hard-excluded" null return
+    // below, which would make an unevaluated candidate indistinguishable
+    // from a genuinely ineligible one at the caller.
+    if (periodEligibility.status === 'UNAVAILABLE') return 'UNAVAILABLE';
+    if (!periodEligibility.eligible) return null;
+  }
   if (classification && !spanOverlapsPlanetaryCombustion(new Date(candidate.start), new Date(candidate.end), classification).eligible) return null;
 
   if (!isStartSensitive) return candidate;
@@ -1004,9 +1029,25 @@ function findBestWindowsForDate(
   /** Lunar Intelligence V1 L5 -- optional, forwarded verbatim to
    * evaluateMuhurthamCandidate() below; see that function's own doc comment. */
   actionPhase?: ActionPhase
-): { best: SampledCandidate; alternates: SampledCandidate[] } | null {
+  /** PA-3C-C1B-02: 'UNAVAILABLE' propagates up from either this function's
+   * own computeAssistantWindows() call (the whole date's solar windows
+   * couldn't be computed -- a legitimate polar no-event condition, before
+   * any candidate is even sampled) or from evaluateMuhurthamCandidate()
+   * reporting the same for a specific sampled candidate. Since every
+   * candidate on one civil date shares the same location and
+   * near-identical date, one UNAVAILABLE candidate reliably means the rest
+   * would be too -- short-circuiting on the first one (rather than
+   * continuing to sample the remaining slots) is a deliberate, documented
+   * simplification, not an oversight. */
+): { best: SampledCandidate; alternates: SampledCandidate[] } | null | 'UNAVAILABLE' {
   const dayContext: DailyAssistantContext = { ...context, now: localDateTimeToUTC(dateStr, '12:00', context.timezone) };
-  const solarSlotCandidates = buildSlotCandidates(computeAssistantWindows(dayContext));
+  let solarSlotCandidates: SlotCandidate[];
+  try {
+    solarSlotCandidates = buildSlotCandidates(computeAssistantWindows(dayContext));
+  } catch (err) {
+    if (err instanceof SolarNoEventError) return 'UNAVAILABLE';
+    throw err;
+  }
 
   // Ceremonial Muhurtham Boundary Augmentation V1: Muhurtham-specific extra
   // candidate starts (Nakshatra/Tithi/Karana/Yoga transitions + authoritative-
@@ -1063,6 +1104,7 @@ function findBestWindowsForDate(
     if (!matchesTimePreference(slot.startMinute, preference === 'ANY' ? 'ANYTIME' : preference)) continue;
     const start = localDateTimeToUTC(dateStr, formatMinutes(slot.startMinute), context.timezone);
     const effectiveCandidate = evaluateMuhurthamCandidate(profile, start, durationMinutes, context, panchangWindows, classification, actionPhase);
+    if (effectiveCandidate === 'UNAVAILABLE') return 'UNAVAILABLE';
     if (!effectiveCandidate) continue;
     if (effectiveCandidate.score < MIN_INCLUSION_SCORE) continue;
     candidates.push({ ...effectiveCandidate, startMinute: slot.startMinute });
@@ -1147,15 +1189,27 @@ export function findMuhurthams(request: MuhurthamSearchRequest): MuhurthamSearch
   const profile = profileFromActivity(activity);
 
   const dateCandidates: MuhurthamDateCandidate[] = [];
+  // PA-3C-C1B-02: counts dates excluded because a required eligibility
+  // check (currently only Chaturmas) could not be determined -- distinct
+  // from an ordinary "no candidate reached MIN_INCLUSION_SCORE" exclusion,
+  // which is silent today for every other reason and stays silent here too.
+  let unavailableDateCount = 0;
   for (const dateStr of dateStrs) {
-    const panchangDay = getPanchangForDate({
-      localDate: dateStr,
-      latitude: request.context.latitude,
-      longitude: request.context.longitude,
-      timezone: request.context.timezone,
-    });
+    let panchangDay: ReturnType<typeof getPanchangForDate>;
+    try {
+      panchangDay = getPanchangForDate({
+        localDate: dateStr,
+        latitude: request.context.latitude,
+        longitude: request.context.longitude,
+        timezone: request.context.timezone,
+      });
+    } catch (err) {
+      if (err instanceof SolarNoEventError) { unavailableDateCount++; continue; }
+      throw err;
+    }
 
     const evaluated = findBestWindowsForDate(profile, dateStr, generalContext, durationMinutes, preference, panchangDay.windows, profile.muhurtaClassification, MUHURTHAM_FINDER_WORKFLOW_ACTION_PHASE);
+    if (evaluated === 'UNAVAILABLE') { unavailableDateCount++; continue; }
     if (!evaluated) continue;
 
     const supportReasons = evaluated.best.reasons.filter((r) => r.polarity === 'SUPPORT');
@@ -1188,6 +1242,7 @@ export function findMuhurthams(request: MuhurthamSearchRequest): MuhurthamSearch
     dateRange: request.dateRange,
     dates: ranked,
     evaluatedDateCount: dateStrs.length,
+    unavailableDateCount,
   };
 }
 
@@ -1335,6 +1390,9 @@ export interface MuhurthamPersonalSearchResult {
   dateRange: MuhurthamDateRange;
   dates: MuhurthamPersonalDateCandidate[];
   evaluatedDateCount: number;
+  /** PA-3C-C1B-02: see MuhurthamSearchResult.unavailableDateCount's own doc
+   * comment -- identical, additive meaning here. */
+  unavailableDateCount: number;
   provenance: { muhurtaMethodology: string; personalMethodology: string };
 }
 
@@ -1378,22 +1436,38 @@ export function findPersonalMuhurthams(request: MuhurthamSearchRequest): Muhurth
   const generalContext: DailyAssistantContext = { ...request.context, personalContext: undefined };
 
   const dateCandidates: MuhurthamPersonalDateCandidate[] = [];
+  // PA-3C-C1B-02: see findMuhurthams()'s identical counter for the full
+  // rationale.
+  let unavailableDateCount = 0;
   for (const dateStr of dateStrs) {
-    const panchangDay = getPanchangForDate({
-      localDate: dateStr,
-      latitude: request.context.latitude,
-      longitude: request.context.longitude,
-      timezone: request.context.timezone,
-    });
+    let panchangDay: ReturnType<typeof getPanchangForDate>;
+    try {
+      panchangDay = getPanchangForDate({
+        localDate: dateStr,
+        latitude: request.context.latitude,
+        longitude: request.context.longitude,
+        timezone: request.context.timezone,
+      });
+    } catch (err) {
+      if (err instanceof SolarNoEventError) { unavailableDateCount++; continue; }
+      throw err;
+    }
 
     // Scan and rank by combinedScore -- the personalized profile is used
     // throughout, so a date's best window is chosen WITH personal factors
     // in mind, not merely re-scored after the fact.
     const evaluated = findBestWindowsForDate(personalProfile, dateStr, request.context, durationMinutes, preference, panchangDay.windows, personalProfile.muhurtaClassification, MUHURTHAM_FINDER_WORKFLOW_ACTION_PHASE);
+    if (evaluated === 'UNAVAILABLE') { unavailableDateCount++; continue; }
     if (!evaluated) continue;
 
     const bestStart = new Date(evaluated.best.start);
-    const generalCandidate = evaluateMuhurthamCandidate(generalOnlyProfile, bestStart, durationMinutes, generalContext, panchangDay.windows, personalProfile.muhurtaClassification, MUHURTHAM_FINDER_WORKFLOW_ACTION_PHASE) ?? evaluated.best;
+    // PA-3C-C1B-02: this general-only re-evaluation shares the exact same
+    // location/date as the personal evaluation above, so if ceremonial
+    // eligibility was available there, it's available here too -- but
+    // narrowed defensively (never treat the 'UNAVAILABLE' sentinel as a
+    // TimingCandidate) rather than assumed.
+    const generalReevaluated = evaluateMuhurthamCandidate(generalOnlyProfile, bestStart, durationMinutes, generalContext, panchangDay.windows, personalProfile.muhurtaClassification, MUHURTHAM_FINDER_WORKFLOW_ACTION_PHASE);
+    const generalCandidate = generalReevaluated && generalReevaluated !== 'UNAVAILABLE' ? generalReevaluated : evaluated.best;
     const personalFit = evaluatePersonalMuhurtaFit(activity, bestStart, personalContext);
 
     const supportReasons = evaluated.best.reasons.filter((r) => r.polarity === 'SUPPORT');
@@ -1429,6 +1503,7 @@ export function findPersonalMuhurthams(request: MuhurthamSearchRequest): Muhurth
     dateRange: request.dateRange,
     dates: ranked,
     evaluatedDateCount: dateStrs.length,
+    unavailableDateCount,
     provenance: { muhurtaMethodology: AURA_MUHURTA_METHODOLOGY_ID, personalMethodology: AURA_PERSONAL_FIT_METHODOLOGY_ID },
   };
 }
@@ -1593,7 +1668,12 @@ function participantCombinedScore(
 ): number {
   const participantProfile: TaskProfile = { ...generalProfile, personalContext };
   const evaluated = evaluateMuhurthamCandidate(participantProfile, bestStart, durationMinutes, context, panchangWindows, generalProfile.muhurtaClassification, actionPhase);
-  return evaluated?.score ?? generalFallbackScore;
+  // PA-3C-C1B-02: 'UNAVAILABLE' narrowed out explicitly (never read as a
+  // TimingCandidate) -- falls back to generalFallbackScore exactly like the
+  // pre-existing null case, since the caller already knows this candidate's
+  // date was NOT reported UNAVAILABLE at the general-evaluation level (this
+  // function is only reached once that check has already passed).
+  return evaluated && evaluated !== 'UNAVAILABLE' ? evaluated.score : generalFallbackScore;
 }
 
 /** One participant's fit on a SHARED candidate -- structurally the same
@@ -1650,6 +1730,9 @@ export interface MuhurthamSharedSearchResult {
   savedPerson: { id: string; name: string };
   dates: MuhurthamSharedDateCandidate[];
   evaluatedDateCount: number;
+  /** PA-3C-C1B-02: see MuhurthamSearchResult.unavailableDateCount's own doc
+   * comment -- identical, additive meaning here. */
+  unavailableDateCount: number;
   provenance: { muhurtaMethodology: string; personalMethodology: string; sharedMethodology: string };
 }
 
@@ -1694,18 +1777,28 @@ export function findSharedMuhurthams(request: MuhurthamSearchRequest): Muhurtham
   const generalProfile = profileFromActivity(activity);
 
   const dateCandidates: MuhurthamSharedDateCandidate[] = [];
+  // PA-3C-C1B-02: see findMuhurthams()'s identical counter for the full
+  // rationale.
+  let unavailableDateCount = 0;
   for (const dateStr of dateStrs) {
-    const panchangDay = getPanchangForDate({
-      localDate: dateStr,
-      latitude: request.context.latitude,
-      longitude: request.context.longitude,
-      timezone: request.context.timezone,
-    });
+    let panchangDay: ReturnType<typeof getPanchangForDate>;
+    try {
+      panchangDay = getPanchangForDate({
+        localDate: dateStr,
+        latitude: request.context.latitude,
+        longitude: request.context.longitude,
+        timezone: request.context.timezone,
+      });
+    } catch (err) {
+      if (err instanceof SolarNoEventError) { unavailableDateCount++; continue; }
+      throw err;
+    }
 
     // Same GENERAL candidate generation findMuhurthams() uses -- SHARED
     // never re-derives or re-picks window candidates using either person's
     // personal context (brief section 1 / section 7).
     const evaluated = findBestWindowsForDate(generalProfile, dateStr, generalContext, durationMinutes, preference, panchangDay.windows, generalProfile.muhurtaClassification, MUHURTHAM_FINDER_WORKFLOW_ACTION_PHASE);
+    if (evaluated === 'UNAVAILABLE') { unavailableDateCount++; continue; }
     if (!evaluated) continue;
 
     const bestStart = new Date(evaluated.best.start);
@@ -1760,6 +1853,7 @@ export function findSharedMuhurthams(request: MuhurthamSearchRequest): Muhurtham
     savedPerson: { id: partner.savedPersonId, name: partner.name },
     dates: ranked,
     evaluatedDateCount: dateStrs.length,
+    unavailableDateCount,
     provenance: { muhurtaMethodology: AURA_MUHURTA_METHODOLOGY_ID, personalMethodology: AURA_PERSONAL_FIT_METHODOLOGY_ID, sharedMethodology: AURA_SHARED_FIT_METHODOLOGY_ID },
   };
 }
@@ -1841,8 +1935,31 @@ export interface MuhurthamCandidateCheckResult {
   balance?: number;
 }
 
+/** PA-3C-C1B-02: returned instead of a result when the required ceremonial
+ * eligibility check (currently only Chaturmas) could not be determined for
+ * this instant's location/date -- never silently folded into `eligible:
+ * true` or `eligible: false` on MuhurthamCandidateCheckResult, since
+ * neither would be an evaluated answer. Mirrors the shape of the existing
+ * `*_PROFILE_INCOMPLETE` variants (a distinct `status`, no fabricated
+ * `window`/`score`/`eligible`). */
+export interface MuhurthamCandidateCheckUnavailable {
+  scope: 'GENERAL' | 'PERSONAL' | 'SHARED';
+  status: 'UNAVAILABLE';
+  /** 'CHATURMAS_UNAVAILABLE' (PeriodUnavailableReasonCode, ceremonialPeriods
+   * eligibility couldn't be determined) or 'SOLAR_WINDOW_UNAVAILABLE' (the
+   * underlying whole-date Panchang/solar-window computation itself failed,
+   * before any ceremonial check could even run -- affects every supported
+   * activity, not only ones with Chaturmas rules). Kept as a plain string
+   * rather than PeriodUnavailableReasonCode alone since the two are
+   * genuinely different root causes a future caller may want to log
+   * distinctly, even though both currently warrant the same honest
+   * "eligibility could not be determined" user-facing copy. */
+  reason: PeriodUnavailableReasonCode | 'SOLAR_WINDOW_UNAVAILABLE';
+}
+
 export type MuhurthamCandidateCheckOutcome =
   | MuhurthamCandidateCheckResult
+  | MuhurthamCandidateCheckUnavailable
   | MuhurthamProfileIncomplete
   | MuhurthamUserProfileIncomplete
   | MuhurthamSavedPersonProfileIncomplete;
@@ -1886,7 +2003,16 @@ export function evaluateMuhurthamCandidateAt(request: MuhurthamCandidateCheckReq
   // noon default. `panchangDay.windows` (used for the section-7 friction/
   // overlap safety check) is unaffected either way -- pure solar-ephemeris
   // arithmetic, independent of referenceInstant.
-  const panchangDay = getPanchangForDate({ localDate: localDateStr, latitude: context.latitude, longitude: context.longitude, timezone: context.timezone, referenceInstant: start });
+  // PA-3C-C1B-02: getPanchangForDate ultimately depends on
+  // computeSolarEphemeris; a legitimate polar no-event location/date can
+  // throw SolarNoEventError here, before any eligibility check even runs.
+  let panchangDay: ReturnType<typeof getPanchangForDate>;
+  try {
+    panchangDay = getPanchangForDate({ localDate: localDateStr, latitude: context.latitude, longitude: context.longitude, timezone: context.timezone, referenceInstant: start });
+  } catch (err) {
+    if (err instanceof SolarNoEventError) return { scope: request.scope, status: 'UNAVAILABLE', reason: 'SOLAR_WINDOW_UNAVAILABLE' };
+    throw err;
+  }
 
   const buildResult = (eligible: boolean, canonical: TimingCandidate, extra: Partial<MuhurthamCandidateCheckResult> = {}): MuhurthamCandidateCheckResult => {
     const cautionReasons = canonical.reasons.filter((r) => r.polarity === 'CAUTION' || r.polarity === 'BLOCK');
@@ -1928,6 +2054,7 @@ export function evaluateMuhurthamCandidateAt(request: MuhurthamCandidateCheckReq
     // exported function's own doc comment above) -- never as the
     // eligibility gate itself.
     const eligibleCandidate = evaluateMuhurthamCandidate(generalProfile, start, durationMinutes, generalContext, panchangDay.windows, generalProfile.muhurtaClassification);
+    if (eligibleCandidate === 'UNAVAILABLE') return { scope: request.scope, status: 'UNAVAILABLE', reason: 'CHATURMAS_UNAVAILABLE' };
     const canonical = eligibleCandidate ?? evaluateTimingCandidate({ profile: generalProfile, start, durationMinutes, context: generalContext });
     return buildResult(eligibleCandidate !== null, canonical);
   }
@@ -1949,10 +2076,11 @@ export function evaluateMuhurthamCandidateAt(request: MuhurthamCandidateCheckReq
     // comparison baseline for generalScore -- never a second eligibility
     // gate.
     const eligiblePersonalCandidate = evaluateMuhurthamCandidate(personalProfile, start, durationMinutes, context, panchangDay.windows, personalProfile.muhurtaClassification);
+    if (eligiblePersonalCandidate === 'UNAVAILABLE') return { scope: request.scope, status: 'UNAVAILABLE', reason: 'CHATURMAS_UNAVAILABLE' };
     const personalCanonical = eligiblePersonalCandidate ?? evaluateTimingCandidate({ profile: personalProfile, start, durationMinutes, context });
     const personalEligible = eligiblePersonalCandidate !== null;
     const generalCandidate = evaluateMuhurthamCandidate(generalOnlyProfile, start, durationMinutes, generalContext, panchangDay.windows, personalProfile.muhurtaClassification);
-    const generalScore = generalCandidate?.score ?? personalCanonical.score;
+    const generalScore = generalCandidate && generalCandidate !== 'UNAVAILABLE' ? generalCandidate.score : personalCanonical.score;
     const personalFit = evaluatePersonalMuhurtaFit(activity, start, personalContext);
 
     return buildResult(personalEligible, personalCanonical, {
@@ -1982,6 +2110,7 @@ export function evaluateMuhurthamCandidateAt(request: MuhurthamCandidateCheckReq
   // combinedScore/delta is layered on top via the exact same
   // participantCombinedScore()/blendSharedDelta() helpers.
   const eligibleGeneralCandidate = evaluateMuhurthamCandidate(generalProfile, start, durationMinutes, generalContext, panchangDay.windows, generalProfile.muhurtaClassification);
+  if (eligibleGeneralCandidate === 'UNAVAILABLE') return { scope: request.scope, status: 'UNAVAILABLE', reason: 'CHATURMAS_UNAVAILABLE' };
   const generalCanonical = eligibleGeneralCandidate ?? evaluateTimingCandidate({ profile: generalProfile, start, durationMinutes, context: generalContext });
   const eligible = eligibleGeneralCandidate !== null;
   const generalScore = generalCanonical.score;

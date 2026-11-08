@@ -204,7 +204,13 @@ check('A candidate entirely before that transition is not rejected on Asta groun
 check('26/27. spanOverlapsProhibitedPeriod\'s own signature carries no score/modifier parameter -- structurally cannot be influenced by an unrelated factor scoring well', spanOverlapsProhibitedPeriod.length === 4);
 check('26/27b. spanOverlapsPlanetaryCombustion\'s own signature carries no score/modifier parameter either', spanOverlapsPlanetaryCombustion.length === 3);
 const finderSource = fs.readFileSync('packages/recommendation/src/muhurthamFinder.ts', 'utf8');
-check('Both new checks are wired into evaluateMuhurthamCandidate BEFORE the function can return a scored candidate (same discipline as the existing Tithi/Nakshatra/Yoga/Karana check)', /spanOverlapsProhibitedPeriod\(new Date\(candidate\.start\)[\s\S]{0,240}return null/.test(finderSource) && /spanOverlapsPlanetaryCombustion\(new Date\(candidate\.start\)[\s\S]{0,120}return null/.test(finderSource));
+// PA-3C-C1B-02: the character budget after spanOverlapsProhibitedPeriod's
+// call site was widened (240 -> 700) to tolerate the new UNAVAILABLE branch
+// and its explanatory comment inserted between the call and the eventual
+// `return null` -- the guarantee itself (checked before any scored return,
+// same discipline as the existing Tithi/Nakshatra/Yoga/Karana check) is
+// unchanged; only the literal source distance grew.
+check('Both new checks are wired into evaluateMuhurthamCandidate BEFORE the function can return a scored candidate (same discipline as the existing Tithi/Nakshatra/Yoga/Karana check)', /spanOverlapsProhibitedPeriod\(new Date\(candidate\.start\)[\s\S]{0,700}return null/.test(finderSource) && /spanOverlapsPlanetaryCombustion\(new Date\(candidate\.start\)[\s\S]{0,120}return null/.test(finderSource));
 check('28. Tara Bala/personalContext plays no role in either new check -- neither function\'s signature accepts a personalContext parameter', !/spanOverlapsProhibitedPeriod\([^)]*personalContext/.test(finderSource) && !/spanOverlapsPlanetaryCombustion\([^)]*personalContext/.test(finderSource));
 
 // ============================================================
