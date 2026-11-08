@@ -4,6 +4,11 @@
  *
  * Reference: https://gml.noaa.gov/grad/solcalc/solareqns.PDF
  */
+import { SolarComputationError, SolarNoEventError } from './errors';
+import { assertValidDateComponents, assertValidLatitude, assertValidLongitude } from './validation';
+
+export { SolarInputValidationError, SolarNoEventError, SolarComputationError, isSolarError } from './errors';
+export type { SolarCondition, SolarError } from './errors';
 
 export interface SolarInput {
   year: number;
@@ -72,19 +77,35 @@ function solarDeclinationRadians(gamma: number): number {
 
 /**
  * Hour angle (degrees) for a given solar elevation angle.
+ *
+ * `cosH > 1` means even the sun's highest point of the day never reaches
+ * the target zenith (continuous darkness = POLAR_NIGHT); `cosH < -1` means
+ * even its lowest point (midnight) stays above it (continuous daylight =
+ * POLAR_DAY). This is the opposite of what a naive reading of "larger hour
+ * angle" suggests -- independently derived and empirically verified
+ * (PA-3C-A2/A3), not assumed. A non-finite `cosH` (division by a
+ * near-zero denominator) is distinguished from both no-event conditions:
+ * it is a computation anomaly, not a legitimate polar result.
  */
+type HourAngleResult =
+  | { kind: 'VALID'; degrees: number }
+  | { kind: 'NO_EVENT'; condition: 'POLAR_DAY' | 'POLAR_NIGHT' }
+  | { kind: 'NON_FINITE' };
+
 function hourAngleDegrees(
   latitudeRad: number,
   declinationRad: number,
   zenithDegrees: number
-): number | null {
+): HourAngleResult {
   const zenithRad = zenithDegrees * DEG2RAD;
   const cosH =
     (Math.cos(zenithRad) - Math.sin(latitudeRad) * Math.sin(declinationRad)) /
     (Math.cos(latitudeRad) * Math.cos(declinationRad));
 
-  if (cosH > 1 || cosH < -1) return null;
-  return Math.acos(cosH) * RAD2DEG;
+  if (!Number.isFinite(cosH)) return { kind: 'NON_FINITE' };
+  if (cosH > 1) return { kind: 'NO_EVENT', condition: 'POLAR_NIGHT' };
+  if (cosH < -1) return { kind: 'NO_EVENT', condition: 'POLAR_DAY' };
+  return { kind: 'VALID', degrees: Math.acos(cosH) * RAD2DEG };
 }
 
 // 91.10° accounts for upper-limb visibility matching Drik Panchang rules
@@ -95,6 +116,15 @@ const SUNRISE_SUNSET_ZENITH = 91.10;
  */
 export function computeSolarEphemeris(input: SolarInput): SolarResult {
   const { year, month, day, latitude, longitude, tzOffsetMinutes } = input;
+
+  // Eager input validation (PA-3C-C1A) -- rejects non-finite/out-of-range
+  // input before any trigonometric computation, so it can never silently
+  // escape as a NaN-valued "successful" SolarResult (confirmed defect,
+  // PA-3C-A2/A3: NaN previously bypassed the only existing guard, since
+  // `NaN > 1` and `NaN < -1` are both false).
+  assertValidLatitude(latitude);
+  assertValidLongitude(longitude);
+  assertValidDateComponents(year, month, day, tzOffsetMinutes);
 
   const latRad = latitude * DEG2RAD;
   const doy = dayOfYear(year, month, day);
@@ -112,13 +142,22 @@ export function computeSolarEphemeris(input: SolarInput): SolarResult {
 
   const solarNoonUTCMinutesFinal = 720 - 4 * longitude - eqTime;
 
-  const haDeg = hourAngleDegrees(latRad, decl, SUNRISE_SUNSET_ZENITH);
+  const haResult = hourAngleDegrees(latRad, decl, SUNRISE_SUNSET_ZENITH);
 
-  if (haDeg === null) {
-    throw new Error(
-      `No sunrise/sunset at latitude ${latitude} on ${year}-${month}-${day} (polar day/night).`
+  if (haResult.kind === 'NON_FINITE') {
+    throw new SolarComputationError(
+      `Solar hour-angle computation produced a non-finite value at latitude ${latitude}, longitude ${longitude} on ${year}-${month}-${day}.`
     );
   }
+  if (haResult.kind === 'NO_EVENT') {
+    const conditionLabel = haResult.condition === 'POLAR_DAY' ? 'continuous daylight' : 'continuous darkness';
+    throw new SolarNoEventError(
+      haResult.condition,
+      `No sunrise/sunset at latitude ${latitude} on ${year}-${month}-${day} (${conditionLabel}).`
+    );
+  }
+
+  const haDeg = haResult.degrees;
 
   const sunriseUTCMinutes = solarNoonUTCMinutesFinal - haDeg * 4;
   const sunsetUTCMinutes = solarNoonUTCMinutesFinal + haDeg * 4;
