@@ -1,21 +1,9 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getSessionFromRequest } from '../../../../lib/session';
 import { getUserById, listPlannedActivities } from '../../../../lib/db';
-import { getDatePartsInTimezone, resolveTzOffsetMinutes } from '../../../../lib/timezone';
+import { getDatePartsInTimezone } from '../../../../lib/timezone';
+import { computeUserLocalNoon, formatLocalICSDate } from '../../../../lib/calendarFeedIcs';
 import { getDailySolarWindows } from '../../../../../../packages/astronomy/src/solarWindows';
-
-/** Formats a Date object into local YYYYMMDDTHHMMSS format without conversion */
-function formatLocalICSDate(d: Date): string {
-  const pad = (n: number) => String(n).padStart(2, '0');
-  const year = d.getFullYear();
-  const month = pad(d.getMonth() + 1);
-  const day = pad(d.getDate());
-  const hours = pad(d.getHours());
-  const mins = pad(d.getMinutes());
-  const secs = pad(d.getSeconds());
-
-  return `${year}${month}${day}T${hours}${mins}${secs}`;
-}
 
 function formatUTCICSDate(d: Date): string {
   const pad = (n: number) => String(n).padStart(2, '0');
@@ -45,11 +33,10 @@ export async function GET(req: NextRequest) {
   const lat = user.latitude ?? 13.0827;
   const lng = user.longitude ?? 80.2707;
   const timezone = user.timezone || 'Asia/Kolkata';
-  const tzOffsetMinutes = resolveTzOffsetMinutes(timezone, now);
   const localDate = getDatePartsInTimezone(timezone, now);
-  const userLocalNoon = new Date(localDate.year, localDate.month - 1, localDate.day, 12, 0, 0);
+  const userLocalNoon = computeUserLocalNoon(localDate, timezone);
 
-  const windows = getDailySolarWindows(userLocalNoon, lat, lng, tzOffsetMinutes);
+  const windows = getDailySolarWindows(userLocalNoon, lat, lng, timezone);
   const plans = await listPlannedActivities(session.userId);
   const upcomingPlans = plans.filter((plan) => {
     if (plan.status !== 'UPCOMING') return false;
@@ -76,9 +63,9 @@ export async function GET(req: NextRequest) {
   ];
 
   for (const event of events) {
-    const startStr = formatLocalICSDate(event.start);
-    const endStr = formatLocalICSDate(event.end);
-    const stampStr = formatLocalICSDate(now);
+    const startStr = formatLocalICSDate(event.start, timezone);
+    const endStr = formatLocalICSDate(event.end, timezone);
+    const stampStr = formatLocalICSDate(now, timezone);
 
     icsContent.push(
       'BEGIN:VEVENT',

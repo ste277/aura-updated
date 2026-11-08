@@ -19,6 +19,8 @@ jobs:
         run: npm install
       - name: Run ephemeris test
         run: npx ts-node test/ephemeris.test.ts
+      - name: Run PA-3B solar windows timezone fix test
+        run: npx ts-node test/pa3bSolarWindowsTimezoneFix.test.ts
       - name: Run integration test
         run: npx ts-node test/integration.test.ts
       - name: Run timezone test
