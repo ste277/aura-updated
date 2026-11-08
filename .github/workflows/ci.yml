@@ -27,6 +27,8 @@ jobs:
         run: npx ts-node test/pa3cC1B01SolarUnavailable.test.ts
       - name: Run PA-3C-C1B-02 Muhurtham eligibility test
         run: npx ts-node test/pa3cC1B02MuhurthamEligibility.test.ts
+      - name: Run PA-3C-C1B-03 Daily Assistant availability test
+        run: npx ts-node test/pa3cC1B03DailyAssistantAvailability.test.ts
       - name: Run integration test
         run: npx ts-node test/integration.test.ts
       - name: Run timezone test

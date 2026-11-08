@@ -149,6 +149,26 @@ export default function DashboardPage() {
   const [logEntries, setLogEntries] = useState<LoggedEntryItem[]>([]);
   const [, setHabits] = useState<any[]>([]);
   const [dailyBriefing, setDailyBriefing] = useState<DailyBriefing | null>(null);
+  // PA-3C-C1B-03: explicit lifecycle for the Daily Assistant briefing
+  // specifically (distinct from goalReportingStatus's deliberate "keep
+  // stale data on a transient refetch failure" convention a few lines
+  // below) -- a briefing is sourced from a legitimate solar no-event
+  // condition, so a failed/unavailable refresh must NOT leave a
+  // previously successful briefing displayed as though it were current.
+  // 'unavailable' = a real, typed, expected polar no-event response;
+  // 'error' = anything else (network failure, non-OK HTTP status,
+  // unexpected server error) -- never the same copy/handling as the
+  // honest 'unavailable' case.
+  const [dailyBriefingStatus, setDailyBriefingStatus] = useState<'loading' | 'available' | 'unavailable' | 'error'>('loading');
+  // Race-condition guard: loadAssistantSignals has no params and can be
+  // triggered again (Timing Location change, manual refresh) before an
+  // earlier in-flight call resolves. Only the response belonging to the
+  // MOST RECENTLY STARTED call may ever update dailyBriefing/
+  // personalContext/dailyBriefingStatus -- an older call resolving later
+  // must not overwrite a newer result. The other three signals fetched in
+  // the same Promise.all keep their existing (unguarded) behavior; this
+  // ticket's scope is the Daily Assistant briefing specifically.
+  const dailyBriefingRequestIdRef = useRef(0);
   // Home Good Right Now Personalization V1 -- the owner's derived natal
   // context (never raw birth date/time/timezone), returned as a sibling
   // field alongside DailyBriefing by the SAME existing
@@ -428,6 +448,7 @@ export default function DashboardPage() {
   // Timing Location save (handleLocationChanged below). Endpoints, response
   // handling, and state updates are unchanged; only the shape moved.
   const loadAssistantSignals = useCallback(async () => {
+    const dailyBriefingRequestId = ++dailyBriefingRequestIdRef.current;
     try {
       const [briefingRes, insightRes, reflectionRes, goalReportingRes] = await Promise.all([
         fetch('/api/daily-assistant/briefing'),
@@ -436,10 +457,35 @@ export default function DashboardPage() {
         fetch('/api/insights/reporting'),
       ]);
 
+      // PA-3C-C1B-03: an older in-flight request resolving after a newer
+      // one must never overwrite the newer result -- skip applying ANY
+      // briefing-specific state once a later call has already started.
+      const isLatestBriefingRequest = () => dailyBriefingRequestId === dailyBriefingRequestIdRef.current;
       if (briefingRes.ok) {
         const briefingData = await briefingRes.json();
-        setDailyBriefing(briefingData);
-        setPersonalContext(briefingData.personalContext);
+        if (isLatestBriefingRequest()) {
+          if (briefingData.status === 'OK') {
+            setDailyBriefing(briefingData.briefing);
+            setPersonalContext(briefingData.personalContext);
+            setDailyBriefingStatus('available');
+          } else if (briefingData.status === 'UNAVAILABLE') {
+            // A legitimate, expected solar no-event condition -- never the
+            // previous briefing, never a fabricated one.
+            setDailyBriefing(null);
+            setPersonalContext(undefined);
+            setDailyBriefingStatus('unavailable');
+          } else {
+            // CALCULATION_UNAVAILABLE or any other non-OK status body: a
+            // genuine failure, not an honest "no event today".
+            setDailyBriefing(null);
+            setPersonalContext(undefined);
+            setDailyBriefingStatus('error');
+          }
+        }
+      } else if (isLatestBriefingRequest()) {
+        setDailyBriefing(null);
+        setPersonalContext(undefined);
+        setDailyBriefingStatus('error');
       }
       if (insightRes.ok) setAssistantInsight(await insightRes.json());
       if (goalReportingRes.ok) {
@@ -451,6 +497,8 @@ export default function DashboardPage() {
         // refetch failure must not tear down already-displayed data back
         // into a blank error state, only the FIRST load (still 'loading')
         // surfaces as 'error'. Same reasoning in the catch block below.
+        // (The Daily Assistant briefing deliberately does NOT follow this
+        // convention -- see dailyBriefingStatus's own comment above.)
         setGoalReportingStatus((prev) => (prev === 'loaded' ? prev : 'error'));
       }
       if (reflectionRes.ok) {
@@ -462,6 +510,11 @@ export default function DashboardPage() {
       }
     } catch (err) {
       console.error('Failed to load daily assistant signals:', err);
+      if (dailyBriefingRequestId === dailyBriefingRequestIdRef.current) {
+        setDailyBriefing(null);
+        setPersonalContext(undefined);
+        setDailyBriefingStatus('error');
+      }
       setGoalReportingStatus((prev) => (prev === 'loaded' ? prev : 'error'));
     }
   }, []);
@@ -1622,6 +1675,7 @@ export default function DashboardPage() {
             dayWindows={mappedTimelineWindows}
             loggedActivitiesToday={loggedActivitiesToday}
             dailyBriefing={dailyBriefing}
+            dailyBriefingStatus={dailyBriefingStatus}
             personalContext={personalContext}
             todayReflection={todayReflection}
             onLogActivity={handleLogActivity}
