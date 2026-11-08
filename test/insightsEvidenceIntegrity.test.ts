@@ -139,9 +139,14 @@ check('NEEDS DATA MODEL DECISION: the explicit-followed-is-authoritative policy 
 // ============================================================
 
 function computeAlignmentScore(windows: string[]): number | null {
-  if (windows.length === 0) return null;
-  const weighted = windows.reduce((sum, w) => sum + insightsWindowWeight(w), 0);
-  return Math.min(100, Math.max(0, Math.round((weighted / windows.length) * 100)));
+  // PA-3C-C1B-01: type-only sync with insightsWindowWeight()'s now-nullable
+  // return (excludes a legitimate solar no-event classification from the
+  // average) -- no fixture below passes 'UNAVAILABLE', so this changes no
+  // existing assertion's outcome.
+  const weights = windows.map((w) => insightsWindowWeight(w)).filter((w): w is number => w !== null);
+  if (weights.length === 0) return null;
+  const weighted = weights.reduce((sum, w) => sum + w, 0);
+  return Math.min(100, Math.max(0, Math.round((weighted / weights.length) * 100)));
 }
 
 check('0 logs -> alignment score null (never a fabricated 0%)', computeAlignmentScore([]) === null);
@@ -151,8 +156,13 @@ check('Mixed supportive/neutral/friction -> exact existing C1 weighted result (6
 check('null and 0 are genuinely distinct JS values from this function (not both falsy-collapsed by a caller)', computeAlignmentScore([]) !== computeAlignmentScore(['RAHU_KALAM']));
 
 const viewSource = fs.readFileSync('apps/web/components/InsightsView.tsx', 'utf8');
-check('InsightsView.tsx\'s lifetime alignmentScore now falls back to null, not 0, with zero logs', /const alignmentScore: number \| null =\s*\n\s*totalActivities > 0[\s\S]{0,150}: null;/.test(viewSource));
-check('InsightsView.tsx\'s monthAlignmentScore now falls back to null, not 0, with zero month activities', /const monthAlignmentScore: number \| null = monthTotalActivities > 0 \? [\s\S]{0,120} : null;/.test(viewSource));
+// PA-3C-C1B-01: these two now divide by classifiedTotalActivities/
+// monthClassifiedActivities (excludes a legitimate solar no-event
+// classification from the alignment denominator), not the raw
+// totalActivities/monthTotalActivities activity-count facts -- the
+// null-not-zero property this check protects is otherwise unchanged.
+check('InsightsView.tsx\'s lifetime alignmentScore now falls back to null, not 0, with zero classified logs', /const alignmentScore: number \| null =\s*\n\s*classifiedTotalActivities > 0[\s\S]{0,150}: null;/.test(viewSource));
+check('InsightsView.tsx\'s monthAlignmentScore now falls back to null, not 0, with zero classified month activities', /const monthAlignmentScore: number \| null = monthClassifiedActivities > 0 \? [\s\S]{0,120} : null;/.test(viewSource));
 check('InsightsView.tsx\'s monthAuraGuidedRate now falls back to null, not 0, with zero month activities', /const monthAuraGuidedRate: number \| null = monthTotalActivities > 0 \? Math\.round\(\(monthAuraGuidedCount \/ monthTotalActivities\) \* 100\) : null;/.test(viewSource));
 check('C1\'s weight constants remain exactly SUPPORTIVE=1.0/NEUTRAL=0.7/FRICTION=0.0 (unchanged by this PR)', insightsWindowWeight('BRAHMA') === 1.0 && insightsWindowWeight('NEUTRAL') === 0.7 && insightsWindowWeight('RAHU_KALAM') === 0.0);
 
@@ -162,8 +172,10 @@ check('C1\'s weight constants remain exactly SUPPORTIVE=1.0/NEUTRAL=0.7/FRICTION
 // ============================================================
 
 function computeSevenDayAlignmentScore(windowsInRange: string[]): number | null {
-  if (windowsInRange.length === 0) return null;
-  return Math.round((windowsInRange.reduce((sum, w) => sum + insightsWindowWeight(w), 0) / windowsInRange.length) * 100);
+  // PA-3C-C1B-01: same type-only sync as computeAlignmentScore above.
+  const weights = windowsInRange.map((w) => insightsWindowWeight(w)).filter((w): w is number => w !== null);
+  if (weights.length === 0) return null;
+  return Math.round((weights.reduce((sum, w) => sum + w, 0) / weights.length) * 100);
 }
 
 check('No logs in the 7-day range -> null', computeSevenDayAlignmentScore([]) === null);
@@ -179,7 +191,10 @@ check('A 7-day window with only 1 supportive log among a hypothetical larger 400
 check('InsightsView.tsx defines sevenDayAlignmentScore from past7Logs (filtered to the 7-day date-key set), never from the full logEntries array', /const past7Logs = logEntries\.filter\(\(e\) => past7DateKeySet\.has\(observationOf\(e\)\.dateKey\)\);/.test(viewSource));
 check('past7DateKeySet is built from past7DateKeys (the same 7-day range the chart bars use), proving older-than-7-day logs cannot leak into the Avg', /const past7DateKeySet = new Set\(past7DateKeys\);/.test(viewSource));
 check('The "Avg" badge now renders analytics.sevenDayAlignmentScore, never analytics.alignmentScore (the old 400-day mislabeling)', /Avg: \{analytics\.sevenDayAlignmentScore !== null \? `\$\{analytics\.sevenDayAlignmentScore\}%` : '—'\}/.test(viewSource) && !/Avg: \{analytics\.alignmentScore\}%/.test(viewSource));
-check('The 7-day PER-DAY bar formula (already-correct null/real-zero semantics) remains untouched by this PR', /dayLogs\.length > 0\s*\n\s*\? Math\.round\(\(dayLogs\.reduce/.test(viewSource));
+// PA-3C-C1B-01: the per-day formula now divides by dayWeights.length
+// (dayLogs filtered to classified-only), not the raw dayLogs.length --
+// the null/real-zero semantics this check protects are unchanged.
+check('The 7-day PER-DAY bar formula (null/real-zero semantics) excludes unclassified logs from its own divisor too', /dayWeights\.length > 0\s*\n\s*\? Math\.round\(\(dayWeights\.reduce/.test(viewSource));
 
 // ============================================================
 // This Month evidence state (brief sections 10-13, 46).
@@ -259,7 +274,10 @@ check('1 Aura-planned + 2 manual -> comparison allowed', computePlanningLift(1, 
 check('3 Aura-planned + 0 manual -> no comparison (one group empty)', computePlanningLift(3, 0, 90, 50) === null);
 check('0 Aura-planned + 3 manual -> no comparison (one group empty)', computePlanningLift(0, 3, 90, 50) === null);
 check('InsightsView.tsx\'s planningLift now requires the COMBINED count to reach AVAILABLE, in addition to both groups being non-empty', /auraPlannedCount > 0 && manualCount > 0 && deriveInsightsEvidenceState\(auraPlannedCount \+ manualCount\) === 'AVAILABLE'/.test(viewSource));
-check('The underlying plannedAlignmentScore/manualAlignmentScore calculations are unchanged by this PR', /const plannedAlignmentScore = auraPlannedCount > 0 \? Math\.round\(\(auraPlannedAlignment \/ auraPlannedCount\) \* 100\) : 0;/.test(viewSource));
+// PA-3C-C1B-01: now divides by auraPlannedClassifiedCount (excludes a
+// legitimate solar no-event classification), not the raw auraPlannedCount
+// activity-count fact.
+check('The underlying plannedAlignmentScore calculation excludes unclassified logs from its own divisor', /const plannedAlignmentScore = auraPlannedClassifiedCount > 0 \? Math\.round\(\(auraPlannedAlignment \/ auraPlannedClassifiedCount\) \* 100\) : 0;/.test(viewSource));
 
 const causalCodeOnlyView = stripComments(viewSource);
 const causalCodeOnlyRoute = stripComments(routeSource);

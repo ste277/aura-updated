@@ -268,10 +268,15 @@ export function InsightsView({ userId, onOpenBirthProfile, timezone, logEntries 
     const past7DateKeys = lastNCalendarDateKeys(timezone, now, 7);
     const past7Days = past7DateKeys.map((dateKey) => {
       const dayLogs = confirmedLogEntries.filter((e) => observationOf(e).dateKey === dateKey);
+      // PA-3C-C1B-01: a legitimate solar no-event log (insightsWindowWeight
+      // returns null) must contribute to neither the sum nor the count --
+      // folding it into either would dilute or inflate the percentage with
+      // a classification that was never actually observed.
+      const dayWeights = dayLogs.map((e) => insightsWindowWeight(e.activeWindow)).filter((w): w is number => w !== null);
 
       const score: number | null =
-        dayLogs.length > 0
-          ? Math.round((dayLogs.reduce((sum, e) => sum + insightsWindowWeight(e.activeWindow), 0) / dayLogs.length) * 100)
+        dayWeights.length > 0
+          ? Math.round((dayWeights.reduce((sum, w) => sum + w, 0) / dayWeights.length) * 100)
           : null;
 
       return {
@@ -299,9 +304,12 @@ export function InsightsView({ userId, onOpenBirthProfile, timezone, logEntries 
     // metric in this PR now preserves.
     const past7DateKeySet = new Set(past7DateKeys);
     const past7Logs = confirmedLogEntries.filter((e) => past7DateKeySet.has(observationOf(e).dateKey));
+    // PA-3C-C1B-01: same exclusion as the per-day scores above -- a
+    // legitimate solar no-event log must not dilute this 7-day average.
+    const past7Weights = past7Logs.map((e) => insightsWindowWeight(e.activeWindow)).filter((w): w is number => w !== null);
     const sevenDayAlignmentScore: number | null =
-      past7Logs.length > 0
-        ? Math.round((past7Logs.reduce((sum, e) => sum + insightsWindowWeight(e.activeWindow), 0) / past7Logs.length) * 100)
+      past7Weights.length > 0
+        ? Math.round((past7Weights.reduce((sum, w) => sum + w, 0) / past7Weights.length) * 100)
         : null;
 
     // 3. Time-of-Day Pattern Counts -- daypart boundaries UNCHANGED
@@ -363,9 +371,19 @@ export function InsightsView({ userId, onOpenBirthProfile, timezone, logEntries 
     const monthEntries = confirmedLogEntries.filter((e) => isInCalendarMonth(observationOf(e).dateKey, currentYear, currentMonth));
     const monthTotalActivities = monthEntries.length;
     let monthWeightedAlignment = 0;
+    // PA-3C-C1B-01: the alignment denominator must exclude legitimate
+    // solar no-event logs (insightsWindowWeight returns null for them) --
+    // monthTotalActivities (used elsewhere as the activity-COUNT fact)
+    // stays unchanged; monthClassifiedActivities is the alignment-specific
+    // divisor.
+    let monthClassifiedActivities = 0;
     let monthAuraGuidedCount = 0;
     monthEntries.forEach((entry) => {
-      monthWeightedAlignment += insightsWindowWeight(entry.activeWindow);
+      const weight = insightsWindowWeight(entry.activeWindow);
+      if (weight !== null) {
+        monthWeightedAlignment += weight;
+        monthClassifiedActivities++;
+      }
       const source = entry.logSource ?? 'MANUAL';
       if (source === 'AURA_PLANNED' || source === 'AURA_DO_NOW') monthAuraGuidedCount++;
     });
@@ -378,7 +396,7 @@ export function InsightsView({ userId, onOpenBirthProfile, timezone, logEntries 
     // to present a null vs. a LIMITED vs. an AVAILABLE score -- this
     // computation only needs to stop fabricating a number that was never
     // observed.
-    const monthAlignmentScore: number | null = monthTotalActivities > 0 ? Math.min(100, Math.max(0, Math.round((monthWeightedAlignment / monthTotalActivities) * 100))) : null;
+    const monthAlignmentScore: number | null = monthClassifiedActivities > 0 ? Math.min(100, Math.max(0, Math.round((monthWeightedAlignment / monthClassifiedActivities) * 100))) : null;
     const monthAuraGuidedRate: number | null = monthTotalActivities > 0 ? Math.round((monthAuraGuidedCount / monthTotalActivities) * 100) : null;
     // Insights Evidence & Sample-Size Integrity V1 -- the shared 0/1-2/3+
     // boundary (apps/web/lib/insightsEvidence.ts), reused rather than a
@@ -392,10 +410,16 @@ export function InsightsView({ userId, onOpenBirthProfile, timezone, logEntries 
 
     // Window Breakdown
     let weightedAlignment = 0;
+    // PA-3C-C1B-01: alignment-specific divisors, excluding legitimate
+    // solar no-event logs -- totalActivities/auraPlannedCount/manualCount
+    // (the activity-COUNT facts used elsewhere) stay unchanged.
+    let classifiedTotalActivities = 0;
     let frictionCount = 0;
     let auraPlannedCount = 0;
+    let auraPlannedClassifiedCount = 0;
     let auraDoNowCount = 0;
     let manualCount = 0;
+    let manualClassifiedCount = 0;
     let overrideCautionCount = 0;
     let auraPlannedAlignment = 0;
     let manualAlignment = 0;
@@ -417,18 +441,30 @@ export function InsightsView({ userId, onOpenBirthProfile, timezone, logEntries 
       // is judged to have been.
       const entryScore = insightsWindowWeight(entry.activeWindow);
       const source = entry.logSource ?? 'MANUAL';
-      weightedAlignment += entryScore;
+      // PA-3C-C1B-01: null means a legitimate solar no-event log --
+      // excluded from every alignment sum AND its matching divisor below,
+      // never treated as 0 (friction) or folded into NEUTRAL's weight.
+      if (entryScore !== null) {
+        weightedAlignment += entryScore;
+        classifiedTotalActivities++;
+      }
 
       if (source === 'AURA_PLANNED') {
         auraPlannedCount++;
-        auraPlannedAlignment += entryScore;
+        if (entryScore !== null) {
+          auraPlannedAlignment += entryScore;
+          auraPlannedClassifiedCount++;
+        }
       } else if (source === 'AURA_DO_NOW') {
         auraDoNowCount++;
       } else if (source === 'OVERRIDE_CAUTION') {
         overrideCautionCount++;
       } else {
         manualCount++;
-        manualAlignment += entryScore;
+        if (entryScore !== null) {
+          manualAlignment += entryScore;
+          manualClassifiedCount++;
+        }
       }
 
       if (classifyInsightsWindow(entry.activeWindow) === 'FRICTION') {
@@ -447,17 +483,19 @@ export function InsightsView({ userId, onOpenBirthProfile, timezone, logEntries 
     // card's "Avg" badge now uses sevenDayAlignmentScore, its own
     // correctly 7-day-scoped figure, above) but is fixed here too since
     // it remains part of this component's public analytics shape.
+    // PA-3C-C1B-01: divide by classifiedTotalActivities (excludes
+    // legitimate solar no-event logs), not the raw totalActivities count.
     const alignmentScore: number | null =
-      totalActivities > 0
-        ? Math.min(100, Math.max(0, Math.round((weightedAlignment / totalActivities) * 100)))
+      classifiedTotalActivities > 0
+        ? Math.min(100, Math.max(0, Math.round((weightedAlignment / classifiedTotalActivities) * 100)))
         : null;
 
     const resolvedDurations = confirmedLogEntries.map((e) => e.durationMinutes ?? 30);
     const totalMinutes = resolvedDurations.reduce((sum, minutes) => sum + minutes, 0);
     const formattedHours = `${(totalMinutes / 60).toFixed(1)} hrs`;
     const auraGuidedCount = auraPlannedCount + auraDoNowCount;
-    const plannedAlignmentScore = auraPlannedCount > 0 ? Math.round((auraPlannedAlignment / auraPlannedCount) * 100) : 0;
-    const manualAlignmentScore = manualCount > 0 ? Math.round((manualAlignment / manualCount) * 100) : 0;
+    const plannedAlignmentScore = auraPlannedClassifiedCount > 0 ? Math.round((auraPlannedAlignment / auraPlannedClassifiedCount) * 100) : 0;
+    const manualAlignmentScore = manualClassifiedCount > 0 ? Math.round((manualAlignment / manualClassifiedCount) * 100) : 0;
     // Insights Evidence & Sample-Size Integrity V1 -- a comparative "lift"
     // sentence now also requires the two groups' COMBINED observation
     // count to reach AVAILABLE (3+), not merely that both groups are

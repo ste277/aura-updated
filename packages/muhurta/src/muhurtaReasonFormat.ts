@@ -21,6 +21,12 @@ import type { MuhurtaReason } from './activityOntology';
 const NEUTRAL_SUMMARY = 'Panchanga factors are neutral for this activity.';
 
 function windowLabel(type: string): string {
+  // PA-3C-C1B-01: a legitimate solar no-event condition must never
+  // display as 'Neutral Flow' -- confirmed currently unreachable (this
+  // module's own callers never pass 'UNAVAILABLE' through), but fixed
+  // here too per the ticket's explicit instruction not to leave a known
+  // unsafe fallback in place merely because it's presently unused.
+  if (type === 'UNAVAILABLE') return 'Timing Unavailable';
   if (type === 'RAHU_KALAM') return 'Rahu Kalam';
   if (type === 'YAMA') return 'Yama Gandam';
   if (type === 'ABHIJIT') return 'Abhijit Muhurta';

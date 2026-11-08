@@ -1,8 +1,12 @@
 import { WindowSpan, SolarWindowType } from '../../../packages/panchang/src/windows';
 
 export interface DailyEnergyInsight {
-  score: number;
-  stars: number;
+  /** PA-3C-C1B-01: null when the active/upcoming classification is
+   * 'UNAVAILABLE' (a legitimate solar no-event condition) or an
+   * unrecognized runtime value -- callers must not treat null as 0 or
+   * substitute a NEUTRAL-style score/theme. */
+  score: number | null;
+  stars: number | null;
   themeText: string;
   bestForToday: string[];
   cautionItems: string[];
@@ -15,7 +19,7 @@ export interface DailyEnergyInsight {
      * CURRENT window (activeType). "Next Best Moment" cards must use these,
      * not the top-level fields, or they end up showing the current window's
      * score/description under the next window's name. */
-    score: number;
+    score: number | null;
     themeText: string;
   };
 }
@@ -41,7 +45,7 @@ function parseMinuteVal(val: unknown, fallback = 0): number {
 }
 
 interface WindowEnergyProfile {
-  score: number;
+  score: number | null;
   themeText: string;
   bestForToday: string[];
   cautionItems: string[];
@@ -88,12 +92,33 @@ function energyProfileForWindowType(type: SolarWindowType): WindowEnergyProfile 
         cautionItems: ['Impulsive Changes'],
       };
     case 'NEUTRAL':
-    default:
       return {
         score: 7.8,
         themeText: 'Balanced and stable energy. Good for consistent, incremental execution.',
         bestForToday: ['Learning', 'Exercise', 'Planning'],
         cautionItems: ['Overcommitting'],
+      };
+    case 'UNAVAILABLE':
+      // PA-3C-C1B-01: a legitimate solar no-event condition (polar day/
+      // night) -- non-scoreable, never NEUTRAL's 7.8 or a fabricated
+      // theme. Callers must render an honest "unavailable" state, not a
+      // numeric score.
+      return {
+        score: null,
+        themeText: 'Solar timing is unavailable for your location today.',
+        bestForToday: [],
+        cautionItems: [],
+      };
+    default:
+      // Defense-in-depth only: SolarWindowType is exhaustive over the 7
+      // cases above, so this branch is unreachable from well-typed
+      // callers. A persisted/API string that bypasses TypeScript must
+      // still never receive NEUTRAL's favorable 7.8 score.
+      return {
+        score: null,
+        themeText: 'Unrecognized timing classification.',
+        bestForToday: [],
+        cautionItems: [],
       };
   }
 }
@@ -124,13 +149,26 @@ export function computeDailyEnergyInsight(
     upcomingWindow = sortedWindows[0];
   }
 
-  let nextShift = {
-    windowName: 'Next Window',
-    startsIn: 'Soon',
-    startTime: '--:--',
-    score: 7.8,
-    themeText: 'Balanced and stable energy. Good for consistent, incremental execution.',
-  };
+  // PA-3C-C1B-01: the pre-existing hardcoded "no upcoming window found"
+  // default must not fabricate a NEUTRAL-style score when the CURRENT
+  // classification is itself UNAVAILABLE (windows is always [] in that
+  // case, so upcomingWindow is never found below). Every other activeType
+  // (including NEUTRAL) keeps this exact default unchanged.
+  let nextShift = activeType === 'UNAVAILABLE'
+    ? {
+        windowName: 'Next Window',
+        startsIn: 'Soon',
+        startTime: '--:--',
+        score: null as number | null,
+        themeText: 'Solar timing is unavailable for your location today.',
+      }
+    : {
+        windowName: 'Next Window',
+        startsIn: 'Soon',
+        startTime: '--:--',
+        score: 7.8 as number | null,
+        themeText: 'Balanced and stable energy. Good for consistent, incremental execution.',
+      };
 
   if (upcomingWindow) {
     const sMin = upcomingWindow.startMinuteParsed;
@@ -159,7 +197,7 @@ export function computeDailyEnergyInsight(
     };
   }
 
-  const stars = Math.min(5, Math.max(1, Math.round((score / 10) * 5)));
+  const stars = score === null ? null : Math.min(5, Math.max(1, Math.round((score / 10) * 5)));
 
   return {
     score,

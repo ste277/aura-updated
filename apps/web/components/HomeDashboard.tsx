@@ -62,13 +62,16 @@ interface HomeDashboardProps {
    * reset convention elsewhere in page.tsx). */
   userId?: string;
   userName: string;
-  energyScore: number;
+  /** PA-3C-C1B-01: null when the active classification is 'UNAVAILABLE'
+   * (a legitimate solar no-event condition) -- never 0 or a fabricated
+   * NEUTRAL-style number. */
+  energyScore: number | null;
   themeText: string;
   nextShift: {
     windowName: string;
     startsIn: string;
     startTime: string;
-    score: number;
+    score: number | null;
     themeText: string;
   };
   currentWindow?: {
@@ -231,9 +234,21 @@ const PROMPT_CHIPS = ['Workout', 'Deep work', 'Study', 'Date night'];
 // has actually evaluated a window as genuinely strong. Neutral Flow is the
 // *absence* of a special window, so it always gets its own honest "Flexible"
 // framing regardless of its numeric score.
-export function getWindowTone(score: number, windowName: string) {
+export function getWindowTone(score: number | null, windowName: string) {
   const cleanWindow = windowName.toUpperCase();
-  if (cleanWindow.includes('RAHU') || cleanWindow.includes('YAMA') || score < 4) {
+  // PA-3C-C1B-01: a legitimate solar no-event condition -- must never be
+  // classified as Caution/Neutral/Strong/Good/Light, all of which imply a
+  // real computed timing judgment. Checked before any score comparison
+  // since score is null here, not a fabricable number.
+  if (cleanWindow.includes('UNAVAILABLE')) {
+    return {
+      label: 'Timing Unavailable',
+      pill: 'Unavailable',
+      color: '#94a3b8',
+      description: 'Solar timing could not be computed for your location today. Your plans and activities are unaffected.',
+    };
+  }
+  if (cleanWindow.includes('RAHU') || cleanWindow.includes('YAMA') || (score !== null && score < 4)) {
     return { label: 'Use Caution', pill: 'Caution', color: '#fb6b6b', description: 'Better for routine, low-stakes tasks and cleanup.' };
   }
   if (cleanWindow.includes('NEUTRAL')) {
@@ -243,6 +258,14 @@ export function getWindowTone(score: number, windowName: string) {
       color: '#38bdf8',
       description: 'Flexible period for steady progress. Good for existing work, everyday tasks, and activities that don’t need a special window.',
     };
+  }
+  // Defense-in-depth only: every named window type (ABHIJIT/BRAHMA/GULIKA)
+  // and NEUTRAL/UNAVAILABLE are already handled above, so `score` is a
+  // real number by this point for any well-typed caller. A null score
+  // reaching here (an unrecognized windowName) must not read as "Light
+  // Flow" -- that still implies a real, if modest, computed judgment.
+  if (score === null) {
+    return { label: 'Timing Unavailable', pill: 'Unavailable', color: '#94a3b8', description: 'Solar timing could not be computed for your location today.' };
   }
   if (score >= 7.5) return { label: 'Strong Window', pill: 'Best Time', color: '#4ade80', description: 'Good for focused, important, or momentum-building work.' };
   if (score >= 5) return { label: 'Good Window', pill: 'Good Time', color: '#4ade80', description: 'Good for steady progress, planning, and everyday tasks.' };
@@ -258,6 +281,7 @@ function toneToStatusTone(hexColor: string): 'positive' | 'caution' | 'danger' |
 
 function getHeroHeadline(windowName: string): string {
   const cleanWindow = windowName.toUpperCase();
+  if (cleanWindow.includes('UNAVAILABLE')) return 'Solar timing unavailable for your location today';
   if (cleanWindow.includes('RAHU')) return 'Better to avoid important new starts';
   if (cleanWindow.includes('YAMA')) return 'Keep things routine for now';
   if (cleanWindow.includes('BRAHMA')) return 'Quiet time for clarity and reflection';
@@ -1668,17 +1692,23 @@ export function HomeDashboard({
   );
 }
 
-function FlowRing({ score, color }: { score: number; color: string }) {
+function FlowRing({ score, color }: { score: number | null; color: string }) {
   const radius = 44;
   const circumference = 2 * Math.PI * radius;
-  const normalized = score <= 10 ? score * 10 : score;
+  // PA-3C-C1B-01: score is null for an unavailable/unrecognized
+  // classification -- draw only the empty background track, never a
+  // fabricated fill percentage (0% would misleadingly read as "worst",
+  // not "unknown").
+  const normalized = score === null ? null : score <= 10 ? score * 10 : score;
   return (
     <div style={{ position: 'relative', width: 120, height: 120, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
       <svg width="120" height="120" viewBox="0 0 120 120" style={{ transform: 'rotate(-90deg)' }}>
         <circle cx="60" cy="60" r={radius} stroke="rgba(148, 163, 184, 0.2)" strokeWidth="10" fill="none" />
-        <circle cx="60" cy="60" r={radius} stroke={color} strokeWidth="10" fill="none" strokeLinecap="round" strokeDasharray={circumference} strokeDashoffset={circumference - (Math.min(100, normalized) / 100) * circumference} />
+        {normalized !== null && (
+          <circle cx="60" cy="60" r={radius} stroke={color} strokeWidth="10" fill="none" strokeLinecap="round" strokeDasharray={circumference} strokeDashoffset={circumference - (Math.min(100, normalized) / 100) * circumference} />
+        )}
       </svg>
-      <div style={{ position: 'absolute', color: '#facc15', fontSize: 34 }}>✦</div>
+      <div style={{ position: 'absolute', color: normalized === null ? '#94a3b8' : '#facc15', fontSize: normalized === null ? 22 : 34 }}>{normalized === null ? '—' : '✦'}</div>
     </div>
   );
 }

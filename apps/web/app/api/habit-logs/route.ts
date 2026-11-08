@@ -3,6 +3,7 @@ import { createHabitLog, getHabitLogByClientRequestId, getUserById, listHabitLog
 import { getSessionFromRequest } from '../../../lib/session';
 import { parseJsonObject } from '../../../lib/request';
 import { resolveHistoricalActiveWindow } from '../../../lib/historicalActivityWindow';
+import { SolarNoEventError } from '../../../../../packages/astronomy/src/errors';
 import { getMinuteOfDayInTimezone } from '../../../lib/timezone';
 import { getActivityProfileById } from '../../../../../packages/recommendation/src/personalizedTasks';
 
@@ -90,7 +91,22 @@ export async function POST(req: NextRequest) {
   // Uses ONLY the owner's Timing Location (never Birth Location, Event
   // Location, or SavedPerson/SHARED context) -- an ordinary owner activity
   // log.
-  const activeWindow = resolveHistoricalActiveWindow(customDate, user.latitude, user.longitude, user.timezone);
+  // PA-3C-C1B-01: a legitimate solar no-event condition (polar day/night)
+  // must not lose this otherwise-valid activity log. Only SolarNoEventError
+  // is caught here -- SolarInputValidationError/SolarComputationError are
+  // real bugs/bad data and must keep propagating uncaught, never silently
+  // become 'UNAVAILABLE' (that would hide a genuine defect as if it were
+  // an expected astronomical fact).
+  let activeWindow: string;
+  try {
+    activeWindow = resolveHistoricalActiveWindow(customDate, user.latitude, user.longitude, user.timezone);
+  } catch (err) {
+    if (err instanceof SolarNoEventError) {
+      activeWindow = 'UNAVAILABLE';
+    } else {
+      throw err;
+    }
+  }
 
   // Insights Timezone Consistency V1 -- logMinuteOfDay is now ALSO ALWAYS
   // computed server-side, from the exact SAME logTimestamp + owner Timing

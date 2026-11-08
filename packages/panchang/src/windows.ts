@@ -11,7 +11,49 @@ export type SolarWindowType =
   | 'RAHU_KALAM'
   | 'GULIKA'
   | 'YAMA'
-  | 'NEUTRAL';
+  | 'NEUTRAL'
+  | 'UNAVAILABLE';
+
+/**
+ * The subset of SolarWindowType that a successful solar-ephemeris
+ * computation can ever produce (computePanchangWindows/getActiveWindow
+ * below). 'UNAVAILABLE' is never returned by those functions -- it is
+ * assigned one layer up, by a caller that caught a SolarNoEventError
+ * (packages/astronomy/src/errors.ts) before a WindowSpan[] could even be
+ * computed. Keeping this as a distinct type (rather than widening
+ * SolarWindowType everywhere) lets consumers that only ever see a
+ * successful computation's output -- computePanchangWindows,
+ * getActiveWindow, and anything typed against their return values --
+ * keep compile-time exhaustiveness over exactly the 6 real values,
+ * while callers that persist/display a classification that may ALSO be
+ * 'UNAVAILABLE' (HabitLog.activeWindow, scoring, formatting, Insights)
+ * use the full SolarWindowType.
+ */
+export type ComputedSolarWindowType = Exclude<SolarWindowType, 'UNAVAILABLE'>;
+
+/**
+ * PA-3C-C1B-01: the single canonical runtime list of every SolarWindowType
+ * member, kept next to the type itself so the two can never silently
+ * drift apart. Any trust boundary that must validate a client-supplied or
+ * persisted string against the real domain (e.g. the legacy habit-
+ * completion endpoint) should import this rather than hand-listing its
+ * own copy -- "avoid a second independent enum definition."
+ */
+export const ALL_SOLAR_WINDOW_TYPES: readonly SolarWindowType[] = [
+  'BRAHMA',
+  'ABHIJIT',
+  'RAHU_KALAM',
+  'GULIKA',
+  'YAMA',
+  'NEUTRAL',
+  'UNAVAILABLE',
+];
+
+const SOLAR_WINDOW_TYPE_SET: ReadonlySet<string> = new Set(ALL_SOLAR_WINDOW_TYPES);
+
+export function isSolarWindowType(value: string): value is SolarWindowType {
+  return SOLAR_WINDOW_TYPE_SET.has(value);
+}
 
 export interface WindowSpan {
   type: SolarWindowType;

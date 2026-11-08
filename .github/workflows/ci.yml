@@ -23,6 +23,8 @@ jobs:
         run: npx ts-node test/pa3bSolarWindowsTimezoneFix.test.ts
       - name: Run PA-3C-C1A typed solar errors test
         run: npx ts-node test/pa3cC1ASolarErrorHandling.test.ts
+      - name: Run PA-3C-C1B-01 solar unavailable classification test
+        run: npx ts-node test/pa3cC1B01SolarUnavailable.test.ts
       - name: Run integration test
         run: npx ts-node test/integration.test.ts
       - name: Run timezone test

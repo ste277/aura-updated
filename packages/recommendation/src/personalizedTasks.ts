@@ -328,8 +328,21 @@ export function getPersonalizedTasks(
   return sorted.slice(0, 3).map((item) => item.task);
 }
 
+/**
+ * PA-3C-C1B-01: a legitimate solar no-event classification must be
+ * recognized explicitly, never folded into the same 'NEUTRAL' default
+ * this function returns for genuinely unparseable text. The "genuinely
+ * unrecognized string -> NEUTRAL" default below is unchanged/pre-existing
+ * (this is a best-effort DISPLAY-NAME normalizer, not a scoring decision
+ * on its own -- callers that score off the result, e.g.
+ * getPersonalizedTasks()'s window-match bonus below, only ever award
+ * points for an EXACT match against a task's own recommended/acceptable
+ * list, which no task lists 'UNAVAILABLE' in, so this never produces a
+ * fabricated favorable score either way).
+ */
 export function normalizeWindowType(window: string): SolarWindowType {
   const clean = String(window || 'NEUTRAL').replace(/_/g, ' ').toUpperCase();
+  if (clean.includes('UNAVAILABLE')) return 'UNAVAILABLE';
   if (clean.includes('RAHU')) return 'RAHU_KALAM';
   if (clean.includes('YAMA')) return 'YAMA';
   if (clean.includes('BRAHMA')) return 'BRAHMA';

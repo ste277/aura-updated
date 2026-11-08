@@ -66,8 +66,14 @@ check('insightsWindowWeight has exactly 1 parameter (windowType only) -- same wi
 // ============================================================
 
 function dayScore(windows: string[]): number | null {
-  if (windows.length === 0) return null;
-  return Math.round((windows.reduce((sum, w) => sum + insightsWindowWeight(w), 0) / windows.length) * 100);
+  // PA-3C-C1B-01: insightsWindowWeight() now returns null for a legitimate
+  // solar no-event classification -- excluded from both the sum and the
+  // divisor, matching the real InsightsView.tsx formula this replicates.
+  // No existing fixture below passes 'UNAVAILABLE', so this is a type-only
+  // sync, not a behavior change for any case this file already tests.
+  const weights = windows.map((w) => insightsWindowWeight(w)).filter((w): w is number => w !== null);
+  if (weights.length === 0) return null;
+  return Math.round((weights.reduce((sum, w) => sum + w, 0) / weights.length) * 100);
 }
 
 check('All-friction day -> 0%, not floored at 30%', dayScore(['RAHU_KALAM', 'YAMA', 'RAHU_KALAM']) === 0);

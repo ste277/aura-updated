@@ -14,6 +14,9 @@ export const DEFAULT_NOTIFICATION_PREFS: NotificationPrefs = {
   GULIKA: false,
   YAMA: false,
   NEUTRAL: false,
+  // PA-3C-C1B-01: a legitimate solar no-event condition is not a window
+  // transition worth alerting on -- same conservative default as NEUTRAL.
+  UNAVAILABLE: false,
 };
 
 export const LEAD_MINUTES = 10;

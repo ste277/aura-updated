@@ -25,6 +25,10 @@ const COLOR_MAP: Record<SolarWindowType, string> = {
   GULIKA: 'var(--as-gulika, #a855f7)',
   YAMA: 'var(--as-yama, #eab308)',
   NEUTRAL: 'var(--as-neutral-arc, #1e293b)',
+  // PA-3C-C1B-01: a legitimate solar no-event condition -- same muted
+  // tone used elsewhere for "timing unavailable" (HomeDashboard.tsx's
+  // getWindowTone), distinct from NEUTRAL's own color.
+  UNAVAILABLE: '#94a3b8',
 };
 
 function minuteToDegrees(minute: number): number {
