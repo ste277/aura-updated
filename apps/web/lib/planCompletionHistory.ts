@@ -1,6 +1,7 @@
 import { resolveHistoricalActiveWindow } from './historicalActivityWindow';
 import { getMinuteOfDayInTimezone } from './timezone';
 import type { SolarWindowType } from '../../../packages/panchang/src/windows';
+import { SolarNoEventError } from '../../../packages/astronomy/src/errors';
 
 /**
  * Plan Completion Historical Integrity V1 -- the pure derivation step that
@@ -37,9 +38,23 @@ export function derivePlanCompletionHistory(params: {
   timezone: string;
 }): PlanCompletionHistory {
   const { completionInstant, latitude, longitude, timezone } = params;
+  // PA-3C-C1B-01: a legitimate solar no-event condition must not prevent
+  // this otherwise-valid plan completion from being recorded. Only
+  // SolarNoEventError is caught -- SolarInputValidationError/
+  // SolarComputationError are real bugs/bad data and must keep propagating.
+  let activeWindow: SolarWindowType;
+  try {
+    activeWindow = resolveHistoricalActiveWindow(completionInstant, latitude, longitude, timezone);
+  } catch (err) {
+    if (err instanceof SolarNoEventError) {
+      activeWindow = 'UNAVAILABLE';
+    } else {
+      throw err;
+    }
+  }
   return {
     logTimestamp: completionInstant,
-    activeWindow: resolveHistoricalActiveWindow(completionInstant, latitude, longitude, timezone),
+    activeWindow,
     logMinuteOfDay: getMinuteOfDayInTimezone(timezone, completionInstant),
   };
 }

@@ -46,6 +46,18 @@ export interface TimelineViewProps {
 
 function getWindowMeta(typeStr: string) {
   const clean = (typeStr || '').replace('_', ' ').toUpperCase();
+  // PA-3C-C1B-01: a legitimate solar no-event condition must display
+  // honestly, never as 'Neutral Flow' (which implies a real computed
+  // judgment -- "nothing special active" -- rather than "could not be
+  // computed at all").
+  if (clean.includes('UNAVAILABLE')) {
+    return {
+      title: 'Solar Timing Unavailable',
+      color: '#94a3b8',
+      gradient: ['#64748b', '#334155'],
+      icon: '—',
+    };
+  }
   if (clean.includes('BRAHMA')) {
     return {
       title: 'Deep Focus (Brahma)',
@@ -96,6 +108,9 @@ function getWindowMeta(typeStr: string) {
 
 function actionQueryForWindow(windowName: string): string {
   const clean = windowName.replace(/_/g, ' ').toUpperCase();
+  // PA-3C-C1B-01: feeds directly into getActionCards() -- must resolve to
+  // ACTION_CARDS.UNAVAILABLE (deliberately empty), never ACTION_CARDS.NEUTRAL.
+  if (clean.includes('UNAVAILABLE')) return 'UNAVAILABLE';
   if (clean.includes('RAHU')) return 'RAHU';
   if (clean.includes('BRAHMA')) return 'BRAHMA';
   if (clean.includes('ABHIJIT')) return 'ABHIJIT';

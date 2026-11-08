@@ -34,19 +34,30 @@
  * stays a plain, honest window-only proxy.
  */
 
-export type InsightsWindowBand = 'SUPPORTIVE' | 'NEUTRAL' | 'FRICTION';
+/**
+ * PA-3C-C1B-01: UNCLASSIFIED is a 4th band for a legitimate solar
+ * no-event condition (`activeWindow === 'UNAVAILABLE'`) -- deliberately
+ * NOT folded into NEUTRAL, which already means "computed successfully,
+ * nothing special active" and carries a real 0.7 display weight. An
+ * unavailable classification must contribute to neither the numerator
+ * nor the denominator of any alignment percentage (see
+ * insightsWindowWeight() below), not receive NEUTRAL's weight.
+ */
+export type InsightsWindowBand = 'SUPPORTIVE' | 'NEUTRAL' | 'FRICTION' | 'UNCLASSIFIED';
 
 /**
  * Classifies a persisted `HabitLog.activeWindow` string (or any other
- * window-type string Insights encounters) into one of three bands.
+ * window-type string Insights encounters) into one of four bands.
  *
  * BRAHMA, ABHIJIT       -> SUPPORTIVE
  * GULIKA, NEUTRAL        -> NEUTRAL
  * RAHU_KALAM, YAMA       -> FRICTION
- * anything unrecognized  -> NEUTRAL (fails safely, never throws, never
- *                           silently counts as either SUPPORTIVE or
- *                           FRICTION for a value this module doesn't
- *                           recognize)
+ * UNAVAILABLE            -> UNCLASSIFIED (excluded from alignment math,
+ *                           never NEUTRAL's 0.7 weight)
+ * anything else unrecognized -> NEUTRAL (fails safely, never throws,
+ *                           never silently counts as SUPPORTIVE or
+ *                           FRICTION; unchanged, pre-existing behavior
+ *                           for genuinely unparseable text)
  *
  * Matches on an uppercased substring check (not a strict enum-equality
  * check) so both the underscore form ("RAHU_KALAM") and the
@@ -55,27 +66,37 @@ export type InsightsWindowBand = 'SUPPORTIVE' | 'NEUTRAL' | 'FRICTION';
  */
 export function classifyInsightsWindow(windowType: string | null | undefined): InsightsWindowBand {
   const normalized = String(windowType || '').toUpperCase();
+  if (normalized.includes('UNAVAILABLE')) return 'UNCLASSIFIED';
   if (normalized.includes('BRAHMA') || normalized.includes('ABHIJIT')) return 'SUPPORTIVE';
   if (normalized.includes('RAHU') || normalized.includes('YAMA')) return 'FRICTION';
   return 'NEUTRAL';
 }
 
 /**
- * A transparent, ordinal DISPLAY/AGGREGATION weight for each band --
- * explicitly an Insights presentation convenience, never a canonical
- * astrology score and never presented to the user as "Aura Fit" or
- * "personal fit" anywhere. 0.7 for NEUTRAL is retained only because it
- * was the pre-existing neutral display weight already shown to users in
- * the 7-day trend and lifetime/month alignment percentages; SUPPORTIVE/
- * FRICTION are the natural 1.0/0.0 endpoints.
+ * A transparent, ordinal DISPLAY/AGGREGATION weight for each scoreable
+ * band -- explicitly an Insights presentation convenience, never a
+ * canonical astrology score and never presented to the user as "Aura
+ * Fit" or "personal fit" anywhere. 0.7 for NEUTRAL is retained only
+ * because it was the pre-existing neutral display weight already shown
+ * to users in the 7-day trend and lifetime/month alignment percentages;
+ * SUPPORTIVE/FRICTION are the natural 1.0/0.0 endpoints. UNCLASSIFIED is
+ * deliberately absent -- it has no numeric weight because it must never
+ * enter an alignment average at all (see insightsWindowWeight()).
  */
-export const INSIGHTS_WINDOW_BAND_WEIGHT: Record<InsightsWindowBand, number> = {
+export const INSIGHTS_WINDOW_BAND_WEIGHT: Record<Exclude<InsightsWindowBand, 'UNCLASSIFIED'>, number> = {
   SUPPORTIVE: 1.0,
   NEUTRAL: 0.7,
   FRICTION: 0.0,
 };
 
-/** classifyInsightsWindow() + INSIGHTS_WINDOW_BAND_WEIGHT lookup, in one call. */
-export function insightsWindowWeight(windowType: string | null | undefined): number {
-  return INSIGHTS_WINDOW_BAND_WEIGHT[classifyInsightsWindow(windowType)];
+/**
+ * classifyInsightsWindow() + INSIGHTS_WINDOW_BAND_WEIGHT lookup, in one
+ * call. Returns null for UNCLASSIFIED -- PA-3C-C1B-01: every caller that
+ * averages this value MUST filter out null entries from BOTH the sum and
+ * the divisor (count), never treat null as 0 or as NEUTRAL's 0.7.
+ */
+export function insightsWindowWeight(windowType: string | null | undefined): number | null {
+  const band = classifyInsightsWindow(windowType);
+  if (band === 'UNCLASSIFIED') return null;
+  return INSIGHTS_WINDOW_BAND_WEIGHT[band];
 }

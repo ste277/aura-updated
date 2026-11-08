@@ -9,6 +9,23 @@ import { applyLunarTithiOverlay } from '../../muhurta/src/lunarFamilyRules';
 import { getTaraBala } from '../../vedic/src/natalChart';
 import type { ActivityProfile } from './personalizedTasks';
 
+/**
+ * PA-3C-C1B-01: thrown by evaluateActivityFit() when windowType is
+ * 'UNAVAILABLE' (a legitimate solar no-event condition). Mirrors the
+ * typed-error convention established in packages/astronomy/src/errors.ts
+ * (PA-3C-C1A) and packages/lagna/src/types.ts -- a narrow, additive signal
+ * callers must explicitly catch, rather than a silently-returned
+ * fabricated score. evaluateActivityFit's successful return shape
+ * (AuraFitEvaluation) is completely unchanged by this addition.
+ */
+export class AuraFitUnavailableError extends Error {
+  readonly code = 'AURA_FIT_UNAVAILABLE' as const;
+  constructor(message: string) {
+    super(message);
+    this.name = 'AuraFitUnavailableError';
+  }
+}
+
 /** Score cap applied when a CEREMONIAL activity's rule pack hasn't reached
  * SUPPORTED (dedicated Tithi+Nakshatra evidence) -- brief section 8: "Do not
  * let a generic good solar window alone produce EXCELLENT... A CEREMONIAL
@@ -121,6 +138,31 @@ export function evaluateActivityFit(params: {
    * legacy evaluateMuhurta() path below -- that path predates this concept and stays untouched. */
   actionPhase?: ActionPhase;
 }): AuraFitEvaluation {
+  // PA-3C-C1B-01 / D10: windowType feeds this composite through more than
+  // just scoreSolarWindow's named 20% slice -- capabilitiesForWindow()
+  // below also derives `capabilities` from windowType, which in turn
+  // feeds natureScore (10%) AND muhurtaScore's friction term (nested
+  // inside the 45% muhurta weight). Traced every consumer of this
+  // function's return value (12+ production files, including the Day
+  // Constructor / window-ranking / daily-guidance scheduling engines) --
+  // a partial reweight that drops only the named solar slice would still
+  // leave `capabilities` silently falling into the NEUTRAL/GULIKA default
+  // branch for an 'UNAVAILABLE' windowType, re-introducing exactly the
+  // "unavailable silently becomes neutral" defect this ticket exists to
+  // remove, one layer deeper. Safely threading a reduced-context flag
+  // through all 12+ consumers (several of which are the live ranking/
+  // scheduling path) is out of this PR's narrow, additive scope per the
+  // ticket's own Section 7 "Critical guard" / Section 22.2-22.3 stop
+  // conditions. This function's successful return SHAPE is therefore left
+  // completely unchanged (no breaking change for any existing caller);
+  // instead, evaluating fit for a legitimately-unavailable solar window is
+  // refused outright via a typed error, which only the (narrow, newly
+  // UNAVAILABLE-aware) callers added in this same PR are equipped to catch.
+  if (params.windowType === 'UNAVAILABLE') {
+    throw new AuraFitUnavailableError(
+      'Aura Fit cannot be evaluated: solar-window classification is unavailable for this location/date.'
+    );
+  }
   const family = familyForActivityProfile(params.activity);
   const rulePack = params.classification ? resolveMuhurtaRulePack(params.classification) : undefined;
   const supportLevel = params.classification && rulePack ? computeMuhurtaSupportLevel(params.classification, rulePack) : undefined;
@@ -160,7 +202,9 @@ export function evaluateActivityFit(params: {
   const capabilities = capabilitiesForWindow(params.windowType, effectiveMuhurta.modifier);
   const activityScore = scoreActivityAgainstCapabilities(params.activity, capabilities);
   const muhurtaScore = clamp(68 + effectiveMuhurta.modifier * 1.8 - capabilities.friction * 0.24);
-  const solarScore = scoreSolarWindow(params.activity, params.windowType);
+  // Non-null: scoreSolarWindow only returns null for 'UNAVAILABLE', which
+  // the guard above already threw on before this line could run.
+  const solarScore = scoreSolarWindow(params.activity, params.windowType) as number;
   const natureScore = scoreNature(params.activity, capabilities);
   const timePreferenceScore = params.timePreferenceScore ?? 70;
   const personalFit = evaluatePersonalMuhurtaFit(params.activity, params.date, params.personalContext);
@@ -308,7 +352,18 @@ function scoreActivityAgainstCapabilities(activity: ActivityProfile, capabilitie
   }
 }
 
-function scoreSolarWindow(activity: ActivityProfile, windowType: SolarWindowType): number {
+/**
+ * PA-3C-C1B-01: returns null for 'UNAVAILABLE' (a legitimate solar
+ * no-event condition) -- never the favorable fallback score of 55, which
+ * previously applied to ANY window type matching none of the activity's
+ * configured avoid/recommended/acceptable lists. evaluateActivityFit()
+ * never actually calls this with 'UNAVAILABLE' (it short-circuits before
+ * reaching here -- see the AuraFitUnavailableError guard below); the
+ * explicit check is kept here too as the function's own contract, not
+ * solely relying on its one caller's guard.
+ */
+function scoreSolarWindow(activity: ActivityProfile, windowType: SolarWindowType): number | null {
+  if (windowType === 'UNAVAILABLE') return null;
   if (activity.avoidWindowTypes.includes(windowType)) return activity.allowDuringAvoidWindow ? 45 : 10;
   if (activity.recommendedWindowTypes.includes(windowType)) return 86;
   if (activity.acceptableWindowTypes.includes(windowType)) return 70;

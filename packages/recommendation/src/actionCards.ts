@@ -222,21 +222,30 @@ const ACTION_CARDS: Record<SolarWindowType, ActionCard[]> = {
       activityId: 'task-6', // "Active Rest & Hydration Check" -- LOG_NOW
     },
   ],
+  // PA-3C-C1B-01: deliberately empty, not a copy of NEUTRAL's cards --
+  // a legitimate solar no-event condition must never offer the same
+  // "business as usual" suggestions NEUTRAL does, which would imply a
+  // real computed judgment was made. Callers render an honest
+  // "timing unavailable" state instead of a card strip.
+  UNAVAILABLE: [],
 };
 
-/** The core "tap arc -> get 3 cards" lookup. Safe against unexpected string formats. */
+/**
+ * The core "tap arc -> get 3 cards" lookup. Safe against unexpected
+ * string formats (differently-cased/underscored known values normalize
+ * identically) -- but PA-3C-C1B-01: NOT safe against genuinely unknown
+ * values, which previously fell through the same `|| ACTION_CARDS.NEUTRAL`
+ * as a legitimate 'UNAVAILABLE' classification, silently presenting both
+ * as "business as usual". normalizeWindowType() (personalizedTasks.ts,
+ * F8) now returns 'UNAVAILABLE' only for a literal 'UNAVAILABLE' input and
+ * 'NEUTRAL' only for a genuinely unrecognized one -- so the lookup below
+ * is exhaustive over SolarWindowType (TypeScript-enforced via
+ * `Record<SolarWindowType, ActionCard[]>`) and no runtime cast/fallback
+ * is needed any more.
+ */
 export function getActionCards(window: string): ActionCard[] {
   if (!window) return ACTION_CARDS.NEUTRAL;
-
-  const clean = normalizeWindowType(window);
-
-  if (clean === 'RAHU_KALAM') return ACTION_CARDS.RAHU_KALAM;
-  if (clean === 'BRAHMA') return ACTION_CARDS.BRAHMA;
-  if (clean === 'ABHIJIT') return ACTION_CARDS.ABHIJIT;
-  if (clean === 'GULIKA') return ACTION_CARDS.GULIKA;
-  if (clean === 'YAMA') return ACTION_CARDS.YAMA;
-
-  return ACTION_CARDS[clean as SolarWindowType] || ACTION_CARDS.NEUTRAL;
+  return ACTION_CARDS[normalizeWindowType(window)];
 }
 
 /**
@@ -288,6 +297,13 @@ export function buildActivityDiscoveryDescription(activityTitle: string, fit: Pi
  */
 export function getActivityDiscoveryCards(window: string, limit = 6, personalContext?: PersonalMuhurtaContext, date: Date = new Date()): ActionCard[] {
   const windowType = normalizeWindowType(window);
+  // PA-3C-C1B-01: a legitimate solar no-event condition -- evaluateActivityFit
+  // throws AuraFitUnavailableError for every activity identically, so check
+  // once up front rather than catching per-activity. An empty list is an
+  // honest "nothing to show", never a fabricated set of NEUTRAL-window cards.
+  if (windowType === 'UNAVAILABLE') {
+    return [];
+  }
   return FULL_ACTIVITY_CATALOG
     .map((activity) => {
       const fit = evaluateActivityFit({ activity, date, windowType, personalContext });

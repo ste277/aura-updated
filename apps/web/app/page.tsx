@@ -977,8 +977,12 @@ export default function DashboardPage() {
   }, [user?.id, windows, notificationPrefs]);
 
   // Active window type lookup
+  // PA-3C-C1B-01: `solar` is null exactly when C1A's containment caught a
+  // legitimate SolarNoEventError -- that must surface as 'UNAVAILABLE',
+  // never silently as 'NEUTRAL' (which already means "computed
+  // successfully, nothing special active").
   const activeType = useMemo(() => {
-    return solar ? getActiveWindow(windows, currentMinuteOfDay) : 'NEUTRAL';
+    return solar ? getActiveWindow(windows, currentMinuteOfDay) : 'UNAVAILABLE';
   }, [solar, windows, currentMinuteOfDay]);
 
   // Daily energy insight score
