@@ -97,6 +97,16 @@ interface HomeDashboardProps {
   dayWindows?: HomeDayWindow[];
   loggedActivitiesToday?: string[];
   dailyBriefing?: DailyBriefing | null;
+  /** PA-3C-C1B-03: 'unavailable' is the one state that gets its own honest,
+   * non-fabricating caption below -- a legitimate solar no-event
+   * condition, never silently indistinguishable from an ordinary
+   * successful load. 'error'/'loading' intentionally get no dedicated
+   * banner here, matching this component's existing pattern for its other
+   * best-effort signals (no global error UI) -- `dailyBriefing` is simply
+   * `null` in both cases, so the existing safe fallback below (sourced
+   * from the independently-computed currentWindow/activeWindowName, never
+   * from this prop) already renders honest, non-stale content. */
+  dailyBriefingStatus?: 'loading' | 'available' | 'unavailable' | 'error';
   todayReflection?: {
     outputLevel: 'LOW' | 'MODERATE' | 'PEAK_FLOW';
     followedGuidance: boolean;
@@ -396,6 +406,7 @@ export function HomeDashboard({
   dayWindows,
   loggedActivitiesToday = [],
   dailyBriefing,
+  dailyBriefingStatus,
   todayReflection,
   personalContext,
   onLogActivity,
@@ -1270,6 +1281,16 @@ export function HomeDashboard({
           <span style={{ color: tone.color, display: 'inline-block', marginLeft: spacing.sm }}>{remainingText}</span>
         </div>
         <p style={{ margin: '11px 0 0', color: colors.textFaint, fontSize: 15, lineHeight: 1.42 }}>{tone.description}</p>
+        {dailyBriefingStatus === 'unavailable' && (
+          // PA-3C-C1B-03: honest, non-fabricating disclosure for a
+          // legitimate solar no-event condition -- the Right Now card
+          // above already renders safely from independently-computed data
+          // (never from `dailyBriefing`, which is null here), so this is
+          // purely an additive note, not a replacement for anything.
+          <p style={{ margin: '7px 0 0', color: colors.textFaint, fontSize: 13, lineHeight: 1.4, fontStyle: 'italic' }}>
+            Today's briefing is unavailable because solar timing could not be determined for this location.
+          </p>
+        )}
 
         <div style={{ marginTop: spacing.xl, paddingTop: spacing.lg, borderTop: `1px solid ${colors.borderSubtle}` }}>
           <SectionHeader

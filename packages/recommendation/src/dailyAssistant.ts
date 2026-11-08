@@ -1,4 +1,5 @@
 import { computeSolarEphemeris } from '../../astronomy/src/ephemeris';
+import { SolarNoEventError, SolarComputationError, SolarInputValidationError } from '../../astronomy/src/errors';
 import {
   computePanchangWindows,
   getActiveWindow,
@@ -139,6 +140,48 @@ export function computeAssistantWindows(context: DailyAssistantContext): WindowS
   });
 
   return computePanchangWindows(solar, localDate.getUTCDay() as WeekdayIndex);
+}
+
+/**
+ * PA-3C-C1B-03: additive discriminated result wrapped around
+ * buildDailyBriefing() for callers (currently: apps/web/app/api/
+ * daily-assistant/briefing/route.ts) that need to represent a legitimate
+ * solar no-event condition explicitly instead of letting it crash.
+ * buildDailyBriefing() itself is UNCHANGED -- its other two callers
+ * (recommendTaskSlot/findOptimalTaskTimes, via computeAssistantWindows)
+ * are out of this ticket's scope and keep their existing throw behavior
+ * verbatim.
+ *
+ * Only SolarNoEventError (a genuine, expected polar day/night) becomes
+ * UNAVAILABLE. SolarInputValidationError and SolarComputationError are
+ * folded into CALCULATION_UNAVAILABLE, not UNAVAILABLE -- this route has
+ * no client-supplied date/location input (latitude/longitude/timezone
+ * come straight from the user's own stored profile), so, exactly like the
+ * existing apps/web/app/api/daily-briefing/today/route.ts precedent's own
+ * reasoning for its structurally-unreachable-but-still-typed INVALID_INPUT/
+ * CALCULATION_FAILED cases, there is no "bad client request" to report
+ * distinctly from "this calculation could not complete right now" --  but
+ * the two remain genuinely distinct from a true polar no-event, never
+ * silently relabeled as one. Any other thrown error (a real bug) still
+ * propagates uncaught, exactly as it does today.
+ */
+export type DailyAssistantBriefingResult =
+  | { status: 'OK'; briefing: DailyBriefing }
+  | { status: 'UNAVAILABLE'; reason: 'SOLAR_NO_EVENT'; solarCondition: 'POLAR_DAY' | 'POLAR_NIGHT' }
+  | { status: 'CALCULATION_UNAVAILABLE'; reason: string };
+
+export function buildDailyBriefingResult(context: DailyAssistantContext): DailyAssistantBriefingResult {
+  try {
+    return { status: 'OK', briefing: buildDailyBriefing(context) };
+  } catch (err) {
+    if (err instanceof SolarNoEventError) {
+      return { status: 'UNAVAILABLE', reason: 'SOLAR_NO_EVENT', solarCondition: err.condition };
+    }
+    if (err instanceof SolarComputationError || err instanceof SolarInputValidationError) {
+      return { status: 'CALCULATION_UNAVAILABLE', reason: err.message };
+    }
+    throw err;
+  }
 }
 
 export function buildDailyBriefing(context: DailyAssistantContext): DailyBriefing {
