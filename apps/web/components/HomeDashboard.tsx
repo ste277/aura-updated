@@ -1315,7 +1315,21 @@ export function HomeDashboard({
          * on dailyBriefingStatus === 'available' so a loading/error/
          * unavailable/stale state (already enforced by the existing
          * isLatestBriefingRequest() guard in page.tsx) never shows this --
-         * never a fabricated favorable value for any other state. */}
+         * never a fabricated favorable value for any other state.
+         *
+         * HOME-RHYTHM-01-I1-F1 -- greenLight.windowType is always the SAME
+         * window buildDailyBriefing() derives `peak`/`peakWindow`/
+         * `briefingState` from (dailyAssistant.ts: `peak = findWindow(windows,
+         * 'ABHIJIT') ?? windows[0]`; `greenLight.windowType: peak?.type`;
+         * `peakWindow: {name: peakName, startTime: peakStart, endTime:
+         * peakEnd}` built from that SAME `peak`), including in the no-ABHIJIT
+         * fallback branch -- so briefingState is already the authoritative,
+         * non-fabricated temporal-validity signal for greenLight specifically,
+         * not a generic unrelated flag. COMPLETED means peakWindow's own
+         * endTime has passed; showing greenLight's favorable-activity text as
+         * if still current would be misleading (the confirmed P1). No new
+         * data field was needed -- peakWindow/briefingState already fully
+         * describe greenLight's window and its validity. */}
         {dailyBriefingStatus === 'available' && dailyBriefing && (
           <div style={{ marginTop: spacing.sm }}>
             {dailyBriefing.nextAction && (
@@ -1324,10 +1338,16 @@ export function HomeDashboard({
                 {dailyBriefing.nextAction}
               </p>
             )}
-            {dailyBriefing.greenLight?.title && (
+            {dailyBriefing.greenLight?.title && dailyBriefing.briefingState !== 'COMPLETED' && (
               <div style={{ marginTop: 4, display: 'flex', alignItems: 'baseline', gap: spacing.sm, flexWrap: 'wrap' }}>
                 <p style={{ margin: 0, color: colors.textFaint, fontSize: 12, lineHeight: 1.4, fontStyle: 'italic' }}>
-                  Favorable for: {dailyBriefing.greenLight.title}
+                  {dailyBriefing.briefingState === 'ACTIVE' ? 'Active now: ' : 'Coming up: '}
+                  {dailyBriefing.peakWindow?.name ?? 'Peak window'}
+                  {dailyBriefing.peakWindow?.startTime && dailyBriefing.peakWindow?.endTime
+                    ? ` (${dailyBriefing.peakWindow.startTime}–${dailyBriefing.peakWindow.endTime})`
+                    : ''}
+                  {' — favorable for '}
+                  {dailyBriefing.greenLight.title}
                   {dailyBriefing.greenLight.description ? ` — ${dailyBriefing.greenLight.description}` : ''}
                 </p>
                 {onPlanClick && (
@@ -1657,6 +1677,7 @@ export function HomeDashboard({
         timezone={effectiveTimezone}
         pendingActivities={myDayPendingActivities}
         nextItemId={myDayAgenda?.nextItem?.id}
+        spotlightItemId={spotlightItem?.id}
         recoverySlot={renderMissedRecovery}
         explanationsById={explanationsById}
         expandedId={expandedTimelineId}

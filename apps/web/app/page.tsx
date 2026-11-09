@@ -169,6 +169,13 @@ export default function DashboardPage() {
   // the same Promise.all keep their existing (unguarded) behavior; this
   // ticket's scope is the Daily Assistant briefing specifically.
   const dailyBriefingRequestIdRef = useRef(0);
+  // HOME-RHYTHM-01-I1-F1 -- when the most recent loadAssistantSignals()
+  // call STARTED (not resolved); used only by the bounded
+  // visibility-restoration refresh below to decide whether a resumed tab
+  // is stale enough to be worth a fresh fetch. Never read by anything that
+  // affects what is displayed -- display state is still governed entirely
+  // by isLatestBriefingRequest()/dailyBriefingStatus, unchanged.
+  const lastBriefingFetchStartedAtRef = useRef(0);
   // Home Good Right Now Personalization V1 -- the owner's derived natal
   // context (never raw birth date/time/timezone), returned as a sibling
   // field alongside DailyBriefing by the SAME existing
@@ -449,6 +456,7 @@ export default function DashboardPage() {
   // handling, and state updates are unchanged; only the shape moved.
   const loadAssistantSignals = useCallback(async () => {
     const dailyBriefingRequestId = ++dailyBriefingRequestIdRef.current;
+    lastBriefingFetchStartedAtRef.current = Date.now();
     try {
       const [briefingRes, insightRes, reflectionRes, goalReportingRes] = await Promise.all([
         fetch('/api/daily-assistant/briefing'),
@@ -523,6 +531,84 @@ export default function DashboardPage() {
     if (!user) return;
     loadAssistantSignals();
   }, [user?.id, loadAssistantSignals]);
+
+  // HOME-RHYTHM-01-I1-F1 -- long-mounted-tab freshness, scheduled
+  // transition. dailyBriefing/dailyBriefingStatus are computed once per
+  // loadAssistantSignals() call, at fetch time; a tab left open past a
+  // timing boundary (e.g. past peakWindow's own end) would otherwise go on
+  // showing a Green Light/nextAction line describing a window that has
+  // since expired, with nothing to trigger a re-fetch until a location/
+  // user change. This schedules exactly ONE bounded timer per successful
+  // 'available' briefing -- re-calling the EXISTING loadAssistantSignals()
+  // (reusing its own isLatestBriefingRequest guard completely unchanged,
+  // never a new fetch path or a parallel state write) at the next real
+  // transition THIS briefing already told us about: peakWindow.endTimestamp
+  // (only while briefingState isn't already 'COMPLETED') or
+  // nextWindow.startTimestamp, whichever is sooner and still in the
+  // future. Never continuous polling -- cleared and re-derived from
+  // scratch every time a fresh briefing arrives (including the one this
+  // very timer causes), and on unmount. If a scheduled refresh itself
+  // fails or returns a non-OK/unavailable result, loadAssistantSignals'
+  // own existing branches handle it exactly as any other failure already
+  // would (clears to 'error'/'unavailable', never silently keeps the
+  // expired favorable copy) -- this effect adds no new error handling of
+  // its own, it only decides WHEN to call the same function again.
+  const briefingRefreshTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  useEffect(() => {
+    if (briefingRefreshTimerRef.current) {
+      clearTimeout(briefingRefreshTimerRef.current);
+      briefingRefreshTimerRef.current = null;
+    }
+    if (dailyBriefingStatus !== 'available' || !dailyBriefing) return undefined;
+    const candidateTimestamps: number[] = [];
+    if (dailyBriefing.briefingState !== 'COMPLETED' && dailyBriefing.peakWindow.endTimestamp) {
+      candidateTimestamps.push(new Date(dailyBriefing.peakWindow.endTimestamp).getTime());
+    }
+    if (dailyBriefing.nextWindow?.startTimestamp) {
+      candidateTimestamps.push(new Date(dailyBriefing.nextWindow.startTimestamp).getTime());
+    }
+    const now = Date.now();
+    const futureTimestamps = candidateTimestamps.filter((t) => Number.isFinite(t) && t > now);
+    if (futureTimestamps.length === 0) return undefined;
+    const delayMs = Math.min(...futureTimestamps) - now;
+    briefingRefreshTimerRef.current = setTimeout(() => {
+      briefingRefreshTimerRef.current = null;
+      loadAssistantSignals();
+    }, delayMs);
+    return () => {
+      if (briefingRefreshTimerRef.current) {
+        clearTimeout(briefingRefreshTimerRef.current);
+        briefingRefreshTimerRef.current = null;
+      }
+    };
+  }, [dailyBriefing, dailyBriefingStatus, loadAssistantSignals]);
+
+  // HOME-RHYTHM-01-I1-F1 -- long-mounted-tab freshness, visibility
+  // restoration. The scheduled-transition timer above can be unreliable
+  // while a tab/app is backgrounded (many platforms suspend JS timers), so
+  // a tab resumed after a long background period could still show a
+  // briefing well past its computed transition with no pending timer left
+  // to catch it. On becoming visible again, if more than
+  // STALE_AFTER_MS has passed since the last fetch attempt STARTED, this
+  // re-calls the SAME existing loadAssistantSignals() once -- bounded
+  // (checked only on this one transition, never a poll loop), still fully
+  // governed by the unchanged isLatestBriefingRequest guard, so a slow
+  // response from the just-superseded earlier call can never overwrite
+  // whatever this new call resolves to. This does not guarantee a
+  // backgrounded tab never shows stale content WHILE backgrounded (that is
+  // unobservable to the user by definition) -- it only guarantees a
+  // bounded re-check specifically on the resume transition, which is the
+  // moment a stale value would actually become visible again.
+  useEffect(() => {
+    const STALE_AFTER_MS = 15 * 60 * 1000;
+    const handleVisibilityChange = () => {
+      if (document.visibilityState !== 'visible') return;
+      if (Date.now() - lastBriefingFetchStartedAtRef.current < STALE_AFTER_MS) return;
+      loadAssistantSignals();
+    };
+    document.addEventListener('visibilitychange', handleVisibilityChange);
+    return () => document.removeEventListener('visibilitychange', handleVisibilityChange);
+  }, [loadAssistantSignals]);
 
   // New Aura Home V1 -- GET /api/daily-assistant/guidance, same
   // best-effort fetch discipline as loadAssistantSignals/loadMyDay above

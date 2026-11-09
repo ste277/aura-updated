@@ -174,7 +174,12 @@ check('E6. no internal exception class name (SolarNoEventError, etc.) is exposed
 // ============================================================
 
 check('F1. ceremonialPeriods.ts (C1B-02) was not touched by this change', !fs.existsSync('.git') || true); // presence-only sanity; real diff check is done via git in the PR, not here
-check('F2. DailyBriefing interface itself is unchanged -- peakWindow/greenLight remain required, non-nullable (A3\'s correction preserved)', /peakWindow: \{\s*\n\s*name: string;\s*\n\s*startTime: string;\s*\n\s*endTime: string;\s*\n\s*\};/.test(dailyAssistantSrc) && !/peakWindow\?:/.test(dailyAssistantSrc) && !/peakWindow: \{[\s\S]{0,80}\} \| null/.test(dailyAssistantSrc));
+check(
+  'F2. DailyBriefing interface itself keeps peakWindow/greenLight required and non-nullable, with name/startTime/endTime still present and required in order (A3\'s correction preserved; HOME-RHYTHM-01-I1-F1 added an additive, OPTIONAL endTimestamp field after them, which this check now tolerates rather than rejecting a legitimate backward-compatible addition)',
+  /peakWindow: \{\s*\n\s*name: string;\s*\n\s*startTime: string;\s*\n\s*endTime: string;[\s\S]{0,800}?\n\s*\};/.test(dailyAssistantSrc)
+    && !/peakWindow\?:/.test(dailyAssistantSrc)
+    && !/peakWindow: \{[\s\S]{0,800}\} \| null/.test(dailyAssistantSrc)
+);
 
 if (!allPassed) {
   console.log('\nSOME PA-3C-C1B-03 CHECKS FAILED');

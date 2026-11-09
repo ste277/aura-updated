@@ -36,12 +36,23 @@ export interface DailyBriefing {
     name: string;
     startTime: string;
     endTime: string;
+    /** HOME-RHYTHM-01-I1-F1 -- additive, optional, backward-compatible.
+     * Absolute UTC instant (ISO 8601) matching `endTime`'s own minute,
+     * computed via the SAME `localInstantForMinute()` every other absolute-
+     * instant field in this module already uses -- no new solar/ranking
+     * computation. Lets a UI consumer schedule a bounded refresh at this
+     * window's real expiry without parsing a locale-formatted display
+     * string (`endTime`) back into a timestamp. */
+    endTimestamp?: string;
   };
   nextWindow: {
     name: string;
     startTime: string;
     endTime: string;
     windowType: SolarWindowType;
+    /** HOME-RHYTHM-01-I1-F1 -- additive, optional, same rationale as
+     * `peakWindow.endTimestamp` above, for this window's start instead. */
+    startTimestamp?: string;
   } | null;
   otherFavorableWindows: Array<{
     name: string;
@@ -194,6 +205,12 @@ export function buildDailyBriefing(context: DailyAssistantContext): DailyBriefin
   const peakName = peak?.label ?? 'Peak Solar Window';
   const peakStart = formatMinute(peak?.startMinutes ?? 720);
   const peakEnd = formatMinute(peak?.endMinutes ?? 780);
+  // HOME-RHYTHM-01-I1-F1 -- same localInstantForMinute() every other
+  // absolute-instant field in this module already uses (see
+  // nearbyCheckMinutes/buildSlotCandidates below); purely an additive ISO
+  // restatement of the SAME peak?.endMinutes already used for peakEnd
+  // above, not a new computation.
+  const peakEndTimestamp = localInstantForMinute(context, peak?.endMinutes ?? 780).toISOString();
   const briefingState = activeWindow === peak?.type
     ? 'ACTIVE'
     : minuteOfDay < (peak?.startMinutes ?? 720)
@@ -206,6 +223,7 @@ export function buildDailyBriefing(context: DailyAssistantContext): DailyBriefin
         startTime: formatMinute(next.startMinutes),
         endTime: formatMinute(next.endMinutes),
         windowType: next.type,
+        startTimestamp: localInstantForMinute(context, next.startMinutes).toISOString(),
       }
     : null;
   const otherFavorableWindows = windows
@@ -235,6 +253,7 @@ export function buildDailyBriefing(context: DailyAssistantContext): DailyBriefin
       name: peakName,
       startTime: peakStart,
       endTime: peakEnd,
+      endTimestamp: peakEndTimestamp,
     },
     greenLight: {
       title: action.title,

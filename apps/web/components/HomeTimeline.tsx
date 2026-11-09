@@ -45,16 +45,20 @@ function markerFor(item: HomeTimelineItem): string {
   return item.kind === 'MOMENT' ? '❤️' : '•';
 }
 
-function markerColor(item: HomeTimelineItem): string {
+function markerColor(item: HomeTimelineItem, isSpotlighted: boolean): string {
   if (item.kind === 'OPPORTUNITY') return colors.textMuted;
   if (item.metadata?.agendaStatus === 'COMPLETED') return colors.positive;
   if (item.metadata?.agendaStatus === 'MISSED' || item.metadata?.agendaStatus === 'SKIPPED' || item.metadata?.agendaStatus === 'MOVED') return colors.textMuted;
-  // HOME-RHYTHM-01-I1-B -- the current item is already the Right Now
-  // hero's own spotlight above (HomeDashboard.tsx); this marker's shape
-  // (●) still says "this is the current one", but it no longer competes
-  // visually with that spotlight via an accent color, same reasoning as
-  // emphasized/isCurrent below.
-  if (item.metadata?.isCurrent) return colors.textMuted;
+  // HOME-RHYTHM-01-I1-F1 -- only the row that IS the Right Now hero's own
+  // spotlight (HomeDashboard.tsx's spotlightItem, compared by stable id,
+  // never by the generic isCurrent flag) is a genuine duplicate of content
+  // already shown above, so only that row is muted. A current item that is
+  // NOT the spotlighted item (e.g. a shared Moment -- selectRightNowState
+  // only ever spotlights a PLAN-sourced item, never a Moment) is not shown
+  // anywhere else on screen, so it keeps its original accent-color cue --
+  // de-emphasizing it would remove its only remaining visibility, not
+  // reduce a duplicate.
+  if (item.metadata?.isCurrent) return isSpotlighted ? colors.textMuted : colors.info;
   if (item.metadata?.agendaStatus === 'WAITING') return colors.caution;
   return colors.textMuted;
 }
@@ -113,6 +117,17 @@ export interface HomeTimelineProps {
   nextItemId?: string;
   /** Daily Experience V1 PR E -- Missed Recovery. The caller (HomeDashboard) decides which rows are recoverable and renders the actions; this component only places what it returns directly beneath the row and owns no lifecycle logic. */
   recoverySlot?: (item: HomeTimelineItem) => React.ReactNode;
+  /** HOME-RHYTHM-01-I1-F1 -- the stable id of HomeDashboard's own
+   * `spotlightItem` (rightNowState.item, from selectRightNowState), the
+   * SAME id `explanationsById`/`expandedTimelineId` already key off above.
+   * Used to de-emphasize ONLY the row that is a genuine duplicate of the
+   * Right Now hero's spotlight -- never a generic "is this item current"
+   * check, which would also catch a current item the spotlight never
+   * shows (e.g. a shared Moment; selectRightNowState only ever spotlights
+   * a PLAN-sourced item). Absent/undefined (no spotlight exists) means no
+   * row is ever treated as spotlighted -- the conservative default that
+   * preserves every row's existing emphasis. */
+  spotlightItemId?: string;
 }
 
 export function HomeTimeline({
@@ -131,6 +146,7 @@ export function HomeTimeline({
   pendingActivities = [],
   nextItemId,
   recoverySlot,
+  spotlightItemId,
 }: HomeTimelineProps) {
   const addSomethingAction = onQuickCapture ? (
     <span data-home-add-something>
@@ -180,6 +196,7 @@ export function HomeTimeline({
               onPlan={onPlanOpportunity}
               isPlanning={planningId === item.id}
               isNext={item.id === nextItemId}
+              isSpotlighted={spotlightItemId !== undefined && item.id === spotlightItemId}
               recovery={recoverySlot?.(item)}
             />
           )
@@ -242,6 +259,7 @@ function TimelineRow({
   onPlan,
   isPlanning,
   isNext,
+  isSpotlighted,
   recovery,
 }: {
   item: HomeTimelineItem;
@@ -253,20 +271,24 @@ function TimelineRow({
   onPlan?: (item: HomeTimelineItem) => void;
   isPlanning: boolean;
   isNext?: boolean;
+  isSpotlighted?: boolean;
   recovery?: React.ReactNode;
 }) {
   const isOpportunity = item.kind === 'OPPORTUNITY';
   const subdued = item.metadata?.agendaStatus === 'COMPLETED' || item.metadata?.agendaStatus === 'MISSED' || item.metadata?.agendaStatus === 'SKIPPED' || item.metadata?.agendaStatus === 'MOVED';
-  // HOME-RHYTHM-01-I1-B -- D1 found the current item duplicated, with EXTRA
-  // visual weight (bold title + accent marker color), what the Right Now
-  // hero above already spotlights in full. `isCurrent` no longer earns the
-  // bold title treatment here -- it renders with the same secondary
-  // typography as any other row, still clearly marked by its own glyph
-  // (markerFor/markerColor above), so the information isn't removed, only
-  // no longer competing with the actual primary recommendation above.
+  // HOME-RHYTHM-01-I1-F1 -- D1/I1-B found the current item duplicated, with
+  // EXTRA visual weight, what the Right Now hero above already spotlights
+  // in full -- but only when it's genuinely the SAME item. `isCurrent` no
+  // longer earns the bold title treatment BY ITSELF; only a current row
+  // that is also the actual spotlighted item (compared by stable id, see
+  // `isSpotlighted` above) loses emphasis, since that's the only row that
+  // duplicates content already shown above. A current row that is NOT the
+  // spotlighted item (e.g. a shared Moment -- selectRightNowState never
+  // spotlights one) is not shown anywhere else, so it keeps its emphasis --
+  // de-emphasizing it would remove information, not reduce a duplicate.
   // `isNext` (a distinct, not-yet-shown-elsewhere upcoming item) is
   // unaffected and keeps its emphasis exactly as before.
-  const emphasized = isNext;
+  const emphasized = isNext || (Boolean(item.metadata?.isCurrent) && !isSpotlighted);
   const hasExplanation = explanationLines.length > 0;
   const label = lifecycleLabel(item);
   const panelId = `home-timeline-why-${item.id}`;
@@ -300,7 +322,7 @@ function TimelineRow({
       }}
     >
       <div style={{ display: 'grid', gridTemplateColumns: '24px 1fr auto', alignItems: 'center', gap: spacing.md, minHeight: 44 }}>
-        <span aria-hidden="true" style={{ color: markerColor(item), fontSize: item.metadata?.isCurrent || item.metadata?.agendaStatus === 'WAITING' ? 10 : 15, textAlign: 'center' }}>
+        <span aria-hidden="true" style={{ color: markerColor(item, Boolean(isSpotlighted)), fontSize: item.metadata?.isCurrent || item.metadata?.agendaStatus === 'WAITING' ? 10 : 15, textAlign: 'center' }}>
           {markerFor(item)}
         </span>
         <button

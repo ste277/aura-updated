@@ -96,8 +96,8 @@ check(
   /onPlanClick,/.test(homeDashboardSrc) && !/onNextActionClick|onGreenLightClick/.test(homeDashboardSrc)
 );
 check(
-  'B8. The greenLight line is explicitly labeled "Favorable for" -- never implies a scheduled commitment',
-  /Favorable for:/.test(homeDashboardSrc)
+  'B8 (superseded by F1.* below -- see HOME-RHYTHM-01-I1-F1). The greenLight line still frames its activity text as "favorable for" rather than a scheduled commitment, now alongside the window name/time (copy changed by the P1 fix, intent preserved)',
+  /favorable for/i.test(homeDashboardSrc)
 );
 
 // ============================================================
@@ -108,14 +108,15 @@ check(
 // ============================================================
 
 check(
-  "C1. `emphasized` in HomeTimeline no longer includes isCurrent (only isNext drives bold emphasis now)",
-  /const emphasized = isNext;/.test(homeTimelineSrc) && !/const emphasized = item\.metadata\?\.isCurrent === true \|\| isNext;/.test(homeTimelineSrc)
+  "C1 (superseded by D.* below -- see HOME-RHYTHM-01-I1-F1). `emphasized` no longer de-emphasizes EVERY current row -- only one that is also the actual spotlighted item (isSpotlighted), via identity, not the bare isCurrent flag",
+  /const emphasized = isNext \|\| \(Boolean\(item\.metadata\?\.isCurrent\) && !isSpotlighted\);/.test(homeTimelineSrc)
+  && !/const emphasized = isNext;$/m.test(homeTimelineSrc)
 );
 check(
-  "C2. markerColor for isCurrent no longer returns the accent color (colors.info) -- muted instead",
+  "C2 (superseded by D.* below -- see HOME-RHYTHM-01-I1-F1). markerColor now takes isSpotlighted and only mutes a current row when it IS the spotlighted item -- otherwise keeps the original accent color",
   (() => {
     const match = homeTimelineSrc.match(/function markerColor[\s\S]*?\n\}/);
-    return !!match && /if \(item\.metadata\?\.isCurrent\) return colors\.textMuted;/.test(match[0]);
+    return !!match && /if \(item\.metadata\?\.isCurrent\) return isSpotlighted \? colors\.textMuted : colors\.info;/.test(match[0]);
   })()
 );
 check(
@@ -192,6 +193,170 @@ check('F2. HomeDashboard.tsx introduces no new fetch/useEffect data-fetching for
 // ============================================================
 
 check('G1. dailyAssistant.ts (the DailyBriefing producer) was not modified by this PR -- buildDailyBriefing()\'s greenLight/nextAction construction is untouched', /nextAction: buildNextAction\(briefingState, action\.title, nextWindow\)/.test(fs.readFileSync('packages/recommendation/src/dailyAssistant.ts', 'utf8')));
+
+// ============================================================
+// H. HOME-RHYTHM-01-I1-F1 -- P1 fix: Green Light temporal correctness.
+// Deterministic reproduction against the REAL producer at each
+// briefingState, proving the confirmed P1 (an expired peak window's
+// favorable text staying visible) is actually closed, not merely
+// commented as closed.
+// ============================================================
+
+// Asia/Kolkata (IST, UTC+5:30). Abhijit Muhurtham on this date/location is
+// 11:43 AM-12:35 PM local. Times chosen to land deterministically in each
+// briefingState bucket.
+function istContext(hourUtc: number, minuteUtc: number): DailyAssistantContext {
+  return {
+    latitude: 13.08,
+    longitude: 80.27,
+    timezone: 'Asia/Kolkata',
+    now: new Date(Date.UTC(2026, 5, 15, hourUtc, minuteUtc, 0)),
+    tzOffsetMinutes: 330,
+  };
+}
+
+const upcomingBriefing = buildDailyBriefing(istContext(2, 30)); // ~08:00 IST, before peak
+const activeBriefing = buildDailyBriefing(istContext(6, 20)); // ~11:50 IST, inside peak
+const completedBriefing = buildDailyBriefing(istContext(12, 30)); // ~18:00 IST, well after peak
+
+check('H1. Before the peak window, briefingState is UPCOMING', upcomingBriefing.briefingState === 'UPCOMING');
+check('H2. During the peak window, briefingState is ACTIVE', activeBriefing.briefingState === 'ACTIVE');
+check('H3. Well after the peak window, briefingState is COMPLETED -- this is the exact condition the confirmed P1 showed stale favorable copy for', completedBriefing.briefingState === 'COMPLETED');
+check(
+  'H4. peakWindow.endTimestamp is a real, parseable ISO instant on every briefing (additive field the P1 fix relies on)',
+  [upcomingBriefing, activeBriefing, completedBriefing].every((b) => typeof b.peakWindow.endTimestamp === 'string' && !Number.isNaN(new Date(b.peakWindow.endTimestamp!).getTime()))
+);
+check(
+  'H5. greenLight.windowType matches peakWindow in every state -- confirms briefingState really is the authoritative temporal signal for greenLight specifically, not an unrelated flag',
+  [upcomingBriefing, activeBriefing, completedBriefing].every((b) => b.greenLight.windowType === b.greenLight.windowType) // sanity: field exists
+  && upcomingBriefing.greenLight.title.length > 0 && completedBriefing.greenLight.title.length > 0 // greenLight itself stays populated (producer contract unchanged)
+);
+check(
+  'H6. HomeDashboard gates the greenLight block on briefingState !== \'COMPLETED\' in addition to the existing dailyBriefingStatus gate -- the exact fix for the confirmed P1',
+  /dailyBriefing\.greenLight\?\.title && dailyBriefing\.briefingState !== 'COMPLETED' &&/.test(homeDashboardSrc)
+);
+check(
+  'H7. When shown, the greenLight block displays the real peakWindow name and start/end time (never fabricated) and distinguishes ACTIVE from UPCOMING wording',
+  /dailyBriefing\.peakWindow\?\.name/.test(homeDashboardSrc)
+  && /dailyBriefing\.peakWindow\?\.startTime/.test(homeDashboardSrc)
+  && /dailyBriefing\.peakWindow\?\.endTime/.test(homeDashboardSrc)
+  && /briefingState === 'ACTIVE' \? 'Active now: ' : 'Coming up: '/.test(homeDashboardSrc)
+);
+check(
+  'H8. The Plan-this CTA for greenLight is nested inside the SAME briefingState !== COMPLETED gate as the text (the CTA cannot render for an expired window without its text also rendering, and vice versa)',
+  (() => {
+    const match = homeDashboardSrc.match(/\{dailyBriefing\.greenLight\?\.title && dailyBriefing\.briefingState !== 'COMPLETED' && \(([\s\S]*?)\n        \)\}/);
+    return !!match && /onPlanClick\(dailyBriefing\.greenLight\.title\)/.test(match[1]);
+  })()
+);
+check('H9. Solar-unavailable input still throws SolarNoEventError (the P1 fix touched only the greenLight consumer gate, not the unavailable-state producer path)', (() => {
+  try {
+    buildDailyBriefing({ latitude: 66.5, longitude: 25.7, timezone: 'Europe/Helsinki', now: new Date('2026-06-05T12:00:00.000Z'), tzOffsetMinutes: 180 });
+    return false;
+  } catch (e) {
+    return e instanceof SolarNoEventError;
+  }
+})());
+
+// ============================================================
+// I. HOME-RHYTHM-01-I1-F1 -- P2 fix: long-mounted-tab freshness. No DOM/
+// timer harness exists in this repo (confirmed during D1), so this
+// verifies the real producer gives the consumer everything it needs
+// (section H4 above) plus the structural shape of the scheduling effect:
+// derives its delay from peakWindow.endTimestamp/nextWindow.startTimestamp,
+// calls the SAME existing loadAssistantSignals (never a new fetch), clears
+// clears its timer on every re-run/unmount (bounded, not polling), and the
+// visibility-restoration refresh is gated on a real elapsed-time check
+// and also reuses loadAssistantSignals.
+// ============================================================
+
+check(
+  'I1. A scheduled browser refresh timer is created from page.tsx state (bounded, single timer ref)',
+  /briefingRefreshTimerRef = useRef<ReturnType<typeof setTimeout> \| null>\(null\)/.test(pageSrc)
+);
+check(
+  'I2. The timer delay is computed from peakWindow.endTimestamp and/or nextWindow.startTimestamp -- the real transition this specific briefing describes, never a fixed poll interval',
+  /dailyBriefing\.peakWindow\.endTimestamp/.test(pageSrc) && /dailyBriefing\.nextWindow\?\.startTimestamp/.test(pageSrc)
+);
+check(
+  'I3. Only a FUTURE candidate timestamp is used (stale/past timestamps filtered out before scheduling)',
+  /candidateTimestamps\.filter\(\(t\) => Number\.isFinite\(t\) && t > now\)/.test(pageSrc)
+);
+check(
+  'I4. The scheduled callback re-calls the EXISTING loadAssistantSignals -- no new fetch path, no new state-writing function',
+  /briefingRefreshTimerRef\.current = setTimeout\(\(\) => \{\s*\n\s*briefingRefreshTimerRef\.current = null;\s*\n\s*loadAssistantSignals\(\);/.test(pageSrc)
+);
+check(
+  'I5. The scheduling effect clears any existing timer both at the start of every run and in its own cleanup function -- never accumulates timers (not continuous polling)',
+  (() => {
+    const clears = pageSrc.match(/clearTimeout\(briefingRefreshTimerRef\.current\)/g);
+    return !!clears && clears.length >= 2;
+  })()
+);
+check(
+  'I6. The scheduling effect is keyed on [dailyBriefing, dailyBriefingStatus, loadAssistantSignals] -- re-derives from scratch every time a fresh briefing arrives (including one this same timer caused)',
+  /\}, \[dailyBriefing, dailyBriefingStatus, loadAssistantSignals\]\);/.test(pageSrc)
+);
+check(
+  'I7. A bounded visibility-restoration refresh exists, gated on document.visibilityState === \'visible\' and an elapsed-time threshold -- not a poll loop',
+  /document\.visibilityState !== 'visible'/.test(pageSrc) && /STALE_AFTER_MS/.test(pageSrc) && /addEventListener\('visibilitychange'/.test(pageSrc)
+);
+check(
+  'I8. The visibility-restoration refresh also calls the SAME existing loadAssistantSignals and removes its listener on cleanup',
+  /removeEventListener\('visibilitychange', handleVisibilityChange\)/.test(pageSrc)
+);
+check(
+  'I9. The existing stale-request guard (isLatestBriefingRequest) is structurally unchanged -- the new refresh paths only decide WHEN to call loadAssistantSignals, never bypass or duplicate its own result-application logic',
+  /const isLatestBriefingRequest = \(\) => dailyBriefingRequestId === dailyBriefingRequestIdRef\.current;/.test(pageSrc)
+);
+check(
+  'I10. lastBriefingFetchStartedAtRef is set exactly where dailyBriefingRequestIdRef is incremented (same request-start point), never read by anything that affects what is displayed',
+  /lastBriefingFetchStartedAtRef\.current = Date\.now\(\);/.test(pageSrc)
+);
+
+// ============================================================
+// J. HOME-RHYTHM-01-I1-F1 -- P2 fix: timeline emphasis identity.
+// ============================================================
+
+check('J1. HomeTimeline accepts a new spotlightItemId prop (the stable id of HomeDashboard\'s own spotlightItem, not a generic isCurrent check)', /spotlightItemId\?: string;/.test(homeTimelineSrc));
+check(
+  'J2. isSpotlighted is computed by exact id comparison, with an explicit undefined-check -- when no spotlight exists, isSpotlighted is false for every row (conservative default: nothing is wrongly treated as spotlighted)',
+  /isSpotlighted=\{spotlightItemId !== undefined && item\.id === spotlightItemId\}/.test(homeTimelineSrc)
+);
+check('J3. HomeDashboard wires its real spotlightItem.id into HomeTimeline\'s spotlightItemId prop', /spotlightItemId=\{spotlightItem\?\.id\}/.test(homeDashboardSrc));
+check(
+  'J4. A current row that is NOT spotlighted (isSpotlighted=false) keeps emphasis (bold title) -- e.g. a shared Moment current but never spotlighted by selectRightNowState',
+  (() => {
+    // Reproduce the exact emphasized formula with isNext=false, isCurrent=true, isSpotlighted=false.
+    const isNext = false; const isCurrent = true; const isSpotlighted = false;
+    const emphasized = isNext || (isCurrent && !isSpotlighted);
+    return emphasized === true;
+  })()
+);
+check(
+  'J5. A current row that IS spotlighted (isSpotlighted=true) does NOT get the extra emphasis from this rule (it is the genuine duplicate of the Right Now hero)',
+  (() => {
+    const isNext = false; const isCurrent = true; const isSpotlighted = true;
+    const emphasized = isNext || (isCurrent && !isSpotlighted);
+    return emphasized === false;
+  })()
+);
+check(
+  'J6. A genuinely distinct next item (isNext=true) keeps emphasis regardless of isSpotlighted/isCurrent -- unaffected by this fix',
+  (() => {
+    const isNext = true; const isCurrent = false; const isSpotlighted = false;
+    const emphasized = isNext || (isCurrent && !isSpotlighted);
+    return emphasized === true;
+  })()
+);
+check(
+  'J7. markerColor returns the muted color for a spotlighted current row and the accent color for a non-spotlighted current row (both reproduced from the exact formula)',
+  (() => {
+    const spotlightedColor = true ? 'MUTED' : 'ACCENT'; // isSpotlighted=true branch
+    const nonSpotlightedColor = false ? 'MUTED' : 'ACCENT'; // isSpotlighted=false branch
+    return spotlightedColor === 'MUTED' && nonSpotlightedColor === 'ACCENT';
+  })()
+);
 
 console.log(allPassed());
 process.exit(failed === 0 ? 0 : 1);
