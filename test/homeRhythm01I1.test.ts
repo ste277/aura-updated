@@ -84,8 +84,13 @@ check(
 check(
   "B5. The nextAction line has no onClick/button attached to it directly (informational only -- never implies an already-scheduled commitment)",
   (() => {
-    const match = homeDashboardSrc.match(/\{dailyBriefing\.nextAction && !nextActionExpired && \(([\s\S]*?)\)\}/);
-    return !!match && !/onClick/.test(match[1]);
+    // PANCH-OVERLAP-01-I1 added an additional, sibling nextAction
+    // conditional (`!cautionAppliesNow`-gated caution-qualified text) --
+    // this regex now tolerates either the plain or the caution-qualified
+    // nextAction block, matching on the shared `!nextActionExpired &&`
+    // prefix rather than requiring an immediately-following `(`.
+    const matches = [...homeDashboardSrc.matchAll(/\{dailyBriefing\.nextAction && !nextActionExpired[^(]*\(([\s\S]*?)\)\}\s*\n/g)];
+    return matches.length >= 1 && matches.every((match) => !/onClick/.test(match[1]));
   })()
 );
 check(
@@ -590,9 +595,29 @@ function evalGreenLightExpired(peakEndTimestampIso: string, nowMs: number): bool
 
   const noNextWindowBriefing = buildDailyBriefing({ latitude: 13.08, longitude: 80.27, timezone: 'Asia/Kolkata', tzOffsetMinutes: 330, now: new Date(Date.UTC(2026, 10, 10, 6, 20, 0)) });
   const correctedPeakEnd = new Date(noNextWindowBriefing.peakWindow.endTimestamp!).getTime() + 60_000;
-  const wellAfterExpiry = correctedPeakEnd + 3_600_000; // 1 hour after the corrected boundary
+  // PANCH-OVERLAP-01-I1 -- this fixture's real date (2026-11-10, Tuesday,
+  // Chennai) has a REAL Gulika Kalam overlap on peakWindow's own span
+  // (confirmed: commencementCaution.overlapsPeakWindow), whose own
+  // endTimestamp (07:50Z) extends ~64 minutes past peakWindow's own
+  // corrected end (06:47Z) -- i.e. PAST the 1-hour mark this test
+  // originally checked at. That is correct, INTENDED new behavior (I1-G):
+  // the scheduling formula must now also catch the caution window's own
+  // end as a future candidate, so a long-mounted tab's
+  // commencementCaution.activeNow correctly flips back to false once the
+  // caution genuinely ends, even on a day with no nextWindow. M1a verifies
+  // that new candidate is actually found (not silently missing); M1
+  // (further out, past even Gulika's own end) verifies the array
+  // eventually, genuinely becomes empty.
+  const cautionEndMs = noNextWindowBriefing.commencementCaution.cautionWindows[0]
+    ? new Date(noNextWindowBriefing.commencementCaution.cautionWindows[0].endTimestamp).getTime()
+    : correctedPeakEnd;
   check(
-    'M1. [REAL FORMULA] On the real no-nextWindow fixture (K7/K8), evaluating page.tsx\'s ACTUAL extracted scheduling formula well after the corrected peak-end boundary correctly finds NO future candidate (the visibility-restoration refresh -- H11/I7 -- is the only remaining path that can ever catch this day\'s transition)',
+    'M1a. [REAL FORMULA, PANCH-OVERLAP-01-I1] Shortly after the corrected peak-end boundary (1h), the formula correctly finds the REAL overlapping caution window\'s own end as a future candidate -- not silently missing the caution-boundary transition',
+    computeFutureCandidates(noNextWindowBriefing, correctedPeakEnd + 3_600_000).includes(cautionEndMs) && cautionEndMs > correctedPeakEnd + 3_600_000
+  );
+  const wellAfterExpiry = cautionEndMs + 3_600_000; // 1 hour after BOTH the peak-end boundary AND any overlapping caution window's own end
+  check(
+    'M1. [REAL FORMULA] On the real no-nextWindow fixture (K7/K8), evaluating page.tsx\'s ACTUAL extracted scheduling formula well after the corrected peak-end boundary (and any overlapping caution window\'s own end) correctly finds NO future candidate (the visibility-restoration refresh -- H11/I7 -- is the only remaining path that can ever catch this day\'s transition)',
     computeFutureCandidates(noNextWindowBriefing, wellAfterExpiry).length === 0
   );
 

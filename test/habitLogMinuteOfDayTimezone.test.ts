@@ -72,7 +72,16 @@ check('America/New_York DST spring-forward: post-transition instant (2-3am skipp
 const sharedInstant = new Date('2026-07-28T06:50:00.000Z'); // the known Abhijit/Gulika-overlap fixture (2026-07-28 12:20 IST, Chennai)
 const window = resolveHistoricalActiveWindow(sharedInstant, chennai.latitude, chennai.longitude, chennai.timezone);
 const minute = getMinuteOfDayInTimezone(chennai.timezone, sharedInstant);
-check('activeWindow for the shared instant resolves to ABHIJIT (matches the known overlap fixture)', window === 'ABHIJIT');
+// PANCH-OVERLAP-01-I1 -- this instant's own commencement-caution window
+// (Gulika Kalam) overlaps Abhijit here; resolveHistoricalActiveWindow()
+// now correctly classifies a NEW habit log at this instant as GULIKA
+// (via the shared evaluatePanchangOverlap() policy), not ABHIJIT --
+// deliberately changed, prospective-only (see historicalActivityWindow.ts's
+// own doc comment: this value is only ever computed once, at write time,
+// for a NEW log; no already-persisted record is reinterpreted). Previously
+// asserted ABHIJIT, matching the pre-fix array-order-first-match bug this
+// same fixture was originally chosen to pin.
+check('activeWindow for the shared instant resolves to GULIKA (the real overlapping commencement-caution window, per PANCH-OVERLAP-01-I1 -- no longer silently ABHIJIT)', window === 'GULIKA');
 check('logMinuteOfDay for the SAME shared instant is 740 (12:20 IST), the same timestamp+timezone pair activeWindow used', minute === 740);
 
 // ============================================================

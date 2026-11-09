@@ -586,6 +586,20 @@ export default function DashboardPage() {
     if (dailyBriefing.nextWindow?.startTimestamp) {
       candidateTimestamps.push(new Date(dailyBriefing.nextWindow.startTimestamp).getTime());
     }
+    // PANCH-OVERLAP-01-I1 -- a commencement-caution window's own start/end
+    // can fall strictly INSIDE peakWindow's span (e.g. Rahu Kalam ending
+    // mid-Abhijit on a Friday), a transition neither of the two candidates
+    // above would ever catch -- so Home's "favorable... but caution also
+    // applies" qualifier (HomeDashboard.tsx's cautionAppliesNow) could stay
+    // stale (either direction: showing the qualifier after the caution has
+    // actually ended, or not yet showing it once the caution has actually
+    // begun) for the rest of the mounted tab. Reuses the exact same bounded
+    // single-timer mechanism -- these are additional candidates in the
+    // same "soonest future transition" list, not a second timer.
+    for (const cautionWindow of dailyBriefing.commencementCaution?.cautionWindows ?? []) {
+      candidateTimestamps.push(new Date(cautionWindow.startTimestamp).getTime());
+      candidateTimestamps.push(new Date(cautionWindow.endTimestamp).getTime());
+    }
     const now = Date.now();
     const futureTimestamps = candidateTimestamps.filter((t) => Number.isFinite(t) && t > now);
     if (futureTimestamps.length === 0) return undefined;
