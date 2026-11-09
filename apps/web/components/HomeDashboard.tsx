@@ -108,6 +108,24 @@ interface HomeDashboardProps {
    * from the independently-computed currentWindow/activeWindowName, never
    * from this prop) already renders honest, non-stale content. */
   dailyBriefingStatus?: 'loading' | 'available' | 'unavailable' | 'error';
+  /** PANCH-OVERLAP-01-I1-F2 -- live, client-recomputed commencement-caution
+   * state (page.tsx's evaluatePanchangOverlap(windows, currentMinuteOfDay),
+   * the SAME windows/minute activeWindowName already uses) -- the
+   * AUTHORITATIVE source for every "is a caution genuinely active right
+   * now" claim rendered by this component. Never derive present-tense
+   * caution truth from dailyBriefing.commencementCaution (a server
+   * snapshot that only updates on a successful, scheduled refetch, and
+   * that schedule only covers peak-overlapping cautions -- a standalone
+   * caution's own end was confirmed to leave that snapshot stale for the
+   * rest of the day). dailyBriefing.commencementCaution.cautionWindows/
+   * overlapsPeakWindow remain valid and unchanged for their own, separate,
+   * legitimately-static purposes: the UPCOMING-framing case (the peak
+   * window hasn't started yet, so there's nothing "active now" to report)
+   * and page.tsx's own refresh-scheduling loop. */
+  liveCommencementCaution?: {
+    activeNow: boolean;
+    activeCautionWindows: Array<{ name: string; windowType: string }>;
+  };
   todayReflection?: {
     outputLevel: 'LOW' | 'MODERATE' | 'PEAK_FLOW';
     followedGuidance: boolean;
@@ -420,6 +438,7 @@ export function HomeDashboard({
   loggedActivitiesToday = [],
   dailyBriefing,
   dailyBriefingStatus,
+  liveCommencementCaution,
   todayReflection,
   personalContext,
   onLogActivity,
@@ -537,24 +556,39 @@ export function HomeDashboard({
   // signal the Green Light/Next Action copy above already uses, so Right
   // Now's hero visual framing can't keep claiming "Best Time"/green while
   // the text underneath it (once rendered) says a caution also applies.
-  const cautionAppliesNow = Boolean(dailyBriefing?.commencementCaution?.activeNow);
+  // PANCH-OVERLAP-01-I1-F2 -- `cautionAppliesNow` (and every other "is a
+  // caution genuinely active right now" claim below) now reads EXCLUSIVELY
+  // from `liveCommencementCaution`, the live client-side value computed in
+  // page.tsx from the SAME windows/currentMinuteOfDay activeWindowName
+  // already uses -- never from dailyBriefing.commencementCaution.activeNow,
+  // a server snapshot that only updates on a successful, scheduled
+  // refetch. Confirmed regression this fixes: that refetch schedule only
+  // covers peak-overlapping cautions, so a STANDALONE caution (no Abhijit
+  // overlap) could end with nothing left to ever refresh the snapshot --
+  // Home then kept showing it as active for the rest of the day (85 to
+  // 636 minutes, reproduced on real calendar fixtures).
+  const cautionAppliesNow = Boolean(liveCommencementCaution?.activeNow);
   const cautionAppliesToPeakWindow = Boolean(
     dailyBriefing &&
       (dailyBriefing.briefingState === 'ACTIVE'
-        ? dailyBriefing.commencementCaution?.activeNow
+        ? liveCommencementCaution?.activeNow
         : dailyBriefing.commencementCaution?.overlapsPeakWindow)
   );
-  // PANCH-OVERLAP-01-I1-F1 -- two DIFFERENT lists, never interchangeable:
-  // `activeCautionWindowNames` (dynamic -- which caution(s) genuinely
-  // contain the current minute, i.e. what `cautionAppliesNow`/`activeNow`
-  // itself was computed from) is the ONLY correct source for any "also
-  // active/applies right now" text. `cautionWindowNames` (static -- which
-  // caution(s) overlap peakWindow's span TODAY, independent of the current
-  // minute) is only correct for the UPCOMING "overlaps part of this
-  // window" framing, before the window has even started. Using the static
-  // list for "active now" text was the confirmed F1 defect (e.g. naming an
-  // already-ended Rahu Kalam while Yama was the window actually active).
-  const activeCautionWindowNames = dailyBriefing?.commencementCaution?.activeCautionWindows.map((w) => w.name).join(' and ') ?? '';
+  // PANCH-OVERLAP-01-I1-F1/-F2 -- two DIFFERENT lists, never interchangeable:
+  // `activeCautionWindowNames` (LIVE -- which caution(s) genuinely contain
+  // the current minute, i.e. what `cautionAppliesNow` itself was computed
+  // from) is the ONLY correct source for any "also active/applies right
+  // now" text. `cautionWindowNames` (static -- which caution(s) overlap
+  // peakWindow's span TODAY, independent of the current minute) is only
+  // correct for the UPCOMING "overlaps part of this window" framing,
+  // before the window has even started, and for page.tsx's own refresh-
+  // scheduling loop. Using the static list (F1) or a server-snapshot-
+  // derived dynamic list (F2) for "active now" text was each, in turn, a
+  // confirmed defect (e.g. naming an already-ended Rahu Kalam while Yama
+  // was the window actually active; or continuing to name a standalone
+  // caution as active after it had genuinely ended because no refetch
+  // ever fired to clear it).
+  const activeCautionWindowNames = liveCommencementCaution?.activeCautionWindows.map((w) => w.name).join(' and ') ?? '';
   const cautionWindowNames = dailyBriefing?.commencementCaution?.cautionWindows.map((w) => w.name).join(' and ') ?? '';
   const baseTone = getWindowTone(energyScore, activeWindowName);
   const tone = cautionAppliesNow

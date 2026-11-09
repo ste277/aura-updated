@@ -285,6 +285,15 @@ async function runDomSection() {
         nextShift: { windowName: 'Next Window', startsIn: 'Soon', startTime: '--:--', score: 70, themeText: 'Neutral' },
         currentMinuteOfDay: 702,
         dailyBriefingStatus: 'available' as const,
+        // PANCH-OVERLAP-01-I1-F2 -- the live, client-computed value
+        // page.tsx now derives from evaluatePanchangOverlap(windows,
+        // currentMinuteOfDay) and passes down -- the AUTHORITATIVE source
+        // for every "active now" claim as of F2. Defaults to "no caution
+        // active" here; individual G-cases below override it to match
+        // what each scenario needs the LIVE state to say (independent of
+        // whatever dailyBriefing.commencementCaution's own, now-unused-for-
+        // this-purpose activeNow/activeCautionWindows fields say).
+        liveCommencementCaution: { activeNow: false, activeCautionWindows: [] },
         onPlanClick: () => {},
         ...overrides,
       };
@@ -304,7 +313,10 @@ async function runDomSection() {
         cautionWindows: [{ name: 'Rahu Kalam', windowType: 'RAHU_KALAM', startTime: '10:52 AM', endTime: '12:29 PM', startTimestamp: '2026-11-20T05:22:00.000Z', endTimestamp: '2026-11-20T06:59:00.000Z' }],
       },
     });
-    const cautionHarness = await mount(React.createElement(HomeDashboard, baseProps({ dailyBriefing: cautionDailyBriefing })));
+    const cautionHarness = await mount(React.createElement(HomeDashboard, baseProps({
+      dailyBriefing: cautionDailyBriefing,
+      liveCommencementCaution: { activeNow: true, activeCautionWindows: [{ name: 'Rahu Kalam', windowType: 'RAHU_KALAM' }] },
+    })));
     const cautionText = cautionHarness.container.textContent || '';
     await cautionHarness.unmount();
     check('G3. [REAL DOM, THE FIX] Caution overlap active now: the unqualified "favorable for..." claim is GONE from the rendered DOM', !cautionText.includes('— favorable for'));
@@ -330,7 +342,16 @@ async function runDomSection() {
         cautionWindows: [{ name: 'Rahu Kalam', windowType: 'RAHU_KALAM', startTime: '10:52 AM', endTime: '12:29 PM', startTimestamp: '2026-11-20T05:22:00.000Z', endTimestamp: '2026-11-20T06:59:00.000Z' }],
       },
     });
-    const mismatchHarness = await mount(React.createElement(HomeDashboard, baseProps({ dailyBriefing: mismatchedCautionBriefing })));
+    const mismatchHarness = await mount(React.createElement(HomeDashboard, baseProps({
+      dailyBriefing: mismatchedCautionBriefing,
+      // PANCH-OVERLAP-01-I1-F2 -- the live value (Yama, genuinely active
+      // now) is what the component must render; dailyBriefing's own static
+      // cautionWindows (Rahu, a stale peak-overlap-only fact) must be
+      // ignored for "active now" text now that F2 sources it exclusively
+      // from liveCommencementCaution, independent of whatever
+      // dailyBriefing.commencementCaution itself says.
+      liveCommencementCaution: { activeNow: true, activeCautionWindows: [{ name: 'Yama Gandam', windowType: 'YAMA' }] },
+    })));
     const mismatchText = mismatchHarness.container.textContent || '';
     await mismatchHarness.unmount();
     check('G7. [REAL DOM, THE F1 FIX] Dynamic vs static caution lists differ: the rendered "active now" copy names YAMA (genuinely active now), never RAHU_KALAM (only a static peak-overlap fact, not active this minute)', mismatchText.includes('Yama Gandam') && !mismatchText.includes('Rahu Kalam is also active right now') && !mismatchText.includes('Rahu Kalam also overlaps right now'));
@@ -349,10 +370,66 @@ async function runDomSection() {
         cautionWindows: [],
       },
     });
-    const standaloneHarness = await mount(React.createElement(HomeDashboard, baseProps({ dailyBriefing: standaloneCautionBriefing })));
+    const standaloneHarness = await mount(React.createElement(HomeDashboard, baseProps({
+      dailyBriefing: standaloneCautionBriefing,
+      liveCommencementCaution: { activeNow: true, activeCautionWindows: [{ name: 'Gulika Kalam', windowType: 'GULIKA' }] },
+    })));
     const standaloneText = standaloneHarness.container.textContent || '';
     await standaloneHarness.unmount();
     check('G9. [REAL DOM] Standalone caution with no Abhijit overlap at all: the dynamic activeCautionWindows list alone correctly names Gulika Kalam in the caution copy', standaloneText.includes('Gulika Kalam'));
+
+    // ============================================================
+    // G10-G13 -- PANCH-OVERLAP-01-I1-F2, the critical architectural proof:
+    // the SAME mounted HomeDashboard instance (never unmounted/remounted,
+    // and with `dailyBriefing` NEVER CHANGING across all four rerenders --
+    // simulating a server refetch that never succeeds, exactly the
+    // confirmed F1-round regression scenario) must still correctly
+    // transition the rendered caution state purely from `liveCommencementCaution`
+    // changing, the same way page.tsx's own currentMinuteOfDay tick would
+    // update it in the real app with zero network activity. If this
+    // passed only because dailyBriefing itself changed between renders,
+    // it would NOT prove what F2 actually fixed.
+    // ============================================================
+    const frozenBriefing = baseDailyBriefing({
+      briefingState: 'COMPLETED',
+      greenLight: { title: '', description: '', windowType: 'NEUTRAL' },
+      // Deliberately stale/wrong relative to the live states below --
+      // proves the rendered text never reads this object's own
+      // commencementCaution field for "active now" purposes.
+      commencementCaution: { activeNow: false, activeCautionWindows: [], overlapsPeakWindow: false, cautionWindows: [] },
+    });
+    const liveHarness = await mount(React.createElement(HomeDashboard, baseProps({
+      dailyBriefing: frozenBriefing,
+      currentMinuteOfDay: 760, // before the standalone caution starts
+      liveCommencementCaution: { activeNow: false, activeCautionWindows: [] },
+    })));
+    const beforeText = liveHarness.container.textContent || '';
+    check('G10. [REAL DOM, LONG-MOUNTED, NO REFETCH] Before the standalone caution starts: no caution copy renders (dailyBriefing frozen throughout this whole sequence, never changed)', !beforeText.includes('Caution') && !beforeText.includes('also active right now'));
+
+    await liveHarness.rerender(React.createElement(HomeDashboard, baseProps({
+      dailyBriefing: frozenBriefing, // SAME object reference -- no refetch occurred
+      currentMinuteOfDay: 780, // caution now active
+      liveCommencementCaution: { activeNow: true, activeCautionWindows: [{ name: 'Yama Gandam', windowType: 'YAMA' }] },
+    })));
+    const duringText = liveHarness.container.textContent || '';
+    check('G11. [REAL DOM, LONG-MOUNTED, NO REFETCH] Caution becomes active purely from liveCommencementCaution changing -- dailyBriefing was never touched', duringText.includes('Yama Gandam') && duringText.includes('Caution'));
+
+    await liveHarness.rerender(React.createElement(HomeDashboard, baseProps({
+      dailyBriefing: frozenBriefing,
+      currentMinuteOfDay: 810, // still within the caution
+      liveCommencementCaution: { activeNow: true, activeCautionWindows: [{ name: 'Yama Gandam', windowType: 'YAMA' }] },
+    })));
+    const stillDuringText = liveHarness.container.textContent || '';
+    check('G12. [REAL DOM, LONG-MOUNTED, NO REFETCH] Caution remains active and correctly named mid-window', stillDuringText.includes('Yama Gandam') && stillDuringText.includes('Caution'));
+
+    await liveHarness.rerender(React.createElement(HomeDashboard, baseProps({
+      dailyBriefing: frozenBriefing, // STILL the same frozen object -- this is the exact scenario (standalone caution ending, no peak-overlap scheduling candidate, no refetch) that left Home stuck showing Caution for 85-636 minutes before this fix
+      currentMinuteOfDay: 850, // after the caution has ended
+      liveCommencementCaution: { activeNow: false, activeCautionWindows: [] },
+    })));
+    const afterText = liveHarness.container.textContent || '';
+    await liveHarness.unmount();
+    check('G13. [REAL DOM, THE F2 FIX -- LONG-MOUNTED, NO REFETCH] Caution correctly clears once it genuinely ends, purely from the live value changing -- with dailyBriefing NEVER having been refetched across the entire sequence (this is the exact regression: a standalone caution has no peak-overlap scheduling candidate, so only a live, refetch-independent evaluation can ever clear it)', !afterText.includes('Caution') && !afterText.includes('Yama Gandam') && !afterText.includes('also active right now'));
   } catch (e: any) {
     if (e?.code === 'MODULE_NOT_FOUND' || /Cannot find module/.test(String(e?.message))) {
       check('G. [REAL DOM -- SKIPPED, not run under the jsdom-tests tsconfig] Run with: npx ts-node --project tsconfig.jsdom-tests.json test/panchOverlap01I1.test.ts', true);

@@ -4,6 +4,7 @@ import React, { useEffect, useMemo, useState, useCallback, useRef } from 'react'
 import { computeSolarEphemeris, isSolarError } from '../../../packages/astronomy/src/ephemeris';
 import {
   computePanchangWindows,
+  evaluatePanchangOverlap,
   getActiveWindow,
   SolarWindowType,
   WeekdayIndex,
@@ -1223,6 +1224,32 @@ export default function DashboardPage() {
     return solar ? getActiveWindow(windows, currentMinuteOfDay) : 'UNAVAILABLE';
   }, [solar, windows, currentMinuteOfDay]);
 
+  // PANCH-OVERLAP-01-I1-F2 -- live, client-recomputed commencement-caution
+  // state, built from the EXACT SAME `windows`/`currentMinuteOfDay` values
+  // `activeType` above already trusts (never a second, independently-timed
+  // or independently-fetched source) -- so this inherits `windows`'s own
+  // existing date-rollover/location/timezone-change invalidation (via
+  // `solar`'s dependency array: user.latitude/longitude/timezone,
+  // todayDateStr) for free, the same way activeType already does. This is
+  // what fixes the confirmed F1 regression: dailyBriefing.commencementCaution
+  // is a SERVER SNAPSHOT that only updates when a scheduled refetch
+  // succeeds, and that schedule only covers peak-overlapping cautions, so a
+  // STANDALONE caution (no Abhijit overlap) could end with nothing to ever
+  // refresh it -- Home then kept showing it as active for the rest of the
+  // day. This value recomputes every time currentMinuteOfDay ticks (every
+  // 30s, via useCurrentMinuteOfDay), independent of any network request
+  // succeeding or being scheduled at all.
+  const liveCommencementCaution = useMemo(() => {
+    if (!solar) {
+      return { activeNow: false, activeCautionWindows: [] as Array<{ name: string; windowType: SolarWindowType }> };
+    }
+    const overlap = evaluatePanchangOverlap(windows, currentMinuteOfDay);
+    return {
+      activeNow: overlap.commencementCaution,
+      activeCautionWindows: overlap.cautionWindows.map((w) => ({ name: w.label, windowType: w.type })),
+    };
+  }, [solar, windows, currentMinuteOfDay]);
+
   // Daily energy insight score
   const energyInsight = useMemo(() => {
     return computeDailyEnergyInsight(windows, activeType, currentMinuteOfDay);
@@ -1861,6 +1888,7 @@ export default function DashboardPage() {
             loggedActivitiesToday={loggedActivitiesToday}
             dailyBriefing={dailyBriefing}
             dailyBriefingStatus={dailyBriefingStatus}
+            liveCommencementCaution={liveCommencementCaution}
             personalContext={personalContext}
             todayReflection={todayReflection}
             onLogActivity={handleLogActivity}
