@@ -269,7 +269,7 @@ async function runDomSection() {
         otherFavorableWindows: [],
         nextAction: 'Do your highest-value heavy lifting or a hard training session now.',
         greenLight: { title: 'Heavy lifting or a hard training session', description: 'Peak solar window', windowType: 'ABHIJIT' },
-        commencementCaution: { activeNow: false, overlapsPeakWindow: false, cautionWindows: [] },
+        commencementCaution: { activeNow: false, activeCautionWindows: [], overlapsPeakWindow: false, cautionWindows: [] },
         notificationText: '',
         widgetText: '',
         activeWindow: 'ABHIJIT',
@@ -299,6 +299,7 @@ async function runDomSection() {
     const cautionDailyBriefing = baseDailyBriefing({
       commencementCaution: {
         activeNow: true,
+        activeCautionWindows: [{ name: 'Rahu Kalam', windowType: 'RAHU_KALAM', startTime: '10:52 AM', endTime: '12:29 PM' }],
         overlapsPeakWindow: true,
         cautionWindows: [{ name: 'Rahu Kalam', windowType: 'RAHU_KALAM', startTime: '10:52 AM', endTime: '12:29 PM', startTimestamp: '2026-11-20T05:22:00.000Z', endTimestamp: '2026-11-20T06:59:00.000Z' }],
       },
@@ -307,9 +308,51 @@ async function runDomSection() {
     const cautionText = cautionHarness.container.textContent || '';
     await cautionHarness.unmount();
     check('G3. [REAL DOM, THE FIX] Caution overlap active now: the unqualified "favorable for..." claim is GONE from the rendered DOM', !cautionText.includes('— favorable for'));
+    check('G3b. [REAL DOM, F1-C FIX] Caution overlap active now: the hero headline no longer shows the unqualified favorable headline (no contradiction above the fold)', !cautionText.includes('Strong time for important work'));
     check('G4. [REAL DOM] Caution overlap active now: the rendered copy names the real caution window (Rahu Kalam)', cautionText.includes('Rahu Kalam'));
     check('G5. [REAL DOM] Caution overlap active now: the CTA ("Plan this") is still present -- PD-02, not removed, only qualified', cautionText.includes('Plan this'));
     check('G6. [REAL DOM] Caution overlap active now: Next Action text no longer says an unqualified "...now." claim for the peak activity', !cautionText.includes('Do your highest-value heavy lifting or a hard training session now.'));
+
+    // G7-G9 -- PANCH-OVERLAP-01-I1-F1, the confirmed Defect 1 regression
+    // test: activeCautionWindows (dynamic -- what's genuinely active RIGHT
+    // NOW) and cautionWindows (static -- what overlaps peakWindow's span
+    // TODAY, independent of the current minute) are DELIBERATELY different
+    // in this fixture (Yama is active now; Rahu is what statically overlaps
+    // the peak span, e.g. because Rahu ran earlier in the day). Before this
+    // fix, Home's "active now" text was built from the static list and
+    // would have wrongly said "Rahu Kalam is also active right now" here --
+    // Rahu isn't active at all in this fixture, only Yama is.
+    const mismatchedCautionBriefing = baseDailyBriefing({
+      commencementCaution: {
+        activeNow: true,
+        activeCautionWindows: [{ name: 'Yama Gandam', windowType: 'YAMA', startTime: '01:30 PM', endTime: '03:00 PM' }],
+        overlapsPeakWindow: true,
+        cautionWindows: [{ name: 'Rahu Kalam', windowType: 'RAHU_KALAM', startTime: '10:52 AM', endTime: '12:29 PM', startTimestamp: '2026-11-20T05:22:00.000Z', endTimestamp: '2026-11-20T06:59:00.000Z' }],
+      },
+    });
+    const mismatchHarness = await mount(React.createElement(HomeDashboard, baseProps({ dailyBriefing: mismatchedCautionBriefing })));
+    const mismatchText = mismatchHarness.container.textContent || '';
+    await mismatchHarness.unmount();
+    check('G7. [REAL DOM, THE F1 FIX] Dynamic vs static caution lists differ: the rendered "active now" copy names YAMA (genuinely active now), never RAHU_KALAM (only a static peak-overlap fact, not active this minute)', mismatchText.includes('Yama Gandam') && !mismatchText.includes('Rahu Kalam is also active right now') && !mismatchText.includes('Rahu Kalam also overlaps right now'));
+    check('G8. [REAL DOM] Same mismatch fixture: the Caution tone/pill still activates (driven by activeNow, unaffected by this fix)', mismatchText.includes('Caution'));
+
+    // G9 -- standalone caution, NO Abhijit overlap at all (overlapsPeakWindow
+    // false, cautionWindows empty) -- activeNow/activeCautionWindows must
+    // still correctly drive the caution copy using the dynamic list alone.
+    const standaloneCautionBriefing = baseDailyBriefing({
+      briefingState: 'COMPLETED',
+      greenLight: { title: '', description: '', windowType: 'NEUTRAL' },
+      commencementCaution: {
+        activeNow: true,
+        activeCautionWindows: [{ name: 'Gulika Kalam', windowType: 'GULIKA', startTime: '02:00 PM', endTime: '03:30 PM' }],
+        overlapsPeakWindow: false,
+        cautionWindows: [],
+      },
+    });
+    const standaloneHarness = await mount(React.createElement(HomeDashboard, baseProps({ dailyBriefing: standaloneCautionBriefing })));
+    const standaloneText = standaloneHarness.container.textContent || '';
+    await standaloneHarness.unmount();
+    check('G9. [REAL DOM] Standalone caution with no Abhijit overlap at all: the dynamic activeCautionWindows list alone correctly names Gulika Kalam in the caution copy', standaloneText.includes('Gulika Kalam'));
   } catch (e: any) {
     if (e?.code === 'MODULE_NOT_FOUND' || /Cannot find module/.test(String(e?.message))) {
       check('G. [REAL DOM -- SKIPPED, not run under the jsdom-tests tsconfig] Run with: npx ts-node --project tsconfig.jsdom-tests.json test/panchOverlap01I1.test.ts', true);

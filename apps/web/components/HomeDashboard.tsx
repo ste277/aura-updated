@@ -544,6 +544,17 @@ export function HomeDashboard({
         ? dailyBriefing.commencementCaution?.activeNow
         : dailyBriefing.commencementCaution?.overlapsPeakWindow)
   );
+  // PANCH-OVERLAP-01-I1-F1 -- two DIFFERENT lists, never interchangeable:
+  // `activeCautionWindowNames` (dynamic -- which caution(s) genuinely
+  // contain the current minute, i.e. what `cautionAppliesNow`/`activeNow`
+  // itself was computed from) is the ONLY correct source for any "also
+  // active/applies right now" text. `cautionWindowNames` (static -- which
+  // caution(s) overlap peakWindow's span TODAY, independent of the current
+  // minute) is only correct for the UPCOMING "overlaps part of this
+  // window" framing, before the window has even started. Using the static
+  // list for "active now" text was the confirmed F1 defect (e.g. naming an
+  // already-ended Rahu Kalam while Yama was the window actually active).
+  const activeCautionWindowNames = dailyBriefing?.commencementCaution?.activeCautionWindows.map((w) => w.name).join(' and ') ?? '';
   const cautionWindowNames = dailyBriefing?.commencementCaution?.cautionWindows.map((w) => w.name).join(' and ') ?? '';
   const baseTone = getWindowTone(energyScore, activeWindowName);
   const tone = cautionAppliesNow
@@ -552,9 +563,21 @@ export function HomeDashboard({
         label: 'Use Caution',
         pill: 'Caution',
         color: '#fb6b6b',
-        description: `${cautionWindowNames || 'A commencement caution period'} also overlaps right now — fine for routine, low-stakes tasks; hold off starting anything important.`,
+        description: `${activeCautionWindowNames || 'A commencement caution period'} also overlaps right now — fine for routine, low-stakes tasks; hold off starting anything important.`,
       }
     : baseTone;
+  // PANCH-OVERLAP-01-I1-F1 -- the hero headline (rendered just below, in the
+  // Right Now card) called getHeroHeadline(activeWindowName) unconditionally
+  // before this fix, so it could still say something like "Strong time for
+  // important work" directly above this same tone pill/description once
+  // cautionAppliesNow flips it to "Caution" -- confirmed reproducible, a
+  // direct above-the-fold contradiction. Overriding only the HEADLINE
+  // STRING here, never activeWindowName/getActiveWindow/energyScore/
+  // getWindowTone's own color logic (unchanged) -- this is presentation-
+  // only, and PD-02: it still never implies a low-stakes activity is
+  // prohibited or that ongoing work must stop, it just stops claiming an
+  // unqualified "favorable, start now" headline while a caution is active.
+  const heroHeadline = cautionAppliesNow ? 'Caution period active' : getHeroHeadline(activeWindowName);
   const currentWindowLabel = dailyBriefing?.briefingState === 'ACTIVE'
     ? dailyBriefing.peakWindow.name
     : formatWindowName(currentWindow?.name ?? activeWindowName);
@@ -1406,7 +1429,7 @@ export function HomeDashboard({
               <div data-home-right-now-label tabIndex={-1} style={{ ...typography.sectionEyebrow, outline: 'none' }}>● Right Now</div>
               <StatusBadge label={tone.pill} tone={toneToStatusTone(tone.color)} />
             </div>
-            <h2 style={{ margin: '13px 0 0', fontSize: 25, color: colors.textPrimary, lineHeight: 1.14 }}>{getHeroHeadline(activeWindowName)}</h2>
+            <h2 style={{ margin: '13px 0 0', fontSize: 25, color: colors.textPrimary, lineHeight: 1.14 }}>{heroHeadline}</h2>
             <div style={{ marginTop: spacing.sm, color: colors.textSecondary, fontSize: 15, fontWeight: 800 }}>{currentWindowLabel} · {tone.pill}</div>
           </div>
         </div>
@@ -1480,7 +1503,7 @@ export function HomeDashboard({
             {dailyBriefing.nextAction && !nextActionExpired && cautionAppliesNow && (
               <p style={{ margin: 0, color: colors.textSecondary, fontSize: 13, lineHeight: 1.4 }}>
                 <span style={{ color: colors.textPrimary, fontWeight: 800 }}>Next: </span>
-                {cautionWindowNames || 'A commencement caution period'} is also active right now — hold off starting anything important; lower-stakes tasks are fine.
+                {activeCautionWindowNames || 'A commencement caution period'} is also active right now — hold off starting anything important; lower-stakes tasks are fine.
               </p>
             )}
             {dailyBriefing.greenLight?.title && dailyBriefing.briefingState !== 'COMPLETED' && !greenLightExpired && (
@@ -1493,7 +1516,14 @@ export function HomeDashboard({
                         ? ` (${dailyBriefing.peakWindow.startTime}–${dailyBriefing.peakWindow.endTime})`
                         : ''}
                       {dailyBriefing.briefingState === 'ACTIVE' ? ' is active, but ' : ' is coming up, but '}
-                      {cautionWindowNames || 'a commencement caution period'}
+                      {/* PANCH-OVERLAP-01-I1-F1 -- ACTIVE names the DYNAMIC
+                       * caution(s) genuinely active right now;
+                       * UPCOMING/else names the STATIC peak-overlap
+                       * caution(s) (the window hasn't started yet, so
+                       * there's no "active now" caution to name -- the
+                       * static "overlaps part of this window" fact is the
+                       * correct and only thing to describe here). */}
+                      {(dailyBriefing.briefingState === 'ACTIVE' ? activeCautionWindowNames : cautionWindowNames) || 'a commencement caution period'}
                       {dailyBriefing.briefingState === 'ACTIVE' ? ' also applies right now' : ' overlaps part of this window'}
                       {' — hold off starting anything important; '}
                       {dailyBriefing.greenLight.title}

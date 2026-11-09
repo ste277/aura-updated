@@ -608,8 +608,16 @@ function evalGreenLightExpired(peakEndTimestampIso: string, nowMs: number): bool
   // that new candidate is actually found (not silently missing); M1
   // (further out, past even Gulika's own end) verifies the array
   // eventually, genuinely becomes empty.
+  //
+  // PANCH-OVERLAP-01-I1-F1 -- the real scheduling formula now applies the
+  // SAME +60_000 inclusive-minute correction to the caution's own end that
+  // peakWindow.endTimestamp already got (confirmed F1 defect: without it, a
+  // refetch exactly at the caution's raw endTimestamp would still land
+  // inside its still-active final minute). This test's own expected value
+  // must apply the identical correction, or it would assert a timestamp one
+  // minute earlier than what the real formula actually schedules.
   const cautionEndMs = noNextWindowBriefing.commencementCaution.cautionWindows[0]
-    ? new Date(noNextWindowBriefing.commencementCaution.cautionWindows[0].endTimestamp).getTime()
+    ? new Date(noNextWindowBriefing.commencementCaution.cautionWindows[0].endTimestamp).getTime() + 60_000
     : correctedPeakEnd;
   check(
     'M1a. [REAL FORMULA, PANCH-OVERLAP-01-I1] Shortly after the corrected peak-end boundary (1h), the formula correctly finds the REAL overlapping caution window\'s own end as a future candidate -- not silently missing the caution-boundary transition',

@@ -86,12 +86,31 @@ export interface DailyBriefing {
    * array-order-only result for a commencement decision it was never safe
    * to drive. */
   commencementCaution: {
-    /** True iff a caution window is active at the SAME current minute
-     * activeWindow/briefingState were evaluated for. Only meaningful
-     * (and only ever true) while briefingState is genuinely 'ACTIVE' --
-     * i.e. the caller is currently inside the overlapping half of
-     * peakWindow's span. */
+    /** True iff ANY caution window genuinely contains the current minute
+     * (evaluatePanchangOverlap(windows, minuteOfDay).commencementCaution) --
+     * independent of whether that caution overlaps peakWindow specifically.
+     * PANCH-OVERLAP-01-I1-F1 correction: previously documented (incorrectly)
+     * as "only ever true while briefingState is ACTIVE" -- that was never
+     * actually true of this field's own computation (it has always checked
+     * ALL active windows, not just peakWindow's), and a standalone caution
+     * with no Abhijit overlap at all (e.g. Yama alone, Rahu already ended)
+     * makes this true during 'UPCOMING'/'COMPLETED' too. Use
+     * activeCautionWindows below for the names of the window(s) actually
+     * causing this to be true right now -- never cautionWindows, which
+     * answers a different, static question (see below). */
     activeNow: boolean;
+    /** Every caution window that genuinely contains the CURRENT minute
+     * (the same windows activeNow's boolean is derived from) -- dynamic,
+     * re-evaluated per minuteOfDay. This is the ONLY correct source for any
+     * "also active right now"/"also applies right now" text. May contain
+     * more than one entry (Wednesday's exact boundary minute, where
+     * Gulika's and Rahu's spans meet). Empty when activeNow is false. */
+    activeCautionWindows: Array<{
+      name: string;
+      windowType: SolarWindowType;
+      startTime: string;
+      endTime: string;
+    }>;
     /** True iff ANY caution window's span overlaps ANY part of
      * peakWindow's own span TODAY -- a static, whole-day fact independent
      * of the current minute. Lets a consumer qualify 'UPCOMING' framing
@@ -99,10 +118,15 @@ export interface DailyBriefing {
      * framing. */
     overlapsPeakWindow: boolean;
     /** Every caution window (full detail, factual, never hidden) whose
-     * span overlaps peakWindow's span today. May contain more than one
-     * entry (confirmed real on Wednesdays, where Gulika's second half and
-     * Rahu Kalam's first half both fall inside Abhijit's span). Empty when
-     * overlapsPeakWindow is false. */
+     * span overlaps peakWindow's span today -- STATIC, independent of the
+     * current minute (do not use this for "active right now" text; see
+     * activeCautionWindows above). May contain more than one entry
+     * (confirmed real on Wednesdays, where Gulika's second half and Rahu
+     * Kalam's first half both fall inside Abhijit's span). Empty when
+     * overlapsPeakWindow is false. Also the correct source for scheduling a
+     * refresh at this caution's own start/end, since those are exactly the
+     * instants peakWindow-specific guidance (Green Light/Next Action) needs
+     * to re-evaluate at. */
     cautionWindows: Array<{
       name: string;
       windowType: SolarWindowType;
@@ -286,21 +310,32 @@ export function buildDailyBriefing(context: DailyAssistantContext): DailyBriefin
           : 'COMPLETED' as const,
     }));
 
-  // PANCH-OVERLAP-01-I1 -- commencementCaution. `activeNow` uses the SAME
-  // shared evaluatePanchangOverlap() policy Timing Search's
-  // resolveOverlappingCandidate() is built on, evaluated at this exact
-  // minuteOfDay -- true only while a caution window genuinely overlaps
-  // "right now". `overlapsPeakWindow`/`cautionWindows` are a separate,
-  // static (minute-independent) fact about peakWindow's own span, so an
+  // PANCH-OVERLAP-01-I1 / -F1 -- commencementCaution. `activeNow`/
+  // `activeCautionWindows` use the SAME shared evaluatePanchangOverlap()
+  // policy Timing Search's resolveOverlappingCandidate() is built on,
+  // evaluated at this exact minuteOfDay -- true, and naming exactly the
+  // window(s), only while a caution window genuinely overlaps "right now".
+  // `overlapsPeakWindow`/`cautionWindows` are a SEPARATE, static
+  // (minute-independent) fact about peakWindow's own span, so an
   // 'UPCOMING' consumer can qualify its framing honestly before the window
-  // has even started, not only its 'ACTIVE' framing.
+  // has even started, not only its 'ACTIVE' framing -- but they must never
+  // be used to name what's active right now (F1 fix: a consumer that did
+  // this could name a caution that already ended, or miss a standalone
+  // caution with no Abhijit overlap at all).
+  const currentOverlap = evaluatePanchangOverlap(windows, minuteOfDay);
   const cautionWindowsOverlappingPeak = peak
     ? windows.filter(
         (w) => isInauspiciousCommencementWindow(w.type) && intervalsOverlap(peak.startMinutes, peak.endMinutes, w.startMinutes, w.endMinutes)
       )
     : [];
   const commencementCaution = {
-    activeNow: evaluatePanchangOverlap(windows, minuteOfDay).commencementCaution,
+    activeNow: currentOverlap.commencementCaution,
+    activeCautionWindows: currentOverlap.cautionWindows.map((w) => ({
+      name: w.label,
+      windowType: w.type,
+      startTime: formatMinute(w.startMinutes),
+      endTime: formatMinute(w.endMinutes),
+    })),
     overlapsPeakWindow: cautionWindowsOverlappingPeak.length > 0,
     cautionWindows: cautionWindowsOverlappingPeak.map((w) => ({
       name: w.label,

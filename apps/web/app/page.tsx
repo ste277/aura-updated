@@ -597,8 +597,20 @@ export default function DashboardPage() {
     // single-timer mechanism -- these are additional candidates in the
     // same "soonest future transition" list, not a second timer.
     for (const cautionWindow of dailyBriefing.commencementCaution?.cautionWindows ?? []) {
+      // PANCH-OVERLAP-01-I1-F1 -- the caution's own START is not subject to
+      // the inclusive-minute issue (a window simply isn't active yet before
+      // its start minute, so scheduling exactly at startTimestamp is
+      // correct as-is, same as nextWindow.startTimestamp above never needing
+      // a correction). Its END needs the SAME +60_000 correction
+      // peakWindow.endTimestamp already gets above, for the identical
+      // reason: getActiveWindow/evaluatePanchangOverlap treat a window's
+      // end minute as inclusive, so refetching exactly AT endTimestamp would
+      // still land inside the caution's still-active final minute and come
+      // back unchanged -- this was a confirmed, reproducible bug (a
+      // long-mounted tab could keep the caution caveat visible for the rest
+      // of the day on a fixture with no later transition to catch it).
       candidateTimestamps.push(new Date(cautionWindow.startTimestamp).getTime());
-      candidateTimestamps.push(new Date(cautionWindow.endTimestamp).getTime());
+      candidateTimestamps.push(new Date(cautionWindow.endTimestamp).getTime() + 60_000);
     }
     const now = Date.now();
     const futureTimestamps = candidateTimestamps.filter((t) => Number.isFinite(t) && t > now);
