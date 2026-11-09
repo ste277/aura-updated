@@ -169,6 +169,21 @@ export default function DashboardPage() {
   // the same Promise.all keep their existing (unguarded) behavior; this
   // ticket's scope is the Daily Assistant briefing specifically.
   const dailyBriefingRequestIdRef = useRef(0);
+  // HOME-RHYTHM-01-I1-F1 -- when the most recent loadAssistantSignals()
+  // call STARTED (not resolved); used only by the bounded
+  // visibility-restoration refresh below to decide whether a resumed tab
+  // is stale enough to be worth a fresh fetch. Never read by anything that
+  // affects what is displayed -- display state is still governed entirely
+  // by isLatestBriefingRequest()/dailyBriefingStatus, unchanged.
+  const lastBriefingFetchStartedAtRef = useRef(0);
+  // HOME-RHYTHM-01-I1-F3 -- counts consecutive fetches that came back
+  //'ACTIVE' for a peak window whose own (corrected, +60s) endTimestamp is
+  // already in the client's past -- client/server clock skew, not a real
+  // data problem. Reset to 0 by the retry effect below on any fetch that
+  // ISN'T in that inconsistent state (including a normal user/location
+  // change, which already triggers a fresh loadAssistantSignals() via the
+  // mount effect and therefore a fresh, usually-consistent dailyBriefing).
+  const clockSkewRetryCountRef = useRef(0);
   // Home Good Right Now Personalization V1 -- the owner's derived natal
   // context (never raw birth date/time/timezone), returned as a sibling
   // field alongside DailyBriefing by the SAME existing
@@ -449,6 +464,7 @@ export default function DashboardPage() {
   // handling, and state updates are unchanged; only the shape moved.
   const loadAssistantSignals = useCallback(async () => {
     const dailyBriefingRequestId = ++dailyBriefingRequestIdRef.current;
+    lastBriefingFetchStartedAtRef.current = Date.now();
     try {
       const [briefingRes, insightRes, reflectionRes, goalReportingRes] = await Promise.all([
         fetch('/api/daily-assistant/briefing'),
@@ -523,6 +539,149 @@ export default function DashboardPage() {
     if (!user) return;
     loadAssistantSignals();
   }, [user?.id, loadAssistantSignals]);
+
+  // HOME-RHYTHM-01-I1-F1 -- long-mounted-tab freshness, scheduled
+  // transition. dailyBriefing/dailyBriefingStatus are computed once per
+  // loadAssistantSignals() call, at fetch time; a tab left open past a
+  // timing boundary (e.g. past peakWindow's own end) would otherwise go on
+  // showing a Green Light/nextAction line describing a window that has
+  // since expired, with nothing to trigger a re-fetch until a location/
+  // user change. This schedules exactly ONE bounded timer per successful
+  // 'available' briefing -- re-calling the EXISTING loadAssistantSignals()
+  // (reusing its own isLatestBriefingRequest guard completely unchanged,
+  // never a new fetch path or a parallel state write) at the next real
+  // transition THIS briefing already told us about: peakWindow.endTimestamp
+  // (only while briefingState isn't already 'COMPLETED') or
+  // nextWindow.startTimestamp, whichever is sooner and still in the
+  // future. Never continuous polling -- cleared and re-derived from
+  // scratch every time a fresh briefing arrives (including the one this
+  // very timer causes), and on unmount. If a scheduled refresh itself
+  // fails or returns a non-OK/unavailable result, loadAssistantSignals'
+  // own existing branches handle it exactly as any other failure already
+  // would (clears to 'error'/'unavailable', never silently keeps the
+  // expired favorable copy) -- this effect adds no new error handling of
+  // its own, it only decides WHEN to call the same function again.
+  const briefingRefreshTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  useEffect(() => {
+    if (briefingRefreshTimerRef.current) {
+      clearTimeout(briefingRefreshTimerRef.current);
+      briefingRefreshTimerRef.current = null;
+    }
+    if (dailyBriefingStatus !== 'available' || !dailyBriefing) return undefined;
+    const candidateTimestamps: number[] = [];
+    if (dailyBriefing.briefingState !== 'COMPLETED' && dailyBriefing.peakWindow.endTimestamp) {
+      // HOME-RHYTHM-01-I1-F2 -- peakWindow.endTimestamp is the START of the
+      // final INCLUSIVE minute (packages/panchang/src/windows.ts's
+      // getActiveWindow treats `endMinutes` as inclusive: `currentMinuteOfDay
+      // <= w.endMinutes`), not its end. Scheduling the refetch exactly AT
+      // endTimestamp would land inside that still-active final minute and
+      // come back 'ACTIVE' again, never triggering a transition out of the
+      // stale recommendation on a day with no nextWindow. +60_000ms is pure
+      // UTC-instant arithmetic on an already-resolved absolute timestamp
+      // (DST-safe -- the local-to-UTC conversion already happened inside
+      // localInstantForMinute()), landing on the first EXCLUSIVE instant
+      // after the window truly ends.
+      candidateTimestamps.push(new Date(dailyBriefing.peakWindow.endTimestamp).getTime() + 60_000);
+    }
+    if (dailyBriefing.nextWindow?.startTimestamp) {
+      candidateTimestamps.push(new Date(dailyBriefing.nextWindow.startTimestamp).getTime());
+    }
+    const now = Date.now();
+    const futureTimestamps = candidateTimestamps.filter((t) => Number.isFinite(t) && t > now);
+    if (futureTimestamps.length === 0) return undefined;
+    const delayMs = Math.min(...futureTimestamps) - now;
+    briefingRefreshTimerRef.current = setTimeout(() => {
+      briefingRefreshTimerRef.current = null;
+      loadAssistantSignals();
+    }, delayMs);
+    return () => {
+      if (briefingRefreshTimerRef.current) {
+        clearTimeout(briefingRefreshTimerRef.current);
+        briefingRefreshTimerRef.current = null;
+      }
+    };
+  }, [dailyBriefing, dailyBriefingStatus, loadAssistantSignals]);
+
+  // HOME-RHYTHM-01-I1-F3 -- bounded clock-skew recovery. The scheduling
+  // effect above already corrects the KNOWN inclusive-minute boundary
+  // (+60s), but a few seconds of genuine client/server clock disagreement
+  // can still make a FRESH fetch come back `briefingState: 'ACTIVE'` for a
+  // peak whose own corrected endTimestamp is already in the client's past
+  // -- exactly the condition HomeDashboard's own independent
+  // `greenLightExpired` guard (same +60s correction) already uses to hide
+  // the stale Green Light/nextAction text, so the UI stays honest
+  // regardless of whether this retry ever runs or succeeds. This effect is
+  // a RECOVERY convenience only: on detecting that specific inconsistency,
+  // it schedules ONE short re-fetch (reusing the existing
+  // loadAssistantSignals(), never a new fetch path or state-write), with a
+  // small bounded attempt budget so persistent skew (or a server that is
+  // itself simply slow to roll over) can never become a retry storm. Any
+  // fetch that resolves WITHOUT that inconsistency (including the normal
+  // case, and including after a user/location change already triggers its
+  // own fresh fetch via the mount effect above) resets the counter to 0.
+  const clockSkewRetryTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  useEffect(() => {
+    if (clockSkewRetryTimerRef.current) {
+      clearTimeout(clockSkewRetryTimerRef.current);
+      clockSkewRetryTimerRef.current = null;
+    }
+    if (dailyBriefingStatus !== 'available' || !dailyBriefing) return undefined;
+    const endTimestamp = dailyBriefing.peakWindow?.endTimestamp;
+    const isClockSkewInconsistent =
+      dailyBriefing.briefingState === 'ACTIVE' &&
+      Boolean(endTimestamp) &&
+      new Date(endTimestamp as string).getTime() + 60_000 <= Date.now();
+    if (!isClockSkewInconsistent) {
+      clockSkewRetryCountRef.current = 0;
+      return undefined;
+    }
+    const MAX_CLOCK_SKEW_RETRIES = 2;
+    const CLOCK_SKEW_RETRY_DELAY_MS = 45_000;
+    if (clockSkewRetryCountRef.current >= MAX_CLOCK_SKEW_RETRIES) return undefined;
+    clockSkewRetryCountRef.current += 1;
+    clockSkewRetryTimerRef.current = setTimeout(() => {
+      clockSkewRetryTimerRef.current = null;
+      loadAssistantSignals();
+    }, CLOCK_SKEW_RETRY_DELAY_MS);
+    return () => {
+      if (clockSkewRetryTimerRef.current) {
+        clearTimeout(clockSkewRetryTimerRef.current);
+        clockSkewRetryTimerRef.current = null;
+      }
+    };
+  }, [dailyBriefing, dailyBriefingStatus, loadAssistantSignals]);
+
+  // HOME-RHYTHM-01-I1-F1 -- long-mounted-tab freshness, visibility
+  // restoration. The scheduled-transition timer above can be unreliable
+  // while a tab/app is backgrounded (many platforms suspend JS timers), so
+  // a tab resumed after a long background period could still show a
+  // briefing well past its computed transition with no pending timer left
+  // to catch it. On becoming visible again, if more than
+  // STALE_AFTER_MS has passed since the last fetch attempt STARTED, this
+  // re-calls the SAME existing loadAssistantSignals() once -- bounded
+  // (checked only on this one transition, never a poll loop), still fully
+  // governed by the unchanged isLatestBriefingRequest guard, so a slow
+  // response from the just-superseded earlier call can never overwrite
+  // whatever this new call resolves to. This does not guarantee a
+  // backgrounded tab never shows stale content WHILE backgrounded (that is
+  // unobservable to the user by definition) -- it only guarantees a
+  // bounded re-check specifically on the resume transition, which is the
+  // moment a stale value would actually become visible again.
+  useEffect(() => {
+    const STALE_AFTER_MS = 15 * 60 * 1000;
+    const handleVisibilityChange = () => {
+      if (document.visibilityState !== 'visible') return;
+      // HOME-RHYTHM-01-I1-F2 -- without this guard, a visitor who is not
+      // logged in (or whose session ended) could still trigger this
+      // authenticated fetch on tab-visibility restoration, same guard the
+      // mount effect above already applies before its own first call.
+      if (!user) return;
+      if (Date.now() - lastBriefingFetchStartedAtRef.current < STALE_AFTER_MS) return;
+      loadAssistantSignals();
+    };
+    document.addEventListener('visibilitychange', handleVisibilityChange);
+    return () => document.removeEventListener('visibilitychange', handleVisibilityChange);
+  }, [loadAssistantSignals, user]);
 
   // New Aura Home V1 -- GET /api/daily-assistant/guidance, same
   // best-effort fetch discipline as loadAssistantSignals/loadMyDay above

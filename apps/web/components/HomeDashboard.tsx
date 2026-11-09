@@ -742,6 +742,82 @@ export function HomeDashboard({
   const skippablePlanIdNow = skippablePlanId(rightNowState);
   const moveablePlanIdNow = moveablePlanId(rightNowState);
 
+  // HOME-RHYTHM-01-I1-F2 -- independent client-side Green Light eligibility
+  // guard. `dailyBriefing.briefingState` alone is NOT trusted as proof the
+  // peak window is still current: packages/panchang/src/windows.ts's
+  // getActiveWindow() treats `endMinutes` as INCLUSIVE, so a server response
+  // computed anywhere during that final minute (including a stale/delayed
+  // one that started before the window truly ended but resolves after) can
+  // legitimately say `briefingState: 'ACTIVE'` even though real wall-clock
+  // time has already passed the window's true end. This hook derives
+  // eligibility from `peakWindow.endTimestamp` (the real producer timestamp,
+  // confirmed computed via localInstantForMinute -- always a :00.000-aligned
+  // instant for the START of that inclusive final minute) plus a 60-second
+  // (one-minute) correction to land on the first EXCLUSIVE instant, and
+  // compares it directly against the client's own clock -- never the
+  // server's state label. This is the same correction page.tsx's refresh
+  // timer below now applies when scheduling its own re-fetch; the two are
+  // independent defenses (one decides WHEN to re-fetch, this one decides
+  // WHETHER to currently render, and holds even if the re-fetch is late,
+  // fails, or returns a stale 'ACTIVE' body).
+  const greenLightExpiryMs = useMemo(() => {
+    const iso = dailyBriefing?.peakWindow?.endTimestamp;
+    if (!iso) return null;
+    const end = new Date(iso).getTime();
+    return Number.isFinite(end) ? end + 60_000 : null;
+  }, [dailyBriefing?.peakWindow?.endTimestamp]);
+  const [greenLightExpired, setGreenLightExpired] = useState(
+    () => greenLightExpiryMs !== null && Date.now() >= greenLightExpiryMs
+  );
+  useEffect(() => {
+    if (greenLightExpiryMs === null) {
+      setGreenLightExpired(false);
+      return undefined;
+    }
+    const checkNow = () => {
+      const expired = Date.now() >= greenLightExpiryMs;
+      setGreenLightExpired(expired);
+      return expired;
+    };
+    if (checkNow()) return undefined;
+    // Bounded: exactly one timer, re-derived whenever greenLightExpiryMs
+    // itself changes (a fresh briefing arrived) and cleared on unmount --
+    // never continuous polling. The visibility listener exists because a
+    // backgrounded tab's JS timers are commonly throttled/suspended by the
+    // browser, so resuming the tab re-checks immediately against the real
+    // clock rather than waiting for a possibly-delayed timer to fire.
+    const timer = setTimeout(checkNow, greenLightExpiryMs - Date.now());
+    const handleVisibility = () => {
+      if (document.visibilityState === 'visible') checkNow();
+    };
+    document.addEventListener('visibilitychange', handleVisibility);
+    return () => {
+      clearTimeout(timer);
+      document.removeEventListener('visibilitychange', handleVisibility);
+    };
+  }, [greenLightExpiryMs]);
+
+  // HOME-RHYTHM-01-I1-F3 -- nextAction has FOUR distinct state-dependent
+  // variants from buildNextAction() (dailyAssistant.ts): UPCOMING's
+  // "Prepare X for the peak window" (forward-looking, not an immediacy
+  // claim), ACTIVE's "Do your highest-value X now." (peak-specific,
+  // immediate -- the ONLY variant that asserts the peak is current right
+  // now), the nextWindow-present fallback "Shift to Y at Z" (refers to a
+  // DIFFERENT, later window's own start time -- not invalidated by the
+  // peak's own expiry, and self-correcting since nextWindow.startTimestamp
+  // is already one of the two candidates page.tsx's refresh timer below
+  // schedules against), and the final "Today's key windows are complete..."
+  // fallback (general, not time-sensitive, always accurate once genuinely
+  // COMPLETED with no nextWindow). Only the ACTIVE variant is reachable via
+  // the exact F2 clock-skew defect (a stale response landing just inside
+  // the server's still-inclusive final minute, after which no further
+  // timer may be scheduled) -- so this reuses the SAME greenLightExpired
+  // calculation (never a second, independently-drifting one) and narrows
+  // suppression to specifically `briefingState === 'ACTIVE'`, never
+  // touching UPCOMING/nextWindow/general text, which are not evidence of
+  // anything wrong on their own.
+  const nextActionExpired = dailyBriefing?.briefingState === 'ACTIVE' && greenLightExpired;
+
   // `origin` only chooses where focus lands afterwards (Right Now region vs the resolved Timeline row); the lifecycle path is identical.
   const focusTimelineRow = (planId: string) => setTimeout(() => (document.querySelector<HTMLElement>(`[data-timeline-item-id="plan:${planId}"]`) ?? document.querySelector<HTMLElement>('[data-home-timeline-region]'))?.focus(), 0);
   const handleCompleteRightNow = async (planId: string, origin: 'RIGHT_NOW' | 'TIMELINE' = 'RIGHT_NOW') => {
@@ -1230,7 +1306,15 @@ export function HomeDashboard({
   };
 
   return (
-    <div style={{ display: 'flex', flexDirection: 'column', gap: spacing.xxl, paddingBottom: spacing.xxl, fontFamily: 'sans-serif', color: colors.textPrimary }}>
+    <div style={{ display: 'flex', flexDirection: 'column', gap: spacing.xl, paddingBottom: spacing.xxl, fontFamily: 'sans-serif', color: colors.textPrimary }}>
+      {/* HOME-RHYTHM-01-I1-C -- gap trimmed from spacing.xxl (24) to
+       * spacing.xl (20) between every top-level Home section. No
+       * breakpoint exists in this codebase (confirmed during D1: zero
+       * @media queries under apps/web), so this is a small, universal
+       * tightening rather than a mobile-only rule -- it reduces the
+       * vertical budget consumed before a user reaches Right Now's
+       * actionable content on a narrow viewport without visibly harming
+       * desktop, where the same 4px-per-gap reduction is imperceptible. */}
       <PageHeader
         title={<>{greeting()}, {userName}! 👋</>}
         subtitle={todayLabel()}
@@ -1264,7 +1348,12 @@ export function HomeDashboard({
       {/* ============================================================
        * RIGHT NOW
        * ============================================================ */}
-      <SurfaceCard elevated accentColor={tone.color} padding={spacing.xxl}>
+      {/* HOME-RHYTHM-01-I1-C -- padding trimmed xxl(24)->xl(20); this card
+       * is the single tallest above-the-fold element on mobile (FlowRing +
+       * headline + pill + timing line + description), so its own padding
+       * is the highest-leverage, lowest-risk trim available without
+       * touching the FlowRing/typography/content it wraps. */}
+      <SurfaceCard elevated accentColor={tone.color} padding={spacing.xl}>
         <div style={{ display: 'grid', gridTemplateColumns: '128px minmax(0, 1fr)', gap: spacing.xl, alignItems: 'center' }}>
           <FlowRing score={energyScore} color={tone.color} />
           <div style={{ minWidth: 0 }}>
@@ -1281,6 +1370,71 @@ export function HomeDashboard({
           <span style={{ color: tone.color, display: 'inline-block', marginLeft: spacing.sm }}>{remainingText}</span>
         </div>
         <p style={{ margin: '11px 0 0', color: colors.textFaint, fontSize: 15, lineHeight: 1.42 }}>{tone.description}</p>
+        {/* HOME-RHYTHM-01-I1-A -- dailyBriefing.nextAction/greenLight are
+         * fetched (via loadAssistantSignals' existing stale-request-guarded
+         * fetch, same object already read above for currentWindowLabel/
+         * currentTimeRange) but were never rendered anywhere in the app.
+         * Two distinct concepts, kept visually and semantically separate
+         * per their actual source (dailyAssistant.ts buildDailyBriefing()):
+         * nextAction is a plain timing-state instruction string (never a
+         * scheduled commitment, no activityId exists for it -- informational
+         * only, no action control); greenLight is the peak/active window's
+         * action-card recommendation (title+description+windowType) -- a
+         * favorable-timing suggestion, not a commitment, so its optional
+         * "Plan this" control reuses the exact same title-only,
+         * no-activityId precedent DailyBriefingCard's own "Find time for
+         * focused work" button already uses (onPlanClick('Focused work'))
+         * rather than inventing an identifier greenLight doesn't carry.
+         * Strictly additive single lines, not a new card -- avoids
+         * duplicating goodRightNow[0]/spotlightItem's own, separately
+         * sourced (selectGoodRightNowCards) recommendation+CTA below. Gated
+         * on dailyBriefingStatus === 'available' so a loading/error/
+         * unavailable/stale state (already enforced by the existing
+         * isLatestBriefingRequest() guard in page.tsx) never shows this --
+         * never a fabricated favorable value for any other state.
+         *
+         * HOME-RHYTHM-01-I1-F1 -- greenLight.windowType is always the SAME
+         * window buildDailyBriefing() derives `peak`/`peakWindow`/
+         * `briefingState` from (dailyAssistant.ts: `peak = findWindow(windows,
+         * 'ABHIJIT') ?? windows[0]`; `greenLight.windowType: peak?.type`;
+         * `peakWindow: {name: peakName, startTime: peakStart, endTime:
+         * peakEnd}` built from that SAME `peak`), including in the no-ABHIJIT
+         * fallback branch -- so briefingState is already the authoritative,
+         * non-fabricated temporal-validity signal for greenLight specifically,
+         * not a generic unrelated flag. COMPLETED means peakWindow's own
+         * endTime has passed; showing greenLight's favorable-activity text as
+         * if still current would be misleading (the confirmed P1). No new
+         * data field was needed -- peakWindow/briefingState already fully
+         * describe greenLight's window and its validity. */}
+        {dailyBriefingStatus === 'available' && dailyBriefing && (
+          <div style={{ marginTop: spacing.sm }}>
+            {dailyBriefing.nextAction && !nextActionExpired && (
+              <p style={{ margin: 0, color: colors.textSecondary, fontSize: 13, lineHeight: 1.4 }}>
+                <span style={{ color: colors.textPrimary, fontWeight: 800 }}>Next: </span>
+                {dailyBriefing.nextAction}
+              </p>
+            )}
+            {dailyBriefing.greenLight?.title && dailyBriefing.briefingState !== 'COMPLETED' && !greenLightExpired && (
+              <div style={{ marginTop: 4, display: 'flex', alignItems: 'baseline', gap: spacing.sm, flexWrap: 'wrap' }}>
+                <p style={{ margin: 0, color: colors.textFaint, fontSize: 12, lineHeight: 1.4, fontStyle: 'italic' }}>
+                  {dailyBriefing.briefingState === 'ACTIVE' ? 'Active now: ' : 'Coming up: '}
+                  {dailyBriefing.peakWindow?.name ?? 'Peak window'}
+                  {dailyBriefing.peakWindow?.startTime && dailyBriefing.peakWindow?.endTime
+                    ? ` (${dailyBriefing.peakWindow.startTime}–${dailyBriefing.peakWindow.endTime})`
+                    : ''}
+                  {' — favorable for '}
+                  {dailyBriefing.greenLight.title}
+                  {dailyBriefing.greenLight.description ? ` — ${dailyBriefing.greenLight.description}` : ''}
+                </p>
+                {onPlanClick && (
+                  <TextButton onClick={() => onPlanClick(dailyBriefing.greenLight.title)} style={{ fontSize: 12 }}>
+                    Plan this →
+                  </TextButton>
+                )}
+              </div>
+            )}
+          </div>
+        )}
         {dailyBriefingStatus === 'unavailable' && (
           // PA-3C-C1B-03: honest, non-fabricating disclosure for a
           // legitimate solar no-event condition -- the Right Now card
@@ -1599,6 +1753,7 @@ export function HomeDashboard({
         timezone={effectiveTimezone}
         pendingActivities={myDayPendingActivities}
         nextItemId={myDayAgenda?.nextItem?.id}
+        spotlightItemId={spotlightItem?.id}
         recoverySlot={renderMissedRecovery}
         explanationsById={explanationsById}
         expandedId={expandedTimelineId}
