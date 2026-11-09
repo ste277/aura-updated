@@ -32,6 +32,13 @@
  */
 import { greeting, todayLabel } from '../apps/web/components/HomeDashboard';
 
+/** Captured at module load, before any mocking occurs anywhere in this
+ * file -- the one trustworthy reference to the REAL `Date` constructor,
+ * used only by section G's post-mock restoration checks (never by
+ * `withMockedNow` itself, which captures its own fresh reference from the
+ * live `Date` global at the moment it's called). */
+const RealDateForRestorationCheck = Date;
+
 let passed = 0;
 let failed = 0;
 function check(label: string, condition: boolean): void {
@@ -67,6 +74,47 @@ function instantAtLocalHour(nearUtc: Date, timezone: string, targetHour: number)
     if (realLocalHour(candidate, timezone) === targetHour) return candidate;
   }
   throw new Error(`instantAtLocalHour: no instant found with local hour ${targetHour} in ${timezone} near ${nearUtc.toISOString()}`);
+}
+
+/** HOME-RHYTHM-01-A1-F1-T1 -- the ORIGINAL section G mock, `(Date as any).now
+ * = () => fixedInstant.getTime()`, does not work: overwriting `Date.now`
+ * has zero effect on the zero-argument `new Date()` constructor path (the
+ * exact path `greeting(new Date(), effectiveTimezone)` uses inside
+ * HomeDashboard) -- confirmed directly: `Date.now = () => 0; new Date()`
+ * still returns the real wall-clock time in V8/Node. An independent review
+ * of this file proved the consequence by shifting the real clock and
+ * watching G1-G3 fail. This replaces the GLOBAL `Date` CONSTRUCTOR itself
+ * (not just `.now`) for the duration of `fn`, so every zero-argument `new
+ * Date()` anywhere in the mounted tree -- not only the one call site this
+ * test targets -- observes `fixedInstant`. `new Date(value)`, `Date.parse`,
+ * `Date.UTC`, and `instanceof Date` all delegate to the real `Date`
+ * (`MockDate extends RealDate`), so nothing else in HomeDashboard's render
+ * (several unconditional `new Date()` calls feed other, unrelated `useMemo`s
+ * -- confirmed via source read -- but none of them need anything from the
+ * mock beyond "a valid Date", which they still get) is put at risk.
+ * Restoration happens in `finally`, so a thrown assertion inside `fn` still
+ * restores the real clock. */
+async function withMockedNow<T>(fixedInstant: Date, fn: () => Promise<T>): Promise<T> {
+  const RealDate = Date;
+  class MockDate extends RealDate {
+    constructor(...args: unknown[]) {
+      if (args.length === 0) {
+        super(fixedInstant.getTime());
+      } else {
+        // @ts-ignore -- forwarding an arbitrary constructor-args tuple to the real Date
+        super(...(args as []));
+      }
+    }
+    static now(): number {
+      return fixedInstant.getTime();
+    }
+  }
+  (global as any).Date = MockDate;
+  try {
+    return await fn();
+  } finally {
+    (global as any).Date = RealDate;
+  }
 }
 
 // ============================================================
@@ -266,32 +314,77 @@ async function main() {
       };
     }
 
+    // G1 -- a fixed, genuinely-evening-in-LA instant. Uses the GLOBAL-`Date`
+    // mock (withMockedNow), which -- unlike the original `Date.now`-only
+    // override this replaces -- actually controls the zero-argument
+    // `new Date()` HomeDashboard's render calls.
     const laEvening = instantAtLocalHour(new Date(Date.UTC(2026, 5, 15, 12, 0, 0)), 'America/Los_Angeles', 20);
-    const realNow = Date.now;
-    (Date as any).now = () => laEvening.getTime();
-    const harness = await mount(React.createElement(HomeDashboard, baseProps({ timezone: 'America/Los_Angeles' })));
-    const text = harness.container.textContent || '';
-    check('G1. [REAL DOM] HomeDashboard mounted with timezone="America/Los_Angeles" at a genuinely-evening instant renders "Good Evening" in the actual DOM', text.includes('Good Evening'));
-    check('G2. [REAL DOM] The same mount does NOT render "Good Morning"/"Good Afternoon"', !text.includes('Good Morning') && !text.includes('Good Afternoon'));
-    await harness.unmount();
-    (Date as any).now = realNow;
+    const beforeG1 = RealDateForRestorationCheck.now();
+    const text1 = await withMockedNow(laEvening, async () => {
+      const harness = await mount(React.createElement(HomeDashboard, baseProps({ timezone: 'America/Los_Angeles' })));
+      const text = harness.container.textContent || '';
+      await harness.unmount();
+      return text;
+    });
+    check('G1. [REAL DOM] HomeDashboard mounted with timezone="America/Los_Angeles" at a genuinely-evening instant (real local hour 20, confirmed via the independent Intl oracle) renders "Good Evening" in the actual DOM', text1.includes('Good Evening'));
+    check('G1b. [REAL DOM] The same mount does NOT render "Good Morning"/"Good Afternoon"', !text1.includes('Good Morning') && !text1.includes('Good Afternoon'));
+    check('G1c. [CLOCK RESTORATION] After the mocked span, Date.now() matches real wall-clock time again (generous 10s tolerance) -- proves the global Date override did not leak', Math.abs(RealDateForRestorationCheck.now() - beforeG1) < 10_000 && Date === RealDateForRestorationCheck);
 
-    // Same instant, no timezone prop at all -> falls back to FALLBACK_HOME_TZ
-    // (Asia/Kolkata, confirmed from source) -- a genuinely different real
-    // local hour for this same UTC instant, so the rendered greeting must
-    // differ from the America/Los_Angeles mount above if the fallback is
-    // truly still wired through to greeting() correctly.
-    (Date as any).now = () => laEvening.getTime();
-    const harness2 = await mount(React.createElement(HomeDashboard, baseProps({})));
-    const text2 = harness2.container.textContent || '';
-    const kolkataHourAtThatInstant = realLocalHour(laEvening, 'Asia/Kolkata');
-    const expectedFallbackGreeting = kolkataHourAtThatInstant >= 17 ? 'Good Evening' : kolkataHourAtThatInstant >= 12 ? 'Good Afternoon' : 'Good Morning';
+    // G2 -- a DIFFERENT fixed instant, genuinely morning in the SAME
+    // timezone. This is the case that makes it impossible for G1 to "pass
+    // by accident" the way the original ineffective mock could (any real
+    // wall-clock time would make at most one of G1/G2 true, never both,
+    // unless the mock is genuinely controlling the clock).
+    const laMorning = instantAtLocalHour(new Date(Date.UTC(2026, 5, 15, 12, 0, 0)), 'America/Los_Angeles', 9);
+    const text2 = await withMockedNow(laMorning, async () => {
+      const harness = await mount(React.createElement(HomeDashboard, baseProps({ timezone: 'America/Los_Angeles' })));
+      const text = harness.container.textContent || '';
+      await harness.unmount();
+      return text;
+    });
+    check('G2. [REAL DOM] A DIFFERENT fixed instant, genuinely morning in America/Los_Angeles (real local hour 9), renders "Good Morning" for the SAME timezone G1 used', text2.includes('Good Morning'));
+    check('G2b. [REAL DOM] The same mount does NOT render "Good Evening"/"Good Afternoon"', !text2.includes('Good Evening') && !text2.includes('Good Afternoon'));
+
+    // G3 -- ONE fixed instant, mounted twice with two different
+    // `timezone` props that the independent Intl oracle confirms disagree
+    // on the greeting period at that instant. Each mount must reflect its
+    // OWN configured effective timezone, never the other one and never
+    // whatever the test process's real local time/zone happens to be.
+    const g3Instant = new Date(Date.UTC(2026, 5, 15, 3, 0, 0)); // reuses section C's instant: ~08:30 IST, ~20:00 PDT
+    const g3KolkataHour = realLocalHour(g3Instant, 'Asia/Kolkata');
+    const g3LaHour = realLocalHour(g3Instant, 'America/Los_Angeles');
+    check('G3a. Sanity: the chosen fixed instant genuinely disagrees between Kolkata and Los Angeles (reused from section C, re-confirmed here)', g3KolkataHour !== g3LaHour);
+    const expectedKolkata = g3KolkataHour >= 17 ? 'Good Evening' : g3KolkataHour >= 12 ? 'Good Afternoon' : 'Good Morning';
+    const expectedLa = g3LaHour >= 17 ? 'Good Evening' : g3LaHour >= 12 ? 'Good Afternoon' : 'Good Morning';
+    const [textKolkata, textLa] = await withMockedNow(g3Instant, async () => {
+      const harnessK = await mount(React.createElement(HomeDashboard, baseProps({ timezone: 'Asia/Kolkata' })));
+      const tK = harnessK.container.textContent || '';
+      await harnessK.unmount();
+      const harnessL = await mount(React.createElement(HomeDashboard, baseProps({ timezone: 'America/Los_Angeles' })));
+      const tL = harnessL.container.textContent || '';
+      await harnessL.unmount();
+      return [tK, tL];
+    });
+    check(`G3b. [REAL DOM] For the SAME fixed instant, mounting with timezone="Asia/Kolkata" renders its own expected greeting ("${expectedKolkata}")`, textKolkata.includes(expectedKolkata));
+    check(`G3c. [REAL DOM] For the SAME fixed instant, mounting with timezone="America/Los_Angeles" renders its own, DIFFERENT expected greeting ("${expectedLa}")`, textLa.includes(expectedLa));
+    check('G3d. [REAL DOM] The two mounts at the identical instant render genuinely different greeting text -- each followed its own configured effective timezone, never a shared/stale one', textKolkata !== textLa || expectedKolkata === expectedLa);
+
+    // G4 -- fallback convention (no timezone prop -> FALLBACK_HOME_TZ,
+    // confirmed from source as Asia/Kolkata) still flows through correctly
+    // after this test-only correction (unchanged from the original intent
+    // of the superseded G3 case).
+    const fallbackHour = realLocalHour(laEvening, 'Asia/Kolkata');
+    const expectedFallbackGreeting = fallbackHour >= 17 ? 'Good Evening' : fallbackHour >= 12 ? 'Good Afternoon' : 'Good Morning';
+    const textFallback = await withMockedNow(laEvening, async () => {
+      const harness = await mount(React.createElement(HomeDashboard, baseProps({})));
+      const text = harness.container.textContent || '';
+      await harness.unmount();
+      return text;
+    });
     check(
-      `G3. [REAL DOM] With no timezone prop (falls back to FALLBACK_HOME_TZ=Asia/Kolkata per source), the rendered greeting matches the real Kolkata local hour at this instant ("${expectedFallbackGreeting}") -- confirms the existing, unmodified fallback convention still flows through to the fixed greeting()`,
-      text2.includes(expectedFallbackGreeting)
+      `G4. [REAL DOM] With no timezone prop (falls back to FALLBACK_HOME_TZ=Asia/Kolkata per source), the rendered greeting matches the real Kolkata local hour at this instant ("${expectedFallbackGreeting}") -- confirms the existing, unmodified fallback convention still flows through to the fixed greeting()`,
+      textFallback.includes(expectedFallbackGreeting)
     );
-    await harness2.unmount();
-    (Date as any).now = realNow;
   } catch (e: any) {
     if (e?.code === 'MODULE_NOT_FOUND' || /Cannot find module/.test(String(e?.message))) {
       check('G. [REAL DOM -- SKIPPED, not run under the jsdom-tests tsconfig] Section G requires `npx ts-node --project tsconfig.jsdom-tests.json`; sections A-F above already cover the underlying logic without jsdom', true);
