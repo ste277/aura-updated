@@ -12,6 +12,7 @@ import type { AuraUpdate } from '../lib/auraUpdates';
 import type { AuraReminder } from '../lib/auraReminders';
 import { formatReminderTiming } from '../lib/auraReminders';
 import { triggerHaptic } from '../lib/haptics';
+import { getMinuteOfDayInTimezone } from '../lib/timezone';
 import { trackEvent } from '../lib/trackEvent';
 import { resolveHomeAskAuraSubmission } from '../lib/homeAskAuraHandoff';
 import * as theme from './theme';
@@ -319,12 +320,24 @@ function formatWindowName(name: string) {
   return formatted.toUpperCase() === 'NEUTRAL' ? 'Neutral Flow' : formatted;
 }
 
-function todayLabel() {
-  return new Date().toLocaleDateString('en-US', { weekday: 'long', month: 'short', day: 'numeric', year: 'numeric' });
+/** HOME-RHYTHM-01-A1-F1 -- `now`/`timezone` are threaded in explicitly (same
+ * convention as `defaultMoveSelection(new Date(), effectiveTimezone)` and
+ * every other timezone-aware call in this file) so the date label reflects
+ * the account's resolved location, never the viewing device's own clock. */
+export function todayLabel(now: Date, timezone: string) {
+  return now.toLocaleDateString('en-US', { weekday: 'long', month: 'short', day: 'numeric', year: 'numeric', timeZone: timezone });
 }
 
-function greeting() {
-  const hour = new Date().getHours();
+/** HOME-RHYTHM-01-A1-F1 -- previously `new Date().getHours()`, which read the
+ * VIEWING DEVICE's local hour regardless of the account's own confirmed
+ * location -- a user in Los Angeles evening whose device happened to be set
+ * to a morning timezone saw "Good Morning" above evening-specific Right Now
+ * content. Reuses `getMinuteOfDayInTimezone` (lib/timezone.ts), the exact
+ * same helper `useCurrentMinuteOfDay` already uses to drive `currentMinuteOfDay`
+ * every 30s -- no new timezone-conversion code, no new fallback hierarchy.
+ * Thresholds/wording unchanged (>=17 Evening, >=12 Afternoon, else Morning). */
+export function greeting(now: Date, timezone: string) {
+  const hour = Math.floor(getMinuteOfDayInTimezone(timezone, now) / 60);
   if (hour >= 17) return 'Good Evening';
   if (hour >= 12) return 'Good Afternoon';
   return 'Good Morning';
@@ -1316,8 +1329,8 @@ export function HomeDashboard({
        * actionable content on a narrow viewport without visibly harming
        * desktop, where the same 4px-per-gap reduction is imperceptible. */}
       <PageHeader
-        title={<>{greeting()}, {userName}! 👋</>}
-        subtitle={todayLabel()}
+        title={<>{greeting(new Date(), effectiveTimezone)}, {userName}! 👋</>}
+        subtitle={todayLabel(new Date(), effectiveTimezone)}
         rightAction={
           <IconButton
             onClick={onNotificationsClick}
