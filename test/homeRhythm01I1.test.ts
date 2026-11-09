@@ -84,7 +84,7 @@ check(
 check(
   "B5. The nextAction line has no onClick/button attached to it directly (informational only -- never implies an already-scheduled commitment)",
   (() => {
-    const match = homeDashboardSrc.match(/\{dailyBriefing\.nextAction && \(([\s\S]*?)\)\}/);
+    const match = homeDashboardSrc.match(/\{dailyBriefing\.nextAction && !nextActionExpired && \(([\s\S]*?)\)\}/);
     return !!match && !/onClick/.test(match[1]);
   })()
 );
@@ -193,7 +193,10 @@ check('F2. HomeDashboard.tsx introduces no new fetch/useEffect data-fetching for
 // authoritative check, this is a cheap regression tripwire).
 // ============================================================
 
-check('G1. dailyAssistant.ts (the DailyBriefing producer) was not modified by this PR -- buildDailyBriefing()\'s greenLight/nextAction construction is untouched', /nextAction: buildNextAction\(briefingState, action\.title, nextWindow\)/.test(fs.readFileSync('packages/recommendation/src/dailyAssistant.ts', 'utf8')));
+check(
+  'G1. dailyAssistant.ts\'s greenLight/nextAction CONSTRUCTION logic itself is untouched by this PR -- F1 added two additive, optional type fields (peakWindow.endTimestamp/nextWindow.startTimestamp) to let consumers detect expiry, but buildNextAction()/the greenLight object-literal construction were never edited',
+  /nextAction: buildNextAction\(briefingState, action\.title, nextWindow\)/.test(fs.readFileSync('packages/recommendation/src/dailyAssistant.ts', 'utf8'))
+);
 
 // ============================================================
 // H. HOME-RHYTHM-01-I1-F1 -- P1 fix: Green Light temporal correctness.
@@ -295,15 +298,31 @@ check('H9. Solar-unavailable input still throws SolarNoEventError (the P1 fix to
 })());
 
 // ============================================================
-// I. HOME-RHYTHM-01-I1-F1 -- P2 fix: long-mounted-tab freshness. No DOM/
-// timer harness exists in this repo (confirmed during D1), so this
-// verifies the real producer gives the consumer everything it needs
-// (section H4 above) plus the structural shape of the scheduling effect:
-// derives its delay from peakWindow.endTimestamp/nextWindow.startTimestamp,
-// calls the SAME existing loadAssistantSignals (never a new fetch), clears
-// clears its timer on every re-run/unmount (bounded, not polling), and the
-// visibility-restoration refresh is gated on a real elapsed-time check
-// and also reuses loadAssistantSignals.
+// I. HOME-RHYTHM-01-I1-F1 -- P2 fix: long-mounted-tab freshness.
+// `test/jsdomReactHarness.ts` DOES exist in this repo and genuinely mounts
+// real React components in real jsdom (an earlier version of this comment
+// incorrectly claimed otherwise -- corrected during the F3 round after
+// independent review flagged it). It is not used for THIS section because
+// page.tsx (the file these checks are about) is a large orchestration
+// component -- session bootstrap plus roughly a dozen independent
+// fetches -- that the harness was never built to drive; mounting it would
+// require stubbing most of that unrelated surface just to reach this one
+// effect. These checks instead verify the real producer gives the
+// consumer everything it needs (section H4 above) plus the structural
+// shape of the scheduling effect: derives its delay from
+// peakWindow.endTimestamp/nextWindow.startTimestamp, calls the SAME
+// existing loadAssistantSignals (never a new fetch), clears its timer on
+// every re-run/unmount (bounded, not polling), and the visibility-
+// restoration refresh is gated on a real elapsed-time check and also
+// reuses loadAssistantSignals. Section N (added in F3) goes one step
+// further for the clock-skew retry effect specifically, by extracting and
+// evaluating its REAL source text against real inputs (the same technique
+// section J already uses for HomeTimeline's formulas) rather than only
+// confirming structural shape. The genuinely mounted-component, real-DOM
+// evidence for this PR's F3 fix itself lives in the separate
+// test/homeRhythm01I1F3JsdomBehavioral.test.ts, which mounts the real
+// HomeDashboard (a React component with a far smaller, mostly-optional
+// prop surface than page.tsx).
 // ============================================================
 
 check(
@@ -503,13 +522,22 @@ function evalGreenLightExpired(peakEndTimestampIso: string, nowMs: number): bool
   // it genuinely scheduled at the raw, uncorrected endTimestamp -- then pair
   // that historical fact with K2 above (the REAL producer proving
   // briefingState is still ACTIVE at exactly that instant) as the complete
-  // real-code-paths red/green evidence the ticket requires.
-  const f1HeadSource = execSync('git show 6a3d89bb49f8d10079e99921bb33c838b2a5c390:apps/web/app/page.tsx', { cwd: __dirname + '/..', encoding: 'utf8' });
-  check(
-    'L1b [RED, from the real F1 commit]. The actual committed source at F1 head (6a3d89bb) schedules its refresh timer at the RAW, uncorrected peakWindow.endTimestamp (no +60_000) -- combined with K2 above (the real producer still reporting ACTIVE at that exact instant), this is direct evidence the F1 commit\'s own refresh timer would fire during the still-active final minute and receive ACTIVE back',
-    /candidateTimestamps\.push\(new Date\(dailyBriefing\.peakWindow\.endTimestamp\)\.getTime\(\)\);/.test(f1HeadSource)
-    && !/candidateTimestamps\.push\(new Date\(dailyBriefing\.peakWindow\.endTimestamp\)\.getTime\(\) \+ 60_000\);/.test(f1HeadSource)
-  );
+  // real-code-paths red/green evidence the ticket requires. Best-effort: a
+  // squash merge will eventually make this specific historical commit SHA
+  // unreachable from a fresh clone of `main` -- when that happens this one
+  // check SKIPS (printed, not silently dropped) rather than crashing the
+  // whole suite; L1/L2-L5 above (synthetic, SHA-independent) and L1c below
+  // remain the durable, always-available evidence.
+  try {
+    const f1HeadSource = execSync('git show 6a3d89bb49f8d10079e99921bb33c838b2a5c390:apps/web/app/page.tsx', { cwd: __dirname + '/..', encoding: 'utf8' });
+    check(
+      'L1b [RED, from the real F1 commit]. The actual committed source at F1 head (6a3d89bb) schedules its refresh timer at the RAW, uncorrected peakWindow.endTimestamp (no +60_000) -- combined with K2 above (the real producer still reporting ACTIVE at that exact instant), this is direct evidence the F1 commit\'s own refresh timer would fire during the still-active final minute and receive ACTIVE back',
+      /candidateTimestamps\.push\(new Date\(dailyBriefing\.peakWindow\.endTimestamp\)\.getTime\(\)\);/.test(f1HeadSource)
+      && !/candidateTimestamps\.push\(new Date\(dailyBriefing\.peakWindow\.endTimestamp\)\.getTime\(\) \+ 60_000\);/.test(f1HeadSource)
+    );
+  } catch (err) {
+    console.log('SKIP L1b. [HISTORICAL] F1-head SHA 6a3d89bb is no longer reachable in this checkout (expected after a squash merge) -- L1/L2-L5/L1c remain the durable evidence; this specific historical comparison is best-effort only.');
+  }
   check(
     'L1c [GREEN, from the real current source]. The current pageSrc (this PR\'s actual head, not a re-implementation) schedules at endTimestamp + 60_000 -- the corrected, exclusive boundary',
     /candidateTimestamps\.push\(new Date\(dailyBriefing\.peakWindow\.endTimestamp\)\.getTime\(\) \+ 60_000\);/.test(pageSrc)
@@ -529,18 +557,64 @@ function evalGreenLightExpired(peakEndTimestampIso: string, nowMs: number): bool
 // ============================================================
 
 {
-  // Reproduces page.tsx's own candidate-timestamp derivation (the +60_000
-  // correction applied to peakWindow.endTimestamp, nextWindow.startTimestamp
-  // used as-is) and confirms: given a briefing whose peak just expired with
-  // no nextWindow (the K7/K8 fixture), scheduling now correctly finds NO
-  // future candidate from the (already past) corrected peak-end, matching
-  // the real "no further producer-side timer" case H11's visibility-restore
-  // path exists specifically to cover.
+  // M1 (as originally written) filtered a value derived from its own
+  // "simulatedNow" against that same simulatedNow -- it could never fail,
+  // regardless of whether the real scheduling formula was correct (flagged
+  // by independent review during the F3 round). Fixed by extracting the
+  // ACTUAL candidate-timestamp block's source text from pageSrc (the exact
+  // technique sections J/L1b already use) and evaluating it with real
+  // DailyBriefing fixtures -- a genuine regression tripwire against the
+  // real implementation, checked on BOTH sides (empty when it must be
+  // empty, non-empty with the right value when it must not be) so an
+  // inverted or broken filter would actually be caught.
+  const candidateBlockMatch = pageSrc.match(/const candidateTimestamps: number\[\] = \[\];[\s\S]*?const futureTimestamps = candidateTimestamps\.filter\(\(t\) => Number\.isFinite\(t\) && t > now\);/);
+  if (!candidateBlockMatch) throw new Error('M1: could not locate the candidateTimestamps/futureTimestamps block in page.tsx -- extraction target moved');
+  function computeFutureCandidates(dailyBriefingArg: unknown, nowMs: number): number[] {
+    // Strip the TS-only `: number[]` type annotation before handing this to
+    // `new Function` -- it evaluates as plain JS, not TypeScript, and the
+    // extracted text is otherwise byte-identical to pageSrc. The extracted
+    // body itself declares its OWN `const now = Date.now();` (real source
+    // text), so the controllable input is Date.now() itself, not a second
+    // `now` parameter (which would collide with that declaration).
+    const jsBody = candidateBlockMatch![0].replace('const candidateTimestamps: number[] = [];', 'const candidateTimestamps = [];');
+    // eslint-disable-next-line no-new-func -- evaluating source text extracted above, not user input
+    const fn = new Function('dailyBriefing', `${jsBody}\nreturn futureTimestamps;`);
+    const realNow = Date.now;
+    Date.now = () => nowMs;
+    try {
+      return fn(dailyBriefingArg);
+    } finally {
+      Date.now = realNow;
+    }
+  }
+
   const noNextWindowBriefing = buildDailyBriefing({ latitude: 13.08, longitude: 80.27, timezone: 'Asia/Kolkata', tzOffsetMinutes: 330, now: new Date(Date.UTC(2026, 10, 10, 6, 20, 0)) });
   const correctedPeakEnd = new Date(noNextWindowBriefing.peakWindow.endTimestamp!).getTime() + 60_000;
-  const simulatedNow = correctedPeakEnd + 3_600_000; // 1 hour after the corrected boundary
-  const candidates = [correctedPeakEnd].filter((t) => Number.isFinite(t) && t > simulatedNow);
-  check('M1. On the no-nextWindow fixture, once real time has passed the corrected peak-end boundary, no future scheduling candidate remains from the timer path (the visibility-restoration refresh -- H11/I7 -- is the only remaining path that can ever catch this day\'s transition)', candidates.length === 0);
+  const wellAfterExpiry = correctedPeakEnd + 3_600_000; // 1 hour after the corrected boundary
+  check(
+    'M1. [REAL FORMULA] On the real no-nextWindow fixture (K7/K8), evaluating page.tsx\'s ACTUAL extracted scheduling formula well after the corrected peak-end boundary correctly finds NO future candidate (the visibility-restoration refresh -- H11/I7 -- is the only remaining path that can ever catch this day\'s transition)',
+    computeFutureCandidates(noNextWindowBriefing, wellAfterExpiry).length === 0
+  );
+
+  const withNextWindowBriefing = buildDailyBriefing({ latitude: 13.08, longitude: 80.27, timezone: 'Asia/Kolkata', tzOffsetMinutes: 330, now: new Date(Date.UTC(2026, 5, 15, 6, 20, 0)) });
+  if (!withNextWindowBriefing.nextWindow) throw new Error('M1b fixture assumption broken: expected a real nextWindow on this date/location');
+  const nextWindowStartMs = new Date(withNextWindowBriefing.nextWindow.startTimestamp!).getTime();
+  const correctedPeakEndForFixture = new Date(withNextWindowBriefing.peakWindow.endTimestamp!).getTime() + 60_000;
+  // Evaluated exactly 1ms before nextWindow starts: nextWindow.startTimestamp
+  // is necessarily a future candidate at this `now`. Explicitly verifying
+  // (not assuming) that the SAME fixture's own corrected peak-end is
+  // already in the past at this `now`, so the only future candidate can be
+  // nextWindow's -- if this fixture's windows ever change shape, this
+  // precondition check fails loudly instead of the test silently asserting
+  // the wrong thing.
+  if (correctedPeakEndForFixture >= nextWindowStartMs - 1) throw new Error('M1b fixture assumption broken: corrected peak-end is not before nextWindow.startTimestamp - 1ms');
+  check(
+    'M1b. [REAL FORMULA, non-tautological control] With a real nextWindow still in the future (and the SAME fixture\'s own peak already expired), the SAME extracted formula correctly finds exactly ONE future candidate matching nextWindow.startTimestamp -- proves the formula genuinely computes candidates rather than always returning empty',
+    (() => {
+      const result = computeFutureCandidates(withNextWindowBriefing, nextWindowStartMs - 1);
+      return result.length === 1 && result[0] === nextWindowStartMs;
+    })()
+  );
 
   // Request-ordering: the existing isLatestBriefingRequest guard is a pure
   // integer-comparison closure in page.tsx, structurally unchanged (I9).
@@ -557,6 +631,94 @@ function evalGreenLightExpired(peakEndTimestampIso: string, nowMs: number): bool
   if (older.isLatest()) appliedValue = 'OLDER (would be a bug)';
   if (newer.isLatest()) appliedValue = 'NEWER (correct)';
   check('M2. An older in-flight request resolving after a newer one has started must not apply its result (isLatestBriefingRequest-equivalent pattern)', appliedValue === 'NEWER (correct)');
+}
+
+// ============================================================
+// N. HOME-RHYTHM-01-I1-F3 -- the remaining P2 the round-3 independent
+// review found: the Green Light CTA block was correctly guarded by
+// greenLightExpired (section H10 above), but its SIBLING nextAction line
+// ("Next: Do your highest-value X now.") was not -- under client/server
+// clock skew, a fresh fetch could still return briefingState: 'ACTIVE'
+// just past the real corrected boundary, leaving that "...now." text
+// visible with nothing further scheduled on a no-nextWindow day. Fixed by
+// deriving a `nextActionExpired` flag (ACTIVE AND the SAME greenLightExpired
+// calculation -- never a second, independently-drifting one) and gating
+// ONLY the nextAction render on it. Genuine mounted-component, real-DOM
+// evidence for this fix (including explicit red/green against the real
+// F2-head source) lives in the separate
+// test/homeRhythm01I1F3JsdomBehavioral.test.ts, which this section does
+// not duplicate. This section instead covers: the formula extracted
+// directly from HomeDashboard.tsx (same technique as J4-J7), and the
+// bounded clock-skew retry effect added to page.tsx, verified the same
+// source-extraction way section M already uses for the scheduling effect
+// (page.tsx's orchestration surface is too large to mount with the jsdom
+// harness -- see section I's updated comment above).
+// ============================================================
+
+{
+  const nextActionExpiredMatch = homeDashboardSrc.match(/const nextActionExpired = (.+);/);
+  if (!nextActionExpiredMatch) throw new Error('N1-N4: could not locate `const nextActionExpired = ...;` in HomeDashboard.tsx -- formula extraction target moved');
+  const nextActionExpiredFormula = nextActionExpiredMatch[1];
+  function evalNextActionExpired(briefingState: string, greenLightExpired: boolean): boolean {
+    const dailyBriefingStub = { briefingState };
+    // eslint-disable-next-line no-new-func -- evaluating source text extracted above, not user input
+    const fn = new Function('dailyBriefing', 'greenLightExpired', `return (${nextActionExpiredFormula});`);
+    return Boolean(fn(dailyBriefingStub, greenLightExpired));
+  }
+  check('N1. nextActionExpired is true for ACTIVE + greenLightExpired -- the confirmed defect case (stale "now" text past real expiry)', evalNextActionExpired('ACTIVE', true) === true);
+  check('N2. nextActionExpired is false for ACTIVE + NOT expired -- valid immediate guidance is never suppressed while genuinely current', evalNextActionExpired('ACTIVE', false) === false);
+  check('N3. nextActionExpired is false for UPCOMING regardless of greenLightExpired -- "Prepare X for the peak window" is never touched by this fix', evalNextActionExpired('UPCOMING', true) === false && evalNextActionExpired('UPCOMING', false) === false);
+  check('N4. nextActionExpired is false for COMPLETED regardless of greenLightExpired -- the nextWindow-fallback/general-fallback text (not peak-specific) is never touched by this fix', evalNextActionExpired('COMPLETED', true) === false && evalNextActionExpired('COMPLETED', false) === false);
+
+  check(
+    'N5. The nextAction render condition in HomeDashboard.tsx is actually gated by `!nextActionExpired` (not just defined and unused)',
+    /dailyBriefing\.nextAction && !nextActionExpired &&/.test(homeDashboardSrc)
+  );
+  check(
+    'N6. The greenLight CTA block remains gated by the SAME !greenLightExpired as before (F3 did not touch or weaken F2\'s own guard)',
+    /dailyBriefing\.greenLight\?\.title && dailyBriefing\.briefingState !== 'COMPLETED' && !greenLightExpired &&/.test(homeDashboardSrc)
+  );
+}
+
+{
+  // Clock-skew retry effect (page.tsx) -- extract the real inconsistency
+  // check and retry-budget constants, evaluate against real DailyBriefing
+  // shapes, never a hand-typed re-implementation of the threshold values.
+  check('N7. A bounded retry-count ref exists, distinct from the main scheduling timer ref', /clockSkewRetryCountRef = useRef\(0\)/.test(pageSrc) && /clockSkewRetryTimerRef = useRef<ReturnType<typeof setTimeout> \| null>\(null\)/.test(pageSrc));
+  check('N8. The retry budget is a small, finite, named constant -- never unbounded', /const MAX_CLOCK_SKEW_RETRIES = 2;/.test(pageSrc));
+  check('N9. The retry delay is a fixed, short, named constant -- never a continuous/zero-delay loop', /const CLOCK_SKEW_RETRY_DELAY_MS = 45_000;/.test(pageSrc));
+  check('N10. The retry counter is reset to 0 whenever a fetch is NOT in the clock-skew-inconsistent state (covers the normal case and the post-user/location-change fresh fetch, both of which re-run this same effect)', /if \(!isClockSkewInconsistent\) \{\s*\n\s*clockSkewRetryCountRef\.current = 0;/.test(pageSrc));
+  check('N11. The retry path calls the EXISTING loadAssistantSignals -- no new fetch function, no direct state write of its own', /clockSkewRetryTimerRef\.current = setTimeout\(\(\) => \{\s*\n\s*clockSkewRetryTimerRef\.current = null;\s*\n\s*loadAssistantSignals\(\);/.test(pageSrc));
+  check('N12. The retry timer is cleared both at the start of every effect run and in its own cleanup -- bounded, never accumulating', (() => {
+    const section = pageSrc.slice(pageSrc.indexOf('clockSkewRetryTimerRef = useRef'), pageSrc.indexOf('HOME-RHYTHM-01-I1-F1 -- long-mounted-tab freshness, visibility'));
+    const clears = section.match(/clearTimeout\(clockSkewRetryTimerRef\.current\)/g);
+    return !!clears && clears.length >= 2;
+  })());
+
+  const inconsistencyBlockMatch = pageSrc.match(/const endTimestamp = dailyBriefing\.peakWindow\?\.endTimestamp;\s*\n\s*const isClockSkewInconsistent =\s*\n[\s\S]*?;\s*\n\s*if \(!isClockSkewInconsistent\)/);
+  if (!inconsistencyBlockMatch) throw new Error('N13-N15: could not locate the endTimestamp/isClockSkewInconsistent block in page.tsx -- extraction target moved');
+  function evalClockSkewInconsistent(dailyBriefingArg: { briefingState: string; peakWindow?: { endTimestamp?: string } }, nowMs: number): boolean {
+    const realNow = Date.now;
+    (Date as any).now = () => nowMs;
+    try {
+      // Strip the TS-only `as string` assertion before handing this to
+      // `new Function` -- it evaluates as plain JS, otherwise byte-identical
+      // to pageSrc. Also drop the trailing `if (!isClockSkewInconsistent)`
+      // this regex used as its own closing anchor.
+      const jsBody = inconsistencyBlockMatch![0]
+        .replace(/\s*\n\s*if \(!isClockSkewInconsistent\)$/, '')
+        .replace('endTimestamp as string', 'endTimestamp');
+      // eslint-disable-next-line no-new-func -- evaluating source text extracted above, not user input
+      const fn = new Function('dailyBriefing', `${jsBody}\nreturn isClockSkewInconsistent;`);
+      return Boolean(fn(dailyBriefingArg));
+    } finally {
+      (Date as any).now = realNow;
+    }
+  }
+  const skewPeakEnd = Date.UTC(2026, 10, 9, 6, 46, 0);
+  check('N13. The real isClockSkewInconsistent formula is true for ACTIVE + corrected-end-already-past (exactly the clock-skew scenario this retry recovers from)', evalClockSkewInconsistent({ briefingState: 'ACTIVE', peakWindow: { endTimestamp: new Date(skewPeakEnd).toISOString() } }, skewPeakEnd + 61_000) === true);
+  check('N14. The real isClockSkewInconsistent formula is false for ACTIVE while still genuinely within the corrected boundary (no spurious retry while legitimately active)', evalClockSkewInconsistent({ briefingState: 'ACTIVE', peakWindow: { endTimestamp: new Date(skewPeakEnd).toISOString() } }, skewPeakEnd + 30_000) === false);
+  check('N15. The real isClockSkewInconsistent formula is false for COMPLETED even with an old endTimestamp -- this check is specifically about a server still claiming ACTIVE, not about staleness in general (COMPLETED is already handled correctly, nothing to recover)', evalClockSkewInconsistent({ briefingState: 'COMPLETED', peakWindow: { endTimestamp: new Date(skewPeakEnd).toISOString() } }, skewPeakEnd + 61_000) === false);
 }
 
 console.log(allPassed());

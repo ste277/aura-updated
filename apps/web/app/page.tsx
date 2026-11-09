@@ -176,6 +176,14 @@ export default function DashboardPage() {
   // affects what is displayed -- display state is still governed entirely
   // by isLatestBriefingRequest()/dailyBriefingStatus, unchanged.
   const lastBriefingFetchStartedAtRef = useRef(0);
+  // HOME-RHYTHM-01-I1-F3 -- counts consecutive fetches that came back
+  //'ACTIVE' for a peak window whose own (corrected, +60s) endTimestamp is
+  // already in the client's past -- client/server clock skew, not a real
+  // data problem. Reset to 0 by the retry effect below on any fetch that
+  // ISN'T in that inconsistent state (including a normal user/location
+  // change, which already triggers a fresh loadAssistantSignals() via the
+  // mount effect and therefore a fresh, usually-consistent dailyBriefing).
+  const clockSkewRetryCountRef = useRef(0);
   // Home Good Right Now Personalization V1 -- the owner's derived natal
   // context (never raw birth date/time/timezone), returned as a sibling
   // field alongside DailyBriefing by the SAME existing
@@ -590,6 +598,55 @@ export default function DashboardPage() {
       if (briefingRefreshTimerRef.current) {
         clearTimeout(briefingRefreshTimerRef.current);
         briefingRefreshTimerRef.current = null;
+      }
+    };
+  }, [dailyBriefing, dailyBriefingStatus, loadAssistantSignals]);
+
+  // HOME-RHYTHM-01-I1-F3 -- bounded clock-skew recovery. The scheduling
+  // effect above already corrects the KNOWN inclusive-minute boundary
+  // (+60s), but a few seconds of genuine client/server clock disagreement
+  // can still make a FRESH fetch come back `briefingState: 'ACTIVE'` for a
+  // peak whose own corrected endTimestamp is already in the client's past
+  // -- exactly the condition HomeDashboard's own independent
+  // `greenLightExpired` guard (same +60s correction) already uses to hide
+  // the stale Green Light/nextAction text, so the UI stays honest
+  // regardless of whether this retry ever runs or succeeds. This effect is
+  // a RECOVERY convenience only: on detecting that specific inconsistency,
+  // it schedules ONE short re-fetch (reusing the existing
+  // loadAssistantSignals(), never a new fetch path or state-write), with a
+  // small bounded attempt budget so persistent skew (or a server that is
+  // itself simply slow to roll over) can never become a retry storm. Any
+  // fetch that resolves WITHOUT that inconsistency (including the normal
+  // case, and including after a user/location change already triggers its
+  // own fresh fetch via the mount effect above) resets the counter to 0.
+  const clockSkewRetryTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  useEffect(() => {
+    if (clockSkewRetryTimerRef.current) {
+      clearTimeout(clockSkewRetryTimerRef.current);
+      clockSkewRetryTimerRef.current = null;
+    }
+    if (dailyBriefingStatus !== 'available' || !dailyBriefing) return undefined;
+    const endTimestamp = dailyBriefing.peakWindow?.endTimestamp;
+    const isClockSkewInconsistent =
+      dailyBriefing.briefingState === 'ACTIVE' &&
+      Boolean(endTimestamp) &&
+      new Date(endTimestamp as string).getTime() + 60_000 <= Date.now();
+    if (!isClockSkewInconsistent) {
+      clockSkewRetryCountRef.current = 0;
+      return undefined;
+    }
+    const MAX_CLOCK_SKEW_RETRIES = 2;
+    const CLOCK_SKEW_RETRY_DELAY_MS = 45_000;
+    if (clockSkewRetryCountRef.current >= MAX_CLOCK_SKEW_RETRIES) return undefined;
+    clockSkewRetryCountRef.current += 1;
+    clockSkewRetryTimerRef.current = setTimeout(() => {
+      clockSkewRetryTimerRef.current = null;
+      loadAssistantSignals();
+    }, CLOCK_SKEW_RETRY_DELAY_MS);
+    return () => {
+      if (clockSkewRetryTimerRef.current) {
+        clearTimeout(clockSkewRetryTimerRef.current);
+        clockSkewRetryTimerRef.current = null;
       }
     };
   }, [dailyBriefing, dailyBriefingStatus, loadAssistantSignals]);

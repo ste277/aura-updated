@@ -797,6 +797,27 @@ export function HomeDashboard({
     };
   }, [greenLightExpiryMs]);
 
+  // HOME-RHYTHM-01-I1-F3 -- nextAction has FOUR distinct state-dependent
+  // variants from buildNextAction() (dailyAssistant.ts): UPCOMING's
+  // "Prepare X for the peak window" (forward-looking, not an immediacy
+  // claim), ACTIVE's "Do your highest-value X now." (peak-specific,
+  // immediate -- the ONLY variant that asserts the peak is current right
+  // now), the nextWindow-present fallback "Shift to Y at Z" (refers to a
+  // DIFFERENT, later window's own start time -- not invalidated by the
+  // peak's own expiry, and self-correcting since nextWindow.startTimestamp
+  // is already one of the two candidates page.tsx's refresh timer below
+  // schedules against), and the final "Today's key windows are complete..."
+  // fallback (general, not time-sensitive, always accurate once genuinely
+  // COMPLETED with no nextWindow). Only the ACTIVE variant is reachable via
+  // the exact F2 clock-skew defect (a stale response landing just inside
+  // the server's still-inclusive final minute, after which no further
+  // timer may be scheduled) -- so this reuses the SAME greenLightExpired
+  // calculation (never a second, independently-drifting one) and narrows
+  // suppression to specifically `briefingState === 'ACTIVE'`, never
+  // touching UPCOMING/nextWindow/general text, which are not evidence of
+  // anything wrong on their own.
+  const nextActionExpired = dailyBriefing?.briefingState === 'ACTIVE' && greenLightExpired;
+
   // `origin` only chooses where focus lands afterwards (Right Now region vs the resolved Timeline row); the lifecycle path is identical.
   const focusTimelineRow = (planId: string) => setTimeout(() => (document.querySelector<HTMLElement>(`[data-timeline-item-id="plan:${planId}"]`) ?? document.querySelector<HTMLElement>('[data-home-timeline-region]'))?.focus(), 0);
   const handleCompleteRightNow = async (planId: string, origin: 'RIGHT_NOW' | 'TIMELINE' = 'RIGHT_NOW') => {
@@ -1387,7 +1408,7 @@ export function HomeDashboard({
          * describe greenLight's window and its validity. */}
         {dailyBriefingStatus === 'available' && dailyBriefing && (
           <div style={{ marginTop: spacing.sm }}>
-            {dailyBriefing.nextAction && (
+            {dailyBriefing.nextAction && !nextActionExpired && (
               <p style={{ margin: 0, color: colors.textSecondary, fontSize: 13, lineHeight: 1.4 }}>
                 <span style={{ color: colors.textPrimary, fontWeight: 800 }}>Next: </span>
                 {dailyBriefing.nextAction}
