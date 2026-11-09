@@ -742,6 +742,61 @@ export function HomeDashboard({
   const skippablePlanIdNow = skippablePlanId(rightNowState);
   const moveablePlanIdNow = moveablePlanId(rightNowState);
 
+  // HOME-RHYTHM-01-I1-F2 -- independent client-side Green Light eligibility
+  // guard. `dailyBriefing.briefingState` alone is NOT trusted as proof the
+  // peak window is still current: packages/panchang/src/windows.ts's
+  // getActiveWindow() treats `endMinutes` as INCLUSIVE, so a server response
+  // computed anywhere during that final minute (including a stale/delayed
+  // one that started before the window truly ended but resolves after) can
+  // legitimately say `briefingState: 'ACTIVE'` even though real wall-clock
+  // time has already passed the window's true end. This hook derives
+  // eligibility from `peakWindow.endTimestamp` (the real producer timestamp,
+  // confirmed computed via localInstantForMinute -- always a :00.000-aligned
+  // instant for the START of that inclusive final minute) plus a 60-second
+  // (one-minute) correction to land on the first EXCLUSIVE instant, and
+  // compares it directly against the client's own clock -- never the
+  // server's state label. This is the same correction page.tsx's refresh
+  // timer below now applies when scheduling its own re-fetch; the two are
+  // independent defenses (one decides WHEN to re-fetch, this one decides
+  // WHETHER to currently render, and holds even if the re-fetch is late,
+  // fails, or returns a stale 'ACTIVE' body).
+  const greenLightExpiryMs = useMemo(() => {
+    const iso = dailyBriefing?.peakWindow?.endTimestamp;
+    if (!iso) return null;
+    const end = new Date(iso).getTime();
+    return Number.isFinite(end) ? end + 60_000 : null;
+  }, [dailyBriefing?.peakWindow?.endTimestamp]);
+  const [greenLightExpired, setGreenLightExpired] = useState(
+    () => greenLightExpiryMs !== null && Date.now() >= greenLightExpiryMs
+  );
+  useEffect(() => {
+    if (greenLightExpiryMs === null) {
+      setGreenLightExpired(false);
+      return undefined;
+    }
+    const checkNow = () => {
+      const expired = Date.now() >= greenLightExpiryMs;
+      setGreenLightExpired(expired);
+      return expired;
+    };
+    if (checkNow()) return undefined;
+    // Bounded: exactly one timer, re-derived whenever greenLightExpiryMs
+    // itself changes (a fresh briefing arrived) and cleared on unmount --
+    // never continuous polling. The visibility listener exists because a
+    // backgrounded tab's JS timers are commonly throttled/suspended by the
+    // browser, so resuming the tab re-checks immediately against the real
+    // clock rather than waiting for a possibly-delayed timer to fire.
+    const timer = setTimeout(checkNow, greenLightExpiryMs - Date.now());
+    const handleVisibility = () => {
+      if (document.visibilityState === 'visible') checkNow();
+    };
+    document.addEventListener('visibilitychange', handleVisibility);
+    return () => {
+      clearTimeout(timer);
+      document.removeEventListener('visibilitychange', handleVisibility);
+    };
+  }, [greenLightExpiryMs]);
+
   // `origin` only chooses where focus lands afterwards (Right Now region vs the resolved Timeline row); the lifecycle path is identical.
   const focusTimelineRow = (planId: string) => setTimeout(() => (document.querySelector<HTMLElement>(`[data-timeline-item-id="plan:${planId}"]`) ?? document.querySelector<HTMLElement>('[data-home-timeline-region]'))?.focus(), 0);
   const handleCompleteRightNow = async (planId: string, origin: 'RIGHT_NOW' | 'TIMELINE' = 'RIGHT_NOW') => {
@@ -1338,7 +1393,7 @@ export function HomeDashboard({
                 {dailyBriefing.nextAction}
               </p>
             )}
-            {dailyBriefing.greenLight?.title && dailyBriefing.briefingState !== 'COMPLETED' && (
+            {dailyBriefing.greenLight?.title && dailyBriefing.briefingState !== 'COMPLETED' && !greenLightExpired && (
               <div style={{ marginTop: 4, display: 'flex', alignItems: 'baseline', gap: spacing.sm, flexWrap: 'wrap' }}>
                 <p style={{ margin: 0, color: colors.textFaint, fontSize: 12, lineHeight: 1.4, fontStyle: 'italic' }}>
                   {dailyBriefing.briefingState === 'ACTIVE' ? 'Active now: ' : 'Coming up: '}

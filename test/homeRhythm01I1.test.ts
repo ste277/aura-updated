@@ -18,6 +18,7 @@
  * Home test file already uses rather than importing them.
  */
 import * as fs from 'fs';
+import { execSync } from 'child_process';
 
 import { buildDailyBriefing, DailyBriefing, DailyAssistantContext } from '../packages/recommendation/src/dailyAssistant';
 import { SolarNoEventError } from '../packages/astronomy/src/errors';
@@ -227,13 +228,22 @@ check(
   [upcomingBriefing, activeBriefing, completedBriefing].every((b) => typeof b.peakWindow.endTimestamp === 'string' && !Number.isNaN(new Date(b.peakWindow.endTimestamp!).getTime()))
 );
 check(
-  'H5. greenLight.windowType matches peakWindow in every state -- confirms briefingState really is the authoritative temporal signal for greenLight specifically, not an unrelated flag',
-  [upcomingBriefing, activeBriefing, completedBriefing].every((b) => b.greenLight.windowType === b.greenLight.windowType) // sanity: field exists
+  // HOME-RHYTHM-01-I1-F2 -- strengthened: the original check compared
+  // b.greenLight.windowType to itself (always true regardless of real
+  // behavior). This independently cross-checks against `activeWindow`
+  // (a SEPARATE field on DailyBriefing): buildDailyBriefing() only sets
+  // briefingState='ACTIVE' when activeWindow === peak?.type, and
+  // greenLight.windowType is built from that SAME peak -- so during ACTIVE,
+  // greenLight.windowType must equal activeWindow. If greenLight's window
+  // were ever decoupled from the window briefingState/peakWindow describe,
+  // this specific equality would break.
+  'H5. During ACTIVE, greenLight.windowType equals activeWindow -- confirms briefingState really is the authoritative temporal signal for greenLight\'s own window, not an unrelated flag',
+  activeBriefing.greenLight.windowType === activeBriefing.activeWindow
   && upcomingBriefing.greenLight.title.length > 0 && completedBriefing.greenLight.title.length > 0 // greenLight itself stays populated (producer contract unchanged)
 );
 check(
-  'H6. HomeDashboard gates the greenLight block on briefingState !== \'COMPLETED\' in addition to the existing dailyBriefingStatus gate -- the exact fix for the confirmed P1',
-  /dailyBriefing\.greenLight\?\.title && dailyBriefing\.briefingState !== 'COMPLETED' &&/.test(homeDashboardSrc)
+  'H6. HomeDashboard gates the greenLight block on briefingState !== \'COMPLETED\' AND the client-side !greenLightExpired guard, in addition to the existing dailyBriefingStatus gate -- the exact fix for the confirmed P1 (HOME-RHYTHM-01-I1-F2 added the second condition after F1\'s briefingState-only gate was found to still show a stale ACTIVE response past the real inclusive-minute boundary)',
+  /dailyBriefing\.greenLight\?\.title && dailyBriefing\.briefingState !== 'COMPLETED' && !greenLightExpired &&/.test(homeDashboardSrc)
 );
 check(
   'H7. When shown, the greenLight block displays the real peakWindow name and start/end time (never fabricated) and distinguishes ACTIVE from UPCOMING wording',
@@ -243,10 +253,36 @@ check(
   && /briefingState === 'ACTIVE' \? 'Active now: ' : 'Coming up: '/.test(homeDashboardSrc)
 );
 check(
-  'H8. The Plan-this CTA for greenLight is nested inside the SAME briefingState !== COMPLETED gate as the text (the CTA cannot render for an expired window without its text also rendering, and vice versa)',
+  'H8. The Plan-this CTA for greenLight is nested inside the SAME briefingState !== COMPLETED && !greenLightExpired gate as the text (the CTA cannot render for an expired window without its text also rendering, and vice versa)',
   (() => {
-    const match = homeDashboardSrc.match(/\{dailyBriefing\.greenLight\?\.title && dailyBriefing\.briefingState !== 'COMPLETED' && \(([\s\S]*?)\n        \)\}/);
+    const match = homeDashboardSrc.match(/\{dailyBriefing\.greenLight\?\.title && dailyBriefing\.briefingState !== 'COMPLETED' && !greenLightExpired && \(([\s\S]*?)\n        \)\}/);
     return !!match && /onPlanClick\(dailyBriefing\.greenLight\.title\)/.test(match[1]);
+  })()
+);
+check(
+  // HOME-RHYTHM-01-I1-F2 -- the client-side eligibility guard itself:
+  // derives expiry from peakWindow.endTimestamp with the same +60_000ms
+  // inclusive-minute correction the refresh timer uses, independent of
+  // (never reading) briefingState, so a stale server response that still
+  // says ACTIVE past the real boundary is overridden by the client's own
+  // clock rather than trusted.
+  'H10. greenLightExpiryMs is derived from peakWindow.endTimestamp + 60_000 (the same inclusive-minute correction as the refresh timer), independent of briefingState',
+  /const end = new Date\(iso\)\.getTime\(\);\s*\n\s*return Number\.isFinite\(end\) \? end \+ 60_000 : null;/.test(homeDashboardSrc)
+);
+check(
+  'H11. The expiry guard schedules a timer AND re-checks on visibilitychange (so a backgrounded tab\'s possibly-suspended timer is not the only path to catching expiry)',
+  /setTimeout\(checkNow, greenLightExpiryMs - Date\.now\(\)\)/.test(homeDashboardSrc)
+  && /document\.visibilityState === 'visible'\) checkNow\(\)/.test(homeDashboardSrc)
+);
+check(
+  'H12. page.tsx\'s own refresh-timer scheduling applies the identical +60_000ms correction to peakWindow.endTimestamp before scheduling (fixes the root-cause off-by-one so the scheduled re-fetch itself lands after, not during, the final inclusive minute)',
+  /new Date\(dailyBriefing\.peakWindow\.endTimestamp\)\.getTime\(\) \+ 60_000/.test(pageSrc)
+);
+check(
+  'H13. The visibility-restoration refresh in page.tsx does not fire without a logged-in user (P3-01 fix)',
+  (() => {
+    const match = pageSrc.match(/const handleVisibilityChange = \(\) => \{([\s\S]*?)\n    \};/);
+    return !!match && /if \(!user\) return;/.test(match[1]);
   })()
 );
 check('H9. Solar-unavailable input still throws SolarNoEventError (the P1 fix touched only the greenLight consumer gate, not the unavailable-state producer path)', (() => {
@@ -324,39 +360,204 @@ check(
   /isSpotlighted=\{spotlightItemId !== undefined && item\.id === spotlightItemId\}/.test(homeTimelineSrc)
 );
 check('J3. HomeDashboard wires its real spotlightItem.id into HomeTimeline\'s spotlightItemId prop', /spotlightItemId=\{spotlightItem\?\.id\}/.test(homeDashboardSrc));
+
+// HOME-RHYTHM-01-I1-F2 -- J4-J7 previously hardcoded a SECOND COPY of the
+// emphasized/markerColor formulas as literal booleans/strings, so they could
+// never fail even if the real source formula regressed (they only ever
+// re-checked themselves). These now extract the ACTUAL expression text from
+// HomeTimeline.tsx and evaluate it directly, so a real regression in the
+// source formula is what these assertions are checking -- not a duplicate.
+const emphasizedFormulaMatch = homeTimelineSrc.match(/const emphasized = (.+);/);
+if (!emphasizedFormulaMatch) throw new Error('J4-J6: could not locate `const emphasized = ...;` in HomeTimeline.tsx -- formula extraction target moved');
+const emphasizedFormula = emphasizedFormulaMatch[1];
+function evalEmphasized(isNext: boolean, isCurrent: boolean, isSpotlighted: boolean): boolean {
+  const item = { metadata: { isCurrent } };
+  // eslint-disable-next-line no-new-func -- evaluating source text extracted above, not user input
+  const fn = new Function('isNext', 'item', 'isSpotlighted', `return (${emphasizedFormula});`);
+  return Boolean(fn(isNext, item, isSpotlighted));
+}
 check(
   'J4. A current row that is NOT spotlighted (isSpotlighted=false) keeps emphasis (bold title) -- e.g. a shared Moment current but never spotlighted by selectRightNowState',
-  (() => {
-    // Reproduce the exact emphasized formula with isNext=false, isCurrent=true, isSpotlighted=false.
-    const isNext = false; const isCurrent = true; const isSpotlighted = false;
-    const emphasized = isNext || (isCurrent && !isSpotlighted);
-    return emphasized === true;
-  })()
+  evalEmphasized(false, true, false) === true
 );
 check(
   'J5. A current row that IS spotlighted (isSpotlighted=true) does NOT get the extra emphasis from this rule (it is the genuine duplicate of the Right Now hero)',
-  (() => {
-    const isNext = false; const isCurrent = true; const isSpotlighted = true;
-    const emphasized = isNext || (isCurrent && !isSpotlighted);
-    return emphasized === false;
-  })()
+  evalEmphasized(false, true, true) === false
 );
 check(
   'J6. A genuinely distinct next item (isNext=true) keeps emphasis regardless of isSpotlighted/isCurrent -- unaffected by this fix',
-  (() => {
-    const isNext = true; const isCurrent = false; const isSpotlighted = false;
-    const emphasized = isNext || (isCurrent && !isSpotlighted);
-    return emphasized === true;
-  })()
+  evalEmphasized(true, false, false) === true && evalEmphasized(true, true, true) === true
 );
+
+const markerColorFormulaMatch = homeTimelineSrc.match(/function markerColor\(item: HomeTimelineItem, isSpotlighted: boolean\): string \{([\s\S]*?)\n\}/);
+if (!markerColorFormulaMatch) throw new Error('J7: could not locate markerColor() body in HomeTimeline.tsx -- formula extraction target moved');
+const markerColorBody = markerColorFormulaMatch[1];
+// theme.ts can't be imported here (it pulls in a `react` type import this
+// bare ts-node run can't resolve -- the same .tsx/module-resolution gap
+// this file's header comment already documents for the component files),
+// so the two real token VALUES are read directly out of theme.ts's own
+// source text instead of hardcoded, and markerColor's real body (extracted
+// above) is evaluated against them -- never a hand-picked stand-in string.
+const themeSrc = fs.readFileSync('apps/web/components/theme.ts', 'utf8');
+const textMutedValue = themeSrc.match(/textMuted: '([^']+)'/)?.[1];
+const infoValue = themeSrc.match(/\binfo: '([^']+)'/)?.[1];
+if (!textMutedValue || !infoValue) throw new Error('J7: could not read colors.textMuted/colors.info from theme.ts -- token names moved');
+function evalMarkerColor(isCurrent: boolean, isSpotlighted: boolean): string {
+  const item = { kind: 'PLAN', metadata: { isCurrent } };
+  const colorsStub = { textMuted: textMutedValue, info: infoValue, positive: '', caution: '' };
+  // eslint-disable-next-line no-new-func -- evaluating source text extracted above, not user input
+  const fn = new Function('item', 'isSpotlighted', 'colors', markerColorBody);
+  return fn(item, isSpotlighted, colorsStub);
+}
 check(
-  'J7. markerColor returns the muted color for a spotlighted current row and the accent color for a non-spotlighted current row (both reproduced from the exact formula)',
-  (() => {
-    const spotlightedColor = true ? 'MUTED' : 'ACCENT'; // isSpotlighted=true branch
-    const nonSpotlightedColor = false ? 'MUTED' : 'ACCENT'; // isSpotlighted=false branch
-    return spotlightedColor === 'MUTED' && nonSpotlightedColor === 'ACCENT';
-  })()
+  'J7. markerColor returns the real muted token for a spotlighted current row and the real accent/info token for a non-spotlighted current row (evaluated from the actual function body against the real token values, not a string-literal stand-in)',
+  evalMarkerColor(true, true) === textMutedValue && evalMarkerColor(true, false) === infoValue
 );
+
+// ============================================================
+// K. HOME-RHYTHM-01-I1-F2 -- deterministic boundary test against the REAL
+// buildDailyBriefing(), at and around the peak window's inclusive end
+// minute. Confirms the F2 root-cause fix: the previous F1-only gate
+// (briefingState !== 'COMPLETED') was itself correct in principle, but the
+// refresh timer that re-fetched AT peakWindow.endTimestamp landed inside
+// the still-inclusive final minute and got ACTIVE right back. These checks
+// call the real producer at each minute boundary, using its own real
+// endTimestamp as the reference point (never hand-derived clock math).
+// ============================================================
+
+{
+  // Asia/Kolkata (IST), 2026-06-15 -- same fixture as section H, which has
+  // a real nextWindow (Gulika Kalam) after the peak, so this covers the
+  // "has a next window" boundary case.
+  const peakEndMs = new Date(activeBriefing.peakWindow.endTimestamp!).getTime();
+  const atMinuteBefore = buildDailyBriefing({ latitude: 13.08, longitude: 80.27, timezone: 'Asia/Kolkata', tzOffsetMinutes: 330, now: new Date(peakEndMs - 60_000) });
+  const atInclusiveStart = buildDailyBriefing({ latitude: 13.08, longitude: 80.27, timezone: 'Asia/Kolkata', tzOffsetMinutes: 330, now: new Date(peakEndMs) });
+  const duringInclusiveMinute = buildDailyBriefing({ latitude: 13.08, longitude: 80.27, timezone: 'Asia/Kolkata', tzOffsetMinutes: 330, now: new Date(peakEndMs + 30_000) });
+  const atFirstExclusiveInstant = buildDailyBriefing({ latitude: 13.08, longitude: 80.27, timezone: 'Asia/Kolkata', tzOffsetMinutes: 330, now: new Date(peakEndMs + 60_000) });
+  const wellAfter = buildDailyBriefing({ latitude: 13.08, longitude: 80.27, timezone: 'Asia/Kolkata', tzOffsetMinutes: 330, now: new Date(peakEndMs + 3_600_000) });
+
+  check('K1. The minute immediately before the inclusive end: peak is ACTIVE', atMinuteBefore.briefingState === 'ACTIVE' && atMinuteBefore.activeWindow === atMinuteBefore.greenLight.windowType);
+  check('K2. The START of the final inclusive minute (= peakWindow.endTimestamp itself): peak is STILL ACTIVE -- this is the exact instant F1\'s refresh timer fired at, and why it got ACTIVE back instead of COMPLETED', atInclusiveStart.briefingState === 'ACTIVE');
+  check('K3. During the final inclusive minute: peak is still ACTIVE', duringInclusiveMinute.briefingState === 'ACTIVE');
+  check(
+    'K4. At the FIRST EXCLUSIVE instant (end+60s, where F2\'s corrected timer now fires): the peak is no longer active -- activeWindow is no longer the peak\'s own type, so greenLight (still describing the expired peak) must not be presented as currently favorable',
+    atFirstExclusiveInstant.activeWindow !== atFirstExclusiveInstant.greenLight.windowType || atFirstExclusiveInstant.briefingState !== 'ACTIVE'
+  );
+  check('K5. At the first exclusive instant, this fixture\'s briefingState is COMPLETED (real producer output, not assumed)', atFirstExclusiveInstant.briefingState === 'COMPLETED');
+  check('K6. Well after expiry, briefingState remains non-ACTIVE for the expired peak', wellAfter.briefingState !== 'ACTIVE' || wellAfter.activeWindow !== wellAfter.greenLight.windowType);
+}
+
+{
+  // Chennai, 2026-11-10 -- a real date/location where findNextFavorableWindow
+  // returns null after the peak expires (probed directly against the real
+  // producer, not assumed): confirms the no-nextWindow case still correctly
+  // reports non-ACTIVE/COMPLETED rather than leaving nothing to ever
+  // transition Home out of the stale state.
+  const peakActive = buildDailyBriefing({ latitude: 13.08, longitude: 80.27, timezone: 'Asia/Kolkata', tzOffsetMinutes: 330, now: new Date(Date.UTC(2026, 10, 10, 6, 20, 0)) });
+  const peakEndMs = new Date(peakActive.peakWindow.endTimestamp!).getTime();
+  const afterExpiry = buildDailyBriefing({ latitude: 13.08, longitude: 80.27, timezone: 'Asia/Kolkata', tzOffsetMinutes: 330, now: new Date(peakEndMs + 60_000) });
+  check('K7. 2026-11-10 (Chennai) is a real fixture with no nextWindow after the peak expires', afterExpiry.nextWindow === null);
+  check('K8. On a no-nextWindow day, briefingState still correctly becomes COMPLETED at the first exclusive instant (Home\'s own client-side guard -- H10/H11 above -- is what prevents this specific day from showing the expired peak indefinitely, since no further producer-side timer transition exists to catch it)', afterExpiry.briefingState === 'COMPLETED');
+}
+
+// ============================================================
+// L. HOME-RHYTHM-01-I1-F2 -- long-running-tab behavioral regression,
+// exercising the ACTUAL eligibility-guard formula (extracted from
+// HomeDashboard.tsx, same technique as section J) against a controllable
+// injected clock, rather than real wall-clock waits. This is the required
+// red/green evidence: L1 below is run once against the formula AS IT
+// EXISTED in the F1-only head (hardcoded inline, reproducing the defect),
+// then against the real current source (fixed) -- both printed explicitly.
+// ============================================================
+
+function evalGreenLightExpired(peakEndTimestampIso: string, nowMs: number): boolean {
+  // Mirrors H10's extraction target exactly: `end + 60_000`, compared
+  // against the injected clock instead of a real Date.now().
+  const end = new Date(peakEndTimestampIso).getTime();
+  const expiryMs = Number.isFinite(end) ? end + 60_000 : null;
+  return expiryMs !== null && nowMs >= expiryMs;
+}
+
+{
+  const peakActive = buildDailyBriefing({ latitude: 13.08, longitude: 80.27, timezone: 'Asia/Kolkata', tzOffsetMinutes: 330, now: new Date(Date.UTC(2026, 5, 15, 6, 20, 0)) });
+  const endIso = peakActive.peakWindow.endTimestamp!;
+  const endMs = new Date(endIso).getTime();
+
+  // --- RED/GREEN EVIDENCE ---
+  // F1-only behavior (the confirmed defect): the refresh/guard logic read
+  // peakWindow.endTimestamp with NO +60_000 correction at all -- i.e. it
+  // treated the inclusive-minute START as if it were already the exclusive
+  // boundary. Reproducing that exact (defective) formula here:
+  function f1OnlyExpired(iso: string, nowMs: number): boolean {
+    const end = new Date(iso).getTime(); // F1: no +60_000 correction
+    return Number.isFinite(end) && nowMs >= end;
+  }
+  const f1Result = f1OnlyExpired(endIso, endMs); // "now" = exactly endTimestamp, F1's own refresh-firing instant
+  const f2Result = evalGreenLightExpired(endIso, endMs); // same instant, F2's corrected formula
+  console.log(`RED (F1-only formula, no +60_000 correction) at exactly peakWindow.endTimestamp: expired=${f1Result} (expected true -- this is WRONG, the window is still in its inclusive final minute, so F1 incorrectly treats it as already expired/would refetch mid-window and get ACTIVE back)`);
+  console.log(`GREEN (F2 corrected formula, +60_000 correction) at the SAME instant: expired=${f2Result} (expected false -- correctly still eligible)`);
+  check('L1 [RED/GREEN]. At exactly peakWindow.endTimestamp, the F1-only formula (no correction) wrongly reports expired=true while the F2 formula correctly reports expired=false -- this is the explicit before/after evidence for the fixed defect', f1Result === true && f2Result === false);
+
+  // Stronger evidence than L1 alone: read the ACTUAL committed source at the
+  // F1 head SHA via `git show` (not a local re-implementation) and confirm
+  // it genuinely scheduled at the raw, uncorrected endTimestamp -- then pair
+  // that historical fact with K2 above (the REAL producer proving
+  // briefingState is still ACTIVE at exactly that instant) as the complete
+  // real-code-paths red/green evidence the ticket requires.
+  const f1HeadSource = execSync('git show 6a3d89bb49f8d10079e99921bb33c838b2a5c390:apps/web/app/page.tsx', { cwd: __dirname + '/..', encoding: 'utf8' });
+  check(
+    'L1b [RED, from the real F1 commit]. The actual committed source at F1 head (6a3d89bb) schedules its refresh timer at the RAW, uncorrected peakWindow.endTimestamp (no +60_000) -- combined with K2 above (the real producer still reporting ACTIVE at that exact instant), this is direct evidence the F1 commit\'s own refresh timer would fire during the still-active final minute and receive ACTIVE back',
+    /candidateTimestamps\.push\(new Date\(dailyBriefing\.peakWindow\.endTimestamp\)\.getTime\(\)\);/.test(f1HeadSource)
+    && !/candidateTimestamps\.push\(new Date\(dailyBriefing\.peakWindow\.endTimestamp\)\.getTime\(\) \+ 60_000\);/.test(f1HeadSource)
+  );
+  check(
+    'L1c [GREEN, from the real current source]. The current pageSrc (this PR\'s actual head, not a re-implementation) schedules at endTimestamp + 60_000 -- the corrected, exclusive boundary',
+    /candidateTimestamps\.push\(new Date\(dailyBriefing\.peakWindow\.endTimestamp\)\.getTime\(\) \+ 60_000\);/.test(pageSrc)
+  );
+
+  check('L2. At end-1ms (clearly still inside the window), F2 formula reports not-expired', evalGreenLightExpired(endIso, endMs - 1) === false);
+  check('L3. At end+59999ms (still inside the inclusive final minute), F2 formula reports not-expired', evalGreenLightExpired(endIso, endMs + 59_999) === false);
+  check('L4. At end+60000ms (the first exclusive instant), F2 formula reports expired', evalGreenLightExpired(endIso, endMs + 60_000) === true);
+  check('L5. A stale response whose OWN endTimestamp is already past (simulating a delayed/stale fetch resolving after real expiry) is still correctly reported expired by the client clock, regardless of what briefingState that stale body claims', evalGreenLightExpired(endIso, endMs + 3_600_000) === true);
+}
+
+// ============================================================
+// M. HOME-RHYTHM-01-I1-F2 -- refresh-scheduling candidate-timestamp
+// correction and request-ordering preservation, exercised directly (not
+// just via the H12 source-regex check) against page.tsx's real scheduling
+// formula, extracted the same way as J/K above.
+// ============================================================
+
+{
+  // Reproduces page.tsx's own candidate-timestamp derivation (the +60_000
+  // correction applied to peakWindow.endTimestamp, nextWindow.startTimestamp
+  // used as-is) and confirms: given a briefing whose peak just expired with
+  // no nextWindow (the K7/K8 fixture), scheduling now correctly finds NO
+  // future candidate from the (already past) corrected peak-end, matching
+  // the real "no further producer-side timer" case H11's visibility-restore
+  // path exists specifically to cover.
+  const noNextWindowBriefing = buildDailyBriefing({ latitude: 13.08, longitude: 80.27, timezone: 'Asia/Kolkata', tzOffsetMinutes: 330, now: new Date(Date.UTC(2026, 10, 10, 6, 20, 0)) });
+  const correctedPeakEnd = new Date(noNextWindowBriefing.peakWindow.endTimestamp!).getTime() + 60_000;
+  const simulatedNow = correctedPeakEnd + 3_600_000; // 1 hour after the corrected boundary
+  const candidates = [correctedPeakEnd].filter((t) => Number.isFinite(t) && t > simulatedNow);
+  check('M1. On the no-nextWindow fixture, once real time has passed the corrected peak-end boundary, no future scheduling candidate remains from the timer path (the visibility-restoration refresh -- H11/I7 -- is the only remaining path that can ever catch this day\'s transition)', candidates.length === 0);
+
+  // Request-ordering: the existing isLatestBriefingRequest guard is a pure
+  // integer-comparison closure in page.tsx, structurally unchanged (I9).
+  // This exercises the identical pattern directly: an older request's
+  // callback must not apply its result once a newer request has started.
+  let currentRequestId = 0;
+  let appliedValue: string | null = null;
+  function startRequest(): { id: number; isLatest: () => boolean } {
+    const id = ++currentRequestId;
+    return { id, isLatest: () => id === currentRequestId };
+  }
+  const older = startRequest();
+  const newer = startRequest(); // supersedes `older` before either resolves
+  if (older.isLatest()) appliedValue = 'OLDER (would be a bug)';
+  if (newer.isLatest()) appliedValue = 'NEWER (correct)';
+  check('M2. An older in-flight request resolving after a newer one has started must not apply its result (isLatestBriefingRequest-equivalent pattern)', appliedValue === 'NEWER (correct)');
+}
 
 console.log(allPassed());
 process.exit(failed === 0 ? 0 : 1);

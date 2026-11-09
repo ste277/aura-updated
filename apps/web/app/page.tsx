@@ -562,7 +562,18 @@ export default function DashboardPage() {
     if (dailyBriefingStatus !== 'available' || !dailyBriefing) return undefined;
     const candidateTimestamps: number[] = [];
     if (dailyBriefing.briefingState !== 'COMPLETED' && dailyBriefing.peakWindow.endTimestamp) {
-      candidateTimestamps.push(new Date(dailyBriefing.peakWindow.endTimestamp).getTime());
+      // HOME-RHYTHM-01-I1-F2 -- peakWindow.endTimestamp is the START of the
+      // final INCLUSIVE minute (packages/panchang/src/windows.ts's
+      // getActiveWindow treats `endMinutes` as inclusive: `currentMinuteOfDay
+      // <= w.endMinutes`), not its end. Scheduling the refetch exactly AT
+      // endTimestamp would land inside that still-active final minute and
+      // come back 'ACTIVE' again, never triggering a transition out of the
+      // stale recommendation on a day with no nextWindow. +60_000ms is pure
+      // UTC-instant arithmetic on an already-resolved absolute timestamp
+      // (DST-safe -- the local-to-UTC conversion already happened inside
+      // localInstantForMinute()), landing on the first EXCLUSIVE instant
+      // after the window truly ends.
+      candidateTimestamps.push(new Date(dailyBriefing.peakWindow.endTimestamp).getTime() + 60_000);
     }
     if (dailyBriefing.nextWindow?.startTimestamp) {
       candidateTimestamps.push(new Date(dailyBriefing.nextWindow.startTimestamp).getTime());
@@ -603,12 +614,17 @@ export default function DashboardPage() {
     const STALE_AFTER_MS = 15 * 60 * 1000;
     const handleVisibilityChange = () => {
       if (document.visibilityState !== 'visible') return;
+      // HOME-RHYTHM-01-I1-F2 -- without this guard, a visitor who is not
+      // logged in (or whose session ended) could still trigger this
+      // authenticated fetch on tab-visibility restoration, same guard the
+      // mount effect above already applies before its own first call.
+      if (!user) return;
       if (Date.now() - lastBriefingFetchStartedAtRef.current < STALE_AFTER_MS) return;
       loadAssistantSignals();
     };
     document.addEventListener('visibilitychange', handleVisibilityChange);
     return () => document.removeEventListener('visibilitychange', handleVisibilityChange);
-  }, [loadAssistantSignals]);
+  }, [loadAssistantSignals, user]);
 
   // New Aura Home V1 -- GET /api/daily-assistant/guidance, same
   // best-effort fetch discipline as loadAssistantSignals/loadMyDay above
