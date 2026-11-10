@@ -1721,7 +1721,7 @@ export function HomeDashboard({
           ) : (
             goodRightNow[0] && (
               <div style={{ maxWidth: 240 }}>
-                <GoodRightNowCard card={goodRightNow[0]} activeWindowName={activeWindowName} onLogActivity={onLogActivity} onPlanClick={onPlanClick} onLogged={handleCardLogged} logEntries={logEntries} />
+                <GoodRightNowCard card={goodRightNow[0]} activeWindowName={activeWindowName} onLogActivity={onLogActivity} onPlanClick={onPlanClick} onLogged={handleCardLogged} logEntries={logEntries} cautionAppliesNow={cautionAppliesNow} activeCautionWindowNames={activeCautionWindowNames} />
               </div>
             )
           )}
@@ -2109,6 +2109,8 @@ function GoodRightNowCard({
   onPlanClick,
   onLogged,
   logEntries,
+  cautionAppliesNow,
+  activeCautionWindowNames,
 }: {
   card: ActionCard;
   activeWindowName: string;
@@ -2116,6 +2118,8 @@ function GoodRightNowCard({
   onPlanClick?: (activity?: string, activityId?: string) => void;
   onLogged?: (title: string) => void;
   logEntries?: LoggedEntryItem[];
+  cautionAppliesNow?: boolean;
+  activeCautionWindowNames?: string;
 }) {
   const [status, setStatus] = useState<'idle' | 'loading' | 'logged' | 'pending' | 'error'>('idle');
   const [loggedAtLabel, setLoggedAtLabel] = useState('');
@@ -2197,9 +2201,20 @@ function GoodRightNowCard({
 
   return (
     <div style={goodRightNowCardStyle}>
-      <span style={{ fontSize: 20 }}>{card.icon ?? '✨'}</span>
+      {cautionAppliesNow ? (
+        <div style={{ display: 'flex', alignItems: 'center', gap: 6, width: '100%' }}>
+          <span style={{ fontSize: 20 }}>{card.icon ?? '✨'}</span>
+          <span style={{ fontSize: 9, fontWeight: 850, color: '#fb6b6b', background: 'rgba(251, 107, 107, 0.14)', border: '1px solid rgba(251, 107, 107, 0.4)', borderRadius: 999, padding: '2px 6px', lineHeight: 1.2 }}>
+            ⚠ Caution
+          </span>
+        </div>
+      ) : (
+        <span style={{ fontSize: 20 }}>{card.icon ?? '✨'}</span>
+      )}
       <span style={{ marginTop: 8, color: '#f8fafc', fontSize: 12, fontWeight: 800, lineHeight: 1.3 }}>{card.title}</span>
-      <span style={{ marginTop: 4, color: '#94a3b8', fontSize: 10.5, lineHeight: 1.35, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', width: '100%' }}>{card.description}</span>
+      <span style={{ marginTop: 4, color: '#94a3b8', fontSize: 10.5, lineHeight: 1.35, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', width: '100%' }}>
+        {cautionAppliesNow ? `Caution: ${activeCautionWindowNames || 'a caution period'} also active — ${card.description}` : card.description}
+      </span>
       <div style={{ marginTop: 'auto', paddingTop: 8, width: '100%' }}>
         {action === 'PLAN' ? (
           <button type="button" onClick={() => onPlanClick?.(planTitle, card.activityId)} style={goodRightNowActionButtonStyle} aria-label={`Plan ${planTitle}`}>
