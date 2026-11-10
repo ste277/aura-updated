@@ -197,6 +197,15 @@ async function run() {
     await click(Array.from(h.container.querySelectorAll('button')).find((b) => /Back to overview/.test(b.textContent ?? ''))!);
     await flush();
     check('C14. "Back to overview" returns focus to the diagram line that opened the entry', document.activeElement === urdhvaG);
+    // C15: initiating diagram line unmounted (user switched to Marks) ->
+    // focus falls back to that entry's list button, never to <body>.
+    await pressKey(urdhvaG, 'Enter');
+    await click(Array.from(h.container.querySelectorAll<HTMLButtonElement>('[role="tab"]')).find((t) => /Marks/.test(t.textContent ?? ''))!);
+    check('C15a. switching to Marks unmounts the diagram', h.container.querySelector('#palm-line-urdhvarekha') === null);
+    await click(Array.from(h.container.querySelectorAll('button')).find((b) => /Back to overview/.test(b.textContent ?? ''))!);
+    await flush();
+    check('C15b. focus falls back to the list entry when the diagram line is gone', document.activeElement === h.container.querySelector('[data-palm-list-entry="urdhvarekha"]'));
+    await click(Array.from(h.container.querySelectorAll<HTMLButtonElement>('[role="tab"]')).find((t) => /Lines/.test(t.textContent ?? ''))!);
 
     // ============================================================
     // D. Marks, overview return, invalid selection, back

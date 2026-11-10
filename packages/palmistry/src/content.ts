@@ -184,7 +184,7 @@ export const PALMISTRY_ENTRIES: readonly PalmistryEntry[] = [
     description:
       'A line rising from the wrist toward the fingers. Its course varies: the texts describe it ending at different fingers.',
     interpretation:
-      'Later treatises read this line by the finger it reaches. The Hastasañjīvana pairs each finger with a social role of its time: the forefinger with a king or minister, the middle finger with a general or preceptor, the ring finger with a wealthy merchant or leader, and the little finger with renown. The Sāmudrikatilaka gives a similar scheme, including a king, army commander or preceptor for the middle finger.',
+      'Later treatises read this line by the finger it reaches. The Hastasañjīvana pairs each finger with a social role of its time: the forefinger with a king or minister, the middle finger with a general, the ring finger with a wealthy merchant or leader, and the little finger with renown. The Sāmudrikatilaka gives a similar scheme, including a king, army commander or preceptor for the middle finger.',
     tradition: 'Indian (12th- and 17th-century treatises)',
     attributionStatus: 'later-tradition-supported',
     attributionConfidence: 'High',

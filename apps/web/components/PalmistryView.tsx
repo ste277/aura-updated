@@ -112,7 +112,13 @@ export function PalmistryView({ onBack, initialEntryId = null }: PalmistryViewPr
             : trigger.source === 'mark'
               ? `button[data-entry-id="${trigger.id}"]`
               : `[data-palm-list-entry="${trigger.id}"]`;
-        document.querySelector<HTMLElement>(selector)?.focus();
+        // Fallback (P1 review): if the initiating control is no longer
+        // mounted (e.g. a diagram line after switching to Marks), focus the
+        // same entry's always-present list button instead of dropping to body.
+        const target =
+          document.querySelector<HTMLElement>(selector) ??
+          document.querySelector<HTMLElement>(`[data-palm-list-entry="${trigger.id}"]`);
+        target?.focus();
       }, 0);
     }
   }, []);

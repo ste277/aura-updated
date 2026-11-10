@@ -27,7 +27,7 @@ A second editorial/cultural reviewer is welcome.
 
 **We ask the reviewer to:**
 1. Check each user-visible sentence in §3 against the cited sources.
-2. Answer the open questions in §5.
+2. Answer the open questions in §5 (14 in total).
 3. Approve, or request changes, using §8.
 
 **How to read the ledgers.** Every claim is tagged as one of:
@@ -134,7 +134,7 @@ These tables are **generated directly from the shipped content file** (`packages
 | Title | Upward line |
 | Traditional name | ūrdhvarekhā |
 | Where | A line rising from the wrist toward the fingers. Its course varies: the texts describe it ending at different fingers. |
-| In this tradition | Later treatises read this line by the finger it reaches. The Hastasañjīvana pairs each finger with a social role of its time: the forefinger with a king or minister, the middle finger with a general or preceptor, the ring finger with a wealthy merchant or leader, and the little finger with renown. The Sāmudrikatilaka gives a similar scheme, including a king, army commander or preceptor for the middle finger. |
+| In this tradition | Later treatises read this line by the finger it reaches. The Hastasañjīvana pairs each finger with a social role of its time: the forefinger with a king or minister, the middle finger with a general, the ring finger with a wealthy merchant or leader, and the little finger with renown. The Sāmudrikatilaka gives a similar scheme, including a king, army commander or preceptor for the middle finger. |
 | Context and uncertainty | The drawing shows one possible course, ending at the middle finger. These readings describe the status categories of medieval society; the Sāmudrikatilaka (1.154) even varies them by social class. For Sāmudrikatilaka 1.155, the Sanskrit names the ring finger while the English translation says forefinger, an open question for expert review. |
 | Western comparison | Western palmistry splits similar vertical lines into a "fate line" and a "sun line". The Indian treatises treat them as one upward line read by where it ends. |
 | Tradition label | Indian (12th- and 17th-century treatises) |
@@ -243,7 +243,7 @@ Page numbers refer to Zysk 2025 unless marked "Iyer". "v." = verse of the Śārd
 | pitṛlekhā | Called a line of knowledge in the early text; "father's line" in diagrams, one linked with Sarasvatī | p. 243 | VERIFIED-TEXT (OPEN Q4) |
 | pitṛlekhā | ST describes the first lines as reaching between the thumb and forefinger; family, wealth, longevity | ST 1.143, p. 265 | VERIFIED-TEXT. Identifying ST's "family" line with pitṛlekhā is left **OPEN** (Q3). |
 | ūrdhvarekhā | Rises from the wrist; read by the finger it reaches | HS 3.2.80, p. 264; vv. 1–2, p. 243 | VERIFIED-TEXT |
-| ūrdhvarekhā | Forefinger: king or minister; middle: general or preceptor; ring ("refuge of Śiva"): rich merchant or leader; little: supported and famous | HS 3.2.81–82, p. 264 | VERIFIED-TEXT |
+| ūrdhvarekhā | Forefinger: king or minister; middle: general; ring ("refuge of Śiva"): rich merchant or leader; little: supported and famous | HS 3.2.81–82, p. 264 | VERIFIED-TEXT. "Preceptor" (Sanskrit *ācārya* in 3.2.81) is deliberately **not** attributed to HS, because Zysk's English gives only "general" (OPEN Q14). |
 | ūrdhvarekhā | ST gives a similar scheme, including king, army commander or preceptor for the middle finger; it varies by social class | ST 1.152, 1.154–1.156, pp. 265–266 | VERIFIED-TEXT. ST 1.155 has a Sanskrit/English discrepancy (OPEN Q5). |
 | ūrdhvarekhā | Line from the wrist to the middle finger | BS Iyer 70.12 | VIA-TRANSLATION |
 | ūrdhvarekhā | Drawn ending at the middle finger | One of the documented courses | **ENGINEERING** |
@@ -251,7 +251,7 @@ Page numbers refer to Zysk 2025 unless marked "Iyer". "v." = verse of the Śārd
 | yava | Used in birth-time omens; several readings | vv. 9–15, pp. 247–251; v. 22, p. 254 | VERIFIED-TEXT |
 | matsya | Two fish marks in mid-palm: feeding many people | BS Iyer 68.44 | VIA-TRANSLATION |
 | matsya | Fish: wealth, food and good fortune; drink; appears twice (two sources merged) | v. 15, pp. 250–251; v. 22, p. 254 | VERIFIED-TEXT |
-| matsya | Later diagrams draw the fish just above the wrist | p. 249 | VERIFIED-TEXT |
+| matsya | Later diagrams draw the fish just above the wrist | p. 250 | VERIFIED-TEXT |
 | śaṅkha | Among the royal marks (kingship; queenship) | BS Iyer 68.45; 70.10 | VIA-TRANSLATION |
 | śaṅkha | A king's palms show a conch with parasol, wheel and elephant's foot; Zysk notes the princely/warrior emphasis | v. 21, p. 253 | VERIFIED-TEXT |
 | chatra | Among the royal marks (kingship; queenship) | BS Iyer 68.45; 70.10 | VIA-TRANSLATION |
@@ -282,6 +282,7 @@ Page numbers refer to Zysk 2025 unless marked "Iyer". "v." = verse of the Śārd
 11. **Lotus (not included).** The Bṛhatsaṃhitā (Iyer 68.45, 70.10) lists the lotus among royal marks, but its Sanskrit term could not be verified (the wisdomlib Sanskrit pages were not accessible). It was left out of the five marks. Should it replace *vedī* once the term is verified?
 12. **Naming the tradition.** The guide now calls the practice Rekhāśāstra, the term Zysk 2025 uses (pp. 241, 243). The names "Hasta Sāmudrika" and "Sāmudrika Śāstra" were removed, because they were not attested in the sources read for this ticket (Sāmudrikaśāstra appears there only as a 1956 book title). Should Aura use either name, and with what attribution?
 13. **Śārdūlakarṇāvadāna dating.** The guide says the palmistry chapter was compiled "after the mid-9th century", following Zysk p. 240. Is that the right public-facing phrasing?
+14. **Hastasañjīvana 3.2.81, "preceptor".** The Sanskrit reads *…tathācāryaḥ…* for the middle finger, but Zysk's English translation gives only "renowned army general". The guide currently attributes only "general" to the Hastasañjīvana, and "preceptor" only to Sāmudrikatilaka 1.152, whose English supports it. Should the Hastasañjīvana reading include the preceptor?
 
 
 ---
@@ -325,7 +326,7 @@ Nothing in this checklist is legal advice, and **no licensing clearance has been
 - [ ] Historical framing and dating are accurate (intro, §2)
 - [ ] The longevity and status-based (social-role) readings are presented responsibly
 - [ ] No culturally inappropriate or misleading wording
-- [ ] Open questions 1–13 answered, or accepted as open with the current wording
+- [ ] Open questions 1–14 answered, or accepted as open with the current wording
 - [ ] Schematic line positions (screenshots 03, 06) are defensible as "approximate"
 
 **Checklist for the licensing reviewer:**
