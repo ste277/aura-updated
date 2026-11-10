@@ -204,7 +204,7 @@ export async function handleRemoteMcpRequest(req: Request, deps: RemoteMcpDeps):
 
   const token = bearerToken(req);
   const access = token ? await deps.verifyAccessToken(token, config.resourceUrl) : null;
-  if (!access) return unauthorized(config, req.headers.has('authorization'));
+  if (!access) return unauthorized(config, /^\s*Bearer\s/i.test(req.headers.get('authorization') ?? ''));
   if (!access.scopes.includes(MCP_SCOPE)) {
     return jsonResponse(
       403,
@@ -227,7 +227,6 @@ export async function handleRemoteMcpRequest(req: Request, deps: RemoteMcpDeps):
 
   try {
     const transport = new WebStandardStreamableHTTPServerTransport({ sessionIdGenerator: undefined, enableJsonResponse: true });
-    transport.onerror = (err) => console.error(`[aura-mcp-remote] transport error (${err.name})`);
     const server = createRemoteMcpServer(deps.now);
     await server.connect(transport);
     return await transport.handleRequest(req, { parsedBody });

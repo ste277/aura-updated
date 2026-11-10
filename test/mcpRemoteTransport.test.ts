@@ -117,7 +117,7 @@ async function main() {
   check('auth: missing token -> 401', noToken.status === 401, noToken.status);
   check('auth: 401 carries Bearer resource_metadata (path-inserted) and scope', challenge.startsWith('Bearer ') && challenge.includes('resource_metadata="https://aura.example/.well-known/oauth-protected-resource/api/mcp"') && challenge.includes(`scope="${MCP_SCOPE}"`), challenge);
   const malformed = await handleRemoteMcpRequest(mcpRequest({ jsonrpc: '2.0', id: 1, method: 'tools/list' }, { authorization: 'Basic abc' }), deps());
-  check('auth: non-Bearer scheme -> 401', malformed.status === 401, malformed.status);
+  check('auth: non-Bearer scheme -> 401 without error code', malformed.status === 401 && !(malformed.headers.get('www-authenticate') ?? '').includes('error='), malformed.status);
   check('auth: no credentials -> challenge without error code (RFC 6750 3.1)', !challenge.includes('error='), challenge);
   const wrong = await handleRemoteMcpRequest(mcpRequest({ jsonrpc: '2.0', id: 1, method: 'tools/list' }, { authorization: 'Bearer some-other-token' }), deps());
   check('auth: unknown token -> 401 with error="invalid_token"', wrong.status === 401 && (wrong.headers.get('www-authenticate') ?? '').includes('error="invalid_token"'), wrong.status);
