@@ -2,7 +2,7 @@
 #   docker build -f deploy/Dockerfile -t aura-app .
 
 # ---- deps: install with the same lockfiles CI uses --------------------------
-FROM node:20-alpine AS deps
+FROM node:24-alpine AS deps
 WORKDIR /repo
 COPY package.json package-lock.json ./
 COPY apps/web/package.json apps/web/package-lock.json ./apps/web/
@@ -10,7 +10,7 @@ RUN npm ci --ignore-scripts \
  && cd apps/web && npm ci --ignore-scripts
 
 # ---- build ------------------------------------------------------------------
-FROM node:20-alpine AS build
+FROM node:24-alpine AS build
 WORKDIR /repo
 COPY --from=deps /repo/node_modules ./node_modules
 COPY --from=deps /repo/apps/web/node_modules ./apps/web/node_modules
@@ -27,7 +27,7 @@ RUN cd apps/web && npx prisma generate \
     npm run build
 
 # ---- runtime: only the standalone server output -----------------------------
-FROM node:20-alpine AS runtime
+FROM node:24-alpine AS runtime
 WORKDIR /app
 ENV NODE_ENV=production \
     NEXT_TELEMETRY_DISABLED=1 \
