@@ -49,6 +49,12 @@ jobs:
         run: npx ts-node test/timingSearch.test.ts
       - name: Run timing search API validation test
         run: npx ts-node test/timingSearchApi.test.ts
+      # AURA-MCP-02-I1 -- remote MCP transport foundation (packages/mcp-tools):
+      # fail-closed config, 404 when off, Origin/body/auth gates, shared tool
+      # definition, parity with the shared executor, 14-day remote window,
+      # dependency pin guard and static isolation. No network, DB or env.
+      - name: Run remote MCP transport test
+        run: npx ts-node test/mcpRemoteTransport.test.ts
       - name: Run panchang day service test
         run: npx ts-node test/panchangDay.test.ts
       - name: Run panchang month service test
