@@ -1,5 +1,5 @@
 import { computeSolarEphemeris } from '../../../packages/astronomy/src/ephemeris';
-import { computePanchangWindows, getActiveWindow, SolarWindowType, WeekdayIndex } from '../../../packages/panchang/src/windows';
+import { computePanchangWindows, evaluatePanchangOverlap, getActiveWindow, SolarWindowType, WeekdayIndex } from '../../../packages/panchang/src/windows';
 import { getDatePartsInTimezone } from '../../../packages/panchang/src/localDate';
 import { resolveTzOffsetMinutes, getMinuteOfDayInTimezone } from './timezone';
 
@@ -19,16 +19,27 @@ import { resolveTzOffsetMinutes, getMinuteOfDayInTimezone } from './timezone';
  * apps/web/lib/useCurrentMinuteOfDay.ts already uses for the live "current
  * minute of day" reading.
  *
- * The overlap precedence between simultaneously-active windows (e.g.
- * Abhijit vs. Rahu Kalam) is entirely governed by getActiveWindow()'s own
- * existing, unmodified ordering -- this function never reimplements or
- * second-guesses that precedence.
+ * PANCH-OVERLAP-01-I1 -- PD-05: the overlap precedence between
+ * simultaneously-active windows (e.g. Abhijit vs. Rahu Kalam) previously
+ * followed getActiveWindow()'s own array-order-first-match, which silently
+ * preferred Abhijit on every weekday it geometrically overlaps a
+ * commencement-caution window (see issue #331) -- causing a habit logged
+ * during that overlap to be stored (and later counted by Insights) as a
+ * SUPPORTIVE Abhijit log, never acknowledging the caution it was actually
+ * also inside. Now uses evaluatePanchangOverlap(), the SAME shared policy
+ * Timing Search's resolveOverlappingCandidate() is built on, and stores the
+ * caution window's type instead whenever one overlaps -- otherwise
+ * byte-identical to before (evaluatePanchangOverlap's non-overlap result is
+ * always the same single window getActiveWindow() alone would return).
  *
- * Uses ONLY the Timing Location (latitude/longitude/timezone) supplied by
- * the caller -- never Birth Location, never Event Location, never
- * SavedPerson/SHARED context. An ordinary owner activity log is always
- * evaluated against the owner's own Timing Location, exactly as live
- * logging already does.
+ * This change is PROSPECTIVE ONLY, by construction: both call sites
+ * (apps/web/app/api/habit-logs/route.ts, apps/web/lib/
+ * planCompletionHistory.ts) invoke this function once, at write time, to
+ * compute a value that is then PERSISTED into HabitLog.activeWindow /
+ * PlannedActivity's completion record -- never recomputed from this
+ * function on a later read. An already-stored row keeps whatever value was
+ * written at the time, forever; only a NEW write after this change is
+ * affected. No migration, no backfill, no historical reinterpretation.
  */
 export function resolveHistoricalActiveWindow(
   logTimestamp: Date,
@@ -41,5 +52,12 @@ export function resolveHistoricalActiveWindow(
   const solar = computeSolarEphemeris({ year, month, day, latitude, longitude, tzOffsetMinutes });
   const windows = computePanchangWindows(solar, weekday as WeekdayIndex);
   const minuteOfDay = getMinuteOfDayInTimezone(timezone, logTimestamp);
+  const overlap = evaluatePanchangOverlap(windows, minuteOfDay);
+  if (overlap.commencementCaution && overlap.primaryCautionWindow) {
+    return overlap.primaryCautionWindow.type;
+  }
+  // Non-overlap case: byte-identical to the original getActiveWindow() call
+  // (evaluatePanchangOverlap's activeWindows[0] in the no-caution case is
+  // always the same first-match window getActiveWindow() would return).
   return getActiveWindow(windows, minuteOfDay);
 }

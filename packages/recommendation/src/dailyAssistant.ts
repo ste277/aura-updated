@@ -2,6 +2,7 @@ import { computeSolarEphemeris } from '../../astronomy/src/ephemeris';
 import { SolarNoEventError, SolarComputationError, SolarInputValidationError } from '../../astronomy/src/errors';
 import {
   computePanchangWindows,
+  evaluatePanchangOverlap,
   getActiveWindow,
   intervalsOverlap,
   isInauspiciousCommencementWindow,
@@ -66,6 +67,74 @@ export interface DailyBriefing {
     title: string;
     description: string;
     windowType: SolarWindowType;
+  };
+  /** PANCH-OVERLAP-01-I1 -- additive, optional for backward compatibility.
+   * greenLight/peakWindow above ONLY ever name the favorable side
+   * (peak = findWindow(windows, 'ABHIJIT') ?? windows[0]); they have no way
+   * to say whether a commencement-caution window (RAHU_KALAM/YAMA/GULIKA)
+   * is ALSO active, because getActiveWindow()'s own array-order-first-match
+   * (computePanchangWindows() lists ABHIJIT before RAHU_KALAM/GULIKA/YAMA)
+   * silently prefers Abhijit whenever they overlap -- a geometric
+   * certainty on most weekdays (solar noon is exactly the boundary between
+   * the 8-way segment scheme's segment 3 and 4; Abhijit, centered on solar
+   * noon, always straddles whichever caution window occupies one of those
+   * two segments -- see issue #331), not a rare edge case. This field is
+   * computed via evaluatePanchangOverlap() -- the SAME shared policy
+   * resolveOverlappingCandidate() (Timing Search's FIND/CHECK/COMPARE) is
+   * built on -- so Home can finally ask the identical question Timing
+   * Search already answers, instead of relying on activeWindow's
+   * array-order-only result for a commencement decision it was never safe
+   * to drive. */
+  commencementCaution: {
+    /** True iff ANY caution window genuinely contains the current minute
+     * (evaluatePanchangOverlap(windows, minuteOfDay).commencementCaution) --
+     * independent of whether that caution overlaps peakWindow specifically.
+     * PANCH-OVERLAP-01-I1-F1 correction: previously documented (incorrectly)
+     * as "only ever true while briefingState is ACTIVE" -- that was never
+     * actually true of this field's own computation (it has always checked
+     * ALL active windows, not just peakWindow's), and a standalone caution
+     * with no Abhijit overlap at all (e.g. Yama alone, Rahu already ended)
+     * makes this true during 'UPCOMING'/'COMPLETED' too. Use
+     * activeCautionWindows below for the names of the window(s) actually
+     * causing this to be true right now -- never cautionWindows, which
+     * answers a different, static question (see below). */
+    activeNow: boolean;
+    /** Every caution window that genuinely contains the CURRENT minute
+     * (the same windows activeNow's boolean is derived from) -- dynamic,
+     * re-evaluated per minuteOfDay. This is the ONLY correct source for any
+     * "also active right now"/"also applies right now" text. May contain
+     * more than one entry (Wednesday's exact boundary minute, where
+     * Gulika's and Rahu's spans meet). Empty when activeNow is false. */
+    activeCautionWindows: Array<{
+      name: string;
+      windowType: SolarWindowType;
+      startTime: string;
+      endTime: string;
+    }>;
+    /** True iff ANY caution window's span overlaps ANY part of
+     * peakWindow's own span TODAY -- a static, whole-day fact independent
+     * of the current minute. Lets a consumer qualify 'UPCOMING' framing
+     * honestly before the window has even started, not only its 'ACTIVE'
+     * framing. */
+    overlapsPeakWindow: boolean;
+    /** Every caution window (full detail, factual, never hidden) whose
+     * span overlaps peakWindow's span today -- STATIC, independent of the
+     * current minute (do not use this for "active right now" text; see
+     * activeCautionWindows above). May contain more than one entry
+     * (confirmed real on Wednesdays, where Gulika's second half and Rahu
+     * Kalam's first half both fall inside Abhijit's span). Empty when
+     * overlapsPeakWindow is false. Also the correct source for scheduling a
+     * refresh at this caution's own start/end, since those are exactly the
+     * instants peakWindow-specific guidance (Green Light/Next Action) needs
+     * to re-evaluate at. */
+    cautionWindows: Array<{
+      name: string;
+      windowType: SolarWindowType;
+      startTime: string;
+      endTime: string;
+      startTimestamp: string;
+      endTimestamp: string;
+    }>;
   };
   notificationText: string;
   widgetText: string;
@@ -241,6 +310,43 @@ export function buildDailyBriefing(context: DailyAssistantContext): DailyBriefin
           : 'COMPLETED' as const,
     }));
 
+  // PANCH-OVERLAP-01-I1 / -F1 -- commencementCaution. `activeNow`/
+  // `activeCautionWindows` use the SAME shared evaluatePanchangOverlap()
+  // policy Timing Search's resolveOverlappingCandidate() is built on,
+  // evaluated at this exact minuteOfDay -- true, and naming exactly the
+  // window(s), only while a caution window genuinely overlaps "right now".
+  // `overlapsPeakWindow`/`cautionWindows` are a SEPARATE, static
+  // (minute-independent) fact about peakWindow's own span, so an
+  // 'UPCOMING' consumer can qualify its framing honestly before the window
+  // has even started, not only its 'ACTIVE' framing -- but they must never
+  // be used to name what's active right now (F1 fix: a consumer that did
+  // this could name a caution that already ended, or miss a standalone
+  // caution with no Abhijit overlap at all).
+  const currentOverlap = evaluatePanchangOverlap(windows, minuteOfDay);
+  const cautionWindowsOverlappingPeak = peak
+    ? windows.filter(
+        (w) => isInauspiciousCommencementWindow(w.type) && intervalsOverlap(peak.startMinutes, peak.endMinutes, w.startMinutes, w.endMinutes)
+      )
+    : [];
+  const commencementCaution = {
+    activeNow: currentOverlap.commencementCaution,
+    activeCautionWindows: currentOverlap.cautionWindows.map((w) => ({
+      name: w.label,
+      windowType: w.type,
+      startTime: formatMinute(w.startMinutes),
+      endTime: formatMinute(w.endMinutes),
+    })),
+    overlapsPeakWindow: cautionWindowsOverlappingPeak.length > 0,
+    cautionWindows: cautionWindowsOverlappingPeak.map((w) => ({
+      name: w.label,
+      windowType: w.type,
+      startTime: formatMinute(w.startMinutes),
+      endTime: formatMinute(w.endMinutes),
+      startTimestamp: localInstantForMinute(context, w.startMinutes).toISOString(),
+      endTimestamp: localInstantForMinute(context, w.endMinutes).toISOString(),
+    })),
+  };
+
   return {
     dateLabel: localDate.toLocaleDateString('en-US', {
       weekday: 'long',
@@ -260,6 +366,7 @@ export function buildDailyBriefing(context: DailyAssistantContext): DailyBriefin
       description: action.description,
       windowType: peak?.type ?? activeWindow,
     },
+    commencementCaution,
     nextWindow,
     otherFavorableWindows,
     nextAction: buildNextAction(briefingState, action.title, nextWindow),
@@ -766,7 +873,21 @@ export function scoreContinuousBlock(
 export function resolveOverlappingCandidate(candidates: SlotCandidate[], minute: number): SlotCandidate | undefined {
   const matches = candidates.filter((item) => containsMinute(item, minute));
   if (matches.length <= 1) return matches[0];
-  return matches.find((item) => isInauspiciousCommencementWindow(item.type)) ?? matches[0];
+  const cautionMatches = matches.filter((item) => isInauspiciousCommencementWindow(item.type));
+  if (cautionMatches.length === 0) return matches[0];
+  // PANCH-OVERLAP-01-I1 -- when MORE THAN ONE caution window overlaps the
+  // same minute (confirmed real on Wednesdays: Gulika's second half and
+  // Rahu Kalam's first half both fall inside Abhijit's span), the previous
+  // `matches.find(...)` picked whichever caution type happened to appear
+  // first in the candidates array -- itself an incidental array-order
+  // dependency, the exact class of bug this whole ticket exists to remove.
+  // Same deterministic, policy-neutral tie-break as
+  // evaluatePanchangOverlap()'s own primaryCautionWindow (earliest
+  // startMinute, then alphabetical type) -- not a religious precedence
+  // among Rahu Kalam/Yamaganda/Gulika, which this repository does not
+  // document. Single-caution case (the overwhelming majority of overlaps)
+  // is byte-identical to before: cautionMatches[0] is the only entry.
+  return [...cautionMatches].sort((a, b) => a.startMinute - b.startMinute || a.type.localeCompare(b.type))[0];
 }
 
 function buildPlanSummary(candidates: SlotCandidate[], profile: TaskProfile, start: number, end: number, startDate?: Date): string {

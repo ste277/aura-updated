@@ -71,18 +71,31 @@ check(
 );
 
 // ============================================================
-// Rahu/Yama/Abhijit/Gulika overlap precedence matches canonical --
+// Rahu/Yama/Abhijit/Gulika overlap precedence --
 // 2026-07-28 12:20 IST falls inside BOTH Abhijit (11:50-12:42) and Gulika
 // (12:16-13:51), the same real overlap test/windowOverlap.test.ts and
-// test/panchangDay.test.ts already confirm exists. getActiveWindow's own
-// array-order precedence (brahma, abhijit, rahuKalam, gulikaKalam,
-// yamaGandam -- unmodified by this PR) means Abhijit must win, never
-// reimplemented or second-guessed here.
+// test/panchangDay.test.ts already confirm exists.
+//
+// PANCH-OVERLAP-01-I1-F1 -- this expectation was ABHIJIT (matching
+// getActiveWindow's own array-order-first-match) before this fix; that was
+// the confirmed defect (issue #331), not the approved policy. This
+// function now resolves overlap via evaluatePanchangOverlap() (the SAME
+// shared, order-independent policy Timing Search's
+// resolveOverlappingCandidate() is built on), which correctly reports
+// GULIKA as the commencement-caution window active at this exact minute.
+// This is a NEW, live evaluation of a fixed historical instant --
+// resolveHistoricalActiveWindow() is called here directly as a pure
+// function, never reading back an already-persisted database record (no
+// database is involved in this test at all) -- so updating this
+// expectation is the approved PD-05 prospective-only correction, exactly
+// mirroring the sibling fix already applied in
+// test/habitLogMinuteOfDayTimezone.test.ts for this identical fixture.
+// Fixture date/location/timezone are unchanged.
 // ============================================================
 
 check(
-  'Overlap precedence: 2026-07-28 12:20 IST (inside both Abhijit and Gulika) resolves to ABHIJIT, matching getActiveWindow\'s existing array-order precedence, never GULIKA',
-  resolveHistoricalActiveWindow(new Date('2026-07-28T06:50:00.000Z'), chennai.latitude, chennai.longitude, chennai.timezone) === 'ABHIJIT'
+  'Overlap precedence: 2026-07-28 12:20 IST (inside both Abhijit and Gulika) resolves to GULIKA, the real commencement-caution window active at this minute (PANCH-OVERLAP-01-I1-F1 -- previously ABHIJIT, matching getActiveWindow\'s array-order-first-match, which was the confirmed defect)',
+  resolveHistoricalActiveWindow(new Date('2026-07-28T06:50:00.000Z'), chennai.latitude, chennai.longitude, chennai.timezone) === 'GULIKA'
 );
 
 // ============================================================
@@ -95,7 +108,7 @@ check(
 
 const firstCall = resolveHistoricalActiveWindow(new Date('2026-07-28T06:50:00.000Z'), chennai.latitude, chennai.longitude, chennai.timezone);
 const secondCallSameHistoricalInstant = resolveHistoricalActiveWindow(new Date('2026-07-28T06:50:00.000Z'), chennai.latitude, chennai.longitude, chennai.timezone);
-check('Same historical logTimestamp always resolves identically, independent of when the code actually runs', firstCall === secondCallSameHistoricalInstant && firstCall === 'ABHIJIT');
+check('Same historical logTimestamp always resolves identically, independent of when the code actually runs', firstCall === secondCallSameHistoricalInstant && firstCall === 'GULIKA');
 
 const helperSource = fs.readFileSync('apps/web/lib/historicalActivityWindow.ts', 'utf8');
 check('resolveHistoricalActiveWindow never reads the execution-time clock (no bare new Date()/Date.now())', !/(?<!logTimestamp[^;]*)\bDate\.now\(\)/.test(helperSource) && !/new Date\(\)/.test(helperSource));
@@ -129,7 +142,7 @@ try {
   const resultWithAucklandProcessTz = resolveHistoricalActiveWindow(new Date('2026-07-28T06:50:00.000Z'), chennai.latitude, chennai.longitude, chennai.timezone);
   check(
     'The process/browser TZ environment has zero effect on the result -- identical across America/Los_Angeles, Asia/Kolkata, and Pacific/Auckland process TZs',
-    resultWithLaProcessTz === 'ABHIJIT' && resultWithKolkataProcessTz === 'ABHIJIT' && resultWithAucklandProcessTz === 'ABHIJIT'
+    resultWithLaProcessTz === 'GULIKA' && resultWithKolkataProcessTz === 'GULIKA' && resultWithAucklandProcessTz === 'GULIKA'
   );
 } finally {
   if (originalProcessTz === undefined) delete process.env.TZ;

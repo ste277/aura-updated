@@ -108,6 +108,24 @@ interface HomeDashboardProps {
    * from the independently-computed currentWindow/activeWindowName, never
    * from this prop) already renders honest, non-stale content. */
   dailyBriefingStatus?: 'loading' | 'available' | 'unavailable' | 'error';
+  /** PANCH-OVERLAP-01-I1-F2 -- live, client-recomputed commencement-caution
+   * state (page.tsx's evaluatePanchangOverlap(windows, currentMinuteOfDay),
+   * the SAME windows/minute activeWindowName already uses) -- the
+   * AUTHORITATIVE source for every "is a caution genuinely active right
+   * now" claim rendered by this component. Never derive present-tense
+   * caution truth from dailyBriefing.commencementCaution (a server
+   * snapshot that only updates on a successful, scheduled refetch, and
+   * that schedule only covers peak-overlapping cautions -- a standalone
+   * caution's own end was confirmed to leave that snapshot stale for the
+   * rest of the day). dailyBriefing.commencementCaution.cautionWindows/
+   * overlapsPeakWindow remain valid and unchanged for their own, separate,
+   * legitimately-static purposes: the UPCOMING-framing case (the peak
+   * window hasn't started yet, so there's nothing "active now" to report)
+   * and page.tsx's own refresh-scheduling loop. */
+  liveCommencementCaution?: {
+    activeNow: boolean;
+    activeCautionWindows: Array<{ name: string; windowType: string }>;
+  };
   todayReflection?: {
     outputLevel: 'LOW' | 'MODERATE' | 'PEAK_FLOW';
     followedGuidance: boolean;
@@ -420,6 +438,7 @@ export function HomeDashboard({
   loggedActivitiesToday = [],
   dailyBriefing,
   dailyBriefingStatus,
+  liveCommencementCaution,
   todayReflection,
   personalContext,
   onLogActivity,
@@ -522,7 +541,77 @@ export function HomeDashboard({
     setReflectionError('');
   }, [todayReflection?.outputLevel]);
 
-  const tone = getWindowTone(energyScore, activeWindowName);
+  // PANCH-OVERLAP-01-I1 -- `activeWindowName`/`activeType` come from the
+  // client's own getActiveWindow() call (page.tsx), which is DELIBERATELY
+  // unchanged (array-order first-match remains correct for briefingState's
+  // UPCOMING/ACTIVE/COMPLETED transitions -- see windows.ts's own doc
+  // comment). That means it still reports 'ABHIJIT' -- never the
+  // overlapping caution type -- on every weekday where they coincide (a
+  // geometric certainty, not a rare edge case; see issue #331), so
+  // getWindowTone()'s own 'RAHU'/'YAMA' text match below can never catch
+  // this case on its own: getWindowTone() itself, and the score it's
+  // called with, are UNCHANGED (no scoring/ranking-model edit) -- this is a
+  // presentation-only override of the rendered label/pill/color/
+  // description at this one call site, using the SAME commencementCaution
+  // signal the Green Light/Next Action copy above already uses, so Right
+  // Now's hero visual framing can't keep claiming "Best Time"/green while
+  // the text underneath it (once rendered) says a caution also applies.
+  // PANCH-OVERLAP-01-I1-F2 -- `cautionAppliesNow` (and every other "is a
+  // caution genuinely active right now" claim below) now reads EXCLUSIVELY
+  // from `liveCommencementCaution`, the live client-side value computed in
+  // page.tsx from the SAME windows/currentMinuteOfDay activeWindowName
+  // already uses -- never from dailyBriefing.commencementCaution.activeNow,
+  // a server snapshot that only updates on a successful, scheduled
+  // refetch. Confirmed regression this fixes: that refetch schedule only
+  // covers peak-overlapping cautions, so a STANDALONE caution (no Abhijit
+  // overlap) could end with nothing left to ever refresh the snapshot --
+  // Home then kept showing it as active for the rest of the day (85 to
+  // 636 minutes, reproduced on real calendar fixtures).
+  const cautionAppliesNow = Boolean(liveCommencementCaution?.activeNow);
+  const cautionAppliesToPeakWindow = Boolean(
+    dailyBriefing &&
+      (dailyBriefing.briefingState === 'ACTIVE'
+        ? liveCommencementCaution?.activeNow
+        : dailyBriefing.commencementCaution?.overlapsPeakWindow)
+  );
+  // PANCH-OVERLAP-01-I1-F1/-F2 -- two DIFFERENT lists, never interchangeable:
+  // `activeCautionWindowNames` (LIVE -- which caution(s) genuinely contain
+  // the current minute, i.e. what `cautionAppliesNow` itself was computed
+  // from) is the ONLY correct source for any "also active/applies right
+  // now" text. `cautionWindowNames` (static -- which caution(s) overlap
+  // peakWindow's span TODAY, independent of the current minute) is only
+  // correct for the UPCOMING "overlaps part of this window" framing,
+  // before the window has even started, and for page.tsx's own refresh-
+  // scheduling loop. Using the static list (F1) or a server-snapshot-
+  // derived dynamic list (F2) for "active now" text was each, in turn, a
+  // confirmed defect (e.g. naming an already-ended Rahu Kalam while Yama
+  // was the window actually active; or continuing to name a standalone
+  // caution as active after it had genuinely ended because no refetch
+  // ever fired to clear it).
+  const activeCautionWindowNames = liveCommencementCaution?.activeCautionWindows.map((w) => w.name).join(' and ') ?? '';
+  const cautionWindowNames = dailyBriefing?.commencementCaution?.cautionWindows.map((w) => w.name).join(' and ') ?? '';
+  const baseTone = getWindowTone(energyScore, activeWindowName);
+  const tone = cautionAppliesNow
+    ? {
+        ...baseTone,
+        label: 'Use Caution',
+        pill: 'Caution',
+        color: '#fb6b6b',
+        description: `${activeCautionWindowNames || 'A commencement caution period'} also overlaps right now — fine for routine, low-stakes tasks; hold off starting anything important.`,
+      }
+    : baseTone;
+  // PANCH-OVERLAP-01-I1-F1 -- the hero headline (rendered just below, in the
+  // Right Now card) called getHeroHeadline(activeWindowName) unconditionally
+  // before this fix, so it could still say something like "Strong time for
+  // important work" directly above this same tone pill/description once
+  // cautionAppliesNow flips it to "Caution" -- confirmed reproducible, a
+  // direct above-the-fold contradiction. Overriding only the HEADLINE
+  // STRING here, never activeWindowName/getActiveWindow/energyScore/
+  // getWindowTone's own color logic (unchanged) -- this is presentation-
+  // only, and PD-02: it still never implies a low-stakes activity is
+  // prohibited or that ongoing work must stop, it just stops claiming an
+  // unqualified "favorable, start now" headline while a caution is active.
+  const heroHeadline = cautionAppliesNow ? 'Caution period active' : getHeroHeadline(activeWindowName);
   const currentWindowLabel = dailyBriefing?.briefingState === 'ACTIVE'
     ? dailyBriefing.peakWindow.name
     : formatWindowName(currentWindow?.name ?? activeWindowName);
@@ -1374,7 +1463,7 @@ export function HomeDashboard({
               <div data-home-right-now-label tabIndex={-1} style={{ ...typography.sectionEyebrow, outline: 'none' }}>● Right Now</div>
               <StatusBadge label={tone.pill} tone={toneToStatusTone(tone.color)} />
             </div>
-            <h2 style={{ margin: '13px 0 0', fontSize: 25, color: colors.textPrimary, lineHeight: 1.14 }}>{getHeroHeadline(activeWindowName)}</h2>
+            <h2 style={{ margin: '13px 0 0', fontSize: 25, color: colors.textPrimary, lineHeight: 1.14 }}>{heroHeadline}</h2>
             <div style={{ marginTop: spacing.sm, color: colors.textSecondary, fontSize: 15, fontWeight: 800 }}>{currentWindowLabel} · {tone.pill}</div>
           </div>
         </div>
@@ -1421,23 +1510,71 @@ export function HomeDashboard({
          * describe greenLight's window and its validity. */}
         {dailyBriefingStatus === 'available' && dailyBriefing && (
           <div style={{ marginTop: spacing.sm }}>
-            {dailyBriefing.nextAction && !nextActionExpired && (
+            {/* PANCH-OVERLAP-01-I1 -- PD-01: peakWindow/greenLight only ever
+             * name the favorable (ABHIJIT) side; on most weekdays a
+             * commencement-caution window (Rahu Kalam/Yama/Gulika) also
+             * overlaps part or all of that same span (a geometric
+             * certainty, not a rare edge case -- see issue #331). An
+             * unqualified "favorable... Plan this" claim during that
+             * overlap would be exactly the misleading commencement
+             * guidance Timing Search's own resolveOverlappingCandidate()
+             * already avoids. `cautionAppliesNow` drives the 'ACTIVE'-state
+             * wording (precise to the current minute, via
+             * commencementCaution.activeNow); `cautionAppliesToPeakWindow`
+             * additionally covers 'UPCOMING' framing using the static
+             * whole-window overlapsPeakWindow fact, so the caveat appears
+             * before the window even starts, not only once it's active.
+             * PD-02: this qualifies the claim, it does not remove the CTA
+             * -- Plan's own flow is a general scheduling action, not an
+             * implied-favorable-right-now commitment, and a low-stakes
+             * activity is never blocked by this. */}
+            {dailyBriefing.nextAction && !nextActionExpired && !cautionAppliesNow && (
               <p style={{ margin: 0, color: colors.textSecondary, fontSize: 13, lineHeight: 1.4 }}>
                 <span style={{ color: colors.textPrimary, fontWeight: 800 }}>Next: </span>
                 {dailyBriefing.nextAction}
               </p>
             )}
+            {dailyBriefing.nextAction && !nextActionExpired && cautionAppliesNow && (
+              <p style={{ margin: 0, color: colors.textSecondary, fontSize: 13, lineHeight: 1.4 }}>
+                <span style={{ color: colors.textPrimary, fontWeight: 800 }}>Next: </span>
+                {activeCautionWindowNames || 'A commencement caution period'} is also active right now — hold off starting anything important; lower-stakes tasks are fine.
+              </p>
+            )}
             {dailyBriefing.greenLight?.title && dailyBriefing.briefingState !== 'COMPLETED' && !greenLightExpired && (
               <div style={{ marginTop: 4, display: 'flex', alignItems: 'baseline', gap: spacing.sm, flexWrap: 'wrap' }}>
                 <p style={{ margin: 0, color: colors.textFaint, fontSize: 12, lineHeight: 1.4, fontStyle: 'italic' }}>
-                  {dailyBriefing.briefingState === 'ACTIVE' ? 'Active now: ' : 'Coming up: '}
-                  {dailyBriefing.peakWindow?.name ?? 'Peak window'}
-                  {dailyBriefing.peakWindow?.startTime && dailyBriefing.peakWindow?.endTime
-                    ? ` (${dailyBriefing.peakWindow.startTime}–${dailyBriefing.peakWindow.endTime})`
-                    : ''}
-                  {' — favorable for '}
-                  {dailyBriefing.greenLight.title}
-                  {dailyBriefing.greenLight.description ? ` — ${dailyBriefing.greenLight.description}` : ''}
+                  {cautionAppliesToPeakWindow ? (
+                    <>
+                      {dailyBriefing.peakWindow?.name ?? 'Peak window'}
+                      {dailyBriefing.peakWindow?.startTime && dailyBriefing.peakWindow?.endTime
+                        ? ` (${dailyBriefing.peakWindow.startTime}–${dailyBriefing.peakWindow.endTime})`
+                        : ''}
+                      {dailyBriefing.briefingState === 'ACTIVE' ? ' is active, but ' : ' is coming up, but '}
+                      {/* PANCH-OVERLAP-01-I1-F1 -- ACTIVE names the DYNAMIC
+                       * caution(s) genuinely active right now;
+                       * UPCOMING/else names the STATIC peak-overlap
+                       * caution(s) (the window hasn't started yet, so
+                       * there's no "active now" caution to name -- the
+                       * static "overlaps part of this window" fact is the
+                       * correct and only thing to describe here). */}
+                      {(dailyBriefing.briefingState === 'ACTIVE' ? activeCautionWindowNames : cautionWindowNames) || 'a commencement caution period'}
+                      {dailyBriefing.briefingState === 'ACTIVE' ? ' also applies right now' : ' overlaps part of this window'}
+                      {' — hold off starting anything important; '}
+                      {dailyBriefing.greenLight.title}
+                      {' is still fine for lower-stakes use'}
+                    </>
+                  ) : (
+                    <>
+                      {dailyBriefing.briefingState === 'ACTIVE' ? 'Active now: ' : 'Coming up: '}
+                      {dailyBriefing.peakWindow?.name ?? 'Peak window'}
+                      {dailyBriefing.peakWindow?.startTime && dailyBriefing.peakWindow?.endTime
+                        ? ` (${dailyBriefing.peakWindow.startTime}–${dailyBriefing.peakWindow.endTime})`
+                        : ''}
+                      {' — favorable for '}
+                      {dailyBriefing.greenLight.title}
+                      {dailyBriefing.greenLight.description ? ` — ${dailyBriefing.greenLight.description}` : ''}
+                    </>
+                  )}
                 </p>
                 {onPlanClick && (
                   <TextButton onClick={() => onPlanClick(dailyBriefing.greenLight.title)} style={{ fontSize: 12 }}>

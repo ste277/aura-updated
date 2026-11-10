@@ -4,6 +4,7 @@ import React, { useEffect, useMemo, useState, useCallback, useRef } from 'react'
 import { computeSolarEphemeris, isSolarError } from '../../../packages/astronomy/src/ephemeris';
 import {
   computePanchangWindows,
+  evaluatePanchangOverlap,
   getActiveWindow,
   SolarWindowType,
   WeekdayIndex,
@@ -585,6 +586,32 @@ export default function DashboardPage() {
     }
     if (dailyBriefing.nextWindow?.startTimestamp) {
       candidateTimestamps.push(new Date(dailyBriefing.nextWindow.startTimestamp).getTime());
+    }
+    // PANCH-OVERLAP-01-I1 -- a commencement-caution window's own start/end
+    // can fall strictly INSIDE peakWindow's span (e.g. Rahu Kalam ending
+    // mid-Abhijit on a Friday), a transition neither of the two candidates
+    // above would ever catch -- so Home's "favorable... but caution also
+    // applies" qualifier (HomeDashboard.tsx's cautionAppliesNow) could stay
+    // stale (either direction: showing the qualifier after the caution has
+    // actually ended, or not yet showing it once the caution has actually
+    // begun) for the rest of the mounted tab. Reuses the exact same bounded
+    // single-timer mechanism -- these are additional candidates in the
+    // same "soonest future transition" list, not a second timer.
+    for (const cautionWindow of dailyBriefing.commencementCaution?.cautionWindows ?? []) {
+      // PANCH-OVERLAP-01-I1-F1 -- the caution's own START is not subject to
+      // the inclusive-minute issue (a window simply isn't active yet before
+      // its start minute, so scheduling exactly at startTimestamp is
+      // correct as-is, same as nextWindow.startTimestamp above never needing
+      // a correction). Its END needs the SAME +60_000 correction
+      // peakWindow.endTimestamp already gets above, for the identical
+      // reason: getActiveWindow/evaluatePanchangOverlap treat a window's
+      // end minute as inclusive, so refetching exactly AT endTimestamp would
+      // still land inside the caution's still-active final minute and come
+      // back unchanged -- this was a confirmed, reproducible bug (a
+      // long-mounted tab could keep the caution caveat visible for the rest
+      // of the day on a fixture with no later transition to catch it).
+      candidateTimestamps.push(new Date(cautionWindow.startTimestamp).getTime());
+      candidateTimestamps.push(new Date(cautionWindow.endTimestamp).getTime() + 60_000);
     }
     const now = Date.now();
     const futureTimestamps = candidateTimestamps.filter((t) => Number.isFinite(t) && t > now);
@@ -1195,6 +1222,32 @@ export default function DashboardPage() {
   // successfully, nothing special active").
   const activeType = useMemo(() => {
     return solar ? getActiveWindow(windows, currentMinuteOfDay) : 'UNAVAILABLE';
+  }, [solar, windows, currentMinuteOfDay]);
+
+  // PANCH-OVERLAP-01-I1-F2 -- live, client-recomputed commencement-caution
+  // state, built from the EXACT SAME `windows`/`currentMinuteOfDay` values
+  // `activeType` above already trusts (never a second, independently-timed
+  // or independently-fetched source) -- so this inherits `windows`'s own
+  // existing date-rollover/location/timezone-change invalidation (via
+  // `solar`'s dependency array: user.latitude/longitude/timezone,
+  // todayDateStr) for free, the same way activeType already does. This is
+  // what fixes the confirmed F1 regression: dailyBriefing.commencementCaution
+  // is a SERVER SNAPSHOT that only updates when a scheduled refetch
+  // succeeds, and that schedule only covers peak-overlapping cautions, so a
+  // STANDALONE caution (no Abhijit overlap) could end with nothing to ever
+  // refresh it -- Home then kept showing it as active for the rest of the
+  // day. This value recomputes every time currentMinuteOfDay ticks (every
+  // 30s, via useCurrentMinuteOfDay), independent of any network request
+  // succeeding or being scheduled at all.
+  const liveCommencementCaution = useMemo(() => {
+    if (!solar) {
+      return { activeNow: false, activeCautionWindows: [] as Array<{ name: string; windowType: SolarWindowType }> };
+    }
+    const overlap = evaluatePanchangOverlap(windows, currentMinuteOfDay);
+    return {
+      activeNow: overlap.commencementCaution,
+      activeCautionWindows: overlap.cautionWindows.map((w) => ({ name: w.label, windowType: w.type })),
+    };
   }, [solar, windows, currentMinuteOfDay]);
 
   // Daily energy insight score
@@ -1835,6 +1888,7 @@ export default function DashboardPage() {
             loggedActivitiesToday={loggedActivitiesToday}
             dailyBriefing={dailyBriefing}
             dailyBriefingStatus={dailyBriefingStatus}
+            liveCommencementCaution={liveCommencementCaution}
             personalContext={personalContext}
             todayReflection={todayReflection}
             onLogActivity={handleLogActivity}
