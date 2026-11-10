@@ -8,9 +8,11 @@
  * This test PROVES the root cause and the fix without needing two Node binaries: it runs the old pattern under two different (equally valid) sort
  * ALGORITHMS written here -- they disagree for the same seed -- and shows the replacement (a seeded Fisher-Yates shuffle, then a STABLE sort by a pure
  * rank comparator) produces identical results under both algorithms, under the engine's native sort, and equals a pinned stream. It also forbids the
- * pattern anywhere in the test tree. CI runs on Node 20 and the incidence suites pin exact authoritative counts, so any engine difference fails CI.
+ * pattern anywhere in the test tree. CI runs on Node 24 and the incidence suites pin exact authoritative counts, so any engine difference fails CI.
  *
- * SUPPORTED NODE: CI declares Node 20 (.github/workflows/ci.yml); `.nvmrc` records the same. Tests are expected to be identical on every supported engine.
+ * SUPPORTED NODE: CI declares Node 24 (.github/workflows/ci.yml); `.nvmrc` records the same (AURA-MCP-02-I1.5-B, matching Vercel Production's Node 24.x).
+ * The only other version allowed in CI is the non-required "MCP Server (Node 20 compatibility)" job, which keeps evidence for apps/mcp's engines >=20
+ * floor. Tests are expected to be identical on every supported engine.
  */
 import fs from 'fs';
 import path from 'path';
@@ -90,7 +92,15 @@ const SWEEPS = ['counterfactualAcceptance', 'localCounterfactual', 'schedulingAt
 check('the four seeded sweeps import the shared deterministic helper and call it', SWEEPS.every((n) => { const s = fs.readFileSync(path.join(__dirname, `${n}.test.ts`), 'utf8'); return /import \{ rankedShuffle \} from '\.\/fixtureSupport';/.test(s) && /rankedShuffle\(/.test(s); }));
 const nvmrc = fs.existsSync(path.join(__dirname, '..', '.nvmrc')) ? fs.readFileSync(path.join(__dirname, '..', '.nvmrc'), 'utf8').trim() : '';
 const ci = fs.readFileSync(path.join(__dirname, '..', '.github', 'workflows', 'ci.yml'), 'utf8');
-check('SUPPORTED NODE IS DECLARED: CI declares Node 20 and `.nvmrc` records the same major', /node-version: 20/.test(ci) && nvmrc === '20');
+// Every job declares Node 24 except the single, explicitly named Node 20 compatibility job (AURA-MCP-02-I1.5-B).
+const ciJobs = (ci.split(/\njobs:\n/)[1] ?? '').split(/\n(?=  [a-z0-9-]+:\n)/).filter((block) => /^  [a-z0-9-]+:\n/.test(block));
+const nodeVersionsByJob = ciJobs.map((block) => ({ name: (/\n    name: (.+)/.exec(block) ?? [])[1] ?? '', versions: [...block.matchAll(/node-version: (\S+)/g)].map((m) => m[1]) }));
+const primaryJobs = nodeVersionsByJob.filter((j) => j.name !== 'MCP Server (Node 20 compatibility)');
+const compatJobs = nodeVersionsByJob.filter((j) => j.name === 'MCP Server (Node 20 compatibility)');
+check('SUPPORTED NODE IS DECLARED: every CI job declares Node 24 and `.nvmrc` records the same major',
+  nvmrc === '24' && primaryJobs.length >= 5 && primaryJobs.every((j) => j.versions.length > 0 && j.versions.every((v) => v === '24')));
+check('the only non-24 Node in CI is the single non-required "MCP Server (Node 20 compatibility)" job, and it pins exactly Node 20',
+  compatJobs.length === 1 && compatJobs[0].versions.length === 1 && compatJobs[0].versions[0] === '20');
 
 if (!allPassed) { console.error('SOME SEEDED FIXTURE REPRODUCIBILITY CHECKS FAILED'); process.exit(1); }
 console.log('ALL SEEDED FIXTURE REPRODUCIBILITY CHECKS PASSED');
