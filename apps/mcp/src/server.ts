@@ -1,5 +1,5 @@
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
-import { findBestTimeInputShape } from './schemas/findBestTime';
+import { findBestTimeObjectSchema } from './schemas/findBestTime';
 import { executeFindBestTime } from './tools/findBestTime';
 
 export const SERVER_NAME = 'aura-mcp';
@@ -26,7 +26,7 @@ export function createServer(): McpServer {
     {
       title: 'Find best time (non-personalized)',
       description: TOOL_DESCRIPTION,
-      inputSchema: findBestTimeInputShape,
+      inputSchema: findBestTimeObjectSchema,
       annotations: {
         readOnlyHint: true,
         destructiveHint: false,

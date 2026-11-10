@@ -80,6 +80,26 @@ test('5. invalid input is rejected as a tool error, server keeps serving', async
   }
 });
 
+test('5b. over the protocol: unknown keys, fractional limit and impossible referenceTime are rejected', async () => {
+  const { client } = await connectClient();
+  try {
+    const cases: [Record<string, unknown>, RegExp][] = [
+      [{ ...VALID_ARGS, userId: 'someone-else' }, /userId|Unrecognized/i],
+      [{ ...VALID_ARGS, limit: 2.5 }, /limit/],
+      [{ ...VALID_ARGS, referenceTime: '2026-02-30T00:00:00Z' }, /referenceTime/],
+    ];
+    for (const [args, pattern] of cases) {
+      const result = await client.callTool({ name: 'find_best_time', arguments: args });
+      assert.equal(result.isError, true, JSON.stringify(args));
+      assert.match((result.content as any)[0].text, pattern);
+    }
+    const { tools } = await client.listTools();
+    assert.equal(tools[0].inputSchema.additionalProperties, false, 'advertised schema forbids unknown keys');
+  } finally {
+    await client.close();
+  }
+});
+
 test('6. unknown tool is reported, not executed', async () => {
   const { client } = await connectClient();
   try {

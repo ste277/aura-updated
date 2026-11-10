@@ -110,17 +110,18 @@ export const findBestTimeInputShape = {
     .describe('Optional part-of-day preference. Defaults to ANY.'),
   limit: z
     .number()
+    .int()
     .min(TIMING_LIMITS.MIN_LIMIT)
     .max(TIMING_LIMITS.MAX_LIMIT)
     .optional()
     .describe('Maximum candidates to return (1-10). Defaults to 3.'),
   referenceTime: z
     .string()
-    .refine((s) => INSTANT_WITH_OFFSET.test(s) && !Number.isNaN(Date.parse(s)), {
+    .refine((s) => INSTANT_WITH_OFFSET.test(s) && isRealCalendarDate(s.slice(0, 10)) && !Number.isNaN(Date.parse(s)), {
       message: 'must be an ISO 8601 instant with an explicit offset, e.g. "2026-11-10T09:00:00+05:30" or "...Z"',
     })
     .optional()
-    .describe('"Now" for the search: past times are excluded and relative horizons are resolved from it. Defaults to the server clock at call time; supply it for reproducible results.'),
+    .describe('"Now" for the search. Relative horizons (TODAY, TOMORROW, ...) are resolved from it and exclude times before it. An explicit dateRange is searched as given, so a past dateRange returns past times. Defaults to the server clock at call time; supply it for reproducible results.'),
   dailyRhythm: z
     .object({
       workStart: z.string().regex(HH_MM, 'must be HH:mm (24h)'),
@@ -133,9 +134,14 @@ export const findBestTimeInputShape = {
     .describe('Optional explicit work hours. When omitted, no Daily Rhythm preference is applied.'),
 };
 
-export const findBestTimeInputSchema = z
-  .object(findBestTimeInputShape)
-  .strict()
+/**
+ * Per-field rules plus unknown-key rejection. This is the schema handed to the
+ * SDK (a bare raw shape would make the SDK strip unknown keys silently).
+ */
+export const findBestTimeObjectSchema = z.object(findBestTimeInputShape).strict();
+
+/** Adds the cross-field rules; enforced in the tool handler. */
+export const findBestTimeInputSchema = findBestTimeObjectSchema
   .refine((input) => (input.activityId === undefined) !== (input.taskTitle === undefined), {
     message: 'Provide exactly one of activityId or taskTitle.',
   })

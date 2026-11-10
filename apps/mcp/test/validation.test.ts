@@ -83,7 +83,23 @@ test('rejects invalid work hours and workdays', () => {
   rejects({ ...BASE, dailyRhythm: { workStart: '09:00', workEnd: '17:00' } }, /workDays/, 'missing workDays');
 });
 
-test('rejects unexpected top-level fields', () => {
+test('accepts empty and duplicate workDays, normalized by the shared validator', () => {
+  const run = (workDays: number[]) => executeFindBestTime({ ...BASE, dailyRhythm: { workStart: '09:00', workEnd: '17:00', workDays } });
+  const empty = run([]);
+  const dupes = run([3, 1, 1, 3]);
+  assert.equal(empty.ok && dupes.ok, true);
+  if (empty.ok && dupes.ok) {
+    assert.deepEqual(empty.result.query.dailyRhythm?.workDays, []);
+    assert.deepEqual(dupes.result.query.dailyRhythm?.workDays, [1, 3]);
+  }
+});
+
+test('rejects fractional limit and impossible referenceTime dates', () => {
+  rejects({ ...BASE, limit: 2.5 }, /limit/, 'fractional limit');
+  rejects({ ...BASE, referenceTime: '2026-02-30T00:00:00Z' }, /referenceTime/, 'Feb 30 instant');
+});
+
+test('rejects unexpected top-level fields (adapter level; see protocol 5b for the wire)', () => {
   rejects({ ...BASE, userId: 'someone-else' }, /userId|Unrecognized/i, 'userId smuggling');
 });
 

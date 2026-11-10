@@ -130,12 +130,16 @@ How to read the results:
 
 ### Errors
 
-Errors come back as an MCP tool result with `isError: true`, plus `structuredContent.error = { kind, message }`:
+Every error comes back as an MCP tool result with `isError: true`. There are two layers:
 
-- `INVALID_INPUT`: schema violations, or a request the existing `buildTimingSearchRequest` rejects.
-- `CALCULATION_FAILED`: the pipeline threw an error. Only the error class name is returned, never a message, stack or path.
+1. **Per-field violations and unknown keys** (bad timezone, coordinates, dates, activity id, limit, an extra field such as `userId`, and so on) are rejected by the SDK before the handler runs. They return the text `MCP error -32602: Input validation error: …` and have no `structuredContent`.
+2. **Cross-field and pipeline errors** return `structuredContent.error = { kind, message }`:
+   - `INVALID_INPUT`: the cross-field rules (exactly one of `activityId` or `taskTitle`; not both `dateRange` and `horizon`), or a request the existing `buildTimingSearchRequest` rejects.
+   - `CALCULATION_FAILED`: the pipeline threw an error. Only the error class name is returned, never a message, stack or path.
 
-Schema violations caught by the SDK itself return `MCP error -32602: Input validation error: …`. An unknown tool name returns `Tool <name> not found`.
+An unknown tool name returns `Tool <name> not found`.
+
+Note that an explicit `dateRange` is searched as given. A range before `referenceTime` returns past times, which matches the existing Timing Search behaviour. Relative horizons exclude times before `referenceTime`.
 
 ## Tests
 
