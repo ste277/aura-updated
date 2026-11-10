@@ -1,0 +1,20 @@
+{
+  // Compiles the MCP server AND the existing pure Timing Search modules it
+  // imports by relative path (apps/web/lib/*, packages/*) into one CommonJS
+  // tree under dist/. rootDir is the repository root so those shared files
+  // keep their relative layout; nothing outside apps/mcp is modified.
+  "compilerOptions": {
+    "target": "ES2022",
+    "module": "node16",
+    "moduleResolution": "node16",
+    "strict": true,
+    "esModuleInterop": true,
+    "skipLibCheck": true,
+    "resolveJsonModule": true,
+    "rootDir": "../..",
+    "outDir": "dist",
+    "types": ["node"],
+    "lib": ["ES2022"]
+  },
+  "include": ["src/**/*.ts", "test/**/*.ts"]
+}
