@@ -262,6 +262,8 @@ async function run() {
     check('F3. no <input type=file>, <video>, <canvas> or <img> in the guide', h.container.querySelectorAll('input[type="file"], video, canvas, img').length === 0);
     const links = Array.from(h.container.querySelectorAll<HTMLAnchorElement>('a[href]'));
     check('F4. external source links open safely (noopener)', links.length > 0 && links.every((a) => a.target === '_blank' && /noopener/.test(a.rel)));
+    const licence = h.container.querySelector('[data-testid="palmistry-licence-zysk-2025"]');
+    check('F5. the Sources list shows the CC BY-SA 4.0 notice and licence link for Zysk 2025', Boolean(licence) && /Kenneth G\. Zysk/.test(licence!.textContent ?? '') && licence!.querySelector('a')?.getAttribute('href') === 'https://creativecommons.org/licenses/by-sa/4.0/' && /license/.test(licence!.querySelector('a')?.getAttribute('rel') ?? ''));
     await h.unmount();
   }
 

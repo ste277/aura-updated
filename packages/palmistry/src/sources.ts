@@ -32,6 +32,9 @@ export interface PalmSource {
   edition: string;
   url?: string;
   licensing: string;
+  /** Machine-readable licence notice, shown in the in-app Sources list when
+   * the source is under an open licence that asks for attribution. */
+  licence?: { name: string; url: string; copyrightHolder: string };
   verification: PalmSourceVerification;
   /** Short, user-facing citation line. */
   shortCitation: string;
@@ -48,6 +51,7 @@ export const PALM_SOURCES: readonly PalmSource[] = [
     url: 'https://journals.library.ualberta.ca/hssa/index.php/hssa/article/view/128',
     licensing:
       'CC BY-SA 4.0. Aura uses original paraphrase only: no translations, verses or diagrams are reproduced. Licensing review must confirm that the paraphrased content is not an "adaptation" that triggers share-alike.',
+    licence: { name: 'CC BY-SA 4.0', url: 'https://creativecommons.org/licenses/by-sa/4.0/', copyrightHolder: 'Kenneth G. Zysk' },
     verification: 'read-directly',
     shortCitation: 'Zysk, History of Science in South Asia 13 (2025)',
   },

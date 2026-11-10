@@ -246,6 +246,16 @@ export function PalmistryView({ onBack, initialEntryId = null }: PalmistryViewPr
                   Source link<span style={visuallyHidden}> (opens in a new tab)</span>
                 </a>
               )}
+              {source.licence && (
+                <span data-testid={`palmistry-licence-${source.id}`}>
+                  {' '}© {source.licence.copyrightHolder}, licensed under{' '}
+                  <a href={source.licence.url} target="_blank" rel="noopener noreferrer license" style={{ color: colors.info }}>
+                    {source.licence.name}
+                    <span style={visuallyHidden}> (opens in a new tab)</span>
+                  </a>
+                  ; Aura&apos;s text paraphrases this work.
+                </span>
+              )}
             </li>
           ))}
         </ul>

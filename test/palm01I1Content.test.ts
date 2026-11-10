@@ -92,6 +92,7 @@ for (const source of PALM_SOURCES) {
   if (source.url) check(`C2. ${source.id}: url is https`, /^https:\/\//.test(source.url));
 }
 check('C3. CC BY-SA licensing is recorded for the Zysk edition', /CC BY-SA 4\.0/.test(getPalmSource('zysk-2025')!.licensing));
+check('C3b. Zysk carries a structured licence notice (name, official URL, copyright holder) for in-app attribution', (() => { const l = getPalmSource('zysk-2025')!.licence; return Boolean(l) && l!.name === 'CC BY-SA 4.0' && l!.url === 'https://creativecommons.org/licenses/by-sa/4.0/' && l!.copyrightHolder === 'Kenneth G. Zysk'; })());
 check('C4. no source is Wikipedia', PALM_SOURCES.every((s) => !/wikipedia/i.test(JSON.stringify(s))));
 check('C5. every source in the register is cited by at least one entry or is the edition other sources rely on', PALM_SOURCES.every((s) => s.id === 'zysk-2025' || PALMISTRY_ENTRIES.some((e) => e.sources.some((r) => r.sourceId === s.id))));
 
