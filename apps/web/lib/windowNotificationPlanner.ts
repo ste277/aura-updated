@@ -1,4 +1,5 @@
 import type { WindowSpan, SolarWindowType } from '../../../packages/panchang/src/windows';
+import { isInauspiciousCommencementWindow } from '../../../packages/panchang/src/windows';
 import { formatMinutes } from '../../../packages/astronomy/src/ephemeris';
 
 // Pure planning logic for window alerts — no Capacitor/browser imports, so
@@ -28,7 +29,12 @@ export interface WindowNotificationSpec {
   minutesFromNow: number;
 }
 
-const FAVORABLE: SolarWindowType[] = ['BRAHMA', 'ABHIJIT', 'GULIKA'];
+// PANCH-FOLLOWUP-335: GULIKA was previously (incorrectly) listed here as
+// favorable, contradicting the canonical isInauspiciousCommencementWindow
+// policy (packages/panchang/src/windows.ts), which treats GULIKA the same
+// as RAHU_KALAM/YAMA for commencement purposes. Only BRAHMA/ABHIJIT are
+// genuinely favorable commencement windows.
+const FAVORABLE: SolarWindowType[] = ['BRAHMA', 'ABHIJIT'];
 
 /**
  * Which notifications should be scheduled for the rest of today.
@@ -52,11 +58,26 @@ export function computeWindowNotificationSpecs(
     if (minutesFromNow <= 0 || w.startMinutes < currentMinuteOfDay) continue;
 
     const favorable = FAVORABLE.includes(w.type);
+    // Safety net (PANCH-FOLLOWUP-335): FAVORABLE must never again contain a
+    // window the canonical Panchangam policy treats as inauspicious for
+    // commencement. NEUTRAL/UNAVAILABLE are meta-states outside that
+    // dichotomy, so this check is scoped to the three real solar-caution
+    // types by isInauspiciousCommencementWindow itself (RAHU_KALAM/YAMA/
+    // GULIKA) and never fires for them today — it only guards against a
+    // future regression re-adding one of those three to FAVORABLE.
+    if (favorable && isInauspiciousCommencementWindow(w.type)) {
+      throw new Error(
+        `windowNotificationPlanner: ${w.type} is both FAVORABLE and inauspicious-for-commencement — this must never happen (PANCH-FOLLOWUP-335).`
+      );
+    }
+    const isGulika = w.type === 'GULIKA';
     specs.push({
-      title: favorable ? `${w.label} in ${LEAD_MINUTES} minutes` : `${w.label} ahead`,
+      title: favorable || isGulika ? `${w.label} in ${LEAD_MINUTES} minutes` : `${w.label} ahead`,
       body: favorable
         ? `Favorable window ${formatMinutes(w.startMinutes)}–${formatMinutes(w.endMinutes)}. Line up your key task.`
-        : `${formatMinutes(w.startMinutes)}–${formatMinutes(w.endMinutes)}. Wrap up before it starts; avoid new beginnings.`,
+        : isGulika
+          ? `Gulika Kalam ${formatMinutes(w.startMinutes)}–${formatMinutes(w.endMinutes)}. Avoid starting important activities; consider continuing existing work.`
+          : `${formatMinutes(w.startMinutes)}–${formatMinutes(w.endMinutes)}. Wrap up before it starts; avoid new beginnings.`,
       minutesFromNow,
     });
   }
