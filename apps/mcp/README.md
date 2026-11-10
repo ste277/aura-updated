@@ -9,6 +9,8 @@ This server:
 - is **read-only**. It creates, saves and records nothing, including product events.
 - is **not remotely hosted, not deployed and not production-ready**.
 
+**Shared core (AURA-MCP-02-I1):** the tool's schema, executor and definition (name, title, description, annotations) now live in [`packages/mcp-tools`](../../packages/mcp-tools/README.md). The remote HTTP endpoint registers the tool from the same definition. `src/schemas/findBestTime.ts` and `src/tools/findBestTime.ts` re-export it unchanged, and the behaviour of this server is unchanged.
+
 ## Prerequisites
 
 - Node.js 20 or newer (the repository's `.nvmrc` pins 20).
@@ -158,7 +160,7 @@ npm test        # builds, then runs node --test on dist/apps/mcp/test/*.test.js
 
 **CI:** the `MCP Server` job in `.github/workflows/ci.yml` runs the same `npm ci` and `npm test` on every pull request to `main` and every push to `main`. It has no path filter, so it also runs when shared Timing Search or Panchangam code changes. It uses Node 20, needs no secrets or database, and runs no migrations.
 
-There are four suites. Each runs the server as a real child process over stdio, and none needs a database or secrets.
+There are five suites. Each runs the server as a real child process over stdio, and none needs a database or secrets.
 
 - `protocol.test.ts`:
   - initialize, capabilities and tool discovery (exactly one tool)
@@ -178,6 +180,7 @@ There are four suites. Each runs the server as a real child process over stdio, 
   - no `process.env` reads
   - no console or stdout writes in the server graph
   - exactly one tool registration
+- `sharedDefinition.test.ts`: the stdio `tools/list` entry equals the shared definition in `packages/mcp-tools`, the same object the remote server is checked against in `test/mcpRemoteTransport.test.ts`.
 
 ## Troubleshooting
 
@@ -195,7 +198,7 @@ There are four suites. Each runs the server as a real child process over stdio, 
 
 The following are out of scope:
 
-- HTTP or remote transport, OAuth, sessions and user lookup
+- HTTP or remote transport, OAuth, sessions and user lookup in **this** server. The remote transport is a separate endpoint in `apps/web` (AURA-MCP-02); see `packages/mcp-tools/README.md`.
 - database access, Prisma and `pg`
 - write tools: plans, activities, preferences and reminders
 - notifications and product events

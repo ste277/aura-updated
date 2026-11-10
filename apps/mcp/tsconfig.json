@@ -15,9 +15,13 @@
     "outDir": "dist",
     "types": ["node"],
     "lib": ["ES2022"],
-    // Shared packages/* sources import astronomy-engine; resolve it from this
-    // package's own node_modules so apps/mcp builds without root deps.
-    "paths": { "astronomy-engine": ["./node_modules/astronomy-engine"] }
+    // Shared packages/* sources (including packages/mcp-tools) import
+    // astronomy-engine and zod; resolve them from this package's own
+    // node_modules so apps/mcp builds without root deps and binds one zod.
+    "paths": {
+      "astronomy-engine": ["./node_modules/astronomy-engine"],
+      "zod": ["./node_modules/zod"]
+    }
   },
   "include": ["src/**/*.ts", "test/**/*.ts"]
 }
