@@ -8,6 +8,9 @@
 //
 // Sentinels are verified to really exist in the source by
 // test/palm01I1Content.test.ts, so this check can never pass vacuously.
+// They are deliberately ASCII-only: the minifier may emit non-ASCII text as
+// escape sequences (e.g. "ñ" -> "\xf1"), which a literal diacritic sentinel
+// would silently fail to match (P1 review finding 1).
 const fs = require('fs');
 const path = require('path');
 const { isPalmistryApproved } = require('../palmistry-build-exclusion');
@@ -18,8 +21,9 @@ const SENTINELS = [
   'PENDING_HUMAN_REVIEW', // review-status value
   'Palmistry is a traditional interpretive practice', // disclosure
   'Learn the lines of the hand', // Explore card copy
-  'dhanamātṛlekhā', // a traditional term (dhanamātṛlekhā)
-  'Hastasañjīvana', // a source title (Hastasañjīvana)
+  'Aura does not estimate lifespan', // longevity disclosure
+  'History of Science in South Asia', // source edition (Zysk 2025)
+  'Western palmistry, for comparison', // detail-panel label
 ];
 
 const SCAN_DIRS = ['.next/static', '.next/server', '.next/standalone'];

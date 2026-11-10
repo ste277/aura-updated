@@ -27,6 +27,12 @@ function isPalmistryApproved() {
 }
 
 function applyPalmistryExclusion(config, { dev, webpack, approved = isPalmistryApproved() }) {
+  // P1 review finding 2: fold the approval state into webpack's persistent
+  // cache key, so a restored .next/cache (e.g. on Vercel) built under one
+  // approval state can never be reused for a build under the other.
+  if (!dev && config.cache && typeof config.cache === 'object') {
+    config.cache.version = `${config.cache.version || ''}|palmistry-approved:${approved ? 'yes' : 'no'}`;
+  }
   if (dev || approved) return config;
   config.plugins = config.plugins || [];
   config.plugins.push(new webpack.NormalModuleReplacementPlugin(PALMISTRY_VIEW_REQUEST, STUB_PATH));

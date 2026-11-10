@@ -237,16 +237,36 @@ const re: RegExp = exclusion.PALMISTRY_VIEW_REQUEST;
 check('K8. replacement pattern matches the PalmistryView request forms', re.test('../components/PalmistryView') && re.test('/repo/apps/web/components/PalmistryView.tsx') && re.test('C:\\repo\\apps\\web\\components\\PalmistryView'));
 check('K9. replacement pattern does not match the stand-in, the diagram or similar names', !re.test('../components/PalmistryView.unpublished') && !re.test('./PalmistryView.unpublished.tsx') && !re.test('./PalmHandDiagram') && !re.test('../components/PalmistryViewer') && !re.test('../components/ExploreView'));
 const realNextConfig = require('../apps/web/next.config.js');
+{
+  const pendingCfg = exclusion.applyPalmistryExclusion({ plugins: [], cache: { type: 'filesystem', version: 'base' } }, { dev: false, webpack: fakeWebpack, approved: false });
+  const approvedCfg = exclusion.applyPalmistryExclusion({ plugins: [], cache: { type: 'filesystem', version: 'base' } }, { dev: false, webpack: fakeWebpack, approved: true });
+  check('K9b. approval state is part of the webpack cache key (pending vs approved differ)', pendingCfg.cache.version === 'base|palmistry-approved:no' && approvedCfg.cache.version === 'base|palmistry-approved:yes');
+  check('K9c. a config without a cache object is left alone', exclusion.applyPalmistryExclusion({ plugins: [], cache: false }, { dev: false, webpack: fakeWebpack, approved: false }).cache === false);
+}
 check('K10. next.config.js wires the exclusion into its webpack hook', typeof realNextConfig.webpack === 'function' && realNextConfig.webpack({ plugins: [] }, { dev: false, webpack: fakeWebpack }).plugins.length === 1 && realNextConfig.webpack({ plugins: [] }, { dev: true, webpack: fakeWebpack }).plugins.length === 0);
 
 // Import allowlist: the replacement only removes everything if the Palmistry
 // tree is reachable SOLELY through components/PalmistryView.
-const importSources = [...walk(path.join(ROOT, 'apps/web/app')), ...walk(path.join(ROOT, 'apps/web/components')), ...walk(path.join(ROOT, 'apps/web/lib')), ...walk(path.join(ROOT, 'packages'))];
+// P1 review finding 5: scan ALL of apps/web (incl. middleware and root files),
+// not just app/components/lib, skipping only dependency and build output.
+function walkSource(dir: string): string[] {
+  const out: string[] = [];
+  for (const name of fs.readdirSync(dir)) {
+    if (['node_modules', '.next', '.next-dev', 'android', 'ios', 'cap-shell', 'public'].includes(name)) continue;
+    const full = path.join(dir, name);
+    const stat = fs.lstatSync(full);
+    if (stat.isSymbolicLink()) continue;
+    if (stat.isDirectory()) out.push(...walkSource(full));
+    else if (/\.(ts|tsx|js|mjs|cjs)$/.test(name)) out.push(full);
+  }
+  return out;
+}
+const importSources = [...walkSource(path.join(ROOT, 'apps/web')), ...walkSource(path.join(ROOT, 'packages'))];
 const importersOf = (pattern: RegExp) => importSources.filter((f) => pattern.test(strip(fs.readFileSync(f, 'utf8')))).map((f) => path.relative(ROOT, f).replace(/\\/g, '/')).sort();
 check('K11. only PalmistryView and PalmHandDiagram import packages/palmistry (relative imports inside the package excluded)', JSON.stringify(importersOf(/(from|require\()\s*['"][^'"]*packages\/palmistry\//)) === JSON.stringify(['apps/web/components/PalmHandDiagram.tsx', 'apps/web/components/PalmistryView.tsx']));
 check('K12. only app/page.tsx imports components/PalmistryView', JSON.stringify(importersOf(/(from|require\()\s*['"][^'"]*\/PalmistryView['"]/)) === JSON.stringify(['apps/web/app/page.tsx']));
 check('K13. only PalmistryView imports PalmHandDiagram', JSON.stringify(importersOf(/(from|require\()\s*['"][^'"]*\/PalmHandDiagram['"]/)) === JSON.stringify(['apps/web/components/PalmistryView.tsx']));
-check('K14. nothing imports the stand-in directly (only the build swaps it in)', importersOf(/PalmistryView\.unpublished/).length === 0);
+check('K14. only the build-exclusion module refers to the stand-in (nothing imports it directly)', JSON.stringify(importersOf(/PalmistryView\.unpublished/)) === JSON.stringify(['apps/web/palmistry-build-exclusion.js']));
 
 // The stand-in must be content-free and export what page.tsx imports.
 const stubSrc = read('apps/web/components/PalmistryView.unpublished.tsx');
@@ -259,7 +279,9 @@ check('K17. every name page.tsx imports from PalmistryView is exported by BOTH t
 // Bundle-check sentinels must really occur in the source, or the post-build
 // check could pass vacuously.
 const palmSources = ['packages/palmistry/src/content.ts', 'packages/palmistry/src/sources.ts', 'packages/palmistry/src/review-status.json', 'apps/web/components/PalmistryView.tsx', 'apps/web/components/PalmHandDiagram.tsx'].map(read).join('\n');
-for (const s of bundleCheck.SENTINELS) check(`K18. bundle sentinel present in source: ${s}`, palmSources.includes(s) || palmSources.includes(JSON.stringify(s).slice(1, -1)));
+for (const s of bundleCheck.SENTINELS) check(`K18. bundle sentinel present in source: ${s}`, palmSources.includes(s));
+check('K18b. every bundle sentinel is ASCII-only (survives minifier escaping)', bundleCheck.SENTINELS.every((s: string) => /^[\x20-\x7e]+$/.test(s)));
+check('K18c. at least 8 sentinels, covering content, sources, UI copy and review state', bundleCheck.SENTINELS.length >= 8);
 check('K19. no sentinel occurs in ExploreView (card copy moved out)', bundleCheck.SENTINELS.every((s: string) => !read('apps/web/components/ExploreView.tsx').includes(s)));
 // K21: negative control -- the scanner really detects leaked content.
 {
