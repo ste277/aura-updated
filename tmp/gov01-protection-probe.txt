@@ -1,0 +1,2 @@
+AURA-GOV-01 disposable branch-protection verification probe.
+This file must never reach main. The PR carrying it is closed unmerged.
