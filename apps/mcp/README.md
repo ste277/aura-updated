@@ -141,12 +141,22 @@ An unknown tool name returns `Tool <name> not found`.
 
 Note that an explicit `dateRange` is searched as given. A range before `referenceTime` returns past times, which matches the existing Timing Search behaviour. Relative horizons exclude times before `referenceTime`.
 
+## Known limitations
+
+- **Scope:** FIND mode only, over local stdio only. There is no remote MCP endpoint, no Aura account authentication and no database access. Results are non-personalized, and the MCP server is not deployed to Production or anywhere else.
+- **Explicit context:** location and IANA timezone are always required. Nothing is inferred, geocoded or read from an Aura profile.
+- **Timezone offset across DST changes:** like the web route, the tool computes `tzOffsetMinutes` once, at `referenceTime`. Most local-time conversions in the pipeline re-resolve the offset for the instant they handle. The exception is Timing Search's step that moves to each candidate day (`dayContextForOffset` in `packages/recommendation/src/timingSearch.ts`), which uses the `referenceTime` offset. A search spanning a daylight-saving change can therefore inherit any effect of this from the existing pipeline. The parity tests include a DST boundary, but they only show that the tool matches the web pipeline, not that either is correct across the change. This ticket does not change the behaviour.
+- **Fractional durations:** `durationMinutes` accepts non-integer values (for example 15.5) within 15–360, the same as the web app's validator. This is kept for parity, and `limit` must be an integer.
+
 ## Tests
 
 ```bash
 cd apps/mcp
+npm ci
 npm test        # builds, then runs node --test on dist/apps/mcp/test/*.test.js
 ```
+
+**CI:** the `MCP Server` job in `.github/workflows/ci.yml` runs the same `npm ci` and `npm test` on every pull request to `main` and every push to `main`. It has no path filter, so it also runs when shared Timing Search or Panchangam code changes. It uses Node 20, needs no secrets or database, and runs no migrations.
 
 There are four suites. Each runs the server as a real child process over stdio, and none needs a database or secrets.
 
