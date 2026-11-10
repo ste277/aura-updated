@@ -17,6 +17,7 @@ import * as path from 'path';
 import {
   handleRemoteMcpRequest,
   handleProtectedResourceMetadata,
+  handleProtectedResourceMetadataOtherMethod,
   parseRemoteMcpConfig,
   protectedResourceMetadataUrl,
   rejectAllAccessTokens,
@@ -83,6 +84,14 @@ async function main() {
     check(`disabled: ${method} /api/mcp -> 404`, res.status === 404, res.status);
   }
   check('disabled: protected resource metadata -> 404', handleProtectedResourceMetadata({ config: null }).status === 404);
+  check('disabled: other methods on metadata URLs -> 404', handleProtectedResourceMetadataOtherMethod({ config: null }).status === 404);
+  check('enabled: other methods on metadata URLs -> 405', handleProtectedResourceMetadataOtherMethod({ config: CONFIG }).status === 405);
+  for (const method of ['OPTIONS', 'PUT', 'PATCH', 'HEAD']) {
+    const res = await handleRemoteMcpRequest(new Request(CONFIG.resourceUrl, { method }), { config: null, verifyAccessToken: acceptTestToken });
+    check(`disabled: ${method} /api/mcp -> 404`, res.status === 404, res.status);
+  }
+  const routeSrc = fs.readFileSync(path.join(ROOT, 'apps/web/app/api/mcp/route.ts'), 'utf8');
+  check('disabled: /api/mcp route exports every method through the handler (no Next auto-204/405)', ['POST', 'GET', 'DELETE', 'PUT', 'PATCH', 'OPTIONS', 'HEAD'].every((m) => new RegExp(`export const ${m} = handle;`).test(routeSrc)));
 
   // ---------------------------------------------------------------- metadata
   const prm = handleProtectedResourceMetadata({ config: CONFIG });
@@ -109,8 +118,9 @@ async function main() {
   check('auth: 401 carries Bearer resource_metadata (path-inserted) and scope', challenge.startsWith('Bearer ') && challenge.includes('resource_metadata="https://aura.example/.well-known/oauth-protected-resource/api/mcp"') && challenge.includes(`scope="${MCP_SCOPE}"`), challenge);
   const malformed = await handleRemoteMcpRequest(mcpRequest({ jsonrpc: '2.0', id: 1, method: 'tools/list' }, { authorization: 'Basic abc' }), deps());
   check('auth: non-Bearer scheme -> 401', malformed.status === 401, malformed.status);
+  check('auth: no credentials -> challenge without error code (RFC 6750 3.1)', !challenge.includes('error='), challenge);
   const wrong = await handleRemoteMcpRequest(mcpRequest({ jsonrpc: '2.0', id: 1, method: 'tools/list' }, { authorization: 'Bearer some-other-token' }), deps());
-  check('auth: unknown token -> 401', wrong.status === 401, wrong.status);
+  check('auth: unknown token -> 401 with error="invalid_token"', wrong.status === 401 && (wrong.headers.get('www-authenticate') ?? '').includes('error="invalid_token"'), wrong.status);
   const deployed = await handleRemoteMcpRequest(mcpRequest({ jsonrpc: '2.0', id: 1, method: 'tools/list' }, AUTH), deps(rejectAllAccessTokens));
   check('auth: deployed reject-all verifier -> 401 even for the test token', deployed.status === 401, deployed.status);
   const cookieOnly = await handleRemoteMcpRequest(mcpRequest({ jsonrpc: '2.0', id: 1, method: 'tools/list' }, { cookie: 'as_session=anything' }), deps());
@@ -121,6 +131,17 @@ async function main() {
   const bigBody = JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'tools/list', params: { pad: 'x'.repeat(MAX_REQUEST_BODY_BYTES) } });
   const actualHuge = await handleRemoteMcpRequest(mcpRequest(bigBody, AUTH), deps());
   check('body: actual body over cap (no content-length) -> 413', actualHuge.status === 413, actualHuge.status);
+  const batch = await handleRemoteMcpRequest(mcpRequest([{ jsonrpc: '2.0', id: 1, method: 'tools/list' }, { jsonrpc: '2.0', id: 2, method: 'tools/list' }], { ...AUTH, ...PROTOCOL }), deps());
+  const batchBody = await batch.json();
+  check('body: JSON-RPC batch rejected (400, -32600) before any tool runs', batch.status === 400 && batchBody.error?.code === -32600, batchBody);
+  const chunked = new Request(CONFIG.resourceUrl, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json', accept: ACCEPT, ...AUTH },
+    body: new ReadableStream({ start(c) { for (let i = 0; i < 40; i++) c.enqueue(new TextEncoder().encode('x'.repeat(1024))); c.close(); } }),
+    duplex: 'half',
+  } as RequestInit & { duplex: 'half' });
+  const chunkedRes = await handleRemoteMcpRequest(chunked, deps());
+  check('body: streamed body without content-length is cut off at the cap -> 413', chunkedRes.status === 413, chunkedRes.status);
   const badJson = await handleRemoteMcpRequest(mcpRequest('{not json', AUTH), deps());
   check('body: invalid JSON -> 400 parse error', badJson.status === 400, badJson.status);
 
@@ -137,10 +158,16 @@ async function main() {
   const shapeKeys = Object.keys(FIND_BEST_TIME_TOOL.inputSchema.shape).sort();
   check('mcp: inputSchema properties equal the shared schema shape', JSON.stringify(Object.keys(tool.inputSchema?.properties ?? {}).sort()) === JSON.stringify(shapeKeys), Object.keys(tool.inputSchema?.properties ?? {}));
   check('mcp: inputSchema forbids additional properties', tool.inputSchema?.additionalProperties === false, tool.inputSchema?.additionalProperties);
+  const sortDeep = (v: unknown): unknown =>
+    Array.isArray(v) ? v.map(sortDeep) : v && typeof v === 'object' ? Object.fromEntries(Object.keys(v as object).sort().map((k) => [k, sortDeep((v as Record<string, unknown>)[k])])) : v;
+  const { $schema: _dialect, ...remoteSchema } = tool.inputSchema ?? {};
+  const fixture = JSON.parse(fs.readFileSync(path.join(ROOT, 'packages/mcp-tools/fixtures/findBestTimeInputSchema.json'), 'utf8'));
+  check('mcp: full inputSchema equals the committed snapshot (also asserted for stdio in apps/mcp/test/sharedDefinition.test.ts)', JSON.stringify(sortDeep(remoteSchema)) === JSON.stringify(fixture));
 
   const cases: Array<{ label: string; args: Record<string, unknown> }> = [
     { label: 'free-text, TOMORROW morning, New York', args: { taskTitle: 'Morning run', durationMinutes: 45, horizon: 'TOMORROW', timePreference: 'MORNING', timezone: 'America/New_York', location: NEW_YORK, referenceTime: '2026-11-10T08:00:00-05:00' } },
     { label: 'catalog activity, 7-day range, Chennai, with Daily Rhythm', args: { activityId: 'meditation', durationMinutes: 30, dateRange: { start: '2026-11-11', end: '2026-11-17' }, timezone: 'Asia/Kolkata', location: CHENNAI, referenceTime: '2026-11-10T09:00:00+05:30', limit: 5, dailyRhythm: { workStart: '09:00', workEnd: '17:00', workDays: [1, 2, 3, 4, 5] } } },
+    { label: 'DST-crossing range (US DST ends 2026-11-01), New York', args: { taskTitle: 'Evening walk', durationMinutes: 30, dateRange: { start: '2026-10-30', end: '2026-11-03' }, timePreference: 'EVENING', timezone: 'America/New_York', location: NEW_YORK, referenceTime: '2026-10-29T12:00:00-04:00', limit: 5 } },
     { label: 'server clock default (no referenceTime)', args: { taskTitle: 'Call family', durationMinutes: 20, horizon: 'TODAY', timezone: 'Asia/Kolkata', location: CHENNAI } },
   ];
   for (const { label, args } of cases) {
@@ -152,9 +179,9 @@ async function main() {
   }
 
   const exactCap = await rpc('tools/call', { name: 'find_best_time', arguments: { taskTitle: 'Walk', durationMinutes: 30, dateRange: { start: '2026-11-11', end: '2026-11-25' }, timezone: 'Asia/Kolkata', location: CHENNAI, referenceTime: '2026-11-10T09:00:00+05:30', limit: 1 } });
-  check(`window: ${REMOTE_MAX_DATE_RANGE_DAYS}-day span accepted`, exactCap.body?.result && !exactCap.body.result.isError, exactCap.body?.result?.content?.[0]?.text);
+  check(`window: span of ${REMOTE_MAX_DATE_RANGE_DAYS} days (end - start, same convention as the 90-day local limit) accepted`, exactCap.body?.result && !exactCap.body.result.isError, exactCap.body?.result?.content?.[0]?.text);
   const overCap = await rpc('tools/call', { name: 'find_best_time', arguments: { taskTitle: 'Walk', durationMinutes: 30, dateRange: { start: '2026-11-11', end: '2026-11-26' }, timezone: 'Asia/Kolkata', location: CHENNAI, referenceTime: '2026-11-10T09:00:00+05:30' } });
-  check(`window: ${REMOTE_MAX_DATE_RANGE_DAYS + 1}-day span rejected as INVALID_INPUT`, overCap.body?.result?.isError === true && /INVALID_INPUT/.test(overCap.body.result.content[0].text), overCap.body?.result);
+  check(`window: span of ${REMOTE_MAX_DATE_RANGE_DAYS + 1} days rejected by the remote cap specifically`, overCap.body?.result?.isError === true && /INVALID_INPUT: dateRange: must span 14 days or fewer for remote requests/.test(overCap.body.result.content[0].text), overCap.body?.result);
 
   const injected = await rpc('tools/call', { name: 'find_best_time', arguments: { ...cases[0].args, userId: 'someone-else' } });
   check('schema: client-supplied userId is rejected (strict schema)', injected.body?.result?.isError === true && /userId/.test(injected.body.result.content[0].text), injected.body);

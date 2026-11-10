@@ -15,6 +15,13 @@ function handle(req: Request): Promise<Response> {
   return handleRemoteMcpRequest(req, { config: remoteMcpConfigFromEnv(), verifyAccessToken: rejectAllAccessTokens });
 }
 
+// Every method goes through the handler so that, while disabled, the route
+// is indistinguishable from a missing one (404 -- including OPTIONS/PUT/PATCH,
+// which Next would otherwise answer itself with 204/405).
 export const POST = handle;
 export const GET = handle;
 export const DELETE = handle;
+export const PUT = handle;
+export const PATCH = handle;
+export const OPTIONS = handle;
+export const HEAD = handle;

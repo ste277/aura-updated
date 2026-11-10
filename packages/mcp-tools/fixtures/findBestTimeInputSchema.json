@@ -1,0 +1,135 @@
+{
+  "additionalProperties": false,
+  "properties": {
+    "activityId": {
+      "description": "Known Aura catalog activity id (e.g. \"exercise\"). Provide exactly one of activityId or taskTitle.",
+      "maxLength": 100,
+      "minLength": 1,
+      "type": "string"
+    },
+    "dailyRhythm": {
+      "additionalProperties": false,
+      "description": "Optional explicit work hours. When omitted, no Daily Rhythm preference is applied.",
+      "properties": {
+        "workDays": {
+          "description": "Weekdays, 0=Sunday .. 6=Saturday.",
+          "items": {
+            "maximum": 6,
+            "minimum": 0,
+            "type": "integer"
+          },
+          "maxItems": 7,
+          "type": "array"
+        },
+        "workEnd": {
+          "pattern": "^([01]\\d|2[0-3]):[0-5]\\d$",
+          "type": "string"
+        },
+        "workStart": {
+          "pattern": "^([01]\\d|2[0-3]):[0-5]\\d$",
+          "type": "string"
+        }
+      },
+      "required": [
+        "workStart",
+        "workEnd",
+        "workDays"
+      ],
+      "type": "object"
+    },
+    "dateRange": {
+      "additionalProperties": false,
+      "description": "Explicit local date range to search (inclusive). Mutually exclusive with horizon.",
+      "properties": {
+        "end": {
+          "description": "Local calendar date in the supplied timezone, YYYY-MM-DD.",
+          "type": "string"
+        },
+        "start": {
+          "description": "Local calendar date in the supplied timezone, YYYY-MM-DD.",
+          "type": "string"
+        }
+      },
+      "required": [
+        "start",
+        "end"
+      ],
+      "type": "object"
+    },
+    "durationMinutes": {
+      "description": "Activity length in minutes (15-360).",
+      "maximum": 360,
+      "minimum": 15,
+      "type": "number"
+    },
+    "horizon": {
+      "description": "Relative search window, resolved against referenceTime in the supplied timezone. Defaults to TODAY when neither horizon nor dateRange is given.",
+      "enum": [
+        "NOW",
+        "TODAY",
+        "TOMORROW",
+        "WEEKEND",
+        "SEVEN_DAYS"
+      ],
+      "type": "string"
+    },
+    "limit": {
+      "description": "Maximum candidates to return (1-10). Defaults to 3.",
+      "maximum": 10,
+      "minimum": 1,
+      "type": "integer"
+    },
+    "location": {
+      "additionalProperties": false,
+      "description": "Coordinates the Panchangam windows are computed for. Not geocoded, not inferred.",
+      "properties": {
+        "latitude": {
+          "maximum": 90,
+          "minimum": -90,
+          "type": "number"
+        },
+        "longitude": {
+          "maximum": 180,
+          "minimum": -180,
+          "type": "number"
+        }
+      },
+      "required": [
+        "latitude",
+        "longitude"
+      ],
+      "type": "object"
+    },
+    "referenceTime": {
+      "description": "\"Now\" for the search. Relative horizons (TODAY, TOMORROW, ...) are resolved from it and exclude times before it. An explicit dateRange is searched as given, so a past dateRange returns past times. Defaults to the server clock at call time; supply it for reproducible results.",
+      "type": "string"
+    },
+    "taskTitle": {
+      "description": "Free-text activity, classified by Aura's existing activity classifier (e.g. \"Go for a run\"). Provide exactly one of activityId or taskTitle.",
+      "maxLength": 200,
+      "minLength": 1,
+      "type": "string"
+    },
+    "timePreference": {
+      "description": "Optional part-of-day preference. Defaults to ANY.",
+      "enum": [
+        "ANY",
+        "MORNING",
+        "AFTERNOON",
+        "EVENING",
+        "NIGHT"
+      ],
+      "type": "string"
+    },
+    "timezone": {
+      "description": "IANA timezone used to interpret every local date/time (e.g. \"Asia/Kolkata\").",
+      "type": "string"
+    }
+  },
+  "required": [
+    "durationMinutes",
+    "location",
+    "timezone"
+  ],
+  "type": "object"
+}

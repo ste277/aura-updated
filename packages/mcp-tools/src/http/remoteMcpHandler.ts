@@ -17,7 +17,10 @@ import { executeFindBestTimeRemote } from '../findBestTimeRemote';
  *   4. declared body larger than the cap        -> 413
  *   5. bearer token rejected by verifyAccessToken -> 401 + WWW-Authenticate
  *      pointing at the RFC 9728 protected resource metadata
- *   6. actual body larger than the cap / invalid JSON -> 413 / 400
+ *   6. body read with a streaming 16 KB cap -> 413; invalid JSON -> 400;
+ *      JSON-RPC batch (array) -> 400 (batching was removed from the
+ *      protocol in 2025-06-18, and a batch would multiply the per-request
+ *      Timing Search cost the 14-day window cap bounds -- D1 threat T9)
  *   7. stateless MCP request (fresh server per request, JSON responses)
  *
  * I1 ships NO token verifier that can succeed: the deployed route always
@@ -102,13 +105,43 @@ function canonicalUrl(value: string | undefined): string | null {
   return url.href.replace(/\/$/, '');
 }
 
-function unauthorized(config: RemoteMcpConfig): Response {
+/**
+ * RFC 6750 section 3.1: with no credentials, the challenge carries no error
+ * code; with a presented-but-rejected token, `error="invalid_token"`.
+ */
+function unauthorized(config: RemoteMcpConfig, tokenPresented: boolean): Response {
   const metadata = protectedResourceMetadataUrl(config.resourceUrl);
+  const error = tokenPresented ? 'error="invalid_token", ' : '';
   return jsonResponse(
     401,
-    { error: 'invalid_token', error_description: 'A valid access token is required.' },
-    { 'www-authenticate': `Bearer resource_metadata="${metadata}", scope="${MCP_SCOPE}"` },
+    tokenPresented ? { error: 'invalid_token', error_description: 'The access token is invalid or expired.' } : { error: 'unauthorized', error_description: 'An access token is required.' },
+    { 'www-authenticate': `Bearer ${error}resource_metadata="${metadata}", scope="${MCP_SCOPE}"` },
   );
+}
+
+/** Reads at most `limit` bytes of the body; returns null if it is larger. */
+async function readBodyCapped(req: Request, limit: number): Promise<string | null> {
+  if (!req.body) return '';
+  const reader = req.body.getReader();
+  const chunks: Uint8Array[] = [];
+  let total = 0;
+  for (;;) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    total += value.byteLength;
+    if (total > limit) {
+      await reader.cancel().catch(() => undefined);
+      return null;
+    }
+    chunks.push(value);
+  }
+  const bytes = new Uint8Array(total);
+  let offset = 0;
+  for (const chunk of chunks) {
+    bytes.set(chunk, offset);
+    offset += chunk.byteLength;
+  }
+  return new TextDecoder().decode(bytes);
 }
 
 function bearerToken(req: Request): string | null {
@@ -128,6 +161,12 @@ export function handleProtectedResourceMetadata(deps: Pick<RemoteMcpDeps, 'confi
     bearer_methods_supported: ['header'],
     resource_name: 'Aura',
   });
+}
+
+/** Non-GET methods on the metadata URLs: 404 while disabled, 405 when enabled. */
+export function handleProtectedResourceMetadataOtherMethod(deps: Pick<RemoteMcpDeps, 'config'>): Response {
+  if (!deps.config) return notFound();
+  return new Response('Method Not Allowed', { status: 405, headers: { allow: 'GET', 'cache-control': 'no-store' } });
 }
 
 export function createRemoteMcpServer(now?: () => Date): McpServer {
@@ -165,7 +204,7 @@ export async function handleRemoteMcpRequest(req: Request, deps: RemoteMcpDeps):
 
   const token = bearerToken(req);
   const access = token ? await deps.verifyAccessToken(token, config.resourceUrl) : null;
-  if (!access) return unauthorized(config);
+  if (!access) return unauthorized(config, req.headers.has('authorization'));
   if (!access.scopes.includes(MCP_SCOPE)) {
     return jsonResponse(
       403,
@@ -174,24 +213,28 @@ export async function handleRemoteMcpRequest(req: Request, deps: RemoteMcpDeps):
     );
   }
 
-  const text = await req.text();
-  if (new TextEncoder().encode(text).byteLength > MAX_REQUEST_BODY_BYTES) {
-    return jsonResponse(413, { error: 'request_too_large' });
-  }
+  const text = await readBodyCapped(req, MAX_REQUEST_BODY_BYTES);
+  if (text === null) return jsonResponse(413, { error: 'request_too_large' });
   let parsedBody: unknown;
   try {
     parsedBody = JSON.parse(text);
   } catch {
     return jsonResponse(400, { jsonrpc: '2.0', id: null, error: { code: -32700, message: 'Parse error' } });
   }
+  if (Array.isArray(parsedBody)) {
+    return jsonResponse(400, { jsonrpc: '2.0', id: null, error: { code: -32600, message: 'Invalid Request: batch requests are not supported' } });
+  }
 
   try {
     const transport = new WebStandardStreamableHTTPServerTransport({ sessionIdGenerator: undefined, enableJsonResponse: true });
+    transport.onerror = (err) => console.error(`[aura-mcp-remote] transport error (${err.name})`);
     const server = createRemoteMcpServer(deps.now);
     await server.connect(transport);
     return await transport.handleRequest(req, { parsedBody });
-  } catch {
-    // Never surface internals (stack traces, paths) to the client.
+  } catch (err) {
+    // Never surface internals (stack traces, paths) to the client; log only
+    // the error class name -- never arguments, tokens or bodies.
+    console.error(`[aura-mcp-remote] request failed (${err instanceof Error ? err.name : 'Error'})`);
     return jsonResponse(500, { jsonrpc: '2.0', id: null, error: { code: -32603, message: 'Internal error' } });
   }
 }
