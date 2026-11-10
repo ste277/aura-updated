@@ -101,14 +101,22 @@ async function runDomSection() {
     const cautionText = cautionHarness.container.textContent || '';
     await cautionHarness.unmount();
     check('T2a. [REAL DOM, THE FIX] Caution overlap active now: Good Right Now shows the caution badge', cautionText.includes('⚠ Caution'));
-    check('T2b. [REAL DOM, THE FIX] Caution overlap active now: Good Right Now names the real overlapping window (Rahu Kalam)', cautionText.includes('Caution: Rahu Kalam also active'));
+    check('T2b. [REAL DOM, THE FIX] Caution overlap active now: Good Right Now names the real overlapping window (Rahu Kalam) on its own dedicated line', cautionText.includes('Rahu Kalam also active'));
     check('T2c. [REAL DOM] Caution overlap active now: the original favorable title is still present as fact (PD-03, not erased)', cautionText.includes('Heavy lifting or a hard training session'));
     check('T2d. [REAL DOM] Caution overlap active now: the primary action control is still present (PD-02, qualified not blocked)', cautionText.includes('Start now') || cautionText.includes('Log now') || cautionText.includes('Do now') || cautionText.includes('Plan'));
 
-    // T3 -- multi-window caution naming: activeCautionWindowNames already
-    // joins multiple names with ' and ' upstream (unchanged, reused as-is);
-    // confirm the Good Right Now card surfaces that exact joined string
-    // rather than re-deriving its own.
+    // T3 -- PANCH-FOLLOWUP-334-P1-B: multi-window caution naming.
+    // activeCautionWindowNames already joins multiple names with ' and '
+    // upstream (unchanged, reused as-is); confirm the Good Right Now card
+    // surfaces that exact joined string, in FULL, on the dedicated caution
+    // line (never silently dropping a window name, and never re-deriving
+    // its own join). The original single-line-description placement risked
+    // ellipsis-truncating this exact string away; the dedicated 2-line-clamp
+    // line is sized so neither "Rahu Kalam" nor "Gulika Kalam" is omitted.
+    // jsdom performs no layout, so this proves the full text reaches the
+    // DOM (what the 2-line clamp then has room to actually display) -- it
+    // cannot by itself prove pixel-level visual fit; that was checked via
+    // code inspection of the clamp/width math (see report).
     const multiCautionHarness = await mount(React.createElement(HomeDashboard, baseProps({
       liveCommencementCaution: {
         activeNow: true,
@@ -117,30 +125,51 @@ async function runDomSection() {
     })));
     const multiCautionText = multiCautionHarness.container.textContent || '';
     await multiCautionHarness.unmount();
-    check('T3. [REAL DOM] Multi-window caution: Good Right Now names both windows via the same shared join, never a third independent computation', multiCautionText.includes('Caution: Rahu Kalam and Gulika Kalam also active'));
+    check('T3a. [REAL DOM] Multi-window caution: the dedicated caution line names BOTH windows via the same shared join, never a third independent computation, never omitting one', multiCautionText.includes('Rahu Kalam and Gulika Kalam also active'));
+    check('T3b. [REAL DOM] Multi-window caution: the original favorable description is still rendered unprefixed/untouched alongside the caution line (PD-03)', multiCautionText.includes('Peak solar window — best alignment for maximum physical output.'));
 
-    // T4 -- the critical live-update proof (mirrors G10-G13): the SAME
-    // mounted HomeDashboard instance, with `dailyBriefing` NEVER changing,
-    // must transition Good Right Now's caution badge purely from
-    // `liveCommencementCaution` changing -- never requiring a refetch.
-    const liveHarness = await mount(React.createElement(HomeDashboard, baseProps({
+    // T4 -- PANCH-FOLLOWUP-334-P1-C correction. Mirrors panchOverlap01I1's
+    // G10-G13 proof exactly: ONE `dailyBriefing` object is created here and
+    // the SAME reference is threaded through every baseProps(...) call
+    // below (never a fresh baseDailyBriefing() per call, which the original
+    // version of this test did despite its own comments claiming otherwise
+    // -- that version only proved the caution presentation updates on
+    // rerender, not that it does so without a dailyBriefing refetch). An
+    // explicit identity assertion (frozenBriefing === the reference baseProps
+    // received) makes the "no refetch" claim verifiable rather than assumed.
+    const frozenBriefing = baseDailyBriefing();
+    let dailyBriefingSeenByProps: unknown[] = [];
+    function propsWithFrozenBriefing(overrides: Record<string, unknown> = {}) {
+      const p = baseProps({ dailyBriefing: frozenBriefing, ...overrides });
+      dailyBriefingSeenByProps.push(p.dailyBriefing);
+      return p;
+    }
+
+    const liveHarness = await mount(React.createElement(HomeDashboard, propsWithFrozenBriefing({
       liveCommencementCaution: { activeNow: false, activeCautionWindows: [] },
     })));
     const beforeText = liveHarness.container.textContent || '';
-    check('T4a. [REAL DOM, LONG-MOUNTED, NO REFETCH] Before caution starts: no badge renders', !beforeText.includes('⚠ Caution'));
+    check('T4a. [REAL DOM, LONG-MOUNTED, dailyBriefing FROZEN] Before caution starts: no badge renders', !beforeText.includes('⚠ Caution'));
 
-    await liveHarness.rerender(React.createElement(HomeDashboard, baseProps({
+    await liveHarness.rerender(React.createElement(HomeDashboard, propsWithFrozenBriefing({
       liveCommencementCaution: { activeNow: true, activeCautionWindows: [{ name: 'Yama Gandam', windowType: 'YAMA' }] },
     })));
     const duringText = liveHarness.container.textContent || '';
-    check('T4b. [REAL DOM, LONG-MOUNTED, NO REFETCH] Caution becomes active purely from liveCommencementCaution changing -- dailyBriefing was never touched', duringText.includes('⚠ Caution') && duringText.includes('Caution: Yama Gandam also active'));
+    check('T4b. [REAL DOM, LONG-MOUNTED, dailyBriefing FROZEN] Caution becomes active purely from liveCommencementCaution changing -- the caution line names Yama Gandam', duringText.includes('⚠ Caution') && duringText.includes('Yama Gandam also active'));
 
-    await liveHarness.rerender(React.createElement(HomeDashboard, baseProps({
+    await liveHarness.rerender(React.createElement(HomeDashboard, propsWithFrozenBriefing({
       liveCommencementCaution: { activeNow: false, activeCautionWindows: [] },
     })));
     const afterText = liveHarness.container.textContent || '';
     await liveHarness.unmount();
-    check('T4c. [REAL DOM, LONG-MOUNTED, NO REFETCH] Caution clears once it genuinely ends, purely from the live value changing', !afterText.includes('⚠ Caution') && !afterText.includes('Caution: Yama Gandam'));
+    check('T4c. [REAL DOM, LONG-MOUNTED, dailyBriefing FROZEN] Caution clears once it genuinely ends, purely from the live value changing', !afterText.includes('⚠ Caution') && !afterText.includes('Yama Gandam'));
+
+    // T4d -- the actual "no refetch" proof: every props object built above
+    // received the exact same dailyBriefing reference, never a new one.
+    check(
+      'T4d. [IDENTITY PROOF] dailyBriefing reference was identical across all three mounts/rerenders in T4 -- no refetch occurred in this test, not merely claimed',
+      dailyBriefingSeenByProps.length === 3 && dailyBriefingSeenByProps.every((d) => d === frozenBriefing)
+    );
   } catch (e: any) {
     if (e?.code === 'MODULE_NOT_FOUND' || /Cannot find module/.test(String(e?.message))) {
       check('T. [REAL DOM -- SKIPPED, not run under the jsdom-tests tsconfig] Run with: npx ts-node --project tsconfig.jsdom-tests.json test/panchFollowup334GoodRightNow.test.ts', true);

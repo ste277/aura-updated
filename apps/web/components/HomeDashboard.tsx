@@ -2212,8 +2212,37 @@ function GoodRightNowCard({
         <span style={{ fontSize: 20 }}>{card.icon ?? '✨'}</span>
       )}
       <span style={{ marginTop: 8, color: '#f8fafc', fontSize: 12, fontWeight: 800, lineHeight: 1.3 }}>{card.title}</span>
+      {cautionAppliesNow && (
+        // PANCH-FOLLOWUP-334-P1-B -- a dedicated line for the caution window
+        // name(s), so they have their own width budget instead of fighting
+        // the single-line-truncated description below for space (a real
+        // two-window overlap, e.g. "Rahu Kalam and Gulika Kalam", could
+        // otherwise be clipped away by the description's own ellipsis --
+        // confirmed by independent review). A 2-line clamp (not single-line
+        // ellipsis) keeps a realistic 1-2 window overlap fully readable;
+        // only a hypothetical 3+ window overlap would ever clip, and never
+        // by inventing an abbreviation. Echoes the Right Now hero's own
+        // established caution voice/wording (see the tone override above)
+        // for cross-surface consistency, never a separately-invented phrase.
+        <span
+          style={{
+            marginTop: 4,
+            color: '#fca5a5',
+            fontSize: 10,
+            fontWeight: 700,
+            lineHeight: 1.3,
+            width: '100%',
+            display: '-webkit-box',
+            WebkitLineClamp: 2,
+            WebkitBoxOrient: 'vertical',
+            overflow: 'hidden',
+          }}
+        >
+          {activeCautionWindowNames || 'A caution period'} also active — hold off starting anything important
+        </span>
+      )}
       <span style={{ marginTop: 4, color: '#94a3b8', fontSize: 10.5, lineHeight: 1.35, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', width: '100%' }}>
-        {cautionAppliesNow ? `Caution: ${activeCautionWindowNames || 'a caution period'} also active — ${card.description}` : card.description}
+        {card.description}
       </span>
       <div style={{ marginTop: 'auto', paddingTop: 8, width: '100%' }}>
         {action === 'PLAN' ? (
