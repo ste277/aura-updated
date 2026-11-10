@@ -14,7 +14,10 @@
     "rootDir": "../..",
     "outDir": "dist",
     "types": ["node"],
-    "lib": ["ES2022"]
+    "lib": ["ES2022"],
+    // Shared packages/* sources import astronomy-engine; resolve it from this
+    // package's own node_modules so apps/mcp builds without root deps.
+    "paths": { "astronomy-engine": ["./node_modules/astronomy-engine"] }
   },
   "include": ["src/**/*.ts", "test/**/*.ts"]
 }
