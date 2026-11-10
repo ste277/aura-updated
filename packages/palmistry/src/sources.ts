@@ -61,7 +61,7 @@ export const PALM_SOURCES: readonly PalmSource[] = [
     url: 'https://journals.library.ualberta.ca/hssa/index.php/hssa/article/view/128',
     licensing: 'Ancient text (public domain). The edition and translation used are CC BY-SA 4.0 (Zysk 2025); paraphrase only.',
     verification: 'read-via-secondary',
-    shortCitation: 'Śārdūlakarṇāvadāna (9th c.), ed. Zysk 2025',
+    shortCitation: 'Śārdūlakarṇāvadāna (palmistry chapter after mid-9th c.), ed. Zysk 2025',
   },
   {
     id: 'brhatsamhita',
@@ -81,7 +81,7 @@ export const PALM_SOURCES: readonly PalmSource[] = [
     author: 'Durlabharāja, completed by his son Jagaddeva',
     title: 'Sāmudrikatilaka',
     textDate: '1160–1175 CE (Zysk 2025, p. 242)',
-    sections: '1.143, 1.155–1.156 (as excerpted in Zysk 2025, Appendix I, pp. 265–266)',
+    sections: '1.143, 1.152–1.156 (as excerpted in Zysk 2025, Appendix I, pp. 265–266)',
     edition: 'Excerpts translated in Zysk 2025, Appendix I',
     url: 'https://journals.library.ualberta.ca/hssa/index.php/hssa/article/view/128',
     licensing: 'Medieval text (public domain). Translation used is CC BY-SA 4.0 (Zysk 2025); paraphrase only.',
@@ -90,7 +90,7 @@ export const PALM_SOURCES: readonly PalmSource[] = [
   },
   {
     id: 'hastasanjivana',
-    author: 'Jain treatise with commentary by Meghavijaya Gaṇi (Tapāgaccha; active 1674–1695)',
+    author: 'Meghavijaya Gaṇi, Jain author of the Tapāgaccha (active 1674–1695), per Zysk 2025, p. 241 (some catalogues treat him as the commentator rather than the root-text author)',
     title: 'Hastasañjīvana',
     textDate: 'Late 17th century CE (Zysk 2025, p. 241)',
     sections: '3.2.80–82 (upward line), as excerpted in Zysk 2025, Appendix I, p. 264',

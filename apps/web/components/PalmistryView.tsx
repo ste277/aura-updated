@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useCallback, useState } from 'react';
+import React, { useCallback, useRef, useState } from 'react';
 import {
   getPalmistryEntriesByCategory,
   getPalmistryEntry,
@@ -15,7 +15,6 @@ import {
 } from '../../../packages/palmistry/src/content';
 import type { PalmistryCategory, PalmistryEntry, PalmistryEntryId } from '../../../packages/palmistry/src/content';
 import { getPalmSource, PALM_SOURCES } from '../../../packages/palmistry/src/sources';
-import { trackEvent as defaultTrackEvent } from '../lib/trackEvent';
 import { PalmHandDiagram, PalmMarkGlyph } from './PalmHandDiagram';
 import { backButtonStyle, colors, radius, spacing, typography } from './theme';
 import { EmptyState, PageHeader, SectionHeader, SegmentedControl, StatusBadge, SurfaceCard, TextButton } from './ui';
@@ -23,19 +22,32 @@ import { EmptyState, PageHeader, SectionHeader, SegmentedControl, StatusBadge, S
 /**
  * AURA-PALM-01-I1 -- Explore -> Palmistry. An EDUCATIONAL guide only: static,
  * bundled content (packages/palmistry), no photo, camera, upload, AI call,
- * personal-data lookup or database access. The only network activity is
- * the optional fire-and-forget product event on feature selection, sent
- * through the existing closed analytics taxonomy (lib/productEvents.ts) with
- * a closed-enum entry id -- never free text, never anything about the user's
- * own hand.
+ * personal-data lookup, database access or network request of its own.
+ * (page.tsx's existing per-tab effect records one PALMISTRY_GUIDE_OPENED
+ * event with empty metadata, same as PANCHANG_CALENDAR_VIEWED. Individual
+ * feature selections are deliberately NOT recorded: a per-user log of which
+ * entries someone read would be a profile built from selections.)
  */
+
+/** Launch gate (AURA-PALM-01-I1 review finding 1). Until a qualified human
+ * reviewer approves the content (PALMISTRY_CONTENT_REVIEW in
+ * packages/palmistry), a PRODUCTION build hides the Explore card and refuses
+ * the 'palmistry' tab, so an accidental merge cannot publish unreviewed
+ * content. Local/dev builds still show it for review. Not a flag framework:
+ * one pure function over two existing values. */
+export function isPalmistryAvailable(
+  status: string = PALMISTRY_CONTENT_REVIEW.status,
+  nodeEnv: string | undefined = process.env.NODE_ENV
+): boolean {
+  return status === 'APPROVED' || nodeEnv !== 'production';
+}
+
+type SelectionSource = 'list' | 'diagram' | 'mark';
 
 export interface PalmistryViewProps {
   onBack: () => void;
   /** Optional deep-link/initial selection; invalid ids are handled safely. */
   initialEntryId?: string | null;
-  /** Injected for tests; defaults to the app's fire-and-forget tracker. */
-  trackEvent?: typeof defaultTrackEvent;
 }
 
 class DiagramBoundary extends React.Component<{ children: React.ReactNode }, { failed: boolean }> {
@@ -55,7 +67,7 @@ class DiagramBoundary extends React.Component<{ children: React.ReactNode }, { f
   }
 }
 
-export function PalmistryView({ onBack, initialEntryId = null, trackEvent = defaultTrackEvent }: PalmistryViewProps) {
+export function PalmistryView({ onBack, initialEntryId = null }: PalmistryViewProps) {
   const initialEntry = getPalmistryEntry(initialEntryId);
   const [selectedId, setSelectedId] = useState<string | null>(initialEntryId ?? null);
   const [category, setCategory] = useState<PalmistryCategory>(initialEntry?.category ?? 'line');
@@ -65,31 +77,45 @@ export function PalmistryView({ onBack, initialEntryId = null, trackEvent = defa
   const lines = getPalmistryEntriesByCategory('line');
   const marks = getPalmistryEntriesByCategory('mark');
 
-  const select = useCallback(
-    (id: PalmistryEntryId) => {
-      const entry = getPalmistryEntry(id);
-      if (!entry) {
-        setSelectedId(id);
-        return;
-      }
-      setSelectedId(entry.id);
-      setCategory(entry.category);
-      trackEvent('PALMISTRY_FEATURE_SELECTED', { metadata: { entryId: entry.id, category: entry.category } });
-    },
-    [trackEvent]
-  );
+  const lastTrigger = useRef<{ id: PalmistryEntryId; source: SelectionSource } | null>(null);
+  const detailRef = useRef<HTMLElement | null>(null);
+
+  const select = useCallback((id: PalmistryEntryId, source: SelectionSource) => {
+    const entry = getPalmistryEntry(id);
+    if (!entry) {
+      setSelectedId(id);
+      return;
+    }
+    lastTrigger.current = { id: entry.id, source };
+    setSelectedId(entry.id);
+    setCategory(entry.category);
+    // Review finding 10: on a single-column phone layout the detail panel can
+    // be far above the "All features" list. A list selection moves focus to
+    // the detail heading (which also scrolls it into view); diagram and mark
+    // selections only scroll, so keyboard users can keep browsing lines.
+    setTimeout(() => {
+      const heading = detailRef.current?.querySelector<HTMLElement>('[data-detail-heading]');
+      if (source === 'list') heading?.focus();
+      else detailRef.current?.scrollIntoView?.({ block: 'nearest', behavior: 'smooth' });
+    }, 0);
+  }, []);
 
   const returnToOverview = useCallback(() => {
-    const previous = selectedId;
+    const trigger = lastTrigger.current;
     setSelectedId(null);
-    if (previous && typeof document !== 'undefined') {
-      // Return focus to the list control for the entry just closed.
+    if (trigger && typeof document !== 'undefined') {
+      // Review finding 14: return focus to the control that opened the entry.
       setTimeout(() => {
-        const trigger = document.querySelector<HTMLElement>(`[data-palm-list-entry="${previous}"]`);
-        trigger?.focus();
+        const selector =
+          trigger.source === 'diagram'
+            ? `g[data-entry-id="${trigger.id}"]`
+            : trigger.source === 'mark'
+              ? `button[data-entry-id="${trigger.id}"]`
+              : `[data-palm-list-entry="${trigger.id}"]`;
+        document.querySelector<HTMLElement>(selector)?.focus();
       }, 0);
     }
-  }, [selectedId]);
+  }, []);
 
   if (PALMISTRY_ENTRIES.length === 0) {
     return (
@@ -137,7 +163,7 @@ export function PalmistryView({ onBack, initialEntryId = null, trackEvent = defa
           {category === 'line' ? (
             <figure style={{ margin: 0 }}>
               <DiagramBoundary>
-                <PalmHandDiagram lines={lines} selectedId={selectedEntry?.category === 'line' ? selectedEntry.id : null} onSelect={select} />
+                <PalmHandDiagram lines={lines} selectedId={selectedEntry?.category === 'line' ? selectedEntry.id : null} onSelect={(id) => select(id, 'diagram')} />
               </DiagramBoundary>
               <figcaption style={{ ...typography.caption, margin: `${spacing.sm}px 0 0` }}>{PALMISTRY_DIAGRAM_NOTE}</figcaption>
             </figure>
@@ -145,7 +171,7 @@ export function PalmistryView({ onBack, initialEntryId = null, trackEvent = defa
             <div>
               <div role="group" aria-label="Traditional marks" style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(96px, 1fr))', gap: spacing.sm }}>
                 {marks.map((entry) => (
-                  <MarkButton key={entry.id} entry={entry} selected={selectedEntry?.id === entry.id} onSelect={select} />
+                  <MarkButton key={entry.id} entry={entry} selected={selectedEntry?.id === entry.id} onSelect={(id) => select(id, 'mark')} />
                 ))}
               </div>
               <p style={{ ...typography.caption, margin: `${spacing.md}px 0 0` }}>
@@ -155,11 +181,11 @@ export function PalmistryView({ onBack, initialEntryId = null, trackEvent = defa
           )}
         </SurfaceCard>
 
-        <section
-          aria-live="polite"
-          aria-label="Feature details"
-          data-testid="palmistry-detail"
-        >
+        <section ref={detailRef} aria-label="Feature details" data-testid="palmistry-detail">
+          {/* Review finding 9: announce a short status, not the whole entry. */}
+          <p role="status" aria-live="polite" data-testid="palmistry-live-status" style={visuallyHidden}>
+            {selectedEntry ? `Showing: ${selectedEntry.title}` : invalidSelection ? 'That feature is not available.' : ''}
+          </p>
           {selectedEntry ? (
             <EntryDetail entry={selectedEntry} lineNumber={lines.findIndex((l) => l.id === selectedEntry.id) + 1} onOverview={returnToOverview} />
           ) : (
@@ -187,9 +213,9 @@ export function PalmistryView({ onBack, initialEntryId = null, trackEvent = defa
 
       <section aria-labelledby="palmistry-all-features">
         <h2 id="palmistry-all-features" style={{ ...typography.sectionEyebrow, margin: `0 0 ${spacing.md}px` }}>All features</h2>
-        <EntryList heading="Lines" entries={lines} numbered selectedId={selectedEntry?.id ?? null} onSelect={select} />
+        <EntryList heading="Lines" entries={lines} numbered selectedId={selectedEntry?.id ?? null} onSelect={(id) => select(id, 'list')} />
         <div style={{ height: spacing.md }} />
-        <EntryList heading="Marks" entries={marks} selectedId={selectedEntry?.id ?? null} onSelect={select} />
+        <EntryList heading="Marks" entries={marks} selectedId={selectedEntry?.id ?? null} onSelect={(id) => select(id, 'list')} />
       </section>
 
       <SurfaceCard>
@@ -340,7 +366,7 @@ function EntryDetail({ entry, lineNumber, onOverview }: { entry: PalmistryEntry;
     <SurfaceCard elevated accentColor={colors.traditional}>
       <article data-testid="palmistry-entry-detail" data-entry-id={entry.id} style={{ display: 'flex', flexDirection: 'column', gap: spacing.md }}>
         <header>
-          <h2 style={typography.sectionTitle}>{entry.title}</h2>
+          <h2 data-detail-heading tabIndex={-1} style={typography.sectionTitle}>{entry.title}</h2>
           {entry.traditionalName && (
             <p lang="sa-Latn" style={{ ...typography.meta, fontStyle: 'italic', margin: '2px 0 0' }}>
               {entry.traditionalName}

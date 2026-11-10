@@ -125,6 +125,8 @@ const BANNED = [
 for (const pattern of BANNED) {
   check(`D5. user-facing content avoids ${pattern}`, !pattern.test(allUserFacingText));
 }
+check('D7. no unverified tradition names (Hasta Sāmudrika / Sāmudrika Śāstra) in user-facing text', !/Hasta S[aā]mudrika|S[aā]mudrika [SŚ][aā]stra/i.test(allUserFacingText));
+check('D8. the early Buddhist chapter is never called simply "9th-century" (it is dated after the mid-9th century)', !/9th-century (text|Buddhist|chapter)/i.test(allUserFacingText));
 check('D6. no Western planetary mount is presented as an entry', !PALMISTRY_ENTRIES.some((e) => /mount of|jupiter|saturn|apollo|venus/i.test(e.title)));
 
 // ============================================================
@@ -144,15 +146,13 @@ check('F3. prototype-ish ids are rejected', !isPalmistryEntryId('__proto__') && 
 // G. Analytics contract (existing closed taxonomy, no schema change)
 // ============================================================
 check('G1. PALMISTRY_GUIDE_OPENED is a known event', isProductEventName('PALMISTRY_GUIDE_OPENED'));
-check('G2. PALMISTRY_FEATURE_SELECTED is a known event', isProductEventName('PALMISTRY_FEATURE_SELECTED'));
+check('G2. per-feature selections are NOT tracked (no profile built from selections)', !isProductEventName('PALMISTRY_FEATURE_SELECTED'));
 check('G3. no PALMISTRY_GUIDE_COMPLETED event was invented', !isProductEventName('PALMISTRY_GUIDE_COMPLETED'));
 check('G4. GUIDE_OPENED accepts empty metadata', validateProductEvent('PALMISTRY_GUIDE_OPENED', {}).ok);
-check('G5. GUIDE_OPENED rejects any metadata key', !validateProductEvent('PALMISTRY_GUIDE_OPENED', { entryId: 'yava' }).ok);
-check('G6. FEATURE_SELECTED accepts a real entry id + category', validateProductEvent('PALMISTRY_FEATURE_SELECTED', { entryId: 'ayurlekha', category: 'line' }).ok);
-check('G7. FEATURE_SELECTED rejects a free-text / unknown entry id', !validateProductEvent('PALMISTRY_FEATURE_SELECTED', { entryId: 'my long life line', category: 'line' }).ok);
-check('G8. FEATURE_SELECTED rejects an observation-like key', !validateProductEvent('PALMISTRY_FEATURE_SELECTED', { entryId: 'yava', lineLength: 'long' }).ok);
-check('G9. FEATURE_SELECTED rejects image-like keys', !validateProductEvent('PALMISTRY_FEATURE_SELECTED', { image: 'data:image/png;base64,AAAA' }).ok);
-check('G10. FEATURE_SELECTED rejects an unknown category', !validateProductEvent('PALMISTRY_FEATURE_SELECTED', { entryId: 'yava', category: 'mount' }).ok);
+check('G5. GUIDE_OPENED rejects an entry id', !validateProductEvent('PALMISTRY_GUIDE_OPENED', { entryId: 'yava' }).ok);
+check('G6. GUIDE_OPENED rejects observation-like metadata', !validateProductEvent('PALMISTRY_GUIDE_OPENED', { lineLength: 'long' }).ok);
+check('G7. GUIDE_OPENED rejects image-like metadata', !validateProductEvent('PALMISTRY_GUIDE_OPENED', { image: 'data:image/png;base64,AAAA' }).ok);
+check('G8. no PALMISTRY_* event other than GUIDE_OPENED exists', !/'PALMISTRY_(?!GUIDE_OPENED')[A-Z_]+'/.test(read('apps/web/lib/productEvents.ts')));
 
 // ============================================================
 // H. Privacy: no photo, camera, upload, AI, storage or data lookups
@@ -174,7 +174,7 @@ for (const file of FEATURE_FILES) {
   check(`H6. ${file}: no API route / db / prisma / session access`, !/['"`]\/api\/|lib\/db|prisma|getSession|\/users\//.test(src));
   check(`H7. ${file}: no external image service`, !/<img\b|<image\b|url\(\s*['"]?https?:/.test(src));
 }
-check('H8. only PalmistryView reaches the tracker, via the existing trackEvent helper', /from '\.\.\/lib\/trackEvent'/.test(read('apps/web/components/PalmistryView.tsx')));
+check('H8. the guide components never import the tracker or any lib/ module', !/from '\.\.\/lib\//.test(read('apps/web/components/PalmistryView.tsx')) && !/from '\.\.\/lib\//.test(read('apps/web/components/PalmHandDiagram.tsx')));
 
 // ============================================================
 // I. No database change

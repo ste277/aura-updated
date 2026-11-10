@@ -17,7 +17,7 @@ import * as path from 'path';
 import { React, mount, click, pressKey, flush, act } from './jsdomReactHarness';
 
 const { ExploreView } = require('../apps/web/components/ExploreView');
-const { PalmistryView } = require('../apps/web/components/PalmistryView');
+const { PalmistryView, isPalmistryAvailable } = require('../apps/web/components/PalmistryView');
 const { PALMISTRY_GENERAL_DISCLOSURE, PALMISTRY_LONGEVITY_DISCLOSURE, PALMISTRY_ENTRIES } = require('../packages/palmistry/src/content');
 
 let passed = 0;
@@ -83,18 +83,39 @@ async function run() {
     await h.unmount();
   }
 
+  // A9-A13: launch gate -- with the gate closed (no onOpenPalmistry) the
+  // Explore screen is exactly the original three cards.
+  {
+    const h = await mount(
+      React.createElement(ExploreView, {
+        timezone: 'Asia/Kolkata',
+        onOpenPanchang: () => {},
+        onOpenMuhurtham: () => {},
+        onOpenMuhurthamWithActivity: () => {},
+        onOpenForwardPlanner: () => {},
+      })
+    );
+    const cards = Array.from(h.container.querySelectorAll('button[aria-label]')).filter((b) => / — /.test(b.getAttribute('aria-label') ?? ''));
+    check('A9. gate closed: Explore shows only the original three cards', cards.length === 3 && !/Palmistry/.test(h.container.textContent ?? ''));
+    await h.unmount();
+  }
+  check('A10. gate: pending content is hidden in a production build', isPalmistryAvailable('PENDING_HUMAN_REVIEW', 'production') === false);
+  check('A11. gate: pending content is visible in local development', isPalmistryAvailable('PENDING_HUMAN_REVIEW', 'development') === true);
+  check('A12. gate: approved content is visible in production', isPalmistryAvailable('APPROVED', 'production') === true);
+  check('A13. gate: defaults read the real review status (pending -> hidden when NODE_ENV=production)', (() => {
+    const prev = process.env.NODE_ENV;
+    (process.env as any).NODE_ENV = 'production';
+    const result = isPalmistryAvailable();
+    (process.env as any).NODE_ENV = prev;
+    return result === false;
+  })());
+
   // ============================================================
   // B. Palmistry guide: intro, disclosure, overview, selection
   // ============================================================
   {
     const { calls, spy } = makeSpies();
-    const tracked: Array<{ name: string; options: any }> = [];
-    const h = await mount(
-      React.createElement(PalmistryView, {
-        onBack: spy('back'),
-        trackEvent: (name: string, options: any) => tracked.push({ name, options }),
-      })
-    );
+    const h = await mount(React.createElement(PalmistryView, { onBack: spy('back') }));
     const text = () => h.container.textContent ?? '';
     const q = <T extends Element>(sel: string) => h.container.querySelector<T>(sel as any) as T | null;
 
@@ -121,8 +142,11 @@ async function run() {
     check('B13. no numeric lifespan appears in the detail', !/\b\d{2,3}\s*years\b/i.test(detail()!.textContent!));
     check('B14. selected list button reports aria-pressed=true', ayurButton.getAttribute('aria-pressed') === 'true');
     check('B15. the matching SVG line is highlighted', h.container.querySelector('#palm-line-ayurlekha [data-selected="true"]') !== null);
-    check('B16. selection fires one closed-enum analytics event', tracked.length === 1 && tracked[0]!.name === 'PALMISTRY_FEATURE_SELECTED' && JSON.stringify(tracked[0]!.options) === JSON.stringify({ metadata: { entryId: 'ayurlekha', category: 'line' } }));
-    check('B17. detail region is a polite live region', q('[data-testid="palmistry-detail"]')?.getAttribute('aria-live') === 'polite');
+    check('B16. selecting a feature makes no network request (no per-selection tracking)', fetchCalls.length === 0);
+    const live = q('[data-testid="palmistry-live-status"]');
+    check('B17. a short polite status announces the selection (not the whole entry)', live?.getAttribute('aria-live') === 'polite' && live?.textContent === 'Showing: Longevity line' && q('[data-testid="palmistry-detail"]')?.getAttribute('aria-live') === null);
+    await flush();
+    check('B17b. a list selection moves focus to the detail heading (brings it into view on phones)', (document.activeElement as HTMLElement | null)?.hasAttribute('data-detail-heading') === true && document.activeElement?.textContent === 'Longevity line');
 
     // Select another entry.
     const pitr = listButtons.find((b) => b.dataset.palmListEntry === 'pitrlekha')!;
@@ -162,6 +186,17 @@ async function run() {
     check('C11. the upward line is first in the precise layer (transverse lines win at crossings)', precise[0]!.getAttribute('data-precise-hit') === 'urdhvarekha');
     await click(precise.find((p) => p.getAttribute('data-precise-hit') === 'ayurlekha')!);
     check('C12. clicking a precise-hit path selects that line', detail()?.getAttribute('data-entry-id') === 'ayurlekha');
+    // Focus return to the triggering control (review finding 14).
+    const urdhvaG = h.container.querySelector<SVGGElement>('#palm-line-urdhvarekha')!;
+    await act(async () => {
+      (urdhvaG as any).focus();
+    });
+    await pressKey(urdhvaG, 'Enter');
+    await flush();
+    check('C13. a diagram selection keeps keyboard focus on the diagram line', document.activeElement === urdhvaG);
+    await click(Array.from(h.container.querySelectorAll('button')).find((b) => /Back to overview/.test(b.textContent ?? ''))!);
+    await flush();
+    check('C14. "Back to overview" returns focus to the diagram line that opened the entry', document.activeElement === urdhvaG);
 
     // ============================================================
     // D. Marks, overview return, invalid selection, back
@@ -186,12 +221,11 @@ async function run() {
     await click(backBtn);
     check('D7. Back to Explore calls onBack once', (calls.back ?? []).length === 1);
 
-    check('D8. analytics only ever sent closed-enum entry ids', tracked.every((t) => t.name === 'PALMISTRY_FEATURE_SELECTED' && PALMISTRY_ENTRIES.some((e: any) => e.id === t.options.metadata.entryId) && Object.keys(t.options.metadata).sort().join(',') === 'category,entryId'));
     await h.unmount();
   }
 
   {
-    const h = await mount(React.createElement(PalmistryView, { onBack: () => {}, initialEntryId: 'heart-line', trackEvent: () => {} }));
+    const h = await mount(React.createElement(PalmistryView, { onBack: () => {}, initialEntryId: 'heart-line' }));
     check('D9. an invalid initial selection shows a safe notice, not a crash', Boolean(h.container.querySelector('[data-testid="palmistry-invalid-selection"]')));
     check('D10. invalid selection never renders a detail', !h.container.querySelector('[data-testid="palmistry-entry-detail"]'));
     const back = Array.from(h.container.querySelectorAll('button')).find((b) => /Back to overview/.test(b.textContent ?? ''))!;
@@ -201,7 +235,7 @@ async function run() {
   }
 
   {
-    const h = await mount(React.createElement(PalmistryView, { onBack: () => {}, initialEntryId: 'chatra', trackEvent: () => {} }));
+    const h = await mount(React.createElement(PalmistryView, { onBack: () => {}, initialEntryId: 'chatra' }));
     check('D12. a valid initial mark id opens that mark in the Marks view', h.container.querySelector('[data-testid="palmistry-entry-detail"]')?.getAttribute('data-entry-id') === 'chatra');
     await h.unmount();
   }
@@ -211,9 +245,9 @@ async function run() {
   // ============================================================
   const page = fs.readFileSync(path.join(__dirname, '../apps/web/app/page.tsx'), 'utf8');
   check('E1. AppTab union includes palmistry', /type AppTab = [^;]*'palmistry'/.test(page));
-  check('E2. VALID_TABS includes palmistry (existing ?tab= convention)', /const VALID_TABS: AppTab\[\] = \[[^\]]*'palmistry'/.test(page));
-  check('E3. Explore opens the palmistry tab (not Home/Plan/Timeline)', /onOpenPalmistry=\{\(\) => setActiveTab\('palmistry'\)\}/.test(page));
-  check('E4. Palmistry renders inside the shell with Back -> Explore', /activeTab === 'palmistry' && <PalmistryView onBack=\{\(\) => setActiveTab\('explore'\)\} \/>/.test(page));
+  check('E2. VALID_TABS includes palmistry only when the launch gate is open', /const palmistryAvailable = isPalmistryAvailable\(\);/.test(page) && /const VALID_TABS: AppTab\[\] = \(\[[^\]]*'palmistry'\] as AppTab\[\]\)\.filter\(\(tab\) => tab !== 'palmistry' \|\| palmistryAvailable\)/.test(page));
+  check('E3. Explore opens the palmistry tab (not Home/Plan/Timeline), and only when the gate is open', /onOpenPalmistry=\{palmistryAvailable \? \(\) => setActiveTab\('palmistry'\) : undefined\}/.test(page));
+  check('E4. Palmistry renders inside the shell with Back -> Explore, behind the gate', /activeTab === 'palmistry' && palmistryAvailable && <PalmistryView onBack=\{\(\) => setActiveTab\('explore'\)\} \/>/.test(page));
   check('E5. the Explore dock item stays highlighted on the palmistry tab', /label="Explore"[^\n]*activeTab === 'palmistry'/.test(page));
   check('E6. GUIDE_OPENED fires from the existing per-tab effect', /activeTab === 'palmistry'\) trackEvent\('PALMISTRY_GUIDE_OPENED'\)/.test(page));
   check('E7. no new routing framework (no next/navigation router push for palmistry)', !/router\.push\([^)]*palm/i.test(page) && !fs.existsSync(path.join(__dirname, '../apps/web/app/palmistry')));
@@ -224,7 +258,7 @@ async function run() {
   // ============================================================
   check('F1. mounting and using the guide made no network request', fetchCalls.length === 0);
   {
-    const h = await mount(React.createElement(PalmistryView, { onBack: () => {}, trackEvent: () => {} }));
+    const h = await mount(React.createElement(PalmistryView, { onBack: () => {} }));
     check('F3. no <input type=file>, <video>, <canvas> or <img> in the guide', h.container.querySelectorAll('input[type="file"], video, canvas, img').length === 0);
     const links = Array.from(h.container.querySelectorAll<HTMLAnchorElement>('a[href]'));
     check('F4. external source links open safely (noopener)', links.length > 0 && links.every((a) => a.target === '_blank' && /noopener/.test(a.rel)));

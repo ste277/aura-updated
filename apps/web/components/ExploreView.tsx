@@ -38,8 +38,10 @@ interface ExploreViewProps {
   onOpenForwardPlanner: () => void;
   /** AURA-PALM-01-I1 -- opens the educational Palmistry guide (the fourth
    * card). Purely educational and independent of every timing engine:
-   * it never touches Panchang, Muhurtham or Plan Ahead state. */
-  onOpenPalmistry: () => void;
+   * it never touches Panchang, Muhurtham or Plan Ahead state. Omitted
+   * (card hidden) while the launch gate is closed -- see
+   * isPalmistryAvailable, exported next to the guide component. */
+  onOpenPalmistry?: () => void;
 }
 
 export function ExploreView({ timezone, onOpenPanchang, onOpenMuhurtham, onOpenMuhurthamWithActivity, onOpenForwardPlanner, onOpenPalmistry }: ExploreViewProps) {
@@ -92,16 +94,18 @@ export function ExploreView({ timezone, onOpenPanchang, onOpenMuhurtham, onOpenM
         onClick={onOpenForwardPlanner}
       />
 
-      <ExploreFeatureCard
-        kicker="Palmistry"
-        actionLabel="Learn the lines of the hand"
-        description="Explore traditional Indian interpretations of palm lines and symbols."
-        icon="✋"
-        accent={theme.colors.traditional}
-        footerIcon="📜"
-        footer="Traditional knowledge · no photo needed"
-        onClick={onOpenPalmistry}
-      />
+      {onOpenPalmistry && (
+        <ExploreFeatureCard
+          kicker="Palmistry"
+          actionLabel="Learn the lines of the hand"
+          description="Explore traditional Indian interpretations of palm lines and symbols."
+          icon="✋"
+          accent={theme.colors.traditional}
+          footerIcon="📜"
+          footer="Traditional knowledge · no photo needed"
+          onClick={onOpenPalmistry}
+        />
+      )}
 
       <section>
         <div style={typography.sectionEyebrow}>Quick Explore</div>
