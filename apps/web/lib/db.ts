@@ -33,7 +33,7 @@ import { toPersistedGoalActivityExecutionSnapshot, fromPersistedGoalActivityExec
 // routes back to `prisma.*` calls once you run `npx prisma generate` in an
 // environment with normal internet access.
 
-const pool = new Pool({ connectionString: process.env.DATABASE_URL });
+const pool = new Pool({ connectionString: process.env.AURA_DATABASE_URL || process.env.DATABASE_URL });
 
 /**
  * Day Constructor V1 PR E2 -- the one minimal primitive a caller needs to
