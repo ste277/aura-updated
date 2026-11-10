@@ -36,9 +36,13 @@ interface ExploreViewProps {
    * screen, same entry-point convention as Muhurtham Finder above -- never
    * added to Home. */
   onOpenForwardPlanner: () => void;
+  /** AURA-PALM-01-I1 -- opens the educational Palmistry guide (the fourth
+   * card). Purely educational and independent of every timing engine:
+   * it never touches Panchang, Muhurtham or Plan Ahead state. */
+  onOpenPalmistry: () => void;
 }
 
-export function ExploreView({ timezone, onOpenPanchang, onOpenMuhurtham, onOpenMuhurthamWithActivity, onOpenForwardPlanner }: ExploreViewProps) {
+export function ExploreView({ timezone, onOpenPanchang, onOpenMuhurtham, onOpenMuhurthamWithActivity, onOpenForwardPlanner, onOpenPalmistry }: ExploreViewProps) {
   const todayLabel = new Date().toLocaleDateString('en-US', { timeZone: timezone, month: 'short', day: 'numeric', year: 'numeric' });
 
   // Reuses the SAME occasion list Muhurtham Finder's own dropdown is built
@@ -86,6 +90,17 @@ export function ExploreView({ timezone, onOpenPanchang, onOpenMuhurtham, onOpenM
         footerIcon="🔭"
         footer="Tomorrow, this weekend, or next 7 days"
         onClick={onOpenForwardPlanner}
+      />
+
+      <ExploreFeatureCard
+        kicker="Palmistry"
+        actionLabel="Learn the lines of the hand"
+        description="Explore traditional Indian interpretations of palm lines and symbols."
+        icon="✋"
+        accent={theme.colors.traditional}
+        footerIcon="📜"
+        footer="Traditional knowledge · no photo needed"
+        onClick={onOpenPalmistry}
       />
 
       <section>

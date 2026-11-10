@@ -182,6 +182,14 @@ jobs:
       # it also has to run after "Install web deps".
       - name: Run product events validation test
         run: npx ts-node test/productEvents.test.ts
+      # AURA-PALM-01-I1 -- educational Palmistry guide. The content test
+      # imports apps/web/lib/productEvents.ts (analytics enum checks), so it
+      # also needs apps/web/node_modules; the jsdom test mounts ExploreView
+      # and PalmistryView with the shared harness (tsconfig.jsdom-tests.json).
+      - name: Run Palmistry content, privacy and isolation test
+        run: npx ts-node test/palm01I1Content.test.ts
+      - name: Run Palmistry Explore + guide component test
+        run: npx ts-node --project tsconfig.jsdom-tests.json test/palm01I1ExploreJsdom.test.ts
       # Goals V2 Candidate A1 -- goalDemandCandidates.ts imports apps/web/lib/db.ts
       # (for its `pg` dependency), same apps/web/node_modules requirement as
       # the Aura Moment/product events tests above.

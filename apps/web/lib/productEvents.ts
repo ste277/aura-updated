@@ -15,6 +15,7 @@
 import { FULL_ACTIVITY_CATALOG } from '../../../packages/recommendation/src/personalizedTasks';
 import { GOAL_TEMPLATE_CATEGORIES } from './goals';
 import { createProductEvent } from './db';
+import { PALMISTRY_ENTRY_IDS } from '../../../packages/palmistry/src/content';
 
 export type ProductEventName =
   | 'AURA_HOME_VIEWED'
@@ -69,7 +70,9 @@ export type ProductEventName =
   | 'PERSONALIZATION_PREFERENCES_UPDATED'
   | 'GOAL_DECOMPOSITION_SHOWN'
   | 'GOAL_DECOMPOSITION_CONFIRMED'
-  | 'GOAL_DECOMPOSITION_CREATE_FAILED';
+  | 'GOAL_DECOMPOSITION_CREATE_FAILED'
+  | 'PALMISTRY_GUIDE_OPENED'
+  | 'PALMISTRY_FEATURE_SELECTED';
 
 export const PRODUCT_EVENT_NAMES: ProductEventName[] = [
   'AURA_HOME_VIEWED',
@@ -125,6 +128,8 @@ export const PRODUCT_EVENT_NAMES: ProductEventName[] = [
   'GOAL_DECOMPOSITION_SHOWN',
   'GOAL_DECOMPOSITION_CONFIRMED',
   'GOAL_DECOMPOSITION_CREATE_FAILED',
+  'PALMISTRY_GUIDE_OPENED',
+  'PALMISTRY_FEATURE_SELECTED',
 ];
 
 export function isProductEventName(value: string): value is ProductEventName {
@@ -265,6 +270,15 @@ export const CLIENT_TRACKED_EVENTS: ReadonlySet<ProductEventName> = new Set<Prod
   'GOAL_DECOMPOSITION_SHOWN',
   'GOAL_DECOMPOSITION_CONFIRMED',
   'GOAL_DECOMPOSITION_CREATE_FAILED',
+  // AURA-PALM-01-I1 -- educational Explore -> Palmistry guide. Both are UI
+  // intent signals with no server-side moment (the guide is static,
+  // bundled content with no API). GUIDE_OPENED fires from page.tsx's own
+  // per-tab effect, same convention as PANCHANG_CALENDAR_VIEWED;
+  // FEATURE_SELECTED carries ONLY a closed-enum entry id + category --
+  // never anything observed about the user's own hand (there is no such
+  // input at all), never free text.
+  'PALMISTRY_GUIDE_OPENED',
+  'PALMISTRY_FEATURE_SELECTED',
 ]);
 
 // Fields that must NEVER appear in ProductEvent.metadata, under any event,
@@ -679,6 +693,13 @@ const EVENT_METADATA_SCHEMAS: Record<ProductEventName, Record<string, FieldSchem
   GOAL_DECOMPOSITION_CREATE_FAILED: {
     errorCategory: { type: 'enum', values: GOAL_CREATE_ERROR_CATEGORY_VALUES },
     matchSource: { type: 'enum', values: GOAL_MATCH_SOURCE_VALUES },
+  },
+  PALMISTRY_GUIDE_OPENED: {},
+  PALMISTRY_FEATURE_SELECTED: {
+    // The exact closed id list the static content module exports -- never
+    // a second copy, so an unknown/free-text id is rejected outright.
+    entryId: { type: 'enum', values: new Set<string>(PALMISTRY_ENTRY_IDS) },
+    category: { type: 'enum', values: new Set(['line', 'mark']) },
   },
 };
 
