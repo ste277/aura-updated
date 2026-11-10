@@ -190,6 +190,12 @@ jobs:
         run: npx ts-node test/palm01I1Content.test.ts
       - name: Run Palmistry Explore + guide component test
         run: npx ts-node --project tsconfig.jsdom-tests.json test/palm01I1ExploreJsdom.test.ts
+      # AURA-PALM-01-P4 -- runs the real apps/web/scripts/vercel-build.sh (what
+      # Vercel executes for Preview and Production) in an isolated temp tree
+      # with fake next/npx, proving the Palmistry bundle scanner runs after
+      # the build and that its failure fails the build. No deploy/credentials.
+      - name: Run Palmistry Vercel build guard test
+        run: npx ts-node test/palm01P4VercelGuard.test.ts
       # Goals V2 Candidate A1 -- goalDemandCandidates.ts imports apps/web/lib/db.ts
       # (for its `pg` dependency), same apps/web/node_modules requirement as
       # the Aura Moment/product events tests above.
