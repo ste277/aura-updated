@@ -32,4 +32,14 @@
     <!-- Permissions -->
 
     <uses-permission android:name="android.permission.INTERNET" />
+    <!-- AURA-MOBILE-01-M1: required for the existing @capacitor/local-notifications
+         integration (apps/web/lib/windowNotifications.ts) to be grantable at all on
+         Android 13+ (API 33+, this app's targetSdkVersion is 34). Without this,
+         LocalNotifications.requestPermissions() can never succeed on-device. -->
+    <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
+    <!-- AURA-MOBILE-01-M1: required for the existing navigator.geolocation call in
+         LocationPicker.tsx (city-level location selection) to function in the native
+         WebView. Coarse only -- this feature needs city-level accuracy, not precise
+         GPS, so ACCESS_FINE_LOCATION is deliberately not requested. -->
+    <uses-permission android:name="android.permission.ACCESS_COARSE_LOCATION" />
 </manifest>
