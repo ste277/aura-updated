@@ -42,9 +42,14 @@ interface ExploreViewProps {
    * (card hidden) while the launch gate is closed -- see
    * isPalmistryAvailable, exported next to the guide component. */
   onOpenPalmistry?: () => void;
+  /** AURA-PALM-01-P1 -- the card's copy is supplied by the guide's own module
+   * (not hard-coded here) so production builds that exclude unapproved
+   * Palmistry content ship none of its text. Card renders only when both
+   * this and onOpenPalmistry are present. */
+  palmistryCard?: { kicker: string; actionLabel: string; description: string; footer: string } | null;
 }
 
-export function ExploreView({ timezone, onOpenPanchang, onOpenMuhurtham, onOpenMuhurthamWithActivity, onOpenForwardPlanner, onOpenPalmistry }: ExploreViewProps) {
+export function ExploreView({ timezone, onOpenPanchang, onOpenMuhurtham, onOpenMuhurthamWithActivity, onOpenForwardPlanner, onOpenPalmistry, palmistryCard }: ExploreViewProps) {
   const todayLabel = new Date().toLocaleDateString('en-US', { timeZone: timezone, month: 'short', day: 'numeric', year: 'numeric' });
 
   // Reuses the SAME occasion list Muhurtham Finder's own dropdown is built
@@ -94,15 +99,15 @@ export function ExploreView({ timezone, onOpenPanchang, onOpenMuhurtham, onOpenM
         onClick={onOpenForwardPlanner}
       />
 
-      {onOpenPalmistry && (
+      {onOpenPalmistry && palmistryCard && (
         <ExploreFeatureCard
-          kicker="Palmistry"
-          actionLabel="Learn the lines of the hand"
-          description="Explore traditional Indian interpretations of palm lines and symbols."
+          kicker={palmistryCard.kicker}
+          actionLabel={palmistryCard.actionLabel}
+          description={palmistryCard.description}
           icon="✋"
           accent={theme.colors.traditional}
           footerIcon="📜"
-          footer="Traditional knowledge · no photo needed"
+          footer={palmistryCard.footer}
           onClick={onOpenPalmistry}
         />
       )}

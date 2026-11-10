@@ -17,7 +17,8 @@ import * as path from 'path';
 import { React, mount, click, pressKey, flush, act } from './jsdomReactHarness';
 
 const { ExploreView } = require('../apps/web/components/ExploreView');
-const { PalmistryView, isPalmistryAvailable } = require('../apps/web/components/PalmistryView');
+const { PalmistryView, isPalmistryAvailable, PALMISTRY_EXPLORE_CARD } = require('../apps/web/components/PalmistryView');
+const stub = require('../apps/web/components/PalmistryView.unpublished');
 const { PALMISTRY_GENERAL_DISCLOSURE, PALMISTRY_LONGEVITY_DISCLOSURE, PALMISTRY_ENTRIES } = require('../packages/palmistry/src/content');
 
 let passed = 0;
@@ -62,6 +63,7 @@ async function run() {
         onOpenMuhurthamWithActivity: spy('muhurthamWithActivity'),
         onOpenForwardPlanner: spy('planner'),
         onOpenPalmistry: spy('palmistry'),
+        palmistryCard: PALMISTRY_EXPLORE_CARD,
       })
     );
     const cards = Array.from(h.container.querySelectorAll('button[aria-label]')).filter((b) => / — /.test(b.getAttribute('aria-label') ?? ''));
@@ -102,6 +104,32 @@ async function run() {
   check('A10. gate: pending content is hidden in a production build', isPalmistryAvailable('PENDING_HUMAN_REVIEW', 'production') === false);
   check('A11. gate: pending content is visible in local development', isPalmistryAvailable('PENDING_HUMAN_REVIEW', 'development') === true);
   check('A12. gate: approved content is visible in production', isPalmistryAvailable('APPROVED', 'production') === true);
+  // A14: card copy comes from the guide module; without it (production
+  // stand-in exports null) no card renders even if a handler were passed.
+  {
+    const h = await mount(
+      React.createElement(ExploreView, {
+        timezone: 'Asia/Kolkata',
+        onOpenPanchang: () => {},
+        onOpenMuhurtham: () => {},
+        onOpenMuhurthamWithActivity: () => {},
+        onOpenForwardPlanner: () => {},
+        onOpenPalmistry: () => {},
+        palmistryCard: stub.PALMISTRY_EXPLORE_CARD,
+      })
+    );
+    const cards = Array.from(h.container.querySelectorAll('button[aria-label]')).filter((b) => / — /.test(b.getAttribute('aria-label') ?? ''));
+    check('A14. with the stand-in card copy (null) Explore shows only the original three cards', cards.length === 3 && !/Palmistry/.test(h.container.textContent ?? ''));
+    await h.unmount();
+  }
+  // S1-S3: the production stand-in is inert.
+  check('S1. stand-in gate is always closed', stub.isPalmistryAvailable() === false);
+  check('S2. stand-in card copy is null', stub.PALMISTRY_EXPLORE_CARD === null);
+  {
+    const h = await mount(React.createElement(stub.PalmistryView, { onBack: () => {} }));
+    check('S3. stand-in view renders nothing', h.container.innerHTML === '');
+    await h.unmount();
+  }
   check('A13. gate: defaults read the real review status (pending -> hidden when NODE_ENV=production)', (() => {
     const prev = process.env.NODE_ENV;
     (process.env as any).NODE_ENV = 'production';
@@ -256,6 +284,7 @@ async function run() {
   check('E1. AppTab union includes palmistry', /type AppTab = [^;]*'palmistry'/.test(page));
   check('E2. VALID_TABS includes palmistry only when the launch gate is open', /const palmistryAvailable = isPalmistryAvailable\(\);/.test(page) && /const VALID_TABS: AppTab\[\] = \(\[[^\]]*'palmistry'\] as AppTab\[\]\)\.filter\(\(tab\) => tab !== 'palmistry' \|\| palmistryAvailable\)/.test(page));
   check('E3. Explore opens the palmistry tab (not Home/Plan/Timeline), and only when the gate is open', /onOpenPalmistry=\{palmistryAvailable \? \(\) => setActiveTab\('palmistry'\) : undefined\}/.test(page));
+  check('E3b. the Explore card copy is passed from the guide module (excluded with it in production)', /palmistryCard=\{PALMISTRY_EXPLORE_CARD\}/.test(page));
   check('E4. Palmistry renders inside the shell with Back -> Explore, behind the gate', /activeTab === 'palmistry' && palmistryAvailable && <PalmistryView onBack=\{\(\) => setActiveTab\('explore'\)\} \/>/.test(page));
   check('E5. the Explore dock item stays highlighted on the palmistry tab', /label="Explore"[^\n]*activeTab === 'palmistry'/.test(page));
   check('E6. GUIDE_OPENED fires from the existing per-tab effect', /activeTab === 'palmistry'\) trackEvent\('PALMISTRY_GUIDE_OPENED'\)/.test(page));

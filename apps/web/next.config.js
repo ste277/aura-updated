@@ -1,3 +1,5 @@
+const { applyPalmistryExclusion } = require('./palmistry-build-exclusion');
+
 /** @type {import('next').NextConfig} */
 const nextConfig = {
   reactStrictMode: true,
@@ -10,6 +12,11 @@ const nextConfig = {
   // needs to be told to transpile those workspace-relative imports too.
   experimental: {
     externalDir: true,
+  },
+  // AURA-PALM-01-P1: production builds exclude unapproved Palmistry content
+  // entirely (see palmistry-build-exclusion.js). `next dev` is unaffected.
+  webpack(config, { dev, webpack }) {
+    return applyPalmistryExclusion(config, { dev, webpack });
   },
 };
 

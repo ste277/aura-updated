@@ -346,7 +346,7 @@ Nothing in this checklist is legal advice, and **no licensing clearance has been
 
 **After sign-off:**
 1. An engineer applies any corrections. Content changes then need re-confirmation by the reviewer.
-2. The engineer sets `PALMISTRY_CONTENT_REVIEW` to `APPROVED` with the reviewer's name and date, and updates tests E1–E2 in the same change, citing this packet.
+2. The engineer sets `packages/palmistry/src/review-status.json` to `{"status": "APPROVED", "approvedBy": {"reviewer": "…", "date": "…"}}`, and in the same change updates tests E1–E2 and K1/K3 (which assert the pending state), citing this packet. That single file controls the runtime gate, the build-level exclusion and the CI bundle check.
 3. Merge and production release still need separate authorization.
 
 ---
@@ -366,5 +366,7 @@ Nothing in this checklist is legal advice, and **no licensing clearance has been
 
 ## 10. Publication status (for context)
 
-- **Launch gate.** While the status is not `APPROVED`, production builds hide the Explore card and ignore `?tab=palmistry`. This was verified in a real production build.
-- **Bundle exposure.** The text in this packet **is included in the production JavaScript bundle**: it is downloadable, even though it is not displayed. Merging before approval would therefore publish the unreviewed text in a technical sense. The PR stays in draft until approval, and the decision is recorded in the P1 report.
+- **Build-level exclusion.** While `review-status.json` is not `APPROVED`, every production build (CI, Vercel Preview, Production) replaces the guide's root module with an empty stand-in. **None of the text in this packet is included in production JavaScript**: not the entries, the disclosures, the sources, or the Explore card copy. This was verified in a real `next start` build by scanning every chunk the server serves, logged in and logged out.
+- **CI guard.** After every production build, CI fails if any sentinel string from this content appears in the build output.
+- **Runtime gate.** A second layer: the Explore card and the `?tab=palmistry` route stay closed until approval.
+- **Local review.** The full guide is available in local development builds (`next dev`) for reviewers. It is not available on Vercel Preview, which is a production build.

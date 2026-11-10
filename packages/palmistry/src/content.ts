@@ -13,6 +13,8 @@
  * 'PENDING_HUMAN_REVIEW' until a real sign-off is recorded (decision 2.4).
  */
 
+import reviewStatus from './review-status.json';
+
 export type PalmistryCategory = 'line' | 'mark';
 
 export type PalmistryAttributionStatus =
@@ -97,11 +99,19 @@ export const PALMISTRY_INTRO = {
     'These are descriptions of what historical texts said, in the social world they came from. They are not claims about you.',
 };
 
+/** Single source of truth for content approval: ./review-status.json is read
+ * both here (runtime gate + UI notice) and by apps/web/palmistry-build-exclusion.js
+ * (build-time exclusion: while not APPROVED, production builds replace the
+ * whole Palmistry module tree with an empty stub, so no content ships).
+ * Change it ONLY when a qualified human reviewer has signed off -- see
+ * docs/palmistry/AURA_PALM_01_I1_CONTENT_REVIEW_PACKET.md. */
+const REVIEW_STATUS = reviewStatus as { status: string; approvedBy: null | { reviewer: string; date: string } };
+
 export const PALMISTRY_CONTENT_REVIEW = {
-  status: 'PENDING_HUMAN_REVIEW' as 'PENDING_HUMAN_REVIEW' | 'APPROVED',
+  status: (REVIEW_STATUS.status === 'APPROVED' ? 'APPROVED' : 'PENDING_HUMAN_REVIEW') as 'PENDING_HUMAN_REVIEW' | 'APPROVED',
   /** Shown in the UI until approved. */
   notice: 'Preview content: awaiting review by a qualified scholar before public release.',
-  approvedBy: null as null | { reviewer: string; date: string },
+  approvedBy: REVIEW_STATUS.approvedBy,
 };
 
 export const PALMISTRY_ENTRIES: readonly PalmistryEntry[] = [

@@ -673,6 +673,13 @@ jobs:
           DATABASE_URL: postgresql://user:pass@localhost:5432/placeholder
           AUTH_SECRET: ci-placeholder-secret-not-for-production
         run: npm run build
+      # AURA-PALM-01-P1 -- while Palmistry content awaits qualified human
+      # approval, the production build must contain none of it (build-level
+      # exclusion, apps/web/palmistry-build-exclusion.js). Fails on any
+      # sentinel string from the unapproved content.
+      - name: Verify unapproved Palmistry content is excluded from the build
+        working-directory: apps/web
+        run: node scripts/check-palmistry-bundle.js
   db-migration-validation:
     # Database Migration Baseline Reconciliation V1 (PR A) -- proves the
     # complete repository migration chain (apps/web/prisma/migrations/,

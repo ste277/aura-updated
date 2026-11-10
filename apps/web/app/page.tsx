@@ -48,7 +48,7 @@ import { PanchangCalendarView } from '../components/PanchangCalendarView';
 import { MuhurthamFinderView } from '../components/MuhurthamFinderView';
 import { PeopleView } from '../components/PeopleView';
 import { ExploreView } from '../components/ExploreView';
-import { PalmistryView, isPalmistryAvailable } from '../components/PalmistryView';
+import { PalmistryView, isPalmistryAvailable, PALMISTRY_EXPLORE_CARD } from '../components/PalmistryView';
 import { UpdatesView } from '../components/UpdatesView';
 import { ForwardPlannerView } from '../components/ForwardPlannerView';
 
@@ -283,7 +283,9 @@ export default function DashboardPage() {
   type AppTab = 'home' | 'timeline' | 'ask' | 'plan' | 'insights' | 'you' | 'chart' | 'activity' | 'explore' | 'panchang' | 'muhurtham' | 'people' | 'updates' | 'planner' | 'palmistry';
   // AURA-PALM-01-I1 launch gate: in a production build the Palmistry tab is
   // only reachable once its content has qualified human approval (see
-  // isPalmistryAvailable in components/PalmistryView.tsx).
+  // isPalmistryAvailable in components/PalmistryView.tsx). AURA-PALM-01-P1:
+  // production builds also swap that module for an empty stand-in until
+  // approval (apps/web/palmistry-build-exclusion.js), so no content ships.
   const palmistryAvailable = isPalmistryAvailable();
   const VALID_TABS: AppTab[] = (['home', 'timeline', 'ask', 'plan', 'insights', 'you', 'chart', 'activity', 'explore', 'panchang', 'muhurtham', 'people', 'updates', 'planner', 'palmistry'] as AppTab[]).filter((tab) => tab !== 'palmistry' || palmistryAvailable);
   // Recipient Conversion V1 (brief section 16/33) -- an already-signed-in
@@ -2081,6 +2083,7 @@ export default function DashboardPage() {
             onOpenMuhurthamWithActivity={handleOpenMuhurthamWithActivity}
             onOpenForwardPlanner={() => setActiveTab('planner')}
             onOpenPalmistry={palmistryAvailable ? () => setActiveTab('palmistry') : undefined}
+            palmistryCard={PALMISTRY_EXPLORE_CARD}
           />
         )}
 

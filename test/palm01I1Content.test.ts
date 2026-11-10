@@ -211,7 +211,69 @@ const componentHits = walk(path.join(ROOT, 'apps/web/components'))
   .filter((f) => /PalmistryView|PalmHandDiagram|packages\/palmistry/.test(fs.readFileSync(f, 'utf8')))
   .map((f) => path.basename(f))
   .sort();
-check('J4. palmistry is referenced only by its own components (not Home, Plan, Timeline, Panchang, Muhurtham)', JSON.stringify(componentHits) === JSON.stringify(['PalmHandDiagram.tsx', 'PalmistryView.tsx']));
+check('J4. palmistry is referenced only by its own components (not Home, Plan, Timeline, Panchang, Muhurtham)', JSON.stringify(componentHits) === JSON.stringify(['PalmHandDiagram.tsx', 'PalmistryView.tsx', 'PalmistryView.unpublished.tsx']));
+
+// ============================================================
+// K. Build-level exclusion (AURA-PALM-01-P1)
+// ============================================================
+const exclusion = require('../apps/web/palmistry-build-exclusion');
+const bundleCheck = require('../apps/web/scripts/check-palmistry-bundle');
+class FakeReplacementPlugin {
+  constructor(public pattern: RegExp, public replacement: string) {}
+}
+const fakeWebpack = { NormalModuleReplacementPlugin: FakeReplacementPlugin };
+
+const reviewJson = JSON.parse(read('packages/palmistry/src/review-status.json'));
+check('K1. review-status.json is PENDING_HUMAN_REVIEW with no approver (single source of truth)', reviewJson.status === 'PENDING_HUMAN_REVIEW' && reviewJson.approvedBy === null);
+check('K2. content.ts derives its review status from review-status.json', /import reviewStatus from '\.\/review-status\.json'/.test(read('packages/palmistry/src/content.ts')) && PALMISTRY_CONTENT_REVIEW.status === reviewJson.status);
+check('K3. build exclusion reads the same file and reports NOT approved', exclusion.isPalmistryApproved() === false && path.resolve(exclusion.REVIEW_STATUS_PATH) === path.join(ROOT, 'packages/palmistry/src/review-status.json'));
+
+const prodConfig = exclusion.applyPalmistryExclusion({ plugins: [] }, { dev: false, webpack: fakeWebpack, approved: false });
+check('K4. production + not approved: exactly one replacement plugin pointing at the stand-in', prodConfig.plugins.length === 1 && prodConfig.plugins[0] instanceof FakeReplacementPlugin && prodConfig.plugins[0].replacement === path.join(ROOT, 'apps/web/components/PalmistryView.unpublished.tsx'));
+check('K5. dev builds keep the real module', exclusion.applyPalmistryExclusion({ plugins: [] }, { dev: true, webpack: fakeWebpack, approved: false }).plugins.length === 0);
+check('K6. approved content is not excluded', exclusion.applyPalmistryExclusion({ plugins: [] }, { dev: false, webpack: fakeWebpack, approved: true }).plugins.length === 0);
+check('K7. default (no `approved` passed) reads the file -> excluded in production', exclusion.applyPalmistryExclusion({ plugins: [] }, { dev: false, webpack: fakeWebpack }).plugins.length === 1);
+const re: RegExp = exclusion.PALMISTRY_VIEW_REQUEST;
+check('K8. replacement pattern matches the PalmistryView request forms', re.test('../components/PalmistryView') && re.test('/repo/apps/web/components/PalmistryView.tsx') && re.test('C:\\repo\\apps\\web\\components\\PalmistryView'));
+check('K9. replacement pattern does not match the stand-in, the diagram or similar names', !re.test('../components/PalmistryView.unpublished') && !re.test('./PalmistryView.unpublished.tsx') && !re.test('./PalmHandDiagram') && !re.test('../components/PalmistryViewer') && !re.test('../components/ExploreView'));
+const realNextConfig = require('../apps/web/next.config.js');
+check('K10. next.config.js wires the exclusion into its webpack hook', typeof realNextConfig.webpack === 'function' && realNextConfig.webpack({ plugins: [] }, { dev: false, webpack: fakeWebpack }).plugins.length === 1 && realNextConfig.webpack({ plugins: [] }, { dev: true, webpack: fakeWebpack }).plugins.length === 0);
+
+// Import allowlist: the replacement only removes everything if the Palmistry
+// tree is reachable SOLELY through components/PalmistryView.
+const importSources = [...walk(path.join(ROOT, 'apps/web/app')), ...walk(path.join(ROOT, 'apps/web/components')), ...walk(path.join(ROOT, 'apps/web/lib')), ...walk(path.join(ROOT, 'packages'))];
+const importersOf = (pattern: RegExp) => importSources.filter((f) => pattern.test(strip(fs.readFileSync(f, 'utf8')))).map((f) => path.relative(ROOT, f).replace(/\\/g, '/')).sort();
+check('K11. only PalmistryView and PalmHandDiagram import packages/palmistry (relative imports inside the package excluded)', JSON.stringify(importersOf(/(from|require\()\s*['"][^'"]*packages\/palmistry\//)) === JSON.stringify(['apps/web/components/PalmHandDiagram.tsx', 'apps/web/components/PalmistryView.tsx']));
+check('K12. only app/page.tsx imports components/PalmistryView', JSON.stringify(importersOf(/(from|require\()\s*['"][^'"]*\/PalmistryView['"]/)) === JSON.stringify(['apps/web/app/page.tsx']));
+check('K13. only PalmistryView imports PalmHandDiagram', JSON.stringify(importersOf(/(from|require\()\s*['"][^'"]*\/PalmHandDiagram['"]/)) === JSON.stringify(['apps/web/components/PalmistryView.tsx']));
+check('K14. nothing imports the stand-in directly (only the build swaps it in)', importersOf(/PalmistryView\.unpublished/).length === 0);
+
+// The stand-in must be content-free and export what page.tsx imports.
+const stubSrc = read('apps/web/components/PalmistryView.unpublished.tsx');
+check('K15. stand-in contains none of the bundle sentinels', bundleCheck.SENTINELS.every((s: string) => !stubSrc.includes(s)));
+check('K16. stand-in imports nothing from packages/palmistry or the real view', !/packages\/palmistry|from '\.\/PalmistryView'|PalmHandDiagram/.test(strip(stubSrc)));
+const pageImports = (read('apps/web/app/page.tsx').match(/import \{([^}]*)\} from '\.\.\/components\/PalmistryView'/)?.[1] ?? '').split(',').map((n) => n.trim()).filter(Boolean).sort();
+const exportsOf = (src: string) => Array.from(strip(src).matchAll(/export (?:function|const) (\w+)/g)).map((m) => m[1]).sort();
+check('K17. every name page.tsx imports from PalmistryView is exported by BOTH the real module and the stand-in', pageImports.length === 3 && pageImports.every((n) => exportsOf(stubSrc).includes(n) && exportsOf(read('apps/web/components/PalmistryView.tsx')).includes(n)));
+
+// Bundle-check sentinels must really occur in the source, or the post-build
+// check could pass vacuously.
+const palmSources = ['packages/palmistry/src/content.ts', 'packages/palmistry/src/sources.ts', 'packages/palmistry/src/review-status.json', 'apps/web/components/PalmistryView.tsx', 'apps/web/components/PalmHandDiagram.tsx'].map(read).join('\n');
+for (const s of bundleCheck.SENTINELS) check(`K18. bundle sentinel present in source: ${s}`, palmSources.includes(s) || palmSources.includes(JSON.stringify(s).slice(1, -1)));
+check('K19. no sentinel occurs in ExploreView (card copy moved out)', bundleCheck.SENTINELS.every((s: string) => !read('apps/web/components/ExploreView.tsx').includes(s)));
+// K21: negative control -- the scanner really detects leaked content.
+{
+  const os = require('os');
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'palm-bundle-check-'));
+  fs.mkdirSync(path.join(tmp, '.next/static/chunks'), { recursive: true });
+  fs.writeFileSync(path.join(tmp, '.next/static/chunks/clean.js'), 'console.log("no content here");');
+  check('K21a. scanner reports nothing for a clean build', bundleCheck.scan(tmp).length === 0);
+  fs.writeFileSync(path.join(tmp, '.next/static/chunks/leak.js'), `var x={status:"PENDING_HUMAN_REVIEW",id:"zysk-2025"};`);
+  const hits = bundleCheck.scan(tmp);
+  check('K21b. scanner flags leaked sentinels with file paths', hits.length === 2 && hits.every((h: { file: string }) => h.file.endsWith('leak.js')));
+  fs.rmSync(tmp, { recursive: true, force: true });
+}
+check('K20. CI runs the bundle check right after the production build', /run: npm run build\n(?:\s+#.*\n)*\s+- name: Verify unapproved Palmistry content is excluded from the build\n\s+working-directory: apps\/web\n\s+run: node scripts\/check-palmistry-bundle\.js/.test(read('.github/workflows/ci.yml')));
 check('J5. no API route references palmistry', walk(path.join(ROOT, 'apps/web/app/api')).every((f) => !/palmistry/i.test(fs.readFileSync(f, 'utf8'))));
 
 console.log(`\n${passed} passed, ${failed} failed`);

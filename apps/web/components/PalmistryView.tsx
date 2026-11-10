@@ -29,18 +29,28 @@ import { EmptyState, PageHeader, SectionHeader, SegmentedControl, StatusBadge, S
  * entries someone read would be a profile built from selections.)
  */
 
-/** Launch gate (AURA-PALM-01-I1 review finding 1). Until a qualified human
- * reviewer approves the content (PALMISTRY_CONTENT_REVIEW in
- * packages/palmistry), a PRODUCTION build hides the Explore card and refuses
- * the 'palmistry' tab, so an accidental merge cannot publish unreviewed
- * content. Local/dev builds still show it for review. Not a flag framework:
- * one pure function over two existing values. */
+/** Runtime launch gate (AURA-PALM-01-I1 review finding 1). Until a qualified
+ * human reviewer approves the content (packages/palmistry/src/review-status.json),
+ * a PRODUCTION build hides the Explore card and refuses the 'palmistry' tab.
+ * Defence in depth: in production builds this whole module is ALSO replaced
+ * at build time by ./PalmistryView.unpublished (apps/web/palmistry-build-exclusion.js),
+ * so the content never reaches the bundle either. Local/dev builds show it
+ * for review. Not a flag framework: one pure function over two values. */
 export function isPalmistryAvailable(
   status: string = PALMISTRY_CONTENT_REVIEW.status,
   nodeEnv: string | undefined = process.env.NODE_ENV
 ): boolean {
   return status === 'APPROVED' || nodeEnv !== 'production';
 }
+
+/** Explore card copy. Lives in this module (not ExploreView) so the
+ * build-level exclusion removes it too: the production stand-in exports null. */
+export const PALMISTRY_EXPLORE_CARD: { kicker: string; actionLabel: string; description: string; footer: string } | null = {
+  kicker: 'Palmistry',
+  actionLabel: 'Learn the lines of the hand',
+  description: 'Explore traditional Indian interpretations of palm lines and symbols.',
+  footer: 'Traditional knowledge · no photo needed',
+};
 
 type SelectionSource = 'list' | 'diagram' | 'mark';
 
