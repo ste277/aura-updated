@@ -680,6 +680,27 @@ jobs:
       - name: Verify unapproved Palmistry content is excluded from the build
         working-directory: apps/web
         run: node scripts/check-palmistry-bundle.js
+  mcp-server:
+    # AURA-MCP-01-M1 -- local stdio MCP server (apps/mcp). Runs its protocol,
+    # validation, Timing Search parity and isolation suites. Deliberately no
+    # path filter: the server compiles shared apps/web/lib and packages/*
+    # Timing Search/Panchangam code into its build, so any change there must
+    # re-run parity. No secrets, no database, no migrations, no deployment.
+    name: MCP Server
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+      - name: Install MCP deps (lockfile)
+        working-directory: apps/mcp
+        run: npm ci
+      - name: Build and test MCP server
+        working-directory: apps/mcp
+        run: npm test
   db-migration-validation:
     # Database Migration Baseline Reconciliation V1 (PR A) -- proves the
     # complete repository migration chain (apps/web/prisma/migrations/,
