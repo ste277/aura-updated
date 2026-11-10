@@ -44,3 +44,21 @@ else
 fi
 
 next build
+
+# AURA-PALM-01-P4 -- Palmistry publication guard for EVERY Vercel build
+# (Preview and Production both run this script: Vercel's project has no custom
+# build command, so it runs this package's `vercel-build` script).
+#
+# While packages/palmistry/src/review-status.json is not exactly "APPROVED",
+# the build swaps the Palmistry module tree for an empty stand-in
+# (palmistry-build-exclusion.js). This scanner then proves it: it inspects
+# the artifacts `next build` just produced (.next/static, .next/server,
+# .next/standalone -- next build clears its own output dir, except .next/cache,
+# before compiling, so nothing stale is scanned) and exits non-zero if any
+# unpublished-content sentinel is present, if no build output exists, or if
+# the approval file is missing/unreadable. Under `set -e` a non-zero exit
+# fails this script, so Vercel fails the build and the deployment is never
+# promoted. Do NOT append `|| true` or otherwise swallow its exit code.
+SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+echo "[vercel-build] verifying no unapproved Palmistry content is in the build..."
+node "$SCRIPT_DIR/check-palmistry-bundle.js"

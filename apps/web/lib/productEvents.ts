@@ -69,7 +69,8 @@ export type ProductEventName =
   | 'PERSONALIZATION_PREFERENCES_UPDATED'
   | 'GOAL_DECOMPOSITION_SHOWN'
   | 'GOAL_DECOMPOSITION_CONFIRMED'
-  | 'GOAL_DECOMPOSITION_CREATE_FAILED';
+  | 'GOAL_DECOMPOSITION_CREATE_FAILED'
+  | 'PALMISTRY_GUIDE_OPENED';
 
 export const PRODUCT_EVENT_NAMES: ProductEventName[] = [
   'AURA_HOME_VIEWED',
@@ -125,6 +126,7 @@ export const PRODUCT_EVENT_NAMES: ProductEventName[] = [
   'GOAL_DECOMPOSITION_SHOWN',
   'GOAL_DECOMPOSITION_CONFIRMED',
   'GOAL_DECOMPOSITION_CREATE_FAILED',
+  'PALMISTRY_GUIDE_OPENED',
 ];
 
 export function isProductEventName(value: string): value is ProductEventName {
@@ -265,6 +267,13 @@ export const CLIENT_TRACKED_EVENTS: ReadonlySet<ProductEventName> = new Set<Prod
   'GOAL_DECOMPOSITION_SHOWN',
   'GOAL_DECOMPOSITION_CONFIRMED',
   'GOAL_DECOMPOSITION_CREATE_FAILED',
+  // AURA-PALM-01-I1 -- educational Explore -> Palmistry guide. A UI intent
+  // signal with no server-side moment (the guide is static, bundled content
+  // with no API); fires from page.tsx's own per-tab effect, same convention
+  // as PANCHANG_CALENDAR_VIEWED, with NO metadata. Per-feature selections
+  // are deliberately not tracked: a per-user log of which entries someone
+  // read would be a profile built from selections.
+  'PALMISTRY_GUIDE_OPENED',
 ]);
 
 // Fields that must NEVER appear in ProductEvent.metadata, under any event,
@@ -680,6 +689,7 @@ const EVENT_METADATA_SCHEMAS: Record<ProductEventName, Record<string, FieldSchem
     errorCategory: { type: 'enum', values: GOAL_CREATE_ERROR_CATEGORY_VALUES },
     matchSource: { type: 'enum', values: GOAL_MATCH_SOURCE_VALUES },
   },
+  PALMISTRY_GUIDE_OPENED: {},
 };
 
 export type ProductEventMetadataValue = string | number | boolean;

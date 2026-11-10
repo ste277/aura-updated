@@ -182,6 +182,20 @@ jobs:
       # it also has to run after "Install web deps".
       - name: Run product events validation test
         run: npx ts-node test/productEvents.test.ts
+      # AURA-PALM-01-I1 -- educational Palmistry guide. The content test
+      # imports apps/web/lib/productEvents.ts (analytics enum checks), so it
+      # also needs apps/web/node_modules; the jsdom test mounts ExploreView
+      # and PalmistryView with the shared harness (tsconfig.jsdom-tests.json).
+      - name: Run Palmistry content, privacy and isolation test
+        run: npx ts-node test/palm01I1Content.test.ts
+      - name: Run Palmistry Explore + guide component test
+        run: npx ts-node --project tsconfig.jsdom-tests.json test/palm01I1ExploreJsdom.test.ts
+      # AURA-PALM-01-P4 -- runs the real apps/web/scripts/vercel-build.sh (what
+      # Vercel executes for Preview and Production) in an isolated temp tree
+      # with fake next/npx, proving the Palmistry bundle scanner runs after
+      # the build and that its failure fails the build. No deploy/credentials.
+      - name: Run Palmistry Vercel build guard test
+        run: npx ts-node test/palm01P4VercelGuard.test.ts
       # Goals V2 Candidate A1 -- goalDemandCandidates.ts imports apps/web/lib/db.ts
       # (for its `pg` dependency), same apps/web/node_modules requirement as
       # the Aura Moment/product events tests above.
@@ -665,6 +679,13 @@ jobs:
           DATABASE_URL: postgresql://user:pass@localhost:5432/placeholder
           AUTH_SECRET: ci-placeholder-secret-not-for-production
         run: npm run build
+      # AURA-PALM-01-P1 -- while Palmistry content awaits qualified human
+      # approval, the production build must contain none of it (build-level
+      # exclusion, apps/web/palmistry-build-exclusion.js). Fails on any
+      # sentinel string from the unapproved content.
+      - name: Verify unapproved Palmistry content is excluded from the build
+        working-directory: apps/web
+        run: node scripts/check-palmistry-bundle.js
   mcp-server:
     # AURA-MCP-01-M1 -- local stdio MCP server (apps/mcp). Runs its protocol,
     # validation, Timing Search parity and isolation suites. Deliberately no
