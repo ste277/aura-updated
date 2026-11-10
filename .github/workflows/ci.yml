@@ -11,10 +11,10 @@ jobs:
     name: Ephemeris / panchang tests
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+      - uses: actions/checkout@v5
+      - uses: actions/setup-node@v5
         with:
-          node-version: 20
+          node-version: 24
       - name: Install root deps
         run: npm install
       - name: Run ephemeris test
@@ -667,10 +667,10 @@ jobs:
     name: Next.js production build
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+      - uses: actions/checkout@v5
+      - uses: actions/setup-node@v5
         with:
-          node-version: 20
+          node-version: 24
       - name: Install root deps
         run: npm install
       - name: Install web deps
@@ -703,8 +703,30 @@ jobs:
     permissions:
       contents: read
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+      - uses: actions/checkout@v5
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 24
+      - name: Install MCP deps (lockfile)
+        working-directory: apps/mcp
+        run: npm ci
+      - name: Build and test MCP server
+        working-directory: apps/mcp
+        run: npm test
+  mcp-server-node20-compat:
+    # AURA-MCP-02-I1.5-B -- transitional compatibility evidence only. Node 24
+    # is the supported runtime (the required "MCP Server" check above runs on
+    # it); apps/mcp still declares engines >=20 for local stdio users, so this
+    # job proves that floor until it is deliberately raised. A separate job
+    # (not a matrix) keeps the required check name "MCP Server" byte-identical
+    # for branch protection. Not a required check.
+    name: MCP Server (Node 20 compatibility)
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-node@v5
         with:
           node-version: 20
       - name: Install MCP deps (lockfile)
@@ -745,10 +767,10 @@ jobs:
       # Disposable CI-only database -- never production, never Vercel/Neon.
       DATABASE_URL: postgresql://aura_ci:aura_ci@localhost:5432/aura_ci
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+      - uses: actions/checkout@v5
+      - uses: actions/setup-node@v5
         with:
-          node-version: 20
+          node-version: 24
       - name: Install web deps
         working-directory: apps/web
         run: npm install
@@ -836,10 +858,10 @@ jobs:
     env:
       DATABASE_URL: postgresql://aura_ci:aura_ci@localhost:5432/aura_ci
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+      - uses: actions/checkout@v5
+      - uses: actions/setup-node@v5
         with:
-          node-version: 20
+          node-version: 24
       - name: Install root deps
         run: npm install
       - name: Install web deps
