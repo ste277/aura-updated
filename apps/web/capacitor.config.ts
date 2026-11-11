@@ -8,7 +8,9 @@ import type { CapacitorConfig } from '@capacitor/cli';
 //   dev, Android emulator:   CAP_SERVER_URL=http://10.0.2.2:3000  (emulator's
 //                            alias for the host machine's localhost)
 //   dev, physical device:    CAP_SERVER_URL=http://<your-mac-lan-ip>:3000
-//   production:              CAP_SERVER_URL=https://<railway-app-url>
+//   production:              CAP_SERVER_URL=https://aura.voyforge.com  (vf-1 --
+//                            see deploy/README.md's "Mobile shells" section;
+//                            this is NOT the Vercel web deployment)
 const serverUrl = process.env.CAP_SERVER_URL ?? 'http://localhost:3000';
 
 const config: CapacitorConfig = {
