@@ -1,0 +1,37 @@
+{
+ "id": "R1.5-coverage-contract-quick",
+ "official": false,
+ "requireReverify": "all",
+ "identity": "R1_5_EXPECTED_IDENTITY.json",
+ "note": "Single quick campaign (seed 7, target 300, --quick) used by the differential-mode negative controls. Same rules as the official contract except that a quick report is allowed.",
+ "campaigns": [
+  {
+   "id": "random-7",
+   "kind": "random",
+   "seed": 7,
+   "target": 300,
+   "generator": "mulberry32/v1 (uint32 state, integer arithmetic, period 2^32; unchanged from R1.3)",
+   "minCanonicalDistinct": 300,
+   "minEligible": 300,
+   "minOrientationComparisons": 4000,
+   "minOutcome": {
+    "outcomeRelevantTies": 15,
+    "abstentionTies": 12,
+    "tierLoweredTies": 3,
+    "candidateRankTies": 12,
+    "r11DisagreementCases": 20,
+    "competingConflicts": 20,
+    "validityBoundaryInvalid": 5
+   },
+   "requiredChecks": [
+    "oracleSelfTest",
+    "distinctAudit",
+    "targetReached",
+    "variantCoverage",
+    "tieClassificationConsistency",
+    "noViolations",
+    "reversalInvariant"
+   ]
+  }
+ ]
+}

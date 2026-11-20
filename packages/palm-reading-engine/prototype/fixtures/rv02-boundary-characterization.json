@@ -1,0 +1,962 @@
+[
+  {
+    "family": "F-PTC-SLOPE",
+    "boundary": 0.05,
+    "margin": 0.015,
+    "probes": {
+      "B-m-1e-6": {
+        "value": 0.034999,
+        "variants": [
+          "P-PTC-STRAIGHT"
+        ],
+        "ambiguous": false
+      },
+      "B-m": {
+        "value": 0.035,
+        "variants": [
+          "P-PTC-STRAIGHT",
+          "P-PTC-BALANCED"
+        ],
+        "ambiguous": true
+      },
+      "B-m+1e-6": {
+        "value": 0.035001000000000004,
+        "variants": [
+          "P-PTC-STRAIGHT",
+          "P-PTC-BALANCED"
+        ],
+        "ambiguous": true
+      },
+      "B-1e-6": {
+        "value": 0.049999,
+        "variants": [
+          "P-PTC-STRAIGHT",
+          "P-PTC-BALANCED"
+        ],
+        "ambiguous": true
+      },
+      "B": {
+        "value": 0.05,
+        "variants": [
+          "P-PTC-STRAIGHT",
+          "P-PTC-BALANCED"
+        ],
+        "ambiguous": true
+      },
+      "B+1e-6": {
+        "value": 0.050001000000000004,
+        "variants": [
+          "P-PTC-STRAIGHT",
+          "P-PTC-BALANCED"
+        ],
+        "ambiguous": true
+      },
+      "B+m-1e-6": {
+        "value": 0.064999,
+        "variants": [
+          "P-PTC-STRAIGHT",
+          "P-PTC-BALANCED"
+        ],
+        "ambiguous": true
+      },
+      "B+m": {
+        "value": 0.065,
+        "variants": [
+          "P-PTC-BALANCED"
+        ],
+        "ambiguous": false
+      },
+      "B+m+1e-6": {
+        "value": 0.065001,
+        "variants": [
+          "P-PTC-BALANCED"
+        ],
+        "ambiguous": false
+      }
+    }
+  },
+  {
+    "family": "F-PTC-SLOPE",
+    "boundary": 0.11,
+    "margin": 0.015,
+    "probes": {
+      "B-m-1e-6": {
+        "value": 0.094999,
+        "variants": [
+          "P-PTC-BALANCED"
+        ],
+        "ambiguous": false
+      },
+      "B-m": {
+        "value": 0.095,
+        "variants": [
+          "P-PTC-BALANCED",
+          "P-PTC-SLOPING"
+        ],
+        "ambiguous": true
+      },
+      "B-m+1e-6": {
+        "value": 0.095001,
+        "variants": [
+          "P-PTC-BALANCED",
+          "P-PTC-SLOPING"
+        ],
+        "ambiguous": true
+      },
+      "B-1e-6": {
+        "value": 0.109999,
+        "variants": [
+          "P-PTC-BALANCED",
+          "P-PTC-SLOPING"
+        ],
+        "ambiguous": true
+      },
+      "B": {
+        "value": 0.11,
+        "variants": [
+          "P-PTC-BALANCED",
+          "P-PTC-SLOPING"
+        ],
+        "ambiguous": true
+      },
+      "B+1e-6": {
+        "value": 0.110001,
+        "variants": [
+          "P-PTC-BALANCED",
+          "P-PTC-SLOPING"
+        ],
+        "ambiguous": true
+      },
+      "B+m-1e-6": {
+        "value": 0.124999,
+        "variants": [
+          "P-PTC-BALANCED",
+          "P-PTC-SLOPING"
+        ],
+        "ambiguous": true
+      },
+      "B+m": {
+        "value": 0.125,
+        "variants": [
+          "P-PTC-SLOPING"
+        ],
+        "ambiguous": false
+      },
+      "B+m+1e-6": {
+        "value": 0.125001,
+        "variants": [
+          "P-PTC-SLOPING"
+        ],
+        "ambiguous": false
+      }
+    }
+  },
+  {
+    "family": "F-PTC-LENGTH",
+    "boundary": 0.5,
+    "margin": 0.03,
+    "probes": {
+      "B-m-1e-6": {
+        "value": 0.469999,
+        "variants": [
+          "P-PTC-SHORT"
+        ],
+        "ambiguous": false
+      },
+      "B-m": {
+        "value": 0.47,
+        "variants": [
+          "P-PTC-SHORT"
+        ],
+        "ambiguous": false
+      },
+      "B-m+1e-6": {
+        "value": 0.47000099999999995,
+        "variants": [
+          "P-PTC-SHORT"
+        ],
+        "ambiguous": true
+      },
+      "B-1e-6": {
+        "value": 0.499999,
+        "variants": [
+          "P-PTC-SHORT"
+        ],
+        "ambiguous": true
+      },
+      "B": {
+        "value": 0.5,
+        "variants": [
+          "P-PTC-SHORT"
+        ],
+        "ambiguous": true
+      },
+      "B+1e-6": {
+        "value": 0.500001,
+        "variants": [
+          "P-PTC-SHORT"
+        ],
+        "ambiguous": true
+      },
+      "B+m-1e-6": {
+        "value": 0.529999,
+        "variants": [
+          "P-PTC-SHORT"
+        ],
+        "ambiguous": true
+      },
+      "B+m": {
+        "value": 0.53,
+        "variants": [],
+        "ambiguous": false
+      },
+      "B+m+1e-6": {
+        "value": 0.530001,
+        "variants": [],
+        "ambiguous": false
+      }
+    }
+  },
+  {
+    "family": "F-PTC-LENGTH",
+    "boundary": 0.7,
+    "margin": 0.03,
+    "probes": {
+      "B-m-1e-6": {
+        "value": 0.6699989999999999,
+        "variants": [],
+        "ambiguous": false
+      },
+      "B-m": {
+        "value": 0.6699999999999999,
+        "variants": [],
+        "ambiguous": false
+      },
+      "B-m+1e-6": {
+        "value": 0.670001,
+        "variants": [
+          "P-PTC-LONG"
+        ],
+        "ambiguous": true
+      },
+      "B-1e-6": {
+        "value": 0.6999989999999999,
+        "variants": [
+          "P-PTC-LONG"
+        ],
+        "ambiguous": true
+      },
+      "B": {
+        "value": 0.7,
+        "variants": [
+          "P-PTC-LONG"
+        ],
+        "ambiguous": true
+      },
+      "B+1e-6": {
+        "value": 0.700001,
+        "variants": [
+          "P-PTC-LONG"
+        ],
+        "ambiguous": true
+      },
+      "B+m-1e-6": {
+        "value": 0.729999,
+        "variants": [
+          "P-PTC-LONG"
+        ],
+        "ambiguous": true
+      },
+      "B+m": {
+        "value": 0.73,
+        "variants": [
+          "P-PTC-LONG"
+        ],
+        "ambiguous": false
+      },
+      "B+m+1e-6": {
+        "value": 0.730001,
+        "variants": [
+          "P-PTC-LONG"
+        ],
+        "ambiguous": false
+      }
+    }
+  },
+  {
+    "family": "F-DTC-RISE",
+    "boundary": 0.05,
+    "margin": 0.015,
+    "probes": {
+      "B-m-1e-6": {
+        "value": 0.034999,
+        "variants": [
+          "R-DTC-STRAIGHT"
+        ],
+        "ambiguous": false
+      },
+      "B-m": {
+        "value": 0.035,
+        "variants": [
+          "R-DTC-STRAIGHT",
+          "R-DTC-GENTLE"
+        ],
+        "ambiguous": true
+      },
+      "B-m+1e-6": {
+        "value": 0.035001000000000004,
+        "variants": [
+          "R-DTC-STRAIGHT",
+          "R-DTC-GENTLE"
+        ],
+        "ambiguous": true
+      },
+      "B-1e-6": {
+        "value": 0.049999,
+        "variants": [
+          "R-DTC-STRAIGHT",
+          "R-DTC-GENTLE"
+        ],
+        "ambiguous": true
+      },
+      "B": {
+        "value": 0.05,
+        "variants": [
+          "R-DTC-STRAIGHT",
+          "R-DTC-GENTLE"
+        ],
+        "ambiguous": true
+      },
+      "B+1e-6": {
+        "value": 0.050001000000000004,
+        "variants": [
+          "R-DTC-STRAIGHT",
+          "R-DTC-GENTLE"
+        ],
+        "ambiguous": true
+      },
+      "B+m-1e-6": {
+        "value": 0.064999,
+        "variants": [
+          "R-DTC-STRAIGHT",
+          "R-DTC-GENTLE"
+        ],
+        "ambiguous": true
+      },
+      "B+m": {
+        "value": 0.065,
+        "variants": [
+          "R-DTC-GENTLE"
+        ],
+        "ambiguous": false
+      },
+      "B+m+1e-6": {
+        "value": 0.065001,
+        "variants": [
+          "R-DTC-GENTLE"
+        ],
+        "ambiguous": false
+      }
+    }
+  },
+  {
+    "family": "F-DTC-RISE",
+    "boundary": 0.1,
+    "margin": 0.015,
+    "probes": {
+      "B-m-1e-6": {
+        "value": 0.084999,
+        "variants": [
+          "R-DTC-GENTLE"
+        ],
+        "ambiguous": false
+      },
+      "B-m": {
+        "value": 0.085,
+        "variants": [
+          "R-DTC-GENTLE",
+          "R-DTC-RISING"
+        ],
+        "ambiguous": true
+      },
+      "B-m+1e-6": {
+        "value": 0.08500100000000001,
+        "variants": [
+          "R-DTC-GENTLE",
+          "R-DTC-RISING"
+        ],
+        "ambiguous": true
+      },
+      "B-1e-6": {
+        "value": 0.099999,
+        "variants": [
+          "R-DTC-GENTLE",
+          "R-DTC-RISING"
+        ],
+        "ambiguous": true
+      },
+      "B": {
+        "value": 0.1,
+        "variants": [
+          "R-DTC-GENTLE",
+          "R-DTC-RISING"
+        ],
+        "ambiguous": true
+      },
+      "B+1e-6": {
+        "value": 0.100001,
+        "variants": [
+          "R-DTC-GENTLE",
+          "R-DTC-RISING"
+        ],
+        "ambiguous": true
+      },
+      "B+m-1e-6": {
+        "value": 0.114999,
+        "variants": [
+          "R-DTC-GENTLE",
+          "R-DTC-RISING"
+        ],
+        "ambiguous": true
+      },
+      "B+m": {
+        "value": 0.115,
+        "variants": [
+          "R-DTC-RISING"
+        ],
+        "ambiguous": false
+      },
+      "B+m+1e-6": {
+        "value": 0.115001,
+        "variants": [
+          "R-DTC-RISING"
+        ],
+        "ambiguous": false
+      }
+    }
+  },
+  {
+    "family": "F-DTC-BRANCHES",
+    "boundary": 2,
+    "margin": 0,
+    "probes": {
+      "B-m-1e-6": {
+        "value": 1.999999,
+        "variants": [],
+        "ambiguous": false
+      },
+      "B-m": {
+        "value": 2,
+        "variants": [
+          "R-DTC-BRANCHED"
+        ],
+        "ambiguous": false
+      },
+      "B-m+1e-6": {
+        "value": 2.000001,
+        "variants": [
+          "R-DTC-BRANCHED"
+        ],
+        "ambiguous": false
+      },
+      "B-1e-6": {
+        "value": 1.999999,
+        "variants": [],
+        "ambiguous": false
+      },
+      "B": {
+        "value": 2,
+        "variants": [
+          "R-DTC-BRANCHED"
+        ],
+        "ambiguous": false
+      },
+      "B+1e-6": {
+        "value": 2.000001,
+        "variants": [
+          "R-DTC-BRANCHED"
+        ],
+        "ambiguous": false
+      },
+      "B+m-1e-6": {
+        "value": 1.999999,
+        "variants": [],
+        "ambiguous": false
+      },
+      "B+m": {
+        "value": 2,
+        "variants": [
+          "R-DTC-BRANCHED"
+        ],
+        "ambiguous": false
+      },
+      "B+m+1e-6": {
+        "value": 2.000001,
+        "variants": [
+          "R-DTC-BRANCHED"
+        ],
+        "ambiguous": false
+      }
+    }
+  },
+  {
+    "family": "F-PTC-TC-ORIGIN",
+    "boundary": 0.05,
+    "margin": 0.01,
+    "probes": {
+      "B-m-1e-6": {
+        "value": 0.039999,
+        "variants": [
+          "C-ORIGIN-JOINED"
+        ],
+        "ambiguous": false
+      },
+      "B-m": {
+        "value": 0.04,
+        "variants": [
+          "C-ORIGIN-JOINED"
+        ],
+        "ambiguous": false
+      },
+      "B-m+1e-6": {
+        "value": 0.040001,
+        "variants": [
+          "C-ORIGIN-JOINED"
+        ],
+        "ambiguous": true
+      },
+      "B-1e-6": {
+        "value": 0.049999,
+        "variants": [
+          "C-ORIGIN-JOINED"
+        ],
+        "ambiguous": true
+      },
+      "B": {
+        "value": 0.05,
+        "variants": [
+          "C-ORIGIN-JOINED"
+        ],
+        "ambiguous": true
+      },
+      "B+1e-6": {
+        "value": 0.050001000000000004,
+        "variants": [
+          "C-ORIGIN-JOINED"
+        ],
+        "ambiguous": true
+      },
+      "B+m-1e-6": {
+        "value": 0.059999000000000004,
+        "variants": [
+          "C-ORIGIN-JOINED"
+        ],
+        "ambiguous": true
+      },
+      "B+m": {
+        "value": 0.060000000000000005,
+        "variants": [],
+        "ambiguous": false
+      },
+      "B+m+1e-6": {
+        "value": 0.060001000000000006,
+        "variants": [],
+        "ambiguous": false
+      }
+    }
+  },
+  {
+    "family": "F-PTC-TC-ORIGIN",
+    "boundary": 0.1,
+    "margin": 0.01,
+    "probes": {
+      "B-m-1e-6": {
+        "value": 0.08999900000000001,
+        "variants": [],
+        "ambiguous": false
+      },
+      "B-m": {
+        "value": 0.09000000000000001,
+        "variants": [
+          "C-ORIGIN-SEPARATE"
+        ],
+        "ambiguous": true
+      },
+      "B-m+1e-6": {
+        "value": 0.09000100000000001,
+        "variants": [
+          "C-ORIGIN-SEPARATE"
+        ],
+        "ambiguous": true
+      },
+      "B-1e-6": {
+        "value": 0.099999,
+        "variants": [
+          "C-ORIGIN-SEPARATE"
+        ],
+        "ambiguous": true
+      },
+      "B": {
+        "value": 0.1,
+        "variants": [
+          "C-ORIGIN-SEPARATE"
+        ],
+        "ambiguous": true
+      },
+      "B+1e-6": {
+        "value": 0.100001,
+        "variants": [
+          "C-ORIGIN-SEPARATE"
+        ],
+        "ambiguous": true
+      },
+      "B+m-1e-6": {
+        "value": 0.109999,
+        "variants": [
+          "C-ORIGIN-SEPARATE"
+        ],
+        "ambiguous": true
+      },
+      "B+m": {
+        "value": 0.11,
+        "variants": [
+          "C-ORIGIN-SEPARATE"
+        ],
+        "ambiguous": true
+      },
+      "B+m+1e-6": {
+        "value": 0.110001,
+        "variants": [
+          "C-ORIGIN-SEPARATE"
+        ],
+        "ambiguous": false
+      }
+    }
+  },
+  {
+    "family": "F-PTC-FORK",
+    "boundary": 1,
+    "margin": 0,
+    "probes": {
+      "B-m-1e-6": {
+        "value": 0.999999,
+        "variants": [],
+        "ambiguous": false
+      },
+      "B-m": {
+        "value": 1,
+        "variants": [
+          "C-PTC-FORK"
+        ],
+        "ambiguous": false
+      },
+      "B-m+1e-6": {
+        "value": 1.000001,
+        "variants": [
+          "C-PTC-FORK"
+        ],
+        "ambiguous": false
+      },
+      "B-1e-6": {
+        "value": 0.999999,
+        "variants": [],
+        "ambiguous": false
+      },
+      "B": {
+        "value": 1,
+        "variants": [
+          "C-PTC-FORK"
+        ],
+        "ambiguous": false
+      },
+      "B+1e-6": {
+        "value": 1.000001,
+        "variants": [
+          "C-PTC-FORK"
+        ],
+        "ambiguous": false
+      },
+      "B+m-1e-6": {
+        "value": 0.999999,
+        "variants": [],
+        "ambiguous": false
+      },
+      "B+m": {
+        "value": 1,
+        "variants": [
+          "C-PTC-FORK"
+        ],
+        "ambiguous": false
+      },
+      "B+m+1e-6": {
+        "value": 1.000001,
+        "variants": [
+          "C-PTC-FORK"
+        ],
+        "ambiguous": false
+      }
+    }
+  },
+  {
+    "family": "F-CENTRAL-LONGITUDINAL",
+    "boundary": 0.35,
+    "margin": 0.03,
+    "probes": {
+      "B-m-1e-6": {
+        "value": 0.319999,
+        "variants": [],
+        "ambiguous": false
+      },
+      "B-m": {
+        "value": 0.31999999999999995,
+        "variants": [],
+        "ambiguous": false
+      },
+      "B-m+1e-6": {
+        "value": 0.3200009999999999,
+        "variants": [
+          "C-FATE-PRESENT"
+        ],
+        "ambiguous": true
+      },
+      "B-1e-6": {
+        "value": 0.349999,
+        "variants": [
+          "C-FATE-PRESENT"
+        ],
+        "ambiguous": true
+      },
+      "B": {
+        "value": 0.35,
+        "variants": [
+          "C-FATE-PRESENT"
+        ],
+        "ambiguous": true
+      },
+      "B+1e-6": {
+        "value": 0.35000099999999995,
+        "variants": [
+          "C-FATE-PRESENT"
+        ],
+        "ambiguous": true
+      },
+      "B+m-1e-6": {
+        "value": 0.37999900000000003,
+        "variants": [
+          "C-FATE-PRESENT"
+        ],
+        "ambiguous": true
+      },
+      "B+m": {
+        "value": 0.38,
+        "variants": [
+          "C-FATE-PRESENT"
+        ],
+        "ambiguous": false
+      },
+      "B+m+1e-6": {
+        "value": 0.380001,
+        "variants": [
+          "C-FATE-PRESENT"
+        ],
+        "ambiguous": false
+      }
+    }
+  },
+  {
+    "family": "F-TC-ARC",
+    "boundary": 0.3,
+    "margin": 0.02,
+    "probes": {
+      "B-m-1e-6": {
+        "value": 0.279999,
+        "variants": [
+          "L-TC-NARROW"
+        ],
+        "ambiguous": false
+      },
+      "B-m": {
+        "value": 0.27999999999999997,
+        "variants": [
+          "L-TC-NARROW"
+        ],
+        "ambiguous": false
+      },
+      "B-m+1e-6": {
+        "value": 0.28000099999999994,
+        "variants": [
+          "L-TC-NARROW"
+        ],
+        "ambiguous": true
+      },
+      "B-1e-6": {
+        "value": 0.299999,
+        "variants": [
+          "L-TC-NARROW"
+        ],
+        "ambiguous": true
+      },
+      "B": {
+        "value": 0.3,
+        "variants": [
+          "L-TC-NARROW"
+        ],
+        "ambiguous": true
+      },
+      "B+1e-6": {
+        "value": 0.30000099999999996,
+        "variants": [
+          "L-TC-NARROW"
+        ],
+        "ambiguous": true
+      },
+      "B+m-1e-6": {
+        "value": 0.31999900000000003,
+        "variants": [
+          "L-TC-NARROW"
+        ],
+        "ambiguous": true
+      },
+      "B+m": {
+        "value": 0.32,
+        "variants": [],
+        "ambiguous": false
+      },
+      "B+m+1e-6": {
+        "value": 0.320001,
+        "variants": [],
+        "ambiguous": false
+      }
+    }
+  },
+  {
+    "family": "F-TC-ARC",
+    "boundary": 0.42,
+    "margin": 0.02,
+    "probes": {
+      "B-m-1e-6": {
+        "value": 0.399999,
+        "variants": [],
+        "ambiguous": false
+      },
+      "B-m": {
+        "value": 0.39999999999999997,
+        "variants": [],
+        "ambiguous": false
+      },
+      "B-m+1e-6": {
+        "value": 0.40000099999999994,
+        "variants": [
+          "L-TC-WIDE"
+        ],
+        "ambiguous": true
+      },
+      "B-1e-6": {
+        "value": 0.419999,
+        "variants": [
+          "L-TC-WIDE"
+        ],
+        "ambiguous": true
+      },
+      "B": {
+        "value": 0.42,
+        "variants": [
+          "L-TC-WIDE"
+        ],
+        "ambiguous": true
+      },
+      "B+1e-6": {
+        "value": 0.42000099999999996,
+        "variants": [
+          "L-TC-WIDE"
+        ],
+        "ambiguous": true
+      },
+      "B+m-1e-6": {
+        "value": 0.43999900000000003,
+        "variants": [
+          "L-TC-WIDE"
+        ],
+        "ambiguous": true
+      },
+      "B+m": {
+        "value": 0.44,
+        "variants": [
+          "L-TC-WIDE"
+        ],
+        "ambiguous": false
+      },
+      "B+m+1e-6": {
+        "value": 0.440001,
+        "variants": [
+          "L-TC-WIDE"
+        ],
+        "ambiguous": false
+      }
+    }
+  },
+  {
+    "family": "F-TC-BREAKS",
+    "boundary": 1,
+    "margin": 0,
+    "probes": {
+      "B-m-1e-6": {
+        "value": 0.999999,
+        "variants": [],
+        "ambiguous": false
+      },
+      "B-m": {
+        "value": 1,
+        "variants": [
+          "L-TC-CHAPTERS"
+        ],
+        "ambiguous": false
+      },
+      "B-m+1e-6": {
+        "value": 1.000001,
+        "variants": [
+          "L-TC-CHAPTERS"
+        ],
+        "ambiguous": false
+      },
+      "B-1e-6": {
+        "value": 0.999999,
+        "variants": [],
+        "ambiguous": false
+      },
+      "B": {
+        "value": 1,
+        "variants": [
+          "L-TC-CHAPTERS"
+        ],
+        "ambiguous": false
+      },
+      "B+1e-6": {
+        "value": 1.000001,
+        "variants": [
+          "L-TC-CHAPTERS"
+        ],
+        "ambiguous": false
+      },
+      "B+m-1e-6": {
+        "value": 0.999999,
+        "variants": [],
+        "ambiguous": false
+      },
+      "B+m": {
+        "value": 1,
+        "variants": [
+          "L-TC-CHAPTERS"
+        ],
+        "ambiguous": false
+      },
+      "B+m+1e-6": {
+        "value": 1.000001,
+        "variants": [
+          "L-TC-CHAPTERS"
+        ],
+        "ambiguous": false
+      }
+    }
+  }
+]

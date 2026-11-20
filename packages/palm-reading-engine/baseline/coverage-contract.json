@@ -1,0 +1,179 @@
+{
+ "id": "R1.5-coverage-contract",
+ "official": true,
+ "requireReverify": "all",
+ "identity": "R1_5_EXPECTED_IDENTITY.json",
+ "note": "Official R1.5 contract. Authority = re-execution: every campaign is regenerated from the seed bound here (or the fixture set named here) and every record is re-evaluated by both frozen engines with the independent oracle; self-reported fields must be present and consistent but are never sufficient. Floors apply to RECORD-DERIVED counts. Random floors are below the measured R1.5 values (identical to R1.4 for every R1.4 category; canonical 7,470-7,510; comparisons 109,567-111,962; outcome-relevant 501-512; abstentions 417-438; tier-lowered 77-93; candidate-rank 429-457; R1.1 disagreements 694-747; competing conflicts 881-913; validity rejections 246-279); minEligible equals the target. Fixture floors equal the exact deterministic counts. G6-I1 adds fixtures-adapter: the frozen D1 synthetic detector output and synthetic-score/synthetic-identity variants passed through adapter/feature-adapter.mjs live; floors equal the exact deterministic counts.",
+ "campaigns": [
+  {
+   "id": "random-1119",
+   "kind": "random",
+   "seed": 1119,
+   "target": 6000,
+   "generator": "mulberry32/v1 (uint32 state, integer arithmetic, period 2^32; unchanged from R1.3)",
+   "requiredChecks": [
+    "oracleSelfTest",
+    "distinctAudit",
+    "targetReached",
+    "variantCoverage",
+    "tieClassificationConsistency",
+    "noViolations",
+    "reversalInvariant"
+   ],
+   "minCanonicalDistinct": 6000,
+   "minEligible": 6000,
+   "minOrientationComparisons": 100000,
+   "minOutcome": {
+    "outcomeRelevantTies": 400,
+    "abstentionTies": 350,
+    "tierLoweredTies": 60,
+    "candidateRankTies": 350,
+    "r11DisagreementCases": 600,
+    "competingConflicts": 800,
+    "validityBoundaryInvalid": 200
+   }
+  },
+  {
+   "id": "random-2026",
+   "kind": "random",
+   "seed": 2026,
+   "target": 6000,
+   "generator": "mulberry32/v1 (uint32 state, integer arithmetic, period 2^32; unchanged from R1.3)",
+   "requiredChecks": [
+    "oracleSelfTest",
+    "distinctAudit",
+    "targetReached",
+    "variantCoverage",
+    "tieClassificationConsistency",
+    "noViolations",
+    "reversalInvariant"
+   ],
+   "minCanonicalDistinct": 6000,
+   "minEligible": 6000,
+   "minOrientationComparisons": 100000,
+   "minOutcome": {
+    "outcomeRelevantTies": 400,
+    "abstentionTies": 350,
+    "tierLoweredTies": 60,
+    "candidateRankTies": 350,
+    "r11DisagreementCases": 600,
+    "competingConflicts": 800,
+    "validityBoundaryInvalid": 200
+   }
+  },
+  {
+   "id": "random-77",
+   "kind": "random",
+   "seed": 77,
+   "target": 6000,
+   "generator": "mulberry32/v1 (uint32 state, integer arithmetic, period 2^32; unchanged from R1.3)",
+   "requiredChecks": [
+    "oracleSelfTest",
+    "distinctAudit",
+    "targetReached",
+    "variantCoverage",
+    "tieClassificationConsistency",
+    "noViolations",
+    "reversalInvariant"
+   ],
+   "minCanonicalDistinct": 6000,
+   "minEligible": 6000,
+   "minOrientationComparisons": 100000,
+   "minOutcome": {
+    "outcomeRelevantTies": 400,
+    "abstentionTies": 350,
+    "tierLoweredTies": 60,
+    "candidateRankTies": 350,
+    "r11DisagreementCases": 600,
+    "competingConflicts": 800,
+    "validityBoundaryInvalid": 200
+   }
+  },
+  {
+   "id": "fixtures-boundary",
+   "kind": "fixture",
+   "generator": "constructed fixtures (deterministic; no RNG)",
+   "requiredChecks": [
+    "oracleSelfTest",
+    "distinctAudit",
+    "variantCoverage",
+    "recordedR11MatchesLive",
+    "tieClassificationConsistency",
+    "noViolations",
+    "reversalInvariant"
+   ],
+   "minCanonicalDistinct": 54,
+   "minEligible": 54,
+   "minOrientationComparisons": 490,
+   "minOutcome": {
+    "outcomeRelevantTies": 14,
+    "abstentionTies": 10,
+    "tierLoweredTies": 4,
+    "candidateRankTies": 4,
+    "r11DisagreementCases": 14
+   }
+  },
+  {
+   "id": "fixtures-competing",
+   "kind": "fixture",
+   "generator": "constructed fixtures (deterministic; no RNG)",
+   "requiredChecks": [
+    "oracleSelfTest",
+    "distinctAudit",
+    "variantCoverage",
+    "recordedR11MatchesLive",
+    "tieClassificationConsistency",
+    "noViolations",
+    "reversalInvariant"
+   ],
+   "minCanonicalDistinct": 8,
+   "minEligible": 7,
+   "minOrientationComparisons": 248,
+   "minOutcome": {
+    "abstentionTies": 5,
+    "competingConflicts": 4,
+    "candidateRankTies": 6,
+    "r11DisagreementCases": 6
+   }
+  },
+  {
+   "id": "fixtures-loop",
+   "kind": "fixture",
+   "generator": "constructed fixtures (deterministic; no RNG)",
+   "requiredChecks": [
+    "oracleSelfTest",
+    "distinctAudit",
+    "variantCoverage",
+    "recordedR11MatchesLive",
+    "tieClassificationConsistency",
+    "noViolations",
+    "reversalInvariant"
+   ],
+   "minCanonicalDistinct": 22,
+   "minEligible": 4,
+   "minOrientationComparisons": 170,
+   "minOutcome": {
+    "r11DisagreementCases": 8,
+    "invalidCases": 18
+   }
+  },
+  {
+   "id": "fixtures-adapter",
+   "kind": "fixture",
+   "generator": "constructed fixtures (deterministic; no RNG)",
+   "requiredChecks": [
+    "oracleSelfTest",
+    "distinctAudit",
+    "variantCoverage",
+    "recordedR11MatchesLive",
+    "tieClassificationConsistency",
+    "noViolations",
+    "reversalInvariant"
+   ],
+   "minCanonicalDistinct": 129,
+   "minEligible": 129,
+   "minOrientationComparisons": 364,
+   "minOutcome": {}
+  }
+ ]
+}

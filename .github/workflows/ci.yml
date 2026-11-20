@@ -192,6 +192,12 @@ jobs:
       # imports apps/web/lib/productEvents.ts (analytics enum checks), so it
       # also needs apps/web/node_modules; the jsdom test mounts ExploreView
       # and PalmistryView with the shared harness (tsconfig.jsdom-tests.json).
+      # AURA-PALM-G6-I1 -- fast synthetic engine + adapter tests (zero dependencies,
+      # node:test). The expensive differential campaigns, coverage contract and
+      # mutation suite stay manual (packages/palm-reading-engine/README.md).
+      - name: Run palm reading engine and adapter tests (synthetic, fast)
+        working-directory: packages/palm-reading-engine/prototype
+        run: node --test test/*.test.mjs
       - name: Run Palmistry content, privacy and isolation test
         run: npx ts-node test/palm01I1Content.test.ts
       - name: Run Palmistry Explore + guide component test
@@ -718,6 +724,12 @@ jobs:
       - name: Verify unapproved Palmistry content is excluded from the build
         working-directory: apps/web
         run: node scripts/check-palmistry-bundle.js
+      # AURA-PALM-G6-I1 -- the synthetic palm reading engine and its test-only
+      # detector adapter (packages/palm-reading-engine) must never be bundled;
+      # unconditional, and the sentinels are self-checked against the source.
+      - name: Verify the palm reading engine is excluded from the build
+        working-directory: apps/web
+        run: node scripts/check-palm-engine-bundle.js
   mcp-server:
     # AURA-MCP-01-M1 -- local stdio MCP server (apps/mcp). Runs its protocol,
     # validation, Timing Search parity and isolation suites. Deliberately no

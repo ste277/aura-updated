@@ -1,0 +1,1986 @@
+{
+ "note": "AURA-PALM-G6-D0-R1.5 order-asymmetric loop fixtures (synthetic; built by baseline/build-r1-5-loop-fixtures.mjs). Each is valid in exactly one single point order under the R1.3 single-order validator and must be invalid (tortuous) in every orientation.",
+ "fixtures": [
+  {
+   "id": "L12-hook-canonical-valid-reverse-tortuous",
+   "category": "loop-order-asymmetric",
+   "expect": "invalid-both",
+   "slot": "PTC",
+   "proof": {
+    "canonicalOrderProblem": null,
+    "reversedOrderProblem": "tortuous",
+    "engineProblem": "tortuous",
+    "tortuosityCanonical": 2.000000001,
+    "tortuosityReversed": 2.0000000010000005,
+    "limit": 2.000000001,
+    "method": "derived copy of frozen src/schema.mjs exporting problemInOrder"
+   },
+   "input": {
+    "schema": "aura.palm.features",
+    "schemaVersion": "0.1.0",
+    "synthetic": true,
+    "capture": {
+     "handedness": {
+      "value": "right",
+      "source": "user-declared"
+     },
+     "dominantHand": "right",
+     "orientation": {
+      "rotationDeg": 4,
+      "palmFacing": true
+     },
+     "quality": {
+      "status": "accepted",
+      "issues": []
+     }
+    },
+    "landmarks": {
+     "present": true,
+     "source": {
+      "detector": "synthetic-fixture",
+      "version": "0.1.0"
+     }
+    },
+    "creases": {
+     "source": {
+      "detector": "synthetic-fixture",
+      "version": "0.1.0"
+     },
+     "coordinateFrame": "palm-normalized-v1",
+     "items": [
+      {
+       "id": "c-dtc",
+       "geometry": {
+        "points": [
+         {
+          "x": 0.95,
+          "y": 0.2
+         },
+         {
+          "x": 0.8,
+          "y": 0.19
+         },
+         {
+          "x": 0.65,
+          "y": 0.17
+         },
+         {
+          "x": 0.5,
+          "y": 0.14
+         },
+         {
+          "x": 0.38,
+          "y": 0.1
+         },
+         {
+          "x": 0.3,
+          "y": 0.06
+         }
+        ]
+       },
+       "continuity": {
+        "gapsBridged": 0,
+        "breaks": 0
+       },
+       "branches": [],
+       "detection": {
+        "confidence": 0.9,
+        "confidenceBasis": "synthetic-declared"
+       },
+       "identity": {
+        "anatomicalClass": "DTC",
+        "classConfidence": 0.9,
+        "classSource": "synthetic-declared"
+       }
+      },
+      {
+       "id": "c-ptc",
+       "geometry": {
+        "points": [
+         {
+          "x": 0.3,
+          "y": 0.4
+         },
+         {
+          "x": 0.3148471347214992,
+          "y": 0.40240000000000004
+         },
+         {
+          "x": 0.3383475855810445,
+          "y": 0.4115438334611317
+         },
+         {
+          "x": 0.3692949729815835,
+          "y": 0.43720000000000003
+         },
+         {
+          "x": 0.37779081646440454,
+          "y": 0.47291049219150616
+         },
+         {
+          "x": 0.3562810030308803,
+          "y": 0.508
+         },
+         {
+          "x": 0.3339650043717823,
+          "y": 0.5153215979402034
+         },
+         {
+          "x": 0.3139054916127667,
+          "y": 0.502
+         }
+        ]
+       },
+       "continuity": {
+        "gapsBridged": 0,
+        "breaks": 0
+       },
+       "branches": [],
+       "detection": {
+        "confidence": 0.9,
+        "confidenceBasis": "synthetic-declared"
+       },
+       "identity": {
+        "anatomicalClass": "PTC",
+        "classConfidence": 0.9,
+        "classSource": "synthetic-declared"
+       }
+      },
+      {
+       "id": "c-tc",
+       "geometry": {
+        "points": [
+         {
+          "x": 0.06,
+          "y": 0.34
+         },
+         {
+          "x": 0.18,
+          "y": 0.45
+         },
+         {
+          "x": 0.3,
+          "y": 0.6
+         },
+         {
+          "x": 0.36,
+          "y": 0.75
+         },
+         {
+          "x": 0.34,
+          "y": 0.9
+         },
+         {
+          "x": 0.27,
+          "y": 1.05
+         }
+        ]
+       },
+       "continuity": {
+        "gapsBridged": 0,
+        "breaks": 0
+       },
+       "branches": [],
+       "detection": {
+        "confidence": 0.9,
+        "confidenceBasis": "synthetic-declared"
+       },
+       "identity": {
+        "anatomicalClass": "TC",
+        "classConfidence": 0.9,
+        "classSource": "synthetic-declared"
+       }
+      }
+     ],
+     "expectedButMissing": [],
+     "conflicts": []
+    },
+    "scanConfidence": {
+     "value": 0.9,
+     "basis": "synthetic-declared"
+    }
+   },
+   "r11": [
+    {
+     "mask": 0,
+     "summary": {
+      "valid": true,
+      "items": [
+       [
+        "F-PTC-SLOPE",
+        {
+         "tier": "tentative",
+         "rules": [
+          "P-PTC-BALANCED",
+          "P-PTC-SLOPING"
+         ]
+        }
+       ],
+       [
+        "F-PTC-LENGTH",
+        {
+         "tier": "clear",
+         "rules": [
+          "P-PTC-SHORT"
+         ]
+        }
+       ],
+       [
+        "F-DTC-RISE",
+        {
+         "tier": "clear",
+         "rules": [
+          "R-DTC-RISING"
+         ]
+        }
+       ],
+       [
+        "F-PTC-TC-ORIGIN",
+        {
+         "tier": "clear",
+         "rules": [
+          "C-ORIGIN-SEPARATE"
+         ]
+        }
+       ]
+      ],
+      "declined": [
+       [
+        "F-CENTRAL-LONGITUDINAL",
+        "missing"
+       ]
+      ]
+     }
+    },
+    {
+     "mask": 1,
+     "summary": {
+      "valid": true,
+      "items": [
+       [
+        "F-PTC-SLOPE",
+        {
+         "tier": "tentative",
+         "rules": [
+          "P-PTC-BALANCED",
+          "P-PTC-SLOPING"
+         ]
+        }
+       ],
+       [
+        "F-PTC-LENGTH",
+        {
+         "tier": "clear",
+         "rules": [
+          "P-PTC-SHORT"
+         ]
+        }
+       ],
+       [
+        "F-DTC-RISE",
+        {
+         "tier": "clear",
+         "rules": [
+          "R-DTC-RISING"
+         ]
+        }
+       ],
+       [
+        "F-PTC-TC-ORIGIN",
+        {
+         "tier": "clear",
+         "rules": [
+          "C-ORIGIN-SEPARATE"
+         ]
+        }
+       ]
+      ],
+      "declined": [
+       [
+        "F-CENTRAL-LONGITUDINAL",
+        "missing"
+       ]
+      ]
+     }
+    },
+    {
+     "mask": 2,
+     "summary": {
+      "valid": false,
+      "items": [],
+      "declined": []
+     }
+    },
+    {
+     "mask": 3,
+     "summary": {
+      "valid": false,
+      "items": [],
+      "declined": []
+     }
+    },
+    {
+     "mask": 4,
+     "summary": {
+      "valid": true,
+      "items": [
+       [
+        "F-PTC-SLOPE",
+        {
+         "tier": "tentative",
+         "rules": [
+          "P-PTC-BALANCED",
+          "P-PTC-SLOPING"
+         ]
+        }
+       ],
+       [
+        "F-PTC-LENGTH",
+        {
+         "tier": "clear",
+         "rules": [
+          "P-PTC-SHORT"
+         ]
+        }
+       ],
+       [
+        "F-DTC-RISE",
+        {
+         "tier": "clear",
+         "rules": [
+          "R-DTC-RISING"
+         ]
+        }
+       ],
+       [
+        "F-PTC-TC-ORIGIN",
+        {
+         "tier": "clear",
+         "rules": [
+          "C-ORIGIN-SEPARATE"
+         ]
+        }
+       ]
+      ],
+      "declined": [
+       [
+        "F-CENTRAL-LONGITUDINAL",
+        "missing"
+       ]
+      ]
+     }
+    },
+    {
+     "mask": 5,
+     "summary": {
+      "valid": true,
+      "items": [
+       [
+        "F-PTC-SLOPE",
+        {
+         "tier": "tentative",
+         "rules": [
+          "P-PTC-BALANCED",
+          "P-PTC-SLOPING"
+         ]
+        }
+       ],
+       [
+        "F-PTC-LENGTH",
+        {
+         "tier": "clear",
+         "rules": [
+          "P-PTC-SHORT"
+         ]
+        }
+       ],
+       [
+        "F-DTC-RISE",
+        {
+         "tier": "clear",
+         "rules": [
+          "R-DTC-RISING"
+         ]
+        }
+       ],
+       [
+        "F-PTC-TC-ORIGIN",
+        {
+         "tier": "clear",
+         "rules": [
+          "C-ORIGIN-SEPARATE"
+         ]
+        }
+       ]
+      ],
+      "declined": [
+       [
+        "F-CENTRAL-LONGITUDINAL",
+        "missing"
+       ]
+      ]
+     }
+    },
+    {
+     "mask": 6,
+     "summary": {
+      "valid": false,
+      "items": [],
+      "declined": []
+     }
+    },
+    {
+     "mask": 7,
+     "summary": {
+      "valid": false,
+      "items": [],
+      "declined": []
+     }
+    }
+   ]
+  },
+  {
+   "id": "L13-hook-canonical-valid-reverse-tortuous-supplied-reversed",
+   "category": "loop-order-asymmetric",
+   "expect": "invalid-both",
+   "slot": "PTC",
+   "proof": {
+    "canonicalOrderProblem": null,
+    "reversedOrderProblem": "tortuous",
+    "engineProblem": "tortuous",
+    "tortuosityCanonical": 2.000000001,
+    "tortuosityReversed": 2.0000000010000005,
+    "limit": 2.000000001,
+    "method": "derived copy of frozen src/schema.mjs exporting problemInOrder"
+   },
+   "input": {
+    "schema": "aura.palm.features",
+    "schemaVersion": "0.1.0",
+    "synthetic": true,
+    "capture": {
+     "handedness": {
+      "value": "right",
+      "source": "user-declared"
+     },
+     "dominantHand": "right",
+     "orientation": {
+      "rotationDeg": 4,
+      "palmFacing": true
+     },
+     "quality": {
+      "status": "accepted",
+      "issues": []
+     }
+    },
+    "landmarks": {
+     "present": true,
+     "source": {
+      "detector": "synthetic-fixture",
+      "version": "0.1.0"
+     }
+    },
+    "creases": {
+     "source": {
+      "detector": "synthetic-fixture",
+      "version": "0.1.0"
+     },
+     "coordinateFrame": "palm-normalized-v1",
+     "items": [
+      {
+       "id": "c-dtc",
+       "geometry": {
+        "points": [
+         {
+          "x": 0.95,
+          "y": 0.2
+         },
+         {
+          "x": 0.8,
+          "y": 0.19
+         },
+         {
+          "x": 0.65,
+          "y": 0.17
+         },
+         {
+          "x": 0.5,
+          "y": 0.14
+         },
+         {
+          "x": 0.38,
+          "y": 0.1
+         },
+         {
+          "x": 0.3,
+          "y": 0.06
+         }
+        ]
+       },
+       "continuity": {
+        "gapsBridged": 0,
+        "breaks": 0
+       },
+       "branches": [],
+       "detection": {
+        "confidence": 0.9,
+        "confidenceBasis": "synthetic-declared"
+       },
+       "identity": {
+        "anatomicalClass": "DTC",
+        "classConfidence": 0.9,
+        "classSource": "synthetic-declared"
+       }
+      },
+      {
+       "id": "c-ptc",
+       "geometry": {
+        "points": [
+         {
+          "x": 0.3139054916127667,
+          "y": 0.502
+         },
+         {
+          "x": 0.3339650043717823,
+          "y": 0.5153215979402034
+         },
+         {
+          "x": 0.3562810030308803,
+          "y": 0.508
+         },
+         {
+          "x": 0.37779081646440454,
+          "y": 0.47291049219150616
+         },
+         {
+          "x": 0.3692949729815835,
+          "y": 0.43720000000000003
+         },
+         {
+          "x": 0.3383475855810445,
+          "y": 0.4115438334611317
+         },
+         {
+          "x": 0.3148471347214992,
+          "y": 0.40240000000000004
+         },
+         {
+          "x": 0.3,
+          "y": 0.4
+         }
+        ]
+       },
+       "continuity": {
+        "gapsBridged": 0,
+        "breaks": 0
+       },
+       "branches": [],
+       "detection": {
+        "confidence": 0.9,
+        "confidenceBasis": "synthetic-declared"
+       },
+       "identity": {
+        "anatomicalClass": "PTC",
+        "classConfidence": 0.9,
+        "classSource": "synthetic-declared"
+       }
+      },
+      {
+       "id": "c-tc",
+       "geometry": {
+        "points": [
+         {
+          "x": 0.06,
+          "y": 0.34
+         },
+         {
+          "x": 0.18,
+          "y": 0.45
+         },
+         {
+          "x": 0.3,
+          "y": 0.6
+         },
+         {
+          "x": 0.36,
+          "y": 0.75
+         },
+         {
+          "x": 0.34,
+          "y": 0.9
+         },
+         {
+          "x": 0.27,
+          "y": 1.05
+         }
+        ]
+       },
+       "continuity": {
+        "gapsBridged": 0,
+        "breaks": 0
+       },
+       "branches": [],
+       "detection": {
+        "confidence": 0.9,
+        "confidenceBasis": "synthetic-declared"
+       },
+       "identity": {
+        "anatomicalClass": "TC",
+        "classConfidence": 0.9,
+        "classSource": "synthetic-declared"
+       }
+      }
+     ],
+     "expectedButMissing": [],
+     "conflicts": []
+    },
+    "scanConfidence": {
+     "value": 0.9,
+     "basis": "synthetic-declared"
+    }
+   },
+   "r11": [
+    {
+     "mask": 0,
+     "summary": {
+      "valid": false,
+      "items": [],
+      "declined": []
+     }
+    },
+    {
+     "mask": 1,
+     "summary": {
+      "valid": false,
+      "items": [],
+      "declined": []
+     }
+    },
+    {
+     "mask": 2,
+     "summary": {
+      "valid": true,
+      "items": [
+       [
+        "F-PTC-SLOPE",
+        {
+         "tier": "tentative",
+         "rules": [
+          "P-PTC-BALANCED",
+          "P-PTC-SLOPING"
+         ]
+        }
+       ],
+       [
+        "F-PTC-LENGTH",
+        {
+         "tier": "clear",
+         "rules": [
+          "P-PTC-SHORT"
+         ]
+        }
+       ],
+       [
+        "F-DTC-RISE",
+        {
+         "tier": "clear",
+         "rules": [
+          "R-DTC-RISING"
+         ]
+        }
+       ],
+       [
+        "F-PTC-TC-ORIGIN",
+        {
+         "tier": "clear",
+         "rules": [
+          "C-ORIGIN-SEPARATE"
+         ]
+        }
+       ]
+      ],
+      "declined": [
+       [
+        "F-CENTRAL-LONGITUDINAL",
+        "missing"
+       ]
+      ]
+     }
+    },
+    {
+     "mask": 3,
+     "summary": {
+      "valid": true,
+      "items": [
+       [
+        "F-PTC-SLOPE",
+        {
+         "tier": "tentative",
+         "rules": [
+          "P-PTC-BALANCED",
+          "P-PTC-SLOPING"
+         ]
+        }
+       ],
+       [
+        "F-PTC-LENGTH",
+        {
+         "tier": "clear",
+         "rules": [
+          "P-PTC-SHORT"
+         ]
+        }
+       ],
+       [
+        "F-DTC-RISE",
+        {
+         "tier": "clear",
+         "rules": [
+          "R-DTC-RISING"
+         ]
+        }
+       ],
+       [
+        "F-PTC-TC-ORIGIN",
+        {
+         "tier": "clear",
+         "rules": [
+          "C-ORIGIN-SEPARATE"
+         ]
+        }
+       ]
+      ],
+      "declined": [
+       [
+        "F-CENTRAL-LONGITUDINAL",
+        "missing"
+       ]
+      ]
+     }
+    },
+    {
+     "mask": 4,
+     "summary": {
+      "valid": false,
+      "items": [],
+      "declined": []
+     }
+    },
+    {
+     "mask": 5,
+     "summary": {
+      "valid": false,
+      "items": [],
+      "declined": []
+     }
+    },
+    {
+     "mask": 6,
+     "summary": {
+      "valid": true,
+      "items": [
+       [
+        "F-PTC-SLOPE",
+        {
+         "tier": "tentative",
+         "rules": [
+          "P-PTC-BALANCED",
+          "P-PTC-SLOPING"
+         ]
+        }
+       ],
+       [
+        "F-PTC-LENGTH",
+        {
+         "tier": "clear",
+         "rules": [
+          "P-PTC-SHORT"
+         ]
+        }
+       ],
+       [
+        "F-DTC-RISE",
+        {
+         "tier": "clear",
+         "rules": [
+          "R-DTC-RISING"
+         ]
+        }
+       ],
+       [
+        "F-PTC-TC-ORIGIN",
+        {
+         "tier": "clear",
+         "rules": [
+          "C-ORIGIN-SEPARATE"
+         ]
+        }
+       ]
+      ],
+      "declined": [
+       [
+        "F-CENTRAL-LONGITUDINAL",
+        "missing"
+       ]
+      ]
+     }
+    },
+    {
+     "mask": 7,
+     "summary": {
+      "valid": true,
+      "items": [
+       [
+        "F-PTC-SLOPE",
+        {
+         "tier": "tentative",
+         "rules": [
+          "P-PTC-BALANCED",
+          "P-PTC-SLOPING"
+         ]
+        }
+       ],
+       [
+        "F-PTC-LENGTH",
+        {
+         "tier": "clear",
+         "rules": [
+          "P-PTC-SHORT"
+         ]
+        }
+       ],
+       [
+        "F-DTC-RISE",
+        {
+         "tier": "clear",
+         "rules": [
+          "R-DTC-RISING"
+         ]
+        }
+       ],
+       [
+        "F-PTC-TC-ORIGIN",
+        {
+         "tier": "clear",
+         "rules": [
+          "C-ORIGIN-SEPARATE"
+         ]
+        }
+       ]
+      ],
+      "declined": [
+       [
+        "F-CENTRAL-LONGITUDINAL",
+        "missing"
+       ]
+      ]
+     }
+    }
+   ]
+  },
+  {
+   "id": "L14-hook-canonical-tortuous-reverse-valid",
+   "category": "loop-order-asymmetric",
+   "expect": "invalid-both",
+   "slot": "PTC",
+   "proof": {
+    "canonicalOrderProblem": "tortuous",
+    "reversedOrderProblem": null,
+    "engineProblem": "tortuous",
+    "tortuosityCanonical": 2.0000000010000005,
+    "tortuosityReversed": 2.000000001,
+    "limit": 2.000000001,
+    "method": "derived copy of frozen src/schema.mjs exporting problemInOrder"
+   },
+   "input": {
+    "schema": "aura.palm.features",
+    "schemaVersion": "0.1.0",
+    "synthetic": true,
+    "capture": {
+     "handedness": {
+      "value": "right",
+      "source": "user-declared"
+     },
+     "dominantHand": "right",
+     "orientation": {
+      "rotationDeg": 4,
+      "palmFacing": true
+     },
+     "quality": {
+      "status": "accepted",
+      "issues": []
+     }
+    },
+    "landmarks": {
+     "present": true,
+     "source": {
+      "detector": "synthetic-fixture",
+      "version": "0.1.0"
+     }
+    },
+    "creases": {
+     "source": {
+      "detector": "synthetic-fixture",
+      "version": "0.1.0"
+     },
+     "coordinateFrame": "palm-normalized-v1",
+     "items": [
+      {
+       "id": "c-dtc",
+       "geometry": {
+        "points": [
+         {
+          "x": 0.95,
+          "y": 0.2
+         },
+         {
+          "x": 0.8,
+          "y": 0.19
+         },
+         {
+          "x": 0.65,
+          "y": 0.17
+         },
+         {
+          "x": 0.5,
+          "y": 0.14
+         },
+         {
+          "x": 0.38,
+          "y": 0.1
+         },
+         {
+          "x": 0.3,
+          "y": 0.06
+         }
+        ]
+       },
+       "continuity": {
+        "gapsBridged": 0,
+        "breaks": 0
+       },
+       "branches": [],
+       "detection": {
+        "confidence": 0.9,
+        "confidenceBasis": "synthetic-declared"
+       },
+       "identity": {
+        "anatomicalClass": "DTC",
+        "classConfidence": 0.9,
+        "classSource": "synthetic-declared"
+       }
+      },
+      {
+       "id": "c-ptc",
+       "geometry": {
+        "points": [
+         {
+          "x": 0.3,
+          "y": 0.4
+         },
+         {
+          "x": 0.3127921351051443,
+          "y": 0.40240000000000004
+         },
+         {
+          "x": 0.3350676495514502,
+          "y": 0.4100609872310452
+         },
+         {
+          "x": 0.35937484373170997,
+          "y": 0.43720000000000003
+         },
+         {
+          "x": 0.3711372319472275,
+          "y": 0.4789764731732349
+         },
+         {
+          "x": 0.35895812892872137,
+          "y": 0.508
+         },
+         {
+          "x": 0.3310599181741416,
+          "y": 0.5204823179384188
+         },
+         {
+          "x": 0.31156533313195955,
+          "y": 0.502
+         }
+        ]
+       },
+       "continuity": {
+        "gapsBridged": 0,
+        "breaks": 0
+       },
+       "branches": [],
+       "detection": {
+        "confidence": 0.9,
+        "confidenceBasis": "synthetic-declared"
+       },
+       "identity": {
+        "anatomicalClass": "PTC",
+        "classConfidence": 0.9,
+        "classSource": "synthetic-declared"
+       }
+      },
+      {
+       "id": "c-tc",
+       "geometry": {
+        "points": [
+         {
+          "x": 0.06,
+          "y": 0.34
+         },
+         {
+          "x": 0.18,
+          "y": 0.45
+         },
+         {
+          "x": 0.3,
+          "y": 0.6
+         },
+         {
+          "x": 0.36,
+          "y": 0.75
+         },
+         {
+          "x": 0.34,
+          "y": 0.9
+         },
+         {
+          "x": 0.27,
+          "y": 1.05
+         }
+        ]
+       },
+       "continuity": {
+        "gapsBridged": 0,
+        "breaks": 0
+       },
+       "branches": [],
+       "detection": {
+        "confidence": 0.9,
+        "confidenceBasis": "synthetic-declared"
+       },
+       "identity": {
+        "anatomicalClass": "TC",
+        "classConfidence": 0.9,
+        "classSource": "synthetic-declared"
+       }
+      }
+     ],
+     "expectedButMissing": [],
+     "conflicts": []
+    },
+    "scanConfidence": {
+     "value": 0.9,
+     "basis": "synthetic-declared"
+    }
+   },
+   "r11": [
+    {
+     "mask": 0,
+     "summary": {
+      "valid": false,
+      "items": [],
+      "declined": []
+     }
+    },
+    {
+     "mask": 1,
+     "summary": {
+      "valid": false,
+      "items": [],
+      "declined": []
+     }
+    },
+    {
+     "mask": 2,
+     "summary": {
+      "valid": true,
+      "items": [
+       [
+        "F-PTC-SLOPE",
+        {
+         "tier": "tentative",
+         "rules": [
+          "P-PTC-BALANCED",
+          "P-PTC-SLOPING"
+         ]
+        }
+       ],
+       [
+        "F-PTC-LENGTH",
+        {
+         "tier": "clear",
+         "rules": [
+          "P-PTC-SHORT"
+         ]
+        }
+       ],
+       [
+        "F-DTC-RISE",
+        {
+         "tier": "clear",
+         "rules": [
+          "R-DTC-RISING"
+         ]
+        }
+       ],
+       [
+        "F-PTC-TC-ORIGIN",
+        {
+         "tier": "clear",
+         "rules": [
+          "C-ORIGIN-SEPARATE"
+         ]
+        }
+       ]
+      ],
+      "declined": [
+       [
+        "F-CENTRAL-LONGITUDINAL",
+        "missing"
+       ]
+      ]
+     }
+    },
+    {
+     "mask": 3,
+     "summary": {
+      "valid": true,
+      "items": [
+       [
+        "F-PTC-SLOPE",
+        {
+         "tier": "tentative",
+         "rules": [
+          "P-PTC-BALANCED",
+          "P-PTC-SLOPING"
+         ]
+        }
+       ],
+       [
+        "F-PTC-LENGTH",
+        {
+         "tier": "clear",
+         "rules": [
+          "P-PTC-SHORT"
+         ]
+        }
+       ],
+       [
+        "F-DTC-RISE",
+        {
+         "tier": "clear",
+         "rules": [
+          "R-DTC-RISING"
+         ]
+        }
+       ],
+       [
+        "F-PTC-TC-ORIGIN",
+        {
+         "tier": "clear",
+         "rules": [
+          "C-ORIGIN-SEPARATE"
+         ]
+        }
+       ]
+      ],
+      "declined": [
+       [
+        "F-CENTRAL-LONGITUDINAL",
+        "missing"
+       ]
+      ]
+     }
+    },
+    {
+     "mask": 4,
+     "summary": {
+      "valid": false,
+      "items": [],
+      "declined": []
+     }
+    },
+    {
+     "mask": 5,
+     "summary": {
+      "valid": false,
+      "items": [],
+      "declined": []
+     }
+    },
+    {
+     "mask": 6,
+     "summary": {
+      "valid": true,
+      "items": [
+       [
+        "F-PTC-SLOPE",
+        {
+         "tier": "tentative",
+         "rules": [
+          "P-PTC-BALANCED",
+          "P-PTC-SLOPING"
+         ]
+        }
+       ],
+       [
+        "F-PTC-LENGTH",
+        {
+         "tier": "clear",
+         "rules": [
+          "P-PTC-SHORT"
+         ]
+        }
+       ],
+       [
+        "F-DTC-RISE",
+        {
+         "tier": "clear",
+         "rules": [
+          "R-DTC-RISING"
+         ]
+        }
+       ],
+       [
+        "F-PTC-TC-ORIGIN",
+        {
+         "tier": "clear",
+         "rules": [
+          "C-ORIGIN-SEPARATE"
+         ]
+        }
+       ]
+      ],
+      "declined": [
+       [
+        "F-CENTRAL-LONGITUDINAL",
+        "missing"
+       ]
+      ]
+     }
+    },
+    {
+     "mask": 7,
+     "summary": {
+      "valid": true,
+      "items": [
+       [
+        "F-PTC-SLOPE",
+        {
+         "tier": "tentative",
+         "rules": [
+          "P-PTC-BALANCED",
+          "P-PTC-SLOPING"
+         ]
+        }
+       ],
+       [
+        "F-PTC-LENGTH",
+        {
+         "tier": "clear",
+         "rules": [
+          "P-PTC-SHORT"
+         ]
+        }
+       ],
+       [
+        "F-DTC-RISE",
+        {
+         "tier": "clear",
+         "rules": [
+          "R-DTC-RISING"
+         ]
+        }
+       ],
+       [
+        "F-PTC-TC-ORIGIN",
+        {
+         "tier": "clear",
+         "rules": [
+          "C-ORIGIN-SEPARATE"
+         ]
+        }
+       ]
+      ],
+      "declined": [
+       [
+        "F-CENTRAL-LONGITUDINAL",
+        "missing"
+       ]
+      ]
+     }
+    }
+   ]
+  },
+  {
+   "id": "L15-hook-canonical-valid-reverse-tortuous-minor-slot",
+   "category": "loop-order-asymmetric",
+   "expect": "invalid-both",
+   "slot": "MINOR",
+   "proof": {
+    "canonicalOrderProblem": null,
+    "reversedOrderProblem": "tortuous",
+    "engineProblem": "tortuous",
+    "tortuosityCanonical": 2.000000001,
+    "tortuosityReversed": 2.000000001000001,
+    "limit": 2.000000001,
+    "method": "derived copy of frozen src/schema.mjs exporting problemInOrder"
+   },
+   "input": {
+    "schema": "aura.palm.features",
+    "schemaVersion": "0.1.0",
+    "synthetic": true,
+    "capture": {
+     "handedness": {
+      "value": "right",
+      "source": "user-declared"
+     },
+     "dominantHand": "right",
+     "orientation": {
+      "rotationDeg": 4,
+      "palmFacing": true
+     },
+     "quality": {
+      "status": "accepted",
+      "issues": []
+     }
+    },
+    "landmarks": {
+     "present": true,
+     "source": {
+      "detector": "synthetic-fixture",
+      "version": "0.1.0"
+     }
+    },
+    "creases": {
+     "source": {
+      "detector": "synthetic-fixture",
+      "version": "0.1.0"
+     },
+     "coordinateFrame": "palm-normalized-v1",
+     "items": [
+      {
+       "id": "c-dtc",
+       "geometry": {
+        "points": [
+         {
+          "x": 0.95,
+          "y": 0.2
+         },
+         {
+          "x": 0.8,
+          "y": 0.19
+         },
+         {
+          "x": 0.65,
+          "y": 0.17
+         },
+         {
+          "x": 0.5,
+          "y": 0.14
+         },
+         {
+          "x": 0.38,
+          "y": 0.1
+         },
+         {
+          "x": 0.3,
+          "y": 0.06
+         }
+        ]
+       },
+       "continuity": {
+        "gapsBridged": 0,
+        "breaks": 0
+       },
+       "branches": [],
+       "detection": {
+        "confidence": 0.9,
+        "confidenceBasis": "synthetic-declared"
+       },
+       "identity": {
+        "anatomicalClass": "DTC",
+        "classConfidence": 0.9,
+        "classSource": "synthetic-declared"
+       }
+      },
+      {
+       "id": "c-ptc",
+       "geometry": {
+        "points": [
+         {
+          "x": 0.05,
+          "y": 0.32
+         },
+         {
+          "x": 0.25,
+          "y": 0.35
+         },
+         {
+          "x": 0.45,
+          "y": 0.38
+         },
+         {
+          "x": 0.65,
+          "y": 0.42
+         },
+         {
+          "x": 0.8,
+          "y": 0.45
+         }
+        ]
+       },
+       "continuity": {
+        "gapsBridged": 0,
+        "breaks": 0
+       },
+       "branches": [],
+       "detection": {
+        "confidence": 0.9,
+        "confidenceBasis": "synthetic-declared"
+       },
+       "identity": {
+        "anatomicalClass": "PTC",
+        "classConfidence": 0.9,
+        "classSource": "synthetic-declared"
+       }
+      },
+      {
+       "id": "c-tc",
+       "geometry": {
+        "points": [
+         {
+          "x": 0.06,
+          "y": 0.34
+         },
+         {
+          "x": 0.18,
+          "y": 0.45
+         },
+         {
+          "x": 0.3,
+          "y": 0.6
+         },
+         {
+          "x": 0.36,
+          "y": 0.75
+         },
+         {
+          "x": 0.34,
+          "y": 0.9
+         },
+         {
+          "x": 0.27,
+          "y": 1.05
+         }
+        ]
+       },
+       "continuity": {
+        "gapsBridged": 0,
+        "breaks": 0
+       },
+       "branches": [],
+       "detection": {
+        "confidence": 0.9,
+        "confidenceBasis": "synthetic-declared"
+       },
+       "identity": {
+        "anatomicalClass": "TC",
+        "classConfidence": 0.9,
+        "classSource": "synthetic-declared"
+       }
+      },
+      {
+       "id": "m1",
+       "geometry": {
+        "points": [
+         {
+          "x": 0.3,
+          "y": 0.4
+         },
+         {
+          "x": 0.3131611538475882,
+          "y": 0.40240000000000004
+         },
+         {
+          "x": 0.3377000037487285,
+          "y": 0.4108508093028293
+         },
+         {
+          "x": 0.37108217326423304,
+          "y": 0.43720000000000003
+         },
+         {
+          "x": 0.37647715046170643,
+          "y": 0.4809240175117686
+         },
+         {
+          "x": 0.3583149483015937,
+          "y": 0.508
+         },
+         {
+          "x": 0.333391431891731,
+          "y": 0.5084955784817539
+         },
+         {
+          "x": 0.3123318801109545,
+          "y": 0.502
+         }
+        ]
+       },
+       "continuity": {
+        "gapsBridged": 0,
+        "breaks": 0
+       },
+       "branches": [],
+       "detection": {
+        "confidence": 0.9,
+        "confidenceBasis": "synthetic-declared"
+       },
+       "identity": {
+        "anatomicalClass": "MINOR",
+        "classConfidence": 0.9,
+        "classSource": "synthetic-declared"
+       }
+      }
+     ],
+     "expectedButMissing": [],
+     "conflicts": []
+    },
+    "scanConfidence": {
+     "value": 0.9,
+     "basis": "synthetic-declared"
+    }
+   },
+   "r11": [
+    {
+     "mask": 0,
+     "summary": {
+      "valid": true,
+      "items": [
+       [
+        "F-PTC-SLOPE",
+        {
+         "tier": "clear",
+         "rules": [
+          "P-PTC-SLOPING"
+         ]
+        }
+       ],
+       [
+        "F-PTC-LENGTH",
+        {
+         "tier": "clear",
+         "rules": [
+          "P-PTC-LONG"
+         ]
+        }
+       ],
+       [
+        "F-DTC-RISE",
+        {
+         "tier": "clear",
+         "rules": [
+          "R-DTC-RISING"
+         ]
+        }
+       ],
+       [
+        "F-PTC-TC-ORIGIN",
+        {
+         "tier": "clear",
+         "rules": [
+          "C-ORIGIN-JOINED"
+         ]
+        }
+       ]
+      ],
+      "declined": []
+     }
+    },
+    {
+     "mask": 1,
+     "summary": {
+      "valid": true,
+      "items": [
+       [
+        "F-PTC-SLOPE",
+        {
+         "tier": "clear",
+         "rules": [
+          "P-PTC-SLOPING"
+         ]
+        }
+       ],
+       [
+        "F-PTC-LENGTH",
+        {
+         "tier": "clear",
+         "rules": [
+          "P-PTC-LONG"
+         ]
+        }
+       ],
+       [
+        "F-DTC-RISE",
+        {
+         "tier": "clear",
+         "rules": [
+          "R-DTC-RISING"
+         ]
+        }
+       ],
+       [
+        "F-PTC-TC-ORIGIN",
+        {
+         "tier": "clear",
+         "rules": [
+          "C-ORIGIN-JOINED"
+         ]
+        }
+       ]
+      ],
+      "declined": []
+     }
+    },
+    {
+     "mask": 2,
+     "summary": {
+      "valid": true,
+      "items": [
+       [
+        "F-PTC-SLOPE",
+        {
+         "tier": "clear",
+         "rules": [
+          "P-PTC-SLOPING"
+         ]
+        }
+       ],
+       [
+        "F-PTC-LENGTH",
+        {
+         "tier": "clear",
+         "rules": [
+          "P-PTC-LONG"
+         ]
+        }
+       ],
+       [
+        "F-DTC-RISE",
+        {
+         "tier": "clear",
+         "rules": [
+          "R-DTC-RISING"
+         ]
+        }
+       ],
+       [
+        "F-PTC-TC-ORIGIN",
+        {
+         "tier": "clear",
+         "rules": [
+          "C-ORIGIN-JOINED"
+         ]
+        }
+       ]
+      ],
+      "declined": []
+     }
+    },
+    {
+     "mask": 3,
+     "summary": {
+      "valid": true,
+      "items": [
+       [
+        "F-PTC-SLOPE",
+        {
+         "tier": "clear",
+         "rules": [
+          "P-PTC-SLOPING"
+         ]
+        }
+       ],
+       [
+        "F-PTC-LENGTH",
+        {
+         "tier": "clear",
+         "rules": [
+          "P-PTC-LONG"
+         ]
+        }
+       ],
+       [
+        "F-DTC-RISE",
+        {
+         "tier": "clear",
+         "rules": [
+          "R-DTC-RISING"
+         ]
+        }
+       ],
+       [
+        "F-PTC-TC-ORIGIN",
+        {
+         "tier": "clear",
+         "rules": [
+          "C-ORIGIN-JOINED"
+         ]
+        }
+       ]
+      ],
+      "declined": []
+     }
+    },
+    {
+     "mask": 4,
+     "summary": {
+      "valid": true,
+      "items": [
+       [
+        "F-PTC-SLOPE",
+        {
+         "tier": "clear",
+         "rules": [
+          "P-PTC-SLOPING"
+         ]
+        }
+       ],
+       [
+        "F-PTC-LENGTH",
+        {
+         "tier": "clear",
+         "rules": [
+          "P-PTC-LONG"
+         ]
+        }
+       ],
+       [
+        "F-DTC-RISE",
+        {
+         "tier": "clear",
+         "rules": [
+          "R-DTC-RISING"
+         ]
+        }
+       ],
+       [
+        "F-PTC-TC-ORIGIN",
+        {
+         "tier": "clear",
+         "rules": [
+          "C-ORIGIN-JOINED"
+         ]
+        }
+       ]
+      ],
+      "declined": []
+     }
+    },
+    {
+     "mask": 5,
+     "summary": {
+      "valid": true,
+      "items": [
+       [
+        "F-PTC-SLOPE",
+        {
+         "tier": "clear",
+         "rules": [
+          "P-PTC-SLOPING"
+         ]
+        }
+       ],
+       [
+        "F-PTC-LENGTH",
+        {
+         "tier": "clear",
+         "rules": [
+          "P-PTC-LONG"
+         ]
+        }
+       ],
+       [
+        "F-DTC-RISE",
+        {
+         "tier": "clear",
+         "rules": [
+          "R-DTC-RISING"
+         ]
+        }
+       ],
+       [
+        "F-PTC-TC-ORIGIN",
+        {
+         "tier": "clear",
+         "rules": [
+          "C-ORIGIN-JOINED"
+         ]
+        }
+       ]
+      ],
+      "declined": []
+     }
+    },
+    {
+     "mask": 6,
+     "summary": {
+      "valid": true,
+      "items": [
+       [
+        "F-PTC-SLOPE",
+        {
+         "tier": "clear",
+         "rules": [
+          "P-PTC-SLOPING"
+         ]
+        }
+       ],
+       [
+        "F-PTC-LENGTH",
+        {
+         "tier": "clear",
+         "rules": [
+          "P-PTC-LONG"
+         ]
+        }
+       ],
+       [
+        "F-DTC-RISE",
+        {
+         "tier": "clear",
+         "rules": [
+          "R-DTC-RISING"
+         ]
+        }
+       ],
+       [
+        "F-PTC-TC-ORIGIN",
+        {
+         "tier": "clear",
+         "rules": [
+          "C-ORIGIN-JOINED"
+         ]
+        }
+       ]
+      ],
+      "declined": []
+     }
+    },
+    {
+     "mask": 7,
+     "summary": {
+      "valid": true,
+      "items": [
+       [
+        "F-PTC-SLOPE",
+        {
+         "tier": "clear",
+         "rules": [
+          "P-PTC-SLOPING"
+         ]
+        }
+       ],
+       [
+        "F-PTC-LENGTH",
+        {
+         "tier": "clear",
+         "rules": [
+          "P-PTC-LONG"
+         ]
+        }
+       ],
+       [
+        "F-DTC-RISE",
+        {
+         "tier": "clear",
+         "rules": [
+          "R-DTC-RISING"
+         ]
+        }
+       ],
+       [
+        "F-PTC-TC-ORIGIN",
+        {
+         "tier": "clear",
+         "rules": [
+          "C-ORIGIN-JOINED"
+         ]
+        }
+       ]
+      ],
+      "declined": []
+     }
+    },
+    {
+     "mask": 8,
+     "summary": {
+      "valid": false,
+      "items": [],
+      "declined": []
+     }
+    },
+    {
+     "mask": 9,
+     "summary": {
+      "valid": false,
+      "items": [],
+      "declined": []
+     }
+    },
+    {
+     "mask": 10,
+     "summary": {
+      "valid": false,
+      "items": [],
+      "declined": []
+     }
+    },
+    {
+     "mask": 11,
+     "summary": {
+      "valid": false,
+      "items": [],
+      "declined": []
+     }
+    },
+    {
+     "mask": 12,
+     "summary": {
+      "valid": false,
+      "items": [],
+      "declined": []
+     }
+    },
+    {
+     "mask": 13,
+     "summary": {
+      "valid": false,
+      "items": [],
+      "declined": []
+     }
+    },
+    {
+     "mask": 14,
+     "summary": {
+      "valid": false,
+      "items": [],
+      "declined": []
+     }
+    },
+    {
+     "mask": 15,
+     "summary": {
+      "valid": false,
+      "items": [],
+      "declined": []
+     }
+    }
+   ]
+  }
+ ]
+}
