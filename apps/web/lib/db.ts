@@ -2119,19 +2119,80 @@ export async function createAuthCode(input: {
   );
 }
 
+const RECENT_AUTH_REQUESTS_SQL = `SELECT COUNT(*)::int AS count FROM "AuthCode"
+     WHERE "createdAt" > now() - ($1 || ' minutes')::interval
+       AND (email = $2 OR ("requestIp" IS NOT NULL AND "requestIp" = $3))`;
+
 /** Requests in the last `windowMinutes` from this email or IP — rate limiting. */
 export async function countRecentAuthRequests(
   email: string,
   requestIp: string | null,
   windowMinutes: number
 ): Promise<number> {
-  const result = await pool.query(
-    `SELECT COUNT(*)::int AS count FROM "AuthCode"
-     WHERE "createdAt" > now() - ($1 || ' minutes')::interval
-       AND (email = $2 OR ("requestIp" IS NOT NULL AND "requestIp" = $3))`,
-    [windowMinutes, email.toLowerCase(), requestIp]
-  );
+  const result = await pool.query(RECENT_AUTH_REQUESTS_SQL, [windowMinutes, email.toLowerCase(), requestIp]);
   return result.rows[0].count;
+}
+
+export type AuthCodeReservation = { reserved: true; id: string } | { reserved: false; recent: number };
+
+/**
+ * AURA-AUTH-01 -- the sign-in rate limit as ONE atomic decision. Counts the
+ * recent requests for this email or IP (the same rule as
+ * countRecentAuthRequests) and, only when under `max`, inserts this request's
+ * AuthCode row, all inside one transaction that first takes per-email and
+ * per-IP advisory locks. Any two requests that could count against each
+ * other share the email or the IP, so they share a lock and run one after
+ * the other: N concurrent requests can no longer all see a count below `max`.
+ *
+ * Locks are taken in ascending hash order (hashtext() of each key), so two
+ * requests can never wait on each other's locks (no deadlock, even on a hash
+ * collision). They are transaction-scoped and released at COMMIT/ROLLBACK,
+ * before the caller sends any email.
+ */
+export async function reserveAuthCodeWithinQuota(
+  input: { email: string; codeHash: string; expiresAt: Date; requestIp?: string | null },
+  windowMinutes: number,
+  max: number
+): Promise<AuthCodeReservation> {
+  const email = input.email.toLowerCase();
+  const requestIp = input.requestIp ?? null;
+  const lockKeys = [`auth-request-email:${email}`, ...(requestIp ? [`auth-request-ip:${requestIp}`] : [])];
+  const client = await beginTransaction();
+  try {
+    const hashed = await client.query('SELECT DISTINCT hashtext(k)::bigint AS h FROM unnest($1::text[]) AS k', [lockKeys]);
+    const lockIds = hashed.rows.map((r: { h: string }) => BigInt(r.h)).sort((a: bigint, b: bigint) => (a < b ? -1 : a > b ? 1 : 0));
+    for (const id of lockIds) {
+      await client.query('SELECT pg_advisory_xact_lock($1::bigint)', [id.toString()]);
+    }
+    const counted = await client.query(RECENT_AUTH_REQUESTS_SQL, [windowMinutes, email, requestIp]);
+    const recent: number = counted.rows[0].count;
+    if (recent >= max) {
+      await client.query('ROLLBACK');
+      return { reserved: false, recent };
+    }
+    const id = randomUUID();
+    await client.query(
+      `INSERT INTO "AuthCode" (id, email, "codeHash", "expiresAt", "requestIp")
+       VALUES ($1, $2, $3, $4, $5)`,
+      [id, email, input.codeHash, input.expiresAt, requestIp]
+    );
+    await client.query('COMMIT');
+    return { reserved: true, id };
+  } catch (err) {
+    await client.query('ROLLBACK').catch(() => {});
+    throw err;
+  } finally {
+    client.release();
+  }
+}
+
+/**
+ * Releases ONE reservation (by its own row id) after its email failed to
+ * send, so a provider outage does not use up the user's quota. Never touches
+ * any other request's row, and never a code that was already used.
+ */
+export async function releaseAuthCodeReservation(id: string): Promise<void> {
+  await pool.query(`DELETE FROM "AuthCode" WHERE id = $1 AND "consumedAt" IS NULL`, [id]);
 }
 
 /** Latest unconsumed, unexpired code row for this email. */

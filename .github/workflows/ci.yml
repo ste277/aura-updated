@@ -1060,6 +1060,13 @@ jobs:
         env:
           TS_NODE_COMPILER_OPTIONS: '{"jsx":"react"}'
         run: npx ts-node test/hpg5I3HomeSaveDb.test.ts
+      # AURA-AUTH-01 -- sign-in rate limit under concurrency (atomic quota reservation),
+      # against this job's own Postgres service. Email goes through a stubbed fetch inside
+      # the test; no provider credentials exist here, and any other outbound request fails it.
+      - name: Run sign-in rate-limit concurrency DB test (AURA-AUTH-01)
+        env:
+          TS_NODE_COMPILER_OPTIONS: '{"jsx":"react"}'
+        run: npx ts-node test/authRequestLinkQuotaDb.test.ts
       # Schedule write consistency S4 -- real-DB proof through the real proposal path
       # (explicit clock) that an overnight / prior-start plan blocks a Recomposition proposal.
       - name: Run Recomposition proposal overlap DB test

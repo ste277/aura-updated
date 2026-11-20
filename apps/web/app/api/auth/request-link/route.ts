@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { createMagicLinkToken, generateAuthCode, hashAuthCode, AUTH_CODE_TTL_MS } from '../../../../lib/auth';
-import { createAuthCode, countRecentAuthRequests } from '../../../../lib/db';
+import { reserveAuthCodeWithinQuota, releaseAuthCodeReservation } from '../../../../lib/db';
 import { sendMagicLinkEmail, isEmailConfigured } from '../../../../lib/email';
 import { readJsonObject } from '../../../../lib/request';
 import { verifyGuestStateToken } from '../../../../lib/guestState';
@@ -36,14 +36,6 @@ export async function POST(req: NextRequest) {
   const email = rawEmail.trim().toLowerCase();
 
   const ip = requestIp(req);
-  const recent = await countRecentAuthRequests(email, ip, RATE_LIMIT_WINDOW_MINUTES);
-  if (recent >= RATE_LIMIT_MAX_REQUESTS) {
-    console.warn('[auth] request-link rate-limited', { email, ip, recent });
-    return NextResponse.json(
-      { error: `Too many sign-in requests. Try again in about ${RATE_LIMIT_WINDOW_MINUTES} minutes.` },
-      { status: 429 }
-    );
-  }
 
   const token = createMagicLinkToken(email);
   // Build the link from the PUBLIC origin, not req.nextUrl.origin — behind a
@@ -78,21 +70,35 @@ export async function POST(req: NextRequest) {
     requestIp: ip,
   };
 
+  // Reserve first, send second (AURA-AUTH-01). The quota check and this
+  // request's AuthCode row are one atomic step, so concurrent requests can't
+  // all pass the check before any of them is recorded. No lock is held while
+  // the email is sent.
+  const reservation = await reserveAuthCodeWithinQuota(codeRow, RATE_LIMIT_WINDOW_MINUTES, RATE_LIMIT_MAX_REQUESTS);
+  if (!reservation.reserved) {
+    console.warn('[auth] request-link rate-limited', { email, ip, recent: reservation.recent });
+    return NextResponse.json(
+      { error: `Too many sign-in requests. Try again in about ${RATE_LIMIT_WINDOW_MINUTES} minutes.` },
+      { status: 429 }
+    );
+  }
+
   if (isEmailConfigured()) {
-    // Send first, persist second: the AuthCode row is also what the rate
-    // limiter counts, so a failed send must not consume one of the user's
-    // three slots — otherwise "try again" during a provider outage locks
-    // them out.
     try {
       await sendMagicLinkEmail(email, verifyUrl, code);
     } catch (err) {
       console.error('[auth] sign-in email send failed', { email, err });
+      // A failed send must not use up one of the user's three slots
+      // (otherwise "try again" during a provider outage locks them out), so
+      // release exactly this request's reservation.
+      await releaseAuthCodeReservation(reservation.id).catch((releaseErr) => {
+        console.error('[auth] could not release sign-in reservation', { releaseErr });
+      });
       return NextResponse.json(
         { error: "Our email provider isn't responding right now. Please try again in a few minutes." },
         { status: 502 }
       );
     }
-    await createAuthCode(codeRow);
     return NextResponse.json({ sent: true });
   }
 
@@ -101,6 +107,7 @@ export async function POST(req: NextRequest) {
   // must fail closed — returning credentials here would let anyone sign in
   // as any email address.
   if (process.env.NODE_ENV === 'production') {
+    await releaseAuthCodeReservation(reservation.id).catch(() => {});
     console.error('[auth] no email provider configured (MOM_API_KEY+MOM_FROM_EMAIL or RESEND_API_KEY); refusing to expose sign-in credentials');
     return NextResponse.json(
       { error: 'Sign-in email is not configured on this server.' },
@@ -108,6 +115,5 @@ export async function POST(req: NextRequest) {
     );
   }
 
-  await createAuthCode(codeRow);
   return NextResponse.json({ devLoginUrl: verifyUrl, devLoginCode: code });
 }
