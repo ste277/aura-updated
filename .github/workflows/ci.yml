@@ -1079,6 +1079,12 @@ jobs:
         env:
           TS_NODE_COMPILER_OPTIONS: '{"jsx":"react"}'
         run: npx ts-node test/authRequestLinkQuotaDb.test.ts
+      # AURA-SEC-01 (#350) -- sign-in logs carry a keyed email reference, never a plaintext
+      # address, code or token; link/code sign-in and the rate limit unchanged. Stubbed email.
+      - name: Run sign-in log redaction DB test (AURA-SEC-01)
+        env:
+          TS_NODE_COMPILER_OPTIONS: '{"jsx":"react"}'
+        run: npx ts-node test/authLogRedactionDb.test.ts
       # Schedule write consistency S4 -- real-DB proof through the real proposal path
       # (explicit clock) that an overnight / prior-start plan blocks a Recomposition proposal.
       - name: Run Recomposition proposal overlap DB test

@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { createMagicLinkToken, generateAuthCode, hashAuthCode, AUTH_CODE_TTL_MS } from '../../../../lib/auth';
+import { createMagicLinkToken, generateAuthCode, hashAuthCode, AUTH_CODE_TTL_MS, emailLogRef } from '../../../../lib/auth';
+import { errorForLog } from '../../../../lib/authLog';
 import { reserveAuthCodeWithinQuota, releaseAuthCodeReservation } from '../../../../lib/db';
 import { sendMagicLinkEmail, isEmailConfigured } from '../../../../lib/email';
 import { readJsonObject } from '../../../../lib/request';
@@ -76,7 +77,7 @@ export async function POST(req: NextRequest) {
   // the email is sent.
   const reservation = await reserveAuthCodeWithinQuota(codeRow, RATE_LIMIT_WINDOW_MINUTES, RATE_LIMIT_MAX_REQUESTS);
   if (!reservation.reserved) {
-    console.warn('[auth] request-link rate-limited', { email, ip, recent: reservation.recent });
+    console.warn('[auth] request-link rate-limited', { emailRef: emailLogRef(email), ip, recent: reservation.recent });
     return NextResponse.json(
       { error: `Too many sign-in requests. Try again in about ${RATE_LIMIT_WINDOW_MINUTES} minutes.` },
       { status: 429 }
@@ -87,12 +88,12 @@ export async function POST(req: NextRequest) {
     try {
       await sendMagicLinkEmail(email, verifyUrl, code);
     } catch (err) {
-      console.error('[auth] sign-in email send failed', { email, err });
+      console.error('[auth] sign-in email send failed', { emailRef: emailLogRef(email), err: errorForLog(err) });
       // A failed send must not use up one of the user's three slots
       // (otherwise "try again" during a provider outage locks them out), so
       // release exactly this request's reservation.
       await releaseAuthCodeReservation(reservation.id).catch((releaseErr) => {
-        console.error('[auth] could not release sign-in reservation', { releaseErr });
+        console.error('[auth] could not release sign-in reservation', { emailRef: emailLogRef(email), err: errorForLog(releaseErr) });
       });
       return NextResponse.json(
         { error: "Our email provider isn't responding right now. Please try again in a few minutes." },
