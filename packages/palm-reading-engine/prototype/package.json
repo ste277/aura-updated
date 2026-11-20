@@ -1,0 +1,8 @@
+{
+  "name": "aura-palm-g6-d0-reading-engine-prototype",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "description": "SYNTHETIC-ONLY prototype for AURA-PALM-G6-D0. Not a production package. No dependencies.",
+  "scripts": { "test": "node --test test/*.test.mjs", "samples": "node bin/render-samples.mjs" }
+}

@@ -1,0 +1,173 @@
+{
+  "schema": "aura.palm.features",
+  "schemaVersion": "0.1.0",
+  "synthetic": true,
+  "capture": {
+    "handedness": {
+      "value": "right",
+      "source": "user-declared"
+    },
+    "dominantHand": "right",
+    "orientation": {
+      "rotationDeg": 4,
+      "palmFacing": true
+    },
+    "quality": {
+      "status": "accepted",
+      "issues": []
+    }
+  },
+  "landmarks": {
+    "present": true,
+    "source": {
+      "detector": "synthetic-fixture",
+      "version": "0.1.0"
+    }
+  },
+  "creases": {
+    "source": {
+      "detector": "creases-directional-d3b",
+      "version": "D3B-C"
+    },
+    "coordinateFrame": "palm-normalized-v1",
+    "items": [
+      {
+        "id": "c-dtc",
+        "geometry": {
+          "points": [
+            {
+              "x": 0.95,
+              "y": 0.2
+            },
+            {
+              "x": 0.8,
+              "y": 0.19
+            },
+            {
+              "x": 0.65,
+              "y": 0.17
+            },
+            {
+              "x": 0.5,
+              "y": 0.14
+            },
+            {
+              "x": 0.38,
+              "y": 0.1
+            },
+            {
+              "x": 0.3,
+              "y": 0.06
+            }
+          ]
+        },
+        "continuity": {
+          "gapsBridged": 0,
+          "breaks": 0
+        },
+        "branches": [],
+        "detection": {
+          "confidence": 0.9,
+          "confidenceBasis": "uncalibrated-detector-score"
+        },
+        "identity": {
+          "anatomicalClass": "DTC",
+          "classConfidence": 0.95,
+          "classSource": "user-confirmed"
+        }
+      },
+      {
+        "id": "c-ptc",
+        "geometry": {
+          "points": [
+            {
+              "x": 0.05,
+              "y": 0.32
+            },
+            {
+              "x": 0.25,
+              "y": 0.35
+            },
+            {
+              "x": 0.45,
+              "y": 0.38
+            },
+            {
+              "x": 0.65,
+              "y": 0.42
+            },
+            {
+              "x": 0.8,
+              "y": 0.45
+            }
+          ]
+        },
+        "continuity": {
+          "gapsBridged": 0,
+          "breaks": 0
+        },
+        "branches": [],
+        "detection": {
+          "confidence": 0.9,
+          "confidenceBasis": "uncalibrated-detector-score"
+        },
+        "identity": {
+          "anatomicalClass": "PTC",
+          "classConfidence": 0.95,
+          "classSource": "user-confirmed"
+        }
+      },
+      {
+        "id": "c-tc",
+        "geometry": {
+          "points": [
+            {
+              "x": 0.06,
+              "y": 0.34
+            },
+            {
+              "x": 0.18,
+              "y": 0.45
+            },
+            {
+              "x": 0.3,
+              "y": 0.6
+            },
+            {
+              "x": 0.36,
+              "y": 0.75
+            },
+            {
+              "x": 0.34,
+              "y": 0.9
+            },
+            {
+              "x": 0.27,
+              "y": 1.05
+            }
+          ]
+        },
+        "continuity": {
+          "gapsBridged": 0,
+          "breaks": 0
+        },
+        "branches": [],
+        "detection": {
+          "confidence": 0.9,
+          "confidenceBasis": "uncalibrated-detector-score"
+        },
+        "identity": {
+          "anatomicalClass": "TC",
+          "classConfidence": 0.95,
+          "classSource": "user-confirmed"
+        }
+      }
+    ],
+    "expectedButMissing": [],
+    "conflicts": []
+  },
+  "scanConfidence": {
+    "value": 0.9,
+    "basis": "synthetic-declared"
+  }
+}
