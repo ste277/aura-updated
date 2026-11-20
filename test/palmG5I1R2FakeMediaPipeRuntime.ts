@@ -84,6 +84,19 @@ export function installFakeMediaPipeRuntime(): void {
   const g = globalThis as any;
   g.self = g;
   if (typeof g.document === 'undefined') g.document = {};
+  // AURA-PALM-G5-C2: MediaPipe 1.2.0 reads `navigator` (userAgent) inside
+  // createFromOptions. Browsers always define it, and so does Node >= 21; Node
+  // 20 (the CI runtime) does not, so the call threw `ReferenceError: navigator
+  // is not defined` and the detector (correctly) failed closed as
+  // 'runtime-unsafe'. Supply a minimal, Node-shaped stand-in ONLY when the
+  // runtime has none, so Node >= 21 keeps its built-in object unchanged.
+  if (typeof g.navigator === 'undefined') {
+    Object.defineProperty(g, 'navigator', {
+      value: { userAgent: `Node.js/${process.versions.node.split('.')[0]}`, platform: '', language: 'en-US' },
+      configurable: true,
+      writable: true,
+    });
+  }
   g.OffscreenCanvas = class { width: number; height: number; constructor(w: number, h: number) { this.width = w; this.height = h; } getContext() { return null; } };
   Object.defineProperty(g, 'location', { value: { origin: PAGE_ORIGIN }, configurable: true, writable: true });
   g.fetch = fakeTransport;
