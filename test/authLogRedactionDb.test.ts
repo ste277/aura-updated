@@ -87,6 +87,28 @@ async function main() {
   check('errorForLog: keeps name and code, redacts the address, drops detail', safe.name === 'Error' && safe.code === '23505' && safe.message.includes('[email]') && !JSON.stringify(safe).toLowerCase().includes('alice') && !('detail' in safe));
   check('errorForLog: non-Error values are reduced to a redacted string', errorForLog(`boom for ${A}`).message === 'boom for [email]' && errorForLog(`boom for ${A}`).name === 'NonError');
   check('redactEmails: every address in a string is replaced', redactEmails(`a@b.co and ${A}`) === '[email] and [email]');
+  // AURA-SEC-03 -- the formats the first pattern missed (AURA-SEC-02 finding S1).
+  const formats: [string, string][] = [
+    ['internationalised', 'josé@exämple.de'],
+    ['non-Latin', '用户@例子.广告'],
+    ['localhost', 'user@localhost'],
+    ['IP-literal domain', 'u@[192.0.2.1]'],
+    ['quoted local part', '"a b"@x.com'],
+    ['URL-encoded @', 'a%40b.com'],
+    ['double-encoded @', 'A%2540B.com'],
+    ['inside a URL', 'https://x.com/?e=a%40b.com&z=1'],
+    ['one-letter TLD', 'ab@c.d'],
+    ['in angle brackets', '<bob@x.org>'],
+  ];
+  for (const [label, addr] of formats) {
+    const outText = redactEmails(`before ${addr} after`);
+    const localPart = addr.replace(/^.*?"?([^"@%]+?)"?(?:@|%40|%2540).*$/i, '$1');
+    check(`redactEmails: ${label} address is redacted`, outText.includes('[email]') && !outText.includes(addr) && (localPart.length < 3 || !outText.includes(localPart)) && outText.startsWith('before ') && outText.endsWith(' after'), outText);
+  }
+  check('redactEmails: text without an address is left unchanged', redactEmails('Resend API error (422): rate limited, code 23505') === 'Resend API error (422): rate limited, code 23505');
+  const named = errorForLog(Object.assign(new Error(`failed for josé@exämple.de`), { name: 'Bad <a@b.co>', code: 'c@d.io' }));
+  check('errorForLog: name and code are redacted too (and bounded)', named.name === 'Bad <[email]>' && named.code === '[email]' && named.message === 'failed for [email]' && named.name.length <= 64);
+  check('errorForLog: a normal Postgres code is kept as-is', errorForLog(Object.assign(new Error('dup'), { code: '23505' })).code === '23505');
 
   // ---- scenario: link + code sign-in, every failure path, rate limit, send failure ----
   const B = `${RUN}-Bob.Example@e2e.aura.local`;
@@ -125,12 +147,16 @@ async function main() {
   failSends = true;
   const E = `${RUN}-Erin@e2e.aura.local`;
   const r5 = await requestLink(fakeRequest({ email: E }, IP('5')));
+  // An internationalised address the provider echoes back (AURA-SEC-03).
+  const F = `${RUN}-josé@exämple.de`;
+  const r5b = await requestLink(fakeRequest({ email: F }, IP('6')));
   failSends = false;
+  check('send failure for an internationalised address: 502, and its echo is redacted', r5b.status === 502 && captured.some((l) => l.includes(emailLogRef(F)) && l.includes('[email]')));
   check('send failure: 502 with the existing message', r5.status === 502 && (await r5.json()).error === "Our email provider isn't responding right now. Please try again in a few minutes.");
 
   // ---- the logs ----
   const logs = captured.join('\n');
-  const addresses = [A, B, C, D, E];
+  const addresses = [A, B, C, D, E, `${RUN}-josé@exämple.de`];
   const leaked = addresses.filter((x) => logs.toLowerCase().includes(x.toLowerCase()) || logs.toLowerCase().includes(x.split('@')[0].toLowerCase()));
   check(`no plaintext address (or its local part) in ${captured.length} captured log lines`, leaked.length === 0 && captured.length > 0, { leaked, sample: captured.slice(0, 3) });
   check('no email-shaped string at all in the logs', !/[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}/i.test(logs), captured.filter((l) => /@/.test(l)).slice(0, 3));
