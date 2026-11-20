@@ -140,10 +140,15 @@ async function main() {
   const v1again = await verifyCode(fakeRequest({ email: A, code: sentA.code }, IP('1')));
   check('a used code is refused (401) and logged without the address', v1again.status === 401);
 
-  // 2. Magic-link sign-in.
+  // 2. Magic-link sign-in -- local development only (AURA-AUTH-02), so opt in for this step.
+  const env2 = process.env as Record<string, string | undefined>;
+  const prev2 = { NODE_ENV: env2.NODE_ENV, AURA_LOCAL_MAGIC_LINKS: env2.AURA_LOCAL_MAGIC_LINKS };
+  env2.NODE_ENV = 'development';
+  env2.AURA_LOCAL_MAGIC_LINKS = 'true';
   const r2 = await requestLink(fakeRequest({ email: B }, IP('2')));
   const sentB = sends.find((s) => s.to === B.toLowerCase())!;
   const v2 = await verifyLink(fakeGet(sentB.link));
+  for (const [k, v] of Object.entries(prev2)) { if (v === undefined) delete env2[k]; else env2[k] = v; }
   check('email-link sign-in still works: 307 redirect home with a session cookie', r2.status === 200 && v2.status === 307 && (v2.headers.get('set-cookie') ?? '').includes('as_session=') && new URL(v2.headers.get('location')!).pathname === '/');
 
   // 3. Wrong codes until the attempt cap.
@@ -177,7 +182,7 @@ async function main() {
   check(`no plaintext address (or its local part) in ${captured.length} captured log lines`, leaked.length === 0 && captured.length > 0, { leaked, sample: captured.slice(0, 3) });
   check('no email-shaped string at all in the logs', !/[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}/i.test(logs), captured.filter((l) => /@/.test(l)).slice(0, 3));
   const codes = sends.map((s) => s.code).filter(Boolean);
-  const tokens = sends.map((s) => new URL(s.link).searchParams.get('token') ?? '').filter(Boolean);
+  const tokens = sends.filter((s) => s.link).map((s) => new URL(s.link).searchParams.get('token') ?? '').filter(Boolean);
   check('no sign-in code or magic-link token in the logs', codes.every((c) => !logs.includes(c)) && tokens.every((t) => !logs.includes(t.slice(0, 24))));
   const has = (event: string, email: string) => captured.some((l) => l.includes(event) && l.includes(emailLogRef(email)));
   check('diagnostic event kept: verify-code "no active code" with the reference for that address', has('[auth] verify-code: no active code', A));

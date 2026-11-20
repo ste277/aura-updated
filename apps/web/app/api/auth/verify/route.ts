@@ -1,8 +1,16 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { verifyMagicLinkToken, createSessionToken, SESSION_COOKIE_NAME } from '../../../../lib/auth';
 import { getOrCreateUserForAuth } from '../../../../lib/db';
+import { magicLinksEnabled, MAGIC_LINK_DISABLED_MESSAGE } from '../../../../lib/magicLinkGate';
 
 export async function GET(req: NextRequest) {
+  // AURA-AUTH-02 -- outside authorized local development no magic link is
+  // accepted, including links issued before this change. Checked FIRST: the
+  // token is never read, verified or logged, and no user or session is created.
+  if (!magicLinksEnabled()) {
+    return NextResponse.json({ error: MAGIC_LINK_DISABLED_MESSAGE }, { status: 403 });
+  }
+
   const token = req.nextUrl.searchParams.get('token');
   if (!token) {
     return NextResponse.json({ error: 'Missing token.' }, { status: 400 });

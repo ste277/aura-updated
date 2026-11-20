@@ -188,9 +188,20 @@ async function main() {
   {
     useEmailProvider(false);
     const email = em('dev');
-    const dev = await call(email, ipOf('dev'));
-    check('7. dev (no provider, not production): returns devLoginUrl + devLoginCode and stores the row', dev.status === 200 && /\/api\/auth\/verify\?token=/.test(dev.body.devLoginUrl) && /^\d{6}$/.test(dev.body.devLoginCode) && (await rowsFor('"codeHash" = $1', [hashAuthCode(email, dev.body.devLoginCode)])) === 1);
     const env = process.env as Record<string, string | undefined>;
+    const dev = await call(email, ipOf('dev'));
+    // AURA-AUTH-02: without the local magic-link opt-in only the code comes back.
+    check('7. dev (no provider, not production, no magic-link opt-in): returns devLoginCode only and stores the row', dev.status === 200 && dev.body.devLoginUrl === undefined && /^\d{6}$/.test(dev.body.devLoginCode) && (await rowsFor('"codeHash" = $1', [hashAuthCode(email, dev.body.devLoginCode)])) === 1);
+    // AURA-AUTH-02: authorized local development (next dev + opt-in) keeps the link.
+    const prevNode = env.NODE_ENV, prevFlag = env.AURA_LOCAL_MAGIC_LINKS;
+    env.NODE_ENV = 'development';
+    env.AURA_LOCAL_MAGIC_LINKS = 'true';
+    const devEmail = em('dev-link');
+    const devLink = await call(devEmail, ipOf('devlink'));
+    env.NODE_ENV = prevNode;
+    if (prevFlag === undefined) delete env.AURA_LOCAL_MAGIC_LINKS; else env.AURA_LOCAL_MAGIC_LINKS = prevFlag;
+    if (prevNode === undefined) delete env.NODE_ENV;
+    check('7. local dev with the opt-in: returns devLoginUrl + devLoginCode and stores the row', devLink.status === 200 && /\/api\/auth\/verify\?token=/.test(devLink.body.devLoginUrl) && /^\d{6}$/.test(devLink.body.devLoginCode) && (await rowsFor('"codeHash" = $1', [hashAuthCode(devEmail, devLink.body.devLoginCode)])) === 1);
     const prevEnv = env.NODE_ENV, prevSecret = env.AUTH_SECRET;
     env.NODE_ENV = 'production';
     env.AUTH_SECRET = prevSecret && prevSecret.length >= 32 ? prevSecret : 'auth01-test-secret-0123456789abcdef0123456789';

@@ -16,13 +16,13 @@ export function isEmailConfigured(): boolean {
   return Boolean((process.env.MOM_API_KEY && process.env.MOM_FROM_EMAIL) || process.env.RESEND_API_KEY);
 }
 
-export async function sendMagicLinkEmail(toEmail: string, verifyUrl: string, code?: string): Promise<void> {
-  const subject = code ? `${code} is your AuraSchedule sign-in code` : 'Your AuraSchedule sign-in link';
-  const html = buildEmailHtml(verifyUrl, code);
-  const text =
-    `Sign in to AuraSchedule: ${verifyUrl}` +
-    (code ? `\n\nOr enter this code in the app: ${code}` : '') +
-    `\n\nThis link and code expire in 15 minutes.`;
+/**
+ * Sends the sign-in email. AURA-AUTH-02: `verifyUrl` is null everywhere except
+ * authorized local development (lib/magicLinkGate.ts), and the email is then
+ * CODE-ONLY -- no link, no button, in both the HTML and the text part.
+ */
+export async function sendMagicLinkEmail(toEmail: string, verifyUrl: string | null, code?: string): Promise<void> {
+  const { subject, html, text } = buildSignInEmail(verifyUrl, code);
 
   if (process.env.MOM_API_KEY && process.env.MOM_FROM_EMAIL) {
     return sendViaMailOMail({ to: toEmail, subject, html });
@@ -31,6 +31,32 @@ export async function sendMagicLinkEmail(toEmail: string, verifyUrl: string, cod
     return sendViaResend({ to: toEmail, subject, html, text });
   }
   throw new Error('No email provider configured (set MOM_API_KEY+MOM_FROM_EMAIL or RESEND_API_KEY).');
+}
+
+/** Pure builder for the sign-in email (exported for tests). */
+export function buildSignInEmail(
+  verifyUrl: string | null,
+  code?: string,
+): { subject: string; html: string; text: string } {
+  if (!verifyUrl && !code) throw new Error('Sign-in email needs a code or a link.');
+  if (!verifyUrl) {
+    return {
+      subject: `${code} is your AuraSchedule sign-in code`,
+      html: buildCodeOnlyEmailHtml(code as string),
+      text:
+        `To sign in to AuraSchedule, enter this code in the app: ${code}` +
+        `\n\nThis code expires in 15 minutes.` +
+        `\n\nIf you didn't request this, you can safely ignore this email.`,
+    };
+  }
+  return {
+    subject: code ? `${code} is your AuraSchedule sign-in code` : 'Your AuraSchedule sign-in link',
+    html: buildEmailHtml(verifyUrl, code),
+    text:
+      `Sign in to AuraSchedule: ${verifyUrl}` +
+      (code ? `\n\nOr enter this code in the app: ${code}` : '') +
+      `\n\nThis link and code expire in 15 minutes.`,
+  };
 }
 
 async function sendViaMailOMail(msg: { to: string; subject: string; html: string }): Promise<void> {
@@ -89,6 +115,22 @@ function buildEmailHtml(verifyUrl: string, code?: string): string {
         Sign in
       </a>
       ${codeBlock}
+      <p style="color: #999; font-size: 12px; margin-top: 24px;">
+        If you didn't request this, you can safely ignore this email.
+      </p>
+    </div>
+  `;
+}
+
+function buildCodeOnlyEmailHtml(code: string): string {
+  return `
+    <div style="font-family: sans-serif; max-width: 480px; margin: 0 auto; padding: 24px;">
+      <h2 style="margin-bottom: 8px;">Sign in to AuraSchedule</h2>
+      <p style="color: #555; margin-bottom: 16px;">Enter this code in the app to sign in. It expires in 15 minutes.</p>
+      <div style="font-family: monospace; font-size: 28px; font-weight: 700; letter-spacing: 6px;
+                  background: #f4f4f5; border-radius: 8px; padding: 12px 20px; display: inline-block;">
+        ${code}
+      </div>
       <p style="color: #999; font-size: 12px; margin-top: 24px;">
         If you didn't request this, you can safely ignore this email.
       </p>

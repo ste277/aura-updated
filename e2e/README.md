@@ -29,7 +29,7 @@ npm run build:check
 
 ## Test data isolation
 
-Every test gets a freshly signed-in user via `e2e/fixtures/testUser.ts`'s `testUser` auto-fixture, using the app's own dev-only magic-link shortcut (`POST /api/auth/request-link` returns `devLoginUrl` when no email provider is configured and `NODE_ENV !== 'production'`) — no forged sessions. Every email is tagged `e2e-<test-name>-<uuid8>@e2e.aura.local`.
+Every test gets a freshly signed-in user via `e2e/fixtures/testUser.ts`'s `testUser` auto-fixture, using the app's own dev-only magic-link shortcut (`POST /api/auth/request-link` returns `devLoginUrl` only under `next dev` with no email provider configured and the local magic-link opt-in `AURA_LOCAL_MAGIC_LINKS=true`, which `playwright.config.ts` sets on its own dev server — see `apps/web/lib/magicLinkGate.ts`) — no forged sessions. Every email is tagged `e2e-<test-name>-<uuid8>@e2e.aura.local`.
 
 `e2e/fixtures/cleanup.ts` runs as Playwright's `globalTeardown` after every run: deletes every row for users matching `email LIKE '%@e2e.aura.local'` (HabitLog/VisitLog/Habit first — they reference `User` with `ON DELETE RESTRICT`, then `User`, which cascades everything else). Never touches any other row. Set `E2E_SKIP_CLEANUP=true` to leave fixture data in place for manual inspection after a run.
 

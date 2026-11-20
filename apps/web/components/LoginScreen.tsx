@@ -131,7 +131,7 @@ export function LoginScreen({ onLoggedInCheck }: { onLoggedInCheck: () => void }
       ) : (
         <div style={{ width: '100%', maxWidth: 320, textAlign: 'center' }}>
           <p style={{ fontFamily: 'var(--as-font-body)', fontSize: 14, marginBottom: 12 }}>
-            We emailed you a sign-in link and a 6-digit code. Enter the code here, or tap the link.
+            We emailed you a 6-digit sign-in code. Enter it here.
           </p>
 
           <form onSubmit={handleVerifyCode} style={{ display: 'flex', gap: 8, marginBottom: 12 }}>
