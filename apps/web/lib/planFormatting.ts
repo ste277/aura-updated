@@ -458,4 +458,9 @@ export interface SaveUpcomingPlanOptions {
   clientRequestId?: string;
   eventLocation?: PlanEventLocation;
   activityId?: string | null;
+  /** AURA-HPG5-V2-I2 (R1-05) -- OPTIONAL. Omitted -> the field is not sent
+   * (server default ALLOW; every existing caller unchanged). A recommended-
+   * time save (My Day story card) sends 'REJECT_ACTIVE_OVERLAP'; only an
+   * explicit user "Save anyway" re-sends the same payload with 'ALLOW'. */
+  overlapPolicy?: 'ALLOW' | 'REJECT_ACTIVE_OVERLAP';
 }

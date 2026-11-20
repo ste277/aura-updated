@@ -9,6 +9,14 @@ import { DailyAssistantContext } from '../../../../../packages/recommendation/sr
 import { recordProductEvent } from '../../../lib/productEvents';
 import { runTimingSearchWithDailyRhythm } from '../../../lib/timingSearchDailyRhythm';
 import type { DailyRhythmPreferencesInput } from '../../../lib/dailyRhythmScheduling';
+import {
+  buildFindATimeConstraints,
+  loadFindATimeConstraintInputs,
+  resolveFindATimeEmptyReason,
+  resolveFindATimeLoadBounds,
+  resolveFindATimeSearchDates,
+  summarizeFindATimeConstraints,
+} from '../../../lib/findATimeConstraints';
 
 /**
  * The Timing Search API: a thin HTTP wrapper around runTimingSearch() (the
@@ -82,7 +90,33 @@ export async function POST(req: NextRequest) {
     workEnd: user.dailyRhythmWorkEnd ?? null,
     workDays: user.dailyRhythmWorkDays ?? [],
   };
-  const result = runTimingSearchWithDailyRhythm(validated.request, user.timezone, dailyRhythmPrefs);
+
+  // AURA-HPG5-V2-I1 -- FIND only: saved availability and existing active
+  // plans become the engine's own hard `searchWindow`/`excludedIntervals`
+  // inputs (applied before Panchang evaluation and ranking), built from the
+  // same rules Plan My Day uses (lib/findATimeConstraints.ts). CHECK and
+  // COMPARE score explicit user-chosen instants and are never filtered.
+  // Daily Rhythm stays a soft re-order over whatever is eligible.
+  let constraints: ReturnType<typeof buildFindATimeConstraints> | null = null;
+  if (validated.request.mode === 'FIND') {
+    const dates = resolveFindATimeSearchDates(validated.request);
+    const bounds = resolveFindATimeLoadBounds(dates, user.timezone);
+    if (bounds) {
+      const inputs = await loadFindATimeConstraintInputs(user, bounds);
+      constraints = buildFindATimeConstraints({ dates, timezone: user.timezone, now, availability: inputs.availability, plans: inputs.plans });
+      // Input-only: the engine's own optional constraint fields on this
+      // request's freshly built object. Candidate instants in the response
+      // are never transformed.
+      if (constraints.searchWindow) validated.request.searchWindow = constraints.searchWindow;
+      validated.request.excludedIntervals = constraints.excludedIntervals;
+    }
+  }
+
+  const searched = runTimingSearchWithDailyRhythm(validated.request, user.timezone, dailyRhythmPrefs);
+  const emptyReason = constraints && !searched.unavailable ? resolveFindATimeEmptyReason(constraints, searched.candidates.length) : undefined;
+  const result = constraints
+    ? { ...searched, constraintsApplied: summarizeFindATimeConstraints(constraints), ...(emptyReason ? { emptyReason } : {}) }
+    : searched;
 
   void recordProductEvent({
     eventName: 'PLAN_SEARCH_COMPLETED',

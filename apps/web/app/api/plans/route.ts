@@ -7,6 +7,8 @@ import { verifyGuestStateToken, hashGuestConversionToken } from '../../../lib/gu
 import { parseEventLocationSnapshot } from '../../../lib/plansRequest';
 import { getActivityProfileById } from '../../../../../packages/recommendation/src/personalizedTasks';
 import { getDatePartsInTimezone } from '../../../lib/timezone';
+import { findBlockingPlanForRange } from '../../../lib/planMove';
+import { describeFirstBlockingPlanForRange, parseOverlapPolicy, PLAN_OVERLAP_CODE, type PlanOverlapConflict } from '../../../lib/findATimeConstraints';
 import { SchedulingEligibilityError, SCHEDULING_ELIGIBILITY_STATUS_BY_CODE, materializeFailureToSchedulingEligibilityError, goalActivityNotAvailableError, goalNotActiveError } from '../../../lib/schedulingEligibilityError';
 
 const MIN_PLAN_DURATION_MINUTES = 15;
@@ -111,6 +113,15 @@ export async function GET(req: NextRequest) {
 
   const plans = await listPlannedActivities(session.userId);
   return NextResponse.json(plans);
+}
+
+
+/** AURA-HPG5-V2-I1 -- internal control flow only: thrown inside the
+ * transaction so the existing catch ROLLBACKs (nothing written, no goal link). */
+class PlanOverlapRejection extends Error {
+  constructor(readonly conflict: PlanOverlapConflict | null) {
+    super('That time overlaps another plan.');
+  }
 }
 
 export async function POST(req: NextRequest) {
@@ -248,6 +259,17 @@ export async function POST(req: NextRequest) {
   // matching this request's own `title` against any GoalActivity's title.
   const goalActivityId = typeof body?.goalActivityId === 'string' && body.goalActivityId.trim() ? body.goalActivityId.trim() : null;
 
+  // AURA-HPG5-V2-I1 -- OPTIONAL, opt-in overlap enforcement. Absent (or
+  // 'ALLOW') keeps the S2 contract exactly: an explicit manual overlap stays
+  // allowed for every existing caller. 'REJECT_ACTIVE_OVERLAP' is sent by
+  // Find a Time's "Use this time" so a stale recommendation can never be
+  // saved silently; the client re-sends 'ALLOW' only after the user
+  // explicitly chooses "Save anyway".
+  const overlapPolicy = parseOverlapPolicy(body?.overlapPolicy);
+  if (!overlapPolicy) {
+    return NextResponse.json({ error: 'overlapPolicy must be ALLOW or REJECT_ACTIVE_OVERLAP.' }, { status: 400 });
+  }
+
   if (!title || title.length > 200) return NextResponse.json({ error: 'A title of up to 200 characters is required.' }, { status: 400 });
   if (!plannedStartAt || !plannedEndAt || plannedEndAt <= plannedStartAt) {
     return NextResponse.json({ error: 'Valid plannedStartAt and plannedEndAt values are required.' }, { status: 400 });
@@ -296,6 +318,19 @@ export async function POST(req: NextRequest) {
   let plan: Awaited<ReturnType<typeof createPlannedActivity>>;
   try {
     await client.query('SELECT pg_advisory_xact_lock(hashtext($1))', [`day-constructor-accept:${session.userId}`]);
+    // AURA-HPG5-V2-I1 -- checked AFTER the per-user lock and BEFORE the
+    // insert, on this same transaction client: every locking writer (Plan My
+    // Day acceptance, Move, Recomposition, other manual saves) is serialized
+    // with this decision, so it cannot race them. The decision is the
+    // existing findBlockingPlanForRange (Move/Recomposition's own rule:
+    // half-open, isActivePlanBlocker); the description only names it.
+    if (overlapPolicy === 'REJECT_ACTIVE_OVERLAP') {
+      const overlapNow = new Date();
+      if (await findBlockingPlanForRange(client, session.userId, [], plannedStartAt, plannedEndAt, overlapNow)) {
+        const conflict = await describeFirstBlockingPlanForRange(client, session.userId, plannedStartAt, plannedEndAt, overlapNow);
+        throw new PlanOverlapRejection(conflict);
+      }
+    }
     plan = await createPlannedActivity({
       userId: session.userId,
       title,
@@ -391,6 +426,9 @@ export async function POST(req: NextRequest) {
     // indistinguishable from each other or from the generic case -- now
     // surface as genuine scheduling conflicts (409), matching Move's own
     // established convention for these same three codes.
+    if (err instanceof PlanOverlapRejection) {
+      return NextResponse.json({ error: 'That time overlaps another plan.', code: PLAN_OVERLAP_CODE, ...(err.conflict ? { conflict: err.conflict } : {}) }, { status: 409 });
+    }
     if (err instanceof SchedulingEligibilityError) {
       return NextResponse.json({ error: err.message, code: err.code }, { status: SCHEDULING_ELIGIBILITY_STATUS_BY_CODE[err.code] });
     }

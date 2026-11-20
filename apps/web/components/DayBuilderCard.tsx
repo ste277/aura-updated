@@ -1,12 +1,14 @@
 'use client';
 
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import { swapSuggestion, type IntentionalDaySuggestion } from '../lib/dayBuilder';
 import type { TimingCandidate } from '../../../packages/recommendation/src/timingSearch';
 import type { EverydaySharedCandidate } from '../../../packages/recommendation/src/everydayTimingFit';
 import type { DailyStoryPhase } from '../lib/dailyStory';
 import type { DailyIntentionGroupId } from '../lib/dailyIntentions';
-import { RESULT_LABEL_TEXT, EVERYDAY_SHARED_RATING_TEXT, saveUpcomingPlanFromCandidate } from './PlanWithAuraView';
+import { RESULT_LABEL_TEXT, EVERYDAY_SHARED_RATING_TEXT, saveUpcomingPlanFromCandidate, PlanOverlapSaveError } from './PlanWithAuraView';
+import { PlanOverlapConflictPanel } from './PlanOverlapConflictPanel';
+import { presentProposedPlanOverlap, type PlanOverlapConflictView } from '../lib/schedulingEligibilityPresentation';
 import { trackEvent } from '../lib/trackEvent';
 import { colors, spacing, radius, typography } from './theme';
 import { PrimaryButton, SecondaryButton, TextButton, StatusBadge } from './ui';
@@ -21,6 +23,17 @@ import { PrimaryButton, SecondaryButton, TextButton, StatusBadge } from './ui';
  * renders nothing at all, not an empty-state card (brief section 13: "Zero
  * suggestions is a successful result").
  */
+
+/** AURA-HPG5-V2-I3 -- the same clock this card formats its own slot times in
+ * (formatTimeRange uses the browser's local zone), so the conflict panel's
+ * times match the chips the user just saw. */
+function browserTimezone(): string {
+  try {
+    return Intl.DateTimeFormat().resolvedOptions().timeZone || 'UTC';
+  } catch {
+    return 'UTC';
+  }
+}
 
 function formatTimeRange(startIso: string, endIso: string): string {
   const opts: Intl.DateTimeFormatOptions = { hour: 'numeric', minute: '2-digit' };
@@ -71,6 +84,20 @@ export function DayBuilderCard({
   // RECENT dismissal only (not per-card state, since the dismissed card
   // itself is already gone by the time this would render).
   const [lastDismissed, setLastDismissed] = useState<{ groupId: DailyIntentionGroupId; label: string } | null>(null);
+  // AURA-HPG5-V2-I3 (I3-B) -- an Add refused at save time (409 PLAN_OVERLAP).
+  // Holds the EXACT refused save so "Save anyway" re-sends it with only the
+  // overlap policy changed. Nothing was written.
+  const [dbOverlap, setDbOverlap] = useState<{
+    suggestionId: string;
+    candidate: TimingCandidate;
+    durationMinutes: number;
+    options: { clientRequestId: string; activityId: string };
+    conflict: PlanOverlapConflictView | null;
+    proposed: { title: string; plannedStartAt: string; plannedEndAt: string };
+  } | null>(null);
+  const dbOverlapHeadingRef = useRef<HTMLDivElement | null>(null);
+  // Synchronous in-flight guard (state flags only apply after a re-render).
+  const addingRef = useRef(false);
 
   /** Personalized Daily Story V2 (brief section 10) -- the ONE place this
    * component talks to GET /api/my-day/suggestions, reused by both the
@@ -117,6 +144,16 @@ export function DayBuilderCard({
   // the last visible suggestion was dismissed (brief section 8: "zero
   // suggestions is valid") -- only bail out entirely when there's ALSO no
   // pending follow-up to show.
+  // AURA-HPG5-V2-I3 (I3-B) -- declared before the early return below (hooks
+  // must run on every render). Stale cleanup: the refused suggestion left the
+  // visible list (swapped, dismissed, refreshed). Focus: the conflict heading.
+  useEffect(() => {
+    if (dbOverlap && !visibleIds.includes(dbOverlap.suggestionId)) setDbOverlap(null);
+  }, [visibleIds, dbOverlap]);
+  useEffect(() => {
+    if (dbOverlap) dbOverlapHeadingRef.current?.focus();
+  }, [dbOverlap]);
+
   if (dayPhase === 'NIGHT' || !suggestions || (visibleIds.length === 0 && !lastDismissed)) return null;
 
   const visible = visibleIds
@@ -154,28 +191,61 @@ export function DayBuilderCard({
     // Brief section 29 -- a pure local state write. No fetch, no Timing
     // Search / Shared Timing re-run, no Plan/Moment creation.
     setState(suggestion.id, { selectedCandidateIndex: index });
+    // AURA-HPG5-V2-I3 -- a pending conflict belongs to the previously selected slot.
+    setDbOverlap((current) => (current && current.suggestionId === suggestion.id ? null : current));
     trackEvent('DAY_BUILDER_SLOT_SELECTED', { metadata: { activityId: suggestion.activityId, candidateRank: index, dayPhase, hasPerson: suggestion.candidate.kind === 'SHARED' } });
   };
 
-  const handleAdd = async (suggestion: IntentionalDaySuggestion) => {
+  const performAdd = async (suggestion: IntentionalDaySuggestion, candidate: TimingCandidate, durationMinutes: number, options: { clientRequestId: string; activityId: string }, overlapPolicy: 'ALLOW' | 'REJECT_ACTIVE_OVERLAP') => {
+    if (addingRef.current) return;
+    addingRef.current = true;
     setState(suggestion.id, { addStatus: 'SAVING', error: undefined });
     try {
-      // Brief section 20 -- a stable id per (suggestion, local date), so a
-      // double-tap or a benign re-render can never create a second Plan.
-      const clientRequestId = `daybuilder:${suggestion.id}:${localDate}`;
-      // Planned Activity Canonical Identity Propagation V1 -- suggestion.activityId
-      // is already a genuine, validated FULL_ACTIVITY_CATALOG id (every
-      // IntentionalDaySuggestion that reaches the UI has one, see
-      // dayBuilder.ts's own selectIntentionCandidates()) -- threaded
-      // straight through, never re-derived/inferred here.
-      const plan = await saveUpcomingPlanFromCandidate(selectedGeneralCandidate(suggestion), suggestion.durationMinutes, { clientRequestId, activityId: suggestion.activityId });
+      const plan = await saveUpcomingPlanFromCandidate(candidate, durationMinutes, { ...options, overlapPolicy });
       trackEvent('DAY_BUILDER_SUGGESTION_ADDED', { metadata: { intentionCategory: suggestion.groupId, activityId: suggestion.activityId, dayPhase } });
+      setDbOverlap(null);
       setState(suggestion.id, { addStatus: 'DONE', addedPlannedActivityId: plan.id });
       onCreated();
       await refreshAfterCreate();
-    } catch {
-      setState(suggestion.id, { addStatus: 'ERROR', error: 'Could not add this to your day. Try again.' });
+    } catch (err) {
+      if (err instanceof PlanOverlapSaveError) {
+        // Nothing was written. Keep the exact refused save for an explicit override.
+        setDbOverlap({ suggestionId: suggestion.id, candidate, durationMinutes, options, conflict: err.conflict, proposed: { title: err.proposed.title, plannedStartAt: err.proposed.plannedStartAt, plannedEndAt: err.proposed.plannedEndAt } });
+        setState(suggestion.id, { addStatus: 'IDLE', error: undefined });
+      } else {
+        setState(suggestion.id, { addStatus: 'ERROR', error: 'Could not add this to your day. Try again.' });
+      }
+    } finally {
+      addingRef.current = false;
     }
+  };
+
+  const handleAdd = async (suggestion: IntentionalDaySuggestion) => {
+    setDbOverlap(null);
+    // Brief section 20 -- a stable id per (suggestion, local date), so a
+    // double-tap or a benign re-render can never create a second Plan.
+    const clientRequestId = `daybuilder:${suggestion.id}:${localDate}`;
+    // Planned Activity Canonical Identity Propagation V1 -- suggestion.activityId
+    // is already a genuine, validated FULL_ACTIVITY_CATALOG id (every
+    // IntentionalDaySuggestion that reaches the UI has one, see
+    // dayBuilder.ts's own selectIntentionCandidates()) -- threaded
+    // straight through, never re-derived/inferred here.
+    // AURA-HPG5-V2-I3 (I3-B) -- a Day Builder slot is a recommendation made
+    // earlier: opt in to REJECT_ACTIVE_OVERLAP so a slot that went stale is
+    // refused inside the save transaction instead of saved over silently.
+    await performAdd(suggestion, selectedGeneralCandidate(suggestion), suggestion.durationMinutes, { clientRequestId, activityId: suggestion.activityId }, 'REJECT_ACTIVE_OVERLAP');
+  };
+
+  // AURA-HPG5-V2-I3 (I3-B) -- explicit override of the EXACT refused save.
+  // Refused (panel closed) if that slot is no longer the selected one on a
+  // visible suggestion.
+  const handleDbOverlapSaveAnyway = async (suggestion: IntentionalDaySuggestion) => {
+    const pending = dbOverlap;
+    if (!pending || pending.suggestionId !== suggestion.id || !visibleIds.includes(suggestion.id) || selectedGeneralCandidate(suggestion).start !== pending.candidate.start) {
+      setDbOverlap(null);
+      return;
+    }
+    await performAdd(suggestion, pending.candidate, pending.durationMinutes, pending.options, 'ALLOW');
   };
 
   const handleInvite = async (suggestion: IntentionalDaySuggestion) => {
@@ -313,7 +383,7 @@ export function DayBuilderCard({
                * is visually AND semantically marked (aria-pressed), never
                * color-only. Switching slots is a pure local state change
                * (brief section 29) -- no network call happens here. */}
-              <div role="group" aria-label={`Choose a time for ${suggestion.label}`} style={{ display: 'flex', flexWrap: 'wrap', gap: 6, marginTop: 8 }}>
+              <div role="group" data-slot-group={suggestion.id} aria-label={`Choose a time for ${suggestion.label}`} style={{ display: 'flex', flexWrap: 'wrap', gap: 6, marginTop: 8 }}>
                 {candidates.slice(0, visibleSlotCount).map((c, index) => (
                   <button
                     key={c.start}
@@ -376,6 +446,26 @@ export function DayBuilderCard({
                   </TextButton>
                 )}
               </div>
+
+              {dbOverlap && dbOverlap.suggestionId === suggestion.id && state.addStatus !== 'DONE' && (
+                <div style={{ marginTop: spacing.sm }}>
+                  <PlanOverlapConflictPanel
+                    idPrefix={`day-builder-overlap-${suggestion.id}`}
+                    testId="day-builder-overlap-conflict"
+                    presentation={presentProposedPlanOverlap(dbOverlap.proposed, dbOverlap.conflict, browserTimezone())}
+                    headingRef={dbOverlapHeadingRef}
+                    onChooseAnotherTime={() => {
+                      setDbOverlap(null);
+                      // Back to this card's own time chips (keyboard focus).
+                      requestAnimationFrame(() => (document.querySelector(`[data-slot-group="${suggestion.id}"] button`) as HTMLButtonElement | null)?.focus());
+                    }}
+                    chooseAnotherTimeLabel={candidates.length > 1 ? 'Choose another time' : 'Not now'}
+                    onSaveAnyway={() => void handleDbOverlapSaveAnyway(suggestion)}
+                    saveDisabled={state.addStatus === 'SAVING'}
+                    saving={state.addStatus === 'SAVING'}
+                  />
+                </div>
+              )}
             </div>
           );
         })}
