@@ -22,6 +22,12 @@
 	<string>$(CURRENT_PROJECT_VERSION)</string>
 	<key>LSRequiresIPhoneOS</key>
 	<true/>
+	<!-- AURA-MOBILE-01-M1: required for the existing navigator.geolocation call in
+	     LocationPicker.tsx (city-level location selection) -- without this key, iOS
+	     terminates the app when that API is invoked rather than merely denying the
+	     permission. When-in-use only; Always/background location is not requested. -->
+	<key>NSLocationWhenInUseUsageDescription</key>
+	<string>Aura uses your location to calculate local Panchangam timings and help you find suitable times for your activities.</string>
 	<key>UILaunchStoryboardName</key>
 	<string>LaunchScreen</string>
 	<key>UIMainStoryboardFile</key>
