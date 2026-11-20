@@ -1,4 +1,5 @@
 const { applyPalmistryExclusion } = require('./palmistry-build-exclusion');
+const { applyPalmImageInputExclusion } = require('./palm-image-input-build-exclusion');
 
 /** @type {import('next').NextConfig} */
 const nextConfig = {
@@ -15,8 +16,11 @@ const nextConfig = {
   },
   // AURA-PALM-01-P1: production builds exclude unapproved Palmistry content
   // entirely (see palmistry-build-exclusion.js). `next dev` is unaffected.
+  // AURA-PALM-G5-I1-R2: palm IMAGE INPUT (upload UI, on-device pipeline,
+  // MediaPipe) is excluded from every production build independently of the
+  // content approval (see palm-image-input-build-exclusion.js).
   webpack(config, { dev, webpack }) {
-    return applyPalmistryExclusion(config, { dev, webpack });
+    return applyPalmImageInputExclusion(applyPalmistryExclusion(config, { dev, webpack }), { dev, webpack });
   },
 };
 

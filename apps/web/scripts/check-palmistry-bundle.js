@@ -11,8 +11,32 @@
 // They are deliberately ASCII-only: the minifier may emit non-ASCII text as
 // escape sequences (e.g. "ñ" -> "\xf1"), which a literal diacritic sentinel
 // would silently fail to match (P1 review finding 1).
+//
+// AURA-PALM-G5-I1-R2/R3/R4 -- IMAGE-INPUT EXCLUSION (runs on every build,
+// whatever the content-approval state). What it guarantees, precisely:
+//   - Scan roots: .next/static (required), .next/server, .next/standalone and
+//     public (optional only when the path is entirely absent; see SCAN_ROOTS).
+//   - Every regular file under those roots is read in bounded chunks and
+//     matched as bytes against the signature rules below, whatever its name or
+//     extension; symlinks are resolved inside the roots and fail closed
+//     otherwise; FIFOs, sockets and devices fail closed.
+//   - ZIP, GZIP (.tar.gz/.tgz) and TAR (v7/ustar/GNU/pax) archives --
+//     recognised by content, including prefixed/suffixed ZIPs -- are inspected
+//     entry by entry in memory, nested up to a fixed depth, with every
+//     decompression capped on actual output; structures it cannot fully and
+//     unambiguously inspect fail closed. Other archive and compression formats
+//     are not inspected (see the archive section below).
+//   - The OK line states exactly what was inspected (files, bytes, archives,
+//     entries, decompressed bytes, roots, absent optional roots).
+// What it does NOT guarantee: detection of payloads stored in other
+// encodings or formats (base64/data URLs, UTF-16, other compressors, custom
+// obfuscation, renamed signature strings) -- detection is signature-based.
+// Coverage is of the directories it is run on: the Docker build does not run
+// this scanner (open finding R2-N5), and platform post-build packaging (e.g.
+// Vercel's own output step) is outside its view.
 const fs = require('fs');
 const path = require('path');
+const zlib = require('zlib');
 const { isPalmistryApproved } = require('../palmistry-build-exclusion');
 
 const SENTINELS = [
@@ -25,6 +49,39 @@ const SENTINELS = [
   'History of Science in South Asia', // source edition (Zysk 2025)
   'Western palmistry, for comparison', // detail-panel label
 ];
+
+// AURA-PALM-G5-I1 -- the development-only palm-image input (components/palm-scan,
+// lib/palm-analysis, @mediapipe/tasks-vision) is imported only from
+// PalmistryView, so the same exclusion removes it. These sentinels prove it.
+// Kept separate from SENTINELS (whose source locations
+// test/palm01I1Content.test.ts K18 pins); test/palmG5I1PrivacyGate.test.ts
+// verifies each one really occurs in the image-input source.
+const IMAGE_INPUT_SENTINELS = [
+  'palm-dev-assets', // self-hosted MediaPipe asset path
+  'Palm image looks suitable for further analysis', // accepted-photo headline
+  'g5-i1-dev', // dev gate flag value (compared at runtime, so never minified away)
+  'Check a palm photo', // section heading (JSX text)
+  'odml.pa.googleapis.com', // MediaPipe bundle (its usage-logger endpoint)
+];
+
+// AURA-PALM-G5-I1-R2 (R1-F3) -- signatures of the MediaPipe runtime itself.
+// They are string literals inside @mediapipe/tasks-vision 1.2.0 that survive
+// minification (a graph name, a WASM-binding property name, two loader and
+// graph error messages); test/palmG5I1R2ProductionExclusion.test.ts verifies each one occurs
+// in the installed package so this check cannot pass vacuously. They are
+// checked separately from IMAGE_INPUT_SENTINELS (which are pinned to Aura's
+// own image-input source).
+const MEDIAPIPE_SENTINELS = [
+  'mediapipe.tasks.vision.hand_landmarker.HandLandmarkerGraph',
+  '_mediapipeLoggerGetEncodedApiKey',
+  'ModuleFactory not set.',
+  'Failed to retrieve CalculatorGraphConfig',
+];
+
+// Dev-only MediaPipe runtime/model directory (scripts/palm-dev-assets.js).
+// It is gitignored; if it is present in a build tree anyway (e.g. a CLI
+// deploy from a developer checkout), the build must fail rather than publish it.
+const DEV_ASSET_DIR = 'public/palm-dev-assets';
 
 const SCAN_DIRS = ['.next/static', '.next/server', '.next/standalone'];
 
@@ -43,21 +100,1082 @@ function* walk(dir) {
   }
 }
 
+// Every file (binary included, node_modules included), symlinks skipped.
+// Used only by devAssetsPresent (a name check); content inspection uses
+// inspectArtifacts() below, which resolves symlinks.
+function* walkAll(dir) {
+  if (!fs.existsSync(dir)) return;
+  for (const name of fs.readdirSync(dir)) {
+    const full = path.join(dir, name);
+    const stat = fs.lstatSync(full);
+    if (stat.isSymbolicLink()) continue;
+    if (stat.isDirectory()) yield* walkAll(full);
+    else yield full;
+  }
+}
+
+// Configured scan roots (relative to apps/web) and the build-mode contract.
+// `next build` (always run before this scanner) creates `.next/static`, so it
+// is REQUIRED. The others are OPTIONAL-WHEN-ABSENT: `.next/standalone` exists
+// only with `output: 'standalone'`, `public/` is optional in Next.js, and
+// `.next/server` is checked when present. "Absent" means the path does not
+// exist at all (lstat ENOENT). A root that exists but is a broken symlink, a
+// symlink leaving apps/web, a symlink loop, not a directory, or unreadable is
+// ALWAYS a blocking scan error -- never treated as absent. Absent optional
+// roots are listed in the scanner output.
+const SCAN_ROOTS = [
+  { rel: '.next/static', required: true },
+  { rel: '.next/server', required: false },
+  { rel: '.next/standalone', required: false },
+  { rel: 'public', required: false },
+];
+// Back-compatible list of the same roots. These are also the ONLY approved
+// targets for symlinks found inside them.
+const ARTIFACT_DIRS = SCAN_ROOTS.map((r) => r.rel);
+
+// AURA-PALM-G5-I1-R3/R4 -- content signatures, matched as BYTES in every
+// regular file under the scan roots and in every entry of every supported
+// archive (see below), whatever its name or extension. Each rule is
+// evidence-based (pinned to the installed package / real model by
+// test/palmG5I1R3ScannerHardening.test.ts) and specific enough that ordinary
+// application assets and prose that merely mentions "MediaPipe" do not match.
+//
+// WHAT THIS DOES NOT DETECT (documented residual limitation, R3-N2): content
+// that is transformed before it is stored -- base64/data URLs, UTF-16,
+// arbitrary encodings, encryption, minifier renaming of the signature
+// strings, or compression formats other than those listed below. Detection
+// is signature-based, not semantic.
+const MEDIAPIPE_ARTIFACT_SIGNATURES = [
+  'node_modules/@mediapipe/', // package path, e.g. in source-map "sources"
+  'hand_landmarks_detector.tflite', // entry name inside hand_landmarker.task
+  'hand_detector.tflite', // entry name inside hand_landmarker.task
+];
+// Header-gated rules: only applied when the file's own leading bytes say
+// what it is (so arbitrary binaries are never judged by loose words).
+const WASM_MAGIC = Buffer.from([0x00, 0x61, 0x73, 0x6d]); // "\0asm"
+const WASM_MEDIAPIPE_MARKERS = ['mediapipe', 'HandLandmarker'];
+const TFLITE_IDENTIFIER = Buffer.from('TFL3'); // FlatBuffer file identifier at offset 4
+
+// AURA-PALM-G5-I1-R4/R4.1/R4.2/R4.3 -- supported archive formats, recognised
+// by CONTENT (never by file name):
+//   - ZIP: any end-of-central-directory record for which a central-directory
+//     signature exists where a known reader looks for it -- at
+//     (EOCD - directory size) OR at the absolute directory offset (Info-ZIP's
+//     "Compensating" fallback, R4.3) -- wherever it sits (prefix, SFX stub or
+//     trailing bytes allowed), or a local-file header at offset 0 (where
+//     streaming readers start). Recognition never depends on local-header
+//     plausibility; a "plausible" local header elsewhere only adds
+//     candidates. Methods: stored (0) and deflate (8). The archive at the LAST
+//     EOCD must be reachable through the relative location and pass the
+//     strict parser (an absolute-only location fails closed). Every other
+//     interpretation must lie wholly inside the data of a strictly validated,
+//     non-directory entry of that archive (stored or deflated): it is then a
+//     nested archive, inspected as that entry's content (R4.2/R4.3); anything
+//     else fails closed. Local headers must agree with the central directory (method,
+//     flags, CRC, sizes); declared data descriptors must be present and match;
+//     every local-header signature outside entry data must be an entry start.
+//     Bytes before/after the archive, comments and extra fields are inspected
+//     (extra fields > 4 KiB fail closed).
+//   - GZIP (incl. .tar.gz/.tgz): parsed member by member (RFC 1952). Every
+//     input byte must belong to a member (header, deflate stream, CRC/ISIZE
+//     trailer); multi-member streams are decompressed in full; any other
+//     trailing data fails closed. FHCRC is verified. FEXTRA, FNAME and
+//     FCOMMENT are inspected like entry data (signatures + nested archives).
+//     The decompressed stream is byte-scanned; if it is a tar archive its
+//     entries are inspected as well.
+//   - TAR (uncompressed or inside gzip): recognised by header checksum (with a
+//     non-zero first header byte), so v7, ustar, GNU and pax archives are all
+//     covered; a header with an empty first byte, or one whose checksum only
+//     validates as signed, is not recognised as tar and is byte-scanned only.
+//     Every byte is accounted for: headers (unused fields must be zero), entry
+//     data, pax records and GNU long-name/long-link payloads (inspected like
+//     entry data), padding (must be zero) and the end-of-archive marker
+//     (trailing data must be zero).
+// R4.2 cross-format rule: the first recognised format only selects the
+// parser. Bytes that are BOTH gzip and tar fail closed; any ZIP structure in
+// the raw bytes of a gzip or tar container must lie wholly inside a region
+// that is itself inspected (tar entry data, gzip header field) or appear
+// byte-for-byte in the decompressed output; ZIP signatures in tar header or
+// padding bytes fail closed; a ZIP in a container's raw bytes that is reachable
+// only through an absolute directory offset (position-dependent, R4.3) fails
+// closed. Otherwise the input is ambiguous: fail closed.
+// Entries are inspected IN MEMORY (never extracted to disk) with the same
+// signature and name rules as plain files; archives inside archives are
+// inspected up to INSPECTION_LIMITS.maxNestedArchiveDepth levels.
+// Every decompression is hard-capped on ACTUAL output (zlib maxOutputLength,
+// set to the declared size, or 1 byte when 0 is declared, and never above the
+// remaining budget); the deflate stream must consume exactly the entry's data.
+// FAIL-CLOSED (blocking scan error) on: malformed or truncated structures,
+// competing ZIP interpretations (several central directories, unreferenced
+// local headers), cross-format/polyglot interpretations (R4.2), local/central
+// header disagreement, missing or inconsistent data descriptors, a bad gzip
+// header CRC, ZIP64, multi-disk, encrypted or password-protected entries,
+// unsupported compression methods, CRC or size mismatches, overlapping or
+// unreferenced regions, directory entries carrying data, duplicate or unsafe
+// entry paths (absolute, "..", backslash, control characters), link/device
+// entries, non-zero tar padding or unused header fields, global pax headers,
+// pax size/link/sparse overrides, gzip trailing data, nesting beyond the
+// depth limit, and any resource-limit violation.
+// NOT supported (therefore not inspected): other compressors (bzip2, xz,
+// zstd, brotli, lzma), 7z/rar/cab, ZIP64 (fails closed), and payloads that are
+// encoded rather than archived (base64, UTF-16, ...): see the file header.
+const ZIP_EOCD_SIG = 0x06054b50;
+const ZIP_CD_SIG = 0x02014b50;
+const ZIP_LOCAL_SIG = 0x04034b50;
+const ZIP64_LOCATOR_SIG = 0x07064b50;
+const ZIP_DESC_SIG = 0x08074b50;
+
+// Bounded, deterministic inspection limits (CI-safe). Exceeding any of them
+// is a blocking scan error, never a silent skip.
+const INSPECTION_LIMITS = Object.freeze({
+  maxFileBytes: 256 * 1024 * 1024, // one regular file
+  maxTotalBytes: 4 * 1024 * 1024 * 1024, // all regular-file bytes read
+  maxFiles: 250000, // regular files + archive entries
+  maxDepth: 64, // directory depth
+  chunkBytes: 1024 * 1024, // regular files are read in chunks of this size
+  // Archives (R4/R4.1). An archive file and each decompressed entry are held
+  // in memory. Every inflate is capped on actual output, and zlib's sync API
+  // may briefly hold the output twice while assembling it, so peak extra
+  // memory is bounded by roughly
+  // maxArchiveBytes + maxNestedArchiveDepth * 2 * maxArchiveEntryBytes
+  // (~448 MiB worst case with the values below; measured far lower in tests).
+  maxArchiveBytes: 64 * 1024 * 1024, // compressed size of one archive file
+  maxArchiveEntryBytes: 64 * 1024 * 1024, // one decompressed entry / gzip stream
+  maxArchiveDecompressedBytes: 256 * 1024 * 1024, // all entries of one top-level archive, nested included
+  maxTotalDecompressedBytes: 1024 * 1024 * 1024, // whole scan
+  maxCompressionRatio: 200, // applied to entries/streams of >= 1 MiB decompressed
+  maxArchiveEntries: 10000, // per archive
+  maxNestedArchiveDepth: 3, // archive at depth 1 = a file; deeper ones are errors
+  maxScanMs: 10 * 60 * 1000, // overall work-time budget
+});
+
+function signatureSet() {
+  const always = [...IMAGE_INPUT_SENTINELS, ...MEDIAPIPE_SENTINELS, ...MEDIAPIPE_ARTIFACT_SIGNATURES].map((s) => ({ label: s, bytes: Buffer.from(s, 'utf8') }));
+  const wasm = WASM_MEDIAPIPE_MARKERS.map((s) => ({ label: `WASM binary with MediaPipe symbol "${s}"`, bytes: Buffer.from(s, 'utf8') }));
+  return { always, wasm, maxLen: Math.max(...[...always, ...wasm].map((x) => x.bytes.length)) };
+}
+
+/**
+ * Search one file's bytes in bounded chunks (overlapping by the longest
+ * signature). R4.1: also records where ZIP local-header / end-of-central-
+ * directory signatures occur (bounded), so ZIP structures are found wherever
+ * they sit in the file, not only at its start or end.
+ */
+function inspectFileBytes(file, size, sigs, limits) {
+  const found = new Set();
+  const zipPositions = new Set();
+  let zipOverflow = false;
+  const zipSigs = [Buffer.from([0x50, 0x4b, 0x03, 0x04]), Buffer.from([0x50, 0x4b, 0x05, 0x06])];
+  const fd = fs.openSync(file, 'r');
+  try {
+    const head = Buffer.alloc(8);
+    const headLen = fs.readSync(fd, head, 0, 8, 0);
+    const isWasm = headLen >= 4 && head.subarray(0, 4).equals(WASM_MAGIC);
+    if (headLen >= 8 && head.subarray(4, 8).equals(TFLITE_IDENTIFIER)) found.add('TFLite model (TFL3 file identifier)');
+    const active = isWasm ? [...sigs.always, ...sigs.wasm] : sigs.always;
+    const overlap = sigs.maxLen - 1;
+    const buf = Buffer.alloc(limits.chunkBytes + overlap);
+    let carry = 0;
+    let pos = 0;
+    while (pos < size) {
+      const n = fs.readSync(fd, buf, carry, limits.chunkBytes, pos);
+      if (n <= 0) break;
+      const view = buf.subarray(0, carry + n);
+      const viewStart = pos - carry;
+      for (const sig of active) if (!found.has(sig.label) && view.indexOf(sig.bytes) !== -1) found.add(sig.label);
+      for (const zs of zipSigs) {
+        let i = view.indexOf(zs);
+        while (i !== -1) {
+          zipPositions.add(viewStart + i);
+          if (zipPositions.size > 4096) { zipOverflow = true; break; }
+          i = view.indexOf(zs, i + 1);
+        }
+      }
+      pos += n;
+      carry = Math.min(overlap, view.length);
+      view.copy(buf, 0, view.length - carry, view.length);
+    }
+  } finally {
+    fs.closeSync(fd);
+  }
+  return { labels: [...found], zipPositions: [...zipPositions], zipOverflow };
+}
+
+/** For files too large to load: does any recorded ZIP signature position look like a real ZIP structure? */
+function largeFileHasPlausibleZip(file, size, positions, overflow) {
+  if (overflow) return true;
+  const fd = fs.openSync(file, 'r');
+  try {
+    for (const p of positions) {
+      const b = Buffer.alloc(Math.min(30 + 4096, size - p));
+      fs.readSync(fd, b, 0, b.length, p);
+      if (b.length >= 4 && b.readUInt32LE(0) === ZIP_LOCAL_SIG && (p === 0 || plausibleLocalHeader(b, 0))) return true; // R4.2: offset 0 always (streaming readers)
+      if (b.length >= 22 && b.readUInt32LE(0) === ZIP_EOCD_SIG) {
+        const disk = b.readUInt16LE(4), cdDisk = b.readUInt16LE(6), nDisk = b.readUInt16LE(8), nTotal = b.readUInt16LE(10), cdSize = b.readUInt32LE(12);
+        if (disk === 0 && cdDisk === 0 && nDisk === nTotal && cdSize <= p) return true;
+        // R4.3 (R42-IV-F1): a central-directory signature at either location a reader tries (relative or absolute).
+        const cdOffset = b.readUInt32LE(16), sig = Buffer.alloc(4);
+        for (const at of [p - cdSize, cdOffset]) if (at >= 0 && at + 4 <= size && fs.readSync(fd, sig, 0, 4, at) === 4 && sig.readUInt32LE(0) === ZIP_CD_SIG) return true;
+      }
+    }
+  } finally { fs.closeSync(fd); }
+  return false;
+}
+
+/** The same rules as inspectFileBytes, for an in-memory buffer (archive entries). */
+function inspectBufferBytes(buf, sigs) {
+  const found = new Set();
+  const isWasm = buf.length >= 4 && buf.subarray(0, 4).equals(WASM_MAGIC);
+  if (buf.length >= 8 && buf.subarray(4, 8).equals(TFLITE_IDENTIFIER)) found.add('TFLite model (TFL3 file identifier)');
+  for (const sig of isWasm ? [...sigs.always, ...sigs.wasm] : sigs.always) if (buf.indexOf(sig.bytes) !== -1) found.add(sig.label);
+  return [...found];
+}
+
+function nameRule(norm, base) {
+  if (/(^|\/)@mediapipe(\/|$)/.test(norm)) return 'MediaPipe package file';
+  if (/(^|\/)palm-dev-assets(\/|$)/.test(norm)) return 'development-only MediaPipe asset';
+  if (/\.task$/i.test(base)) return 'model bundle (.task)';
+  if (/vision_wasm|hand_landmarker/i.test(base)) return 'MediaPipe runtime/model file';
+  return null;
+}
+
+// ------------------------------------------------------------------ archives (R4 + R4.1)
+class ArchiveError extends Error {}
+
+const crc32 = (() => {
+  if (typeof zlib.crc32 === 'function') return (b) => zlib.crc32(b) >>> 0;
+  const t = new Uint32Array(256);
+  for (let n = 0; n < 256; n++) { let c = n; for (let k = 0; k < 8; k++) c = c & 1 ? 0xedb88320 ^ (c >>> 1) : c >>> 1; t[n] = c >>> 0; }
+  return (b) => { let c = 0xffffffff; for (const x of b) c = t[(c ^ x) & 0xff] ^ (c >>> 8); return (c ^ 0xffffffff) >>> 0; };
+})();
+
+const ZIP_LOCAL_BYTES = Buffer.from([0x50, 0x4b, 0x03, 0x04]);
+const ZIP_EOCD_BYTES = Buffer.from([0x50, 0x4b, 0x05, 0x06]);
+const KNOWN_ZIP_METHODS = new Set([0, 1, 2, 3, 4, 5, 6, 8, 9, 10, 12, 14, 18, 19, 93, 94, 95, 96, 97, 98, 99]);
+const MAX_ZIP_EXTRA_BYTES = 4096; // per entry (local or central); larger extra fields fail closed
+const MAX_SIG_POSITIONS = 4096; // signature occurrences examined per buffer/file before failing closed
+// R4.3: central-directory records walked per buffer across ALL structural views (bounds memory and CPU; more fails closed).
+const MAX_CD_RECORDS_PER_BUFFER = 100000;
+
+/** All offsets of `needle` in `buf` (bounded). */
+function allPositions(buf, needle, from = 0, to = buf.length) {
+  const out = [];
+  let i = buf.indexOf(needle, from);
+  while (i !== -1 && i < to) {
+    out.push(i);
+    if (out.length > MAX_SIG_POSITIONS) throw new ArchiveError('too many ZIP signature occurrences to inspect safely');
+    i = buf.indexOf(needle, i + 1);
+  }
+  return out;
+}
+
+/**
+ * R4.1: a ZIP local-file header is "plausible" when its fixed fields have
+ * values real archivers write (version, a known method, a sane non-empty
+ * name). Random data almost never satisfies all of them, so a plausible
+ * header that the central directory does not account for is treated as a
+ * concatenated or embedded archive (fail closed), not as noise.
+ */
+function plausibleLocalHeader(buf, pos) {
+  if (pos + 30 > buf.length || buf.readUInt32LE(pos) !== ZIP_LOCAL_SIG) return false;
+  if ((buf.readUInt16LE(pos + 4) & 0xff) > 63) return false;
+  if (!KNOWN_ZIP_METHODS.has(buf.readUInt16LE(pos + 8))) return false;
+  const nlen = buf.readUInt16LE(pos + 26);
+  if (nlen < 1 || nlen > 4096 || pos + 30 + nlen > buf.length) return false;
+  return buf.subarray(pos + 30, pos + 30 + nlen).indexOf(0) === -1;
+}
+
+/** Entry paths are untrusted metadata: only ever displayed, never used to touch the filesystem. */
+function checkEntryPath(name) {
+  if (name.length === 0) throw new ArchiveError('empty entry path');
+  if (/[\x00-\x1f\x7f]/.test(name)) throw new ArchiveError('unsafe entry path (control characters)');
+  if (name.includes('\\')) throw new ArchiveError('unsafe entry path (backslash)');
+  if (name.startsWith('/') || /^[A-Za-z]:/.test(name)) throw new ArchiveError('unsafe entry path (absolute)');
+  if (name.split('/').includes('..')) throw new ArchiveError('unsafe entry path (".." traversal)');
+}
+
+/**
+ * R4.1 bounded raw inflate. `cap` is a hard limit on ACTUAL output bytes
+ * (zlib aborts as soon as it is exceeded; nothing is allocated from
+ * metadata). Returns the output and the exact number of input bytes the
+ * deflate stream consumed, so callers can account for every input byte.
+ */
+function inflateRawBounded(input, cap, label) {
+  if (input.length === 0) throw new ArchiveError(`empty deflate stream for "${label}"`);
+  let r;
+  try { r = zlib.inflateRawSync(input, { maxOutputLength: Math.max(1, cap), info: true }); } catch (err) {
+    if (err && err.code === 'ERR_BUFFER_TOO_LARGE') throw new ArchiveError(`decompressed output exceeds its limit (${cap} bytes) for "${label}"`);
+    throw new ArchiveError(`decompression error (corrupt or truncated deflate data) for "${label}" (${err.code || err.message})`);
+  }
+  return { out: r.buffer, consumed: r.engine.bytesWritten };
+}
+
+/** Parse the central directory that belongs to the EOCD record at `eocd` (trailing bytes after it are allowed). */
+function parseZipCentralDirectory(buf, eocd, limits) {
+  if (eocd + 22 > buf.length) throw new ArchiveError('malformed ZIP (end-of-central-directory record truncated)');
+  const commentLen = buf.readUInt16LE(eocd + 20);
+  const eocdEnd = eocd + 22 + commentLen;
+  if (eocdEnd > buf.length) throw new ArchiveError('malformed ZIP (archive comment truncated)');
+  if (eocd >= 20 && buf.readUInt32LE(eocd - 20) === ZIP64_LOCATOR_SIG) throw new ArchiveError('ZIP64 archives are not supported');
+  const disk = buf.readUInt16LE(eocd + 4), cdDisk = buf.readUInt16LE(eocd + 6);
+  const nDisk = buf.readUInt16LE(eocd + 8), nTotal = buf.readUInt16LE(eocd + 10);
+  const cdSize = buf.readUInt32LE(eocd + 12), cdOffset = buf.readUInt32LE(eocd + 16);
+  if (disk !== 0 || cdDisk !== 0 || nDisk !== nTotal) throw new ArchiveError('multi-disk ZIP archives are not supported');
+  if (nTotal === 0xffff || cdSize === 0xffffffff || cdOffset === 0xffffffff) throw new ArchiveError('ZIP64 archives are not supported');
+  if (nTotal > limits.maxArchiveEntries) throw new ArchiveError(`archive entry-count limit (${limits.maxArchiveEntries}) exceeded`);
+  const cdStart = eocd - cdSize;
+  const delta = cdStart - cdOffset; // bytes prepended before the archive (e.g. hand_landmarker.task, SFX stubs)
+  if (cdStart < 0 || delta < 0) throw new ArchiveError('malformed ZIP (central directory out of range)');
+  const entries = [];
+  const meta = [];
+  const names = new Set();
+  let p = cdStart;
+  for (let i = 0; i < nTotal; i++) {
+    if (p + 46 > eocd || buf.readUInt32LE(p) !== ZIP_CD_SIG) throw new ArchiveError('malformed ZIP (bad central-directory entry)');
+    const flags = buf.readUInt16LE(p + 8), method = buf.readUInt16LE(p + 10);
+    const crc = buf.readUInt32LE(p + 16), csize = buf.readUInt32LE(p + 20), usize = buf.readUInt32LE(p + 24);
+    const nlen = buf.readUInt16LE(p + 28), elen = buf.readUInt16LE(p + 30), clen = buf.readUInt16LE(p + 32);
+    const extAttr = buf.readUInt32LE(p + 38), lho = buf.readUInt32LE(p + 42);
+    if (p + 46 + nlen + elen + clen > eocd) throw new ArchiveError('malformed ZIP (central-directory entry overruns)');
+    const name = buf.toString('utf8', p + 46, p + 46 + nlen);
+    if (elen > MAX_ZIP_EXTRA_BYTES) throw new ArchiveError(`oversized ZIP extra field (${elen} bytes) for "${name}"`);
+    if (elen) meta.push({ label: `<central extra of ${name}>`, data: buf.subarray(p + 46 + nlen, p + 46 + nlen + elen) });
+    if (clen) meta.push({ label: `<comment of ${name}>`, data: buf.subarray(p + 46 + nlen + elen, p + 46 + nlen + elen + clen) });
+    p += 46 + nlen + elen + clen;
+    checkEntryPath(name);
+    if (names.has(name)) throw new ArchiveError(`duplicate entry path "${name}"`);
+    names.add(name);
+    if (flags & 0x1 || flags & 0x40 || method === 99) throw new ArchiveError(`encrypted or password-protected entry "${name}"`);
+    if (csize === 0xffffffff || usize === 0xffffffff || lho === 0xffffffff) throw new ArchiveError('ZIP64 entries are not supported');
+    const unixType = (extAttr >>> 16) & 0o170000;
+    if (unixType === 0o120000) throw new ArchiveError(`link entry "${name}" is not supported`);
+    if (unixType !== 0 && unixType !== 0o100000 && unixType !== 0o040000) throw new ArchiveError(`special entry "${name}" is not supported`);
+    if (method !== 0 && method !== 8) throw new ArchiveError(`unsupported compression method ${method} for "${name}"`);
+    const lh = lho + delta;
+    if (lh + 30 > cdStart || buf.readUInt32LE(lh) !== ZIP_LOCAL_SIG) throw new ArchiveError(`malformed ZIP (bad local header for "${name}")`);
+    const lnlen = buf.readUInt16LE(lh + 26), lelen = buf.readUInt16LE(lh + 28);
+    if (buf.toString('utf8', lh + 30, lh + 30 + lnlen) !== name) throw new ArchiveError(`entry path mismatch between local header and central directory ("${name}")`);
+    if (lelen > MAX_ZIP_EXTRA_BYTES) throw new ArchiveError(`oversized ZIP extra field (${lelen} bytes) for "${name}"`);
+    if (lelen) meta.push({ label: `<local extra of ${name}>`, data: buf.subarray(lh + 30 + lnlen, lh + 30 + lnlen + lelen) });
+    const dataStart = lh + 30 + lnlen + lelen;
+    const dataEnd = dataStart + csize;
+    if (dataEnd > cdStart) throw new ArchiveError(`truncated ZIP entry "${name}"`);
+    // R4.2 (IV1-F2): streaming readers trust the LOCAL header, so its fields
+    // must agree with the central directory (one interpretation per entry).
+    const lflags = buf.readUInt16LE(lh + 6), lmethod = buf.readUInt16LE(lh + 8);
+    const lcrc = buf.readUInt32LE(lh + 14), lcsize = buf.readUInt32LE(lh + 18), lusize = buf.readUInt32LE(lh + 22);
+    if (lmethod !== method || ((lflags ^ flags) & 0x49) !== 0) throw new ArchiveError(`local header disagrees with central directory (method/flags) for "${name}"`);
+    if (flags & 0x8) {
+      if ((lcrc !== 0 && lcrc !== crc) || (lcsize !== 0 && lcsize !== csize) || (lusize !== 0 && lusize !== usize)) throw new ArchiveError(`local header disagrees with central directory (CRC/sizes) for "${name}"`);
+    } else if (lcrc !== crc || lcsize !== csize || lusize !== usize) throw new ArchiveError(`local header disagrees with central directory (CRC/sizes) for "${name}"`);
+    // R4.2 (IV1-F2): a declared data descriptor must be present and must match
+    // the central directory exactly (optional signature + CRC + sizes).
+    let end = dataEnd;
+    if (flags & 0x8) {
+      const hasSig = dataEnd + 4 <= cdStart && buf.readUInt32LE(dataEnd) === ZIP_DESC_SIG;
+      const d = dataEnd + (hasSig ? 4 : 0);
+      if (d + 12 > cdStart || buf.readUInt32LE(d) !== crc || buf.readUInt32LE(d + 4) !== csize || buf.readUInt32LE(d + 8) !== usize) throw new ArchiveError(`missing or inconsistent data descriptor for "${name}"`);
+      end = d + 12;
+    }
+    const isDir = name.endsWith('/') || unixType === 0o040000;
+    entries.push({ name, method, flags, crc, csize, usize, dataStart, dataEnd, end, start: lh, isDir });
+  }
+  if (p !== eocd) throw new ArchiveError('malformed ZIP (central-directory size mismatch)');
+  if (commentLen) meta.push({ label: '<archive comment>', data: buf.subarray(eocd + 22, eocdEnd) });
+  return { entries, meta, cdStart, eocd, eocdEnd };
+}
+
+/**
+ * R4.2 (IV1-F1/F2/F3) + R4.3 (R42-IV-F1): STRUCTURAL views of the ZIP(s) that
+ * a stock reader could see from the EOCD record at `eocd`. Deliberately
+ * broader than the supported subset (no disk-number, prefix-sign, method,
+ * entry-count, tiling or local-header plausibility requirement).
+ *
+ * An EOCD yields a view for EACH place a known reader looks for the central
+ * directory, whenever a central-directory signature is actually there:
+ *   - 'relative': eocd - cdSize (Python zipfile, libarchive; Info-ZIP first);
+ *   - 'absolute': cdOffset as an absolute file offset (Info-ZIP's
+ *     "reported length of central directory is ... too long. Compensating..."
+ *     fallback, R42-IV-F1), local headers then also absolute.
+ * Requiring a real CD signature at the resolved position (two independent
+ * signatures linked by the EOCD fields) keeps random signature bytes from
+ * counting. An empty archive (cdSize 0, no entries) and ZIP64 markers also
+ * count. Records are walked while signatures continue (bounded by
+ * maxArchiveEntries + 1 per view and MAX_CD_RECORDS_PER_BUFFER across all
+ * views of one buffer, beyond which the buffer fails closed); `tiled` says
+ * whether they end exactly at the EOCD.
+ */
+function zipStructuralViews(buf, eocd, limits, budget = { left: MAX_CD_RECORDS_PER_BUFFER }) {
+  if (eocd < 0 || eocd + 22 > buf.length || buf.readUInt32LE(eocd) !== ZIP_EOCD_SIG) return [];
+  const eocdEnd = Math.min(buf.length, eocd + 22 + buf.readUInt16LE(eocd + 20));
+  const nTotal = buf.readUInt16LE(eocd + 10), cdSize = buf.readUInt32LE(eocd + 12), cdOffset = buf.readUInt32LE(eocd + 16);
+  if ((eocd >= 20 && buf.readUInt32LE(eocd - 20) === ZIP64_LOCATOR_SIG) || nTotal === 0xffff || cdSize === 0xffffffff || cdOffset === 0xffffffff) {
+    return [{ eocd, eocdEnd, cdStart: eocd, spanStart: Math.max(0, eocd - 20), mode: 'zip64', zip64: true, entries: [] }];
+  }
+  const views = [];
+  const relStart = eocd - cdSize;
+  const walk = (cdStart, delta, mode) => {
+    if (cdStart < 0 || cdStart > eocd) return;
+    if (cdStart === eocd) { if (cdSize === 0 && nTotal === 0) views.push({ eocd, eocdEnd, cdStart, spanStart: cdStart, mode, tiled: true, entries: [] }); return; }
+    if (cdStart + 46 > buf.length || buf.readUInt32LE(cdStart) !== ZIP_CD_SIG) return;
+    const entries = [];
+    let p = cdStart;
+    while (p < eocd && p + 46 <= buf.length && buf.readUInt32LE(p) === ZIP_CD_SIG) {
+      if (entries.length > limits.maxArchiveEntries) { views.push({ eocd, eocdEnd, cdStart, spanStart: cdStart, mode, tooMany: true, entries: [] }); return; }
+      if (--budget.left < 0) throw new ArchiveError(`too many ZIP central-directory records to inspect safely (> ${MAX_CD_RECORDS_PER_BUFFER} per buffer)`);
+      const method = buf.readUInt16LE(p + 10), csize = buf.readUInt32LE(p + 20);
+      const nlen = buf.readUInt16LE(p + 28), elen = buf.readUInt16LE(p + 30), clen = buf.readUInt16LE(p + 32);
+      const lh = buf.readUInt32LE(p + 42) + delta;
+      let dataStart = -1, dataEnd = -1;
+      if (lh >= 0 && lh + 30 <= buf.length && buf.readUInt32LE(lh) === ZIP_LOCAL_SIG) {
+        dataStart = lh + 30 + buf.readUInt16LE(lh + 26) + buf.readUInt16LE(lh + 28);
+        dataEnd = dataStart + csize;
+      }
+      entries.push({ method, start: lh, dataStart, dataEnd });
+      p += 46 + nlen + elen + clen;
+    }
+    // R4.3: the span covers every CLAIMED local-header position (resolvable or
+    // not), so a structure whose parts sit in different regions never looks contained.
+    let spanStart = cdStart;
+    for (const e of entries) if (e.start >= 0 && e.start < spanStart) spanStart = e.start;
+    views.push({ eocd, eocdEnd, cdStart, spanStart, mode, tiled: p === eocd, entries });
+  };
+  walk(relStart, relStart - cdOffset, 'relative');
+  if (cdOffset !== relStart) walk(cdOffset, 0, 'absolute');
+  return views;
+}
+
+/** Every structural ZIP interpretation in `buf` (bounded by MAX_SIG_POSITIONS EOCD candidates). */
+function zipInterpretations(buf, limits) {
+  const out = [];
+  const budget = { left: MAX_CD_RECORDS_PER_BUFFER };
+  for (const e of allPositions(buf, ZIP_EOCD_BYTES)) out.push(...zipStructuralViews(buf, e, limits, budget));
+  return out;
+}
+
+/**
+ * True when `buf` contains a ZIP structure a standard tool could read:
+ * R4.2/R4.3 -- any structural EOCD interpretation (relative OR absolute
+ * central-directory location, see zipStructuralViews), or a local-file header
+ * at offset 0 (where streaming readers start, whatever its field values).
+ * Recognition does NOT depend on local-header plausibility (R42-IV-F1); the
+ * "plausible local header anywhere" test only adds candidates (more inputs
+ * fail closed, never fewer).
+ */
+function hasZipStructure(buf, limits = INSPECTION_LIMITS) {
+  if (buf.length >= 4 && buf.readUInt32LE(0) === ZIP_LOCAL_SIG) return true;
+  if (zipInterpretations(buf, limits).length) return true;
+  for (const l of allPositions(buf, ZIP_LOCAL_BYTES)) if (plausibleLocalHeader(buf, l)) return true;
+  return false;
+}
+
+/**
+ * R4.2 (IV1-F1): every ZIP interpretation of a gzip or tar container's RAW
+ * bytes must be wholly inside a region whose exact bytes are inspected as a
+ * nested archive (tar entry data, gzip header fields), or appear byte-for-byte
+ * in the decompressed output (`copy`, e.g. deflate stored blocks) where the
+ * same rules inspect it. Anything else is a cross-format (polyglot)
+ * interpretation that no inspected view contains: fail closed.
+ */
+function assertZipInterpretationsAccounted(buf, regions, copy, kind, limits) {
+  for (const v of zipInterpretations(buf, limits)) {
+    const start = v.spanStart, end = v.eocdEnd;
+    // R4.3: an absolute-offset interpretation depends on where the bytes sit in
+    // THIS file, so a nested view of a sub-region cannot reproduce it: fail closed.
+    if (v.mode === 'absolute') throw new ArchiveError(`ambiguous archive: the raw bytes of this ${kind} container form a ZIP archive reachable only through an absolute central-directory offset (bytes ${start}-${end}; reader-fallback interpretation)`);
+    if (regions.some((r) => start >= r.start && end <= r.end)) continue;
+    if (copy && copy.indexOf(buf.subarray(start, end)) !== -1) continue;
+    throw new ArchiveError(`ambiguous archive: the raw bytes of this ${kind} container also form a ZIP archive (bytes ${start}-${end}) that is not wholly inside any inspected region (cross-format/polyglot interpretation)`);
+  }
+}
+
+function parseZipEntries(buf, limits) {
+  // R4.1 (N2/N3) + R4.2: consider EVERY end-of-central-directory candidate,
+  // wherever it is, by STRUCTURE (what any reader could use), not only those
+  // the strict parser accepts.
+  let interps = zipInterpretations(buf, limits);
+  if (interps.length === 0) {
+    // Report the most specific strict-parser reason (ZIP64, multi-disk, ...).
+    let lastErr = null;
+    for (const e of allPositions(buf, ZIP_EOCD_BYTES)) { try { parseZipCentralDirectory(buf, e, limits); } catch (err) { lastErr = err; } }
+    throw (lastErr instanceof ArchiveError && !/end-of-central-directory record truncated/.test(lastErr.message) ? lastErr : new ArchiveError('malformed or truncated ZIP (no valid end-of-central-directory record)'));
+  }
+  // R4.3 (R42-IV-F1/F2): the interpretation a stock seekable reader uses is
+  // the one at the LAST end-of-central-directory record. It must be reachable
+  // through the relative location (the only one the strict parser accepts)
+  // and strictly validate; a disagreeing or absolute-only location is a
+  // reader-fallback interpretation: fail closed (never "no archive").
+  const lastEocd = Math.max(...interps.map((v) => v.eocd));
+  const top = interps.find((v) => v.eocd === lastEocd && v.mode !== 'absolute');
+  if (!top) throw new ArchiveError('ambiguous ZIP: the central directory is reachable only through the absolute-offset fallback (inconsistent EOCD size/offset; Info-ZIP "compensating" interpretation)');
+  const z = parseZipCentralDirectory(buf, lastEocd, limits); // strict: unsupported features fail closed here
+  // R4.3 (R42-IV-F2): EVERY other interpretation is exempt as a nested archive
+  // only when it lies wholly inside the data of a STRICTLY VALIDATED,
+  // non-directory entry of that top-level archive (CD/local agreement, bounds
+  // and tiling checked below; CRC and size on load). Boundaries claimed by
+  // any other, unvalidated structure never grant an exemption. The nested
+  // content is then inspected recursively (depth- and budget-limited).
+  // The absolute-offset view of the top EOCD (when it differs from the
+  // relative one) is treated like any other competing view.
+  const nEocd = new Set(interps.map((x) => x.eocd)).size;
+  for (const v of interps) {
+    if (v === top) continue;
+    if (z.entries.some((e) => !e.isDir && v.spanStart >= e.dataStart && v.eocdEnd <= e.dataEnd)) continue;
+    if (nEocd === 1) throw new ArchiveError('ambiguous ZIP: the end-of-central-directory record resolves to two different central directories (relative and absolute offsets disagree)');
+    throw new ArchiveError(`multiple ZIP central directories (${nEocd}): concatenated or embedded archives with competing interpretations (a central directory outside the validated entries of the top-level archive)`);
+  }
+  const entries = z.entries;
+  // Every byte between the first local header and the central directory must
+  // belong to an entry: local header, data and (R4.2) a VALIDATED data
+  // descriptor when one is declared. No gaps, no overlaps.
+  const sorted = [...entries].sort((a, b) => a.start - b.start);
+  let cursor = sorted.length ? sorted[0].start : z.cdStart;
+  for (const e of sorted) {
+    if (e.start < cursor) throw new ArchiveError('overlapping ZIP entries');
+    if (e.start !== cursor) throw new ArchiveError('unreferenced bytes inside ZIP archive');
+    cursor = e.end;
+  }
+  if (z.cdStart !== cursor) throw new ArchiveError('unreferenced bytes inside ZIP archive');
+  // N3 + R4.2 (IV1-F2): ANY local-file-header signature that is not an entry
+  // start and not inside an entry's data is a second (concatenated, embedded or
+  // streaming-only) archive -- decided by position, not by whether its
+  // author-controlled fields look "plausible".
+  const starts = new Set(entries.map((e) => e.start));
+  for (const pos of allPositions(buf, ZIP_LOCAL_BYTES)) {
+    if (starts.has(pos)) continue;
+    if (entries.some((e) => pos >= e.dataStart && pos < e.dataEnd)) continue;
+    throw new ArchiveError('unreferenced ZIP local file header (concatenated, embedded or streaming-only archive)');
+  }
+  const prefixEnd = sorted.length ? sorted[0].start : z.cdStart;
+  const regions = [];
+  if (prefixEnd > 0) regions.push({ label: '<zip prefix>', data: buf.subarray(0, prefixEnd) });
+  if (z.eocdEnd < buf.length) regions.push({ label: '<zip suffix>', data: buf.subarray(z.eocdEnd) });
+  for (const m of z.meta) regions.push(m);
+  return {
+    regions,
+    entries: entries.map((e) => ({
+      name: e.name,
+      isDir: e.isDir,
+      load: (budget) => {
+        // N6: a directory entry must carry no data at all.
+        if (e.isDir && e.usize !== 0) throw new ArchiveError(`directory entry with data "${e.name}"`);
+        budget.reserve(e.usize, e.name); // declared size must fit the limits before anything is decompressed
+        if (e.usize >= 1024 * 1024 && e.usize / Math.max(1, e.csize) > limits.maxCompressionRatio) throw new ArchiveError(`compression-ratio limit (${limits.maxCompressionRatio}) exceeded for "${e.name}"`);
+        const raw = buf.subarray(e.dataStart, e.dataEnd);
+        let out;
+        if (e.method === 0) {
+          if (e.csize !== e.usize) throw new ArchiveError(`size mismatch in stored entry "${e.name}"`);
+          out = raw;
+        } else if (e.csize === 0 && e.usize === 0) {
+          out = Buffer.alloc(0);
+        } else {
+          // N5: the declared size is a HARD cap on actual output (1 byte when 0 is declared).
+          let r;
+          try { r = inflateRawBounded(raw, e.usize, e.name); } catch (err) {
+            if (/exceeds its limit/.test(err.message)) throw new ArchiveError(`decompression error or size above declared for "${e.name}" (actual output exceeds the declared ${e.usize} bytes)`);
+            throw err;
+          }
+          if (r.consumed !== raw.length) throw new ArchiveError(`deflate stream does not span the entry data (hidden trailing bytes) in "${e.name}"`);
+          out = r.out;
+        }
+        if (out.length !== e.usize) throw new ArchiveError(`decompressed size mismatch for "${e.name}"`);
+        if (crc32(out) !== e.crc) throw new ArchiveError(`CRC mismatch (corrupt entry) for "${e.name}"`);
+        if (e.isDir && out.length !== 0) throw new ArchiveError(`directory entry with data "${e.name}"`);
+        return out;
+      },
+    })),
+  };
+}
+
+function parseOctal(field, what) {
+  if (field[0] & 0x80) throw new ArchiveError(`unsupported tar base-256 ${what}`);
+  const s = field.toString('latin1').replace(/\0.*$/s, '').trim();
+  if (s === '') return 0;
+  if (!/^[0-7]+$/.test(s)) throw new ArchiveError(`malformed tar ${what}`);
+  return parseInt(s, 8);
+}
+
+/** R4.1 (N4): a tar header is recognised by its checksum and numeric fields (v7, ustar, GNU, pax), not by magic. */
+function isTarHeader(buf, off = 0) {
+  if (off + 512 > buf.length) return false;
+  const h = buf.subarray(off, off + 512);
+  if (h[0] === 0) return false;
+  try {
+    let sum = 0;
+    for (let i = 0; i < 512; i++) sum += i >= 148 && i < 156 ? 0x20 : h[i];
+    if (parseOctal(h.subarray(148, 156), 'checksum') !== sum) return false;
+    parseOctal(h.subarray(124, 136), 'size');
+    parseOctal(h.subarray(100, 108), 'mode');
+  } catch { return false; }
+  return true;
+}
+
+/**
+ * Treat as tar when the header validates (any format, incl. v7) OR when it
+ * carries the ustar magic -- in the latter case it is then parsed strictly,
+ * so a ustar/GNU archive with a corrupt header fails closed (R4 behaviour).
+ */
+function isTarCandidate(buf, off = 0) {
+  return isTarHeader(buf, off) || (off + 512 <= buf.length && buf.toString('latin1', off + 257, off + 262) === 'ustar');
+}
+
+/** Strict pax record parsing: "<len> <key>=<value>\n" records must tile the data exactly. */
+function parsePaxRecords(data) {
+  const rec = {};
+  let i = 0;
+  while (i < data.length) {
+    const sp = data.indexOf(0x20, i);
+    if (sp === -1 || sp - i > 20) throw new ArchiveError('malformed pax record');
+    const lenStr = data.toString('latin1', i, sp);
+    if (!/^[1-9][0-9]*$/.test(lenStr)) throw new ArchiveError('malformed pax record length');
+    const len = parseInt(lenStr, 10);
+    if (i + len > data.length || data[i + len - 1] !== 0x0a) throw new ArchiveError('malformed pax record (length mismatch)');
+    const kv = data.toString('utf8', sp + 1, i + len - 1);
+    const eq = kv.indexOf('=');
+    if (eq <= 0) throw new ArchiveError('malformed pax record (no key)');
+    rec[kv.slice(0, eq)] = kv.slice(eq + 1);
+    i += len;
+  }
+  return rec;
+}
+
+function parseTarEntries(buf, limits) {
+  const entries = [];
+  const names = new Set();
+  let off = 0;
+  let longName = null;
+  let paxPath = null;
+  let ended = false;
+  while (off + 512 <= buf.length) {
+    const h = buf.subarray(off, off + 512);
+    if (h.every((b) => b === 0)) {
+      if (!buf.subarray(off).every((b) => b === 0)) throw new ArchiveError('unexpected data after tar end-of-archive marker');
+      ended = true;
+      break;
+    }
+    let sum = 0;
+    for (let i = 0; i < 512; i++) sum += i >= 148 && i < 156 ? 0x20 : h[i];
+    if (parseOctal(h.subarray(148, 156), 'checksum') !== sum) throw new ArchiveError('tar header checksum mismatch (corrupt archive)');
+    const ustar = h.toString('latin1', 257, 262) === 'ustar';
+    // N7: header bytes no format defines must be zero (v7: 257-511; ustar/GNU: 500-511).
+    if (!h.subarray(ustar ? 500 : 257, 512).every((b) => b === 0)) throw new ArchiveError('nonzero bytes in unused tar header fields');
+    const size = parseOctal(h.subarray(124, 136), 'size');
+    const type = String.fromCharCode(h[156] || 0x30);
+    const dataStart = off + 512;
+    const dataEnd = dataStart + size;
+    const next = dataStart + Math.ceil(size / 512) * 512;
+    if (next > buf.length) throw new ArchiveError('truncated tar entry');
+    const data = buf.subarray(dataStart, dataEnd);
+    // N7: padding after the data must be zero.
+    if (!buf.subarray(dataEnd, next).every((b) => b === 0)) throw new ArchiveError('nonzero tar padding');
+    off = next;
+    if (entries.length + 1 > limits.maxArchiveEntries) throw new ArchiveError(`archive entry-count limit (${limits.maxArchiveEntries}) exceeded`);
+    if (type === 'L' || type === 'K') {
+      // GNU long name / long link: the payload is inspected like any entry data.
+      entries.push({ name: `<GNU long ${type === 'L' ? 'name' : 'link'} record>`, meta: true, range: { start: dataStart, end: dataEnd }, load: () => data });
+      if (type === 'L') longName = data.toString('utf8').replace(/\0+$/, '');
+      continue;
+    }
+    if (type === 'x') {
+      const rec = parsePaxRecords(data);
+      if (Object.keys(rec).some((k) => k === 'size' || k === 'linkpath' || k.startsWith('GNU.sparse.'))) throw new ArchiveError('unsupported pax header (size/link/sparse override)');
+      entries.push({ name: '<pax extended header>', meta: true, range: { start: dataStart, end: dataEnd }, load: () => data });
+      paxPath = Object.prototype.hasOwnProperty.call(rec, 'path') ? rec.path : null;
+      continue;
+    }
+    if (type === 'g') throw new ArchiveError('unsupported global pax header');
+    let name = h.toString('utf8', 0, 100).replace(/\0.*$/s, '');
+    if (ustar) {
+      const prefix = h.toString('utf8', 345, 500).replace(/\0.*$/s, '');
+      if (prefix) name = `${prefix}/${name}`;
+    }
+    if (paxPath !== null) name = paxPath;
+    if (longName !== null) name = longName;
+    longName = null;
+    paxPath = null;
+    if (type === '1' || type === '2') throw new ArchiveError(`link entry "${name}" is not supported`);
+    if (type !== '0' && type !== '7' && type !== '5') throw new ArchiveError(`unsupported tar entry type "${type}" for "${name}"`);
+    const isDir = type === '5';
+    if (isDir && size !== 0) throw new ArchiveError(`directory entry with data "${name}"`);
+    // `tar -C dir .` writes a "./" root entry: an empty path after normalisation is only allowed for that directory.
+    const norm = name.replace(/^(\.\/)+/, '').replace(/^\.$/, '');
+    if (norm === '' || norm === '/') { if (!isDir) throw new ArchiveError('empty entry path'); continue; }
+    checkEntryPath(norm);
+    const key = norm.replace(/\/$/, '');
+    if (names.has(key)) throw new ArchiveError(`duplicate entry path "${name}"`);
+    names.add(key);
+    entries.push({ name, isDir, range: { start: dataStart, end: dataEnd }, load: () => data });
+  }
+  if (!ended) throw new ArchiveError('truncated tar (no end-of-archive marker)');
+  return entries;
+}
+
+/**
+ * R4.1 (N1): gzip parsed member by member (RFC 1952). Every input byte must
+ * belong to a member: header, deflate stream (exact length from zlib), CRC32
+ * and ISIZE trailer. Multi-member gzip is decompressed in full (as gunzip
+ * does); ANY other trailing bytes fail closed. Output is hard-capped.
+ */
+function gunzipBounded(buf, limits, budget, label) {
+  const cap = Math.min(limits.maxArchiveEntryBytes, budget.remaining());
+  const outs = [];
+  const headers = [];
+  const fields = []; // R4.2 (IV1-F1): FEXTRA / FNAME / FCOMMENT contents, as absolute ranges of `buf`
+  let total = 0;
+  let pos = 0;
+  while (pos < buf.length) {
+    if (pos + 18 > buf.length || buf[pos] !== 0x1f || buf[pos + 1] !== 0x8b) throw new ArchiveError(pos === 0 ? `corrupt or truncated gzip stream "${label}" (bad header)` : `unexpected data after gzip member in "${label}" (trailing bytes are not inspected by gunzip; failing closed)`);
+    if (buf[pos + 2] !== 8) throw new ArchiveError(`corrupt or truncated gzip stream "${label}" (unsupported method)`);
+    const flg = buf[pos + 3];
+    if (flg & 0xe0) throw new ArchiveError(`corrupt or truncated gzip stream "${label}" (reserved flags)`);
+    let p = pos + 10;
+    if (flg & 0x04) {
+      if (p + 2 > buf.length) throw new ArchiveError(`corrupt or truncated gzip stream "${label}" (FEXTRA length)`);
+      const xlen = buf.readUInt16LE(p);
+      if (p + 2 + xlen > buf.length) throw new ArchiveError(`corrupt or truncated gzip stream "${label}" (FEXTRA overruns the stream)`);
+      fields.push({ label: 'FEXTRA', start: p + 2, end: p + 2 + xlen });
+      p += 2 + xlen;
+    }
+    for (const [bit, name] of [[0x08, 'FNAME'], [0x10, 'FCOMMENT']]) if (flg & bit) {
+      const z0 = buf.indexOf(0, p);
+      if (z0 === -1) throw new ArchiveError(`corrupt or truncated gzip stream "${label}" (${name} not terminated)`);
+      fields.push({ label: name, start: p, end: z0 });
+      p = z0 + 1;
+    }
+    if (flg & 0x02) {
+      // R4.2: FHCRC is verified (as Python's gzip module does), not skipped.
+      if (p + 2 > buf.length) throw new ArchiveError(`corrupt or truncated gzip stream "${label}" (FHCRC)`);
+      if ((crc32(buf.subarray(pos, p)) & 0xffff) !== buf.readUInt16LE(p)) throw new ArchiveError(`corrupt gzip stream "${label}" (header CRC mismatch)`);
+      p += 2;
+    }
+    if (p >= buf.length) throw new ArchiveError(`corrupt or truncated gzip stream "${label}"`);
+    headers.push(buf.subarray(pos, p));
+    const remainingCap = cap - total;
+    if (remainingCap < 1) throw new ArchiveError(`decompressed-size limit exceeded for gzip stream "${label}"`);
+    let r;
+    try { r = inflateRawBounded(buf.subarray(p), remainingCap, label); } catch (err) {
+      if (/exceeds its limit/.test(err.message)) throw new ArchiveError(`decompressed-size limit exceeded for gzip stream "${label}"`);
+      throw new ArchiveError(`corrupt or truncated gzip stream "${label}" (${err.message})`);
+    }
+    const t = p + r.consumed;
+    if (t + 8 > buf.length) throw new ArchiveError(`corrupt or truncated gzip stream "${label}" (missing trailer)`);
+    if (buf.readUInt32LE(t) !== crc32(r.out) || buf.readUInt32LE(t + 4) !== (r.out.length >>> 0)) throw new ArchiveError(`corrupt or truncated gzip stream "${label}" (CRC/size trailer mismatch)`);
+    outs.push(r.out);
+    total += r.out.length;
+    pos = t + 8;
+  }
+  const out = outs.length === 1 ? outs[0] : Buffer.concat(outs);
+  if (out.length >= 1024 * 1024 && out.length / Math.max(1, buf.length) > limits.maxCompressionRatio) throw new ArchiveError(`compression-ratio limit (${limits.maxCompressionRatio}) exceeded for gzip stream "${label}"`);
+  budget.reserve(out.length, label);
+  return { out, headers, fields };
+}
+
+/**
+ * R4.2 (IV1-F1): a tar container's raw bytes outside entry data are tar
+ * structure only (headers, zero padding, zero end marker). Any ZIP signature
+ * there, or any ZIP interpretation not wholly inside one entry's data, is a
+ * cross-format interpretation: fail closed.
+ */
+function assertTarHasNoForeignZip(buf, entries, limits) {
+  const regions = entries.filter((e) => e.range).map((e) => e.range);
+  for (const sig of [ZIP_LOCAL_BYTES, ZIP_EOCD_BYTES]) {
+    for (const pos of allPositions(buf, sig)) {
+      if (!regions.some((r) => pos >= r.start && pos + 4 <= r.end)) throw new ArchiveError(`ambiguous archive: ZIP signature in tar header/padding bytes at ${pos} (cross-format/polyglot interpretation)`);
+    }
+  }
+  assertZipInterpretationsAccounted(buf, regions, null, 'tar', limits);
+}
+
+/**
+ * 'zip' | 'gzip' | 'tar' | null, from content only (R4.1: tar by checksum; ZIP
+ * by structure anywhere). R4.2: the first match only picks the PARSER; the
+ * parser then accounts for every other supported interpretation of the same
+ * bytes (gzip+tar polyglots fail closed; raw ZIP structures inside gzip/tar
+ * must lie inside an inspected region), so precedence can no longer hide one.
+ */
+function detectArchiveInBuffer(buf) {
+  if (buf.length >= 3 && buf[0] === 0x1f && buf[1] === 0x8b) return 'gzip';
+  if (isTarCandidate(buf, 0)) return 'tar';
+  if (buf.indexOf(ZIP_EOCD_BYTES) !== -1 || buf.indexOf(ZIP_LOCAL_BYTES) !== -1) {
+    try { if (hasZipStructure(buf)) return 'zip'; } catch { return 'zip'; } // too many candidates: inspect (and fail closed)
+  }
+  return null;
+}
+
+/**
+ * AURA-PALM-G5-I1-R3/R4 -- inspect every regular file reachable under the
+ * configured scan roots, and every entry of every supported archive among
+ * them. Symlinks are resolved: targets inside an approved root are inspected
+ * (each real file once, however many links point to it); targets outside
+ * every root, broken links, loops and directory cycles are blocking errors.
+ * FIFOs, sockets, device nodes and any other non-regular, non-directory
+ * object are blocking errors (never opened). Returns { hits, errors, stats }.
+ */
+function inspectArtifacts(root, limits = INSPECTION_LIMITS) {
+  const hits = [];
+  const errors = [];
+  const stats = { roots: [], absentOptionalRoots: [], files: 0, bytes: 0, symlinksFollowed: 0, duplicateReferences: 0, archives: 0, archiveEntries: 0, archiveCompressedBytes: 0, decompressedBytes: 0, ms: 0 };
+  const t0 = Date.now();
+  const sigs = signatureSet();
+  const relOf = (p) => path.relative(root, p).split(path.sep).join('/');
+  const typeOf = (st) => (st.isFIFO() ? 'FIFO (named pipe)' : st.isSocket() ? 'Unix-domain socket' : st.isBlockDevice() ? 'block device' : st.isCharacterDevice() ? 'character device' : 'unsupported filesystem object');
+  let stopped = false;
+  const overTime = () => {
+    if (!stopped && Date.now() - t0 > limits.maxScanMs) { errors.push({ file: '(scan)', error: `work-time budget (${limits.maxScanMs} ms) exceeded` }); stopped = true; }
+    return stopped;
+  };
+
+  // ---- R3-N3: resolve configured roots under the build-mode contract.
+  let appReal;
+  try { appReal = fs.realpathSync(root); } catch (e) { errors.push({ file: '.', error: `cannot resolve the app root (${e.code || e.message})` }); return { hits, errors, stats }; }
+  const rootReal = [];
+  for (const cfg of SCAN_ROOTS) {
+    const abs = path.join(root, cfg.rel);
+    let lst;
+    try { lst = fs.lstatSync(abs); } catch (e) {
+      if (e.code === 'ENOENT') {
+        // Only a genuinely absent path; a dangling parent symlink also lands here,
+        // so check every existing ancestor for a broken link.
+        let p = path.dirname(abs), brokenAncestor = null;
+        while (p.startsWith(root) && p !== root) { try { const a = fs.lstatSync(p); if (a.isSymbolicLink()) { try { fs.realpathSync(p); } catch { brokenAncestor = p; } } } catch { /* absent ancestor */ } p = path.dirname(p); }
+        if (brokenAncestor) errors.push({ file: cfg.rel, error: `scan root unreachable: broken symlink at ${relOf(brokenAncestor)}` });
+        else if (cfg.required) errors.push({ file: cfg.rel, error: `required scan root missing: no ${cfg.rel} found -- run \`next build\` first` });
+        else stats.absentOptionalRoots.push(cfg.rel);
+      } else errors.push({ file: cfg.rel, error: `scan root inaccessible (${e.code || e.message})` });
+      continue;
+    }
+    let real;
+    if (lst.isSymbolicLink()) {
+      try { real = fs.realpathSync(abs); } catch (e) { errors.push({ file: cfg.rel, error: e.code === 'ELOOP' ? 'scan root is a symlink loop' : `scan root is a broken symlink (${e.code || e.message})` }); continue; }
+      if (!real.startsWith(appReal + path.sep)) { errors.push({ file: cfg.rel, error: 'scan root symlink points outside the app directory (not traversed)' }); continue; }
+    } else real = fs.realpathSync(abs);
+    let st;
+    try { st = fs.statSync(real); } catch (e) { errors.push({ file: cfg.rel, error: `scan root inaccessible (${e.code || e.message})` }); continue; }
+    if (!st.isDirectory()) { errors.push({ file: cfg.rel, error: 'scan root is not a directory' }); continue; }
+    try { fs.accessSync(real, fs.constants.R_OK | fs.constants.X_OK); fs.readdirSync(real); } catch (e) { errors.push({ file: cfg.rel, error: `scan root inaccessible (${e.code || e.message})` }); continue; }
+    rootReal.push({ rel: cfg.rel, real });
+  }
+  const within = (real) => rootReal.some((r) => real === r.real || real.startsWith(r.real + path.sep));
+  const seenFiles = new Set();
+  const seenDirs = new Set();
+  let totalDecompressed = 0;
+
+  // ---- archives
+  const inspectArchive = (buf, kind, shown, depth, budget) => {
+    if (overTime()) return;
+    stats.archives++;
+    let entries;
+    let regions = [];
+    const rawHits = (data, label) => { for (const s of inspectBufferBytes(data, sigs)) hits.push({ file: label, sentinel: `${s} (archive entry)` }); };
+    if (kind === 'gzip') {
+      // R4.2 (IV1-F1): the same bytes may not also be a tar archive (a raw-mode
+      // tar reader would see different content than gunzip).
+      if (isTarCandidate(buf, 0)) throw new ArchiveError('ambiguous archive: the input is both a gzip stream and a tar archive (polyglot)');
+      const { out, headers, fields } = gunzipBounded(buf, limits, budget, shown);
+      for (const hb of headers) rawHits(hb, `${shown}!<gzip header>`);
+      // R4.2 (IV1-F1): header fields get the same nested inspection as ZIP
+      // comments/extra fields and tar metadata, and no raw ZIP may sit outside them.
+      assertZipInterpretationsAccounted(buf, fields, out, 'gzip', limits);
+      for (const f of fields) regions.push({ label: `<gzip ${f.label}>`, data: buf.subarray(f.start, f.end) });
+      if (isTarCandidate(out, 0)) {
+        // N7: the whole decompressed tar stream (headers, metadata, padding) is byte-scanned too.
+        rawHits(out, `${shown}!<tar stream>`);
+        entries = parseTarEntries(out, limits);
+        assertTarHasNoForeignZip(out, entries, limits);
+      } else {
+        for (const r of regions) inspectEntryData(r.data, `${shown}!${r.label}`, `${shown}!${r.label}`, depth, budget);
+        inspectEntryData(out, `${shown}!<gzip stream>`, `${shown}`, depth, budget);
+        return;
+      }
+    } else if (kind === 'tar') { entries = parseTarEntries(buf, limits); assertTarHasNoForeignZip(buf, entries, limits); }
+    else { const z = parseZipEntries(buf, limits); entries = z.entries; regions = z.regions; }
+    // N2/N3/N7: bytes outside entries (prefix, suffix, comments, extra fields) are inspected as well.
+    for (const r of regions) inspectEntryData(r.data, `${shown}!${r.label}`, `${shown}!${r.label}`, depth, budget);
+    for (const e of entries) {
+      if (overTime()) return;
+      const label = `${shown}!${e.name}`;
+      if (!e.meta) {
+        const byName = nameRule(e.name, path.posix.basename(e.name.replace(/\/$/, '')));
+        if (byName) hits.push({ file: label, sentinel: `${byName} (archive entry)` });
+      }
+      if (stats.files + stats.archiveEntries + 1 > limits.maxFiles) throw new ArchiveError(`file-count limit (${limits.maxFiles}) exceeded`);
+      const data = e.load(budget); // N6: directory entries are loaded and must be empty
+      stats.archiveEntries++;
+      inspectEntryData(data, label, label, depth, budget);
+    }
+  };
+  const inspectEntryData = (data, label, shownForNested, depth, budget) => {
+    for (const s of inspectBufferBytes(data, sigs)) hits.push({ file: label, sentinel: `${s} (archive entry)` });
+    const nested = detectArchiveInBuffer(data);
+    if (nested) {
+      if (depth + 1 > limits.maxNestedArchiveDepth) throw new ArchiveError(`nested archive beyond the depth limit (${limits.maxNestedArchiveDepth}) at "${label}"`);
+      inspectArchive(data, nested, shownForNested, depth + 1, budget);
+    }
+  };
+  const makeBudget = () => {
+    let used = 0;
+    return {
+      remaining: () => Math.min(limits.maxArchiveDecompressedBytes - used, limits.maxTotalDecompressedBytes - totalDecompressed),
+      reserve(n, label) {
+        if (n > limits.maxArchiveEntryBytes) throw new ArchiveError(`decompressed entry-size limit (${limits.maxArchiveEntryBytes}) exceeded for "${label}"`);
+        if (used + n > limits.maxArchiveDecompressedBytes) throw new ArchiveError(`per-archive decompressed-bytes limit (${limits.maxArchiveDecompressedBytes}) exceeded`);
+        if (totalDecompressed + n > limits.maxTotalDecompressedBytes) throw new ArchiveError(`total decompressed-bytes limit (${limits.maxTotalDecompressedBytes}) exceeded`);
+        used += n;
+        totalDecompressed += n;
+        stats.decompressedBytes += n;
+      },
+    };
+  };
+
+  const visitFile = (shownPath, realPath, size) => {
+    if (seenFiles.has(realPath)) { stats.duplicateReferences++; return; }
+    seenFiles.add(realPath);
+    if (overTime()) return;
+    if (stats.files + stats.archiveEntries + 1 > limits.maxFiles) { errors.push({ file: relOf(shownPath), error: `file-count limit (${limits.maxFiles}) exceeded` }); stopped = true; return; }
+    if (size > limits.maxFileBytes) { errors.push({ file: relOf(shownPath), error: `file too large to inspect (${size} bytes > ${limits.maxFileBytes})` }); return; }
+    if (stats.bytes + size > limits.maxTotalBytes) { errors.push({ file: relOf(shownPath), error: `total-bytes limit (${limits.maxTotalBytes}) exceeded` }); stopped = true; return; }
+    stats.files++;
+    stats.bytes += size;
+    const shown = relOf(shownPath);
+    const byName = nameRule(shown, path.basename(shownPath)) || nameRule(relOf(realPath), path.basename(realPath));
+    if (byName) hits.push({ file: shown, sentinel: byName });
+    let scanRes;
+    try {
+      scanRes = inspectFileBytes(realPath, size, sigs, limits);
+      for (const label of scanRes.labels) hits.push({ file: shown, sentinel: label });
+    } catch (e) {
+      errors.push({ file: shown, error: `unreadable (${e.code || e.message})` });
+      return;
+    }
+    // R3-N1 / R4.1: supported archives are inspected entry by entry.
+    let head;
+    try {
+      const fd = fs.openSync(realPath, 'r');
+      try { head = Buffer.alloc(Math.min(512, size)); fs.readSync(fd, head, 0, head.length, 0); } finally { fs.closeSync(fd); }
+    } catch (e) { errors.push({ file: shown, error: `unreadable (${e.code || e.message})` }); return; }
+    const gzHead = head.length >= 3 && head[0] === 0x1f && head[1] === 0x8b;
+    const tarHead = isTarCandidate(head, 0);
+    const zipSigs = scanRes.zipPositions.length > 0 || scanRes.zipOverflow;
+    if (!gzHead && !tarHead && !zipSigs) return;
+    if (size > limits.maxArchiveBytes) {
+      let tooLarge = gzHead || tarHead;
+      if (!tooLarge) { try { tooLarge = largeFileHasPlausibleZip(realPath, size, scanRes.zipPositions, scanRes.zipOverflow); } catch (e) { errors.push({ file: shown, error: `unreadable (${e.code || e.message})` }); return; } }
+      if (tooLarge) errors.push({ file: shown, error: `archive too large to inspect (${size} bytes > ${limits.maxArchiveBytes})` });
+      return;
+    }
+    let kind = null;
+    let archiveBuf;
+    try { archiveBuf = fs.readFileSync(realPath); kind = detectArchiveInBuffer(archiveBuf); } catch (e) { errors.push({ file: shown, error: `unreadable (${e.code || e.message})` }); return; }
+    if (!kind) return;
+    try {
+      const buf = archiveBuf;
+      stats.archiveCompressedBytes += buf.length;
+      inspectArchive(buf, kind, shown, 1, makeBudget());
+    } catch (e) {
+      if (e instanceof ArchiveError) errors.push({ file: shown, error: `archive not fully inspectable: ${e.message}` });
+      else errors.push({ file: shown, error: `archive inspection failed (${e.code || e.message})` });
+    }
+  };
+
+  const visitDir = (shownDir, realDir, depth, ancestors) => {
+    if (stopped || overTime()) return;
+    if (depth > limits.maxDepth) { errors.push({ file: relOf(shownDir), error: `depth limit (${limits.maxDepth}) exceeded` }); return; }
+    if (seenDirs.has(realDir)) { stats.duplicateReferences++; return; }
+    seenDirs.add(realDir);
+    let names;
+    try { names = fs.readdirSync(realDir).sort(); } catch (e) { errors.push({ file: relOf(shownDir), error: `unreadable directory (${e.code || e.message})` }); return; }
+    for (const name of names) {
+      if (stopped) return;
+      const shown = path.join(shownDir, name);
+      const actual = path.join(realDir, name);
+      let st;
+      try { st = fs.lstatSync(actual); } catch (e) { errors.push({ file: relOf(shown), error: `cannot stat (${e.code || e.message})` }); continue; }
+      if (st.isSymbolicLink()) {
+        let target;
+        try { target = fs.realpathSync(actual); } catch (e) {
+          errors.push({ file: relOf(shown), error: e.code === 'ELOOP' ? 'symlink loop' : `broken symlink (${e.code || e.message})` });
+          continue;
+        }
+        if (!within(target)) { errors.push({ file: relOf(shown), error: 'symlink target outside the approved scan roots (not traversed)' }); continue; }
+        let tst;
+        try { tst = fs.statSync(target); } catch (e) { errors.push({ file: relOf(shown), error: `broken symlink (${e.code || e.message})` }); continue; }
+        stats.symlinksFollowed++;
+        if (tst.isDirectory()) {
+          if (ancestors.has(target)) { errors.push({ file: relOf(shown), error: 'symlink cycle (points to an ancestor directory)' }); continue; }
+          visitDir(shown, target, depth + 1, new Set([...ancestors, target]));
+        } else if (tst.isFile()) visitFile(shown, target, tst.size);
+        else errors.push({ file: relOf(shown), error: `symlink to an unsupported filesystem object: ${typeOf(tst)} (not opened)` });
+        continue;
+      }
+      if (st.isDirectory()) visitDir(shown, actual, depth + 1, new Set([...ancestors, actual]));
+      else if (st.isFile()) visitFile(shown, actual, st.size);
+      else errors.push({ file: relOf(shown), error: `unsupported filesystem object: ${typeOf(st)} (not opened)` }); // R3-N4
+    }
+  };
+
+  for (const r of rootReal) {
+    const shown = path.join(root, r.rel);
+    stats.roots.push(r.rel);
+    visitDir(shown, r.real, 0, new Set([r.real]));
+  }
+  stats.ms = Date.now() - t0;
+  return { hits, errors, stats };
+}
+
+/** Back-compatible: every hit and every blocking scan error as a hit list. */
+function scanImageInput(root) {
+  const { hits, errors } = inspectArtifacts(root);
+  return [...hits, ...errors.map((e) => ({ file: e.file, sentinel: `SCAN ERROR: ${e.error}` }))];
+}
+
+/** Human-readable statement of exactly what was inspected (used in OK lines). */
+function describeInspection(st) {
+  const mib = (n) => (n / 1048576).toFixed(1);
+  const absent = st.absentOptionalRoots.length ? `; absent optional roots: ${st.absentOptionalRoots.join(', ')}` : '';
+  return `inspected ${st.files} file(s), ${mib(st.bytes)} MiB, in ${st.roots.join(', ') || '(no roots)'}${absent}; ${st.archives} archive(s) with ${st.archiveEntries} entr(ies), ${mib(st.decompressedBytes)} MiB decompressed; ${st.symlinksFollowed} symlink(s) followed, ${st.duplicateReferences} repeated reference(s); signature-based (encoded/transformed payloads are not detected)`;
+}
+
 function scan(root) {
   const hits = [];
   for (const rel of SCAN_DIRS) {
     for (const file of walk(path.join(root, rel))) {
       const text = fs.readFileSync(file, 'utf8');
-      for (const s of SENTINELS) if (text.includes(s)) hits.push({ file: path.relative(root, file), sentinel: s });
+      for (const s of [...SENTINELS, ...IMAGE_INPUT_SENTINELS]) if (text.includes(s)) hits.push({ file: path.relative(root, file), sentinel: s });
     }
   }
   return hits;
 }
 
+function devAssetsPresent(root) {
+  const dir = path.join(root, DEV_ASSET_DIR);
+  if (fs.existsSync(dir)) return true;
+  // Also catch a copy that reached the standalone output.
+  for (const file of walkAll(path.join(root, '.next/standalone'))) if (file.includes('palm-dev-assets')) return true;
+  return false;
+}
+
 if (require.main === module) {
   const root = path.resolve(__dirname, '..');
+  // Unconditional (independent of content approval): dev assets never ship.
+  if (devAssetsPresent(root)) {
+    console.error(`[palmistry-bundle] FAIL: ${DEV_ASSET_DIR} (development-only MediaPipe assets) is present in this build tree. Run \`node scripts/palm-dev-assets.js --remove\` and rebuild.`);
+    process.exit(1);
+  }
+  // AURA-PALM-G5-I1-R2 (R1-F3): unconditional -- content approval never
+  // authorises image input, the MediaPipe runtime or model assets.
+  const inspection = inspectArtifacts(root);
+  if (inspection.errors.length) {
+    console.error(`[palmistry-bundle] FAIL: SCAN ERROR -- the production artifact could not be fully inspected (${inspection.errors.length} blocking error(s)); failing closed:`);
+    for (const e of inspection.errors.slice(0, 20)) console.error(`  ${e.error}  ->  ${e.file}`);
+  }
+  if (inspection.hits.length) {
+    console.error(`[palmistry-bundle] FAIL: palm image-input code or MediaPipe artifacts are in this build (${inspection.hits.length} hit(s)). Production release of image input is not authorised, whatever the content-approval state:`);
+    for (const h of inspection.hits.slice(0, 20)) console.error(`  ${h.sentinel}  ->  ${h.file}`);
+  }
+  if (inspection.errors.length || inspection.hits.length) process.exit(1);
+  const inspected = describeInspection(inspection.stats);
   if (isPalmistryApproved()) {
-    console.log('[palmistry-bundle] content APPROVED -- inclusion allowed, nothing to check.');
+    console.log(`[palmistry-bundle] content APPROVED -- inclusion allowed, nothing to check. (Image-input exclusion checked independently: OK; ${inspected}.)`);
     process.exit(0);
   }
   if (!fs.existsSync(path.join(root, '.next/static'))) {
@@ -70,7 +1188,7 @@ if (require.main === module) {
     for (const h of hits.slice(0, 20)) console.error(`  ${h.sentinel}  ->  ${h.file}`);
     process.exit(1);
   }
-  console.log(`[palmistry-bundle] OK: none of ${SENTINELS.length} Palmistry sentinels present in ${SCAN_DIRS.join(', ')}.`);
+  console.log(`[palmistry-bundle] OK: none of ${SENTINELS.length} Palmistry sentinels present in ${SCAN_DIRS.join(', ')} (nor any of ${IMAGE_INPUT_SENTINELS.length} image-input sentinels, ${MEDIAPIPE_SENTINELS.length} MediaPipe sentinels or MediaPipe artifacts; image-input check ${inspected}).`);
 }
 
-module.exports = { SENTINELS, SCAN_DIRS, scan };
+module.exports = { SENTINELS, IMAGE_INPUT_SENTINELS, MEDIAPIPE_SENTINELS, MEDIAPIPE_ARTIFACT_SIGNATURES, WASM_MEDIAPIPE_MARKERS, INSPECTION_LIMITS, SCAN_ROOTS, DEV_ASSET_DIR, SCAN_DIRS, ARTIFACT_DIRS, scan, scanImageInput, inspectArtifacts, describeInspection, detectArchiveInBuffer, devAssetsPresent };

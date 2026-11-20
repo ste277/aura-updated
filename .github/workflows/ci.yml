@@ -208,6 +208,29 @@ jobs:
       # the build and that its failure fails the build. No deploy/credentials.
       - name: Run Palmistry Vercel build guard test
         run: npx ts-node test/palm01P4VercelGuard.test.ts
+      # AURA-PALM-G5-C1 -- development-only Upload Photo pipeline (G5-I1..R4.3).
+      # Synthetic fixtures and a fake MediaPipe runtime only; no real images,
+      # no network. Production exclusion is asserted here and by
+      # check-palmistry-bundle.js after `next build` (web-build job).
+      - name: Run Palm upload image validation tests (G5-I1)
+        run: npx ts-node test/palmG5I1Validation.test.ts
+      - name: Run Palm upload pipeline tests (G5-I1)
+        run: npx ts-node test/palmG5I1Pipeline.test.ts
+      - name: Run Palm upload privacy, isolation and gate tests (G5-I1)
+        run: npx ts-node test/palmG5I1PrivacyGate.test.ts
+      - name: Run Palm upload component test (G5-I1, jsdom)
+        run: npx ts-node --project tsconfig.jsdom-tests.json test/palmG5I1UploadJsdom.test.ts
+      - name: Run Palm upload lifecycle tests (G5-I1-R2)
+        run: npx ts-node test/palmG5I1R2Lifecycle.test.ts
+      - name: Run Palm upload production exclusion tests (G5-I1-R2)
+        run: npx ts-node test/palmG5I1R2ProductionExclusion.test.ts
+      - name: Run Palm bundle scanner hardening tests (G5-I1-R3..R4.3)
+        run: |
+          npx ts-node test/palmG5I1R3ScannerHardening.test.ts
+          npx ts-node test/palmG5I1R4ArchiveScanner.test.ts
+          npx ts-node test/palmG5I1R41ArchiveBypass.test.ts
+          npx ts-node test/palmG5I1R42ArchiveFormat.test.ts
+          npx ts-node test/palmG5I1R43ZipRecognition.test.ts
       # Goals V2 Candidate A1 -- goalDemandCandidates.ts imports apps/web/lib/db.ts
       # (for its `pg` dependency), same apps/web/node_modules requirement as
       # the Aura Moment/product events tests above.
