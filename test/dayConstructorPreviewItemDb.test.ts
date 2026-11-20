@@ -148,11 +148,16 @@ async function main() {
     // above, parameterized so checks 10 and 13 (different previews, different
     // windows) don't depend on one fixed offset that might coincide with a
     // real friction window for their particular item/time.
-    const findCandidateStartFor = async (baseStartIso: string | Date, windowEndIso: string | Date, postFn: (candidateStart: string) => Promise<any>): Promise<{ candidateStart: string; result: any }> => {
+    // `avoid` (optional): plans this user ALREADY has. This endpoint is blocker-unaware by
+    // design (see check 14), so an edited time it returns UPDATED for can still overlap a plan
+    // an earlier check saved; a check that then expects acceptance to SAVE must not pick such
+    // a time, or the acceptance path correctly rejects it as a CONFLICT (AURA-CI-01).
+    const findCandidateStartFor = async (baseStartIso: string | Date, windowEndIso: string | Date, postFn: (candidateStart: string) => Promise<any>, avoid?: { durationMs: number; busy: { start: Date; end: Date }[] }): Promise<{ candidateStart: string; result: any }> => {
       const offsetsHours = [1.5, 1, 2, 3, 0.5, 4, 5];
       for (const h of offsetsHours) {
         const ms = new Date(baseStartIso).getTime() + h * HOUR;
         const clamped = Math.min(ms, new Date(windowEndIso).getTime() - 60 * MIN);
+        if (avoid && avoid.busy.some((b) => clamped < b.end.getTime() && clamped + avoid.durationMs > b.start.getTime())) continue;
         const candidateStart = new Date(clamped).toISOString();
         const result = await postFn(candidateStart);
         if (result.status === 'UPDATED') return { candidateStart, result };
@@ -207,12 +212,15 @@ async function main() {
     const pv3 = await preview(A, [{ id: 'fl3', title: 'Journaling', durationMinutes: 30, flexibility: 'FLEXIBLE', activityId: 'journaling' }]);
     const item3: any = pv3?.constructedDay.proposedItems.find((i: any) => i.intentId === 'fl3');
     if (pv3 && item3) {
+      // Check 12 has just SAVED a plan for A; the edited time must not land on it.
+      const busy3 = (await sql(`SELECT "plannedStartAt" AS start, "plannedEndAt" AS end FROM "PlannedActivity" WHERE "userId" = $1`, [A.U.id])).map((r: any) => ({ start: new Date(r.start), end: new Date(r.end) }));
+      const duration3 = new Date(item3.end).getTime() - new Date(item3.start).getTime();
       const { candidateStart: newCandidate3, result: edited3 } = await findCandidateStartFor(item3.start, pv3.constructionWindow.end, (candidateStart) => postPreviewItem(A, {
         window: JSON.parse(JSON.stringify(pv3.constructionWindow)),
         item: { intentId: item3.intentId, activityId: item3.activityId, title: item3.title, start: item3.start, end: item3.end, placementSource: item3.placementSource },
         acceptanceToken: item3.acceptanceToken,
         candidateStart,
-      }));
+      }), { durationMs: duration3, busy: busy3 });
       if (edited3.status === 'UPDATED') {
         const acceptBody3 = buildAcceptRequestBody(pv3, `preview-item-edit-accept-${Date.now()}-${n++}`);
         acceptBody3.proposedItems[0] = { ...acceptBody3.proposedItems[0], start: edited3.item.start, end: edited3.item.end };
