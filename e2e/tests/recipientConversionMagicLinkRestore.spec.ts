@@ -26,7 +26,7 @@ test('magic-link click restores guest state, fires GUEST_RESULT_RESTORED, and sa
   const email = `e2e-rc-magiclink-${Date.now()}@e2e.aura.local`;
   await page.getByPlaceholder('you@example.com').fill(email);
   await page.getByRole('button', { name: 'Continue with email' }).click();
-  await expect(page.getByText('We emailed you a sign-in link')).toBeVisible({ timeout: 10000 });
+  await expect(page.getByText('We emailed you a 6-digit sign-in code')).toBeVisible({ timeout: 10000 });
 
   const devLoginLink = page.locator('a[href*="/api/auth/verify"]');
   const href = await devLoginLink.getAttribute('href');

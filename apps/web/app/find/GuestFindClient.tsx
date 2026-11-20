@@ -359,7 +359,7 @@ export function GuestFindClient({ initialSource, initialRestoreToken }: { initia
       });
       const data = await res.json().catch(() => null);
       if (!res.ok) {
-        setError(data?.error ?? 'Unable to send a sign-in link. Try again.');
+        setError(data?.error ?? 'Unable to send a sign-in code. Try again.');
         return;
       }
       if (data?.devLoginUrl) setDevLoginUrl(data.devLoginUrl);
@@ -572,7 +572,7 @@ export function GuestFindClient({ initialSource, initialRestoreToken }: { initia
               </form>
             ) : (
               <form onSubmit={handleVerifyCode}>
-                <p style={{ ...typography.meta, marginBottom: spacing.sm }}>We emailed you a sign-in link and a 6-digit code.</p>
+                <p style={{ ...typography.meta, marginBottom: spacing.sm }}>We emailed you a 6-digit sign-in code.</p>
                 <TextInput
                   type="text"
                   inputMode="numeric"

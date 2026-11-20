@@ -1093,6 +1093,13 @@ jobs:
       # buildForwardPlannerResult that a prior-start UPCOMING plan blocks a candidate.
       - name: Run Forward Planner overlap blocker DB test
         run: npx ts-node test/forwardPlannerOverlapBlockerDb.test.ts
+      # AURA-AUTH-02 -- magic links only in authorized local development: env matrix,
+      # no issuance / valid-token rejection in Production and Preview, code-only email,
+      # code sign-in and rate limit unchanged. Stubbed fetch; synthetic identities only.
+      - name: Run magic-link local-only DB test (AURA-AUTH-02)
+        env:
+          TS_NODE_COMPILER_OPTIONS: '{"jsx":"react"}'
+        run: npx ts-node test/authMagicLinkLocalOnlyDb.test.ts
       # HPG3-A4b CI coverage reconciliation -- these 4 suites already pass
       # against main but were never wired into CI; reusing this job's
       # existing Postgres service/migration-deploy step, same as the PR

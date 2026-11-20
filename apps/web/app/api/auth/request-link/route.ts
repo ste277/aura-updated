@@ -5,6 +5,7 @@ import { reserveAuthCodeWithinQuota, releaseAuthCodeReservation } from '../../..
 import { sendMagicLinkEmail, isEmailConfigured } from '../../../../lib/email';
 import { readJsonObject } from '../../../../lib/request';
 import { verifyGuestStateToken } from '../../../../lib/guestState';
+import { magicLinksEnabled } from '../../../../lib/magicLinkGate';
 
 // Sign-in requests allowed per email/IP per window — enough for a user who
 // mistypes twice, low enough to make email-bombing and code-guessing via
@@ -38,31 +39,38 @@ export async function POST(req: NextRequest) {
 
   const ip = requestIp(req);
 
-  const token = createMagicLinkToken(email);
-  // Build the link from the PUBLIC origin, not req.nextUrl.origin — behind a
-  // tunnel or reverse proxy nextUrl reports the internal address
-  // (localhost:3001), which would put a dead link in the email.
-  const host = req.headers.get('x-forwarded-host') ?? req.headers.get('host') ?? req.nextUrl.host;
-  const proto =
-    req.headers.get('x-forwarded-proto') ?? (host.startsWith('localhost') ? 'http' : 'https');
-  let verifyUrl = `${proto}://${host}/api/auth/verify?token=${encodeURIComponent(token)}`;
+  // AURA-AUTH-02 -- a magic link is minted ONLY in authorized local development
+  // (lib/magicLinkGate.ts). Everywhere else no token is created, so none can be
+  // emailed, returned or logged; sign-in uses the 6-digit code below.
+  let verifyUrl: string | null = null;
+  if (magicLinksEnabled()) {
+    const token = createMagicLinkToken(email);
+    // Build the link from the PUBLIC origin, not req.nextUrl.origin — behind a
+    // tunnel or reverse proxy nextUrl reports the internal address
+    // (localhost:3001), which would put a dead link in the email.
+    const host = req.headers.get('x-forwarded-host') ?? req.headers.get('host') ?? req.nextUrl.host;
+    const proto =
+      req.headers.get('x-forwarded-proto') ?? (host.startsWith('localhost') ? 'http' : 'https');
+    verifyUrl = `${proto}://${host}/api/auth/verify?token=${encodeURIComponent(token)}`;
 
-  // Recipient Conversion V1 (brief section 10/24) -- if this sign-in was
-  // triggered from the guest conversion flow at /find, thread the guest's
-  // already-minted, short-lived state token through the magic link so the
-  // GET /api/auth/verify click (which may land in a different browser
-  // context than where the guest searched, e.g. a mail app's in-app
-  // browser) can restore their result instead of dropping them on generic
-  // Home. Re-verified here (not just shape-checked) so a malformed or
-  // already-expired token is never embedded pointlessly.
-  const rawGuestStateToken = typeof body.guestStateToken === 'string' ? body.guestStateToken : '';
-  if (rawGuestStateToken && rawGuestStateToken.length <= 2000 && verifyGuestStateToken(rawGuestStateToken)) {
-    verifyUrl += `&guest=${encodeURIComponent(rawGuestStateToken)}`;
+    // Recipient Conversion V1 (brief section 10/24) -- if this sign-in was
+    // triggered from the guest conversion flow at /find, thread the guest's
+    // already-minted, short-lived state token through the magic link so the
+    // GET /api/auth/verify click (which may land in a different browser
+    // context than where the guest searched, e.g. a mail app's in-app
+    // browser) can restore their result instead of dropping them on generic
+    // Home. Re-verified here (not just shape-checked) so a malformed or
+    // already-expired token is never embedded pointlessly. Without a link the
+    // guest flow continues by code in the same page (find/GuestFindClient.tsx).
+    const rawGuestStateToken = typeof body.guestStateToken === 'string' ? body.guestStateToken : '';
+    if (rawGuestStateToken && rawGuestStateToken.length <= 2000 && verifyGuestStateToken(rawGuestStateToken)) {
+      verifyUrl += `&guest=${encodeURIComponent(rawGuestStateToken)}`;
+    }
   }
 
-  // The 6-digit code travels in the same email as the link. It exists for
-  // surfaces where following the link would land the session in the wrong
-  // browser context (the native app shells) — the code can be typed anywhere.
+  // The 6-digit code is the sign-in credential in every deployed environment
+  // (and travels alongside the link in local development); it can be typed
+  // anywhere, including the native app shells.
   const code = generateAuthCode();
   const codeRow = {
     email,
@@ -116,5 +124,7 @@ export async function POST(req: NextRequest) {
     );
   }
 
-  return NextResponse.json({ devLoginUrl: verifyUrl, devLoginCode: code });
+  // Dev fallback (no email provider, not production): the code always; the link
+  // only when the local magic-link gate is open.
+  return NextResponse.json(verifyUrl ? { devLoginUrl: verifyUrl, devLoginCode: code } : { devLoginCode: code });
 }

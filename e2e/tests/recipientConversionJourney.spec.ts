@@ -72,7 +72,7 @@ test('logged-out recipient: public Moment -> respond -> find your own moment -> 
   await page.getByPlaceholder('you@example.com').fill(email);
   await page.getByRole('button', { name: 'Continue with email' }).click();
 
-  await expect(page.getByText('We emailed you a sign-in link')).toBeVisible({ timeout: 10000 });
+  await expect(page.getByText('We emailed you a 6-digit sign-in code')).toBeVisible({ timeout: 10000 });
   const devCode = await page.locator('text=/Code: \\d{6}/').textContent();
   const code = devCode?.match(/\d{6}/)?.[0];
   expect(code).toBeTruthy();
