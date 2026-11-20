@@ -99,6 +99,12 @@ async function main() {
     ['inside a URL', 'https://x.com/?e=a%40b.com&z=1'],
     ['one-letter TLD', 'ab@c.d'],
     ['in angle brackets', '<bob@x.org>'],
+    // AURA-SEC-03 independent review (P3): partial or missed local parts.
+    ['apostrophe local part', "o'brien@x.com"],
+    ['comma local part', 'a,b@x.com'],
+    ['quoted local part with a newline', '"line\nbreak"@x.com'],
+    ['commented local part', '(comment)alice@x.com'],
+    ['fullwidth at sign', 'bob\uFF20example.com'],
   ];
   for (const [label, addr] of formats) {
     const outText = redactEmails(`before ${addr} after`);
@@ -108,6 +114,16 @@ async function main() {
   check('redactEmails: text without an address is left unchanged', redactEmails('Resend API error (422): rate limited, code 23505') === 'Resend API error (422): rate limited, code 23505');
   const named = errorForLog(Object.assign(new Error(`failed for josé@exämple.de`), { name: 'Bad <a@b.co>', code: 'c@d.io' }));
   check('errorForLog: name and code are redacted too (and bounded)', named.name === 'Bad <[email]>' && named.code === '[email]' && named.message === 'failed for [email]' && named.name.length <= 64);
+  // AURA-SEC-03 independent review (P2): matching is bounded, so hostile/long input stays fast.
+  for (const filler of ['a', '%4', 'a@']) {
+    const t0 = Date.now();
+    redactEmails(filler.repeat(500_000));
+    const ms = Date.now() - t0;
+    check(`redactEmails: 1 MB of ${JSON.stringify(filler)} is processed in bounded time (${ms} ms < 500)`, ms < 500);
+  }
+  const hostile = errorForLog({ get message(): string { throw new Error('boom'); } });
+  const hostileToString = errorForLog({ message: { toString() { throw new Error('boom'); } } });
+  check('errorForLog: never throws on a hostile getter or toString', hostile.name === 'Unloggable' && hostileToString.message === '[unprintable]');
   check('errorForLog: a normal Postgres code is kept as-is', errorForLog(Object.assign(new Error('dup'), { code: '23505' })).code === '23505');
 
   // ---- scenario: link + code sign-in, every failure path, rate limit, send failure ----
@@ -175,7 +191,7 @@ async function main() {
     let src = '';
     try { src = readFileSync(join(__dirname, '..', 'apps/web/app/api/auth', f, 'route.ts'), 'utf8'); } catch { continue; }
     const calls = src.match(/console\.(log|info|warn|error|debug)\([^;]*\);/g) ?? [];
-    const bad = calls.filter((c) => /[{,]\s*email\s*[,}]/.test(c) || /[{,]\s*(err|releaseErr|error)\s*[,}]/.test(c) || /\b(code|token|verifyUrl)\b\s*[,}]/.test(c));
+    const bad = calls.filter((c) => /[{,]\s*email\s*[,}]/.test(c) || /\b(email|rawEmail)\s*:/.test(c) || /\.\.\./.test(c) || /\b(req|body|row)\b\s*[,})]/.test(c) || /[{,]\s*(err|releaseErr|error)\s*[,}]/.test(c) || /\b(code|token|verifyUrl)\b\s*[,}]/.test(c));
     check(`source guard: ${f} logs no raw email, raw error object, code or token (${calls.length} log calls)`, bad.length === 0, bad);
   }
 }
