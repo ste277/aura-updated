@@ -143,7 +143,18 @@ check('createPlannedActivity does NOT perform its own catalog lookup/validation 
 // ============================================================
 
 const dayBuilderCardSource = fs.readFileSync('apps/web/components/DayBuilderCard.tsx', 'utf8');
-check('DayBuilderCard.tsx\'s handleAdd threads suggestion.activityId into saveUpcomingPlanFromCandidate', /saveUpcomingPlanFromCandidate\(selectedGeneralCandidate\(suggestion\), suggestion\.durationMinutes, \{ clientRequestId, activityId: suggestion\.activityId \}\)/.test(dayBuilderCardSource));
+// AURA-HPG5-V2-I3 changed this ONE assertion deliberately: Add now runs
+// through performAdd (which adds the save-time overlapPolicy and the
+// conflict/override handling), so the literal single-call shape no longer
+// exists. The invariant is unchanged and pinned just as strictly: handleAdd
+// threads the SELECTED candidate, the suggestion's duration, the stable
+// clientRequestId and suggestion.activityId (never re-derived) into
+// performAdd, and performAdd hands exactly those options to the ONE
+// canonical saveUpcomingPlanFromCandidate.
+check('DayBuilderCard.tsx\'s handleAdd threads suggestion.activityId into saveUpcomingPlanFromCandidate',
+  /performAdd\(suggestion, selectedGeneralCandidate\(suggestion\), suggestion\.durationMinutes, \{ clientRequestId, activityId: suggestion\.activityId \}, 'REJECT_ACTIVE_OVERLAP'\)/.test(dayBuilderCardSource) &&
+  /const performAdd = async \(suggestion: IntentionalDaySuggestion, candidate: TimingCandidate, durationMinutes: number, options: \{ clientRequestId: string; activityId: string \}, overlapPolicy: 'ALLOW' \| 'REJECT_ACTIVE_OVERLAP'\) => \{[\s\S]*?await saveUpcomingPlanFromCandidate\(candidate, durationMinutes, \{ \.\.\.options, overlapPolicy \}\);/.test(dayBuilderCardSource) &&
+  (stripComments(dayBuilderCardSource).match(/saveUpcomingPlanFromCandidate\(/g) ?? []).length === 1);
 check('DayBuilderCard.tsx does not perform a fresh catalog lookup for the Plan-save activityId (suggestion.activityId is used directly, not re-derived)', !stripComments(dayBuilderCardSource).includes('getActivityProfileById'));
 
 // ============================================================

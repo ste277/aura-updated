@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import type { DailyStory } from '../lib/dailyStory';
 import type { DailyReflection } from '../lib/dailyReflection';
 import type { TomorrowPreview } from '../lib/tomorrowPreview';
@@ -9,7 +9,9 @@ import { getActivityDefinition } from '../../../packages/recommendation/src/acti
 import { FULL_ACTIVITY_CATALOG } from '../../../packages/recommendation/src/personalizedTasks';
 import type { TimingCandidate } from '../../../packages/recommendation/src/timingSearch';
 import type { EverydaySharedCandidate } from '../../../packages/recommendation/src/everydayTimingFit';
-import { RESULT_LABEL_TEXT, EVERYDAY_SHARED_RATING_TEXT, saveUpcomingPlanFromCandidate } from './PlanWithAuraView';
+import { RESULT_LABEL_TEXT, EVERYDAY_SHARED_RATING_TEXT, saveUpcomingPlanFromCandidate, PlanOverlapSaveError } from './PlanWithAuraView';
+import { PlanOverlapConflictPanel } from './PlanOverlapConflictPanel';
+import { presentProposedPlanOverlap, type PlanOverlapConflictView } from '../lib/schedulingEligibilityPresentation';
 import { RELATIONSHIP_ICON, SavedPersonRow } from './PeopleView';
 import { trackEvent } from '../lib/trackEvent';
 import { colors, spacing, radius, typography } from './theme';
@@ -34,6 +36,9 @@ type Phase =
   | 'NO_RESULT'
   | 'ERROR'
   | 'CREATING'
+  // AURA-HPG5-V2-I2 (R1-05) -- the recommended time was refused at save time
+  // (409 PLAN_OVERLAP: another plan now overlaps it). Nothing was written.
+  | 'CONFLICT'
   | 'DONE'
   // Daily Reflection & Tomorrow Preview V1 (brief section 5/7) -- a
   // SEPARATE, shorter "Make room for tomorrow?" flow: broad category ->
@@ -51,6 +56,17 @@ type Phase =
  * that doesn't happen to match the catalog's own title string. */
 function catalogTitleFor(activityId: string): string | undefined {
   return FULL_ACTIVITY_CATALOG.find((a) => a.id === activityId)?.title;
+}
+
+/** The same clock this card already formats its own times in (formatTimeRange
+ * uses the browser's local zone), so the conflict panel's times match the
+ * result the user just saw. */
+function browserTimezone(): string {
+  try {
+    return Intl.DateTimeFormat().resolvedOptions().timeZone || 'UTC';
+  } catch {
+    return 'UTC';
+  }
 }
 
 function formatTimeRange(startIso: string, endIso: string): string {
@@ -108,6 +124,13 @@ export function MyDayStoryCard({
   const [selectedDurationMinutes, setSelectedDurationMinutes] = useState<number>(45);
   const [candidate, setCandidate] = useState<ResolvedCandidate | null>(null);
   const [error, setError] = useState('');
+  // AURA-HPG5-V2-I2 (R1-05) -- the refused save: the exact candidate whose
+  // payload was rejected, and the conflict the server named (or null).
+  const [overlap, setOverlap] = useState<{ candidate: TimingCandidate; conflict: PlanOverlapConflictView | null; proposed: { title: string; plannedStartAt: string; plannedEndAt: string } } | null>(null);
+  const overlapHeadingRef = useRef<HTMLDivElement | null>(null);
+  // Synchronous double-submit guard (state updates are async; a second click
+  // in the same tick must never send a second POST).
+  const savingRef = useRef(false);
   const [tomorrowBroadChoice, setTomorrowBroadChoice] = useState<DailyIntentionBroadChoice | null>(null);
   const [tomorrowGroupId, setTomorrowGroupId] = useState<DailyIntentionGroupId | null>(null);
 
@@ -216,6 +239,7 @@ export function MyDayStoryCard({
 
     setPhase('SEARCHING');
     setError('');
+    setOverlap(null);
     trackEvent('MY_DAY_ADD_STARTED', { metadata: { intentionCategory: groupId ?? 'WORK', activityId: activity.activityId, dayPhase } });
 
     try {
@@ -250,11 +274,19 @@ export function MyDayStoryCard({
     }
   };
 
-  const handleAddToMyDay = async () => {
-    if (!candidate?.solo || !selectedActivity) return;
+  // AURA-HPG5-V2-I2 (R1-05) -- a recommended-time save opts in to
+  // REJECT_ACTIVE_OVERLAP, so a recommendation that went stale (another plan
+  // created since the search, e.g. from a second tab or device) is refused
+  // inside the save transaction instead of being saved over silently. Only an
+  // explicit "Save anyway" re-sends the SAME candidate's payload with ALLOW.
+  // Never retried automatically.
+  const saveCandidate = async (target: TimingCandidate, overlapPolicy: 'ALLOW' | 'REJECT_ACTIVE_OVERLAP') => {
+    if (savingRef.current) return;
+    savingRef.current = true;
     setPhase('CREATING');
+    setError('');
     try {
-      await saveUpcomingPlanFromCandidate(candidate.solo, selectedDurationMinutes);
+      await saveUpcomingPlanFromCandidate(target, selectedDurationMinutes, { overlapPolicy });
       // Product Journey / E2E Hardening V1 (brief section 26) -- the
       // My Day intention flow's own doc comment already claimed this
       // reuses PLAN_RESULT_SELECTED "via the existing reused APIs", but
@@ -266,12 +298,45 @@ export function MyDayStoryCard({
       // PlanWithAuraView's own "Use this time" already fires for the
       // identical outcome, not a new My-Day-specific event.
       trackEvent('PLAN_RESULT_SELECTED', { metadata: { mode: 'FIND' } });
+      setOverlap(null);
       setPhase('DONE');
-    } catch {
-      setError('Could not add this to your day. Try again.');
-      setPhase('RESULT');
+    } catch (err) {
+      if (err instanceof PlanOverlapSaveError) {
+        setOverlap({ candidate: target, conflict: err.conflict, proposed: { title: err.proposed.title, plannedStartAt: err.proposed.plannedStartAt, plannedEndAt: err.proposed.plannedEndAt } });
+        setPhase('CONFLICT');
+      } else {
+        setError('Could not add this to your day. Try again.');
+        setPhase(overlap ? 'CONFLICT' : 'RESULT');
+      }
+    } finally {
+      savingRef.current = false;
     }
   };
+
+  const handleAddToMyDay = async () => {
+    if (!candidate?.solo || !selectedActivity) return;
+    await saveCandidate(candidate.solo, 'REJECT_ACTIVE_OVERLAP');
+  };
+
+  const handleOverlapSaveAnyway = async () => {
+    // Only the refused candidate, and only while it is still the one shown.
+    if (!overlap || !candidate?.solo || candidate.solo.start !== overlap.candidate.start || candidate.solo.end !== overlap.candidate.end) {
+      setOverlap(null);
+      return;
+    }
+    await saveCandidate(overlap.candidate, 'ALLOW');
+  };
+
+  // "Choose another time": a fresh search for the same activity -- the
+  // constrained FIND now excludes the plan that caused the conflict.
+  const handleOverlapChooseAnotherTime = () => {
+    setOverlap(null);
+    if (selectedActivity) void chooseActivity(selectedActivity);
+  };
+
+  useEffect(() => {
+    if (phase === 'CONFLICT') overlapHeadingRef.current?.focus();
+  }, [phase]);
 
   const handleInvite = async () => {
     if (!candidate?.shared || !selectedActivity || !selectedPerson) return;
@@ -307,6 +372,7 @@ export function MyDayStoryCard({
     setSelectedDurationMinutes(45);
     setCandidate(null);
     setError('');
+    setOverlap(null);
     onCreated();
   };
 
@@ -485,7 +551,7 @@ export function MyDayStoryCard({
         <EmptyPhase title="No strong times found today" description="Try again another day, or from the full Plan screen for a wider search." action={<SecondaryButton onClick={reset}>Done</SecondaryButton>} />
       )}
 
-      {(phase === 'RESULT' || phase === 'CREATING') && candidate && selectedActivity && (
+      {(phase === 'RESULT' || (phase === 'CREATING' && !overlap)) && candidate && selectedActivity && (
         <div style={{ textAlign: 'center' }}>
           <div style={{ ...typography.sectionEyebrow }}>Best time today</div>
           <h2 style={{ ...typography.pageTitle, fontSize: 20, marginTop: spacing.sm }}>{selectedActivity.icon} {selectedActivity.label}</h2>
@@ -510,6 +576,25 @@ export function MyDayStoryCard({
             {phase === 'CREATING' ? 'Saving…' : candidate.kind === 'SOLO' ? 'Add to my day' : `Invite ${selectedPerson?.name ?? 'them'}`}
           </PrimaryButton>
           <div style={{ marginTop: spacing.md }}>
+            <TextButton onClick={reset} color={colors.textMuted}>Cancel</TextButton>
+          </div>
+        </div>
+      )}
+
+      {(phase === 'CONFLICT' || (phase === 'CREATING' && overlap)) && overlap && selectedActivity && (
+        <div>
+          <PlanOverlapConflictPanel
+            idPrefix="my-day-overlap"
+            testId="my-day-overlap-conflict"
+            presentation={presentProposedPlanOverlap(overlap.proposed, overlap.conflict, browserTimezone())}
+            headingRef={overlapHeadingRef}
+            onChooseAnotherTime={handleOverlapChooseAnotherTime}
+            onSaveAnyway={handleOverlapSaveAnyway}
+            saveDisabled={phase === 'CREATING'}
+            saving={phase === 'CREATING'}
+          />
+          {error && <div style={{ color: colors.danger, fontSize: 12, marginTop: spacing.md }}>{error}</div>}
+          <div style={{ marginTop: spacing.md, textAlign: 'center' }}>
             <TextButton onClick={reset} color={colors.textMuted}>Cancel</TextButton>
           </div>
         </div>

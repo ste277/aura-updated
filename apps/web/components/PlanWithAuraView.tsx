@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useEffect, useMemo, useRef, useState } from 'react';
+import React, { Fragment, useEffect, useMemo, useRef, useState } from 'react';
 import type { PlanningHorizon, TimePreference } from '../../../packages/recommendation/src/dailyAssistant';
 import { buildGoogleCalendarUrl } from '../../../packages/recommendation/src/dailyAssistant';
 import { FULL_ACTIVITY_CATALOG } from '../../../packages/recommendation/src/personalizedTasks';
@@ -19,7 +19,8 @@ import { localDateTimeToUTC, getDatePartsInTimezone, getMinuteOfDayInTimezone } 
 import { useCurrentMinuteOfDay } from '../lib/useCurrentMinuteOfDay';
 import { triggerHaptic } from '../lib/haptics';
 import { trackEvent } from '../lib/trackEvent';
-import { isKnownSchedulingEligibilityCode, presentSchedulingEligibilityError, type SchedulingEligibilityPresentation } from '../lib/schedulingEligibilityPresentation';
+import { isKnownSchedulingEligibilityCode, presentSchedulingEligibilityError, type SchedulingEligibilityPresentation, isPlanOverlapResponse, parsePlanOverlapConflict, presentProposedPlanOverlap, presentFindATimeEmptyReason, type PlanOverlapConflictView } from '../lib/schedulingEligibilityPresentation';
+import { PlanOverlapConflictPanel } from './PlanOverlapConflictPanel';
 // Event Location Plan Persistence V1 closeout: pure plan display/formatting
 // logic moved to a plain .ts module so it can be unit-tested under this
 // repo's normal (non-JSX) test runner -- see planFormatting.ts's own doc
@@ -365,7 +366,7 @@ function getHorizonHelper(horizon: PlanningHorizon, timezone?: string): string {
  */
 
 export async function saveUpcomingPlanFromCandidate(candidate: TimingCandidate, durationMinutes: number, options: SaveUpcomingPlanOptions = {}): Promise<UpcomingPlan> {
-  const { sharedWithName, guestConversionToken, clientRequestId, eventLocation, activityId } = options;
+  const { sharedWithName, guestConversionToken, clientRequestId, eventLocation, activityId, overlapPolicy } = options;
   const plan = planPayloadFromCandidate(candidate, durationMinutes, sharedWithName, eventLocation);
   const res = await fetch('/api/plans', {
     method: 'POST',
@@ -390,10 +391,31 @@ export async function saveUpcomingPlanFromCandidate(candidate: TimingCandidate, 
       ...(guestConversionToken ? { guestConversionToken } : {}),
       ...(clientRequestId ? { clientRequestId } : {}),
       ...(eventLocation ? { eventLocation } : {}),
+      ...(overlapPolicy ? { overlapPolicy } : {}),
     }),
   });
-  if (!res.ok) throw new Error('Unable to save plan.');
+  if (!res.ok) {
+    // AURA-HPG5-V2-I2 (R1-05) -- a refused REJECT_ACTIVE_OVERLAP save is a
+    // typed, overridable conflict (nothing was written), not a generic
+    // failure. Every other non-2xx keeps the exact previous behaviour.
+    if (res.status === 409) {
+      const body = await res.json().catch(() => null);
+      if (isPlanOverlapResponse(body)) throw new PlanOverlapSaveError(parsePlanOverlapConflict(body), plan);
+    }
+    throw new Error('Unable to save plan.');
+  }
   return mapPlanRow(await res.json());
+}
+
+/** AURA-HPG5-V2-I2 (R1-05) -- thrown by saveUpcomingPlanFromCandidate for a
+ * 409 PLAN_OVERLAP. Carries the conflicting plan (when the server named it)
+ * and the exact refused plan payload, so the caller can show both sides and
+ * offer an explicit override of the SAME payload. */
+export class PlanOverlapSaveError extends Error {
+  constructor(public readonly conflict: PlanOverlapConflictView | null, public readonly proposed: UpcomingPlan) {
+    super('That time overlaps another plan.');
+    this.name = 'PlanOverlapSaveError';
+  }
 }
 
 /** HPG3-A3b -- carries an optional, untrusted-until-validated `code` string
@@ -407,6 +429,33 @@ class PlanActionError extends Error {
     this.name = 'PlanActionError';
   }
 }
+
+/** AURA-HPG5-V2-I1 -- POST /api/plans refused a Find a Time save with 409
+ * PLAN_OVERLAP (overlapPolicy REJECT_ACTIVE_OVERLAP). Nothing was written. */
+class PlanOverlapActionError extends PlanActionError {
+  // AURA-HPG5-V2-I2 -- `sentGoalActivityId` is the goal link the REFUSED
+  // request actually carried, so "Save anyway" can prove it re-sends the
+  // identical payload (see handleSaveAnyway).
+  constructor(message: string, public readonly conflict: PlanOverlapConflictView | null, public readonly sentGoalActivityId: string | null = null) {
+    super(message, 'PLAN_OVERLAP');
+    this.name = 'PlanOverlapActionError';
+  }
+}
+
+type PlanSaveOptions = {
+  /** Omitted -> field not sent (server default ALLOW, unchanged contract). */
+  overlapPolicy?: 'ALLOW' | 'REJECT_ACTIVE_OVERLAP';
+};
+
+type PendingPlanOverlap = {
+  key: string;
+  /** The exact refused payload (title + instants); re-sent verbatim. */
+  plan: UpcomingPlan;
+  activityId?: string | null;
+  /** AURA-HPG5-V2-I2 -- the goal link the refused request carried. */
+  goalActivityId: string | null;
+  conflict: PlanOverlapConflictView | null;
+};
 
 export function PlanWithAuraView({ onTimingSearch, onViewDay, onPlanLogged, timezone, initialActivity, initialActivityKey, initialActivityId, initialHorizon, onOpenPeople, focusMomentsKey, onMomentSeen, focusMomentToken, focusPlansKey, focusPlanId, focusPlansFilter }: PlanWithAuraViewProps) {
   const [planMode, setPlanMode] = useState<TimingSearchMode>('FIND');
@@ -452,6 +501,13 @@ export function PlanWithAuraView({ onTimingSearch, onViewDay, onPlanLogged, time
   // catch block runs sets exactly one of them and clears the other, so
   // the view never renders two overlapping failure banners for one event.
   const [schedulingConflict, setSchedulingConflict] = useState<SchedulingEligibilityPresentation | null>(null);
+  // AURA-HPG5-V2-I1 -- a Find a Time save the server refused because it now
+  // overlaps another plan. Shown as an inline choice; never auto-retried.
+  const [planOverlap, setPlanOverlap] = useState<PendingPlanOverlap | null>(null);
+  const planOverlapHeadingRef = useRef<HTMLDivElement | null>(null);
+  // AURA-HPG5-V2-I2 -- see saveOpportunity: same-batch double-submit guard.
+  const savingOpportunityRef = useRef(false);
+  const findResultsHeadingRef = useRef<HTMLDivElement | null>(null);
   const [isLoading, setIsLoading] = useState(false);
   const [isListening, setIsListening] = useState(false);
 
@@ -735,12 +791,17 @@ export function PlanWithAuraView({ onTimingSearch, onViewDay, onPlanLogged, time
     setFindResult(null);
     setError('');
     setSchedulingConflict(null);
+    // AURA-HPG5-V2-I2 -- a pending conflict belongs to the previous link.
+    setPlanOverlap(null);
     bumpRequestGeneration();
   };
 
   const clearGoalActivitySelection = () => {
     setSelectedGoalActivityId(undefined);
     setSelectedGoalActivityTitle(undefined);
+    // AURA-HPG5-V2-I1 -- a pending overlap choice belongs to the link it was
+    // refused with; once the link changes it is stale.
+    setPlanOverlap(null);
   };
 
   useEffect(() => {
@@ -910,7 +971,7 @@ export function PlanWithAuraView({ onTimingSearch, onViewDay, onPlanLogged, time
     return saved;
   };
 
-  const handleSavePlan = async (plan: UpcomingPlan, activityId?: string | null): Promise<UpcomingPlan> => {
+  const handleSavePlan = async (plan: UpcomingPlan, activityId?: string | null, options?: PlanSaveOptions): Promise<UpcomingPlan> => {
     const replacedPlanId = reschedulingPlanId;
     if (replacedPlanId) {
       try {
@@ -970,6 +1031,10 @@ export function PlanWithAuraView({ onTimingSearch, onViewDay, onPlanLogged, time
           // longer holds (see POST /api/plans's own handling) -- this is
           // advisory intent, not a trusted fact.
           goalActivityId: selectedGoalActivityId ?? null,
+          // AURA-HPG5-V2-I1 -- only Find a Time's "Use this time" opts in to
+          // REJECT_ACTIVE_OVERLAP; "Save anyway" sends ALLOW. Every other
+          // save omits the field (manual-overlap contract unchanged).
+          ...(options?.overlapPolicy ? { overlapPolicy: options.overlapPolicy } : {}),
         }),
       });
       if (!res.ok) {
@@ -981,9 +1046,13 @@ export function PlanWithAuraView({ onTimingSearch, onViewDay, onPlanLogged, time
         // exact same generic text. Reading it now is a strict
         // improvement, not a changed success flow.
         const body = await res.json().catch(() => null);
+        if (res.status === 409 && isPlanOverlapResponse(body)) {
+          throw new PlanOverlapActionError((body && typeof body.error === 'string' && body.error) || 'That time overlaps another plan.', parsePlanOverlapConflict(body), selectedGoalActivityId ?? null);
+        }
         throw new PlanActionError((body && typeof body.error === 'string' && body.error) || 'Unable to save plan.', typeof body?.code === 'string' ? body.code : undefined);
       }
       const row = await res.json();
+      setPlanOverlap(null);
       const saved = mapPlanRow(row, timezone);
       setSavedPlans((plans) => [saved, ...plans.filter((item) => item.id !== saved.id)]);
       setExpandedPlanId(saved.id);
@@ -1007,6 +1076,12 @@ export function PlanWithAuraView({ onTimingSearch, onViewDay, onPlanLogged, time
       // a genuine conflict, a real "View your plans" action); every other
       // failure (a network error, an unrecognized/codeless rejection) keeps
       // the exact same generic `error` text as before this ticket.
+      if (err instanceof PlanOverlapActionError) {
+        // AURA-HPG5-V2-I1 -- surfaced by saveOpportunity as the inline
+        // "Choose another time / Save anyway" choice, not a generic error.
+        triggerHaptic('warning');
+        throw err;
+      }
       if (err instanceof PlanActionError && isKnownSchedulingEligibilityCode(err.code)) {
         setSchedulingConflict(presentSchedulingEligibilityError(err.code));
       } else {
@@ -1227,6 +1302,7 @@ export function PlanWithAuraView({ onTimingSearch, onViewDay, onPlanLogged, time
     setIsLoading(true);
     setError('');
     setSchedulingConflict(null);
+    setPlanOverlap(null);
     // DR4-F2B blocking-fix -- bumped unconditionally so THIS request's own
     // generation is always strictly newer than whatever came before it
     // (including an identical re-run of the same search: "a newer
@@ -1489,17 +1565,28 @@ export function PlanWithAuraView({ onTimingSearch, onViewDay, onPlanLogged, time
     });
   };
 
-  const saveOpportunity = async (key: string, plan: UpcomingPlan, activityId?: string | null) => {
-    if (savingOpportunityKey || plannedOpportunityKeys.has(key)) return;
+  const saveOpportunity = async (key: string, plan: UpcomingPlan, activityId?: string | null, options?: PlanSaveOptions) => {
+    // AURA-HPG5-V2-I2 (R1-04) -- synchronous in-flight guard. The state flag
+    // below only takes effect after a re-render, so two clicks handled in the
+    // same React batch could otherwise both POST (the second one then hitting
+    // the user's own just-saved plan as a "conflict").
+    if (savingOpportunityRef.current || savingOpportunityKey || plannedOpportunityKeys.has(key)) return;
+    savingOpportunityRef.current = true;
     setSavingOpportunityKey(key);
     try {
-      const saved = await handleSavePlan(plan, activityId);
+      const saved = await handleSavePlan(plan, activityId, options);
       setPlannedOpportunityKeys((prev) => new Set(prev).add(key));
       setPlannedActivityIdByKey((prev) => ({ ...prev, [key]: saved.id }));
-    } catch {
+    } catch (err) {
       // handleSavePlan() already surfaced this via the `error` state -- leave
       // the opportunity unmarked (not planned) so the user can retry.
+      // AURA-HPG5-V2-I1 -- except an overlap refusal, which becomes the
+      // explicit choice below (same plan payload and goal link preserved).
+      if (err instanceof PlanOverlapActionError) {
+        setPlanOverlap({ key, plan, activityId, goalActivityId: err.sentGoalActivityId, conflict: err.conflict });
+      }
     } finally {
+      savingOpportunityRef.current = false;
       setSavingOpportunityKey(null);
     }
   };
@@ -1549,8 +1636,67 @@ export function PlanWithAuraView({ onTimingSearch, onViewDay, onPlanLogged, time
       setError('This result no longer matches your current search. Find a time again before saving.');
       return;
     }
-    void saveOpportunity(findCandidateKey(candidate), planPayloadFromCandidate(candidate, durationMinutes), resolvedActivityDefinition?.id);
+    setPlanOverlap(null);
+    // AURA-HPG5-V2-I1 -- a Find a Time recommendation may have gone stale
+    // (another plan created since the search): the server re-checks overlap
+    // inside the save transaction and refuses with PLAN_OVERLAP instead of
+    // saving silently.
+    void saveOpportunity(findCandidateKey(candidate), planPayloadFromCandidate(candidate, durationMinutes), resolvedActivityDefinition?.id, { overlapPolicy: 'REJECT_ACTIVE_OVERLAP' });
   };
+
+  // AURA-HPG5-V2-I1 -- the two explicit choices after a PLAN_OVERLAP refusal.
+  const visiblePlanOverlap = planOverlap && findResult?.candidates.some((candidate) => findCandidateKey(candidate) === planOverlap.key) ? planOverlap : null;
+  const handleChooseAnotherTime = () => {
+    setPlanOverlap(null);
+    requestAnimationFrame(() => findResultsHeadingRef.current?.focus());
+  };
+  const handleSaveAnyway = () => {
+    // Only for a refusal whose candidate is still part of the CURRENT result
+    // (a new search or input change hides the choice entirely).
+    const pending = visiblePlanOverlap;
+    if (!pending || savingOpportunityKey) return;
+    // AURA-HPG5-V2-I2 (R1-04) -- the override must be the EXACT refused
+    // payload. `pending.plan`/`pending.activityId` are that payload; the goal
+    // link is read from the current selection by handleSavePlan, so it is
+    // re-checked here against the link the refused request carried. Any
+    // difference means the conflict is stale: close it, save nothing.
+    if ((selectedGoalActivityId ?? null) !== pending.goalActivityId) {
+      setPlanOverlap(null);
+      return;
+    }
+    // Intentional, user-confirmed manual overlap: the S2 contract's explicit
+    // allowance (overlapPolicy ALLOW). The goal link is still the current
+    // explicit selection -- a refusal never clears it (only a successful save
+    // does), and changing the selection clears the result and hides this
+    // choice, so it is the same link the refused attempt carried.
+    void saveOpportunity(pending.key, pending.plan, pending.activityId, { overlapPolicy: 'ALLOW' });
+  };
+  const planOverlapPresentation = visiblePlanOverlap
+    ? presentProposedPlanOverlap({ title: visiblePlanOverlap.plan.title, plannedStartAt: visiblePlanOverlap.plan.plannedStartAt, plannedEndAt: visiblePlanOverlap.plan.plannedEndAt }, visiblePlanOverlap.conflict, timezone || 'UTC')
+    : null;
+  useEffect(() => {
+    if (planOverlap) planOverlapHeadingRef.current?.focus();
+  }, [planOverlap]);
+  // AURA-HPG5-V2-I2 -- clear (not merely hide) a conflict whose refused
+  // candidate is no longer in the current result: a new search, any input
+  // change that nulls the result, or a different result set. A later result
+  // that happens to contain the same slot can never resurrect it.
+  useEffect(() => {
+    if (planOverlap && !findResult?.candidates.some((candidate) => findCandidateKey(candidate) === planOverlap.key)) setPlanOverlap(null);
+  }, [findResult, planOverlap]);
+  // Rendered directly under the refused card (never above a different one).
+  const renderPlanOverlapPanel = (candidateKey: string) =>
+    visiblePlanOverlap && planOverlapPresentation && visiblePlanOverlap.key === candidateKey ? (
+      <PlanOverlapConflictPanel
+        idPrefix="plan-overlap"
+        presentation={planOverlapPresentation}
+        headingRef={planOverlapHeadingRef}
+        onChooseAnotherTime={handleChooseAnotherTime}
+        onSaveAnyway={handleSaveAnyway}
+        saveDisabled={savingOpportunityKey !== null}
+        saving={savingOpportunityKey === visiblePlanOverlap.key}
+      />
+    ) : null;
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 17, paddingBottom: 24, fontFamily: 'sans-serif', color: '#f8fafc' }}>
@@ -1854,9 +2000,11 @@ export function PlanWithAuraView({ onTimingSearch, onViewDay, onPlanLogged, time
 
       {findResult && (
         <section style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
-          <SectionHeader label="Aura's Best Moments" actionLabel={onViewDay ? 'View my day' : undefined} onAction={onViewDay} />
+          <div ref={findResultsHeadingRef} tabIndex={-1} style={{ outline: 'none' }}>
+            <SectionHeader label="Aura's Best Moments" actionLabel={onViewDay ? 'View my day' : undefined} onAction={onViewDay} />
+          </div>
           {findResult.candidates.length === 0 && (
-            <div style={emptyPlansStyle}>Aura could not find a usable time for this request. Try a shorter duration, a wider date range, or a different preferred time.</div>
+            <div style={emptyPlansStyle}>{presentFindATimeEmptyReason((findResult as { emptyReason?: unknown }).emptyReason) ?? 'Aura could not find a usable time for this request. Try a shorter duration, a wider date range, or a different preferred time.'}</div>
           )}
           {findResult.candidates[0] && (
             <TimingResultCard
@@ -1877,12 +2025,13 @@ export function PlanWithAuraView({ onTimingSearch, onViewDay, onPlanLogged, time
               dailyRhythmNote={findResult.dailyRhythmNotes?.[findResult.candidates[0].start]}
             />
           )}
+          {findResult.candidates[0] && renderPlanOverlapPanel(findCandidateKey(findResult.candidates[0]))}
           {findResult.candidates.length > 1 && (
             <>
               <SectionHeader label="Other Good Options" />
               {findResult.candidates.slice(1).map((candidate) => (
+                <Fragment key={findCandidateKey(candidate)}>
                 <TimingResultCard
-                  key={findCandidateKey(candidate)}
                   kicker="OTHER OPTION"
                   candidate={candidate}
                   activityTitle={candidate.metadata.activityType}
@@ -1899,6 +2048,8 @@ export function PlanWithAuraView({ onTimingSearch, onViewDay, onPlanLogged, time
                   shareFeedback={momentShareFeedback?.key === findCandidateKey(candidate) ? momentShareFeedback.text : null}
                   dailyRhythmNote={findResult.dailyRhythmNotes?.[candidate.start]}
                 />
+                {renderPlanOverlapPanel(findCandidateKey(candidate))}
+                </Fragment>
               ))}
             </>
           )}

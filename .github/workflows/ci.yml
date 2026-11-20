@@ -663,6 +663,32 @@ jobs:
       # with the canonical overlap loader over the requested range and candidate extent.
       - name: Run Forward Planner overlap blocker architecture test
         run: npx ts-node test/forwardPlannerOverlapBlockerArchitecture.test.ts
+      # AURA-HPG5-V2-I1 -- Find a Time availability/conflict constraints (pure
+      # T1-T24 logic; imports lib/db.ts for types, so it runs after "Install web
+      # deps", jsx-enabled like the Home dashboard tests). No live DB.
+      - name: Run Find a Time constraints test (HPG5-V2-I1)
+        env:
+          TS_NODE_COMPILER_OPTIONS: '{"jsx":"react"}'
+        run: npx ts-node test/findATimeConstraints.test.ts
+      # AURA-HPG5-V2-I1 -- the mounted Plan tab's PLAN_OVERLAP refusal, Choose
+      # another time and explicit Save anyway (shared jsdom harness).
+      - name: Run Find a Time conflict component test (HPG5-V2-I1)
+        run: npx ts-node --project tsconfig.jsdom-tests.json test/findATimeConflictJsdom.test.ts
+      # AURA-HPG5-V2-I2 -- conflict copy names the proposed save and the
+      # existing plan in the user's timezone (pure).
+      - name: Run conflict presentation test (HPG5-V2-I2)
+        env:
+          TS_NODE_COMPILER_OPTIONS: '{"jsx":"react"}'
+        run: npx ts-node test/hpg5I2ConflictPresentation.test.ts
+      # AURA-HPG5-V2-I2 -- Plan tab conflict panel placement/override and the
+      # My Day story card's protected recommended-time save (jsdom harness).
+      - name: Run conflict panel and My Day save component test (HPG5-V2-I2)
+        run: npx ts-node --project tsconfig.jsdom-tests.json test/hpg5I2ConflictPanelJsdom.test.ts
+      # AURA-HPG5-V2-I3 -- the live Home save paths (Home timeline / Right Now
+      # Plan, Day Builder Add): REJECT opt-in, conflict panel beside the action,
+      # explicit Save anyway, double-submit and stale-state guards (jsdom).
+      - name: Run Home save conflict component test (HPG5-V2-I3)
+        run: npx ts-node --project tsconfig.jsdom-tests.json test/hpg5I3HomeSaveJsdom.test.ts
   web-build:
     name: Next.js production build
     runs-on: ubuntu-latest
@@ -1012,6 +1038,28 @@ jobs:
       # POST /api/plans route (acceptance, Move and manual writers serialize).
       - name: Run manual writer serialization DB test
         run: npx ts-node test/scheduleWriteManualSerializationDb.test.ts
+      # AURA-HPG5-V2-I1 -- real-DB proof through the real /api/timing-search and
+      # POST /api/plans routes: Find a Time constraints, opt-in
+      # REJECT_ACTIVE_OVERLAP (409 PLAN_OVERLAP, rollback, concurrency, goal
+      # identity). Synthetic users only; cleans up after itself.
+      - name: Run Find a Time constraints DB test (HPG5-V2-I1)
+        env:
+          TS_NODE_COMPILER_OPTIONS: '{"jsx":"react"}'
+        run: npx ts-node test/findATimeConstraintsDb.test.ts
+      # AURA-HPG5-V2-I2 -- the My Day story card's client save function against
+      # the real routes: stale recommendation refused, no write, Save anyway,
+      # concurrency, isolation. jsx-enabled (it imports the client component).
+      - name: Run My Day save protection DB test (HPG5-V2-I2)
+        env:
+          TS_NODE_COMPILER_OPTIONS: '{"jsx":"react"}'
+        run: npx ts-node test/hpg5I2MyDaySaveDb.test.ts
+      # AURA-HPG5-V2-I3 -- Home Plan / Day Builder Add saves against the real
+      # routes: stale refusal with no write, Save anyway with the same
+      # idempotency key, races, privacy.
+      - name: Run Home save protection DB test (HPG5-V2-I3)
+        env:
+          TS_NODE_COMPILER_OPTIONS: '{"jsx":"react"}'
+        run: npx ts-node test/hpg5I3HomeSaveDb.test.ts
       # Schedule write consistency S4 -- real-DB proof through the real proposal path
       # (explicit clock) that an overnight / prior-start plan blocks a Recomposition proposal.
       - name: Run Recomposition proposal overlap DB test
