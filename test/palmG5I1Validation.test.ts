@@ -67,7 +67,10 @@ async function run() {
   check('C8. huge WebP VP8X (16384x16384) -> dimensions-too-large', (await code(validatePalmImageFile(blobOf(makeWebpVp8x(16384, 16384), 'image/webp')))) === 'dimensions-too-large');
   check('C9. checkDimensions rejects NaN', checkDimensions(NaN, 100) === 'corrupt-image');
   const farSof = await validatePalmImageFile(blobOf(makeJpegHeader(2000, 1500, { paddingBytes: PALM_IMAGE_LIMITS.headerReadBytes + 1000 }), 'image/jpeg'));
-  check('C10. JPEG whose SOF lies beyond the header window: accepted for decode, post-decode check applies', farSof.ok && farSof.header === null);
+  // AURA-PALM-G5-C5 (F-1): the SOF is now located past the window and checked
+  // before decode (was: accepted with header null, post-decode check only).
+  // Bombs past the window: test/palmG5C5JpegDecodeBomb.test.ts.
+  check('C10. JPEG whose SOF lies beyond the header window: dimensions read and checked before decode', farSof.ok && farSof.header?.width === 2000 && farSof.header?.height === 1500);
 
   // ------------------------------------------------------------ D. orientation
   for (const le of [false, true]) {

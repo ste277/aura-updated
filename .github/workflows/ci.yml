@@ -809,6 +809,10 @@ jobs:
         run: npm install
       - name: Run Palm upload image validation tests (G5-I1)
         run: npx ts-node test/palmG5I1Validation.test.ts
+      # G5-C5 (F-1): JPEG decompression bombs rejected before decode, wherever
+      # the SOF lies; bounded windowed reads; decoder never called.
+      - name: Run Palm upload JPEG pre-decode dimension tests (G5-C5)
+        run: npx ts-node test/palmG5C5JpegDecodeBomb.test.ts
       - name: Run Palm upload pipeline tests (G5-I1)
         run: npx ts-node test/palmG5I1Pipeline.test.ts
       - name: Run Palm upload privacy, isolation and gate tests (G5-I1)

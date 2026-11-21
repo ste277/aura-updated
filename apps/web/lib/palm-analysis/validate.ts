@@ -22,6 +22,14 @@ export const PALM_IMAGE_LIMITS = Object.freeze({
   analysisMaxEdgePx: 1280,
   /** Bytes read for header sniffing (JPEG SOF can follow a large EXIF block). */
   headerReadBytes: 512 * 1024,
+  /**
+   * AURA-PALM-G5-C5 (F-1): a JPEG whose SOF lies beyond the first window is
+   * located by walking its marker segments through further windows of
+   * headerReadBytes. A segment is at most 65 537 bytes, so every window
+   * advances by at least headerReadBytes - 65 537 bytes; this bound covers a
+   * maxFileBytes file with margin and is enforced as a hard cap.
+   */
+  maxJpegHeaderReads: Math.ceil((15 * 1024 * 1024) / (512 * 1024 - 65_537)) + 2,
 });
 
 /** `accept` attribute for the picker. No `capture` attribute is ever set. */
@@ -110,32 +118,82 @@ function readExifOrientation(b: Uint8Array, start: number, end: number): number 
   return 1;
 }
 
-function parseJpeg(b: Uint8Array): ImageHeaderInfo | null {
-  let i = 2;
-  let orientation = 1;
-  while (i + 4 <= b.length) {
-    if (b[i] !== 0xff) return null; // lost sync: corrupt
+/**
+ * Result of walking JPEG marker segments over one window of the file.
+ *   found   -- the frame header (SOF) was read;
+ *   corrupt -- the stream is malformed, or ends (EOI/SOS/end of file) before any SOF;
+ *   more    -- the window ended first; resume at absolute `offset`.
+ */
+type JpegScan =
+  | { kind: 'found'; info: ImageHeaderInfo }
+  | { kind: 'corrupt' }
+  | { kind: 'more'; offset: number; orientation: number };
+
+/**
+ * AURA-PALM-G5-C5 (F-1): walk JPEG markers in `b`, which holds the file bytes
+ * [base, base + b.length), starting at absolute offset `start`. Segment bodies
+ * are skipped by their declared length and never buffered beyond the window.
+ * The SOF and the first APP1 (EXIF orientation) are only interpreted when the
+ * whole segment is inside the window; otherwise the caller re-reads from the
+ * segment start, so a straddling header is never parsed truncated.
+ */
+function scanJpeg(b: Uint8Array, base: number, start: number, orientation: number, atEof: boolean): JpegScan {
+  const corrupt: JpegScan = { kind: 'corrupt' };
+  const more = (at: number): JpegScan => (atEof || base + at <= start ? corrupt : { kind: 'more', offset: base + at, orientation });
+  let i = start - base;
+  for (;;) {
+    if (i + 4 > b.length) return more(i);
+    if (b[i] !== 0xff) return corrupt; // lost sync
     const marker = b[i + 1];
     if (marker === 0xff) { i++; continue; } // fill byte
     if (marker === 0xd8 || marker === 0x01 || (marker >= 0xd0 && marker <= 0xd7)) { i += 2; continue; }
-    if (marker === 0xd9 || marker === 0xda) return null; // EOI / SOS before any SOF
+    if (marker === 0xd9 || marker === 0xda || marker === 0x00) return corrupt; // EOI / SOS before any SOF, or a stuffed byte
     const len = u16be(b, i + 2);
-    if (len < 2) return null;
-    const segStart = i + 4;
+    if (len < 2) return corrupt;
     const segEnd = i + 2 + len;
-    if (marker === 0xe1 && orientation === 1) orientation = readExifOrientation(b, segStart, Math.min(segEnd, b.length));
     const isSof = marker >= 0xc0 && marker <= 0xcf && marker !== 0xc4 && marker !== 0xc8 && marker !== 0xcc;
+    const wantExif = marker === 0xe1 && orientation === 1;
+    if ((isSof || wantExif) && segEnd > b.length) return more(i);
+    if (wantExif) orientation = readExifOrientation(b, i + 4, segEnd);
     if (isSof) {
-      if (segStart + 5 > b.length) return null;
-      return { height: u16be(b, segStart + 1), width: u16be(b, segStart + 3), exifOrientation: orientation };
+      // precision(1) height(2) width(2) components(1) at least.
+      if (len < 8) return corrupt;
+      return { kind: 'found', info: { height: u16be(b, i + 5), width: u16be(b, i + 7), exifOrientation: orientation } };
     }
     i = segEnd;
   }
-  return null; // SOF not inside the header window
+}
+
+function parseJpeg(b: Uint8Array): ImageHeaderInfo | null {
+  const r = scanJpeg(b, 0, 2, 1, true);
+  return r.kind === 'found' ? r.info : null;
+}
+
+/**
+ * Locate the JPEG frame header anywhere in the file with bounded work: at
+ * most maxJpegHeaderReads windows of headerReadBytes, one held at a time,
+ * each strictly further into the file. Returns null when the file is not a
+ * well-formed JPEG up to its SOF (the caller rejects it as corrupt).
+ */
+async function locateJpegHeader(file: PalmBlobLike, first: Uint8Array): Promise<ImageHeaderInfo | null> {
+  const L = PALM_IMAGE_LIMITS;
+  let scan = scanJpeg(first, 0, 2, 1, first.length >= file.size);
+  let reads = 1;
+  while (scan.kind === 'more') {
+    reads++;
+    if (reads > L.maxJpegHeaderReads || scan.offset >= file.size) return null;
+    const base = scan.offset;
+    const end = Math.min(file.size, base + L.headerReadBytes);
+    const buf = new Uint8Array(await file.slice(base, end).arrayBuffer());
+    if (buf.length !== end - base) return null; // short read
+    scan = scanJpeg(buf, base, base, scan.orientation, end >= file.size);
+  }
+  return scan.kind === 'found' ? scan.info : null;
 }
 
 function parsePng(b: Uint8Array): ImageHeaderInfo | null {
-  if (b.length < 24 || ascii(b, 12, 4) !== 'IHDR') return null;
+  // IHDR must be the first chunk and exactly 13 bytes long (PNG spec 11.2.2).
+  if (b.length < 24 || ascii(b, 12, 4) !== 'IHDR' || u32be(b, 8) !== 13) return null;
   return { width: u32be(b, 16), height: u32be(b, 20), exifOrientation: 1 };
 }
 
@@ -206,14 +264,20 @@ export async function validatePalmImageFile(file: PalmBlobLike): Promise<PalmVal
     if (sniffed === 'unknown' && (/hei[cf]/.test(declared) || /\.hei[cf]$/.test(name))) return fail('heic-unsupported');
     return fail('unsupported-format');
   }
-  const header = parseImageHeader(sniffed, bytes);
-  // PNG/WebP keep their size in the first bytes: no header means corrupt.
-  // A JPEG may place SOF beyond the window; the post-decode check covers it.
-  if (!header && sniffed !== 'jpeg') return fail('corrupt-image');
-  if (!header && bytes.length >= file.size) return fail('corrupt-image');
-  if (header) {
-    const dimError = checkDimensions(header.width, header.height);
-    if (dimError) return fail(dimError);
+  // AURA-PALM-G5-C5 (F-1): every accepted file has its declared dimensions
+  // checked HERE, before any decode. PNG/WebP keep their size in the first
+  // bytes; a JPEG's SOF is located through bounded windowed reads however far
+  // into the file it lies. No header means corrupt -- nothing is decoded on
+  // the strength of the post-decode check alone (that check stays as defence
+  // in depth in normalize.ts).
+  let header: ImageHeaderInfo | null;
+  try {
+    header = sniffed === 'jpeg' ? await locateJpegHeader(file, bytes) : parseImageHeader(sniffed, bytes);
+  } catch {
+    return fail('corrupt-image');
   }
+  if (!header) return fail('corrupt-image');
+  const dimError = checkDimensions(header.width, header.height);
+  if (dimError) return fail(dimError);
   return { ok: true, format: sniffed, header, declaredTypeMismatch: declared !== '' && declared !== MIME_FOR[sniffed] };
 }
