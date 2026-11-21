@@ -51,7 +51,7 @@ const locationConfirmationSource = stripComments(read('apps/web/lib/locationConf
 // ============================================================
 
 check('reuses the EXISTING LocationPicker component (no second location-editing UI)', /import \{ LocationPicker \} from '\.\/LocationPicker'/.test(journey) && /<LocationPicker\b/.test(journey));
-check('never imports or reimplements the timing/Panchang engine (computeSolarEphemeris/computePanchangWindows/computeDailyEnergyInsight) -- only consumes the already-computed nextShift prop', !/computeSolarEphemeris|computePanchangWindows|computeDailyEnergyInsight/.test(journey));
+check('never imports or reimplements the timing/Panchang engine (computeSolarEphemeris/computePanchangWindows/computeDailyEnergyInsight) -- only consumes the already-computed recommendation prop (AURA-READY-03-F1)', !/computeSolarEphemeris|computePanchangWindows|computeDailyEnergyInsight/.test(journey));
 check('never imports a second Prisma/db/pool module (no duplicate persistence path)', !/from '\.\.\/lib\/db'|\bpool\b|pg['"]/.test(journey));
 
 // ============================================================
@@ -91,8 +91,8 @@ check('B9. selecting a different city or submitting a custom location both flow 
 // C. Recommendation -- no fabrication, no extra requirements.
 // ============================================================
 
-check('C1. nextShift is received as a prop (the real, already-computed engine value) -- never computed, never hardcoded inside this file', /nextShift: DailyEnergyInsight\['nextShift'\] \| undefined/.test(journey));
-check('C2. the displayed start time is the REAL nextShift.startTime, never a static example string', /\{nextShift\.startTime\}/.test(journey) && !/4:30\s*(AM|PM)|12:00\s*(AM|PM)/.test(journey));
+check('C1. the recommendation is received as a prop (computed in page.tsx from the real engine windows by computeOnboardingRecommendation, AURA-READY-03-F1) -- never computed, never hardcoded inside this file', /recommendation: OnboardingWindowRecommendation \| undefined/.test(journey));
+check('C2. the displayed start time is the REAL recommendation.startTime, never a static example string', /recommendation\.startTime/.test(journey) && !/4:30\s*(AM|PM)|12:00\s*(AM|PM)/.test(journey));
 check('C3. no birth-detail concept anywhere in the recommendation logic', !/birthDate|birthTime|birthCityName|birthLatitude|birthLongitude|natal/i.test(journey));
 check('C4. no Goal concept anywhere in the recommendation logic (RecommendationStep itself -- Onboarding V1 PR 4 added an optional Goal offer as later, separate, skippable steps AFTER this one, never inside it)', (() => {
   const recStart = journeySource.indexOf('function RecommendationStep');
@@ -105,15 +105,15 @@ check('C4. no Goal concept anywhere in the recommendation logic (RecommendationS
   return !/\bGoal\b|GoalActivity|goalId/.test(recommendationSource);
 })());
 check('C5. no availability-configuration concept anywhere', !/availabilityConfigured|AvailabilityConfiguration/.test(journey));
-check('C6. an unconfirmed location NEVER reaches the real-nextShift branch -- the component returns the "confirm your location" fallback first', (() => {
+check('C6. an unconfirmed location NEVER reaches the real-recommendation branch -- the component returns the "confirm your location" fallback first', (() => {
   const recFnStart = journey.indexOf('function RecommendationStep');
   const body = journey.slice(recFnStart);
   const guardIndex = body.indexOf('if (!locationConfirmed)');
-  const realBranchIndex = body.indexOf('YOUR NEXT USEFUL WINDOW') >= 0 ? body.indexOf('nextShift.windowName') : -1;
-  return guardIndex !== -1 && (realBranchIndex === -1 || guardIndex < realBranchIndex);
+  const realBranchIndex = body.indexOf('recommendation.windowName');
+  return guardIndex !== -1 && realBranchIndex !== -1 && guardIndex < realBranchIndex;
 })());
 check('C7. the unconfirmed-location fallback never claims verification/personalization', /Confirm your location to see timing guidance/.test(journey) && !/verified|personalized to you(?! yet)/i.test(journey.slice(journey.indexOf('if (!locationConfirmed)'), journey.indexOf('if (!hasRealRecommendation'))));
-check('C8. a missing/empty engine result (no window) shows a truthful "no window available" fallback, never the real-window branch\'s copy', /No timing window available right now/.test(journey) && /!hasRealRecommendation \|\| !nextShift/.test(journey));
+check('C8. a missing/empty engine result (no window) shows a truthful "no window available" fallback, never the real-window branch\'s copy', /No timing window available right now/.test(journey) && /!hasRealRecommendation \|\| !recommendation/.test(journey));
 check('C9. the no-window fallback still offers a route into Aura (Plan my day AND Go to Home)', (() => {
   const idx = journey.indexOf('No timing window available right now');
   const block = journey.slice(idx, idx + 600);
