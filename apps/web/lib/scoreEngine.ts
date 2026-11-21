@@ -177,15 +177,8 @@ export function computeDailyEnergyInsight(
       diffMinutes += 1440;
     }
 
-    const hrs = Math.floor(diffMinutes / 60);
-    const mins = diffMinutes % 60;
-    const startsIn = hrs > 0 ? `${hrs}h ${mins}m` : `${mins}m`;
-
-    const startHr = Math.floor(sMin / 60) % 24;
-    const startMin = sMin % 60;
-    const period = startHr >= 12 ? 'PM' : 'AM';
-    const formattedHr = startHr % 12 === 0 ? 12 : startHr % 12;
-    const startTime = `${formattedHr}:${String(startMin).padStart(2, '0')} ${period}`;
+    const startsIn = formatMinutesUntil(diffMinutes);
+    const startTime = formatMinuteOfDay(sMin);
     const upcomingProfile = energyProfileForWindowType((upcomingWindow.type || 'NEUTRAL') as SolarWindowType);
 
     nextShift = {
@@ -209,7 +202,25 @@ export function computeDailyEnergyInsight(
   };
 }
 
-function formatWindowName(type: SolarWindowType | string): string {
+/** "2h 5m" / "45m" -- the duration text `nextShift.startsIn` has always used
+ * (exported so other surfaces format "starts in" identically). */
+export function formatMinutesUntil(diffMinutes: number): string {
+  const hrs = Math.floor(diffMinutes / 60);
+  const mins = diffMinutes % 60;
+  return hrs > 0 ? `${hrs}h ${mins}m` : `${mins}m`;
+}
+
+/** Local minute-of-day -> "9:02 AM" -- the clock text `nextShift.startTime`
+ * has always used. */
+export function formatMinuteOfDay(sMin: number): string {
+  const startHr = Math.floor(sMin / 60) % 24;
+  const startMin = sMin % 60;
+  const period = startHr >= 12 ? 'PM' : 'AM';
+  const formattedHr = startHr % 12 === 0 ? 12 : startHr % 12;
+  return `${formattedHr}:${String(startMin).padStart(2, '0')} ${period}`;
+}
+
+export function formatWindowName(type: SolarWindowType | string): string {
   const cleanType = String(type).replace('_', ' ').toUpperCase();
   if (cleanType.includes('ABHIJIT')) return 'Peak Clarity (Abhijit)';
   if (cleanType.includes('VIJAYA')) return 'Victorious Window (Vijaya)';

@@ -283,6 +283,14 @@ jobs:
         env:
           TS_NODE_COMPILER_OPTIONS: '{"jsx":"react"}'
         run: npx ts-node test/homeRecomposition.test.ts
+      # AURA-READY-03-F1 -- onboarding never presents Rahu Kalam/Yamaganda/
+      # Gulika as the "next favourable window". Renders RecommendationStep
+      # (automatic JSX runtime, hence react-jsx) via renderToStaticMarkup;
+      # fixed dates/clocks, real ephemeris; no live DB.
+      - name: Run onboarding recommendation test
+        env:
+          TS_NODE_COMPILER_OPTIONS: '{"jsx":"react-jsx"}'
+        run: npx ts-node test/onboardingRecommendation.test.ts
       # Goals V2 Candidate B2 (resumed) -- goalActivityProposal.ts imports
       # a type-only RhythmPickerValue from the 'use client'
       # components/RhythmPicker.tsx, same jsx-enabled/apps-web-node_modules

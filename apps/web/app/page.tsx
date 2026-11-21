@@ -10,6 +10,7 @@ import {
   WeekdayIndex,
 } from '../../../packages/panchang/src/windows';
 import { computeDailyEnergyInsight } from '../lib/scoreEngine';
+import { computeOnboardingRecommendation } from '../lib/onboardingRecommendation';
 import { computeCurrentWindowStatus } from '../lib/currentWindowStatus';
 import { getActionCards, ActionCard } from '../../../packages/recommendation/src/actionCards';
 import { findActivityIntent } from '../../../packages/recommendation/src/personalizedTasks';
@@ -1258,6 +1259,13 @@ export default function DashboardPage() {
     };
   }, [solar, windows, currentMinuteOfDay]);
 
+  // AURA-READY-03-F1 -- onboarding's first recommendation: a favourable,
+  // caution-free window only (never the any-type energyInsight.nextShift).
+  const onboardingRecommendation = useMemo(
+    () => computeOnboardingRecommendation(windows, currentMinuteOfDay),
+    [windows, currentMinuteOfDay]
+  );
+
   // Daily energy insight score
   const energyInsight = useMemo(() => {
     return computeDailyEnergyInsight(windows, activeType, currentMinuteOfDay);
@@ -1800,7 +1808,7 @@ export default function DashboardPage() {
         timezone={user.timezone}
         locationConfirmed={user.locationConfirmedAt != null}
         onLocationChanged={handleLocationChanged}
-        nextShift={mounted ? energyInsight.nextShift : undefined}
+        recommendation={mounted ? onboardingRecommendation : undefined}
         hasRealRecommendation={mounted && windows.length > 0}
         onExit={handleExitOnboarding}
         onPlanMyDay={() => {
