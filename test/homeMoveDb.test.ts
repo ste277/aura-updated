@@ -40,7 +40,42 @@ const item = (day: string, id: string, title: string, h: number): AcceptedPropos
 let reqN = 0;
 const request = (day: string, items: AcceptedProposedItem[]): AcceptConstructedDayRequest => ({ clientRequestId: `home-move-${Date.now()}-${reqN++}`, constructionWindow: { date: day, start: new Date(`${day}T09:00:00Z`), end: new Date(`${day}T17:00:00Z`), timezone: TZ, source: 'EXPLICIT_RANGE' }, proposedItems: items });
 
+// AURA-WEB-CI-01 -- fixture dates, as pure functions of "now" so they can be
+// checked for every CI clock. Move destinations sit at now+60d (+3 h per
+// step); the subjects mk() places ahead sit at now+30d..now+36d (+60 min).
+// Accepted-day plans used to sit on FIXED days from 2027-01-20, so on
+// 2026-11-21 at ~06:47 UTC the first Move successor (now+60d+3h, 60 min)
+// landed on 2027-01-20 09:47-10:47Z over the accept item (10:00-10:30Z):
+// acceptance REJECTED the overlap and `.plans[0]` threw. Accepted days now
+// sit at now+45d, in the gap between those two relative ranges, so they can
+// never meet whatever day CI runs.
+const destAt = (nowMs: number, step: number) => minute(nowMs) + 60 * DAY + step * 3 * HOUR;
+const acceptDayAt = (nowMs: number, i: number) => new Date(Math.floor((nowMs + 45 * DAY) / DAY) * DAY + i * DAY).toISOString().slice(0, 10);
+const legacyAcceptDay = (i: number) => new Date(Date.UTC(2027, 0, 20 + i)).toISOString().slice(0, 10);
+
+function fixtureDateChecks() {
+  const overlaps = (a0: number, a1: number, b0: number, b1: number) => a0 < b1 && b0 < a1;
+  // Everything a construction window on `day` (09:00-17:00Z, holding the 10:00-10:30Z item) could meet:
+  // every Move destination (steps 0..39, 60 min each) and every future mk() subject (now+30d..now+36d, 60 min).
+  const collides = (nowMs: number, day: string) => {
+    const w0 = Date.parse(`${day}T09:00:00Z`); const w1 = Date.parse(`${day}T17:00:00Z`);
+    for (let s = 0; s < 40; s++) if (overlaps(w0, w1, destAt(nowMs, s), destAt(nowMs, s) + 60 * MIN)) return true;
+    return overlaps(w0, w1, minute(nowMs) + 30 * DAY, minute(nowMs) + 36 * DAY + 60 * MIN);
+  };
+  const failingRun = Date.parse('2026-11-21T06:47:00Z');
+  const firstMove = destAt(failingRun, 1);
+  const legacyItem = [Date.parse(`${legacyAcceptDay(0)}T10:00:00Z`), Date.parse(`${legacyAcceptDay(0)}T10:30:00Z`)];
+  check('CI-01. regression: on the failing main run (2026-11-21 06:47Z) the first Move successor overlapped the old fixed 2027-01-20 accept item', overlaps(firstMove, firstMove + 60 * MIN, legacyItem[0], legacyItem[1]));
+  check('CI-01. that same clock: the relative accept days no longer collide with any Move destination or subject', !collides(failingRun, acceptDayAt(failingRun, 0)) && !collides(failingRun, acceptDayAt(failingRun, 1)));
+  let bad = 0;
+  for (let t = Date.parse('2026-01-01T00:00:00Z'); t < Date.parse('2030-01-01T00:00:00Z'); t += 7 * MIN) {
+    if (collides(t, acceptDayAt(t, 0)) || collides(t, acceptDayAt(t, 1))) bad++;
+  }
+  check('CI-01. every CI clock 2026-2029 (7-minute steps): accept days never overlap a Move destination or a mk() subject', bad === 0);
+}
+
 async function main() {
+  fixtureDateChecks();
   const U = await upsertUserByEmail({ email: 'test-home-move@example.com', cityName: 'Chennai', latitude: 13.0827, longitude: 80.2707, timezone: TZ });
   await updateBirthProfile(U.id, { birthDate: '1990-06-15', birthTime: '08:30', birthCityName: 'Chennai', birthLatitude: 13.0827, birthLongitude: 80.2707, birthTimezone: TZ });
   const tok = createSessionToken(U.id, U.email);
@@ -62,10 +97,11 @@ async function main() {
     }) as unknown as typeof fetch;
   };
   const mk = async (title: string, startMs: number, durMin = 60) => createPlannedActivity({ userId: U.id, title: `${title} ${Date.now()}-${n++}`, plannedStartAt: new Date(startMs), plannedEndAt: new Date(startMs + durMin * MIN), durationMinutes: durMin, windowType: 'NEUTRAL' });
-  const dest = () => new Date(minute(Date.now()) + 60 * DAY + n++ * 3 * HOUR);
+  const dest = () => new Date(destAt(Date.now(), n++));
   const row = async (id: string) => (await sql(`SELECT * FROM "PlannedActivity" WHERE id = $1`, [id]))[0];
   const habits = async () => Number((await sql(`SELECT count(*)::int AS n FROM "HabitLog" WHERE "userId" = $1`, [U.id]))[0].n);
-  const nextDay = () => new Date(Date.UTC(2027, 0, 20 + day++)).toISOString().slice(0, 10);
+  const acceptNow = Date.now();
+  const nextDay = () => acceptDayAt(acceptNow, day++);
   const accept = async (map: { cap?: [string, string]; goal?: [string, string] }, title: string) => {
     const d = nextDay();
     return (await persistAcceptedConstructedDay(U.id, request(d, [item(d, 'i1', title, 10)]), new Date(`${d}T08:00:00Z`), new Map(map.goal ? [['i1', map.goal[1]]] : []), new Map(map.cap ? [['i1', map.cap[1]]] : []))) as any;
