@@ -29,7 +29,9 @@ import { buildPersonalMuhurtaContextForUser } from './natalContext';
 import { getActivityProfileById } from '../../../packages/recommendation/src/personalizedTasks';
 import { familyForActivityProfile } from '../../../packages/recommendation/src/auraFitEngine';
 import { runTimingSearch } from '../../../packages/recommendation/src/timingSearch';
-import { applyDailyRhythmPreference, type DailyRhythmPreferencesInput } from './dailyRhythmScheduling';
+import { applyDailyRhythmPreference, type DailyRhythmPreferencesInput, type DailyRhythmFilterContext } from './dailyRhythmScheduling';
+import { PRIMARY_TIMING_LABELS, RELAXED_TIMING_LABELS } from '../../../packages/daily-guidance/src/constants';
+import type { TimingCandidate } from '../../../packages/recommendation/src/timingSearch';
 import type { User, PlannedActivity } from './db';
 import type { DailyAgenda } from './dailyAgenda';
 import type { ConcreteGuidanceCandidate } from './dailyGuidanceTypes';
@@ -210,7 +212,7 @@ export async function resolveDayBuilderCandidates(
     const profile = getActivityProfileById(suggestion.activityId);
     if (!profile) continue;
 
-    const timingCandidates = applyDailyRhythmPreference(suggestion.candidate.candidates, suggestion.activityId, {
+    const timingCandidates = preferOutsideWorkForGuidance(suggestion.candidate.candidates, suggestion.activityId, {
       targetDate,
       timezone: user.timezone,
       prefs: dailyRhythmPrefs,
@@ -260,4 +262,33 @@ export async function collectDayBuilderCandidates(user: User, now: Date): Promis
 export function dedupeCandidates(candidates: ConcreteGuidanceCandidate[]): ConcreteGuidanceCandidate[] {
   const planActivityIds = new Set(candidates.filter((c) => c.source === 'PLAN').map((c) => c.activityId));
   return candidates.filter((c) => c.source === 'PLAN' || !planActivityIds.has(c.activityId));
+}
+
+/**
+ * Timing labels Daily Guidance can ever recommend: the union of every
+ * selection stage's own label set (packages/daily-guidance/src/eligibility.ts).
+ * CAUTION is in none of them, so a CAUTION window is never recommended.
+ */
+const GUIDANCE_ELIGIBLE_TIMING_LABELS: ReadonlySet<string> = new Set<string>([...PRIMARY_TIMING_LABELS, ...RELAXED_TIMING_LABELS]);
+
+/**
+ * AURA-CI-06 (#349) -- Home's Daily Rhythm preference, made aware of Daily
+ * Guidance eligibility.
+ *
+ * `applyDailyRhythmPreference` keeps ONLY the outside-work candidates whenever
+ * any exist. On Home those candidates then go through Daily Guidance's
+ * eligibility floor, which never recommends a CAUTION window. If every
+ * outside-work candidate was CAUTION, the filter had already discarded the
+ * eligible in-work window, so the activity got no recommendation at all:
+ * the soft preference became a hard exclusion.
+ *
+ * The preference is now kept only when the narrowed list still contains a
+ * guidance-eligible window. Otherwise the original ranked list is used, the
+ * same fallback Daily Rhythm already applies when no outside-work candidate
+ * exists. Panchang ranking and labels are untouched: this never reorders, and
+ * never promotes a CAUTION window over an eligible one.
+ */
+export function preferOutsideWorkForGuidance(ranked: readonly TimingCandidate[], activityId: string | undefined, context: DailyRhythmFilterContext): TimingCandidate[] {
+  const preferred = applyDailyRhythmPreference(ranked, activityId, context);
+  return preferred.some((candidate) => GUIDANCE_ELIGIBLE_TIMING_LABELS.has(candidate.label)) ? preferred : [...ranked];
 }
