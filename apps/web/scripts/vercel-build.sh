@@ -35,8 +35,19 @@
 # (bypasses the migration history entirely) -- see DEPLOY.md.
 set -e
 
+SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+
+# AURA-MCP-02-I1.5-D -- database identity guard, immediately before the only
+# migration command. For the Aura Production project it allows the migration
+# unchanged. For any other project (an isolated staging project) it refuses
+# unless that project is pinned in the guard and BOTH the migration URL and
+# the runtime URL resolve to the approved staging database. It fails closed
+# (non-zero exit -> `set -e` aborts before `prisma migrate deploy`) and
+# prints only a reason code, never a URL or credential. See
+# scripts/check-db-identity.js.
 if [ "$VERCEL_ENV" = "production" ]; then
   echo "[vercel-build] VERCEL_ENV=production -- applying pending database migrations before building..."
+  node "$SCRIPT_DIR/check-db-identity.js"
   npx prisma migrate deploy
   echo "[vercel-build] Migrations applied (or already up to date). Proceeding to build."
 else
@@ -59,6 +70,5 @@ next build
 # the approval file is missing/unreadable. Under `set -e` a non-zero exit
 # fails this script, so Vercel fails the build and the deployment is never
 # promoted. Do NOT append `|| true` or otherwise swallow its exit code.
-SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 echo "[vercel-build] verifying no unapproved Palmistry content is in the build..."
 node "$SCRIPT_DIR/check-palmistry-bundle.js"
