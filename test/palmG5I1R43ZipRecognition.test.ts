@@ -109,6 +109,51 @@ function unzipT(name: string, data: Buffer): string {
     return `rc=${r.status}${/No errors detected/.test(o) ? ' "No errors detected"' : ''}${/Compensating/.test(o) ? ' (Compensating)' : ''}`;
   } finally { cleanup(d); }
 }
+// AURA-PALM-G5-C4: stock-reader PRECONDITIONS (does the external tool really
+// read the attack fixture?) made portable. These checks prove the attack is
+// real; they are not scanner assertions, and the scanner's own fail-closed
+// assertions (mustFailClosed) are unchanged and always run.
+//
+// Debian/Ubuntu's UnZip 6.0 carries the CVE-2019-13232 patch, which refuses
+// archives with overlapping components ("invalid zip file with overlapped
+// components (possible zip bomb)") with exit code 12 BEFORE testing entries,
+// and documents UNZIP_DISABLE_ZIPBOMB_DETECTION=TRUE to turn that guard off.
+// macOS's UnZip 6.00 has no such guard. So, per runner:
+//   1. default reader reads it            -> precondition PASS (as before);
+//   2. rc 12 + the overlap/zip-bomb text  -> re-run with the documented switch:
+//        reads it -> PASS, labelled: the Info-ZIP absolute-offset fallback is
+//                    present and reachable; only the default guard blocks it;
+//        does not -> PLATFORM-NOT-APPLICABLE (reported separately, never a pass);
+//   3. anything else                      -> FAIL (unexplained reader behaviour).
+// A platform-specific rejection is never treated as protection by the scanner.
+const platformNA: string[] = [];
+const ZIP_BOMB_GUARD = /overlapped components|possible zip bomb/i;
+function unzipRaw(name: string, data: Buffer, extraEnv: Record<string, string> = {}): { rc: number | null; out: string } {
+  const d = fs.mkdtempSync(path.join(os.tmpdir(), 'palm-r43-'));
+  try {
+    const f = path.join(d, name); fs.writeFileSync(f, data);
+    const env = { ...process.env, ...extraEnv };
+    if (!('UNZIP_DISABLE_ZIPBOMB_DETECTION' in extraEnv)) delete (env as any).UNZIP_DISABLE_ZIPBOMB_DETECTION;
+    const r = spawnSync('/usr/bin/unzip', ['-t', f], { encoding: 'utf8', env });
+    return { rc: r.status, out: (r.stdout || '') + (r.stderr || '') };
+  } finally { cleanup(d); }
+}
+function readerPrecondition(id: string, label: string, name: string, data: Buffer, needCompensating: boolean): void {
+  if (!UNZIP) { notRun.push(id); return; }
+  const reads = (o: string) => /No errors detected/.test(o) && (!needCompensating || /Compensating/.test(o));
+  const first = unzipRaw(name, data);
+  if (reads(first.out)) { check(`${id}. ${label}`, true); return; }
+  const bombLine = (first.out.split('\n').find((l) => ZIP_BOMB_GUARD.test(l)) || '').trim();
+  if (first.rc === 12 && bombLine) {
+    const second = unzipRaw(name, data, { UNZIP_DISABLE_ZIPBOMB_DETECTION: 'TRUE' });
+    console.log(`INFO ${id} platform: default unzip rc=12 "${bombLine.slice(0, 120)}"; with UNZIP_DISABLE_ZIPBOMB_DETECTION=TRUE rc=${second.rc}${reads(second.out) ? ' reads it' : ' does not read it'}`);
+    if (reads(second.out)) { check(`${id}. ${label} [Debian/Ubuntu: default zip-bomb guard rejects (rc=12); the Info-ZIP fallback reads it once that guard is disabled]`, true); return; }
+    platformNA.push(id);
+    console.log(`PLATFORM-NOT-APPLICABLE ${id}. ${label} -- this runner's unzip does not read the fixture even with its zip-bomb guard disabled (rc=${second.rc}); NOT evidence that the scanner is secure`);
+    return;
+  }
+  check(`${id}. ${label}`, false, `rc=${first.rc} ${first.out.replace(/\s+/g, ' ').slice(0, 200)}`);
+}
 const info = (id: string, name: string, data: Buffer, r: Run) => console.log(`INFO ${id} sha256=${sha(data)} unzip-t=[${unzipT(name, data)}] scanner exit=${r.exit} archivesInspected=${r.archives} reason="${r.reason.slice(0, 140)}"`);
 /** F1-style: must fail closed (exit 1, >= 1 archive inspected), never a clean zero-archive pass. */
 function mustFailClosed(id: string, label: string, name: string, data: Buffer, re: RegExp) {
@@ -124,9 +169,10 @@ function mustPass(id: string, label: string, name: string, data: Buffer, archive
 
 async function main(): Promise<void> {
   // ================================================================ F1: ZIP recognition (R42-IV-F1)
+  if (UNZIP) console.log(`INFO unzip: ${(spawnSync('/usr/bin/unzip', ['-v'], { encoding: 'utf8' }).stdout || '').split('\n')[0].trim()}`);
   const C = F.reviewerC().buf;
   check('R1a. fixture C is byte-identical to the R4.2 reviewer fixture', sha(C) === 'cad8cc801e437c82f8bd872cac45c83a321342abe526c32b6e0f16a8fb79a62b', sha(C));
-  if (UNZIP) check('R1b. stock unzip reads fixture C ("Compensating", "No errors detected")', /No errors detected/.test(unzipT('c.zip', C)) && /Compensating/.test(unzipT('c.zip', C)), unzipT('c.zip', C)); else notRun.push('R1b');
+  readerPrecondition('R1b', 'stock unzip reads fixture C ("Compensating", "No errors detected")', 'c.zip', C, true);
   mustFailClosed('R1', '[R42-IV-F1 original] absolute offsets, cdSize +64, implausible local header', 'c.zip', C, ABS);
   const B = F.reviewerB().buf;
   check('R2a. fixture B is byte-identical to the R4.2 reviewer fixture', sha(B) === 'b6867a50936db5ea2ad4d693f2d1a011caefacff2dc9444bcdc57b76dcfa80eb');
@@ -153,11 +199,11 @@ async function main(): Promise<void> {
   mustFailClosed('R12', 'embedded: fixture C as a tar entry', 'x.tar', F.tar([{ name: 'inner.zip', data: C }]), ABS);
   { const z = F.buildZip([{ name: 'hello.txt', data: F.HELLO, lver: 0xff }], { absolute: true, cdSizeDelta: 64, base: 512 }).buf;
     const t = F.tar([{ name: 'inner.bin', data: z }]);
-    if (UNZIP) check('R13a. stock unzip reads the TAR file itself as a ZIP ("Compensating")', /No errors detected/.test(unzipT('ca.tar', t)), unzipT('ca.tar', t)); else notRun.push('R13a');
+    readerPrecondition('R13a', 'stock unzip reads the TAR file itself as a ZIP ("Compensating")', 'ca.tar', t, false);
     mustFailClosed('R13', 'tar whose raw bytes are an absolute-offset ZIP (container coordinates)', 'ca.tar', t, ABS); }
   { const z = F.buildZip([{ name: 'hello.txt', data: F.HELLO, lver: 0xff }], { absolute: true, cdSizeDelta: 64, base: 12 }).buf;
     const g = F.gzipWithExtra(Buffer.from('ok\n'), z);
-    if (UNZIP) check('R14a. stock unzip reads the GZIP file itself as a ZIP ("Compensating")', /No errors detected/.test(unzipT('ca.gz', g)), unzipT('ca.gz', g)); else notRun.push('R14a');
+    readerPrecondition('R14a', 'stock unzip reads the GZIP file itself as a ZIP ("Compensating")', 'ca.gz', g, false);
     mustFailClosed('R14', 'gzip whose raw bytes are an absolute-offset ZIP (container coordinates)', 'ca.gz', g, ABS); }
   { // >64 MiB path (largeFileHasPlausibleZip), exercised with a reduced maxArchiveBytes.
     const r = run('big.zip', C, { maxArchiveBytes: 100 });
@@ -223,7 +269,7 @@ async function main(): Promise<void> {
     } finally { cleanup(d); }
   } else { notRun.push('T13'); console.log('NOT RUN T13 (zip not available)'); }
 
-  console.log(`\n${passed} passed, ${failed} failed${notRun.length ? `, ${notRun.length} NOT RUN (${notRun.join(', ')})` : ''}`);
+  console.log(`\n${passed} passed, ${failed} failed${notRun.length ? `, ${notRun.length} NOT RUN (${notRun.join(', ')})` : ''}${platformNA.length ? `, ${platformNA.length} PLATFORM-NOT-APPLICABLE (${platformNA.join(', ')})` : ''}`);
   process.exit(failed ? 1 : 0);
 }
 
