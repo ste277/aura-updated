@@ -65,13 +65,20 @@ const STAGING_PROJECT_IDS = Object.freeze(['prj_0wR8cnuX0dphdd3ExRGOT0AqcuEa']);
  * Compute with:  node apps/web/scripts/check-db-identity.js --hash-host
  * (reads the host on stdin, prints only the digest).
  *
- * While EMPTY: every staging build is refused (STAGING_DB_NOT_PINNED), and
- * Production builds are not inspected (behaviour unchanged).
- * Once pinned: a staging build must target exactly this database, and a
+ * Pinned: a staging build must target exactly this database, and a
  * Production build whose DATABASE_URL / AURA_DATABASE_URL resolves to it is
- * refused (PRODUCTION_DB_IS_STAGING).
+ * refused (PRODUCTION_DB_IS_STAGING). (If ever emptied: every staging build
+ * is refused with STAGING_DB_NOT_PINNED and Production is not inspected.)
+ * The Production host's digest is deliberately NOT committed here; staging
+ * builds receive it through AURA_STAGING_FORBIDDEN_DB_HOSTS.
+ *
+ *   c5b70ccc...8ba7  Neon project falling-glade-02684214 (aura-staging),
+ *                    AWS us-east-1, direct-form host (no -pooler label;
+ *                    the pooled host folds to the same digest); verified
+ *                    2026-11-21 with --hash-host, and confirmed by the owner
+ *                    to differ from the Production host digest.
  */
-const STAGING_DB_HOST_SHA256 = Object.freeze([]);
+const STAGING_DB_HOST_SHA256 = Object.freeze(['c5b70ccce850d80ebe0a714327fa546adef5296e031ad848e4664c12e73e8ba7']);
 
 /** Connection-string parameters that cannot change which server/database/role is used. */
 const ALLOWED_URL_PARAMS = new Set(['sslmode', 'channel_binding', 'connect_timeout', 'application_name', 'pgbouncer', 'connection_limit', 'pool_timeout']);
