@@ -18,7 +18,7 @@
  */
 import { upsertUserByEmail, updateBirthProfile, createPlannedActivity, cancelPlannedActivity, deletePlannedActivity, updateUserDayBuilderPrefs, setDailyWorkPreferences, clearDailyWorkPreferences, getUserById } from '../apps/web/lib/db';
 import { buildPersonalDailyGuidance } from '../apps/web/lib/dailyGuidanceOrchestrator';
-import { collectPlanCandidates, collectDayBuilderCandidates } from '../apps/web/lib/dailyGuidanceCandidates';
+import { collectPlanCandidates, collectDayBuilderCandidates, preferOutsideWorkForGuidance } from '../apps/web/lib/dailyGuidanceCandidates';
 
 let allPassed = true;
 function check(label: string, condition: boolean) {
@@ -153,16 +153,67 @@ async function main() {
     check('DAILY RHYTHM (all candidates inside a wide work window): fallback preserves the full original candidate count (never excluded)', workoutWideWork?.timingCandidates.length === workoutBaseline?.timingCandidates.length);
     check('DAILY RHYTHM (all candidates inside a wide work window): rank-1 candidate is unchanged from the unfiltered baseline', workoutWideWork?.timingCandidates[0]?.start === baselineFirstStart);
 
-    // Narrower work window (10:00-17:00 IST) -> exactly one of the real
-    // candidates (09:30 IST) falls outside it -> genuinely reordered:
-    // the previously-non-rank-1 outside-work candidate is promoted to
-    // rank 1, and the inside-work candidates are deprioritized away.
-    await setDailyWorkPreferences(dailyRhythmUserBase.id, { workStart: '10:00', workEnd: '17:00', workDays: [1, 2, 3, 4, 5] });
+    // AURA-CI-06 (#349). The original narrow-window case hard-coded a
+    // 10:00-17:00 work window that assumed one baseline candidate at 09:30
+    // IST. Which slots the real Panchang-ranked search returns for this fixed
+    // user/date is an engine output, and PCE-4A (#298, the Lahiri ayanamsa
+    // correction) legitimately changed it to 10:45 (USABLE), 15:15 (CAUTION)
+    // and 16:45 (CAUTION). That exposed a Home defect: when the only
+    // outside-work slots were CAUTION, Daily Rhythm kept only them, Daily
+    // Guidance (which never recommends CAUTION) dropped them, and the workout
+    // got NO recommendation. Home now keeps Daily Rhythm's narrowed list only
+    // when it still holds a guidance-eligible window
+    // (preferOutsideWorkForGuidance, dailyGuidanceCandidates.ts).
+    //
+    // The real-engine cases below derive their work windows from the baseline
+    // itself, so they don't depend on specific engine-ranked times. The
+    // reordering rule is also pinned on fixed synthetic candidates (further
+    // below), because this date's real output has no eligible non-rank-1
+    // outside-work slot to promote.
+    const istHHMM = (iso: string | number | Date) => new Date(iso).toLocaleTimeString('en-GB', { timeZone: TZ, hour: '2-digit', minute: '2-digit', hourCycle: 'h23' });
+    const baselineList = workoutBaseline?.timingCandidates ?? [];
+    const isEligible = (label: string) => ['EXCELLENT', 'VERY_GOOD', 'GOOD', 'USABLE'].includes(label);
+    // A work window spanning every baseline candidate except candidate k, which must lie wholly outside it.
+    const windowExcluding = (k: number): { workStart: string; workEnd: string } | null => {
+      const others = baselineList.filter((_, i) => i !== k);
+      if (others.length === 0) return null;
+      const lo = Math.min(...others.map((c) => new Date(c.start).getTime()));
+      const hi = Math.max(...others.map((c) => new Date(c.end).getTime()));
+      const kStart = new Date(baselineList[k].start).getTime();
+      const kEnd = new Date(baselineList[k].end).getTime();
+      if (!(istHHMM(lo) < istHHMM(hi - 1)) || !(kEnd <= lo || kStart >= hi)) return null;
+      return { workStart: istHHMM(lo), workEnd: istHHMM(hi) };
+    };
+    const firstIndex = (pred: (k: number) => boolean) => { for (let k = baselineList.length - 1; k >= 0; k--) if (pred(k) && windowExcluding(k)) return k; return -1; };
+
+    // Baseline guidance (no Daily Rhythm): the workout is recommended at the baseline's eligible time.
+    const baselineReady = await buildPersonalDailyGuidance(dailyRhythmUserUnconfigured!, NOW);
+    const baselineWorkoutRec = baselineReady.status === 'READY' ? baselineReady.guidance.recommendations.find((r) => r.activityFamily === 'WORKOUT') : undefined;
+    check('DAILY RHYTHM (missing prefs): Home recommends the workout at the baseline rank-1 time, which is guidance-eligible', baselineWorkoutRec !== undefined && baselineWorkoutRec.timing.start === baselineFirstStart && isEligible(String(baselineList[0]?.label)));
+
+    // CASE A -- only CAUTION outside work (regression for #349): a window that leaves exactly one
+    // CAUTION candidate outside. Daily Rhythm must NOT discard the eligible in-work window.
+    const cautionK = firstIndex((k) => k >= 1 && baselineList[k].label === 'CAUTION');
+    const cautionWindow = cautionK >= 0 ? windowExcluding(cautionK) : null;
+    check('DAILY RHYTHM (fixture A): the real baseline has a CAUTION candidate that can lie alone outside a work window', cautionWindow !== null);
+    await setDailyWorkPreferences(dailyRhythmUserBase.id, { ...(cautionWindow ?? { workStart: '10:00', workEnd: '17:00' }), workDays: [1, 2, 3, 4, 5] });
+    const dailyRhythmUserCautionOnly = await getUserById(dailyRhythmUserBase.id);
+    const workoutCautionOnly = (await collectDayBuilderCandidates(dailyRhythmUserCautionOnly!, NOW)).find((c) => c.activityId === 'workout');
+    check('DAILY RHYTHM (only CAUTION outside work): the original ranked list is kept (no CAUTION-only narrowing)', workoutCautionOnly?.timingCandidates.length === baselineList.length && workoutCautionOnly?.timingCandidates[0]?.start === baselineFirstStart);
+    const cautionOnlyReady = await buildPersonalDailyGuidance(dailyRhythmUserCautionOnly!, NOW);
+    const cautionOnlyRec = cautionOnlyReady.status === 'READY' ? cautionOnlyReady.guidance.recommendations.find((r) => r.activityFamily === 'WORKOUT') : undefined;
+    check('DAILY RHYTHM (only CAUTION outside work): the eligible in-work WORKOUT recommendation is retained (previously dropped -- #349)', cautionOnlyReady.status === 'READY' && cautionOnlyRec !== undefined);
+    check('DAILY RHYTHM DISPLAY/COMMIT CONSISTENCY (only CAUTION outside work): the displayed/committed timing.start is exactly the kept rank-1 candidate', cautionOnlyRec !== undefined && cautionOnlyRec.timing.start === workoutCautionOnly?.timingCandidates[0]?.start);
+
+    // CASE B -- an eligible candidate outside work: Daily Rhythm narrows to the eligible outside-work set.
+    const eligibleK = firstIndex((k) => isEligible(String(baselineList[k].label)));
+    const eligibleWindow = eligibleK >= 0 ? windowExcluding(eligibleK) : null;
+    check('DAILY RHYTHM (fixture B): the real baseline has a guidance-eligible candidate that can lie alone outside a work window', eligibleWindow !== null);
+    await setDailyWorkPreferences(dailyRhythmUserBase.id, { ...(eligibleWindow ?? { workStart: '10:00', workEnd: '17:00' }), workDays: [1, 2, 3, 4, 5] });
     const dailyRhythmUserNarrowWork = await getUserById(dailyRhythmUserBase.id);
-    const narrowWorkCandidates = await collectDayBuilderCandidates(dailyRhythmUserNarrowWork!, NOW);
-    const workoutNarrowWork = narrowWorkCandidates.find((c) => c.activityId === 'workout');
-    check('DAILY RHYTHM (one outside-work candidate exists): the preferred outside-work window is genuinely promoted to rank 1 (different from the unfiltered baseline)', workoutNarrowWork?.timingCandidates[0]?.start !== undefined && workoutNarrowWork.timingCandidates[0].start !== baselineFirstStart);
-    check('DAILY RHYTHM (one outside-work candidate exists): the surviving set is strictly narrower than the unfiltered baseline (a real preference, not a no-op)', (workoutNarrowWork?.timingCandidates.length ?? 0) < (workoutBaseline?.timingCandidates.length ?? 0));
+    const workoutNarrowWork = (await collectDayBuilderCandidates(dailyRhythmUserNarrowWork!, NOW)).find((c) => c.activityId === 'workout');
+    check('DAILY RHYTHM (eligible outside-work candidate exists): rank-1 is exactly that outside-work candidate', eligibleK >= 0 && workoutNarrowWork?.timingCandidates[0] !== undefined && workoutNarrowWork.timingCandidates[0].start === baselineList[eligibleK].start);
+    check('DAILY RHYTHM (eligible outside-work candidate exists): the surviving set is strictly narrower than the unfiltered baseline (a real preference, not a no-op)', (workoutNarrowWork?.timingCandidates.length ?? 0) < baselineList.length && (workoutNarrowWork?.timingCandidates.length ?? 0) > 0);
 
     // Non-workday (Daily Rhythm configured, but NOW's own weekday is not
     // among workDays) -> no workday restriction inherited, unchanged.
@@ -172,25 +223,44 @@ async function main() {
     const workoutNonWorkday = nonWorkdayCandidates.find((c) => c.activityId === 'workout');
     check('DAILY RHYTHM (non-configured workday): unchanged, no workday restriction inherited', workoutNonWorkday?.timingCandidates[0]?.start === baselineFirstStart && workoutNonWorkday?.timingCandidates.length === workoutBaseline?.timingCandidates.length);
 
-    // Display/commit consistency (the critical requirement): the
-    // candidate promoted to rank 1 by the narrow-work-window filter above
-    // is EXACTLY the instant that reaches guidance.recommendations[...].timing
-    // -- the same real DailyGuidanceRecommendation Home renders AND the
-    // same value HomeDashboard.tsx's handlePlanOpportunity passes to the
-    // existing commit/re-verification call (candidateStart: item.start) --
-    // proven through the REAL, unmodified downstream engines
-    // (selectOneCandidatePerFamily -> deriveWindowRanking -> #104), not
-    // merely asserted.
+    // Display/commit consistency (the critical requirement): the candidate
+    // Daily Rhythm leaves at rank 1 above is EXACTLY the instant that reaches
+    // guidance.recommendations[...].timing -- the same real
+    // DailyGuidanceRecommendation Home renders AND the same value
+    // HomeDashboard.tsx's handlePlanOpportunity passes to the existing
+    // commit/re-verification call (candidateStart: item.start) -- proven
+    // through the REAL, unmodified downstream engines.
     const narrowWorkReady = await buildPersonalDailyGuidance(dailyRhythmUserNarrowWork!, NOW);
-    check('DAILY RHYTHM DISPLAY/COMMIT CONSISTENCY: buildPersonalDailyGuidance reaches READY for the Daily-Rhythm-reordered user', narrowWorkReady.status === 'READY');
+    check('DAILY RHYTHM DISPLAY/COMMIT CONSISTENCY: buildPersonalDailyGuidance reaches READY for the Daily-Rhythm user', narrowWorkReady.status === 'READY');
     if (narrowWorkReady.status === 'READY') {
-      const workoutRecommendation = narrowWorkReady.guidance.recommendations.find((r) => r.activityFamily === 'WORKOUT');
-      check('DAILY RHYTHM DISPLAY/COMMIT CONSISTENCY: a WORKOUT recommendation is present', workoutRecommendation !== undefined);
+      const workoutRecs = narrowWorkReady.guidance.recommendations.filter((r) => r.activityFamily === 'WORKOUT');
+      const workoutRecommendation = workoutRecs[0];
+      check('DAILY RHYTHM DISPLAY/COMMIT CONSISTENCY: exactly one WORKOUT recommendation is present (no duplicates)', workoutRecs.length === 1);
       check(
-        "DAILY RHYTHM DISPLAY/COMMIT CONSISTENCY: the recommendation's displayed/committed timing.start is EXACTLY the Daily-Rhythm-preferred (outside-work) instant, not the original unfiltered rank-1",
-        workoutRecommendation?.timing.start === workoutNarrowWork?.timingCandidates[0]?.start && workoutRecommendation?.timing.start !== baselineFirstStart
+        "DAILY RHYTHM DISPLAY/COMMIT CONSISTENCY: the recommendation's displayed/committed timing.start is EXACTLY the Daily-Rhythm-preferred (outside-work) instant",
+        workoutRecommendation?.timing.start === workoutNarrowWork?.timingCandidates[0]?.start
       );
     }
+
+    // The reordering rule itself, on fixed synthetic candidates (no engine
+    // ranking involved), through the exact helper Home uses.
+    const at = (hhmm: string) => new Date(`2026-09-09T${hhmm}:00+05:30`).toISOString();
+    const cand = (from: string, to: string, label: string): any => ({ start: at(from), end: at(to), label, score: 5 });
+    const ctx = (workStart: string, workEnd: string, workDays = [1, 2, 3, 4, 5]) => ({ targetDate: '2026-09-09', timezone: TZ, prefs: { workStart, workEnd, workDays } });
+    const r1In = cand('11:00', '11:30', 'GOOD');
+    const r2In = cand('14:00', '14:30', 'USABLE');
+    const r3OutGood = cand('18:30', '19:00', 'USABLE');
+    const r3OutCaution = cand('18:30', '19:00', 'CAUTION');
+    const promoted = preferOutsideWorkForGuidance([r1In, r2In, r3OutGood], 'workout', ctx('10:00', '17:00'));
+    check('DAILY RHYTHM (synthetic): an eligible non-rank-1 outside-work candidate is promoted to rank 1, and the in-work ones are deprioritized away', promoted.length === 1 && promoted[0] === r3OutGood);
+    const cautionKept = preferOutsideWorkForGuidance([r1In, r2In, r3OutCaution], 'workout', ctx('10:00', '17:00'));
+    check('DAILY RHYTHM (synthetic): a CAUTION-only outside-work candidate does not displace the eligible in-work ranking (original list kept)', cautionKept.length === 3 && cautionKept[0] === r1In && cautionKept[1] === r2In && cautionKept[2] === r3OutCaution);
+    const allInside = preferOutsideWorkForGuidance([r1In, r2In], 'workout', ctx('09:00', '17:00'));
+    check('DAILY RHYTHM (synthetic): all candidates inside work -> unchanged (existing fallback)', allInside.length === 2 && allInside[0] === r1In && allInside[1] === r2In);
+    const notConfigured = preferOutsideWorkForGuidance([r1In, r2In, r3OutGood], 'workout', { targetDate: '2026-09-09', timezone: TZ, prefs: { workStart: null, workEnd: null, workDays: [] } } as any);
+    check('DAILY RHYTHM (synthetic): no Daily Rhythm configured -> unchanged', notConfigured.length === 3 && notConfigured[0] === r1In);
+    const mixedOutside = preferOutsideWorkForGuidance([r1In, r3OutGood, cand('19:30', '20:00', 'CAUTION')], 'workout', ctx('10:00', '17:00'));
+    check('DAILY RHYTHM (synthetic): eligible + CAUTION outside work -> the outside set is kept, eligible first (Daily Rhythm behaviour unchanged)', mixedOutside.length === 2 && mixedOutside[0] === r3OutGood);
 
     // Restore to unconfigured so this doesn't leak into the shared
     // fixture user's later assertions below (none currently depend on
