@@ -652,6 +652,34 @@ export function EmptyState({
 // conventions can't drift apart again.
 // ============================================================
 
+/**
+ * Shared open-modal registry (AURA-MOBILE-01-M2-B/AND-02) -- every modal
+ * built with useModalA11y registers its own onClose here for as long as
+ * it's open, so Android's hardware back button (lib/useAndroidBackButton.ts)
+ * can dismiss whichever modal is topmost without each modal needing its own
+ * wiring, and without this file needing to know how many modals exist or
+ * where they're rendered from. A plain module-level stack is deliberately
+ * used instead of React Context -- this is a single root-mounted app with
+ * no nested-provider concerns, and the earlier, rejected design (hand-
+ * enumerating each modal's isOpen flag into the back-button hook) was what
+ * caused a real modal to be missed in M2-B's own first draft.
+ */
+const openModalCloseHandlers: Array<() => void> = [];
+
+export function isAnyModalOpen(): boolean {
+  return openModalCloseHandlers.length > 0;
+}
+
+/** Closes the topmost (most-recently-opened) registered modal. Returns false
+ * if no modal is currently open, so a caller (the back-button handler) knows
+ * whether to fall through to its next-priority action instead. */
+export function closeTopmostModal(): boolean {
+  const topmost = openModalCloseHandlers[openModalCloseHandlers.length - 1];
+  if (!topmost) return false;
+  topmost();
+  return true;
+}
+
 /** Escape-to-close, Tab focus trap, body-scroll lock, and focus restore on
  * unmount -- the behavior every modal needs, extracted once instead of
  * reimplemented per component. `initialFocusRef` is optional so a modal
@@ -679,6 +707,25 @@ export function useModalA11y({
       previousFocus?.focus?.();
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isOpen]);
+
+  // Registered once per isOpen (matching the effect above), but calls
+  // through a ref rather than closing over `onClose` directly -- modals
+  // like EditProposedItemTimeModal/WeeklyPlanReviewModal pass a
+  // `saving ? noop : onClose` that changes identity without `isOpen`
+  // changing, and the hardware back button must see that latest value
+  // (the same guard the Escape-key handler below already gets for free
+  // from its own `[isOpen, onClose, dialogRef]` deps).
+  const onCloseRef = useRef(onClose);
+  onCloseRef.current = onClose;
+  useEffect(() => {
+    if (!isOpen) return undefined;
+    const handler = () => onCloseRef.current();
+    openModalCloseHandlers.push(handler);
+    return () => {
+      const index = openModalCloseHandlers.lastIndexOf(handler);
+      if (index !== -1) openModalCloseHandlers.splice(index, 1);
+    };
   }, [isOpen]);
 
   useEffect(() => {

@@ -52,3 +52,30 @@ try {
 } catch(Exception e) {
     logger.info("google-services.json not found, google-services plugin not applied. Push Notifications won't work")
 }
+
+// AURA-MOBILE-01-AND-COMPAT-03: fail the Android build unless the coarse-location
+// compatibility patch for @capacitor/geolocation 6.1.1 is present (applied by
+// apps/web/scripts/apply-geolocation-compat-patch.mjs from npm postinstall). This
+// closes the `npm ci --ignore-scripts` gap: an unpatched plugin would silently
+// reintroduce the API 22-30 location failure / API 22-29 SecurityException crash.
+// Verification only -- it never modifies files.
+def geolocationCompatPatched = [
+    'GeolocationPlugin.java': '5c4ba692153db8ca92205cfab0467aa6cfc5408191758513a757564ffe584791',
+    'Geolocation.java'      : '1861133e350a294d401c3ca0d639ca1b191d28ef39e186ad1ad05d9e3e9edf8b',
+]
+tasks.register('verifyGeolocationCompatPatch') {
+    doLast {
+        def dir = file("${rootDir}/../node_modules/@capacitor/geolocation/android/src/main/java/com/capacitorjs/plugins/geolocation")
+        geolocationCompatPatched.each { name, expected ->
+            def f = new File(dir, name)
+            if (!f.exists()) {
+                throw new GradleException("@capacitor/geolocation source missing: ${f}. Run `npm install` in apps/web.")
+            }
+            def actual = java.security.MessageDigest.getInstance('SHA-256').digest(f.bytes).encodeHex().toString()
+            if (actual != expected) {
+                throw new GradleException("@capacitor/geolocation ${name} does not carry the AND-COMPAT-03 coarse-location patch (sha256 ${actual}). Run `npm install` in apps/web (scripts must not be disabled), or `node scripts/apply-geolocation-compat-patch.mjs`.")
+            }
+        }
+    }
+}
+tasks.named('preBuild') { dependsOn 'verifyGeolocationCompatPatch' }

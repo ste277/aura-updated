@@ -6,6 +6,7 @@ import type { ProposedItem } from '../lib/dayConstructor';
 import { acceptConstructedDay, type PersistedPlanSummary, type GoalActivityLink, type CaptureLink } from '../lib/acceptConstructedDay';
 import { classifyAcceptanceUiState, resolveClientRequestId, computePreviewIdentityKey, shouldSubmitAcceptance, hasSubmittableProposal, type ClientRequestIdCache, type DayPlanAcceptanceUiState } from '../lib/dayPlanAcceptancePresentation';
 import { applyUpdatedProposedItem } from '../lib/dayPlanPreviewItemEditing';
+import { generateClientRequestId } from '../lib/clientId';
 import type { UpdatedPreviewItem } from '../lib/dayConstructorPreviewItemClient';
 import { DayPlanPreview } from './DayPlanPreview';
 import { EditProposedItemTimeModal } from './EditProposedItemTimeModal';
@@ -127,7 +128,7 @@ export function DayPlanPreviewController({ preview, onDiscard, onSaved, onRefres
   // render) -- `resolveClientRequestId` is the pure decision; this ref
   // only holds its own last result.
   const requestIdCacheRef = useRef<ClientRequestIdCache | null>(null);
-  requestIdCacheRef.current = resolveClientRequestId(requestIdCacheRef.current, identityKey, () => crypto.randomUUID());
+  requestIdCacheRef.current = resolveClientRequestId(requestIdCacheRef.current, identityKey, generateClientRequestId);
   const clientRequestId = requestIdCacheRef.current.clientRequestId;
   // A genuinely new identity also resets any STALE/FAILED/SAVED state left
   // over from a previous proposal -- never shows "Your day is planned"

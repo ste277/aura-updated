@@ -722,6 +722,72 @@ jobs:
       # explicit Save anyway, double-submit and stale-state guards (jsdom).
       - name: Run Home save conflict component test (HPG5-V2-I3)
         run: npx ts-node --project tsconfig.jsdom-tests.json test/hpg5I3HomeSaveJsdom.test.ts
+      # ---- AURA-ANDROID-REL-03 -- Android functional readiness (offline only) ----
+      # No device, emulator, adb, network or database: Capacitor plugins are mocked,
+      # routes/geocoder run in-process with stubs, LocationPicker mounts in jsdom
+      # (automatic JSX runtime, hence "react-jsx").
+      # AND-COMPAT-05 -- timezone fallback for WebViews without Intl "shortOffset".
+      - name: Run COMPAT-05 timezone shortOffset fallback test
+        run: npx ts-node test/timezoneShortOffsetFallback.test.ts
+      # AND-MIN-01 / AND-ERR-01 -- static Android checks (minSdk, WebView floor 91,
+      # errorPath + fallback pages, AuraWebViewClient/MainActivity wiring).
+      - name: Run Android minimum-support static test
+        run: node test/androidMinimumSupportConfig.test.mjs
+      # AND-COMPAT-03 -- @capacitor/geolocation 6.1.1 coarse-location patch. CI builds
+      # no Android, so these cover the patch script and the patched Java logic
+      # (the two Java-logic tests compile the pristine and patched sources: JDK).
+      - name: Check JDK for COMPAT-03 Java logic tests
+        run: javac -version && java -version
+      - name: Run COMPAT-03 geolocation patch script test
+        run: node test/geolocationCompatPatchScript.test.mjs
+      - name: Run COMPAT-03 geolocation Java logic test
+        run: node test/geolocationCompatJavaLogic.test.mjs
+      - name: Run COMPAT-03 geolocation Java logic harness test
+        run: node test/geolocationCompatJavaLogicHarness.test.mjs
+      # M2-A/B -- secure-context client request ids (AND-01), hardware back (AND-02),
+      # and the structural tests those changes updated.
+      - name: Run M2 client request id test
+        run: npx ts-node test/clientId.test.ts
+      - name: Run M2 Android back navigation test
+        run: npx ts-node test/androidBackNavigation.test.ts
+      - name: Run onboarding Goal step wiring test
+        run: npx ts-node test/onboardingGoalStepWiring.test.ts
+      - name: Run pending activity visual consistency test
+        run: npx ts-node test/pendingActivityVisualConsistency.test.ts
+      - name: Run pending activity reload visibility test
+        run: npx ts-node --project tsconfig.jsdom-tests.json test/pendingActivityReloadVisibility.test.ts
+      # M2-B/C/D + IOS-02 location -- native geolocation, permission recovery, timeout
+      # lifecycle, StrictMode, POST reverse-geocode route, location error wording.
+      - name: Run location search API test
+        run: npx ts-node test/locationSearchApi.test.ts
+      - name: Run LocationPicker smart selection test
+        run: npx ts-node test/locationPickerSmartSelection.test.ts
+      - name: Run LocationPicker native geolocation test
+        run: npx ts-node test/locationPickerNativeGeolocation.test.ts
+      - name: Run IOS-02 reverse-geocode POST route test
+        run: npx ts-node test/ios02ReverseRoutePost.test.ts
+      - name: Run LocationPicker M2-D reliability test
+        env:
+          TS_NODE_COMPILER_OPTIONS: '{"jsx":"react-jsx"}'
+        run: npx ts-node --project tsconfig.jsdom-tests.json test/locationPickerM2dReliability.test.ts
+      - name: Run LocationPicker native timeout diagnostics test
+        env:
+          TS_NODE_COMPILER_OPTIONS: '{"jsx":"react-jsx"}'
+        run: npx ts-node --project tsconfig.jsdom-tests.json test/locationPickerNativeTimeoutDiagnostics.test.ts
+      - name: Run LocationPicker StrictMode lifecycle test
+        env:
+          TS_NODE_COMPILER_OPTIONS: '{"jsx":"react-jsx"}'
+        run: npx ts-node --project tsconfig.jsdom-tests.json test/locationPickerStrictModeLifecycle.test.ts
+      # REL-03 F1 -- choosing a location another way supersedes a still-running
+      # "Use my current location" request (a late fix never wins).
+      - name: Run LocationPicker REL-03 supersede test
+        env:
+          TS_NODE_COMPILER_OPTIONS: '{"jsx":"react-jsx"}'
+        run: npx ts-node --project tsconfig.jsdom-tests.json test/locationPickerRel03Supersede.test.ts
+      - name: Run IOS-02 location errors and privacy test
+        env:
+          TS_NODE_COMPILER_OPTIONS: '{"jsx":"react-jsx"}'
+        run: npx ts-node --project tsconfig.jsdom-tests.json test/ios02LocationErrorsAndPrivacy.test.ts
   web-build:
     name: Next.js production build
     runs-on: ubuntu-latest

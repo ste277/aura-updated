@@ -315,7 +315,7 @@ check(
   /prev\.map\(\(item\) => \(item\.id === tempId \? \{ \.\.\.item, syncStatus: 'pending', clientRequestId \} : item\)\)\);/.test(pageSource)
 );
 check('handleLogActivity\'s optimistic-entry literal (before the request) and offline-queue push are untouched', /const optimisticEntry: LoggedEntryItem = \{\s*id: tempId,\s*activityTitle,\s*activeWindow: activeWindowForLog,\s*loggedAt: targetDate,\s*logMinuteOfDay: calculatedMinute,\s*durationMinutes,\s*notes: notes \? String\(notes\)\.trim\(\) : null,\s*logSource: finalLogSource,\s*activitySignificance: inferredSignificance,\s*\};/.test(pageSource));
-check('page.tsx still generates clientRequestId once per log attempt via crypto.randomUUID() (PR #86 idempotency untouched)', /const clientRequestId = crypto\.randomUUID\(\);/.test(pageSource));
+check('page.tsx still generates clientRequestId once per log attempt via generateClientRequestId() (PR #86 idempotency untouched; AURA-MOBILE-01-M2-B/AND-01: not crypto.randomUUID() directly, which throws outside a secure context)', /const clientRequestId = generateClientRequestId\(\);/.test(pageSource));
 check('page.tsx still imports classifyHabitLogSyncOutcome for offline-queue replay (PR #86 untouched)', /classifyHabitLogSyncOutcome/.test(pageSource));
 check('the Offline Log Sync Listener queue-removal/retention logic is untouched (still classifies confirmed/retry/permanent-failure)', /const outcome = classifyHabitLogSyncOutcome\(res\.status\);/.test(pageSource));
 check('Plan logging (handlePlanLogged) remains separate and untouched in page.tsx', /const handlePlanLogged = useCallback\(async \(\) => \{/.test(pageSource));

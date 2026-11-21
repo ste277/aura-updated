@@ -2,6 +2,7 @@
 
 import React, { useEffect, useRef, useState } from 'react';
 import { useRouter } from 'next/navigation';
+import { useAndroidBackToHome } from '../../lib/useAndroidBackToHome';
 import {
   PageHeader,
   SurfaceCard,
@@ -188,6 +189,7 @@ function ShadowReviewPanel({ review, timezone }: { review: ShadowReviewPayload; 
 }
 
 export function PlanDayClient({ timezone, planningDate, horizon, availabilityConfigured, locationConfirmed, cityName, goalActivities, captures, autoGoalSuggestions }: PlanDayClientProps) {
+  useAndroidBackToHome();
   const router = useRouter();
   const authenticated = !!timezone && !!planningDate && !!horizon;
   const [phase, setPhase] = useState<Phase>(() => (authenticated ? 'ENTRY' : 'REDIRECTING'));

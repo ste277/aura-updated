@@ -199,7 +199,7 @@ check('handleLogActivity in page.tsx is unchanged: still returns Promise<\'confi
 check('handleLogActivity still sets syncStatus: \'pending\' only from the fetch-exception (network failure) branch', /syncStatus: 'pending'(, clientRequestId)? \} : item\)\)\);/.test(pageSource));
 check('handleLogActivity still clears syncStatus on confirmed success', /syncStatus: undefined,/.test(pageSource));
 check('page.tsx still imports classifyHabitLogSyncOutcome for offline-queue replay (PR #86 untouched)', /classifyHabitLogSyncOutcome/.test(pageSource));
-check('page.tsx still generates clientRequestId once per log attempt (PR #86 idempotency untouched)', /const clientRequestId = crypto\.randomUUID\(\);/.test(pageSource));
+check('page.tsx still generates clientRequestId once per log attempt (PR #86 idempotency untouched; AURA-MOBILE-01-M2-B/AND-01: generateClientRequestId(), not crypto.randomUUID() directly, which throws outside a secure context)', /const clientRequestId = generateClientRequestId\(\);/.test(pageSource));
 check('Plan logging (handlePlanLogged) remains separate and untouched in page.tsx', /const handlePlanLogged = useCallback\(async \(\) => \{/.test(pageSource));
 
 if (!allPassed) {

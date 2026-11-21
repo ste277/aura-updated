@@ -12,6 +12,7 @@ import type { OnboardingWindowRecommendation } from '../lib/onboardingRecommenda
 import type { ConstructDayPreview } from '../lib/dayConstructorOrchestrator';
 import type { GoalActivityLink } from '../lib/acceptConstructedDay';
 import { previewConstructedDay } from '../lib/dayConstructorPreviewClient';
+import { generateClientRequestId } from '../lib/clientId';
 import {
   ONBOARDING_GOAL_CATEGORIES,
   ONBOARDING_GOAL_TITLE_MAX_LENGTH,
@@ -461,9 +462,12 @@ function GoalStep({ onGoalCreated, onSkip }: { onGoalCreated: (goalActivity: Onb
   const [error, setError] = useState<string | null>(null);
   // One id per GoalStep mount, reused across every retry within this mount
   // -- the exact same clientRequestId lifecycle CreateGoalModal's own
-  // `useState(() => crypto.randomUUID())` already establishes, giving this
-  // step the identical double-submit/retry idempotency guarantee for free.
-  const [clientRequestId] = useState(() => crypto.randomUUID());
+  // `useState(() => generateClientRequestId())` already establishes, giving
+  // this step the identical double-submit/retry idempotency guarantee for
+  // free. generateClientRequestId() (not crypto.randomUUID() directly) --
+  // the latter throws outside a secure context, e.g. the Android emulator's
+  // http://10.0.2.2 dev alias (AURA-MOBILE-01-M2-A/AND-01).
+  const [clientRequestId] = useState(() => generateClientRequestId());
 
   function chooseCategory(category: OnboardingGoalCategory) {
     setTitle(category.suggestedTitle);

@@ -60,6 +60,8 @@ import { resolveTzOffsetMinutes, getDatePartsInTimezone } from '../lib/timezone'
 import { formatDisplayName } from '../lib/displayName';
 import { trackEvent } from '../lib/trackEvent';
 import { Capacitor } from '@capacitor/core';
+import { generateClientRequestId } from '../lib/clientId';
+import { useAndroidBackButton } from '../lib/useAndroidBackButton';
 import {
   loadNotificationPrefs,
   saveNotificationPrefs,
@@ -299,6 +301,9 @@ export default function DashboardPage() {
     const requested = new URLSearchParams(window.location.search).get('tab');
     return (VALID_TABS as string[]).includes(requested ?? '') ? (requested as AppTab) : 'home';
   });
+  // AURA-MOBILE-01-M2-B/AND-02 -- Android hardware back button: no-op on
+  // web/iOS, see lib/useAndroidBackButton.ts for the full rationale.
+  useAndroidBackButton(activeTab, setActiveTab, Boolean(user));
   const [panchangDateJump, setPanchangDateJump] = useState<{ date: string; key: number } | null>(null);
   const [muhurthamActivityJump, setMuhurthamActivityJump] = useState<{ activityId: string; key: number } | null>(null);
 
@@ -1416,7 +1421,7 @@ export default function DashboardPage() {
       // offline-queue replay -- never regenerated per attempt. This is
       // what lets the server (POST /api/habit-logs's own idempotent-replay
       // check) recognize a retry as the SAME request instead of a new one.
-      const clientRequestId = crypto.randomUUID();
+      const clientRequestId = generateClientRequestId();
       const activeWindowForLog = overrideWindowType || activeType || 'NEUTRAL';
       const inferredSignificance = activitySignificance ?? inferActivitySignificance(activityTitle);
       const finalLogSource = logSource === 'MANUAL' && isFrictionWindow(activeWindowForLog) && inferredSignificance !== 'LOW'

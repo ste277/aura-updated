@@ -13,6 +13,7 @@ import { requestSignInCode } from '../../lib/signInCode';
 import { SignInCodeActions } from '../../components/SignInCodeActions';
 import { colors, spacing, radius, typography } from '../../components/theme';
 import { PrimaryButton, SecondaryButton, TextButton, ActivityChip, DurationChip, StatusBadge, EmptyState, TextInput, SelectInput, FieldLabel, type StatusTone } from '../../components/ui';
+import { useAndroidBackToHome } from '../../lib/useAndroidBackToHome';
 
 /**
  * Recipient Conversion V1 -- the guest conversion loop's UI: activity ->
@@ -94,6 +95,7 @@ function formatCandidateWhen(startIso: string, endIso: string, timezone: string)
 }
 
 export function GuestFindClient({ initialSource, initialRestoreToken }: { initialSource: 'AURA_MOMENT' | 'DIRECT'; initialRestoreToken: string | null }) {
+  useAndroidBackToHome();
   const [phase, setPhase] = useState<Phase>('CHECKING_SESSION');
   const [isAuthenticated, setIsAuthenticated] = useState(false);
   const [error, setError] = useState('');

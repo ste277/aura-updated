@@ -1,6 +1,18 @@
 'use client';
 
 import { useEffect, useMemo, useRef, useState } from 'react';
+import { Capacitor } from '@capacitor/core';
+import { Geolocation } from '@capacitor/geolocation';
+import { App } from '@capacitor/app';
+import { LOCATION_ERROR_MESSAGES, SETTINGS_RECOVERABLE_KINDS, classifyNativeLocationError, locationErrorMessage, type LocationErrorKind } from '../lib/locationErrors';
+import {
+  NATIVE_LOCATION_TIMEOUT_MS,
+  NATIVE_LOCATION_PROGRESS_MS,
+  WEB_LOCATION_TIMEOUT_MS,
+  acquireNativeLocation,
+  waitWithTimeout,
+} from '../lib/nativeLocationRequest';
+import { isAppSettingsSupported, openAppSettings } from '../lib/appSettings';
 import { CITY_OPTIONS, parseCoordinate, formatCoordinateDirectional, MIN_VALID_LATITUDE, MAX_VALID_LATITUDE, MIN_VALID_LONGITUDE, MAX_VALID_LONGITUDE } from '../lib/cities';
 import { isValidIanaTimezone, searchTimezones, TimezoneOption } from '../lib/timezone';
 import { submitLocationConfirmation } from '../lib/locationConfirmation';
@@ -98,6 +110,11 @@ type PendingSource = 'gps' | 'search';
  * the same PATCH /api/users/location; none of them reads or writes
  * birthCityName/birthLatitude/birthLongitude/birthTimezone.
  */
+// AURA-MOBILE-01-M2-B/AND-03, standardised in M2-D -- every GPS error
+// message (native and web) comes from the one shared table in
+// lib/locationErrors.ts, so the two platforms can't drift apart.
+const GEOCODE_FALLBACK_MESSAGE = "Couldn't identify your location. Try searching instead.";
+
 export function LocationPicker({ currentCity, currentLatitude, currentLongitude, currentTimezone, onChanged }: LocationPickerProps) {
   const [saving, setSaving] = useState(false);
   const [showCustomForm, setShowCustomForm] = useState(false);
@@ -115,9 +132,164 @@ export function LocationPicker({ currentCity, currentLatitude, currentLongitude,
   const [timezoneMenuOpen, setTimezoneMenuOpen] = useState(false);
   const timezoneFieldRef = useRef<HTMLDivElement>(null);
 
+  // AURA-MOBILE-01-M2-B/AND-02 follow-up -- the Android back button is now
+  // one tap away from this modal at every point in the GPS flow below
+  // (permission prompt, up-to-several-second native fix, reverse-geocode
+  // fetch), so a closed/unmounted picker must not keep setting state on a
+  // promise chain nobody can see finish.
+  const isMountedRef = useRef(true);
+  useEffect(() => {
+    // AURA-MOBILE-01-M2-C-F1 -- React Strict Mode (development) runs
+    // setup -> cleanup -> setup on mount; without restoring the flag here
+    // the simulated cleanup leaves it false forever and every GPS result,
+    // error and timeout below is silently dropped (infinite spinner).
+    isMountedRef.current = true;
+    return () => {
+      isMountedRef.current = false;
+    };
+  }, []);
+
   // ---- Smart Location Selection: GPS ("Use my current location") ----
   const [gpsLoading, setGpsLoading] = useState(false);
   const [gpsError, setGpsError] = useState<string | null>(null);
+  // AURA-MOBILE-01-M2-D -- request lifecycle. Every tap is one UI
+  // "operation" with its own id; only the latest operation of a mounted
+  // picker may change state, so late results (after an app timeout, a
+  // newer tap, or unmount) can never overwrite newer UI. gpsBusyRef blocks
+  // re-entry synchronously, before React re-renders the disabled button.
+  const [gpsSlow, setGpsSlow] = useState(false);
+  const [gpsErrorKind, setGpsErrorKind] = useState<LocationErrorKind | null>(null);
+  const [gpsNotice, setGpsNotice] = useState<string | null>(null);
+  const gpsOpIdRef = useRef(0);
+  const gpsBusyRef = useRef(false);
+  const gpsErrorKindRef = useRef<LocationErrorKind | null>(null);
+  const gpsProgressTimerRef = useRef<number | null>(null);
+  const gpsWaitCancelRef = useRef<(() => void) | null>(null);
+
+  function isCurrentGpsOp(op: number) {
+    return isMountedRef.current && gpsOpIdRef.current === op;
+  }
+  function clearGpsTimers() {
+    if (gpsProgressTimerRef.current !== null) {
+      window.clearTimeout(gpsProgressTimerRef.current);
+      gpsProgressTimerRef.current = null;
+    }
+    if (gpsWaitCancelRef.current) {
+      gpsWaitCancelRef.current();
+      gpsWaitCancelRef.current = null;
+    }
+  }
+  function setGpsFailure(kind: LocationErrorKind | null, message: string) {
+    gpsErrorKindRef.current = kind;
+    setGpsErrorKind(kind);
+    setGpsError(message);
+  }
+  function clearGpsFailure() {
+    gpsErrorKindRef.current = null;
+    setGpsErrorKind(null);
+    setGpsError(null);
+  }
+  /** Ends operation `op` (only if it is still the current one). */
+  function finishGpsOp(op: number, failure?: { kind: LocationErrorKind | null; message: string }) {
+    if (!isCurrentGpsOp(op)) return;
+    clearGpsTimers();
+    gpsBusyRef.current = false;
+    setGpsLoading(false);
+    setGpsSlow(false);
+    if (failure) setGpsFailure(failure.kind, failure.message);
+  }
+  /**
+   * AURA-ANDROID-REL-03 F1 -- the user chose a location another way (search
+   * result, curated city, manual entry, "Confirm {currentCity}") while "Use
+   * my current location" was still running. Retire that operation so its late
+   * fix can't replace or reopen what the user picked. UI only: the native
+   * request can't be cancelled and stays tracked (single-flight) in
+   * lib/nativeLocationRequest.ts, so a later tap joins it.
+   */
+  function supersedeGpsOp() {
+    if (!gpsBusyRef.current) return;
+    gpsOpIdRef.current += 1;
+    clearGpsTimers();
+    gpsBusyRef.current = false;
+    setGpsLoading(false);
+    setGpsSlow(false);
+  }
+
+  // Genuine unmount (and Strict Mode's simulated one): stop the UI timers
+  // and invalidate the running operation. The native request itself cannot
+  // be cancelled (plugin limitation); it stays tracked in
+  // lib/nativeLocationRequest.ts until it settles, and its result is ignored.
+  useEffect(() => {
+    // If effects are torn down and re-run WITHOUT a real unmount while a
+    // request is in flight (Fast Refresh, future offscreen/Activity), the
+    // cleanup below invalidated that request; reset the busy UI so the
+    // button is usable again. No-ops on first mount. (Review F-2.)
+    gpsBusyRef.current = false;
+    setGpsLoading(false);
+    setGpsSlow(false);
+    return () => {
+      gpsOpIdRef.current += 1;
+      gpsBusyRef.current = false;
+      clearGpsTimers();
+    };
+  }, []);
+
+  // AURA-MOBILE-01-M2-D -- returning from Settings: when the app resumes
+  // while a Settings-recoverable error is showing (permission denied /
+  // permanently denied / location services off), re-check and clear the
+  // stale error if it has been resolved. Never requests permission or
+  // starts a location request by itself.
+  useEffect(() => {
+    if (!Capacitor.isNativePlatform()) return;
+    let cancelled = false;
+    let handle: { remove: () => void } | null = null;
+    const listener = App.addListener('resume', () => {
+      void recheckLocationAccessAfterResume();
+    });
+    Promise.resolve(listener)
+      .then((h) => {
+        if (cancelled) h.remove();
+        else handle = h;
+      })
+      .catch(() => {});
+    return () => {
+      cancelled = true;
+      handle?.remove();
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  async function recheckLocationAccessAfterResume() {
+    const kind = gpsErrorKindRef.current;
+    if (!kind || !SETTINGS_RECOVERABLE_KINDS.has(kind) || gpsBusyRef.current) return;
+    const op = gpsOpIdRef.current;
+    try {
+      const status = await Geolocation.checkPermissions();
+      if (!isCurrentGpsOp(op) || gpsErrorKindRef.current !== kind) return;
+      const granted = status.coarseLocation === 'granted' || status.location === 'granted';
+      if (granted) {
+        clearGpsFailure();
+        setGpsNotice('Location access is on. Tap "Use my current location" to try again.');
+      } else if (kind === 'services_disabled') {
+        // Location services are back on, but permission still needs a tap.
+        clearGpsFailure();
+      }
+      // Still not granted: keep the current message. The cached Capacitor
+      // state is not trusted to re-label it (see requestCurrentLocationNative).
+    } catch (err) {
+      if (!isCurrentGpsOp(op)) return;
+      if (classifyNativeLocationError(err) === 'services_disabled') {
+        setGpsFailure('services_disabled', LOCATION_ERROR_MESSAGES.services_disabled);
+      }
+    }
+  }
+
+  async function handleOpenSettings() {
+    const opened = await openAppSettings();
+    if (!opened && isMountedRef.current) {
+      setGpsNotice('Open your device Settings, then Apps > AuraSchedule > Permissions > Location.');
+    }
+  }
 
   // ---- Smart Location Selection: search ----
   const [searchQuery, setSearchQuery] = useState('');
@@ -198,9 +370,118 @@ export function LocationPicker({ currentCity, currentLatitude, currentLongitude,
   // permission denied, timeout, and the reverse-geocode call itself
   // failing -- each with its own message and a path back to search/manual
   // entry, never a dead end.
+  // Shared by both the native and web GPS paths below -- the one place a
+  // raw coordinate pair becomes a reverse-geocoded pending result (or a
+  // failure message), so neither path can drift out of sync with the other.
+  async function resolveGpsCoordinates(op: number, latitude: number, longitude: number, accuracy: number) {
+    try {
+      // IOS-02: coordinates travel in a POST body, never in the URL.
+      const res = await fetch('/api/location/reverse', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ latitude, longitude }),
+        cache: 'no-store',
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!isCurrentGpsOp(op)) return;
+      if (res.ok && data.result) {
+        setPending({ result: data.result, source: 'gps', gpsAccuracyMeters: accuracy });
+        finishGpsOp(op);
+      } else if (res.status === 502 || res.status === 503) {
+        // City lookup (reverse geocoding) unavailable -- distinct from a
+        // failure to acquire the device location itself.
+        finishGpsOp(op, { kind: 'geocode_unavailable', message: LOCATION_ERROR_MESSAGES.geocode_unavailable });
+      } else {
+        finishGpsOp(op, { kind: null, message: typeof data.error === 'string' ? data.error : GEOCODE_FALLBACK_MESSAGE });
+      }
+    } catch {
+      finishGpsOp(op, { kind: 'geocode_unavailable', message: LOCATION_ERROR_MESSAGES.geocode_unavailable });
+    }
+  }
+
+  // AURA-MOBILE-01-M2-B/AND-03 -- the browser's navigator.geolocation (used
+  // below for web) requires a secure context (HTTPS, or the literal host
+  // "localhost") and is unreachable over the Android emulator's plain-HTTP
+  // http://10.0.2.2 dev alias for that reason, confirmed in
+  // AURA-MOBILE-01-M2-A. Native Android/iOS have no such restriction --
+  // routing native calls through Capacitor's own Geolocation plugin instead
+  // (same Capacitor.isNativePlatform() branch lib/haptics.ts and
+  // lib/windowNotifications.ts already use) bypasses the WebView's JS
+  // secure-context gate entirely, the standards-correct way to obtain
+  // native-platform location data, rather than disabling or weakening that
+  // check for the web path, which is untouched below.
+  //
+  // AURA-MOBILE-01-M2-D -- request lifecycle (see lib/nativeLocationRequest.ts):
+  //  * single-flight: a retry or a reopened picker JOINS a native request
+  //    that is still running instead of starting a second one;
+  //  * the app-level timeout (NATIVE_LOCATION_TIMEOUT_MS) only stops the UI
+  //    waiting -- the plugin cannot cancel getCurrentPosition, so the native
+  //    request keeps running and stays tracked until it settles;
+  //  * "Still finding your location..." after NATIVE_LOCATION_PROGRESS_MS;
+  //  * all timers are cleared when the operation ends or the picker unmounts.
+  async function requestCurrentLocationNative(op: number) {
+    try {
+      let status = await Geolocation.checkPermissions();
+      if (!isCurrentGpsOp(op)) return;
+      let granted = status.coarseLocation === 'granted' || status.location === 'granted';
+      // Always ask Android when not granted -- even if Capacitor's CACHED
+      // state says 'denied'. That cache is an inference (no rationale after
+      // a refusal) and can be stale or wrong (first dialog dismissed with
+      // back; permission later reset in Settings). When the denial really is
+      // permanent, Android answers instantly WITHOUT showing a dialog, so
+      // this never re-triggers a prompt the user already refused for good,
+      // and it refreshes Capacitor's cache. (M2-D independent review, F-1.)
+      if (!granted) {
+        // Coarse only, matching this app's declared AndroidManifest permission
+        // (ACCESS_COARSE_LOCATION, no ACCESS_FINE_LOCATION) and this feature's
+        // own city-level-accuracy need (AURA-MOBILE-01-M1).
+        status = await Geolocation.requestPermissions({ permissions: ['coarseLocation'] });
+        if (!isCurrentGpsOp(op)) return;
+        granted = status.coarseLocation === 'granted' || status.location === 'granted';
+      }
+      if (!granted) {
+        const kind: LocationErrorKind = status.coarseLocation === 'denied' ? 'permission_permanently_denied' : 'permission_denied';
+        finishGpsOp(op, { kind, message: locationErrorMessage(kind, Capacitor.getPlatform()) });
+        return;
+      }
+      gpsProgressTimerRef.current = window.setTimeout(() => {
+        gpsProgressTimerRef.current = null;
+        if (isCurrentGpsOp(op)) setGpsSlow(true);
+      }, NATIVE_LOCATION_PROGRESS_MS);
+      // The plugin's `timeout` option is ignored by getCurrentPosition on
+      // Android; the app-level wait below is what bounds the UI.
+      const native = acquireNativeLocation(() =>
+        Geolocation.getCurrentPosition({ enableHighAccuracy: false, timeout: NATIVE_LOCATION_TIMEOUT_MS })
+      );
+      const wait = waitWithTimeout(native.promise, NATIVE_LOCATION_TIMEOUT_MS);
+      gpsWaitCancelRef.current = wait.cancel;
+      const position = await wait.promise;
+      if (!isCurrentGpsOp(op)) return;
+      clearGpsTimers();
+      setGpsSlow(false);
+      await resolveGpsCoordinates(op, position.coords.latitude, position.coords.longitude, position.coords.accuracy);
+    } catch (err) {
+      const kind = classifyNativeLocationError(err);
+      finishGpsOp(op, { kind, message: locationErrorMessage(kind, Capacitor.getPlatform()) });
+    }
+  }
+
   function requestCurrentLocation() {
-    setGpsError(null);
+    // Synchronous re-entry guard: a second tap before React re-renders the
+    // disabled button must not start a second operation.
+    if (gpsBusyRef.current) return;
+    clearGpsFailure();
+    setGpsNotice(null);
     setPending(null);
+
+    if (Capacitor.isNativePlatform()) {
+      const op = ++gpsOpIdRef.current;
+      gpsBusyRef.current = true;
+      setGpsLoading(true);
+      setGpsSlow(false);
+      void requestCurrentLocationNative(op);
+      return;
+    }
 
     if (typeof window !== 'undefined' && window.isSecureContext === false) {
       setGpsError('Location access needs a secure (https) connection. Try searching instead.');
@@ -211,35 +492,23 @@ export function LocationPicker({ currentCity, currentLatitude, currentLongitude,
       return;
     }
 
+    const op = ++gpsOpIdRef.current;
+    gpsBusyRef.current = true;
     setGpsLoading(true);
     navigator.geolocation.getCurrentPosition(
       async (position) => {
+        if (!isCurrentGpsOp(op)) return;
         const { latitude, longitude, accuracy } = position.coords;
-        try {
-          const res = await fetch(`/api/location/reverse?lat=${latitude}&lng=${longitude}`);
-          const data = await res.json().catch(() => ({}));
-          if (res.ok && data.result) {
-            setPending({ result: data.result, source: 'gps', gpsAccuracyMeters: accuracy });
-          } else {
-            setGpsError(typeof data.error === 'string' ? data.error : "Couldn't identify your location. Try searching instead.");
-          }
-        } catch {
-          setGpsError("Couldn't identify your location. Try searching instead.");
-        } finally {
-          setGpsLoading(false);
-        }
+        await resolveGpsCoordinates(op, latitude, longitude, accuracy);
       },
       (geoError) => {
-        setGpsLoading(false);
-        if (geoError.code === geoError.PERMISSION_DENIED) {
-          setGpsError('Location permission was denied. You can search or enter your location manually below.');
-        } else if (geoError.code === geoError.TIMEOUT) {
-          setGpsError('Getting your location took too long. Try again or search instead.');
-        } else {
-          setGpsError('Could not get your location. Try searching instead.');
-        }
+        // The browser cannot tell an ordinary denial from a permanent one,
+        // so the web path never offers the (native-only) Settings action.
+        const kind: LocationErrorKind =
+          geoError.code === geoError.PERMISSION_DENIED ? 'permission_denied' : geoError.code === geoError.TIMEOUT ? 'timeout' : 'unavailable';
+        finishGpsOp(op, { kind, message: locationErrorMessage(kind, Capacitor.getPlatform()) });
       },
-      { timeout: 10_000, maximumAge: 0 }
+      { timeout: WEB_LOCATION_TIMEOUT_MS, maximumAge: 0 }
     );
   }
 
@@ -322,6 +591,7 @@ export function LocationPicker({ currentCity, currentLatitude, currentLongitude,
   // attempt and nothing else).
   async function confirmCurrentLocation() {
     if (!currentLocationReady || confirmingCurrent) return;
+    supersedeGpsOp();
     setConfirmingCurrent(true);
     setConfirmCurrentError(null);
     const result = await submitLocationConfirmation({
@@ -362,6 +632,7 @@ export function LocationPicker({ currentCity, currentLatitude, currentLongitude,
     const selectedCity = combinedCities.find((c) => c.cityName === value);
     if (!selectedCity) return;
 
+    supersedeGpsOp();
     setSaving(true);
     setError(null);
 
@@ -448,6 +719,7 @@ export function LocationPicker({ currentCity, currentLatitude, currentLongitude,
     setSubmitAttempted(true);
     if (!formValid || parsedLatitude === null || parsedLongitude === null) return;
 
+    supersedeGpsOp();
     setSaving(true);
     setError(null);
 
@@ -858,11 +1130,35 @@ export function LocationPicker({ currentCity, currentLatitude, currentLongitude,
         }}
       >
         <span aria-hidden="true">📍</span>
-        {gpsLoading ? 'Finding your location...' : 'Use my current location'}
+        {gpsLoading ? (gpsSlow ? 'Still finding your location...' : 'Finding your location...') : 'Use my current location'}
       </button>
       {gpsError && (
         <div role="alert" style={{ color: 'var(--as-danger, var(--as-rahu))', fontSize: 11 }}>
           {gpsError}
+        </div>
+      )}
+      {gpsErrorKind === 'permission_permanently_denied' && isAppSettingsSupported() && (
+        <button
+          type="button"
+          onClick={handleOpenSettings}
+          style={{
+            minHeight: 44,
+            padding: '9px 14px',
+            borderRadius: 8,
+            border: '1px solid var(--as-border, #2a3550)',
+            background: 'transparent',
+            color: 'var(--as-text, #e6e9f2)',
+            fontSize: 13,
+            fontWeight: 700,
+            cursor: 'pointer',
+          }}
+        >
+          Open Settings
+        </button>
+      )}
+      {gpsNotice && (
+        <div role="status" style={{ color: 'var(--as-text-muted)', fontSize: 11 }}>
+          {gpsNotice}
         </div>
       )}
 
@@ -906,7 +1202,10 @@ export function LocationPicker({ currentCity, currentLatitude, currentLongitude,
               <button
                 key={`${result.cityName}-${result.latitude}-${result.longitude}-${i}`}
                 type="button"
-                onClick={() => setPending({ result, source: 'search' })}
+                onClick={() => {
+                  supersedeGpsOp();
+                  setPending({ result, source: 'search' });
+                }}
                 style={{
                   display: 'block',
                   width: '100%',

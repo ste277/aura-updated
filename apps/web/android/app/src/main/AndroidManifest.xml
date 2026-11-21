@@ -32,4 +32,10 @@
     <!-- Permissions -->
 
     <uses-permission android:name="android.permission.INTERNET" />
+    <!-- AURA-ANDROID-REL-03 (from AURA-MOBILE-01-M1 / COMPAT-03): approximate
+         location for "Use my current location" (city-level Panchangam timings).
+         Coarse only: ACCESS_FINE_LOCATION and background location are deliberately
+         not requested. The patched @capacitor/geolocation 6.1.1 uses the coarse
+         alias on every API level when only this permission is declared. -->
+    <uses-permission android:name="android.permission.ACCESS_COARSE_LOCATION" />
 </manifest>

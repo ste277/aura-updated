@@ -4,6 +4,7 @@ import React, { useEffect, useRef, useState } from 'react';
 import { spacing, typography, colors } from './theme';
 import { ModalShell, useModalA11y, PrimaryButton, SecondaryButton, TextButton, FieldLabel, FieldHint, FieldError, TextInput } from './ui';
 import { getDatePartsInTimezone, getMinuteOfDayInTimezone, localDateTimeToUTC } from '../lib/timezone';
+import { generateClientRequestId } from '../lib/clientId';
 import type { TimingCandidate } from '../../../packages/recommendation/src/timingSearch';
 import {
   fetchWeeklyRhythmProposal,
@@ -93,7 +94,7 @@ export function WeeklyPlanReviewModal({ goalActivityId, activityTitleFallback, t
   // `current` already set and is a no-op), and stable for the rest of this
   // component's real mounted lifetime either way.
   const acceptanceIdRef = useRef<string | null>(null);
-  if (!acceptanceIdRef.current) acceptanceIdRef.current = crypto.randomUUID();
+  if (!acceptanceIdRef.current) acceptanceIdRef.current = generateClientRequestId();
   const acceptanceId = acceptanceIdRef.current;
 
   const [state, setState] = useState<LoadState>({ phase: 'LOADING' });

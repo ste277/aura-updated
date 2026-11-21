@@ -203,10 +203,11 @@ function main() {
   // ============================================================
   const goalsListClientCodeOnly = stripComments(sources['Goals list client']);
   check(
-    'B3.1: clientRequestId is generated via exactly one useState lazy initializer calling crypto.randomUUID() (generated once per mount, not per submit)',
-    /const \[clientRequestId\] = useState<string>\(\(\) => crypto\.randomUUID\(\)\)/.test(goalsListClientCodeOnly)
+    'B3.1: clientRequestId is generated via exactly one useState lazy initializer calling generateClientRequestId() (generated once per mount, not per submit) -- AURA-MOBILE-01-M2-B/AND-01: not crypto.randomUUID() directly, which throws outside a secure context',
+    /const \[clientRequestId\] = useState<string>\(\(\) => generateClientRequestId\(\)\)/.test(goalsListClientCodeOnly)
   );
-  check('B3.1: clientRequestId is never reassigned/regenerated inside handleSubmit (no second crypto.randomUUID() call anywhere in the file)', (goalsListClientCodeOnly.match(/crypto\.randomUUID\(\)/g) ?? []).length === 1);
+  check('B3.1: clientRequestId is never reassigned/regenerated inside handleSubmit (no second generateClientRequestId() call anywhere in the file)', (goalsListClientCodeOnly.match(/generateClientRequestId\(\)/g) ?? []).length === 1);
+  check('B3.1/AND-01: no direct crypto.randomUUID() call anywhere in the file (every id generation goes through the secure-context-safe wrapper)', !/crypto\.randomUUID\(\)/.test(goalsListClientCodeOnly));
   check('B3.1: the submit request body includes clientRequestId', /clientRequestId,\s*\}\)/.test(goalsListClientCodeOnly) || /body:\s*JSON\.stringify\(\{[\s\S]*clientRequestId/.test(goalsListClientCodeOnly));
   check(
     'B3.1: the SUBMITTING double-click guard is explicitly documented as NOT the idempotency mechanism (never silently conflated with it)',

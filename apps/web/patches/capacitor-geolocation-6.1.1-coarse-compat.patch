@@ -1,0 +1,86 @@
+--- a/android/src/main/java/com/capacitorjs/plugins/geolocation/GeolocationPlugin.java
++++ b/android/src/main/java/com/capacitorjs/plugins/geolocation/GeolocationPlugin.java
+@@ -28,6 +28,8 @@
+ 
+     static final String LOCATION = "location";
+     static final String COARSE_LOCATION = "coarseLocation";
++    static final String MANIFEST_PERMISSIONS_MISSING =
++        "Location permissions are not declared in manifest. Make sure at least ACCESS_COARSE_LOCATION is declared in AndroidManifest.xml.";
+     private Geolocation implementation;
+     private Map<String, PluginCall> watchingCalls = new HashMap<>();
+ 
+@@ -80,6 +82,10 @@
+     @PluginMethod
+     public void getCurrentPosition(final PluginCall call) {
+         String alias = getAlias(call);
++        if (alias == null) {
++            call.reject(MANIFEST_PERMISSIONS_MISSING);
++            return;
++        }
+         if (getPermissionState(alias) != PermissionState.GRANTED) {
+             requestPermissionForAlias(alias, call, "completeCurrentPosition");
+         } else {
+@@ -124,6 +130,11 @@
+     public void watchPosition(PluginCall call) {
+         call.setKeepAlive(true);
+         String alias = getAlias(call);
++        if (alias == null) {
++            call.setKeepAlive(false);
++            call.reject(MANIFEST_PERMISSIONS_MISSING);
++            return;
++        }
+         if (getPermissionState(alias) != PermissionState.GRANTED) {
+             requestPermissionForAlias(alias, call, "completeWatchPosition");
+         } else {
+@@ -237,15 +248,24 @@
+         return ret;
+     }
+ 
+-    private String getAlias(PluginCall call) {
+-        String alias = GeolocationPlugin.LOCATION;
+-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+-            boolean enableHighAccuracy = call.getBoolean("enableHighAccuracy", false);
+-            if (!enableHighAccuracy) {
+-                alias = GeolocationPlugin.COARSE_LOCATION;
+-            }
++    /**
++     * Backport of upstream ionic-team/capacitor-geolocation c9c4c84 (v8.2.1, #85):
++     * only request permissions that are declared in the manifest. With only
++     * ACCESS_COARSE_LOCATION declared, the coarse alias is used on every API level
++     * (previously API < 31 always required ACCESS_FINE_LOCATION). Behaviour for apps
++     * that declare ACCESS_FINE_LOCATION is unchanged.
++     *
++     * @return the alias to request, or null if no location permission is declared
++     */
++    private String getAlias(PluginCall call) {
++        boolean hasFine = isPermissionDeclared(GeolocationPlugin.LOCATION);
++        boolean hasCoarse = isPermissionDeclared(GeolocationPlugin.COARSE_LOCATION);
++        if (!hasFine && !hasCoarse) {
++            return null;
+         }
+-        return alias;
++        boolean enableHighAccuracy = call.getBoolean("enableHighAccuracy", false);
++        boolean shouldRequestFine = hasFine && (Build.VERSION.SDK_INT < Build.VERSION_CODES.S || enableHighAccuracy);
++        return shouldRequestFine ? GeolocationPlugin.LOCATION : GeolocationPlugin.COARSE_LOCATION;
+     }
+ 
+     private boolean isHighAccuracy(PluginCall call) {
+--- a/android/src/main/java/com/capacitorjs/plugins/geolocation/Geolocation.java
++++ b/android/src/main/java/com/capacitorjs/plugins/geolocation/Geolocation.java
+@@ -130,7 +130,15 @@
+         Location lastLoc = null;
+         LocationManager lm = (LocationManager) context.getSystemService(Context.LOCATION_SERVICE);
+         for (String provider : lm.getAllProviders()) {
+-            Location tmpLoc = lm.getLastKnownLocation(provider);
++            Location tmpLoc;
++            try {
++                tmpLoc = lm.getLastKnownLocation(provider);
++            } catch (SecurityException e) {
++                // Aura backport: on API < 30 a coarse-only app may not query FINE-level
++                // providers (e.g. "gps", "passive"); LocationManagerService throws instead of
++                // returning null. Skip such providers rather than crashing the plugin call.
++                continue;
++            }
+             if (tmpLoc != null) {
+                 long locationAge = SystemClock.elapsedRealtimeNanos() - tmpLoc.getElapsedRealtimeNanos();
+                 long maximumAgeNanoSec = maximumAge * 1000000L;
