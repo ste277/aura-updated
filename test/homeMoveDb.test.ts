@@ -65,7 +65,11 @@ async function main() {
   const dest = () => new Date(minute(Date.now()) + 60 * DAY + n++ * 3 * HOUR);
   const row = async (id: string) => (await sql(`SELECT * FROM "PlannedActivity" WHERE id = $1`, [id]))[0];
   const habits = async () => Number((await sql(`SELECT count(*)::int AS n FROM "HabitLog" WHERE "userId" = $1`, [U.id]))[0].n);
-  const nextDay = () => new Date(Date.UTC(2027, 0, 20 + day++)).toISOString().slice(0, 10);
+  // Accept days sit in their own band, 20-21 UTC days from now: no other plan in this file can land there
+  // (now-relative plans: about now, +30..36 days; dest(): +60..63 days; DST moves: +71 days onward).
+  // A fixed calendar date collided with dest() whenever now + 60 days reached it (#372).
+  const acceptBase = Math.floor(Date.now() / DAY) * DAY + 20 * DAY;
+  const nextDay = () => new Date(acceptBase + day++ * DAY).toISOString().slice(0, 10);
   const accept = async (map: { cap?: [string, string]; goal?: [string, string] }, title: string) => {
     const d = nextDay();
     return (await persistAcceptedConstructedDay(U.id, request(d, [item(d, 'i1', title, 10)]), new Date(`${d}T08:00:00Z`), new Map(map.goal ? [['i1', map.goal[1]]] : []), new Map(map.cap ? [['i1', map.cap[1]]] : []))) as any;
@@ -163,8 +167,9 @@ async function main() {
     // ---- DST transition day: the wall time the user picks is the time Aura commits (real executor -> real route -> real DB) ----
     const LA = 'America/Los_Angeles';
     const offsetOf = (ms: number) => { const m = new Intl.DateTimeFormat('en-US', { timeZone: LA, timeZoneName: 'shortOffset' }).formatToParts(new Date(ms)).find((p) => p.type === 'timeZoneName')!.value.match(/GMT([+-])(\d+)/)!; return (m[1] === '-' ? -1 : 1) * Number(m[2]); };
-    /** First local date (after ~30 days out) on which LA's offset changes in the requested direction; found by scanning noon-UTC offsets, independent of the code under test. */
-    const nextTransition = (kind: 'SPRING' | 'FALL') => { const start = Math.floor((Date.now() + 30 * DAY) / DAY) * DAY; for (let i = 1; i < 500; i++) { const day = start + i * DAY; const prev = offsetOf(day - DAY + 12 * HOUR); const cur = offsetOf(day + 12 * HOUR); if ((kind === 'SPRING' && cur > prev) || (kind === 'FALL' && cur < prev)) return new Date(day).toISOString().slice(0, 10); } throw new Error('no transition found'); };
+    /** First local date (after ~70 days out) on which LA's offset changes in the requested direction; found by scanning noon-UTC offsets, independent of the code under test.
+     *  70 days keeps the DST destinations past every other plan in this file (+30..36 days, dest() at +60..63 days), so they can never collide with them. */
+    const nextTransition = (kind: 'SPRING' | 'FALL') => { const start = Math.floor((Date.now() + 70 * DAY) / DAY) * DAY; for (let i = 1; i < 500; i++) { const day = start + i * DAY; const prev = offsetOf(day - DAY + 12 * HOUR); const cur = offsetOf(day + 12 * HOUR); if ((kind === 'SPRING' && cur > prev) || (kind === 'FALL' && cur < prev)) return new Date(day).toISOString().slice(0, 10); } throw new Error('no transition found'); };
     const wallOf = (ms: number) => { const p: Record<string, string> = {}; for (const x of new Intl.DateTimeFormat('en-CA', { timeZone: LA, year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', hourCycle: 'h23' }).formatToParts(new Date(ms))) p[x.type] = x.value; return { date: `${p.year}-${p.month}-${p.day}`, time: `${p.hour}:${p.minute}` }; };
     const dayBefore = (date: string) => new Date(Date.parse(`${date}T00:00:00Z`) - DAY).toISOString().slice(0, 10);
     for (const kind of ['SPRING', 'FALL'] as const) {
