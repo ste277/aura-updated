@@ -31,6 +31,9 @@ function stripComments(source: string): string {
 
 const source = read('apps/web/components/LocationPicker.tsx');
 const picker = stripComments(source);
+// AURA-MOBILE-01-M2-D: GPS messages/timeouts moved to shared lib modules.
+const errorsLib = stripComments(read('apps/web/lib/locationErrors.ts'));
+const requestLib = stripComments(read('apps/web/lib/nativeLocationRequest.ts'));
 const onboardingJourneySource = stripComments(read('apps/web/components/OnboardingJourney.tsx'));
 const youViewSource = stripComments(read('apps/web/components/YouView.tsx'));
 
@@ -39,13 +42,31 @@ const youViewSource = stripComments(read('apps/web/components/YouView.tsx'));
 // ============================================================
 
 check('geolocation is requested ONLY from the button\'s onClick (requestCurrentLocation), never from a useEffect/mount effect', !/useEffect\([^)]*\{[\s\S]*?getCurrentPosition/.test(picker) && /onClick=\{requestCurrentLocation\}/.test(picker));
-check('getCurrentPosition is called exactly once in the whole file, inside requestCurrentLocation', (picker.match(/getCurrentPosition\(/g) ?? []).length === 1);
-check('no coordinates are saved automatically on a GPS fix -- the result lands in `pending` state, never calls onChanged/PATCH directly from the geolocation success callback', (() => {
-  const start = picker.indexOf('function requestCurrentLocation');
+check(
+  'getCurrentPosition is called exactly twice in the whole file -- once for native (Capacitor Geolocation, requestCurrentLocationNative) and once for web (navigator.geolocation, requestCurrentLocation), AURA-MOBILE-01-M2-B/AND-03\'s native/web split, never a third/stray call site',
+  (picker.match(/getCurrentPosition\(/g) ?? []).length === 2
+);
+check('no coordinates are saved automatically on a GPS fix, on EITHER the native or web path -- the result lands in `pending` state via the one shared resolveGpsCoordinates helper, never calls onChanged/PATCH directly from either platform\'s success path', (() => {
+  const start = picker.indexOf('async function resolveGpsCoordinates');
   const body = picker.slice(start, picker.indexOf('\n  }\n', start));
   return /setPending\(\{ result: data\.result, source: 'gps'/.test(body) && !/onChanged\(|PATCH/.test(body);
 })());
-check('no coordinates are saved automatically on a search result click -- clicking a result sets `pending`, never calls onChanged/PATCH directly', /onClick=\{\(\) => setPending\(\{ result, source: 'search' \}\)\}/.test(picker));
+check('neither GPS caller (requestCurrentLocation, the web path, or requestCurrentLocationNative) calls onChanged/PATCH directly itself -- both only ever reach resolveGpsCoordinates, so a future edit can\'t bypass the pending-confirmation step on just one platform', (() => {
+  const nativeStart = picker.indexOf('async function requestCurrentLocationNative');
+  const nativeBody = picker.slice(nativeStart, picker.indexOf('\n  }\n', nativeStart));
+  const webStart = picker.indexOf('function requestCurrentLocation()');
+  const webBody = picker.slice(webStart, picker.indexOf('\n  }\n', webStart));
+  return !/onChanged\(|PATCH/.test(nativeBody) && !/onChanged\(|PATCH/.test(webBody);
+})());
+check('both the native and web GPS paths route through the one shared resolveGpsCoordinates helper (no second/competing coordinate-to-pending translation)', (picker.match(/resolveGpsCoordinates\(/g) ?? []).length === 3 /* 1 definition + 2 call sites (native, web) */);
+// AURA-ANDROID-REL-03 F1: the handler may also retire a still-running GPS
+// operation (supersedeGpsOp, UI-only) -- but its body must be exactly that
+// plus setPending, so a click still never saves anything by itself.
+check('no coordinates are saved automatically on a search result click -- clicking a result sets `pending`, never calls onChanged/PATCH directly', /onClick=\{\(\) => \{\s*supersedeGpsOp\(\);\s*setPending\(\{ result, source: 'search' \}\);\s*\}\}/.test(picker));
+check('supersedeGpsOp itself never saves (no onChanged/PATCH/fetch in its body)', (() => {
+  const m = /function supersedeGpsOp\(\) \{([\s\S]*?)\n  \}/.exec(picker);
+  return !!m && !/onChanged\(|PATCH|fetch\(/.test(m[1]);
+})());
 
 // ============================================================
 // Permission / timeout / unsupported-browser / secure-context handling.
@@ -53,9 +74,9 @@ check('no coordinates are saved automatically on a search result click -- clicki
 
 check('unsupported browser (no navigator.geolocation) is handled with a distinct, actionable message', /!\('geolocation' in navigator\)/.test(picker) && /doesn't support location access/.test(picker));
 check('insecure context (HTTP, not HTTPS) is handled with its own distinct message before even checking geolocation support', /window\.isSecureContext === false/.test(picker) && /secure \(https\) connection/.test(picker));
-check('PERMISSION_DENIED is handled with a message that offers search/manual as a next step (never a dead end)', /geoError\.code === geoError\.PERMISSION_DENIED/.test(picker) && /permission was denied/.test(picker));
-check('TIMEOUT is handled with its own distinct message', /geoError\.code === geoError\.TIMEOUT/.test(picker) && /took too long/.test(picker));
-check('getCurrentPosition is called with an explicit timeout (never left to the browser\'s own default, which can be unbounded)', /\{ timeout: 10_000, maximumAge: 0 \}/.test(picker));
+check('PERMISSION_DENIED is handled with a message that offers search/manual as a next step (never a dead end)', /geoError\.code === geoError\.PERMISSION_DENIED/.test(picker) && /permission was denied[^']*manually below/.test(errorsLib));
+check('TIMEOUT is handled with its own distinct message', /geoError\.code === geoError\.TIMEOUT \? 'timeout'/.test(picker) && /timeout: 'Finding your location took too long/.test(errorsLib));
+check('getCurrentPosition is called with an explicit timeout (never left to the browser\'s own default, which can be unbounded)', /\{ timeout: WEB_LOCATION_TIMEOUT_MS, maximumAge: 0 \}/.test(picker) && /export const WEB_LOCATION_TIMEOUT_MS = 10_000;/.test(requestLib));
 check('reverse-geocode failure after a successful GPS fix is handled distinctly from a GPS error itself (couldn\'t identify your location, try searching)', /Couldn't identify your location\. Try searching instead\./.test(picker));
 
 // ============================================================

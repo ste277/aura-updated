@@ -33,19 +33,23 @@ const reverseRouteSrc = read('apps/web/app/api/location/reverse/route.ts');
 // gracefully when unconfigured, and never accept an arbitrary user id.
 // ============================================================
 
+
+// IOS-02: the reverse route sends every response through json(body, status) (adds no-store),
+// so a status is either `status: NNN` (search) or `}, NNN)` / `, NNN);` (reverse).
+const hasStatus = (src: string, code: number) => new RegExp(`status: ${code}\\b|, ${code}\\)`).test(src);
 for (const [name, src] of [['search', searchRouteSrc], ['reverse', reverseRouteSrc]] as const) {
-  check(`${name}: authenticated via the session cookie (getSessionFromRequest), 401 when absent`, /getSessionFromRequest\(req\)/.test(src) && /status: 401/.test(src));
-  check(`${name}: rate-limited per authenticated user (keyed by session.userId, never by raw request body)`, /isRateLimited\(`location-(search|reverse):\$\{session\.userId\}`/.test(src) && /status: 429/.test(src));
-  check(`${name}: degrades gracefully (503, not a 500 crash) when the provider key is not configured`, /isGeocodingConfigured\(\)/.test(src) && /status: 503/.test(src));
-  check(`${name}: provider failures return a clear, non-crashing error (502), never leak the raw provider error to the client`, /status: 502/.test(src) && !/apiKey|OPENCAGE_API_KEY/.test(src));
+  check(`${name}: authenticated via the session cookie (getSessionFromRequest), 401 when absent`, /getSessionFromRequest\(req\)/.test(src) && hasStatus(src, 401));
+  check(`${name}: rate-limited per authenticated user (keyed by session.userId, never by raw request body)`, /isRateLimited\(`location-(search|reverse):\$\{session\.userId\}`/.test(src) && hasStatus(src, 429));
+  check(`${name}: degrades gracefully (503, not a 500 crash) when the provider key is not configured`, /isGeocodingConfigured\(\)/.test(src) && hasStatus(src, 503));
+  check(`${name}: provider failures return a clear, non-crashing error (502), never leak the raw provider error to the client`, hasStatus(src, 502) && !/apiKey|OPENCAGE_API_KEY/.test(src));
   check(`${name}: never writes to the database -- read-only resolution, saving only happens through the existing PATCH /api/users/location`, !/updateUserLocation|UPDATE "User"|INSERT INTO/.test(src));
 }
 
 check('search: rejects a missing/empty query with 400 before ever calling the provider', /if \(!query \|\| !query\.trim\(\)\) \{\s*return NextResponse\.json\(\{ error: '[^']*' \}, \{ status: 400 \}\);/.test(searchRouteSrc));
 check('search: rejects an unreasonably long query (query-length abuse guard)', /query\.length > 200/.test(searchRouteSrc));
 check('reverse: validates latitude/longitude against the SAME bounds the rest of the app already uses (MIN/MAX_VALID_LAT/LNG from lib/cities.ts) -- no second, divergent validation rule', /MIN_VALID_LATITUDE|MAX_VALID_LATITUDE/.test(reverseRouteSrc) && /from '\.\.\/\.\.\/\.\.\/\.\.\/lib\/cities'/.test(reverseRouteSrc));
-check('reverse: rejects non-finite or out-of-range coordinates with 400', /Number\.isFinite\(latitude\)/.test(reverseRouteSrc) && /status: 400/.test(reverseRouteSrc));
-check('reverse: a geocode result with no usable place (provider returned nothing) is a 404, never a fabricated result', /status: 404/.test(reverseRouteSrc));
+check('reverse: rejects non-finite or out-of-range coordinates with 400', /Number\.isFinite\(latitude\)/.test(reverseRouteSrc) && hasStatus(reverseRouteSrc, 400));
+check('reverse: a geocode result with no usable place (provider returned nothing) is a 404, never a fabricated result', hasStatus(reverseRouteSrc, 404));
 
 // ============================================================
 // Direct logic: the rate limiter itself, exercised exactly as each route
