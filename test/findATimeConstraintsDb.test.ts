@@ -69,7 +69,11 @@ async function main() {
   const Cu = await mk('c'); // tiny, fully occupied window
   const G = await mk('g'); // goal identity
   const X = await mk('x'); // concurrency / transaction ordering
-  const ids = [A.id, B.id, Cu.id, G.id, X.id];
+  // AURA-CI-03 (#360): T10's lifecycle checks run on their own user, so a plan
+  // another section creates (T17's "Team call" at a Panchang-ranked, date-
+  // dependent slot on user A) can never occupy T10's fixed slots.
+  const L = await mk('l'); // T10 lifecycle (CANCELLED / SKIPPED) -- isolated
+  const ids = [A.id, B.id, Cu.id, G.id, X.id, L.id];
   const cleanup = async () => {
     await sql(`DELETE FROM "PlanCreationIdempotency" WHERE "userId" = ANY($1::text[])`, [ids]).catch(() => {});
     await sql(`DELETE FROM "GoalActivityOccurrence" WHERE "userId" = ANY($1::text[])`, [ids]).catch(() => {});
@@ -183,14 +187,22 @@ async function main() {
     const partial = await call(plansRoute, A.token, planBody('Partial', at(D1, '17:45'), at(D1, '18:15'), { overlapPolicy: 'REJECT_ACTIVE_OVERLAP' }));
     check('T7 save: partial overlap rejected under REJECT', partial.status === 409 && partial.body.conflict?.title === 'Running');
 
-    // Lifecycle at save time: CANCELLED / SKIPPED do not block.
-    const doomed = await call(plansRoute, A.token, planBody('Doomed', at(D1, '13:00'), at(D1, '14:00')));
+    // Lifecycle at save time: CANCELLED / SKIPPED do not block. On user L (isolated, see above):
+    // for each lifecycle the SAME slot is first shown to be refused while the plan is still
+    // UPCOMING and naming that plan (so the later 200 can only come from the lifecycle change),
+    // then accepted once the plan is CANCELLED / SKIPPED.
+    check('T10 fixture: the lifecycle user starts with no plans (nothing else can occupy its slots)', (await planCount(L.id)) === 0);
+    const doomed = await call(plansRoute, L.token, planBody('Doomed', at(D1, '13:00'), at(D1, '14:00')));
+    const whileUpcomingC = await call(plansRoute, L.token, planBody('Over cancelled', at(D1, '13:15'), at(D1, '13:45'), { overlapPolicy: 'REJECT_ACTIVE_OVERLAP' }));
+    check('T10 control: while still UPCOMING, the plan blocks the same slot under REJECT (409 naming it)', doomed.status === 200 && whileUpcomingC.status === 409 && whileUpcomingC.body.conflict?.title === 'Doomed');
     await sql(`UPDATE "PlannedActivity" SET status = 'CANCELLED' WHERE id = $1`, [doomed.body.id]);
-    const overCancelled = await call(plansRoute, A.token, planBody('Over cancelled', at(D1, '13:15'), at(D1, '13:45'), { overlapPolicy: 'REJECT_ACTIVE_OVERLAP' }));
+    const overCancelled = await call(plansRoute, L.token, planBody('Over cancelled', at(D1, '13:15'), at(D1, '13:45'), { overlapPolicy: 'REJECT_ACTIVE_OVERLAP' }));
     check('T10 save: a CANCELLED plan does not block under REJECT', overCancelled.status === 200);
-    const skipped = await call(plansRoute, A.token, planBody('Skipped one', at(D1, '15:00'), at(D1, '16:00')));
+    const skipped = await call(plansRoute, L.token, planBody('Skipped one', at(D1, '15:00'), at(D1, '16:00')));
+    const whileUpcomingS = await call(plansRoute, L.token, planBody('Over skipped', at(D1, '15:15'), at(D1, '15:45'), { overlapPolicy: 'REJECT_ACTIVE_OVERLAP' }));
+    check('T10 control: while still UPCOMING, the plan blocks the same slot under REJECT (409 naming it)', skipped.status === 200 && whileUpcomingS.status === 409 && whileUpcomingS.body.conflict?.title === 'Skipped one');
     await sql(`UPDATE "PlannedActivity" SET status = 'SKIPPED' WHERE id = $1`, [skipped.body.id]);
-    const overSkipped = await call(plansRoute, A.token, planBody('Over skipped', at(D1, '15:15'), at(D1, '15:45'), { overlapPolicy: 'REJECT_ACTIVE_OVERLAP' }));
+    const overSkipped = await call(plansRoute, L.token, planBody('Over skipped', at(D1, '15:15'), at(D1, '15:45'), { overlapPolicy: 'REJECT_ACTIVE_OVERLAP' }));
     check('T10 save: a SKIPPED plan does not block under REJECT', overSkipped.status === 200);
     const overnightSave = await call(plansRoute, B.token, planBody('After midnight', at(D2, '00:00'), at(D2, '00:15'), { overlapPolicy: 'REJECT_ACTIVE_OVERLAP' }));
     check('T11 save: the D1->D2 overnight plan blocks a D2 00:00 save under REJECT', overnightSave.status === 409 && overnightSave.body.conflict?.title === 'Overnight');
