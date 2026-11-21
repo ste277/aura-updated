@@ -9,6 +9,8 @@ import type { PlanningHorizon } from '../../../../packages/recommendation/src/da
 import { RESULT_LABEL_TEXT, saveUpcomingPlanFromCandidate } from '../../components/PlanWithAuraView';
 import { CITY_OPTIONS } from '../../lib/cities';
 import { trackEvent } from '../../lib/trackEvent';
+import { requestSignInCode } from '../../lib/signInCode';
+import { SignInCodeActions } from '../../components/SignInCodeActions';
 import { colors, spacing, radius, typography } from '../../components/theme';
 import { PrimaryButton, SecondaryButton, TextButton, ActivityChip, DurationChip, StatusBadge, EmptyState, TextInput, SelectInput, FieldLabel, type StatusTone } from '../../components/ui';
 
@@ -124,6 +126,9 @@ export function GuestFindClient({ initialSource, initialRestoreToken }: { initia
   const [signupBusy, setSignupBusy] = useState(false);
   const [devLoginUrl, setDevLoginUrl] = useState<string | null>(null);
   const [devLoginCode, setDevLoginCode] = useState<string | null>(null);
+  // AURA-READY-03-F2 -- the address the pending code was sent to; verification
+  // always uses it, and Change email clears it.
+  const [sentTo, setSentTo] = useState<string | null>(null);
 
   const activity = activityId ? FULL_ACTIVITY_CATALOG.find((a) => a.id === activityId) : undefined;
   const activityDefinition = activity ? getActivityDefinition(activity) : undefined;
@@ -352,18 +357,16 @@ export function GuestFindClient({ initialSource, initialRestoreToken }: { initia
       const guestStateData = await guestStateRes.json().catch(() => ({}));
       if (guestStateData?.token) setGuestStateToken(guestStateData.token);
 
-      const res = await fetch('/api/auth/request-link', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ email, guestStateToken: guestStateData?.token }),
-      });
-      const data = await res.json().catch(() => null);
-      if (!res.ok) {
-        setError(data?.error ?? 'Unable to send a sign-in link. Try again.');
+      const target = email.trim();
+      const result = await requestSignInCode({ email: target, guestStateToken: guestStateData?.token });
+      if (result.kind !== 'SENT') {
+        setError(result.message);
         return;
       }
-      if (data?.devLoginUrl) setDevLoginUrl(data.devLoginUrl);
-      if (data?.devLoginCode) setDevLoginCode(data.devLoginCode);
+      setSentTo(target);
+      setCode('');
+      setDevLoginUrl(result.devLoginUrl);
+      setDevLoginCode(result.devLoginCode);
       setSignupStep('CODE');
     } catch {
       setError("Couldn't reach the server. Check your connection and try again.");
@@ -372,15 +375,26 @@ export function GuestFindClient({ initialSource, initialRestoreToken }: { initia
     }
   };
 
+  // AURA-READY-03-F2 -- back to email entry with no pending verification.
+  const handleChangeEmail = () => {
+    setSentTo(null);
+    setCode('');
+    setDevLoginUrl(null);
+    setDevLoginCode(null);
+    setError('');
+    setSignupStep('EMAIL');
+  };
+
   const handleVerifyCode = async (e: React.FormEvent) => {
     e.preventDefault();
+    if (!sentTo) return;
     setSignupBusy(true);
     setError('');
     try {
       const res = await fetch('/api/auth/verify-code', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ email, code }),
+        body: JSON.stringify({ email: sentTo, code }),
       });
       if (!res.ok) {
         const data = await res.json().catch(() => null);
@@ -563,7 +577,7 @@ export function GuestFindClient({ initialSource, initialRestoreToken }: { initia
               <li>Receive reminders</li>
             </ul>
 
-            {signupStep === 'EMAIL' ? (
+            {signupStep === 'EMAIL' || !sentTo ? (
               <form onSubmit={handleSignupSubmit}>
                 <TextInput type="email" required placeholder="you@example.com" value={email} onChange={(e) => setEmail(e.target.value)} />
                 <PrimaryButton type="submit" disabled={signupBusy} style={{ width: '100%', marginTop: spacing.md }}>
@@ -572,7 +586,7 @@ export function GuestFindClient({ initialSource, initialRestoreToken }: { initia
               </form>
             ) : (
               <form onSubmit={handleVerifyCode}>
-                <p style={{ ...typography.meta, marginBottom: spacing.sm }}>We emailed you a sign-in link and a 6-digit code.</p>
+                <p style={{ ...typography.meta, marginBottom: spacing.sm }}>We emailed you a 6-digit sign-in code.</p>
                 <TextInput
                   type="text"
                   inputMode="numeric"
@@ -587,6 +601,18 @@ export function GuestFindClient({ initialSource, initialRestoreToken }: { initia
                 <PrimaryButton type="submit" disabled={signupBusy || code.length !== 6} style={{ width: '100%', marginTop: spacing.md }}>
                   {signupBusy ? 'Checking…' : 'Sign in and save'}
                 </PrimaryButton>
+                <SignInCodeActions
+                  sentTo={sentTo}
+                  disabled={signupBusy}
+                  requestCode={() => requestSignInCode({ email: sentTo, guestStateToken })}
+                  onResent={(result) => {
+                    setCode('');
+                    setError('');
+                    setDevLoginUrl(result.devLoginUrl);
+                    setDevLoginCode(result.devLoginCode);
+                  }}
+                  onChangeEmail={handleChangeEmail}
+                />
                 {(devLoginUrl || devLoginCode) && (
                   <div style={{ marginTop: spacing.md, padding: spacing.md, borderRadius: radius.md, background: colors.surfaceSubtle, border: `1px dashed ${colors.borderDefault}`, fontSize: 12, color: colors.textMuted }}>
                     Dev mode — no email provider configured:

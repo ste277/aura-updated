@@ -1,0 +1,722 @@
+{
+ "schema": "r1.5-test-inventory/1",
+ "command": "cd packages/palm-reading-engine/prototype && node --test test/*.test.mjs",
+ "counts": {
+  "R1.3-or-earlier": 142,
+  "R1.4": 11,
+  "R1.5": 9,
+  "total": 177,
+  "R2-F1": 4,
+  "G6-I1": 11
+ },
+ "tests": [
+  {
+   "name": "determinism: identical input → byte-identical output, repeatedly",
+   "origin": "R1.3-or-earlier"
+  },
+  {
+   "name": "determinism: crease order does not change interpretations",
+   "origin": "R1.3-or-earlier"
+  },
+  {
+   "name": "engine does not mutate input and returns a frozen reading",
+   "origin": "R1.3-or-earlier"
+  },
+  {
+   "name": "every reading carries the disclaimer, versions and synthetic flag",
+   "origin": "R1.3-or-earlier"
+  },
+  {
+   "name": "strong evidence covers all four domains",
+   "origin": "R1.3-or-earlier"
+  },
+  {
+   "name": "provenance: every interpretation traces to a documented rule and to observed creases",
+   "origin": "R1.3-or-earlier"
+  },
+  {
+   "name": "weak evidence never produces \"clear\" wording",
+   "origin": "R1.3-or-earlier"
+  },
+  {
+   "name": "research detectors (uncalibrated) are capped at tentative even with user confirmation",
+   "origin": "R1.3-or-earlier"
+  },
+  {
+   "name": "refusal: poor quality, low scan confidence and palm-not-facing decline the whole reading",
+   "origin": "R1.3-or-earlier"
+  },
+  {
+   "name": "refusal: unlabelled research-detector polylines are not interpreted",
+   "origin": "R1.3-or-earlier"
+  },
+  {
+   "name": "invalid input yields an invalid-input reading with errors and no interpretation",
+   "origin": "R1.3-or-earlier"
+  },
+  {
+   "name": "conflicting features: class collisions and recorded conflicts are declined, not resolved by guessing",
+   "origin": "R1.3-or-earlier"
+  },
+  {
+   "name": "ambiguous identity is declined for the ambiguous crease only",
+   "origin": "R1.3-or-earlier"
+  },
+  {
+   "name": "contradictory evidence within a crease lowers the tier",
+   "origin": "R1.3-or-earlier"
+  },
+  {
+   "name": "multiple possible interpretations are shown together, capped at tentative",
+   "origin": "R1.3-or-earlier"
+  },
+  {
+   "name": "hypothesis feature (central longitudinal crease) never reaches clear",
+   "origin": "R1.3-or-earlier"
+  },
+  {
+   "name": "NEGATIVE CONTROL: missing creases are never fabricated",
+   "origin": "R1.3-or-earlier"
+  },
+  {
+   "name": "NEGATIVE CONTROL: removing any crease never adds an interpretation (monotonic evidence)",
+   "origin": "R1.3-or-earlier"
+  },
+  {
+   "name": "NEGATIVE CONTROL: low-confidence observations never become definite conclusions",
+   "origin": "R1.3-or-earlier"
+  },
+  {
+   "name": "NEGATIVE CONTROL: scan confidence bounds every crease (high crease confidence cannot override a weak scan)",
+   "origin": "R1.3-or-earlier"
+  },
+  {
+   "name": "NEGATIVE CONTROL: absent hypothesis crease yields no meaning",
+   "origin": "R1.3-or-earlier"
+  },
+  {
+   "name": "all rule text and all generated readings pass the prohibited-claim lint",
+   "origin": "R1.3-or-earlier"
+  },
+  {
+   "name": "prohibited-claim lint catches deterministic, medical, lifespan, wealth and relationship-outcome claims",
+   "origin": "R1.3-or-earlier"
+  },
+  {
+   "name": "a rule with prohibited text is a hard failure, not a silent output",
+   "origin": "R1.3-or-earlier"
+  },
+  {
+   "name": "REGRESSION (found in G6-D0 testing): display rounding never lifts evidence across a tier threshold",
+   "origin": "R1.3-or-earlier"
+  },
+  {
+   "name": "engine source imports only sibling modules and node:crypto",
+   "origin": "R1.3-or-earlier"
+  },
+  {
+   "name": "engine source has no network, storage, camera, MediaPipe, clock or randomness access",
+   "origin": "R1.3-or-earlier"
+  },
+  {
+   "name": "runtime: generating every sample performs no network or filesystem writes",
+   "origin": "R1.3-or-earlier"
+  },
+  {
+   "name": "no production code imports or references the G6-D0 prototype",
+   "origin": "R1.3-or-earlier"
+  },
+  {
+   "name": "prototype lives outside production import paths",
+   "origin": "R1.3-or-earlier"
+  },
+  {
+   "name": "content provenance: no rule text overlaps the paused guide (≥ 6 consecutive words) or uses its entry ids",
+   "origin": "R1.3-or-earlier"
+  },
+  {
+   "name": "R1-RV-02: the engine reads the caller object once; later mutation-between-reads cannot change the reading",
+   "origin": "R1.3-or-earlier"
+  },
+  {
+   "name": "R1-RV-02: the engine never consults the raw argument after snapshotting (static) and never mutates it",
+   "origin": "R1.3-or-earlier"
+  },
+  {
+   "name": "R1-RV-02: the snapshot is deep-frozen, null-prototype plain data and equal in content to valid JSON input",
+   "origin": "R1.3-or-earlier"
+  },
+  {
+   "name": "R1-RV-02: valid JSON inputs keep their behaviour (JSON round-trip and null-prototype copies give identical readings)",
+   "origin": "R1.3-or-earlier"
+  },
+  {
+   "name": "HOSTILE: accessors are rejected without being invoked (getter, setter-only, getter on array index)",
+   "origin": "R1.3-or-earlier"
+  },
+  {
+   "name": "HOSTILE: Proxies with throwing traps and revoked Proxies give a controlled invalid-input",
+   "origin": "R1.3-or-earlier"
+  },
+  {
+   "name": "HOSTILE: arrays with unusual properties are rejected (own iterator, extra keys, holes, subclass, too long)",
+   "origin": "R1.3-or-earlier"
+  },
+  {
+   "name": "HOSTILE: prototype manipulation, built-ins, boxed primitives and non-JSON values are rejected",
+   "origin": "R1.3-or-earlier"
+  },
+  {
+   "name": "HOSTILE: cycles and shared references inside contract fields never loop or throw",
+   "origin": "R1.3-or-earlier"
+  },
+  {
+   "name": "RV-09: the input hash is computed over the validated snapshot; unhashable extras cannot crash it",
+   "origin": "R1.3-or-earlier"
+  },
+  {
+   "name": "RV-10: unknown keys (e.g. raw landmark coordinates) are rejected at every level, without echoing values",
+   "origin": "R1.3-or-earlier"
+  },
+  {
+   "name": "R1-RV-01: the reviewer counterexample (30.00005°) now classifies identically in both directions",
+   "origin": "R1.3-or-earlier"
+  },
+  {
+   "name": "R1-RV-01: exactly 30°, just below, just above, negative slope, vertical and horizontal behave predictably",
+   "origin": "R1.3-or-earlier"
+  },
+  {
+   "name": "R1-RV-01: degenerate geometry never reaches the verticality measurement",
+   "origin": "R1.3-or-earlier"
+  },
+  {
+   "name": "R1-RV-01: random polylines — verticality is bit-identical under reversal and the trace shows the rounded value",
+   "origin": "R1.3-or-earlier"
+  },
+  {
+   "name": "R1-RV-03: nominal 0.01 endpoint gaps are ambiguous regardless of representation; just above resolves",
+   "origin": "R1.3-or-earlier"
+  },
+  {
+   "name": "R1-RV-03: an ambiguous 0.01 endpoint never reaches interpretation (dependent rules decline identically both ways)",
+   "origin": "R1.3-or-earlier"
+  },
+  {
+   "name": "R1-RV-03: the same comparison rule applies to every geometry limit (length, turn, tortuosity)",
+   "origin": "R1.3-or-earlier"
+  },
+  {
+   "name": "R1-RV-04: smooth curves, reversed curves, mild zig-zags and staircases (parallel segments) are accepted as ordered polylines",
+   "origin": "R1.3-or-earlier"
+  },
+  {
+   "name": "R1-RV-04: strong zig-zags, doubling back, self-intersection, loops, shuffles and degenerate endpoints stay rejected",
+   "origin": "R1.3-or-earlier"
+  },
+  {
+   "name": "R1-RV-04: an accepted zig-zag can lengthen the measured path by at most the tortuosity bound (2.0 × chord)",
+   "origin": "R1.3-or-earlier"
+  },
+  {
+   "name": "R1-RV-05: confirmed rotation permits evaluation; the fate-line rule stays tentative",
+   "origin": "R1.3-or-earlier"
+  },
+  {
+   "name": "R1-RV-05: conflicting or out-of-range rotation declines the axis- and direction-dependent rules",
+   "origin": "R1.3-or-earlier"
+  },
+  {
+   "name": "R1-RV-05: unknown or invalid rotation is rejected, never defaulted",
+   "origin": "R1.3-or-earlier"
+  },
+  {
+   "name": "R1-RV-05: reversed central crease, unconfirmed palm side and the research-detector cap",
+   "origin": "R1.3-or-earlier"
+  },
+  {
+   "name": "R1-RV-07: every hypothesis family lowered from clear records hypothesis-capped; other families never do",
+   "origin": "R1.3-or-earlier"
+  },
+  {
+   "name": "PRESERVED: confidence thresholds and the 0.49996 raw-score regression hold through the snapshot",
+   "origin": "R1.3-or-earlier"
+  },
+  {
+   "name": "R1-RV-08 (INFO): every string-valued key in every sample reading is classified as prose (linted) or identifier/metadata",
+   "origin": "R1.3-or-earlier"
+  },
+  {
+   "name": "R1.1-RV-01(a): the fate-line centre counterexample gives identical readings forward and reversed",
+   "origin": "R1.3-or-earlier"
+  },
+  {
+   "name": "R1.1-RV-01(b): the PTC length counterexample gives identical readings forward and reversed",
+   "origin": "R1.3-or-earlier"
+  },
+  {
+   "name": "R1.1-RV-01: canonicalSequence picks one of {points, reversed} deterministically and only re-indexes",
+   "origin": "R1.3-or-earlier"
+  },
+  {
+   "name": "R1.1-RV-01: every descriptor and validity verdict is bit-identical under reversal (7 categories × 3,000 polylines)",
+   "origin": "R1.3-or-earlier"
+  },
+  {
+   "name": "R1.1-RV-01: whole readings are identical under reversal for random creases in every class (selected rules, declines, confidence, text, trace)",
+   "origin": "R1.3-or-earlier"
+  },
+  {
+   "name": "R1.1-RV-01: fate-line centre and length boundary cases (4-dp half points) agree in both directions",
+   "origin": "R1.3-or-earlier"
+  },
+  {
+   "name": "R1.1-RV-01: geometry limits and the 2× zig-zag bound are unchanged by canonicalisation",
+   "origin": "R1.3-or-earlier"
+  },
+  {
+   "name": "R1.1-RV-03: error output is capped at MAX_REPORTED_ERRORS with an exact count and truncation marker",
+   "origin": "R1.3-or-earlier"
+  },
+  {
+   "name": "R1.1-RV-03: the listed errors are the first 50 in deterministic order and never echo values",
+   "origin": "R1.3-or-earlier"
+  },
+  {
+   "name": "R1.1-RV-03: invalid input stays invalid when truncated — mixed known/unknown keys, validator-origin errors, fatal errors beyond the cap",
+   "origin": "R1.3-or-earlier"
+  },
+  {
+   "name": "R1.1-RV-03: hostile and repeated inputs stay bounded and deterministic",
+   "origin": "R1.3-or-earlier"
+  },
+  {
+   "name": "R1.1-RV-03: valid input readings are unchanged (no error fields on valid readings)",
+   "origin": "R1.3-or-earlier"
+  },
+  {
+   "name": "R1.1-RV-04: the rule spec states the strict >45° rule and each family’s frame requirements exactly as the engine declares them",
+   "origin": "R1.3-or-earlier"
+  },
+  {
+   "name": "R1.1-RV-04: runtime agrees with the spec at 45° boundaries, with the flag on and off",
+   "origin": "R1.3-or-earlier"
+  },
+  {
+   "name": "R1.1-RV-04: unknown orientation and unknown handedness never yield an orientation-dependent interpretation",
+   "origin": "R1.3-or-earlier"
+  },
+  {
+   "name": "R1.1-RV-02 (deferred): every interpretation cut-off behaves exactly as recorded (thresholds, margins, edge behaviour unchanged)",
+   "origin": "R1.3-or-earlier"
+  },
+  {
+   "name": "R1.1-RV-02 (deferred): identical evidence always gives identical selection (discontinuities are thresholds, not contradictions)",
+   "origin": "R1.3-or-earlier"
+  },
+  {
+   "name": "PRESERVED: thresholds, tentative cap and the 0.49996 boundary are unchanged",
+   "origin": "R1.3-or-earlier"
+  },
+  {
+   "name": "TIE RULE: fate-line reviewer case — not emitted in either order; never more confident than R1.1",
+   "origin": "R1.3-or-earlier"
+  },
+  {
+   "name": "TIE RULE: PTC-length reviewer case — tentative in both orders with both tie values traced; never more confident than R1.1",
+   "origin": "R1.3-or-earlier"
+  },
+  {
+   "name": "TIE RULE: adjacent rounding boundaries — length ties near 0.47 / 0.53 / 0.67 / 0.73 are order-invariant and never clear when readings differ",
+   "origin": "R1.3-or-earlier"
+  },
+  {
+   "name": "TIE RULE: centre ties at both edges (0.3, 0.7) withhold the fate line in both orders; non-tie centres are unaffected",
+   "origin": "R1.3-or-earlier"
+  },
+  {
+   "name": "TIE RULE: tie fields appear only on rounding ties — none of the 13 samples carries one",
+   "origin": "R1.3-or-earlier"
+  },
+  {
+   "name": "R1.3 ORACLE: the no-upgrade oracle classifies all of its self-test cases correctly",
+   "origin": "R1.3-or-earlier"
+  },
+  {
+   "name": "R1.3 FIXTURES: every constructed fixture provably reaches its intended condition (no random discovery)",
+   "origin": "R1.3-or-earlier"
+  },
+  {
+   "name": "R1.3 NO-UPGRADE: for every constructed fixture and every orientation, R1.3 is never more permissive than the meet of R1.1 over all orientations",
+   "origin": "R1.3-or-earlier"
+  },
+  {
+   "name": "R1.3 REVERSAL: every orientation of every constructed fixture gives the identical reading (except the input fingerprint)",
+   "origin": "R1.3-or-earlier"
+  },
+  {
+   "name": "R1.3 RV-02: claim/no-claim length ties abstain; claim/claim ties keep only the common reading at tentative; RV-07 same-reading ties are unchanged",
+   "origin": "R1.3-or-earlier"
+  },
+  {
+   "name": "R1.3 RV-02: the decision-table rows SHORT/no-claim, LONG/no-claim and fate-present/no-claim all abstain",
+   "origin": "R1.3-or-earlier"
+  },
+  {
+   "name": "R1.3 RV-02: SHORT/LONG cannot arise from a 4-dp length tie (ranges 0.5 and 0.7 are 0.2 apart); generic rule would abstain",
+   "origin": "R1.3-or-earlier"
+  },
+  {
+   "name": "R1.3 RV-01: competing creases — a tied candidate always takes part in conflict detection and is traced",
+   "origin": "R1.3-or-earlier"
+  },
+  {
+   "name": "R1.3 RV-01: conflict-based abstention in ANY R1.1 orientation never becomes a fate-line claim",
+   "origin": "R1.3-or-earlier"
+  },
+  {
+   "name": "R1.3 RV-03: a crease invalid in either order is invalid; validity and the reported code are identical in both orders and under repeated reversal",
+   "origin": "R1.3-or-earlier"
+  },
+  {
+   "name": "R1.3 PLAIN BOUNDARIES: values just below, at and above each 4-dp cut-off without a tie behave exactly like R1.1",
+   "origin": "R1.3-or-earlier"
+  },
+  {
+   "name": "R1.3 PRESERVED: thresholds, tentative cap and detector pins are unchanged",
+   "origin": "R1.3-or-earlier"
+  },
+  {
+   "name": "R1-F1: identifier \"death\" (and other claim-like words) never crashes the engine and is treated as an opaque id",
+   "origin": "R1.3-or-earlier"
+  },
+  {
+   "name": "R1-F1: empty, wrongly typed, over-long, punctuated, Unicode and whitespace ids get a controlled invalid-input reading",
+   "origin": "R1.3-or-earlier"
+  },
+  {
+   "name": "R1-F1: duplicate ids are rejected; reserved ids (object internals) are rejected case-insensitively",
+   "origin": "R1.3-or-earlier"
+  },
+  {
+   "name": "R1-F1: conflict ids are identifier-checked too (no prototype names, no non-strings)",
+   "origin": "R1.3-or-earlier"
+  },
+  {
+   "name": "R1-F1: error messages never echo the offending identifier or disclose implementation details",
+   "origin": "R1.3-or-earlier"
+  },
+  {
+   "name": "R1-F1: unreadable or unhashable payloads give a controlled invalid-input reading, never an exception",
+   "origin": "R1.3-or-earlier"
+  },
+  {
+   "name": "R1-F2: prototype-property detector names fail safely as unknown detectors (crease and landmark sources)",
+   "origin": "R1.3-or-earlier"
+  },
+  {
+   "name": "R1-F2: prototype names in versions and enum fields cannot redirect lookups",
+   "origin": "R1.3-or-earlier"
+  },
+  {
+   "name": "R1-F2: registries are null-prototype tables read through own-property lookups; valid names still resolve",
+   "origin": "R1.3-or-earlier"
+  },
+  {
+   "name": "R1-F2: engine source never indexes an externally keyed table with a computed key",
+   "origin": "R1.3-or-earlier"
+  },
+  {
+   "name": "R1-F3: gapsBridged = 0, 1, 2 and large values never produce a break-based interpretation",
+   "origin": "R1.3-or-earlier"
+  },
+  {
+   "name": "R1-F3: missing gapsBridged is accepted (metadata is optional); missing breaks declines the break rule",
+   "origin": "R1.3-or-earlier"
+  },
+  {
+   "name": "R1-F3: invalid continuity metadata is rejected with a controlled reading",
+   "origin": "R1.3-or-earlier"
+  },
+  {
+   "name": "R1-F3: conflicting synthetic observations — the observed break count, not gapsBridged, decides",
+   "origin": "R1.3-or-earlier"
+  },
+  {
+   "name": "R1-F3: a research detector cannot supply breaks; its gapsBridged never becomes a break",
+   "origin": "R1.3-or-earlier"
+  },
+  {
+   "name": "R1-F3: multiple creases with different preprocessing metadata keep it as metadata only",
+   "origin": "R1.3-or-earlier"
+  },
+  {
+   "name": "R1-F3: no rule reads gapsBridged; no lifespan, health or deterministic text in break-related output",
+   "origin": "R1.3-or-earlier"
+  },
+  {
+   "name": "R1-F4: known handedness and orientation keep the G6-D0 behaviour (control)",
+   "origin": "R1.3-or-earlier"
+  },
+  {
+   "name": "R1-F4: unknown handedness declines every direction-dependent rule; handedness-independent rules stay eligible",
+   "origin": "R1.3-or-earlier"
+  },
+  {
+   "name": "R1-F4: unknown orientation (palmFacing null) declines direction rules and caps everything else at tentative",
+   "origin": "R1.3-or-earlier"
+  },
+  {
+   "name": "R1-F4: both unknown → no clear output and no direction-dependent output at all",
+   "origin": "R1.3-or-earlier"
+  },
+  {
+   "name": "R1-F4: absent landmarks decline every scale- and direction-dependent rule",
+   "origin": "R1.3-or-earlier"
+  },
+  {
+   "name": "R1-F4: conflicting orientation metadata and a low-quality frame decline the dependent rules",
+   "origin": "R1.3-or-earlier"
+  },
+  {
+   "name": "R1-F4: invalid orientation or handedness values are rejected, not defaulted",
+   "origin": "R1.3-or-earlier"
+  },
+  {
+   "name": "R1-F4: model-estimated (mirror-sensitive) handedness caps direction rules at tentative and says why",
+   "origin": "R1.3-or-earlier"
+  },
+  {
+   "name": "R1-F4: research-detector cap and threshold boundaries hold under frame caps; 0.49996 regression preserved",
+   "origin": "R1.3-or-earlier"
+  },
+  {
+   "name": "R1-F5: valid ordered polylines behave consistently; whole reversal of any polyline gives identical sections",
+   "origin": "R1.3-or-earlier"
+  },
+  {
+   "name": "R1-F5: consecutive duplicate points are collapsed; any other repeated point is rejected",
+   "origin": "R1.3-or-earlier"
+  },
+  {
+   "name": "R1-F5: empty, single-point, all-duplicate and degenerate polylines fail safely",
+   "origin": "R1.3-or-earlier"
+  },
+  {
+   "name": "R1-F5: unordered, doubling-back, self-intersecting and tortuous polylines are rejected, not measured",
+   "origin": "R1.3-or-earlier"
+  },
+  {
+   "name": "R1-F5: ambiguous endpoints decline rules that read endpoint roles, identically in both directions",
+   "origin": "R1.3-or-earlier"
+  },
+  {
+   "name": "R1-F5: invalid and extremely large coordinates are rejected",
+   "origin": "R1.3-or-earlier"
+  },
+  {
+   "name": "R1-F5: declared ordering metadata is rejected (order is derived from the points)",
+   "origin": "R1.3-or-earlier"
+  },
+  {
+   "name": "R1-F5: branch positions are radial-referenced, so reversing points does not move a branch",
+   "origin": "R1.3-or-earlier"
+  },
+  {
+   "name": "R1-F5: repeated execution over all R1 edge cases is byte-identical",
+   "origin": "R1.3-or-earlier"
+  },
+  {
+   "name": "PART E: domains, rule ids and all user-facing rule text are unchanged from G6-D0",
+   "origin": "R1.3-or-earlier"
+  },
+  {
+   "name": "PART E: every R1 decline/uncertainty text passes the prohibited-claim lint",
+   "origin": "R1.3-or-earlier"
+  },
+  {
+   "name": "every sample fixture is schema-valid",
+   "origin": "R1.3-or-earlier"
+  },
+  {
+   "name": "non-object and wrong schema/version are rejected",
+   "origin": "R1.3-or-earlier"
+  },
+  {
+   "name": "non-synthetic input is refused in G6-D0",
+   "origin": "R1.3-or-earlier"
+  },
+  {
+   "name": "missing required fields are reported, never defaulted",
+   "origin": "R1.3-or-earlier"
+  },
+  {
+   "name": "unknown detectors and unknown detector versions are rejected",
+   "origin": "R1.3-or-earlier"
+  },
+  {
+   "name": "invalid geometry is rejected",
+   "origin": "R1.3-or-earlier"
+  },
+  {
+   "name": "declared descriptors are refused (engine derives them from points)",
+   "origin": "R1.3-or-earlier"
+  },
+  {
+   "name": "hand landmarks can never be submitted as palm creases",
+   "origin": "R1.3-or-earlier"
+  },
+  {
+   "name": "detector capabilities cannot be invented",
+   "origin": "R1.3-or-earlier"
+  },
+  {
+   "name": "identity consistency and confidence ranges are enforced",
+   "origin": "R1.3-or-earlier"
+  },
+  {
+   "name": "anatomical class vocabulary excludes palmistry names",
+   "origin": "R1.3-or-earlier"
+  },
+  {
+   "name": "R1.4 RV-03: the oracle self-test includes orientations that disagree on rule sets, and all cases pass",
+   "origin": "R1.4"
+  },
+  {
+   "name": "R1.4 RV-03: missing comparison results fail loudly instead of passing silently",
+   "origin": "R1.4"
+  },
+  {
+   "name": "R1.4 RV-02: an input and its full or partial point-order reversal count once; different geometry counts separately",
+   "origin": "R1.4"
+  },
+  {
+   "name": "R1.4 RV-02: canonical keys are deterministic and the distinct count does not depend on case order",
+   "origin": "R1.4"
+  },
+  {
+   "name": "R1.4 RV-01: tie categories on known constructed fixtures follow the existing policy semantics",
+   "origin": "R1.4"
+  },
+  {
+   "name": "R1.4 RV-01: classification is identical for every orientation; no-op reconciliations never change an outcome; categories need the R1.1 baseline",
+   "origin": "R1.4"
+  },
+  {
+   "name": "R1.4 RV-04: loop fixtures provably reach their conditions (R1.1 single-order validator proofs)",
+   "origin": "R1.4"
+  },
+  {
+   "name": "R1.4 RV-04: a loop invalid in either order is invalid in every orientation, with an order-independent error (code and message)",
+   "origin": "R1.4"
+  },
+  {
+   "name": "R1.4 RV-04: loop fixtures never upgrade relative to the R1.1 meet (validity, claims, confidence)",
+   "origin": "R1.4"
+  },
+  {
+   "name": "R1.4 RV-03: the coverage contract accepts a complete report set",
+   "origin": "R1.4"
+  },
+  {
+   "name": "R1.4 RV-03: the coverage contract rejects every listed coverage defect",
+   "origin": "R1.4"
+  },
+  {
+   "name": "R1.5 ORACLE SELF-TEST: summarize() is exercised on literal readings with independently written expectations",
+   "origin": "R1.5"
+  },
+  {
+   "name": "R1.5 INDEPENDENT ORACLE: agrees with the oracle on every constructed fixture orientation and flags a forced upgrade",
+   "origin": "R1.5"
+  },
+  {
+   "name": "R1.5 NC-44 LOOP CONTROL: an order-asymmetric loop (valid in exactly one single order) is invalid in every orientation",
+   "origin": "R1.5"
+  },
+  {
+   "name": "R1.5 TIES: tier-lowered, candidate-rank and outcome-unchanged categories on known fixtures; partition identities hold",
+   "origin": "R1.5"
+  },
+  {
+   "name": "R1.5 CONTRACT: a genuine campaign set passes only after regeneration and full re-evaluation",
+   "origin": "R1.5"
+  },
+  {
+   "name": "R1.5 CONTRACT: forged, failing, relabelled, truncated and incomplete campaign evidence is rejected for the intended reason",
+   "origin": "R1.5"
+  },
+  {
+   "name": "R1.5 CONTRACT: a genuinely failing campaign cannot be passed off by rewriting its report and records",
+   "origin": "R1.5"
+  },
+  {
+   "name": "R1.5 CAMPAIGN CORE: generation is deterministic, regenerable and seed-specific; expected variant sets are independent of the mask choice",
+   "origin": "R1.5"
+  },
+  {
+   "name": "R1.5 CONTRACT: tie consistency, recorded R1.1 readings and both oracle self-tests are re-derived by the checker, not taken from the report",
+   "origin": "R1.5"
+  },
+  {
+   "name": "R2-F1: both oracles reject an unknown confidence tier (candidate or baseline)",
+   "origin": "R2-F1"
+  },
+  {
+   "name": "R2-F1: both oracles reject duplicate interpretation claims (same section, across sections, repeated rule)",
+   "origin": "R2-F1"
+  },
+  {
+   "name": "R2-F1: valid readings keep their behaviour — self-tests pass and every fixture orientation compares as before in both oracles",
+   "origin": "R2-F1"
+  },
+  {
+   "name": "R2-F1: the reviewer's over-claiming engine (a clear duplicate before each tentative claim) now fails closed in the campaign and in the contract re-check",
+   "origin": "R2-F1"
+  },
+  {
+   "name": "G6-I1 inputs: adapter inputs are the frozen D1 evidence (hash-pinned) and the G4 synthetic frame, unaltered",
+   "origin": "G6-I1"
+  },
+  {
+   "name": "G6-I1 B1: output is plain JSON with only feature-contract fields and validates; malformed inputs fail closed",
+   "origin": "G6-I1"
+  },
+  {
+   "name": "G6-I1 B2: frame attestation is forwarded unaltered; landmark coordinates are never forwarded",
+   "origin": "G6-I1"
+  },
+  {
+   "name": "G6-I1 B3: track point order is preserved exactly — no resampling, sorting, de-duplication or truncation",
+   "origin": "G6-I1"
+  },
+  {
+   "name": "G6-I1 B4/B5: no branches are synthesised; gapsBridged is metadata only and breaks is always null",
+   "origin": "G6-I1"
+  },
+  {
+   "name": "G6-I1 B6: pixel → palm-normalized-v1 transform (anchors, unit, bounds) and per-crease decline outside the frame or above 64 points",
+   "origin": "G6-I1"
+  },
+  {
+   "name": "G6-I1 B7: opaque ids cand1…cand6 by detector order, stable across declines; ids satisfy the engine contract",
+   "origin": "G6-I1"
+  },
+  {
+   "name": "G6-I1 identity and confidence: unclassified by default; scores only as uncalibrated-detector-score; never calibrated; synthetic user-confirmed identity only when explicitly synthetic",
+   "origin": "G6-I1"
+  },
+  {
+   "name": "G6-I1 determinism and orientation: identical output on repeat; reversed tracks give the same reading; mirrored and rotated images give the same palm-frame geometry",
+   "origin": "G6-I1"
+  },
+  {
+   "name": "G6-I1 end to end: every frozen D1 output declines through the pipeline; synthetic-score cases never claim above tentative and never upgrade the meet of their orientations",
+   "origin": "G6-I1"
+  },
+  {
+   "name": "G6-I1 bundle guard: every production-build sentinel occurs in the engine/adapter source and nowhere else under apps/ or packages/",
+   "origin": "G6-I1"
+  }
+ ]
+}

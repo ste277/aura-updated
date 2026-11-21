@@ -143,9 +143,18 @@ function catchOnlyReturnsAllowlistedRejections(catchBlock: string, schedulingEli
   const instanceofCount = (catchBlock.match(/err instanceof SchedulingEligibilityError/g) ?? []).length;
   if (instanceofCount !== 1) return false;
   if (!/status: SCHEDULING_ELIGIBILITY_STATUS_BY_CODE\[err\.code\]/.test(catchBlock)) return false;
-  // No OTHER literal numeric status inside the catch block besides this one lookup.
-  const literalStatuses = [...catchBlock.matchAll(/status:\s*\d+/g)];
-  if (literalStatuses.length > 0) return false;
+  // No OTHER literal numeric status inside the catch block besides this one
+  // lookup -- except (AURA-HPG5-V2-I1) exactly ONE opt-in overlap refusal:
+  // `err instanceof PlanOverlapRejection` -> 409 PLAN_OVERLAP_CODE, thrown
+  // only under overlapPolicy REJECT_ACTIVE_OVERLAP (pinned separately below).
+  const literalStatuses = [...catchBlock.matchAll(/status:\s*\d+/g)].map((m) => m[0].replace(/\s+/g, ' '));
+  const overlapBranches = (catchBlock.match(/err instanceof PlanOverlapRejection/g) ?? []).length;
+  if (overlapBranches > 1) return false;
+  if (overlapBranches === 0 && literalStatuses.length > 0) return false;
+  if (overlapBranches === 1) {
+    if (literalStatuses.length !== 1 || literalStatuses[0] !== 'status: 409') return false;
+    if (!/err instanceof PlanOverlapRejection\) \{\s*return NextResponse\.json\(\{ error: 'That time overlaps another plan\.', code: PLAN_OVERLAP_CODE[^;]*\{ status: 409 \}\);\s*\}/.test(catchBlock)) return false;
+  }
   const codeKeys = [...schedulingEligibilityErrorSrc.matchAll(/^\s*([A-Z_]+):\s*\d+,?$/gm)].map((m) => m[1]);
   return codeKeys.length === SCHEDULING_ELIGIBILITY_CODES.length && SCHEDULING_ELIGIBILITY_CODES.every((c) => codeKeys.includes(c));
 }
@@ -359,7 +368,21 @@ check('NO LOCK HELPER / RENAME in this slice: no extracted lock helper, and the 
 check('LOCK ORDER: the manual writer takes no other lock (no FOR UPDATE / FOR SHARE / other advisory lock in POST), so it cannot invert the automatic writers\' order', !/FOR UPDATE|FOR SHARE/.test(post) && count(/pg_advisory/g, post) === 1);
 
 // ---- serialization only, not validation ----
-check('NO OVERLAP VALIDATION: the manual path introduces no overlap/blocker query, no conflict logic and no 409', !/listPlannedActivitiesOverlappingRange|listPlannedActivitiesForDay|findBlockingPlanForRange|intervalsOverlap|isActivePlanBlocker|CONFLICT|status: 409|OVERLAPS/.test(route));
+// AURA-HPG5-V2-I1 changed this ONE invariant deliberately and narrowly: the
+// manual path still has no overlap validation BY DEFAULT; overlap is checked
+// only when the caller opts in with overlapPolicy REJECT_ACTIVE_OVERLAP (Find
+// a Time), via the existing findBlockingPlanForRange, inside the transaction
+// AFTER the lock. Absent overlapPolicy -> 'ALLOW' -> byte-identical S2 path.
+{
+  const optInBlock = post.includes("if (overlapPolicy === 'REJECT_ACTIVE_OVERLAP') {") ? braceBlock(post, "if (overlapPolicy === 'REJECT_ACTIVE_OVERLAP') {") : '';
+  const outsideOptIn = optInBlock ? route.replace(optInBlock, '') : route;
+  const lockIdx = post.indexOf('pg_advisory_xact_lock');
+  const optInIdx = post.indexOf("if (overlapPolicy === 'REJECT_ACTIVE_OVERLAP') {");
+  const insertIdx = post.indexOf('plan = await createPlannedActivity(');
+  check('NO OVERLAP VALIDATION BY DEFAULT: outside the single opt-in block the manual path has no overlap/blocker query, no conflict logic and no 409 decision', !!optInBlock && !/listPlannedActivitiesOverlappingRange|listPlannedActivitiesForDay|findBlockingPlanForRange\(|intervalsOverlap|isActivePlanBlocker|CONFLICT|OVERLAPS|describeFirstBlockingPlanForRange\(/.test(outsideOptIn));
+  check('OPT-IN ONLY (AURA-HPG5-V2-I1): exactly one overlap check, gated on overlapPolicy REJECT_ACTIVE_OVERLAP, using the existing findBlockingPlanForRange on the transaction client, after the lock and before the insert', count(/findBlockingPlanForRange\(/g, route) === 1 && /findBlockingPlanForRange\(client, session\.userId, \[\], plannedStartAt, plannedEndAt, /.test(optInBlock) && lockIdx > 0 && optInIdx > lockIdx && insertIdx > optInIdx);
+  check('OPT-IN ONLY: an absent overlapPolicy resolves to ALLOW (S2 default unchanged) and only one 409 exists in the route', /const overlapPolicy = parseOverlapPolicy\(body\?\.overlapPolicy\);/.test(post) && count(/status: 409/g, route) === 1);
+}
 check('the transaction client is used ONLY for the lock, COMMIT and ROLLBACK: POST runs no other query of its own (so no overlap/blocker SQL can be added unnoticed), and the route holds no PlannedActivity SQL', count(/client\.query\(/g, post) === 3 && !/FROM "PlannedActivity"|"plannedStartAt"|"plannedEndAt"|SELECT /.test(route.replace("'SELECT pg_advisory_xact_lock(hashtext($1))'", '')));
 check('no availability or lifecycle check was added to manual creation', !/availability|loadFreshBlockers|resolveAvailability/i.test(post));
 check('the success response contract is unchanged: POST still returns the created plan as JSON (NextResponse.json(plan))', /return NextResponse\.json\(plan\);/.test(post));

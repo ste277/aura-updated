@@ -8,7 +8,7 @@ import { RhythmPicker, type RhythmPickerValue } from './RhythmPicker';
 import { DayPlanPreviewController } from './DayPlanPreviewController';
 import { findCity } from '../lib/cities';
 import { submitLocationConfirmation } from '../lib/locationConfirmation';
-import type { DailyEnergyInsight } from '../lib/scoreEngine';
+import type { OnboardingWindowRecommendation } from '../lib/onboardingRecommendation';
 import type { ConstructDayPreview } from '../lib/dayConstructorOrchestrator';
 import type { GoalActivityLink } from '../lib/acceptConstructedDay';
 import { previewConstructedDay } from '../lib/dayConstructorPreviewClient';
@@ -44,14 +44,15 @@ interface OnboardingJourneyProps {
   /** Same shape `page.tsx`'s own `handleLocationChanged` already takes --
    * reused verbatim, never a second location-update path. */
   onLocationChanged: (city: CityOption & { locationConfirmedAt: string | null }) => void;
-  /** `energyInsight.nextShift` as `page.tsx` already computes it from the
-   * REAL solar ephemeris/Panchang windows -- `undefined` only when the
-   * client hasn't mounted yet (brief hydration window). Never the
-   * separate, cosmetic `safeNextShift` fallback Home's own banner uses. */
-  nextShift: DailyEnergyInsight['nextShift'] | undefined;
+  /** AURA-READY-03-F1: computeOnboardingRecommendation() over the REAL
+   * solar ephemeris/Panchang windows `page.tsx` already computes --
+   * only ever a favourable, caution-free window (or an honest "none
+   * today"), never the any-type `energyInsight.nextShift`. `undefined`
+   * only before the client has mounted (brief hydration window). */
+  recommendation: OnboardingWindowRecommendation | undefined;
   /** True only when the real engine actually produced at least one window
    * for today -- false means "no suitable window found," never papered
-   * over with `nextShift`'s own defensive placeholder text. */
+   * over with placeholder text. */
   hasRealRecommendation: boolean;
   /** Skip (any step) / Go to Home -- returns to the normal tab UI. */
   onExit: () => void;
@@ -88,7 +89,7 @@ export function OnboardingJourney({
   timezone,
   locationConfirmed,
   onLocationChanged,
-  nextShift,
+  recommendation,
   hasRealRecommendation,
   onExit,
   onPlanMyDay,
@@ -191,7 +192,7 @@ export function OnboardingJourney({
           <RecommendationStep
             cityName={cityName}
             locationConfirmed={locationConfirmedLocal}
-            nextShift={nextShift}
+            recommendation={recommendation}
             hasRealRecommendation={hasRealRecommendation}
             onPlanMyDay={onPlanMyDay}
             // Onboarding V1 PR 4 -- "Go to Home" is now the on-ramp to the
@@ -327,17 +328,17 @@ function LocationStep({
   );
 }
 
-function RecommendationStep({
+export function RecommendationStep({
   cityName,
   locationConfirmed,
-  nextShift,
+  recommendation,
   hasRealRecommendation,
   onPlanMyDay,
   onGoHome,
 }: {
   cityName: string;
   locationConfirmed: boolean;
-  nextShift: DailyEnergyInsight['nextShift'] | undefined;
+  recommendation: OnboardingWindowRecommendation | undefined;
   hasRealRecommendation: boolean;
   onPlanMyDay: () => void;
   onGoHome: () => void;
@@ -362,7 +363,7 @@ function RecommendationStep({
     );
   }
 
-  if (!hasRealRecommendation || !nextShift) {
+  if (!hasRealRecommendation || !recommendation) {
     return (
       <StepCard>
         <h2 style={typography.sectionTitle}>No timing window available right now</h2>
@@ -381,15 +382,47 @@ function RecommendationStep({
     );
   }
 
+  // AURA-READY-03-F1 -- states the period in effect right now when it is
+  // one Aura avoids for starting important activities (Rahu Kalam,
+  // Yamaganda, Gulika), so the card never implies "now" is a good time.
+  const cautionLine = recommendation.cautionNow ? (
+    <p style={{ ...typography.body, marginTop: spacing.sm }}>
+      Right now: {recommendation.cautionNow.windowName} until {recommendation.cautionNow.endTime} -- a period Aura avoids for starting important activities.
+    </p>
+  ) : null;
+
+  if (recommendation.kind === 'NONE_TODAY') {
+    return (
+      <StepCard>
+        <h2 style={typography.sectionTitle}>No favourable window left today</h2>
+        {cautionLine}
+        <p style={{ ...typography.body, marginTop: spacing.sm }}>
+          Today's timing guidance for {cityName} has no more favourable windows. Everyday tasks can still go ahead, and you can plan your day or head to Home.
+        </p>
+        <div style={{ display: 'flex', flexDirection: 'column', gap: spacing.md, marginTop: spacing.xxl }}>
+          <PrimaryButton onClick={onPlanMyDay} style={{ width: '100%' }}>
+            Plan my day
+          </PrimaryButton>
+          <SecondaryButton onClick={onGoHome} style={{ width: '100%', minHeight: 44 }}>
+            Go to Home
+          </SecondaryButton>
+        </div>
+      </StepCard>
+    );
+  }
+
   return (
     <StepCard>
-      <div style={{ ...typography.sectionEyebrow, color: colors.positive }}>Your next useful window</div>
-      <h2 style={{ ...typography.sectionTitle, marginTop: spacing.sm }}>{nextShift.windowName}</h2>
+      <div style={{ ...typography.sectionEyebrow, color: colors.positive }}>Your next favourable window</div>
+      <h2 style={{ ...typography.sectionTitle, marginTop: spacing.sm }}>{recommendation.windowName}</h2>
       <p style={{ ...typography.bodyStrong, marginTop: spacing.sm, fontSize: 18 }}>
-        Today, starting around {nextShift.startTime} ({nextShift.startsIn})
+        {recommendation.activeNow
+          ? `Today, now until ${recommendation.endTime}`
+          : `Today, ${recommendation.startTime}–${recommendation.endTime} (${recommendation.startsIn})`}
       </p>
+      {cautionLine}
       <p style={{ ...typography.body, marginTop: spacing.sm }}>
-        Aura suggests this as a suitable period for focused activity based on today's timing guidance for {cityName}.
+        Based on today's timing guidance for {cityName}, this is a favourable period for focused or important activity.
       </p>
       <div style={{ display: 'flex', flexDirection: 'column', gap: spacing.md, marginTop: spacing.xxl }}>
         <PrimaryButton onClick={onPlanMyDay} style={{ width: '100%' }}>

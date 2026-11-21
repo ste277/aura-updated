@@ -111,3 +111,13 @@ export function authCodeHashesEqual(a: string, b: string): boolean {
   const bBuf = Buffer.from(b);
   return aBuf.length === bBuf.length && timingSafeEqual(aBuf, bBuf);
 }
+
+/**
+ * AURA-SEC-01 (#350) -- a stable, non-reversible reference to an email address
+ * for logs. Keyed with AUTH_SECRET and domain-separated from the code hash, so
+ * the same address always gives the same reference (events can be correlated)
+ * but the address can't be read or brute-forced from the logs.
+ */
+export function emailLogRef(email: string): string {
+  return createHmac('sha256', SECRET).update(`aura-auth-log:${email.trim().toLowerCase()}`).digest('hex').slice(0, 16);
+}

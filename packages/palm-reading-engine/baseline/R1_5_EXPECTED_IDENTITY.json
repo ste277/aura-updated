@@ -1,0 +1,48 @@
+{
+ "schema": "r1.5-expected-identity/1",
+ "candidateEngine": {
+  "src/engine.mjs": "8315a553a8d5403f61b887b64cecad849e2c6b625a85031463fe97fb3875e1be",
+  "src/geometry.mjs": "9636ea0207343f10276142a61bb88be929dc30dabe559e76eb27da3766b7f59b",
+  "src/index.mjs": "40f2dd9c88127207f24c6d53dd70b1fab0809b7779f5d5b5c39523fd315ce24a",
+  "src/policy.mjs": "758896456775123e44296699225e7ee4ad381b19472f958023a825a7a544bd35",
+  "src/rules.mjs": "03c7f86c5a03f51d1ff4045556b61caaa8b1370825c5ecbfdf175a7dd38cefd5",
+  "src/schema.mjs": "4974adff0a1c623947dca5866bf6b5f2ee8a60227a335ec6d9be622c2ed41999",
+  "src/snapshot.mjs": "f3f45f7621fddb6ac3f2c876775fcd3d022731e429cd4190bec165b49de80b27"
+ },
+ "baselineEngine": {
+  "src/engine.mjs": "e01d0e8186d12e15c32e75930d8419522b3c532c0a6ba4d62e2d9ae213e29b4e",
+  "src/geometry.mjs": "bfd03ff25a3ec7b6077361103014108a405ce292787aa92ec5d9dfeba8bd6c8d",
+  "src/index.mjs": "40f2dd9c88127207f24c6d53dd70b1fab0809b7779f5d5b5c39523fd315ce24a",
+  "src/policy.mjs": "758896456775123e44296699225e7ee4ad381b19472f958023a825a7a544bd35",
+  "src/rules.mjs": "71ff9e7f5b5bc09ff3bc15464ea7cb93660abdb0365edc0b3eeedbdf147d6ceb",
+  "src/schema.mjs": "fa317b44eafd75f1da50599663b5699a0938a9485648488d89e5969c8b1c5cd0",
+  "src/snapshot.mjs": "3622640ddd6908b0149831d65df65326d2272cc4b537cabf5466aef333cd6035"
+ },
+ "fixtures": {
+  "fixtures/synthetic-fixtures.mjs": "61ce45906dcf28ef145aab1cb39285a04fff6d25710623d40dc61fe46b8a2238",
+  "fixtures/r1-3-constructed-boundary-fixtures.json": "e16bd6e20505625239611b2140a207867217345237557426bd0d707f931238e4",
+  "fixtures/r1-4-loop-validity-fixtures.json": "bf9adf48119c06d3586f3b65c51c6edb68f9876d171d5e44b3d0208b5c2a71d3",
+  "fixtures/r1-5-loop-order-asymmetric-fixtures.json": "b43747c887766ec63fdc73d01efbfc82ef6d2e4b6fb1cd1e916deba7a36f5821",
+  "fixtures/g6-i1-adapter-inputs.json": "c0ac7466d9a904756a17b8e236701c2b41a2a77c6604c2b735fc78f1c3a97ad6"
+ },
+ "harness": {
+  "random": {
+   "test/oracle.mjs": "96912c3082e03fa9fdcc2d5e2536a49d88da814abbe72de364ad2a2d6cbddc49",
+   "test/coverage.mjs": "5fec6265748635be9bf8425c614188ed34c79691d3b3f3ad1ab214fae801238d",
+   "test/campaign-core.mjs": "e41f01638a65c05f6444f6cbd0c67be822c9e26d18470887cc08c739f3b4c79c",
+   "test/campaign-verify.mjs": "9ac9da9e7a6b1f32553a1aa5fada97ba6f42fffd5fdffd1122450282e5c7fd91",
+   "test/independent-oracle.mjs": "b05dfd8d2a41ecf13774ac9ef819cf014f68ba59b1649e039c7507c4a656081f",
+   "adapter/feature-adapter.mjs": "1a33fb48f3c2f68c7ce5632751b0e13b2ca1459eae4beed8d2376a9c739991e0",
+   "baseline/differential.mjs": "a71045cf00ed94b7736b0bb9fac4079c52eb25f129b1cca4f8713681a5e02122"
+  },
+  "fixture": {
+   "test/oracle.mjs": "96912c3082e03fa9fdcc2d5e2536a49d88da814abbe72de364ad2a2d6cbddc49",
+   "test/coverage.mjs": "5fec6265748635be9bf8425c614188ed34c79691d3b3f3ad1ab214fae801238d",
+   "test/campaign-core.mjs": "e41f01638a65c05f6444f6cbd0c67be822c9e26d18470887cc08c739f3b4c79c",
+   "test/campaign-verify.mjs": "9ac9da9e7a6b1f32553a1aa5fada97ba6f42fffd5fdffd1122450282e5c7fd91",
+   "test/independent-oracle.mjs": "b05dfd8d2a41ecf13774ac9ef819cf014f68ba59b1649e039c7507c4a656081f",
+   "adapter/feature-adapter.mjs": "1a33fb48f3c2f68c7ce5632751b0e13b2ca1459eae4beed8d2376a9c739991e0",
+   "baseline/fixture-campaigns.mjs": "1336bb803452b60fdf161686acd992f82b3fe185db8a63588d9161aed1a61a02"
+  }
+ }
+}

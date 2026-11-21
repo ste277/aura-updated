@@ -30,8 +30,9 @@ export interface TestUser {
 /**
  * Signs a fresh test user in via the dev-only magic-link shortcut
  * (POST /api/auth/request-link returns `devLoginUrl` when no email
- * provider is configured and NODE_ENV !== 'production' -- see
- * apps/web/app/api/auth/request-link/route.ts). Navigating the page to
+ * provider is configured, under `next dev`, with the local magic-link
+ * opt-in AURA_LOCAL_MAGIC_LINKS=true that playwright.config.ts sets -- see
+ * apps/web/lib/magicLinkGate.ts and apps/web/app/api/auth/request-link/route.ts). Navigating the page to
  * that URL sets the real session cookie via the real /api/auth/verify
  * route, exactly like a genuine magic-link click -- no session is forged.
  */
@@ -44,7 +45,7 @@ export async function signInNewUser(
   if (!res.ok()) throw new Error(`request-link failed: ${res.status()} ${await res.text()}`);
   const body = await res.json();
   if (!body.devLoginUrl) {
-    throw new Error('devLoginUrl missing from /api/auth/request-link -- E2E must run against a dev server (NODE_ENV !== production, no email provider configured).');
+    throw new Error('devLoginUrl missing from /api/auth/request-link -- E2E must run against a local dev server (next dev, no email provider, AURA_LOCAL_MAGIC_LINKS=true).');
   }
   await page.goto(body.devLoginUrl);
 

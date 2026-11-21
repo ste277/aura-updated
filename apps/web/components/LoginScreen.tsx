@@ -1,6 +1,8 @@
 'use client';
 
-import { useState } from 'react';
+import React, { useState } from 'react';
+import { SignInCodeActions } from './SignInCodeActions';
+import { requestSignInCode, SIGN_IN_OFFLINE_MESSAGE } from '../lib/signInCode';
 
 export function LoginScreen({ onLoggedInCheck }: { onLoggedInCheck: () => void }) {
   const [email, setEmail] = useState('');
@@ -10,45 +12,50 @@ export function LoginScreen({ onLoggedInCheck }: { onLoggedInCheck: () => void }
   const [code, setCode] = useState('');
   const [verifying, setVerifying] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  // AURA-READY-03-F2 -- the address the pending code was sent to. Verification
+  // always uses this (never a later edit), and Change email clears it.
+  const [sentTo, setSentTo] = useState<string | null>(null);
 
   // Both handlers must survive a rejected fetch: in the native shells the
   // device is routinely offline, and an unhandled rejection would leave the
   // button disabled on "Sending..." forever with no way to retry.
-  const OFFLINE_MESSAGE = "Couldn't reach the server. Check your connection and try again.";
+  const OFFLINE_MESSAGE = SIGN_IN_OFFLINE_MESSAGE;
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
     setStatus('sending');
     setError(null);
 
-    try {
-      const res = await fetch('/api/auth/request-link', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ email }),
-      });
-
-      const data = await res.json().catch(() => null);
-      if (!res.ok) {
-        setError(data?.error ?? `Sign-in request failed (${res.status}). Try again.`);
-        setStatus('idle');
-        return;
-      }
-
-      setStatus('sent');
-      if (data?.devLoginUrl) setDevLoginUrl(data.devLoginUrl);
-      if (data?.devLoginCode) setDevLoginCode(data.devLoginCode);
-    } catch (err) {
-      console.error('request-link failed:', err);
-      setError(OFFLINE_MESSAGE);
+    const target = email.trim();
+    const result = await requestSignInCode({ email: target });
+    if (result.kind !== 'SENT') {
+      setError(result.message);
       setStatus('idle');
+      return;
     }
+    setSentTo(target);
+    setCode('');
+    setDevLoginUrl(result.devLoginUrl);
+    setDevLoginCode(result.devLoginCode);
+    setStatus('sent');
+  }
+
+  // AURA-READY-03-F2 -- back to email entry with no pending verification:
+  // the old code, its dev extras and the target address are all dropped.
+  function handleChangeEmail() {
+    setSentTo(null);
+    setCode('');
+    setDevLoginUrl(null);
+    setDevLoginCode(null);
+    setError(null);
+    setStatus('idle');
   }
 
   // The emailed link opens in the system browser, which is the wrong context
   // inside the native app shells — the 6-digit code works everywhere.
   async function handleVerifyCode(e: React.FormEvent) {
     e.preventDefault();
+    if (!sentTo) return;
     setVerifying(true);
     setError(null);
 
@@ -56,7 +63,7 @@ export function LoginScreen({ onLoggedInCheck }: { onLoggedInCheck: () => void }
       const res = await fetch('/api/auth/verify-code', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ email, code }),
+        body: JSON.stringify({ email: sentTo, code }),
       });
 
       if (!res.ok) {
@@ -114,7 +121,7 @@ export function LoginScreen({ onLoggedInCheck }: { onLoggedInCheck: () => void }
         Sign in with your email — no password needed.
       </p>
 
-      {status !== 'sent' ? (
+      {status !== 'sent' || !sentTo ? (
         <form onSubmit={handleSubmit} style={{ display: 'flex', gap: 8, width: '100%', maxWidth: 320 }}>
           <input
             type="email"
@@ -131,7 +138,7 @@ export function LoginScreen({ onLoggedInCheck }: { onLoggedInCheck: () => void }
       ) : (
         <div style={{ width: '100%', maxWidth: 320, textAlign: 'center' }}>
           <p style={{ fontFamily: 'var(--as-font-body)', fontSize: 14, marginBottom: 12 }}>
-            We emailed you a sign-in link and a 6-digit code. Enter the code here, or tap the link.
+            We emailed you a 6-digit sign-in code. Enter it here.
           </p>
 
           <form onSubmit={handleVerifyCode} style={{ display: 'flex', gap: 8, marginBottom: 12 }}>
@@ -151,6 +158,19 @@ export function LoginScreen({ onLoggedInCheck }: { onLoggedInCheck: () => void }
               {verifying ? 'Checking...' : 'Sign in'}
             </button>
           </form>
+
+          <SignInCodeActions
+            sentTo={sentTo}
+            disabled={verifying}
+            requestCode={() => requestSignInCode({ email: sentTo })}
+            onResent={(result) => {
+              setCode('');
+              setError(null);
+              setDevLoginUrl(result.devLoginUrl);
+              setDevLoginCode(result.devLoginCode);
+            }}
+            onChangeEmail={handleChangeEmail}
+          />
 
           {(devLoginUrl || devLoginCode) && (
             <div

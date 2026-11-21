@@ -39,7 +39,9 @@ import { loadEligibleGoalDemand, createRealGoalDemandCandidatesDeps } from '../a
 import { signRecompositionProposal } from '../apps/web/lib/remainingDayRecompositionIntegrity';
 import { acceptRemainingDayRecomposition, realRecompositionAcceptanceDeps } from '../apps/web/lib/remainingDayRecompositionAcceptance';
 import type { AcceptConstructedDayRequest } from '../apps/web/lib/dayConstructorAcceptance';
-import { getDatePartsInTimezone, addDaysToDateStr } from '../apps/web/lib/timezone';
+import { getDatePartsInTimezone, addDaysToDateStr, localDateTimeToUTC } from '../apps/web/lib/timezone';
+import { getWeekdayForDateStr } from '../apps/web/lib/availabilityContext';
+import { localCalendarWeekStart } from '../apps/web/lib/goalActivityRhythm';
 
 let allPassed = true;
 function check(label: string, condition: boolean) {
@@ -50,6 +52,18 @@ const TZ = 'Asia/Kolkata';
 const MIN = 60000;
 const HOUR = 3600000;
 const GOAL_TITLE_PREFIX = 'PR2 Move Capacity fixture ';
+
+/** The first Asia/Kolkata local Tuesday 00:00 at or after `fromMs` (#294 fixture anchor). */
+function nextLocalTuesdayMidnight(fromMs: number): number {
+  const fromDate = getDatePartsInTimezone(TZ, new Date(fromMs)).dateStr;
+  for (let i = 0; i <= 7; i++) {
+    const d = addDaysToDateStr(fromDate, i);
+    if (getWeekdayForDateStr(d) !== 2) continue;
+    const ms = localDateTimeToUTC(d, '00:00', TZ).getTime();
+    if (ms >= fromMs) return ms;
+  }
+  throw new Error('unreachable: a Tuesday 00:00 always occurs within 8 local days');
+}
 
 async function sql(text: string, params: unknown[] = []): Promise<any[]> {
   const c = await beginTransaction();
@@ -77,8 +91,13 @@ async function main() {
   };
   await cleanup();
 
-  // A real near-future base instant -- movePlannedActivity validates destinations against the real wall clock.
-  const base = Math.ceil((Date.now() + 2 * HOUR) / MIN) * MIN;
+  // A real future base instant -- movePlannedActivity validates destinations against the real wall clock.
+  // #294: anchored to the next Asia/Kolkata TUESDAY 00:00 (at least 2h ahead), never "now + 2h". With a
+  // now-relative base, a scenario's 6h block could straddle a local Monday 00:00 for some run times, splitting
+  // one scenario's "same destination week" slots across two weeks (e.g. E's two concurrent Moves then both
+  // landed in an empty week and both, correctly, succeeded). From Tuesday 00:00 every week-0 block ends by
+  // Thursday and every week-1 block (+8 days) runs Wednesday..Friday, so no block can cross a week boundary.
+  const base = nextLocalTuesdayMidnight(Date.now() + 2 * HOUR);
   const WEEK_MS = 8 * 24 * HOUR; // > 7 days: guaranteed to cross at least one Monday week boundary
 
   // Each scenario gets a dedicated 6-hour block (0..5) within the day, at
@@ -95,6 +114,23 @@ async function main() {
   // disagrees with IST for ~5.5h/day and, when that disagreement straddles
   // a Monday, buckets the query into the wrong calendar week entirely.
   function dateOf(ms: number): string { return getDatePartsInTimezone(TZ, new Date(ms)).dateStr; }
+
+  // #294 regression guard: every scenario block (sub-hours 0..4 plus a 20-minute item) lies inside ONE local
+  // calendar week, and week 0 / week 1 are different weeks -- checked for this run's real base and for the
+  // anchor computed from every hour of a full week, so no run time can reintroduce the boundary straddle.
+  const blockIsSafe = (b: number): boolean =>
+    Object.keys(SCENARIO_HOURS).every((s) => {
+      const weekOf = (ms: number) => localCalendarWeekStart(dateOf(ms));
+      const at = (week: 0 | 1, h: number) => b + week * WEEK_MS + SCENARIO_HOURS[s] * HOUR + h * HOUR;
+      const w0 = weekOf(at(0, 0));
+      const w1 = weekOf(at(1, 0));
+      return w0 !== w1 && weekOf(at(0, 4) + 20 * MIN) === w0 && weekOf(at(1, 4) + 20 * MIN) === w1;
+    });
+  check('fixture (#294): this run\'s scenario blocks never straddle a local week boundary', blockIsSafe(base));
+  const sweepStart = Date.UTC(2026, 10, 16); // any fixed week; the anchor is computed per sample
+  check('fixture (#294): the Tuesday anchor is boundary-safe from every hour of a week', Array.from({ length: 168 }, (_, h) => nextLocalTuesdayMidnight(sweepStart + h * HOUR)).every(blockIsSafe));
+  // Non-vacuous: the guard flags the previous now-relative base at the real failing CI instant (run 44762828971).
+  check('fixture (#294): the guard rejects the old "now + 2h" base at the 2026-11-20T15:33Z CI failure', !blockIsSafe(Math.ceil((Date.parse('2026-11-20T15:33:39Z') + 2 * HOUR) / MIN) * MIN));
 
   async function makeGoalActivity(tag: string, targetPerWeek: number) {
     const { goal } = await createGoalWithActivities({ userId: user.id, title: `${GOAL_TITLE_PREFIX}${tag}`, targetDate: null, activities: [] });

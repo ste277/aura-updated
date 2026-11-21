@@ -1,0 +1,160 @@
+{
+ "id": "R1.5-coverage-contract-quickset",
+ "official": true,
+ "requireReverify": "all",
+ "identity": "R1_5_EXPECTED_IDENTITY.json",
+ "note": "Small campaign set used by the negative-control harness (contract mode) and the R1.5 contract tests: seeds 7, 8, 9 at target 300, plus the three fixture campaigns. Same rules as the official contract; floors scaled to the run size.",
+ "campaigns": [
+  {
+   "id": "random-7",
+   "kind": "random",
+   "seed": 7,
+   "target": 300,
+   "generator": "mulberry32/v1 (uint32 state, integer arithmetic, period 2^32; unchanged from R1.3)",
+   "minCanonicalDistinct": 300,
+   "minEligible": 300,
+   "minOrientationComparisons": 4500,
+   "minOutcome": {
+    "outcomeRelevantTies": 20,
+    "abstentionTies": 15,
+    "tierLoweredTies": 2,
+    "candidateRankTies": 15,
+    "r11DisagreementCases": 25,
+    "competingConflicts": 25,
+    "validityBoundaryInvalid": 5
+   },
+   "requiredChecks": [
+    "oracleSelfTest",
+    "distinctAudit",
+    "targetReached",
+    "variantCoverage",
+    "tieClassificationConsistency",
+    "noViolations",
+    "reversalInvariant"
+   ]
+  },
+  {
+   "id": "random-8",
+   "kind": "random",
+   "seed": 8,
+   "target": 300,
+   "generator": "mulberry32/v1 (uint32 state, integer arithmetic, period 2^32; unchanged from R1.3)",
+   "minCanonicalDistinct": 300,
+   "minEligible": 300,
+   "minOrientationComparisons": 4500,
+   "minOutcome": {
+    "outcomeRelevantTies": 20,
+    "abstentionTies": 15,
+    "tierLoweredTies": 2,
+    "candidateRankTies": 15,
+    "r11DisagreementCases": 25,
+    "competingConflicts": 25,
+    "validityBoundaryInvalid": 5
+   },
+   "requiredChecks": [
+    "oracleSelfTest",
+    "distinctAudit",
+    "targetReached",
+    "variantCoverage",
+    "tieClassificationConsistency",
+    "noViolations",
+    "reversalInvariant"
+   ]
+  },
+  {
+   "id": "random-9",
+   "kind": "random",
+   "seed": 9,
+   "target": 300,
+   "generator": "mulberry32/v1 (uint32 state, integer arithmetic, period 2^32; unchanged from R1.3)",
+   "minCanonicalDistinct": 300,
+   "minEligible": 300,
+   "minOrientationComparisons": 4500,
+   "minOutcome": {
+    "outcomeRelevantTies": 20,
+    "abstentionTies": 15,
+    "tierLoweredTies": 2,
+    "candidateRankTies": 15,
+    "r11DisagreementCases": 25,
+    "competingConflicts": 25,
+    "validityBoundaryInvalid": 5
+   },
+   "requiredChecks": [
+    "oracleSelfTest",
+    "distinctAudit",
+    "targetReached",
+    "variantCoverage",
+    "tieClassificationConsistency",
+    "noViolations",
+    "reversalInvariant"
+   ]
+  },
+  {
+   "id": "fixtures-boundary",
+   "kind": "fixture",
+   "generator": "constructed fixtures (deterministic; no RNG)",
+   "minCanonicalDistinct": 54,
+   "minEligible": 54,
+   "minOrientationComparisons": 490,
+   "minOutcome": {
+    "outcomeRelevantTies": 14,
+    "abstentionTies": 10,
+    "tierLoweredTies": 4,
+    "r11DisagreementCases": 14
+   },
+   "requiredChecks": [
+    "oracleSelfTest",
+    "distinctAudit",
+    "variantCoverage",
+    "recordedR11MatchesLive",
+    "tieClassificationConsistency",
+    "noViolations",
+    "reversalInvariant"
+   ]
+  },
+  {
+   "id": "fixtures-competing",
+   "kind": "fixture",
+   "generator": "constructed fixtures (deterministic; no RNG)",
+   "minCanonicalDistinct": 8,
+   "minEligible": 7,
+   "minOrientationComparisons": 248,
+   "minOutcome": {
+    "abstentionTies": 5,
+    "competingConflicts": 4,
+    "r11DisagreementCases": 6,
+    "candidateRankTies": 6
+   },
+   "requiredChecks": [
+    "oracleSelfTest",
+    "distinctAudit",
+    "variantCoverage",
+    "recordedR11MatchesLive",
+    "tieClassificationConsistency",
+    "noViolations",
+    "reversalInvariant"
+   ]
+  },
+  {
+   "id": "fixtures-loop",
+   "kind": "fixture",
+   "generator": "constructed fixtures (deterministic; no RNG)",
+   "minCanonicalDistinct": 22,
+   "minEligible": 4,
+   "minOrientationComparisons": 170,
+   "minOutcome": {
+    "r11DisagreementCases": 8,
+    "invalidCases": 18
+   },
+   "requiredChecks": [
+    "oracleSelfTest",
+    "distinctAudit",
+    "variantCoverage",
+    "recordedR11MatchesLive",
+    "tieClassificationConsistency",
+    "noViolations",
+    "reversalInvariant"
+   ]
+  }
+ ]
+}

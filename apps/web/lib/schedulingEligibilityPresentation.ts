@@ -96,3 +96,127 @@ export function presentSchedulingEligibilityError(code: SchedulingEligibilityErr
       };
   }
 }
+
+// ============================================================
+// AURA-HPG5-V2-I1 -- Find a Time conflict and empty-result presentation.
+// Pure and client-safe (no DB import). `PLAN_OVERLAP` is deliberately NOT
+// a SchedulingEligibilityErrorCode: it is an overridable overlap warning
+// (the user may "Save anyway"), not an eligibility refusal.
+// ============================================================
+
+export const PLAN_OVERLAP_RESPONSE_CODE = 'PLAN_OVERLAP';
+
+export interface PlanOverlapConflictView {
+  title: string;
+  plannedStartAt: string;
+  plannedEndAt: string;
+}
+
+export interface PlanOverlapPresentation {
+  headline: string;
+  detail: string;
+  /** Screen-reader-friendly label for the explicit override action. */
+  saveAnywayLabel: string;
+}
+
+/** True only for the 409 body POST /api/plans returns when
+ * overlapPolicy REJECT_ACTIVE_OVERLAP found a blocking plan. */
+export function isPlanOverlapResponse(body: unknown): boolean {
+  return typeof body === 'object' && body !== null && (body as { code?: unknown }).code === PLAN_OVERLAP_RESPONSE_CODE;
+}
+
+/** Validates the untrusted `conflict` field; null when absent or malformed
+ * (e.g. the conflicting plan vanished between the check and the read). */
+export function parsePlanOverlapConflict(body: unknown): PlanOverlapConflictView | null {
+  const conflict = typeof body === 'object' && body !== null ? (body as { conflict?: unknown }).conflict : undefined;
+  if (typeof conflict !== 'object' || conflict === null) return null;
+  const { title, plannedStartAt, plannedEndAt } = conflict as Record<string, unknown>;
+  if (typeof title !== 'string' || typeof plannedStartAt !== 'string' || typeof plannedEndAt !== 'string') return null;
+  if (Number.isNaN(new Date(plannedStartAt).getTime()) || Number.isNaN(new Date(plannedEndAt).getTime())) return null;
+  return { title: title.slice(0, 200), plannedStartAt, plannedEndAt };
+}
+
+export function formatPlanOverlapTime(conflict: Pick<PlanOverlapConflictView, 'plannedStartAt' | 'plannedEndAt'>, timezone: string): string {
+  const start = new Date(conflict.plannedStartAt);
+  const end = new Date(conflict.plannedEndAt);
+  const time: Intl.DateTimeFormatOptions = { hour: 'numeric', minute: '2-digit', timeZone: timezone };
+  const day: Intl.DateTimeFormatOptions = { weekday: 'short', month: 'short', day: 'numeric', timeZone: timezone };
+  const startDay = start.toLocaleDateString('en-US', day);
+  const endDay = end.toLocaleDateString('en-US', day);
+  // AURA-HPG5-V2-I2 -- a range that crosses local midnight names its end
+  // date too, so "11:30 PM – 12:30 AM" is never read as the same day.
+  const endText = endDay === startDay ? end.toLocaleTimeString('en-US', time) : `${endDay}, ${end.toLocaleTimeString('en-US', time)}`;
+  return `${startDay}, ${start.toLocaleTimeString('en-US', time)} – ${endText}`;
+}
+
+/** AURA-HPG5-V2-I2 (R1-04) -- the save that was refused: exactly the payload
+ * "Save anyway" re-sends (title + instants), never a different card's. */
+export interface PlanOverlapProposedView {
+  title: string;
+  plannedStartAt: string;
+  plannedEndAt: string;
+}
+
+export interface PlanOverlapProposedPresentation {
+  headline: string;
+  /** "You're trying to schedule X for <date, start – end>." */
+  proposedLine: string;
+  /** "It overlaps with Y at <date, start – end>. Nothing was saved." */
+  conflictLine: string;
+  /** Both lines, for aria-describedby consumers that want one string. */
+  detail: string;
+  /** Visible button text: "Save anyway at 8:07 PM". */
+  saveAnywayText: string;
+  /** Accessible name: proposed activity, full date/time and the conflict. */
+  saveAnywayLabel: string;
+}
+
+/**
+ * AURA-HPG5-V2-I2 (R1-04) -- conflict copy that names BOTH sides: the
+ * proposed save being refused (title, date, start and end) and the existing
+ * plan it overlaps, in the user's timezone, plus an override label that
+ * carries the exact proposed time so it can never be mistaken for a
+ * different result card's time.
+ */
+export function presentProposedPlanOverlap(proposed: PlanOverlapProposedView, conflict: PlanOverlapConflictView | null, timezone: string): PlanOverlapProposedPresentation {
+  const proposedWhen = formatPlanOverlapTime(proposed, timezone);
+  const proposedStartTime = new Date(proposed.plannedStartAt).toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit', timeZone: timezone });
+  const proposedLine = `You’re trying to schedule ${proposed.title} for ${proposedWhen}.`;
+  const conflictLine = conflict
+    ? `It overlaps with “${conflict.title}” at ${formatPlanOverlapTime(conflict, timezone)}. Nothing was saved.`
+    : 'It overlaps with another plan on your schedule. Nothing was saved.';
+  return {
+    headline: 'This time overlaps with another plan',
+    proposedLine,
+    conflictLine,
+    detail: `${proposedLine} ${conflictLine}`,
+    saveAnywayText: `Save anyway at ${proposedStartTime}`,
+    saveAnywayLabel: `Save anyway at ${proposedWhen}: ${proposed.title}, overlapping ${conflict ? conflict.title : 'another plan'}`,
+  };
+}
+
+export function presentPlanOverlap(conflict: PlanOverlapConflictView | null, timezone: string): PlanOverlapPresentation {
+  if (!conflict) {
+    return {
+      headline: 'This time overlaps another plan',
+      detail: 'It overlaps another plan on your schedule. Nothing was saved.',
+      saveAnywayLabel: 'Save anyway, overlapping another plan',
+    };
+  }
+  return {
+    headline: 'This time overlaps another plan',
+    detail: `It overlaps “${conflict.title}” (${formatPlanOverlapTime(conflict, timezone)}). Nothing was saved.`,
+    saveAnywayLabel: `Save anyway, overlapping ${conflict.title}`,
+  };
+}
+
+/** Copy for an empty constrained Find a Time result (`emptyReason`). */
+export function presentFindATimeEmptyReason(reason: unknown): string | null {
+  if (reason === 'NO_AVAILABILITY_IN_RANGE') {
+    return 'None of your saved availability falls in this date range. Try another day, or update your availability.';
+  }
+  if (reason === 'NO_ELIGIBLE_TIME') {
+    return 'No free time found for this request — Aura only suggests times inside your availability that don’t overlap your existing plans. Try a shorter duration, a wider date range, or a different preferred time.';
+  }
+  return null;
+}

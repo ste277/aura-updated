@@ -5,7 +5,9 @@ import {
   authCodeHashesEqual,
   SESSION_COOKIE_NAME,
   AUTH_CODE_MAX_ATTEMPTS,
+  emailLogRef,
 } from '../../../../lib/auth';
+import { errorForLog } from '../../../../lib/authLog';
 import {
   findActiveAuthCode,
   spendAuthCodeAttempt,
@@ -43,7 +45,7 @@ export async function POST(req: NextRequest) {
   try {
     const row = await findActiveAuthCode(email);
     if (!row) {
-      console.warn('[auth] verify-code: no active code', { email });
+      console.warn('[auth] verify-code: no active code', { emailRef: emailLogRef(email) });
       return NextResponse.json(REJECTED, { status: 401 });
     }
 
@@ -51,7 +53,7 @@ export async function POST(req: NextRequest) {
     // costs exactly one attempt; null means the cap is spent.
     const attempt = await spendAuthCodeAttempt(row.id, AUTH_CODE_MAX_ATTEMPTS);
     if (!attempt) {
-      console.warn('[auth] verify-code: attempt cap reached', { email });
+      console.warn('[auth] verify-code: attempt cap reached', { emailRef: emailLogRef(email) });
       return NextResponse.json(
         { error: 'Too many incorrect attempts. Request a new code.' },
         { status: 429 }
@@ -59,7 +61,7 @@ export async function POST(req: NextRequest) {
     }
 
     if (!authCodeHashesEqual(hashAuthCode(email, code), attempt.codeHash)) {
-      console.warn('[auth] verify-code: incorrect code', { email });
+      console.warn('[auth] verify-code: incorrect code', { emailRef: emailLogRef(email) });
       return NextResponse.json(REJECTED, { status: 401 });
     }
 
@@ -72,7 +74,7 @@ export async function POST(req: NextRequest) {
     // concurrent duplicate submission loses the race and is rejected here.
     const consumed = await consumeAuthCode(row.id);
     if (!consumed) {
-      console.warn('[auth] verify-code: code already consumed', { email });
+      console.warn('[auth] verify-code: code already consumed', { emailRef: emailLogRef(email) });
       return NextResponse.json(REJECTED, { status: 401 });
     }
 
@@ -87,7 +89,7 @@ export async function POST(req: NextRequest) {
     });
     return response;
   } catch (err) {
-    console.error('[auth] verify-code failed', { email, err });
+    console.error('[auth] verify-code failed', { emailRef: emailLogRef(email), err: errorForLog(err) });
     return NextResponse.json(
       { error: 'Sign-in is temporarily unavailable. Please try again in a moment.' },
       { status: 503 }

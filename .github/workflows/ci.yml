@@ -192,6 +192,12 @@ jobs:
       # imports apps/web/lib/productEvents.ts (analytics enum checks), so it
       # also needs apps/web/node_modules; the jsdom test mounts ExploreView
       # and PalmistryView with the shared harness (tsconfig.jsdom-tests.json).
+      # AURA-PALM-G6-I1 -- fast synthetic engine + adapter tests (zero dependencies,
+      # node:test). The expensive differential campaigns, coverage contract and
+      # mutation suite stay manual (packages/palm-reading-engine/README.md).
+      - name: Run palm reading engine and adapter tests (synthetic, fast)
+        working-directory: packages/palm-reading-engine/prototype
+        run: node --test test/*.test.mjs
       - name: Run Palmistry content, privacy and isolation test
         run: npx ts-node test/palm01I1Content.test.ts
       - name: Run Palmistry Explore + guide component test
@@ -277,6 +283,14 @@ jobs:
         env:
           TS_NODE_COMPILER_OPTIONS: '{"jsx":"react"}'
         run: npx ts-node test/homeRecomposition.test.ts
+      # AURA-READY-03-F1 -- onboarding never presents Rahu Kalam/Yamaganda/
+      # Gulika as the "next favourable window". Renders RecommendationStep
+      # (automatic JSX runtime, hence react-jsx) via renderToStaticMarkup;
+      # fixed dates/clocks, real ephemeris; no live DB.
+      - name: Run onboarding recommendation test
+        env:
+          TS_NODE_COMPILER_OPTIONS: '{"jsx":"react-jsx"}'
+        run: npx ts-node test/onboardingRecommendation.test.ts
       # Goals V2 Candidate B2 (resumed) -- goalActivityProposal.ts imports
       # a type-only RhythmPickerValue from the 'use client'
       # components/RhythmPicker.tsx, same jsx-enabled/apps-web-node_modules
@@ -663,6 +677,37 @@ jobs:
       # with the canonical overlap loader over the requested range and candidate extent.
       - name: Run Forward Planner overlap blocker architecture test
         run: npx ts-node test/forwardPlannerOverlapBlockerArchitecture.test.ts
+      # AURA-HPG5-V2-I1 -- Find a Time availability/conflict constraints (pure
+      # T1-T24 logic; imports lib/db.ts for types, so it runs after "Install web
+      # deps", jsx-enabled like the Home dashboard tests). No live DB.
+      - name: Run Find a Time constraints test (HPG5-V2-I1)
+        env:
+          TS_NODE_COMPILER_OPTIONS: '{"jsx":"react"}'
+        run: npx ts-node test/findATimeConstraints.test.ts
+      # AURA-HPG5-V2-I1 -- the mounted Plan tab's PLAN_OVERLAP refusal, Choose
+      # another time and explicit Save anyway (shared jsdom harness).
+      - name: Run Find a Time conflict component test (HPG5-V2-I1)
+        run: npx ts-node --project tsconfig.jsdom-tests.json test/findATimeConflictJsdom.test.ts
+      # AURA-READY-03-F2 -- Resend code / Change email on the 6-digit sign-in code
+      # screen: cooldown, in-flight lock, 429/failure messages, verification
+      # against the newly entered address (mounted LoginScreen, scripted fetch).
+      - name: Run sign-in resend / change-email component test (AURA-READY-03-F2)
+        run: npx ts-node --project tsconfig.jsdom-tests.json test/signInResendChangeEmailJsdom.test.ts
+      # AURA-HPG5-V2-I2 -- conflict copy names the proposed save and the
+      # existing plan in the user's timezone (pure).
+      - name: Run conflict presentation test (HPG5-V2-I2)
+        env:
+          TS_NODE_COMPILER_OPTIONS: '{"jsx":"react"}'
+        run: npx ts-node test/hpg5I2ConflictPresentation.test.ts
+      # AURA-HPG5-V2-I2 -- Plan tab conflict panel placement/override and the
+      # My Day story card's protected recommended-time save (jsdom harness).
+      - name: Run conflict panel and My Day save component test (HPG5-V2-I2)
+        run: npx ts-node --project tsconfig.jsdom-tests.json test/hpg5I2ConflictPanelJsdom.test.ts
+      # AURA-HPG5-V2-I3 -- the live Home save paths (Home timeline / Right Now
+      # Plan, Day Builder Add): REJECT opt-in, conflict panel beside the action,
+      # explicit Save anyway, double-submit and stale-state guards (jsdom).
+      - name: Run Home save conflict component test (HPG5-V2-I3)
+        run: npx ts-node --project tsconfig.jsdom-tests.json test/hpg5I3HomeSaveJsdom.test.ts
   web-build:
     name: Next.js production build
     runs-on: ubuntu-latest
@@ -692,6 +737,12 @@ jobs:
       - name: Verify unapproved Palmistry content is excluded from the build
         working-directory: apps/web
         run: node scripts/check-palmistry-bundle.js
+      # AURA-PALM-G6-I1 -- the synthetic palm reading engine and its test-only
+      # detector adapter (packages/palm-reading-engine) must never be bundled;
+      # unconditional, and the sentinels are self-checked against the source.
+      - name: Verify the palm reading engine is excluded from the build
+        working-directory: apps/web
+        run: node scripts/check-palm-engine-bundle.js
   mcp-server:
     # AURA-MCP-01-M1 -- local stdio MCP server (apps/mcp). Runs its protocol,
     # validation, Timing Search parity and isolation suites. Deliberately no
@@ -1034,6 +1085,41 @@ jobs:
       # POST /api/plans route (acceptance, Move and manual writers serialize).
       - name: Run manual writer serialization DB test
         run: npx ts-node test/scheduleWriteManualSerializationDb.test.ts
+      # AURA-HPG5-V2-I1 -- real-DB proof through the real /api/timing-search and
+      # POST /api/plans routes: Find a Time constraints, opt-in
+      # REJECT_ACTIVE_OVERLAP (409 PLAN_OVERLAP, rollback, concurrency, goal
+      # identity). Synthetic users only; cleans up after itself.
+      - name: Run Find a Time constraints DB test (HPG5-V2-I1)
+        env:
+          TS_NODE_COMPILER_OPTIONS: '{"jsx":"react"}'
+        run: npx ts-node test/findATimeConstraintsDb.test.ts
+      # AURA-HPG5-V2-I2 -- the My Day story card's client save function against
+      # the real routes: stale recommendation refused, no write, Save anyway,
+      # concurrency, isolation. jsx-enabled (it imports the client component).
+      - name: Run My Day save protection DB test (HPG5-V2-I2)
+        env:
+          TS_NODE_COMPILER_OPTIONS: '{"jsx":"react"}'
+        run: npx ts-node test/hpg5I2MyDaySaveDb.test.ts
+      # AURA-HPG5-V2-I3 -- Home Plan / Day Builder Add saves against the real
+      # routes: stale refusal with no write, Save anyway with the same
+      # idempotency key, races, privacy.
+      - name: Run Home save protection DB test (HPG5-V2-I3)
+        env:
+          TS_NODE_COMPILER_OPTIONS: '{"jsx":"react"}'
+        run: npx ts-node test/hpg5I3HomeSaveDb.test.ts
+      # AURA-AUTH-01 -- sign-in rate limit under concurrency (atomic quota reservation),
+      # against this job's own Postgres service. Email goes through a stubbed fetch inside
+      # the test; no provider credentials exist here, and any other outbound request fails it.
+      - name: Run sign-in rate-limit concurrency DB test (AURA-AUTH-01)
+        env:
+          TS_NODE_COMPILER_OPTIONS: '{"jsx":"react"}'
+        run: npx ts-node test/authRequestLinkQuotaDb.test.ts
+      # AURA-SEC-01 (#350) -- sign-in logs carry a keyed email reference, never a plaintext
+      # address, code or token; link/code sign-in and the rate limit unchanged. Stubbed email.
+      - name: Run sign-in log redaction DB test (AURA-SEC-01)
+        env:
+          TS_NODE_COMPILER_OPTIONS: '{"jsx":"react"}'
+        run: npx ts-node test/authLogRedactionDb.test.ts
       # Schedule write consistency S4 -- real-DB proof through the real proposal path
       # (explicit clock) that an overnight / prior-start plan blocks a Recomposition proposal.
       - name: Run Recomposition proposal overlap DB test
@@ -1042,6 +1128,13 @@ jobs:
       # buildForwardPlannerResult that a prior-start UPCOMING plan blocks a candidate.
       - name: Run Forward Planner overlap blocker DB test
         run: npx ts-node test/forwardPlannerOverlapBlockerDb.test.ts
+      # AURA-AUTH-02 -- magic links only in authorized local development: env matrix,
+      # no issuance / valid-token rejection in Production and Preview, code-only email,
+      # code sign-in and rate limit unchanged. Stubbed fetch; synthetic identities only.
+      - name: Run magic-link local-only DB test (AURA-AUTH-02)
+        env:
+          TS_NODE_COMPILER_OPTIONS: '{"jsx":"react"}'
+        run: npx ts-node test/authMagicLinkLocalOnlyDb.test.ts
       # HPG3-A4b CI coverage reconciliation -- these 4 suites already pass
       # against main but were never wired into CI; reusing this job's
       # existing Postgres service/migration-deploy step, same as the PR

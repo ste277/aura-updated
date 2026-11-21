@@ -51,6 +51,10 @@ export default defineConfig({
     timeout: 120_000,
     env: {
       E2E_TIME_OVERRIDE_ENABLED: 'true',
+      // AURA-AUTH-02 -- this is a local `next dev` server, so it opts in to the
+      // local-only magic-link shortcut the fixtures sign in with
+      // (apps/web/lib/magicLinkGate.ts; ignored in any deployed environment).
+      AURA_LOCAL_MAGIC_LINKS: 'true',
       PORT,
     },
   },

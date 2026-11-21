@@ -28,7 +28,9 @@ import { LoggedEntryItem } from './CalendarViewSection';
 import { resolvePendingActivityStatus } from '../lib/pendingReplayReconciliation';
 import { DayBuilderCard } from './DayBuilderCard';
 import { PersonalizationPromptCard } from './PersonalizationPromptCard';
-import { saveUpcomingPlanFromCandidate } from './PlanWithAuraView';
+import { saveUpcomingPlanFromCandidate, PlanOverlapSaveError } from './PlanWithAuraView';
+import { PlanOverlapConflictPanel } from './PlanOverlapConflictPanel';
+import { presentProposedPlanOverlap, type PlanOverlapConflictView } from '../lib/schedulingEligibilityPresentation';
 import type { DailyIntentionGroupId } from '../lib/dailyIntentions';
 import { HomeTimeline } from './HomeTimeline';
 import { buildHomeTimeline } from '../lib/homeTimelineComposer';
@@ -521,6 +523,29 @@ export function HomeDashboard({
   }, [captureConfirmed]);
   const [planningOpportunityId, setPlanningOpportunityId] = useState<string | null>(null);
   const [opportunityError, setOpportunityError] = useState('');
+  // AURA-HPG5-V2-I3 (I3-B) -- a Home "Plan" refused at save time (409
+  // PLAN_OVERLAP: another plan now overlaps it). Holds the EXACT refused
+  // save (candidate + duration + options) so "Save anyway" re-sends it with
+  // only the overlap policy changed, and which surface was tapped so the
+  // panel renders beside that action.
+  const [homeOverlap, setHomeOverlap] = useState<{
+    itemId: string;
+    itemStart: string;
+    source: 'SPOTLIGHT' | 'TIMELINE';
+    candidate: TimingCandidate;
+    durationMinutes: number;
+    options: { activityId: string; clientRequestId: string };
+    activityTitle: string;
+    conflict: PlanOverlapConflictView | null;
+    proposed: { title: string; plannedStartAt: string; plannedEndAt: string };
+  } | null>(null);
+  const homeOverlapHeadingRef = useRef<HTMLDivElement | null>(null);
+  // Synchronous in-flight guard: the state flag only takes effect after a
+  // re-render, so two taps in one React batch could otherwise both save.
+  const planningOpportunityRef = useRef(false);
+  // AURA-HPG5-V2-I3 -- set to 'SPOTLIGHT' by a capture-phase click on the
+  // Right Now Plan button; read once and reset by handlePlanOpportunity.
+  const planSourceRef = useRef<'SPOTLIGHT' | 'TIMELINE'>('TIMELINE');
 
   // Cross-tab handoff target for focusTimelineKey above -- same
   // requestAnimationFrame + scrollIntoView convention PlanWithAuraView's
@@ -1381,9 +1406,16 @@ export function HomeDashboard({
    * creation path -- never a second save implementation.
    */
   const handlePlanOpportunity = async (item: HomeTimelineItem) => {
-    if (!onTimingSearch || !item.metadata?.activityId || planningOpportunityId) return;
+    // Which surface was tapped (beside which the conflict panel renders): the
+    // Right Now button marks itself in the capture phase; anything else
+    // (the HomeTimeline row) is the timeline. Read once, then reset.
+    const source = planSourceRef.current;
+    planSourceRef.current = 'TIMELINE';
+    if (!onTimingSearch || !item.metadata?.activityId || planningOpportunityId || planningOpportunityRef.current) return;
+    planningOpportunityRef.current = true;
     setPlanningOpportunityId(item.id);
     setOpportunityError('');
+    setHomeOverlap(null);
     try {
       const durationMinutes = item.metadata.durationMinutes ?? 45;
       const response = await onTimingSearch({ mode: 'CHECK', activityId: item.metadata.activityId, durationMinutes, candidateStart: item.start });
@@ -1396,15 +1428,98 @@ export function HomeDashboard({
       // a contract violation surfaces as a clean failure instead of a
       // silently-wrong save.
       if (candidate.start !== item.start) throw new Error('CHECK returned a different instant than the opportunity displayed');
-      await saveUpcomingPlanFromCandidate(candidate, durationMinutes, { activityId: item.metadata.activityId, clientRequestId: `home-opportunity:${item.id}` });
+      const options = { activityId: item.metadata.activityId, clientRequestId: `home-opportunity:${item.id}` };
+      try {
+        // AURA-HPG5-V2-I3 (I3-B) -- a Home opportunity is a recommended time
+        // computed earlier: opt in to REJECT_ACTIVE_OVERLAP so a slot that
+        // went stale (another plan created since, e.g. in a second tab) is
+        // refused inside the save transaction instead of saved over.
+        await saveUpcomingPlanFromCandidate(candidate, durationMinutes, { ...options, overlapPolicy: 'REJECT_ACTIVE_OVERLAP' });
+      } catch (saveErr) {
+        if (saveErr instanceof PlanOverlapSaveError) {
+          setHomeOverlap({ itemId: item.id, itemStart: item.start, source, candidate, durationMinutes, options, activityTitle: item.title, conflict: saveErr.conflict, proposed: { title: saveErr.proposed.title, plannedStartAt: saveErr.proposed.plannedStartAt, plannedEndAt: saveErr.proposed.plannedEndAt } });
+          return;
+        }
+        throw saveErr;
+      }
       trackEvent('PLAN_RESULT_SELECTED', { metadata: { mode: 'CHECK', source: 'HOME_TIMELINE' } });
       onMyDayChanged?.();
     } catch (err) {
       console.error('Failed to plan opportunity from Home:', err);
       setOpportunityError('Could not plan this. Try again.');
     } finally {
+      planningOpportunityRef.current = false;
       setPlanningOpportunityId(null);
     }
+  };
+
+  // AURA-HPG5-V2-I3 (I3-B) -- explicit override: the EXACT refused save
+  // (same candidate, duration, activityId and clientRequestId) with only
+  // overlapPolicy ALLOW. Refused (and the panel closed) if the opportunity
+  // is no longer on the timeline at the same time.
+  const handleHomeOverlapSaveAnyway = async () => {
+    const pending = homeOverlap;
+    if (!pending || planningOpportunityId || planningOpportunityRef.current) return;
+    if (!homeTimeline.some((entry) => entry.id === pending.itemId && entry.start === pending.itemStart)) {
+      setHomeOverlap(null);
+      return;
+    }
+    planningOpportunityRef.current = true;
+    setPlanningOpportunityId(pending.itemId);
+    setOpportunityError('');
+    try {
+      await saveUpcomingPlanFromCandidate(pending.candidate, pending.durationMinutes, { ...pending.options, overlapPolicy: 'ALLOW' });
+      setHomeOverlap(null);
+      trackEvent('PLAN_RESULT_SELECTED', { metadata: { mode: 'CHECK', source: 'HOME_TIMELINE' } });
+      onMyDayChanged?.();
+    } catch (err) {
+      console.error('Failed to plan opportunity from Home:', err);
+      setOpportunityError('Could not plan this. Try again.');
+    } finally {
+      planningOpportunityRef.current = false;
+      setPlanningOpportunityId(null);
+    }
+  };
+
+  // "Choose another time": the core Plan tab, prefilled with this activity
+  // (its Find a Time applies the validated availability/plan constraints).
+  const handleHomeOverlapChooseAnotherTime = () => {
+    const pending = homeOverlap;
+    setHomeOverlap(null);
+    if (pending) onPlanClick?.(pending.activityTitle, pending.options.activityId);
+  };
+
+  // Stale cleanup: the refused opportunity left the timeline or moved.
+  useEffect(() => {
+    if (homeOverlap && !homeTimeline.some((entry) => entry.id === homeOverlap.itemId && entry.start === homeOverlap.itemStart)) setHomeOverlap(null);
+  }, [homeTimeline, homeOverlap]);
+  useEffect(() => {
+    if (homeOverlap) homeOverlapHeadingRef.current?.focus();
+  }, [homeOverlap]);
+
+  const renderHomeOverlap = (itemId: string | undefined, source: 'SPOTLIGHT' | 'TIMELINE') => {
+    if (!homeOverlap || homeOverlap.itemId !== itemId || homeOverlap.source !== source) return null;
+    return (
+      <div style={{ marginTop: spacing.sm }}>
+        <PlanOverlapConflictPanel
+          idPrefix={`home-overlap-${source.toLowerCase()}`}
+          testId="home-overlap-conflict"
+          presentation={presentProposedPlanOverlap(homeOverlap.proposed, homeOverlap.conflict, effectiveTimezone)}
+          headingRef={homeOverlapHeadingRef}
+          onChooseAnotherTime={handleHomeOverlapChooseAnotherTime}
+          onSaveAnyway={handleHomeOverlapSaveAnyway}
+          saveDisabled={planningOpportunityId !== null}
+          saving={planningOpportunityId === homeOverlap.itemId}
+        />
+        {opportunityError ? <div role="alert" style={{ color: colors.danger, fontSize: 12, marginTop: spacing.xs }}>{opportunityError}</div> : null}
+      </div>
+    );
+  };
+
+  const renderTimelineRowExtras = (item: HomeTimelineItem) => {
+    const recovery = renderMissedRecovery(item);
+    const overlap = renderHomeOverlap(item.id, 'TIMELINE');
+    return recovery || overlap ? <>{recovery}{overlap}</> : null;
   };
 
   return (
@@ -1632,7 +1747,20 @@ export function HomeDashboard({
                 <div style={{ ...typography.meta, color: colors.textSecondary, marginTop: spacing.xs }}>For: {spotlightGoalContext.goal.title}</div>
               )}
               {spotlightCompletionDetail && <div style={{ ...typography.meta, color: colors.textSecondary, marginTop: 2 }}>{spotlightCompletionDetail}</div>}
-              <div style={{ display: 'flex', alignItems: 'center', gap: spacing.sm, marginTop: spacing.sm, flexWrap: 'wrap' }}>
+              <div
+                style={{ display: 'flex', alignItems: 'center', gap: spacing.sm, marginTop: spacing.sm, flexWrap: 'wrap' }}
+                onClickCapture={(event) => {
+                  // AURA-HPG5-V2-I3 (RV-1 fix) -- decided synchronously in the capture
+                  // phase, with no deferred reset (in a real browser React's capture and
+                  // bubble handlers run in separate native listeners, so a microtask
+                  // would run in between). Only the row's own Plan button marks the
+                  // spotlight; ANY other click in this row (Move, Done, Why...) marks
+                  // the timeline, and handlePlanOpportunity resets after reading, so a
+                  // stale SPOTLIGHT can never leak into a later timeline tap.
+                  const button = (event.target as HTMLElement | null)?.closest?.('button');
+                  planSourceRef.current = button && /^(Plan|Planning…)$/.test((button.textContent ?? '').trim()) ? 'SPOTLIGHT' : 'TIMELINE';
+                }}
+              >
                 {spotlightItem.status && <StatusBadge label={spotlightItem.status} tone={spotlightItem.status === 'Best' ? 'positive' : 'info'} />}
                 {/* Finding D -- a Why control only ever renders when a real
                  * explanation exists (fail closed, never a dead no-op), and
@@ -1705,8 +1833,9 @@ export function HomeDashboard({
               )}
               {moveablePlanIdNow && movePickerFor === moveablePlanIdNow && spotlightItem && renderMovePicker(moveablePlanIdNow, spotlightItem.title, spotlightItem.start, spotlightItem.metadata?.durationMinutes)}
               {rightNowState.kind === 'OPPORTUNITY' && opportunityError && (
-                <div style={{ color: colors.danger, fontSize: 12, marginTop: spacing.xs }}>{opportunityError}</div>
+                homeOverlap ? null : <div style={{ color: colors.danger, fontSize: 12, marginTop: spacing.xs }}>{opportunityError}</div>
               )}
+              {rightNowState.kind === 'OPPORTUNITY' && renderHomeOverlap(spotlightItem?.id, 'SPOTLIGHT')}
               {spotlightWhyExpanded && spotlightExplanation && spotlightExplanation.length > 0 && (
                 <div style={{ marginTop: spacing.sm, display: 'flex', flexDirection: 'column', gap: 4 }}>
                   <div style={{ ...typography.caption, color: colors.textMuted, fontWeight: 800 }}>Why this time?</div>
@@ -1904,7 +2033,7 @@ export function HomeDashboard({
         pendingActivities={myDayPendingActivities}
         nextItemId={myDayAgenda?.nextItem?.id}
         spotlightItemId={spotlightItem?.id}
-        recoverySlot={renderMissedRecovery}
+        recoverySlot={renderTimelineRowExtras}
         explanationsById={explanationsById}
         expandedId={expandedTimelineId}
         onToggleExpand={handleToggleExpand}
