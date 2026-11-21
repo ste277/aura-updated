@@ -21,6 +21,7 @@ import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
 import * as crypto from 'crypto';
+import * as zlib from 'zlib';
 import { execFileSync, spawn, spawnSync } from 'child_process';
 import * as F from './palmG5I1R43Fixtures';
 
@@ -230,6 +231,72 @@ async function main(): Promise<void> {
     console.log(`INFO R23 entries=4000 code=${rm.code} maxRSS=${rm.maxRssMiB} MiB ms=${rm.ms}`);
     check('R23. a legitimate 4,000-entry ZIP still passes (the record budget does not block it; the pre-existing 4,096-signature cap is the effective entry limit)', !rm.killed && rm.code === 0, `code=${rm.code} ${rm.out.slice(0, 200)}`); }
 
+  // ================================================================ H: G5-HR2 reader differential (R42-IV-F1 / R43-R1)
+  // Direct scanner assertions that do not depend on any external reader, plus a
+  // differential against EVERY locally available reader: whenever the scanner
+  // classifies a structure as "no archive" (exit 0), no available reader may
+  // extract its hidden payload (the deflated MediaPipe runtime, invisible to
+  // the byte scan). Untested readers (e.g. 7-Zip) remain outside this check.
+  {
+    const PAY = RT;
+    const lh = (o: { ver?: number; name?: Buffer } = {}) => {
+      const name = o.name ?? Buffer.from('a.js'); const comp = zlib.deflateRawSync(PAY); const h = Buffer.alloc(30);
+      h.writeUInt32LE(0x04034b50, 0); h.writeUInt16LE(o.ver ?? 20, 4); h.writeUInt16LE(8, 8); h.writeUInt32LE(F.crc32(PAY), 14);
+      h.writeUInt32LE(comp.length, 18); h.writeUInt32LE(PAY.length, 22); h.writeUInt16LE(name.length, 26);
+      return { buf: Buffer.concat([h, name, comp]), name, comp };
+    };
+    const cdFor = (L: { name: Buffer; comp: Buffer }, at: number, cdAt: number) => {
+      const c = Buffer.alloc(46); c.writeUInt32LE(0x02014b50, 0); c.writeUInt16LE(20, 4); c.writeUInt16LE(20, 6); c.writeUInt16LE(8, 10);
+      c.writeUInt32LE(F.crc32(PAY), 16); c.writeUInt32LE(L.comp.length, 20); c.writeUInt32LE(PAY.length, 24); c.writeUInt16LE(L.name.length, 28); c.writeUInt32LE(at, 42);
+      const cd = Buffer.concat([c, L.name]); const e = Buffer.alloc(22);
+      e.writeUInt32LE(0x06054b50, 0); e.writeUInt16LE(1, 8); e.writeUInt16LE(1, 10); e.writeUInt32LE(cd.length, 12); e.writeUInt32LE(cdAt, 16);
+      return { cd, e };
+    };
+    const pre = Buffer.alloc(64, 0x2f);
+    const H0L = lh(); const H0 = cdFor(H0L, 64, 64 + H0L.buf.length);
+    const H6L = lh({ ver: 0xff }); const H6 = cdFor(H6L, 64, 64 + H6L.buf.length);
+    const H7e = Buffer.from(H6.e); H7e.writeUInt32LE(0, 0);
+    const cases: [string, string, Buffer][] = [
+      ['H0', 'valid ZIP behind a 64-byte prefix', Buffer.concat([pre, H0L.buf, H0.cd, H0.e])],
+      ['H1', 'local headers only, at offset 0', lh().buf],
+      ['H2', 'local headers only, mid-file, plausible header', Buffer.concat([pre, lh().buf])],
+      ['H3', 'local headers only, mid-file, version byte 0xFF', Buffer.concat([pre, lh({ ver: 0xff }).buf])],
+      ['H4', 'local headers only, mid-file, empty name', Buffer.concat([pre, lh({ name: Buffer.alloc(0) }).buf])],
+      ['H5', 'local headers only, mid-file, NUL in name', Buffer.concat([pre, lh({ name: Buffer.from('a\0.js') }).buf])],
+      ['H6', 'central directory but no EOCD, version byte 0xFF', Buffer.concat([pre, H6L.buf, H6.cd])],
+      ['H7', 'EOCD signature zeroed, version byte 0xFF', Buffer.concat([pre, H6L.buf, H6.cd, H7e])],
+    ];
+    const java = hasTool('java') && spawnSync('java', ['-version'], { encoding: 'utf8' }).status === 0;
+    const py = 'import zipfile,sys\nz=zipfile.ZipFile(sys.argv[1])\nfor n in z.namelist(): sys.stdout.buffer.write(z.read(n))';
+    const readers: { id: string; ok: boolean; cmd: string; args: (f: string, o: string) => string[]; stdin?: boolean }[] = [
+      { id: 'unzip', ok: UNZIP, cmd: '/usr/bin/unzip', args: (f, o) => ['-o', '-q', f, '-d', o] },
+      { id: 'bsdtar(file)', ok: hasTool('bsdtar'), cmd: 'bsdtar', args: (f, o) => ['-xf', f, '-C', o] },
+      { id: 'bsdtar(stdin)', ok: hasTool('bsdtar'), cmd: 'bsdtar', args: (_f, o) => ['-xf', '-', '-C', o], stdin: true },
+      { id: 'python-zipfile', ok: hasTool('python3'), cmd: 'python3', args: (f) => ['-I', '-c', py, f] },
+      { id: 'jar', ok: java && hasTool('jar'), cmd: 'jar', args: () => ['xf'] },
+      { id: 'ditto', ok: hasTool('ditto'), cmd: 'ditto', args: (f, o) => ['-x', '-k', f, o] },
+    ];
+    const extracts = (r: (typeof readers)[number], data: Buffer): boolean => {
+      const d = fs.mkdtempSync(path.join(os.tmpdir(), 'palm-r43-'));
+      try {
+        const f = path.join(d, 'x.zip'); fs.writeFileSync(f, data); const o = path.join(d, 'out'); fs.mkdirSync(o);
+        const args = r.id === 'jar' ? ['xf', f] : r.args(f, o);
+        const res = spawnSync(r.cmd, args, { cwd: o, input: r.stdin ? data : undefined, timeout: 30000 });
+        let got = !!res.stdout && HIT.test(res.stdout.toString('latin1'));
+        const walk = (p: string) => { for (const n of fs.readdirSync(p)) { const q = path.join(p, n); const st = fs.lstatSync(q); if (st.isDirectory()) walk(q); else if (st.isFile() && HIT.test(fs.readFileSync(q).toString('latin1'))) got = true; } };
+        walk(o);
+        return got;
+      } finally { cleanup(d); }
+    };
+    for (const r of readers) if (!r.ok) notRun.push(`H-diff:${r.id}`);
+    for (const [id, label, data] of cases) {
+      const s = run(`${id}.bin`, data);
+      const ex = readers.filter((r) => r.ok && extracts(r, data)).map((r) => r.id);
+      console.log(`INFO ${id} scanner exit=${s.exit} archives=${s.archives} reason="${s.reason.slice(0, 100)}" extractedBy=[${ex.join(', ')}]`);
+      if (['H0', 'H1', 'H2'].includes(id)) check(`${id}. scanner rejects: ${label}`, s.exit === 1, `exit=${s.exit}`);
+      check(`${id}d. differential: ${label} -- scanner never passes a payload a local reader extracts`, s.exit === 1 || ex.length === 0, `scanner exit=${s.exit}, extracted by ${ex.join(', ')}`);
+    }
+  }
   // ================================================================ F2: nested-entry trust (R42-IV-F2)
   const inner = F.buildZip([{ name: 'hello.txt', data: F.HELLO }]).buf;
   mustPass('T1', 'ZIP storing a valid ZIP inside a validated entry (recursively inspected)', 'n.zip', F.buildZip([{ name: 'inner.zip', data: inner, method: 0 }]).buf, 2);
