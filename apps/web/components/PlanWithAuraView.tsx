@@ -21,6 +21,7 @@ import { triggerHaptic } from '../lib/haptics';
 import { trackEvent } from '../lib/trackEvent';
 import { isKnownSchedulingEligibilityCode, presentSchedulingEligibilityError, type SchedulingEligibilityPresentation, isPlanOverlapResponse, parsePlanOverlapConflict, presentProposedPlanOverlap, presentFindATimeEmptyReason, type PlanOverlapConflictView } from '../lib/schedulingEligibilityPresentation';
 import { PlanOverlapConflictPanel } from './PlanOverlapConflictPanel';
+import { FindTimeError, FIND_TIME_ERROR_COPY, assertFindTimeCandidates, classifyFindTimeError, withFindTimeTimeout, type FindTimeErrorKind } from '../lib/findTimeErrors';
 // Event Location Plan Persistence V1 closeout: pure plan display/formatting
 // logic moved to a plain .ts module so it can be unit-tested under this
 // repo's normal (non-JSX) test runner -- see planFormatting.ts's own doc
@@ -509,6 +510,13 @@ export function PlanWithAuraView({ onTimingSearch, onViewDay, onPlanLogged, time
   const savingOpportunityRef = useRef(false);
   const findResultsHeadingRef = useRef<HTMLDivElement | null>(null);
   const [isLoading, setIsLoading] = useState(false);
+  // AURA-READY-02-F4 -- a FAILED Find a Time search (connection, server,
+  // timeout, unreadable response), kept apart from the genuine "no suitable
+  // time" result and from the shared `error` line other actions use.
+  const [findError, setFindError] = useState<FindTimeErrorKind | null>(null);
+  // Synchronous guard: isLoading only updates on the next render, so two taps
+  // in the same tick could otherwise both start a search.
+  const findInFlightRef = useRef(false);
   const [isListening, setIsListening] = useState(false);
 
   // Product Structure V2 -- "Who's this with?" (brief section 10/11).
@@ -1298,9 +1306,11 @@ export function PlanWithAuraView({ onTimingSearch, onViewDay, onPlanLogged, time
   };
 
   const handleFindTime = async () => {
-    if (!canSubmit) return;
+    if (!canSubmit || findInFlightRef.current) return;
+    findInFlightRef.current = true;
     setIsLoading(true);
     setError('');
+    setFindError(null);
     setSchedulingConflict(null);
     setPlanOverlap(null);
     // DR4-F2B blocking-fix -- bumped unconditionally so THIS request's own
@@ -1321,7 +1331,7 @@ export function PlanWithAuraView({ onTimingSearch, onViewDay, onPlanLogged, time
       // comment for why). Otherwise, existing GENERAL/personalized FIND is
       // completely unchanged.
       if (selectedPersonId && selection.activityId) {
-        const res = await fetch('/api/timing-search/shared', {
+        const res = await withFindTimeTimeout(fetch('/api/timing-search/shared', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
@@ -1334,14 +1344,14 @@ export function PlanWithAuraView({ onTimingSearch, onViewDay, onPlanLogged, time
             limit: 3,
             savedPersonId: selectedPersonId,
           }),
-        });
-        const data = await res.json();
-        if (!res.ok) throw new Error(data?.error || 'Unable to find a shared time.');
+        }));
+        if (!res.ok) throw new FindTimeError('SERVER');
+        const data = assertFindTimeCandidates(await res.json());
         if (myRequestGeneration !== requestGenerationRef.current) return;
         setSharedFindResult(data.candidates as EverydaySharedCandidate[]);
         setFindResult(null);
       } else {
-        const next = await onTimingSearch({
+        const next = assertFindTimeCandidates(await withFindTimeTimeout(onTimingSearch({
           mode: 'FIND',
           ...selection,
           durationMinutes,
@@ -1350,7 +1360,7 @@ export function PlanWithAuraView({ onTimingSearch, onViewDay, onPlanLogged, time
           customEndDate: horizon === 'CUSTOM' ? customEndDate : undefined,
           timePreference: toTimingPreference(timePreference),
           limit: 3,
-        });
+        })));
         if (myRequestGeneration !== requestGenerationRef.current) return;
         setFindResult(next);
         setSharedFindResult(null);
@@ -1359,10 +1369,13 @@ export function PlanWithAuraView({ onTimingSearch, onViewDay, onPlanLogged, time
       setPlannedOpportunityKeys(new Set());
       setMomentSavedKeys(new Set());
       triggerHaptic('success');
-    } catch {
+    } catch (err) {
       if (myRequestGeneration !== requestGenerationRef.current) return;
-      setError('Aura could not find a time for this request. Try a shorter duration or a wider date range.');
+      // A timed-out request that answers later is ignored: this handler has
+      // already moved on, and nothing else awaits that promise.
+      setFindError(classifyFindTimeError(err));
     } finally {
+      findInFlightRef.current = false;
       setIsLoading(false);
     }
   };
@@ -1970,6 +1983,17 @@ export function PlanWithAuraView({ onTimingSearch, onViewDay, onPlanLogged, time
           🛡 Aura finds options using today&apos;s Panchang + your patterns
         </div>
         {error && <div role="alert" style={{ color: '#fb6b6b', fontSize: 12, marginTop: 10, lineHeight: 1.35 }}>{error}</div>}
+        {findError && (
+          <div role="alert" data-find-error={findError} style={{ marginTop: 10, padding: 12, borderRadius: 10, border: '1px solid rgba(251,107,107,0.35)', background: 'rgba(251,107,107,0.08)' }}>
+            <div style={{ color: '#fb6b6b', fontSize: 13, fontWeight: 700 }}>{FIND_TIME_ERROR_COPY[findError].title}</div>
+            <div style={{ color: '#dbe7f4', fontSize: 12, marginTop: 4, lineHeight: 1.4 }}>{FIND_TIME_ERROR_COPY[findError].message}</div>
+            <div style={{ marginTop: 10 }}>
+              <SecondaryButton onClick={handleFindTime} disabled={isLoading || !canSubmit} style={{ minHeight: 44 }}>
+                {isLoading ? 'Trying again…' : 'Try again'}
+              </SecondaryButton>
+            </div>
+          </div>
+        )}
         {/* HPG3-A3b -- the dedicated scheduling-eligibility banner (never
             rendered at the same time as the generic `error` div above --
             see the `schedulingConflict`/`error` state's own doc comment
