@@ -162,10 +162,16 @@ const TFLITE_IDENTIFIER = Buffer.from('TFL3'); // FlatBuffer file identifier at 
 //     signature exists where a known reader looks for it -- at
 //     (EOCD - directory size) OR at the absolute directory offset (Info-ZIP's
 //     "Compensating" fallback, R4.3) -- wherever it sits (prefix, SFX stub or
-//     trailing bytes allowed), or a local-file header at offset 0 (where
-//     streaming readers start). Recognition never depends on local-header
-//     plausibility; a "plausible" local header elsewhere only adds
-//     candidates. Methods: stored (0) and deflate (8). The archive at the LAST
+//     trailing bytes allowed); or (R4.4) any of libarchive's streaming lead
+//     signatures at offset 0 (PK\1\2, PK\3\4, PK\5\6, PK\6\6, PK\7\8, "PK00");
+//     or an extractable local-file header ANYWHERE (known compressing method,
+//     name/extra in bounds; stored headers keep the R4.1 plausibility test,
+//     their data being visible to the byte scan -- version byte, name
+//     content, CRC and deflate validity are
+//     deliberately ignored, because streaming readers scan forward to such a
+//     header and write its data before verifying it). Every candidate is
+//     parsed strictly; anything incomplete fails closed. Methods: stored (0,
+//     never with a data descriptor: R4.4) and deflate (8). The archive at the LAST
 //     EOCD must be reachable through the relative location and pass the
 //     strict parser (an absolute-only location fails closed). Every other
 //     interpretation must lie wholly inside the data of a strictly validated,
@@ -306,10 +312,13 @@ function largeFileHasPlausibleZip(file, size, positions, overflow) {
   if (overflow) return true;
   const fd = fs.openSync(file, 'r');
   try {
+    const lead = Buffer.alloc(Math.min(4, size));
+    fs.readSync(fd, lead, 0, lead.length, 0);
+    if (hasZipLeadSignature(lead)) return true; // R4.4 (HR2R1-F1): streaming-reader lead signature
     for (const p of positions) {
       const b = Buffer.alloc(Math.min(30 + 4096, size - p));
       fs.readSync(fd, b, 0, b.length, p);
-      if (b.length >= 4 && b.readUInt32LE(0) === ZIP_LOCAL_SIG && (p === 0 || plausibleLocalHeader(b, 0))) return true; // R4.2: offset 0 always (streaming readers)
+      if (b.length >= 4 && b.readUInt32LE(0) === ZIP_LOCAL_SIG && (p === 0 || extractableLocalHeader(b, 0, size - p))) return true; // R4.2: offset 0 always; R4.4: structural rule elsewhere
       if (b.length >= 22 && b.readUInt32LE(0) === ZIP_EOCD_SIG) {
         const disk = b.readUInt16LE(4), cdDisk = b.readUInt16LE(6), nDisk = b.readUInt16LE(8), nTotal = b.readUInt16LE(10), cdSize = b.readUInt32LE(12);
         if (disk === 0 && cdDisk === 0 && nDisk === nTotal && cdSize <= p) return true;
@@ -370,19 +379,47 @@ function allPositions(buf, needle, from = 0, to = buf.length) {
 }
 
 /**
- * R4.1: a ZIP local-file header is "plausible" when its fixed fields have
- * values real archivers write (version, a known method, a sane non-empty
- * name). Random data almost never satisfies all of them, so a plausible
- * header that the central directory does not account for is treated as a
- * concatenated or embedded archive (fail closed), not as noise.
+ * R4.4 (HR2R1-F1): libarchive's streaming ZIP reader (bsdtar, from a file or
+ * stdin) bids on ANY of these leading signatures -- central-directory, local,
+ * EOCD, ZIP64-EOCD, data-descriptor/spanning marker, "PK00" -- and then scans
+ * FORWARD to the next local-file header wherever it is. A buffer that starts
+ * with one is therefore a ZIP candidate (the strict parser then fails closed
+ * unless it is a complete, supported archive).
  */
-function plausibleLocalHeader(buf, pos) {
+const ZIP_STREAM_LEAD_SIGS = new Set([0x02014b50, 0x04034b50, 0x06054b50, 0x06064b50, 0x08074b50, 0x30304b50]);
+function hasZipLeadSignature(buf) {
+  return buf.length >= 4 && ZIP_STREAM_LEAD_SIGS.has(buf.readUInt32LE(0));
+}
+
+/**
+ * R4.4 (HR2R1-F1; replaces R4.1's "plausible" header test): a local-file
+ * header a reader could extract from. STRUCTURAL only -- a known compression
+ * method and a name/extra area that fits the available bytes. The version
+ * byte and the name's content are NOT consulted (readers ignore them), and
+ * neither is the CRC or the deflate stream: streaming readers write data as
+ * they decode it (a truncated deflate stream still leaks the payload through
+ * bsdtar), so stream or CRC validity is not a safe gate.
+ * STORED (method 0) headers keep R4.1's plausibility test (version, a sane
+ * non-empty NUL-free name), so R4.4 never recognises fewer candidates than
+ * R4.3: stored data is plain bytes of this same buffer, already matched by the
+ * byte scan, and any archive inside it is recognised on its own. Not widening
+ * the stored case avoids false positives on machine code, where "PK\3\4"
+ * followed by a zero method field occurs by chance (a macOS system binary in
+ * the R4.4 corpus run). A local header at offset 0 is always a candidate
+ * (hasZipLeadSignature), whatever its fields.
+ * `available` is the number of bytes from `pos` to the end of the input (for
+ * the large-file path, where only a window is read).
+ */
+function extractableLocalHeader(buf, pos, available = buf.length - pos) {
   if (pos + 30 > buf.length || buf.readUInt32LE(pos) !== ZIP_LOCAL_SIG) return false;
-  if ((buf.readUInt16LE(pos + 4) & 0xff) > 63) return false;
-  if (!KNOWN_ZIP_METHODS.has(buf.readUInt16LE(pos + 8))) return false;
+  const method = buf.readUInt16LE(pos + 8);
+  if (!KNOWN_ZIP_METHODS.has(method)) return false;
   const nlen = buf.readUInt16LE(pos + 26);
-  if (nlen < 1 || nlen > 4096 || pos + 30 + nlen > buf.length) return false;
-  return buf.subarray(pos + 30, pos + 30 + nlen).indexOf(0) === -1;
+  if (method === 0) {
+    if ((buf.readUInt16LE(pos + 4) & 0xff) > 63 || nlen < 1 || nlen > 4096 || pos + 30 + nlen > buf.length) return false;
+    return buf.subarray(pos + 30, pos + 30 + nlen).indexOf(0) === -1;
+  }
+  return 30 + nlen + buf.readUInt16LE(pos + 28) <= available;
 }
 
 /** Entry paths are untrusted metadata: only ever displayed, never used to touch the filesystem. */
@@ -451,6 +488,12 @@ function parseZipCentralDirectory(buf, eocd, limits) {
     if (unixType === 0o120000) throw new ArchiveError(`link entry "${name}" is not supported`);
     if (unixType !== 0 && unixType !== 0o100000 && unixType !== 0o040000) throw new ArchiveError(`special entry "${name}" is not supported`);
     if (method !== 0 && method !== 8) throw new ArchiveError(`unsupported compression method ${method} for "${name}"`);
+    // R4.4 (HR2R1-F2): a STORED entry has no self-delimiting stream, so for a
+    // declared data descriptor a streaming reader finds the end of the data by
+    // SEARCHING it for a descriptor signature. An early fake descriptor then
+    // ends the entry and exposes whatever follows as a new local header -- an
+    // interpretation the central directory never shows. Fail closed.
+    if (method === 0 && flags & 0x8) throw new ArchiveError(`stored entry with a data descriptor "${name}" is not supported (streaming readers locate its end by searching the data; ambiguous)`);
     const lh = lho + delta;
     if (lh + 30 > cdStart || buf.readUInt32LE(lh) !== ZIP_LOCAL_SIG) throw new ArchiveError(`malformed ZIP (bad local header for "${name}")`);
     const lnlen = buf.readUInt16LE(lh + 26), lelen = buf.readUInt16LE(lh + 28);
@@ -556,16 +599,17 @@ function zipInterpretations(buf, limits) {
 /**
  * True when `buf` contains a ZIP structure a standard tool could read:
  * R4.2/R4.3 -- any structural EOCD interpretation (relative OR absolute
- * central-directory location, see zipStructuralViews), or a local-file header
- * at offset 0 (where streaming readers start, whatever its field values).
- * Recognition does NOT depend on local-header plausibility (R42-IV-F1); the
- * "plausible local header anywhere" test only adds candidates (more inputs
- * fail closed, never fewer).
+ * central-directory location, see zipStructuralViews); R4.4 -- a streaming-
+ * reader lead signature at offset 0 (hasZipLeadSignature, which includes a
+ * local-file header there), or an extractable local-file header ANYWHERE
+ * (extractableLocalHeader: structural, independent of version, name, CRC or
+ * deflate validity). Every candidate is then parsed strictly and fails closed
+ * unless it is a complete, supported archive.
  */
 function hasZipStructure(buf, limits = INSPECTION_LIMITS) {
-  if (buf.length >= 4 && buf.readUInt32LE(0) === ZIP_LOCAL_SIG) return true;
+  if (hasZipLeadSignature(buf)) return true;
   if (zipInterpretations(buf, limits).length) return true;
-  for (const l of allPositions(buf, ZIP_LOCAL_BYTES)) if (plausibleLocalHeader(buf, l)) return true;
+  for (const l of allPositions(buf, ZIP_LOCAL_BYTES)) if (extractableLocalHeader(buf, l)) return true;
   return false;
 }
 
@@ -648,7 +692,11 @@ function parseZipEntries(buf, limits) {
   }
   const prefixEnd = sorted.length ? sorted[0].start : z.cdStart;
   const regions = [];
-  if (prefixEnd > 0) regions.push({ label: '<zip prefix>', data: buf.subarray(0, prefixEnd) });
+  // R4.4: a lone 4-byte spanning marker (PK\7\8 or "PK00") before the first
+  // entry belongs to the archive itself; any other prefix is inspected (and a
+  // prefix that is itself a ZIP candidate fails closed).
+  const spanMarker = prefixEnd === 4 && (buf.readUInt32LE(0) === ZIP_DESC_SIG || buf.readUInt32LE(0) === 0x30304b50);
+  if (prefixEnd > 0 && !spanMarker) regions.push({ label: '<zip prefix>', data: buf.subarray(0, prefixEnd) });
   if (z.eocdEnd < buf.length) regions.push({ label: '<zip suffix>', data: buf.subarray(z.eocdEnd) });
   for (const m of z.meta) regions.push(m);
   return {
@@ -896,7 +944,7 @@ function assertTarHasNoForeignZip(buf, entries, limits) {
 function detectArchiveInBuffer(buf) {
   if (buf.length >= 3 && buf[0] === 0x1f && buf[1] === 0x8b) return 'gzip';
   if (isTarCandidate(buf, 0)) return 'tar';
-  if (buf.indexOf(ZIP_EOCD_BYTES) !== -1 || buf.indexOf(ZIP_LOCAL_BYTES) !== -1) {
+  if (hasZipLeadSignature(buf) || buf.indexOf(ZIP_EOCD_BYTES) !== -1 || buf.indexOf(ZIP_LOCAL_BYTES) !== -1) {
     try { if (hasZipStructure(buf)) return 'zip'; } catch { return 'zip'; } // too many candidates: inspect (and fail closed)
   }
   return null;
@@ -1055,7 +1103,7 @@ function inspectArtifacts(root, limits = INSPECTION_LIMITS) {
     } catch (e) { errors.push({ file: shown, error: `unreadable (${e.code || e.message})` }); return; }
     const gzHead = head.length >= 3 && head[0] === 0x1f && head[1] === 0x8b;
     const tarHead = isTarCandidate(head, 0);
-    const zipSigs = scanRes.zipPositions.length > 0 || scanRes.zipOverflow;
+    const zipSigs = scanRes.zipPositions.length > 0 || scanRes.zipOverflow || hasZipLeadSignature(head); // R4.4: streaming lead
     if (!gzHead && !tarHead && !zipSigs) return;
     if (size > limits.maxArchiveBytes) {
       let tooLarge = gzHead || tarHead;
