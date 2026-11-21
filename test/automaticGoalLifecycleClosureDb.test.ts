@@ -257,8 +257,17 @@ async function main() {
     check('14a. remainingThisWeek = 2 after first completion (1 completed, 0 committed, target 3)', elig8.status === 'OK' && elig8.candidates.find((c) => c.goalActivityId === ga!.id)?.remainingThisWeek === 2);
     const discovery8 = await eligibility(TUE);
     check('14b. CENTRAL CLOSURE INVARIANT: completion of one occurrence does NOT terminate the ongoing GoalActivity -- it becomes eligible again', discovery8.status === 'OK' && discovery8.candidates.some((c) => c.goalActivityId === ga!.id));
-    const suggestions8 = await autoSuggestions(TUE, []);
-    check('14c. Plan Day bootstrap can surface it again', suggestions8.status === 'OK' && suggestions8.suggestions.some((s) => s.goalActivityId === ga!.id));
+    // AURA-HPG-FIX-01 (V1-05) -- the activity is ONCE_PER_DAY (default) and
+    // Tuesday already holds its completed occurrence, so a Tuesday
+    // suggestion could only be refused at acceptance (DAILY_CAPACITY_EXCEEDED).
+    // The closure invariant (completion does not terminate the activity) is
+    // therefore asserted for the NEXT planning date -- the same Wednesday
+    // Phase 15 below goes on to plan -- and the same-day suggestion is
+    // withheld.
+    const suggestions8 = await autoSuggestions(WED, []);
+    check('14c. Plan Day bootstrap can surface it again (next planning date)', suggestions8.status === 'OK' && suggestions8.suggestions.some((s) => s.goalActivityId === ga!.id));
+    const suggestions8SameDay = await autoSuggestions(TUE, []);
+    check('14d. HPG-FIX-01: not re-suggested for the SAME day that already holds its once-per-day occurrence', suggestions8SameDay.status === 'OK' && !suggestions8SameDay.suggestions.some((s) => s.goalActivityId === ga!.id));
 
     console.log('=== PHASE 15: SECOND OCCURRENCE IDENTITY (next planning date) ===');
     const intentId2 = encodeGoalDemandIntentId(WED, ga!.id);

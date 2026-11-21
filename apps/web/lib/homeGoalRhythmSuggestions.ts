@@ -71,6 +71,10 @@ export interface HomeGoalRhythmSuggestion {
    * handoff -- a component builds its own URLSearchParams/href from this,
    * mirroring GoalDetailClient.tsx's own handlePlanWithAura convention. */
   planHandoff: { fromGoal: string; activities: string };
+  /** AURA-HPG-FIX-01 (V1-05) -- carried from GoalDemandCandidate.scheduledOnPlanningDate:
+   * today's once-per-day session already exists (planned or done), so a
+   * "today" handoff would only be refused. Absent/false = no such session. */
+  scheduledToday?: boolean;
 }
 
 /** Pure, no DB, no Date.now() -- exported so a test can exercise the exact
@@ -99,6 +103,7 @@ export function mapGoalDemandToHomeRhythmSuggestions(candidates: readonly GoalDe
     targetPerWeek: candidate.rhythm.targetPerWeek,
     progressLabel: formatRhythmRemainingLabel(candidate.remainingThisWeek, candidate.rhythm.targetPerWeek),
     planHandoff: { fromGoal: candidate.goalId, activities: candidate.goalActivityId },
+    ...(candidate.scheduledOnPlanningDate === true ? { scheduledToday: true } : {}),
   }));
 }
 
@@ -177,4 +182,33 @@ export function excludeGoalRhythmSuggestionsDuplicatingActivities(
   activityIdsAlreadyShownOnHome: ReadonlySet<string>
 ): HomeGoalRhythmSuggestion[] {
   return suggestions.filter((s) => s.activityId === null || !activityIdsAlreadyShownOnHome.has(s.activityId));
+}
+
+/**
+ * AURA-HPG-FIX-01 (V1-05) -- which actions the Home rhythm card offers for
+ * one suggestion. Pure so the decision is testable without rendering.
+ *  - `todayHandoff`: the Plan My Day (today) handoff is offered at all
+ *    (as "Just today" next to the weekly review, or as the single "Plan it").
+ *  - `weeklyReview`: the multi-day review is the primary action.
+ * When today's session already exists, the today handoff is withheld and
+ * the weekly review (future days only) becomes the way to plan the rest.
+ */
+export function resolveGoalRhythmCardActions(suggestion: Pick<HomeGoalRhythmSuggestion, 'remainingThisWeek' | 'scheduledToday'>, offerWeeklyReviewByCount: boolean): {
+  todayHandoff: 'JUST_TODAY' | 'PLAN_IT' | null;
+  weeklyReview: boolean;
+  primaryLabel: string;
+  scheduledTodayNote: string | null;
+} {
+  if (suggestion.scheduledToday === true) {
+    return {
+      todayHandoff: null,
+      weeklyReview: true,
+      primaryLabel: suggestion.remainingThisWeek === 1 ? 'Plan another day' : `Plan remaining ${suggestion.remainingThisWeek}`,
+      scheduledTodayNote: "Today's session is already planned.",
+    };
+  }
+  if (offerWeeklyReviewByCount) {
+    return { todayHandoff: 'JUST_TODAY', weeklyReview: true, primaryLabel: `Plan remaining ${suggestion.remainingThisWeek}`, scheduledTodayNote: null };
+  }
+  return { todayHandoff: 'PLAN_IT', weeklyReview: false, primaryLabel: 'Plan it', scheduledTodayNote: null };
 }

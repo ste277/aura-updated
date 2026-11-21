@@ -8,6 +8,7 @@ import { buildPersonalMuhurtaContextForUser } from '../../../../../lib/natalCont
 import { runTimingSearchWithDailyRhythm } from '../../../../../lib/timingSearchDailyRhythm';
 import { createRealGoalDemandCandidatesDeps } from '../../../../../lib/goalDemandCandidates';
 import { generateWeeklyRhythmProposal, type WeeklyRhythmProposalDeps } from '../../../../../lib/goalRhythmWeeklyProposal';
+import { createRealDayConstructorOrchestratorDeps } from '../../../../../lib/dayConstructorOrchestrator';
 import type { DailyRhythmPreferencesInput } from '../../../../../lib/dailyRhythmScheduling';
 import { DailyAssistantContext } from '../../../../../../../packages/recommendation/src/dailyAssistant';
 
@@ -61,9 +62,15 @@ export async function POST(req: NextRequest) {
     workDays: user.dailyRhythmWorkDays ?? [],
   };
 
+  // AURA-HPG-FIX-01 -- the same existing-plan and availability loaders the
+  // Day Constructor preview (and so weekly acceptance) uses, so proposals
+  // are filtered by the rules acceptance will apply.
+  const constructorDeps = createRealDayConstructorOrchestratorDeps(user, now);
   const deps: WeeklyRhythmProposalDeps = {
     ...createRealGoalDemandCandidatesDeps(),
     runFind: runTimingSearchWithDailyRhythm,
+    loadBlockingPlans: constructorDeps.loadBlockingPlans,
+    loadAvailabilityConfiguration: constructorDeps.loadAvailabilityConfiguration,
   };
 
   const result = await generateWeeklyRhythmProposal(deps, {

@@ -48,6 +48,8 @@ import { durationMinutesFor, GENERIC_DURATION_FALLBACK_MINUTES } from './dayBuil
 import { loadEligibleGoalDemand, type GoalDemandCandidatesDeps, type GoalDemandCandidate } from './goalDemandCandidates';
 import type { DailyRhythmPreferencesInput } from './dailyRhythmScheduling';
 import type { TimingSearchResponseWithDailyRhythm } from './timingSearchDailyRhythm';
+import { isActivePlanBlocker, type PlanBlockerCandidate } from './planBlockerLifecycle';
+import { resolveAvailability, type AvailabilityConfiguration } from './availabilityContext';
 
 /** HGR2 established GOAL_RHYTHM_VISIBLE_CAP = 3 for Home's own card; this
  * reuses the exact same number as the proposal count cap, rather than
@@ -117,6 +119,14 @@ export type WeeklyRhythmProposalResult =
 
 export interface WeeklyRhythmProposalDeps extends GoalDemandCandidatesDeps {
   runFind: (request: TimingSearchRequest, timezone: string, dailyRhythmPrefs: DailyRhythmPreferencesInput) => TimingSearchResponseWithDailyRhythm;
+  /** AURA-HPG-FIX-01 -- the user's existing plans overlapping `bounds`
+   * (same loader/shape the Day Constructor preview uses to place a FIXED
+   * session, so a proposal never offers a time acceptance would reject as
+   * TIME_NO_LONGER_AVAILABLE). Optional only so older fakes compile; the
+   * real route always wires it. */
+  loadBlockingPlans?: (bounds: { from: Date; to: Date }) => Promise<PlanBlockerCandidate[]>;
+  /** AURA-HPG-FIX-01 -- same source weekly acceptance's OUTSIDE_AVAILABILITY check reads. */
+  loadAvailabilityConfiguration?: () => Promise<AvailabilityConfiguration>;
 }
 
 export interface WeeklyRhythmProposalParams {
@@ -183,6 +193,47 @@ export function selectDistinctDayProposals(
  * (COMPLETED or COMMITTED) of this GoalActivity -- read from the SAME
  * per-activity rhythm facts loadEligibleGoalDemand itself consults, never
  * a second, independently-maintained notion of "already scheduled". */
+/**
+ * AURA-HPG-FIX-01 -- pure pre-selection filter applying, to every ranked
+ * candidate, the same hard rules weekly acceptance enforces, so the review
+ * dialog never proposes a session the user can only have rejected:
+ *   - TIME_ALREADY_ELAPSED: start must be strictly after `now`;
+ *   - TIME_NO_LONGER_AVAILABLE: no overlap with an active existing plan
+ *     (isActivePlanBlocker -- UPCOMING not yet ended, or LOGGED);
+ *   - OUTSIDE_AVAILABILITY: inside a usable window when availability is
+ *     configured (unconfigured = no boundary, same as acceptance).
+ * Ranking order is preserved exactly; nothing is re-scored.
+ */
+export function filterProposableCandidates(
+  rankedCandidates: readonly TimingCandidate[],
+  input: {
+    now: Date;
+    timezone: string;
+    blockers: readonly PlanBlockerCandidate[];
+    availability: AvailabilityConfiguration | null;
+  }
+): TimingCandidate[] {
+  const nowMs = input.now.getTime();
+  const activeBlockers = input.blockers.filter((plan) => isActivePlanBlocker(plan, input.now));
+  const availabilityByDate = new Map<string, ReturnType<typeof resolveAvailability>>();
+  return rankedCandidates.filter((candidate) => {
+    const start = new Date(candidate.start).getTime();
+    const end = new Date(candidate.end).getTime();
+    if (!(start > nowMs)) return false;
+    if (activeBlockers.some((plan) => plan.start.getTime() < end && plan.end.getTime() > start)) return false;
+    if (input.availability) {
+      const localDate = localDateOfInstant(input.timezone, candidate.start);
+      let resolution = availabilityByDate.get(localDate);
+      if (!resolution) {
+        resolution = resolveAvailability({ targetDate: localDate, timezone: input.timezone, now: input.now, configuration: input.availability });
+        availabilityByDate.set(localDate, resolution);
+      }
+      if (resolution.status === 'CONFIGURED' && !resolution.usableWindows.some((w) => start >= w.start.getTime() && end <= w.end.getTime())) return false;
+    }
+    return true;
+  });
+}
+
 function occupiedLocalDates(facts: ReadonlyMap<string, readonly { localDate: string; contribution: 'COMPLETED' | 'COMMITTED' | 'NONE' }[]>, goalActivityId: string): Set<string> {
   const rows = facts.get(goalActivityId) ?? [];
   return new Set(rows.filter((row) => row.contribution !== 'NONE').map((row) => row.localDate));
@@ -236,8 +287,42 @@ export async function generateWeeklyRhythmProposal(deps: WeeklyRhythmProposalDep
     return { status: 'SEARCH_FAILED' };
   }
 
-  const seedOccupied = occupiedLocalDates(facts, params.goalActivityId);
-  const selected = selectDistinctDayProposals(response.candidates, params.timezone, requestedCount, seedOccupied);
+  // AURA-HPG-FIX-01 -- the rhythm facts' `localDate` is the occurrence's
+  // scheduled WEEK start whenever a week snapshot exists (every occurrence
+  // created since that snapshot shipped), so seeding from it marked the
+  // week's Monday "occupied" instead of the real session day -- which is
+  // how a day that already had a completed session was proposed again.
+  // Prefer the true per-day occupancy (same attribution as the daily
+  // guard); fall back to the legacy facts only when it is not wired.
+  let seedOccupied: Set<string>;
+  if (deps.loadDailyOccupancy) {
+    try {
+      const occupancy = await deps.loadDailyOccupancy(params.userId, [params.goalActivityId], params.timezone);
+      seedOccupied = new Set(occupancy.get(params.goalActivityId)?.days ?? []);
+    } catch {
+      return { status: 'SEARCH_FAILED' };
+    }
+  } else {
+    seedOccupied = occupiedLocalDates(facts, params.goalActivityId);
+  }
+
+  let blockers: PlanBlockerCandidate[] = [];
+  let availability: AvailabilityConfiguration | null = null;
+  if (response.candidates.length > 0) {
+    try {
+      if (deps.loadBlockingPlans) {
+        const from = new Date(Math.min(...response.candidates.map((c) => new Date(c.start).getTime())));
+        const to = new Date(Math.max(...response.candidates.map((c) => new Date(c.end).getTime())));
+        blockers = await deps.loadBlockingPlans({ from, to });
+      }
+      if (deps.loadAvailabilityConfiguration) availability = await deps.loadAvailabilityConfiguration();
+    } catch {
+      return { status: 'SEARCH_FAILED' };
+    }
+  }
+
+  const proposable = filterProposableCandidates(response.candidates, { now: params.context.now, timezone: params.timezone, blockers, availability });
+  const selected = selectDistinctDayProposals(proposable, params.timezone, requestedCount, seedOccupied);
 
   const proposals: WeeklyRhythmProposalItem[] = selected.map((c) => ({
     localDate: localDateOfInstant(params.timezone, c.start),

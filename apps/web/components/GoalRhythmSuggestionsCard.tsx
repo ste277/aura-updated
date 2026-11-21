@@ -3,7 +3,7 @@
 import React, { useState } from 'react';
 import { colors, spacing, typography } from './theme';
 import { SectionHeader, SurfaceCard, TextButton, PrimaryButton, SecondaryButton } from './ui';
-import { computeGoalRhythmHomeView, type HomeGoalRhythmSuggestion } from '../lib/homeGoalRhythmSuggestions';
+import { computeGoalRhythmHomeView, resolveGoalRhythmCardActions, type HomeGoalRhythmSuggestion } from '../lib/homeGoalRhythmSuggestions';
 import { shouldOfferWeeklyReview } from '../lib/weeklyPlanReviewClient';
 import { WeeklyPlanReviewModal } from './WeeklyPlanReviewModal';
 
@@ -69,11 +69,14 @@ export function GoalRhythmSuggestionsCard({
   dismissedIds,
   onDismiss,
   timezone,
+  onWeeklyReviewClosed,
 }: {
   suggestions: readonly HomeGoalRhythmSuggestion[];
   dismissedIds: ReadonlySet<string>;
   onDismiss: (goalActivityId: string) => void;
   timezone: string;
+  /** AURA-HPG-FIX-01 (V1-09) -- lets Home refresh counts after the review. */
+  onWeeklyReviewClosed?: () => void;
 }) {
   const [expanded, setExpanded] = useState(false);
   const [reviewingGoalActivityId, setReviewingGoalActivityId] = useState<string | null>(null);
@@ -94,28 +97,33 @@ export function GoalRhythmSuggestionsCard({
             const params = new URLSearchParams({ fromGoal: suggestion.planHandoff.fromGoal, activities: suggestion.planHandoff.activities });
             window.location.href = `/plan-day?${params.toString()}`;
           };
-          const offerWeeklyReview = shouldOfferWeeklyReview(suggestion.remainingThisWeek);
+          // AURA-HPG-FIX-01 (V1-05) -- withhold the today handoff when today's
+          // once-per-day session already exists (it would only be refused).
+          const actions = resolveGoalRhythmCardActions(suggestion, shouldOfferWeeklyReview(suggestion.remainingThisWeek));
           return (
             <SurfaceCard key={suggestion.goalActivityId} padding={spacing.md}>
               <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: spacing.sm, flexWrap: 'wrap' }}>
                 <div>
                   <div style={{ ...typography.bodyStrong, color: colors.textPrimary }}>{suggestion.title}</div>
                   <div style={{ ...typography.caption, color: colors.textSecondary, marginTop: 2 }}>{suggestion.progressLabel}</div>
+                  {actions.scheduledTodayNote && (
+                    <div style={{ ...typography.caption, color: colors.textMuted, marginTop: 2 }}>{actions.scheduledTodayNote}</div>
+                  )}
                 </div>
                 <div style={{ display: 'flex', alignItems: 'center', gap: spacing.sm, flexShrink: 0, flexWrap: 'wrap' }}>
                   <TextButton onClick={() => onDismiss(suggestion.goalActivityId)} style={{ minHeight: 44, padding: '0 8px' }}>
                     Not now
                   </TextButton>
-                  {offerWeeklyReview && (
+                  {actions.todayHandoff === 'JUST_TODAY' && (
                     <SecondaryButton onClick={navigateToPlanDay} style={{ minHeight: 44 }}>
                       Just today
                     </SecondaryButton>
                   )}
                   <PrimaryButton
-                    onClick={offerWeeklyReview ? () => setReviewingGoalActivityId(suggestion.goalActivityId) : navigateToPlanDay}
+                    onClick={actions.weeklyReview ? () => setReviewingGoalActivityId(suggestion.goalActivityId) : navigateToPlanDay}
                     style={{ minHeight: 44, padding: '0 14px' }}
                   >
-                    {offerWeeklyReview ? `Plan remaining ${suggestion.remainingThisWeek}` : 'Plan it'}
+                    {actions.primaryLabel}
                   </PrimaryButton>
                 </div>
               </div>
@@ -137,7 +145,12 @@ export function GoalRhythmSuggestionsCard({
           goalActivityId={reviewingSuggestion.goalActivityId}
           activityTitleFallback={reviewingSuggestion.title}
           timezone={timezone}
-          onClose={() => setReviewingGoalActivityId(null)}
+          onClose={() => {
+            setReviewingGoalActivityId(null);
+            // The review may have accepted sessions; refresh so the counts
+            // and actions reflect the new planning state immediately.
+            onWeeklyReviewClosed?.();
+          }}
         />
       )}
     </div>

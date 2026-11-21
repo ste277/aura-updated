@@ -81,7 +81,12 @@ function depsFor(
   return { deps, findCalls };
 }
 
-const CONTEXT: DailyAssistantContext = { now: new Date('2026-11-06T04:00:00.000Z'), latitude: 12.97, longitude: 77.59, timezone: TZ, tzOffsetMinutes: 330 };
+// AURA-HPG-FIX-01 -- `now` moved from 04:00Z to 00:00Z (05:30 IST, still
+// planning date 2026-11-06): several fixtures below propose 02:00Z on
+// 2026-11-06, which was BEFORE the old `now`. Proposals now exclude elapsed
+// times (the same TIME_ALREADY_ELAPSED rule weekly acceptance enforces), so
+// the fixture clock must precede the candidates it expects to be proposed.
+const CONTEXT: DailyAssistantContext = { now: new Date('2026-11-06T00:00:00.000Z'), latitude: 12.97, longitude: 77.59, timezone: TZ, tzOffsetMinutes: 330 };
 const PREFS: DailyRhythmPreferencesInput = { workStart: null, workEnd: null, workDays: [] };
 
 async function run(deps: WeeklyRhythmProposalDeps, goalActivityId: string, planningLocalDate: string): Promise<WeeklyRhythmProposalResult> {
