@@ -127,45 +127,77 @@ function readExifOrientation(b: Uint8Array, start: number, end: number): number 
 type JpegScan =
   | { kind: 'found'; info: ImageHeaderInfo }
   | { kind: 'corrupt' }
-  | { kind: 'more'; offset: number; orientation: number };
+  | { kind: 'more'; offset: number; orientation: number; sof: ImageHeaderInfo | null };
+
+/** SOFn: frame headers browsers decode or reject (C0-C3, C5-C7, C9-CB, CD-CF). */
+const isSofMarker = (m: number) => m >= 0xc0 && m <= 0xcf && m !== 0xc4 && m !== 0xc8 && m !== 0xcc;
 
 /**
- * AURA-PALM-G5-C5 (F-1): walk JPEG markers in `b`, which holds the file bytes
- * [base, base + b.length), starting at absolute offset `start`. Segment bodies
- * are skipped by their declared length and never buffered beyond the window.
- * The SOF and the first APP1 (EXIF orientation) are only interpreted when the
- * whole segment is inside the window; otherwise the caller re-reads from the
- * segment start, so a straddling header is never parsed truncated.
+ * AURA-PALM-G5-C7 (C6-F1): the ONLY markers allowed between SOI and SOS,
+ * besides the single SOF and 0xFF fill bytes: APP0-APP15, COM, DQT, DHT, DRI
+ * and DAC -- the table/misc segments ITU T.81 B.2.4 permits there. Every one
+ * carries a 2-byte length, so every decoder skips them identically.
+ *
+ * Everything else is rejected, because decoders disagree about it:
+ * RST0-7 (D0-D7) and TEM (01) are length-less to libjpeg but WebKit/ImageIO
+ * skips a 2-byte length after them, so a crafted file showed the validator a
+ * fake 300 x 300 SOF while ImageIO decoded the real 12000 x 400 one (C6-F1).
+ * A second SOI, DNL (DC), DHP/EXP (DE/DF), JPG (C8), JPGn (F0-FD), reserved
+ * (02-BF) and stuffed 0x00 have no legitimate place before SOS in a baseline
+ * or progressive photo; libjpeg already refuses them there.
  */
-function scanJpeg(b: Uint8Array, base: number, start: number, orientation: number, atEof: boolean): JpegScan {
+const isAllowedTableMarker = (m: number) =>
+  (m >= 0xe0 && m <= 0xef) || m === 0xfe || m === 0xdb || m === 0xc4 || m === 0xdd || m === 0xcc;
+
+/**
+ * AURA-PALM-G5-C5 (F-1) / C7 (C6-F1): walk JPEG markers in `b`, which holds
+ * the file bytes [base, base + b.length), starting at absolute offset
+ * `start`, from SOI to the first SOS. Segment bodies are skipped by their
+ * declared length and never buffered beyond the window. The SOF and the first
+ * APP1 (EXIF orientation) are only interpreted when the whole segment is
+ * inside the window; otherwise the caller re-reads from the segment start, so
+ * a straddling header is never parsed truncated.
+ *
+ * C7: fail closed on any marker outside the allowlist, and require EXACTLY ONE
+ * SOF before SOS (a second SOF is ambiguous: decoders differ on which wins).
+ * The dimensions are only reported once SOS is reached, i.e. once the whole
+ * header sequence a decoder will act on has been checked.
+ */
+function scanJpeg(b: Uint8Array, base: number, start: number, orientation: number, sofIn: ImageHeaderInfo | null, atEof: boolean): JpegScan {
   const corrupt: JpegScan = { kind: 'corrupt' };
-  const more = (at: number): JpegScan => (atEof || base + at <= start ? corrupt : { kind: 'more', offset: base + at, orientation });
+  let sof = sofIn;
+  const more = (at: number): JpegScan => (atEof || base + at <= start ? corrupt : { kind: 'more', offset: base + at, orientation, sof });
   let i = start - base;
   for (;;) {
-    if (i + 4 > b.length) return more(i);
+    if (i + 2 > b.length) return more(i);
     if (b[i] !== 0xff) return corrupt; // lost sync
     const marker = b[i + 1];
     if (marker === 0xff) { i++; continue; } // fill byte
-    if (marker === 0xd8 || marker === 0x01 || (marker >= 0xd0 && marker <= 0xd7)) { i += 2; continue; }
-    if (marker === 0xd9 || marker === 0xda || marker === 0x00) return corrupt; // EOI / SOS before any SOF, or a stuffed byte
+    if (marker === 0xda) return sof ? { kind: 'found', info: sof } : corrupt; // SOS: header sequence complete
+    const sofHere = isSofMarker(marker);
+    if (!sofHere && !isAllowedTableMarker(marker)) return corrupt; // RSTn, TEM, SOI, EOI, DNL, JPGn, reserved, 0x00 ...
+    if (sofHere && sof) return corrupt; // a second frame header before SOS
+    if (i + 4 > b.length) return more(i);
     const len = u16be(b, i + 2);
     if (len < 2) return corrupt;
     const segEnd = i + 2 + len;
-    const isSof = marker >= 0xc0 && marker <= 0xcf && marker !== 0xc4 && marker !== 0xc8 && marker !== 0xcc;
-    const wantExif = marker === 0xe1 && orientation === 1;
-    if ((isSof || wantExif) && segEnd > b.length) return more(i);
+    const wantExif = marker === 0xe1 && orientation === 1 && !sof;
+    if ((sofHere || wantExif) && segEnd > b.length) return more(i);
     if (wantExif) orientation = readExifOrientation(b, i + 4, segEnd);
-    if (isSof) {
+    if (sofHere) {
       // precision(1) height(2) width(2) components(1) at least.
       if (len < 8) return corrupt;
-      return { kind: 'found', info: { height: u16be(b, i + 5), width: u16be(b, i + 7), exifOrientation: orientation } };
+      sof = { height: u16be(b, i + 5), width: u16be(b, i + 7), exifOrientation: orientation };
+      // An out-of-limit frame header is rejected at once: nothing later in
+      // the file can make it acceptable, so there is no need to read on.
+      if (checkDimensions(sof.width, sof.height)) return { kind: 'found', info: sof };
     }
     i = segEnd;
   }
 }
 
 function parseJpeg(b: Uint8Array): ImageHeaderInfo | null {
-  const r = scanJpeg(b, 0, 2, 1, true);
+  const r = scanJpeg(b, 0, 2, 1, null, true);
   return r.kind === 'found' ? r.info : null;
 }
 
@@ -177,7 +209,8 @@ function parseJpeg(b: Uint8Array): ImageHeaderInfo | null {
  */
 async function locateJpegHeader(file: PalmBlobLike, first: Uint8Array): Promise<ImageHeaderInfo | null> {
   const L = PALM_IMAGE_LIMITS;
-  let scan = scanJpeg(first, 0, 2, 1, first.length >= file.size);
+  // A JPEG must start with exactly one SOI (FF D8); the walk begins after it.
+  let scan = scanJpeg(first, 0, 2, 1, null, first.length >= file.size);
   let reads = 1;
   while (scan.kind === 'more') {
     reads++;
@@ -186,7 +219,7 @@ async function locateJpegHeader(file: PalmBlobLike, first: Uint8Array): Promise<
     const end = Math.min(file.size, base + L.headerReadBytes);
     const buf = new Uint8Array(await file.slice(base, end).arrayBuffer());
     if (buf.length !== end - base) return null; // short read
-    scan = scanJpeg(buf, base, base, scan.orientation, end >= file.size);
+    scan = scanJpeg(buf, base, base, scan.orientation, scan.sof, end >= file.size);
   }
   return scan.kind === 'found' ? scan.info : null;
 }
