@@ -1,6 +1,9 @@
 {
   "name": "auraschedule-web",
   "private": true,
+  "engines": {
+    "node": "24.x"
+  },
   "version": "0.0.1",
   "scripts": {
     "dev": "next dev",
@@ -28,7 +31,7 @@
     "web-push": "^3.6.7"
   },
   "devDependencies": {
-    "@types/node": "^20.14.0",
+    "@types/node": "^24.19.2",
     "@types/pg": "^8.11.6",
     "@types/react": "^18.3.3",
     "@types/react-dom": "^18.3.0",
