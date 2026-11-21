@@ -24,13 +24,16 @@
 //     recognised by content, including prefixed/suffixed ZIPs -- are inspected
 //     entry by entry in memory, nested up to a fixed depth, with every
 //     decompression capped on actual output; structures it cannot fully and
-//     unambiguously inspect fail closed. Other archive and compression formats
-//     are not inspected (see the archive section below).
+//     unambiguously inspect fail closed. Other IDENTIFIABLE archive and
+//     compression formats (xz, 7z, bzip2, zstd, lz4, rar, cab, and gzip
+//     embedded after offset 0) are not inspected and FAIL CLOSED wherever they
+//     occur, top-level or inside an archive (G5-D7-A; see the archive section).
 //   - The OK line states exactly what was inspected (files, bytes, archives,
 //     entries, decompressed bytes, roots, absent optional roots).
 // What it does NOT guarantee: detection of payloads stored in other
-// encodings or formats (base64/data URLs, UTF-16, other compressors, custom
-// obfuscation, renamed signature strings) -- detection is signature-based.
+// encodings or in formats WITHOUT a reliable signature (base64/data URLs,
+// UTF-16, brotli, raw deflate, lzma "alone", custom obfuscation, renamed
+// signature strings) -- detection is signature-based.
 // Coverage is of the directories it is run on: the Docker build does not run
 // this scanner (open finding R2-N5), and platform post-build packaging (e.g.
 // Vercel's own output step) is outside its view.
@@ -222,9 +225,26 @@ const TFLITE_IDENTIFIER = Buffer.from('TFL3'); // FlatBuffer file identifier at 
 // entries, non-zero tar padding or unused header fields, global pax headers,
 // pax size/link/sparse overrides, gzip trailing data, nesting beyond the
 // depth limit, and any resource-limit violation.
-// NOT supported (therefore not inspected): other compressors (bzip2, xz,
-// zstd, brotli, lzma), 7z/rar/cab, ZIP64 (fails closed), and payloads that are
-// encoded rather than archived (base64, UTF-16, ...): see the file header.
+// G5-D7-A -- IDENTIFIABLE BUT NOT INSPECTABLE formats FAIL CLOSED (they are
+// never silently skipped): xz, 7z, bzip2, zstd, lz4 (frame), rar (v4/v5) and
+// cab, at offset 0 or EMBEDDED anywhere in an inspected buffer, and a gzip
+// stream embedded at offset > 0 (gzip at offset 0 is a supported container,
+// above). "Inspected buffer" = every regular file, every archive entry and
+// every container region (ZIP prefix/suffix/comments/extra fields, gzip header
+// fields, decompressed gzip streams), so archive members are covered too.
+// Detection is a magic number PLUS a format-specific structural check, chosen
+// so that coincidental bytes (machine code, ASCII text) do not match: xz and
+// 7z header CRCs, rar v4/v5 header CRCs, the bzip2 block magic with a sane
+// origin pointer, the zstd frame and first block header, the lz4 frame
+// header checksum (xxh32), cab header fields, and for embedded gzip a bounded
+// partial inflate producing >= FOREIGN_MIN_OUTPUT bytes. ZIP entries using
+// these compression methods already fail closed (unsupported method).
+// RESIDUAL (not detectable by signature, documented limitation R3-N2):
+// formats without a reliable magic number (brotli, raw deflate/zlib, lzma
+// "alone", lz4 legacy/raw blocks, Snappy), embedded gzip streams decoding to
+// fewer than FOREIGN_MIN_OUTPUT bytes, ZIP64 (fails closed), and payloads that
+// are encoded rather than archived (base64, UTF-16, custom transforms): see
+// the file header.
 const ZIP_EOCD_SIG = 0x06054b50;
 const ZIP_CD_SIG = 0x02014b50;
 const ZIP_LOCAL_SIG = 0x04034b50;
@@ -271,6 +291,9 @@ function inspectFileBytes(file, size, sigs, limits) {
   const found = new Set();
   const zipPositions = new Set();
   let zipOverflow = false;
+  const foreignPositions = [];
+  const foreignSeen = new Set();
+  let foreignOverflow = false;
   const zipSigs = [Buffer.from([0x50, 0x4b, 0x03, 0x04]), Buffer.from([0x50, 0x4b, 0x05, 0x06])];
   const fd = fs.openSync(file, 'r');
   try {
@@ -297,6 +320,16 @@ function inspectFileBytes(file, size, sigs, limits) {
           i = view.indexOf(zs, i + 1);
         }
       }
+      // G5-D7-A: magic numbers of identifiable, uninspectable formats (validated later).
+      FOREIGN_FORMATS.forEach((fmt, f) => {
+        let i = foreignOverflow ? -1 : view.indexOf(fmt.magic);
+        while (i !== -1) {
+          const key = `${f}:${viewStart + i}`;
+          if (!foreignSeen.has(key)) { foreignSeen.add(key); foreignPositions.push({ f, pos: viewStart + i }); }
+          if (foreignPositions.length > MAX_SIG_POSITIONS) { foreignOverflow = true; break; }
+          i = view.indexOf(fmt.magic, i + 1);
+        }
+      });
       pos += n;
       carry = Math.min(overlap, view.length);
       view.copy(buf, 0, view.length - carry, view.length);
@@ -304,7 +337,7 @@ function inspectFileBytes(file, size, sigs, limits) {
   } finally {
     fs.closeSync(fd);
   }
-  return { labels: [...found], zipPositions: [...zipPositions], zipOverflow };
+  return { labels: [...found], zipPositions: [...zipPositions], zipOverflow, foreignPositions, foreignOverflow };
 }
 
 /** For files too large to load: does any recorded ZIP signature position look like a real ZIP structure? */
@@ -420,6 +453,168 @@ function extractableLocalHeader(buf, pos, available = buf.length - pos) {
     return buf.subarray(pos + 30, pos + 30 + nlen).indexOf(0) === -1;
   }
   return 30 + nlen + buf.readUInt16LE(pos + 28) <= available;
+}
+
+// ------------------------------------------------------------------ G5-D7-A: identifiable, uninspectable formats
+// Probe parameters (not inspection limits): embedded-gzip probes inflate at
+// most FOREIGN_PROBE_INPUT input bytes into at most FOREIGN_PROBE_OUTPUT
+// output bytes; a stream counts when it decodes to >= FOREIGN_MIN_OUTPUT
+// bytes without error. Large files are probed through FOREIGN_WINDOW reads.
+const FOREIGN_PROBE_INPUT = 64 * 1024;
+const FOREIGN_PROBE_OUTPUT = 64 * 1024;
+const FOREIGN_MIN_OUTPUT = 64;
+const FOREIGN_WINDOW = 256 * 1024;
+
+/** xxHash32 (lz4 frame header checksum). */
+function xxh32(b, seed = 0) {
+  const P1 = 2654435761, P2 = 2246822519, P3 = 3266489917, P4 = 668265263, P5 = 374761393;
+  const rotl = (x, r) => ((x << r) | (x >>> (32 - r))) >>> 0;
+  const mul = (x, y) => Math.imul(x, y) >>> 0;
+  const n = b.length;
+  let i = 0, h;
+  if (n >= 16) {
+    let v1 = (seed + P1 + P2) >>> 0, v2 = (seed + P2) >>> 0, v3 = seed >>> 0, v4 = (seed - P1) >>> 0;
+    const round = (v, x) => mul(rotl((v + mul(x, P2)) >>> 0, 13), P1);
+    for (; i + 16 <= n; i += 16) { v1 = round(v1, b.readUInt32LE(i)); v2 = round(v2, b.readUInt32LE(i + 4)); v3 = round(v3, b.readUInt32LE(i + 8)); v4 = round(v4, b.readUInt32LE(i + 12)); }
+    h = (rotl(v1, 1) + rotl(v2, 7) + rotl(v3, 12) + rotl(v4, 18)) >>> 0;
+  } else h = (seed + P5) >>> 0;
+  h = (h + n) >>> 0;
+  for (; i + 4 <= n; i += 4) h = mul(rotl((h + mul(b.readUInt32LE(i), P3)) >>> 0, 17), P4);
+  for (; i < n; i++) h = mul(rotl((h + mul(b[i], P5)) >>> 0, 11), P1);
+  h = mul(h ^ (h >>> 15), P2); h = mul(h ^ (h >>> 13), P3);
+  return (h ^ (h >>> 16)) >>> 0;
+}
+
+/** Embedded gzip member: valid header and a deflate stream that really decodes (bounded). */
+function validGzipAt(buf, p) {
+  if (p + 18 > buf.length || buf[p + 2] !== 8 || buf[p + 3] & 0xe0) return false;
+  const flg = buf[p + 3];
+  let q = p + 10;
+  if (flg & 0x04) { if (q + 2 > buf.length) return false; q += 2 + buf.readUInt16LE(q); }
+  for (const bit of [0x08, 0x10]) if (flg & bit) { const z = buf.indexOf(0, q); if (z === -1 || z - q > 65535) return false; q = z + 1; }
+  if (flg & 0x02) q += 2;
+  if (q >= buf.length) return false;
+  try {
+    return zlib.inflateRawSync(buf.subarray(q, q + FOREIGN_PROBE_INPUT), { maxOutputLength: FOREIGN_PROBE_OUTPUT, finishFlush: zlib.constants.Z_SYNC_FLUSH }).length >= FOREIGN_MIN_OUTPUT;
+  } catch (err) { return !!err && err.code === 'ERR_BUFFER_TOO_LARGE'; }
+}
+/** xz stream header: flags (reserved bits zero, known check type) and their CRC32. */
+function validXzAt(buf, p) {
+  if (p + 12 > buf.length || buf[p + 6] !== 0 || ![0x00, 0x01, 0x04, 0x0a].includes(buf[p + 7])) return false;
+  return crc32(buf.subarray(p + 6, p + 8)) === buf.readUInt32LE(p + 8);
+}
+/** 7z signature header: major version 0 and the start-header CRC32. */
+function valid7zAt(buf, p) {
+  if (p + 32 > buf.length || buf[p + 6] !== 0) return false;
+  return crc32(buf.subarray(p + 12, p + 32)) === buf.readUInt32LE(p + 8);
+}
+/** bzip2: "BZh1".."BZh9" + block magic (searched) + randomised bit 0 + origin pointer below the block size. */
+function validBzip2At(buf, p) {
+  if (p < 0 || p + 18 > buf.length || buf.toString('latin1', p, p + 3) !== 'BZh') return false;
+  const level = buf[p + 3] - 0x30;
+  if (level < 1 || level > 9 || buf[p + 14] & 0x80) return false;
+  const origPtr = ((buf[p + 14] & 0x7f) << 17) | (buf[p + 15] << 9) | (buf[p + 16] << 1) | (buf[p + 17] >>> 7);
+  return origPtr < level * 100000;
+}
+/** zstd frame: frame header descriptor (reserved bit zero, sane window) and a valid first block header. */
+function validZstdAt(buf, p) {
+  if (p + 6 > buf.length) return false;
+  const fhd = buf[p + 4];
+  if (fhd & 0x08) return false;
+  const single = (fhd >> 5) & 1;
+  if (!single && buf[p + 5] >> 3 > 21) return false; // window log > 31
+  const hdr = 1 + (single ? 0 : 1) + [0, 1, 2, 4][fhd & 3] + [single, 2, 4, 8][fhd >> 6];
+  const b = p + 4 + hdr;
+  if (b + 3 > buf.length) return false;
+  const bh = buf.readUIntLE(b, 3), type = (bh >> 1) & 3, size = bh >>> 3;
+  if (type === 3 || size > 128 * 1024) return false;
+  return b + 3 + (type === 1 ? 1 : size) <= buf.length;
+}
+/** lz4 frame: FLG/BD fields and the descriptor checksum (second byte of xxh32). */
+function validLz4At(buf, p) {
+  if (p + 7 > buf.length) return false;
+  const flg = buf[p + 4], bd = buf[p + 5];
+  if (flg >> 6 !== 1 || flg & 0x02 || bd & 0x8f || ((bd >> 4) & 7) < 4) return false;
+  const dlen = 2 + (flg & 0x08 ? 8 : 0) + (flg & 0x01 ? 4 : 0);
+  if (p + 4 + dlen + 1 > buf.length) return false;
+  return ((xxh32(buf.subarray(p + 4, p + 4 + dlen)) >>> 8) & 0xff) === buf[p + 4 + dlen];
+}
+/** rar: v4 main header (type 0x73, CRC16) or v5 main header (CRC32 over the vint-sized header, type 1). */
+function validRarAt(buf, p) {
+  if (p + 8 > buf.length) return false;
+  if (buf[p + 6] === 0) {
+    if (p + 14 > buf.length || buf[p + 9] !== 0x73) return false;
+    const hsize = buf.readUInt16LE(p + 12);
+    if (hsize < 13 || p + 7 + hsize > buf.length) return false;
+    return (crc32(buf.subarray(p + 9, p + 7 + hsize)) & 0xffff) === buf.readUInt16LE(p + 7);
+  }
+  if (buf[p + 6] !== 1 || buf[p + 7] !== 0) return false;
+  const q = p + 8;
+  if (q + 6 > buf.length) return false;
+  let size = 0, v = 0;
+  for (; v < 3; v++) { const c = buf[q + 4 + v]; size |= (c & 0x7f) << (7 * v); if (!(c & 0x80)) break; }
+  if (v === 3 || size < 1) return false;
+  const start = q + 4 + v + 1;
+  if (start + size > buf.length || buf[start] !== 1) return false;
+  return crc32(buf.subarray(q + 4, start + size)) === buf.readUInt32LE(q);
+}
+/** cab: reserved fields zero, version 1.3, at least one folder and file, offsets consistent. */
+function validCabAt(buf, p) {
+  if (p + 36 > buf.length) return false;
+  if (buf.readUInt32LE(p + 4) || buf.readUInt32LE(p + 12) || buf.readUInt32LE(p + 20)) return false;
+  if (buf[p + 24] !== 3 || buf[p + 25] !== 1 || buf.readUInt16LE(p + 26) < 1 || buf.readUInt16LE(p + 28) < 1) return false;
+  const cb = buf.readUInt32LE(p + 8), coffFiles = buf.readUInt32LE(p + 16);
+  return cb >= 44 && coffFiles >= 36 && coffFiles < cb;
+}
+// `shift`: offset of the stream start relative to the searched magic.
+const FOREIGN_FORMATS = [
+  { name: 'gzip (embedded)', magic: Buffer.from([0x1f, 0x8b, 0x08]), validate: validGzipAt },
+  { name: 'xz', magic: Buffer.from([0xfd, 0x37, 0x7a, 0x58, 0x5a, 0x00]), validate: validXzAt },
+  { name: '7z', magic: Buffer.from([0x37, 0x7a, 0xbc, 0xaf, 0x27, 0x1c]), validate: valid7zAt },
+  { name: 'bzip2', magic: Buffer.from([0x31, 0x41, 0x59, 0x26, 0x53, 0x59]), shift: -4, validate: validBzip2At },
+  { name: 'zstd', magic: Buffer.from([0x28, 0xb5, 0x2f, 0xfd]), validate: validZstdAt },
+  { name: 'lz4', magic: Buffer.from([0x04, 0x22, 0x4d, 0x18]), validate: validLz4At },
+  { name: 'rar', magic: Buffer.from('Rar!\x1a\x07', 'latin1'), validate: validRarAt },
+  { name: 'cab', magic: Buffer.from('MSCF', 'latin1'), validate: validCabAt },
+];
+
+/**
+ * G5-D7-A: first identifiable stream of a format the scanner cannot inspect,
+ * or null. Called only for buffers that are NOT a supported archive (so gzip
+ * at offset 0 never reaches it). Bounded: more than MAX_SIG_POSITIONS
+ * occurrences of one magic fails closed.
+ */
+function findForeignStream(buf) {
+  for (const f of FOREIGN_FORMATS) {
+    let i = buf.indexOf(f.magic);
+    let n = 0;
+    while (i !== -1) {
+      if (++n > MAX_SIG_POSITIONS) throw new ArchiveError(`too many ${f.name} signature occurrences to inspect safely`);
+      const p = i + (f.shift || 0);
+      if (p >= 0 && f.validate(buf, p)) return { format: f.name, pos: p };
+      i = buf.indexOf(f.magic, i + 1);
+    }
+  }
+  return null;
+}
+function assertNoForeignStream(buf, label) {
+  const f = findForeignStream(buf);
+  if (f) throw new ArchiveError(`unsupported archive or compressed stream (${f.format}) at offset ${f.pos} of "${label}" cannot be inspected (identifiable formats fail closed)`);
+}
+/** Large files: validate recorded magic positions through bounded window reads. */
+function largeFileForeignStream(file, size, positions) {
+  const fd = fs.openSync(file, 'r');
+  try {
+    for (const { f, pos } of positions) {
+      const fmt = FOREIGN_FORMATS[f];
+      const p = pos + (fmt.shift || 0);
+      if (p < 0) continue;
+      const w = Buffer.alloc(Math.min(FOREIGN_WINDOW, size - p));
+      fs.readSync(fd, w, 0, w.length, p);
+      if (fmt.validate(w, 0)) return { format: fmt.name, pos: p };
+    }
+  } finally { fs.closeSync(fd); }
+  return null;
 }
 
 /** Entry paths are untrusted metadata: only ever displayed, never used to touch the filesystem. */
@@ -1058,7 +1253,7 @@ function inspectArtifacts(root, limits = INSPECTION_LIMITS) {
     if (nested) {
       if (depth + 1 > limits.maxNestedArchiveDepth) throw new ArchiveError(`nested archive beyond the depth limit (${limits.maxNestedArchiveDepth}) at "${label}"`);
       inspectArchive(data, nested, shownForNested, depth + 1, budget);
-    }
+    } else assertNoForeignStream(data, label); // G5-D7-A: archive members and container regions
   };
   const makeBudget = () => {
     let used = 0;
@@ -1104,17 +1299,33 @@ function inspectArtifacts(root, limits = INSPECTION_LIMITS) {
     const gzHead = head.length >= 3 && head[0] === 0x1f && head[1] === 0x8b;
     const tarHead = isTarCandidate(head, 0);
     const zipSigs = scanRes.zipPositions.length > 0 || scanRes.zipOverflow || hasZipLeadSignature(head); // R4.4: streaming lead
-    if (!gzHead && !tarHead && !zipSigs) return;
+    const foreignSigs = scanRes.foreignPositions.length > 0 || scanRes.foreignOverflow; // G5-D7-A
+    if (!gzHead && !tarHead && !zipSigs && !foreignSigs) return;
     if (size > limits.maxArchiveBytes) {
       let tooLarge = gzHead || tarHead;
-      if (!tooLarge) { try { tooLarge = largeFileHasPlausibleZip(realPath, size, scanRes.zipPositions, scanRes.zipOverflow); } catch (e) { errors.push({ file: shown, error: `unreadable (${e.code || e.message})` }); return; } }
-      if (tooLarge) errors.push({ file: shown, error: `archive too large to inspect (${size} bytes > ${limits.maxArchiveBytes})` });
+      if (!tooLarge && zipSigs) { try { tooLarge = largeFileHasPlausibleZip(realPath, size, scanRes.zipPositions, scanRes.zipOverflow); } catch (e) { errors.push({ file: shown, error: `unreadable (${e.code || e.message})` }); return; } }
+      if (tooLarge) { errors.push({ file: shown, error: `archive too large to inspect (${size} bytes > ${limits.maxArchiveBytes})` }); return; }
+      if (foreignSigs) {
+        let f = null;
+        if (scanRes.foreignOverflow) f = { format: 'too many archive/compressed-stream signatures', pos: 0 };
+        else { try { f = largeFileForeignStream(realPath, size, scanRes.foreignPositions); } catch (e) { errors.push({ file: shown, error: `unreadable (${e.code || e.message})` }); return; } }
+        if (f) errors.push({ file: shown, error: `archive not fully inspectable: unsupported archive or compressed stream (${f.format}) at offset ${f.pos} of "${shown}" cannot be inspected (identifiable formats fail closed)` });
+      }
       return;
     }
     let kind = null;
     let archiveBuf;
     try { archiveBuf = fs.readFileSync(realPath); kind = detectArchiveInBuffer(archiveBuf); } catch (e) { errors.push({ file: shown, error: `unreadable (${e.code || e.message})` }); return; }
-    if (!kind) return;
+    if (!kind) {
+      // G5-D7-A: not a supported archive -- an identifiable uninspectable stream anywhere fails closed.
+      if (foreignSigs) {
+        try { assertNoForeignStream(archiveBuf, shown); } catch (e) {
+          if (e instanceof ArchiveError) errors.push({ file: shown, error: `archive not fully inspectable: ${e.message}` });
+          else errors.push({ file: shown, error: `archive inspection failed (${e.code || e.message})` });
+        }
+      }
+      return;
+    }
     try {
       const buf = archiveBuf;
       stats.archiveCompressedBytes += buf.length;
@@ -1239,4 +1450,4 @@ if (require.main === module) {
   console.log(`[palmistry-bundle] OK: none of ${SENTINELS.length} Palmistry sentinels present in ${SCAN_DIRS.join(', ')} (nor any of ${IMAGE_INPUT_SENTINELS.length} image-input sentinels, ${MEDIAPIPE_SENTINELS.length} MediaPipe sentinels or MediaPipe artifacts; image-input check ${inspected}).`);
 }
 
-module.exports = { SENTINELS, IMAGE_INPUT_SENTINELS, MEDIAPIPE_SENTINELS, MEDIAPIPE_ARTIFACT_SIGNATURES, WASM_MEDIAPIPE_MARKERS, INSPECTION_LIMITS, SCAN_ROOTS, DEV_ASSET_DIR, SCAN_DIRS, ARTIFACT_DIRS, scan, scanImageInput, inspectArtifacts, describeInspection, detectArchiveInBuffer, devAssetsPresent };
+module.exports = { SENTINELS, IMAGE_INPUT_SENTINELS, MEDIAPIPE_SENTINELS, MEDIAPIPE_ARTIFACT_SIGNATURES, WASM_MEDIAPIPE_MARKERS, INSPECTION_LIMITS, SCAN_ROOTS, DEV_ASSET_DIR, SCAN_DIRS, ARTIFACT_DIRS, scan, scanImageInput, inspectArtifacts, describeInspection, detectArchiveInBuffer, findForeignStream, devAssetsPresent };
