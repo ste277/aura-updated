@@ -541,14 +541,18 @@ function validLz4At(buf, p) {
   return ((xxh32(buf.subarray(p + 4, p + 4 + dlen)) >>> 8) & 0xff) === buf[p + 4 + dlen];
 }
 /**
- * G5-D7B (IV3B-1) xar (macOS .pkg container): big-endian header -- size >= 28,
- * version 1, checksum id <= 3, non-zero TOC lengths -- followed by a zlib TOC
- * that really inflates (bounded) to XML.
+ * G5-D7B (IV3B-1) xar (macOS .pkg container): big-endian header -- size
+ * 28..4096, version 1, non-zero TOC lengths -- followed by a zlib TOC that
+ * really inflates (bounded) to XML.
+ * G5-IV3F: the checksum id is NOT checked (IV3E-2: 7-Zip extracts xar whatever
+ * its checksum id, 0..0xFFFFFFFF), and a TOC whose bounded probe reaches the
+ * inspection cap counts as detected (IV3E-1: a large XML comment or whitespace
+ * in the TOC must not turn the archive into "no archive").
  */
 function validXarAt(buf, p) {
   if (p + 28 > buf.length) return false;
   const hsize = buf.readUInt16BE(p + 4);
-  if (hsize < 28 || hsize > 4096 || buf.readUInt16BE(p + 6) !== 1 || buf.readUInt32BE(p + 24) > 3) return false;
+  if (hsize < 28 || hsize > 4096 || buf.readUInt16BE(p + 6) !== 1) return false;
   const tocC = buf.readBigUInt64BE(p + 8), tocU = buf.readBigUInt64BE(p + 16);
   if (tocC === 0n || tocU === 0n || tocU > 0x7fffffffn) return false;
   const t = p + hsize;
@@ -556,7 +560,7 @@ function validXarAt(buf, p) {
   let out;
   try {
     out = zlib.inflateSync(buf.subarray(t, t + Math.min(Number(tocC), 4096)), { maxOutputLength: FOREIGN_PROBE_OUTPUT, finishFlush: zlib.constants.Z_SYNC_FLUSH });
-  } catch (err) { return false; }
+  } catch (err) { return !!err && err.code === 'ERR_BUFFER_TOO_LARGE'; } // IV3E-1: xar TOC reached the inspection cap -> detected
   return /^\s*<(\?xml|xar)/.test(out.toString('latin1', 0, 64));
 }
 /** rar: v4 main header (type 0x73, CRC16) or v5 main header (CRC32 over the vint-sized header, type 1). */

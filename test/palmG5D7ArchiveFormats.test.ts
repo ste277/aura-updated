@@ -2,7 +2,8 @@
  * AURA-PALM-G5-D7-A -- identifiable but uninspectable archive / compressed-
  * stream formats fail closed (IV1-PC-1: gzip embedded after offset 0;
  * IV1-PC-1b: xz, 7z, bzip2, zstd, lz4, rar, cab at offset 0 or embedded;
- * G5-D7B / IV3B-1: xar, the macOS .pkg container).
+ * G5-D7B / IV3B-1: xar, the macOS .pkg container; G5-IV3F / IV3E-1, IV3E-2:
+ * xar with an oversized TOC, and xar with any checksum id).
  *
  * The scanner (`check-palmistry-bundle.js`) must never pass a build file that
  * holds such a stream -- top-level, embedded, or inside an archive member --
@@ -26,6 +27,7 @@ import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
 import * as zlib from 'zlib';
+import * as crypto from 'crypto';
 import { spawnSync } from 'child_process';
 import * as F from './palmG5I1R43Fixtures';
 
@@ -76,6 +78,18 @@ const PAYLOAD = (() => { let x = 7, s = ''; const r = () => { x = (x * 110351524
   return Buffer.from(s); })();
 const BODY = zlib.deflateRawSync(PAYLOAD); // opaque tail after hand-built headers
 
+/** Rebuild a real (bsdtar) xar with a replacement TOC XML and/or checksum id; keeps the heap and refreshes the SHA-1 TOC checksum. */
+function rebuildXar(b: Buffer, o: { tocXml?: (x: string) => string; alg?: number } = {}): Buffer {
+  const hs = b.readUInt16BE(4), tocC = Number(b.readBigUInt64BE(8)), alg = b.readUInt32BE(24);
+  const xml = zlib.inflateSync(b.subarray(hs, hs + tocC)).toString('utf8');
+  const nx = o.tocXml ? o.tocXml(xml) : xml; const tz = zlib.deflateSync(Buffer.from(nx, 'utf8'));
+  const h = Buffer.from(b.subarray(0, hs)); h.writeBigUInt64BE(BigInt(tz.length), 8); h.writeBigUInt64BE(BigInt(Buffer.byteLength(nx)), 16); h.writeUInt32BE((o.alg ?? alg) >>> 0, 24);
+  const heap = Buffer.from(b.subarray(hs + tocC)); if (alg === 1) crypto.createHash('sha1').update(tz).digest().copy(heap, 0);
+  return Buffer.concat([h, tz, heap]);
+}
+const bigComment = (x: string) => { const d = x.indexOf('?>') + 2; return `${x.slice(0, d)}\n<!--${' '.repeat(300000)}-->${x.slice(d)}`; };
+const bigSpace = (x: string) => { const d = x.indexOf('?>') + 2; return `${x.slice(0, d)}${' '.repeat(300000)}${x.slice(d)}`; };
+const XAR_ALGS = [0, 1, 2, 3, 4, 5, 6, 7, 8, 16, 255, 0xffffffff];
 /** xar header (big-endian) + zlib-compressed TOC. `o` overrides fields for malformed variants. */
 function xarHead(o: { hsize?: number; ver?: number; alg?: number; tocC?: number; toc?: Buffer } = {}): Buffer {
   const toc = o.toc ?? zlib.deflateSync(Buffer.from('<?xml version="1.0" encoding="UTF-8"?>\n<xar><toc><creation-time>2026-11-21T00:00:00</creation-time></toc></xar>\n'));
@@ -209,12 +223,43 @@ async function main(): Promise<void> {
             const got = fs.readdirSync(path.join(o, 'x')).some((n) => fs.readFileSync(path.join(o, 'x', n)).includes(SENT));
             check(`X6. precondition: stock ${z7x} x extracts the payload of a xar embedded after 64 bytes`, got); } finally { cleanup(o); } }
         else { notRun.push('X6'); console.log('NOT RUN X6 (7-Zip not installed)'); }
+        // ---- G5-IV3F: IV3E-1 (oversized TOC) and IV3E-2 (checksum id) on REAL xar archives
+        const xe1 = rebuildXar(s, { tocXml: bigComment }), xe1b = rebuildXar(s, { tocXml: bigSpace });
+        mustFail('XE1', '[IV3E-1] real xar whose TOC carries a 300 KB XML comment (probe reaches the cap), at offset 0', xe1, /^xar$/);
+        mustFail('XE1e', '[IV3E-1] same, embedded after 64 bytes', Buffer.concat([fill(64), xe1]), /^xar$/);
+        mustFail('XE1b', '[IV3E-1] real xar whose TOC carries 300 KB of whitespace, embedded after 64 bytes', Buffer.concat([fill(64), xe1b]), /^xar$/);
+        mustFail('XE1b0', '[IV3E-1] same, at offset 0', xe1b, /^xar$/);
+        mustFail('XE1m', '[IV3E-1] oversized-TOC xar as a stored ZIP member', zipStored('p.pkg', xe1b), /^xar$/);
+        for (const a of XAR_ALGS) {
+          const x = rebuildXar(s, { alg: a });
+          mustFail(`XE4.${a}`, `[IV3E-2] real xar with checksum id ${a}, at offset 0`, x, /^xar$/);
+          mustFail(`XE4e.${a}`, `[IV3E-2] real xar with checksum id ${a}, embedded after 64 bytes`, Buffer.concat([fill(64), x]), /^xar$/);
+        }
+        const ext = (cmd: string, args: (f: string) => string[], data: Buffer, stdin = false) => { const o = fs.mkdtempSync(path.join(os.tmpdir(), TMP)); try {
+          const f = path.join(o, 'in.bin'); fs.writeFileSync(f, data); fs.mkdirSync(path.join(o, 'x')); spawnSync(cmd, args(f), { cwd: path.join(o, 'x'), input: stdin ? data : undefined });
+          return fs.readdirSync(path.join(o, 'x')).some((n) => fs.readFileSync(path.join(o, 'x', n)).includes(SENT)); } finally { cleanup(o); } };
+        check('XE5. precondition [IV3E-1]: stock bsdtar (stdin) extracts the payload of XE1', ext('bsdtar', () => ['-xf', '-'], xe1, true));
+        if (z7x) {
+          check(`XE6. precondition [IV3E-1]: stock ${z7x} x extracts the payload of XE1b embedded after 64 bytes`, ext(z7x, (f) => ['x', '-y', f], Buffer.concat([fill(64), xe1b])));
+          const algsOk = XAR_ALGS.filter((a) => ext(z7x, (f) => ['x', '-y', f], rebuildXar(s, { alg: a })));
+          check(`XE7. precondition [IV3E-2]: stock ${z7x} x extracts the payload for every tested checksum id (${XAR_ALGS.length})`, algsOk.length === XAR_ALGS.length, `extracted for ${algsOk.join(',')}`);
+        } else { notRun.push('XE6', 'XE7'); console.log('NOT RUN XE6/XE7 (7-Zip not installed)'); }
       }
     } finally { cleanup(d); }
   } else { notRun.push('X.real'); console.log('NOT RUN X.real (bsdtar not installed)'); }
   mustPass('X7', 'malformed xar: version 2', code(xarHead({ ver: 2 })));
   mustPass('X8', 'malformed xar: header size 27', code(xarHead({ hsize: 27 })));
-  mustPass('X9', 'malformed xar: unknown checksum id 9', code(xarHead({ alg: 9 })));
+  // G5-IV3F (IV3E-2): the checksum id is not a validity criterion (7-Zip ignores it) -- every id is detected.
+  for (const a of XAR_ALGS) { mustFail(`X9.${a}`, `hand-built xar head with checksum id ${a} (offset 0)`, xarHead({ alg: a }), /^xar$/);
+    mustFail(`X9e.${a}`, `hand-built xar head with checksum id ${a} (embedded in machine-code bytes)`, code(xarHead({ alg: a })), /^xar$/); }
+  // G5-IV3F (IV3E-1): a TOC whose bounded probe reaches the 64 KiB cap is detected (after the header checks).
+  { const big = xarHead({ toc: zlib.deflateSync(Buffer.from(`<?xml version="1.0"?>\n<!--${' '.repeat(300000)}--><xar/>`)) });
+    mustFail('XH1', '[IV3E-1] hand-built xar head with an oversized TOC, at offset 0', big, /^xar$/);
+    mustFail('XH1e', '[IV3E-1] same, embedded after 64 bytes', Buffer.concat([fill(64), big]), /^xar$/);
+    mustFail('XH1m', '[IV3E-1] same, as a tar member', tar('p.pkg', big), /^xar$/);
+    mustFail('XH2', 'conservative: valid xar header + a zlib TOC reaching the cap with non-XML content is detected', xarHead({ toc: zlib.deflateSync(Buffer.alloc(300000, 0x41)) }), /^xar$/);
+    mustPass('XH3', 'malformed header (version 2) with an oversized TOC still passes (cap rule only after the header checks)', code(xarHead({ ver: 2, toc: zlib.deflateSync(Buffer.alloc(300000, 0x41)) })));
+    mustPass('XH4', 'malformed header (size 27) with an oversized TOC still passes', code(xarHead({ hsize: 27, toc: zlib.deflateSync(Buffer.alloc(300000, 0x41)) }))); }
   mustPass('X10', 'malformed xar: zero TOC length', code(xarHead({ tocC: 0 })));
   mustPass('X11', 'malformed xar: TOC is not a zlib stream', code(xarHead({ toc: fill(64, 0xff) })));
   mustPass('X12', 'malformed xar: TOC inflates but is not XML', code(xarHead({ toc: zlib.deflateSync(Buffer.from('not an xml table of contents '.repeat(4))) })));
@@ -268,6 +313,8 @@ async function main(): Promise<void> {
       { id: 'M5', label: 'embedded-gzip validator weakened to the magic only', from: 'function validGzipAt(buf, p) {', to: 'function validGzipAt(buf, p) { return true;', probe: () => !mustPass('M5p', '', code(Buffer.concat([hex('1f8b0800 00000000 0003'), fill(64, 0xff)])), mut) },
       { id: 'M6', label: 'bzip2 origin-pointer check removed', from: 'return origPtr < level * 100000;', to: 'return true;', probe: () => !mustPass('M6p', '', Buffer.from('const BZ = "BZh91AY&SY";\nexport function isBzip2(s) { return s.startsWith(BZ); }\n'), mut) },
       { id: 'M8', label: 'xar detection disabled (validator returns false)', from: 'function validXarAt(buf, p) {', to: 'function validXarAt(buf, p) { return false;', probe: () => mustPass('M8p', '', stream('xar'), mut) && mustPass('M8q', '', zipStored('p.pkg', stream('xar')), mut) },
+      { id: 'M9', label: 'xar inspection-cap detection disabled (IV3E-1 reverted)', from: "} catch (err) { return !!err && err.code === 'ERR_BUFFER_TOO_LARGE'; } // IV3E-1: xar TOC reached the inspection cap -> detected", to: '} catch (err) { return false; }', probe: () => mustPass('M9p', '', xarHead({ toc: zlib.deflateSync(Buffer.from(`<?xml version="1.0"?>\n<!--${' '.repeat(300000)}--><xar/>`)) }), mut) && !mustPass('M9q', '', stream('xar'), mut) },
+      { id: 'M10', label: 'xar checksum-id bound reinstated (IV3E-2 reverted)', from: 'if (hsize < 28 || hsize > 4096 || buf.readUInt16BE(p + 6) !== 1) return false;', to: 'if (hsize < 28 || hsize > 4096 || buf.readUInt16BE(p + 6) !== 1 || buf.readUInt32BE(p + 24) > 3) return false;', probe: () => mustPass('M10p', '', xarHead({ alg: 4 }), mut) && mustPass('M10q', '', xarHead({ alg: 0xffffffff }), mut) && !mustPass('M10r', '', xarHead({ alg: 1 }), mut) },
       { id: 'M7', label: 'large-file window probe removed', from: 'f = largeFileForeignStream(realPath, size, scanRes.foreignPositions);', to: 'f = null;', probe: () => run('M7p.bin', Buffer.concat([fill(64), stream('xz')]), mut, { maxArchiveBytes: 40 }).errors.length === 0 },
     ];
     let mut = '';
@@ -277,7 +324,7 @@ async function main(): Promise<void> {
       try { mut = path.join(d, 'check-palmistry-bundle.js'); fs.writeFileSync(mut, src.replace(m.from, m.to));
         check(`${m.id}. negative control: with ${m.label}, the suite observes the regression`, m.probe()); } finally { cleanup(d); }
     }
-  } else { notRun.push('M1-M8'); console.log('NOT RUN M1-M8 (PALM_SCANNER_UNDER_TEST set)'); }
+  } else { notRun.push('M1-M10'); console.log('NOT RUN M1-M10 (PALM_SCANNER_UNDER_TEST set)'); }
 
   console.log(`\n${passed} passed, ${failed} failed${notRun.length ? `, ${notRun.length} NOT RUN (${notRun.join(', ')})` : ''}`);
   process.exit(failed ? 1 : 0);
