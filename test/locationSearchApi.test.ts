@@ -1,6 +1,6 @@
 /**
  * Onboarding V1 PR 3 -- Smart Location Selection: regression suite for
- * GET /api/location/search and GET /api/location/reverse. Combines
+ * GET /api/location/search and POST /api/location/reverse. Combines
  * structural source checks (authentication/rate-limit/validation wiring
  * present, matching this repo's established route-review convention) with
  * direct logic tests that mirror each route's own real sequence using the
