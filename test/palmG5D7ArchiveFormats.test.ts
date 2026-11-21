@@ -1,7 +1,8 @@
 /**
  * AURA-PALM-G5-D7-A -- identifiable but uninspectable archive / compressed-
  * stream formats fail closed (IV1-PC-1: gzip embedded after offset 0;
- * IV1-PC-1b: xz, 7z, bzip2, zstd, lz4, rar, cab at offset 0 or embedded).
+ * IV1-PC-1b: xz, 7z, bzip2, zstd, lz4, rar, cab at offset 0 or embedded;
+ * G5-D7B / IV3B-1: xar, the macOS .pkg container).
  *
  * The scanner (`check-palmistry-bundle.js`) must never pass a build file that
  * holds such a stream -- top-level, embedded, or inside an archive member --
@@ -75,6 +76,13 @@ const PAYLOAD = (() => { let x = 7, s = ''; const r = () => { x = (x * 110351524
   return Buffer.from(s); })();
 const BODY = zlib.deflateRawSync(PAYLOAD); // opaque tail after hand-built headers
 
+/** xar header (big-endian) + zlib-compressed TOC. `o` overrides fields for malformed variants. */
+function xarHead(o: { hsize?: number; ver?: number; alg?: number; tocC?: number; toc?: Buffer } = {}): Buffer {
+  const toc = o.toc ?? zlib.deflateSync(Buffer.from('<?xml version="1.0" encoding="UTF-8"?>\n<xar><toc><creation-time>2026-11-21T00:00:00</creation-time></toc></xar>\n'));
+  const h = Buffer.alloc(28); h.write('xar!', 0, 'latin1'); h.writeUInt16BE(o.hsize ?? 28, 4); h.writeUInt16BE(o.ver ?? 1, 6);
+  h.writeBigUInt64BE(BigInt(o.tocC ?? toc.length), 8); h.writeBigUInt64BE(BigInt(1024), 16); h.writeUInt32BE(o.alg ?? 1, 24);
+  return Buffer.concat([h, toc]);
+}
 // Minimal hand-built stream heads that satisfy the scanner's structural checks
 // (independent constructions; rar/lz4 use published reference header bytes).
 const HEADS: Record<string, Buffer> = {
@@ -85,9 +93,10 @@ const HEADS: Record<string, Buffer> = {
   lz4: hex('04224d18 6440a7'), // lz4 CLI default frame header (FLG 0x64, BD 0x40, HC 0xa7)
   rar4: hex('526172211a0700 cf90 73 0000 0d00 000000000000'),
   rar5: hex('526172211a070100 3392b5e5 0a 01 05 06 00 05 01 01 80 80 00'),
+  xar: xarHead(),
   cab: (() => { const h = Buffer.alloc(36); h.write('MSCF', 0, 'latin1'); h.writeUInt32LE(4096, 8); h.writeUInt32LE(44, 16); h[24] = 3; h[25] = 1; h.writeUInt16LE(1, 26); h.writeUInt16LE(1, 28); return h; })(),
 };
-const NAME: Record<string, string> = { xz: 'xz', '7z': '7z', bzip2: 'bzip2', zstd: 'zstd', lz4: 'lz4', rar4: 'rar', rar5: 'rar', cab: 'cab' };
+const NAME: Record<string, string> = { xz: 'xz', '7z': '7z', bzip2: 'bzip2', zstd: 'zstd', lz4: 'lz4', rar4: 'rar', rar5: 'rar', cab: 'cab', xar: 'xar' };
 const stream = (k: string) => Buffer.concat([HEADS[k], k === 'zstd' ? Buffer.alloc(8, 0x61) : Buffer.alloc(0), BODY]);
 const gzEmbedded = () => Buffer.concat([fill(64), zlib.gzipSync(PAYLOAD)]);
 function tar(name: string, data: Buffer): Buffer {
@@ -173,6 +182,47 @@ async function main(): Promise<void> {
     } finally { cleanup(d); }
   } else { notRun.push('C.7z'); console.log('NOT RUN C.7z (7-Zip not installed)'); }
 
+  const code = (b: Buffer) => Buffer.concat([hex('cffaedfe 0c000001'), fill(256, 0x90), b, fill(256, 0xcc)]); // machine-code-like context
+  // ================================================================ X: xar (G5-D7B, IV3B-1)
+  if (hasTool('bsdtar')) {
+    const d = fs.mkdtempSync(path.join(os.tmpdir(), TMP));
+    try {
+      fs.writeFileSync(path.join(d, 'payload.txt'), PAYLOAD);
+      const mk = spawnSync('bsdtar', ['--format', 'xar', '-cf', 'p.xar', 'payload.txt'], { cwd: d, encoding: 'utf8' });
+      const s = mk.status === 0 && fs.existsSync(path.join(d, 'p.xar')) ? fs.readFileSync(path.join(d, 'p.xar')) : null;
+      if (!s) { notRun.push('X.real'); console.log(`NOT RUN X.real (this bsdtar cannot write xar: ${(mk.stderr || '').trim().slice(0, 80)})`); }
+      else {
+        check('X0. real xar (bsdtar --format xar) does not expose the payload as plain bytes', !s.includes(SENT));
+        mustFail('X1', 'real xar at offset 0', s, /^xar$/);
+        mustFail('X2', 'real xar embedded after 64 bytes', Buffer.concat([fill(64), s]), /^xar$/);
+        mustFail('X3', 'real xar as a stored ZIP member', zipStored('p.pkg', s), /^xar$/);
+        mustFail('X4', 'real xar as a tar member', tar('p.pkg', s), /^xar$/);
+        const readers: [string, string[], Buffer][] = [['bsdtar', ['-xf', '-'], s]];
+        const z7x = hasTool('7zz') ? '7zz' : hasTool('7z') ? '7z' : null;
+        for (const [rid, args, data] of readers) {
+          const o = fs.mkdtempSync(path.join(os.tmpdir(), TMP));
+          try { spawnSync(rid, args, { cwd: o, input: data }); const got = fs.readdirSync(o).some((n) => fs.readFileSync(path.join(o, n)).includes(SENT));
+            check(`X5. precondition: stock ${rid} extracts the payload of the real xar (stdin)`, got); } finally { cleanup(o); }
+        }
+        if (z7x) { const o = fs.mkdtempSync(path.join(os.tmpdir(), TMP)); try { fs.writeFileSync(path.join(o, 'in.bin'), Buffer.concat([fill(64), s])); fs.mkdirSync(path.join(o, 'x'));
+            spawnSync(z7x, ['x', '-y', path.join(o, 'in.bin')], { cwd: path.join(o, 'x') });
+            const got = fs.readdirSync(path.join(o, 'x')).some((n) => fs.readFileSync(path.join(o, 'x', n)).includes(SENT));
+            check(`X6. precondition: stock ${z7x} x extracts the payload of a xar embedded after 64 bytes`, got); } finally { cleanup(o); } }
+        else { notRun.push('X6'); console.log('NOT RUN X6 (7-Zip not installed)'); }
+      }
+    } finally { cleanup(d); }
+  } else { notRun.push('X.real'); console.log('NOT RUN X.real (bsdtar not installed)'); }
+  mustPass('X7', 'malformed xar: version 2', code(xarHead({ ver: 2 })));
+  mustPass('X8', 'malformed xar: header size 27', code(xarHead({ hsize: 27 })));
+  mustPass('X9', 'malformed xar: unknown checksum id 9', code(xarHead({ alg: 9 })));
+  mustPass('X10', 'malformed xar: zero TOC length', code(xarHead({ tocC: 0 })));
+  mustPass('X11', 'malformed xar: TOC is not a zlib stream', code(xarHead({ toc: fill(64, 0xff) })));
+  mustPass('X12', 'malformed xar: TOC inflates but is not XML', code(xarHead({ toc: zlib.deflateSync(Buffer.from('not an xml table of contents '.repeat(4))) })));
+  mustPass('X13', 'incidental "xar!" in JS text', Buffer.from('// xar! is the macOS package magic; see docs.\nexport const XAR = "xar!";\n'.repeat(4)));
+  mustPass('X14', 'incidental "xar!" followed by machine-code bytes', code(Buffer.concat([Buffer.from('xar!', 'latin1'), fill(40, 0x48)])));
+  { const r = run('X15.bin', Buffer.concat([fill(64), stream('xar')]), SCANNER, { maxArchiveBytes: 40 });
+    check('X15. >maxArchiveBytes file with embedded xar: fails closed (window probe)', r.errors.some((e) => /\(xar\)/.test(e)), JSON.stringify(r.errors)); }
+
   // ================================================================ D: legitimate content still passes (and is inspected)
   mustPass('D1', 'gzip at offset 0 (supported, inspected)', zlib.gzipSync(F.HELLO));
   mustPass('D2', '.tar.gz (supported, inspected)', zlib.gzipSync(tar('hello.txt', F.HELLO)));
@@ -183,7 +233,6 @@ async function main(): Promise<void> {
   mustPass('D7', 'R4.4 machine-code control (chance PK\\3\\4, method 0)', (() => { const h = Buffer.alloc(30); h.writeUInt32LE(0x04034b50, 0); h.writeUInt16LE(33807, 4); h.writeUInt16LE(596, 6); h.writeUInt32LE(113028, 18); h.writeUInt16LE(2750, 28); return Buffer.concat([hex('cffaedfe'), fill(4000, 0x11), h, fill(4000, 0x22)]); })());
 
   // ================================================================ E: false-positive controls -- magic present, structure invalid
-  const code = (b: Buffer) => Buffer.concat([hex('cffaedfe 0c000001'), fill(256, 0x90), b, fill(256, 0xcc)]); // machine-code-like context
   mustPass('E1', 'xz magic with a wrong flags CRC', code(Buffer.concat([hex('fd377a585a00 0001'), u32(0xdeadbeef), BODY.subarray(0, 64)])));
   mustPass('E2', '7z magic with a wrong start-header CRC', code(Buffer.concat([hex('377abcaf271c 0004'), u32(1), fill(20, 7)])));
   mustPass('E3', 'bzip2 block magic as ASCII text in JS ("BZh91AY&SY" constant)', Buffer.from('const BZ = "BZh91AY&SY";\nexport function isBzip2(s) { return s.startsWith(BZ); }\n'));
@@ -218,6 +267,7 @@ async function main(): Promise<void> {
       { id: 'M4', label: 'RAR validator weakened to the marker only', from: 'function validRarAt(buf, p) {', to: 'function validRarAt(buf, p) { return true;', probe: () => !mustPass('M4p', '', code(Buffer.concat([Buffer.from('Rar!\x1a\x07\x00', 'latin1'), fill(32, 0x48)])), mut) },
       { id: 'M5', label: 'embedded-gzip validator weakened to the magic only', from: 'function validGzipAt(buf, p) {', to: 'function validGzipAt(buf, p) { return true;', probe: () => !mustPass('M5p', '', code(Buffer.concat([hex('1f8b0800 00000000 0003'), fill(64, 0xff)])), mut) },
       { id: 'M6', label: 'bzip2 origin-pointer check removed', from: 'return origPtr < level * 100000;', to: 'return true;', probe: () => !mustPass('M6p', '', Buffer.from('const BZ = "BZh91AY&SY";\nexport function isBzip2(s) { return s.startsWith(BZ); }\n'), mut) },
+      { id: 'M8', label: 'xar detection disabled (validator returns false)', from: 'function validXarAt(buf, p) {', to: 'function validXarAt(buf, p) { return false;', probe: () => mustPass('M8p', '', stream('xar'), mut) && mustPass('M8q', '', zipStored('p.pkg', stream('xar')), mut) },
       { id: 'M7', label: 'large-file window probe removed', from: 'f = largeFileForeignStream(realPath, size, scanRes.foreignPositions);', to: 'f = null;', probe: () => run('M7p.bin', Buffer.concat([fill(64), stream('xz')]), mut, { maxArchiveBytes: 40 }).errors.length === 0 },
     ];
     let mut = '';
@@ -227,7 +277,7 @@ async function main(): Promise<void> {
       try { mut = path.join(d, 'check-palmistry-bundle.js'); fs.writeFileSync(mut, src.replace(m.from, m.to));
         check(`${m.id}. negative control: with ${m.label}, the suite observes the regression`, m.probe()); } finally { cleanup(d); }
     }
-  } else { notRun.push('M1-M7'); console.log('NOT RUN M1-M7 (PALM_SCANNER_UNDER_TEST set)'); }
+  } else { notRun.push('M1-M8'); console.log('NOT RUN M1-M8 (PALM_SCANNER_UNDER_TEST set)'); }
 
   console.log(`\n${passed} passed, ${failed} failed${notRun.length ? `, ${notRun.length} NOT RUN (${notRun.join(', ')})` : ''}`);
   process.exit(failed ? 1 : 0);

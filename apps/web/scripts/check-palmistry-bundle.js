@@ -25,9 +25,9 @@
 //     entry by entry in memory, nested up to a fixed depth, with every
 //     decompression capped on actual output; structures it cannot fully and
 //     unambiguously inspect fail closed. Other IDENTIFIABLE archive and
-//     compression formats (xz, 7z, bzip2, zstd, lz4, rar, cab, and gzip
+//     compression formats (xz, 7z, bzip2, zstd, lz4, rar, cab, xar, and gzip
 //     embedded after offset 0) are not inspected and FAIL CLOSED wherever they
-//     occur, top-level or inside an archive (G5-D7-A; see the archive section).
+//     occur, top-level or inside an archive (G5-D7-A/D7B; see the archive section).
 //   - The OK line states exactly what was inspected (files, bytes, archives,
 //     entries, decompressed bytes, roots, absent optional roots).
 // What it does NOT guarantee: detection of payloads stored in other
@@ -226,8 +226,8 @@ const TFLITE_IDENTIFIER = Buffer.from('TFL3'); // FlatBuffer file identifier at 
 // pax size/link/sparse overrides, gzip trailing data, nesting beyond the
 // depth limit, and any resource-limit violation.
 // G5-D7-A -- IDENTIFIABLE BUT NOT INSPECTABLE formats FAIL CLOSED (they are
-// never silently skipped): xz, 7z, bzip2, zstd, lz4 (frame), rar (v4/v5) and
-// cab, at offset 0 or EMBEDDED anywhere in an inspected buffer, and a gzip
+// never silently skipped): xz, 7z, bzip2, zstd, lz4 (frame), rar (v4/v5), cab
+// and (G5-D7B) xar, at offset 0 or EMBEDDED anywhere in an inspected buffer, and a gzip
 // stream embedded at offset > 0 (gzip at offset 0 is a supported container,
 // above). "Inspected buffer" = every regular file, every archive entry and
 // every container region (ZIP prefix/suffix/comments/extra fields, gzip header
@@ -236,7 +236,8 @@ const TFLITE_IDENTIFIER = Buffer.from('TFL3'); // FlatBuffer file identifier at 
 // so that coincidental bytes (machine code, ASCII text) do not match: xz and
 // 7z header CRCs, rar v4/v5 header CRCs, the bzip2 block magic with a sane
 // origin pointer, the zstd frame and first block header, the lz4 frame
-// header checksum (xxh32), cab header fields, and for embedded gzip a bounded
+// header checksum (xxh32), cab header fields, the xar header plus a zlib TOC
+// that inflates to XML, and for embedded gzip a bounded
 // partial inflate producing >= FOREIGN_MIN_OUTPUT bytes. ZIP entries using
 // these compression methods already fail closed (unsupported method).
 // RESIDUAL (not detectable by signature, documented limitation R3-N2):
@@ -539,6 +540,25 @@ function validLz4At(buf, p) {
   if (p + 4 + dlen + 1 > buf.length) return false;
   return ((xxh32(buf.subarray(p + 4, p + 4 + dlen)) >>> 8) & 0xff) === buf[p + 4 + dlen];
 }
+/**
+ * G5-D7B (IV3B-1) xar (macOS .pkg container): big-endian header -- size >= 28,
+ * version 1, checksum id <= 3, non-zero TOC lengths -- followed by a zlib TOC
+ * that really inflates (bounded) to XML.
+ */
+function validXarAt(buf, p) {
+  if (p + 28 > buf.length) return false;
+  const hsize = buf.readUInt16BE(p + 4);
+  if (hsize < 28 || hsize > 4096 || buf.readUInt16BE(p + 6) !== 1 || buf.readUInt32BE(p + 24) > 3) return false;
+  const tocC = buf.readBigUInt64BE(p + 8), tocU = buf.readBigUInt64BE(p + 16);
+  if (tocC === 0n || tocU === 0n || tocU > 0x7fffffffn) return false;
+  const t = p + hsize;
+  if (t + 2 > buf.length) return false;
+  let out;
+  try {
+    out = zlib.inflateSync(buf.subarray(t, t + Math.min(Number(tocC), 4096)), { maxOutputLength: FOREIGN_PROBE_OUTPUT, finishFlush: zlib.constants.Z_SYNC_FLUSH });
+  } catch (err) { return false; }
+  return /^\s*<(\?xml|xar)/.test(out.toString('latin1', 0, 64));
+}
 /** rar: v4 main header (type 0x73, CRC16) or v5 main header (CRC32 over the vint-sized header, type 1). */
 function validRarAt(buf, p) {
   if (p + 8 > buf.length) return false;
@@ -576,6 +596,7 @@ const FOREIGN_FORMATS = [
   { name: 'lz4', magic: Buffer.from([0x04, 0x22, 0x4d, 0x18]), validate: validLz4At },
   { name: 'rar', magic: Buffer.from('Rar!\x1a\x07', 'latin1'), validate: validRarAt },
   { name: 'cab', magic: Buffer.from('MSCF', 'latin1'), validate: validCabAt },
+  { name: 'xar', magic: Buffer.from('xar!', 'latin1'), validate: validXarAt },
 ];
 
 /**
