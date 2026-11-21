@@ -3,6 +3,12 @@ import { FIND_BEST_TIME_TOOL, toFindBestTimeToolResult } from '../findBestTimeTo
 import { executeFindBestTimeRemote } from '../findBestTimeRemote';
 import type { McpRateLimiter, RateLimitRule } from '../security/rateLimit';
 import type { McpAuditEvent, McpAuditSink } from '../security/audit';
+import { parseRemoteMcpConfig, type RemoteMcpConfig } from './remoteMcpConfig';
+
+// Re-exported so existing importers keep working; the implementation lives in
+// the dependency-free ./remoteMcpConfig (I2a-R2 B1).
+export { parseRemoteMcpConfig };
+export type { RemoteMcpConfig };
 
 /**
  * AURA-MCP-02-I1 -- Remote Transport Foundation.
@@ -58,13 +64,6 @@ export type AccessTokenVerifier = (token: string, resource: string) => Promise<V
 /** The only verifier I1 deploys: every token is rejected. */
 export const rejectAllAccessTokens: AccessTokenVerifier = async () => null;
 
-export interface RemoteMcpConfig {
-  /** Canonical resource URL (RFC 8707 audience), e.g. https://example.com/api/mcp. */
-  resourceUrl: string;
-  /** Authorization server issuer URL advertised in protected resource metadata. */
-  authorizationServer: string;
-}
-
 export interface RemoteMcpDeps {
   /** null = remote MCP disabled (flag off or configuration incomplete). */
   config: RemoteMcpConfig | null;
@@ -105,34 +104,6 @@ export function protectedResourceMetadataUrl(resourceUrl: string): string {
   const url = new URL(resourceUrl);
   const path = url.pathname === '/' ? '' : url.pathname.replace(/\/$/, '');
   return `${url.origin}/.well-known/oauth-protected-resource${path}`;
-}
-
-/**
- * Parses and validates remote MCP configuration. Fails closed: anything
- * missing or malformed yields null, which disables every endpoint (404).
- * Both URLs must be absolute https URLs without query, fragment or
- * credentials (http is permitted only for localhost, for local testing).
- */
-export function parseRemoteMcpConfig(input: { enabled?: string; resourceUrl?: string; authorizationServer?: string }): RemoteMcpConfig | null {
-  if (input.enabled !== '1') return null;
-  const resourceUrl = canonicalUrl(input.resourceUrl);
-  const authorizationServer = canonicalUrl(input.authorizationServer);
-  if (!resourceUrl || !authorizationServer) return null;
-  return { resourceUrl, authorizationServer };
-}
-
-function canonicalUrl(value: string | undefined): string | null {
-  if (!value) return null;
-  let url: URL;
-  try {
-    url = new URL(value);
-  } catch {
-    return null;
-  }
-  const localhost = url.hostname === 'localhost' || url.hostname === '127.0.0.1';
-  if (url.protocol !== 'https:' && !(url.protocol === 'http:' && localhost)) return null;
-  if (url.search || url.hash || url.username || url.password) return null;
-  return url.href.replace(/\/$/, '');
 }
 
 /**

@@ -206,8 +206,14 @@ async function main() {
     check(`isolation: ${rel} reads no environment variables`, !/process\.env/.test(src.replace(/\/\*[\s\S]*?\*\/|\/\/.*$/gm, '')));
   }
   const handlerImports = imports(read('packages/mcp-tools/src/http/remoteMcpHandler.ts'));
-  check('isolation: remote handler imports only the SDK v2 server and shared core', handlerImports.every((s) => s === '@modelcontextprotocol/server' || s.startsWith('../')), handlerImports);
+  check('isolation: remote handler imports only the SDK v2 server and shared core', handlerImports.every((s) => s === '@modelcontextprotocol/server' || s.startsWith('../') || s === './remoteMcpConfig'), handlerImports);
   check('isolation: remote handler reads no environment variables', !/process\.env/.test(read('packages/mcp-tools/src/http/remoteMcpHandler.ts')));
+  // I2a-R2 B1: the config parser must stay dependency-free -- the Pages Router
+  // OAuth route loads it, and the standalone server has no MCP SDK for it.
+  const configSrc = read('packages/mcp-tools/src/http/remoteMcpConfig.ts');
+  check('isolation (B1): remoteMcpConfig.ts has no imports and reads no environment variables', imports(configSrc).length === 0 && !/\brequire\(|\bimport\(/.test(configSrc) && !/process\.env/.test(configSrc.replace(/\/\*[\s\S]*?\*\/|\/\/.*$/gm, '')), imports(configSrc));
+  const webConfigImports = imports(read('apps/web/lib/mcpRemoteConfig.ts'));
+  check('isolation (B1): lib/mcpRemoteConfig.ts never imports remoteMcpHandler (keeps the SDK out of the OAuth Pages route)', webConfigImports.length > 0 && webConfigImports.every((s) => s.endsWith('/http/remoteMcpConfig')), webConfigImports);
   const route = read('apps/web/app/api/mcp/route.ts');
   check('deployment: /api/mcp route wires rejectAllAccessTokens (nothing callable until I2)', /verifyAccessToken:\s*rejectAllAccessTokens/.test(route) && !/acceptTestToken|TEST_TOKEN/.test(route));
 
