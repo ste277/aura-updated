@@ -55,6 +55,14 @@ jobs:
       # dependency pin guard and static isolation. No network, DB or env.
       - name: Run remote MCP transport test
         run: npx ts-node test/mcpRemoteTransport.test.ts
+      # AURA-MCP-02-I2a -- local OAuth authorization server (oidc-provider)
+      # -> remote MCP, on an ephemeral 127.0.0.1 port with synthetic users
+      # and clients: discovery, Authorization Code + PKCE (S256), token
+      # issuance, expiry, forged/tampered tokens, audience, scope,
+      # revocation, client binding, rate limits, audit redaction, and the
+      # environment gate that keeps Production/staging reject-all. No DB.
+      - name: Run local OAuth -> MCP test
+        run: npx ts-node test/mcpOAuthLocal.test.ts
       - name: Run panchang day service test
         run: npx ts-node test/panchangDay.test.ts
       - name: Run panchang month service test

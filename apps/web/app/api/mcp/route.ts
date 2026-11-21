@@ -1,18 +1,38 @@
 import { handleRemoteMcpRequest, rejectAllAccessTokens } from '../../../../../packages/mcp-tools/src/http/remoteMcpHandler';
 import { remoteMcpConfigFromEnv } from '../../../lib/mcpRemoteConfig';
+import { resolveRuntimeMcpAuthMode } from '../../../lib/mcpAuthGate';
 
 /**
- * AURA-MCP-02-I1 -- remote MCP endpoint (Streamable HTTP, stateless).
+ * AURA-MCP-02-I1/I2a -- remote MCP endpoint (Streamable HTTP, stateless).
  *
  * A thin adapter: every decision lives in handleRemoteMcpRequest
  * (packages/mcp-tools/src/http/remoteMcpHandler.ts). Off by default (404).
- * Even when enabled, I1 deliberately wires `rejectAllAccessTokens`, so every
- * request is answered 401 until the authorization server (MCP-02-I2) exists.
+ *
+ * Token validation: `rejectAllAccessTokens` (every request 401) in every
+ * environment, EXCEPT when resolveRuntimeMcpAuthMode (lib/mcpAuthGate.ts) returns
+ * "local" -- a NODE_ENV=development server, not on Vercel, with the explicit
+ * AURA_MCP_AUTH_MODE=local-dev opt-in and loopback URLs. Only then is the
+ * local authorization server loaded (lazily) and its verifier, client
+ * binding, rate limiter and audit sink wired in. Production and staging
+ * stay reject-all by code, not only by flag.
  */
 export const dynamic = 'force-dynamic';
 
-function handle(req: Request): Promise<Response> {
-  return handleRemoteMcpRequest(req, { config: remoteMcpConfigFromEnv(), verifyAccessToken: rejectAllAccessTokens });
+async function handle(req: Request): Promise<Response> {
+  const config = remoteMcpConfigFromEnv();
+  const gate = resolveRuntimeMcpAuthMode(config);
+  if (config && gate.mode === 'local') {
+    const { getLocalMcpAuth, localMcpAudit } = await import('../../../lib/mcpLocalOAuth');
+    const local = getLocalMcpAuth(config);
+    return handleRemoteMcpRequest(req, {
+      config,
+      verifyAccessToken: local.server.verifyAccessToken,
+      isClientAllowed: local.server.isClientAllowed,
+      rateLimiter: local.rateLimiter,
+      audit: localMcpAudit,
+    });
+  }
+  return handleRemoteMcpRequest(req, { config, verifyAccessToken: rejectAllAccessTokens });
 }
 
 // Every method goes through the handler so that, while disabled, the route

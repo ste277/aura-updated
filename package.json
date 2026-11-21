@@ -21,6 +21,7 @@
   "dependencies": {
     "@modelcontextprotocol/server": "2.4.0",
     "astronomy-engine": "^2.1.19",
+    "oidc-provider": "9.13.3",
     "zod": "4.6.7"
   }
 }
