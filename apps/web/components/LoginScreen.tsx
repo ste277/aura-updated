@@ -20,6 +20,7 @@ export function LoginScreen({ onLoggedInCheck }: { onLoggedInCheck: () => void }
   // device is routinely offline, and an unhandled rejection would leave the
   // button disabled on "Sending..." forever with no way to retry.
   const OFFLINE_MESSAGE = SIGN_IN_OFFLINE_MESSAGE;
+  const onEmailStep = status !== 'sent' || !sentTo;
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
@@ -107,6 +108,7 @@ export function LoginScreen({ onLoggedInCheck }: { onLoggedInCheck: () => void }
     <div
       style={{
         minHeight: '100vh',
+        boxSizing: 'border-box',
         background: 'var(--as-bg)',
         color: 'var(--as-text)',
         display: 'flex',
@@ -117,11 +119,26 @@ export function LoginScreen({ onLoggedInCheck }: { onLoggedInCheck: () => void }
       }}
     >
       <h1 style={{ fontFamily: 'var(--as-font-display)', fontSize: 24, marginBottom: 4 }}>AuraSchedule</h1>
-      <p style={{ fontFamily: 'var(--as-font-body)', fontSize: 13, color: 'var(--as-text-muted)', marginBottom: 24 }}>
+
+      {onEmailStep && (
+        // AURA-READY-02-F3 -- say what Aura is before asking for an email.
+        <section aria-labelledby="landing-intro-title" style={{ width: '100%', maxWidth: 320, textAlign: 'center', marginTop: 12 }}>
+          <h2 id="landing-intro-title" style={{ fontFamily: 'var(--as-font-display)', fontSize: 20, lineHeight: 1.25, margin: '0 0 6px' }}>
+            Make time for what matters.
+          </h2>
+          <p style={{ fontFamily: 'var(--as-font-body)', fontSize: 14, lineHeight: 1.5, color: 'var(--as-text)', margin: 0 }}>
+            Aura helps you find favorable times for your plans, balancing your schedule with Panchangam, the traditional
+            Indian guide to auspicious timing.
+          </p>
+        </section>
+      )}
+
+      <p style={{ fontFamily: 'var(--as-font-body)', fontSize: 13, color: 'var(--as-text-muted)', marginTop: onEmailStep ? 20 : undefined, marginBottom: onEmailStep ? 12 : 24 }}>
         Sign in with your email — no password needed.
       </p>
 
-      {status !== 'sent' || !sentTo ? (
+      {onEmailStep ? (
+        <>
         <form onSubmit={handleSubmit} style={{ display: 'flex', gap: 8, width: '100%', maxWidth: 320 }}>
           <input
             type="email"
@@ -135,6 +152,35 @@ export function LoginScreen({ onLoggedInCheck }: { onLoggedInCheck: () => void }
             {status === 'sending' ? 'Sending...' : 'Continue'}
           </button>
         </form>
+
+        {/* AURA-READY-02-F3 -- secondary entry to the EXISTING guest Find a Time
+         * (/find). Saving a result there still asks for the same email code. */}
+        <div style={{ width: '100%', maxWidth: 320, textAlign: 'center', marginTop: 20 }}>
+          <a
+            href="/find"
+            style={{
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              minHeight: 44,
+              boxSizing: 'border-box',
+              padding: '10px 16px',
+              borderRadius: 8,
+              border: '1px solid var(--as-border)',
+              color: 'var(--as-text)',
+              fontFamily: 'var(--as-font-body)',
+              fontSize: 14,
+              fontWeight: 600,
+              textDecoration: 'none',
+            }}
+          >
+            Try it without an account
+          </a>
+          <p style={{ fontFamily: 'var(--as-font-body)', fontSize: 12, color: 'var(--as-text-muted)', margin: '6px 0 0' }}>
+            Find a good time for a plan now. Sign in only when you want to save it.
+          </p>
+        </div>
+        </>
       ) : (
         <div style={{ width: '100%', maxWidth: 320, textAlign: 'center' }}>
           <p style={{ fontFamily: 'var(--as-font-body)', fontSize: 14, marginBottom: 12 }}>
