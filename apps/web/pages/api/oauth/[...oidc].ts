@@ -26,23 +26,33 @@ function notFound(res: NextApiResponse): void {
 }
 
 export default async function handler(req: NextApiRequest, res: NextApiResponse): Promise<void> {
-  const mcpConfig = remoteMcpConfigFromEnv();
-  const gate = resolveRuntimeMcpAuthMode(mcpConfig);
-  if (!mcpConfig || gate.mode !== 'local') return notFound(res);
+  // I2a-R1 F15: the literal NODE_ENV test is replaced by Next at build time.
+  // In a production build the whole block -- including the dynamic import --
+  // is dead code that webpack skips at parse time, so neither the
+  // authorization server nor oidc-provider is emitted into the bundle and
+  // every request gets 404. (An early `return` is not enough: webpack only
+  // prunes dead `if` branches.)
+  if (process.env.NODE_ENV !== 'production') {
+    const mcpConfig = remoteMcpConfigFromEnv();
+    const gate = resolveRuntimeMcpAuthMode(mcpConfig);
+    if (!mcpConfig || gate.mode !== 'local') return notFound(res);
 
-  // The public path is rebuilt from the catch-all segments, so it does not
-  // depend on how the rewrite presents req.url.
-  const raw = req.query.oidc;
-  const segments = Array.isArray(raw) ? raw : typeof raw === 'string' ? [raw] : [];
-  if (segments.some((s) => s === '' || s === '.' || s === '..' || s.includes('/'))) return notFound(res);
-  const publicPath = `/${segments.join('/')}`;
-  const allowed = publicPath === '/.well-known/oauth-authorization-server' || publicPath === '/.well-known/openid-configuration' || publicPath.startsWith('/oauth/');
-  if (!allowed) return notFound(res);
+    // The public path is rebuilt from the catch-all segments, so it does not
+    // depend on how the rewrite presents req.url.
+    const raw = req.query.oidc;
+    const segments = Array.isArray(raw) ? raw : typeof raw === 'string' ? [raw] : [];
+    if (segments.some((s) => s === '' || s === '.' || s === '..' || s.includes('/'))) return notFound(res);
+    const publicPath = `/${segments.join('/')}`;
+    const allowed = publicPath === '/.well-known/oauth-authorization-server' || publicPath === '/.well-known/openid-configuration' || publicPath.startsWith('/oauth/');
+    if (!allowed) return notFound(res);
 
-  const query = new URL(req.url ?? '/', 'http://localhost').searchParams;
-  query.delete('oidc');
-  const search = query.toString() ? `?${query}` : '';
+    const query = new URL(req.url ?? '/', 'http://localhost').searchParams;
+    query.delete('oidc');
+    const search = query.toString() ? `?${query}` : '';
 
-  const { getLocalMcpAuth } = await import('../../../lib/mcpLocalOAuth');
-  await getLocalMcpAuth(mcpConfig).server.handle(req, res, publicPath, search);
+    const { getLocalMcpAuth } = await import('../../../lib/mcpLocalOAuth');
+    await getLocalMcpAuth(mcpConfig).server.handle(req, res, publicPath, search);
+    return;
+  }
+  return notFound(res);
 }

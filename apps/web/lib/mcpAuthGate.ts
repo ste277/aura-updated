@@ -20,6 +20,10 @@ import type { RemoteMcpConfig } from '../../../packages/mcp-tools/src/http/remot
  *      constant "production", so the local path is unreachable code in any
  *      production build, whatever its runtime env vars;
  *   5. the explicit opt-in AURA_MCP_AUTH_MODE=local-dev missing;
+ *   5b. (I2a-R1 F14) AUTH_SECRET missing, shorter than 32 characters, or
+ *      equal to the development fallback published in lib/auth.ts -- the
+ *      OAuth consent flow trusts the `as_session` cookie, so a publicly
+ *      known signing key must never authenticate OAuth users;
  *   6. remote MCP config disabled (AURA_MCP_REMOTE_ENABLED != "1");
  *   7. resource or issuer not a loopback http(s) URL, issuer not an origin,
  *      or issuer and resource on different origins.
@@ -33,6 +37,9 @@ export const PRODUCTION_PROJECT_ID = 'prj_iY4xteQOWUNsV85NnbyIylBAba6t';
 /** aura-staging. Remote MCP auth stays disabled there until separately authorized. */
 export const STAGING_PROJECT_IDS: readonly string[] = Object.freeze(['prj_0wR8cnuX0dphdd3ExRGOT0AqcuEa']);
 export const LOCAL_DEV_OPT_IN = 'local-dev';
+/** lib/auth.ts development fallback (public in the repo); never acceptable for local OAuth. */
+const PUBLIC_DEV_SESSION_SECRET = 'dev-only-insecure-secret-change-me';
+const MIN_SESSION_SECRET_LENGTH = 32;
 
 export type McpAuthMode = { mode: 'local' } | { mode: 'reject_all'; reason: string };
 
@@ -59,6 +66,8 @@ export function resolveMcpAuthMode(env: Env, config: RemoteMcpConfig | null): Mc
   if (env.VERCEL || env.VERCEL_ENV || env.VERCEL_URL || projectId) return reject('vercel_deployment');
   if (env.NODE_ENV !== 'development' && env.NODE_ENV !== 'test') return reject('not_development_build');
   if (env.AURA_MCP_AUTH_MODE !== LOCAL_DEV_OPT_IN) return reject('local_opt_in_missing');
+  const secret = env.AUTH_SECRET;
+  if (!secret || secret.length < MIN_SESSION_SECRET_LENGTH || secret === PUBLIC_DEV_SESSION_SECRET) return reject('unsafe_session_secret');
   if (!config) return reject('remote_mcp_disabled');
   const resource = loopbackUrl(config.resourceUrl);
   const issuer = loopbackUrl(config.authorizationServer);

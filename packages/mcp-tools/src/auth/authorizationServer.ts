@@ -1,7 +1,7 @@
 /// <reference path="./oidc-provider.d.ts" />
 import { createHmac, generateKeyPairSync, randomBytes, timingSafeEqual } from 'crypto';
 import type { IncomingMessage, ServerResponse } from 'http';
-import Provider, { errors, type InteractionDetails } from 'oidc-provider';
+import Provider, { errors, interactionPolicy, type InteractionDetails } from 'oidc-provider';
 import { MCP_SCOPE, type AccessTokenVerifier } from '../http/remoteMcpHandler';
 import { noopAuditSink, type McpAuditSink } from '../security/audit';
 import { createMemoryAdapterStore, type MemoryAdapterStore } from './memoryAdapter';
@@ -33,6 +33,19 @@ import { createMemoryAdapterStore, type MemoryAdapterStore } from './memoryAdapt
  * server never sees a password or sign-in code. Consent is an explicit POST
  * protected by an HMAC CSRF token bound to (interaction uid, user id), an
  * Origin check and anti-framing headers.
+ *
+ * Identity binding (I2a-R1, F1): `oidc-provider` keeps its own login session
+ * cookie. It is never trusted on its own. On EVERY authorization request the
+ * login prompt re-checks that a current Aura session exists and names the
+ * same user as the provider session; otherwise login is required again
+ * (and `prompt=none` fails with login_required). Consent is also required on
+ * every authorization request (`prompt=none` fails with consent_required),
+ * so a previously authorized client can never obtain a code silently -- not
+ * for another user, and not through an attacker-chosen PKCE challenge. A
+ * stored grant is reused only if it belongs to the current account and
+ * client.
+ *
+ * Only loopback peers may reach the authorization server (I2a-R1, F14).
  */
 
 export interface AuraOAuthClient {
@@ -62,6 +75,11 @@ export interface AuraOAuthServerOptions {
   audit?: McpAuditSink;
   /** Defaults to a fresh in-memory store (local/test only). */
   adapterStore?: MemoryAdapterStore;
+  /**
+   * Accept requests whose TCP peer is not a loopback address. Default false:
+   * a LAN peer of a local dev server gets 404 from every OAuth path.
+   */
+  allowNonLoopbackPeers?: boolean;
 }
 
 export interface AuraOAuthServer {
@@ -87,6 +105,12 @@ export const OAUTH_ROUTES = {
 } as const;
 export const INTERACTION_PREFIX = '/oauth/interaction/';
 const MAX_FORM_BYTES = 4096;
+const LOOPBACK_PEERS: ReadonlySet<string> = new Set(['127.0.0.1', '::1', '::ffff:127.0.0.1']);
+
+/** True only for a loopback TCP peer address (as reported by the socket, not by headers). */
+export function isLoopbackPeer(address: string | undefined): boolean {
+  return typeof address === 'string' && LOOPBACK_PEERS.has(address);
+}
 const MAX_TOKEN_LENGTH = 512;
 
 function isOriginOnly(value: string): boolean {
@@ -149,6 +173,32 @@ export function createAuraOAuthServer(options: AuraOAuthServerOptions): AuraOAut
   const cookieKeys = [randomBytes(32).toString('base64url')];
   const csrfKey = randomBytes(32);
 
+  // F1: never trust the provider's own login session on its own.
+  async function currentAuraUser(req: IncomingMessage): Promise<{ userId: string } | null> {
+    try {
+      const user = await options.resolveSessionUser(req);
+      return user && typeof user.userId === 'string' && user.userId.length > 0 ? user : null;
+    } catch {
+      return null; // fail closed
+    }
+  }
+  const { base: basePolicy, Check } = interactionPolicy;
+  const policy = basePolicy();
+  policy.get('login').checks.add(
+    new Check('aura_session_binding', 'The Aura session does not match the authorization session', 'login_required', async (ctx: { req: IncomingMessage; oidc: { session?: { accountId?: string } } }) => {
+      const user = await currentAuraUser(ctx.req);
+      if (!user) return Check.REQUEST_PROMPT;
+      return ctx.oidc.session?.accountId === user.userId ? Check.NO_NEED_TO_PROMPT : Check.REQUEST_PROMPT;
+    }),
+    0,
+  );
+  policy.get('consent').checks.add(
+    new Check('aura_explicit_consent', 'Explicit consent is required for every authorization', 'consent_required', (ctx: { oidc: { result?: { consent?: unknown } } }) =>
+      ctx.oidc.result?.consent ? Check.NO_NEED_TO_PROMPT : Check.REQUEST_PROMPT,
+    ),
+    0,
+  );
+
   const provider = new Provider(issuer, {
     adapter: adapterStore.factory,
     clients: options.clients.map((c) => ({
@@ -167,7 +217,16 @@ export function createAuraOAuthServer(options: AuraOAuthServerOptions): AuraOAut
     claims: { openid: ['sub'] },
     pkce: { required: () => true },
     findAccount: async (_ctx: unknown, id: string) => ({ accountId: id, claims: async () => ({ sub: id }) }),
-    interactions: { url: (_ctx: unknown, interaction: { uid: string }) => `${INTERACTION_PREFIX}${interaction.uid}` },
+    interactions: { policy, url: (_ctx: unknown, interaction: { uid: string }) => `${INTERACTION_PREFIX}${interaction.uid}` },
+    // Reuse a stored grant only if it belongs to the current account and client
+    // (the library would otherwise throw on a mismatch).
+    loadExistingGrant: async (ctx: { oidc: { result?: { consent?: { grantId?: string } }; session: { accountId?: string; grantIdFor(clientId: string): string | undefined }; client: { clientId: string }; provider: Provider } }) => {
+      const grantId = ctx.oidc.result?.consent?.grantId || ctx.oidc.session.grantIdFor(ctx.oidc.client.clientId);
+      if (!grantId) return undefined;
+      const grant = await ctx.oidc.provider.Grant.find(grantId);
+      if (!grant || grant.accountId !== ctx.oidc.session.accountId || grant.clientId !== ctx.oidc.client.clientId) return undefined;
+      return grant;
+    },
     ttl: {
       AccessToken: ttl,
       IdToken: 300,
@@ -233,11 +292,46 @@ export function createAuraOAuthServer(options: AuraOAuthServerOptions): AuraOAut
     res.end();
   }
 
+  /**
+   * F1: the provider session belongs to a different Aura user than the one
+   * signed in now (sign-out + sign-in, or an account switch). Destroy that
+   * provider session -- in the store, so it is unusable even if the browser
+   * keeps the cookie, and by expiring its cookies -- then restart the same,
+   * already validated authorization request so the current user logs in
+   * fresh. (The library's own account-switch path needs RP-initiated logout,
+   * which is deliberately disabled.)
+   */
+  async function resetProviderSessionAndRestart(req: IncomingMessage, res: ServerResponse, details: InteractionDetails): Promise<void> {
+    const sessionCookie = provider.cookieName('session');
+    for (const part of String(req.headers.cookie ?? '').split(';')) {
+      const i = part.indexOf('=');
+      if (i > 0 && part.slice(0, i).trim() === sessionCookie) {
+        const jti = decodeURIComponent(part.slice(i + 1).trim());
+        if (jti) await new adapterStore.factory('Session').destroy(jti);
+      }
+    }
+    const expired = 'Path=/; Expires=Thu, 01 Jan 1970 00:00:00 GMT; HttpOnly; SameSite=Lax';
+    const restart = new URLSearchParams();
+    for (const [k, v] of Object.entries(details.params)) if (typeof v === 'string') restart.set(k, v);
+    audit({ event: 'oauth.error', outcome: 'provider_session_reset', clientId: String(details.params.client_id ?? '') });
+    res.writeHead(303, {
+      location: `${OAUTH_ROUTES.authorization}?${restart}`,
+      'cache-control': 'no-store',
+      'set-cookie': [`${sessionCookie}=; ${expired}`, `${sessionCookie}.sig=; ${expired}`],
+    });
+    res.end();
+  }
+
   /** Grants exactly the allowlisted scopes the prompt is missing. */
   async function grantFor(details: InteractionDetails, userId: string): Promise<string> {
     const clientId = String(details.params.client_id);
-    const existing = details.grantId ? await provider.Grant.find(details.grantId) : undefined;
+    const found = details.grantId ? await provider.Grant.find(details.grantId) : undefined;
+    const existing = found && found.accountId === userId && found.clientId === clientId ? found : undefined;
     const grant = existing ?? new provider.Grant({ accountId: userId, clientId });
+    // Always (re)state the allowlisted scopes this request asked for.
+    const requested = String(details.params.scope ?? '').split(' ');
+    if (requested.includes(MCP_SCOPE)) grant.addResourceScope(resourceUrl, MCP_SCOPE);
+    if (requested.includes('openid')) grant.addOIDCScope('openid');
     const d = details.prompt.details as { missingOIDCScope?: string[]; missingResourceScopes?: Record<string, string[]> };
     const oidc = (d.missingOIDCScope ?? []).filter((s) => s === 'openid');
     if (oidc.length) grant.addOIDCScope(oidc.join(' '));
@@ -250,7 +344,9 @@ export function createAuraOAuthServer(options: AuraOAuthServerOptions): AuraOAut
 
   async function handleInteraction(req: IncomingMessage, res: ServerResponse, path: string): Promise<void> {
     const rest = path.slice(INTERACTION_PREFIX.length);
-    const [uid, action] = rest.split('/');
+    const parts = rest.split('/');
+    if (parts.length > 2 || !parts[0]) return sendPage(res, 404, 'Not found', '<h1>Not found</h1>');
+    const [uid, action] = parts;
     let details: InteractionDetails;
     try {
       details = await provider.interactionDetails(req, res);
@@ -259,17 +355,23 @@ export function createAuraOAuthServer(options: AuraOAuthServerOptions): AuraOAut
     }
     if (details.uid !== uid) return sendPage(res, 400, 'Invalid request', '<h1>Invalid request</h1>');
 
-    const user = await options.resolveSessionUser(req);
+    const user = await currentAuraUser(req);
     if (!user) {
       if (req.method === 'POST') return sendPage(res, 401, 'Sign in required', '<h1>Sign in required</h1>');
       const signIn = escapeHtml(options.signInUrl ?? '/');
       return sendPage(res, 401, 'Sign in to Aura', `<h1>Sign in to Aura</h1><p>Sign in to Aura in this browser, then reload this page to continue.</p><p><a href="${signIn}">Sign in</a></p>`);
     }
 
+    // A provider session for a different Aura user must never be reused.
+    const accountChanged = !!details.session?.accountId && details.session.accountId !== user.userId;
+
     if (details.prompt.name === 'login') {
       // Login is the existing Aura session; nothing new is collected here.
       if (req.method !== 'GET' || action) return sendPage(res, 405, 'Invalid request', '<h1>Invalid request</h1>');
-      return finish(req, res, { login: { accountId: user.userId } });
+      if (accountChanged) return resetProviderSessionAndRestart(req, res, details);
+      // Transient provider session: it never outlives the browser session,
+      // and it is re-bound to the Aura session on every request anyway.
+      return finish(req, res, { login: { accountId: user.userId, remember: false } });
     }
 
     if (details.prompt.name !== 'consent') return finish(req, res, { error: 'access_denied' });
@@ -277,11 +379,8 @@ export function createAuraOAuthServer(options: AuraOAuthServerOptions): AuraOAut
     const client = clientsById.get(String(details.params.client_id));
     if (!client) return finish(req, res, { error: 'unauthorized_client' });
 
-    // A provider session for a different Aura user must not be reused.
-    const accountChanged = !!details.session?.accountId && details.session.accountId !== user.userId;
-
     if (req.method === 'GET' && !action) {
-      if (accountChanged) return finish(req, res, { error: 'login_required', error_description: 'The signed-in account changed.' });
+      if (accountChanged) return resetProviderSessionAndRestart(req, res, details);
       const csrf = csrfFor(uid, user.userId);
       const base = `${INTERACTION_PREFIX}${encodeURIComponent(uid)}`;
       return sendPage(
@@ -316,6 +415,11 @@ export function createAuraOAuthServer(options: AuraOAuthServerOptions): AuraOAut
 
   async function handle(req: IncomingMessage, res: ServerResponse, path: string, search = ''): Promise<void> {
     try {
+      if (!options.allowNonLoopbackPeers && !isLoopbackPeer(req.socket?.remoteAddress)) {
+        res.writeHead(404, { 'content-type': 'text/plain', 'cache-control': 'no-store' });
+        res.end('Not Found');
+        return;
+      }
       if (path.startsWith(INTERACTION_PREFIX)) return await handleInteraction(req, res, path);
       // RFC 8414 discovery is served from the same document as OIDC discovery.
       const providerPath = path === '/.well-known/oauth-authorization-server' ? '/.well-known/openid-configuration' : path;

@@ -16,7 +16,7 @@ The shared core of Aura's MCP tool, `find_best_time`, used by two transports:
 | `src/findBestTimeTool.ts` | `FIND_BEST_TIME_TOOL` (name, title, description, annotations, schema) and the shared outcome-to-result mapping | the schema and executor types |
 | `src/findBestTimeRemote.ts` | Remote profile: caps an explicit `dateRange` at a **span** of 14 days (`end − start`, the same convention as the local 90-day limit, so up to 15 calendar dates inclusive; D1 threat T9). Otherwise delegates to the executor. | the executor |
 | `src/http/remoteMcpHandler.ts` | Framework-free Web `Request` → `Response` handler, protected resource metadata, fail-closed config parsing, client-binding / rate-limit / audit hooks | `@modelcontextprotocol/server`, the files above and `src/security/*` |
-| `src/security/rateLimit.ts` | `McpRateLimiter` interface plus an in-memory fixed-window limiter (process-local; local/dev only) | nothing |
+| `src/security/rateLimit.ts` | `McpRateLimiter` interface (per-rule limits) plus a bounded in-memory fixed-window limiter (process-local; local/dev only) | nothing |
 | `src/security/audit.ts` | Redacted audit events: allowlisted fields only, pseudonymous `userRef` | `crypto` |
 | `src/auth/authorizationServer.ts` | OAuth authorization server on `oidc-provider` 9.13.3 (I2a): Node req/res `handle()`, consent interaction, resource-server token verifier | `oidc-provider`, the handler's types, `src/security/*` |
 | `src/auth/memoryAdapter.ts` | In-memory `oidc-provider` adapter (local/tests only) | nothing |
@@ -38,7 +38,7 @@ Checks run in this order, failing closed:
 
 **Nothing is callable in any deployment.** The route wires `rejectAllAccessTokens` everywhere except the gated local development path below. Personalization from the verified account, which excludes the birth profile per D-2, arrives in MCP-02-I3.
 
-After authentication (I2a): a token without the scope returns **403** `insufficient_scope`; a token issued to a client the resource does not accept returns **403** `unauthorized_client`; a user or client over its rate limit returns **429** with `Retry-After`. Every outcome from step 2 on is reported to the audit sink.
+After authentication (I2a): a token without the scope returns **403** `insufficient_scope`; a token issued to a client the resource does not accept returns **403** `unauthorized_client`; a user over the per-user limit (default 60/min), or a client over its much larger ceiling (default 600/min, which must exceed the per-user limit, so one user can never exhaust it), returns **429** with `Retry-After`. The in-memory limiter never evicts an active window and rejects requests that would need a new key once it is full (`limitedBy: "capacity"`), so it fails closed with bounded memory; it is per process, and a shared store is I2b work. Every outcome from step 2 on is reported to the audit sink.
 
 ## Local OAuth authorization server (I2a)
 
@@ -46,7 +46,9 @@ After authentication (I2a): a token without the scope returns **403** `insuffici
 
 Login reuses the existing Aura session (`as_session`). The consent page is an explicit POST with an HMAC CSRF token bound to the interaction and the user, an Origin check and anti-framing headers.
 
-**Where it runs.** Only where `apps/web/lib/mcpAuthGate.ts` returns `local`, which requires all of: not on Vercel (no `VERCEL*` variables, and the Production and staging project ids are pinned as explicit denials), `NODE_ENV=development` or `test` (so never `next build` / `next start`), `AURA_MCP_AUTH_MODE=local-dev`, remote MCP enabled, and loopback resource and issuer URLs on one origin. Everywhere else `/api/mcp` stays reject-all and the OAuth routes (`apps/web/pages/api/oauth/[...oidc].ts`, reached through `next.config.js` rewrites) return 404.
+**Session binding (I2a-R1).** `oidc-provider`'s own login session is never trusted on its own. On every authorization request a login-prompt check confirms that a current Aura session exists and names the same user; otherwise login is required again (`prompt=none` → `login_required`). If the provider session belongs to a different user (sign-out then sign-in, or an account switch), it is destroyed and the request restarts for the current user. Consent is required on every authorization request (`prompt=none` → `consent_required`), so no code is ever issued silently, including to an attacker-chosen PKCE challenge. Only loopback TCP peers can reach the authorization server.
+
+**Where it runs.** Only where `apps/web/lib/mcpAuthGate.ts` returns `local`, which requires all of: not on Vercel (no `VERCEL*` variables, and the Production and staging project ids are pinned as explicit denials), `NODE_ENV=development` or `test` (so never `next build` / `next start`), `AURA_MCP_AUTH_MODE=local-dev`, an `AUTH_SECRET` of at least 32 characters that is not the public development fallback, remote MCP enabled, and loopback resource and issuer URLs on one origin. In production builds the local code is not emitted at all: both routes wrap it in a literal `process.env.NODE_ENV !== 'production'` block that webpack drops, and `next.config.js` excludes the module from file tracing. Everywhere else `/api/mcp` stays reject-all and the OAuth routes (`apps/web/pages/api/oauth/[...oidc].ts`, reached through `next.config.js` rewrites) return 404.
 
 **State is in memory** (`src/auth/memoryAdapter.ts`): codes, grants, tokens and signing keys are per process and lost on restart. The durable Postgres adapter needs a migration and a separately approved ticket.
 
@@ -58,7 +60,8 @@ AURA_MCP_REMOTE_ENABLED=1 \
 AURA_MCP_RESOURCE_URL=http://localhost:3000/api/mcp \
 AURA_MCP_AUTHORIZATION_SERVER=http://localhost:3000 \
 AURA_MCP_AUTH_MODE=local-dev \
-npx next dev
+AUTH_SECRET=<any local value of 32+ characters> \
+npx next dev -H 127.0.0.1
 ```
 
 The single registered client is `aura-local-dev-client`, with loopback redirect URIs `http://127.0.0.1:8976/callback` and `http://localhost:8976/callback`.
@@ -83,5 +86,6 @@ Code outside `apps/web` resolves bare imports from the **repository root** `node
 npm install                                   # repo root
 npx ts-node test/mcpRemoteTransport.test.ts   # remote handler (CI: math-core-tests job)
 npx ts-node test/mcpOAuthLocal.test.ts        # local OAuth -> MCP, environment gate (CI: math-core-tests job)
+npx ts-node test/mcpOAuthSecurityRegression.test.ts  # I2a-R1 security regressions (CI: math-core-tests job)
 (cd apps/mcp && npm ci && npm test)           # stdio server plus shared-definition check (CI: MCP Server job)
 ```

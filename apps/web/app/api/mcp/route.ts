@@ -20,17 +20,24 @@ export const dynamic = 'force-dynamic';
 
 async function handle(req: Request): Promise<Response> {
   const config = remoteMcpConfigFromEnv();
-  const gate = resolveRuntimeMcpAuthMode(config);
-  if (config && gate.mode === 'local') {
-    const { getLocalMcpAuth, localMcpAudit } = await import('../../../lib/mcpLocalOAuth');
-    const local = getLocalMcpAuth(config);
-    return handleRemoteMcpRequest(req, {
-      config,
-      verifyAccessToken: local.server.verifyAccessToken,
-      isClientAllowed: local.server.isClientAllowed,
-      rateLimiter: local.rateLimiter,
-      audit: localMcpAudit,
-    });
+  // I2a-R1 F15: the literal NODE_ENV test is replaced by Next at build time,
+  // so in a production build this whole block -- including the dynamic
+  // import -- is dead code that webpack drops: the local authorization
+  // server, oidc-provider and Koa are not emitted into the server bundle.
+  // The runtime gate below still applies on its own.
+  if (process.env.NODE_ENV !== 'production') {
+    const gate = resolveRuntimeMcpAuthMode(config);
+    if (config && gate.mode === 'local') {
+      const { getLocalMcpAuth, localMcpAudit } = await import('../../../lib/mcpLocalOAuth');
+      const local = getLocalMcpAuth(config);
+      return handleRemoteMcpRequest(req, {
+        config,
+        verifyAccessToken: local.server.verifyAccessToken,
+        isClientAllowed: local.server.isClientAllowed,
+        rateLimiter: local.rateLimiter,
+        audit: localMcpAudit,
+      });
+    }
   }
   return handleRemoteMcpRequest(req, { config, verifyAccessToken: rejectAllAccessTokens });
 }

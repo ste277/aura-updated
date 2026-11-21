@@ -12,6 +12,13 @@ const nextConfig = {
   // needs to be told to transpile those workspace-relative imports too.
   experimental: {
     externalDir: true,
+    // AURA-MCP-02-I2a-R1 F15: the local OAuth module is only reachable behind
+    // a literal NODE_ENV !== 'production' block, so no production chunk
+    // contains it; this also keeps the file tracer from copying its source
+    // into server/standalone output.
+    outputFileTracingExcludes: {
+      '*': ['./lib/mcpLocalOAuth.ts'],
+    },
   },
   // AURA-MCP-02-I2a: public OAuth paths -> the Pages API mount
   // (pages/api/oauth/[...oidc].ts). That route answers 404 unless the local

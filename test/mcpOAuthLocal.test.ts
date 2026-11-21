@@ -347,12 +347,32 @@ async function main(): Promise<void> {
       b.jar.set('test_session', USER_B);
       const otherUser = await b.fetch(action!, { method: 'POST', headers: { 'content-type': 'application/x-www-form-urlencoded', origin: h.origin }, body: `csrf=${encodeURIComponent(csrf!)}` });
       check('consent: CSRF token is bound to the signed-in user (other user -> 403)', otherUser.status === 403, otherUser.status);
-      // User B (now signed in) reloads the consent page started under user A: the flow ends with login_required, no code.
+      // User B (now signed in) reloads the consent page started under user A (I2a-R1 F1):
+      // A's provider session is reset, the request restarts, and B sees B's own consent page.
       const consentUrl = action!.replace(/\/confirm$/, '');
       let switched = await b.fetch(consentUrl);
-      for (let i = 0; i < 4 && switched.status === 303 && !(switched.headers.get('location') ?? '').startsWith(REDIRECT); i += 1) switched = await b.fetch(switched.headers.get('location')!);
-      const switchedLoc = new URL(switched.headers.get('location') ?? 'http://x/');
-      check('consent: account switch mid-flow -> login_required, no code', switchedLoc.href.startsWith(REDIRECT) && switchedLoc.searchParams.get('error') === 'login_required' && !switchedLoc.searchParams.get('code'), switchedLoc.href);
+      let sawCode = false;
+      for (let i = 0; i < 6 && switched.status === 303; i += 1) {
+        const loc = switched.headers.get('location')!;
+        if (loc.startsWith(REDIRECT)) {
+          sawCode = !!new URL(loc).searchParams.get('code');
+          break;
+        }
+        switched = await b.fetch(loc);
+      }
+      const bHtml = switched.status === 200 ? await switched.text() : '';
+      const bCsrf = /name="csrf" value="([^"]+)"/.exec(bHtml)?.[1];
+      const bAction = /action="([^"]+\/confirm)"/.exec(bHtml)?.[1];
+      check('consent: account switch mid-flow -> no code; restarts at a fresh consent page for the new user', !sawCode && !!bCsrf && !!bAction, [switched.status, sawCode]);
+      let bToken: string | undefined;
+      if (bCsrf && bAction) {
+        let r = await b.fetch(bAction, { method: 'POST', headers: { 'content-type': 'application/x-www-form-urlencoded', origin: h.origin }, body: `csrf=${encodeURIComponent(bCsrf)}` });
+        for (let i = 0; i < 4 && r.status === 303 && !(r.headers.get('location') ?? '').startsWith(REDIRECT); i += 1) r = await b.fetch(r.headers.get('location')!);
+        const code = new URL(r.headers.get('location') ?? 'http://x/').searchParams.get('code');
+        if (code) bToken = (await token(h, { grant_type: 'authorization_code', code, redirect_uri: REDIRECT, client_id: CLIENT, code_verifier: p.verifier, resource: h.resource })).json?.access_token;
+      }
+      const bVerified = bToken ? await h.as.verifyAccessToken(bToken, h.resource) : null;
+      check('consent: after the switch, the token is for the new user (B), never A', bVerified?.userId === USER_B, bVerified);
     }
 
     // ---------------------------------------------------------- invalid / forged tokens
@@ -436,26 +456,25 @@ async function main(): Promise<void> {
     {
       const fa = await fullFlow(h, USER_A);
       const fb = await fullFlow(h, USER_B);
-      const limiter = createFixedWindowRateLimiter({ limit: 3, windowMs: 60_000, now: () => 1_000_000 });
+      const limiter = createFixedWindowRateLimiter({ windowMs: 60_000, now: () => 1_000_000 });
+      const LIMITS = { perUser: 3, perClient: 30 };
       const statuses: number[] = [];
-      for (let i = 0; i < 4; i += 1) statuses.push((await mcp(h, fa.accessToken!, 'tools/list', {}, { rateLimiter: limiter })).status);
-      const limited = await mcp(h, fa.accessToken!, 'tools/list', {}, { rateLimiter: limiter });
+      for (let i = 0; i < 4; i += 1) statuses.push((await mcp(h, fa.accessToken!, 'tools/list', {}, { rateLimiter: limiter, rateLimits: LIMITS })).status);
+      const limited = await mcp(h, fa.accessToken!, 'tools/list', {}, { rateLimiter: limiter, rateLimits: LIMITS });
       check('rate limit: 4th request of a user in the window -> 429', JSON.stringify(statuses) === '[200,200,200,429]', statuses);
       check('rate limit: 429 carries Retry-After and no internals', limited.status === 429 && Number(limited.headers.get('retry-after')) >= 1 && limited.body?.error === 'rate_limited', [limited.status, limited.headers.get('retry-after'), limited.body]);
-      const clientLimited = (await mcp(h, fb.accessToken!, 'tools/list', {}, { rateLimiter: limiter })).status;
-      check('rate limit: per-client budget is shared across users of that client', clientLimited === 429, clientLimited);
-      const perUser = createFixedWindowRateLimiter({ limit: 2, windowMs: 60_000, now: () => 5 });
-      await mcp(h, fa.accessToken!, 'tools/list', {}, { rateLimiter: perUser });
-      const keysSeen: string[][] = [];
-      const spy = { check: (keys: readonly string[]) => (keysSeen.push([...keys]), { allowed: true, retryAfterSeconds: 0 }) };
+      const otherUser = (await mcp(h, fb.accessToken!, 'tools/list', {}, { rateLimiter: limiter, rateLimits: LIMITS })).status;
+      check('rate limit (R1 F2): a user at their limit does not block another user of the same client', otherUser === 200, otherUser);
+      const rulesSeen: unknown[] = [];
+      const spy = { check: (rules: readonly { key: string; limit: number }[]) => (rulesSeen.push(rules.map((r) => ({ ...r }))), { allowed: true, retryAfterSeconds: 0 }) };
       await mcp(h, fa.accessToken!, 'tools/list', {}, { rateLimiter: spy });
-      check('rate limit: keyed by verified user AND client (never by request input)', JSON.stringify(keysSeen) === JSON.stringify([[`user:${USER_A}`, `client:${CLIENT}`]]), keysSeen);
+      check('rate limit: rules keyed by verified user AND client with default limits (60 / 600)', JSON.stringify(rulesSeen) === JSON.stringify([[{ key: `user:${USER_A}`, limit: 60 }, { key: `client:${CLIENT}`, limit: 600 }]]), rulesSeen);
       let t = 0;
-      const windowed = createFixedWindowRateLimiter({ limit: 1, windowMs: 1000, now: () => t });
-      const w1 = windowed.check(['user:x']).allowed;
-      const w2 = windowed.check(['user:x']).allowed;
+      const windowed = createFixedWindowRateLimiter({ windowMs: 1000, now: () => t });
+      const w1 = windowed.check([{ key: 'user:x', limit: 1 }]).allowed;
+      const w2 = windowed.check([{ key: 'user:x', limit: 1 }]).allowed;
       t = 1000;
-      const w3 = windowed.check(['user:x']).allowed;
+      const w3 = windowed.check([{ key: 'user:x', limit: 1 }]).allowed;
       check('rate limit: window resets', w1 && !w2 && w3, [w1, w2, w3]);
       const unauth = await mcp(h, null, 'tools/list', {}, { rateLimiter: { check: () => ({ allowed: false, retryAfterSeconds: 9 }) } });
       check('rate limit: checked only after authentication (401 first)', unauth.status === 401, unauth.status);
@@ -500,7 +519,8 @@ async function main(): Promise<void> {
 
   // ---------------------------------------------------------- environment gate
   const local = { resourceUrl: 'http://localhost:3000/api/mcp', authorizationServer: 'http://localhost:3000' };
-  const LOCAL_ENV = { AURA_MCP_AUTH_MODE: 'local-dev', NODE_ENV: 'development' };
+  const SYNTH_SECRET = 'synthetic-local-session-secret-for-tests-0001';
+  const LOCAL_ENV = { AURA_MCP_AUTH_MODE: 'local-dev', NODE_ENV: 'development', AUTH_SECRET: SYNTH_SECRET };
   check('gate: local dev with explicit opt-in and loopback URLs -> local', resolveMcpAuthMode(LOCAL_ENV, local).mode === 'local');
   const denials: [string, Record<string, string | undefined>, typeof local | null][] = [
     ['Production project id', { ...LOCAL_ENV, VERCEL_PROJECT_ID: PRODUCTION_PROJECT_ID }, local],
@@ -511,9 +531,12 @@ async function main(): Promise<void> {
     ['VERCEL_URL set', { ...LOCAL_ENV, VERCEL_URL: 'x.vercel.app' }, local],
     ['unknown Vercel project id', { ...LOCAL_ENV, VERCEL_PROJECT_ID: 'prj_unknown' }, local],
     ['NODE_ENV=production (next build / next start / Docker)', { ...LOCAL_ENV, NODE_ENV: 'production' }, local],
-    ['NODE_ENV unset', { AURA_MCP_AUTH_MODE: 'local-dev' }, local],
-    ['opt-in missing', { NODE_ENV: 'development' }, local],
-    ['opt-in misspelled ("1")', { NODE_ENV: 'development', AURA_MCP_AUTH_MODE: '1' }, local],
+    ['NODE_ENV unset', { AURA_MCP_AUTH_MODE: 'local-dev', AUTH_SECRET: SYNTH_SECRET }, local],
+    ['opt-in missing', { NODE_ENV: 'development', AUTH_SECRET: SYNTH_SECRET }, local],
+    ['opt-in misspelled ("1")', { NODE_ENV: 'development', AURA_MCP_AUTH_MODE: '1', AUTH_SECRET: SYNTH_SECRET }, local],
+    ['AUTH_SECRET missing (R1 F14)', { NODE_ENV: 'development', AURA_MCP_AUTH_MODE: 'local-dev' }, local],
+    ['AUTH_SECRET shorter than 32 (R1 F14)', { ...LOCAL_ENV, AUTH_SECRET: 'short-secret' }, local],
+    ['AUTH_SECRET = public dev fallback (R1 F14)', { ...LOCAL_ENV, AUTH_SECRET: 'dev-only-insecure-secret-change-me' }, local],
     ['remote MCP config disabled', LOCAL_ENV, null],
     ['non-loopback resource URL', LOCAL_ENV, { resourceUrl: 'https://aura.example/api/mcp', authorizationServer: 'http://localhost:3000' }],
     ['non-loopback issuer', LOCAL_ENV, { resourceUrl: 'http://localhost:3000/api/mcp', authorizationServer: 'https://aura.example' }],
@@ -534,7 +557,9 @@ async function main(): Promise<void> {
   const route = read('apps/web/app/api/mcp/route.ts');
   check('wiring: /api/mcp falls back to rejectAllAccessTokens unless the gate says local', /rejectAllAccessTokens/.test(route) && /resolveRuntimeMcpAuthMode\(/.test(route) && /mode === 'local'/.test(route));
   check('wiring: /api/mcp loads the local AS lazily (dynamic import), never at module load', /await import\(['"][^'"]*mcpLocalOAuth['"]\)/.test(route) && !/^import[^\n]*mcpLocalOAuth/m.test(route));
+  check('wiring (R1 F15): /api/mcp local block sits behind a literal process.env.NODE_ENV !== production guard', /if \(process\.env\.NODE_ENV !== 'production'\) \{\s*(\/\/[^\n]*\n\s*)*const gate = resolveRuntimeMcpAuthMode/.test(route) || /if \(process\.env\.NODE_ENV !== 'production'\) \{[\s\S]{0,80}resolveRuntimeMcpAuthMode/.test(route));
   const pagesRoute = read('apps/web/pages/api/oauth/[...oidc].ts');
+  check('wiring (R1 F15): OAuth mount body (incl. the dynamic import) sits inside a literal NODE_ENV !== production block, 404 otherwise', /if \(process\.env\.NODE_ENV !== 'production'\) \{[\s\S]*await import\(['"][^'"]*mcpLocalOAuth['"]\)[\s\S]*\n  \}\n  return notFound\(res\);\n\}/.test(pagesRoute));
   check('wiring: OAuth mount 404s unless the gate says local', /resolveRuntimeMcpAuthMode\(/.test(pagesRoute) && /404/.test(pagesRoute) && /await import\(['"][^'"]*mcpLocalOAuth['"]\)/.test(pagesRoute));
   check('wiring: OAuth mount disables Next body parsing (provider reads the raw body)', /bodyParser:\s*false/.test(pagesRoute));
   const localAs = read('apps/web/lib/mcpLocalOAuth.ts');

@@ -63,6 +63,12 @@ jobs:
       # environment gate that keeps Production/staging reject-all. No DB.
       - name: Run local OAuth -> MCP test
         run: npx ts-node test/mcpOAuthLocal.test.ts
+      # AURA-MCP-02-I2a-R1 -- regressions for the independent security review:
+      # provider/Aura session binding (sign-out, account switch, prompt=none,
+      # attacker PKCE, session expiry, concurrency, re-authorization), per-user
+      # vs per-client rate limits, bounded limiter, loopback-only AS.
+      - name: Run OAuth security regression test
+        run: npx ts-node test/mcpOAuthSecurityRegression.test.ts
       - name: Run panchang day service test
         run: npx ts-node test/panchangDay.test.ts
       - name: Run panchang month service test

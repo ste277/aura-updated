@@ -64,6 +64,7 @@ declare module 'oidc-provider' {
     issuer: string;
     proxy: boolean;
     callback(): (req: IncomingMessage, res: ServerResponse) => void;
+    cookieName(type: 'session' | 'interaction' | 'resume'): string;
     interactionDetails(req: IncomingMessage, res: ServerResponse): Promise<InteractionDetails>;
     interactionResult(req: IncomingMessage, res: ServerResponse, result: Record<string, unknown>, options?: { mergeWithLastSubmission?: boolean }): Promise<string>;
     on(event: string, listener: (...args: any[]) => void): this;
@@ -79,6 +80,19 @@ declare module 'oidc-provider' {
       find(id: string): Promise<ClientInstance | undefined>;
     };
   }
+
+  export class Check {
+    constructor(reason: string, description: string, error: string, check: (ctx: any) => boolean | Promise<boolean>);
+    static REQUEST_PROMPT: true;
+    static NO_NEED_TO_PROMPT: false;
+  }
+  export interface PromptPolicy {
+    checks: { add(check: Check, index?: number): void };
+  }
+  export const interactionPolicy: {
+    base(): PromptPolicy[] & { get(name: string): PromptPolicy };
+    Check: typeof Check;
+  };
 
   export const errors: {
     InvalidTarget: new (description?: string) => Error;

@@ -74,8 +74,9 @@ export function getLocalMcpAuth(config: RemoteMcpConfig): LocalState {
   const state: LocalState = {
     key,
     server,
-    // Local defaults: 60 requests per user and per client per minute.
-    rateLimiter: createFixedWindowRateLimiter({ limit: 60, windowMs: 60_000 }),
+    // Local: 1-minute windows; limits are the handler defaults
+    // (60 per user, 600 per client ceiling). Bounded at 10,000 windows.
+    rateLimiter: createFixedWindowRateLimiter({ windowMs: 60_000, maxKeys: 10_000 }),
   };
   globalRef.__auraMcpLocalOAuth = state;
   return state;

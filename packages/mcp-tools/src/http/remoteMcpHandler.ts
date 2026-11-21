@@ -1,7 +1,7 @@
 import { McpServer, WebStandardStreamableHTTPServerTransport } from '@modelcontextprotocol/server';
 import { FIND_BEST_TIME_TOOL, toFindBestTimeToolResult } from '../findBestTimeTool';
 import { executeFindBestTimeRemote } from '../findBestTimeRemote';
-import type { McpRateLimiter } from '../security/rateLimit';
+import type { McpRateLimiter, RateLimitRule } from '../security/rateLimit';
 import type { McpAuditEvent, McpAuditSink } from '../security/audit';
 
 /**
@@ -21,7 +21,8 @@ import type { McpAuditEvent, McpAuditSink } from '../security/audit';
  *      pointing at the RFC 9728 protected resource metadata; token without
  *      the scope -> 403 insufficient_scope; token issued to a client the
  *      resource does not accept (isClientAllowed) -> 403 unauthorized_client
- *   5b. per-user / per-client rate limit (rateLimiter)         -> 429
+ *   5b. rate limit (rateLimiter): a per-user bucket plus a much larger
+ *       per-client ceiling, so one user cannot exhaust another's allowance -> 429
  *   6. body read with a streaming 16 KB cap -> 413; invalid JSON -> 400;
  *      JSON-RPC batch (array) -> 400 (batching was removed from the
  *      protocol in 2025-06-18, and a batch would multiply the per-request
@@ -41,6 +42,7 @@ export const REMOTE_SERVER_NAME = 'aura-mcp-remote';
 export const REMOTE_SERVER_VERSION = '0.1.0';
 export const MCP_SCOPE = 'aura.planning.read';
 export const MAX_REQUEST_BODY_BYTES = 16 * 1024;
+export const DEFAULT_RATE_LIMITS = Object.freeze({ perUser: 60, perClient: 600 });
 
 export interface VerifiedAccess {
   /** Verified, server-side Aura user id. Unused by tools until I3 (personalization). */
@@ -74,8 +76,14 @@ export interface RemoteMcpDeps {
    * a clientId is refused too.
    */
   isClientAllowed?: (clientId: string) => boolean;
-  /** Per-user and per-client rate limit, checked after authentication. */
+  /** Rate limiter, checked after authentication (see rateLimits). */
   rateLimiter?: McpRateLimiter;
+  /**
+   * Per-window limits. `perClient` must exceed `perUser` (I2a-R1 F2: the
+   * client ceiling is an abuse backstop, never something one user's
+   * traffic can reach on its own). Defaults: 60 per user, 600 per client.
+   */
+  rateLimits?: { perUser: number; perClient: number };
   /** Redacted audit sink. */
   audit?: McpAuditSink;
   /** Monotonic-ish clock for audit latency (tests pin it). */
@@ -274,9 +282,11 @@ export async function handleRemoteMcpRequest(req: Request, deps: RemoteMcpDeps):
     return done(jsonResponse(403, { error: 'unauthorized_client' }), 'unauthorized_client');
   }
   if (deps.rateLimiter) {
-    const keys = [`user:${access.userId}`];
-    if (access.clientId) keys.push(`client:${access.clientId}`);
-    const decision = await deps.rateLimiter.check(keys);
+    const limits = deps.rateLimits ?? DEFAULT_RATE_LIMITS;
+    if (!(limits.perClient > limits.perUser)) throw new TypeError('rateLimits.perClient must exceed rateLimits.perUser');
+    const rules: RateLimitRule[] = [{ key: `user:${access.userId}`, limit: limits.perUser }];
+    if (access.clientId) rules.push({ key: `client:${access.clientId}`, limit: limits.perClient });
+    const decision = await deps.rateLimiter.check(rules);
     if (!decision.allowed) {
       audit.limitedBy = decision.limitedBy;
       return done(jsonResponse(429, { error: 'rate_limited' }, { 'retry-after': String(decision.retryAfterSeconds) }), 'rate_limited');
