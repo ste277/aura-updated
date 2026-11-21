@@ -62,6 +62,8 @@ function runVercelBuild(opts: { nextMode: NextMode; vercelEnv?: string; approval
     fs.copyFileSync(path.join(ROOT, VERCEL_BUILD), path.join(web, 'scripts/vercel-build.sh'));
     fs.copyFileSync(path.join(ROOT, 'apps/web/scripts/check-palmistry-bundle.js'), path.join(web, 'scripts/check-palmistry-bundle.js'));
     fs.copyFileSync(path.join(ROOT, 'apps/web/palmistry-build-exclusion.js'), path.join(web, 'palmistry-build-exclusion.js'));
+    // AURA-MCP-02-I1.5-D: vercel-build.sh runs the DB identity guard before migrating.
+    fs.copyFileSync(path.join(ROOT, 'apps/web/scripts/check-db-identity.js'), path.join(web, 'scripts/check-db-identity.js'));
     if (opts.approval !== null) {
       fs.writeFileSync(path.join(tmp, 'packages/palmistry/src/review-status.json'), opts.approval ?? '{"status":"PENDING_HUMAN_REVIEW","approvedBy":null}');
     }
@@ -91,7 +93,10 @@ exit 0
     fs.writeFileSync(path.join(tmp, 'bin/npx'), `#!/bin/sh\necho "npx $*" >> "${log}"\nexit 0\n`, { mode: 0o755 });
     const env: NodeJS.ProcessEnv = { ...process.env, PATH: `${path.join(tmp, 'bin')}${path.delimiter}${process.env.PATH}`, FAKE_NEXT_MODE: opts.nextMode };
     delete env.VERCEL_ENV;
+    delete env.VERCEL_PROJECT_ID;
     if (opts.vercelEnv) env.VERCEL_ENV = opts.vercelEnv;
+    // Vercel always injects VERCEL_PROJECT_ID; Production builds are the Aura Production project.
+    if (opts.vercelEnv === 'production') env.VERCEL_PROJECT_ID = 'prj_iY4xteQOWUNsV85NnbyIylBAba6t';
     const res = spawnSync('sh', ['scripts/vercel-build.sh'], { cwd: web, env, encoding: 'utf8' });
     const calls = fs.existsSync(log) ? fs.readFileSync(log, 'utf8').trim().split('\n').filter(Boolean) : [];
     return { status: res.status, out: `${res.stdout}\n${res.stderr}`, calls };

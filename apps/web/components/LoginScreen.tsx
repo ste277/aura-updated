@@ -1,6 +1,8 @@
 'use client';
 
-import { useState } from 'react';
+import React, { useState } from 'react';
+import { SignInCodeActions } from './SignInCodeActions';
+import { requestSignInCode, SIGN_IN_OFFLINE_MESSAGE } from '../lib/signInCode';
 
 export function LoginScreen({ onLoggedInCheck }: { onLoggedInCheck: () => void }) {
   const [email, setEmail] = useState('');
@@ -10,45 +12,51 @@ export function LoginScreen({ onLoggedInCheck }: { onLoggedInCheck: () => void }
   const [code, setCode] = useState('');
   const [verifying, setVerifying] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  // AURA-READY-03-F2 -- the address the pending code was sent to. Verification
+  // always uses this (never a later edit), and Change email clears it.
+  const [sentTo, setSentTo] = useState<string | null>(null);
 
   // Both handlers must survive a rejected fetch: in the native shells the
   // device is routinely offline, and an unhandled rejection would leave the
   // button disabled on "Sending..." forever with no way to retry.
-  const OFFLINE_MESSAGE = "Couldn't reach the server. Check your connection and try again.";
+  const OFFLINE_MESSAGE = SIGN_IN_OFFLINE_MESSAGE;
+  const onEmailStep = status !== 'sent' || !sentTo;
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
     setStatus('sending');
     setError(null);
 
-    try {
-      const res = await fetch('/api/auth/request-link', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ email }),
-      });
-
-      const data = await res.json().catch(() => null);
-      if (!res.ok) {
-        setError(data?.error ?? `Sign-in request failed (${res.status}). Try again.`);
-        setStatus('idle');
-        return;
-      }
-
-      setStatus('sent');
-      if (data?.devLoginUrl) setDevLoginUrl(data.devLoginUrl);
-      if (data?.devLoginCode) setDevLoginCode(data.devLoginCode);
-    } catch (err) {
-      console.error('request-link failed:', err);
-      setError(OFFLINE_MESSAGE);
+    const target = email.trim();
+    const result = await requestSignInCode({ email: target });
+    if (result.kind !== 'SENT') {
+      setError(result.message);
       setStatus('idle');
+      return;
     }
+    setSentTo(target);
+    setCode('');
+    setDevLoginUrl(result.devLoginUrl);
+    setDevLoginCode(result.devLoginCode);
+    setStatus('sent');
+  }
+
+  // AURA-READY-03-F2 -- back to email entry with no pending verification:
+  // the old code, its dev extras and the target address are all dropped.
+  function handleChangeEmail() {
+    setSentTo(null);
+    setCode('');
+    setDevLoginUrl(null);
+    setDevLoginCode(null);
+    setError(null);
+    setStatus('idle');
   }
 
   // The emailed link opens in the system browser, which is the wrong context
   // inside the native app shells — the 6-digit code works everywhere.
   async function handleVerifyCode(e: React.FormEvent) {
     e.preventDefault();
+    if (!sentTo) return;
     setVerifying(true);
     setError(null);
 
@@ -56,7 +64,7 @@ export function LoginScreen({ onLoggedInCheck }: { onLoggedInCheck: () => void }
       const res = await fetch('/api/auth/verify-code', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ email, code }),
+        body: JSON.stringify({ email: sentTo, code }),
       });
 
       if (!res.ok) {
@@ -100,6 +108,7 @@ export function LoginScreen({ onLoggedInCheck }: { onLoggedInCheck: () => void }
     <div
       style={{
         minHeight: '100vh',
+        boxSizing: 'border-box',
         background: 'var(--as-bg)',
         color: 'var(--as-text)',
         display: 'flex',
@@ -110,11 +119,26 @@ export function LoginScreen({ onLoggedInCheck }: { onLoggedInCheck: () => void }
       }}
     >
       <h1 style={{ fontFamily: 'var(--as-font-display)', fontSize: 24, marginBottom: 4 }}>AuraSchedule</h1>
-      <p style={{ fontFamily: 'var(--as-font-body)', fontSize: 13, color: 'var(--as-text-muted)', marginBottom: 24 }}>
+
+      {onEmailStep && (
+        // AURA-READY-02-F3 -- say what Aura is before asking for an email.
+        <section aria-labelledby="landing-intro-title" style={{ width: '100%', maxWidth: 320, textAlign: 'center', marginTop: 12 }}>
+          <h2 id="landing-intro-title" style={{ fontFamily: 'var(--as-font-display)', fontSize: 20, lineHeight: 1.25, margin: '0 0 6px' }}>
+            Make time for what matters.
+          </h2>
+          <p style={{ fontFamily: 'var(--as-font-body)', fontSize: 14, lineHeight: 1.5, color: 'var(--as-text)', margin: 0 }}>
+            Aura helps you find favorable times for your plans, balancing your schedule with Panchangam, the traditional
+            Indian guide to auspicious timing.
+          </p>
+        </section>
+      )}
+
+      <p style={{ fontFamily: 'var(--as-font-body)', fontSize: 13, color: 'var(--as-text-muted)', marginTop: onEmailStep ? 20 : undefined, marginBottom: onEmailStep ? 12 : 24 }}>
         Sign in with your email — no password needed.
       </p>
 
-      {status !== 'sent' ? (
+      {onEmailStep ? (
+        <>
         <form onSubmit={handleSubmit} style={{ display: 'flex', gap: 8, width: '100%', maxWidth: 320 }}>
           <input
             type="email"
@@ -128,6 +152,35 @@ export function LoginScreen({ onLoggedInCheck }: { onLoggedInCheck: () => void }
             {status === 'sending' ? 'Sending...' : 'Continue'}
           </button>
         </form>
+
+        {/* AURA-READY-02-F3 -- secondary entry to the EXISTING guest Find a Time
+         * (/find). Saving a result there still asks for the same email code. */}
+        <div style={{ width: '100%', maxWidth: 320, textAlign: 'center', marginTop: 20 }}>
+          <a
+            href="/find"
+            style={{
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              minHeight: 44,
+              boxSizing: 'border-box',
+              padding: '10px 16px',
+              borderRadius: 8,
+              border: '1px solid var(--as-border)',
+              color: 'var(--as-text)',
+              fontFamily: 'var(--as-font-body)',
+              fontSize: 14,
+              fontWeight: 600,
+              textDecoration: 'none',
+            }}
+          >
+            Try it without an account
+          </a>
+          <p style={{ fontFamily: 'var(--as-font-body)', fontSize: 12, color: 'var(--as-text-muted)', margin: '6px 0 0' }}>
+            Find a good time for a plan now. Sign in only when you want to save it.
+          </p>
+        </div>
+        </>
       ) : (
         <div style={{ width: '100%', maxWidth: 320, textAlign: 'center' }}>
           <p style={{ fontFamily: 'var(--as-font-body)', fontSize: 14, marginBottom: 12 }}>
@@ -151,6 +204,19 @@ export function LoginScreen({ onLoggedInCheck }: { onLoggedInCheck: () => void }
               {verifying ? 'Checking...' : 'Sign in'}
             </button>
           </form>
+
+          <SignInCodeActions
+            sentTo={sentTo}
+            disabled={verifying}
+            requestCode={() => requestSignInCode({ email: sentTo })}
+            onResent={(result) => {
+              setCode('');
+              setError(null);
+              setDevLoginUrl(result.devLoginUrl);
+              setDevLoginCode(result.devLoginCode);
+            }}
+            onChangeEmail={handleChangeEmail}
+          />
 
           {(devLoginUrl || devLoginCode) && (
             <div

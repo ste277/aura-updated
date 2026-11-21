@@ -71,4 +71,4 @@ Note that first-time setup step 6 above becomes `bash deploy/deploy.sh <tag>`.
 
 ## Mobile shells
 
-Point the Capacitor shells at production: `CAP_SERVER_URL=https://aura.voyforge.com npx cap sync`.
+Point the Capacitor shells at production, one platform at a time: `CAP_SERVER_URL=https://aura.voyforge.com npx cap sync android` and `CAP_SERVER_URL=https://aura.voyforge.com npx cap sync ios`. Do not use a combined `npx cap sync`: it omits Android's `server.errorPath`, which disables the unsupported-WebView page (AND-MIN-01).

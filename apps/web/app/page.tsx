@@ -10,6 +10,7 @@ import {
   WeekdayIndex,
 } from '../../../packages/panchang/src/windows';
 import { computeDailyEnergyInsight } from '../lib/scoreEngine';
+import { computeOnboardingRecommendation } from '../lib/onboardingRecommendation';
 import { computeCurrentWindowStatus } from '../lib/currentWindowStatus';
 import { getActionCards, ActionCard } from '../../../packages/recommendation/src/actionCards';
 import { findActivityIntent } from '../../../packages/recommendation/src/personalizedTasks';
@@ -59,6 +60,8 @@ import { resolveTzOffsetMinutes, getDatePartsInTimezone } from '../lib/timezone'
 import { formatDisplayName } from '../lib/displayName';
 import { trackEvent } from '../lib/trackEvent';
 import { Capacitor } from '@capacitor/core';
+import { generateClientRequestId } from '../lib/clientId';
+import { useAndroidBackButton } from '../lib/useAndroidBackButton';
 import {
   loadNotificationPrefs,
   saveNotificationPrefs,
@@ -298,6 +301,9 @@ export default function DashboardPage() {
     const requested = new URLSearchParams(window.location.search).get('tab');
     return (VALID_TABS as string[]).includes(requested ?? '') ? (requested as AppTab) : 'home';
   });
+  // AURA-MOBILE-01-M2-B/AND-02 -- Android hardware back button: no-op on
+  // web/iOS, see lib/useAndroidBackButton.ts for the full rationale.
+  useAndroidBackButton(activeTab, setActiveTab, Boolean(user));
   const [panchangDateJump, setPanchangDateJump] = useState<{ date: string; key: number } | null>(null);
   const [muhurthamActivityJump, setMuhurthamActivityJump] = useState<{ activityId: string; key: number } | null>(null);
 
@@ -1258,6 +1264,13 @@ export default function DashboardPage() {
     };
   }, [solar, windows, currentMinuteOfDay]);
 
+  // AURA-READY-03-F1 -- onboarding's first recommendation: a favourable,
+  // caution-free window only (never the any-type energyInsight.nextShift).
+  const onboardingRecommendation = useMemo(
+    () => computeOnboardingRecommendation(windows, currentMinuteOfDay),
+    [windows, currentMinuteOfDay]
+  );
+
   // Daily energy insight score
   const energyInsight = useMemo(() => {
     return computeDailyEnergyInsight(windows, activeType, currentMinuteOfDay);
@@ -1408,7 +1421,7 @@ export default function DashboardPage() {
       // offline-queue replay -- never regenerated per attempt. This is
       // what lets the server (POST /api/habit-logs's own idempotent-replay
       // check) recognize a retry as the SAME request instead of a new one.
-      const clientRequestId = crypto.randomUUID();
+      const clientRequestId = generateClientRequestId();
       const activeWindowForLog = overrideWindowType || activeType || 'NEUTRAL';
       const inferredSignificance = activitySignificance ?? inferActivitySignificance(activityTitle);
       const finalLogSource = logSource === 'MANUAL' && isFrictionWindow(activeWindowForLog) && inferredSignificance !== 'LOW'
@@ -1800,7 +1813,7 @@ export default function DashboardPage() {
         timezone={user.timezone}
         locationConfirmed={user.locationConfirmedAt != null}
         onLocationChanged={handleLocationChanged}
-        nextShift={mounted ? energyInsight.nextShift : undefined}
+        recommendation={mounted ? onboardingRecommendation : undefined}
         hasRealRecommendation={mounted && windows.length > 0}
         onExit={handleExitOnboarding}
         onPlanMyDay={() => {

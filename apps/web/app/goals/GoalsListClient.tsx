@@ -2,6 +2,8 @@
 
 import React, { useEffect, useRef, useState } from 'react';
 import { colors, spacing, typography } from '../../components/theme';
+import { generateClientRequestId } from '../../lib/clientId';
+import { useAndroidBackToHome } from '../../lib/useAndroidBackToHome';
 import {
   PageHeader,
   SurfaceCard,
@@ -62,6 +64,7 @@ type ViewFilter = 'ACTIVE' | 'ARCHIVED';
 type LoadState = { status: 'LOADING' } | { status: 'LOADED'; goals: GoalSummary[] } | { status: 'ERROR' };
 
 export function GoalsListClient({ authenticated }: { authenticated: boolean }) {
+  useAndroidBackToHome();
   useEffect(() => {
     if (!authenticated) window.location.href = '/';
   }, [authenticated]);
@@ -252,8 +255,8 @@ function CreateGoalModal({ onClose }: { onClose: () => void }) {
   // Create Goal attempt (this ticket's own section 5). A lazy useState
   // initializer runs exactly once per mount, so every submit/retry within
   // THIS modal instance reuses the identical id (same primitive,
-  // crypto.randomUUID(), DayPlanPreviewController.tsx already uses for an
-  // analogous client-request id) -- never regenerated merely because the
+  // generateClientRequestId(), DayPlanPreviewController.tsx already uses for
+  // an analogous client-request id) -- never regenerated merely because the
   // network request is retried. A genuinely new logical Create Goal
   // action gets a fresh id for free: closing and reopening the modal
   // unmounts this component (GoalsListView's own `{createOpen && ...}`
@@ -261,8 +264,11 @@ function CreateGoalModal({ onClose }: { onClose: () => void }) {
   // with its own fresh initializer call. A successful submission
   // navigates away (`window.location.href` below), which has the same
   // practical effect as an explicit reset -- there is no "next attempt"
-  // to reuse it for.
-  const [clientRequestId] = useState<string>(() => crypto.randomUUID());
+  // to reuse it for. generateClientRequestId() (not crypto.randomUUID()
+  // directly) falls back to crypto.getRandomValues() outside a secure
+  // context, e.g. the Android emulator's http://10.0.2.2 dev alias
+  // (AURA-MOBILE-01-M2-A/AND-01).
+  const [clientRequestId] = useState<string>(() => generateClientRequestId());
   // Goals V2 Candidate B4 -- transient, session-scoped telemetry
   // bookkeeping maintained ALONGSIDE `proposal` (goalDecompositionObservability.ts's
   // own doc comment covers the exact reset/sticky semantics). Never

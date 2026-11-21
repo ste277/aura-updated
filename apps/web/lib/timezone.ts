@@ -11,6 +11,12 @@
  * by the platform, not by us.
  */
 export function resolveTzOffsetMinutes(ianaTimezone: string, date: Date): number {
+  // AURA-MOBILE-01-AND-COMPAT-05: older WebViews (Chromium < 95, e.g. the stock
+  // Android 10/11 WebView 91) throw a RangeError for timeZoneName 'shortOffset'
+  // at formatter construction, which blanked the app after sign-in. Only in
+  // that case derive the offset from the zone's local wall-clock parts instead.
+  if (!supportsShortOffset()) return resolveTzOffsetMinutesFromParts(ianaTimezone, date);
+
   const dtf = new Intl.DateTimeFormat('en-US', {
     timeZone: ianaTimezone,
     timeZoneName: 'shortOffset',
@@ -28,6 +34,78 @@ export function resolveTzOffsetMinutes(ianaTimezone: string, date: Date): number
   const minutes = match[3] ? parseInt(match[3], 10) : 0;
 
   return sign * (hours * 60 + minutes);
+}
+
+// ---- AURA-MOBILE-01-AND-COMPAT-05: 'shortOffset' compatibility fallback ----
+
+let shortOffsetSupported: boolean | undefined;
+
+/** Feature-detects timeZoneName 'shortOffset' once. Probes with the always-valid
+ * zone 'UTC', so a RangeError here can only mean the option is unsupported --
+ * never an invalid caller timezone. Any other error type is rethrown. */
+function supportsShortOffset(): boolean {
+  if (shortOffsetSupported === undefined) {
+    try {
+      new Intl.DateTimeFormat('en-US', { timeZone: 'UTC', timeZoneName: 'shortOffset' });
+      shortOffsetSupported = true;
+    } catch (err) {
+      if (!(err instanceof RangeError)) throw err;
+      shortOffsetSupported = false;
+    }
+  }
+  return shortOffsetSupported;
+}
+
+/** Test-only: forget the cached feature-detection result. */
+export function __resetShortOffsetSupportForTests(): void {
+  shortOffsetSupported = undefined;
+}
+
+/**
+ * Fallback for environments without 'shortOffset': reads the zone's local
+ * wall-clock date/time for the instant (second precision, 24-hour) and
+ * compares it with the same instant in UTC. Same contract as the primary path:
+ * minutes EAST of UTC (Asia/Kolkata -> +330, America/New_York in January ->
+ * -300), DST-correct per instant (the platform tz database decides), works for
+ * half- and quarter-hour zones. An invalid IANA name still throws the platform's
+ * RangeError from the Intl.DateTimeFormat constructor, as before -- it is never
+ * turned into a plausible offset. Uses no timezone abbreviations.
+ */
+function resolveTzOffsetMinutesFromParts(ianaTimezone: string, date: Date): number {
+  const dtf = new Intl.DateTimeFormat('en-US', {
+    timeZone: ianaTimezone,
+    hourCycle: 'h23',
+    year: 'numeric',
+    month: 'numeric',
+    day: 'numeric',
+    hour: 'numeric',
+    minute: 'numeric',
+    second: 'numeric',
+  });
+  const parts = dtf.formatToParts(date);
+  const get = (type: Intl.DateTimeFormatPartTypes) => parseInt(parts.find((p) => p.type === type)?.value ?? 'NaN', 10);
+  // Some older ICU builds report midnight as hour "24" even with h23.
+  const hour = get('hour') % 24; // some older ICU builds report midnight as "24"
+  // Build the zone's wall-clock time as a UTC instant, without mutating a Date
+  // (scheduling Date-mutator architecture guard; AURA-MOBILE-01-COMPAT-05-F1).
+  // Date.UTC maps years 0-99 to 1900-1999, so those years are shifted forward by one
+  // 400-year Gregorian cycle (exactly 146,097 days, identical leap-year pattern) and
+  // the cycle is subtracted again, which keeps them literal. NaN parts stay NaN.
+  const GREGORIAN_400_YEARS_MS = 146097 * 86400000;
+  const year = get('year');
+  const cycleShift = year >= 0 && year <= 99 ? 400 : 0;
+  const wallMs =
+    Date.UTC(year + cycleShift, get('month') - 1, get('day'), hour, get('minute'), get('second'), 0) -
+    (cycleShift === 0 ? 0 : GREGORIAN_400_YEARS_MS);
+  // The formatter has whole-second precision; compare against the instant truncated to the second.
+  const instant = Math.floor(date.getTime() / 1000) * 1000;
+  // Math.trunc (not round) mirrors the primary path, which drops an offset's seconds
+  // component (historical LMT offsets such as +6:01:40) rather than rounding it.
+  const minutes = Math.trunc((wallMs - instant) / 60000);
+  if (!Number.isFinite(minutes)) {
+    throw new RangeError(`Unable to resolve UTC offset for time zone "${ianaTimezone}"`);
+  }
+  return minutes;
 }
 
 /**

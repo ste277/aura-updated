@@ -4,6 +4,7 @@ import React, { useEffect, useRef, useState } from 'react';
 import { colors, spacing, typography } from '../../components/theme';
 import { PageHeader, SurfaceCard, PrimaryButton, SecondaryButton, TextButton, StatusBadge, FieldLabel, FieldError, TextInput } from '../../components/ui';
 import { isCaptureActionable, presentCaptureStateLabel, buildCapturePlanHref, type CaptureItem } from '../../lib/capturesPresentation';
+import { useAndroidBackToHome } from '../../lib/useAndroidBackToHome';
 
 /**
  * Quick Capture V1 PR B -- the smallest useful surface: a one-line composer
@@ -16,6 +17,7 @@ import { isCaptureActionable, presentCaptureStateLabel, buildCapturePlanHref, ty
 type LoadState = { status: 'LOADING' } | { status: 'LOADED'; items: CaptureItem[] } | { status: 'ERROR' };
 
 export function CapturesClient({ authenticated }: { authenticated: boolean }) {
+  useAndroidBackToHome();
   useEffect(() => {
     if (!authenticated) window.location.href = '/';
   }, [authenticated]);

@@ -11,10 +11,10 @@ jobs:
     name: Ephemeris / panchang tests
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+      - uses: actions/checkout@v5
+      - uses: actions/setup-node@v5
         with:
-          node-version: 20
+          node-version: 24
       - name: Install root deps
         run: npm install
       - name: Run ephemeris test
@@ -208,6 +208,12 @@ jobs:
       # the build and that its failure fails the build. No deploy/credentials.
       - name: Run Palmistry Vercel build guard test
         run: npx ts-node test/palm01P4VercelGuard.test.ts
+      # AURA-MCP-02-I1.5-D -- database identity guard run by vercel-build.sh
+      # before `prisma migrate deploy`: fail-closed checks of DATABASE_URL and
+      # AURA_DATABASE_URL against the approved staging identity, and the real
+      # script's ordering. Synthetic URLs only; no database, no migration.
+      - name: Run database identity guard test
+        run: npx ts-node test/dbIdentityGuard.test.ts
       # Goals V2 Candidate A1 -- goalDemandCandidates.ts imports apps/web/lib/db.ts
       # (for its `pg` dependency), same apps/web/node_modules requirement as
       # the Aura Moment/product events tests above.
@@ -283,6 +289,14 @@ jobs:
         env:
           TS_NODE_COMPILER_OPTIONS: '{"jsx":"react"}'
         run: npx ts-node test/homeRecomposition.test.ts
+      # AURA-READY-03-F1 -- onboarding never presents Rahu Kalam/Yamaganda/
+      # Gulika as the "next favourable window". Renders RecommendationStep
+      # (automatic JSX runtime, hence react-jsx) via renderToStaticMarkup;
+      # fixed dates/clocks, real ephemeris; no live DB.
+      - name: Run onboarding recommendation test
+        env:
+          TS_NODE_COMPILER_OPTIONS: '{"jsx":"react-jsx"}'
+        run: npx ts-node test/onboardingRecommendation.test.ts
       # Goals V2 Candidate B2 (resumed) -- goalActivityProposal.ts imports
       # a type-only RhythmPickerValue from the 'use client'
       # components/RhythmPicker.tsx, same jsx-enabled/apps-web-node_modules
@@ -680,6 +694,19 @@ jobs:
       # another time and explicit Save anyway (shared jsdom harness).
       - name: Run Find a Time conflict component test (HPG5-V2-I1)
         run: npx ts-node --project tsconfig.jsdom-tests.json test/findATimeConflictJsdom.test.ts
+      # AURA-READY-03-F2 -- Resend code / Change email on the 6-digit sign-in code
+      # screen: cooldown, in-flight lock, 429/failure messages, verification
+      # against the newly entered address (mounted LoginScreen, scripted fetch).
+      - name: Run sign-in resend / change-email component test (AURA-READY-03-F2)
+        run: npx ts-node --project tsconfig.jsdom-tests.json test/signInResendChangeEmailJsdom.test.ts
+      # AURA-READY-02-F3 -- landing intro + "Try it without an account" link to the
+      # existing guest /find; email sign-in unchanged (mounted LoginScreen).
+      - name: Run landing guest-entry component test (AURA-READY-02-F3)
+        run: npx ts-node --project tsconfig.jsdom-tests.json test/landingGuestEntryJsdom.test.ts
+      # AURA-READY-02-F4 -- Find a Time: failed searches (connection, server,
+      # timeout, malformed) are told apart from a genuine empty result, with Retry.
+      - name: Run Find a Time error-state component test (AURA-READY-02-F4)
+        run: npx ts-node --project tsconfig.jsdom-tests.json test/findATimeErrorStatesJsdom.test.ts
       # AURA-HPG5-V2-I2 -- conflict copy names the proposed save and the
       # existing plan in the user's timezone (pure).
       - name: Run conflict presentation test (HPG5-V2-I2)
@@ -695,6 +722,72 @@ jobs:
       # explicit Save anyway, double-submit and stale-state guards (jsdom).
       - name: Run Home save conflict component test (HPG5-V2-I3)
         run: npx ts-node --project tsconfig.jsdom-tests.json test/hpg5I3HomeSaveJsdom.test.ts
+      # ---- AURA-ANDROID-REL-03 -- Android functional readiness (offline only) ----
+      # No device, emulator, adb, network or database: Capacitor plugins are mocked,
+      # routes/geocoder run in-process with stubs, LocationPicker mounts in jsdom
+      # (automatic JSX runtime, hence "react-jsx").
+      # AND-COMPAT-05 -- timezone fallback for WebViews without Intl "shortOffset".
+      - name: Run COMPAT-05 timezone shortOffset fallback test
+        run: npx ts-node test/timezoneShortOffsetFallback.test.ts
+      # AND-MIN-01 / AND-ERR-01 -- static Android checks (minSdk, WebView floor 91,
+      # errorPath + fallback pages, AuraWebViewClient/MainActivity wiring).
+      - name: Run Android minimum-support static test
+        run: node test/androidMinimumSupportConfig.test.mjs
+      # AND-COMPAT-03 -- @capacitor/geolocation 6.1.1 coarse-location patch. CI builds
+      # no Android, so these cover the patch script and the patched Java logic
+      # (the two Java-logic tests compile the pristine and patched sources: JDK).
+      - name: Check JDK for COMPAT-03 Java logic tests
+        run: javac -version && java -version
+      - name: Run COMPAT-03 geolocation patch script test
+        run: node test/geolocationCompatPatchScript.test.mjs
+      - name: Run COMPAT-03 geolocation Java logic test
+        run: node test/geolocationCompatJavaLogic.test.mjs
+      - name: Run COMPAT-03 geolocation Java logic harness test
+        run: node test/geolocationCompatJavaLogicHarness.test.mjs
+      # M2-A/B -- secure-context client request ids (AND-01), hardware back (AND-02),
+      # and the structural tests those changes updated.
+      - name: Run M2 client request id test
+        run: npx ts-node test/clientId.test.ts
+      - name: Run M2 Android back navigation test
+        run: npx ts-node test/androidBackNavigation.test.ts
+      - name: Run onboarding Goal step wiring test
+        run: npx ts-node test/onboardingGoalStepWiring.test.ts
+      - name: Run pending activity visual consistency test
+        run: npx ts-node test/pendingActivityVisualConsistency.test.ts
+      - name: Run pending activity reload visibility test
+        run: npx ts-node --project tsconfig.jsdom-tests.json test/pendingActivityReloadVisibility.test.ts
+      # M2-B/C/D + IOS-02 location -- native geolocation, permission recovery, timeout
+      # lifecycle, StrictMode, POST reverse-geocode route, location error wording.
+      - name: Run location search API test
+        run: npx ts-node test/locationSearchApi.test.ts
+      - name: Run LocationPicker smart selection test
+        run: npx ts-node test/locationPickerSmartSelection.test.ts
+      - name: Run LocationPicker native geolocation test
+        run: npx ts-node test/locationPickerNativeGeolocation.test.ts
+      - name: Run IOS-02 reverse-geocode POST route test
+        run: npx ts-node test/ios02ReverseRoutePost.test.ts
+      - name: Run LocationPicker M2-D reliability test
+        env:
+          TS_NODE_COMPILER_OPTIONS: '{"jsx":"react-jsx"}'
+        run: npx ts-node --project tsconfig.jsdom-tests.json test/locationPickerM2dReliability.test.ts
+      - name: Run LocationPicker native timeout diagnostics test
+        env:
+          TS_NODE_COMPILER_OPTIONS: '{"jsx":"react-jsx"}'
+        run: npx ts-node --project tsconfig.jsdom-tests.json test/locationPickerNativeTimeoutDiagnostics.test.ts
+      - name: Run LocationPicker StrictMode lifecycle test
+        env:
+          TS_NODE_COMPILER_OPTIONS: '{"jsx":"react-jsx"}'
+        run: npx ts-node --project tsconfig.jsdom-tests.json test/locationPickerStrictModeLifecycle.test.ts
+      # REL-03 F1 -- choosing a location another way supersedes a still-running
+      # "Use my current location" request (a late fix never wins).
+      - name: Run LocationPicker REL-03 supersede test
+        env:
+          TS_NODE_COMPILER_OPTIONS: '{"jsx":"react-jsx"}'
+        run: npx ts-node --project tsconfig.jsdom-tests.json test/locationPickerRel03Supersede.test.ts
+      - name: Run IOS-02 location errors and privacy test
+        env:
+          TS_NODE_COMPILER_OPTIONS: '{"jsx":"react-jsx"}'
+        run: npx ts-node --project tsconfig.jsdom-tests.json test/ios02LocationErrorsAndPrivacy.test.ts
   palm-g5-upload-tests:
     # AURA-PALM-G5-C2 -- dedicated job for the development-only Upload Photo
     # pipeline suites (G5-I1..R4.3), so a Palmistry failure stays visible on
@@ -744,10 +837,10 @@ jobs:
     name: Next.js production build
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+      - uses: actions/checkout@v5
+      - uses: actions/setup-node@v5
         with:
-          node-version: 20
+          node-version: 24
       - name: Install root deps
         run: npm install
       - name: Install web deps
@@ -786,8 +879,30 @@ jobs:
     permissions:
       contents: read
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+      - uses: actions/checkout@v5
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 24
+      - name: Install MCP deps (lockfile)
+        working-directory: apps/mcp
+        run: npm ci
+      - name: Build and test MCP server
+        working-directory: apps/mcp
+        run: npm test
+  mcp-server-node20-compat:
+    # AURA-MCP-02-I1.5-B -- transitional compatibility evidence only. Node 24
+    # is the supported runtime (the required "MCP Server" check above runs on
+    # it); apps/mcp still declares engines >=20 for local stdio users, so this
+    # job proves that floor until it is deliberately raised. A separate job
+    # (not a matrix) keeps the required check name "MCP Server" byte-identical
+    # for branch protection. Not a required check.
+    name: MCP Server (Node 20 compatibility)
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-node@v5
         with:
           node-version: 20
       - name: Install MCP deps (lockfile)
@@ -828,10 +943,10 @@ jobs:
       # Disposable CI-only database -- never production, never Vercel/Neon.
       DATABASE_URL: postgresql://aura_ci:aura_ci@localhost:5432/aura_ci
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+      - uses: actions/checkout@v5
+      - uses: actions/setup-node@v5
         with:
-          node-version: 20
+          node-version: 24
       - name: Install web deps
         working-directory: apps/web
         run: npm install
@@ -919,10 +1034,10 @@ jobs:
     env:
       DATABASE_URL: postgresql://aura_ci:aura_ci@localhost:5432/aura_ci
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+      - uses: actions/checkout@v5
+      - uses: actions/setup-node@v5
         with:
-          node-version: 20
+          node-version: 24
       - name: Install root deps
         run: npm install
       - name: Install web deps
