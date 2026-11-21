@@ -27,7 +27,8 @@
 
 import { normalizeGoalActivityRhythm, type GoalActivityRhythmOccurrenceFact } from './goalActivityRhythm';
 import { evaluateNewOccurrenceEligibility } from './goalActivityOccurrenceCapacity';
-import { loadCandidateGoalActivitiesForRhythmDemand, loadGoalActivityRhythmFactsForActivities, type CandidateGoalActivityForRhythmDemandRow } from './db';
+import { loadCandidateGoalActivitiesForRhythmDemand, loadGoalActivityRhythmFactsForActivities, listGoalActivityDailyOccupancyForActivities, type CandidateGoalActivityForRhythmDemandRow, type GoalActivityDailyOccupancy } from './db';
+import { normalizeGoalActivityDailyFrequency, isGoalActivityDailyFrequencyEnforceable } from './goalActivityDailyFrequency';
 
 // ============================================================
 // Demand contract (this ticket's own section 5) -- the smallest shape
@@ -62,6 +63,13 @@ export interface GoalDemandCandidate {
    * re-derived. Every candidate returned here is already Rhythm-eligible
    * (N_PER_WEEK, `eligible === true`), so this is always populated. */
   rhythm: GoalDemandRhythmFacts;
+  /** AURA-HPG-FIX-01 (V1-05) -- true when this activity already has a live
+   * (UPCOMING/LOGGED) or completed occurrence on `planningLocalDate` AND its
+   * daily frequency is ONCE_PER_DAY, i.e. exactly when the acceptance-time
+   * guard (DAILY_CAPACITY_EXCEEDED) would refuse another session that day.
+   * A presentation hint only -- the write path re-checks inside its own
+   * transaction. Present only when the caller wired `loadDailyOccupancy`. */
+  scheduledOnPlanningDate?: boolean;
 }
 
 /**
@@ -79,6 +87,9 @@ export type GoalDemandResult = { status: 'OK'; candidates: readonly GoalDemandCa
 export interface GoalDemandCandidatesDeps {
   loadCandidateGoalActivities: (userId: string) => Promise<readonly CandidateGoalActivityForRhythmDemandRow[]>;
   loadRhythmFacts: (userId: string, goalActivityIds: readonly string[], timezone: string) => Promise<ReadonlyMap<string, readonly GoalActivityRhythmOccurrenceFact[]>>;
+  /** AURA-HPG-FIX-01 -- optional: per-GoalActivity set of local days that
+   * already hold a live/completed occurrence (listGoalActivityDailyOccupancyForActivities). */
+  loadDailyOccupancy?: (userId: string, goalActivityIds: readonly string[], timezone: string) => Promise<ReadonlyMap<string, GoalActivityDailyOccupancy>>;
 }
 
 /** Real production wiring -- both functions are reused verbatim from
@@ -89,6 +100,7 @@ export function createRealGoalDemandCandidatesDeps(): GoalDemandCandidatesDeps {
   return {
     loadCandidateGoalActivities: loadCandidateGoalActivitiesForRhythmDemand,
     loadRhythmFacts: loadGoalActivityRhythmFactsForActivities,
+    loadDailyOccupancy: listGoalActivityDailyOccupancyForActivities,
   };
 }
 
@@ -128,6 +140,18 @@ export async function loadEligibleGoalDemand(deps: GoalDemandCandidatesDeps, use
     return { status: 'LOAD_FAILED' };
   }
 
+  // AURA-HPG-FIX-01 -- best-effort: a failed occupancy read degrades to "no
+  // hint" (never LOAD_FAILED), so Home/Plan My Day keep working and the
+  // write-time guard remains the safety net.
+  let dailyOccupancy: ReadonlyMap<string, GoalActivityDailyOccupancy> | null = null;
+  if (deps.loadDailyOccupancy) {
+    try {
+      dailyOccupancy = await deps.loadDailyOccupancy(userId, rows.map((row) => row.goalActivityId), timezone);
+    } catch {
+      dailyOccupancy = null;
+    }
+  }
+
   const candidates: GoalDemandCandidate[] = [];
   for (const row of rows) {
     // Defense-in-depth re-check of the discovery query's own SQL filter
@@ -154,6 +178,7 @@ export async function loadEligibleGoalDemand(deps: GoalDemandCandidatesDeps, use
         committedThisWeek: eligibility.committedThisWeek,
         remainingOccurrences: eligibility.remainingOccurrences,
       },
+      ...(dailyOccupancy ? { scheduledOnPlanningDate: isDayOccupiedForGoalActivity(dailyOccupancy.get(row.goalActivityId), planningLocalDate) } : {}),
     });
   }
 
@@ -174,4 +199,18 @@ export async function loadEligibleGoalDemand(deps: GoalDemandCandidatesDeps, use
 export function excludeGoalDemandByActivityIds(candidates: readonly GoalDemandCandidate[], excludeGoalActivityIds: ReadonlySet<string> | readonly string[]): GoalDemandCandidate[] {
   const exclude = excludeGoalActivityIds instanceof Set ? excludeGoalActivityIds : new Set(excludeGoalActivityIds);
   return candidates.filter((candidate) => !exclude.has(candidate.goalActivityId));
+}
+
+/**
+ * AURA-HPG-FIX-01 (V1-05) -- pure: would the acceptance-time daily guard
+ * refuse another occurrence of `row` on `localDate`? Mirrors
+ * materializeGoalActivityRhythmOccurrence's own gate (db.ts): only an
+ * enforceable ONCE_PER_DAY frequency (null normalizes to ONCE_PER_DAY)
+ * blocks, and only when that day is already occupied.
+ */
+export function isDayOccupiedForGoalActivity(occupancy: Pick<GoalActivityDailyOccupancy, 'days' | 'dailyFrequencyKind' | 'dailyFrequencyLimit'> | undefined, localDate: string): boolean {
+  if (!occupancy) return false;
+  const frequency = normalizeGoalActivityDailyFrequency({ dailyFrequencyKind: occupancy.dailyFrequencyKind, dailyFrequencyLimit: occupancy.dailyFrequencyLimit });
+  if (!isGoalActivityDailyFrequencyEnforceable(frequency.kind) || frequency.kind !== 'ONCE_PER_DAY') return false;
+  return occupancy.days.has(localDate);
 }

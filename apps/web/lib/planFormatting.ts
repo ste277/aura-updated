@@ -385,15 +385,31 @@ export function findCandidateKey(candidate: TimingCandidate): string {
  * back to plain browser-local formatting here exactly as before, since
  * this function (unlike mapPlanRow's own call sites inside the component)
  * has no Timing Location value of its own to fall back to. */
-export function planPayloadFromCandidate(candidate: TimingCandidate, durationMinutes: number, sharedWithName?: string, eventLocation?: PlanEventLocation): UpcomingPlan {
+/**
+ * AURA-HPG-FIX-01 (V1-03) -- the title a saved/displayed Find a Time, Check a
+ * Time or Compare result should carry. The engine's
+ * `candidate.metadata.activityType` is its own inferred activity-profile
+ * label ("Focused work", "Workout", ...), which is right for classification
+ * but used to REPLACE whatever the user typed. The user's own non-empty
+ * title now wins; the inferred label remains the intentional default only
+ * when no title was supplied (e.g. a blank search or a non-user caller).
+ */
+export function resolveCandidatePlanTitle(candidate: Pick<TimingCandidate, 'metadata'>, userTitle?: string | null): string {
+  const trimmed = typeof userTitle === 'string' ? userTitle.trim() : '';
+  return trimmed.length > 0 ? trimmed : candidate.metadata.activityType;
+}
+
+export function planPayloadFromCandidate(candidate: TimingCandidate, durationMinutes: number, sharedWithName?: string, eventLocation?: PlanEventLocation, userTitle?: string | null): UpcomingPlan {
   const start = new Date(candidate.start);
   const end = new Date(candidate.end);
-  const title = candidate.metadata.activityType;
+  const title = resolveCandidatePlanTitle(candidate, userTitle);
   const reasonDetails = summarizeReasonsPlainly(candidate.reasons) ?? 'Aura found this as a good moment for this activity.';
   return {
     id: `aura-${findCandidateKey(candidate)}`.replace(/[^a-z0-9]+/g, '-'),
     title,
-    icon: planIconForTitle(title),
+    // Icon still follows the engine's own activity classification (unchanged
+    // from before HPG-FIX-01), so a custom title keeps the matching icon.
+    icon: planIconForTitle(candidate.metadata.activityType),
     when: candidate.metadata.dateLabel,
     plannedStartAt: candidate.start,
     plannedEndAt: candidate.end,
@@ -402,7 +418,7 @@ export function planPayloadFromCandidate(candidate: TimingCandidate, durationMin
     window: candidate.metadata.windowLabel,
     match: candidate.label === 'EXCELLENT' || candidate.label === 'VERY_GOOD' ? 'Best Match' : 'Good Match',
     note: RESULT_LABEL_TEXT[candidate.label],
-    accent: planAccentForTitle(title),
+    accent: planAccentForTitle(candidate.metadata.activityType),
     details: sharedWithName ? `❤️ Planned with ${sharedWithName}. ${reasonDetails}` : reasonDetails,
     score: candidate.score * 10,
     googleCalendarUrl: buildGoogleCalendarUrl(title, candidate.start, candidate.end),

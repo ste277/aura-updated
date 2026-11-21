@@ -90,3 +90,18 @@ export function classifyGoalDemandIntentId(intentId: string): GoalDemandIntentId
 
   return { kind: 'VALID_GOAL_DEMAND', planningLocalDate, goalActivityId };
 }
+
+/**
+ * AURA-HPG-FIX-01 (V1-02) -- the one place a canonical goal-demand id is
+ * re-minted for a different planning date (a Today <-> Tomorrow switch that
+ * preserves Plan My Day rows). A VALID id for another date gets the same
+ * goalActivityId under `planningLocalDate`; every other id (not goal
+ * demand, malformed, or already for that date) is returned unchanged.
+ * Server authorization (authorizeGoalActivityLinks) still verifies date and
+ * provenance at acceptance.
+ */
+export function rekeyGoalDemandIntentIdForPlanningDate(intentId: string, planningLocalDate: string): string {
+  const classification = classifyGoalDemandIntentId(intentId);
+  if (classification.kind !== 'VALID_GOAL_DEMAND' || classification.planningLocalDate === planningLocalDate) return intentId;
+  return encodeGoalDemandIntentId(planningLocalDate, classification.goalActivityId);
+}
