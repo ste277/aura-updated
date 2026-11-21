@@ -15,10 +15,11 @@ import { spawnSync } from 'child_process';
 
 // eslint-disable-next-line @typescript-eslint/no-var-requires
 const guard = require('../apps/web/scripts/check-db-identity.js') as {
-  evaluate: (env: Record<string, string | undefined>, options?: { stagingProjectIds?: string[] }) => { ok: boolean; code: string };
+  evaluate: (env: Record<string, string | undefined>, options?: { stagingProjectIds?: string[]; stagingDbHostSha256?: string[] }) => { ok: boolean; code: string };
   normalizeHost: (host: string) => string;
   PRODUCTION_PROJECT_ID: string;
   STAGING_PROJECT_IDS: readonly string[];
+  STAGING_DB_HOST_SHA256: readonly string[];
 };
 
 let passed = 0;
@@ -40,7 +41,6 @@ const BUILD = path.join(ROOT, 'apps/web/scripts/vercel-build.sh');
 // ---------- synthetic fixtures (never real hosts or credentials) ----------
 const PROD_PROJECT = 'prj_iY4xteQOWUNsV85NnbyIylBAba6t';
 const STAGING_PROJECT = 'prj_SYNTHETIC_STAGING_0001';
-const PIN = { stagingProjectIds: [STAGING_PROJECT] };
 
 const STG_HOST = 'ep-quiet-sky-a1b2c3.us-east-1.aws.neon.tech';
 const STG_POOLED_HOST = 'ep-quiet-sky-a1b2c3-pooler.us-east-1.aws.neon.tech';
@@ -58,6 +58,8 @@ const STG_POOLED = url('stg_owner', STG_PASS, STG_POOLED_HOST, 'aura_staging');
 const PROD_URL = url('prod_owner', PROD_PASS, PROD_HOST, 'neondb');
 
 const sha = (s: string) => crypto.createHash('sha256').update(s, 'utf8').digest('hex');
+// Synthetic pins for the policy tests: a synthetic staging project and its synthetic DB host.
+const PIN: { stagingProjectIds?: string[]; stagingDbHostSha256?: string[] } = { stagingProjectIds: [STAGING_PROJECT], stagingDbHostSha256: [sha(STG_HOST)] };
 
 function stagingEnv(overrides: Record<string, string | undefined> = {}): Record<string, string | undefined> {
   const base: Record<string, string | undefined> = {
@@ -94,7 +96,7 @@ check('A6b. ... (same host, other database) -> FAIL', is(stagingEnv({ AURA_DATAB
 check('A6c. ... (same host and database, other port) -> FAIL', is(stagingEnv({ AURA_DATABASE_URL: url('stg_owner', STG_PASS, `${STG_HOST}:6543`, 'aura_staging') }), 'RUNTIME_DB_MISMATCH'));
 check('A7. pooled migration URL + direct runtime URL for the same staging DB -> PASS', is(stagingEnv({ DATABASE_URL: STG_POOLED, AURA_DATABASE_URL: STG_DIRECT }), 'STAGING_VERIFIED'));
 check('A7b. pooled expected host + direct URLs -> PASS (expected host is normalised too)', is(stagingEnv({ AURA_STAGING_EXPECTED_DB_HOST: STG_POOLED_HOST, AURA_DATABASE_URL: STG_POOLED }), 'STAGING_VERIFIED'));
-check('A7c. pooler folding applies to Neon hosts only (db-pooler.example.com != db.example.com)', is(stagingEnv({ AURA_STAGING_EXPECTED_DB_HOST: 'db.example.com', AURA_STAGING_FORBIDDEN_DB_HOSTS: 'prod.example.com', DATABASE_URL: url('stg_owner', STG_PASS, 'db-pooler.example.com', 'aura_staging') }), 'MIGRATION_DB_MISMATCH'));
+check('A7c. pooler folding applies to Neon hosts only (db-pooler.example.com != db.example.com)', is(stagingEnv({ AURA_STAGING_EXPECTED_DB_HOST: 'db.example.com', AURA_STAGING_FORBIDDEN_DB_HOSTS: 'prod.example.com', DATABASE_URL: url('stg_owner', STG_PASS, 'db-pooler.example.com', 'aura_staging') }), 'MIGRATION_DB_MISMATCH', { stagingProjectIds: [STAGING_PROJECT], stagingDbHostSha256: [sha('db.example.com')] }));
 check('A7d. host comparison ignores case and a trailing dot', is(stagingEnv({ DATABASE_URL: url('stg_owner', STG_PASS, `${STG_HOST.toUpperCase()}.`, 'aura_staging') }), 'STAGING_VERIFIED'));
 
 const malformed: [string, string][] = [
@@ -141,8 +143,8 @@ check('A11c. Production project without DATABASE_URL is not newly blocked by the
 check('A12. VERCEL_PROJECT_ID missing in a migrating build -> FAIL', is(stagingEnv({ VERCEL_PROJECT_ID: undefined }), 'PROJECT_ID_MISSING'));
 check('A12b. VERCEL_PROJECT_ID blank -> FAIL', is(stagingEnv({ VERCEL_PROJECT_ID: '  ' }), 'PROJECT_ID_MISSING'));
 check('A13. perfectly configured but UNPINNED staging project -> FAIL', is(stagingEnv({ AURA_DATABASE_URL: STG_POOLED }), 'PROJECT_NOT_ALLOWLISTED', { stagingProjectIds: [] }));
-check('A13b. the committed staging allowlist is empty (pinned by a later PR before the first staging build)', Array.isArray(guard.STAGING_PROJECT_IDS) && guard.STAGING_PROJECT_IDS.length === 0 && Object.isFrozen(guard.STAGING_PROJECT_IDS));
-check('A13c. so with the committed allowlist, a staging project is refused today', guard.evaluate(stagingEnv()).code === 'PROJECT_NOT_ALLOWLISTED');
+check('A13b. the committed staging allowlist is exactly the aura-staging project (see section E)', Array.isArray(guard.STAGING_PROJECT_IDS) && guard.STAGING_PROJECT_IDS.length === 1 && guard.STAGING_PROJECT_IDS[0] === 'prj_0wR8cnuX0dphdd3ExRGOT0AqcuEa' && Object.isFrozen(guard.STAGING_PROJECT_IDS));
+check('A13c. with the committed allowlist, any other (synthetic) staging project is still refused', guard.evaluate(stagingEnv()).code === 'PROJECT_NOT_ALLOWLISTED');
 check('A13d. committed Production project ID is the aura-updated project', guard.PRODUCTION_PROJECT_ID === PROD_PROJECT);
 check('A14. Preview build -> not guarded (no migration runs)', is(stagingEnv({ VERCEL_ENV: 'preview', DATABASE_URL: undefined }), 'NOT_PRODUCTION_BUILD'));
 check('A14b. unset VERCEL_ENV -> not guarded', is({}, 'NOT_PRODUCTION_BUILD'));
@@ -223,10 +225,85 @@ check('C6. non-Production project pointing at Production: build FAILS before `pr
 check('C7. ... output discloses no credential', !SECRET_FRAGMENTS.some((s) => stagingToProd.out.includes(s)));
 
 const stagingGood = runBuild(stagingEnv({ AURA_DATABASE_URL: STG_POOLED }));
-check('C8. correctly configured staging project is still refused until its ID is pinned (no migration, no build)', typeof stagingGood.status === 'number' && stagingGood.status !== 0 && stagingGood.calls.length === 0 && /PROJECT_NOT_ALLOWLISTED/.test(stagingGood.out));
+check('C8. correctly configured but UNPINNED project is refused (no migration, no build)', typeof stagingGood.status === 'number' && stagingGood.status !== 0 && stagingGood.calls.length === 0 && /PROJECT_NOT_ALLOWLISTED/.test(stagingGood.out));
 
 const preview = runBuild({ VERCEL_ENV: 'preview' });
 check('C9. Preview without any DB credentials: build exits 0, no guard, no migration (unchanged)', preview.status === 0 && preview.calls.join('|') === 'next build|scanner' && !/DB identity/.test(preview.out));
+
+// ============================================================
+// E. aura-staging pin, staging DB pin, and Production reverse check
+// ============================================================
+const REAL_STAGING = 'prj_0wR8cnuX0dphdd3ExRGOT0AqcuEa';
+const DB_PIN = { stagingDbHostSha256: [sha(STG_HOST)] }; // committed project allowlist + a synthetic DB pin
+const realStagingEnv = (o: Record<string, string | undefined> = {}) => stagingEnv({ VERCEL_PROJECT_ID: REAL_STAGING, ...o });
+const evc = (env: Record<string, string | undefined>, opts: { stagingProjectIds?: string[]; stagingDbHostSha256?: string[] } = {}) => guard.evaluate(env, opts);
+
+// 1. Correct staging project ID is recognized
+check('E1. the real aura-staging project ID is recognized (pinned DB, direct migration + pooled runtime) -> PASS', evc(realStagingEnv({ AURA_DATABASE_URL: STG_POOLED }), DB_PIN).code === 'STAGING_VERIFIED');
+check('E1b. ... and is never treated as Production', evc(realStagingEnv(), DB_PIN).code !== 'PRODUCTION_PROJECT' && REAL_STAGING !== guard.PRODUCTION_PROJECT_ID);
+// 2. Correct Production project ID remains recognized
+check('E2. the Production project ID is still recognized with the committed constants', evc({ VERCEL_ENV: 'production', VERCEL_PROJECT_ID: PROD_PROJECT, DATABASE_URL: PROD_URL }).code === 'PRODUCTION_PROJECT');
+check('E2b. ... and with the staging DB pinned, a Production DB that is not staging still passes (direct and pooled)', evc({ VERCEL_ENV: 'production', VERCEL_PROJECT_ID: PROD_PROJECT, DATABASE_URL: PROD_URL, AURA_DATABASE_URL: url('prod_owner', PROD_PASS, PROD_POOLED_HOST, 'neondb') }, DB_PIN).code === 'PRODUCTION_PROJECT');
+// 3. Unknown project ID is rejected
+check('E3. unknown project ID is rejected even with perfect staging configuration', evc(stagingEnv({ VERCEL_PROJECT_ID: 'prj_unknown_project_x' }), DB_PIN).code === 'PROJECT_NOT_ALLOWLISTED');
+check('E3b. a project ID differing only in case is rejected', evc(realStagingEnv({ VERCEL_PROJECT_ID: REAL_STAGING.toLowerCase() }), DB_PIN).code === 'PROJECT_NOT_ALLOWLISTED');
+// 4. Staging project with Production database identity is rejected
+check('E4. aura-staging migrating against the Production DB -> FAIL', evc(realStagingEnv({ DATABASE_URL: PROD_URL }), DB_PIN).code === 'MIGRATION_URL_FORBIDDEN_HOST');
+check('E4b. aura-staging running against the Production DB (pooled) -> FAIL', evc(realStagingEnv({ AURA_DATABASE_URL: url('prod_owner', PROD_PASS, PROD_POOLED_HOST, 'neondb') }), DB_PIN).code === 'RUNTIME_URL_FORBIDDEN_HOST');
+check('E4c. aura-staging whose EXPECTED host was switched to an unpinned DB -> FAIL (env alone cannot re-point staging)', evc(realStagingEnv({ AURA_STAGING_EXPECTED_DB_HOST: OTHER_HOST, DATABASE_URL: url('stg_owner', STG_PASS, OTHER_HOST, 'aura_staging') }), DB_PIN).code === 'STAGING_DB_NOT_PINNED');
+check('E4d. with the committed DB pin, aura-staging targeting any other (synthetic) host is refused before migrating', evc(realStagingEnv()).code === 'STAGING_DB_NOT_PINNED');
+check('E4e. a pooled expected host matches a pin computed from the direct host', evc(realStagingEnv({ AURA_STAGING_EXPECTED_DB_HOST: STG_POOLED_HOST, DATABASE_URL: STG_POOLED }), DB_PIN).code === 'STAGING_VERIFIED');
+// 5. Production project with staging database identity is rejected
+const prodEnv = (o: Record<string, string | undefined>) => ({ VERCEL_ENV: 'production', VERCEL_PROJECT_ID: PROD_PROJECT, ...o });
+check('E5. Production migrating against the staging DB (direct) -> FAIL', evc(prodEnv({ DATABASE_URL: STG_DIRECT }), DB_PIN).code === 'PRODUCTION_DB_IS_STAGING');
+check('E5b. Production migrating against the staging DB (pooled) -> FAIL', evc(prodEnv({ DATABASE_URL: STG_POOLED }), DB_PIN).code === 'PRODUCTION_DB_IS_STAGING');
+check('E5c. Production runtime (AURA_DATABASE_URL) against the staging DB -> FAIL', evc(prodEnv({ DATABASE_URL: PROD_URL, AURA_DATABASE_URL: STG_POOLED }), DB_PIN).code === 'PRODUCTION_DB_IS_STAGING');
+check('E5d. Production with an unparsable URL while the staging DB is pinned -> FAIL (unverifiable)', evc(prodEnv({ DATABASE_URL: 'not-a-url' }), DB_PIN).code === 'PRODUCTION_MIGRATION_URL_UNVERIFIABLE' && evc(prodEnv({ DATABASE_URL: PROD_URL, AURA_DATABASE_URL: 'mysql://x' }), DB_PIN).code === 'PRODUCTION_RUNTIME_URL_UNVERIFIABLE');
+// 6. Missing required identity variables fail closed
+for (const key of ['AURA_STAGING_EXPECTED_DB_HOST', 'AURA_STAGING_EXPECTED_DB_NAME', 'AURA_STAGING_EXPECTED_DB_USER', 'AURA_STAGING_FORBIDDEN_DB_HOSTS']) {
+  check(`E6. aura-staging missing ${key} -> FAIL`, evc(realStagingEnv({ [key]: undefined }), DB_PIN).code === 'STAGING_IDENTITY_MISSING');
+}
+check('E6b. aura-staging missing DATABASE_URL -> FAIL', evc(realStagingEnv({ DATABASE_URL: undefined, AURA_DATABASE_URL: STG_POOLED }), DB_PIN).code === 'MIGRATION_URL_MISSING');
+check('E6c. aura-staging missing VERCEL_PROJECT_ID -> FAIL', evc(realStagingEnv({ VERCEL_PROJECT_ID: undefined }), DB_PIN).code === 'PROJECT_ID_MISSING');
+// 7. Existing Production migration behaviour preserved
+check('E7. with the committed pin, Production on a non-staging DB still passes (direct + pooled runtime)', evc(prodEnv({ DATABASE_URL: PROD_URL, AURA_DATABASE_URL: url('prod_owner', PROD_PASS, PROD_POOLED_HOST, 'neondb') })).code === 'PRODUCTION_PROJECT');
+check('E7b. a Production build without DATABASE_URL is still left to Prisma, pinned or not', evc(prodEnv({})).code === 'PRODUCTION_PROJECT' && evc(prodEnv({}), DB_PIN).code === 'PRODUCTION_PROJECT');
+// Misconfiguration: the staging list can never contain the Production project
+check('E8. a staging allowlist containing the Production ID refuses every migrating build', evc(prodEnv({ DATABASE_URL: PROD_URL }), { stagingProjectIds: [REAL_STAGING, PROD_PROJECT] }).code === 'GUARD_MISCONFIGURED' && evc(realStagingEnv(), { stagingProjectIds: [PROD_PROJECT], ...DB_PIN }).code === 'GUARD_MISCONFIGURED');
+check('E8b. committed constants are frozen; the DB pin list holds only SHA-256 hex', Object.isFrozen(guard.STAGING_DB_HOST_SHA256) && guard.STAGING_DB_HOST_SHA256.every((h) => /^[0-9a-f]{64}$/.test(h)));
+// --hash-host helper
+const hashCli = (input: string) => spawnSync(process.execPath, [GUARD, '--hash-host'], { input, encoding: 'utf8', env: { PATH: process.env.PATH } });
+const hDirect = hashCli(`${STG_HOST}\n`);
+const hPooled = hashCli(STG_POOLED_HOST.toUpperCase());
+check('E9. --hash-host prints exactly SHA-256(normalised host), and pooled/uppercase hosts give the same digest', hDirect.status === 0 && hDirect.stdout.trim() === sha(STG_HOST) && hPooled.stdout.trim() === sha(STG_HOST));
+check('E9b. --hash-host never echoes the host', !hDirect.stdout.includes(STG_HOST) && !hDirect.stderr.includes(STG_HOST));
+const hUrl = hashCli(STG_DIRECT);
+check('E9c. --hash-host refuses a full connection URL (exit 1) without echoing it', hUrl.status === 1 && !`${hUrl.stdout}${hUrl.stderr}`.includes(STG_PASS) && !`${hUrl.stdout}${hUrl.stderr}`.includes(STG_HOST));
+const realStagingBuild = runBuild(realStagingEnv({ AURA_DATABASE_URL: STG_POOLED }));
+check('E10. the real vercel-build.sh refuses aura-staging before any migration while its DB is unpinned', typeof realStagingBuild.status === 'number' && realStagingBuild.status !== 0 && realStagingBuild.calls.length === 0 && /REFUSED: STAGING_DB_NOT_PINNED/.test(realStagingBuild.out) && !SECRET_FRAGMENTS.some((x) => realStagingBuild.out.includes(x)));
+
+// ============================================================
+// F. The committed staging DB pin (falling-glade-02684214)
+// ============================================================
+const COMMITTED_STAGING_DIGEST = 'c5b70ccce850d80ebe0a714327fa546adef5296e031ad848e4664c12e73e8ba7';
+check('F1. STAGING_DB_HOST_SHA256 is exactly the verified aura-staging digest', guard.STAGING_DB_HOST_SHA256.length === 1 && guard.STAGING_DB_HOST_SHA256[0] === COMMITTED_STAGING_DIGEST && Object.isFrozen(guard.STAGING_DB_HOST_SHA256));
+const guardText = fs.readFileSync(GUARD, 'utf8');
+check('F2. the only SHA-256 digest committed in the guard is the staging one (the Production digest is never committed)', JSON.stringify([...new Set(guardText.match(/\b[0-9a-f]{64}\b/g) || [])]) === JSON.stringify([COMMITTED_STAGING_DIGEST]));
+check('F3. no Neon hostname is committed in the guard (only digests)', !/ep-[a-z0-9-]+\.[a-z0-9.-]*neon\.tech/.test(guardText));
+// Real-host checks need the hostname, which is never committed. Run locally with
+//   AURA_TEST_STAGING_DB_HOST=<staging direct host> npx ts-node test/dbIdentityGuard.test.ts
+const realHost = (process.env.AURA_TEST_STAGING_DB_HOST || '').trim();
+if (realHost) {
+  const pooledReal = realHost.replace(/^([^.]+)/, '$1-pooler');
+  const rURL = (h: string) => url('neondb_owner', STG_PASS, h, 'neondb');
+  const rEnv = (o: Record<string, string | undefined> = {}) => realStagingEnv({ AURA_STAGING_EXPECTED_DB_HOST: realHost, AURA_STAGING_EXPECTED_DB_NAME: 'neondb', AURA_STAGING_EXPECTED_DB_USER: 'neondb_owner', DATABASE_URL: rURL(realHost), ...o });
+  check('F4. [local] the real staging host hashes to the committed digest', sha(guard.normalizeHost(realHost)) === COMMITTED_STAGING_DIGEST);
+  check('F5. [local] committed constants: aura-staging on its direct host is ACCEPTED', guard.evaluate(rEnv()).code === 'STAGING_VERIFIED');
+  check('F6. [local] ... with the pooled host for runtime (and as expected host) it is ACCEPTED too', guard.evaluate(rEnv({ AURA_DATABASE_URL: rURL(pooledReal) })).code === 'STAGING_VERIFIED' && guard.evaluate(rEnv({ AURA_STAGING_EXPECTED_DB_HOST: pooledReal, DATABASE_URL: rURL(pooledReal) })).code === 'STAGING_VERIFIED');
+  check('F7. [local] committed constants: Production migrating against the real staging host (direct or pooled) is REFUSED', guard.evaluate(prodEnv({ DATABASE_URL: rURL(realHost) })).code === 'PRODUCTION_DB_IS_STAGING' && guard.evaluate(prodEnv({ DATABASE_URL: PROD_URL, AURA_DATABASE_URL: rURL(pooledReal) })).code === 'PRODUCTION_DB_IS_STAGING');
+} else {
+  console.log('SKIP F4-F7 (set AURA_TEST_STAGING_DB_HOST locally to run the real-host checks; never commit the host)');
+}
 
 // ============================================================
 // D. Static wiring
