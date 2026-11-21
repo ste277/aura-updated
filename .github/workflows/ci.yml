@@ -688,6 +688,11 @@ jobs:
       # another time and explicit Save anyway (shared jsdom harness).
       - name: Run Find a Time conflict component test (HPG5-V2-I1)
         run: npx ts-node --project tsconfig.jsdom-tests.json test/findATimeConflictJsdom.test.ts
+      # AURA-READY-03-F2 -- Resend code / Change email on the 6-digit sign-in code
+      # screen: cooldown, in-flight lock, 429/failure messages, verification
+      # against the newly entered address (mounted LoginScreen, scripted fetch).
+      - name: Run sign-in resend / change-email component test (AURA-READY-03-F2)
+        run: npx ts-node --project tsconfig.jsdom-tests.json test/signInResendChangeEmailJsdom.test.ts
       # AURA-HPG5-V2-I2 -- conflict copy names the proposed save and the
       # existing plan in the user's timezone (pure).
       - name: Run conflict presentation test (HPG5-V2-I2)
