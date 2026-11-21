@@ -16,10 +16,13 @@
  * Policy, fail closed (every missing, unknown or unparsable input refuses):
  *   1. VERCEL_ENV != production       -> nothing to guard (no migration runs).
  *   2. VERCEL_PROJECT_ID missing      -> REFUSED.
- *   3. Aura Production project        -> allowed; Production behaviour unchanged.
+ *   0. STAGING_PROJECT_IDS containing the Production ID -> REFUSED.
+ *   3. Aura Production project        -> allowed; once STAGING_DB_HOST_SHA256
+ *      is pinned, refused if either URL resolves to the staging database.
  *   4. Any other project must be pinned in STAGING_PROJECT_IDS, and then:
  *      - AURA_STAGING_EXPECTED_DB_HOST / _NAME / _USER and
  *        AURA_STAGING_FORBIDDEN_DB_HOSTS must all be set;
+ *      - the expected host must be pinned in STAGING_DB_HOST_SHA256;
  *      - DATABASE_URL (migrations) must parse, carry credentials, and match
  *        the expected host, database and role;
  *      - AURA_DATABASE_URL (runtime), when set, must parse, carry credentials
@@ -48,12 +51,27 @@ const crypto = require('crypto');
 const PRODUCTION_PROJECT_ID = 'prj_iY4xteQOWUNsV85NnbyIylBAba6t';
 
 /**
- * Staging project IDs allowed to migrate under this guard. Intentionally
- * EMPTY until the `aura-staging` project exists: its ID is pinned here by a
- * separate PR before its first build (staging design section 3.4 step 7).
- * While empty, every non-Production project is refused.
+ * Staging project IDs allowed to migrate under this guard (staging design
+ * section 3.4 step 7). Every other non-Production project is refused.
+ *   prj_0wR8cnuX0dphdd3ExRGOT0AqcuEa  aura-staging (team aura-56a1), created
+ *   2026-11-21, Vercel Authentication on all deployments.
  */
-const STAGING_PROJECT_IDS = Object.freeze([]);
+const STAGING_PROJECT_IDS = Object.freeze(['prj_0wR8cnuX0dphdd3ExRGOT0AqcuEa']);
+
+/**
+ * SHA-256 of the normalised host of the approved STAGING database endpoint
+ * (see normalizeHost: lowercase, Neon `-pooler` label folded), so the staging
+ * database identity is pinned in reviewed code, not only in env vars.
+ * Compute with:  node apps/web/scripts/check-db-identity.js --hash-host
+ * (reads the host on stdin, prints only the digest).
+ *
+ * While EMPTY: every staging build is refused (STAGING_DB_NOT_PINNED), and
+ * Production builds are not inspected (behaviour unchanged).
+ * Once pinned: a staging build must target exactly this database, and a
+ * Production build whose DATABASE_URL / AURA_DATABASE_URL resolves to it is
+ * refused (PRODUCTION_DB_IS_STAGING).
+ */
+const STAGING_DB_HOST_SHA256 = Object.freeze([]);
 
 /** Connection-string parameters that cannot change which server/database/role is used. */
 const ALLOWED_URL_PARAMS = new Set(['sslmode', 'channel_binding', 'connect_timeout', 'application_name', 'pgbouncer', 'connection_limit', 'pool_timeout']);
@@ -127,17 +145,46 @@ function isForbidden(host, forbidden) {
   return forbidden.some((f) => (f.hash ? f.hash === digest : f.host === host));
 }
 
+/** Host of a connection URL, normalised, without the strict staging checks. Null if unparsable. */
+function hostOf(raw) {
+  try {
+    const url = new URL(raw);
+    if (url.protocol !== 'postgres:' && url.protocol !== 'postgresql:') return null;
+    return url.hostname ? normalizeHost(url.hostname) : null;
+  } catch {
+    return null;
+  }
+}
+
 /**
- * Pure policy evaluation. `options.stagingProjectIds` exists for tests only;
- * builds always use the pinned STAGING_PROJECT_IDS.
+ * Pure policy evaluation. `options.stagingProjectIds` / `options.stagingDbHostSha256`
+ * exist for tests only; builds always use the pinned constants.
  */
 function evaluate(env, options = {}) {
   const stagingProjectIds = options.stagingProjectIds || STAGING_PROJECT_IDS;
+  const stagingDbHashes = (options.stagingDbHostSha256 || STAGING_DB_HOST_SHA256).map((h) => String(h).toLowerCase());
   if (env.VERCEL_ENV !== 'production') return { ok: true, code: 'NOT_PRODUCTION_BUILD' };
+
+  // The staging allowlist can never contain the Production project.
+  if (stagingProjectIds.includes(PRODUCTION_PROJECT_ID)) return refuse('GUARD_MISCONFIGURED');
 
   const projectId = typeof env.VERCEL_PROJECT_ID === 'string' ? env.VERCEL_PROJECT_ID.trim() : '';
   if (!projectId) return refuse('PROJECT_ID_MISSING');
-  if (projectId === PRODUCTION_PROJECT_ID) return { ok: true, code: 'PRODUCTION_PROJECT' };
+  if (projectId === PRODUCTION_PROJECT_ID) {
+    // Reverse check, active only once the staging database is pinned: the
+    // Production project must never migrate (or run) against it. A missing
+    // URL is left to Prisma, exactly as before this guard existed.
+    if (stagingDbHashes.length > 0) {
+      for (const [key, code] of [['DATABASE_URL', 'MIGRATION'], ['AURA_DATABASE_URL', 'RUNTIME']]) {
+        const raw = env[key];
+        if (raw === undefined || raw === '') continue;
+        const host = hostOf(raw);
+        if (!host) return refuse(`PRODUCTION_${code}_URL_UNVERIFIABLE`);
+        if (stagingDbHashes.includes(sha256(host))) return refuse('PRODUCTION_DB_IS_STAGING');
+      }
+    }
+    return { ok: true, code: 'PRODUCTION_PROJECT' };
+  }
   if (!stagingProjectIds.includes(projectId)) return refuse('PROJECT_NOT_ALLOWLISTED');
 
   const expectedHostRaw = (env.AURA_STAGING_EXPECTED_DB_HOST || '').trim();
@@ -149,6 +196,8 @@ function evaluate(env, options = {}) {
   if (forbidden.length === 0) return refuse('STAGING_IDENTITY_MISSING');
   const expectedHost = normalizeHost(expectedHostRaw);
   if (isForbidden(expectedHost, forbidden)) return refuse('STAGING_IDENTITY_FORBIDDEN');
+  // The expected staging database must also be pinned in reviewed code.
+  if (!stagingDbHashes.includes(sha256(expectedHost))) return refuse('STAGING_DB_NOT_PINNED');
   const runtimeUserOverride = (env.AURA_STAGING_EXPECTED_RUNTIME_DB_USER || '').trim();
   const allowedRuntimeUsers = new Set([runtimeUserOverride || expectedUser]);
 
@@ -173,7 +222,24 @@ function evaluate(env, options = {}) {
   return { ok: true, code: 'STAGING_VERIFIED' };
 }
 
+/** `--hash-host`: read one hostname on stdin, print only SHA-256(normalizeHost(host)). */
+function hashHostFromStdin() {
+  let input = '';
+  process.stdin.setEncoding('utf8');
+  process.stdin.on('data', (chunk) => (input += chunk));
+  process.stdin.on('end', () => {
+    const host = input.trim();
+    if (!host || /[\s/@:?#]/.test(host)) {
+      console.error('[check-db-identity] hash mode: expected one bare DNS name on stdin (no scheme, credentials, port or path)');
+      process.exit(1);
+    }
+    const digest = sha256(normalizeHost(host));
+    console.log(digest);
+  });
+}
+
 function main() {
+  if (process.argv[2] === '--hash-host') return hashHostFromStdin();
   let result;
   try {
     result = evaluate(process.env);
@@ -191,4 +257,4 @@ function main() {
 
 if (require.main === module) main();
 
-module.exports = { evaluate, normalizeHost, parseConnection, PRODUCTION_PROJECT_ID, STAGING_PROJECT_IDS };
+module.exports = { evaluate, normalizeHost, parseConnection, PRODUCTION_PROJECT_ID, STAGING_PROJECT_IDS, STAGING_DB_HOST_SHA256 };
