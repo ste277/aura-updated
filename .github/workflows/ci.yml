@@ -697,6 +697,10 @@ jobs:
       # existing guest /find; email sign-in unchanged (mounted LoginScreen).
       - name: Run landing guest-entry component test (AURA-READY-02-F3)
         run: npx ts-node --project tsconfig.jsdom-tests.json test/landingGuestEntryJsdom.test.ts
+      # AURA-READY-02-F4 -- Find a Time: failed searches (connection, server,
+      # timeout, malformed) are told apart from a genuine empty result, with Retry.
+      - name: Run Find a Time error-state component test (AURA-READY-02-F4)
+        run: npx ts-node --project tsconfig.jsdom-tests.json test/findATimeErrorStatesJsdom.test.ts
       # AURA-HPG5-V2-I2 -- conflict copy names the proposed save and the
       # existing plan in the user's timezone (pure).
       - name: Run conflict presentation test (HPG5-V2-I2)
