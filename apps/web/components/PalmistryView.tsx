@@ -16,6 +16,10 @@ import {
 import type { PalmistryCategory, PalmistryEntry, PalmistryEntryId } from '../../../packages/palmistry/src/content';
 import { getPalmSource, PALM_SOURCES } from '../../../packages/palmistry/src/sources';
 import { PalmHandDiagram, PalmMarkGlyph } from './PalmHandDiagram';
+// AURA-PALM-G5-I1: development-only photo check. Renders nothing unless
+// `next dev` runs with NEXT_PUBLIC_AURA_PALM_IMAGE_INPUT=g5-i1-dev, and is
+// excluded from production builds together with this whole module.
+import { PalmImageInput } from './palm-scan/PalmImageInput';
 import { backButtonStyle, colors, radius, spacing, typography } from './theme';
 import { EmptyState, PageHeader, SectionHeader, SegmentedControl, StatusBadge, SurfaceCard, TextButton } from './ui';
 
@@ -163,6 +167,8 @@ export function PalmistryView({ onBack, initialEntryId = null }: PalmistryViewPr
           {PALMISTRY_CONTENT_REVIEW.notice}
         </p>
       )}
+
+      <PalmImageInput />
 
       <SegmentedControl<PalmistryCategory>
         ariaLabel="Feature type"
