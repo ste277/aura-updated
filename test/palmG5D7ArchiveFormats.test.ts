@@ -87,6 +87,8 @@ function rebuildXar(b: Buffer, o: { tocXml?: (x: string) => string; alg?: number
   const heap = Buffer.from(b.subarray(hs + tocC)); if (alg === 1) crypto.createHash('sha1').update(tz).digest().copy(heap, 0);
   return Buffer.concat([h, tz, heap]);
 }
+/** G5-C11: xar head declaring a header size above 4096, with `toc` at that declared position (rule (b) of validXarAt). */
+const farXar = (toc: Buffer, hsize = 5000) => { const h = xarHead({ hsize, toc: Buffer.alloc(0) }); return Buffer.concat([h, Buffer.alloc(hsize - h.length), toc]); };
 const bigComment = (x: string) => { const d = x.indexOf('?>') + 2; return `${x.slice(0, d)}\n<!--${' '.repeat(300000)}-->${x.slice(d)}`; };
 const bigSpace = (x: string) => { const d = x.indexOf('?>') + 2; return `${x.slice(0, d)}${' '.repeat(300000)}${x.slice(d)}`; };
 const XAR_ALGS = [0, 1, 2, 3, 4, 5, 6, 7, 8, 16, 255, 0xffffffff];
@@ -247,7 +249,8 @@ async function main(): Promise<void> {
       }
     } finally { cleanup(d); }
   } else { notRun.push('X.real'); console.log('NOT RUN X.real (bsdtar not installed)'); }
-  mustPass('X7', 'malformed xar: version 2', code(xarHead({ ver: 2 })));
+  // G5-C11 (C10-F1): unusual header variants fail closed (xar extracts version 2; no header field but the size is a validity criterion).
+  mustFail('X7', '[C10-F1] unusual xar: version 2', code(xarHead({ ver: 2 })), /^xar$/);
   mustPass('X8', 'malformed xar: header size 27', code(xarHead({ hsize: 27 })));
   // G5-IV3F (IV3E-2): the checksum id is not a validity criterion (7-Zip ignores it) -- every id is detected.
   for (const a of XAR_ALGS) { mustFail(`X9.${a}`, `hand-built xar head with checksum id ${a} (offset 0)`, xarHead({ alg: a }), /^xar$/);
@@ -258,11 +261,11 @@ async function main(): Promise<void> {
     mustFail('XH1e', '[IV3E-1] same, embedded after 64 bytes', Buffer.concat([fill(64), big]), /^xar$/);
     mustFail('XH1m', '[IV3E-1] same, as a tar member', tar('p.pkg', big), /^xar$/);
     mustFail('XH2', 'conservative: valid xar header + a zlib TOC reaching the cap with non-XML content is detected', xarHead({ toc: zlib.deflateSync(Buffer.alloc(300000, 0x41)) }), /^xar$/);
-    mustPass('XH3', 'malformed header (version 2) with an oversized TOC still passes (cap rule only after the header checks)', code(xarHead({ ver: 2, toc: zlib.deflateSync(Buffer.alloc(300000, 0x41)) })));
+    mustFail('XH3', '[C10-F1] unusual header (version 2) with an oversized TOC fails closed', code(xarHead({ ver: 2, toc: zlib.deflateSync(Buffer.alloc(300000, 0x41)) })), /^xar$/);
     mustPass('XH4', 'malformed header (size 27) with an oversized TOC still passes', code(xarHead({ hsize: 27, toc: zlib.deflateSync(Buffer.alloc(300000, 0x41)) }))); }
-  mustPass('X10', 'malformed xar: zero TOC length', code(xarHead({ tocC: 0 })));
-  mustPass('X11', 'malformed xar: TOC is not a zlib stream', code(xarHead({ toc: fill(64, 0xff) })));
-  mustPass('X12', 'malformed xar: TOC inflates but is not XML', code(xarHead({ toc: zlib.deflateSync(Buffer.from('not an xml table of contents '.repeat(4))) })));
+  mustFail('X10', '[C10-F1] unusual xar: zero TOC length', code(xarHead({ tocC: 0 })), /^xar$/);
+  mustFail('X11', '[C10-F1] unusual xar: TOC is not a zlib stream (binary header size: fails closed)', code(xarHead({ toc: fill(64, 0xff) })), /^xar$/);
+  mustFail('X12', '[C10-F1] unusual xar: TOC inflates but is not XML', code(xarHead({ toc: zlib.deflateSync(Buffer.from('not an xml table of contents '.repeat(4))) })), /^xar$/);
   mustPass('X13', 'incidental "xar!" in JS text', Buffer.from('// xar! is the macOS package magic; see docs.\nexport const XAR = "xar!";\n'.repeat(4)));
   mustPass('X14', 'incidental "xar!" followed by machine-code bytes', code(Buffer.concat([Buffer.from('xar!', 'latin1'), fill(40, 0x48)])));
   { const r = run('X15.bin', Buffer.concat([fill(64), stream('xar')]), SCANNER, { maxArchiveBytes: 40 });
@@ -313,8 +316,9 @@ async function main(): Promise<void> {
       { id: 'M5', label: 'embedded-gzip validator weakened to the magic only', from: 'function validGzipAt(buf, p) {', to: 'function validGzipAt(buf, p) { return true;', probe: () => !mustPass('M5p', '', code(Buffer.concat([hex('1f8b0800 00000000 0003'), fill(64, 0xff)])), mut) },
       { id: 'M6', label: 'bzip2 origin-pointer check removed', from: 'return origPtr < level * 100000;', to: 'return true;', probe: () => !mustPass('M6p', '', Buffer.from('const BZ = "BZh91AY&SY";\nexport function isBzip2(s) { return s.startsWith(BZ); }\n'), mut) },
       { id: 'M8', label: 'xar detection disabled (validator returns false)', from: 'function validXarAt(buf, p) {', to: 'function validXarAt(buf, p) { return false;', probe: () => mustPass('M8p', '', stream('xar'), mut) && mustPass('M8q', '', zipStored('p.pkg', stream('xar')), mut) },
-      { id: 'M9', label: 'xar inspection-cap detection disabled (IV3E-1 reverted)', from: "} catch (err) { return !!err && err.code === 'ERR_BUFFER_TOO_LARGE'; } // IV3E-1: xar TOC reached the inspection cap -> detected", to: '} catch (err) { return false; }', probe: () => mustPass('M9p', '', xarHead({ toc: zlib.deflateSync(Buffer.from(`<?xml version="1.0"?>\n<!--${' '.repeat(300000)}--><xar/>`)) }), mut) && !mustPass('M9q', '', stream('xar'), mut) },
-      { id: 'M10', label: 'xar checksum-id bound reinstated (IV3E-2 reverted)', from: 'if (hsize < 28 || hsize > 4096 || buf.readUInt16BE(p + 6) !== 1) return false;', to: 'if (hsize < 28 || hsize > 4096 || buf.readUInt16BE(p + 6) !== 1 || buf.readUInt32BE(p + 24) > 3) return false;', probe: () => mustPass('M10p', '', xarHead({ alg: 4 }), mut) && mustPass('M10q', '', xarHead({ alg: 0xffffffff }), mut) && !mustPass('M10r', '', xarHead({ alg: 1 }), mut) },
+      // G5-C11: M9/M10 re-anchored to the C11 xar rule; same properties as before (IV3E-1 cap detection on the TOC probe; no checksum-id bound).
+      { id: 'M9', label: 'xar inspection-cap detection disabled (IV3E-1 reverted)', from: "} catch (err) { return !!err && err.code === 'ERR_BUFFER_TOO_LARGE'; } // IV3E-1: xar TOC probe reached the inspection cap -> detected", to: '} catch (err) { return false; }', probe: () => mustPass('M9p', '', farXar(zlib.deflateSync(Buffer.from(`<?xml version="1.0"?>\n<!--${' '.repeat(300000)}--><xar/>`))), mut) && !mustPass('M9q', '', stream('xar'), mut) },
+      { id: 'M10', label: 'xar checksum-id bound reinstated (IV3E-2 reverted)', from: 'if (hsize >= 28 && hsize <= 4096) return true;', to: 'if (hsize >= 28 && hsize <= 4096) return buf.readUInt32BE(p + 24) <= 3;', probe: () => mustPass('M10p', '', xarHead({ alg: 4 }), mut) && mustPass('M10q', '', xarHead({ alg: 0xffffffff }), mut) && !mustPass('M10r', '', xarHead({ alg: 1 }), mut) },
       { id: 'M7', label: 'large-file window probe removed', from: 'f = largeFileForeignStream(realPath, size, scanRes.foreignPositions);', to: 'f = null;', probe: () => run('M7p.bin', Buffer.concat([fill(64), stream('xz')]), mut, { maxArchiveBytes: 40 }).errors.length === 0 },
     ];
     let mut = '';

@@ -843,6 +843,10 @@ jobs:
           npx ts-node test/palmG5I1R43ZipRecognition.test.ts
           npx ts-node test/palmG5I1R44StreamingZip.test.ts
           npx ts-node test/palmG5D7ArchiveFormats.test.ts
+      # G5-C11 (C10-F1..F4): xar/xz/bzip2 variants fail closed; gzip member cap
+      # and in-loop work-time check. Real-tool cases need bsdtar/xz/bzip2 (above).
+      - name: Run Palm bundle scanner fail-open regression tests (G5-C11)
+        run: npx ts-node test/palmG5C11ForeignFormatFailOpen.test.ts
   web-build:
     name: Next.js production build
     runs-on: ubuntu-latest
