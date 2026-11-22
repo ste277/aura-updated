@@ -110,7 +110,8 @@ export function getLocalMcpAuth(config: RemoteMcpConfig): LocalState {
   let preAuthLimiter: McpRateLimiter;
   if (storeKind === 'postgres') {
     const pool = new Pool({ connectionString: localOAuthDatabaseUrl(env), max: 5 });
-    adapterStore = createPostgresAdapterStore({ db: pool });
+    // I2b-R1: recoverable identifiers are sealed with keys derived from the cookie keys.
+    adapterStore = createPostgresAdapterStore({ db: pool, fieldKeys: keys.cookieKeys });
     rateLimiter = createPostgresRateLimiter({ pool, windowMs: 60_000 });
     preAuthLimiter = rateLimiter;
   } else {

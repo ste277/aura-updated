@@ -21,7 +21,8 @@ The shared core of Aura's MCP tool, `find_best_time`, used by two transports:
 | `src/auth/authorizationServer.ts` | OAuth authorization server on `oidc-provider` 9.13.3 (I2a): Node req/res `handle()`, consent interaction, resource-server token verifier | `oidc-provider`, the handler's types, `src/security/*` |
 | `src/auth/memoryAdapter.ts` | In-memory `oidc-provider` adapter (local/tests only); same atomic contract as the Postgres adapter | `src/auth/oauthStore.ts` |
 | `src/auth/oauthStore.ts` (I2b) | Store contract: atomic single-use `consume`, `ReplayDetectedError`, connections list / disconnect, cleanup | `oidc-provider` errors |
-| `src/auth/postgresAdapter.ts` (I2b) | Durable, shared adapter on table `McpOAuthPayload` (migration 0052): conditional-UPDATE consume, SHA-256 ids, no `jti` at rest | an injected `query` (a `pg` Pool) |
+| `src/auth/postgresAdapter.ts` (I2b) | Durable, shared adapter on table `McpOAuthPayload` (migration 0052): conditional-UPDATE consume, SHA-256 ids, no `jti` at rest; I2b-R1: Interaction `session.cookie` dropped, Interaction `returnTo` and Session `state.secret` sealed | an injected `query` (a `pg` Pool), `fieldSeal.ts` |
+| `src/auth/fieldSeal.ts` (I2b-R1) | AES-256-GCM field sealing, keys derived by HKDF from the OAuth cookie keys, AAD bound to row + field, rotation by `kid`, fail closed | `crypto` |
 | `src/auth/keys.ts` (I2b) | Signing JWKS / cookie keys / pairwise salt / audit key from env, validation, rotation; ephemeral keys for local/tests | `crypto` |
 | `src/auth/clientPolicy.ts` (I2b) | Static client registration policy (https or loopback redirect URIs, labels, refresh permission); no DCR / CIMD | nothing |
 | `src/security/postgresRateLimit.ts` (I2b) | Distributed fixed-window limiter on table `McpRateLimitWindow`: all-or-nothing, row-locked, fail closed | an injected `pg` Pool |
@@ -138,5 +139,6 @@ npx ts-node test/mcpOAuthLocal.test.ts        # local OAuth -> MCP, environment 
 npx ts-node test/mcpOAuthSecurityRegression.test.ts  # I2a-R1 security regressions (CI: math-core-tests job)
 npx ts-node test/mcpOAuthI2b.test.ts          # I2b offline security tests (CI: math-core-tests job)
 DATABASE_URL=<disposable db, migrations applied> npx ts-node test/mcpOAuthPostgresDb.test.ts  # I2b durable store + distributed limiter (CI: Database migration validation job)
+DATABASE_URL=<disposable db, migrations applied> npx ts-node test/mcpOAuthStorageProtectionDb.test.ts  # I2b-R1 at-rest protection (CI: Database migration validation job)
 (cd apps/mcp && npm ci && npm test)           # stdio server plus shared-definition check (CI: MCP Server job)
 ```

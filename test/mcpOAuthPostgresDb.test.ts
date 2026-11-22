@@ -17,7 +17,7 @@ import { createPostgresAdapterStore, storageKey } from '../packages/mcp-tools/sr
 import { ReplayDetectedError } from '../packages/mcp-tools/src/auth/oauthStore';
 import { createPostgresRateLimiter } from '../packages/mcp-tools/src/security/postgresRateLimit';
 import { createFixedWindowRateLimiter } from '../packages/mcp-tools/src/security/rateLimit';
-import { Browser, CLIENT, SCOPE_OFFLINE, USER_A, USER_B, authorize, check, connect, redeemCode, refresh, sleep, startCluster, summary, verifyOn } from './mcpOAuthI2bHarness';
+import { Browser, CLIENT, SCOPE_OFFLINE, USER_A, USER_B, authorize, check, connect, redeemCode, refresh, sharedKeys, sleep, startCluster, summary, verifyOn } from './mcpOAuthI2bHarness';
 
 const url = process.env.DATABASE_URL;
 if (!url) {
@@ -45,7 +45,8 @@ async function main() {
   const rows = async (sql: string, params: unknown[] = []) => (await admin.query(sql, params)).rows;
   try {
     await admin.query('TRUNCATE "McpOAuthPayload", "McpRateLimitWindow"');
-    const stores = pools.map((pool) => createPostgresAdapterStore({ db: pool }));
+    const keys = sharedKeys();
+    const stores = pools.map((pool) => createPostgresAdapterStore({ db: pool, fieldKeys: keys.cookieKeys }));
     const secrets: string[] = [];
 
     // ---------------------------------------------------------- adapter: atomic consume across two pools
@@ -69,7 +70,7 @@ async function main() {
     }
 
     // ---------------------------------------------------------- full flow: two independent instances on one database
-    const c = await startCluster(2, { refreshTokens: { enabled: true } }, (i) => ({ adapterStore: stores[i] }));
+    const c = await startCluster(2, { refreshTokens: { enabled: true }, keys }, (i) => ({ adapterStore: stores[i] }));
     try {
       let n = 0;
       c.route.pick = () => n++ % 2;
@@ -164,7 +165,7 @@ async function main() {
     // ---------------------------------------------------------- F5 with the shared limiter: budget shared by instances
     {
       const shared = pools.map((pool) => createPostgresRateLimiter({ pool, windowMs: 60_000 }));
-      const c2 = await startCluster(2, {}, (i) => ({ adapterStore: stores[i], preAuth: { limiter: shared[i], addressSource: { kind: 'socket' }, perAddress: 6, global: 1000 } }));
+      const c2 = await startCluster(2, { keys }, (i) => ({ adapterStore: stores[i], preAuth: { limiter: shared[i], addressSource: { kind: 'socket' }, perAddress: 6, global: 1000 } }));
       try {
         let k = 0;
         c2.route.pick = () => k++ % 2;

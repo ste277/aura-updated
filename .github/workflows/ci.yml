@@ -967,6 +967,13 @@ jobs:
         run: npm install
       - name: Run I2b OAuth Postgres store and distributed limiter test
         run: npx ts-node test/mcpOAuthPostgresDb.test.ts
+      # AURA-MCP-02-I2b-R1 (I2b-R-1) -- inspects this disposable database
+      # mid-flow: no session id / interaction uid / code / token / cookie in
+      # clear, Interaction returnTo and Session state.secret sealed
+      # (AES-256-GCM), tampered/moved/unsealed values fail closed, key
+      # rotation, no keys -> no store. Touches only the two MCP tables.
+      - name: Run I2b-R1 OAuth storage protection test
+        run: npx ts-node test/mcpOAuthStorageProtectionDb.test.ts
       - name: Verify every repository migration was recorded as applied
         run: |
           set -euo pipefail

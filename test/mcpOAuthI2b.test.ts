@@ -13,6 +13,8 @@
  */
 import { createPublicKey, generateKeyPairSync } from 'crypto';
 import { createMemoryAdapterStore } from '../packages/mcp-tools/src/auth/memoryAdapter';
+import { createFieldSealer, FieldSealError } from '../packages/mcp-tools/src/auth/fieldSeal';
+import { protectPayload, unprotectPayload } from '../packages/mcp-tools/src/auth/postgresAdapter';
 import { ReplayDetectedError } from '../packages/mcp-tools/src/auth/oauthStore';
 import { ephemeralOAuthKeys, loadOAuthKeysFromEnv, validateSigningJwks } from '../packages/mcp-tools/src/auth/keys';
 import { parseClientRegistry, validateClientRegistry, validateRedirectUri } from '../packages/mcp-tools/src/auth/clientPolicy';
@@ -269,6 +271,54 @@ async function main() {
     } finally {
       await cOld.close();
     }
+  }
+
+  // ------------------------------------------------------------ I2b-R1: field sealing (unit)
+  {
+    const K1 = 'synthetic-field-key-one-0123456789abcdef';
+    const K2 = 'synthetic-field-key-two-0123456789abcdef';
+    const s1 = createFieldSealer([K1]);
+    const aad = 'Interaction\0rowkey\0returnTo';
+    const plain = 'http://127.0.0.1:3000/oauth/authorize/SyntheticInteractionUid123';
+    const sealed = s1.seal(plain, aad);
+    check('I2b-R1 seal: round trip', s1.open(sealed, aad) === plain);
+    check('I2b-R1 seal: ciphertext reveals nothing of the identifier', !sealed.includes('SyntheticInteractionUid123') && !sealed.includes('oauth') && sealed.startsWith('v1.'));
+    check('I2b-R1 seal: fresh IV per value (same input -> different output)', s1.seal(plain, aad) !== sealed);
+    const fails = (fn: () => unknown) => {
+      try {
+        fn();
+        return false;
+      } catch (e) {
+        return e instanceof FieldSealError;
+      }
+    };
+    const parts = sealed.split('.');
+    const flip = (i: number) => parts.map((p, j) => (j === i ? (p[0] === 'A' ? 'B' : 'A') + p.slice(1) : p)).join('.');
+    check('I2b-R1 seal: tampered IV / ciphertext / tag each fail closed', fails(() => s1.open(flip(2), aad)) && fails(() => s1.open(flip(3), aad)) && fails(() => s1.open(flip(4), aad)));
+    check('I2b-R1 seal: a value moved to another row or field fails (AAD binding)', fails(() => s1.open(sealed, 'Interaction\0otherrow\0returnTo')) && fails(() => s1.open(sealed, 'Session\0rowkey\0state.secret')));
+    check('I2b-R1 seal: malformed values fail closed', ['', 'v1', 'v1.a.b.c', 'v2.x.y.z.w', plain].every((v) => fails(() => s1.open(v, aad))));
+    check('I2b-R1 seal: without the key a value cannot be opened', fails(() => createFieldSealer([K2]).open(sealed, aad)));
+    const rotated = createFieldSealer([K2, K1]);
+    check('I2b-R1 seal: rotation -- [new, old] opens values sealed with old', rotated.open(sealed, aad) === plain);
+    check('I2b-R1 seal: rotation -- new values use the new key (old-only sealer cannot open them)', fails(() => s1.open(rotated.seal(plain, aad), aad)));
+    const refuses = (keys: string[]) => {
+      try {
+        createFieldSealer(keys);
+        return false;
+      } catch {
+        return true;
+      }
+    };
+    check('I2b-R1 seal: missing, short or duplicate keys refused at construction', refuses([]) && refuses(['short-key']) && refuses([K1, K1]));
+    const payload = { returnTo: plain, session: { accountId: USER_A, uid: 'session-uid-1', cookie: 'SyntheticSessionCookieValue99' }, params: { client_id: CLIENT } };
+    const prot = protectPayload(s1, 'Interaction', 'rowkey', payload as never);
+    const text = JSON.stringify(prot);
+    check('I2b-R1 protect: Interaction session.cookie dropped, returnTo sealed, rest unchanged', !text.includes('SyntheticSessionCookieValue99') && !('cookie' in (prot.session as object)) && !text.includes('SyntheticInteractionUid123') && (prot.params as { client_id: string }).client_id === CLIENT && (prot.session as { uid: string }).uid === 'session-uid-1');
+    check('I2b-R1 protect: input payload is not mutated', payload.session.cookie === 'SyntheticSessionCookieValue99' && payload.returnTo === plain);
+    check('I2b-R1 unprotect: returnTo restored', unprotectPayload(s1, 'Interaction', 'rowkey', prot).returnTo === plain);
+    const sess = protectPayload(s1, 'Session', 'srow', { accountId: USER_A, state: { secret: 'SyntheticXsrfSecret42', clientId: CLIENT } } as never);
+    check('I2b-R1 protect: Session state.secret sealed and restorable', !JSON.stringify(sess).includes('SyntheticXsrfSecret42') && (unprotectPayload(s1, 'Session', 'srow', sess).state as { secret: string }).secret === 'SyntheticXsrfSecret42');
+    check('I2b-R1 unprotect: a plaintext value where a seal is required fails closed', fails(() => unprotectPayload(s1, 'Interaction', 'rowkey', { returnTo: plain } as never)));
   }
 
   // ------------------------------------------------------------ R1-L2 client address
