@@ -3786,6 +3786,83 @@ export async function checkDailyOccurrenceEligibility(
   return { status: 'ELIGIBLE' };
 }
 
+/**
+ * AURA-HPG-FIX-01 (V1-05, weekly proposal) -- the READ-ONLY, batched
+ * counterpart of checkDailyOccurrenceEligibility above, for presentation
+ * surfaces (Home rhythm card, Plan My Day "Aura suggests", weekly-plan
+ * proposals) that must not OFFER a day the acceptance-time guard would
+ * reject. Applies exactly the same day attribution (live UPCOMING/LOGGED
+ * via resolveOccurrenceLocalDay -- `scheduledLocalDate` snapshot first;
+ * hard-deleted rows only when they carry an execution, via
+ * resolveOccurrenceLocalDayOrNull) but takes no row locks and never
+ * decides eligibility: it only reports which local days are already
+ * occupied per GoalActivity. checkDailyOccurrenceEligibility (inside the
+ * write transaction) stays the sole authority; an unrecoverable legacy day
+ * is simply omitted here (the write path still reports UNRESOLVED).
+ *
+ * NOTE: deliberately NOT built from GoalActivityRhythmOccurrenceFact --
+ * that fact's `localDate` is the occurrence's scheduled WEEK start whenever
+ * a week snapshot exists (resolveOccurrenceLocalDate), so it identifies the
+ * week, never the day.
+ */
+export interface GoalActivityDailyOccupancy {
+  /** Local days already holding a live (UPCOMING/LOGGED) or completed-then-deleted occurrence. */
+  days: Set<string>;
+  /** The activity's persisted daily frequency, read here (NOT from the
+   * hash-pinned candidate query) so callers can apply the same
+   * ONCE_PER_DAY gate as the acceptance-time guard. */
+  dailyFrequencyKind: string | null;
+  dailyFrequencyLimit: number | null;
+}
+
+export async function listGoalActivityDailyOccupancyForActivities(
+  userId: string,
+  goalActivityIds: readonly string[],
+  timezone: string,
+  executor: ReadQueryExecutor = pool
+): Promise<Map<string, GoalActivityDailyOccupancy>> {
+  const occupancy = new Map<string, GoalActivityDailyOccupancy>();
+  if (goalActivityIds.length === 0) return occupancy;
+  const frequencyRes = await executor.query(
+    `SELECT ga.id, ga."dailyFrequencyKind", ga."dailyFrequencyLimit" FROM "GoalActivity" ga
+     WHERE ga."userId" = $1 AND ga.id = ANY($2::text[])`,
+    [userId, [...goalActivityIds]]
+  );
+  for (const row of frequencyRes.rows) {
+    occupancy.set(row.id, { days: new Set(), dailyFrequencyKind: row.dailyFrequencyKind ?? null, dailyFrequencyLimit: row.dailyFrequencyLimit ?? null });
+  }
+  const result = await executor.query(
+    `SELECT gao."goalActivityId", gao."scheduledLocalDate", gao."scheduledLocalTimezone", pa."plannedStartAt", pa.status,
+            (gao."plannedActivityId" IS NULL) AS "isDeleted", (gae.id IS NOT NULL) AS "hasExecution"
+     FROM "GoalActivityOccurrence" gao
+     LEFT JOIN "PlannedActivity" pa ON pa.id = gao."plannedActivityId"
+     LEFT JOIN "GoalActivityExecution" gae ON gae."goalActivityOccurrenceId" = gao.id
+     WHERE gao."userId" = $1 AND gao."goalActivityId" = ANY($2::text[])`,
+    [userId, [...goalActivityIds]]
+  );
+  for (const row of result.rows) {
+    let day: string | null = null;
+    const snapshot = { scheduledLocalDate: row.scheduledLocalDate, scheduledLocalTimezone: row.scheduledLocalTimezone };
+    try {
+      if (row.isDeleted) {
+        if (!row.hasExecution) continue;
+        day = resolveOccurrenceLocalDayOrNull(snapshot, null, timezone);
+      } else {
+        if (row.status !== 'UPCOMING' && row.status !== 'LOGGED') continue;
+        if (!row.plannedStartAt) continue;
+        day = resolveOccurrenceLocalDay(snapshot, new Date(row.plannedStartAt), timezone);
+      }
+    } catch {
+      // A corrupt, half-populated snapshot: the write-time guard refuses it
+      // loudly; a read-only presentation hint just skips the row.
+      continue;
+    }
+    if (day === null) continue;
+    occupancy.get(row.goalActivityId)?.days.add(day);
+  }
+  return occupancy;
+}
+
 export type MaterializeGoalActivityRhythmOccurrenceResult =
   | { ok: true; occurrenceId: string }
   | { ok: false; reason: 'NOT_FOUND' | 'NOT_RHYTHM_ELIGIBLE' | 'CAPACITY_EXHAUSTED' | 'DAILY_CAPACITY_EXHAUSTED' | 'DAILY_ATTRIBUTION_UNRESOLVED' };

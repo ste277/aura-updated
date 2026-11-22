@@ -405,7 +405,12 @@ export async function resolveAutomaticGoalDemand(
   const manualIds = new Set(excludeGoalActivityIds);
   return {
     status: 'OK',
-    suggestions: excludeGoalDemandByActivityIds(result.candidates, excludeGoalActivityIds),
+    // AURA-HPG-FIX-01 (V1-05) -- never OFFER ("Aura suggests") an activity
+    // that already has its once-per-day session on this planning date: the
+    // acceptance guard would only refuse it with DAILY_CAPACITY_EXCEEDED.
+    // The manual handoff (manualCanonicalGoalActivityIds) is untouched --
+    // an explicit user request still reaches that guard and its message.
+    suggestions: excludeGoalDemandByActivityIds(result.candidates, excludeGoalActivityIds).filter((candidate) => candidate.scheduledOnPlanningDate !== true),
     manualCanonicalGoalActivityIds: result.candidates.filter((candidate) => manualIds.has(candidate.goalActivityId)).map((candidate) => candidate.goalActivityId),
   };
 }

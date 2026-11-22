@@ -659,3 +659,42 @@ export function presentPlanDayPreviewFailure(result: Exclude<ConstructDayPreview
       return { message: 'Something went wrong.', showEdit: true, actions: ['RETRY'] };
   }
 }
+
+/**
+ * AURA-HPG-FIX-01 (V1-02) -- a Today/Tomorrow switch is a soft navigation
+ * that deliberately PRESERVES `rows` (PlanDayClient.tsx), but a canonical
+ * Goal-demand row's id encodes the planning date it was minted for
+ * (`goal-demand:<date>:<goalActivityId>`). Carried unchanged into the
+ * other day, acceptance correctly rejected it
+ * (AUTOMATIC_GOAL_PLANNING_DATE_MISMATCH -> "Your day changed since this
+ * plan was created"), and "Review again" repeated that forever.
+ *
+ * Re-keys every row through the caller-supplied `rekeyId` (PlanDayClient
+ * passes rekeyGoalDemandIntentIdForPlanningDate), keeping the same
+ * goalActivityId and every other field. Server-side authorization and the
+ * acceptance-time weekly/daily eligibility checks still run for the new
+ * date -- this only stops the client sending an id for the wrong day.
+ * Non-goal-demand rows (typed, Quick Pick, manual `plan-day-goal-*`
+ * handoff, captures) are untouched. If re-keying would duplicate an id
+ * already present (the same activity added for both days), the later row
+ * is dropped rather than sending two intents with one id. Returns the SAME
+ * array when nothing changes so callers can bail out of a re-render.
+ */
+export function rekeyGoalDemandRowsForPlanningDate(rows: readonly PlanDayIntentRow[], rekeyId: (rowId: string) => string): PlanDayIntentRow[] {
+  let changed = false;
+  const seen = new Set<string>();
+  const next: PlanDayIntentRow[] = [];
+  for (const row of rows) {
+    // This module computes no identity itself (manualGoalProvenanceParity
+    // architecture rule): the caller supplies the id re-keying function.
+    const id = rekeyId(row.id);
+    if (id !== row.id) changed = true;
+    if (seen.has(id)) {
+      changed = true;
+      continue;
+    }
+    seen.add(id);
+    next.push(id === row.id ? row : { ...row, id });
+  }
+  return changed ? next : (rows as PlanDayIntentRow[]);
+}

@@ -258,6 +258,21 @@ jobs:
       # timezone.ts, no new dependency).
       - name: Run Goal Rhythm weekly proposal test
         run: npx ts-node test/goalRhythmWeeklyProposal.test.ts
+      # AURA-HPG-FIX-01 -- Home -> Plan -> Goals stabilization regressions
+      # (V1-03 title persistence, V1-05 already-scheduled recommendations,
+      # weekly-plan proposal validity, V1-09 Home refresh). Same
+      # apps/web/node_modules requirement; the jsdom one needs the jsx
+      # tsconfig like the other component tests above.
+      - name: Run HPG-FIX-01 activity title persistence test
+        run: npx ts-node test/hpgFix01TitlePersistence.test.ts
+      - name: Run HPG-FIX-01 already-scheduled recommendation test
+        run: npx ts-node test/hpgFix01AlreadyScheduled.test.ts
+      - name: Run HPG-FIX-01 weekly proposal validity test
+        run: npx ts-node test/hpgFix01WeeklyProposal.test.ts
+      - name: Run HPG-FIX-01 Home rhythm refresh (jsdom) test
+        run: npx ts-node --project tsconfig.jsdom-tests.json test/hpgFix01HomeRefreshJsdom.test.ts
+      - name: Run HPG-FIX-01 Goal -> Plan -> Tomorrow (V1-02) test
+        run: npx ts-node test/hpgFix01GoalPlanTomorrow.test.ts
       # HGR3-B -- same apps/web/node_modules requirement (imports
       # goalRhythmWeeklyAcceptance.ts, which transitively imports
       # dayConstructorPreviewRequest.ts/dayConstructorAcceptancePersistence.ts/
@@ -1028,6 +1043,10 @@ jobs:
         run: npx ts-node test/dayConstructorAcceptancePersistenceDb.test.ts
       - name: Run Goal demand candidates DB test
         run: npx ts-node test/goalDemandCandidatesDb.test.ts
+      # AURA-HPG-FIX-01 -- read-only daily-occupancy loader agrees with the
+      # acceptance-time daily guard (V1-05 / weekly proposal).
+      - name: Run HPG-FIX-01 daily occupancy DB test
+        run: npx ts-node test/hpgFix01DailyOccupancyDb.test.ts
       # HGR3-B -- the critical, non-today EXPLICIT_RANGE construction gate;
       # requires a real DB (real GoalActivity/PlannedActivity/GoalActivityOccurrence
       # rows through the real, unmodified preview+accept pipeline).
