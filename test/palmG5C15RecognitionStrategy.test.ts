@@ -254,8 +254,10 @@ async function main(): Promise<void> {
     check('F7p. precondition: gzip -dc decodes a .Z with reserved flag bits set', (spawnSync('gzip', ['-d', '-c'], { input: res }).stdout as Buffer).includes(SENT));
     mustFail('F7', '[C14-F4] compress .Z with reserved flag bits', res, /^compress \(\.Z\)$/);
     const mb8 = Buffer.from(z); mb8[2] = (mb8[2] & 0xe0) | 8;
-    check('F8p. precondition: gzip refuses a .Z with maxbits 8', !(spawnSync('gzip', ['-d', '-c'], { input: mb8 }).stdout as Buffer).includes(SENT));
-    mustPass('F8', '.Z header with maxbits 8 (gzip refuses it)', mb8);
+    // C15-CI-1: GNU gzip (Ubuntu) decodes maxbits 0..8, Apple gzip does not; the
+    // scanner fails closed either way (full range: palmG5C15CI1CompressMaxbits).
+    info('F8i. gzip -dc decodes a .Z with maxbits 8 (scanner fails closed either way)', (spawnSync('gzip', ['-d', '-c'], { input: mb8 }).stdout as Buffer).includes(SENT));
+    mustFail('F8', '[C15-CI-1] .Z header with maxbits 8 (GNU gzip decodes it)', mb8, /^compress \(\.Z\)$/);
     check('F9p. precondition: gzip refuses a .Z that starts after offset 0', !(spawnSync('gzip', ['-d', '-c'], { input: Buffer.concat([fill(16, 0x41), z]) }).stdout as Buffer).includes(SENT));
     mustPass('F9', 'documented residual: .Z embedded after offset 0 (no stock reader opens it)', Buffer.concat([fill(16, 0x41), z]));
   } else { notRun.push('F5-F9'); console.log('NOT RUN F5-F9 (compress / ncompress not installed)'); }

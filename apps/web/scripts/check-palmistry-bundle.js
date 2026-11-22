@@ -250,7 +250,7 @@ const TFLITE_IDENTIFIER = Buffer.from('TFL3'); // FlatBuffer file identifier at 
 // header checksum (xxh32), the lz4 legacy first block size, the cab folder /
 // file counts plus the bsdtar or cabextract header rule, the xar magic with a
 // binary header size (or a zlib TOC that inflates at the declared position),
-// the lzip version byte (0 or 1), compress .Z (offset 0 only: maxbits 9..16
+// the lzip version byte (0 or 1), compress .Z (offset 0 only: maxbits 0..16
 // and a literal first code), and for embedded gzip a header whose fields are
 // scanned up to GZ_FIELD_SCAN plus a bounded deflate probe that counts ANY
 // deflate data valid through the probe window, a complete member with a
@@ -739,14 +739,16 @@ function validIsoAt(buf, p) {
 /**
  * G5-C15 (C14-F4) compress .Z (Tier B), checked at OFFSET 0 of every inspected
  * buffer only, where gzip, uncompress and bsdtar read it (they ignore a .Z
- * that starts later; see RESIDUAL). Rule: 1F 9D, maxbits 9..16 (gzip refuses
- * others; reserved flag bits are tolerated) and a first 9-bit code below 256
- * (gzip: "corrupt input" otherwise).
+ * that starts later; see RESIDUAL). Rule: 1F 9D, maxbits 0..16 and a first
+ * 9-bit code below 256 (every reader: "corrupt input" otherwise). C15-CI-1:
+ * the maxbits range is the UNION of the readers: GNU gzip 1.12 (and its
+ * uncompress) decodes maxbits 0..16 (it refuses only > 16), Apple gzip
+ * 12..16. The block-mode and reserved flag bits are ignored by GNU gzip.
  */
 function validCompressAt(buf) {
   if (buf.length < 5 || buf[0] !== 0x1f || buf[1] !== 0x9d) return false;
   const maxbits = buf[2] & 0x1f;
-  return maxbits >= 9 && maxbits <= 16 && (buf[3] | ((buf[4] & 1) << 8)) < 256;
+  return maxbits <= 16 && (buf[3] | ((buf[4] & 1) << 8)) < 256;
 }
 // `shift`: offset of the stream start relative to the searched magic.
 const FOREIGN_FORMATS = [

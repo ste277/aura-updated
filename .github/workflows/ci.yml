@@ -857,6 +857,9 @@ jobs:
       # cab reader union (cabextract), budget checks after the last entry and the scan.
       - name: Run Palm bundle scanner recognition-strategy regression tests (G5-C15)
         run: npx ts-node test/palmG5C15RecognitionStrategy.test.ts
+      # G5-C15-CI-1: compress .Z maxbits 0..16 (GNU gzip / libarchive decode 0..8).
+      - name: Run Palm bundle scanner .Z maxbits regression tests (G5-C15-CI-1)
+        run: npx ts-node test/palmG5C15CI1CompressMaxbits.test.ts
   web-build:
     name: Next.js production build
     runs-on: ubuntu-latest
