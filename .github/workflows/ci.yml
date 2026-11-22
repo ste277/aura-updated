@@ -69,6 +69,14 @@ jobs:
       # vs per-client rate limits, bounded limiter, loopback-only AS.
       - name: Run OAuth security regression test
         run: npx ts-node test/mcpOAuthSecurityRegression.test.ts
+      # AURA-MCP-02-I2b -- offline production-readiness security tests:
+      # atomic single-use codes and refresh-token rotation/replay (F6),
+      # pre-auth throttling (F5), trusted client-address resolution and
+      # proxy-header spoofing (R1-L2), keys and rotation, ID-token privacy,
+      # client registration policy, disconnect, sign-in return, audit
+      # redaction, multi-instance behaviour on a shared store. No DB.
+      - name: Run I2b OAuth production-readiness test
+        run: npx ts-node test/mcpOAuthI2b.test.ts
       - name: Run panchang day service test
         run: npx ts-node test/panchangDay.test.ts
       - name: Run panchang month service test
@@ -949,6 +957,16 @@ jobs:
       - name: Verify migration status is up to date
         working-directory: apps/web
         run: npx prisma migrate status
+      # AURA-MCP-02-I2b -- the durable OAuth store and the distributed rate
+      # limiter (migration 0052) against this disposable database: atomic
+      # single use across independent instances (F6), refresh rotation and
+      # replay, hashed-at-rest ids, disconnect, expiry/cleanup, shared
+      # limits across instances (R1-L1) and fail-closed on DB loss. Touches
+      # only the two MCP tables.
+      - name: Install root deps (I2b OAuth DB test)
+        run: npm install
+      - name: Run I2b OAuth Postgres store and distributed limiter test
+        run: npx ts-node test/mcpOAuthPostgresDb.test.ts
       - name: Verify every repository migration was recorded as applied
         run: |
           set -euo pipefail

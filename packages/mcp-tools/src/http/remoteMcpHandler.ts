@@ -49,6 +49,7 @@ export const REMOTE_SERVER_VERSION = '0.1.0';
 export const MCP_SCOPE = 'aura.planning.read';
 export const MAX_REQUEST_BODY_BYTES = 16 * 1024;
 export const DEFAULT_RATE_LIMITS = Object.freeze({ perUser: 60, perClient: 600 });
+export const DEFAULT_PREAUTH_LIMITS = Object.freeze({ perAddress: 120, global: 6000 });
 
 export interface VerifiedAccess {
   /** Verified, server-side Aura user id. Unused by tools until I3 (personalization). */
@@ -83,6 +84,15 @@ export interface RemoteMcpDeps {
    * traffic can reach on its own). Defaults: 60 per user, 600 per client.
    */
   rateLimits?: { perUser: number; perClient: number };
+  /**
+   * I2b (F5): pre-authentication throttle, checked BEFORE the access token is
+   * verified (token verification is a database lookup). Keyed by the trusted
+   * client address (clientAddress.ts; never a raw forwarded header) plus a
+   * global ceiling. Without an address only the global ceiling applies.
+   */
+  preAuthRateLimiter?: McpRateLimiter;
+  clientAddress?: string | null;
+  preAuthLimits?: { perAddress: number; global: number };
   /** Redacted audit sink. */
   audit?: McpAuditSink;
   /** Monotonic-ish clock for audit latency (tests pin it). */
@@ -222,6 +232,18 @@ export async function handleRemoteMcpRequest(req: Request, deps: RemoteMcpDeps):
   const declaredLength = Number(req.headers.get('content-length') ?? '0');
   if (Number.isFinite(declaredLength) && declaredLength > MAX_REQUEST_BODY_BYTES) {
     return done(jsonResponse(413, { error: 'request_too_large' }), 'request_too_large');
+  }
+
+  if (deps.preAuthRateLimiter) {
+    const pre = deps.preAuthLimits ?? DEFAULT_PREAUTH_LIMITS;
+    if (!(pre.global >= pre.perAddress && pre.perAddress >= 1)) throw new TypeError('preAuthLimits.global must be >= perAddress >= 1');
+    const rules: RateLimitRule[] = [{ key: 'preauth-mcp:global', limit: pre.global }];
+    if (deps.clientAddress) rules.push({ key: `preauth-mcp:addr:${deps.clientAddress}`, limit: pre.perAddress });
+    const decision = await deps.preAuthRateLimiter.check(rules);
+    if (!decision.allowed) {
+      audit.limitedBy = decision.limitedBy;
+      return done(jsonResponse(429, { error: 'rate_limited' }, { 'retry-after': String(Math.max(1, decision.retryAfterSeconds)) }), 'preauth_throttled');
+    }
   }
 
   const token = bearerToken(req);
