@@ -290,11 +290,11 @@ async function main(): Promise<void> {
         to: '  if (p + 12 > buf.length || buf[p + 6] !== 0 || ![0x00, 0x01, 0x04, 0x0a].includes(buf[p + 7])) return false;\n  return crc32(buf.subarray(p + 6, p + 8)) === buf.readUInt32LE(p + 8);', probe: (m) => mustPass('M1p', '', xzHead(0, 5), m) && !mustPass('M1q', '', xzHead(0, 4), m) },
       { id: 'M2', label: 'bzip2 randomised-bit rejection reinstated (C10-F3 reverted)', from: 'const level = digit >= 1 && digit <= 9 ? digit : 9;', to: 'const level = digit >= 1 && digit <= 9 && !(buf[p + 14] & 0x80) ? digit : -1;',
         probe: (m) => mustPass('M2p', '', bzHead('9', true), m) && !mustPass('M2q', '', bzHead('9', false), m) },
-      { id: 'M3', label: 'xar version check reinstated on the binary-size rule (C10-F1 reverted)', from: 'if (hsize >= 28 && hsize <= 4096) return true;', to: 'if (hsize >= 28 && hsize <= 4096 && buf.readUInt16BE(p + 6) === 1) return true;',
+      { id: 'M3', label: 'xar version check reinstated on the binary-size rule (C10-F1 reverted)', from: 'if (hsize <= 4096) return true;', to: 'if (hsize <= 4096 && buf.readUInt16BE(p + 6) === 1) return true;',
         probe: (m) => mustPass('M3p', '', xarHead({ ver: 2, toc: fill(64, 0xff) }), m) && !mustPass('M3q', '', xarHead(), m) },
       { id: 'M4', label: 'gzip member-count limit removed (C10-F4 reverted)', from: 'if (headers.length >= maxMembers) throw', to: 'if (false) throw',
         probe: (m) => run('M4p.gz', gzEmptyMembers(10001), m).exit === 0 },
-      { id: 'M5', label: 'in-loop gzip work-time check removed (C10-F4 reverted)', from: 'if (overTime()) throw new ArchiveError(`work-time budget', to: 'if (false) throw new ArchiveError(`work-time budget',
+      { id: 'M5', label: 'in-loop gzip work-time check removed (C10-F4 reverted)', from: 'if (overTime()) throw new ArchiveError(`work-time budget (${limits.maxScanMs} ms) exceeded while decompressing', to: 'if (false) throw new ArchiveError(`work-time budget (${limits.maxScanMs} ms) exceeded while decompressing',
         probe: (m) => { const fn: LimitsFn = (base) => { let armed = false; return new Proxy({ ...base }, { get(t: any, k) { if (k === 'maxGzipMembers') armed = true; if (k === 'maxScanMs' && armed) return -1; return t[k]; } }); };
           return !run('M5p.gz', Buffer.concat([gzMember(Buffer.from('a\n')), gzMember(Buffer.from('b\n'))]), m, fn).errors.some((e) => /while decompressing gzip stream/.test(e)); } },
     ];

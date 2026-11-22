@@ -847,6 +847,10 @@ jobs:
       # and in-loop work-time check. Real-tool cases need bsdtar/xz/bzip2 (above).
       - name: Run Palm bundle scanner fail-open regression tests (G5-C11)
         run: npx ts-node test/palmG5C11ForeignFormatFailOpen.test.ts
+      # G5-C13 (C12-F1..F7): xar size < 28, 7z major version, cab fields, lz4 and
+      # zstd legacy frames, rar v4 block order, gzip post-loop budget check.
+      - name: Run Palm bundle scanner format-variant regression tests (G5-C13)
+        run: npx ts-node test/palmG5C13ForeignFormatVariants.test.ts
   web-build:
     name: Next.js production build
     runs-on: ubuntu-latest

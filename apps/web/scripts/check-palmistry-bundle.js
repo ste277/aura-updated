@@ -226,7 +226,8 @@ const TFLITE_IDENTIFIER = Buffer.from('TFL3'); // FlatBuffer file identifier at 
 // pax size/link/sparse overrides, gzip trailing data, nesting beyond the
 // depth limit, and any resource-limit violation.
 // G5-D7-A -- IDENTIFIABLE BUT NOT INSPECTABLE formats FAIL CLOSED (they are
-// never silently skipped): xz, 7z, bzip2, zstd, lz4 (frame), rar (v4/v5), cab
+// never silently skipped): xz, 7z, bzip2, zstd (and, G5-C13, legacy v0.1-0.7
+// frames), lz4 (frame and, G5-C13, legacy), rar (v4/v5), cab
 // and (G5-D7B) xar, at offset 0 or EMBEDDED anywhere in an inspected buffer, and a gzip
 // stream embedded at offset > 0 (gzip at offset 0 is a supported container,
 // above). "Inspected buffer" = every regular file, every archive entry and
@@ -247,7 +248,7 @@ const TFLITE_IDENTIFIER = Buffer.from('TFL3'); // FlatBuffer file identifier at 
 // TOC), since that turned real streams into "no archive". Variants fail closed.
 // RESIDUAL (not detectable by signature, documented limitation R3-N2):
 // formats without a reliable magic number (brotli, raw deflate/zlib, lzma
-// "alone", lz4 legacy/raw blocks, Snappy), embedded gzip streams decoding to
+// "alone", lz4 raw blocks, Snappy), embedded gzip streams decoding to
 // fewer than FOREIGN_MIN_OUTPUT bytes, ZIP64 (fails closed), and payloads that
 // are encoded rather than archived (base64, UTF-16, custom transforms): see
 // the file header.
@@ -522,9 +523,15 @@ function validXzAt(buf, p) {
   if (p + 12 > buf.length) return false;
   return crc32(buf.subarray(p + 6, p + 8)) === buf.readUInt32LE(p + 8);
 }
-/** 7z signature header: major version 0 and the start-header CRC32. */
+/**
+ * 7z signature header: the start-header CRC32.
+ * G5-C13 (C12-F2): the major-version byte is no longer consulted. The CRC
+ * does not cover it and bsdtar extracts archives with a major version of 1 or
+ * 0xff, so a version check turned decodable archives into "no archive". The
+ * CRC stays: bsdtar refuses a start header whose CRC is wrong.
+ */
 function valid7zAt(buf, p) {
-  if (p + 32 > buf.length || buf[p + 6] !== 0) return false;
+  if (p + 32 > buf.length) return false;
   return crc32(buf.subarray(p + 12, p + 32)) === buf.readUInt32LE(p + 8);
 }
 /**
@@ -568,6 +575,27 @@ function validLz4At(buf, p) {
   return ((xxh32(buf.subarray(p + 4, p + 4 + dlen)) >>> 8) & 0xff) === buf[p + 4 + dlen];
 }
 /**
+ * G5-C13 (C12-F4): lz4 LEGACY frame (`lz4 -l`): magic 02 21 4C 18, then
+ * blocks prefixed by a 32-bit compressed size. `lz4 -dc` decodes it, so it
+ * fails closed like the lz4 frame format. Structural check: the first block
+ * size is 1..LZ4_compressBound(8 MiB), the most the legacy format allows.
+ */
+const LZ4_LEGACY_MAX_BLOCK = 8 * 1024 * 1024 + Math.floor((8 * 1024 * 1024) / 255) + 16;
+function validLz4LegacyAt(buf, p) {
+  if (p + 8 > buf.length) return false;
+  const n = buf.readUInt32LE(p + 4);
+  return n >= 1 && n <= LZ4_LEGACY_MAX_BLOCK;
+}
+/**
+ * G5-C13 (C12-F5): zstd LEGACY frames (format versions 0.1-0.7; magics
+ * 1E/22..27 B5 2F FD). The zstd CLI still decodes legacy frames (v0.7 shown;
+ * which versions depends on how it was built), so every legacy magic fails
+ * closed; the 4-byte magic and one following byte are the whole check.
+ */
+function validZstdLegacyAt(buf, p) {
+  return p + 5 <= buf.length;
+}
+/**
  * G5-D7B (IV3B-1) xar (macOS .pkg container): big-endian header -- size
  * 28..4096, version 1, non-zero TOC lengths -- followed by a zlib TOC that
  * really inflates (bounded) to XML.
@@ -580,16 +608,18 @@ function validLz4At(buf, p) {
  * xar extracts version-2 headers, a zero or > 2^31 uncompressed TOC length,
  * and TOCs that begin with a comment, a BOM, a DOCTYPE or a processing
  * instruction, all of which the old checks passed as "no archive". Rule:
- *   (a) "xar!" + a binary header size 28..4096 -> xar (any variant fails
- *       closed). Text after "xar!" is printable (>= 0x20 0x20 = 8224), so
- *       this range does not match ordinary prose or code;
+ *   (a) "xar!" + a binary header size 0..4096 -> xar (any variant fails
+ *       closed; G5-C13 / C12-F1: xar reads the TOC at offset 28 even when
+ *       the field says less, so sizes below 28 count too). Text after "xar!"
+ *       is printable (>= 0x20 0x20 = 8224), so this range does not match
+ *       ordinary prose or code;
  *   (b) any other header size -> xar if a zlib stream at the declared TOC
  *       position really inflates (bounded), as a reader would find it.
  */
 function validXarAt(buf, p) {
   if (p + 8 > buf.length) return false;
   const hsize = buf.readUInt16BE(p + 4);
-  if (hsize >= 28 && hsize <= 4096) return true;
+  if (hsize <= 4096) return true; // G5-C13 (C12-F1): sizes below 28 too -- xar reads the TOC at 28 whatever the field says
   const t = p + hsize;
   if (hsize < 8 || t + 2 > buf.length) return false;
   try {
@@ -600,9 +630,12 @@ function validXarAt(buf, p) {
 function validRarAt(buf, p) {
   if (p + 8 > buf.length) return false;
   if (buf[p + 6] === 0) {
-    if (p + 14 > buf.length || buf[p + 9] !== 0x73) return false;
+    // G5-C13 (C12-F6): the first block after the marker may be of ANY type
+    // (bsdtar reads archives with no main header, or a comment block first),
+    // so it no longer has to be the main header (0x73). Its CRC16 must match.
+    if (p + 14 > buf.length) return false;
     const hsize = buf.readUInt16LE(p + 12);
-    if (hsize < 13 || p + 7 + hsize > buf.length) return false;
+    if (hsize < 7 || p + 7 + hsize > buf.length) return false;
     return (crc32(buf.subarray(p + 9, p + 7 + hsize)) & 0xffff) === buf.readUInt16LE(p + 7);
   }
   if (buf[p + 6] !== 1 || buf[p + 7] !== 0) return false;
@@ -615,13 +648,18 @@ function validRarAt(buf, p) {
   if (start + size > buf.length || buf[start] !== 1) return false;
   return crc32(buf.subarray(q + 4, start + size)) === buf.readUInt32LE(q);
 }
-/** cab: reserved fields zero, version 1.3, at least one folder and file, offsets consistent. */
+/**
+ * cab: first reserved field zero, at least one folder and one file.
+ * G5-C13 (C12-F3): the second and third reserved fields, the version, the
+ * cabinet size and the file-table offset are no longer consulted. bsdtar
+ * extracts cabinets where any of them is unusual, so those checks turned
+ * decodable cabinets into "no archive". The remaining checks are the ones
+ * bsdtar itself enforces (it refuses reserved1 != 0, zero folders or zero
+ * files); they also keep "MSCF" in text from matching.
+ */
 function validCabAt(buf, p) {
   if (p + 36 > buf.length) return false;
-  if (buf.readUInt32LE(p + 4) || buf.readUInt32LE(p + 12) || buf.readUInt32LE(p + 20)) return false;
-  if (buf[p + 24] !== 3 || buf[p + 25] !== 1 || buf.readUInt16LE(p + 26) < 1 || buf.readUInt16LE(p + 28) < 1) return false;
-  const cb = buf.readUInt32LE(p + 8), coffFiles = buf.readUInt32LE(p + 16);
-  return cb >= 44 && coffFiles >= 36 && coffFiles < cb;
+  return buf.readUInt32LE(p + 4) === 0 && buf.readUInt16LE(p + 26) >= 1 && buf.readUInt16LE(p + 28) >= 1;
 }
 // `shift`: offset of the stream start relative to the searched magic.
 const FOREIGN_FORMATS = [
@@ -631,6 +669,8 @@ const FOREIGN_FORMATS = [
   { name: 'bzip2', magic: Buffer.from([0x31, 0x41, 0x59, 0x26, 0x53, 0x59]), shift: -4, validate: validBzip2At },
   { name: 'zstd', magic: Buffer.from([0x28, 0xb5, 0x2f, 0xfd]), validate: validZstdAt },
   { name: 'lz4', magic: Buffer.from([0x04, 0x22, 0x4d, 0x18]), validate: validLz4At },
+  { name: 'lz4 (legacy)', magic: Buffer.from([0x02, 0x21, 0x4c, 0x18]), validate: validLz4LegacyAt }, // G5-C13 (C12-F4)
+  ...[0x1e, 0x22, 0x23, 0x24, 0x25, 0x26, 0x27].map((v) => ({ name: `zstd (legacy v0.${v === 0x1e ? 1 : v - 0x20})`, magic: Buffer.from([v, 0xb5, 0x2f, 0xfd]), validate: validZstdLegacyAt })), // G5-C13 (C12-F5)
   { name: 'rar', magic: Buffer.from('Rar!\x1a\x07', 'latin1'), validate: validRarAt },
   { name: 'cab', magic: Buffer.from('MSCF', 'latin1'), validate: validCabAt },
   { name: 'xar', magic: Buffer.from('xar!', 'latin1'), validate: validXarAt },
@@ -1171,6 +1211,8 @@ function gunzipBounded(buf, limits, budget, label, overTime = () => false) {
     total += r.out.length;
     pos = t + 8;
   }
+  // G5-C13 (C12-F7): the budget is checked once more after the last member, before the members are joined.
+  if (overTime()) throw new ArchiveError(`work-time budget (${limits.maxScanMs} ms) exceeded after decompressing gzip stream "${label}"`);
   const out = outs.length === 1 ? outs[0] : Buffer.concat(outs);
   if (out.length >= 1024 * 1024 && out.length / Math.max(1, buf.length) > limits.maxCompressionRatio) throw new ArchiveError(`compression-ratio limit (${limits.maxCompressionRatio}) exceeded for gzip stream "${label}"`);
   budget.reserve(out.length, label);
@@ -1294,6 +1336,7 @@ function inspectArtifacts(root, limits = INSPECTION_LIMITS) {
           if (overTime()) return; // G5-C11 (C10-F4): budget checked per header field, not only per archive
           inspectEntryData(r.data, `${shown}!${r.label}`, `${shown}!${r.label}`, depth, budget);
         }
+        if (overTime()) return; // G5-C13 (C12-F7): and before the decompressed stream is scanned
         inspectEntryData(out, `${shown}!<gzip stream>`, `${shown}`, depth, budget);
         return;
       }
