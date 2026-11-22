@@ -828,8 +828,10 @@ jobs:
       # 7-Zip extraction precondition. Without them those checks report NOT RUN.
       # G5-C7: imagemagick provides the libjpeg decoder for the JPEG marker
       # differential (ImageIO/sips is macOS-only and reports NOT RUN here).
+      # G5-C15: cabextract (libmspack cab reader), lzip and ncompress (compress
+      # .Z) let the C15 reader-behaviour checks run here instead of NOT RUN.
       - name: Install stock archive readers for the scanner differential
-        run: sudo apt-get update -qq && sudo apt-get install -y -qq --no-install-recommends libarchive-tools xz-utils bzip2 zstd lz4 7zip imagemagick
+        run: sudo apt-get update -qq && sudo apt-get install -y -qq --no-install-recommends libarchive-tools xz-utils bzip2 zstd lz4 7zip imagemagick cabextract lzip ncompress
       # G5-C7 (C6-F1): JPEG marker allowlist before SOF; exactly one SOF before
       # SOS; RST/TEM desync rejected; real-encoder compatibility + decoder diff.
       - name: Run Palm upload JPEG marker desync tests (G5-C7)
@@ -851,6 +853,10 @@ jobs:
       # zstd legacy frames, rar v4 block order, gzip post-loop budget check.
       - name: Run Palm bundle scanner format-variant regression tests (G5-C13)
         run: npx ts-node test/palmG5C13ForeignFormatVariants.test.ts
+      # G5-C15 (C14-F1..F4, P3): embedded gzip probe, rar Tier A, lzip / .Z / ISO 9660,
+      # cab reader union (cabextract), budget checks after the last entry and the scan.
+      - name: Run Palm bundle scanner recognition-strategy regression tests (G5-C15)
+        run: npx ts-node test/palmG5C15RecognitionStrategy.test.ts
   web-build:
     name: Next.js production build
     runs-on: ubuntu-latest

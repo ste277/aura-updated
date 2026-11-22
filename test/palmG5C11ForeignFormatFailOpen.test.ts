@@ -277,7 +277,8 @@ async function main(): Promise<void> {
   // ================================================================ P: coincidental bytes must not match (no false positives)
   mustPass('P1', 'incidental "xar!" in JS text', Buffer.from('// xar! is the macOS package magic\nexport const XAR = "xar!";\nconst s = "xar! archive";\n'.repeat(8)));
   mustPass('P2', 'a "BZh91AY&SY" constant in JS text', Buffer.from('const BZ = "BZh91AY&SY";\nexport function isBzip2(s) { return s.startsWith(BZ); }\n'.repeat(4)));
-  mustPass('P3', 'xz magic with a broken header CRC (xz refuses it)', code(xzHead(0, 4, true)));
+  // G5-C15 Tier A: a >= 6-byte binary magic alone fails closed (no header field is consulted).
+  mustFail('P3', '[C15 Tier A] xz magic with a broken header CRC', code(xzHead(0, 4, true)), /^xz$/);
   mustPass('P4', 'bzip2 block magic whose origin pointer is outside every block size (bzip2 refuses it)', code(bzHead('9', false, 0x7fffff)));
   mustPass('P5', '64 KiB of pseudo-random binary data', Buffer.from(Array.from({ length: 65536 }, (_, i) => (i * 2654435761 >>> 13) & 0xff)));
   mustPass('P6', '"xar!" followed by printable machine-code-like bytes', code(Buffer.concat([Buffer.from('xar!', 'latin1'), fill(40, 0x48)])));
@@ -286,8 +287,8 @@ async function main(): Promise<void> {
   if (!process.env.PALM_SCANNER_UNDER_TEST) {
     const src = fs.readFileSync(SCANNER, 'utf8');
     const mutants: { id: string; label: string; from: string; to: string; probe: (mut: string) => boolean }[] = [
-      { id: 'M1', label: 'xz check-ID allowlist reinstated (C10-F2 reverted)', from: '  if (p + 12 > buf.length) return false;\n  return crc32(buf.subarray(p + 6, p + 8)) === buf.readUInt32LE(p + 8);',
-        to: '  if (p + 12 > buf.length || buf[p + 6] !== 0 || ![0x00, 0x01, 0x04, 0x0a].includes(buf[p + 7])) return false;\n  return crc32(buf.subarray(p + 6, p + 8)) === buf.readUInt32LE(p + 8);', probe: (m) => mustPass('M1p', '', xzHead(0, 5), m) && !mustPass('M1q', '', xzHead(0, 4), m) },
+      { id: 'M1', label: 'xz check-ID allowlist reinstated (C10-F2 reverted)', from: 'function validXzAt() {\n  return true;',
+        to: 'function validXzAt(buf, p) {\n  return p + 8 <= buf.length && [0x00, 0x01, 0x04, 0x0a].includes(buf[p + 7]);', probe: (m) => mustPass('M1p', '', xzHead(0, 5), m) && !mustPass('M1q', '', xzHead(0, 4), m) },
       { id: 'M2', label: 'bzip2 randomised-bit rejection reinstated (C10-F3 reverted)', from: 'const level = digit >= 1 && digit <= 9 ? digit : 9;', to: 'const level = digit >= 1 && digit <= 9 && !(buf[p + 14] & 0x80) ? digit : -1;',
         probe: (m) => mustPass('M2p', '', bzHead('9', true), m) && !mustPass('M2q', '', bzHead('9', false), m) },
       { id: 'M3', label: 'xar version check reinstated on the binary-size rule (C10-F1 reverted)', from: 'if (hsize <= 4096) return true;', to: 'if (hsize <= 4096 && buf.readUInt16BE(p + 6) === 1) return true;',

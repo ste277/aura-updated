@@ -227,31 +227,47 @@ const TFLITE_IDENTIFIER = Buffer.from('TFL3'); // FlatBuffer file identifier at 
 // depth limit, and any resource-limit violation.
 // G5-D7-A -- IDENTIFIABLE BUT NOT INSPECTABLE formats FAIL CLOSED (they are
 // never silently skipped): xz, 7z, bzip2, zstd (and, G5-C13, legacy v0.1-0.7
-// frames), lz4 (frame and, G5-C13, legacy), rar (v4/v5), cab
-// and (G5-D7B) xar, at offset 0 or EMBEDDED anywhere in an inspected buffer, and a gzip
+// frames), lz4 (frame and, G5-C13, legacy), rar (v4/v5), cab, (G5-D7B) xar
+// and (G5-C15) lzip, ISO 9660 and compress .Z, at offset 0 or EMBEDDED anywhere in an inspected buffer, and a gzip
 // stream embedded at offset > 0 (gzip at offset 0 is a supported container,
 // above). "Inspected buffer" = every regular file, every archive entry and
 // every container region (ZIP prefix/suffix/comments/extra fields, gzip header
 // fields, decompressed gzip streams), so archive members are covered too.
-// Detection is a magic number PLUS a format-specific structural check, chosen
-// so that coincidental bytes (machine code, ASCII text) do not match: xz and
-// 7z header CRCs, rar v4/v5 header CRCs, the bzip2 block magic with an
-// origin pointer bzip2 would accept, the zstd frame and first block header,
-// the lz4 frame header checksum (xxh32), cab header fields, the xar magic
-// with a binary header size (or a zlib TOC that inflates at the declared
-// position), and for embedded gzip a bounded partial inflate producing
-// >= FOREIGN_MIN_OUTPUT bytes. ZIP entries using these compression methods
-// already fail closed (unsupported method).
+// G5-C15 RECOGNITION STRATEGY (one rule per tier, no per-variant exceptions):
+//   Tier A -- magic of >= 6 bytes containing non-text bytes (xz, 7z, rar v4/v5,
+//     ISO 9660 descriptor "CD001" between a type byte and version 1): the magic
+//     ALONE fails closed. Coincidence is ~2^-48 per byte and impossible in
+//     text, so no header field is consulted and no header variant can pass.
+//   Tier B -- shorter or text-like magic (gzip embedded, bzip2, zstd and its
+//     legacy frames, lz4 and its legacy frame, cab, xar, lzip, compress .Z):
+//     magic PLUS a structural check that rejects ONLY bytes every supported
+//     reader refuses too (bsdtar / libarchive, xz, bzip2, zstd, lz4, gzip,
+//     cabextract / libmspack, Node zlib / DecompressionStream). Header fields
+//     a reader ignores or tolerates are never validity criteria.
+//   Tier C -- no reliable magic (residual R3-N2 below): not detectable.
+// Tier B checks per format: the bzip2 block magic with an origin pointer
+// bzip2 would accept, the zstd frame and first block header, the lz4 frame
+// header checksum (xxh32), the lz4 legacy first block size, the cab folder /
+// file counts plus the bsdtar or cabextract header rule, the xar magic with a
+// binary header size (or a zlib TOC that inflates at the declared position),
+// the lzip version byte (0 or 1), compress .Z (offset 0 only: maxbits 9..16
+// and a literal first code), and for embedded gzip a header whose fields are
+// scanned up to GZ_FIELD_SCAN plus a bounded deflate probe that counts ANY
+// deflate data valid through the probe window, a complete member with a
+// matching CRC/ISIZE trailer, or output reaching the probe cap.
+// ZIP entries using these compression methods already fail closed
+// (unsupported method).
 // G5-C11 (C10-F1..F3): a structural check may only reject bytes that a reader
 // could not decode either. It must never reject a decodable VARIANT (an
 // unsupported check ID, a randomised bzip2 block, an unusual xar version or
 // TOC), since that turned real streams into "no archive". Variants fail closed.
 // RESIDUAL (not detectable by signature, documented limitation R3-N2):
 // formats without a reliable magic number (brotli, raw deflate/zlib, lzma
-// "alone", lz4 raw blocks, Snappy), embedded gzip streams decoding to
-// fewer than FOREIGN_MIN_OUTPUT bytes, ZIP64 (fails closed), and payloads that
-// are encoded rather than archived (base64, UTF-16, custom transforms): see
-// the file header.
+// "alone", lz4 raw blocks, Snappy), compress .Z EMBEDDED after offset 0 (its
+// 2-byte magic cannot be told from coincidental bytes; stock readers only
+// read it at offset 0, where it IS detected), ZIP64 (fails closed), and
+// payloads that are encoded rather than archived (base64, uuencode, UTF-16,
+// custom transforms): see the file header.
 const ZIP_EOCD_SIG = 0x06054b50;
 const ZIP_CD_SIG = 0x02014b50;
 const ZIP_LOCAL_SIG = 0x04034b50;
@@ -475,6 +491,18 @@ const FOREIGN_PROBE_INPUT = 64 * 1024;
 const FOREIGN_PROBE_OUTPUT = 64 * 1024;
 const FOREIGN_MIN_OUTPUT = 64;
 const FOREIGN_WINDOW = 256 * 1024;
+// G5-C15 (C14-F1): gzip FNAME / FCOMMENT are scanned for their terminating NUL
+// up to this many bytes (readers accept any length). A field still open after
+// it, with data beyond, fails closed: real binary data has a NUL long before
+// 1 MiB, and text cannot contain the 1F 8B gzip magic (invalid UTF-8).
+const GZ_FIELD_SCAN = 1024 * 1024;
+// A deflate stream that is valid so far but ends with the available data
+// counts once it has at least this many bytes (gunzip emits the partial output).
+const GZ_TRUNCATED_MIN = 16;
+// A complete member whose trailer does NOT match still counts from this much
+// output: the shortest sentinel is 9 bytes, so less cannot hide one, and random
+// bytes rarely form a complete deflate stream this long.
+const GZ_MIN_LEAK = 8;
 
 /** xxHash32 (lz4 frame header checksum). */
 function xxh32(b, seed = 0) {
@@ -496,21 +524,54 @@ function xxh32(b, seed = 0) {
   return (h ^ (h >>> 16)) >>> 0;
 }
 
-/** Embedded gzip member: valid header and a deflate stream that really decodes (bounded). */
-function validGzipAt(buf, p) {
-  if (p + 18 > buf.length || buf[p + 2] !== 8 || buf[p + 3] & 0xe0) return false;
+/**
+ * Embedded gzip member (Tier B). `ctx.more`: the buffer is a window and the
+ * input continues past its end (large-file path).
+ * G5-C15 (C14-F1): the header no longer rejects reserved flag bits (Apple and
+ * Python gzip decode them), FNAME / FCOMMENT are scanned up to GZ_FIELD_SCAN
+ * instead of 64 KiB, and the deflate probe (at most FOREIGN_PROBE_INPUT input,
+ * FOREIGN_PROBE_OUTPUT output) counts:
+ *   - output reaching FOREIGN_MIN_OUTPUT or the probe cap (as before);
+ *   - a COMPLETE deflate stream followed by a matching CRC32/ISIZE trailer,
+ *     whatever its output size (chains of tiny members);
+ *   - deflate data valid through the whole probe window, or to the end of the
+ *     available data after >= GZ_TRUNCATED_MIN bytes (e.g. > 64 KiB of empty
+ *     stored blocks before the content; a truncated stream).
+ * Only invalid deflate data (Z_DATA_ERROR) or a complete stream whose trailer
+ * does not match is "not gzip". Work stays bounded per candidate.
+ */
+function validGzipAt(buf, p, ctx = {}) {
+  if (p + 10 > buf.length || buf[p + 2] !== 8) return false;
   const flg = buf[p + 3];
   let q = p + 10;
-  if (flg & 0x04) { if (q + 2 > buf.length) return false; q += 2 + buf.readUInt16LE(q); }
-  for (const bit of [0x08, 0x10]) if (flg & bit) { const z = buf.indexOf(0, q); if (z === -1 || z - q > 65535) return false; q = z + 1; }
+  if (flg & 0x04) { if (q + 2 > buf.length) return !!ctx.more; q += 2 + buf.readUInt16LE(q); }
+  for (const bit of [0x08, 0x10]) if (flg & bit) {
+    const end = Math.min(buf.length, q + GZ_FIELD_SCAN);
+    const z = q < end ? buf.subarray(q, end).indexOf(0) : -1;
+    if (z === -1) return end < buf.length || !!ctx.more; // field longer than the scan bound, data beyond it: fail closed
+    q += z + 1;
+  }
   if (flg & 0x02) q += 2;
-  if (q >= buf.length) return false;
-  try {
-    return zlib.inflateRawSync(buf.subarray(q, q + FOREIGN_PROBE_INPUT), { maxOutputLength: FOREIGN_PROBE_OUTPUT, finishFlush: zlib.constants.Z_SYNC_FLUSH }).length >= FOREIGN_MIN_OUTPUT;
-  } catch (err) { return !!err && err.code === 'ERR_BUFFER_TOO_LARGE'; }
+  if (q >= buf.length) return !!ctx.more;
+  const slice = buf.subarray(q, q + FOREIGN_PROBE_INPUT);
+  let r;
+  try { r = zlib.inflateRawSync(slice, { maxOutputLength: FOREIGN_PROBE_OUTPUT, info: true }); } catch (err) {
+    if (err && err.code === 'ERR_BUFFER_TOO_LARGE') return true; // probe output cap reached
+    if (err && err.code === 'Z_BUF_ERROR') return slice.length === FOREIGN_PROBE_INPUT || !!ctx.more || slice.length >= GZ_TRUNCATED_MIN; // valid deflate up to the end of the window / data
+    return false; // invalid deflate data
+  }
+  if (r.buffer.length >= FOREIGN_MIN_OUTPUT) return true;
+  // A complete member: gunzip and DecompressionStream emit its output BEFORE
+  // checking the trailer, so it counts if the trailer matches (tiny-member
+  // chains) or if its output could hold a sentinel (>= GZ_MIN_LEAK bytes)
+  // whatever the trailer says.
+  if (r.buffer.length >= GZ_MIN_LEAK) return true;
+  const t = q + r.engine.bytesWritten;
+  if (t + 8 > buf.length) return !!ctx.more;
+  return buf.readUInt32LE(t) === crc32(r.buffer) && buf.readUInt32LE(t + 4) === r.buffer.length;
 }
 /**
- * xz stream header: magic + the CRC32 of the two stream-flag bytes.
+ * xz stream header (G5-C15: Tier A -- the magic alone; history below).
  * G5-C11 (C10-F2): the flag VALUES are not consulted. xz decodes check IDs it
  * does not support (2, 3, 5-9, 11-15) with only a warning, so accepting only
  * the known IDs turned those streams into "no archive". Any stream header whose
@@ -519,20 +580,18 @@ function validGzipAt(buf, p) {
  * refuses a header whose CRC is wrong, and it keeps coincidental magic bytes
  * from matching.
  */
-function validXzAt(buf, p) {
-  if (p + 12 > buf.length) return false;
-  return crc32(buf.subarray(p + 6, p + 8)) === buf.readUInt32LE(p + 8);
+function validXzAt() {
+  return true; // G5-C15 Tier A: the 6-byte binary magic alone fails closed (no header field, not even the CRC, is consulted)
 }
 /**
- * 7z signature header: the start-header CRC32.
+ * 7z signature header (G5-C15: Tier A -- the magic alone; history below).
  * G5-C13 (C12-F2): the major-version byte is no longer consulted. The CRC
  * does not cover it and bsdtar extracts archives with a major version of 1 or
  * 0xff, so a version check turned decodable archives into "no archive". The
  * CRC stays: bsdtar refuses a start header whose CRC is wrong.
  */
-function valid7zAt(buf, p) {
-  if (p + 32 > buf.length) return false;
-  return crc32(buf.subarray(p + 12, p + 32)) === buf.readUInt32LE(p + 8);
+function valid7zAt() {
+  return true; // G5-C15 Tier A: the 6-byte binary magic alone fails closed (C14-P3-1: 7-Zip may recover a zeroed or bad start header)
 }
 /**
  * bzip2: "BZh" + level byte + block magic (searched) + origin pointer below the block size.
@@ -626,27 +685,16 @@ function validXarAt(buf, p) {
     return zlib.inflateSync(buf.subarray(t, t + 4096), { maxOutputLength: FOREIGN_PROBE_OUTPUT, finishFlush: zlib.constants.Z_SYNC_FLUSH }).length >= FOREIGN_MIN_OUTPUT;
   } catch (err) { return !!err && err.code === 'ERR_BUFFER_TOO_LARGE'; } // IV3E-1: xar TOC probe reached the inspection cap -> detected
 }
-/** rar: v4 main header (type 0x73, CRC16) or v5 main header (CRC32 over the vint-sized header, type 1). */
-function validRarAt(buf, p) {
-  if (p + 8 > buf.length) return false;
-  if (buf[p + 6] === 0) {
-    // G5-C13 (C12-F6): the first block after the marker may be of ANY type
-    // (bsdtar reads archives with no main header, or a comment block first),
-    // so it no longer has to be the main header (0x73). Its CRC16 must match.
-    if (p + 14 > buf.length) return false;
-    const hsize = buf.readUInt16LE(p + 12);
-    if (hsize < 7 || p + 7 + hsize > buf.length) return false;
-    return (crc32(buf.subarray(p + 9, p + 7 + hsize)) & 0xffff) === buf.readUInt16LE(p + 7);
-  }
-  if (buf[p + 6] !== 1 || buf[p + 7] !== 0) return false;
-  const q = p + 8;
-  if (q + 6 > buf.length) return false;
-  let size = 0, v = 0;
-  for (; v < 3; v++) { const c = buf[q + 4 + v]; size |= (c & 0x7f) << (7 * v); if (!(c & 0x80)) break; }
-  if (v === 3 || size < 1) return false;
-  const start = q + 4 + v + 1;
-  if (start + size > buf.length || buf[start] !== 1) return false;
-  return crc32(buf.subarray(q + 4, start + size)) === buf.readUInt32LE(q);
+/**
+ * rar v4 / v5 (G5-C15, Tier A): the marker "Rar!\x1a\x07" alone fails closed.
+ * C12-F6 / C14-F2 / C14-F3 showed bsdtar reads archives whatever block comes
+ * first (main, comment, add-size AV / SUB / PROTECT / SIGN blocks, a v5 file
+ * or service header) and with 4-byte v5 header-size numbers; block-order and
+ * CRC checks kept turning decodable archives into "no archive". The 6-byte
+ * marker holds two control bytes, so it cannot occur in text.
+ */
+function validRarAt() {
+  return true;
 }
 /**
  * cab: first reserved field zero, at least one folder and one file.
@@ -657,9 +705,48 @@ function validRarAt(buf, p) {
  * bsdtar itself enforces (it refuses reserved1 != 0, zero folders or zero
  * files); they also keep "MSCF" in text from matching.
  */
-function validCabAt(buf, p) {
+function validCabAt(buf, p, ctx = {}) {
   if (p + 36 > buf.length) return false;
-  return buf.readUInt32LE(p + 4) === 0 && buf.readUInt16LE(p + 26) >= 1 && buf.readUInt16LE(p + 28) >= 1;
+  if (buf.readUInt16LE(p + 26) < 1 || buf.readUInt16LE(p + 28) < 1) return false; // no folder or no file: bsdtar and cabextract both refuse
+  if (buf.readUInt32LE(p + 4) === 0) return true; // bsdtar's rule
+  // G5-C15 (C14-P3-1): cabextract (libmspack) ignores reserved1. Its search
+  // accepts a cabinet whose file-table offset lies below the cabinet size and
+  // whose size fits the input (+32). Text after "MSCF" gives a size of at
+  // least 0x20202020 (538 MB), beyond any inspected input, so text still passes.
+  const avail = ctx.total ?? buf.length - p;
+  return buf.readUInt32LE(p + 16) < buf.readUInt32LE(p + 8) && buf.readUInt32LE(p + 8) < avail + 32;
+}
+/**
+ * G5-C15 (C14-F4) lzip (Tier B): "LZIP" + version 0 or 1 (xz 5.4+, lzip
+ * and bsdtar refuse other versions) + a first LZMA byte of 0x00 (the range
+ * coder always starts with it; xz refuses anything else as corrupt). The
+ * dictionary-size byte is not consulted. The 0x00 rule keeps NUL-terminated
+ * "LZIP" strings (e.g. a translated MIME-type table) from matching.
+ */
+function validLzipAt(buf, p) {
+  return p + 7 <= buf.length && (buf[p + 4] === 0 || buf[p + 4] === 1) && buf[p + 6] === 0;
+}
+/**
+ * G5-C15 (C14-F4) ISO 9660 / zisofs (Tier A): a volume descriptor -- type byte
+ * 0..3 or 255, "CD001", version 1. bsdtar extracts ISO images, decompressing
+ * zisofs files on the fly, so any descriptor fails closed (shift -1: the type
+ * byte precedes the searched "CD001"). Text cannot match: both bytes around
+ * "CD001" are control bytes.
+ */
+function validIsoAt(buf, p) {
+  return p + 7 <= buf.length && (buf[p] <= 3 || buf[p] === 0xff) && buf[p + 6] === 1;
+}
+/**
+ * G5-C15 (C14-F4) compress .Z (Tier B), checked at OFFSET 0 of every inspected
+ * buffer only, where gzip, uncompress and bsdtar read it (they ignore a .Z
+ * that starts later; see RESIDUAL). Rule: 1F 9D, maxbits 9..16 (gzip refuses
+ * others; reserved flag bits are tolerated) and a first 9-bit code below 256
+ * (gzip: "corrupt input" otherwise).
+ */
+function validCompressAt(buf) {
+  if (buf.length < 5 || buf[0] !== 0x1f || buf[1] !== 0x9d) return false;
+  const maxbits = buf[2] & 0x1f;
+  return maxbits >= 9 && maxbits <= 16 && (buf[3] | ((buf[4] & 1) << 8)) < 256;
 }
 // `shift`: offset of the stream start relative to the searched magic.
 const FOREIGN_FORMATS = [
@@ -674,6 +761,8 @@ const FOREIGN_FORMATS = [
   { name: 'rar', magic: Buffer.from('Rar!\x1a\x07', 'latin1'), validate: validRarAt },
   { name: 'cab', magic: Buffer.from('MSCF', 'latin1'), validate: validCabAt },
   { name: 'xar', magic: Buffer.from('xar!', 'latin1'), validate: validXarAt },
+  { name: 'lzip', magic: Buffer.from('LZIP', 'latin1'), validate: validLzipAt }, // G5-C15 (C14-F4)
+  { name: 'iso9660', magic: Buffer.from('CD001', 'latin1'), shift: -1, validate: validIsoAt }, // G5-C15 (C14-F4)
 ];
 
 /**
@@ -683,13 +772,14 @@ const FOREIGN_FORMATS = [
  * occurrences of one magic fails closed.
  */
 function findForeignStream(buf) {
+  if (validCompressAt(buf)) return { format: 'compress (.Z)', pos: 0 }; // G5-C15 (C14-F4): offset 0 only
   for (const f of FOREIGN_FORMATS) {
     let i = buf.indexOf(f.magic);
     let n = 0;
     while (i !== -1) {
       if (++n > MAX_SIG_POSITIONS) throw new ArchiveError(`too many ${f.name} signature occurrences to inspect safely`);
       const p = i + (f.shift || 0);
-      if (p >= 0 && f.validate(buf, p)) return { format: f.name, pos: p };
+      if (p >= 0 && f.validate(buf, p, { more: false, total: buf.length - p })) return { format: f.name, pos: p };
       i = buf.indexOf(f.magic, i + 1);
     }
   }
@@ -709,7 +799,7 @@ function largeFileForeignStream(file, size, positions) {
       if (p < 0) continue;
       const w = Buffer.alloc(Math.min(FOREIGN_WINDOW, size - p));
       fs.readSync(fd, w, 0, w.length, p);
-      if (fmt.validate(w, 0)) return { format: fmt.name, pos: p };
+      if (fmt.validate(w, 0, { more: size - p > w.length, total: size - p })) return { format: fmt.name, pos: p };
     }
   } finally { fs.closeSync(fd); }
   return null;
@@ -1356,6 +1446,7 @@ function inspectArtifacts(root, limits = INSPECTION_LIMITS) {
       stats.archiveEntries++;
       inspectEntryData(data, label, label, depth, budget);
     }
+    overTime(); // G5-C15 (C14-P3-2): also checked after the last tar / ZIP entry
   };
   const inspectEntryData = (data, label, shownForNested, depth, budget) => {
     for (const s of inspectBufferBytes(data, sigs)) hits.push({ file: label, sentinel: `${s} (archive entry)` });
@@ -1409,7 +1500,8 @@ function inspectArtifacts(root, limits = INSPECTION_LIMITS) {
     const gzHead = head.length >= 3 && head[0] === 0x1f && head[1] === 0x8b;
     const tarHead = isTarCandidate(head, 0);
     const zipSigs = scanRes.zipPositions.length > 0 || scanRes.zipOverflow || hasZipLeadSignature(head); // R4.4: streaming lead
-    const foreignSigs = scanRes.foreignPositions.length > 0 || scanRes.foreignOverflow; // G5-D7-A
+    const compressHead = validCompressAt(head); // G5-C15 (C14-F4): compress .Z at offset 0
+    const foreignSigs = scanRes.foreignPositions.length > 0 || scanRes.foreignOverflow || compressHead; // G5-D7-A
     if (!gzHead && !tarHead && !zipSigs && !foreignSigs) return;
     if (size > limits.maxArchiveBytes) {
       let tooLarge = gzHead || tarHead;
@@ -1418,6 +1510,7 @@ function inspectArtifacts(root, limits = INSPECTION_LIMITS) {
       if (foreignSigs) {
         let f = null;
         if (scanRes.foreignOverflow) f = { format: 'too many archive/compressed-stream signatures', pos: 0 };
+        else if (compressHead) f = { format: 'compress (.Z)', pos: 0 };
         else { try { f = largeFileForeignStream(realPath, size, scanRes.foreignPositions); } catch (e) { errors.push({ file: shown, error: `unreadable (${e.code || e.message})` }); return; } }
         if (f) errors.push({ file: shown, error: `archive not fully inspectable: unsupported archive or compressed stream (${f.format}) at offset ${f.pos} of "${shown}" cannot be inspected (identifiable formats fail closed)` });
       }
@@ -1487,6 +1580,7 @@ function inspectArtifacts(root, limits = INSPECTION_LIMITS) {
     stats.roots.push(r.rel);
     visitDir(shown, r.real, 0, new Set([r.real]));
   }
+  overTime(); // G5-C15 (C14-P3-2): and once more at the end of the scan
   stats.ms = Date.now() - t0;
   return { hits, errors, stats };
 }

@@ -282,17 +282,19 @@ async function main(): Promise<void> {
   mustPass('D7', 'R4.4 machine-code control (chance PK\\3\\4, method 0)', (() => { const h = Buffer.alloc(30); h.writeUInt32LE(0x04034b50, 0); h.writeUInt16LE(33807, 4); h.writeUInt16LE(596, 6); h.writeUInt32LE(113028, 18); h.writeUInt16LE(2750, 28); return Buffer.concat([hex('cffaedfe'), fill(4000, 0x11), h, fill(4000, 0x22)]); })());
 
   // ================================================================ E: false-positive controls -- magic present, structure invalid
-  mustPass('E1', 'xz magic with a wrong flags CRC', code(Buffer.concat([hex('fd377a585a00 0001'), u32(0xdeadbeef), BODY.subarray(0, 64)])));
-  mustPass('E2', '7z magic with a wrong start-header CRC', code(Buffer.concat([hex('377abcaf271c 0004'), u32(1), fill(20, 7)])));
+  // G5-C15 Tier A: a >= 6-byte binary magic alone fails closed (no header field is consulted): E1, E2, E7, E8 and L3 now fail closed.
+  mustFail('E1', '[C15 Tier A] xz magic with a wrong flags CRC', code(Buffer.concat([hex('fd377a585a00 0001'), u32(0xdeadbeef), BODY.subarray(0, 64)])), /^xz$/);
+  mustFail('E2', '[C15 Tier A] 7z magic with a wrong start-header CRC', code(Buffer.concat([hex('377abcaf271c 0004'), u32(1), fill(20, 7)])), /^7z$/);
   mustPass('E3', 'bzip2 block magic as ASCII text in JS ("BZh91AY&SY" constant)', Buffer.from('const BZ = "BZh91AY&SY";\nexport function isBzip2(s) { return s.startsWith(BZ); }\n'));
   mustPass('E4', 'zstd magic with the reserved FHD bit set', code(hex('28b52ffd 08 50 410000 6161616161616161')));
   mustPass('E5', 'zstd magic with an invalid (reserved) block type', code(hex('28b52ffd 00 50 070000 6161616161616161')));
   mustPass('E6', 'lz4 magic with a wrong header checksum', code(hex('04224d18 6440a8 00000000')));
-  mustPass('E7', 'RAR marker followed by code bytes (libarchive/cpack shape: signature constant only)', code(Buffer.concat([Buffer.from('Rar!\x1a\x07\x00', 'latin1'), fill(32, 0x48)])));
-  mustPass('E8', 'RAR5 marker with a wrong main-header CRC', code(hex('526172211a070100 00000000 0a 01 05 06 00 05 01 01 80 80 00')));
+  mustFail('E7', '[C15 Tier A] RAR marker followed by code bytes (an archive library binary holding the constant now fails closed: documented false-positive class)', code(Buffer.concat([Buffer.from('Rar!\x1a\x07\x00', 'latin1'), fill(32, 0x48)])), /^rar$/);
+  mustFail('E8', '[C15 Tier A] RAR5 marker with a wrong main-header CRC', code(hex('526172211a070100 00000000 0a 01 05 06 00 05 01 01 80 80 00')), /^rar$/);
   mustPass('E9', '"MSCF" in text (not a cabinet header)', Buffer.from('// MSCF is the Microsoft cabinet magic; see docs.\n'.repeat(5)));
   mustPass('E10', 'gzip magic followed by an invalid deflate stream (reserved block type)', code(Buffer.concat([hex('1f8b0800 00000000 0003'), fill(64, 0xff)])));
-  mustPass('E11', 'documented residual: embedded gzip decoding to < 64 bytes', Buffer.concat([fill(64), zlib.gzipSync(Buffer.from('tiny'))]));
+  // G5-C15 (C14-F1): a complete small member with a matching trailer is now detected (no longer a residual).
+  mustFail('E11', '[C15] embedded gzip decoding to < 64 bytes (complete member, valid trailer)', Buffer.concat([fill(64), zlib.gzipSync(Buffer.from('tiny'))]), /^gzip \(embedded\)$/);
   mustPass('E12', 'documented residual: brotli (no magic number)', Buffer.concat([fill(64), zlib.brotliCompressSync(PAYLOAD)]));
 
   // ================================================================ L: large-file path and bounds
@@ -301,10 +303,10 @@ async function main(): Promise<void> {
     const r2 = run('L2.bin', gzEmbedded(), SCANNER, { maxArchiveBytes: 40 });
     check('L2. >maxArchiveBytes file with embedded gzip: fails closed (window probe)', r2.errors.some((e) => /gzip \(embedded\)/.test(e)), JSON.stringify(r2.errors));
     const r3 = run('L3.bin', code(Buffer.concat([hex('fd377a585a00 0001'), u32(1)])), SCANNER, { maxArchiveBytes: 40 });
-    check('L3. >maxArchiveBytes file with an invalid xz header: passes (no false positive)', r3.errors.length === 0, JSON.stringify(r3.errors)); }
+    check('L3. [C15 Tier A] >maxArchiveBytes file with an xz magic and a bad header: fails closed (window probe)', r3.errors.some((e) => /\(xz\)/.test(e)), JSON.stringify(r3.errors)); }
   { const many = Buffer.concat(Array.from({ length: 4200 }, () => Buffer.concat([hex('fd377a585a00 0001'), u32(1)])));
     const r = run('L4.bin', many);
-    check('L4. > MAX_SIG_POSITIONS invalid xz magics: fails closed (bounded work)', r.exit === 1 && /too many (xz|archive)/.test(r.reason), r.reason); }
+    check('L4. > MAX_SIG_POSITIONS xz magics: fails closed (bounded work)', r.exit === 1 && /too many (xz|archive)|\(xz\)/.test(r.reason), r.reason); }
 
   // ================================================================ M: negative controls (mutants must be detected)
   if (!process.env.PALM_SCANNER_UNDER_TEST) {
@@ -313,8 +315,9 @@ async function main(): Promise<void> {
       { id: 'M1', label: 'detection disabled (findForeignStream returns null)', from: 'function findForeignStream(buf) {', to: 'function findForeignStream(buf) { return null;', probe: () => mustPass('M1p', '', stream('xz'), mut) },
       { id: 'M2', label: 'archive-member hook removed', from: '} else assertNoForeignStream(data, label); // G5-D7-A', to: '} // G5-D7-A', probe: () => mustPass('M2p', '', zipStored('m.bin', stream('xz')), mut) && !mustPass('M2q', '', stream('xz'), mut) },
       { id: 'M3', label: 'top-level hook removed', from: 'try { assertNoForeignStream(archiveBuf, shown); }', to: 'try { }', probe: () => mustPass('M3p', '', stream('xz'), mut) && !mustPass('M3q', '', zipStored('m.bin', stream('xz')), mut) },
-      { id: 'M4', label: 'RAR validator weakened to the marker only', from: 'function validRarAt(buf, p) {', to: 'function validRarAt(buf, p) { return true;', probe: () => !mustPass('M4p', '', code(Buffer.concat([Buffer.from('Rar!\x1a\x07\x00', 'latin1'), fill(32, 0x48)])), mut) },
-      { id: 'M5', label: 'embedded-gzip validator weakened to the magic only', from: 'function validGzipAt(buf, p) {', to: 'function validGzipAt(buf, p) { return true;', probe: () => !mustPass('M5p', '', code(Buffer.concat([hex('1f8b0800 00000000 0003'), fill(64, 0xff)])), mut) },
+      // G5-C15: the marker alone is now the rule, so M4 checks the opposite regression (rar detection switched off).
+      { id: 'M4', label: 'RAR detection disabled (validator returns false)', from: 'function validRarAt() {\n  return true;', to: 'function validRarAt() {\n  return false;', probe: () => mustPass('M4p', '', code(Buffer.concat([Buffer.from('Rar!\x1a\x07\x00', 'latin1'), fill(32, 0x48)])), mut) },
+      { id: 'M5', label: 'embedded-gzip validator weakened to the magic only', from: 'function validGzipAt(buf, p, ctx = {}) {', to: 'function validGzipAt(buf, p, ctx = {}) { return true;', probe: () => !mustPass('M5p', '', code(Buffer.concat([hex('1f8b0800 00000000 0003'), fill(64, 0xff)])), mut) },
       { id: 'M6', label: 'bzip2 origin-pointer check removed', from: 'return origPtr < level * 100000;', to: 'return true;', probe: () => !mustPass('M6p', '', Buffer.from('const BZ = "BZh91AY&SY";\nexport function isBzip2(s) { return s.startsWith(BZ); }\n'), mut) },
       { id: 'M8', label: 'xar detection disabled (validator returns false)', from: 'function validXarAt(buf, p) {', to: 'function validXarAt(buf, p) { return false;', probe: () => mustPass('M8p', '', stream('xar'), mut) && mustPass('M8q', '', zipStored('p.pkg', stream('xar')), mut) },
       // G5-C11: M9/M10 re-anchored to the C11 xar rule; same properties as before (IV3E-1 cap detection on the TOC probe; no checksum-id bound).

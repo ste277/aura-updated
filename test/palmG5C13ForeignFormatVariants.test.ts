@@ -183,7 +183,8 @@ async function main(): Promise<void> {
   // ================================================================ S: C12-F2 7z major version
   for (const mj of [1, 2, 0x7f, 0xff]) mustFail(`S1.${mj}`, `[C12-F2] 7z signature header, major version ${mj}`, sevenZHead(mj), /^7z$/);
   mustFail('S2', '[C12-F2] 7z major version 1, as a stored ZIP member inside a tar.gz', zlib.gzipSync(tar('a.zip', zipStored('a.7z', sevenZHead(1)))), /^7z$/);
-  mustPass('S3', '7z magic with a broken start-header CRC (bsdtar refuses it)', code(sevenZHead(0, 4, true)));
+  // G5-C15 Tier A: a >= 6-byte binary magic alone fails closed (no header field is consulted) (7-Zip may recover a bad start header, C14-P3-1).
+  mustFail('S3', '[C15 Tier A] 7z magic with a broken start-header CRC', code(sevenZHead(0, 4, true)), /^7z$/);
   if (hasTool('bsdtar')) {
     const d = fs.mkdtempSync(path.join(os.tmpdir(), TMP));
     try {
@@ -220,7 +221,9 @@ async function main(): Promise<void> {
   for (const [i, [lbl, o]] of ([['reserved1 != 0', { r1: 1 }], ['no folders', { nfold: 0 }], ['no files', { nfiles: 0 }]] as [string, Parameters<typeof cab>[0]][]).entries()) {
     const v = code(cab(o));
     if (hasTool('bsdtar')) check(`C4.${i}p. precondition: stock bsdtar does NOT extract the cabinet with ${lbl}`, !extracts('bsdtar', (f) => ['-xOf', f], cab(o), Buffer.from(SENT), '.cab'));
-    mustPass(`C4.${i}`, `cabinet with ${lbl} (bsdtar refuses it), in machine-code bytes`, v);
+    // G5-C15 (C14-P3-1): cabextract ignores reserved1, so that cabinet now fails closed; zero folders / files still pass (both readers refuse).
+    if (i === 0) mustFail(`C4.${i}`, `[C15] cabinet with ${lbl} (cabextract accepts it), in machine-code bytes`, v, /^cab$/);
+    else mustPass(`C4.${i}`, `cabinet with ${lbl} (bsdtar and cabextract refuse it), in machine-code bytes`, v);
   }
 
   // ================================================================ L: C12-F4 lz4 legacy
@@ -256,7 +259,8 @@ async function main(): Promise<void> {
   mustFail('R2', '[C12-F6] rar v4 with no main header (file header first)', nomain, /^rar$/);
   mustFail('R3', '[C12-F6] rar v4 with a comment block before the main header', commentFirst, /^rar$/);
   mustFail('R4', '[C12-F6] rar v4 with no main header, embedded in machine-code bytes', code(nomain), /^rar$/);
-  mustPass('R5', 'rar v4 marker followed by a block with a broken CRC', code(Buffer.concat([RAR_MARK, rarBlock(0x74, 0, Buffer.alloc(30), false)])));
+  // G5-C15 Tier A: a >= 6-byte binary magic alone fails closed (no header field is consulted).
+  mustFail('R5', '[C15 Tier A] rar v4 marker followed by a block with a broken CRC', code(Buffer.concat([RAR_MARK, rarBlock(0x74, 0, Buffer.alloc(30), false)])), /^rar$/);
   if (hasTool('bsdtar')) {
     check('RR2p. precondition: stock bsdtar extracts the content of the no-main-header rar', extracts('bsdtar', (f) => ['-xOf', f], nomain, BENIGN.subarray(0, 24), '.rar'));
     check('RR3p. precondition: stock bsdtar extracts the content of the comment-first rar', extracts('bsdtar', (f) => ['-xOf', f], commentFirst, BENIGN.subarray(0, 24), '.rar'));
@@ -294,11 +298,11 @@ async function main(): Promise<void> {
     const src = fs.readFileSync(SCANNER, 'utf8');
     const mutants: { id: string; label: string; from: string; to: string; probe: (m: string) => boolean }[] = [
       { id: 'M1', label: 'xar size rule back to 28..4096 (C12-F1 reverted)', from: 'if (hsize <= 4096) return true;', to: 'if (hsize >= 28 && hsize <= 4096) return true;', probe: (m) => mustPass('M1p', '', xarSmall(0), m) },
-      { id: 'M2', label: '7z major-version check reinstated (C12-F2 reverted)', from: 'function valid7zAt(buf, p) {\n  if (p + 32 > buf.length) return false;', to: 'function valid7zAt(buf, p) {\n  if (p + 32 > buf.length || buf[p + 6] !== 0) return false;', probe: (m) => mustPass('M2p', '', sevenZHead(1), m) && !mustPass('M2q', '', sevenZHead(0), m) },
-      { id: 'M3', label: 'cab reserved2 check reinstated (C12-F3 reverted)', from: 'return buf.readUInt32LE(p + 4) === 0 && buf.readUInt16LE(p + 26) >= 1', to: 'return buf.readUInt32LE(p + 4) === 0 && buf.readUInt32LE(p + 12) === 0 && buf.readUInt16LE(p + 26) >= 1', probe: (m) => mustPass('M3p', '', cab({ r2: 1 }), m) && !mustPass('M3q', '', cab(), m) },
+      { id: 'M2', label: '7z major-version check reinstated (C12-F2 reverted)', from: 'function valid7zAt() {\n  return true;', to: 'function valid7zAt(buf, p) {\n  return buf[p + 6] === 0;', probe: (m) => mustPass('M2p', '', sevenZHead(1), m) && !mustPass('M2q', '', sevenZHead(0), m) },
+      { id: 'M3', label: 'cab reserved2 check reinstated (C12-F3 reverted)', from: 'if (buf.readUInt32LE(p + 4) === 0) return true; // bsdtar', to: 'if (buf.readUInt32LE(p + 12) !== 0) return false;\n  if (buf.readUInt32LE(p + 4) === 0) return true; // bsdtar', probe: (m) => mustPass('M3p', '', cab({ r2: 1 }), m) && !mustPass('M3q', '', cab(), m) },
       { id: 'M4', label: 'lz4 legacy detection removed (C12-F4 reverted)', from: 'function validLz4LegacyAt(buf, p) {', to: 'function validLz4LegacyAt(buf, p) { return false;', probe: (m) => mustPass('M4p', '', Buffer.concat([hex('02214c18'), u32(128), BODY]), m) },
       { id: 'M5', label: 'zstd legacy detection removed (C12-F5 reverted)', from: 'function validZstdLegacyAt(buf, p) {', to: 'function validZstdLegacyAt(buf, p) { return false;', probe: (m) => mustPass('M5p', '', zstdV07Raw(BENIGN), m) },
-      { id: 'M6', label: 'rar v4 main-header requirement reinstated (C12-F6 reverted)', from: 'if (p + 14 > buf.length) return false;\n    const hsize', to: 'if (p + 14 > buf.length || buf[p + 9] !== 0x73) return false;\n    const hsize', probe: (m) => mustPass('M6p', '', nomain, m) && !mustPass('M6q', '', Buffer.concat([RAR_MARK, rarMain(), rarFile(BENIGN), RAR_END]), m) },
+      { id: 'M6', label: 'rar v4 main-header requirement reinstated (C12-F6 reverted)', from: 'function validRarAt() {\n  return true;', to: 'function validRarAt(buf, p) {\n  return buf[p + 9] === 0x73;', probe: (m) => mustPass('M6p', '', nomain, m) && !mustPass('M6q', '', Buffer.concat([RAR_MARK, rarMain(), rarFile(BENIGN), RAR_END]), m) },
       { id: 'M7', label: 'gzip post-loop budget check removed (C12-F7 reverted)', from: 'if (overTime()) throw new ArchiveError(`work-time budget (${limits.maxScanMs} ms) exceeded after decompressing', to: 'if (false) throw new ArchiveError(`work-time budget (${limits.maxScanMs} ms) exceeded after decompressing',
         probe: (m) => !run('M7p.gz', three, m, expireAt(4)).errors.some((e) => /after decompressing gzip stream/.test(e)) },
       { id: 'M8', label: 'pre-inspection budget check removed (C12-F7 reverted)', from: 'if (overTime()) return; // G5-C13 (C12-F7)', to: '// removed (C12-F7)',
