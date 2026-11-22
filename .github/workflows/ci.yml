@@ -55,6 +55,20 @@ jobs:
       # dependency pin guard and static isolation. No network, DB or env.
       - name: Run remote MCP transport test
         run: npx ts-node test/mcpRemoteTransport.test.ts
+      # AURA-MCP-02-I2a -- local OAuth authorization server (oidc-provider)
+      # -> remote MCP, on an ephemeral 127.0.0.1 port with synthetic users
+      # and clients: discovery, Authorization Code + PKCE (S256), token
+      # issuance, expiry, forged/tampered tokens, audience, scope,
+      # revocation, client binding, rate limits, audit redaction, and the
+      # environment gate that keeps Production/staging reject-all. No DB.
+      - name: Run local OAuth -> MCP test
+        run: npx ts-node test/mcpOAuthLocal.test.ts
+      # AURA-MCP-02-I2a-R1 -- regressions for the independent security review:
+      # provider/Aura session binding (sign-out, account switch, prompt=none,
+      # attacker PKCE, session expiry, concurrency, re-authorization), per-user
+      # vs per-client rate limits, bounded limiter, loopback-only AS.
+      - name: Run OAuth security regression test
+        run: npx ts-node test/mcpOAuthSecurityRegression.test.ts
       - name: Run panchang day service test
         run: npx ts-node test/panchangDay.test.ts
       - name: Run panchang month service test
@@ -838,6 +852,15 @@ jobs:
       - name: Verify the palm reading engine is excluded from the build
         working-directory: apps/web
         run: node scripts/check-palm-engine-bundle.js
+      # AURA-MCP-02-I2a-R2 (B1) -- runs the DEPLOYABLE standalone server the
+      # way deploy/Dockerfile does (`node server.js` from an isolated copy of
+      # .next/standalone, outside any node_modules tree) with Docker defaults,
+      # with every local OAuth opt-in, and Preview-like env. Every disabled
+      # OAuth route must answer 404 (not 500) and /api/mcp must never accept a
+      # token. Synthetic values only, 127.0.0.1 only.
+      - name: Verify disabled OAuth routes return 404 in the standalone server
+        working-directory: apps/web
+        run: node scripts/check-standalone-oauth.js
   mcp-server:
     # AURA-MCP-01-M1 -- local stdio MCP server (apps/mcp). Runs its protocol,
     # validation, Timing Search parity and isolation suites. Deliberately no

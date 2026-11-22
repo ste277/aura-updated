@@ -1,4 +1,7 @@
-import { parseRemoteMcpConfig, type RemoteMcpConfig } from '../../../packages/mcp-tools/src/http/remoteMcpHandler';
+// I2a-R2 B1: import the dependency-free parser, never remoteMcpHandler (which
+// loads @modelcontextprotocol/server). The Pages Router OAuth route imports
+// this file and must run in the standalone server without the MCP SDK.
+import { parseRemoteMcpConfig, type RemoteMcpConfig } from '../../../packages/mcp-tools/src/http/remoteMcpConfig';
 
 /**
  * AURA-MCP-02-I1 -- the only place remote MCP reads the environment.
