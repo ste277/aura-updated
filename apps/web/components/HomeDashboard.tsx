@@ -217,6 +217,9 @@ interface HomeDashboardProps {
    * Undefined/omitted simply renders nothing, matching every other
    * optional Home data slice's own convention. */
   goalRhythmSuggestions?: readonly HomeGoalRhythmSuggestion[];
+  /** AURA-HPG-FIX-01 (V1-09) -- called after the weekly plan review closes
+   * so the page can refresh rhythm counts and Your Day without a reload. */
+  onGoalRhythmChanged?: () => void;
   onOpenBirthProfile?: () => void;
   /** Home Plan/Add Actions fix -- "+ Add something"'s own fallback when
    * Day Builder has nothing to show (NIGHT phase / no agenda yet, see
@@ -479,6 +482,7 @@ export function HomeDashboard({
   onDayBuilderPrefsChange,
   guidance,
   goalRhythmSuggestions,
+  onGoalRhythmChanged,
   onOpenBirthProfile,
   onTimingSearch,
   assistantInsight,
@@ -2025,7 +2029,7 @@ export function HomeDashboard({
         </div>
       )}
       {dedupedGoalRhythmSuggestions.length > 0 && (
-        <GoalRhythmSuggestionsCard suggestions={dedupedGoalRhythmSuggestions} dismissedIds={dismissedGoalRhythmIds} onDismiss={handleDismissGoalRhythmSuggestion} timezone={effectiveTimezone} />
+        <GoalRhythmSuggestionsCard suggestions={dedupedGoalRhythmSuggestions} dismissedIds={dismissedGoalRhythmIds} onDismiss={handleDismissGoalRhythmSuggestion} timezone={effectiveTimezone} onWeeklyReviewClosed={onGoalRhythmChanged} />
       )}
       <HomeTimeline
         items={homeTimeline}

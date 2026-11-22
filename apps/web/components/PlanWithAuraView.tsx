@@ -47,6 +47,7 @@ import {
   isCompletedPlan,
   findCandidateKey,
   planPayloadFromCandidate,
+  resolveCandidatePlanTitle,
   getTodayForTimezone,
   addDays,
   formatShortDate,
@@ -1629,7 +1630,7 @@ export function PlanWithAuraView({ onTimingSearch, onViewDay, onPlanLogged, time
       setCheckError('This assessment no longer matches the selected date and time. Check this time again before saving.');
       return;
     }
-    void saveOpportunity(findCandidateKey(candidate), planPayloadFromCandidate(candidate, checkDurationMinutes), resolveActivitySelection(checkTaskTitle).activityId);
+    void saveOpportunity(findCandidateKey(candidate), planPayloadFromCandidate(candidate, checkDurationMinutes, undefined, undefined, checkTaskTitle), resolveActivitySelection(checkTaskTitle).activityId);
   };
 
   // DR4-F2B blocking-fix -- FIND's equivalent save-boundary guard (section
@@ -1654,7 +1655,7 @@ export function PlanWithAuraView({ onTimingSearch, onViewDay, onPlanLogged, time
     // (another plan created since the search): the server re-checks overlap
     // inside the save transaction and refuses with PLAN_OVERLAP instead of
     // saving silently.
-    void saveOpportunity(findCandidateKey(candidate), planPayloadFromCandidate(candidate, durationMinutes), resolvedActivityDefinition?.id, { overlapPolicy: 'REJECT_ACTIVE_OVERLAP' });
+    void saveOpportunity(findCandidateKey(candidate), planPayloadFromCandidate(candidate, durationMinutes, undefined, undefined, taskTitle), resolvedActivityDefinition?.id, { overlapPolicy: 'REJECT_ACTIVE_OVERLAP' });
   };
 
   // AURA-HPG5-V2-I1 -- the two explicit choices after a PLAN_OVERLAP refusal.
@@ -2034,7 +2035,7 @@ export function PlanWithAuraView({ onTimingSearch, onViewDay, onPlanLogged, time
             <TimingResultCard
               kicker="BEST MATCH"
               candidate={findResult.candidates[0]}
-              activityTitle={findResult.candidates[0].metadata.activityType}
+              activityTitle={resolveCandidatePlanTitle(findResult.candidates[0], taskTitle)}
               durationMinutes={durationMinutes}
               timezone={timezone || 'UTC'}
               isSaving={savingOpportunityKey === findCandidateKey(findResult.candidates[0])}
@@ -2058,7 +2059,7 @@ export function PlanWithAuraView({ onTimingSearch, onViewDay, onPlanLogged, time
                 <TimingResultCard
                   kicker="OTHER OPTION"
                   candidate={candidate}
-                  activityTitle={candidate.metadata.activityType}
+                  activityTitle={resolveCandidatePlanTitle(candidate, taskTitle)}
                   durationMinutes={durationMinutes}
                   timezone={timezone || 'UTC'}
                   isSaving={savingOpportunityKey === findCandidateKey(candidate)}
@@ -2181,7 +2182,7 @@ export function PlanWithAuraView({ onTimingSearch, onViewDay, onPlanLogged, time
               <TimingResultCard
                 kicker="REQUESTED TIME"
                 candidate={checkResult.requestedCandidate}
-                activityTitle={checkResult.requestedCandidate.metadata.activityType}
+                activityTitle={resolveCandidatePlanTitle(checkResult.requestedCandidate, checkTaskTitle)}
                 durationMinutes={checkDurationMinutes}
                 timezone={timezone || 'UTC'}
                 isSaving={savingOpportunityKey === findCandidateKey(checkResult.requestedCandidate)}
@@ -2195,13 +2196,13 @@ export function PlanWithAuraView({ onTimingSearch, onViewDay, onPlanLogged, time
                   <TimingResultCard
                     kicker="BETTER NEARBY"
                     candidate={checkResult.betterNearby}
-                    activityTitle={checkResult.betterNearby.metadata.activityType}
+                    activityTitle={resolveCandidatePlanTitle(checkResult.betterNearby, checkTaskTitle)}
                     durationMinutes={checkDurationMinutes}
                     timezone={timezone || 'UTC'}
                     planCtaLabel="Use better time"
                     isSaving={savingOpportunityKey === findCandidateKey(checkResult.betterNearby)}
                     isPlanned={plannedOpportunityKeys.has(findCandidateKey(checkResult.betterNearby))}
-                    onPlan={() => saveOpportunity(findCandidateKey(checkResult.betterNearby!), planPayloadFromCandidate(checkResult.betterNearby!, checkDurationMinutes), resolveActivitySelection(checkTaskTitle).activityId)}
+                    onPlan={() => saveOpportunity(findCandidateKey(checkResult.betterNearby!), planPayloadFromCandidate(checkResult.betterNearby!, checkDurationMinutes, undefined, undefined, checkTaskTitle), resolveActivitySelection(checkTaskTitle).activityId)}
                   />
                 </>
               )}
@@ -2283,12 +2284,12 @@ export function PlanWithAuraView({ onTimingSearch, onViewDay, onPlanLogged, time
               <TimingResultCard
                 kicker="RECOMMENDED"
                 candidate={compareResult.candidates[0]}
-                activityTitle={compareResult.candidates[0].metadata.activityType}
+                activityTitle={resolveCandidatePlanTitle(compareResult.candidates[0], compareTaskTitle)}
                 durationMinutes={compareDurationMinutes}
                 timezone={timezone || 'UTC'}
                 isSaving={savingOpportunityKey === findCandidateKey(compareResult.candidates[0])}
                 isPlanned={plannedOpportunityKeys.has(findCandidateKey(compareResult.candidates[0]))}
-                onPlan={() => saveOpportunity(findCandidateKey(compareResult.candidates[0]), planPayloadFromCandidate(compareResult.candidates[0], compareDurationMinutes), resolveActivitySelection(compareTaskTitle).activityId)}
+                onPlan={() => saveOpportunity(findCandidateKey(compareResult.candidates[0]), planPayloadFromCandidate(compareResult.candidates[0], compareDurationMinutes, undefined, undefined, compareTaskTitle), resolveActivitySelection(compareTaskTitle).activityId)}
                 dailyRhythmNote={compareResult.dailyRhythmNotes?.[compareResult.candidates[0].start]}
               />
               <SectionHeader label="Compared With" />
@@ -2297,12 +2298,12 @@ export function PlanWithAuraView({ onTimingSearch, onViewDay, onPlanLogged, time
                   key={findCandidateKey(candidate)}
                   kicker="COMPARED WITH"
                   candidate={candidate}
-                  activityTitle={candidate.metadata.activityType}
+                  activityTitle={resolveCandidatePlanTitle(candidate, compareTaskTitle)}
                   durationMinutes={compareDurationMinutes}
                   timezone={timezone || 'UTC'}
                   isSaving={savingOpportunityKey === findCandidateKey(candidate)}
                   isPlanned={plannedOpportunityKeys.has(findCandidateKey(candidate))}
-                  onPlan={() => saveOpportunity(findCandidateKey(candidate), planPayloadFromCandidate(candidate, compareDurationMinutes), resolveActivitySelection(compareTaskTitle).activityId)}
+                  onPlan={() => saveOpportunity(findCandidateKey(candidate), planPayloadFromCandidate(candidate, compareDurationMinutes, undefined, undefined, compareTaskTitle), resolveActivitySelection(compareTaskTitle).activityId)}
                   dailyRhythmNote={compareResult.dailyRhythmNotes?.[candidate.start]}
                 />
               ))}

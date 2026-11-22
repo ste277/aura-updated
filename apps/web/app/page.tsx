@@ -762,20 +762,36 @@ export default function DashboardPage() {
   // loadAssistantSignals/loadAuraUpdates convention) rather than any
   // retry/global error UI -- Home already renders fine with zero Rhythm
   // suggestions.
-  const loadGoalRhythmSuggestions = useCallback(async () => {
+  // AURA-HPG-FIX-01 (V1-09) -- `preserveOnFailure` is used by the
+  // post-change refreshes below: a transient failure right after a
+  // successful schedule/complete/skip/move keeps the last-known-good
+  // suggestions instead of blanking the card. The initial load keeps its
+  // original degrade-to-empty behaviour.
+  const loadGoalRhythmSuggestions = useCallback(async (options?: { preserveOnFailure?: boolean }) => {
+    const onFailure = () => {
+      if (!options?.preserveOnFailure) setGoalRhythmSuggestions([]);
+    };
     try {
       const res = await fetch('/api/daily-assistant/goal-rhythm');
       if (!res.ok) {
-        setGoalRhythmSuggestions([]);
+        onFailure();
         return;
       }
       const result: GoalDemandResult = await res.json();
-      setGoalRhythmSuggestions(result.status === 'OK' ? mapGoalDemandToHomeRhythmSuggestions(result.candidates) : []);
+      if (result.status === 'OK') setGoalRhythmSuggestions(mapGoalDemandToHomeRhythmSuggestions(result.candidates));
+      else onFailure();
     } catch (err) {
       console.error('Failed to load goal rhythm suggestions:', err);
-      setGoalRhythmSuggestions([]);
+      onFailure();
     }
   }, []);
+
+  // AURA-HPG-FIX-01 (V1-09) -- Home's "Your rhythm this week" counts were
+  // only ever fetched on sign-in (the effect below), so scheduling,
+  // completing, skipping, moving or a weekly review left them stale until
+  // a full reload. Every confirmed plan-changing path now also refreshes
+  // them (no full-page reload).
+  const refreshGoalRhythmSuggestions = useCallback(() => loadGoalRhythmSuggestions({ preserveOnFailure: true }), [loadGoalRhythmSuggestions]);
 
   useEffect(() => {
     setGoalRhythmSuggestions([]);
@@ -1666,8 +1682,8 @@ export default function DashboardPage() {
   const handlePlanLogged = useCallback(async () => {
     // New Aura Home V1 -- loadGuidance() added alongside the existing two
     // refreshes; a logged Plan can change today's eligible-intent set.
-    await Promise.all([loadUserDataAndLogs(), loadMyDay(), loadGuidance()]);
-  }, [loadUserDataAndLogs, loadMyDay, loadGuidance]);
+    await Promise.all([loadUserDataAndLogs(), loadMyDay(), loadGuidance(), refreshGoalRhythmSuggestions()]);
+  }, [loadUserDataAndLogs, loadMyDay, loadGuidance, refreshGoalRhythmSuggestions]);
 
   // New Aura Home V1 -- passed to HomeDashboard as onMyDayChanged in
   // place of the bare loadMyDay reference, so both of its own existing
@@ -1683,7 +1699,7 @@ export default function DashboardPage() {
   // authoritative session check (loadUserDataAndLogs).
   const handleHomePlanCompleted = useCallback(
     () =>
-      refreshAfterHomeCompletion({
+      Promise.all([refreshAfterHomeCompletion({
         fetchImpl: (...args) => fetch(...args),
         applyLogs: (json) => applyConfirmedLogs(json as any[]),
         applyHabits: (json) => setHabits(json as any),
@@ -1692,14 +1708,15 @@ export default function DashboardPage() {
         refreshGuidance: loadGuidance,
         refreshAuraUpdates: loadAuraUpdates,
         reauthenticate: loadUserDataAndLogs,
-      }).then(() => undefined),
-    [applyConfirmedLogs, loadMyDay, loadGuidance, loadAuraUpdates, loadUserDataAndLogs]
+      }), refreshGoalRhythmSuggestions()]).then(() => undefined),
+    [applyConfirmedLogs, loadMyDay, loadGuidance, loadAuraUpdates, loadUserDataAndLogs, refreshGoalRhythmSuggestions]
   );
 
   const handleMyDayOrGuidanceChanged = useCallback(() => {
     loadMyDay();
     loadGuidance();
-  }, [loadMyDay, loadGuidance]);
+    refreshGoalRhythmSuggestions();
+  }, [loadMyDay, loadGuidance, refreshGoalRhythmSuggestions]);
 
   // HPG1 -- activityId is optional; pass it only when the caller already
   // resolved a genuine catalog id (never derive one here from `activity`'s
@@ -1946,6 +1963,7 @@ export default function DashboardPage() {
             onPlanCompleted={handleHomePlanCompleted}
             guidance={guidance}
             goalRhythmSuggestions={goalRhythmSuggestions}
+            onGoalRhythmChanged={handleMyDayOrGuidanceChanged}
             onOpenBirthProfile={() => setActiveTab('chart')}
             onOpenAgendaItem={handleOpenAgendaItem}
             onPlanTomorrow={handlePlanTomorrow}

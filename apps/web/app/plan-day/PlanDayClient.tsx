@@ -32,6 +32,7 @@ import {
   createIntentRowFromGoalHandoffItem,
   createIntentRowFromCapture,
   createIntentRowFromAutoGoalSuggestion,
+  rekeyGoalDemandRowsForPlanningDate,
   deriveAvailableAutoGoalSuggestions,
   buildCaptureLinksForAccept,
   MAX_PLAN_DAY_INTENTS,
@@ -50,7 +51,7 @@ import {
 } from '../../lib/planDayEntry';
 import type { GoalActivityHandoffItem, CaptureHandoffItem } from '../../lib/planDayBootstrap';
 import type { GoalDemandCandidate } from '../../lib/goalDemandCandidates';
-import { encodeGoalDemandIntentId } from '../../lib/goalDemandIntentId';
+import { encodeGoalDemandIntentId, rekeyGoalDemandIntentIdForPlanningDate } from '../../lib/goalDemandIntentId';
 
 /**
  * Day Constructor V1 -- PR F2. The user-reachable "Plan my day" entry
@@ -295,6 +296,14 @@ export function PlanDayClient({ timezone, planningDate, horizon, availabilityCon
     setAvailabilityRequiredStale(false);
     setPhase((current) => (current === 'PREVIEW_ERROR' ? 'ENTRY' : current));
   }, [horizon]);
+
+  // AURA-HPG-FIX-01 (V1-02) -- the preserved rows must follow the NEW
+  // planning date: a Goal-demand row keyed to the previous day can never be
+  // accepted for this one (see rekeyGoalDemandRowsForPlanningDate).
+  useEffect(() => {
+    if (!planningDate) return;
+    setRows((current) => rekeyGoalDemandRowsForPlanningDate(current, (rowId) => rekeyGoalDemandIntentIdForPlanningDate(rowId, planningDate)));
+  }, [planningDate]);
 
   // Plan My Day UX V2 PR U1 -- `+ Something else` focus handoff. Uses the
   // SAME deterministic `plan-day-title-${id}` element id every row's own
