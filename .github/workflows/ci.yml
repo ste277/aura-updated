@@ -1084,6 +1084,13 @@ jobs:
       # recovers (S3-2). Touches only the two MCP tables.
       - name: Run I2b-S4 OAuth store DB test
         run: npx ts-node test/mcpOAuthStoreS4Db.test.ts
+      # I2b-S6: an activation whose outcome the server cannot confirm (lost
+      # COMMIT acknowledgement, timeout) or a client that disconnects before
+      # the response is written leaves no redeemable code: the code is revoked
+      # whether pending or active. Concurrent flows, PKCE and the normal flow
+      # are unaffected. Touches only the two MCP tables.
+      - name: Run I2b-S6 authorization-code lifecycle DB test
+        run: npx ts-node test/mcpOAuthCodeS6Db.test.ts
       - name: Verify every repository migration was recorded as applied
         run: |
           set -euo pipefail

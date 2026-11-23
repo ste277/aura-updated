@@ -82,6 +82,8 @@ interface ProviderCtx {
   body: unknown;
   type: string;
   oidc?: { route?: string; entities?: unknown };
+  req: IncomingMessage;
+  res: ServerResponse;
   response: { get(name: string): string };
   remove(name: string): void;
   set(name: string, value: string): void;
@@ -436,15 +438,41 @@ export function createAuraOAuthServer(options: AuraOAuthServerOptions): AuraOAut
    * changes the status but keeps the success `Location` (with the code).
    * This outermost middleware runs after every provider route:
    *   - a code created by this request (any route but the token endpoint)
-   *     is ACTIVATED only if the final response is < 400 and actually
-   *     carries it (Location or form_post body). The store writes new codes
-   *     as pending, so until activation they cannot be redeemed;
-   *   - if activation fails, the response becomes 503 and the code stays
-   *     pending; if the response failed or carries no code, the code is
-   *     discarded (best effort -- pending either way);
+   *     is ACTIVATED only if the final response is < 400, actually carries
+   *     it (Location or form_post body) and the client is still connected.
+   *     The store writes new codes as pending, so until activation they
+   *     cannot be redeemed;
    *   - every response >= 400 loses its Location header.
+   *
+   * I2b-S6: an activation the server cannot confirm may still have
+   * committed (lost COMMIT acknowledgement, timeout), and a committed
+   * activation does not mean the response was delivered. So whenever the
+   * server decides the code is NOT delivered -- activation failed or is
+   * uncertain, the response failed or carries no code, or the client
+   * connection closed before the response was fully written -- the code is
+   * REVOKED (deleted whether pending or active; retried once), never just
+   * left pending. Invariant: a code is redeemable only if the server wrote
+   * it into a < 400 response on an open connection after a confirmed
+   * activation; a code that never left the server is revoked unless every
+   * revocation attempt also fails (audited `CodeRevocationFailed`; it then
+   * expires with its 60 s TTL, and nobody outside the server holds it).
    * No code value is logged.
    */
+  const REVOKE_ATTEMPTS = 2;
+  const revokeCode = async (code: string): Promise<void> => {
+    if (!adapterStore.revokeIssued) return;
+    for (let attempt = 0; attempt < REVOKE_ATTEMPTS; attempt += 1) {
+      try {
+        await adapterStore.revokeIssued('AuthorizationCode', code);
+        return;
+      } catch {
+        // retry: the first attempt can time out on the row lock of an in-flight activation COMMIT
+      }
+    }
+    audit({ event: 'oauth.error', outcome: 'store_unavailable', errorCode: 'CodeRevocationFailed' });
+  };
+  const connectionGone = (ctx: ProviderCtx) => ctx.res.destroyed === true || ctx.req.socket?.destroyed === true;
+
   provider.use(async (ctx: ProviderCtx, next: () => Promise<void>) => {
     await next();
     let code: string | undefined;
@@ -457,18 +485,18 @@ export function createAuraOAuthServer(options: AuraOAuthServerOptions): AuraOAut
     if (code) {
       const location = String(ctx.response.get('Location') ?? '');
       const body = typeof ctx.body === 'string' ? ctx.body : '';
-      const delivered = ctx.status < 400 && (location.includes(code) || body.includes(code));
+      const deliverable = ctx.status < 400 && (location.includes(code) || body.includes(code)) && !connectionGone(ctx);
       let activated = !adapterStore.activateIssued; // stores without pending codes cannot fail part-way
-      if (delivered && adapterStore.activateIssued) {
+      if (deliverable && adapterStore.activateIssued) {
         try {
           activated = await adapterStore.activateIssued('AuthorizationCode', code);
         } catch {
-          activated = false;
+          activated = false; // failed OR uncertain: it may have committed, so revoke below
         }
       }
-      if (!delivered || !activated) {
-        if (adapterStore.discardIssued) await adapterStore.discardIssued('AuthorizationCode', code).catch(() => undefined);
-        if (delivered) {
+      if (!deliverable || !activated || connectionGone(ctx)) {
+        await revokeCode(code);
+        if (deliverable && !activated) {
           audit({ event: 'oauth.error', outcome: 'store_unavailable', errorCode: 'CodeActivationFailed' });
           ctx.remove('Location');
           ctx.status = 503;
@@ -476,7 +504,19 @@ export function createAuraOAuthServer(options: AuraOAuthServerOptions): AuraOAut
           ctx.set('retry-after', '1');
           ctx.type = 'json';
           ctx.body = JSON.stringify({ error: 'temporarily_unavailable' });
+        } else if (deliverable) {
+          // Activated, but the client left meanwhile: nothing is sent.
+          ctx.remove('Location');
+          ctx.status = 503;
+          ctx.body = '';
         }
+      } else if (adapterStore.revokeIssued) {
+        // The response is written after this middleware returns; if the
+        // connection closes before it is fully handed to the OS, revoke.
+        const issued = code;
+        ctx.res.once('close', () => {
+          if (!ctx.res.writableFinished) void revokeCode(issued);
+        });
       }
     }
     if (ctx.status >= 400) ctx.remove('Location');

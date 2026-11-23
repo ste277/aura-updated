@@ -58,8 +58,13 @@ import { CONSUMABLE_MODELS, ReplayDetectedError, type OAuthStore, type UserGrant
  *   - I2b-S4 (S3-1): a new AuthorizationCode is written PENDING and is
  *     invisible to `find` until the authorization server activates it after
  *     the response that delivers it succeeded (`activateIssued`); a failed
- *     response discards it (`discardIssued`), and if even that fails the
- *     code simply stays pending and unredeemable until it expires.
+ *     response revokes it (`revokeIssued`). If even that fails, a code whose
+ *     activation never committed stays pending and unredeemable until it
+ *     expires.
+ *   - I2b-S6: `revokeIssued` deletes the code whether pending or active,
+ *     because an activation reported as failed may still have committed.
+ *     The DELETE waits on the row lock of an in-flight activation, so it is
+ *     ordered after a late COMMIT.
  *
  * The adapter takes an injected `query` function (a `pg` Pool satisfies it),
  * so this package does not import a database driver.
@@ -335,9 +340,10 @@ export function createPostgresAdapterStore(options: PostgresAdapterOptions): OAu
       );
       return (r.rowCount ?? 0) === 1;
     },
-    async discardIssued(model: string, id: string): Promise<void> {
+    async revokeIssued(model: string, id: string): Promise<void> {
       if (!PENDING_ON_WRITE.has(model)) return;
-      await db.query(`DELETE FROM ${TABLE} WHERE "model" = $1 AND "id" = $2 AND "payload" ? '${PENDING_FIELD}'`, [model, storageKey(id)]);
+      // Pending OR activated: an activation reported as failed may have committed (I2b-S6).
+      await db.query(`DELETE FROM ${TABLE} WHERE "model" = $1 AND "id" = $2`, [model, storageKey(id)]);
     },
     async size(model?: string): Promise<number> {
       const r = model
