@@ -319,6 +319,19 @@ async function main() {
     const sess = protectPayload(s1, 'Session', 'srow', { accountId: USER_A, state: { secret: 'SyntheticXsrfSecret42', clientId: CLIENT } } as never);
     check('I2b-R1 protect: Session state.secret sealed and restorable', !JSON.stringify(sess).includes('SyntheticXsrfSecret42') && (unprotectPayload(s1, 'Session', 'srow', sess).state as { secret: string }).secret === 'SyntheticXsrfSecret42');
     check('I2b-R1 unprotect: a plaintext value where a seal is required fails closed', fails(() => unprotectPayload(s1, 'Interaction', 'rowkey', { returnTo: plain } as never)));
+    // I2b-RR-1: the library account-switch state (resume.js) carries the resume URL.
+    const swState = { secret: 'SyntheticXsrfSecret77', clientId: CLIENT, postLogoutRedirectUri: plain };
+    const sw = protectPayload(s1, 'Session', 'srow', { accountId: USER_A, state: swState } as never);
+    const swText = JSON.stringify(sw);
+    const swBack = unprotectPayload(s1, 'Session', 'srow', sw).state as typeof swState;
+    check('I2b-RR-1 protect: Session state.postLogoutRedirectUri sealed (no uid, no URL), clientId unchanged', !swText.includes('SyntheticInteractionUid123') && !swText.includes('oauth') && (sw.state as typeof swState).clientId === CLIENT);
+    check('I2b-RR-1 unprotect: both state fields restored exactly', swBack.secret === swState.secret && swBack.postLogoutRedirectUri === plain && swBack.clientId === CLIENT);
+    check('I2b-RR-1 unprotect: sealed state fields cannot be swapped (field binding)', fails(() => unprotectPayload(s1, 'Session', 'srow', { state: { secret: (sw.state as typeof swState).postLogoutRedirectUri, postLogoutRedirectUri: (sw.state as typeof swState).secret } } as never)));
+    check('I2b-RR-1 unprotect: a plaintext postLogoutRedirectUri fails closed', fails(() => unprotectPayload(s1, 'Session', 'srow', { state: { secret: (sw.state as typeof swState).secret, postLogoutRedirectUri: plain } } as never)));
+    check('I2b-RR-1: a Session without state (normal case) still round-trips', (unprotectPayload(s1, 'Session', 'srow', protectPayload(s1, 'Session', 'srow', { accountId: USER_A } as never)) as { accountId: string }).accountId === USER_A);
+    // I2b-RR-2: an Interaction must carry its sealed returnTo.
+    check('I2b-RR-2 unprotect: an Interaction with no returnTo fails closed (not a half-valid record)', fails(() => unprotectPayload(s1, 'Interaction', 'rowkey', { session: { uid: 'x' } } as never)));
+    check('I2b-RR-2 unprotect: null / number / object returnTo fail closed', [null, 42, { url: 'http://attacker.example/' }].every((v) => fails(() => unprotectPayload(s1, 'Interaction', 'rowkey', { returnTo: v } as never))));
   }
 
   // ------------------------------------------------------------ R1-L2 client address

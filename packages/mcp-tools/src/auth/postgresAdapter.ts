@@ -63,8 +63,24 @@ export function storageKey(id: string): string {
   return createHash('sha256').update(`aura-mcp-oauth-v1:${id}`).digest('hex');
 }
 
-/** Fields protected per model (I2b-R1). */
-const SEALED_FIELDS: Record<string, readonly string[]> = { Interaction: ['returnTo'], Session: ['state.secret'] };
+/**
+ * Fields protected per model (I2b-R1, I2b-RR-1).
+ *  - Interaction.returnTo: resume URL embedding the interaction uid.
+ *  - Session.state.secret: account-switch confirmation (xsrf) secret.
+ *  - Session.state.postLogoutRedirectUri: written by oidc-provider
+ *    `actions/authorization/resume.js` on the account-switch path; it is the
+ *    resume URL and so embeds the live interaction uid.
+ */
+const SEALED_FIELDS: Record<string, readonly string[]> = {
+  Interaction: ['returnTo'],
+  Session: ['state.secret', 'state.postLogoutRedirectUri'],
+};
+/**
+ * Sealed fields the library always sets on that model (I2b-RR-2): a stored
+ * record without them is corrupt and reads as not found (the existing
+ * "request expired, start again" page), never as a half-valid record.
+ */
+const REQUIRED_SEALED: Record<string, readonly string[]> = { Interaction: ['returnTo'] };
 const DROPPED_FIELDS: Record<string, readonly string[]> = { Interaction: ['session.cookie'] };
 
 function getPath(obj: Record<string, unknown>, path: string): { parent: Record<string, unknown>; key: string } | undefined {
@@ -97,7 +113,10 @@ export function unprotectPayload(sealer: FieldSealer, model: string, rowKey: str
   const out = structuredClone(payload) as AdapterPayload;
   for (const path of SEALED_FIELDS[model] ?? []) {
     const at = getPath(out, path);
-    if (!at || at.parent[at.key] === undefined) continue;
+    if (!at || at.parent[at.key] === undefined) {
+      if (REQUIRED_SEALED[model]?.includes(path)) throw new FieldSealError('required protected field missing');
+      continue;
+    }
     const value = at.parent[at.key];
     if (!sealer.isSealed(value)) throw new FieldSealError('protected field stored without a seal');
     at.parent[at.key] = sealer.open(value, `${model}\0${rowKey}\0${path}`);

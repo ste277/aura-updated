@@ -9,6 +9,11 @@
  *     cookie values), code, token or cookie value is stored in plaintext;
  *   - Interaction rows carry no `session.cookie` and a SEALED `returnTo`;
  *     Session `state.secret` is sealed;
+ *   - I2b-RR-1: on the REAL library account-switch path (resume.js),
+ *     Session `state.postLogoutRedirectUri` (the resume URL with the live
+ *     uid) is sealed and restores exactly;
+ *   - I2b-RR-2: a missing or corrupted Interaction `returnTo` shows the
+ *     recovery page (400): no code, no redirect, no 500;
  *   - without the keys the identifiers cannot be recovered;
  *   - tampered, moved or plaintext (unsealed) values fail closed;
  *   - key rotation keeps in-flight interactions working, and removing a key
@@ -17,10 +22,12 @@
  *     code single-use, refresh rotation/replay, disconnect, multi-instance
  *     all still work; nothing leaks into logs.
  */
+import { createHash, randomBytes } from 'crypto';
 import { Pool } from 'pg';
+import { MCP_SCOPE } from '../packages/mcp-tools/src/http/remoteMcpHandler';
 import { createAuraOAuthServer } from '../packages/mcp-tools/src/auth/authorizationServer';
 import { createPostgresAdapterStore, storageKey } from '../packages/mcp-tools/src/auth/postgresAdapter';
-import { Browser, CLIENT, REDIRECT, SCOPE_OFFLINE, USER_A, USER_B, authorize, check, redeemCode, refresh, sharedKeys, startCluster, summary, verifyOn, type Cluster } from './mcpOAuthI2bHarness';
+import { Browser, CLIENT, REDIRECT, SCOPE_OFFLINE, USER_A, USER_B, authorize, b64, check, redeemCode, refresh, sharedKeys, startCluster, summary, verifyOn, type Cluster } from './mcpOAuthI2bHarness';
 
 const url = process.env.DATABASE_URL;
 if (!url) {
@@ -160,6 +167,73 @@ async function main() {
       const bTok = b1.code ? await redeemCode(c, b1.code, b1.verifier) : undefined;
       check('F1 intact: account switch -> B consents and gets B\'s token', !!a1.code && (await verifyOn(c, 0, bTok?.json.access_token)) === USER_B);
       secrets.push(...shared.seen);
+
+      // ---------------------------------------------------- I2b-RR-1: the REAL library account-switch path (resume.js)
+      // Tab 1 starts an authorization with no provider session; tab 2 (same browser)
+      // completes a connection as A; the user switches Aura to B and resumes tab 1.
+      // oidc-provider then writes Session.state = {secret, clientId,
+      // postLogoutRedirectUri: <resume URL containing the live uid>}.
+      {
+        const sb = new RecordingBrowser(c.origin, USER_A);
+        const pk = b64(randomBytes(32));
+        const aq = new URLSearchParams({ client_id: CLIENT, redirect_uri: REDIRECT, response_type: 'code', scope: MCP_SCOPE, resource: c.resource, code_challenge: b64(createHash('sha256').update(pk).digest()), code_challenge_method: 'S256', state: 's' });
+        const r0 = await sb.fetch(`/oauth/authorize?${aq}`);
+        const sUid = (r0.headers.get('location') ?? '').split('/').pop() as string;
+        const tab1 = [...sb.jar].filter(([k]) => k.startsWith('_interaction'));
+        const tab2 = await authorize(c, sb, { consent: true });
+        for (const [k, v] of tab1) sb.jar.set(k, v);
+        sb.jar.set('aura', USER_B);
+        const g = await sb.fetch(`/oauth/interaction/${sUid}`);
+        const rs = g.headers.get('location') ? await sb.fetch(g.headers.get('location') as string) : undefined;
+        const rsBody = rs ? await rs.text() : '';
+        const xsrf = /name="xsrf" value="([^"]+)"/.exec(rsBody)?.[1];
+        secrets.push(sUid, ...sb.seen);
+        if (xsrf) secrets.push(xsrf);
+        const withState = (await q(`SELECT "id", "payload" FROM "McpOAuthPayload" WHERE "model" = 'Session' AND "payload" ? 'state'`));
+        const st = withState[0]?.payload.state ?? {};
+        const dSwitch = await dump();
+        check('RR-1 setup: the library account-switch path is reached (resume form, no code issued)', !!tab2.code && !!xsrf && withState.length === 1 && !(rs?.headers.get('location') ?? '').startsWith(REDIRECT), { tab2: !!tab2.code, xsrf: !!xsrf, states: withState.length });
+        check('RR-1: Session.state.postLogoutRedirectUri is sealed (v1.*), not a URL', typeof st.postLogoutRedirectUri === 'string' && st.postLogoutRedirectUri.startsWith('v1.') && !st.postLogoutRedirectUri.includes('oauth'), typeof st.postLogoutRedirectUri === 'string' ? st.postLogoutRedirectUri.slice(0, 3) : typeof st.postLogoutRedirectUri);
+        check('RR-1: the live interaction uid is in no stored row after the real account switch', !dSwitch.includes(sUid));
+        check('RR-1: Session.state.secret (real xsrf value) sealed, not in any row', !!xsrf && !dSwitch.includes(xsrf) && String(st.secret).startsWith('v1.'));
+        const sid = sb.jar.get('_session') as string;
+        const back = (await new stores[1].factory('Session').find(sid)) as { state?: { secret?: string; postLogoutRedirectUri?: string; clientId?: string } } | undefined;
+        check('RR-1: both sealed state fields restore exactly on the other instance', back?.state?.secret === xsrf && back?.state?.postLogoutRedirectUri === `${c.origin}/oauth/authorize/${sUid}` && back?.state?.clientId === CLIENT);
+        const ROT = 'synthetic-cookie-key-rotated-rr1-0123456789';
+        const rotStore = createPostgresAdapterStore({ db: admin, fieldKeys: [ROT, ...keys.cookieKeys] });
+        const newOnlyStore = createPostgresAdapterStore({ db: admin, fieldKeys: [ROT] });
+        check('RR-1 rotation: [new, old] keys still open the switched Session state', ((await new rotStore.factory('Session').find(sid)) as typeof back)?.state?.postLogoutRedirectUri === `${c.origin}/oauth/authorize/${sUid}`);
+        check('RR-1 rotation: with the old key removed the switched Session reads as missing (fail closed)', (await new newOnlyStore.factory('Session').find(sid)) === undefined);
+        // Moving the sealed postLogoutRedirectUri into the secret slot (or vice versa) must fail closed.
+        await admin.query(`UPDATE "McpOAuthPayload" SET "payload" = jsonb_set("payload", '{state,secret}', "payload"->'state'->'postLogoutRedirectUri') WHERE "id" = $1`, [withState[0].id]);
+        check('RR-1: a sealed state field moved to another field fails closed (session reads as missing)', (await new stores[0].factory('Session').find(sid)) === undefined);
+        await admin.query(`UPDATE "McpOAuthPayload" SET "payload" = jsonb_set("payload", '{state,postLogoutRedirectUri}', to_jsonb($1::text)) WHERE "id" = $2`, [`${c.origin}/oauth/authorize/attacker-chosen`, withState[0].id]);
+        check('RR-1: a plaintext postLogoutRedirectUri fails closed', (await new stores[0].factory('Session').find(sid)) === undefined);
+        const after = await sb.fetch(`/oauth/interaction/${sUid}`);
+        check('RR-1: the browser continues with no 500 and no attacker redirect after the tampered session', after.status < 500 && !/attacker-chosen/.test(after.headers.get('location') ?? ''), after.status);
+      }
+
+      // ---------------------------------------------------- I2b-RR-2: missing / corrupted returnTo -> recovery page, never 500
+      for (const [label, sql, value] of [
+        ['missing returnTo', `"payload" - 'returnTo'`, null],
+        ['returnTo = null', `jsonb_set("payload", '{returnTo}', 'null'::jsonb)`, null],
+        ['returnTo = number', `jsonb_set("payload", '{returnTo}', '42'::jsonb)`, null],
+        ['returnTo = object', `jsonb_set("payload", '{returnTo}', '{"url":"http://attacker.example/"}'::jsonb)`, null],
+        ['returnTo = empty string', `jsonb_set("payload", '{returnTo}', '""'::jsonb)`, null],
+        ['returnTo = truncated seal', `jsonb_set("payload", '{returnTo}', to_jsonb(split_part("payload"->>'returnTo', '.', 1) || '.' || split_part("payload"->>'returnTo', '.', 2)))`, null],
+      ] as const) {
+        void value;
+        const mb = new RecordingBrowser(c.origin, USER_A);
+        const m = await authorize(c, mb, { consent: false });
+        const mUid = /action="\/oauth\/interaction\/([^/"]+)\/confirm"/.exec(m.consentHtml ?? '')?.[1] as string;
+        await admin.query(`UPDATE "McpOAuthPayload" SET "payload" = ${sql} WHERE "model" = 'Interaction' AND "id" = $1`, [storageKey(mUid)]);
+        const mCsrf = /name="csrf" value="([^"]+)"/.exec(m.consentHtml ?? '')?.[1] as string;
+        const cr = await mb.fetch(`/oauth/interaction/${mUid}/confirm`, { method: 'POST', headers: { 'content-type': 'application/x-www-form-urlencoded', origin: c.origin }, body: `csrf=${encodeURIComponent(mCsrf)}` });
+        const crBody = await cr.text();
+        const gr = await mb.fetch(`/oauth/interaction/${mUid}`);
+        check(`RR-2 (${label}): confirm and interaction page show the recovery page (400), no code, no redirect, no 500`, cr.status === 400 && /start connecting again/.test(crBody) && !cr.headers.get('location') && gr.status === 400 && !gr.headers.get('location'), { confirm: cr.status, page: gr.status });
+        secrets.push(mUid, ...mb.seen);
+      }
 
       // ---------------------------------------------------- Session state.secret sealed (library account-switch form secret)
       const S = new stores[0].factory('Session');
