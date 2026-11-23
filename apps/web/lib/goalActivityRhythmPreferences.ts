@@ -18,8 +18,10 @@
  * times (the shared timing engine, Panchang ranking, Daily Rhythm) is MR2.
  */
 import type { TimingTimePreference } from '../../../packages/recommendation/src/timingSearch';
-import { NONE_GOAL_ACTIVITY_RHYTHM, type GoalActivityRhythm } from './goalActivityRhythm';
+import { NONE_GOAL_ACTIVITY_RHYTHM, localCalendarWeekBounds, localCalendarWeekStart, type GoalActivityRhythm } from './goalActivityRhythm';
 import { isGoalActivityDailyFrequencyEnforceable, type GoalActivityDailyFrequency } from './goalActivityDailyFrequency';
+import { getWeekdayForDateStr } from './availabilityContext';
+import { addDaysToDateStr } from './timezone';
 
 /** The timing engine's own existing time-of-day vocabulary (timingSearch.ts),
  * minus its 'ANY' sentinel -- "any time" is represented by `null` here, never
@@ -232,4 +234,50 @@ export function resolveGoalActivityRhythmSettingsUpdate(current: CurrentGoalActi
   if (!consistency.ok) return consistency;
   const pauseAction: RhythmPauseAction = update.paused === true ? 'PAUSE' : update.paused === false ? 'CLEAR' : 'KEEP';
   return { ok: true, value: { rhythm, preferences, pauseAction } };
+}
+
+// ============================================================
+// AURA-MR2 -- the ONE shared interpretation of stored preferences, used by
+// the weekly proposal, Plan My Day and Home alike (so the three surfaces can
+// never disagree about what a preference means).
+// ============================================================
+
+/** True when `localDate` ("YYYY-MM-DD", user-local) is one of the preferred
+ * weekdays -- or when no weekday preference is set (every day qualifies).
+ * Weekdays are a strict filter: a rhythm is never proposed or auto-suggested
+ * on a day the user did not choose. */
+export function isPreferredRhythmDate(preferences: GoalActivityRhythmPreferences, localDate: string): boolean {
+  if (preferences.preferredWeekdays.length === 0) return true;
+  return preferences.preferredWeekdays.includes(getWeekdayForDateStr(localDate));
+}
+
+/** Which calendar week a weekly plan is for. CURRENT = the rest of this
+ * week (today .. Sunday); NEXT = the whole following Monday .. Sunday. */
+export type RhythmPlanningWeek = 'CURRENT' | 'NEXT';
+export const RHYTHM_PLANNING_WEEKS: readonly RhythmPlanningWeek[] = ['CURRENT', 'NEXT'];
+
+export function isRhythmPlanningWeek(value: unknown): value is RhythmPlanningWeek {
+  return typeof value === 'string' && (RHYTHM_PLANNING_WEEKS as readonly string[]).includes(value);
+}
+
+export interface ResolvedRhythmPlanningWeek {
+  week: RhythmPlanningWeek;
+  /** The date weekly capacity is evaluated for (its week is the planned week):
+   * today for CURRENT, next Monday for NEXT. */
+  planningLocalDate: string;
+  /** Inclusive civil-date range sessions may be proposed/accepted in. */
+  startDate: string;
+  endDate: string;
+}
+
+/** Pure civil-date arithmetic in the user's own timezone (the caller derives
+ * `todayLocalDate` via getDatePartsInTimezone): the same Monday-start week
+ * goalActivityRhythm.ts buckets occurrences with, so DST and timezone offsets
+ * can never shift which seven dates a week contains. */
+export function resolveRhythmPlanningWeek(todayLocalDate: string, week: RhythmPlanningWeek): ResolvedRhythmPlanningWeek {
+  if (week === 'CURRENT') {
+    return { week, planningLocalDate: todayLocalDate, startDate: todayLocalDate, endDate: localCalendarWeekBounds(todayLocalDate).endDate };
+  }
+  const nextMonday = addDaysToDateStr(localCalendarWeekStart(todayLocalDate), 7);
+  return { week, planningLocalDate: nextMonday, startDate: nextMonday, endDate: addDaysToDateStr(nextMonday, 6) };
 }

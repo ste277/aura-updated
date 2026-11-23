@@ -70,7 +70,7 @@ function hookedRunner(afterQuery: number, hook: () => Promise<void>, log: string
     let n = 0; let fired = false;
     const fire = async () => { if (!fired) { fired = true; await hook(); } };
     if (afterQuery === 0) await fire();
-    const wrapped: ReadQueryExecutor = { query: async (text, params) => { n += 1; log.push(text.replace(/\s+/g, ' ').slice(0, 220)); const r = await executor.query(text, params); if (n === afterQuery) await fire(); return r; } };
+    const wrapped: ReadQueryExecutor = { query: async (text, params) => { n += 1; log.push(text.replace(/\s+/g, ' ').slice(0, 600)); /* AURA-MR2: 220 -> 600 -- the candidate query now also selects three preference columns, which pushed its FROM "GoalActivity" past the old display cut-off; the 7-statement count and order are unchanged. */ const r = await executor.query(text, params); if (n === afterQuery) await fire(); return r; } };
     return read(wrapped);
   });
 }

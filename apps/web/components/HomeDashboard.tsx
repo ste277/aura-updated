@@ -50,7 +50,7 @@ import { createRecompositionStore, initialRecompositionState, shouldOfferRecompo
 import { formatGoalActivityCompletion } from '../lib/goalActivityExecution';
 import { DailyBriefingCard } from './DailyBriefingCard';
 import { GoalRhythmSuggestionsCard } from './GoalRhythmSuggestionsCard';
-import { excludeGoalRhythmSuggestionsDuplicatingActivities, type HomeGoalRhythmSuggestion } from '../lib/homeGoalRhythmSuggestions';
+import { excludeGoalRhythmSuggestionsDuplicatingActivities, type HomeGoalRhythmSuggestion, type HomePausedGoalRhythm } from '../lib/homeGoalRhythmSuggestions';
 
 /** Matches page.tsx's own FALLBACK_TZ -- defensive only, page.tsx always supplies a real value today. */
 const FALLBACK_HOME_TZ = 'Asia/Kolkata';
@@ -217,6 +217,8 @@ interface HomeDashboardProps {
    * Undefined/omitted simply renders nothing, matching every other
    * optional Home data slice's own convention. */
   goalRhythmSuggestions?: readonly HomeGoalRhythmSuggestion[];
+  /** AURA-MR2 -- paused rhythms, shown as paused (never suggested). */
+  pausedGoalRhythms?: readonly HomePausedGoalRhythm[];
   /** AURA-HPG-FIX-01 (V1-09) -- called after the weekly plan review closes
    * so the page can refresh rhythm counts and Your Day without a reload. */
   onGoalRhythmChanged?: () => void;
@@ -482,6 +484,7 @@ export function HomeDashboard({
   onDayBuilderPrefsChange,
   guidance,
   goalRhythmSuggestions,
+  pausedGoalRhythms,
   onGoalRhythmChanged,
   onOpenBirthProfile,
   onTimingSearch,
@@ -2028,8 +2031,8 @@ export function HomeDashboard({
           )}
         </div>
       )}
-      {dedupedGoalRhythmSuggestions.length > 0 && (
-        <GoalRhythmSuggestionsCard suggestions={dedupedGoalRhythmSuggestions} dismissedIds={dismissedGoalRhythmIds} onDismiss={handleDismissGoalRhythmSuggestion} timezone={effectiveTimezone} onWeeklyReviewClosed={onGoalRhythmChanged} />
+      {(dedupedGoalRhythmSuggestions.length > 0 || (pausedGoalRhythms?.length ?? 0) > 0) && (
+        <GoalRhythmSuggestionsCard suggestions={dedupedGoalRhythmSuggestions} dismissedIds={dismissedGoalRhythmIds} onDismiss={handleDismissGoalRhythmSuggestion} timezone={effectiveTimezone} onWeeklyReviewClosed={onGoalRhythmChanged} pausedRhythms={pausedGoalRhythms} />
       )}
       <HomeTimeline
         items={homeTimeline}

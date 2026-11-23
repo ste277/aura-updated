@@ -395,6 +395,11 @@ jobs:
       # weekly rhythm's pause state and preferences (migration 0053).
       - name: Run My Rhythm preferences test
         run: npx ts-node test/goalActivityRhythmPreferences.test.ts
+      # AURA-MR2 -- scheduling preferences + next-week planning (pure): week
+      # bounds, shared weekday rule, weekly proposal preference/fallback and
+      # Panchang-order behavior, Home view/actions, Plan My Day intents.
+      - name: Run My Rhythm scheduling preferences test
+        run: npx ts-node test/myRhythmSchedulingPreferences.test.ts
       - name: Run Daily agenda Goal context test
         run: npx ts-node test/dailyAgendaGoalContext.test.ts
       - name: Run Goal context structural guards test
@@ -1212,6 +1217,12 @@ jobs:
       # duplicate sessions.
       - name: Run My Rhythm foundation DB test
         run: npx ts-node test/myRhythmFoundationDb.test.ts
+      # AURA-MR2 -- real engine + routes on this disposable DB: preferences,
+      # Daily Rhythm, Panchang ranking, next-week confirmation without
+      # duplicates, Home paused/next-occurrence, consistent pause/weekday
+      # handling across Home, Plan My Day and the weekly proposal, timezones.
+      - name: Run My Rhythm scheduling DB test
+        run: npx ts-node test/myRhythmSchedulingDb.test.ts
       - name: Run Goal context DB test
         run: npx ts-node test/goalContextDb.test.ts
       - name: Run Goal template completion DB test

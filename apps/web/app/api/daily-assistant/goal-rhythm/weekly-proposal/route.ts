@@ -11,6 +11,7 @@ import { generateWeeklyRhythmProposal, type WeeklyRhythmProposalDeps } from '../
 import { createRealDayConstructorOrchestratorDeps } from '../../../../../lib/dayConstructorOrchestrator';
 import type { DailyRhythmPreferencesInput } from '../../../../../lib/dailyRhythmScheduling';
 import { DailyAssistantContext } from '../../../../../../../packages/recommendation/src/dailyAssistant';
+import { isRhythmPlanningWeek } from '../../../../../lib/goalActivityRhythmPreferences';
 
 const MAX_GOAL_ACTIVITY_ID_LENGTH = 100;
 
@@ -46,6 +47,11 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: 'A valid goalActivityId is required.' }, { status: 400 });
   }
 
+  // AURA-MR2 -- optional planning week: 'CURRENT' (default; unchanged
+  // behavior) or 'NEXT' (the following Monday..Sunday).
+  const week = body.week === undefined ? 'CURRENT' : body.week;
+  if (!isRhythmPlanningWeek(week)) return NextResponse.json({ error: "week must be 'CURRENT' or 'NEXT'." }, { status: 400 });
+
   const now = resolveRequestNow(req);
   const planningLocalDate = getDatePartsInTimezone(user.timezone, now).dateStr;
   const context: DailyAssistantContext = {
@@ -80,6 +86,7 @@ export async function POST(req: NextRequest) {
     timezone: user.timezone,
     context,
     dailyRhythmPrefs,
+    week,
   });
 
   if (result.status === 'SEARCH_FAILED') return NextResponse.json(result, { status: 500 });

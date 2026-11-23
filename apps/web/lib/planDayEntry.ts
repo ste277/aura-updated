@@ -107,6 +107,12 @@ export interface PlanDayIntentRow {
    * preview request, never cleared by editing. A row carries AT MOST ONE of
    * `goalActivityId` / `captureId` (the link builders below enforce it). */
   captureId?: string;
+  /** AURA-MR2 -- the linked rhythm's stored preferences, used as DEFAULTS at
+   * submission: the time of day becomes the intent's timePreference (FLEXIBLE
+   * rows only) and the duration fills in only when the row has none. An
+   * explicit choice made in the row always wins. */
+  rhythmTimePreference?: 'MORNING' | 'AFTERNOON' | 'EVENING' | 'NIGHT';
+  rhythmDurationMinutes?: number;
 }
 
 export const MAX_PLAN_DAY_INTENTS = 12; // mirrors F1's own MAX_INTENTS_PER_REQUEST (dayConstructorPreviewRequest.ts) -- the hard upper bound, not a new limit.
@@ -196,11 +202,13 @@ export function createIntentRowFromGoalActivity(goalActivity: { id: string; titl
  * planning date) keeps the unmodified legacy manual row. This function
  * computes no id and reads no eligibility itself.
  */
-export function createIntentRowFromGoalHandoffItem(item: { id: string; title: string; activityId: string | null; canonicalDemand?: boolean }, canonicalIntentId: string | null): PlanDayIntentRow {
+export function createIntentRowFromGoalHandoffItem(item: { id: string; title: string; activityId: string | null; canonicalDemand?: boolean; preferences?: RhythmPreferenceDefaults }, canonicalIntentId: string | null): PlanDayIntentRow {
   if (item.canonicalDemand === true && canonicalIntentId) {
-    return createIntentRowFromAutoGoalSuggestion({ title: item.title, activityId: item.activityId, goalActivityId: item.id }, canonicalIntentId);
+    // AURA-MR2 -- the canonical row still comes from the ONE shared automatic
+    // row factory; the rhythm defaults are layered on afterwards.
+    return { ...createIntentRowFromAutoGoalSuggestion({ title: item.title, activityId: item.activityId, goalActivityId: item.id }, canonicalIntentId), ...rhythmDefaultsFor(item.preferences) };
   }
-  return createIntentRowFromGoalActivity(item);
+  return { ...createIntentRowFromGoalActivity(item), ...rhythmDefaultsFor(item.preferences) };
 }
 
 /**
@@ -218,8 +226,23 @@ export function createIntentRowFromGoalHandoffItem(item: { id: string; title: st
  * -- the caller (PlanDayClient.tsx) derives it from the canonical
  * planningDate prop it already receives, never a client clock read.
  */
-export function createIntentRowFromAutoGoalSuggestion(suggestion: { title: string; activityId: string | null; goalActivityId: string }, intentId: string): PlanDayIntentRow {
-  return { ...blankIntentRow(intentId), title: suggestion.title, activityId: suggestion.activityId ?? undefined, goalActivityId: suggestion.goalActivityId };
+export function createIntentRowFromAutoGoalSuggestion(suggestion: { title: string; activityId: string | null; goalActivityId: string; preferences?: RhythmPreferenceDefaults }, intentId: string): PlanDayIntentRow {
+  return { ...blankIntentRow(intentId), title: suggestion.title, activityId: suggestion.activityId ?? undefined, goalActivityId: suggestion.goalActivityId, ...rhythmDefaultsFor(suggestion.preferences) };
+}
+
+/** AURA-MR2 -- the subset of a rhythm's stored preferences Plan My Day uses
+ * (weekdays are applied earlier, when deciding what to suggest at all). */
+export interface RhythmPreferenceDefaults {
+  preferredTimeOfDay: 'MORNING' | 'AFTERNOON' | 'EVENING' | 'NIGHT' | null;
+  preferredDurationMinutes: number | null;
+}
+
+function rhythmDefaultsFor(preferences: RhythmPreferenceDefaults | undefined): Pick<PlanDayIntentRow, 'rhythmTimePreference' | 'rhythmDurationMinutes'> {
+  if (!preferences) return {};
+  return {
+    ...(preferences.preferredTimeOfDay ? { rhythmTimePreference: preferences.preferredTimeOfDay } : {}),
+    ...(preferences.preferredDurationMinutes !== null ? { rhythmDurationMinutes: preferences.preferredDurationMinutes } : {}),
+  };
 }
 
 /**
@@ -471,6 +494,10 @@ export function buildRequestedIntentsForSubmission(rows: readonly PlanDayIntentR
       flexibility: row.timeMode,
     };
     if (row.durationMinutes !== null) intent.durationMinutes = row.durationMinutes;
+    // AURA-MR2 -- rhythm preferences as defaults; the row's own explicit
+    // duration / fixed time always take precedence.
+    else if (row.rhythmDurationMinutes !== undefined) intent.durationMinutes = row.rhythmDurationMinutes;
+    if (row.rhythmTimePreference !== undefined && row.timeMode === 'FLEXIBLE') intent.timePreference = row.rhythmTimePreference;
     if (row.important) intent.importance = 'HIGH';
     if (deadline !== undefined) intent.deadline = deadline;
     if (row.activityId !== undefined) intent.activityId = row.activityId;

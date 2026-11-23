@@ -62,6 +62,10 @@ export interface PreviewRequestIntentBody {
    * to an ISO string the same way `acceptConstructedDay.ts`'s own request
    * body does, never a hand-formatted string. */
   fixedStart?: Date;
+  /** AURA-MR2 -- optional preferred time of day for a FLEXIBLE intent (the
+   * timing engine's own vocabulary); set only from a rhythm's stored
+   * preference. Re-validated server-side (dayConstructorPreviewRequest.ts). */
+  timePreference?: 'MORNING' | 'AFTERNOON' | 'EVENING' | 'NIGHT';
   /** Plan My Day UX V2 PR U1 -- a real, current catalog id, set only by a
    * Quick Pick (planDayQuickPicks.ts/planDayEntry.ts), never by a typed
    * row. F1's own request parser already accepts and re-validates this

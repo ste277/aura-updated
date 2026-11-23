@@ -30,8 +30,7 @@ import { readOfflineHabitQueue, toPendingLoggedEntry, mergeConfirmedLogEntries, 
 import { refreshAfterHomeCompletion } from '../lib/homeRefresh';
 import { selectTodaysPendingActivities } from '../lib/myDayPendingOverlay';
 import type { GuidanceUiState } from '../lib/bestForYouViewModel';
-import type { GoalDemandResult } from '../lib/goalDemandCandidates';
-import { mapGoalDemandToHomeRhythmSuggestions, type HomeGoalRhythmSuggestion } from '../lib/homeGoalRhythmSuggestions';
+import { buildHomeGoalRhythmSuggestions, type GoalRhythmHomeResponse, type HomeGoalRhythmSuggestion, type HomePausedGoalRhythm } from '../lib/homeGoalRhythmSuggestions';
 import { createAskAuraHandoff, type AskAuraHandoffRequest } from '../lib/homeAskAuraHandoff';
 
 // UI Modules
@@ -253,6 +252,8 @@ export default function DashboardPage() {
   // change fetch discipline as `guidance` above (a stale prior user's
   // Rhythm suggestions must never render attributed to a different user).
   const [goalRhythmSuggestions, setGoalRhythmSuggestions] = useState<readonly HomeGoalRhythmSuggestion[]>([]);
+  // AURA-MR2 -- paused rhythms (shown as paused, never suggested).
+  const [pausedGoalRhythms, setPausedGoalRhythms] = useState<readonly HomePausedGoalRhythm[]>([]);
   // HOME-INTENT-1 -- Home's own "What would you like to do?" input hands a
   // free-text request off into the existing Ask Aura tab/pipeline exactly
   // once (see homeAskAuraHandoff.ts). `null` once consumed by AskAuraView
@@ -769,7 +770,10 @@ export default function DashboardPage() {
   // original degrade-to-empty behaviour.
   const loadGoalRhythmSuggestions = useCallback(async (options?: { preserveOnFailure?: boolean }) => {
     const onFailure = () => {
-      if (!options?.preserveOnFailure) setGoalRhythmSuggestions([]);
+      if (!options?.preserveOnFailure) {
+        setGoalRhythmSuggestions([]);
+        setPausedGoalRhythms([]);
+      }
     };
     try {
       const res = await fetch('/api/daily-assistant/goal-rhythm');
@@ -777,8 +781,11 @@ export default function DashboardPage() {
         onFailure();
         return;
       }
-      const result: GoalDemandResult = await res.json();
-      if (result.status === 'OK') setGoalRhythmSuggestions(mapGoalDemandToHomeRhythmSuggestions(result.candidates));
+      const result: GoalRhythmHomeResponse = await res.json();
+      if (result.status === 'OK') {
+        setGoalRhythmSuggestions(buildHomeGoalRhythmSuggestions(result));
+        setPausedGoalRhythms(result.pausedRhythms ?? []);
+      }
       else onFailure();
     } catch (err) {
       console.error('Failed to load goal rhythm suggestions:', err);
@@ -795,6 +802,7 @@ export default function DashboardPage() {
 
   useEffect(() => {
     setGoalRhythmSuggestions([]);
+    setPausedGoalRhythms([]);
     if (!user) return;
     loadGoalRhythmSuggestions();
   }, [user?.id, loadGoalRhythmSuggestions]);
@@ -1963,6 +1971,7 @@ export default function DashboardPage() {
             onPlanCompleted={handleHomePlanCompleted}
             guidance={guidance}
             goalRhythmSuggestions={goalRhythmSuggestions}
+            pausedGoalRhythms={pausedGoalRhythms}
             onGoalRhythmChanged={handleMyDayOrGuidanceChanged}
             onOpenBirthProfile={() => setActiveTab('chart')}
             onOpenAgendaItem={handleOpenAgendaItem}

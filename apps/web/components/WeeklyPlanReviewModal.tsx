@@ -1,5 +1,6 @@
 'use client';
 
+import type { RhythmPlanningWeek } from '../lib/goalActivityRhythmPreferences';
 import React, { useEffect, useRef, useState } from 'react';
 import { spacing, typography, colors } from './theme';
 import { ModalShell, useModalA11y, PrimaryButton, SecondaryButton, TextButton, FieldLabel, FieldHint, FieldError, TextInput } from './ui';
@@ -71,6 +72,8 @@ export interface WeeklyPlanReviewModalProps {
   activityTitleFallback: string;
   timezone: string;
   onClose: () => void;
+  /** AURA-MR2 -- which week to plan: 'CURRENT' (default) or 'NEXT'. */
+  week?: RhythmPlanningWeek;
 }
 
 type LoadState =
@@ -79,11 +82,12 @@ type LoadState =
   | { phase: 'SEARCH_FAILED' }
   | { phase: 'NETWORK_ERROR' }
   | { phase: 'EMPTY' }
-  | { phase: 'READY'; activityTitle: string; remainingThisWeek: number; weeklyTarget: number; shortfall: boolean; activityId: string | null; durationMinutes: number };
+  | { phase: 'READY'; activityTitle: string; remainingThisWeek: number; weeklyTarget: number; shortfall: boolean; shortfallExplanation?: string; activityId: string | null; durationMinutes: number };
 
 type SubmitBanner = { kind: 'NETWORK_ERROR' } | { kind: 'HTTP_ERROR'; httpStatus: number } | { kind: 'DATE_COLLISION' } | null;
 
-export function WeeklyPlanReviewModal({ goalActivityId, activityTitleFallback, timezone, onClose }: WeeklyPlanReviewModalProps) {
+export function WeeklyPlanReviewModal({ goalActivityId, activityTitleFallback, timezone, onClose, week = 'CURRENT' }: WeeklyPlanReviewModalProps) {
+  const weekWord = week === 'NEXT' ? 'next week' : 'this week';
   const dialogRef = useRef<HTMLDivElement | null>(null);
   const headingRef = useRef<HTMLHeadingElement | null>(null);
 
@@ -111,7 +115,7 @@ export function WeeklyPlanReviewModal({ goalActivityId, activityTitleFallback, t
   useEffect(() => {
     let cancelled = false;
     (async () => {
-      const result = await fetchWeeklyRhythmProposal(goalActivityId);
+      const result = await fetchWeeklyRhythmProposal(goalActivityId, week);
       if (cancelled) return;
       if (result.status === 'OK') {
         setDrafts(buildSessionDraftsFromProposal(result.proposals));
@@ -124,6 +128,7 @@ export function WeeklyPlanReviewModal({ goalActivityId, activityTitleFallback, t
             remainingThisWeek: result.remainingThisWeek,
             weeklyTarget: result.weeklyTarget,
             shortfall: result.shortfallReason === 'FEWER_SUITABLE_DAYS_THAN_REQUESTED',
+            ...(result.shortfallExplanation ? { shortfallExplanation: result.shortfallExplanation } : {}),
             activityId: result.activityId,
             durationMinutes: result.proposals[0].durationMinutes,
           });
@@ -163,7 +168,7 @@ export function WeeklyPlanReviewModal({ goalActivityId, activityTitleFallback, t
     }
     setSubmitting(true);
     setSubmitBanner(null);
-    const result = await submitWeeklyAcceptance(goalActivityId, acceptanceId, pending);
+    const result = await submitWeeklyAcceptance(goalActivityId, acceptanceId, pending, week);
     setSubmitting(false);
     if (result.status === 'OK') {
       setDrafts((current) => applyAcceptanceSummaryToDrafts(current, pending, result.summary));
@@ -191,14 +196,14 @@ export function WeeklyPlanReviewModal({ goalActivityId, activityTitleFallback, t
     <ModalShell
       dialogRef={dialogRef}
       labelledBy="weekly-plan-review-title"
-      title={<span ref={headingRef} tabIndex={-1} id="weekly-plan-review-title-text">Plan this week&rsquo;s sessions</span>}
+      title={<span ref={headingRef} tabIndex={-1} id="weekly-plan-review-title-text">{week === 'NEXT' ? <>Plan next week&rsquo;s sessions</> : <>Plan this week&rsquo;s sessions</>}</span>}
       onClose={saving ? undefined : onClose}
       maxWidth={440}
     >
       {state.phase === 'LOADING' && <div style={typography.caption}>Finding suitable times…</div>}
 
       {state.phase === 'NOT_ELIGIBLE' && (
-        <div style={typography.caption}>This activity no longer has remaining sessions to plan this week.</div>
+        <div style={typography.caption}>This activity has no remaining sessions to plan {weekWord}.</div>
       )}
 
       {state.phase === 'SEARCH_FAILED' && (
@@ -220,7 +225,7 @@ export function WeeklyPlanReviewModal({ goalActivityId, activityTitleFallback, t
       )}
 
       {state.phase === 'EMPTY' && (
-        <div style={typography.caption}>Aura couldn&rsquo;t find a suitable time this week. Try planning just today instead.</div>
+        <div style={typography.caption}>{week === 'NEXT' ? <>Aura couldn&rsquo;t find a suitable time next week.</> : <>Aura couldn&rsquo;t find a suitable time this week. Try planning just today instead.</>}</div>
       )}
 
       {state.phase === 'READY' && (
@@ -229,8 +234,10 @@ export function WeeklyPlanReviewModal({ goalActivityId, activityTitleFallback, t
             {state.activityTitle} — {state.remainingThisWeek} remaining
           </div>
           {state.shortfall && (
-            <FieldHint>Fewer suitable days remained this week than the full remaining count.</FieldHint>
+            <FieldHint>{state.shortfallExplanation ?? `Fewer suitable days remained ${weekWord} than the full remaining count.`}</FieldHint>
           )}
+          {/* AURA-MR2 -- nothing below is booked until the user accepts. */}
+          <FieldHint>These are suggestions. Nothing is booked until you accept.</FieldHint>
 
           <div style={{ display: 'flex', flexDirection: 'column', gap: spacing.sm, marginTop: spacing.md }}>
             {drafts.map((draft, index) => (
@@ -331,6 +338,12 @@ function SessionRow({
           </div>
           {reasons.length > 0 && (
             <div style={{ ...typography.caption, marginTop: 2 }}>{reasons[0]}</div>
+          )}
+          {!draft.adjusted && draft.notes?.map((note) => (
+            <div key={note} style={{ ...typography.caption, color: colors.textMuted, marginTop: 2 }}>{note}</div>
+          ))}
+          {draft.outcome === 'PENDING' && (
+            <div style={{ ...typography.caption, color: colors.textMuted, marginTop: 2 }}>Suggested — not booked yet</div>
           )}
           {draft.outcome === 'FAILED' && (
             <div style={{ ...typography.caption, color: colors.danger, marginTop: 2 }}>{describeSessionFailure(draft.failureReason).message}</div>

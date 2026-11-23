@@ -171,7 +171,10 @@ const allowedOccurrenceFnBodiesNoComments =
   // checkDailyOccurrenceEligibility (same day attribution) used by Home /
   // Plan My Day / weekly proposals to avoid offering an occupied day. Two
   // SELECTs, no write; the write path keeps its own guard.
-  stripComments(functionBody(dbSrc, 'listGoalActivityDailyOccupancyForActivities'));
+  stripComments(functionBody(dbSrc, 'listGoalActivityDailyOccupancyForActivities')) +
+  // AURA-MR2 -- listNextGoalRhythmOccurrences: Home's READ-ONLY lookup of each
+  // rhythm's earliest CONFIRMED (UPCOMING) session. One SELECT, no write.
+  stripComments(functionBody(dbSrc, 'listNextGoalRhythmOccurrences'));
 check(
   'db.ts references GoalActivityOccurrence ONLY inside the allowed, intentionally-reviewed functions (loadGoalActivityRhythmFacts [read-only], loadGoalActivityRhythmFactsForActivities [R4\'s batched read-only sibling], listGoalActivityOccurrenceRowsForActivities [O5 P2d: that sibling\'s raw read-only SELECT, moved unchanged so it can run on the snapshot executor], materializeGoalActivityRhythmOccurrence [R3\'s sole writer], logPlannedActivity [Insights V1 PR3\'s corrected, occurrence-keyed completion lookup], checkDailyOccurrenceEligibility [HPG3-A2\'s shared daily-capacity read], and listGoalActivityDailyOccupancyForActivities [HPG-FIX-01\'s read-only presentation counterpart]) -- no additional, undocumented function in real code, no UPDATE/DELETE anywhere',
   (dbSrcNoComments.match(/GoalActivityOccurrence/g) ?? []).length === (allowedOccurrenceFnBodiesNoComments.match(/GoalActivityOccurrence/g) ?? []).length &&

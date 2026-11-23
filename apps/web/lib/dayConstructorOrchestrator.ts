@@ -43,7 +43,7 @@ import { buildPersonalMuhurtaContextForUser } from './natalContext';
 import { findActivityIntent, getActivityProfileById } from '../../../packages/recommendation/src/personalizedTasks';
 import { classifyTask } from '../../../packages/recommendation/src/dailyAssistant';
 import { familyForActivityProfile } from '../../../packages/recommendation/src/auraFitEngine';
-import { runTimingSearch, type TimingCandidate, type TimingCandidateLabel, type TimingSearchRequest } from '../../../packages/recommendation/src/timingSearch';
+import { runTimingSearch, type TimingCandidate, type TimingCandidateLabel, type TimingSearchRequest, type TimingTimePreference } from '../../../packages/recommendation/src/timingSearch';
 import type { MuhurtaActivityFamily } from '../../../packages/muhurta/src/muhurtaEngine';
 import {
   buildDayIntent,
@@ -119,6 +119,13 @@ export interface RequestedDayIntent {
    * intent's own resolved duration by construction, for any request this
    * file builds. */
   fixedStart?: Date;
+  /** AURA-MR2 -- USER-PROVIDED, optional, FLEXIBLE intents only: a preferred
+   * time of day, passed verbatim as the timing engine's OWN existing
+   * `timePreference` (the same field Find a Time already uses). This file
+   * stays domain-blind: it never knows where the preference came from. Never
+   * a new ranking rule: the engine still ranks by Panchang / Aura Fit within
+   * the preferred part of the day. */
+  timePreference?: Exclude<TimingTimePreference, 'ANY'>;
   originalOrder: number;
 }
 
@@ -916,7 +923,7 @@ async function runOrchestration(request: ConstructDayRequest, deps: DayConstruct
    * ticket) or for a FLEXIBLE intent with an unresolved duration
    * (`constructDay`'s own `DURATION_UNKNOWN` gate handles that, no
    * search ever ran for it to replenish). */
-  const flexibleSearchMetaByIntentId: Record<string, { activityId?: string; title: string; durationMinutes: number }> = {};
+  const flexibleSearchMetaByIntentId: Record<string, { activityId?: string; title: string; durationMinutes: number; timePreference?: Exclude<TimingTimePreference, 'ANY'> }> = {};
   /** O5 P1 -- intents whose duration came from the generic fallback, from
    * the SAME resolution that produced the duration (never a second one). */
   const fallbackDurationIntentIds = new Set<string>();
@@ -1004,8 +1011,8 @@ async function runOrchestration(request: ConstructDayRequest, deps: DayConstruct
     // (3) byte-for-byte.
     const dailyRhythmSearchLimit = resolveDailyRhythmSearchLimit(dayIntent.activityId, { targetDate: request.targetDate, timezone: request.timezone, prefs: dailyRhythmPrefs });
     const searchRequest: Omit<TimingSearchRequest, 'context'> = dayIntent.activityId
-      ? { mode: 'FIND', activityId: dayIntent.activityId, durationMinutes: dayIntent.estimatedDurationMinutes, dateRange: { start: request.targetDate, end: request.targetDate }, searchWindow, excludedIntervals, ...(dailyRhythmSearchLimit !== undefined ? { limit: dailyRhythmSearchLimit } : {}) }
-      : { mode: 'FIND', taskTitle: requested.title, durationMinutes: dayIntent.estimatedDurationMinutes, dateRange: { start: request.targetDate, end: request.targetDate }, searchWindow, excludedIntervals, ...(dailyRhythmSearchLimit !== undefined ? { limit: dailyRhythmSearchLimit } : {}) };
+      ? { mode: 'FIND', activityId: dayIntent.activityId, durationMinutes: dayIntent.estimatedDurationMinutes, dateRange: { start: request.targetDate, end: request.targetDate }, searchWindow, excludedIntervals, ...(dailyRhythmSearchLimit !== undefined ? { limit: dailyRhythmSearchLimit } : {}), ...(requested.timePreference ? { timePreference: requested.timePreference } : {}) }
+      : { mode: 'FIND', taskTitle: requested.title, durationMinutes: dayIntent.estimatedDurationMinutes, dateRange: { start: request.targetDate, end: request.targetDate }, searchWindow, excludedIntervals, ...(dailyRhythmSearchLimit !== undefined ? { limit: dailyRhythmSearchLimit } : {}), ...(requested.timePreference ? { timePreference: requested.timePreference } : {}) };
 
     let searchResult: { candidates: TimingCandidate[] };
     try {
@@ -1040,7 +1047,7 @@ async function runOrchestration(request: ConstructDayRequest, deps: DayConstruct
     // against a larger `excludedIntervals`, without re-deriving
     // `activityId`/`title`/`estimatedDurationMinutes` from `requested`/
     // `dayIntent` a second time.
-    flexibleSearchMetaByIntentId[dayIntent.id] = { activityId: dayIntent.activityId, title: requested.title, durationMinutes: dayIntent.estimatedDurationMinutes };
+    flexibleSearchMetaByIntentId[dayIntent.id] = { activityId: dayIntent.activityId, title: requested.title, durationMinutes: dayIntent.estimatedDurationMinutes, ...(requested.timePreference ? { timePreference: requested.timePreference } : {}) };
   }
 
   // O5 P4b1 -- T1: the candidate lists exactly as the ORIGINAL timing searches left them, captured (owned copies) BEFORE any replenishment
@@ -1174,8 +1181,8 @@ async function runOrchestration(request: ConstructDayRequest, deps: DayConstruct
       // intent, so this is a cheap, pure re-check, not a second policy).
       const dailyRhythmSearchLimit = resolveDailyRhythmSearchLimit(meta.activityId, { targetDate: request.targetDate, timezone: request.timezone, prefs: dailyRhythmPrefs });
       const searchRequest: Omit<TimingSearchRequest, 'context'> = meta.activityId
-        ? { mode: 'FIND', activityId: meta.activityId, durationMinutes: meta.durationMinutes, dateRange: { start: request.targetDate, end: request.targetDate }, searchWindow, excludedIntervals, ...(dailyRhythmSearchLimit !== undefined ? { limit: dailyRhythmSearchLimit } : {}) }
-        : { mode: 'FIND', taskTitle: meta.title, durationMinutes: meta.durationMinutes, dateRange: { start: request.targetDate, end: request.targetDate }, searchWindow, excludedIntervals, ...(dailyRhythmSearchLimit !== undefined ? { limit: dailyRhythmSearchLimit } : {}) };
+        ? { mode: 'FIND', activityId: meta.activityId, durationMinutes: meta.durationMinutes, dateRange: { start: request.targetDate, end: request.targetDate }, searchWindow, excludedIntervals, ...(dailyRhythmSearchLimit !== undefined ? { limit: dailyRhythmSearchLimit } : {}), ...(meta.timePreference ? { timePreference: meta.timePreference } : {}) }
+        : { mode: 'FIND', taskTitle: meta.title, durationMinutes: meta.durationMinutes, dateRange: { start: request.targetDate, end: request.targetDate }, searchWindow, excludedIntervals, ...(dailyRhythmSearchLimit !== undefined ? { limit: dailyRhythmSearchLimit } : {}), ...(meta.timePreference ? { timePreference: meta.timePreference } : {}) };
 
       let replenishedResult: { candidates: TimingCandidate[] };
       try {

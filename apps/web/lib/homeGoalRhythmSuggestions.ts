@@ -48,6 +48,8 @@
  * `progressLabel`.
  */
 import type { GoalDemandCandidate } from './goalDemandCandidates';
+// Pure, client-safe (no DB import) -- this module is bundled into Home.
+import { isPreferredRhythmDate } from './goalActivityRhythmPreferences';
 
 export interface HomeGoalRhythmSuggestion {
   goalActivityId: string;
@@ -75,7 +77,48 @@ export interface HomeGoalRhythmSuggestion {
    * today's once-per-day session already exists (planned or done), so a
    * "today" handoff would only be refused. Absent/false = no such session. */
   scheduledToday?: boolean;
+  /** AURA-MR2 -- the earliest CONFIRMED future session (a real UPCOMING
+   * plan), when one exists. Never a suggestion. */
+  nextOccurrence?: GoalRhythmNextOccurrence;
+  /** AURA-MR2 -- true when the rhythm has a weekday preference that excludes
+   * today: Aura does not offer a "today" session for it. */
+  notPreferredToday?: boolean;
+  /** AURA-MR2 -- sessions still open for NEXT week (absent when none). */
+  nextWeekRemaining?: number;
+  /** AURA-MR2 -- true for a card that exists only because NEXT week has open
+   * sessions (this week's target is already met or fully planned). */
+  currentWeekComplete?: boolean;
 }
+
+/** AURA-MR2 -- a confirmed upcoming session (from a real PlannedActivity). */
+export interface GoalRhythmNextOccurrence {
+  plannedActivityId: string;
+  start: string;
+  end: string;
+}
+
+/** AURA-MR2 -- a paused rhythm, shown on Home as paused (never suggested). */
+export interface HomePausedGoalRhythm {
+  goalActivityId: string;
+  goalId: string;
+  title: string;
+  targetPerWeek: number | null;
+  nextOccurrence?: GoalRhythmNextOccurrence;
+}
+
+/** AURA-MR2 -- GET /api/daily-assistant/goal-rhythm's response. `candidates`
+ * keeps its exact pre-MR2 meaning (this week's demand); everything else is
+ * additive. */
+export type GoalRhythmHomeResponse =
+  | {
+      status: 'OK';
+      candidates: readonly GoalDemandCandidate[];
+      planningLocalDate?: string;
+      nextWeekCandidates?: readonly GoalDemandCandidate[];
+      nextOccurrenceByGoalActivityId?: Readonly<Record<string, GoalRhythmNextOccurrence>>;
+      pausedRhythms?: readonly HomePausedGoalRhythm[];
+    }
+  | { status: 'LOAD_FAILED' };
 
 /** Pure, no DB, no Date.now() -- exported so a test can exercise the exact
  * singular/plural boundary without constructing a full candidate. */
@@ -114,6 +157,56 @@ export function mapGoalDemandToHomeRhythmSuggestions(candidates: readonly GoalDe
 /** The default number of Goal-Rhythm suggestion cards Home shows before
  * requiring a "View all" tap (this ticket's own section 2: "a maximum of
  * three visible Goal-Rhythm suggestions initially"). */
+/**
+ * AURA-MR2 -- the Home view of the goal-rhythm response: this week's
+ * suggestions (exactly mapGoalDemandToHomeRhythmSuggestions) enriched with the
+ * confirmed next session, today's weekday preference and next week's open
+ * sessions, plus one next-week-only card per rhythm whose current week is
+ * already complete. Pure.
+ */
+export function buildHomeGoalRhythmSuggestions(response: Extract<GoalRhythmHomeResponse, { status: 'OK' }>): HomeGoalRhythmSuggestion[] {
+  const next = new Map((response.nextWeekCandidates ?? []).map((c) => [c.goalActivityId, c] as const));
+  const occurrences = response.nextOccurrenceByGoalActivityId ?? {};
+  const today = response.planningLocalDate;
+  const enrich = (suggestion: HomeGoalRhythmSuggestion, candidate: GoalDemandCandidate): HomeGoalRhythmSuggestion => {
+    const nextWeek = next.get(suggestion.goalActivityId);
+    return {
+      ...suggestion,
+      ...(occurrences[suggestion.goalActivityId] ? { nextOccurrence: occurrences[suggestion.goalActivityId] } : {}),
+      ...(today && candidate.preferences && !isPreferredRhythmDate(candidate.preferences, today) ? { notPreferredToday: true } : {}),
+      ...(nextWeek && nextWeek.remainingThisWeek > 0 ? { nextWeekRemaining: nextWeek.remainingThisWeek } : {}),
+    };
+  };
+  const current = response.candidates.map((candidate) => enrich(mapGoalDemandToHomeRhythmSuggestions([candidate])[0], candidate));
+  const currentIds = new Set(response.candidates.map((c) => c.goalActivityId));
+  const nextOnly = (response.nextWeekCandidates ?? [])
+    .filter((c) => !currentIds.has(c.goalActivityId) && c.remainingThisWeek > 0)
+    .map((candidate) => ({
+      ...mapGoalDemandToHomeRhythmSuggestions([candidate])[0],
+      remainingThisWeek: 0,
+      progressLabel: "This week's sessions are planned",
+      currentWeekComplete: true as const,
+      nextWeekRemaining: candidate.remainingThisWeek,
+      ...(occurrences[candidate.goalActivityId] ? { nextOccurrence: occurrences[candidate.goalActivityId] } : {}),
+    }));
+  return [...current, ...nextOnly];
+}
+
+/** AURA-MR2 -- "Next: Tue, Nov 25 · 7:10 AM · Confirmed". Always says
+ * Confirmed, because a nextOccurrence is only ever a real UPCOMING plan; a
+ * suggestion never reaches this label. Pure (explicit timezone). */
+export function formatNextOccurrenceLabel(next: GoalRhythmNextOccurrence, timezone: string): string {
+  const start = new Date(next.start);
+  const day = start.toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric', timeZone: timezone });
+  const time = start.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit', timeZone: timezone });
+  return `Next: ${day} · ${time} · Confirmed`;
+}
+
+/** AURA-MR2 -- one paused rhythm's Home line, e.g. "Evening walk · Paused". */
+export function formatPausedRhythmLabel(paused: HomePausedGoalRhythm): string {
+  return `${paused.title} · Paused`;
+}
+
 export const GOAL_RHYTHM_VISIBLE_CAP = 3;
 
 /**
@@ -193,22 +286,44 @@ export function excludeGoalRhythmSuggestionsDuplicatingActivities(
  * When today's session already exists, the today handoff is withheld and
  * the weekly review (future days only) becomes the way to plan the rest.
  */
-export function resolveGoalRhythmCardActions(suggestion: Pick<HomeGoalRhythmSuggestion, 'remainingThisWeek' | 'scheduledToday'>, offerWeeklyReviewByCount: boolean): {
+export function resolveGoalRhythmCardActions(suggestion: Pick<HomeGoalRhythmSuggestion, 'remainingThisWeek' | 'scheduledToday'> & Partial<Pick<HomeGoalRhythmSuggestion, 'notPreferredToday' | 'nextWeekRemaining' | 'currentWeekComplete'>>, offerWeeklyReviewByCount: boolean): {
   todayHandoff: 'JUST_TODAY' | 'PLAN_IT' | null;
   weeklyReview: boolean;
   primaryLabel: string;
   scheduledTodayNote: string | null;
+  /** AURA-MR2 -- which week the primary weekly review plans. */
+  primaryWeek?: 'CURRENT' | 'NEXT';
+  /** AURA-MR2 -- offer a secondary "Plan next week" review. */
+  offerNextWeek?: boolean;
 } {
+  // AURA-MR2 -- a card that exists only for next week.
+  if (suggestion.currentWeekComplete === true) {
+    return { todayHandoff: null, weeklyReview: true, primaryLabel: 'Plan next week', scheduledTodayNote: null, primaryWeek: 'NEXT' };
+  }
+  const offerNextWeek = (suggestion.nextWeekRemaining ?? 0) > 0 ? { offerNextWeek: true } : {};
+  // AURA-MR2 -- today is not one of the rhythm's preferred days: no "today"
+  // handoff (Plan My Day would not suggest it either); the weekly review
+  // proposes only preferred days.
+  if (suggestion.notPreferredToday === true) {
+    return {
+      todayHandoff: null,
+      weeklyReview: true,
+      primaryLabel: suggestion.remainingThisWeek === 1 ? 'Plan this week' : `Plan remaining ${suggestion.remainingThisWeek}`,
+      scheduledTodayNote: "Today isn't one of this rhythm's days.",
+      ...offerNextWeek,
+    };
+  }
   if (suggestion.scheduledToday === true) {
     return {
       todayHandoff: null,
       weeklyReview: true,
       primaryLabel: suggestion.remainingThisWeek === 1 ? 'Plan another day' : `Plan remaining ${suggestion.remainingThisWeek}`,
       scheduledTodayNote: "Today's session is already planned.",
+      ...offerNextWeek,
     };
   }
   if (offerWeeklyReviewByCount) {
-    return { todayHandoff: 'JUST_TODAY', weeklyReview: true, primaryLabel: `Plan remaining ${suggestion.remainingThisWeek}`, scheduledTodayNote: null };
+    return { todayHandoff: 'JUST_TODAY', weeklyReview: true, primaryLabel: `Plan remaining ${suggestion.remainingThisWeek}`, scheduledTodayNote: null, ...offerNextWeek };
   }
-  return { todayHandoff: 'PLAN_IT', weeklyReview: false, primaryLabel: 'Plan it', scheduledTodayNote: null };
+  return { todayHandoff: 'PLAN_IT', weeklyReview: false, primaryLabel: 'Plan it', scheduledTodayNote: null, ...offerNextWeek };
 }
