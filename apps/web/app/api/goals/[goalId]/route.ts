@@ -4,6 +4,7 @@ import { getGoalForUser, listGoalActivitiesWithLinkedPlanStatus, deleteGoal, get
 import { deriveGoalActivityState, computeGoalProgress } from '../../../../lib/goals';
 import { normalizeGoalActivityCompletionRequirement } from '../../../../lib/goalCompletion';
 import { normalizeGoalActivityRhythm } from '../../../../lib/goalActivityRhythm';
+import { isGoalActivityRhythmPaused, normalizeGoalActivityRhythmPreferences } from '../../../../lib/goalActivityRhythmPreferences';
 import { evaluateNewOccurrenceEligibility } from '../../../../lib/goalActivityOccurrenceCapacity';
 import { getDatePartsInTimezone } from '../../../../lib/timezone';
 import { goalHasOngoingRhythmActivity, type GoalActivityRhythmView } from '../../../../lib/goalsPresentation';
@@ -76,6 +77,10 @@ export async function GET(req: NextRequest, { params }: { params: { goalId: stri
       // normalizes to DONE). Not consumed by any UI yet.
       completionRequirement: normalizeGoalActivityCompletionRequirement(row),
       rhythm,
+      // AURA-MR1 -- read-only views of migration 0053's pause state and
+      // preferences (normalized; never re-derived from anything else).
+      rhythmPaused: isGoalActivityRhythmPaused(row),
+      rhythmPreferences: normalizeGoalActivityRhythmPreferences(row),
     };
   });
   // Goals V2 Rhythm R4 -- hasOngoingRhythmActivity (this ticket's own

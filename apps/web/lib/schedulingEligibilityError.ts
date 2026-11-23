@@ -62,6 +62,11 @@ export function materializeFailureToSchedulingEligibilityError(reason: Materiali
       return new SchedulingEligibilityError('DAILY_ATTRIBUTION_UNRESOLVED', 'Cannot confirm that day is free for this activity.');
     case 'NOT_FOUND':
       return goalActivityNotAvailableError();
+    // AURA-MR1 -- a paused rhythm reuses the existing generic "not available"
+    // code (no new client-facing code or copy in MR1; a pause-specific message
+    // belongs to the MR3 UI work).
+    case 'RHYTHM_PAUSED':
+      return goalActivityNotAvailableError();
   }
 }
 

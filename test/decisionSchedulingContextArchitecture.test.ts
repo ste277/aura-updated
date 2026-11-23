@@ -71,7 +71,11 @@ const SNAPSHOT_READS = ['loadCandidateGoalActivitiesForRhythmDemand', 'listGoalA
  * now prefers over live re-derivation. Every other pin below is unmodified and still catches an accidental
  * change the same as before. */
 const SQL_PINS: Record<string, string> = {
-  loadCandidateGoalActivitiesForRhythmDemand: '757784fc4ef4052f',
+  // AURA-MR1 -- re-baselined, not weakened: the discovery query gained exactly
+  // one predicate, `AND ga."rhythmPausedAt" IS NULL` (migration 0053), so a
+  // paused My Rhythm is never offered as Goal demand. Removing that one line
+  // reproduces the previous pin 757784fc4ef4052f exactly.
+  loadCandidateGoalActivitiesForRhythmDemand: '0e7b2f7f5b5de012',
   // Insights V1 PR3 -- re-baselined, not weakened: listGoalActivityOccurrenceRowsForActivities's
   // own SQL deliberately changed (JOIN -> LEFT JOIN on PlannedActivity, plus
   // a new LEFT JOIN on GoalActivityExecution via goalActivityOccurrenceId)

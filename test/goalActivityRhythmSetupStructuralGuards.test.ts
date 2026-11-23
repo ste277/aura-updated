@@ -71,7 +71,11 @@ const addActivityRouteSrc = stripComments(read('../apps/web/app/api/goals/[goalI
 const rhythmEditRouteSrc = stripComments(read('../apps/web/app/api/goals/[goalId]/activities/[goalActivityId]/rhythm/route.ts'));
 check('19. POST /api/goals validates every activityRhythms entry through the canonical R2 validator (validateGoalActivityRhythm), never trusts the client object raw', /validateGoalActivityRhythm\(/.test(createGoalRouteSrc));
 check('19. POST /api/goals/[goalId]/activities validates rhythm through the canonical R2 validator', /validateGoalActivityRhythm\(/.test(addActivityRouteSrc));
-check('19. PATCH .../rhythm validates through the canonical R2 validator and requires it (never optional on this endpoint)', /validateGoalActivityRhythm\(/.test(rhythmEditRouteSrc) && /rhythm is required/.test(rhythmEditRouteSrc));
+// AURA-MR1 -- `rhythm` is no longer the only field on this endpoint (MR1 adds
+// `preferences` and `paused`), so it is optional when another field is
+// given; the request must still carry at least one field, and every field is
+// still server-validated through its canonical validator.
+check('19. PATCH .../rhythm validates rhythm through the canonical R2 validator, preferences through the canonical MR1 parser, and requires at least one field', /validateGoalActivityRhythm\(/.test(rhythmEditRouteSrc) && /parseGoalActivityRhythmPreferencesPatch\(/.test(rhythmEditRouteSrc) && /At least one of rhythm, preferences or paused is required/.test(rhythmEditRouteSrc));
 check('18. none of the three routes coerce an invalid value (no Math.round/Math.floor/Math.abs/|| applied to a client-supplied targetPerWeek)', !/Math\.(round|floor|abs)\(.*targetPerWeek|targetPerWeek\s*\|\|/.test(createGoalRouteSrc + addActivityRouteSrc + rhythmEditRouteSrc));
 
 // ============================================================
@@ -96,9 +100,14 @@ function functionBody(source: string, name: string): string {
   }
   throw new Error(`unterminated function ${name}`);
 }
-const setRhythmBody = functionBody(dbSrc, 'setGoalActivityRhythm');
-check('21/22/23. setGoalActivityRhythm never references plannedActivityId/status/GoalActivityOccurrence (a pure policy UPDATE, this ticket\'s own section 21)', !/plannedActivityId|"status"|GoalActivityOccurrence/.test(setRhythmBody));
-check('21/22/23. setGoalActivityRhythm issues exactly one UPDATE targeting only rhythmKind/rhythmTargetPerWeek/updatedAt', /UPDATE "GoalActivity" SET "rhythmKind" = \$1, "rhythmTargetPerWeek" = \$2, "updatedAt" = now\(\)/.test(setRhythmBody));
+// AURA-MR1 -- R5's setGoalActivityRhythm was generalized into
+// updateGoalActivityRhythmSettings (policy + MR1 pause/preferences in one
+// UPDATE). The same invariants are re-asserted against the new writer: still
+// a pure policy write that never touches plans, status or occurrences.
+const setRhythmBody = functionBody(dbSrc, 'updateGoalActivityRhythmSettings');
+check('21/22/23. updateGoalActivityRhythmSettings never references plannedActivityId/status/GoalActivityOccurrence (a pure policy UPDATE, this ticket\'s own section 21)', !/plannedActivityId|"status"|GoalActivityOccurrence|PlannedActivity/.test(setRhythmBody));
+check('21/22/23. updateGoalActivityRhythmSettings issues exactly one UPDATE, targeting only the Rhythm policy, MR1 pause/preference columns and updatedAt', (setRhythmBody.match(/UPDATE "GoalActivity" SET/g) ?? []).length === 1 && /"rhythmKind" = \$1,\s*"rhythmTargetPerWeek" = \$2,\s*"rhythmPreferredWeekdays" = \$3::integer\[\],\s*"rhythmPreferredTimeOfDay" = \$4,\s*"rhythmPreferredDurationMinutes" = \$5,\s*"rhythmPausedAt" = CASE \$6::text WHEN 'PAUSE' THEN COALESCE\("rhythmPausedAt", now\(\)\) WHEN 'CLEAR' THEN NULL ELSE "rhythmPausedAt" END,\s*"updatedAt" = now\(\)\s*WHERE/.test(setRhythmBody) && !/INSERT\s|DELETE\s/.test(setRhythmBody));
+check('21/22/23. updateGoalActivityRhythmSettings reads the current row FOR UPDATE scoped by id + goalId + userId (ownership + serialized merge)', /WHERE id = \$1 AND "goalId" = \$2 AND "userId" = \$3 FOR UPDATE/.test(setRhythmBody) && /WHERE id = \$7 AND "goalId" = \$8 AND "userId" = \$9/.test(setRhythmBody));
 
 // ============================================================
 // 24/25/26. CompletionRequirement / scheduling duration / Constructor
@@ -106,7 +115,7 @@ check('21/22/23. setGoalActivityRhythm issues exactly one UPDATE targeting only 
 // ============================================================
 check('24. the manual Add activity form has no CompletionRequirement control (no kind/targetValue/unit selector added alongside the frequency picker)', !/completionKind|completionTargetValue|completionUnit/.test(goalDetailSrc));
 check('25. no duration x frequency aggregate math anywhere in the setup UI (no targetPerWeek multiplied/added with a duration value)', !/targetPerWeek\s*\*|dDurationMinutes\s*\*\s*targetPerWeek/.test(allSetupUiSrc));
-check('26. dayConstructor*.ts has zero reference to activityRhythms/RhythmPicker/setGoalActivityRhythm (R5 never reaches the Constructor)', !/activityRhythms|RhythmPicker|setGoalActivityRhythm/.test(stripComments(read('../apps/web/lib/dayConstructor.ts'))) && !/activityRhythms|RhythmPicker|setGoalActivityRhythm/.test(stripComments(read('../apps/web/lib/dayConstructorOrchestrator.ts'))));
+check('26. dayConstructor*.ts has zero reference to activityRhythms/RhythmPicker/setGoalActivityRhythm (R5 never reaches the Constructor)', !/activityRhythms|RhythmPicker|setGoalActivityRhythm|updateGoalActivityRhythmSettings|goalActivityRhythmPreferences/.test(stripComments(read('../apps/web/lib/dayConstructor.ts'))) && !/activityRhythms|RhythmPicker|setGoalActivityRhythm|updateGoalActivityRhythmSettings|goalActivityRhythmPreferences/.test(stripComments(read('../apps/web/lib/dayConstructorOrchestrator.ts'))));
 
 if (!allPassed) {
   console.error('SOME GOAL ACTIVITY RHYTHM SETUP STRUCTURAL GUARD CHECKS FAILED');

@@ -1,19 +1,36 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getSessionFromRequest } from '../../../../../../../lib/session';
-import { setGoalActivityRhythm } from '../../../../../../../lib/db';
+import { updateGoalActivityRhythmSettings } from '../../../../../../../lib/db';
 import { parseJsonObject } from '../../../../../../../lib/request';
 import { validateGoalActivityRhythm } from '../../../../../../../lib/goalActivityRhythm';
+import {
+  isGoalActivityRhythmPaused,
+  normalizeGoalActivityRhythmPreferences,
+  parseGoalActivityRhythmPreferencesPatch,
+  type GoalActivityRhythmSettingsUpdate,
+} from '../../../../../../../lib/goalActivityRhythmPreferences';
 
 /**
- * Goals V2 Rhythm R5 -- the one allowed path for changing an EXISTING
- * GoalActivity's Rhythm policy after creation (this ticket's own section
- * 20's "small inline edit" decision -- see this ticket's own doc comments
- * in GoalDetailClient.tsx/db.ts for why editing is included rather than
- * creation-only). A pure policy change: PATCH, not POST, since it mutates
- * an existing resource's field rather than creating anything. `rhythm` is
- * required and server-validated through the canonical R2 validator -- the
- * client's own pre-validation (immediate UI feedback only) is never
- * trusted (this ticket's own section 19).
+ * Goals V2 Rhythm R5, extended by AURA-MR1 -- the one allowed path for
+ * changing an EXISTING GoalActivity's Rhythm settings after creation. A pure
+ * policy change: PATCH, not POST.
+ *
+ * Body (every field optional, at least one required):
+ *   rhythm       -- { kind: 'NONE' } | { kind: 'N_PER_WEEK', targetPerWeek }
+ *                   (R5's original field; `{ rhythm }` alone behaves exactly
+ *                   as before, except that switching to NONE now also clears
+ *                   MR1's preferences/pause, which mean nothing for NONE).
+ *   preferences  -- { preferredWeekdays?, preferredTimeOfDay?,
+ *                   preferredDurationMinutes? }; an absent key is unchanged,
+ *                   null (or [] for weekdays) clears it.
+ *   paused       -- true pauses (no new rhythm sessions recommended or
+ *                   created; existing plans untouched), false resumes.
+ *
+ * Every value is server-validated through the canonical validators -- a
+ * client's own pre-validation is never trusted -- and the merged result is
+ * validated as a whole under a row lock (updateGoalActivityRhythmSettings).
+ * Ownership: the session's user, the Goal and the activity must all match,
+ * otherwise 404 (another user's rhythm can never be read or modified).
  */
 export async function PATCH(req: NextRequest, { params }: { params: { goalId: string; goalActivityId: string } }) {
   const session = getSessionFromRequest(req);
@@ -22,13 +39,40 @@ export async function PATCH(req: NextRequest, { params }: { params: { goalId: st
   const body = await parseJsonObject(req);
   if (!body) return NextResponse.json({ error: 'A valid JSON request body is required.' }, { status: 400 });
 
-  if (body.rhythm === undefined || body.rhythm === null || typeof body.rhythm !== 'object') {
-    return NextResponse.json({ error: 'rhythm is required and must be an object with a kind field.' }, { status: 400 });
-  }
-  const validated = validateGoalActivityRhythm(body.rhythm as { kind: unknown; targetPerWeek?: unknown });
-  if (!validated.ok) return NextResponse.json({ error: validated.error }, { status: 400 });
+  const update: GoalActivityRhythmSettingsUpdate = {};
 
-  const activity = await setGoalActivityRhythm(session.userId, params.goalId, params.goalActivityId, validated.rhythm);
-  if (!activity) return NextResponse.json({ error: 'Goal activity not found.' }, { status: 404 });
-  return NextResponse.json(activity);
+  if (body.rhythm !== undefined) {
+    if (body.rhythm === null || typeof body.rhythm !== 'object') {
+      return NextResponse.json({ error: 'rhythm must be an object with a kind field.' }, { status: 400 });
+    }
+    const validated = validateGoalActivityRhythm(body.rhythm as { kind: unknown; targetPerWeek?: unknown });
+    if (!validated.ok) return NextResponse.json({ error: validated.error }, { status: 400 });
+    update.rhythm = validated.rhythm;
+  }
+
+  if (body.preferences !== undefined) {
+    const parsed = parseGoalActivityRhythmPreferencesPatch(body.preferences);
+    if (!parsed.ok) return NextResponse.json({ error: parsed.error }, { status: 400 });
+    update.preferences = parsed.value;
+  }
+
+  if (body.paused !== undefined) {
+    if (typeof body.paused !== 'boolean') return NextResponse.json({ error: 'paused must be true or false.' }, { status: 400 });
+    update.paused = body.paused;
+  }
+
+  if (update.rhythm === undefined && update.preferences === undefined && update.paused === undefined) {
+    return NextResponse.json({ error: 'At least one of rhythm, preferences or paused is required.' }, { status: 400 });
+  }
+
+  const result = await updateGoalActivityRhythmSettings(session.userId, params.goalId, params.goalActivityId, update);
+  if (result.status === 'NOT_FOUND') return NextResponse.json({ error: 'Goal activity not found.' }, { status: 404 });
+  if (result.status === 'INVALID') return NextResponse.json({ error: result.error }, { status: 400 });
+
+  const activity = result.activity;
+  return NextResponse.json({
+    ...activity,
+    rhythmPaused: isGoalActivityRhythmPaused(activity),
+    rhythmPreferences: normalizeGoalActivityRhythmPreferences(activity),
+  });
 }

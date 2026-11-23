@@ -93,7 +93,13 @@ check('schema.prisma was not touched by G3.2 beyond what G3.2 itself added (stil
     .replace(/rhythmKind\s+String\?/g, '')
     .replace(/rhythmTargetPerWeek\s+Int\?/g, '')
     .replace(/dailyFrequencyKind\s+String\?/g, '')
-    .replace(/dailyFrequencyLimit\s+Int\?/g, '');
+    .replace(/dailyFrequencyLimit\s+Int\?/g, '')
+    // AURA-MR1 (migration 0053) -- the four separately-reviewed My Rhythm
+    // pause/preference columns, stripped by exact name AND type the same way.
+    .replace(/rhythmPausedAt\s+DateTime\?\s+@db\.Timestamptz\(3\)/g, '')
+    .replace(/rhythmPreferredWeekdays\s+Int\[\]\s+@default\(\[\]\)/g, '')
+    .replace(/rhythmPreferredTimeOfDay\s+String\?/g, '')
+    .replace(/rhythmPreferredDurationMinutes\s+Int\?/g, '');
   return !/dayBucket|frequency|recurrence|Rhythm/i.test(withoutKnownRhythmColumns);
 })());
 
