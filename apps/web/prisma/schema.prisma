@@ -884,6 +884,26 @@ model GoalActivity {
   // negative value before it ever reaches persistence.
   dailyFrequencyLimit Int?
 
+  // AURA-MR1 (migration 0053) -- My Rhythm foundation: pause state and
+  // scheduling PREFERENCES for an N_PER_WEEK rhythm (apps/web/lib/
+  // goalActivityRhythmPreferences.ts). Orthogonal to rhythmKind/
+  // rhythmTargetPerWeek above: preferences describe WHERE/WHEN sessions
+  // should be proposed, never HOW MANY are owed -- the weekly eligibility
+  // formula is unchanged. Additive, no backfill: every existing row reads
+  // as "active, no preferences", identical to pre-0053 behavior.
+  //   rhythmPausedAt: NULL = active; non-NULL = paused (no new rhythm
+  //     sessions are recommended or materialized; existing plans untouched).
+  //   rhythmPreferredWeekdays: [] = any day; else distinct sorted 0=Sun..6=Sat
+  //     (same encoding/default convention as User.dailyRhythmWorkDays).
+  //   rhythmPreferredTimeOfDay: NULL = any; else MORNING|AFTERNOON|EVENING|NIGHT.
+  //   rhythmPreferredDurationMinutes: NULL = activity default; else 15..360.
+  // Only meaningful while rhythmKind = N_PER_WEEK; setting the rhythm back
+  // to NONE clears all four (updateGoalActivityRhythmSettings, db.ts).
+  rhythmPausedAt                 DateTime? @db.Timestamptz(3)
+  rhythmPreferredWeekdays        Int[]     @default([])
+  rhythmPreferredTimeOfDay       String?
+  rhythmPreferredDurationMinutes Int?
+
   createdAt         DateTime         @default(now()) @db.Timestamptz(3)
   updatedAt         DateTime         @updatedAt @db.Timestamptz(3)
 

@@ -24,6 +24,12 @@ import {
   resolveOccurrenceLocalDayOrNull,
   type PersistedGoalActivityDailyFrequency,
 } from './goalActivityDailyFrequency';
+import {
+  normalizeGoalActivityRhythmPreferences,
+  resolveGoalActivityRhythmSettingsUpdate,
+  toPersistedGoalActivityRhythmPreferences,
+  type GoalActivityRhythmSettingsUpdate,
+} from './goalActivityRhythmPreferences';
 import { getDatePartsInTimezone } from './timezone';
 import { canonicalizeCivilBirthDate } from './birthDate';
 import { toPersistedGoalActivityExecutionSnapshot, fromPersistedGoalActivityExecutionSnapshot, resolveCompletionActualValue } from './goalActivityExecution';
@@ -2866,6 +2872,13 @@ export interface GoalActivity {
   // normalizes to NONE).
   rhythmKind: string | null;
   rhythmTargetPerWeek: number | null;
+  // AURA-MR1 (migration 0053) -- raw persisted pause state and preferences;
+  // see apps/web/lib/goalActivityRhythmPreferences.ts for the canonical
+  // normalized view (NULL / '{}' = active, no preferences).
+  rhythmPausedAt: Date | null;
+  rhythmPreferredWeekdays: number[];
+  rhythmPreferredTimeOfDay: string | null;
+  rhythmPreferredDurationMinutes: number | null;
   createdAt: Date;
   updatedAt: Date;
 }
@@ -3161,27 +3174,81 @@ export async function addGoalActivity(userId: string, goalId: string, input: { t
   return result.rows[0];
 }
 
+export type UpdateGoalActivityRhythmSettingsResult =
+  | { status: 'UPDATED'; activity: GoalActivity }
+  | { status: 'NOT_FOUND' }
+  | { status: 'INVALID'; error: string };
+
 /**
- * Goals V2 Rhythm R5 -- the one allowed Rhythm WRITE path for an EXISTING
- * GoalActivity (creation-time Rhythm goes through addGoalActivity /
- * createGoalWithActivities instead -- this function is never called from
- * either). A pure policy change: never touches plannedActivityId, never
- * creates/deletes a GoalActivityOccurrence row, never cancels an existing
- * UPCOMING commitment (this ticket's own section 21/22 -- eligibility
- * simply recalculates prospectively from the new policy the next time it
- * is read; nothing here is migrated or backfilled). Scoped by userId AND
- * goalId AND id together, same ownership convention as
- * dismissGoalActivity. The caller is responsible for validating `rhythm`
- * through validateGoalActivityRhythm first -- this function trusts its
- * input, same convention as every other persistence function in this file.
+ * Goals V2 Rhythm R5, generalized by AURA-MR1 -- the one allowed Rhythm WRITE
+ * path for an EXISTING GoalActivity (creation-time Rhythm goes through
+ * addGoalActivity / createGoalWithActivities instead -- this function is
+ * never called from either). It replaces R5's setGoalActivityRhythm, which
+ * could only write the weekly policy; it now also writes MR1's pause state
+ * and preferences (migration 0053), in the SAME single UPDATE, so the policy
+ * and its preferences can never be observed half-written.
+ *
+ * Still a pure policy change: never touches plannedActivityId, never
+ * creates/deletes a GoalActivityOccurrence row, never cancels, completes or
+ * skips an existing commitment -- pausing leaves every already-confirmed plan
+ * exactly as it was; eligibility simply recalculates prospectively.
+ *
+ * The CURRENT row is read `FOR UPDATE` inside one transaction and the update
+ * is merged and validated as a whole (resolveGoalActivityRhythmSettingsUpdate,
+ * pure) -- two concurrent edits serialize instead of each validating against
+ * a stale row. Scoped by userId AND goalId AND id together (same ownership
+ * convention as dismissGoalActivity): another user's activity, or an
+ * activity under a different Goal, is NOT_FOUND. The caller validates every
+ * client value first (validateGoalActivityRhythm,
+ * parseGoalActivityRhythmPreferencesPatch).
  */
-export async function setGoalActivityRhythm(userId: string, goalId: string, goalActivityId: string, rhythm: GoalActivityRhythm): Promise<GoalActivity | null> {
-  const persisted = toPersistedGoalActivityRhythm(rhythm);
-  const result = await pool.query(
-    `UPDATE "GoalActivity" SET "rhythmKind" = $1, "rhythmTargetPerWeek" = $2, "updatedAt" = now() WHERE id = $3 AND "goalId" = $4 AND "userId" = $5 RETURNING *`,
-    [persisted.rhythmKind, persisted.rhythmTargetPerWeek, goalActivityId, goalId, userId]
-  );
-  return result.rows[0] ?? null;
+export async function updateGoalActivityRhythmSettings(userId: string, goalId: string, goalActivityId: string, update: GoalActivityRhythmSettingsUpdate): Promise<UpdateGoalActivityRhythmSettingsResult> {
+  const client = await beginTransaction();
+  try {
+    const current = await client.query(
+      `SELECT "rhythmKind", "rhythmTargetPerWeek", "rhythmPreferredWeekdays", "rhythmPreferredTimeOfDay", "rhythmPreferredDurationMinutes", "dailyFrequencyKind", "dailyFrequencyLimit"
+       FROM "GoalActivity" WHERE id = $1 AND "goalId" = $2 AND "userId" = $3 FOR UPDATE`,
+      [goalActivityId, goalId, userId]
+    );
+    if (current.rows.length === 0) {
+      await client.query('ROLLBACK');
+      return { status: 'NOT_FOUND' };
+    }
+    const row = current.rows[0];
+    const resolved = resolveGoalActivityRhythmSettingsUpdate(
+      {
+        rhythm: normalizeGoalActivityRhythm({ rhythmKind: row.rhythmKind, rhythmTargetPerWeek: row.rhythmTargetPerWeek }),
+        preferences: normalizeGoalActivityRhythmPreferences(row),
+        dailyFrequency: normalizeGoalActivityDailyFrequency({ dailyFrequencyKind: row.dailyFrequencyKind, dailyFrequencyLimit: row.dailyFrequencyLimit }),
+      },
+      update
+    );
+    if (!resolved.ok) {
+      await client.query('ROLLBACK');
+      return { status: 'INVALID', error: resolved.error };
+    }
+    const persistedRhythm = toPersistedGoalActivityRhythm(resolved.value.rhythm);
+    const persistedPreferences = toPersistedGoalActivityRhythmPreferences(resolved.value.preferences);
+    const updated = await client.query(
+      `UPDATE "GoalActivity" SET
+         "rhythmKind" = $1,
+         "rhythmTargetPerWeek" = $2,
+         "rhythmPreferredWeekdays" = $3::integer[],
+         "rhythmPreferredTimeOfDay" = $4,
+         "rhythmPreferredDurationMinutes" = $5,
+         "rhythmPausedAt" = CASE $6::text WHEN 'PAUSE' THEN COALESCE("rhythmPausedAt", now()) WHEN 'CLEAR' THEN NULL ELSE "rhythmPausedAt" END,
+         "updatedAt" = now()
+       WHERE id = $7 AND "goalId" = $8 AND "userId" = $9 RETURNING *`,
+      [persistedRhythm.rhythmKind, persistedRhythm.rhythmTargetPerWeek, persistedPreferences.rhythmPreferredWeekdays, persistedPreferences.rhythmPreferredTimeOfDay, persistedPreferences.rhythmPreferredDurationMinutes, resolved.value.pauseAction, goalActivityId, goalId, userId]
+    );
+    await client.query('COMMIT');
+    return { status: 'UPDATED', activity: updated.rows[0] };
+  } catch (err) {
+    await client.query('ROLLBACK').catch(() => {});
+    throw err;
+  } finally {
+    client.release();
+  }
 }
 
 /** Idempotent (repeat dismissal is a harmless no-op re-write of the same
@@ -3671,6 +3738,7 @@ export async function loadCandidateGoalActivitiesForRhythmDemand(userId: string,
        AND g.status = 'ACTIVE'
        AND ga.status != 'DISMISSED'
        AND ga."rhythmKind" = 'N_PER_WEEK'
+       AND ga."rhythmPausedAt" IS NULL
      ORDER BY ga.id`,
     [userId]
   );
@@ -3865,7 +3933,11 @@ export async function listGoalActivityDailyOccupancyForActivities(
 
 export type MaterializeGoalActivityRhythmOccurrenceResult =
   | { ok: true; occurrenceId: string }
-  | { ok: false; reason: 'NOT_FOUND' | 'NOT_RHYTHM_ELIGIBLE' | 'CAPACITY_EXHAUSTED' | 'DAILY_CAPACITY_EXHAUSTED' | 'DAILY_ATTRIBUTION_UNRESOLVED' };
+  // AURA-MR1 -- RHYTHM_PAUSED: an N_PER_WEEK rhythm whose rhythmPausedAt is
+  // set. Deliberately NOT folded into NOT_RHYTHM_ELIGIBLE, which callers
+  // treat as "finite, fall through to the legacy single link" -- a paused
+  // rhythm must refuse a new session outright, never be linked as finite.
+  | { ok: false; reason: 'NOT_FOUND' | 'NOT_RHYTHM_ELIGIBLE' | 'RHYTHM_PAUSED' | 'CAPACITY_EXHAUSTED' | 'DAILY_CAPACITY_EXHAUSTED' | 'DAILY_ATTRIBUTION_UNRESOLVED' };
 
 /**
  * Goals V2 Rhythm R3, extended by Multi-Occurrence Rhythm PR 2 and HPG3-A2
@@ -3935,7 +4007,7 @@ export async function materializeGoalActivityRhythmOccurrence(
   client: PoolClient
 ): Promise<MaterializeGoalActivityRhythmOccurrenceResult> {
   const gaRes = await client.query(
-    `SELECT ga.status, ga."rhythmKind", ga."rhythmTargetPerWeek", ga."dailyFrequencyKind", ga."dailyFrequencyLimit"
+    `SELECT ga.status, ga."rhythmKind", ga."rhythmTargetPerWeek", ga."rhythmPausedAt", ga."dailyFrequencyKind", ga."dailyFrequencyLimit"
      FROM "GoalActivity" ga
      WHERE ga.id = $1 AND ga."userId" = $2`,
     [goalActivityId, userId]
@@ -3946,6 +4018,10 @@ export async function materializeGoalActivityRhythmOccurrence(
 
   const rhythm = normalizeGoalActivityRhythm({ rhythmKind: row.rhythmKind, rhythmTargetPerWeek: row.rhythmTargetPerWeek });
   if (rhythm.kind !== 'N_PER_WEEK') return { ok: false, reason: 'NOT_RHYTHM_ELIGIBLE' };
+  // AURA-MR1 -- a paused rhythm accepts no new session from any path (a
+  // weekly proposal accepted after the pause, Plan My Day, or a manual
+  // Goal-linked plan). Existing sessions are untouched.
+  if (row.rhythmPausedAt !== null) return { ok: false, reason: 'RHYTHM_PAUSED' };
 
   const facts = await loadGoalActivityRhythmFacts(userId, goalActivityId, timezone, client);
   const eligibility = evaluateNewOccurrenceEligibility({ rhythm, planningLocalDate, occurrences: facts });
@@ -3972,7 +4048,7 @@ export async function materializeGoalActivityRhythmOccurrence(
 
   const relinked = await client.query(
     `UPDATE "GoalActivity" SET "plannedActivityId" = $1, "updatedAt" = now()
-     WHERE id = $2 AND "userId" = $3 AND status != 'DISMISSED' AND "rhythmKind" = 'N_PER_WEEK'`,
+     WHERE id = $2 AND "userId" = $3 AND status != 'DISMISSED' AND "rhythmKind" = 'N_PER_WEEK' AND "rhythmPausedAt" IS NULL`,
     [newPlannedActivityId, goalActivityId, userId]
   );
   if ((relinked.rowCount ?? 0) !== 1) return { ok: false, reason: 'NOT_FOUND' };
