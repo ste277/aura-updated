@@ -860,6 +860,10 @@ jobs:
       # G5-C15-CI-1: compress .Z maxbits 0..16 (GNU gzip / libarchive decode 0..8).
       - name: Run Palm bundle scanner .Z maxbits regression tests (G5-C15-CI-1)
         run: npx ts-node test/palmG5C15CI1CompressMaxbits.test.ts
+      # G5-C17 (C16-F1..F3): reader-versus-scanner matrix -- embedded gzip that fails after
+      # emitting content, LHA, pack, gzip LZH, old-magic gzip; real readers on Ubuntu.
+      - name: Run Palm bundle scanner reader-versus-scanner matrix (G5-C17)
+        run: npx ts-node test/palmG5C17ReaderMatrix.test.ts
   web-build:
     name: Next.js production build
     runs-on: ubuntu-latest

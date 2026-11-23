@@ -251,7 +251,8 @@ const TFLITE_IDENTIFIER = Buffer.from('TFL3'); // FlatBuffer file identifier at 
 // file counts plus the bsdtar or cabextract header rule, the xar magic with a
 // binary header size (or a zlib TOC that inflates at the declared position),
 // the lzip version byte (0 or 1), compress .Z (offset 0 only: maxbits 0..16
-// and a literal first code), and for embedded gzip a header whose fields are
+// and a literal first code), the LHA header size / level bytes (G5-C17), pack,
+// gzip LZH and old-magic gzip (offset 0 only, G5-C17), and for embedded gzip a header whose fields are
 // scanned up to GZ_FIELD_SCAN plus a bounded deflate probe that counts ANY
 // deflate data valid through the probe window, a complete member with a
 // matching CRC/ISIZE trailer, or output reaching the probe cap.
@@ -503,6 +504,137 @@ const GZ_TRUNCATED_MIN = 16;
 // output: the shortest sentinel is 9 bytes, so less cannot hide one, and random
 // bytes rarely form a complete deflate stream this long.
 const GZ_MIN_LEAK = 8;
+// G5-C17 (C16-F1): a candidate the probe would call "not gzip" (invalid or
+// truncated deflate) is NOT harmless by that alone: streaming decoders (Node
+// createGunzip, DecompressionStream, Python zlib, GNU gzip) emit everything
+// decoded before the error. The probe therefore recovers that output with a
+// lenient decoder (inflateRecover: symbol by symbol up to the failure, and a
+// back-reference "too far back" reads zeros as in GNU gzip, C16-F1b) and
+// inspects it like
+// any other decoded content: a sentinel, a supported archive or an
+// identifiable foreign stream in it fails closed. Random bytes that happen to
+// follow a gzip magic decode to garbage that holds none of these, so no
+// byte-count threshold (and its false positives) is needed.
+const GZ_RECOVER_DEPTH = 3; // nested recovered-output inspections before failing closed
+let gzRecoverDepth = 0;
+let recoverSigs = null;
+// Raw-DEFLATE tables (RFC 1951 3.2.5, 3.2.7).
+const DFL_LEN_BASE = [3, 4, 5, 6, 7, 8, 9, 10, 11, 13, 15, 17, 19, 23, 27, 31, 35, 43, 51, 59, 67, 83, 99, 115, 131, 163, 195, 227, 258];
+const DFL_LEN_EXTRA = [0, 0, 0, 0, 0, 0, 0, 0, 1, 1, 1, 1, 2, 2, 2, 2, 3, 3, 3, 3, 4, 4, 4, 4, 5, 5, 5, 5, 0];
+const DFL_DIST_BASE = [1, 2, 3, 4, 5, 7, 9, 13, 17, 25, 33, 49, 65, 97, 129, 193, 257, 385, 513, 769, 1025, 1537, 2049, 3073, 4097, 6145, 8193, 12289, 16385, 24577];
+const DFL_DIST_EXTRA = [0, 0, 0, 0, 1, 1, 2, 2, 3, 3, 4, 4, 5, 5, 6, 6, 7, 7, 8, 8, 9, 9, 10, 10, 11, 11, 12, 12, 13, 13];
+const DFL_CL_ORDER = [16, 17, 18, 0, 8, 7, 9, 6, 10, 5, 11, 4, 12, 3, 13, 2, 14, 1, 15];
+function dflHuffman(lengths) {
+  const count = new Uint16Array(16), offs = new Uint16Array(16), symbol = new Uint16Array(lengths.length);
+  for (const l of lengths) count[l]++;
+  count[0] = 0;
+  let left = 1;
+  for (let len = 1; len < 16; len++) { left = left * 2 - count[len]; if (left < 0) throw new Error('over-subscribed code'); }
+  for (let len = 1; len < 15; len++) offs[len + 1] = offs[len] + count[len];
+  for (let i = 0; i < lengths.length; i++) if (lengths[i]) symbol[offs[lengths[i]]++] = i;
+  return { count, symbol };
+}
+let DFL_FIXED = null;
+/**
+ * G5-C17 (C16-F1) lenient raw-DEFLATE decoder used ONLY to recover what a
+ * streaming reader emits before a failure: output is produced symbol by
+ * symbol and everything decoded before an error, the end of the input or `cap`
+ * bytes is returned. It is deliberately a superset of the readers: a copy
+ * reaching before the start of the output reads zeros (GNU gzip; zlib refuses
+ * it), incomplete codes are allowed, and the rest follows RFC 1951 (stored
+ * LEN/NLEN, reserved block type, over-subscribed codes and invalid length /
+ * distance symbols end decoding, as in zlib and GNU gzip). zlib's own error
+ * path is not used here: a sync zlib call that fails on bad data leaves its
+ * engine and output buffers pinned (Node), which repeated probes would turn
+ * into unbounded memory.
+ */
+function inflateRecover(src, cap) {
+  const out = Buffer.alloc(cap);
+  let n = 0, pos = 0, bitbuf = 0, bitcnt = 0;
+  const need = (k) => { while (bitcnt < k) { if (pos >= src.length) throw new Error('end of input'); bitbuf |= src[pos++] << bitcnt; bitcnt += 8; } };
+  const bits = (k) => { need(k); const v = bitbuf & ((1 << k) - 1); bitbuf >>>= k; bitcnt -= k; return v; };
+  const decode = (h) => {
+    let code = 0, first = 0, index = 0;
+    for (let len = 1; len < 16; len++) {
+      code |= bits(1);
+      const c = h.count[len];
+      if (code - c < first) return h.symbol[index + (code - first)];
+      index += c; first += c; first <<= 1; code <<= 1;
+    }
+    throw new Error('invalid code');
+  };
+  const emit = (b) => { if (n >= cap) throw new Error('cap'); out[n++] = b; };
+  try {
+    let last = 0;
+    while (!last) {
+      last = bits(1);
+      const type = bits(2);
+      if (type === 0) {
+        bitbuf = 0; bitcnt = 0;
+        if (pos + 4 > src.length) throw new Error('end of input');
+        const len = src[pos] | (src[pos + 1] << 8), nlen = src[pos + 2] | (src[pos + 3] << 8);
+        if (len !== (~nlen & 0xffff)) throw new Error('stored length mismatch');
+        pos += 4;
+        for (let i = 0; i < len; i++) { if (pos >= src.length) throw new Error('end of input'); emit(src[pos++]); }
+        continue;
+      }
+      let lit, dist;
+      if (type === 1) {
+        if (!DFL_FIXED) { const l = new Array(288); l.fill(8, 0, 144); l.fill(9, 144, 256); l.fill(7, 256, 280); l.fill(8, 280, 288); DFL_FIXED = { lit: dflHuffman(l), dist: dflHuffman(new Array(30).fill(5)) }; }
+        ({ lit, dist } = DFL_FIXED);
+      } else if (type === 2) {
+        const nlen = bits(5) + 257, ndist = bits(5) + 1, ncode = bits(4) + 4;
+        if (nlen > 286 || ndist > 30) throw new Error('bad counts');
+        const cl = new Array(19).fill(0);
+        for (let i = 0; i < ncode; i++) cl[DFL_CL_ORDER[i]] = bits(3);
+        const clh = dflHuffman(cl);
+        const lens = [];
+        while (lens.length < nlen + ndist) {
+          const sym = decode(clh);
+          if (sym < 16) { lens.push(sym); continue; }
+          let rep, val = 0;
+          if (sym === 16) { if (!lens.length) throw new Error('repeat with no length'); val = lens[lens.length - 1]; rep = 3 + bits(2); } else if (sym === 17) rep = 3 + bits(3); else rep = 11 + bits(7);
+          if (lens.length + rep > nlen + ndist) throw new Error('too many lengths');
+          while (rep--) lens.push(val);
+        }
+        if (!lens[256]) throw new Error('no end-of-block code');
+        lit = dflHuffman(lens.slice(0, nlen)); dist = dflHuffman(lens.slice(nlen));
+      } else throw new Error('reserved block type');
+      for (;;) {
+        const sym = decode(lit);
+        if (sym < 256) { emit(sym); continue; }
+        if (sym === 256) break;
+        const li = sym - 257;
+        if (li >= 29) throw new Error('invalid length symbol');
+        const len = DFL_LEN_BASE[li] + bits(DFL_LEN_EXTRA[li]);
+        const ds = decode(dist);
+        if (ds >= 30) throw new Error('invalid distance symbol');
+        const d = DFL_DIST_BASE[ds] + bits(DFL_DIST_EXTRA[ds]);
+        for (let i = 0; i < len; i++) emit(n - d >= 0 ? out[n - d] : 0);
+      }
+    }
+  } catch { /* everything decoded so far is what a streaming reader may emit */ }
+  return out.subarray(0, n);
+}
+/** Output a streaming decoder could emit before `slice` fails, or 'cap' at the probe output cap. */
+function recoverDeflate(slice) {
+  const out = inflateRecover(slice, FOREIGN_PROBE_OUTPUT + 1);
+  return out.length > FOREIGN_PROBE_OUTPUT ? 'cap' : out;
+}
+/** Does output a reader would recover hold anything the scanner must not let through? */
+function recoveredOutputLeaks(out) {
+  if (out === 'cap') return true;
+  if (!out || out.length === 0) return false;
+  if (!recoverSigs) { const s = signatureSet(); recoverSigs = { ...s, always: [...s.always, ...SENTINELS.map((x) => ({ label: x, bytes: Buffer.from(x, 'utf8') }))] }; }
+  if (inspectBufferBytes(out, recoverSigs).length > 0) return true;
+  if (gzRecoverDepth >= GZ_RECOVER_DEPTH) return out.length >= GZ_MIN_LEAK; // nesting bound: fail closed
+  gzRecoverDepth++;
+  try { return detectArchiveInBuffer(out) !== null || findForeignStream(out) !== null; } finally { gzRecoverDepth--; }
+}
+/** The probe found no gzip: fail closed anyway when the output readers WOULD recover leaks. */
+function gzipRecoverableLeak(slice) {
+  return recoveredOutputLeaks(recoverDeflate(slice));
+}
 
 /** xxHash32 (lz4 frame header checksum). */
 function xxh32(b, seed = 0) {
@@ -537,8 +669,9 @@ function xxh32(b, seed = 0) {
  *   - deflate data valid through the whole probe window, or to the end of the
  *     available data after >= GZ_TRUNCATED_MIN bytes (e.g. > 64 KiB of empty
  *     stored blocks before the content; a truncated stream).
- * Only invalid deflate data (Z_DATA_ERROR) or a complete stream whose trailer
- * does not match is "not gzip". Work stays bounded per candidate.
+ * Otherwise (invalid deflate data, a short truncated stream, a tiny member
+ * with a wrong trailer) G5-C17 (C16-F1) inspects the output readers recover
+ * before the failure (gzipRecoverableLeak). Work stays bounded per candidate.
  */
 function validGzipAt(buf, p, ctx = {}) {
   if (p + 10 > buf.length || buf[p + 2] !== 8) return false;
@@ -557,8 +690,8 @@ function validGzipAt(buf, p, ctx = {}) {
   let r;
   try { r = zlib.inflateRawSync(slice, { maxOutputLength: FOREIGN_PROBE_OUTPUT, info: true }); } catch (err) {
     if (err && err.code === 'ERR_BUFFER_TOO_LARGE') return true; // probe output cap reached
-    if (err && err.code === 'Z_BUF_ERROR') return slice.length === FOREIGN_PROBE_INPUT || !!ctx.more || slice.length >= GZ_TRUNCATED_MIN; // valid deflate up to the end of the window / data
-    return false; // invalid deflate data
+    if (err && err.code === 'Z_BUF_ERROR' && (slice.length === FOREIGN_PROBE_INPUT || !!ctx.more || slice.length >= GZ_TRUNCATED_MIN)) return true; // valid deflate up to the end of the window / data
+    return gzipRecoverableLeak(slice); // G5-C17 (C16-F1): invalid or short truncated deflate -- inspect what readers emit before failing
   }
   if (r.buffer.length >= FOREIGN_MIN_OUTPUT) return true;
   // A complete member: gunzip and DecompressionStream emit its output BEFORE
@@ -567,8 +700,8 @@ function validGzipAt(buf, p, ctx = {}) {
   // whatever the trailer says.
   if (r.buffer.length >= GZ_MIN_LEAK) return true;
   const t = q + r.engine.bytesWritten;
-  if (t + 8 > buf.length) return !!ctx.more;
-  return buf.readUInt32LE(t) === crc32(r.buffer) && buf.readUInt32LE(t + 4) === r.buffer.length;
+  if (t + 8 > buf.length) return !!ctx.more || gzipRecoverableLeak(slice);
+  return (buf.readUInt32LE(t) === crc32(r.buffer) && buf.readUInt32LE(t + 4) === r.buffer.length) || gzipRecoverableLeak(slice);
 }
 /**
  * xz stream header (G5-C15: Tier A -- the magic alone; history below).
@@ -750,6 +883,40 @@ function validCompressAt(buf) {
   const maxbits = buf[2] & 0x1f;
   return maxbits <= 16 && (buf[3] | ((buf[4] & 1) << 8)) < 256;
 }
+/**
+ * G5-C17 (C16-F2) LHA / LArc header (Tier B), found by its method tag at
+ * offset 2 of the header, anywhere in the buffer (libarchive also finds an
+ * archive behind a self-extractor stub). bsdtar (libarchive) extracts level-0
+ * headers whatever the attribute byte; the rule keeps only what a reader needs
+ * to see a header: a non-zero header size byte, a method tag libarchive knows
+ * (-lh0-..-lh7-, -lhd-, -lzs-, -lz4-, -lz5-) and a header level 0..3. Attribute
+ * and checksums are not criteria (readers differ on them). Text cannot match:
+ * the level byte must be a control byte 0..3.
+ */
+function validLhaAt(buf, p) {
+  return p + 22 <= buf.length && buf[p] !== 0 && buf[p + 20] <= 3;
+}
+/**
+ * G5-C17 (C16-F3, C17-N1) single-stream formats GNU / Apple gzip decode at
+ * OFFSET 0 only (they refuse them after a prefix; a gzip member followed by
+ * one already fails closed as unexpected data after the member):
+ *   pack   1F 1E + 4-byte length + tree depth (gzip: header of 7 bytes)
+ *   LZH    1F A0 (SCO compress -H, GNU gzip only) + at least one data byte pair
+ *   gzip with the old magic 1F 9E (both gzips treat it as 1F 8B): method 8
+ *          and a complete 10-byte header. The scanner does not inflate it.
+ * No field beyond these is a criterion: any such header fails closed.
+ */
+function validPackAt(buf) { return buf.length >= 7 && buf[0] === 0x1f && buf[1] === 0x1e; }
+function validGzipLzhAt(buf) { return buf.length >= 4 && buf[0] === 0x1f && buf[1] === 0xa0; }
+function validOldGzipAt(buf) { return buf.length >= 10 && buf[0] === 0x1f && buf[1] === 0x9e && buf[2] === 8; }
+/** Format of an offset-0-only stream at the start of `buf`, or null. */
+function headForeignFormat(buf) {
+  if (validCompressAt(buf)) return 'compress (.Z)'; // G5-C15 (C14-F4)
+  if (validPackAt(buf)) return 'pack (1F 1E)';
+  if (validGzipLzhAt(buf)) return 'gzip LZH (1F A0)';
+  if (validOldGzipAt(buf)) return 'gzip (old magic 1F 9E)';
+  return null;
+}
 // `shift`: offset of the stream start relative to the searched magic.
 const FOREIGN_FORMATS = [
   { name: 'gzip (embedded)', magic: Buffer.from([0x1f, 0x8b, 0x08]), validate: validGzipAt },
@@ -765,6 +932,7 @@ const FOREIGN_FORMATS = [
   { name: 'xar', magic: Buffer.from('xar!', 'latin1'), validate: validXarAt },
   { name: 'lzip', magic: Buffer.from('LZIP', 'latin1'), validate: validLzipAt }, // G5-C15 (C14-F4)
   { name: 'iso9660', magic: Buffer.from('CD001', 'latin1'), shift: -1, validate: validIsoAt }, // G5-C15 (C14-F4)
+  ...['-lh0-', '-lh1-', '-lh2-', '-lh3-', '-lh4-', '-lh5-', '-lh6-', '-lh7-', '-lhd-', '-lzs-', '-lz4-', '-lz5-'].map((m) => ({ name: 'lha', magic: Buffer.from(m, 'latin1'), shift: -2, validate: validLhaAt })), // G5-C17 (C16-F2)
 ];
 
 /**
@@ -774,7 +942,8 @@ const FOREIGN_FORMATS = [
  * occurrences of one magic fails closed.
  */
 function findForeignStream(buf) {
-  if (validCompressAt(buf)) return { format: 'compress (.Z)', pos: 0 }; // G5-C15 (C14-F4): offset 0 only
+  const head = headForeignFormat(buf); // G5-C15 (C14-F4) / G5-C17 (C16-F3, C17-N1): offset 0 only
+  if (head) return { format: head, pos: 0 };
   for (const f of FOREIGN_FORMATS) {
     let i = buf.indexOf(f.magic);
     let n = 0;
@@ -1502,8 +1671,8 @@ function inspectArtifacts(root, limits = INSPECTION_LIMITS) {
     const gzHead = head.length >= 3 && head[0] === 0x1f && head[1] === 0x8b;
     const tarHead = isTarCandidate(head, 0);
     const zipSigs = scanRes.zipPositions.length > 0 || scanRes.zipOverflow || hasZipLeadSignature(head); // R4.4: streaming lead
-    const compressHead = validCompressAt(head); // G5-C15 (C14-F4): compress .Z at offset 0
-    const foreignSigs = scanRes.foreignPositions.length > 0 || scanRes.foreignOverflow || compressHead; // G5-D7-A
+    const headForeign = headForeignFormat(head); // G5-C15 / G5-C17: offset-0-only formats (.Z, pack, LZH, old gzip magic)
+    const foreignSigs = scanRes.foreignPositions.length > 0 || scanRes.foreignOverflow || !!headForeign; // G5-D7-A
     if (!gzHead && !tarHead && !zipSigs && !foreignSigs) return;
     if (size > limits.maxArchiveBytes) {
       let tooLarge = gzHead || tarHead;
@@ -1512,7 +1681,7 @@ function inspectArtifacts(root, limits = INSPECTION_LIMITS) {
       if (foreignSigs) {
         let f = null;
         if (scanRes.foreignOverflow) f = { format: 'too many archive/compressed-stream signatures', pos: 0 };
-        else if (compressHead) f = { format: 'compress (.Z)', pos: 0 };
+        else if (headForeign) f = { format: headForeign, pos: 0 };
         else { try { f = largeFileForeignStream(realPath, size, scanRes.foreignPositions); } catch (e) { errors.push({ file: shown, error: `unreadable (${e.code || e.message})` }); return; } }
         if (f) errors.push({ file: shown, error: `archive not fully inspectable: unsupported archive or compressed stream (${f.format}) at offset ${f.pos} of "${shown}" cannot be inspected (identifiable formats fail closed)` });
       }
@@ -1656,4 +1825,4 @@ if (require.main === module) {
   console.log(`[palmistry-bundle] OK: none of ${SENTINELS.length} Palmistry sentinels present in ${SCAN_DIRS.join(', ')} (nor any of ${IMAGE_INPUT_SENTINELS.length} image-input sentinels, ${MEDIAPIPE_SENTINELS.length} MediaPipe sentinels or MediaPipe artifacts; image-input check ${inspected}).`);
 }
 
-module.exports = { SENTINELS, IMAGE_INPUT_SENTINELS, MEDIAPIPE_SENTINELS, MEDIAPIPE_ARTIFACT_SIGNATURES, WASM_MEDIAPIPE_MARKERS, INSPECTION_LIMITS, SCAN_ROOTS, DEV_ASSET_DIR, SCAN_DIRS, ARTIFACT_DIRS, scan, scanImageInput, inspectArtifacts, describeInspection, detectArchiveInBuffer, findForeignStream, devAssetsPresent };
+module.exports = { SENTINELS, IMAGE_INPUT_SENTINELS, MEDIAPIPE_SENTINELS, MEDIAPIPE_ARTIFACT_SIGNATURES, WASM_MEDIAPIPE_MARKERS, INSPECTION_LIMITS, SCAN_ROOTS, DEV_ASSET_DIR, SCAN_DIRS, ARTIFACT_DIRS, scan, scanImageInput, inspectArtifacts, describeInspection, detectArchiveInBuffer, findForeignStream, inflateRecover, devAssetsPresent };
