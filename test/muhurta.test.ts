@@ -165,7 +165,12 @@ if (deepWorkIntent) {
 // carried when the limit was widened from 8 to 20. Checking membership in
 // a generously sized slice preserves the original intent without depending
 // on alphabetical tie-break order among an arbitrarily-sized catalog.
-const neutralDiscovery = getActivityDiscoveryCards('Neutral Flow', 50);
+//
+// AURA-CI-01: `date` passed explicitly for the same reason as the PA-2A
+// Abhijit call below -- without it the 4th parameter defaults to
+// `new Date()`, and the 'dating' membership check failed whenever CI ran
+// inside a recurring wall-clock window (e.g. ~14:30Z-20:45Z on 2026-11-23).
+const neutralDiscovery = getActivityDiscoveryCards('Neutral Flow', 50, undefined, date);
 check('Discovery cards expose fit labels', neutralDiscovery.every((card) => Boolean(card.fit)));
 check('Discovery is catalog-backed for dating in Neutral Flow', neutralDiscovery.some((card) => card.activityId === 'dating'));
 check('Discovery uses nuanced fit labels', new Set(neutralDiscovery.map((card) => card.fit)).size > 1);

@@ -399,6 +399,10 @@ jobs:
       # decision (update vs retire this suite), not a blind wire-in.
       - name: Run Goal activity rhythm setup structural guards test
         run: npx ts-node test/goalActivityRhythmSetupStructuralGuards.test.ts
+      # AURA-MR1 -- My Rhythm foundation: pure validation/merge rules for a
+      # weekly rhythm's pause state and preferences (migration 0053).
+      - name: Run My Rhythm preferences test
+        run: npx ts-node test/goalActivityRhythmPreferences.test.ts
       - name: Run Daily agenda Goal context test
         run: npx ts-node test/dailyAgendaGoalContext.test.ts
       - name: Run Goal context structural guards test
@@ -1233,6 +1237,12 @@ jobs:
         run: npx ts-node test/goalActivityRhythmGoalDetailDb.test.ts
       - name: Run Goal activity rhythm setup DB test
         run: npx ts-node test/goalActivityRhythmSetupDb.test.ts
+      # AURA-MR1 -- My Rhythm foundation against this disposable database:
+      # legacy-row compatibility, set/clear preferences, invalid inputs,
+      # ownership, pause/resume with confirmed plans left untouched, and no
+      # duplicate sessions.
+      - name: Run My Rhythm foundation DB test
+        run: npx ts-node test/myRhythmFoundationDb.test.ts
       - name: Run Goal context DB test
         run: npx ts-node test/goalContextDb.test.ts
       - name: Run Goal template completion DB test
