@@ -96,6 +96,8 @@ declare module 'oidc-provider' {
 
   export const errors: {
     InvalidTarget: new (description?: string) => Error;
+    /** I2b: thrown by an adapter's atomic `consume` when it loses a replay race. */
+    InvalidGrant: new (detail?: string) => Error & { error: string; status: number };
     [name: string]: new (...args: any[]) => Error;
   };
 

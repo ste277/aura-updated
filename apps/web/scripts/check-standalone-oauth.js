@@ -43,6 +43,11 @@ const OAUTH_PATHS = [
   ['GET', '/api/oauth/oauth/jwks'],
   ['GET', '/api/oauth/.well-known/openid-configuration'],
   ['GET', '/api/oauth/.well-known/oauth-authorization-server'],
+  // AURA-MCP-02-I2b -- connected assistants and the OAuth sign-in return page.
+  ['GET', '/api/mcp/connections'],
+  ['POST', '/api/mcp/connections'],
+  ['GET', '/connect/sign-in?returnTo=%2Foauth%2Finteraction%2Fsynthetic-uid'],
+  ['GET', '/connect/apps'],
 ];
 
 const SYNTHETIC_SECRET = 'standalone-check-synthetic-secret-0123456789';

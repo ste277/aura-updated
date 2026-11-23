@@ -19,7 +19,14 @@ The shared core of Aura's MCP tool, `find_best_time`, used by two transports:
 | `src/security/rateLimit.ts` | `McpRateLimiter` interface (per-rule limits) plus a bounded in-memory fixed-window limiter (process-local; local/dev only) | nothing |
 | `src/security/audit.ts` | Redacted audit events: allowlisted fields only, pseudonymous `userRef` | `crypto` |
 | `src/auth/authorizationServer.ts` | OAuth authorization server on `oidc-provider` 9.13.3 (I2a): Node req/res `handle()`, consent interaction, resource-server token verifier | `oidc-provider`, the handler's types, `src/security/*` |
-| `src/auth/memoryAdapter.ts` | In-memory `oidc-provider` adapter (local/tests only) | nothing |
+| `src/auth/memoryAdapter.ts` | In-memory `oidc-provider` adapter (local/tests only); same atomic contract as the Postgres adapter | `src/auth/oauthStore.ts` |
+| `src/auth/oauthStore.ts` (I2b) | Store contract: atomic single-use `consume`, `ReplayDetectedError`, connections list / disconnect, cleanup | `oidc-provider` errors |
+| `src/auth/postgresAdapter.ts` (I2b) | Durable, shared adapter on table `McpOAuthPayload` (migration 0052): conditional-UPDATE consume, SHA-256 ids, no `jti` at rest; I2b-R1: Interaction `session.cookie` dropped, Interaction `returnTo` and Session `state.secret` sealed; I2b-RR-1: Session `state.postLogoutRedirectUri` sealed; I2b-RR-2: an Interaction without its sealed `returnTo` reads as not found | an injected `query` (a `pg` Pool), `fieldSeal.ts` |
+| `src/auth/fieldSeal.ts` (I2b-R1) | AES-256-GCM field sealing, keys derived by HKDF from the OAuth cookie keys, AAD bound to row + field, rotation by `kid`, fail closed | `crypto` |
+| `src/auth/keys.ts` (I2b) | Signing JWKS / cookie keys / pairwise salt / audit key from env, validation, rotation; ephemeral keys for local/tests | `crypto` |
+| `src/auth/clientPolicy.ts` (I2b) | Static client registration policy (https or loopback redirect URIs, labels, refresh permission); no DCR / CIMD | nothing |
+| `src/security/postgresRateLimit.ts` (I2b) | Distributed fixed-window limiter on table `McpRateLimitWindow`: all-or-nothing, row-locked, fail closed | an injected `pg` Pool |
+| `src/security/clientAddress.ts` (I2b) | Client address from the TCP peer or ONE allowlisted trusted-proxy header; never `X-Forwarded-For` | `net` |
 | `src/auth/oidc-provider.d.ts` | Narrow local typings for the library subset Aura uses | — |
 
 **Rule:** the four core files must never import an MCP SDK, a database, a session or `process.env`. Both `apps/mcp/test/isolation.test.ts` (compiled graph) and `test/mcpRemoteTransport.test.ts` (source imports) enforce this. Only `apps/web/lib/mcpRemoteConfig.ts` reads the environment.
@@ -68,6 +75,49 @@ The single registered client is `aura-local-dev-client`, with loopback redirect 
 
 Failures return a generic 500 and log only the error class name. Arguments, tokens and bodies are never logged.
 
+## Production readiness components (I2b)
+
+I2b adds the components a deployed authorization server needs. **Nothing here enables remote MCP:** `apps/web/lib/mcpAuthGate.ts` is unchanged and still rejects every Vercel deployment, the staging project and the Production project, and every production build compiles the OAuth code out (F15). The components run in the local mode and in tests.
+
+| Finding | Resolution |
+|---|---|
+| F5 pre-auth flooding | Every OAuth endpoint (`preAuth`) and `/api/mcp` (`preAuthRateLimiter`, checked before the token lookup) are throttled per trusted client address plus a global ceiling. |
+| F6 atomic codes | `consume` is one conditional `UPDATE … WHERE "consumedAt" IS NULL … RETURNING`; the loser gets `invalid_grant` and the grant is revoked. Covers codes and rotated refresh tokens. |
+| R1-L1 per-process limits | `postgresRateLimit.ts`: one row per key, locked in sorted order, shared by every instance; fails closed. |
+| R1-L2 client address | `clientAddress.ts`: `socket`, `none`, or `header:x-real-ip` / `header:x-vercel-forwarded-for` only; single-IP values only. |
+
+Other I2b behaviour:
+- **Refresh tokens** (`refreshTokens`): only for clients with `allow_refresh`, only with consented `offline_access`. Always rotated; 7-day idle and 30-day absolute lifetime by default; replay revokes the grant.
+- **ID tokens** (`idTokens`): off by default (`openid` is stripped). `pairwise` issues only an HMAC `sub` per client.
+- **Keyed audit pseudonym:** the audit `userRef` is keyed with `AURA_MCP_AUDIT_KEY`.
+- **User flows:** sign-in return at `/connect/sign-in?returnTo=/oauth/interaction/<uid>`, and connected assistants at `/connect/apps` (`GET`/`POST /api/mcp/connections`). Both are disabled wherever the OAuth server is.
+
+### Local use of the durable components
+
+```bash
+AURA_MCP_OAUTH_STORE=postgres \
+AURA_MCP_OAUTH_DATABASE_URL=postgresql://user@127.0.0.1:5432/aura_local \
+...the local OAuth variables above... npx next dev -H 127.0.0.1
+```
+
+`AURA_MCP_OAUTH_DATABASE_URL` must be a **loopback** database with migration 0052 applied. `DATABASE_URL` is deliberately never used for OAuth state.
+
+### Deployment requirements (staging; not activated)
+
+`apps/web/lib/mcpRemoteReadiness.ts` checks an environment against this list without enabling anything.
+
+| Requirement | Variable / item |
+|---|---|
+| Durable store | `AURA_MCP_OAUTH_STORE=postgres`, a database URL, and **migration 0052** applied |
+| Trusted client address | `AURA_MCP_CLIENT_ADDRESS_SOURCE=header:x-vercel-forwarded-for` (Vercel) or `header:x-real-ip` (nginx/Docker) |
+| Signing keys | `AURA_MCP_OAUTH_JWKS`: private RSA ≥ 2048 or EC P-256 JWKs with unique `kid`; first signs |
+| Cookie keys | `AURA_MCP_OAUTH_COOKIE_KEYS`: comma-separated, ≥ 32 characters each; first signs |
+| Pairwise salt / audit key | `AURA_MCP_OAUTH_PAIRWISE_SALT`, `AURA_MCP_AUDIT_KEY` (≥ 32 characters, all different) |
+| Clients | `AURA_MCP_OAUTH_CLIENTS`: JSON array validated by `clientPolicy.ts` |
+| Issuer / resource | https, same origin, `AURA_MCP_REMOTE_ENABLED=1` |
+
+**Key rotation:** put the new key first and keep the old one for at least the longest lifetime it protects, then remove it.
+
 ## Schema snapshot
 
 `fixtures/findBestTimeInputSchema.json` is the canonical JSON Schema of the tool input: keys sorted, without `$schema`, because the dialect URI is SDK-specific (v1 emits draft-07, v2 emits 2020-12, and nothing else differs). Both transports' tests compare their advertised `inputSchema` against it. If you change the schema deliberately, regenerate the snapshot and review the diff.
@@ -87,5 +137,8 @@ npm install                                   # repo root
 npx ts-node test/mcpRemoteTransport.test.ts   # remote handler (CI: math-core-tests job)
 npx ts-node test/mcpOAuthLocal.test.ts        # local OAuth -> MCP, environment gate (CI: math-core-tests job)
 npx ts-node test/mcpOAuthSecurityRegression.test.ts  # I2a-R1 security regressions (CI: math-core-tests job)
+npx ts-node test/mcpOAuthI2b.test.ts          # I2b offline security tests (CI: math-core-tests job)
+DATABASE_URL=<disposable db, migrations applied> npx ts-node test/mcpOAuthPostgresDb.test.ts  # I2b durable store + distributed limiter (CI: Database migration validation job)
+DATABASE_URL=<disposable db, migrations applied> npx ts-node test/mcpOAuthStorageProtectionDb.test.ts  # I2b-R1 at-rest protection (CI: Database migration validation job)
 (cd apps/mcp && npm ci && npm test)           # stdio server plus shared-definition check (CI: MCP Server job)
 ```

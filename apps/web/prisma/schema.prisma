@@ -1176,3 +1176,42 @@ model Capture {
 
   @@index([userId, status, createdAt])
 }
+
+// AURA-MCP-02-I2b (migration 0052) -- durable state for the remote MCP OAuth
+// authorization server (oidc-provider adapter). "id" is SHA-256 of the
+// provider id and "payload" omits its jti: no bearer token, code or session
+// id is stored in clear. consumedAt is set by one conditional UPDATE
+// (single-use codes / refresh tokens). Accessed through raw SQL in
+// packages/mcp-tools/src/auth/postgresAdapter.ts; no relation to User by
+// design (OAuth state is droppable with the feature).
+model McpOAuthPayload {
+  model      String
+  id         String
+  payload    Json
+  grantId    String?
+  accountId  String?
+  clientId   String?
+  uid        String?
+  userCode   String?
+  expiresAt  DateTime? @db.Timestamptz(3)
+  consumedAt DateTime? @db.Timestamptz(3)
+  createdAt  DateTime  @default(now()) @db.Timestamptz(3)
+
+  @@id([model, id])
+  @@index([grantId])
+  @@index([model, uid])
+  @@index([model, userCode])
+  @@index([model, accountId, clientId])
+  @@index([expiresAt])
+}
+
+// AURA-MCP-02-I2b (migration 0052) -- fixed-window rate-limit counters
+// shared by every server instance (packages/mcp-tools/src/security/postgresRateLimit.ts).
+model McpRateLimitWindow {
+  key         String   @id
+  windowStart DateTime @db.Timestamptz(3)
+  count       Int      @default(0)
+  expiresAt   DateTime @db.Timestamptz(3)
+
+  @@index([expiresAt])
+}

@@ -28,14 +28,20 @@ async function handle(req: Request): Promise<Response> {
   if (process.env.NODE_ENV !== 'production') {
     const gate = resolveRuntimeMcpAuthMode(config);
     if (config && gate.mode === 'local') {
-      const { getLocalMcpAuth, localMcpAudit } = await import('../../../lib/mcpLocalOAuth');
+      const { getLocalMcpAuth } = await import('../../../lib/mcpLocalOAuth');
       const local = getLocalMcpAuth(config);
       return handleRemoteMcpRequest(req, {
         config,
         verifyAccessToken: local.server.verifyAccessToken,
         isClientAllowed: local.server.isClientAllowed,
         rateLimiter: local.rateLimiter,
-        audit: localMcpAudit,
+        // I2b F5: throttled before token verification. An App Router handler
+        // has no trusted client address locally, so only the global ceiling
+        // applies here (R1-L2: a deployment must configure a trusted proxy
+        // header -- see lib/mcpRemoteReadiness.ts).
+        preAuthRateLimiter: local.preAuthLimiter,
+        clientAddress: null,
+        audit: local.audit,
       });
     }
   }
