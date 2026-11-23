@@ -14,6 +14,14 @@ import { SignInCodeActions } from '../../components/SignInCodeActions';
 import { colors, spacing, radius, typography } from '../../components/theme';
 import { PrimaryButton, SecondaryButton, TextButton, ActivityChip, DurationChip, StatusBadge, EmptyState, TextInput, SelectInput, FieldLabel, type StatusTone } from '../../components/ui';
 import { useAndroidBackToHome } from '../../lib/useAndroidBackToHome';
+import {
+  POPULAR_ACTIVITY_IDS,
+  ACTIVITY_DISCOVERY_CATEGORIES,
+  GUEST_ACTIVITY_SEARCH_PLACEHOLDER,
+  getGuestPlannableActivities,
+  resolveDiscoveryActivities,
+  searchGuestActivities,
+} from '../../lib/guestActivityDiscovery';
 
 /**
  * Recipient Conversion V1 -- the guest conversion loop's UI: activity ->
@@ -53,8 +61,6 @@ function routeExistingUserToPlan(activityTitle?: string) {
   if (activityTitle) params.set('activity', activityTitle);
   window.location.href = `/?${params.toString()}`;
 }
-
-const POPULAR_ACTIVITY_IDS = ['date-night', 'dinner-date', 'coffee-tea', 'movie-night', 'road-trip', 'party'];
 
 const HORIZON_OPTIONS: Array<{ value: PlanningHorizon; label: string }> = [
   { value: 'TODAY', label: 'Today' },
@@ -135,19 +141,17 @@ export function GuestFindClient({ initialSource, initialRestoreToken }: { initia
   const activity = activityId ? FULL_ACTIVITY_CATALOG.find((a) => a.id === activityId) : undefined;
   const activityDefinition = activity ? getActivityDefinition(activity) : undefined;
 
-  const everydayActivities = useMemo(
-    () => FULL_ACTIVITY_CATALOG.filter((a) => getActivityDefinition(a)?.experience.planningMode === 'EVERYDAY'),
+  // AURA-DISC-01 -- Popular, categories and search all resolve against the
+  // same guest-plannable (EVERYDAY) catalog pool; see guestActivityDiscovery.ts.
+  const everydayActivities = useMemo(() => getGuestPlannableActivities(), []);
+  const popularActivities = useMemo(() => resolveDiscoveryActivities(POPULAR_ACTIVITY_IDS), []);
+  const discoveryCategories = useMemo(
+    () => ACTIVITY_DISCOVERY_CATEGORIES.map((c) => ({ ...c, activities: resolveDiscoveryActivities(c.activityIds) })).filter((c) => c.activities.length > 0),
     []
   );
-  const popularActivities = useMemo(
-    () => POPULAR_ACTIVITY_IDS.map((id) => FULL_ACTIVITY_CATALOG.find((a) => a.id === id)).filter((a): a is NonNullable<typeof a> => Boolean(a)),
-    []
-  );
-  const searchResults = useMemo(() => {
-    const q = activityQuery.trim().toLowerCase();
-    if (q.length < 2) return [];
-    return everydayActivities.filter((a) => a.title.toLowerCase().includes(q) || a.aliases.some((alias) => alias.includes(q))).slice(0, 8);
-  }, [activityQuery, everydayActivities]);
+  const [openCategoryId, setOpenCategoryId] = useState<string | null>(null);
+  const openCategory = discoveryCategories.find((c) => c.id === openCategoryId);
+  const searchResults = useMemo(() => searchGuestActivities(activityQuery, everydayActivities), [activityQuery, everydayActivities]);
 
   // Section 16/33: an already-signed-in visitor never sees the guest
   // wizard -- straight to the authenticated Plan flow. Section 24/25:
@@ -438,8 +442,57 @@ export function GuestFindClient({ initialSource, initialRestoreToken }: { initia
               </div>
             </div>
             <div style={{ marginTop: spacing.xl }}>
+              <FieldLabel>Browse by category</FieldLabel>
+              <div role="group" aria-label="Activity categories" style={{ display: 'grid', gridTemplateColumns: 'repeat(2, minmax(0, 1fr))', gap: spacing.sm, marginTop: spacing.sm }}>
+                {discoveryCategories.map((c) => {
+                  const expanded = openCategoryId === c.id;
+                  return (
+                    <button
+                      key={c.id}
+                      type="button"
+                      aria-expanded={expanded}
+                      aria-controls={expanded ? 'guest-activity-category-panel' : undefined}
+                      onClick={() => setOpenCategoryId(expanded ? null : c.id)}
+                      style={{
+                        display: 'flex',
+                        alignItems: 'center',
+                        gap: 6,
+                        minHeight: 44,
+                        minWidth: 0,
+                        padding: '0 12px',
+                        borderRadius: radius.md,
+                        border: `1px solid ${expanded ? colors.accentBorder : colors.borderSubtle}`,
+                        background: expanded ? colors.positiveSoft : 'rgba(15, 23, 42, 0.6)',
+                        color: expanded ? colors.positive : colors.textSecondary,
+                        fontSize: 13,
+                        fontWeight: 750,
+                        textAlign: 'left',
+                        cursor: 'pointer',
+                      }}
+                    >
+                      <span aria-hidden="true">{c.icon}</span>
+                      <span style={{ flex: 1, minWidth: 0, lineHeight: 1.2 }}>{c.label}</span>
+                      <span aria-hidden="true" style={{ fontSize: 11, opacity: 0.8 }}>{expanded ? '▴' : '▾'}</span>
+                    </button>
+                  );
+                })}
+              </div>
+              {openCategory && (
+                <div
+                  id="guest-activity-category-panel"
+                  role="region"
+                  aria-label={`${openCategory.label} activities`}
+                  style={{ display: 'flex', flexWrap: 'wrap', gap: spacing.sm, marginTop: spacing.md }}
+                >
+                  {openCategory.activities.map((a) => (
+                    <ActivityChip key={a.id} label={a.title} icon={a.icon} onClick={() => handleSelectActivity(a.id)} />
+                  ))}
+                </div>
+              )}
+            </div>
+            <div style={{ marginTop: spacing.xl }}>
               <FieldLabel htmlFor="guest-activity-search">Search activities</FieldLabel>
-              <TextInput id="guest-activity-search" placeholder="e.g. Dinner, Study, Workout" value={activityQuery} onChange={(e) => setActivityQuery(e.target.value)} />
+              <TextInput id="guest-activity-search" placeholder={GUEST_ACTIVITY_SEARCH_PLACEHOLDER} value={activityQuery} onChange={(e) => setActivityQuery(e.target.value)} />
               {searchResults.length > 0 && (
                 <div style={{ display: 'flex', flexWrap: 'wrap', gap: spacing.sm, marginTop: spacing.sm }}>
                   {searchResults.map((a) => (
