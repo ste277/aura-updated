@@ -5,7 +5,7 @@
  *
  *   DATABASE_URL=postgresql://user@127.0.0.1:5432/throwaway \
  *   BASELINE_LIMITER=/path/to/main/postgresRateLimit.ts \
- *   npx ts-node test/mcpRateLimitContentionBench.ts
+ *   npx ts-node test/mcpRateLimitLoadBench.ts
  *
  * BASELINE_LIMITER is the pre-S2 implementation (e.g. extracted with
  * `git show ba93d7e:packages/mcp-tools/src/security/postgresRateLimit.ts`);
