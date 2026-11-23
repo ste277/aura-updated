@@ -17,3 +17,7 @@ android/.idea/
 aura-dev.apk
 aura-prod.apk
 tsconfig.tsbuildinfo
+
+# AURA-PALM-G5-I1: self-hosted MediaPipe runtime + hand model for LOCAL
+# DEVELOPMENT ONLY (scripts/palm-dev-assets.js). Never committed or deployed.
+public/palm-dev-assets/

@@ -243,7 +243,11 @@ const realNextConfig = require('../apps/web/next.config.js');
   check('K9b. approval state is part of the webpack cache key (pending vs approved differ)', pendingCfg.cache.version === 'base|palmistry-approved:no' && approvedCfg.cache.version === 'base|palmistry-approved:yes');
   check('K9c. a config without a cache object is left alone', exclusion.applyPalmistryExclusion({ plugins: [], cache: false }, { dev: false, webpack: fakeWebpack, approved: false }).cache === false);
 }
-check('K10. next.config.js wires the exclusion into its webpack hook', typeof realNextConfig.webpack === 'function' && realNextConfig.webpack({ plugins: [] }, { dev: false, webpack: fakeWebpack }).plugins.length === 1 && realNextConfig.webpack({ plugins: [] }, { dev: true, webpack: fakeWebpack }).plugins.length === 0);
+// AURA-PALM-G5-I1-R2: next.config.js now also applies the independent palm
+// image-input exclusion (a second replacement plugin), so K10 counts the
+// PalmistryView replacement specifically instead of all plugins.
+const k10PalmistryReplacements = (cfg: any) => cfg.plugins.filter((p: any) => p?.pattern instanceof RegExp && p.pattern.test('../components/PalmistryView')).length;
+check('K10. next.config.js wires the exclusion into its webpack hook', typeof realNextConfig.webpack === 'function' && k10PalmistryReplacements(realNextConfig.webpack({ plugins: [] }, { dev: false, webpack: fakeWebpack })) === 1 && realNextConfig.webpack({ plugins: [] }, { dev: true, webpack: fakeWebpack }).plugins.length === 0);
 
 // Import allowlist: the replacement only removes everything if the Palmistry
 // tree is reachable SOLELY through components/PalmistryView.

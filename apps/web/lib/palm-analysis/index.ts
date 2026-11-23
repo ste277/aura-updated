@@ -1,0 +1,13 @@
+/**
+ * AURA-PALM-G5-I1 -- public surface of the shared on-device palm pipeline.
+ * Input adapters (the upload picker now, the G5-I2 camera later) import
+ * from here only. See AURA_PALM_G5_I1_UPLOAD_PIPELINE/05_SHARED_PIPELINE_INTERFACE.md.
+ */
+export * from './types';
+export { createPalmAnalysisSession } from './session';
+export type { PalmAnalysisSession, PalmSessionDeps, PalmSessionPhase, PalmSessionState } from './session';
+export { analyzePalmFrame, PALM_ACCEPTED_HEADLINE, PALM_SCOPE_NOTE, PALM_FEEDBACK_MESSAGES } from './analyze';
+export { validatePalmImageFile, PALM_IMAGE_LIMITS, PALM_UPLOAD_ACCEPT, PALM_INPUT_MESSAGES } from './validate';
+export { normalizeImageBlob, normalizeDrawableFrame, createDefaultDecoder } from './normalize';
+export { createMediaPipeHandDetector, PALM_MEDIAPIPE_ASSET_BASE, PALM_MEDIAPIPE_VERSION } from './mediapipeDetector';
+export { isPalmImageInputEnabled, PALM_IMAGE_INPUT_FLAG, PALM_IMAGE_INPUT_FLAG_VALUE } from './gate';
