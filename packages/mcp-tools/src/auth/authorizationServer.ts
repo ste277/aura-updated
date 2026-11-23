@@ -4,7 +4,9 @@ import type { IncomingMessage, ServerResponse } from 'http';
 import Provider, { errors, interactionPolicy, type InteractionDetails } from 'oidc-provider';
 import { MCP_SCOPE, type AccessTokenVerifier } from '../http/remoteMcpHandler';
 import { noopAuditSink, type McpAuditSink } from '../security/audit';
-import { nodeAddressRequest, resolveClientAddress, type ClientAddressSource } from '../security/clientAddress';
+import { nodeAddressRequest, resolveClientAddressDetailed, type ClientAddressSource } from '../security/clientAddress';
+import { isStoreUnavailableError } from '../security/deadline';
+import { buildPreAuthRules } from '../security/preAuthRules';
 import type { McpRateLimiter } from '../security/rateLimit';
 import { validateClientRegistry } from './clientPolicy';
 import { ephemeralOAuthKeys, type OAuthKeyMaterial } from './keys';
@@ -60,12 +62,32 @@ import type { OAuthStore } from './oauthStore';
  *     `allow_refresh`, only when `offline_access` is requested and consented,
  *     always rotated, idle + absolute lifetime, replay revokes the grant;
  *   - pre-authentication throttling of every OAuth endpoint by trusted
- *     client address plus a global ceiling (`preAuth`, F5 / R1-L2);
+ *     client address plus a global ceiling (`preAuth`, F5 / R1-L2). I2b-S2:
+ *     addresses are bucketed IPv4 /32, IPv6 /64; a missing or invalid
+ *     trusted address uses one shared bounded bucket and is audited
+ *     (`oauth.address_unresolved`); the global ceiling is sharded with
+ *     shard limits summing to exactly the ceiling (security/preAuthRules.ts);
+ *   - I2b-S2 fail closed with 503: a limiter that cannot decide, or an
+ *     OAuth state store that times out or errors, answers 503 (never 429,
+ *     never a code or token);
  *   - ID tokens carry only a per-client pseudonymous `sub` (HMAC of client
  *     and user, keyed by the pairwise salt) -- never the Aura user id;
  *   - connected-assistant listing and disconnect (`listUserConnections`,
  *     `revokeUserClientGrants`), and a sign-in return URL.
  */
+
+/** The slice of the Koa context the I2b-S4 issuance middleware uses. */
+interface ProviderCtx {
+  status: number;
+  body: unknown;
+  type: string;
+  oidc?: { route?: string; entities?: unknown };
+  req: IncomingMessage;
+  res: ServerResponse;
+  response: { get(name: string): string };
+  remove(name: string): void;
+  set(name: string, value: string): void;
+}
 
 export interface AuraOAuthClient {
   client_id: string;
@@ -91,6 +113,10 @@ export interface PreAuthThrottle {
   /** Requests per window per client address (default 120) and for all clients together (default 6000). */
   perAddress?: number;
   global?: number;
+  /** Global ceiling shards (default: preAuthRules.defaultGlobalShards). */
+  globalShards?: number;
+  /** Test hook: shard selection (default: crypto random). */
+  pickShard?: (shards: number) => number;
 }
 
 export interface AuraConnection {
@@ -402,7 +428,98 @@ export function createAuraOAuthServer(options: AuraOAuthServerOptions): AuraOAut
     audit({ event: 'oauth.error', outcome: 'revocation_error', clientId: ctx.oidc?.client?.clientId, errorCode: err?.error }),
   );
   provider.on('server_error', (_ctx: unknown, err: unknown) => {
-    audit({ event: 'oauth.error', outcome: 'server_error', errorCode: err instanceof Error ? err.name : 'Error' });
+    audit({ event: 'oauth.error', outcome: isStoreUnavailableError(err) ? 'store_unavailable' : 'server_error', errorCode: err instanceof Error ? err.name : 'Error' });
+  });
+
+  /**
+   * I2b-S4 (S3-1): a code reaches the client only in a response that fully
+   * succeeded. `oidc-provider` writes the code, sets the redirect, and only
+   * then saves the session; if a later store write fails, its error handler
+   * changes the status but keeps the success `Location` (with the code).
+   * This outermost middleware runs after every provider route:
+   *   - a code created by this request (any route but the token endpoint)
+   *     is ACTIVATED only if the final response is < 400, actually carries
+   *     it (Location or form_post body) and the client is still connected.
+   *     The store writes new codes as pending, so until activation they
+   *     cannot be redeemed;
+   *   - every response >= 400 loses its Location header.
+   *
+   * I2b-S6: an activation the server cannot confirm may still have
+   * committed (lost COMMIT acknowledgement, timeout), and a committed
+   * activation does not mean the response was delivered. So whenever the
+   * server decides the code is NOT delivered -- activation failed or is
+   * uncertain, the response failed or carries no code, or the client
+   * connection closed before the response was fully written -- the code is
+   * REVOKED (deleted whether pending or active; retried once), never just
+   * left pending. Invariant: a code is redeemable only if the server wrote
+   * it into a < 400 response on an open connection after a confirmed
+   * activation; a code that never left the server is revoked unless every
+   * revocation attempt also fails (audited `CodeRevocationFailed`; it then
+   * expires with its 60 s TTL, and nobody outside the server holds it).
+   * No code value is logged.
+   */
+  const REVOKE_ATTEMPTS = 2;
+  const revokeCode = async (code: string): Promise<void> => {
+    if (!adapterStore.revokeIssued) return;
+    for (let attempt = 0; attempt < REVOKE_ATTEMPTS; attempt += 1) {
+      try {
+        await adapterStore.revokeIssued('AuthorizationCode', code);
+        return;
+      } catch {
+        // retry: the first attempt can time out on the row lock of an in-flight activation COMMIT
+      }
+    }
+    audit({ event: 'oauth.error', outcome: 'store_unavailable', errorCode: 'CodeRevocationFailed' });
+  };
+  const connectionGone = (ctx: ProviderCtx) => ctx.res.destroyed === true || ctx.req.socket?.destroyed === true;
+
+  provider.use(async (ctx: ProviderCtx, next: () => Promise<void>) => {
+    await next();
+    let code: string | undefined;
+    try {
+      const ac = ctx.oidc?.route !== 'token' ? (ctx.oidc?.entities as { AuthorizationCode?: { jti?: string } } | undefined)?.AuthorizationCode : undefined;
+      code = typeof ac?.jti === 'string' ? ac.jti : undefined;
+    } catch {
+      code = undefined;
+    }
+    if (code) {
+      const location = String(ctx.response.get('Location') ?? '');
+      const body = typeof ctx.body === 'string' ? ctx.body : '';
+      const deliverable = ctx.status < 400 && (location.includes(code) || body.includes(code)) && !connectionGone(ctx);
+      let activated = !adapterStore.activateIssued; // stores without pending codes cannot fail part-way
+      if (deliverable && adapterStore.activateIssued) {
+        try {
+          activated = await adapterStore.activateIssued('AuthorizationCode', code);
+        } catch {
+          activated = false; // failed OR uncertain: it may have committed, so revoke below
+        }
+      }
+      if (!deliverable || !activated || connectionGone(ctx)) {
+        await revokeCode(code);
+        if (deliverable && !activated) {
+          audit({ event: 'oauth.error', outcome: 'store_unavailable', errorCode: 'CodeActivationFailed' });
+          ctx.remove('Location');
+          ctx.status = 503;
+          ctx.set('cache-control', 'no-store');
+          ctx.set('retry-after', '1');
+          ctx.type = 'json';
+          ctx.body = JSON.stringify({ error: 'temporarily_unavailable' });
+        } else if (deliverable) {
+          // Activated, but the client left meanwhile: nothing is sent.
+          ctx.remove('Location');
+          ctx.status = 503;
+          ctx.body = '';
+        }
+      } else if (adapterStore.revokeIssued) {
+        // The response is written after this middleware returns; if the
+        // connection closes before it is fully handed to the OS, revoke.
+        const issued = code;
+        ctx.res.once('close', () => {
+          if (!ctx.res.writableFinished) void revokeCode(issued);
+        });
+      }
+    }
+    if (ctx.status >= 400) ctx.remove('Location');
   });
 
   const providerCallback = provider.callback();
@@ -577,16 +694,26 @@ ${duration}${manage}
     return changed ? `?${q}` : search;
   }
 
-  /** Returns retry-after seconds when the request must be throttled, else null. */
-  async function preAuthThrottled(req: IncomingMessage): Promise<number | null> {
+  /** Returns the refusal (429 throttled, 503 limiter unavailable) when the request must not proceed, else null. */
+  async function preAuthThrottled(req: IncomingMessage): Promise<{ status: 429 | 503; retryAfter: number } | null> {
     const pre = options.preAuth as PreAuthThrottle;
-    const address = resolveClientAddress(nodeAddressRequest(req as never), pre.addressSource);
-    const rules = [{ key: 'preauth-as:global', limit: pre.global ?? 6000 }];
-    if (address) rules.push({ key: `preauth-as:addr:${address}`, limit: pre.perAddress ?? 120 });
+    const resolved = resolveClientAddressDetailed(nodeAddressRequest(req as never), pre.addressSource);
+    // I2b-S2: no usable trusted address -> the shared bounded bucket, audited (never the value).
+    if (resolved.kind === 'unresolved' && resolved.reason !== 'no_source') audit({ event: 'oauth.address_unresolved', outcome: 'unresolved', errorCode: resolved.reason });
+    const rules = buildPreAuthRules(
+      'preauth-as',
+      resolved.kind === 'resolved' ? resolved.address : null,
+      { perAddress: pre.perAddress ?? 120, global: pre.global ?? 6000, globalShards: pre.globalShards },
+      pre.pickShard,
+    );
     const decision = await pre.limiter.check(rules);
     if (decision.allowed) return null;
+    if (decision.limitedBy === 'unavailable') {
+      audit({ event: 'oauth.throttled', outcome: 'limiter_unavailable', limitedBy: 'unavailable' });
+      return { status: 503, retryAfter: 1 };
+    }
     audit({ event: 'oauth.throttled', outcome: 'preauth_throttled', limitedBy: decision.limitedBy });
-    return Math.max(1, decision.retryAfterSeconds);
+    return { status: 429, retryAfter: Math.max(1, decision.retryAfterSeconds) };
   }
 
   async function handle(req: IncomingMessage, res: ServerResponse, path: string, search = ''): Promise<void> {
@@ -600,8 +727,8 @@ ${duration}${manage}
       if (options.preAuth) {
         const throttled = await preAuthThrottled(req);
         if (throttled !== null) {
-          res.writeHead(429, { 'content-type': 'application/json', 'cache-control': 'no-store', 'retry-after': String(throttled) });
-          res.end(JSON.stringify({ error: 'rate_limited' }));
+          res.writeHead(throttled.status, { 'content-type': 'application/json', 'cache-control': 'no-store', 'retry-after': String(throttled.retryAfter) });
+          res.end(JSON.stringify({ error: throttled.status === 503 ? 'temporarily_unavailable' : 'rate_limited' }));
           return;
         }
       }
@@ -615,10 +742,14 @@ ${duration}${manage}
         providerCallback(req, res);
       });
     } catch (err) {
-      audit({ event: 'oauth.error', outcome: 'server_error', errorCode: err instanceof Error ? err.name : 'Error' });
+      // I2b-S2: an unavailable OAuth state store is a 503; nothing was issued.
+      const unavailable = isStoreUnavailableError(err);
+      audit({ event: 'oauth.error', outcome: unavailable ? 'store_unavailable' : 'server_error', errorCode: err instanceof Error ? err.name : 'Error' });
       if (!res.headersSent) {
-        res.writeHead(500, { 'content-type': 'application/json', 'cache-control': 'no-store' });
-        res.end(JSON.stringify({ error: 'server_error' }));
+        // I2b-S4 (S3-1): never let a prepared success redirect out with an error.
+        res.removeHeader('location');
+        res.writeHead(unavailable ? 503 : 500, { 'content-type': 'application/json', 'cache-control': 'no-store', ...(unavailable ? { 'retry-after': '1' } : {}) });
+        res.end(JSON.stringify({ error: unavailable ? 'temporarily_unavailable' : 'server_error' }));
       }
     }
   }

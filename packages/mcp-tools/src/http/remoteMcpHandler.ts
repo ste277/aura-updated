@@ -3,6 +3,9 @@ import { FIND_BEST_TIME_TOOL, toFindBestTimeToolResult } from '../findBestTimeTo
 import { executeFindBestTimeRemote } from '../findBestTimeRemote';
 import type { McpRateLimiter, RateLimitRule } from '../security/rateLimit';
 import type { McpAuditEvent, McpAuditSink } from '../security/audit';
+import { parseIp, type AddressUnresolvedReason } from '../security/clientAddress';
+import { isStoreUnavailableError } from '../security/deadline';
+import { buildPreAuthRules, type PreAuthLimits } from '../security/preAuthRules';
 import { parseRemoteMcpConfig, type RemoteMcpConfig } from './remoteMcpConfig';
 
 // Re-exported so existing importers keep working; the implementation lives in
@@ -29,6 +32,9 @@ export type { RemoteMcpConfig };
  *      resource does not accept (isClientAllowed) -> 403 unauthorized_client
  *   5b. rate limit (rateLimiter): a per-user bucket plus a much larger
  *       per-client ceiling, so one user cannot exhaust another's allowance -> 429
+ *   I2b-S2: a limiter that cannot decide (database timeout or error) and a
+ *   token verifier whose store is unavailable answer 503
+ *   `temporarily_unavailable` + Retry-After, never 429 and never a pass.
  *   6. body read with a streaming 16 KB cap -> 413; invalid JSON -> 400;
  *      JSON-RPC batch (array) -> 400 (batching was removed from the
  *      protocol in 2025-06-18, and a batch would multiply the per-request
@@ -88,11 +94,18 @@ export interface RemoteMcpDeps {
    * I2b (F5): pre-authentication throttle, checked BEFORE the access token is
    * verified (token verification is a database lookup). Keyed by the trusted
    * client address (clientAddress.ts; never a raw forwarded header) plus a
-   * global ceiling. Without an address only the global ceiling applies.
+   * global ceiling. I2b-S2: the address is bucketed (IPv4 /32, IPv6 /64);
+   * without a usable address the request uses the ONE shared `unresolved`
+   * bucket with the per-address limit (bounded; never global-only), and the
+   * global ceiling is sharded (security/preAuthRules.ts).
    */
   preAuthRateLimiter?: McpRateLimiter;
   clientAddress?: string | null;
-  preAuthLimits?: { perAddress: number; global: number };
+  /** Why `clientAddress` is null (from resolveClientAddressDetailed); audited as a code only. */
+  clientAddressProblem?: AddressUnresolvedReason;
+  preAuthLimits?: PreAuthLimits;
+  /** Test hook: global shard selection (default: crypto random). */
+  pickShard?: (shards: number) => number;
   /** Redacted audit sink. */
   audit?: McpAuditSink;
   /** Monotonic-ish clock for audit latency (tests pin it). */
@@ -103,6 +116,11 @@ const JSON_HEADERS = { 'content-type': 'application/json', 'cache-control': 'no-
 
 function jsonResponse(status: number, body: unknown, headers: Record<string, string> = {}): Response {
   return new Response(JSON.stringify(body), { status, headers: { ...JSON_HEADERS, ...headers } });
+}
+
+/** I2b-S2: infrastructure failure (limiter or token store), fail closed. */
+function unavailable(): Response {
+  return jsonResponse(503, { error: 'temporarily_unavailable' }, { 'retry-after': '1' });
 }
 
 function notFound(): Response {
@@ -236,12 +254,14 @@ export async function handleRemoteMcpRequest(req: Request, deps: RemoteMcpDeps):
 
   if (deps.preAuthRateLimiter) {
     const pre = deps.preAuthLimits ?? DEFAULT_PREAUTH_LIMITS;
-    if (!(pre.global >= pre.perAddress && pre.perAddress >= 1)) throw new TypeError('preAuthLimits.global must be >= perAddress >= 1');
-    const rules: RateLimitRule[] = [{ key: 'preauth-mcp:global', limit: pre.global }];
-    if (deps.clientAddress) rules.push({ key: `preauth-mcp:addr:${deps.clientAddress}`, limit: pre.perAddress });
+    const address = deps.clientAddress ? parseIp(deps.clientAddress)?.address ?? null : null;
+    const problem: AddressUnresolvedReason | undefined = address ? undefined : deps.clientAddress ? 'invalid' : deps.clientAddressProblem;
+    if (problem && problem !== 'no_source') deps.audit?.({ event: 'mcp.address_unresolved', outcome: 'unresolved', errorCode: problem });
+    const rules: RateLimitRule[] = buildPreAuthRules('preauth-mcp', address, pre, deps.pickShard);
     const decision = await deps.preAuthRateLimiter.check(rules);
     if (!decision.allowed) {
       audit.limitedBy = decision.limitedBy;
+      if (decision.limitedBy === 'unavailable') return done(unavailable(), 'limiter_unavailable');
       return done(jsonResponse(429, { error: 'rate_limited' }, { 'retry-after': String(Math.max(1, decision.retryAfterSeconds)) }), 'preauth_throttled');
     }
   }
@@ -251,8 +271,10 @@ export async function handleRemoteMcpRequest(req: Request, deps: RemoteMcpDeps):
   try {
     access = token ? await deps.verifyAccessToken(token, config.resourceUrl) : null;
   } catch (err) {
-    // A verifier failure is a rejection, never a pass.
+    // A verifier failure is a rejection, never a pass. I2b-S2: an unavailable
+    // token store is reported as 503 (retry later), not as an invalid token.
     console.error(`[aura-mcp-remote] token verification failed (${err instanceof Error ? err.name : 'Error'})`);
+    if (isStoreUnavailableError(err)) return done(unavailable(), 'store_unavailable');
     access = null;
   }
   if (!access) {
@@ -282,6 +304,7 @@ export async function handleRemoteMcpRequest(req: Request, deps: RemoteMcpDeps):
     const decision = await deps.rateLimiter.check(rules);
     if (!decision.allowed) {
       audit.limitedBy = decision.limitedBy;
+      if (decision.limitedBy === 'unavailable') return done(unavailable(), 'limiter_unavailable');
       return done(jsonResponse(429, { error: 'rate_limited' }, { 'retry-after': String(decision.retryAfterSeconds) }), 'rate_limited');
     }
   }

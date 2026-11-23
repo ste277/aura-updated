@@ -5,6 +5,14 @@ import { ephemeralOAuthKeys, loadOAuthKeysFromEnv, type OAuthKeyMaterial } from 
 import type { OAuthStore } from '../../../packages/mcp-tools/src/auth/oauthStore';
 import { createPostgresAdapterStore } from '../../../packages/mcp-tools/src/auth/postgresAdapter';
 import { createRedactingAuditSink, type McpAuditSink } from '../../../packages/mcp-tools/src/security/audit';
+import {
+  fetchAddressRequest,
+  parseClientAddressSource,
+  resolveClientAddressDetailed,
+  type AddressUnresolvedReason,
+  type ClientAddressSource,
+} from '../../../packages/mcp-tools/src/security/clientAddress';
+import { MCP_PG_POOL_BOUNDS } from '../../../packages/mcp-tools/src/security/deadline';
 import { createPostgresRateLimiter } from '../../../packages/mcp-tools/src/security/postgresRateLimit';
 import { createFixedWindowRateLimiter, type McpRateLimiter } from '../../../packages/mcp-tools/src/security/rateLimit';
 import type { RemoteMcpConfig } from '../../../packages/mcp-tools/src/http/remoteMcpHandler';
@@ -29,6 +37,17 @@ import { resolveRuntimeMcpAuthMode } from './mcpAuthGate';
  *     can be exercised locally. It REQUIRES AURA_MCP_OAUTH_DATABASE_URL on a
  *     loopback host -- never DATABASE_URL, which may point at a shared or
  *     Production database.
+ *   I2b-S2 (I2b-R-2): TWO bounded pools on that database -- one for the
+ *     OAuth store, one for the two limiters -- so limiter saturation cannot
+ *     block token/session reads and vice versa. Each has a checkout timeout
+ *     and a client-side query timeout (MCP_PG_POOL_BOUNDS); the limiter
+ *     adds transaction-local lock/statement timeouts and a decision
+ *     deadline, the store a per-query deadline. Timeouts fail closed (503).
+ * Client address for /api/mcp pre-auth (I2b-S2, I2b-R-3):
+ *   AURA_MCP_CLIENT_ADDRESS_SOURCE (default "none"). Only "none" or
+ *   "header:x-real-ip" / "header:x-vercel-forwarded-for" make sense for an
+ *   App Router request; without a usable address /api/mcp uses the shared
+ *   bounded "unresolved" bucket.
  * Keys: AURA_MCP_OAUTH_JWKS (+ cookie keys, pairwise salt, audit key; see
  * packages/mcp-tools/src/auth/keys.ts) when set, otherwise ephemeral.
  *
@@ -48,13 +67,23 @@ const LOCAL_CLIENTS = [
 
 const LOOPBACK_DB_HOSTS: ReadonlySet<string> = new Set(['127.0.0.1', 'localhost', '::1', '[::1]']);
 
-interface LocalState {
+export interface LocalState {
   key: string;
   server: AuraOAuthServer;
   rateLimiter: McpRateLimiter;
   preAuthLimiter: McpRateLimiter;
   audit: McpAuditSink;
   storeKind: 'memory' | 'postgres';
+  addressSource: ClientAddressSource;
+}
+
+/** I2b-S2: a pool with the shared bounds (security/deadline.ts MCP_PG_POOL_BOUNDS). */
+function boundedPool(connectionString: string, role: 'store' | 'limiter'): Pool {
+  const pool = new Pool({ connectionString, ...MCP_PG_POOL_BOUNDS, application_name: `aura-mcp-oauth-${role}` });
+  // An idle client that errors (server restart, destroyed connection) must
+  // not crash the process; log the class only.
+  pool.on('error', (err) => console.error(`[aura-mcp-oauth] ${role} pool client error (${err instanceof Error ? err.name : 'Error'})`));
+  return pool;
 }
 
 // Survives Next dev hot reloads within one process.
@@ -109,10 +138,12 @@ export function getLocalMcpAuth(config: RemoteMcpConfig): LocalState {
   let rateLimiter: McpRateLimiter;
   let preAuthLimiter: McpRateLimiter;
   if (storeKind === 'postgres') {
-    const pool = new Pool({ connectionString: localOAuthDatabaseUrl(env), max: 5 });
+    const connectionString = localOAuthDatabaseUrl(env);
+    const storePool = boundedPool(connectionString, 'store');
+    const limiterPool = boundedPool(connectionString, 'limiter');
     // I2b-R1: recoverable identifiers are sealed with keys derived from the cookie keys.
-    adapterStore = createPostgresAdapterStore({ db: pool, fieldKeys: keys.cookieKeys });
-    rateLimiter = createPostgresRateLimiter({ pool, windowMs: 60_000 });
+    adapterStore = createPostgresAdapterStore({ db: storePool, fieldKeys: keys.cookieKeys });
+    rateLimiter = createPostgresRateLimiter({ pool: limiterPool, windowMs: 60_000 });
     preAuthLimiter = rateLimiter;
   } else {
     // Local: 1-minute windows, bounded at 10,000 windows each.
@@ -137,9 +168,16 @@ export function getLocalMcpAuth(config: RemoteMcpConfig): LocalState {
     // Local dev: clients connect directly, so the TCP peer is the address.
     preAuth: { limiter: preAuthLimiter, addressSource: { kind: 'socket' } },
   });
-  const state: LocalState = { key, server, rateLimiter, preAuthLimiter, audit, storeKind };
+  const addressSource = parseClientAddressSource(env.AURA_MCP_CLIENT_ADDRESS_SOURCE);
+  const state: LocalState = { key, server, rateLimiter, preAuthLimiter, audit, storeKind, addressSource };
   globalRef.__auraMcpLocalOAuth = state;
   return state;
 }
 
 export const localMcpAudit = createRedactingAuditSink({ knownTools: ['find_best_time'] });
+
+/** I2b-S2: the trusted client address of an /api/mcp request (or why there is none). */
+export function localMcpClientAddress(state: LocalState, req: Request): { clientAddress: string | null; clientAddressProblem?: AddressUnresolvedReason } {
+  const r = resolveClientAddressDetailed(fetchAddressRequest(req), state.addressSource);
+  return r.kind === 'resolved' ? { clientAddress: r.address } : { clientAddress: null, clientAddressProblem: r.reason };
+}
