@@ -23,6 +23,7 @@
  *
  * Run: npx ts-node test/palmG5C17ReaderMatrix.test.ts
  */
+import * as crypto from 'crypto';
 import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
@@ -72,6 +73,14 @@ type ReaderId = 'node-gunzip' | 'decompression-stream' | 'python-zlib' | 'gzip' 
 const GZIP = which('gzip');
 const gzVer = GZIP ? spawnSync('gzip', ['--version'], { encoding: 'utf8' }) : null;
 const FLAVOR = !gzVer ? 'none' : /Apple/.test(gzVer.stdout + gzVer.stderr) ? 'apple' : /^gzip 1\.\d+/m.test(gzVer.stdout) ? 'gnu' : 'other';
+// G5-C17-CI-1: the exact gzip build is recorded, because GNU gzip's handling of a
+// back-reference before the stream start differs between builds (1.12 on Debian 12
+// zero-fills and recovers F1b; the GNU gzip on the Ubuntu 26.04 runner refuses it).
+const GZ_VERSION = gzVer ? ((gzVer.stdout || gzVer.stderr || '').split('\n')[0].trim() || 'unknown') : 'none';
+const GNU_RELEASE = FLAVOR === 'gnu' ? (/^gzip (1\.\d+)/m.exec(gzVer!.stdout) || [])[1] || '' : '';
+// sha256 of the F1b gzip stream whose sentinel GNU gzip 1.12 (Debian 12) recovered live
+// in G5-C17 (suites/c17_gnu_debian.log). Pinned so the verified regression fixture cannot drift.
+const F1B_SHA256_VERIFIED_GZIP_1_12 = '147aaade4b0d89ae235d8a2a65ae5a84d239ffea292655a1f1d64292f53a239a';
 const PY = which('python3');
 const BSDTAR = which('bsdtar');
 const available: Record<ReaderId, boolean> = { 'node-gunzip': true, 'decompression-stream': typeof (globalThis as any).DecompressionStream === 'function', 'python-zlib': !!PY, gzip: !!GZIP, bsdtar: !!BSDTAR };
@@ -243,10 +252,11 @@ function fixtures(): Fx[] {
 }
 
 async function main() {
-  console.log(`readers: ${(Object.keys(available) as ReaderId[]).map((r) => `${r}=${available[r] ? (r === 'gzip' ? `yes(${FLAVOR})` : 'yes') : 'NOT AVAILABLE'}`).join(', ')}`);
+  console.log(`readers: ${(Object.keys(available) as ReaderId[]).map((r) => `${r}=${available[r] ? (r === 'gzip' ? `yes(${FLAVOR}; ${GZ_VERSION})` : 'yes') : 'NOT AVAILABLE'}`).join(', ')}`);
   for (const r of Object.keys(available) as ReaderId[]) if (!available[r]) notRun.push(`reader:${r}`);
   const fx = fixtures();
   const recovered: Record<string, ReaderId[]> = {};
+  const verdict: Record<string, number> = {};
   for (const f of fx) {
     const needle = f.needle || S;
     check(`${f.id}0. fixture does not contain the sentinel as plain bytes`, !f.scan.includes(needle));
@@ -260,6 +270,7 @@ async function main() {
     }
     recovered[f.id] = rec;
     const res = run(`${f.id.replace(/[^A-Za-z0-9.]/g, '_')}.bin`, f.scan);
+    verdict[f.id] = res.exit;
     console.log(`MATRIX ${f.id} | ${cells.join(' ') || 'no reader applies'} | scanner=${res.exit ? `FAIL(${fmtOf(res)})` : 'PASS'}`);
     if (rec.length) check(`${f.id}. ${f.label}: recovered by ${rec.join(', ')} -> scanner must fail closed`, res.exit === 1, res.reason.slice(0, 160));
     if (f.expect === 'fail') check(`${f.id}e. ${f.label} -> FAIL closed${f.fmt ? ` (${f.fmt.source})` : ''}`, res.exit === 1 && (!f.fmt || f.fmt.test(fmtOf(res))), `exit=${res.exit} reason=${res.reason.slice(0, 160)}`);
@@ -272,12 +283,28 @@ async function main() {
   if (available['python-zlib']) check('D3. Python zlib streaming recovers it too (C16-F1)', has('F1.err1000', 'python-zlib'));
   check('D4. a streaming reader recovers the 9-byte sentinel from the short truncated stream', (recovered['F1.trunc'] || []).length > 0, 'no reader recovered it');
   if (FLAVOR === 'gnu') {
-    check('D5. GNU gzip recovers the too-far-back stream (C16-F1b)', has('F1b', 'gzip'));
+    // D5 (G5-C17-CI-1): record what this GNU gzip build actually does with F1b; a build
+    // that refuses it is acceptable, a build that recovers it must be met by a rejection.
+    const f1bLive = has('F1b', 'gzip');
+    console.log(`INFO D5 ${GZ_VERSION}: F1b ${f1bLive ? 'RECOVERED (zero-fill, as GNU gzip 1.12)' : 'REFUSED (no output, as zlib)'}; scanner ${verdict['F1b'] === 1 ? 'FAIL closed' : 'PASS'}`);
+    check(`D5. GNU gzip ${GNU_RELEASE || '?'} F1b behaviour recorded (${f1bLive ? 'recovers' : 'refuses'}) and any recovery is rejected by the scanner (C16-F1b)`, !f1bLive || verdict['F1b'] === 1);
+    if (GNU_RELEASE === '1.12' && f1bLive) check('D5-live. live GNU gzip 1.12 reproduces the verified F1b recovery', true);
+    else { notRun.push(`D5-live(GNU gzip 1.12 F1b recovery not reproduced live: ${GZ_VERSION} ${f1bLive ? 'recovers' : 'refuses'}; covered by D5a/D5b)`); console.log(`NOT RUN D5-live: no live GNU gzip 1.12 recovery here (${GZ_VERSION}); the verified 1.12 behaviour stays covered by D5a/D5b`); }
     check('D6. GNU gzip decodes pack, gzip LZH and old-magic gzip at offset 0', has('P1', 'gzip') && has('Z1', 'gzip') && has('O1', 'gzip'));
     check('D7. GNU gzip recovers the sentinel before the invalid block once its 32 KiB window flushes', has('F1.err60000', 'gzip'));
   } else if (FLAVOR === 'apple') {
     check('D5. Apple gzip decodes pack and old-magic gzip at offset 0 (not LZH)', has('P1', 'gzip') && has('O1', 'gzip') && !has('Z1', 'gzip'));
   } else notRun.push('D5-D7');
+  // D5a/D5b (G5-C17-CI-1): the GNU gzip 1.12 behaviour verified in G5-C17 stays covered on every platform.
+  { const f1b = fx.find((f) => f.id === 'F1b')!;
+    const f1bSha = crypto.createHash('sha256').update(f1b.read!).digest('hex');
+    check('D5a. F1b is byte-identical to the stream GNU gzip 1.12 recovered in G5-C17 (pinned sha256)', f1bSha === F1B_SHA256_VERIFIED_GZIP_1_12, `sha256=${f1bSha}`);
+    const SCD = require(SCANNER);
+    const want = Buffer.concat([Buffer.alloc(3, 0), S]);
+    const got = typeof SCD.inflateRecover === 'function' ? SCD.inflateRecover(f1b.read!.subarray(GZ_HEAD.length), 70000) : Buffer.alloc(0);
+    check('D5b. the scanner\'s recovery decoder reproduces GNU gzip 1.12\'s F1b output (3 zero bytes + sentinel)', Buffer.compare(got, want) === 0, `got ${got.length} B`);
+    if (available.gzip && FLAVOR !== 'gnu') console.log(`INFO D5 ${GZ_VERSION}: F1b ${has('F1b', 'gzip') ? 'RECOVERED' : 'REFUSED'}; scanner ${verdict['F1b'] === 1 ? 'FAIL closed' : 'PASS'}`);
+    check('D5c. F1b is rejected by the scanner regardless of the installed gzip', verdict['F1b'] === 1); }
   check('D8. zlib readers refuse the too-far-back stream (why C16-F1b needs the GNU-style zero fill)', !has('F1b', 'node-gunzip'));
   if (available.bsdtar) check('D9. bsdtar extracts LHA level 0 (any attribute) and behind an MZ stub', has('L1', 'bsdtar') && has('L2', 'bsdtar') && has('L3', 'bsdtar'));
 
