@@ -68,6 +68,8 @@ declare module 'oidc-provider' {
     interactionDetails(req: IncomingMessage, res: ServerResponse): Promise<InteractionDetails>;
     interactionResult(req: IncomingMessage, res: ServerResponse, result: Record<string, unknown>, options?: { mergeWithLastSubmission?: boolean }): Promise<string>;
     on(event: string, listener: (...args: any[]) => void): this;
+    /** App-level Koa middleware; oidc-provider inserts it before route execution, so it wraps every route. */
+    use(fn: (ctx: any, next: () => Promise<void>) => Promise<void>): this;
     AccessToken: {
       new (fields: Record<string, unknown>): AccessTokenInstance;
       find(value: string, options?: { ignoreExpiration?: boolean }): Promise<AccessTokenInstance | undefined>;

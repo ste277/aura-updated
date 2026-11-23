@@ -1076,6 +1076,14 @@ jobs:
       # tables.
       - name: Run I2b-S2 staging-blocker DB test
         run: npx ts-node test/mcpOAuthStagingBlockersDb.test.ts
+      # AURA-MCP-02-I2b-S4 -- S3 review findings: every store statement after
+      # the authorization-code write failed in turn (reject and hang) never
+      # discloses or leaves a redeemable code and issues no token (S3-1); a
+      # store write that misses its deadline behind a lock never lands later
+      # and cannot overwrite a newer session, server-side waits end, the pool
+      # recovers (S3-2). Touches only the two MCP tables.
+      - name: Run I2b-S4 OAuth store DB test
+        run: npx ts-node test/mcpOAuthStoreS4Db.test.ts
       - name: Verify every repository migration was recorded as applied
         run: |
           set -euo pipefail

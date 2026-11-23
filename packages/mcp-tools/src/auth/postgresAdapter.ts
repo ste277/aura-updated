@@ -2,7 +2,7 @@
 import { createHash } from 'crypto';
 import type { Adapter, AdapterPayload } from 'oidc-provider';
 import { createFieldSealer, FieldSealError, type FieldSealer } from './fieldSeal';
-import { boundedMs, singleFlight, withDeadline } from '../security/deadline';
+import { boundedMs, boundedStatement, singleFlight, withDeadline, type BoundedPool } from '../security/deadline';
 import { CONSUMABLE_MODELS, ReplayDetectedError, type OAuthStore, type UserGrantSummary } from './oauthStore';
 
 /**
@@ -45,16 +45,21 @@ import { CONSUMABLE_MODELS, ReplayDetectedError, type OAuthStore, type UserGrant
  *   - Expiry is enforced on read (expired rows are invisible) and rows are
  *     removed by `cleanupExpired` (bounded batches; opportunistic, see
  *     `cleanupEvery`; I2b-S2: at most one opportunistic cleanup in flight).
- *   - I2b-S2 (I2b-R-2) bounded execution: every query runs under a
- *     deadline (`queryDeadlineMs`, default 3000, covering pool checkout and
- *     execution). A timeout or ANY database error throws
+ *   - I2b-S2 / S4 (I2b-R-2, S3-2) bounded execution: every query has a
+ *     client-side deadline (`queryDeadlineMs`, default 3000, covering pool
+ *     checkout and execution). A timeout or ANY database error throws
  *     StoreUnavailableError (security/deadline.ts: 503, generic body), never
- *     "not found" and never a driver message. `oidc-provider` turns it into a
- *     503 error response, so no code, token or session is issued from a
- *     failed or partial store operation. A statement abandoned by the
- *     deadline may still complete later; it can only write state whose
- *     identifier was never returned to anyone, or remove state (consume,
- *     destroy, revoke), so a late completion is fail-safe.
+ *     "not found" and never a driver message. With a real pool each
+ *     statement runs in its own transaction with server-side
+ *     `statement_timeout` / `lock_timeout` and is committed only if the
+ *     deadline has not answered failure (`boundedStatement`), so a write
+ *     reported as failed cannot land later and overwrite newer state (the
+ *     only exception is a lost COMMIT acknowledgement).
+ *   - I2b-S4 (S3-1): a new AuthorizationCode is written PENDING and is
+ *     invisible to `find` until the authorization server activates it after
+ *     the response that delivers it succeeded (`activateIssued`); a failed
+ *     response discards it (`discardIssued`), and if even that fails the
+ *     code simply stays pending and unredeemable until it expires.
  *
  * The adapter takes an injected `query` function (a `pg` Pool satisfies it),
  * so this package does not import a database driver.
@@ -77,7 +82,18 @@ export interface PostgresAdapterOptions {
   cleanupBatch?: number;
   /** I2b-S2: deadline per query (checkout + execution), ms (default 3000). */
   queryDeadlineMs?: number;
+  /** I2b-S4: server-side `SET LOCAL statement_timeout` per statement, ms (default 1500). */
+  statementTimeoutMs?: number;
+  /** I2b-S4: server-side `SET LOCAL lock_timeout` per statement, ms (default 1000). */
+  lockTimeoutMs?: number;
 }
+
+/**
+ * I2b-S4 (S3-1): models whose new rows are written PENDING and must be
+ * activated by the authorization server once delivered (see OAuthStore).
+ */
+const PENDING_ON_WRITE: ReadonlySet<string> = new Set(['AuthorizationCode']);
+const PENDING_FIELD = 'auraIssuePending';
 
 const TABLE = '"McpOAuthPayload"';
 
@@ -158,8 +174,18 @@ export function createPostgresAdapterStore(options: PostgresAdapterOptions): OAu
   const cleanupEvery = options.cleanupEvery ?? 200;
   const cleanupBatch = options.cleanupBatch ?? 500;
   const queryDeadlineMs = boundedMs('queryDeadlineMs', options.queryDeadlineMs, 3000, 50, 60_000);
+  const statementTimeoutMs = boundedMs('statementTimeoutMs', options.statementTimeoutMs, 1500, 50, 60_000);
+  const lockTimeoutMs = boundedMs('lockTimeoutMs', options.lockTimeoutMs, 1000, 10, 60_000);
   // Every statement is bounded; failures surface only as StoreUnavailableError.
-  const db: PgQueryable = { query: <R,>(text: string, params?: unknown[]) => withDeadline(options.db.query<R>(text, params), queryDeadlineMs) };
+  // I2b-S4 (S3-2): with a real pool, each statement runs in its own short
+  // transaction with server-side timeouts and is committed only if the
+  // deadline has not already answered failure (boundedStatement). A plain
+  // `query`-only db (tests, fakes) keeps the client-side deadline only.
+  const raw = options.db as PgQueryable & Partial<BoundedPool>;
+  const db: PgQueryable =
+    typeof raw.connect === 'function'
+      ? { query: <R,>(text: string, params?: unknown[]) => boundedStatement<R>(raw as BoundedPool, text, params, { deadlineMs: queryDeadlineMs, statementTimeoutMs, lockTimeoutMs }) }
+      : { query: <R,>(text: string, params?: unknown[]) => withDeadline(options.db.query<R>(text, params), queryDeadlineMs) };
   let writes = 0;
 
   async function cleanupExpired(): Promise<number> {
@@ -187,6 +213,8 @@ export function createPostgresAdapterStore(options: PostgresAdapterOptions): OAu
       const stored: AdapterPayload = protectPayload(sealer, this.name, key, payload);
       delete stored.jti;
       delete stored.consumed;
+      // I2b-S4 (S3-1): a new code is not redeemable until activated.
+      if (PENDING_ON_WRITE.has(this.name)) (stored as Record<string, unknown>)[PENDING_FIELD] = true;
       // The Grant row is part of its own grant (so revokeByGrantId removes it).
       const grantId = this.name === 'Grant' ? id : typeof payload.grantId === 'string' ? payload.grantId : null;
       const accountId = typeof payload.accountId === 'string' ? payload.accountId : null;
@@ -218,6 +246,8 @@ export function createPostgresAdapterStore(options: PostgresAdapterOptions): OAu
         [this.name, key],
       );
       const row = r.rows[0];
+      // I2b-S4 (S3-1): a pending (not yet delivered) code does not exist for readers.
+      if (row && (row.payload as Record<string, unknown>)?.[PENDING_FIELD] === true) return undefined;
       return row ? { id: row.id, row } : undefined;
     }
 
@@ -296,6 +326,19 @@ export function createPostgresAdapterStore(options: PostgresAdapterOptions): OAu
       return new Set(r.rows.filter((row) => row.model === 'Grant').map((row) => row.grantId)).size;
     },
     cleanupExpired,
+    async activateIssued(model: string, id: string): Promise<boolean> {
+      if (!PENDING_ON_WRITE.has(model)) return false;
+      const r = await db.query(
+        `UPDATE ${TABLE} SET "payload" = "payload" - '${PENDING_FIELD}'
+         WHERE "model" = $1 AND "id" = $2 AND "payload" ? '${PENDING_FIELD}' AND "consumedAt" IS NULL AND ("expiresAt" IS NULL OR "expiresAt" > now())`,
+        [model, storageKey(id)],
+      );
+      return (r.rowCount ?? 0) === 1;
+    },
+    async discardIssued(model: string, id: string): Promise<void> {
+      if (!PENDING_ON_WRITE.has(model)) return;
+      await db.query(`DELETE FROM ${TABLE} WHERE "model" = $1 AND "id" = $2 AND "payload" ? '${PENDING_FIELD}'`, [model, storageKey(id)]);
+    },
     async size(model?: string): Promise<number> {
       const r = model
         ? await db.query<{ n: string }>(`SELECT count(*)::text AS n FROM ${TABLE} WHERE "model" = $1 AND ("expiresAt" IS NULL OR "expiresAt" > now())`, [model])

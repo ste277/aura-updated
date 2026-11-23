@@ -76,6 +76,17 @@ import type { OAuthStore } from './oauthStore';
  *     `revokeUserClientGrants`), and a sign-in return URL.
  */
 
+/** The slice of the Koa context the I2b-S4 issuance middleware uses. */
+interface ProviderCtx {
+  status: number;
+  body: unknown;
+  type: string;
+  oidc?: { route?: string; entities?: unknown };
+  response: { get(name: string): string };
+  remove(name: string): void;
+  set(name: string, value: string): void;
+}
+
 export interface AuraOAuthClient {
   client_id: string;
   redirect_uris: string[];
@@ -418,6 +429,59 @@ export function createAuraOAuthServer(options: AuraOAuthServerOptions): AuraOAut
     audit({ event: 'oauth.error', outcome: isStoreUnavailableError(err) ? 'store_unavailable' : 'server_error', errorCode: err instanceof Error ? err.name : 'Error' });
   });
 
+  /**
+   * I2b-S4 (S3-1): a code reaches the client only in a response that fully
+   * succeeded. `oidc-provider` writes the code, sets the redirect, and only
+   * then saves the session; if a later store write fails, its error handler
+   * changes the status but keeps the success `Location` (with the code).
+   * This outermost middleware runs after every provider route:
+   *   - a code created by this request (any route but the token endpoint)
+   *     is ACTIVATED only if the final response is < 400 and actually
+   *     carries it (Location or form_post body). The store writes new codes
+   *     as pending, so until activation they cannot be redeemed;
+   *   - if activation fails, the response becomes 503 and the code stays
+   *     pending; if the response failed or carries no code, the code is
+   *     discarded (best effort -- pending either way);
+   *   - every response >= 400 loses its Location header.
+   * No code value is logged.
+   */
+  provider.use(async (ctx: ProviderCtx, next: () => Promise<void>) => {
+    await next();
+    let code: string | undefined;
+    try {
+      const ac = ctx.oidc?.route !== 'token' ? (ctx.oidc?.entities as { AuthorizationCode?: { jti?: string } } | undefined)?.AuthorizationCode : undefined;
+      code = typeof ac?.jti === 'string' ? ac.jti : undefined;
+    } catch {
+      code = undefined;
+    }
+    if (code) {
+      const location = String(ctx.response.get('Location') ?? '');
+      const body = typeof ctx.body === 'string' ? ctx.body : '';
+      const delivered = ctx.status < 400 && (location.includes(code) || body.includes(code));
+      let activated = !adapterStore.activateIssued; // stores without pending codes cannot fail part-way
+      if (delivered && adapterStore.activateIssued) {
+        try {
+          activated = await adapterStore.activateIssued('AuthorizationCode', code);
+        } catch {
+          activated = false;
+        }
+      }
+      if (!delivered || !activated) {
+        if (adapterStore.discardIssued) await adapterStore.discardIssued('AuthorizationCode', code).catch(() => undefined);
+        if (delivered) {
+          audit({ event: 'oauth.error', outcome: 'store_unavailable', errorCode: 'CodeActivationFailed' });
+          ctx.remove('Location');
+          ctx.status = 503;
+          ctx.set('cache-control', 'no-store');
+          ctx.set('retry-after', '1');
+          ctx.type = 'json';
+          ctx.body = JSON.stringify({ error: 'temporarily_unavailable' });
+        }
+      }
+    }
+    if (ctx.status >= 400) ctx.remove('Location');
+  });
+
   const providerCallback = provider.callback();
   const csrfWith = (key: Buffer, uid: string, userId: string) => createHmac('sha256', key).update(`${uid}\0${userId}`).digest('base64url');
   // New tokens use the first key; tokens made with any configured key verify (key rotation).
@@ -642,6 +706,8 @@ ${duration}${manage}
       const unavailable = isStoreUnavailableError(err);
       audit({ event: 'oauth.error', outcome: unavailable ? 'store_unavailable' : 'server_error', errorCode: err instanceof Error ? err.name : 'Error' });
       if (!res.headersSent) {
+        // I2b-S4 (S3-1): never let a prepared success redirect out with an error.
+        res.removeHeader('location');
         res.writeHead(unavailable ? 503 : 500, { 'content-type': 'application/json', 'cache-control': 'no-store', ...(unavailable ? { 'retry-after': '1' } : {}) });
         res.end(JSON.stringify({ error: unavailable ? 'temporarily_unavailable' : 'server_error' }));
       }

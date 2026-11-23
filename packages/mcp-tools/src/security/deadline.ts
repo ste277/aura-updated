@@ -83,3 +83,101 @@ export function singleFlight<T>(task: () => Promise<T>): () => Promise<T | undef
     }
   };
 }
+
+type QueryResultLike<R> = { rows: R[]; rowCount: number | null };
+export interface BoundedClient {
+  query<R = Record<string, unknown>>(text: string, params?: unknown[]): Promise<QueryResultLike<R>>;
+  release(err?: unknown): void;
+}
+export interface BoundedPool {
+  connect(): Promise<BoundedClient>;
+}
+export interface BoundedStatementOptions {
+  /** Client-side answer deadline (checkout + BEGIN + statement), ms. */
+  deadlineMs: number;
+  /** Server-side `SET LOCAL statement_timeout`, ms. */
+  statementTimeoutMs: number;
+  /** Server-side `SET LOCAL lock_timeout`, ms. */
+  lockTimeoutMs: number;
+}
+
+/**
+ * AURA-MCP-02-I2b-S4 (S3-2) -- one statement in its own short transaction,
+ * bounded on BOTH sides, with no late write after a reported failure:
+ *   - `BEGIN; SET LOCAL statement_timeout; SET LOCAL lock_timeout` (one
+ *     message; transaction-scoped, so safe behind a transaction-mode pooler):
+ *     the server aborts the statement itself instead of running or waiting
+ *     on a lock after the client has gone;
+ *   - the work is committed only by an explicit COMMIT that this function
+ *     sends, and it is NEVER sent once the deadline has answered failure.
+ *     A connection abandoned before COMMIT is destroyed, and Postgres rolls
+ *     back an uncommitted transaction when its connection ends, so a
+ *     statement that finishes after the deadline cannot become durable --
+ *     even if the server-side timeouts are larger than the deadline;
+ *   - once COMMIT has been sent, the deadline waits for its outcome (bounded
+ *     by the pool's client-side query timeout). If that outcome is lost the
+ *     answer is still StoreUnavailableError: the only case in which a write
+ *     reported as failed may have landed is a lost COMMIT acknowledgement.
+ * Every failure is StoreUnavailableError; a connection whose transaction
+ * state is uncertain is destroyed, never returned to the pool.
+ */
+export function boundedStatement<R>(pool: BoundedPool, text: string, params: unknown[] | undefined, o: BoundedStatementOptions): Promise<QueryResultLike<R>> {
+  const begin = `BEGIN; SET LOCAL statement_timeout = '${o.statementTimeoutMs}ms'; SET LOCAL lock_timeout = '${o.lockTimeoutMs}ms'`;
+  return new Promise((resolve, reject) => {
+    let settled = false;
+    let commitSent = false;
+    let client: BoundedClient | undefined;
+    let released = false;
+    const fail = (reason: 'timeout' | 'error') => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
+      reject(new StoreUnavailableError(reason));
+    };
+    const destroy = (c: BoundedClient | undefined) => {
+      if (!c || released) return;
+      released = true;
+      try {
+        c.release(new Error('bounded statement abandoned'));
+      } catch {
+        // already gone
+      }
+    };
+    const timer = setTimeout(() => {
+      if (commitSent) return; // the outcome is decided by COMMIT now
+      fail('timeout');
+      destroy(client);
+    }, o.deadlineMs);
+    (async () => {
+      try {
+        const c = await pool.connect();
+        if (settled) {
+          // Never used: clean.
+          c.release();
+          return;
+        }
+        client = c;
+        await c.query(begin);
+        const r = await c.query<R>(text, params);
+        if (settled) {
+          // Failure already reported: never commit; destroying the
+          // connection rolls the transaction back.
+          destroy(c);
+          return;
+        }
+        commitSent = true;
+        await c.query('COMMIT');
+        released = true;
+        c.release();
+        if (!settled) {
+          settled = true;
+          clearTimeout(timer);
+          resolve(r);
+        }
+      } catch {
+        destroy(client);
+        fail('error');
+      }
+    })();
+  });
+}

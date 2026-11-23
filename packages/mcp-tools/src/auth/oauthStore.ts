@@ -28,6 +28,16 @@ export interface UserGrantSummary {
 export interface OAuthStore {
   /** Adapter class passed to the provider's `adapter` configuration. */
   factory: new (name: string) => Adapter;
+  /**
+   * I2b-S4 (S3-1), optional: stores that can fail part-way through a request
+   * write new authorization codes as PENDING (not findable, so not
+   * redeemable). The authorization server activates a code only once the
+   * response that delivers it has succeeded; otherwise it discards it.
+   * `activateIssued` resolves true only if exactly that live, pending row
+   * was activated.
+   */
+  activateIssued?(model: string, id: string): Promise<boolean>;
+  discardIssued?(model: string, id: string): Promise<void>;
   /** Grants a user currently holds (connected assistants). */
   listUserGrants(userId: string): Promise<UserGrantSummary[]>;
   /** Revokes every grant (and its codes and tokens) a user holds for a client. Returns the number of grants revoked. */
