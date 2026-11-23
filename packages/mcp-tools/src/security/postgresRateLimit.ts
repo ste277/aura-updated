@@ -61,7 +61,12 @@ export interface PostgresRateLimiterOptions {
   windowMs: number;
   /** Run cleanupExpired about once every N admitted decisions (default 500; 0 disables). */
   cleanupEvery?: number;
-  /** Server-side lock wait bound per statement, ms (default 250). */
+  /**
+   * Server-side lock wait bound per statement, ms (default 1000). It bounds
+   * waits the client has abandoned; the client deadline (below) bounds the
+   * answer. Much tighter values turn ordinary bursts on one hot key (queued
+   * behind a new row's first insert) into 503s.
+   */
   lockTimeoutMs?: number;
   /** Server-side statement bound, ms (default 1000). */
   statementTimeoutMs?: number;
@@ -109,7 +114,7 @@ export function createPostgresRateLimiter(options: PostgresRateLimiterOptions): 
   const { pool, windowMs } = options;
   if (!Number.isFinite(windowMs) || windowMs < 1000) throw new TypeError('windowMs must be at least 1000');
   const cleanupEvery = options.cleanupEvery ?? 500;
-  const lockTimeoutMs = boundedMs('lockTimeoutMs', options.lockTimeoutMs, 250, 10, 10_000);
+  const lockTimeoutMs = boundedMs('lockTimeoutMs', options.lockTimeoutMs, 1000, 10, 10_000);
   const statementTimeoutMs = boundedMs('statementTimeoutMs', options.statementTimeoutMs, 1000, 50, 30_000);
   const decisionDeadlineMs = boundedMs('decisionDeadlineMs', options.decisionDeadlineMs, 1250, 50, 30_000);
   // Integers validated above, so interpolation is safe; SET cannot take bind parameters.
