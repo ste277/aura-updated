@@ -25,8 +25,10 @@ The shared core of Aura's MCP tool, `find_best_time`, used by two transports:
 | `src/auth/fieldSeal.ts` (I2b-R1) | AES-256-GCM field sealing, keys derived by HKDF from the OAuth cookie keys, AAD bound to row + field, rotation by `kid`, fail closed | `crypto` |
 | `src/auth/keys.ts` (I2b) | Signing JWKS / cookie keys / pairwise salt / audit key from env, validation, rotation; ephemeral keys for local/tests | `crypto` |
 | `src/auth/clientPolicy.ts` (I2b) | Static client registration policy (https or loopback redirect URIs, labels, refresh permission); no DCR / CIMD | nothing |
-| `src/security/postgresRateLimit.ts` (I2b) | Distributed fixed-window limiter on table `McpRateLimitWindow`: all-or-nothing, row-locked, fail closed | an injected `pg` Pool |
-| `src/security/clientAddress.ts` (I2b) | Client address from the TCP peer or ONE allowlisted trusted-proxy header; never `X-Forwarded-For` | `net` |
+| `src/security/postgresRateLimit.ts` (I2b) | Distributed fixed-window limiter on table `McpRateLimitWindow`: all-or-nothing, row-locked, bounded (lock/statement timeouts, decision deadline), fail closed | an injected `pg` Pool |
+| `src/security/clientAddress.ts` (I2b) | Client address from the TCP peer or ONE allowlisted trusted-proxy header; never `X-Forwarded-For`. Strict canonical IPv4/IPv6 parser; IPv4 /32 and IPv6 /64 rate-limit buckets | nothing |
+| `src/security/preAuthRules.ts` (I2b-S2) | Pre-auth rules: address bucket (or the shared `unresolved` bucket) plus one shard of the global ceiling; shard limits sum to exactly the ceiling | `crypto` |
+| `src/security/deadline.ts` (I2b-S2) | `StoreUnavailableError` (503), `withDeadline`, `singleFlight`, shared `pg` pool bounds | nothing |
 | `src/auth/oidc-provider.d.ts` | Narrow local typings for the library subset Aura uses | — |
 
 **Rule:** the four core files must never import an MCP SDK, a database, a session or `process.env`. Both `apps/mcp/test/isolation.test.ts` (compiled graph) and `test/mcpRemoteTransport.test.ts` (source imports) enforce this. Only `apps/web/lib/mcpRemoteConfig.ts` reads the environment.
@@ -85,6 +87,9 @@ I2b adds the components a deployed authorization server needs. **Nothing here en
 | F6 atomic codes | `consume` is one conditional `UPDATE … WHERE "consumedAt" IS NULL … RETURNING`; the loser gets `invalid_grant` and the grant is revoked. Covers codes and rotated refresh tokens. |
 | R1-L1 per-process limits | `postgresRateLimit.ts`: one row per key, locked in sorted order, shared by every instance; fails closed. |
 | R1-L2 client address | `clientAddress.ts`: `socket`, `none`, or `header:x-real-ip` / `header:x-vercel-forwarded-for` only; single-IP values only. |
+| I2b-R-2 database timeouts (S2) | Separate store and limiter pools with checkout and query timeouts. Limiter: `SET LOCAL lock_timeout` 250 ms / `statement_timeout` 1000 ms, a 1250 ms decision deadline that denies and destroys the connection. Store: a 3000 ms deadline per query; any failure is `StoreUnavailableError`. Cleanups are single-flight. Infrastructure failures answer **503** `temporarily_unavailable` (never 429, never a code or token). |
+| I2b-R-3 address normalisation (S2) | Canonical parsing (both IPv4-mapped forms → IPv4; zone ids, ports, lists, brackets rejected), IPv4 /32 and IPv6 /64 buckets, `/api/mcp` reads `AURA_MCP_CLIENT_ADDRESS_SOURCE`. A missing or invalid trusted address uses one shared bounded `unresolved` bucket and is audited (`*.address_unresolved`, reason code only) — never global-only. |
+| I2b-1 limiter contention (S2) | The global ceiling is split into up to 16 shard rows chosen at random, with limits summing to **exactly** the ceiling (aggregate never larger). A decision is 4 statements; rows are locked for one statement plus COMMIT, not from the first upsert. |
 
 Other I2b behaviour:
 - **Refresh tokens** (`refreshTokens`): only for clients with `allow_refresh`, only with consented `offline_access`. Always rotated; 7-day idle and 30-day absolute lifetime by default; replay revokes the grant.
@@ -109,7 +114,8 @@ AURA_MCP_OAUTH_DATABASE_URL=postgresql://user@127.0.0.1:5432/aura_local \
 | Requirement | Variable / item |
 |---|---|
 | Durable store | `AURA_MCP_OAUTH_STORE=postgres`, a database URL, and **migration 0052** applied |
-| Trusted client address | `AURA_MCP_CLIENT_ADDRESS_SOURCE=header:x-vercel-forwarded-for` (Vercel) or `header:x-real-ip` (nginx/Docker) |
+| Trusted client address | `AURA_MCP_CLIENT_ADDRESS_SOURCE=header:x-vercel-forwarded-for` (Vercel) or `header:x-real-ip` (nginx/Docker). **Before relying on it:** verify on staging that the edge overwrites a client-supplied value of that header (I2b-S2 staging condition; not established by code or tests) |
+| Timeouts | Confirm the S2 defaults (2 s checkout, 3 s query, 1.25 s limiter decision, 250 ms lock) against the target database's p99 latency |
 | Signing keys | `AURA_MCP_OAUTH_JWKS`: private RSA ≥ 2048 or EC P-256 JWKs with unique `kid`; first signs |
 | Cookie keys | `AURA_MCP_OAUTH_COOKIE_KEYS`: comma-separated, ≥ 32 characters each; first signs |
 | Pairwise salt / audit key | `AURA_MCP_OAUTH_PAIRWISE_SALT`, `AURA_MCP_AUDIT_KEY` (≥ 32 characters, all different) |

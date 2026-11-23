@@ -27,7 +27,10 @@ export type McpAuditEventName =
   | 'oauth.token_refreshed'
   | 'oauth.replay_detected'
   | 'oauth.throttled'
-  | 'oauth.error';
+  | 'oauth.error'
+  // I2b-S2: a request had no usable trusted client address (reason code only, never the value).
+  | 'oauth.address_unresolved'
+  | 'mcp.address_unresolved';
 
 export interface McpAuditEvent {
   event: McpAuditEventName;
@@ -73,6 +76,8 @@ const EVENTS: ReadonlySet<string> = new Set([
   'oauth.replay_detected',
   'oauth.throttled',
   'oauth.error',
+  'oauth.address_unresolved',
+  'mcp.address_unresolved',
 ]);
 const KNOWN_RPC_METHODS: ReadonlySet<string> = new Set([
   'initialize',

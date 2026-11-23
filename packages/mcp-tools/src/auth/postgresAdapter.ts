@@ -2,6 +2,7 @@
 import { createHash } from 'crypto';
 import type { Adapter, AdapterPayload } from 'oidc-provider';
 import { createFieldSealer, FieldSealError, type FieldSealer } from './fieldSeal';
+import { boundedMs, singleFlight, withDeadline } from '../security/deadline';
 import { CONSUMABLE_MODELS, ReplayDetectedError, type OAuthStore, type UserGrantSummary } from './oauthStore';
 
 /**
@@ -43,7 +44,17 @@ import { CONSUMABLE_MODELS, ReplayDetectedError, type OAuthStore, type UserGrant
  *     storage-protection review before either feature is enabled.
  *   - Expiry is enforced on read (expired rows are invisible) and rows are
  *     removed by `cleanupExpired` (bounded batches; opportunistic, see
- *     `cleanupEvery`).
+ *     `cleanupEvery`; I2b-S2: at most one opportunistic cleanup in flight).
+ *   - I2b-S2 (I2b-R-2) bounded execution: every query runs under a
+ *     deadline (`queryDeadlineMs`, default 3000, covering pool checkout and
+ *     execution). A timeout or ANY database error throws
+ *     StoreUnavailableError (security/deadline.ts: 503, generic body), never
+ *     "not found" and never a driver message. `oidc-provider` turns it into a
+ *     503 error response, so no code, token or session is issued from a
+ *     failed or partial store operation. A statement abandoned by the
+ *     deadline may still complete later; it can only write state whose
+ *     identifier was never returned to anyone, or remove state (consume,
+ *     destroy, revoke), so a late completion is fail-safe.
  *
  * The adapter takes an injected `query` function (a `pg` Pool satisfies it),
  * so this package does not import a database driver.
@@ -64,6 +75,8 @@ export interface PostgresAdapterOptions {
   cleanupEvery?: number;
   /** Max rows a single cleanup deletes (default 500). */
   cleanupBatch?: number;
+  /** I2b-S2: deadline per query (checkout + execution), ms (default 3000). */
+  queryDeadlineMs?: number;
 }
 
 const TABLE = '"McpOAuthPayload"';
@@ -140,11 +153,13 @@ function withConsumed(payload: AdapterPayload, consumedAt: Date | null): Adapter
 }
 
 export function createPostgresAdapterStore(options: PostgresAdapterOptions): OAuthStore {
-  const { db } = options;
   // Fail closed: no keys, no store.
   const sealer = createFieldSealer(options.fieldKeys);
   const cleanupEvery = options.cleanupEvery ?? 200;
   const cleanupBatch = options.cleanupBatch ?? 500;
+  const queryDeadlineMs = boundedMs('queryDeadlineMs', options.queryDeadlineMs, 3000, 50, 60_000);
+  // Every statement is bounded; failures surface only as StoreUnavailableError.
+  const db: PgQueryable = { query: <R,>(text: string, params?: unknown[]) => withDeadline(options.db.query<R>(text, params), queryDeadlineMs) };
   let writes = 0;
 
   async function cleanupExpired(): Promise<number> {
@@ -154,6 +169,8 @@ export function createPostgresAdapterStore(options: PostgresAdapterOptions): OAu
     );
     return r.rowCount ?? 0;
   }
+
+  const backgroundCleanup = singleFlight(cleanupExpired);
 
   async function revokeGrant(grantId: string): Promise<void> {
     await db.query(`DELETE FROM ${TABLE} WHERE "grantId" = $1`, [grantId]);
@@ -189,7 +206,7 @@ export function createPostgresAdapterStore(options: PostgresAdapterOptions): OAu
       writes += 1;
       if (cleanupEvery > 0 && writes % cleanupEvery === 0) {
         // Opportunistic; never fails the request.
-        cleanupExpired().catch(() => undefined);
+        backgroundCleanup().catch(() => undefined);
       }
     }
 

@@ -77,6 +77,14 @@ jobs:
       # redaction, multi-instance behaviour on a shared store. No DB.
       - name: Run I2b OAuth production-readiness test
         run: npx ts-node test/mcpOAuthI2b.test.ts
+      # AURA-MCP-02-I2b-S2 -- staging-blocker fixes, offline: canonical
+      # IPv4/IPv6 parsing and /32 + /64 buckets, unresolved-address bucket,
+      # spoofed headers (I2b-R-3); global shards summing exactly to the
+      # ceiling (I2b-1); deadlines, single-flight cleanup, hung/late pool
+      # connections, 503 vs 429, no code or token with the store down
+      # (I2b-R-2). No DB.
+      - name: Run I2b-S2 staging-blocker offline test
+        run: npx ts-node test/mcpOAuthStagingBlockers.test.ts
       - name: Run panchang day service test
         run: npx ts-node test/panchangDay.test.ts
       - name: Run panchang month service test
@@ -977,6 +985,14 @@ jobs:
       # Touches only the two MCP tables.
       - name: Run I2b-R1 OAuth storage protection test
         run: npx ts-node test/mcpOAuthStorageProtectionDb.test.ts
+      # AURA-MCP-02-I2b-S2 -- staging-blocker fixes against this disposable
+      # database: hung server, held locks and terminated connections deny
+      # fast (503), pool isolation, store timeout through the full flow
+      # issues nothing; sharded global ceiling exact across 3 instances, no
+      # deadlocks; /64 rotation and shared NAT. Touches only the two MCP
+      # tables.
+      - name: Run I2b-S2 staging-blocker DB test
+        run: npx ts-node test/mcpOAuthStagingBlockersDb.test.ts
       - name: Verify every repository migration was recorded as applied
         run: |
           set -euo pipefail

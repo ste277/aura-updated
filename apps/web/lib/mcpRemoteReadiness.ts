@@ -19,7 +19,12 @@ import { parseRemoteMcpConfig } from '../../../packages/mcp-tools/src/http/remot
  *   - AURA_MCP_OAUTH_STORE=postgres and a database URL (durable, shared
  *     state: F6, R1-L1);
  *   - AURA_MCP_CLIENT_ADDRESS_SOURCE = header:x-real-ip or
- *     header:x-vercel-forwarded-for (a trusted proxy header; R1-L2, F5);
+ *     header:x-vercel-forwarded-for (a trusted proxy header; R1-L2, F5).
+ *     I2b-S2: this checks configuration only. That the platform edge
+ *     OVERWRITES a client-supplied value of the chosen header is a staging
+ *     verification item (it cannot be proven here); until verified, the
+ *     header must not be relied on. Requests without a usable address fall
+ *     into one shared bounded pre-auth bucket (I2b-R-3);
  *   - signing keys, cookie keys, pairwise salt, audit key (keys.ts);
  *   - a valid static client registry (clientPolicy.ts), https or loopback
  *     redirect URIs only;
