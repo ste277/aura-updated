@@ -3726,12 +3726,18 @@ export interface CandidateGoalActivityForRhythmDemandRow {
   activityId: string | null;
   rhythmKind: string | null;
   rhythmTargetPerWeek: number | null;
+  // AURA-MR2 -- MR1's stored preferences (migration 0053), read alongside the
+  // policy. Optional in the type so pre-MR2 test fixtures stay valid.
+  rhythmPreferredWeekdays?: number[] | null;
+  rhythmPreferredTimeOfDay?: string | null;
+  rhythmPreferredDurationMinutes?: number | null;
 }
 
 export async function loadCandidateGoalActivitiesForRhythmDemand(userId: string, executor: ReadQueryExecutor = pool): Promise<CandidateGoalActivityForRhythmDemandRow[]> {
   const result = await executor.query(
     `SELECT ga.id AS "goalActivityId", ga."goalId", g.title AS "goalTitle", ga.title, ga."activityId",
-            ga."rhythmKind", ga."rhythmTargetPerWeek"
+            ga."rhythmKind", ga."rhythmTargetPerWeek",
+            ga."rhythmPreferredWeekdays", ga."rhythmPreferredTimeOfDay", ga."rhythmPreferredDurationMinutes"
      FROM "GoalActivity" ga
      JOIN "Goal" g ON g.id = ga."goalId"
      WHERE ga."userId" = $1
@@ -3741,6 +3747,67 @@ export async function loadCandidateGoalActivitiesForRhythmDemand(userId: string,
        AND ga."rhythmPausedAt" IS NULL
      ORDER BY ga.id`,
     [userId]
+  );
+  return result.rows;
+}
+
+export interface PausedGoalRhythmRow {
+  goalActivityId: string;
+  goalId: string;
+  goalTitle: string;
+  title: string;
+  rhythmTargetPerWeek: number | null;
+  rhythmPausedAt: Date;
+}
+
+/**
+ * AURA-MR2 -- read-only: the user's PAUSED weekly rhythms (MR1's
+ * rhythmPausedAt), for Home's paused/active display. Same structural scope as
+ * loadCandidateGoalActivitiesForRhythmDemand (ACTIVE Goal, not DISMISSED,
+ * N_PER_WEEK) but the opposite pause predicate -- the two lists partition the
+ * user's weekly rhythms. Never feeds recommendations.
+ */
+export async function listPausedGoalRhythms(userId: string): Promise<PausedGoalRhythmRow[]> {
+  const result = await pool.query(
+    `SELECT ga.id AS "goalActivityId", ga."goalId", g.title AS "goalTitle", ga.title, ga."rhythmTargetPerWeek", ga."rhythmPausedAt"
+     FROM "GoalActivity" ga
+     JOIN "Goal" g ON g.id = ga."goalId"
+     WHERE ga."userId" = $1
+       AND g.status = 'ACTIVE'
+       AND ga.status != 'DISMISSED'
+       AND ga."rhythmKind" = 'N_PER_WEEK'
+       AND ga."rhythmPausedAt" IS NOT NULL
+     ORDER BY ga.id`,
+    [userId]
+  );
+  return result.rows;
+}
+
+export interface NextGoalRhythmOccurrenceRow {
+  goalActivityId: string;
+  plannedActivityId: string;
+  plannedStartAt: Date;
+  plannedEndAt: Date;
+}
+
+/**
+ * AURA-MR2 -- read-only: for each given GoalActivity, its earliest CONFIRMED
+ * future session -- an occurrence whose linked plan is still UPCOMING and has
+ * not yet ended at `now`. Only real, user-confirmed PlannedActivity rows are
+ * returned; a suggestion is never a row and so can never appear here.
+ */
+export async function listNextGoalRhythmOccurrences(userId: string, goalActivityIds: readonly string[], now: Date): Promise<NextGoalRhythmOccurrenceRow[]> {
+  if (goalActivityIds.length === 0) return [];
+  const result = await pool.query(
+    `SELECT DISTINCT ON (o."goalActivityId") o."goalActivityId", p.id AS "plannedActivityId", p."plannedStartAt", p."plannedEndAt"
+     FROM "GoalActivityOccurrence" o
+     JOIN "PlannedActivity" p ON p.id = o."plannedActivityId" AND p."userId" = o."userId"
+     WHERE o."userId" = $1
+       AND o."goalActivityId" = ANY($2::text[])
+       AND p.status = 'UPCOMING'
+       AND p."plannedEndAt" > $3
+     ORDER BY o."goalActivityId", p."plannedStartAt", p.id`,
+    [userId, [...goalActivityIds], now]
   );
   return result.rows;
 }

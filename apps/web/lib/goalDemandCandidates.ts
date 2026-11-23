@@ -29,6 +29,7 @@ import { normalizeGoalActivityRhythm, type GoalActivityRhythmOccurrenceFact } fr
 import { evaluateNewOccurrenceEligibility } from './goalActivityOccurrenceCapacity';
 import { loadCandidateGoalActivitiesForRhythmDemand, loadGoalActivityRhythmFactsForActivities, listGoalActivityDailyOccupancyForActivities, type CandidateGoalActivityForRhythmDemandRow, type GoalActivityDailyOccupancy } from './db';
 import { normalizeGoalActivityDailyFrequency, isGoalActivityDailyFrequencyEnforceable } from './goalActivityDailyFrequency';
+import { hasAnyRhythmPreference, isPreferredRhythmDate, normalizeGoalActivityRhythmPreferences, type GoalActivityRhythmPreferences } from './goalActivityRhythmPreferences';
 
 // ============================================================
 // Demand contract (this ticket's own section 5) -- the smallest shape
@@ -70,6 +71,15 @@ export interface GoalDemandCandidate {
    * A presentation hint only -- the write path re-checks inside its own
    * transaction. Present only when the caller wired `loadDailyOccupancy`. */
   scheduledOnPlanningDate?: boolean;
+  /** AURA-MR2 -- the rhythm's stored scheduling preferences (MR1, migration
+   * 0053), normalized. Present ONLY when at least one preference is set, so a
+   * rhythm without preferences produces a candidate byte-identical to pre-MR2.
+   * Absent = no preferences. */
+  preferences?: GoalActivityRhythmPreferences;
+  /** AURA-MR2 -- present together with `preferences`: whether the planning
+   * date is one of the preferred weekdays (isPreferredRhythmDate). Absent =
+   * every day qualifies. Never affects eligibility or remaining counts. */
+  preferredOnPlanningDate?: boolean;
 }
 
 /**
@@ -179,6 +189,7 @@ export async function loadEligibleGoalDemand(deps: GoalDemandCandidatesDeps, use
         remainingOccurrences: eligibility.remainingOccurrences,
       },
       ...(dailyOccupancy ? { scheduledOnPlanningDate: isDayOccupiedForGoalActivity(dailyOccupancy.get(row.goalActivityId), planningLocalDate) } : {}),
+      ...preferenceFields(row, planningLocalDate),
     });
   }
 
@@ -195,6 +206,25 @@ export async function loadEligibleGoalDemand(deps: GoalDemandCandidatesDeps, use
 // provided only as a reusable primitive, not called from anywhere in
 // this ticket.
 // ============================================================
+
+/** AURA-MR2 -- the optional preference fields for one candidate (empty when
+ * the row carries no preference). Rows from callers that predate MR2 (no
+ * preference columns at all) normalize to "no preferences". */
+function preferenceFields(row: CandidateGoalActivityForRhythmDemandRow, planningLocalDate: string): Pick<GoalDemandCandidate, 'preferences' | 'preferredOnPlanningDate'> {
+  const preferences = normalizeGoalActivityRhythmPreferences({
+    rhythmPreferredWeekdays: row.rhythmPreferredWeekdays ?? null,
+    rhythmPreferredTimeOfDay: row.rhythmPreferredTimeOfDay ?? null,
+    rhythmPreferredDurationMinutes: row.rhythmPreferredDurationMinutes ?? null,
+  });
+  if (!hasAnyRhythmPreference(preferences)) return {};
+  return { preferences, preferredOnPlanningDate: isPreferredRhythmDate(preferences, planningLocalDate) };
+}
+
+/** AURA-MR2 -- false only when the candidate has a weekday preference that
+ * excludes `localDate`. Shared by Plan My Day and Home. */
+export function isGoalDemandPreferredOn(candidate: Pick<GoalDemandCandidate, 'preferences'>, localDate: string): boolean {
+  return candidate.preferences ? isPreferredRhythmDate(candidate.preferences, localDate) : true;
+}
 
 export function excludeGoalDemandByActivityIds(candidates: readonly GoalDemandCandidate[], excludeGoalActivityIds: ReadonlySet<string> | readonly string[]): GoalDemandCandidate[] {
   const exclude = excludeGoalActivityIds instanceof Set ? excludeGoalActivityIds : new Set(excludeGoalActivityIds);

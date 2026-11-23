@@ -11,6 +11,7 @@ import { getPlanCreationClaim, getPlannedActivityForOwner, findPlanCreationClaim
 import { createRealGoalDemandCandidatesDeps } from '../../../../../lib/goalDemandCandidates';
 import type { AvailabilityConfiguration } from '../../../../../lib/availabilityContext';
 import { isValidCalendarDateString } from '../../../../../../../packages/panchang/src/localDate';
+import { isRhythmPlanningWeek, resolveRhythmPlanningWeek } from '../../../../../lib/goalActivityRhythmPreferences';
 import {
   acceptWeeklyRhythmSessions,
   MAX_WEEKLY_ACCEPTANCE_SESSIONS,
@@ -85,6 +86,11 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: 'A valid goalActivityId is required.' }, { status: 400 });
   }
 
+  // AURA-MR2 -- optional planning week: 'CURRENT' (default; unchanged
+  // behavior) or 'NEXT' (the following Monday..Sunday).
+  const week = body.week === undefined ? 'CURRENT' : body.week;
+  if (!isRhythmPlanningWeek(week)) return NextResponse.json({ error: "week must be 'CURRENT' or 'NEXT'." }, { status: 400 });
+
   // HGR3-C1 -- a REQUIRED, client-generated identity for this one explicit
   // confirmation. See this route's own header comment and
   // goalRhythmWeeklyAcceptance.ts's "HGR3-C1" section for why this is
@@ -118,7 +124,10 @@ export async function POST(req: NextRequest) {
   }
 
   const now = resolveRequestNow(req);
-  const planningLocalDate = getDatePartsInTimezone(user.timezone, now).dateStr;
+  // AURA-MR2 -- for 'NEXT', capacity and the allowed session dates are the
+  // following week's (planningLocalDate = next Monday); 'CURRENT' is
+  // byte-for-byte the previous behavior (today).
+  const planningLocalDate = resolveRhythmPlanningWeek(getDatePartsInTimezone(user.timezone, now).dateStr, week).planningLocalDate;
 
   const deps: WeeklyAcceptanceDeps = {
     ...createRealGoalDemandCandidatesDeps(),

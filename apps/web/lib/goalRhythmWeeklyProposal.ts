@@ -50,6 +50,7 @@ import type { DailyRhythmPreferencesInput } from './dailyRhythmScheduling';
 import type { TimingSearchResponseWithDailyRhythm } from './timingSearchDailyRhythm';
 import { isActivePlanBlocker, type PlanBlockerCandidate } from './planBlockerLifecycle';
 import { resolveAvailability, type AvailabilityConfiguration } from './availabilityContext';
+import { isPreferredRhythmDate, resolveRhythmPlanningWeek, NO_RHYTHM_PREFERENCES, type GoalActivityRhythmPreferences, type RhythmPlanningWeek, type RhythmTimeOfDay } from './goalActivityRhythmPreferences';
 
 /** HGR2 established GOAL_RHYTHM_VISIBLE_CAP = 3 for Home's own card; this
  * reuses the exact same number as the proposal count cap, rather than
@@ -80,6 +81,13 @@ export interface WeeklyRhythmProposalItem {
   label: TimingCandidate['label'];
   /** Canonical structured reasons, carried verbatim -- nothing here is generated prose. */
   reasons: readonly MuhurtaReason[];
+  /** AURA-MR2 -- true when this session satisfies every stored preference
+   * (weekday AND time of day); false for an explained fallback. Always set by
+   * this module; optional in the type only so pre-MR2 payloads stay valid. */
+  matchedPreferences?: boolean;
+  /** AURA-MR2 -- plain-language explanations: the time-of-day compromise (when
+   * one was needed) and the existing Daily Rhythm work-hours note. */
+  notes?: readonly string[];
 }
 
 export type WeeklyRhythmProposalResult =
@@ -95,6 +103,14 @@ export type WeeklyRhythmProposalResult =
       remainingThisWeek: number;
       requestedCount: number;
       proposals: readonly WeeklyRhythmProposalItem[];
+      /** AURA-MR2 -- which week was planned and its inclusive civil-date
+       * range; the remaining/completed/committed counts describe THIS week
+       * (the following week, for 'NEXT'). */
+      week: RhythmPlanningWeek;
+      weekStartDate: string;
+      weekEndDate: string;
+      /** AURA-MR2 -- the stored preferences that were applied (normalized). */
+      preferences: GoalActivityRhythmPreferences;
       /** Always false -- see this module's own doc comment. Never omitted,
        * so a caller can never mistake absence for "yes". */
       committable: false;
@@ -103,6 +119,9 @@ export type WeeklyRhythmProposalResult =
        * distinct days existed than remaining demand. Never fabricated by
        * forcing an unsuitable slot to hit the count. */
       shortfallReason?: 'FEWER_SUITABLE_DAYS_THAN_REQUESTED';
+      /** AURA-MR2 -- present with a shortfall when a weekday preference limited
+       * the days available. */
+      shortfallExplanation?: string;
     }
   /** Covers: GoalActivity not owned by this user, does not exist, Goal
    * archived, activity DISMISSED, not an N_PER_WEEK rhythm, or its weekly
@@ -136,6 +155,9 @@ export interface WeeklyRhythmProposalParams {
   timezone: string;
   context: DailyAssistantContext;
   dailyRhythmPrefs: DailyRhythmPreferencesInput;
+  /** AURA-MR2 -- 'CURRENT' (default, the rest of this week) or 'NEXT' (the
+   * following Monday..Sunday). `planningLocalDate` is always TODAY. */
+  week?: RhythmPlanningWeek;
 }
 
 /** The rest of the user's CURRENT local calendar week: today through that
@@ -239,8 +261,21 @@ function occupiedLocalDates(facts: ReadonlyMap<string, readonly { localDate: str
   return new Set(rows.filter((row) => row.contribution !== 'NONE').map((row) => row.localDate));
 }
 
-function resolveDurationMinutes(candidate: GoalDemandCandidate): number {
+function resolveDurationMinutes(candidate: GoalDemandCandidate, preferences: GoalActivityRhythmPreferences): number {
+  // AURA-MR2 -- an explicit stored duration preference wins over the
+  // catalog/personalized default (the same precedence Plan My Day applies).
+  if (preferences.preferredDurationMinutes !== null) return preferences.preferredDurationMinutes;
   return candidate.activityId ? durationMinutesFor(candidate.activityId) : GENERIC_DURATION_FALLBACK_MINUTES;
+}
+
+const TIME_OF_DAY_WORDS: Record<RhythmTimeOfDay, string> = { MORNING: 'morning', AFTERNOON: 'afternoon', EVENING: 'evening', NIGHT: 'night' };
+const WEEKDAY_NAMES = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
+
+/** AURA-MR2 -- the explanation attached to a session placed outside the
+ * preferred time of day (the fallback: same preferred day, the engine's
+ * best-ranked time across the whole day). */
+export function describeTimeOfDayCompromise(timeOfDay: RhythmTimeOfDay): string {
+  return `No suitable ${TIME_OF_DAY_WORDS[timeOfDay]} time that day, so this is the best available time instead.`;
 }
 
 /**
@@ -248,9 +283,27 @@ function resolveDurationMinutes(candidate: GoalDemandCandidate): number {
  * "remaining" count -- `candidate.remainingThisWeek` below is always the
  * value THIS call's own loadEligibleGoalDemand just computed, fresh,
  * server-side.
+ *
+ * AURA-MR2 -- preferences and next-week planning, through the SAME engine
+ * call (runFind = runTimingSearchWithDailyRhythm). Order of authority:
+ *   1. hard constraints: existing live plans, configured availability, the
+ *      engine's own Panchang veto, weekly and once-per-day capacity -- never
+ *      relaxed;
+ *   2. explicit user choices: preferred weekdays are a strict filter; the
+ *      preferred time of day is passed as the engine's own `timePreference`
+ *      (candidate generation);
+ *   3. Daily Rhythm work hours (soft, inside runFind, unchanged);
+ *   4. the engine's Panchang / Aura Fit ranking chooses WHICH time on each
+ *      day -- this module never re-scores or re-orders within a day.
+ * When the preferred time of day leaves a preferred day with no usable time,
+ * that day falls back to the engine's best time across the whole day and the
+ * session says so (`matchedPreferences: false` + a note). Weekdays are never
+ * relaxed: a shortfall is reported and explained instead.
  */
 export async function generateWeeklyRhythmProposal(deps: WeeklyRhythmProposalDeps, params: WeeklyRhythmProposalParams): Promise<WeeklyRhythmProposalResult> {
-  const demand = await loadEligibleGoalDemand(deps, params.userId, params.planningLocalDate, params.timezone);
+  const plannedWeek = resolveRhythmPlanningWeek(params.planningLocalDate, params.week ?? 'CURRENT');
+
+  const demand = await loadEligibleGoalDemand(deps, params.userId, plannedWeek.planningLocalDate, params.timezone);
   if (demand.status === 'LOAD_FAILED') return { status: 'SEARCH_FAILED' };
 
   const candidate = demand.candidates.find((c) => c.goalActivityId === params.goalActivityId);
@@ -259,23 +312,24 @@ export async function generateWeeklyRhythmProposal(deps: WeeklyRhythmProposalDep
   const requestedCount = Math.min(MAX_WEEKLY_RHYTHM_PROPOSALS, candidate.remainingThisWeek);
   if (requestedCount <= 0) return { status: 'NOT_ELIGIBLE' };
 
-  const dateRange = remainingWeekDateRange(params.planningLocalDate);
-  const durationMinutes = resolveDurationMinutes(candidate);
+  const preferences = candidate.preferences ?? NO_RHYTHM_PREFERENCES;
+  const dateRange = { start: plannedWeek.startDate, end: plannedWeek.endDate };
+  const durationMinutes = resolveDurationMinutes(candidate, preferences);
 
-  const request: TimingSearchRequest = {
+  const buildRequest = (timePreference: TimingSearchRequest['timePreference']): TimingSearchRequest => ({
     mode: 'FIND',
     activityId: candidate.activityId ?? undefined,
     taskTitle: candidate.activityId ? undefined : candidate.title,
     durationMinutes,
     dateRange,
     limit: SEARCH_CANDIDATE_POOL_LIMIT,
-    timePreference: 'ANY',
+    timePreference,
     context: params.context,
-  };
+  });
 
   let response: TimingSearchResponseWithDailyRhythm;
   try {
-    response = deps.runFind(request, params.timezone, params.dailyRhythmPrefs);
+    response = deps.runFind(buildRequest(preferences.preferredTimeOfDay ?? 'ANY'), params.timezone, params.dailyRhythmPrefs);
   } catch {
     return { status: 'SEARCH_FAILED' };
   }
@@ -287,13 +341,6 @@ export async function generateWeeklyRhythmProposal(deps: WeeklyRhythmProposalDep
     return { status: 'SEARCH_FAILED' };
   }
 
-  // AURA-HPG-FIX-01 -- the rhythm facts' `localDate` is the occurrence's
-  // scheduled WEEK start whenever a week snapshot exists (every occurrence
-  // created since that snapshot shipped), so seeding from it marked the
-  // week's Monday "occupied" instead of the real session day -- which is
-  // how a day that already had a completed session was proposed again.
-  // Prefer the true per-day occupancy (same attribution as the daily
-  // guard); fall back to the legacy facts only when it is not wired.
   let seedOccupied: Set<string>;
   if (deps.loadDailyOccupancy) {
     try {
@@ -306,34 +353,74 @@ export async function generateWeeklyRhythmProposal(deps: WeeklyRhythmProposalDep
     seedOccupied = occupiedLocalDates(facts, params.goalActivityId);
   }
 
+  const onPreferredDay = (list: readonly TimingCandidate[]) => list.filter((c) => isPreferredRhythmDate(preferences, localDateOfInstant(params.timezone, c.start)));
+
   let blockers: PlanBlockerCandidate[] = [];
   let availability: AvailabilityConfiguration | null = null;
-  if (response.candidates.length > 0) {
+  const loadConstraints = async (pool: readonly TimingCandidate[]): Promise<boolean> => {
+    if (pool.length === 0) return true;
     try {
       if (deps.loadBlockingPlans) {
-        const from = new Date(Math.min(...response.candidates.map((c) => new Date(c.start).getTime())));
-        const to = new Date(Math.max(...response.candidates.map((c) => new Date(c.end).getTime())));
+        const from = new Date(Math.min(...pool.map((c) => new Date(c.start).getTime())));
+        const to = new Date(Math.max(...pool.map((c) => new Date(c.end).getTime())));
         blockers = await deps.loadBlockingPlans({ from, to });
       }
-      if (deps.loadAvailabilityConfiguration) availability = await deps.loadAvailabilityConfiguration();
+      if (deps.loadAvailabilityConfiguration && !availability) availability = await deps.loadAvailabilityConfiguration();
+      return true;
+    } catch {
+      return false;
+    }
+  };
+
+  const primaryPool = onPreferredDay(response.candidates);
+  if (!(await loadConstraints(primaryPool))) return { status: 'SEARCH_FAILED' };
+  const proposable = filterProposableCandidates(primaryPool, { now: params.context.now, timezone: params.timezone, blockers, availability });
+  const primary = selectDistinctDayProposals(proposable, params.timezone, requestedCount, seedOccupied);
+
+  // Fallback pass -- ONLY when a time-of-day preference left a preferred day
+  // without a session: same preferred days, the engine's best time all day.
+  let fallback: TimingCandidate[] = [];
+  let fallbackNotes: Record<string, string> = {};
+  if (primary.length < requestedCount && preferences.preferredTimeOfDay !== null) {
+    let anyTime: TimingSearchResponseWithDailyRhythm;
+    try {
+      anyTime = deps.runFind(buildRequest('ANY'), params.timezone, params.dailyRhythmPrefs);
     } catch {
       return { status: 'SEARCH_FAILED' };
     }
+    const fallbackPool = onPreferredDay(anyTime.candidates);
+    if (!(await loadConstraints([...primaryPool, ...fallbackPool]))) return { status: 'SEARCH_FAILED' };
+    const fallbackProposable = filterProposableCandidates(fallbackPool, { now: params.context.now, timezone: params.timezone, blockers, availability });
+    const used = new Set<string>([...seedOccupied, ...primary.map((c) => localDateOfInstant(params.timezone, c.start))]);
+    fallback = selectDistinctDayProposals(fallbackProposable, params.timezone, requestedCount - primary.length, used);
+    fallbackNotes = anyTime.dailyRhythmNotes ?? {};
   }
 
-  const proposable = filterProposableCandidates(response.candidates, { now: params.context.now, timezone: params.timezone, blockers, availability });
-  const selected = selectDistinctDayProposals(proposable, params.timezone, requestedCount, seedOccupied);
+  const toItem = (c: TimingCandidate, matched: boolean, dailyRhythmNotes: Record<string, string>): WeeklyRhythmProposalItem => {
+    const notes: string[] = [];
+    if (!matched && preferences.preferredTimeOfDay !== null) notes.push(describeTimeOfDayCompromise(preferences.preferredTimeOfDay));
+    if (dailyRhythmNotes[c.start]) notes.push(dailyRhythmNotes[c.start]);
+    return {
+      localDate: localDateOfInstant(params.timezone, c.start),
+      start: c.start,
+      end: c.end,
+      timezone: params.timezone,
+      durationMinutes,
+      score: c.score,
+      label: c.label,
+      reasons: c.reasons,
+      matchedPreferences: matched,
+      notes,
+    };
+  };
 
-  const proposals: WeeklyRhythmProposalItem[] = selected.map((c) => ({
-    localDate: localDateOfInstant(params.timezone, c.start),
-    start: c.start,
-    end: c.end,
-    timezone: params.timezone,
-    durationMinutes,
-    score: c.score,
-    label: c.label,
-    reasons: c.reasons,
-  }));
+  const proposals: WeeklyRhythmProposalItem[] = [
+    ...primary.map((c) => toItem(c, true, response.dailyRhythmNotes ?? {})),
+    ...fallback.map((c) => toItem(c, false, fallbackNotes)),
+  ].sort((a, b) => a.start.localeCompare(b.start));
+
+  const shortfall = proposals.length < requestedCount;
+  const weekdayLimited = shortfall && preferences.preferredWeekdays.length > 0;
 
   return {
     status: 'OK',
@@ -347,8 +434,15 @@ export async function generateWeeklyRhythmProposal(deps: WeeklyRhythmProposalDep
     remainingThisWeek: candidate.remainingThisWeek,
     requestedCount,
     proposals,
+    week: plannedWeek.week,
+    weekStartDate: plannedWeek.startDate,
+    weekEndDate: plannedWeek.endDate,
+    preferences,
     committable: false,
     nonCommittableReason: NON_COMMITTABLE_REASON,
-    ...(proposals.length < requestedCount ? { shortfallReason: 'FEWER_SUITABLE_DAYS_THAN_REQUESTED' as const } : {}),
+    ...(shortfall ? { shortfallReason: 'FEWER_SUITABLE_DAYS_THAN_REQUESTED' as const } : {}),
+    ...(weekdayLimited
+      ? { shortfallExplanation: `Only ${proposals.length} of your preferred days (${preferences.preferredWeekdays.map((d) => WEEKDAY_NAMES[d]).join(', ')}) had a suitable time left in this week.` }
+      : {}),
   };
 }

@@ -69,6 +69,9 @@ export const MAX_ACTIVITY_ID_LENGTH = 200;
 const VALID_CONSTRUCTION_WINDOW_SOURCES = new Set<ConstructionWindowSource>(['REMAINING_TODAY', 'EXPLICIT_RANGE']);
 const VALID_IMPORTANCE_VALUES = new Set<DayIntentImportance>(['HIGH', 'MEDIUM', 'LOW']);
 const VALID_FLEXIBILITY_VALUES = new Set<DayIntentFlexibility>(['FIXED', 'FLEXIBLE']);
+// AURA-MR2 -- the timing engine's own time-of-day vocabulary (minus ANY,
+// which is expressed by omitting the field).
+const VALID_TIME_PREFERENCES = new Set<string>(['MORNING', 'AFTERNOON', 'EVENING', 'NIGHT']);
 const MAX_DURATION_MINUTES = 24 * 60; // mirrors dayIntent.ts's own `validateEstimatedDurationMinutes` bound.
 
 export interface ParsePreviewRequestContext {
@@ -160,6 +163,17 @@ function parseRequestedIntent(raw: unknown, index: number, seenIds: Set<string>)
     return { ok: false, error: `${label}.fixedStart must not be supplied when flexibility is FLEXIBLE.` };
   }
 
+  // AURA-MR2 -- optional preferred time of day; only meaningful for a
+  // FLEXIBLE intent (a FIXED intent already names its exact time).
+  let timePreference: 'MORNING' | 'AFTERNOON' | 'EVENING' | 'NIGHT' | undefined;
+  if (raw.timePreference !== undefined) {
+    if (typeof raw.timePreference !== 'string' || !VALID_TIME_PREFERENCES.has(raw.timePreference)) {
+      return { ok: false, error: `${label}.timePreference must be one of MORNING, AFTERNOON, EVENING, NIGHT when present.` };
+    }
+    if (flexibility === 'FIXED') return { ok: false, error: `${label}.timePreference must not be supplied when flexibility is FIXED.` };
+    timePreference = raw.timePreference as 'MORNING' | 'AFTERNOON' | 'EVENING' | 'NIGHT';
+  }
+
   // `originalOrder` is intentionally NEVER read from the request body
   // (this ticket's own section 19's preferred behavior) -- derived
   // exclusively from this intent's own position in the submitted array,
@@ -167,7 +181,7 @@ function parseRequestedIntent(raw: unknown, index: number, seenIds: Set<string>)
   // supplying an arbitrary value.
   return {
     ok: true,
-    intent: { id, title, activityId, durationMinutes, importance, deadline, flexibility, fixedStart, originalOrder: index },
+    intent: { id, title, activityId, durationMinutes, importance, deadline, flexibility, fixedStart, ...(timePreference ? { timePreference } : {}), originalOrder: index },
   };
 }
 

@@ -20,7 +20,8 @@ import { MAX_PLAN_DAY_INTENTS } from './planDayEntry';
 import { deriveGoalActivityState, type GoalActivityStatus, type PlannedActivityStatus } from './goals';
 import { deriveCaptureState, type CaptureStatus, type LinkedPlanStatus } from './captures';
 import { normalizeGoalActivityRhythm, computeGoalActivityRhythmEligibility } from './goalActivityRhythm';
-import { loadEligibleGoalDemand, excludeGoalDemandByActivityIds, type GoalDemandCandidate, type GoalDemandCandidatesDeps } from './goalDemandCandidates';
+import { loadEligibleGoalDemand, excludeGoalDemandByActivityIds, isGoalDemandPreferredOn, type GoalDemandCandidate, type GoalDemandCandidatesDeps } from './goalDemandCandidates';
+import { hasAnyRhythmPreference, isGoalActivityRhythmPaused, normalizeGoalActivityRhythmPreferences } from './goalActivityRhythmPreferences';
 
 export interface PlanDayBootstrap {
   timezone: string;
@@ -158,6 +159,9 @@ export interface GoalActivityHandoffItem {
    * entry paths identically. Absent/false keeps the legacy manual row.
    */
   canonicalDemand?: boolean;
+  /** AURA-MR2 -- the rhythm's stored time-of-day / duration preferences,
+   * used by Plan My Day as row defaults. Absent when none are set. */
+  preferences?: { preferredTimeOfDay: 'MORNING' | 'AFTERNOON' | 'EVENING' | 'NIGHT' | null; preferredDurationMinutes: number | null };
 }
 
 export interface GoalActivityHandoffDeps {
@@ -181,7 +185,7 @@ export interface GoalActivityHandoffDeps {
     userId: string,
     goalId: string
   ) => Promise<
-    ReadonlyArray<{ id: string; title: string; activityId: string | null; status: string; plannedActivityId: string | null; linkedPlanStatus: string | null; rhythmKind?: string | null; rhythmTargetPerWeek?: number | null; everCompleted?: boolean }>
+    ReadonlyArray<{ id: string; title: string; activityId: string | null; status: string; plannedActivityId: string | null; linkedPlanStatus: string | null; rhythmKind?: string | null; rhythmTargetPerWeek?: number | null; everCompleted?: boolean; rhythmPausedAt?: Date | string | null; rhythmPreferredWeekdays?: number[] | null; rhythmPreferredTimeOfDay?: string | null; rhythmPreferredDurationMinutes?: number | null }>
   >;
   /** Rhythm R3 -- `loadGoalActivityRhythmFacts` (db.ts), passed by
    * reference; the SAME batched-per-activity read model R2 already
@@ -230,7 +234,14 @@ export async function resolveGoalActivityHandoff(deps: GoalActivityHandoffDeps, 
   // this ticket's own section 8/PR B's 404 handling already established).
   const activities = await deps.listGoalActivities(session.userId, goalId);
 
-  const candidates = activities.filter((activity) => requestedIdSet.has(activity.id));
+  // AURA-MR2 -- a PAUSED weekly rhythm is never handed off: Plan My Day must
+  // not preview (or suggest) times for it, consistent with the MR1 rule that
+  // a paused rhythm cannot be saved. Resolves the MR1 preview inconsistency.
+  const candidates = activities.filter((activity) => {
+    if (!requestedIdSet.has(activity.id)) return false;
+    const rhythm = normalizeGoalActivityRhythm({ rhythmKind: activity.rhythmKind ?? null, rhythmTargetPerWeek: activity.rhythmTargetPerWeek ?? null });
+    return !(rhythm.kind === 'N_PER_WEEK' && isGoalActivityRhythmPaused({ rhythmPausedAt: activity.rhythmPausedAt ?? null }));
+  });
   const admitted = await Promise.all(
     candidates.map(async (activity) => {
       const state = deriveGoalActivityState({
@@ -268,7 +279,22 @@ export async function resolveGoalActivityHandoff(deps: GoalActivityHandoffDeps, 
     })
   );
 
-  return candidates.filter((_, index) => admitted[index]).map((activity) => ({ id: activity.id, title: activity.title, activityId: activity.activityId }));
+  return candidates
+    .filter((_, index) => admitted[index])
+    .map((activity) => {
+      const preferences = normalizeGoalActivityRhythmPreferences({
+        rhythmPreferredWeekdays: activity.rhythmPreferredWeekdays ?? null,
+        rhythmPreferredTimeOfDay: activity.rhythmPreferredTimeOfDay ?? null,
+        rhythmPreferredDurationMinutes: activity.rhythmPreferredDurationMinutes ?? null,
+      });
+      const carry = hasAnyRhythmPreference(preferences) && (preferences.preferredTimeOfDay !== null || preferences.preferredDurationMinutes !== null);
+      return {
+        id: activity.id,
+        title: activity.title,
+        activityId: activity.activityId,
+        ...(carry ? { preferences: { preferredTimeOfDay: preferences.preferredTimeOfDay, preferredDurationMinutes: preferences.preferredDurationMinutes } } : {}),
+      };
+    });
 }
 
 // ============================================================
@@ -410,7 +436,10 @@ export async function resolveAutomaticGoalDemand(
     // acceptance guard would only refuse it with DAILY_CAPACITY_EXCEEDED.
     // The manual handoff (manualCanonicalGoalActivityIds) is untouched --
     // an explicit user request still reaches that guard and its message.
-    suggestions: excludeGoalDemandByActivityIds(result.candidates, excludeGoalActivityIds).filter((candidate) => candidate.scheduledOnPlanningDate !== true),
+    // AURA-MR2 -- a rhythm with a weekday preference is not auto-suggested on a
+    // day the user did not choose (the same interpretation the weekly proposal
+    // and Home use). The user can still add it explicitly.
+    suggestions: excludeGoalDemandByActivityIds(result.candidates, excludeGoalActivityIds).filter((candidate) => candidate.scheduledOnPlanningDate !== true && isGoalDemandPreferredOn(candidate, planningLocalDate)),
     manualCanonicalGoalActivityIds: result.candidates.filter((candidate) => manualIds.has(candidate.goalActivityId)).map((candidate) => candidate.goalActivityId),
   };
 }

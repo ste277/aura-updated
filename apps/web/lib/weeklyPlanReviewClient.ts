@@ -41,6 +41,7 @@
  * it must never claim full batch-level binding.
  */
 
+import type { RhythmPlanningWeek } from './goalActivityRhythmPreferences';
 import type { MuhurtaReason } from '../../../packages/muhurta/src/activityOntology';
 import { formatMuhurtaReason } from '../../../packages/muhurta/src/muhurtaReasonFormat';
 import type { WeeklyRhythmProposalItem } from './goalRhythmWeeklyProposal';
@@ -95,6 +96,11 @@ export interface WeeklyReviewSessionDraft {
   /** Set only once `outcome` is `FAILED` -- the real, closed machine code
    * the acceptance endpoint returned (never a client-invented reason). */
   failureReason?: string;
+  /** AURA-MR2 -- the proposal's own explanations (time-of-day compromise,
+   * Daily Rhythm note); absent for a pre-MR2 proposal. */
+  notes?: readonly string[];
+  /** AURA-MR2 -- false when the session is an explained fallback. */
+  matchedPreferences?: boolean;
 }
 
 /** 1:1 projection, order-preserving -- never re-sorts/re-scores the
@@ -111,6 +117,8 @@ export function buildSessionDraftsFromProposal(items: readonly WeeklyRhythmPropo
     reasons: item.reasons,
     adjusted: false,
     outcome: 'PENDING',
+    ...(item.notes && item.notes.length > 0 ? { notes: item.notes } : {}),
+    ...(item.matchedPreferences === false ? { matchedPreferences: false } : {}),
   }));
 }
 
@@ -326,6 +334,11 @@ export interface WeeklyProposalFetchOk {
   requestedCount: number;
   proposals: WeeklyRhythmProposalItem[];
   shortfallReason?: 'FEWER_SUITABLE_DAYS_THAN_REQUESTED';
+  /** AURA-MR2 -- additive; absent from a pre-MR2 server response. */
+  week?: RhythmPlanningWeek;
+  weekStartDate?: string;
+  weekEndDate?: string;
+  shortfallExplanation?: string;
 }
 
 export type WeeklyProposalFetchResult =
@@ -353,13 +366,15 @@ export function parseWeeklyProposalResponseBody(body: unknown, httpStatus: numbe
 /** The one network call for proposal generation. Read-only on the server
  * (goalRhythmWeeklyProposal.ts) -- this function never writes anything and
  * is always safe to call again (e.g. a "Regenerate" retry). */
-export async function fetchWeeklyRhythmProposal(goalActivityId: string): Promise<WeeklyProposalFetchResult> {
+export async function fetchWeeklyRhythmProposal(goalActivityId: string, week: RhythmPlanningWeek = 'CURRENT'): Promise<WeeklyProposalFetchResult> {
   let response: Response;
   try {
     response = await fetch('/api/daily-assistant/goal-rhythm/weekly-proposal', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ goalActivityId }),
+      // AURA-MR2 -- `week` is sent only for NEXT, so a CURRENT request body
+      // is byte-identical to the pre-MR2 one.
+      body: JSON.stringify(week === 'NEXT' ? { goalActivityId, week } : { goalActivityId }),
     });
   } catch {
     return { status: 'NETWORK_ERROR' };
@@ -381,13 +396,17 @@ export interface WeeklyAcceptanceRequestBody {
   goalActivityId: string;
   acceptanceId: string;
   sessions: { localDate: string; start: string; end: string }[];
+  /** AURA-MR2 -- present only for NEXT. */
+  week?: 'NEXT';
 }
 
 /** Pure. `acceptanceId` is never generated here -- see this file's own
  * header comment on why identity generation belongs to the modal, not this
  * client module. */
-export function buildWeeklyAcceptanceRequestBody(goalActivityId: string, acceptanceId: string, sessions: readonly { localDate: string; start: string; end: string }[]): WeeklyAcceptanceRequestBody {
-  return { goalActivityId, acceptanceId, sessions: sessions.map((s) => ({ localDate: s.localDate, start: s.start, end: s.end })) };
+export function buildWeeklyAcceptanceRequestBody(goalActivityId: string, acceptanceId: string, sessions: readonly { localDate: string; start: string; end: string }[], week: RhythmPlanningWeek = 'CURRENT'): WeeklyAcceptanceRequestBody {
+  const body: WeeklyAcceptanceRequestBody = { goalActivityId, acceptanceId, sessions: sessions.map((s) => ({ localDate: s.localDate, start: s.start, end: s.end })) };
+  if (week === 'NEXT') body.week = 'NEXT';
+  return body;
 }
 
 export type WeeklyAcceptanceSubmitResult =
@@ -427,13 +446,13 @@ export function parseWeeklyAcceptanceResponseBody(body: unknown, httpStatus: num
  * never silently mint a new acceptanceId merely because this threw (see
  * `WeeklyPlanReviewModal.tsx`'s own "network uncertainty" handling).
  */
-export async function submitWeeklyAcceptance(goalActivityId: string, acceptanceId: string, sessions: readonly { localDate: string; start: string; end: string }[]): Promise<WeeklyAcceptanceSubmitResult> {
+export async function submitWeeklyAcceptance(goalActivityId: string, acceptanceId: string, sessions: readonly { localDate: string; start: string; end: string }[], week: RhythmPlanningWeek = 'CURRENT'): Promise<WeeklyAcceptanceSubmitResult> {
   let response: Response;
   try {
     response = await fetch('/api/daily-assistant/goal-rhythm/weekly-accept', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(buildWeeklyAcceptanceRequestBody(goalActivityId, acceptanceId, sessions)),
+      body: JSON.stringify(buildWeeklyAcceptanceRequestBody(goalActivityId, acceptanceId, sessions, week)),
     });
   } catch {
     return { status: 'NETWORK_ERROR' };

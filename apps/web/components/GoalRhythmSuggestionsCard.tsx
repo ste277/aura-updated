@@ -3,7 +3,8 @@
 import React, { useState } from 'react';
 import { colors, spacing, typography } from './theme';
 import { SectionHeader, SurfaceCard, TextButton, PrimaryButton, SecondaryButton } from './ui';
-import { computeGoalRhythmHomeView, resolveGoalRhythmCardActions, type HomeGoalRhythmSuggestion } from '../lib/homeGoalRhythmSuggestions';
+import { computeGoalRhythmHomeView, resolveGoalRhythmCardActions, formatNextOccurrenceLabel, type HomeGoalRhythmSuggestion, type HomePausedGoalRhythm } from '../lib/homeGoalRhythmSuggestions';
+import { PausedRhythmsNote } from './PausedRhythmsNote';
 import { shouldOfferWeeklyReview } from '../lib/weeklyPlanReviewClient';
 import { WeeklyPlanReviewModal } from './WeeklyPlanReviewModal';
 
@@ -70,6 +71,7 @@ export function GoalRhythmSuggestionsCard({
   onDismiss,
   timezone,
   onWeeklyReviewClosed,
+  pausedRhythms = [],
 }: {
   suggestions: readonly HomeGoalRhythmSuggestion[];
   dismissedIds: ReadonlySet<string>;
@@ -77,11 +79,14 @@ export function GoalRhythmSuggestionsCard({
   timezone: string;
   /** AURA-HPG-FIX-01 (V1-09) -- lets Home refresh counts after the review. */
   onWeeklyReviewClosed?: () => void;
+  /** AURA-MR2 -- paused rhythms, shown as paused (never suggested). */
+  pausedRhythms?: readonly HomePausedGoalRhythm[];
 }) {
   const [expanded, setExpanded] = useState(false);
-  const [reviewingGoalActivityId, setReviewingGoalActivityId] = useState<string | null>(null);
+  const [reviewing, setReviewing] = useState<{ goalActivityId: string; week: 'CURRENT' | 'NEXT' } | null>(null);
+  const reviewingGoalActivityId = reviewing?.goalActivityId ?? null;
   const { visible, overflow } = computeGoalRhythmHomeView(suggestions, dismissedIds);
-  if (visible.length === 0) return null;
+  if (visible.length === 0 && pausedRhythms.length === 0) return null;
   const shown = expanded ? [...visible, ...overflow] : visible;
   const reviewingSuggestion = shown.find((s) => s.goalActivityId === reviewingGoalActivityId) ?? suggestions.find((s) => s.goalActivityId === reviewingGoalActivityId);
 
@@ -109,6 +114,14 @@ export function GoalRhythmSuggestionsCard({
                   {actions.scheduledTodayNote && (
                     <div style={{ ...typography.caption, color: colors.textMuted, marginTop: 2 }}>{actions.scheduledTodayNote}</div>
                   )}
+                  {suggestion.nextOccurrence && (
+                    <div style={{ ...typography.caption, color: colors.textSecondary, marginTop: 2 }}>{formatNextOccurrenceLabel(suggestion.nextOccurrence, timezone)}</div>
+                  )}
+                  {actions.offerNextWeek && (
+                    <TextButton onClick={() => setReviewing({ goalActivityId: suggestion.goalActivityId, week: 'NEXT' })} style={{ minHeight: 44, padding: '0 0' }}>
+                      Plan next week
+                    </TextButton>
+                  )}
                 </div>
                 <div style={{ display: 'flex', alignItems: 'center', gap: spacing.sm, flexShrink: 0, flexWrap: 'wrap' }}>
                   <TextButton onClick={() => onDismiss(suggestion.goalActivityId)} style={{ minHeight: 44, padding: '0 8px' }}>
@@ -120,7 +133,7 @@ export function GoalRhythmSuggestionsCard({
                     </SecondaryButton>
                   )}
                   <PrimaryButton
-                    onClick={actions.weeklyReview ? () => setReviewingGoalActivityId(suggestion.goalActivityId) : navigateToPlanDay}
+                    onClick={actions.weeklyReview ? () => setReviewing({ goalActivityId: suggestion.goalActivityId, week: actions.primaryWeek ?? 'CURRENT' }) : navigateToPlanDay}
                     style={{ minHeight: 44, padding: '0 14px' }}
                   >
                     {actions.primaryLabel}
@@ -140,13 +153,15 @@ export function GoalRhythmSuggestionsCard({
           {expanded ? 'Show less' : `View all (+${overflow.length} more)`}
         </TextButton>
       )}
-      {reviewingSuggestion && (
+      {pausedRhythms.length > 0 && <PausedRhythmsNote pausedRhythms={pausedRhythms} timezone={timezone} />}
+      {reviewingSuggestion && reviewing && (
         <WeeklyPlanReviewModal
+          week={reviewing.week}
           goalActivityId={reviewingSuggestion.goalActivityId}
           activityTitleFallback={reviewingSuggestion.title}
           timezone={timezone}
           onClose={() => {
-            setReviewingGoalActivityId(null);
+            setReviewing(null);
             // The review may have accepted sessions; refresh so the counts
             // and actions reflect the new planning state immediately.
             onWeeklyReviewClosed?.();

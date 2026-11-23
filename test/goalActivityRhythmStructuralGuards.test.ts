@@ -231,11 +231,18 @@ check(
 // (proved in test/goalActivityRhythmSetupStructuralGuards.test.ts and
 // test/myRhythmFoundationDb.test.ts). The count stays six: one writer was
 // swapped for its generalization, none was added.
+//
+// AURA-MR2 (a further, separately-authorized ticket) added exactly two more
+// intentionally-reviewed READ-ONLY functions for Home: listPausedGoalRhythms
+// (paused/active display) and listNextGoalRhythmOccurrences (the confirmed
+// next session). Both are re-checked read-only just below.
 check(
-  'db.ts defines ONLY the six allowed, intentionally-reviewed Rhythm functions (O5 P2d added the PURE row mapper buildGoalActivityRhythmFactsFromOccurrenceRows, no query; loadGoalActivityRhythmFacts [read-only], loadGoalActivityRhythmFactsForActivities [R4\'s batched read-only sibling], materializeGoalActivityRhythmOccurrence [R3\'s sole occurrence writer], updateGoalActivityRhythmSettings [R5\'s existing-activity policy writer, generalized by MR1], and loadCandidateGoalActivitiesForRhythmDemand [Candidate A1\'s read-only discovery query]) -- no other function references Rhythm',
+  'db.ts defines ONLY the eight allowed, intentionally-reviewed Rhythm functions (O5 P2d added the PURE row mapper buildGoalActivityRhythmFactsFromOccurrenceRows, no query; loadGoalActivityRhythmFacts [read-only], loadGoalActivityRhythmFactsForActivities [R4\'s batched read-only sibling], materializeGoalActivityRhythmOccurrence [R3\'s sole occurrence writer], updateGoalActivityRhythmSettings [R5\'s existing-activity policy writer, generalized by MR1], and loadCandidateGoalActivitiesForRhythmDemand [Candidate A1\'s read-only discovery query]) -- no other function references Rhythm',
   [...new Set((dbSrc.match(/function \w*[Rr]hythm\w*/g) ?? []))].sort().join(',') ===
-    ['function buildGoalActivityRhythmFactsFromOccurrenceRows', 'function loadGoalActivityRhythmFacts', 'function loadGoalActivityRhythmFactsForActivities', 'function materializeGoalActivityRhythmOccurrence', 'function updateGoalActivityRhythmSettings', 'function loadCandidateGoalActivitiesForRhythmDemand'].sort().join(',')
+    ['function buildGoalActivityRhythmFactsFromOccurrenceRows', 'function loadGoalActivityRhythmFacts', 'function loadGoalActivityRhythmFactsForActivities', 'function materializeGoalActivityRhythmOccurrence', 'function updateGoalActivityRhythmSettings', 'function loadCandidateGoalActivitiesForRhythmDemand', 'function listPausedGoalRhythms', 'function listNextGoalRhythmOccurrences'].sort().join(',')
 );
+check('AURA-MR2: listPausedGoalRhythms contains no INSERT/UPDATE/DELETE (read-only)', !/INSERT\s|UPDATE\s|DELETE\s/.test(functionBody(dbSrc, 'listPausedGoalRhythms')));
+check('AURA-MR2: listNextGoalRhythmOccurrences contains no INSERT/UPDATE/DELETE (read-only) and returns only UPCOMING plans', !/INSERT\s|UPDATE\s|DELETE\s/.test(functionBody(dbSrc, 'listNextGoalRhythmOccurrences')) && /p\.status = 'UPCOMING'/.test(functionBody(dbSrc, 'listNextGoalRhythmOccurrences')));
 check('loadCandidateGoalActivitiesForRhythmDemand itself contains no INSERT/UPDATE/DELETE (read-only, this ticket\'s own section 15)', !/INSERT\s|UPDATE\s|DELETE\s/.test(functionBody(dbSrc, 'loadCandidateGoalActivitiesForRhythmDemand')));
 check('loadGoalActivityRhythmFacts itself contains no INSERT/UPDATE/DELETE (read-only, this ticket\'s own section 23)', !/INSERT\s|UPDATE\s|DELETE\s/.test(functionBody(dbSrc, 'loadGoalActivityRhythmFacts')));
 

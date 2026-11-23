@@ -75,7 +75,12 @@ const SQL_PINS: Record<string, string> = {
   // one predicate, `AND ga."rhythmPausedAt" IS NULL` (migration 0053), so a
   // paused My Rhythm is never offered as Goal demand. Removing that one line
   // reproduces the previous pin 757784fc4ef4052f exactly.
-  loadCandidateGoalActivitiesForRhythmDemand: '0e7b2f7f5b5de012',
+  // AURA-MR2 -- re-baselined again, not weakened: the same query now also
+  // SELECTs MR1's three stored preference columns (rhythmPreferredWeekdays,
+  // rhythmPreferredTimeOfDay, rhythmPreferredDurationMinutes) so the shared
+  // Goal-demand read model can carry them. No filter, join or ordering
+  // changed; removing those three columns reproduces 0e7b2f7f5b5de012.
+  loadCandidateGoalActivitiesForRhythmDemand: '599d1de980e1389d',
   // Insights V1 PR3 -- re-baselined, not weakened: listGoalActivityOccurrenceRowsForActivities's
   // own SQL deliberately changed (JOIN -> LEFT JOIN on PlannedActivity, plus
   // a new LEFT JOIN on GoalActivityExecution via goalActivityOccurrenceId)

@@ -61,7 +61,10 @@ check('the encoder is called only by the three known producers/matchers: the Pla
 check('the Plan Day client derives the canonical id for BOTH entry paths from the same encoder and the server-supplied planning date', (code(path.join(app, 'plan-day/PlanDayClient.tsx')).match(/encodeGoalDemandIntentId\(planningDate/g) ?? []).length === 2);
 check('the client no longer seeds manual rows with the legacy factory directly; it goes through createIntentRowFromGoalHandoffItem', !/createIntentRowFromGoalActivity\b/.test(code(path.join(app, 'plan-day/PlanDayClient.tsx'))) && /createIntentRowFromGoalHandoffItem\(item, planningDate \? encodeGoalDemandIntentId\(planningDate, item\.id\) : null\)/.test(client));
 check('planDayEntry.ts and planDayBootstrap.ts never import or mention the encoder/decoder (they compute no identity)', !/goalDemandIntentId|encodeGoalDemandIntentId|classifyGoalDemandIntentId/.test(stripComments(planDayEntry)) && !/goalDemandIntentId|encodeGoalDemandIntentId|classifyGoalDemandIntentId|goalDemandProvenanceAuthorization/.test(bootstrap));
-check('a canonical manual row is built by the EXISTING automatic row factory (one row shape for both paths)', /return createIntentRowFromAutoGoalSuggestion\(\{ title: item\.title, activityId: item\.activityId, goalActivityId: item\.id \}, canonicalIntentId\);/.test(planDayEntry));
+// AURA-MR2 -- the canonical row is still built by the same automatic row
+// factory, with identical arguments; MR2 only spreads the rhythm's
+// time-of-day/duration defaults onto the result.
+check('a canonical manual row is built by the EXISTING automatic row factory (one row shape for both paths)', /return \{ \.\.\.createIntentRowFromAutoGoalSuggestion\(\{ title: item\.title, activityId: item\.activityId, goalActivityId: item\.id \}, canonicalIntentId\), \.\.\.rhythmDefaultsFor\(item\.preferences\) \};/.test(planDayEntry));
 check('the legacy manual factory remains unmodified as the fallback (legacy ids, unmarked items, load failures)', /`plan-day-goal-\$\{goalActivity\.id\}`/.test(planDayEntry));
 
 // ============================================================
