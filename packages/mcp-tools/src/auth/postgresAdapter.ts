@@ -20,17 +20,27 @@ import { CONSUMABLE_MODELS, ReplayDetectedError, type OAuthStore, type UserGrant
  *     tokens, authorization codes and session ids therefore cannot be read
  *     back out of the database; `find` restores `jti` from the value the
  *     caller presented.
- *   - I2b-R1 (I2b-R-1): `oidc-provider` also copies identifiers INTO other
- *     payloads. Before storage:
+ *   - I2b-R1 / I2b-RR1 (I2b-R-1, I2b-RR-1): `oidc-provider` also copies
+ *     identifiers INTO other payloads. Before storage:
  *       Interaction `session.cookie` (the session id = `_session` cookie
  *         value) is DROPPED -- the library never reads it back;
- *       Interaction `returnTo` (contains the interaction uid = the
- *         `_interaction` / `_interaction_resume` cookie value) and Session
- *         `state.secret` (the xsrf secret of the account-switch form) are
- *         read back by the library, so they are SEALED with AES-256-GCM
- *         (fieldSeal.ts), bound to their row and field.
- *     A record whose sealed field is missing its seal, malformed or tampered
- *     is treated as NOT FOUND (fail closed).
+ *       Interaction `returnTo` (the resume URL; contains the interaction
+ *         uid = the `_interaction` / `_interaction_resume` cookie value),
+ *       Session `state.secret` (the xsrf secret of the account-switch form)
+ *         and
+ *       Session `state.postLogoutRedirectUri` (written by resume.js on the
+ *         account-switch path; also the resume URL with the live uid)
+ *         are read back by the library, so they are ENCRYPTED with
+ *         AES-256-GCM (fieldSeal.ts), bound to their model, row and field.
+ *     Fail closed: a sealed field that is present but not a valid seal
+ *     (plaintext, non-string, malformed, unknown key, tampered or moved)
+ *     makes the record read as NOT FOUND. Interaction `returnTo` is always
+ *     written by the library, so a record WITHOUT it also reads as not found
+ *     (I2b-RR-2). The Session `state.*` fields are optional (normal sessions
+ *     carry no `state`), so their absence is accepted.
+ *     Not sealed (deferred, I2b-RRC-2): Interaction `deviceCode` / `parJti`
+ *     are unset while device flow and PAR stay disabled; they need a
+ *     storage-protection review before either feature is enabled.
  *   - Expiry is enforced on read (expired rows are invisible) and rows are
  *     removed by `cleanupExpired` (bounded batches; opportunistic, see
  *     `cleanupEvery`).
