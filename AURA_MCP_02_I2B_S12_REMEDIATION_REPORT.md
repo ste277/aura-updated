@@ -113,6 +113,12 @@ The callback must also be registered for that client. At `finish`, the hand-off 
 | **mcpOAuthS12Db (new)** | **15/15** |
 | dbIdentityGuard | passed |
 
+- **CI round 1 (run 45423351312, head `054b717`):** Database migration validation **failed**. The limiter suite leaked its per-scenario pools, which exhausted CI PostgreSQL's `max_connections = 100`, and later decisions returned `unavailable` with cause **`checkout`**. The new cause classification identified it immediately; the local cluster ran with 200 connections, which had hidden it.
+  - It was a test-harness defect, not a product one.
+  - Reproduced locally at `max_connections = 100`.
+  - Fixed by closing every scenario's pools right after its flood (`endSince`).
+  - Every DB suite then passed at 100 connections, and the limiter suite passed 3 further repeats.
+  - No assertion changed.
 - **Fixture updates for the policy:** the I2b, S8 and S10 loader fixtures now declare formats, and S10 asserts that untagged values are accepted only as retained keys. The assertions are not weakened.
 - **Repeat stability:** see the PR description.
 - **Safeguards:** `git diff fdcbfab` is empty for the gate, readiness, local OAuth wiring, `vercel.json`, `vercel-build.sh`, the routes, `next.config.js`, the standalone check, `prisma/`, `package.json` and the lockfile. There are no migrations or dependencies. Both new suites are wired into CI.

@@ -264,9 +264,18 @@ async function main() {
         } };
       };
 
+      // I2b-S12: every scenario closes the pools it opened (CI Postgres has
+      // max_connections = 100; leaking them turned later decisions into
+      // "checkout" failures -- which the cause classification exposed).
+      const endSince = async (mark: number) => {
+        const fresh = pools.splice(mark);
+        await Promise.all(fresh.map((p) => endWithin(p, 5000)));
+      };
       // (a) production deadline, real runner.
+      let mark = pools.length;
       const ctl = await runnerControl(pool() as unknown as Connectable);
       const safe = await flood([0, 1, 2].map(() => appLimiter(pool())));
+      await endSince(mark);
       const g1 = gate(safe, ctl.threshold);
       const diag = { runnerControl: ctl, elapsedMs: safe.ms, outcomes: safe.by, counted: safe.shardSum, gate: g1 };
       console.log(`  I2b-1 aggregate (production deadline, app pool bounds) diagnostics: ${JSON.stringify(diag)}`);
@@ -274,8 +283,10 @@ async function main() {
 
       // (b) a SHARED slowdown (the whole runner / database is slow): the
       // independent control sees it too, so the floor drops proportionally.
+      mark = pools.length;
       const sharedCtl = await runnerControl(slowPool() as unknown as Connectable);
       const shared = await flood([0, 1, 2].map(() => appLimiter(slowPool())));
+      await endSince(mark);
       const g2 = gate(shared, sharedCtl.threshold);
       const sharedDiag = { runnerControl: sharedCtl, elapsedMs: shared.ms, outcomes: shared.by, counted: shared.shardSum, gate: g2 };
       console.log(`  I2b-1 aggregate (shared slowdown, production deadline) diagnostics: ${JSON.stringify(sharedDiag)}`);
@@ -306,15 +317,21 @@ async function main() {
           }, release: (e?: unknown) => c.release(e as Error | undefined) };
         } };
       };
+      mark = pools.length;
       const faulty = await flood([0, 1, 2].map(() => appLimiter(faultyPool('decide'))));
+      await endSince(mark);
       const g4 = gate(faulty, ctl.threshold);
       console.log(`  I2b-1 aggregate (injected driver faults) diagnostics: ${JSON.stringify({ outcomes: faulty.by, gate: g4 })}`);
       check('I2b-1 negative control: injected pre-COMMIT driver faults are classified "driver" and FAIL the gate', !g4.ok && (faulty.by['unavailable:driver'] ?? 0) > 0, { outcomes: faulty.by, gate: g4 });
+      mark = pools.length;
       const lost = await flood([0, 1, 2].map(() => appLimiter(faultyPool('commit_lost'))));
+      await endSince(mark);
       const g5 = gate(lost, ctl.threshold);
       console.log(`  I2b-1 aggregate (post-send connection loss) diagnostics: ${JSON.stringify({ outcomes: lost.by, counted: lost.shardSum, gate: g5 })}`);
       check('I2b-1 post-send driver failure: classified "commit_lost" (ambiguous accounting: counted may exceed admitted), never shedding -- it FAILS the gate', (lost.by['unavailable:commit_lost'] ?? 0) > 0 && !g5.ok && lost.admitted <= lost.shardSum && lost.shardSum <= G, { outcomes: lost.by, counted: lost.shardSum, gate: g5 });
+      mark = pools.length;
       const refused = await flood([0, 1, 2].map(() => appLimiter(faultyPool('commit_refused'))));
+      await endSince(mark);
       const g6 = gate(refused, ctl.threshold);
       console.log(`  I2b-1 aggregate (explicit COMMIT refusal) diagnostics: ${JSON.stringify({ outcomes: refused.by, counted: refused.shardSum, gate: g6 })}`);
       check('I2b-1 explicit COMMIT failure (server SQLSTATE): classified "commit_failed", nothing counted for it, and it FAILS the gate', (refused.by['unavailable:commit_failed'] ?? 0) > 0 && !g6.ok && refused.shardSum === refused.admitted, { outcomes: refused.by, counted: refused.shardSum, gate: g6 });
@@ -323,8 +340,10 @@ async function main() {
       const allShed: FloodResult = { ...allDown, out: allDown.out.map((d) => ({ ...d, cause: 'deadline' as const })) };
       check('I2b-1 negative control: even pure deadline shedding with 0 admitted FAILS the availability floor', !gate(allShed, ctl.threshold).ok && ctl.threshold > 0, { threshold: ctl.threshold });
 
+      mark = pools.length;
       const roomy = [0, 1, 2].map(() => createPostgresRateLimiter({ pool: pool(), windowMs: 60_000, decisionDeadlineMs: 30_000, lockTimeoutMs: 5000, statementTimeoutMs: 6000 }));
       const exact = await flood(roomy);
+      await endSince(mark);
       console.log(`  I2b-1 aggregate (explicit budget) diagnostics: ${JSON.stringify({ elapsedMs: exact.ms, outcomes: exact.by })}`);
       check('I2b-1 aggregate: 2000 concurrent decisions from 500 networks on 3 instances -> exactly G (480) admitted, never more', exact.admitted === G && exact.shardSum === G, { admitted: exact.admitted, outcomes: exact.by, elapsedMs: exact.ms });
       check('I2b-1 aggregate: every one of the 16 shards stopped at its own limit (30)', exact.shardRows.length === 16 && exact.shardRows.every((r) => r.count === 30), exact.shardRows.map((r) => r.count));
