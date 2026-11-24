@@ -106,6 +106,11 @@ jobs:
       # and the review's counterexamples. No DB.
       - name: Run I2b-S11 offline remediation test
         run: npx ts-node test/mcpOAuthS11.test.ts
+      # I2b-S12 (S11 review residuals): structured redirect validation, original
+      # budget instant + limiter ROLLBACK / retry / exact-deadline boundaries
+      # under a synthetic clock, explicit secret formats, sanitized audit causes. No DB.
+      - name: Run I2b-S12 offline residual test
+        run: npx ts-node test/mcpOAuthS12.test.ts
       - name: Run panchang day service test
         run: npx ts-node test/panchangDay.test.ts
       - name: Run panchang month service test
@@ -1156,6 +1161,12 @@ jobs:
       # A6 freeze asserted deterministically. Touches only the MCP tables.
       - name: Run I2b-S11 checked-out client and issuance DB test
         run: npx ts-node test/mcpOAuthS11Db.test.ts
+      # I2b-S12: same-status redirect replacements (code moved / duplicated /
+      # re-homed, callback or state changed) are never committed and are refused
+      # on another instance; limiter causes reach the application audit output on
+      # the OAuth path and both MCP paths. Touches only the MCP tables.
+      - name: Run I2b-S12 redirect integrity and audit cause DB test
+        run: npx ts-node test/mcpOAuthS12Db.test.ts
       - name: Verify every repository migration was recorded as applied
         run: |
           set -euo pipefail

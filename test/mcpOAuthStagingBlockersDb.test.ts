@@ -173,28 +173,35 @@ async function main() {
       check('I2b-1 exactness: 300 concurrent decisions on 3 instances, one address limit 50 -> exactly 50', perAddr.filter((d) => d.allowed).length === 50, perAddr.filter((d) => d.allowed).length);
       check('I2b-1 exactness: global shards counted exactly the admitted requests', (await counts('preauth-mcp:global:%')) === 50);
 
-      // I2b-S10 / S11 (run 45372768632; S10 review P2-3). The 2000-decision
-      // flood is checked at the SAME concurrency in three ways:
-      //  (a) PRODUCTION deadline, application pool bounds (5 per instance):
-      //      a regression GATE, not just a safety check. It passes only if
-      //        - no decision failed unexpectedly (cause checkout / driver /
-      //          SQL / internal -- the limiter reports why it was unavailable);
-      //        - admitted <= counted <= G, and any over-count is explained by
-      //          ambiguous COMMITs (counted - admitted <= #commit_unknown);
-      //        - availability: admitted >= min(G, 1/2 x the capacity this runner
-      //          can serve within the deadline), where capacity = connections x
-      //          deadline / measured cold decision latency. The 1/2 margin
-      //          absorbs lock contention on 16 hot shard rows; a fast runner
-      //          must therefore admit exactly G, a starved one proportionally
-      //          fewer -- but never "zero admitted, 2000 unavailable".
-      //  (b) the slow-database reproduction, held to the same gate with its own
-      //      calibration (deadline shedding is fine; unexpected failures are not);
-      //  (c) EXACTNESS with an explicit large budget (below).
-      // Negative controls prove the gate rejects injected driver failures and an
-      // all-unavailable outcome. No retries; no assertion is weaker than S10's.
+      // I2b-S10 / S11 / S12 (run 45372768632; S10 review P2-3; S11 review
+      // R-P2-2). The 2000-decision flood at the SAME concurrency is a
+      // regression GATE under the production 1250 ms deadline and the
+      // application pool bounds (5 per instance). It passes only if:
+      //   - no decision failed unexpectedly: causes checkout / driver /
+      //     internal / commit_failed (explicit COMMIT refusal) / commit_lost
+      //     (connection failed after COMMIT was sent) all FAIL the gate;
+      //     expected shedding is deadline / commit_timeout / commit_late;
+      //   - admitted <= counted <= G, and any over-count is explained by the
+      //     genuinely ambiguous / late COMMITs (commit_timeout + commit_late +
+      //     commit_lost);
+      //   - availability: admitted >= min(G, 1/2 x capacity), where capacity is
+      //     anchored to an INDEPENDENT runner control -- plain PostgreSQL
+      //     transactions on a session-local TEMP table, with the same three
+      //     round trips as a warm limiter decision (BEGIN+SET LOCAL, UPDATE,
+      //     COMMIT) but none of the limiter's code:
+      //        capacity = instances x connections x deadline / (K x controlLatency)
+      //     K = 4 is FIXED: a cold limiter decision is ~7 round trips (BEGIN,
+      //     DECIDE, ROLLBACK, BEGIN, INSERT, DECIDE, COMMIT) vs the control's 3
+      //     (x2.33), times ~1.7 for lock contention on 16 hot shard rows. A
+      //     slower LIMITER therefore cannot lower its own floor; a slower
+      //     RUNNER lowers it proportionally.
+      // Negative controls prove the gate fails on: injected pre-COMMIT driver
+      // faults, post-send connection loss, explicit COMMIT refusal, a
+      // limiter-only slowdown, and the "0 admitted, 2000 unavailable" outcome.
       const G = 480;
       const CONN = 5; // MCP_PG_POOL_BOUNDS.max (the application's per-instance pool)
       const DEADLINE = 1250;
+      const K = 4;
       type FloodResult = { out: RateLimitDecision[]; admitted: number; by: Record<string, number>; ms: number; shardRows: Record<string, unknown>[]; shardSum: number };
       const flood = async (limiters: PostgresRateLimiter[]): Promise<FloodResult> => {
         await admin.query('TRUNCATE "McpRateLimitWindow"');
@@ -210,38 +217,42 @@ async function main() {
         const shardRows = await q(`SELECT "key", "count" FROM "McpRateLimitWindow" WHERE "key" LIKE 'preauth-mcp:global:%'`);
         return { out, admitted: by.admitted ?? 0, by, ms: Date.now() - t0, shardRows, shardSum: await counts('preauth-mcp:global:%') };
       };
-      /** Cold-path decision latency on ONE connection (2 new keys each, as in the flood). */
-      const calibrate = async (mk: () => PostgresRateLimiter) => {
-        await admin.query('TRUNCATE "McpRateLimitWindow"');
-        const lim = mk();
-        const n = 40;
-        const t0 = Date.now();
-        for (let i = 0; i < n; i += 1) await lim.check(buildPreAuthRules('preauth-mcp', `2001:db8:ca1:${i.toString(16)}::1`, { perAddress: 480, global: 100_000, globalShards: 16 }, () => i % 16));
-        const latencyMs = Math.max(0.1, (Date.now() - t0) / n);
-        const capacity = Math.floor((3 * CONN * DEADLINE) / latencyMs);
-        return { latencyMs: Math.round(latencyMs * 100) / 100, capacity, threshold: Math.min(G, Math.floor(capacity / 2)) };
+      type Connectable = { connect(): Promise<{ query(t: string, p?: unknown[]): Promise<unknown>; release(e?: unknown): void }> };
+      /** Independent runner control: plain transactions on a TEMP table (no limiter code, no MCP table). */
+      const runnerControl = async (p: Connectable) => {
+        const c = await p.connect();
+        try {
+          await c.query('CREATE TEMP TABLE IF NOT EXISTS s12_runner_control (k int PRIMARY KEY, n int NOT NULL)');
+          await c.query('INSERT INTO s12_runner_control VALUES (1, 0) ON CONFLICT (k) DO NOTHING');
+          const n = 40;
+          const t0 = Date.now();
+          for (let i = 0; i < n; i += 1) {
+            await c.query("BEGIN; SET LOCAL statement_timeout = '1000ms'; SET LOCAL lock_timeout = '1000ms'");
+            await c.query('UPDATE s12_runner_control SET n = n + 1 WHERE k = 1 RETURNING n');
+            await c.query('COMMIT');
+          }
+          const latencyMs = Math.max(0.05, (Date.now() - t0) / n);
+          await c.query('DROP TABLE IF EXISTS s12_runner_control');
+          const capacity = Math.floor((3 * CONN * DEADLINE) / (K * latencyMs));
+          return { controlLatencyMs: Math.round(latencyMs * 100) / 100, K, capacity, threshold: Math.min(G, Math.floor(capacity / 2)) };
+        } finally {
+          c.release();
+        }
       };
-      const UNEXPECTED = new Set(['checkout', 'driver', 'internal', 'none']);
+      const EXPECTED = new Set(['deadline', 'commit_timeout', 'commit_late']);
+      const AMBIGUOUS = new Set(['commit_timeout', 'commit_late', 'commit_lost']);
       const gate = (r: FloodResult, threshold: number) => {
-        const unexpected = r.out.filter((d) => !d.allowed && (d.limitedBy !== 'unavailable' ? d.limitedBy !== 'preauth-mcp' : UNEXPECTED.has(String(d.cause ?? 'none')))).length;
-        const commitUnknown = r.out.filter((d) => d.cause === 'commit_unknown').length;
+        const unexpected = r.out.filter((d) => !d.allowed && (d.limitedBy !== 'unavailable' ? d.limitedBy !== 'preauth-mcp' : !EXPECTED.has(String(d.cause ?? 'none')))).length;
+        const ambiguous = r.out.filter((d) => AMBIGUOUS.has(String(d.cause))).length;
         const reasons: string[] = [];
         if (unexpected > 0) reasons.push(`${unexpected} unexpected failures`);
         if (!(r.admitted <= r.shardSum && r.shardSum <= G)) reasons.push('admitted <= counted <= G violated');
-        if (r.shardSum - r.admitted > commitUnknown) reasons.push('over-count not explained by ambiguous COMMITs');
+        if (r.shardSum - r.admitted > ambiguous) reasons.push('over-count not explained by ambiguous / late COMMITs');
         if (r.admitted < threshold) reasons.push(`availability ${r.admitted} < threshold ${threshold}`);
-        return { ok: reasons.length === 0, reasons, unexpected, commitUnknown };
+        return { ok: reasons.length === 0, reasons, unexpected, ambiguous };
       };
-      const appLimiter = (p: Pool | { connect(): Promise<unknown> }) => createPostgresRateLimiter({ pool: p as never, windowMs: 60_000 });
-
-      const cal = await calibrate(() => appLimiter(pool()));
-      const safe = await flood([0, 1, 2].map(() => appLimiter(pool())));
-      const g1 = gate(safe, cal.threshold);
-      const diag = { calibration: cal, elapsedMs: safe.ms, outcomes: safe.by, counted: safe.shardSum, gate: g1 };
-      console.log(`  I2b-1 aggregate (production deadline, app pool bounds) diagnostics: ${JSON.stringify(diag)}`);
-      check('I2b-1 aggregate gate (production 1250 ms deadline): no unexpected failure, admitted <= counted <= G (over-count only from ambiguous COMMITs), availability >= calibrated threshold', g1.ok, diag);
-
-      // (b) slow database (+10 ms per statement): shedding, not failure.
+      const appLimiter = (p: unknown) => createPostgresRateLimiter({ pool: p as never, windowMs: 60_000 });
+      /** A pool whose statements each take +10 ms (a starved runner). */
       const slowPool = () => {
         const real = pool();
         return { connect: async () => {
@@ -252,34 +263,65 @@ async function main() {
           }, release: (e?: unknown) => c.release(e as Error | undefined) };
         } };
       };
-      const slowCal = await calibrate(() => appLimiter(slowPool()));
-      const slow = await flood([0, 1, 2].map(() => appLimiter(slowPool())));
-      const g2 = gate(slow, slowCal.threshold);
-      const slowDiag = { calibration: slowCal, elapsedMs: slow.ms, outcomes: slow.by, counted: slow.shardSum, gate: g2 };
-      console.log(`  I2b-1 aggregate (slow database, production deadline) diagnostics: ${JSON.stringify(slowDiag)}`);
-      check('I2b-1 slow-runner reproduction: fewer than G admitted, the shortfall is deadline shedding only (cause deadline / commit_unknown), and the same gate passes on its own calibration', slow.admitted < G && (slow.by['unavailable:deadline'] ?? 0) > 0 && g2.ok, slowDiag);
 
-      // Negative controls: the gate must FAIL on arbitrary infrastructure failures.
-      const faultyPool = () => {
+      // (a) production deadline, real runner.
+      const ctl = await runnerControl(pool() as unknown as Connectable);
+      const safe = await flood([0, 1, 2].map(() => appLimiter(pool())));
+      const g1 = gate(safe, ctl.threshold);
+      const diag = { runnerControl: ctl, elapsedMs: safe.ms, outcomes: safe.by, counted: safe.shardSum, gate: g1 };
+      console.log(`  I2b-1 aggregate (production deadline, app pool bounds) diagnostics: ${JSON.stringify(diag)}`);
+      check('I2b-1 aggregate gate (production 1250 ms deadline): no unexpected failure, admitted <= counted <= G (over-count only from ambiguous / late COMMITs), availability >= the INDEPENDENTLY anchored floor', g1.ok, diag);
+
+      // (b) a SHARED slowdown (the whole runner / database is slow): the
+      // independent control sees it too, so the floor drops proportionally.
+      const sharedCtl = await runnerControl(slowPool() as unknown as Connectable);
+      const shared = await flood([0, 1, 2].map(() => appLimiter(slowPool())));
+      const g2 = gate(shared, sharedCtl.threshold);
+      const sharedDiag = { runnerControl: sharedCtl, elapsedMs: shared.ms, outcomes: shared.by, counted: shared.shardSum, gate: g2 };
+      console.log(`  I2b-1 aggregate (shared slowdown, production deadline) diagnostics: ${JSON.stringify(sharedDiag)}`);
+      check('I2b-1 shared slowdown (runner and database both +10 ms/statement): fewer than G admitted, the shortfall is expected shedding only, and the gate passes against the independently measured floor', shared.admitted < G && (shared.by['unavailable:deadline'] ?? 0) > 0 && g2.ok, sharedDiag);
+
+      // (c) a LIMITER-ONLY slowdown (an implementation regression): the runner
+      // control is unaffected, so the floor stays high and the gate FAILS.
+      const g3 = gate(shared, ctl.threshold);
+      check('I2b-1 negative control: a limiter-only slowdown cannot lower its own floor -- the same slow result FAILS against the real runner control', !g3.ok && g3.reasons.some((r) => r.startsWith('availability')), { threshold: ctl.threshold, admitted: shared.admitted, gate: g3 });
+
+      // (d) injected pre-COMMIT driver faults.
+      const faultyPool = (mode: 'decide' | 'commit_lost' | 'commit_refused') => {
         const real = pool();
         let n = 0;
         return { connect: async () => {
           const c = await real.connect();
           return { on: c.on.bind(c), off: c.off.bind(c), query: async (t: string, p2?: unknown[]) => {
-            if (/^WITH want/.test(t) && (n += 1) % 10 === 0) throw new Error('injected driver fault');
+            if (mode === 'decide' && /^WITH want/.test(t) && (n += 1) % 10 === 0) throw new Error('injected driver fault');
+            if (mode !== 'decide' && t === 'COMMIT' && (n += 1) % 10 === 0) {
+              if (mode === 'commit_lost') {
+                await c.query('COMMIT'); // it LANDS, then the connection is "lost"
+                throw new Error('Connection terminated unexpectedly');
+              }
+              await c.query('ROLLBACK'); // the server refuses: nothing lands
+              throw Object.assign(new Error('could not serialize access'), { code: '40001', severity: 'ERROR' });
+            }
             return c.query(t, p2 as unknown[]);
           }, release: (e?: unknown) => c.release(e as Error | undefined) };
         } };
       };
-      const faulty = await flood([0, 1, 2].map(() => appLimiter(faultyPool())));
-      const g3 = gate(faulty, cal.threshold);
-      console.log(`  I2b-1 aggregate (injected driver faults) diagnostics: ${JSON.stringify({ outcomes: faulty.by, gate: g3 })}`);
-      check('I2b-1 negative control: injected driver failures (every 10th decision) are classified "driver" and FAIL the gate', !g3.ok && g3.unexpected > 0 && (faulty.by['unavailable:driver'] ?? 0) > 0, { outcomes: faulty.by, gate: g3 });
+      const faulty = await flood([0, 1, 2].map(() => appLimiter(faultyPool('decide'))));
+      const g4 = gate(faulty, ctl.threshold);
+      console.log(`  I2b-1 aggregate (injected driver faults) diagnostics: ${JSON.stringify({ outcomes: faulty.by, gate: g4 })}`);
+      check('I2b-1 negative control: injected pre-COMMIT driver faults are classified "driver" and FAIL the gate', !g4.ok && (faulty.by['unavailable:driver'] ?? 0) > 0, { outcomes: faulty.by, gate: g4 });
+      const lost = await flood([0, 1, 2].map(() => appLimiter(faultyPool('commit_lost'))));
+      const g5 = gate(lost, ctl.threshold);
+      console.log(`  I2b-1 aggregate (post-send connection loss) diagnostics: ${JSON.stringify({ outcomes: lost.by, counted: lost.shardSum, gate: g5 })}`);
+      check('I2b-1 post-send driver failure: classified "commit_lost" (ambiguous accounting: counted may exceed admitted), never shedding -- it FAILS the gate', (lost.by['unavailable:commit_lost'] ?? 0) > 0 && !g5.ok && lost.admitted <= lost.shardSum && lost.shardSum <= G, { outcomes: lost.by, counted: lost.shardSum, gate: g5 });
+      const refused = await flood([0, 1, 2].map(() => appLimiter(faultyPool('commit_refused'))));
+      const g6 = gate(refused, ctl.threshold);
+      console.log(`  I2b-1 aggregate (explicit COMMIT refusal) diagnostics: ${JSON.stringify({ outcomes: refused.by, counted: refused.shardSum, gate: g6 })}`);
+      check('I2b-1 explicit COMMIT failure (server SQLSTATE): classified "commit_failed", nothing counted for it, and it FAILS the gate', (refused.by['unavailable:commit_failed'] ?? 0) > 0 && !g6.ok && refused.shardSum === refused.admitted, { outcomes: refused.by, counted: refused.shardSum, gate: g6 });
       const allDown: FloodResult = { out: Array.from({ length: 2000 }, () => ({ allowed: false, retryAfterSeconds: 1, limitedBy: 'unavailable', cause: 'checkout' as const })), admitted: 0, by: {}, ms: 0, shardRows: [], shardSum: 0 };
-      const g4 = gate(allDown, cal.threshold);
-      check('I2b-1 negative control: "0 admitted, 2000 unavailable" (the S10 gap) FAILS the gate', !g4.ok, g4);
+      check('I2b-1 negative control: "0 admitted, 2000 unavailable" FAILS the gate', !gate(allDown, ctl.threshold).ok);
       const allShed: FloodResult = { ...allDown, out: allDown.out.map((d) => ({ ...d, cause: 'deadline' as const })) };
-      check('I2b-1 negative control: even pure deadline shedding with 0 admitted FAILS the availability threshold', !gate(allShed, cal.threshold).ok && cal.threshold > 0, { threshold: cal.threshold });
+      check('I2b-1 negative control: even pure deadline shedding with 0 admitted FAILS the availability floor', !gate(allShed, ctl.threshold).ok && ctl.threshold > 0, { threshold: ctl.threshold });
 
       const roomy = [0, 1, 2].map(() => createPostgresRateLimiter({ pool: pool(), windowMs: 60_000, decisionDeadlineMs: 30_000, lockTimeoutMs: 5000, statementTimeoutMs: 6000 }));
       const exact = await flood(roomy);

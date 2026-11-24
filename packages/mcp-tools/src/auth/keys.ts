@@ -36,25 +36,19 @@ import { constants, createPrivateKey, createPublicKey, generateKeyPairSync, rand
  *   - EC: the public point is the one derived from `d`;
  *   - every key must sign a probe that VERIFIES against a key built from
  *     its PUBLIC members only (what /oauth/jwks publishes);
- *   - secrets (every cookie key -- current AND retained rotation keys --,
- *     the pairwise salt and the audit key): >= 32 characters and >= 128
- *     bits by `assessSecret`, an OBVIOUS-MISTAKE FILTER, not proof of
- *     entropy (I2b-S10 / S11):
- *       SUPPORTED formats (canonical encodings of CSPRNG bytes; strength =
- *       8 x decoded bytes): hex (even length, one case), base64 (padded,
- *       canonical), base64url (unpadded, canonical) -- e.g.
- *       `openssl rand -hex 16|32`, `openssl rand -base64 24|32`;
- *       LEGACY values (anything else) keep the S8 rule: Shannon estimate
- *       >= 128 bits and >= 10 distinct characters.
- *     Accepted on EITHER estimate, subject to mistake vetoes: no repeated
- *     block; for supported formats no run of >= 12 repeating / one-step
- *     characters in the format's alphabet and no character far more frequent
- *     than chance (a uniform random encoding trips a veto with p < 1e-11).
- *     Legacy policy (explicit): an S8-accepted value is refused ONLY if it
- *     trips a veto -- such a value is patterned, not random, and must be
- *     regenerated. A deterministic or derived value in a supported format
- *     cannot be detected: provenance (CSPRNG generation, custody) is owner
- *     decision D9.
+ *   - secrets (I2b-S12, explicit format policy): the CURRENT cookie key,
+ *     the pairwise salt and the audit key MUST declare their format --
+ *     "hex:<hex>", "base64:<base64>" or "base64url:<base64url>" -- and the
+ *     body must be a canonical encoding with >= 16 decoded bytes that passes
+ *     the mistake vetoes (repeated block, step runs, skew, low variety). The
+ *     whole string, tag included, is the secret: nothing is decoded,
+ *     stripped or transformed. RETAINED cookie keys may also be untagged
+ *     legacy values (compatibility path): >= 32 characters, judged by the
+ *     legacy rule (S8 estimate, or canonical-format credit where a
+ *     hex-lexical value earns hex credit only). Generate with a CSPRNG, e.g.
+ *     "hex:$(openssl rand -hex 32)" or "base64:$(openssl rand -base64 32)".
+ *     Format validation and pattern checks cannot establish the entropy of a
+ *     real key; provenance and custody are owner decision D9.
  * Error messages name the variable and the kid only, never a value.
  *
  * `ephemeralOAuthKeys()` is for local development and tests only: fresh
@@ -167,7 +161,7 @@ export interface SecretAssessment {
   /** Estimated strength, bits (format-aware; see the module comment). */
   bits: number;
   /** Why it was refused (a code, never the value). */
-  reason?: 'short' | 'weak' | 'repeated_block' | 'run' | 'skewed' | 'low_variety';
+  reason?: 'short' | 'weak' | 'repeated_block' | 'run' | 'skewed' | 'low_variety' | 'not_canonical';
 }
 
 /**
@@ -192,9 +186,15 @@ export function assessSecret(v: string): SecretAssessment {
   // Anything else -- odd-length hex, impossible lengths, non-canonical pad
   // bits, text -- is LEGACY and judged by the unchanged S8 rule.
   const b64Groups = [/[a-z]/, /[A-Z]/, /[0-9]/].filter(hasCase).length >= 2;
-  if (/^(?:[0-9a-f]{2})+$/.test(v) || /^(?:[0-9A-F]{2})+$/.test(v) ? /[a-fA-F]/.test(v) : false) {
+  // I2b-S12 (S11 review R-P3-2): a value made ONLY of hex characters is
+  // "hex-lexical" and can earn hex credit only (if canonical) -- never base64 /
+  // base64url credit, even when it also happens to be canonical base64url.
+  const hexLexical = /^[0-9A-Fa-f]+$/.test(v);
+  if (hexLexical && (/^(?:[0-9a-f]{2})+$/.test(v) || /^(?:[0-9A-F]{2})+$/.test(v)) && /[a-fA-F]/.test(v)) {
     format = 'hex';
     bits = 8 * (v.length / 2);
+  } else if (hexLexical) {
+    bits = estimateSecretBits(v);
   } else if (b64Groups && /^[A-Za-z0-9+/]+={0,2}$/.test(v) && v.length % 4 === 0 && Buffer.from(v, 'base64').toString('base64') === v) {
     format = 'base64';
     core = v.replace(/=+$/, '');
@@ -228,23 +228,97 @@ export function assessSecret(v: string): SecretAssessment {
   return out(new Set(v).size < MIN_DISTINCT && format === 'text' ? 'low_variety' : 'weak');
 }
 
-function strongEnough(v: string): boolean {
-  return assessSecret(v).ok;
+/** I2b-S12: the explicit format tags for new configuration ("<tag>:<value>"). */
+export type DeclaredSecretFormat = 'hex' | 'base64' | 'base64url';
+const FORMAT_TAGS: readonly [string, DeclaredSecretFormat][] = [
+  ['hex:', 'hex'],
+  ['base64url:', 'base64url'],
+  ['base64:', 'base64'],
+];
+
+/** Decoded byte length when `body` is a CANONICAL encoding in `f`, else null. */
+function canonicalBytes(body: string, f: DeclaredSecretFormat): number | null {
+  if (f === 'hex') return /^(?:[0-9a-f]{2})+$/.test(body) || /^(?:[0-9A-F]{2})+$/.test(body) ? body.length / 2 : null;
+  if (f === 'base64') return /^[A-Za-z0-9+/]+={0,2}$/.test(body) && body.length % 4 === 0 && Buffer.from(body, 'base64').toString('base64') === body ? Buffer.from(body, 'base64').length : null;
+  return /^[A-Za-z0-9_-]+$/.test(body) && body.length % 4 !== 1 && Buffer.from(body, 'base64url').toString('base64url') === body ? Buffer.from(body, 'base64url').length : null;
+}
+
+export interface ConfiguredSecretAssessment extends SecretAssessment {
+  /** The declared format, when the value carries an explicit tag. */
+  declared?: DeclaredSecretFormat;
+}
+
+/**
+ * AURA-MCP-02-I2b-S12 (S11 review R-P3-2): deterministic secret-format policy.
+ *   - TAGGED value "hex:<hex>", "base64:<base64>" or "base64url:<base64url>"
+ *     (REQUIRED for new configuration): the body must be a canonical
+ *     encoding in exactly the declared format with >= 16 decoded bytes
+ *     (128 bits), and pass the mistake vetoes. The whole string, tag
+ *     included, is used verbatim as the secret: nothing is decoded,
+ *     stripped or otherwise transformed.
+ *   - UNTAGGED value (compatibility path, retained cookie keys only): the
+ *     legacy rule `assessSecret` (S8 estimate or canonical-format estimate,
+ *     with vetoes; a hex-lexical value earns hex credit only).
+ * Format checks and pattern vetoes catch mistakes; they cannot establish the
+ * entropy of a real key. Provenance and custody are owner decision D9.
+ */
+export function assessConfiguredSecret(raw: string): ConfiguredSecretAssessment {
+  const tag = FORMAT_TAGS.find(([t]) => raw.startsWith(t));
+  if (!tag) return assessSecret(raw);
+  const [t, declared] = tag;
+  const body = raw.slice(t.length);
+  const bytes = canonicalBytes(body, declared);
+  const out = (bits: number, reason?: SecretAssessment['reason']): ConfiguredSecretAssessment => ({ ok: !reason, format: declared === 'hex' ? 'hex' : 'base64', bits, declared, ...(reason ? { reason } : {}) });
+  if (bytes === null) return out(0, 'not_canonical');
+  const bits = 8 * bytes;
+  if (bits < MIN_SECRET_BITS) return out(bits, 'weak');
+  if (periodic(body)) return out(bits, 'repeated_block');
+  const core = body.replace(/=+$/, '');
+  const alphabet = declared === 'hex' ? HEX_ALPHABET : declared === 'base64url' ? B64URL_ALPHABET : B64_ALPHABET;
+  if (longestStepRun(declared === 'hex' ? core.toLowerCase() : core, alphabet) >= 12) return out(bits, 'run');
+  const counts = new Map<string, number>();
+  let max = 0;
+  for (const ch of core) {
+    const c = (counts.get(ch) ?? 0) + 1;
+    counts.set(ch, c);
+    if (c > max) max = c;
+  }
+  if (max >= maxCountLimit(core.length, declared === 'hex' ? 16 : 64)) return out(bits, 'skewed');
+  // I2b-S12: far fewer distinct characters than random draws from the declared
+  // alphabet give (< 1/2 of the expected count) -- e.g. a hex-looking string
+  // declared as base64url. P(false refusal) for CSPRNG output <= 3e-9 (16-byte
+  // values; << 1e-11 from 24 bytes).
+  const a = declared === 'hex' ? 16 : 64;
+  if (new Set(core).size < 0.5 * a * (1 - Math.pow(1 - 1 / a, core.length))) return out(bits, 'low_variety');
+  return out(bits);
+}
+
+const FORMAT_REQUIRED = 'declare the format as "hex:", "base64:" or "base64url:" followed by a canonical CSPRNG value (untagged values are accepted only as retained cookie keys)';
+
+/** Validates one configured secret. `allowUntagged`: the legacy compatibility path (retained cookie keys only). */
+function checkSecret(name: string, raw: string, allowUntagged: boolean): void {
+  const tagged = FORMAT_TAGS.some(([t]) => raw.startsWith(t));
+  if (!tagged && !allowUntagged) throw new TypeError(`${name}: ${FORMAT_REQUIRED}`);
+  if (!tagged && raw.length < MIN_SECRET) throw new TypeError(`${name}: every key must be at least ${MIN_SECRET} characters`);
+  const a = assessConfiguredSecret(raw);
+  if (a.reason === 'not_canonical') throw new TypeError(`${name}: a key is not a canonical encoding in its declared format`);
+  if (!a.ok) throw new TypeError(`${name}: a key is too predictable (needs >= ${MIN_SECRET_BITS} bits; use a CSPRNG)`);
 }
 
 function secretList(name: string, value: string | undefined): string[] {
   const list = (value ?? '').split(',').map((s) => s.trim()).filter(Boolean);
   if (list.length === 0) throw new TypeError(`${name} is required`);
-  for (const s of list) if (s.length < MIN_SECRET) throw new TypeError(`${name}: every key must be at least ${MIN_SECRET} characters`);
-  for (const s of list) if (!strongEnough(s)) throw new TypeError(`${name}: a key is too predictable (needs >= ${MIN_SECRET_BITS} bits of estimated entropy; use a CSPRNG)`);
+  // I2b-S12: the CURRENT key (first; signs new cookies) must declare its
+  // format; RETAINED keys (verification only) may be untagged legacy values.
+  list.forEach((s, i) => checkSecret(name, s, i > 0));
   if (new Set(list).size !== list.length) throw new TypeError(`${name}: duplicate keys`);
   return list;
 }
 
 function secret(name: string, value: string | undefined): string {
   const v = (value ?? '').trim();
-  if (v.length < MIN_SECRET) throw new TypeError(`${name} must be at least ${MIN_SECRET} characters`);
-  if (!strongEnough(v)) throw new TypeError(`${name} is too predictable (needs >= ${MIN_SECRET_BITS} bits of estimated entropy; use a CSPRNG)`);
+  if (v.length === 0) throw new TypeError(`${name} is required`);
+  checkSecret(name, v, false);
   return v;
 }
 
