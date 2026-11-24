@@ -114,18 +114,23 @@ check('Rounding applies identically to negative deltas: -33.33 rounds to -33, no
 // fixes).
 // ============================================================
 
+// AURA-INS-01: the comparison moved from route.ts into lib/insightsAlignment.ts
+// (adding 30/10/10 display thresholds and nearest-5 display rounding, covered
+// by test/insightsAlignmentSafeguards.test.ts). The invariants below are
+// re-pointed at the module; the replica above documents the formula shape.
 const routeSource = fs.readFileSync('apps/web/app/api/daily-assistant/insights/route.ts', 'utf8');
-const roundCallCount = (routeSource.match(/Math\.round\(/g) || []).length;
-check('Route contains exactly ONE Math.round(...) call for the delta -- a single formula shape, no dual relative/absolute branching', roundCallCount === 1);
+const alignmentModuleSource = fs.readFileSync('apps/web/lib/insightsAlignment.ts', 'utf8');
+const roundCallCount = (alignmentModuleSource.match(/Math\.round\(/g) || []).length;
+check('The comparison module contains exactly ONE Math.round(...) call -- a single formula shape, no dual relative/absolute branching', roundCallCount === 1);
 check('Route never clamps a negative lift to zero (no Math.max(0, ...alignedRate/unalignedRate/lift...) pattern)', !/Math\.max\(0/.test(routeSource));
-check('Route requires BOTH groups (alignedRate !== null && unalignedRate !== null) before computing a delta -- never a one-sided comparison', /alignedRate !== null && unalignedRate !== null/.test(routeSource));
-check('Route stores group rates as null (not a silent 0) when that group is empty -- 0 would be indistinguishable from "scored the worst possible outcome"', /alignedTotal > 0 \? alignedScoreTotal \/ alignedTotal : null/.test(routeSource) && /unalignedTotal > 0 \? unalignedScoreTotal \/ unalignedTotal : null/.test(routeSource));
+check('The module requires BOTH groups (each at the per-group minimum) before computing a difference -- never a one-sided comparison', /followedDays >= ALIGNMENT_MIN_DAYS_PER_GROUP && otherDays >= ALIGNMENT_MIN_DAYS_PER_GROUP/.test(alignmentModuleSource));
+check('The module never divides by an empty group: the insufficient-data return precedes the per-group means, and the difference is null there', alignmentModuleSource.indexOf('if (!eligible)') > -1 && alignmentModuleSource.indexOf('if (!eligible)') < alignmentModuleSource.indexOf('followedScoreTotal / followedDays') && /status: 'INSUFFICIENT', differencePoints: null/.test(alignmentModuleSource));
 // Matches actual code usage (property access, type/object key, assignment)
 // but not prose mentions inside a doc comment (e.g. "renamed from the old
 // peakFlowLiftPercent, which conflated...").
 const PEAK_FLOW_LIFT_LIVE_USAGE = /\.peakFlowLiftPercent\b|peakFlowLiftPercent\s*:\s*number|peakFlowLiftPercent\s*=/;
 check('The old dual-formula field name (peakFlowLiftPercent) is not used as a live identifier in the route (only, if at all, in an explanatory doc comment)', !PEAK_FLOW_LIFT_LIVE_USAGE.test(routeSource));
-check('The response field is named alignmentDeltaPoints (percentage-point delta, not a relative "lift" percent)', /alignmentDeltaPoints,/.test(routeSource));
+check('The response field is still named alignmentDeltaPoints (percentage-point difference, not a relative "lift" percent)', /alignmentDeltaPoints: alignment\.differencePoints,/.test(routeSource));
 
 // ============================================================
 // InsightsView.tsx's rendering side: no lingering clamp, no lingering
@@ -136,8 +141,8 @@ check('The response field is named alignmentDeltaPoints (percentage-point delta,
 const insightsViewSource = fs.readFileSync('apps/web/components/InsightsView.tsx', 'utf8');
 check('InsightsView.tsx no longer references the removed peakFlowLiftPercent field as a live identifier (only, if at all, in an explanatory doc comment)', !PEAK_FLOW_LIFT_LIVE_USAGE.test(insightsViewSource));
 check('InsightsView.tsx no longer clamps the displayed delta with Math.max(0, ...)', !/Math\.max\(0,\s*assistantInsight/.test(insightsViewSource));
-check('InsightsView.tsx renders the new alignmentDeltaPoints field', /assistantInsight\.alignmentDeltaPoints/.test(insightsViewSource));
-check('InsightsView.tsx has an explicit branch for the null (insufficient-comparison) case, not a bare number render that would show NaN/blank', /assistantInsight\.alignmentDeltaPoints !== null/.test(insightsViewSource));
+check('InsightsView.tsx renders the comparison from the alignment object (summary + sample sizes)', /assistantInsight\.alignment\?\.summaryText/.test(insightsViewSource) && /alignment\.sampleText/.test(insightsViewSource));
+check('InsightsView.tsx has an explicit branch for the insufficient-data case, never a bare number render that would show NaN/blank', /assistantInsight\.alignment\?\.status === 'INSUFFICIENT'/.test(insightsViewSource));
 check('InsightsView.tsx interface types alignmentDeltaPoints as number | null (matches the route\'s actual possible-null return)', /alignmentDeltaPoints:\s*number \| null/.test(insightsViewSource));
 
 console.log(allPassed ? '\nALL INSIGHTS ALIGNMENT COMPARISON CHECKS PASSED' : '\nSOME INSIGHTS ALIGNMENT COMPARISON CHECKS FAILED');

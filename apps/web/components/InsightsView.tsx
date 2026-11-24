@@ -1,5 +1,6 @@
 'use client';
 
+import type { AlignmentComparison } from '../lib/insightsAlignment';
 import React, { useState, useMemo } from 'react';
 import { computeAverageTimedSessionMinutes } from '../lib/activityDuration';
 import { toInsightsObservation, todayDateKey, lastNCalendarDateKeys, isInCalendarMonth } from '../lib/insightsTimezone';
@@ -148,6 +149,9 @@ interface InsightsViewProps {
      * denominator, and could not represent a negative result at all. */
     alignmentDeltaPoints: number | null;
     insightText: string;
+    /** AURA-INS-01 -- the thresholded, neutrally-worded comparison (see
+     * lib/insightsAlignment.ts). Optional so an older response still renders. */
+    alignment?: AlignmentComparison;
     /** Canonical Aura Fit Insights V1 -- a SEPARATE, activity-aware metric
      * from every other value on this object and from this component's own
      * window-only C1 calculations (analytics.alignmentScore/
@@ -705,29 +709,31 @@ export function InsightsView({ userId, onOpenBirthProfile, timezone, logEntries 
 
           {assistantInsight && (
             <SurfaceCard accentColor={colors.positive}>
-              <div style={typography.sectionEyebrow}>Your Alignment</div>
-              {/* Insights Correctness + Historical Integrity V1 -- the
-                * signed delta is shown as-is (never clamped to 0, which
-                * would misrepresent a genuinely negative result as "no
-                * difference"); a null delta (not enough two-sided evidence
-                * yet) shows a plain "Not enough data yet" state instead of
-                * a fabricated number. */}
-              {assistantInsight.alignmentDeltaPoints !== null ? (
-                <div style={{ fontSize: 32, color: colors.textPrimary, fontWeight: 850, marginTop: spacing.sm }}>
-                  {assistantInsight.alignmentDeltaPoints > 0 ? '+' : ''}
-                  {assistantInsight.alignmentDeltaPoints} pts
-                </div>
-              ) : (
-                <div style={{ fontSize: 16, color: colors.textSecondary, fontWeight: 700, marginTop: spacing.sm }}>
-                  Not enough data yet
+              {/* AURA-INS-01 (PV-F04) -- an observational comparison of the
+                * user's own check-ins, shown only past the display thresholds
+                * (30 days, 10 per group), with sample sizes, method and a
+                * non-causal caveat. No large headline number. */}
+              <div style={typography.sectionEyebrow}>Your check-in patterns</div>
+              <div style={{ ...typography.bodyStrong, color: colors.textPrimary, lineHeight: 1.45, marginTop: spacing.sm }}>
+                {assistantInsight.alignment?.summaryText ?? assistantInsight.insightText}
+              </div>
+              {assistantInsight.alignment?.status === 'AVAILABLE' && assistantInsight.alignment.sampleText && (
+                <div style={{ ...typography.meta, marginTop: spacing.xs }}>{assistantInsight.alignment.sampleText}</div>
+              )}
+              {assistantInsight.alignment?.status === 'INSUFFICIENT' && (
+                <div style={{ ...typography.meta, marginTop: spacing.xs }}>
+                  {assistantInsight.alignment.qualifyingDays} of {assistantInsight.alignment.minTotalDays} check-in days so far ({assistantInsight.alignment.followedDays} following favorable windows, {assistantInsight.alignment.otherDays} other). At least {assistantInsight.alignment.minDaysPerGroup} of each are needed.
                 </div>
               )}
-              <div style={{ fontSize: 13, color: colors.textSecondary, lineHeight: 1.4, marginTop: spacing.xs }}>
-                {assistantInsight.insightText}
-              </div>
-              <div style={{ ...typography.meta, marginTop: spacing.sm }}>
-                {assistantInsight.reflectionCount} check-ins · {assistantInsight.alignedDays} aligned days
-              </div>
+              {assistantInsight.alignment && (
+                <>
+                  <div style={{ ...typography.meta, marginTop: spacing.sm }}>{assistantInsight.alignment.caveatText}</div>
+                  <details style={{ marginTop: spacing.sm }}>
+                    <summary style={{ ...typography.meta, color: colors.info, cursor: 'pointer', minHeight: 44, display: 'flex', alignItems: 'center' }}>How it&rsquo;s calculated</summary>
+                    <div style={{ ...typography.meta, lineHeight: 1.5 }}>{assistantInsight.alignment.methodText}</div>
+                  </details>
+                </>
+              )}
             </SurfaceCard>
           )}
 
@@ -826,7 +832,7 @@ export function InsightsView({ userId, onOpenBirthProfile, timezone, logEntries 
               )}
 
               <div style={{ fontSize: 11, color: colors.textFaint, lineHeight: 1.4, marginTop: spacing.xs }}>
-                Aura Fit reflects the specific activity; Alignment above reflects the broader timing window.
+                Aura Fit reflects the specific activity; your check-in patterns above reflect the broader timing window.
               </div>
             </SurfaceCard>
           )}

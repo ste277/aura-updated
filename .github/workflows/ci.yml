@@ -423,6 +423,10 @@ jobs:
       # AURA-MR3 -- preferences UI draft/patch logic and structural guards.
       - name: Run MR3 My Rhythm preferences UI test
         run: npx ts-node test/myRhythmPreferencesUi.test.ts
+      # AURA-INS-01 (PV-F04) -- alignment insight display thresholds,
+      # neutral wording, Home removal and calculation edge cases.
+      - name: Run INS-01 alignment insight safeguards test
+        run: npx ts-node test/insightsAlignmentSafeguards.test.ts
       - name: Run Daily agenda Goal context test
         run: npx ts-node test/dailyAgendaGoalContext.test.ts
       - name: Run Goal context structural guards test

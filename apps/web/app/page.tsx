@@ -1986,7 +1986,6 @@ export default function DashboardPage() {
             dayBuilderPrioritiesPromptDismissed={user.dayBuilderPrioritiesPromptDismissed}
             onDayBuilderPrefsChange={handleDayBuilderPrefsChange}
             onTimingSearch={handleTimingSearch}
-            assistantInsight={assistantInsight}
           />
         )}
 

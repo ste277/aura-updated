@@ -108,10 +108,14 @@ check('A real comparison result of exactly 0 is preserved as 0, not coerced to n
 })());
 
 const routeSource = fs.readFileSync('apps/web/app/api/daily-assistant/insights/route.ts', 'utf8');
-check('route.ts imports deriveInsightsEvidenceState from the shared evidence helper', /import \{ deriveInsightsEvidenceState \} from '\.\.\/\.\.\/\.\.\/\.\.\/lib\/insightsEvidence'/.test(routeSource));
-check('route.ts\'s hasValidComparison now requires BOTH groups AND the shared evidence state to be AVAILABLE (the fix)', /hasBothComparisonGroups && deriveInsightsEvidenceState\(reflections\.length\) === 'AVAILABLE'/.test(routeSource));
-check('route.ts still requires both comparison groups as a SEPARATE condition (hasBothComparisonGroups), not silently dropped', /alignedRate !== null && unalignedRate !== null/.test(routeSource));
-check('route.ts\'s signed percentage-point delta formula (PR #75) remains unchanged', /Math\.round\(\(alignedRate! - unalignedRate!\) \* 100\)/.test(routeSource));
+// AURA-INS-01: the comparison moved to lib/insightsAlignment.ts. Its 30-day /
+// 10-per-group display thresholds supersede (are stricter than) the shared
+// 3+ evidence gate for this one metric; the invariants are re-pointed there.
+const alignmentModuleSource = fs.readFileSync('apps/web/lib/insightsAlignment.ts', 'utf8');
+check('route.ts computes the comparison through the shared alignment module', /import \{ computeAlignmentComparison \} from '\.\.\/\.\.\/\.\.\/\.\.\/lib\/insightsAlignment'/.test(routeSource) && /computeAlignmentComparison\(/.test(routeSource));
+check('The comparison requires the overall minimum AND both groups (stricter than the old 3+ gate)', /qualifyingDays >= ALIGNMENT_MIN_TOTAL_DAYS && followedDays >= ALIGNMENT_MIN_DAYS_PER_GROUP && otherDays >= ALIGNMENT_MIN_DAYS_PER_GROUP/.test(alignmentModuleSource));
+check('Both comparison groups remain a separate, explicit condition (not silently dropped)', /followedDays >= ALIGNMENT_MIN_DAYS_PER_GROUP && otherDays >= ALIGNMENT_MIN_DAYS_PER_GROUP/.test(alignmentModuleSource));
+check('The signed percentage-point difference (PR #75: followed mean minus other mean, x100) is unchanged before display rounding', /\(followedScoreTotal \/ followedDays - otherScoreTotal \/ otherDays\) \* 100/.test(alignmentModuleSource));
 
 // ============================================================
 // Reflection source-of-truth (brief section 6/43) -- NEEDS DATA MODEL
@@ -131,7 +135,7 @@ const schemaSource = fs.readFileSync('apps/web/prisma/schema.prisma', 'utf8');
 check('Sanity check: DailyReflection.followedGuidance is confirmed non-nullable (Boolean, no ?) in the schema', /followedGuidance Boolean @default\(false\)/.test(schemaSource));
 const reflectionRouteSource = fs.readFileSync('apps/web/app/api/daily-assistant/reflection/route.ts', 'utf8');
 check('Sanity check: the write path coerces any input via Boolean(...), confirming missing and explicit-false are indistinguishable at write time', /followedGuidance: Boolean\(body\?\.followedGuidance\)/.test(reflectionRouteSource));
-check('NEEDS DATA MODEL DECISION: the explicit-followed-is-authoritative policy (brief section 6) is intentionally NOT implemented -- the pre-existing inference line is left byte-for-byte unchanged pending a schema decision', /const followed = reflection\.followedGuidance \|\| followedByLogs;/.test(routeSource));
+check('NEEDS DATA MODEL DECISION: the explicit-followed-is-authoritative policy (brief section 6) is intentionally NOT implemented -- the pre-existing OR inference is preserved unchanged (now in lib/insightsAlignment.ts)', /const followed = reflection\.followedGuidance \|\| Boolean\(dayLogs && dayLogs\.aligned > dayLogs\.friction\);/.test(alignmentModuleSource));
 
 // ============================================================
 // Timing Pattern -- null vs. zero (brief sections 8, 44). Replicates
