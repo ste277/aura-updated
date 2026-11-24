@@ -3,10 +3,9 @@
  * security remediation, against a REAL disposable Postgres (migration 0052).
  * Synthetic users/clients only.
  *
- *   S3-1 residual  activation committed but its acknowledgement was lost AND
- *                  both inline revocations failed: the instance refuses the
- *                  code at once, and the background retry deletes it once
- *                  the database answers again (then no instance redeems it)
+ *   (S3-1 residual: the S8 instance-local hold and background retry were
+ *                  removed in I2b-S10, which closes S3-1 by database state;
+ *                  its cross-instance cases are test/mcpOAuthS10Db.test.ts)
  *   S5             a COMMIT answered with the ROLLBACK tag is never a
  *                  success; a COMMIT that does not answer in time is
  *                  reported as a failure (outcome unknown); a lost COMMIT
@@ -19,16 +18,13 @@
  * applied. Truncates the two MCP tables only; refuses a non-loopback database
  * outside CI.
  */
-import { createHash, randomBytes } from 'crypto';
-import { Pool, type PoolClient } from 'pg';
-import { createPostgresAdapterStore } from '../packages/mcp-tools/src/auth/postgresAdapter';
-import type { OAuthStore } from '../packages/mcp-tools/src/auth/oauthStore';
+import { randomBytes } from 'crypto';
+import { Pool } from 'pg';
 import { boundedStatement, MCP_PG_POOL_BOUNDS, StoreUnavailableError, type BoundedPool } from '../packages/mcp-tools/src/security/deadline';
 import { createPostgresRateLimiter } from '../packages/mcp-tools/src/security/postgresRateLimit';
 import { createBucketHasher, deriveBucketKey } from '../packages/mcp-tools/src/security/preAuthRules';
-import { handleRemoteMcpRequest, MCP_SCOPE } from '../packages/mcp-tools/src/http/remoteMcpHandler';
-import type { McpAuditEvent } from '../packages/mcp-tools/src/security/audit';
-import { Browser, CLIENT, REDIRECT, USER_A, b64, check, redeemCode, sharedKeys, sleep, startCluster, summary } from './mcpOAuthI2bHarness';
+import { handleRemoteMcpRequest } from '../packages/mcp-tools/src/http/remoteMcpHandler';
+import { check, sleep, summary } from './mcpOAuthI2bHarness';
 
 const url = process.env.DATABASE_URL;
 if (!url) {
@@ -44,92 +40,9 @@ process.on('beforeExit', () => {
   process.exit(1);
 });
 
-const isActivation = (t: string, p?: unknown[]) => /^\s*UPDATE/i.test(t) && p?.[0] === 'AuthorizationCode' && t.includes('auraIssuePending');
-
-/**
- * A pg Pool whose activation COMMIT lands but whose acknowledgement is lost,
- * and whose first `revokeFailures` AuthorizationCode DELETEs fail.
- */
-function faultPool(real: Pool, f: { ackLost: boolean; revokeFailures: number }) {
-  const st = { deletesFailed: 0, deletesOk: 0 };
-  return {
-    st,
-    pool: {
-      query: (t: string, p?: unknown[]) => real.query(t, p),
-      connect: async () => {
-        const c: PoolClient = await real.connect();
-        let inActivation = false;
-        return {
-          query: async (text: string, params?: unknown[]) => {
-            if (params?.[0] === 'AuthorizationCode' && /^\s*DELETE/i.test(text)) {
-              if (st.deletesFailed < f.revokeFailures) {
-                st.deletesFailed += 1;
-                throw new Error('injected revoke fault');
-              }
-              st.deletesOk += 1;
-            }
-            if (isActivation(text, params)) inActivation = true;
-            if (/^\s*COMMIT/i.test(text) && inActivation) {
-              inActivation = false;
-              const r = await c.query('COMMIT');
-              if (f.ackLost) throw new Error('injected lost COMMIT acknowledgement');
-              return r;
-            }
-            return c.query(text, params as unknown[]);
-          },
-          release: (err?: unknown) => c.release(err as Error | undefined),
-        };
-      },
-    },
-  };
-}
-
-async function flow(origin: string, resource: string) {
-  const b = new Browser(origin, USER_A);
-  const verifier = b64(randomBytes(32));
-  const challenge = b64(createHash('sha256').update(verifier).digest());
-  const q = new URLSearchParams({ client_id: CLIENT, redirect_uri: REDIRECT, response_type: 'code', scope: MCP_SCOPE, resource, code_challenge: challenge, code_challenge_method: 'S256', state: 's' });
-  const seen: string[] = [];
-  let res = await b.fetch(`/oauth/authorize?${q}`);
-  for (let i = 0; i < 14; i += 1) {
-    const body = await res.text();
-    seen.push(JSON.stringify([...res.headers]) + body);
-    const loc = res.headers.get('location');
-    if (res.status >= 300 && res.status < 400 && loc) {
-      if (loc.startsWith(REDIRECT)) return { status: res.status, verifier, delivered: new URL(loc).searchParams.get('code'), seen };
-      res = await b.fetch(loc);
-      continue;
-    }
-    if (res.status === 200 && /name="csrf"/.test(body)) {
-      const csrf = /name="csrf" value="([^"]+)"/.exec(body)?.[1] as string;
-      const action = /action="([^"]+\/confirm)"/.exec(body)?.[1] as string;
-      res = await b.fetch(action, { method: 'POST', headers: { 'content-type': 'application/x-www-form-urlencoded', origin }, body: `csrf=${encodeURIComponent(csrf)}` });
-      continue;
-    }
-    return { status: res.status, verifier, delivered: null, seen };
-  }
-  return { status: 0, verifier, delivered: null, seen };
-}
-
-function spyCodes(store: OAuthStore) {
-  const codes: string[] = [];
-  const Base = store.factory;
-  class Spy extends (Base as unknown as new (name: string) => { upsert(id: string, payload: unknown, exp: number): Promise<void> }) {
-    constructor(private readonly model: string) {
-      super(model);
-    }
-    async upsert(id: string, payload: unknown, exp: number) {
-      if (this.model === 'AuthorizationCode') codes.push(id);
-      return super.upsert(id, payload, exp);
-    }
-  }
-  return { store: { ...store, factory: Spy as unknown as OAuthStore['factory'] }, codes };
-}
-
 async function main() {
   const admin = new Pool({ connectionString: url, max: 4 });
   const q = async (sql: string, params: unknown[] = []) => (await admin.query(sql, params)).rows;
-  const keys = sharedKeys();
   const pools: Pool[] = [];
   const mkPool = (name: string, extra: Record<string, unknown> = {}) => {
     const p = new Pool({ connectionString: url, ...MCP_PG_POOL_BOUNDS, application_name: name, ...extra });
@@ -137,73 +50,10 @@ async function main() {
     pools.push(p);
     return p;
   };
-  const codeState = async () => {
-    const rows = await q(`SELECT ("payload" ? 'auraIssuePending') AS pending FROM "McpOAuthPayload" WHERE "model" = 'AuthorizationCode'`);
-    return rows.map((r) => (r.pending ? 'pending' : 'active')).join(',') || 'absent';
-  };
   const results: Record<string, unknown>[] = [];
 
   try {
     await admin.query('TRUNCATE "McpOAuthPayload", "McpRateLimitWindow"');
-
-    // ---------------------------------------------------------- S3-1 residual: hold + background retry
-    {
-      // Instance 0 and instance 1 have their OWN store objects (own local
-      // holds), over the same database -- like two serverless instances.
-      const f0 = faultPool(mkPool('aura-s8-i0'), { ackLost: true, revokeFailures: 2 });
-      const s0 = createPostgresAdapterStore({ db: f0.pool as never, fieldKeys: keys.cookieKeys, cleanupEvery: 0, revocationRetryDelaysMs: [600, 600, 600] });
-      const spy = spyCodes(s0);
-      const s1 = createPostgresAdapterStore({ db: mkPool('aura-s8-i1'), fieldKeys: keys.cookieKeys, cleanupEvery: 0 });
-      const audits: McpAuditEvent[] = [];
-      const c = await startCluster(2, { keys, audit: (e) => audits.push(e) }, (i) => ({ adapterStore: i === 0 ? spy.store : s1 }));
-      try {
-        c.route.pick = () => 0;
-        const out = await flow(c.origin, c.resource);
-        const code = spy.codes[0];
-        const exposed = out.seen.some((x) => x.includes(code));
-        const stateAtAnswer = await codeState();
-        const sameInstance = await redeemCode(c, code, out.verifier);
-        const row: Record<string, unknown> = { case: 'S3-1 ack lost + both inline revocations fail', status: out.status, exposed, stateAtAnswer, held: s0.pendingRevocations?.(), redeemSameInstanceDuringHold: sameInstance.status, audits: audits.map((a) => a.errorCode).filter((e) => /Code/.test(String(e))) };
-        check('S3-1 residual: 503, code not exposed, CodeRevocationFailed audited (no value)', out.status === 503 && !exposed && (row.audits as string[]).includes('CodeRevocationFailed'), row);
-        check('S3-1 residual: the committed activation left the code ACTIVE in the database (the ambiguity is real)', stateAtAnswer === 'active', row);
-        check('S3-1 residual: the instance that failed to revoke refuses the code immediately (400, no token)', sameInstance.status === 400 && !sameInstance.json.access_token && row.held === 1, row);
-        await sleep(1500);
-        const afterRetry = await codeState();
-        c.route.pick = () => 1;
-        const other = await redeemCode(c, code, out.verifier);
-        Object.assign(row, { stateAfterBackgroundRetry: afterRetry, retryDeletes: f0.st.deletesOk, redeemOtherInstanceAfterRetry: other.status, heldAfter: s0.pendingRevocations?.() });
-        results.push(row);
-        check('S3-1 residual: the background retry deleted the code once the database answered', afterRetry === 'absent' && f0.st.deletesOk >= 1 && row.heldAfter === 0, row);
-        check('S3-1 residual: after the retry no instance redeems it (400 on the other instance)', other.status === 400 && !other.json.access_token, row);
-      } finally {
-        await c.close();
-      }
-    }
-
-    // ---------------------------------------------------------- S3-1 residual window, measured (not a pass condition)
-    {
-      await admin.query('TRUNCATE "McpOAuthPayload"');
-      const f0 = faultPool(mkPool('aura-s8-w0'), { ackLost: true, revokeFailures: 1_000 });
-      const s0 = createPostgresAdapterStore({ db: f0.pool as never, fieldKeys: keys.cookieKeys, cleanupEvery: 0, revocationRetryDelaysMs: [] });
-      const spy = spyCodes(s0);
-      const s1 = createPostgresAdapterStore({ db: mkPool('aura-s8-w1'), fieldKeys: keys.cookieKeys, cleanupEvery: 0 });
-      const c = await startCluster(2, { keys }, (i) => ({ adapterStore: i === 0 ? spy.store : s1 }));
-      try {
-        c.route.pick = () => 0;
-        const out = await flow(c.origin, c.resource);
-        const code = spy.codes[0];
-        const same = await redeemCode(c, code, out.verifier);
-        c.route.pick = () => 1;
-        const other = await redeemCode(c, code, out.verifier);
-        const row = { case: 'S3-1 database unreachable for revocation for the whole code lifetime (measured residual)', status: out.status, exposed: out.seen.some((x) => x.includes(code)), redeemSameInstance: same.status, redeemOtherInstanceWithServerKnownCode: other.status };
-        results.push(row);
-        check('S3-1 residual window: still 503 and never exposed; same instance refuses', out.status === 503 && !row.exposed && same.status === 400, row);
-        // Documented, not asserted: another instance can redeem it ONLY with
-        // the code value, which never left the server (see the S8 report).
-      } finally {
-        await c.close();
-      }
-    }
 
     // ---------------------------------------------------------- S5 boundedStatement on a real connection
     {

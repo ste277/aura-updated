@@ -2,8 +2,8 @@
 import { createHash } from 'crypto';
 import type { Adapter, AdapterPayload } from 'oidc-provider';
 import { createFieldSealer, FieldSealError, type FieldSealer } from './fieldSeal';
-import { boundedMs, boundedStatement, singleFlight, withDeadline, type BoundedPool } from '../security/deadline';
-import { CONSUMABLE_MODELS, ReplayDetectedError, type OAuthStore, type UserGrantSummary } from './oauthStore';
+import { boundedMs, boundedStatement, budgetedDeadlineMs, heldStatement, singleFlight, StoreUnavailableError, withDeadline, type BoundedPool, type HeldCommitOutcome } from '../security/deadline';
+import { CONSUMABLE_MODELS, ReplayDetectedError, type IssuedActivation, type OAuthStore, type UserGrantSummary } from './oauthStore';
 
 /**
  * AURA-MCP-02-I2b (F6) -- durable, shared `oidc-provider` adapter on the
@@ -55,23 +55,25 @@ import { CONSUMABLE_MODELS, ReplayDetectedError, type OAuthStore, type UserGrant
  *     deadline has not answered failure (`boundedStatement`), so a write
  *     reported as failed cannot land later and overwrite newer state (the
  *     only exception is a lost COMMIT acknowledgement).
- *   - I2b-S4 (S3-1): a new AuthorizationCode is written PENDING and is
- *     invisible to `find` until the authorization server activates it after
- *     the response that delivers it succeeded (`activateIssued`); a failed
- *     response revokes it (`revokeIssued`). If even that fails, a code whose
- *     activation never committed stays pending and unredeemable until it
- *     expires.
- *   - I2b-S6: `revokeIssued` deletes the code whether pending or active,
- *     because an activation reported as failed may still have committed.
- *     The DELETE waits on the row lock of an in-flight activation, so it is
- *     ordered after a late COMMIT.
- *   - I2b-S8 (S3-1 residual): when the authorization server could not
- *     revoke a code (`holdUnrevoked`), this instance (a) refuses the code in
- *     `find`/`consume` until it expires, and (b) keeps retrying the DELETE
- *     in the background with backoff until it succeeds or the code's TTL
- *     has passed. Other instances learn of it only once a retry lands; the
- *     code never left the server, so redeeming it there needs the 256-bit
- *     code value (see the S8 report).
+ *   - I2b-S4 / S10 (S3-1): a new AuthorizationCode is written PENDING and
+ *     is invisible to `find` (and refused by `consume`) until it is
+ *     ACTIVATED. I2b-S10: activation is a held transaction
+ *     (`beginIssuedActivation`): the conditional UPDATE that clears the
+ *     pending marker runs BEFORE the response is written (so a code is
+ *     never delivered unless its live pending row exists), but it is
+ *     COMMITTED only after the authorization server has handed the
+ *     complete response to the runtime. Any failure before that point --
+ *     error response, disconnect, partial write, process crash or freeze,
+ *     database outage -- leaves the transaction uncommitted, and the
+ *     server rolls it back (dropped connection or
+ *     `idle_in_transaction_session_timeout`): the code stays PENDING on
+ *     every instance without any further write. No instance-local memory,
+ *     deny list or revocation write is involved. Pending rows expire with
+ *     the code TTL and are removed by `cleanupExpired`.
+ *     A lookup of a pending-capable model by id uses `FOR SHARE`, so a
+ *     redemption that races an in-flight activation waits (bounded by
+ *     `lock_timeout`) for its COMMIT or rollback instead of reading a
+ *     half-decided row.
  *
  * The adapter takes an injected `query` function (a `pg` Pool satisfies it),
  * so this package does not import a database driver.
@@ -98,10 +100,15 @@ export interface PostgresAdapterOptions {
   statementTimeoutMs?: number;
   /** I2b-S4: server-side `SET LOCAL lock_timeout` per statement, ms (default 1000). */
   lockTimeoutMs?: number;
-  /** I2b-S8: background revocation retry delays, ms (default 1s, 2s, 4s, 8s, 16s, 30s). Test hook. */
-  revocationRetryDelaysMs?: readonly number[];
-  /** I2b-S8: how long an unrevoked code is held locally, ms (default 65 s: code TTL 60 s + margin). */
-  unrevokedHoldMs?: number;
+  /**
+   * I2b-S10: longest an activation transaction may stay open waiting for the
+   * response hand-off, ms (default 2000). Past it the activation is aborted
+   * (the code stays pending). Server-side backstop:
+   * `idle_in_transaction_session_timeout` = this + 1000.
+   */
+  activationHoldMs?: number;
+  /** I2b-S10: bound for the activation COMMIT round trip after hand-off, ms (default 1500). */
+  activationCommitMs?: number;
 }
 
 /**
@@ -201,27 +208,20 @@ export function createPostgresAdapterStore(options: PostgresAdapterOptions): OAu
   const db: PgQueryable =
     typeof raw.connect === 'function'
       ? { query: <R,>(text: string, params?: unknown[]) => boundedStatement<R>(raw as BoundedPool, text, params, { deadlineMs: queryDeadlineMs, statementTimeoutMs, lockTimeoutMs }) }
-      : { query: <R,>(text: string, params?: unknown[]) => withDeadline(options.db.query<R>(text, params), queryDeadlineMs) };
+      : {
+          query: <R,>(text: string, params?: unknown[]) => {
+            // I2b-S10: shortened to the request budget; nothing is sent once it is spent.
+            const ms = budgetedDeadlineMs(queryDeadlineMs);
+            return ms <= 0 ? Promise.reject(new StoreUnavailableError('timeout')) : withDeadline(options.db.query<R>(text, params), ms);
+          },
+        };
   let writes = 0;
 
-  /**
-   * I2b-S8 (S3-1 residual): storage keys of codes the server decided NOT to
-   * deliver but could not revoke, with the local hold deadline. Bounded: an
-   * entry lives at most `unrevokedHoldMs`, and the map is capped.
-   */
-  const unrevoked = new Map<string, number>();
-  const UNREVOKED_MAX = 10_000;
-  const retryDelays = options.revocationRetryDelaysMs ?? [1000, 2000, 4000, 8000, 16_000, 30_000];
-  const holdMs = boundedMs('unrevokedHoldMs', options.unrevokedHoldMs, 65_000, 1000, 600_000);
-  const isHeld = (model: string, key: string): boolean => {
-    if (!PENDING_ON_WRITE.has(model)) return false;
-    const until = unrevoked.get(key);
-    if (until === undefined) return false;
-    if (until > Date.now()) return true;
-    unrevoked.delete(key);
-    return false;
-  };
-  const deleteIssued = (model: string, key: string) => db.query(`DELETE FROM ${TABLE} WHERE "model" = $1 AND "id" = $2`, [model, key]);
+  const activationHoldMs = boundedMs('activationHoldMs', options.activationHoldMs, 2000, 50, 30_000);
+  const activationCommitMs = boundedMs('activationCommitMs', options.activationCommitMs, 1500, 50, 30_000);
+  const pool = typeof raw.connect === 'function' ? (raw as BoundedPool) : undefined;
+  const ACTIVATE_SQL = `UPDATE ${TABLE} SET "payload" = "payload" - '${PENDING_FIELD}'
+         WHERE "model" = $1 AND "id" = $2 AND "payload" ? '${PENDING_FIELD}' AND "consumedAt" IS NULL AND ("expiresAt" IS NULL OR "expiresAt" > now())`;
 
   async function cleanupExpired(): Promise<number> {
     const r = await db.query(
@@ -275,11 +275,11 @@ export function createPostgresAdapterStore(options: PostgresAdapterOptions): OAu
 
     private async findWhere(column: 'id' | 'uid' | 'userCode', value: string): Promise<{ id: string; row: { payload: AdapterPayload; consumedAt: Date | null } } | undefined> {
       const key = column === 'id' ? storageKey(value) : value;
-      // I2b-S8: a code this instance failed to revoke is refused locally.
-      if (column === 'id' && isHeld(this.name, key)) return undefined;
+      // I2b-S10: wait for an in-flight activation of this code (row lock) instead of reading it half-decided.
+      const lock = column === 'id' && PENDING_ON_WRITE.has(this.name) ? ' FOR SHARE' : '';
       const r = await db.query<{ payload: AdapterPayload; consumedAt: Date | null; id: string }>(
         `SELECT "payload", "consumedAt", "id" FROM ${TABLE}
-         WHERE "model" = $1 AND "${column}" = $2 AND ("expiresAt" IS NULL OR "expiresAt" > now()) LIMIT 1`,
+         WHERE "model" = $1 AND "${column}" = $2 AND ("expiresAt" IS NULL OR "expiresAt" > now()) LIMIT 1${lock}`,
         [this.name, key],
       );
       const row = r.rows[0];
@@ -318,10 +318,11 @@ export function createPostgresAdapterStore(options: PostgresAdapterOptions): OAu
 
     async consume(id: string): Promise<void> {
       const key = storageKey(id);
-      if (isHeld(this.name, key)) throw new ReplayDetectedError();
+      // I2b-S10: a pending (never activated) code can never be consumed (DB-enforced, not only via find).
+      const notPending = PENDING_ON_WRITE.has(this.name) ? ` AND NOT ("payload" ? '${PENDING_FIELD}')` : '';
       const r = await db.query<{ grantId: string | null }>(
         `UPDATE ${TABLE} SET "consumedAt" = now()
-         WHERE "model" = $1 AND "id" = $2 AND "consumedAt" IS NULL AND ("expiresAt" IS NULL OR "expiresAt" > now())
+         WHERE "model" = $1 AND "id" = $2 AND "consumedAt" IS NULL AND ("expiresAt" IS NULL OR "expiresAt" > now())${notPending}
          RETURNING "grantId"`,
         [this.name, key],
       );
@@ -364,53 +365,44 @@ export function createPostgresAdapterStore(options: PostgresAdapterOptions): OAu
       return new Set(r.rows.filter((row) => row.model === 'Grant').map((row) => row.grantId)).size;
     },
     cleanupExpired,
-    async activateIssued(model: string, id: string): Promise<boolean> {
-      if (!PENDING_ON_WRITE.has(model)) return false;
-      const r = await db.query(
-        `UPDATE ${TABLE} SET "payload" = "payload" - '${PENDING_FIELD}'
-         WHERE "model" = $1 AND "id" = $2 AND "payload" ? '${PENDING_FIELD}' AND "consumedAt" IS NULL AND ("expiresAt" IS NULL OR "expiresAt" > now())`,
-        [model, storageKey(id)],
-      );
-      return (r.rowCount ?? 0) === 1;
-    },
-    async revokeIssued(model: string, id: string): Promise<void> {
-      if (!PENDING_ON_WRITE.has(model)) return;
-      // Pending OR activated: an activation reported as failed may have committed (I2b-S6).
-      await deleteIssued(model, storageKey(id));
-    },
-    holdUnrevoked(model: string, id: string): void {
-      if (!PENDING_ON_WRITE.has(model)) return;
-      const key = storageKey(id);
-      if (unrevoked.size >= UNREVOKED_MAX) {
-        // Drop expired holds first; if still full, evict the oldest (it is the closest to its own expiry).
-        for (const [k, until] of unrevoked) if (until <= Date.now()) unrevoked.delete(k);
-        if (unrevoked.size >= UNREVOKED_MAX) unrevoked.delete(unrevoked.keys().next().value as string);
-      }
-      const until = Date.now() + holdMs;
-      unrevoked.set(key, until);
-      let i = 0;
-      const retry = () => {
-        if (Date.now() >= until) {
-          unrevoked.delete(key);
-          return;
+    async beginIssuedActivation(model: string, id: string): Promise<IssuedActivation | null> {
+      if (!PENDING_ON_WRITE.has(model)) return null;
+      const params = [model, storageKey(id)];
+      if (pool) {
+        // Held: the UPDATE runs (and locks the row) now; COMMIT only after hand-off.
+        const held = await heldStatement(pool, ACTIVATE_SQL, params, {
+          deadlineMs: queryDeadlineMs,
+          statementTimeoutMs,
+          lockTimeoutMs,
+          idleInTransactionTimeoutMs: activationHoldMs + 1000,
+          holdMs: activationHoldMs,
+        });
+        if ((held.result.rowCount ?? 0) !== 1) {
+          held.abort();
+          return null;
         }
-        deleteIssued(model, key).then(
-          () => unrevoked.delete(key),
-          () => {
-            i += 1;
-            if (i < retryDelays.length) schedule();
-          },
-        );
+        return { commit: () => held.commit(activationCommitMs), abort: () => held.abort() };
+      }
+      // Query-only db (tests, fakes): no held transaction. Check now, write the
+      // single autocommit UPDATE only after hand-off; nothing is written before.
+      const live = await db.query(`SELECT 1 FROM ${TABLE} WHERE "model" = $1 AND "id" = $2 AND "payload" ? '${PENDING_FIELD}' AND "consumedAt" IS NULL AND ("expiresAt" IS NULL OR "expiresAt" > now())`, params);
+      if ((live.rowCount ?? live.rows.length) !== 1) return null;
+      let decided = false;
+      return {
+        abort: () => {
+          decided = true;
+        },
+        commit: async (): Promise<HeldCommitOutcome> => {
+          if (decided) return 'not_committed';
+          decided = true;
+          try {
+            const r = await withDeadline(options.db.query(ACTIVATE_SQL, params), activationCommitMs);
+            return (r.rowCount ?? 0) === 1 ? 'committed' : 'not_committed';
+          } catch {
+            return 'unknown';
+          }
+        },
       };
-      const schedule = () => {
-        const t = setTimeout(retry, retryDelays[i]);
-        (t as { unref?: () => void }).unref?.();
-      };
-      if (retryDelays.length > 0) schedule();
-    },
-    pendingRevocations(): number {
-      for (const [k, until] of unrevoked) if (until <= Date.now()) unrevoked.delete(k);
-      return unrevoked.size;
     },
     async size(model?: string): Promise<number> {
       const r = model

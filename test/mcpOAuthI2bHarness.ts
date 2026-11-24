@@ -43,8 +43,12 @@ export interface Cluster {
   instances: AuraOAuthServer[];
   origin: string;
   resource: string;
-  /** Picks the instance index for the next request (default round-robin). */
-  route: { pick?: () => number };
+  /**
+   * Picks the instance index for the next request (default round-robin).
+   * I2b-S10: `onRequest` (test-only) sees every request's req/res before the
+   * instance does, e.g. to cut or replace a response at the wire.
+   */
+  route: { pick?: () => number; onRequest?: (req: http.IncomingMessage, res: http.ServerResponse) => void };
   /** When set, requests appear to come from this TCP peer. */
   spoofPeer: { address?: string };
   close(): Promise<void>;
@@ -60,6 +64,7 @@ export async function startCluster(n: number, extra: Partial<AuraOAuthServerOpti
     if (spoofPeer.address) Object.defineProperty(req.socket, 'remoteAddress', { value: spoofPeer.address, configurable: true });
     const url = new URL(req.url ?? '/', 'http://127.0.0.1');
     const i = route.pick ? route.pick() : rr++ % instances.length;
+    route.onRequest?.(req, res);
     void instances[i].handle(req, res, url.pathname, url.search);
   });
   server.keepAliveTimeout = 1;
