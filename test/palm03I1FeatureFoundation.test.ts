@@ -427,5 +427,77 @@ const allItems = (r: any) => r.sections.flatMap((sec: any) => sec.items ?? []).f
 check('RV11. every emitted interpretation item is tier "tentative" (decision 2 ceiling, scan confidence 1)', (() => { const r = engine.generateReading(adaptF(fsFull, { synthetic: true, scanConfidence: 1 })); const its = allItems(r); return its.length > 0 && its.every((it: any) => it.tier === 'tentative'); })());
 
 check('RV12 (INC-7, characterization). empty branch arrays make the frozen branch/fork families evaluate to QUIET variants (unobserved read as none; E1-A3)', (() => { const q = engine.generateReading(adaptF(fsFull, SYN)).sections.flatMap((sec: any) => sec.quiet ?? []); return q.includes('F-DTC-BRANCHES') && q.includes('F-PTC-FORK'); })());
+
+// ============================================================ M3F. final M3 adapter integrity (reviewed head 89ea6fe)
+// Cross-record quality consistency, complete record invariants, inherited fields; positive controls first.
+const okAdapt = (f: unknown) => adaptErr(f) === 'accepted';
+const fold = CANON.map((p, i) => (i === 16 ? { x: 0.66, y: -0.2 } : p));
+const POS: Array<[string, PalmFeatureSetInput]> = [
+  ['clean, 3 traces', featureInput(POSE)],
+  ...(['hand-too-small', 'hand-rotated', 'too-dark', 'too-bright', 'low-contrast', 'blurry'] as PalmFeedbackCode[]).map((c): [string, PalmFeatureSetInput] => [`degrading ${c}`, featureInput(POSE, { qualityIssues: [c] })]),
+  ...(['palm-not-visible', 'hand-cut-off'] as PalmFeedbackCode[]).map((c): [string, PalmFeatureSetInput] => [`blocking ${c}`, featureInput(POSE, { qualityIssues: [c] })]),
+  ['blocking + degrading', featureInput(POSE, { qualityIssues: ['hand-cut-off', 'blurry'] })],
+  ['unknown quality', featureInput(POSE, { qualityIssues: null })],
+  ['accepted + folded ring finger (geometry-specific unavailability)', featureInput(POSE, { landmarks: landmarksFor(POSE, fold) })],
+  ['no handedness label', featureInput(POSE, { handednessLabel: undefined })],
+  ['back of hand (palm-not-facing)', featureInput(POSE, { handednessLabel: LABEL_UNMIRRORED === 'Right' ? 'Left' : 'Right' })],
+  ['implausible proportions', featureInput(POSE, { landmarks: landmarksFor(POSE, CANON.map((p) => ({ x: p.x, y: p.y * 0.55 }))) })],
+  ['landmark out of frame (no frame)', featureInput(POSE, { landmarks: lm.map((p, i) => (i === 12 ? { ...p, y: -0.05 } : p)) })],
+  ['invalid landmarks (no frame)', featureInput(POSE, { landmarks: null })],
+  ['degenerate frame', featureInput(POSE, { landmarks: lm.map((p, i) => (i === 17 ? { ...lm[5] } : p)) })],
+  ['mirrored left hand', featureInput({ ...POSE, mirror: true })],
+  ['skipped / pending / invalid traces + marks', featureInput(POSE, { lines: [{ line: 'heart', action: 'skipped', reason: 'user-cannot-see' }, { line: 'head', action: 'traced', points: CANON_TRACES.head.map((p) => toNorm(p, POSE)), confirmed: false }, { line: 'life', action: 'traced', points: crossing, confirmed: true }], marks: [{ mark: 'matsya', action: 'reported', approximateLocation: toNorm({ x: 0.5, y: 0.5 }, POSE) }, { mark: 'yava', action: 'reported' }, { mark: 'vedi', action: 'skipped' }, { mark: 'chatra', action: 'reported', approximateLocation: { x: 2, y: 0 } }] })],
+  ['frame unavailable + confirmed trace', featureInput(POSE, { landmarks: null, lines: tracedLines(POSE, ['heart']) })],
+];
+const posResults = POS.map(([label, inp]) => [label, adaptErr(build(inp))]);
+check(`P1 (M3F positive controls). all ${POS.length} builder-produced records across quality and observation states are accepted by the adapter`, posResults.every(([, r]) => r === 'accepted'), posResults.filter(([, r]) => r !== 'accepted'));
+check('P2. an accepted frame with geometry-specific unavailable measurements (folded finger) maps and interprets', (() => { const f = build(POS.find(([l]) => l.startsWith('accepted + folded'))![1]); return f.frame.qualityStatus === 'accepted' && f.measurements.measurements.ringLength.status === 'unavailable' && engine.generateReading(adaptF(f, SYN)).status === 'interpreted'; })());
+check('P3. genuine blocked and unknown-quality records are accepted by the adapter and then declined by the engine quality gate (never interpreted)', ['blocking palm-not-visible', 'blocking hand-cut-off', 'unknown quality'].every((l) => { const f = build(POS.find(([x]) => x === l)![1]); return engine.generateReading(adaptF(f, SYN)).status === 'declined'; }));
+// Contradictions (reproductions). reprov() rebuilds the provenance index from the records so that the ONLY defect in
+// each case is the cross-record quality contradiction under test.
+const reprov = (f: any) => { const g: any = { 'automatic-measured': [], 'user-confirmed': [], 'user-reported': [], unassessed: [] }; for (const id of MEASUREMENT_IDS) g[f.measurements.measurements[id].status === 'unavailable' ? 'unassessed' : 'automatic-measured'].push(`measurement:${id}`); for (const id of ALL_LINES) g[f.lines[id].provenance].push(`line:${id}`); for (const id of ALL_MARKS) g[f.marks[id].provenance].push(`mark:${id}`); f.provenance = g; return f; };
+const cleanBlocked = clone(build(POS[0][1])); const blk = build(featureInput(POSE, { qualityIssues: ['hand-cut-off'] })); cleanBlocked.measurements = clone(blk.measurements); cleanBlocked.provenance = clone(blk.provenance); cleanBlocked.provenance['user-confirmed'] = clone(build(POS[0][1]).provenance['user-confirmed']); cleanBlocked.provenance.unassessed = clone(blk.provenance.unassessed).filter((x: string) => !x.startsWith('line:') || x === 'line:upward').concat([]);
+reprov(cleanBlocked); const cbCode = adaptErr(cleanBlocked);
+check('M3F-1. accepted (clean) frame + measurement record blocked by hand-cut-off -> contradictory-quality, before interpretation', cbCode === 'contradictory-quality', cbCode);
+const cleanUnknown = clone(build(POS[0][1])); cleanUnknown.measurements = clone(build(featureInput(POSE, { qualityIssues: null })).measurements);
+reprov(cleanUnknown); check('M3F-2. accepted frame + measurements carrying quality-unknown -> contradictory-quality', adaptErr(cleanUnknown) === 'contradictory-quality', adaptErr(cleanUnknown));
+const unknownClean = clone(build(featureInput(POSE, { qualityIssues: null }))); unknownClean.measurements = clone(build(POS[0][1]).measurements);
+reprov(unknownClean); check('M3F-3. unknown-quality frame + measurements claiming clean measured quality -> contradictory-quality', adaptErr(unknownClean) === 'contradictory-quality', adaptErr(unknownClean));
+const blockedMeasured = clone(build(featureInput(POSE, { qualityIssues: ['palm-not-visible'] }))); blockedMeasured.measurements = clone(build(POS[0][1]).measurements);
+reprov(blockedMeasured); check('M3F-4. blocking frame issue + fully measured measurements -> contradictory-quality', adaptErr(blockedMeasured) === 'contradictory-quality', adaptErr(blockedMeasured));
+const degradedMeasured = clone(build(featureInput(POSE, { qualityIssues: ['blurry'] }))); degradedMeasured.measurements = clone(build(POS[0][1]).measurements);
+reprov(degradedMeasured); check('M3F-5. degrading frame issue (blurry) + measurements with no matching reason -> contradictory-quality', adaptErr(degradedMeasured) === 'contradictory-quality', adaptErr(degradedMeasured));
+const facingMismatch = clone(build(POS[0][1])); facingMismatch.frame.palmFacing = false;
+check('M3F-6. frame palmFacing false + measured measurements -> contradictory-quality', adaptErr(facingMismatch) === 'contradictory-quality', adaptErr(facingMismatch));
+const availMismatch = clone(build(featureInput(POSE, { landmarks: null }))); availMismatch.measurements = clone(build(POS[0][1]).measurements); availMismatch.provenance = clone(build(POS[0][1]).provenance); availMismatch.provenance['user-confirmed'] = []; availMismatch.provenance.unassessed = [...availMismatch.provenance.unassessed, 'line:heart', 'line:head', 'line:life'];
+availMismatch.lines = clone(build(featureInput(POSE, { landmarks: null })).lines); reprov(availMismatch); check('M3F-7. frame unavailable + measured measurements -> contradictory-quality', adaptErr(availMismatch) === 'contradictory-quality', adaptErr(availMismatch));
+const setInconsistent = clone(build(POS[0][1])); setInconsistent.measurements.status = 'measured'; setInconsistent.measurements.reasons = ['blurry'];
+check('M3F-8. measurement set status/reasons inconsistent (measured with reasons) -> invalid-measurement', adaptErr(setInconsistent) === 'invalid-measurement', adaptErr(setInconsistent));
+// Record invariants
+const staleMark = clone(fsFull); staleMark.marks.vedi.approximatePalmLocation = { x: 0.4, y: 0.4 };
+check('M3F-9. unassessed mark carrying a stale placement -> invalid-mark', adaptErr(staleMark) === 'invalid-mark', adaptErr(staleMark));
+const noReason = clone(fsFull); delete noReason.frame.reason;
+const badReason = clone(fsFull); badReason.frame.reason = 'landmarks-invalid';
+check('M3F-10. missing frame reason, or a reason contradicting availability -> invalid-frame', adaptErr(noReason) === 'invalid-frame' && adaptErr(badReason) === 'invalid-frame', [adaptErr(noReason), adaptErr(badReason)]);
+const noUnassessedReason = clone(fsFull); delete noUnassessedReason.lines.upward.reason;
+const noMarkReason = clone(fsFull); delete noMarkReason.marks.vedi.reason;
+const noMeasReasons = clone(fsFull); delete noMeasReasons.measurements.measurements.palmLength.reasons;
+check('M3F-11. missing required diagnostic fields (line reason, mark reason, measurement reasons) -> typed errors', adaptErr(noUnassessedReason) === 'invalid-line' && adaptErr(noMarkReason) === 'invalid-mark' && adaptErr(noMeasReasons) === 'invalid-measurement', [adaptErr(noUnassessedReason), adaptErr(noMarkReason), adaptErr(noMeasReasons)]);
+const idPartial = clone(fsFull); delete idPartial.lines.heart.identity.indian;
+const idWrong = clone(fsFull); idWrong.lines.head.identity.indianId = 'ayurlekha';
+const idExtra = clone(fsFull); idExtra.lines.life.identity.meaning = 'longevity';
+check('M3F-12. incomplete, wrong or extended line identity -> invalid-line', [idPartial, idWrong, idExtra].every((f) => adaptErr(f) === 'invalid-line'), [idPartial, idWrong, idExtra].map((f) => adaptErr(f)));
+const confirmedUnassessed = build(featureInput(POSE, { lines: [{ line: 'life', action: 'traced', points: crossing, confirmed: true }] }));
+check('M3F-13. positive control: user-confirmed identity with unassessed geometry is accepted', confirmedUnassessed.lines.life.provenance === 'unassessed' && confirmedUnassessed.lines.life.confirmation === 'confirmed' && okAdapt(confirmedUnassessed));
+const inherit1 = Object.assign(Object.create(clone(fsFull)), {}); // every field inherited
+const inherit2 = clone(fsFull); const fr2 = inherit2.frame; inherit2.frame = Object.assign(Object.create({ reason: fr2.reason }), { ...fr2 }); delete inherit2.frame.reason;
+const inherit3 = clone(fsFull); inherit3.lines.heart = Object.assign(Object.create({ palmPoints: inherit3.lines.heart.palmPoints }), { ...inherit3.lines.heart }); delete inherit3.lines.heart.palmPoints;
+check('M3F-14. inherited (prototype) fields never satisfy required properties -> typed error', [inherit1, inherit2, inherit3].every((f) => !okAdapt(f) && !adaptErr(f).startsWith('RAW:')), [inherit1, inherit2, inherit3].map((f) => adaptErr(f)));
+const extraTop = clone(fsFull); extraTop.interpretation = 'x';
+const extraLine = clone(fsFull); extraLine.lines.upward.palmPoints = [];
+check('M3F-15. unexpected extra fields (top-level, or geometry on an unassessed line) -> typed error', !okAdapt(extraTop) && adaptErr(extraLine) === 'invalid-line', [adaptErr(extraTop), adaptErr(extraLine)]);
+check('M3F-16. the adapter identity table equals the feature-set identity table (no drift)', JSON.stringify(featureSetAdapter.EXPECTED_IDENTITY) === JSON.stringify(PALM_LINE_IDENTITY), featureSetAdapter.EXPECTED_IDENTITY);
+const rejectedBeforeEngine = (() => { const calls: any[] = []; const orig = engine.generateReading; try { [cleanBlocked, cleanUnknown, staleMark, idPartial, inherit2].forEach((f) => { try { const r = featureSetAdapter.adaptFeatureSet(f, SYN); calls.push(r); } catch { /* rejected */ } }); } finally { void orig; } return calls.length === 0; })();
+check('M3F-17. malformed records are rejected by the adapter itself: no engine payload is produced for any of them', rejectedBeforeEngine);
 console.log(`\n${passed} passed, ${failed} failed`);
 process.exit(failed > 0 ? 1 : 0);

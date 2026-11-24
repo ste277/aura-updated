@@ -35,11 +35,39 @@
 import { FEATURE_SCHEMA_ID, FEATURE_SCHEMA_VERSION, COORDINATE_FRAME, FRAME_BOUNDS, MAX_POINTS, QUALITY_ISSUES, polylineProblem } from '../prototype/src/schema.mjs';
 import { TENTATIVE_CAP } from '../prototype/src/policy.mjs';
 
-export const FEATURE_SET_ADAPTER_VERSION = 'palm-03-i1-feature-set-adapter@0.2.0';
+export const FEATURE_SET_ADAPTER_VERSION = 'palm-03-i1-feature-set-adapter@0.3.0';
 export const ACCEPTED_FEATURE_SET_VERSIONS = Object.freeze(['palm-03-i1-feature-set@0.1.0']);
 export const ACCEPTED_MEASUREMENT_VERSIONS = Object.freeze(['palm-03-i1-hand-measurements@0.1.0']);
 export const LINE_TO_CLASS = Object.freeze({ heart: 'DTC', head: 'PTC', life: 'TC', upward: 'MINOR' });
-export const EXPECTED_ANATOMY = Object.freeze({ heart: 'distal-transverse', head: 'proximal-transverse', life: 'thenar', upward: 'central-longitudinal' });
+/** Complete expected line identities (must equal PALM_LINE_IDENTITY in features.ts; the root test checks for drift). */
+export const EXPECTED_IDENTITY = Object.freeze({
+  heart: Object.freeze({ anatomical: 'distal-transverse', western: 'heart line', indian: 'āyurlekhā (longevity line)', indianId: 'ayurlekha' }),
+  head: Object.freeze({ anatomical: 'proximal-transverse', western: 'head line', indian: 'dhanamātṛlekhā (prosperity/mother line)', indianId: 'dhanamatrlekha' }),
+  life: Object.freeze({ anatomical: 'thenar', western: 'life line', indian: 'pitṛlekhā (father/knowledge line)', indianId: 'pitrlekha' }),
+  upward: Object.freeze({ anatomical: 'central-longitudinal', western: 'fate line', indian: 'ūrdhvarekhā (upward line)', indianId: 'urdhvarekha' }),
+});
+const IDENTITY_KEYS = Object.freeze(['anatomical', 'western', 'indian', 'indianId']);
+// Exact own-property sets of every record type (no missing and no extra fields; inherited fields never count).
+const KEYS = Object.freeze({
+  featureSet: ['version', 'hand', 'dominantHand', 'frame', 'measurements', 'lines', 'marks', 'provenance'],
+  hand: ['value', 'source'],
+  frame: ['available', 'reason', 'rotationDeg', 'palmFacing', 'qualityStatus', 'qualityIssues'],
+  measurementSet: ['version', 'provenance', 'status', 'reasons', 'measurements'],
+  measurement: ['id', 'value', 'unit', 'status', 'reasons'],
+  lineConfirmed: ['line', 'provenance', 'confirmation', 'identity', 'palmPoints'],
+  lineUnassessed: ['line', 'provenance', 'confirmation', 'identity', 'reason'],
+  markReported: ['mark', 'provenance', 'approximatePalmLocation'],
+  markUnassessed: ['mark', 'provenance', 'reason'],
+  point: ['x', 'y'],
+});
+const FRAME_REASONS = Object.freeze(['ok', 'landmarks-invalid', 'landmark-out-of-frame', 'image-size-invalid', 'frame-degenerate']);
+// Measurement-set reasons (measurements.ts), split by the status they produce.
+const BLOCKING_QUALITY = Object.freeze(['palm-not-visible', 'hand-cut-off']);
+const DEGRADING_QUALITY = Object.freeze(['hand-too-small', 'hand-rotated', 'too-dark', 'too-bright', 'low-contrast', 'blurry']);
+const PRE_QUALITY_UNAVAILABLE = Object.freeze(['input-invalid', 'image-size-invalid', 'landmarks-invalid', 'landmark-out-of-frame']);
+const SET_UNAVAILABLE_REASONS = Object.freeze([...PRE_QUALITY_UNAVAILABLE, ...BLOCKING_QUALITY, 'frame-degenerate', 'palm-not-facing', 'computation-nonfinite']);
+const SET_UNCERTAIN_REASONS = Object.freeze([...DEGRADING_QUALITY, 'quality-unknown', 'palm-facing-unknown', 'implausible-proportions']);
+const ITEM_UNAVAILABLE_REASONS = Object.freeze(['finger-not-extended', 'depends-on-unavailable', 'computation-nonfinite']);
 export const LINE_IDS = Object.freeze(['heart', 'head', 'life', 'upward']);
 export const MARK_IDS = Object.freeze(['yava', 'matsya', 'shankha', 'chatra', 'vedi']);
 export const MEASUREMENT_IDS = Object.freeze(['palmLength', 'thumbLength', 'indexLength', 'middleLength', 'ringLength', 'littleLength', 'handLength', 'middleToPalmRatio', 'indexToRingRatio']);
@@ -60,7 +88,9 @@ const isObj = (v) => v !== null && typeof v === 'object' && !Array.isArray(v);
 const isNum = (v) => typeof v === 'number' && Number.isFinite(v);
 const num01 = (v) => isNum(v) && v >= 0 && v <= 1;
 const inBounds = (p) => p.x >= FRAME_BOUNDS.xMin && p.x <= FRAME_BOUNDS.xMax && p.y >= FRAME_BOUNDS.yMin && p.y <= FRAME_BOUNDS.yMax;
-const sameKeys = (o, keys) => { const k = Object.keys(o); return k.length === keys.length && keys.every((x) => own(o, x)); };
+const sameKeys = (o, keys) => { const k = Object.getOwnPropertyNames(o); return k.length === keys.length && keys.every((x) => own(o, x)); };
+const hasKeys = (o, keys, code, where) => { if (!isObj(o) || !sameKeys(o, keys)) fail(code, `${where} must have exactly the own fields ${keys.join(', ')}`); };
+const strArray = (a) => Array.isArray(a) && a.every((x) => typeof x === 'string');
 
 /** V1: deep plain-data check (dense arrays, data properties only, finite numbers). Throws AdapterError. */
 function assertPlain(v, where, depth = 0, seen = new Set()) {
@@ -70,6 +100,10 @@ function assertPlain(v, where, depth = 0, seen = new Set()) {
   if (typeof v !== 'object') fail('invalid-input', `${where}: ${typeof v} is not plain data`);
   if (seen.has(v)) fail('invalid-input', `${where}: cycle or shared reference`);
   seen.add(v);
+  // Inherited fields must never satisfy a required property: only plain Object/Array prototypes are accepted.
+  const proto = Object.getPrototypeOf(v);
+  if (Array.isArray(v) ? proto !== Array.prototype : proto !== Object.prototype && proto !== null) fail('invalid-input', `${where}: non-plain prototype (inherited fields are not accepted)`);
+  if (Object.getOwnPropertySymbols(v).length) fail('invalid-input', `${where}: symbol keys`);
   if (Array.isArray(v)) {
     for (let i = 0; i < v.length; i++) if (!own(v, i)) fail('sparse-array', `${where}[${i}] is a hole`);
   }
@@ -95,17 +129,62 @@ function validQuality(fr) {
 }
 
 function validMeasurements(ms) {
-  if (!isObj(ms) || ms.provenance !== 'automatic-measured' || !ACCEPTED_MEASUREMENT_VERSIONS.includes(ms.version) || !MEASUREMENT_STATUSES.includes(ms.status) || !Array.isArray(ms.reasons)) fail('invalid-measurement', 'measurements { version, provenance: automatic-measured, status, reasons[] }');
+  hasKeys(ms, KEYS.measurementSet, 'invalid-measurement', 'measurements');
+  if (ms.provenance !== 'automatic-measured' || !ACCEPTED_MEASUREMENT_VERSIONS.includes(ms.version) || !MEASUREMENT_STATUSES.includes(ms.status) || !strArray(ms.reasons)) fail('invalid-measurement', 'measurements { version, provenance: automatic-measured, status, reasons[] }');
+  // Set-level status ⇔ reasons.
+  const setOk = ms.status === 'measured' ? ms.reasons.length === 0
+    : ms.status === 'uncertain' ? ms.reasons.length > 0 && ms.reasons.every((r) => SET_UNCERTAIN_REASONS.includes(r))
+    : ms.reasons.length > 0 && ms.reasons.every((r) => SET_UNAVAILABLE_REASONS.includes(r));
+  if (!setOk || new Set(ms.reasons).size !== ms.reasons.length) fail('invalid-measurement', `measurement set status ${ms.status} with reasons ${JSON.stringify(ms.reasons)}`);
   if (!isObj(ms.measurements) || !sameKeys(ms.measurements, MEASUREMENT_IDS)) fail('incomplete-inventory', `measurements must list exactly ${MEASUREMENT_IDS.join(', ')}`);
   for (const id of MEASUREMENT_IDS) {
     const m = ms.measurements[id];
-    if (!isObj(m) || m.id !== id || !MEASUREMENT_STATUSES.includes(m.status) || !Array.isArray(m.reasons) || !['palm-width', 'ratio'].includes(m.unit)) fail('invalid-measurement', `measurements.${id}`);
+    hasKeys(m, KEYS.measurement, 'invalid-measurement', `measurements.${id}`);
+    if (m.id !== id || !MEASUREMENT_STATUSES.includes(m.status) || !strArray(m.reasons) || m.unit !== (id.endsWith('Ratio') ? 'ratio' : 'palm-width')) fail('invalid-measurement', `measurements.${id}`);
     if (m.status === 'unavailable' ? m.value !== null : !isNum(m.value)) fail('invalid-measurement', `measurements.${id}: status ${m.status} with value ${JSON.stringify(m.value)}`);
+    // Item status ⇔ reasons, and consistency with the set.
+    const itemOk = ms.status === 'unavailable' ? m.status === 'unavailable' && m.reasons.length === 1 && m.reasons[0] === 'depends-on-unavailable'
+      : m.status === 'measured' ? ms.status === 'measured' && m.reasons.length === 0
+      : m.status === 'uncertain' ? m.reasons.length > 0 && m.reasons.every((r) => SET_UNCERTAIN_REASONS.includes(r) || r === 'depends-on-uncertain')
+      : m.reasons.length > 0 && m.reasons.every((r) => ITEM_UNAVAILABLE_REASONS.includes(r));
+    if (!itemOk) fail('invalid-measurement', `measurements.${id}: status ${m.status} with reasons ${JSON.stringify(m.reasons)} under set status ${ms.status}`);
   }
+}
+
+/**
+ * Cross-record quality consistency (frame ↔ measurement set). Mirrors the order of checks in measurements.ts; any
+ * contradiction is rejected, never repaired. Geometry-specific per-measurement unavailability (e.g. a folded finger)
+ * under an accepted frame is legitimate and is not affected.
+ */
+function crossQuality(fr, ms) {
+  const R = ms.reasons, has = (r) => R.includes(r);
+  const issues = fr.qualityIssues;
+  const g5InSet = R.filter((r) => BLOCKING_QUALITY.includes(r) || DEGRADING_QUALITY.includes(r));
+  const bad = (msg) => fail('contradictory-quality', msg);
+  if (g5InSet.some((r) => !issues.includes(r))) bad(`measurements cite quality issue(s) ${JSON.stringify(g5InSet)} absent from the frame`);
+  if (fr.qualityStatus !== 'unknown' && has('quality-unknown')) bad(`measurements report quality-unknown but the frame quality is ${fr.qualityStatus}`);
+  const preQuality = R.some((r) => PRE_QUALITY_UNAVAILABLE.includes(r));
+  if (fr.qualityStatus === 'unknown' && ms.status !== 'unavailable' && !has('quality-unknown')) bad('frame quality unknown but measurements do not say so');
+  const blocking = BLOCKING_QUALITY.filter((c) => issues.includes(c));
+  if (blocking.length) {
+    if (ms.status !== 'unavailable') bad(`blocking frame issue(s) ${JSON.stringify(blocking)} but measurements are ${ms.status}`);
+    if (!preQuality && JSON.stringify(R) !== JSON.stringify(blocking)) bad(`blocking frame issue(s) ${JSON.stringify(blocking)} but measurement reasons ${JSON.stringify(R)}`);
+  } else if (ms.status !== 'unavailable') {
+    const degrading = DEGRADING_QUALITY.filter((c) => issues.includes(c));
+    if (degrading.some((c) => !has(c))) bad(`degrading frame issue(s) ${JSON.stringify(degrading)} not reflected in measurement reasons ${JSON.stringify(R)}`);
+  }
+  // Frame availability and palm-facing must agree with the measurement set.
+  if (!fr.available && ms.status !== 'unavailable') bad('no frame is available but measurements are not unavailable');
+  if (fr.available && R.some((r) => ['landmarks-invalid', 'landmark-out-of-frame', 'image-size-invalid', 'input-invalid'].includes(r))) bad(`frame available but measurements report ${JSON.stringify(R)}`);
+  if (fr.palmFacing === false && ms.status !== 'unavailable') bad('frame is not palm-facing but measurements are not unavailable');
+  if (has('palm-not-facing') && fr.palmFacing !== false) bad('measurements report palm-not-facing but the frame does not');
+  if (has('palm-facing-unknown') && fr.palmFacing !== null) bad('measurements report palm-facing-unknown but the frame decided it');
+  if (fr.available && fr.palmFacing === null && ms.status !== 'unavailable' && !has('palm-facing-unknown')) bad('palm-facing undecided but measurements do not say so');
 }
 
 function validGeometry(points, where) {
   if (!Array.isArray(points) || points.length < 2 || points.length > MAX_POINTS) fail('invalid-line', `${where}: 2..${MAX_POINTS} points required`);
+  if (!points.every((p) => isObj(p) && sameKeys(p, KEYS.point))) fail('invalid-line', `${where}: every point must be exactly { x, y }`);
   const out = [];
   for (let i = 0; i < points.length; i++) {
     const p = points[i];
@@ -123,7 +202,9 @@ function validLines(lines, frameAvailable) {
   for (const id of LINE_IDS) {
     const l = lines[id];
     if (!isObj(l) || l.line !== id) fail('invalid-line', `lines.${id}`);
-    if (!isObj(l.identity) || l.identity.anatomical !== EXPECTED_ANATOMY[id]) fail('invalid-line', `lines.${id}: identity must be ${EXPECTED_ANATOMY[id]}`);
+    if (l.provenance !== 'user-confirmed' && l.provenance !== 'unassessed') fail('invalid-provenance', `lines.${id}: provenance ${JSON.stringify(l.provenance)} is not valid for a line`);
+    hasKeys(l, l.provenance === 'user-confirmed' ? KEYS.lineConfirmed : KEYS.lineUnassessed, 'invalid-line', `lines.${id}`);
+    if (!isObj(l.identity) || !sameKeys(l.identity, IDENTITY_KEYS) || IDENTITY_KEYS.some((k) => l.identity[k] !== EXPECTED_IDENTITY[id][k])) fail('invalid-line', `lines.${id}: identity must be exactly ${JSON.stringify(EXPECTED_IDENTITY[id])}`);
     if (l.provenance === 'user-confirmed') {
       if (l.confirmation !== 'confirmed') fail('invalid-line', `lines.${id}: user-confirmed requires confirmation 'confirmed'`);
       if (!frameAvailable) fail('invalid-line', `lines.${id}: placed geometry needs an available frame`);
@@ -143,9 +224,10 @@ function validMarks(marks) {
   for (const id of MARK_IDS) {
     const m = marks[id];
     if (!isObj(m) || m.mark !== id) fail('invalid-mark', `marks.${id}`);
+    if (m.provenance === 'user-reported' || m.provenance === 'unassessed') hasKeys(m, m.provenance === 'user-reported' ? KEYS.markReported : KEYS.markUnassessed, 'invalid-mark', `marks.${id}`);
     if (m.provenance === 'user-reported') {
       const loc = m.approximatePalmLocation;
-      if (!(loc === null || (isObj(loc) && isNum(loc.x) && isNum(loc.y) && inBounds(loc)))) fail('invalid-mark', `marks.${id}.approximatePalmLocation`);
+      if (!(loc === null || (isObj(loc) && sameKeys(loc, KEYS.point) && isNum(loc.x) && isNum(loc.y) && inBounds(loc)))) fail('invalid-mark', `marks.${id}.approximatePalmLocation`);
     } else if (m.provenance === 'unassessed') {
       if (!MARK_UNASSESSED_REASONS.includes(m.reason)) fail('invalid-mark', `marks.${id}: unknown reason ${JSON.stringify(m.reason)}`);
     } else fail('invalid-provenance', `marks.${id}: provenance ${JSON.stringify(m.provenance)} is not valid for a mark`);
@@ -170,14 +252,19 @@ function validateRecord(fs) {
   if (!isObj(fs)) fail('unsupported-feature-set', 'feature set must be an object');
   assertPlain(fs, 'featureSet');
   if (!ACCEPTED_FEATURE_SET_VERSIONS.includes(fs.version)) fail('unsupported-feature-set', `version ${JSON.stringify(fs.version)}`);
+  hasKeys(fs, KEYS.featureSet, 'invalid-feature-set', 'featureSet');
   const hand = fs.hand;
-  if (!isObj(hand) || !['left', 'right'].includes(hand.value) || hand.source !== 'user-declared') fail('invalid-hand', 'hand { value: left|right, source: user-declared }');
+  hasKeys(hand, KEYS.hand, 'invalid-hand', 'hand');
+  if (!['left', 'right'].includes(hand.value) || hand.source !== 'user-declared') fail('invalid-hand', 'hand { value: left|right, source: user-declared }');
   if (!['left', 'right', 'unknown'].includes(fs.dominantHand)) fail('invalid-dominant-hand', 'left | right | unknown');
   const fr = fs.frame;
   if (!isObj(fr) || typeof fr.available !== 'boolean' || !(fr.palmFacing === null || typeof fr.palmFacing === 'boolean') || !isNum(fr.rotationDeg) || Math.abs(fr.rotationDeg) > 180) fail('invalid-frame', 'frame { available, palmFacing, rotationDeg }');
+  hasKeys(fr, KEYS.frame, 'invalid-frame', 'frame');
+  if (!FRAME_REASONS.includes(fr.reason) || (fr.reason === 'ok') !== fr.available) fail('invalid-frame', `frame.reason ${JSON.stringify(fr.reason)} must be 'ok' exactly when the frame is available`);
   if (!fr.available && fr.palmFacing !== null) fail('invalid-frame', 'palmFacing must be null when no frame is available');
   validQuality(fr);
   validMeasurements(fs.measurements);
+  crossQuality(fr, fs.measurements);
   validLines(fs.lines, fr.available);
   validMarks(fs.marks);
   validProvenanceIndex(fs);
