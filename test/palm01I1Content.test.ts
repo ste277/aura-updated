@@ -99,7 +99,7 @@ check('C5. every source in the register is cited by at least one entry or is the
 // ============================================================
 // D. Disclosures and wording safety
 // ============================================================
-check('D1. general disclosure is the exact approved sentence', PALMISTRY_GENERAL_DISCLOSURE === 'Palmistry is a traditional interpretive practice, not a scientifically validated method of predicting personality, health, lifespan, or future events.');
+check('D1. general disclosure is the exact I1-B sentence plus the G3 W4 sentence', PALMISTRY_GENERAL_DISCLOSURE === 'Palmistry is a traditional interpretive practice, not a scientifically validated method of predicting personality, health, lifespan, or future events. Please don\'t use it for decisions about health, money or relationships.');
 check('D2. longevity disclosure states Aura does not estimate lifespan or predict death', /does not estimate lifespan or predict death/.test(PALMISTRY_LONGEVITY_DISCLOSURE));
 check('D3. hand-convention note is historical and says Aura does not infer anything', /traditionally/.test(PALMISTRY_HAND_CONVENTION_NOTE) && /does not ask/.test(PALMISTRY_HAND_CONVENTION_NOTE));
 check('D4. diagram note says the drawing is schematic and not every hand shows every feature', /schematic/.test(PALMISTRY_DIAGRAM_NOTE) && /no hand needs to show every feature/.test(PALMISTRY_DIAGRAM_NOTE));
@@ -128,6 +128,12 @@ for (const pattern of BANNED) {
 }
 check('D7. no unverified tradition names (Hasta Sāmudrika / Sāmudrika Śāstra) in user-facing text', !/Hasta S[aā]mudrika|S[aā]mudrika [SŚ][aā]stra/i.test(allUserFacingText));
 check('D8. the early Buddhist chapter is never called simply "9th-century" (it is dated after the mid-9th century)', !/9th-century (text|Buddhist|chapter)/i.test(allUserFacingText));
+// AURA-PALM-01-G3: user-facing text states textual uncertainty neutrally and
+// never refers to Aura's internal review workflow.
+{
+  const workflowText = [allUserFacingText, PALMISTRY_GENERAL_DISCLOSURE, PALMISTRY_LONGEVITY_DISCLOSURE, PALMISTRY_CONTENT_REVIEW.notice].join('\n');
+  check('D9. no internal review-workflow wording in user-facing text', !/expert review|awaiting|awaits|qualified scholar|reviewer|sign-off/i.test(workflowText));
+}
 check('D6. no Western planetary mount is presented as an entry', !PALMISTRY_ENTRIES.some((e) => /mount of|jupiter|saturn|apollo|venus/i.test(e.title)));
 
 // ============================================================
