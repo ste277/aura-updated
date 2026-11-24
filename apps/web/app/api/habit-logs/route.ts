@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { createHabitLog, getHabitLogByClientRequestId, getUserById, listHabitLogsForInsights, INSIGHTS_HISTORY_DAYS } from '../../../lib/db';
 import { getSessionFromRequest } from '../../../lib/session';
+import { checkExpectedAccount } from '../../../lib/expectedAccount';
 import { parseJsonObject } from '../../../lib/request';
 import { resolveHistoricalActiveWindow } from '../../../lib/historicalActivityWindow';
 import { SolarNoEventError } from '../../../../../packages/astronomy/src/errors';
@@ -22,6 +23,11 @@ export async function POST(req: NextRequest) {
   if (!session) {
     return NextResponse.json({ error: 'Not authenticated.' }, { status: 401 });
   }
+
+  // AURA-ANDROID-REL-04 IR-01 -- the write must be for the account this
+  // session authenticates; checked before any read or write.
+  const accountMismatch = checkExpectedAccount(req, session.userId, { required: true });
+  if (accountMismatch) return accountMismatch;
 
   const user = await getUserById(session.userId);
   if (!user) return NextResponse.json({ error: 'User not found.' }, { status: 404 });

@@ -64,8 +64,11 @@ import {
 } from '../apps/web/lib/offlineHabitQueue';
 import { LoggedEntryItem } from '../apps/web/components/CalendarViewSection';
 
+// AURA-ANDROID-REL-04 IR-01: the queue is per verified account; entries carry ownerUserId.
+const OWNER = 'synthetic-user-a';
+const OWNED_KEY = 'offline_habit_queue_v2:' + OWNER;
 function setQueue(items: unknown[]) {
-  (global as any).localStorage.setItem('offline_habit_queue', JSON.stringify(items));
+  (global as any).localStorage.setItem(OWNED_KEY, JSON.stringify(items.map((i) => (i && typeof i === 'object' ? { ownerUserId: OWNER, ...(i as object) } : i))));
 }
 
 const queuedA: QueuedHabitLog = {
@@ -96,7 +99,7 @@ function confirmedEntry(id: string, clientRequestId: string, title = 'Deep Work'
 
 (global as any).localStorage.clear();
 setQueue([queuedA]);
-const read1 = readOfflineHabitQueue();
+const read1 = readOfflineHabitQueue(OWNER);
 check('readOfflineHabitQueue reads back the one queued entry', read1.length === 1);
 const reconstructed1 = read1.map(toPendingLoggedEntry);
 check('the reconstructed entry has syncStatus === \'pending\' (4. no accidental promotion -- always literal, never derived)', reconstructed1[0]?.syncStatus === 'pending');
@@ -110,7 +113,7 @@ check('the reconstructed entry preserves activityTitle/loggedAt/notes/source/sig
 
 (global as any).localStorage.clear();
 setQueue([queuedA, queuedB]);
-const reconstructedMulti = readOfflineHabitQueue().map(toPendingLoggedEntry);
+const reconstructedMulti = readOfflineHabitQueue(OWNER).map(toPendingLoggedEntry);
 check('two queued entries both reconstruct independently', reconstructedMulti.length === 2 && reconstructedMulti.every((e) => e.syncStatus === 'pending'));
 check('each keeps its own distinct id (clientRequestId)', reconstructedMulti[0]?.id !== reconstructedMulti[1]?.id);
 
@@ -126,7 +129,7 @@ check('clientRequestId is carried onto the reconstructed entry itself (never a f
 
 (global as any).localStorage.clear();
 setQueue([queuedB]); // queuedA removed, as if replay had confirmed/rejected + removed it
-const afterRemoval = readOfflineHabitQueue();
+const afterRemoval = readOfflineHabitQueue(OWNER);
 check('an item removed from the queue is no longer read back', !afterRemoval.some((item) => item.clientRequestId === queuedA.clientRequestId));
 check('the remaining still-queued item is still read back', afterRemoval.some((item) => item.clientRequestId === queuedB.clientRequestId));
 
@@ -137,20 +140,20 @@ check('the remaining still-queued item is still read back', afterRemoval.some((i
 // ============================================================
 
 (global as any).localStorage.clear();
-check('no queue key at all -> empty array, no throw', (() => { try { return readOfflineHabitQueue().length === 0; } catch { return false; } })());
+check('no queue key at all -> empty array, no throw', (() => { try { return readOfflineHabitQueue(OWNER).length === 0; } catch { return false; } })());
 
-(global as any).localStorage.setItem('offline_habit_queue', 'not valid json{{{');
-check('corrupt JSON -> empty array, no throw', (() => { try { return readOfflineHabitQueue().length === 0; } catch { return false; } })());
+(global as any).localStorage.setItem(OWNED_KEY, 'not valid json{{{');
+check('corrupt JSON -> empty array, no throw', (() => { try { return readOfflineHabitQueue(OWNER).length === 0; } catch { return false; } })());
 
-(global as any).localStorage.setItem('offline_habit_queue', JSON.stringify({ not: 'an array' }));
-check('a non-array value -> empty array, no throw', (() => { try { return readOfflineHabitQueue().length === 0; } catch { return false; } })());
+(global as any).localStorage.setItem(OWNED_KEY, JSON.stringify({ not: 'an array' }));
+check('a non-array value -> empty array, no throw', (() => { try { return readOfflineHabitQueue(OWNER).length === 0; } catch { return false; } })());
 
-(global as any).localStorage.setItem('offline_habit_queue', JSON.stringify([queuedA, { activityTitle: 'Missing required fields' }]));
-const mixedRead = readOfflineHabitQueue();
+setQueue([queuedA, { activityTitle: 'Missing required fields' }]);
+const mixedRead = readOfflineHabitQueue(OWNER);
 check('a malformed sibling is dropped while a valid sibling in the SAME queue still reconstructs (one bad item does not destroy the rest)', mixedRead.length === 1 && mixedRead[0]?.clientRequestId === queuedA.clientRequestId);
 
-(global as any).localStorage.setItem('offline_habit_queue', JSON.stringify([{ ...queuedA, logSource: 'NOT_A_REAL_SOURCE' }]));
-check('an invalid logSource degrades to the safe MANUAL default rather than propagating garbage', readOfflineHabitQueue().map(toPendingLoggedEntry)[0]?.logSource === 'MANUAL');
+setQueue([{ ...queuedA, logSource: 'NOT_A_REAL_SOURCE' }]);
+check('an invalid logSource degrades to the safe MANUAL default rather than propagating garbage', readOfflineHabitQueue(OWNER).map(toPendingLoggedEntry)[0]?.logSource === 'MANUAL');
 (global as any).localStorage.clear();
 
 // ============================================================
@@ -307,7 +310,8 @@ check(
 check('loadUserDataAndLogs calls mergeConfirmedLogEntries (no re-implemented inline merge logic)', /return mergeConfirmedLogEntries\(confirmedEntries, prev, queuedClientRequestIds\);/.test(pageSource));
 check('the confirmed fetch propagates clientRequestId from the server row onto each entry', /clientRequestId: l\.clientRequestId \?\? undefined,/.test(pageSource));
 check('the reload-reconstruction effect calls selectQueueItemsToReconstruct (no re-implemented inline selection logic)', /const reconstructed = selectQueueItemsToReconstruct\(queued, prev\)\.map\(toPendingLoggedEntry\);/.test(pageSource));
-check('an empty queue is a no-op in the reconstruction effect (early return, no unnecessary setLogEntries call)', /if \(queued\.length === 0\) return;/.test(pageSource));
+check('an empty queue is a no-op in the reconstruction (no unnecessary setLogEntries call)', /if \(queued\.length > 0\) \{/.test(pageSource));
+check('AURA-ANDROID-REL-04: reconstruction reads only the verified account\'s queue', /const queued = readOfflineHabitQueue\(check\.user\.id\);/.test(pageSource));
 
 check('handleLogActivity is unchanged: still returns Promise<\'confirmed\' | \'pending\'>', /Promise<'confirmed' \| 'pending'>/.test(pageSource));
 check(
@@ -316,8 +320,10 @@ check(
 );
 check('handleLogActivity\'s optimistic-entry literal (before the request) and offline-queue push are untouched', /const optimisticEntry: LoggedEntryItem = \{\s*id: tempId,\s*activityTitle,\s*activeWindow: activeWindowForLog,\s*loggedAt: targetDate,\s*logMinuteOfDay: calculatedMinute,\s*durationMinutes,\s*notes: notes \? String\(notes\)\.trim\(\) : null,\s*logSource: finalLogSource,\s*activitySignificance: inferredSignificance,\s*\};/.test(pageSource));
 check('page.tsx still generates clientRequestId once per log attempt via generateClientRequestId() (PR #86 idempotency untouched; AURA-MOBILE-01-M2-B/AND-01: not crypto.randomUUID() directly, which throws outside a secure context)', /const clientRequestId = generateClientRequestId\(\);/.test(pageSource));
-check('page.tsx still imports classifyHabitLogSyncOutcome for offline-queue replay (PR #86 untouched)', /classifyHabitLogSyncOutcome/.test(pageSource));
-check('the Offline Log Sync Listener queue-removal/retention logic is untouched (still classifies confirmed/retry/permanent-failure)', /const outcome = classifyHabitLogSyncOutcome\(res\.status\);/.test(pageSource));
+// AURA-ANDROID-REL-04 IR-01: replay moved to lib/activitySync.ts (account-bound); same classification.
+const activitySyncSource = fs.readFileSync('apps/web/lib/activitySync.ts', 'utf8');
+check('offline-queue replay still classifies via classifyHabitLogSyncOutcome (now in lib/activitySync.ts)', /classifyHabitLogSyncOutcome/.test(activitySyncSource) && /replayOfflineQueue\(\)/.test(pageSource));
+check('the replay queue-removal/retention logic still classifies confirmed/retry/permanent-failure', /const outcome = classifyHabitLogSyncOutcome\(status\);/.test(activitySyncSource) && /outcome === 'permanent-failure'/.test(activitySyncSource));
 check('Plan logging (handlePlanLogged) remains separate and untouched in page.tsx', /const handlePlanLogged = useCallback\(async \(\) => \{/.test(pageSource));
 check('Timing Location save orchestration (handleLocationChanged) remains untouched in page.tsx', /const handleLocationChanged = useCallback\(async \(city: \{/.test(pageSource));
 check('LocationPicker.tsx was not touched by this change (no reference to offlineHabitQueue there)', !fs.existsSync('apps/web/components/LocationPicker.tsx') || !/offlineHabitQueue/.test(fs.readFileSync('apps/web/components/LocationPicker.tsx', 'utf8')));

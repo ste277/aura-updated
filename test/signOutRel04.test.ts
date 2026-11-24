@@ -1,94 +1,67 @@
 /**
- * AURA-ANDROID-REL-04 -- lib/signOut.ts: sign-out reports success only when the
- * server removed the session cookie, and clears the account-less offline
- * activity-log queue only then (after asking when it still holds entries).
+ * AURA-ANDROID-REL-04 IR-03 -- lib/signOut.ts unit checks: the logout
+ * acknowledgement must be exact, and the confirmation wording must reflect the
+ * real pending work. The full transition (tabs, replay, storage faults, lost
+ * acknowledgement, concurrency) is covered by test/rel04AccountIsolation.test.ts.
  *
- *   npx ts-node test/signOutRel04.test.ts
- *
- * Baseline defect (app/page.tsx before REL-04): `await fetch(logout); setUser(null)`
- * -- a 5xx showed "signed out" while the cookie stayed valid; offline threw and
- * said nothing; the queue survived and replayed under the next account.
+ *   TS_NODE_COMPILER_OPTIONS='{"jsx":"react-jsx"}' npx ts-node --project tsconfig.jsdom-tests.json test/signOutRel04.test.ts
  */
-import { performSignOut, unsyncedQueueCount, unsyncedQueueWarning, OFFLINE_HABIT_QUEUE_KEY, SignOutDeps } from '../apps/web/lib/signOut';
+import { storage } from './rel04AccountIsolationHarness';
+const acct = require('../apps/web/lib/accountSession');
+const so = require('../apps/web/lib/signOut');
 
 let passed = 0, failed = 0;
 function check(label: string, ok: boolean) { ok ? passed++ : failed++; console.log(`${ok ? 'OK  ' : 'FAIL'} ${label}`); }
 
-function memStorage(initial: Record<string, string> = {}) {
-  const data = new Map(Object.entries(initial));
-  return {
-    data,
-    getItem: (k: string) => (data.has(k) ? data.get(k)! : null),
-    removeItem: (k: string) => { data.delete(k); },
+type Answer = { status: number; type?: string; redirected?: boolean; body?: unknown; throws?: boolean };
+function fakeFetch(logout: Answer, sessionUser: string | null) {
+  const calls: string[] = [];
+  const f = async (url: string, init: any = {}) => {
+    calls.push(`${init.method ?? 'GET'} ${url} redirect=${init.redirect ?? ''}`);
+    if (url === '/api/auth/session') return new Response(JSON.stringify({ user: sessionUser ? { id: sessionUser } : null }), { status: 200, headers: { 'content-type': 'application/json' } });
+    if (logout.throws) throw new TypeError('Failed to fetch');
+    const res = new Response(logout.body === undefined ? null : typeof logout.body === 'string' ? logout.body : JSON.stringify(logout.body), { status: logout.status, headers: { 'content-type': logout.type ?? 'application/json' } });
+    if (logout.redirected) Object.defineProperty(res, 'redirected', { value: true });
+    return res;
   };
+  return { f, calls };
 }
 
-function deps(over: Partial<SignOutDeps> & { status?: number | 'throw'; confirmAnswer?: boolean; storageInit?: Record<string, string> } = {}) {
-  const calls = { fetch: [] as string[], confirm: [] as string[] };
-  const storage = memStorage(over.storageInit);
-  const d: SignOutDeps = {
-    fetch: async (url, init) => {
-      calls.fetch.push(`${init.method} ${url}`);
-      if (over.status === 'throw') throw new TypeError('Failed to fetch');
-      const status = over.status ?? 200;
-      return { ok: status >= 200 && status < 300 };
-    },
-    storage,
-    confirm: (m) => { calls.confirm.push(m); return over.confirmAnswer ?? true; },
-  };
-  return { d, calls, storage };
+async function signOutWith(answer: Answer, sessionAfter: string | null) {
+  so.__resetSignOutForTests();
+  acct.__resetAccountSessionForTests('t');
+  storage.clear();
+  acct.setVerifiedAccount('user-a');
+  const { f, calls } = fakeFetch(answer, sessionAfter);
+  const out = await so.performSignOut({ fetch: f, confirm: () => true, settleTimeoutMs: 10 });
+  return { out, calls };
 }
-
-const queue2 = JSON.stringify([{ activityTitle: 'Walk' }, { activityTitle: 'Read' }]);
 
 (async () => {
-  {
-    const { d, calls, storage } = deps();
-    check('200, empty queue -> signed-out', (await performSignOut(d)) === 'signed-out');
-    check('posts to /api/auth/logout exactly once', calls.fetch.length === 1 && calls.fetch[0] === 'POST /api/auth/logout');
-    check('no confirmation when nothing is queued', calls.confirm.length === 0);
-    check('storage untouched apart from the queue key', storage.data.size === 0);
+  const ok = await signOutWith({ status: 200, body: { loggedOut: true } }, null);
+  check('exact acknowledgement (200, JSON, loggedOut:true) -> signed-out', ok.out === 'signed-out');
+  check('logout is requested with redirect:"error" (a redirect can never count as success)', ok.calls.some((c) => c === 'POST /api/auth/logout redirect=error'));
+  for (const [label, ans] of [
+    ['204 No Content', { status: 204 }],
+    ['200 with loggedOut:"true" (string)', { status: 200, body: { loggedOut: 'true' } }],
+    ['200 text/html', { status: 200, type: 'text/html', body: '<html></html>' }],
+    ['200 marked redirected', { status: 200, body: { loggedOut: true }, redirected: true }],
+    ['200 malformed JSON', { status: 200, body: '{not json' }],
+  ] as Array<[string, Answer]>) {
+    const r = await signOutWith(ans, 'user-a');
+    check(`${label}: not accepted; reconciled (session still A) -> failed, A kept`, r.out === 'failed' && acct.getVerifiedAccount() === 'user-a' && r.calls.some((c) => c.startsWith('GET /api/auth/session')));
   }
-  {
-    const { d } = deps({ status: 500 });
-    check('HTTP 500 -> failed (UI must stay signed in)', (await performSignOut(d)) === 'failed');
-  }
-  {
-    const { d } = deps({ status: 'throw' });
-    check('network error -> failed, never throws', (await performSignOut(d)) === 'failed');
-  }
-  {
-    const { d, storage } = deps({ status: 503, storageInit: { [OFFLINE_HABIT_QUEUE_KEY]: queue2 } });
-    check('failed sign-out keeps the offline queue', (await performSignOut(d)) === 'failed' && storage.data.get(OFFLINE_HABIT_QUEUE_KEY) === queue2);
-  }
-  {
-    const { d, calls, storage } = deps({ storageInit: { [OFFLINE_HABIT_QUEUE_KEY]: queue2, other: 'x' } });
-    check('queued entries + confirm yes -> signed-out', (await performSignOut(d)) === 'signed-out');
-    check('asked once, naming the 2 unsynced logs', calls.confirm.length === 1 && /2 activity logs/.test(calls.confirm[0]));
-    check('confirmed sign-out removes the queue', !storage.data.has(OFFLINE_HABIT_QUEUE_KEY));
-    check('other storage keys are left alone', storage.data.get('other') === 'x');
-  }
-  {
-    const { d, calls, storage } = deps({ confirmAnswer: false, storageInit: { [OFFLINE_HABIT_QUEUE_KEY]: queue2 } });
-    check('confirm no -> cancelled', (await performSignOut(d)) === 'cancelled');
-    check('cancelled: no logout request sent', calls.fetch.length === 0);
-    check('cancelled: queue kept', storage.data.get(OFFLINE_HABIT_QUEUE_KEY) === queue2);
-  }
-  {
-    const { d, calls } = deps({ storageInit: { [OFFLINE_HABIT_QUEUE_KEY]: '{not json' } });
-    check('corrupt queue -> no prompt, sign-out proceeds', (await performSignOut(d)) === 'signed-out' && calls.confirm.length === 0);
-  }
-  {
-    const d: SignOutDeps = { fetch: async () => ({ ok: true }), storage: null, confirm: () => true };
-    check('no storage available -> signed-out', (await performSignOut(d)) === 'signed-out');
-  }
-  {
-    const throwing = { getItem: () => { throw new Error('denied'); }, removeItem: () => { throw new Error('denied'); } };
-    const d: SignOutDeps = { fetch: async () => ({ ok: true }), storage: throwing, confirm: () => true };
-    check('throwing storage -> signed-out, never throws', (await performSignOut(d)) === 'signed-out');
-  }
-  check('unsyncedQueueCount counts array entries', unsyncedQueueCount(memStorage({ [OFFLINE_HABIT_QUEUE_KEY]: queue2 })) === 2);
-  check('singular wording for one entry', /1 activity log that/.test(unsyncedQueueWarning(1)) && /remove it/.test(unsyncedQueueWarning(1)));
+  const http = await signOutWith({ status: 503, body: { error: 'x' } }, 'user-a');
+  check('HTTP 503 -> failed without reconciliation needed', http.out === 'failed' && acct.getVerifiedAccount() === 'user-a');
+  const lost = await signOutWith({ status: 200, throws: true }, null);
+  check('lost answer, session gone -> signed-out-unconfirmed', lost.out === 'signed-out-unconfirmed' && acct.getVerifiedAccount() === null);
+  const switched = await signOutWith({ status: 200, throws: true }, 'user-b');
+  check('lost answer, session now B -> account-changed to B', switched.out === 'account-changed' && acct.getVerifiedAccount() === 'user-b');
+
+  check('wording: 1 owned', /1 activity log that has not synced yet/.test(so.describePendingWork({ owned: 1, legacy: 0 })) && /remove it/.test(so.describePendingWork({ owned: 1, legacy: 0 })));
+  check('wording: owned + legacy named separately', /2 activity logs that have not synced yet and 1 older unsynced log/.test(so.describePendingWork({ owned: 2, legacy: 1 })));
+  check('wording: unreadable storage asks instead of assuming none', /couldn't check this device/i.test(so.describePendingWork({ owned: null, legacy: 0 })));
+  check('wording: nothing pending -> no question', so.describePendingWork({ owned: 0, legacy: 0 }) === null);
 
   console.log(`\n${passed} passed, ${failed} failed`);
   process.exit(failed ? 1 : 0);

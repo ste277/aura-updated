@@ -9,6 +9,7 @@ import type { PlanningHorizon } from '../../../../packages/recommendation/src/da
 import { RESULT_LABEL_TEXT, saveUpcomingPlanFromCandidate } from '../../components/PlanWithAuraView';
 import { CITY_OPTIONS } from '../../lib/cities';
 import { trackEvent } from '../../lib/trackEvent';
+import { fetchVerifiedSession, subscribeAccount, getAccountEpoch, runActivityOperation, startForegroundReverification } from '../../lib/accountSession';
 import { requestSignInCode } from '../../lib/signInCode';
 import { SignInCodeActions } from '../../components/SignInCodeActions';
 import { colors, spacing, radius, typography } from '../../components/theme';
@@ -161,10 +162,11 @@ export function GuestFindClient({ initialSource, initialRestoreToken }: { initia
     let cancelled = false;
     (async () => {
       try {
-        const res = await fetch('/api/auth/session');
-        const data = await res.json().catch(() => ({ user: null }));
+        // AURA-ANDROID-REL-04 IR-03 -- same verified session check as Home
+        // (lib/accountSession.ts); a stale answer counts as not signed in.
+        const check = await fetchVerifiedSession();
         if (cancelled) return;
-        const authed = Boolean(data?.user);
+        const authed = check.status === 'current';
         setIsAuthenticated(authed);
 
         if (initialRestoreToken) {
@@ -185,6 +187,30 @@ export function GuestFindClient({ initialSource, initialRestoreToken }: { initia
       cancelled = true;
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  // AURA-ANDROID-REL-04 IR-03 -- an account change in this or another tab
+  // (sign-out, sign-in, switch, expiry) re-verifies the session, so /find
+  // never keeps acting for the previous account.
+  useEffect(() => {
+    let active = true;
+    let seenEpoch = getAccountEpoch();
+    const unsubscribe = subscribeAccount(() => {
+      // Only an actual account change (new epoch) needs a re-check.
+      const epoch = getAccountEpoch();
+      if (epoch === seenEpoch) return;
+      seenEpoch = epoch;
+      fetchVerifiedSession().then((check) => {
+        if (!active || check.status === 'stale') return;
+        setIsAuthenticated(check.status === 'current');
+      });
+    });
+    const stopForeground = startForegroundReverification();
+    return () => {
+      active = false;
+      unsubscribe();
+      stopForeground();
+    };
   }, []);
 
   async function restoreGuestState(token: string, authed: boolean) {
@@ -317,7 +343,14 @@ export function GuestFindClient({ initialSource, initialRestoreToken }: { initia
       // verification, or a re-visited magic link all resolve to the SAME
       // token, so POST /api/plans returns the already-created Plan instead
       // of creating a second one.
-      await saveUpcomingPlanFromCandidate(selectedCandidate, durationMinutes, { guestConversionToken: guestStateToken ?? undefined });
+      // AURA-ANDROID-REL-04 IR-01 -- saved only for the verified account,
+      // never during a sign-out; the server refuses it under any other session.
+      await runActivityOperation((lease) =>
+        saveUpcomingPlanFromCandidate(selectedCandidate, durationMinutes, {
+          guestConversionToken: guestStateToken ?? undefined,
+          expectedAccountId: lease.account,
+        })
+      );
       trackEvent('GUEST_RESULT_SAVED', { metadata: { activityId, source: initialSource } });
       trackEvent('ONBOARDING_HANDOFF_VIEWED', { metadata: { activityId, source: initialSource } });
       setPhase('SAVED');
@@ -408,6 +441,13 @@ export function GuestFindClient({ initialSource, initialRestoreToken }: { initia
         return;
       }
       trackEvent('GUEST_SIGNUP_COMPLETED', { metadata: { source: initialSource } });
+      // AURA-ANDROID-REL-04 IR-01 -- learn WHICH account the code signed in
+      // (verified by the server) before saving anything for it.
+      const check = await fetchVerifiedSession();
+      if (check.status !== 'current') {
+        setError("Signed in, but Aura couldn't confirm your account. Try again.");
+        return;
+      }
       setIsAuthenticated(true);
       await performSave();
     } catch {

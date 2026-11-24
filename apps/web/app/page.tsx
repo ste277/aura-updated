@@ -25,8 +25,9 @@ import type { DailyStory } from '../lib/dailyStory';
 import type { DailyReflection } from '../lib/dailyReflection';
 import type { TomorrowPreview } from '../lib/tomorrowPreview';
 import { shouldRefreshMyDayForDateChange } from '../lib/myDayRefreshPolicy';
-import { classifyHabitLogSyncOutcome } from '../lib/habitLogSyncPolicy';
 import { readOfflineHabitQueue, toPendingLoggedEntry, mergeConfirmedLogEntries, selectQueueItemsToReconstruct } from '../lib/offlineHabitQueue';
+import { fetchVerifiedSession, subscribeAccount, getAccountEpoch, AccountUnavailableError, startForegroundReverification } from '../lib/accountSession';
+import { submitActivityLog, replayOfflineQueue } from '../lib/activitySync';
 import { refreshAfterHomeCompletion } from '../lib/homeRefresh';
 import { selectTodaysPendingActivities } from '../lib/myDayPendingOverlay';
 import type { GuidanceUiState } from '../lib/bestForYouViewModel';
@@ -60,7 +61,7 @@ import { formatDisplayName } from '../lib/displayName';
 import { trackEvent } from '../lib/trackEvent';
 import { generateClientRequestId } from '../lib/clientId';
 import { useAndroidBackButton } from '../lib/useAndroidBackButton';
-import { performSignOut, SIGN_OUT_FAILED_MESSAGE } from '../lib/signOut';
+import { performSignOut, SIGN_OUT_FAILED_MESSAGE, SIGN_OUT_BUSY_MESSAGE } from '../lib/signOut';
 import {
   loadNotificationPrefs,
   saveNotificationPrefs,
@@ -125,8 +126,24 @@ function isFrictionWindow(windowName: string): boolean {
   return normalized.includes('RAHU') || normalized.includes('YAMA');
 }
 
+// AURA-ANDROID-REL-04 IR-01 -- the dashboard is keyed on the account epoch
+// (lib/accountSession.ts). Any account change -- sign-out, sign-in, switch,
+// session expiry, another tab's transition -- remounts it, so every piece of
+// account-scoped state, ref and in-component cache starts empty for the next
+// account, and late responses for the previous one land on an unmounted
+// instance (ignored by React) instead of the new screen.
 export default function DashboardPage() {
+  const epoch = React.useSyncExternalStore(subscribeAccount, getAccountEpoch, () => 0);
+  useEffect(() => startForegroundReverification(), []);
+  return <DashboardPageInner key={epoch} />;
+}
+
+function DashboardPageInner() {
   const [user, setUser] = useState<SessionUser | null | undefined>(undefined);
+  // AURA-ANDROID-REL-04 IR-01 -- the verified account this dashboard instance
+  // belongs to (set from the session answer; the instance is remounted when
+  // the account changes).
+  const accountIdRef = useRef<string | null>(null);
   // Onboarding V1 PR 1 -- Location Trust Foundation: lets the global
   // disclosure banner's action land directly on the already-expanded
   // Location & Time panel, instead of a collapsed You tab the user then
@@ -390,7 +407,7 @@ export default function DashboardPage() {
     // stale row once it's no longer in the queue (PR #86's own
     // invariant) -- see that function's own doc comment.
     setLogEntries((prev) => {
-      const queuedClientRequestIds = new Set(readOfflineHabitQueue().map((item) => item.clientRequestId));
+      const queuedClientRequestIds = new Set(readOfflineHabitQueue(accountIdRef.current).map((item) => item.clientRequestId));
       return mergeConfirmedLogEntries(confirmedEntries, prev, queuedClientRequestIds);
     });
   }, []);
@@ -398,16 +415,33 @@ export default function DashboardPage() {
   // Parallelize Session & Initial Data Fetches
   const loadUserDataAndLogs = useCallback(async () => {
     try {
-      const sessionRes = await fetch('/api/auth/session');
-      const sessionData = await sessionRes.json();
+      // AURA-ANDROID-REL-04 IR-01/IR-03 -- the session answer goes through
+      // the account boundary: a late answer from before a transition or an
+      // account change is 'stale' and never applied.
+      const check = await fetchVerifiedSession();
+      if (check.status === 'stale') return;
+      if (check.status === 'error') throw new Error('session check failed');
+      const sessionData = check.payload as any;
 
-      if (!sessionData?.user) {
+      if (check.status === 'signed-out' || !sessionData?.user) {
+        accountIdRef.current = null;
         setUser(null);
         setPlannedActivities([]);
         return;
       }
 
+      accountIdRef.current = check.user.id;
       setUser(sessionData.user);
+
+      // Pending Activity Reload Visibility V1, now account-scoped: only the
+      // verified account's own queued entries are reconstructed.
+      const queued = readOfflineHabitQueue(check.user.id);
+      if (queued.length > 0) {
+        setLogEntries((prev) => {
+          const reconstructed = selectQueueItemsToReconstruct(queued, prev).map(toPendingLoggedEntry);
+          return reconstructed.length === 0 ? prev : [...reconstructed, ...prev];
+        });
+      }
 
       // Onboarding V1 PR 2 -- captured exactly once per page load (see
       // onboardingDecidedRef's own doc comment above); a later refetch
@@ -446,27 +480,9 @@ export default function DashboardPage() {
     loadUserDataAndLogs();
   }, [loadUserDataAndLogs]);
 
-  // Pending Activity Reload Visibility V1 -- a still-queued offline log
-  // (localStorage['offline_habit_queue'], written by handleLogActivity's
-  // own catch branch below) has no server row yet, so the confirmed fetch
-  // above can never know about it. This is a pure, read-only
-  // reconstruction into presentation state -- it never mutates the queue,
-  // never POSTs, and is entirely separate from the Offline Log Sync
-  // Listener effect further down (which does attempt to resync and IS
-  // allowed to mutate the queue). Runs once on mount; order-independent
-  // relative to the confirmed fetch above by construction (see that
-  // effect's own setLogEntries merge comment) -- whichever of the two
-  // resolves first, the other's setLogEntries call preserves it rather
-  // than overwriting it.
-  useEffect(() => {
-    const queued = readOfflineHabitQueue();
-    if (queued.length === 0) return;
-    setLogEntries((prev) => {
-      const reconstructed = selectQueueItemsToReconstruct(queued, prev).map(toPendingLoggedEntry);
-      if (reconstructed.length === 0) return prev;
-      return [...reconstructed, ...prev];
-    });
-  }, []);
+  // Pending Activity Reload Visibility V1 -- reconstruction of still-queued
+  // offline logs now runs inside loadUserDataAndLogs, after the session
+  // answer verified WHICH account's queue may be shown (AURA-ANDROID-REL-04).
 
   // My Day Timing Location Change Refresh V1 -- extracted from its
   // original inline form (previously only reachable via the user-id-gated
@@ -1104,70 +1120,28 @@ export default function DashboardPage() {
   // exception during replay is retained for a later attempt. The queue is
   // rewritten to hold only what's still genuinely retry-worthy, never
   // blanket-cleared.
+  // AURA-ANDROID-REL-04 IR-01 -- replay goes through lib/activitySync.ts:
+  // only the VERIFIED account's own entries, each request bound to that
+  // account (the server refuses it under any other session), single-flight,
+  // stopped by any auth transition, and removing only the ids it settled.
+  // It starts only once this instance has a verified signed-in account.
+  const verifiedUserId = user ? user.id : null;
   useEffect(() => {
+    if (!verifiedUserId) return;
+    let active = true;
     const syncOfflineLogs = async () => {
-      const rawQueue = localStorage.getItem('offline_habit_queue');
-      if (!rawQueue) return;
-
-      let queue: any[];
-      try {
-        queue = JSON.parse(rawQueue);
-      } catch {
-        return;
-      }
-      if (!Array.isArray(queue) || queue.length === 0) return;
-
-      const remaining: any[] = [];
-      let anyConfirmed = false;
-
-      for (const queuedItem of queue) {
-        const { tempId, ...payload } = queuedItem;
-        try {
-          const res = await fetch('/api/habit-logs', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify(payload),
-          });
-          const outcome = classifyHabitLogSyncOutcome(res.status);
-          if (outcome === 'confirmed') {
-            anyConfirmed = true;
-          } else if (outcome === 'retry') {
-            // Transient-looking server failure -- keep for a later retry.
-            remaining.push(queuedItem);
-          }
-          // 'permanent-failure' (a 4xx) here -- deliberately NOT pushed back
-          // onto `remaining`, so it stops being retried, but it was also never
-          // counted in anyConfirmed, so it's never treated as a success.
-        } catch {
-          // Genuine network failure mid-replay -- still ambiguous, keep it.
-          remaining.push(queuedItem);
-        }
-      }
-
-      if (remaining.length > 0) {
-        localStorage.setItem('offline_habit_queue', JSON.stringify(remaining));
-      } else {
-        localStorage.removeItem('offline_habit_queue');
-      }
-
-      // Refresh whenever anything was attempted, not only on a confirmed
-      // success -- a permanently-discarded 4xx entry still needs the stale
-      // "pending" optimistic row cleared out of logEntries, which this
-      // full refetch-and-replace already does as a side effect.
+      const result = await replayOfflineQueue();
+      if (!active || result.attempted === 0) return;
       loadUserDataAndLogs();
-      if (anyConfirmed) loadMyDay();
+      if (result.confirmed > 0) loadMyDay();
     };
-
-    // Mount-time reconciliation (brief section 11) -- a queued entry must
-    // not depend indefinitely on a future offline -> online transition
-    // that may never come (e.g. every attempt failed with 5xx while the
-    // browser was online the whole time). This is a one-shot check on
-    // mount, never a poll/interval.
     syncOfflineLogs();
-
     window.addEventListener('online', syncOfflineLogs);
-    return () => window.removeEventListener('online', syncOfflineLogs);
-  }, [loadUserDataAndLogs, loadMyDay]);
+    return () => {
+      active = false;
+      window.removeEventListener('online', syncOfflineLogs);
+    };
+  }, [verifiedUserId, loadUserDataAndLogs, loadMyDay]);
 
   // The panchang day is defined by the USER'S timezone (their selected city),
   // never the browser clock or UTC: the weekday selects the Rahu/Gulika/Yama
@@ -1489,48 +1463,39 @@ export default function DashboardPage() {
       // the offline queue. A non-2xx response, by contrast, IS a
       // definitive answer from the server and is handled below, outside
       // this catch, never queued as if it were a connectivity problem.
-      let res: Response;
+      // AURA-ANDROID-REL-04 IR-01 -- through the account boundary
+      // (lib/activitySync.ts): refused without a verified account or during
+      // a sign-out; the request carries the expected account; a network
+      // failure queues the entry for THIS account only while it is current.
+      let outcome: Awaited<ReturnType<typeof submitActivityLog>>;
       try {
-        res = await fetch('/api/habit-logs', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify(payload),
-        });
-      } catch {
-        // Pending Activity Reload Visibility V1 -- clientRequestId is
-        // stamped here (it already exists as a local variable, generated
-        // above) so this live, in-session pending entry carries the same
-        // identity a reload-reconstructed one does. loadUserDataAndLogs's
-        // own merge needs this to tell a genuinely-still-queued pending
-        // row apart from a stale one whose replay was permanently
-        // rejected (4xx) and already removed from the queue -- without
-        // it, a permanently-failed entry could never be told apart from
-        // a real one and would linger here forever instead of being
-        // correctly cleared, regressing PR #86's own invariant.
+        outcome = await submitActivityLog(payload, tempId);
+      } catch (err) {
+        setLogEntries((prev) => prev.filter((item) => item.id !== tempId));
+        if (err instanceof AccountUnavailableError) throw err;
+        throw new Error('Unable to log this activity.');
+      }
+
+      if (outcome.kind === 'queued') {
+        // Pending Activity Reload Visibility V1 -- clientRequestId is stamped
+        // so loadUserDataAndLogs's merge can tell this still-queued pending
+        // row apart from one whose replay was permanently rejected.
         setLogEntries((prev) => prev.map((item) => (item.id === tempId ? { ...item, syncStatus: 'pending', clientRequestId } : item)));
-        const rawQueue = localStorage.getItem('offline_habit_queue');
-        const queue = rawQueue ? JSON.parse(rawQueue) : [];
-        queue.push({ ...payload, tempId });
-        localStorage.setItem('offline_habit_queue', JSON.stringify(queue));
         return 'pending';
       }
 
-      if (!res.ok) {
-        // Good Right Now / Log Activity Failure State Correctness V1 -- ANY
-        // HTTP response, 4xx or 5xx alike, is a definitive server answer,
-        // never an "offline" condition. Roll the optimistic entry back out
-        // entirely (no lingering false-success state) and reject so the
-        // caller's own catch path -- already written in every one of
-        // GoodRightNowCard/Timeline/PastActivityModal, previously
-        // unreachable because this function never used to reject --
-        // actually runs. A 4xx would fail identically on every retry (bad
-        // request/auth/unknown activity); a 5xx deserves a visible,
-        // explicitly-retryable failure, not a silent invisible queue entry.
+      if (outcome.kind !== 'confirmed') {
+        // Good Right Now / Log Activity Failure State Correctness V1 -- any
+        // HTTP answer is definitive: roll the optimistic entry back and
+        // reject so the caller's own catch path runs. Also covers an account
+        // change mid-request and a device that couldn't store the entry.
         setLogEntries((prev) => prev.filter((item) => item.id !== tempId));
-        throw new Error(`Unable to log this activity (server responded ${res.status}).`);
+        if (outcome.kind === 'rejected') throw new Error(`Unable to log this activity (server responded ${outcome.status}).`);
+        if (outcome.kind === 'not-stored') throw new Error("You're offline and this device couldn't keep the activity. Try again when you're back online.");
+        throw new AccountUnavailableError('stale');
       }
 
-      const serverLog = await res.json();
+      const serverLog = outcome.serverLog as any;
       setLogEntries((prev) =>
         prev.map((item) =>
           item.id === tempId
@@ -1583,13 +1548,14 @@ export default function DashboardPage() {
   // AURA-ANDROID-REL-04 -- signed out only once the server has removed the
   // session cookie (see lib/signOut.ts); a failed request says so instead.
   const handleLogout = useCallback(async () => {
+    // Signed-out, unconfirmed and account-changed outcomes change the account
+    // epoch, which remounts this dashboard for the next state.
     const outcome = await performSignOut({
       fetch: (url, init) => fetch(url, init),
-      storage: typeof localStorage === 'undefined' ? null : localStorage,
       confirm: (message) => window.confirm(message),
     });
-    if (outcome === 'signed-out') setUser(null);
-    else if (outcome === 'failed') window.alert(SIGN_OUT_FAILED_MESSAGE);
+    if (outcome === 'failed') window.alert(SIGN_OUT_FAILED_MESSAGE);
+    else if (outcome === 'busy') window.alert(SIGN_OUT_BUSY_MESSAGE);
   }, []);
 
   // My Day Timing Location Change Refresh V1 -- LocationPicker only ever

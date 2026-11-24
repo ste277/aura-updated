@@ -24,16 +24,12 @@ export interface QueuedHabitLog {
   tempId: string;
 }
 
-const OFFLINE_HABIT_QUEUE_KEY = 'offline_habit_queue';
-
 function isValidLogSource(value: unknown): value is NonNullable<QueuedHabitLog['logSource']> {
   return value === 'AURA_PLANNED' || value === 'AURA_DO_NOW' || value === 'MANUAL' || value === 'OVERRIDE_CAUTION';
 }
-
 function isValidActivitySignificance(value: unknown): value is NonNullable<QueuedHabitLog['activitySignificance']> {
   return value === 'LOW' || value === 'MEDIUM' || value === 'HIGH';
 }
-
 function isQueuedHabitLog(value: unknown): value is QueuedHabitLog {
   if (!value || typeof value !== 'object') return false;
   const item = value as Record<string, unknown>;
@@ -48,23 +44,145 @@ function isQueuedHabitLog(value: unknown): value is QueuedHabitLog {
 }
 
 /**
- * Reads the same localStorage key handleLogActivity/syncOfflineLogs
- * (page.tsx) already write to and read from -- no second persistence
- * mechanism. Fails closed (empty array) on any missing/corrupt/malformed
- * data, mirroring syncOfflineLogs' own `try { JSON.parse } catch { return; }`
- * degrade-gracefully behavior: never throws, never fabricates an entry
- * out of a value that doesn't actually look like a queued log.
+ * AURA-ANDROID-REL-04 IR-01 -- the queue is partitioned by VERIFIED account.
+ * Each account's entries live under their own key and carry ownerUserId, so
+ * replay for account B can never read account A's entries, a sign-out
+ * discards only the signed-out account's entries, and an account switch or
+ * session expiry leaves the previous account's entries untouched (they replay
+ * only when that account is verified again).
+ *
+ * The pre-REL-04 key (`offline_habit_queue`) holds entries with NO owner.
+ * Their owner is never inferred: they are QUARANTINED (never replayed, never
+ * shown as the current account's pending work) and removed only through an
+ * explicit, confirmed discard (lib/signOut.ts).
+ *
+ * Every mutation is a synchronous read-modify-write of the latest stored
+ * value (localStorage is synchronous within a tab), and replay removes only
+ * the ids it settled -- it never writes back a snapshot -- so a concurrent
+ * enqueue or a concurrent replay can't be overwritten, and a late completion
+ * can't restore a cleared queue.
  */
-export function readOfflineHabitQueue(): QueuedHabitLog[] {
+export const LEGACY_QUEUE_KEY = 'offline_habit_queue';
+export const QUEUE_KEY_PREFIX = 'offline_habit_queue_v2:';
+
+export interface OwnedQueuedHabitLog extends QueuedHabitLog {
+  ownerUserId: string;
+}
+
+export function queueKeyFor(ownerUserId: string): string {
+  return QUEUE_KEY_PREFIX + ownerUserId;
+}
+
+export type QueueRead = { ok: true; items: OwnedQueuedHabitLog[] } | { ok: false };
+
+function storageOrNull(): Storage | null {
   try {
-    if (typeof localStorage === 'undefined') return [];
-    const raw = localStorage.getItem(OFFLINE_HABIT_QUEUE_KEY);
-    if (!raw) return [];
-    const parsed = JSON.parse(raw);
-    if (!Array.isArray(parsed)) return [];
-    return parsed.filter(isQueuedHabitLog);
+    return typeof localStorage === 'undefined' ? null : localStorage;
   } catch {
-    return [];
+    return null;
+  }
+}
+
+/**
+ * The owner's entries. `ok:false` when storage is unavailable, throws, or
+ * holds something that isn't a queue -- callers must not treat that as
+ * "nothing pending". Entries whose ownerUserId differs are ignored.
+ */
+export function readOwnedQueue(ownerUserId: string): QueueRead {
+  const s = storageOrNull();
+  if (!s) return { ok: false };
+  try {
+    const raw = s.getItem(queueKeyFor(ownerUserId));
+    if (!raw) return { ok: true, items: [] };
+    const parsed = JSON.parse(raw);
+    if (!Array.isArray(parsed)) return { ok: false };
+    return {
+      ok: true,
+      items: parsed.filter((v): v is OwnedQueuedHabitLog => isQueuedHabitLog(v) && (v as { ownerUserId?: unknown }).ownerUserId === ownerUserId),
+    };
+  } catch {
+    return { ok: false };
+  }
+}
+
+/** Presentation read: the owner's entries, or [] if unreadable. */
+export function readOfflineHabitQueue(ownerUserId: string | null | undefined): OwnedQueuedHabitLog[] {
+  if (!ownerUserId) return [];
+  const r = readOwnedQueue(ownerUserId);
+  return r.ok ? r.items : [];
+}
+
+function writeOwned(s: Storage, ownerUserId: string, items: OwnedQueuedHabitLog[]) {
+  if (items.length === 0) s.removeItem(queueKeyFor(ownerUserId));
+  else s.setItem(queueKeyFor(ownerUserId), JSON.stringify(items));
+}
+
+/** Appends one entry for its owner. false = not stored (storage unavailable/full/corrupt). */
+export function enqueueOwned(item: OwnedQueuedHabitLog): boolean {
+  const s = storageOrNull();
+  if (!s || !item.ownerUserId) return false;
+  const current = readOwnedQueue(item.ownerUserId);
+  if (!current.ok) return false;
+  try {
+    const items = current.items.filter((i) => i.clientRequestId !== item.clientRequestId);
+    items.push(item);
+    writeOwned(s, item.ownerUserId, items);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+/** Removes exactly these clientRequestIds from the owner's latest stored queue. */
+export function removeOwnedEntries(ownerUserId: string, clientRequestIds: Iterable<string>): boolean {
+  const s = storageOrNull();
+  if (!s) return false;
+  const ids = new Set(clientRequestIds);
+  if (ids.size === 0) return true;
+  const current = readOwnedQueue(ownerUserId);
+  if (!current.ok) return false;
+  try {
+    writeOwned(s, ownerUserId, current.items.filter((i) => !ids.has(i.clientRequestId)));
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+/** Discards the owner's whole queue (confirmed sign-out only). */
+export function clearOwnedQueue(ownerUserId: string): boolean {
+  const s = storageOrNull();
+  if (!s) return false;
+  try {
+    s.removeItem(queueKeyFor(ownerUserId));
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+/** Number of quarantined legacy (unowned) entries; null if unreadable. */
+export function legacyQueueCount(): number | null {
+  const s = storageOrNull();
+  if (!s) return null;
+  try {
+    const raw = s.getItem(LEGACY_QUEUE_KEY);
+    if (!raw) return 0;
+    const parsed = JSON.parse(raw);
+    return Array.isArray(parsed) ? parsed.length : null;
+  } catch {
+    return null;
+  }
+}
+
+export function clearLegacyQueue(): boolean {
+  const s = storageOrNull();
+  if (!s) return false;
+  try {
+    s.removeItem(LEGACY_QUEUE_KEY);
+    return true;
+  } catch {
+    return false;
   }
 }
 

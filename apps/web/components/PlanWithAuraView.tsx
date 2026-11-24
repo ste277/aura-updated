@@ -368,11 +368,11 @@ function getHorizonHelper(horizon: PlanningHorizon, timezone?: string): string {
  */
 
 export async function saveUpcomingPlanFromCandidate(candidate: TimingCandidate, durationMinutes: number, options: SaveUpcomingPlanOptions = {}): Promise<UpcomingPlan> {
-  const { sharedWithName, guestConversionToken, clientRequestId, eventLocation, activityId, overlapPolicy } = options;
+  const { sharedWithName, guestConversionToken, clientRequestId, eventLocation, activityId, overlapPolicy, expectedAccountId } = options;
   const plan = planPayloadFromCandidate(candidate, durationMinutes, sharedWithName, eventLocation);
   const res = await fetch('/api/plans', {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
+    headers: { 'Content-Type': 'application/json', ...(expectedAccountId ? { 'X-Aura-Expected-Account': expectedAccountId } : {}) },
     body: JSON.stringify({
       title: plan.title,
       activityType: plan.title,

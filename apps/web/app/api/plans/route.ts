@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getSessionFromRequest } from '../../../lib/session';
+import { checkExpectedAccount } from '../../../lib/expectedAccount';
 import { DIRECT_PLAN_SCHEDULING_MODE } from '../../../lib/plannedActivitySchedulingMode';
 import { beginTransaction, createPlannedActivity, listPlannedActivities, getPlannedActivityForOwner, getGuestConversionRedemption, claimGuestConversionToken, fillGuestConversionRedemption, getPlanCreationClaim, claimPlanCreation, fillPlanCreationClaim, linkGoalActivityToPlannedActivity, lockGoalParentLifecycleForPlanning, materializeGoalActivityRhythmOccurrence, getUserById } from '../../../lib/db';
 import { parseJsonObject } from '../../../lib/request';
@@ -127,6 +128,10 @@ class PlanOverlapRejection extends Error {
 export async function POST(req: NextRequest) {
   const session = getSessionFromRequest(req);
   if (!session) return NextResponse.json({ error: 'Not authenticated.' }, { status: 401 });
+  // AURA-ANDROID-REL-04 IR-01 -- enforced when the caller states the account
+  // it is saving for (the /find sign-in-then-save flow does).
+  const accountMismatch = checkExpectedAccount(req, session.userId, { required: false });
+  if (accountMismatch) return accountMismatch;
 
   const body = await parseJsonObject(req);
   if (!body) return NextResponse.json({ error: 'A valid JSON request body is required.' }, { status: 400 });

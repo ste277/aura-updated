@@ -1,18 +1,134 @@
 # AURA-ANDROID-REL-04 — Application Release Readiness
 
-**Date:** 2026-11-24 · **Branch:** `aura-android-rel04-app-readiness`, cut from `main` `ad49e6a`
-**Mode:** code review, code fixes, offline tests, local Gradle compile/resource checks. No emulator, ADB, device, signing, Play Console, infrastructure or Production action.
+**Date:** 2026-11-24 · **Branch:** `aura-android-rel04-app-readiness`, cut from `main` `ad49e6a` · **PR:** #392
+**Revision:** R1, account isolation remediation of the independent review of `a54daf60fe562e83df96f5db90f792ce0f2341e7`.
+**Mode:** code review, code fixes, offline tests, local Gradle compile/resource checks. No emulator, ADB, device, signing, packaging, Play Console, infrastructure, live database or Production action.
 
 ## 1. Verdict
 
-**ANDROID APPLICATION — CODE-LEVEL RELEASE READINESS: COMPLETE FOR WHAT CODE CAN SETTLE. Android release: still NO-GO.**
+**REL-04 ACCOUNT ISOLATION CORRECTED — READY FOR INDEPENDENT DELTA REVIEW.** Android release is still **NO-GO**, and the PR must not be merged before that review and owner approval.
 
-Every confirmed application defect within REL-04's authority is fixed, has a regression test, and is wired into CI. What is left needs one of three things, none of which can be done in code here:
-- **owner decisions** (§10);
-- **two product features** that Google Play requires: in-app account deletion and a privacy policy (§9);
-- **device acceptance** (§11).
+- The independent review's material findings IR-01, IR-03 and IR-06 are corrected and covered by integrated regression tests.
+- IR-04 and IR-05 are documented as directed (§R4).
+- The original cross-account failure **reproduces with the reviewed head's code and is prevented on the corrected head** (§R3).
+- What remains is listed in §9 and §10: owner decisions, two Google Play product features, server-side revocation (AURA-AUTH-01), release-candidate preparation and device acceptance.
 
-Nothing in this report claims device behaviour. Every runtime claim below comes from source reading, unit/jsdom tests, or a local Gradle task.
+Nothing in this report claims device behaviour. Every runtime claim comes from source reading, unit/jsdom/in-process integration tests, or a local Gradle task.
+
+---
+
+## R1. Remediation matrix (independent review of `a54daf6`)
+
+| Finding | Requirement | Correction | Evidence |
+|---|---|---|---|
+| **IR-01** Account isolation | Bind queued activity to its verified account | The queue is per verified account: `offline_habit_queue_v2:<userId>`, and every entry carries `ownerUserId` (`lib/offlineHabitQueue.ts`). Entries are queued only through `submitActivityLog`, under the lease's verified account. | S1, S5, S7; R1 |
+| | Require verified identity before replay | `replayOfflineQueue` runs only with a verified account (the latest `GET /api/auth/session` answer that was still current) and reads only that account's key. | S1, S7, S8 |
+| | Enforce expected account at the server write boundary; never authorize from it | `lib/expectedAccount.ts`. `POST /api/habit-logs` **requires** `X-Aura-Expected-Account` equal to the session user: 409 on mismatch, 428 if absent. It is checked right after the session check, before any database read or write. `POST /api/plans` enforces it when present (the `/find` sign-in-then-save flow sends it). Authorization still comes only from the signed session cookie; the header alone never authorizes (a request with no session gets 401). | SB1–SB5, S4; R1, R3 |
+| | Reject mismatched writes without persisting | 409 before any db call (asserted: zero db calls, zero rows). | SB1, SB5, S4, R3 |
+| | Legacy unowned entries | The pre-REL-04 key is **quarantined**: never replayed, never shown as the current account's pending work. It is removed only by an explicit, confirmed discard in the sign-out question, after an acknowledged logout. Ownership is never inferred. | S6 |
+| | Concurrent replay / enqueue | Replay is single-flight per tab and per account, plus a Web Lock across tabs where available. Mutations are synchronous read-modify-writes of the latest value. Replay removes only the ids it settled; it never writes back a snapshot. | S5 |
+| | Stop old-account work during transitions | Every activity operation runs under an `AccountLease` (`lib/accountSession.ts`). A transition or account change aborts in-flight operations and refuses new ones. | S2, S8, S15 |
+| | Stale completions | Completions check `lease.isCurrent()`. A stale completion cannot queue, cannot restore a cleared queue (removal-only) and cannot update the next account's screen. | S2, S2b, S14, S15 |
+| | Clear/partition dashboard state and caches | Home is keyed on the **account epoch**: any account change remounts the dashboard, so all component state, refs and in-component caches start empty. Late responses land on the unmounted instance. Account-scoped localStorage (briefing view state) was already keyed by user id; the queue is now too. | H2–H6 |
+| | Account change, session expiry, multiple tabs | Session answers update the verified account; a change bumps the epoch. A cross-tab marker announces `signing-out`, `signed-out` and `account-verified` (with the account). The session is re-verified when the page returns to the foreground (Capacitor resume fires `visibilitychange`). | S7, S8, H5, H6 |
+| **IR-03** Sign-out transition | Prevent concurrent sign-out | Single flight: a concurrent call gets the same promise; one question, one logout request. | S13 |
+| | Exact acknowledgement; reject redirects and malformed answers | `redirect: 'error'`, `cache: 'no-store'`. Accepted only if: 200, not redirected, `application/json`, and `{ loggedOut: true }`. Anything else (204, string `"true"`, HTML, redirected, malformed) is ambiguous. | unit test 14/0; S11 |
+| | Suspend submission and replay | `beginTransition()` refuses new writes and replays, aborts running ones, and suspends other tabs. | S2, S8, F3 |
+| | Confirmation reflects actual pending work | Sign-out waits (bounded at 8 s) until no activity write is in flight, then counts. An aborted write is neither stored nor queued, so it is not counted. A write that will not settle → `busy`, still signed in. | S2, S15, S16 |
+| | Preserve pending work on cancel/failure | Cancel, HTTP failure, offline, unexpected answer → `resumed`; the account's queue is untouched. | S6, S10, S11 |
+| | Discard only the right account's work after confirmation + acknowledgement | Only the signed-out account's key, and the legacy key only if it was part of the confirmed question. Only after the exact acknowledgement. | S1, S6 |
+| | Reconcile ambiguous outcomes | Ambiguous outcomes check `GET /api/auth/session` before anything resumes:<br>• same account → resume (`failed`);<br>• signed out → signed out but the queue is **kept** for its owner (`signed-out-unconfirmed`);<br>• another account → switch;<br>• unknown → nothing authenticated until re-verified. | S12, unit test |
+| | Failing storage | Unreadable storage → the question says it couldn't check, and is asked anyway. Enqueue write failure → `not-stored`, and Home tells the user. Removal failure after acknowledgement → signed out; the undeletable entries stay partitioned under their owner and are never replayed by another account. | S9 |
+| | Stale session/dashboard responses | `fetchVerifiedSession` discards any answer whose epoch changed or that arrived during a transition. Dashboard remount (above). | S14, H4 |
+| | Same behaviour on Home and `/find` | `/find` uses the same `fetchVerifiedSession`, re-verifies on any account change and on foreground, and saves through `runActivityOperation` with the expected-account header. | F1–F3 |
+| **IR-06** Location search | Hide outdated results immediately | Results and error are stored with the query they belong to; anything for another query is hidden on the very render the query changes. | R5 |
+| | Abort obsolete requests; invalidate on unmount | One `AbortController` per query. The effect cleanup (next query or unmount) clears the debounce, aborts and retires the sequence id. | R6, R7 |
+| | No stale errors/results/loading; keep debounce | Only the latest, unaborted request updates state; 400 ms debounce unchanged. | R1–R4, R8 |
+| **IR-04** (deferred) Cookie flush | Document as best-effort | `MainActivity` comment and §3 F2 now say best-effort, not durability. Device rows D-S2 and D-S6 keep the delayed-response, interrupted-transition, cold-launch and pause-latency checks. | — |
+| **IR-05** (deferred) Release gate | Describe as partial | §7 rewritten: the gate is **partial**. Release-candidate prerequisites RC-7a…RC-7e preserved. | — |
+
+**Out of this PR, as directed:** server-side session revocation (AURA-AUTH-01).
+
+## R2. Design summary (small, shared by web, Android and iOS)
+
+```
+lib/accountSession.ts  verified account · epoch · single-flight transition (+ cross-tab marker)
+                       · tracked/abortable activity operations · foreground re-verification
+lib/activitySync.ts    submitActivityLog / replayOfflineQueue (expected-account header, per-account queue)
+lib/offlineHabitQueue  per-account keys, removal by id, legacy quarantine
+lib/signOut.ts         the transition: settle → count → confirm → exact ack → discard | reconcile
+lib/expectedAccount.ts server: header vs session (409/428) before any read/write
+app/page.tsx           <DashboardPageInner key={epoch}/>; loads, replay and writes through the above
+app/find/...           same session check, account-change listener, bound save
+```
+
+The native shells load this same web bundle, so Android and iOS get the boundary unchanged. No native code changed for IR-01/IR-03.
+
+## R3. Original defect: reproduction and corrected result
+
+`test/rel04ReviewedHeadReproduction.test.ts` runs the **reviewed head's own code** against the same in-process server and cookie-at-send semantics. The code is vendored verbatim in `test/fixtures/rel04-reviewed-head/`:
+- the habit-logs route;
+- `lib/signOut.ts`;
+- the `page.tsx` enqueue and `syncOfflineLogs` blocks.
+
+The fixtures are re-checked byte for byte against `a54daf6` when that commit is present.
+
+| Scenario | Reviewed head `a54daf6` | Corrected head |
+|---|---|---|
+| R1 A queues offline; A's session ends without an ordinary logout; B signs in on the device | **Reproduced:** A's 2 queued activities are stored under **B** | B's replay sends nothing; 0 rows under B. An out-of-date client replaying under B is refused (428). |
+| R2 A's replay is running when sign-out starts; B signs in | **Reproduced:** sign-out does not stop the replay; A's items 2 and 3 are stored under **B** | The replay is aborted by the transition; 0 rows under B (and none under A) |
+| R3 A stale tab's write meant for A arrives with B's session | **Reproduced:** accepted under B | 409, nothing stored |
+
+Result: 12/0 (4 provenance checks, 3 reproductions, 5 corrected-head checks).
+
+## R4. Integrated regression evidence
+
+| Suite | Covers | Result |
+|---|---|---|
+| `test/rel04AccountIsolation.test.ts` | **Server boundary:** SB1–SB5<br>**Scenarios:**<br>S1 A queues → sign-out → B<br>S2 replay during logout<br>S2b in-flight replay across a switch<br>S3 direct write after logout<br>S4 A identity + B session<br>S5 concurrent replay/enqueue<br>S6 legacy entries<br>S7 expiry and switch without logout<br>S8 multiple tabs<br>S9 storage read, write and remove failures<br>S10 offline / HTTP failure + retry<br>S11 HTML 200, redirect, malformed acknowledgement + retry<br>S12 lost acknowledgement<br>S13 concurrent logout<br>S14 late session answer<br>S15 in-flight write at sign-out<br>S16 unsettled write → busy | **61/0** |
+| `test/rel04HomeFindTransitionJsdom.test.ts` | The **real Home page and `/find`** mounted: H1–H4 sign-out → B with late session and dashboard responses (no A on screen; every post-switch dashboard request carries B's session); H5 session expiry noticed on foreground; H6 another tab's account switch; F1–F3 `/find` boundary, guest after sign-out, refusal during another tab's sign-out | **13/0** |
+| `test/rel04ReviewedHeadReproduction.test.ts` | §R3 | **12/0** |
+| `test/signOutRel04.test.ts` | Acknowledgement matrix (204, string `"true"`, HTML, redirected, malformed, 503, lost answer to signed-out and to B), wording | **14/0** |
+| `test/locationPickerRel04SearchRace.test.ts` | R1–R4 races; R5 immediate hide; R6 abort; R7 unmount teardown; R8 debounce | **14/0**. The reviewed head's `LocationPicker` fails R5, R6 and R7. |
+| `test/rel04Rv1TokenReplay.test.ts` | RV-1 residual (unchanged) | **8/0** |
+| `test/androidRel04AppReadiness.test.mjs` | Backup/transfer, flush, release gate, logout attributes | **48/0** |
+
+**Synthetic only:** in-process route handlers over an in-memory db stub. Unexpected db calls are recorded and fail the test. There is no database, no network, no real credential, and no device.
+
+**Updated existing suites (design change, not weakened):**
+- `pendingActivityReloadVisibility`: reads the per-account key.
+- `pendingReplayReconciliation`: replay and classification asserted in `lib/activitySync.ts`.
+- `locationPickerSmartSelection`: unchanged assertion, now satisfied.
+
+**Pre-existing failures on `main`, untouched and not in CI:** `insightsHistoryWiring` and `plannedActivityCanonicalIdentity`. Both fail identically on a clean `origin/main` export.
+
+**Full offline sweep of the CI test commands (local, no database):**
+- 341 commands were run: every `node test/...` and `npx ts-node ... test/...` line in `.github/workflows/ci.yml`, including those inside multi-line `run: |` blocks.
+- All pass except **78 `*Db.test.ts` suites**. Each of those stops at its database precondition (no `DATABASE_URL`, `InitPostgres` connection refused, or "refusing: local disposable database only"). CI's DB jobs run them.
+- The sweep found 2 regressions, both fixed and re-run:
+  - an outdated structural assertion in `pendingActivityVisualConsistency`;
+  - a duplicate `/find` session request (its account listener now reacts only to an epoch change), caught by `disc01GuestActivityDiscoveryJsdom`.
+
+Exact-head CI: see §R6.
+
+## R5. Owner decision dispositions (recorded 2026-11-24)
+
+| # | Direction | Effect on this PR |
+|---|---|---|
+| **O-1** | Backup **Option A selected**. BK-1 device verification stays mandatory. | Implemented (F1); D-S1 mandatory |
+| **O-2** | The up-to-30-day copied-session residual is **unacceptable for public release**. Per-session revocation is preferred. | RV-1 residual is a **public-release blocker** (B-6). Revocation is AURA-AUTH-01, not this PR. |
+| **O-3** | Explicit discard of **account-owned** unsynced activity is permitted after confirmed logout. | Implemented: discard only after confirmation **and** exact acknowledgement; otherwise kept |
+| **O-4** | Final release origin | Separate work (unchanged) |
+| **O-5** | **Retire S4** as a release dependency for this lineage. Preserve its guarantees through shared account transitions, server revocation and device acceptance. | FP-0, R-07 and E-1 closed as not applicable. Guarantees now come from IR-01/IR-03 (here), AURA-AUTH-01, and D-S rows. |
+| **O-6** | Keep fresh-location behaviour; no caching | No `maximumAge`; unchanged |
+| **O-7** | Preserve minSdk 29 / targetSdk 36 | Unchanged; enforced by static tests |
+| **O-8** | Privacy policy / account deletion | Separate work (unchanged) |
+
+## R6. Exact corrected head and CI
+
+The exact head SHA and its CI results are recorded in the PR #392 description and its remediation comment once CI completes on that head. This file cannot contain its own commit hash.
+
+---
 
 ## 2. Sources and restrictions
 
@@ -26,212 +142,200 @@ Nothing in this report claims device behaviour. Every runtime claim below comes 
 | `S5A_R07_E1_RELEASE_CLASSIFICATION.md` | `673c0070` |
 | `S5A_SR02_FRESH_PROCESS_TEST.md` | `5e9d755d` |
 
-Also read: the REL-03 supervised plan R1 §5, the REL-03 functional readiness report and checklist (`docs/android/`), and the current `main` source.
+Also read: the REL-03 supervised plan R1 §5, the REL-03 functional readiness report and checklist (`docs/android/`), the independent review of `a54daf6` (findings as stated in the remediation ticket), and the current source.
 
 **Restrictions honoured:**
-- The REL-03 archive was not touched; P-1 and SAS-0 were not started.
-- No emulator, ADB or device was used, and no host configuration was changed.
-- No credential or signing operation took place. No APK was packaged, so the debug keystore was never used.
-- No Play Console, infrastructure or Production change was made.
-- No merge. Auto-fix and Auto-merge are left off.
-- The only local files created outside the diff were in this worktree:
-  - `apps/web/android/local.properties`, pointing at the existing SDK (gitignored);
-  - the generated `capacitor.config.json` (gitignored), written by `npx cap sync`.
-- A combined `npx cap sync` modified `apps/web/ios/App/Podfile`. That change was reverted (see §13).
+- The REL-03 deferral and sealed archive were not touched; P-1 and SAS-0 were not started.
+- No emulator, ADB or device; no host configuration change; no credential or signing operation; no APK/AAB packaging (so the debug keystore was never used).
+- No Play Console, infrastructure, live database or Production change.
+- No merge. Auto-fix and Auto-merge stay off.
 
-## 3. Implemented fixes
+## 3. Fixes (original REL-04 set, as amended by R1)
 
-| ID | Defect (confirmed in source) | Fix | Regression test |
+| ID | Defect | Fix | Status after R1 |
 |---|---|---|---|
-| **REL04-F1 (S5A-F2 / BK-1)** | `android:allowBackup="true"` with no rules. The WebView profile (`app_webview/`: the `as_session` cookie in plaintext, plus Local Storage) goes into cloud backup and device-to-device transfer, so a restore can bring back a session that was signed out after the backup was taken. | **S5-A Option A, exactly as specified:**<br>• `allowBackup="false"`<br>• `fullBackupContent="false"` (API ≤ 30)<br>• `dataExtractionRules`, excluding all 9 domains for both `<cloud-backup>` and `<device-transfer>` (API 31+, where device transfer ignores `allowBackup`)<br>The merged manifest was checked with `processDebugResources`. | `androidRel04AppReadiness.test.mjs` §1 (24 checks) |
-| **REL04-F2** | The WebView cookie store was never flushed. Chromium writes cookie changes lazily, so a sign-in or sign-out followed quickly by process death could leave the previous cookie on disk. The fresh process would then show the wrong state, for example signed back in after a sign-out. | `MainActivity.onPause()` calls `CookieManager.getInstance().flush()`, and tolerates a missing WebView provider. It writes only; it changes no cookie. | static §2 (4 checks); device row D-S2 |
-| **REL04-F3** | Sign-out reported success it never got. `handleLogout` did `await fetch(logout); setUser(null)`:<br>• on HTTP 5xx the UI showed "signed out" while the cookie stayed valid, so the next launch was signed in again;<br>• offline, it threw and said nothing. | `lib/signOut.ts` `performSignOut()`:<br>• signed out only on a 2xx;<br>• otherwise the alert "Couldn't sign out. Check your connection and try again."<br>Home now uses it. | `signOutRel04.test.ts` (19 checks) |
-| **REL04-F4** | The offline activity-log queue (`localStorage.offline_habit_queue`) has no owner. It survived sign-out and replayed under the **next** account that signed in on the device, which is a cross-account data leak on a shared device. | After a confirmed sign-out the queue is cleared. If it still holds entries, the user is first asked: "You have N activity logs that have not synced yet… Sign out anyway?" Cancel keeps both the session and the queue. | `signOutRel04.test.ts` |
-| **REL04-F5** | The logout cookie removal omitted the issuing attributes, and the response could be cached. | The removal now uses `HttpOnly`, `Secure` (in production), `SameSite=Lax`, `Path=/` and `Max-Age=0`, plus `Cache-Control: no-store`. | `rel04Rv1TokenReplay.test.ts` |
-| **REL04-F6 (REL-03 "search race", P3)** | A slower, older city-search response overwrote newer results or error state. This is more likely on mobile networks. | A per-query sequence id in `LocationPicker`: only the newest request updates results, error or loading. Shortening the query below 2 characters retires the request in flight. | `locationPickerRel04SearchRace.test.ts`: 6/0 fixed, **3 FAIL on the `main` baseline** |
-| **REL04-F7 (A4)** | Release builds were not guarded. A release could be built against `http://localhost:3000` (the default), a LAN IP or `10.0.2.2`, with cleartext on, or without `errorPath` (a combined `cap sync`). `versionCode 1` was hard-coded. | New Gradle task `verifyReleaseServerConfig`, wired to `preReleaseBuild` only. It requires:<br>• an `https` URL whose host is not localhost or private;<br>• `cleartext` not true;<br>• `errorPath` set;<br>• WebView floor 91.<br>Versioning now reads validated `-PauraVersionCode` (1…2 100 000 000) and `-PauraVersionName`; the defaults are unchanged. The stale "Railway" production comment was corrected. | Static §3 (11 checks). Local Gradle runs below. |
-
-**Gradle evidence (local, `--offline`, JDK 17, AGP 8.10.1, Gradle 8.11.1):**
-- `:app:compileDebugJavaWithJavac` → exit 0.
-- `:app:processDebugResources` → exit 0. The merged manifest has `allowBackup="false"`, `fullBackupContent="false"` and `dataExtractionRules="@xml/data_extraction_rules"`.
-- `verifyReleaseServerConfig` on four inputs:
-
-| Input | Result |
-|---|---|
-| Dev config (`http://10.0.2.2:3000`, `cap sync android`) | **blocked**, with 3 problems listed: not https, cleartext, errorPath missing |
-| `https://aura.example.invalid` via combined `cap sync` | **blocked**: errorPath missing |
-| `https://aura.example.invalid` via `cap sync android` | **passes** |
-| `-PauraVersionCode=0` | **rejected** |
-
-- `bundleRelease --dry-run` includes the gate; `assembleDebug --dry-run` does not.
+| **F1 (S5A-F2 / BK-1)** | Backup and device transfer carried the WebView profile, including the session cookie | S5-A Option A: `allowBackup="false"`, `fullBackupContent="false"`, `data_extraction_rules.xml` excluding all 9 domains for cloud backup and device transfer | Unchanged; owner selected Option A (O-1) |
+| **F2** | Cookie changes reach disk lazily | `MainActivity.onPause()` → `CookieManager.flush()`. **Best-effort persistence, not a durability guarantee** (IR-04): asynchronous on some WebView versions; kills before or during `onPause` and responses arriving after it are not covered. Session safety rests on the server boundary and the transition, not on this. | Wording corrected |
+| **F3** | Sign-out reported success it did not get | Replaced by the IR-03 transition (§R1) | **Superseded** |
+| **F4** | Offline queue replayed under the next account | Replaced by the IR-01 per-account queue and server boundary (§R1) | **Superseded** |
+| **F5** | Logout cookie removal attributes | `HttpOnly`, `Secure` (production), `SameSite=Lax`, `Path=/`, `Max-Age=0`, `Cache-Control: no-store` | Unchanged |
+| **F6** | Search race | Completed by IR-06 (§R1) | **Completed** |
+| **F7** | Release-build guard | `verifyReleaseServerConfig` + validated versioning: a **partial** gate (§7) | Wording corrected |
 
 ## 4. Authentication and session security
 
-| Question | Finding on `main` |
+| Question | Finding |
 |---|---|
-| Issuance | `verify-code` → `createSessionToken`, which produces HMAC-SHA256 over `{userId, email, exp: +30 d}`. It is set as the `as_session` cookie: HttpOnly, SameSite=Lax, Secure in production, max-age 30 days. |
-| Server state / revocation | **None** (S5A-F3, confirmed). There is no session table and no `sessionVersion`. |
-| Logout | Clears the cookie in the client that calls it (now with the matching attributes, uncached, and reported honestly to the user: F3, F5). It cannot revoke a copied token. |
-| Expiry | Fixed 30-day `exp`, enforced in `verify()`. Not sliding; no refresh token. After expiry, `/api/auth/session` returns `user: null` and the app shows the signed-out state. |
-| Deleted user | `/api/auth/session` returns `user: null` when the user row is gone. |
-| Account switching | A new sign-in replaces the cookie in this WebView. With F2, the replacement reaches disk when the app is backgrounded. |
-| Backup / device transfer | **Closed** (F1). |
-| **RV-1 (executed in-process)** | A synthetic token, copied before logout, is **still accepted after logout**, until `exp`. This is the documented residual of revocation Option B; the test asserts it so that a later revocation change has to flip it. The token is rejected after `exp`, and a tampered token is never accepted. No database, network or real account was used. |
+| Issuance | `verify-code` → HMAC-signed `{userId, email, exp: +30 d}` cookie `as_session` (HttpOnly, SameSite=Lax, Secure in production). |
+| Server state / revocation | **None** (S5A-F3). A token copied before logout stays valid until `exp` (RV-1, executed in-process). **Unacceptable for public release** (O-2); scheduled as AURA-AUTH-01. |
+| Logout | The IR-03 transition with exact acknowledgement; the cookie is removed with its issuing attributes. |
+| Writes under the wrong account | **Closed at the server**. Activity writes require the expected account; mismatch → 409 before any read/write. Plans saves enforce it when stated. |
+| Account switching / expiry / tabs | Epoch-based isolation on the client; server boundary as the guarantee. |
+| Backup / device transfer | Closed (F1); device verification D-S1 mandatory. |
 
 ## 5. Outstanding Android findings: disposition
 
-| ID | Original requirement (S5-A) | Status on `main` after REL-04 | Class |
-|---|---|---|---|
-| **FP-0 / S5A-F1** | Fresh-process test of the **S4.2 sign-in guard**: `getSessionCookieState` returning `durable:"fresh_process"` while A's row stays on disk. | **Not applicable to `main` as written.** The S4/S4.1 guard (SessionCookie plugin, `getSessionCookieState`, `fetchWithAndroidSignInGuard`, the transition marker) **is not on `main`**: it was in the HPG2 "live-session auth" lineage that REL-03 deliberately excluded (`git grep` finds none of it). Without that guard the predicted chain cannot occur. The `main`-equivalent risk, process death before the cookie change reaches disk, is reduced by F2 and moved to device row **D-S2**. | Owner decision **O-5** (is the S4 guard required?) + device |
-| **R-07** | Require the S4.1 contract v3 `durable:"disk"`. | **Not applicable**: the contract does not exist on `main`. It applies only if O-5 brings the guard back. | Owner decision (O-5) |
-| **E-1** | Route `LoginScreen` requests through `fetchWithAndroidSignInGuard`. | **Not applicable**: the guard does not exist on `main`. | Owner decision (O-5) |
-| **BK-1** | Inspect a backup archive (API 29 and 34/36) **after** the backup decision is implemented. | Option A **implemented** (F1). Verification is device-only: row **D-S1**. | Device |
-| **RV-1** | Replay a synthetic token after logout; expected *accepted*. | **Executed in-process** (§4): accepted. The residual needs the owner's written acceptance. | Owner decision **O-2** |
-| **S5A-F4** | The production nginx access log records query strings (`?token=`). | Out of scope for the app. Magic links are already disabled outside local development (AURA-AUTH-02), so `/api/auth/verify` rejects before reading the token. The log setting itself is an infrastructure item. | Infrastructure (recorded) |
-| **REL-03 A5: location on API 29–30** | Never observed on a device. | No code defect found. The patched coarse alias is covered by the Java logic tests (15/0, 24/0). | Device **D-L1** |
-| **REL-03 A5: Android 15/16 edge-to-edge, keyboard, predictive back, large screens** | Device only. | Code review: insets go to WebView margins (bars, cutout, IME); Back uses `OnBackPressedCallback` everywhere (`MainActivity` and `@capacitor/app` 6.0.3), which is compatible with target-36 predictive back. Capacitor 6 is not officially validated at target 36. | Device **D-U1…D-U4** |
-| **REL-03 A5: permission-spinner lifecycle** | F-3: a dropped permission callback leaves the button disabled until remount. | Accepted in M2-D; device only. | Device **D-L5** |
-| **REL-03 A5: `errorPath` after `cap sync`** | A combined sync drops it. | **Now enforced for release builds** (F7). | Closed for release |
+| ID | Status |
+|---|---|
+| **FP-0 / S5A-F1, R-07, E-1** | **Closed as not applicable.** They target the S4/S4.1 guard, which is not on `main`. The owner retired S4 as a release dependency (O-5). |
+| **BK-1** | Option A implemented; **device verification mandatory** (D-S1). |
+| **RV-1** | Executed in-process: residual confirmed; **public-release blocker** (O-2 → AURA-AUTH-01). |
+| **S5A-F4** | Infrastructure item, recorded (nginx query-string logging). |
+| **REL-03 A5 device-only risks** | Unchanged; device rows D-L*, D-U*. |
 
 ## 6. Native application experience: review
 
-| Area | Finding | Action |
-|---|---|---|
-| Native geolocation | Coarse only; plugin patched and gated in Gradle; 30 s native timeout with "Still finding…" at 10 s; late results discarded; F1 supersede present. | No new defect. `maximumAge` stays an owner/privacy decision (O-6). |
-| Permission handling / permanent denial | Always asks Android when not granted. On permanent denial, "Open Settings" opens App info (navigates only). On resume, the error clears without prompting. | No new defect; device rows D-L2…D-L4. |
-| Timeout / retry | Timers are cleared on settle or unmount; retry is possible after a timeout; single-flight native request. | No new defect. |
-| Back button | Covers modals, the history stack, root exit, signed-out exit, fallback pages and kept 4xx pages. | No new defect. |
-| Authentication persistence | **F2, F3, F4** fixed. | Done. |
-| App lifecycle / resume | Connection page retries once on `onRestart`; briefing refresh on visibility (bounded); location re-check on `resume`; cookie flush on `onPause` (F2). | Done. |
-| Offline / network errors | Main frame: network error or 5xx shows the bundled connection page with "Try again"; a 4xx keeps the app's page. In-app: the offline log queue replays on `online` and on mount; search, sign-in and sign-out show typed errors. | Search race (F6) and sign-out (F3) fixed. |
-| Mobile layout / safe area | Edge-to-edge on API 29–36. The WebView gets margins equal to the bars, cutout and IME, and insets are consumed so the CSS does not pad twice. Dark bars. | No defect in code; device rows D-U1/D-U2. |
+Unchanged from the original review, except as amended in R1:
+- authentication persistence and sign-out (IR-03);
+- offline replay (IR-01);
+- location search (IR-06);
+- the cookie flush, now described as best-effort (IR-04).
+
+| Area | State |
+|---|---|
+| Geolocation | Coarse only; fresh fix (no `maximumAge`, O-6) |
+| Permission flows | No new defect |
+| Timeout / retry | No new defect |
+| Back button | `OnBackPressedCallback` everywhere; predictive-back compatible |
+| Lifecycle / resume | Session re-verified on foreground (R1) |
+| Offline | Connection page; account-bound queue (R1) |
+| Safe area | Unchanged |
 
 ## 7. Release configuration
 
+The **release gate is partial** (IR-05). `verifyReleaseServerConfig` runs before release builds and rejects the following, using the generated `capacitor.config.json`:
+- a non-HTTPS or local/private `server.url`;
+- cleartext;
+- a missing `errorPath`;
+- a WebView floor other than 91.
+
+It does **not** prove:
+- that the URL is the **final release origin** (O-4);
+- the **effective** configuration inside the packaged artefact;
+- that the **merged assets** in the AAB match the synced config;
+- that an **explicit release version** was supplied (defaults 1 / "1.0" still build);
+- the WebView policy on devices without Google WebView, such as **Huawei/HMS** devices.
+
+These stay release-candidate prerequisites RC-7a…RC-7e (§12).
+
 | Item | State |
 |---|---|
-| minSdk | **29 (Android 10), preserved**; enforced by the existing static test. |
-| target / compile SDK | 36 / 36. Google Play requires target 36 for new apps and updates from 31 Aug 2026. |
-| Toolchain | AGP 8.10.1, Gradle 8.11.1, JDK 17; SDK platforms 34 and 36 installed locally. |
-| Capacitor | 6.2.1 (pinned at 6 because 7 needs Xcode 16+). Not officially validated at target 36, which is the device risk D-U*. |
-| AndroidX | appcompat 1.6.1, core 1.12.0, activity 1.8.0, webkit 1.9.0: Capacitor 6 defaults, compiled cleanly against 36. Upgrading is not needed for release; doing so would be a separate ticket. |
-| Manifest | Permissions are INTERNET and ACCESS_COARSE_LOCATION only. One exported launcher activity (required). FileProvider not exported. Backup and transfer off (F1). No `usesCleartextTraffic`. Release cleartext is blocked by F7. |
-| Release build type | `minifyEnabled false` (Capacitor plugins use reflection; no R8 keep rules were prepared). Not debuggable by default. **No signing config** (signing is an owner action). |
-| Versioning | `-PauraVersionCode` (must increase on every Play upload) and `-PauraVersionName`. Defaults stay 1 / "1.0". |
-| 16 KB page size | The app ships no native `.so` of its own (Capacitor and plugins are Java/Kotlin). Confirm on the built AAB (RC-7). |
+| minSdk / target / compile | 29 / 36 / 36 (O-7) |
+| Toolchain | AGP 8.10.1, Gradle 8.11.1, JDK 17 |
+| Capacitor | 6.2.1; not officially validated at target 36 (device rows D-U*) |
+| Manifest | INTERNET + ACCESS_COARSE_LOCATION; backup/transfer off; no cleartext |
+| Release build type | `minifyEnabled false`; no signing config (owner action) |
+| Versioning | `-PauraVersionCode` / `-PauraVersionName` (validated) |
 
-**AAB build procedure (for the RC; not executed):**
-1. In `apps/web`: run `npm ci`. Scripts must stay enabled, because the geolocation patch is gated.
-2. `CAP_SERVER_URL=https://<production-host> npx cap sync android` (Android only, never a combined sync).
-3. `cd android && ./gradlew bundleRelease -PauraVersionCode=<n> -PauraVersionName=<x.y.z>`. The gate runs first; the output is an **unsigned** `app/build/outputs/bundle/release/app-release.aab`.
-4. The owner signs it with the **upload key**, outside the repo. Play App Signing holds the app signing key.
+## 8. Validation results
 
-## 8. Validation results (this branch)
+See §R4 for the REL-04 suites and §R6 for exact-head CI. Existing Android/location suites were re-run on this branch and all pass:
+- minimum support 74/0;
+- COMPAT-03 21/0, 15/0, 24/0;
+- COMPAT-05 160/0;
+- M2-D 63/0;
+- timeout diagnostics 14/0;
+- StrictMode 19/0;
+- REL-03 supersede 14/0;
+- IOS-02 35/0;
+- reverse-geocode POST 19/0;
+- smart selection, native geolocation, location search API, back navigation and clientId: all PASS.
 
-**New tests (all wired into CI):**
-- `androidRel04AppReadiness.test.mjs`: **48/0**
-- `signOutRel04.test.ts`: **19/0**
-- `rel04Rv1TokenReplay.test.ts`: **8/0**
-- `locationPickerRel04SearchRace.test.ts`: **6/0** (3 FAIL on the baseline)
+`tsc --noEmit` (`apps/web`) is clean. Gradle compile and resource checks are as in the original report.
 
-**Existing suites, re-run on this branch:**
+**Not run:** DB-backed suites against a real database; anything needing an emulator, ADB, a device, signing, secrets, the network or Production; packaging.
 
-| Suite | Result |
-|---|---|
-| Android minimum support (static) | 74/0 |
-| COMPAT-03 patch script | 21/0 |
-| COMPAT-03 Java logic | 15/0 |
-| COMPAT-03 Java logic harness | 24/0 |
-| COMPAT-05 shortOffset | 160/0 |
-| clientId | PASS |
-| back navigation | PASS |
-| location search API | PASS |
-| LocationPicker smart selection | PASS |
-| LocationPicker native geolocation | PASS |
-| reverse-geocode POST route | 19/0 |
-| M2-D reliability | 63/0 |
-| timeout diagnostics | 14/0 |
-| StrictMode lifecycle | 19/0 |
-| REL-03 supersede | 14/0 |
-| IOS-02 errors and privacy | 35/0 |
-| pending activity reload visibility | PASS |
-
-**Type check and Gradle:** `apps/web` `tsc --noEmit` clean. The Gradle checks are listed in §3.
-
-**Not run:**
-- DB-backed suites;
-- anything needing an emulator, ADB, a device, signing, secrets, the network or Production;
-- APK or AAB packaging.
-
-## 9. Remaining application blockers
+## 9. Remaining release blockers
 
 | # | Blocker | Needs |
 |---|---|---|
-| **B-1** | **In-app account deletion is missing on `main`.** Google Play requires apps that create accounts to offer deletion in the app and through a web link. It existed only in the unmerged HPG2 lineage. | A product feature (schema and API), plus owner scoping |
-| **B-2** | **No privacy policy page** on the app origin. Play requires one, and it feeds the Data safety form (email, approximate location, activity logs). | Content and owner approval |
-| **B-3** | Production `CAP_SERVER_URL`: which hosted HTTPS origin the release loads. | Owner decision (O-4) |
-| **B-4** | Device acceptance (§11), including BK-1 and the D-S rows. | Supervised run (REL-03 R2 or alternative) |
-| **B-5** | Upload key, Play App Signing enrolment, Play Console set-up. | Owner (RC-4…RC-6) |
+| B-1 | In-app account deletion (Google Play) | O-8 product work |
+| B-2 | Privacy policy page (Google Play) | O-8 content + approval |
+| B-3 | Final release origin `CAP_SERVER_URL` | O-4 |
+| B-4 | Device acceptance (§11), including BK-1 and the D-S rows | Supervised run |
+| B-5 | Upload key, Play App Signing, Play Console | Owner (RC-4…RC-6) |
+| **B-6** | **Server-side per-session revocation** (RV-1 residual unacceptable for public release, O-2) | AURA-AUTH-01 |
+| B-7 | Independent delta review of this remediation, then owner approval to merge | Codex delta review (§13) |
+| B-8 | Release-gate completion (RC-7a…RC-7e) | RC preparation |
 
 ## 10. Owner decisions
 
-| # | Decision | Recommendation |
-|---|---|---|
-| **O-1** | Ratify backup **Option A** as implemented (F1). The S5-A decision box was unsigned. | Ratify. After a phone change the user signs in again. |
-| **O-2** | Revocation: **Option B**. Accept in writing the residual of up to 30 days for a copied token (RV-1 confirmed it), optionally with a shorter lifetime, and schedule a `sessionVersion` revocation before wider rollout. | B now; `sessionVersion` before wider rollout. |
-| **O-3** | Discarding the offline queue on sign-out after the prompt (F4). The alternative, binding queue entries to a user id, is a larger change. | Accept as implemented. |
-| **O-4** | Production origin for `CAP_SERVER_URL`. | The Production domain already serving the web app. |
-| **O-5** | Is the S4/S4.1 sign-in guard (FP-0, R-07, E-1, RV-02 lineage) required for release, or is `main`'s simpler model (server cookie, plus F2 and F3) acceptable? | Accept `main`'s model for a controlled release, with D-S2 and D-S3 passing on a device. Revisit if device testing shows stale sessions. |
-| **O-6** | `maximumAge` 5–10 min for the location fix (privacy sign-off), and whether to hide GPS when city lookup is not configured. | Carried from REL-03. |
-| **O-7** | Ratify minSdk 29 and target 36 (REL-03 governance caveat). | Ratify. |
-| **O-8** | Account deletion scope (B-1) and privacy policy text (B-2). | Required before any Play track beyond internal testing. |
+All directions recorded in §R5. Still open:
+- O-4 (final release origin);
+- O-8 (privacy policy and account deletion scope);
+- approval to merge after the delta review.
 
 ## 11. Consolidated final device acceptance checklist
 
-**Rules carried from REL-03:**
-- one build SHA; a disposable account; a non-production backend;
+**Rules:**
+- one build SHA, disposable synthetic accounts A and B, a non-production backend;
 - no coordinates recorded;
-- 0 FATAL / 0 ANR; no spinner over 31 s;
-- record device, API level and location settings.
+- 0 FATAL / 0 ANR; no spinner over 31 s.
 
-**Device coverage:** API 29 or 30, API 34, and API 36 (physical where marked P).
+**Device coverage:** API 29 or 30, API 34, and API 36 (P = physical preferred).
 
 | # | Area | Steps | Pass |
 |---|---|---|---|
-| R1–R10 | REL-03 rows 1–10 (launch, permissions, deny, Settings recovery, GPS and timeout, F1 supersede, manual city, background, Back, Find a Time, save and sign-in) | As in `AURA_ANDROID_REL_03_DEVICE_ACCEPTANCE_CHECKLIST.md` | As written there |
-| **D-S1 (BK-1)** | Backup and transfer | Signed in on the debug RC: `bmgr backupnow` with a local transport (API 34/36) and `adb backup` (API 29/30); list the archive; on API 31+, a device-transfer emulation if available | No `app_webview/` (and no app data) in any archive or transfer. After restore or transfer the app opens **signed out**. |
-| **D-S2** | Cookie persistence across process death | (a) Sign in → background within 3 s → swipe from Recents → cold launch. (b) Sign out → background within 3 s → swipe → cold launch. Repeat 5×. | (a) always signed in; (b) always signed out |
-| **D-S3** | Honest sign-out | Airplane mode → Sign out | The alert "Couldn't sign out…" appears and the app stays signed in. Online again → Sign out → signed out. |
-| **D-S4** | Queue on sign-out | Offline, log 2 activities → online server down → Sign out | The prompt names 2 logs. Cancel keeps both the session and the logs; OK signs out. Signing in as B never shows A's logs. |
-| **D-S5** | Account switch | Sign out A → sign in B → cold launch | B is shown; A never reappears |
-| **D-L1** | Location on API 29–30 (P preferred) | Run REL-03 rows 2–5 | A fix or a clean timeout; never a crash |
-| **D-L2…L4** | Permission flows on API 34/36 | REL-03 rows 3, 4, 4b | As written there |
-| **D-L5** | Permission-spinner lifecycle | Rotate, toggle dark mode, and background while the dialog is open | No duplicate dialog; the button returns within 31 s, or F-3 is recorded |
-| **D-L6** | Search race (optional) | Throttled network: type "Ko", then "Kollam" | Kollam results remain |
-| **D-U1** | Edge-to-edge (API 35/36, and API 29) | Every tab, modal and sheet; gesture and 3-button navigation; cutout device | Nothing under the bars or cutout; no double padding |
-| **D-U2** | Keyboard | Sign-in code field, location search, notes | The focused field stays visible; the layout recovers on close |
-| **D-U3** | Predictive back (API 36) | Back gesture from a modal, a sub-tab and the root | Matches REL-03 row 8; no premature exit |
-| **D-U4** | Large screen / fold | Tablet or resizable emulator; rotate | Usable layout; no clipped content |
-| **D-N1** | Connection page | Server down → launch; then server up → "Try again" | The page shows; one retry loads the app; Back exits |
-| **D-N2** | WebView floor | Device or emulator with WebView below 91 (if obtainable) | `unsupported-webview.html` shows |
-| **D-R1 (P)** | Release build from the internal track | Install the Play-signed build from internal testing; repeat R1, R2, D-S2, D-S3 | All pass on a physical device |
-| **D-R2** | Play pre-launch report | Review it after the internal upload | No crash or ANR; accessibility warnings triaged |
+| R1–R10 | REL-03 rows 1–10 | As in `AURA_ANDROID_REL_03_DEVICE_ACCEPTANCE_CHECKLIST.md` | As written there |
+| **D-S1 (BK-1, mandatory)** | Backup and transfer | Signed in on the debug RC: `bmgr backupnow` with a local transport (API 34/36), `adb backup` (API 29/30), device-transfer emulation where available; list each archive | No `app_webview/` and no app data in any archive; after restore or transfer the app opens **signed out** |
+| **D-S2** | Cookie persistence (best-effort) across process death | (a) Sign in → background within 3 s → swipe from Recents → cold launch. (b) Sign out → same. 5× each. Repeat with the logout **response delayed** (slow network, so the answer lands after backgrounding) and with the swipe **during** the sign-out. | (a) signed in; (b) signed out, or, where the acknowledgement never arrived, the app reconciles to the server's real state at cold launch and never shows a "signed out" screen while the server still has A. Record every deviation, with the pause-to-kill latency. |
+| **D-S3** | Honest sign-out | Airplane mode → Sign out; then a captive-portal Wi-Fi (HTML 200) if available | "Couldn't sign out…"; still A; online retry signs out |
+| **D-S4** | Pending activity at sign-out (updated) | Offline, log 2 activities as A. Then each of: | |
+| | (a) Cancel | Sign out → question names 2 logs → **Cancel** | Still A; both logs pending; they sync later as A |
+| | (b) Confirm, online | Sign out → **OK** | Signed out; logs removed; sign in as B → B never shows or receives A's logs |
+| | (c) Logout fails | Server down or airplane → Sign out → OK | "Couldn't sign out…"; still A; both logs kept and sync as A when online |
+| | (d) Lost acknowledgement | Drop the connection right after the request is sent (proxy) | After reconnect, the app shows the server's real state; if signed out, A's logs are **kept** (not discarded) and never appear for B |
+| | (e) Replay running | Online with a slow network, open the app (replay starts) → Sign out immediately | Question counts the logs still pending; after B signs in, no A log appears in B's history |
+| | (f) Storage unavailable | Not device-feasible; covered by S9 | — |
+| **D-S5** | Account switch | Sign out A → sign in B → cold launch; then background and foreground the app | B shown; A never reappears; no A data on any tab |
+| **D-S6** | Interrupted transition / pause latency | Start sign-out, press Home mid-request; return after 10 s; cold launch | Either fully signed out or fully A; never a mix; no stuck spinner |
+| **D-S7** | Session expiry | Synthetic account with a short-lived token (test backend), wait past expiry, foreground the app | Signed-out screen; no A data |
+| **D-L1…L6** | Location | API 29–30 acquisition; permission flows; spinner lifecycle; search on a throttled network ("Ko" → "Kollam": no "Ko" row is selectable) | As in REL-03; IR-06 behaviour |
+| **D-U1…U4** | Edge-to-edge, keyboard, predictive back, large screens | — | As in the original checklist |
+| **D-N1/N2** | Connection page; WebView floor | — | As in the original checklist |
+| **D-R1 (P)/R2** | Release build from internal track; pre-launch report | — | As in the original checklist |
 
 ## 12. Release-candidate preparation requirements
 
-| # | Item | Owner / where |
-|---|---|---|
-| RC-1 | Merge this PR after review and CI | Owner approval |
-| RC-2 | Resolve B-1, B-2 and O-1…O-8 | Owner / product |
-| RC-3 | Choose the RC commit; build the debug RC for device acceptance (§11) | Engineering, with authorization |
-| RC-4 | Google Play developer account. If it is a personal account created after Nov 2023, a closed test (12+ testers for 14 days) is required before production. | Owner |
-| RC-5 | Play App Signing enrolment; generate the **upload key** and store it outside the repo, with a recorded backup | Owner |
-| RC-6 | Store listing, content rating, Data safety (email, approximate location, activity data; encrypted in transit; deletion per B-1), privacy policy URL, target audience, internal tester list | Owner |
-| RC-7 | Build the AAB (§7) with `auraVersionCode` ≥ 1; confirm 16 KB alignment and that no debuggable flag is set (`bundletool` / APK Analyzer) | Engineering, with authorization |
-| RC-8 | Upload to **internal testing** only; run D-R1 and D-R2 | Owner GO |
+| # | Item |
+|---|---|
+| RC-1 | Delta review (B-7) → owner approval → merge |
+| RC-2 | Resolve B-1, B-2, B-3, B-6 |
+| RC-3 | RC commit; debug RC for device acceptance (§11) |
+| RC-4…RC-6 | Play account (closed-test rule), Play App Signing + upload key, listing, Data safety, privacy URL, testers |
+| **RC-7a** | Validate the **final release origin** (O-4) in the synced config |
+| **RC-7b** | Inspect the **effective configuration** in the built AAB (`capacitor.config.json` in assets) |
+| **RC-7c** | Verify **merged assets** (connection and WebView-floor pages, plugin config) in the AAB |
+| **RC-7d** | Supply an **explicit release version** (`auraVersionCode` > every prior upload; `auraVersionName`); do not ship defaults |
+| **RC-7e** | Decide the **Huawei/no-Google-WebView policy** (WebView floor behaviour on HMS devices; distribute or exclude) |
+| RC-7f | 16 KB alignment, not debuggable (`bundletool` / APK Analyzer) |
+| RC-8 | Internal testing upload; D-R1, D-R2 |
 
-## 13. Observations (not fixed; outside scope)
+## 13. Independent delta review request
 
-- **iOS Podfile drift:** a combined `npx cap sync` adds the `CapacitorApp` and `CapacitorGeolocation` pods to `apps/web/ios/App/Podfile`, which `main` does not list. iOS is outside REL-04; the change was reverted here and needs an iOS ticket.
-- **Pre-existing deprecation notes:** `MainActivity` calls `setStatusBarColor` and `setNavigationBarColor` below API 35 only. These are expected; no action.
-- **R-8 (web only):** an ignored browser permission prompt leaves the web button busy. This is unchanged and web only.
+A focused **Codex** delta review is requested, from a model outside the implementing lineage.
+
+**Scope:** `a54daf6..<corrected head>` (see §R6).
+
+**Questions:**
+1. Can any activity write be stored under an account other than the one the user saw, including:
+   - requests already on the wire;
+   - replays;
+   - other tabs;
+   - session expiry;
+   - lost logout acknowledgements?
+2. Is the server check (`lib/expectedAccount.ts`) placed before every read and write in both routes, and does the header ever authorize?
+3. Can a stale completion restore a cleared queue or previous-account data on Home or `/find`?
+4. Are legacy entries ever replayed or attributed?
+5. Is every ambiguous logout outcome reconciled before authenticated work resumes?
+6. Are the IR-06 search guarantees complete?
+7. Do the tests exercise real client transitions and the real route handlers, as claimed?
+
+**Not in scope:** server-side revocation (AURA-AUTH-01), device behaviour, release preparation.
+
+## 14. Observations (outside scope)
+
+- **Out-of-date clients:** a page loaded before this change, still open after deploy, gets 428 on activity writes. Its own replay treats 4xx as permanent and drops that entry, which is safe but loses the entry; the user sees a failed log. Reloading picks up the new client.
+- **`useHabitLogs` and the `PastActivityModal` fallback:** both are unused by the app. They post without the header and so fail closed (428).
+- **iOS Podfile drift** from a combined `cap sync` (reverted; needs an iOS ticket).
+- **`insightsHistoryWiring` / `plannedActivityCanonicalIdentity`:** these fail on `main` (not in CI).

@@ -242,14 +242,14 @@ check(
 );
 
 check(
-  'syncOfflineLogs still unconditionally calls loadUserDataAndLogs() after every replay attempt (success or permanent failure), and loadMyDay() only when anyConfirmed -- the exact pre-existing refresh path this fix reuses, not a new one',
-  /loadUserDataAndLogs\(\);\s*if \(anyConfirmed\) loadMyDay\(\);/.test(pageSource)
+  'syncOfflineLogs still calls loadUserDataAndLogs() after every replay attempt (success or permanent failure), and loadMyDay() only when something was confirmed -- the same refresh path (AURA-ANDROID-REL-04: replay now in lib/activitySync.ts)',
+  /if \(!active \|\| result\.attempted === 0\) return;\s*loadUserDataAndLogs\(\);\s*if \(result\.confirmed > 0\) loadMyDay\(\);/.test(pageSource)
 );
 
 check(
-  'syncOfflineLogs still classifies each replayed item via classifyHabitLogSyncOutcome and still rewrites the queue to hold only what remains genuinely retry-worthy -- queue retry classification/persistence untouched',
-  /const outcome = classifyHabitLogSyncOutcome\(res\.status\);/.test(pageSource) &&
-    /localStorage\.setItem\('offline_habit_queue', JSON\.stringify\(remaining\)\);/.test(pageSource)
+  'replay still classifies each item via classifyHabitLogSyncOutcome and keeps only what remains retry-worthy (AURA-ANDROID-REL-04: removes only settled ids from the owner\'s queue)',
+  /const outcome = classifyHabitLogSyncOutcome\(status\);/.test(fs.readFileSync('apps/web/lib/activitySync.ts', 'utf8')) &&
+    /removeOwnedEntries\(lease\.account, settled\)/.test(fs.readFileSync('apps/web/lib/activitySync.ts', 'utf8'))
 );
 
 // ============================================================

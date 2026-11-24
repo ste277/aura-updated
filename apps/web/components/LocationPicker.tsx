@@ -296,6 +296,10 @@ export function LocationPicker({ currentCity, currentLatitude, currentLongitude,
   const [searchLoading, setSearchLoading] = useState(false);
   const [searchError, setSearchError] = useState<string | null>(null);
   const [searchResults, setSearchResults] = useState<GeocodeResultDto[]>([]);
+  // AURA-ANDROID-REL-04 IR-06 -- the query the current results/error belong
+  // to. Anything for another query is hidden on the very render the query
+  // changes, before any effect or response.
+  const [searchFor, setSearchFor] = useState('');
   const searchDebounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   // AURA-ANDROID-REL-04 -- id of the newest search request; an older, slower
   // response must never replace newer results (REL-03 "search race").
@@ -339,40 +343,55 @@ export function LocationPicker({ currentCity, currentLatitude, currentLongitude,
   useEffect(() => {
     if (searchDebounceRef.current) clearTimeout(searchDebounceRef.current);
     const query = searchQuery.trim();
-    // Any change of the query retires every request already in flight.
+    // AURA-ANDROID-REL-04 IR-06 -- each query gets its own sequence id and
+    // AbortController. The cleanup below (next query OR unmount) clears the
+    // debounce, aborts the request and retires the id, so an obsolete
+    // request can never change results, error or loading state.
     const seq = ++searchSeqRef.current;
-    const isLatest = () => searchSeqRef.current === seq;
+    const controller = new AbortController();
+    const isLatest = () => searchSeqRef.current === seq && !controller.signal.aborted;
+    setSearchLoading(false);
     if (query.length < 2) {
       setSearchResults([]);
       setSearchError(null);
-      setSearchLoading(false);
-      return;
+      setSearchFor(query);
+      return () => { controller.abort(); };
     }
     searchDebounceRef.current = setTimeout(async () => {
+      if (!isLatest()) return;
       setSearchLoading(true);
       setSearchError(null);
       try {
-        const res = await fetch(`/api/location/search?q=${encodeURIComponent(query)}`);
+        const res = await fetch(`/api/location/search?q=${encodeURIComponent(query)}`, { signal: controller.signal });
         const data = await res.json().catch(() => ({}));
         if (!isLatest()) return;
         if (res.ok) {
           setSearchResults(Array.isArray(data.results) ? data.results : []);
+          setSearchError(null);
         } else {
           setSearchResults([]);
           setSearchError(typeof data.error === 'string' ? data.error : 'Search is temporarily unavailable.');
         }
+        setSearchFor(query);
       } catch {
         if (!isLatest()) return;
         setSearchResults([]);
         setSearchError("Couldn't search right now. Please try again.");
+        setSearchFor(query);
       } finally {
         if (isLatest()) setSearchLoading(false);
       }
     }, 400);
     return () => {
       if (searchDebounceRef.current) clearTimeout(searchDebounceRef.current);
+      controller.abort();
+      if (searchSeqRef.current === seq) searchSeqRef.current++;
     };
   }, [searchQuery]);
+
+  const searchIsCurrent = searchFor === searchQuery.trim();
+  const visibleSearchResults = searchIsCurrent ? searchResults : [];
+  const visibleSearchError = searchIsCurrent ? searchError : null;
 
   // "Use my current location" -- requested ONLY on explicit tap, never on
   // mount or automatically. Covers: unsupported browser/insecure context,
@@ -1187,17 +1206,17 @@ export function LocationPicker({ currentCity, currentLatitude, currentLongitude,
         {searchLoading && (
           <div style={{ fontSize: 11, color: 'var(--as-text-muted)', marginTop: 4 }}>Searching...</div>
         )}
-        {searchError && (
+        {visibleSearchError && (
           <div role="alert" style={{ fontSize: 11, color: 'var(--as-danger, var(--as-rahu))', marginTop: 4 }}>
-            {searchError}
+            {visibleSearchError}
           </div>
         )}
-        {!searchLoading && !searchError && searchQuery.trim().length >= 2 && searchResults.length === 0 && (
+        {!searchLoading && !visibleSearchError && searchIsCurrent && searchQuery.trim().length >= 2 && visibleSearchResults.length === 0 && (
           <div style={{ fontSize: 11, color: 'var(--as-text-muted)', marginTop: 4 }}>
             No matches found. Try a different spelling, or enter it manually below.
           </div>
         )}
-        {searchResults.length > 0 && (
+        {visibleSearchResults.length > 0 && (
           <div
             style={{
               marginTop: 6,
@@ -1207,7 +1226,7 @@ export function LocationPicker({ currentCity, currentLatitude, currentLongitude,
               overflow: 'hidden',
             }}
           >
-            {searchResults.map((result, i) => (
+            {visibleSearchResults.map((result, i) => (
               <button
                 key={`${result.cityName}-${result.latitude}-${result.longitude}-${i}`}
                 type="button"
@@ -1223,7 +1242,7 @@ export function LocationPicker({ currentCity, currentLatitude, currentLongitude,
                   padding: '8px 10px',
                   background: 'transparent',
                   border: 'none',
-                  borderBottom: i < searchResults.length - 1 ? '1px solid var(--as-border-subtle, var(--as-border))' : 'none',
+                  borderBottom: i < visibleSearchResults.length - 1 ? '1px solid var(--as-border-subtle, var(--as-border))' : 'none',
                   cursor: 'pointer',
                 }}
               >
@@ -1235,7 +1254,7 @@ export function LocationPicker({ currentCity, currentLatitude, currentLongitude,
             ))}
           </div>
         )}
-        {(searchResults.length > 0 || gpsError === null) && pending === null && searchQuery.trim().length >= 2 && (
+        {(visibleSearchResults.length > 0 || gpsError === null) && pending === null && searchQuery.trim().length >= 2 && (
           // OpenCage's free-tier terms require attribution wherever its
           // results are shown to an end user -- see this PR's own provider
           // decision memo. Kept small/quiet (not a promotional banner),

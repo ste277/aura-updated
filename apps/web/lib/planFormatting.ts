@@ -479,4 +479,8 @@ export interface SaveUpcomingPlanOptions {
    * time save (My Day story card) sends 'REJECT_ACTIVE_OVERLAP'; only an
    * explicit user "Save anyway" re-sends the same payload with 'ALLOW'. */
   overlapPolicy?: 'ALLOW' | 'REJECT_ACTIVE_OVERLAP';
+  /** AURA-ANDROID-REL-04 IR-01 -- OPTIONAL. The verified account this save is
+   * for; sent as X-Aura-Expected-Account so the server refuses the save (409,
+   * nothing written) if the session belongs to another account. */
+  expectedAccountId?: string;
 }

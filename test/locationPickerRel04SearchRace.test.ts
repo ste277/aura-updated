@@ -33,16 +33,18 @@ installMock('@capacitor/geolocation', { Geolocation });
 installMock('@capacitor/app', { App });
 
 // ---------- controllable search fetch ----------
-type Pending = { q: string; resolve: (names: string[]) => void; reject: () => void };
+type Pending = { q: string; resolve: (names: string[]) => void; reject: () => void; signal?: AbortSignal };
 const pending: Pending[] = [];
 const place = (name: string) => ({ displayName: name, cityName: name, latitude: 0, longitude: 0, timezone: 'UTC' });
-(global as any).fetch = (url: string) => {
+(global as any).fetch = (url: string, init?: { signal?: AbortSignal }) => {
   const u = String(url);
   if (u.startsWith('/api/location/search')) {
     const q = decodeURIComponent(u.split('q=')[1] ?? '');
     return new Promise((resolve, reject) => {
+      init?.signal?.addEventListener('abort', () => { const e = new Error('aborted'); e.name = 'AbortError'; reject(e); });
       pending.push({
         q,
+        signal: init?.signal,
         resolve: (names) => resolve({ ok: true, status: 200, json: async () => ({ results: names.map(place) }) }),
         reject: () => reject(new TypeError('Failed to fetch')),
       });
@@ -114,6 +116,60 @@ async function run() {
     await typeAndDebounce(c, 'Kochi');
     await settle(() => byQ('Kochi').resolve(['Kochi']));
     check('R4 control: an uncontested search shows its results', resultButtons(c, /^Kochi/).length === 1);
+    await h.unmount();
+  }
+
+  // R5 (IR-06) -- results of an outdated query are hidden on the very
+  // render the query changes, before the debounce or any response.
+  {
+    pending.length = 0;
+    const h = await mount(picker()); const c = h.container;
+    await typeAndDebounce(c, 'Kol');
+    await settle(() => byQ('Kol').resolve(['Kollam']));
+    check('R5 precondition: Kollam row is shown for "Kol"', resultButtons(c, /^Kollam/).length === 1);
+    await typeInto(c.querySelector('#location-picker-search') as HTMLInputElement, 'Kot');
+    check('R5 the "Kol" row is gone immediately after typing "Kot" (cannot be selected for the wrong query)', resultButtons(c, /^Kollam/).length === 0);
+    await h.unmount();
+  }
+
+  // R6 (IR-06) -- an obsolete in-flight request is aborted.
+  {
+    pending.length = 0;
+    const h = await mount(picker()); const c = h.container;
+    await typeAndDebounce(c, 'Che');
+    await typeAndDebounce(c, 'Chennai');
+    check('R6 the obsolete "Che" request was aborted; "Chennai" is live', byQ('Che').signal?.aborted === true && byQ('Chennai').signal?.aborted === false);
+    await settle(() => byQ('Chennai').resolve(['Chennai']));
+    check('R6 an aborted request shows no error; the live one shows its results', !/Couldn't search right now/.test(text(c)) && resultButtons(c, /^Chennai/).length === 1);
+    await h.unmount();
+  }
+
+  // R7 (IR-06) -- unmount tears down the pending request.
+  {
+    pending.length = 0;
+    const errors: unknown[] = [];
+    const origError = console.error;
+    console.error = (...a: unknown[]) => { errors.push(a); };
+    const h = await mount(picker()); const c = h.container;
+    await typeAndDebounce(c, 'Mumbai');
+    const req = byQ('Mumbai');
+    await h.unmount();
+    check('R7 unmount aborts the in-flight search request', req.signal?.aborted === true);
+    await act(async () => { req.resolve(['Mumbai']); });
+    await flush();
+    console.error = origError;
+    check('R7 nothing is applied after unmount (no React state-update warnings or errors)', errors.length === 0);
+  }
+
+  // R8 (IR-06) -- debounce preserved: no request before ~400 ms of quiet.
+  {
+    pending.length = 0;
+    const h = await mount(picker()); const c = h.container;
+    await typeInto(c.querySelector('#location-picker-search') as HTMLInputElement, 'Delhi');
+    await wait(150);
+    check('R8 no request within the debounce window', pending.length === 0);
+    await wait(350); await flush();
+    check('R8 one request after the debounce', pending.length === 1 && pending[0].q === 'Delhi');
     await h.unmount();
   }
 

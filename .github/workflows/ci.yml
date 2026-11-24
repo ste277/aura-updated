@@ -904,7 +904,28 @@ jobs:
       # Sign-out reports success only when the server removed the cookie; clears the
       # account-less offline queue (after asking) only then.
       - name: Run REL-04 sign-out test
-        run: npx ts-node test/signOutRel04.test.ts
+        env:
+          TS_NODE_COMPILER_OPTIONS: '{"jsx":"react-jsx"}'
+        run: npx ts-node --project tsconfig.jsdom-tests.json test/signOutRel04.test.ts
+      # IR-01/IR-03 -- account isolation and the sign-out transition: real client
+      # modules (one instance per tab) against the real logout/session/habit-logs/
+      # plans routes in-process, synthetic accounts A and B, held/failed requests.
+      - name: Run REL-04 account isolation integration test (IR-01/IR-03)
+        env:
+          TS_NODE_COMPILER_OPTIONS: '{"jsx":"react-jsx"}'
+        run: npx ts-node --project tsconfig.jsdom-tests.json test/rel04AccountIsolation.test.ts
+      # The real Home page and /find mounted in jsdom across sign-out, sign-in,
+      # late responses, session expiry and another tab's account switch.
+      - name: Run REL-04 Home and /find transition test (IR-01/IR-03)
+        env:
+          TS_NODE_COMPILER_OPTIONS: '{"jsx":"react-jsx"}'
+        run: npx ts-node --project tsconfig.jsdom-tests.json test/rel04HomeFindTransitionJsdom.test.ts
+      # The original cross-account failure reproduces with the reviewed head's code
+      # (a54daf6, vendored verbatim) and is prevented by the corrected head.
+      - name: Run REL-04 reviewed-head reproduction test (IR-01)
+        env:
+          TS_NODE_COMPILER_OPTIONS: '{"jsx":"react-jsx"}'
+        run: npx ts-node --project tsconfig.jsdom-tests.json test/rel04ReviewedHeadReproduction.test.ts
       # S5-A RV-1 in-process: logout clears the cookie; a copied token stays valid
       # until exp (documents the accepted residual of revocation Option B).
       - name: Run REL-04 RV-1 token replay test
