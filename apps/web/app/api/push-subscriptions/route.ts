@@ -1,6 +1,8 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getSessionFromRequest } from '../../../lib/session';
-import { disablePushSubscriptionForOwner, hasActivePushSubscription, upsertPushSubscription } from '../../../lib/db';
+import { disablePushSubscriptionForOwner, getReminderDispatchHeartbeat, hasActivePushSubscription, upsertPushSubscription } from '../../../lib/db';
+import { classifyBackgroundDelivery } from '../../../lib/reminderDeliveryStatus';
+import { isWebPushConfigured } from '../../../lib/webPushServer';
 import { parseJsonObject } from '../../../lib/request';
 
 /**
@@ -38,8 +40,14 @@ export async function GET(req: NextRequest) {
   const session = getSessionFromRequest(req);
   if (!session) return NextResponse.json({ error: 'Not authenticated.' }, { status: 401 });
 
-  const hasActiveSubscription = await hasActivePushSubscription(session.userId);
-  return NextResponse.json({ hasActiveSubscription });
+  const [hasActiveSubscription, heartbeat] = await Promise.all([
+    hasActivePushSubscription(session.userId),
+    getReminderDispatchHeartbeat('WEB_PUSH'),
+  ]);
+  // AURA-REM-01: whether background delivery is actually running, so the
+  // client never shows "on" when reminders can't reach a closed app.
+  const backgroundDelivery = classifyBackgroundDelivery({ pushConfigured: isWebPushConfigured(), heartbeat, now: new Date() });
+  return NextResponse.json({ hasActiveSubscription, backgroundDelivery });
 }
 
 export async function POST(req: NextRequest) {

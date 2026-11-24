@@ -26,6 +26,8 @@ function installBrowserStubs(opts: {
   permission?: 'granted' | 'denied' | 'default';
   browserSubscription?: unknown;
   serverHasActiveSubscription?: boolean;
+  /** AURA-REM-01: the server's background-delivery status (default AVAILABLE). */
+  backgroundDelivery?: 'AVAILABLE' | 'NOT_CONFIGURED' | 'SCHEDULER_INACTIVE';
   fetchOk?: boolean;
 }) {
   requestPermissionCallCount = 0;
@@ -75,7 +77,7 @@ function installBrowserStubs(opts: {
     if (url === '/api/push-subscriptions') {
       return {
         ok: opts.fetchOk ?? true,
-        json: async () => ({ hasActiveSubscription: opts.serverHasActiveSubscription ?? false }),
+        json: async () => ({ hasActiveSubscription: opts.serverHasActiveSubscription ?? false, backgroundDelivery: opts.backgroundDelivery ?? 'AVAILABLE' }),
       };
     }
     throw new Error(`Unexpected fetch in test: ${url}`);
@@ -137,7 +139,10 @@ async function main() {
   // technically present). Must NEVER claim SUBSCRIBED from browser state
   // alone.
   installBrowserStubs({ supported: true, permission: 'granted', browserSubscription: { endpoint: 'https://example.com/x' }, serverHasActiveSubscription: false });
-  check('GRANTED (not SUBSCRIBED) when the browser has a subscription object but the server disagrees', (await getPushCapabilityState()) === 'GRANTED');
+  // AURA-REM-01: still never SUBSCRIBED; now reported as SUBSCRIPTION_EXPIRED
+  // (was GRANTED) so the UI can say notifications stopped and replace the
+  // dead browser subscription on re-enable.
+  check('SUBSCRIPTION_EXPIRED (not SUBSCRIBED) when the browser has a subscription object but the server disagrees', (await getPushCapabilityState()) === 'SUBSCRIPTION_EXPIRED');
 
   // ============================================================
   // subscribeToPush -- the ONE place a permission prompt may occur, and

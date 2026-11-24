@@ -1285,13 +1285,57 @@ export async function markReminderDeliveryStatus(
  * workers from both sending the same occurrence -- the delivery row's own
  * creation-time uniqueness (ensureReminderDelivery) only stops duplicate
  * CREATION, which is a different race. */
-export async function claimReminderDeliveryForSending(deliveryId: string): Promise<ReminderDelivery | null> {
+export async function claimReminderDeliveryForSending(
+  deliveryId: string,
+  options: { maxAttempts?: number; staleProcessingMinutes?: number } = {}
+): Promise<ReminderDelivery | null> {
+  // AURA-REM-01: also reclaims a row stuck in PROCESSING (a worker that
+  // crashed or timed out between claim and send/mark), but only once it has
+  // been PROCESSING for longer than staleProcessingMinutes, and never beyond
+  // maxAttempts. Still a single conditional UPDATE, so two workers can never
+  // both win the same row.
+  const maxAttempts = options.maxAttempts ?? 3;
+  const staleMinutes = options.staleProcessingMinutes ?? 5;
   const result = await pool.query(
     `UPDATE "ReminderDelivery"
      SET status = 'PROCESSING', "attemptCount" = "attemptCount" + 1, "lastAttemptAt" = now()
-     WHERE id = $1 AND status = 'PENDING'
+     WHERE id = $1
+       AND "attemptCount" < $2
+       AND (
+         status = 'PENDING'
+         OR (status = 'PROCESSING' AND "lastAttemptAt" < now() - make_interval(mins => $3::int))
+       )
      RETURNING *`,
-    [deliveryId]
+    [deliveryId, maxAttempts, staleMinutes]
+  );
+  return result.rows[0] ?? null;
+}
+
+/** AURA-REM-01 -- records that the scheduler reached the dispatch endpoint
+ * (called once per authorized run, before any sending). */
+export async function recordReminderDispatchHeartbeat(channel: ReminderDeliveryChannel, configured: boolean): Promise<void> {
+  await pool.query(
+    `INSERT INTO "ReminderDispatchHeartbeat" (channel, "lastRunAt", "lastRunConfigured")
+     VALUES ($1, now(), $2)
+     ON CONFLICT (channel) DO UPDATE SET "lastRunAt" = now(), "lastRunConfigured" = EXCLUDED."lastRunConfigured"`,
+    [channel, configured]
+  );
+}
+
+export async function getReminderDispatchHeartbeat(channel: ReminderDeliveryChannel): Promise<{ lastRunAt: Date; lastRunConfigured: boolean } | null> {
+  const result = await pool.query(`SELECT "lastRunAt", "lastRunConfigured" FROM "ReminderDispatchHeartbeat" WHERE channel = $1`, [channel]);
+  return result.rows[0] ?? null;
+}
+
+/** AURA-REM-01 -- a claimed (PROCESSING) delivery whose send failed only
+ * transiently goes back to PENDING so the next scheduler run retries it.
+ * Conditional on PROCESSING, so it can never resurrect a SENT/SKIPPED row. */
+export async function releaseReminderDeliveryForRetry(deliveryId: string, failureReason: string): Promise<ReminderDelivery | null> {
+  const result = await pool.query(
+    `UPDATE "ReminderDelivery" SET status = 'PENDING', "failureReason" = $2
+     WHERE id = $1 AND status = 'PROCESSING'
+     RETURNING *`,
+    [deliveryId, failureReason.slice(0, 500)]
   );
   return result.rows[0] ?? null;
 }

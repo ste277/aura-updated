@@ -58,7 +58,6 @@ import { useCurrentMinuteOfDay } from '../lib/useCurrentMinuteOfDay';
 import { resolveTzOffsetMinutes, getDatePartsInTimezone } from '../lib/timezone';
 import { formatDisplayName } from '../lib/displayName';
 import { trackEvent } from '../lib/trackEvent';
-import { Capacitor } from '@capacitor/core';
 import { generateClientRequestId } from '../lib/clientId';
 import { useAndroidBackButton } from '../lib/useAndroidBackButton';
 import {
@@ -327,17 +326,12 @@ export default function DashboardPage() {
     setMounted(true);
     setNotificationPrefs(loadNotificationPrefs());
 
-    // Web-only permission request (in-app toast alerts). In the native shells
-    // the LocalNotifications plugin runs its own permission flow when window
-    // alerts are scheduled — see syncWindowNotifications.
-    if (
-      typeof window !== 'undefined' &&
-      !Capacitor.isNativePlatform() &&
-      'Notification' in window &&
-      Notification.permission === 'default'
-    ) {
-      Notification.requestPermission();
-    }
+    // AURA-REM-01: no permission prompt on page load. An unprompted request
+    // on every visit is quieted or auto-blocked by browsers, and a denial
+    // there also blocks reminder notifications. Permission is now requested
+    // only from You -> Reminders -> "Enable notifications". Window alert
+    // toasts still show in-app; their optional system notification
+    // (WindowShiftToast) is shown only if permission was already granted.
 
     // Register Service Worker for PWA Offline Caching
     if (typeof window !== 'undefined' && 'serviceWorker' in navigator && process.env.NODE_ENV === 'production') {

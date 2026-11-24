@@ -11,14 +11,75 @@
 
 export type PushCapabilityState =
   | 'UNSUPPORTED'
+  /** AURA-REM-01: iPhone/iPad Safari tab -- Web Push needs Aura added to
+   * the Home Screen and opened from there. */
+  | 'IOS_INSTALL_REQUIRED'
+  /** AURA-REM-01: the deployment has no Web Push keys -- nothing to enable. */
+  | 'NOT_CONFIGURED'
   | 'NOT_ASKED'
   | 'GRANTED'
   | 'DENIED'
   | 'SUBSCRIBED'
+  /** AURA-REM-01: this device is subscribed, but the server's scheduler has
+   * not run recently, so reminders can't reach a closed app yet. Never shown
+   * as "on". */
+  | 'BACKGROUND_UNAVAILABLE'
+  /** AURA-REM-01: the browser still holds a subscription the server no
+   * longer accepts (provider said it expired, or it was removed) -- the next
+   * enable replaces it instead of re-sending the dead one. */
+  | 'SUBSCRIPTION_EXPIRED'
   | 'SUBSCRIPTION_ERROR';
+
+export type ServerBackgroundDelivery = 'AVAILABLE' | 'NOT_CONFIGURED' | 'SCHEDULER_INACTIVE';
 
 export function isPushSupported(): boolean {
   return typeof window !== 'undefined' && 'serviceWorker' in navigator && 'PushManager' in window && 'Notification' in window;
+}
+
+function isNativeShell(): boolean {
+  const cap = typeof window !== 'undefined' ? (window as unknown as { Capacitor?: { isNativePlatform?: () => boolean } }).Capacitor : undefined;
+  return Boolean(cap && typeof cap.isNativePlatform === 'function' && cap.isNativePlatform());
+}
+
+/** iPhone/iPad in a normal Safari tab (not the installed Home Screen app). */
+export function isIosBrowserTab(): boolean {
+  if (typeof window === 'undefined' || typeof navigator === 'undefined') return false;
+  const ua = navigator.userAgent || '';
+  const isIos = /iPad|iPhone|iPod/.test(ua) || (navigator.platform === 'MacIntel' && (navigator.maxTouchPoints ?? 0) > 1);
+  if (!isIos) return false;
+  const standalone =
+    (typeof window.matchMedia === 'function' && window.matchMedia('(display-mode: standalone)').matches) ||
+    (navigator as unknown as { standalone?: boolean }).standalone === true;
+  return !standalone;
+}
+
+/** AURA-REM-01: navigator.serviceWorker.ready never settles when the service
+ * worker failed to register (or isn't registered, as in `next dev`), which
+ * used to leave the notification settings blank forever. Bounded instead. */
+const SERVICE_WORKER_READY_TIMEOUT_MS = 5000;
+function serviceWorkerReady(): Promise<ServiceWorkerRegistration> {
+  return new Promise((resolve, reject) => {
+    const timer = setTimeout(() => reject(new Error('service_worker_not_ready')), SERVICE_WORKER_READY_TIMEOUT_MS);
+    navigator.serviceWorker.ready.then(
+      (registration) => { clearTimeout(timer); resolve(registration); },
+      (err) => { clearTimeout(timer); reject(err); }
+    );
+  });
+}
+
+async function fetchServerPushStatus(): Promise<{ hasActiveSubscription: boolean; backgroundDelivery: ServerBackgroundDelivery | null } | null> {
+  try {
+    const res = await fetch('/api/push-subscriptions');
+    if (!res.ok) return null;
+    const body = await res.json();
+    const delivery = body?.backgroundDelivery;
+    return {
+      hasActiveSubscription: body?.hasActiveSubscription === true,
+      backgroundDelivery: delivery === 'AVAILABLE' || delivery === 'NOT_CONFIGURED' || delivery === 'SCHEDULER_INACTIVE' ? delivery : null,
+    };
+  } catch {
+    return null;
+  }
 }
 
 /**
@@ -29,21 +90,27 @@ export function isPushSupported(): boolean {
  * disagree, e.g. the server disabled a subscription after a provider 410
  * while the browser's local PushManager object is still technically
  * present).
+ *
+ * AURA-REM-01: also requires the server's background delivery to be
+ * running before reporting SUBSCRIBED. Never prompts.
  */
 export async function getPushCapabilityState(): Promise<PushCapabilityState> {
-  if (!isPushSupported()) return 'UNSUPPORTED';
+  if (!isPushSupported() || isNativeShell()) {
+    return !isNativeShell() && isIosBrowserTab() ? 'IOS_INSTALL_REQUIRED' : 'UNSUPPORTED';
+  }
   if (Notification.permission === 'denied') return 'DENIED';
+
+  const server = await fetchServerPushStatus();
+  if (server?.backgroundDelivery === 'NOT_CONFIGURED') return 'NOT_CONFIGURED';
   if (Notification.permission === 'default') return 'NOT_ASKED';
 
   try {
-    const registration = await navigator.serviceWorker.ready;
+    const registration = await serviceWorkerReady();
     const subscription = await registration.pushManager.getSubscription();
     if (!subscription) return 'GRANTED';
-
-    const res = await fetch('/api/push-subscriptions');
-    if (!res.ok) return 'GRANTED';
-    const { hasActiveSubscription } = await res.json();
-    return hasActiveSubscription ? 'SUBSCRIBED' : 'GRANTED';
+    if (!server) return 'GRANTED';
+    if (!server.hasActiveSubscription) return 'SUBSCRIPTION_EXPIRED';
+    return server.backgroundDelivery === 'AVAILABLE' ? 'SUBSCRIBED' : 'BACKGROUND_UNAVAILABLE';
   } catch {
     return 'GRANTED';
   }
@@ -67,7 +134,7 @@ export type SubscribeOutcome =
  * service worker and registers the subscription server-side. Called ONLY
  * from the "Enable notifications" button's onClick -- never automatically.
  */
-export async function subscribeToPush(): Promise<SubscribeOutcome> {
+export async function subscribeToPush(options: { replaceExisting?: boolean } = {}): Promise<SubscribeOutcome> {
   if (!isPushSupported()) return { ok: false, reason: 'unsupported' };
 
   // Notification.permission is already 'granted' or 'default' by the time
@@ -84,8 +151,15 @@ export async function subscribeToPush(): Promise<SubscribeOutcome> {
     const { publicKey } = await keyRes.json();
     if (!publicKey) return { ok: false, reason: 'not_configured' };
 
-    const registration = await navigator.serviceWorker.ready;
+    const registration = await serviceWorkerReady();
     let subscription = await registration.pushManager.getSubscription();
+    if (subscription && options.replaceExisting) {
+      // AURA-REM-01: the server rejected this subscription (expired/invalid).
+      // Re-registering the same dead endpoint would look enabled and never
+      // deliver, so drop it and create a fresh one.
+      await subscription.unsubscribe().catch(() => false);
+      subscription = null;
+    }
     if (!subscription) {
       subscription = await registration.pushManager.subscribe({
         userVisibleOnly: true,
@@ -112,7 +186,7 @@ export async function subscribeToPush(): Promise<SubscribeOutcome> {
 export async function unsubscribeFromPush(): Promise<void> {
   if (!isPushSupported()) return;
   try {
-    const registration = await navigator.serviceWorker.ready;
+    const registration = await serviceWorkerReady();
     const subscription = await registration.pushManager.getSubscription();
     if (!subscription) return;
     const endpoint = subscription.endpoint;

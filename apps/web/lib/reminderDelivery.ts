@@ -2,6 +2,7 @@ import {
   claimReminderDeliveryForSending,
   disablePushSubscriptionByEndpoint,
   ensureReminderDelivery,
+  hasActivePushSubscription,
   getUserById,
   listActivePushSubscriptionsForOwner,
   listAuraMomentsForReminders,
@@ -10,12 +11,14 @@ import {
   listUserIdsWithPotentialReminders,
   markPushSubscriptionSuccessful,
   markReminderDeliveryStatus,
+  recordReminderDispatchHeartbeat,
+  releaseReminderDeliveryForRetry,
   ReminderDelivery,
   ReminderDeliveryChannel,
 } from './db';
 import { deriveAuraReminders, MAX_REMINDER_LEAD_MINUTES, REMINDER_GRACE_PERIOD_MINUTES } from './auraReminders';
 import { buildMomentPushPayload, buildPlanPushPayload } from './pushPayload';
-import { sendWebPushNotification } from './webPushServer';
+import { isWebPushConfigured, sendWebPushNotification, WebPushSendResult } from './webPushServer';
 import { recordProductEvent } from './productEvents';
 
 /**
@@ -38,6 +41,26 @@ import { recordProductEvent } from './productEvents';
  */
 
 const WEB_PUSH: ReminderDeliveryChannel = 'WEB_PUSH';
+
+/** AURA-REM-01 -- at most this many send attempts per reminder occurrence
+ * (first try plus two retries on later scheduler runs). */
+export const MAX_REMINDER_DELIVERY_ATTEMPTS = 3;
+
+/** AURA-REM-01 -- a delivery left in PROCESSING longer than this (a worker
+ * that crashed or timed out mid-send) may be reclaimed by a later run. Well
+ * above a dispatch run's expected duration, so a slow-but-alive worker is
+ * not raced; the service worker's per-item notification tag also collapses
+ * any duplicate on the device. */
+export const STALE_PROCESSING_MINUTES = 5;
+
+/** AURA-REM-01 -- a device notification that says "starts in 15 min" is only
+ * useful BEFORE the activity starts. The in-app reminder stays visible for a
+ * grace period after start (REMINDER_GRACE_PERIOD_MINUTES, unchanged), but a
+ * push that a late scheduler run would deliver after the start time is
+ * skipped instead of sent. */
+export function isTooLateForPush(startAtIso: string, now: Date): boolean {
+  return now.getTime() >= new Date(startAtIso).getTime();
+}
 
 /**
  * For one owner: find every currently-active reminder occurrence and
@@ -82,7 +105,16 @@ export async function ensureDueReminderDeliveries(userId: string, now: Date): Pr
   return deliveries;
 }
 
-export type SendReminderDeliveryOutcome = 'SENT' | 'FAILED' | 'SKIPPED' | 'ALREADY_CLAIMED';
+/** AURA-REM-01 -- the physical send step, injectable so retry, gone-endpoint
+ * and concurrency behaviour can be tested against a real database without a
+ * real push provider. Production always uses sendWebPushNotification. */
+export interface ReminderDeliveryDeps {
+  send: (subscription: { endpoint: string; p256dh: string; auth: string }, payload: unknown) => Promise<WebPushSendResult>;
+}
+
+const DEFAULT_DEPS: ReminderDeliveryDeps = { send: sendWebPushNotification };
+
+export type SendReminderDeliveryOutcome = 'SENT' | 'FAILED' | 'SKIPPED' | 'ALREADY_CLAIMED' | 'RETRY_SCHEDULED';
 
 /**
  * Web Push V1 (brief section 16) -- attempts to actually send ONE
@@ -97,8 +129,15 @@ export type SendReminderDeliveryOutcome = 'SENT' | 'FAILED' | 'SKIPPED' | 'ALREA
  * transition. If that returns null, someone else already claimed (or sent,
  * or skipped) this row -- return immediately, never send.
  */
-export async function sendReminderDelivery(delivery: ReminderDelivery, now: Date = new Date()): Promise<SendReminderDeliveryOutcome> {
-  const claimed = await claimReminderDeliveryForSending(delivery.id);
+export async function sendReminderDelivery(
+  delivery: ReminderDelivery,
+  now: Date = new Date(),
+  deps: ReminderDeliveryDeps = DEFAULT_DEPS
+): Promise<SendReminderDeliveryOutcome> {
+  const claimed = await claimReminderDeliveryForSending(delivery.id, {
+    maxAttempts: MAX_REMINDER_DELIVERY_ATTEMPTS,
+    staleProcessingMinutes: STALE_PROCESSING_MINUTES,
+  });
   if (!claimed) return 'ALREADY_CLAIMED';
 
   const user = await getUserById(claimed.userId);
@@ -140,6 +179,11 @@ export async function sendReminderDelivery(delivery: ReminderDelivery, now: Date
     return 'SKIPPED';
   }
 
+  if (isTooLateForPush(match.startAt, now)) {
+    await markReminderDeliveryStatus(claimed.id, 'SKIPPED', 'too_late_activity_started');
+    return 'SKIPPED';
+  }
+
   const subscriptions = await listActivePushSubscriptionsForOwner(claimed.userId);
   if (subscriptions.length === 0) {
     await markReminderDeliveryStatus(claimed.id, 'SKIPPED', 'no_active_push_subscription');
@@ -166,8 +210,10 @@ export async function sendReminderDelivery(delivery: ReminderDelivery, now: Date
   // child rows) chosen because V1 has no UI that needs per-device delivery
   // detail, only "did the owner get notified at all".
   let successCount = 0;
+  let transientFailureCount = 0;
+  let lastErrorCode = 'send_error';
   for (const subscription of subscriptions) {
-    const result = await sendWebPushNotification(
+    const result = await deps.send(
       { endpoint: subscription.endpoint, p256dh: subscription.p256dh, auth: subscription.auth },
       payload
     );
@@ -179,6 +225,10 @@ export async function sendReminderDelivery(delivery: ReminderDelivery, now: Date
       // never retry it. Transient failures (anything else) are recorded via
       // the delivery's own failureReason below, not retried in V1.
       await disablePushSubscriptionByEndpoint(subscription.endpoint, result.errorCode ?? 'gone');
+    } else {
+      lastErrorCode = result.errorCode ?? 'send_error';
+      // Missing VAPID keys won't fix themselves between runs -- not retried.
+      if (lastErrorCode !== 'not_configured') transientFailureCount += 1;
     }
   }
 
@@ -194,17 +244,34 @@ export async function sendReminderDelivery(delivery: ReminderDelivery, now: Date
     return 'SENT';
   }
 
-  await markReminderDeliveryStatus(claimed.id, 'FAILED', `0/${subscriptions.length} subscriptions succeeded`);
+  const failureReason = `0/${subscriptions.length} subscriptions succeeded (${lastErrorCode})`;
+  // AURA-REM-01: a temporary failure (network error, provider 5xx/429) is
+  // retried on a later scheduler run while attempts remain and the activity
+  // hasn't started. Gone endpoints (404/410) were already disabled above and
+  // are never retried; if every subscription was gone, the row is FAILED.
+  if (transientFailureCount > 0 && claimed.attemptCount < MAX_REMINDER_DELIVERY_ATTEMPTS) {
+    await releaseReminderDeliveryForRetry(claimed.id, failureReason);
+    return 'RETRY_SCHEDULED';
+  }
+  await markReminderDeliveryStatus(claimed.id, 'FAILED', failureReason);
   return 'FAILED';
 }
 
 export interface DispatchDueReminderPushesResult {
+  /** AURA-REM-01: false when the VAPID keys are missing -- nothing is
+   * claimed or attempted, so no delivery row is burned on a misconfigured
+   * deployment. */
+  configured: boolean;
   usersInspected: number;
+  /** Users skipped before any delivery row was created because they have no
+   * active device subscription (in-app reminders are unaffected). */
+  usersWithoutSubscription: number;
   deliveriesPending: number;
   sent: number;
   failed: number;
   skipped: number;
   alreadyClaimed: number;
+  retryScheduled: number;
 }
 
 /**
@@ -214,29 +281,50 @@ export interface DispatchDueReminderPushesResult {
  * creation), then sendReminderDelivery() for every currently-PENDING row.
  * Reports the counts brief section 48 asks for.
  */
-export async function dispatchDueReminderPushes(now: Date = new Date()): Promise<DispatchDueReminderPushesResult> {
+export async function dispatchDueReminderPushes(
+  now: Date = new Date(),
+  deps: ReminderDeliveryDeps = DEFAULT_DEPS
+): Promise<DispatchDueReminderPushesResult> {
   const from = new Date(now.getTime() - REMINDER_GRACE_PERIOD_MINUTES * 60_000);
   const to = new Date(now.getTime() + MAX_REMINDER_LEAD_MINUTES * 60_000);
-  const userIds = await listUserIdsWithPotentialReminders(from, to);
-
   const result: DispatchDueReminderPushesResult = {
-    usersInspected: userIds.length,
+    configured: isWebPushConfigured(),
+    usersInspected: 0,
+    usersWithoutSubscription: 0,
     deliveriesPending: 0,
     sent: 0,
     failed: 0,
     skipped: 0,
     alreadyClaimed: 0,
+    retryScheduled: 0,
   };
+  // Heartbeat first, on every authorized run: this is how the app knows the
+  // scheduler is really running (see lib/reminderDeliveryStatus.ts).
+  await recordReminderDispatchHeartbeat(WEB_PUSH, result.configured);
+  if (!result.configured) return result;
+
+  const userIds = await listUserIdsWithPotentialReminders(from, to);
+  result.usersInspected = userIds.length;
 
   for (const userId of userIds) {
+    // AURA-REM-01: no device subscription -> no delivery row at all. Before,
+    // a SKIPPED row was written, which also meant a user who turned on
+    // notifications a few minutes later never got that reminder.
+    if (!(await hasActivePushSubscription(userId))) {
+      result.usersWithoutSubscription += 1;
+      continue;
+    }
     const deliveries = await ensureDueReminderDeliveries(userId, now);
     for (const delivery of deliveries) {
-      if (delivery.status !== 'PENDING') continue;
+      // PENDING (new or released for retry) and PROCESSING (possibly stale;
+      // the claim itself decides) are both offered to the sender.
+      if (delivery.status !== 'PENDING' && delivery.status !== 'PROCESSING') continue;
       result.deliveriesPending += 1;
-      const outcome = await sendReminderDelivery(delivery, now);
+      const outcome = await sendReminderDelivery(delivery, now, deps);
       if (outcome === 'SENT') result.sent += 1;
       else if (outcome === 'FAILED') result.failed += 1;
       else if (outcome === 'SKIPPED') result.skipped += 1;
+      else if (outcome === 'RETRY_SCHEDULED') result.retryScheduled += 1;
       else result.alreadyClaimed += 1;
     }
   }

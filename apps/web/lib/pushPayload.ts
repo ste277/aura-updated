@@ -32,8 +32,14 @@ export interface PushNotificationPayload {
   reminderAt: string;
 }
 
-function leadMinutesFor(reminder: AuraReminder): number {
-  return Math.max(0, Math.round((new Date(reminder.startAt).getTime() - new Date(reminder.reminderAt).getTime()) / 60_000));
+/** AURA-REM-01: the title states the time actually left when the push is
+ * built (reminder.minutesUntilStart, derived with the sender's own `now`),
+ * not the configured lead time -- a scheduler run a few minutes late must not
+ * say "starts in 15 min" when it starts in 9. The sender never builds a push
+ * once the activity has started (see isTooLateForPush). */
+function startsInPhrase(reminder: AuraReminder): string {
+  const minutes = Math.max(0, Math.round(reminder.minutesUntilStart));
+  return minutes > 0 ? `starts in ${minutes} min` : 'is starting now';
 }
 
 function baseFields(reminder: AuraReminder) {
@@ -50,9 +56,8 @@ function baseFields(reminder: AuraReminder) {
  * link exists to personalize it further). */
 export function buildPlanPushPayload(reminder: AuraReminder): PushNotificationPayload {
   const icon = reminder.activityIcon ?? '🔔';
-  const lead = leadMinutesFor(reminder);
   return {
-    title: `${icon} ${reminder.activityTitle} starts in ${lead} min`,
+    title: `${icon} ${reminder.activityTitle} ${startsInPhrase(reminder)}`,
     body: 'Your planned activity is coming up.',
     ...baseFields(reminder),
   };
@@ -64,7 +69,6 @@ export function buildPlanPushPayload(reminder: AuraReminder): PushNotificationPa
  * never inferred from title text), generic for GENERAL/PERSONAL. */
 export function buildMomentPushPayload(reminder: AuraReminder, moment: AuraMoment): PushNotificationPayload {
   const icon = reminder.activityIcon ?? '❤️';
-  const lead = leadMinutesFor(reminder);
   const planningMode = getActivityDefinition(moment.activityId)?.experience.planningMode;
 
   let body: string;
@@ -79,7 +83,7 @@ export function buildMomentPushPayload(reminder: AuraReminder, moment: AuraMomen
   }
 
   return {
-    title: `${icon} ${reminder.activityTitle} starts in ${lead} min`,
+    title: `${icon} ${reminder.activityTitle} ${startsInPhrase(reminder)}`,
     body,
     ...baseFields(reminder),
   };
