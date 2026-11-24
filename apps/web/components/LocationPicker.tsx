@@ -297,6 +297,9 @@ export function LocationPicker({ currentCity, currentLatitude, currentLongitude,
   const [searchError, setSearchError] = useState<string | null>(null);
   const [searchResults, setSearchResults] = useState<GeocodeResultDto[]>([]);
   const searchDebounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  // AURA-ANDROID-REL-04 -- id of the newest search request; an older, slower
+  // response must never replace newer results (REL-03 "search race").
+  const searchSeqRef = useRef(0);
 
   // ---- Location PR8: explicit "Confirm {currentCity}" action ----
   const [confirmingCurrent, setConfirmingCurrent] = useState(false);
@@ -336,9 +339,13 @@ export function LocationPicker({ currentCity, currentLatitude, currentLongitude,
   useEffect(() => {
     if (searchDebounceRef.current) clearTimeout(searchDebounceRef.current);
     const query = searchQuery.trim();
+    // Any change of the query retires every request already in flight.
+    const seq = ++searchSeqRef.current;
+    const isLatest = () => searchSeqRef.current === seq;
     if (query.length < 2) {
       setSearchResults([]);
       setSearchError(null);
+      setSearchLoading(false);
       return;
     }
     searchDebounceRef.current = setTimeout(async () => {
@@ -347,6 +354,7 @@ export function LocationPicker({ currentCity, currentLatitude, currentLongitude,
       try {
         const res = await fetch(`/api/location/search?q=${encodeURIComponent(query)}`);
         const data = await res.json().catch(() => ({}));
+        if (!isLatest()) return;
         if (res.ok) {
           setSearchResults(Array.isArray(data.results) ? data.results : []);
         } else {
@@ -354,10 +362,11 @@ export function LocationPicker({ currentCity, currentLatitude, currentLongitude,
           setSearchError(typeof data.error === 'string' ? data.error : 'Search is temporarily unavailable.');
         }
       } catch {
+        if (!isLatest()) return;
         setSearchResults([]);
         setSearchError("Couldn't search right now. Please try again.");
       } finally {
-        setSearchLoading(false);
+        if (isLatest()) setSearchLoading(false);
       }
     }, 400);
     return () => {

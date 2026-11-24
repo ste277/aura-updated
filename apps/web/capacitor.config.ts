@@ -10,7 +10,9 @@ import type { CapacitorConfig } from '@capacitor/cli';
 //   dev, Android emulator:   CAP_SERVER_URL=http://10.0.2.2:3000  (emulator's
 //                            alias for the host machine's localhost)
 //   dev, physical device:    CAP_SERVER_URL=http://<your-mac-lan-ip>:3000
-//   production:              CAP_SERVER_URL=https://<railway-app-url>
+//   production:              CAP_SERVER_URL=https://<production-host> (HTTPS only;
+//                            the release build fails otherwise -- see
+//                            verifyReleaseServerConfig in android/app/build.gradle)
 //
 // CAP_SERVER_URL is read when the CLI runs and baked into the generated
 // capacitor.config.json. If it is unset, the iOS-simulator default above is

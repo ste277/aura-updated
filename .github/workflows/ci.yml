@@ -897,6 +897,23 @@ jobs:
         env:
           TS_NODE_COMPILER_OPTIONS: '{"jsx":"react-jsx"}'
         run: npx ts-node --project tsconfig.jsdom-tests.json test/ios02LocationErrorsAndPrivacy.test.ts
+      # ---- AURA-ANDROID-REL-04 -- application release readiness (offline only) ----
+      # Backup/device-transfer off, cookie flush, release-build gate, logout attributes.
+      - name: Run REL-04 Android application readiness static test
+        run: node test/androidRel04AppReadiness.test.mjs
+      # Sign-out reports success only when the server removed the cookie; clears the
+      # account-less offline queue (after asking) only then.
+      - name: Run REL-04 sign-out test
+        run: npx ts-node test/signOutRel04.test.ts
+      # S5-A RV-1 in-process: logout clears the cookie; a copied token stays valid
+      # until exp (documents the accepted residual of revocation Option B).
+      - name: Run REL-04 RV-1 token replay test
+        run: npx ts-node test/rel04Rv1TokenReplay.test.ts
+      # An older, slower city-search response never replaces newer results.
+      - name: Run LocationPicker REL-04 search race test
+        env:
+          TS_NODE_COMPILER_OPTIONS: '{"jsx":"react-jsx"}'
+        run: npx ts-node --project tsconfig.jsdom-tests.json test/locationPickerRel04SearchRace.test.ts
   palm-g5-upload-tests:
     # AURA-PALM-G5-C2 -- dedicated job for the development-only Upload Photo
     # pipeline suites (G5-I1..R4.3), so a Palmistry failure stays visible on

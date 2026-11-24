@@ -60,6 +60,7 @@ import { formatDisplayName } from '../lib/displayName';
 import { trackEvent } from '../lib/trackEvent';
 import { generateClientRequestId } from '../lib/clientId';
 import { useAndroidBackButton } from '../lib/useAndroidBackButton';
+import { performSignOut, SIGN_OUT_FAILED_MESSAGE } from '../lib/signOut';
 import {
   loadNotificationPrefs,
   saveNotificationPrefs,
@@ -1579,9 +1580,16 @@ export default function DashboardPage() {
     [activeType, loadMyDay, loadGuidance]
   );
 
+  // AURA-ANDROID-REL-04 -- signed out only once the server has removed the
+  // session cookie (see lib/signOut.ts); a failed request says so instead.
   const handleLogout = useCallback(async () => {
-    await fetch('/api/auth/logout', { method: 'POST' });
-    setUser(null);
+    const outcome = await performSignOut({
+      fetch: (url, init) => fetch(url, init),
+      storage: typeof localStorage === 'undefined' ? null : localStorage,
+      confirm: (message) => window.confirm(message),
+    });
+    if (outcome === 'signed-out') setUser(null);
+    else if (outcome === 'failed') window.alert(SIGN_OUT_FAILED_MESSAGE);
   }, []);
 
   // My Day Timing Location Change Refresh V1 -- LocationPicker only ever
