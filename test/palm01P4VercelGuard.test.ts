@@ -167,7 +167,8 @@ check('C6. this guard test is wired into CI', /run: npx ts-node test\/palm01P4Ve
 // D. Real approval state untouched
 // ============================================================
 const approval = JSON.parse(read('packages/palmistry/src/review-status.json'));
-check('D1. real approval status is still PENDING_HUMAN_REVIEW with no approver', approval.status === 'PENDING_HUMAN_REVIEW' && approval.approvedBy === null);
+// AURA-PALM-01-G3: Product Owner approval recorded 2026-11-24; never an independent scholarly sign-off.
+check('D1. real approval is exactly the Product Owner record (independentScholarlyReview false)', ((s: any) => s.status === 'APPROVED' && s.approvedBy !== null && s.approvedBy.reviewer === 'Product Owner' && s.approvedBy.role === 'PRODUCT_OWNER_EDITORIAL_AND_CULTURAL_REVIEW' && s.approvedBy.independentScholarlyReview === false && s.approvedBy.contentCommit === 'f723942' && s.approvedBy.date === '2026-11-24' && /AURA-PALM-01-G3-SCHOLAR-WAIVER\.md §5/.test(s.approvedBy.basis) && Object.keys(s.approvedBy).sort().join(',') === 'basis,contentCommit,date,independentScholarlyReview,reviewer,role')(approval));
 
 console.log(`\n${passed} passed, ${failed} failed`);
 if (failed > 0) process.exit(1);

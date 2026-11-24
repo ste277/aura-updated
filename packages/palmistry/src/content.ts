@@ -106,7 +106,7 @@ export const PALMISTRY_INTRO = {
  * whole Palmistry module tree with an empty stub, so no content ships).
  * Change it ONLY when a qualified human reviewer has signed off -- see
  * docs/palmistry/AURA_PALM_01_I1_CONTENT_REVIEW_PACKET.md. */
-const REVIEW_STATUS = reviewStatus as { status: string; approvedBy: null | { reviewer: string; date: string } };
+const REVIEW_STATUS = reviewStatus as { status: string; approvedBy: null | { reviewer: string; role: string; independentScholarlyReview: boolean; basis: string; contentCommit: string; date: string } };
 
 export const PALMISTRY_CONTENT_REVIEW = {
   status: (REVIEW_STATUS.status === 'APPROVED' ? 'APPROVED' : 'PENDING_HUMAN_REVIEW') as 'PENDING_HUMAN_REVIEW' | 'APPROVED',

@@ -139,8 +139,11 @@ check('D6. no Western planetary mount is presented as an entry', !PALMISTRY_ENTR
 // ============================================================
 // E. Review status cannot silently claim approval
 // ============================================================
-check('E1. content review status is still PENDING_HUMAN_REVIEW', PALMISTRY_CONTENT_REVIEW.status === 'PENDING_HUMAN_REVIEW');
-check('E2. no approver is recorded (no fabricated sign-off)', PALMISTRY_CONTENT_REVIEW.approvedBy === null);
+// AURA-PALM-01-G3: Product Owner approval recorded 2026-11-24 (scholar waiver §5 + editorial/cultural review of f723942).
+// The record must never read as an independent scholarly sign-off.
+const isOwnerApprovalRecord = (s: any) => s.status === 'APPROVED' && s.approvedBy !== null && s.approvedBy.reviewer === 'Product Owner' && s.approvedBy.role === 'PRODUCT_OWNER_EDITORIAL_AND_CULTURAL_REVIEW' && s.approvedBy.independentScholarlyReview === false && s.approvedBy.contentCommit === 'f723942' && s.approvedBy.date === '2026-11-24' && /AURA-PALM-01-G3-SCHOLAR-WAIVER\.md §5/.test(s.approvedBy.basis) && Object.keys(s.approvedBy).sort().join(',') === 'basis,contentCommit,date,independentScholarlyReview,reviewer,role';
+check('E1. content review status is APPROVED (Product Owner approval, 2026-11-24)', PALMISTRY_CONTENT_REVIEW.status === 'APPROVED');
+check('E2. approver is the Product Owner editorial/cultural review, explicitly NOT an independent scholarly review', isOwnerApprovalRecord(PALMISTRY_CONTENT_REVIEW));
 
 // ============================================================
 // F. Safe lookups
@@ -230,15 +233,17 @@ class FakeReplacementPlugin {
 const fakeWebpack = { NormalModuleReplacementPlugin: FakeReplacementPlugin };
 
 const reviewJson = JSON.parse(read('packages/palmistry/src/review-status.json'));
-check('K1. review-status.json is PENDING_HUMAN_REVIEW with no approver (single source of truth)', reviewJson.status === 'PENDING_HUMAN_REVIEW' && reviewJson.approvedBy === null);
+check('K1. review-status.json holds exactly the Product Owner approval record (single source of truth; independentScholarlyReview false)', isOwnerApprovalRecord(reviewJson));
 check('K2. content.ts derives its review status from review-status.json', /import reviewStatus from '\.\/review-status\.json'/.test(read('packages/palmistry/src/content.ts')) && PALMISTRY_CONTENT_REVIEW.status === reviewJson.status);
-check('K3. build exclusion reads the same file and reports NOT approved', exclusion.isPalmistryApproved() === false && path.resolve(exclusion.REVIEW_STATUS_PATH) === path.join(ROOT, 'packages/palmistry/src/review-status.json'));
+check('K3. build exclusion reads the same file and reports approved', exclusion.isPalmistryApproved() === true && path.resolve(exclusion.REVIEW_STATUS_PATH) === path.join(ROOT, 'packages/palmistry/src/review-status.json'));
 
 const prodConfig = exclusion.applyPalmistryExclusion({ plugins: [] }, { dev: false, webpack: fakeWebpack, approved: false });
 check('K4. production + not approved: exactly one replacement plugin pointing at the stand-in', prodConfig.plugins.length === 1 && prodConfig.plugins[0] instanceof FakeReplacementPlugin && prodConfig.plugins[0].replacement === path.join(ROOT, 'apps/web/components/PalmistryView.unpublished.tsx'));
 check('K5. dev builds keep the real module', exclusion.applyPalmistryExclusion({ plugins: [] }, { dev: true, webpack: fakeWebpack, approved: false }).plugins.length === 0);
 check('K6. approved content is not excluded', exclusion.applyPalmistryExclusion({ plugins: [] }, { dev: false, webpack: fakeWebpack, approved: true }).plugins.length === 0);
-check('K7. default (no `approved` passed) reads the file -> excluded in production', exclusion.applyPalmistryExclusion({ plugins: [] }, { dev: false, webpack: fakeWebpack }).plugins.length === 1);
+// AURA-PALM-01-G3: the real file is now APPROVED (Product Owner, 2026-11-24), so the default read keeps the real module;
+// the pending -> excluded path stays covered by K4 (explicit) and the fixture-tree tests (palmG5I1R2ProductionExclusion D4).
+check('K7. default (no `approved` passed) reads the file -> real APPROVED record -> not excluded in production', exclusion.applyPalmistryExclusion({ plugins: [] }, { dev: false, webpack: fakeWebpack }).plugins.length === 0);
 const re: RegExp = exclusion.PALMISTRY_VIEW_REQUEST;
 check('K8. replacement pattern matches the PalmistryView request forms', re.test('../components/PalmistryView') && re.test('/repo/apps/web/components/PalmistryView.tsx') && re.test('C:\\repo\\apps\\web\\components\\PalmistryView'));
 check('K9. replacement pattern does not match the stand-in, the diagram or similar names', !re.test('../components/PalmistryView.unpublished') && !re.test('./PalmistryView.unpublished.tsx') && !re.test('./PalmHandDiagram') && !re.test('../components/PalmistryViewer') && !re.test('../components/ExploreView'));
@@ -253,7 +258,12 @@ const realNextConfig = require('../apps/web/next.config.js');
 // image-input exclusion (a second replacement plugin), so K10 counts the
 // PalmistryView replacement specifically instead of all plugins.
 const k10PalmistryReplacements = (cfg: any) => cfg.plugins.filter((p: any) => p?.pattern instanceof RegExp && p.pattern.test('../components/PalmistryView')).length;
-check('K10. next.config.js wires the exclusion into its webpack hook', typeof realNextConfig.webpack === 'function' && k10PalmistryReplacements(realNextConfig.webpack({ plugins: [] }, { dev: false, webpack: fakeWebpack })) === 1 && realNextConfig.webpack({ plugins: [] }, { dev: true, webpack: fakeWebpack }).plugins.length === 0);
+// AURA-PALM-01-G3: with the real file APPROVED, wiring is proven by the approval-state cache key the hook writes
+// (it can only come from applyPalmistryExclusion reading review-status.json); the image-input replacement must still be present.
+{
+  const k10Prod = typeof realNextConfig.webpack === 'function' ? realNextConfig.webpack({ plugins: [], cache: { type: 'filesystem', version: 'base' } }, { dev: false, webpack: fakeWebpack }) : null;
+  check('K10. next.config.js wires the exclusion into its webpack hook (reads the real APPROVED file; image-input exclusion still applied)', Boolean(k10Prod) && k10Prod.cache.version.includes('|palmistry-approved:yes') && k10PalmistryReplacements(k10Prod) === 0 && k10Prod.plugins.length >= 1 && realNextConfig.webpack({ plugins: [] }, { dev: true, webpack: fakeWebpack }).plugins.length === 0);
+}
 
 // Import allowlist: the replacement only removes everything if the Palmistry
 // tree is reachable SOLELY through components/PalmistryView.
