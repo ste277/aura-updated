@@ -8,7 +8,7 @@
 import * as fs from 'fs';
 import * as path from 'path';
 import { measureHand, MEASUREMENT_IDS, HAND_MEASUREMENT_VERSION, type HandMeasurementSet } from '../apps/web/lib/palm-analysis/measurements';
-import { buildPalmFeatureSet, palmFrameFromLandmarks, imageToPalm, ALL_LINES, ALL_MARKS, PALM_LINE_IDENTITY, type LineInput, type MarkInput, type PalmFeatureSet, type PalmFeatureSetInput } from '../apps/web/lib/palm-analysis/features';
+import { buildPalmFeatureSet, palmFrameFromLandmarks, imageToPalm, traceGeometryProblem, ALL_LINES, ALL_MARKS, PALM_LINE_IDENTITY, type LineInput, type MarkInput, type PalmFeatureSet, type PalmFeatureSetInput } from '../apps/web/lib/palm-analysis/features';
 import type { PalmFeedbackCode } from '../apps/web/lib/palm-analysis/types';
 
 // The engine package is ESM (.mjs); Node >= 22.12 loads it through require().
@@ -75,6 +75,8 @@ function build(input: PalmFeatureSetInput): PalmFeatureSet {
   return r.featureSet;
 }
 const SYN = { synthetic: true, scanConfidence: 0.9 };
+// L1: the full adapter result ({ features, declined, notMapped }) is the integration contract; tests read .features from it.
+const adaptF = (f: unknown, syn: unknown) => featureSetAdapter.adaptFeatureSet(f, syn).features;
 
 // ============================================================ A. measurements: basic + coordinate normalisation
 const base = measureAt(POSE);
@@ -218,27 +220,27 @@ check('H5. the skipped upward line is not observed (never inferred)', obs('CENTR
 check('H6. measurements and user-reported marks are listed as not mappable, none dropped silently', adapted.notMapped.filter((n: any) => n.feature.startsWith('measurement:')).length === MEASUREMENT_IDS.length && adapted.notMapped.some((n: any) => n.feature === 'mark:matsya') && adapted.notMapped.some((n: any) => n.feature === 'mark:yava'));
 check('H7. skipped lines are not mapped as "expected but missing" (absence carries no meaning)', adapted.features.creases.expectedButMissing.length === 0);
 check('H8. the engine disclaimer is present; reading text carries no prohibited claim (excluded-claims list aside)', /not a science/.test(reading.disclaimer.text) && !/\b(lifespan|death|die|diagnos|disease|guarantee)/i.test(JSON.stringify(reading.sections, (k, v) => (k === 'excludedClaims' ? undefined : v))) && JSON.stringify(reading.sections).includes('excludedClaims'));
-const onlyHeart = engine.generateReading(featureSetAdapter.toEngineFeaturesFromFeatureSet(build(featureInput(POSE, { lines: tracedLines(POSE, ['heart']) })), SYN));
+const onlyHeart = engine.generateReading(adaptF(build(featureInput(POSE, { lines: tracedLines(POSE, ['heart']) })), SYN));
 check('H9. only the heart line traced: head and life are not observed, heart is ok', obs.call(null, 'DTC') && onlyHeart.observations.find((o: any) => o.crease === 'DTC').status === 'ok' && ['PTC', 'TC'].every((c) => onlyHeart.observations.find((o: any) => o.crease === c).status === 'not-observed'));
-const nothing = engine.generateReading(featureSetAdapter.toEngineFeaturesFromFeatureSet(build(featureInput(POSE, { lines: [] })), SYN));
+const nothing = engine.generateReading(adaptF(build(featureInput(POSE, { lines: [] })), SYN));
 check('H10. nothing traced: the engine declines rather than inventing a reading', nothing.status !== 'interpreted', nothing.status);
-const lowScan = engine.generateReading(featureSetAdapter.toEngineFeaturesFromFeatureSet(fsFull, { synthetic: true, scanConfidence: 0.3 }));
+const lowScan = engine.generateReading(adaptF(fsFull, { synthetic: true, scanConfidence: 0.3 }));
 check('H11. scan confidence below the engine minimum (0.40) declines the whole reading', lowScan.status !== 'interpreted', lowScan.status);
 const blurry = build(featureInput(POSE, { qualityIssues: ['blurry'] }));
-const blurryReading = engine.generateReading(featureSetAdapter.toEngineFeaturesFromFeatureSet(blurry, SYN));
-check('H12. a G5 quality issue is forwarded unaltered and the engine applies its own frame rules', featureSetAdapter.toEngineFeaturesFromFeatureSet(blurry, SYN).capture.quality.status === 'needs-retake' && blurryReading.status !== 'interpreted', blurryReading.status);
+const blurryReading = engine.generateReading(adaptF(blurry, SYN));
+check('H12. a G5 quality issue is forwarded unaltered and the engine applies its own frame rules', adaptF(blurry, SYN).capture.quality.status === 'needs-retake' && blurryReading.status !== 'interpreted', blurryReading.status);
 const upward = build(featureInput(POSE, { lines: tracedLines(POSE, ['heart', 'head', 'life', 'upward']) }));
-const upwardReading = engine.generateReading(featureSetAdapter.toEngineFeaturesFromFeatureSet(upward, SYN));
-check('H13. a traced upward line reaches the engine only as a geometry-identified hypothesis (MINOR)', featureSetAdapter.toEngineFeaturesFromFeatureSet(upward, SYN).creases.items.some((c: any) => c.id === 'trace-upward' && c.identity.anatomicalClass === 'MINOR') && upwardReading.observations.find((o: any) => o.crease === 'CENTRAL_LONGITUDINAL').evidenceScore <= 0.74);
+const upwardReading = engine.generateReading(adaptF(upward, SYN));
+check('H13. a traced upward line reaches the engine only as a geometry-identified hypothesis (MINOR)', adaptF(upward, SYN).creases.items.some((c: any) => c.id === 'trace-upward' && c.identity.anatomicalClass === 'MINOR') && upwardReading.observations.find((o: any) => o.crease === 'CENTRAL_LONGITUDINAL').evidenceScore <= 0.74);
 // A self-crossing trace is structurally fine in the feature set, but the engine geometry rules reject it.
 const zigzag = [{ x: 0.3, y: 0.3 }, { x: 0.8, y: 0.45 }, { x: 0.8, y: 0.3 }, { x: 0.3, y: 0.45 }].map((p) => toNorm(p, POSE));
 const zz = build(featureInput(POSE, { lines: [...tracedLines(POSE, ['heart', 'life']), { line: 'head', action: 'traced', points: zigzag, confirmed: true }] }));
 const zzAdapted = featureSetAdapter.adaptFeatureSet(zz, SYN);
-check('H14. a self-crossing trace is declined by the adapter with the engine reason; the other lines still read', zzAdapted.declined.some((d: any) => d.line === 'head' && /^geometry-/.test(d.reason)) && engine.validateFeatures(zzAdapted.features).ok && engine.generateReading(zzAdapted.features).status === 'interpreted');
+check('H14. a self-crossing trace never becomes confirmed geometry: unassessed (trace-self-intersecting, identity confirmation kept); the other lines still read', zz.lines.head.provenance === 'unassessed' && (zz.lines.head as any).reason === 'trace-self-intersecting' && zz.lines.head.confirmation === 'confirmed' && zzAdapted.features.creases.items.length === 2 && engine.validateFeatures(zzAdapted.features).ok && engine.generateReading(zzAdapted.features).status === 'interpreted');
 const refuse = (fn: () => unknown, code: string) => { try { fn(); return false; } catch (e: any) { return e?.code === code; } };
 check('H15. the adapter refuses without an explicit synthetic declaration (no real-input path)', refuse(() => featureSetAdapter.adaptFeatureSet(fsFull, { scanConfidence: 0.9 }), 'synthetic-required') && refuse(() => featureSetAdapter.adaptFeatureSet(fsFull, null), 'synthetic-required'));
 check('H16. the adapter refuses an unknown feature-set version and an unconfirmed "assessed" line', refuse(() => featureSetAdapter.adaptFeatureSet({ ...fsFull, version: 'x' }, SYN), 'unsupported-feature-set') && refuse(() => featureSetAdapter.adaptFeatureSet({ ...fsFull, lines: { ...fsFull.lines, heart: { ...fsFull.lines.heart, confirmation: 'pending' } } }, SYN), 'invalid-line'));
-check('H17. left and right hands produce the same engine creases (mirror consistency end to end)', JSON.stringify(featureSetAdapter.toEngineFeaturesFromFeatureSet(fsBase, SYN).creases) === JSON.stringify(featureSetAdapter.toEngineFeaturesFromFeatureSet(fsLeft, SYN).creases));
+check('H17. left and right hands produce the same engine creases (mirror consistency end to end)', JSON.stringify(adaptF(fsBase, SYN).creases) === JSON.stringify(adaptF(fsLeft, SYN).creases));
 check('H18. the frozen engine keeps its synthetic-only restriction (synthetic: false is rejected)', !engine.validateFeatures({ ...adapted.features, synthetic: false }).ok);
 
 // ============================================================ I. production exclusion + isolation
@@ -267,5 +269,163 @@ check('I7. the dev gate is unchanged (next dev + explicit flag)', /nodeEnv === '
 check('I8. the frozen engine sources are untouched by this ticket (no 03-I1 marker in prototype/src)', fs.readdirSync(path.join(ROOT, 'packages/palm-reading-engine/prototype/src')).every((f) => !/03-I1|feature-set-adapter/.test(read(`packages/palm-reading-engine/prototype/src/${f}`))));
 check('I9. the approved guide review status is still APPROVED and the guide files are not referenced by the new modules', /"status":\s*"APPROVED"/.test(read('packages/palmistry/src/review-status.json')) && NEW_LIB.every((f) => !/packages\/palmistry|PalmistryView|PalmHandDiagram/.test(strip(read(f)))));
 
+// ============================================================ R. independent-review boundary regressions (M1-M4, L1)
+// Written from the PR #391 review findings (reviewed head 3c2e7de). Each must hold on the corrected head.
+const noThrow = (fn: () => unknown): { ok: boolean; value?: any; error?: any } => { try { return { ok: true, value: fn() }; } catch (error) { return { ok: false, error }; } };
+const mh = (over: Record<string, unknown>) => noThrow(() => measureHand({ landmarks: lm, imageWidth: 1000, imageHeight: 1400, qualityIssues: [], handednessLabel: labelFor(POSE), ...over } as never));
+const sparseLm = lm.slice(); delete (sparseLm as any)[7];
+const r1 = mh({ landmarks: sparseLm });
+check('R1 (M1). sparse landmark array -> no exception, all unavailable (landmarks-invalid)', r1.ok && r1.value.status === 'unavailable' && r1.value.reasons.includes('landmarks-invalid'), r1.ok ? r1.value.reasons : String(r1.error));
+const r2 = mh({ landmarks: lm.map((p, i) => (i === 12 ? { ...p, y: -0.05 } : p)) });
+check('R2 (M1). landmark outside the normalised [0,1] frame -> unavailable (landmark-out-of-frame)', r2.ok && r2.value.status === 'unavailable' && r2.value.reasons.includes('landmark-out-of-frame'), r2.ok ? r2.value.reasons : String(r2.error));
+const r3 = mh({ landmarks: lm.map((p, i) => (i === 2 ? { ...p, z: NaN } : p)) });
+check('R3 (M1). non-finite optional z -> unavailable (landmarks-invalid)', r3.ok && r3.value.status === 'unavailable' && r3.value.reasons.includes('landmarks-invalid'), r3.ok ? r3.value.reasons : String(r3.error));
+const r4 = mh({ imageWidth: 1e308, imageHeight: 1e308 });
+check('R4 (M1). arithmetic overflow (1e308 px image) -> no non-finite value classified as measured', r4.ok && r4.value.status === 'unavailable' && MEASUREMENT_IDS.every((id: any) => r4.value.measurements[id].value === null), r4.ok ? [r4.value.status, values(r4.value)] : String(r4.error));
+const r5 = mh({ qualityIssues: undefined });
+check('R5 (M1). missing quality feedback -> quality explicitly unknown, values at most uncertain', r5.ok && r5.value.status === 'uncertain' && r5.value.reasons.includes('quality-unknown'), r5.ok ? [r5.value.status, r5.value.reasons] : String(r5.error));
+const r6 = mh({ qualityIssues: ['not-a-code'] });
+check('R6 (M1). invalid quality feedback (unknown code) -> unavailable (quality-invalid)', r6.ok && r6.value.status === 'unavailable' && r6.value.reasons.includes('quality-invalid'), r6.ok ? r6.value.reasons : String(r6.error));
+const sparseIssues: PalmFeedbackCode[] = []; sparseIssues.length = 2;
+const r6b = mh({ qualityIssues: sparseIssues });
+check('R6b (M1). sparse quality-issue array -> unavailable (quality-invalid)', r6b.ok && r6b.value.status === 'unavailable' && r6b.value.reasons.includes('quality-invalid'), r6b.ok ? r6b.value.reasons : String(r6b.error));
+const r7 = [noThrow(() => measureHand(null as never)), noThrow(() => measureHand({ get landmarks() { throw new Error('boom'); }, imageWidth: 1, imageHeight: 1, qualityIssues: [] } as never))];
+check('R7 (M1). malformed input objects (null input, throwing accessor) -> no uncontrolled exception', r7.every((r) => r.ok && r.value.status === 'unavailable'), r7.map((r) => (r.ok ? r.value.reasons : String(r.error))));
+const sparseTrace = CANON_TRACES.heart.map((p) => toNorm(p, POSE)); delete (sparseTrace as any)[2];
+const r8 = noThrow(() => build(featureInput(POSE, { lines: [{ line: 'heart', action: 'traced', points: sparseTrace, confirmed: true }] })).lines.heart);
+check('R8 (M2). sparse trace array -> no exception, unassessed (trace-point-invalid)', r8.ok && r8.value.provenance === 'unassessed' && r8.value.reason === 'trace-point-invalid', r8.ok ? r8.value : String(r8.error));
+const crossing = [{ x: 0.3, y: 0.3 }, { x: 0.8, y: 0.45 }, { x: 0.8, y: 0.3 }, { x: 0.3, y: 0.45 }].map((p) => toNorm(p, POSE));
+const r9 = noThrow(() => build(featureInput(POSE, { lines: [{ line: 'head', action: 'traced', points: crossing, confirmed: true }] })).lines.head);
+check('R9 (M2). self-crossing trace is rejected before recording: unassessed (trace-self-intersecting), identity confirmation kept separate', r9.ok && r9.value.provenance === 'unassessed' && r9.value.reason === 'trace-self-intersecting' && r9.value.confirmation === 'confirmed', r9.ok ? r9.value : String(r9.error));
+const backTrack = [{ x: 0.2, y: 0.4 }, { x: 0.6, y: 0.42 }, { x: 0.25, y: 0.43 }].map((p) => toNorm(p, POSE));
+const r9b = noThrow(() => build(featureInput(POSE, { lines: [{ line: 'head', action: 'traced', points: backTrack, confirmed: true }] })).lines.head);
+check('R9b (M2). doubling-back trace -> unassessed (trace-doubles-back)', r9b.ok && r9b.value.provenance === 'unassessed' && r9b.value.reason === 'trace-doubles-back', r9b.ok ? r9b.value : String(r9b.error));
+// R10: property check over deterministic pseudo-random traces near the geometric limits: every RECORDED (rounded,
+// serialised) geometry must pass the engine's own polyline rules and bounds, and order must be preserved.
+const engineSchema = require('../packages/palm-reading-engine/prototype/src/schema.mjs');
+let seed = 20261124; const rnd = () => ((seed = (seed * 1103515245 + 12345) % 2147483648) / 2147483648);
+const r10: { recorded: number; bad: any[] } = { recorded: 0, bad: [] };
+const { frame: f10 } = palmFrameFromLandmarks(lm, 1000, 1400);
+for (let k = 0; k < 600; k++) {
+  const n = 2 + Math.floor(rnd() * 6), pts: P[] = [];
+  const x0 = 0.35 + rnd() * 0.3, y0 = 0.45 + rnd() * 0.15, step = rnd() < 0.3 ? 0.000004 + rnd() * 0.00003 : 0.002 + rnd() * 0.05;
+  for (let j = 0; j < n; j++) pts.push({ x: x0 + (rnd() - 0.3) * step * (j + 1), y: y0 + (rnd() - 0.5) * step * (j + 1) });
+  const res = build(featureInput(POSE, { lines: [{ line: 'life', action: 'traced', points: pts, confirmed: true }] })).lines.life;
+  if (res.provenance === 'user-confirmed') {
+    r10.recorded++;
+    const order = pts.map((p) => imageToPalm(f10!, p));
+    const okOrder = res.palmPoints.every((q, i) => Math.abs(q.x - order[i].x) <= 5.1e-5 && Math.abs(q.y - order[i].y) <= 5.1e-5);
+    if (engineSchema.polylineProblem(res.palmPoints.map((q) => ({ x: q.x, y: q.y }))) !== null || !okOrder || res.palmPoints.length !== pts.length) r10.bad.push(res.palmPoints);
+  }
+}
+check('R10 (M2). rounding-sensitive traces: every recorded geometry passes the engine polyline rules after rounding; order and point count preserved', r10.bad.length === 0 && r10.recorded > 50, { recorded: r10.recorded, bad: r10.bad.slice(0, 2) });
+
+// Port equivalence: the feature-set geometry rules agree with the engine's polylineProblem (same accept/reject verdict)
+// on deterministic random polylines, including near-limit turns, crossings and near-duplicate points.
+{
+  const ENGINE_TO_TRACE: Record<string, string> = { 'too-few-distinct-points': 'trace-too-few-distinct-points', 'repeated-point': 'trace-repeated-point', degenerate: 'trace-too-short', 'doubles-back': 'trace-doubles-back', 'self-intersecting': 'trace-self-intersecting', tortuous: 'trace-tortuous' };
+  let s2 = 77; const r2 = () => ((s2 = (s2 * 1103515245 + 12345) % 2147483648) / 2147483648);
+  const mismatches: any[] = []; let rejects = 0;
+  for (let k = 0; k < 3000; k++) {
+    const n = 2 + Math.floor(r2() * 7), pts: P[] = [];
+    for (let j = 0; j < n; j++) pts.push({ x: Math.round((0.2 + r2() * 0.6) * (r2() < 0.2 ? 100 : 10000)) / (r2() < 0.2 ? 100 : 10000), y: Math.round((0.2 + r2() * 0.6) * 10000) / 10000 });
+    if (r2() < 0.1 && n > 2) pts[n - 1] = { ...pts[0] };
+    const e = engineSchema.polylineProblem(pts), t = traceGeometryProblem(pts);
+    if (e) rejects++;
+    if ((e ? ENGINE_TO_TRACE[e] : null) !== t) mismatches.push({ pts, e, t });
+  }
+  check('R10b (M2). ported geometry rules give the engine polylineProblem verdict on 3000 random polylines (incl. rejects)', mismatches.length === 0 && rejects > 500, { mismatches: mismatches.slice(0, 2), rejects });
+}
+const unknownQ = build(featureInput(POSE, { qualityIssues: null }));
+const unknownQAdapted = adaptF(unknownQ, SYN);
+const unknownQReading = engine.generateReading(unknownQAdapted);
+check('R5b (M1). builder with no quality feedback: qualityStatus "unknown", measurements uncertain (quality-unknown), forwarded unaltered; the engine does not interpret an unknown-quality frame', unknownQ.frame.qualityStatus === 'unknown' && unknownQ.measurements.reasons.includes('quality-unknown') && unknownQAdapted.capture.quality.status === 'unknown' && unknownQReading.status === 'declined', [unknownQ.frame.qualityStatus, unknownQReading.status]);
+// Adapter (M3)
+const clone = (v: unknown) => JSON.parse(JSON.stringify(v));
+const adaptErr = (f: unknown, syn: unknown = SYN): string => { try { featureSetAdapter.adaptFeatureSet(f, syn); return 'accepted'; } catch (e: any) { return e instanceof featureSetAdapter.AdapterError ? e.code : `RAW:${e?.constructor?.name}:${e?.message}`; } };
+const contra = clone(fsFull); contra.frame.qualityStatus = 'accepted'; contra.frame.qualityIssues = ['blurry'];
+check('R11 (M3). contradictory quality record (accepted + issues) -> typed AdapterError', adaptErr(contra) === 'contradictory-quality', adaptErr(contra));
+const blockAcc = clone(fsFull); blockAcc.frame.qualityStatus = 'accepted'; blockAcc.frame.qualityIssues = ['palm-not-visible'];
+check('R11b (M3). blocking issue cannot be laundered through an "accepted" status', adaptErr(blockAcc) === 'contradictory-quality', adaptErr(blockAcc));
+const noStatusIssues = clone(fsFull); noStatusIssues.frame.qualityStatus = 'needs-retake'; noStatusIssues.frame.qualityIssues = [];
+check('R11c (M3). needs-retake with no issue is contradictory too', adaptErr(noStatusIssues) === 'contradictory-quality', adaptErr(noStatusIssues));
+const sparsePts = clone(fsFull); sparsePts.lines.heart.palmPoints = [sparsePts.lines.heart.palmPoints[0], null, sparsePts.lines.heart.palmPoints[2]];
+const holePts = clone(fsFull); const h = holePts.lines.heart.palmPoints; delete h[1];
+check('R12 (M3). null trace point -> invalid-line; sparse (hole) trace array -> sparse-array (both typed AdapterErrors)', adaptErr(sparsePts) === 'invalid-line' && adaptErr(holePts) === 'sparse-array', [adaptErr(sparsePts), adaptErr(holePts)]);
+const crossRec = clone(fsFull); crossRec.lines.head.palmPoints = [{ x: 0.3, y: 0.3 }, { x: 0.8, y: 0.45 }, { x: 0.8, y: 0.3 }, { x: 0.3, y: 0.45 }];
+check('R12b (M3). malformed (self-crossing) recorded geometry -> typed AdapterError, not a silent decline', adaptErr(crossRec) === 'invalid-line', adaptErr(crossRec));
+const noMeas = clone(fsFull); delete noMeas.measurements.measurements.ringLength;
+const noMark = clone(fsFull); delete noMark.marks.shankha;
+const noLine = clone(fsFull); delete noLine.lines.upward;
+check('R13 (M3). incomplete measurement, mark or line inventory -> typed AdapterError (incomplete-inventory)', [noMeas, noMark, noLine].every((f) => adaptErr(f) === 'incomplete-inventory'), [noMeas, noMark, noLine].map((f) => adaptErr(f)));
+const badMeas = clone(fsFull); badMeas.measurements.measurements.palmLength.value = null;
+check('R13b (M3). measurement marked measured with a null value -> typed AdapterError', adaptErr(badMeas) === 'invalid-measurement', adaptErr(badMeas));
+const provLine = clone(fsFull); provLine.lines.heart.provenance = 'user-reported';
+const provMark = clone(fsFull); provMark.marks.yava.provenance = 'user-confirmed';
+const provGroups = clone(fsFull); provGroups.provenance['user-confirmed'] = [...provGroups.provenance['user-confirmed'], 'line:upward'];
+check('R14 (M3). invalid provenance (line user-reported, mark user-confirmed, groups disagreeing with records) -> typed AdapterError', adaptErr(provLine) === 'invalid-provenance' && adaptErr(provMark) === 'invalid-provenance' && adaptErr(provGroups) === 'invalid-provenance', [adaptErr(provLine), adaptErr(provMark), adaptErr(provGroups)]);
+const confLine = clone(fsFull); confLine.lines.upward = { line: 'upward', provenance: 'unassessed', confirmation: 'confirmed', identity: confLine.lines.upward.identity, reason: 'user-skipped' };
+const pendLine = clone(fsFull); pendLine.lines.heart.confirmation = 'pending';
+const idLine = clone(fsFull); idLine.lines.heart.identity = clone(PALM_LINE_IDENTITY.life);
+check('R15 (M3). invalid confirmation/source combinations (skipped yet confirmed, user-confirmed yet pending, wrong identity) -> typed AdapterError', adaptErr(confLine) === 'invalid-line' && adaptErr(pendLine) === 'invalid-line' && adaptErr(idLine) === 'invalid-line', [adaptErr(confLine), adaptErr(pendLine), adaptErr(idLine)]);
+const throwing = clone(fsFull); Object.defineProperty(throwing, 'lines', { get() { throw new Error('boom'); }, enumerable: true });
+const numPts = clone(fsFull); numPts.lines.heart.palmPoints = 5;
+check('R16 (M3). hostile or wrongly typed records never leak raw exceptions (AdapterError only)', [throwing, numPts, null, 7, [], { version: 'palm-03-i1-feature-set@0.1.0' }].every((f) => !adaptErr(f).startsWith('RAW:') && adaptErr(f) !== 'accepted'), [throwing, numPts, null, 7, [], {}].map((f) => adaptErr(f)));
+const blocking = build(featureInput(POSE, { qualityIssues: ['palm-not-visible'] }));
+const blockingReading = engine.generateReading(adaptF(blocking, SYN));
+check('R17 (M3). blocking quality feedback reaches the engine quality gate: reading declined (quality-not-accepted)', adaptF(blocking, SYN).capture.quality.status === 'needs-retake' && blockingReading.status === 'declined' && /quality/.test(JSON.stringify(blockingReading.decline ?? blockingReading)), blockingReading.status);
+check('R18 (M3). synthetic-only gate and tentative ceiling preserved after hardening', adaptErr(fsFull, { scanConfidence: 0.9 }) === 'synthetic-required' && adaptF(fsFull, SYN).creases.items.every((c: any) => c.detection.confidence <= 0.74));
+check('R19 (L1). the diagnostics-discarding convenience export is gone; only the full result is exported', featureSetAdapter.toEngineFeaturesFromFeatureSet === undefined && (() => { const r = featureSetAdapter.adaptFeatureSet(fsFull, SYN); return Array.isArray(r.declined) && Array.isArray(r.notMapped) && typeof r.features === 'object'; })());
+// M4 characterization (frozen engine NOT modified): a user-SKIPPED line reaches the engine as "not observed" at the
+// observation level, but the family-level decline reuses the engine's detector-miss wording ("not detected ...
+// limitation of the photo or detector"). Recorded here as-is; PALM-03-E1 must resolve it (see report, E1 acceptance).
+const skipLife = build(featureInput(POSE, { lines: [...tracedLines(POSE, ['heart', 'head']), { line: 'life', action: 'skipped', reason: 'user-skipped' }] }));
+const skipReading = engine.generateReading(adaptF(skipLife, SYN));
+const tcItems = skipReading.sections.flatMap((sec: any) => [...(sec.items ?? []), ...(sec.declined ?? []), ...(sec.quiet ?? [])]).filter((it: any) => /^F-TC-/.test(it.familyId ?? ''));
+check('R20 (M4, characterization). skipped life line: observation not-observed; families declined with the detector-miss reason "missing" (frozen-engine mismatch, E1 item)', skipReading.observations.find((o: any) => o.crease === 'TC').status === 'not-observed' && tcItems.length > 0 && tcItems.every((it: any) => it.kind === 'declined' && it.reason === 'missing' && /not detected/.test(it.text)), tcItems.map((it: any) => [it.familyId, it.kind, it.reason]));
+check('R21 (M4). no interpretation is generated from a skipped feature', tcItems.every((it: any) => it.kind !== 'interpreted') && !skipReading.sections.some((sec: any) => (sec.items ?? []).some((it: any) => it.kind === 'interpreted' && (it.evidence?.anatomicalClasses ?? []).includes('TC'))));
+
+// ============================================================ RV. exact reproductions from the independent review (AURA-PALM-03-I1-IR)
+// Axis-aligned 64 x 128 fixture: pixel offsets relative to (24, 32), label 'Left', rotation 0.
+const RV_OFF = [[2,12],[-3,10],[-5,7],[-7,4],[-9,2],[0,0],[-1,-5],[-2,-8],[-3,-12],[4,0],[4,-5],[4,-9],[4,-13],[8,0],[9,-5],[9,-8],[9,-11],[12,0],[13,-4],[13,-7],[13,-10]];
+const RV_LM = RV_OFF.map(([dx, dy]) => ({ x: (24 + dx) / 64, y: (32 + dy) / 128, z: 0 }));
+const rvMeasure = (landmarks: unknown, over: Record<string, unknown> = {}) => noThrow(() => measureHand({ landmarks, imageWidth: 64, imageHeight: 128, qualityIssues: [], handednessLabel: 'Left', ...over } as never));
+const rvInput = (over: Partial<PalmFeatureSetInput> = {}): PalmFeatureSetInput => ({ hand: 'right', dominantHand: 'right', landmarks: RV_LM, imageWidth: 64, imageHeight: 128, qualityIssues: [], rotationDeg: 0, handednessLabel: 'Left', lines: [], marks: [], ...over });
+const rvBase = rvMeasure(RV_LM);
+check('RV0. the review fixture is a valid frame (baseline measured or uncertain, never unavailable)', rvBase.ok && rvBase.value.status !== 'unavailable', rvBase.ok ? [rvBase.value.status, rvBase.value.reasons] : String(rvBase.error));
+const rvHole = RV_LM.slice(); delete (rvHole as any)[5];
+const rv1a = rvMeasure(rvHole), rv1b = noThrow(() => buildPalmFeatureSet(rvInput({ landmarks: rvHole })));
+check('RV1 (M1). index 5 deleted: measureHand and buildPalmFeatureSet do not throw; landmarks invalid, frame unavailable', rv1a.ok && rv1a.value.status === 'unavailable' && rv1b.ok && rv1b.value.ok && !rv1b.value.featureSet.frame.available && rv1b.value.featureSet.frame.reason === 'landmarks-invalid', [rv1a.ok ? rv1a.value.reasons : String(rv1a.error), rv1b.ok ? rv1b.value : String(rv1b.error)]);
+const rv2 = rvMeasure(RV_LM.map((p, i) => (i === 8 ? { ...p, x: 1.2 } : p)));
+const rv3 = rvMeasure(RV_LM.map((p, i) => (i === 8 ? { ...p, x: Number.MAX_VALUE } : p)));
+check('RV2 (M1). index fingertip at x = 1.2 -> unavailable (landmark-out-of-frame), not measured', rv2.ok && rv2.value.status === 'unavailable' && rv2.value.reasons.includes('landmark-out-of-frame'), rv2.ok ? rv2.value.reasons : String(rv2.error));
+check('RV3 (M1). index fingertip at x = Number.MAX_VALUE -> unavailable; no Infinity anywhere', rv3.ok && rv3.value.status === 'unavailable' && !/Infinity|null,"unit":"palm-width","status":"measured"/.test(JSON.stringify(rv3.value)) && MEASUREMENT_IDS.every((id: any) => rv3.value.measurements[id].value === null), rv3.ok ? rv3.value.reasons : String(rv3.error));
+const rv4 = rvMeasure(RV_LM, { qualityIssues: undefined });
+check('RV4 (M1). qualityIssues undefined -> quality-unknown, not measured', rv4.ok && rv4.value.status === 'uncertain' && rv4.value.reasons.includes('quality-unknown'), rv4.ok ? [rv4.value.status, rv4.value.reasons] : String(rv4.error));
+// Diagonal trace in the axis-aligned frame: palm (0.200051, 0.200051) -> (0.214211, 0.214211); palm width = 12 px.
+const rvTrace = [[0.200051, 0.200051], [0.214211, 0.214211]].map(([px, py]) => ({ x: (24 + 12 * px) / 64, y: (32 + 12 * py) / 128 }));
+const rv5 = noThrow(() => build(rvInput({ lines: [{ line: 'heart', action: 'traced', points: rvTrace, confirmed: true }] })).lines.heart);
+check('RV5 (M2). rounding-boundary diagonal (raw ~0.020025, rounded ~0.019940): rejected as trace-too-short after rounding, never confirmed', rv5.ok && rv5.value.provenance === 'unassessed' && rv5.value.reason === 'trace-too-short' && rv5.value.confirmation === 'confirmed', rv5.ok ? rv5.value : String(rv5.error));
+const rvGood = build(rvInput({ lines: [{ line: 'heart', action: 'traced', points: [[0.2, 0.2], [0.6, 0.25], [0.9, 0.3]].map(([px, py]) => ({ x: (24 + 12 * px) / 64, y: (32 + 12 * py) / 128 })), confirmed: true }] }));
+check('RV5b (M2). a valid trace on the same fixture is still confirmed with order preserved', rvGood.lines.heart.provenance === 'user-confirmed' && (rvGood.lines.heart as any).palmPoints[0].x < (rvGood.lines.heart as any).palmPoints[2].x);
+const rvMid = [[0.2, 0.2], [0.5, 0.25], [0.8, 0.3]].map(([px, py]) => ({ x: (24 + 12 * px) / 64, y: (32 + 12 * py) / 128 })); delete (rvMid as any)[1];
+const rv6 = noThrow(() => build(rvInput({ lines: [{ line: 'heart', action: 'traced', points: rvMid, confirmed: true }] })).lines.heart);
+check('RV6 (M2). three-point trace with the middle index deleted -> unassessed (trace-point-invalid), no throw', rv6.ok && rv6.value.provenance === 'unassessed' && rv6.value.reason === 'trace-point-invalid', rv6.ok ? rv6.value : String(rv6.error));
+const rvRec = clone(rvGood); delete rvRec.lines.heart.palmPoints[1];
+check('RV7 (M3). mapped record with a deleted palmPoints element -> typed AdapterError, no raw TypeError', ['sparse-array', 'invalid-line'].includes(adaptErr(rvRec)), adaptErr(rvRec));
+const rvQ1 = clone(rvGood); rvQ1.frame.qualityIssues = new Array(1); rvQ1.frame.qualityStatus = 'needs-retake';
+const rvQ2 = clone(rvGood); rvQ2.frame.qualityStatus = 'accepted'; rvQ2.frame.qualityIssues = ['hand-cut-off'];
+check('RV8 (M3). quality issues new Array(1) -> typed error; accepted + hand-cut-off -> contradictory-quality (never reaches the engine)', ['sparse-array', 'invalid-frame'].includes(adaptErr(rvQ1)) && adaptErr(rvQ2) === 'contradictory-quality', [adaptErr(rvQ1), adaptErr(rvQ2)]);
+const rvE1 = clone(rvGood); rvE1.measurements = {};
+const rvE2 = clone(rvGood); rvE2.marks = {};
+check('RV9 (M3). measurements {} or marks {} -> typed AdapterError (no silent loss of those diagnostic blocks)', ['invalid-measurement', 'incomplete-inventory'].includes(adaptErr(rvE1)) && adaptErr(rvE2) === 'incomplete-inventory', [adaptErr(rvE1), adaptErr(rvE2)]);
+const rvSkip = build(featureInput(POSE, { lines: [...tracedLines(POSE, ['heart']), { line: 'head', action: 'skipped', reason: 'user-skipped' }] }));
+const rvSkipReading = engine.generateReading(adaptF(rvSkip, SYN));
+const ptcItems = rvSkipReading.sections.flatMap((sec: any) => [...(sec.items ?? []), ...(sec.declined ?? []), ...(sec.quiet ?? [])]).filter((it: any) => /PTC/.test(it.familyId ?? ''));
+check('RV10 (M4, characterization). traced heart + skipped head: PTC not-observed, PTC families declined as "missing" with detector-miss wording, no PTC interpretation (frozen engine; E1 item)', rvSkipReading.observations.find((o: any) => o.crease === 'PTC').status === 'not-observed' && ptcItems.length > 0 && ptcItems.every((it: any) => it.kind === 'declined' && it.reason === 'missing' && /not detected/.test(it.text)), ptcItems.map((it: any) => [it.familyId, it.kind, it.reason]));
+const allItems = (r: any) => r.sections.flatMap((sec: any) => sec.items ?? []).filter((it: any) => it.kind === 'interpreted');
+check('RV11. every emitted interpretation item is tier "tentative" (decision 2 ceiling, scan confidence 1)', (() => { const r = engine.generateReading(adaptF(fsFull, { synthetic: true, scanConfidence: 1 })); const its = allItems(r); return its.length > 0 && its.every((it: any) => it.tier === 'tentative'); })());
+
+check('RV12 (INC-7, characterization). empty branch arrays make the frozen branch/fork families evaluate to QUIET variants (unobserved read as none; E1-A3)', (() => { const q = engine.generateReading(adaptF(fsFull, SYN)).sections.flatMap((sec: any) => sec.quiet ?? []); return q.includes('F-DTC-BRANCHES') && q.includes('F-PTC-FORK'); })());
 console.log(`\n${passed} passed, ${failed} failed`);
 process.exit(failed > 0 ? 1 : 0);

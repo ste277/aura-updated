@@ -23,13 +23,19 @@
  */
 import { LM, orientation, MIN_TIP_TO_PIP_RATIO, type Pt } from './quality';
 import type { PalmFeedbackCode } from './types';
+import { PALM_FEEDBACK_MESSAGES } from './analyze';
 
 export const HAND_MEASUREMENT_VERSION = 'palm-03-i1-hand-measurements@0.1.0';
 
 export type MeasurementStatus = 'measured' | 'uncertain' | 'unavailable';
 
 export type MeasurementReason =
+  | 'input-invalid'
   | 'landmarks-invalid'
+  | 'landmark-out-of-frame'
+  | 'quality-invalid'
+  | 'quality-unknown'
+  | 'computation-nonfinite'
   | 'image-size-invalid'
   | 'frame-degenerate'
   | 'palm-not-facing'
@@ -83,8 +89,12 @@ export interface HandMeasurementInput {
   readonly landmarks: ReadonlyArray<{ x: number; y: number; z?: number }> | null | undefined;
   readonly imageWidth: number;
   readonly imageHeight: number;
-  /** G5 quality feedback codes for the same frame (analyze.ts). */
-  readonly qualityIssues: readonly PalmFeedbackCode[];
+  /**
+   * G5 quality feedback codes for the SAME frame (analyze.ts). `null` or
+   * `undefined` means quality is unknown: values are then at most uncertain.
+   * Anything else that is not a dense array of known codes is invalid.
+   */
+  readonly qualityIssues: readonly PalmFeedbackCode[] | null | undefined;
   /** MediaPipe handedness label, used only by the existing palm-facing test. */
   readonly handednessLabel?: string;
 }
@@ -118,11 +128,53 @@ const CHAINS: Readonly<Record<'thumb' | 'index' | 'middle' | 'ring' | 'little', 
 /** Thumb extension test: tip clearly farther from the wrist than the thumb's last joint (IP, landmark 3). */
 export const MIN_THUMB_TIP_TO_IP_RATIO = 1.05;
 
+/**
+ * Largest accepted image side, in pixels. The pipeline downsizes frames to
+ * <= 1280 px; this generous cap only keeps pixel arithmetic far from
+ * floating-point overflow.
+ */
+export const MAX_IMAGE_SIDE_PX = 100000;
+/** Known G5 feedback codes (the keys of the existing message table). */
+export const KNOWN_QUALITY_CODES: readonly PalmFeedbackCode[] = Object.freeze(Object.keys(PALM_FEEDBACK_MESSAGES) as PalmFeedbackCode[]);
+
 const round3 = (v: number) => Math.round(v * 1000) / 1000;
 const isFiniteNum = (v: unknown): v is number => typeof v === 'number' && Number.isFinite(v);
 
-function validLandmarks(lm: HandMeasurementInput['landmarks']): lm is ReadonlyArray<{ x: number; y: number }> {
-  return Array.isArray(lm) && lm.length === 21 && lm.every((p) => p !== null && typeof p === 'object' && isFiniteNum(p.x) && isFiniteNum(p.y));
+/**
+ * Landmark contract: a dense array of exactly 21 objects, each with finite
+ * x and y in MediaPipe's normalised image range [0, 1] and, if present, a
+ * finite z. Sparse arrays (holes) are invalid. Every index is read
+ * explicitly (Array.prototype.every skips holes). A landmark outside [0, 1]
+ * lies outside the photo: the hand is not fully in frame, so nothing is
+ * measured (explicit unavailable-data policy, never clamped).
+ * Returns a plain copy, or the reason it is unusable.
+ */
+function readLandmarks(lm: unknown): { ok: true; points: Pt[] } | { ok: false; reason: 'landmarks-invalid' | 'landmark-out-of-frame' } {
+  if (!Array.isArray(lm) || lm.length !== 21) return { ok: false, reason: 'landmarks-invalid' };
+  const points: Pt[] = [];
+  let outOfFrame = false;
+  for (let k = 0; k < 21; k++) {
+    if (!Object.prototype.hasOwnProperty.call(lm, k)) return { ok: false, reason: 'landmarks-invalid' };
+    const p = lm[k];
+    if (p === null || typeof p !== 'object') return { ok: false, reason: 'landmarks-invalid' };
+    const x = (p as { x?: unknown }).x, y = (p as { y?: unknown }).y, z = (p as { z?: unknown }).z;
+    if (!isFiniteNum(x) || !isFiniteNum(y) || (z !== undefined && !isFiniteNum(z))) return { ok: false, reason: 'landmarks-invalid' };
+    if (x < 0 || x > 1 || y < 0 || y > 1) outOfFrame = true;
+    points.push({ x, y });
+  }
+  return outOfFrame ? { ok: false, reason: 'landmark-out-of-frame' } : { ok: true, points };
+}
+
+/** Quality contract: null/undefined = unknown; otherwise a dense array of known codes. */
+function readQuality(q: unknown): { kind: 'known'; issues: PalmFeedbackCode[] } | { kind: 'unknown' } | { kind: 'invalid' } {
+  if (q === null || q === undefined) return { kind: 'unknown' };
+  if (!Array.isArray(q)) return { kind: 'invalid' };
+  const issues: PalmFeedbackCode[] = [];
+  for (let k = 0; k < q.length; k++) {
+    if (!Object.prototype.hasOwnProperty.call(q, k) || !KNOWN_QUALITY_CODES.includes(q[k])) return { kind: 'invalid' };
+    issues.push(q[k]);
+  }
+  return { kind: 'known', issues };
 }
 
 function unavailableSet(reasons: MeasurementReason[]): HandMeasurementSet {
@@ -138,15 +190,27 @@ function unavailableSet(reasons: MeasurementReason[]): HandMeasurementSet {
  * input (it returns an all-unavailable set with the reason instead).
  */
 export function measureHand(input: HandMeasurementInput): HandMeasurementSet {
-  const { imageWidth: w, imageHeight: h } = input;
-  if (!isFiniteNum(w) || !isFiniteNum(h) || w <= 0 || h <= 0) return unavailableSet(['image-size-invalid']);
-  if (!validLandmarks(input.landmarks)) return unavailableSet(['landmarks-invalid']);
-  const issues = Array.isArray(input.qualityIssues) ? input.qualityIssues : [];
+  try {
+    return measureHandUnsafe(input);
+  } catch {
+    // Hostile input (throwing accessors, proxies): no partial result, no exception.
+    return unavailableSet(['input-invalid']);
+  }
+}
+
+function measureHandUnsafe(input: HandMeasurementInput): HandMeasurementSet {
+  if (input === null || typeof input !== 'object') return unavailableSet(['input-invalid']);
+  const w = input.imageWidth, h = input.imageHeight;
+  if (!isFiniteNum(w) || !isFiniteNum(h) || w <= 0 || h <= 0 || w > MAX_IMAGE_SIDE_PX || h > MAX_IMAGE_SIDE_PX) return unavailableSet(['image-size-invalid']);
+  const read = readLandmarks(input.landmarks);
+  if (!read.ok) return unavailableSet([read.reason]);
+  const quality = readQuality(input.qualityIssues);
+  if (quality.kind === 'invalid') return unavailableSet(['quality-invalid']);
+  const issues: PalmFeedbackCode[] = quality.kind === 'known' ? quality.issues : [];
   const blocking = BLOCKING_ISSUES.filter((c) => issues.includes(c));
   if (blocking.length) return unavailableSet([...blocking] as MeasurementReason[]);
 
-  const norm = input.landmarks;
-  const px: Pt[] = norm.map((p) => ({ x: p.x * w, y: p.y * h }));
+  const px: Pt[] = read.points.map((p) => ({ x: p.x * w, y: p.y * h }));
   const dist = (a: Pt, b: Pt) => Math.hypot(a.x - b.x, a.y - b.y);
   const palmWidth = dist(px[LM.INDEX_MCP], px[LM.PINKY_MCP]);
   const palmLengthPx = dist(px[LM.WRIST], px[LM.MIDDLE_MCP]);
@@ -154,10 +218,12 @@ export function measureHand(input: HandMeasurementInput): HandMeasurementSet {
   const i = px[LM.INDEX_MCP], p = px[LM.PINKY_MCP], wr = px[LM.WRIST];
   const wristOffset = Math.abs((p.x - i.x) * (wr.y - i.y) - (p.y - i.y) * (wr.x - i.x)) / (palmWidth || 1);
   if (!(palmWidth > 1e-6) || !(palmLengthPx > 1e-6) || !(wristOffset > 1e-6 * palmWidth)) return unavailableSet(['frame-degenerate']);
+  if (!isFiniteNum(palmWidth) || !isFiniteNum(palmLengthPx) || !isFiniteNum(wristOffset)) return unavailableSet(['computation-nonfinite']);
   const setReasons: MeasurementReason[] = DEGRADING_ISSUES.filter((c) => issues.includes(c)) as MeasurementReason[];
+  if (quality.kind === 'unknown') setReasons.push('quality-unknown');
   // Palm facing: the existing G5 test, on pixel-space landmarks so aspect ratio cannot flip it. The test needs the
   // handedness label (a mirrored hand flips the winding); without one, palm-facing cannot be decided -> uncertain.
-  const label = input.handednessLabel;
+  const label = typeof input.handednessLabel === 'string' ? input.handednessLabel : undefined;
   if (label === 'Left' || label === 'Right') {
     if (!orientation(px, label).palmFacing) return unavailableSet(['palm-not-facing']);
   } else setReasons.push('palm-facing-unknown');
@@ -181,7 +247,9 @@ export function measureHand(input: HandMeasurementInput): HandMeasurementSet {
 
   const out = {} as Record<HandMeasurementId, HandMeasurement>;
   const put = (id: HandMeasurementId, raw: number | null, reasons: MeasurementReason[]) => {
-    const unavailable = raw === null || reasons.includes('finger-not-extended') || reasons.includes('depends-on-unavailable');
+    // A non-finite computed value is never classified as measured or uncertain.
+    if (raw !== null && !(isFiniteNum(raw) && isFiniteNum(round3(raw)))) reasons = ['computation-nonfinite'];
+    const unavailable = raw === null || reasons.includes('finger-not-extended') || reasons.includes('depends-on-unavailable') || reasons.includes('computation-nonfinite');
     const status: MeasurementStatus = unavailable ? 'unavailable' : reasons.length ? 'uncertain' : 'measured';
     out[id] = Object.freeze({ id, value: unavailable ? null : round3(raw as number), unit: id.endsWith('Ratio') ? 'ratio' : 'palm-width', status, reasons: Object.freeze([...reasons]) }) as HandMeasurement;
   };
