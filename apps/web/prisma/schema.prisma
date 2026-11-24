@@ -1235,3 +1235,13 @@ model McpRateLimitWindow {
 
   @@index([expiresAt])
 }
+
+// AURA-REM-01 -- when the reminder scheduler last reached the dispatch
+// endpoint, per channel. Used only to decide whether background delivery is
+// actually running before the UI says device notifications are working.
+// Holds no user data.
+model ReminderDispatchHeartbeat {
+  channel           String   @id // "WEB_PUSH"
+  lastRunAt         DateTime @db.Timestamptz(3)
+  lastRunConfigured Boolean
+}

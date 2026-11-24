@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { dispatchDueReminderPushes } from '../../../../../lib/reminderDelivery';
+import { dispatchSecrets, isDispatchAuthorized } from '../../../../../lib/reminderDispatchAuth';
 
 /**
  * Web Push V1 (brief section 19/32) -- the scheduler's trigger point.
@@ -24,15 +25,8 @@ import { dispatchDueReminderPushes } from '../../../../../lib/reminderDelivery';
 
 export const dynamic = 'force-dynamic';
 
-function isAuthorized(req: NextRequest): boolean {
-  const secret = process.env.INTERNAL_REMINDER_DISPATCH_SECRET;
-  if (!secret) return false;
-  const authHeader = req.headers.get('authorization');
-  return authHeader === `Bearer ${secret}`;
-}
-
 export async function POST(req: NextRequest) {
-  if (!isAuthorized(req)) {
+  if (!isDispatchAuthorized(req.headers.get('authorization'), dispatchSecrets())) {
     return NextResponse.json({ error: 'Not found.' }, { status: 404 });
   }
 
@@ -43,7 +37,9 @@ export async function POST(req: NextRequest) {
   // Brief section 48: the exact counts a performance report needs, plus
   // total wall-clock duration -- no Panchang/Muhurtham/Timing
   // Search/natal computation happens anywhere in this path.
-  return NextResponse.json({ ...result, durationMs });
+  // AURA-REM-01: 503 (not 200) when Web Push isn't configured, so a
+  // scheduler's run history shows the misconfiguration instead of "success".
+  return NextResponse.json({ ...result, durationMs }, { status: result.configured ? 200 : 503 });
 }
 
 // Vercel Cron Jobs invoke via GET by default; support both so the same

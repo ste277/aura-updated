@@ -306,6 +306,22 @@ jobs:
       # cancel, validation, failed/duplicate saves, pause/resume.
       - name: Run MR3 My Rhythm preferences editor (jsdom) test
         run: npx ts-node --project tsconfig.jsdom-tests.json test/myRhythmPreferencesEditorJsdom.test.ts
+      # AURA-REM-01 (PV-F03) -- mounted DeviceNotificationSettings in every
+      # permission/availability state (never "on" without a running
+      # scheduler), dispatch auth, too-late cutoff, no page-load prompt.
+      - name: Run REM-01 notification settings (jsdom) test
+        run: npx ts-node --project tsconfig.jsdom-tests.json test/reminderNotificationSettingsJsdom.test.ts
+      # Existing reminder suites, never wired into CI before REM-01.
+      - name: Run Aura Reminders eligibility test
+        run: npx ts-node test/auraReminders.test.ts
+      - name: Run reminder push payload test
+        run: npx ts-node test/pushPayload.test.ts
+      - name: Run reminder attention test
+        run: npx ts-node test/reminderAttention.test.ts
+      - name: Run reminder consistency test
+        run: npx ts-node test/reminderConsistency.test.ts
+      - name: Run Web Push client capability test
+        run: npx ts-node test/webPushClientCapability.test.ts
       - name: Run HPG-FIX-01 Goal -> Plan -> Tomorrow (V1-02) test
         run: npx ts-node test/hpgFix01GoalPlanTomorrow.test.ts
       # HGR3-B -- same apps/web/node_modules requirement (imports
@@ -1300,6 +1316,22 @@ jobs:
       # reload, pause/resume, and preferences flowing into scheduling.
       - name: Run MR3 My Rhythm preferences UI DB test
         run: npx ts-node test/myRhythmPreferencesUiDb.test.ts
+      # AURA-REM-01 (PV-F03) -- background reminder dispatcher on this
+      # disposable DB with an injected sender: on-time delivery, duplicate and
+      # concurrent runs, reschedule/cancel/complete, retry and expiry,
+      # stale-claim recovery, midnight boundary, missing configuration and
+      # the scheduler heartbeat. Plus the existing reminder DB suites, which
+      # were never wired into CI before.
+      - name: Run REM-01 reminder reliability DB test
+        run: npx ts-node test/reminderReliabilityDb.test.ts
+      - name: Run reminder delivery DB test
+        run: npx ts-node test/reminderDeliveryDb.test.ts
+      - name: Run reminder delivery claim DB test
+        run: npx ts-node test/reminderDeliveryClaimDb.test.ts
+      - name: Run push subscriptions DB test
+        run: npx ts-node test/pushSubscriptionsDb.test.ts
+      - name: Run reminder attention DB test
+        run: npx ts-node test/reminderAttentionDb.test.ts
       - name: Run Goal context DB test
         run: npx ts-node test/goalContextDb.test.ts
       - name: Run Goal template completion DB test
