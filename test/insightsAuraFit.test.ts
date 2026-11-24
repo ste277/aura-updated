@@ -416,7 +416,7 @@ check('schema.prisma\'s HabitLog model gained no new Aura-Fit-specific column (n
 const insightsRouteSource = fs.readFileSync('apps/web/app/api/daily-assistant/insights/route.ts', 'utf8');
 const insightsRouteSourceNoLineComments = insightsRouteSource.replace(/^\s*\/\/.*$/gm, '');
 check('The insights route imports summarizeAuraFit from the new helper module', /import \{ summarizeAuraFit \} from '\.\.\/\.\.\/\.\.\/\.\.\/lib\/insightsAuraFit'/.test(insightsRouteSource));
-check('The insights route\'s JSON response includes auraFit as a sibling of the pre-existing fields, not a replacement for any of them', /reflectionCount:/.test(insightsRouteSource) && /alignedDays:/.test(insightsRouteSource) && /unalignedDays:/.test(insightsRouteSource) && /alignmentDeltaPoints,/.test(insightsRouteSource) && /insightText,/.test(insightsRouteSource) && /auraFit,/.test(insightsRouteSource));
+check('The insights route\'s JSON response includes auraFit as a sibling of the pre-existing fields, not a replacement for any of them', /reflectionCount:/.test(insightsRouteSource) && /alignedDays:/.test(insightsRouteSource) && /unalignedDays:/.test(insightsRouteSource) && /alignmentDeltaPoints:/.test(insightsRouteSource) && /insightText:/.test(insightsRouteSource) && /auraFit,/.test(insightsRouteSource));
 check('The insights route performs no new/additional DB query for Aura Fit -- listHabitLogsForInsights is still called exactly once (excluding doc-comment mentions)', (insightsRouteSourceNoLineComments.match(/listHabitLogsForInsights\(/g) || []).length === 1);
 
 const dbSource = fs.readFileSync('apps/web/lib/db.ts', 'utf8');

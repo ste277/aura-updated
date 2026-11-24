@@ -5,7 +5,7 @@ import { getDatePartsInTimezone } from '../../../../lib/timezone';
 import { classifyInsightsWindow } from '../../../../lib/insightsWindowAlignment';
 import { toInsightsObservation, isInCalendarMonth } from '../../../../lib/insightsTimezone';
 import { summarizeAuraFit } from '../../../../lib/insightsAuraFit';
-import { deriveInsightsEvidenceState } from '../../../../lib/insightsEvidence';
+import { computeAlignmentComparison } from '../../../../lib/insightsAlignment';
 
 const REFLECTION_HISTORY_DAYS = 60;
 
@@ -74,100 +74,32 @@ export async function GET(req: NextRequest) {
   const currentMonthLogs = logs.filter((log) => isInCalendarMonth(toInsightsObservation(new Date(log.logTimestamp), user.timezone).dateKey, currentYear, currentMonth));
   const auraFit = summarizeAuraFit(currentMonthLogs);
 
-  let alignedScoreTotal = 0;
-  let alignedTotal = 0;
-  let unalignedScoreTotal = 0;
-  let unalignedTotal = 0;
-
-  reflections.forEach((reflection) => {
-    // reflectionDate (@db.Date) is a semantic "YYYY-MM-DD" calendar date,
-    // stored via a literal UTC-midnight encoding (see reflection/route.ts's
-    // own getReflectionDate() doc comment) -- `.toISOString().slice(0,10)`
-    // here simply DECODES that same date string back out, unchanged; it is
-    // not a timezone reinterpretation (brief section 16: never
-    // timezone-shift the stored date after it was chosen). The write-time
-    // CHOICE of that date is what Insights Timezone Consistency V1 fixed
-    // (reflection/route.ts now defaults it to the owner's Timing-Location
-    // "today", not server-UTC "today") -- this read-side decode was
-    // already correct and is unchanged here.
-    const dateKey = new Date(reflection.reflectionDate).toISOString().slice(0, 10);
-    const dayLogs = logsByDay.get(dateKey);
-    const followedByLogs = Boolean(dayLogs && dayLogs.aligned > dayLogs.friction);
-    const followed = reflection.followedGuidance || followedByLogs;
-    const reflectionScore = reflection.outputLevel === 'PEAK_FLOW'
-      ? 1
-      : reflection.outputLevel === 'MODERATE'
-      ? 0.5
-      : 0;
-
-    if (followed) {
-      alignedTotal += 1;
-      alignedScoreTotal += reflectionScore;
-    } else {
-      unalignedTotal += 1;
-      unalignedScoreTotal += reflectionScore;
-    }
-  });
-
-  // Insights Correctness + Historical Integrity V1 -- ONE consistent
-  // comparison, never a formula that silently changes shape by
-  // denominator. Previously: a RELATIVE percentage lift when
-  // unalignedRate > 0, but an unrelated ABSOLUTE percentage
-  // (alignedRate * 100, not a "lift" at all) when it wasn't -- both
-  // rendered under the identical "% higher" wording, and a genuinely
-  // negative lift was clamped to display "0% higher", misrepresenting the
-  // direction of the evidence. Now: a plain PERCENTAGE-POINT difference
-  // between the two groups' average outcome score (each already a 0-1
-  // scale) -- well-defined and continuous through positive, zero, and
-  // negative, with no denominator-dependent branching.
-  //
-  // Requires BOTH comparison groups to actually exist (brief section 10):
-  // a comparison is never manufactured from only one side. alignedRate/
-  // unalignedRate are `null`, not a silent 0, when their own group is
-  // empty -- 0 would be indistinguishable from "this group scored the
-  // worst possible outcome", which is a different claim entirely.
-  const alignedRate = alignedTotal > 0 ? alignedScoreTotal / alignedTotal : null;
-  const unalignedRate = unalignedTotal > 0 ? unalignedScoreTotal / unalignedTotal : null;
-  const hasBothComparisonGroups = alignedRate !== null && unalignedRate !== null;
-  // Insights Evidence & Sample-Size Integrity V1 -- a comparison must ALSO
-  // rest on enough TOTAL reflections (reused, unmodified 0/1-2/3+
-  // boundary), not merely on both groups being non-empty. Previously
-  // `hasValidComparison` only checked the two-groups condition, so exactly
-  // 2 total reflections (1 aligned + 1 unaligned) could already produce a
-  // real, bolded alignmentDeltaPoints number while insightText below it
-  // (gated separately on `reflections.length < 3`) still said "Log a few
-  // evening check-ins to unlock..." -- a self-contradictory UI. Both the
-  // number and the copy now share one evidence gate.
-  const hasValidComparison = hasBothComparisonGroups && deriveInsightsEvidenceState(reflections.length) === 'AVAILABLE';
-  const alignmentDeltaPoints = hasValidComparison ? Math.round((alignedRate! - unalignedRate!) * 100) : null;
-
-  let insightText: string;
-  if (reflections.length < 3) {
-    insightText = 'Log a few evening check-ins to unlock your personal before-and-after trend.';
-  } else if (!hasValidComparison) {
-    // Enough total check-ins, but they don't yet span both "followed" and
-    // "not followed" days -- there is nothing to compare yet, never a
-    // fabricated one-sided percentage.
-    insightText = 'Keep logging check-ins on both favorable and caution days to unlock your personal before-and-after trend.';
-  } else if (alignmentDeltaPoints! > 0) {
-    insightText = `Your check-ins score ${alignmentDeltaPoints} points higher on days when you followed favorable windows.`;
-  } else if (alignmentDeltaPoints! < 0) {
-    insightText = `Your check-ins score ${Math.abs(alignmentDeltaPoints!)} points lower on days when you followed favorable windows.`;
-  } else {
-    insightText = 'Your check-ins score about the same whether or not you followed favorable windows.';
-  }
+  // AURA-INS-01 -- the comparison itself (unchanged scoring and "followed"
+  // definition, new display thresholds and neutral wording) lives in
+  // lib/insightsAlignment.ts. reflectionDate (@db.Date) is a semantic
+  // "YYYY-MM-DD" stored as UTC midnight, so `.toISOString().slice(0, 10)`
+  // decodes it unchanged (see reflection/route.ts getReflectionDate()).
+  const alignment = computeAlignmentComparison(
+    reflections.map((reflection) => ({
+      dateKey: new Date(reflection.reflectionDate).toISOString().slice(0, 10),
+      outputLevel: reflection.outputLevel,
+      followedGuidance: reflection.followedGuidance,
+    })),
+    logsByDay,
+    REFLECTION_HISTORY_DAYS,
+  );
 
   return NextResponse.json({
     reflectionCount: reflections.length,
-    alignedDays: alignedTotal,
-    unalignedDays: unalignedTotal,
-    // Percentage-POINT delta on the 0-1 outcome scale (never a relative
-    // percent), or null when there isn't yet a valid two-sided comparison
-    // -- see hasValidComparison above. Renamed from the old
-    // peakFlowLiftPercent to make the shape/meaning change explicit at
-    // every call site (apps/web/components/InsightsView.tsx).
-    alignmentDeltaPoints,
-    insightText,
+    // Kept for compatibility; now counted from qualifying (valid-mood,
+    // one-per-day) check-ins only.
+    alignedDays: alignment.followedDays,
+    unalignedDays: alignment.otherDays,
+    // Rounded percentage-point difference (nearest 5), or null until the
+    // INS-01 display thresholds are met (30 days overall, 10 per group).
+    alignmentDeltaPoints: alignment.differencePoints,
+    insightText: alignment.summaryText,
+    alignment,
     // Canonical Aura Fit Insights V1 -- additive field, always computable
     // from data already fetched above (no extra DB query). See
     // apps/web/lib/insightsAuraFit.ts for the full eligibility/aggregation

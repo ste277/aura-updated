@@ -248,11 +248,6 @@ interface HomeDashboardProps {
     durationMinutes: number;
     candidateStart: string;
   }) => Promise<TimingSearchResponse>;
-  /** Home UI V2 -- the real personalized insight already fetched for the
-   * Insights tab (`GET /api/daily-assistant/insights`), threaded through
-   * unchanged so Daily Reflection can show a truthful line instead of the
-   * old generic, non-personalized "Aura Insight" text. No new fetch. */
-  assistantInsight?: { insightText: string } | null;
 }
 
 interface HomeDayWindow {
@@ -488,7 +483,6 @@ export function HomeDashboard({
   onGoalRhythmChanged,
   onOpenBirthProfile,
   onTimingSearch,
-  assistantInsight,
   onExploreClick,
 }: HomeDashboardProps) {
   const effectiveTimezone = timezone ?? FALLBACK_HOME_TZ;
@@ -2123,8 +2117,12 @@ export function HomeDashboard({
               <AuraInsightIcon />
             </div>
             <div style={{ minWidth: 0 }}>
+              {/* AURA-INS-01 (PV-F04) -- Home no longer shows the check-in
+                * comparison (an observational association, easily read as a
+                * causal claim). It lives in Insights with its sample sizes,
+                * method and thresholds; Home only points there. */}
               <div style={{ color: colors.textSecondary, fontSize: 13.5, lineHeight: 1.4 }}>
-                {assistantInsight?.insightText || 'Your patterns will appear here as you log more moments.'}
+                Your check-ins help you notice patterns in how your days feel over time.
               </div>
               <TextButton onClick={onInsightsClick} style={{ marginTop: spacing.sm, fontSize: 12 }}>View insights →</TextButton>
             </div>
