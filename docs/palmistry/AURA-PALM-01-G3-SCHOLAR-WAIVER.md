@@ -1,8 +1,8 @@
 # AURA-PALM-01-G3: Scholarly Review Waiver (content-only guide)
 
-**Status: PROPOSED. NOT APPROVED.** This waiver takes effect only if the Product Owner explicitly approves the wording in §5. No approval is recorded here.
+**Status: APPROVED by the Product Owner, 2026-11-24** (decision D1; verbatim text in `AURA_PALM_01_GOVERNANCE_RECORDS.md` §6).
 - **Not a review:** no independent scholarly review has been completed. This waiver does not describe one, and does not record the Product Owner as a scholarly reviewer.
-- **Not publication:** `packages/palmistry/src/review-status.json` stays `PENDING_HUMAN_REVIEW`. Approving this waiver does not approve the content or authorise publication.
+- **Not publication:** the approval record (§6) is committed on PR #385 only. Publication is **not authorised** (D7).
 - **Prepared by** Claude (AI), 2026-11-24, for the Product Owner. The preparer adds no decision of its own.
 
 **Scope:** the **content-only educational Palmistry guide** only (`packages/palmistry`, `components/PalmistryView`, `PalmHandDiagram`). It does **not** cover:
@@ -77,11 +77,11 @@ The Product Owner reviews the **exact final user-facing content** in `AURA_PALM_
 
 | Field | Value |
 |---|---|
-| Final decision (APPROVE / AMEND / REJECT), owner's words | *(blank: not given)* |
-| Approved by / date | *(blank: not given)* |
-| Final content editorial and cultural review confirmed (owner's words, content commit) | *(blank: not given)* |
+| Final decision (APPROVE / AMEND / REJECT), owner's words | "APPROVED. I approve the wording in §5 of `AURA-PALM-01-G3-SCHOLAR-WAIVER.md` and accept residual scholarly risks S-1–S-7. I acknowledge that no independent scholarly review has been completed. This approval applies exclusively to the content-only educational Palmistry guide." (D1) |
+| Approved by / date | Product Owner / 2026-11-24 (chat session; verbatim in `AURA_PALM_01_GOVERNANCE_RECORDS.md` §6) |
+| Final content editorial and cultural review confirmed (owner's words, content commit) | "APPROVED without further content changes. I have personally reviewed the final content and illustrations against checklist H1–H10 and approve the exact content at `f723942`, with the hashes recorded in the final-content review document. This is Product Owner editorial and cultural approval, not independent scholarly approval." (D2) |
 
-## 6. Approval record if both approvals are given (not applied)
+## 6. Approval record (applied 2026-11-24 on PR #385, after D1 and D2)
 
 Inspection (2026-11-24):
 - the runtime gate (`isPalmistryAvailable`), the build exclusion (`palmistry-build-exclusion.js`) and the Vercel guard test **only** check `status === "APPROVED"`;
@@ -112,5 +112,11 @@ The same commit would:
 
   The new checks would assert `role` is the Product Owner role and `independentScholarlyReview === false`, so the record can never read as a scholarly sign-off.
 - leave the fixture-based build-exclusion and bundle-check tests, and the image-input exclusion, **unchanged**.
+
+**As applied:** `contentCommit` is `f723942` and `date` is `2026-11-24`. The real-state checks above were updated as listed. Two further real-state checks pinned the pending state and were updated in the same commit, since the list above missed them:
+- `palm01I1ExploreJsdom`: A13 (approved, so visible in production) and B4 (preview notice hidden).
+- `palm01I1Content`: K7 (the default read keeps the real module) and K10 (next.config wiring, now proven through the approval-state cache key, with the image-input replacement still present).
+
+The pending → excluded path stays covered by K4 and the fixture-tree tests. No fixture-based negative test, build exclusion, bundle check or image-input exclusion was changed. The `content.ts` change is the type line only, so its sha256 changed; no user-facing text changed (`AURA_PALM_01_G3_FINAL_CONTENT_REVIEW.md` header).
 
 The G3 v1.1 PDF §11 **Primary scholarly reviewer** fields stay **blank and unsigned**. They are not filled with the Product Owner's name.

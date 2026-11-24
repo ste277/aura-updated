@@ -1,8 +1,8 @@
 # Aura Palmistry: Final Content for Product Owner Review (G3)
 
-**Status: CONTENT-ONLY MVP RELEASE CANDIDATE READY — OWNER FINAL REVIEW PENDING.**
-- **Not reviewed or approved by the Product Owner yet.** Nothing here records an owner review, a scholarly review or a publication decision.
-- `review-status.json` is `PENDING_HUMAN_REVIEW`, and public builds still exclude the guide.
+**Status: CONTENT-ONLY MVP — OWNER APPROVED, PUBLICATION AUTHORIZATION PENDING.**
+- **Approved by the Product Owner on 2026-11-24** (D2, editorial and cultural review; verbatim in `AURA_PALM_01_GOVERNANCE_RECORDS.md` §6). This is not an independent scholarly review.
+- `review-status.json` records that approval on PR #385 only. **Publication is not authorised** (D7), and PR #385 must not be merged until it is.
 
 | Field | Value |
 |---|---|
@@ -12,6 +12,7 @@
 | sha256 `apps/web/components/PalmistryView.tsx` | `e2a5158a91b0bcdf4fa206613319bf8c34c6b9753adc42957c7d3cbc4792de70` |
 | sha256 `apps/web/components/PalmHandDiagram.tsx` | `3fab074c2693830f43b0d3b91953344a2d46149f64131de38b5daa34288b2453` |
 | G3 v1.1 PDF (preserved, unchanged) | `AURA_PALM_01_G3_HUMAN_REVIEW_PACKAGE_v1.1.pdf`, sha256 `d5fb7a1e30c6ad52c1ac7ab9ce06a49d822ee105872099ff74497f48c1719a88`, re-verified 2026-11-24 |
+| sha256 `content.ts` after the approval-record commit | `d519bac85b51292e75032344e94ab3ff3f61c7bb3fcc4c4e2e36df4341c99557`. The **only** change from `f723942` is the `approvedBy` type line (line 109), widened to the approved record's fields; no user-facing text changed. `sources.ts`, `PalmistryView.tsx` and `PalmHandDiagram.tsx` are byte-identical to the hashes above |
 | How the text was produced | Generated from the committed content modules, then compared with the text rendered by an isolated production build (§J). The rendered text matched |
 
 **Changes since G3 v1.1** (everything else is unchanged; the entry order is unchanged):
@@ -208,28 +209,30 @@ Tick each item, or give the exact change wanted. **Blank = not reviewed.**
 
 | # | Check | Owner |
 |---|---|---|
-| H1 | The general disclosure (with W4) and the longevity disclosure are clear to a general adult reader | ☐ |
-| H2 | No sentence predicts or implies health, lifespan, relationships, children or finances for the reader | ☐ |
-| H3 | Status- and caste-linked readings (Upward line, W3 "varṇa"; royal marks) are presented as historical categories, responsibly | ☐ |
-| H4 | Gendered content (Barleycorn "having sons" with W1 framing; Which hand?; Parasol "queenship for women") is presented responsibly | ☐ |
-| H5 | Religious and ritual references (Sarasvatī; Vedic altar, sacrificial rites; conch) are respectful and accurate as far as the owner can judge | ☐ |
-| H6 | No sensational, mocking or misleading wording; the tone is educational throughout | ☐ |
-| H7 | The uncertainties in §G are stated plainly enough, and none should be removed instead of stated | ☐ |
-| H8 | Attribution in §F is complete (Zysk CC BY-SA 4.0 notice and link, paraphrase notice, Iyer citation) | ☐ |
-| H9 | The hand drawing and mark glyphs (§E) are acceptable to publish | ☐ |
-| H10 | I have reviewed the exact content at commit `f723942` with the hashes above | ☐ |
+| H1 | The general disclosure (with W4) and the longevity disclosure are clear to a general adult reader | ✅ (D2) |
+| H2 | No sentence predicts or implies health, lifespan, relationships, children or finances for the reader | ✅ (D2) |
+| H3 | Status- and caste-linked readings (Upward line, W3 "varṇa"; royal marks) are presented as historical categories, responsibly | ✅ (D2) |
+| H4 | Gendered content (Barleycorn "having sons" with W1 framing; Which hand?; Parasol "queenship for women") is presented responsibly | ✅ (D2) |
+| H5 | Religious and ritual references (Sarasvatī; Vedic altar, sacrificial rites; conch) are respectful and accurate as far as the owner can judge | ✅ (D2) |
+| H6 | No sensational, mocking or misleading wording; the tone is educational throughout | ✅ (D2) |
+| H7 | The uncertainties in §G are stated plainly enough, and none should be removed instead of stated | ✅ (D2) |
+| H8 | Attribution in §F is complete (Zysk CC BY-SA 4.0 notice and link, paraphrase notice, Iyer citation) | ✅ (D2) |
+| H9 | The hand drawing and mark glyphs (§E) are acceptable to publish | ✅ (D2) |
+| H10 | I have reviewed the exact content at commit `f723942` with the hashes above | ✅ (D2) |
 
-**Owner confirmation (blank until given):** decision (approve / approve with changes / reject), date, exact changes.
+**Owner confirmation (2026-11-24, D2, verbatim):** "APPROVED without further content changes. I have personally reviewed the final content and illustrations against checklist H1–H10 and approve the exact content at `f723942`, with the hashes recorded in the final-content review document. This is Product Owner editorial and cultural approval, not independent scholarly approval."
+
+The ✅ marks above record that statement; the owner did not answer each item separately.
 
 ## I. Residual risk summary
 
 | Area | Risk | Status |
 |---|---|---|
 | Licensing | R-1 ShareAlike; R-2 selection and arrangement; R-3 AI authorship; R-4 unknown reproduction; R-5 cross-border; R-6 Iyer public-domain status | **Accepted** by the owner, 2026-11-24 (G3-C waiver §3–§4) |
-| Scholarship | S-1 unreviewed readings (Q1, Q2, Q5, Q6, Q9); S-2 Bṛhatsaṃhitā Sanskrit unchecked; S-3 single secondary source; S-4 narrow coverage; S-5 AI-only checks; S-6 cultural sensitivity reviewed only by the owner; S-7 no independent reviewer | **Proposed for acceptance** (scholar waiver §4). Not accepted yet |
-| Governance | GF-1/GF-2/GF-3 transcriptions await owner confirmation; the HR2 applicability decision is undecided | Open (`AURA_PALM_01_GOVERNANCE_RECORDS.md`) |
+| Scholarship | S-1 unreviewed readings (Q1, Q2, Q5, Q6, Q9); S-2 Bṛhatsaṃhitā Sanskrit unchecked; S-3 single secondary source; S-4 narrow coverage; S-5 AI-only checks; S-6 cultural sensitivity reviewed only by the owner; S-7 no independent reviewer | **Accepted** by the owner, 2026-11-24 (D1) |
+| Governance | GF-1/GF-2/GF-3 transcriptions confirmed (D3); HR2 content-only split adopted (D4); Stage 1 accepted, scoped (D5); C6-S1, R2-N5, S1C-F4 accepted as limitations, not remediated (D6) | Decided 2026-11-24 (`AURA_PALM_01_GOVERNANCE_RECORDS.md`) |
 | Product | Educational content only. No scanning, camera, upload, personalisation or prediction is shipped (§J) | Verified on the RC build |
-| Release | Publication needs a separate authorisation (HR2 item M, public-release gate). Vercel production git builds are currently skipped | Not authorised |
+| Release | Publication needs a separate authorisation (HR2 item M, public-release gate). Merging PR #385 would make the guide eligible for the next Production build. Vercel production git builds are currently skipped. The owner requires the actual release artifact to be verified before any Production promotion (D6) | **Not authorised** (D7) |
 
 ## J. Verification (2026-11-24, local, at `f723942`)
 
