@@ -4,6 +4,8 @@ import React, { useEffect, useState } from 'react';
 import { colors, spacing, typography } from '../../../components/theme';
 import { PageHeader, SurfaceCard, PrimaryButton, SecondaryButton, TextButton, DestructiveButton, StatusBadge, EmptyState, FieldLabel, TextInput, FieldError } from '../../../components/ui';
 import { RhythmPicker, type RhythmPickerValue } from '../../../components/RhythmPicker';
+import { RhythmSettingsEditor } from '../../../components/RhythmSettingsEditor';
+import { savedRhythmSettingsFromActivity } from '../../../lib/rhythmPreferencesDraft';
 import {
   formatGoalActivityCompletion,
   formatGoalActivityRhythmFrequencyLabel,
@@ -54,6 +56,12 @@ function GoalDetailView({ goalId }: { goalId: string }) {
       const detail = await res.json();
       if (!detail?.goal) throw new Error('failed');
       setState({ status: 'LOADED', detail });
+      // AURA-MR3 -- Home's "Edit rhythm" deep-links to #activity-<id>; the
+      // rows only exist once loaded, so the browser's own hash jump misses.
+      if (typeof window !== 'undefined' && window.location.hash.startsWith('#activity-')) {
+        const targetId = window.location.hash.slice(1);
+        window.setTimeout(() => document.getElementById(targetId)?.scrollIntoView({ block: 'start' }), 0);
+      }
     } catch {
       setState({ status: 'ERROR' });
     }
@@ -148,7 +156,9 @@ function GoalDetailBody({ detail, onChanged }: { detail: GoalDetailView; onChang
   // row can still have real remaining weekly capacity for another
   // occurrence, exactly like Plan My Day's automatic suggestions already
   // allow.
-  const isSelectable = (a: GoalActivityView) => a.derivedState === 'SUGGESTED' || ((a.derivedState === 'COMPLETED' || a.derivedState === 'PLANNED') && a.rhythm.kind === 'N_PER_WEEK' && a.rhythm.eligibleForAnotherOccurrence);
+  // AURA-MR3 -- a paused rhythm offers no planning action (MR2 already
+  // refuses its handoff server-side; this hides the dead-end checkbox).
+  const isSelectable = (a: GoalActivityView) => a.rhythmPaused !== true && (a.derivedState === 'SUGGESTED' || ((a.derivedState === 'COMPLETED' || a.derivedState === 'PLANNED') && a.rhythm.kind === 'N_PER_WEEK' && a.rhythm.eligibleForAnotherOccurrence));
   const selectableIds = new Set(primaryActivities.filter(isSelectable).map((a) => a.id));
   const effectiveSelectedIds = Array.from(selectedIds).filter((id) => selectableIds.has(id));
 
@@ -207,13 +217,14 @@ function GoalDetailBody({ detail, onChanged }: { detail: GoalDetailView; onChang
             </SurfaceCard>
           )}
           {primaryActivities.map((activity) => (
-            <ActivityRow
-              key={activity.id}
-              activity={activity}
-              onChanged={onChanged}
-              selected={isSelectable(activity) ? selectedIds.has(activity.id) : undefined}
-              onToggleSelect={isSelectable(activity) ? () => toggleSelected(activity.id) : undefined}
-            />
+            <div key={activity.id} id={`activity-${activity.id}`}>
+              <ActivityRow
+                activity={activity}
+                onChanged={onChanged}
+                selected={isSelectable(activity) ? selectedIds.has(activity.id) : undefined}
+                onToggleSelect={isSelectable(activity) ? () => toggleSelected(activity.id) : undefined}
+              />
+            </div>
           ))}
         </div>
 
@@ -339,7 +350,10 @@ function ActivityRow({
           )}
           <span style={{ ...typography.bodyStrong, minWidth: 0 }}>{activity.title}</span>
         </label>
-        {stateLabel && <StatusBadge label={stateLabel} tone={activity.derivedState === 'COMPLETED' ? 'positive' : 'info'} />}
+        <div style={{ display: 'flex', gap: spacing.xs, flexWrap: 'wrap' }}>
+          {activity.rhythmPaused === true && <StatusBadge label="Paused" tone="neutral" />}
+          {stateLabel && <StatusBadge label={stateLabel} tone={activity.derivedState === 'COMPLETED' ? 'positive' : 'info'} />}
+        </div>
       </div>
 
       {/* Goals V2 G3.2 -- one compact secondary line (this ticket's own
@@ -412,62 +426,17 @@ function ActivityRow({
  * only.
  */
 function RhythmEditor({ activity, onSaved }: { activity: GoalActivityView; onSaved: () => void }) {
-  const [editing, setEditing] = useState(false);
-  const initialValue: RhythmPickerValue = activity.rhythm.kind === 'N_PER_WEEK' ? { kind: 'N_PER_WEEK', targetPerWeek: activity.rhythm.targetPerWeek } : { kind: 'NONE' };
-  const [value, setValue] = useState<RhythmPickerValue | null>(initialValue);
-  const [saving, setSaving] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-
-  if (!editing) {
-    return (
-      <TextButton onClick={() => { setValue(initialValue); setEditing(true); }} color={colors.info}>
-        {activity.rhythm.kind === 'N_PER_WEEK' ? 'Change frequency' : 'Set weekly frequency'}
-      </TextButton>
-    );
-  }
-
-  const handleSave = async () => {
-    if (value === null || saving) return;
-    setSaving(true);
-    setError(null);
-    try {
-      const res = await fetch(`/api/goals/${activity.goalId}/activities/${activity.id}/rhythm`, {
-        method: 'PATCH',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ rhythm: value }),
-      });
-      const data = await res.json().catch(() => null);
-      if (!res.ok) {
-        setError(data?.error ?? 'Could not save this. Try again.');
-        setSaving(false);
-        return;
-      }
-      setEditing(false);
-      setSaving(false);
-      onSaved();
-    } catch {
-      setError('Could not save this. Try again.');
-      setSaving(false);
-    }
-  };
-
+  // AURA-MR3 -- frequency, preferred days/time/length and pause/resume now
+  // live in the shared RhythmSettingsEditor (one PATCH endpoint, server
+  // re-validates). This wrapper only adapts the Goal Detail read model.
   return (
-    <div>
-      <RhythmPicker value={value ?? initialValue} onChange={setValue} idPrefix={`activity-${activity.id}`} />
-      {error && (
-        <div role="alert" style={{ marginTop: spacing.sm }}>
-          <FieldError>{error}</FieldError>
-        </div>
-      )}
-      <div style={{ display: 'flex', gap: spacing.sm, marginTop: spacing.md }}>
-        <PrimaryButton onClick={handleSave} disabled={value === null || saving} loading={saving}>
-          Save
-        </PrimaryButton>
-        <SecondaryButton onClick={() => setEditing(false)} disabled={saving}>
-          Cancel
-        </SecondaryButton>
-      </div>
-    </div>
+    <RhythmSettingsEditor
+      goalId={activity.goalId}
+      goalActivityId={activity.id}
+      saved={savedRhythmSettingsFromActivity(activity)}
+      paused={activity.rhythmPaused === true}
+      onSaved={onSaved}
+    />
   );
 }
 

@@ -54,7 +54,9 @@ function main() {
     // capacity. A finite (NONE) PLANNED/COMPLETED activity is still
     // never selectable (rhythm.kind === 'N_PER_WEEK' still required).
     'A/4. the checkbox is gated on derivedState === \'SUGGESTED\' (unconditionally), OR COMPLETED/PLANNED gated strictly on rhythm.eligibleForAnotherOccurrence for an N_PER_WEEK activity (R4, extended by Multi-Occurrence Rhythm PR 2)',
-    /isSelectable = \(a: GoalActivityView\) => a\.derivedState === 'SUGGESTED' \|\| \(\(a\.derivedState === 'COMPLETED' \|\| a\.derivedState === 'PLANNED'\) && a\.rhythm\.kind === 'N_PER_WEEK' && a\.rhythm\.eligibleForAnotherOccurrence\)/.test(source)
+    // AURA-MR3: the same gate, now additionally closed for a paused rhythm
+    // (MR2 already refuses a paused handoff server-side).
+    /isSelectable = \(a: GoalActivityView\) => a\.rhythmPaused !== true && \(a\.derivedState === 'SUGGESTED' \|\| \(\(a\.derivedState === 'COMPLETED' \|\| a\.derivedState === 'PLANNED'\) && a\.rhythm\.kind === 'N_PER_WEEK' && a\.rhythm\.eligibleForAnotherOccurrence\)\)/.test(source)
   );
   check('B/C. PLANNED/COMPLETED never render a checkbox -- isSelectable is false for every state except SUGGESTED (single boolean gate, no PLANNED/COMPLETED branch grants it)', !/isSelectable[\s\S]{0,80}'PLANNED'/.test(source) && !/isSelectable[\s\S]{0,80}'COMPLETED'/.test(source));
   check('4. the checkbox itself is conditionally rendered only when isSelectable', /\{isSelectable && \(/.test(source));

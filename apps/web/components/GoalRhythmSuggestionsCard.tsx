@@ -4,6 +4,7 @@ import React, { useState } from 'react';
 import { colors, spacing, typography } from './theme';
 import { SectionHeader, SurfaceCard, TextButton, PrimaryButton, SecondaryButton } from './ui';
 import { computeGoalRhythmHomeView, resolveGoalRhythmCardActions, formatNextOccurrenceLabel, type HomeGoalRhythmSuggestion, type HomePausedGoalRhythm } from '../lib/homeGoalRhythmSuggestions';
+import { goalActivityRhythmHref } from '../lib/rhythmPreferencesDraft';
 import { PausedRhythmsNote } from './PausedRhythmsNote';
 import { shouldOfferWeeklyReview } from '../lib/weeklyPlanReviewClient';
 import { WeeklyPlanReviewModal } from './WeeklyPlanReviewModal';
@@ -117,11 +118,17 @@ export function GoalRhythmSuggestionsCard({
                   {suggestion.nextOccurrence && (
                     <div style={{ ...typography.caption, color: colors.textSecondary, marginTop: 2 }}>{formatNextOccurrenceLabel(suggestion.nextOccurrence, timezone)}</div>
                   )}
-                  {actions.offerNextWeek && (
-                    <TextButton onClick={() => setReviewing({ goalActivityId: suggestion.goalActivityId, week: 'NEXT' })} style={{ minHeight: 44, padding: '0 0' }}>
-                      Plan next week
+                  <div style={{ display: 'flex', gap: spacing.md, flexWrap: 'wrap' }}>
+                    {actions.offerNextWeek && (
+                      <TextButton onClick={() => setReviewing({ goalActivityId: suggestion.goalActivityId, week: 'NEXT' })} style={{ minHeight: 44, padding: '0 0' }}>
+                        Plan next week
+                      </TextButton>
+                    )}
+                    {/* AURA-MR3 -- days, time, length and pause live on the goal activity. */}
+                    <TextButton onClick={() => { window.location.href = goalActivityRhythmHref(suggestion.goalId, suggestion.goalActivityId); }} color={colors.textMuted} style={{ minHeight: 44, padding: '0 0' }}>
+                      Edit rhythm
                     </TextButton>
-                  )}
+                  </div>
                 </div>
                 <div style={{ display: 'flex', alignItems: 'center', gap: spacing.sm, flexShrink: 0, flexWrap: 'wrap' }}>
                   <TextButton onClick={() => onDismiss(suggestion.goalActivityId)} style={{ minHeight: 44, padding: '0 8px' }}>

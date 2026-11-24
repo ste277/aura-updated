@@ -44,7 +44,14 @@ check('formatGoalActivityCompletion itself never references execution id/source/
 // dimension (this ticket's own section 24).
 check('no new progress-write fetch/POST was added to GoalDetailClient.tsx (still exactly the pre-existing load/dismiss/add/archive/delete endpoints, plus Rhythm R5\'s own single, separate rhythm-edit endpoint)', (() => {
   const fetchCalls = detailSrc.match(/fetch\(`[^`]*`/g) ?? [];
-  return fetchCalls.length === 6 && fetchCalls.every((call) => /\/api\/goals\/\$\{goalId\}`|\/dismiss`|\/activities`|\/archive`|\/api\/goals\/\$\{goal\.id\}`|\/activities\/\$\{activity\.id\}\/rhythm`/.test(call));
+  // AURA-MR3 re-baseline: the rhythm-edit PATCH moved to
+  // components/RhythmSettingsEditor.tsx (its only fetch), so Goal Detail now
+  // has the 5 pre-existing endpoints and no progress-write endpoint exists
+  // in either file.
+  const editorSrc = read('../apps/web/components/RhythmSettingsEditor.tsx');
+  const editorFetches = editorSrc.match(/fetch\(/g) ?? [];
+  return fetchCalls.length === 5 && fetchCalls.every((call) => /\/api\/goals\/\$\{goalId\}`|\/dismiss`|\/activities`|\/archive`|\/api\/goals\/\$\{goal\.id\}`/.test(call))
+    && editorFetches.length === 1 && /\/activities\/\$\{goalActivityId\}\/rhythm`/.test(editorSrc) && !/progress|currentValue|complete/i.test(editorSrc.match(/const send = [\s\S]*?\n  \};/)?.[0] ?? 'x');
 })());
 check('no "Done"/"Complete" action button was added to Goal Detail (execution stays in Home/Right Now)', !/>Done<|>Complete<|>Mark done</.test(read('../apps/web/app/goals/[goalId]/GoalDetailClient.tsx')));
 check('no Progress/Adjust/Edit target/+1/History button was added', !/>Progress<|>Adjust<|>Edit target<|>\+1<|>History</.test(read('../apps/web/app/goals/[goalId]/GoalDetailClient.tsx')));

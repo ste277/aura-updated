@@ -295,6 +295,10 @@ jobs:
         run: npx ts-node test/hpgFix01WeeklyProposal.test.ts
       - name: Run HPG-FIX-01 Home rhythm refresh (jsdom) test
         run: npx ts-node --project tsconfig.jsdom-tests.json test/hpgFix01HomeRefreshJsdom.test.ts
+      # AURA-MR3 -- mounted RhythmSettingsEditor: minimal PATCH bodies,
+      # cancel, validation, failed/duplicate saves, pause/resume.
+      - name: Run MR3 My Rhythm preferences editor (jsdom) test
+        run: npx ts-node --project tsconfig.jsdom-tests.json test/myRhythmPreferencesEditorJsdom.test.ts
       - name: Run HPG-FIX-01 Goal -> Plan -> Tomorrow (V1-02) test
         run: npx ts-node test/hpgFix01GoalPlanTomorrow.test.ts
       # HGR3-B -- same apps/web/node_modules requirement (imports
@@ -416,6 +420,9 @@ jobs:
       # Panchang-order behavior, Home view/actions, Plan My Day intents.
       - name: Run My Rhythm scheduling preferences test
         run: npx ts-node test/myRhythmSchedulingPreferences.test.ts
+      # AURA-MR3 -- preferences UI draft/patch logic and structural guards.
+      - name: Run MR3 My Rhythm preferences UI test
+        run: npx ts-node test/myRhythmPreferencesUi.test.ts
       - name: Run Daily agenda Goal context test
         run: npx ts-node test/dailyAgendaGoalContext.test.ts
       - name: Run Goal context structural guards test
@@ -1269,6 +1276,10 @@ jobs:
       # handling across Home, Plan My Day and the weekly proposal, timezones.
       - name: Run My Rhythm scheduling DB test
         run: npx ts-node test/myRhythmSchedulingDb.test.ts
+      # AURA-MR3 -- the editor's own PATCH bodies through the real route,
+      # reload, pause/resume, and preferences flowing into scheduling.
+      - name: Run MR3 My Rhythm preferences UI DB test
+        run: npx ts-node test/myRhythmPreferencesUiDb.test.ts
       - name: Run Goal context DB test
         run: npx ts-node test/goalContextDb.test.ts
       - name: Run Goal template completion DB test

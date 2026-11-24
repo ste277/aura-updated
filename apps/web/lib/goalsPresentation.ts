@@ -16,6 +16,7 @@
  */
 
 import { isValidCivilDateString, type DerivedGoalActivityState, type GoalActivityStatus, type GoalStatus, type GoalTemplateCategory } from './goals';
+import type { GoalActivityRhythmPreferences } from './goalActivityRhythmPreferences';
 import type { CompletionRequirement } from './goalCompletion';
 import { formatGoalActivityCompletion } from './goalActivityExecution';
 
@@ -83,6 +84,13 @@ export interface GoalActivityView {
   // app/api/goals/[goalId]/route.ts), still never authoritative for any
   // write. `{ kind: 'NONE' }` for every finite activity.
   rhythm: GoalActivityRhythmView;
+  // AURA-MR1 read model, consumed by the MR3 editor: GET /api/goals/:goalId
+  // already returns these (normalized). Optional so older fixtures/callers
+  // that predate MR1 keep type-checking; absent = active, no preferences.
+  rhythmPaused?: boolean;
+  rhythmPreferences?: GoalActivityRhythmPreferences;
+  /** Raw persisted column (spread from the row); null = ONCE_PER_DAY. */
+  dailyFrequencyKind?: string | null;
   createdAt: string;
   updatedAt: string;
 }
@@ -293,3 +301,4 @@ export function formatGoalTargetDateLabel(dateStr: string): string {
 }
 
 export { isValidCivilDateString };
+
