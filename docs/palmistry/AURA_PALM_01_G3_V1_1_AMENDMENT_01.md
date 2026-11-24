@@ -1,6 +1,6 @@
 # G3 Review Package v1.1: Amendment 01 (reviewer instructions)
 
-**Applies to:** `AURA_PALM_01_G3_HUMAN_REVIEW_PACKAGE_v1.1.pdf` (sha256 `d5fb7a1e…`). The PDF is **unchanged and preserved**; read it together with this sheet. A review counts if it cites "v1.1 + Amendment 01". **Status:** prepared 2026-11-24. Not yet sent to anyone.
+**Applies to:** `AURA_PALM_01_G3_HUMAN_REVIEW_PACKAGE_v1.1.pdf` (sha256 `d5fb7a1e…`). The PDF is **unchanged and preserved**; read it together with this sheet. A review counts if it cites "v1.1 + Amendment 01". **Status:** prepared 2026-11-24 and updated the same day for the approved waiver. Not yet sent to anyone; sending needs separate authorisation.
 
 ## 1. Changed wording (one entry)
 
@@ -29,8 +29,8 @@ The sources and locators are unchanged: Hastasañjīvana 3.2.80–82; Sāmudrika
 - **Q6** (framing of social roles): now asks whether the new general summary, plus the context note, frames them adequately.
 - **Q14** ("preceptor" in Hastasañjīvana 3.2.81): **no longer affects user-visible text**, because the entry no longer names finger-by-finger roles. Answer it only if you recommend restoring specific roles.
 
-## 4. Sign-off change (proposed; depends on owner approval)
+## 4. Sign-off change (approved by the Product Owner, 2026-11-24)
 
-- **If** the Product Owner accepts `AURA-PALM-01-G3-C-WAIVER.md`, the **Licensing reviewer** row in PDF §8 is replaced by that Product Owner risk acceptance, and no external counsel sign-off is required.
-- The **Primary scholarly reviewer** row stays required. The **Editorial / cultural reviewer** row stays as in v1.1.
-- Until the owner decides, the v1.1 sign-off table applies unchanged.
+- The Product Owner approved `AURA-PALM-01-G3-C-WAIVER.md` on 2026-11-24 (waiver §4). The **Licensing reviewer** row in PDF §8 is therefore **replaced by that Product Owner risk acceptance**. External copyright counsel sign-off is no longer an internal publication prerequisite for the content-only guide.
+- **Still required:** the **Primary scholarly reviewer** and the **Editorial / cultural reviewer** sign-offs. The owner stated that "Scholarly review, editorial review, attribution, applicable licence compliance and separate publication authorization remain mandatory."
+- Reviewer sign-offs are **not** recorded here. They are completed only by the actual reviewers.

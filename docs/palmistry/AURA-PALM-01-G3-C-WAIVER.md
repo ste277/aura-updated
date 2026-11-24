@@ -1,9 +1,10 @@
 # AURA-PALM-01-G3-C: Licensing Counsel Waiver (content-only guide)
 
-**Status: PROPOSED — PENDING THE PRODUCT OWNER'S EXPLICIT FINAL APPROVAL.** This is not legal advice, legal clearance or a guarantee of non-infringement.
-- §4 contains the owner's **proposed** wording, supplied on 2026-11-24 and recorded verbatim.
-- The owner has said it stays pending until they have reviewed the applicable AI provider terms (§5) and the completed PR.
-- **No approval or signature is recorded.**
+**Status: APPROVED BY THE PRODUCT OWNER, 2026-11-24 (§4).** This is not legal advice, legal clearance or a guarantee of non-infringement.
+- **Counsel:** mandatory external copyright counsel review is no longer an internal publication prerequisite for the content-only guide.
+- **Still mandatory:** scholarly review, editorial review, attribution, applicable licence compliance and separate publication authorisation.
+- **Not publication:** `review-status.json` stays `PENDING_HUMAN_REVIEW`.
+- **No signature:** none is recorded. The approval is the owner's explicit written authorisation in the chat session, transcribed in §4.
 
 **Scope:** the **content-only educational Palmistry guide** only (`packages/palmistry`, `components/PalmistryView`, `PalmHandDiagram`). It does **not** cover:
 - scanning, camera or image input, or MediaPipe and the hand model;
@@ -13,9 +14,9 @@
 
 ## 1. What changes
 
-| Before (G3-C) | After (if accepted) |
+| Before (G3-C) | After (approved 2026-11-24) |
 |---|---|
-| External copyright counsel (Reviewer C) must give an opinion on L1, L2 and N3 before publication | **Counsel review is no longer mandatory.** The Product Owner accepts the residual risk in §3 on the basis of the §2 remediation and evidence |
+| External copyright counsel (Reviewer C) must give an opinion on L1, L2 and N3 before publication | **Counsel review is no longer mandatory.** The Product Owner has accepted the residual risk in §3 on the basis of the §2 remediation and evidence |
 | Licensing-reviewer sign-off row in v1.1 §8 | Replaced by this Product Owner risk acceptance |
 | **Unchanged** | Scholarly review (Reviewer A) and editorial/cultural review (B) remain **required**. Third-party licence obligations (§2.3) remain in force. Publication still needs separate authorisation (`review-status.json` → `APPROVED`, then release approval under HR2 item M). Counsel may still be engaged voluntarily at any time |
 
@@ -48,7 +49,7 @@
 
    **If** the paraphrase were held to be Adapted Material, ShareAlike would require Aura's adapted text to be licensed under BY-SA 4.0 or a compatible licence. This waiver does **not** claim that obligation has been eliminated.
 
-## 3. Residual risks accepted (if §4 is signed)
+## 3. Residual risks accepted by the Product Owner (§4)
 
 | Risk | Level (AI estimate) | Note |
 |---|---|---|
@@ -61,7 +62,7 @@
 
 ## 4. Product Owner acceptance
 
-**Proposed wording, supplied by the Product Owner on 2026-11-24 and recorded verbatim. PENDING EXPLICIT FINAL APPROVAL; not yet approved:**
+**Wording supplied by the Product Owner on 2026-11-24, recorded verbatim, and APPROVED by the owner on 2026-11-24:**
 
 > I elect to replace mandatory external copyright counsel review for the content-only Aura Palmistry guide with internal licensing assessment, targeted remediation and explicit Product Owner risk acceptance.
 > I acknowledge the residual uncertainty concerning copyright, ShareAlike applicability, selection and arrangement, AI-generated content ownership and cross-border distribution.
@@ -69,20 +70,20 @@
 > Scholarly review, editorial review, attribution, applicable licence compliance and separate publication authorization remain mandatory.
 > This decision does not extend to palm scanning, real photograph collection, personalized readings or privacy and data protection requirements.
 
-| Field | Value |
+| Field | Value (owner's words, verbatim) |
 |---|---|
-| Final decision (APPROVE / REJECT / APPROVE WITH CONDITIONS), owner's words | *(blank: pending)* |
-| Account type and plan used on 2026-11-10, confirmed by the owner | *(blank; §5 gives the evidence)* |
-| Name / date of final approval | *(blank)* |
-
-Until this table is completed, mandatory external counsel review (G3-C) still applies.
+| Final decision | **APPROVE.** "I explicitly approve the Product Owner Licensing Risk Acceptance wording in §4 of `AURA-PALM-01-G3-C-WAIVER.md` and accept the documented residual licensing risks." |
+| Account type and plan used on 2026-11-10 | **Confirmed by the owner:** "I was using my individual Claude Max subscription when the Palmistry content was generated on November 10, 2026." This is consistent with §5: the Anthropic Consumer Terms applied |
+| Effect stated by the owner | "Mandatory external copyright counsel review is no longer an internal publication prerequisite for the content-only Palmistry guide. Scholarly review, editorial review, attribution, applicable licence compliance and separate publication authorization remain mandatory." |
+| Scope stated by the owner | "This approval does not extend to palm scanning, real photograph collection, personalized readings or privacy and data protection requirements." |
+| Approved by / date | The Product Owner, 2026-11-24, by explicit written authorisation in the Claude Code chat session. **No signature** (handwritten or digital) is recorded. Transcribed by Claude, which added no decision of its own |
 
 ## 5. AI provider terms that applied (evidence; not a legal conclusion)
 
 | Question | Finding | Evidence |
 |---|---|---|
 | Provider and tool | Anthropic, Claude Opus 5.5 via Claude Code | Commit trailers; G3-L2B owner decisions, item 3 |
-| Account used | **Individual Claude Max subscription** (`organizationType: claude_max`, `billingType: stripe_subscription`), subscription created 2026-08-21, before generation on 2026-11-10 | The local Claude Code profile, read 2026-11-24. This is today's profile, not a record made on 2026-11-10. **Owner confirmation requested (§4)** |
+| Account used | **Individual Claude Max subscription** (`organizationType: claude_max`, `billingType: stripe_subscription`), subscription created 2026-08-21, before generation on 2026-11-10 | The local Claude Code profile, read 2026-11-24, and **confirmed by the owner on 2026-11-24 (§4)** |
 | Applicable terms | **Anthropic Consumer Terms of Service, effective Oct 8, 2025.** They cover Claude.ai, Pro and other products and subscriptions for individuals. The Commercial Terms (effective Jun 17, 2025) cover API keys and the Console, and are "not for consumer use" | Pages fetched 2026-11-11 (G3-L2B item 3) and re-fetched 2026-11-24. **Both still show the same effective dates.** Each predates 2026-11-10 and no later version exists, so these versions were in force at generation. The pages link a version history, which was not read |
 | Output rights (Consumer §4) | Subject to compliance, Anthropic assigns its right, title and interest "if any" in Outputs | Consumer Terms |
 | Warranty / indemnity | Outputs are provided "as is", with non-infringement disclaimed (§11). The user indemnifies Anthropic for third-party-rights claims. **No Anthropic IP indemnity for Outputs** (the Commercial Terms have one in §K.1; they did not apply) | Consumer Terms; Commercial Terms for contrast |
