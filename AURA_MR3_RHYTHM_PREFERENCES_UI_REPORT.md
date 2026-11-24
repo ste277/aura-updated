@@ -146,7 +146,7 @@ Console: no errors on fresh loads. A transient Fast Refresh `ReferenceError` was
 ## 9. PV-F02 disposition, PR and CI
 
 - **PV-F02: RESOLVED in code, VERIFIED locally** (automated tests, plus browser QA scenarios 1–10). It reaches users only after a separately authorized release; Production is unchanged.
-- **PR:** PR_LINK — CI: CI_RESULT. Not merged; no automatic merge.
+- **PR:** https://github.com/ste277/aura-updated/pull/384. CI was started on the final commit; see the PR checks (the 5 required checks gate merge). Not merged; no automatic merge.
 - **Restrictions honoured:**
   - No Production deploy, promotion, database write or env change.
   - The deployment guard is untouched.
