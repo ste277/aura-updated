@@ -1,4 +1,5 @@
 import { createHash, createHmac } from 'crypto';
+import { LIMITER_UNAVAILABLE_CAUSES, type LimiterUnavailableCause } from './rateLimit';
 
 /**
  * AURA-MCP-02-I2a -- redacted audit logging for remote MCP and its
@@ -47,6 +48,11 @@ export interface McpAuditEvent {
   errorCode?: string;
   /** Which rate-limit namespace rejected the request. */
   limitedBy?: string;
+  /**
+   * I2b-S12 (S11 review R-P2-2): why the limiter was unavailable -- one of
+   * LIMITER_UNAVAILABLE_CAUSES (a bounded code; anything else is dropped).
+   */
+  cause?: string;
   latencyMs?: number;
 }
 
@@ -61,11 +67,13 @@ export interface SanitizedAuditEvent {
   tool?: string;
   errorCode?: string;
   limitedBy?: string;
+  cause?: LimiterUnavailableCause;
   latencyMs?: number;
 }
 
 export type McpAuditSink = (event: McpAuditEvent) => void;
 
+const LIMITER_CAUSES: ReadonlySet<string> = new Set(LIMITER_UNAVAILABLE_CAUSES);
 const EVENTS: ReadonlySet<string> = new Set([
   'mcp.request',
   'oauth.grant',
@@ -122,6 +130,8 @@ export function sanitizeAuditEvent(event: McpAuditEvent, now: () => Date = () =>
   if (errorCode) out.errorCode = errorCode;
   const limitedBy = ident(event.limitedBy);
   if (limitedBy) out.limitedBy = limitedBy;
+  // I2b-S12: only the bounded limiter cause codes pass; never a raw error.
+  if (typeof event.cause === 'string' && LIMITER_CAUSES.has(event.cause)) out.cause = event.cause as LimiterUnavailableCause;
   if (typeof event.latencyMs === 'number' && Number.isFinite(event.latencyMs)) out.latencyMs = Math.max(0, Math.round(event.latencyMs));
   return out;
 }

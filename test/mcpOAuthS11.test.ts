@@ -123,7 +123,7 @@ async function main() {
       });
       const lim2 = createPostgresRateLimiter({ pool: p2.pool as never, windowMs: 60_000 });
       const d2 = await lim2.check([{ key: 'user:a', limit: 5 }]);
-      check('P3-1 limiter: a confirmed but LATE COMMIT is not an admission -> unavailable/commit_unknown (counted, not admitted: over-count only)', !d2.allowed && d2.cause === 'commit_unknown' && p2.st.statements.includes('COMMIT'), d2);
+      check('P3-1 limiter: a confirmed but LATE COMMIT is not an admission -> unavailable/commit_late (counted, not admitted: over-count only)', !d2.allowed && d2.cause === 'commit_late' && p2.st.statements.includes('COMMIT'), d2);
       const p3 = clockPool((t) => (t.startsWith('WITH want') ? { result: { rows: [{ key: 'user:a', cnt: 0, retry: 60, ok: true, bumped: 1 }], rowCount: 1 } } : undefined));
       const d3 = await createPostgresRateLimiter({ pool: p3.pool as never, windowMs: 60_000 }).check([{ key: 'user:a', limit: 5 }]);
       check('P3-1 limiter control: a timely confirmed COMMIT admits', d3.allowed === true, d3);

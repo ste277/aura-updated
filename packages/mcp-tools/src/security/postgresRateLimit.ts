@@ -1,5 +1,5 @@
 import type { PgQueryable } from '../auth/postgresAdapter';
-import { boundedMs, commitConfirmed, guardClient, monotonicNow, singleFlight, transactionTimeouts, type BoundedClient } from './deadline';
+import { boundedMs, commitConfirmed, expiredAt, guardClient, monotonicNow, singleFlight, transactionTimeouts, type BoundedClient } from './deadline';
 import type { McpRateLimiter, RateLimitDecision, RateLimitRule } from './rateLimit';
 
 /**
@@ -92,8 +92,16 @@ export interface PostgresRateLimiter extends McpRateLimiter {
 const TABLE = '"McpRateLimitWindow"';
 type UnavailableCause = NonNullable<RateLimitDecision['cause']>;
 const unavailable = (cause: UnavailableCause): RateLimitDecision => Object.freeze({ allowed: false, retryAfterSeconds: 1, limitedBy: 'unavailable', cause });
-/** I2b-S11: a phase reached after the decision's absolute deadline. */
+/** I2b-S11: a phase reached after the decision's absolute deadline (no COMMIT sent). */
 class DecisionExpired extends Error {}
+/** I2b-S12: a COMMIT that was sent and then failed, classified. */
+class CommitFailure extends Error {
+  constructor(readonly cause: 'commit_failed' | 'commit_lost') {
+    super(cause);
+  }
+}
+/** A PostgreSQL ErrorResponse carries a SQLSTATE: the server answered (definitive). A connection error does not. */
+const isServerError = (e: unknown) => !!e && typeof e === 'object' && typeof (e as { code?: unknown }).code === 'string' && /^[0-9A-Z]{5}$/.test((e as { code: string }).code);
 /** Fast path, then INSERT path, then one more INSERT path if cleanup removed a row in between. */
 const MAX_ATTEMPTS = 3;
 
@@ -154,6 +162,8 @@ export function createPostgresRateLimiter(options: PostgresRateLimiterOptions): 
       // A row is missing (new key, or removed by cleanup after expiry):
       // nothing was changed; release the locks and take the INSERT path.
       await client.query('ROLLBACK');
+      // I2b-S12 (R-P3-1): elapsed time is checked after every ROLLBACK acknowledgement.
+      if (expiredAt(phase.deadlineAt)) throw new DecisionExpired();
       return null;
     }
     const ok = r.rows[0]?.ok === true;
@@ -162,16 +172,26 @@ export function createPostgresRateLimiter(options: PostgresRateLimiterOptions): 
       // I2b-S11 (P3-1): never send COMMIT past the absolute deadline, even if
       // its timer has not run yet (the caller discards the connection, so the
       // transaction rolls back and nothing is counted).
-      if (monotonicNow() >= phase.deadlineAt) throw new DecisionExpired();
+      if (expiredAt(phase.deadlineAt)) throw new DecisionExpired();
       phase.commitSent = true;
-      // I2b-S8 (S5): admit only on a CONFIRMED commit (tag "COMMIT"); an
-      // unconfirmed outcome is a deny, which can only over-count.
-      if (!commitConfirmed(await client.query('COMMIT'))) return unavailable('commit_unknown');
+      let res: unknown;
+      try {
+        res = await client.query('COMMIT');
+      } catch (e) {
+        // I2b-S12 (R-P2-2): the server's explicit error (SQLSTATE) is definitive;
+        // a lost connection after send is genuinely ambiguous.
+        throw new CommitFailure(isServerError(e) ? 'commit_failed' : 'commit_lost');
+      }
+      // I2b-S8 (S5): admit only on a CONFIRMED commit (tag "COMMIT"). Any other
+      // tag (ROLLBACK) is the server's explicit refusal: nothing was counted.
+      if (!commitConfirmed(res)) return unavailable('commit_failed');
       // A confirmed but LATE acknowledgement is not an admission (counted, not admitted: over-count only).
-      if (monotonicNow() > phase.deadlineAt) return unavailable('commit_unknown');
+      if (expiredAt(phase.deadlineAt)) return unavailable('commit_late');
       return { allowed: true, retryAfterSeconds: 0 };
     }
     await client.query('ROLLBACK');
+    // I2b-S12 (R-P3-1): a refusal decided after the deadline is not reported as a timely 429.
+    if (expiredAt(phase.deadlineAt)) throw new DecisionExpired();
     let limitedBy: string | undefined;
     let retryAfterSeconds = 0;
     for (const row of r.rows) {
@@ -212,7 +232,8 @@ export function createPostgresRateLimiter(options: PostgresRateLimiterOptions): 
       // an abandoned or failed transaction is never reused.
       const fail = (cause: UnavailableCause) => {
         guard?.discard();
-        answer(unavailable(phase.commitSent && cause !== 'checkout' ? 'commit_unknown' : cause));
+        // After COMMIT was sent the outcome is unknown: by deadline (shedding) or by a lost connection (infrastructure).
+        answer(unavailable(phase.commitSent && cause === 'deadline' ? 'commit_timeout' : phase.commitSent && cause === 'driver' ? 'commit_lost' : cause));
       };
       const timer = setTimeout(() => fail('deadline'), decisionDeadlineMs);
 
@@ -224,7 +245,7 @@ export function createPostgresRateLimiter(options: PostgresRateLimiterOptions): 
           fail('checkout');
           return;
         }
-        if (answered || monotonicNow() >= phase.deadlineAt) {
+        if (answered || expiredAt(phase.deadlineAt)) {
           // Late checkout: never used (no transaction), so it is clean: return it to the pool.
           try {
             c.release();
@@ -238,7 +259,11 @@ export function createPostgresRateLimiter(options: PostgresRateLimiterOptions): 
         guard = guardClient(c as unknown as BoundedClient, () => fail('driver'));
         try {
           let decision: RateLimitDecision | null = null;
-          for (let i = 0; i < MAX_ATTEMPTS && decision === null && !answered; i += 1) decision = await attempt(c, i > 0, keys, limits, byKey, seconds, phase);
+          for (let i = 0; i < MAX_ATTEMPTS && decision === null && !answered; i += 1) {
+            // I2b-S12 (R-P3-1): elapsed time is checked before every attempt (incl. retries).
+            if (expiredAt(phase.deadlineAt)) throw new DecisionExpired();
+            decision = await attempt(c, i > 0, keys, limits, byKey, seconds, phase);
+          }
           if (answered) {
             guard.discard();
             return;
@@ -256,7 +281,7 @@ export function createPostgresRateLimiter(options: PostgresRateLimiterOptions): 
           answer(decision ?? unavailable('internal'));
         } catch (err) {
           // Fail closed: a limiter that cannot decide denies.
-          fail(err instanceof DecisionExpired ? 'deadline' : err instanceof Error && err.message === 'rate-limit invariant violated' ? 'internal' : 'driver');
+          fail(err instanceof DecisionExpired ? 'deadline' : err instanceof CommitFailure ? err.cause : err instanceof Error && err.message === 'rate-limit invariant violated' ? 'internal' : 'driver');
         }
       })();
     });

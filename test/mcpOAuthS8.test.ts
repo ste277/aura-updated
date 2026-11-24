@@ -119,9 +119,10 @@ async function main() {
     check('R-6 EC key whose public point is not derived from d is refused', rejects(() => validateSigningJwks(jwks({ ...ec, x: other.x, y: other.y, kid: 'ec-bad-1' })), [String(ec.d)]));
     check('R-6 a public-only key is refused', rejects(() => validateSigningJwks(jwks({ kty: 'RSA', n: rsa.n, e: rsa.e, kid: 'pub-only-1', alg: 'RS256' }))));
 
-    const base = { AURA_MCP_OAUTH_JWKS: jwks(rsa), AURA_MCP_OAUTH_COOKIE_KEYS: strong(), AURA_MCP_OAUTH_PAIRWISE_SALT: strong(), AURA_MCP_AUDIT_KEY: strong() };
+    // I2b-S12: new configuration declares its format.
+    const base = { AURA_MCP_OAUTH_JWKS: jwks(rsa), AURA_MCP_OAUTH_COOKIE_KEYS: `base64url:${strong()}`, AURA_MCP_OAUTH_PAIRWISE_SALT: `base64url:${strong()}`, AURA_MCP_AUDIT_KEY: `base64url:${strong()}` };
     check('R-6 CSPRNG secrets (base64url) are accepted', !rejects(() => loadOAuthKeysFromEnv(base)));
-    check('R-6 CSPRNG secrets (hex, 64 chars) are accepted', !rejects(() => loadOAuthKeysFromEnv({ ...base, AURA_MCP_AUDIT_KEY: randomBytes(32).toString('hex') })));
+    check('R-6 CSPRNG secrets (hex, 64 chars) are accepted', !rejects(() => loadOAuthKeysFromEnv({ ...base, AURA_MCP_AUDIT_KEY: `hex:${randomBytes(32).toString('hex')}` })));
     const weak: [string, string][] = [
       ['32 x "a" (S3 reproduction)', 'a'.repeat(32)],
       ['32 x "b"', 'b'.repeat(32)],
